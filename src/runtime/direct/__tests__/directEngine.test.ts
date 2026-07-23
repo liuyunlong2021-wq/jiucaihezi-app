@@ -54,6 +54,25 @@ test('runDirectChatCompletion performs a second pass when the model requests web
   assert.equal(sentMessages[1][2].content, '[search:韭菜盒子]')
 })
 
+test('runDirectChatCompletion does not continue an interrupted stream when continuation is disabled', async () => {
+  let requests = 0
+
+  await assert.rejects(
+    () => runDirectChatCompletion({
+      messages: [{ role: 'user', content: '你好' }],
+      onText: () => {},
+      continueOnInterruption: false,
+      sendChatCompletion: async () => {
+        requests += 1
+        return interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '部分回复' } }] })])
+      },
+    }),
+    /stream body interrupted/,
+  )
+
+  assert.equal(requests, 1)
+})
+
 test('runDirectChatCompletion reports the normalized tool id used by the tool result', async () => {
   const reportedCalls: string[] = []
   const executedCalls: string[] = []

@@ -49,6 +49,8 @@ import { buildWebProjectToolDefinitions, createWebProjectToolExecutor } from '@/
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { useProjectStore } from '@/stores/projectStore'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import { safeFetch } from '@/utils/httpClient'
 import type { SendMessageOptions, ChatMessage, AgentPhase } from '../useChat'
 
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
@@ -185,8 +187,9 @@ export async function sendWebCloudMessage(
   currentMessages: ChatMessage[]  // passed to buildDirectMessages & getLatestUserText
 ) {
   const agentStore = useAgentStore()
-  const projectId = useProjectStore().webProjectId.value
-  const selectedSkill = options.agentId ? agentStore.getSkillById(options.agentId) : null
+  const isDaoMode = options.chatMode === 'dao'
+  const projectId = isDaoMode ? '' : useProjectStore().webProjectId.value
+  const selectedSkill = isDaoMode ? null : options.agentId ? agentStore.getSkillById(options.agentId) : null
   const skillName = selectedSkill?.name || options.skillName || options.agentName || ''
   const projectMemoryFiles = projectId ? {
     async read(path: string) {
@@ -211,11 +214,13 @@ export async function sendWebCloudMessage(
     if (runId !== getActiveRunId() || controller.signal.aborted) throw new DOMException('Aborted', 'AbortError')
 
     setPhase('replying', '云端模型正在回复')
-    const skillPrompt = await resolveWebSkillSystemPrompt(
+    const skillPrompt = isDaoMode ? '' : await resolveWebSkillSystemPrompt(
       skillName,
       [...agentStore.loadSkills(), ...agentStore.getPresetSkills()],
     )
-    const [projectMemory] = await Promise.all([readCreativeProjectMemory(projectMemoryFiles)])
+    const [projectMemory] = isDaoMode
+      ? [{ claude: null, hot: null }]
+      : await Promise.all([readCreativeProjectMemory(projectMemoryFiles)])
     const contextWindow = getModelContextWindow(modelId, providerId)
     const context = buildCreativeContext({
       messages: requestMessages,
@@ -224,7 +229,7 @@ export async function sendWebCloudMessage(
       reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
       projectMemory,
     })
-    const automaticSkillPrompt = buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
+    const automaticSkillPrompt = isDaoMode ? '' : buildWebSkillCatalogPrompt(await loadWebSkillCatalog())
     const currentModel = agentStore.availableModels.find(
       model => model.id === modelId && model.providerId === config.providerId,
     )
@@ -242,19 +247,20 @@ export async function sendWebCloudMessage(
       })
     }
     const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
-    const toolsAllowed = currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
+    const toolsAllowed = !isDaoMode && currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
     let apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
-      systemPrompt: [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
-      skillSystemPrompt: [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
-      files: options.files,
+      systemPrompt: isDaoMode ? '' : [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
+      skillSystemPrompt: isDaoMode ? '' : [options.mediaPlanPolicy || MEDIA_PLAN_POLICY, skillPrompt, automaticSkillPrompt].filter(Boolean).join('\n\n'),
+      omitPlatformHint: isDaoMode,
+      files: isDaoMode ? undefined : options.files,
       visionModel: true,
       apiFormat: 'openai',
-      platform: 'web',
+      platform: isDaoMode && isTauriRuntime() ? 'desktop' : 'web',
       attachments: modelAttachments,
     })
-    const searchEnabled = typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
+    const searchEnabled = !isDaoMode && typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
     if (searchEnabled) {
       const query = getLatestUserText(currentMessages).slice(0, 300)
       if (query) {
@@ -269,7 +275,7 @@ export async function sendWebCloudMessage(
       model: config.model,
       messages: apiMessages,
       temperature: 0.3,
-      max_tokens: 4096,
+      ...(isDaoMode ? {} : { max_tokens: 4096 }),
       stream: true,
       ...buildChatCompletionExtras(config),
     }
@@ -306,7 +312,7 @@ export async function sendWebCloudMessage(
           messages: request.messages,
           ...(request.tools?.length ? { tools: request.tools } : {}),
         },
-        body => fetchWithCorsRetry(`${config.apiBase}/v1/chat/completions`, {
+        body => (isTauriRuntime() ? safeFetch : fetchWithCorsRetry)(`${config.apiBase}/v1/chat/completions`, {
           method: 'POST',
           headers: buildHeaders(config),
           signal: controller.signal,
@@ -383,6 +389,8 @@ export async function sendWebCloudMessage(
         }
       },
       executeTool,
+      allowToolCalls: !isDaoMode,
+      continueOnInterruption: !isDaoMode,
       signal: controller.signal,
       sendChatCompletion,
     })

@@ -5,6 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { initDB } from '../../utils/idb'
 import { useSessionStore } from '../sessionStore'
 import { useOpenCodeSyncStore } from '../openCodeSyncStore'
+import { useChatModeStore } from '../chatModeStore'
 import type { ChatMessage } from '../../composables/useChat'
 
 function installWebStorage() {
@@ -108,6 +109,28 @@ test('desktop session deletion delegates to OpenCode and does not touch IndexedD
     assert.equal(deleted, 1)
     assert.equal(store.activeSessionId, '')
     assert.equal(syncStore.activeSessionId, '')
+  } finally {
+    storage.restore()
+  }
+})
+
+test('desktop dao mode persists its visible conversation without an OpenCode session', { concurrency: false }, async () => {
+  const storage = installWebStorage()
+  ;(globalThis as any).window = { __TAURI_INTERNALS__: {} }
+  try {
+    await initDB()
+    setActivePinia(createPinia())
+    useChatModeStore().setMode('dao')
+    const store = useSessionStore()
+    store.setCurrentProjectDir('/dao-project')
+    const sessionId = store.startNewSession('')
+    const messages = [message('user_dao', 'user', '你好'), message('assistant_dao', 'assistant', '你好')]
+
+    assert.ok(sessionId)
+    assert.doesNotMatch(sessionId, /^ses_/)
+    await store.saveSession(sessionId, '', messages)
+    assert.deepEqual((await store.loadSessionMessages(sessionId)).map(item => item.content), ['你好', '你好'])
+    assert.equal(useOpenCodeSyncStore().activeSessionId, '')
   } finally {
     storage.restore()
   }

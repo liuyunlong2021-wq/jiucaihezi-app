@@ -23,6 +23,7 @@ export interface BuildDirectMessagesInput {
   attachments?: ResolvedDirectAttachment[]
   /** Undefined preserves the legacy 24-message fallback; null means the caller already applied a capacity policy. */
   historyLimit?: number | null
+  omitPlatformHint?: boolean
   visionModel: boolean; apiFormat: 'openai' | 'ollama'; platform: 'desktop' | 'web'
 }
 function chatContentToText(value: unknown): string {
@@ -38,7 +39,7 @@ function appendFiles(content: string, files?: DirectMessageFile[]): string {
 }
 function buildSystemPrompt(args: BuildDirectMessagesInput): string {
   const platformHint = args.platform === 'web' ? '当前运行环境是 Web 端。不要调用本地 Shell、文件系统或桌面专属工具。' : '当前使用直连模式。不要虚构没有实际调用过的工具。'
-  return [args.systemPrompt, args.skillSystemPrompt, platformHint].filter(Boolean).join('\n\n')
+  return [args.systemPrompt, args.skillSystemPrompt, args.omitPlatformHint ? '' : platformHint].filter(Boolean).join('\n\n')
 }
 function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): string | null {
   if (msg.role === 'system') return null

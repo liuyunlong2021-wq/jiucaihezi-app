@@ -16,6 +16,7 @@ import { writeMediaAsset, isBase64Media, MEDIA_REF_PREFIX } from '@/utils/mediaF
 import { parseMediaRef, isMediaRef, resolveForLlm } from '@/utils/mediaFileReader'
 import type { ChatMessage } from '@/composables/useChat'
 import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
+import { useChatModeStore } from '@/stores/chatModeStore'
 import { mapOpenCodeMessagesToChatMessages } from '@/opencodeClient/messageMapper'
 
 export interface Session {
@@ -39,6 +40,8 @@ const IMAGE_REF_PREFIX = MEDIA_REF_PREFIX
 
 export const useSessionStore = defineStore('sessions', () => {
   const openCodeSyncStore = useOpenCodeSyncStore()
+  const chatModeStore = useChatModeStore()
+  const usesOpenCodeSessions = () => isTauriRuntime() && chatModeStore.mode !== 'dao'
   const sessions = ref<Session[]>([])
   // 从 localStorage 恢复上次的 activeSessionId
   const restoredActiveSessionId = localStorage.getItem('jc_active_session') || ''
@@ -50,7 +53,7 @@ export const useSessionStore = defineStore('sessions', () => {
   const currentProjectDir = ref('')
   const projectSessions = computed(() => {
     const dir = currentProjectDir.value
-    if (isTauriRuntime()) {
+    if (usesOpenCodeSessions()) {
       return openCodeSyncStore.sessionsForDirectory(dir).map(info => ({
         id: info.id,
         title: info.title || '无主题对话',
@@ -75,7 +78,7 @@ export const useSessionStore = defineStore('sessions', () => {
     // ponytail: 切项目时清空旧列表，等 loadAllSessions 填新数据 (Step 27)
     // 不清空会导致旧项目会话残留显示
     if (newDir && newDir !== oldDir) {
-      if (isTauriRuntime()) {
+      if (usesOpenCodeSessions()) {
         activeSessionId.value = openCodeSyncStore.activeSessionId
         return
       }
@@ -352,7 +355,7 @@ export const useSessionStore = defineStore('sessions', () => {
   // UI 渲染用 resolveForDisplay()（convertFileSrc，零内存开销），
   // 仅在发送给 LLM 时才按需调 resolveForLlm()。
   async function loadSessionMessages(sessionId: string): Promise<ChatMessage[]> {
-    if (isTauriRuntime()) {
+    if (usesOpenCodeSessions()) {
       return mapOpenCodeMessagesToChatMessages((openCodeSyncStore.state.messages[sessionId] ?? []).map(info => ({
         info,
         parts: openCodeSyncStore.state.parts[info.id] ?? [],
@@ -395,7 +398,7 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 加载所有对话列表 ───
   async function loadAllSessions(client?: { session: { list: (opts: any) => Promise<{ data?: any[] }> } }) {
-    if (isTauriRuntime()) {
+    if (usesOpenCodeSessions()) {
       return
     }
     if (!client) {
@@ -426,7 +429,7 @@ export const useSessionStore = defineStore('sessions', () => {
         }))
         .sort((a: Session, b: Session) => b.updatedAt - a.updatedAt)
     } catch {
-      if (isTauriRuntime()) return  // 桌面端失败不 fallback，等下次重试
+      if (usesOpenCodeSessions()) return  // 桌面端失败不 fallback，等下次重试
       const dir = currentProjectDir.value
       const records = await idb.getAll('conversations')
       sessions.value = records.filter((r: any) => r && r.id)
@@ -459,7 +462,7 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 新建对话 ───
   function startNewSession(agentId: string): string {
-    if (isTauriRuntime()) {
+    if (usesOpenCodeSessions()) {
       openCodeSyncStore.newDraft()
       activeSessionId.value = ''
       localStorage.removeItem(activeSessionKey())
@@ -476,7 +479,7 @@ export const useSessionStore = defineStore('sessions', () => {
   function switchSession(sessionId: string) {
     const id = String(sessionId || '').trim()
     activeSessionId.value = id
-    if (isTauriRuntime()) {
+    if (usesOpenCodeSessions()) {
       if (id) openCodeSyncStore.setActiveSession(id)
       else openCodeSyncStore.newDraft()
     }
@@ -510,7 +513,7 @@ export const useSessionStore = defineStore('sessions', () => {
 
   // ─── 删除对话 ───
   async function deleteSession(sessionId: string) {
-    if (isTauriRuntime()) {
+    if (usesOpenCodeSessions()) {
       await openCodeSyncStore.deleteSession(sessionId)
       if (activeSessionId.value === sessionId) {
         activeSessionId.value = ''

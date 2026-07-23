@@ -30,7 +30,8 @@ async function switchOpenCodeProject(directory: string, generation: number) {
     sessionStore.setCurrentProjectDir(directory)
     return
   }
-  if (chatModeStore.mode === 'creative') {
+  if (chatModeStore.mode === 'creative' || chatModeStore.mode === 'dao') {
+    if (chatModeStore.mode === 'dao') sessionStore.setCurrentProjectDir('')
     if (openCodeSyncStore.activeSessionId) {
       try {
         await openCodeSyncStore.abortActiveSession()

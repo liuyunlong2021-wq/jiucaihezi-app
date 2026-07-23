@@ -166,7 +166,7 @@ export interface SendMessageOptions {
   modelAttachments?: ResolvedDirectAttachment[]
   modelId?: string
   modelProviderId?: string
-  chatMode?: 'build' | 'plan' | 'dao'
+  chatMode?: 'build' | 'plan' | 'creative' | 'dao'
   openCodeAgent?: string
   openCodeProjectDir?: string
   openCodeComposerParts?: OpenCodeComposerPart[]
@@ -992,6 +992,7 @@ export function useChat() {
 
   async function sendMessage(userText: string, options: SendMessageOptions = {}) {
     if (isCreativeDesktopMode()) return
+    const isDaoDirectMode = options.chatMode === 'dao'
     const text = String(userText || '').trim()
     const hasAttachments = Boolean(options.images?.length || options.files?.length || options.modelAttachments?.length)
     if ((!text && !hasAttachments) || (exposedIsStreaming.value && !options._parallel)) return
@@ -1011,8 +1012,8 @@ export function useChat() {
       }))
     }
 
-    const desktopMessageID = isTauriRuntime() ? createOpenCodeId('message') : ''
-    const desktopParts = isTauriRuntime()
+    const desktopMessageID = isTauriRuntime() && !isDaoDirectMode ? createOpenCodeId('message') : ''
+    const desktopParts = isTauriRuntime() && !isDaoDirectMode
       ? buildOpenCodePromptParts({
           text,
           agent: options.openCodeAgent,
@@ -1023,7 +1024,7 @@ export function useChat() {
           composerParts: options.openCodeComposerParts,
         }) as OpenCodeRenderablePart[]
       : []
-    if (!options._skipUserMessageInsert && !isTauriRuntime()) {
+    if (!options._skipUserMessageInsert && (!isTauriRuntime() || isDaoDirectMode)) {
       const userMsg: ChatMessage = {
         id: createMessageId('user'),
         role: 'user',
@@ -1033,7 +1034,7 @@ export function useChat() {
         agentName: options.openCodeAgent || options.agentName,
         modelId: options.modelId,
         modelProviderId: options.modelProviderId,
-        openCodeParts: buildOpenCodePromptParts({
+        openCodeParts: isDaoDirectMode ? undefined : buildOpenCodePromptParts({
           text,
           agent: options.openCodeAgent,
           images: options.images,
@@ -1049,7 +1050,7 @@ export function useChat() {
     const controller = new AbortController()
     abortController.value = controller
     isStreaming.value = true
-    if (!isTauriRuntime()) {
+    if (!isTauriRuntime() || isDaoDirectMode) {
       console.log('[JC:cloud] sendMessage 进入云端路径, text:', text.substring(0, 50))
       let sessionId = ''
       try {
@@ -1150,7 +1151,12 @@ export function useChat() {
   }
 
   function stopStream() {
-    if (isTauriRuntime()) {
+    if (abortController.value) {
+      setPhase('cancelling', '云端请求正在停止')
+      cancelCurrentRun()
+      return
+    }
+    if (isTauriRuntime() && useChatModeStore().mode !== 'dao') {
       setPhase('cancelling', '韭菜盒子正在停止')
       void openCodeSyncStore.abortActiveSession()
         .then(() => setPhase('idle'))
@@ -1161,12 +1167,11 @@ export function useChat() {
         })
       return
     }
-    setPhase('cancelling', '云端请求正在停止')
-    cancelCurrentRun()
+    setPhase('idle')
   }
 
   async function clearMessages(_options: { sessionId?: string } = {}) {
-    if (isTauriRuntime()) openCodeSyncStore.newDraft()
+    if (isTauriRuntime() && useChatModeStore().mode !== 'dao') openCodeSyncStore.newDraft()
     cancelCurrentRun()
     messages.value = []
     setActiveOpenCodeSessionId('')

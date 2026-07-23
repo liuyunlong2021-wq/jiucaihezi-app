@@ -112,7 +112,7 @@ function openDiffInEditor(diff: OpenCodeDiffFile) {
 
 // Auto-fetch diffs when panel mounts (official: createEffect when wantsReview)
 onMounted(async () => {
-  if (chatModeStore.mode === 'creative') return
+  if (chatModeStore.mode === 'creative' || chatModeStore.mode === 'dao') return
   if (activeOpenCodeSessionId.value) {
     await fetchSessionDiffs()
   }

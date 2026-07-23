@@ -236,7 +236,9 @@ const pendingCreativeToolApproval = ref<PendingCreativeToolApproval | null>(null
 const pendingRetryConfirmation = ref<PendingRetryConfirmation | null>(null)
 // gatewayStore removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true) // All features now available once logged in
-const sessionLoadPromise = isTauriRuntime() ? Promise.resolve() : sessionStore.loadAllSessions()
+const sessionLoadPromise = isTauriRuntime() && chatModeStore.mode !== 'dao'
+  ? Promise.resolve()
+  : sessionStore.loadAllSessions()
 
 function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
   const model = getMediaModel(modelId)
@@ -441,8 +443,20 @@ const previewImageTitle = ref('')
 const popover = ref<'at' | 'slash' | null>(null)
 const agentMode = computed(() => chatModeStore.mode)
 const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const isDaoMode = computed(() => agentMode.value === 'dao')
+function mergeVisibleTimeline(...timelines: ChatMessage[][]): ChatMessage[] {
+  const messagesById = new Map<string, ChatMessage>()
+  for (const timeline of timelines) {
+    for (const message of timeline) {
+      if (!messagesById.has(message.id)) messagesById.set(message.id, message)
+    }
+  }
+  return [...messagesById.values()].sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0))
+}
 const desktopTimelineMessages = computed(() =>
-  !isWebRuntime.value && !isCreativeMode.value ? openCodeSyncStore.chatMessages : messages.value,
+  !isWebRuntime.value && !isCreativeMode.value && !isDaoMode.value
+    ? mergeVisibleTimeline(openCodeSyncStore.chatMessages, messages.value)
+    : messages.value,
 )
 const selectedProjectDir = computed(() => projectStore.projectDir.value)
 const projectFiles = createRuntimeProjectFileService()
@@ -455,6 +469,7 @@ if (isTauriRuntime()) {
 
 // ─── / 斜杠指令（照抄 OpenCode slashCommands）：builtin + custom(skill)───
 const slashCommands = computed<SlashCommand[]>(() => {
+  if (isDaoMode.value) return []
   // builtin: 3 条内置指令
   const builtin: SlashCommand[] = [
     {
@@ -487,11 +502,10 @@ const slashCommands = computed<SlashCommand[]>(() => {
 
 // ─── @ 数据源：agent（照抄 OpenCode agentList — 注意：agent 不是 skill！）───
 const agentList = computed<AtOption[]>(() => {
-  if (!isTauriRuntime() || isCreativeMode.value) return []
+  if (!isTauriRuntime() || isCreativeMode.value || isDaoMode.value) return []
   return [
     { type: 'agent', name: 'plan', display: 'plan' },
     { type: 'agent', name: 'build', display: 'build' },
-    { type: 'agent', name: 'dao', display: 'dao' },
   ]
 })
 
@@ -520,6 +534,7 @@ const recentFiles = computed<AtOption[]>(() => {
 
 // ─── @ useFilteredList（照抄 OpenCode prompt-input.tsx L690-770）───
 const atItems = async (query: string): Promise<AtOption[]> => {
+  if (isDaoMode.value) return []
   const refs = referenceList.value
   const agents = agentList.value
   const resources = mcpResourceList.value
@@ -624,16 +639,26 @@ const agentModeLabel = computed(() =>
 const agentModeTitle = computed(() => {
   if (agentMode.value === 'creative') return '创模式：Skill、项目文件与创作面板'
   if (agentMode.value === 'plan') return '文模式：不操控电脑'
-  if (agentMode.value === 'dao') return '道模式：模型优先，按需使用工具和 Skill'
+  if (agentMode.value === 'dao') return '道模式：直接与当前模型对话'
   return '武模式：直接操控电脑'
 })
-const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | 'dao' | undefined>(() => {
+const currentDesktopOpenCodeAgent = computed<'build' | 'plan' | undefined>(() => {
   const mode = agentMode.value
-  return isTauriRuntime() && (mode === 'build' || mode === 'plan' || mode === 'dao') ? mode : undefined
+  return isTauriRuntime() && (mode === 'build' || mode === 'plan') ? mode : undefined
 })
 function selectAgentMode(mode: ChatMode) {
+  if (mode === 'dao' && !isDaoMode.value) {
+    void enterDaoMode(desktopTimelineMessages.value)
+    showModeMenu.value = false
+    return
+  }
+  if (mode === 'creative' && isDaoMode.value && !isWebRuntime.value) {
+    void enterCreativeModeFromDao(messages.value)
+    showModeMenu.value = false
+    return
+  }
   const shouldRefreshOpenCodeCatalog =
-    isTauriRuntime() && isCreativeMode.value && mode !== 'creative'
+    isTauriRuntime() && isCreativeMode.value && (mode === 'build' || mode === 'plan')
   chatModeStore.setMode(mode)
   if (shouldRefreshOpenCodeCatalog) {
     void refreshOpenCodeSkills()
@@ -883,7 +908,7 @@ const composerCommands = computed(() => {
   return [...base, ...dynamicCommands]
 })
 const desktopMediaMessages = computed<ChatMessage[]>(() => {
-  if (isWebRuntime.value) return []
+  if (isWebRuntime.value || isDaoMode.value) return []
   const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
   return mediaTaskStore.chatTasksFor(openCodeSyncStore.activeSessionId, directory).flatMap(task => [
     {
@@ -1029,7 +1054,7 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
 
 // 打开右侧审查栏，和官方 OpenCode 一样把 diff 放在独立侧栏。
 function scrollToDiffReview() {
-  if (isCreativeMode.value) return
+  if (isCreativeMode.value || isDaoMode.value) return
   emitEvent('switch-panel', 'review')
 }
 
@@ -1243,6 +1268,7 @@ let pendingCreativeSessionId = ''
 let pendingCreativeMessages: ChatMessage[] | null = null
 let pendingCreativeRunId = 0
 let nextCreativeRunId = 0
+let daoSessionId = ''
 
 // ponytail: Web 端需要 IndexedDB 持久化（无 OpenCode Server），桌面端由 OpenCode Server 管理
 async function persistCurrentSession() {
@@ -1251,12 +1277,12 @@ async function persistCurrentSession() {
       await creativeSessionStore.saveSession(currentSessionId, messages.value)
     return
   }
-  if (!isWebRuntime.value || !currentSessionId || messages.value.length === 0) return
+  if ((!isWebRuntime.value && !isDaoMode.value) || !currentSessionId || messages.value.length === 0) return
   await sessionStore.saveSession(
     currentSessionId,
     '',
     messages.value.map(m => ({ ...m })),
-    { openCodeSessionId: getActiveOpenCodeSessionId() || undefined },
+    { openCodeSessionId: isDaoMode.value ? undefined : getActiveOpenCodeSessionId() || undefined },
   )
 }
 async function flushCurrentSessionPersist() {
@@ -1287,6 +1313,46 @@ watch(
   },
   { deep: true },
 )
+
+function projectDaoTranscript(source: ChatMessage[]): ChatMessage[] {
+  return source
+    .filter(message => (message.role === 'user' || message.role === 'assistant') && !message.isMediaTask)
+    .map(message => ({
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      timestamp: message.timestamp,
+      modelId: message.modelId,
+      modelProviderId: message.modelProviderId,
+      images: message.images,
+      attachments: message.attachments,
+      finishReason: message.finishReason,
+    }))
+}
+
+async function enterDaoMode(source: ChatMessage[]) {
+  const transcript = projectDaoTranscript(source)
+  chatModeStore.setMode('dao')
+  sessionStore.setCurrentProjectDir('')
+  settleCreativeToolApproval('reject')
+  const sessionId = daoSessionId || sessionStore.startNewSession(transcript[0]?.content || '')
+  daoSessionId = sessionId
+  currentSessionId = sessionId
+  rawSyncStartMessageCount = 0
+  skipNextPersist = true
+  loadMessages(transcript, { agentId: '', skillContent: '' })
+  if (transcript.length) await persistCurrentSession()
+}
+
+async function enterCreativeModeFromDao(source: ChatMessage[]) {
+  const transcript = projectDaoTranscript(source)
+  chatModeStore.setMode('creative')
+  if (!transcript.length) return
+  const sessionId = creativeSessionStore.createPendingSession()
+  if (!sessionId) return
+  await creativeSessionStore.saveSession(sessionId, transcript)
+  creativeSessionStore.switchSession(sessionId)
+}
 
 onBeforeUnmount(() => {
   if (localCommandNoticeTimer) clearTimeout(localCommandNoticeTimer)
@@ -1359,7 +1425,8 @@ watch(
     }
     sessionHydrating.value = true
     try {
-      if (!isWebRuntime.value) {
+      if (isDaoMode.value) daoSessionId = newId
+      if (!isWebRuntime.value && !isDaoMode.value) {
         const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
         await openCodeSyncStore.openSession(directory, newId)
         if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
@@ -1374,7 +1441,7 @@ watch(
       if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
       const session = sessionStore.projectSessions.find(s => s.id === newId)
       let effectiveHistory = history
-      if (session?.openCodeSessionId) {
+      if (session?.openCodeSessionId && !isDaoMode.value) {
         try {
           const projectedConfig = await projectStoredNewApiForOpenCode({
             currentModel: agentStore.currentModel,
@@ -1454,10 +1521,11 @@ watch(
 
 async function restoreActiveSession() {
   if (isCreativeMode.value) return
-  if (!isWebRuntime.value) return
+  if (!isWebRuntime.value && !isDaoMode.value) return
   await sessionStore.loadAllSessions()
   const activeId = String(sessionStore.activeSessionId || '').trim()
   if (!activeId) return
+  if (isDaoMode.value) daoSessionId = activeId
   if (activeId === currentSessionId && messages.value.length > 0) return
 
   const requestId = ++sessionLoadRequestId
@@ -1545,7 +1613,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   if (!editor && !options) return
   const composerPills = options ? [] : extractPills(editor!)
   let openCodeComposerParts: OpenCodeComposerPart[] = []
-  if (!options && !isWebRuntime.value) {
+  if (!options && !isWebRuntime.value && !isDaoMode.value) {
     try {
       openCodeComposerParts = await resolveOpenCodeComposerParts(composerPills)
     } catch (error) {
@@ -1556,7 +1624,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   const pendingMediaType = isMediaModel(agentStore.currentModel)
   if (pendingMediaType && isMember.value && mediaSubmitPending) return
   const plainText = options?.text ?? getPlainText(editor!)
-  if (!options && !(await addPastedProjectMediaReferences(plainText))) return
+  if (!options && !isDaoMode.value && !(await addPastedProjectMediaReferences(plainText))) return
   const hasText = plainText.trim().length > 0
   const hasComposerParts = composerPills.length > 0
   const hasAttachments = options ? false : (fileUploader.value?.attachedFiles?.length || 0) > 0
@@ -1914,7 +1982,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   // ─── 媒体模型拦截：如果当前模型是媒体生成模型，走 Task Engine ───
   const currentModelId = agentStore.currentModel
   const mediaType = isMediaModel(currentModelId)
-  if (mediaType && isMember.value) {
+  if (mediaType && isMember.value && !isDaoMode.value) {
     if (mediaSubmitPending) return
     mediaSubmitPending = true
     try {
@@ -2092,15 +2160,15 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   }
 
   // Web 端首次发消息时创建本地 session；Desktop 由 OpenCode session.create 返回真实 ses_*。
-  if (isWebRuntime.value && !currentSessionId) {
+  if ((isWebRuntime.value || isDaoMode.value) && !currentSessionId) {
     currentSessionId = sessionStore.startNewSession('')
     rawSyncStartMessageCount = 0
     sessionStore.switchSession(currentSessionId)
   }
 
   // 2. 合并引用文件到 files
-  for (const rf of refFiles) {
-    files.push({ name: rf.name, content: rf.content })
+  if (!isDaoMode.value) {
+    for (const rf of refFiles) files.push({ name: rf.name, content: rf.content })
   }
   // 3. 发送消息（只使用用户当前显式选择的配置）
   const chatModelId = isMember.value
@@ -2113,7 +2181,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     ? `[引用回复] 用户引用了之前的消息: 「${replyContext.content}」\n\n${text}`
     : text
 
-  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('/')) {
+  if (!isWebRuntime.value && !isDaoMode.value && !hasAttachments && sendText.startsWith('/')) {
     await startOutputFollow()
     await runVisibleSlashText(sendText, {
       ...currentOpenCodeCommandOptions(),
@@ -2124,7 +2192,7 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     return
   }
 
-  if (!isWebRuntime.value && !hasAttachments && sendText.startsWith('!')) {
+  if (!isWebRuntime.value && !isDaoMode.value && !hasAttachments && sendText.startsWith('!')) {
     await startOutputFollow()
     await runShellCommand(sendText.slice(1), {
       ...currentOpenCodeCommandOptions(),
@@ -2152,35 +2220,36 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     preinsertedWebUserMessage = true
     await persistCurrentSession()
   }
-  // ─── 插件 hook: chat.send.before ───
-  const host = getPluginHost()
-  let pluginModifiedText = sendText
-  ;(host as any).triggerChatSendBefore?.({
-    text: sendText,
-    modelId: chatModelId,
-    sessionId: currentSessionId,
-    modifyText: (newText: string) => {
-      pluginModifiedText = newText
-    },
-  })
-  const finalSendText = pluginModifiedText
+  let finalSendText = sendText
+  if (!isDaoMode.value) {
+    // ─── 插件 hook: chat.send.before ───
+    const host = getPluginHost()
+    ;(host as any).triggerChatSendBefore?.({
+      text: sendText,
+      modelId: chatModelId,
+      sessionId: currentSessionId,
+      modifyText: (newText: string) => {
+        finalSendText = newText
+      },
+    })
+  }
 
   const sendPromise = sendMessage(finalSendText, {
     agentName: isMember.value ? skillName || agentStore.modelLabel : agentStore.modelLabel,
     skillName: isMember.value ? skillName || undefined : undefined,
     sessionId: currentSessionId,
     images: images.length > 0 ? images : undefined,
-    files: files.length > 0 ? files : undefined,
+    files: !isDaoMode.value && files.length > 0 ? files : undefined,
     attachments: attachmentRefs.length ? attachmentRefs : undefined,
     modelAttachments: modelAttachments.length ? modelAttachments : undefined,
     modelId: chatModelId,
     modelProviderId: chatModelEntry?.providerId,
-    mediaPlanPolicy,
-    chatMode: currentDesktopOpenCodeAgent.value,
+    mediaPlanPolicy: isDaoMode.value ? undefined : mediaPlanPolicy,
+    chatMode: agentMode.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
-    openCodeProjectDir: selectedProjectDir.value || undefined,
-    openCodeComposerParts,
-    skillPermission: buildSkillPermissionScope({ skillName }),
+    openCodeProjectDir: isDaoMode.value ? undefined : selectedProjectDir.value || undefined,
+    openCodeComposerParts: isDaoMode.value ? undefined : openCodeComposerParts,
+    skillPermission: isDaoMode.value ? undefined : buildSkillPermissionScope({ skillName }),
     _skipUserMessageInsert: preinsertedWebUserMessage,
   })
   await nextTick()
@@ -2209,16 +2278,16 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
   if (!options && shouldClearCreativeAttachments(finalAssistantMessage?.finishReason)) {
     fileUploader.value?.clearAll()
   }
-  if (!isWebRuntime.value) {
+  if (!isWebRuntime.value && !isDaoMode.value) {
     currentSessionId = getActiveOpenCodeSessionId()
     sessionStore.switchSession(currentSessionId)
   }
 
   // ─── 插件 hook: chat.receive.after ───
   const lastAssistantMsg = [...messages.value].reverse().find(m => m.role === 'assistant')
-  if (lastAssistantMsg) {
+  if (lastAssistantMsg && !isDaoMode.value) {
     if (isWebRuntime.value) attachMediaPlan(lastAssistantMsg, mediaContext)
-    ;(host as any).triggerChatReceiveAfter?.({
+    ;(getPluginHost() as any).triggerChatReceiveAfter?.({
       content: lastAssistantMsg.content,
       modelId: chatModelId,
       sessionId: currentSessionId,
@@ -2572,7 +2641,7 @@ function startNew() {
     void startNewCreativeSession()
     return
   }
-  if (isWebRuntime.value) {
+  if (isWebRuntime.value || isDaoMode.value) {
     const previousSessionId = currentSessionId
     const previousMessages = messages.value.map(message => ({ ...message }))
     currentSessionId = ''
@@ -2653,6 +2722,10 @@ watch(
 )
 
 async function refreshOpenCodeSkills() {
+  if (isDaoMode.value) {
+    openCodeSkillError.value = ''
+    return
+  }
   openCodeSkillLoading.value = true
   try {
     await refreshProductSkillCatalog()
@@ -2686,7 +2759,7 @@ async function refreshProductSkillCatalog() {
 }
 
 async function refreshOpenCodeCommands() {
-  if (isCreativeMode.value) return
+  if (isCreativeMode.value || isDaoMode.value) return
   if (isWebRuntime.value) {
     openCodeCustomCommands.value = []
     openCodeCommandError.value = ''
@@ -2697,12 +2770,12 @@ async function refreshOpenCodeCommands() {
       currentModel: agentStore.currentModel,
       models: agentStore.availableModels,
     })
-    if (isCreativeMode.value) return
+    if (isCreativeMode.value || isDaoMode.value) return
     const handle = await ensureOpenCodeServer({
       config: projectedConfig,
       directory: selectedProjectDir.value || undefined,
     })
-    if (isCreativeMode.value) return
+    if (isCreativeMode.value || isDaoMode.value) return
     openCodeCustomCommands.value = await listOpenCodeCommands(
       createJiucaiOpenCodeClient(handle, selectedProjectDir.value || undefined),
       {
@@ -3386,6 +3459,7 @@ function reconcileComposerState() {
 
 // ─── @ 选中（照抄 OpenCode handleAtSelect）───
 function handleAtSelect(option: AtOption) {
+  if (isDaoMode.value) return
   const editor = composerRef.value
   if (!editor) return
 
@@ -3419,6 +3493,7 @@ function handleAtSelect(option: AtOption) {
 
 // ─── / 选中 ───
 function handleSlashSelect(cmd: SlashCommand) {
+  if (isDaoMode.value) return
   const editor = composerRef.value
   // 清除残留的 / 文本
   if (editor) editor.textContent = ''
@@ -3438,12 +3513,12 @@ function handleSlashSelect(cmd: SlashCommand) {
 onMounted(async () => {
   await Promise.all([sessionLoadPromise, mediaTaskStore.init()])
   void restoreActiveSession()
-  void refreshProductSkillCatalog()
+  if (!isDaoMode.value) void refreshProductSkillCatalog()
   // 静默拉取 OpenCode 官方 model / skill / command 列表（不阻塞 UI）
   // 等待 apiKey 状态确定后再拉模型，避免 Key 未就绪时走到 OpenCode 兜底
   void Promise.resolve((window as any).__JC_API_KEY_READY__).then(() => {
-    void agentStore.fetchModels({ shouldSkipOpenCode: () => isCreativeMode.value }).finally(() => {
-      if (isTauriRuntime() && !isCreativeMode.value) {
+    void agentStore.fetchModels({ shouldSkipOpenCode: () => isCreativeMode.value || isDaoMode.value }).finally(() => {
+      if (isTauriRuntime() && !isCreativeMode.value && !isDaoMode.value) {
         void refreshOpenCodeSkills()
         void refreshOpenCodeCommands()
       }
@@ -3923,7 +3998,7 @@ function onDrop(e: DragEvent) {
       </div>
     </div>
     <div
-      v-if="pendingCreativeToolApproval"
+      v-if="pendingCreativeToolApproval && !isDaoMode"
       class="cp-creative-approval"
       role="alertdialog"
       aria-live="assertive"
@@ -3954,33 +4029,33 @@ function onDrop(e: DragEvent) {
       </div>
     </div>
     <PermissionDock
-      v-if="!isWebRuntime && !isCreativeMode"
+      v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"
       :requests="pendingPermissions"
       @decide="respondPermission"
     />
     <QuestionDock
-      v-if="!isWebRuntime && !isCreativeMode"
+      v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"
       :requests="pendingQuestions"
       @reply="replyQuestion"
       @reject="rejectQuestion"
     />
-    <TodoDock v-if="!isWebRuntime && !isCreativeMode" :todos="sessionTodos" />
+    <TodoDock v-if="!isWebRuntime && !isCreativeMode && !isDaoMode" :todos="sessionTodos" />
     <RevertDock
-      v-if="!isWebRuntime && !isCreativeMode"
+      v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"
       :items="sessionRevertItems"
       :restoring="restoringRevertId"
       :disabled="isStreaming"
       @restore="restoreRevert"
     />
     <FollowupDock
-      v-if="!isWebRuntime && !isCreativeMode"
+      v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"
       :items="sessionFollowups"
       :sending="sendingFollowupId"
       @send="sendFollowupItem"
       @edit="editFollowupItem"
     />
     <SessionShareNotice
-      v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"
+      v-if="!isWebRuntime && !isCreativeMode && !isDaoMode && sessionShareUrl"
       :url="sessionShareUrl"
       @dismiss="sessionShareUrl = ''"
     />
@@ -3990,7 +4065,7 @@ function onDrop(e: DragEvent) {
     <!-- 输入区顶栏：Skill + 指令 + 文/武/直连同排 -->
     <div class="cp-composer-toprow">
       <SkillPickerBar
-        v-if="isMember"
+        v-if="isMember && !isDaoMode"
         :skills="selectableOpenCodeSkills"
         :selected-skill-name="effectiveOpenCodeSkillName"
         :auto-detected-name="autoDetectedSkillName"
@@ -4032,12 +4107,13 @@ function onDrop(e: DragEvent) {
             </div>
           </div>
         </div>
-        <div v-if="!isWebRuntime" class="cp-mode-wrap">
+        <div class="cp-mode-wrap">
           <button class="cp-mode-btn" @click="toggleModeMenu($event)" :title="agentModeTitle">
             {{ agentModeLabel }}
           </button>
           <div v-if="showModeMenu" class="cp-mode-menu" @click.stop>
             <button
+              v-if="!isWebRuntime"
               class="cp-mode-item"
               :class="{ active: agentMode === 'build' }"
               @click="selectAgentMode('build')"
@@ -4046,6 +4122,7 @@ function onDrop(e: DragEvent) {
               <span class="cp-mode-desc">直接操控电脑，用于编程、调试、文件管理</span>
             </button>
             <button
+              v-if="!isWebRuntime"
               class="cp-mode-item"
               :class="{ active: agentMode === 'plan' }"
               @click="selectAgentMode('plan')"
@@ -4067,7 +4144,7 @@ function onDrop(e: DragEvent) {
               @click="selectAgentMode('dao')"
             >
               <span>道</span>
-              <span class="cp-mode-desc">模型优先，按需使用工具、Skill 与项目 Wiki</span>
+              <span class="cp-mode-desc">直接与当前模型对话</span>
             </button>
           </div>
         </div>
@@ -4075,7 +4152,7 @@ function onDrop(e: DragEvent) {
     </div>
 
     <!-- 引用文件条 -->
-    <div v-if="referenceFiles.length > 0" class="cp-ref-bar">
+    <div v-if="!isDaoMode && referenceFiles.length > 0" class="cp-ref-bar">
       <div v-for="(rf, i) in referenceFiles" :key="rf.name" class="cp-ref-chip">
         <JcIcon name="attach_file" style="font-size: 13px" />
         <span class="cp-ref-name">{{ rf.name }}</span>

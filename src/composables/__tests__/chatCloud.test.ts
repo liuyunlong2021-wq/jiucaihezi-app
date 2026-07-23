@@ -185,6 +185,42 @@ test('Web sends MP4 once to the selected model even when it explicitly declares 
   }
 })
 
+test('dao sends one empty-tool request with the original attachment and no Skill lookup', async () => {
+  const key = 'sk-cloud-test-12345678901234567890'
+  const restoreStorage = installStorage({ jcApiKey: key, jcWebSearchEnabled: 'true' })
+  const previousFetch = globalThis.fetch
+  const requests: Array<{ url: string; body: any }> = []
+  __resetApiKeyMemoryCacheForTests(key)
+  globalThis.fetch = async (input, init) => {
+    requests.push({ url: String(input), body: JSON.parse(String(init?.body || '{}')) })
+    return new Response(JSON.stringify({ choices: [{ message: { content: '完成' } }] }), {
+      headers: { 'content-type': 'application/json' },
+    })
+  }
+  try {
+    setActivePinia(createPinia())
+    setModels([primaryTextModel])
+    const { messages, assistant } = createMessages()
+    await sendWebCloudMessage({
+      chatMode: 'dao',
+      modelId: primaryTextModel.id,
+      modelProviderId: 'jiucaihezi',
+      modelAttachments: [videoAttachment],
+    }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
+
+    assert.equal(requests.length, 1)
+    assert.match(requests[0].url, /\/v1\/chat\/completions$/)
+    assert.equal(requests[0].body.tools, undefined)
+    assert.equal(requests[0].body.max_tokens, undefined)
+    assert.equal(requests[0].body.messages.some((message: any) => message.role === 'system'), false)
+    assert.match(JSON.stringify(requests[0].body.messages), /data:video\/mp4;base64,AAAA/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
 test('Web forwards text-only model attachments to the upstream without suggesting automatic local tools', async () => {
   const key = 'sk-cloud-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })

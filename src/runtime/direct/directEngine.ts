@@ -29,6 +29,7 @@ export interface RunDirectChatCompletionOptions {
   executeTool?: DirectToolExecutor
   maxToolRounds?: number
   allowToolCalls?: boolean
+  continueOnInterruption?: boolean
   signal?: AbortSignal
 }
 
@@ -77,6 +78,7 @@ export async function runDirectChatCompletion(
     try {
       stream = await readChatCompletionDetails(response, options.onText, toolCallAccumulator)
     } catch (error) {
+      if (options.continueOnInterruption === false) throw error
       if (!(error instanceof DirectStreamInterruptionError) || options.signal?.aborted || Object.keys(toolCallAccumulator).length) throw error
       const partialText = error.partialText
       if (partialText) {

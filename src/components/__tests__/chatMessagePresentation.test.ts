@@ -203,10 +203,10 @@ test('OpenCode streaming is event-driven instead of waiting for prompt completio
   assert.doesNotMatch(useChat, /getOpenCodeSessionStatusWithTimeout/)
 })
 
-test('Web chat falls back to cloud completions without starting the desktop OpenCode kernel', () => {
+test('Web and dao chats use cloud completions without starting the desktop OpenCode kernel', () => {
   assert.match(useChat, /import \{ isTauriRuntime \} from '@\/utils\/tauriEnv'/)
   assert.match(useChat, /sendWebCloudMessage\(options,\s*runId,\s*controller,\s*assistantMsg,\s*setPhase,\s*\(\) => activeRunId,\s*messages\.value\)/)
-  assert.match(useChat, /if \(!isTauriRuntime\(\)\) \{[\s\S]*await sendWebCloudMessage\([\s\S]*return/)
+  assert.match(useChat, /if \(!isTauriRuntime\(\) \|\| isDaoDirectMode\) \{[\s\S]*await sendWebCloudMessage\([\s\S]*return/)
   assert.match(chatCloud, /async function sendWebCloudMessage/)
   assert.match(chatCloud, /resolveApiConfig\(\{[\s\S]*forceCloud:\s*true/)
   assert.match(chatCloud, /\/v1\/chat\/completions/)
@@ -551,15 +551,15 @@ test('OpenCode docks follow official above-composer ordering', () => {
   assert.deepEqual([...order].sort((a, b) => a - b), order)
 })
 
-test('Web direct hides desktop OpenCode review and interaction docks', () => {
-  assert.match(chatPanel, /<PermissionDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<QuestionDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<RevertDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<FollowupDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<SessionShareNotice[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"/)
+test('Web and dao modes hide desktop OpenCode review and interaction docks', () => {
+  assert.match(chatPanel, /<PermissionDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<QuestionDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<RevertDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<FollowupDock[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<SessionShareNotice[\s\S]{0,100}v-if="!isWebRuntime && !isCreativeMode && !isDaoMode && sessionShareUrl"/)
   assert.doesNotMatch(chatPanel, /<DiffReviewDock/)
-  assert.match(chatPanel, /if \(isTauriRuntime\(\) && !isCreativeMode\.value\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
+  assert.match(chatPanel, /if \(isTauriRuntime\(\) && !isCreativeMode\.value && !isDaoMode\.value\) \{[\s\S]*void refreshOpenCodeSkills\(\)[\s\S]*void refreshOpenCodeCommands\(\)[\s\S]*\}/)
 })
 
 test('OpenCode context tools use a dedicated official-style grouped carrier', () => {
@@ -734,7 +734,7 @@ test('OpenCode P3 shortcuts follow official keybinds and avoid extra main button
 test('OpenCode share results use an actionable copy and open carrier', () => {
   assert.match(useChat, /sessionShareUrl/)
   assert.match(useChat, /sessionShareUrl\.value = shared\?\./)
-  assert.match(chatPanel, /<SessionShareNotice[\s\S]{0,140}v-if="!isWebRuntime && !isCreativeMode && sessionShareUrl"[\s\S]{0,80}:url="sessionShareUrl"/)
+  assert.match(chatPanel, /<SessionShareNotice[\s\S]{0,140}v-if="!isWebRuntime && !isCreativeMode && !isDaoMode && sessionShareUrl"[\s\S]{0,80}:url="sessionShareUrl"/)
   assert.match(sessionShareNotice, /copyShareUrl/)
   assert.match(sessionShareNotice, /openShareUrl/)
   assert.match(sessionShareNotice, /write_clipboard_text/)
@@ -776,7 +776,7 @@ test('OpenCode session switching clears stale share and command notice UI state'
   )
 })
 
-test('desktop mode selector exposes plan build dao and creative without changing Web direct-only behavior', () => {
+test('mode selector keeps 文武 on Desktop and exposes 道创 to both runtimes', () => {
   assert.match(chatPanel, /useChatModeStore/)
   assert.match(chatPanel, /agentModeLabel = computed\(\(\) =>[\s\S]{0,100}agentMode\.value === 'creative' \? '创'/)
   assert.match(chatPanel, /selectAgentMode\('build'\)/)
@@ -784,11 +784,11 @@ test('desktop mode selector exposes plan build dao and creative without changing
   assert.match(chatPanel, /selectAgentMode\('dao'\)/)
   assert.match(chatPanel, /selectAgentMode\('creative'\)/)
   assert.doesNotMatch(chatPanel, /selectAgentMode\('direct'\)/)
-  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed<'build' \| 'plan' \| 'dao' \| undefined>/)
+  assert.match(chatPanel, /const currentDesktopOpenCodeAgent = computed<'build' \| 'plan' \| undefined>/)
   assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
-  assert.match(chatPanel, /chatMode: currentDesktopOpenCodeAgent\.value/)
-  assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)
-  assert.match(chatPanel, /!isWebRuntime\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
+  assert.match(chatPanel, /chatMode: agentMode\.value/)
+  assert.match(chatPanel, /!isWebRuntime\.value && !isDaoMode\.value && !hasAttachments && sendText\.startsWith\('\/'\)/)
+  assert.match(chatPanel, /!isWebRuntime\.value && !isDaoMode\.value && !hasAttachments && sendText\.startsWith\('!'\)/)
   assert.match(chatPanel, /v-if="showShellCommandMenu && !isWebRuntime"/)
   assert.doesNotMatch(chatPanel, /agentMode !== 'direct'/)
 })

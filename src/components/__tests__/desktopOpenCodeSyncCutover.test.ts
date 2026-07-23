@@ -11,6 +11,7 @@ const useChat = readFileSync(join(root, 'src/composables/useChat.ts'), 'utf8')
 const fileTree = readFileSync(join(root, 'src/components/filetree/FileTreePanel.vue'), 'utf8')
 const agentStore = readFileSync(join(root, 'src/stores/agentStore.ts'), 'utf8')
 const reviewPanel = readFileSync(join(root, 'src/components/chat/ReviewPanel.vue'), 'utf8')
+const providerProjection = readFileSync(join(root, 'src/opencodeClient/providerProjection.ts'), 'utf8')
 
 test('Desktop send path delegates to the OpenCode sync store', () => {
   assert.match(useChat, /openCodeSyncStore\.submitPrompt\(/)
@@ -52,17 +53,34 @@ test('Desktop prompt hot path does not initialize the OpenCode runtime', () => {
   assert.match(desktopSend, /openCodeSyncStore\.submitPrompt\(/)
 })
 
-test('dao mode projects the official dao Agent and retains the shared OpenCode send path', () => {
+test('dao mode bypasses OpenCode and uses the empty-tool direct path', () => {
   const modeProjection = chatPanel.slice(
     chatPanel.indexOf('const currentDesktopOpenCodeAgent'),
     chatPanel.indexOf('function selectAgentMode'),
   )
-  assert.match(modeProjection, /computed<'build' \| 'plan' \| 'dao' \| undefined>/)
-  assert.match(modeProjection, /mode === 'build' \|\| mode === 'plan' \|\| mode === 'dao'/)
+  assert.match(modeProjection, /computed<'build' \| 'plan' \| undefined>/)
+  assert.match(modeProjection, /mode === 'build' \|\| mode === 'plan'/)
   assert.match(chatPanel, /selectAgentMode\('dao'\)/)
   assert.match(chatPanel, /<span>道<\/span>/)
-  assert.match(chatPanel, /openCodeAgent: currentDesktopOpenCodeAgent\.value/)
-  assert.match(useChat, /const agent = options\.openCodeAgent \|\| options\.chatMode \|\| 'build'/)
+  assert.match(chatPanel, /chatMode: agentMode\.value/)
+  assert.match(useChat, /const isDaoDirectMode = options\.chatMode === 'dao'/)
+  const daoBranch = useChat.slice(
+    useChat.indexOf("const isDaoDirectMode = options.chatMode === 'dao'"),
+    useChat.indexOf('if (isTauriRuntime()) {', useChat.indexOf("const isDaoDirectMode = options.chatMode === 'dao'")),
+  )
+  assert.match(daoBranch, /if \(!isTauriRuntime\(\) \|\| isDaoDirectMode\) \{[\s\S]*sendWebCloudMessage\(/)
+  assert.doesNotMatch(daoBranch, /openCodeSyncStore/)
+  assert.doesNotMatch(providerProjection, /DAO_AGENT_PROMPT|\bdao:\s*\{/)
+})
+
+test('dao mode never starts OpenCode catalog or session hydration work', () => {
+  const commands = chatPanel.slice(
+    chatPanel.indexOf('async function refreshOpenCodeCommands'),
+    chatPanel.indexOf('function currentOpenCodeCommandOptions'),
+  )
+  assert.match(commands, /if \(isCreativeMode\.value \|\| isDaoMode\.value\) return/)
+  assert.match(chatPanel, /isTauriRuntime\(\) && !isCreativeMode\.value && !isDaoMode\.value/)
+  assert.match(chatPanel, /if \(session\?\.openCodeSessionId && !isDaoMode\.value\)/)
 })
 
 test('creative mode has separate session routing and never enters the OpenCode send path', () => {
@@ -133,18 +151,18 @@ test('creative new conversation never invokes an OpenCode session action', () =>
   assert.doesNotMatch(sessionAction.slice(creativeGuard, openCodeAction), /clearMessages\(/)
 })
 
-test('App does not connect OpenCode while the selected mode is creative', () => {
+test('App does not connect OpenCode while the selected mode is creative or dao', () => {
   const lifecycle = app.slice(
     app.indexOf('async function switchOpenCodeProject'),
     app.indexOf('function queueOpenCodeProjectSwitch'),
   )
-  const creativeGuard = lifecycle.indexOf("chatModeStore.mode === 'creative'")
+  const creativeGuard = lifecycle.indexOf("chatModeStore.mode === 'creative' || chatModeStore.mode === 'dao'")
   const connect = lifecycle.indexOf('await openCodeSyncStore.ensureConnected')
   assert.ok(creativeGuard >= 0 && creativeGuard < connect)
 })
 
-test('creative mode loads Gateway models without starting OpenCode', () => {
-  assert.match(chatPanel, /agentStore\.fetchModels\(\{ shouldSkipOpenCode: \(\) => isCreativeMode\.value \}\)/)
+test('creative and dao modes load Gateway models without starting OpenCode', () => {
+  assert.match(chatPanel, /agentStore\.fetchModels\(\{ shouldSkipOpenCode: \(\) => isCreativeMode\.value \|\| isDaoMode\.value \}\)/)
   assert.match(agentStore, /async function fetchModels\(options: \{ skipOpenCode\?: boolean; shouldSkipOpenCode\?: \(\) => boolean \} = \{\}\)/)
   assert.match(agentStore, /const shouldSkipOpenCode = \(\) => Boolean\(options\.skipOpenCode \|\| options\.shouldSkipOpenCode\?\.\(\)\)/)
   const modelFetch = agentStore.slice(agentStore.indexOf('async function fetchModels'), agentStore.indexOf('const initialResolvedModel'))
@@ -189,19 +207,20 @@ test('entering creative mode clears shared OpenCode history before creative-sess
   )
 })
 
-test('creative startup refreshes only the two product Skill sources, never the OpenCode catalog', () => {
+test('creative and dao startup do not refresh the OpenCode catalog', () => {
   const mounted = chatPanel.slice(chatPanel.lastIndexOf('onMounted(async () => {'), chatPanel.indexOf('// ─── 拖拽上传'))
-  assert.match(mounted, /if \(isTauriRuntime\(\) && !isCreativeMode\.value\) \{[\s\S]*refreshOpenCodeSkills\(\)[\s\S]*refreshOpenCodeCommands\(\)/)
+  assert.match(mounted, /if \(isTauriRuntime\(\) && !isCreativeMode\.value && !isDaoMode\.value\) \{[\s\S]*refreshOpenCodeSkills\(\)[\s\S]*refreshOpenCodeCommands\(\)/)
 
   const skills = chatPanel.slice(chatPanel.indexOf('async function refreshOpenCodeSkills'), chatPanel.indexOf('async function refreshOpenCodeCommands'))
   const commands = chatPanel.slice(chatPanel.indexOf('async function refreshOpenCodeCommands'), chatPanel.indexOf('function currentOpenCodeCommandOptions'))
   assert.match(skills, /await refreshProductSkillCatalog\(\)/)
+  assert.match(skills, /if \(isDaoMode\.value\) \{[\s\S]*return/)
   assert.match(skills, /if \(isCreativeMode\.value\) \{[\s\S]*return/)
   assert.doesNotMatch(skills, /listOpenCodeSkills/)
   assert.match(chatPanel, /mergeCreativeSkillCatalog\(skillsManageStore\.centralSkills, builtInSkills\.value\)/)
-  assert.match(commands, /if \(isCreativeMode\.value\) return/)
+  assert.match(commands, /if \(isCreativeMode\.value \|\| isDaoMode\.value\) return/)
   const commandsBeforeConnect = commands.slice(commands.indexOf('const projectedConfig = await'), commands.indexOf('const handle = await ensureOpenCodeServer'))
-  assert.match(commandsBeforeConnect, /if \(isCreativeMode\.value\) return/)
+  assert.match(commandsBeforeConnect, /if \(isCreativeMode\.value \|\| isDaoMode\.value\) return/)
 })
 
 test('creative message actions and composer commands do not fall through to OpenCode', () => {
@@ -229,16 +248,16 @@ test('creative message actions and composer commands do not fall through to Open
   assert.match(slash, /cmd\.id === 'new-session'[\s\S]*isCreativeMode\.value[\s\S]*startNewCreativeSession/)
 })
 
-test('creative mode hides stale OpenCode docks and prevents Review from fetching OpenCode VCS data', () => {
+test('creative and dao modes hide stale OpenCode docks and prevent Review from fetching OpenCode VCS data', () => {
   assert.match(chatPanel, /v-if="!isCreativeMode && turnDiffs\.length > 0"/)
-  assert.match(chatPanel, /<PermissionDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<QuestionDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime && !isCreativeMode"/)
-  assert.match(chatPanel, /function scrollToDiffReview\(\) \{\s*if \(isCreativeMode\.value\) return/)
+  assert.match(chatPanel, /<PermissionDock\s+v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<QuestionDock\s+v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<TodoDock v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<RevertDock\s+v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /<FollowupDock\s+v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"/)
+  assert.match(chatPanel, /function scrollToDiffReview\(\) \{\s*if \(isCreativeMode\.value \|\| isDaoMode\.value\) return/)
   assert.match(reviewPanel, /useChatModeStore/)
-  assert.match(reviewPanel, /if \(chatModeStore\.mode === 'creative'\) return[\s\S]*fetchVcsInfo\(\)/)
+  assert.match(reviewPanel, /if \(chatModeStore\.mode === 'creative' \|\| chatModeStore\.mode === 'dao'\) return[\s\S]*fetchVcsInfo\(\)/)
 })
 
 test('ChatPanel opens official sessions directly and does not link local ids', () => {
@@ -247,9 +266,63 @@ test('ChatPanel opens official sessions directly and does not link local ids', (
   assert.doesNotMatch(chatPanel, /sessionStore\.saveSessionPreview\(/)
 })
 
-test('Desktop history projects OpenCode sessions instead of local IndexedDB ids', () => {
-  assert.match(sessionStore, /isTauriRuntime\(\)[\s\S]*openCodeSyncStore\.sessionsForDirectory/)
-  assert.match(sessionStore, /if \(isTauriRuntime\(\)\)[\s\S]*openCodeSyncStore\.newDraft\(\)/)
+test('Desktop history reserves OpenCode sessions for plan and build, leaving dao local', () => {
+  assert.match(sessionStore, /const usesOpenCodeSessions = \(\) => isTauriRuntime\(\) && chatModeStore\.mode !== 'dao'/)
+  assert.match(sessionStore, /if \(usesOpenCodeSessions\(\)\)[\s\S]*openCodeSyncStore\.sessionsForDirectory/)
+  assert.match(sessionStore, /if \(usesOpenCodeSessions\(\)\)[\s\S]*openCodeSyncStore\.newDraft\(\)/)
+})
+
+test('dao mode loads and persists its local transcript without OpenCode metadata', () => {
+  assert.match(chatPanel, /const sessionLoadPromise = isTauriRuntime\(\) && chatModeStore\.mode !== 'dao'\s*\? Promise\.resolve\(\)\s*:\s*sessionStore\.loadAllSessions\(\)/)
+  const restore = chatPanel.slice(chatPanel.indexOf('async function restoreActiveSession'), chatPanel.indexOf('// ─── P0-4'))
+  assert.match(restore, /if \(!isWebRuntime\.value && !isDaoMode\.value\) return/)
+  const persist = chatPanel.slice(chatPanel.indexOf('async function persistCurrentSession'), chatPanel.indexOf('async function flushCurrentSessionPersist'))
+  assert.match(persist, /openCodeSessionId: isDaoMode\.value \? undefined : getActiveOpenCodeSessionId\(\) \|\| undefined/)
+})
+
+test('dao composer does not expose project, agent, or Skill references', () => {
+  const slash = chatPanel.slice(chatPanel.indexOf('const slashCommands'), chatPanel.indexOf('// ─── @ 数据源：agent'))
+  assert.match(slash, /if \(isDaoMode\.value\) return \[\]/)
+  const atItems = chatPanel.slice(chatPanel.indexOf('const atItems'), chatPanel.indexOf('const atKey'))
+  assert.match(atItems, /if \(isDaoMode\.value\) return \[\]/)
+  const atSelect = chatPanel.slice(chatPanel.indexOf('function handleAtSelect'), chatPanel.indexOf('// ─── \/ 选中'))
+  assert.match(atSelect, /if \(isDaoMode\.value\) return/)
+  const slashSelect = chatPanel.slice(chatPanel.indexOf('function handleSlashSelect'), chatPanel.indexOf('onMounted(async () => {'))
+  assert.match(slashSelect, /if \(isDaoMode\.value\) return/)
+})
+
+test('dao send skips project-pill resolution and product send hooks', () => {
+  const send = chatPanel.slice(chatPanel.indexOf('async function handleSend('), chatPanel.indexOf('// ─── P0-1: 原地编辑 user 消息'))
+  assert.match(send, /if \(!options && !isWebRuntime\.value && !isDaoMode\.value\) \{[\s\S]*resolveOpenCodeComposerParts/)
+  assert.match(send, /if \(!options && !isDaoMode\.value && !\(await addPastedProjectMediaReferences\(plainText\)\)\) return/)
+  const hook = send.slice(send.indexOf('let finalSendText'), send.indexOf('const sendPromise'))
+  assert.match(hook, /if \(!isDaoMode\.value\) \{[\s\S]*triggerChatSendBefore/)
+  assert.match(send, /lastAssistantMsg && !isDaoMode\.value[\s\S]*triggerChatReceiveAfter/)
+})
+
+test('dao mode keeps a project-independent local transcript and removes process-only UI', () => {
+  const enterDao = chatPanel.slice(chatPanel.indexOf('async function enterDaoMode'), chatPanel.indexOf('onBeforeUnmount(() => {'))
+  assert.match(enterDao, /sessionStore\.setCurrentProjectDir\(''\)/)
+  assert.match(enterDao, /settleCreativeToolApproval\('reject'\)/)
+  assert.match(enterDao, /const sessionId = daoSessionId \|\| sessionStore\.startNewSession/)
+  const projection = chatPanel.slice(chatPanel.indexOf('function projectDaoTranscript'), chatPanel.indexOf('async function enterDaoMode'))
+  assert.match(projection, /!message\.isMediaTask/)
+  assert.doesNotMatch(projection, /files: message\.files/)
+  const media = chatPanel.slice(chatPanel.indexOf('const desktopMediaMessages'), chatPanel.indexOf('const displayMessages'))
+  assert.match(media, /if \(isWebRuntime\.value \|\| isDaoMode\.value\) return \[\]/)
+  assert.match(chatPanel, /v-if="pendingCreativeToolApproval && !isDaoMode"/)
+  assert.match(app, /if \(chatModeStore\.mode === 'dao'\) sessionStore\.setCurrentProjectDir\(''\)/)
+})
+
+test('Desktop dao to creative projects only the visible transcript into a creative session', () => {
+  const selectMode = chatPanel.slice(chatPanel.indexOf('function selectAgentMode'), chatPanel.indexOf('const shellCommandText'))
+  assert.match(selectMode, /mode === 'creative' && isDaoMode\.value && !isWebRuntime\.value/)
+  assert.match(selectMode, /enterCreativeModeFromDao\(messages\.value\)/)
+  const transition = chatPanel.slice(chatPanel.indexOf('async function enterCreativeModeFromDao'), chatPanel.indexOf('onBeforeUnmount(() => {'))
+  assert.match(transition, /const transcript = projectDaoTranscript\(source\)/)
+  assert.match(transition, /creativeSessionStore\.createPendingSession\(\)/)
+  assert.match(transition, /await creativeSessionStore\.saveSession\(sessionId, transcript\)/)
+  assert.match(transition, /creativeSessionStore\.switchSession\(sessionId\)/)
 })
 
 test('Desktop session opening restores the valid OpenCode model and variant', () => {
@@ -376,11 +449,11 @@ test('Desktop composer sends extracted pills as structured OpenCode context and 
   assert.match(chatPanel, /composerRef\.value\.innerHTML = composerSnapshot/)
 })
 
-test('Desktop timeline projects the active official Store session without a local message mirror', () => {
+test('Desktop timeline uses the local visible message projection in dao mode', () => {
   assert.doesNotMatch(useChat, /pendingDesktopMessages/)
   assert.match(
     chatPanel,
-    /const desktopTimelineMessages = computed\(\(\) =>\s*!isWebRuntime\.value && !isCreativeMode\.value \? openCodeSyncStore\.chatMessages : messages\.value/,
+    /const desktopTimelineMessages = computed\(\(\) =>\s*!isWebRuntime\.value && !isCreativeMode\.value && !isDaoMode\.value\s*\? mergeVisibleTimeline\(openCodeSyncStore\.chatMessages, messages\.value\)\s*:\s*messages\.value/,
   )
   assert.match(chatPanel, /:messages="desktopTimelineMessages"/)
 })
