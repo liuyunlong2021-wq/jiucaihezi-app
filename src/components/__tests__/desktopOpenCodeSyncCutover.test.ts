@@ -262,6 +262,19 @@ test('Desktop session opening restores the valid OpenCode model and variant', ()
   assert.match(chatPanel, /function restoreOpenCodeSessionModel\([\s\S]*agentStore\.setModel[\s\S]*setModelVariant/)
 })
 
+test('Desktop session selection loads the official session before any local history guard', () => {
+  const sessionWatcher = chatPanel.slice(
+    chatPanel.indexOf('watch(\n  () => sessionStore.activeSessionId'),
+    chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
+  )
+  const desktopLoad = sessionWatcher.indexOf('await openCodeSyncStore.openSession(directory, newId)')
+  const legacyGuard = sessionWatcher.indexOf('if (newId === currentSessionId) return')
+
+  assert.ok(desktopLoad >= 0)
+  assert.ok(legacyGuard > desktopLoad)
+  assert.match(sessionWatcher, /requestId !== sessionLoadRequestId \|\| sessionStore\.activeSessionId !== newId/)
+})
+
 test('Desktop chat no longer contains the legacy per-run OpenCode event kernel', () => {
   assert.doesNotMatch(useChat, /subscribeOpenCodeEvents/)
   assert.doesNotMatch(useChat, /getOpenCodeSessionStatusWithTimeout/)
@@ -363,14 +376,13 @@ test('Desktop composer sends extracted pills as structured OpenCode context and 
   assert.match(chatPanel, /composerRef\.value\.innerHTML = composerSnapshot/)
 })
 
-test('Desktop projection clears stale messages while retaining only pending submissions', () => {
-  const projection = useChat.slice(
-    useChat.indexOf('() => [openCodeSyncStore.activeSessionId'),
-    useChat.indexOf('watch(() => openCodeSyncStore.activePermissions'),
+test('Desktop timeline projects the active official Store session without a local message mirror', () => {
+  assert.doesNotMatch(useChat, /pendingDesktopMessages/)
+  assert.match(
+    chatPanel,
+    /const desktopTimelineMessages = computed\(\(\) =>\s*!isWebRuntime\.value && !isCreativeMode\.value \? openCodeSyncStore\.chatMessages : messages\.value/,
   )
-  assert.match(projection, /pendingDesktopMessages\.value = pendingDesktopMessages\.value\.filter/)
-  assert.match(projection, /\.\.\.\(sessionID \? projected\.map/)
-  assert.match(projection, /\.\.\.pendingDesktopMessages\.value/)
+  assert.match(chatPanel, /:messages="desktopTimelineMessages"/)
 })
 
 test('Desktop interactive replies use Store-owned active-directory methods', () => {

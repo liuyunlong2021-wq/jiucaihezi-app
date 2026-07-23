@@ -1359,16 +1359,18 @@ watch(
       sessionHydrating.value = false
       return
     }
-    if (newId === currentSessionId) return
-    currentSessionId = newId
     sessionHydrating.value = true
     try {
       if (!isWebRuntime.value) {
         const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
         await openCodeSyncStore.openSession(directory, newId)
+        if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
+        currentSessionId = newId
         restoreOpenCodeSessionModel(newId)
         return
       }
+      if (newId === currentSessionId) return
+      currentSessionId = newId
       await sessionLoadPromise
       const history = await sessionStore.loadSessionMessages(newId)
       if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return

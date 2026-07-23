@@ -750,3 +750,11 @@ Tauri Store 的优势：
 **官方对照**：OpenCode v1.18.4 的 session timeline 只消费当前 session 的 message store；切换 session 不得把旧 session 的 timeline 作为新 session 的 fallback。
 
 **修复与验证**：删除 Desktop `useChat` 的消息镜像和发送前本地 pending 消息；ChatPanel 时间线直接消费 `activeSessionId -> openCodeSyncStore.chatMessages`，与官方 `createTimelineModel` 的 `sync.data.message[id] ?? []` 一一对应。回归测试覆盖“Desktop 不镜像 Store”“ChatPanel 直接读 session-keyed 投影”“乐观消息只由 `submitPrompt()` 写入 Store”；专项测试、`vue-tsc -b` 与 `git diff --check` 通过。
+
+### 2026-07-23 回归：除首条外的侧栏会话不能加载
+
+**根因**：ChatPanel 的 Desktop 会话 watcher 在调用 `openCodeSyncStore.openSession(directory, newId)` 前，沿用了 Web/创模式的 `currentSessionId` 短路。该变量不属于 OpenCode Store，会在某些恢复路径中先被写为目标 ID，导致点击侧栏时直接跳过 HTTP + Store 加载；右侧只能显示空时间线。首条会话能显示只是初始化时这个遗留变量恰好为空，并非不同会话有不同合同。
+
+**官方对照**：OpenCode v1.18.4 `packages/app/src/pages/session/timeline/model.ts` 由 session ID resource 调用 `sync().session.sync(id)`，而 `message-timeline.tsx` 只读 `sync().data.message[sessionID] ?? []`。没有组件本地 session-ID guard，也没有旧 timeline fallback。
+
+**修复与验证**：Desktop 路径始终先执行 `openCodeSyncStore.openSession(directory, newId)`；请求返回后仅用请求序号和当前选中 ID 忽略过期结果，再恢复模型/variant。`currentSessionId` guard 保留在 Web 本地历史路径。专项测试先以旧 `pendingDesktopMessages` 合同失败，再改为断言 Desktop 不存在本地消息镜像、ChatPanel 直接投影 Store；`desktopOpenCodeSyncCutover` 39/39、`vue-tsc -b` 通过。Desktop 人工验收仍需点击非首条历史会话确认。
