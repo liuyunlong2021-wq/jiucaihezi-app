@@ -3,7 +3,7 @@ function hasNativeAttachment(messages: readonly unknown[]): boolean {
     const content = (message as { content?: unknown })?.content
     return Array.isArray(content) && content.some(part => {
       const type = (part as { type?: string })?.type
-      return type === 'image_url' || type === 'file'
+      return type === 'image_url' || type === 'video_url' || type === 'input_audio' || type === 'file'
     })
   })
 }

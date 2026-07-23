@@ -4,7 +4,7 @@ import { buildDirectAttachmentHttpError } from '../directAttachmentErrors'
 
 const messages = [{
   role: 'user',
-  content: [{ type: 'file', file: { filename: 'clip.mp4', file_data: 'data:video/mp4;base64,AAA' } }],
+  content: [{ type: 'video_url', video_url: 'data:video/mp4;base64,AAA' }],
 }]
 
 test('maps native attachment HTTP failures to explicit user-facing errors', () => {

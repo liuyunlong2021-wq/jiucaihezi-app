@@ -65,7 +65,7 @@ test('Desktop creative chat routes attachments only to the selected model', () =
   assert.doesNotMatch(source, /任务需要时请调用现有本地工具/)
 })
 
-test('Desktop sends one MP4 file part once with the selected model and current key', async () => {
+test('Desktop sends one MP4 video part once with the selected model and current key', async () => {
   const key = 'sk-desktop-test-12345678901234567890'
   const restoreStorage = installStorage({ jcApiKey: key })
   const previousFetch = globalThis.fetch
@@ -102,13 +102,13 @@ test('Desktop sends one MP4 file part once with the selected model and current k
     assert.equal(requests[0]?.url, 'https://api.jiucaihezi.studio/v1/chat/completions')
     assert.equal(requests[0]?.body.model, 'gpt-5.6-terra')
     assert.equal(requests[0]?.headers.Authorization, `Bearer ${key}`)
-    const fileParts = requests[0]?.body.messages
+    const contentParts = requests[0]?.body.messages
       .flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
-      .filter((part: any) => part.type === 'file')
-    assert.deepEqual(fileParts, [{
-      type: 'file',
-      file: { filename: 'clip.mp4', file_data: 'data:video/mp4;base64,AAAA' },
+    assert.deepEqual(contentParts.filter((part: any) => part.type === 'video_url'), [{
+      type: 'video_url',
+      video_url: 'data:video/mp4;base64,AAAA',
     }])
+    assert.equal(contentParts.some((part: any) => part.type === 'file' && part.file?.filename === 'clip.mp4'), false)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch

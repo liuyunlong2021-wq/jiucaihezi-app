@@ -13,6 +13,9 @@ export function shouldClearCreativeAttachments(finishReason?: string): boolean {
 
 const MIME_ALIASES: Readonly<Record<string, string>> = {
   'video/quicktime': 'video/mov',
+  'video/x-msvideo': 'video/avi',
+  'video/x-ms-wmv': 'video/wmv',
+  'video/x-flv': 'video/flv',
   'audio/x-wav': 'audio/wav',
   'image/jpg': 'image/jpeg',
 }

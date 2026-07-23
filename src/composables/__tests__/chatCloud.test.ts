@@ -213,7 +213,13 @@ test('dao sends one empty-tool request with the original attachment and no Skill
     assert.equal(requests[0].body.tools, undefined)
     assert.equal(requests[0].body.max_tokens, undefined)
     assert.equal(requests[0].body.messages.some((message: any) => message.role === 'system'), false)
-    assert.match(JSON.stringify(requests[0].body.messages), /data:video\/mp4;base64,AAAA/)
+    const videoPart = requests[0].body.messages
+      .flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+      .find((part: any) => part.type === 'video_url')
+    assert.deepEqual(videoPart, { type: 'video_url', video_url: 'data:video/mp4;base64,AAAA' })
+    assert.equal(requests[0].body.messages
+      .flatMap((message: any) => Array.isArray(message.content) ? message.content : [])
+      .some((part: any) => part.type === 'file' && part.file?.filename === 'clip.mp4'), false)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch

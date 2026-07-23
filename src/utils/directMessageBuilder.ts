@@ -14,8 +14,11 @@ export interface ResolvedDirectAttachment {
 }
 type DirectTextPart = { type: 'text'; text: string }
 type DirectImagePart = { type: 'image_url'; image_url: { url: string } }
+type DirectVideoPart = { type: 'video_url'; video_url: string }
+type DirectAudioPart = { type: 'input_audio'; input_audio: { data: string; format: string } }
 type DirectFilePart = { type: 'file'; file: { filename: string; file_data: string } }
-export type DirectApiMessageContent = string | Array<DirectTextPart | DirectImagePart | DirectFilePart>
+type DirectAttachmentPart = DirectImagePart | DirectVideoPart | DirectAudioPart | DirectFilePart
+export type DirectApiMessageContent = string | Array<DirectTextPart | DirectAttachmentPart>
 export interface DirectApiMessage { role: 'system' | 'user' | 'assistant'; content: DirectApiMessageContent }
 export interface BuildDirectMessagesInput {
   messages: Array<{ id: string; role: string; content: unknown; files?: Array<{ name: string; content: string }>; images?: string[] }>
@@ -47,14 +50,25 @@ function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): 
   if (msg.role === 'user') text = appendFiles(text, msg.files)
   return text || null
 }
-function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: string[]): Array<DirectImagePart | DirectFilePart> {
-  const parts: Array<DirectImagePart | DirectFilePart> = []
+function dataUrlPayload(value: string): string {
+  if (!value.toLowerCase().startsWith('data:')) return value
+  const comma = value.indexOf(',')
+  if (comma < 0) throw new Error('附件数据格式无效：data URL 缺少逗号分隔符。')
+  return value.slice(comma + 1)
+}
+function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: string[]): DirectAttachmentPart[] {
+  const parts: DirectAttachmentPart[] = []
   const seenValues = new Set<string>()
   for (const rawAttachment of args.attachments || []) {
     const attachment = normalizeNewApiAttachment(rawAttachment)
     if (!attachment.value || seenValues.has(attachment.value)) continue
     seenValues.add(attachment.value)
     if (attachment.mime.startsWith('image/')) parts.push({ type: 'image_url', image_url: { url: attachment.value } })
+    else if (attachment.mime.startsWith('video/')) parts.push({ type: 'video_url', video_url: attachment.value })
+    else if (attachment.mime.startsWith('audio/')) parts.push({
+      type: 'input_audio',
+      input_audio: { data: dataUrlPayload(attachment.value), format: attachment.mime.slice('audio/'.length) },
+    })
     else parts.push({ type: 'file', file: { filename: attachment.name, file_data: attachment.value } })
   }
   if (args.visionModel) {

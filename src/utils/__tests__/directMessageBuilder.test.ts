@@ -101,13 +101,14 @@ describe('buildDirectMessages', () => {
     assert.ok(text.includes('# Hello World'), '应包含文件内容')
   })
 
-  test('原生附件使用生产验证过的 image_url 和 file parts', () => {
+  test('原生附件按 NewAPI 官方媒体类型构造内容 parts', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析附件')],
       attachments: [
         { id: 'image', name: 'red.png', mime: 'image/png', size: 3, kind: 'image', value: 'data:image/png;base64,AAA' },
         { id: 'video', name: 'clip.mp4', mime: 'video/mp4', size: 3, kind: 'video', value: 'data:video/mp4;base64,BBB' },
         { id: 'audio', name: 'voice.wav', mime: 'audio/wav', size: 3, kind: 'audio', value: 'data:audio/wav;base64,CCC' },
+        { id: 'audio-mp3', name: 'voice.mp3', mime: 'audio/mpeg', size: 3, kind: 'audio', value: 'data:audio/mpeg;base64,EEE' },
         { id: 'file', name: 'brief.pdf', mime: 'application/pdf', size: 3, kind: 'file', value: 'data:application/pdf;base64,DDD' },
       ],
       visionModel: true,
@@ -119,11 +120,12 @@ describe('buildDirectMessages', () => {
     assert.deepEqual(parts, [
       { type: 'text', text: '分析附件' },
       { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } },
-      { type: 'file', file: { filename: 'clip.mp4', file_data: 'data:video/mp4;base64,BBB' } },
-      { type: 'file', file: { filename: 'voice.wav', file_data: 'data:audio/wav;base64,CCC' } },
+      { type: 'video_url', video_url: 'data:video/mp4;base64,BBB' },
+      { type: 'input_audio', input_audio: { data: 'CCC', format: 'wav' } },
+      { type: 'input_audio', input_audio: { data: 'EEE', format: 'mpeg' } },
       { type: 'file', file: { filename: 'brief.pdf', file_data: 'data:application/pdf;base64,DDD' } },
     ])
-    assert.equal(parts.some(part => part.type === 'video_url'), false)
+    assert.equal(parts.filter(part => part.type === 'video_url').length, 1)
   })
 
   test('原生附件与旧图片输入合并但不重复发送同一值', () => {
@@ -145,7 +147,7 @@ describe('buildDirectMessages', () => {
     ])
   })
 
-  test('MOV 浏览器 MIME 在附件元数据和 file_data 头中统一为 video/mov', () => {
+  test('MOV 浏览器 MIME 在 video_url 头中统一为 video/mov', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析 MOV')],
       attachments: [{
@@ -162,13 +164,15 @@ describe('buildDirectMessages', () => {
     })
 
     const part = (result.at(-1)?.content as any[])[1]
-    assert.equal(part.type, 'file')
-    assert.equal(part.file.file_data, 'data:video/mov;base64,AAA')
+    assert.deepEqual(part, { type: 'video_url', video_url: 'data:video/mov;base64,AAA' })
   })
 
   test('浏览器别名、扩展名和 data URL 头共用 MIME 归一化', () => {
     const cases = [
       { name: 'clip.mov', mime: 'video/quicktime', value: 'data:video/quicktime;base64,AAA', expected: 'video/mov' },
+      { name: 'clip.avi', mime: 'video/x-msvideo', value: 'data:video/x-msvideo;base64,AAA', expected: 'video/avi' },
+      { name: 'clip.wmv', mime: 'video/x-ms-wmv', value: 'data:video/x-ms-wmv;base64,AAA', expected: 'video/wmv' },
+      { name: 'clip.flv', mime: 'video/x-flv', value: 'data:video/x-flv;base64,AAA', expected: 'video/flv' },
       { name: 'voice.wav', mime: 'audio/x-wav', value: 'data:audio/x-wav;base64,AAA', expected: 'audio/wav' },
       { name: 'photo.jpg', mime: 'image/jpg', value: 'data:image/jpg;base64,AAA', expected: 'image/jpeg' },
       { name: 'clip.mov', mime: 'application/octet-stream', value: 'data:application/octet-stream;base64,AAA', expected: 'video/mov' },
@@ -188,7 +192,7 @@ describe('buildDirectMessages', () => {
     }
   })
 
-  test('未知 MIME 原样保留并继续构造 file_data', () => {
+  test('未知视频 MIME 原样保留并继续构造 video_url', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析附件')],
       attachments: [{ id: 'webm', name: 'clip.webm', mime: 'video/webm', size: 1, kind: 'video', value: 'data:video/webm;base64,AAA' }],
@@ -197,8 +201,8 @@ describe('buildDirectMessages', () => {
       platform: 'web',
     })
     assert.deepEqual((result.at(-1)?.content as any[])[1], {
-      type: 'file',
-      file: { filename: 'clip.webm', file_data: 'data:video/webm;base64,AAA' },
+      type: 'video_url',
+      video_url: 'data:video/webm;base64,AAA',
     })
   })
 
