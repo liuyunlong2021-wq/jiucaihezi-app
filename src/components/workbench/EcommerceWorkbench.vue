@@ -77,7 +77,7 @@ const currentModelEntry = computed(() => agentStore.textModels.find(model => mod
 const reverseHistory = computed(() => history.value.filter(record => record.action === 'reverse-prompt'))
 const productHistory = computed(() => history.value.filter(record => record.action !== 'reverse-prompt'))
 
-function setDraftText(key: 'deliveryGoal' | 'market' | 'notes', value: string) {
+function setDraftText(key: 'notes', value: string) {
   workbenchStore.updateDraft(activeSessionId.value, { [key]: value })
 }
 
@@ -302,12 +302,8 @@ async function requestPlan() {
       skill: { id: skill.id, content: skill.content },
       input: {
         fields: {
-          action: '根据用户自己的商品图、参考图和诉求，只输出最终中文商品图提示词。',
-          deliveryGoal: draft.value.deliveryGoal,
-          market: draft.value.market,
+          action: '根据用户自己的商品图、参考图和用户诉求，只输出最终中文商品图提示词。比例由用户在后续媒体计划中选择。',
           notes: draft.value.notes,
-          productImageCount: String(draft.value.productImages.length),
-          referenceImageCount: String(draft.value.referenceImages.length),
         },
         attachments: [
           ...draft.value.productImages.map((value, index) => ({ id: `product-image-${index}`, name: `product-image-${index + 1}`, mime: 'image/*', value })),
@@ -616,9 +612,7 @@ onBeforeUnmount(() => {
       </section>
 
       <section class="ecom-section ecom-fields">
-        <label>交付目标<select :value="draft.deliveryGoal" @change="setDraftText('deliveryGoal', ($event.target as HTMLSelectElement).value)"><option>商品主图</option><option>场景图</option><option>详情页长图</option><option>一组商品图</option></select></label>
-        <label>发布位置<select :value="draft.market" @change="setDraftText('market', ($event.target as HTMLSelectElement).value)"><option>让 AI 推荐</option><option>淘宝京东</option><option>抖音小红书</option><option>海外站</option></select></label>
-        <label class="ecom-notes">补充<textarea :value="draft.notes" rows="3" placeholder="不可改变的事实、品牌语气、风格或修改要求" @input="setDraftText('notes', ($event.target as HTMLTextAreaElement).value)" /></label>
+        <label class="ecom-notes">你的诉求<textarea :value="draft.notes" rows="3" placeholder="不可改变的事实、品牌语气、风格或修改要求" @input="setDraftText('notes', ($event.target as HTMLTextAreaElement).value)" /></label>
       </section>
 
       <section v-if="productPrompt" class="ecom-plan">

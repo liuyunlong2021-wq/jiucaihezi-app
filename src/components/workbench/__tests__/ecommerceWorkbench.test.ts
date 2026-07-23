@@ -31,6 +31,13 @@ test('product images use the prompt-only Skill and enter the shared media confir
   assert.doesNotMatch(workbench, /宣传视频|参考图分析|改图入口/)
 })
 
+test('product-image prompting leaves size selection to the shared media plan instead of guessing a platform use case', () => {
+  assert.match(workbench, /你的诉求/)
+  assert.match(workbench, /notes: draft\.value\.notes/)
+  assert.doesNotMatch(workbench, /交付目标|发布位置/)
+  assert.doesNotMatch(workbench, /deliveryGoal: draft\.value\.deliveryGoal|market: draft\.value\.market/)
+})
+
 test('ecommerce header keeps the three workbench views on the left and the model picker on the right', () => {
   assert.doesNotMatch(workbench, /class="ecom-collaboration"/)
   assert.doesNotMatch(workbench, /<p>\{\{ viewLabel \}\}<\/p>/)
