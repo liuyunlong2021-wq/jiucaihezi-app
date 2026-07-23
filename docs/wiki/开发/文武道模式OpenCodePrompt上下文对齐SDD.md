@@ -1,7 +1,7 @@
 # 文武道模式 OpenCode Prompt 上下文对齐 SDD
 
 > 日期：2026-07-22  
-> 状态：待实施  
+> 状态：已实施并收尾（2026-07-23；代码已准备并入 `main`）
 > 基线：OpenCode SDK/runtime v1.18.4  
 > 范围：Desktop 文、武、道共用 Prompt 输入合同
 
@@ -83,3 +83,32 @@ OpenCode v1.18.4 官方分两阶段：
 6. 引用失效时不进入 Agent 循环，输入不丢失。
 7. 文、武、道共用同一构造和发送入口；创模式行为不变。
 8. 专项测试、`vue-tsc -b`、Desktop 构建和 `git diff --check` 通过。
+
+## 6. 实施回执（2026-07-22）
+
+- `ChatPanel` 通过 `ProjectFileService.searchPaths()` 查询当前项目，并从编辑器会话提供最近已打开的 Desktop 项目文件；`plan`、`build`、`dao` 继续作为官方 agent part。
+- `extractPills()` 只消费本轮仍在输入框内的引用。发送前会再次以项目服务确认文件或目录存在，失效时保留草稿和 pill；项目目录使用 `application/x-directory`，路径经共享构造器转为 `file://`。
+- 新会话在 `session.create` 时携带所选 Skill permission；既有会话由 Store 按规则集串行去重并在 `promptAsync` 前完成更新，快速切换时最后选择不会被旧请求覆盖。失败时不发送 prompt，输入恢复并显示错误。
+- 项目搜索忽略软链接，引用 URL 对路径段编码并覆盖常用图片、PDF、音视频 MIME，避免借项目链接扫描 Home 或将原生媒体降级为普通文本。
+- 通过：本轮 Session/Sync Store/ChatPanel/ContentEditable 专项测试、完整 `pnpm run test:focused`、`vue-tsc -b`、`pnpm run build:desktop:quick`、`git diff --check`。
+- 真实 Desktop 文/武/道 Provider 验收和三平台安装包矩阵仍待补。
+
+## 7. 收尾回执（2026-07-23）
+
+### 最终架构
+
+- Desktop 文、武、道时间线只有一条数据路径：`activeSessionId -> openCodeSyncStore.state.messages[sessionID] -> chatMessages -> ChatPanel`。`useChat` 不再保留 Desktop 消息镜像或发送前 pending 消息。
+- 每次侧栏 session 选择先进入 `openCodeSyncStore.openSession(directory, sessionID)`，再以请求序号和当前选择 ID 丢弃过期响应；Web 本地历史才使用 `currentSessionId` 短路。
+- 这对应 OpenCode v1.18.4 `createTimelineModel` 的 session ID 同步和 `sync.data.message[id] ?? []` 投影，不添加本地 fallback 或第二套历史状态。
+
+### 提交与验证
+
+- 本分支最终范围：`c720be5a`、`5a268d5f`、`5f89642c`、`024f2c0a`、`75a23eeb`、`fd303eab`、`6d9a9938`、`694d1132`。
+- 定向 `desktopOpenCodeSyncCutover`：39/39 通过；该回归先证明旧 `pendingDesktopMessages` 合同已经失效，再改为约束 Store 单一真源。
+- 本轮重新执行 `pnpm run build:desktop:quick`，涵盖 `vue-tsc -b`、Vite 前端产物、Desktop dist 清理与审计，退出码为 0；`git diff --check` 通过。
+- `pnpm run test:focused` 本轮因 2026-07-19 遗留的无父 Node 测试进程占用固定 `/private/tmp/jc-focused-tests` 临时目录而没有得到可归属的结束码；不以本轮结果声明完整 focused 已通过。该遗留进程已停止，后续需要独占临时目录重跑再更新证据。
+
+### 已知边界与下一步
+
+- 真正的 Desktop Provider 连续会话、停止后继续、权限/问题交互，以及 Windows/Intel/Apple Silicon 安装包仍是人工矩阵，不由本次 Store 投影或前端构建替代。
+- 后续进入点：先读 [[开发/OpenCode差异修复记录]] 的 2026-07-23 三条回归记录；若继续排查会话，先采集目标 `ses_*` 的 Store/事件/HTTP 证据，不重建组件本地 fallback。

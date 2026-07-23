@@ -17,6 +17,29 @@ test('Desktop send path delegates to the OpenCode sync store', () => {
   assert.match(useChat, /openCodeSyncStore\.waitForReady\(/)
 })
 
+test('Desktop @ data sources initialize their setup dependencies first', () => {
+  assert.ok(
+    chatPanel.indexOf('const isCreativeMode') < chatPanel.indexOf('const agentList'),
+    'agentList must not read isCreativeMode during its temporal dead zone',
+  )
+  assert.ok(
+    chatPanel.indexOf('const selectedProjectDir') < chatPanel.indexOf('const recentFiles'),
+    'recentFiles must not read selectedProjectDir during its temporal dead zone',
+  )
+  assert.ok(
+    chatPanel.indexOf('const projectFiles') < chatPanel.indexOf('const atItems'),
+    'atItems must not read projectFiles during its temporal dead zone',
+  )
+})
+
+test('Desktop @ results stay filterable by their display label after project search', () => {
+  const mentionList = chatPanel.slice(
+    chatPanel.indexOf('} = useFilteredList<AtOption>({'),
+    chatPanel.indexOf('// ─── / useFilteredList'),
+  )
+  assert.match(mentionList, /filterKeys:\s*\['display'\]/)
+})
+
 test('Desktop prompt hot path does not initialize the OpenCode runtime', () => {
   const desktopSend = useChat.slice(
     useChat.indexOf('if (isTauriRuntime()) {', useChat.indexOf('async function sendMessage')),
@@ -239,6 +262,19 @@ test('Desktop session opening restores the valid OpenCode model and variant', ()
   assert.match(chatPanel, /function restoreOpenCodeSessionModel\([\s\S]*agentStore\.setModel[\s\S]*setModelVariant/)
 })
 
+test('Desktop session selection loads the official session before any local history guard', () => {
+  const sessionWatcher = chatPanel.slice(
+    chatPanel.indexOf('watch(\n  () => sessionStore.activeSessionId'),
+    chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
+  )
+  const desktopLoad = sessionWatcher.indexOf('await openCodeSyncStore.openSession(directory, newId)')
+  const legacyGuard = sessionWatcher.indexOf('if (newId === currentSessionId) return')
+
+  assert.ok(desktopLoad >= 0)
+  assert.ok(legacyGuard > desktopLoad)
+  assert.match(sessionWatcher, /requestId !== sessionLoadRequestId \|\| sessionStore\.activeSessionId !== newId/)
+})
+
 test('Desktop chat no longer contains the legacy per-run OpenCode event kernel', () => {
   assert.doesNotMatch(useChat, /subscribeOpenCodeEvents/)
   assert.doesNotMatch(useChat, /getOpenCodeSessionStatusWithTimeout/)
@@ -327,14 +363,26 @@ test('Desktop Skill permission updates follow Skill and session lifecycle, not p
   assert.match(chatPanel, /function syncOpenCodeSkillPermission\([\s\S]*openCodeSyncStore\.updateSessionPermission/)
 })
 
-test('Desktop projection clears stale messages while retaining only pending submissions', () => {
-  const projection = useChat.slice(
-    useChat.indexOf('() => [openCodeSyncStore.activeSessionId'),
-    useChat.indexOf('watch(() => openCodeSyncStore.activePermissions'),
+test('Desktop composer sends extracted pills as structured OpenCode context and restores them after a rejected submit', () => {
+  const handleSend = chatPanel.slice(
+    chatPanel.indexOf('async function handleSend('),
+    chatPanel.indexOf('// Web 端首次发消息时创建本地 session'),
   )
-  assert.match(projection, /pendingDesktopMessages\.value = pendingDesktopMessages\.value\.filter/)
-  assert.match(projection, /\.\.\.\(sessionID \? projected\.map/)
-  assert.match(projection, /\.\.\.pendingDesktopMessages\.value/)
+
+  assert.match(handleSend, /const composerPills = options \? \[\] : extractPills\(editor!\)/)
+  assert.match(handleSend, /const hasComposerParts = composerPills\.length > 0/)
+  assert.match(chatPanel, /openCodeComposerParts,/)
+  assert.match(handleSend, /const composerSnapshot = options \? '' : editor!\.innerHTML/)
+  assert.match(chatPanel, /composerRef\.value\.innerHTML = composerSnapshot/)
+})
+
+test('Desktop timeline projects the active official Store session without a local message mirror', () => {
+  assert.doesNotMatch(useChat, /pendingDesktopMessages/)
+  assert.match(
+    chatPanel,
+    /const desktopTimelineMessages = computed\(\(\) =>\s*!isWebRuntime\.value && !isCreativeMode\.value \? openCodeSyncStore\.chatMessages : messages\.value/,
+  )
+  assert.match(chatPanel, /:messages="desktopTimelineMessages"/)
 })
 
 test('Desktop interactive replies use Store-owned active-directory methods', () => {

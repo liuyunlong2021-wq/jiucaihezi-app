@@ -119,7 +119,6 @@ function appendTextWithLineBreaks(node: Node, lines: string[]): void {
 
   const el = node as HTMLElement
   if (el.getAttribute('contenteditable') === 'false') {
-    lines.push(el.textContent || '')
     return
   }
   if (el.tagName === 'BR') {

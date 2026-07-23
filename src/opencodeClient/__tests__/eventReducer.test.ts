@@ -72,7 +72,30 @@ test('message part and delta events build one ordered session timeline', () => {
   assert.equal(state.sessionStatus.ses_1?.type, 'idle')
 })
 
-test('part updates without a known parent message do not create visible orphans', () => {
+test('part updates arriving before their parent message become visible when the parent arrives', () => {
+  const state = createOpenCodeSyncState()
+  const assistant = {
+    id: 'msg_missing',
+    sessionID: 'ses_1',
+    role: 'assistant',
+    time: { created: 1 },
+    agent: 'build',
+    model: { providerID: 'jiucaihezi', modelID: 'model' },
+  }
+  ;(state as any).loadingMessageSessions = { ses_1: true }
+  applyOpenCodeEvent(state, directory, event('message.part.updated', {
+    sessionID: 'ses_1',
+    part: { id: 'prt_orphan', sessionID: 'ses_1', messageID: 'msg_missing', type: 'text', text: 'bad' },
+    time: 1,
+  }))
+  assert.equal(state.parts.msg_missing?.[0]?.id, 'prt_orphan')
+
+  applyOpenCodeEvent(state, directory, event('message.updated', { sessionID: 'ses_1', info: assistant }))
+  assert.equal(state.messages.ses_1?.[0]?.id, 'msg_missing')
+  assert.equal(state.parts.msg_missing?.[0]?.text, 'bad')
+})
+
+test('part updates without a parent outside an active message load are ignored', () => {
   const state = createOpenCodeSyncState()
   applyOpenCodeEvent(state, directory, event('message.part.updated', {
     sessionID: 'ses_1',
@@ -146,6 +169,13 @@ test('message and part removal events delete their cached state', () => {
     sessionID: 'ses_1', messageID: 'msg_1',
   }))
   assert.deepEqual(state.messages.ses_1, [])
+
+  applyOpenCodeEvent(state, directory, event('message.part.updated', {
+    sessionID: 'ses_1',
+    part: { id: 'prt_late', sessionID: 'ses_1', messageID: 'msg_1', type: 'text', text: 'stale' },
+    time: 1,
+  }))
+  assert.equal(state.parts.msg_1, undefined)
 })
 
 test('standard question events add and remove requests', () => {
@@ -190,4 +220,19 @@ test('archiving a session evicts all session caches', () => {
   assert.equal(state.sessionInfo.ses_1, undefined)
   assert.equal(state.messages.ses_1, undefined)
   assert.equal(state.parts.msg_1, undefined)
+})
+
+test('session eviction clears buffered orphan parts', () => {
+  const state = createOpenCodeSyncState()
+  ;(state as any).loadingMessageSessions = { ses_1: true }
+  applyOpenCodeEvent(state, directory, event('message.part.updated', {
+    sessionID: 'ses_1',
+    part: { id: 'prt_orphan', sessionID: 'ses_1', messageID: 'msg_missing', type: 'text', text: 'bad' },
+    time: 1,
+  }))
+  assert.equal(state.parts.msg_missing?.[0]?.id, 'prt_orphan')
+
+  applyOpenCodeEvent(state, directory, event('session.deleted', { info: session('ses_1') }))
+  assert.equal(state.parts.msg_missing, undefined)
+  assert.equal((state as any).loadingMessageSessions?.ses_1, undefined)
 })

@@ -123,7 +123,9 @@ import {
   listOpenCodeChatMessages,
   prefetchOpenCodeSession,
   listOpenCodeSessions,
+  type OpenCodeComposerPart,
 } from '@/opencodeClient/session'
+import { projectEditorSessionEpoch, projectEditorSessionStore } from '@/components/editor/editorSessionStore'
 type DisplayChatMessage = ChatMessage & {
   latestToolResult?: string
 }
@@ -439,6 +441,14 @@ const previewImageMime = ref('image/png')
 const previewImageTitle = ref('')
 // ─── @mention + / 弹窗状态（照抄 OpenCode transient-state.ts）───
 const popover = ref<'at' | 'slash' | null>(null)
+const agentMode = computed(() => chatModeStore.mode)
+const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const desktopTimelineMessages = computed(() =>
+  !isWebRuntime.value && !isCreativeMode.value ? openCodeSyncStore.chatMessages : messages.value,
+)
+const selectedProjectDir = computed(() => projectStore.projectDir.value)
+const projectFiles = createRuntimeProjectFileService()
+const projectFileActions = createProjectFileActions(projectFiles)
 
 // ponytail: 桌面端 eager 加载 skill
 if (isTauriRuntime()) {
@@ -479,9 +489,12 @@ const slashCommands = computed<SlashCommand[]>(() => {
 
 // ─── @ 数据源：agent（照抄 OpenCode agentList — 注意：agent 不是 skill！）───
 const agentList = computed<AtOption[]>(() => {
-  // ponytail: OpenCode 的 agent 是内置 agent（plan/build），不是用户的 skill
-  // 我们暂不暴露内置 agent，返回空数组
-  return []
+  if (!isTauriRuntime() || isCreativeMode.value) return []
+  return [
+    { type: 'agent', name: 'plan', display: 'plan' },
+    { type: 'agent', name: 'build', display: 'build' },
+    { type: 'agent', name: 'dao', display: 'dao' },
+  ]
 })
 
 // ─── @ 数据源：resource（照抄 OpenCode mcpResourceList）───
@@ -498,8 +511,13 @@ const referenceList = computed<AtOption[]>(() => {
 
 // ─── @ 数据源：recent files（照抄 OpenCode recent）───
 const recentFiles = computed<AtOption[]>(() => {
-  // ponytail: 返回当前打开的文件 tabs
-  return []
+  projectEditorSessionEpoch.value
+  const owner = selectedProjectDir.value
+  if (!owner) return []
+  return projectEditorSessionStore.all()
+    .map(session => session.resource)
+    .filter((resource): resource is ProjectResource => Boolean(resource && resource.runtime === 'desktop' && resource.owner === owner))
+    .map(resource => ({ type: 'file' as const, path: resource.path, display: resource.path, recent: true }))
 })
 
 // ─── @ useFilteredList（照抄 OpenCode prompt-input.tsx L690-770）───
@@ -511,9 +529,12 @@ const atItems = async (query: string): Promise<AtOption[]> => {
 
   if (!query.trim()) return [...refs, ...agents, ...resources, ...recent]
 
-  // ponytail: 有查询词时搜索项目文件
-  const files: AtOption[] = []
-  // TODO: files.searchFilesAndDirectories(query) via Tauri or OpenCode SDK
+  const owner = selectedProjectDir.value
+  const files = !owner
+    ? []
+    : await projectFiles.searchPaths(owner, query.trim(), 40)
+      .then(resources => resources.map(resource => ({ type: 'file' as const, path: resource.path, display: resource.path })))
+      .catch(() => [])
   return [...refs, ...agents, ...resources, ...recent, ...files]
 }
 
@@ -550,6 +571,7 @@ const {
 } = useFilteredList<AtOption>({
   items: atItems,
   key: atKey,
+  filterKeys: ['display'],
   groupBy: atGroupBy,
   sortGroupsBy: (a, b) => (atGroupOrder[a.category] ?? 99) - (atGroupOrder[b.category] ?? 99),
   noInitialSelection: true,
@@ -568,8 +590,6 @@ const {
   key: slashKey,
   noInitialSelection: true,
 })
-
-const selectedProjectDir = computed(() => projectStore.projectDir.value)
 
 function toggleModeMenu(event: Event) {
   event.stopPropagation()
@@ -596,8 +616,6 @@ function fillKbCommand(preset: KbCommandPreset) {
   })
 }
 
-const agentMode = computed(() => chatModeStore.mode)
-const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
 const isStreaming = computed(() =>
   isCreativeMode.value ? isCreativeStreaming.value : isOpenCodeStreaming.value,
 )
@@ -643,8 +661,6 @@ const currentModelVariant = computed(() => agentStore.modelVariantFor(
   currentModelEntry.value?.variants,
 ))
 const fileUploader = ref<InstanceType<typeof FileUploader> | null>(null)
-const projectFiles = createRuntimeProjectFileService()
-const projectFileActions = createProjectFileActions(projectFiles)
 
 function activeMediaOwner(): string {
   return isTauriRuntime()
@@ -781,7 +797,7 @@ const canCompactContext = computed(
     !isStreaming.value &&
     !sessionHydrating.value &&
     Boolean(activeOpenCodeSessionId.value) &&
-    messages.value.some(message => message.role !== 'system'),
+    desktopTimelineMessages.value.some(message => message.role !== 'system'),
 )
 
 const effectiveDesktopSkills = computed(() =>
@@ -891,13 +907,14 @@ const desktopMediaMessages = computed<ChatMessage[]>(() => {
 })
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
-  const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
-  const sourceMessages = isWebRuntime.value
-    ? messages.value
-    : [...messages.value, ...desktopMediaMessages.value].sort(
+  const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(desktopTimelineMessages.value)
+  const sourceMessages = desktopTimelineMessages.value
+  const renderedMessages = isWebRuntime.value
+    ? sourceMessages
+    : [...sourceMessages, ...desktopMediaMessages.value].sort(
         (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
       )
-  const enrichedMessages = sourceMessages.map(message => {
+  const enrichedMessages = renderedMessages.map(message => {
     const messageFiles = dedupeOfficeDownloadFiles([
       ...(message.officeDownloadFiles || []),
       ...extractOfficeDownloadFiles(message.content || ''),
@@ -975,12 +992,29 @@ const displayMessages = computed(() => {
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
   if (message.role !== 'assistant') return false
-  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-    const candidate = messages.value[index]
+  for (let index = desktopTimelineMessages.value.length - 1; index >= 0; index -= 1) {
+    const candidate = desktopTimelineMessages.value[index]
     if (candidate.role === 'assistant') return candidate.id === message.id
   }
   return false
 }
+
+const activeOpenCodeUserMessageId = computed(() => {
+  if (!isOpenCodeStreaming.value) return ''
+  let userIndex = -1
+  for (let index = desktopTimelineMessages.value.length - 1; index >= 0; index -= 1) {
+    if (desktopTimelineMessages.value[index]?.role === 'user') {
+      userIndex = index
+      break
+    }
+  }
+  if (userIndex < 0) return ''
+  const hasVisibleAssistantPart = desktopTimelineMessages.value.slice(userIndex + 1).some(message =>
+    message.role === 'assistant'
+    && (message.openCodeParts || []).some(part => part.type === 'text' && part.text?.trim()),
+  )
+  return hasVisibleAssistantPart ? '' : desktopTimelineMessages.value[userIndex]!.id
+})
 
 function hasOpenCodeTimeline(message: DisplayChatMessage): boolean {
   return message.role === 'assistant' && Boolean(message.openCodeParts?.length)
@@ -990,6 +1024,8 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
   return buildOpenCodeTimelineRows([message], {
     isStreaming: isAssistantStreamingMessage(message),
     activeAssistantMessageId: message.id,
+    activeUserMessageId: activeOpenCodeUserMessageId.value,
+    sessionStatus: isOpenCodeStreaming.value ? 'busy' : 'idle',
   })
 }
 
@@ -1014,6 +1050,20 @@ const virtualizer = useVirtualizer(
     },
   })),
 )
+
+async function loadOlderOpenCodeMessages() {
+  if (isWebRuntime.value || isCreativeMode.value) return
+  const container = messagesContainer.value
+  const sessionID = openCodeSyncStore.activeSessionId
+  const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+  if (!container || container.scrollTop > 160 || !sessionID || !directory) return
+  if (!openCodeSyncStore.hasOlderMessages(sessionID)) return
+  const height = container.scrollHeight
+  const top = container.scrollTop
+  await openCodeSyncStore.loadOlderMessages(directory, sessionID)
+  await nextTick()
+  container.scrollTop = top + container.scrollHeight - height
+}
 
 // measureElement 适配 Vue ref 回调类型（Element | ComponentPublicInstance → Element | null）
 function measureVirtualElement(el: unknown) {
@@ -1309,16 +1359,18 @@ watch(
       sessionHydrating.value = false
       return
     }
-    if (newId === currentSessionId) return
-    currentSessionId = newId
     sessionHydrating.value = true
     try {
       if (!isWebRuntime.value) {
         const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
         await openCodeSyncStore.openSession(directory, newId)
+        if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
+        currentSessionId = newId
         restoreOpenCodeSessionModel(newId)
         return
       }
+      if (newId === currentSessionId) return
+      currentSessionId = newId
       await sessionLoadPromise
       const history = await sessionStore.loadSessionMessages(newId)
       if (requestId !== sessionLoadRequestId || sessionStore.activeSessionId !== newId) return
@@ -1493,15 +1545,26 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
       : undefined
   const editor = composerRef.value
   if (!editor && !options) return
+  const composerPills = options ? [] : extractPills(editor!)
+  let openCodeComposerParts: OpenCodeComposerPart[] = []
+  if (!options && !isWebRuntime.value) {
+    try {
+      openCodeComposerParts = await resolveOpenCodeComposerParts(composerPills)
+    } catch (error) {
+      setLocalCommandNotice(error instanceof Error ? error.message : String(error))
+      return
+    }
+  }
   const pendingMediaType = isMediaModel(agentStore.currentModel)
   if (pendingMediaType && isMember.value && mediaSubmitPending) return
   const plainText = options?.text ?? getPlainText(editor!)
   if (!options && !(await addPastedProjectMediaReferences(plainText))) return
   const hasText = plainText.trim().length > 0
+  const hasComposerParts = composerPills.length > 0
   const hasAttachments = options ? false : (fileUploader.value?.attachedFiles?.length || 0) > 0
   const isFileProcessing = options ? false : fileUploader.value?.isProcessing
 
-  if ((!hasText && !hasAttachments) || isFileProcessing || (sessionHydrating.value && !options))
+  if ((!hasText && !hasAttachments && !hasComposerParts) || isFileProcessing || (sessionHydrating.value && !options))
     return
 
   if (isStreaming.value) {
@@ -1509,7 +1572,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     await new Promise(r => setTimeout(r, 200))
   }
 
-  const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : '')
+  const text = plainText.trim() || (hasAttachments ? '请分析这些文件' : hasComposerParts ? '请查看引用资源' : '')
+  const composerSnapshot = options ? '' : editor!.innerHTML
   // 清空编辑器
   const replyContext = options ? null : replyTarget.value
   if (!options) {
@@ -2114,6 +2178,8 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     chatMode: currentDesktopOpenCodeAgent.value,
     openCodeAgent: currentDesktopOpenCodeAgent.value,
     openCodeProjectDir: selectedProjectDir.value || undefined,
+    openCodeComposerParts,
+    skillPermission: buildSkillPermissionScope({ skillName }),
     _skipUserMessageInsert: preinsertedWebUserMessage,
   })
   await nextTick()
@@ -2125,7 +2191,13 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
     if (error instanceof NewApiRequestTooLargeError) {
       fileUploader.value?.reportError(error.message)
     }
-    setEditorText(composerRef.value, finalSendText)
+    if (!options && composerRef.value) {
+      composerRef.value.innerHTML = composerSnapshot
+      composerRef.value.dispatchEvent(new Event('input', { bubbles: true }))
+    } else {
+      setEditorText(composerRef.value, finalSendText)
+    }
+    setLocalCommandNotice(error instanceof Error ? error.message : String(error))
     hasInputText.value = true
     await nextTick()
     resizeComposer()
@@ -2154,6 +2226,33 @@ async function handleSend(internal?: InternalCreativeSend | Event) {
 
   // 5. 保存到 IndexedDB
   await persistCurrentSession()
+}
+
+async function resolveOpenCodeComposerParts(pills: ReturnType<typeof extractPills>): Promise<OpenCodeComposerPart[]> {
+  const owner = selectedProjectDir.value
+  const parts: OpenCodeComposerPart[] = []
+  for (const pill of pills) {
+    if (pill.type === 'agent' && pill.name) {
+      parts.push({ type: 'agent', name: pill.name })
+      continue
+    }
+    if (pill.source?.type === 'resource' && pill.url) {
+      parts.push({ type: 'file', path: pill.path, name: pill.content.replace(/^@/, ''), mime: pill.mime, url: pill.url })
+      continue
+    }
+    if (!owner || !pill.path) throw new Error(`引用资源已失效: ${pill.content}`)
+    const resource = (await projectFiles.searchPaths(owner, pill.path, 40))
+      .find(item => item.path === pill.path)
+    if (!resource) throw new Error(`引用资源已失效: ${pill.path}`)
+    parts.push({
+      type: 'file',
+      path: resource.path,
+      name: resource.name,
+      mime: resource.isDirectory ? 'application/x-directory' : resource.mimeType,
+      isDirectory: resource.isDirectory,
+    })
+  }
+  return parts
 }
 
 function bytesToDataUrl(bytes: Uint8Array, mimeType = 'application/octet-stream'): Promise<string> {
@@ -3650,12 +3749,13 @@ function onDrop(e: DragEvent) {
     <div
       ref="messagesContainer"
       class="cp-messages"
+      @scroll="loadOlderOpenCodeMessages"
       @dragover.prevent="fileUploader?.handleDragOver($event)"
       @dragleave.prevent="fileUploader?.handleDragLeave($event)"
       @drop.prevent="fileUploader?.handleDrop($event)"
     >
       <!-- Welcome -->
-      <div v-if="messages.length === 0" class="cp-welcome">
+      <div v-if="displayMessages.length === 0" class="cp-welcome">
         <h2 class="serif">韭菜盒子</h2>
         <p>国产Codex</p>
         <div class="cp-welcome-cards">
@@ -3730,12 +3830,7 @@ function onDrop(e: DragEvent) {
                 />
               </div>
             </div>
-            <template
-              v-else-if="
-                displayMessages[virtualRow.index].role === 'user' &&
-                displayMessages[virtualRow.index].summaryDiffs?.length
-              "
-            >
+            <template v-else-if="displayMessages[virtualRow.index].role === 'user'">
               <template
                 v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])"
                 :key="row.key"
@@ -3773,6 +3868,14 @@ function onDrop(e: DragEvent) {
                 @delete="deleteMessage"
                 @edit="editUserMessage"
               />
+              <template
+                v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])"
+                :key="row.key"
+              >
+                <div v-if="row.type === 'thinking'" class="cp-opencode-thinking">
+                  <span>{{ row.reasoningHeading || '正在思考' }}</span>
+                </div>
+              </template>
             </template>
             <template v-else-if="hasOpenCodeTimeline(displayMessages[virtualRow.index])">
               <div class="cp-opencode-clean">
@@ -3932,26 +4035,6 @@ function onDrop(e: DragEvent) {
         </template>
       </div>
 
-      <!-- Streaming indicator (virtual list 之后，自然流底部可见) -->
-      <div
-        v-if="
-          isStreaming &&
-          (!messages.length ||
-            messages[messages.length - 1]?.role === 'user' ||
-            !messages[messages.length - 1]?.content)
-        "
-        class="msg assistant"
-      >
-        <div class="msg-meta">
-          <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px" /></div>
-          <span class="msg-meta-name">{{
-            effectiveOpenCodeSkillName || agentStore.modelLabel
-          }}</span>
-        </div>
-        <div class="msg-bubble">
-          <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
-        </div>
-      </div>
     </div>
 
     <!-- 🔧 Phase B v2: 变更摘要（基于 turnDiffs/sessionDiffs，消息流末尾始终可见） -->
@@ -3974,7 +4057,7 @@ function onDrop(e: DragEvent) {
       ref="scrollNav"
       :container="messagesContainer"
       :is-streaming="isStreaming"
-      :messages="messages"
+      :messages="desktopTimelineMessages"
     />
 
     <!-- P1-1: 图片预览灯箱 -->
@@ -4667,29 +4750,6 @@ function onDrop(e: DragEvent) {
   max-width: 400px;
   margin: 0 auto;
   line-height: 1.6;
-}
-
-/* Typing dots — from code.html line 362-365 */
-.typing-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--ink3);
-  border-radius: 50%;
-  margin: 0 2px;
-  animation: bounce 0.6s infinite alternate;
-}
-.typing-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.typing-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-@keyframes bounce {
-  to {
-    transform: translateY(-4px);
-    opacity: 0.4;
-  }
 }
 
 /* 引用回复条 */
@@ -5632,6 +5692,15 @@ function onDrop(e: DragEvent) {
   background: var(--surface);
   color: var(--ink3);
   font-size: 12px;
+}
+.cp-opencode-thinking {
+  margin: 8px 0 12px 38px;
+  color: var(--ink3);
+  font-size: 12px;
+  animation: cp-thinking-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes cp-thinking-shimmer {
+  50% { opacity: 0.45; }
 }
 .cp-opencode-error {
   border-color: color-mix(in srgb, #c62828 42%, var(--line));

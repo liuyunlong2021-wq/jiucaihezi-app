@@ -722,3 +722,39 @@ Tauri Store 的优势：
 用户已验证文/武连续对话、本地 Ollama 回复、重启恢复、项目切换；Apple Silicon 上 `deepseek-v4-flash` 已真实执行 `search + read` 并返回 Skill 原文，`global.event` CORS 循环未再出现。浏览器 `navigator.platform=MacIntel` 不是硬件证据，Intel 仍待验收。曾根据单次 DSML/思考响应把两个模型硬编码为 `tool_call:false`，该结论错误且已撤销：模型能力必须以官方目录为依据，异常响应应在 NewAPI/协议适配边界排查。
 
 仍未验收：停止后继续、权限/问题真实交互，以及 Ollama 首 token/CPU/退出后进程数。不得把这些项目写成已通过。
+
+## 2026-07-23：续聊时历史内容短暂消失
+
+**根因**：本地 reducer 在 `message.part.updated` 早于 `message.updated` 时直接丢弃 part；发送完成后 `useChat` 又立即以当时的 Store 投影整体覆盖 UI。其后发现 `openSession()` 还把可能暂时不完整的 HTTP 消息快照当作删除权限，导致事件流已确认的历史消息和 part 被瞬间替换，直到后续事件回填。
+
+**官方对照**：OpenCode v1.18.4 `packages/app/src/context/server-session.ts` 只在活动消息加载期间暂存无父级 part，记录已删除 message，并在加载结束时清理未匹配 orphan。`TextPartDisplay` 的复制操作只复制当前 text part；引用块没有独立复制交互。`message-part.css` 保留 `content-visibility: auto`。
+
+**修复**：韭菜盒子为活动 `openSession()` 加载翻译上述 orphan/tombstone 边界，发送后不再额外整体替换消息投影；消息快照只补全或更新已知 message/part，`message.removed` 是唯一删除入口；每个 text part 单独复制自身文本，流式和完成态的 fenced code block 都提供同一可见复制按钮，保留官方 `content-visibility`，仅移除本地 `contain-intrinsic-size` 提示。
+
+**验证**：reducer 乱序、删除迟到 part、会话回收、快照漏掉已确认消息、流式代码块复制回归测试通过；Sync Store、消息展示和聊天控制定向测试通过。完整 `build:desktop` 被当前 `HEAD` 已有的 `creationPanelContractUi` 断言失败阻塞（其期待已不存在的 `buildMediaPlanSubmission`，不在本次改动范围）。
+
+### 2026-07-23 后续对齐：等待态与历史页
+
+**运行窗口确认**：人工截图对应的 `target/debug/jiucaihezi-app`、Vite 和工作目录均来自 `0722-opencodeshangxiawen`，不是其他支线占用的 App。
+
+**等待态根因**：Studio 把整个会话的 busy 状态渲染为聊天底部的三点假助手气泡；官方 `Timeline.constructMessageRows()` 则把它投影为当前 user message 后的 `Thinking` row，直到可渲染 assistant part 抵达。因此前者既不对齐，也会把“模型还没有创建 assistant message”和“消息消失”混在同一个视觉信号中。
+
+**历史边界**：Studio 曾固定请求 `limit: 500`；官方首屏是 20 条，向上滚动再按 `x-next-cursor` 加载每页 200 条，并保持滚动锚点。现已按该页大小、cursor 和事件合并语义翻译。
+
+**上下文边界**：OpenCode runtime 按 Provider model `limit.context` 自动 compact；压缩失败会产生 `ContextOverflowError`，不是前端静默停止。Studio 不得添加本地压缩器。若真实会话卡在 busy，下一步应采集该 session 的 server status/event/error，区分 Provider 无响应、compaction 进行中和 overflow 错误。
+
+### 2026-07-23 回归：切换侧栏会话仍显示上一会话
+
+**根因**：Desktop 在唯一 OpenCode Sync Store 之外，又让 `useChat` 把当前 Store 消息复制到模块级 `messages`。ChatPanel 渲染这个镜像；为容忍同一会话的短暂空快照，镜像进一步保留旧内容。点击侧栏会先切换 active ID，目标会话历史尚未返回时便出现“左侧已选中、右侧仍是旧对话”。
+
+**官方对照**：OpenCode v1.18.4 的 session timeline 只消费当前 session 的 message store；切换 session 不得把旧 session 的 timeline 作为新 session 的 fallback。
+
+**修复与验证**：删除 Desktop `useChat` 的消息镜像和发送前本地 pending 消息；ChatPanel 时间线直接消费 `activeSessionId -> openCodeSyncStore.chatMessages`，与官方 `createTimelineModel` 的 `sync.data.message[id] ?? []` 一一对应。回归测试覆盖“Desktop 不镜像 Store”“ChatPanel 直接读 session-keyed 投影”“乐观消息只由 `submitPrompt()` 写入 Store”；专项测试、`vue-tsc -b` 与 `git diff --check` 通过。
+
+### 2026-07-23 回归：除首条外的侧栏会话不能加载
+
+**根因**：ChatPanel 的 Desktop 会话 watcher 在调用 `openCodeSyncStore.openSession(directory, newId)` 前，沿用了 Web/创模式的 `currentSessionId` 短路。该变量不属于 OpenCode Store，会在某些恢复路径中先被写为目标 ID，导致点击侧栏时直接跳过 HTTP + Store 加载；右侧只能显示空时间线。首条会话能显示只是初始化时这个遗留变量恰好为空，并非不同会话有不同合同。
+
+**官方对照**：OpenCode v1.18.4 `packages/app/src/pages/session/timeline/model.ts` 由 session ID resource 调用 `sync().session.sync(id)`，而 `message-timeline.tsx` 只读 `sync().data.message[sessionID] ?? []`。没有组件本地 session-ID guard，也没有旧 timeline fallback。
+
+**修复与验证**：Desktop 路径始终先执行 `openCodeSyncStore.openSession(directory, newId)`；请求返回后仅用请求序号和当前选中 ID 忽略过期结果，再恢复模型/variant。`currentSessionId` guard 保留在 Web 本地历史路径。专项测试先以旧 `pendingDesktopMessages` 合同失败，再改为断言 Desktop 不存在本地消息镜像、ChatPanel 直接投影 Store；`desktopOpenCodeSyncCutover` 39/39、`vue-tsc -b` 通过。Desktop 人工验收仍需点击非首条历史会话确认。

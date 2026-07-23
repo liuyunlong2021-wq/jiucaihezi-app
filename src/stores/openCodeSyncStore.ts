@@ -3,7 +3,11 @@ import { defineStore } from 'pinia'
 import type { Message, OpencodeClient, Part, Session } from '@opencode-ai/sdk/v2/client'
 
 import type { QueuedServerEvent } from '@/opencodeClient/eventBridge'
-import { applyOpenCodeEvent, createOpenCodeSyncState } from '@/opencodeClient/eventReducer'
+import {
+  applyOpenCodeEvent,
+  completeOpenCodeMessageLoad,
+  createOpenCodeSyncState,
+} from '@/opencodeClient/eventReducer'
 import { mapOpenCodeMessagesToChatMessages } from '@/opencodeClient/messageMapper'
 import { createOpenCodeId } from '@/opencodeClient/identifier'
 import {
@@ -75,6 +79,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   let serverGeneration = 0
   let reconcileGeneration = 0
   let sessionLoadGeneration = 0
+  let messageLoadGeneration = 0
   let directoryBootstrapGeneration = 0
   let connectionIntentGeneration = 0
   const pendingConnections = new Map<string, PendingConnection>()
@@ -96,6 +101,9 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
   const loadedSessions = new Set<string>()
   const creatingSessions = new Map<string, CreatingSession>()
   const sessionCleanupReservations = new Map<string, { token: string; directory: string }>()
+  const appliedSessionPermissions = new Map<string, string>()
+  const requestedSessionPermissions = new Map<string, string>()
+  const pendingSessionPermissionUpdates = new Map<string, Promise<void>>()
   const deletingSessions = new Map<string, Promise<void>>()
   const openingSessions = new Map<string, Promise<void>>()
   const bootstrappingDirectories = new Map<string, Promise<void>>()
@@ -248,8 +256,39 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     return request
   }
 
+  function sessionPermissionKey(permission: unknown): string {
+    return JSON.stringify(permission || [])
+  }
+
   async function updateSessionPermission(directory: string, sessionID: string, permission: unknown): Promise<void> {
-    await clientFor(directory).session.update({ sessionID, permission, directory } as any)
+    const key = sessionPermissionKey(permission)
+    requestedSessionPermissions.set(sessionID, key)
+    const apply = async () => {
+      await clientFor(directory).session.update({ sessionID, permission, directory } as any)
+      if (requestedSessionPermissions.get(sessionID) === key) {
+        appliedSessionPermissions.set(sessionID, key)
+      }
+    }
+    const previous = pendingSessionPermissionUpdates.get(sessionID)
+    const request = previous ? previous.catch(() => undefined).then(apply) : apply()
+    pendingSessionPermissionUpdates.set(sessionID, request)
+    try {
+      await request
+    } finally {
+      if (pendingSessionPermissionUpdates.get(sessionID) === request) {
+        pendingSessionPermissionUpdates.delete(sessionID)
+      }
+    }
+  }
+
+  async function ensureSessionPermission(directory: string, sessionID: string, permission: unknown): Promise<void> {
+    const key = sessionPermissionKey(permission)
+    if (appliedSessionPermissions.get(sessionID) === key) return
+    if (requestedSessionPermissions.get(sessionID) === key) {
+      await pendingSessionPermissionUpdates.get(sessionID)
+      if (appliedSessionPermissions.get(sessionID) === key) return
+    }
+    await updateSessionPermission(directory, sessionID, permission)
   }
 
   function activeRequestClient(sessionID: string, requestID: string, requests: any[]) {
@@ -463,6 +502,9 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     delete state.permissions[sessionID]
     delete state.questions[sessionID]
     delete state.messages[sessionID]
+    delete state.messageCursor[sessionID]
+    delete state.messageComplete[sessionID]
+    delete state.loadingOlderMessages[sessionID]
     for (const key of loadedSessions) if (key === `${directory}\u0000${sessionID}`) loadedSessions.delete(key)
     sessionRevision.delete(sessionID)
     todoRevision.delete(sessionID)
@@ -527,7 +569,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     if (sessionID) await openSession(directory, sessionID)
   }
 
-  async function ensureSessionWithOwnership(input: { directory: string; title?: string }): Promise<EnsureSessionResult> {
+  async function ensureSessionWithOwnership(input: { directory: string; title?: string; permission?: unknown }): Promise<EnsureSessionResult> {
     const directory = String(input.directory || '').trim()
     if (activeSessionId.value && activeDirectory.value === directory) {
       sessionCleanupReservations.delete(activeSessionId.value)
@@ -546,8 +588,12 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       const info = unwrap<Session>(await clientFor(directory).session.create({
         directory,
         title: input.title,
+        permission: input.permission,
       } as any))
       if (!info?.id) throw new Error('韭菜盒子会话创建失败。')
+      const permissionKey = sessionPermissionKey(input.permission)
+      appliedSessionPermissions.set(info.id, permissionKey)
+      requestedSessionPermissions.set(info.id, permissionKey)
       applyServerEvent({
         directory,
         payload: { type: 'session.created', properties: { sessionID: info.id, info } } as any,
@@ -566,7 +612,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     return { sessionID: await request, created: true, cleanupToken: token }
   }
 
-  async function ensureSession(input: { directory: string; title?: string }): Promise<string> {
+  async function ensureSession(input: { directory: string; title?: string; permission?: unknown }): Promise<string> {
     return (await ensureSessionWithOwnership(input)).sessionID
   }
 
@@ -607,9 +653,11 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     const todoSnapshotRevision = todoRevision.get(sessionID) ?? 0
     const diffSnapshotRevision = diffRevision.get(sessionID) ?? 0
     const client = clientFor(directory)
+    const messageLoadToken = ++messageLoadGeneration
+    state.loadingMessageSessions[sessionID] = messageLoadToken
     const request = Promise.all([
       client.session.get({ sessionID, directory } as any),
-      client.session.messages({ sessionID, directory, limit: 500 } as any),
+      client.session.messages({ sessionID, directory, limit: 20 } as any),
       client.session.todo({ sessionID, directory } as any),
       client.session.diff({ sessionID, directory } as any),
     ]).then(([sessionResult, messageResult, todoResult, diffResult]) => {
@@ -646,27 +694,24 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
           .sort((a, b) => a.id.localeCompare(b.id))
       }
       const rows = unwrap<Array<{ info: Message; parts: Part[] }>>(messageResult) ?? []
+      const cursor = (messageResult as any)?.response?.headers?.get?.('x-next-cursor') || undefined
       const snapshotMessages = rows.map(row => row.info).filter(Boolean)
       const currentMessages = state.messages[sessionID] ?? []
-      const messages = revision === (sessionRevision.get(sessionID) ?? 0)
-        ? snapshotMessages
-        : [...snapshotMessages, ...currentMessages].reduce<Message[]>((items, item) => {
-            if (removedMessages.get(sessionID)?.has(item.id)) return items
-            const index = items.findIndex(existing => existing.id === item.id)
-            if (index >= 0) items[index] = item
-            else items.push(item)
-            return items
-          }, [])
+      const messages = [...snapshotMessages, ...currentMessages].reduce<Message[]>((items, item) => {
+        if (removedMessages.get(sessionID)?.has(item.id)) return items
+        const index = items.findIndex(existing => existing.id === item.id)
+        if (index >= 0) items[index] = item
+        else items.push(item)
+        return items
+      }, [])
       state.messages[sessionID] = messages.sort((a, b) => a.id.localeCompare(b.id))
-      if (unchanged) {
-        const snapshotMessageIDs = new Set(snapshotMessages.map(message => message.id))
-        for (const [messageID, parts] of Object.entries(state.parts)) {
-          if (parts?.some(part => part.sessionID === sessionID) && !snapshotMessageIDs.has(messageID)) delete state.parts[messageID]
-        }
+      const knownMessageIDs = new Set(messages.map(message => message.id))
+      for (const [messageID, parts] of Object.entries(state.parts)) {
+        if (parts?.some(part => part.sessionID === sessionID) && !knownMessageIDs.has(messageID)) delete state.parts[messageID]
       }
       for (const row of rows) {
         const currentParts = state.parts[row.info.id] ?? []
-        const source = unchanged ? (row.parts ?? []) : [...(row.parts ?? []), ...currentParts]
+        const source = [...currentParts, ...(row.parts ?? [])]
         const parts = source.reduce<Part[]>((items, part) => {
           if (removedParts.get(sessionID)?.has(part.id)) return items
           const index = items.findIndex(existing => existing.id === part.id)
@@ -677,6 +722,8 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
         if (parts.length) state.parts[row.info.id] = parts.sort((a, b) => a.id.localeCompare(b.id))
         else delete state.parts[row.info.id]
       }
+      state.messageCursor[sessionID] = cursor
+      state.messageComplete[sessionID] = !cursor
       if (todoUnchanged) {
         state.todos[sessionID] = unwrap<any[]>(todoResult) ?? []
       }
@@ -685,10 +732,57 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       }
       loadedSessions.add(key)
     }).finally(() => {
+      if (state.loadingMessageSessions[sessionID] === messageLoadToken) {
+        completeOpenCodeMessageLoad(state, sessionID)
+      }
       if (openingSessions.get(key) === request) openingSessions.delete(key)
     })
     openingSessions.set(key, request)
     return request
+  }
+
+  function hasOlderMessages(sessionID: string): boolean {
+    return Boolean(state.messageCursor[sessionID]) && !state.messageComplete[sessionID]
+  }
+
+  async function loadOlderMessages(directory: string, sessionID: string): Promise<void> {
+    const cursor = state.messageCursor[sessionID]
+    if (!cursor || state.messageComplete[sessionID] || state.loadingOlderMessages[sessionID]) return
+    state.loadingOlderMessages[sessionID] = true
+    try {
+      const result = await clientFor(directory).session.messages({
+        sessionID,
+        directory,
+        limit: 200,
+        before: cursor,
+      } as any)
+      const rows = unwrap<Array<{ info: Message; parts: Part[] }>>(result) ?? []
+      const messages = [...rows.map(row => row.info).filter(Boolean), ...(state.messages[sessionID] ?? [])]
+        .reduce<Message[]>((items, item) => {
+          if (removedMessages.get(sessionID)?.has(item.id)) return items
+          const index = items.findIndex(existing => existing.id === item.id)
+          if (index >= 0) items[index] = item
+          else items.push(item)
+          return items
+        }, [])
+      state.messages[sessionID] = messages.sort((a, b) => a.id.localeCompare(b.id))
+      for (const row of rows) {
+        const source = [...(state.parts[row.info.id] ?? []), ...(row.parts ?? [])]
+        const parts = source.reduce<Part[]>((items, part) => {
+          if (removedParts.get(sessionID)?.has(part.id)) return items
+          const index = items.findIndex(existing => existing.id === part.id)
+          if (index >= 0) items[index] = part
+          else items.push(part)
+          return items
+        }, [])
+        if (parts.length) state.parts[row.info.id] = parts.sort((a, b) => a.id.localeCompare(b.id))
+      }
+      const next = (result as any)?.response?.headers?.get?.('x-next-cursor') || undefined
+      state.messageCursor[sessionID] = next
+      state.messageComplete[sessionID] = !next
+    } finally {
+      delete state.loadingOlderMessages[sessionID]
+    }
   }
 
   function newDraft() {
@@ -788,6 +882,7 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     renameSession,
     deleteSession,
     updateSessionPermission,
+    ensureSessionPermission,
     replyPermission,
     replyQuestion,
     rejectQuestion,
@@ -800,6 +895,8 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
     ensureSessionWithOwnership,
     cleanupCreatedSessionIfExclusive,
     openSession,
+    hasOlderMessages,
+    loadOlderMessages,
     newDraft,
     sessionsForDirectory,
     submitPrompt,

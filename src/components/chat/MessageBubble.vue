@@ -89,6 +89,7 @@ const emit = defineEmits<{
 }>()
 
 const copyLabel = ref('复制')
+const copiedOpenCodeTextPartId = ref('')
 const downloadingUrl = ref('')
 const generatedOfficeFiles = ref<OfficeDownloadFile[]>([])
 const exportError = ref('')
@@ -205,6 +206,20 @@ const attachmentRefsOnly = computed(() => {
   const displayedNames = new Set((props.files || []).map(file => file.name))
   return (props.attachments || []).filter(attachment => !displayedNames.has(attachment.name))
 })
+// OpenCode v1.18.4 message-file.ts: attached() + kind().
+const userOpenCodeAttachments = computed(() => (
+  props.role === 'user'
+    ? (props.openCodeParts || []).filter(part => part.type === 'file' && part.url?.startsWith('data:')).map(part => {
+      const mime = part.mime || ''
+      return {
+        id: part.id,
+        name: part.filename || 'attachment',
+        url: part.url || '',
+        type: mime.startsWith('image/') ? 'image' : 'file',
+      }
+    })
+    : []
+))
 function attachmentIcon(kind: DirectAttachmentRef['kind']): string {
   if (kind === 'image') return 'image'
   if (kind === 'video') return 'movie'
@@ -219,6 +234,7 @@ const isToolRunning = computed(() => (
 ))
 const latestToolResult = computed(() => props.toolResult)
 const openCodeTextParts = computed(() => (props.openCodeParts || []).filter(part => part.type === 'text' && part.text?.trim()))
+const openCodeReasoningParts = computed(() => (props.openCodeParts || []).filter(part => part.type === 'reasoning' && part.text?.trim()))
 const isOpenCodeAssistant = computed(() => props.role === 'assistant' && Boolean(props.openCodeParts?.length))
 const openCodeReasoningContent = computed(() => {
   const text = (props.openCodeParts || [])
@@ -500,6 +516,15 @@ async function copyMessage() {
   setTimeout(() => { copyLabel.value = '复制' }, copied ? 1200 : 1800)
 }
 
+async function copyOpenCodeTextPart(part: OpenCodeRenderablePart) {
+  if (!part.text?.trim()) return
+  if (!await writeClipboardText(part.text)) return
+  copiedOpenCodeTextPartId.value = part.id
+  setTimeout(() => {
+    if (copiedOpenCodeTextPartId.value === part.id) copiedOpenCodeTextPartId.value = ''
+  }, 2000)
+}
+
 // 放入编辑区 — 支持替换/追加两种模式
 const editorInsertLabel = ref('放入编辑区')
 
@@ -559,9 +584,9 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 普通消息气泡 -->
-  <div class="msg" :class="messageClass">
+  <div class="msg" :class="[messageClass, { 'opencode-assistant': isOpenCodeAssistant }]">
     <div v-if="role === 'user'" data-component="user-message">
-      <div v-if="displayImages.length || (files && files.length) || attachmentRefsOnly.length" data-slot="user-message-attachments">
+      <div v-if="displayImages.length || (files && files.length) || attachmentRefsOnly.length || userOpenCodeAttachments.length" data-slot="user-message-attachments">
         <div
           v-for="(img, i) in displayImages"
           :key="`img-${i}`"
@@ -591,6 +616,25 @@ onBeforeUnmount(() => {
         >
           <div data-slot="user-message-attachment-file">
             <JcIcon :name="attachmentIcon(attachment.kind)" data-slot="user-message-attachment-icon" />
+            <span data-slot="user-message-attachment-name" :title="attachment.name">{{ attachment.name }}</span>
+          </div>
+        </div>
+        <div
+          v-for="attachment in userOpenCodeAttachments"
+          :key="`opencode-file-${attachment.id}`"
+          data-slot="user-message-attachment"
+          :data-type="attachment.type"
+          :data-clickable="attachment.type === 'image' ? true : undefined"
+          @click.stop="attachment.type === 'image' && openLightbox(attachment.url)"
+        >
+          <img
+            v-if="attachment.type === 'image'"
+            :src="attachment.url"
+            :alt="attachment.name"
+            data-slot="user-message-attachment-image"
+          />
+          <div v-else data-slot="user-message-attachment-file">
+            <JcIcon :name="attachment.name.endsWith('.pdf') ? 'picture_as_pdf' : 'description'" data-slot="user-message-attachment-icon" />
             <span data-slot="user-message-attachment-name" :title="attachment.name">{{ attachment.name }}</span>
           </div>
         </div>
@@ -627,7 +671,7 @@ onBeforeUnmount(() => {
     </div>
 
     <template v-else>
-    <div v-if="showMeta" class="msg-meta">
+    <div v-if="showMeta && !isOpenCodeAssistant" class="msg-meta">
       <div class="msg-meta-avatar">
         <JcIcon :name="metaIcon" style="font-size: 13px;" />
       </div>
@@ -636,7 +680,49 @@ onBeforeUnmount(() => {
         {{ formatRelativeTime(timestampValue) }}
       </span>
     </div>
-    <div class="msg-bubble">
+
+    <div v-if="isOpenCodeAssistant" data-component="assistant-message">
+      <MessageTextWarning v-if="showTextWarning" :message="textWarningMessage" />
+
+      <div
+        v-for="part in openCodeReasoningParts"
+        :key="part.id"
+        data-component="reasoning-part"
+        :data-timeline-part-id="part.id"
+      >
+        <div class="msg-body" @click="onRenderedClick" v-html="renderOpenCodeTextPart(part)"></div>
+      </div>
+
+      <div
+        v-for="part in openCodeTextParts"
+        :key="part.id"
+        data-component="text-part"
+        :data-timeline-part-id="part.id"
+      >
+        <div
+          data-slot="text-part-body"
+          class="msg-body"
+          @click="onRenderedClick"
+          v-html="renderOpenCodeTextPart(part)"
+        ></div>
+        <div data-slot="text-part-copy-wrapper">
+          <button
+            class="msg-user-action"
+            @mousedown.prevent
+            @click="copyOpenCodeTextPart(part)"
+            :title="copiedOpenCodeTextPartId === part.id ? '已复制' : '复制回复'"
+            :aria-label="copiedOpenCodeTextPartId === part.id ? '已复制' : '复制回复'"
+          >
+            <JcIcon :name="copiedOpenCodeTextPartId === part.id ? 'check' : 'content_copy'" />
+          </button>
+          <span v-if="assistantMeta" data-slot="text-part-meta">{{ assistantMeta }}</span>
+        </div>
+      </div>
+
+      <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
+    </div>
+
+    <div v-else class="msg-bubble">
       <!-- 图片附件（P1：jc-media:// 懒解析为本地路径） -->
       <div v-if="displayImages.length" class="msg-images">
         <img v-for="(img, i) in displayImages" :key="i" :src="img" class="msg-image" @click.stop="openLightbox(img)" />
@@ -661,7 +747,7 @@ onBeforeUnmount(() => {
       </div>
 
       <!-- 思考链折叠面板（默认收起） -->
-      <div v-if="role === 'assistant' && openCodeReasoningContent" class="msg-thinking">
+      <div v-if="role === 'assistant' && !isOpenCodeAssistant && openCodeReasoningContent" class="msg-thinking">
         <button class="msg-thinking-toggle" @click="showThinking = !showThinking">
           <JcIcon :name="showThinking ? 'expand_less' : 'psychology'" style="font-size:14px" />
           <span>{{ showThinking ? '收起思考' : '查看思考过程' }}</span>
@@ -709,30 +795,7 @@ onBeforeUnmount(() => {
 
       <MessageTextWarning v-if="showTextWarning" :message="textWarningMessage" />
 
-      <div v-if="isOpenCodeAssistant" data-component="assistant-message">
-        <div
-          v-for="part in openCodeTextParts"
-          :key="part.id"
-          data-component="text-part"
-          :data-timeline-part-id="part.id"
-        >
-          <div
-            data-slot="text-part-body"
-            class="msg-body"
-            @click="onRenderedClick"
-            v-html="renderOpenCodeTextPart(part)"
-          ></div>
-          <div data-slot="text-part-copy-wrapper">
-            <button class="msg-user-action" @click="copyMessage" title="复制回复" aria-label="复制回复">
-              <JcIcon name="content_copy" />
-            </button>
-            <span v-if="assistantMeta" data-slot="text-part-meta">{{ assistantMeta }}</span>
-          </div>
-        </div>
-
-        <OpenCodePartList v-if="hasOpenCodeNonTextParts" :parts="openCodeParts" @open-subtask="emit('openSubtask', $event)" @preview-image="emit('previewImage', $event)" @download-image="emit('downloadImage', $event)" />
-      </div>
-      <div v-else-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
+      <div v-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
 
       <MediaPlanCard
         v-if="role === 'assistant' && mediaPlan"
@@ -841,6 +904,7 @@ onBeforeUnmount(() => {
 }
 .msg.user { align-items: stretch; }
 .msg.assistant { align-items: flex-start; }
+.msg.opencode-assistant { width: 100%; align-items: stretch; }
 .msg-bubble {
   max-width: 85%;
   padding: 10px 14px;
@@ -1012,17 +1076,17 @@ onBeforeUnmount(() => {
   font-size: 16px;
 }
 [data-component="assistant-message"] {
-  /* ponytail: Intel Mac 修复 — content-visibility: auto 在慢平台上会错误估算元素尺寸，
-     导致内容突破容器宽度溢出。加 contain-intrinsic-size 提示 + overflow 安全网。
-     天花板：长列表性能略降，后续可加虚拟列表补偿。 */
   content-visibility: auto;
-  contain-intrinsic-size: auto 200px;
   width: 100%;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
   overflow-x: hidden;
+}
+[data-component="reasoning-part"] {
+  width: 100%;
+  color: var(--ink3);
 }
 [data-component="text-part"] {
   width: 100%;

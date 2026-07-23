@@ -68,7 +68,7 @@ test('media plan card uses the product theme and offers optional persisted param
 })
 
 test('chat messages use layout instead of visible user identity chrome', () => {
-  assert.match(messageBubble, /v-if="showMeta"/)
+  assert.match(messageBubble, /v-if="showMeta && !isOpenCodeAssistant"/)
   assert.doesNotMatch(messageBubble, /role === 'user' \? '你'/)
   assert.doesNotMatch(messageBubble, /role === 'user' \? 'person'/)
 })
@@ -84,8 +84,10 @@ test('message action rows stay visible and use hover only for emphasis', () => {
   assert.doesNotMatch(parentActionRowBlock, /opacity:\s*0;/)
 })
 
-test('streaming indicator is visible while the latest message is from the user', () => {
-  assert.match(chatPanel, /isStreaming &&[\s\S]{0,180}messages\[messages\.length - 1\]\?\.role === 'user'/)
+test('streaming indicator is projected below the active user turn', () => {
+  assert.match(chatPanel, /activeOpenCodeUserMessageId/)
+  assert.match(chatPanel, /row\.type === 'thinking'/)
+  assert.doesNotMatch(chatPanel, /typing-dot/)
 })
 
 test('ecommerce planning reuses the creative session loop and returns a plan without submitting media', () => {
@@ -504,7 +506,7 @@ test('tool summaries and composer expose terminal states without looking stuck',
 test('OpenCode structured parts make messages visible without polluting markdown body', () => {
   assert.match(chatPanel, /function hasOpenCodeTimeline\([\s\S]{0,180}Boolean\(message\.openCodeParts\?\.length\)/)
   assert.match(messageBubble, /hasMarkdownBody/)
-  assert.match(messageBubble, /v-else-if="hasMarkdownBody/)
+  assert.match(messageBubble, /v-if="hasMarkdownBody/)
   assert.doesNotMatch(messageBubble, /v-else-if="!\(role === 'tool' && officeDownloadFiles\.length\)"/)
 })
 
@@ -517,6 +519,21 @@ test('ChatPanel renders OpenCode assistant messages through timeline rows', () =
   assert.match(chatPanel, /cp-opencode-system/)
   assert.match(chatPanel, /row\.type === 'thinking'/)
   assert.match(chatPanel, /row\.type === 'error'/)
+})
+
+test('ChatPanel attaches the OpenCode waiting state to the active user turn', () => {
+  assert.match(chatPanel, /const activeOpenCodeUserMessageId = computed/)
+  assert.match(chatPanel, /activeUserMessageId: activeOpenCodeUserMessageId\.value/)
+  assert.match(chatPanel, /sessionStatus: isOpenCodeStreaming\.value \? 'busy' : 'idle'/)
+  assert.doesNotMatch(chatPanel, /typing-dot/)
+})
+
+test('ChatPanel requests earlier OpenCode history only from the top of the message list', () => {
+  assert.match(chatPanel, /async function loadOlderOpenCodeMessages\(\)/)
+  assert.match(chatPanel, /container\.scrollTop > 160/)
+  assert.match(chatPanel, /openCodeSyncStore\.hasOlderMessages\(sessionID\)/)
+  assert.match(chatPanel, /await openCodeSyncStore\.loadOlderMessages\(directory, sessionID\)/)
+  assert.match(chatPanel, /@scroll="loadOlderOpenCodeMessages"/)
 })
 
 test('session switching prefetches linked OpenCode sessions and uses cached official history', () => {
@@ -840,12 +857,50 @@ test('OpenCode user messages render only the official non-synthetic text part wi
   assert.match(messageBubble, /title="复制消息"/)
 })
 
+test('OpenCode user messages render official data attachments as thumbnails outside the text body', () => {
+  assert.match(messageBubble, /const userOpenCodeAttachments = computed/)
+  assert.match(messageBubble, /part\.type === 'file' && part\.url\?\.startsWith\('data:'\)/)
+  assert.match(messageBubble, /mime\.startsWith\('image\/'\)/)
+  assert.match(messageBubble, /userOpenCodeAttachments\.length/)
+  assert.match(messageBubble, /v-for="attachment in userOpenCodeAttachments"/)
+  assert.match(messageBubble, /data-slot="user-message-attachments"/)
+  assert.match(messageBubble, /v-if="attachment\.type === 'image'"/)
+  assert.match(messageBubble, /:src="attachment\.url"/)
+})
+
 test('OpenCode assistant text parts render with official message-part DOM slots', () => {
   assert.match(messageBubble, /data-component="assistant-message"/)
   assert.match(messageBubble, /data-component="text-part"/)
   assert.match(messageBubble, /data-slot="text-part-body"/)
   assert.match(messageBubble, /data-slot="text-part-copy-wrapper"/)
   assert.match(messageBubble, /data-slot="text-part-meta"/)
+})
+
+test('OpenCode text-part copy is scoped to the displayed part and preserves official content visibility', () => {
+  const assistantMessage = messageBubble.slice(
+    messageBubble.indexOf('<div v-if="isOpenCodeAssistant"'),
+    messageBubble.indexOf('<div v-else class="msg-bubble">'),
+  )
+  const assistantStyle = messageBubble.slice(
+    messageBubble.indexOf('[data-component="assistant-message"]'),
+    messageBubble.indexOf('[data-component="reasoning-part"]'),
+  )
+
+  assert.match(messageBubble, /async function copyOpenCodeTextPart\(part: OpenCodeRenderablePart\)/)
+  assert.match(assistantMessage, /@click="copyOpenCodeTextPart\(part\)"/)
+  assert.doesNotMatch(assistantMessage, /@click="copyMessage"/)
+  assert.match(assistantStyle, /content-visibility:\s*auto;/)
+  assert.doesNotMatch(assistantStyle, /contain-intrinsic-size/)
+})
+
+test('OpenCode assistant messages render full-width text and reasoning parts outside the legacy bubble', () => {
+  assert.match(messageBubble, /v-if="showMeta && !isOpenCodeAssistant"/)
+  assert.match(messageBubble, /<div v-if="isOpenCodeAssistant" data-component="assistant-message">/)
+  assert.match(messageBubble, /<div v-else class="msg-bubble">/)
+  assert.match(messageBubble, /const openCodeReasoningParts = computed/)
+  assert.match(messageBubble, /v-for="part in openCodeReasoningParts"/)
+  assert.match(messageBubble, /data-component="reasoning-part"/)
+  assert.doesNotMatch(messageBubble, /role === 'assistant' && openCodeReasoningContent" class="msg-thinking"/)
 })
 
 test('OpenCode project workspace does not declare legacy vault mount fs scopes', () => {

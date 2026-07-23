@@ -244,6 +244,48 @@ test('openSession loads messages todo and diff once and reuses the cache', async
   assert.equal(store.state.sessionDiff.ses_1?.[0]?.file, 'a.md')
 })
 
+test('OpenCode session history loads initial and earlier cursor pages without replacing live messages', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  const calls: any[] = []
+  store.registerClient('/project', { session: {
+    get: async () => ({ data: { id: 'ses_1', directory: '/project', time: {} } }),
+    messages: async (input: any) => {
+      calls.push(input)
+      if (input.before) {
+        return {
+          data: [{
+            info: { id: 'msg_old', sessionID: 'ses_1', role: 'user', time: { created: 1 } },
+            parts: [{ id: 'prt_old', sessionID: 'ses_1', messageID: 'msg_old', type: 'text', text: '较早消息' }],
+          }],
+          response: { headers: new Headers() },
+        }
+      }
+      return {
+        data: [{
+          info: { id: 'msg_new', sessionID: 'ses_1', role: 'user', time: { created: 2 } },
+          parts: [{ id: 'prt_new', sessionID: 'ses_1', messageID: 'msg_new', type: 'text', text: '最新消息' }],
+        }],
+        response: { headers: new Headers({ 'x-next-cursor': 'cursor_older' }) },
+      }
+    },
+    todo: async () => ({ data: [] }),
+    diff: async () => ({ data: [] }),
+  } } as any)
+
+  await store.openSession('/project', 'ses_1')
+  store.applyServerEvent({ directory: '/project', payload: { type: 'message.updated', properties: {
+    info: { id: 'msg_live', sessionID: 'ses_1', role: 'assistant', time: { created: 3 } },
+  } } as any })
+  await store.loadOlderMessages('/project', 'ses_1')
+
+  assert.equal(calls[0].limit, 20)
+  assert.equal(calls[1].limit, 200)
+  assert.equal(calls[1].before, 'cursor_older')
+  assert.deepEqual(store.state.messages.ses_1?.map(message => message.id), ['msg_live', 'msg_new', 'msg_old'])
+  assert.equal(store.hasOlderMessages('ses_1'), false)
+})
+
 test('newDraft clears only the active session identity', () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
@@ -632,6 +674,28 @@ test('openSession snapshots cannot overwrite newer session todo or diff events',
   assert.equal(store.state.sessionDiff.ses_1?.[0]?.file, 'new')
 })
 
+test('openSession snapshots do not remove messages already confirmed by the event stream', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  store.state.messages.ses_1 = [{
+    id: 'msg_confirmed', sessionID: 'ses_1', role: 'assistant', time: { created: 1 },
+  } as any]
+  store.state.parts.msg_confirmed = [{
+    id: 'prt_confirmed', messageID: 'msg_confirmed', sessionID: 'ses_1', type: 'text', text: '仍应可见',
+  } as any]
+  store.registerClient('/project', { session: {
+    get: async () => ({ data: { id: 'ses_1', directory: '/project', time: {} } }),
+    messages: async () => ({ data: [] }),
+    todo: async () => ({ data: [] }),
+    diff: async () => ({ data: [] }),
+  } } as any)
+
+  await store.openSession('/project', 'ses_1')
+
+  assert.equal(store.state.messages.ses_1?.[0]?.id, 'msg_confirmed')
+  assert.equal((store.state.parts.msg_confirmed?.[0] as any)?.text, '仍应可见')
+})
+
 test('archiving the active session clears its identity and allows cache reload', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
@@ -933,7 +997,7 @@ test('opening a loaded session is the latest intent over a pending session', asy
   assert.equal(store.activeSessionId, 'ses_a')
 })
 
-test('authoritative message snapshot removes orphan parts for missing messages', async () => {
+test('message snapshots remove parts only when their parent message is absent', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
   store.state.parts.msg_orphan = [{ id: 'prt_orphan', messageID: 'msg_orphan', sessionID: 'ses_1', type: 'text' } as any]
@@ -1191,6 +1255,53 @@ test('session permission updates use the registered directory client', async () 
   await store.updateSessionPermission('/project', 'ses_1', [{ permission: 'read', pattern: '*' }])
 
   assert.deepEqual(calls, [{ sessionID: 'ses_1', permission: [{ permission: 'read', pattern: '*' }], directory: '/project' }])
+})
+
+test('later Skill permission updates cannot be overwritten by an earlier request', async () => {
+  const calls: string[] = []
+  let releaseFirst: (() => void) | undefined
+  const firstRequest = new Promise<void>(resolve => { releaseFirst = resolve })
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  store.registerClient('/project', {
+    session: {
+      update: async (input: any) => {
+        calls.push(input.permission[0].pattern)
+        if (input.permission[0].pattern === 'first') await firstRequest
+      },
+    },
+  } as any)
+
+  const first = store.updateSessionPermission('/project', 'ses_1', [{ permission: 'skill', pattern: 'first' }])
+  const second = store.updateSessionPermission('/project', 'ses_1', [{ permission: 'skill', pattern: 'second' }])
+
+  assert.deepEqual(calls, ['first'])
+  releaseFirst!()
+  await Promise.all([first, second])
+  assert.deepEqual(calls, ['first', 'second'])
+})
+
+test('new sessions persist their Skill permission before the first prompt', async () => {
+  let createInput: any
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  store.registerClient('/project', {
+    session: {
+      create: async (input: any) => {
+        createInput = input
+        return { data: { id: 'ses_permission', title: 'permission' } }
+      },
+    },
+  } as any)
+
+  await store.ensureSession({
+    directory: '/project',
+    permission: [{ permission: 'skill', pattern: '剧本 Skill', action: 'allow' }],
+  })
+
+  assert.deepEqual(createInput.permission, [
+    { permission: 'skill', pattern: '剧本 Skill', action: 'allow' },
+  ])
 })
 
 test('a late older ensure intent cannot replace the newer server or continue into session creation', async () => {

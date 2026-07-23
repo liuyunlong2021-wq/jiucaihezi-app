@@ -42,14 +42,32 @@ function installWebTextModel() {
   agentStore.currentModel = 'gpt-5.6-terra'
 }
 
-test('OpenCode empty sync snapshots preserve already visible messages', () => {
+test('Desktop useChat does not mirror the official Sync Store message projection', () => {
   const source = readFileSync('src/composables/useChat.ts', 'utf8')
   const projection = source.slice(
     source.indexOf('() => [openCodeSyncStore.activeSessionId'),
     source.indexOf("watch(() => openCodeSyncStore.activePermissions"),
   )
-  assert.match(projection, /replaceMessagesPreservingPrompt\(/)
-  assert.doesNotMatch(projection, /messages\.value = \[\s*\.\.\.\(sessionID \? projected/)
+  assert.doesNotMatch(projection, /openCodeSyncStore\.chatMessages/)
+  assert.doesNotMatch(projection, /messages\.value/)
+})
+
+test('Desktop ChatPanel renders the official session-keyed projection directly', () => {
+  const source = readFileSync('src/components/chat/ChatPanel.vue', 'utf8')
+  assert.match(source, /const desktopTimelineMessages = computed\(/)
+  assert.match(source, /openCodeSyncStore\.chatMessages/)
+  assert.match(source, /const sourceMessages = desktopTimelineMessages\.value/)
+})
+
+test('Desktop prompt submission leaves message presentation to the Sync Store', () => {
+  const source = readFileSync('src/composables/useChat.ts', 'utf8')
+  const start = source.indexOf('await openCodeSyncStore.submitPrompt({')
+  const end = source.indexOf('} catch (error) {', start)
+  const desktopSubmit = source.slice(start, end)
+
+  assert.ok(start >= 0)
+  assert.ok(end > start)
+  assert.doesNotMatch(desktopSubmit, /replaceMessagesPreservingPrompt\(/)
 })
 
 test('clearMessages resets chat state without inserting a local context boundary marker', async () => {
@@ -165,15 +183,16 @@ test('desktop local model enters OpenCode plan/build mode instead of direct engi
   assert.match(source, /setPhase\('sending', '韭菜盒子正在连接'\)/)
 })
 
-test('Desktop projects the user message before awaiting OpenCode connection', () => {
+test('Desktop creates its optimistic user message in the official Sync Store', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
   const desktopSend = source.slice(source.indexOf('async function sendMessage'), source.indexOf('function stopStream'))
-  const optimistic = desktopSend.indexOf('pendingDesktopMessages.value.push')
-  const connect = desktopSend.indexOf('await openCodeSyncStore.ensureConnected')
+  const connect = desktopSend.indexOf('await openCodeSyncStore.waitForReady')
+  const optimistic = desktopSend.indexOf('await openCodeSyncStore.submitPrompt')
 
-  assert.ok(optimistic >= 0)
-  assert.ok(connect > optimistic)
+  assert.ok(connect >= 0)
+  assert.ok(optimistic > connect)
   assert.match(desktopSend, /messageID:\s*desktopMessageID/)
+  assert.doesNotMatch(desktopSend, /pendingDesktopMessages|messages\.value\.push\(pending\)/)
 })
 
 test('Desktop plan/build follows the official prompt contract without deprecated tools overrides', () => {
@@ -332,7 +351,7 @@ test('Web success saves once and snapshot failure does not replace the original 
   }
 })
 
-test('Desktop projection clears visible messages when the Sync Store active session is cleared', async () => {
+test('Desktop useChat leaves Sync Store messages out of the mutable chat facade', async () => {
   const runtime = globalThis as any
   const previousWindow = runtime.window
   runtime.window = { ...(previousWindow || {}), isTauri: true }
@@ -340,6 +359,7 @@ test('Desktop projection clears visible messages when the Sync Store active sess
     setActivePinia(createPinia())
     const store = useOpenCodeSyncStore()
     const chat = useChat()
+    const baseline = chat.messages.value.map(message => ({ ...message }))
     store.setActiveDirectory('/project')
     store.setActiveSession('ses_1')
     store.state.messages.ses_1 = [{
@@ -350,12 +370,53 @@ test('Desktop projection clears visible messages when the Sync Store active sess
       id: 'part_1', sessionID: 'ses_1', messageID: 'msg_1', type: 'text', text: '旧消息',
     } as any]
     await nextTick()
-    assert.equal(chat.messages.value.length, 1)
+    assert.deepEqual(chat.messages.value, baseline)
 
     store.newDraft()
     await nextTick()
 
-    assert.deepEqual(chat.messages.value, [])
+    assert.deepEqual(chat.messages.value, baseline)
+  } finally {
+    runtime.window = previousWindow
+  }
+})
+
+test('Desktop session changes do not copy another session into the mutable chat facade', async () => {
+  const runtime = globalThis as any
+  const previousWindow = runtime.window
+  runtime.window = { ...(previousWindow || {}), isTauri: true }
+  try {
+    setActivePinia(createPinia())
+    const store = useOpenCodeSyncStore()
+    const chat = useChat()
+    const baseline = chat.messages.value.map(message => ({ ...message }))
+    store.setActiveDirectory('/project')
+    store.setActiveSession('ses_previous')
+    store.state.messages.ses_previous = [{
+      id: 'msg_previous', sessionID: 'ses_previous', role: 'user', time: { created: 1 },
+      agent: 'plan', model: { providerID: 'jiucaihezi', modelID: 'model' },
+    } as any]
+    store.state.parts.msg_previous = [{
+      id: 'part_previous', sessionID: 'ses_previous', messageID: 'msg_previous', type: 'text', text: '前一会话',
+    } as any]
+    await nextTick()
+    assert.deepEqual(chat.messages.value, baseline)
+
+    store.setActiveSession('ses_selected')
+    await nextTick()
+
+    assert.deepEqual(chat.messages.value, baseline)
+
+    store.state.messages.ses_selected = [{
+      id: 'msg_selected', sessionID: 'ses_selected', role: 'user', time: { created: 2 },
+      agent: 'plan', model: { providerID: 'jiucaihezi', modelID: 'model' },
+    } as any]
+    store.state.parts.msg_selected = [{
+      id: 'part_selected', sessionID: 'ses_selected', messageID: 'msg_selected', type: 'text', text: '目标会话',
+    } as any]
+    await nextTick()
+
+    assert.deepEqual(chat.messages.value, baseline)
   } finally {
     runtime.window = previousWindow
   }

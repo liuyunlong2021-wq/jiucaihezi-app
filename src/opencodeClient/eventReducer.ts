@@ -21,6 +21,12 @@ export interface OpenCodeSyncState {
   questions: Record<string, OpenCodeInteractiveRequest[] | undefined>
   messages: Record<string, Message[] | undefined>
   parts: Record<string, Part[] | undefined>
+  loadingMessageSessions: Record<string, number | undefined>
+  messageCursor: Record<string, string | undefined>
+  messageComplete: Record<string, boolean | undefined>
+  loadingOlderMessages: Record<string, boolean | undefined>
+  orphanPartMessageIds: Record<string, string[] | undefined>
+  removedMessageIds: Record<string, string[] | undefined>
 }
 
 const SKIP_PARTS = new Set(['patch', 'step-start', 'step-finish'])
@@ -37,6 +43,12 @@ export function createOpenCodeSyncState(): OpenCodeSyncState {
     questions: {},
     messages: {},
     parts: {},
+    loadingMessageSessions: {},
+    messageCursor: {},
+    messageComplete: {},
+    loadingOlderMessages: {},
+    orphanPartMessageIds: {},
+    removedMessageIds: {},
   }
 }
 
@@ -52,9 +64,19 @@ function removeById<T extends { id: string }>(items: T[] | undefined, id: string
   return (items ?? []).filter(item => item.id !== id)
 }
 
+function addId(items: string[] | undefined, id: string): string[] {
+  return items?.includes(id) ? items : [...(items ?? []), id]
+}
+
+function removeId(items: string[] | undefined, id: string): string[] | undefined {
+  const next = items?.filter(item => item !== id) ?? []
+  return next.length ? next : undefined
+}
+
 function dropSession(state: OpenCodeSyncState, sessionID: string) {
-  const messages = state.messages[sessionID] ?? []
-  for (const message of messages) delete state.parts[message.id]
+  for (const [messageID, parts] of Object.entries(state.parts)) {
+    if (parts?.some(part => part.sessionID === sessionID)) delete state.parts[messageID]
+  }
   delete state.sessionInfo[sessionID]
   delete state.sessionStatus[sessionID]
   delete state.sessionErrors[sessionID]
@@ -63,6 +85,21 @@ function dropSession(state: OpenCodeSyncState, sessionID: string) {
   delete state.permissions[sessionID]
   delete state.questions[sessionID]
   delete state.messages[sessionID]
+  delete state.loadingMessageSessions[sessionID]
+  delete state.messageCursor[sessionID]
+  delete state.messageComplete[sessionID]
+  delete state.loadingOlderMessages[sessionID]
+  delete state.orphanPartMessageIds[sessionID]
+  delete state.removedMessageIds[sessionID]
+}
+
+export function completeOpenCodeMessageLoad(state: OpenCodeSyncState, sessionID: string): void {
+  const known = new Set((state.messages[sessionID] ?? []).map(message => message.id))
+  for (const messageID of state.orphanPartMessageIds[sessionID] ?? []) {
+    if (!known.has(messageID)) delete state.parts[messageID]
+  }
+  delete state.loadingMessageSessions[sessionID]
+  delete state.orphanPartMessageIds[sessionID]
 }
 
 export function applyOpenCodeEvent(state: OpenCodeSyncState, directory: string, event: Event): void {
@@ -111,17 +148,38 @@ export function applyOpenCodeEvent(state: OpenCodeSyncState, directory: string, 
       const info = properties.info as Message
       if (!info?.id || !info.sessionID) return
       state.messages[info.sessionID] = upsertById(state.messages[info.sessionID], info)
+      const removed = removeId(state.removedMessageIds[info.sessionID], info.id)
+      if (removed) state.removedMessageIds[info.sessionID] = removed
+      else delete state.removedMessageIds[info.sessionID]
+      const orphaned = removeId(state.orphanPartMessageIds[info.sessionID], info.id)
+      if (orphaned) state.orphanPartMessageIds[info.sessionID] = orphaned
+      else delete state.orphanPartMessageIds[info.sessionID]
       return
     }
     case 'message.removed': {
       state.messages[properties.sessionID] = removeById(state.messages[properties.sessionID], properties.messageID)
       delete state.parts[properties.messageID]
+      state.removedMessageIds[properties.sessionID] = addId(
+        state.removedMessageIds[properties.sessionID],
+        properties.messageID,
+      )
+      const orphaned = removeId(state.orphanPartMessageIds[properties.sessionID], properties.messageID)
+      if (orphaned) state.orphanPartMessageIds[properties.sessionID] = orphaned
+      else delete state.orphanPartMessageIds[properties.sessionID]
       return
     }
     case 'message.part.updated': {
       const part = properties.part as Part
       if (!part?.id || SKIP_PARTS.has(part.type)) return
-      if (!state.messages[part.sessionID]?.some(message => message.id === part.messageID)) return
+      if (state.removedMessageIds[part.sessionID]?.includes(part.messageID)) return
+      const parentExists = state.messages[part.sessionID]?.some(message => message.id === part.messageID)
+      if (!parentExists) {
+        if (!state.loadingMessageSessions[part.sessionID]) return
+        state.orphanPartMessageIds[part.sessionID] = addId(
+          state.orphanPartMessageIds[part.sessionID],
+          part.messageID,
+        )
+      }
       state.parts[part.messageID] = upsertById(state.parts[part.messageID], part)
       return
     }

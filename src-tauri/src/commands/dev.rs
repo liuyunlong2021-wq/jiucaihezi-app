@@ -787,6 +787,10 @@ pub fn dev_search_project_paths(input: DevSearchProjectPathsInput) -> Result<Vec
         children.sort_by_key(|entry| entry.file_name());
         for child in children {
             let path = child.path();
+            let link_metadata = std::fs::symlink_metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+            if link_metadata.file_type().is_symlink() {
+                continue;
+            }
             let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
             let relative = display_relative(&root, &path);
             let is_dir = metadata.is_dir();
@@ -2117,6 +2121,26 @@ mod tests {
         };
         assert_eq!(target_error, "导入目标必须是项目内文件夹");
         assert!(!outside.path().join("reference.pdf").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn project_search_skips_symlinks_outside_the_project() {
+        use std::os::unix::fs::symlink;
+
+        let project = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("inside.md"), "inside").unwrap();
+        std::fs::write(outside.path().join("private.md"), "outside").unwrap();
+        symlink(outside.path(), project.path().join("external")).unwrap();
+
+        let entries = dev_search_project_paths(DevSearchProjectPathsInput {
+            root: project.path().to_string_lossy().to_string(),
+            query: "".into(),
+            limit: 20,
+        }).unwrap();
+
+        assert_eq!(entries.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["inside.md"]);
     }
 
     #[test]
