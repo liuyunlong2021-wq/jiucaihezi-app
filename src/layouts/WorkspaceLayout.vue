@@ -22,7 +22,6 @@ import EditorPanel from '@/components/editor/EditorPanel.vue'
 import CreationPanel from '@/components/creation/CreationPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useChatModeStore } from '@/stores/chatModeStore'
-import { useEcommerceWorkbenchStore } from '@/stores/ecommerceWorkbenchStore'
 import { emitEvent, onEvent } from '@/utils/eventBus'
 import { useLocale } from '@/i18n'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -32,7 +31,6 @@ import { startDesktopProjectDropDispatcher } from '@/services/desktopProjectDrop
 
 const agentStore = useAgentStore()
 const chatModeStore = useChatModeStore()
-const ecommerceWorkbenchStore = useEcommerceWorkbenchStore()
 //  removed - use isCloudLoggedIn() or isCloudReady instead
 const isMember = computed(() => true)  // All features now available once logged in
 const creationEnabled = ref(true)
@@ -41,8 +39,7 @@ const TOGGLEABLE_RIGHT_PANELS = new Set(['editor', 'creation', 'settings'])
 const WEB_UNSUPPORTED_PANELS = new Set(['files', 'context'])
 const { t } = useLocale()
 const isWebRuntime = computed(() => !isTauriRuntime())
-const isEcommerceMode = computed(() => chatModeStore.mode === 'creative')
-const isEcommerceWorkbench = computed(() => isEcommerceMode.value && ecommerceWorkbenchStore.surface === 'workbench')
+const isEcommerceWorkbench = ref(false)
 const isProductionWorkbench = ref(false)
 const { messages, openCodeContextUsage } = useChat()
 const contextMessagesForPanel = computed(() =>
@@ -271,7 +268,7 @@ function onRailSwitch(mode: string) {
     return
   }
   if (mode === 'chat') {
-    ecommerceWorkbenchStore.setSurface('collaboration')
+    isEcommerceWorkbench.value = false
     isProductionWorkbench.value = false
     workspaceMode.value = 'chat'
     rightPanel.value = ''
@@ -283,15 +280,14 @@ function onRailSwitch(mode: string) {
   }
   if (mode === 'ecommerce') {
     isProductionWorkbench.value = false
-    chatModeStore.setMode('creative')
-    ecommerceWorkbenchStore.setSurface('workbench')
+    isEcommerceWorkbench.value = true
     ensurePanelMounted('creation')
     rightPanel.value = 'creation'
     workspaceMode.value = 'chat'
     return
   }
   if (mode === 'production') {
-    ecommerceWorkbenchStore.setSurface('collaboration')
+    isEcommerceWorkbench.value = false
     isProductionWorkbench.value = true
     ensurePanelMounted('creation')
     rightPanel.value = 'creation'
@@ -428,9 +424,9 @@ function onResizeEnd(e?: PointerEvent) {
 
     <!-- Col 3: ChatPanel — 始终显示，自动填充 -->
     <div ref="chatEl" class="ws-col ws-chat">
-      <ChatPanel v-show="!isEcommerceWorkbench && !isProductionWorkbench" />
-      <EcommerceWorkbench v-show="isEcommerceWorkbench" />
-      <ProductionWorkbench v-show="isProductionWorkbench" />
+      <ChatPanel v-if="!isEcommerceWorkbench && !isProductionWorkbench" />
+      <EcommerceWorkbench v-else-if="isEcommerceWorkbench" />
+      <ProductionWorkbench v-else />
     </div>
 
       <!-- Col 4: 右侧面板 — Rail 切换（可隐藏） -->

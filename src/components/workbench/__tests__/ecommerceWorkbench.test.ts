@@ -51,6 +51,11 @@ test('ecommerce header keeps the three workbench views on the left and the model
   assert.doesNotMatch(workbench, /agentStore\.setModel\(/)
 })
 
+test('ecommerce loads its public model catalog without mounting Chat', () => {
+  assert.match(workbench, /agentStore\.fetchModels\(\{ skipOpenCode: true \}\)/)
+  assert.match(workbench, /watch\(\(\) => agentStore\.textModels/)
+})
+
 test('reverse workbench accepts five reference images and uses the compact upload instruction', () => {
   assert.match(workbench, /上传参考图反推图片提示词/)
   const manifest = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/workbench.json'), 'utf8')
@@ -121,10 +126,10 @@ test('each reverse run can retry or open a seeded reverse-image tab without a se
   assert.match(workbench, /activeView\.value = 'reverse-image'/)
   assert.doesNotMatch(workbench, /productHandoffRef/)
   assert.doesNotMatch(workbench, /requestProductImagePrompt/)
-  assert.match(workbench, /反推历史/)
-  assert.match(workbench, /商品图历史/)
+  assert.doesNotMatch(workbench, /反推历史|商品图历史|function reuseHistory/)
   assert.match(workbench, /emitEvent\('show-history-list'\)/)
   assert.match(workbench, /emitEvent\('project-filetree:locate'/)
+  assert.match(workbench, /@click="locateRun\(run\.id\)"/)
 })
 
 test('reverse cards do not render raw analysis while a prompt is streaming', () => {
@@ -154,18 +159,18 @@ test('asset previews leave matching vertical space around the image and label', 
   assert.match(workbench, /\.ecom-asset-preview \{[^}]*height: 130px;/)
 })
 
-test('ecommerce workbench is available on Web and switches views without destroying the active chat panel', () => {
-  assert.match(layout, /<ChatPanel v-show="!isEcommerceWorkbench && !isProductionWorkbench" \/>/)
-  assert.match(layout, /<EcommerceWorkbench v-show="isEcommerceWorkbench" \/>/)
-  assert.match(layout, /<ProductionWorkbench v-show="isProductionWorkbench" \/>/)
+test('ecommerce is a standalone surface that neither selects a chat mode nor mounts ChatPanel', () => {
+  assert.match(layout, /<ChatPanel v-if="!isEcommerceWorkbench && !isProductionWorkbench" \/>/)
+  assert.match(layout, /<EcommerceWorkbench v-else-if="isEcommerceWorkbench" \/>/)
   assert.match(layout, /rightPanel\.value = 'creation'/)
-  assert.match(layout, /const isEcommerceMode = computed\(\(\) => chatModeStore\.mode === 'creative'\)/)
+  assert.doesNotMatch(layout, /isEcommerceMode|chatModeStore\.setMode\('creative'\)/)
   assert.match(layout, /mobilePanel = ref<'chat' \| 'history' \| 'creation' \| 'ecommerce' \| 'settings'>\('chat'\)/)
   assert.match(layout, /mobilePanel === 'ecommerce'/)
   assert.match(layout, /mobilePanel = 'ecommerce'/)
   const railSwitch = layout.match(/function onRailSwitch[\s\S]*?\n}\n\n\/\/ ─── Resize/)
   assert.ok(railSwitch)
   assert.doesNotMatch(railSwitch[0], /if \(isWebRuntime\.value\) return/)
+  assert.doesNotMatch(railSwitch[0], /chatModeStore\.setMode\('creative'\)/)
   assert.match(rail, /key: 'ecommerce'/)
   assert.match(rail, /webHiddenTabs = new Set\(\['files'\]\)/)
 })
