@@ -102,8 +102,9 @@ test('ActivityRail starts with Chat and keeps the requested text-tab order', () 
   assert.equal(i18nSource.includes("navChat: '对话'"), true)
   assert.equal(i18nSource.includes("navChat: 'Chat'"), true)
   assert.equal(layoutSource.includes("const rightPanel = ref<string>('')"), true)
-  assert.match(layoutSource, /if \(mode === 'chat'\) \{[\s\S]*?ecommerceWorkbenchStore\.setSurface\('collaboration'\)/)
-  assert.equal(layoutSource.includes("isEcommerceWorkbench ? 'ecommerce' : (rightPanel || 'chat')"), true)
+  assert.equal(layoutSource.includes('ecommerceWorkbenchStore'), false)
+  assert.equal(layoutSource.includes('useEcommerceWorkbenchStore'), false)
+  assert.equal(layoutSource.includes("isProductionWorkbench ? 'production' : (isEcommerceWorkbench ? 'ecommerce' : (rightPanel || 'chat'))"), true)
 })
 
 test('editor and creation mount once while the file column opens without a width transition', () => {
