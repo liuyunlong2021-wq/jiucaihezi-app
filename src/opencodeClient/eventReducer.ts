@@ -22,6 +22,9 @@ export interface OpenCodeSyncState {
   messages: Record<string, Message[] | undefined>
   parts: Record<string, Part[] | undefined>
   loadingMessageSessions: Record<string, number | undefined>
+  messageCursor: Record<string, string | undefined>
+  messageComplete: Record<string, boolean | undefined>
+  loadingOlderMessages: Record<string, boolean | undefined>
   orphanPartMessageIds: Record<string, string[] | undefined>
   removedMessageIds: Record<string, string[] | undefined>
 }
@@ -41,6 +44,9 @@ export function createOpenCodeSyncState(): OpenCodeSyncState {
     messages: {},
     parts: {},
     loadingMessageSessions: {},
+    messageCursor: {},
+    messageComplete: {},
+    loadingOlderMessages: {},
     orphanPartMessageIds: {},
     removedMessageIds: {},
   }
@@ -80,6 +86,9 @@ function dropSession(state: OpenCodeSyncState, sessionID: string) {
   delete state.questions[sessionID]
   delete state.messages[sessionID]
   delete state.loadingMessageSessions[sessionID]
+  delete state.messageCursor[sessionID]
+  delete state.messageComplete[sessionID]
+  delete state.loadingOlderMessages[sessionID]
   delete state.orphanPartMessageIds[sessionID]
   delete state.removedMessageIds[sessionID]
 }

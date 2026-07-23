@@ -244,6 +244,48 @@ test('openSession loads messages todo and diff once and reuses the cache', async
   assert.equal(store.state.sessionDiff.ses_1?.[0]?.file, 'a.md')
 })
 
+test('OpenCode session history loads initial and earlier cursor pages without replacing live messages', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  const calls: any[] = []
+  store.registerClient('/project', { session: {
+    get: async () => ({ data: { id: 'ses_1', directory: '/project', time: {} } }),
+    messages: async (input: any) => {
+      calls.push(input)
+      if (input.before) {
+        return {
+          data: [{
+            info: { id: 'msg_old', sessionID: 'ses_1', role: 'user', time: { created: 1 } },
+            parts: [{ id: 'prt_old', sessionID: 'ses_1', messageID: 'msg_old', type: 'text', text: '较早消息' }],
+          }],
+          response: { headers: new Headers() },
+        }
+      }
+      return {
+        data: [{
+          info: { id: 'msg_new', sessionID: 'ses_1', role: 'user', time: { created: 2 } },
+          parts: [{ id: 'prt_new', sessionID: 'ses_1', messageID: 'msg_new', type: 'text', text: '最新消息' }],
+        }],
+        response: { headers: new Headers({ 'x-next-cursor': 'cursor_older' }) },
+      }
+    },
+    todo: async () => ({ data: [] }),
+    diff: async () => ({ data: [] }),
+  } } as any)
+
+  await store.openSession('/project', 'ses_1')
+  store.applyServerEvent({ directory: '/project', payload: { type: 'message.updated', properties: {
+    info: { id: 'msg_live', sessionID: 'ses_1', role: 'assistant', time: { created: 3 } },
+  } } as any })
+  await store.loadOlderMessages('/project', 'ses_1')
+
+  assert.equal(calls[0].limit, 20)
+  assert.equal(calls[1].limit, 200)
+  assert.equal(calls[1].before, 'cursor_older')
+  assert.deepEqual(store.state.messages.ses_1?.map(message => message.id), ['msg_live', 'msg_new', 'msg_old'])
+  assert.equal(store.hasOlderMessages('ses_1'), false)
+})
+
 test('newDraft clears only the active session identity', () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()

@@ -84,8 +84,10 @@ test('message action rows stay visible and use hover only for emphasis', () => {
   assert.doesNotMatch(parentActionRowBlock, /opacity:\s*0;/)
 })
 
-test('streaming indicator is visible while the latest message is from the user', () => {
-  assert.match(chatPanel, /isStreaming &&[\s\S]{0,180}messages\[messages\.length - 1\]\?\.role === 'user'/)
+test('streaming indicator is projected below the active user turn', () => {
+  assert.match(chatPanel, /activeOpenCodeUserMessageId/)
+  assert.match(chatPanel, /row\.type === 'thinking'/)
+  assert.doesNotMatch(chatPanel, /typing-dot/)
 })
 
 test('ecommerce planning reuses the creative session loop and returns a plan without submitting media', () => {
@@ -517,6 +519,21 @@ test('ChatPanel renders OpenCode assistant messages through timeline rows', () =
   assert.match(chatPanel, /cp-opencode-system/)
   assert.match(chatPanel, /row\.type === 'thinking'/)
   assert.match(chatPanel, /row\.type === 'error'/)
+})
+
+test('ChatPanel attaches the OpenCode waiting state to the active user turn', () => {
+  assert.match(chatPanel, /const activeOpenCodeUserMessageId = computed/)
+  assert.match(chatPanel, /activeUserMessageId: activeOpenCodeUserMessageId\.value/)
+  assert.match(chatPanel, /sessionStatus: isOpenCodeStreaming\.value \? 'busy' : 'idle'/)
+  assert.doesNotMatch(chatPanel, /typing-dot/)
+})
+
+test('ChatPanel requests earlier OpenCode history only from the top of the message list', () => {
+  assert.match(chatPanel, /async function loadOlderOpenCodeMessages\(\)/)
+  assert.match(chatPanel, /container\.scrollTop > 160/)
+  assert.match(chatPanel, /openCodeSyncStore\.hasOlderMessages\(sessionID\)/)
+  assert.match(chatPanel, /await openCodeSyncStore\.loadOlderMessages\(directory, sessionID\)/)
+  assert.match(chatPanel, /@scroll="loadOlderOpenCodeMessages"/)
 })
 
 test('session switching prefetches linked OpenCode sessions and uses cached official history', () => {

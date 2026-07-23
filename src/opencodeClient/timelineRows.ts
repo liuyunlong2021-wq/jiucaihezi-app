@@ -275,10 +275,20 @@ function reasoningHeading(text: string): string | undefined {
 
 export function buildOpenCodeTimelineRows(
   messages: ChatMessage[],
-  input: { isStreaming?: boolean; activeAssistantMessageId?: string; showReasoning?: boolean } = {},
+  input: {
+    isStreaming?: boolean
+    activeAssistantMessageId?: string
+    activeUserMessageId?: string
+    sessionStatus?: 'busy' | 'idle' | 'retry'
+    showReasoning?: boolean
+  } = {},
 ): OpenCodeTimelineRow[] {
   const rows: OpenCodeTimelineRow[] = []
   let previousUserMessage = false
+  const activeAssistantHasVisiblePart = messages.some(message =>
+    message.role === 'assistant'
+    && (message.openCodeParts || []).some(part => isRenderableOpenCodePart(part, input.showReasoning ?? true)),
+  )
   for (const message of messages) {
     if (message.role === 'user') {
       // 🔧 Phase B: 在 user message 前插入 diff-summary row（如果该 message 携带 summaryDiffs）
@@ -302,6 +312,13 @@ export function buildOpenCodeTimelineRows(
       }
       rows.push({ type: 'user', key: `user-message:${message.id}`, messageId: message.id, previousUserMessage })
       previousUserMessage = true
+      if (
+        input.sessionStatus === 'busy'
+        && input.activeUserMessageId === message.id
+        && !activeAssistantHasVisiblePart
+      ) {
+        rows.push({ type: 'thinking', key: `thinking:${message.id}`, messageId: message.id })
+      }
       continue
     }
     if (message.role !== 'assistant') continue
@@ -364,7 +381,11 @@ export function buildOpenCodeTimelineRows(
         text: message.content || 'OpenCode 运行错误',
       })
     }
-    if (input.isStreaming && input.activeAssistantMessageId === message.id && !parts.some(part => part.type === 'text' && part.text?.trim())) {
+    if (
+      input.isStreaming
+      && input.activeAssistantMessageId === message.id
+      && !parts.some(part => part.type === 'text' && part.text?.trim())
+    ) {
       rows.push({
         type: 'thinking',
         key: `thinking:${message.id}`,

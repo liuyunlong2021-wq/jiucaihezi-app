@@ -732,3 +732,13 @@ Tauri Store 的优势：
 **修复**：韭菜盒子为活动 `openSession()` 加载翻译上述 orphan/tombstone 边界，发送后不再额外整体替换消息投影；消息快照只补全或更新已知 message/part，`message.removed` 是唯一删除入口；每个 text part 单独复制自身文本，流式和完成态的 fenced code block 都提供同一可见复制按钮，保留官方 `content-visibility`，仅移除本地 `contain-intrinsic-size` 提示。
 
 **验证**：reducer 乱序、删除迟到 part、会话回收、快照漏掉已确认消息、流式代码块复制回归测试通过；Sync Store、消息展示和聊天控制定向测试通过。完整 `build:desktop` 被当前 `HEAD` 已有的 `creationPanelContractUi` 断言失败阻塞（其期待已不存在的 `buildMediaPlanSubmission`，不在本次改动范围）。
+
+### 2026-07-23 后续对齐：等待态与历史页
+
+**运行窗口确认**：人工截图对应的 `target/debug/jiucaihezi-app`、Vite 和工作目录均来自 `0722-opencodeshangxiawen`，不是其他支线占用的 App。
+
+**等待态根因**：Studio 把整个会话的 busy 状态渲染为聊天底部的三点假助手气泡；官方 `Timeline.constructMessageRows()` 则把它投影为当前 user message 后的 `Thinking` row，直到可渲染 assistant part 抵达。因此前者既不对齐，也会把“模型还没有创建 assistant message”和“消息消失”混在同一个视觉信号中。
+
+**历史边界**：Studio 曾固定请求 `limit: 500`；官方首屏是 20 条，向上滚动再按 `x-next-cursor` 加载每页 200 条，并保持滚动锚点。现已按该页大小、cursor 和事件合并语义翻译。
+
+**上下文边界**：OpenCode runtime 按 Provider model `limit.context` 自动 compact；压缩失败会产生 `ContextOverflowError`，不是前端静默停止。Studio 不得添加本地压缩器。若真实会话卡在 busy，下一步应采集该 session 的 server status/event/error，区分 Provider 无响应、compaction 进行中和 overflow 错误。

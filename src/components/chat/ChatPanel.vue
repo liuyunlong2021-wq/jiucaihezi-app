@@ -995,6 +995,23 @@ function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   return false
 }
 
+const activeOpenCodeUserMessageId = computed(() => {
+  if (!isOpenCodeStreaming.value) return ''
+  let userIndex = -1
+  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
+    if (messages.value[index]?.role === 'user') {
+      userIndex = index
+      break
+    }
+  }
+  if (userIndex < 0) return ''
+  const hasVisibleAssistantPart = messages.value.slice(userIndex + 1).some(message =>
+    message.role === 'assistant'
+    && (message.openCodeParts || []).some(part => part.type === 'text' && part.text?.trim()),
+  )
+  return hasVisibleAssistantPart ? '' : messages.value[userIndex]!.id
+})
+
 function hasOpenCodeTimeline(message: DisplayChatMessage): boolean {
   return message.role === 'assistant' && Boolean(message.openCodeParts?.length)
 }
@@ -1003,6 +1020,8 @@ function openCodeRowsForMessage(message: DisplayChatMessage): OpenCodeTimelineRo
   return buildOpenCodeTimelineRows([message], {
     isStreaming: isAssistantStreamingMessage(message),
     activeAssistantMessageId: message.id,
+    activeUserMessageId: activeOpenCodeUserMessageId.value,
+    sessionStatus: isOpenCodeStreaming.value ? 'busy' : 'idle',
   })
 }
 
@@ -1027,6 +1046,20 @@ const virtualizer = useVirtualizer(
     },
   })),
 )
+
+async function loadOlderOpenCodeMessages() {
+  if (isWebRuntime.value || isCreativeMode.value) return
+  const container = messagesContainer.value
+  const sessionID = openCodeSyncStore.activeSessionId
+  const directory = selectedProjectDir.value || openCodeSyncStore.activeDirectory
+  if (!container || container.scrollTop > 160 || !sessionID || !directory) return
+  if (!openCodeSyncStore.hasOlderMessages(sessionID)) return
+  const height = container.scrollHeight
+  const top = container.scrollTop
+  await openCodeSyncStore.loadOlderMessages(directory, sessionID)
+  await nextTick()
+  container.scrollTop = top + container.scrollHeight - height
+}
 
 // measureElement 适配 Vue ref 回调类型（Element | ComponentPublicInstance → Element | null）
 function measureVirtualElement(el: unknown) {
@@ -3710,6 +3743,7 @@ function onDrop(e: DragEvent) {
     <div
       ref="messagesContainer"
       class="cp-messages"
+      @scroll="loadOlderOpenCodeMessages"
       @dragover.prevent="fileUploader?.handleDragOver($event)"
       @dragleave.prevent="fileUploader?.handleDragLeave($event)"
       @drop.prevent="fileUploader?.handleDrop($event)"
@@ -3790,12 +3824,7 @@ function onDrop(e: DragEvent) {
                 />
               </div>
             </div>
-            <template
-              v-else-if="
-                displayMessages[virtualRow.index].role === 'user' &&
-                displayMessages[virtualRow.index].summaryDiffs?.length
-              "
-            >
+            <template v-else-if="displayMessages[virtualRow.index].role === 'user'">
               <template
                 v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])"
                 :key="row.key"
@@ -3833,6 +3862,14 @@ function onDrop(e: DragEvent) {
                 @delete="deleteMessage"
                 @edit="editUserMessage"
               />
+              <template
+                v-for="row in openCodeRowsForMessage(displayMessages[virtualRow.index])"
+                :key="row.key"
+              >
+                <div v-if="row.type === 'thinking'" class="cp-opencode-thinking">
+                  <span>{{ row.reasoningHeading || '正在思考' }}</span>
+                </div>
+              </template>
             </template>
             <template v-else-if="hasOpenCodeTimeline(displayMessages[virtualRow.index])">
               <div class="cp-opencode-clean">
@@ -3992,26 +4029,6 @@ function onDrop(e: DragEvent) {
         </template>
       </div>
 
-      <!-- Streaming indicator (virtual list 之后，自然流底部可见) -->
-      <div
-        v-if="
-          isStreaming &&
-          (!messages.length ||
-            messages[messages.length - 1]?.role === 'user' ||
-            !messages[messages.length - 1]?.content)
-        "
-        class="msg assistant"
-      >
-        <div class="msg-meta">
-          <div class="msg-meta-avatar"><JcIcon name="smart_toy" style="font-size: 14px" /></div>
-          <span class="msg-meta-name">{{
-            effectiveOpenCodeSkillName || agentStore.modelLabel
-          }}</span>
-        </div>
-        <div class="msg-bubble">
-          <span class="typing-dot" /><span class="typing-dot" /><span class="typing-dot" />
-        </div>
-      </div>
     </div>
 
     <!-- 🔧 Phase B v2: 变更摘要（基于 turnDiffs/sessionDiffs，消息流末尾始终可见） -->
@@ -4727,29 +4744,6 @@ function onDrop(e: DragEvent) {
   max-width: 400px;
   margin: 0 auto;
   line-height: 1.6;
-}
-
-/* Typing dots — from code.html line 362-365 */
-.typing-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  background: var(--ink3);
-  border-radius: 50%;
-  margin: 0 2px;
-  animation: bounce 0.6s infinite alternate;
-}
-.typing-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.typing-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
-@keyframes bounce {
-  to {
-    transform: translateY(-4px);
-    opacity: 0.4;
-  }
 }
 
 /* 引用回复条 */
@@ -5692,6 +5686,15 @@ function onDrop(e: DragEvent) {
   background: var(--surface);
   color: var(--ink3);
   font-size: 12px;
+}
+.cp-opencode-thinking {
+  margin: 8px 0 12px 38px;
+  color: var(--ink3);
+  font-size: 12px;
+  animation: cp-thinking-shimmer 1.5s ease-in-out infinite;
+}
+@keyframes cp-thinking-shimmer {
+  50% { opacity: 0.45; }
 }
 .cp-opencode-error {
   border-color: color-mix(in srgb, #c62828 42%, var(--line));

@@ -299,6 +299,31 @@ test('builds OpenCode timeline rows without flattening assistant parts into one 
   assert.equal(rows[1].type === 'context-group' ? rows[1].parts[0].toolName : '', 'read')
 })
 
+test('projects a busy OpenCode turn as thinking beneath its user message before assistant parts arrive', () => {
+  const rows = buildOpenCodeTimelineRows([{
+    id: 'u_waiting', role: 'user', content: '继续', timestamp: 1000,
+  } as any], {
+    sessionStatus: 'busy',
+    activeUserMessageId: 'u_waiting',
+  })
+
+  assert.deepEqual(rows.map(row => row.type), ['user', 'thinking'])
+})
+
+test('does not retain the thinking row after visible assistant text arrives', () => {
+  const rows = buildOpenCodeTimelineRows([{
+    id: 'u_done', role: 'user', content: '继续', timestamp: 1000,
+  }, {
+    id: 'a_done', role: 'assistant', content: '', timestamp: 1001,
+    openCodeParts: [{ id: 'prt_done', messageId: 'a_done', type: 'text', text: '已收到' }],
+  }] as any, {
+    sessionStatus: 'busy',
+    activeUserMessageId: 'u_done',
+  })
+
+  assert.deepEqual(rows.map(row => row.type), ['user', 'assistant-part'])
+})
+
 test('builds dedicated system rows for OpenCode runtime events', () => {
   const messages = mapOpenCodeMessagesToChatMessages([
     {
