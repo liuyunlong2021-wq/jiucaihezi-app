@@ -76,11 +76,9 @@ triggers:
 - 不整篇覆盖用户正文，不编造事实，不创建平行 Wiki。
 - 事实冲突、不可逆操作、正式稿判定或权限不足时才询问用户。
 
-## 脚本出口
+## 工具出口
 
-- 盘点：`python scripts/digest_raw.py inspect --project <项目根>`。
-- 开发收尾预览：`python scripts/digest_raw.py closeout --project <项目根> --evidence-file <测试或构建输出>`；只读，不直接写 Wiki。
-- 验证：`python scripts/digest_raw.py validate --project <项目根>`；除入口存在外，还核对 `hot.md` 与 `来源索引.md` 的 Wiki 链接可达。
+Studio 原生 `wiki` 工具可用时，必须使用 `inspect`、`closeout`、`validate`；`closeout` 只生成证据预览，不直接写 Wiki。没有 `wiki` 工具的外部 Agent 才使用 `scripts/digest_raw.py` 的同名命令。
 
 ## Reference 索引
 

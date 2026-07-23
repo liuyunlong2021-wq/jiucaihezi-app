@@ -8,6 +8,7 @@ import {
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
+import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
@@ -37,12 +38,33 @@ export function createWebProjectToolExecutor(input: {
     return input.projectId
   }
 
+  const wikiWorkspace: WikiWorkspace = {
+    async list() {
+      return (await input.files.list(requireProject())).map(entry => ({ path: entry.path, isDir: entry.isDir }))
+    },
+    async read(path) {
+      const entry = await input.files.read(requireProject(), path)
+      if (entry.mimeType === 'folder') throw new Error(`读取路径必须是文件: ${path}`)
+      return entry.content
+    },
+    async write(path, content) {
+      await input.files.write(requireProject(), path, content)
+    },
+    async createDirectory(path) {
+      await input.files.createFolder(requireProject(), path)
+    },
+  }
+
   return async (call): Promise<DirectToolResult> => {
     const args = parseCreativeToolArguments(call)
     const name = call.function.name
 
     if (name === 'skill') {
       return { content: await skills.load(String(args.name)) }
+    }
+
+    if (name === 'wiki') {
+      return { content: await executeWikiAction(wikiWorkspace, args as any) }
     }
 
     if (name === 'read') {

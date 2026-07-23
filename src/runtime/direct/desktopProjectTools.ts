@@ -8,6 +8,7 @@ import {
   parseCreativeToolArguments,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
+import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
 type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
@@ -128,6 +129,31 @@ export function createDesktopProjectToolExecutor(input: {
     return await invoke('dev_read_external_file', { path, maxBytes: 30_000_000 })
   }
 
+  const wikiWorkspace: WikiWorkspace = {
+    async list() {
+      return (await listFiles()).map(entry => ({ path: entry.path, isDir: entry.isDir }))
+    },
+    async read(path) {
+      return (await readFile(path)).content
+    },
+    async write(path, content) {
+      await invoke('dev_write_file', { root: requireProject(), relativePath: path, content })
+    },
+    async createDirectory(path) {
+      await invoke('dev_create_dir', { root: requireProject(), relativePath: path })
+    },
+    async gitEvidence() {
+      const status = await invoke('dev_run_command', {
+        root: requireProject(), command: 'git status --short', workdir: '.', timeoutSeconds: 30,
+      })
+      const diff = await invoke('dev_run_command', {
+        root: requireProject(), command: 'git diff --no-ext-diff --binary HEAD', workdir: '.', timeoutSeconds: 30,
+      })
+      if (Number(status.exitCode ?? status.exit_code) !== 0 || Number(diff.exitCode ?? diff.exit_code) !== 0) return null
+      return { status: String(status.stdout || ''), diff: String(diff.stdout || '') }
+    },
+  }
+
   function renderReadFile(path: string, file: DesktopReadFile, args: Record<string, unknown>): DirectToolResult {
     const mime = mimeForPath(path)
     if (mime.startsWith('image/')) {
@@ -155,6 +181,10 @@ export function createDesktopProjectToolExecutor(input: {
         return { content: localSkillOutput(skillName, skill) }
       }
       return { content: await skills.load(skillName) }
+    }
+
+    if (name === 'wiki') {
+      return { content: await executeWikiAction(wikiWorkspace, args as any) }
     }
 
     if (name === 'read') {

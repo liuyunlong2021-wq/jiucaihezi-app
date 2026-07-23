@@ -38,6 +38,7 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/webProjectTools.test.ts',
   'src/runtime/direct/__tests__/desktopProjectTools.test.ts',
   'src/runtime/direct/__tests__/creativeSkillCatalog.test.ts',
+  'src/runtime/direct/__tests__/wikiRuntime.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',
   'src/runtime/workbench/__tests__/mediaReference.test.ts',

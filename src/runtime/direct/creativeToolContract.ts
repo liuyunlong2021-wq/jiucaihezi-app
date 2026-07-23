@@ -23,6 +23,23 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool('skill', 'Load a specialized Skill from the available skills list.', {
     name: { type: 'string', description: 'Exact Skill name from the available skills list' },
   }, ['name']),
+  tool('wiki', 'Run deterministic project Wiki operations without Python or Node. Use Wiki Skills for judgment and this tool for inspection, structure, search, validation, audit, closeout preview, and confirmed mechanical repairs.', {
+    action: { type: 'string', enum: ['inspect', 'scaffold', 'search', 'status', 'graph', 'validate', 'audit', 'closeout', 'replace', 'link', 'extend'] },
+    type: { type: 'string', enum: ['dev_project', 'novel', 'manju', 'short_story', 'film', 'tv_series', 'advertisement', 'generic'] },
+    query: { type: 'string' },
+    scope: { type: 'string', enum: ['active', 'all'] },
+    limit: { type: 'integer', minimum: 1, maximum: 1000 },
+    evidencePaths: { type: 'array', items: { type: 'string' } },
+    path: { type: 'string', description: 'Project-relative Wiki file or evidence path' },
+    oldText: { type: 'string' },
+    newText: { type: 'string' },
+    target: { type: 'string', description: 'Wiki link target without brackets' },
+    category: { type: 'string' },
+    description: { type: 'string' },
+    reason: { type: 'string', description: 'Confirmed problem being repaired' },
+    basis: { type: 'string', description: 'User decision, source, or inspection item proving the repair' },
+    apply: { type: 'boolean', description: 'Omit or false for preview; true only after confirmation' },
+  }, ['action']),
   tool('read', 'Read a directory, UTF-8 text file, supported image, or a loaded Skill resource. Relative paths use the current project; user-approved absolute paths are also supported.', {
     path: pathProperty,
     offset: { type: 'integer', description: 'Optional 1-based line offset', minimum: 1 },
@@ -66,8 +83,15 @@ export function buildCreativeToolDefinitions() {
   ]
 }
 
-const fieldTypes: Record<string, Record<string, 'string' | 'boolean' | 'integer'>> = {
+type ToolFieldType = 'string' | 'boolean' | 'integer' | 'stringArray'
+
+const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   skill: { name: 'string' },
+  wiki: {
+    action: 'string', type: 'string', query: 'string', scope: 'string', limit: 'integer',
+    evidencePaths: 'stringArray', path: 'string', oldText: 'string', newText: 'string',
+    target: 'string', category: 'string', description: 'string', reason: 'string', basis: 'string', apply: 'boolean',
+  },
   read: { path: 'string', offset: 'integer', limit: 'integer' },
   glob: { pattern: 'string', path: 'string', limit: 'integer' },
   grep: { pattern: 'string', path: 'string', include: 'string', limit: 'integer' },
@@ -88,7 +112,12 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   for (const [key, item] of Object.entries(args)) {
     const expected = types[key]
     if (!expected) throw new Error(`工具参数不支持: ${key}`)
-    if (expected === 'integer' ? !Number.isInteger(item) : typeof item !== expected) {
+    const invalid = expected === 'integer'
+      ? !Number.isInteger(item)
+      : expected === 'stringArray'
+        ? !Array.isArray(item) || item.some(value => typeof value !== 'string')
+        : typeof item !== expected
+    if (invalid) {
       throw new Error(`工具参数类型无效: ${key}`)
     }
   }

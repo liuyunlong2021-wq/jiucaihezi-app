@@ -62,7 +62,7 @@ function call(name: string, args: Record<string, unknown>) {
 test('web project tools use OpenCode-compatible names', () => {
   assert.deepEqual(
     WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
-    ['skill', 'read', 'glob', 'grep', 'write', 'edit'],
+    ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
   )
 })
 
@@ -85,11 +85,21 @@ test('web project tool definitions append connected MCP tools without Desktop te
   try {
     assert.deepEqual(
       buildWebProjectToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mcp__docs__lookup'],
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mcp__docs__lookup'],
     )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
+})
+
+test('web project tools execute the native Wiki runtime without Python or Node', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('原生 Wiki')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+
+  assert.match((await execute(call('wiki', { action: 'scaffold', type: 'dev_project' }))).content, /created-or-completed: docs\/wiki/)
+  assert.match((await execute(call('wiki', { action: 'inspect' }))).content, /path: docs\/wiki/)
+  assert.equal((await files.list(project.id)).some(entry => entry.path === '.raw' || entry.path.startsWith('.raw/')), false)
 })
 
 test('web project tool executor reads writes searches and edits the bound project', async () => {

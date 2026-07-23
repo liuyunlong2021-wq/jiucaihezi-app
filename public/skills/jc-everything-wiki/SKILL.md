@@ -39,10 +39,15 @@ triggers:
 
 ## 执行流程
 
-1. **盘点**：运行 `scripts/everything_to_wiki.py inspect <项目根目录>`，确认已有 Wiki 与 Raw 状态；需要 VS Code 会话时运行 `locate-vscode`。
+1. **盘点**：调用 Studio 原生 `wiki` 工具的 `inspect`，确认已有 Wiki 与 Raw 状态。
 2. **判断**：确定类型，读取类型 -> Reference 表中对应的项目语境，再选择目标位置。
-3. **建库/接管**：运行 `scaffold <类型> <项目根目录>`，只创建缺失目录和入口，不覆盖已有文件。
-4. **验证**：运行 `validate <项目根目录> <类型>`，报告实际路径、创建项、Raw 位置和未处理项。
+3. **建库/接管**：调用 `scaffold` 并传入类型，只创建缺失目录和入口，不覆盖已有文件；Studio 不创建 `.raw/` 会话副本。
+4. **验证**：调用 `validate`，报告实际路径、创建项、Raw 位置和未处理项。
+
+## 工具出口
+
+- Studio 原生 `wiki` 工具可用时，必须使用 `inspect`、`scaffold`、`validate`；不要通过终端调用 Python/Node。
+- 没有 `wiki` 工具的外部 Agent 才使用 `scripts/everything_to_wiki.py` 兼容出口。
 
 ## 输出标准
 

@@ -53,7 +53,7 @@ function fixtureInvoke(command: string, payload: any): Promise<any> {
 test('creative tool contract exposes the project tools and Desktop terminal', () => {
   assert.deepEqual(
     CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
-    ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
+    ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
   )
   const terminal = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'terminal')
   assert.match(terminal?.function.description || '', /explicitly lists that exact token/)
@@ -88,11 +88,20 @@ test('creative tool definitions append connected MCP tools without changing core
   try {
     assert.deepEqual(
       buildCreativeToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
     )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
+})
+
+test('desktop project tools execute native Wiki inspection through existing Tauri files', async () => {
+  const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
+
+  const result = await execute(call('wiki', { action: 'inspect' }))
+
+  assert.match(result.content, /state: existing/)
+  assert.match(result.content, /path: wiki/)
 })
 
 test('desktop project tools use relative Tauri IPC with Web-compatible output', async () => {

@@ -38,6 +38,22 @@ class WikiSkillMigrationTests(unittest.TestCase):
             self.assertNotIn("启动闸门", text)
             self.assertNotIn("等用户选择", text)
 
+    def test_five_wiki_skills_prefer_the_native_wiki_tool_and_keep_external_fallbacks(self) -> None:
+        expected_actions = {
+            "jc-everything-wiki": ("inspect", "scaffold", "validate"),
+            "jc-cha-wiki": ("search", "status", "graph"),
+            "jc-jian-wiki": ("audit",),
+            "jc-raw-wiki": ("inspect", "closeout", "validate"),
+            "jc-xiu-wiki": ("replace", "link", "extend"),
+        }
+        for name, actions in expected_actions.items():
+            text = self.read_skill(name)
+            self.assertIn("Studio 原生 `wiki` 工具", text, name)
+            self.assertIn("没有 `wiki` 工具", text, name)
+            self.assertIn("scripts/", text, name)
+            for action in actions:
+                self.assertIn(f"`{action}`", text, name)
+
     def test_query_is_read_only_except_optional_derived_output(self) -> None:
         text = self.read_skill("jc-cha-wiki")
         self.assertIn("docs/wiki/", text)

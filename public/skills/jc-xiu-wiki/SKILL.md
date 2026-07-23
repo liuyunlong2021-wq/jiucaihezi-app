@@ -44,3 +44,8 @@ triggers:
 | ------------ | ------------------------------------- |
 | 巡检问题修复 | `references/能力标准/巡检修正规范.md` |
 | 架构扩展     | `references/能力标准/架构扩展规范.md` |
+
+## 工具出口
+
+- Studio 原生 `wiki` 工具可用时，机械修正使用 `replace`、`link`、`extend`，默认只预览；用户确认后才传 `apply: true`。
+- 没有 `wiki` 工具的外部 Agent 才使用 `scripts/apply_fix.py`；脚本的 `scaffold` 对应原生 `extend`。

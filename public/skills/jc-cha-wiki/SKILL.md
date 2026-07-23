@@ -47,8 +47,8 @@ triggers:
 | 状态查询   | `references/能力标准/状态查询规范.md` |
 | 关系图     | `references/能力标准/关系图规范.md`   |
 
-## 脚本出口
+## 工具出口
 
-- 默认现行检索：`python scripts/wiki_query.py search <项目根> <关键词>`。
-- 追溯历史：追加 `--scope all`；结果过多时用 `--limit N`。
-- 状态查询：`python scripts/wiki_query.py status <项目根>`，兼容当前 `架构/开发/运维` 目录。
+Studio 原生 `wiki` 工具可用时，必须使用 `search`、`status`、`graph`；不要通过终端调用 Python/Node。
+
+没有 `wiki` 工具的外部 Agent 才使用 `scripts/wiki_query.py`：默认现行检索用 `search`，追溯历史追加 `--scope all`，状态查询用 `status`，关系图用 `graph`。
