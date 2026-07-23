@@ -223,7 +223,6 @@ interface RuntimeContextBaseline {
 }
 
 const messages = ref<ChatMessage[]>([])
-const pendingDesktopMessages = ref<ChatMessage[]>([])
 
 const isStreaming = ref(false)
 const abortController = ref<AbortController | null>(null)
@@ -258,7 +257,6 @@ let testDeps: Record<string, unknown> | null = null
 let activeOpenCodeSessionId = ''
 const activeOpenCodeSessionIdRef = ref('')
 let activeOpenCodeDirectory = ''
-let projectedDesktopSessionId = ''
 // ponytail: 跟踪上次发送的项目目录，变了 = 切项目 → 清 session
 let lastProjectDir = ''
 
@@ -501,26 +499,12 @@ export function useChat() {
 
   if (isTauriRuntime()) {
     watch(
-      () => [openCodeSyncStore.activeSessionId, openCodeSyncStore.chatMessages, chatModeStore.mode] as const,
-      ([sessionID, projected, mode]) => {
-        if (mode === 'creative') {
-          projectedDesktopSessionId = ''
-          return
-        }
-        const sessionChanged = sessionID !== projectedDesktopSessionId
+      () => [openCodeSyncStore.activeSessionId, chatModeStore.mode] as const,
+      ([sessionID, mode]) => {
+        if (mode === 'creative') return
         setActiveOpenCodeSessionId(sessionID)
-        const confirmed = new Set(projected.map(message => message.id))
-        pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => !confirmed.has(message.id))
-        const nextMessages = [
-          ...(sessionID ? projected.map(message => ({ ...message })) : []),
-          ...pendingDesktopMessages.value,
-        ].sort((a, b) => a.timestamp - b.timestamp)
-        if (!sessionID) messages.value = []
-        else if (sessionChanged) messages.value = nextMessages
-        else replaceMessagesPreservingPrompt(nextMessages, messages.value)
-        projectedDesktopSessionId = sessionID
       },
-      { deep: true, immediate: true },
+      { immediate: true },
     )
     watch(() => openCodeSyncStore.activePermissions, requests => {
       pendingPermissions.value = requests.map(request => normalizePermissionRequest(request))
@@ -1039,25 +1023,6 @@ export function useChat() {
           composerParts: options.openCodeComposerParts,
         }) as OpenCodeRenderablePart[]
       : []
-    if (isTauriRuntime() && !options._skipUserMessageInsert) {
-      const pending: ChatMessage = {
-        id: desktopMessageID,
-        role: 'user',
-        content: text,
-        timestamp: Date.now(),
-        agentId: options.agentId,
-        agentName: options.openCodeAgent || options.agentName,
-        modelId: options.modelId,
-        modelProviderId: options.modelProviderId,
-        openCodeParts: desktopParts,
-        images: persistableAttachmentUrls(options.images),
-        files: options.files,
-        attachments: options.attachments,
-      }
-      pendingDesktopMessages.value.push(pending)
-      messages.value.push(pending)
-    }
-
     if (!options._skipUserMessageInsert && !isTauriRuntime()) {
       const userMsg: ChatMessage = {
         id: createMessageId('user'),
@@ -1123,7 +1088,6 @@ export function useChat() {
           buildFixedSkillSystemInstruction(openCodeSkillName),
         ].filter(Boolean).join('\n\n')
         if (isCreativeDesktopMode()) {
-          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false
           abortController.value = null
           setPhase('idle')
@@ -1132,7 +1096,6 @@ export function useChat() {
         const projectDir = String(options.openCodeProjectDir || '').trim()
         const effectiveDir = await openCodeSyncStore.waitForReady(projectDir)
         if (isCreativeDesktopMode()) {
-          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false
           abortController.value = null
           setPhase('idle')
@@ -1150,7 +1113,6 @@ export function useChat() {
           options.skillPermission,
         )
         if (isCreativeDesktopMode()) {
-          pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
           isStreaming.value = false
           abortController.value = null
           setPhase('idle')
@@ -1174,12 +1136,10 @@ export function useChat() {
           model,
           parts: desktopParts as Array<Record<string, any> & { type: string; id?: string }>,
         })
-        pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
         isStreaming.value = false
         abortController.value = null
         return
       } catch (error) {
-        pendingDesktopMessages.value = pendingDesktopMessages.value.filter(message => message.id !== desktopMessageID)
         isStreaming.value = false
         abortController.value = null
         const detail = error instanceof Error ? error.message : String(error)

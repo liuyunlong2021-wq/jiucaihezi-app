@@ -745,8 +745,8 @@ Tauri Store 的优势：
 
 ### 2026-07-23 回归：切换侧栏会话仍显示上一会话
 
-**根因**：为同一会话的短暂空快照保留现有 UI 投影时，`useChat` 未区分 active session ID 是否变化。点击侧栏会先切换 active ID，目标会话历史尚未返回时空投影错误复用上一会话消息，造成“左侧已选中、右侧仍是旧对话”。
+**根因**：Desktop 在唯一 OpenCode Sync Store 之外，又让 `useChat` 把当前 Store 消息复制到模块级 `messages`。ChatPanel 渲染这个镜像；为容忍同一会话的短暂空快照，镜像进一步保留旧内容。点击侧栏会先切换 active ID，目标会话历史尚未返回时便出现“左侧已选中、右侧仍是旧对话”。
 
 **官方对照**：OpenCode v1.18.4 的 session timeline 只消费当前 session 的 message store；切换 session 不得把旧 session 的 timeline 作为新 session 的 fallback。
 
-**修复与验证**：仅在 session ID 不变时保留短暂空快照；ID 变化立即清空旧投影，收到目标会话官方消息页后正常显示。回归测试覆盖“切换加载中无旧消息残留”和“目标消息抵达后替换显示”；专项测试、`vue-tsc -b` 与 `git diff --check` 通过。
+**修复与验证**：删除 Desktop `useChat` 的消息镜像和发送前本地 pending 消息；ChatPanel 时间线直接消费 `activeSessionId -> openCodeSyncStore.chatMessages`，与官方 `createTimelineModel` 的 `sync.data.message[id] ?? []` 一一对应。回归测试覆盖“Desktop 不镜像 Store”“ChatPanel 直接读 session-keyed 投影”“乐观消息只由 `submitPrompt()` 写入 Store”；专项测试、`vue-tsc -b` 与 `git diff --check` 通过。

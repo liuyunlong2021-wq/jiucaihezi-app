@@ -443,6 +443,9 @@ const previewImageTitle = ref('')
 const popover = ref<'at' | 'slash' | null>(null)
 const agentMode = computed(() => chatModeStore.mode)
 const isCreativeMode = computed(() => !isWebRuntime.value && agentMode.value === 'creative')
+const desktopTimelineMessages = computed(() =>
+  !isWebRuntime.value && !isCreativeMode.value ? openCodeSyncStore.chatMessages : messages.value,
+)
 const selectedProjectDir = computed(() => projectStore.projectDir.value)
 const projectFiles = createRuntimeProjectFileService()
 const projectFileActions = createProjectFileActions(projectFiles)
@@ -794,7 +797,7 @@ const canCompactContext = computed(
     !isStreaming.value &&
     !sessionHydrating.value &&
     Boolean(activeOpenCodeSessionId.value) &&
-    messages.value.some(message => message.role !== 'system'),
+    desktopTimelineMessages.value.some(message => message.role !== 'system'),
 )
 
 const effectiveDesktopSkills = computed(() =>
@@ -904,13 +907,14 @@ const desktopMediaMessages = computed<ChatMessage[]>(() => {
 })
 const displayMessages = computed(() => {
   let lastOfficeFiles: OfficeDownloadFile[] = []
-  const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(messages.value)
-  const sourceMessages = isWebRuntime.value
-    ? messages.value
-    : [...messages.value, ...desktopMediaMessages.value].sort(
+  const latestToolResultByAssistantId = buildLatestToolResultByAssistantId(desktopTimelineMessages.value)
+  const sourceMessages = desktopTimelineMessages.value
+  const renderedMessages = isWebRuntime.value
+    ? sourceMessages
+    : [...sourceMessages, ...desktopMediaMessages.value].sort(
         (a, b) => (a.timestamp || 0) - (b.timestamp || 0),
       )
-  const enrichedMessages = sourceMessages.map(message => {
+  const enrichedMessages = renderedMessages.map(message => {
     const messageFiles = dedupeOfficeDownloadFiles([
       ...(message.officeDownloadFiles || []),
       ...extractOfficeDownloadFiles(message.content || ''),
@@ -988,8 +992,8 @@ const displayMessages = computed(() => {
 function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
   if (!isStreaming.value) return false
   if (message.role !== 'assistant') return false
-  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-    const candidate = messages.value[index]
+  for (let index = desktopTimelineMessages.value.length - 1; index >= 0; index -= 1) {
+    const candidate = desktopTimelineMessages.value[index]
     if (candidate.role === 'assistant') return candidate.id === message.id
   }
   return false
@@ -998,18 +1002,18 @@ function isAssistantStreamingMessage(message: DisplayChatMessage): boolean {
 const activeOpenCodeUserMessageId = computed(() => {
   if (!isOpenCodeStreaming.value) return ''
   let userIndex = -1
-  for (let index = messages.value.length - 1; index >= 0; index -= 1) {
-    if (messages.value[index]?.role === 'user') {
+  for (let index = desktopTimelineMessages.value.length - 1; index >= 0; index -= 1) {
+    if (desktopTimelineMessages.value[index]?.role === 'user') {
       userIndex = index
       break
     }
   }
   if (userIndex < 0) return ''
-  const hasVisibleAssistantPart = messages.value.slice(userIndex + 1).some(message =>
+  const hasVisibleAssistantPart = desktopTimelineMessages.value.slice(userIndex + 1).some(message =>
     message.role === 'assistant'
     && (message.openCodeParts || []).some(part => part.type === 'text' && part.text?.trim()),
   )
-  return hasVisibleAssistantPart ? '' : messages.value[userIndex]!.id
+  return hasVisibleAssistantPart ? '' : desktopTimelineMessages.value[userIndex]!.id
 })
 
 function hasOpenCodeTimeline(message: DisplayChatMessage): boolean {
@@ -3749,7 +3753,7 @@ function onDrop(e: DragEvent) {
       @drop.prevent="fileUploader?.handleDrop($event)"
     >
       <!-- Welcome -->
-      <div v-if="messages.length === 0" class="cp-welcome">
+      <div v-if="displayMessages.length === 0" class="cp-welcome">
         <h2 class="serif">韭菜盒子</h2>
         <p>国产Codex</p>
         <div class="cp-welcome-cards">
@@ -4051,7 +4055,7 @@ function onDrop(e: DragEvent) {
       ref="scrollNav"
       :container="messagesContainer"
       :is-streaming="isStreaming"
-      :messages="messages"
+      :messages="desktopTimelineMessages"
     />
 
     <!-- P1-1: 图片预览灯箱 -->
