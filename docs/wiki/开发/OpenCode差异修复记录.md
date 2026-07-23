@@ -725,10 +725,10 @@ Tauri Store 的优势：
 
 ## 2026-07-23：续聊时历史内容短暂消失
 
-**根因**：本地 reducer 在 `message.part.updated` 早于 `message.updated` 时直接丢弃 part；发送完成后 `useChat` 又立即以当时的 Store 投影整体覆盖 UI。重连/回填期间，完整历史因此可被暂时替换为不完整消息，直到快照返回。
+**根因**：本地 reducer 在 `message.part.updated` 早于 `message.updated` 时直接丢弃 part；发送完成后 `useChat` 又立即以当时的 Store 投影整体覆盖 UI。其后发现 `openSession()` 还把可能暂时不完整的 HTTP 消息快照当作删除权限，导致事件流已确认的历史消息和 part 被瞬间替换，直到后续事件回填。
 
 **官方对照**：OpenCode v1.18.4 `packages/app/src/context/server-session.ts` 只在活动消息加载期间暂存无父级 part，记录已删除 message，并在加载结束时清理未匹配 orphan。`TextPartDisplay` 的复制操作只复制当前 text part；引用块没有独立复制交互。`message-part.css` 保留 `content-visibility: auto`。
 
-**修复**：韭菜盒子为活动 `openSession()` 加载翻译上述 orphan/tombstone 边界，发送后不再额外整体替换消息投影；每个 text part 单独复制自身文本，保留官方 `content-visibility`，仅移除本地 `contain-intrinsic-size` 提示。
+**修复**：韭菜盒子为活动 `openSession()` 加载翻译上述 orphan/tombstone 边界，发送后不再额外整体替换消息投影；消息快照只补全或更新已知 message/part，`message.removed` 是唯一删除入口；每个 text part 单独复制自身文本，流式和完成态的 fenced code block 都提供同一可见复制按钮，保留官方 `content-visibility`，仅移除本地 `contain-intrinsic-size` 提示。
 
-**验证**：reducer 乱序、删除迟到 part、会话回收回归测试通过；Sync Store、消息展示和聊天控制定向测试通过。完整 `build:desktop` 被当前 `HEAD` 已有的 `creationPanelContractUi` 断言失败阻塞（其期待已不存在的 `buildMediaPlanSubmission`，不在本次改动范围）。
+**验证**：reducer 乱序、删除迟到 part、会话回收、快照漏掉已确认消息、流式代码块复制回归测试通过；Sync Store、消息展示和聊天控制定向测试通过。完整 `build:desktop` 被当前 `HEAD` 已有的 `creationPanelContractUi` 断言失败阻塞（其期待已不存在的 `buildMediaPlanSubmission`，不在本次改动范围）。

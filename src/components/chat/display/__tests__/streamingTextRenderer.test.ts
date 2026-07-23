@@ -21,6 +21,8 @@ test('renderStreamingText wraps unfinished fences with lightweight code markup',
   assert.match(html, /第一行<br>/)
   assert.match(html, /md-code-streaming/)
   assert.match(html, /<span class="md-code-lang">ts<\/span>/)
+  assert.match(html, /data-code-copy="1"/)
+  assert.match(html, /aria-label="复制代码"/)
   assert.match(html, /const x = 1\n<\/code><\/pre><\/div>$/)
   assert.doesNotMatch(html, /hljs|language-ts|data-mermaid/)
 })

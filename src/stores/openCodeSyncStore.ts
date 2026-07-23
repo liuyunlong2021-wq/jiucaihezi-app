@@ -693,25 +693,21 @@ export const useOpenCodeSyncStore = defineStore('openCodeSync', () => {
       const rows = unwrap<Array<{ info: Message; parts: Part[] }>>(messageResult) ?? []
       const snapshotMessages = rows.map(row => row.info).filter(Boolean)
       const currentMessages = state.messages[sessionID] ?? []
-      const messages = revision === (sessionRevision.get(sessionID) ?? 0)
-        ? snapshotMessages
-        : [...snapshotMessages, ...currentMessages].reduce<Message[]>((items, item) => {
-            if (removedMessages.get(sessionID)?.has(item.id)) return items
-            const index = items.findIndex(existing => existing.id === item.id)
-            if (index >= 0) items[index] = item
-            else items.push(item)
-            return items
-          }, [])
+      const messages = [...snapshotMessages, ...currentMessages].reduce<Message[]>((items, item) => {
+        if (removedMessages.get(sessionID)?.has(item.id)) return items
+        const index = items.findIndex(existing => existing.id === item.id)
+        if (index >= 0) items[index] = item
+        else items.push(item)
+        return items
+      }, [])
       state.messages[sessionID] = messages.sort((a, b) => a.id.localeCompare(b.id))
-      if (unchanged) {
-        const snapshotMessageIDs = new Set(snapshotMessages.map(message => message.id))
-        for (const [messageID, parts] of Object.entries(state.parts)) {
-          if (parts?.some(part => part.sessionID === sessionID) && !snapshotMessageIDs.has(messageID)) delete state.parts[messageID]
-        }
+      const knownMessageIDs = new Set(messages.map(message => message.id))
+      for (const [messageID, parts] of Object.entries(state.parts)) {
+        if (parts?.some(part => part.sessionID === sessionID) && !knownMessageIDs.has(messageID)) delete state.parts[messageID]
       }
       for (const row of rows) {
         const currentParts = state.parts[row.info.id] ?? []
-        const source = unchanged ? (row.parts ?? []) : [...(row.parts ?? []), ...currentParts]
+        const source = [...currentParts, ...(row.parts ?? [])]
         const parts = source.reduce<Part[]>((items, part) => {
           if (removedParts.get(sessionID)?.has(part.id)) return items
           const index = items.findIndex(existing => existing.id === part.id)

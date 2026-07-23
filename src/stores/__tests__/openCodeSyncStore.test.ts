@@ -632,6 +632,28 @@ test('openSession snapshots cannot overwrite newer session todo or diff events',
   assert.equal(store.state.sessionDiff.ses_1?.[0]?.file, 'new')
 })
 
+test('openSession snapshots do not remove messages already confirmed by the event stream', async () => {
+  setActivePinia(createPinia())
+  const store = useOpenCodeSyncStore()
+  store.state.messages.ses_1 = [{
+    id: 'msg_confirmed', sessionID: 'ses_1', role: 'assistant', time: { created: 1 },
+  } as any]
+  store.state.parts.msg_confirmed = [{
+    id: 'prt_confirmed', messageID: 'msg_confirmed', sessionID: 'ses_1', type: 'text', text: '仍应可见',
+  } as any]
+  store.registerClient('/project', { session: {
+    get: async () => ({ data: { id: 'ses_1', directory: '/project', time: {} } }),
+    messages: async () => ({ data: [] }),
+    todo: async () => ({ data: [] }),
+    diff: async () => ({ data: [] }),
+  } } as any)
+
+  await store.openSession('/project', 'ses_1')
+
+  assert.equal(store.state.messages.ses_1?.[0]?.id, 'msg_confirmed')
+  assert.equal((store.state.parts.msg_confirmed?.[0] as any)?.text, '仍应可见')
+})
+
 test('archiving the active session clears its identity and allows cache reload', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
@@ -933,7 +955,7 @@ test('opening a loaded session is the latest intent over a pending session', asy
   assert.equal(store.activeSessionId, 'ses_a')
 })
 
-test('authoritative message snapshot removes orphan parts for missing messages', async () => {
+test('message snapshots remove parts only when their parent message is absent', async () => {
   setActivePinia(createPinia())
   const store = useOpenCodeSyncStore()
   store.state.parts.msg_orphan = [{ id: 'prt_orphan', messageID: 'msg_orphan', sessionID: 'ses_1', type: 'text' } as any]

@@ -27,7 +27,7 @@ export function renderStreamingText(content: string): string {
         inFence = false
       } else {
         const lang = normalizeFenceLang(fence[1] || 'code')
-        output.push(`<div class="md-code md-code-streaming"><div class="md-code-head"><span class="md-code-lang">${escapeHtml(lang)}</span></div><pre><code>`)
+        output.push(`<div class="md-code md-code-streaming"><div class="md-code-head"><span class="md-code-lang">${escapeHtml(lang)}</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span aria-hidden="true">📋</span><span>复制</span></button></div><pre><code>`)
         inFence = true
       }
       continue
