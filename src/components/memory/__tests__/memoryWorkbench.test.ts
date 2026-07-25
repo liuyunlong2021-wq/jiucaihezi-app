@@ -106,9 +106,21 @@ test('memory topbar uses a grouped model popover and a text-only new conversatio
   assert.doesNotMatch(workbench, /<select v-model="agentStore\.currentModel"/)
   assert.match(workbench, /const modelGroups = computed/)
   assert.match(workbench, /Claude[\s\S]*GPT \/ OpenAI[\s\S]*Gemini \/ Google/)
+  assert.match(workbench, /agentStore\.textModels\.filter\(model => !isInternalMediaModel\(model\.id\)\)/)
+  assert.doesNotMatch(workbench, /runninghub: 'RunningHub'/)
   assert.match(workbench, /class="memory-model-menu" role="listbox"/)
+  assert.match(workbench, /\.memory-model-menu \{[\s\S]*left: 0;/)
   assert.match(workbench, /role="option" :aria-selected="model\.id === agentStore\.currentModel"/)
   assert.match(workbench, /agentStore\.setModel\(modelId\)/)
+})
+
+test('memory document and file tree keep independent visible scrolling', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+
+  assert.match(workbench, /\.memory-tree \{[\s\S]*min-height: 0;[\s\S]*overflow: hidden;/)
+  assert.match(workbench, /\.memory-document \{[\s\S]*height: 100%;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/)
+  assert.match(tree, /\.pft-list \{[\s\S]*min-height: 0;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/)
 })
 
 test('memory Skill install card writes only after explicit approval', () => {

@@ -104,7 +104,7 @@ const title = computed(() => {
   if (conversation.value) return conversation.value.transcript.title
   return opened.value?.resource.name || projectStore.projectName.value || '韭菜盒子'
 })
-const textModels = computed(() => agentStore.textModels)
+const textModels = computed(() => agentStore.textModels.filter(model => !isInternalMediaModel(model.id)))
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof textModels.value>()
   for (const model of textModels.value) {
@@ -156,13 +156,17 @@ function modelGroupKey(modelId: string): string {
   if (id.includes('qwen') || id.includes('tongyi')) return 'qwen'
   if (id.includes('glm') || id.includes('zhipu')) return 'zhipu'
   if (id.includes('doubao') || id.includes('bytedance')) return 'doubao'
-  if (id.includes('rh-') || id.includes('runninghub')) return 'runninghub'
   if (id.includes('ollama') || id.includes('local-')) return 'local'
   return 'other'
 }
 
 function modelGroupLabel(key: string): string {
-  return ({ anthropic: 'Claude', openai: 'GPT / OpenAI', google: 'Gemini / Google', xai: 'Grok / xAI', deepseek: 'DeepSeek', qwen: '通义千问', zhipu: '智谱', doubao: '豆包', runninghub: 'RunningHub', local: '本地模型', other: '其他' } as Record<string, string>)[key] || key
+  return ({ anthropic: 'Claude', openai: 'GPT / OpenAI', google: 'Gemini / Google', xai: 'Grok / xAI', deepseek: 'DeepSeek', qwen: '通义千问', zhipu: '智谱', doubao: '豆包', local: '本地模型', other: '其他' } as Record<string, string>)[key] || key
+}
+
+function isInternalMediaModel(modelId: string): boolean {
+  const id = modelId.toLowerCase()
+  return id.startsWith('rh-') || id.includes('/rh-') || id.includes('runninghub')
 }
 
 function closeModelPicker(event: PointerEvent) {
@@ -769,7 +773,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench { --memory-header-height: 74px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--paper); color: var(--ink1); font-size: var(--font-base); }
 .memory-workbench.desktop-runtime { --memory-header-height: 102px; padding-top: 28px; box-sizing: border-box; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
-.memory-tree { min-width: 0; border-right: 1px solid var(--line); background: var(--surface); }
+.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
 .memory-main { display: grid; grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .memory-topbar { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
@@ -780,11 +784,11 @@ function readDataUrl(file: File): Promise<string> {
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
 .new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
-.memory-model-picker { position: relative; min-width: 0; }
-.memory-model-trigger { display: flex; width: min(260px, 28vw); min-width: 150px; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
+.memory-model-picker { position: relative; min-width: 0; max-width: min(260px, 28vw); }
+.memory-model-trigger { display: flex; max-width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-model-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-model-trigger:hover, .memory-model-trigger[aria-expanded="true"] { border-color: var(--olive); }
-.memory-model-menu { position: absolute; z-index: 50; top: calc(100% + 7px); right: 0; width: min(290px, 80vw); max-height: min(520px, 68vh); overflow-y: auto; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
+.memory-model-menu { position: absolute; z-index: 50; top: calc(100% + 7px); left: 0; width: min(290px, 80vw); max-height: min(520px, 68vh); overflow-y: auto; padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-model-group + .memory-model-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
 .memory-model-group h3 { margin: 0 7px 3px; color: var(--ink3); font-size: 10px; font-weight: 700; letter-spacing: .02em; }
 .memory-model-group button { display: block; width: 100%; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
@@ -824,8 +828,11 @@ function readDataUrl(file: File): Promise<string> {
 .memory-attachment-chip img { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 4px; object-fit: cover; }
 .memory-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-.memory-document { min-height: 0; overflow: auto; padding: 28px max(24px, calc((100% - 900px) / 2)); }
+.memory-document { min-height: 0; height: 100%; overflow-y: scroll; overflow-x: auto; overscroll-behavior: contain; scrollbar-gutter: stable; box-sizing: border-box; padding: 28px max(24px, calc((100% - 900px) / 2)); }
 .memory-document pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink1); font: var(--font-base)/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.memory-document, .memory-model-menu { scrollbar-color: color-mix(in srgb, var(--ink3) 48%, transparent) transparent; scrollbar-width: thin; }
+.memory-document::-webkit-scrollbar, .memory-model-menu::-webkit-scrollbar { width: 10px; }
+.memory-document::-webkit-scrollbar-thumb, .memory-model-menu::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 48%, transparent); background-clip: content-box; }
 .memory-media { display: grid; min-height: 0; padding: 20px; place-items: center; overflow: auto; }
 .memory-media img, .memory-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .memory-media audio { width: min(620px, 100%); }
@@ -852,7 +859,7 @@ function readDataUrl(file: File): Promise<string> {
   .memory-tree.open { transform: translateX(0); }
   .memory-tree-backdrop, .mobile-only { display: grid; }
   .memory-topbar { padding: 0 8px; }
-  .memory-model-trigger { width: min(180px, 42vw); min-width: 120px; }
+  .memory-model-picker { max-width: 42vw; }
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }

@@ -49,9 +49,6 @@ import {
   type WebProjectTransferEntry,
 } from '@/utils/webProjectTransfer'
 import MediaViewer from '@/components/media/MediaViewer.vue'
-import {
-  initializeMemoryProject,
-} from '@/runtime/memory/memoryProject'
 import { parseConversationTranscript } from '@/runtime/memory/conversationTranscript'
 
 interface FlatEntry {
@@ -308,7 +305,7 @@ async function loadFileTree() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const resources = await projectFiles.listDirectory(requestedProjectKey, '')
+    const resources = (await projectFiles.listDirectory(requestedProjectKey, '')).filter(resource => isVisibleMemoryResource(resource.path))
     const nextTree = buildTree(
       resources.map(resource => ({
         id: resource.id,
@@ -385,7 +382,7 @@ function remapLoadedNode(oldPath: string, newPath: string) {
 async function refreshDirectory(directory: TreeNode) {
   const owner = projectKey.value
   if (!directory.loaded || !owner) return
-  const children = await projectFiles.listDirectory(owner, directory.path)
+  const children = (await projectFiles.listDirectory(owner, directory.path)).filter(resource => isVisibleMemoryResource(resource.path))
   if (owner !== projectKey.value) return
   const previous = new Map(directory.children.map(child => [child.path, child]))
   directory.children = await Promise.all(children.map(async resource => {
@@ -571,6 +568,9 @@ const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', '
 const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
+function isVisibleMemoryResource(path: string): boolean {
+  return !(props.memoryMode && (path === '.raw/sessions' || path.startsWith('.raw/sessions/')))
+}
 function isCanvasFile(node: TreeNode | null | undefined): node is TreeNode {
   return Boolean(node && !node.isDir && node.name.toLowerCase().endsWith(`.${CANVAS_EXT}`))
 }
@@ -650,7 +650,7 @@ async function ensureDirectoryLoaded(node: TreeNode): Promise<boolean> {
   try {
     const owner = projectKey.value
     if (!owner) return false
-    const children = await projectFiles.listDirectory(owner, node.path)
+    const children = (await projectFiles.listDirectory(owner, node.path)).filter(resource => isVisibleMemoryResource(resource.path))
     if (owner !== projectKey.value) return false
     node.children = await Promise.all(children.map(async resource => {
       let displayName = resource.name
@@ -745,7 +745,7 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
   }
   const resource = resourceForNode(node)
   const result = await openProjectResource(projectFiles, resource)
-  if (props.memoryMode && !isDesktop) {
+  if (props.memoryMode) {
     emitEvent('memory:open-resource', result)
     return
   }
@@ -1291,10 +1291,6 @@ async function refreshWebProjects() {
 async function selectWebProject(project: { id: string; name: string }) {
   projectStore.selectWebProject(project)
   showProjectMenu.value = false
-  if (props.memoryMode) {
-    const conversation = await initializeMemoryProject(project.id, projectFiles)
-    emitEvent('memory:open-resource', await openProjectResource(projectFiles, conversation.resource))
-  }
 }
 async function createWebProject() {
   const name = await safePrompt('新建项目名称', '未命名项目', { forceDom: props.memoryMode })
@@ -1330,6 +1326,10 @@ async function ctxNewFolder() {
 async function createFileAt(relPath: string) {
   try {
     const resource = await projectFiles.createText(projectKey.value, relPath, '')
+    if (props.memoryMode) {
+      emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
+      return
+    }
     const text = await projectFiles.readText(resource)
     emitEvent('open-in-editor', {
       resource,
@@ -2094,7 +2094,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pft" :class="{ 'memory-mode': props.memoryMode }" data-project-drop-target="project" @keydown="onTreeKeydown" tabindex="0">
+  <div class="pft" :class="{ 'memory-mode': props.memoryMode, 'memory-desktop': props.memoryMode && isDesktop }" data-project-drop-target="project" @keydown="onTreeKeydown" tabindex="0">
     <input
       ref="uploadInput"
       class="pft-native-input"
@@ -2123,7 +2123,8 @@ onBeforeUnmount(() => {
       <!-- ═══ 顶部工具栏 ═══ -->
       <header class="pft-head">
         <div class="pft-title-row">
-          <strong class="pft-title">{{ projectStore.projectName.value }}</strong>
+          <img v-if="props.memoryMode" class="pft-brand-logo" src="/logo.svg" alt="韭菜盒子" />
+          <strong v-else class="pft-title">{{ projectStore.projectName.value }}</strong>
         </div>
         <div class="pft-actions">
           <template v-if="props.memoryMode">
@@ -2377,8 +2378,16 @@ onBeforeUnmount(() => {
             <JcIcon name="palette" /><span>加入画布</span>
           </button>
           <button
+            v-if="isDesktop && props.memoryMode"
+            class="pft-ctx-item"
+            @click="ctxOpenInSystem"
+          >
+            <JcIcon name="open_in_new" /><span>用系统默认应用打开</span>
+          </button>
+          <button
             class="pft-ctx-item"
             v-if="
+              !props.memoryMode &&
               ctxMenu.node &&
               (ctxMenu.node.mimeType?.startsWith('video/') ||
                 VIDEO_EXTS.has(ctxMenu.node.name.split('.').pop()?.toLowerCase() || ''))
@@ -2391,7 +2400,7 @@ onBeforeUnmount(() => {
             <JcIcon name="dashboard" /><span>打开画布</span>
           </button>
           <button v-else class="pft-ctx-item" @click="ctxOpen">
-            <JcIcon name="edit" /><span>编辑区打开</span>
+            <JcIcon name="edit" /><span>{{ props.memoryMode ? '打开' : '编辑区打开' }}</span>
           </button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxCopyResources">
@@ -2588,6 +2597,11 @@ onBeforeUnmount(() => {
   gap: 6px;
   min-width: 0;
 }
+.pft-brand-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
 .pft-title {
   font-size: 12px;
   white-space: nowrap;
@@ -2664,6 +2678,16 @@ onBeforeUnmount(() => {
   height: calc(var(--memory-header-height) - 41px);
   flex: 0 0 calc(var(--memory-header-height) - 41px);
 }
+.pft.memory-mode.memory-desktop .pft-head {
+  height: 69px;
+  flex-basis: 69px;
+  padding-top: 28px;
+  box-sizing: border-box;
+}
+.pft.memory-mode.memory-desktop .pft-search {
+  height: calc(var(--memory-header-height) - 69px);
+  flex-basis: calc(var(--memory-header-height) - 69px);
+}
 .pft.memory-mode .pft-title,
 .pft.memory-mode .pft-node,
 .pft.memory-mode .pft-project-menu button,
@@ -2702,9 +2726,16 @@ onBeforeUnmount(() => {
 /* ─── 列表 ─── */
 .pft-list {
   flex: 1;
-  overflow-y: auto;
+  min-height: 0;
+  overflow-y: scroll;
   overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--ink3) 48%, transparent) transparent;
+  scrollbar-width: thin;
 }
+.pft-list::-webkit-scrollbar { width: 10px; }
+.pft-list::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 48%, transparent); background-clip: content-box; }
 .pft-list.drop-active {
   background: var(--olive-pale);
   outline: 1px dashed var(--olive);
