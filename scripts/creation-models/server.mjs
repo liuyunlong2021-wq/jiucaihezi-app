@@ -27,6 +27,8 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'rh-gpt2-text', aliases: ['rh-gpt2-text'] },
   { id: 'z-image-turbo', aliases: ['z-image-turbo'] },
   { id: 'rh-video-v31-fast', aliases: ['rh-video-v31-fast'] },
+  { id: 'rh-3d-text', aliases: ['rh-3d-text'] },
+  { id: 'rh-3d-image', aliases: ['rh-3d-image'] },
   { id: 'rh-seedance2-text-video', aliases: ['rh-seedance2-text-video'] },
   { id: 'rh-seedance2-image-video', aliases: ['rh-seedance2-image-video'] },
   { id: 'rh-seedance2-multimodal-video', aliases: ['rh-seedance2-multimodal-video'] },

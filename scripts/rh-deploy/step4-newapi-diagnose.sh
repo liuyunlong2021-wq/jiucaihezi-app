@@ -128,7 +128,7 @@ data=json.load(open(sys.argv[1], encoding="utf-8"))
 ids=[item.get("id") for item in data.get("data", [])]
 need=[
  "rh-pro-image","rh-image-v2","rh-gpt2-image","rh-gpt2-text","z-image-turbo",
- "rh-video-v31-fast","rh-seedance2-text-video","rh-seedance2-image-video",
+ "rh-video-v31-fast","rh-3d-text","rh-3d-image","rh-seedance2-text-video","rh-seedance2-image-video",
  "rh-seedance2-multimodal-video","rh-grok-text-video","rh-grok-image-video",
  "rh-aiapp-fast-digital-human","rh-aiapp-digital-human","rh-aiapp-director",
  "rh-speech-hd","rh-speech-turbo","rh-music","rh-voice-clone",
