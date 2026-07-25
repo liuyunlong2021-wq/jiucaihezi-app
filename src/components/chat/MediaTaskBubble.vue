@@ -8,8 +8,12 @@
 import { computed } from 'vue'
 import { useMediaTaskStore, type MediaTask } from '@/stores/mediaTaskStore'
 import { emitEvent } from '@/utils/eventBus'
-import { useFileStore } from '@/composables/useFileStore'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { useProjectStore } from '@/stores/projectStore'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { openProjectResource } from '@/services/projectExplorerService'
+import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
+import { fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
 
 const props = defineProps<{
   taskId: string
@@ -17,7 +21,8 @@ const props = defineProps<{
 }>()
 
 const taskStore = useMediaTaskStore()
-const fileStore = useFileStore()
+const projectStore = useProjectStore()
+const projectFiles = createRuntimeProjectFileService()
 
 const task = computed<MediaTask | undefined>(() => taskStore.getTask(props.taskId))
 
@@ -25,26 +30,54 @@ const isRunning = computed(() => task.value?.status === 'running' || task.value?
 const isSuccess = computed(() => task.value?.status === 'success')
 const isFailed = computed(() => task.value?.status === 'failed')
 const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
+const projectResource = computed<ProjectResource | undefined>(() => {
+  const t = task.value
+  const path = String(t?.projectPath || '')
+  const owner = String(t?.projectId || projectStore.projectDir.value || '')
+  if (!t || !path || !owner) return undefined
+  const mimeType = t.type === 'video' ? 'video/mp4'
+    : t.type === 'audio' ? 'audio/mpeg'
+      : t.type === 'image' ? 'image/png' : 'model/gltf-binary'
+  return {
+    runtime: t.projectId ? 'web' : 'desktop',
+    owner,
+    path,
+    name: path.split('/').pop() || path,
+    isDirectory: false,
+    mimeType,
+    kind: classifyProjectResource({ path, mimeType }),
+  }
+})
 
 function cancel() {
   taskStore.cancelTask(props.taskId)
 }
 
-/** 保存到文件-媒体 (FileTree) */
-async function saveToFiles() {
-  const url = task.value?.resultUrl
-  if (!url || !isAllowedCreationResultUrl(url)) return
-  const t = task.value!
-  if (t.type === 'text') return
-  const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'
-  const fileType: 'image' | 'video' | 'audio' = t.type
-  const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'
-  await fileStore.addMedia(
-    `${t.modelLabel}_${new Date(t.createdAt).toLocaleTimeString('zh-CN')}.${ext}`,
-    url,
-    fileType,
-    mimeType
-  )
+async function downloadCopy() {
+  const resource = projectResource.value
+  if (resource) {
+    const binary = await projectFiles.readBinary(resource)
+    await saveGeneratedFile({
+      filename: resource.name,
+      mimeType: binary.mimeType || resource.mimeType || 'application/octet-stream',
+      data: binary.data,
+    })
+    return
+  }
+  const t = task.value
+  if (!t?.resultUrl || !isAllowedCreationResultUrl(t.resultUrl)) return
+  await saveGeneratedFile({
+    filename: `${t.modelLabel}_${t.id}.${t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : t.type === 'model3d' ? 'glb' : 'png'}`,
+    mimeType: t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : t.type === 'model3d' ? 'model/gltf-binary' : 'image/png',
+    data: await fetchBlobForExport(t.resultUrl),
+  })
+}
+
+async function revealInTree() {
+  const resource = projectResource.value
+  if (!resource) return
+  emitEvent('project-filetree:locate', { path: resource.path })
+  if (props.workbenchMode) emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
 }
 
 /** 发送到创作面板画廊 */
@@ -77,7 +110,7 @@ function sendAsReference() {
       <div class="mtb-header">
         <JcIcon name="hourglass_bottom" class="mtb-spin" />
         <span class="mtb-model">{{ task.modelLabel }}</span>
-        <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : '音频' }}生成中</span>
+        <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : task.type === 'model3d' ? '3D 模型' : '音频' }}生成中</span>
         <button class="mtb-cancel" @click="cancel" title="取消">
           <JcIcon name="close" />
         </button>
@@ -93,11 +126,19 @@ function sendAsReference() {
       <img v-if="task.type === 'image'" :src="task.resultUrl" class="mtb-image" />
       <video v-else-if="task.type === 'video'" :src="task.resultUrl" controls class="mtb-video" />
       <audio v-else-if="task.type === 'audio'" :src="task.resultUrl" controls class="mtb-audio" />
+      <div v-else-if="task.type === 'model3d'" class="mtb-file-result">
+        <JcIcon name="deployed_code" />
+        <span>3D 模型文件已生成</span>
+      </div>
+      <div v-if="task.projectPath" class="mtb-saved-path">已保存到 {{ task.projectPath }}</div>
       <div class="mtb-actions">
-        <button class="mtb-act-btn" @click="saveToFiles" title="保存到文件">
-          <JcIcon name="save" /> 保存
+        <button class="mtb-act-btn" @click="downloadCopy" title="下载副本">
+          <JcIcon name="download" /> 下载
         </button>
-        <button v-if="!props.workbenchMode" class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
+        <button v-if="projectResource" class="mtb-act-btn" @click="revealInTree" title="在文件树中查看">
+          <JcIcon name="folder_open" /> 在文件树中查看
+        </button>
+        <button v-if="!props.workbenchMode && task.type !== 'model3d'" class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
           <JcIcon name="filter" /> 画廊
         </button>
         <button v-if="!props.workbenchMode && task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
@@ -135,7 +176,7 @@ function sendAsReference() {
   gap: 6px;
   font-size: 13px;
 }
-.mtb-model { font-weight: 600; color: var(--accent, #6c5ce7); }
+.mtb-model { font-weight: 600; color: var(--olive-dark); }
 .mtb-type { color: var(--ink2, #888); }
 .mtb-cancel {
   margin-left: auto;
@@ -146,7 +187,7 @@ function sendAsReference() {
 
 .mtb-spin {
   animation: mtb-spin-anim 1.5s ease-in-out infinite;
-  color: var(--accent, #6c5ce7);
+  color: var(--olive);
 }
 @keyframes mtb-spin-anim {
   0%, 100% { transform: rotate(0deg); }
@@ -157,13 +198,13 @@ function sendAsReference() {
   margin-top: 8px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(var(--ink-rgb, 200,200,220), 0.1);
+  background: color-mix(in srgb, var(--olive) 12%, transparent);
   overflow: hidden;
 }
 .mtb-progress-fill {
   height: 100%;
   border-radius: 2px;
-  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+  background: linear-gradient(90deg, var(--olive-dark), var(--olive));
   transition: width 0.5s ease;
 }
 .mtb-progress-text {
@@ -186,6 +227,14 @@ function sendAsReference() {
   border-radius: 8px;
 }
 .mtb-audio { width: 100%; }
+.mtb-file-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  color: var(--ink2, #888);
+}
+.mtb-saved-path { color: var(--ink3); font-size: 11px; overflow-wrap: anywhere; }
 
 .mtb-actions {
   display: flex;
@@ -204,9 +253,9 @@ function sendAsReference() {
   transition: all 0.15s;
 }
 .mtb-act-btn:hover {
-  background: rgba(var(--accent-rgb, 108,92,231), 0.1);
-  color: var(--accent, #6c5ce7);
-  border-color: var(--accent, #6c5ce7);
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+  border-color: var(--olive);
 }
 .mtb-act-btn .mso { font-size: 14px; }
 

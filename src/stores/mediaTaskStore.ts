@@ -50,7 +50,7 @@ import type { CanvasTaskTarget } from '@/types/canvas'
 // ─── Types ───
 
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
-export type TaskMediaType = 'image' | 'video' | 'audio' | 'text'
+export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text'
 export type TaskSource = 'chat' | 'creation'
 export type CreationErrorCategory =
   | 'plan-validation'
@@ -118,8 +118,10 @@ export interface MediaTask {
   completedAt?: number
   /** 生成成功后的结果 URL（远程 CDN URL，历史兼容，不可变） */
   resultUrl?: string
-  /** 本地资产 URI（仅 Desktop 使用；Web 保持 projectPath 作为持久化引用） */
+  /** 本地资产 URI（Desktop 预览使用） */
   assetUri?: string
+  /** 当前项目内的稳定相对路径（Web/Desktop 共用） */
+  projectPath?: string
   /** 本地化状态：pending=待下载, local=已落地, failed=Web 项目写入失败, remote-only=Desktop 累计失败 */
   assetStatus?: 'pending' | 'local' | 'failed' | 'remote-only'
   /** 下载失败重试次数 */
@@ -129,8 +131,6 @@ export interface MediaTask {
   source: TaskSource
   /** Web 创作任务提交时冻结的项目归属，不能在完成时读取活动项目 */
   projectId?: string
-  /** Web 创作任务落盘后的项目相对媒体路径，不保存临时 blob URL */
-  projectPath?: string
   /** 来源对话的消息 ID（用于 ChatPanel 气泡渲染） */
   chatMessageId?: string
   /** Desktop ChatPanel 归属；只用于媒体任务投影，不属于 OpenCode 文本状态 */
@@ -594,7 +594,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
               : task.type === 'text'
                 ? ('text' as const)
                 : ('image' as const)
-        const { filePath } = await writeProjectMedia({
+        const { filePath, projectPath } = await writeProjectMedia({
           dataBase64,
           mime: contentType,
           projectDir,
@@ -602,6 +602,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           prompt: task.prompt || task.modelLabel || '',
         })
         task.assetUri = filePath
+        task.projectPath = projectPath
         task.assetStatus = 'local'
         task.assetRetryCount = 0
         console.log('[JC] 创作结果已落项目文件夹:', filePath)

@@ -500,8 +500,9 @@ async function recordMediaResult(payload: unknown) {
   const target = mediaTaskResources.get(taskId)
   if (!target || recordedMediaTasks.has(taskId)) return
   recordedMediaTasks.add(taskId)
+  const projectPath = mediaTaskStore.getTask(taskId)?.projectPath
   const summary = result.status === 'success'
-    ? `[媒体结果]\n任务 ${taskId} 已完成。\n${result.url || result.text || ''}`
+    ? `[媒体结果]\n任务 ${taskId} 已完成${projectPath ? `并保存到 ${projectPath}` : '，可在任务卡下载'}。`
     : `[媒体结果]\n任务 ${taskId} 失败：${result.errorMsg || '未知错误'}`
   try {
     const updated = await appendMemoryTurn(target.resource, 'assistant', summary, files)

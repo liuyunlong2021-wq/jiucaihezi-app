@@ -123,6 +123,23 @@ test('memory document and file tree keep independent visible scrolling', () => {
   assert.match(tree, /\.pft-list \{[\s\S]*min-height: 0;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/)
 })
 
+test('memory media results stay project-first, downloadable, locatable and theme-aware', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const bubble = source('src/components/chat/MediaTaskBubble.vue')
+  const tasks = source('src/stores/mediaTaskStore.ts')
+  const writer = source('src/utils/projectMediaWriter.ts')
+
+  assert.match(writer, /projectPath: resource\.path/)
+  assert.match(tasks, /task\.projectPath = projectPath/)
+  assert.match(workbench, /\u5e76\u4fdd\u5b58\u5230 \$\{projectPath\}/)
+  assert.doesNotMatch(workbench, /\$\{result\.url \|\| result\.text \|\| ''\}/)
+  assert.match(bubble, /> \u4e0b\u8f7d\s*<\/button>/)
+  assert.match(bubble, /project-filetree:locate/)
+  assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
+  assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
+  assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
+})
+
 test('memory Skill install card writes only after explicit approval', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const card = source('src/components/chat/SkillInstallCard.vue')

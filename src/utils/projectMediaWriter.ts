@@ -37,6 +37,7 @@ function pad(n: number): string { return String(n).padStart(2, '0') }
 
 export interface WriteProjectMediaResult {
   filePath: string   // 绝对路径，用于 convertFileSrc()
+  projectPath: string
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -72,5 +73,8 @@ export async function writeProjectMedia(opts: {
     data: base64ToBytes(opts.dataBase64),
     mimeType: opts.mime,
   })
-  return { filePath: `${opts.projectDir.replace(/[\\/]+$/, '')}/${resource.path}` }
+  return {
+    filePath: `${opts.projectDir.replace(/[\\/]+$/, '')}/${resource.path}`,
+    projectPath: resource.path,
+  }
 }

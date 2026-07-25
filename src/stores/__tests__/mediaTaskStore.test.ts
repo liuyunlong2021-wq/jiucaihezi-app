@@ -496,6 +496,7 @@ test(
 
       assert.equal(task?.canvasTarget?.owner, ownerA)
       assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
+      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(ownerACanvas.scene.length, 1)
       assert.equal(ownerBCanvas.scene.length, 0)
@@ -2280,7 +2281,7 @@ test('creation gallery cards recover when async media urls resolve', () => {
   assert.match(cardSource, /v-if="isImage && url && !imgError"/)
 })
 
-test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
+test('MediaTaskBubble downloads project media first and keeps the remote fallback safe', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'),
     'utf8',
@@ -2296,16 +2297,9 @@ test('MediaTaskBubble treats audio as audio when saving and checks result URL sa
     ),
     true,
   )
-  assert.equal(source.includes("const fileType: 'image' | 'video' | 'audio' = t.type"), true)
-  assert.equal(
-    source.includes("const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'"),
-    true,
-  )
-  assert.equal(
-    source.includes(
-      "const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'",
-    ),
-    true,
-  )
+  assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
+  assert.equal(source.includes('data: await fetchBlobForExport(t.resultUrl)'), true)
+  assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
+  assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
   assert.equal(source.includes('v-else-if="isSuccess && isSafeResult"'), true)
 })
