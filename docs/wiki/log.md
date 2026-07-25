@@ -1,5 +1,26 @@
 # Wiki 操作日志
 
+## [2026-07-25] Skill 边界收敛 | 仓库与选择器只显示用户已安装 Skill
+
+- `public/skills/` 保留为产品内置能力与内部加载来源，不再灌入 Web Skill Store，也不在 Skill 仓库和记忆工作台选择器展示。
+- Skill 仓库与选择器统一读取 `agentStore.getCustomSkills()`；Web 新增、编辑和删除继续落 `jc_web_skills_v1`，两处不维护第二份列表。
+- 不创建 `public/zijian/skills/`：发布后的 `public/` 是浏览器只读静态资源，不能承载用户运行时安装。
+- `skill-creator` 仅在用户明确要求安装后输出自包含 `jc-skill-install` 块；对话区转换成确认卡，用户点击后才调用 `createAgent()`。第一版只安装单文件 `SKILL.md`，不伪造尚无运行时存储的资料包。
+
+## [2026-07-24] 开发收尾 | 通用记忆对话工作台第一阶段 Web 本地完成
+
+- 实现 [[开发/通用记忆对话独立App SDD]] 第一阶段：Web 使用文件树唯一导航、中央资源路由和隐藏设置；Desktop 入口保持原布局，未创建新域名、Bundle ID 或第二套对话数据库。
+- 通用项目初始化五个 Wiki 文件与 `.raw/对话记录/`；对话用路径 + `jc:conversation` 双条件识别，发送按“用户 Raw -> 重读 -> 查询 Skill/Wiki -> 完整回复 -> assistant Raw”执行。
+- 登录、模型、Skill 仓库、MCP 和统一图片/视频/音频计划均已接入新工作台；浏览器验证项目创建、五文件 Wiki、对话标题/切换、普通文档、设置和手机抽屉。
+- 验证：定向 `43/43`、TypeScript、Web quick build 和产物审计通过。完整 focused 仍有 4 条既有电商/旧 Web 会话合同失败；生产发布、真实模型/Wiki 写入、付费媒体、Desktop 和 Mobile 未验收。
+
+## [2026-07-24] 开发收尾 | RH 明确失败任务不再永久运行
+
+- 更新 [[开发/三项生产故障闭环SDD-2026-07-21]]：2026-07-21 的可恢复任务兜底曾把已带上游 ID 的所有轮询错误写回 `pending`，导致 `FAILED + 1501` 明确终态在每次刷新后继续恢复轮询。
+- API 轮询现为明确失败终态添加标记并立即停止重试；Media Store 只保留非终态异常为可恢复，终态直接持久化失败并展示上游 `errorMessage`。未新增取消流程。
+- 验证通过：API 17、创作 Runtime 16、Media Store 42，共 75/75；TypeScript、Web 构建、产物审计及改动文件补丁检查通过。证据 `/tmp/jc-media-terminal-failure-closeout.log`，`sha256:3d90cd2d817c`。
+- 未验证：Web 尚未发布，生产浏览器刷新后的真实 `1501` 任务展示待人工验收；完整 focused 因现有 `eventBridge.test` 长驻进程挂起且另有 3 条无关基线失败，未登记为通过。
+
 ## [2026-07-23] Web 解禁 | 电商工作台入口
 
 - 移除 Rail 和布局对 Web 电商工作台的硬编码阻断；宽屏 Web 可从 Rail 打开，窄屏 Web 可从移动 Rail 打开。
@@ -300,3 +321,58 @@
 - 分支提交范围：`c720be5a` 至 `694d1132`，包含 `@` file/agent parts、Skill permission、附件投影、消息乱序/快照连续性、官方 thinking row、分页历史、代码块复制和 session 切换回归。
 - 自动验证：`desktopOpenCodeSyncCutover` 39/39、`pnpm exec vue-tsc -b`、`pnpm run build:desktop:quick` 和 `git diff --check` 通过；quick build 生成的无关图标差异未纳入提交。
 - 未验证：本轮 `pnpm run test:focused` 未产生可归属结束码，原因是 2026-07-19 遗留 Node 测试进程使用固定 `/private/tmp/jc-focused-tests`；已停止该进程，需在干净临时目录复跑。真实 Desktop Provider、停止/权限交互及三平台人工矩阵仍待补。
+
+## [2026-07-24] 产品合同修正 | 通用记忆对话 App 纳入统一媒体能力
+
+- 用户确认媒体生成属于通用对话基础能力；独立 App 保留图片、视频、音频生成，但不加载 `CreationPanel`、画布、编辑区、画廊或媒体工作台。
+- 更新 [[开发/通用记忆对话独立App SDD]]：统一使用 `MediaPlan -> preparePublicMediaPlan() -> mediaTaskStore`，在对话内完成付费确认、进度、取消、结果、项目落盘和刷新恢复。
+- 音频纳入与图片、视频相同的公共计划合同；模型字段来自现有 Creation 注册表，继续复用现有音频提交、轮询、`jc-media/audios` 落盘和播放器。本轮只修 Wiki/SDD，代码与真实付费验收待实施。
+
+## [2026-07-24] 产品合同修正 | 通用记忆对话 App 补齐设置、Skill 与 MCP
+
+- 用户确认账号登录、模型配置、Skill 仓库和 MCP 是通用对话基础能力，不能因拆除主 App 模式与工作台而一起删除。
+- 更新 [[开发/通用记忆对话独立App SDD]]：极简工具栏只保留“对话”和“设置/账号”；设置区复用账号/Provider、本地模型、双端 Skill 仓库、MCP 管理及通用设置子能力，不复制整个 `WorkspaceLayout`、`ActivityRail` 或 `SettingsPanel`。
+- 已启用且已连接的 MCP 工具继续经现有 `mcpStore -> mcpBridge` 进入同一模型工具循环；模型仍须先查询 Wiki，再按需调用 MCP。Desktop 支持本地与远程 MCP，Web 只显示真实可执行的远程 MCP。本轮只修 Wiki/SDD，代码与真实连接验收待实施。
+- 独立产品继续使用同一账号后端，但登录态与回调身份独立：Web 返回 `chat.jiucaihezi.studio`，Desktop 登录和 MCP OAuth 返回 `jiucaihezi-chat://`，不得误开主 App。
+
+## [2026-07-24] 产品合同纠偏 | 文件树统一导航与现有产品身份交付
+
+- 用户确认不增加项目选择器或对话选择器；项目文件树是唯一导航。`.raw/对话记录/` 下同时具有有效 `jc:conversation` 标记的文件进入聊天壳，普通 Markdown/文本、图片/视频/音频和其他文件分别进入中央区的文档、媒体和安全文件视图。
+- 统一资源判断必须扩展现有 `openProjectResource()`，不在文件树、聊天区和移动端复制路径判断。对话行显示 Raw 的首个 H1，但仍以稳定路径和 conversation ID 标识；新建、重命名、删除和恢复都以项目文件为真源。
+- 交付顺序改为：先在 `https://jiucaihezi.studio` 上线 Web，再沿用现有韭菜盒子 Desktop 的 Bundle ID、签名、Deep Link 和更新通道，最后适配 Mobile 的 App 管理项目目录与文件树抽屉。
+- 此决断取代上一条日志中的独立回调身份：当前不创建 `chat.jiucaihezi.studio`、`com.jiucaihezi.chat`、`jiucaihezi-chat://`、独立更新通道或 `apps/chat`。本轮只更新 SDD/Wiki，代码和真实发布尚未实施。
+
+## [2026-07-24] 预览修正 | 记忆工作台极简交互
+
+- 根据用户截图把记忆模式文件树顶栏收敛为新建文件、新建文件夹、切换项目、刷新和隐藏文件树五个动作；切换项目同步打开目标项目首条 Raw，避免中央区残留旧项目对话。
+- 输入框改用主 App 同源的 `contenteditable` 纯文本提取和自动增高合同；普通文本文件恢复“引用到对话”，引用作为下一轮请求文件上下文，原文件不变。
+- 设置抽屉新增白色、浅色、黑夜和护眼四主题；记忆 Web 首次启动默认护眼绿色，后续保存用户选择。
+- 验证通过：相关回归 78/78、`pnpm exec vue-tsc -b`、`pnpm run build:quick`、Web 产物审计和应用内浏览器交互验收；未发布生产，真实模型、Wiki 写入和付费媒体仍待用户手测。
+
+## [2026-07-25] 修正 | 记忆工作台附件、Raw 与标题栏
+
+- 用户附件现在在输入区显示缩略图，发送后在当前对话显示图片/文件卡；Raw 只保存附件稳定元数据，不写入 base64 原文。
+- 发送入口增加同步一次提交锁，并支持仅附件发送，避免一次操作重复追加多个用户 turn；解析层只折叠 5 秒内连续完全相同的旧 user turn，不改写 Raw。
+- 记忆模式隐藏旧 `.raw/sessions` 目录，只展示当前 `.raw/对话记录` 合同，不删除旧数据。
+- Logo 移到左侧文件树品牌位；仅 Desktop 记忆窗口为 macOS overlay 标题栏预留安全区，Web 保持原 74px 对齐；顶栏新建对话、模型和设置统一 34px 控件基线。
+- 验证通过：记忆工作台与 Raw 定向回归 18/18、`pnpm exec vue-tsc -b`、`pnpm run build:quick`、Web 产物审计；应用内浏览器完成桌面视口布局和图片附件预览核对。
+
+## [2026-07-25] 修正 | 记忆工作台快速模式与参考图生成
+
+- 输入框工具栏增加逐次发送的 `快速 | 记忆` 两段式开关；两者共用当前对话完整 Raw。快速模式不创建 Wiki/MCP 工具循环，自动 Skill 为空，明确选择的 Skill 与公共媒体规则仍生效；记忆模式保持强制加载 `jc-cha-wiki` 和真实查询。
+- 用户 turn 在 Raw 标记 `mode="quick|memory"`，新对话默认记忆，重开恢复最后使用模式；旧 Raw 无模式时按记忆处理。
+- 粘贴图片不再进入 `contenteditable` 正文，统一转换为现有附件；普通粘贴只插入纯文本。
+- 记忆工作台复用主 App 的 `buildExplicitMediaReferences -> materializeMediaPlanReferences`，上传图片会真实进入媒体确认卡和生成任务，不再出现聊天模型看懂图片但执行器按文生图提交。
+- 验证通过：定向回归 `34/34`、完整 focused、`vue-tsc -b`、Web/Desktop quick build与产物审计；浏览器真实验证模式切换、图片粘贴只生成附件及普通文本纯文本粘贴。Apple Silicon `.app` / `.dmg` 已重建，Developer ID 严格签名校验通过并启动；未配置 Apple 公证凭据，仍按本机私测包处理。
+
+## [2026-07-25] 修正 | 记忆工作台输入区收敛
+
+- 记忆工作台把原有两个 Skill 控件合并为一个 `Skill：当前值` 入口；面板从输入框向上浮动并以工具栏右边缘为锚点，不改变输入框高度或越出中央内容区，选择和点击外部都会关闭。
+- `快速 | 记忆` 保持原交互；附件和文件引用改为固定高度的紧凑标签，移除嵌套元素误命中外层标签样式及引用区额外分隔带。
+- 验证通过：记忆工作台定向回归 `17/17`、TypeScript、Desktop quick build与产物审计；应用内浏览器实测浮层方向、中央区边界、外部关闭和图片附件 `34px` 标签。
+
+## [2026-07-25] 修正 | 记忆工作台顶部模型选择
+
+- “新建对话”移除无信息量图标，保留纯文字主动作；设置继续使用单一齿轮图标。
+- 原生模型 `<select>` 改为固定宽度产品内浮层，按模型 ID 归入 Claude、GPT/OpenAI、Gemini/Google、Grok/xAI、DeepSeek、通义、智谱、豆包、RunningHub、本地模型和其他，组内保持网关顺序。
+- 没有增加搜索、收藏或最近使用；模型切换仍只调用现有 `agentStore.setModel()`。定向回归 `18/18`、TypeScript 和 Desktop quick build/产物审计通过。

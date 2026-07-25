@@ -19,7 +19,28 @@ test('memory file tree keeps only the five requested toolbar actions', () => {
   assert.match(tree, /title="刷新"/)
   assert.match(tree, /title="隐藏文件树"/)
   assert.doesNotMatch(toolbar, /新建对话|上传|导入|导出/)
-  assert.match(tree, /async function selectWebProject[\s\S]*initializeMemoryProject[\s\S]*memory:open-resource/)
+  assert.doesNotMatch(tree, /async function selectWebProject[\s\S]*initializeMemoryProject/)
+})
+
+test('memory space and conversations are created only by their explicit actions', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const project = source('src/runtime/memory/memoryProject.ts')
+
+  assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
+  assert.match(workbench, /async function createMemorySpace\(\)[\s\S]*initializeMemoryProject\(owner, files\)/)
+  assert.match(workbench, /async function startNewConversation\(\)[\s\S]*createMemoryConversation\(owner, '新对话', files\)/)
+  assert.match(workbench, /'新建记忆空间'/)
+  assert.match(workbench, /<span>新建对话<\/span>/)
+  assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
+})
+
+test('memory workbench keeps the brand in the file tree and a native drag region in the header', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+
+  assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region/)
+  assert.doesNotMatch(workbench, /memory-brand-logo/)
+  assert.match(tree, /class="pft-brand-logo" src="\/logo\.svg"/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
@@ -38,13 +59,56 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(runtime, /files: input\.files/)
 })
 
+test('memory composer keeps quick and memory execution in one Raw conversation', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(workbench, /executionMode = ref<ConversationMode>\('memory'\)/)
+  assert.match(workbench, /快速[\s\S]*记忆/)
+  assert.match(workbench, /appendMemoryTurn\([\s\S]*attachmentMetadata\(pendingAttachments\),[\s\S]*pendingMode/)
+  assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
+  assert.match(runtime, /if \(!memoryMode\)[\s\S]*runDirectChatCompletion\([\s\S]*tools: undefined/)
+})
+
+test('memory composer routes pasted images and media plans through the shared attachment references', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /@paste="handleComposerPaste"/)
+  assert.match(workbench, /clipboardData\?\.items/)
+  assert.match(workbench, /buildExplicitMediaReferences/)
+  assert.match(workbench, /buildMediaReferencePolicy\(mediaContext\)/)
+  assert.match(workbench, /materializeMediaPlanReferences\(parseMediaPlan\(turn\.content\), mediaContext\)/)
+})
+
 test('memory Skill picker uses the same installed-user list as the Web warehouse', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
+  const picker = source('src/components/chat/SkillPickerBar.vue')
 
   assert.match(workbench, /agentStore\.getCustomSkills\(\)/)
   assert.doesNotMatch(workbench, /loadWebSkillCatalog/)
   assert.match(runtime, /agentStore\.getCustomSkills\(\)\.find/)
+  assert.match(workbench, /<SkillPickerBar[\s\S]*compact/)
+  assert.match(workbench, /\.memory-composer-tools \{ position: relative;/)
+  assert.match(workbench, /:deep\(\.spb-root\.compact\) \{ position: static; \}/)
+  assert.match(picker, /props\.compact[\s\S]*spb-compact-trigger/)
+  assert.match(picker, /spb-panel-up/)
+  assert.match(picker, /\.spb-panel-up \{[\s\S]*right: 0;[\s\S]*bottom: calc\(100% \+ 8px\)/)
+  assert.match(picker, /暂无已安装 Skill/)
+  assert.doesNotMatch(picker, /暂无内置 Skill，请确认 dist\/skills/)
+})
+
+test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /class="new-conversation-button"[\s\S]*<span>新建对话<\/span>/)
+  assert.doesNotMatch(workbench, /new-conversation-button[\s\S]{0,180}<JcIcon/)
+  assert.doesNotMatch(workbench, /<select v-model="agentStore\.currentModel"/)
+  assert.match(workbench, /const modelGroups = computed/)
+  assert.match(workbench, /Claude[\s\S]*GPT \/ OpenAI[\s\S]*Gemini \/ Google/)
+  assert.match(workbench, /class="memory-model-menu" role="listbox"/)
+  assert.match(workbench, /role="option" :aria-selected="model\.id === agentStore\.currentModel"/)
+  assert.match(workbench, /agentStore\.setModel\(modelId\)/)
 })
 
 test('memory Skill install card writes only after explicit approval', () => {
@@ -82,6 +146,7 @@ test('memory file actions use the supported DOM prompt and headers share one bas
   assert.match(tree, /'memory-mode': props\.memoryMode/)
   assert.match(tree, /\.pft\.memory-mode \.pft-head[\s\S]*border-bottom: 0/)
   assert.match(workbench, /--memory-header-height: 74px/)
+  assert.match(workbench, /\.memory-workbench\.desktop-runtime \{ --memory-header-height: 102px/)
   assert.match(workbench, /grid-template-rows: var\(--memory-header-height\)/)
 })
 
@@ -104,4 +169,48 @@ test('memory tree toggle collapses the desktop file tree and exposes reopen cont
   assert.match(workbench, /v-if="!treeOpen" class="icon-button" title="打开文件树"/)
   assert.match(workbench, /\.memory-workbench\.tree-closed \{ grid-template-columns: 0 minmax\(0, 1fr\); \}/)
   assert.match(workbench, /\.memory-workbench\.tree-closed \.memory-tree \{ overflow: hidden; border-right: 0; \}/)
+})
+
+test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {
+  const app = source('src/App.vue')
+
+  assert.match(app, /<MemoryWorkbench \/>/)
+  assert.doesNotMatch(app, /WorkspaceLayout|useOpenCodeSyncStore|projectStoredNewApiForOpenCode/)
+})
+
+test('memory workbench follows the current project owner on both runtimes', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /const projectOwner = computed\(\(\) => desktopRuntime[\s\S]*projectStore\.projectDir\.value[\s\S]*projectStore\.webProjectId\.value/)
+  assert.match(workbench, /watch\(projectOwner, owner => void openProject\(owner\), \{ immediate: true \}\)/)
+  assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
+})
+
+test('memory text models default to tools unless the gateway explicitly disables them', () => {
+  const store = source('src/stores/agentStore.ts')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(store, /toolCall: capability === 'text' && item\.tool_call !== false && item\.toolCall !== false/)
+  assert.match(runtime, /agentStore\.modelsFetched && model\?\.toolCall === false/)
+})
+
+test('memory file actions stay inside the memory resource route on Desktop', () => {
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+
+  assert.match(tree, /if \(props\.memoryMode\) \{\s*emitEvent\('memory:open-resource', result\)\s*return/)
+  assert.match(tree, /createText\(projectKey\.value, relPath, ''\)[\s\S]*if \(props\.memoryMode\)[\s\S]*memory:open-resource/)
+  assert.match(tree, /isDesktop && props\.memoryMode[\s\S]*用系统默认应用打开/)
+})
+
+test('memory settings expose the existing Desktop local model runtime', () => {
+  const settings = source('src/components/memory/MemorySettings.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(settings, /connectLocalOllama/)
+  assert.match(settings, /getLocalOllamaModels/)
+  assert.match(settings, /agentStore\.refreshLocalModels\(\)/)
+  assert.match(settings, /v-if="desktopRuntime" class="memory-local-model"/)
+  assert.match(runtime, /createDesktopProjectToolExecutor\(\{ projectDir: input\.projectId \}\)/)
+  assert.match(runtime, /platform: isTauriRuntime\(\) \? 'desktop' : 'web'/)
+  assert.doesNotMatch(runtime, /forceCloud: true/)
 })
