@@ -1348,6 +1348,41 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
 
   runninghubStandard({
+    id: 'runninghub/api/rh-3d-text',
+    model: 'rh-3d-text',
+    label: '混元 3D v3.1 文生 3D · RunningHub',
+    task: 'model3d',
+    mode: 'text-to-3d',
+    price: 4.2,
+    webappId: 'hunyuan3d-v3.1/text-to-3d',
+    notes: ['docs/wiki/归档/模型文档/RH-混元3D.md'],
+    outputModalities: ['model3d'],
+    fields: promptFields([
+      { key: 'faceCount', label: '面数', kind: 'number', defaultValue: 500000, min: 10000, max: 1500000, step: 1 },
+      { key: 'enablePbr', label: 'PBR 材质', kind: 'boolean', defaultValue: false },
+      { key: 'generateType', label: '生成类型', kind: 'select', defaultValue: 'Normal', options: options(['Normal', 'Geometry', 'Sketch']) },
+    ]),
+  }),
+  runninghubStandard({
+    id: 'runninghub/api/rh-3d-image',
+    model: 'rh-3d-image',
+    label: '混元 3D v3.1 图生 3D · RunningHub',
+    task: 'model3d',
+    mode: 'image-to-3d',
+    price: 6.6,
+    webappId: 'hunyuan3d-v3.1/image-to-3d',
+    notes: ['docs/wiki/归档/模型文档/RH-混元3D.md'],
+    files: { images: { min: 1, max: 8 } },
+    outputModalities: ['model3d'],
+    fields: [
+      { key: 'faceCount', label: '面数', kind: 'number', defaultValue: 500000, min: 10000, max: 1500000, step: 1 },
+      { key: 'enablePbr', label: 'PBR 材质', kind: 'boolean', defaultValue: false },
+      { key: 'generateType', label: '生成类型', kind: 'select', defaultValue: 'Normal', options: options(['Normal', 'Geometry', 'Sketch']) },
+      { key: 'images', label: '参考图（主、左、右、后、上、下、左前、右前）', kind: 'images', required: true },
+    ],
+  }),
+
+  runninghubStandard({
     id: 'runninghub/aiapp/rh-aiapp',
     model: 'rh-aiapp',
     label: 'AI 应用（自定义）· RunningHub 工作流',

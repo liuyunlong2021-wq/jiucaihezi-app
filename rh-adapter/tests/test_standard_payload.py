@@ -54,6 +54,38 @@ async def test_seedance_image_video_maps_ordered_images_to_official_frame_keys()
 
 
 @pytest.mark.asyncio
+async def test_hunyuan_3d_maps_ordered_images_to_view_keys():
+    client = FakeClient()
+    images = [f"https://example.com/{index}.png" for index in range(8)]
+
+    payload = await build_standard_payload(
+        client,
+        "rh_key",
+        "hunyuan3d-v3.1/image-to-3d",
+        {
+            "images": images,
+            "faceCount": 500000,
+            "enablePbr": False,
+            "generateType": "Normal",
+        },
+    )
+
+    assert payload == {
+        "faceCount": 500000,
+        "enablePbr": False,
+        "generateType": "Normal",
+        "imageUrl": images[0],
+        "leftImageUrl": images[1],
+        "rightImageUrl": images[2],
+        "backImageUrl": images[3],
+        "topImageUrl": images[4],
+        "bottomImageUrl": images[5],
+        "leftFrontImageUrl": images[6],
+        "rightFrontImageUrl": images[7],
+    }
+
+
+@pytest.mark.asyncio
 async def test_standard_payload_rejects_values_outside_official_options():
     client = FakeClient()
 

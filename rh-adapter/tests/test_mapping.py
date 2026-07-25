@@ -28,6 +28,8 @@ TARGET_MODELS = {
     "rh-seedance2-multimodal-video",
     "rh-grok-text-video",
     "rh-grok-image-video",
+    "rh-3d-text",
+    "rh-3d-image",
     "rh-aiapp-fast-digital-human",
     "rh-aiapp-digital-human",
     "rh-aiapp-director",
@@ -48,8 +50,6 @@ REMOVED_MODELS = {
     "rh-veo-31-pro",
     "rh-seedance2",
     "grok-video-3",
-    "rh-3d-text",
-    "rh-3d-image",
     "rh-grok-video-edit",
     "rh-mimic",
     "rh-digital-human-fast",
@@ -138,6 +138,7 @@ def test_get_output_type():
     assert get_output_type("rh-speech-hd") == "audio"
     assert get_output_type("rh-gpt2-text") == "image"
     assert get_output_type("z-image-turbo") == "image"
+    assert get_output_type("rh-3d-text") == "3d"
 
 
 def test_video_models_have_fallback():

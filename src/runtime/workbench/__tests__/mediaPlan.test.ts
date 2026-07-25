@@ -201,6 +201,22 @@ test('accepts registered video and audio plans', () => {
   assert.doesNotThrow(() => validateMediaPlan(audio))
 })
 
+test('3D media plans select text or image Hunyuan models from references', () => {
+  const text = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'model3d', title: '钥匙模型', prompt: '一把旧铜钥匙',
+  }) + '\n```')
+  assert.equal(text.modelId, 'runninghub/api/rh-3d-text')
+  assert.doesNotThrow(() => validateMediaPlan(text))
+
+  const withImage = {
+    ...text,
+    referenceImages: ['data:image/png;base64,front'],
+    modelId: 'runninghub/api/rh-3d-image',
+  }
+  assert.doesNotThrow(() => validateMediaPlan(withImage))
+  assert.equal(getMediaPlanEditorControls(withImage).models.length, 1)
+})
+
 test('media plan editor uses compatible registry models and normalizes changed model parameters', () => {
   const plan = {
     kind: 'image' as const,

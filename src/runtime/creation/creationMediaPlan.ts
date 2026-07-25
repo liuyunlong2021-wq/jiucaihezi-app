@@ -300,9 +300,8 @@ function normalizeRunningHubParams(
   }
   // 植入 spec.fields 中的新字段（hd, quality, stylize, chaos, variant, customWidth, customHight 等）
   for (const field of spec.fields || []) {
-    if (!(field.key in base) && field.key in params && params[field.key] !== undefined) {
-      base[field.key] = params[field.key]
-    }
+    const value = params[field.key] ?? field.defaultValue
+    if (!(field.key in base) && value !== undefined) base[field.key] = value
   }
 
   return compact(base)
@@ -424,6 +423,8 @@ function modeLabel(mode: CreationRunPlan['mode']): string {
     'image-to-video': '图生视频',
     'video-edit': '视频编辑',
     'text-to-audio': '文生音频',
+    'text-to-3d': '文生 3D',
+    'image-to-3d': '图生 3D',
     lyrics: '歌词',
     'voice-clone': '声音克隆',
     'voice-design': '声音设计',

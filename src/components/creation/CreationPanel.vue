@@ -329,6 +329,14 @@ async function previewTask(task: MediaTask) {
         return
       }
       taskPreviewObjectUrl = objectUrl
+      if (task.type === 'model3d') {
+        const link = document.createElement('a')
+        link.href = objectUrl
+        link.download = projectPath.split('/').pop() || 'model.glb'
+        link.click()
+        releaseTaskPreviewUrl()
+        return
+      }
       taskPreview.value = {
         url: objectUrl,
         type: taskPreviewType(task),
@@ -392,6 +400,10 @@ function modeLabel(mode?: string): string {
       return '视频编辑'
     case 'text-to-audio':
       return '文生音频'
+    case 'text-to-3d':
+      return '文生 3D'
+    case 'image-to-3d':
+      return '图生 3D'
     case 'lyrics':
       return '歌词'
     case 'voice-clone':
@@ -533,10 +545,16 @@ async function runCreationViaTaskStore() {
           ? ('image' as const)
           : task === 'audio'
             ? ('audio' as const)
+            : task === 'model3d'
+              ? ('model3d' as const)
             : ('video' as const)
 
-    const refImages: string[] = []
-    const refVideos: string[] = []
+    const refImages = await Promise.all(
+      cpState.files.filter(file => file.type.startsWith('image/')).map(fileToDataUrl),
+    )
+    const refVideos = await Promise.all(
+      cpState.files.filter(file => file.type.startsWith('video/')).map(fileToDataUrl),
+    )
     const selected = (app?.editor?.list || []) as any[]
     let canvasTarget: CanvasTaskTarget | undefined
     if (selected.length && canvasStore.canvasPath) {
@@ -599,7 +617,7 @@ async function runCreationViaTaskStore() {
         },
         { left: Infinity, top: Infinity, right: -Infinity, bottom: -Infinity },
       )
-      canvasTarget = {
+      if (task !== 'model3d') canvasTarget = {
         canvasId,
         canvasPath,
         owner,

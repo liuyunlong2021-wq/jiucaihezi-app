@@ -22,15 +22,18 @@ function sanitizeFilename(input: string): string {
 }
 
 /** MIME → 文件扩展名 */
-function mimeToExt(mime: string): string {
+function mimeToExt(mime: string, sourceUrl = ''): string {
   const map: Record<string, string> = {
     'image/png': '.png', 'image/jpeg': '.jpg', 'image/webp': '.webp',
     'image/gif': '.gif', 'image/svg+xml': '.svg', 'image/bmp': '.bmp',
     'video/mp4': '.mp4', 'video/webm': '.webm', 'video/quicktime': '.mov',
     'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg',
     'audio/mp4': '.m4a', 'text/plain': '.txt', 'text/markdown': '.md',
+    'model/gltf-binary': '.glb', 'model/gltf+json': '.gltf', 'model/obj': '.obj',
+    'application/zip': '.zip',
   }
-  return map[mime] || (mime.startsWith('image/') ? '.png' : mime.startsWith('video/') ? '.mp4' : mime.startsWith('audio/') ? '.mp3' : '.bin')
+  const urlExt = sourceUrl.split(/[?#]/, 1)[0]?.match(/\.(glb|gltf|obj|fbx|stl|ply|zip)$/i)?.[0]?.toLowerCase()
+  return map[mime] || urlExt || (mime.startsWith('image/') ? '.png' : mime.startsWith('video/') ? '.mp4' : mime.startsWith('audio/') ? '.mp3' : '.bin')
 }
 
 function pad(n: number): string { return String(n).padStart(2, '0') }
@@ -51,17 +54,18 @@ export async function writeProjectMedia(opts: {
   dataBase64: string   // 纯 base64，不含 data: 前缀
   mime: string
   projectDir: string
-  kind: 'image' | 'video' | 'audio' | 'text'
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
   prompt?: string
+  sourceUrl?: string
 }): Promise<WriteProjectMediaResult> {
-  const ext = mimeToExt(opts.mime)
+  const ext = mimeToExt(opts.mime, opts.sourceUrl)
   const promptPart = sanitizeFilename(opts.prompt || '')
   const rand = Math.random().toString(36).slice(2, 5)
   const now = new Date()
   const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   const filename = promptPart ? `${ts}_${promptPart}_${rand}${ext}` : `${ts}_${rand}${ext}`
 
-  const folderName = opts.kind === 'text' ? 'text' : `${opts.kind}s`
+  const folderName = opts.kind === 'text' ? 'text' : opts.kind === 'model3d' ? 'models' : `${opts.kind}s`
   const relativePath = `jc-media/${folderName}/${filename}`
 
   const [{ createProjectFileActions }, { createRuntimeProjectFileService }] = await Promise.all([

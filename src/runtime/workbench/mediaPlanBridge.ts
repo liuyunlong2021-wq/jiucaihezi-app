@@ -47,7 +47,7 @@ export function buildMediaPlanSubmission(plan: MediaPlan) {
     prompt: plan.prompt,
     referenceImages: plan.referenceImages || [],
     referenceVideos: plan.referenceVideos || [],
-    ...(plan.kind === 'video'
+    ...(plan.kind === 'video' || plan.kind === 'model3d'
       ? { videoParams: { prompt: plan.prompt, videoUrl: plan.referenceVideos?.[0], imageUrl: plan.referenceImages?.[0], imageUrls: plan.referenceImages, duration: plan.duration } }
       : {}),
     ...(plan.kind === 'image'
@@ -74,7 +74,8 @@ export async function preparePublicMediaPlan(
   }
   const invalidReference = plan.mediaReferences?.find(reference => reference.invalidReason)
   if (invalidReference) throw new Error(invalidReference.invalidReason)
-  if (plan.mediaReferences?.length && !resolvers) {
+  const needsRefresh = plan.mediaReferences?.some(reference => reference.locator.type !== 'attachment')
+  if (needsRefresh && !resolvers) {
     throw new Error('参考素材缺少重新读取能力。')
   }
 

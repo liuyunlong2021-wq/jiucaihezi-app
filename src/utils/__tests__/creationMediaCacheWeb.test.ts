@@ -68,3 +68,15 @@ test('Web creation media helpers preserve response MIME when building a determin
     globalThis.fetch = previousFetch
   }
 })
+
+test('3D creation results keep their model file extension in the project', () => {
+  const path = creationMediaCache.webCreationMediaProjectPath({
+    type: 'model3d',
+    prompt: '角色模型',
+    taskId: 'mtask_3d',
+    mimeType: 'application/octet-stream',
+    sourceUrl: 'https://example.com/output/character.glb?token=short-lived',
+  })
+
+  assert.match(path, /^jc-media\/models\/.+_mtask_3d\.glb$/)
+})

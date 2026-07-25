@@ -27,18 +27,18 @@ export function fileIdFromMediaRef(ref: string): string {
   return String(ref || '').startsWith(MEDIA_REF_PREFIX) ? String(ref).slice(MEDIA_REF_PREFIX.length) : ''
 }
 
-type CreationMediaType = 'image' | 'video' | 'audio'
+type CreationMediaType = 'image' | 'video' | 'audio' | 'model3d'
 
 function extFor(type: CreationMediaType): string {
-  return type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : 'png'
+  return type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : type === 'model3d' ? 'glb' : 'png'
 }
 
 function mimeFor(type: CreationMediaType, fallback?: string): string {
   if (fallback && fallback.includes('/')) return fallback
-  return type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mpeg' : 'image/png'
+  return type === 'video' ? 'video/mp4' : type === 'audio' ? 'audio/mpeg' : type === 'model3d' ? 'model/gltf-binary' : 'image/png'
 }
 
-function extensionForMime(type: CreationMediaType, mimeType?: string): string {
+function extensionForMime(type: CreationMediaType, mimeType?: string, sourceUrl?: string): string {
   switch (String(mimeType || '').split(';')[0].trim().toLowerCase()) {
     case 'image/jpeg': return 'jpg'
     case 'image/webp': return 'webp'
@@ -57,17 +57,27 @@ function extensionForMime(type: CreationMediaType, mimeType?: string): string {
     case 'audio/webm': return 'webm'
     case 'audio/mpeg':
     case 'audio/mp3': return 'mp3'
-    default: return extFor(type)
+    case 'model/gltf-binary': return 'glb'
+    case 'model/gltf+json': return 'gltf'
+    case 'model/obj': return 'obj'
+    case 'application/zip': return 'zip'
+    default: {
+      if (type === 'model3d') {
+        const ext = sourceUrl?.split(/[?#]/, 1)[0]?.match(/\.([a-z0-9]{2,5})$/i)?.[1]?.toLowerCase()
+        if (ext && ['glb', 'gltf', 'obj', 'fbx', 'stl', 'ply', 'zip'].includes(ext)) return ext
+      }
+      return extFor(type)
+    }
   }
 }
 
-function webMediaFilename(params: { type: CreationMediaType; prompt?: string; model?: string; taskId?: string; mimeType?: string }): string {
+function webMediaFilename(params: { type: CreationMediaType; prompt?: string; model?: string; taskId?: string; mimeType?: string; sourceUrl?: string }): string {
   const stem = String(params.prompt || params.model || 'creation')
     .replace(/[/\\:*?"<>|]/g, '_')
     .trim()
     .slice(0, 48) || 'creation'
   const suffix = String(params.taskId || Date.now().toString(36)).replace(/[^a-z0-9_-]/gi, '').slice(-16)
-  return `${stem}_${suffix}.${extensionForMime(params.type, params.mimeType)}`
+  return `${stem}_${suffix}.${extensionForMime(params.type, params.mimeType, params.sourceUrl)}`
 }
 
 export function webCreationMediaProjectPath(params: {
@@ -76,8 +86,9 @@ export function webCreationMediaProjectPath(params: {
   model?: string
   taskId?: string
   mimeType?: string
+  sourceUrl?: string
 }): string {
-  const directory = params.type === 'video' ? 'videos' : params.type === 'audio' ? 'audios' : 'images'
+  const directory = params.type === 'video' ? 'videos' : params.type === 'audio' ? 'audios' : params.type === 'model3d' ? 'models' : 'images'
   return `jc-media/${directory}/${webMediaFilename(params)}`
 }
 

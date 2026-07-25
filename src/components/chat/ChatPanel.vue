@@ -240,7 +240,7 @@ const sessionLoadPromise = isTauriRuntime() && chatModeStore.mode !== 'dao'
   ? Promise.resolve()
   : sessionStore.loadAllSessions()
 
-function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' {
+function isMediaModel(modelId: string): false | 'image' | 'video' | 'audio' | 'model3d' {
   const model = getMediaModel(modelId)
   if (!model) return false
   return model.task === 'ai-app' ? 'video' : model.task

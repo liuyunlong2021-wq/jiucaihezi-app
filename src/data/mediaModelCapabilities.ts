@@ -3,7 +3,7 @@ import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabi
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
 const RH_ONLY_MODE = false
 
-export type MediaTaskKind = 'image' | 'video' | 'audio' | 'ai-app'
+export type MediaTaskKind = 'image' | 'video' | 'audio' | 'model3d' | 'ai-app'
 
 export type MediaFieldKind =
   | 'prompt'
@@ -223,6 +223,26 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     fields: [
       { key: 'prompt', label: '歌词主题', kind: 'prompt', required: true },
     ],
+  },
+  {
+    id: 'rh-3d-text',
+    label: '混元 3D v3.1 文生 3D',
+    task: 'model3d',
+    model: 'rh-3d-text',
+    provider: 'runninghub-video',
+    webappId: 'hunyuan3d-v3.1/text-to-3d',
+    fields: rhOfficialFields('hunyuan3d-v3.1/text-to-3d'),
+  },
+  {
+    id: 'rh-3d-image',
+    label: '混元 3D v3.1 图生 3D',
+    task: 'model3d',
+    model: 'rh-3d-image',
+    provider: 'runninghub-video',
+    webappId: 'hunyuan3d-v3.1/image-to-3d',
+    maxFiles: rhOfficialMaxFiles('hunyuan3d-v3.1/image-to-3d'),
+    acceptedFiles: ['image'],
+    fields: rhOfficialFields('hunyuan3d-v3.1/image-to-3d'),
   },
 
   // ── RunningHub 模型 ──
@@ -614,6 +634,7 @@ export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
   image: '图片',
   video: '视频',
   audio: '音频',
+  model3d: '3D',
   'ai-app': 'AI 应用',
 }
 

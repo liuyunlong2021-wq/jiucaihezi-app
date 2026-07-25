@@ -324,7 +324,7 @@ function taskPrompt(params: MediaTaskSubmitParams): string {
   return String(
     params.type === 'audio' || params.type === 'text'
       ? (params.audioParams?.prompt ?? params.prompt)
-      : params.type === 'video'
+      : params.type === 'video' || params.type === 'model3d'
         ? (params.videoParams?.prompt ?? params.prompt)
         : (params.imageParams?.prompt ?? params.prompt),
   )
@@ -486,7 +486,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   /** 将媒体结果存入文件树（媒体 tab） */
   async function saveMediaToFileTree(task: MediaTask) {
-    if (!task.resultUrl) return
+    if (!task.resultUrl || task.type === 'model3d') return
     try {
       const fileStore = useFileStore()
       const name = (task.prompt || task.modelLabel || '未命名').substring(0, 50)
@@ -533,6 +533,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           ? ('video' as const)
           : task.type === 'audio'
             ? ('audio' as const)
+            : task.type === 'model3d'
+              ? ('model3d' as const)
             : ('image' as const)
       const { blob, mimeType } = await fetchCreationMediaBlob(url, type)
       const projectPath = webCreationMediaProjectPath({
@@ -541,6 +543,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         model: task.modelLabel || task.model,
         taskId: task.id,
         mimeType,
+        sourceUrl: url,
       })
       await createProjectFileActions(createRuntimeProjectFileService()).importMedia({
         owner: projectId,
@@ -592,6 +595,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             ? ('video' as const)
             : task.type === 'audio'
               ? ('audio' as const)
+              : task.type === 'model3d'
+                ? ('model3d' as const)
               : task.type === 'text'
                 ? ('text' as const)
                 : ('image' as const)
@@ -601,6 +606,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           projectDir,
           kind,
           prompt: task.prompt || task.modelLabel || '',
+          sourceUrl: url,
         })
         task.assetUri = filePath
         task.projectPath = projectPath
@@ -1212,6 +1218,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         // ★ 保存上游任务 ID 和轮询地址（用于刷新后恢复）
         const persisted = await markTaskSubmitted(task, result)
         if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+      } else if (params.type === 'model3d') {
+        throw new Error('3D 任务必须通过共用 Creation 运行计划提交')
       } else if (params.type === 'audio' || params.type === 'text') {
         result = await generateAudio(
           {

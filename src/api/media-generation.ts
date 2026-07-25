@@ -67,7 +67,7 @@ export interface AudioGenParams {
 
 export interface MediaResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'text'
+  type: 'image' | 'video' | 'audio' | 'model3d' | 'text'
   text?: string
   taskId?: string
   /** 上游轮询路径（用于任务恢复） */

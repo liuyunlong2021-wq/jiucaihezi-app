@@ -33,7 +33,7 @@ import { normalizeCreationTextField, sanitizeCreationResults } from '@/utils/cre
 // ─── 结果项 ───
 export interface CreationResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'text' | 'failed' | 'unknown'
+  type: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'failed' | 'unknown'
   content?: string
   model: string
   task: string
@@ -263,7 +263,7 @@ function normalizeSavedTask(task: unknown): CreationTask {
   if (task === 'text-video' || task === 'image-video') normalized = 'video'
   else if (task === 'text-music') normalized = 'audio'
   else if (task === 'text-image' || task === 'image-image') normalized = 'image'
-  else if (task === 'image' || task === 'video' || task === 'audio' || task === 'ai-app') normalized = task
+  else if (task === 'image' || task === 'video' || task === 'audio' || task === 'model3d' || task === 'ai-app') normalized = task
 
   const visibleTasks = getVisibleCreationTasks()
   if (visibleTasks.includes(normalized)) return normalized

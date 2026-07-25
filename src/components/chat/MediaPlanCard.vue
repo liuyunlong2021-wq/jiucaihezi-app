@@ -27,6 +27,7 @@ const kindLabel = {
   image: '图片',
   video: '视频',
   audio: '音频',
+  model3d: '3D',
 } as const
 
 const spec = computed(() => getCreationModelSpec(props.plan.modelId))
@@ -58,6 +59,8 @@ const modeLabel = computed(() => {
     'image-to-video': '图生视频',
     'video-edit': '视频编辑',
     'text-to-audio': '文生音频',
+    'text-to-3d': '文生 3D',
+    'image-to-3d': '图生 3D',
   }
   return labels[effectiveMode.value || ''] || '媒体生成'
 })

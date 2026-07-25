@@ -59,6 +59,10 @@ function mimeToExt(mime: string): string {
     'audio/ogg': '.ogg',
     'audio/mp4': '.m4a',
     'audio/webm': '.weba',
+    'model/gltf-binary': '.glb',
+    'model/gltf+json': '.gltf',
+    'model/obj': '.obj',
+    'application/zip': '.zip',
   }
   return map[mime] || '.bin'
 }

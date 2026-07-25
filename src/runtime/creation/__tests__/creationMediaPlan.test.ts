@@ -47,6 +47,8 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
+    'runninghub/api/rh-3d-text',
+    'runninghub/api/rh-3d-image',
     'runninghub/aiapp/rh-aiapp',
   ]
 
@@ -227,6 +229,36 @@ test('RunningHub audio and generic AI App plans do not receive image ratio defau
   assert.equal('resolution' in aiApp.debug.normalizedParams, false)
   assert.equal(aiApp.debug.normalizedParams['3:audio'], 'https://example.com/voice.mp3')
   assert.equal(aiApp.debug.normalizedParams['4:image'], 'https://example.com/person.png')
+})
+
+test('Hunyuan 3D plans preserve the verified v3.1 parameters', () => {
+  const text = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-3d-text',
+    params: { prompt: '一把旧铜钥匙' },
+  })
+  const image = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-3d-image',
+    params: {
+      images: ['front.png', 'left.png'],
+      faceCount: 800000,
+      enablePbr: true,
+      generateType: 'Geometry',
+    },
+  })
+
+  assert.equal(text.task, 'model3d')
+  assert.equal(text.mode, 'text-to-3d')
+  assert.equal(text.price, 4.2)
+  assert.equal(text.endpoint, '/v1/videos')
+  assert.equal(text.debug.normalizedParams.faceCount, 500000)
+  assert.equal(text.debug.normalizedParams.enablePbr, false)
+  assert.equal(text.debug.normalizedParams.generateType, 'Normal')
+  assert.equal(image.mode, 'image-to-3d')
+  assert.equal(image.price, 6.6)
+  assert.deepEqual(image.debug.normalizedParams.images, ['front.png', 'left.png'])
+  assert.equal(image.debug.normalizedParams.faceCount, 800000)
+  assert.equal(image.debug.normalizedParams.enablePbr, true)
+  assert.equal(image.debug.normalizedParams.generateType, 'Geometry')
 })
 
 test('generic RunningHub AI App plans preserve dynamic workflow params', () => {

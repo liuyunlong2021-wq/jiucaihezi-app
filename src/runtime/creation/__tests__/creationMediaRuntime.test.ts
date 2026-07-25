@@ -167,6 +167,45 @@ test('RunningHub image edit sends canvas data directly to the RH adapter', async
   }
 })
 
+test('Hunyuan image-to-3D reuses RH async submission and returns a 3D result', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const images = ['https://cdn.jiucaihezi.studio/front.png', 'https://cdn.jiucaihezi.studio/left.png']
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-3d-image')
+      assert.deepEqual(body.images, images)
+      assert.equal(body.extra_fields.faceCount, 500000)
+      assert.equal(body.extra_fields.enablePbr, false)
+      assert.equal(body.extra_fields.generateType, 'Normal')
+      return Response.json({ task_id: 'rh_3d_runtime_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_3d_runtime_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/model.glb' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-3d-image',
+      params: { images },
+    })
+    const request = buildCreationSubmitRequest(plan)
+    assert.equal(request.taskType, 'video')
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.type, 'model3d')
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/model.glb')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_3d_runtime_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('RunningHub Z Image Turbo runtime submits LoRA payload through RH adapter route', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

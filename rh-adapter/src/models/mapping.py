@@ -84,6 +84,16 @@ IMAGE_MODELS: dict[str, dict] = {
 # ── Video models ──
 
 VIDEO_MODELS: dict[str, dict] = {
+    "rh-3d-text": {
+        "endpoint": "hunyuan3d-v3.1/text-to-3d",
+        "label": "混元 3D v3.1 文生 3D",
+        "output_type": "3d",
+    },
+    "rh-3d-image": {
+        "endpoint": "hunyuan3d-v3.1/image-to-3d",
+        "label": "混元 3D v3.1 图生 3D",
+        "output_type": "3d",
+    },
     "rh-video-v31-fast": {
         "endpoint": "rhart-video-v3.1-fast/text-to-video",
         "label": "全能视频V3.1-Fast",

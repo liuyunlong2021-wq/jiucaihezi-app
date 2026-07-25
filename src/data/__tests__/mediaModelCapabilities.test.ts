@@ -21,6 +21,8 @@ test('approved media catalog contains active models and excludes removed models'
   assert.ok(ids.includes('rh-image-v2'))
   assert.ok(ids.includes('rh-gpt2-image'))
   assert.ok(ids.includes('rh-gpt2-text'))
+  assert.ok(ids.includes('rh-3d-text'))
+  assert.ok(ids.includes('rh-3d-image'))
   assert.ok(ids.includes('z-image-turbo'))
   assert.equal(ids.includes('nano-banana'), false)
   assert.equal(ids.includes('nano-banana-hd'), false)
@@ -69,7 +71,7 @@ test('media models are grouped by user-visible task with explicit model selectio
 })
 
 test('creation panel only exposes tasks backed by enabled models', () => {
-  assert.deepEqual(getVisibleCreationTasks(), ['image', 'video', 'audio', 'ai-app'])
+  assert.deepEqual(getVisibleCreationTasks(), ['image', 'video', 'audio', 'model3d', 'ai-app'])
 })
 
 test('creation model projection keeps visible Nano Banana id but submits upstream Pro model', () => {
@@ -122,6 +124,8 @@ test('RunningHub standard image and video fields are driven by official endpoint
     ['rh-video-v31-fast', 'rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'],
     ['rh-grok-text-video', 'rhart-video-g/text-to-video', undefined],
     ['rh-grok-image-video', 'rhart-video-g/image-to-video', undefined],
+    ['rh-3d-text', 'hunyuan3d-v3.1/text-to-3d', undefined],
+    ['rh-3d-image', 'hunyuan3d-v3.1/image-to-3d', undefined],
   ] as const
 
   for (const [modelId, endpoint, extraEndpoint] of cases) {
@@ -135,6 +139,7 @@ test('RunningHub standard image and video fields are driven by official endpoint
   assert.equal(byId['rh-video-v31-fast']?.maxFiles, rhOfficialMaxFiles('rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'))
   assert.equal(byId['rh-gpt2-image']?.maxFiles, rhOfficialMaxFiles('rhart-image-g-2/image-to-image'))
   assert.equal(byId['rh-grok-image-video']?.maxFiles, rhOfficialMaxFiles('rhart-video-g/image-to-video'))
+  assert.equal(byId['rh-3d-image']?.maxFiles, rhOfficialMaxFiles('hunyuan3d-v3.1/image-to-3d'))
 })
 
 test('removed models are not enabled', () => {
