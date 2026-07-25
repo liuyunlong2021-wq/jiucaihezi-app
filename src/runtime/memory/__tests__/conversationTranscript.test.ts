@@ -35,3 +35,49 @@ test('conversation transcript appends complete turns and renames only the H1 tit
   ])
   assert.match(renamed, /jc:conversation id="chat_fixed"/)
 })
+
+test('conversation transcript keeps attachment metadata without embedding binary values', () => {
+  const empty = createConversationTranscript('chat_attachment')
+  const withAttachment = appendConversationTurn(empty, {
+    id: 'turn_image',
+    role: 'user',
+    content: '请看这张图',
+    createdAt: '2026-07-24T10:01:00.000Z',
+    attachments: [{ id: 'image-1', name: 'logo.png', mime: 'image/png', size: 12, kind: 'image' }],
+  })
+  const parsed = parseConversationTranscript('.raw/对话记录/chat_attachment.md', withAttachment)
+
+  assert.deepEqual(parsed?.turns[0]?.attachments, [{
+    id: 'image-1', name: 'logo.png', mime: 'image/png', size: 12, kind: 'image',
+  }])
+  assert.doesNotMatch(withAttachment, /data:image|base64/)
+})
+
+test('conversation transcript records the execution mode on user turns', () => {
+  const empty = createConversationTranscript('chat_mode')
+  const content = appendConversationTurn(empty, {
+    id: 'turn_quick',
+    role: 'user',
+    content: '直接回答',
+    createdAt: '2026-07-24T10:01:00.000Z',
+    mode: 'quick',
+  })
+  const parsed = parseConversationTranscript('.raw/对话记录/chat_mode.md', content)
+
+  assert.equal(parsed?.turns[0]?.mode, 'quick')
+  assert.match(content, /mode="quick"/)
+})
+
+test('conversation transcript hides only the legacy rapid duplicate user turns', () => {
+  const empty = createConversationTranscript('chat_duplicate')
+  const first = appendConversationTurn(empty, {
+    id: 'turn_1', role: 'user', content: '同一条消息', createdAt: '2026-07-24T10:01:00.000Z',
+  })
+  const duplicate = appendConversationTurn(first, {
+    id: 'turn_2', role: 'user', content: '同一条消息', createdAt: '2026-07-24T10:01:03.000Z',
+  })
+  const legitimate = appendConversationTurn(duplicate, {
+    id: 'turn_3', role: 'user', content: '同一条消息', createdAt: '2026-07-24T10:01:10.000Z',
+  })
+  assert.deepEqual(parseConversationTranscript('.raw/对话记录/chat_duplicate.md', legitimate)?.turns.map(turn => turn.id), ['turn_1', 'turn_3'])
+})

@@ -458,6 +458,22 @@ test('normalizeGatewayModels maps gateway items to product model entries', () =>
   ])
 })
 
+test('normalizeGatewayModels preserves an explicit tool-call capability', () => {
+  const models = normalizeGatewayModels({
+    items: [
+      { id: 'gemini-3.6-flash', tool_call: true },
+      { id: 'legacy-chat', tool_call: false },
+      { id: 'unspecified-chat' },
+    ],
+  })
+
+  assert.deepEqual(models.map(item => [item.id, item.toolCall]), [
+    ['gemini-3.6-flash', true],
+    ['legacy-chat', false],
+    ['unspecified-chat', undefined],
+  ])
+})
+
 test('normalizeGatewayModels infers RH and AI application capabilities without taskTypes', () => {
   const models = normalizeGatewayModels({
     items: [

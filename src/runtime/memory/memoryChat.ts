@@ -19,10 +19,14 @@ import {
 } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import { buildWebProjectToolDefinitions, createWebProjectToolExecutor } from '@/runtime/direct/webProjectTools'
+import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { buildMediaPlanPolicy } from '@/runtime/workbench/mediaPlan'
 import { webProjectFiles } from '@/utils/webProjectFiles'
+import { isTauriRuntime } from '@/utils/tauriEnv'
+import { safeFetch } from '@/utils/httpClient'
+import { supportsVision } from '@/utils/providerConfig'
 
-import type { ConversationTurn } from './conversationTranscript'
+import type { ConversationMode, ConversationTurn } from './conversationTranscript'
 
 const REQUIRED_SKILL = 'jc-cha-wiki'
 const WIKI_QUERY_TOOLS = new Set(['wiki', 'read', 'glob', 'grep'])
@@ -31,7 +35,9 @@ export interface MemoryChatInput {
   projectId: string
   turns: ConversationTurn[]
   modelId: string
+  mode?: ConversationMode
   selectedSkillName?: string
+  mediaReferencePolicy?: string
   attachments?: ResolvedDirectAttachment[]
   files?: DirectMessageFile[]
   signal?: AbortSignal
@@ -45,38 +51,42 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
 
   const agentStore = useAgentStore()
   const model = agentStore.availableModels.find(entry => entry.id === input.modelId)
-  if (model?.toolCall === false) throw new Error('当前模型不支持 Wiki 工具，请选择支持工具调用的模型')
+  const memoryMode = input.mode !== 'quick'
+  if (memoryMode && agentStore.modelsFetched && model?.toolCall === false) {
+    throw new Error('当前模型不支持 Wiki 工具，请选择支持工具调用的模型')
+  }
   const providerId = model?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
   const config = await resolveApiConfig({
-    forceCloud: true,
     modelId: input.modelId,
     modelProviderId: providerId,
   })
 
-  const catalog = await loadWebSkillCatalog()
+  const catalog = memoryMode ? await loadWebSkillCatalog() : []
   const selectedSkill = input.selectedSkillName
     ? agentStore.getCustomSkills().find(skill => skill.name === input.selectedSkillName)
     : null
   const messages = buildDirectMessages({
     messages: input.turns,
     historyLimit: null,
-    systemPrompt: [
-      '你是韭菜盒子记忆对话工作台。项目 Wiki 是唯一长期记忆，当前对话 Raw 是本次讨论的完整原始记录。',
-      `每次回复必须先调用 skill({"name":"${REQUIRED_SKILL}"})，再根据用户最新消息调用 wiki、read、glob 或 grep 查询项目 Wiki。没有完成这两步，不得输出最终回复。`,
-      '只依据当前对话和实际查询结果回答；不要声称读取了没有实际查询的内容。',
-    ].join('\n'),
+    systemPrompt: memoryMode
+      ? [
+          '你是韭菜盒子记忆对话工作台。项目 Wiki 是唯一长期记忆，当前对话 Raw 是本次讨论的完整原始记录。',
+          `每次回复必须先调用 skill({"name":"${REQUIRED_SKILL}"})，再根据用户最新消息调用 wiki、read、glob 或 grep 查询项目 Wiki。没有完成这两步，不得输出最终回复。`,
+          '只依据当前对话和实际查询结果回答；不要声称读取了没有实际查询的内容。',
+        ].join('\n')
+      : '你是韭菜盒子通用对话工作台。依据当前对话和用户本轮提供的内容直接回答。',
     skillSystemPrompt: [
-      buildMediaPlanPolicy(),
-      buildWebSkillCatalogPrompt(catalog),
+      buildMediaPlanPolicy(input.mediaReferencePolicy),
+      memoryMode ? buildWebSkillCatalogPrompt(catalog) : '',
       selectedSkill?.skillContent
         ? `用户额外选择的 Skill：${selectedSkill.name}\n<SKILL.md>\n${selectedSkill.skillContent}\n</SKILL.md>`
         : '',
     ].filter(Boolean).join('\n\n'),
     attachments: input.attachments,
     files: input.files,
-    visionModel: true,
+    visionModel: supportsVision(input.modelId, providerId),
     apiFormat: 'openai',
-    platform: 'web',
+    platform: isTauriRuntime() ? 'desktop' : 'web',
   })
   const body = {
     model: config.model,
@@ -91,7 +101,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       ...body,
       messages: request.messages,
       ...(request.tools?.length ? { tools: request.tools } : {}),
-    }, payload => fetch(`${config.apiBase}/v1/chat/completions`, {
+    }, payload => safeFetch(`${config.apiBase}/v1/chat/completions`, {
       method: 'POST',
       headers: buildHeaders(config),
       signal: input.signal,
@@ -103,7 +113,22 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return response
   }
 
-  const projectTools = createWebProjectToolExecutor({ projectId: input.projectId, files: webProjectFiles })
+  if (!memoryMode) {
+    const result = await runDirectChatCompletion({
+      messages,
+      tools: undefined,
+      sendChatCompletion,
+      signal: input.signal,
+      onText: input.onText,
+    })
+    const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
+    input.onText(text)
+    return text
+  }
+
+  const projectTools = isTauriRuntime()
+    ? createDesktopProjectToolExecutor({ projectDir: input.projectId })
+    : createWebProjectToolExecutor({ projectId: input.projectId, files: webProjectFiles })
   let loadedRequiredSkill = false
   let queriedWiki = false
   const result = await runDirectChatCompletion({

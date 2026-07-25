@@ -255,13 +255,14 @@ export const useAgentStore = defineStore('agents', () => {
       if (!id) return null
       const existing = defaultMap.get(id)
       const providerId = item.providerId || 'jiucaihezi'
+      const capability = existing?.capability || item.capability || inferCapability(id)
       return {
         id,
         label: existing?.label || item.label || item.name || id.split('/').pop() || id,
         providerId,
-        capability: existing?.capability || item.capability || inferCapability(id),
+        capability,
         // Gateway catalog omits this field for built-in text models; those are our declared tool-capable defaults.
-        toolCall: item.tool_call === true || item.toolCall === true || existing?.capability === 'text',
+        toolCall: capability === 'text' && item.tool_call !== false && item.toolCall !== false,
         inputModalities: resolveModelInputModalities({
           id,
           providerId,

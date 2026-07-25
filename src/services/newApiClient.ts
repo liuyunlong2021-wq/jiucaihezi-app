@@ -197,6 +197,7 @@ export interface GatewayModelEntry {
   capability: 'text' | 'image' | 'video' | 'audio'
   channel?: string
   taskTypes?: string[]
+  toolCall?: boolean
 }
 
 export interface GatewayLedgerItem {
@@ -597,6 +598,9 @@ export function normalizeGatewayModels(payload: any): GatewayModelEntry[] {
         capability,
         channel: item?.channel ? String(item.channel) : undefined,
         taskTypes,
+        toolCall: typeof item?.tool_call === 'boolean'
+          ? item.tool_call
+          : typeof item?.toolCall === 'boolean' ? item.toolCall : undefined,
       }
     })
     .filter(Boolean) as GatewayModelEntry[]

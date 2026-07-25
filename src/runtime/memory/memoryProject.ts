@@ -11,6 +11,7 @@ import {
   createConversationTranscript,
   parseConversationTranscript,
   renameConversationTranscript,
+  type ConversationAttachment,
   type ConversationTranscript,
   type ConversationTurn,
 } from './conversationTranscript'
@@ -22,14 +23,30 @@ export interface MemoryConversation {
   transcript: ConversationTranscript
 }
 
+export interface MemoryProjectState {
+  initialized: boolean
+  conversations: MemoryConversation[]
+}
+
+export async function inspectMemoryProject(
+  owner: string,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+): Promise<MemoryProjectState> {
+  const resources = await files.list(owner)
+  const hasTree = (path: string) => resources.some(resource => resource.path === path || resource.path.startsWith(`${path}/`))
+  const initialized = (hasTree('wiki') || hasTree('docs/wiki')) && hasTree(CONVERSATION_DIRECTORY)
+  return {
+    initialized,
+    conversations: initialized ? await listMemoryConversations(owner, files) : [],
+  }
+}
+
 export async function initializeMemoryProject(
   owner: string,
   files: ProjectFileService = createRuntimeProjectFileService(),
-): Promise<MemoryConversation> {
+): Promise<void> {
   await executeWikiAction(wikiWorkspace(owner, files), { action: 'scaffold', type: 'generic' })
   await files.createFolder(owner, CONVERSATION_DIRECTORY)
-  const conversations = await listMemoryConversations(owner, files)
-  return conversations[0] || await createMemoryConversation(owner, '新对话', files)
 }
 
 export async function listMemoryConversations(
@@ -80,12 +97,16 @@ export async function appendMemoryTurn(
   role: ConversationTurn['role'],
   content: string,
   files: ProjectFileService = createRuntimeProjectFileService(),
+  attachments?: ConversationAttachment[],
+  mode?: ConversationTurn['mode'],
 ): Promise<MemoryConversation> {
   const turn: ConversationTurn = {
     id: uniqueId('turn'),
     role,
     content: String(content || '').trim(),
     createdAt: new Date().toISOString(),
+    attachments: attachments?.length ? attachments : undefined,
+    mode,
   }
   return mutateConversation(resource, files, current => appendConversationTurn(current, turn))
 }
