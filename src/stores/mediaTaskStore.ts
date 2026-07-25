@@ -18,6 +18,7 @@ import {
   generateImage,
   generateVideo,
   generateAudio,
+  isTerminalCreationTaskError,
   pollTask,
 } from '@/api/media-generation'
 import type {
@@ -930,7 +931,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         markCanvasWriteUnwritten(task)
         return
       }
-      if (task.upstreamTaskId && task.pollUrl && task.pollKind) {
+      const terminalFailure = isTerminalCreationTaskError(e)
+      if (task.upstreamTaskId && task.pollUrl && task.pollKind && !terminalFailure) {
         task.status = 'pending'
         task.progressText = '轮询暂时失败，重启后将继续恢复'
         task.errorMsg = undefined
@@ -939,8 +941,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         return
       }
       task.status = 'failed'
-      task.errorMsg = `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
-      task.error = buildTaskError(e, { category: 'network', stage: 'poll' })
+      task.progress = 0
+      task.errorMsg = terminalFailure
+        ? (e.message || e).toString().slice(0, 200)
+        : `恢复失败: ${(e.message || e).toString().slice(0, 150)}`
+      task.error = terminalFailure
+        ? classifyExecutionError(task, e)
+        : buildTaskError(e, { category: 'network', stage: 'poll' })
+      task.error.stage = 'poll'
+      task.progressText = `失败: ${task.errorMsg}`
       task.completedAt = Date.now()
       markCanvasWriteUnwritten(task)
 
@@ -1259,7 +1268,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         markCanvasWriteUnwritten(task)
         return
       }
-      if (task.upstreamTaskId && task.pollUrl && task.pollKind) {
+      const terminalFailure = isTerminalCreationTaskError(e)
+      if (task.upstreamTaskId && task.pollUrl && task.pollKind && !terminalFailure) {
         task.status = 'pending'
         task.progressText = '轮询暂时失败，重启后将继续恢复'
         task.errorMsg = undefined
@@ -1271,6 +1281,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progress = 0
       task.errorMsg = (e.message || String(e)).slice(0, 200)
       task.error = classifyExecutionError(task, e)
+      if (terminalFailure) task.error.stage = 'poll'
       task.progressText = `失败: ${task.errorMsg}`
       task.completedAt = Date.now()
       markCanvasWriteUnwritten(task)

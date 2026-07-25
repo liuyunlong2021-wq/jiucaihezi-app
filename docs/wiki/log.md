@@ -390,3 +390,9 @@
 - 结果卡删除重复的“保存”，改为从项目文件下载副本和在文件树中定位；旧任务没有项目路径时才从安全远程结果降级下载。
 - `MediaTaskBubble` 移除写死紫色，生成状态、进度条和操作色与 `MediaPlanCard` 一样跟随 `--olive*` 主题变量。
 - 验证通过：记忆工作台与媒体任务定向回归 `62/62`、`vue-tsc -b`、Web 正式构建及产物审计、Apple Silicon Mac `.app` / DMG Developer ID 签名构建；未配置 Apple 公证凭据，仍按本机私测包处理。
+
+## [2026-07-25] 修正 | RH 失败任务停止轮询
+
+- 真实任务证明先前修复只覆盖了 APP：`rh-adapter` 仍会把 RH 的 `FAILED + errorCode/errorMessage` 转成普通 HTTP 500，导致 APP 按临时故障继续等待。
+- adapter 现保留明确任务终态并输出 `status=failed`、上游错误原因；APP 的统一轮询器收到后立即停止，首次执行和重启恢复使用同一规则。
+- 定向验证：adapter `1/1`、前端 API 与 Media Store `59/59`、TypeScript、补丁检查及 Apple Silicon Mac `.app` / DMG Developer ID 签名构建通过；全量 adapter 基线另有 13 个既有环境/模型清单失败，不计为本次通过。

@@ -105,6 +105,8 @@ def build_task_status_response(task_id: str, task_data: dict) -> dict:
         error_msg = (
             task_data.get("failReason") or
             task_data.get("fail_reason") or
+            task_data.get("errorMessage") or
+            task_data.get("error_message") or
             task_data.get("error") or
             task_data.get("msg") or
             "Task failed"

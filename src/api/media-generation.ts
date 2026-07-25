@@ -412,6 +412,22 @@ function extractStatus(data: any): string {
   )
 }
 
+type TerminalCreationTaskError = Error & { terminalCreationTask: true }
+
+function terminalCreationTaskError(message: string): TerminalCreationTaskError {
+  const error = new Error(message) as TerminalCreationTaskError
+  error.terminalCreationTask = true
+  return error
+}
+
+export function isTerminalCreationTaskError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      (error as Partial<TerminalCreationTaskError>).terminalCreationTask,
+  )
+}
+
 export async function uploadCreationAsset(value?: string): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
@@ -511,13 +527,18 @@ function checkUpstreamError(data: any) {
   }
   const rawCode = data.code ?? data.status_code ?? data.statusCode
   const status = String(data.status || data.data?.status || '').toLowerCase()
+  const errCode = data.errorCode || data.error_code
+  const errMsg = data.errorMessage || data.error_message || data.error?.message
+  if (/^(failed|failure|fail|error|cancelled|canceled)$/i.test(status)) {
+    throw terminalCreationTaskError(
+      errMsg ? String(errMsg) : errCode ? `上游任务失败 (${errCode})` : '上游任务失败',
+    )
+  }
   const nonErrorStatus = /^(queued|queueing|submitting|processing|pending|running|in_progress|completed|complete|success|succeeded|done)$/i.test(status)
   if (rawCode !== undefined && rawCode !== null && rawCode !== 0 && rawCode !== '0' && rawCode !== 200 && rawCode !== '200' && rawCode !== 'success' && !nonErrorStatus) {
     const message = data.message || data.error?.message || data.error || data.fail_reason || data.failReason
     throw new Error(message ? String(message) : `上游错误 (${rawCode})`)
   }
-  const errCode = data.errorCode || data.error_code
-  const errMsg = data.errorMessage || data.error_message || data.error?.message
   if (errCode && errCode !== '0' && errCode !== 0) {
     // errorCode 1001 = Invalid URL, 1000 = Unknown error
     const friendlyMap: Record<string, string> = {
@@ -628,6 +649,7 @@ export async function pollTask(
       data = await apiCall(pollPath, null, 'GET')
       consecutive521 = 0  // 成功请求，重置 521 计数
     } catch (e: any) {
+      if (isTerminalCreationTaskError(e)) throw e
       // 上游偶发 521 时不要立即判失败，继续轮询 3 分钟
       if (e.message?.includes('521')) {
         consecutive521++
@@ -660,8 +682,9 @@ export async function pollTask(
     }
     if (/^(failed|failure|fail|error|cancelled|canceled)$/i.test(status)) {
       const err = data.fail_reason || data.failReason || data.error?.message ||
-                  data.data?.fail_reason || data.data?.error || data.error || '生成失败'
-      throw new Error(typeof err === 'string' ? err : JSON.stringify(err))
+                  data.data?.fail_reason || data.data?.error || data.errorMessage ||
+                  data.error_message || data.error || '生成失败'
+      throw terminalCreationTaskError(typeof err === 'string' ? err : JSON.stringify(err))
     }
     // 超过 5 分钟仍在处理，给用户更明确的反馈
     if (elapsed > 300) {

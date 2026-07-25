@@ -78,7 +78,9 @@ def _check_rh_error(data: dict, context: str = "") -> None:
 
     # Also check errorCode / errorMessage (RH v2 format)
     error_code = str(data.get("errorCode", "") or "").strip()
-    if error_code and error_code != "0":
+    task_status = str(data.get("status", "") or "").strip().lower()
+    terminal_task_status = task_status in {"failed", "failure", "fail", "error", "cancelled", "canceled"}
+    if error_code and error_code != "0" and not terminal_task_status:
         error_msg = data.get("errorMessage", "") or msg or f"RunningHub error {error_code}"
         full_msg = f"{context}: {error_msg}" if context else str(error_msg)
         raise RHError(full_msg, rh_code=error_code)

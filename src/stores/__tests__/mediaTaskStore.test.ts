@@ -2196,6 +2196,66 @@ test(
 )
 
 test(
+  'mediaTaskStore stops restored polling when RunningHub explicitly reports FAILED',
+  { concurrency: false },
+  async () => {
+    const savedTasks = [
+      {
+        id: 'mtask_content_audit_failed',
+        type: 'image',
+        model: 'rh-gpt2-text',
+        modelLabel: 'GPT2.0 文生图 · RunningHub',
+        prompt: '内容审核失败测试',
+        referenceImages: [],
+        status: 'pending',
+        progress: 0,
+        progressText: '轮询暂时失败，重启后将继续恢复',
+        createdAt: Date.now(),
+        source: 'creation',
+        route: 'runninghub-adapter',
+        upstreamFamily: 'runninghub',
+        upstreamTaskId: '2080000000000000001',
+        pollUrl: '/rh/tasks/2080000000000000001',
+        pollKind: 'image',
+      },
+    ]
+    const storage = installLocalStorage({
+      jc_media_tasks_v1: JSON.stringify(savedTasks),
+    })
+    const previousFetch = globalThis.fetch
+    let pollCount = 0
+    globalThis.fetch = async () => {
+      pollCount += 1
+      return Response.json({
+        taskId: '2080000000000000001',
+        status: 'FAILED',
+        errorCode: '1501',
+        errorMessage: 'Content security audit did not pass | 内容安全审查未通过',
+        results: null,
+      })
+    }
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const store = useMediaTaskStore()
+
+    try {
+      await withImmediateTimers(async () => {
+        await store.init()
+        await waitFor(() => store.getTask('mtask_content_audit_failed')?.status !== 'running')
+      })
+      const task = store.getTask('mtask_content_audit_failed')
+
+      assert.equal(task?.status, 'failed')
+      assert.match(task?.errorMsg || '', /内容安全审查未通过/)
+      assert.equal(pollCount, 1)
+    } finally {
+      globalThis.fetch = previousFetch
+      storage.restore()
+    }
+  },
+)
+
+test(
   'mediaTaskStore does not fail pending creation tasks without poll metadata during init recovery',
   { concurrency: false },
   async () => {
