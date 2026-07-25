@@ -29,6 +29,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
     'newapi/t8/gpt-image-2',
+    'newapi/vip/gpt-image-2-vip',
     'newapi/t8/grok-video-3',
     'newapi/t8/veo3.1-fast',
     'newapi/trump/seedance-2.0',
@@ -98,10 +99,28 @@ test('every registry model has a valid route contract and can produce a run plan
 
 test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.model, 'gpt-image-2')
+  assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.model, 'gpt-image-2-vip')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
   assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
   assert.equal(getCreationModelSpec('nonexistent-model-id'), undefined)
+})
+
+test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
+  const textOnly = buildCreationRunPlan({
+    modelId: 'newapi/vip/gpt-image-2-vip',
+    params: { prompt: '一张产品图', ratio: '1:1', resolution: '2k' },
+  })
+  const withImage = buildCreationRunPlan({
+    modelId: 'newapi/vip/gpt-image-2-vip',
+    params: { prompt: '改成产品图', images: ['https://example.com/ref.png'] },
+  })
+
+  assert.equal(textOnly.model, 'gpt-image-2-vip')
+  assert.equal(textOnly.endpoint, '/v1/images/generations')
+  assert.equal(textOnly.pollKind, 'none')
+  assert.equal(withImage.endpoint, '/v1/images/edits')
+  assert.equal(withImage.apiStyle, 'openai-image-edits')
 })
 
 test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () => {

@@ -89,6 +89,21 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     ],
   },
   {
+    id: 'gpt-image-2-vip',
+    label: 'GPT Image 2 VIP',
+    task: 'image',
+    model: 'gpt-image-2-vip',
+    provider: 'gateway-image',
+    maxFiles: 5,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'size', label: '尺寸', kind: 'select', defaultValue: 'auto', options: options(GPT_IMAGE_SIZES) },
+      { key: 'image', label: '参考图', kind: 'images' },
+      { key: 'response_format', label: '返回格式', kind: 'select', defaultValue: 'url', options: options(['url', 'b64_json']) },
+    ],
+  },
+  {
     id: 'nano-banana-2k',
     label: 'Nano Banana 2K',
     task: 'image',

@@ -54,7 +54,7 @@ test('media models are grouped by user-visible task with explicit model selectio
   const image = getMediaModelsForTask('image').map(model => model.id)
   const video = getMediaModelsForTask('video').map(model => model.id)
 
-  for (const modelId of ['gpt-image-2', 'nano-banana-4k', 'rh-pro-image', 'rh-gpt2-image']) {
+  for (const modelId of ['gpt-image-2', 'gpt-image-2-vip', 'nano-banana-4k', 'rh-pro-image', 'rh-gpt2-image']) {
     assert.equal(image.includes(modelId), true, modelId)
   }
   for (const modelId of ['rh-video-v31-fast', 'rh-seedance2-mini', 'rh-seedance2-fast', 'rh-grok-text-video']) {
@@ -178,6 +178,7 @@ test('removed media model matcher blocks stale upstream names before capability 
   assert.equal(isRemovedMediaModelId('nano-banana-4k'), false)
   assert.equal(isRemovedMediaModelId('nano-banana-pro-4k'), false)
   assert.equal(isRemovedMediaModelId('gpt-image-2'), false)
+  assert.equal(isRemovedMediaModelId('gpt-image-2-vip'), false)
 })
 
 test('runtime model availability can disable an otherwise local enabled model', () => {

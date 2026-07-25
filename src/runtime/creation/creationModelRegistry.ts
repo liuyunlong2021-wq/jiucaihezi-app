@@ -122,7 +122,7 @@ function directImage(input: {
   id: string
   model?: string
   label: string
-  price: number
+  price?: number
   upstreamFamily?: CreationUpstreamFamily
   apiStyle?: CreationApiStyle
   mode?: CreationMode
@@ -252,7 +252,7 @@ function runninghubStandard(input: {
   label: string
   task: CreationTask
   mode: CreationMode
-  price: number
+  price?: number
   apiStyle?: CreationApiStyle
   contractStatus?: CreationContractStatus
   endpoint?: string
@@ -399,6 +399,52 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ],
     aliases: ['gpt-image-2'],
     notes: ['docs/notes/T8gpt2.md'],
+    ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
+    resolutions: ['1k', '2k', '4k'],
+  }),
+  baseSpec({
+    id: 'newapi/vip/gpt-image-2-vip',
+    model: 'gpt-image-2-vip',
+    label: 'GPT Image 2 VIP · 直连',
+    task: 'image',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    pollKind: 'none',
+    mode: 'text-to-image',
+    contractStatus: 'verified',
+    endpoint: '/v1/images/generations',
+    assetFlow: 'none',
+    resultExtractor: 'openai-image',
+    files: { images: { min: 0, max: 8 } },
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '1:1',
+        options: options(['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']),
+      },
+      {
+        key: 'resolution',
+        label: '分辨率',
+        kind: 'select',
+        defaultValue: '2k',
+        options: options(['1k', '2k', '4k']),
+      },
+      { key: 'image', label: '参考图', kind: 'images' },
+      {
+        key: 'response_format',
+        label: '返回格式',
+        kind: 'select',
+        defaultValue: 'url',
+        options: options(['url', 'b64_json']),
+      },
+    ],
+    aliases: ['gpt-image-2-vip'],
+    notes: [],
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: ['1k', '2k', '4k'],
   }),

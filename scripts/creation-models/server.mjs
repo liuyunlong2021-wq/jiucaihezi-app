@@ -17,6 +17,7 @@ const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
   { id: 'gpt-image-2', aliases: ['gpt-image-2'] },
+  { id: 'gpt-image-2-vip', aliases: ['gpt-image-2-vip'] },
   { id: '普gpt-image-2', aliases: ['gpt-image-2'] },
   { id: '普gemini-3-pro-image-preview', aliases: ['gemini-3-pro-image-preview'] },
   { id: '普gemini-3.1-flash-image-preview', aliases: ['gemini-3.1-flash-image-preview'] },

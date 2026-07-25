@@ -67,12 +67,21 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
   const byId = Object.fromEntries(models.map(model => [model.id, model]))
 
   assert.equal(byId['gpt-image-2'].status, 'enabled')
+  assert.equal(byId['gpt-image-2-vip'].status, 'disabled')
   assert.equal(byId['nano-banana-4k'].status, 'enabled')
   assert.equal(byId['rh-pro-image'].status, 'enabled')
   assert.equal(byId['grok-video-3'].status, 'disabled')
   assert.equal(byId['grok-video-3'].reason, 'NewAPI 渠道已自动禁用')
   assert.equal(byId['rh-grok-text-video'].status, 'disabled')
   assert.equal(byId['rh-grok-text-video'].reason, 'NewAPI 渠道已自动禁用')
+})
+
+test('buildCreationModelAvailability detects GPT Image 2 VIP channels', () => {
+  const models = buildCreationModelAvailability([
+    { id: 91, name: 'vip', status: 1, baseUrl: 'x', models: ['gpt-image-2-vip'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'gpt-image-2-vip')?.status, 'enabled')
 })
 
 test('creation model availability tracks the complete active RH model set', () => {

@@ -55,7 +55,6 @@ jobs:
           args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Notarize macOS app (ARM)
-        if: env.APPLE_APP_PASSWORD != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -203,7 +202,6 @@ jobs:
           args: --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Notarize macOS app (Intel)
-        if: env.APPLE_APP_PASSWORD != ''
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

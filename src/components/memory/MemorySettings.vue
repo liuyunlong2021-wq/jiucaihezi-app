@@ -6,6 +6,10 @@ import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
 import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
+import { connectLocalOllama } from '@/utils/localOllamaRuntime'
+import { getLocalOllamaModels } from '@/utils/providerConfig'
+import { openExternal } from '@/utils/httpClient'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import {
   gatewayLogin,
   getApiKey,
@@ -20,6 +24,10 @@ const apiKey = ref('')
 const status = ref('')
 const saved = ref(false)
 const advancedOpen = ref(false)
+const desktopRuntime = isTauriRuntime()
+const localModelBusy = ref(false)
+const localModelStatus = ref('')
+const installedLocalModelCount = ref(0)
 const agentStore = useAgentStore()
 const { theme } = useTheme()
 const textModels = computed(() => agentStore.textModels.map(model => ({ id: model.id, label: model.label })))
@@ -43,9 +51,26 @@ function setFontSize(value: number) {
 }
 
 onMounted(async () => {
+  if (desktopRuntime) installedLocalModelCount.value = getLocalOllamaModels().length
   apiKey.value = getApiKey() || await initApiKey()
   if (apiKey.value) await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
 })
+
+async function connectOllama() {
+  if (localModelBusy.value) return
+  localModelBusy.value = true
+  localModelStatus.value = '正在连接 Ollama...'
+  try {
+    const result = await connectLocalOllama()
+    installedLocalModelCount.value = result.models.length
+    agentStore.refreshLocalModels()
+    localModelStatus.value = result.message
+  } catch {
+    localModelStatus.value = '未连接到 Ollama，请先安装并启动 Ollama。'
+  } finally {
+    localModelBusy.value = false
+  }
+}
 
 async function login(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> {
   const result = await gatewayLogin({ username: payload.username, password: payload.password })
@@ -89,19 +114,33 @@ async function saveKey() {
       </button>
     </nav>
     <div class="memory-settings-body">
-      <JcCloudLoginBox
-        v-if="tab === 'account'"
-        v-model:api-key="apiKey"
-        v-model:advanced-open="advancedOpen"
-        :logged-in="Boolean(apiKey)"
-        :saved="saved"
-        :status="status"
-        :model="agentStore.currentModel"
-        :chat-models="textModels"
-        :login="login"
-        @login-success="handleLogin"
-        @save-key="saveKey"
-      />
+      <div v-if="tab === 'account'" class="memory-account">
+        <JcCloudLoginBox
+          v-model:api-key="apiKey"
+          v-model:advanced-open="advancedOpen"
+          :logged-in="Boolean(apiKey)"
+          :saved="saved"
+          :status="status"
+          :model="agentStore.currentModel"
+          :chat-models="textModels"
+          :login="login"
+          @login-success="handleLogin"
+          @save-key="saveKey"
+        />
+        <section v-if="desktopRuntime" class="memory-local-model">
+          <div>
+            <strong>Ollama 本地模型</strong>
+            <span>{{ installedLocalModelCount ? `已识别 ${installedLocalModelCount} 个模型` : '未连接' }}</span>
+          </div>
+          <p v-if="localModelStatus">{{ localModelStatus }}</p>
+          <div class="memory-local-actions">
+            <button :disabled="localModelBusy" @click="connectOllama">
+              {{ localModelBusy ? '连接中' : '连接 Ollama' }}
+            </button>
+            <button @click="openExternal('https://ollama.com/download/mac')">下载安装</button>
+          </div>
+        </section>
+      </div>
       <WebSkillPanel v-else-if="tab === 'skills'" />
       <McpManagerPanel v-else-if="tab === 'mcp'" />
       <div v-else class="memory-appearance">
@@ -140,6 +179,13 @@ async function saveKey() {
 .memory-settings-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 36px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+.memory-account { display: grid; gap: 16px; }
+.memory-local-model { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.memory-local-model > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.memory-local-model span, .memory-local-model p { margin: 0; color: var(--ink3); font-size: 12px; }
+.memory-local-actions { display: flex; gap: 8px; }
+.memory-local-actions button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
+.memory-local-actions button:disabled { opacity: .55; cursor: progress; }
 .memory-appearance { display: grid; gap: 20px; }
 .memory-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .memory-theme-options button { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; }
