@@ -29,7 +29,6 @@ import {
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
 import { DEFAULT_TEXT_MODEL, chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
-import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { resolveModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
@@ -863,32 +862,11 @@ export const useAgentStore = defineStore('agents', () => {
     )
   }
 
-  async function bootstrapWebSkills(fetcher: typeof fetch = fetch) {
+  async function bootstrapWebSkills() {
     if (isTauriRuntime()) return
-    const userSkills = loadWebSkillsFromStorage()
-    try {
-      const skills: SkillConfig[] = (await loadWebSkillCatalog(fetcher)).map(skill => ({
-        id: skill.id,
-        name: skill.name,
-        description: skill.description || '',
-        triggers: skill.triggers,
-        references: [],
-        examples: [],
-        version: 1,
-        source: 'builtin',
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-        evolutionLog: [],
-        skillContent: `skill://${skill.id}/SKILL.md`,
-      }))
-      inMemorySkills.value = sortSkillConfigs([...skills, ...userSkills])
-      _skillsVersion.value++
-    } catch (e) {
-      console.warn('[JC] Web Skill 目录加载失败:', e)
-      inMemorySkills.value = sortSkillConfigs(userSkills)
-    } finally {
-      skillsBootstrapped.value = true
-    }
+    inMemorySkills.value = sortSkillConfigs(loadWebSkillsFromStorage())
+    _skillsVersion.value++
+    skillsBootstrapped.value = true
   }
 
   return {

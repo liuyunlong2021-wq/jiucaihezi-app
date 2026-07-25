@@ -3,6 +3,7 @@
  * 4 个主题: white / light / dark / green
  */
 import { ref, watch } from 'vue'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 type Theme = 'white' | 'light' | 'dark' | 'green'
 
@@ -12,7 +13,15 @@ function normalizeTheme(value: string | null): Theme {
   return 'light'
 }
 
-const theme = ref<Theme>(normalizeTheme(localStorage.getItem('jcTheme')))
+function initialTheme(): Theme {
+  if (!isTauriRuntime() && localStorage.getItem('jcMemoryThemeInitialized') !== '1') {
+    localStorage.setItem('jcMemoryThemeInitialized', '1')
+    return 'green'
+  }
+  return normalizeTheme(localStorage.getItem('jcTheme'))
+}
+
+const theme = ref<Theme>(initialTheme())
 
 function apply(t: Theme) {
   const root = document.documentElement

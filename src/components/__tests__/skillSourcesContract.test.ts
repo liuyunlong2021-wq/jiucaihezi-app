@@ -16,16 +16,17 @@ test('Desktop combines only local and bundled Skill sources before selection and
   assert.doesNotMatch(chatPanel, /for \(const skill of openCodeSkills\.value\)/)
 })
 
-test('bundled Skill list is browse-only while Web also exposes a user Skill editor', () => {
+test('Desktop keeps the bundled list while Web exposes only user-installed Skills', () => {
   assert.match(centralPanel, /viewMode === 'builtin'/)
   assert.match(centralPanel, /<BuiltInSkillList :skills="visibleBuiltInSkills"/)
   assert.match(webPanel, />自建</)
+  assert.match(webPanel, /store\.getCustomSkills\(\)/)
   assert.match(webPanel, /openCreate\(/)
   assert.match(webPanel, /openEdit\(skill: SkillConfig\)/)
   assert.match(webPanel, /await store\.createAgent\(skill\)/)
   assert.match(webPanel, /store\.updateSkill\(editingSkill\.value\.id, skill\)/)
   assert.match(webPanel, /await store\.deleteAgent\(skill\.id\)/)
-  assert.match(webPanel, /v-if="!isBuiltin\(skill\)"/)
+  assert.doesNotMatch(webPanel, /BuiltInSkillList|内置 Skill/)
   assert.doesNotMatch(builtInList, /<button/)
 })
 

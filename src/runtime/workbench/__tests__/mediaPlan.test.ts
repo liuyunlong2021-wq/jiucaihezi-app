@@ -176,7 +176,7 @@ test('accepts the fixed GPT Image 2 official handoff with a user-selected ratio'
   assert.doesNotThrow(() => validateMediaPlan(plan))
 })
 
-test('accepts a registered video plan and rejects unsupported task kinds', () => {
+test('accepts registered video and audio plans', () => {
   const video = parseMediaPlan([
     '```jc-media-plan',
     JSON.stringify({
@@ -190,7 +190,15 @@ test('accepts a registered video plan and rejects unsupported task kinds', () =>
   ].join('\n'))
   assert.doesNotThrow(() => validateMediaPlan(video))
   assert.throws(() => validateMediaPlan({ ...video, kind: 'image' }), /类型与模型不匹配/)
-  assert.throws(() => parseMediaPlan('```jc-media-plan\n{"kind":"audio"}\n```'), /只支持/)
+
+  const audio = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'audio',
+    title: '主题曲',
+    prompt: '一首轻快的中文流行歌',
+    modelId: 'runninghub/api/rh-suno-v55-single',
+  }) + '\n```')
+  assert.equal(audio.kind, 'audio')
+  assert.doesNotThrow(() => validateMediaPlan(audio))
 })
 
 test('media plan editor uses compatible registry models and normalizes changed model parameters', () => {

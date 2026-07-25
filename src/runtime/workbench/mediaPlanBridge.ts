@@ -53,6 +53,9 @@ export function buildMediaPlanSubmission(plan: MediaPlan) {
     ...(plan.kind === 'image'
       ? { imageParams: { prompt: plan.prompt, image: plan.referenceImages?.length ? plan.referenceImages : undefined } }
       : {}),
+    ...(plan.kind === 'audio'
+      ? { audioParams: { prompt: plan.prompt, title: plan.title } }
+      : {}),
     source: 'creation' as const,
     plan: runPlan,
   }

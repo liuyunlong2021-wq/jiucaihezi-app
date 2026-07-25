@@ -83,6 +83,19 @@ test('scaffold keeps the film structure distinct from novel-only categories', as
   assert.equal(entries.has('wiki/世界/设定/历史与时代.md'), false)
 })
 
+test('generic scaffold creates only the five stable Wiki files', async () => {
+  const { entries, workspace } = memoryWiki()
+
+  await executeWikiAction(workspace, { action: 'scaffold', type: 'generic' })
+  await executeWikiAction(workspace, { action: 'validate', type: 'generic' })
+
+  assert.deepEqual(
+    [...entries.keys()].filter(path => path.startsWith('wiki/')).sort(),
+    ['wiki/CLAUDE.md', 'wiki/hot.md', 'wiki/index.md', 'wiki/log.md', 'wiki/来源索引.md'],
+  )
+  assert.match(String(entries.get('wiki/来源索引.md')), /\.raw\/对话记录/)
+})
+
 test('search prioritizes current entry pages and excludes log and archive by default', async () => {
   const { workspace } = developmentWiki({
     'docs/wiki/hot.md': '# Hot\n\n原生运行时当前结论\n',

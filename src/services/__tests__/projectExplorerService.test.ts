@@ -39,6 +39,26 @@ test('resource open routing keeps non-Markdown project text in raw mode', async 
   }
 })
 
+test('resource open routing only treats marked Raw files as conversations', async () => {
+  const transcript = [
+    '# 聊聊历史',
+    '',
+    '<!-- jc:conversation id="chat_fixed" created-at="2026-07-24T10:00:00.000Z" -->',
+  ].join('\n')
+
+  const conversation = await openProjectResource(
+    fileService(transcript),
+    resource('document', '.raw/对话记录/chat_fixed.md'),
+  )
+  const normalDocument = await openProjectResource(
+    fileService(transcript),
+    resource('document', 'wiki/chat_fixed.md'),
+  )
+
+  assert.equal(conversation.type, 'conversation')
+  assert.equal(normalDocument.type, 'editor')
+})
+
 test('resource open routing rejects truncated documents before an editor tab exists', async () => {
   const result = await openProjectResource(fileService('# partial', true), resource('document', 'wiki/large.md'))
 

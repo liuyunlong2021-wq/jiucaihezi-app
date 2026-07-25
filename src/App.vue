@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onBeforeUnmount, onMounted, watch } from 'vue'
 import WorkspaceLayout from './layouts/WorkspaceLayout.vue'
+import MemoryWorkbench from './components/memory/MemoryWorkbench.vue'
 import GlobalSearch from './components/search/GlobalSearch.vue'
 import LocalCapabilitySetup from './components/settings/LocalCapabilitySetup.vue'
 import { shouldShowSetupWizard } from './utils/localCapabilities'
@@ -13,6 +14,7 @@ import { useChatModeStore } from './stores/chatModeStore'
 import { projectStoredNewApiForOpenCode } from './opencodeClient/providerProjection'
 
 const showSetupWizard = ref(false)
+const desktopRuntime = isTauriRuntime()
 const agentStore = useAgentStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
 const projectStore = useProjectStore()
@@ -91,6 +93,7 @@ function queueOpenCodeProjectSwitch(directory: string) {
 }
 
 onMounted(async () => {
+  if (!desktopRuntime) return
   try {
     showSetupWizard.value = await shouldShowSetupWizard()
   } catch { /* ignore */ }
@@ -143,8 +146,9 @@ async function checkNewVersion() {
 </script>
 
 <template>
-  <WorkspaceLayout />
-  <GlobalSearch />
+  <WorkspaceLayout v-if="desktopRuntime" />
+  <MemoryWorkbench v-else />
+  <GlobalSearch v-if="desktopRuntime" />
   <LocalCapabilitySetup
     v-if="showSetupWizard"
     mode="modal"

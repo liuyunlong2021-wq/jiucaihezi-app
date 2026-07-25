@@ -48,9 +48,23 @@ const isTauri = isTauriRuntime()
 
 // Boot theme from localStorage (flicker-free)
 try {
-  const theme = String(localStorage.getItem('jcTheme') || '').toLowerCase()
+  const memoryThemeInitialized = localStorage.getItem('jcMemoryThemeInitialized') === '1'
+  const theme = String(!isTauri && !memoryThemeInitialized
+    ? 'green'
+    : localStorage.getItem('jcTheme') || '').toLowerCase()
+  if (!isTauri && !memoryThemeInitialized) {
+    localStorage.setItem('jcTheme', 'green')
+    localStorage.setItem('jcMemoryThemeInitialized', '1')
+  }
   if (theme === 'dark' || theme === 'green') {
     document.documentElement.setAttribute('data-theme', theme)
+  }
+} catch (_) {}
+
+try {
+  const fontSize = Number(localStorage.getItem('jcFontSize'))
+  if (fontSize === 16 || fontSize === 18) {
+    document.documentElement.style.setProperty('--font-base', `${fontSize}px`)
   }
 } catch (_) {}
 

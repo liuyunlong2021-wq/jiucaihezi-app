@@ -1,6 +1,6 @@
 ---
 name: skill-creator
-description: Use when users want to create, edit, optimize, evaluate, or benchmark a reusable Skill and its discovery description.
+description: Use when users want to create, edit, optimize, evaluate, benchmark, or confirm installation of a reusable Skill and its discovery description.
 triggers:
   - 'Skill缔造'
   - '创建技能'
@@ -539,6 +539,33 @@ Repeating one more time the core loop here for emphasis:
 Please add steps to your TodoList, if you have such a thing, to make sure you don't forget. If you're in Cowork, please specifically put "Create evals JSON and run `eval-viewer/generate_review.py` so human can review test cases" in your TodoList to make sure it happens.
 
 Good luck!
+
+## 安装到“我的 Skill”
+
+只有用户明确说“安装”“帮我安装”或同等确认后，才输出安装产物。此前只展示和修改草稿，不输出安装块，也不要声称已经安装。
+
+安装产物必须是一个自包含的单文件 `SKILL.md`。把运行必需的规则写进正文；当前不要引用尚未安装的 `references/`、`scripts/` 或 `assets/`。
+
+输出一句简短确认语，再输出且只输出一个如下格式的代码块：
+
+````markdown
+Skill 已准备好，请确认安装。
+
+```jc-skill-install
+---
+name: lowercase-hyphen-name
+description: "说明这个 Skill 做什么，以及何时使用"
+triggers:
+  - 触发短语
+---
+
+# 工作流
+
+完整、自包含的 Skill 正文。
+```
+````
+
+`name` 只能使用小写字母、数字和连字符。安装块内必须是完整 `SKILL.md`，不能放 JSON、解释文字或省略号。界面会把这个块转换成安装确认卡；只有用户点击确认卡后才算安装成功。
 
 ## 指令
 

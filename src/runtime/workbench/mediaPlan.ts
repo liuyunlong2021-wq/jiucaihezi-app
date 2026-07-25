@@ -9,7 +9,7 @@ import { getMediaModelAvailability } from '@/data/mediaModelCapabilities'
 import type { MediaReference } from './mediaReference'
 /** The only model-authored media payload the app accepts. */
 export interface MediaPlan {
-  kind: 'image' | 'video'
+  kind: 'image' | 'video' | 'audio'
   title: string
   prompt: string
   modelId: string
@@ -47,16 +47,17 @@ export interface MediaPlanEditorControls {
 }
 
 export const MEDIA_PLAN_POLICY = [
-  '创作模式媒体执行规则：当用户明确要求生成图片或视频时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
-  '媒体计划字段：kind(image|video)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
+  '媒体执行规则：当用户明确要求生成图片、视频或音频时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
+  '媒体计划字段：kind(image|video|audio)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
   '不要自行选择默认模型：应用会默认使用 GPT Image 2 官方生图；视频按无参考、一张参考图、多素材分别使用标准 Seedance 2.0 文生、图生、多模态。用户可在确认卡手动调整模型。',
   '只能使用应用提供的素材 referenceId；不要输出 referenceImages、referenceVideos、URL、data URL 或文件路径。',
-  '不要在此路径运行 jc_media.py、媒体 API、轮询或下载；用户确认后由应用的现有创作面板执行。没有媒体生成意图时不要输出媒体计划。',
+  '不要直接运行媒体 API、轮询或下载；用户确认后由应用的公共媒体任务引擎执行。没有媒体生成意图时不要输出媒体计划。',
 ].join('\n')
 
 export function buildMediaPlanPolicy(referencePolicy = ''): string {
   const models = listCreationModels()
-    .filter(model => model.task === 'image' || model.task === 'video')
+    .filter(model => model.task === 'image' || model.task === 'video' || model.task === 'audio')
+    .filter(model => getCreationModelSpec(model.id)?.capabilities.outputModalities.includes(model.task as 'image' | 'video' | 'audio'))
     .filter(model => isCreationModelAvailable(model.id))
     .map(model => {
       const spec = getCreationModelSpec(model.id)!
@@ -114,8 +115,8 @@ export function parseMediaPlan(text: string): MediaPlan {
   }
 
   const plan = value as Record<string, unknown>
-  if (!['image', 'video'].includes(String(plan.kind))) {
-    throw new Error('媒体计划暂时只支持 image、video。')
+  if (!['image', 'video', 'audio'].includes(String(plan.kind))) {
+    throw new Error('媒体计划只支持 image、video、audio。')
   }
   for (const field of ['referenceImages', 'referenceVideos']) {
     if (plan[field] !== undefined) throw new Error(`媒体计划的 ${field} 不能由模型提供。`)
@@ -224,6 +225,7 @@ export function updateMediaPlanParameters(
 
 export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
   if (plan.kind === 'image') return 'runninghub/api/rh-gpt2-official'
+  if (plan.kind === 'audio') return 'runninghub/api/rh-suno-v55-single'
 
   const imageCount = Math.max(
     plan.referenceImages?.length || 0,

@@ -13,6 +13,7 @@ import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 
 const props = defineProps<{
   taskId: string
+  workbenchMode?: boolean
 }>()
 
 const taskStore = useMediaTaskStore()
@@ -96,10 +97,10 @@ function sendAsReference() {
         <button class="mtb-act-btn" @click="saveToFiles" title="保存到文件">
           <JcIcon name="save" /> 保存
         </button>
-        <button class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
+        <button v-if="!props.workbenchMode" class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
           <JcIcon name="filter" /> 画廊
         </button>
-        <button v-if="task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
+        <button v-if="!props.workbenchMode && task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
           <JcIcon name="image" /> 参考图
         </button>
       </div>

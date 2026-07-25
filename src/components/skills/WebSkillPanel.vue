@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import BuiltInSkillList from '@/components/skills/BuiltInSkillList.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { searchSkills } from '@/utils/skillSearch'
 import type { SkillConfig } from '@/types/skill'
@@ -11,25 +10,10 @@ const query = ref('')
 const showEditor = ref(false)
 const editingSkill = ref<SkillConfig | null>(null)
 const editForm = ref({ name: '', description: '', content: '' })
-const builtInSkills = computed(() => searchSkills(
-  query.value,
-  store.inMemorySkills.filter(skill => skill.source === 'builtin'),
-).map(skill => ({
-  id: skill.id,
-  name: skill.name,
-  description: skill.description || null,
-  triggers: skill.triggers || [],
-  commands: [],
-  files: ['SKILL.md'],
-})))
 const userSkills = computed(() => searchSkills(
   query.value,
-  store.inMemorySkills.filter(skill => skill.source !== 'builtin'),
+  store.getCustomSkills(),
 ))
-
-function isBuiltin(skill: SkillConfig) {
-  return skill.source === 'builtin'
-}
 
 function openCreate() {
   editingSkill.value = null
@@ -101,16 +85,13 @@ async function deleteSkill(skill: SkillConfig) {
             <strong>{{ skill.name }}</strong>
             <p>{{ skill.description || '暂无描述' }}</p>
           </div>
-          <div v-if="!isBuiltin(skill)" class="wsp-user-actions">
+          <div class="wsp-user-actions">
             <button type="button" @click="openEdit(skill)">编辑</button>
             <button class="danger" type="button" @click="deleteSkill(skill)">删除</button>
           </div>
         </article>
       </section>
-      <section class="wsp-section">
-        <div class="wsp-section-title">内置 Skill</div>
-        <BuiltInSkillList :skills="builtInSkills" />
-      </section>
+      <div v-else class="wsp-state">还没有安装 Skill</div>
     </div>
 
     <div v-if="showEditor" class="wsp-overlay" @click.self="closeEditor">

@@ -112,6 +112,18 @@ test('media plan bridge reuses the creation contract for video', () => {
   assert.equal(video.source, 'creation')
 })
 
+test('media plan bridge reuses the creation contract for audio', () => {
+  const audio = buildMediaPlanSubmission({
+    kind: 'audio',
+    title: '主题曲',
+    prompt: '一首轻快的中文流行歌',
+    modelId: 'runninghub/api/rh-suno-v55-single',
+  })
+  assert.equal(audio.type, 'audio')
+  assert.equal(audio.audioParams?.prompt, '一首轻快的中文流行歌')
+  assert.equal(audio.source, 'creation')
+})
+
 test('creative chat exposes a reviewed plan and delegates execution to CreationPanel', () => {
   const root = process.cwd()
   const chat = readFileSync(join(root, 'src/components/chat/ChatPanel.vue'), 'utf8')

@@ -14,6 +14,7 @@ const props = defineProps<{
   status?: 'ready' | 'submitting' | 'submitted' | 'failed'
   error?: string
   blocked?: boolean
+  workbenchMode?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -25,6 +26,7 @@ const emit = defineEmits<{
 const kindLabel = {
   image: '图片',
   video: '视频',
+  audio: '音频',
 } as const
 
 const spec = computed(() => getCreationModelSpec(props.plan.modelId))
@@ -55,6 +57,7 @@ const modeLabel = computed(() => {
     'text-to-video': '文生视频',
     'image-to-video': '图生视频',
     'video-edit': '视频编辑',
+    'text-to-audio': '文生音频',
   }
   return labels[effectiveMode.value || ''] || '媒体生成'
 })
@@ -184,9 +187,9 @@ function updateDuration(event: Event) {
         开始生成
       </button>
     </div>
-    <span v-else-if="status === 'submitting'" class="media-plan-status">正在提交到创作面板…</span>
+    <span v-else-if="status === 'submitting'" class="media-plan-status">正在提交媒体任务…</span>
     <span v-else-if="status === 'submitted'" class="media-plan-status"
-      >已提交，结果将在创作面板和画布中显示。</span
+      >{{ props.workbenchMode ? '已提交，结果会在当前对话中显示。' : '已提交，结果将在创作面板和画布中显示。' }}</span
     >
   </section>
 </template>

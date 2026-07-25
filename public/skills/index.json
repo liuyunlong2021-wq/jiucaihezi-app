@@ -857,7 +857,7 @@
   {
     "id": "skill-creator",
     "name": "skill-creator",
-    "description": "Use when users want to create, edit, optimize, evaluate, or benchmark a reusable Skill and its discovery description.",
+    "description": "Use when users want to create, edit, optimize, evaluate, benchmark, or confirm installation of a reusable Skill and its discovery description.",
     "triggers": [
       "'Skill缔造'",
       "'创建技能'",
