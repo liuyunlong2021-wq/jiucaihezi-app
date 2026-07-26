@@ -493,3 +493,10 @@
 - 公共媒体确认卡的“调整”区增加提示词编辑，修改后的当前值直接进入公共提交合同；不增加“简单/专业”模式。
 - 媒体模型下拉对同名来源补充“直连 / RunningHub”，解决 Veo 3.1 Fast 多渠道显示成同名项的问题，不修改模型 ID、渠道和价格。
 - 恢复独立记忆工作台文件树的“引用到对话”：图片、视频和音频从项目文件读取真实字节与 MIME 后进入当前输入框附件；复制路径仍只复制文字，不隐式读取或上传文件。
+
+## [2026-07-26] 实施 | 第四阶段 SYNC_DB 数据底座
+
+- Cloudflare 创建 APAC D1 `jiucaihezi_sync`（Gateway binding `SYNC_DB`），与现有账号数据库 `DB` 完全分离。
+- 新增可审计 migration `0001_sync_foundation.sql`：项目归属、文本版本与 tombstone、同步 mutation 游标/幂等三张表，不包含媒体、Skill、MCP、Provider 或凭据字段。
+- 本地 D1 migration 执行成功；三表三索引、样例写入、递增 `seq` 和重复 `mutation_id` 拒绝通过，Gateway dry-run 同时识别 `DB` 与 `SYNC_DB`。现有 Gateway 测试 `18/20`，两条旧 landing/废弃路由合同失败与本次 TOML/SQL 变更无关。
+- 经用户确认，`0001_sync_foundation.sql` 已应用到远端；Wrangler 显示无待执行 migration，远端 `projects`、`text_files`、`sync_mutations` 及三项业务索引均存在。未写入远端样例数据，Gateway 尚未部署。

@@ -686,6 +686,8 @@ D1 为每个云项目生成稳定 `project_id`。每台设备只在本地保存 
 - Web 2.0.1 已构建并正式发布到 <https://jiucaihezi.studio>，生产域名已验证加载新资源。
 - Apple Silicon Mac 2.0.1 本机测试包已构建、校验并启动；Mobile 原生 App 尚未实施。
 - 第四阶段入口改为 4A 文字同步底座，完成 Web ↔ Mac 真机闭环后再进入 4B Mobile。
+- Cloudflare 已创建 APAC 独立 D1 `jiucaihezi_sync`，Gateway 配置以 `SYNC_DB` 作为第二绑定；首份 `0001_sync_foundation.sql` 已在本地及远端 D1 应用，远端三表三索引已核验，Gateway 尚未部署。
+- 本地 schema 包含 `projects`、`text_files`、`sync_mutations`；服务端递增 `seq` 用作拉取游标，客户端 `mutation_id` 唯一约束负责重试幂等。三表、三索引、插入/游标与重复 mutation 拒绝均已实测。
 
 ### 14.6 导航职责分离决策记录（2026-07-26）
 

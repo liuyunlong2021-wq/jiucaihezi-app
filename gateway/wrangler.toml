@@ -28,3 +28,9 @@ id = "b32af0b054b14548a81a1c77717c1299"
 binding = "DB"
 database_name = "jiucaihezi_gateway"
 database_id = "e91b223c-6a4d-4df3-8872-6e35072f3fcf"
+
+[[d1_databases]]
+binding = "SYNC_DB"
+database_name = "jiucaihezi_sync"
+database_id = "dd23df95-cb41-44a3-a0d4-d219f3a4707a"
+migrations_dir = "migrations/sync"
