@@ -233,6 +233,24 @@ test('memory file actions stay inside the memory resource route on Desktop', () 
   assert.match(tree, /isDesktop && props\.memoryMode[\s\S]*用系统默认应用打开/)
 })
 
+test('memory navigation separates Raw conversations from project files and transient previews', () => {
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(tree, /path === '\.raw' \|\| path\.startsWith\('\.raw\/'\)/)
+  assert.match(workbench, /const conversations = ref<MemoryConversation\[\]>\(\[\]\)/)
+  assert.match(workbench, /class="memory-conversation-trigger"/)
+  assert.match(workbench, /filteredConversations/)
+  assert.match(workbench, /renameMemoryConversation\(item\.resource, nextTitle, files\)/)
+  assert.match(workbench, /files\.planBatch\(\{ kind: 'delete', resources: \[item\.resource\] \}\)/)
+  assert.match(workbench, /files\.executeBatch\(plan\)/)
+  assert.match(workbench, /const previewResource = ref<ProjectResourceOpenResult \| null>\(null\)/)
+  assert.match(workbench, /else \{\s*releaseMediaUrl\(\)\s*previewResource\.value = resource\s*\}/)
+  assert.match(workbench, />返回对话</)
+  assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
+  assert.doesNotMatch(workbench, /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/)
+})
+
 test('memory settings expose the existing Desktop local model runtime', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')

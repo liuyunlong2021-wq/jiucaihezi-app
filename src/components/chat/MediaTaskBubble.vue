@@ -5,7 +5,7 @@
  * 在对话区显示媒体生成任务的实时进度和最终结果。
  * 响应式连接到 mediaTaskStore，自动更新。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useMediaTaskStore, type MediaTask } from '@/stores/mediaTaskStore'
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
@@ -30,6 +30,7 @@ const isRunning = computed(() => task.value?.status === 'running' || task.value?
 const isSuccess = computed(() => task.value?.status === 'success')
 const isFailed = computed(() => task.value?.status === 'failed')
 const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
+const linkCopied = ref(false)
 const projectResource = computed<ProjectResource | undefined>(() => {
   const t = task.value
   const path = String(t?.projectPath || '')
@@ -71,6 +72,14 @@ async function downloadCopy() {
     mimeType: t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : t.type === 'model3d' ? 'model/gltf-binary' : 'image/png',
     data: await fetchBlobForExport(t.resultUrl),
   })
+}
+
+async function copyOriginalLink() {
+  const url = task.value?.resultUrl
+  if (!url || !isAllowedCreationResultUrl(url)) return
+  await navigator.clipboard.writeText(url)
+  linkCopied.value = true
+  window.setTimeout(() => { linkCopied.value = false }, 1400)
 }
 
 async function revealInTree() {
@@ -134,6 +143,9 @@ function sendAsReference() {
       <div class="mtb-actions">
         <button class="mtb-act-btn" @click="downloadCopy" title="下载副本">
           <JcIcon name="download" /> 下载
+        </button>
+        <button class="mtb-act-btn" @click="copyOriginalLink" title="复制上游返回的原始链接">
+          <JcIcon name="link" /> {{ linkCopied ? '已复制' : '原始链接' }}
         </button>
         <button v-if="projectResource" class="mtb-act-btn" @click="revealInTree" title="在文件树中查看">
           <JcIcon name="folder_open" /> 在文件树中查看

@@ -19,6 +19,7 @@ import {
   initializeMemoryProject,
   inspectMemoryProject,
   renameMemoryConversation,
+  type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
 import {
@@ -44,6 +45,8 @@ import { getPlainText, setEditorText } from '@/composables/useContentEditable'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { SkillConfig } from '@/types/skill'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { confirmAction } from '@/utils/confirmAction'
+import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 
 const projectStore = useProjectStore()
@@ -52,6 +55,11 @@ const mediaTaskStore = useMediaTaskStore()
 const files = createRuntimeProjectFileService()
 const desktopRuntime = isTauriRuntime()
 const opened = ref<ProjectResourceOpenResult | null>(null)
+const previewResource = ref<ProjectResourceOpenResult | null>(null)
+const conversations = ref<MemoryConversation[]>([])
+const conversationPickerOpen = ref(false)
+const conversationSearch = ref('')
+const conversationPickerRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
@@ -100,9 +108,13 @@ let offReferenceFile: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
-const title = computed(() => {
-  if (conversation.value) return conversation.value.transcript.title
-  return opened.value?.resource.name || projectStore.projectName.value || '韭菜盒子'
+const title = computed(() => projectStore.projectName.value || '韭菜盒子')
+const filteredConversations = computed(() => {
+  const query = conversationSearch.value.trim().toLowerCase()
+  return conversations.value
+    .filter(item => !query || item.transcript.title.toLowerCase().includes(query))
+    .slice()
+    .reverse()
 })
 const textModels = computed(() => agentStore.textModels.filter(model => !isInternalMediaModel(model.id)))
 const modelGroups = computed(() => {
@@ -126,6 +138,7 @@ onMounted(async () => {
   offMediaTaskSettled = onEvent('media-task-settled', payload => void recordMediaResult(payload))
   offReferenceFile = onEvent('reference-file', addReferencedFile)
   document.addEventListener('pointerdown', closeModelPicker)
+  document.addEventListener('keydown', handleGlobalKeydown)
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
   await Promise.all([
     refreshSkills(),
@@ -140,6 +153,7 @@ onBeforeUnmount(() => {
   offMediaTaskSettled?.()
   offReferenceFile?.()
   document.removeEventListener('pointerdown', closeModelPicker)
+  document.removeEventListener('keydown', handleGlobalKeydown)
   stopProjectWatch?.()
   projectGeneration++
   abortController?.abort()
@@ -171,6 +185,11 @@ function isInternalMediaModel(modelId: string): boolean {
 
 function closeModelPicker(event: PointerEvent) {
   if (modelPickerOpen.value && !modelPickerRef.value?.contains(event.target as Node)) modelPickerOpen.value = false
+  if (conversationPickerOpen.value && !conversationPickerRef.value?.contains(event.target as Node)) conversationPickerOpen.value = false
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && previewResource.value) closePreview()
 }
 
 function selectModel(modelId: string) {
@@ -181,6 +200,8 @@ function selectModel(modelId: string) {
 async function openProject(owner: string) {
   const generation = ++projectGeneration
   opened.value = null
+  previewResource.value = null
+  conversations.value = []
   memoryReady.value = false
   error.value = ''
   if (!owner) return
@@ -188,6 +209,7 @@ async function openProject(owner: string) {
     const state = await inspectMemoryProject(owner, files)
     if (generation !== projectGeneration) return
     memoryReady.value = state.initialized
+    conversations.value = state.conversations
     const first = state.conversations[0]
     if (first) await openResource(await openProjectResource(files, first.resource))
   } catch (cause) {
@@ -205,6 +227,7 @@ async function createMemorySpace() {
     await initializeMemoryProject(owner, files)
     memoryReady.value = true
     opened.value = null
+    conversations.value = []
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -219,6 +242,7 @@ async function startNewConversation() {
   error.value = ''
   try {
     const created = await createMemoryConversation(owner, '新对话', files)
+    rememberConversation(created)
     await openResource(await openProjectResource(files, created.resource))
     await nextTick()
     composerRef.value?.focus()
@@ -235,12 +259,15 @@ watch(() => conversation.value?.transcript.turns.length, async () => {
 })
 
 async function openResource(resource: ProjectResourceOpenResult) {
-  releaseMediaUrl()
-  opened.value = resource
   error.value = ''
   if (!sending.value) status.value = ''
   streamingText.value = ''
   if (resource.type === 'conversation') {
+    closePreview()
+    opened.value = resource
+    rememberConversation({ resource: resource.resource, transcript: resource.transcript })
+    conversationPickerOpen.value = false
+    conversationSearch.value = ''
     executionMode.value = [...resource.transcript.turns].reverse()
       .find(turn => turn.role === 'user' && turn.mode)?.mode || 'memory'
     for (const turn of resource.transcript.turns) {
@@ -254,7 +281,11 @@ async function openResource(resource: ProjectResourceOpenResult) {
         skillInstallStatus.value[turn.id] ||= 'ready'
       } catch { /* ordinary assistant reply */ }
     }
-  } else if (resource.type === 'media') {
+  } else {
+    releaseMediaUrl()
+    previewResource.value = resource
+  }
+  if (resource.type === 'media') {
     try {
       const binary = await files.readBinary(resource.resource)
       mediaObjectUrl = URL.createObjectURL(new Blob(
@@ -267,6 +298,52 @@ async function openResource(resource: ProjectResourceOpenResult) {
     }
   }
   if (window.innerWidth <= 760) treeOpen.value = false
+}
+
+function rememberConversation(next: MemoryConversation) {
+  const index = conversations.value.findIndex(item => item.resource.path === next.resource.path)
+  if (index < 0) conversations.value.push(next)
+  else conversations.value[index] = next
+}
+
+async function selectConversation(item: MemoryConversation) {
+  await openResource(await openProjectResource(files, item.resource))
+}
+
+async function renameConversation(item: MemoryConversation) {
+  const nextTitle = (await safePrompt('重命名对话', item.transcript.title, { forceDom: desktopRuntime }))?.trim()
+  if (!nextTitle || nextTitle === item.transcript.title) return
+  try {
+    const renamed = await renameMemoryConversation(item.resource, nextTitle, files)
+    rememberConversation(renamed)
+    if (conversation.value?.resource.path === item.resource.path) {
+      opened.value = await openProjectResource(files, renamed.resource)
+    }
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+
+async function deleteConversation(item: MemoryConversation) {
+  if (!(await confirmAction(`删除对话“${item.transcript.title}”？`, { title: '删除对话', okLabel: '删除' }))) return
+  try {
+    const plan = await files.planBatch({ kind: 'delete', resources: [item.resource] })
+    const result = await files.executeBatch(plan)
+    if (result.failures.length) throw new Error(result.failures[0].message)
+    conversations.value = conversations.value.filter(entry => entry.resource.path !== item.resource.path)
+    if (conversation.value?.resource.path === item.resource.path) {
+      opened.value = null
+      const next = conversations.value.at(-1)
+      if (next) await selectConversation(next)
+    }
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+
+function closePreview() {
+  previewResource.value = null
+  releaseMediaUrl()
 }
 
 async function send() {
@@ -296,6 +373,7 @@ async function send() {
       const titleSource = message || pendingAttachments[0]?.name || '新对话'
       saved = await renameMemoryConversation(saved.resource, titleSource.replace(/\s+/g, ' ').slice(0, 28), files)
     }
+    rememberConversation(saved)
     opened.value = await openProjectResource(files, saved.resource)
     input.value = ''
     setEditorText(composerRef.value, '')
@@ -330,6 +408,7 @@ async function send() {
       },
     })
     const complete = await appendMemoryTurn(saved.resource, 'assistant', reply, files)
+    rememberConversation(complete)
     opened.value = await openProjectResource(files, complete.resource)
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
@@ -607,6 +686,33 @@ function readDataUrl(file: File): Promise<string> {
     <main class="memory-main">
       <header class="memory-topbar">
         <button v-if="!treeOpen" class="icon-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
+        <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
+          <button
+            class="memory-conversation-trigger"
+            type="button"
+            :aria-expanded="conversationPickerOpen"
+            @click="conversationPickerOpen = !conversationPickerOpen"
+          >
+            <span>{{ conversation?.transcript.title || '选择对话' }}</span>
+            <JcIcon :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
+          </button>
+          <div v-if="conversationPickerOpen" class="memory-conversation-menu">
+            <input v-model="conversationSearch" type="search" placeholder="搜索对话" aria-label="搜索对话" />
+            <div class="memory-conversation-list">
+              <div
+                v-for="item in filteredConversations"
+                :key="item.transcript.id"
+                class="memory-conversation-item"
+                :class="{ active: item.resource.path === conversation?.resource.path }"
+              >
+                <button class="memory-conversation-name" @click="selectConversation(item)">{{ item.transcript.title }}</button>
+                <button class="memory-conversation-action" title="重命名" @click="renameConversation(item)"><JcIcon name="edit" /></button>
+                <button class="memory-conversation-action" title="删除" @click="deleteConversation(item)"><JcIcon name="delete" /></button>
+              </div>
+              <p v-if="!filteredConversations.length" class="memory-model-empty">没有匹配的对话</p>
+            </div>
+          </div>
+        </div>
         <div class="memory-title-drag" data-tauri-drag-region><strong data-tauri-drag-region>{{ title }}</strong></div>
         <div class="memory-topbar-actions">
           <button
@@ -671,16 +777,6 @@ function readDataUrl(file: File): Promise<string> {
         </article>
       </section>
 
-      <section v-else-if="opened?.type === 'editor'" class="memory-document">
-        <pre>{{ opened.text.content }}</pre>
-      </section>
-      <section v-else-if="opened?.type === 'media'" class="memory-media">
-        <img v-if="opened.mediaKind === 'image' && mediaUrl" :src="mediaUrl" :alt="opened.resource.name" />
-        <video v-else-if="opened.mediaKind === 'video' && mediaUrl" :src="mediaUrl" controls />
-        <audio v-else-if="opened.mediaKind === 'audio' && mediaUrl" :src="mediaUrl" controls />
-        <p v-else>该媒体文件暂时无法在浏览器中预览。</p>
-      </section>
-      <section v-else-if="opened" class="memory-empty-state">该文件不支持直接预览，请从文件树菜单导出。</section>
       <section v-else-if="projectOwner && !memoryReady" class="memory-onboarding">
         <div>
           <img src="/logo.svg" alt="" />
@@ -760,6 +856,24 @@ function readDataUrl(file: File): Promise<string> {
           <button v-else class="send-button" title="发送" :disabled="!input.trim() && !attachments.length && !referencedFiles.length" @click="send"><JcIcon name="arrow-upward" /></button>
         </div>
       </footer>
+
+      <section v-if="previewResource" class="memory-preview">
+        <header class="memory-preview-header">
+          <button class="memory-preview-back" @click="closePreview"><JcIcon name="arrow-back" /><span>返回对话</span></button>
+          <strong>{{ previewResource.resource.name }}</strong>
+          <button class="icon-button" title="关闭预览" @click="closePreview"><JcIcon name="close" /></button>
+        </header>
+        <div v-if="previewResource.type === 'editor'" class="memory-document">
+          <pre>{{ previewResource.text.content }}</pre>
+        </div>
+        <div v-else-if="previewResource.type === 'media'" class="memory-media">
+          <img v-if="previewResource.mediaKind === 'image' && mediaUrl" :src="mediaUrl" :alt="previewResource.resource.name" />
+          <video v-else-if="previewResource.mediaKind === 'video' && mediaUrl" :src="mediaUrl" controls />
+          <audio v-else-if="previewResource.mediaKind === 'audio' && mediaUrl" :src="mediaUrl" controls />
+          <p v-else>该媒体文件暂时无法在浏览器中预览。</p>
+        </div>
+        <div v-else class="memory-empty-state">该文件不支持直接预览，请从文件树菜单导出。</div>
+      </section>
     </main>
 
     <div v-if="settingsOpen" class="memory-settings-backdrop" @click="settingsOpen = false"></div>
@@ -776,13 +890,27 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
 .memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
-.memory-main { display: grid; grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+.memory-main { position: relative; display: grid; grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .memory-topbar { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-title-drag > * { pointer-events: none; }
 .memory-title-drag > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-base); }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
+.memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
+.memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
+.memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }
+.memory-conversation-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-conversation-trigger:hover, .memory-conversation-trigger[aria-expanded="true"] { border-color: var(--olive); }
+.memory-conversation-menu { position: absolute; z-index: 50; top: calc(100% + 7px); left: 0; width: min(320px, 84vw); padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
+.memory-conversation-menu > input { width: 100%; height: 32px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--surface); color: var(--ink1); font: inherit; }
+.memory-conversation-menu > input:focus { border-color: var(--olive); }
+.memory-conversation-list { max-height: min(420px, 58vh); margin-top: 6px; overflow-y: auto; }
+.memory-conversation-item { display: grid; grid-template-columns: minmax(0, 1fr) 30px 30px; align-items: center; border-radius: 5px; }
+.memory-conversation-item:hover, .memory-conversation-item.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
+.memory-conversation-name, .memory-conversation-action { min-width: 0; height: 34px; border: 0; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; }
+.memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.memory-conversation-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
+.memory-conversation-action:hover { color: var(--olive); }
 .new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
 .memory-model-picker { position: relative; min-width: 0; max-width: min(260px, 28vw); }
@@ -837,6 +965,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-media { display: grid; min-height: 0; padding: 20px; place-items: center; overflow: auto; }
 .memory-media img, .memory-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .memory-media audio { width: min(620px, 100%); }
+.memory-preview { position: absolute; z-index: 20; inset: var(--memory-header-height) 0 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); min-height: 0; background: var(--paper); }
+.memory-preview-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.memory-preview-header > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.memory-preview-back { display: flex; height: 34px; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; }
 .memory-empty-state { display: grid; min-height: 0; padding: 32px; place-items: center; color: var(--ink3); font-size: calc(var(--font-base) - 1px); }
 .memory-onboarding { display: grid; min-height: 0; padding: 32px; place-items: center; text-align: center; }
 .memory-onboarding > div { display: grid; justify-items: center; gap: 12px; }
@@ -859,8 +991,13 @@ function readDataUrl(file: File): Promise<string> {
   .memory-tree { position: fixed; z-index: 38; inset: 0 auto 0 0; width: min(320px, 88vw); transform: translateX(-100%); transition: transform .18s ease; }
   .memory-tree.open { transform: translateX(0); }
   .memory-tree-backdrop, .mobile-only { display: grid; }
-  .memory-topbar { padding: 0 8px; }
-  .memory-model-picker { max-width: 42vw; }
+  .memory-topbar { gap: 4px; padding: 0 8px; }
+  .memory-title-drag { display: none; }
+  .memory-topbar-actions { gap: 4px; }
+  .memory-conversation-picker { max-width: 90px; }
+  .new-conversation-button { padding: 0 7px; }
+  .memory-model-picker { max-width: 100px; }
+  .memory-model-menu { right: 0; left: auto; }
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }

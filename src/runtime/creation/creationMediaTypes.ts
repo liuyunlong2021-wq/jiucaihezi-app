@@ -86,7 +86,7 @@ export interface CreationModelSpec {
   apiStyle: CreationApiStyle
   mode: CreationMode
   contractStatus: CreationContractStatus
-  price?: number
+  price?: number | string
   endpoint: string
   poll?: {
     kind: CreationPollKind
@@ -131,7 +131,7 @@ export interface CreationModelListItem {
   source: CreationSource
   upstreamFamily: CreationUpstreamFamily
   mode: CreationMode
-  price?: number
+  price?: number | string
   contractStatus: CreationContractStatus
   disabledReason?: string
   badges: string[]
@@ -165,7 +165,7 @@ export interface CreationRunPlan {
   pollKind: CreationPollKind
   assetFlow: CreationAssetFlow
   submitSummary: string
-  price?: number
+  price?: number | string
   warnings?: string[]
   debug: {
     referenceImageCount: number

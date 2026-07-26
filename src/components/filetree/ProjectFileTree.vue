@@ -569,7 +569,7 @@ const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
 function isVisibleMemoryResource(path: string): boolean {
-  return !(props.memoryMode && (path === '.raw/sessions' || path.startsWith('.raw/sessions/')))
+  return !(props.memoryMode && (path === '.raw' || path.startsWith('.raw/')))
 }
 function isCanvasFile(node: TreeNode | null | undefined): node is TreeNode {
   return Boolean(node && !node.isDir && node.name.toLowerCase().endsWith(`.${CANVAS_EXT}`))

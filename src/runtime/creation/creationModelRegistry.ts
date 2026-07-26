@@ -56,7 +56,7 @@ function baseSpec(input: {
   apiStyle: CreationApiStyle
   mode: CreationMode
   contractStatus?: CreationContractStatus
-  price?: number
+  price?: number | string
   endpoint: string
   pollKind?: NonNullable<CreationModelSpec['poll']>['kind']
   assetFlow?: CreationAssetFlow
@@ -122,7 +122,7 @@ function directImage(input: {
   id: string
   model?: string
   label: string
-  price?: number
+  price?: number | string
   upstreamFamily?: CreationUpstreamFamily
   apiStyle?: CreationApiStyle
   mode?: CreationMode
@@ -371,7 +371,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     mode: 'text-to-image',
     contractStatus: 'verified',
-    price: 0.15,
+    price: '分组计价 · 自动账户 ¥0.12',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
@@ -418,6 +418,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'none',
     mode: 'text-to-image',
     contractStatus: 'verified',
+    price: '¥0.20',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',

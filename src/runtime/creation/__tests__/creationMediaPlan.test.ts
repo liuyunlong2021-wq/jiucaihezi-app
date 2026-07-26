@@ -205,6 +205,11 @@ test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () 
   assert.match(plan.submitSummary, /size=2048x1152/)
 })
 
+test('direct GPT Image 2 models show the configured group and VIP prices', () => {
+  assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.price, '分组计价 · 自动账户 ¥0.12')
+  assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.price, '¥0.20')
+})
+
 test('direct GPT Image 2 switches generation and edit contracts by reference image presence', () => {
   const textOnly = buildCreationRunPlan({
     modelId: 'newapi/t8/gpt-image-2',
