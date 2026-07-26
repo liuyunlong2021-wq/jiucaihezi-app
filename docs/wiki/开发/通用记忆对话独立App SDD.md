@@ -496,6 +496,7 @@ Web / Mac / Mobile
 - 不启用 R2。只有未来明确要求媒体跨设备时，才单独评估 R2、流量、生命周期和用户配额。
 - 所有查询必须带 `user_id` 所有权条件；客户端提交的 user ID 不可信，用户身份只能来自服务端 Session。
 - Worker 只接受允许的相对路径、UTF-8 文本、大小上限和内容哈希；拒绝 `..`、绝对路径、NUL、凭据路径和媒体目录。
+- 第一版服务端合同为 `GET/POST /sync/projects`、`GET/POST /sync/projects/:id/files`、`POST /sync/projects/:id/delete` 与 `POST /sync/projects/:id/restore`。单文件上限 2MB，单批 1-100 项，单次拉取最多 200 个路径。
 
 最小数据模型：
 
@@ -687,7 +688,9 @@ D1 为每个云项目生成稳定 `project_id`。每台设备只在本地保存 
 - Apple Silicon Mac 2.0.1 本机测试包已构建、校验并启动；Mobile 原生 App 尚未实施。
 - 第四阶段入口改为 4A 文字同步底座，完成 Web ↔ Mac 真机闭环后再进入 4B Mobile。
 - Cloudflare 已创建 APAC 独立 D1 `jiucaihezi_sync`，Gateway 配置以 `SYNC_DB` 作为第二绑定；首份 `0001_sync_foundation.sql` 已在本地及远端 D1 应用，远端三表三索引已核验，Gateway 尚未部署。
-- 本地 schema 包含 `projects`、`text_files`、`sync_mutations`；服务端递增 `seq` 用作拉取游标，客户端 `mutation_id` 唯一约束负责重试幂等。三表、三索引、插入/游标与重复 mutation 拒绝均已实测。
+- 基础 schema 包含 `projects`、`text_files`、`sync_mutations`；服务端递增 `seq` 用作拉取游标，客户端 `mutation_id` 唯一约束负责重试幂等。三表、基础三索引、插入/游标与重复 mutation 拒绝均已实测。
+- 为避免两个设备同时读到同一 revision 后静默覆盖，新增 `0002_sync_revision_guard.sql`，由数据库唯一约束 `(project_id, path, revision)` 作为最终并发门禁；D1 batch 冲突整体回滚并返回 `409`。该 migration 已在本地与远端应用并核验。
+- Gateway 已本地实现受 `requireWebUser()` 保护的项目列表/创建、增量拉取、批量推送、项目删除/恢复接口；登录同时签发独立 `sync_session`，不改变普通 NewAPI Key 的模型调用职责。未登录、账号隔离、伪造 user ID、路径、幂等、revision 冲突和 tombstone 合同测试已通过，Worker dry-run 同时识别 `DB` 与 `SYNC_DB`；尚未部署，客户端 `syncClient` 与本地待同步队列仍待实施。
 
 ### 14.6 导航职责分离决策记录（2026-07-26）
 

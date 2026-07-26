@@ -37,7 +37,8 @@ test('health exposes only auth broker capabilities', async () => {
     'auth.login',
     'auth.desktop',
     'auth.session',
-    'auth.logout'
+    'auth.logout',
+    'sync.text'
   ]);
 });
 

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "test": "node --test tests/login.test.mjs tests/auth-broker.test.mjs",
+    "test": "node --test tests/login.test.mjs tests/auth-broker.test.mjs tests/sync.test.mjs",
     "deploy": "wrangler deploy --keep-vars"
   },
   "devDependencies": {

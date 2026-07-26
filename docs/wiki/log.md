@@ -500,3 +500,10 @@
 - 新增可审计 migration `0001_sync_foundation.sql`：项目归属、文本版本与 tombstone、同步 mutation 游标/幂等三张表，不包含媒体、Skill、MCP、Provider 或凭据字段。
 - 本地 D1 migration 执行成功；三表三索引、样例写入、递增 `seq` 和重复 `mutation_id` 拒绝通过，Gateway dry-run 同时识别 `DB` 与 `SYNC_DB`。现有 Gateway 测试 `18/20`，两条旧 landing/废弃路由合同失败与本次 TOML/SQL 变更无关。
 - 经用户确认，`0001_sync_foundation.sql` 已应用到远端；Wrangler 显示无待执行 migration，远端 `projects`、`text_files`、`sync_mutations` 及三项业务索引均存在。未写入远端样例数据，Gateway 尚未部署。
+
+## [2026-07-26] 实施 | Gateway 文字同步接口
+
+- `/auth/login` 在普通 NewAPI Key 之外签发独立 `sync_session`；聊天仍直连 NewAPI，同步接口只接受 `jc_session` 或 `X-JC-Session`，客户端传入的 user ID 不参与授权。
+- 新增项目列表/创建、按游标增量拉取、1-100 项批量推送、项目 tombstone 删除/恢复；服务端校验账号所有权、相对安全文本路径、2MB 上限、内容哈希、`expected_revision` 和幂等 `mutation_id`。
+- 新增同步与鉴权合同 `17/17` 通过，Gateway dry-run 同时识别 `DB` 与 `SYNC_DB` 并包含 `/sync/*` 路由；完整 Gateway 测试为 `31/33`，两项旧 landing/废弃路由失败与本次同步链路无关。Gateway 尚未部署，客户端同步队列尚未接入。
+- 并发复审补充 `0002_sync_revision_guard.sql`：数据库唯一约束 `(project_id, path, revision)` 阻止两个设备从同一旧版本同时写入；冲突 D1 batch 整体回滚并由 Gateway 返回 `409`。本地与远端 migration 均已应用，远端迁移队列为空且唯一索引已核验。

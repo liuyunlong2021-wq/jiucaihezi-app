@@ -3,13 +3,16 @@ import { badRequest } from './errors.js';
 import { errorResponse, jsonResponse, notFound, readJson } from './http.js';
 import {
   createDesktopManagedTokenKeyFromBrowserCookie,
+  createSession,
   destroySession,
   expiredSessionCookie,
   ensureLegacyManagedTokenKey,
   getSessionUser,
   loginWithWebAccount,
-  publicUser
+  publicUser,
+  sessionCookie
 } from './auth-service.js';
+import { handleSync } from './sync-service.js';
 
 async function handleLogin(request, env) {
   const body = await readJson(request);
@@ -23,13 +26,15 @@ async function handleLogin(request, env) {
     }, 401, request);
   }
   const apiKey = await ensureLegacyManagedTokenKey(env, user);
+  const session = await createSession(env, user);
   return jsonResponse({
     success: true,
     api_key: apiKey,
+    sync_session: session.id,
     base_url: 'https://api.jiucaihezi.studio/v1',
     username: publicUser(user).username,
     user: publicUser(user),
-  }, 200, request);
+  }, 200, request, { 'Set-Cookie': sessionCookie(session) });
 }
 
 async function handleLogout(request, env) {
@@ -370,7 +375,7 @@ function handleHealth(request) {
   return jsonResponse({
     success: true,
     service: 'jiucaihezi-studio-login-gateway',
-    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout']
+    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'sync.text']
   }, 200, request);
 }
 
@@ -472,6 +477,7 @@ export default {
       if (request.method === 'POST' && url.pathname === '/auth/login') return await handleLogin(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/logout') return await handleLogout(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/session') return await handleSession(request, env);
+      if (url.pathname.startsWith('/sync/')) return await handleSync(request, env);
 
       // ★ API 代理（CORS 去重）：浏览器同源请求 Gateway，Gateway 转发到 api.jiucaihezi.studio
       if (url.pathname.startsWith('/api/')) {

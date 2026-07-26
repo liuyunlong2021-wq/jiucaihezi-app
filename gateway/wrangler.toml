@@ -11,6 +11,7 @@ routes = [
   { pattern = "api.jiucaihezi.studio/apple-touch-icon.svg", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/apple-touch-icon.png", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/auth/*", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/sync/*", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/health", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/landing/*", zone_name = "jiucaihezi.studio" }
 ]
