@@ -125,6 +125,8 @@ test('Web and Mac share text with offline retry, idempotency and visible conflic
     await webSync.open('web-owner', '共同记忆')
     await webSync.enable()
 
+    assert.equal(await webSync.cloudProjectIdFor('web-owner'), 'project_12345678')
+
     assert.equal(cloud.files.get('.raw/对话记录/第一轮.md')?.content, 'Web 第一轮')
     assert.equal(cloud.files.get('wiki/人物.md')?.content, '人物初稿')
     assert.equal(cloud.files.has('jc-media/video.txt'), false)

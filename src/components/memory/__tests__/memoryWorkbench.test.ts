@@ -21,6 +21,22 @@ test('memory file tree groups project identity above its three file actions', ()
   assert.doesNotMatch(tree, /async function selectWebProject[\s\S]*initializeMemoryProject/)
 })
 
+test('memory project entry unifies local and cloud projects while settings only diagnoses sync', () => {
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const settings = source('src/components/memory/MemorySettings.vue')
+
+  assert.match(tree, />项目中心</)
+  assert.match(tree, />本机项目</)
+  assert.match(tree, />云端项目</)
+  assert.match(tree, /上传到云端/)
+  assert.match(tree, /projectTextSync\.listCloudProjects\(\)/)
+  assert.match(tree, /projectTextSync\.cloudProjectIdFor\(project\.owner\)/)
+  assert.match(tree, /webProjectFiles\.createProject\(cloud\.name\)[\s\S]*projectTextSync\.connect\(cloud\.id\)/)
+  assert.match(tree, /projectFiles\.list\(dir\)[\s\S]*空文件夹[\s\S]*projectTextSync\.connect\(cloud\.id\)/)
+  assert.match(settings, /立即同步/)
+  assert.doesNotMatch(settings, /selectedCloudProjectId|projectTextSync\.connect|projectTextSync\.enable/)
+})
+
 test('memory space and conversations are created only by their explicit actions', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const project = source('src/runtime/memory/memoryProject.ts')
@@ -42,7 +58,7 @@ test('memory workbench keeps project identity in the file tree and a native drag
   assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region><\/div>/)
   assert.doesNotMatch(workbench, /memory-brand-logo/)
   assert.match(tree, /class="pft-brand-logo" src="\/logo\.svg"/)
-  assert.match(tree, /class="pft-project-name"[\s\S]*projectStore\.projectName\.value/)
+  assert.match(tree, /class="pft-project-name pft-project-trigger"[\s\S]*projectStore\.projectName\.value/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {

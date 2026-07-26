@@ -50,6 +50,9 @@ import {
 } from '@/utils/webProjectTransfer'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { parseConversationTranscript } from '@/runtime/memory/conversationTranscript'
+import { getGatewaySessionToken } from '@/services/newApiClient'
+import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
+import type { SyncProject } from '@/services/textSyncClient'
 
 interface FlatEntry {
   id?: string
@@ -152,8 +155,14 @@ const projectDir = computed(() => projectStore.projectDir.value)
 const webProjectId = computed(() => projectStore.webProjectId.value)
 const projectKey = computed(() => (isDesktop ? projectDir.value : webProjectId.value))
 const hasProject = computed(() => projectStore.hasProject.value)
+const currentCloudProjectId = computed(() =>
+  projectTextSyncStatus.owner === projectKey.value ? projectTextSyncStatus.cloudProjectId : '',
+)
 const webProjects = ref<Array<{ id: string; name: string }>>([])
+const cloudProjects = ref<SyncProject[]>([])
 const showProjectMenu = ref(false)
+const projectMenuBusy = ref(false)
+const projectMenuError = ref('')
 const treeDropActive = ref(false)
 const filePreview = ref<FilePreview | null>(null)
 const pendingCollision = ref<PendingCollision | null>(null)
@@ -1268,6 +1277,15 @@ function ctxOpen() {
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
 async function ctxAddProjectFolder() {
   closeCtxMenu()
+  if (props.memoryMode) {
+    if (showProjectMenu.value) {
+      showProjectMenu.value = false
+      return
+    }
+    showProjectMenu.value = true
+    await refreshProjectCenter()
+    return
+  }
   if (!isDesktop) {
     await refreshWebProjects()
     showProjectMenu.value = true
@@ -1281,6 +1299,15 @@ async function ctxAddProjectFolder() {
     errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}`
   }
 }
+async function refreshProjectCenter() {
+  projectMenuError.value = ''
+  try {
+    if (!isDesktop) await refreshWebProjects()
+    cloudProjects.value = getGatewaySessionToken() ? await projectTextSync.listCloudProjects() : []
+  } catch (e) {
+    projectMenuError.value = e instanceof Error ? e.message : String(e)
+  }
+}
 async function refreshWebProjects() {
   const projects = await webProjectFiles.listProjects()
   webProjects.value = projects.map(project => ({ id: project.id, name: project.name }))
@@ -1292,12 +1319,110 @@ async function selectWebProject(project: { id: string; name: string }) {
   projectStore.selectWebProject(project)
   showProjectMenu.value = false
 }
+async function selectDesktopProject(dir: string) {
+  projectStore.selectProject(dir)
+  showProjectMenu.value = false
+}
 async function createWebProject() {
   const name = await safePrompt('新建项目名称', '未命名项目', { forceDom: props.memoryMode })
   if (!name?.trim()) return
   const project = await webProjectFiles.createProject(name.trim())
   webProjects.value.push({ id: project.id, name: project.name })
   await selectWebProject(project)
+}
+async function openLocalProjectFolder() {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const dir = await invoke<string | null>('pick_project_folder')
+    if (dir) await selectDesktopProject(dir)
+  } catch (e) {
+    projectMenuError.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+async function uploadCurrentProject() {
+  if (!projectKey.value || projectMenuBusy.value) return
+  if (!getGatewaySessionToken()) {
+    projectMenuError.value = '请先在设置的“账号”中登录'
+    return
+  }
+  projectMenuBusy.value = true
+  projectMenuError.value = ''
+  try {
+    await projectTextSync.open(projectKey.value, projectStore.projectName.value)
+    await projectTextSync.enable()
+    await refreshProjectCenter()
+  } catch (e) {
+    projectMenuError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    projectMenuBusy.value = false
+  }
+}
+function projectNameFromOwner(owner: string): string {
+  return owner.replace(/\/+$/, '').split('/').pop() || owner
+}
+async function localOwnerForCloud(cloudProjectId: string): Promise<{ owner: string; name: string } | null> {
+  const localProjects = isDesktop
+    ? projectStore.recentProjectDirs.value.map(owner => ({ owner, name: projectNameFromOwner(owner) }))
+    : webProjects.value.map(project => ({ owner: project.id, name: project.name }))
+  for (const project of localProjects) {
+    try {
+      if (await projectTextSync.cloudProjectIdFor(project.owner) === cloudProjectId) return project
+    } catch {
+      // Missing/deleted recent projects are ignored.
+    }
+  }
+  return null
+}
+async function openCloudProject(cloud: SyncProject) {
+  if (projectMenuBusy.value) return
+  projectMenuBusy.value = true
+  projectMenuError.value = ''
+  try {
+    const existing = await localOwnerForCloud(cloud.id)
+    if (existing) {
+      if (isDesktop) projectStore.selectProject(existing.owner)
+      else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
+      await projectTextSync.open(existing.owner, existing.name)
+      showProjectMenu.value = false
+      return
+    }
+
+    if (!isDesktop) {
+      const project = await webProjectFiles.createProject(cloud.name)
+      const local = { id: project.id, name: project.name }
+      webProjects.value.push(local)
+      projectStore.selectWebProject(local)
+      await projectTextSync.open(local.id, local.name)
+      await projectTextSync.connect(cloud.id)
+      showProjectMenu.value = false
+      return
+    }
+
+    const { invoke } = await import('@tauri-apps/api/core')
+    const dir = await invoke<string | null>('pick_project_folder')
+    if (!dir) return
+    if ((await projectFiles.list(dir)).length) throw new Error('请选择或新建一个空文件夹来保存云项目')
+    projectStore.selectProject(dir)
+    await projectTextSync.open(dir, projectNameFromOwner(dir))
+    await projectTextSync.connect(cloud.id)
+    showProjectMenu.value = false
+  } catch (e) {
+    projectMenuError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    projectMenuBusy.value = false
+  }
+}
+async function syncCurrentProject() {
+  if (projectMenuBusy.value) return
+  projectMenuBusy.value = true
+  projectMenuError.value = ''
+  try {
+    await projectTextSync.syncNow()
+  } catch (e) {
+    projectMenuError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    projectMenuBusy.value = false
+  }
 }
 async function ctxNewFile() {
   const parentNode = ctxMenu.value.node
@@ -2113,9 +2238,9 @@ onBeforeUnmount(() => {
     <div v-if="!hasProject" class="pft-empty">
       <JcIcon name="folder" style="font-size: 32px; opacity: 0.3" />
       <p>还没有打开项目</p>
-      <button class="pft-empty-btn" @click="props.memoryMode && !isDesktop ? createWebProject() : ctxAddProjectFolder()">
+      <button class="pft-empty-btn pft-project-trigger" @click="ctxAddProjectFolder">
         <JcIcon name="create_new_folder" style="font-size: 14px" />
-        {{ isDesktop ? '选择项目文件夹' : props.memoryMode ? '创建记忆项目' : '新建或切换项目' }}
+        {{ props.memoryMode ? '打开项目中心' : isDesktop ? '选择项目文件夹' : '新建或切换项目' }}
       </button>
     </div>
 
@@ -2124,7 +2249,7 @@ onBeforeUnmount(() => {
       <header class="pft-head">
         <template v-if="props.memoryMode">
           <div class="pft-project-row">
-            <button class="pft-project-name" :title="`切换项目：${projectStore.projectName.value}`" @click="ctxAddProjectFolder">
+            <button class="pft-project-name pft-project-trigger" :title="`切换项目：${projectStore.projectName.value}`" @click="ctxAddProjectFolder">
               <img class="pft-brand-logo" src="/logo.svg" alt="" />
               <strong>{{ projectStore.projectName.value }}</strong>
               <JcIcon name="expand-more" />
@@ -2250,20 +2375,52 @@ onBeforeUnmount(() => {
       </div>
     </template>
 
-    <div v-if="showProjectMenu && !isDesktop" class="pft-project-menu">
+    <div v-if="showProjectMenu" class="pft-project-menu" @click.stop>
+      <div class="pft-project-menu-title">项目中心</div>
+      <template v-if="hasProject">
+        <div class="pft-project-current">
+          <strong>{{ projectStore.projectName.value }}</strong>
+          <span v-if="currentCloudProjectId">{{ projectTextSyncStatus.message || '已连接云端' }}</span>
+          <span v-else>仅保存在当前设备</span>
+        </div>
+        <button v-if="currentCloudProjectId" :disabled="projectMenuBusy" @click="syncCurrentProject">
+          <JcIcon name="sync" /><span>{{ projectMenuBusy ? '同步中' : '立即同步' }}</span>
+        </button>
+        <button v-else :disabled="projectMenuBusy" @click="uploadCurrentProject">
+          <JcIcon name="upload" /><span>{{ projectMenuBusy ? '上传中' : '上传到云端' }}</span>
+        </button>
+        <div class="pft-ctx-divider"></div>
+      </template>
+
+      <div class="pft-project-section">本机项目</div>
       <button
-        v-for="project in webProjects"
+        v-for="project in (isDesktop ? projectStore.recentProjectDirs.value.map(dir => ({ id: dir, name: projectNameFromOwner(dir) })) : webProjects)"
         :key="project.id"
-        :class="{ active: project.id === webProjectId }"
-        @click="selectWebProject(project)"
+        :class="{ active: project.id === projectKey }"
+        @click="isDesktop ? selectDesktopProject(project.id) : selectWebProject(project)"
       >
-        <JcIcon name="folder" />
-        <span>{{ project.name }}</span>
+        <JcIcon name="folder" /><span>{{ project.name }}</span>
       </button>
-      <div v-if="webProjects.length" class="pft-ctx-divider"></div>
-      <button @click="createWebProject">
+      <button v-if="isDesktop" @click="openLocalProjectFolder">
+        <JcIcon name="folder-open" /><span>打开本地文件夹</span>
+      </button>
+      <button v-else @click="createWebProject">
         <JcIcon name="create-new-folder" /><span>新建项目</span>
       </button>
+
+      <div class="pft-ctx-divider"></div>
+      <div class="pft-project-section">云端项目</div>
+      <p v-if="!getGatewaySessionToken()" class="pft-project-hint">登录后可查看和下载云项目</p>
+      <button
+        v-for="project in cloudProjects"
+        :key="project.id"
+        :disabled="projectMenuBusy"
+        @click="openCloudProject(project)"
+      >
+        <JcIcon name="cloud" /><span>{{ project.name }}</span>
+      </button>
+      <p v-if="getGatewaySessionToken() && !cloudProjects.length && !projectMenuError" class="pft-project-hint">还没有云项目</p>
+      <p v-if="projectMenuError" class="pft-project-error">{{ projectMenuError }}</p>
     </div>
 
     <!-- ═══ 右键菜单 ═══ -->
@@ -2577,6 +2734,39 @@ onBeforeUnmount(() => {
   text-align: left;
   cursor: pointer;
 }
+.pft-project-menu button:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+.pft-project-menu-title,
+.pft-project-section {
+  padding: 5px 8px;
+  color: var(--ink3);
+  font-size: 11px;
+  font-weight: 700;
+}
+.pft-project-menu-title {
+  color: var(--ink);
+  font-size: 13px;
+}
+.pft-project-current {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+}
+.pft-project-current span,
+.pft-project-hint,
+.pft-project-error {
+  margin: 0;
+  color: var(--ink3);
+  font-size: 11px;
+}
+.pft-project-hint,
+.pft-project-error {
+  padding: 6px 8px;
+  line-height: 1.45;
+}
+.pft-project-error { color: var(--danger); }
 .pft-project-menu button:hover,
 .pft-project-menu button.active {
   background: var(--olive-pale);
@@ -2717,6 +2907,7 @@ onBeforeUnmount(() => {
   padding-top: 28px;
   box-sizing: border-box;
 }
+.pft.memory-mode.memory-desktop .pft-project-menu { top: var(--memory-header-height); }
 .pft.memory-mode.memory-desktop .pft-search {
   height: 34px;
   flex-basis: 34px;

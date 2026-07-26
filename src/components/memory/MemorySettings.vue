@@ -18,7 +18,6 @@ import {
   getGatewaySessionToken,
 } from '@/services/newApiClient'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
-import type { SyncProject } from '@/services/textSyncClient'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
 const emit = defineEmits<{ (event: 'synced'): void }>()
@@ -36,8 +35,6 @@ const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
 const syncBusy = ref(false)
 const syncError = ref('')
-const cloudProjects = ref<SyncProject[]>([])
-const selectedCloudProjectId = ref('')
 const agentStore = useAgentStore()
 const { theme } = useTheme()
 const textModels = computed(() => agentStore.textModels.map(model => ({ id: model.id, label: model.label })))
@@ -92,7 +89,6 @@ async function handleLogin(result: JcCloudLoginResult) {
   await setApiKey(result.apiKey)
   await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
   status.value = '已登录'
-  if (tab.value === 'sync') await refreshCloudProjects()
 }
 
 async function saveKey() {
@@ -109,29 +105,14 @@ async function saveKey() {
 
 async function showSync() {
   tab.value = 'sync'
-  await refreshCloudProjects()
 }
 
-async function refreshCloudProjects() {
-  syncError.value = ''
-  if (!getGatewaySessionToken()) return
-  try {
-    cloudProjects.value = await projectTextSync.listCloudProjects()
-    selectedCloudProjectId.value ||= cloudProjects.value[0]?.id || ''
-  } catch (error) {
-    syncError.value = error instanceof Error ? error.message : String(error)
-  }
-}
-
-async function runSync(action: 'enable' | 'connect' | 'sync') {
+async function runSync() {
   if (syncBusy.value || !props.owner) return
   syncBusy.value = true
   syncError.value = ''
   try {
-    if (action === 'enable') await projectTextSync.enable()
-    else if (action === 'connect') await projectTextSync.connect(selectedCloudProjectId.value)
-    else await projectTextSync.syncNow()
-    await refreshCloudProjects()
+    await projectTextSync.syncNow()
     emit('synced')
   } catch (error) {
     syncError.value = error instanceof Error ? error.message : String(error)
@@ -202,18 +183,10 @@ async function runSync(action: 'enable' | 'connect' | 'sync') {
             <span>{{ projectTextSyncStatus.message || '已连接云项目' }}</span>
             <span v-if="projectTextSyncStatus.pending">待同步 {{ projectTextSyncStatus.pending }} 项</span>
           </div>
-          <button :disabled="syncBusy" @click="runSync('sync')">{{ syncBusy ? '同步中' : '立即同步' }}</button>
+          <button :disabled="syncBusy" @click="runSync">{{ syncBusy ? '同步中' : '立即同步' }}</button>
         </template>
         <template v-else>
-          <p>把当前项目作为新的云端文字项目，或者连接同账号下已有项目。</p>
-          <button :disabled="syncBusy" @click="runSync('enable')">同步当前项目</button>
-          <div v-if="cloudProjects.length" class="memory-sync-connect">
-            <select v-model="selectedCloudProjectId" aria-label="已有云项目">
-              <option v-for="project in cloudProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
-            </select>
-            <button :disabled="syncBusy || !selectedCloudProjectId" @click="runSync('connect')">连接</button>
-          </div>
-          <p v-else>当前账号还没有其他云项目。</p>
+          <p>当前项目尚未上传。请点击左上角项目名，在项目中心上传当前项目或下载云项目。</p>
         </template>
         <p v-if="syncError" class="memory-sync-error">{{ syncError }}</p>
       </div>
@@ -264,12 +237,10 @@ async function runSync(action: 'enable' | 'connect' | 'sync') {
 .memory-local-actions button:disabled { opacity: .55; cursor: progress; }
 .memory-sync { display: grid; gap: 12px; }
 .memory-sync p { margin: 0; color: var(--ink3); line-height: 1.6; }
-.memory-sync > button, .memory-sync-connect button { min-height: 36px; padding: 0 12px; border: 1px solid var(--olive); border-radius: 6px; background: var(--olive); color: white; cursor: pointer; font: inherit; }
+.memory-sync > button { min-height: 36px; padding: 0 12px; border: 1px solid var(--olive); border-radius: 6px; background: var(--olive); color: white; cursor: pointer; font: inherit; }
 .memory-sync button:disabled { opacity: .5; cursor: progress; }
 .memory-sync-summary { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-sync-summary span { color: var(--ink3); font-size: 12px; }
-.memory-sync-connect { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
-.memory-sync-connect select { min-width: 0; height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; }
 .memory-sync .memory-sync-error { color: var(--danger); }
 .memory-appearance { display: grid; gap: 20px; }
 .memory-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

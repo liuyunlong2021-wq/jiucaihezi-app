@@ -181,6 +181,13 @@ export class ProjectTextSync {
     return await this.api.listProjects()
   }
 
+  async cloudProjectIdFor(owner: string): Promise<string> {
+    if (!owner) return ''
+    const resource = (await this.files.list(owner)).find(item => item.path === STATE_PATH)
+    if (!resource) return ''
+    return parseState((await this.files.readText(resource)).content).cloudProjectId
+  }
+
   dispose(): void {
     this.stopChanges?.()
     this.stopChanges = null
