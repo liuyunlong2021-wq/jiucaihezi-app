@@ -60,6 +60,7 @@ test('media plan card uses the product theme and offers optional persisted param
   assert.match(mediaPlanCard, /调整/)
   assert.match(mediaPlanCard, /media-plan-editor/)
   assert.match(mediaPlanCard, /updateParameters/)
+  assert.match(mediaPlanCard, /<textarea :value="plan\.prompt"/)
   assert.match(mediaPlanCard, /var\(--olive\)/)
   assert.doesNotMatch(mediaPlanCard, /var\(--accent/)
   assert.match(messageBubble, /updateMediaPlanParameters/)

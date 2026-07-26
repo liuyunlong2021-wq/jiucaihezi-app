@@ -145,6 +145,7 @@ test('choosing a model in the confirmation card stops default-model refinement',
 
 test('native media planning does not require a bundled Skill', () => {
   assert.doesNotMatch(MEDIA_PLAN_POLICY, /jc-instant-create/)
+  assert.match(MEDIA_PLAN_POLICY, /prompt 必须原样使用，不得擅自扩写、润色或替换/)
 })
 
 test('native media policy is generated from the executable Creation registry', () => {
@@ -270,4 +271,24 @@ test('media plan editor uses compatible registry models and normalizes changed m
   assert.equal(updated.ratio, '1:1')
   assert.equal(updated.resolution, '2k')
   assert.doesNotThrow(() => validateMediaPlan(updated))
+})
+
+test('media plan editor keeps the user in control of the final prompt and disambiguates duplicate models', () => {
+  const plan = {
+    kind: 'video' as const,
+    title: '推进镜头',
+    prompt: '专业扩写版本',
+    modelId: 'newapi/zx/veo-3.1-fast-generate-preview',
+    referenceImages: ['data:image/jpeg;base64,reference'],
+  }
+
+  const updated = updateMediaPlanParameters(plan, { prompt: '镜头推进' })
+  const veoFast = getMediaPlanEditorControls(updated).models
+    .filter(model => model.label.startsWith('Veo 3.1 Fast'))
+
+  assert.equal(updated.prompt, '镜头推进')
+  assert.deepEqual(veoFast.map(model => model.label), [
+    'Veo 3.1 Fast · 直连',
+    'Veo 3.1 Fast · RunningHub',
+  ])
 })

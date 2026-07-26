@@ -1,7 +1,7 @@
 # 通用记忆对话工作台 SDD
 
 > 日期：2026-07-26
-> 状态：Web 本地底座完成；对话导航与文件预览分离方案已确认，按“Mac 私测 → Web 预览/正式发布 → Mobile”推进
+> 状态：Web 与 Mac 2.0.1 已完成；第四阶段先建设同账号文字云同步底座，再建立 Mobile App
 > 首发目标：<https://jiucaihezi.studio>
 > 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
@@ -81,7 +81,7 @@ ProjectFileTree
 - 不自动把讨论、猜测或草稿写入 Wiki。
 - 不加载 `CreationPanel`、画布、编辑区、画廊或媒体工作台。
 - 不新增媒体 API、任务 Store、轮询器或音频专用流程。
-- V1 不做云同步、跨设备自动同步或专用上下文管理。
+- 不做媒体、Skill、MCP 凭据、Provider 或界面设置的跨设备同步；第四阶段只同步项目文字。
 - 当前阶段不创建新域名、Bundle ID、Deep Link、签名身份或更新通道。
 
 ## 4. 唯一真源
@@ -92,6 +92,7 @@ ProjectFileTree
 | 已确认知识 | 当前项目现有 `wiki/` 或 `docs/wiki/` |
 | 当前打开资源 | 页面存活期间的 UI 状态；重启后从最近项目和文件树恢复 |
 | 项目文件 | `ProjectFileService` 背后的当前平台存储 |
+| 跨设备文字副本 | Cloudflare `SYNC_DB`；只接受已登录账号名下项目，不取代本地项目文件 |
 | 模型与 Provider | 现有公共模型/Provider 配置 |
 | 产品内置 Skill | `public/skills/` 与现有只读 loader；不进入仓库或选择器 |
 | 用户已安装 Skill | Web `agentStore` 的 `jc_web_skills_v1`；与内置 Skill 合并为模型可发现目录 |
@@ -99,7 +100,7 @@ ProjectFileTree
 | 生成媒体 | 当前项目 `jc-media/` |
 | 在途媒体任务 | 现有 `mediaTaskStore` |
 
-App 不再把同一份对话正文保存进 conversations/messages 数据库。清除页面状态后，只要项目目录还在，就必须能从 Raw 恢复全部对话，从 Wiki 恢复确认知识，从 `jc-media/` 恢复已生成媒体。
+App 不再把同一份对话正文保存进 conversations/messages 数据库。清除页面状态后，只要项目目录还在，就必须能从 Raw 恢复全部对话，从 Wiki 恢复确认知识，从 `jc-media/` 恢复已生成媒体。第四阶段的 D1 是跨设备传输和恢复副本，不是模型直接读取的新记忆库；同步下载后仍由 `ProjectFileService` 读写本地文件。
 
 ## 5. 项目文件合同
 
@@ -454,11 +455,89 @@ type ProjectResourceOpenResult =
 
 ### 12.3 Mobile
 
-- 第四阶段做手机 App。
-- 使用同一 Raw、Wiki、媒体和 `ProjectFileService` 合同。
+- 第四阶段先完成 Web、Mac 与 Mobile 共用的文字同步，再做手机壳；不先制造第二个数据孤岛。
+- Mobile 使用 Tauri v2 的 iOS/Android 能力和现有 Vue 运行时，不新建另一套 React Native/Flutter 业务代码；先在真实 iPhone 闭环，再补 Android。
+- 使用同一 Raw、Wiki 和 `ProjectFileService` 合同；移动端增加 App 管理目录适配器，不依赖任意系统目录权限。
 - 项目存放在 App 管理的可写目录；文件树读写的是该项目目录，不依赖任意系统目录权限。
-- 支持系统文件导入、导出和分享；V1 不承诺跨设备自动同步。
+- 支持系统文件导入、导出和分享；登录同一韭菜盒子账号后，可以拉取云端文字项目并继续对话。
 - 手机只改变布局：文件树抽屉 + 中央内容区 + 设置抽屉，不改变模型和记忆链路。
+
+### 12.4 同账号文字云同步
+
+#### 产品边界
+
+同步的不是“聊天数据库”，而是项目里的安全文本文件：
+
+| 内容 | 是否同步 | 说明 |
+| --- | --- | --- |
+| `.raw/对话记录/*.md` | 是 | 对话标题、用户/助手 turn 和媒体项目相对路径一起同步 |
+| `wiki/**`、`docs/wiki/**` | 是 | 否则手机与 Mac 的长期记忆会分叉 |
+| 普通 Markdown、纯文本、JSON、YAML、CSV 等安全文本 | 是 | 使用扩展名/MIME 白名单和单文件大小上限 |
+| `jc-media/**` 图片、视频、音频、3D、上传附件 | 否 | 只留在生成或上传它的设备 |
+| 用户 Skill、MCP、Provider、API Key、Session、界面设置 | 否 | 继续使用各平台现有安全存储；凭据绝不进入同步库 |
+| 二进制、未知格式、`.env` 和其他敏感文件 | 否 | 不读取、不上传、不猜测 |
+
+另一设备打开含媒体引用的 Raw 时，正常显示文字和一张“媒体仅保存在原设备”的占位卡，不把缺失的 `jc-media/...` 当作损坏项目，不自动访问历史临时 URL。用户可在当前设备重新上传或重新生成媒体。
+
+#### Cloudflare 边界
+
+可以并且应该使用 Cloudflare D1，但不改 NewAPI：
+
+```text
+Web / Mac / Mobile
+  -> 现有 api.jiucaihezi.studio Gateway
+  -> requireWebUser() 校验现有韭菜盒子 Session
+  -> /sync/projects 与 /sync/projects/:id/files
+  -> 独立 D1 binding: SYNC_DB
+```
+
+- 复用现有 Gateway、`jc_session` / `X-JC-Session` 和 NewAPI 账号 ID，不再注册第二个账号。
+- 新建独立 `SYNC_DB`，不把大量项目正文混入现有登录数据库 `DB`；同一个 Worker 绑定两个 D1 即可。
+- 不启用 R2。只有未来明确要求媒体跨设备时，才单独评估 R2、流量、生命周期和用户配额。
+- 所有查询必须带 `user_id` 所有权条件；客户端提交的 user ID 不可信，用户身份只能来自服务端 Session。
+- Worker 只接受允许的相对路径、UTF-8 文本、大小上限和内容哈希；拒绝 `..`、绝对路径、NUL、凭据路径和媒体目录。
+
+最小数据模型：
+
+```sql
+projects(id, user_id, name, created_at, updated_at, deleted_at)
+text_files(project_id, path, content, content_hash, revision, updated_at, deleted_at)
+sync_mutations(id, project_id, device_id, created_at)
+```
+
+`projects(user_id, updated_at)`、`text_files(project_id, path)` 和 `sync_mutations(id)` 建唯一/查询索引。`mutation id` 保证网络重试不会重复写入；`revision` 是乐观并发条件，不以客户端时钟判断谁覆盖谁。
+
+#### 同步时序
+
+本地项目文件始终先落盘；同步失败不能阻止离线聊天：
+
+```text
+本地创建/修改/删除安全文本
+  -> ProjectFileService 成功
+  -> 写入本地待同步队列（mutation id + expected revision）
+  -> 在线时推送到 Gateway
+  -> D1 原子校验账号、路径、mutation id 和 revision
+  -> 返回新 revision / 冲突
+
+登录、打开项目、App 回到前台、用户点“立即同步”
+  -> 按 cursor 拉取远端变更
+  -> 写入本地 ProjectFileService
+  -> 更新本地 cursor
+```
+
+第一版不做 WebSocket、字符级实时协同、后台常驻进程或 CRDT。产品目标是“手机用完，Mac 打开后接着用”，不是两台设备同时编辑同一行。
+
+#### 冲突与删除
+
+- 服务端更新必须携带 `expectedRevision`；不一致返回 `409`，绝不静默最后写入覆盖。
+- Raw 对话仅在能按稳定 turn ID 无歧义合并时自动合并；否则保留本地版本，并生成可见冲突副本等待用户选择。
+- Wiki 和普通文档第一版不做语义自动合并；冲突时保留两份，模型不能替用户猜哪份正确。
+- 删除使用 tombstone，至少保留 30 天，防止离线设备把旧文件重新上传；恢复和永久删除后续复用同一 revision 合同。
+- 项目列表、文件正文和 tombstone 都按账号隔离；退出登录后停止同步，但不删除用户本地项目。
+
+#### 项目身份
+
+D1 为每个云项目生成稳定 `project_id`。每台设备只在本地保存 `本地 owner -> cloud project_id + cursor` 映射；文件路径仍由 `ProjectFileService` 管理，不把绝对路径上传云端。新设备从云项目列表选择项目后，在 App 管理目录创建本地副本，再进入现有工作台。
 
 ## 13. 错误与并发
 
@@ -474,6 +553,10 @@ type ProjectResourceOpenResult =
 | 媒体成功但项目落盘失败 | 保留生成成功与原始结果，单独显示保存警告和“重试保存” |
 | MCP 未连接或调用失败 | 不伪造外部结果，显示真实错误 |
 | 多窗口同时追加 | revision 冲突后重读，按 turn ID 去重重试 |
+| 文字同步离线或超时 | 本地写入照常成功，保留待同步状态；恢复网络后按同一 mutation id 重试 |
+| 云端 revision 冲突 | 返回 409，保留两份并显式提示；禁止最后写入静默覆盖 |
+| 另一设备缺少媒体 | 文字继续可读，媒体显示“仅保存在原设备”，不把缺失媒体当成同步失败 |
+| Session 失效 | 停止同步并要求重新登录，不删除本地文件、不退化为公共数据 |
 | Provider 容量错误 | 原样显示，不新增隐藏摘要流程 |
 
 ## 14. 实施顺序与发布门槛
@@ -490,7 +573,7 @@ type ProjectResourceOpenResult =
 
 验证：本地 Web 用户无需模式或项目选择器；通过顶部对话选择器切换对话，通过文件树打开资料预览、查询和写入 Wiki，并完成公共媒体计划验证。
 
-### 第二阶段：现有 Desktop App / Mac 私测（下一步）
+### 第二阶段：现有 Desktop App / Mac 私测（已完成 Apple Silicon 主路径）
 
 1. 将第一阶段公共运行时与布局接入 Desktop，替换旧 `WorkspaceLayout` 的工作台入口。
 2. 接入现有 Desktop 项目文件、Keychain、本地模型、本地 MCP 和系统打开能力。
@@ -498,7 +581,7 @@ type ProjectResourceOpenResult =
 4. 部署新版 `rh-adapter`，在 NewAPI RH 渠道加入 `rh-3d-text`、`rh-3d-image` 及对应价格。
 5. 在 Mac 测试版完成 Raw、Wiki、Skill、MCP、媒体和混元 3D 真实闭环。
 
-验证：当前先完成 Apple Silicon Mac 私测；通过后再扩展 Intel Mac 和 Windows 矩阵。测试失败可直接回退现有主 App，不影响正式 Web 用户。
+验证：Apple Silicon Mac 主路径与 2.0.1 本机包已完成；Intel Mac 和 Windows 仍属于后续平台矩阵。测试失败可直接回退现有主 App，不影响正式 Web 用户。
 
 ### 第三阶段：Web 预览与正式发布
 
@@ -509,13 +592,26 @@ type ProjectResourceOpenResult =
 
 验证：正式 Web 用户可以完成完整成功路径，且 Mac 私测与 Web 预览没有未关闭的阻断问题。
 
-### 第四阶段：Mobile App
+### 第四阶段：文字同步底座与 Mobile App
 
-1. 增加移动文件适配器和 App 管理项目目录。
-2. 把文件树、设置改为抽屉，中央内容区保持同一资源路由。
-3. 接入移动登录回调、附件、媒体上传/播放、导入导出。
+#### 4A：同步服务
 
-验证：手机上可以新建/导入项目、切换 Raw 对话、读写 Wiki、生成和播放媒体；关闭重开后从项目文件恢复。Mobile 不提前阻塞 Mac 或 Web 发布。
+1. 在 Cloudflare 新建独立 D1 `SYNC_DB`，提交可审计 migration，并绑定现有 Gateway。
+2. 在 Gateway 增加受 `requireWebUser()` 保护的项目列表、增量拉取、批量推送和删除恢复接口；先写越权、路径、幂等与 revision 冲突测试。
+3. 建立客户端 `syncClient + 本地待同步队列`，只消费 `ProjectFileService` 成功后的文字变更，不直接接管底层文件系统。
+4. 先用同一账号完成 Web -> Mac、Mac -> Web、离线重试和冲突副本真实闭环。
+
+验证：两端可以顺序继续同一 Raw 对话和 Wiki；断网不丢本地内容，重连不重复 turn，不同步任何媒体或凭据，不同账号无法探测项目是否存在。
+
+#### 4B：Mobile 壳与移动文件适配
+
+1. 审计现有 Tauri 插件的 iOS/Android 支持，只替换 Desktop 专属文件、窗口、Keychain、stdio MCP 和本地模型入口；共享 Vue 组件、Direct Engine、Raw/Wiki 和同步客户端。
+2. 增加移动 `ProjectFileService` 适配器和 App 管理项目目录，从云项目列表拉取文字副本。
+3. 把文件树、设置改为抽屉，中央内容区保持同一资源路由。
+4. 接入移动登录回调、系统附件、媒体生成/播放和导入导出；媒体仅落手机本地。
+5. 先在真实 iPhone 完成登录、同步、聊天、Wiki 和媒体验收，再补 Android 构建与权限矩阵。
+
+验证：手机创建或继续项目后，Mac/Web 能取得新增文字并继续；Mac/Web 的文字也能出现在手机。媒体在原设备可用、另一设备显示明确占位；关闭重开后从本地项目恢复，并在登录联网后增量同步。
 
 ### 14.4 第一阶段实施记录（2026-07-25）
 
@@ -572,18 +668,24 @@ type ProjectResourceOpenResult =
 - 左侧文件树和中央文档预览是两个独立的竖向滚动容器；鼠标滚轮只滚动指针所在区域，内容超长时显示可见滚动条，不让整页或相邻区域代替滚动。
 - 验证通过：相关定向回归 `34/34`、完整 focused、TypeScript、Web/Desktop quick build及两端产物审计；浏览器真实验证模式切换、图片粘贴和纯文本粘贴。Apple Silicon `.app` / `.dmg` 重建完成，Developer ID 严格签名校验通过并已启动。
 
-未完成：
+以下是 2026-07-25 当时的未完成记录，已由后续实施与发布记录部分覆盖：
 
 - 第二阶段第 4-5 项（新版 `rh-adapter` / NewAPI RH 3D 配置和真实混元 3D 闭环）尚未执行。
 - 尚未完成登录后的真实模型回复、Wiki 确认写入、MCP 调用和付费媒体人工验收；这些不影响本机测试包交付，但不能登记为通过证据。
 
-未完成：
+同日旧清单（保留作为历史，以下状态以 2026-07-26 当前状态为准）：
 
 - 尚未发布到 <https://jiucaihezi.studio>。
 - 未使用真实登录账号完成模型回复、Wiki 确认写入和付费媒体闭环。
 - Desktop/Mac 第二阶段适配和本机私测尚未实施。
 - RH Adapter 新版部署、NewAPI 两个 3D 模型及价格配置尚未完成线上验收。
 - Web 预览/正式发布和 Mobile 原生 App 尚未实施。
+
+2026-07-26 当前状态：
+
+- Web 2.0.1 已构建并正式发布到 <https://jiucaihezi.studio>，生产域名已验证加载新资源。
+- Apple Silicon Mac 2.0.1 本机测试包已构建、校验并启动；Mobile 原生 App 尚未实施。
+- 第四阶段入口改为 4A 文字同步底座，完成 Web ↔ Mac 真机闭环后再进入 4B Mobile。
 
 ### 14.6 导航职责分离决策记录（2026-07-26）
 
@@ -669,6 +771,18 @@ type ProjectResourceOpenResult =
 - 根因是每个成功任务卡挂载时都从 OPFS 读取完整媒体，再依次复制为 `ArrayBuffer -> Uint8Array -> Blob -> Object URL` 并解码；批量图片和历史任务卡会并发放大峰值。`URL.revokeObjectURL()` 只能在卸载后释放，不能阻止挂载时的峰值。
 - 正确边界：项目文件负责持久化，结果 HTTPS 负责轻量展示；图片使用浏览器原生 `loading="lazy" + decoding="async"`，视频和音频只 `preload="metadata"`。只有用户主动下载、打开或引用时才读取项目二进制，不能用自动本地预读优化正常可用的远程结果。
 
+#### 经验十二：项目二进制重读必须恢复真实 MIME
+
+- 2026-07-26 Mac 2.0.1 再次提交历史参考图时，RH 明确返回 `Unsupported file type: application/octet-stream`；这不是渠道集体失效，而是 Desktop 文件读取只返回字节和大小，计划重建的项目定位器又没有 MIME。
+- Raw 虽然正确保存了原附件 `image/jpeg`，媒体计划只持有项目路径；付费提交重新读取后若不从明确元数据或受控扩展名恢复 MIME，数据 URL 就会退化为 `application/octet-stream`。
+- 正确边界在共享 `ProjectFileActions.readMediaDataUrl()`：存储层 MIME 优先，其次资源 MIME，最后才按受控媒体扩展名推断。不得在 Seedance、RH adapter 或单个模型分支里打补丁。
+
+#### 经验十三：媒体确认卡确认的是用户意志，不是模型改写
+
+- 用户明确写出提示词或动作描述时，媒体计划必须原样使用；只有用户明确要求优化，或没有提供可执行描述时，模型才可以补全。专业化 Skill 是可选增强，不能默认覆盖用户原话。
+- 付费提交前的提示词必须和模型、比例、分辨率、时长一样可编辑；确认卡里的当前值才是最终提交真源。
+- 模型 ID 和路由不能为了视觉简洁被隐藏成无法区分的同名项。同一展示名来自不同执行来源时，下拉菜单必须补充“直连 / RunningHub”，但不新增渠道分组或改变路由。
+
 ## 15. 验收标准
 
 ### 15.1 导航与资源
@@ -738,6 +852,19 @@ type ProjectResourceOpenResult =
 6. 当前阶段不存在 `chat.jiucaihezi.studio`、`com.jiucaihezi.chat`、`jiucaihezi-chat://`、`chat-v*` 或 `/updates/chat/`。
 7. 现有主 App 源码、签名身份和历史发布可用于回退。
 
+### 15.6 跨设备文字同步与 Mobile
+
+1. 同一账号在 Web、Mac 和 Mobile 看到相同的云项目列表；不同账号即使猜中 project ID 也只能得到统一的不可见响应。
+2. `.raw/对话记录/`、Wiki 和允许的普通文本可双向增量同步；媒体二进制、Skill、MCP、Provider、API Key、Session 和设置不会进入请求或 D1。
+3. 手机新增一个用户 turn 和完整 assistant turn 后，Mac 拉取即可继续同一对话；Mac 写入 Wiki 后，手机拉取能用于下一轮记忆查询。
+4. 断网发送和 Wiki 写入先在本地成功并显示“待同步”；恢复网络后按同一 mutation id 上传，不生成重复 turn 或重复文件。
+5. 两台设备基于同一 revision 修改同一文件时，后一提交收到 409；Raw 只有稳定 turn 可无歧义合并时才自动合并，其他文件保留冲突副本。
+6. 删除同步到离线设备后不会被旧副本复活；30 天 tombstone 期间可以恢复。
+7. 新设备打开含 `jc-media/...` 引用的对话时，文字和计划正常显示，缺失媒体明确标注“仅保存在原设备”，无自动远程下载和崩溃。
+8. D1 中没有绝对路径、二进制/Base64、临时媒体 URL、系统提示词、隐藏推理或任何凭据。
+9. Mobile 使用 App 管理目录和同一 `ProjectFileService` 语义；不因平台不同复制 Raw 解析、Wiki 工具或媒体计划实现。
+10. iPhone 真实设备完成登录、前后台恢复、断网重试、文字双向同步、对话、Wiki、附件和本地媒体闭环后，才开始 Android 发布矩阵。
+
 ## 16. 成功路径
 
 ```text
@@ -755,7 +882,11 @@ type ProjectResourceOpenResult =
   -> 从设置登录、选模型、管理 Skill 和 MCP
   -> 在对话内确认并生成媒体，结果落当前项目
   -> 用户确认后把结论写入 Wiki
-  -> 关闭重开，仍从项目 Raw、Wiki 和媒体恢复
+  -> 本地 Raw/Wiki 变更进入待同步队列并上传 D1
+  -> 同账号手机从云项目列表拉取文字副本，继续同一对话
+  -> 手机本地媒体不上传；Mac 只显示“媒体仅保存在原设备”
+  -> Mac 再次打开后增量拉取手机新增文字并继续
+  -> 关闭重开，仍先从本地项目 Raw、Wiki 和媒体恢复
 ```
 
-这条路径成立，就说明第一个工作台成立。实际发布顺序是先用 Desktop/Mac 私测降低风险，再做 Web 预览和正式发布，最后适配手机；不提前创建三套产品工程和发布身份。
+这条路径成立，就说明第一个工作台完成跨设备闭环。第四阶段必须先让 Web 与 Mac 通过同一同步合同，再接 Mobile；不提前创建三套业务代码，不让手机成为第二个数据孤岛。

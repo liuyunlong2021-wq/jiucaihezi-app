@@ -8,9 +8,9 @@ import MemorySettings from './MemorySettings.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
-import { onEvent } from '@/utils/eventBus'
+import { consumeLastEvent, onEvent } from '@/utils/eventBus'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
-import { createProjectFileActions } from '@/services/projectFileActions'
+import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
 import type { ProjectResourceOpenResult } from '@/services/projectExplorerService'
 import { openProjectResource } from '@/services/projectExplorerService'
 import {
@@ -103,6 +103,7 @@ let offOpenResource: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
 let offMediaTaskSettled: (() => void) | null = null
 let offReferenceFile: (() => void) | null = null
+let offMediaReferenceAdd: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
@@ -134,6 +135,9 @@ onMounted(async () => {
   offToggleTree = onEvent('toggle-file-tree', () => { treeOpen.value = !treeOpen.value })
   offMediaTaskSettled = onEvent('media-task-settled', payload => void recordMediaResult(payload))
   offReferenceFile = onEvent('reference-file', addReferencedFile)
+  offMediaReferenceAdd = onEvent('media-reference:add', payload => void addProjectMediaReferences(payload))
+  const pendingMediaReference = consumeLastEvent('media-reference:add')
+  if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
   document.addEventListener('pointerdown', closeModelPicker)
   document.addEventListener('keydown', handleGlobalKeydown)
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
@@ -149,6 +153,7 @@ onBeforeUnmount(() => {
   offToggleTree?.()
   offMediaTaskSettled?.()
   offReferenceFile?.()
+  offMediaReferenceAdd?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   stopProjectWatch?.()
@@ -446,6 +451,36 @@ function addReferencedFile(payload: unknown) {
   const file = payload as DirectMessageFile | null
   if (!file?.name || !file.content || referencedFiles.value.some(item => item.name === file.name)) return
   referencedFiles.value.push({ name: file.name, content: file.content })
+}
+
+async function addProjectMediaReferences(payload: unknown) {
+  const resources = (payload as { resources?: ProjectResource[] } | null)?.resources || []
+  for (const resource of resources) {
+    if (resource.isDirectory || resource.kind !== 'media'
+      || attachments.value.some(attachment => attachment.resourcePath === resource.path)) continue
+    try {
+      const binary = await fileActions.readMedia(resource)
+      const mime = binary.mimeType || resource.mimeType || mediaMimeForPath(resource.path) || 'application/octet-stream'
+      const bytes = new Uint8Array(binary.data.byteLength)
+      bytes.set(binary.data)
+      const file = new File([bytes.buffer], resource.name, { type: mime })
+      attachments.value.push({
+        id: crypto.randomUUID(),
+        name: resource.name,
+        mime,
+        size: binary.size,
+        kind: mime.startsWith('image/') ? 'image'
+          : mime.startsWith('video/') ? 'video'
+            : mime.startsWith('audio/') ? 'audio' : 'file',
+        value: await readDataUrl(file),
+        resourcePath: resource.path,
+      })
+      await nextTick()
+      composerRef.value?.focus()
+    } catch (cause) {
+      error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
+    }
+  }
 }
 
 function resetComposer() {

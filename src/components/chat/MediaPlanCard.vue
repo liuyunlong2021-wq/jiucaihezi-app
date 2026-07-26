@@ -88,6 +88,10 @@ function updateText(key: 'modelId' | 'ratio' | 'resolution', event: Event) {
   emit('updateParameters', { [key]: (event.target as HTMLSelectElement).value })
 }
 
+function updatePrompt(event: Event) {
+  emit('updateParameters', { prompt: (event.target as HTMLTextAreaElement).value })
+}
+
 function updateDuration(event: Event) {
   const target = event.target as HTMLInputElement | HTMLSelectElement
   emit('updateParameters', { duration: target.value })
@@ -144,6 +148,10 @@ function updateGenerationCount(event: Event) {
       将提交 {{ generationCount }} 个独立付费任务，按单张价格分别计费。
     </p>
     <div v-if="showEditor && canEdit" class="media-plan-editor">
+      <label class="media-plan-prompt-field">
+        <span>提示词</span>
+        <textarea :value="plan.prompt" rows="3" @change="updatePrompt" />
+      </label>
       <label>
         <span>模型</span>
         <select :value="plan.modelId" @change="updateText('modelId', $event)">
@@ -306,16 +314,29 @@ function updateGenerationCount(event: Event) {
   font-size: 11px;
 }
 .media-plan-editor select,
-.media-plan-editor input {
+.media-plan-editor input,
+.media-plan-editor textarea {
   width: 100%;
   min-width: 0;
-  height: 30px;
   box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--paper);
   color: var(--ink2);
   font: inherit;
+}
+.media-plan-editor select,
+.media-plan-editor input {
+  height: 30px;
+}
+.media-plan-prompt-field {
+  grid-column: 1 / -1;
+}
+.media-plan-editor textarea {
+  min-height: 62px;
+  padding: 7px 8px;
+  line-height: 1.5;
+  resize: vertical;
 }
 .media-plan-error {
   margin: 8px 0;
