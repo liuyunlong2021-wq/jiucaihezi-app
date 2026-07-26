@@ -5,6 +5,7 @@ import { CREATION_GALLERY_SOURCE } from '@/utils/fileEntryFilters'
 import { writeMediaAsset, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
 import { useProjectStore } from '@/stores/projectStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
+import { DEFAULT_API_BASE_URL, getApiKey } from '@/services/newApiClient'
 
 interface DownloadBase64Response {
   status: number
@@ -188,7 +189,12 @@ export async function fetchCreationMediaBlob(
   if (!isAllowedCreationResultUrl(url)) throw new Error('媒体地址不安全，已阻止缓存')
 
   debugMediaDownloadPath('browser', url)
-  const response = await fetch(url)
+  const apiOrigin = new URL(DEFAULT_API_BASE_URL).origin
+  const resultOrigin = new URL(url).origin
+  const apiKey = resultOrigin === apiOrigin ? getApiKey() : ''
+  const response = await fetch(url, apiKey
+    ? { headers: { Authorization: `Bearer ${apiKey}` } }
+    : undefined)
   if (!response.ok) throw new Error(`媒体缓存失败: HTTP ${response.status}`)
   const blob = await response.blob()
   const mimeType = normalizeMimeType(response.headers.get('content-type') || blob.type, mimeFor(type))

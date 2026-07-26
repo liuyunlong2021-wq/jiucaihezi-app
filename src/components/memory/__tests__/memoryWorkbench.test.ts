@@ -140,9 +140,26 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.doesNotMatch(workbench, /\$\{result\.url \|\| result\.text \|\| ''\}/)
   assert.match(bubble, /> \u4e0b\u8f7d\s*<\/button>/)
   assert.match(bubble, /project-filetree:locate/)
+  assert.match(bubble, /const displayUrl = computed/)
+  assert.match(bubble, /await projectFiles\.readBinary\(resource\)/)
+  assert.match(bubble, /:src="displayUrl"/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
   assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
+})
+
+test('memory media cards can rerun adjusted parameters and submit up to five image variants', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const card = source('src/components/chat/MediaPlanCard.vue')
+
+  assert.match(workbench, /const mediaTasks = ref<Record<string, string\[\]>>/)
+  assert.match(workbench, /for \(let index = 0; index < count; index\+\+\)/)
+  assert.match(workbench, /已提交 \$\{taskIds\.length\}\/\$\{count\} 个任务/)
+  assert.match(workbench, /mediaTasks\.value\[key\] = \[\.\.\.\(mediaTasks\.value\[key\] \|\| \[\]\), \.\.\.taskIds\]/)
+  assert.match(workbench, /v-for="taskId in mediaTasks/)
+  assert.match(card, /v-for="count in 5"/)
+  assert.match(card, /独立付费任务，按单张价格分别计费/)
+  assert.match(card, /status === 'submitted' \|\| status === 'failed' \? '再次生成'/)
 })
 
 test('memory Skill install card writes only after explicit approval', () => {

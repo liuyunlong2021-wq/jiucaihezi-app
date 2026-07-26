@@ -721,9 +721,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   function markWebMediaPersistenceFailure(task: MediaTask, error: unknown) {
     const detail = error instanceof Error ? error.message : String(error || '未知错误')
     const message = `保存到项目失败：${detail.slice(0, 160)}`
-    task.status = 'failed'
-    task.progress = 0
-    task.progressText = `失败: ${message}`
+    task.status = 'success'
+    task.progress = 100
+    task.progressText = '生成完成，保存到项目失败'
     task.errorMsg = message
     task.error = {
       category: 'persistence',
@@ -758,6 +758,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
       if (isTauriRuntime() || task.source !== 'creation') throw error
       markWebMediaPersistenceFailure(task, error)
+      emitEvent('media-task-complete', {
+        taskId: task.id,
+        type: task.type,
+        url: resultUrl,
+        source: task.source,
+        chatMessageId: task.chatMessageId,
+        model: task.modelLabel,
+        prompt: task.prompt,
+      })
       emitSettled(task)
       await persistTasksSafely(`${persistenceContext}-asset-failed`)
       return
@@ -1037,7 +1046,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       isTauriRuntime() ||
       !task ||
       task.source !== 'creation' ||
-      task.status !== 'failed' ||
+      task.status !== 'success' ||
       task.assetStatus !== 'failed' ||
       !task.projectId ||
       !task.resultUrl

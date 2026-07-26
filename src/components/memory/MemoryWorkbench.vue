@@ -91,7 +91,8 @@ const mediaUrl = ref('')
 const mediaPlans = ref<Record<string, MediaPlan[]>>({})
 const mediaPlanStatus = ref<Record<string, 'ready' | 'submitting' | 'submitted' | 'failed'>>({})
 const mediaPlanErrors = ref<Record<string, string>>({})
-const mediaTasks = ref<Record<string, string>>({})
+const mediaTasks = ref<Record<string, string[]>>({})
+const mediaGenerationCounts = ref<Record<string, number>>({})
 const skillInstallPlans = ref<Record<string, SkillInstallPlan>>({})
 const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installed' | 'failed'>>({})
 const skillInstallErrors = ref<Record<string, string>>({})
@@ -563,17 +564,30 @@ async function approveMediaPlan(turnId: string, planIndex: number) {
   mediaPlanErrors.value[key] = ''
   try {
     const prepared = await preparePublicMediaPlan({ plan, owner: conversation.value.resource.owner })
-    const taskId = await mediaTaskStore.submitTask({
-      ...prepared.submission,
-      chatMessageId: key,
-    })
-    mediaTasks.value[key] = taskId
-    mediaTaskResources.set(taskId, conversation.value)
+    const count = plan.kind === 'image' ? (mediaGenerationCounts.value[key] || 1) : 1
+    const taskIds: string[] = []
+    let submitError = ''
+    for (let index = 0; index < count; index++) {
+      try {
+        const taskId = await mediaTaskStore.submitTask({
+          ...prepared.submission,
+          chatMessageId: key,
+        })
+        mediaTaskResources.set(taskId, conversation.value)
+        taskIds.push(taskId)
+      } catch (cause) {
+        submitError = cause instanceof Error ? cause.message : String(cause)
+        break
+      }
+    }
+    if (!taskIds.length) throw new Error(submitError || '媒体任务提交失败')
+    mediaTasks.value[key] = [...(mediaTasks.value[key] || []), ...taskIds]
     mediaPlanStatus.value[key] = 'submitted'
+    if (submitError) mediaPlanErrors.value[key] = `已提交 ${taskIds.length}/${count} 个任务；其余提交失败：${submitError}`
     const updated = await appendMemoryTurn(
       conversation.value.resource,
       'assistant',
-      `[媒体任务]\n任务 ${taskId} 已提交：${plan.title}`,
+      `[媒体任务]\n任务 ${taskIds.join('、')} 已提交：${plan.title}`,
       files,
     )
     opened.value = await openProjectResource(files, updated.resource)
@@ -612,6 +626,10 @@ function updatePlan(turnId: string, planIndex: number, patch: MediaPlanParameter
   } catch (cause) {
     mediaPlanErrors.value[key] = cause instanceof Error ? cause.message : String(cause)
   }
+}
+
+function updateGenerationCount(turnId: string, planIndex: number, count: number) {
+  mediaGenerationCounts.value[mediaPlanKey(turnId, planIndex)] = Math.min(5, Math.max(1, count))
 }
 
 function installedSkill(plan: SkillInstallPlan): SkillConfig | undefined {
@@ -767,13 +785,16 @@ function readDataUrl(file: File): Promise<string> {
               :plan="plan"
               :status="mediaPlanStatus[mediaPlanKey(turn.id, planIndex)] || 'ready'"
               :error="mediaPlanErrors[mediaPlanKey(turn.id, planIndex)]"
+              :generation-count="mediaGenerationCounts[mediaPlanKey(turn.id, planIndex)] || 1"
               workbench-mode
               @approve="approveMediaPlan(turn.id, planIndex)"
               @update-parameters="patch => updatePlan(turn.id, planIndex, patch)"
+              @update-generation-count="count => updateGenerationCount(turn.id, planIndex, count)"
             />
             <MediaTaskBubble
-              v-if="mediaTasks[mediaPlanKey(turn.id, planIndex)]"
-              :task-id="mediaTasks[mediaPlanKey(turn.id, planIndex)]"
+              v-for="taskId in mediaTasks[mediaPlanKey(turn.id, planIndex)] || []"
+              :key="taskId"
+              :task-id="taskId"
               workbench-mode
             />
           </template>

@@ -228,7 +228,7 @@ function canRetryWebMediaPersistence(task: MediaTask): boolean {
   return (
     !isTauriRuntime() &&
     task.source === 'creation' &&
-    task.status === 'failed' &&
+    task.status === 'success' &&
     task.assetStatus === 'failed' &&
     Boolean(task.projectId && task.resultUrl)
   )

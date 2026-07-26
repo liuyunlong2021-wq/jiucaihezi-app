@@ -1034,7 +1034,7 @@ test(
 )
 
 test(
-  'mediaTaskStore reports Web media persistence failures without publishing a successful result',
+  'mediaTaskStore preserves a successful Web result when project persistence fails',
   { concurrency: false },
   async () => {
     const storage = installLocalStorage()
@@ -1081,13 +1081,14 @@ test(
         plan,
       })
 
-      await waitFor(() => store.getTask(taskId)?.status === 'failed')
+      await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       const task = store.getTask(taskId)
 
       assert.equal(task?.assetStatus, 'failed')
+      assert.equal(task?.status, 'success')
       assert.equal(task?.resultUrl, resultUrl)
       assert.match(task?.errorMsg || '', /保存到项目失败/)
-      assert.equal(completionEvents, 0)
+      assert.equal(completionEvents, 1)
       assert.equal(canvasEvents, 0)
       assert.equal(files.binaryWrites.length, 0)
     } finally {
@@ -1104,7 +1105,7 @@ test(
 )
 
 test(
-  'mediaTaskStore reports rejected Web binary writes without publishing a successful result',
+  'mediaTaskStore preserves a successful result when the Web binary write is rejected',
   { concurrency: false },
   async () => {
     const storage = installLocalStorage()
@@ -1154,13 +1155,14 @@ test(
         plan,
       })
 
-      await waitFor(() => store.getTask(taskId)?.status === 'failed')
+      await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       const task = store.getTask(taskId)
 
       assert.equal(task?.assetStatus, 'failed')
+      assert.equal(task?.status, 'success')
       assert.equal(task?.resultUrl, resultUrl)
       assert.match(task?.errorMsg || '', /保存到项目失败：OPFS 配额不足/)
-      assert.equal(completionEvents, 0)
+      assert.equal(completionEvents, 1)
       assert.equal(files.binaryWrites.length, 0)
     } finally {
       offComplete()
@@ -1229,7 +1231,7 @@ test(
         plan,
       })
 
-      await waitFor(() => store.getTask(taskId)?.status === 'failed')
+      await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       assert.equal(store.getTask(taskId)?.resultUrl, resultUrl)
 
       assert.equal(await store.retryWebMediaPersistence(taskId), true)
@@ -2358,7 +2360,7 @@ test('MediaTaskBubble downloads project media first and keeps the remote fallbac
     true,
   )
   assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
-  assert.equal(source.includes('data: await fetchBlobForExport(t.resultUrl)'), true)
+  assert.match(source, /props\.workbenchMode[\s\S]*fetchCreationMediaBlob\(t\.resultUrl[\s\S]*fetchBlobForExport\(t\.resultUrl\)/)
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
   assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
   assert.equal(source.includes('v-else-if="isSuccess && isSafeResult"'), true)

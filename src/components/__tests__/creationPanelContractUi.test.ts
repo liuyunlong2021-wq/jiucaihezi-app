@@ -760,7 +760,7 @@ test('creation panel previews persisted Web task media in MediaViewer without a 
   assert.match(source, /URL\.revokeObjectURL\(taskPreviewObjectUrl\)/)
 })
 
-test('creation panel exposes a retry only for failed Web project persistence', () => {
+test('creation panel exposes a retry when a successful result failed Web project persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const retry =
     source.match(
@@ -768,7 +768,7 @@ test('creation panel exposes a retry only for failed Web project persistence', (
     )?.[0] || ''
   assert.match(retry, /!isTauriRuntime\(\)/)
   assert.match(retry, /task\.source === 'creation'/)
-  assert.match(retry, /task\.status === 'failed'/)
+  assert.match(retry, /task\.status === 'success'/)
   assert.match(retry, /task\.assetStatus === 'failed'/)
   assert.match(retry, /await mediaTaskStore\.retryWebMediaPersistence\(task\.id\)/)
   assert.match(

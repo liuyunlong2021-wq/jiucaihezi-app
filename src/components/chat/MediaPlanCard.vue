@@ -15,12 +15,14 @@ const props = defineProps<{
   error?: string
   blocked?: boolean
   workbenchMode?: boolean
+  generationCount?: number
 }>()
 
 const emit = defineEmits<{
   (event: 'approve'): void
   (event: 'removeReference', id: string): void
   (event: 'updateParameters', patch: MediaPlanParameterPatch): void
+  (event: 'updateGenerationCount', count: number): void
 }>()
 
 const kindLabel = {
@@ -66,7 +68,7 @@ const modeLabel = computed(() => {
 })
 const canApprove = computed(() => {
   if (props.blocked) return false
-  if (props.status && props.status !== 'ready' && props.status !== 'failed') return false
+  if (props.status === 'submitting' || (props.status === 'submitted' && !props.workbenchMode)) return false
   if (props.plan.mediaReferences?.some(reference => reference.invalidReason)) return false
   try {
     validateMediaPlan(props.plan)
@@ -75,7 +77,7 @@ const canApprove = computed(() => {
     return false
   }
 })
-const canEdit = computed(() => !props.status || props.status === 'ready' || props.status === 'failed')
+const canEdit = computed(() => !props.status || props.status === 'ready' || props.status === 'failed' || (props.workbenchMode && props.status === 'submitted'))
 
 function approve() {
   if (!canApprove.value) return
@@ -89,6 +91,10 @@ function updateText(key: 'modelId' | 'ratio' | 'resolution', event: Event) {
 function updateDuration(event: Event) {
   const target = event.target as HTMLInputElement | HTMLSelectElement
   emit('updateParameters', { duration: target.value })
+}
+
+function updateGenerationCount(event: Event) {
+  emit('updateGenerationCount', Number((event.target as HTMLSelectElement).value))
 }
 </script>
 
@@ -134,6 +140,9 @@ function updateDuration(event: Event) {
         >{{ plan.ratio || plan.resolution || plan.duration !== undefined ? ' · ' : '' }}价格 {{ spec.price }}</span
       >
     </p>
+    <p v-if="plan.kind === 'image' && (generationCount || 1) > 1" class="media-plan-meta">
+      将提交 {{ generationCount }} 个独立付费任务，按单张价格分别计费。
+    </p>
     <div v-if="showEditor && canEdit" class="media-plan-editor">
       <label>
         <span>模型</span>
@@ -178,6 +187,12 @@ function updateDuration(event: Event) {
           @change="updateDuration"
         >
       </label>
+      <label v-if="plan.kind === 'image' && generationCount !== undefined">
+        <span>数量</span>
+        <select :value="generationCount" @change="updateGenerationCount">
+          <option v-for="count in 5" :key="count" :value="count">{{ count }} 张</option>
+        </select>
+      </label>
     </div>
     <p v-if="error" class="media-plan-error">{{ error }}</p>
     <div v-if="canEdit" class="media-plan-actions">
@@ -187,7 +202,7 @@ function updateDuration(event: Event) {
       </button>
       <button type="button" class="media-plan-submit" :disabled="!canApprove" @click="approve">
         <JcIcon name="play_arrow" />
-        开始生成
+        {{ status === 'submitted' || status === 'failed' ? '再次生成' : '开始生成' }}
       </button>
     </div>
     <span v-else-if="status === 'submitting'" class="media-plan-status">正在提交媒体任务…</span>

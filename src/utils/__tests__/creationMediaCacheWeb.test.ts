@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import { useProjectStore } from '@/stores/projectStore'
 import * as creationMediaCache from '../creationMediaCache'
 import { webProjectFiles } from '../webProjectFiles'
+import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
 
 test('Web creation media stays usable when active project persistence fails', { concurrency: false }, async () => {
   const projectStore = useProjectStore()
@@ -79,4 +80,33 @@ test('3D creation results keep their model file extension in the project', () =>
   })
 
   assert.match(path, /^jc-media\/models\/.+_mtask_3d\.glb$/)
+})
+
+test('Web media download authenticates only Jiucaihezi API result URLs', { concurrency: false }, async () => {
+  const previousFetch = globalThis.fetch
+  const calls: Array<{ url: string; authorization?: string }> = []
+  __resetApiKeyMemoryCacheForTests('media-token')
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const headers = new Headers(init?.headers)
+    calls.push({ url: String(input), authorization: headers.get('authorization') || undefined })
+    return new Response(new Blob(['video'], { type: 'video/mp4' }), {
+      status: 200,
+      headers: { 'content-type': 'video/mp4' },
+    })
+  }
+
+  try {
+    await creationMediaCache.fetchCreationMediaBlob(
+      'https://api.jiucaihezi.studio/v1/videos/task_veo/content',
+      'video',
+    )
+    await creationMediaCache.fetchCreationMediaBlob('https://cdn.example.com/video.mp4', 'video')
+    assert.deepEqual(calls, [
+      { url: 'https://api.jiucaihezi.studio/v1/videos/task_veo/content', authorization: 'Bearer media-token' },
+      { url: 'https://cdn.example.com/video.mp4', authorization: undefined },
+    ])
+  } finally {
+    __resetApiKeyMemoryCacheForTests()
+    globalThis.fetch = previousFetch
+  }
 })
