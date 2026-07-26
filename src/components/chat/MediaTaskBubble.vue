@@ -98,6 +98,11 @@ async function revealInTree() {
   if (props.workbenchMode) emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
 }
 
+async function previewResult() {
+  if (!projectResource.value) return
+  await revealInTree()
+}
+
 /** 发送到创作面板画廊 */
 function sendToGallery() {
   if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl)) return
@@ -141,9 +146,18 @@ function sendAsReference() {
 
     <!-- 成功 -->
     <div v-else-if="isSuccess && isSafeResult" class="mtb-result">
-      <img v-if="task.type === 'image'" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" />
-      <video v-else-if="task.type === 'video'" :src="displayUrl" preload="metadata" controls class="mtb-video" />
-      <audio v-else-if="task.type === 'audio'" :src="displayUrl" preload="metadata" controls class="mtb-audio" />
+      <img v-if="task.type === 'image'" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
+      <button
+        v-else-if="task.type === 'video' || task.type === 'audio'"
+        type="button"
+        class="mtb-media-preview"
+        :disabled="!projectResource"
+        :title="projectResource ? '打开预览' : '媒体尚未保存到项目'"
+        @click="previewResult"
+      >
+        <JcIcon :name="task.type === 'video' ? 'movie' : 'music-note'" />
+        <span>{{ task.type === 'video' ? '打开视频' : '播放音频' }}</span>
+      </button>
       <div v-else-if="task.type === 'model3d'" class="mtb-file-result">
         <JcIcon name="deployed_code" />
         <span>3D 模型文件已生成</span>
@@ -246,12 +260,22 @@ function sendAsReference() {
   object-fit: contain;
   cursor: pointer;
 }
-.mtb-video {
-  max-width: 100%;
-  max-height: 360px;
+.mtb-media-preview {
+  display: grid;
+  width: 100%;
+  min-height: 112px;
+  place-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
   border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink2);
+  cursor: pointer;
+  font: inherit;
 }
-.mtb-audio { width: 100%; }
+.mtb-media-preview:hover:not(:disabled) { border-color: var(--olive); color: var(--olive); }
+.mtb-media-preview:disabled { cursor: default; opacity: .55; }
+.mtb-media-preview .mso { font-size: 34px; }
 .mtb-file-result {
   display: flex;
   align-items: center;

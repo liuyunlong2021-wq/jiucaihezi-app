@@ -779,7 +779,35 @@ D1 为每个云项目生成稳定 `project_id`。每台设备只在本地保存 
 
 - 2026-07-26 两次 Chrome Renderer 崩溃 dump 明确记录 `OOM (CALL_AND_RETRY_LAST)`、V8 `allocation failure` 和当前 `gpt-image-2-vip` 任务。生成请求已返回 HTTP 200、项目文件已保存，崩溃发生在结果展示阶段。
 - 根因是每个成功任务卡挂载时都从 OPFS 读取完整媒体，再依次复制为 `ArrayBuffer -> Uint8Array -> Blob -> Object URL` 并解码；批量图片和历史任务卡会并发放大峰值。`URL.revokeObjectURL()` 只能在卸载后释放，不能阻止挂载时的峰值。
-- 正确边界：项目文件负责持久化，结果 HTTPS 负责轻量展示；图片使用浏览器原生 `loading="lazy" + decoding="async"`，视频和音频只 `preload="metadata"`。只有用户主动下载、打开或引用时才读取项目二进制，不能用自动本地预读优化正常可用的远程结果。
+- 第一轮止血只取消了任务卡自动读取 OPFS，仍让完整历史和每个视频/音频播放器长期挂载；`preload="metadata"` 不能释放媒体元素、解码上下文和 GPU 资源，因此不是最终架构。
+
+#### 经验十一补充：任务、资产、轻量卡片、按需预览必须分层
+
+横向依据：
+
+- OpenCode `message-timeline.tsx` 使用 `@tanstack/solid-virtual`；LobeHub `VirtualizedList.tsx` 使用 `virtua`。两者都只挂载可视消息，并为生成中或用户正在选择的消息保留例外。
+- Open WebUI 默认只挂载最近 8 条消息，向上滚动再扩展，并用 `content-visibility` 降低非可视布局成本。
+- ComfyUI 的任务资产列表使用 `@tanstack/vue-virtual`；`LazyImage.vue` 通过 `IntersectionObserver` 进入视口才取得媒体，离开后释放 Blob URL；视频播放器只存在于结果查看组件。
+- InvokeAI Gallery 使用 `react-virtuoso` 的 windowed list，只为当前可视范围批量取得完整 DTO，原图进入独立 Viewer。
+- 本项目主 App 已采用同一原则：文件树虚拟化；视频在画布中只保存项目路径、静态首帧和播放按钮；Desktop 首帧由后台 `ffmpeg` 单通道生成；点击后才建立唯一预览播放器。
+
+公共媒体合同：
+
+```text
+媒体任务：状态、模型、提示词、参数、进度、错误
+  -> 媒体资产：assetId、项目路径、MIME、缩略图/封面、原始结果地址
+  -> 轻量载体：对话卡、文件树、画布只消费元数据和缩略图
+  -> 按需查看：用户点击后读取本地项目文件，并建立唯一预览实例
+```
+
+- Raw 只保存稳定任务/资产身份和项目相对路径，不保存媒体二进制、Data URL、Blob URL 或播放器状态。
+- 记忆对话复用项目现有 `@tanstack/vue-virtual` 动态高度时间线，只挂载可视区及 overscan；运行中的轮询属于 Store，不依赖任务卡是否挂载。
+- 图片卡可使用安全 HTTPS 缩略展示，但必须 `loading="lazy" + decoding="async"`；视频、音频和 3D 卡只展示静态类型、模型、保存状态和操作，不在时间线建立播放器或渲染器。
+- 点击已落项目的结果统一进入现有中央资源预览；任何时刻最多存在一个视频、音频或 3D 预览实例。关闭预览、切换资源或切换对话必须停止播放并释放本地 Object URL。
+- 项目文件是设备内持久化真源，远程结果地址只负责刚完成时的轻量图片展示和保存失败兜底；下载、打开和再次引用才读取项目二进制。
+- Desktop、Web、Mobile 共享上述身份和生命周期合同，但缩略图实现允许按平台不同：Desktop 后台 `ffmpeg`，Web 无缩略图时显示静态视频封面，Mobile 后续使用原生媒体框架。
+
+压力验收：同一对话至少覆盖 100 轮文字、50 张图片、20 个视频；未打开预览时 DOM 中不得存在 `video`/`audio`，打开时同类播放器最多 1 个；连续滚动、切换对话和关闭预览后不再持有离屏播放器、Blob URL 或已完成任务轮询。Web Chrome、Mac App 和手机真机必须共用这组门禁。
 
 #### 经验十二：项目二进制重读必须恢复真实 MIME
 

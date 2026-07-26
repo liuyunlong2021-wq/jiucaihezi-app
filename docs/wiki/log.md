@@ -514,3 +514,9 @@
 - Web/Mac 共用 `textSyncClient + ProjectTextSync`；本地 Raw、Wiki 和安全文本先落盘，再写入 `.raw/.sync/state.json`，按稳定 mutation ID 增量同步。项目打开与新建不等待网络，断网不阻塞本地工作。
 - 冲突以远端为规范文件，并把本地版本保存为可见冲突副本；媒体、Skill、MCP/Provider 凭据、Session、设置和队列状态均不会同步。
 - 自动化通过 Web/Mac 双向、离线恢复、响应丢失幂等、冲突副本和排除规则；相关回归 `59/59`、完整 focused、TypeScript、Web/Desktop 正式构建和两端产物审计全部通过。12 条旧主 App 回滚源码合同保留但显式跳过，不再错误阻断当前 `MemoryWorkbench` 产品构建。下一步为同账号 Web/Mac 真机验收。
+
+## [2026-07-26] 修正 | 媒体时间线有界渲染与 Apple Silicon 发布
+
+- Web 崩溃根因不是单个播放器，而是完整历史消息、视频和音频播放器随对话长度无界常驻；记忆时间线现复用 `@tanstack/vue-virtual`，视频和音频任务只显示轻量入口，点击后进入现有中央单实例预览。
+- 项目文件仍是媒体持久化真源，任务 Store 继续独立轮询；虚拟卡片卸载不影响任务完成和落盘。图片保留原生懒加载，下载、文件树定位和原始链接兜底不变。
+- `v2.0.2` Apple Silicon 失败定位为 ARM OpenCode sidecar 的 ad-hoc 签名与时间戳签名链冲突；下载器在 Tauri 正式签名前移除 macOS sidecar 上游签名，工作流对 Apple 时间戳服务瞬断增加一次完整构建重试，不降低 Developer ID 或公证标准。

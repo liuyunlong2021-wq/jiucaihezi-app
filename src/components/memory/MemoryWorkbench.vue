@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useVirtualizer } from '@tanstack/vue-virtual'
 import ProjectFileTree from '@/components/filetree/ProjectFileTree.vue'
 import MediaPlanCard from '@/components/chat/MediaPlanCard.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
@@ -109,6 +110,27 @@ let offMediaReferenceAdd: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
+const conversationTurns = computed(() => conversation.value?.transcript.turns || [])
+const memoryTimelineVirtualizer = useVirtualizer(
+  computed(() => ({
+    count: conversationTurns.value.length,
+    getScrollElement: () => messagesEl.value,
+    getItemKey: index => conversationTurns.value[index]?.id || index,
+    estimateSize: () => 180,
+    overscan: 6,
+    measureElement: (element: Element) => Math.max(element.getBoundingClientRect().height + 24, 80),
+  })),
+)
+const virtualConversationTurns = computed(() => memoryTimelineVirtualizer.value
+  .getVirtualItems()
+  .flatMap(row => {
+    const turn = conversationTurns.value[row.index]
+    return turn ? [{ row, turn }] : []
+  }))
+
+function measureMemoryTurn(element: unknown) {
+  if (element instanceof Element) memoryTimelineVirtualizer.value.measureElement(element)
+}
 const filteredConversations = computed(() => {
   const query = conversationSearch.value.trim().toLowerCase()
   return conversations.value
@@ -288,6 +310,7 @@ async function startNewConversation() {
 
 watch(() => conversation.value?.transcript.turns.length, async () => {
   await nextTick()
+  memoryTimelineVirtualizer.value.measure()
   if (messagesEl.value) messagesEl.value.scrollTop = messagesEl.value.scrollHeight
 })
 
@@ -917,7 +940,20 @@ function readDataUrl(file: File): Promise<string> {
 
       <section v-if="conversation" ref="messagesEl" class="memory-messages">
         <div v-if="!conversation.transcript.turns.length" class="memory-empty-state">开始一段对话</div>
-        <article v-for="turn in conversation.transcript.turns" :key="turn.id" class="memory-message" :class="turn.role">
+        <div
+          v-else
+          class="memory-message-list"
+          :style="{ height: `${memoryTimelineVirtualizer.getTotalSize()}px` }"
+        >
+        <article
+          v-for="{ row, turn } in virtualConversationTurns"
+          :key="turn.id"
+          :ref="measureMemoryTurn"
+          :data-index="row.index"
+          class="memory-message"
+          :class="turn.role"
+          :style="{ transform: `translateY(${row.start}px)` }"
+        >
           <span class="memory-role">{{ turn.role === 'user' ? '你' : '韭菜盒子' }}</span>
           <div v-if="turn.role === 'user' && turnAttachments(turn).length" class="memory-message-attachments">
             <div v-for="attachment in turnAttachments(turn)" :key="attachment.id" class="memory-message-attachment" :class="attachment.kind">
@@ -955,6 +991,7 @@ function readDataUrl(file: File): Promise<string> {
             @revise="continueSkillRevision(skillInstallPlans[turn.id])"
           />
         </article>
+        </div>
         <article v-if="sending && streamingText" class="memory-message assistant streaming">
           <span class="memory-role">韭菜盒子</span>
           <div class="memory-message-text">{{ streamingText }}</div>
@@ -1102,7 +1139,9 @@ function readDataUrl(file: File): Promise<string> {
 .icon-button, .send-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; }
 .icon-button:hover { color: var(--olive); border-color: var(--olive); }
 .memory-messages { min-height: 0; overflow-y: auto; padding: 24px max(20px, calc((100% - 820px) / 2)); }
+.memory-message-list { position: relative; width: 100%; }
 .memory-message { margin-bottom: 24px; }
+.memory-message-list > .memory-message { position: absolute; top: 0; right: 0; left: 0; }
 .memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border-radius: 8px; background: var(--surface); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }

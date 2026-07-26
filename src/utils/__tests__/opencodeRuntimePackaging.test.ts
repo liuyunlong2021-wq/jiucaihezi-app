@@ -57,6 +57,14 @@ test('OpenCode updater uses baseline builds for every x64 desktop target', () =>
   assert.match(source, /opencode-windows-x64-baseline\.zip/)
 })
 
+test('macOS OpenCode runtimes drop upstream signatures before app signing', () => {
+  const source = readFileSync(join(process.cwd(), 'scripts/update-opencode-runtime.mjs'), 'utf8')
+
+  assert.match(source, /process\.platform === 'darwin'/)
+  assert.match(source, /codesign', \['--remove-signature', outputPath\]/)
+  assert.ok(source.indexOf("run(outputPath, ['--version'])") < source.indexOf("['--remove-signature', outputPath]"))
+})
+
 test('OpenCode restarts preserve committed SQLite WAL data', () => {
   const source = readFileSync(join(process.cwd(), 'src-tauri/src/commands/opencode.rs'), 'utf8')
 

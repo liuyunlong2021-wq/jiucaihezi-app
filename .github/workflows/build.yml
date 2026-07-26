@@ -31,7 +31,34 @@ jobs:
           VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
         run: pnpm exec vite build
 
-      - uses: tauri-apps/tauri-action@v0
+      - id: build-macos-arm
+        continue-on-error: true
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "韭菜盒子 ${{ github.ref_name }}"
+          releaseBody: |
+            ## 韭菜盒子 ${{ github.ref_name }}
+
+            ### macOS Apple Silicon (M 芯片)
+            | 文件 | SHA256 |
+            |------|--------|
+            | 韭菜盒子_${{ github.ref_name }}_aarch64.dmg | 见 .sha256 文件 |
+
+            ### 校验
+            下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
+          tauriScript: pnpm tauri
+          args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Retry macOS ARM build after transient signing failure
+        if: steps.build-macos-arm.outcome == 'failure'
+        uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}

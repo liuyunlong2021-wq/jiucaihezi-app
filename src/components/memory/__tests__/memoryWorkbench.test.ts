@@ -144,12 +144,25 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.match(bubble, /const displayUrl = computed/)
   assert.match(bubble, /:src="displayUrl"/)
   assert.match(bubble, /loading="lazy" decoding="async"/)
-  assert.match(bubble, /preload="metadata"/)
+  assert.doesNotMatch(bubble, /<video|<audio|preload="metadata"/)
+  assert.match(bubble, /class="mtb-media-preview"/)
+  assert.match(bubble, /await revealInTree\(\)/)
   assert.doesNotMatch(bubble, /watch\(projectResource|projectMediaUrl|URL\.createObjectURL|URL\.revokeObjectURL/)
   assert.match(bubble, /async function downloadCopy\(\)[\s\S]*readBinary\(resource\)/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
   assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
+})
+
+test('memory conversation virtualizes historical turns and keeps rich media out of the timeline', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /import \{ useVirtualizer \} from '@tanstack\/vue-virtual'/)
+  assert.match(workbench, /const memoryTimelineVirtualizer = useVirtualizer/)
+  assert.match(workbench, /const virtualConversationTurns = computed/)
+  assert.match(workbench, /v-for="\{ row, turn \} in virtualConversationTurns"/)
+  assert.match(workbench, /:data-index="row\.index"/)
+  assert.match(workbench, /measureMemoryTurn/)
 })
 
 test('memory media cards can rerun adjusted parameters and submit up to five image variants', () => {
