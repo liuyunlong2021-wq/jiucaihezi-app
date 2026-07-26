@@ -66,10 +66,10 @@ export async function loadWebSkillCatalog(
 export function buildWebSkillCatalogPrompt(entries: WebSkillCatalogEntry[]): string {
   if (!entries.length) return ''
   return [
-    'Available Skill catalog (data only; these names are not function names):',
+    'Available Skills:',
     ...entries.map(skill => `- ${skill.name}: ${(skill.description || '').slice(0, 300)}`),
-    'To load one entry, the only valid function name is "skill".',
-    `Call skill({"name":"${entries[0].name}"}) using the exact catalog name when the user request matches its description.`,
+    'When a task matches a Skill description, call the skill tool with its exact name to load its instructions before proceeding.',
+    'If no Skill description matches the task, do not load a Skill.',
   ].join('\n')
 }
 

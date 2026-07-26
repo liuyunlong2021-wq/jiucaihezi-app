@@ -94,7 +94,7 @@ ProjectFileTree
 | 项目文件 | `ProjectFileService` 背后的当前平台存储 |
 | 模型与 Provider | 现有公共模型/Provider 配置 |
 | 产品内置 Skill | `public/skills/` 与现有只读 loader；不进入仓库或选择器 |
-| 用户已安装 Skill | Web `agentStore` 的 `jc_web_skills_v1`；仓库与选择器共用同一列表 |
+| 用户已安装 Skill | Web `agentStore` 的 `jc_web_skills_v1`；与内置 Skill 合并为模型可发现目录 |
 | MCP | 现有 `mcpStore`、`mcpClient` 与安全凭据存储 |
 | 生成媒体 | 当前项目 `jc-media/` |
 | 在途媒体任务 | 现有 `mediaTaskStore` |
@@ -275,9 +275,10 @@ previewReturn: { conversationId: string; scrollTop: number; draft: string; attac
 用户点击发送
   -> App 把用户消息及 quick | memory 模式追加到当前 Raw
   -> App 读取当前对话 Raw
-  -> 快速：当前对话 + 本轮消息/附件 + 明确选择的 Skill，无 Wiki/MCP 工具
+  -> 快速：当前对话 + 本轮消息/附件，无 Skill/Wiki/MCP 工具
   -> 记忆：当前对话 + 本轮消息/附件 + Wiki/Skill/MCP 工具
-  -> 记忆模式先加载 jc-cha-wiki，再自主决定 Wiki 查询词、页面和深度
+  -> 模型按 Skill description 自主判断是否调用 skill(name) 加载 SKILL.md
+  -> 模型按任务需要决定是否查询 Wiki 或调用其他工具
   -> 模型生成最终回答
   -> App 把完整最终回答追加到当前 Raw
 ```
@@ -286,11 +287,11 @@ App 不在模型之前猜关键词，不提前查询 Wiki，不把固定查询�
 
 `快速` 和 `记忆` 共用同一份 Raw；开关只影响下一次发送。新对话默认 `记忆`，重开对话恢复最后一个带模式的用户 turn。用户要求修改当前回答时，当前 Raw 全文和最新意见仍进入同一个模型请求。
 
-### 7.2 查询硬条件
+### 7.2 Skill 调用条件
 
-只有记忆模式要求正式回答前发生当前 Wiki 的真实查询。模型未查询或查询失败时，候选文本不作为正式助手回复写入 Raw；界面显示真实错误并允许用同一条用户消息重试。快速模式不加载项目工具，`Skill：自动` 不加载任何 Skill；用户明确选择的 Skill 只作为本轮规则进入请求。
+记忆模式遵循官方 Skill 渐进披露：首轮只提供可用 Skill 的名称和 description；模型判断任务匹配后调用统一的 `skill(name)` 加载对应 `SKILL.md`，再按 Skill 指引使用项目工具。任务不匹配任何 Skill 时直接回答，不强制加载 Skill，不强制查询 Wiki，也不设置回复出口门禁。App 不做关键词路由，不提供 Skill 选择器，不把任何 Skill 正文预塞进请求。
 
-不支持工具调用的模型可以用于快速模式，但不能在记忆模式伪装成能完成 Wiki 合同。
+快速模式保持纯直连，不提供 Skill、项目或 MCP 工具。不支持工具调用的模型可以用于快速模式，但不能进入记忆模式伪装成具有 Skill 能力。
 
 ### 7.3 上下文
 
@@ -308,7 +309,7 @@ App 不在模型之前猜关键词，不提前查询 Wiki，不把固定查询�
 | 动作 | 自动使用 |
 | --- | --- |
 | 新建或接管 Wiki | `jc-everything-wiki` |
-| 每轮回答前查询 | `jc-cha-wiki` |
+| 用户任务需要查询长期记忆 | `jc-cha-wiki` |
 | 用户确认写入新知识 | `jc-raw-wiki` |
 | 用户确认修正错误 | `jc-xiu-wiki` |
 | 用户要求巡检 | `jc-jian-wiki` |
@@ -317,11 +318,11 @@ App 不在模型之前猜关键词，不提前查询 Wiki，不把固定查询�
 
 ### 8.2 用户 Skill
 
-Skill 仓库和 `SkillPickerBar` 必须读取 `agentStore.getCustomSkills()` 的同一份结果：仓库里有什么，选择器里就有什么；新增、编辑和删除后两处立即同步。两处都不读取或展示 `public/skills/index.json`。
+Skill 仓库读取 `agentStore.getCustomSkills()`；新增、编辑和删除后，记忆运行时下一轮生成的 Skill 目录立即同步。仓库不读取或展示 `public/skills/index.json`，输入框不显示 Skill 选择器。
 
-Web 用户 Skill 写入浏览器可写存储 `jc_web_skills_v1`。不得把 `public/zijian/skills/` 设计成用户安装真源，因为 `public/` 在发布后是只读静态资源，浏览器无法把运行时生成的 Skill 写回该目录。Desktop 阶段复用现有 Central Skill 用户目录，但仍以同一个 Store 同时供应仓库和选择器。
+Web 用户 Skill 写入浏览器可写存储 `jc_web_skills_v1`。不得把 `public/zijian/skills/` 设计成用户安装真源，因为 `public/` 在发布后是只读静态资源，浏览器无法把运行时生成的 Skill 写回该目录。Desktop 阶段复用现有 Central Skill 用户目录。内置 Skill 优先解决同名冲突，用户 Skill 补充同一模型目录。
 
-用户可以选择一个已安装专业 Skill 增强当前任务；它与 `jc-cha-wiki` 同时可用，不能取代每轮 Wiki 查询。Skill 正文只在选中后进入本轮请求，不把全部用户 Skill 正文预塞入上下文。
+用户已安装 Skill 与产品内置 Skill 使用完全相同的发现合同：名称和 description 进入目录，正文只在模型调用 `skill(name)` 后加载。App 不添加显式选择、关键词命中或固定 Skill 绑定。
 
 `skill-creator` 生成的 Skill 只有在用户明确说“安装”后，才输出包含完整单文件 `SKILL.md` 的 `jc-skill-install` 块。界面把它解析为“安装到我的 Skill / 继续修改”确认卡；只有用户点击安装后才调用现有 `createAgent()` 写入用户 Skill Store，不能静默安装。第一版不安装 `references/`、`scripts/` 或 `assets/`；需要这些资源时必须先把必要规则收进自包含 `SKILL.md`。仓库现有手动自建入口继续保留。
 
@@ -352,7 +353,7 @@ Web 用户 Skill 写入浏览器可写存储 `jc_web_skills_v1`。不得把 `pub
 
 ### 9.2 MCP
 
-已启用且已连接的 MCP 工具经现有 `mcpStore -> mcpBridge` 进入同一模型工具循环，由模型按本轮目标决定是否调用。MCP 不能取代每轮 Wiki 查询。
+已启用且已连接的 MCP 工具经现有 `mcpStore -> mcpBridge` 进入同一模型工具循环，由模型按本轮目标决定是否调用。
 
 Desktop 支持现有本地 `stdio` 与远程 MCP；Web 只显示浏览器真实可执行的远程 MCP。凭据、OAuth token、工具参数和完整回执不进入 Raw 或 Wiki。
 
@@ -426,7 +427,7 @@ type ProjectResourceOpenResult =
 - `ProjectFileService` 与 Desktop/Web 项目适配器；
 - `openProjectResource()` 统一路由与资源变更事件；
 - 现有账号、Provider、模型和安全凭据能力；
-- `SkillPickerBar`、Skill loader 与双端 Skill 仓库；
+- Skill loader、自动发现目录与双端 Skill 仓库；
 - `McpManagerPanel`、`mcpStore`、`mcpClient` 与 `mcpBridge`；
 - Direct Engine、附件和 Markdown 渲染的底层能力；
 - `MediaPlanCard`、`MediaTaskBubble`、`preparePublicMediaPlan()` 与 `mediaTaskStore`；
@@ -483,7 +484,7 @@ type ProjectResourceOpenResult =
 2. 在 `openProjectResource()` 增加对话识别与打开结果。
 3. 建立文件树 + `CentralContentHost`，完成四种资源显示。
 4. 实现 Raw 新建、标题显示、聊天恢复、追加、重命名和删除。
-5. 接入 Direct Engine、每轮 Wiki 查询、用户 Skill、确认写入和 MCP。
+5. 接入 Direct Engine、官方式 Skill 自动发现、用户 Skill、确认写入和 MCP。
 6. 接入隐藏设置及对话内图片/视频/音频能力。
 7. 保持正式域名不变，先完成本地自动化验证；正式域名发布移到第三阶段。
 
@@ -524,13 +525,13 @@ type ProjectResourceOpenResult =
 - 绑定项目文件夹只检测，不写入；用户点击“新建记忆空间”后才创建 Wiki 与 `.raw/对话记录/`，且不自动创建首条对话。
 - `openProjectResource()` 已统一区分 `conversation / document / media / binary`；普通 Markdown 不进入聊天壳。
 - 对话创建、H1 标题、Raw 追加、修订冲突重试和文件树切换已落地；用户消息先落 Raw，合格回复完成后再落 assistant。
-- Direct 请求必须先加载 `jc-cha-wiki` 并真实调用 Wiki 查询工具；缺任一步都拒绝保存正式助手回复。
+- 记忆 Direct 请求只暴露 Skill 元数据与统一 `skill(name)` loader；模型按 description 自主决定是否加载和使用工具，不设强制查询门禁。
 - 登录、模型、Skill 仓库和 MCP 进入设置抽屉；图片、视频、音频共用 `MediaPlanCard -> mediaTaskStore`，不加载创作面板。
 - 桌面宽屏使用左树右内容，手机宽度使用文件树抽屉和全屏中央内容区。
 - 记忆模式文件树头部按作用域分两排：第一排为 `Logo + 项目名/切换 + 隐藏文件树`，第二排为新建文件、新建文件夹和刷新；顶部对话选择器旁常驻“新建对话”，切换项目后从 Raw 读取对话列表，没有对话时显示显式创建入口。
 - 输入框复用主 App 的 `contenteditable` 纯文本提取和自动增高合同；普通文本文件可从右键菜单“引用到对话”，引用内容只进入下一轮请求，不改写原文件。
 - 设置抽屉复用白色、浅色、黑夜和护眼四套主题；记忆 Web 首次启动默认护眼绿色，后续尊重用户选择。
-- Web Skill 仓库与 SkillPicker 统一读取用户已安装 Skill Store；`public/skills/` 只供产品内部调用，不再灌入仓库或选择器。
+- Web Skill 仓库读取用户已安装 Skill Store；输入框不显示 SkillPicker。`public/skills/` 不进入仓库，但与用户 Skill 合并为模型可发现目录。
 - `skill-creator` 的完整 `SKILL.md` 安装块、确认卡和 `createAgent()` 写入已接通；同名 Skill 明示为更新，确认前不写入。
 
 验证证据：
@@ -609,7 +610,7 @@ type ProjectResourceOpenResult =
 #### 经验二：同一对话允许不同执行深度
 
 - `快速` 与 `记忆` 不是两个会话或两个产品模式，而是当前一轮的执行策略；两者必须写入同一个 Raw，用户切换时不能丢上下文。
-- 快速路径保留完整对话、附件、媒体规划和显式 Skill，但不强制查询 Wiki；记忆路径必须先加载查询 Skill 并真实查询 Wiki，失败时不得伪造已查询的正式回复。
+- 快速路径保留完整对话、附件和媒体规划但不提供工具；记忆路径提供 Skill/项目/MCP 工具，由模型按任务自主决定是否调用。
 - “快”来自少一次不必要的工具循环，不来自删掉附件、媒体、模型选择或对话历史。
 
 #### 经验三：导航按用户目标分工，不按文件类型堆入口
@@ -658,9 +659,15 @@ type ProjectResourceOpenResult =
 #### 经验十：生成、取回与保存是三个状态，确认卡是可复用参数单
 
 - 上游生成成功、浏览器取回结果、写入项目文件是三个阶段。后两步失败不能把已经付费完成的生成任务改写成“生成失败”；必须保留原始结果，并单独提供“重试保存”。
-- `api.jiucaihezi.studio` 返回的 `/v1/videos/{task}/content` 等结果地址可能仍需当前用户 Token。浏览器只对韭菜盒子 API 同源结果下载附加现有认证，不能把 Token 发往第三方 CDN；成功落项目后，预览优先读取项目本地副本。
+- `api.jiucaihezi.studio` 返回的 `/v1/videos/{task}/content` 等结果地址可能仍需当前用户 Token。浏览器只对韭菜盒子 API 同源结果下载附加现有认证，不能把 Token 发往第三方 CDN；聊天结果卡直接显示受信执行链返回的安全 HTTPS 地址，项目副本只在用户点击下载、文件树预览或再次引用时读取。
 - 媒体确认卡不是一次性按钮，而是当前提示词、参考素材、模型、比例、分辨率和时长的可复用参数单。提交后仍可调整参数并“再次生成”，旧结果不能被新任务覆盖。
 - 图片支持一次生成 `1-5` 张；每张都是独立付费任务、独立进度和独立结果。批量提交发生部分失败时，已经提交的任务必须立即显示，并明确提示成功提交数量；视频、音频和 3D 暂不提供批量入口，避免高成本误操作。
+
+#### 经验十一：落盘不是展示缓存，媒体卡不得主动搬运项目文件
+
+- 2026-07-26 两次 Chrome Renderer 崩溃 dump 明确记录 `OOM (CALL_AND_RETRY_LAST)`、V8 `allocation failure` 和当前 `gpt-image-2-vip` 任务。生成请求已返回 HTTP 200、项目文件已保存，崩溃发生在结果展示阶段。
+- 根因是每个成功任务卡挂载时都从 OPFS 读取完整媒体，再依次复制为 `ArrayBuffer -> Uint8Array -> Blob -> Object URL` 并解码；批量图片和历史任务卡会并发放大峰值。`URL.revokeObjectURL()` 只能在卸载后释放，不能阻止挂载时的峰值。
+- 正确边界：项目文件负责持久化，结果 HTTPS 负责轻量展示；图片使用浏览器原生 `loading="lazy" + decoding="async"`，视频和音频只 `preload="metadata"`。只有用户主动下载、打开或引用时才读取项目二进制，不能用自动本地预读优化正常可用的远程结果。
 
 ## 15. 验收标准
 
@@ -681,8 +688,8 @@ type ProjectResourceOpenResult =
 
 1. 新建对话立即创建带有效标记的唯一 Raw。
 2. 用户消息先写 Raw，再发模型；完整回复后写 assistant Raw。
-3. 模型看到当前对话后自主调用 `jc-cha-wiki`，App 不预查关键词。
-4. 未查询或查询失败时不落正式助手回复。
+3. 模型看到当前对话和 Skill 目录后，按 description 自主决定是否调用 `jc-cha-wiki` 或其他 Skill；App 不预查关键词、不强制调用。
+4. 模型只有实际调用并成功取得工具结果后，才可声称查询或修改了项目；普通回答无需工具门禁。
 5. 普通聊天不写 Wiki；用户确认后可写合理路径并追溯到 Raw turn。
 6. 清除 UI 状态后，全部对话仍可从 Raw 恢复。
 7. 普通文本文件可引用到当前对话；引用只进入本轮模型请求，原文件保持不变。
@@ -692,8 +699,8 @@ type ProjectResourceOpenResult =
 
 1. 账号/齿轮按钮可打开登录、Provider、模型、Skill 仓库、MCP 和通用设置。
 2. 设置不是常驻第三栏，关闭后回到原资源。
-3. Skill 仓库与选择器只显示用户已安装 Skill，列表完全一致；新增、编辑或删除后立即同步。
-4. `public/skills/` 中的产品内置 Skill 不在仓库和选择器出现，但内部调用不受影响。
+3. Skill 仓库只显示用户已安装 Skill；输入框没有 Skill 选择器，新增、编辑或删除后自动发现目录立即同步。
+4. `public/skills/` 中的产品内置 Skill 不在仓库出现，但与用户 Skill 一样由模型按 description 自主调用。
 5. 用户明确要求安装后才出现安装确认卡；点击“继续修改”不写入，点击“安装到我的 Skill”才写入并同步两处列表。
 6. 只有 `enabled + connected` 的 MCP 工具进入模型候选池。
 7. Web 不显示不可执行的本地 `stdio`；Desktop 可使用现有本地与远程 MCP。

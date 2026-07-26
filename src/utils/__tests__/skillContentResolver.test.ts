@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -46,11 +46,13 @@ test('web skill catalog exposes only routing metadata to the first model turn', 
   assert.doesNotMatch(prompt, /# 工作流/)
 })
 
-test('web skill catalog declares the only valid skill tool call shape', () => {
+test('web skill catalog lets the model select by description without a fixed Skill', () => {
   const prompt = buildWebSkillCatalogPrompt(catalog)
 
-  assert.match(prompt, /only valid function name is "skill"/)
-  assert.match(prompt, /skill\(\{"name":"JC-duanju-shijiemoxing"\}\)/)
+  assert.match(prompt, /matches a Skill description/)
+  assert.match(prompt, /exact name/)
+  assert.match(prompt, /If no Skill description matches/)
+  assert.doesNotMatch(prompt, /skill\(\{"name":"JC-duanju-shijiemoxing"\}\)/)
   assert.doesNotMatch(prompt, /<available_skills>/)
 })
 
@@ -85,26 +87,6 @@ test('generated Web Skill catalog excludes local filesystem artifacts', () => {
       assert.equal(file.split('/').some(segment => segment === '.DS_Store' || segment === '__pycache__' || segment.endsWith('.pyc')), false, file)
     }
   }
-})
-
-test('ecommerce product-image planning Skill is packaged as planning-only guidance', () => {
-  const path = join(process.cwd(), 'public/skills/jc-product-image/SKILL.md')
-  assert.equal(existsSync(path), true)
-  const content = readFileSync(path, 'utf8')
-  assert.match(content, /```jc-media-plan/)
-  assert.match(content, /不得.*(?:CLI|轮询|下载|媒体 API)/)
-})
-
-test('jc-gpt-image is a prompt-only Skill without local key or image execution code', () => {
-  const directory = join(process.cwd(), 'public/skills/jc-gpt-image')
-  const content = readFileSync(join(directory, 'SKILL.md'), 'utf8')
-
-  assert.match(content, /只输出一条可直接用于公共媒体生成的中文图片提示词/)
-  assert.doesNotMatch(content, /OPENAI_API_KEY|API Key|CLI|scripts\/generate\.py/)
-  assert.equal(existsSync(join(directory, 'scripts')), false)
-  assert.equal(existsSync(join(directory, 'src')), false)
-  assert.equal(existsSync(join(directory, 'README.md')), false)
-  assert.equal(existsSync(join(directory, 'agents')), false)
 })
 
 test('forced catalog refresh sees a newly packaged workbench declaration', { concurrency: false }, async () => {

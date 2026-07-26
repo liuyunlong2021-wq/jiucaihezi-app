@@ -88,22 +88,15 @@ test('memory composer routes pasted images and media plans through the shared at
   assert.match(workbench, /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/)
 })
 
-test('memory Skill picker uses the same installed-user list as the Web warehouse', () => {
+test('memory mode follows automatic Skill discovery without a user picker', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
-  const picker = source('src/components/chat/SkillPickerBar.vue')
 
-  assert.match(workbench, /agentStore\.getCustomSkills\(\)/)
-  assert.doesNotMatch(workbench, /loadWebSkillCatalog/)
-  assert.match(runtime, /agentStore\.getCustomSkills\(\)\.find/)
-  assert.match(workbench, /<SkillPickerBar[\s\S]*compact/)
-  assert.match(workbench, /\.memory-composer-tools \{ position: relative;/)
-  assert.match(workbench, /:deep\(\.spb-root\.compact\) \{ position: static; \}/)
-  assert.match(picker, /props\.compact[\s\S]*spb-compact-trigger/)
-  assert.match(picker, /spb-panel-up/)
-  assert.match(picker, /\.spb-panel-up \{[\s\S]*right: 0;[\s\S]*bottom: calc\(100% \+ 8px\)/)
-  assert.match(picker, /暂无已安装 Skill/)
-  assert.doesNotMatch(picker, /暂无内置 Skill，请确认 dist\/skills/)
+  assert.doesNotMatch(workbench, /SkillPickerBar|selectedSkillName/)
+  assert.match(runtime, /mergeCreativeSkillCatalog\(customSkills, await loadWebSkillCatalog\(\)\)/)
+  assert.match(runtime, /根据用户任务自主决定是否加载 Skill/)
+  assert.doesNotMatch(runtime, /REQUIRED_SKILL|loadedRequiredSkill|queriedWiki|每次回复必须先调用/)
+  assert.match(runtime, /if \(customSkill\?\.skillContent\.trim\(\)\)/)
 })
 
 test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {
@@ -145,8 +138,11 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.match(bubble, /> \u4e0b\u8f7d\s*<\/button>/)
   assert.match(bubble, /project-filetree:locate/)
   assert.match(bubble, /const displayUrl = computed/)
-  assert.match(bubble, /await projectFiles\.readBinary\(resource\)/)
   assert.match(bubble, /:src="displayUrl"/)
+  assert.match(bubble, /loading="lazy" decoding="async"/)
+  assert.match(bubble, /preload="metadata"/)
+  assert.doesNotMatch(bubble, /watch\(projectResource|projectMediaUrl|URL\.createObjectURL|URL\.revokeObjectURL/)
+  assert.match(bubble, /async function downloadCopy\(\)[\s\S]*readBinary\(resource\)/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
   assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)

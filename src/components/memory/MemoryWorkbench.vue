@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import ProjectFileTree from '@/components/filetree/ProjectFileTree.vue'
-import SkillPickerBar from '@/components/chat/SkillPickerBar.vue'
 import MediaPlanCard from '@/components/chat/MediaPlanCard.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
 import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
@@ -46,7 +45,6 @@ import {
   stripSkillInstallBlock,
   type SkillInstallPlan,
 } from '@/runtime/memory/skillInstall'
-import type { OpenCodeSkillOption } from '@/opencodeClient/catalog'
 import { getPlainText, setEditorText } from '@/composables/useContentEditable'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { SkillConfig } from '@/types/skill'
@@ -71,16 +69,7 @@ const conversationPickerRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
-const selectedSkillName = ref('')
 const executionMode = ref<ConversationMode>('memory')
-const skills = computed<OpenCodeSkillOption[]>(() => agentStore.getCustomSkills().map(skill => ({
-  name: skill.name,
-  label: skill.name,
-  description: skill.description || undefined,
-  location: `user-skill://${skill.id}`,
-})))
-const skillsLoading = ref(false)
-const skillsError = ref('')
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const sending = ref(false)
@@ -149,7 +138,7 @@ onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
   await Promise.all([
-    refreshSkills(),
+    refreshSkills().catch(() => {}),
     agentStore.fetchModels({ skipOpenCode: true }).catch(() => {}),
     mediaTaskStore.init(),
   ])
@@ -399,18 +388,17 @@ async function send() {
       userTurn?.id,
       pendingAttachments,
     )
-    status.value = pendingMode === 'memory' ? '正在查询 Wiki' : '正在回复'
+    status.value = '正在回复'
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
       turns: saved.transcript.turns,
       modelId: agentStore.currentModel,
       mode: pendingMode,
-      selectedSkillName: selectedSkillName.value,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
       attachments: pendingAttachments,
       files: referencedFiles.value,
       signal: abortController.signal,
-      onTool(name) { status.value = name === 'skill' ? '正在加载查询 Skill' : '正在查询 Wiki' },
+      onTool(name) { status.value = name === 'skill' ? '正在加载 Skill' : '正在使用工具' },
       onText(text) {
         status.value = '正在回复'
         streamingText.value = text
@@ -522,18 +510,7 @@ async function handleComposerPaste(event: ClipboardEvent) {
 }
 
 async function refreshSkills() {
-  skillsLoading.value = true
-  skillsError.value = ''
-  try {
-    await agentStore.refreshSkills()
-    if (selectedSkillName.value && !skills.value.some(skill => skill.name === selectedSkillName.value)) {
-      selectedSkillName.value = ''
-    }
-  } catch (cause) {
-    skillsError.value = cause instanceof Error ? cause.message : String(cause)
-  } finally {
-    skillsLoading.value = false
-  }
+  await agentStore.refreshSkills()
 }
 
 async function selectFiles(event: Event) {
@@ -944,26 +921,16 @@ function readDataUrl(file: File): Promise<string> {
             <button
               type="button"
               :class="{ active: executionMode === 'quick' }"
-              title="直接回答，不查询 Wiki"
+              title="直接回答，不使用 Skill 和项目工具"
               @click="executionMode = 'quick'"
             >快速</button>
             <button
               type="button"
               :class="{ active: executionMode === 'memory' }"
-              title="回答前查询 Wiki"
+              title="按需使用 Skill 和项目工具"
               @click="executionMode = 'memory'"
             >记忆</button>
           </div>
-          <SkillPickerBar
-            :skills="skills"
-            :selected-skill-name="selectedSkillName"
-            :loading="skillsLoading"
-            :error="skillsError"
-            :web-mode="!desktopRuntime"
-            compact
-            @select="selectedSkillName = $event"
-            @refresh="refreshSkills"
-          />
         </div>
         <div v-if="attachments.length" class="memory-attachments">
           <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip">
@@ -1077,7 +1044,6 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message.streaming { opacity: .85; }
 .memory-composer { width: min(860px, calc(100% - 28px)); margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
 .memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }
-.memory-composer-tools :deep(.spb-root.compact) { position: static; }
 .memory-mode-segment { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-mode-segment button { height: 24px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--ink3); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-mode-segment button.active { background: var(--olive); color: white; }

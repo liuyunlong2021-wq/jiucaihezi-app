@@ -5,7 +5,7 @@
  * 在对话区显示媒体生成任务的实时进度和最终结果。
  * 响应式连接到 mediaTaskStore，自动更新。
  */
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, ref } from 'vue'
 import { useMediaTaskStore, type MediaTask } from '@/stores/mediaTaskStore'
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
@@ -33,8 +33,6 @@ const isFailed = computed(() => task.value?.status === 'failed')
 const hasSaveWarning = computed(() => task.value?.status === 'success' && task.value.assetStatus === 'failed')
 const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
 const linkCopied = ref(false)
-const projectMediaUrl = ref('')
-let projectMediaRequest = 0
 const projectResource = computed<ProjectResource | undefined>(() => {
   const t = task.value
   const path = String(t?.projectPath || '')
@@ -53,28 +51,7 @@ const projectResource = computed<ProjectResource | undefined>(() => {
     kind: classifyProjectResource({ path, mimeType }),
   }
 })
-const displayUrl = computed(() => projectMediaUrl.value || task.value?.resultUrl || '')
-
-watch(projectResource, async resource => {
-  const request = ++projectMediaRequest
-  if (projectMediaUrl.value) URL.revokeObjectURL(projectMediaUrl.value)
-  projectMediaUrl.value = ''
-  if (!resource) return
-  try {
-    const binary = await projectFiles.readBinary(resource)
-    if (request !== projectMediaRequest) return
-    const bytes = new Uint8Array(binary.data.byteLength)
-    bytes.set(binary.data)
-    projectMediaUrl.value = URL.createObjectURL(new Blob([bytes.buffer], {
-      type: binary.mimeType || resource.mimeType || 'application/octet-stream',
-    }))
-  } catch { /* 原始链接仍可作为兜底 */ }
-}, { immediate: true })
-
-onBeforeUnmount(() => {
-  projectMediaRequest++
-  if (projectMediaUrl.value) URL.revokeObjectURL(projectMediaUrl.value)
-})
+const displayUrl = computed(() => task.value?.resultUrl || '')
 
 function cancel() {
   taskStore.cancelTask(props.taskId)
@@ -164,9 +141,9 @@ function sendAsReference() {
 
     <!-- 成功 -->
     <div v-else-if="isSuccess && isSafeResult" class="mtb-result">
-      <img v-if="task.type === 'image'" :src="displayUrl" class="mtb-image" />
-      <video v-else-if="task.type === 'video'" :src="displayUrl" controls class="mtb-video" />
-      <audio v-else-if="task.type === 'audio'" :src="displayUrl" controls class="mtb-audio" />
+      <img v-if="task.type === 'image'" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" />
+      <video v-else-if="task.type === 'video'" :src="displayUrl" preload="metadata" controls class="mtb-video" />
+      <audio v-else-if="task.type === 'audio'" :src="displayUrl" preload="metadata" controls class="mtb-audio" />
       <div v-else-if="task.type === 'model3d'" class="mtb-file-result">
         <JcIcon name="deployed_code" />
         <span>3D 模型文件已生成</span>
