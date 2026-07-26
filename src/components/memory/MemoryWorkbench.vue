@@ -11,6 +11,7 @@ import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { onEvent } from '@/utils/eventBus'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { createProjectFileActions } from '@/services/projectFileActions'
 import type { ProjectResourceOpenResult } from '@/services/projectExplorerService'
 import { openProjectResource } from '@/services/projectExplorerService'
 import {
@@ -34,6 +35,10 @@ import {
   buildMediaReferencePolicy,
   createMediaContextSnapshot,
   materializeMediaPlanReferences,
+  projectResourceForMediaTask,
+  refreshMediaPlanReferenceValues,
+  type MediaContextSnapshot,
+  type MediaReferenceResolvers,
 } from '@/runtime/workbench/mediaReference'
 import { preparePublicMediaPlan } from '@/runtime/workbench/mediaPlanBridge'
 import {
@@ -49,11 +54,13 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
+import type { ProjectResource } from '@/utils/projectResource'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
 const mediaTaskStore = useMediaTaskStore()
 const files = createRuntimeProjectFileService()
+const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
@@ -271,10 +278,17 @@ async function openResource(resource: ProjectResourceOpenResult) {
     conversationSearch.value = ''
     executionMode.value = [...resource.transcript.turns].reverse()
       .find(turn => turn.role === 'user' && turn.mode)?.mode || 'memory'
+    let previousUserTurnId = ''
     for (const turn of resource.transcript.turns) {
+      if (turn.role === 'user') {
+        previousUserTurnId = turn.id
+        continue
+      }
       if (turn.role !== 'assistant') continue
       try {
-        mediaPlans.value[turn.id] = parseMediaPlans(turn.content)
+        const mediaContext = conversationMediaContext(resource.transcript.turns, previousUserTurnId)
+        mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
+          .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
         mediaPlans.value[turn.id].forEach((_, index) => {
           mediaPlanStatus.value[mediaPlanKey(turn.id, index)] ||= 'ready'
         })
@@ -380,19 +394,11 @@ async function send() {
     opened.value = await openProjectResource(files, saved.resource)
     input.value = ''
     setEditorText(composerRef.value, '')
-    const mediaInputs = pendingAttachments
-      .filter(attachment => attachment.kind === 'image' || attachment.kind === 'video')
-      .map(attachment => ({
-        name: attachment.name,
-        kind: attachment.kind as 'image' | 'video',
-        value: attachment.value,
-        source: 'attachment' as const,
-      }))
-    const mediaContext = createMediaContextSnapshot({
-      owner: active.resource.owner,
-      sessionId: saved.transcript.id,
-      explicitReferences: buildExplicitMediaReferences(userTurn?.id || saved.transcript.id, mediaInputs),
-    })
+    const mediaContext = conversationMediaContext(
+      saved.transcript.turns,
+      userTurn?.id,
+      pendingAttachments,
+    )
     status.value = pendingMode === 'memory' ? '正在查询 Wiki' : '正在回复'
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
@@ -416,8 +422,8 @@ async function send() {
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
       try {
-        mediaPlans.value[turn.id] = parseMediaPlans(turn.content)
-          .map(plan => materializeMediaPlanReferences(plan, mediaContext))
+        mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
+          .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
         mediaPlans.value[turn.id].forEach((_, index) => {
           mediaPlanStatus.value[mediaPlanKey(turn.id, index)] = 'ready'
         })
@@ -537,16 +543,28 @@ async function selectFiles(event: Event) {
 }
 
 async function addAttachmentFiles(selected: File[]) {
-  const resolved = await Promise.all(selected.map(async (file, index): Promise<ResolvedDirectAttachment> => ({
-    id: `${file.name}-${file.lastModified}-${file.size}-${index}`,
-    name: file.name,
-    mime: file.type || 'application/octet-stream',
-    size: file.size,
-    kind: file.type.startsWith('image/') ? 'image'
-      : file.type.startsWith('video/') ? 'video'
-        : file.type.startsWith('audio/') ? 'audio' : 'file',
-    value: await readDataUrl(file),
-  })))
+  const owner = projectOwner.value
+  if (!owner || !memoryReady.value) throw new Error('请先创建记忆空间')
+  const resolved = await Promise.all(selected.map(async (file): Promise<ResolvedDirectAttachment> => {
+    const mime = file.type || 'application/octet-stream'
+    const resource = await fileActions.importMedia({
+      owner,
+      path: `jc-media/uploads/${crypto.randomUUID()}-${safeAttachmentName(file.name)}`,
+      data: new Uint8Array(await file.arrayBuffer()),
+      mimeType: mime,
+    })
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      mime,
+      size: file.size,
+      kind: mime.startsWith('image/') ? 'image'
+        : mime.startsWith('video/') ? 'video'
+          : mime.startsWith('audio/') ? 'audio' : 'file',
+      value: await readDataUrl(file),
+      resourcePath: resource.path,
+    }
+  }))
   const byId = new Map(attachments.value.map(attachment => [attachment.id, attachment]))
   for (const attachment of resolved) byId.set(attachment.id, attachment)
   attachments.value = [...byId.values()]
@@ -563,7 +581,11 @@ async function approveMediaPlan(turnId: string, planIndex: number) {
   mediaPlanStatus.value[key] = 'submitting'
   mediaPlanErrors.value[key] = ''
   try {
-    const prepared = await preparePublicMediaPlan({ plan, owner: conversation.value.resource.owner })
+    const prepared = await preparePublicMediaPlan({
+      plan,
+      owner: conversation.value.resource.owner,
+      resolvers: mediaReferenceResolvers(),
+    })
     const count = plan.kind === 'image' ? (mediaGenerationCounts.value[key] || 1) : 1
     const taskIds: string[] = []
     let submitError = ''
@@ -682,12 +704,93 @@ function displayTurnContent(turn: ConversationTurn): string {
 }
 
 function attachmentMetadata(attachments: ResolvedDirectAttachment[]): ConversationAttachment[] {
-  return attachments.map(({ id, name, mime, size, kind }) => ({ id, name, mime, size, kind }))
+  return attachments.map(({ id, name, mime, size, kind, resourcePath }) => ({
+    id, name, mime, size, kind, projectPath: resourcePath,
+  }))
 }
 
 function turnAttachments(turn: ConversationTurn): Array<ConversationAttachment & { value?: string }> {
   const previews = new Map((transientAttachments.value[turn.id] || []).map(attachment => [attachment.id, attachment.value]))
   return (turn.attachments || []).map(attachment => ({ ...attachment, value: previews.get(attachment.id) }))
+}
+
+function conversationMediaContext(
+  turns: ConversationTurn[],
+  explicitTurnId = '',
+  liveAttachments: ResolvedDirectAttachment[] = [],
+): MediaContextSnapshot {
+  const owner = conversation.value?.resource.owner || projectOwner.value
+  const liveByPath = new Map(liveAttachments.map(attachment => [attachment.resourcePath, attachment]))
+  const references = turns.flatMap(turn => {
+    if (turn.role !== 'user') return []
+    const inputs = (turn.attachments || []).flatMap(attachment => {
+      if (!attachment.projectPath || (attachment.kind !== 'image' && attachment.kind !== 'video')) return []
+      const live = liveByPath.get(attachment.projectPath)
+      const resource = attachmentResource(owner, attachment)
+      return [{
+        name: `${attachment.name}（${turn.createdAt.slice(0, 16).replace('T', ' ')}）`,
+        kind: attachment.kind,
+        value: live?.value || '',
+        source: 'project' as const,
+        resource,
+      }]
+    })
+    return buildExplicitMediaReferences(turn.id, inputs)
+      .map(reference => ({ ...reference, explicit: turn.id === explicitTurnId }))
+  })
+  return createMediaContextSnapshot({
+    owner,
+    sessionId: conversation.value?.transcript.id || '',
+    explicitReferences: references,
+  })
+}
+
+async function resolveMediaPlanReferences(plan: MediaPlan, context: MediaContextSnapshot): Promise<MediaPlan> {
+  const materialized = materializeMediaPlanReferences(plan, context)
+  return materialized.mediaReferences?.length
+    ? await refreshMediaPlanReferenceValues(materialized, mediaReferenceResolvers())
+    : materialized
+}
+
+function mediaReferenceResolvers(): MediaReferenceResolvers {
+  return {
+    async readProject(locator) {
+      return fileActions.readMediaDataUrl({
+        runtime: locator.runtime,
+        owner: locator.owner,
+        path: locator.path,
+        id: locator.id,
+        name: locator.path.split('/').pop() || locator.path,
+        isDirectory: false,
+        kind: 'media',
+      })
+    },
+    async readTask(taskId) {
+      const task = mediaTaskStore.getTask(taskId)
+      if (task?.status !== 'success') return ''
+      const resource = projectResourceForMediaTask(task)
+      if (resource) {
+        try { return await fileActions.readMediaDataUrl(resource) } catch { /* result URL fallback */ }
+      }
+      return task.resultUrl || ''
+    },
+  }
+}
+
+function attachmentResource(owner: string, attachment: ConversationAttachment): ProjectResource {
+  return {
+    runtime: desktopRuntime ? 'desktop' : 'web',
+    owner,
+    path: attachment.projectPath!,
+    name: attachment.name,
+    isDirectory: false,
+    kind: 'media',
+    mimeType: attachment.mime,
+  }
+}
+
+function safeAttachmentName(name: string): string {
+  return String(name || 'attachment.bin').replace(/[^a-zA-Z0-9._\-\u4e00-\u9fff]/g, '_').slice(-100)
 }
 
 function releaseMediaUrl() {

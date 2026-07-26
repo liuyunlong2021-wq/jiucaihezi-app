@@ -279,6 +279,7 @@ export function buildMediaReferencePolicy(snapshot: MediaContextSnapshot): strin
       reference =>
         `- ${reference.id} | ${reference.kind} | ${reference.label} | ${reference.source}`,
     ),
+    '用户说“这张图”“之前那张图”等指代且只有一个同类素材时，直接使用它的 ID；有多个且无法确定时，先请用户确认，不要猜测。',
   ].join('\n')
 }
 

@@ -6,6 +6,7 @@ export interface ConversationAttachment {
   mime: string
   size: number
   kind: 'image' | 'video' | 'audio' | 'file'
+  projectPath?: string
 }
 
 export type ConversationMode = 'quick' | 'memory'
@@ -98,11 +99,18 @@ function parseAttachments(value?: string): ConversationAttachment[] | undefined 
         mime: String(item.mime),
         size: Number(item.size) || 0,
         kind: ['image', 'video', 'audio', 'file'].includes(item.kind) ? item.kind : 'file',
+        ...(validProjectMediaPath(item.projectPath) ? { projectPath: item.projectPath } : {}),
       })) as ConversationAttachment[]
     return attachments.length ? attachments : undefined
   } catch {
     return undefined
   }
+}
+
+function validProjectMediaPath(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.startsWith('jc-media/')
+    && !value.split('/').some(part => !part || part === '.' || part === '..')
 }
 
 export function renameConversationTranscript(content: string, title: string): string {
