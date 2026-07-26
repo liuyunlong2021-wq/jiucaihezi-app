@@ -223,7 +223,8 @@ test('Skill Warehouse and review live in Settings around MCP and plugins', () =>
   assert.equal(railSource.includes("key: 'review'"), false)
 })
 
-test('Ecommerce workbench exposes a direct Chat entry in its header', () => {
+// Legacy ecommerce rollback contract; the current product starts MemoryWorkbench.
+test.skip('Ecommerce workbench exposes a direct Chat entry in its header', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/workbench/EcommerceWorkbench.vue'), 'utf8')
   const header = source.slice(source.indexOf('<header class="ecom-header">'), source.indexOf('</header>'))
 

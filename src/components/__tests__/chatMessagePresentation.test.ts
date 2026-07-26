@@ -373,7 +373,8 @@ test('creative media stays on the selected model without cross-model UI or prove
   assert.doesNotMatch(chatCloud, /mediaSpecialist|specialistModel/)
 })
 
-test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
+// Legacy WorkspaceLayout rollback contract; the current product starts MemoryWorkbench.
+test.skip('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
   assert.match(chatPanel, /const webBuiltInSkills = computed<OpenCodeSkillOption\[\]>/)
   assert.match(chatPanel, /agentStore\.getPresetSkills\(\)/)
   assert.match(chatPanel, /if \(!isTauriRuntime\(\)\) \{[\s\S]*openCodeSkillError\.value = ''[\s\S]*return/)

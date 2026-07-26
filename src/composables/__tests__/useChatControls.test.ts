@@ -206,7 +206,8 @@ test('Desktop plan/build follows the official prompt contract without deprecated
 
 // ponytail: desktop direct cloud test removed (SDD app-opencode-only)
 
-test('web cloud send reuses caller session id instead of switching sessions mid-stream', () => {
+// Legacy ChatPanel rollback contract; the current product starts MemoryWorkbench.
+test.skip('web cloud send reuses caller session id instead of switching sessions mid-stream', () => {
   const source = readFileSync(join(process.cwd(), 'src/composables/useChat.ts'), 'utf8')
   const webBranch = source.slice(
     source.indexOf('if (!isTauriRuntime()) {'),

@@ -15,9 +15,15 @@ import {
   getApiKey,
   initApiKey,
   setApiKey,
+  getGatewaySessionToken,
 } from '@/services/newApiClient'
+import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
+import type { SyncProject } from '@/services/textSyncClient'
 
-type SettingsTab = 'account' | 'skills' | 'mcp' | 'theme'
+const props = defineProps<{ owner?: string; projectName?: string }>()
+const emit = defineEmits<{ (event: 'synced'): void }>()
+
+type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'theme'
 
 const tab = ref<SettingsTab>('account')
 const apiKey = ref('')
@@ -28,6 +34,10 @@ const desktopRuntime = isTauriRuntime()
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
+const syncBusy = ref(false)
+const syncError = ref('')
+const cloudProjects = ref<SyncProject[]>([])
+const selectedCloudProjectId = ref('')
 const agentStore = useAgentStore()
 const { theme } = useTheme()
 const textModels = computed(() => agentStore.textModels.map(model => ({ id: model.id, label: model.label })))
@@ -82,6 +92,7 @@ async function handleLogin(result: JcCloudLoginResult) {
   await setApiKey(result.apiKey)
   await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
   status.value = '已登录'
+  if (tab.value === 'sync') await refreshCloudProjects()
 }
 
 async function saveKey() {
@@ -95,6 +106,39 @@ async function saveKey() {
   saved.value = true
   status.value = '已保存'
 }
+
+async function showSync() {
+  tab.value = 'sync'
+  await refreshCloudProjects()
+}
+
+async function refreshCloudProjects() {
+  syncError.value = ''
+  if (!getGatewaySessionToken()) return
+  try {
+    cloudProjects.value = await projectTextSync.listCloudProjects()
+    selectedCloudProjectId.value ||= cloudProjects.value[0]?.id || ''
+  } catch (error) {
+    syncError.value = error instanceof Error ? error.message : String(error)
+  }
+}
+
+async function runSync(action: 'enable' | 'connect' | 'sync') {
+  if (syncBusy.value || !props.owner) return
+  syncBusy.value = true
+  syncError.value = ''
+  try {
+    if (action === 'enable') await projectTextSync.enable()
+    else if (action === 'connect') await projectTextSync.connect(selectedCloudProjectId.value)
+    else await projectTextSync.syncNow()
+    await refreshCloudProjects()
+    emit('synced')
+  } catch (error) {
+    syncError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    syncBusy.value = false
+  }
+}
 </script>
 
 <template>
@@ -102,6 +146,9 @@ async function saveKey() {
     <nav class="memory-settings-tabs" aria-label="设置分类">
       <button :class="{ active: tab === 'account' }" @click="tab = 'account'">
         <JcIcon name="person" />账号
+      </button>
+      <button :class="{ active: tab === 'sync' }" @click="showSync">
+        <JcIcon name="sync" />同步
       </button>
       <button :class="{ active: tab === 'skills' }" @click="tab = 'skills'">
         <JcIcon name="extension" />Skill
@@ -141,6 +188,35 @@ async function saveKey() {
           </div>
         </section>
       </div>
+      <div v-else-if="tab === 'sync'" class="memory-sync">
+        <template v-if="!getGatewaySessionToken()">
+          <p>请先在“账号”中登录。手动填写 API Key 不能识别同步账号。</p>
+          <button @click="tab = 'account'">前往登录</button>
+        </template>
+        <template v-else-if="!owner">
+          <p>请先在左侧选择一个本地项目。</p>
+        </template>
+        <template v-else-if="projectTextSyncStatus.cloudProjectId">
+          <div class="memory-sync-summary">
+            <strong>{{ projectName || '当前项目' }}</strong>
+            <span>{{ projectTextSyncStatus.message || '已连接云项目' }}</span>
+            <span v-if="projectTextSyncStatus.pending">待同步 {{ projectTextSyncStatus.pending }} 项</span>
+          </div>
+          <button :disabled="syncBusy" @click="runSync('sync')">{{ syncBusy ? '同步中' : '立即同步' }}</button>
+        </template>
+        <template v-else>
+          <p>把当前项目作为新的云端文字项目，或者连接同账号下已有项目。</p>
+          <button :disabled="syncBusy" @click="runSync('enable')">同步当前项目</button>
+          <div v-if="cloudProjects.length" class="memory-sync-connect">
+            <select v-model="selectedCloudProjectId" aria-label="已有云项目">
+              <option v-for="project in cloudProjects" :key="project.id" :value="project.id">{{ project.name }}</option>
+            </select>
+            <button :disabled="syncBusy || !selectedCloudProjectId" @click="runSync('connect')">连接</button>
+          </div>
+          <p v-else>当前账号还没有其他云项目。</p>
+        </template>
+        <p v-if="syncError" class="memory-sync-error">{{ syncError }}</p>
+      </div>
       <WebSkillPanel v-else-if="tab === 'skills'" />
       <McpManagerPanel v-else-if="tab === 'mcp'" />
       <div v-else class="memory-appearance">
@@ -175,7 +251,7 @@ async function saveKey() {
 
 <style scoped>
 .memory-settings { display: flex; height: 100%; min-height: 0; flex-direction: column; }
-.memory-settings-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 10px; border-bottom: 1px solid var(--line); }
+.memory-settings-tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 10px; border-bottom: 1px solid var(--line); }
 .memory-settings-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 36px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
@@ -186,6 +262,15 @@ async function saveKey() {
 .memory-local-actions { display: flex; gap: 8px; }
 .memory-local-actions button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .memory-local-actions button:disabled { opacity: .55; cursor: progress; }
+.memory-sync { display: grid; gap: 12px; }
+.memory-sync p { margin: 0; color: var(--ink3); line-height: 1.6; }
+.memory-sync > button, .memory-sync-connect button { min-height: 36px; padding: 0 12px; border: 1px solid var(--olive); border-radius: 6px; background: var(--olive); color: white; cursor: pointer; font: inherit; }
+.memory-sync button:disabled { opacity: .5; cursor: progress; }
+.memory-sync-summary { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.memory-sync-summary span { color: var(--ink3); font-size: 12px; }
+.memory-sync-connect { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.memory-sync-connect select { min-width: 0; height: 36px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; }
+.memory-sync .memory-sync-error { color: var(--danger); }
 .memory-appearance { display: grid; gap: 20px; }
 .memory-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .memory-theme-options button { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; }

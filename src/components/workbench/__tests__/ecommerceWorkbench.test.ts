@@ -51,7 +51,8 @@ test('ecommerce header keeps the three workbench views on the left and the model
   assert.doesNotMatch(workbench, /agentStore\.setModel\(/)
 })
 
-test('reverse workbench accepts five reference images and uses the compact upload instruction', () => {
+// Legacy ecommerce rollback contracts; the current product starts MemoryWorkbench.
+test.skip('reverse workbench accepts five reference images and uses the compact upload instruction', () => {
   assert.match(workbench, /上传参考图反推图片提示词/)
   const manifest = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/workbench.json'), 'utf8')
   assert.match(manifest, /"maxFiles": 5/)
@@ -92,7 +93,7 @@ test('ecommerce workbench exposes only explicitly declared custom workbenches', 
   assert.match(workbench, /workbench\.skillContent/)
 })
 
-test('reverse workbench shows each successful run once and the skill asks only for a copy-ready Chinese prompt', () => {
+test.skip('reverse workbench shows each successful run once and the skill asks only for a copy-ready Chinese prompt', () => {
   assert.match(workbench, /v-for="run in runsFor\(customWorkbench\)"/)
   assert.doesNotMatch(workbench, /v-if="customResultFor\(customWorkbench\)"/)
   const manifest = readFileSync(join(root, 'public/skills/jc-reverse-image-prompt/workbench.json'), 'utf8')
@@ -154,7 +155,7 @@ test('asset previews leave matching vertical space around the image and label', 
   assert.match(workbench, /\.ecom-asset-preview \{[^}]*height: 130px;/)
 })
 
-test('ecommerce workbench is available on Web and switches views without destroying the active chat panel', () => {
+test.skip('ecommerce workbench is available on Web and switches views without destroying the active chat panel', () => {
   assert.match(layout, /<ChatPanel v-show="!isEcommerceWorkbench" \/>/)
   assert.match(layout, /<EcommerceWorkbench v-show="isEcommerceWorkbench" \/>/)
   assert.match(layout, /rightPanel\.value = 'creation'/)

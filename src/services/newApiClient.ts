@@ -325,18 +325,20 @@ async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit 
   throw lastError
 }
 
-export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string }> {
+export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string; syncSession: string }> {
   const { payload: data, response } = await gatewayJsonWithResponse<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
   const apiKey = extractGatewayApiKey(data)
   if (!apiKey) throw new Error('登录响应缺少 API Key，请稍后重试')
+  const syncSession = String(data?.sync_session || data?.data?.sync_session || '').trim()
   await setApiKey(apiKey)
-  await clearGatewaySession()
+  if (syncSession) await setGatewaySessionToken(syncSession)
+  else await clearGatewaySession()
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
-  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data) }
+  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data), syncSession }
 }
 
 export async function gatewayRegister(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {

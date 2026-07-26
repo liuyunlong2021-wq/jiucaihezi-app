@@ -152,6 +152,8 @@ const wave1FocusedTests = [
   'src/services/__tests__/projectExplorerService.test.ts',
   'src/services/__tests__/projectResourceWatcher.test.ts',
   'src/services/__tests__/newApiOneClickLogin.test.ts',
+  'src/services/__tests__/textSyncClient.test.ts',
+  'src/services/__tests__/projectTextSync.test.ts',
   'src/services/__tests__/creationModelAvailability.test.ts',
   'src/utils/__tests__/creationResults.test.ts',
   'src/components/__tests__/desktopOpenCodeSyncCutover.test.ts',

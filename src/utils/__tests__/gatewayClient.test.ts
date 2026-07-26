@@ -71,7 +71,7 @@ test('setGatewaySessionToken clears empty token', async () => {
   })
 })
 
-test('setGatewaySessionToken remains available only for legacy cleanup state', async () => {
+test('setGatewaySessionToken stays separate from ordinary model credentials', async () => {
   await withLocalStorage({}, async store => {
     __resetGatewaySessionMemoryCacheForTests('')
     await setGatewaySessionToken('session_secure')
@@ -101,7 +101,7 @@ test('initApiKey restores the ordinary API key from web localStorage after refre
   })
 })
 
-test('gatewayLogin saves returned api_key as the ordinary API key and clears legacy session', async () => {
+test('gatewayLogin saves the ordinary API key and dedicated sync session separately', async () => {
   const previousStorage = (globalThis as any).localStorage
   const previousFetch = globalThis.fetch
   const store = new Map<string, string>([['jcGatewaySessionToken', 'legacy-session']])
@@ -113,6 +113,7 @@ test('gatewayLogin saves returned api_key as the ordinary API key and clears leg
   globalThis.fetch = (async () => new Response(JSON.stringify({
     success: true,
     api_key: 'sk-auth-broker-12345678901234567890',
+    sync_session: 'sess_sync_1234567890',
     base_url: 'https://api.jiucaihezi.studio/v1',
     user: { id: 'u1', username: 'alice' },
   }), {
@@ -125,8 +126,9 @@ test('gatewayLogin saves returned api_key as the ordinary API key and clears leg
     const result = await gatewayLogin({ username: 'alice', password: 'secret' })
     assert.equal(result.apiKey, 'sk-auth-broker-12345678901234567890')
     assert.equal(getApiKey(), 'sk-auth-broker-12345678901234567890')
-    assert.equal(getGatewaySessionToken(), '')
-    assert.equal(store.get('jcGatewaySessionToken'), undefined)
+    assert.equal(result.syncSession, 'sess_sync_1234567890')
+    assert.equal(getGatewaySessionToken(), 'sess_sync_1234567890')
+    assert.equal(store.get('jcGatewaySessionToken'), 'sess_sync_1234567890')
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     __resetGatewaySessionMemoryCacheForTests('')

@@ -242,6 +242,8 @@ test('memory workbench follows the current project owner on both runtimes', () =
   assert.match(workbench, /const projectOwner = computed\(\(\) => desktopRuntime[\s\S]*projectStore\.projectDir\.value[\s\S]*projectStore\.webProjectId\.value/)
   assert.match(workbench, /watch\(projectOwner, owner => void openProject\(owner\), \{ immediate: true \}\)/)
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
+  assert.match(workbench, /memoryReady\.value = state\.initialized[\s\S]*void projectTextSync\.open/)
+  assert.match(workbench, /initializeMemoryProject\(owner, files\)[\s\S]*memoryReady\.value = true[\s\S]*void projectTextSync\.open/)
 })
 
 test('memory text models default to tools unless the gateway explicitly disables them', () => {

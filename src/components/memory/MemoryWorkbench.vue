@@ -53,6 +53,8 @@ import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import type { ProjectResource } from '@/utils/projectResource'
+import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
+import { getGatewaySessionToken } from '@/services/newApiClient'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -140,6 +142,7 @@ onMounted(async () => {
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
   document.addEventListener('pointerdown', closeModelPicker)
   document.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('focus', syncOnFocus)
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
   await Promise.all([
     refreshSkills().catch(() => {}),
@@ -156,6 +159,7 @@ onBeforeUnmount(() => {
   offMediaReferenceAdd?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('focus', syncOnFocus)
   stopProjectWatch?.()
   projectGeneration++
   abortController?.abort()
@@ -214,9 +218,30 @@ async function openProject(owner: string) {
     conversations.value = state.conversations
     const first = state.conversations[0]
     if (first) await openResource(await openProjectResource(files, first.resource))
+    void projectTextSync.open(owner, projectStore.projectName.value).then(async () => {
+      if (generation === projectGeneration) await refreshProjectView(owner)
+    })
   } catch (cause) {
     if (generation !== projectGeneration) return
     error.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+
+async function syncOnFocus() {
+  const owner = projectOwner.value
+  if (!owner || !projectTextSyncStatus.cloudProjectId) return
+  await projectTextSync.syncNow().catch(() => {})
+  await refreshProjectView(owner)
+}
+
+async function refreshProjectView(owner = projectOwner.value) {
+  if (!owner) return
+  const state = await inspectMemoryProject(owner, files)
+  memoryReady.value = state.initialized
+  conversations.value = state.conversations
+  if (conversation.value) {
+    const current = state.conversations.find(item => item.resource.path === conversation.value?.resource.path)
+    if (current) await openResource(await openProjectResource(files, current.resource))
   }
 }
 
@@ -230,6 +255,12 @@ async function createMemorySpace() {
     memoryReady.value = true
     opened.value = null
     conversations.value = []
+    if (getGatewaySessionToken()) {
+      void projectTextSync.open(owner, projectStore.projectName.value)
+        .then(() => projectTextSync.enable())
+        .then(() => refreshProjectView(owner))
+        .catch(() => {})
+    }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -1022,7 +1053,11 @@ function readDataUrl(file: File): Promise<string> {
     <div v-if="settingsOpen" class="memory-settings-backdrop" @click="settingsOpen = false"></div>
     <aside class="memory-settings-drawer" :class="{ open: settingsOpen }">
       <header><strong>设置</strong><button class="icon-button" title="关闭" @click="settingsOpen = false"><JcIcon name="close" /></button></header>
-      <MemorySettings />
+      <MemorySettings
+        :owner="projectOwner"
+        :project-name="projectStore.projectName.value"
+        @synced="refreshProjectView()"
+      />
     </aside>
   </div>
 </template>

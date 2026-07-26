@@ -507,3 +507,10 @@
 - 新增项目列表/创建、按游标增量拉取、1-100 项批量推送、项目 tombstone 删除/恢复；服务端校验账号所有权、相对安全文本路径、2MB 上限、内容哈希、`expected_revision` 和幂等 `mutation_id`。
 - 新增同步与鉴权合同 `17/17` 通过，Gateway dry-run 同时识别 `DB` 与 `SYNC_DB` 并包含 `/sync/*` 路由；完整 Gateway 测试为 `31/33`，两项旧 landing/废弃路由失败与本次同步链路无关。Gateway 尚未部署，客户端同步队列尚未接入。
 - 并发复审补充 `0002_sync_revision_guard.sql`：数据库唯一约束 `(project_id, path, revision)` 阻止两个设备从同一旧版本同时写入；冲突 D1 batch 整体回滚并由 Gateway 返回 `409`。本地与远端 migration 均已应用，远端迁移队列为空且唯一索引已核验。
+
+## [2026-07-26] 实施 | Web/Mac 文字同步客户端闭环
+
+- Gateway 文字同步接口已部署，版本 `72145e62-0944-452d-9fc7-961664ad54c1`；生产健康检查返回 `sync.text`，未登录同步请求返回 `401`。服务端补充拒绝 `.sync` 路径，防止客户端隐藏队列进入 D1。
+- Web/Mac 共用 `textSyncClient + ProjectTextSync`；本地 Raw、Wiki 和安全文本先落盘，再写入 `.raw/.sync/state.json`，按稳定 mutation ID 增量同步。项目打开与新建不等待网络，断网不阻塞本地工作。
+- 冲突以远端为规范文件，并把本地版本保存为可见冲突副本；媒体、Skill、MCP/Provider 凭据、Session、设置和队列状态均不会同步。
+- 自动化通过 Web/Mac 双向、离线恢复、响应丢失幂等、冲突副本和排除规则；相关回归 `59/59`、完整 focused、TypeScript、Web/Desktop 正式构建和两端产物审计全部通过。12 条旧主 App 回滚源码合同保留但显式跳过，不再错误阻断当前 `MemoryWorkbench` 产品构建。下一步为同账号 Web/Mac 真机验收。

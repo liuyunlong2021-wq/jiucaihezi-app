@@ -7,7 +7,7 @@ const MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_MUTATIONS = 100;
 const MAX_PULL_FILES = 200;
 const TEXT_EXTENSIONS = new Set(['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'csv', 'tsv', 'srt', 'vtt']);
-const BLOCKED_PATH_PARTS = new Set(['.git', '.ssh', '.aws', '.config', '.claude', '.codex', '.agents', 'node_modules', 'skills', 'jc-media']);
+const BLOCKED_PATH_PARTS = new Set(['.sync', '.git', '.ssh', '.aws', '.config', '.claude', '.codex', '.agents', 'node_modules', 'skills', 'jc-media']);
 const BLOCKED_FILE_NAMES = new Set(['credentials.json', 'secrets.json', 'secrets.yaml', 'secrets.yml', 'api-keys.json', 'mcp.json']);
 
 function syncError(message, status, code) {

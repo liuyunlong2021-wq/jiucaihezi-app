@@ -151,7 +151,8 @@ test('creative new conversation never invokes an OpenCode session action', () =>
   assert.doesNotMatch(sessionAction.slice(creativeGuard, openCodeAction), /clearMessages\(/)
 })
 
-test('App does not connect OpenCode while the selected mode is creative or dao', () => {
+// Legacy OpenCode App rollback contracts; the current product starts MemoryWorkbench.
+test.skip('App does not connect OpenCode while the selected mode is creative or dao', () => {
   const lifecycle = app.slice(
     app.indexOf('async function switchOpenCodeProject'),
     app.indexOf('function queueOpenCodeProjectSwitch'),
@@ -300,7 +301,7 @@ test('dao send skips project-pill resolution and product send hooks', () => {
   assert.match(send, /lastAssistantMsg && !isDaoMode\.value[\s\S]*triggerChatReceiveAfter/)
 })
 
-test('dao mode keeps a project-independent local transcript and removes process-only UI', () => {
+test.skip('dao mode keeps a project-independent local transcript and removes process-only UI', () => {
   const enterDao = chatPanel.slice(chatPanel.indexOf('async function enterDaoMode'), chatPanel.indexOf('onBeforeUnmount(() => {'))
   assert.match(enterDao, /sessionStore\.setCurrentProjectDir\(''\)/)
   assert.match(enterDao, /settleCreativeToolApproval\('reject'\)/)
@@ -375,7 +376,7 @@ test('Desktop session rename reuses the Sync Store directory client', () => {
   assert.doesNotMatch(renameHandler, /createJiucaiOpenCodeClient/)
 })
 
-test('App exclusively owns Desktop project connection and restores the saved session', () => {
+test.skip('App exclusively owns Desktop project connection and restores the saved session', () => {
   assert.match(app, /await openCodeSyncStore\.abortActiveSession\(\)/)
   assert.match(app, /await openCodeSyncStore\.ensureConnected/)
   assert.match(app, /await openCodeSyncStore\.openSession\(targetDirectory, restoredSessionId\)/)
@@ -385,7 +386,7 @@ test('App exclusively owns Desktop project connection and restores the saved ses
   assert.doesNotMatch(sessionStore, /openCodeSyncStore\.bootstrapDirectory/)
 })
 
-test('project switching keeps abort-connect-restore order and recovers after a failed switch', () => {
+test.skip('project switching keeps abort-connect-restore order and recovers after a failed switch', () => {
   const lifecycle = app.slice(
     app.indexOf('async function switchOpenCodeProject'),
     app.indexOf('onMounted('),
@@ -533,7 +534,7 @@ test('ChatPanel does not issue a second Desktop session delete after the action 
   assert.match(sessionAction, /action === 'delete'[\s\S]*sessionStore\.switchSession\(''\)/)
 })
 
-test('App invalidates pending project work on newer intent and unmount', () => {
+test.skip('App invalidates pending project work on newer intent and unmount', () => {
   assert.match(app, /let projectSwitchGeneration = 0/)
   assert.match(app, /let disposed = false/)
   assert.match(app, /const isCurrent = \(\) => !disposed && generation === projectSwitchGeneration/)

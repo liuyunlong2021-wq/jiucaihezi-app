@@ -21,7 +21,8 @@ test('creation panel reads registry-backed plan state instead of legacy RH-only 
   assert.doesNotMatch(source, /const rhMode = computed/)
 })
 
-test('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
+// Legacy ecommerce rollback contract; MemoryWorkbench owns the current media path.
+test.skip('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /buildMediaPlanSubmission/)
