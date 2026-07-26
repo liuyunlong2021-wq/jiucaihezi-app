@@ -677,6 +677,12 @@ export async function pollTask(
       }
       const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
       if (url) return url
+      const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
+      if (publicVideoTask) {
+        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET')
+        const detailUrl = extractMediaUrl(detail, 'video')
+        if (detailUrl) return detailUrl
+      }
       // 状态完成但没有 URL，可能响应格式异常
       console.warn('[pollTask] 状态完成但未提取到 URL:', JSON.stringify(data).slice(0, 300))
     }
@@ -908,33 +914,67 @@ export async function generateVideo(
     return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
   }
 
-  // ── Veo / 其他 NewAPI 视频模型 → /v1/videos ──
-  const body: any = { model: upstreamModel, prompt }
-  if (aspectRatio) body.ratio = aspectRatio
-  if (resolution) body.resolution = resolution.toUpperCase()
-  if (duration) body.duration = Number(duration)
   const safeImages = filterSafeImageUrls(imageUrls, imageUrl)
-  if (safeImages.length) body.images = safeImages
-  if (params.videoUrl) body.video_url = params.videoUrl
-  if (params.audioUrl) body.audio_url = params.audioUrl
+  const isVeoPreview = upstreamModel === 'veo-3.1-generate-preview' || upstreamModel === 'veo-3.1-fast-generate-preview'
+  let data: any
 
-  // DoubaoVideo (Seedance) 走 NewAPI 专用任务接口 /v1/video/generations
-  const isDoubaoVideo = isDoubaoVideoModel(model, upstreamModel)
-  if (isDoubaoVideo) {
-    body.metadata = {
-      ...(body.metadata || {}),
+  if (isVeoPreview) {
+    const ratio = aspectRatio || '16:9'
+    const veoResolution = String(resolution || '720p').toLowerCase()
+    const veoDuration = Number(duration || 4)
+    const size = ratio === '9:16' ? '720x1280' : '1280x720'
+    if (safeImages.length) {
+      const source = safeImages[0]
+      const image = source.startsWith('data:')
+        ? dataUrlToBlob(source)
+        : await safeFetch(source).then(response => {
+            if (!response.ok) throw new Error('无法加载参考图片')
+            return response.blob()
+          })
+      data = await apiCallMultipart('/v1/videos', {
+        model: upstreamModel,
+        prompt,
+        input_reference: image,
+        seconds: String(veoDuration),
+        size,
+        resolution: veoResolution,
+        aspectRatio: ratio,
+      })
+    } else {
+      data = await apiCall('/v1/videos', {
+        model: upstreamModel,
+        prompt,
+        duration: veoDuration,
+        size,
+        metadata: { resolution: veoResolution, aspectRatio: ratio },
+      }, 'POST', model)
     }
-    if (aspectRatio) body.metadata.ratio = aspectRatio
-    if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
-  }
-  const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
+  } else {
+    const body: any = { model: upstreamModel, prompt }
+    if (aspectRatio) body.ratio = aspectRatio
+    if (resolution) body.resolution = resolution.toUpperCase()
+    if (duration) body.duration = Number(duration)
+    if (safeImages.length) body.images = safeImages
+    if (params.videoUrl) body.video_url = params.videoUrl
+    if (params.audioUrl) body.audio_url = params.audioUrl
 
-  const data = await apiCall(videoPath, body, 'POST', model)
+    // DoubaoVideo (Seedance) 走 NewAPI 专用任务接口 /v1/video/generations
+    const isDoubaoVideo = isDoubaoVideoModel(model, upstreamModel)
+    if (isDoubaoVideo) {
+      body.metadata = {
+        ...(body.metadata || {}),
+      }
+      if (aspectRatio) body.metadata.ratio = aspectRatio
+      if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
+    }
+    const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
+    data = await apiCall(videoPath, body, 'POST', model)
+  }
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
   if (!mediaUrl) {
     if (taskId) {
-      const pollUrl = isDoubaoVideo
+      const pollUrl = isDoubaoVideoModel(model, upstreamModel)
         ? `/v1/video/generations/${taskId}`
         : `/v1/videos/${taskId}`
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
@@ -942,7 +982,7 @@ export async function generateVideo(
     }
   }
   if (!mediaUrl) throw new Error('视频生成失败')
-  return { url: mediaUrl, type: 'video', taskId, pollUrl: taskId ? (isDoubaoVideo ? `/v1/video/generations/${taskId}` : `/v1/videos/${taskId}`) : undefined, pollKind: 'video' as const }
+  return { url: mediaUrl, type: 'video', taskId, pollUrl: taskId ? (isDoubaoVideoModel(model, upstreamModel) ? `/v1/video/generations/${taskId}` : `/v1/videos/${taskId}`) : undefined, pollKind: 'video' as const }
 }
 
 function isDoubaoVideoModel(model: string, upstreamModel: string): boolean {

@@ -4,6 +4,7 @@ import {
   extractMediaText,
   extractMediaUrl,
   extractTaskId,
+  generateVideo,
   pollTask,
   uploadCreationAsset,
   type AudioGenParams,
@@ -204,6 +205,14 @@ async function executeDirectVideoRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交中...')
   const params = request.videoParams || {}
+  if (request.plan.apiStyle === 'openai-videos') {
+    return generateVideo({
+      ...params,
+      model: request.plan.model,
+      prompt: asString(params.prompt),
+      onSubmitted,
+    }, onProgress)
+  }
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
   const shouldUploadAssets = request.plan.assetFlow !== 'none'
   const uploadedImages = shouldUploadAssets

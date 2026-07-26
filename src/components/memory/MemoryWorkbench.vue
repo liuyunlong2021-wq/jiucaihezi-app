@@ -598,7 +598,7 @@ function readDataUrl(file: File): Promise<string> {
 </script>
 
 <template>
-  <div class="memory-workbench" :class="{ 'tree-closed': !treeOpen, 'desktop-runtime': desktopRuntime }">
+  <div class="memory-workbench" :class="{ 'tree-closed': !treeOpen, 'desktop-runtime': desktopRuntime }" data-tauri-drag-region>
     <aside class="memory-tree" :class="{ open: treeOpen }">
       <ProjectFileTree memory-mode />
     </aside>
@@ -607,7 +607,7 @@ function readDataUrl(file: File): Promise<string> {
     <main class="memory-main">
       <header class="memory-topbar">
         <button v-if="!treeOpen" class="icon-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
-        <div class="memory-title-drag" data-tauri-drag-region><strong>{{ title }}</strong></div>
+        <div class="memory-title-drag" data-tauri-drag-region><strong data-tauri-drag-region>{{ title }}</strong></div>
         <div class="memory-topbar-actions">
           <button
             v-if="memoryReady"

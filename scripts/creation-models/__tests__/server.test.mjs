@@ -12,6 +12,7 @@ import {
 const RH_TARGET_MODELS = [
   'rh-pro-image',
   'rh-image-v2',
+  'rh-gpt2-official',
   'rh-gpt2-image',
   'rh-gpt2-text',
   'z-image-turbo',
@@ -82,6 +83,33 @@ test('buildCreationModelAvailability detects GPT Image 2 VIP channels', () => {
   ])
 
   assert.equal(models.find(model => model.id === 'gpt-image-2-vip')?.status, 'enabled')
+})
+
+test('buildCreationModelAvailability keeps channel 61 RH GPT Image 2 separate from direct GPT Image 2', () => {
+  const models = buildCreationModelAvailability([
+    { id: 61, name: 'RH image', status: 1, baseUrl: 'x', models: ['rh-gpt2-official'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'rh-gpt2-official')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2')?.status, 'disabled')
+})
+
+test('buildCreationModelAvailability detects channel 94 Gemini image models', () => {
+  const models = buildCreationModelAvailability([
+    { id: 94, name: 'Gemini image', status: 1, baseUrl: 'x', models: ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview'] },
+  ])
+
+  assert.equal(models.find(model => model.id === '普gemini-3-pro-image-preview')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === '普gemini-3.1-flash-image-preview')?.status, 'enabled')
+})
+
+test('buildCreationModelAvailability detects channel 82 Veo video models', () => {
+  const models = buildCreationModelAvailability([
+    { id: 82, name: 'Veo', status: 1, baseUrl: 'x', models: ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'veo-3.1-generate-preview')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'veo-3.1-fast-generate-preview')?.status, 'enabled')
 })
 
 test('creation model availability tracks the complete active RH model set', () => {

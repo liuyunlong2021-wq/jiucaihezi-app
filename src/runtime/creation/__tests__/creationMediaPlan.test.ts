@@ -123,6 +123,65 @@ test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
   assert.equal(withImage.apiStyle, 'openai-image-edits')
 })
 
+test('RH GPT Image 2 official keeps its price and RH adapter route', () => {
+  const spec = getCreationModelSpec('runninghub/api/rh-gpt2-official')
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-gpt2-official',
+    params: {
+      prompt: '商品图',
+      ratio: '1:1',
+      images: ['data:image/png;base64,test'],
+    },
+  })
+
+  assert.equal(spec?.price, 0.25)
+  assert.equal(plan.model, 'rh-gpt2-official')
+  assert.equal(plan.source, 'runninghub')
+  assert.equal(plan.route, 'runninghub-adapter')
+  assert.equal(plan.usesRhAdapter, true)
+  assert.equal(plan.endpoint, '/v1/images/generations')
+})
+
+test('Gemini image models use the verified generation and edit contracts', () => {
+  for (const [modelId, model, price] of [
+    ['newapi/t8/gemini-3.1-flash-image-preview', 'gemini-3.1-flash-image-preview', 0.1],
+    ['newapi/t8/gemini-3-pro-image-preview', 'gemini-3-pro-image-preview', 0.2],
+  ] as const) {
+    const spec = getCreationModelSpec(modelId)
+    const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一张产品图' } })
+    const withImage = buildCreationRunPlan({ modelId, params: { prompt: '修改产品图', images: ['https://example.com/ref.png'] } })
+
+    assert.equal(spec?.price, price)
+    assert.equal(textOnly.model, model)
+    assert.equal(textOnly.endpoint, '/v1/images/generations')
+    assert.equal(textOnly.apiStyle, 'openai-images')
+    assert.equal(textOnly.pollKind, 'none')
+    assert.equal(withImage.endpoint, '/v1/images/edits')
+    assert.equal(withImage.apiStyle, 'openai-image-edits')
+    assert.equal(withImage.assetFlow, 'newapi-upload')
+  }
+})
+
+test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
+  for (const [modelId, model, price] of [
+    ['newapi/zx/veo-3.1-generate-preview', 'veo-3.1-generate-preview', 0.2],
+    ['newapi/zx/veo-3.1-fast-generate-preview', 'veo-3.1-fast-generate-preview', 0.1],
+  ] as const) {
+    const spec = getCreationModelSpec(modelId)
+    const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一段产品视频', duration: 4, resolution: '720p', ratio: '16:9' } })
+    const withImage = buildCreationRunPlan({ modelId, params: { prompt: '让产品动起来', duration: 4, resolution: '720p', ratio: '16:9', images: ['https://example.com/ref.jpg'] } })
+
+    assert.equal(spec?.price, price)
+    assert.equal(textOnly.model, model)
+    assert.equal(textOnly.apiStyle, 'openai-videos')
+    assert.equal(textOnly.endpoint, '/v1/videos')
+    assert.equal(textOnly.pollKind, 'newapi-task')
+    assert.equal(textOnly.mode, 'text-to-video')
+    assert.equal(withImage.mode, 'image-to-video')
+    assert.equal(withImage.debug.referenceImageCount, 1)
+  }
+})
+
 test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () => {
   const plan = buildCreationRunPlan({
     modelId: 'newapi/t8/gpt-image-2',

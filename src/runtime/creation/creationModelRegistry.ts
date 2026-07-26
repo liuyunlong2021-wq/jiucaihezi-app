@@ -200,6 +200,10 @@ function directVideo(input: {
   notes: string[]
   aliases?: string[]
   contractIssues?: string[]
+  mode?: CreationMode
+  fields?: CreationFieldSpec[]
+  duration?: { min?: number; max?: number; allowedValues?: number[] }
+  files?: { images?: { min?: number; max?: number } }
 }): CreationModelSpec {
   return baseSpec({
     id: input.id,
@@ -210,7 +214,7 @@ function directVideo(input: {
     route: 'newapi-direct',
     upstreamFamily: input.upstreamFamily,
     apiStyle: input.apiStyle || 'newapi-task',
-    mode: 'image-to-video',
+    mode: input.mode || 'image-to-video',
     contractStatus: input.contractStatus || 'partial',
     price: input.price,
     endpoint: input.endpoint || '/v1/videos',
@@ -218,8 +222,8 @@ function directVideo(input: {
     assetFlow:
       input.assetFlow || (input.apiStyle === 'seedance-task' ? 'seedance-asset' : 'newapi-upload'),
     resultExtractor: 'newapi-task',
-    files: { images: { min: 0, max: 9 } },
-    fields: promptFields([
+    files: input.files || { images: { min: 0, max: 9 } },
+    fields: input.fields || promptFields([
       {
         key: 'ratio',
         label: '比例',
@@ -239,7 +243,7 @@ function directVideo(input: {
     ]),
     notes: input.notes,
     aliases: input.aliases,
-    duration: { min: 4, max: 30 },
+    duration: input.duration || { min: 4, max: 30 },
     contractIssues:
       input.contractIssues ??
       (input.contractStatus === 'partial' ? ['异步轮询字段需以后端实测确认。'] : undefined),
@@ -333,14 +337,14 @@ function runninghubStandard(input: {
 export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── ★ GPT Image 2 官方（推荐 · 置顶）──
   // 不上传参考图→文生图，上传参考图→图生图。
-  // quality/resolution 由 rh-adapter 强制设为 low/1k，计费统一 0.1。
+  // quality/resolution 由 rh-adapter 强制设为 low/1k，计费统一 0.25。
   runninghubStandard({
     id: 'runninghub/api/rh-gpt2-official',
     model: 'rh-gpt2-official',
     label: 'GPT Image 2 官方',
     task: 'image',
     mode: 'text-to-image',
-    price: 0.1,
+    price: 0.25,
     notes: ['docs/notes/RH-GPTImage2官方.md'],
     files: { images: { min: 0, max: 10 } },
     fields: promptFields([
@@ -501,16 +505,16 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directImage({
     id: 'newapi/t8/gemini-3.1-flash-image-preview',
     model: 'gemini-3.1-flash-image-preview',
-    label: 'Gemini 3.1 Flash Image · T8（已下线）',
+    label: 'Gemini 3.1 Flash Image',
     price: 0.1,
-    apiStyle: 'newapi-task',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
     mode: 'text-to-image',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
+    resultExtractor: 'openai-image',
+    contractStatus: 'verified',
+    notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
   directImage({
     id: 'newapi/t8/gemini-3.1-flash-image-preview-2k',
@@ -529,16 +533,16 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directImage({
     id: 'newapi/t8/gemini-3-pro-image-preview',
     model: 'gemini-3-pro-image-preview',
-    label: 'Gemini 3 Pro Image · T8（已下线）',
+    label: 'Gemini 3 Pro Image',
     price: 0.2,
-    apiStyle: 'newapi-task',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
     mode: 'text-to-image',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
+    resultExtractor: 'openai-image',
+    contractStatus: 'verified',
+    notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
   directImage({
     id: 'newapi/t8/gemini-3-pro-image-preview-2k',
@@ -644,6 +648,44 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'broken',
     notes: ['NewAPI alias'],
     contractIssues: ['T8 渠道已关闭'],
+  }),
+  directVideo({
+    id: 'newapi/zx/veo-3.1-generate-preview',
+    model: 'veo-3.1-generate-preview',
+    label: 'Veo 3.1',
+    price: 0.2,
+    upstreamFamily: 'zx',
+    apiStyle: 'openai-videos',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    files: { images: { min: 0, max: 1 } },
+    duration: { allowedValues: [4, 6, 8] },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 4, options: options([4, 6, 8]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    notes: ['docs/wiki/归档/模型文档/zx-veo.md'],
+  }),
+  directVideo({
+    id: 'newapi/zx/veo-3.1-fast-generate-preview',
+    model: 'veo-3.1-fast-generate-preview',
+    label: 'Veo 3.1 Fast',
+    price: 0.1,
+    upstreamFamily: 'zx',
+    apiStyle: 'openai-videos',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    files: { images: { min: 0, max: 1 } },
+    duration: { allowedValues: [4, 6, 8] },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 4, options: options([4, 6, 8]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    notes: ['docs/wiki/归档/模型文档/zx-veo.md'],
   }),
   directVideo({
     id: 'newapi/trump/seedance-2.0',

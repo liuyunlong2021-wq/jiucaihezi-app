@@ -39,6 +39,8 @@ test('memory workbench keeps the brand in the file tree and a native drag region
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
   assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region/)
+  assert.match(workbench, /class="memory-workbench"[^>]*data-tauri-drag-region/)
+  assert.match(workbench, /<strong data-tauri-drag-region>\{\{ title \}\}<\/strong>/)
   assert.doesNotMatch(workbench, /memory-brand-logo/)
   assert.match(tree, /class="pft-brand-logo" src="\/logo\.svg"/)
 })

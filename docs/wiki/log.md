@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-07-26] 模型修正 | RH GPT Image 2 官方恢复可用性识别
+
+- `rh-gpt2-official` 始终属于 RunningHub，运行计划固定为 `runninghub -> runninghub-adapter`；渠道 61 只按精确模型名识别，不与 NewAPI 直连 `gpt-image-2` 共享别名。
+- APP 展示价格由错误的 `¥0.1` 修正为 `¥0.25`。本次报错根因是 `creation-models` 可用性服务漏登记该模型，导致请求到达 NewAPI / rh-adapter 前即被拦截；未修改 rh-adapter 现有模型映射。
+- 定向媒体合同、运行时、模型守卫和可用性服务回归共 70/70 通过；生产恢复仍需部署新版 `creation-models`，仅更新 APP 不足以消除现网拦截。
+
 ## [2026-07-25] Skill 边界收敛 | 仓库与选择器只显示用户已安装 Skill
 
 - `public/skills/` 保留为产品内置能力与内部加载来源，不再灌入 Web Skill Store，也不在 Skill 仓库和记忆工作台选择器展示。
@@ -396,3 +402,15 @@
 - 真实任务证明先前修复只覆盖了 APP：`rh-adapter` 仍会把 RH 的 `FAILED + errorCode/errorMessage` 转成普通 HTTP 500，导致 APP 按临时故障继续等待。
 - adapter 现保留明确任务终态并输出 `status=failed`、上游错误原因；APP 的统一轮询器收到后立即停止，首次执行和重启恢复使用同一规则。
 - 定向验证：adapter `1/1`、前端 API 与 Media Store `59/59`、TypeScript、补丁检查及 Apple Silicon Mac `.app` / DMG Developer ID 签名构建通过；全量 adapter 基线另有 13 个既有环境/模型清单失败，不计为本次通过。
+
+## [2026-07-26] 修正 | Gemini 图片合同与 Mac 窗口拖拽
+
+- 渠道 94 的 `gemini-3.1-flash-image-preview` 与 `gemini-3-pro-image-preview` 启用现有 OpenAI 图片合同：文生图 `/v1/images/generations`，图生图 `/v1/images/edits` multipart，同步提取 `b64_json`；APP 价格分别为 ¥0.1、¥0.2。
+- Mac Overlay 标题栏的根容器空白区与标题文字补齐 `data-tauri-drag-region`，不增加自定义鼠标监听，操作按钮仍保持普通点击区域。
+- 定向回归 `63/63`、TypeScript、Desktop quick build 与产物审计通过。
+
+## [2026-07-26] 新增 | 渠道 82 Veo 3.1 视频
+
+- `veo-3.1-generate-preview`（¥0.2/秒）与 `veo-3.1-fast-generate-preview`（¥0.1/秒）通过真实文生视频和单张首帧图生视频测试，均完成轮询并下载为有效 MP4。
+- 文生使用 `/v1/videos` JSON；图生使用同端点 multipart `input_reference`；公开任务完成后从 `/v1/video/generations/{task_id}` 提取 `result_url`，避免状态已完成但 APP 继续等待。
+- APP 仅开放实测的 720p，时长按上游文档开放 4/6/8 秒；1080p/4K 未纳入本次合同。

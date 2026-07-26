@@ -54,12 +54,14 @@ test('media models are grouped by user-visible task with explicit model selectio
   const image = getMediaModelsForTask('image').map(model => model.id)
   const video = getMediaModelsForTask('video').map(model => model.id)
 
-  for (const modelId of ['gpt-image-2', 'gpt-image-2-vip', 'nano-banana-4k', 'rh-pro-image', 'rh-gpt2-image']) {
+  for (const modelId of ['gpt-image-2', 'gpt-image-2-vip', '普gemini-3-pro-image-preview', '普gemini-3.1-flash-image-preview', 'nano-banana-4k', 'rh-pro-image', 'rh-gpt2-image']) {
     assert.equal(image.includes(modelId), true, modelId)
   }
   for (const modelId of ['rh-video-v31-fast', 'rh-seedance2-mini', 'rh-seedance2-fast', 'rh-grok-text-video']) {
     assert.equal(video.includes(modelId), true, modelId)
   }
+  assert.equal(video.includes('veo-3.1-generate-preview'), true)
+  assert.equal(video.includes('veo-3.1-fast-generate-preview'), true)
   assert.equal(video.includes('grok-video-3'), false)
   assert.equal(video.includes('rh-seedance2'), false)
   assert.deepEqual(getMediaModelsForTask('digital-human').map(model => model.id), [])
@@ -104,9 +106,9 @@ test('WorldRouter Seedance uses official adaptive ratio defaults and fast-safe r
   assert.deepEqual(RH_CREATION_MODELS['普seedance2.0-fast']?.res, ['480p', '720p'])
 })
 
-test('unverified Gemini image-preview and WorldRouter Seedance models stay hidden before backend deployment', () => {
-  assert.equal(isMediaModelEnabled('普gemini-3-pro-image-preview'), false)
-  assert.equal(isMediaModelEnabled('普gemini-3.1-flash-image-preview'), false)
+test('verified Gemini image-preview models are enabled while WorldRouter Seedance stays hidden', () => {
+  assert.equal(isMediaModelEnabled('普gemini-3-pro-image-preview'), true)
+  assert.equal(isMediaModelEnabled('普gemini-3.1-flash-image-preview'), true)
   assert.equal(isMediaModelEnabled('普seedance2.0'), false)
   assert.equal(isMediaModelEnabled('普seedance2.0-fast'), false)
   assert.equal(isMediaModelEnabled('seedance-2.0'), false)

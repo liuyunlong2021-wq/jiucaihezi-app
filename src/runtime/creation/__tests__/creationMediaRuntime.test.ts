@@ -85,6 +85,48 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
   }
 })
 
+test('Veo Creation Runtime reuses the verified multipart and public-task result contract', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const resultUrl = 'https://api.jiucaihezi.studio/v1/videos/task_veo_runtime/content'
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      assert.ok(init.body instanceof FormData)
+      assert.equal(init.body.get('model'), 'veo-3.1-fast-generate-preview')
+      assert.equal(init.body.get('seconds'), '4')
+      assert.ok(init.body.get('input_reference') instanceof Blob)
+      return Response.json({ id: 'task_veo_runtime', status: 'queued' })
+    }
+    if (url.endsWith('/v1/videos/task_veo_runtime')) {
+      return Response.json({ id: 'task_veo_runtime', status: 'completed' })
+    }
+    if (url.endsWith('/v1/video/generations/task_veo_runtime')) {
+      return Response.json({ code: 'success', data: { result_url: resultUrl } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/zx/veo-3.1-fast-generate-preview',
+      params: {
+        prompt: '让画面动起来',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 4,
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, resultUrl)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapter task route', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
