@@ -290,7 +290,9 @@ App 不在模型之前猜关键词，不提前查询 Wiki，不把固定查询�
 
 ### 7.2 Skill 调用条件
 
-记忆模式遵循官方 Skill 渐进披露：首轮只提供可用 Skill 的名称和 description；模型判断任务匹配后调用统一的 `skill(name)` 加载对应 `SKILL.md`，再按 Skill 指引使用项目工具。任务不匹配任何 Skill 时直接回答，不强制加载 Skill，不强制查询 Wiki，也不设置回复出口门禁。App 不做关键词路由，不提供 Skill 选择器，不把任何 Skill 正文预塞进请求。
+记忆模式遵循官方 Skill 渐进披露：首轮只提供可用 Skill 的名称和 description；模型判断任务匹配后调用统一的 `skill(name)` 加载对应 `SKILL.md`，再按 Skill 指引使用项目工具。任务不匹配任何 Skill 时直接回答，不强制加载 Skill，不强制查询 Wiki，也不设置回复出口门禁。App 不做关键词路由，不把任何 Skill 正文预塞进普通请求。
+
+输入框的 `@` 是统一的本轮引用入口，动态列出当前项目可用文件和用户已安装 Skill。选择项目文档后读取真实内容作为本轮 `files` 引用；选择项目媒体后复用现有附件物化合同；选择 Skill 后自动进入记忆模式，并在首轮模型请求之前用标准 assistant tool call + tool result 协议精确执行 `skill(name)`。这是用户明确选择，不是关键词路由，也不把产品内置 Skill 暴露到选择器。切换到快速模式必须清除已选 Skill。
 
 快速模式保持纯直连，不提供 Skill、项目或 MCP 工具。不支持工具调用的模型可以用于快速模式，但不能进入记忆模式伪装成具有 Skill 能力。
 
@@ -319,11 +321,11 @@ App 不在模型之前猜关键词，不提前查询 Wiki，不把固定查询�
 
 ### 8.2 用户 Skill
 
-Skill 仓库读取 `agentStore.getCustomSkills()`；新增、编辑和删除后，记忆运行时下一轮生成的 Skill 目录立即同步。仓库不读取或展示 `public/skills/index.json`，输入框不显示 Skill 选择器。
+Skill 仓库与输入框 `@` 菜单都读取 `agentStore.getCustomSkills()`；新增、编辑和删除后，记忆运行时下一轮生成的 Skill 目录及 `@` 菜单立即同步。仓库和 `@` 菜单都不读取或展示 `public/skills/index.json`。
 
-Web 用户 Skill 写入浏览器可写存储 `jc_web_skills_v1`。不得把 `public/zijian/skills/` 设计成用户安装真源，因为 `public/` 在发布后是只读静态资源，浏览器无法把运行时生成的 Skill 写回该目录。Desktop 阶段复用现有 Central Skill 用户目录。内置 Skill 优先解决同名冲突，用户 Skill 补充同一模型目录。
+Web 用户 Skill 写入浏览器可写存储 `jc_web_skills_v1`。不得把 `public/zijian/skills/` 设计成用户安装真源，因为 `public/` 在发布后是只读静态资源，浏览器无法把运行时生成的 Skill 写回该目录。Desktop 阶段复用现有 Central Skill 用户目录 `~/.agents/skills`。内置 Skill 优先解决同名冲突，用户 Skill 补充同一模型目录。
 
-用户已安装 Skill 与产品内置 Skill 使用完全相同的发现合同：名称和 description 进入目录，正文只在模型调用 `skill(name)` 后加载。App 不添加显式选择、关键词命中或固定 Skill 绑定。
+用户已安装 Skill 与产品内置 Skill 使用完全相同的自动发现合同：名称和 description 进入目录，正文只在模型调用 `skill(name)` 后加载。额外允许用户从 `@` 菜单明确选择已安装 Skill；该动作只对本轮生效并精确执行同一个 `skill(name)`，不增加关键词命中或固定 Skill 绑定。
 
 `skill-creator` 生成的 Skill 只有在用户明确说“安装”后，才输出包含完整单文件 `SKILL.md` 的 `jc-skill-install` 块。界面把它解析为“安装到我的 Skill / 继续修改”确认卡；只有用户点击安装后才调用现有 `createAgent()` 写入用户 Skill Store，不能静默安装。第一版不安装 `references/`、`scripts/` 或 `assets/`；需要这些资源时必须先把必要规则收进自包含 `SKILL.md`。仓库现有手动自建入口继续保留。
 
@@ -851,7 +853,7 @@ D1 为每个云项目生成稳定 `project_id`。每台设备只在本地保存 
 
 1. 账号/齿轮按钮可打开登录、Provider、模型、Skill 仓库、MCP 和通用设置。
 2. 设置不是常驻第三栏，关闭后回到原资源。
-3. Skill 仓库只显示用户已安装 Skill；输入框没有 Skill 选择器，新增、编辑或删除后自动发现目录立即同步。
+3. Skill 仓库和输入框 `@` 菜单只显示用户已安装 Skill；新增、编辑或删除后自动发现目录与菜单立即同步。`@` 同时可引用当前项目文件和媒体。
 4. `public/skills/` 中的产品内置 Skill 不在仓库出现，但与用户 Skill 一样由模型按 description 自主调用。
 5. 用户明确要求安装后才出现安装确认卡；点击“继续修改”不写入，点击“安装到我的 Skill”才写入并同步两处列表。
 6. 只有 `enabled + connected` 的 MCP 工具进入模型候选池。

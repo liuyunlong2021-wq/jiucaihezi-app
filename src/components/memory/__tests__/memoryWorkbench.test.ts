@@ -54,7 +54,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(tree, /await projectFiles\.readText\(resourceForNode\(node\)\)/)
   assert.match(tree, /emitEvent\('reference-file', \{ name: node\.name, content: text\.content \}\)/)
   assert.match(workbench, /contenteditable="true"/)
-  assert.match(workbench, /getPlainText\(event\.currentTarget as HTMLElement\)/)
+  assert.match(workbench, /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/)
   assert.match(workbench, /function resizeComposer\(\)/)
   assert.doesNotMatch(workbench, /<textarea/)
   assert.match(workbench, /files: referencedFiles\.value/)
@@ -92,15 +92,26 @@ test('memory composer routes pasted images and media plans through the shared at
   assert.match(workbench, /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/)
 })
 
-test('memory mode follows automatic Skill discovery without a user picker', () => {
+test('memory mode keeps automatic discovery and lets @ explicitly load an installed Skill', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.doesNotMatch(workbench, /SkillPickerBar|selectedSkillName/)
+  assert.doesNotMatch(workbench, /SkillPickerBar/)
+  assert.match(workbench, /agentStore\.getCustomSkills\(\)/)
+  assert.match(workbench, /files\.searchPaths\(owner, query\.trim\(\), 40\)/)
+  assert.match(workbench, /const selectedSkillNames = ref<string\[\]>\(\[\]\)/)
+  assert.match(workbench, /getCursorPosition\(editor\)/)
+  assert.match(workbench, /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/)
+  assert.match(workbench, /v-show="mentionOpen"/)
+  assert.match(workbench, /files\.readText\(option\.resource\)/)
+  assert.match(workbench, /selectedSkillNames: selectedSkillNames\.value/)
   assert.match(runtime, /mergeCreativeSkillCatalog\(customSkills, await loadWebSkillCatalog\(\)\)/)
   assert.match(runtime, /根据用户任务自主决定是否加载 Skill/)
   assert.doesNotMatch(runtime, /REQUIRED_SKILL|loadedRequiredSkill|queriedWiki|每次回复必须先调用/)
   assert.match(runtime, /if \(customSkill\?\.skillContent\.trim\(\)\)/)
+  assert.match(runtime, /buildToolResultMessages\(/)
+  assert.match(runtime, /selectedSkillNames\.map\(\(name, index\)/)
+  assert.match(runtime, /function: \{ name: 'skill', arguments: JSON\.stringify\(\{ name \}\) \}/)
 })
 
 test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {

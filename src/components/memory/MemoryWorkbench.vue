@@ -46,7 +46,8 @@ import {
   stripSkillInstallBlock,
   type SkillInstallPlan,
 } from '@/runtime/memory/skillInstall'
-import { getPlainText, setEditorText } from '@/composables/useContentEditable'
+import { getCursorPosition, getPlainText, setEditorText } from '@/composables/useContentEditable'
+import { useFilteredList } from '@/composables/useFilteredList'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { SkillConfig } from '@/types/skill'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -72,6 +73,8 @@ const conversationPickerRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
+const selectedSkillNames = ref<string[]>([])
+const mentionOpen = ref(false)
 const executionMode = ref<ConversationMode>('memory')
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
@@ -85,6 +88,7 @@ const settingsOpen = ref(false)
 const treeOpen = ref(true)
 const messagesEl = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLElement | null>(null)
+const mentionPopoverRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const mediaUrl = ref('')
 const mediaPlans = ref<Record<string, MediaPlan[]>>({})
@@ -110,6 +114,56 @@ let offMediaReferenceAdd: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
+const projectOwner = computed(() => desktopRuntime
+  ? projectStore.projectDir.value
+  : projectStore.webProjectId.value)
+type MemoryMentionOption =
+  | { type: 'file'; display: string; description: string; resource: ProjectResource }
+  | { type: 'skill'; display: string; description: string; name: string }
+
+const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
+  const skills = agentStore.getCustomSkills()
+    .filter(skill => skill.enabled !== false)
+    .map(skill => ({
+      type: 'skill' as const,
+      display: skill.name,
+      description: skill.description,
+      name: skill.name,
+    }))
+  const owner = projectOwner.value
+  const resources = !owner ? [] : await (query.trim()
+    ? files.searchPaths(owner, query.trim(), 40)
+    : files.list(owner))
+  const projectOptions = resources
+    .filter(resource => !resource.isDirectory
+      && !resource.path.startsWith('.raw/')
+      && resource.path !== '.raw'
+      && resource.kind !== 'binary')
+    .slice(0, 40)
+    .map(resource => ({
+      type: 'file' as const,
+      display: resource.path,
+      description: resource.kind === 'media' ? '项目媒体' : '项目文件',
+      resource,
+    }))
+  return query.trim() ? [...skills, ...projectOptions] : [...skills.slice(0, 5), ...projectOptions]
+}
+const mentionKey = (item: MemoryMentionOption) => item.type === 'skill'
+  ? `skill:${item.name}`
+  : `file:${item.resource.path}`
+const {
+  flat: mentionFlat,
+  active: mentionActive,
+  onInput: mentionOnInput,
+  onKeyDown: mentionOnKeyDown,
+  setActive: setMentionActive,
+  clear: clearMentionFilter,
+} = useFilteredList<MemoryMentionOption>({
+  items: mentionItems,
+  key: mentionKey,
+  filterKeys: ['display', 'description'],
+  noInitialSelection: true,
+})
 const conversationTurns = computed(() => conversation.value?.transcript.turns || [])
 const memoryTimelineVirtualizer = useVirtualizer(
   computed(() => ({
@@ -150,9 +204,6 @@ const modelGroups = computed(() => {
   return [...groups.entries()].map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
 const currentModelLabel = computed(() => textModels.value.find(model => model.id === agentStore.currentModel)?.label || agentStore.currentModel || '登录后加载模型')
-const projectOwner = computed(() => desktopRuntime
-  ? projectStore.projectDir.value
-  : projectStore.webProjectId.value)
 
 onMounted(async () => {
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
@@ -214,6 +265,9 @@ function isInternalMediaModel(modelId: string): boolean {
 function closeModelPicker(event: PointerEvent) {
   if (modelPickerOpen.value && !modelPickerRef.value?.contains(event.target as Node)) modelPickerOpen.value = false
   if (conversationPickerOpen.value && !conversationPickerRef.value?.contains(event.target as Node)) conversationPickerOpen.value = false
+  if (mentionOpen.value
+    && !composerRef.value?.contains(event.target as Node)
+    && !mentionPopoverRef.value?.contains(event.target as Node)) closeMention()
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
@@ -416,7 +470,7 @@ async function send() {
   const message = input.value.trim()
   const pendingAttachments = attachments.value.slice()
   const pendingMode = executionMode.value
-  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length) || sending.value || sendInFlight) return
+  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
   sending.value = true
   error.value = ''
@@ -456,6 +510,7 @@ async function send() {
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
       attachments: pendingAttachments,
       files: referencedFiles.value,
+      selectedSkillNames: selectedSkillNames.value,
       signal: abortController.signal,
       onTool(name) { status.value = name === 'skill' ? '正在加载 Skill' : '正在使用工具' },
       onText(text) {
@@ -482,6 +537,7 @@ async function send() {
     }
     attachments.value = []
     referencedFiles.value = []
+    selectedSkillNames.value = []
     streamingText.value = ''
     status.value = ''
   } catch (cause) {
@@ -558,14 +614,75 @@ function resizeComposer() {
 }
 
 function handleComposerInput(event: Event) {
-  input.value = getPlainText(event.currentTarget as HTMLElement)
+  const editor = event.currentTarget as HTMLElement
+  input.value = getPlainText(editor)
+  const cursorPos = getCursorPosition(editor)
+  const match = input.value.slice(0, cursorPos || input.value.length).match(/@(\S*)$/)
+  if (match) {
+    mentionOpen.value = true
+    mentionOnInput(match[1])
+  } else {
+    closeMention()
+  }
   resizeComposer()
 }
 
 function handleComposerKeydown(event: KeyboardEvent) {
+  if (mentionOpen.value) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeMention()
+      return
+    }
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault()
+      const item = mentionFlat.value.find(option => mentionKey(option) === mentionActive.value) || mentionFlat.value[0]
+      if (item) void selectMention(item)
+      return
+    }
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      mentionOnKeyDown(event)
+      return
+    }
+  }
   if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
   event.preventDefault()
   void send()
+}
+
+function closeMention() {
+  mentionOpen.value = false
+  clearMentionFilter()
+}
+
+async function selectMention(option: MemoryMentionOption) {
+  try {
+    if (option.type === 'skill') {
+      if (!selectedSkillNames.value.includes(option.name)) selectedSkillNames.value.push(option.name)
+      executionMode.value = 'memory'
+    } else if (option.resource.kind === 'media') {
+      await addProjectMediaReferences({ resources: [option.resource] })
+    } else {
+      const text = await files.readText(option.resource)
+      if (!referencedFiles.value.some(file => file.name === option.resource.path)) {
+        referencedFiles.value.push({ name: option.resource.path, content: text.content })
+      }
+    }
+    input.value = input.value.replace(/@([^\s@]*)$/, '')
+    setEditorText(composerRef.value, input.value)
+    await nextTick()
+    resizeComposer()
+  } catch (cause) {
+    error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
+  } finally {
+    closeMention()
+    composerRef.value?.focus()
+  }
+}
+
+function selectExecutionMode(mode: ConversationMode) {
+  executionMode.value = mode
+  if (mode === 'quick') selectedSkillNames.value = []
 }
 
 async function handleComposerPaste(event: ClipboardEvent) {
@@ -1025,13 +1142,13 @@ function readDataUrl(file: File): Promise<string> {
               type="button"
               :class="{ active: executionMode === 'quick' }"
               title="直接回答，不使用 Skill 和项目工具"
-              @click="executionMode = 'quick'"
+              @click="selectExecutionMode('quick')"
             >快速</button>
             <button
               type="button"
               :class="{ active: executionMode === 'memory' }"
               title="按需使用 Skill 和项目工具"
-              @click="executionMode = 'memory'"
+              @click="selectExecutionMode('memory')"
             >记忆</button>
           </div>
         </div>
@@ -1050,8 +1167,30 @@ function readDataUrl(file: File): Promise<string> {
             <button title="移除引用" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
           </div>
         </div>
+        <div v-if="selectedSkillNames.length" class="memory-attachments memory-references">
+          <div v-for="name in selectedSkillNames" :key="name" class="memory-attachment-chip">
+            <JcIcon name="psychology" />
+            <span class="memory-attachment-name" :title="name">Skill · {{ name }}</span>
+            <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+          </div>
+        </div>
         <div v-if="status || error" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
         <div class="memory-input-row">
+          <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
+            <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配的项目文件或 Skill</div>
+            <button
+              v-for="item in mentionFlat.slice(0, 12)"
+              :key="mentionKey(item)"
+              type="button"
+              :class="{ active: mentionActive === mentionKey(item) }"
+              @click="selectMention(item)"
+              @pointermove="setMentionActive(mentionKey(item))"
+            >
+              <JcIcon :name="item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
+              <span class="memory-mention-name">{{ item.display }}</span>
+              <span class="memory-mention-kind">{{ item.type === 'skill' ? 'Skill' : item.description }}</span>
+            </button>
+          </div>
           <input ref="fileInput" type="file" multiple hidden @change="selectFiles" />
           <button class="icon-button" title="添加附件" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
           <div
@@ -1064,7 +1203,7 @@ function readDataUrl(file: File): Promise<string> {
             @paste="handleComposerPaste"
           />
           <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
-          <button v-else class="send-button" title="发送" :disabled="!input.trim() && !attachments.length && !referencedFiles.length" @click="send"><JcIcon name="arrow-upward" /></button>
+          <button v-else class="send-button" title="发送" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
         </div>
       </footer>
 
@@ -1156,7 +1295,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-mode-segment { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-mode-segment button { height: 24px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--ink3); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-mode-segment button.active { background: var(--olive); color: white; }
-.memory-input-row { display: flex; align-items: flex-end; gap: 8px; padding: 10px; }
+.memory-input-row { position: relative; display: flex; align-items: flex-end; gap: 8px; padding: 10px; }
+.memory-mention-popover { position: absolute; z-index: 60; right: 10px; bottom: calc(100% + 7px); left: 10px; max-height: min(320px, 42vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
+.memory-mention-popover > button { display: grid; width: 100%; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
+.memory-mention-popover > button:hover, .memory-mention-popover > button.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
+.memory-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-mention-kind, .memory-mention-empty { color: var(--ink3); font-size: 11px; }
+.memory-mention-empty { padding: 9px; }
 .memory-composer-editable { min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; overflow-wrap: anywhere; }
 .memory-composer-editable:empty::before { color: var(--ink3); content: attr(data-placeholder); pointer-events: none; }
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }

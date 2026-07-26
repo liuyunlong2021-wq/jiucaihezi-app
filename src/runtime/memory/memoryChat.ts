@@ -13,8 +13,11 @@ import {
 } from '@/utils/directMessageBuilder'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import {
+  buildToolResultMessages,
   resolveDirectCompletionText,
   runDirectChatCompletion,
+  type DirectApiMessage,
+  type DirectToolCall,
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
@@ -37,6 +40,7 @@ export interface MemoryChatInput {
   mediaReferencePolicy?: string
   attachments?: ResolvedDirectAttachment[]
   files?: DirectMessageFile[]
+  selectedSkillNames?: string[]
   signal?: AbortSignal
   onText: (text: string) => void
   onTool?: (name: string) => void
@@ -62,7 +66,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const catalog = memoryMode
     ? mergeCreativeSkillCatalog(customSkills, await loadWebSkillCatalog())
     : []
-  const messages = buildDirectMessages({
+  const messages: DirectApiMessage[] = buildDirectMessages({
     messages: input.turns,
     historyLimit: null,
     systemPrompt: memoryMode
@@ -126,6 +130,35 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     : createWebProjectToolExecutor({ projectId: input.projectId, files: webProjectFiles })
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   const builtInNames = new Set(catalog.filter(skill => skill.source === 'builtin').map(skill => skill.name))
+  const executeMemoryTool = async (call: DirectToolCall) => {
+    if (call.function.name === 'skill') {
+      const skillName = String(parseArguments(call.function.arguments).name || '')
+      const customSkill = !builtInNames.has(skillName) ? customSkillsByName.get(skillName) : null
+      if (customSkill?.skillContent.trim()) {
+        return { content: `<skill_content name="${skillName}">\n${customSkill.skillContent.trim()}\n</skill_content>` }
+      }
+    }
+    return await projectTools(call)
+  }
+  const selectedSkillNames = [...new Set(input.selectedSkillNames || [])]
+  const unknownSkill = selectedSkillNames.find(name => !catalog.some(skill => skill.name === name))
+  if (unknownSkill) throw new Error(`Skill 不存在或未启用: ${unknownSkill}`)
+  if (selectedSkillNames.length) {
+    messages.push(...await buildToolResultMessages(
+      selectedSkillNames.map((name, index) => ({
+        id: `selected_skill_${index + 1}`,
+        type: 'function' as const,
+        function: { name: 'skill', arguments: JSON.stringify({ name }) },
+      })),
+      executeMemoryTool,
+      {
+        signal: input.signal,
+        onToolEvent(event) {
+          if (event.type === 'tool_execution_start') input.onTool?.(event.call.function.name)
+        },
+      },
+    ))
+  }
   const result = await runDirectChatCompletion({
     messages,
     tools: buildWebProjectToolDefinitions(),
@@ -135,16 +168,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     onToolEvent(event) {
       if (event.type === 'tool_execution_start') input.onTool?.(event.call.function.name)
     },
-    async executeTool(call) {
-      if (call.function.name === 'skill') {
-        const skillName = String(parseArguments(call.function.arguments).name || '')
-        const customSkill = !builtInNames.has(skillName) ? customSkillsByName.get(skillName) : null
-        if (customSkill?.skillContent.trim()) {
-          return { content: `<skill_content name="${skillName}">\n${customSkill.skillContent.trim()}\n</skill_content>` }
-        }
-      }
-      return await projectTools(call)
-    },
+    executeTool: executeMemoryTool,
   })
   const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
   input.onText(text)

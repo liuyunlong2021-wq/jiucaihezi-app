@@ -520,3 +520,8 @@
 - Web 崩溃根因不是单个播放器，而是完整历史消息、视频和音频播放器随对话长度无界常驻；记忆时间线现复用 `@tanstack/vue-virtual`，视频和音频任务只显示轻量入口，点击后进入现有中央单实例预览。
 - 项目文件仍是媒体持久化真源，任务 Store 继续独立轮询；虚拟卡片卸载不影响任务完成和落盘。图片保留原生懒加载，下载、文件树定位和原始链接兜底不变。
 - `v2.0.2` Apple Silicon 失败定位为 ARM OpenCode sidecar 的 ad-hoc 签名与时间戳签名链冲突；下载器在 Tauri 正式签名前移除 macOS sidecar 上游签名，工作流对 Apple 时间戳服务瞬断增加一次完整构建重试，不降低 Developer ID 或公证标准。
+
+## [2026-07-26] 实施 | 记忆输入框统一 @ 引用
+
+- `@` 菜单动态读取当前项目文档/媒体和 `agentStore.getCustomSkills()`；内置产品 Skill 仍不展示。文件读取后作为本轮引用，媒体复用现有附件物化合同。
+- 用户明确选择 Skill 时自动切到记忆模式，并在模型回答前用标准 assistant tool call + tool result 精确执行 `skill(name)`；不做关键词路由，不在普通请求预塞 Skill 正文，切回快速会清除已选 Skill。
