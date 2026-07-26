@@ -6,7 +6,9 @@ import {
   buildMediaPlanPolicy,
   getMediaPlanEditorControls,
   parseMediaPlan,
+  parseMediaPlans,
   replaceMediaPlanModelId,
+  stripMediaPlanBlocks,
   updateMediaPlanParameters,
   validateMediaPlan,
 } from '../mediaPlan'
@@ -41,6 +43,37 @@ test('media plan parser accepts one fenced image plan', () => {
     resolution: '2k',
     referenceIds: ['ref_product'],
   })
+})
+
+test('media plan parser accepts multiple independent plans in one fenced array', () => {
+  const content = [
+    '已按三张参考图分别规划：',
+    '```jc-media-plan',
+    JSON.stringify([
+      {
+        kind: 'video', title: '镜头一', prompt: '第一个镜头',
+        modelId: 'runninghub/api/rh-grok-image-video',
+        referenceIds: ['ref_input_1'], ratio: '16:9', duration: 6,
+      },
+      {
+        kind: 'video', title: '镜头二', prompt: '第二个镜头',
+        modelId: 'runninghub/api/rh-grok-image-video',
+        referenceIds: ['ref_input_2'], ratio: '16:9', duration: 6,
+      },
+      {
+        kind: 'video', title: '镜头三', prompt: '第三个镜头',
+        modelId: 'runninghub/api/rh-grok-image-video',
+        referenceIds: ['ref_input_3'], ratio: '16:9', duration: 6,
+      },
+    ]),
+    '```',
+  ].join('\n')
+
+  const plans = parseMediaPlans(content)
+  assert.equal(plans.length, 3)
+  assert.deepEqual(plans.map(plan => plan.title), ['镜头一', '镜头二', '镜头三'])
+  assert.deepEqual(plans.map(plan => plan.referenceIds), [['ref_input_1'], ['ref_input_2'], ['ref_input_3']])
+  assert.equal(stripMediaPlanBlocks(content), '已按三张参考图分别规划：')
 })
 
 test('model-authored plans cannot inject media paths or URLs', () => {

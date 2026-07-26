@@ -83,6 +83,11 @@ export function buildMediaPlanPolicy(referencePolicy = ''): string {
 }
 
 const MEDIA_PLAN_BLOCK = /```jc-media-plan\s*\n([\s\S]*?)\n```/
+const MEDIA_PLAN_BLOCKS = /```jc-media-plan\s*\n[\s\S]*?\n```/g
+
+export function stripMediaPlanBlocks(text: string): string {
+  return String(text || '').replace(MEDIA_PLAN_BLOCKS, '').trim()
+}
 
 export function replaceMediaPlanModelId(text: string, modelId: string): string {
   const match = String(text || '').match(MEDIA_PLAN_BLOCK)
@@ -100,6 +105,16 @@ export function replaceMediaPlanModelId(text: string, modelId: string): string {
 }
 
 export function parseMediaPlan(text: string): MediaPlan {
+  const values = parseMediaPlanValues(text)
+  if (values.length !== 1) throw new Error('媒体计划必须是单个 JSON 对象。')
+  return normalizeMediaPlan(values[0])
+}
+
+export function parseMediaPlans(text: string): MediaPlan[] {
+  return parseMediaPlanValues(text).map(normalizeMediaPlan)
+}
+
+function parseMediaPlanValues(text: string): Record<string, unknown>[] {
   const match = String(text || '').match(MEDIA_PLAN_BLOCK)
   if (!match) throw new Error('媒体计划必须放在 ```jc-media-plan JSON 代码块中。')
 
@@ -110,11 +125,14 @@ export function parseMediaPlan(text: string): MediaPlan {
     throw new Error('媒体计划不是有效 JSON。')
   }
 
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('媒体计划必须是 JSON 对象。')
+  const values = Array.isArray(value) ? value : [value]
+  if (!values.length || values.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+    throw new Error('媒体计划必须是 JSON 对象或对象数组。')
   }
+  return values as Record<string, unknown>[]
+}
 
-  const plan = value as Record<string, unknown>
+function normalizeMediaPlan(plan: Record<string, unknown>): MediaPlan {
   if (!['image', 'video', 'audio', 'model3d'].includes(String(plan.kind))) {
     throw new Error('媒体计划只支持 image、video、audio、model3d。')
   }

@@ -23,7 +23,8 @@ import {
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
 import {
-  parseMediaPlan,
+  parseMediaPlans,
+  stripMediaPlanBlocks,
   updateMediaPlanParameters,
   type MediaPlan,
   type MediaPlanParameterPatch,
@@ -87,7 +88,7 @@ const messagesEl = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const mediaUrl = ref('')
-const mediaPlans = ref<Record<string, MediaPlan>>({})
+const mediaPlans = ref<Record<string, MediaPlan[]>>({})
 const mediaPlanStatus = ref<Record<string, 'ready' | 'submitting' | 'submitted' | 'failed'>>({})
 const mediaPlanErrors = ref<Record<string, string>>({})
 const mediaTasks = ref<Record<string, string>>({})
@@ -108,7 +109,6 @@ let offReferenceFile: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
-const title = computed(() => projectStore.projectName.value || '韭菜盒子')
 const filteredConversations = computed(() => {
   const query = conversationSearch.value.trim().toLowerCase()
   return conversations.value
@@ -273,8 +273,10 @@ async function openResource(resource: ProjectResourceOpenResult) {
     for (const turn of resource.transcript.turns) {
       if (turn.role !== 'assistant') continue
       try {
-        mediaPlans.value[turn.id] = parseMediaPlan(turn.content)
-        mediaPlanStatus.value[turn.id] ||= 'ready'
+        mediaPlans.value[turn.id] = parseMediaPlans(turn.content)
+        mediaPlans.value[turn.id].forEach((_, index) => {
+          mediaPlanStatus.value[mediaPlanKey(turn.id, index)] ||= 'ready'
+        })
       } catch { /* ordinary assistant reply */ }
       try {
         skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
@@ -413,8 +415,11 @@ async function send() {
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
       try {
-        mediaPlans.value[turn.id] = materializeMediaPlanReferences(parseMediaPlan(turn.content), mediaContext)
-        mediaPlanStatus.value[turn.id] = 'ready'
+        mediaPlans.value[turn.id] = parseMediaPlans(turn.content)
+          .map(plan => materializeMediaPlanReferences(plan, mediaContext))
+        mediaPlans.value[turn.id].forEach((_, index) => {
+          mediaPlanStatus.value[mediaPlanKey(turn.id, index)] = 'ready'
+        })
       } catch { /* no media plan */ }
       try {
         skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
@@ -546,20 +551,25 @@ async function addAttachmentFiles(selected: File[]) {
   attachments.value = [...byId.values()]
 }
 
-async function approveMediaPlan(turnId: string) {
-  const plan = mediaPlans.value[turnId]
+function mediaPlanKey(turnId: string, planIndex: number): string {
+  return `${turnId}:${planIndex}`
+}
+
+async function approveMediaPlan(turnId: string, planIndex: number) {
+  const key = mediaPlanKey(turnId, planIndex)
+  const plan = mediaPlans.value[turnId]?.[planIndex]
   if (!plan || !conversation.value) return
-  mediaPlanStatus.value[turnId] = 'submitting'
-  mediaPlanErrors.value[turnId] = ''
+  mediaPlanStatus.value[key] = 'submitting'
+  mediaPlanErrors.value[key] = ''
   try {
     const prepared = await preparePublicMediaPlan({ plan, owner: conversation.value.resource.owner })
     const taskId = await mediaTaskStore.submitTask({
       ...prepared.submission,
-      chatMessageId: turnId,
+      chatMessageId: key,
     })
-    mediaTasks.value[turnId] = taskId
+    mediaTasks.value[key] = taskId
     mediaTaskResources.set(taskId, conversation.value)
-    mediaPlanStatus.value[turnId] = 'submitted'
+    mediaPlanStatus.value[key] = 'submitted'
     const updated = await appendMemoryTurn(
       conversation.value.resource,
       'assistant',
@@ -568,8 +578,8 @@ async function approveMediaPlan(turnId: string) {
     )
     opened.value = await openProjectResource(files, updated.resource)
   } catch (cause) {
-    mediaPlanStatus.value[turnId] = 'failed'
-    mediaPlanErrors.value[turnId] = cause instanceof Error ? cause.message : String(cause)
+    mediaPlanStatus.value[key] = 'failed'
+    mediaPlanErrors.value[key] = cause instanceof Error ? cause.message : String(cause)
   }
 }
 
@@ -594,12 +604,13 @@ async function recordMediaResult(payload: unknown) {
   }
 }
 
-function updatePlan(turnId: string, patch: MediaPlanParameterPatch) {
+function updatePlan(turnId: string, planIndex: number, patch: MediaPlanParameterPatch) {
+  const key = mediaPlanKey(turnId, planIndex)
   try {
-    mediaPlans.value[turnId] = updateMediaPlanParameters(mediaPlans.value[turnId], patch)
-    mediaPlanErrors.value[turnId] = ''
+    mediaPlans.value[turnId][planIndex] = updateMediaPlanParameters(mediaPlans.value[turnId][planIndex], patch)
+    mediaPlanErrors.value[key] = ''
   } catch (cause) {
-    mediaPlanErrors.value[turnId] = cause instanceof Error ? cause.message : String(cause)
+    mediaPlanErrors.value[key] = cause instanceof Error ? cause.message : String(cause)
   }
 }
 
@@ -647,8 +658,9 @@ async function continueSkillRevision(plan: SkillInstallPlan) {
   composerRef.value?.focus()
 }
 
-function displayTurnContent(content: string): string {
-  return stripSkillInstallBlock(content)
+function displayTurnContent(turn: ConversationTurn): string {
+  const content = stripSkillInstallBlock(turn.content)
+  return mediaPlans.value[turn.id]?.length ? stripMediaPlanBlocks(content) : content
 }
 
 function attachmentMetadata(attachments: ResolvedDirectAttachment[]): ConversationAttachment[] {
@@ -713,16 +725,16 @@ function readDataUrl(file: File): Promise<string> {
             </div>
           </div>
         </div>
-        <div class="memory-title-drag" data-tauri-drag-region><strong data-tauri-drag-region>{{ title }}</strong></div>
+        <button
+          v-if="memoryReady"
+          class="new-conversation-button"
+          :disabled="sending || projectActionPending"
+          @click="startNewConversation"
+        >
+          <span>新建对话</span>
+        </button>
+        <div class="memory-title-drag" data-tauri-drag-region></div>
         <div class="memory-topbar-actions">
-          <button
-            v-if="memoryReady"
-            class="new-conversation-button"
-            :disabled="sending || projectActionPending"
-            @click="startNewConversation"
-          >
-            <span>新建对话</span>
-          </button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <span>{{ currentModelLabel }}</span><JcIcon :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -749,17 +761,22 @@ function readDataUrl(file: File): Promise<string> {
               <template v-else><JcIcon :name="attachment.kind === 'video' ? 'movie' : attachment.kind === 'audio' ? 'music-note' : 'description'" /><span :title="attachment.name">{{ attachment.name }}</span></template>
             </div>
           </div>
-          <div v-if="displayTurnContent(turn.content)" class="memory-message-text">{{ displayTurnContent(turn.content) }}</div>
-          <MediaPlanCard
-            v-if="mediaPlans[turn.id]"
-            :plan="mediaPlans[turn.id]"
-            :status="mediaPlanStatus[turn.id] || 'ready'"
-            :error="mediaPlanErrors[turn.id]"
-            workbench-mode
-            @approve="approveMediaPlan(turn.id)"
-            @update-parameters="patch => updatePlan(turn.id, patch)"
-          />
-          <MediaTaskBubble v-if="mediaTasks[turn.id]" :task-id="mediaTasks[turn.id]" workbench-mode />
+          <div v-if="displayTurnContent(turn)" class="memory-message-text">{{ displayTurnContent(turn) }}</div>
+          <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
+            <MediaPlanCard
+              :plan="plan"
+              :status="mediaPlanStatus[mediaPlanKey(turn.id, planIndex)] || 'ready'"
+              :error="mediaPlanErrors[mediaPlanKey(turn.id, planIndex)]"
+              workbench-mode
+              @approve="approveMediaPlan(turn.id, planIndex)"
+              @update-parameters="patch => updatePlan(turn.id, planIndex, patch)"
+            />
+            <MediaTaskBubble
+              v-if="mediaTasks[mediaPlanKey(turn.id, planIndex)]"
+              :task-id="mediaTasks[mediaPlanKey(turn.id, planIndex)]"
+              workbench-mode
+            />
+          </template>
           <SkillInstallCard
             v-if="skillInstallPlans[turn.id]"
             :plan="skillInstallPlans[turn.id]"
@@ -893,8 +910,6 @@ function readDataUrl(file: File): Promise<string> {
 .memory-main { position: relative; display: grid; grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .memory-topbar { display: flex; align-items: center; gap: 10px; padding: 0 14px; border-bottom: 1px solid var(--line); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
-.memory-title-drag > * { pointer-events: none; }
-.memory-title-drag > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--font-base); }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }

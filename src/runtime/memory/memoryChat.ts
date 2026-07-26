@@ -77,6 +77,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       : '你是韭菜盒子通用对话工作台。依据当前对话和用户本轮提供的内容直接回答。',
     skillSystemPrompt: [
       buildMediaPlanPolicy(input.mediaReferencePolicy),
+      '记忆工作台支持批量媒体确认：单个任务在 jc-media-plan 中写一个 JSON 对象；多个独立任务写对象数组，每个任务一项。不要输出多个 jc-media-plan 代码块。',
       memoryMode ? buildWebSkillCatalogPrompt(catalog) : '',
       selectedSkill?.skillContent
         ? `用户额外选择的 Skill：${selectedSkill.name}\n<SKILL.md>\n${selectedSkill.skillContent}\n</SKILL.md>`

@@ -7,17 +7,16 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
 
-test('memory file tree keeps only the five requested toolbar actions', () => {
+test('memory file tree groups project identity above its three file actions', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const toolbar = tree.match(/<template v-if="props\.memoryMode">([\s\S]*?)<\/template>/)?.[1] || ''
 
   assert.deepEqual(Array.from(toolbar.matchAll(/title="([^"]+)"/g), match => match[1]), [
-    '新建文件',
-    '新建文件夹',
-    '切换项目',
+    '`切换项目：${projectStore.projectName.value}`',
+    '隐藏文件树',
   ])
-  assert.match(tree, /title="刷新"/)
-  assert.match(tree, /title="隐藏文件树"/)
+  assert.match(toolbar, /:title="`切换项目：\$\{projectStore\.projectName\.value\}`"/)
+  assert.match(tree, /<\/header>\s*<div v-if="props\.memoryMode" class="pft-actions pft-memory-actions">[\s\S]*title="新建文件"[\s\S]*title="新建文件夹"[\s\S]*title="刷新"/)
   assert.doesNotMatch(toolbar, /新建对话|上传|导入|导出/)
   assert.doesNotMatch(tree, /async function selectWebProject[\s\S]*initializeMemoryProject/)
 })
@@ -34,15 +33,16 @@ test('memory space and conversations are created only by their explicit actions'
   assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
 })
 
-test('memory workbench keeps the brand in the file tree and a native drag region in the header', () => {
+test('memory workbench keeps project identity in the file tree and a native drag region in the header', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
   assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region/)
   assert.match(workbench, /class="memory-workbench"[^>]*data-tauri-drag-region/)
-  assert.match(workbench, /<strong data-tauri-drag-region>\{\{ title \}\}<\/strong>/)
+  assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region><\/div>/)
   assert.doesNotMatch(workbench, /memory-brand-logo/)
   assert.match(tree, /class="pft-brand-logo" src="\/logo\.svg"/)
+  assert.match(tree, /class="pft-project-name"[\s\S]*projectStore\.projectName\.value/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
@@ -79,7 +79,9 @@ test('memory composer routes pasted images and media plans through the shared at
   assert.match(workbench, /clipboardData\?\.items/)
   assert.match(workbench, /buildExplicitMediaReferences/)
   assert.match(workbench, /buildMediaReferencePolicy\(mediaContext\)/)
-  assert.match(workbench, /materializeMediaPlanReferences\(parseMediaPlan\(turn\.content\), mediaContext\)/)
+  assert.match(workbench, /parseMediaPlans\(turn\.content\)\s*\.map\(plan => materializeMediaPlanReferences\(plan, mediaContext\)\)/)
+  assert.match(workbench, /v-for="\(plan, planIndex\) in mediaPlans\[turn\.id\]"/)
+  assert.match(workbench, /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/)
 })
 
 test('memory Skill picker uses the same installed-user list as the Web warehouse', () => {
@@ -104,6 +106,7 @@ test('memory topbar uses a grouped model popover and a text-only new conversatio
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /class="new-conversation-button"[\s\S]*<span>新建对话<\/span>/)
+  assert.match(workbench, /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/)
   assert.doesNotMatch(workbench, /new-conversation-button[\s\S]{0,180}<JcIcon/)
   assert.doesNotMatch(workbench, /<select v-model="agentStore\.currentModel"/)
   assert.match(workbench, /const modelGroups = computed/)
@@ -175,8 +178,11 @@ test('memory file actions use the supported DOM prompt and headers share one bas
     assert.match(tree, new RegExp(`safePrompt\\('${label}[\\s\\S]*?forceDom: props\\.memoryMode`))
   }
   assert.match(tree, /'memory-mode': props\.memoryMode/)
-  assert.match(tree, /\.pft\.memory-mode \.pft-head[\s\S]*border-bottom: 0/)
+  assert.match(tree, /\.pft\.memory-mode \.pft-head[\s\S]*border-bottom-color: var\(--line\)/)
   assert.match(workbench, /--memory-header-height: 74px/)
+  assert.match(tree, /\.pft\.memory-mode \.pft-head \{[\s\S]*height: var\(--memory-header-height\)/)
+  assert.match(tree, /\.pft-brand-logo \{[\s\S]*transform: translateY\(2px\)/)
+  assert.match(tree, /\.pft-memory-actions \{[\s\S]*height: 34px/)
   assert.match(workbench, /\.memory-workbench\.desktop-runtime \{ --memory-header-height: 102px/)
   assert.match(workbench, /grid-template-rows: var\(--memory-header-height\)/)
 })

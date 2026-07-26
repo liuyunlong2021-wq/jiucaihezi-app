@@ -2122,17 +2122,19 @@ onBeforeUnmount(() => {
     <template v-else>
       <!-- ═══ 顶部工具栏 ═══ -->
       <header class="pft-head">
-        <div class="pft-title-row">
-          <img v-if="props.memoryMode" class="pft-brand-logo" src="/logo.svg" alt="韭菜盒子" />
-          <strong v-else class="pft-title">{{ projectStore.projectName.value }}</strong>
-        </div>
-        <div class="pft-actions">
-          <template v-if="props.memoryMode">
-            <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
-            <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
-            <button class="pft-icon-btn pft-project-trigger" title="切换项目" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
-          </template>
-          <template v-else>
+        <template v-if="props.memoryMode">
+          <div class="pft-project-row">
+            <button class="pft-project-name" :title="`切换项目：${projectStore.projectName.value}`" @click="ctxAddProjectFolder">
+              <img class="pft-brand-logo" src="/logo.svg" alt="" />
+              <strong>{{ projectStore.projectName.value }}</strong>
+              <JcIcon name="expand-more" />
+            </button>
+            <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
+          </div>
+        </template>
+        <template v-else>
+          <div class="pft-title-row"><strong class="pft-title">{{ projectStore.projectName.value }}</strong></div>
+          <div class="pft-actions">
             <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
             <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
             <button class="pft-icon-btn" title="上传文件" @click="openFileUpload()"><JcIcon name="upload" /></button>
@@ -2140,15 +2142,17 @@ onBeforeUnmount(() => {
             <button class="pft-icon-btn" title="导入项目" @click="ctxImportProject"><JcIcon name="upload" /></button>
             <button class="pft-icon-btn" title="导出项目" @click="ctxExportProject"><JcIcon name="download" /></button>
             <button class="pft-icon-btn pft-project-trigger" :title="isDesktop ? '切换项目文件夹' : '切换项目'" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
-          </template>
-          <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories">
-            <JcIcon name="refresh" />
-          </button>
-          <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree">
-            <JcIcon name="chevron-left" />
-          </button>
-        </div>
+            <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories"><JcIcon name="refresh" /></button>
+            <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
+          </div>
+        </template>
       </header>
+
+      <div v-if="props.memoryMode" class="pft-actions pft-memory-actions">
+        <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
+        <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
+        <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories"><JcIcon name="refresh" /></button>
+      </div>
 
       <!-- 文件筛选 -->
       <div class="pft-search">
@@ -2597,10 +2601,37 @@ onBeforeUnmount(() => {
   gap: 6px;
   min-width: 0;
 }
+.pft-project-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+}
+.pft-project-name {
+  display: flex;
+  min-width: 0;
+  height: 32px;
+  flex: 1;
+  align-items: center;
+  gap: 5px;
+  padding: 0 4px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+}
+.pft-project-name:hover { background: var(--olive-pale); }
+.pft-project-name strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pft-project-name :deep(.jc-icon) { flex: 0 0 auto; color: var(--ink3); }
 .pft-brand-logo {
   width: 28px;
   height: 28px;
   object-fit: contain;
+  transform: translateY(2px);
 }
 .pft-title {
   font-size: 12px;
@@ -2670,24 +2701,33 @@ onBeforeUnmount(() => {
 }
 
 .pft.memory-mode .pft-head {
-  height: 41px;
-  flex: 0 0 41px;
-  border-bottom: 0;
+  height: var(--memory-header-height);
+  flex: 0 0 var(--memory-header-height);
+  align-items: stretch;
+  justify-content: center;
+  border-bottom-color: var(--line);
 }
 .pft.memory-mode .pft-search {
-  height: calc(var(--memory-header-height) - 41px);
-  flex: 0 0 calc(var(--memory-header-height) - 41px);
+  height: 34px;
+  flex: 0 0 34px;
 }
 .pft.memory-mode.memory-desktop .pft-head {
-  height: 69px;
-  flex-basis: 69px;
+  height: var(--memory-header-height);
+  flex-basis: var(--memory-header-height);
   padding-top: 28px;
   box-sizing: border-box;
 }
 .pft.memory-mode.memory-desktop .pft-search {
-  height: calc(var(--memory-header-height) - 69px);
-  flex-basis: calc(var(--memory-header-height) - 69px);
+  height: 34px;
+  flex-basis: 34px;
 }
+.pft-memory-actions {
+  height: 34px;
+  flex: 0 0 34px;
+  justify-content: flex-start;
+  padding: 0 10px;
+}
+.pft.memory-mode .pft-search { border-bottom-color: color-mix(in srgb, var(--line) 55%, transparent); }
 .pft.memory-mode .pft-title,
 .pft.memory-mode .pft-node,
 .pft.memory-mode .pft-project-menu button,
