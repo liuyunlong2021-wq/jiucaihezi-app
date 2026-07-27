@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 记忆工作台已按需融合现有 `CreationPanel`，并完成三栏可调宽、宽度记忆、52px 统一工具栏、专注创作、对话粘性滚动、历史同源预览和文件树/历史同源画布导入。项目文件仍是素材唯一真源，生成结果需明确“放到画布”并保持真实比例；画笔提供五档粗细并在选择后自动收起档位面板。完整 focused、Tauri、Web/Desktop 构建与产物审计已通过，v2.0.8 Web Production 已发布，Desktop 正式构建由 tag CI 发布；之后进入 4C iPhone 原生壳与移动平台能力审计。
+**当前焦点：[[开发/通用记忆对话独立App SDD]]** — v2.0.9 将媒体“生成中”收敛为当前进程确实存在的提交/轮询执行，旧持久化 `pending/running` 不再直接占用任务数量。完整 focused、Tauri、Web/Desktop 构建与产物审计已通过，Web Production 已部署；Desktop 正式构建由 tag CI 发布。稳定节点发布后进入 4C iPhone 原生壳：同仓库共享 Vue、登录、云项目、Raw/Wiki、对话和媒体任务，移动端只增加独立壳、App 管理目录和触摸导航。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -30,4 +30,4 @@
 
 ---
 
-> 上次刷新: 2026-07-27（v2.0.8 Web Production 已发布；创作面板与画布交互收尾完成，Desktop 正式构建进入发布流程。）
+> 上次刷新: 2026-07-27（v2.0.9 任务运行态修复与 iPhone 4C 边界完成，Web Production 已部署，Desktop 正式构建进入发布流程。）

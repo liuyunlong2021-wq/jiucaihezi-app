@@ -1526,6 +1526,41 @@ test(
 )
 
 test(
+  'persisted pending tasks do not count as actively generating without a live execution',
+  { concurrency: false },
+  async () => {
+    const savedTask = {
+      id: 'mtask_stale_pending',
+      type: 'video',
+      model: 'veo-3.1-generate-preview',
+      modelLabel: 'Veo 3.1',
+      prompt: '三天前的任务',
+      referenceImages: [],
+      status: 'pending',
+      progress: 50,
+      progressText: '轮询暂时失败，重启后将继续恢复',
+      createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
+      source: 'creation',
+      planSnapshot: { pollKind: 'video' },
+    }
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([savedTask]) })
+
+    try {
+      setActivePinia(createPinia())
+      const store = useMediaTaskStore()
+      await store.init()
+
+      assert.equal(store.getTask(savedTask.id)?.status, 'pending')
+      assert.equal(store.isTaskActive(savedTask.id), false)
+      assert.equal(store.runningCount, 0)
+      assert.equal(store.hasRunning, false)
+    } finally {
+      storage.restore()
+    }
+  },
+)
+
+test(
   'mediaTaskStore rolls back the inserted task when initial persistence fails',
   { concurrency: false },
   async () => {
@@ -1864,8 +1899,12 @@ test(
       assert.equal(started, 2)
       assert.equal(store.getTask(firstId)?.status, 'running')
       assert.equal(store.getTask(secondId)?.status, 'running')
+      assert.equal(store.isTaskActive(firstId), true)
+      assert.equal(store.isTaskActive(secondId), true)
+      assert.equal(store.runningCount, 2)
       release?.()
       await new Promise(resolve => setTimeout(resolve, 20))
+      assert.equal(store.runningCount, 0)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       environment.restore()

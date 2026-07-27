@@ -21,6 +21,16 @@ test('creation panel reads registry-backed plan state instead of legacy RH-only 
   assert.doesNotMatch(source, /const rhMode = computed/)
 })
 
+test('creation panel counts only tasks with a live runtime execution as generating', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /task\.source === 'creation' && mediaTaskStore\.isTaskActive\(task\.id\)/)
+  assert.doesNotMatch(
+    source,
+    /task\.source === 'creation' && \(task\.status === 'pending' \|\| task\.status === 'running'\)/,
+  )
+})
+
 // Legacy ecommerce rollback contract; MemoryWorkbench owns the current media path.
 test.skip('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')

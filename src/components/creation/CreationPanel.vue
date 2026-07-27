@@ -162,7 +162,7 @@ let pendingMemoryPlanResources: ProjectResource[] = []
 
 const creationActiveTasks = computed(() =>
   mediaTaskStore.tasks.filter(
-    task => task.source === 'creation' && (task.status === 'pending' || task.status === 'running'),
+    task => task.source === 'creation' && mediaTaskStore.isTaskActive(task.id),
   ),
 )
 const creationRunningCount = computed(() => creationActiveTasks.value.length)

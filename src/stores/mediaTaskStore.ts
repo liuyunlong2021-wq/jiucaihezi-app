@@ -418,6 +418,7 @@ export function __setCreationSubmitExecutorForTests(
 
 export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const tasks = ref<MediaTask[]>([])
+  const activeTaskIds = ref(new Set<string>())
   const initialized = ref(false)
   let initPromise: Promise<void> | null = null
   let persistenceQueue = Promise.resolve()
@@ -446,11 +447,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   // ─── Computed ───
-  const runningTasks = computed(() => tasks.value.filter(t => t.status === 'running'))
+  const runningTasks = computed(() =>
+    tasks.value.filter(task => activeTaskIds.value.has(task.id)),
+  )
   const pendingTasks = computed(() => tasks.value.filter(t => t.status === 'pending'))
   const completedTasks = computed(() => tasks.value.filter(t => t.status === 'success'))
   const hasRunning = computed(() => runningTasks.value.length > 0)
-  const runningCount = computed(() => runningTasks.value.length + pendingTasks.value.length)
+  const runningCount = computed(() => runningTasks.value.length)
+
+  function isTaskActive(taskId: string): boolean {
+    return activeTaskIds.value.has(taskId)
+  }
 
   function chatTasksFor(sessionId: string, directory: string): MediaTask[] {
     const targetSession = String(sessionId || '')
@@ -892,6 +899,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** 恢复单个任务的轮询 */
   async function _resumePolling(task: MediaTask) {
     if (!task.pollUrl || !task.pollKind) return
+    activeTaskIds.value.add(task.id)
     task.status = 'running'
     task.progressText = '恢复轮询中...'
 
@@ -971,6 +979,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       emitSettled(task)
       await persistTasksSafely('resume-failed')
       return
+    } finally {
+      activeTaskIds.value.delete(task.id)
     }
   }
 
@@ -1119,6 +1129,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     const task = tasks.value.find(t => t.id === taskId)
     if (!task) return
 
+    activeTaskIds.value.add(task.id)
     task.status = 'running'
     task.progressText = '生成中...'
 
@@ -1307,6 +1318,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       emitSettled(task)
       await persistTasksSafely('execute-failed')
       return
+    } finally {
+      activeTaskIds.value.delete(task.id)
     }
   }
 
@@ -1317,6 +1330,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     completedTasks,
     hasRunning,
     runningCount,
+    isTaskActive,
     init,
     submitTask,
     cancelTask,
