@@ -1034,6 +1034,7 @@ Mobile App 目录 owner ─┘
 - 实验 C（最终）：本分支以本地 `tauri-runtime-wry` 补丁只跳过 iOS 上会触发 #14675 的版本探测，将 iOS WebView runtime 标记为可用；保留非 iOS 的原官方查询路径。补丁来源为官方 `tauri-runtime-wry 2.11.2`，不是长期 Wry fork，待上游发布修复后删除。项目启动同时改用 Tauri iOS 沙盒 `app_data_dir`，并在 iOS 入口按 Rustls 官方要求安装 `ring` crypto provider，分别消除 `184048.ips` 的桌面 home 目录 panic 与 `184504.ips` 的 `reqwest` provider panic。
 - 最终版本：`tauri 2.11.2`、本地 `tauri-runtime-wry 2.11.2` 最小 iOS 补丁、`wry 0.55.1`、官方 Tao `729bbcad`、iOS-only `rustls 0.23/ring`。`cargo check --target aarch64-apple-ios` 通过，`tauri ios dev` 完成 Xcode 构建、Apple Development 签名、IPA 导出及真机安装。
 - 真机证据：iPhone 13 Pro Max（iOS 26.5.2，Bundle ID `com.jiucaihezi.mobile`）于 18:51:37 明确 `--terminate-existing` 冷启动；PID 919 在超过 60 秒后仍存在，系统 Crash Logs 最新仍为 18:45:04 的历史 `184504.ips`，没有新增报告。开发服务器运行时页面已加载；屏幕截图服务受当前开发盘映像限制，未将其失败当作运行失败。
+- 后续首页加载复核：iOS 开发包必须声明 `NSLocalNetworkUsageDescription`，否则手机不能连接 Tauri 代换后的 Mac `devUrl`。在 iPhone 授权本地网络后，重新冷启动的 App 与 Mac Vite 热更新端口 `192.168.1.51:1421` 保持已建立连接，PID 990 连续存活超过 60 秒且没有新增 `.ips`。这是开发构建访问本机首页资源所需权限，不是生产 IPA 的外部服务依赖。
 
 结论：4C-6 已完成。iPhone 已可冷启动并稳定停留首页；本轮没有开发登录、同步、媒体或 TestFlight。后续开始 4C-7 前，应持续跟踪 #14675，官方发布兼容版本后删除本地 runtime 补丁并重新做同一真机验证。
 
