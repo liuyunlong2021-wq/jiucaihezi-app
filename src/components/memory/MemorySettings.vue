@@ -14,8 +14,9 @@ import {
   gatewayLogin,
   getApiKey,
   initApiKey,
+  initGatewaySessionToken,
   setApiKey,
-  getGatewaySessionToken,
+  gatewaySessionAuthenticated,
 } from '@/services/newApiClient'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
 
@@ -60,6 +61,7 @@ function setFontSize(value: number) {
 onMounted(async () => {
   if (desktopRuntime) installedLocalModelCount.value = getLocalOllamaModels().length
   apiKey.value = getApiKey() || await initApiKey()
+  await initGatewaySessionToken()
   if (apiKey.value) await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
 })
 
@@ -170,9 +172,9 @@ async function runSync() {
         </section>
       </div>
       <div v-else-if="tab === 'sync'" class="memory-sync">
-        <template v-if="!getGatewaySessionToken()">
-          <p>请先在“账号”中登录。手动填写 API Key 不能识别同步账号。</p>
-          <button @click="tab = 'account'">前往登录</button>
+        <template v-if="!gatewaySessionAuthenticated">
+          <p>{{ apiKey ? '当前 API Key 可用于模型，但云同步需要重新登录一次账号。' : '请先在“账号”中登录。手动填写 API Key 不能识别同步账号。' }}</p>
+          <button @click="tab = 'account'">{{ apiKey ? '重新登录以启用同步' : '前往登录' }}</button>
         </template>
         <template v-else-if="!owner">
           <p>请先在左侧选择一个本地项目。</p>
@@ -182,6 +184,12 @@ async function runSync() {
             <strong>{{ projectName || '当前项目' }}</strong>
             <span>{{ projectTextSyncStatus.message || '已连接云项目' }}</span>
             <span v-if="projectTextSyncStatus.pending">待同步 {{ projectTextSyncStatus.pending }} 项</span>
+            <progress
+              v-if="projectTextSyncStatus.phase === 'syncing' && projectTextSyncStatus.progressTotal"
+              :value="projectTextSyncStatus.progressCurrent"
+              :max="projectTextSyncStatus.progressTotal"
+            ></progress>
+            <span>只同步文字，媒体和空目录不同步</span>
           </div>
           <button :disabled="syncBusy" @click="runSync">{{ syncBusy ? '同步中' : '立即同步' }}</button>
         </template>
@@ -241,6 +249,7 @@ async function runSync() {
 .memory-sync button:disabled { opacity: .5; cursor: progress; }
 .memory-sync-summary { display: grid; gap: 4px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-sync-summary span { color: var(--ink3); font-size: 12px; }
+.memory-sync-summary progress { width: 100%; height: 6px; accent-color: var(--olive); }
 .memory-sync .memory-sync-error { color: var(--danger); }
 .memory-appearance { display: grid; gap: 20px; }
 .memory-theme-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }

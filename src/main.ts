@@ -6,7 +6,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { patchFetch } from '@/utils/httpClient'
 import { registerMcpStore } from '@/runtime/tools/mcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
-import { initApiKey, setApiKey } from '@/services/newApiClient'
+import { initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import { consumeMcpOAuthCallbackUrl } from '@/services/mcpOAuth'
 import { restoreMcpServers } from '@/services/mcpClient'
@@ -134,6 +134,7 @@ async function boot() {
   // ponytail: await initApiKey 确保 Key 在后续操作前就绪 (Step 28)
   try {
     await initApiKey()
+    await initGatewaySessionToken()
   } catch { /* 无 Key 也是正常状态 */ }
   keyReadyResolve?.()
 }

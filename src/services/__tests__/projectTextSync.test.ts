@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { ProjectTextSync, isSyncableTextPath } from '../projectTextSync'
+import { ProjectTextSync, isSyncableTextPath, projectTextSyncStatus } from '../projectTextSync'
 import { createProjectFileService, type ProjectFileAdapter } from '../projectFileService'
 import { TextSyncError, type SyncFile, type SyncMutation, type SyncProject } from '../textSyncClient'
 
@@ -56,16 +56,20 @@ function fakeCloud() {
   let cursor = 0
   let offline = false
   let loseNextResponse = false
+  const pushBatchSizes: number[] = []
+  const pushProgress: string[] = []
   const api = {
     async listProjects() { return [project] },
     async createProject() { return project },
     async pullFiles(_projectId: string, after: number) {
       if (offline) throw new TypeError('offline')
       const changed = [...files.values()].filter(file => file.updated_at > after)
-      return { cursor, has_more: false, files: changed }
+      return { cursor, has_more: false, total: changed.length, files: changed }
     },
     async pushFiles(_projectId: string, _deviceId: string, inputs: SyncMutation[]) {
       if (offline) throw new TypeError('offline')
+      pushBatchSizes.push(inputs.length)
+      pushProgress.push(projectTextSyncStatus.message)
       const results = inputs.map(input => {
         const duplicate = mutations.get(input.mutation_id)
         if (duplicate) return { mutation_id: input.mutation_id, path: duplicate.path, revision: duplicate.revision, duplicate: true }
@@ -95,6 +99,8 @@ function fakeCloud() {
   return {
     api,
     files,
+    pushBatchSizes,
+    pushProgress,
     setOffline(value: boolean) { offline = value },
     loseResponseOnce() { loseNextResponse = true },
   }
@@ -170,5 +176,25 @@ test('sync path contract excludes queue state, media, credentials and binary fil
   assert.equal(isSyncableTextPath('.raw/对话记录/今天.md'), true)
   for (const path of ['.raw/.sync/state.json', 'jc-media/a.txt', '.env.local', 'credentials.json', 'wiki/a.png']) {
     assert.equal(isSyncableTextPath(path), false)
+  }
+})
+
+test('first upload sends at most 100 files per request and reports progress', async () => {
+  const cloud = fakeCloud()
+  const web = localFiles('web')
+  const sync = new ProjectTextSync(web.service, cloud.api)
+  try {
+    for (let index = 0; index < 205; index += 1) {
+      await web.service.createText('web-owner', `wiki/${index}.md`, `# ${index}`)
+    }
+    await sync.open('web-owner', '批量记忆')
+    await sync.enable()
+
+    assert.deepEqual(cloud.pushBatchSizes, [100, 100, 5])
+    assert.deepEqual(cloud.pushProgress, ['上传 0/205', '上传 100/205', '上传 200/205'])
+    assert.equal(projectTextSyncStatus.message, '文字已同步')
+    assert.equal(projectTextSyncStatus.progressTotal, 0)
+  } finally {
+    sync.dispose()
   }
 })

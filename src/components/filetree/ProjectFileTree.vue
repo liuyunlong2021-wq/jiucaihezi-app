@@ -50,7 +50,11 @@ import {
 } from '@/utils/webProjectTransfer'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { parseConversationTranscript } from '@/runtime/memory/conversationTranscript'
-import { getGatewaySessionToken } from '@/services/newApiClient'
+import {
+  gatewaySessionAuthenticated,
+  getGatewaySessionToken,
+  initGatewaySessionToken,
+} from '@/services/newApiClient'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
 import type { SyncProject } from '@/services/textSyncClient'
 
@@ -1303,7 +1307,8 @@ async function refreshProjectCenter() {
   projectMenuError.value = ''
   try {
     if (!isDesktop) await refreshWebProjects()
-    cloudProjects.value = getGatewaySessionToken() ? await projectTextSync.listCloudProjects() : []
+    const session = getGatewaySessionToken() || await initGatewaySessionToken()
+    cloudProjects.value = session ? await projectTextSync.listCloudProjects() : []
   } catch (e) {
     projectMenuError.value = e instanceof Error ? e.message : String(e)
   }
@@ -1341,8 +1346,8 @@ async function openLocalProjectFolder() {
 }
 async function uploadCurrentProject() {
   if (!projectKey.value || projectMenuBusy.value) return
-  if (!getGatewaySessionToken()) {
-    projectMenuError.value = '请先在设置的“账号”中登录'
+  if (!(getGatewaySessionToken() || await initGatewaySessionToken())) {
+    projectMenuError.value = '请先在设置的“账号”中重新登录一次，以启用云同步'
     return
   }
   projectMenuBusy.value = true
@@ -2382,6 +2387,12 @@ onBeforeUnmount(() => {
           <strong>{{ projectStore.projectName.value }}</strong>
           <span v-if="currentCloudProjectId">{{ projectTextSyncStatus.message || '已连接云端' }}</span>
           <span v-else>仅保存在当前设备</span>
+          <progress
+            v-if="projectTextSyncStatus.phase === 'syncing' && projectTextSyncStatus.progressTotal"
+            :value="projectTextSyncStatus.progressCurrent"
+            :max="projectTextSyncStatus.progressTotal"
+          ></progress>
+          <span v-if="currentCloudProjectId">只同步文字，媒体和空目录不同步</span>
         </div>
         <button v-if="currentCloudProjectId" :disabled="projectMenuBusy" @click="syncCurrentProject">
           <JcIcon name="sync" /><span>{{ projectMenuBusy ? '同步中' : '立即同步' }}</span>
@@ -2410,7 +2421,7 @@ onBeforeUnmount(() => {
 
       <div class="pft-ctx-divider"></div>
       <div class="pft-project-section">云端项目</div>
-      <p v-if="!getGatewaySessionToken()" class="pft-project-hint">登录后可查看和下载云项目</p>
+      <p v-if="!gatewaySessionAuthenticated" class="pft-project-hint">登录后可查看和下载云项目</p>
       <button
         v-for="project in cloudProjects"
         :key="project.id"
@@ -2419,7 +2430,7 @@ onBeforeUnmount(() => {
       >
         <JcIcon name="cloud" /><span>{{ project.name }}</span>
       </button>
-      <p v-if="getGatewaySessionToken() && !cloudProjects.length && !projectMenuError" class="pft-project-hint">还没有云项目</p>
+      <p v-if="gatewaySessionAuthenticated && !cloudProjects.length && !projectMenuError" class="pft-project-hint">还没有云项目</p>
       <p v-if="projectMenuError" class="pft-project-error">{{ projectMenuError }}</p>
     </div>
 
@@ -2760,6 +2771,11 @@ onBeforeUnmount(() => {
   margin: 0;
   color: var(--ink3);
   font-size: 11px;
+}
+.pft-project-current progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--olive);
 }
 .pft-project-hint,
 .pft-project-error {

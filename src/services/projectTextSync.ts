@@ -35,7 +35,7 @@ interface LocalSyncState {
 interface TextSyncApi {
   listProjects(includeDeleted?: boolean): Promise<SyncProject[]>
   createProject(name: string): Promise<SyncProject>
-  pullFiles(projectId: string, cursor: number): Promise<{ cursor: number; has_more: boolean; files: SyncFile[] }>
+  pullFiles(projectId: string, cursor: number): Promise<{ cursor: number; has_more: boolean; total: number; files: SyncFile[] }>
   pushFiles(projectId: string, deviceId: string, mutations: SyncMutation[]): Promise<Array<{ mutation_id: string; path: string; revision: number; duplicate: boolean }>>
 }
 
@@ -45,6 +45,8 @@ export const projectTextSyncStatus = reactive({
   phase: 'idle' as 'idle' | 'disabled' | 'syncing' | 'synced' | 'offline' | 'auth' | 'error',
   message: '',
   pending: 0,
+  progressCurrent: 0,
+  progressTotal: 0,
   lastSyncedAt: 0,
 })
 
@@ -277,16 +279,19 @@ export class ProjectTextSync {
   }
 
   private async reconcileLocalFiles(): Promise<void> {
+    this.updateProgress('正在扫描文字文件...', 0, 0)
     const resources = (await this.files.list(this.owner)).filter(resource =>
       !resource.isDirectory && isSyncableTextPath(resource.path),
     )
     const present = new Set(resources.map(resource => resource.path))
     const pendingPaths = new Set(this.state.pending.map(item => item.path))
-    for (const resource of resources) {
-      if (pendingPaths.has(resource.path)) continue
-      const content = (await this.files.readText(resource)).content
-      const hash = await sha256(content)
-      if (this.state.hashes[resource.path] !== hash) await this.enqueueUpsert(resource.path, content)
+    for (const [index, resource] of resources.entries()) {
+      if (!pendingPaths.has(resource.path)) {
+        const content = (await this.files.readText(resource)).content
+        const hash = await sha256(content)
+        if (this.state.hashes[resource.path] !== hash) await this.enqueueUpsert(resource.path, content)
+      }
+      this.updateProgress(`正在扫描 ${index + 1}/${resources.length}`, index + 1, resources.length)
     }
     for (const path of Object.keys(this.state.hashes)) {
       if (!present.has(path) && !pendingPaths.has(path)) await this.enqueueDelete(path)
@@ -298,14 +303,32 @@ export class ProjectTextSync {
     this.updateStatus('syncing', '正在同步文字...')
     try {
       await this.pullAll()
+      const uploadTotal = this.state.pending.length
+      let uploaded = 0
       while (this.state.pending.length) {
-        const mutation = this.state.pending[0]
+        const paths = new Set<string>()
+        const batch = this.state.pending.filter(mutation => {
+          if (paths.has(mutation.path) || paths.size >= 100) return false
+          paths.add(mutation.path)
+          return true
+        })
+        this.updateProgress(`上传 ${uploaded}/${uploadTotal}`, uploaded, uploadTotal)
         try {
-          const [result] = await this.api.pushFiles(this.state.cloudProjectId, deviceId(), [mutation])
-          this.state.revisions[mutation.path] = result.revision
-          if (mutation.operation === 'delete') delete this.state.hashes[mutation.path]
-          else this.state.hashes[mutation.path] = mutation.content_hash
-          this.state.pending.shift()
+          const results = await this.api.pushFiles(this.state.cloudProjectId, deviceId(), batch)
+          if (results.length !== batch.length) throw new Error('云端返回的同步结果数量不完整')
+          for (const [index, mutation] of batch.entries()) {
+            const result = results[index]
+            if (result.mutation_id !== mutation.mutation_id || result.path !== mutation.path) {
+              throw new Error('云端返回的同步结果顺序无效')
+            }
+            this.state.revisions[mutation.path] = result.revision
+            if (mutation.operation === 'delete') delete this.state.hashes[mutation.path]
+            else this.state.hashes[mutation.path] = mutation.content_hash
+          }
+          const completed = new Set(batch.map(mutation => mutation.mutation_id))
+          this.state.pending = this.state.pending.filter(mutation => !completed.has(mutation.mutation_id))
+          uploaded += batch.length
+          this.updateProgress(`上传 ${uploaded}/${uploadTotal}`, uploaded, uploadTotal)
           await this.persistState()
         } catch (error) {
           if (error instanceof TextSyncError && error.status === 409) {
@@ -327,9 +350,17 @@ export class ProjectTextSync {
 
   private async pullAll(): Promise<void> {
     let more = true
+    let downloaded = 0
+    let total = 0
     while (more) {
       const page = await this.api.pullFiles(this.state.cloudProjectId, this.state.cursor)
-      for (const remote of page.files) await this.applyRemote(remote)
+      if (!total) total = page.total
+      if (total) this.updateProgress(`下载 ${downloaded}/${total}`, downloaded, total)
+      for (const remote of page.files) {
+        await this.applyRemote(remote)
+        downloaded += 1
+        this.updateProgress(`下载 ${downloaded}/${total}`, downloaded, total)
+      }
       this.state.cursor = page.cursor
       more = page.has_more
       await this.persistState()
@@ -381,12 +412,22 @@ export class ProjectTextSync {
     await this.files.createText(this.owner, candidate, content)
   }
 
-  private updateStatus(phase: typeof projectTextSyncStatus.phase, message = ''): void {
+  private updateProgress(message: string, current: number, total: number): void {
+    this.updateStatus('syncing', message)
+    projectTextSyncStatus.progressCurrent = current
+    projectTextSyncStatus.progressTotal = total
+  }
+
+  private updateStatus(phase: typeof projectTextSyncStatus.phase, message?: string): void {
     projectTextSyncStatus.owner = this.owner
     projectTextSyncStatus.cloudProjectId = this.state.cloudProjectId
     projectTextSyncStatus.phase = phase
-    projectTextSyncStatus.message = message
+    if (message !== undefined) projectTextSyncStatus.message = message
     projectTextSyncStatus.pending = this.state.pending.length
+    if (phase !== 'syncing') {
+      projectTextSyncStatus.progressCurrent = 0
+      projectTextSyncStatus.progressTotal = 0
+    }
   }
 
   private setFailure(error: unknown): void {

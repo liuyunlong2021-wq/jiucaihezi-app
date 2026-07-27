@@ -13,6 +13,7 @@ import {
   clearLegacyAuthStorage,
   getApiKey,
   getGatewaySessionToken,
+  gatewaySessionAuthenticated,
   extractGatewayApiKey,
   extractGatewayBaseUrl,
   extractGatewaySessionToken,
@@ -24,6 +25,7 @@ import {
   normalizeGatewayUser,
   gatewayLogin,
   initApiKey,
+  initGatewaySessionToken,
   setApiKey,
   setGatewaySessionToken,
 } from '../../services/newApiClient'
@@ -98,6 +100,16 @@ test('initApiKey restores the ordinary API key from web localStorage after refre
 
     assert.equal(await initApiKey(), 'sk-web-refresh-12345678901234567890')
     assert.equal(getApiKey(), 'sk-web-refresh-12345678901234567890')
+  })
+})
+
+test('initGatewaySessionToken restores sync authentication after refresh', async () => {
+  await withLocalStorage({ jcGatewaySessionToken: 'sess_web_refresh_1234567890' }, async () => {
+    __resetGatewaySessionMemoryCacheForTests('')
+
+    assert.equal(gatewaySessionAuthenticated.value, false)
+    assert.equal(await initGatewaySessionToken(), 'sess_web_refresh_1234567890')
+    assert.equal(gatewaySessionAuthenticated.value, true)
   })
 })
 

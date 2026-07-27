@@ -220,6 +220,7 @@ test('database revision guard is translated to a 409 conflict', async () => {
 test('incremental pull returns the latest text state and tombstones', async () => {
   const db = createDb((method, sql) => {
     if (method === 'first' && sql.includes('FROM projects')) return { id: 'project_12345678', name: '记忆空间', created_at: 1, updated_at: 4, deleted_at: null };
+    if (method === 'first' && sql.includes('COUNT(DISTINCT path)')) return { total: 2 };
     if (method === 'all' && sql.includes('FROM sync_mutations m')) return { results: [
       { seq: 4, path: 'wiki/人物.md', content: '# 人物', content_hash: 'abc', revision: 2, updated_at: 4, deleted_at: null },
       { seq: 5, path: 'wiki/旧稿.md', content: '# 旧稿', content_hash: 'def', revision: 3, updated_at: 5, deleted_at: 5 },
@@ -234,6 +235,7 @@ test('incremental pull returns the latest text state and tombstones', async () =
   assert.equal(response.status, 200);
   assert.equal(payload.cursor, 5);
   assert.equal(payload.has_more, false);
+  assert.equal(payload.total, 2);
   assert.equal(payload.files[0].content, '# 人物');
   assert.equal(payload.files[1].content, null);
 });

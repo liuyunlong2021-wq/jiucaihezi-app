@@ -78,7 +78,7 @@ export const textSyncClient = {
     })
     return payload.project
   },
-  async pullFiles(projectId: string, cursor: number): Promise<{ cursor: number; has_more: boolean; files: SyncFile[] }> {
+  async pullFiles(projectId: string, cursor: number): Promise<{ cursor: number; has_more: boolean; total: number; files: SyncFile[] }> {
     return await syncJson(`/sync/projects/${encodeURIComponent(projectId)}/files?cursor=${cursor}`)
   },
   async pushFiles(projectId: string, deviceId: string, mutations: SyncMutation[]): Promise<Array<{ mutation_id: string; path: string; revision: number; duplicate: boolean }>> {

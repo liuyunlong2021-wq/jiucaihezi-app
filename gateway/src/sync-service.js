@@ -112,6 +112,9 @@ function readCursor(request) {
 async function pullFiles(request, db, projectId, userId) {
   await ownedProject(db, projectId, userId);
   const cursor = readCursor(request);
+  const count = await db.prepare(
+    'SELECT COUNT(DISTINCT path) AS total FROM sync_mutations WHERE project_id = ?1 AND seq > ?2'
+  ).bind(projectId, cursor).first();
   const result = await db.prepare(
     `SELECT m.seq, f.path, f.content, f.content_hash, f.revision, f.updated_at, f.deleted_at
      FROM sync_mutations m
@@ -133,6 +136,7 @@ async function pullFiles(request, db, projectId, userId) {
     success: true,
     cursor: nextCursor,
     has_more: !!more,
+    total: Number(count?.total || 0),
     files: pulled.map((row) => ({
       path: String(row.path),
       content: row.deleted_at == null ? String(row.content || '') : null,

@@ -21,6 +21,7 @@ const MAX_GATEWAY_SESSION_TOKEN_LENGTH = 8192
 let apiKeyMemoryCache = ''
 export const apiKeyReady = ref('')
 let gatewaySessionMemoryCache = ''
+export const gatewaySessionAuthenticated = ref(false)
 let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
 
 async function getInvokeApi() {
@@ -110,12 +111,16 @@ export function __resetApiKeyMemoryCacheForTests(value = ''): void {
 }
 
 export async function initGatewaySessionToken(): Promise<string> {
-  if (gatewaySessionMemoryCache) return gatewaySessionMemoryCache
+  if (gatewaySessionMemoryCache) {
+    gatewaySessionAuthenticated.value = true
+    return gatewaySessionMemoryCache
+  }
   const invoke = await getInvokeApi()
   if (invoke) {
     const stored = String((await invoke('get_gateway_session_token')) || '').trim()
     if (stored) {
       gatewaySessionMemoryCache = stored
+      gatewaySessionAuthenticated.value = true
       return gatewaySessionMemoryCache
     }
   }
@@ -129,6 +134,7 @@ export async function initGatewaySessionToken(): Promise<string> {
       gatewaySessionMemoryCache = legacy
     }
   }
+  gatewaySessionAuthenticated.value = Boolean(gatewaySessionMemoryCache)
   return gatewaySessionMemoryCache
 }
 
@@ -139,6 +145,7 @@ export function getGatewaySessionToken(): string {
 export async function setGatewaySessionToken(token: string): Promise<void> {
   const clean = String(token || '').trim()
   gatewaySessionMemoryCache = clean
+  gatewaySessionAuthenticated.value = Boolean(clean)
   const invoke = await getInvokeApi()
   if (invoke) {
     if (clean) await invoke('set_gateway_session_token', { token: clean })
@@ -153,6 +160,7 @@ export async function setGatewaySessionToken(token: string): Promise<void> {
 
 export async function clearGatewaySession(): Promise<void> {
   gatewaySessionMemoryCache = ''
+  gatewaySessionAuthenticated.value = false
   const invoke = await getInvokeApi()
   if (invoke) await invoke('clear_gateway_session_token')
   if (typeof localStorage !== 'undefined') {
@@ -163,6 +171,7 @@ export async function clearGatewaySession(): Promise<void> {
 
 export function __resetGatewaySessionMemoryCacheForTests(value = ''): void {
   gatewaySessionMemoryCache = value
+  gatewaySessionAuthenticated.value = Boolean(value)
 }
 
 export interface GatewayUser {
