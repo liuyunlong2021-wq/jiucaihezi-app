@@ -278,9 +278,14 @@ test('memory tree toggle collapses the desktop file tree and exposes reopen cont
 
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {
   const app = source('src/App.vue')
+  const studioApp = source('src/StudioApp.vue')
+  const vite = source('vite.config.ts')
 
   assert.match(app, /<MemoryWorkbench \/>/)
   assert.doesNotMatch(app, /WorkspaceLayout|useOpenCodeSyncStore|projectStoredNewApiForOpenCode/)
+  assert.match(studioApp, /<WorkspaceLayout \/>/)
+  assert.match(studioApp, /useOpenCodeSyncStore|projectStoredNewApiForOpenCode/)
+  assert.match(vite, /mode === 'studio' \? 'src\/StudioApp\.vue' : 'src\/App\.vue'/)
 })
 
 test('memory workbench follows the current project owner on both runtimes', () => {

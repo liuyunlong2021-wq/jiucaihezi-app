@@ -1,6 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import App from './App.vue'
+import App from '@app-root'
 import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { patchFetch } from '@/utils/httpClient'

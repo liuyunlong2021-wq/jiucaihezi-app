@@ -1,7 +1,7 @@
 # 通用记忆对话工作台 SDD
 
 > 日期：2026-07-27
-> 状态：Web 与 Mac 已完成；第四阶段 4A 云项目 Web ↔ Mac 真机闭环已通过，首次同步批量与进度已补齐
+> 状态：Web 与 Mac 已完成；第四阶段 4A 云项目 Web ↔ Mac 真机闭环已通过，4B 多产品构建边界实施中
 > 首发目标：<https://jiucaihezi.studio>
 > 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
@@ -27,6 +27,26 @@ Markdown/文本  -> 临时预览层显示文档阅读器
 产品能力仍然完整：登录、模型、Skill 仓库、MCP、附件、Wiki 读写和对话内图片/视频/音频生成都保留，只把设置收进按钮，把媒体生成收进对话。
 
 ## 2. 为什么这是正确边界
+
+### 2.0 一个底座，多产品壳
+
+通用记忆能力是后续产品共用的底座，不是把所有产品界面和运行时一起塞进一个安装包。仓库保持一个，交付物按产品独立：
+
+```text
+通用底座
+├── 登录、Gateway 与云项目同步
+├── ProjectFileService、Raw 与 Wiki
+├── 对话、模型、Skill 与公共媒体能力
+└── 跨端资源合同
+
+独立产品壳
+├── 记忆工作台 App
+├── 韭菜盒子 Studio 主 App
+├── 电商工作台 App
+└── 漫剧工作台 App
+```
+
+每个产品壳只选择自己的前端入口、Bundle ID、Deep Link、更新通道和原生能力。共享底座不复制，未被目标入口引用的界面不进入前端产物；OpenCode sidecar 只属于 Studio，记忆、电商、漫剧和 Mobile 不得携带。当前已经发布的记忆 App 继续使用 `com.jiucaihezi.desktop`，避免现有用户的数据目录和升级链路断开；恢复主 Studio 时使用新的 `com.jiucaihezi.studio.desktop` 身份和独立发布通道。
 
 ### 2.1 对话导航与文件导航必须分离
 
@@ -640,7 +660,17 @@ Mobile App 目录 owner ─┘
 
 验证：新设备无需预先创建同名项目或理解本地 owner；从云项目列表下载后即可顺序继续同一 Raw 对话和 Wiki。断网不丢本地内容，重连不重复 turn，不同步任何媒体或凭据，不同账号无法探测项目是否存在。
 
-#### 4B：Mobile 壳与移动文件适配
+#### 4B：多产品构建边界（Mobile 前置）
+
+1. 默认 `App.vue + tauri.conf.json` 只构建记忆工作台，保留现有记忆 App 的产品身份和用户数据目录。
+2. Studio 使用独立 `StudioApp.vue + tauri.studio.conf.json`，只有该目标声明 OpenCode sidecar、Studio Bundle ID、Deep Link 和更新通道。
+3. Vite 在构建期静态选择产品入口，不用运行时开关，也不把其他产品壳作为隐藏 chunk 打入当前产物。
+4. 正式记忆 App CI 不下载 OpenCode；Mac DMG 与 Windows 便携包必须反向断言不存在任何 `opencode` 文件。
+5. 暂不为了体积给共享 Rust 命令逐项加 feature gate；先移除占体积最大的 sidecar，并以实际产物测量决定下一步，避免为了尚未证明的收益拆散稳定原生层。
+
+验证：默认记忆 App 和 Studio 两个前端入口均能独立通过 TypeScript 与正式构建；记忆安装包内没有 OpenCode sidecar，Studio 配置仍明确携带它；现有记忆 App 升级后仍读取原数据目录。
+
+#### 4C：Mobile 壳与移动文件适配
 
 1. 审计现有 Tauri 插件的 iOS/Android 支持，只替换 Desktop 专属文件、窗口、Keychain、stdio MCP 和本地模型入口；共享 Vue 组件、Direct Engine、Raw/Wiki 和同步客户端。
 2. 增加移动 `ProjectFileService` 适配器和 App 管理项目目录，从云项目列表拉取文字副本。
@@ -722,7 +752,7 @@ Mobile App 目录 owner ─┘
 
 - Web 2.0.1 已构建并正式发布到 <https://jiucaihezi.studio>，生产域名已验证加载新资源。
 - Apple Silicon Mac 2.0.1 本机测试包已构建、校验并启动；Mobile 原生 App 尚未实施。
-- 第四阶段入口改为 4A 文字同步底座，完成 Web ↔ Mac 真机闭环后再进入 4B Mobile。
+- 第四阶段入口改为 4A 文字同步底座，完成 Web ↔ Mac 真机闭环后先完成 4B 多产品构建边界，再进入 4C Mobile。
 - Cloudflare 已创建 APAC 独立 D1 `jiucaihezi_sync`，Gateway 配置以 `SYNC_DB` 作为第二绑定；`0001_sync_foundation.sql` 与 `0002_sync_revision_guard.sql` 均已在本地及远端应用，远端三表、基础索引和 revision 唯一门禁已核验。
 - 基础 schema 包含 `projects`、`text_files`、`sync_mutations`；服务端递增 `seq` 用作拉取游标，客户端 `mutation_id` 唯一约束负责重试幂等。三表、基础三索引、插入/游标与重复 mutation 拒绝均已实测。
 - 为避免两个设备同时读到同一 revision 后静默覆盖，新增 `0002_sync_revision_guard.sql`，由数据库唯一约束 `(project_id, path, revision)` 作为最终并发门禁；D1 batch 冲突整体回滚并返回 `409`。该 migration 已在本地与远端应用并核验。
@@ -731,7 +761,7 @@ Mobile App 目录 owner ─┘
 - 项目打开、App 回到前台和用户点击“立即同步”时先拉后推；云端版本冲突时远端保持规范文件，本地版本保存为可见的 `文件名 (冲突 时间).md`。同步失败不阻塞打开或新建本地记忆空间。
 - 客户端与服务端双重拒绝 `.sync`、`jc-media`、Skill、MCP/Provider 凭据、`.env*`、系统配置目录和非安全文本扩展名。媒体、API Key、Session 和设置不会进入请求或 D1。
 - 自动化已证明 Web -> Mac、Mac -> Web、离线重试、响应丢失幂等、冲突副本和媒体/队列排除；同步/账号/记忆工作台相关回归 `59/59`、完整 focused、TypeScript、Web 正式构建、Desktop 正式构建及两端产物审计全部通过。12 条只适用于旧 `WorkspaceLayout / ChatPanel / 电商工作台 / OpenCode App` 的回滚源码合同已显式标记为跳过，测试内容仍保留，不再阻断当前 `MemoryWorkbench` 产品入口。
-- 4A 的 D1、Gateway、客户端增量同步、安全门禁和应用级云项目入口已完成。左上项目中心统一提供本机/云端列表、首次上传、下载到空本地副本和手动重试；已绑定副本继续自动先拉后推。设置页的旧配对控件已移除。下一步做同账号 Web/Mac 真机验收；通过后进入 4B Mobile 原生壳与平台能力审计。
+- 4A 的 D1、Gateway、客户端增量同步、安全门禁和应用级云项目入口已完成。左上项目中心统一提供本机/云端列表、首次上传、下载到空本地副本和手动重试；已绑定副本继续自动先拉后推。设置页的旧配对控件已移除。Web/Mac 真机验收通过后进入 4B 多产品构建边界，再进入 4C Mobile 原生壳与平台能力审计。
 - v2.0.4 真机验收发现启动只恢复普通模型 API Key、没有恢复独立 `sync_session`，造成账号页显示已登录、同步页却判定未登录，上传动作也在请求前被内存空值拦截。同步会话必须和 API Key 一起在启动阶段恢复，并以独立响应式状态驱动项目中心和设置页；普通 API Key 不能冒充同步登录。历史上只保存过 API Key 的用户需要重新登录一次取得 `sync_session`，此后 Web 刷新与 App 重启均自动恢复。
 - v2.0.4 真机复验确认同步主体成立：用户在正确的 2.0.4 Mac App 重新登录后，将本地项目上传为云项目；Web 同账号从云项目下载后，`.raw/对话记录/`、完整 `wiki/` 和其他允许的文字文件均出现并可正常使用，内容与 Mac 本地一致。Wiki 从未被过滤；只有含允许文字文件的目录会随文件出现，空目录本身不建立云端记录。
 - 真机同时暴露首次同步的两个体验缺口：客户端原先每个 mutation 单独请求，文件多时长时间只显示“同步中”；状态也没有总数、完成数和进度条。现已沿用原 Gateway 批量合同，将上传收敛为每批最多 100 个不同路径，保留同路径 revision 顺序；拉取响应返回当前 cursor 后的不同路径总数，项目中心与设置页统一显示扫描、上传、下载和完成进度。没有新增 D1 表、同步 Store、后台常驻任务或媒体同步。
@@ -861,6 +891,19 @@ Mobile App 目录 owner ─┘
 - 用户明确写出提示词或动作描述时，媒体计划必须原样使用；只有用户明确要求优化，或没有提供可执行描述时，模型才可以补全。专业化 Skill 是可选增强，不能默认覆盖用户原话。
 - 付费提交前的提示词必须和模型、比例、分辨率、时长一样可编辑；确认卡里的当前值才是最终提交真源。
 - 模型 ID 和路由不能为了视觉简洁被隐藏成无法区分的同名项。同一展示名来自不同执行来源时，下拉菜单必须补充“直连 / RunningHub”，但不新增渠道分组或改变路由。
+
+### 14.8 多产品构建边界实施记录（2026-07-27）
+
+已完成：
+
+- 默认 `src/App.vue` 继续承载记忆工作台；新增 `src/StudioApp.vue` 恢复主 Studio 的 `WorkspaceLayout + OpenCode` 启动链路。
+- Vite 使用构建期 alias 静态选择入口：默认记忆目标转换 431 个模块，Studio 目标转换 3062 个模块；没有运行时产品开关或把另一产品壳打成隐藏 chunk。
+- 默认 `tauri.conf.json` 保留已发布记忆 App 的 `com.jiucaihezi.desktop` 身份，但 `externalBin` 为空；`tauri.studio.conf.json` 使用 `com.jiucaihezi.studio.desktop`，独立声明 `binaries/opencode`、Deep Link 和更新通道。
+- 正式 Mac/Windows CI 不再下载或复制 OpenCode，并把原“sidecar 必须存在”冒烟测试反转为“记忆包出现任何 opencode 文件即失败”。Studio 的 runtime 下载器、解析器和版本一致性测试继续保留。
+- Apple Silicon 实际构建验证：记忆 `.app` 为 14MB，包内没有任何 `opencode`，签名严格校验通过；Studio `.app` 为 146MB，明确包含 131MB 的 OpenCode sidecar。两者 Bundle ID、前端入口和原生资源边界均不同。
+- 完整 focused 与 Rust 门禁通过；记忆和 Studio 前端正式构建、Desktop dist 审计均通过。Rust 当前仍共用同一原生命令层；本阶段不为未证明的额外体积收益引入大规模 feature gate，Mobile 平台兼容审计在 4C 处理。
+
+结论：后续电商和漫剧工作台只需增加各自产品入口与 Tauri 覆盖配置，继续复用通用底座，不复制仓库，也不把其他工作台和 OpenCode 一起打包。
 
 ## 15. 验收标准
 

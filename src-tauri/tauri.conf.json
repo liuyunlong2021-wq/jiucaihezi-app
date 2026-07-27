@@ -43,9 +43,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "externalBin": [
-      "binaries/opencode"
-    ],
+    "externalBin": [],
     "resources": {
       "../public/skills": "skills"
     },

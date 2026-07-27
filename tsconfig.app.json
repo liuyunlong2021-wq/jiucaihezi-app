@@ -6,7 +6,8 @@
     "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"]
+      "@/*": ["src/*"],
+      "@app-root": ["src/App.vue"]
     },
     "noUnusedLocals": false,
     "noUnusedParameters": false
