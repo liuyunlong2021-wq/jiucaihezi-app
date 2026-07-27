@@ -1,0 +1,9 @@
+{
+  "$schema": "https://raw.githubusercontent.com/nicoulaj/schemastore/master/src/schemas/json/tauri-v2.json",
+  "identifier": "com.jiucaihezi.mobile",
+  "bundle": {
+    "iOS": {
+      "developmentTeam": "RXD4L9387J"
+    }
+  }
+}

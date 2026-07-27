@@ -1,7 +1,7 @@
 # 通用记忆对话工作台 SDD
 
 > 日期：2026-07-27
-> 状态：Web 与 Mac 已完成；第四阶段 4A、4B 已完成，v2.0.9 稳定节点发布后进入 4C iPhone 原生壳
+> 状态：Web 与 Mac 已完成；第四阶段 4A、4B 已完成，4C 已完成 iPhone 真机编译、签名、安装，运行受 Tauri 官方 #14675 阻塞
 > 首发目标：<https://jiucaihezi.studio>
 > 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
@@ -103,7 +103,7 @@ ProjectFileTree
 - 不加载 `CreationPanel`、画布、编辑区、画廊或媒体工作台。
 - 不新增媒体 API、任务 Store、轮询器或音频专用流程。
 - 不做媒体、Skill、MCP 凭据、Provider 或界面设置的跨设备同步；第四阶段只同步项目文字。
-- 当前阶段不创建新域名、Bundle ID、Deep Link、签名身份或更新通道。
+- Mobile 已使用独立 Bundle ID `com.jiucaihezi.mobile` 和 Apple Team；当前不创建新域名、Deep Link 或桌面式更新通道。
 
 ## 4. 唯一真源
 
@@ -986,12 +986,15 @@ Mobile App 目录 owner ─┘
 - `cargo check --target aarch64-apple-ios` 与 `cargo check --target aarch64-apple-ios-sim` 均通过，证明共享 Rust 壳已跨过首个 iPhone 编译边界。
 - Xcode iOS 26.4.1 Simulator Platform 已安装；`tauri ios build --debug --target aarch64-sim --no-sign --ci` 完整通过，生成的 `.app` 已安装到 iPhone 17 Pro 模拟器并显示产品图标。
 - 模拟器启动在业务代码执行前崩于 `wry::platform_webview_version -> NSBundle::bundleWithIdentifier -> CFRelease`。调用栈与 Tauri 官方未关闭的 [#14675](https://github.com/tauri-apps/tauri/issues/14675) 完全一致，属于当前 Tauri/Wry 在新版 iOS 运行时的上游问题；不通过整体降级 Tauri 或复制本地 fork 掩盖。
+- Mobile 身份已确定并写入 `tauri.ios.conf.json`：Bundle ID 为 `com.jiucaihezi.mobile`，Apple Team ID 为 `RXD4L9387J`；Apple Development 证书和开发 Provisioning Profile 已生成。
+- 真实 iPhone 13 Pro Max 已连接并受信任。官方 `tauri ios dev` 完成 `aarch64-apple-ios` 编译、Xcode 签名、IPA 导出、真机安装和启动请求，设备报告确认 Bundle ID 与 Team ID 正确。
+- Xcode GUI 构建脚本最初因环境中找不到 `pnpm` 失败；本机只在已忽略的可再生成 `src-tauri/gen/apple/project.yml` 中补充 PATH 后重新生成工程，不把机器路径或生成物提交为产品实现。
+- 解锁后的真机启动仍在业务代码执行前崩于同一 `wry::wkwebview::platform_webview_version -> NSBundle::bundleWithIdentifier -> CFRelease`，系统报告为 `CFRelease() called with NULL` / `SIGTRAP`。真机证据确认这不是 Simulator 特例，也不是登录、同步或 Vue 页面代码故障，而是同一个 Tauri [#14675](https://github.com/tauri-apps/tauri/issues/14675) 上游运行时阻断。
 
 仍待外部条件：
 
-- 模拟器运行仍受 Tauri 官方 #14675 阻塞；上游修复或确认兼容版本后，必须重新完成“启动进入首页并保持存活”的运行验收，当前仅将编译、安装和图标显示记为通过。
-- 当前没有连接 iPhone，钥匙串只有 Mac `Developer ID Application`，没有 iOS `Apple Development` 证书；真机安装前必须在 Xcode 登录 Apple Developer 团队、生成开发证书并连接受信任设备。
-- Mobile Bundle ID 尚未确定，因此本阶段不擅自创建 App Store 身份。进入真机签名前先确定独立 Bundle ID 和 Team ID，再写入 `tauri.ios.conf.json`。
+- Simulator 与真实 iPhone 运行均受 Tauri 官方 #14675 阻塞；上游修复或确认兼容版本后，必须重新完成“启动进入首页并保持存活”的运行验收。当前只能将编译、签名、导出、安装和启动请求记为通过，不能宣称 iPhone 壳已经可运行。
+- 运行时阻断解除后，才能继续验收首页、登录、云项目和后续 4C 业务闭环；TestFlight 尚未开始。
 
 ## 15. 验收标准
 
