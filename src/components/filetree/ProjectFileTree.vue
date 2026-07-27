@@ -768,13 +768,7 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
     return
   }
   if (result.type === 'media') {
-    emitEvent('canvas:add-media', {
-      projectId: projectKey.value,
-      path: result.resource.path,
-      kind: result.mediaKind,
-      label: result.resource.name,
-    })
-    emitEvent('switch-panel', 'creation')
+    emitMediaToCanvas(result.resource, result.mediaKind)
     return
   }
   if (result.type === 'unsafe-text') {
@@ -1151,10 +1145,26 @@ function queueRenderedMediaThumbnail(el: Element | null, node: TreeNode) {
   if (!el) return
   enqueueMediaThumbnail(node)
 }
-function ctxOpenInCanvas() {
+function emitMediaToCanvas(resource: ProjectResource, kind: 'image' | 'video' | 'audio') {
+  emitEvent('canvas:add-media', {
+    projectId: resource.owner,
+    path: resource.path,
+    kind,
+    label: resource.name,
+  })
+  emitEvent('switch-panel', 'creation')
+}
+
+async function ctxOpenInCanvas() {
   const n = ctxMenu.value.node
   closeCtxMenu()
-  if (n && !n.isDir) void openFile(n)
+  if (!n || n.isDir) return
+  try {
+    const result = await openProjectResource(projectFiles, resourceForNode(n))
+    if (result.type === 'media') emitMediaToCanvas(result.resource, result.mediaKind)
+  } catch (error) {
+    errorMsg.value = `加入画布失败: ${error instanceof Error ? error.message : String(error)}`
+  }
 }
 async function ctxReferenceInChat() {
   const node = ctxMenu.value.node
@@ -2837,7 +2847,7 @@ onBeforeUnmount(() => {
   width: 28px;
   height: 28px;
   object-fit: contain;
-  transform: translateY(2px);
+  transform: translateY(3px);
 }
 .pft-title {
   font-size: 12px;
@@ -2920,8 +2930,6 @@ onBeforeUnmount(() => {
 .pft.memory-mode.memory-desktop .pft-head {
   height: var(--memory-header-height);
   flex-basis: var(--memory-header-height);
-  padding-top: 28px;
-  box-sizing: border-box;
 }
 .pft.memory-mode.memory-desktop .pft-project-menu { top: var(--memory-header-height); }
 .pft.memory-mode.memory-desktop .pft-search {

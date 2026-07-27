@@ -127,6 +127,7 @@ import {
 } from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
 import type { ProjectResource } from '@/utils/projectResource'
+import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import type {
   CanvasDocumentV3,
@@ -134,6 +135,11 @@ import type {
   CanvasSceneNode,
   CanvasTaskTarget,
 } from '@/types/canvas'
+
+const props = withDefaults(defineProps<{ previewSurface?: 'dialog' | 'host' }>(), {
+  previewSurface: 'dialog',
+})
+const emit = defineEmits<{ previewResource: [resource: ProjectResource] }>()
 
 const mediaTaskStore = useMediaTaskStore()
 const openCodeSyncStore = useOpenCodeSyncStore()
@@ -311,6 +317,14 @@ function downloadTaskPreview() {
 }
 
 async function previewTask(task: MediaTask) {
+  if (props.previewSurface === 'host') {
+    const resource = projectResourceForMediaTask(task)
+    if (resource) {
+      showTaskHistory.value = false
+      emit('previewResource', resource)
+      return
+    }
+  }
   if (!isTauriRuntime()) {
     const projectId = String(task.projectId || '')
     const projectPath = String(task.projectPath || '')
@@ -850,6 +864,9 @@ const videoPreview = ref<{ src: string; name: string; filePath: string } | null>
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text' | 'pen' | 'number'>('arrow')
+const penWidths = [2, 3, 5, 8, 12] as const
+const penWidth = ref<number>(3)
+const showPenWidths = ref(false)
 // ponytail: 跟踪当前激活的工具类型，解决切换工具时的 toggle 竞态
 const activeDrawType = ref<'arrow' | 'text' | 'pen' | 'number' | null>(null)
 // 右键菜单
@@ -1548,7 +1565,27 @@ function onCanvasImport(event: Event) {
 /** 画布拖入处理（模板直接绑定 @drop） */
 async function onCanvasDrop(e: DragEvent) {
   if (canvasInteractionBlocked.value) return
-  if (e.dataTransfer?.files) await addCanvasFiles(e.dataTransfer.files)
+  const internal = e.dataTransfer?.getData('application/x-jc-media-reference') || ''
+  if (internal) {
+    try {
+      const resources = JSON.parse(internal) as ProjectResource[]
+      for (const resource of resources) {
+        const kind = canvasMediaKindForPath(resource.path)
+        if (!resource.owner || !kind) continue
+        await addFileTreeMediaToCanvas({
+          projectId: resource.owner,
+          path: resource.path,
+          kind,
+          label: resource.name,
+        })
+      }
+      return
+    } catch {
+      cpState.progressText = '无法读取拖入的项目素材'
+      return
+    }
+  }
+  if (e.dataTransfer?.files.length) await addCanvasFiles(e.dataTransfer.files)
 }
 
 function canvasMediaKindForPath(path: string): CanvasMediaKind | null {
@@ -2647,9 +2684,18 @@ function transformSelection(
 }
 function activateDrawTool(type: 'arrow' | 'text' | 'pen' | 'number') {
   if (canvasInteractionBlocked.value) return
-  if (drawMode.value && activeDrawType.value === type) return
+  if (drawMode.value && activeDrawType.value === type) {
+    if (type === 'pen') showPenWidths.value = !showPenWidths.value
+    return
+  }
+  showPenWidths.value = type === 'pen'
   drawType.value = type
   canvasTool('draw')
+}
+
+function selectPenWidth(width: number) {
+  penWidth.value = width
+  showPenWidths.value = false
 }
 
 function setCanvasViewportScale(scale: number, focus?: { x: number; y: number }) {
@@ -2729,6 +2775,7 @@ function fitCanvasViewport() {
 
 function canvasTool(action: string) {
   if (!app || canvasInteractionBlocked.value) return
+  if (action !== 'draw' || drawType.value !== 'pen') showPenWidths.value = false
   switch (action) {
     case 'select':
       if (drawMode.value) {
@@ -2791,7 +2838,7 @@ function canvasTool(action: string) {
           const point = e.getPagePoint()
           pen = new Pen({ id: crypto.randomUUID(), editable: true }).setStyle({
             stroke: '#333',
-            strokeWidth: 3,
+            strokeWidth: penWidth.value,
             strokeCap: 'round',
             strokeJoin: 'round',
           })
@@ -3267,22 +3314,14 @@ const canSend = computed(
         ></span
       >
       <span class="cp-toolbar-spacer" />
-      <button class="cp-toolbar-link" title="定位当前画布" @click="emitEvent('canvas:locate')">
+      <button class="cp-toolbar-link cp-toolbar-icon" title="定位当前画布" @click="emitEvent('canvas:locate')">
         <JcIcon name="folder-open" />
       </button>
-      <button
-        class="cp-toolbar-link"
-        title="新建项目文档"
-        @click="emitEvent('project:new-document')"
-      >
-        <JcIcon name="note-add" />
-      </button>
-      <button class="cp-toolbar-link" title="新建画布" @click="createAndOpenCanvas()">
+      <button class="cp-toolbar-link cp-toolbar-icon" title="新建画布" @click="createAndOpenCanvas()">
         <JcIcon name="add" />
       </button>
-      <button class="cp-toolbar-link" @click="showTaskHistory = true" title="查看生成历史">
+      <button class="cp-toolbar-link cp-toolbar-icon" @click="showTaskHistory = true" title="查看生成历史">
         <JcIcon name="history" />
-        <span class="cp-toolbar-link-text">历史</span>
       </button>
       <button
         class="cp-toolbar-link"
@@ -3292,6 +3331,7 @@ const canSend = computed(
         <JcIcon name="tips_and_updates" />
         <span class="cp-toolbar-link-text">提示词参考</span>
       </button>
+      <span class="cp-toolbar-actions"><slot name="toolbar-actions" /></span>
     </div>
 
     <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
@@ -3355,13 +3395,32 @@ const canSend = computed(
         >
           <JcIcon name="title" />
         </button>
-        <button
-          title="画笔 B"
-          :class="{ active: drawMode && drawType === 'pen' }"
-          @click="activateDrawTool('pen')"
-        >
-          <JcIcon name="draw" />
-        </button>
+        <div class="cp-brush-tool">
+          <button
+            title="画笔 B"
+            :class="{ active: drawMode && drawType === 'pen' }"
+            @click="activateDrawTool('pen')"
+          >
+            <JcIcon name="draw" />
+          </button>
+          <div
+            v-if="showPenWidths && drawMode && drawType === 'pen'"
+            class="cp-brush-sizes"
+            aria-label="笔尖粗细"
+          >
+            <button
+              v-for="width in penWidths"
+              :key="width"
+              type="button"
+              :class="{ active: penWidth === width }"
+              :title="`笔尖粗细 ${width}`"
+              :aria-label="`笔尖粗细 ${width}`"
+              @click="selectPenWidth(width)"
+            >
+              <i :style="{ width: `${width + 4}px`, height: `${width + 4}px` }" />
+            </button>
+          </div>
+        </div>
         <button
           title="编号标注 N"
           :class="{ active: drawMode && drawType === 'number' }"
@@ -4280,8 +4339,8 @@ const canSend = computed(
   box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 0 14px;
+  gap: 6px;
+  padding: 0 10px 0 14px;
   border-bottom: 1px solid var(--line);
   flex-shrink: 0;
 }
@@ -4326,6 +4385,8 @@ const canSend = computed(
   cursor: pointer;
   flex-shrink: 0;
 }
+.cp-toolbar-icon { width: 28px; padding: 0; justify-content: center; }
+.cp-toolbar-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 
 .cp-toolbar-link:hover {
   border-color: var(--olive);
@@ -4441,6 +4502,40 @@ const canSend = computed(
   border-color: var(--olive);
   color: white;
   background: var(--olive);
+}
+.cp-brush-tool {
+  position: relative;
+  height: 30px;
+}
+.cp-brush-sizes {
+  position: absolute;
+  top: 0;
+  right: 38px;
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
+}
+.cp-canvas-toolbar .cp-brush-sizes button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+}
+.cp-canvas-toolbar .cp-brush-sizes button.active {
+  color: var(--olive-dark);
+  background: var(--olive-pale);
+  box-shadow: inset 0 0 0 1px var(--olive);
+}
+.cp-brush-sizes i {
+  display: block;
+  max-width: 16px;
+  max-height: 16px;
+  border-radius: 50%;
+  background: currentColor;
 }
 .cp-toolbar-sep {
   width: 20px;

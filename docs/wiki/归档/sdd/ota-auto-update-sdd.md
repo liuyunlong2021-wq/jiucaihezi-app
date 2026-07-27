@@ -1,5 +1,7 @@
 # OTA 自动更新 + 下载分发 — 完整设计文档
 
+> **2026-07-27 复核结论：本文记录的是历史目标，不是已经验收的现状。** 当前 CI 用 OpenSSL RSA 生成 `.sig`，`tauri.conf.json` 也配置了 RSA 公钥；两者均不符合 Tauri v2 updater 的官方签名合同，因此 macOS 自动更新不可视为已打通。Windows 仍为 portable ZIP，本身不能由 updater 自动替换安装。修复必须统一改为 Tauri 官方签名密钥与 updater artifacts，并补齐下载进度、可见错误和 `旧版 -> 新版` 三平台真机验收。
+
 > **最后更新**: 2026-07-10
 > **技术栈**: `tauri-plugin-updater` + 自建服务器 `api.jiucaihezi.studio` + CI `scp` 自动上传 + RSA 2048 签名
 > **数据源**: `latest.json` 是唯一真相源，同时服务 OTA 更新和新用户下载
@@ -117,4 +119,3 @@ location /site-assets/ { alias /opt/new-api/static/; }
 - Windows 仅 portable zip，不支持 OTA（需 NSIS 安装器）
 - macOS OTA 需用户手动确认安装（Tauri 限制）
 - CI `publish-manifest` job 偶尔 GitHub runner 获取失败，重跑即可
-

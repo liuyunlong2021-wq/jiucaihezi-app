@@ -249,12 +249,30 @@ test('memory file actions use the supported DOM prompt and headers share one bas
   }
   assert.match(tree, /'memory-mode': props\.memoryMode/)
   assert.match(tree, /\.pft\.memory-mode \.pft-head[\s\S]*border-bottom-color: var\(--line\)/)
-  assert.match(workbench, /--memory-header-height: 74px/)
+  assert.match(workbench, /--memory-header-height: 52px/)
   assert.match(tree, /\.pft\.memory-mode \.pft-head \{[\s\S]*height: var\(--memory-header-height\)/)
-  assert.match(tree, /\.pft-brand-logo \{[\s\S]*transform: translateY\(2px\)/)
+  assert.match(tree, /\.pft-brand-logo \{[\s\S]*transform: translateY\(3px\)/)
   assert.match(tree, /\.pft-memory-actions \{[\s\S]*height: 34px/)
-  assert.match(workbench, /\.memory-workbench\.desktop-runtime \{ --memory-header-height: 102px/)
+  assert.match(workbench, /\.memory-workbench\.desktop-runtime \{ padding-top: 28px/)
   assert.match(workbench, /grid-template-rows: var\(--memory-header-height\)/)
+})
+
+test('memory creation surface reuses resizable columns, host preview, and sticky scrolling', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const creation = source('src/components/creation/CreationPanel.vue')
+
+  assert.match(workbench, /const creationWidth = ref\(/)
+  assert.match(workbench, /localStorage\.setItem\('jcMemoryCreationWidth'/)
+  assert.match(workbench, /@pointerdown\.prevent="startCreationResize"/)
+  assert.match(workbench, /<ChatScrollNav/)
+  assert.match(workbench, /preview-surface="host"/)
+  assert.match(workbench, /@preview-resource="previewProjectResource"/)
+  assert.match(workbench, /#toolbar-actions/)
+  assert.match(workbench, /:title="creationFocused \? '\u9000\u51fa\u4e13\u6ce8\u521b\u4f5c' : '\u4e13\u6ce8\u521b\u4f5c'"/)
+  assert.match(workbench, /title="\u6536\u8d77\u521b\u4f5c\u9762\u677f"/)
+  assert.match(creation, /<slot name="toolbar-actions"/)
+  assert.match(creation, />\u63d0\u793a\u8bcd\u53c2\u8003</)
+  assert.doesNotMatch(creation, /title="\u65b0\u5efa\u9879\u76ee\u6587\u6863"/)
 })
 
 test('memory settings provide and persist three accessible font sizes', () => {

@@ -190,6 +190,18 @@ test('canvas text and number markers use Leafer page coordinates', () => {
   assert.match(source, /x: point\.x - 14,[\s\S]{0,40}y: point\.y - 14/)
 })
 
+test('canvas pen offers five visual stroke widths and uses the selected width', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /const penWidths = \[2, 3, 5, 8, 12\] as const/)
+  assert.match(source, /const penWidth = ref<number>\(3\)/)
+  assert.match(source, /strokeWidth: penWidth\.value/)
+  assert.match(source, /v-for="width in penWidths"/)
+  assert.match(source, /:aria-label="`笔尖粗细 \$\{width\}`"/)
+  assert.match(source, /function selectPenWidth\(width: number\)[\s\S]*?showPenWidths\.value = false/)
+  assert.match(source, /@click="selectPenWidth\(width\)"/)
+})
+
 test('canvas viewport tools keep the viewport center stable', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
@@ -410,6 +422,19 @@ test('creation panel resolves file-tree media from its project-relative event pa
   assert.doesNotMatch(receiver, /payload\.url/)
   assert.match(source, /if \(!owner \|\| !isWebProjectMediaPath\(filePath\)\) return filePath/)
   assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
+})
+
+test('creation panel consumes project-tree media drops and delegates saved task preview to its host', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const drop = source.match(/async function onCanvasDrop[\s\S]*?\n}/)?.[0] || ''
+  const preview = source.match(/async function previewTask[\s\S]*?\n}/)?.[0] || ''
+
+  assert.match(drop, /application\/x-jc-media-reference/)
+  assert.match(drop, /addFileTreeMediaToCanvas/)
+  assert.match(preview, /props\.previewSurface === 'host'/)
+  assert.match(preview, /projectResourceForMediaTask\(task\)/)
+  assert.match(preview, /emit\('previewResource', resource\)/)
+  assert.match(preview, /showTaskHistory\.value = false/)
 })
 
 test('creation panel persists direct Web and Desktop imports before adding them to canvas', () => {
