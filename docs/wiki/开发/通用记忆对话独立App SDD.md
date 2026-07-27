@@ -716,6 +716,26 @@ Mobile App 目录 owner ─┘
 
 验证：手机创建或继续项目后，Mac/Web 能取得新增文字并继续；Mac/Web 的文字也能出现在手机。媒体在原设备可用、另一设备显示明确占位；关闭重开后从本地项目恢复，并在登录联网后增量同步。
 
+#### 4C 分项验收清单
+
+| 编号 | 验收目标 | 通过标准 | 状态 |
+| --- | --- | --- | --- |
+| 4C-1 | 独立 iPhone 开发边界 | `codex/iphone-app` 从 Web/Desktop 稳定节点分出；不改 `main`、不影响 Web/Mac 正式包。 | 已完成 |
+| 4C-2 | 官方 iOS 工程与交叉编译 | Tauri 官方 `ios init` 可再生工程生成；`aarch64-apple-ios` 和 Simulator target 的 `cargo check` 均通过。 | 已完成 |
+| 4C-3 | Desktop 专属依赖隔离 | `rfd`、`trash` 等 Desktop-only 依赖不再进入 iOS target；不改变共享业务运行时。 | 已完成 |
+| 4C-4 | Simulator 构建诊断 | 官方 debug Simulator `.app` 可构建、安装并产出启动诊断；不把“安装”当作“运行”。 | 已完成 |
+| 4C-5 | 真实设备签名与安装 | iPhone 13 Pro Max 使用 `com.jiucaihezi.mobile` 和 `RXD4L9387J` 完成签名、IPA 导出、安装及启动请求。 | 已完成 |
+| 4C-6 | 原生壳真机稳定启动 | 仅采用官方已发布且兼容的 Tauri/Wry 组合；真实 iPhone 冷启动进入首页，连续停留至少 60 秒且无崩溃报告。每次实验须记录版本、构建、安装、启动结果。 | 进行中 |
+| 4C-7 | 移动项目目录适配 | App 管理目录的 `ProjectFileService` 可创建、读取、修改安全文本项目，无任意目录权限依赖。 | 未开始 |
+| 4C-8 | 移动工作台导航 | 文件树与设置为抽屉，聊天/预览全屏；无悬停、右键或桌面拖放前提。 | 未开始 |
+| 4C-9 | 移动登录与云项目 | 同账号登录回调可用，云项目可下载为本地副本并恢复项目映射。 | 未开始 |
+| 4C-10 | 文字同步与离线恢复 | 手机上线后按先拉后推同步 Raw/Wiki/安全文本；离线写入、重连、冲突副本均可验证。 | 未开始 |
+| 4C-11 | 移动附件与媒体 | 系统导入/导出/分享、媒体提交、播放、任务恢复可用；媒体只存手机本地。 | 未开始 |
+| 4C-12 | 真机业务回归 | 真实 iPhone 验收登录、项目、对话、Wiki、附件、前后台恢复与断网重试；复杂画布不纳入首版门槛。 | 未开始 |
+| 4C-13 | TestFlight 与后续平台门槛 | 4C-12 全部通过后才提交 TestFlight；TestFlight 稳定后才开始 Android 构建与权限矩阵。 | 未开始 |
+
+4C-6 阻断规则：若官方尚未发布兼容版本，必须保留官方 issue、当前锁定版本、真机 `.ips` 调用栈和每次实验结果；不得将 IPA 安装成功称为 App 成功，也不得以长期私有 Wry fork 或整仓降级绕过此门槛。
+
 ### 14.4 第一阶段实施记录（2026-07-25）
 
 已完成：
@@ -995,6 +1015,16 @@ Mobile App 目录 owner ─┘
 
 - Simulator 与真实 iPhone 运行均受 Tauri 官方 #14675 阻塞；上游修复或确认兼容版本后，必须重新完成“启动进入首页并保持存活”的运行验收。当前只能将编译、签名、导出、安装和启动请求记为通过，不能宣称 iPhone 壳已经可运行。
 - 运行时阻断解除后，才能继续验收首页、登录、云项目和后续 4C 业务闭环；TestFlight 尚未开始。
+
+### 14.12 4C-6 官方版本与真机复核记录（2026-07-27）
+
+- 已直接复核 [Tauri #14675](https://github.com/tauri-apps/tauri/issues/14675)：issue 仍为 open；2026-03-13 的后续报告仍确认 `wry::webview_version()` 在 iOS 崩溃。评论中“`tauri-runtime-wry = 2.6.0` / `wry = 0.37.0`”仅为社区降级 workaround，不是官方已发布修复，且会整体倒退稳定依赖，未采用。
+- 当前分支实际解析为 `tauri 2.11.2`、`tauri-runtime-wry 2.11.2`、`wry 0.55.1`。截至本次核查，官方最新 `tauri 2.11.5`、`tauri-runtime-wry 2.11.4` 仍依赖 `wry ^0.55.0`；没有新的已发布 Wry 兼容版本可替换验证。
+- Wry `dev` 分支的 `platform_webview_version()` 仍在 iOS/macOS 共用路径调用 `NSBundle::bundleWithIdentifier("com.apple.WebKit")`，没有针对 #14675 的已发布或主干修复。2025-08 的 Wry #1609 仅把 macOS 的空 bundle unwrap 改为错误返回，不能阻止 iOS 上系统 `CFRelease(NULL)` 在该消息发送中终止进程。
+- 真机 13 Pro Max 已用 `devicectl` 直接导出最新报告 `韭菜盒子-2026-07-27-174909.ips`：`bundleID=com.jiucaihezi.mobile`，时间 `2026-07-27 17:49:09 +0800`，`EXC_BREAKPOINT` 调用栈为 `NSBundle::bundleWithIdentifier -> wry::wkwebview::platform_webview_version -> tauri_runtime_wry::Wry::init`。这发生在 `jiucaihezi_app_lib::run` 的 Tauri runtime 初始化内，首页和 Vue 业务代码尚未执行。
+- 实验记录：基线 `tauri 2.11.2 / tauri-runtime-wry 2.11.2 / wry 0.55.1` 已构建、签名、安装；真机启动失败并生成上述 `.ips`。候选 `tauri 2.11.5 / tauri-runtime-wry 2.11.4 / wry 0.55.1` 无法构成兼容性实验，因为 Wry 版本和故障调用点不变；尝试解析该候选版本时 crates.io 索引网络卡住，停止后确认 `Cargo.lock` 未变，未构建、未安装、未启动。
+
+结论：4C-6 受上游 Tauri/Wry #14675 阻断，未完成。下一条可执行路线是等待 Tauri/Wry 发布明确包含 iOS `platform_webview_version` 修复的稳定版本；届时在本分支先锁定该官方版本，记录 Cargo 解析和 iOS 构建，再在本 iPhone 13 Pro Max 安装并验证冷启动进入首页、连续 60 秒存活且无新 `.ips`。在此之前不启动 4C-7 及后续业务项，不进入 TestFlight。
 
 ## 15. 验收标准
 
