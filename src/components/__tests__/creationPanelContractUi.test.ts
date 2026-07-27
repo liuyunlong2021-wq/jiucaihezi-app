@@ -49,7 +49,6 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
   assert.match(source, /canvas:locate/)
   assert.match(source, /onCanvasPaste/)
   assert.match(source, /addCanvasFiles/)
-  assert.match(source, /referenceNodeIds/)
   assert.doesNotMatch(source, /canvasEditOperation/)
   assert.doesNotMatch(source, /替换原图/)
   assert.match(source, /lockRatio:\s*true/)
@@ -284,17 +283,15 @@ test('creation panel keeps canvases bound to their runtime owner', () => {
   assert.doesNotMatch(clearOwner, /flushCanvasSave\(/)
 })
 
-test('creation panel snapshots the canvas target owner before async reference resolution', () => {
+test('creation panel uses selected canvas media as references without auto-targeting the canvas', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const target =
     source.match(/if \(selected\.length && canvasStore\.canvasPath\) \{[\s\S]*?\n  \}/)?.[0] || ''
-  const canvasTypes = readFileSync(join(root, 'src/types/canvas.ts'), 'utf8')
 
-  assert.match(canvasTypes, /export interface CanvasTaskTarget \{[\s\S]*?owner\?: string/)
   assert.match(target, /const owner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
-  assert.match(target, /const canvasId = canvasStore\.canvasId/)
-  assert.match(target, /const canvasPath = canvasStore\.canvasPath/)
-  assert.match(target, /canvasTarget = \{[\s\S]{0,100}canvasId,[\s\S]{0,60}canvasPath,[\s\S]{0,60}owner,[\s\S]{0,60}operation: 'append'/)
+  assert.match(target, /getMediaSubmissionUrl/)
+  assert.doesNotMatch(target, /canvasTarget =/)
+  assert.doesNotMatch(source, /canvasTarget,\s*\n\s*\}\)/)
 })
 
 test('creation panel reopens an existing project canvas before creating one', () => {
@@ -361,7 +358,8 @@ test('creation panel resolves Web project media without serializing object URLs'
       /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
     )?.[0] || ''
 
-  assert.match(source, /createProjectFileActions\(createRuntimeProjectFileService\(\)\)/)
+  assert.match(source, /const projectFiles = createRuntimeProjectFileService\(\)/)
+  assert.match(source, /createProjectFileActions\(projectFiles\)/)
   assert.match(source, /projectFileActions\.readMedia\(\{/)
   assert.match(source, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
   assert.match(source, /bytes\.set\(binary\.data\)/)
@@ -414,17 +412,14 @@ test('creation panel resolves file-tree media from its project-relative event pa
   assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
 })
 
-test('creation panel rejects direct Web blob drops until project upload exists', () => {
+test('creation panel persists direct Web and Desktop imports before adding them to canvas', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const addFiles = source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
 
-  assert.match(
-    source,
-    /if \(!isTauriRuntime\(\) && filePath\.startsWith\('blob:'\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/,
-  )
-  assert.match(
-    source,
-    /async function addCanvasFiles[\s\S]*?if \(!isTauriRuntime\(\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/,
-  )
+  assert.doesNotMatch(addFiles, /Web 端暂不支持直接拖入或粘贴媒体/)
+  assert.match(addFiles, /writeProjectMedia/)
+  assert.match(addFiles, /isTauriRuntime\(\) \? persisted\.filePath : persisted\.projectPath/)
+  assert.match(source, />添加参考素材</)
 })
 
 test('creation panel snapshots debounced saves and binds media work to its restore owner', () => {
@@ -467,41 +462,29 @@ test('creation panel snapshots debounced saves and binds media work to its resto
   assert.match(source, /request\.owner !== owner \|\| request\.loadToken !== loadToken/)
 })
 
-test('creation task resolution keeps the event-time canvas owner', () => {
+test('creation results enter canvas only through the explicit history action', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const sync =
-    source.match(
-      /const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\nlet relinkCanvasAssetId/,
-    )?.[0] || ''
 
-  assert.match(source, /function captureCanvasMediaOwnership\(\)/)
-  assert.match(sync, /const ownership = captureCanvasMediaOwnership\(\)\s+void nextTick/)
-  assert.match(
-    sync,
-    /if \(!isCurrentCanvasMediaRequest\(ownership\)\) return[\s\S]*?const filePath = await resolveTaskFilePath\(task\)\s+if \(!isCurrentCanvasMediaRequest\(ownership\) \|\| !filePath\) return/,
-  )
-  assert.match(
-    sync,
-    /await addMediaToCanvas\([\s\S]{0,500}filePath,[\s\S]{0,80}task\.type,[\s\S]{0,80}'creation',[\s\S]{0,200}captureCanvasMediaRequest\([\s\S]{0,400}ownership[\s\S]{0,80}\)/,
-  )
+  assert.doesNotMatch(source, /const offCanvasSync = onEvent\('media-task-settled'/)
+  assert.match(source, /async function addTaskResultToCanvas\(task: MediaTask\)/)
+  assert.match(source, /@click="addTaskResultToCanvas\(task\)"/)
+  assert.match(source, /放到画布/)
 })
 
-test('Desktop canvas file imports retain their owner only after project persistence', () => {
+test('canvas file imports retain their owner only after project persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const addFiles =
     source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
 
   assert.match(addFiles, /const ownership = captureCanvasMediaOwnership\(\)/)
-  assert.match(
-    addFiles,
-    /if \(!projectDir\) \{\s+cpState\.progressText = '请先选择项目文件夹'\s+return/,
-  )
+  assert.match(addFiles, /if \(!owner\) \{/)
+  assert.match(addFiles, /isTauriRuntime\(\) \? '请先选择项目文件夹' : '请先选择 Web 项目'/)
   assert.ok(
     (addFiles.match(/if \(!isCurrentCanvasMediaRequest\(ownership\)\) return/g) || []).length >= 4,
   )
   assert.match(
     addFiles,
-    /await addMediaToCanvas\([\s\S]{0,300}filePath,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
+    /await addMediaToCanvas\([\s\S]{0,380}filePath,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
   )
   assert.match(
     addFiles,

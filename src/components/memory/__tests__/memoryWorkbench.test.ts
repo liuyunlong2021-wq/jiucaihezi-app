@@ -95,7 +95,7 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(runtime, /if \(!memoryMode\)[\s\S]*runDirectChatCompletion\([\s\S]*tools: undefined/)
 })
 
-test('memory composer routes pasted images and media plans through the shared attachment references', () => {
+test('memory composer routes pasted images and media plans into the existing creation panel', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /@paste="handleComposerPaste"/)
@@ -112,6 +112,11 @@ test('memory composer routes pasted images and media plans through the shared at
   assert.match(workbench, /attachment\.resourcePath === resource\.path/)
   assert.match(workbench, /resourcePath: resource\.path/)
   assert.match(workbench, /v-for="\(plan, planIndex\) in mediaPlans\[turn\.id\]"/)
+  assert.match(workbench, /defineAsyncComponent\(\(\) => import\('@\/components\/creation\/CreationPanel\.vue'\)\)/)
+  assert.match(workbench, /emitEvent\('memory-media-plan-load'/)
+  assert.match(workbench, /class="memory-creation"/)
+  assert.doesNotMatch(workbench, /import MediaPlanCard/)
+  assert.doesNotMatch(workbench, /<MediaPlanCard/)
   assert.match(workbench, /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/)
 })
 
@@ -199,18 +204,15 @@ test('memory conversation virtualizes historical turns and keeps rich media out 
   assert.match(workbench, /measureMemoryTurn/)
 })
 
-test('memory media cards can rerun adjusted parameters and submit up to five image variants', () => {
+test('memory media execution stays in the creation panel while settled results return to chat', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  const card = source('src/components/chat/MediaPlanCard.vue')
 
-  assert.match(workbench, /const mediaTasks = ref<Record<string, string\[\]>>/)
-  assert.match(workbench, /for \(let index = 0; index < count; index\+\+\)/)
-  assert.match(workbench, /已提交 \$\{taskIds\.length\}\/\$\{count\} 个任务/)
-  assert.match(workbench, /mediaTasks\.value\[key\] = \[\.\.\.\(mediaTasks\.value\[key\] \|\| \[\]\), \.\.\.taskIds\]/)
-  assert.match(workbench, /v-for="taskId in mediaTasks/)
-  assert.match(card, /v-for="count in 5"/)
-  assert.match(card, /独立付费任务，按单张价格分别计费/)
-  assert.match(card, /status === 'submitted' \|\| status === 'failed' \? '再次生成'/)
+  assert.match(workbench, /onEvent\('memory-media-task-submitted'/)
+  assert.match(workbench, /mediaTaskResources\.set\(taskId/)
+  assert.match(workbench, /mediaResultTaskId/)
+  assert.match(workbench, /<MediaTaskBubble/)
+  assert.match(workbench, /recordMediaResult/)
+  assert.doesNotMatch(workbench, /mediaPlanStatus|mediaGenerationCounts|approveMediaPlan/)
 })
 
 test('memory Skill install card writes only after explicit approval', () => {

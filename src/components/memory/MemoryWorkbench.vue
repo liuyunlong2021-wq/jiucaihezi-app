@@ -1,15 +1,14 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import ProjectFileTree from '@/components/filetree/ProjectFileTree.vue'
-import MediaPlanCard from '@/components/chat/MediaPlanCard.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
 import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
 import MemorySettings from './MemorySettings.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
-import { consumeLastEvent, onEvent } from '@/utils/eventBus'
+import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
 import type { ProjectResourceOpenResult } from '@/services/projectExplorerService'
@@ -26,9 +25,7 @@ import { runMemoryChat } from '@/runtime/memory/memoryChat'
 import {
   parseMediaPlans,
   stripMediaPlanBlocks,
-  updateMediaPlanParameters,
   type MediaPlan,
-  type MediaPlanParameterPatch,
 } from '@/runtime/workbench/mediaPlan'
 import {
   buildExplicitMediaReferences,
@@ -40,7 +37,6 @@ import {
   type MediaContextSnapshot,
   type MediaReferenceResolvers,
 } from '@/runtime/workbench/mediaReference'
-import { preparePublicMediaPlan } from '@/runtime/workbench/mediaPlanBridge'
 import {
   parseSkillInstallPlan,
   stripSkillInstallBlock,
@@ -64,6 +60,7 @@ const mediaTaskStore = useMediaTaskStore()
 const files = createRuntimeProjectFileService()
 const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
+const CreationPanel = defineAsyncComponent(() => import('@/components/creation/CreationPanel.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
 const conversations = ref<MemoryConversation[]>([])
@@ -92,10 +89,9 @@ const mentionPopoverRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const mediaUrl = ref('')
 const mediaPlans = ref<Record<string, MediaPlan[]>>({})
-const mediaPlanStatus = ref<Record<string, 'ready' | 'submitting' | 'submitted' | 'failed'>>({})
-const mediaPlanErrors = ref<Record<string, string>>({})
-const mediaTasks = ref<Record<string, string[]>>({})
-const mediaGenerationCounts = ref<Record<string, number>>({})
+const creationMounted = ref(false)
+const creationOpen = ref(false)
+const creationFocused = ref(false)
 const skillInstallPlans = ref<Record<string, SkillInstallPlan>>({})
 const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installed' | 'failed'>>({})
 const skillInstallErrors = ref<Record<string, string>>({})
@@ -111,6 +107,7 @@ let offToggleTree: (() => void) | null = null
 let offMediaTaskSettled: (() => void) | null = null
 let offReferenceFile: (() => void) | null = null
 let offMediaReferenceAdd: (() => void) | null = null
+let offMemoryMediaTaskSubmitted: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
@@ -211,6 +208,7 @@ onMounted(async () => {
   offMediaTaskSettled = onEvent('media-task-settled', payload => void recordMediaResult(payload))
   offReferenceFile = onEvent('reference-file', addReferencedFile)
   offMediaReferenceAdd = onEvent('media-reference:add', payload => void addProjectMediaReferences(payload))
+  offMemoryMediaTaskSubmitted = onEvent('memory-media-task-submitted', payload => void rememberSubmittedMediaTask(payload))
   const pendingMediaReference = consumeLastEvent('media-reference:add')
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
   document.addEventListener('pointerdown', closeModelPicker)
@@ -230,6 +228,7 @@ onBeforeUnmount(() => {
   offMediaTaskSettled?.()
   offReferenceFile?.()
   offMediaReferenceAdd?.()
+  offMemoryMediaTaskSubmitted?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('focus', syncOnFocus)
@@ -281,6 +280,8 @@ function selectModel(modelId: string) {
 
 async function openProject(owner: string) {
   const generation = ++projectGeneration
+  creationOpen.value = false
+  creationFocused.value = false
   opened.value = null
   previewResource.value = null
   conversations.value = []
@@ -391,9 +392,6 @@ async function openResource(resource: ProjectResourceOpenResult) {
         const mediaContext = conversationMediaContext(resource.transcript.turns, previousUserTurnId)
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
-        mediaPlans.value[turn.id].forEach((_, index) => {
-          mediaPlanStatus.value[mediaPlanKey(turn.id, index)] ||= 'ready'
-        })
       } catch { /* ordinary assistant reply */ }
       try {
         skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
@@ -526,9 +524,8 @@ async function send() {
       try {
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
-        mediaPlans.value[turn.id].forEach((_, index) => {
-          mediaPlanStatus.value[mediaPlanKey(turn.id, index)] = 'ready'
-        })
+        const firstPlan = mediaPlans.value[turn.id][0]
+        if (firstPlan) await openMediaPlanInCreation(turn.id, 0, firstPlan)
       } catch { /* no media plan */ }
       try {
         skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
@@ -757,49 +754,83 @@ function mediaPlanKey(turnId: string, planIndex: number): string {
   return `${turnId}:${planIndex}`
 }
 
-async function approveMediaPlan(turnId: string, planIndex: number) {
-  const key = mediaPlanKey(turnId, planIndex)
-  const plan = mediaPlans.value[turnId]?.[planIndex]
-  if (!plan || !conversation.value) return
-  mediaPlanStatus.value[key] = 'submitting'
-  mediaPlanErrors.value[key] = ''
-  try {
-    const prepared = await preparePublicMediaPlan({
-      plan,
-      owner: conversation.value.resource.owner,
-      resolvers: mediaReferenceResolvers(),
-    })
-    const count = plan.kind === 'image' ? (mediaGenerationCounts.value[key] || 1) : 1
-    const taskIds: string[] = []
-    let submitError = ''
-    for (let index = 0; index < count; index++) {
-      try {
-        const taskId = await mediaTaskStore.submitTask({
-          ...prepared.submission,
-          chatMessageId: key,
-        })
-        mediaTaskResources.set(taskId, conversation.value)
-        taskIds.push(taskId)
-      } catch (cause) {
-        submitError = cause instanceof Error ? cause.message : String(cause)
-        break
-      }
+function mediaPlanResources(plan: MediaPlan): ProjectResource[] {
+  const resources = (plan.mediaReferences || []).flatMap(reference => {
+    if (reference.locator.type === 'project') {
+      const locator = reference.locator
+      return [{
+        runtime: locator.runtime,
+        owner: locator.owner,
+        path: locator.path,
+        id: locator.id,
+        name: reference.label,
+        isDirectory: false,
+        kind: 'media' as const,
+      }]
     }
-    if (!taskIds.length) throw new Error(submitError || '媒体任务提交失败')
-    mediaTasks.value[key] = [...(mediaTasks.value[key] || []), ...taskIds]
-    mediaPlanStatus.value[key] = 'submitted'
-    if (submitError) mediaPlanErrors.value[key] = `已提交 ${taskIds.length}/${count} 个任务；其余提交失败：${submitError}`
-    const updated = await appendMemoryTurn(
-      conversation.value.resource,
-      'assistant',
-      `[媒体任务]\n任务 ${taskIds.join('、')} 已提交：${plan.title}`,
-      files,
-    )
-    opened.value = await openProjectResource(files, updated.resource)
-  } catch (cause) {
-    mediaPlanStatus.value[key] = 'failed'
-    mediaPlanErrors.value[key] = cause instanceof Error ? cause.message : String(cause)
+    if (reference.locator.type === 'task') {
+      const resource = projectResourceForMediaTask(mediaTaskStore.getTask(reference.locator.taskId) || {
+        id: '', type: '', status: '', createdAt: 0,
+      })
+      return resource ? [resource] : []
+    }
+    return []
+  })
+  return [...new Map(resources.map(resource => [`${resource.owner}:${resource.path}`, resource])).values()]
+}
+
+async function openMediaPlanInCreation(turnId: string, planIndex: number, plan: MediaPlan) {
+  const active = conversation.value
+  if (!active) return
+  creationMounted.value = true
+  creationOpen.value = true
+  await nextTick()
+  emitEvent('memory-media-plan-load', {
+    plan,
+    resources: mediaPlanResources(plan),
+    origin: {
+      key: mediaPlanKey(turnId, planIndex),
+      owner: active.resource.owner,
+      conversationPath: active.resource.path,
+      conversationId: active.transcript.id,
+    },
+  })
+}
+
+async function openCreationForCurrentConversation() {
+  const active = conversation.value
+  if (!active) return
+  creationMounted.value = true
+  creationOpen.value = true
+  await nextTick()
+  emitEvent('memory-media-plan-load', {
+    origin: {
+      key: `direct:${active.transcript.id}`,
+      owner: active.resource.owner,
+      conversationPath: active.resource.path,
+      conversationId: active.transcript.id,
+    },
+  })
+}
+
+async function rememberSubmittedMediaTask(payload: unknown) {
+  const data = payload as {
+    taskId?: string
+    origin?: { key?: string; owner?: string; conversationPath?: string }
   }
+  const taskId = String(data.taskId || '')
+  const key = String(data.origin?.key || '')
+  const owner = String(data.origin?.owner || '')
+  const conversationPath = String(data.origin?.conversationPath || '')
+  if (!taskId || !key || !owner || !conversationPath) return
+  if (conversation.value?.resource.owner === owner && conversation.value.resource.path === conversationPath) {
+    mediaTaskResources.set(taskId, conversation.value)
+    return
+  }
+  const target = conversations.value.find(item => item.resource.owner === owner && item.resource.path === conversationPath)
+  if (!target) return
+  const openedTarget = await openProjectResource(files, target.resource)
+  if (openedTarget.type === 'conversation') mediaTaskResources.set(taskId, openedTarget)
 }
 
 async function recordMediaResult(payload: unknown) {
@@ -821,20 +852,6 @@ async function recordMediaResult(payload: unknown) {
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   }
-}
-
-function updatePlan(turnId: string, planIndex: number, patch: MediaPlanParameterPatch) {
-  const key = mediaPlanKey(turnId, planIndex)
-  try {
-    mediaPlans.value[turnId][planIndex] = updateMediaPlanParameters(mediaPlans.value[turnId][planIndex], patch)
-    mediaPlanErrors.value[key] = ''
-  } catch (cause) {
-    mediaPlanErrors.value[key] = cause instanceof Error ? cause.message : String(cause)
-  }
-}
-
-function updateGenerationCount(turnId: string, planIndex: number, count: number) {
-  mediaGenerationCounts.value[mediaPlanKey(turnId, planIndex)] = Math.min(5, Math.max(1, count))
 }
 
 function installedSkill(plan: SkillInstallPlan): SkillConfig | undefined {
@@ -883,7 +900,13 @@ async function continueSkillRevision(plan: SkillInstallPlan) {
 
 function displayTurnContent(turn: ConversationTurn): string {
   const content = stripSkillInstallBlock(turn.content)
+  if (mediaResultTaskId(turn)) return ''
   return mediaPlans.value[turn.id]?.length ? stripMediaPlanBlocks(content) : content
+}
+
+function mediaResultTaskId(turn: ConversationTurn): string {
+  if (turn.role !== 'assistant') return ''
+  return /^\[媒体结果\]\n任务\s+(mtask_[^\s，。]+)/.exec(turn.content)?.[1] || ''
 }
 
 function attachmentMetadata(attachments: ResolvedDirectAttachment[]): ConversationAttachment[] {
@@ -993,7 +1016,16 @@ function readDataUrl(file: File): Promise<string> {
 </script>
 
 <template>
-  <div class="memory-workbench" :class="{ 'tree-closed': !treeOpen, 'desktop-runtime': desktopRuntime }" data-tauri-drag-region>
+  <div
+    class="memory-workbench"
+    :class="{
+      'tree-closed': !treeOpen,
+      'desktop-runtime': desktopRuntime,
+      'creation-open': creationOpen,
+      'creation-focused': creationFocused,
+    }"
+    data-tauri-drag-region
+  >
     <aside class="memory-tree" :class="{ open: treeOpen }">
       <ProjectFileTree memory-mode />
     </aside>
@@ -1039,6 +1071,12 @@ function readDataUrl(file: File): Promise<string> {
         </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
         <div class="memory-topbar-actions">
+          <button
+            v-if="conversation"
+            class="icon-button"
+            title="创作面板"
+            @click="creationOpen ? creationOpen = false : openCreationForCurrentConversation()"
+          ><JcIcon name="palette" /></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <span>{{ currentModelLabel }}</span><JcIcon :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -1080,23 +1118,21 @@ function readDataUrl(file: File): Promise<string> {
           </div>
           <div v-if="displayTurnContent(turn)" class="memory-message-text">{{ displayTurnContent(turn) }}</div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
-            <MediaPlanCard
-              :plan="plan"
-              :status="mediaPlanStatus[mediaPlanKey(turn.id, planIndex)] || 'ready'"
-              :error="mediaPlanErrors[mediaPlanKey(turn.id, planIndex)]"
-              :generation-count="mediaGenerationCounts[mediaPlanKey(turn.id, planIndex)] || 1"
-              workbench-mode
-              @approve="approveMediaPlan(turn.id, planIndex)"
-              @update-parameters="patch => updatePlan(turn.id, planIndex, patch)"
-              @update-generation-count="count => updateGenerationCount(turn.id, planIndex, count)"
-            />
-            <MediaTaskBubble
-              v-for="taskId in mediaTasks[mediaPlanKey(turn.id, planIndex)] || []"
-              :key="taskId"
-              :task-id="taskId"
-              workbench-mode
-            />
+            <button
+              type="button"
+              class="memory-media-plan-link"
+              @click="openMediaPlanInCreation(turn.id, planIndex, plan)"
+            >
+              <JcIcon name="palette" />
+              <span>{{ plan.title }}</span>
+              <small>在创作面板中调整</small>
+            </button>
           </template>
+          <MediaTaskBubble
+            v-if="mediaResultTaskId(turn)"
+            :task-id="mediaResultTaskId(turn)"
+            workbench-mode
+          />
           <SkillInstallCard
             v-if="skillInstallPlans[turn.id]"
             :plan="skillInstallPlans[turn.id]"
@@ -1226,6 +1262,18 @@ function readDataUrl(file: File): Promise<string> {
       </section>
     </main>
 
+    <aside v-if="creationMounted" v-show="creationOpen" class="memory-creation">
+      <div class="memory-creation-controls">
+        <button
+          class="icon-button"
+          :title="creationFocused ? '退出专注创作' : '专注创作'"
+          @click="creationFocused = !creationFocused"
+        ><JcIcon :name="creationFocused ? 'close-fullscreen' : 'open-in-full'" /></button>
+        <button class="icon-button" title="收起创作面板" @click="creationOpen = false; creationFocused = false"><JcIcon name="close" /></button>
+      </div>
+      <CreationPanel />
+    </aside>
+
     <div v-if="settingsOpen" class="memory-settings-backdrop" @click="settingsOpen = false"></div>
     <aside class="memory-settings-drawer" :class="{ open: settingsOpen }">
       <header><strong>设置</strong><button class="icon-button" title="关闭" @click="settingsOpen = false"><JcIcon name="close" /></button></header>
@@ -1242,6 +1290,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench { --memory-header-height: 74px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--paper); color: var(--ink1); font-size: var(--font-base); }
 .memory-workbench.desktop-runtime { --memory-header-height: 102px; padding-top: 28px; box-sizing: border-box; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
+.memory-workbench.creation-open { grid-template-columns: 280px minmax(360px, .85fr) minmax(520px, 1.15fr); }
+.memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(360px, .85fr) minmax(520px, 1.15fr); }
+.memory-workbench.creation-focused { display: block; padding-top: 0; }
+.memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
 .memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
 .memory-main { position: relative; display: grid; grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
@@ -1289,6 +1341,11 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
 .memory-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-base); line-height: 1.72; }
+.memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
+.memory-media-plan-link:hover { border-color: var(--olive); }
+.memory-media-plan-link .mso { color: var(--olive); }
+.memory-media-plan-link span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-media-plan-link small { flex: 0 0 auto; color: var(--ink3); }
 .memory-message.streaming { opacity: .85; }
 .memory-composer { width: min(860px, calc(100% - 28px)); margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
 .memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }
@@ -1325,6 +1382,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-media img, .memory-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .memory-media audio { width: min(620px, 100%); }
 .memory-preview { position: absolute; z-index: 20; inset: var(--memory-header-height) 0 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); min-height: 0; background: var(--paper); }
+.memory-creation { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-left: 1px solid var(--line); background: var(--surface); }
+.memory-creation-controls { position: absolute; z-index: 12; top: 6px; right: 8px; display: flex; gap: 4px; }
+.memory-creation-controls .icon-button { background: color-mix(in srgb, var(--surface) 92%, transparent); }
+.memory-workbench.creation-focused .memory-creation { width: 100vw; height: 100dvh; border-left: 0; }
 .memory-preview-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .memory-preview-header > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
 .memory-preview-back { display: flex; height: 34px; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; }
@@ -1360,5 +1421,6 @@ function readDataUrl(file: File): Promise<string> {
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }
+  .memory-creation { position: fixed; z-index: 45; inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
 }
 </style>

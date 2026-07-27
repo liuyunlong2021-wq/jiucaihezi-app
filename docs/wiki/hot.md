@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4B 多产品构建边界已完成：默认记忆 App 与主 Studio 使用静态独立入口和 Tauri 配置；记忆包保留现有数据身份但禁止 OpenCode sidecar，实测 Apple Silicon `.app` 14MB；Studio 独立身份明确携带 sidecar，实测 146MB。正式桌面 CI 已反向门禁 sidecar，下一步进入 4C iPhone 原生壳与移动平台能力审计。
+**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 记忆工作台已按需融合现有 `CreationPanel`：媒体意图装载可编辑草稿，用户在面板内明确生成，进度和历史不进对话，结果只回写最终回执；项目文件是素材唯一真源，生成结果需明确“放到画布”并保持真实比例。完整 focused、Tauri、Web/Desktop 构建与产物审计已通过，待 `v2.0.7` 正式发布后进入 4C iPhone 原生壳与移动平台能力审计。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -30,4 +30,4 @@
 
 ---
 
-> 上次刷新: 2026-07-27（云项目真机闭环通过，首次同步批量与可见进度完成。）
+> 上次刷新: 2026-07-27（记忆工作台与现有创作面板融合完成，待 v2.0.7 发布。）
