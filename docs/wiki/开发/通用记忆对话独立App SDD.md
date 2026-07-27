@@ -975,6 +975,24 @@ Mobile App 目录 owner ─┘
 - `1600x1000` 真实浏览器验收三栏宽度为 `280 / 800 / 520`，三栏工具栏均为 52px且无横向溢出；创作面板拖到 615px 后刷新可恢复该宽度。
 - 真实浏览器已验证文件树右键“加入画布”、专注创作和退出专注；内部项目媒体拖入画布由数据合同和组件测试覆盖，仍保留 Desktop/Web 人工拖拽验收项。
 
+### 14.11 第四阶段 4C iPhone 原生壳启动记录（2026-07-27）
+
+已完成：
+
+- 从 `v2.0.9` 稳定提交建立独立 `codex/iphone-app` 分支；Desktop 正式发布与 Mobile 开发互不混入。
+- 使用 Tauri v2 官方 `ios init` 生成本机 Xcode 工程；`src-tauri/gen/apple` 继续遵守官方可再生目录规则，不提交生成物或复制第二套业务源码。
+- 安装 `aarch64-apple-ios`、`aarch64-apple-ios-sim` 和 `x86_64-apple-ios` Rust targets，并完成 Xcode 首次启动组件注册。
+- 首次交叉编译定位到 `rfd` 文件选择器和 `trash` 回收站库被无条件编入 Mobile。现已将两者限制为 Desktop target；移动端对应命令明确要求后续接入系统附件、系统分享和移动删除确认，不伪装桌面文件夹或废纸篓能力。
+- `cargo check --target aarch64-apple-ios` 与 `cargo check --target aarch64-apple-ios-sim` 均通过，证明共享 Rust 壳已跨过首个 iPhone 编译边界。
+- Xcode iOS 26.4.1 Simulator Platform 已安装；`tauri ios build --debug --target aarch64-sim --no-sign --ci` 完整通过，生成的 `.app` 已安装到 iPhone 17 Pro 模拟器并显示产品图标。
+- 模拟器启动在业务代码执行前崩于 `wry::platform_webview_version -> NSBundle::bundleWithIdentifier -> CFRelease`。调用栈与 Tauri 官方未关闭的 [#14675](https://github.com/tauri-apps/tauri/issues/14675) 完全一致，属于当前 Tauri/Wry 在新版 iOS 运行时的上游问题；不通过整体降级 Tauri 或复制本地 fork 掩盖。
+
+仍待外部条件：
+
+- 模拟器运行仍受 Tauri 官方 #14675 阻塞；上游修复或确认兼容版本后，必须重新完成“启动进入首页并保持存活”的运行验收，当前仅将编译、安装和图标显示记为通过。
+- 当前没有连接 iPhone，钥匙串只有 Mac `Developer ID Application`，没有 iOS `Apple Development` 证书；真机安装前必须在 Xcode 登录 Apple Developer 团队、生成开发证书并连接受信任设备。
+- Mobile Bundle ID 尚未确定，因此本阶段不擅自创建 App Store 身份。进入真机签名前先确定独立 Bundle ID 和 Team ID，再写入 `tauri.ios.conf.json`。
+
 ## 15. 验收标准
 
 ### 15.1 导航与资源

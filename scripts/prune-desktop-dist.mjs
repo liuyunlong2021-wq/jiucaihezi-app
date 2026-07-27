@@ -24,7 +24,7 @@ function removeSystemJunk(directory) {
 
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const target = resolve(directory, entry.name)
-    if (entry.name === '.DS_Store' || entry.name === 'Thumbs.db') {
+    if (entry.name === '.DS_Store' || entry.name === 'Thumbs.db' || entry.name.endsWith('.map')) {
       rmSync(target, { force: true })
       console.log(`[desktop-dist] removed ${target.replace(`${distDir}/`, '')}`)
       continue

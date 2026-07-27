@@ -1367,6 +1367,16 @@ fn batch_project_entries(root: &Path, paths: &[String]) -> Result<Vec<DevBatchPr
     Ok(entries)
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn move_project_path_to_trash(path: &Path) -> Result<(), String> {
+    trash::delete(path).map_err(|e| format!("移入废纸篓失败: {}", e))
+}
+
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn move_project_path_to_trash(_path: &Path) -> Result<(), String> {
+    Err("移动端不支持废纸篓，请在文件树中确认后永久删除。".into())
+}
+
 #[tauri::command]
 pub fn dev_batch_project_operation(input: DevBatchProjectOperationInput) -> Result<DevBatchProjectOperationOutput, String> {
     let root = canonical_root(&input.root)?;
@@ -1405,9 +1415,7 @@ pub fn dev_batch_project_operation(input: DevBatchProjectOperationInput) -> Resu
         }
         "delete" => {
             let deleted = batch_project_entries(&root, &input.relative_paths)?;
-            batch_delete_project_paths(&root, &input.relative_paths, |path| {
-                trash::delete(path).map_err(|e| format!("移入废纸篓失败: {}", e))
-            })?;
+            batch_delete_project_paths(&root, &input.relative_paths, move_project_path_to_trash)?;
             Ok(DevBatchProjectOperationOutput { created: Vec::new(), renamed: Vec::new(), deleted })
         }
         _ => Err("批量操作类型无效".into()),
@@ -1439,9 +1447,7 @@ pub fn dev_delete_file(input: DevDeleteInput) -> Result<DevDeleteFileOutput, Str
         Err(error) => return Err(format!("项目内路径不可访问: {}", error)),
         Ok(_) => {}
     }
-    trash_project_path(&root, &input.relative_path, |path| {
-        trash::delete(path).map_err(|e| format!("移入废纸篓失败: {}", e))
-    })?;
+    trash_project_path(&root, &input.relative_path, move_project_path_to_trash)?;
     Ok(DevDeleteFileOutput { status: "trashed".into() })
 }
 
@@ -1673,11 +1679,18 @@ pub async fn dev_generate_video_thumbnail(app: AppHandle, input: DevReadFileInpu
 }
 
 #[tauri::command]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn pick_project_folder() -> Result<Option<String>, String> {
     let folder = rfd::FileDialog::new()
         .set_title("选择项目文件夹")
         .pick_folder();
     Ok(folder.map(|p| p.to_string_lossy().to_string()))
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn pick_project_folder() -> Result<Option<String>, String> {
+    Err("移动端项目保存在 App 管理目录，请从云项目创建或打开。".into())
 }
 
 #[tauri::command]
@@ -1694,6 +1707,7 @@ pub fn create_production_project(app: AppHandle) -> Result<String, String> {
 
 // ponytail: 照抄 OpenCode desktop/main/ipc.ts "open-file-picker" handler
 #[tauri::command]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn open_file_picker() -> Result<Option<String>, String> {
     let file = rfd::FileDialog::new()
         .set_title("选择文件")
@@ -1701,8 +1715,15 @@ pub fn open_file_picker() -> Result<Option<String>, String> {
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
+#[tauri::command]
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn open_file_picker() -> Result<Option<String>, String> {
+    Err("移动端请使用系统附件选择器。".into())
+}
+
 // ponytail: 照抄 OpenCode desktop/main/ipc.ts "save-file-picker" handler
 #[tauri::command]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn save_file_picker(default_name: Option<String>) -> Result<Option<String>, String> {
     let mut dialog = rfd::FileDialog::new()
         .set_title("保存文件");
@@ -1714,6 +1735,13 @@ pub fn save_file_picker(default_name: Option<String>) -> Result<Option<String>, 
 }
 
 #[tauri::command]
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn save_file_picker(_default_name: Option<String>) -> Result<Option<String>, String> {
+    Err("移动端请使用系统分享导出文件。".into())
+}
+
+#[tauri::command]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn dev_import_project_files(input: DevImportProjectFilesInput) -> Result<Option<Vec<String>>, String> {
     let root = canonical_root(&input.root)?;
     let target_relative = clean_relative_path(&input.target_relative_path)?;
@@ -1721,6 +1749,12 @@ pub fn dev_import_project_files(input: DevImportProjectFilesInput) -> Result<Opt
         return Ok(None);
     };
     Ok(Some(import_external_files(&root, &files, &target_relative)?))
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn dev_import_project_files(_input: DevImportProjectFilesInput) -> Result<Option<Vec<String>>, String> {
+    Err("移动端请使用系统附件选择器导入文件。".into())
 }
 
 #[tauri::command]
@@ -1747,6 +1781,7 @@ pub fn dev_import_project_drop(input: DevImportProjectDropInput) -> Result<Vec<D
 }
 
 #[tauri::command]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn dev_import_project_folder(input: DevImportProjectFolderInput) -> Result<Option<String>, String> {
     let root = canonical_root(&input.root)?;
     let target_relative = clean_relative_path(&input.target_relative_path)?;
@@ -1756,7 +1791,15 @@ pub fn dev_import_project_folder(input: DevImportProjectFolderInput) -> Result<O
     Ok(Some(import_external_folder(&root, &folder, &target_relative)?))
 }
 
+
 #[tauri::command]
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn dev_import_project_folder(_input: DevImportProjectFolderInput) -> Result<Option<String>, String> {
+    Err("移动端不支持导入外部文件夹。".into())
+}
+
+#[tauri::command]
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn dev_export_project(input: DevExportProjectInput) -> Result<Option<String>, String> {
     let root = canonical_root(&input.root)?;
     let Some(destination) = rfd::FileDialog::new().set_title("选择项目导出位置").pick_folder() else {
@@ -1764,6 +1807,13 @@ pub fn dev_export_project(input: DevExportProjectInput) -> Result<Option<String>
     };
     let destination = canonical_external_existing_path(&destination.to_string_lossy())?;
     Ok(Some(export_project_to_directory(&root, &destination)?))
+}
+
+
+#[tauri::command]
+#[cfg(any(target_os = "ios", target_os = "android"))]
+pub fn dev_export_project(_input: DevExportProjectInput) -> Result<Option<String>, String> {
+    Err("移动端请使用系统分享导出项目。".into())
 }
 
 #[tauri::command]
