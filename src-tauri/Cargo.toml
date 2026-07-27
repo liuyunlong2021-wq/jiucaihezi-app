@@ -45,8 +45,17 @@ notify = "8.2"
 rfd = "0.15"
 trash = "5.2"
 
+[target.'cfg(target_os = "ios")'.dependencies]
+rustls = { version = "0.23", default-features = false, features = ["std", "ring"] }
+
 [dev-dependencies]
 tempfile = "3"
+
+[patch.crates-io]
+# Temporary iOS compatibility patch. Remove once Tauri/Wry releases the upstream fix for #14675.
+tauri-runtime-wry = { path = "vendor/tauri-runtime-wry" }
+# Official Tao iOS fixes not yet available in the crates.io release used by Tauri 2.11.
+tao = { git = "https://github.com/tauri-apps/tao", rev = "729bbcad70a1c912ceb9b3c03cfc250c63e8a368" }
 
 [profile.release]
 panic = "abort"

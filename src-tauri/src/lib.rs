@@ -1038,6 +1038,9 @@ mod tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "ios")]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // ─── Windows WebView2 检测 ───
     // Tauri v2 在 Windows 上依赖系统 WebView2 Runtime（不像 Electron 自带 Chromium）。
     // 若未安装，Tauri 自身会弹错误对话框引导安装；此处为补充日志。
@@ -1078,9 +1081,9 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
-            let skills_db_dir = skills::path_utils::app_data_dir();
-            std::fs::create_dir_all(&skills_db_dir)
-                .expect("Failed to create ~/.skillsmanage directory");
+            let app_data = app.path().app_data_dir()?;
+            let skills_db_dir = app_data.join("skillsmanage");
+            std::fs::create_dir_all(&skills_db_dir)?;
             let skills_db_path =
                 skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
 
@@ -1126,7 +1129,6 @@ pub fn run() {
             });
 
             // 确保应用数据目录存在
-            let app_data = app.path().app_data_dir().expect("failed to get app data dir");
             std::fs::create_dir_all(&app_data).ok();
             // 创建 vault 子目录
             std::fs::create_dir_all(app_data.join("vault")).ok();

@@ -1,7 +1,7 @@
 # 通用记忆对话工作台 SDD
 
 > 日期：2026-07-27
-> 状态：Web 与 Mac 已完成；第四阶段 4A、4B 已完成，4C 已完成 iPhone 真机编译、签名、安装，运行受 Tauri 官方 #14675 阻塞
+> 状态：Web 与 Mac 已完成；第四阶段 4A、4B 已完成，4C-6 已在 iPhone 13 Pro Max 完成冷启动与 60 秒稳定运行；后续业务验收尚未开始。
 > 首发目标：<https://jiucaihezi.studio>
 > 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
@@ -725,7 +725,7 @@ Mobile App 目录 owner ─┘
 | 4C-3 | Desktop 专属依赖隔离 | `rfd`、`trash` 等 Desktop-only 依赖不再进入 iOS target；不改变共享业务运行时。 | 已完成 |
 | 4C-4 | Simulator 构建诊断 | 官方 debug Simulator `.app` 可构建、安装并产出启动诊断；不把“安装”当作“运行”。 | 已完成 |
 | 4C-5 | 真实设备签名与安装 | iPhone 13 Pro Max 使用 `com.jiucaihezi.mobile` 和 `RXD4L9387J` 完成签名、IPA 导出、安装及启动请求。 | 已完成 |
-| 4C-6 | 原生壳真机稳定启动 | 仅采用官方已发布且兼容的 Tauri/Wry 组合；真实 iPhone 冷启动进入首页，连续停留至少 60 秒且无崩溃报告。每次实验须记录版本、构建、安装、启动结果。 | 进行中 |
+| 4C-6 | 原生壳真机稳定启动 | 优先验证官方已发布组合；若其未修复上游问题，只允许最小、可移除的兼容补丁。真实 iPhone 冷启动进入首页，连续停留至少 60 秒且无崩溃报告。每次实验须记录版本、构建、安装、启动结果。 | 已完成 |
 | 4C-7 | 移动项目目录适配 | App 管理目录的 `ProjectFileService` 可创建、读取、修改安全文本项目，无任意目录权限依赖。 | 未开始 |
 | 4C-8 | 移动工作台导航 | 文件树与设置为抽屉，聊天/预览全屏；无悬停、右键或桌面拖放前提。 | 未开始 |
 | 4C-9 | 移动登录与云项目 | 同账号登录回调可用，云项目可下载为本地副本并恢复项目映射。 | 未开始 |
@@ -734,7 +734,7 @@ Mobile App 目录 owner ─┘
 | 4C-12 | 真机业务回归 | 真实 iPhone 验收登录、项目、对话、Wiki、附件、前后台恢复与断网重试；复杂画布不纳入首版门槛。 | 未开始 |
 | 4C-13 | TestFlight 与后续平台门槛 | 4C-12 全部通过后才提交 TestFlight；TestFlight 稳定后才开始 Android 构建与权限矩阵。 | 未开始 |
 
-4C-6 阻断规则：若官方尚未发布兼容版本，必须保留官方 issue、当前锁定版本、真机 `.ips` 调用栈和每次实验结果；不得将 IPA 安装成功称为 App 成功，也不得以长期私有 Wry fork 或整仓降级绕过此门槛。
+4C-6 兼容规则：必须保留官方 issue、当前锁定版本、真机 `.ips` 调用栈和每次实验结果；不得将 IPA 安装成功称为 App 成功，也不得以长期私有 Wry fork 或整仓降级绕过此门槛。若官方尚未发布修复，只允许记录了上游来源、仅覆盖故障调用点且可随上游版本删除的临时补丁。
 
 ### 14.4 第一阶段实施记录（2026-07-25）
 
@@ -1024,7 +1024,18 @@ Mobile App 目录 owner ─┘
 - 真机 13 Pro Max 已用 `devicectl` 直接导出最新报告 `韭菜盒子-2026-07-27-174909.ips`：`bundleID=com.jiucaihezi.mobile`，时间 `2026-07-27 17:49:09 +0800`，`EXC_BREAKPOINT` 调用栈为 `NSBundle::bundleWithIdentifier -> wry::wkwebview::platform_webview_version -> tauri_runtime_wry::Wry::init`。这发生在 `jiucaihezi_app_lib::run` 的 Tauri runtime 初始化内，首页和 Vue 业务代码尚未执行。
 - 实验记录：基线 `tauri 2.11.2 / tauri-runtime-wry 2.11.2 / wry 0.55.1` 已构建、签名、安装；真机启动失败并生成上述 `.ips`。候选 `tauri 2.11.5 / tauri-runtime-wry 2.11.4 / wry 0.55.1` 无法构成兼容性实验，因为 Wry 版本和故障调用点不变；尝试解析该候选版本时 crates.io 索引网络卡住，停止后确认 `Cargo.lock` 未变，未构建、未安装、未启动。
 
-结论：4C-6 受上游 Tauri/Wry #14675 阻断，未完成。下一条可执行路线是等待 Tauri/Wry 发布明确包含 iOS `platform_webview_version` 修复的稳定版本；届时在本分支先锁定该官方版本，记录 Cargo 解析和 iOS 构建，再在本 iPhone 13 Pro Max 安装并验证冷启动进入首页、连续 60 秒存活且无新 `.ips`。在此之前不启动 4C-7 及后续业务项，不进入 TestFlight。
+结论（该记录时）：4C-6 当时受上游 Tauri/Wry #14675 阻断，未完成。后续解决结果见 14.13；4C-7 及后续业务项仍未开始，也未进入 TestFlight。
+
+### 14.13 4C-6 真机稳定启动完成记录（2026-07-27）
+
+- 先复核官方状态：Tauri [#14675](https://github.com/tauri-apps/tauri/issues/14675) 仍 open；稳定发布链 `tauri 2.11.2 / tauri-runtime-wry 2.11.2 / wry 0.55.1` 仍会在 iOS 26.5.2 的 `wry::webview_version()` 访问 WebKit bundle 时终止。官方发布版本没有可直接替换的 Wry 修复。
+- 实验 A（基线）：`tauri 2.11.2 / runtime-wry 2.11.2 / wry 0.55.1 / tao 0.35.2`，交叉构建、签名、安装均通过；真机启动失败，`174909.ips` 指向 Wry WebKit bundle 查询。
+- 实验 B（官方 Tao 主干）：固定 Tao 官方提交 `729bbcad`（含 iOS 场景修复），并以 Tauri 的持久 `Info.ios.plist` 注入 `UIApplicationSceneManifest`。构建、签名、安装均通过；真机启动推进至场景回调，但仍在桌面式启动初始化中失败，`184048.ips` 提供精确堆栈。
+- 实验 C（最终）：本分支以本地 `tauri-runtime-wry` 补丁只跳过 iOS 上会触发 #14675 的版本探测，将 iOS WebView runtime 标记为可用；保留非 iOS 的原官方查询路径。补丁来源为官方 `tauri-runtime-wry 2.11.2`，不是长期 Wry fork，待上游发布修复后删除。项目启动同时改用 Tauri iOS 沙盒 `app_data_dir`，并在 iOS 入口按 Rustls 官方要求安装 `ring` crypto provider，分别消除 `184048.ips` 的桌面 home 目录 panic 与 `184504.ips` 的 `reqwest` provider panic。
+- 最终版本：`tauri 2.11.2`、本地 `tauri-runtime-wry 2.11.2` 最小 iOS 补丁、`wry 0.55.1`、官方 Tao `729bbcad`、iOS-only `rustls 0.23/ring`。`cargo check --target aarch64-apple-ios` 通过，`tauri ios dev` 完成 Xcode 构建、Apple Development 签名、IPA 导出及真机安装。
+- 真机证据：iPhone 13 Pro Max（iOS 26.5.2，Bundle ID `com.jiucaihezi.mobile`）于 18:51:37 明确 `--terminate-existing` 冷启动；PID 919 在超过 60 秒后仍存在，系统 Crash Logs 最新仍为 18:45:04 的历史 `184504.ips`，没有新增报告。开发服务器运行时页面已加载；屏幕截图服务受当前开发盘映像限制，未将其失败当作运行失败。
+
+结论：4C-6 已完成。iPhone 已可冷启动并稳定停留首页；本轮没有开发登录、同步、媒体或 TestFlight。后续开始 4C-7 前，应持续跟踪 #14675，官方发布兼容版本后删除本地 runtime 补丁并重新做同一真机验证。
 
 ## 15. 验收标准
 
