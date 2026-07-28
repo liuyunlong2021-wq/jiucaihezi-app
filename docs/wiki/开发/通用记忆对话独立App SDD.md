@@ -744,7 +744,7 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 | --- | --- | --- | --- | --- |
 | 4D-1 | Android 工具链与 Tauri 工程初始化 | 固定 JDK、Android SDK/NDK、Rust Android targets 和 Tauri v2 Android 工程；只补 Android 配置、图标和签名占位，不改共享业务。 | `java`、`adb`、`sdkmanager`、Rust targets 版本记录；`pnpm tauri android init` 可重复执行；`cargo check` 通过。 | 电脑端完成，待真机阶段 |
 | 4D-2 | Debug 构建与设备启动 | 生成 debug APK，安装到至少一台 Android 设备或模拟器；处理状态栏、导航栏、返回键和首次启动权限提示。 | 构建产物 SHA-256、安装结果、启动截图/日志；应用冷启动进入首页并稳定停留 60 秒。 | 已完成（vivo V2443BA 真机） |
-| 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 实现已接入，待真账号验收 |
+| 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 已完成（vivo V2443BA 真机） |
 | 4D-4 | 云项目与文字同步 | 复用 `syncClient` 和 `ProjectFileService`；支持云项目列表、下载、上传、Raw/Wiki/安全文本增量同步；媒体仍按本地合同处理。 | Android -> Web/Mac 与 Web/Mac -> Android 双向文字回流；断网不丢本地内容，重连不重复 turn；不同账号不可越权。 | 未开始 |
 | 4D-5 | 移动核心工作流 | 适配聊天、Raw、Wiki、Skill、文件树、设置和对话删除；使用抽屉/全屏导航，不依赖右键、悬停或桌面拖放。 | 新建/继续对话、Raw 读写、Wiki 写入、Skill 调用、移动端永久删除均在真机完成并可重启恢复。 | 未开始 |
 | 4D-6 | 附件与媒体能力 | 接入 Android 系统文件选择器、相册/相机权限和现有媒体任务；只做首版必要的图片、视频、音频和 3D 预览，不扩展复杂画布。 | 文件附件与相册导入、媒体提交/恢复/播放、3D 旋转缩放、保存到系统相册均通过；拒绝权限有明确可恢复提示。 | 未开始 |
@@ -1237,6 +1237,14 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - 构建结果：Android `cargo check --target aarch64-linux-android` 通过；Debug APK 构建通过，SHA-256 `fb4d4d5a2a0540703660c70a7f17738257546de421d0f78c8247c8306879a746`，大小 `271,684,299` bytes。
 - 安装/启动结果：覆盖安装到 vivo `V2443BA` 成功，`com.jiucaihezi.desktop` 冷启动成功进入记忆空间页面；当前尚未输入真实账号，未产生登录凭据。
 - 当前门禁：4D-3 仍未完成。必须由用户在真机登录并勾选“保持登录”，再验证退出、杀进程恢复、失效 Session 回登录页及网络错误日志；在这些证据齐全前不得进入 4D-4。
+
+### 14.31 Android 4D-3 真机会话验收结果（2026-07-28）
+
+- 真账号登录：用户在 vivo `V2443BA` 上完成登录并勾选“保持登录”；设置页显示“已登录，可直接使用”。
+- 杀进程恢复：`adb shell am force-stop` 后冷启动，设置页仍显示“已登录，可直接使用”，证明 Session 从 Android Keystore 恢复而非只依赖内存。
+- 退出与失效：通过真实设置页点击“退出登录”，界面显示“已退出登录”；随后再次杀进程重开只出现“一键登录”，旧 Session 没有从 Keystore 恢复。该动作同时调用现有 Gateway logout 合同并清除本地安全凭据。
+- 日志：重启过程保存 `/tmp/jiucaihezi-4d3-restart.log` 与 `/tmp/jiucaihezi-4d3-logout-restart.log`；未发现 App `FATAL EXCEPTION`、`AndroidRuntime` 或 panic。设备网络同时记录了系统网络错误，应用保持可用并显示可恢复的登录入口。
+- 结论：4D-3 登录、退出、杀进程恢复和失效后回登录页门禁通过；进入 4D-4 前需要再次登录，不能把退出后的未登录状态当作同步登录。
 
 ## 15. 验收标准
 
