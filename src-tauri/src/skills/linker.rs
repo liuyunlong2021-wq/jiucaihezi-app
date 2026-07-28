@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::skills::db::{self, DbPool, SkillInstallation};
 use crate::skills::SkillsAppState;
+use crate::skills::db::{self, DbPool, SkillInstallation};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

@@ -35,7 +35,9 @@ pub async fn mcp_spawn_stdio(
         cmd.envs(env);
     }
 
-    let mut child = cmd.spawn().map_err(|error| format!("无法启动 MCP 进程: {error}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|error| format!("无法启动 MCP 进程: {error}"))?;
     let stdout = child.stdout.take().ok_or("无法获取 MCP stdout")?;
     let stdin = child.stdin.take().ok_or("无法获取 MCP stdin")?;
     let stderr = child.stderr.take().ok_or("无法获取 MCP stderr")?;
@@ -58,20 +60,33 @@ pub async fn mcp_spawn_stdio(
         }
     });
 
-    MCP_PROCESSES.lock().await.insert(handle_id.clone(), McpStdioProcess { child, stdin });
+    MCP_PROCESSES
+        .lock()
+        .await
+        .insert(handle_id.clone(), McpStdioProcess { child, stdin });
     Ok(handle_id)
 }
 
 #[tauri::command]
 pub async fn mcp_write_stdin(handle_id: String, message: String) -> Result<(), String> {
     let mut processes = MCP_PROCESSES.lock().await;
-    let process = processes.get_mut(&handle_id)
+    let process = processes
+        .get_mut(&handle_id)
         .ok_or_else(|| format!("MCP 进程不存在: {handle_id}"))?;
-    process.stdin.write_all(message.as_bytes()).await
+    process
+        .stdin
+        .write_all(message.as_bytes())
+        .await
         .map_err(|error| format!("写入 MCP 进程失败: {error}"))?;
-    process.stdin.write_all(b"\n").await
+    process
+        .stdin
+        .write_all(b"\n")
+        .await
         .map_err(|error| format!("写入 MCP 换行失败: {error}"))?;
-    process.stdin.flush().await
+    process
+        .stdin
+        .flush()
+        .await
         .map_err(|error| format!("刷新 MCP stdin 失败: {error}"))
 }
 

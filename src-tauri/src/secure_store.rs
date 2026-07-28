@@ -9,7 +9,9 @@ fn cli_key_file_path() -> std::path::PathBuf {
     let home = std::env::var("HOME")
         .or_else(|_| std::env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".jiucaihezi").join(".jc_api_key")
+    std::path::PathBuf::from(home)
+        .join(".jiucaihezi")
+        .join(".jc_api_key")
 }
 
 /// 将 Key 同步写入 ~/.jiucaihezi/.jc_api_key，供 CLI 工具读取
@@ -43,7 +45,11 @@ fn gateway_session_entry() -> Result<Entry, String> {
 
 fn mcp_oauth_entry(server_id: &str) -> Result<Entry, String> {
     let id = server_id.trim();
-    if id.is_empty() || !id.chars().all(|char| char.is_ascii_alphanumeric() || char == '-' || char == '_') {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|char| char.is_ascii_alphanumeric() || char == '-' || char == '_')
+    {
         return Err("无效的 MCP server id".to_string());
     }
     Entry::new(KEYCHAIN_SERVICE, &format!("mcp-oauth-{id}")).map_err(|error| error.to_string())
@@ -51,10 +57,15 @@ fn mcp_oauth_entry(server_id: &str) -> Result<Entry, String> {
 
 fn mcp_server_secret_entry(server_id: &str) -> Result<Entry, String> {
     let id = server_id.trim();
-    if id.is_empty() || !id.chars().all(|char| char.is_ascii_alphanumeric() || char == '-' || char == '_') {
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|char| char.is_ascii_alphanumeric() || char == '-' || char == '_')
+    {
         return Err("无效的 MCP server id".to_string());
     }
-    Entry::new(KEYCHAIN_SERVICE, &format!("mcp-server-secret-{id}")).map_err(|error| error.to_string())
+    Entry::new(KEYCHAIN_SERVICE, &format!("mcp-server-secret-{id}"))
+        .map_err(|error| error.to_string())
 }
 
 fn get_entry_value(entry: Entry) -> Result<Option<String>, String> {
@@ -66,7 +77,11 @@ fn get_entry_value(entry: Entry) -> Result<Option<String>, String> {
     }
 }
 
-fn set_entry_value(entry: Entry, value: String, clear: fn() -> Result<(), String>) -> Result<(), String> {
+fn set_entry_value(
+    entry: Entry,
+    value: String,
+    clear: fn() -> Result<(), String>,
+) -> Result<(), String> {
     let clean = value.trim();
     if clean.is_empty() {
         return clear();
@@ -91,14 +106,24 @@ pub fn get_api_key() -> Result<Option<String>, String> {
 /// 用于 Keychain 不可用时的降级方案
 #[tauri::command]
 pub fn get_cli_api_key() -> Result<Option<String>, String> {
-    let path = cli_key_file_path();
-    match std::fs::read_to_string(&path) {
-        Ok(content) => {
-            let trimmed = content.trim().to_string();
-            if trimmed.is_empty() { Ok(None) } else { Ok(Some(trimmed)) }
+    #[cfg(target_os = "ios")]
+    return get_api_key();
+
+    #[cfg(not(target_os = "ios"))]
+    {
+        let path = cli_key_file_path();
+        match std::fs::read_to_string(&path) {
+            Ok(content) => {
+                let trimmed = content.trim().to_string();
+                if trimmed.is_empty() {
+                    Ok(None)
+                } else {
+                    Ok(Some(trimmed))
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e.to_string()),
         }
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-        Err(e) => Err(e.to_string()),
     }
 }
 

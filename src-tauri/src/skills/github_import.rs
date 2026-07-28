@@ -9,8 +9,8 @@ use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::skills::{
-    db::{self, DbPool, Skill},
     SkillsAppState,
+    db::{self, DbPool, Skill},
 };
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
@@ -664,7 +664,11 @@ fn github_client() -> Result<reqwest::Client, String> {
 }
 
 fn parse_github_url(url: &str) -> Result<(String, String), String> {
-    let trimmed = url.trim().trim_end_matches('/').trim_end_matches(".git").trim_end_matches('/');
+    let trimmed = url
+        .trim()
+        .trim_end_matches('/')
+        .trim_end_matches(".git")
+        .trim_end_matches('/');
     // ponytail: 自动补全缺失的 https:// 协议头。用户常输入 github.com/owner/repo 或 owner/repo
     let with_scheme = if trimmed.starts_with("https://") || trimmed.starts_with("http://") {
         trimmed.to_string()
@@ -676,8 +680,12 @@ fn parse_github_url(url: &str) -> Result<(String, String), String> {
     } else {
         trimmed.to_string()
     };
-    let parsed =
-        reqwest::Url::parse(&with_scheme).map_err(|e| format!("无效的 GitHub URL（{}），请使用 https://github.com/owner/repo 格式", e))?;
+    let parsed = reqwest::Url::parse(&with_scheme).map_err(|e| {
+        format!(
+            "无效的 GitHub URL（{}），请使用 https://github.com/owner/repo 格式",
+            e
+        )
+    })?;
 
     if parsed.scheme() != "https" {
         return Err("Only https:// GitHub repository URLs are supported.".to_string());
@@ -1422,7 +1430,7 @@ fn sanitize_skill_id(raw: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use flate2::{write::GzEncoder, Compression};
+    use flate2::{Compression, write::GzEncoder};
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -1919,10 +1927,12 @@ mod tests {
                 .expect("skills"),
         };
 
-        assert!(preview
-            .skills
-            .iter()
-            .any(|skill| skill.source_path.starts_with("skills/")));
+        assert!(
+            preview
+                .skills
+                .iter()
+                .any(|skill| skill.source_path.starts_with("skills/"))
+        );
     }
 
     #[tokio::test]
@@ -1968,14 +1978,18 @@ mod tests {
                 .expect("preview skills"),
         };
 
-        assert!(preview
-            .skills
-            .iter()
-            .any(|skill| skill.source_path == "skills/.curated/openai-docs"));
-        assert!(preview
-            .skills
-            .iter()
-            .any(|skill| skill.source_path == "skills/.system/skill-creator"));
+        assert!(
+            preview
+                .skills
+                .iter()
+                .any(|skill| skill.source_path == "skills/.curated/openai-docs")
+        );
+        assert!(
+            preview
+                .skills
+                .iter()
+                .any(|skill| skill.source_path == "skills/.system/skill-creator")
+        );
     }
 
     #[tokio::test]
@@ -2008,8 +2022,8 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -2090,8 +2104,8 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -2171,8 +2185,8 @@ mod tests {
         use std::io::{Read, Write};
         use std::net::TcpListener;
         use std::sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc, Mutex,
+            atomic::{AtomicUsize, Ordering},
         };
 
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
@@ -2232,11 +2246,15 @@ mod tests {
 
         server.join().expect("server join");
         let captured = requests.lock().expect("captured");
-        assert!(captured
-            .iter()
-            .any(|request| request.contains("GET /direct")));
-        assert!(captured
-            .iter()
-            .any(|request| request.contains("GET /mirror")));
+        assert!(
+            captured
+                .iter()
+                .any(|request| request.contains("GET /direct"))
+        );
+        assert!(
+            captured
+                .iter()
+                .any(|request| request.contains("GET /mirror"))
+        );
     }
 }

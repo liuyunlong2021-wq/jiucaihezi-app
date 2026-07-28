@@ -85,6 +85,48 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
   }
 })
 
+test('Veo Creation Runtime reuses the verified multipart and public-task result contract', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const resultUrl = 'https://api.jiucaihezi.studio/v1/videos/task_veo_runtime/content'
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      assert.ok(init.body instanceof FormData)
+      assert.equal(init.body.get('model'), 'veo-3.1-fast-generate-preview')
+      assert.equal(init.body.get('seconds'), '4')
+      assert.ok(init.body.get('input_reference') instanceof Blob)
+      return Response.json({ id: 'task_veo_runtime', status: 'queued' })
+    }
+    if (url.endsWith('/v1/videos/task_veo_runtime')) {
+      return Response.json({ id: 'task_veo_runtime', status: 'completed' })
+    }
+    if (url.endsWith('/v1/video/generations/task_veo_runtime')) {
+      return Response.json({ code: 'success', data: { result_url: resultUrl } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/zx/veo-3.1-fast-generate-preview',
+      params: {
+        prompt: '让画面动起来',
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 4,
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, resultUrl)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapter task route', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
@@ -161,6 +203,45 @@ test('RunningHub image edit sends canvas data directly to the RH adapter', async
     })
     const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
     assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-canvas-data.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('Hunyuan image-to-3D reuses RH async submission and returns a 3D result', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const images = ['https://cdn.jiucaihezi.studio/front.png', 'https://cdn.jiucaihezi.studio/left.png']
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-3d-image')
+      assert.deepEqual(body.images, images)
+      assert.equal(body.extra_fields.faceCount, 500000)
+      assert.equal(body.extra_fields.enablePbr, false)
+      assert.equal(body.extra_fields.generateType, 'Normal')
+      return Response.json({ task_id: 'rh_3d_runtime_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/rh_3d_runtime_001')) {
+      return Response.json({ status: 'success', url: 'https://webstatic.aiproxy.vip/output/model.glb' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-3d-image',
+      params: { images },
+    })
+    const request = buildCreationSubmitRequest(plan)
+    assert.equal(request.taskType, 'video')
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.type, 'model3d')
+    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/model.glb')
+    assert.equal(result.pollUrl, '/rh/tasks/rh_3d_runtime_001')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

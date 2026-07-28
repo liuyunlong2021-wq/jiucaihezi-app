@@ -11,6 +11,7 @@ import * as eventBus from '@/utils/eventBus'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import {
   __setCreationSubmitExecutorForTests,
+  __setMediaTaskLoaderForTests,
   __setMediaTaskSaverForTests,
   useMediaTaskStore,
 } from '../mediaTaskStore'
@@ -496,6 +497,7 @@ test(
 
       assert.equal(task?.canvasTarget?.owner, ownerA)
       assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
+      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(ownerACanvas.scene.length, 1)
       assert.equal(ownerBCanvas.scene.length, 0)
@@ -1033,7 +1035,7 @@ test(
 )
 
 test(
-  'mediaTaskStore reports Web media persistence failures without publishing a successful result',
+  'mediaTaskStore preserves a successful Web result when project persistence fails',
   { concurrency: false },
   async () => {
     const storage = installLocalStorage()
@@ -1080,13 +1082,14 @@ test(
         plan,
       })
 
-      await waitFor(() => store.getTask(taskId)?.status === 'failed')
+      await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       const task = store.getTask(taskId)
 
       assert.equal(task?.assetStatus, 'failed')
+      assert.equal(task?.status, 'success')
       assert.equal(task?.resultUrl, resultUrl)
       assert.match(task?.errorMsg || '', /保存到项目失败/)
-      assert.equal(completionEvents, 0)
+      assert.equal(completionEvents, 1)
       assert.equal(canvasEvents, 0)
       assert.equal(files.binaryWrites.length, 0)
     } finally {
@@ -1103,7 +1106,7 @@ test(
 )
 
 test(
-  'mediaTaskStore reports rejected Web binary writes without publishing a successful result',
+  'mediaTaskStore preserves a successful result when the Web binary write is rejected',
   { concurrency: false },
   async () => {
     const storage = installLocalStorage()
@@ -1153,13 +1156,14 @@ test(
         plan,
       })
 
-      await waitFor(() => store.getTask(taskId)?.status === 'failed')
+      await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       const task = store.getTask(taskId)
 
       assert.equal(task?.assetStatus, 'failed')
+      assert.equal(task?.status, 'success')
       assert.equal(task?.resultUrl, resultUrl)
       assert.match(task?.errorMsg || '', /保存到项目失败：OPFS 配额不足/)
-      assert.equal(completionEvents, 0)
+      assert.equal(completionEvents, 1)
       assert.equal(files.binaryWrites.length, 0)
     } finally {
       offComplete()
@@ -1228,7 +1232,7 @@ test(
         plan,
       })
 
-      await waitFor(() => store.getTask(taskId)?.status === 'failed')
+      await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       assert.equal(store.getTask(taskId)?.resultUrl, resultUrl)
 
       assert.equal(await store.retryWebMediaPersistence(taskId), true)
@@ -1521,6 +1525,80 @@ test(
     }
   },
 )
+
+test(
+  'persisted pending tasks do not count as actively generating without a live execution',
+  { concurrency: false },
+  async () => {
+    const savedTask = {
+      id: 'mtask_stale_pending',
+      type: 'video',
+      model: 'veo-3.1-generate-preview',
+      modelLabel: 'Veo 3.1',
+      prompt: '三天前的任务',
+      referenceImages: [],
+      status: 'pending',
+      progress: 50,
+      progressText: '轮询暂时失败，重启后将继续恢复',
+      createdAt: Date.now() - 3 * 24 * 60 * 60 * 1000,
+      source: 'creation',
+      planSnapshot: { pollKind: 'video' },
+    }
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([savedTask]) })
+
+    try {
+      setActivePinia(createPinia())
+      const store = useMediaTaskStore()
+      await store.init()
+
+      assert.equal(store.getTask(savedTask.id)?.status, 'pending')
+      assert.equal(store.isTaskActive(savedTask.id), false)
+      assert.equal(store.runningCount, 0)
+      assert.equal(store.hasRunning, false)
+    } finally {
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore never overwrites history while Tauri SQLite is unavailable',
+  { concurrency: false },
+  async () => {
+    setActivePinia(createPinia())
+    let loadCalls = 0
+    let saveCalls = 0
+    __setMediaTaskLoaderForTests(async () => {
+      loadCalls++
+      throw new Error('SQLite storage is not ready')
+    })
+    __setMediaTaskSaverForTests(async () => {
+      saveCalls++
+    })
+
+    try {
+      const store = useMediaTaskStore()
+      await assert.rejects(store.init(), /SQLite storage is not ready/)
+      await assert.rejects(store.init(), /SQLite storage is not ready/)
+      assert.equal(loadCalls, 2)
+      assert.equal(saveCalls, 0)
+    } finally {
+      __setMediaTaskLoaderForTests(null)
+      __setMediaTaskSaverForTests(null)
+    }
+  },
+)
+
+test('mediaTaskStore rebases persisted iOS media paths after an app update', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  const rebase = source.match(/async function rebaseMobileTaskPaths[\s\S]*?\n}/)?.[0] || ''
+
+  assert.match(rebase, /isTauriMobileRuntime\(\)/)
+  assert.match(rebase, /invoke<Array<\{ name: string; path: string \}>>\('list_mobile_projects'\)/)
+  assert.match(rebase, /projects\.find\(project => project\.name === projectName\)/)
+  assert.match(rebase, /task\.directory = current\.path/)
+  assert.match(rebase, /task\.assetUri = `\$\{current\.path}\/{1}\$\{task\.projectPath}`/)
+})
 
 test(
   'mediaTaskStore rolls back the inserted task when initial persistence fails',
@@ -1861,8 +1939,12 @@ test(
       assert.equal(started, 2)
       assert.equal(store.getTask(firstId)?.status, 'running')
       assert.equal(store.getTask(secondId)?.status, 'running')
+      assert.equal(store.isTaskActive(firstId), true)
+      assert.equal(store.isTaskActive(secondId), true)
+      assert.equal(store.runningCount, 2)
       release?.()
       await new Promise(resolve => setTimeout(resolve, 20))
+      assert.equal(store.runningCount, 0)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       environment.restore()
@@ -2195,6 +2277,66 @@ test(
 )
 
 test(
+  'mediaTaskStore stops restored polling when RunningHub explicitly reports FAILED',
+  { concurrency: false },
+  async () => {
+    const savedTasks = [
+      {
+        id: 'mtask_content_audit_failed',
+        type: 'image',
+        model: 'rh-gpt2-text',
+        modelLabel: 'GPT2.0 文生图 · RunningHub',
+        prompt: '内容审核失败测试',
+        referenceImages: [],
+        status: 'pending',
+        progress: 0,
+        progressText: '轮询暂时失败，重启后将继续恢复',
+        createdAt: Date.now(),
+        source: 'creation',
+        route: 'runninghub-adapter',
+        upstreamFamily: 'runninghub',
+        upstreamTaskId: '2080000000000000001',
+        pollUrl: '/rh/tasks/2080000000000000001',
+        pollKind: 'image',
+      },
+    ]
+    const storage = installLocalStorage({
+      jc_media_tasks_v1: JSON.stringify(savedTasks),
+    })
+    const previousFetch = globalThis.fetch
+    let pollCount = 0
+    globalThis.fetch = async () => {
+      pollCount += 1
+      return Response.json({
+        taskId: '2080000000000000001',
+        status: 'FAILED',
+        errorCode: '1501',
+        errorMessage: 'Content security audit did not pass | 内容安全审查未通过',
+        results: null,
+      })
+    }
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const store = useMediaTaskStore()
+
+    try {
+      await withImmediateTimers(async () => {
+        await store.init()
+        await waitFor(() => store.getTask('mtask_content_audit_failed')?.status !== 'running')
+      })
+      const task = store.getTask('mtask_content_audit_failed')
+
+      assert.equal(task?.status, 'failed')
+      assert.match(task?.errorMsg || '', /内容安全审查未通过/)
+      assert.equal(pollCount, 1)
+    } finally {
+      globalThis.fetch = previousFetch
+      storage.restore()
+    }
+  },
+)
+
+test(
   'mediaTaskStore does not fail pending creation tasks without poll metadata during init recovery',
   { concurrency: false },
   async () => {
@@ -2280,7 +2422,7 @@ test('creation gallery cards recover when async media urls resolve', () => {
   assert.match(cardSource, /v-if="isImage && url && !imgError"/)
 })
 
-test('MediaTaskBubble treats audio as audio when saving and checks result URL safety', () => {
+test('MediaTaskBubble downloads project media first and keeps the remote fallback safe', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'),
     'utf8',
@@ -2296,16 +2438,9 @@ test('MediaTaskBubble treats audio as audio when saving and checks result URL sa
     ),
     true,
   )
-  assert.equal(source.includes("const fileType: 'image' | 'video' | 'audio' = t.type"), true)
-  assert.equal(
-    source.includes("const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'"),
-    true,
-  )
-  assert.equal(
-    source.includes(
-      "const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'",
-    ),
-    true,
-  )
+  assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
+  assert.match(source, /props\.workbenchMode[\s\S]*fetchCreationMediaBlob\(t\.resultUrl[\s\S]*fetchBlobForExport\(t\.resultUrl\)/)
+  assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
+  assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
   assert.equal(source.includes('v-else-if="isSuccess && isSafeResult"'), true)
 })

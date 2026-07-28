@@ -62,7 +62,7 @@ test('project file tree adds images videos and audio to canvas as selectable med
 
   assert.match(source, /openProjectResource\(projectFiles, resource\)/)
   assert.match(source, /if \(result\.type === 'media'\)/)
-  assert.match(source, /kind: result\.mediaKind/)
+  assert.match(source, /emitMediaToCanvas\(result\.resource, result\.mediaKind\)/)
   assert.match(
     source,
     /function isCanvasAddableMediaResource\(node: TreeNode \| null \| undefined\): boolean/,
@@ -200,6 +200,23 @@ test('file tree context menus position from their measured DOM size instead of a
   assert.doesNotMatch(source, /CTX_MENU_EST_HEIGHT/)
 })
 
+test('mobile file tree opens the existing context menu on long press without blocking scroll', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+
+  assert.match(source, /const NODE_LONG_PRESS_MS = 500/)
+  assert.match(source, /function startNodeLongPress\(e: PointerEvent, node: TreeNode\)/)
+  assert.match(source, /if \(!isMobile \|\| e\.pointerType === 'mouse'\) return/)
+  assert.match(source, /openNodeContextMenu\(node, nodeLongPressStart\.x, nodeLongPressStart\.y\)/)
+  assert.match(source, /function moveNodeLongPress[\s\S]*?NODE_LONG_PRESS_MOVE_LIMIT[\s\S]*?cancelNodeLongPress\(\)/)
+  assert.match(source, /@pointerdown="startNodeLongPress\(\$event, item\.node\)"/)
+  assert.match(source, /@pointerup="cancelNodeLongPress"/)
+  assert.match(source, /-webkit-touch-callout:\s*none/)
+  assert.match(source, /user-select:\s*none/)
+})
+
 test('project file tree searches unloaded paths in a temporary ancestor-complete tree', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
@@ -272,11 +289,24 @@ test('project file tree uses native Web file interactions and local binary data'
   assert.match(source, /mode="file"/)
   assert.match(
     source,
-    /'canvas:add-media', \{\s+projectId: projectKey\.value,\s+path: result\.resource\.path,\s+kind: result\.mediaKind/,
+    /function emitMediaToCanvas[\s\S]*?'canvas:add-media', \{\s+projectId: resource\.owner,\s+path: resource\.path,\s+kind/,
   )
   assert.match(source, /node\.mimeType\?\.startsWith\('audio\/'\)/)
   assert.match(viewer, /mode\?: 'creation' \| 'file'/)
   assert.match(viewer, /props\.mode !== 'file'/)
+})
+
+test('memory file-tree canvas action bypasses preview and opens the creation host', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+  const action = source.match(/async function ctxOpenInCanvas[\s\S]*?\n}/)?.[0] || ''
+
+  assert.match(action, /openProjectResource/)
+  assert.match(action, /emitMediaToCanvas/)
+  assert.doesNotMatch(action, /openFile\(/)
+  assert.match(source, /application\/x-jc-media-reference/)
 })
 
 test('top toolbar creates inside the selected directory before falling back to project root', () => {
@@ -314,7 +344,7 @@ test('top toolbar creates beside a selected file instead of falling back to proj
   )
 })
 
-test('editor and creation panel request new project documents through the tree command host', () => {
+test('editor requests new project documents through the tree command host without duplicating it in creation', () => {
   const tree = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
@@ -329,7 +359,7 @@ test('editor and creation panel request new project documents through the tree c
     tree,
     /emitEvent\('open-in-editor', \{\s+resource,\s+content: '',\s+revision: text\.revision/,
   )
-  assert.match(creation, /emitEvent\('project:new-document'\)/)
+  assert.doesNotMatch(creation, /emitEvent\('project:new-document'\)/)
 })
 
 test('project export requests survive until the file tree command host mounts', () => {

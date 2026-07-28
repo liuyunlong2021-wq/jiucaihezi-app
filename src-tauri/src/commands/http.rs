@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tauri::ipc::Channel;
@@ -32,11 +32,34 @@ pub struct HttpDownloadResponse {
     pub data_base64: String,
 }
 
+#[derive(Deserialize)]
+pub struct DocumentMarkdownRequest {
+    pub url: String,
+    pub api_key: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub data_base64: String,
+    pub max_chars: usize,
+}
+
 fn is_unified_api_host(url: &str) -> bool {
     tauri::Url::parse(url)
         .ok()
-        .and_then(|parsed| parsed.host_str().map(|host| host == "api.jiucaihezi.studio"))
+        .and_then(|parsed| {
+            parsed
+                .host_str()
+                .map(|host| host == "api.jiucaihezi.studio")
+        })
         .unwrap_or(false)
+}
+
+fn is_document_converter_url(url: &str) -> bool {
+    tauri::Url::parse(url).ok().is_some_and(|parsed| {
+        parsed.scheme() == "https"
+            && parsed.host_str() == Some("api.jiucaihezi.studio")
+            && parsed.path() == "/documents/markdown"
+            && parsed.query().is_none()
+    })
 }
 
 fn is_newapi_passthrough_path(url: &str) -> bool {
@@ -48,7 +71,9 @@ fn is_newapi_passthrough_path(url: &str) -> bool {
 
 fn has_gateway_session_header(headers: &Option<HashMap<String, String>>) -> bool {
     headers.as_ref().is_some_and(|headers| {
-        headers.keys().any(|key| key.eq_ignore_ascii_case("x-jc-session"))
+        headers
+            .keys()
+            .any(|key| key.eq_ignore_ascii_case("x-jc-session"))
     })
 }
 
@@ -62,7 +87,9 @@ fn should_direct_unified_download_to_newapi(request: &HttpDownloadRequest) -> bo
     is_unified_api_host(&request.url) && is_newapi_passthrough_path(&request.url)
 }
 
-fn with_newapi_source_resolution(mut client_builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+fn with_newapi_source_resolution(
+    mut client_builder: reqwest::ClientBuilder,
+) -> reqwest::ClientBuilder {
     client_builder = client_builder.resolve(
         "api.jiucaihezi.studio",
         std::net::SocketAddr::new(
@@ -114,15 +141,21 @@ impl Utf8StreamDecoder {
 }
 
 fn stream_error_message(status: u16, headers: &HashMap<String, String>, detail: &str) -> String {
-    let header = |name: &str| headers.iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(name))
-        .map(|(_, value)| value.as_str())
-        .unwrap_or("none");
+    let header = |name: &str| {
+        headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+            .unwrap_or("none")
+    };
     let request_id = ["x-oneapi-request-id", "x-request-id", "cf-ray"]
         .iter()
-        .find_map(|name| headers.iter()
-            .find(|(key, _)| key.eq_ignore_ascii_case(name))
-            .map(|(_, value)| value.as_str()))
+        .find_map(|name| {
+            headers
+                .iter()
+                .find(|(key, _)| key.eq_ignore_ascii_case(name))
+                .map(|(_, value)| value.as_str())
+        })
         .unwrap_or("none");
 
     format!(
@@ -149,7 +182,13 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    let method = match request.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
+    let method = match request
+        .method
+        .as_deref()
+        .unwrap_or("GET")
+        .to_uppercase()
+        .as_str()
+    {
         "POST" => reqwest::Method::POST,
         "PUT" => reqwest::Method::PUT,
         "DELETE" => reqwest::Method::DELETE,
@@ -171,7 +210,10 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
         req = req.body(body);
     }
 
-    let resp = req.send().await.map_err(|e| format!("HTTP 请求失败: {}", e))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP 请求失败: {}", e))?;
 
     let status = resp.status().as_u16();
     let mut headers = HashMap::new();
@@ -180,13 +222,95 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
             headers.insert(key.to_string(), v.to_string());
         }
     }
-    let body = resp.text().await.map_err(|e| format!("读取响应失败: {}", e))?;
+    let body = resp
+        .text()
+        .await
+        .map_err(|e| format!("读取响应失败: {}", e))?;
 
-    Ok(HttpResponse { status, headers, body })
+    Ok(HttpResponse {
+        status,
+        headers,
+        body,
+    })
 }
 
 #[tauri::command]
-pub async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDownloadResponse, String> {
+pub async fn document_markdown_request(
+    request: DocumentMarkdownRequest,
+) -> Result<HttpResponse, String> {
+    if !is_document_converter_url(&request.url) {
+        return Err("文档转换地址不受信任".into());
+    }
+    let api_key = request.api_key.trim();
+    if api_key.is_empty() {
+        return Err("请先登录后再上传文档".into());
+    }
+    let data = general_purpose::STANDARD
+        .decode(&request.data_base64)
+        .map_err(|_| "文档数据格式无效".to_string())?;
+    if data.len() > 20 * 1024 * 1024 {
+        return Err("文件超过 20 MB 上限".into());
+    }
+    let filename = std::path::Path::new(&request.filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("document")
+        .to_string();
+    let mime_type = if request.mime_type.trim().is_empty() {
+        "application/octet-stream"
+    } else {
+        request.mime_type.trim()
+    };
+    let file = reqwest::multipart::Part::bytes(data)
+        .file_name(filename)
+        .mime_str(mime_type)
+        .map_err(|_| "文档 MIME 类型无效".to_string())?;
+    let form = reqwest::multipart::Form::new()
+        .text(
+            "max_chars",
+            request.max_chars.clamp(1, 1_000_000).to_string(),
+        )
+        .part("file", file);
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("创建文档转换连接失败: {}", e))?;
+    let response = client
+        .post(&request.url)
+        .bearer_auth(api_key)
+        .header("x-api-key", api_key)
+        .multipart(form)
+        .send()
+        .await
+        .map_err(|e| format!("文档转换请求失败: {}", e))?;
+    let status = response.status().as_u16();
+    let headers = response
+        .headers()
+        .iter()
+        .filter_map(|(key, value)| {
+            value
+                .to_str()
+                .ok()
+                .map(|value| (key.to_string(), value.to_string()))
+        })
+        .collect();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("读取文档转换结果失败: {}", e))?;
+    Ok(HttpResponse {
+        status,
+        headers,
+        body,
+    })
+}
+
+#[tauri::command]
+pub async fn http_download_base64(
+    request: HttpDownloadRequest,
+) -> Result<HttpDownloadResponse, String> {
     let mut client_builder = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
         .pool_idle_timeout(std::time::Duration::from_secs(90));
@@ -211,7 +335,10 @@ pub async fn http_download_base64(request: HttpDownloadRequest) -> Result<HttpDo
             headers.insert(key.to_string(), v.to_string());
         }
     }
-    let bytes = resp.bytes().await.map_err(|e| format!("读取下载数据失败: {}", e))?;
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|e| format!("读取下载数据失败: {}", e))?;
     Ok(HttpDownloadResponse {
         status,
         headers,
@@ -240,7 +367,13 @@ pub async fn http_request_stream(
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
 
-    let method = match request.method.as_deref().unwrap_or("GET").to_uppercase().as_str() {
+    let method = match request
+        .method
+        .as_deref()
+        .unwrap_or("GET")
+        .to_uppercase()
+        .as_str()
+    {
         "POST" => reqwest::Method::POST,
         "PUT" => reqwest::Method::PUT,
         "DELETE" => reqwest::Method::DELETE,
@@ -262,7 +395,10 @@ pub async fn http_request_stream(
         req = req.body(body);
     }
 
-    let resp = req.send().await.map_err(|e| format!("HTTP 请求失败: {}", e))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("HTTP 请求失败: {}", e))?;
 
     let status = resp.status().as_u16();
     let mut headers_map = HashMap::new();
@@ -341,5 +477,21 @@ mod tests {
         assert!(message.contains("content-encoding: gzip"));
         assert!(message.contains("request-id: req_123"));
         assert!(message.contains("error decoding response body"));
+    }
+
+    #[test]
+    fn document_converter_request_is_pinned_to_the_production_endpoint() {
+        assert!(is_document_converter_url(
+            "https://api.jiucaihezi.studio/documents/markdown"
+        ));
+        assert!(!is_document_converter_url(
+            "http://api.jiucaihezi.studio/documents/markdown"
+        ));
+        assert!(!is_document_converter_url(
+            "https://evil.example/documents/markdown"
+        ));
+        assert!(!is_document_converter_url(
+            "https://api.jiucaihezi.studio/documents/markdown?next=evil"
+        ));
     }
 }

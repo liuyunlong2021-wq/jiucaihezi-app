@@ -5,8 +5,8 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
 use super::github_import;
-use crate::skills::path_utils::central_skills_dir;
 use crate::skills::SkillsAppState;
+use crate::skills::path_utils::central_skills_dir;
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -120,7 +120,9 @@ fn marketplace_skills_from_candidates(
 // ─── IPC Commands ────────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn list_registries(state: State<'_, SkillsAppState>) -> Result<Vec<SkillRegistry>, String> {
+pub async fn list_registries(
+    state: State<'_, SkillsAppState>,
+) -> Result<Vec<SkillRegistry>, String> {
     let rows = sqlx::query(
         "SELECT id, name, source_type, url, is_builtin, is_enabled, last_synced,
                 last_attempted_sync, last_sync_status, last_sync_error,
@@ -695,7 +697,10 @@ fn format_reqwest_error(e: &reqwest::Error) -> String {
 }
 
 #[tauri::command]
-pub async fn explain_skill(state: State<'_, SkillsAppState>, content: String) -> Result<String, String> {
+pub async fn explain_skill(
+    state: State<'_, SkillsAppState>,
+    content: String,
+) -> Result<String, String> {
     // Read dynamic provider settings
     async fn get_setting(pool: &crate::skills::db::DbPool, key: &str) -> Option<String> {
         sqlx::query_scalar::<_, String>("SELECT value FROM settings WHERE key = ?")
@@ -1353,16 +1358,15 @@ pub async fn refresh_skill_explanation(
 #[cfg(test)]
 mod tests {
     use super::{
-        add_registry_impl, cache_skill_explanation, classify_reqwest_error,
+        ExplanationApiProtocol, ExplanationErrorKind, RegistryCacheMetadata, RegistrySyncStatus,
+        SyncRegistryOptions, add_registry_impl, cache_skill_explanation, classify_reqwest_error,
         detect_explanation_api_protocol, format_reqwest_error, get_fallback_endpoint,
         load_cached_skill_explanation, marketplace_skills_from_candidates,
         registry_has_cached_skills, search_marketplace_skills_impl, sync_registry_impl,
-        ExplanationApiProtocol, ExplanationErrorKind, RegistryCacheMetadata, RegistrySyncStatus,
-        SyncRegistryOptions,
     };
-    use crate::skills::github_import::RemoteSkillCandidate;
     use crate::skills::db;
-    use tempfile::{tempdir, TempDir};
+    use crate::skills::github_import::RemoteSkillCandidate;
+    use tempfile::{TempDir, tempdir};
 
     async fn setup_test_db() -> (crate::skills::db::DbPool, TempDir) {
         let dir = tempdir().expect("create tempdir");
@@ -1406,14 +1410,18 @@ mod tests {
         assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].id, "openai::openai-docs");
         assert_eq!(skills[0].name, "openai-docs");
-        assert!(skills[0]
-            .download_url
-            .contains("skills/.curated/openai-docs"));
+        assert!(
+            skills[0]
+                .download_url
+                .contains("skills/.curated/openai-docs")
+        );
         assert_eq!(skills[1].id, "openai::skill-creator");
         assert_eq!(skills[1].name, "skill-creator");
-        assert!(skills[1]
-            .download_url
-            .contains("skills/.system/skill-creator"));
+        assert!(
+            skills[1]
+                .download_url
+                .contains("skills/.system/skill-creator")
+        );
     }
 
     #[test]
@@ -1686,9 +1694,10 @@ mod tests {
         .expect("fetch registry");
 
         use sqlx::Row;
-        assert!(row
-            .get::<Option<String>, _>("last_attempted_sync")
-            .is_none());
+        assert!(
+            row.get::<Option<String>, _>("last_attempted_sync")
+                .is_none()
+        );
         assert!(row.get::<Option<String>, _>("last_synced").is_none());
         assert_eq!(
             row.get::<String, _>("last_sync_status"),
@@ -1856,9 +1865,11 @@ mod tests {
         .await
         .expect("registry created");
 
-        assert!(!registry_has_cached_skills(&pool, &registry.id)
-            .await
-            .expect("empty"));
+        assert!(
+            !registry_has_cached_skills(&pool, &registry.id)
+                .await
+                .expect("empty")
+        );
 
         sqlx::query(
             "INSERT INTO marketplace_skills
@@ -1876,8 +1887,10 @@ mod tests {
         .await
         .expect("insert skill");
 
-        assert!(registry_has_cached_skills(&pool, &registry.id)
-            .await
-            .expect("cached"));
+        assert!(
+            registry_has_cached_skills(&pool, &registry.id)
+                .await
+                .expect("cached")
+        );
     }
 }

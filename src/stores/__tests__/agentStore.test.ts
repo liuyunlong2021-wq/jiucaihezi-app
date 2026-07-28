@@ -44,22 +44,16 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   }
 }
 
-test('Web restores saved user Skills alongside the public built-in catalog', { concurrency: false }, async () => {
+test('Web restores only installed user Skills', { concurrency: false }, async () => {
   const legacySkill = skill({ id: 'legacy-writing-skill', name: '旧写作 Skill' })
   const storage = installLocalStorage({ jc_web_skills_v1: JSON.stringify([legacySkill]) })
-  const fetcher = async (url: string | URL | Request) => {
-    assert.equal(String(url), '/skills/index.json')
-    return Response.json([
-      { id: 'writer', name: 'writer', description: '写作', triggers: ['写作'], commands: [], files: ['SKILL.md'] },
-    ])
-  }
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    await agentStore.bootstrapWebSkills(fetcher as typeof fetch)
+    await agentStore.bootstrapWebSkills()
 
-    assert.deepEqual(agentStore.inMemorySkills.map(item => item.id), ['legacy-writing-skill', 'writer'])
+    assert.deepEqual(agentStore.inMemorySkills.map(item => item.id), ['legacy-writing-skill'])
     assert.equal(agentStore.getSkillById('legacy-writing-skill')?.source, 'user')
   } finally {
     storage.restore()
@@ -105,37 +99,16 @@ test('agentStore initialization does not delete legacy persisted Skill data', ()
   }
 })
 
-test('Web Skill warehouse follows the generated public Skill catalog without preloading packages', { concurrency: false }, async () => {
+test('Web Skill warehouse does not expose the bundled product catalog', { concurrency: false }, async () => {
   const storage = installLocalStorage()
-  const calls: string[] = []
-  const fetcher = async (url: string | URL | Request) => {
-    const path = String(url)
-    calls.push(path)
-    if (path === '/skills/index.json') {
-      return Response.json([
-        {
-          id: 'writer', name: 'writer', description: '写作', triggers: ['写作'], commands: [], files: ['SKILL.md'],
-        },
-        {
-          id: 'nested/composer', name: 'composer', description: '合成', triggers: [], commands: [], files: ['SKILL.md'],
-        },
-      ])
-    }
-    throw new Error(`unexpected fetch: ${path}`)
-  }
-
   try {
     setActivePinia(createPinia())
     const agentStore = useAgentStore()
 
-    await agentStore.bootstrapWebSkills(fetcher as typeof fetch)
+    await agentStore.bootstrapWebSkills()
 
-    assert.deepEqual(agentStore.inMemorySkills.map(item => item.id), ['nested/composer', 'writer'])
-    assert.deepEqual(agentStore.inMemorySkills.map(item => item.skillContent), [
-      'skill://nested/composer/SKILL.md',
-      'skill://writer/SKILL.md',
-    ])
-    assert.deepEqual(calls, ['/skills/index.json'])
+    assert.deepEqual(agentStore.inMemorySkills, [])
+    assert.deepEqual(agentStore.getCustomSkills(), [])
   } finally {
     storage.restore()
   }

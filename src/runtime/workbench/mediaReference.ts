@@ -175,12 +175,19 @@ export function projectResourceForMediaTask(task: RecentMediaTask): ProjectResou
       kind: 'media',
     }
   }
-  if (task.directory && task.assetUri) {
-    const path = normalizeProjectMediaReferencePath(task.assetUri, task.directory, 'desktop')
+  const projectPath = String(task.projectPath || '').replace(/^\/+/, '')
+  const assetUri = String(task.assetUri || '').replace(/\\/g, '/')
+  const inferredDirectory =
+    !task.directory && projectPath && assetUri.endsWith(`/${projectPath}`)
+      ? assetUri.slice(0, -(projectPath.length + 1))
+      : ''
+  const directory = task.directory || inferredDirectory
+  if (directory && (projectPath || assetUri)) {
+    const path = normalizeProjectMediaReferencePath(projectPath || assetUri, directory, 'desktop')
     if (path) {
       return {
         runtime: 'desktop',
-        owner: task.directory,
+        owner: directory,
         path,
         name: path.split('/').pop() || path,
         isDirectory: false,
@@ -279,6 +286,7 @@ export function buildMediaReferencePolicy(snapshot: MediaContextSnapshot): strin
       reference =>
         `- ${reference.id} | ${reference.kind} | ${reference.label} | ${reference.source}`,
     ),
+    '用户说“这张图”“之前那张图”等指代且只有一个同类素材时，直接使用它的 ID；有多个且无法确定时，先请用户确认，不要猜测。',
   ].join('\n')
 }
 

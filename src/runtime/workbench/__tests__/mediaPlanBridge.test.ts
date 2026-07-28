@@ -83,6 +83,33 @@ test('public media contract rejects a media plan from another project before sub
   )
 })
 
+test('public media contract submits current-turn attachment references without a project reader', async () => {
+  const image = 'data:image/png;base64,attachment'
+  const result = await preparePublicMediaPlan({
+    owner: 'project-a',
+    plan: {
+      kind: 'image',
+      title: '参考图改造',
+      prompt: '保持角色，改变视角',
+      modelId: 'runninghub/api/rh-gpt2-official',
+      mediaOwner: 'project-a',
+      referenceImages: [image],
+      mediaReferences: [{
+        id: 'ref_attachment',
+        kind: 'image',
+        source: 'attachment',
+        label: '角色图',
+        value: image,
+        explicit: true,
+        locator: { type: 'attachment', messageId: 'turn-1', index: 0 },
+      }],
+    },
+  })
+
+  assert.deepEqual(result.submission.referenceImages, [image])
+  assert.equal(result.submission.plan.mode, 'image-to-image')
+})
+
 test('media plan bridge sends the product image and selected ratio to GPT Image 2 official', () => {
   const submission = buildMediaPlanSubmission({
     kind: 'image',
@@ -110,6 +137,32 @@ test('media plan bridge reuses the creation contract for video', () => {
   assert.equal(video.type, 'video')
   assert.equal(video.videoParams?.duration, 8)
   assert.equal(video.source, 'creation')
+})
+
+test('media plan bridge reuses the creation contract for audio', () => {
+  const audio = buildMediaPlanSubmission({
+    kind: 'audio',
+    title: '主题曲',
+    prompt: '一首轻快的中文流行歌',
+    modelId: 'runninghub/api/rh-suno-v55-single',
+  })
+  assert.equal(audio.type, 'audio')
+  assert.equal(audio.audioParams?.prompt, '一首轻快的中文流行歌')
+  assert.equal(audio.source, 'creation')
+})
+
+test('media plan bridge sends ordered references to Hunyuan image-to-3D', () => {
+  const model3d = buildMediaPlanSubmission({
+    kind: 'model3d',
+    title: '角色模型',
+    prompt: '根据多视图生成角色模型',
+    modelId: 'runninghub/api/rh-3d-image',
+    referenceImages: ['front', 'left'],
+  })
+  assert.equal(model3d.type, 'model3d')
+  assert.deepEqual(model3d.referenceImages, ['front', 'left'])
+  assert.deepEqual(model3d.videoParams?.imageUrls, ['front', 'left'])
+  assert.equal(model3d.plan.task, 'model3d')
 })
 
 test('creative chat exposes a reviewed plan and delegates execution to CreationPanel', () => {

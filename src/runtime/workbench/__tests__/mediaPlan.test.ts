@@ -6,7 +6,9 @@ import {
   buildMediaPlanPolicy,
   getMediaPlanEditorControls,
   parseMediaPlan,
+  parseMediaPlans,
   replaceMediaPlanModelId,
+  stripMediaPlanBlocks,
   updateMediaPlanParameters,
   validateMediaPlan,
 } from '../mediaPlan'
@@ -41,6 +43,37 @@ test('media plan parser accepts one fenced image plan', () => {
     resolution: '2k',
     referenceIds: ['ref_product'],
   })
+})
+
+test('media plan parser accepts multiple independent plans in one fenced array', () => {
+  const content = [
+    '已按三张参考图分别规划：',
+    '```jc-media-plan',
+    JSON.stringify([
+      {
+        kind: 'video', title: '镜头一', prompt: '第一个镜头',
+        modelId: 'runninghub/api/rh-grok-image-video',
+        referenceIds: ['ref_input_1'], ratio: '16:9', duration: 6,
+      },
+      {
+        kind: 'video', title: '镜头二', prompt: '第二个镜头',
+        modelId: 'runninghub/api/rh-grok-image-video',
+        referenceIds: ['ref_input_2'], ratio: '16:9', duration: 6,
+      },
+      {
+        kind: 'video', title: '镜头三', prompt: '第三个镜头',
+        modelId: 'runninghub/api/rh-grok-image-video',
+        referenceIds: ['ref_input_3'], ratio: '16:9', duration: 6,
+      },
+    ]),
+    '```',
+  ].join('\n')
+
+  const plans = parseMediaPlans(content)
+  assert.equal(plans.length, 3)
+  assert.deepEqual(plans.map(plan => plan.title), ['镜头一', '镜头二', '镜头三'])
+  assert.deepEqual(plans.map(plan => plan.referenceIds), [['ref_input_1'], ['ref_input_2'], ['ref_input_3']])
+  assert.equal(stripMediaPlanBlocks(content), '已按三张参考图分别规划：')
 })
 
 test('model-authored plans cannot inject media paths or URLs', () => {
@@ -112,6 +145,7 @@ test('choosing a model in the confirmation card stops default-model refinement',
 
 test('native media planning does not require a bundled Skill', () => {
   assert.doesNotMatch(MEDIA_PLAN_POLICY, /jc-instant-create/)
+  assert.match(MEDIA_PLAN_POLICY, /prompt 必须原样使用，不得擅自扩写、润色或替换/)
 })
 
 test('native media policy is generated from the executable Creation registry', () => {
@@ -176,7 +210,7 @@ test('accepts the fixed GPT Image 2 official handoff with a user-selected ratio'
   assert.doesNotThrow(() => validateMediaPlan(plan))
 })
 
-test('accepts a registered video plan and rejects unsupported task kinds', () => {
+test('accepts registered video and audio plans', () => {
   const video = parseMediaPlan([
     '```jc-media-plan',
     JSON.stringify({
@@ -190,7 +224,31 @@ test('accepts a registered video plan and rejects unsupported task kinds', () =>
   ].join('\n'))
   assert.doesNotThrow(() => validateMediaPlan(video))
   assert.throws(() => validateMediaPlan({ ...video, kind: 'image' }), /类型与模型不匹配/)
-  assert.throws(() => parseMediaPlan('```jc-media-plan\n{"kind":"audio"}\n```'), /只支持/)
+
+  const audio = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'audio',
+    title: '主题曲',
+    prompt: '一首轻快的中文流行歌',
+    modelId: 'runninghub/api/rh-suno-v55-single',
+  }) + '\n```')
+  assert.equal(audio.kind, 'audio')
+  assert.doesNotThrow(() => validateMediaPlan(audio))
+})
+
+test('3D media plans select text or image Hunyuan models from references', () => {
+  const text = parseMediaPlan('```jc-media-plan\n' + JSON.stringify({
+    kind: 'model3d', title: '钥匙模型', prompt: '一把旧铜钥匙',
+  }) + '\n```')
+  assert.equal(text.modelId, 'runninghub/api/rh-3d-text')
+  assert.doesNotThrow(() => validateMediaPlan(text))
+
+  const withImage = {
+    ...text,
+    referenceImages: ['data:image/png;base64,front'],
+    modelId: 'runninghub/api/rh-3d-image',
+  }
+  assert.doesNotThrow(() => validateMediaPlan(withImage))
+  assert.equal(getMediaPlanEditorControls(withImage).models.length, 1)
 })
 
 test('media plan editor uses compatible registry models and normalizes changed model parameters', () => {
@@ -213,4 +271,24 @@ test('media plan editor uses compatible registry models and normalizes changed m
   assert.equal(updated.ratio, '1:1')
   assert.equal(updated.resolution, '2k')
   assert.doesNotThrow(() => validateMediaPlan(updated))
+})
+
+test('media plan editor keeps the user in control of the final prompt and disambiguates duplicate models', () => {
+  const plan = {
+    kind: 'video' as const,
+    title: '推进镜头',
+    prompt: '专业扩写版本',
+    modelId: 'newapi/zx/veo-3.1-fast-generate-preview',
+    referenceImages: ['data:image/jpeg;base64,reference'],
+  }
+
+  const updated = updateMediaPlanParameters(plan, { prompt: '镜头推进' })
+  const veoFast = getMediaPlanEditorControls(updated).models
+    .filter(model => model.label.startsWith('Veo 3.1 Fast'))
+
+  assert.equal(updated.prompt, '镜头推进')
+  assert.deepEqual(veoFast.map(model => model.label), [
+    'Veo 3.1 Fast · 直连',
+    'Veo 3.1 Fast · RunningHub',
+  ])
 })

@@ -1,4 +1,4 @@
-export type CreationTask = 'image' | 'video' | 'audio' | 'ai-app'
+export type CreationTask = 'image' | 'video' | 'audio' | 'model3d' | 'ai-app'
 
 export type CreationSource = 'newapi-direct' | 'runninghub'
 
@@ -33,6 +33,8 @@ export type CreationMode =
   | 'image-to-video'
   | 'video-edit'
   | 'text-to-audio'
+  | 'text-to-3d'
+  | 'image-to-3d'
   | 'lyrics'
   | 'voice-clone'
   | 'voice-design'
@@ -54,7 +56,7 @@ export type CreationResultExtractor =
 
 export type CreationInputModality = 'text' | 'image' | 'video' | 'audio'
 
-export type CreationOutputModality = 'image' | 'video' | 'audio' | 'text'
+export type CreationOutputModality = 'image' | 'video' | 'audio' | 'model3d' | 'text'
 
 export interface CreationFieldOption {
   value: string | number | boolean
@@ -84,7 +86,7 @@ export interface CreationModelSpec {
   apiStyle: CreationApiStyle
   mode: CreationMode
   contractStatus: CreationContractStatus
-  price?: number
+  price?: number | string
   endpoint: string
   poll?: {
     kind: CreationPollKind
@@ -129,7 +131,7 @@ export interface CreationModelListItem {
   source: CreationSource
   upstreamFamily: CreationUpstreamFamily
   mode: CreationMode
-  price?: number
+  price?: number | string
   contractStatus: CreationContractStatus
   disabledReason?: string
   badges: string[]
@@ -163,7 +165,7 @@ export interface CreationRunPlan {
   pollKind: CreationPollKind
   assetFlow: CreationAssetFlow
   submitSummary: string
-  price?: number
+  price?: number | string
   warnings?: string[]
   debug: {
     referenceImageCount: number

@@ -7,9 +7,9 @@ use serde::{Deserialize, Serialize};
 use serde_json;
 use tauri::{Emitter, State};
 
+use crate::skills::SkillsAppState;
 use crate::skills::db::{self, DbPool};
 use crate::skills::path_utils::{central_skills_dir, path_to_string, resolve_home_dir};
-use crate::skills::SkillsAppState;
 
 const OBSIDIAN_PLATFORM_ID: &str = "obsidian";
 const OBSIDIAN_PLATFORM_NAME: &str = "Obsidian";
@@ -1326,7 +1326,9 @@ pub async fn get_scan_roots(state: State<'_, SkillsAppState>) -> Result<Vec<Scan
 }
 
 #[tauri::command]
-pub async fn get_obsidian_vaults(state: State<'_, SkillsAppState>) -> Result<Vec<ObsidianVault>, String> {
+pub async fn get_obsidian_vaults(
+    state: State<'_, SkillsAppState>,
+) -> Result<Vec<ObsidianVault>, String> {
     get_obsidian_vaults_impl(&state.db).await
 }
 
@@ -1699,17 +1701,14 @@ mod tests {
         "/tmp/skills-manage-val-cross-012/cursor-platform-skills";
     const CROSS_AREA_FIXTURE_PARENT_PATH: &str =
         "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents";
-    const CROSS_AREA_FIXTURE_VAULT_PATH: &str =
-        "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents/make-money";
+    const CROSS_AREA_FIXTURE_VAULT_PATH: &str = "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents/make-money";
     const CROSS_AREA_FIXTURE_VAULT_NAME: &str = "make-money";
     const CROSS_AREA_FIXTURE_SKILL_DIR_NAME: &str = "money-researcher";
     const CROSS_AREA_FIXTURE_SKILL_NAME: &str = "Money Researcher";
     const CROSS_AREA_FIXTURE_SKILL_DESCRIPTION: &str = "Correlated fixture skill";
     const CROSS_AREA_FIXTURE_SKILL_ID: &str = "obsidian__ef800504428ee0cc__money-researcher";
-    const CROSS_AREA_FIXTURE_SOURCE_DIR: &str =
-        "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents/make-money/.agents/skills/money-researcher";
-    const CROSS_AREA_FIXTURE_SOURCE_FILE: &str =
-        "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents/make-money/.agents/skills/money-researcher/SKILL.md";
+    const CROSS_AREA_FIXTURE_SOURCE_DIR: &str = "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents/make-money/.agents/skills/money-researcher";
+    const CROSS_AREA_FIXTURE_SOURCE_FILE: &str = "/tmp/skills-manage-val-cross-012/Library/Mobile Documents/iCloud~md~obsidian/Documents/make-money/.agents/skills/money-researcher/SKILL.md";
     const CROSS_AREA_FIXTURE_CENTRAL_TARGET: &str =
         "/tmp/skills-manage-val-cross-012/central/money-researcher";
     const CROSS_AREA_FIXTURE_SYMLINK_TARGET: &str =
@@ -1960,9 +1959,11 @@ mod tests {
             projects[0].skills[0].id,
             "hermes__hermes-project__weights-and-biases"
         );
-        assert!(projects[0].skills[0]
-            .dir_path
-            .contains(".hermes/skills/mlops/evaluation/weights-and-biases"));
+        assert!(
+            projects[0].skills[0]
+                .dir_path
+                .contains(".hermes/skills/mlops/evaluation/weights-and-biases")
+        );
     }
 
     #[tokio::test]
@@ -2541,11 +2542,13 @@ mod tests {
             .find(|project| project.project_path == vault_dir.to_string_lossy())
             .expect("marked vault should be discovered as its own project");
         assert_eq!(vault.skills.len(), 3);
-        assert!(vault
-            .skills
-            .iter()
-            .all(|skill| skill.platform_id == OBSIDIAN_PLATFORM_ID
-                && skill.platform_name == OBSIDIAN_PLATFORM_NAME));
+        assert!(
+            vault
+                .skills
+                .iter()
+                .all(|skill| skill.platform_id == OBSIDIAN_PLATFORM_ID
+                    && skill.platform_name == OBSIDIAN_PLATFORM_NAME)
+        );
         let selected_dirs: Vec<String> = vault
             .skills
             .iter()
@@ -2655,12 +2658,16 @@ mod tests {
             2,
             "same basename and skill id in different vaults must remain distinct"
         );
-        assert!(vault_projects
-            .iter()
-            .any(|project| project.project_path == vault_a.to_string_lossy()));
-        assert!(vault_projects
-            .iter()
-            .any(|project| project.project_path == vault_b.to_string_lossy()));
+        assert!(
+            vault_projects
+                .iter()
+                .any(|project| project.project_path == vault_a.to_string_lossy())
+        );
+        assert!(
+            vault_projects
+                .iter()
+                .any(|project| project.project_path == vault_b.to_string_lossy())
+        );
     }
 
     #[tokio::test]
@@ -3136,10 +3143,12 @@ mod tests {
         .unwrap();
         assert_eq!(platform_result.skill_id, CROSS_AREA_FIXTURE_SKILL_DIR_NAME);
         let platform_target = PathBuf::from(CROSS_AREA_FIXTURE_SYMLINK_TARGET);
-        assert!(std::fs::symlink_metadata(&platform_target)
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            std::fs::symlink_metadata(&platform_target)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
         let platform_install =
             db::get_skill_installations(&pool, CROSS_AREA_FIXTURE_SKILL_DIR_NAME)
                 .await
@@ -4020,7 +4029,6 @@ mod tests {
         );
     }
 
-
     // ── Recursive scan tests ──────────────────────────────────────────────────
 
     #[tokio::test]
@@ -4708,7 +4716,10 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(third.total_projects, 1);
-        assert_ne!(third.projects[0].skills[0].platform_id, OBSIDIAN_PLATFORM_ID);
+        assert_ne!(
+            third.projects[0].skills[0].platform_id,
+            OBSIDIAN_PLATFORM_ID
+        );
         assert!(
             third.projects[0].skills[0]
                 .dir_path

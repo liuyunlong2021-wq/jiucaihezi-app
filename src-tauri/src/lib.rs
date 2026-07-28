@@ -10,17 +10,16 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::time::Instant;
-use tauri::{webview::NewWindowResponse, Manager, WebviewWindowBuilder};
+use tauri::{Manager, WebviewWindowBuilder, webview::NewWindowResponse};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 
 mod commands;
 mod secure_store;
 mod skills;
 // re-export tools functions for remaining inline code
-use crate::commands::opencode::{stop_opencode_runtime, OpenCodeRuntime};
-
+use crate::commands::opencode::{OpenCodeRuntime, stop_opencode_runtime};
 
 // ─── Plugin 系统命令 ───
 
@@ -539,17 +538,22 @@ struct MediaCaptureJobs {
 
 impl MediaCaptureJobs {
     async fn is_allowed_input(&self, path: &Path) -> bool {
-        let Ok(canonical) = std::fs::canonicalize(path) else { return false; };
+        let Ok(canonical) = std::fs::canonicalize(path) else {
+            return false;
+        };
         self.allowed_inputs.lock().await.contains(&canonical)
     }
     async fn allow_input(&self, path: &Path) -> Result<PathBuf, String> {
         let canonical = std::fs::canonicalize(path).map_err(|_| "文件不可访问，请重新选择。")?;
-        if !canonical.is_file() { return Err("请选择有效的音频或视频文件。".into()); }
+        if !canonical.is_file() {
+            return Err("请选择有效的音频或视频文件。".into());
+        }
         self.allowed_inputs.lock().await.insert(canonical.clone());
         Ok(canonical)
     }
     async fn allow_output(&self, path: &Path) -> Result<(), String> {
-        let canonical = std::fs::canonicalize(path).map_err(|e| format!("输出文件不可访问: {e}"))?;
+        let canonical =
+            std::fs::canonicalize(path).map_err(|e| format!("输出文件不可访问: {e}"))?;
         self.allowed_outputs.lock().await.insert(canonical);
         Ok(())
     }
@@ -557,7 +561,9 @@ impl MediaCaptureJobs {
 
 fn sanitize_media_process_error(detail: &str, fallback: &str) -> String {
     let v = detail.trim();
-    if v.is_empty() { return fallback.into(); }
+    if v.is_empty() {
+        return fallback.into();
+    }
     let first_line = v.lines().next().unwrap_or(fallback);
     let lower = first_line.to_ascii_lowercase();
     let exposes_internal_tool = ["ffmpeg", "whisper", "rapidocr", "yt-dlp"]
@@ -609,7 +615,10 @@ impl ConversionJobs {
         self.cancelled.lock().await.insert(job_id.to_string());
         let pid = self.pids.lock().await.get(job_id).copied();
         if let Some(pid) = pid {
-            let _ = StdCommand::new("kill").arg("-TERM").arg(pid.to_string()).output();
+            let _ = StdCommand::new("kill")
+                .arg("-TERM")
+                .arg(pid.to_string())
+                .output();
         }
     }
 }
@@ -628,7 +637,7 @@ fn split_command(command: &str) -> Result<(String, Vec<String>), String> {
 mod tests {
     use super::*;
     use crate::commands::http::{
-        should_direct_unified_api_to_newapi, HttpRequest, Utf8StreamDecoder,
+        HttpRequest, Utf8StreamDecoder, should_direct_unified_api_to_newapi,
     };
     use crate::commands::media::{
         convert_markdown_for_output, find_transcript_output, is_meaningful_markdown,
@@ -640,23 +649,23 @@ mod tests {
         latest_skill_seekers_output_dir,
     };
     use crate::commands::tools::{
-        opencode_platform_package_dir, opencode_resource_names,
-        resolve_opencode_binary_from_inputs,
+        opencode_platform_package_dir, opencode_resource_names, resolve_opencode_binary_from_inputs,
     };
     use std::time::SystemTime;
 
     fn temp_test_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "jc_skill_material_{}_{}",
-            name,
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("jc_skill_material_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp test dir");
         dir
     }
 
-    fn compile_input(runtime_root: &Path, source_type: &str, value: &str) -> SkillMaterialCompileInput {
+    fn compile_input(
+        runtime_root: &Path,
+        source_type: &str,
+        value: &str,
+    ) -> SkillMaterialCompileInput {
         SkillMaterialCompileInput {
             runtime_root: runtime_root.to_string_lossy().to_string(),
             workspace_path: temp_test_dir("workspace").to_string_lossy().to_string(),
@@ -681,7 +690,10 @@ mod tests {
         assert!(validate_selected_media_path(&file.to_string_lossy()).is_ok());
         assert!(validate_selected_media_path("demo.mp4").is_err());
         assert!(validate_selected_media_path("").is_err());
-        assert!(validate_selected_media_path(&format!("{}/../demo.mp4", root.to_string_lossy())).is_err());
+        assert!(
+            validate_selected_media_path(&format!("{}/../demo.mp4", root.to_string_lossy()))
+                .is_err()
+        );
         assert!(validate_selected_media_path(&root.to_string_lossy()).is_err());
     }
 
@@ -728,55 +740,128 @@ mod tests {
         let spec = build_skill_material_command(&input).expect("build command");
 
         assert_eq!(spec.program, "uv");
-        assert_eq!(spec.env.get("GITHUB_TOKEN").map(String::as_str), Some("ghp_secret_token"));
+        assert_eq!(
+            spec.env.get("GITHUB_TOKEN").map(String::as_str),
+            Some("ghp_secret_token")
+        );
         assert!(!spec.args.iter().any(|arg| arg.contains("ghp_secret_token")));
         assert!(!spec.display_command.contains("ghp_secret_token"));
-        assert_eq!(spec.args, vec![
-            "run",
-            "skill-seekers",
-            "create",
-            "owner/project",
-            "--name",
-            "Repo Skill",
-            "--preset",
-            "quick",
-            "--output",
-            input.workspace_path.as_str(),
-            "--enhance-level",
-            "0",
-            "--quiet",
-            "--non-interactive",
-        ]);
+        assert_eq!(
+            spec.args,
+            vec![
+                "run",
+                "skill-seekers",
+                "create",
+                "owner/project",
+                "--name",
+                "Repo Skill",
+                "--preset",
+                "quick",
+                "--output",
+                input.workspace_path.as_str(),
+                "--enhance-level",
+                "0",
+                "--quiet",
+                "--non-interactive",
+            ]
+        );
     }
 
     #[test]
     fn skill_material_command_writes_to_job_workspace() {
         let runtime_root = temp_test_dir("runtime_workspace");
-        let input = compile_input(&runtime_root, "local_codebase", "/Users/by3/Documents/project");
+        let input = compile_input(
+            &runtime_root,
+            "local_codebase",
+            "/Users/by3/Documents/project",
+        );
 
         let spec = build_skill_material_command(&input).expect("build command");
 
-        let output_index = spec.args.iter().position(|arg| arg == "--output").expect("output flag");
-        assert_eq!(spec.args.get(output_index + 1).map(String::as_str), Some(input.workspace_path.as_str()));
+        let output_index = spec
+            .args
+            .iter()
+            .position(|arg| arg == "--output")
+            .expect("output flag");
+        assert_eq!(
+            spec.args.get(output_index + 1).map(String::as_str),
+            Some(input.workspace_path.as_str())
+        );
     }
 
     #[test]
     fn skill_material_source_validation_rejects_unsafe_inputs() {
         let runtime_root = temp_test_dir("runtime_validation");
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "documentation_url", "file:///tmp/a")).is_err());
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "documentation_url", "http://localhost:3000/docs")).is_err());
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "documentation_url", "https://user:pass@example.com/docs")).is_err());
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "documentation_url", "http://169.254.169.254/latest/meta-data")).is_err());
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "local_codebase", "../project")).is_err());
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "github_repo", "https://example.com/repo")).is_err());
-        assert!(build_skill_material_command(&compile_input(&runtime_root, "openapi", "https://example.com/openapi.json")).is_err());
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "documentation_url",
+                "file:///tmp/a"
+            ))
+            .is_err()
+        );
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "documentation_url",
+                "http://localhost:3000/docs"
+            ))
+            .is_err()
+        );
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "documentation_url",
+                "https://user:pass@example.com/docs"
+            ))
+            .is_err()
+        );
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "documentation_url",
+                "http://169.254.169.254/latest/meta-data"
+            ))
+            .is_err()
+        );
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "local_codebase",
+                "../project"
+            ))
+            .is_err()
+        );
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "github_repo",
+                "https://example.com/repo"
+            ))
+            .is_err()
+        );
+        assert!(
+            build_skill_material_command(&compile_input(
+                &runtime_root,
+                "openapi",
+                "https://example.com/openapi.json"
+            ))
+            .is_err()
+        );
 
         #[cfg(unix)]
         {
             let secret_target = temp_test_dir("source_secret_target");
             let link = runtime_root.join("link_to_secret");
             std::os::unix::fs::symlink(&secret_target, &link).expect("create source symlink");
-            assert!(build_skill_material_command(&compile_input(&runtime_root, "local_codebase", &link.to_string_lossy())).is_err());
+            assert!(
+                build_skill_material_command(&compile_input(
+                    &runtime_root,
+                    "local_codebase",
+                    &link.to_string_lossy()
+                ))
+                .is_err()
+            );
         }
     }
 
@@ -793,7 +878,8 @@ mod tests {
 
         #[cfg(unix)]
         {
-            std::os::unix::fs::symlink(root.join("SKILL.md"), root.join("references/link.md")).expect("symlink");
+            std::os::unix::fs::symlink(root.join("SKILL.md"), root.join("references/link.md"))
+                .expect("symlink");
             assert!(collect_skill_material_raw_files(&root, 10, 1024).is_err());
         }
     }
@@ -809,8 +895,13 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(2));
         std::fs::write(new_dir.join("SKILL.md"), "# New").expect("write new");
 
-        let found = latest_skill_seekers_output_dir(&runtime_root, std::time::SystemTime::UNIX_EPOCH).expect("find latest output");
-        assert_eq!(found.file_name().and_then(|name| name.to_str()), Some("new"));
+        let found =
+            latest_skill_seekers_output_dir(&runtime_root, std::time::SystemTime::UNIX_EPOCH)
+                .expect("find latest output");
+        assert_eq!(
+            found.file_name().and_then(|name| name.to_str()),
+            Some("new")
+        );
 
         let files = collect_skill_material_raw_files(&found, 10, 1024).expect("collect latest");
         assert_eq!(files[0].path, "SKILL.md");
@@ -867,11 +958,15 @@ mod tests {
 
     #[test]
     fn validates_json_and_srt_outputs() {
-        let json = convert_markdown_for_output("json", "```json\n{\"a\":1}\n```").expect("json output");
+        let json =
+            convert_markdown_for_output("json", "```json\n{\"a\":1}\n```").expect("json output");
         assert_eq!(json, "{\n  \"a\": 1\n}\n");
 
         let srt = "1\n00:00:00,000 --> 00:00:01,000\n你好\n";
-        assert_eq!(convert_markdown_for_output("srt", srt).expect("srt output"), srt);
+        assert_eq!(
+            convert_markdown_for_output("srt", srt).expect("srt output"),
+            srt
+        );
         assert!(convert_markdown_for_output("srt", "# 普通正文").is_err());
     }
 
@@ -881,14 +976,9 @@ mod tests {
         let explicit = root.join("custom-opencode");
         std::fs::write(&explicit, b"#!/bin/sh\n").expect("write fake opencode");
 
-        let resolved = resolve_opencode_binary_from_inputs(
-            &[],
-            None,
-            Some(explicit.as_os_str()),
-            None,
-            None,
-        )
-        .expect("resolve explicit opencode");
+        let resolved =
+            resolve_opencode_binary_from_inputs(&[], None, Some(explicit.as_os_str()), None, None)
+                .expect("resolve explicit opencode");
 
         assert_eq!(resolved, explicit);
     }
@@ -904,7 +994,8 @@ mod tests {
             .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
             .join(opencode_platform_package_dir().expect("platform package"))
             .join("bin/opencode");
-        std::fs::create_dir_all(dev_binary.parent().expect("dev parent")).expect("mkdir dev parent");
+        std::fs::create_dir_all(dev_binary.parent().expect("dev parent"))
+            .expect("mkdir dev parent");
         std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
 
         let resolved = resolve_opencode_binary_from_inputs(
@@ -926,17 +1017,13 @@ mod tests {
             .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
             .join(opencode_platform_package_dir().expect("platform package"))
             .join("bin/opencode");
-        std::fs::create_dir_all(dev_binary.parent().expect("dev parent")).expect("mkdir dev parent");
+        std::fs::create_dir_all(dev_binary.parent().expect("dev parent"))
+            .expect("mkdir dev parent");
         std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
 
-        let resolved = resolve_opencode_binary_from_inputs(
-            &[],
-            Some(home.as_path()),
-            None,
-            None,
-            None,
-        )
-        .expect("resolve dev checkout opencode");
+        let resolved =
+            resolve_opencode_binary_from_inputs(&[], Some(home.as_path()), None, None, None)
+                .expect("resolve dev checkout opencode");
 
         assert_eq!(resolved, dev_binary);
     }
@@ -945,9 +1032,12 @@ mod tests {
     fn opencode_binary_resolution_uses_bundled_resource_before_path() {
         let resource_dir = temp_test_dir("opencode_resource");
         let path_dir = temp_test_dir("opencode_path_with_resource");
-        let bundled = resource_dir.join("binaries").join(opencode_resource_names()[0].clone());
+        let bundled = resource_dir
+            .join("binaries")
+            .join(opencode_resource_names()[0].clone());
         let path_binary = path_dir.join("opencode");
-        std::fs::create_dir_all(bundled.parent().expect("bundled parent")).expect("mkdir bundled parent");
+        std::fs::create_dir_all(bundled.parent().expect("bundled parent"))
+            .expect("mkdir bundled parent");
         std::fs::write(&bundled, b"#!/bin/sh\n").expect("write bundled opencode");
         std::fs::write(&path_binary, b"#!/bin/sh\n").expect("write path opencode");
 
@@ -976,8 +1066,8 @@ mod tests {
     fn opencode_runtime_dirs_are_created_under_runtime_root() {
         let root = temp_test_dir("opencode_runtime_dirs");
 
-        let (data, state, config, workspace) = prepare_opencode_runtime_dirs(&root)
-            .expect("prepare runtime dirs");
+        let (data, state, config, workspace) =
+            prepare_opencode_runtime_dirs(&root).expect("prepare runtime dirs");
 
         assert_eq!(data, root.join("data"));
         assert_eq!(state, root.join("state"));
@@ -1038,6 +1128,9 @@ mod tests {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(target_os = "ios")]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // ─── Windows WebView2 检测 ───
     // Tauri v2 在 Windows 上依赖系统 WebView2 Runtime（不像 Electron 自带 Chromium）。
     // 若未安装，Tauri 自身会弹错误对话框引导安装；此处为补充日志。
@@ -1059,7 +1152,10 @@ pub fn run() {
         if found {
             eprintln!("[JC] ✅ WebView2 Runtime 已安装");
         } else {
-            eprintln!("[JC] ❌ WebView2 Runtime 未安装！（已检查: {}）", checked_paths.join(", "));
+            eprintln!(
+                "[JC] ❌ WebView2 Runtime 未安装！（已检查: {}）",
+                checked_paths.join(", ")
+            );
             eprintln!("[JC] 请从以下地址下载安装：");
             eprintln!("[JC] https://go.microsoft.com/fwlink/p/?LinkId=2124703");
             eprintln!("[JC] 安装后重新运行韭菜盒子即可。");
@@ -1072,17 +1168,20 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
-            let skills_db_dir = skills::path_utils::app_data_dir();
-            std::fs::create_dir_all(&skills_db_dir)
-                .expect("Failed to create ~/.skillsmanage directory");
+            let app_data = app.path().app_data_dir()?;
+            let skills_db_dir = app_data.join("skillsmanage");
+            std::fs::create_dir_all(&skills_db_dir)?;
             let skills_db_path =
                 skills::path_utils::path_to_string(&skills_db_dir.join("db.sqlite"));
+            #[cfg(target_os = "ios")]
+            let mobile_skills_root = app_data.join("skills");
 
             // 解析内置 Skill 源目录（同步，不阻塞窗口创建）
             // dev: 从 target/debug/ 上 3 层到项目根 → public/skills/
@@ -1108,6 +1207,21 @@ pub fn run() {
                         if let Err(e) = skills::db::init_database(&pool).await {
                             eprintln!("[JC] skills DB init failed: {e}");
                         }
+                        #[cfg(target_os = "ios")]
+                        {
+                            let root = skills::path_utils::path_to_string(&mobile_skills_root);
+                            if let Err(e) = std::fs::create_dir_all(&mobile_skills_root) {
+                                eprintln!("[JC] mobile skills directory failed: {e}");
+                            } else if let Err(e) = sqlx::query(
+                                "UPDATE agents SET global_skills_dir = ? WHERE id = 'central'",
+                            )
+                            .bind(root)
+                            .execute(&pool)
+                            .await
+                            {
+                                eprintln!("[JC] mobile skills path repair failed: {e}");
+                            }
+                        }
                         // 内置 Skill 保持在应用资源中；仅清理旧版本创建的带标记副本。
                         if let Some(ref src) = skills_src {
                             if let Err(e) = skills::db::remove_seeded_preset_skills(src) {
@@ -1126,7 +1240,6 @@ pub fn run() {
             });
 
             // 确保应用数据目录存在
-            let app_data = app.path().app_data_dir().expect("failed to get app data dir");
             std::fs::create_dir_all(&app_data).ok();
             // 创建 vault 子目录
             std::fs::create_dir_all(app_data.join("vault")).ok();
@@ -1137,7 +1250,7 @@ pub fn run() {
             let app_handle_nav = app.handle().clone();
             let app_handle_new = app.handle().clone();
 
-            let window = WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            let window_builder = WebviewWindowBuilder::from_config(app.handle(), window_config)?
                 .on_navigation(move |url| {
                     if is_workbench_return_url(url) {
                         if let Some(main) = app_handle_nav.get_webview_window("main") {
@@ -1220,8 +1333,10 @@ pub fn run() {
 })();
 "#,
                 )
-                .enable_clipboard_access()
-                .build()?;
+                .enable_clipboard_access();
+            #[cfg(target_os = "ios")]
+            let window_builder = window_builder.with_input_accessory_view_builder(|_| None);
+            let window = window_builder.build()?;
 
             #[cfg(unix)]
             {
@@ -1334,6 +1449,7 @@ pub fn run() {
             commands::clipboard::write_clipboard_text,
             commands::tools::check_whisper_available,
             commands::http::http_request,
+            commands::http::document_markdown_request,
             commands::http::http_download_base64,
             commands::http::http_request_stream,
             secure_store::get_api_key,
@@ -1395,6 +1511,8 @@ pub fn run() {
             commands::dev::dev_run_command,
             commands::dev::dev_generate_video_thumbnail,
             commands::dev::pick_project_folder,
+            commands::dev::list_mobile_projects,
+            commands::dev::create_mobile_project,
             commands::dev::create_production_project,
             commands::dev::open_file_picker,
             commands::dev::save_file_picker,

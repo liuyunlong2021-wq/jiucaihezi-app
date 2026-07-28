@@ -94,6 +94,18 @@ def _media_value_for_key(inputs: dict[str, Any], key: str, param_type: str) -> A
         elif _value_present(images):
             image_list = [images]
         single_image = inputs.get("image") if _value_present(inputs.get("image")) else None
+        hunyuan_view_index = {
+            "imageurl": 0,
+            "leftimageurl": 1,
+            "rightimageurl": 2,
+            "backimageurl": 3,
+            "topimageurl": 4,
+            "bottomimageurl": 5,
+            "leftfrontimageurl": 6,
+            "rightfrontimageurl": 7,
+        }.get(key_lower)
+        if hunyuan_view_index is not None:
+            return image_list[hunyuan_view_index] if len(image_list) > hunyuan_view_index else inputs.get(key)
         if key_lower in ("lastframeurl", "lastimageurl"):
             return image_list[1] if len(image_list) > 1 else inputs.get(key)
         if key_lower in ("firstframeurl", "firstimageurl", "imageurl"):

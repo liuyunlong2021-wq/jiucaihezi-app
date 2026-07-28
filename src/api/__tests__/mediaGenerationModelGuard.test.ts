@@ -40,6 +40,7 @@ test('media generation API rejects removed and stale model ids before execution'
 
 test('media generation API allows only approved models for each execution kind', () => {
   assert.doesNotThrow(() => assertMediaModelExecutable('gpt-image-2', 'image'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('gpt-image-2-vip', 'image'))
   assert.throws(() => assertMediaModelExecutable('nano-banana-2k', 'image'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-4k', 'image'))
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-pro-4k', 'image'))
@@ -51,6 +52,8 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('seedance-2.0', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('seedance-2.0-fast', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-video-v31-fast', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('veo-3.1-generate-preview', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('veo-3.1-fast-generate-preview', 'video'))
   assert.throws(() => assertMediaModelExecutable('rh-aiapp-fast-digital-human', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-aiapp-digital-human', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-aiapp-director', 'video'), /不可用|重新选择/)
@@ -80,6 +83,49 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('gpt-image-2', 'video'), /不支持/)
   assert.throws(() => assertMediaModelExecutable('grok-video-3', 'image'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('rh-suno-v55-single', 'video'), /不支持/)
+})
+
+test('Veo reference video uses multipart input_reference and resolves the completed public task URL', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const resultUrl = 'https://api.jiucaihezi.studio/v1/videos/task_veo_001/content'
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      assert.ok(init.body instanceof FormData)
+      assert.equal(init.body.get('model'), 'veo-3.1-generate-preview')
+      assert.equal(init.body.get('seconds'), '4')
+      assert.equal(init.body.get('size'), '1280x720')
+      assert.equal(init.body.get('resolution'), '720p')
+      assert.equal(init.body.get('aspectRatio'), '16:9')
+      assert.ok(init.body.get('input_reference') instanceof Blob)
+      return Response.json({ id: 'task_veo_001', status: 'queued' })
+    }
+    if (url.endsWith('/v1/videos/task_veo_001')) {
+      return Response.json({ id: 'task_veo_001', status: 'completed', progress: 100 })
+    }
+    if (url.endsWith('/v1/video/generations/task_veo_001')) {
+      return Response.json({ code: 'success', data: { status: 'SUCCESS', result_url: resultUrl } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const result = await withImmediateTimers(() => generateVideo({
+      model: 'veo-3.1-generate-preview',
+      prompt: '让画面动起来',
+      aspectRatio: '16:9',
+      resolution: '720p',
+      duration: 4,
+      imageUrl: 'data:image/png;base64,iVBORw0KGgo=',
+    }))
+    assert.equal(result.url, resultUrl)
+    assert.equal(result.taskId, 'task_veo_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
 })
 
 test('media generation API rejects backend-disabled runtime availability before execution', () => {

@@ -120,3 +120,9 @@ ul[data-type="taskList"] li > div { flex: 1; }
 
 /* Highlight */
 mark { background: rgba(255, 213, 79, 0.45); border-radius: 3px; padding: 0 2px; }
+
+@media (max-width: 760px) {
+  input:not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"] {
+    font-size: max(16px, var(--font-base, 14px)) !important;
+  }
+}

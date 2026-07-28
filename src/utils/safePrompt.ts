@@ -9,13 +9,14 @@ let activeResolve: ((value: string | null) => void) | null = null
 
 export interface SafePromptOptions {
   inputType?: 'text' | 'password'
+  forceDom?: boolean
 }
 
 export async function safePrompt(message: string, defaultValue = '', options: SafePromptOptions = {}): Promise<string | null> {
   // ponytail: Tauri v2 的全局变量是 __TAURI_INTERNALS__，不是 __TAURI__（v1）
   // 用 isTauriRuntime() 正确兼容 Tauri v2
   const { isTauriRuntime } = await import('./tauriEnv')
-  if (!isTauriRuntime()) {
+  if (!isTauriRuntime() && !options.forceDom) {
     return window.prompt(message, defaultValue)
   }
 

@@ -37,6 +37,7 @@
     "dialog:allow-ask",
     "shell:default",
     "shell:allow-open",
+    "opener:default",
     "deep-link:default",
     "deep-link:allow-get-current",
     "process:default",

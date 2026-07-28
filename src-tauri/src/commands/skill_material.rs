@@ -1,10 +1,13 @@
+use crate::commands::dev::canonical_root;
+use crate::{
+    SkillMaterialCompileInput, SkillMaterialCompileOutput, SkillMaterialRawFile,
+    SkillMaterialSourceInput,
+};
 use std::collections::HashMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::Instant;
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
-use crate::{SkillMaterialSourceInput, SkillMaterialCompileInput, SkillMaterialRawFile, SkillMaterialCompileOutput};
-use crate::commands::dev::canonical_root;
+use tokio::time::{Duration, timeout};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SkillMaterialCommandSpec {
@@ -25,23 +28,30 @@ fn validate_skill_material_source(source: &SkillMaterialSourceInput) -> Result<(
             if !path.is_absolute() {
                 return Err("本地资料路径必须是绝对路径".into());
             }
-            if path.components().any(|part| matches!(part, Component::ParentDir)) {
+            if path
+                .components()
+                .any(|part| matches!(part, Component::ParentDir))
+            {
                 return Err("本地资料路径不能包含 ..".into());
             }
             reject_symlink_path(path)?;
             Ok(())
         }
-        "documentation_url" => {
-            validate_public_http_url(value)
-        }
+        "documentation_url" => validate_public_http_url(value),
         "github_repo" => {
             let parts: Vec<&str> = value.split('/').collect();
             let valid = parts.len() == 2
                 && parts.iter().all(|part| {
                     !part.is_empty()
-                        && part.chars().all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+                        && part
+                            .chars()
+                            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
                 });
-            if valid { Ok(()) } else { Err("GitHub 仓库必须使用 owner/repo 格式".into()) }
+            if valid {
+                Ok(())
+            } else {
+                Err("GitHub 仓库必须使用 owner/repo 格式".into())
+            }
         }
         _ => Err("当前素材转Skill暂不支持这个资料来源".into()),
     }
@@ -78,21 +88,24 @@ fn validate_public_http_url(value: &str) -> Result<(), String> {
 }
 
 fn is_unsafe_skill_material_host(host: &str) -> bool {
-    let normalized = host.trim_matches(['[', ']']).trim_end_matches('.').to_ascii_lowercase();
+    let normalized = host
+        .trim_matches(['[', ']'])
+        .trim_end_matches('.')
+        .to_ascii_lowercase();
     if normalized.is_empty() {
         return true;
     }
-    if normalized == "localhost" || normalized.ends_with(".localhost") || normalized == "metadata.google.internal" {
+    if normalized == "localhost"
+        || normalized.ends_with(".localhost")
+        || normalized == "metadata.google.internal"
+    {
         return true;
     }
     if let Ok(ip) = normalized.parse::<std::net::IpAddr>() {
         return match ip {
             std::net::IpAddr::V4(ipv4) => {
                 let octets = ipv4.octets();
-                ipv4.is_loopback()
-                    || ipv4.is_private()
-                    || ipv4.is_link_local()
-                    || octets[0] == 0
+                ipv4.is_loopback() || ipv4.is_private() || ipv4.is_link_local() || octets[0] == 0
             }
             std::net::IpAddr::V6(ipv6) => {
                 let segments = ipv6.segments();
@@ -105,7 +118,9 @@ fn is_unsafe_skill_material_host(host: &str) -> bool {
     false
 }
 
-pub(crate) fn build_skill_material_command(input: &SkillMaterialCompileInput) -> Result<SkillMaterialCommandSpec, String> {
+pub(crate) fn build_skill_material_command(
+    input: &SkillMaterialCompileInput,
+) -> Result<SkillMaterialCommandSpec, String> {
     validate_skill_material_source(&input.source)?;
     let runtime_root = canonical_root(&input.runtime_root)?;
     let name = input.name.trim();
@@ -176,7 +191,9 @@ fn redact_skill_material_log(value: &str, env: &HashMap<String, String>) -> Stri
 }
 
 fn safe_skill_material_raw_path(path: &Path, root: &Path) -> Result<String, String> {
-    let relative = path.strip_prefix(root).map_err(|_| "输出路径不在工作区内".to_string())?;
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| "输出路径不在工作区内".to_string())?;
     let mut parts = Vec::new();
     for component in relative.components() {
         match component {
@@ -199,11 +216,16 @@ fn safe_skill_material_raw_path(path: &Path, root: &Path) -> Result<String, Stri
     Ok(parts.join("/"))
 }
 
-pub(crate) fn collect_skill_material_raw_files(root: &Path, max_files: usize, max_bytes_per_file: u64) -> Result<Vec<SkillMaterialRawFile>, String> {
+pub(crate) fn collect_skill_material_raw_files(
+    root: &Path,
+    max_files: usize,
+    max_bytes_per_file: u64,
+) -> Result<Vec<SkillMaterialRawFile>, String> {
     if !root.exists() {
         return Ok(Vec::new());
     }
-    let canonical_root = std::fs::canonicalize(root).map_err(|e| format!("读取编译输出失败: {}", e))?;
+    let canonical_root =
+        std::fs::canonicalize(root).map_err(|e| format!("读取编译输出失败: {}", e))?;
     let mut files = Vec::new();
     let mut stack = vec![canonical_root.clone()];
     while let Some(dir) = stack.pop() {
@@ -211,7 +233,9 @@ pub(crate) fn collect_skill_material_raw_files(root: &Path, max_files: usize, ma
         for entry in entries {
             let entry = entry.map_err(|e| format!("读取编译输出失败: {}", e))?;
             let path = entry.path();
-            let file_type = entry.file_type().map_err(|e| format!("读取编译输出失败: {}", e))?;
+            let file_type = entry
+                .file_type()
+                .map_err(|e| format!("读取编译输出失败: {}", e))?;
             if file_type.is_symlink() {
                 return Err("编译输出不能包含符号链接".into());
             }
@@ -225,15 +249,19 @@ pub(crate) fn collect_skill_material_raw_files(root: &Path, max_files: usize, ma
             if files.len() >= max_files {
                 return Err("编译输出文件过多".into());
             }
-            let metadata = entry.metadata().map_err(|e| format!("读取编译输出失败: {}", e))?;
+            let metadata = entry
+                .metadata()
+                .map_err(|e| format!("读取编译输出失败: {}", e))?;
             if metadata.len() > max_bytes_per_file {
                 continue;
             }
-            let canonical_path = std::fs::canonicalize(&path).map_err(|e| format!("读取编译输出失败: {}", e))?;
+            let canonical_path =
+                std::fs::canonicalize(&path).map_err(|e| format!("读取编译输出失败: {}", e))?;
             if !canonical_path.starts_with(&canonical_root) {
                 return Err("编译输出路径逃逸".into());
             }
-            let content = std::fs::read_to_string(&canonical_path).map_err(|e| format!("读取编译输出失败: {}", e))?;
+            let content = std::fs::read_to_string(&canonical_path)
+                .map_err(|e| format!("读取编译输出失败: {}", e))?;
             files.push(SkillMaterialRawFile {
                 path: safe_skill_material_raw_path(&canonical_path, &canonical_root)?,
                 content,
@@ -249,12 +277,17 @@ fn has_skill_material_entry(files: &[SkillMaterialRawFile]) -> bool {
     files.iter().any(|file| file.path == "SKILL.md")
 }
 
-pub(crate) fn latest_skill_seekers_output_dir(runtime_root: &Path, started_at: std::time::SystemTime) -> Option<PathBuf> {
+pub(crate) fn latest_skill_seekers_output_dir(
+    runtime_root: &Path,
+    started_at: std::time::SystemTime,
+) -> Option<PathBuf> {
     let output_root = runtime_root.join("output");
     let entries = std::fs::read_dir(output_root).ok()?;
     let mut candidates: Vec<(std::time::SystemTime, PathBuf)> = Vec::new();
     for entry in entries.flatten() {
-        let Ok(file_type) = entry.file_type() else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
         if !file_type.is_dir() {
             continue;
         }
@@ -276,10 +309,16 @@ pub(crate) fn latest_skill_seekers_output_dir(runtime_root: &Path, started_at: s
 }
 
 #[tauri::command]
-pub async fn skill_material_compile(input: SkillMaterialCompileInput) -> Result<SkillMaterialCompileOutput, String> {
+pub async fn skill_material_compile(
+    input: SkillMaterialCompileInput,
+) -> Result<SkillMaterialCompileOutput, String> {
     let runtime_root = canonical_root(&input.runtime_root)?;
     let workspace_path = PathBuf::from(input.workspace_path.trim());
-    if !workspace_path.is_absolute() || workspace_path.components().any(|part| matches!(part, Component::ParentDir)) {
+    if !workspace_path.is_absolute()
+        || workspace_path
+            .components()
+            .any(|part| matches!(part, Component::ParentDir))
+    {
         return Err("编译工作区路径不安全".into());
     }
     std::fs::create_dir_all(&workspace_path).map_err(|e| format!("创建编译工作区失败: {}", e))?;

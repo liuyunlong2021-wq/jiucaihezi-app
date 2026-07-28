@@ -176,6 +176,11 @@ async function scaffold(workspace: WikiWorkspace, state: Snapshot, type: WikiPro
     await ensureFile(workspace, state, joinPath(root, 'CLAUDE.md'), WIKI_TEMPLATES.claude, created)
     await ensureFile(workspace, state, joinPath(root, 'hot.md'), WIKI_TEMPLATES.hot, created)
     await ensureFile(workspace, state, joinPath(root, 'log.md'), WIKI_TEMPLATES.log, created)
+  } else if (type === 'generic') {
+    await ensureFile(workspace, state, joinPath(root, 'CLAUDE.md'), WIKI_TEMPLATES.genericClaude, created)
+    await ensureFile(workspace, state, joinPath(root, 'index.md'), WIKI_TEMPLATES.index, created)
+    await ensureFile(workspace, state, joinPath(root, 'log.md'), WIKI_TEMPLATES.log, created)
+    await ensureFile(workspace, state, joinPath(root, 'hot.md'), WIKI_TEMPLATES.hot, created)
   } else {
     await ensureFile(workspace, state, joinPath(root, 'index.md'), WIKI_TEMPLATES.index, created)
     await ensureFile(workspace, state, joinPath(root, '方向.md'), WIKI_TEMPLATES.direction, created)
@@ -264,10 +269,13 @@ async function graph(workspace: WikiWorkspace, state: Snapshot): Promise<string>
 async function validate(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
   const wiki = findWiki(state)
   if (!wiki) throw new Error('验证失败：未找到 docs/wiki/ 或 wiki/')
-  const isDev = input.type === 'dev_project' || state.files.has(`${wiki}/CLAUDE.md`)
+  const isGeneric = input.type === 'generic'
+  const isDev = !isGeneric && (input.type === 'dev_project' || state.dirs.has(`${wiki}/开发`))
   const required = isDev
     ? ['CLAUDE.md', 'hot.md', 'log.md', '来源索引.md', '开发', '架构', '运维', '排障', '学习', '巡检报告', '归档']
-    : ['index.md', '方向.md', 'hot.md', 'log.md', '来源索引.md']
+    : isGeneric
+      ? ['CLAUDE.md', 'index.md', 'hot.md', 'log.md', '来源索引.md']
+      : ['index.md', '方向.md', 'hot.md', 'log.md', '来源索引.md']
   const missing = required.filter(name => !state.paths.has(`${wiki}/${name}`))
   if (missing.length) throw new Error(`验证失败：${wiki} 缺少 ${missing.join(', ')}`)
   const broken: string[] = []

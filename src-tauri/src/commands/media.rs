@@ -1,13 +1,15 @@
-use base64::{engine::general_purpose, Engine as _};
+use crate::commands::tools::{
+    local_tools_python_path, resolve_app_media_binary, resolve_local_binary, resolve_local_python,
+};
+use crate::*;
+use base64::{Engine as _, engine::general_purpose};
 use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tokio::process::Command;
 use tokio::time::timeout;
-use tauri_plugin_dialog::DialogExt;
-use crate::commands::tools::{resolve_local_binary, resolve_app_media_binary, resolve_local_python, local_tools_python_path};
-use crate::*;
 
 pub fn app_media_dir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
     let dir = app
@@ -60,7 +62,9 @@ pub fn media_file_stem(filename: &str) -> String {
 }
 
 pub fn strip_data_url_prefix(data: &str) -> &str {
-    data.split_once(',').map(|(_, payload)| payload).unwrap_or(data)
+    data.split_once(',')
+        .map(|(_, payload)| payload)
+        .unwrap_or(data)
 }
 
 pub fn markdown_output_filename(filename: &str) -> String {
@@ -188,7 +192,6 @@ pub fn is_successful_markdown_content(content: &str) -> bool {
     is_meaningful_markdown(content) && !is_internal_conversion_failure_markdown(content)
 }
 
-
 pub fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
     let max = max_chars.clamp(1, 1_000_000);
     if content.chars().count() <= max {
@@ -206,7 +209,12 @@ pub fn loose_cache_key(value: &str) -> String {
 }
 
 pub async fn count_pdf_pages(source: &Path) -> Option<usize> {
-    if source.extension().and_then(|value| value.to_str()).map(|value| value.eq_ignore_ascii_case("pdf")) != Some(true) {
+    if source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.eq_ignore_ascii_case("pdf"))
+        != Some(true)
+    {
         return None;
     }
     let mut command = Command::new(resolve_local_python());
@@ -218,7 +226,8 @@ pub async fn count_pdf_pages(source: &Path) -> Option<usize> {
         .env_remove("PYTHONHOME")
         .current_dir(env::temp_dir())
         .arg("-c")
-        .arg(r#"
+        .arg(
+            r#"
 import sys
 
 source = sys.argv[1]
@@ -236,7 +245,8 @@ try:
     sys.exit(0)
 except Exception:
     sys.exit(1)
-"#)
+"#,
+        )
         .arg(source)
         .kill_on_drop(true);
     let output = match timeout(Duration::from_secs(10), command.output()).await {
@@ -246,7 +256,10 @@ except Exception:
     if !output.status.success() {
         return None;
     }
-    String::from_utf8_lossy(&output.stdout).trim().parse::<usize>().ok()
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<usize>()
+        .ok()
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -333,7 +346,11 @@ pub fn pdf_probe_has_text_layer(probe: &PdfTextProbe) -> bool {
     enough_pages && enough_chars
 }
 
-pub fn is_meaningful_markitdown_output(content: &str, source: &Path, pdf_probe: Option<&PdfTextProbe>) -> bool {
+pub fn is_meaningful_markitdown_output(
+    content: &str,
+    source: &Path,
+    pdf_probe: Option<&PdfTextProbe>,
+) -> bool {
     if !is_successful_markdown_content(content) {
         return false;
     }
@@ -400,7 +417,12 @@ pub fn source_cache_key(source: &Path) -> String {
     format!("{}_{}_{}", loose_cache_key(stem), len, modified)
 }
 
-pub fn chunk_markdown_cache_path(cache_dir: &Path, source: &Path, start_page: usize, end_page: usize) -> PathBuf {
+pub fn chunk_markdown_cache_path(
+    cache_dir: &Path,
+    source: &Path,
+    start_page: usize,
+    end_page: usize,
+) -> PathBuf {
     cache_dir
         .join("document-markdown-chunks")
         .join(source_cache_key(source))
@@ -441,16 +463,21 @@ pub fn emit_format_progress(
     let progress = if total_pages == 0 {
         0
     } else {
-        ((completed_pages as f64 / total_pages as f64) * 100.0).round().clamp(0.0, 100.0) as u8
+        ((completed_pages as f64 / total_pages as f64) * 100.0)
+            .round()
+            .clamp(0.0, 100.0) as u8
     };
-    let _ = app.emit("format-converter-progress", FormatConverterProgress {
-        job_id: job_id.map(|value| value.to_string()),
-        source_path: source.to_string_lossy().to_string(),
-        completed_pages,
-        total_pages,
-        progress,
-        message,
-    });
+    let _ = app.emit(
+        "format-converter-progress",
+        FormatConverterProgress {
+            job_id: job_id.map(|value| value.to_string()),
+            source_path: source.to_string_lossy().to_string(),
+            completed_pages,
+            total_pages,
+            progress,
+            message,
+        },
+    );
 }
 
 pub fn placeholder_page_markdown(source_name: &str, page: usize, error: &str) -> String {
@@ -462,16 +489,14 @@ pub fn placeholder_page_markdown(source_name: &str, page: usize, error: &str) ->
         String::new(),
         format!("> 来源：{}", source_name),
         String::new(),
-    ].join("\n")
+    ]
+    .join("\n")
 }
 
-
-
-
-
-
-
-pub async fn run_markitdown(source: &Path, output_path: &Path) -> Result<(String, String, String), String> {
+pub async fn run_markitdown(
+    source: &Path,
+    output_path: &Path,
+) -> Result<(String, String, String), String> {
     let output = timeout(
         Duration::from_secs(90),
         Command::new(resolve_local_binary("markitdown"))
@@ -503,9 +528,19 @@ pub fn parse_markdown_conversion_mode(value: Option<&str>) -> MarkdownConversion
 }
 
 pub fn normalize_output_format(value: Option<&str>) -> String {
-    match value.unwrap_or("md").trim().trim_start_matches('.').to_ascii_lowercase().as_str() {
+    match value
+        .unwrap_or("md")
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "markdown" => "md".into(),
-        "md" | "txt" | "html" | "csv" | "json" | "srt" => value.unwrap_or("md").trim().trim_start_matches('.').to_ascii_lowercase(),
+        "md" | "txt" | "html" | "csv" | "json" | "srt" => value
+            .unwrap_or("md")
+            .trim()
+            .trim_start_matches('.')
+            .to_ascii_lowercase(),
         _ => "md".into(),
     }
 }
@@ -537,8 +572,12 @@ pub fn strip_markdown_for_plain_text(markdown: &str) -> String {
             continue;
         }
         while let Some(start) = value.find('[') {
-            let Some(mid) = value[start..].find("](").map(|index| start + index) else { break };
-            let Some(end) = value[mid + 2..].find(')').map(|index| mid + 2 + index) else { break };
+            let Some(mid) = value[start..].find("](").map(|index| start + index) else {
+                break;
+            };
+            let Some(end) = value[mid + 2..].find(')').map(|index| mid + 2 + index) else {
+                break;
+            };
             let label = value[start + 1..mid].to_string();
             value.replace_range(start..=end, &label);
         }
@@ -611,10 +650,9 @@ pub fn split_markdown_table_row(line: &str) -> Vec<String> {
 }
 
 pub fn is_markdown_table_separator(line: &str) -> bool {
-    line.trim()
-        .trim_matches('|')
-        .split('|')
-        .all(|cell| cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')) && cell.contains('-'))
+    line.trim().trim_matches('|').split('|').all(|cell| {
+        cell.trim().chars().all(|ch| matches!(ch, '-' | ':' | ' ')) && cell.contains('-')
+    })
 }
 
 pub fn csv_escape(value: &str) -> String {
@@ -633,7 +671,10 @@ pub fn markdown_table_to_csv(markdown: &str) -> Option<String> {
         }
         let mut rows = vec![split_markdown_table_row(lines[index])];
         let mut cursor = index + 2;
-        while cursor < lines.len() && lines[cursor].contains('|') && !lines[cursor].trim().is_empty() {
+        while cursor < lines.len()
+            && lines[cursor].contains('|')
+            && !lines[cursor].trim().is_empty()
+        {
             rows.push(split_markdown_table_row(lines[cursor]));
             cursor += 1;
         }
@@ -642,7 +683,12 @@ pub fn markdown_table_to_csv(markdown: &str) -> Option<String> {
         }
         let csv = rows
             .into_iter()
-            .map(|row| row.into_iter().map(|cell| csv_escape(&cell)).collect::<Vec<_>>().join(","))
+            .map(|row| {
+                row.into_iter()
+                    .map(|cell| csv_escape(&cell))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            })
             .collect::<Vec<_>>()
             .join("\n");
         return Some(format!("{}\n", csv));
@@ -666,7 +712,9 @@ pub fn strip_single_code_fence(content: &str, lang: &str) -> String {
 
 pub fn looks_like_srt(content: &str) -> bool {
     content.contains("-->")
-        && content.lines().any(|line| line.trim().parse::<usize>().is_ok())
+        && content
+            .lines()
+            .any(|line| line.trim().parse::<usize>().is_ok())
 }
 
 pub fn convert_markdown_for_output(output_format: &str, markdown: &str) -> Result<String, String> {
@@ -676,10 +724,17 @@ pub fn convert_markdown_for_output(output_format: &str, markdown: &str) -> Resul
         "html" => Ok(markdown_to_simple_html(markdown)),
         "csv" => {
             let plain = strip_markdown_for_plain_text(markdown);
-            if plain.lines().take(5).filter(|line| line.contains(',')).count() >= 2 {
+            if plain
+                .lines()
+                .take(5)
+                .filter(|line| line.contains(','))
+                .count()
+                >= 2
+            {
                 return Ok(plain);
             }
-            markdown_table_to_csv(markdown).ok_or_else(|| "没有检测到可导出 CSV 的表格内容。".into())
+            markdown_table_to_csv(markdown)
+                .ok_or_else(|| "没有检测到可导出 CSV 的表格内容。".into())
         }
         "json" => {
             let candidate = strip_single_code_fence(markdown, "json");
@@ -710,10 +765,14 @@ pub fn validate_selected_media_path(input_path: &str) -> Result<PathBuf, String>
     if !path.is_absolute() {
         return Err("请选择有效的音频或视频文件。".into());
     }
-    if path.components().any(|part| matches!(part, Component::ParentDir)) {
+    if path
+        .components()
+        .any(|part| matches!(part, Component::ParentDir))
+    {
         return Err("文件路径不安全，请重新选择文件。".into());
     }
-    let canonical = std::fs::canonicalize(&path).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
+    let canonical =
+        std::fs::canonicalize(&path).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
     if !canonical.is_file() {
         return Err("请选择有效的音频或视频文件。".into());
     }
@@ -759,8 +818,12 @@ pub fn media_kind(has_video: bool, has_audio: bool) -> String {
     }
 }
 
-pub async fn inspect_media_path(app: &tauri::AppHandle, source: &Path) -> Result<MediaInspectFileOutput, String> {
-    let metadata = std::fs::metadata(source).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
+pub async fn inspect_media_path(
+    app: &tauri::AppHandle,
+    source: &Path,
+) -> Result<MediaInspectFileOutput, String> {
+    let metadata =
+        std::fs::metadata(source).map_err(|_| "文件不可访问，请重新选择。".to_string())?;
     let filename = source
         .file_name()
         .and_then(|value| value.to_str())
@@ -795,9 +858,13 @@ pub async fn inspect_media_path(app: &tauri::AppHandle, source: &Path) -> Result
         return Err("无法读取这个媒体文件的信息。".into());
     }
 
-    let data: serde_json::Value = serde_json::from_slice(&output.stdout)
-        .map_err(|_| "媒体信息格式不可识别。".to_string())?;
-    let streams = data.get("streams").and_then(|value| value.as_array()).cloned().unwrap_or_default();
+    let data: serde_json::Value =
+        serde_json::from_slice(&output.stdout).map_err(|_| "媒体信息格式不可识别。".to_string())?;
+    let streams = data
+        .get("streams")
+        .and_then(|value| value.as_array())
+        .cloned()
+        .unwrap_or_default();
     let mut width = None;
     let mut height = None;
     let mut fps = None;
@@ -808,7 +875,10 @@ pub async fn inspect_media_path(app: &tauri::AppHandle, source: &Path) -> Result
     let mut has_subtitles = false;
 
     for stream in streams {
-        let codec_type = stream.get("codec_type").and_then(|value| value.as_str()).unwrap_or("");
+        let codec_type = stream
+            .get("codec_type")
+            .and_then(|value| value.as_str())
+            .unwrap_or("");
         match codec_type {
             "video" => {
                 has_video = true;
@@ -820,13 +890,19 @@ pub async fn inspect_media_path(app: &tauri::AppHandle, source: &Path) -> Result
                         .or_else(|| stream.get("r_frame_rate"))
                         .and_then(|value| value.as_str())
                         .and_then(parse_fps);
-                    video_codec = stream.get("codec_name").and_then(|value| value.as_str()).map(str::to_string);
+                    video_codec = stream
+                        .get("codec_name")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string);
                 }
             }
             "audio" => {
                 has_audio = true;
                 if audio_codec.is_none() {
-                    audio_codec = stream.get("codec_name").and_then(|value| value.as_str()).map(str::to_string);
+                    audio_codec = stream
+                        .get("codec_name")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string);
                 }
             }
             "subtitle" => {
@@ -845,7 +921,13 @@ pub async fn inspect_media_path(app: &tauri::AppHandle, source: &Path) -> Result
         .get("format")
         .and_then(|value| value.get("format_name"))
         .and_then(|value| value.as_str())
-        .map(|value| value.split(',').next().unwrap_or(value).to_ascii_uppercase())
+        .map(|value| {
+            value
+                .split(',')
+                .next()
+                .unwrap_or(value)
+                .to_ascii_uppercase()
+        })
         .filter(|value| !value.is_empty())
         .unwrap_or(fallback_format);
 
@@ -884,21 +966,24 @@ pub fn supported_media_format(format: &str) -> bool {
     )
 }
 
-pub fn build_ffmpeg_args(input: &MediaProcessFileInput, source: &Path, output: &Path) -> Result<Vec<String>, String> {
+pub fn build_ffmpeg_args(
+    input: &MediaProcessFileInput,
+    source: &Path,
+    output: &Path,
+) -> Result<Vec<String>, String> {
     let action = input.action.trim().to_ascii_lowercase();
-    let format = input.target_format.trim().trim_start_matches('.').to_ascii_lowercase();
+    let format = input
+        .target_format
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
     if !supported_media_format(&format) {
         return Err(format!("不支持的目标格式: {}", format));
     }
 
     let source_str = source.to_string_lossy().to_string();
     let output_str = output.to_string_lossy().to_string();
-    let mut args = vec![
-        "-y".into(),
-        "-hide_banner".into(),
-        "-i".into(),
-        source_str,
-    ];
+    let mut args = vec!["-y".into(), "-hide_banner".into(), "-i".into(), source_str];
 
     match action.as_str() {
         "compress" => {
@@ -926,17 +1011,10 @@ pub fn build_ffmpeg_args(input: &MediaProcessFileInput, source: &Path, output: &
                     "libopus".into(),
                 ]),
                 "mkv" => args.extend(["-c".into(), "copy".into()]),
-                "mp3" | "wav" | "aac" | "flac" | "ogg" => args.extend([
-                    "-vn".into(),
-                    "-acodec".into(),
-                    audio_codec(&format).into(),
-                ]),
-                _ => args.extend([
-                    "-c:v".into(),
-                    "libx264".into(),
-                    "-c:a".into(),
-                    "aac".into(),
-                ]),
+                "mp3" | "wav" | "aac" | "flac" | "ogg" => {
+                    args.extend(["-vn".into(), "-acodec".into(), audio_codec(&format).into()])
+                }
+                _ => args.extend(["-c:v".into(), "libx264".into(), "-c:a".into(), "aac".into()]),
             }
             args.push(output_str);
         }
@@ -967,12 +1045,7 @@ pub fn build_ffmpeg_args(input: &MediaProcessFileInput, source: &Path, output: &
             ]);
         }
         "mute" => {
-            args.extend([
-                "-an".into(),
-                "-c:v".into(),
-                "copy".into(),
-                output_str,
-            ]);
+            args.extend(["-an".into(), "-c:v".into(), "copy".into(), output_str]);
         }
         _ => return Err(format!("不支持的媒体处理动作: {}", action)),
     }
@@ -984,13 +1057,23 @@ pub fn supported_transcript_format(format: &str) -> bool {
     matches!(format, "txt" | "srt" | "vtt" | "json")
 }
 
-pub fn find_transcript_output(output_dir: &Path, stem: &str, format: &str, started_at: SystemTime) -> Option<PathBuf> {
+pub fn find_transcript_output(
+    output_dir: &Path,
+    stem: &str,
+    format: &str,
+    started_at: SystemTime,
+) -> Option<PathBuf> {
     let direct = output_dir.join(format!("{}.{}", stem, format));
     if direct.exists()
         && std::fs::metadata(&direct)
             .ok()
             .and_then(|metadata| metadata.modified().ok())
-            .is_some_and(|modified| modified >= started_at.checked_sub(Duration::from_secs(5)).unwrap_or(started_at))
+            .is_some_and(|modified| {
+                modified
+                    >= started_at
+                        .checked_sub(Duration::from_secs(5))
+                        .unwrap_or(started_at)
+            })
     {
         return Some(direct);
     }
@@ -1006,7 +1089,11 @@ pub fn find_transcript_output(output_dir: &Path, stem: &str, format: &str, start
         })
         .filter_map(|path| {
             let modified = std::fs::metadata(&path).ok()?.modified().ok()?;
-            if modified < started_at.checked_sub(Duration::from_secs(5)).unwrap_or(started_at) {
+            if modified
+                < started_at
+                    .checked_sub(Duration::from_secs(5))
+                    .unwrap_or(started_at)
+            {
                 return None;
             }
             Some((modified, path))
@@ -1024,7 +1111,10 @@ pub fn escape_subtitle_filter_path(path: &Path) -> String {
 }
 
 #[tauri::command]
-pub fn media_cache_file(app: tauri::AppHandle, input: MediaCacheFileInput) -> Result<MediaCacheFileOutput, String> {
+pub fn media_cache_file(
+    app: tauri::AppHandle,
+    input: MediaCacheFileInput,
+) -> Result<MediaCacheFileOutput, String> {
     let cache_dir = app_media_dir(&app, "media-cache")?;
     let filename = unique_media_filename(&input.filename);
     let path = cache_dir.join(&filename);
@@ -1033,7 +1123,9 @@ pub fn media_cache_file(app: tauri::AppHandle, input: MediaCacheFileInput) -> Re
         .decode(payload)
         .map_err(|e| format!("媒体文件解码失败: {}", e))?;
     std::fs::write(&path, &bytes).map_err(|e| format!("缓存媒体文件失败: {}", e))?;
-    let size = std::fs::metadata(&path).map_err(|e| format!("读取媒体缓存失败: {}", e))?.len();
+    let size = std::fs::metadata(&path)
+        .map_err(|e| format!("读取媒体缓存失败: {}", e))?
+        .len();
     Ok(MediaCacheFileOutput {
         input_path: path.to_string_lossy().to_string(),
         filename,
@@ -1052,7 +1144,9 @@ pub async fn convert_pdf_to_markdown(
     _timeout_seconds: Option<u64>,
 ) -> Result<MarkdownConversion, String> {
     if mode == MarkdownConversionMode::Ocr {
-        return Err("OCR 模式已移除。请使用快速模式，或安装第三方 OCR 工具后通过 OpenCode 处理。".into());
+        return Err(
+            "OCR 模式已移除。请使用快速模式，或安装第三方 OCR 工具后通过 OpenCode 处理。".into(),
+        );
     }
 
     emit_format_progress(app, job_id, source_path, 0, 0, "正在判断文档类型".into());
@@ -1060,7 +1154,12 @@ pub async fn convert_pdf_to_markdown(
     let mut markitdown_error: Option<String> = None;
     let mut markitdown_attempted = false;
 
-    if mode == MarkdownConversionMode::Fast || probe.as_ref().map(pdf_probe_has_text_layer).unwrap_or(false) {
+    if mode == MarkdownConversionMode::Fast
+        || probe
+            .as_ref()
+            .map(pdf_probe_has_text_layer)
+            .unwrap_or(false)
+    {
         markitdown_attempted = true;
         let message = if mode == MarkdownConversionMode::Fast {
             "快速转换中"
@@ -1090,16 +1189,27 @@ pub async fn convert_pdf_to_markdown(
     }
 
     if mode == MarkdownConversionMode::Fast {
-        return Err(markitdown_error.unwrap_or_else(|| "快速模式没有提取到有效正文，请切换 OCR 模式。".into()));
+        return Err(markitdown_error
+            .unwrap_or_else(|| "快速模式没有提取到有效正文，请切换 OCR 模式。".into()));
     }
 
-    let page_count = match probe.map(|value| value.page_count).filter(|value| *value > 0) {
+    let page_count = match probe
+        .map(|value| value.page_count)
+        .filter(|value| *value > 0)
+    {
         Some(value) => Some(value),
         None => count_pdf_pages(source_path).await,
     };
 
     if let Some(page_count) = page_count {
-        emit_format_progress(app, job_id, source_path, 0, page_count, "未检测到有效文字层，进入分段 OCR".into());
+        emit_format_progress(
+            app,
+            job_id,
+            source_path,
+            0,
+            page_count,
+            "未检测到有效文字层，进入分段 OCR".into(),
+        );
         return Err("OCR 已移除。请使用快速模式。".into());
     }
 
@@ -1116,7 +1226,8 @@ pub async fn convert_pdf_to_markdown(
                     });
                 }
                 let _ = std::fs::remove_file(output_path);
-                markitdown_error = Some("PDF 页数读取失败，且本地快速转换没有得到有效正文。".into());
+                markitdown_error =
+                    Some("PDF 页数读取失败，且本地快速转换没有得到有效正文。".into());
             }
             Err(err) => {
                 let _ = std::fs::remove_file(output_path);
@@ -1139,7 +1250,17 @@ pub async fn convert_source_to_markdown(
     timeout_seconds: Option<u64>,
 ) -> Result<MarkdownConversion, String> {
     if is_pdf_path(source_path) {
-        return convert_pdf_to_markdown(app, jobs, job_id, source_path, output_path, max_chars, mode, timeout_seconds).await;
+        return convert_pdf_to_markdown(
+            app,
+            jobs,
+            job_id,
+            source_path,
+            output_path,
+            max_chars,
+            mode,
+            timeout_seconds,
+        )
+        .await;
     }
 
     if is_image_path(source_path) {
@@ -1242,8 +1363,8 @@ pub fn finalize_markdown_conversion_output(
         ));
     }
 
-    let markdown = std::fs::read_to_string(markdown_path)
-        .unwrap_or_else(|_| conversion.content.clone());
+    let markdown =
+        std::fs::read_to_string(markdown_path).unwrap_or_else(|_| conversion.content.clone());
     let output_content = convert_markdown_for_output(output_format, &markdown)?;
     write_text_file(final_path, &output_content)?;
     let _ = std::fs::remove_file(markdown_path);
@@ -1295,7 +1416,18 @@ pub async fn document_to_markdown_file(
         .map_err(|e| format!("文档数据解码失败: {}", e))?;
     std::fs::write(&source_path, &bytes).map_err(|e| format!("缓存待转换文档失败: {}", e))?;
 
-    let result = match convert_source_to_markdown(&app, &jobs, job_id.as_deref(), &source_path, &markdown_output_path, max_chars, mode, timeout_seconds).await {
+    let result = match convert_source_to_markdown(
+        &app,
+        &jobs,
+        job_id.as_deref(),
+        &source_path,
+        &markdown_output_path,
+        max_chars,
+        mode,
+        timeout_seconds,
+    )
+    .await
+    {
         Ok(conversion) => finalize_markdown_conversion_output(
             input.filename,
             &source_path,
@@ -1305,7 +1437,8 @@ pub async fn document_to_markdown_file(
             &output_format,
             conversion,
             max_chars,
-        ).map_err(|err| err),
+        )
+        .map_err(|err| err),
         Err(err) => Ok(markdown_error_output(
             input.filename,
             &source_path,
@@ -1361,7 +1494,18 @@ pub async fn document_path_to_markdown_file(
     let mode = parse_markdown_conversion_mode(input.conversion_mode.as_deref());
     let timeout_seconds = input.timeout_seconds;
 
-    let result = match convert_source_to_markdown(&app, &jobs, job_id.as_deref(), &source_path, &markdown_output_path, max_chars, mode, timeout_seconds).await {
+    let result = match convert_source_to_markdown(
+        &app,
+        &jobs,
+        job_id.as_deref(),
+        &source_path,
+        &markdown_output_path,
+        max_chars,
+        mode,
+        timeout_seconds,
+    )
+    .await
+    {
         Ok(conversion) => finalize_markdown_conversion_output(
             source_name,
             &source_path,
@@ -1371,7 +1515,8 @@ pub async fn document_path_to_markdown_file(
             &output_format,
             conversion,
             max_chars,
-        ).map_err(|err| err),
+        )
+        .map_err(|err| err),
         Err(err) => Ok(markdown_error_output(
             source_name,
             &source_path,
@@ -1406,7 +1551,12 @@ pub async fn media_select_file(
         .dialog()
         .file()
         .set_title(input.title.unwrap_or_else(|| "选择音频或视频".into()))
-        .add_filter("音频视频", &["mp4", "mov", "mkv", "webm", "mp3", "wav", "aac", "m4a", "flac", "ogg"])
+        .add_filter(
+            "音频视频",
+            &[
+                "mp4", "mov", "mkv", "webm", "mp3", "wav", "aac", "m4a", "flac", "ogg",
+            ],
+        )
         .blocking_pick_file();
     let Some(selected) = selected else {
         return Ok(None);
@@ -1443,7 +1593,10 @@ pub async fn media_process_file(
 
     let output = timeout(
         Duration::from_secs(900),
-        Command::new(resolve_app_media_binary(&app, "ffmpeg")?).args(args).kill_on_drop(true).output(),
+        Command::new(resolve_app_media_binary(&app, "ffmpeg")?)
+            .args(args)
+            .kill_on_drop(true)
+            .output(),
     )
     .await
     .map_err(|_| "媒体处理超时，请稍后重试。".to_string())?
@@ -1525,10 +1678,13 @@ pub async fn media_transcribe_file(
         }
     }
 
-    let output = timeout(Duration::from_secs(1800), command.kill_on_drop(true).output())
-        .await
-        .map_err(|_| "转文字超时，请稍后重试。".to_string())?
-        .map_err(|_| "媒体处理组件暂时不可用，请重启应用后重试。".to_string())?;
+    let output = timeout(
+        Duration::from_secs(1800),
+        command.kill_on_drop(true).output(),
+    )
+    .await
+    .map_err(|_| "转文字超时，请稍后重试。".to_string())?
+    .map_err(|_| "媒体处理组件暂时不可用，请重启应用后重试。".to_string())?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
     let stderr = String::from_utf8_lossy(&output.stderr).to_string();
@@ -1586,14 +1742,22 @@ pub async fn media_burn_subtitles(
     let output_dir = app_media_dir(&app, "media-outputs")?;
     let fallback = format!(
         "{}_subtitled.mp4",
-        media_file_stem(source.file_name().and_then(|value| value.to_str()).unwrap_or("video"))
+        media_file_stem(
+            source
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("video")
+        )
     );
     let output_filename = sanitize_media_filename(
         input.output_filename.as_deref().unwrap_or(&fallback),
         &fallback,
     );
     let output_path = output_dir.join(unique_media_filename(&output_filename));
-    let filter = format!("subtitles=filename='{}'", escape_subtitle_filter_path(&subtitle_path));
+    let filter = format!(
+        "subtitles=filename='{}'",
+        escape_subtitle_filter_path(&subtitle_path)
+    );
     let start = Instant::now();
 
     let output = timeout(
@@ -1644,4 +1808,3 @@ pub async fn media_burn_subtitles(
         duration_ms: start.elapsed().as_millis(),
     })
 }
-

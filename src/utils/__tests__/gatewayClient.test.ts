@@ -13,6 +13,7 @@ import {
   clearLegacyAuthStorage,
   getApiKey,
   getGatewaySessionToken,
+  gatewaySessionAuthenticated,
   extractGatewayApiKey,
   extractGatewayBaseUrl,
   extractGatewaySessionToken,
@@ -23,7 +24,9 @@ import {
   normalizeGatewayTopupOrder,
   normalizeGatewayUser,
   gatewayLogin,
+  gatewayLogout,
   initApiKey,
+  initGatewaySessionToken,
   setApiKey,
   setGatewaySessionToken,
 } from '../../services/newApiClient'
@@ -71,7 +74,7 @@ test('setGatewaySessionToken clears empty token', async () => {
   })
 })
 
-test('setGatewaySessionToken remains available only for legacy cleanup state', async () => {
+test('setGatewaySessionToken stays separate from ordinary model credentials', async () => {
   await withLocalStorage({}, async store => {
     __resetGatewaySessionMemoryCacheForTests('')
     await setGatewaySessionToken('session_secure')
@@ -101,7 +104,17 @@ test('initApiKey restores the ordinary API key from web localStorage after refre
   })
 })
 
-test('gatewayLogin saves returned api_key as the ordinary API key and clears legacy session', async () => {
+test('initGatewaySessionToken restores sync authentication after refresh', async () => {
+  await withLocalStorage({ jcGatewaySessionToken: 'sess_web_refresh_1234567890' }, async () => {
+    __resetGatewaySessionMemoryCacheForTests('')
+
+    assert.equal(gatewaySessionAuthenticated.value, false)
+    assert.equal(await initGatewaySessionToken(), 'sess_web_refresh_1234567890')
+    assert.equal(gatewaySessionAuthenticated.value, true)
+  })
+})
+
+test('gatewayLogin saves the ordinary API key and dedicated sync session separately', async () => {
   const previousStorage = (globalThis as any).localStorage
   const previousFetch = globalThis.fetch
   const store = new Map<string, string>([['jcGatewaySessionToken', 'legacy-session']])
@@ -113,6 +126,7 @@ test('gatewayLogin saves returned api_key as the ordinary API key and clears leg
   globalThis.fetch = (async () => new Response(JSON.stringify({
     success: true,
     api_key: 'sk-auth-broker-12345678901234567890',
+    sync_session: 'sess_sync_1234567890',
     base_url: 'https://api.jiucaihezi.studio/v1',
     user: { id: 'u1', username: 'alice' },
   }), {
@@ -125,8 +139,9 @@ test('gatewayLogin saves returned api_key as the ordinary API key and clears leg
     const result = await gatewayLogin({ username: 'alice', password: 'secret' })
     assert.equal(result.apiKey, 'sk-auth-broker-12345678901234567890')
     assert.equal(getApiKey(), 'sk-auth-broker-12345678901234567890')
-    assert.equal(getGatewaySessionToken(), '')
-    assert.equal(store.get('jcGatewaySessionToken'), undefined)
+    assert.equal(result.syncSession, 'sess_sync_1234567890')
+    assert.equal(getGatewaySessionToken(), 'sess_sync_1234567890')
+    assert.equal(store.get('jcGatewaySessionToken'), 'sess_sync_1234567890')
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     __resetGatewaySessionMemoryCacheForTests('')
@@ -193,7 +208,7 @@ test('gatewayLogin reports unified API routing problems when auth path returns H
   })
 })
 
-test('gatewayLogin ignores legacy session cookie when Auth Broker returns api_key', async () => {
+test('gatewayLogin rejects responses without the dedicated sync session', async () => {
   await withLocalStorage({}, async () => {
     const previousFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -208,13 +223,13 @@ test('gatewayLogin ignores legacy session cookie when Auth Broker returns api_ke
       },
     })) as typeof fetch
     try {
-      const result = await gatewayLogin({ username: 'alice', password: 'secret' })
-      assert.equal(result.apiKey, 'sk-cookie-ignored-12345678901234567890')
+      await assert.rejects(
+        () => gatewayLogin({ username: 'alice', password: 'secret' }),
+        /登录响应缺少同步会话/,
+      )
+      assert.equal(getApiKey(), '')
       assert.equal(getGatewaySessionToken(), '')
-      assert.deepEqual(buildGatewayHeaders(), {
-        Authorization: 'Bearer sk-cookie-ignored-12345678901234567890',
-        'x-api-key': 'sk-cookie-ignored-12345678901234567890',
-      })
+      assert.deepEqual(buildGatewayHeaders(), {})
     } finally {
       globalThis.fetch = previousFetch
     }
@@ -248,6 +263,27 @@ test('clearGatewaySession removes legacy session without clearing ordinary API k
     await clearGatewaySession()
     assert.equal(getApiKey(), 'sk-ordinary-12345678901234567890')
     assert.equal(getGatewaySessionToken(), '')
+  })
+})
+
+test('gatewayLogout revokes the dedicated sync session and preserves the model API key', async () => {
+  await withLocalStorage({
+    jcApiKey: 'sk-ordinary-12345678901234567890',
+    jcGatewaySessionToken: 'sess_logout_1234567890',
+  }, async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(new Headers(init?.headers).get('X-JC-Session'), 'sess_logout_1234567890')
+      return Response.json({ success: true })
+    }) as typeof fetch
+    try {
+      await gatewayLogout()
+      assert.equal(getApiKey(), 'sk-ordinary-12345678901234567890')
+      assert.equal(getGatewaySessionToken(), '')
+      assert.equal(gatewaySessionAuthenticated.value, false)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
   })
 })
 
@@ -455,6 +491,22 @@ test('normalizeGatewayModels maps gateway items to product model entries', () =>
   assert.deepEqual(models.map(item => [item.id, item.label, item.providerId, item.capability]), [
     ['gpt-5.5', 'GPT-5.5', 'jiucaihezi', 'text'],
     ['gpt-image-2', 'GPT Image', 'jiucaihezi', 'image'],
+  ])
+})
+
+test('normalizeGatewayModels preserves an explicit tool-call capability', () => {
+  const models = normalizeGatewayModels({
+    items: [
+      { id: 'gemini-3.6-flash', tool_call: true },
+      { id: 'legacy-chat', tool_call: false },
+      { id: 'unspecified-chat' },
+    ],
+  })
+
+  assert.deepEqual(models.map(item => [item.id, item.toolCall]), [
+    ['gemini-3.6-flash', true],
+    ['legacy-chat', false],
+    ['unspecified-chat', undefined],
   ])
 })
 

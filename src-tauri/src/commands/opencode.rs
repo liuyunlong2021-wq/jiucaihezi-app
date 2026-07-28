@@ -1,4 +1,5 @@
-use base64::{engine::general_purpose, Engine as _};
+use crate::commands::tools::resolve_opencode_binary;
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::net::TcpListener;
@@ -9,16 +10,14 @@ use tauri::{Manager, State};
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::time::{timeout, Duration};
-use crate::commands::tools::resolve_opencode_binary;
+use tokio::time::{Duration, timeout};
 
 #[tauri::command]
 pub async fn open_in_shell(path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     // 若路径不存在，尝试创建目录（用户首次点击「我的文件」时）
     if !p.exists() {
-        std::fs::create_dir_all(&p)
-            .map_err(|e| format!("创建目录失败: {}", e))?;
+        std::fs::create_dir_all(&p).map_err(|e| format!("创建目录失败: {}", e))?;
     }
     open_path_with_system(&p, false)
 }
@@ -35,29 +34,45 @@ pub(crate) fn open_path_with_system(path: &Path, reveal: bool) -> Result<(), Str
             StdCommand::new("open").arg(path).status()
         }
         .map_err(|e| format!("打开文件失败: {}", e))?;
-        return status.success().then_some(()).ok_or_else(|| "打开文件失败。".to_string());
+        return status
+            .success()
+            .then_some(())
+            .ok_or_else(|| "打开文件失败。".to_string());
     }
     #[cfg(target_os = "windows")]
     {
         let status = if reveal {
-            StdCommand::new("explorer").arg(format!("/select,{}", path.to_string_lossy())).status()
+            StdCommand::new("explorer")
+                .arg(format!("/select,{}", path.to_string_lossy()))
+                .status()
         } else {
-            StdCommand::new("cmd").args(["/C", "start", "", &path.to_string_lossy()]).status()
+            StdCommand::new("cmd")
+                .args(["/C", "start", "", &path.to_string_lossy()])
+                .status()
         }
         .map_err(|e| format!("打开文件失败: {}", e))?;
-        return status.success().then_some(()).ok_or_else(|| "打开文件失败。".to_string());
+        return status
+            .success()
+            .then_some(())
+            .ok_or_else(|| "打开文件失败。".to_string());
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let target = if reveal { path.parent().unwrap_or(path) } else { path };
+        let target = if reveal {
+            path.parent().unwrap_or(path)
+        } else {
+            path
+        };
         let status = StdCommand::new("xdg-open")
             .arg(target)
             .status()
             .map_err(|e| format!("打开文件失败: {}", e))?;
-        return status.success().then_some(()).ok_or_else(|| "打开文件失败。".to_string());
+        return status
+            .success()
+            .then_some(())
+            .ok_or_else(|| "打开文件失败。".to_string());
     }
 }
-
 
 pub(crate) struct OpenCodeSession {
     pub(crate) child: tokio::process::Child,
@@ -161,14 +176,19 @@ fn opencode_runtime_root() -> Result<PathBuf, String> {
     Ok(home.join(".jiucaihezi").join("opencode-runtime"))
 }
 
-pub(crate) fn prepare_opencode_runtime_dirs(root: &Path) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
+pub(crate) fn prepare_opencode_runtime_dirs(
+    root: &Path,
+) -> Result<(PathBuf, PathBuf, PathBuf, PathBuf), String> {
     let data = root.join("data");
     let state = root.join("state");
     let config = root.join("config");
     let workspace = root.join("workspace").join("default");
     for dir in [&data, &state, &config, &workspace] {
         std::fs::create_dir_all(dir).map_err(|e| {
-            format!("无法创建 OpenCode runtime 目录 {}: {e}", dir.to_string_lossy())
+            format!(
+                "无法创建 OpenCode runtime 目录 {}: {e}",
+                dir.to_string_lossy()
+            )
         })?;
     }
     Ok((data, state, config, workspace))
@@ -212,7 +232,9 @@ pub(crate) async fn stop_opencode_runtime(runtime: &OpenCodeRuntime) {
 }
 
 #[tauri::command]
-pub async fn opencode_status(runtime: State<'_, OpenCodeRuntime>) -> Result<OpenCodeServerStatus, String> {
+pub async fn opencode_status(
+    runtime: State<'_, OpenCodeRuntime>,
+) -> Result<OpenCodeServerStatus, String> {
     let mut session = runtime.session.lock().await;
     if let Some(current) = session.as_mut() {
         match current.child.try_wait() {
@@ -242,7 +264,10 @@ pub async fn opencode_stop(runtime: State<'_, OpenCodeRuntime>) -> Result<(), St
 
 // ponytail: 照抄 OpenCode desktop/main/ipc.ts "relaunch" handler
 #[tauri::command]
-pub async fn opencode_relaunch(app: tauri::AppHandle, runtime: State<'_, OpenCodeRuntime>) -> Result<(), String> {
+pub async fn opencode_relaunch(
+    app: tauri::AppHandle,
+    runtime: State<'_, OpenCodeRuntime>,
+) -> Result<(), String> {
     stop_opencode_runtime(&runtime).await;
     // Step 2: 重启应用（此调用不会返回）
     #[allow(unreachable_code)]
@@ -256,7 +281,10 @@ pub async fn opencode_relaunch(app: tauri::AppHandle, runtime: State<'_, OpenCod
 #[tauri::command]
 pub async fn opencode_export_debug_logs(app: tauri::AppHandle) -> Result<String, String> {
     use std::fs;
-    let log_dir = app.path().app_log_dir().map_err(|e| format!("无法获取日志目录: {e}"))?;
+    let log_dir = app
+        .path()
+        .app_log_dir()
+        .map_err(|e| format!("无法获取日志目录: {e}"))?;
     let mut logs = String::new();
     if let Ok(entries) = fs::read_dir(&log_dir) {
         for entry in entries.flatten() {
@@ -320,7 +348,11 @@ fn parse_opencode_mcp_servers(raw: &str) -> Vec<OpenCodeMcpServerStatus> {
                 .trim_matches([':', '-', '•'])
                 .to_string();
             OpenCodeMcpServerStatus {
-                name: if name.is_empty() { line.to_string() } else { name },
+                name: if name.is_empty() {
+                    line.to_string()
+                } else {
+                    name
+                },
                 status: status.to_string(),
                 detail: line.to_string(),
             }
@@ -331,7 +363,8 @@ fn parse_opencode_mcp_servers(raw: &str) -> Vec<OpenCodeMcpServerStatus> {
 #[tauri::command]
 pub async fn opencode_mcp_status(app: tauri::AppHandle) -> Result<OpenCodeMcpStatus, String> {
     let runtime_root = opencode_runtime_root()?;
-    let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let (data_dir, state_dir, config_dir, workspace_dir) =
+        prepare_opencode_runtime_dirs(&runtime_root)?;
     let directory = workspace_dir.to_string_lossy().to_string();
     let program = match resolve_opencode_binary(Some(&app)) {
         Ok(program) => program,
@@ -435,10 +468,12 @@ fn load_shell_env() -> std::collections::HashMap<String, String> {
         Ok(out) if out.status.success() => {
             let mut env = std::collections::HashMap::new();
             for line in out.stdout.split(|&b| b == 0) {
-                if line.is_empty() { continue; }
+                if line.is_empty() {
+                    continue;
+                }
                 if let Ok(s) = std::str::from_utf8(line) {
                     if let Some(ix) = s.find('=') {
-                        env.insert(s[..ix].to_string(), s[ix+1..].to_string());
+                        env.insert(s[..ix].to_string(), s[ix + 1..].to_string());
                     }
                 }
             }
@@ -448,7 +483,10 @@ fn load_shell_env() -> std::collections::HashMap<String, String> {
     }
 }
 
-fn load_shell_env_once<F>(cached: &mut Option<HashMap<String, String>>, loader: F) -> HashMap<String, String>
+fn load_shell_env_once<F>(
+    cached: &mut Option<HashMap<String, String>>,
+    loader: F,
+) -> HashMap<String, String>
 where
     F: FnOnce() -> HashMap<String, String>,
 {
@@ -492,11 +530,7 @@ pub async fn opencode_ensure_server(
         } else {
             false
         };
-        if should_replace {
-            session.take()
-        } else {
-            None
-        }
+        if should_replace { session.take() } else { None }
     };
     // ponytail: wait before opening the same SQLite DB in a replacement process.
     if let Some(current) = replaced_session {
@@ -522,7 +556,8 @@ pub async fn opencode_ensure_server(
     let password = random_opencode_password();
     let program = resolve_opencode_binary(Some(&app))?;
     let runtime_root = opencode_runtime_root()?;
-    let (data_dir, state_dir, config_dir, workspace_dir) = prepare_opencode_runtime_dirs(&runtime_root)?;
+    let (data_dir, state_dir, config_dir, workspace_dir) =
+        prepare_opencode_runtime_dirs(&runtime_root)?;
     let fallback_dir = user_home_dir().unwrap_or(workspace_dir.clone());
     let effective_dir = if !requested_dir.is_empty() {
         let p = PathBuf::from(&requested_dir);
@@ -564,9 +599,17 @@ pub async fn opencode_ensure_server(
         command.creation_flags(CREATE_NO_WINDOW);
     }
 
-    let mut child = command.spawn().map_err(|e| format!("无法启动 OpenCode server: {e}"))?;
-    let stdout = child.stdout.take().ok_or("无法读取 OpenCode server stdout")?;
-    let stderr = child.stderr.take().ok_or("无法读取 OpenCode server stderr")?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("无法启动 OpenCode server: {e}"))?;
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("无法读取 OpenCode server stdout")?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or("无法读取 OpenCode server stderr")?;
     let mut stdout_reader = BufReader::new(stdout).lines();
     let mut stderr_reader = BufReader::new(stderr).lines();
     let mut output = String::new();
@@ -641,7 +684,9 @@ pub async fn opencode_ensure_server(
         directory: effective_dir.to_string_lossy().to_string(),
         config_signature: requested_config_signature,
     });
-    Ok(opencode_status_from_session(session.as_ref().expect("session inserted")))
+    Ok(opencode_status_from_session(
+        session.as_ref().expect("session inserted"),
+    ))
 }
 
 #[cfg(test)]

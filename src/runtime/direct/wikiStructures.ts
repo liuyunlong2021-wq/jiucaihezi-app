@@ -105,7 +105,7 @@ export const WIKI_STRUCTURES: Record<WikiProjectType, WikiStructure> = {
     '场景': [],
     '道具': [],
   },
-  generic: { '资料': [], '主题': [], '参考': [] },
+  generic: {},
   dev_project: {
     '开发': [],
     '架构': [],
@@ -123,5 +123,6 @@ export const WIKI_TEMPLATES = {
   log: '# Wiki Log\n\n',
   hot: '# 热缓存\n\n> 当前最需要优先读取的结论与入口。\n',
   claude: '# 项目 Wiki\n\n> 项目架构、SDD、排障与历史的总入口。\n\n## 索引\n\n- [[开发]]\n- [[架构]]\n- [[巡检报告]]\n- [[hot]]\n',
-  sources: '# 来源索引\n\n> Wiki 保存结论与导航；原始记录保留在原位置，不复制。\n\n## 原始记录位置\n\n| 来源 | 位置 | 读取规则 |\n|---|---|---|\n| Studio 创模式 | App 会话存储或用户明确提供的导出 | 不自动生成项目内副本 |\n| Studio 文/武模式 | OpenCode 项目会话 `ses_<会话ID>` | 按 `projectDir` 查询 OpenCode 会话数据库 |\n| VS Code Chat | 当前项目对应工作区的 `chatSessions/<会话ID>.jsonl` | 按项目路径定位后只读 |\n| 外部原文/文件 | 用户提供的原始路径 | 不复制，记录原路径 |\n\n## Wiki 文档与原始记录对应表\n\n| Wiki 文档 | 原始记录 | 说明 |\n|---|---|---|\n| 待补充 | 待补充 | 填写真实会话或原始文件路径 |\n',
+  genericClaude: '# 项目 Wiki\n\n> 用户确认的知识与导航。完整对话保存在 `.raw/对话记录/`。\n\n## 索引\n\n- [[index]]\n- [[hot]]\n- [[来源索引]]\n',
+  sources: '# 来源索引\n\n> Wiki 保存确认结论与导航；完整原始对话保留在 `.raw/对话记录/`，不复制。\n\n## Wiki 文档与原始记录对应表\n\n| Wiki 文档 | 原始记录 | 已处理范围 | 说明 |\n|---|---|---|---|\n| 待补充 | `.raw/对话记录/<conversation-id>.md` | 待补充 | 用户确认写入 |\n',
 }

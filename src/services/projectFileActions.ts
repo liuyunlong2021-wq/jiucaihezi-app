@@ -63,6 +63,16 @@ function binaryDataUrl(data: Uint8Array, mimeType?: string): string {
   return `data:${mimeType || 'application/octet-stream'};base64,${btoa(binary)}`
 }
 
+export function mediaMimeForPath(path: string): string | undefined {
+  const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
+  return extension && ({
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp',
+    svg: 'image/svg+xml', bmp: 'image/bmp', mp4: 'video/mp4', mov: 'video/quicktime',
+    webm: 'video/webm', avi: 'video/x-msvideo', mkv: 'video/x-matroska', mp3: 'audio/mpeg',
+    wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4', flac: 'audio/flac',
+  } as Record<string, string>)[extension]
+}
+
 export function createProjectFileActions(projectFiles: ProjectFileService) {
   async function listCanvases(owner: string): Promise<ProjectResource[]> {
     return (await projectFiles.list(owner))
@@ -101,7 +111,7 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
         throw new Error('不是有效的项目媒体资源')
       }
       const binary = await projectFiles.readBinary(resource)
-      return binaryDataUrl(binary.data, binary.mimeType || resource.mimeType)
+      return binaryDataUrl(binary.data, binary.mimeType || resource.mimeType || mediaMimeForPath(resource.path))
     },
     async exportResources(input: ExportProjectResourcesInput): Promise<void> {
       if (!input.resources.length) throw new Error('请先选择项目资源')

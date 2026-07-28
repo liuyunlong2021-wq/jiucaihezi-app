@@ -4,6 +4,7 @@ import {
   extractMediaText,
   extractMediaUrl,
   extractTaskId,
+  generateVideo,
   pollTask,
   uploadCreationAsset,
   type AudioGenParams,
@@ -31,7 +32,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
   const request: CreationSubmitRequest = {
     runtime,
     taskType: plan.task === 'image' ? 'image'
-      : plan.task === 'video' || plan.task === 'ai-app' ? 'video'
+      : plan.task === 'video' || plan.task === 'model3d' || plan.task === 'ai-app' ? 'video'
       : 'audio',
     endpoint: plan.endpoint,
     pollKind: plan.pollKind,
@@ -55,7 +56,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     return request
   }
 
-  if (plan.task === 'video') {
+  if (plan.task === 'video' || plan.task === 'model3d') {
     const images = asStringArray(firstMediaValue(params, ['images', 'image', 'imageUrls', 'imageUrl']))
     const videos = asStringArray(firstMediaValue(params, ['videos', 'video', 'videoUrls', 'videoUrl']))
     const audios = asStringArray(firstMediaValue(params, ['audios', 'audio', 'audioUrls', 'audioUrl']))
@@ -204,6 +205,14 @@ async function executeDirectVideoRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交中...')
   const params = request.videoParams || {}
+  if (request.plan.apiStyle === 'openai-videos') {
+    return generateVideo({
+      ...params,
+      model: request.plan.model,
+      prompt: asString(params.prompt),
+      onSubmitted,
+    }, onProgress)
+  }
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
   const shouldUploadAssets = request.plan.assetFlow !== 'none'
   const uploadedImages = shouldUploadAssets
@@ -393,10 +402,10 @@ async function executeRunningHubVideoRequest(
     const pollUrl = buildRunningHubPollUrl(taskId, request.plan.apiStyle === 'rh-aiapp' || isAiAppResponse(data))
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
     mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000)
-    return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' }
+    return { url: mediaUrl, type: request.plan.task === 'model3d' ? 'model3d' : 'video', taskId, pollUrl, pollKind: 'video' }
   }
   if (!mediaUrl) throw new Error('RunningHub 视频生成失败')
-  return { url: mediaUrl, type: 'video' }
+  return { url: mediaUrl, type: request.plan.task === 'model3d' ? 'model3d' : 'video' }
 }
 
 async function executeRunningHubAudioRequest(

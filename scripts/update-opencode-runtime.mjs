@@ -185,8 +185,12 @@ async function main() {
   const outputPath = join(BIN_DIR, target.output)
   await copyFile(binary, outputPath)
   if (process.platform !== 'win32') await chmod(outputPath, 0o755)
-
   const versionOutput = run(outputPath, ['--version'])
+  if (process.platform === 'darwin' && target.asset.startsWith('opencode-darwin-')) {
+    const signature = spawnSync('/usr/bin/codesign', ['-d', outputPath], { encoding: 'utf8' })
+    if (signature.status === 0) run('/usr/bin/codesign', ['--remove-signature', outputPath])
+  }
+
   const hash = await sha256(outputPath)
   const updatedAt = new Date().toISOString()
   const manifest = {

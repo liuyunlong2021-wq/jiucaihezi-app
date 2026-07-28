@@ -5,45 +5,102 @@
  * 在对话区显示媒体生成任务的实时进度和最终结果。
  * 响应式连接到 mediaTaskStore，自动更新。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useMediaTaskStore, type MediaTask } from '@/stores/mediaTaskStore'
 import { emitEvent } from '@/utils/eventBus'
-import { useFileStore } from '@/composables/useFileStore'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { useProjectStore } from '@/stores/projectStore'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { openProjectResource } from '@/services/projectExplorerService'
+import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
+import { fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
+import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
 
 const props = defineProps<{
   taskId: string
+  workbenchMode?: boolean
 }>()
 
 const taskStore = useMediaTaskStore()
-const fileStore = useFileStore()
+const projectStore = useProjectStore()
+const projectFiles = createRuntimeProjectFileService()
 
 const task = computed<MediaTask | undefined>(() => taskStore.getTask(props.taskId))
 
 const isRunning = computed(() => task.value?.status === 'running' || task.value?.status === 'pending')
 const isSuccess = computed(() => task.value?.status === 'success')
 const isFailed = computed(() => task.value?.status === 'failed')
+const hasSaveWarning = computed(() => task.value?.status === 'success' && task.value.assetStatus === 'failed')
 const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
+const linkCopied = ref(false)
+const projectResource = computed<ProjectResource | undefined>(() => {
+  const t = task.value
+  const path = String(t?.projectPath || '')
+  const owner = String(t?.projectId || projectStore.projectDir.value || '')
+  if (!t || !path || !owner) return undefined
+  const mimeType = t.type === 'video' ? 'video/mp4'
+    : t.type === 'audio' ? 'audio/mpeg'
+      : t.type === 'image' ? 'image/png' : 'model/gltf-binary'
+  return {
+    runtime: t.projectId ? 'web' : 'desktop',
+    owner,
+    path,
+    name: path.split('/').pop() || path,
+    isDirectory: false,
+    mimeType,
+    kind: classifyProjectResource({ path, mimeType }),
+  }
+})
+const displayUrl = computed(() => task.value?.resultUrl || '')
 
 function cancel() {
   taskStore.cancelTask(props.taskId)
 }
 
-/** 保存到文件-媒体 (FileTree) */
-async function saveToFiles() {
+async function retrySave() {
+  await taskStore.retryWebMediaPersistence(props.taskId)
+}
+
+async function downloadCopy() {
+  const resource = projectResource.value
+  if (resource) {
+    const binary = await projectFiles.readBinary(resource)
+    await saveGeneratedFile({
+      filename: resource.name,
+      mimeType: binary.mimeType || resource.mimeType || 'application/octet-stream',
+      data: binary.data,
+    })
+    return
+  }
+  const t = task.value
+  if (!t?.resultUrl || !isAllowedCreationResultUrl(t.resultUrl)) return
+  await saveGeneratedFile({
+    filename: `${t.modelLabel}_${t.id}.${t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : t.type === 'model3d' ? 'glb' : 'png'}`,
+    mimeType: t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : t.type === 'model3d' ? 'model/gltf-binary' : 'image/png',
+    data: props.workbenchMode
+      ? (await fetchCreationMediaBlob(t.resultUrl, t.type === 'video' ? 'video' : t.type === 'audio' ? 'audio' : t.type === 'model3d' ? 'model3d' : 'image')).blob
+      : await fetchBlobForExport(t.resultUrl),
+  })
+}
+
+async function copyOriginalLink() {
   const url = task.value?.resultUrl
   if (!url || !isAllowedCreationResultUrl(url)) return
-  const t = task.value!
-  if (t.type === 'text') return
-  const ext = t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : 'png'
-  const fileType: 'image' | 'video' | 'audio' = t.type
-  const mimeType = t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : 'image/png'
-  await fileStore.addMedia(
-    `${t.modelLabel}_${new Date(t.createdAt).toLocaleTimeString('zh-CN')}.${ext}`,
-    url,
-    fileType,
-    mimeType
-  )
+  await navigator.clipboard.writeText(url)
+  linkCopied.value = true
+  window.setTimeout(() => { linkCopied.value = false }, 1400)
+}
+
+async function revealInTree() {
+  const resource = projectResource.value
+  if (!resource) return
+  emitEvent('project-filetree:locate', { path: resource.path })
+  if (props.workbenchMode) emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
+}
+
+async function previewResult() {
+  if (!projectResource.value) return
+  await revealInTree()
 }
 
 /** 发送到创作面板画廊 */
@@ -76,7 +133,7 @@ function sendAsReference() {
       <div class="mtb-header">
         <JcIcon name="hourglass_bottom" class="mtb-spin" />
         <span class="mtb-model">{{ task.modelLabel }}</span>
-        <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : '音频' }}生成中</span>
+        <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : task.type === 'model3d' ? '3D 模型' : '音频' }}生成中</span>
         <button class="mtb-cancel" @click="cancel" title="取消">
           <JcIcon name="close" />
         </button>
@@ -89,17 +146,41 @@ function sendAsReference() {
 
     <!-- 成功 -->
     <div v-else-if="isSuccess && isSafeResult" class="mtb-result">
-      <img v-if="task.type === 'image'" :src="task.resultUrl" class="mtb-image" />
-      <video v-else-if="task.type === 'video'" :src="task.resultUrl" controls class="mtb-video" />
-      <audio v-else-if="task.type === 'audio'" :src="task.resultUrl" controls class="mtb-audio" />
+      <img v-if="task.type === 'image'" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
+      <button
+        v-else-if="task.type === 'video' || task.type === 'audio'"
+        type="button"
+        class="mtb-media-preview"
+        :disabled="!projectResource"
+        :title="projectResource ? '打开预览' : '媒体尚未保存到项目'"
+        @click="previewResult"
+      >
+        <JcIcon :name="task.type === 'video' ? 'movie' : 'music-note'" />
+        <span>{{ task.type === 'video' ? '打开视频' : '播放音频' }}</span>
+      </button>
+      <div v-else-if="task.type === 'model3d'" class="mtb-file-result">
+        <JcIcon name="deployed_code" />
+        <span>3D 模型文件已生成</span>
+      </div>
+      <div v-if="task.projectPath" class="mtb-saved-path">已保存到 {{ task.projectPath }}</div>
+      <div v-else-if="hasSaveWarning" class="mtb-save-warning">
+        媒体已生成，但保存到项目失败。
+        <button type="button" @click="retrySave">重试保存</button>
+      </div>
       <div class="mtb-actions">
-        <button class="mtb-act-btn" @click="saveToFiles" title="保存到文件">
-          <JcIcon name="save" /> 保存
+        <button class="mtb-act-btn" @click="downloadCopy" title="下载副本">
+          <JcIcon name="download" /> 下载
         </button>
-        <button class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
+        <button class="mtb-act-btn" @click="copyOriginalLink" title="复制上游返回的原始链接">
+          <JcIcon name="link" /> {{ linkCopied ? '已复制' : '原始链接' }}
+        </button>
+        <button v-if="projectResource" class="mtb-act-btn" @click="revealInTree" title="在文件树中查看">
+          <JcIcon name="folder_open" /> 在文件树中查看
+        </button>
+        <button v-if="!props.workbenchMode && task.type !== 'model3d'" class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
           <JcIcon name="filter" /> 画廊
         </button>
-        <button v-if="task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
+        <button v-if="!props.workbenchMode && task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
           <JcIcon name="image" /> 参考图
         </button>
       </div>
@@ -134,7 +215,7 @@ function sendAsReference() {
   gap: 6px;
   font-size: 13px;
 }
-.mtb-model { font-weight: 600; color: var(--accent, #6c5ce7); }
+.mtb-model { font-weight: 600; color: var(--olive-dark); }
 .mtb-type { color: var(--ink2, #888); }
 .mtb-cancel {
   margin-left: auto;
@@ -145,7 +226,7 @@ function sendAsReference() {
 
 .mtb-spin {
   animation: mtb-spin-anim 1.5s ease-in-out infinite;
-  color: var(--accent, #6c5ce7);
+  color: var(--olive);
 }
 @keyframes mtb-spin-anim {
   0%, 100% { transform: rotate(0deg); }
@@ -156,13 +237,13 @@ function sendAsReference() {
   margin-top: 8px;
   height: 4px;
   border-radius: 2px;
-  background: rgba(var(--ink-rgb, 200,200,220), 0.1);
+  background: color-mix(in srgb, var(--olive) 12%, transparent);
   overflow: hidden;
 }
 .mtb-progress-fill {
   height: 100%;
   border-radius: 2px;
-  background: linear-gradient(90deg, #6c5ce7, #a29bfe);
+  background: linear-gradient(90deg, var(--olive-dark), var(--olive));
   transition: width 0.5s ease;
 }
 .mtb-progress-text {
@@ -179,12 +260,45 @@ function sendAsReference() {
   object-fit: contain;
   cursor: pointer;
 }
-.mtb-video {
-  max-width: 100%;
-  max-height: 360px;
+.mtb-media-preview {
+  display: grid;
+  width: 100%;
+  min-height: 112px;
+  place-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
   border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink2);
+  cursor: pointer;
+  font: inherit;
 }
-.mtb-audio { width: 100%; }
+.mtb-media-preview:hover:not(:disabled) { border-color: var(--olive); color: var(--olive); }
+.mtb-media-preview:disabled { cursor: default; opacity: .55; }
+.mtb-media-preview .mso { font-size: 34px; }
+.mtb-file-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  color: var(--ink2, #888);
+}
+.mtb-saved-path { color: var(--ink3); font-size: 11px; overflow-wrap: anywhere; }
+.mtb-save-warning {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--danger, #c0392b);
+  font-size: 12px;
+}
+.mtb-save-warning button {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
 
 .mtb-actions {
   display: flex;
@@ -203,9 +317,9 @@ function sendAsReference() {
   transition: all 0.15s;
 }
 .mtb-act-btn:hover {
-  background: rgba(var(--accent-rgb, 108,92,231), 0.1);
-  color: var(--accent, #6c5ce7);
-  border-color: var(--accent, #6c5ce7);
+  background: var(--olive-pale);
+  color: var(--olive-dark);
+  border-color: var(--olive);
 }
 .mtb-act-btn .mso { font-size: 14px; }
 

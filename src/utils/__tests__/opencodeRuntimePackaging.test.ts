@@ -3,20 +3,22 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-test('macOS OpenCode packaging includes both Apple Silicon and Intel runtimes', () => {
+test('memory packaging excludes OpenCode while the Studio target retains it', () => {
   const root = process.cwd()
   const resolverSource = readFileSync(join(root, 'src-tauri/src/commands/tools.rs'), 'utf8')
   const updaterSource = readFileSync(join(root, 'scripts/update-opencode-runtime.mjs'), 'utf8')
-  const tauriConfig = readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8')
+  const memoryConfig = JSON.parse(readFileSync(join(root, 'src-tauri/tauri.conf.json'), 'utf8'))
+  const studioConfig = JSON.parse(readFileSync(join(root, 'src-tauri/tauri.studio.conf.json'), 'utf8'))
   const buildWorkflow = readFileSync(join(root, '.github/workflows/build.yml'), 'utf8')
 
   assert.match(resolverSource, /opencode-aarch64-apple-darwin/)
   assert.match(resolverSource, /opencode-x86_64-apple-darwin/)
   assert.match(updaterSource, /opencode-darwin-arm64\.zip/)
   assert.match(updaterSource, /opencode-darwin-x64-baseline\.zip/)
-  assert.match(tauriConfig, /"binaries\/opencode"/)
-  assert.match(buildWorkflow, /Download OpenCode \(darwin arm64\)[\s\S]*--platform=darwin --arch=arm64/)
-  assert.match(buildWorkflow, /Download OpenCode \(darwin x64\)[\s\S]*--platform=darwin --arch=x64/)
+  assert.deepEqual(memoryConfig.bundle.externalBin, [])
+  assert.deepEqual(studioConfig.bundle.externalBin, ['binaries/opencode'])
+  assert.doesNotMatch(buildWorkflow, /update-opencode-runtime/)
+  assert.match(buildWorkflow, /记忆 APP 不得携带 OpenCode sidecar/)
 })
 
 test('OpenCode SDK, runtime manifest, and frontend metadata use one official version', t => {
@@ -36,17 +38,13 @@ test('OpenCode SDK, runtime manifest, and frontend metadata use one official ver
   assert.match(frontendInfo, new RegExp(`"version": "${manifest.version}"`))
 })
 
-test('OpenCode SDK, updater, and CI pin the v1.18.4 release', () => {
+test('OpenCode SDK and Studio updater pin the v1.18.4 release', () => {
   const root = process.cwd()
   const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
   const updater = readFileSync(join(root, 'scripts/update-opencode-runtime.mjs'), 'utf8')
-  const workflow = readFileSync(join(root, '.github/workflows/build.yml'), 'utf8')
 
   assert.equal(packageJson.dependencies['@opencode-ai/sdk'], '1.18.4')
   assert.match(updater, /argValue\('--version'\) \|\| 'v1\.18\.4'/)
-  assert.match(workflow, /--version=v1\.18\.4 --platform=darwin --arch=arm64/)
-  assert.match(workflow, /--version=v1\.18\.4 --platform=darwin --arch=x64/)
-  assert.match(workflow, /--version=v1\.18\.4 --platform=win32 --arch=x64/)
 })
 
 test('OpenCode updater uses baseline builds for every x64 desktop target', () => {
@@ -55,6 +53,14 @@ test('OpenCode updater uses baseline builds for every x64 desktop target', () =>
   assert.match(source, /opencode-darwin-x64-baseline\.zip/)
   assert.match(source, /opencode-linux-x64-baseline\.tar\.gz/)
   assert.match(source, /opencode-windows-x64-baseline\.zip/)
+})
+
+test('macOS OpenCode runtimes drop upstream signatures before app signing', () => {
+  const source = readFileSync(join(process.cwd(), 'scripts/update-opencode-runtime.mjs'), 'utf8')
+
+  assert.match(source, /process\.platform === 'darwin'/)
+  assert.match(source, /codesign', \['--remove-signature', outputPath\]/)
+  assert.ok(source.indexOf("run(outputPath, ['--version'])") < source.indexOf("['--remove-signature', outputPath]"))
 })
 
 test('OpenCode restarts preserve committed SQLite WAL data', () => {

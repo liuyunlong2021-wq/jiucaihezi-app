@@ -14,17 +14,22 @@ const props = defineProps<{
   status?: 'ready' | 'submitting' | 'submitted' | 'failed'
   error?: string
   blocked?: boolean
+  workbenchMode?: boolean
+  generationCount?: number
 }>()
 
 const emit = defineEmits<{
   (event: 'approve'): void
   (event: 'removeReference', id: string): void
   (event: 'updateParameters', patch: MediaPlanParameterPatch): void
+  (event: 'updateGenerationCount', count: number): void
 }>()
 
 const kindLabel = {
   image: '图片',
   video: '视频',
+  audio: '音频',
+  model3d: '3D',
 } as const
 
 const spec = computed(() => getCreationModelSpec(props.plan.modelId))
@@ -55,12 +60,15 @@ const modeLabel = computed(() => {
     'text-to-video': '文生视频',
     'image-to-video': '图生视频',
     'video-edit': '视频编辑',
+    'text-to-audio': '文生音频',
+    'text-to-3d': '文生 3D',
+    'image-to-3d': '图生 3D',
   }
   return labels[effectiveMode.value || ''] || '媒体生成'
 })
 const canApprove = computed(() => {
   if (props.blocked) return false
-  if (props.status && props.status !== 'ready' && props.status !== 'failed') return false
+  if (props.status === 'submitting' || (props.status === 'submitted' && !props.workbenchMode)) return false
   if (props.plan.mediaReferences?.some(reference => reference.invalidReason)) return false
   try {
     validateMediaPlan(props.plan)
@@ -69,7 +77,7 @@ const canApprove = computed(() => {
     return false
   }
 })
-const canEdit = computed(() => !props.status || props.status === 'ready' || props.status === 'failed')
+const canEdit = computed(() => !props.status || props.status === 'ready' || props.status === 'failed' || (props.workbenchMode && props.status === 'submitted'))
 
 function approve() {
   if (!canApprove.value) return
@@ -80,9 +88,17 @@ function updateText(key: 'modelId' | 'ratio' | 'resolution', event: Event) {
   emit('updateParameters', { [key]: (event.target as HTMLSelectElement).value })
 }
 
+function updatePrompt(event: Event) {
+  emit('updateParameters', { prompt: (event.target as HTMLTextAreaElement).value })
+}
+
 function updateDuration(event: Event) {
   const target = event.target as HTMLInputElement | HTMLSelectElement
   emit('updateParameters', { duration: target.value })
+}
+
+function updateGenerationCount(event: Event) {
+  emit('updateGenerationCount', Number((event.target as HTMLSelectElement).value))
 }
 </script>
 
@@ -128,7 +144,14 @@ function updateDuration(event: Event) {
         >{{ plan.ratio || plan.resolution || plan.duration !== undefined ? ' · ' : '' }}价格 {{ spec.price }}</span
       >
     </p>
+    <p v-if="plan.kind === 'image' && (generationCount || 1) > 1" class="media-plan-meta">
+      将提交 {{ generationCount }} 个独立付费任务，按单张价格分别计费。
+    </p>
     <div v-if="showEditor && canEdit" class="media-plan-editor">
+      <label class="media-plan-prompt-field">
+        <span>提示词</span>
+        <textarea :value="plan.prompt" rows="3" @change="updatePrompt" />
+      </label>
       <label>
         <span>模型</span>
         <select :value="plan.modelId" @change="updateText('modelId', $event)">
@@ -172,6 +195,12 @@ function updateDuration(event: Event) {
           @change="updateDuration"
         >
       </label>
+      <label v-if="plan.kind === 'image' && generationCount !== undefined">
+        <span>数量</span>
+        <select :value="generationCount" @change="updateGenerationCount">
+          <option v-for="count in 5" :key="count" :value="count">{{ count }} 张</option>
+        </select>
+      </label>
     </div>
     <p v-if="error" class="media-plan-error">{{ error }}</p>
     <div v-if="canEdit" class="media-plan-actions">
@@ -181,12 +210,12 @@ function updateDuration(event: Event) {
       </button>
       <button type="button" class="media-plan-submit" :disabled="!canApprove" @click="approve">
         <JcIcon name="play_arrow" />
-        开始生成
+        {{ status === 'submitted' || status === 'failed' ? '再次生成' : '开始生成' }}
       </button>
     </div>
-    <span v-else-if="status === 'submitting'" class="media-plan-status">正在提交到创作面板…</span>
+    <span v-else-if="status === 'submitting'" class="media-plan-status">正在提交媒体任务…</span>
     <span v-else-if="status === 'submitted'" class="media-plan-status"
-      >已提交，结果将在创作面板和画布中显示。</span
+      >{{ props.workbenchMode ? '已提交，结果会在当前对话中显示。' : '已提交，结果将在创作面板和画布中显示。' }}</span
     >
   </section>
 </template>
@@ -285,16 +314,29 @@ function updateDuration(event: Event) {
   font-size: 11px;
 }
 .media-plan-editor select,
-.media-plan-editor input {
+.media-plan-editor input,
+.media-plan-editor textarea {
   width: 100%;
   min-width: 0;
-  height: 30px;
   box-sizing: border-box;
   border: 1px solid var(--line);
   border-radius: 5px;
   background: var(--paper);
   color: var(--ink2);
   font: inherit;
+}
+.media-plan-editor select,
+.media-plan-editor input {
+  height: 30px;
+}
+.media-plan-prompt-field {
+  grid-column: 1 / -1;
+}
+.media-plan-editor textarea {
+  min-height: 62px;
+  padding: 7px 8px;
+  line-height: 1.5;
+  resize: vertical;
 }
 .media-plan-error {
   margin: 8px 0;

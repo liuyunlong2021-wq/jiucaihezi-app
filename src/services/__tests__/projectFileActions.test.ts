@@ -136,6 +136,22 @@ test('shared media submission URL encodes a project image outside jc-media', asy
   assert.equal(url, 'data:audio/mpeg;base64,QUI=')
 })
 
+test('shared media submission restores image MIME when Desktop binary reads return bytes only', async () => {
+  const adapter: ProjectFileAdapter = {
+    runtime: 'desktop', async list() { return [] }, async readText() { throw new Error('not used') },
+    async createText() { throw new Error('not used') }, async rename() { throw new Error('not used') }, async remove() { throw new Error('not used') },
+    async readBinary() { return { data: new Uint8Array([65, 66]), size: 2 } },
+  }
+  const actions = createProjectFileActions(createProjectFileService(adapter))
+
+  const url = await actions.readMediaDataUrl({
+    runtime: 'desktop', owner: '/project', path: 'jc-media/uploads/reference.jpg',
+    name: 'reference.jpg', isDirectory: false, kind: 'media',
+  })
+
+  assert.equal(url, 'data:image/jpeg;base64,QUI=')
+})
+
 test('shared export rejects resources from different projects before platform export begins', async () => {
   const adapter: ProjectFileAdapter = {
     runtime: 'web',

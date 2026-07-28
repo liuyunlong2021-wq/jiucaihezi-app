@@ -56,7 +56,7 @@ function baseSpec(input: {
   apiStyle: CreationApiStyle
   mode: CreationMode
   contractStatus?: CreationContractStatus
-  price?: number
+  price?: number | string
   endpoint: string
   pollKind?: NonNullable<CreationModelSpec['poll']>['kind']
   assetFlow?: CreationAssetFlow
@@ -122,7 +122,7 @@ function directImage(input: {
   id: string
   model?: string
   label: string
-  price: number
+  price?: number | string
   upstreamFamily?: CreationUpstreamFamily
   apiStyle?: CreationApiStyle
   mode?: CreationMode
@@ -200,6 +200,10 @@ function directVideo(input: {
   notes: string[]
   aliases?: string[]
   contractIssues?: string[]
+  mode?: CreationMode
+  fields?: CreationFieldSpec[]
+  duration?: { min?: number; max?: number; allowedValues?: number[] }
+  files?: { images?: { min?: number; max?: number } }
 }): CreationModelSpec {
   return baseSpec({
     id: input.id,
@@ -210,7 +214,7 @@ function directVideo(input: {
     route: 'newapi-direct',
     upstreamFamily: input.upstreamFamily,
     apiStyle: input.apiStyle || 'newapi-task',
-    mode: 'image-to-video',
+    mode: input.mode || 'image-to-video',
     contractStatus: input.contractStatus || 'partial',
     price: input.price,
     endpoint: input.endpoint || '/v1/videos',
@@ -218,8 +222,8 @@ function directVideo(input: {
     assetFlow:
       input.assetFlow || (input.apiStyle === 'seedance-task' ? 'seedance-asset' : 'newapi-upload'),
     resultExtractor: 'newapi-task',
-    files: { images: { min: 0, max: 9 } },
-    fields: promptFields([
+    files: input.files || { images: { min: 0, max: 9 } },
+    fields: input.fields || promptFields([
       {
         key: 'ratio',
         label: '比例',
@@ -239,7 +243,7 @@ function directVideo(input: {
     ]),
     notes: input.notes,
     aliases: input.aliases,
-    duration: { min: 4, max: 30 },
+    duration: input.duration || { min: 4, max: 30 },
     contractIssues:
       input.contractIssues ??
       (input.contractStatus === 'partial' ? ['异步轮询字段需以后端实测确认。'] : undefined),
@@ -252,7 +256,7 @@ function runninghubStandard(input: {
   label: string
   task: CreationTask
   mode: CreationMode
-  price: number
+  price?: number
   apiStyle?: CreationApiStyle
   contractStatus?: CreationContractStatus
   endpoint?: string
@@ -333,14 +337,14 @@ function runninghubStandard(input: {
 export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── ★ GPT Image 2 官方（推荐 · 置顶）──
   // 不上传参考图→文生图，上传参考图→图生图。
-  // quality/resolution 由 rh-adapter 强制设为 low/1k，计费统一 0.1。
+  // quality/resolution 由 rh-adapter 强制设为 low/1k，计费统一 0.25。
   runninghubStandard({
     id: 'runninghub/api/rh-gpt2-official',
     model: 'rh-gpt2-official',
     label: 'GPT Image 2 官方',
     task: 'image',
     mode: 'text-to-image',
-    price: 0.1,
+    price: 0.25,
     notes: ['docs/notes/RH-GPTImage2官方.md'],
     files: { images: { min: 0, max: 10 } },
     fields: promptFields([
@@ -367,7 +371,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     mode: 'text-to-image',
     contractStatus: 'verified',
-    price: 0.15,
+    price: '分组计价 · 自动账户 ¥0.12',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
@@ -399,6 +403,53 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ],
     aliases: ['gpt-image-2'],
     notes: ['docs/notes/T8gpt2.md'],
+    ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
+    resolutions: ['1k', '2k', '4k'],
+  }),
+  baseSpec({
+    id: 'newapi/vip/gpt-image-2-vip',
+    model: 'gpt-image-2-vip',
+    label: 'GPT Image 2 VIP · 直连',
+    task: 'image',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    pollKind: 'none',
+    mode: 'text-to-image',
+    contractStatus: 'verified',
+    price: '¥0.20',
+    endpoint: '/v1/images/generations',
+    assetFlow: 'none',
+    resultExtractor: 'openai-image',
+    files: { images: { min: 0, max: 8 } },
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '1:1',
+        options: options(['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']),
+      },
+      {
+        key: 'resolution',
+        label: '分辨率',
+        kind: 'select',
+        defaultValue: '2k',
+        options: options(['1k', '2k', '4k']),
+      },
+      { key: 'image', label: '参考图', kind: 'images' },
+      {
+        key: 'response_format',
+        label: '返回格式',
+        kind: 'select',
+        defaultValue: 'url',
+        options: options(['url', 'b64_json']),
+      },
+    ],
+    aliases: ['gpt-image-2-vip'],
+    notes: [],
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: ['1k', '2k', '4k'],
   }),
@@ -455,16 +506,16 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directImage({
     id: 'newapi/t8/gemini-3.1-flash-image-preview',
     model: 'gemini-3.1-flash-image-preview',
-    label: 'Gemini 3.1 Flash Image · T8（已下线）',
+    label: 'Gemini 3.1 Flash Image',
     price: 0.1,
-    apiStyle: 'newapi-task',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
     mode: 'text-to-image',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
+    resultExtractor: 'openai-image',
+    contractStatus: 'verified',
+    notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
   directImage({
     id: 'newapi/t8/gemini-3.1-flash-image-preview-2k',
@@ -483,16 +534,16 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   directImage({
     id: 'newapi/t8/gemini-3-pro-image-preview',
     model: 'gemini-3-pro-image-preview',
-    label: 'Gemini 3 Pro Image · T8（已下线）',
+    label: 'Gemini 3 Pro Image',
     price: 0.2,
-    apiStyle: 'newapi-task',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
     mode: 'text-to-image',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
+    resultExtractor: 'openai-image',
+    contractStatus: 'verified',
+    notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
   directImage({
     id: 'newapi/t8/gemini-3-pro-image-preview-2k',
@@ -598,6 +649,44 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'broken',
     notes: ['NewAPI alias'],
     contractIssues: ['T8 渠道已关闭'],
+  }),
+  directVideo({
+    id: 'newapi/zx/veo-3.1-generate-preview',
+    model: 'veo-3.1-generate-preview',
+    label: 'Veo 3.1',
+    price: 0.2,
+    upstreamFamily: 'zx',
+    apiStyle: 'openai-videos',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    files: { images: { min: 0, max: 1 } },
+    duration: { allowedValues: [4, 6, 8] },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 4, options: options([4, 6, 8]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    notes: ['docs/wiki/归档/模型文档/zx-veo.md'],
+  }),
+  directVideo({
+    id: 'newapi/zx/veo-3.1-fast-generate-preview',
+    model: 'veo-3.1-fast-generate-preview',
+    label: 'Veo 3.1 Fast',
+    price: 0.1,
+    upstreamFamily: 'zx',
+    apiStyle: 'openai-videos',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    files: { images: { min: 0, max: 1 } },
+    duration: { allowedValues: [4, 6, 8] },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 4, options: options([4, 6, 8]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    notes: ['docs/wiki/归档/模型文档/zx-veo.md'],
   }),
   directVideo({
     id: 'newapi/trump/seedance-2.0',
@@ -1345,6 +1434,41 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     price: 0.02,
     notes: ['docs/notes/runninghub-suno.md'],
     outputModalities: ['text'],
+  }),
+
+  runninghubStandard({
+    id: 'runninghub/api/rh-3d-text',
+    model: 'rh-3d-text',
+    label: '混元 3D v3.1 文生 3D · RunningHub',
+    task: 'model3d',
+    mode: 'text-to-3d',
+    price: 4.2,
+    webappId: 'hunyuan3d-v3.1/text-to-3d',
+    notes: ['docs/wiki/归档/模型文档/RH-混元3D.md'],
+    outputModalities: ['model3d'],
+    fields: promptFields([
+      { key: 'faceCount', label: '面数', kind: 'number', defaultValue: 500000, min: 10000, max: 1500000, step: 1 },
+      { key: 'enablePbr', label: 'PBR 材质', kind: 'boolean', defaultValue: false },
+      { key: 'generateType', label: '生成类型', kind: 'select', defaultValue: 'Normal', options: options(['Normal', 'Geometry', 'Sketch']) },
+    ]),
+  }),
+  runninghubStandard({
+    id: 'runninghub/api/rh-3d-image',
+    model: 'rh-3d-image',
+    label: '混元 3D v3.1 图生 3D · RunningHub',
+    task: 'model3d',
+    mode: 'image-to-3d',
+    price: 6.6,
+    webappId: 'hunyuan3d-v3.1/image-to-3d',
+    notes: ['docs/wiki/归档/模型文档/RH-混元3D.md'],
+    files: { images: { min: 1, max: 8 } },
+    outputModalities: ['model3d'],
+    fields: [
+      { key: 'faceCount', label: '面数', kind: 'number', defaultValue: 500000, min: 10000, max: 1500000, step: 1 },
+      { key: 'enablePbr', label: 'PBR 材质', kind: 'boolean', defaultValue: false },
+      { key: 'generateType', label: '生成类型', kind: 'select', defaultValue: 'Normal', options: options(['Normal', 'Geometry', 'Sketch']) },
+      { key: 'images', label: '参考图（主、左、右、后、上、下、左前、右前）', kind: 'images', required: true },
+    ],
   }),
 
   runninghubStandard({

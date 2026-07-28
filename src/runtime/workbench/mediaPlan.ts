@@ -9,7 +9,7 @@ import { getMediaModelAvailability } from '@/data/mediaModelCapabilities'
 import type { MediaReference } from './mediaReference'
 /** The only model-authored media payload the app accepts. */
 export interface MediaPlan {
-  kind: 'image' | 'video'
+  kind: 'image' | 'video' | 'audio' | 'model3d'
   title: string
   prompt: string
   modelId: string
@@ -27,6 +27,7 @@ export interface MediaPlan {
 }
 
 export interface MediaPlanParameterPatch {
+  prompt?: string
   modelId?: string
   ratio?: string
   resolution?: string
@@ -47,16 +48,18 @@ export interface MediaPlanEditorControls {
 }
 
 export const MEDIA_PLAN_POLICY = [
-  '创作模式媒体执行规则：当用户明确要求生成图片或视频时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
-  '媒体计划字段：kind(image|video)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
+  '媒体执行规则：当用户明确要求生成图片、视频、音频或 3D 模型时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
+  '媒体计划字段：kind(image|video|audio|model3d)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
+  '用户明确给出媒体提示词或动作描述时，prompt 必须原样使用，不得擅自扩写、润色或替换；只有用户明确要求优化，或没有给出可执行描述时，才可以补全。',
   '不要自行选择默认模型：应用会默认使用 GPT Image 2 官方生图；视频按无参考、一张参考图、多素材分别使用标准 Seedance 2.0 文生、图生、多模态。用户可在确认卡手动调整模型。',
   '只能使用应用提供的素材 referenceId；不要输出 referenceImages、referenceVideos、URL、data URL 或文件路径。',
-  '不要在此路径运行 jc_media.py、媒体 API、轮询或下载；用户确认后由应用的现有创作面板执行。没有媒体生成意图时不要输出媒体计划。',
+  '不要直接运行媒体 API、轮询或下载；用户确认后由应用的公共媒体任务引擎执行。没有媒体生成意图时不要输出媒体计划。',
 ].join('\n')
 
 export function buildMediaPlanPolicy(referencePolicy = ''): string {
   const models = listCreationModels()
-    .filter(model => model.task === 'image' || model.task === 'video')
+    .filter(model => model.task === 'image' || model.task === 'video' || model.task === 'audio' || model.task === 'model3d')
+    .filter(model => getCreationModelSpec(model.id)?.capabilities.outputModalities.includes(model.task as 'image' | 'video' | 'audio' | 'model3d'))
     .filter(model => isCreationModelAvailable(model.id))
     .map(model => {
       const spec = getCreationModelSpec(model.id)!
@@ -82,6 +85,11 @@ export function buildMediaPlanPolicy(referencePolicy = ''): string {
 }
 
 const MEDIA_PLAN_BLOCK = /```jc-media-plan\s*\n([\s\S]*?)\n```/
+const MEDIA_PLAN_BLOCKS = /```jc-media-plan\s*\n[\s\S]*?\n```/g
+
+export function stripMediaPlanBlocks(text: string): string {
+  return String(text || '').replace(MEDIA_PLAN_BLOCKS, '').trim()
+}
 
 export function replaceMediaPlanModelId(text: string, modelId: string): string {
   const match = String(text || '').match(MEDIA_PLAN_BLOCK)
@@ -99,6 +107,16 @@ export function replaceMediaPlanModelId(text: string, modelId: string): string {
 }
 
 export function parseMediaPlan(text: string): MediaPlan {
+  const values = parseMediaPlanValues(text)
+  if (values.length !== 1) throw new Error('媒体计划必须是单个 JSON 对象。')
+  return normalizeMediaPlan(values[0])
+}
+
+export function parseMediaPlans(text: string): MediaPlan[] {
+  return parseMediaPlanValues(text).map(normalizeMediaPlan)
+}
+
+function parseMediaPlanValues(text: string): Record<string, unknown>[] {
   const match = String(text || '').match(MEDIA_PLAN_BLOCK)
   if (!match) throw new Error('媒体计划必须放在 ```jc-media-plan JSON 代码块中。')
 
@@ -109,13 +127,16 @@ export function parseMediaPlan(text: string): MediaPlan {
     throw new Error('媒体计划不是有效 JSON。')
   }
 
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    throw new Error('媒体计划必须是 JSON 对象。')
+  const values = Array.isArray(value) ? value : [value]
+  if (!values.length || values.some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
+    throw new Error('媒体计划必须是 JSON 对象或对象数组。')
   }
+  return values as Record<string, unknown>[]
+}
 
-  const plan = value as Record<string, unknown>
-  if (!['image', 'video'].includes(String(plan.kind))) {
-    throw new Error('媒体计划暂时只支持 image、video。')
+function normalizeMediaPlan(plan: Record<string, unknown>): MediaPlan {
+  if (!['image', 'video', 'audio', 'model3d'].includes(String(plan.kind))) {
+    throw new Error('媒体计划只支持 image、video、audio、model3d。')
   }
   for (const field of ['referenceImages', 'referenceVideos']) {
     if (plan[field] !== undefined) throw new Error(`媒体计划的 ${field} 不能由模型提供。`)
@@ -177,14 +198,27 @@ export function getMediaPlanEditorControls(plan: MediaPlan): MediaPlanEditorCont
     plan.referenceVideos?.length || 0,
     plan.mediaReferences?.filter(reference => reference.kind === 'video').length || 0,
   )
-  const models = listCreationModels({ task: plan.kind })
+  const compatibleModels = listCreationModels({ task: plan.kind })
     .filter(model => isCreationModelAvailable(model.id))
     .filter(model => {
       const spec = getCreationModelSpec(model.id)!
       return acceptsFileCount(spec.files?.images, imageCount)
         && acceptsFileCount(spec.files?.videos, videoCount)
     })
-    .map(model => ({ value: model.id, label: displayModelLabel(model.label) }))
+  const labelCounts = new Map<string, number>()
+  for (const model of compatibleModels) {
+    const label = displayModelLabel(model.label)
+    labelCounts.set(label, (labelCounts.get(label) || 0) + 1)
+  }
+  const models = compatibleModels.map(model => {
+    const label = displayModelLabel(model.label)
+    return {
+      value: model.id,
+      label: labelCounts.get(label)! > 1
+        ? `${label} · ${model.source === 'runninghub' ? 'RunningHub' : '直连'}`
+        : label,
+    }
+  })
   const spec = getCreationModelSpec(plan.modelId)
   if (!spec) return { models, ratios: [], resolutions: [], durations: [] }
   const duration = spec.capabilities.duration
@@ -211,7 +245,11 @@ export function updateMediaPlanParameters(
   const modelId = patch.modelId || plan.modelId
   const spec = getCreationModelSpec(modelId)
   if (!spec) throw new Error(`媒体计划的模型未注册：${modelId}`)
-  const next: MediaPlan = { ...plan, modelId }
+  const next: MediaPlan = {
+    ...plan,
+    modelId,
+    ...(patch.prompt === undefined ? {} : { prompt: patch.prompt.trim() }),
+  }
   if (patch.modelId) delete next.usesProductDefaultModel
   const controls = getMediaPlanEditorControls(next)
 
@@ -224,6 +262,7 @@ export function updateMediaPlanParameters(
 
 export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
   if (plan.kind === 'image') return 'runninghub/api/rh-gpt2-official'
+  if (plan.kind === 'audio') return 'runninghub/api/rh-suno-v55-single'
 
   const imageCount = Math.max(
     plan.referenceImages?.length || 0,
@@ -233,6 +272,9 @@ export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'ref
     plan.referenceVideos?.length || 0,
     plan.mediaReferences?.filter(reference => reference.kind === 'video').length || 0,
   )
+  if (plan.kind === 'model3d') {
+    return imageCount > 0 ? 'runninghub/api/rh-3d-image' : 'runninghub/api/rh-3d-text'
+  }
   if (videoCount > 0 || imageCount > 1) return 'runninghub/api/rh-seedance2'
   if (imageCount === 1) return 'runninghub/api/rh-seedance2-image'
   return 'runninghub/api/rh-seedance2-text'

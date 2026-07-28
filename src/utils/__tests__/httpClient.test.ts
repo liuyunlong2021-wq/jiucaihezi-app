@@ -74,3 +74,10 @@ test('Rust-backed chat streams have no total duration cutoff', () => {
   assert.match(source, /body,\s*timeout_secs:\s*undefined,/s)
   assert.doesNotMatch(source, /timeout_secs:\s*new URL\(url\)\.pathname === '\/global\/event' \? undefined : 120/)
 })
+
+test('Tauri opens external URLs through the official opener plugin', () => {
+  const source = readFileSync('src/utils/httpClient.ts', 'utf8')
+  assert.match(source, /@tauri-apps\/plugin-opener/)
+  assert.match(source, /await openUrl\(url\)/)
+  assert.doesNotMatch(source, /@tauri-apps\/plugin-shell'[\s\S]*await open\(url\)/)
+})

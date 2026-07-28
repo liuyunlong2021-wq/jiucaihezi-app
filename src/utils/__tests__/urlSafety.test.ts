@@ -44,9 +44,15 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/result.mp4'), true)
   assert.equal(isAllowedCreationResultUrl('https://cdn.sd2.mengfactory.cn/sd2/result-assets/result.mp4'), true)
   assert.equal(isAllowedCreationResultUrl('https://webstatic.aiproxy.vip/output/result.png'), true)
+  assert.equal(isAllowedCreationResultUrl('https://vip.edu888.top/media/siphonlab-media/images/outputs/result.png'), true)
+  assert.equal(isAllowedCreationResultUrl('https://new-partner-cdn.example/result.png'), true)
+  assert.equal(isAllowedCreationResultUrl('https://user:password@cdn.example.com/result.png'), false)
+  assert.equal(isAllowedCreationResultUrl('https://localhost/result.png'), false)
+  assert.equal(isAllowedCreationResultUrl('https://127.0.0.1/result.png'), false)
+  assert.equal(isAllowedCreationResultUrl('https://192.168.1.8/result.png'), false)
+  assert.equal(isAllowedCreationResultUrl('https://[::1]/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('asset://localhost/Users/by3/Library/Application%20Support/jiucaihezi/media-outputs/audio.mp3'), false)
   assert.equal(isAllowedCreationResultUrl('blob:https://jiucaihezi.studio/result'), false)
-  assert.equal(isAllowedCreationResultUrl('https://cdn.example.com/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('javascript:alert(1)'), false)
   assert.equal(isAllowedCreationResultUrl('file:///Users/by3/result.png'), false)
 })
@@ -63,6 +69,13 @@ test('Tauri CSP allows approved creation result CDN hosts used for media caching
   assert.match(mediaSrc, /(^|\s)data:(\s|$)/)
   assert.match(mediaSrc, /(^|\s)blob:(\s|$)/)
   assert.match(mediaSrc, /(^|\s)https:(\s|$)/)
+})
+
+test('Web CSP permits HTTPS fetches for trusted media execution results', () => {
+  const headers = readFileSync(join(process.cwd(), 'public/_headers'), 'utf8')
+  const connectSrc = headers.match(/connect-src[^;]+/)?.[0] || ''
+
+  assert.match(connectSrc, /(^|\s)https:(\s|$)/)
 })
 
 test('creation poll url guard only allows known task polling paths', () => {

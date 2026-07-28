@@ -400,13 +400,14 @@ export async function createSession(env, user) {
 }
 
 export function getSessionId(request) {
-  const authorization = request.headers.get('Authorization') || request.headers.get('authorization') || '';
-  const bearerMatch = String(authorization || '').match(/^Bearer\s+(.+)$/i);
-  if (bearerMatch && bearerMatch[1]) return bearerMatch[1].trim();
   const desktopSession = request.headers.get('X-JC-Session') || request.headers.get('x-jc-session') || '';
   if (desktopSession) return String(desktopSession).trim();
   const cookies = parseCookie(request.headers.get('Cookie') || request.headers.get('cookie') || '');
-  return cookies[SESSION_COOKIE_NAME] || '';
+  if (cookies[SESSION_COOKIE_NAME]) return cookies[SESSION_COOKIE_NAME];
+  const authorization = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+  const bearerMatch = String(authorization || '').match(/^Bearer\s+(.+)$/i);
+  if (bearerMatch && bearerMatch[1]) return bearerMatch[1].trim();
+  return '';
 }
 
 export function sessionCookie(session) {

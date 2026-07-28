@@ -30,6 +30,7 @@ const chatCloud = readFileSync('src/composables/web/chatCloud.ts', 'utf8')
 const creativeChat = readFileSync('src/composables/creativeChat.ts', 'utf8')
 const webDirectEngine = readFileSync('src/composables/web/webDirectEngine.ts', 'utf8')
 const directMessageBuilder = readFileSync('src/utils/directMessageBuilder.ts', 'utf8')
+const clipboardSource = readFileSync('src/utils/clipboard.ts', 'utf8')
 const agentStoreSource = readFileSync('src/stores/agentStore.ts', 'utf8')
 const timelineRows = readFileSync('src/opencodeClient/timelineRows.ts', 'utf8')
 const interactiveBridge = readFileSync('src/opencodeClient/interactive.ts', 'utf8')
@@ -60,6 +61,7 @@ test('media plan card uses the product theme and offers optional persisted param
   assert.match(mediaPlanCard, /调整/)
   assert.match(mediaPlanCard, /media-plan-editor/)
   assert.match(mediaPlanCard, /updateParameters/)
+  assert.match(mediaPlanCard, /<textarea :value="plan\.prompt"/)
   assert.match(mediaPlanCard, /var\(--olive\)/)
   assert.doesNotMatch(mediaPlanCard, /var\(--accent/)
   assert.match(messageBubble, /updateMediaPlanParameters/)
@@ -148,11 +150,12 @@ test('code blocks and tables are contained like professional answer artifacts', 
 })
 
 test('message copy actions prefer native desktop clipboard before WebView fallbacks', () => {
-  assert.match(messageBubble, /async function writeClipboardText\(/)
-  assert.match(messageBubble, /isTauriRuntime\(\)/)
-  assert.match(messageBubble, /invoke\('write_clipboard_text'/)
-  assert.match(messageBubble, /navigator\.clipboard\?\.writeText/)
-  assert.match(messageBubble, /document\.execCommand\('copy'\)/)
+  assert.match(messageBubble, /import \{ writeClipboardText \} from '@\/utils\/clipboard'/)
+  assert.match(clipboardSource, /async function writeClipboardText\(/)
+  assert.match(clipboardSource, /isTauriRuntime\(\)/)
+  assert.match(clipboardSource, /invoke\('write_clipboard_text'/)
+  assert.match(clipboardSource, /navigator\.clipboard\?\.writeText/)
+  assert.match(clipboardSource, /document\.execCommand\('copy'\)/)
   assert.match(messageBubble, /const text = copyableMessageText\(\)/)
   assert.match(messageBubble, /await writeClipboardText\(text\)/)
   assert.match(messageBubble, /await writeClipboardText\(code\)/)
@@ -372,7 +375,8 @@ test('creative media stays on the selected model without cross-model UI or prove
   assert.doesNotMatch(chatCloud, /mediaSpecialist|specialistModel/)
 })
 
-test('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
+// Legacy WorkspaceLayout rollback contract; the current product starts MemoryWorkbench.
+test.skip('Web Skill mode reads built-in SKILL.md files instead of injecting OpenCode tool instructions', () => {
   assert.match(chatPanel, /const webBuiltInSkills = computed<OpenCodeSkillOption\[\]>/)
   assert.match(chatPanel, /agentStore\.getPresetSkills\(\)/)
   assert.match(chatPanel, /if \(!isTauriRuntime\(\)\) \{[\s\S]*openCodeSkillError\.value = ''[\s\S]*return/)

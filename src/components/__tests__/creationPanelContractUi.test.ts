@@ -21,7 +21,27 @@ test('creation panel reads registry-backed plan state instead of legacy RH-only 
   assert.doesNotMatch(source, /const rhMode = computed/)
 })
 
-test('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
+test('creation panel counts only tasks with a live runtime execution as generating', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /task\.source === 'creation' && mediaTaskStore\.isTaskActive\(task\.id\)/)
+  assert.doesNotMatch(
+    source,
+    /task\.source === 'creation' && \(task\.status === 'pending' \|\| task\.status === 'running'\)/,
+  )
+})
+
+test('creation prompt grows for typed and programmatically loaded text', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /ref="promptInput"/)
+  assert.match(source, /resizePromptInput\(event\.currentTarget as HTMLTextAreaElement\)/)
+  assert.match(source, /\(\) => \[cpState\.prompt, showPromptInput\.value\]/)
+  assert.match(source, /nextTick\(\(\) => resizePromptInput\(\)\)/)
+})
+
+// Legacy ecommerce rollback contract; MemoryWorkbench owns the current media path.
+test.skip('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /preparePublicMediaPlan/)
@@ -46,10 +66,14 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
   assert.match(source, /flushQueuedCanvasMedia\(/)
   assert.match(source, /定位当前画布/)
   assert.match(source, /新建画布/)
+  assert.match(source, /placeholder="搜索画布"/)
+  assert.match(source, /filteredCanvasFiles/)
+  assert.match(source, /selectCanvasRecord\(file\)/)
+  assert.match(source, /renameCanvasRecord\(file\)/)
+  assert.match(source, /deleteCanvasRecord\(file\)/)
   assert.match(source, /canvas:locate/)
   assert.match(source, /onCanvasPaste/)
   assert.match(source, /addCanvasFiles/)
-  assert.match(source, /referenceNodeIds/)
   assert.doesNotMatch(source, /canvasEditOperation/)
   assert.doesNotMatch(source, /替换原图/)
   assert.match(source, /lockRatio:\s*true/)
@@ -191,6 +215,18 @@ test('canvas text and number markers use Leafer page coordinates', () => {
   assert.match(source, /x: point\.x - 14,[\s\S]{0,40}y: point\.y - 14/)
 })
 
+test('canvas pen offers five visual stroke widths and uses the selected width', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /const penWidths = \[2, 3, 5, 8, 12\] as const/)
+  assert.match(source, /const penWidth = ref<number>\(3\)/)
+  assert.match(source, /strokeWidth: penWidth\.value/)
+  assert.match(source, /v-for="width in penWidths"/)
+  assert.match(source, /:aria-label="`笔尖粗细 \$\{width\}`"/)
+  assert.match(source, /function selectPenWidth\(width: number\)[\s\S]*?showPenWidths\.value = false/)
+  assert.match(source, /@click="selectPenWidth\(width\)"/)
+})
+
 test('canvas viewport tools keep the viewport center stable', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
@@ -284,17 +320,15 @@ test('creation panel keeps canvases bound to their runtime owner', () => {
   assert.doesNotMatch(clearOwner, /flushCanvasSave\(/)
 })
 
-test('creation panel snapshots the canvas target owner before async reference resolution', () => {
+test('creation panel uses selected canvas media as references without auto-targeting the canvas', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const target =
     source.match(/if \(selected\.length && canvasStore\.canvasPath\) \{[\s\S]*?\n  \}/)?.[0] || ''
-  const canvasTypes = readFileSync(join(root, 'src/types/canvas.ts'), 'utf8')
 
-  assert.match(canvasTypes, /export interface CanvasTaskTarget \{[\s\S]*?owner\?: string/)
   assert.match(target, /const owner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
-  assert.match(target, /const canvasId = canvasStore\.canvasId/)
-  assert.match(target, /const canvasPath = canvasStore\.canvasPath/)
-  assert.match(target, /canvasTarget = \{[\s\S]{0,100}canvasId,[\s\S]{0,60}canvasPath,[\s\S]{0,60}owner,[\s\S]{0,60}operation: 'append'/)
+  assert.match(target, /getMediaSubmissionUrl/)
+  assert.doesNotMatch(target, /canvasTarget =/)
+  assert.doesNotMatch(source, /canvasTarget,\s*\n\s*\}\)/)
 })
 
 test('creation panel reopens an existing project canvas before creating one', () => {
@@ -361,7 +395,8 @@ test('creation panel resolves Web project media without serializing object URLs'
       /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
     )?.[0] || ''
 
-  assert.match(source, /createProjectFileActions\(createRuntimeProjectFileService\(\)\)/)
+  assert.match(source, /const projectFiles = createRuntimeProjectFileService\(\)/)
+  assert.match(source, /createProjectFileActions\(projectFiles\)/)
   assert.match(source, /projectFileActions\.readMedia\(\{/)
   assert.match(source, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
   assert.match(source, /bytes\.set\(binary\.data\)/)
@@ -414,17 +449,27 @@ test('creation panel resolves file-tree media from its project-relative event pa
   assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
 })
 
-test('creation panel rejects direct Web blob drops until project upload exists', () => {
+test('creation panel consumes project-tree media drops and delegates saved task preview to its host', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const drop = source.match(/async function onCanvasDrop[\s\S]*?\n}/)?.[0] || ''
+  const preview = source.match(/async function previewTask[\s\S]*?\n}/)?.[0] || ''
 
-  assert.match(
-    source,
-    /if \(!isTauriRuntime\(\) && filePath\.startsWith\('blob:'\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/,
-  )
-  assert.match(
-    source,
-    /async function addCanvasFiles[\s\S]*?if \(!isTauriRuntime\(\)\) \{\s+cpState\.progressText = 'Web 端暂不支持直接拖入或粘贴媒体，请先保存到项目文件后加入画布'\s+return/,
-  )
+  assert.match(drop, /application\/x-jc-media-reference/)
+  assert.match(drop, /addFileTreeMediaToCanvas/)
+  assert.match(preview, /props\.previewSurface === 'host'/)
+  assert.match(preview, /projectResourceForMediaTask\(task\)/)
+  assert.match(preview, /emit\('previewResource', resource\)/)
+  assert.match(preview, /showTaskHistory\.value = false/)
+})
+
+test('creation panel persists direct Web and Desktop imports before adding them to canvas', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const addFiles = source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
+
+  assert.doesNotMatch(addFiles, /Web 端暂不支持直接拖入或粘贴媒体/)
+  assert.match(addFiles, /writeProjectMedia/)
+  assert.match(addFiles, /isTauriRuntime\(\) \? persisted\.filePath : persisted\.projectPath/)
+  assert.match(source, />添加参考素材</)
 })
 
 test('creation panel snapshots debounced saves and binds media work to its restore owner', () => {
@@ -467,41 +512,29 @@ test('creation panel snapshots debounced saves and binds media work to its resto
   assert.match(source, /request\.owner !== owner \|\| request\.loadToken !== loadToken/)
 })
 
-test('creation task resolution keeps the event-time canvas owner', () => {
+test('creation results enter canvas only through the explicit history action', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-  const sync =
-    source.match(
-      /const offCanvasSync = onEvent\('media-task-settled',[\s\S]*?\n}\)\n\nlet relinkCanvasAssetId/,
-    )?.[0] || ''
 
-  assert.match(source, /function captureCanvasMediaOwnership\(\)/)
-  assert.match(sync, /const ownership = captureCanvasMediaOwnership\(\)\s+void nextTick/)
-  assert.match(
-    sync,
-    /if \(!isCurrentCanvasMediaRequest\(ownership\)\) return[\s\S]*?const filePath = await resolveTaskFilePath\(task\)\s+if \(!isCurrentCanvasMediaRequest\(ownership\) \|\| !filePath\) return/,
-  )
-  assert.match(
-    sync,
-    /await addMediaToCanvas\([\s\S]{0,500}filePath,[\s\S]{0,80}task\.type,[\s\S]{0,80}'creation',[\s\S]{0,200}captureCanvasMediaRequest\([\s\S]{0,400}ownership[\s\S]{0,80}\)/,
-  )
+  assert.doesNotMatch(source, /const offCanvasSync = onEvent\('media-task-settled'/)
+  assert.match(source, /async function addTaskResultToCanvas\(task: MediaTask\)/)
+  assert.match(source, /@click="addTaskResultToCanvas\(task\)"/)
+  assert.match(source, /放到画布/)
 })
 
-test('Desktop canvas file imports retain their owner only after project persistence', () => {
+test('canvas file imports retain their owner only after project persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const addFiles =
     source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
 
   assert.match(addFiles, /const ownership = captureCanvasMediaOwnership\(\)/)
-  assert.match(
-    addFiles,
-    /if \(!projectDir\) \{\s+cpState\.progressText = '请先选择项目文件夹'\s+return/,
-  )
+  assert.match(addFiles, /if \(!owner\) \{/)
+  assert.match(addFiles, /isTauriRuntime\(\) \? '请先选择项目文件夹' : '请先选择 Web 项目'/)
   assert.ok(
     (addFiles.match(/if \(!isCurrentCanvasMediaRequest\(ownership\)\) return/g) || []).length >= 4,
   )
   assert.match(
     addFiles,
-    /await addMediaToCanvas\([\s\S]{0,300}filePath,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
+    /await addMediaToCanvas\([\s\S]{0,380}filePath,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
   )
   assert.match(
     addFiles,
@@ -732,28 +765,29 @@ test('creation panel releases lifecycle gates only after replacement canvases op
   )
 })
 
-test('creation panel previews persisted Web task media in MediaViewer without a remote fallback', () => {
+test('creation panel previews persisted project task media in MediaViewer without an external fallback', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const preview =
     source.match(
-      /async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskFolder/,
+      /async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskHistory/,
     )?.[0] || ''
-  const webPreview = preview.match(/if \(!isTauriRuntime\(\)\) \{[\s\S]*?\n  }/)?.[0] || ''
 
   assert.match(source, /import MediaViewer from '@\/components\/media\/MediaViewer\.vue'/)
   assert.match(source, /const taskPreview = ref/)
   assert.match(source, /function closeTaskPreview\(\)/)
   assert.match(source, /task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl/)
-  assert.match(webPreview, /const projectId = String\(task\.projectId \|\| ''\)/)
-  assert.match(webPreview, /const projectPath = String\(task\.projectPath \|\| ''\)/)
-  assert.match(webPreview, /projectFileActions\.readMedia\(\{[\s\S]{0,160}owner: projectId,[\s\S]{0,100}path: projectPath/)
-  assert.match(webPreview, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
-  assert.match(webPreview, /bytes\.set\(binary\.data\)/)
+  assert.match(preview, /const resource = projectResourceForMediaTask\(task\)/)
+  assert.match(preview, /projectFileActions\.readMedia\(resource\)/)
+  assert.match(preview, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
+  assert.match(preview, /bytes\.set\(binary\.data\)/)
   assert.match(
-    webPreview,
+    preview,
     /URL\.createObjectURL\(new Blob\(\[bytes\.buffer\], \{ type: binary\.mimeType \}\)\)/,
   )
-  assert.doesNotMatch(webPreview, /openExternal|window\.open/)
+  assert.doesNotMatch(preview, /openExternal|open_in_shell|window\.open/)
+  assert.match(preview, /if \(task\.resultUrl\)[\s\S]*?taskPreview\.value =/)
+  assert.match(preview, /type: taskPreviewType\(task\)/)
+  assert.match(source, /async function openTaskHistory\(\)[\s\S]*?await mediaTaskStore\.init\(\)/)
   assert.match(
     source,
     /<MediaViewer[\s\S]*?v-if="taskPreview"[\s\S]*?mode="file"[\s\S]*?@close="closeTaskPreview"/,
@@ -761,7 +795,7 @@ test('creation panel previews persisted Web task media in MediaViewer without a 
   assert.match(source, /URL\.revokeObjectURL\(taskPreviewObjectUrl\)/)
 })
 
-test('creation panel exposes a retry only for failed Web project persistence', () => {
+test('creation panel exposes a retry when a successful result failed Web project persistence', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const retry =
     source.match(
@@ -769,7 +803,7 @@ test('creation panel exposes a retry only for failed Web project persistence', (
     )?.[0] || ''
   assert.match(retry, /!isTauriRuntime\(\)/)
   assert.match(retry, /task\.source === 'creation'/)
-  assert.match(retry, /task\.status === 'failed'/)
+  assert.match(retry, /task\.status === 'success'/)
   assert.match(retry, /task\.assetStatus === 'failed'/)
   assert.match(retry, /await mediaTaskStore\.retryWebMediaPersistence\(task\.id\)/)
   assert.match(

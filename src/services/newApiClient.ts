@@ -21,6 +21,7 @@ const MAX_GATEWAY_SESSION_TOKEN_LENGTH = 8192
 let apiKeyMemoryCache = ''
 export const apiKeyReady = ref('')
 let gatewaySessionMemoryCache = ''
+export const gatewaySessionAuthenticated = ref(false)
 let invokeApi: null | ((cmd: string, args?: Record<string, unknown>) => Promise<unknown>) = null
 
 async function getInvokeApi() {
@@ -110,12 +111,16 @@ export function __resetApiKeyMemoryCacheForTests(value = ''): void {
 }
 
 export async function initGatewaySessionToken(): Promise<string> {
-  if (gatewaySessionMemoryCache) return gatewaySessionMemoryCache
+  if (gatewaySessionMemoryCache) {
+    gatewaySessionAuthenticated.value = true
+    return gatewaySessionMemoryCache
+  }
   const invoke = await getInvokeApi()
   if (invoke) {
     const stored = String((await invoke('get_gateway_session_token')) || '').trim()
     if (stored) {
       gatewaySessionMemoryCache = stored
+      gatewaySessionAuthenticated.value = true
       return gatewaySessionMemoryCache
     }
   }
@@ -129,6 +134,7 @@ export async function initGatewaySessionToken(): Promise<string> {
       gatewaySessionMemoryCache = legacy
     }
   }
+  gatewaySessionAuthenticated.value = Boolean(gatewaySessionMemoryCache)
   return gatewaySessionMemoryCache
 }
 
@@ -139,6 +145,7 @@ export function getGatewaySessionToken(): string {
 export async function setGatewaySessionToken(token: string): Promise<void> {
   const clean = String(token || '').trim()
   gatewaySessionMemoryCache = clean
+  gatewaySessionAuthenticated.value = Boolean(clean)
   const invoke = await getInvokeApi()
   if (invoke) {
     if (clean) await invoke('set_gateway_session_token', { token: clean })
@@ -153,6 +160,7 @@ export async function setGatewaySessionToken(token: string): Promise<void> {
 
 export async function clearGatewaySession(): Promise<void> {
   gatewaySessionMemoryCache = ''
+  gatewaySessionAuthenticated.value = false
   const invoke = await getInvokeApi()
   if (invoke) await invoke('clear_gateway_session_token')
   if (typeof localStorage !== 'undefined') {
@@ -163,6 +171,7 @@ export async function clearGatewaySession(): Promise<void> {
 
 export function __resetGatewaySessionMemoryCacheForTests(value = ''): void {
   gatewaySessionMemoryCache = value
+  gatewaySessionAuthenticated.value = Boolean(value)
 }
 
 export interface GatewayUser {
@@ -197,6 +206,7 @@ export interface GatewayModelEntry {
   capability: 'text' | 'image' | 'video' | 'audio'
   channel?: string
   taskTypes?: string[]
+  toolCall?: boolean
 }
 
 export interface GatewayLedgerItem {
@@ -324,18 +334,20 @@ async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit 
   throw lastError
 }
 
-export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string }> {
+export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string; syncSession: string }> {
   const { payload: data, response } = await gatewayJsonWithResponse<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
   const apiKey = extractGatewayApiKey(data)
   if (!apiKey) throw new Error('登录响应缺少 API Key，请稍后重试')
+  const syncSession = String(data?.sync_session || data?.data?.sync_session || '').trim()
+  if (!syncSession) throw new Error('登录响应缺少同步会话，请稍后重试')
   await setApiKey(apiKey)
-  await clearGatewaySession()
+  await setGatewaySessionToken(syncSession)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
-  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data) }
+  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data), syncSession }
 }
 
 export async function gatewayRegister(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
@@ -352,8 +364,12 @@ export async function gatewayRegister(payload: Record<string, unknown>): Promise
 }
 
 export async function gatewayLogout(): Promise<void> {
+  const session = getGatewaySessionToken()
   try {
-    await gatewayJson('/auth/logout', { method: 'POST' })
+    await gatewayJson('/auth/logout', {
+      method: 'POST',
+      headers: session ? { 'X-JC-Session': session } : {},
+    })
   } finally {
     await clearGatewaySession()
   }
@@ -597,6 +613,9 @@ export function normalizeGatewayModels(payload: any): GatewayModelEntry[] {
         capability,
         channel: item?.channel ? String(item.channel) : undefined,
         taskTypes,
+        toolCall: typeof item?.tool_call === 'boolean'
+          ? item.tool_call
+          : typeof item?.toolCall === 'boolean' ? item.toolCall : undefined,
       }
     })
     .filter(Boolean) as GatewayModelEntry[]

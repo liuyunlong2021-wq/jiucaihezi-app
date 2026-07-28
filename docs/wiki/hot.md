@@ -1,6 +1,8 @@
 # 🔥 热缓存
 
-> 当前开发阶段最需要被 AI 读的十九份文档。
+> 当前开发阶段最需要被 AI 读的二十份文档。
+
+**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4C-1 至 4C-13 已完成。V2.1.0 Web 与桌面三平台正式版已经发布，iOS `2.1.0 (2.1.0.1)` 已上传 App Store Connect，并由用户从 TestFlight 安装到 iPhone 13 Pro Max 后通过真实回归。下一步开始 Android 构建与权限适配；Excel/PPT 转换依赖仍待服务器部署和真实文件验证。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -20,11 +22,12 @@
 15. **[[排障/Web创作面板控制台红字排障-2026-07-20]]** — Web 创作面板三类控制台红字的根因与修复：启动脚本 CSP、创作模型接口误走 Pages、画布项目图片路径被当成网站 URL；RunningHub CORS 已在生产 Nginx 验证，前端修复待重新发布后人工验收。
 16. **[[开发/韭菜盒子原生媒体编排能力SDD]]** — Desktop 创模式与 Web 直连可用受控素材 ID 编排本轮附件、项目/画布素材和同会话最近成功任务；确认后仍只走 CreationPanel 与 mediaTaskStore。自动验证、Web/Desktop 构建和产物审计通过；真实付费、刷新恢复与 Windows/Intel/Apple Silicon 安装包人工矩阵待验收。
 17. **[[排障/ZX-Grok参考图视频真实失败交接-2026-07-21]]** — ZX Grok 选 1 参考图实测仍返回 `Alias.image` 对象类型 400；已停止局部补丁，交接页给出必须先抓代理端真实请求体的排查步骤。相关代码提交与自动测试不等于真实闭环验收。
-18. **[[开发/三项生产故障闭环SDD-2026-07-21]]** — Word 转换已完成真实生产闭环：Nginx 路由、`markitdown[docx]` 依赖和 Web 上传均验收成功；画布项目图片路径修复及 RH 可恢复任务语义仍待发布和真实业务验收。
+18. **[[开发/三项生产故障闭环SDD-2026-07-21]]** — RH 失败终态要求 adapter 与 APP 双端对齐：adapter 不再把 `FAILED + errorCode/errorMessage` 变成 HTTP 500，而是返回 `status=failed` 并透传原因；APP 收到后立即停止轮询并持久化失败。定向回归通过，仍待部署新版 adapter 与 APP 后用真实失败任务验收。
 19. **[[开发/绝对纯直连道模式实施记录]]** — 道模式已改为 Desktop / Web 共用的 Direct Engine 单次请求：不注册 OpenCode `dao` Agent，不带工具、项目记忆、Wiki、Skill、MCP、搜索、媒体计划、项目 pill 或产品插件钩子；保留当前模型、可见对话和原始附件。Desktop 道会话不按项目目录筛选，切换只投影用户/助手可见消息，不建立或恢复 `ses_*`，也不显示媒体任务或审批过程。focused、类型检查、Web/Desktop 产物审计通过；真实 Provider 和跨平台人工矩阵待验收。
+20. **[[开发/通用记忆对话独立App SDD]]** — 第四阶段 4A 已完成 Mac 上传 → Web 下载真机闭环，Raw/Wiki 文字一致；媒体和空目录不参与同步。首次上传改用 Gateway 既有的最多 100 项批量合同，项目中心与设置页显示扫描、上传、下载进度。v2.0.4 暴露的独立 `sync_session` 启动恢复问题也已修正。
 
 当前状态：手动“继续写”已从文、武、创全部模式移除；创模式仅保留首次最终正文 SSE 断流的自动续写。
 
 ---
 
-> 上次刷新: 2026-07-23（绝对纯直连道模式已实施并通过自动验证；真实模型和跨平台人工矩阵待验收。）
+> 上次刷新: 2026-07-28（V2.1.0 Web/桌面/iPhone TestFlight 已完成；下一阶段 Android。）

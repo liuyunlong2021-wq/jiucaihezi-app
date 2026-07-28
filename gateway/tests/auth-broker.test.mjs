@@ -28,7 +28,7 @@ async function readJson(response) {
   return response.json();
 }
 
-test('auth login returns an ordinary NewAPI key and base_url', async () => {
+test('auth login returns an ordinary NewAPI key plus a dedicated sync session', async () => {
   const env = createEnv();
   const previousFetch = globalThis.fetch;
   const calls = [];
@@ -62,8 +62,8 @@ test('auth login returns an ordinary NewAPI key and base_url', async () => {
     assert.equal(payload.api_key, 'sk-existing-workbench-key');
     assert.equal(payload.base_url, 'https://api.jiucaihezi.studio/v1');
     assert.equal(payload.username, 'alice');
-    assert.equal(payload.sessionToken, undefined);
-    assert.equal(response.headers.get('Set-Cookie'), null);
+    assert.match(payload.sync_session, /^sess_/);
+    assert.match(response.headers.get('Set-Cookie'), /^jc_session=sess_/);
     assert.equal(calls.some((call) => call.url.endsWith('/api/token/701/key')), true);
   } finally {
     globalThis.fetch = previousFetch;

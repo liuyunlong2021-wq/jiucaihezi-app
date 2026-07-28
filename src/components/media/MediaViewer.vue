@@ -3,7 +3,7 @@
  * MediaViewer — 统一媒体查看器
  * 支持图片/视频/音频/文本/失败状态，后续可被创作面板、画布和聊天媒体复用。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { formatRelativeTime } from '@/utils/timeFormat'
 import { resolveJcMediaUrl } from '@/utils/mediaFileReader'
 
@@ -21,6 +21,7 @@ const props = defineProps<{
   sourceUrl?: string
   mode?: 'creation' | 'file'
 }>()
+const Model3DViewer = defineAsyncComponent(() => import('./Model3DViewer.vue'))
 
 const emit = defineEmits<{
   close: []
@@ -34,7 +35,7 @@ const emit = defineEmits<{
 
 const infoTime = computed(() => props.ts ? formatRelativeTime(props.ts) : '')
 const canNavigate = computed(() => (props.totalCount || 0) > 1)
-const isMedia = computed(() => props.type === 'image' || props.type === 'video' || props.type === 'audio' || props.type === 'text')
+const isMedia = computed(() => props.type === 'image' || props.type === 'video' || props.type === 'audio' || props.type === 'model3d' || props.type === 'text')
 const currentNumber = computed(() => Math.max((props.currentIndex ?? 0) + 1, 1))
 const totalNumber = computed(() => Math.max(props.totalCount || 1, 1))
 const urlLabel = computed(() => {
@@ -102,6 +103,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
       <img v-else-if="type === 'image' && resolvedSrc" :src="resolvedSrc" class="mv-media" />
       <video v-else-if="type === 'video' && resolvedSrc" :src="resolvedSrc" controls autoplay class="mv-media" />
       <audio v-else-if="type === 'audio' && resolvedSrc" :src="resolvedSrc" controls autoplay class="mv-media mv-audio" />
+      <Model3DViewer v-else-if="type === 'model3d' && resolvedSrc" :url="resolvedSrc" />
       <pre v-else-if="type === 'text'" class="mv-media mv-text">{{ content || '无返回内容' }}</pre>
       <pre v-else-if="type === 'failed'" class="mv-media mv-text mv-failed">{{ errorMsg || content || '生成失败' }}</pre>
 

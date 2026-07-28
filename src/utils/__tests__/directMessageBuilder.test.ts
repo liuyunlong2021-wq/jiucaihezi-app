@@ -101,6 +101,30 @@ describe('buildDirectMessages', () => {
     assert.ok(text.includes('# Hello World'), '应包含文件内容')
   })
 
+  test('转换后的 Office 附件只发送 Markdown，不再发送原始二进制', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析附件')],
+      attachments: [{
+        id: 'word',
+        name: '方案.docx',
+        mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 1024,
+        kind: 'file',
+        value: '',
+        textContent: '# 方案\n\n转换后的正文',
+      }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    const last = result.at(-1)?.content
+    assert.equal(typeof last, 'string')
+    assert.match(last as string, /\[附件: 方案\.docx\]/)
+    assert.match(last as string, /转换后的正文/)
+    assert.doesNotMatch(JSON.stringify(result), /file_data/)
+  })
+
   test('原生附件按 NewAPI 官方媒体类型构造内容 parts', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析附件')],

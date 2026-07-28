@@ -67,7 +67,7 @@ export interface AudioGenParams {
 
 export interface MediaResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'text'
+  type: 'image' | 'video' | 'audio' | 'model3d' | 'text'
   text?: string
   taskId?: string
   /** 上游轮询路径（用于任务恢复） */
@@ -412,6 +412,22 @@ function extractStatus(data: any): string {
   )
 }
 
+type TerminalCreationTaskError = Error & { terminalCreationTask: true }
+
+function terminalCreationTaskError(message: string): TerminalCreationTaskError {
+  const error = new Error(message) as TerminalCreationTaskError
+  error.terminalCreationTask = true
+  return error
+}
+
+export function isTerminalCreationTaskError(error: unknown): boolean {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      (error as Partial<TerminalCreationTaskError>).terminalCreationTask,
+  )
+}
+
 export async function uploadCreationAsset(value?: string): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
@@ -511,13 +527,18 @@ function checkUpstreamError(data: any) {
   }
   const rawCode = data.code ?? data.status_code ?? data.statusCode
   const status = String(data.status || data.data?.status || '').toLowerCase()
+  const errCode = data.errorCode || data.error_code
+  const errMsg = data.errorMessage || data.error_message || data.error?.message
+  if (/^(failed|failure|fail|error|cancelled|canceled)$/i.test(status)) {
+    throw terminalCreationTaskError(
+      errMsg ? String(errMsg) : errCode ? `上游任务失败 (${errCode})` : '上游任务失败',
+    )
+  }
   const nonErrorStatus = /^(queued|queueing|submitting|processing|pending|running|in_progress|completed|complete|success|succeeded|done)$/i.test(status)
   if (rawCode !== undefined && rawCode !== null && rawCode !== 0 && rawCode !== '0' && rawCode !== 200 && rawCode !== '200' && rawCode !== 'success' && !nonErrorStatus) {
     const message = data.message || data.error?.message || data.error || data.fail_reason || data.failReason
     throw new Error(message ? String(message) : `上游错误 (${rawCode})`)
   }
-  const errCode = data.errorCode || data.error_code
-  const errMsg = data.errorMessage || data.error_message || data.error?.message
   if (errCode && errCode !== '0' && errCode !== 0) {
     // errorCode 1001 = Invalid URL, 1000 = Unknown error
     const friendlyMap: Record<string, string> = {
@@ -628,6 +649,7 @@ export async function pollTask(
       data = await apiCall(pollPath, null, 'GET')
       consecutive521 = 0  // 成功请求，重置 521 计数
     } catch (e: any) {
+      if (isTerminalCreationTaskError(e)) throw e
       // 上游偶发 521 时不要立即判失败，继续轮询 3 分钟
       if (e.message?.includes('521')) {
         consecutive521++
@@ -655,13 +677,20 @@ export async function pollTask(
       }
       const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
       if (url) return url
+      const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
+      if (publicVideoTask) {
+        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET')
+        const detailUrl = extractMediaUrl(detail, 'video')
+        if (detailUrl) return detailUrl
+      }
       // 状态完成但没有 URL，可能响应格式异常
       console.warn('[pollTask] 状态完成但未提取到 URL:', JSON.stringify(data).slice(0, 300))
     }
     if (/^(failed|failure|fail|error|cancelled|canceled)$/i.test(status)) {
       const err = data.fail_reason || data.failReason || data.error?.message ||
-                  data.data?.fail_reason || data.data?.error || data.error || '生成失败'
-      throw new Error(typeof err === 'string' ? err : JSON.stringify(err))
+                  data.data?.fail_reason || data.data?.error || data.errorMessage ||
+                  data.error_message || data.error || '生成失败'
+      throw terminalCreationTaskError(typeof err === 'string' ? err : JSON.stringify(err))
     }
     // 超过 5 分钟仍在处理，给用户更明确的反馈
     if (elapsed > 300) {
@@ -885,33 +914,67 @@ export async function generateVideo(
     return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
   }
 
-  // ── Veo / 其他 NewAPI 视频模型 → /v1/videos ──
-  const body: any = { model: upstreamModel, prompt }
-  if (aspectRatio) body.ratio = aspectRatio
-  if (resolution) body.resolution = resolution.toUpperCase()
-  if (duration) body.duration = Number(duration)
   const safeImages = filterSafeImageUrls(imageUrls, imageUrl)
-  if (safeImages.length) body.images = safeImages
-  if (params.videoUrl) body.video_url = params.videoUrl
-  if (params.audioUrl) body.audio_url = params.audioUrl
+  const isVeoPreview = upstreamModel === 'veo-3.1-generate-preview' || upstreamModel === 'veo-3.1-fast-generate-preview'
+  let data: any
 
-  // DoubaoVideo (Seedance) 走 NewAPI 专用任务接口 /v1/video/generations
-  const isDoubaoVideo = isDoubaoVideoModel(model, upstreamModel)
-  if (isDoubaoVideo) {
-    body.metadata = {
-      ...(body.metadata || {}),
+  if (isVeoPreview) {
+    const ratio = aspectRatio || '16:9'
+    const veoResolution = String(resolution || '720p').toLowerCase()
+    const veoDuration = Number(duration || 4)
+    const size = ratio === '9:16' ? '720x1280' : '1280x720'
+    if (safeImages.length) {
+      const source = safeImages[0]
+      const image = source.startsWith('data:')
+        ? dataUrlToBlob(source)
+        : await safeFetch(source).then(response => {
+            if (!response.ok) throw new Error('无法加载参考图片')
+            return response.blob()
+          })
+      data = await apiCallMultipart('/v1/videos', {
+        model: upstreamModel,
+        prompt,
+        input_reference: image,
+        seconds: String(veoDuration),
+        size,
+        resolution: veoResolution,
+        aspectRatio: ratio,
+      })
+    } else {
+      data = await apiCall('/v1/videos', {
+        model: upstreamModel,
+        prompt,
+        duration: veoDuration,
+        size,
+        metadata: { resolution: veoResolution, aspectRatio: ratio },
+      }, 'POST', model)
     }
-    if (aspectRatio) body.metadata.ratio = aspectRatio
-    if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
-  }
-  const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
+  } else {
+    const body: any = { model: upstreamModel, prompt }
+    if (aspectRatio) body.ratio = aspectRatio
+    if (resolution) body.resolution = resolution.toUpperCase()
+    if (duration) body.duration = Number(duration)
+    if (safeImages.length) body.images = safeImages
+    if (params.videoUrl) body.video_url = params.videoUrl
+    if (params.audioUrl) body.audio_url = params.audioUrl
 
-  const data = await apiCall(videoPath, body, 'POST', model)
+    // DoubaoVideo (Seedance) 走 NewAPI 专用任务接口 /v1/video/generations
+    const isDoubaoVideo = isDoubaoVideoModel(model, upstreamModel)
+    if (isDoubaoVideo) {
+      body.metadata = {
+        ...(body.metadata || {}),
+      }
+      if (aspectRatio) body.metadata.ratio = aspectRatio
+      if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
+    }
+    const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
+    data = await apiCall(videoPath, body, 'POST', model)
+  }
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
   if (!mediaUrl) {
     if (taskId) {
-      const pollUrl = isDoubaoVideo
+      const pollUrl = isDoubaoVideoModel(model, upstreamModel)
         ? `/v1/video/generations/${taskId}`
         : `/v1/videos/${taskId}`
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
@@ -919,7 +982,7 @@ export async function generateVideo(
     }
   }
   if (!mediaUrl) throw new Error('视频生成失败')
-  return { url: mediaUrl, type: 'video', taskId, pollUrl: taskId ? (isDoubaoVideo ? `/v1/video/generations/${taskId}` : `/v1/videos/${taskId}`) : undefined, pollKind: 'video' as const }
+  return { url: mediaUrl, type: 'video', taskId, pollUrl: taskId ? (isDoubaoVideoModel(model, upstreamModel) ? `/v1/video/generations/${taskId}` : `/v1/videos/${taskId}`) : undefined, pollKind: 'video' as const }
 }
 
 function isDoubaoVideoModel(model: string, upstreamModel: string): boolean {

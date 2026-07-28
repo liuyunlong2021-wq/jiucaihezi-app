@@ -29,6 +29,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
     'newapi/t8/gpt-image-2',
+    'newapi/vip/gpt-image-2-vip',
     'newapi/t8/grok-video-3',
     'newapi/t8/veo3.1-fast',
     'newapi/trump/seedance-2.0',
@@ -47,6 +48,8 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
+    'runninghub/api/rh-3d-text',
+    'runninghub/api/rh-3d-image',
     'runninghub/aiapp/rh-aiapp',
   ]
 
@@ -96,10 +99,87 @@ test('every registry model has a valid route contract and can produce a run plan
 
 test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.model, 'gpt-image-2')
+  assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.model, 'gpt-image-2-vip')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
   assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
   assert.equal(getCreationModelSpec('nonexistent-model-id'), undefined)
+})
+
+test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
+  const textOnly = buildCreationRunPlan({
+    modelId: 'newapi/vip/gpt-image-2-vip',
+    params: { prompt: '一张产品图', ratio: '1:1', resolution: '2k' },
+  })
+  const withImage = buildCreationRunPlan({
+    modelId: 'newapi/vip/gpt-image-2-vip',
+    params: { prompt: '改成产品图', images: ['https://example.com/ref.png'] },
+  })
+
+  assert.equal(textOnly.model, 'gpt-image-2-vip')
+  assert.equal(textOnly.endpoint, '/v1/images/generations')
+  assert.equal(textOnly.pollKind, 'none')
+  assert.equal(withImage.endpoint, '/v1/images/edits')
+  assert.equal(withImage.apiStyle, 'openai-image-edits')
+})
+
+test('RH GPT Image 2 official keeps its price and RH adapter route', () => {
+  const spec = getCreationModelSpec('runninghub/api/rh-gpt2-official')
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-gpt2-official',
+    params: {
+      prompt: '商品图',
+      ratio: '1:1',
+      images: ['data:image/png;base64,test'],
+    },
+  })
+
+  assert.equal(spec?.price, 0.25)
+  assert.equal(plan.model, 'rh-gpt2-official')
+  assert.equal(plan.source, 'runninghub')
+  assert.equal(plan.route, 'runninghub-adapter')
+  assert.equal(plan.usesRhAdapter, true)
+  assert.equal(plan.endpoint, '/v1/images/generations')
+})
+
+test('Gemini image models use the verified generation and edit contracts', () => {
+  for (const [modelId, model, price] of [
+    ['newapi/t8/gemini-3.1-flash-image-preview', 'gemini-3.1-flash-image-preview', 0.1],
+    ['newapi/t8/gemini-3-pro-image-preview', 'gemini-3-pro-image-preview', 0.2],
+  ] as const) {
+    const spec = getCreationModelSpec(modelId)
+    const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一张产品图' } })
+    const withImage = buildCreationRunPlan({ modelId, params: { prompt: '修改产品图', images: ['https://example.com/ref.png'] } })
+
+    assert.equal(spec?.price, price)
+    assert.equal(textOnly.model, model)
+    assert.equal(textOnly.endpoint, '/v1/images/generations')
+    assert.equal(textOnly.apiStyle, 'openai-images')
+    assert.equal(textOnly.pollKind, 'none')
+    assert.equal(withImage.endpoint, '/v1/images/edits')
+    assert.equal(withImage.apiStyle, 'openai-image-edits')
+    assert.equal(withImage.assetFlow, 'newapi-upload')
+  }
+})
+
+test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
+  for (const [modelId, model, price] of [
+    ['newapi/zx/veo-3.1-generate-preview', 'veo-3.1-generate-preview', 0.2],
+    ['newapi/zx/veo-3.1-fast-generate-preview', 'veo-3.1-fast-generate-preview', 0.1],
+  ] as const) {
+    const spec = getCreationModelSpec(modelId)
+    const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一段产品视频', duration: 4, resolution: '720p', ratio: '16:9' } })
+    const withImage = buildCreationRunPlan({ modelId, params: { prompt: '让产品动起来', duration: 4, resolution: '720p', ratio: '16:9', images: ['https://example.com/ref.jpg'] } })
+
+    assert.equal(spec?.price, price)
+    assert.equal(textOnly.model, model)
+    assert.equal(textOnly.apiStyle, 'openai-videos')
+    assert.equal(textOnly.endpoint, '/v1/videos')
+    assert.equal(textOnly.pollKind, 'newapi-task')
+    assert.equal(textOnly.mode, 'text-to-video')
+    assert.equal(withImage.mode, 'image-to-video')
+    assert.equal(withImage.debug.referenceImageCount, 1)
+  }
 })
 
 test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () => {
@@ -123,6 +203,11 @@ test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () 
   assert.match(plan.submitSummary, /直连/)
   assert.match(plan.submitSummary, /T8/)
   assert.match(plan.submitSummary, /size=2048x1152/)
+})
+
+test('direct GPT Image 2 models show the configured group and VIP prices', () => {
+  assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.price, '分组计价 · 自动账户 ¥0.12')
+  assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.price, '¥0.20')
 })
 
 test('direct GPT Image 2 switches generation and edit contracts by reference image presence', () => {
@@ -227,6 +312,36 @@ test('RunningHub audio and generic AI App plans do not receive image ratio defau
   assert.equal('resolution' in aiApp.debug.normalizedParams, false)
   assert.equal(aiApp.debug.normalizedParams['3:audio'], 'https://example.com/voice.mp3')
   assert.equal(aiApp.debug.normalizedParams['4:image'], 'https://example.com/person.png')
+})
+
+test('Hunyuan 3D plans preserve the verified v3.1 parameters', () => {
+  const text = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-3d-text',
+    params: { prompt: '一把旧铜钥匙' },
+  })
+  const image = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-3d-image',
+    params: {
+      images: ['front.png', 'left.png'],
+      faceCount: 800000,
+      enablePbr: true,
+      generateType: 'Geometry',
+    },
+  })
+
+  assert.equal(text.task, 'model3d')
+  assert.equal(text.mode, 'text-to-3d')
+  assert.equal(text.price, 4.2)
+  assert.equal(text.endpoint, '/v1/videos')
+  assert.equal(text.debug.normalizedParams.faceCount, 500000)
+  assert.equal(text.debug.normalizedParams.enablePbr, false)
+  assert.equal(text.debug.normalizedParams.generateType, 'Normal')
+  assert.equal(image.mode, 'image-to-3d')
+  assert.equal(image.price, 6.6)
+  assert.deepEqual(image.debug.normalizedParams.images, ['front.png', 'left.png'])
+  assert.equal(image.debug.normalizedParams.faceCount, 800000)
+  assert.equal(image.debug.normalizedParams.enablePbr, true)
+  assert.equal(image.debug.normalizedParams.generateType, 'Geometry')
 })
 
 test('generic RunningHub AI App plans preserve dynamic workflow params', () => {

@@ -11,23 +11,23 @@ const EXTERNAL_URL_PROTOCOLS = new Set([
 const DOWNLOAD_PROTOCOLS = new Set(['https:', 'http:', 'asset:', 'blob:'])
 const MEDIA_ATTACHMENT_PROTOCOLS = new Set(['https:', 'http:', 'blob:', 'asset:'])
 const MAX_MEDIA_DATA_URL_LENGTH = 12 * 1024 * 1024
-const CREATION_RESULT_HOST_PATTERNS = [
-  /(^|\.)jiucaihezi\.studio$/i,
-  /(^|\.)runninghub\.cn$/i,
-  /(^|\.)runninghub\.ai$/i,
-  /^rh-[a-z0-9-]+\.cos\.ap-beijing\.myqcloud\.com$/i,
-  /^rh-[a-z0-9-]+\.xiaoyaoyou\.com$/i,
-  /^cdn\.sd2\.mengfactory\.cn$/i,
-  /(^|\.)suno\.com$/i,
-  /(^|\.)sunoapi\.org$/i,
-  /(^|\.)x\.ai$/i,
-  /(^|\.)openai\.com$/i,
-  /(^|\.)oaidalleapiprodscus\.blob\.core\.windows\.net$/i,
-  /(^|\.)aiproxy\.vip$/i,
-  /(^|\.)soruxgpt\.com$/i,
-  /(^|\.)innk\.cc$/i,
-  /(^|\.)volces\.com$/i,
-]
+
+function isPrivateNetworkHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true
+  if (host === '::' || host === '::1' || host.startsWith('fc') || host.startsWith('fd')) return true
+  if (/^fe[89ab]/.test(host)) return true
+
+  const parts = host.split('.').map(Number)
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return false
+  const [a, b] = parts
+  return a === 0 || a === 10 || a === 127 || a >= 224 ||
+    (a === 100 && b >= 64 && b <= 127) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 198 && (b === 18 || b === 19))
+}
 
 function parseUrl(input: string, defaultHttp = false): URL | null {
   const text = String(input || '').trim()
@@ -81,7 +81,8 @@ export function isAllowedCreationResultUrl(input: string): boolean {
   const parsed = parseUrl(text)
   if (!parsed) return false
   if (parsed.protocol !== 'https:') return false
-  return CREATION_RESULT_HOST_PATTERNS.some(pattern => pattern.test(parsed.hostname))
+  if (parsed.username || parsed.password) return false
+  return !isPrivateNetworkHost(parsed.hostname)
 }
 
 export function isAllowedCreationPollUrl(input: string): boolean {

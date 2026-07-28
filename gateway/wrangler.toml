@@ -11,6 +11,7 @@ routes = [
   { pattern = "api.jiucaihezi.studio/apple-touch-icon.svg", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/apple-touch-icon.png", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/auth/*", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/sync/*", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/health", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/landing/*", zone_name = "jiucaihezi.studio" }
 ]
@@ -28,3 +29,9 @@ id = "b32af0b054b14548a81a1c77717c1299"
 binding = "DB"
 database_name = "jiucaihezi_gateway"
 database_id = "e91b223c-6a4d-4df3-8872-6e35072f3fcf"
+
+[[d1_databases]]
+binding = "SYNC_DB"
+database_name = "jiucaihezi_sync"
+database_id = "dd23df95-cb41-44a3-a0d4-d219f3a4707a"
+migrations_dir = "migrations/sync"

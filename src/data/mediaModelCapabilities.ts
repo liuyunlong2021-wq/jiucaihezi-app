@@ -3,7 +3,7 @@ import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabi
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
 const RH_ONLY_MODE = false
 
-export type MediaTaskKind = 'image' | 'video' | 'audio' | 'ai-app'
+export type MediaTaskKind = 'image' | 'video' | 'audio' | 'model3d' | 'ai-app'
 
 export type MediaFieldKind =
   | 'prompt'
@@ -89,6 +89,21 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     ],
   },
   {
+    id: 'gpt-image-2-vip',
+    label: 'GPT Image 2 VIP',
+    task: 'image',
+    model: 'gpt-image-2-vip',
+    provider: 'gateway-image',
+    maxFiles: 5,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'size', label: '尺寸', kind: 'select', defaultValue: 'auto', options: options(GPT_IMAGE_SIZES) },
+      { key: 'image', label: '参考图', kind: 'images' },
+      { key: 'response_format', label: '返回格式', kind: 'select', defaultValue: 'url', options: options(['url', 'b64_json']) },
+    ],
+  },
+  {
     id: 'nano-banana-2k',
     label: 'Nano Banana 2K',
     task: 'image',
@@ -149,6 +164,38 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(VEO_RATIOS) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720P', options: options(['720P', '1080P']) },
       { key: 'duration', label: '时长', kind: 'select', defaultValue: 8, options: options([8]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'veo-3.1-generate-preview',
+    label: 'Veo 3.1',
+    task: 'video',
+    model: 'veo-3.1-generate-preview',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(VEO_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 4, options: options([4, 6, 8]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ],
+  },
+  {
+    id: 'veo-3.1-fast-generate-preview',
+    label: 'Veo 3.1 Fast',
+    task: 'video',
+    model: 'veo-3.1-fast-generate-preview',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(VEO_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 4, options: options([4, 6, 8]) },
       { key: 'images', label: '参考图', kind: 'images' },
     ],
   },
@@ -223,6 +270,26 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     fields: [
       { key: 'prompt', label: '歌词主题', kind: 'prompt', required: true },
     ],
+  },
+  {
+    id: 'rh-3d-text',
+    label: '混元 3D v3.1 文生 3D',
+    task: 'model3d',
+    model: 'rh-3d-text',
+    provider: 'runninghub-video',
+    webappId: 'hunyuan3d-v3.1/text-to-3d',
+    fields: rhOfficialFields('hunyuan3d-v3.1/text-to-3d'),
+  },
+  {
+    id: 'rh-3d-image',
+    label: '混元 3D v3.1 图生 3D',
+    task: 'model3d',
+    model: 'rh-3d-image',
+    provider: 'runninghub-video',
+    webappId: 'hunyuan3d-v3.1/image-to-3d',
+    maxFiles: rhOfficialMaxFiles('hunyuan3d-v3.1/image-to-3d'),
+    acceptedFiles: ['image'],
+    fields: rhOfficialFields('hunyuan3d-v3.1/image-to-3d'),
   },
 
   // ── RunningHub 模型 ──
@@ -534,7 +601,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'image',
     model: 'gemini-3-pro-image-preview',
     provider: 'gateway-image',
-    enabled: false,
     maxFiles: 5,
     acceptedFiles: ['image'],
     fields: [
@@ -550,7 +616,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'image',
     model: 'gemini-3.1-flash-image-preview',
     provider: 'gateway-image',
-    enabled: false,
     maxFiles: 5,
     acceptedFiles: ['image'],
     fields: [
@@ -614,6 +679,7 @@ export const MEDIA_TASK_LABELS: Record<MediaTaskKind, string> = {
   image: '图片',
   video: '视频',
   audio: '音频',
+  model3d: '3D',
   'ai-app': 'AI 应用',
 }
 
