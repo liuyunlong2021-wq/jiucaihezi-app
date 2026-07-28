@@ -8,6 +8,8 @@
   <array>
     <string>zh-Hans</string>
   </array>
+  <key>ITSAppUsesNonExemptEncryption</key>
+  <false/>
   <key>NSLocalNetworkUsageDescription</key>
   <string>允许韭菜盒子在开发期间连接此 Mac 上的本地服务。</string>
   <key>NSPhotoLibraryAddUsageDescription</key>

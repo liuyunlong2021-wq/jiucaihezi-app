@@ -1,7 +1,7 @@
 # 通用记忆对话工作台 SDD
 
 > 日期：2026-07-28
-> 状态：Web 与 Mac 已完成；第四阶段 4A、4B、4C-1 至 4C-12 已完成，下一项为 4C-13 TestFlight 构建与真机验收。
+> 状态：V2.1.0 Web 与桌面正式版已发布；第四阶段 4A、4B、4C-1 至 4C-12 已完成，4C-13 已上传 TestFlight 并邀请内部测试，待同一真机安装回归。
 > 首发目标：<https://jiucaihezi.studio>
 > 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
@@ -732,7 +732,7 @@ Mobile App 目录 owner ─┘
 | 4C-10 | 移动聊天、Raw、Wiki 和 Skill | 手机可新建/继续 Raw 对话、读写 Wiki、调用已安装 Skill；结果仍落项目文件，不创建移动专属业务链。 | 已完成 |
 | 4C-11 | 手机相册、文件附件和媒体生成 | 系统相册/文件附件可导入，媒体任务可提交、恢复和播放；媒体只存原手机本地。 | 已完成 |
 | 4C-12 | 前后台恢复、断网和闪退恢复 | 真实 iPhone 验收前后台切换、杀进程、断网写入、重连重试和异常恢复，不丢本地项目内容。 | 已完成 |
-| 4C-13 | TestFlight 构建与真机验收 | 4C-7 至 4C-12 全部通过后归档上传 TestFlight；从 TestFlight 安装并完成同一真机回归。 | 未开始 |
+| 4C-13 | TestFlight 构建与真机验收 | 4C-7 至 4C-12 全部通过后归档上传 TestFlight；从 TestFlight 安装并完成同一真机回归。 | 进行中：已上传并邀请，待真机安装回归 |
 
 4C-6 兼容规则：必须保留官方 issue、当前锁定版本、真机 `.ips` 调用栈和每次实验结果；不得将 IPA 安装成功称为 App 成功，也不得以长期私有 Wry fork 或整仓降级绕过此门槛。若官方尚未发布修复，只允许记录了上游来源、仅覆盖故障调用点且可随上游版本删除的临时补丁。
 
@@ -1152,6 +1152,22 @@ Mobile App 目录 owner ─┘
 - 正式域名在 `1440x900` 与 `390x844` 浏览器视口均可进入首页；页面宽度与视口一致、无横向溢出，控制台无 error。此证据只证明 Web V2.1.0 上线，不代表桌面安装包或 TestFlight 已完成。
 
 结论：V2.1.0 Web 已正式上线。下一步以包含本记录的主线提交创建 `v2.1.0` tag，等待三平台桌面 CI 生成、公证、上传并完成真实安装包核对；桌面发布稳定后再进入 4C-13 TestFlight。
+
+### 14.23 V2.1.0 桌面正式发布记录（2026-07-28）
+
+- `v2.1.0` tag 指向发布提交 `bdf490f6`；GitHub Actions run `30329609935` 全部通过。Apple Silicon Mac、Intel Mac 均完成构建、公证和 15 秒启动冒烟，Windows 完成 portable 构建与 ZIP 冒烟，发布清单任务成功。
+- GitHub Release 已发布：<https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v2.1.0>。生产更新清单 <https://api.jiucaihezi.studio/updates/latest.json> 返回 `2.1.0`，Mac ARM、Intel Mac、Windows 三个正式下载地址均返回 HTTP 200。
+- 用户已从公开下载入口取得桌面 App，完成安装并实际使用，确认可用。该证据完成 V2.1.0 Web 与桌面正式版发布门禁，允许进入 4C-13；不代表 iPhone TestFlight 已完成。
+
+### 14.24 4C-13 TestFlight 上传与内部测试记录（2026-07-28）
+
+- 在 `codex/iphone-app` 的 V2.1.0 发布源码上执行 `pnpm tauri ios build --target aarch64 --export-method app-store-connect --build-number 1 --ci -v`，归档、App Store 导出均成功。IPA 为 `com.jiucaihezi.mobile`、版本 `2.1.0`、构建号 `2.1.0.1`，大小 11,510,917 bytes，SHA-256 `a2e8825e2b52fcd056558c66b5f94147db72d455ce5e3e73560b5b575698e3ea`。
+- IPA 通过 `codesign --verify --deep --strict`；签名为 `Apple Distribution: yunlong liu (RXD4L9387J)`，描述文件为 `iOS Team Store Provisioning Profile: com.jiucaihezi.mobile`，Team 与 Bundle ID 均匹配。
+- Xcode Organizer 已成功上传，明确返回 `韭菜盒子 2.1.0 (2.1.0.1) uploaded`。App Store Connect 创建 iOS App 记录 `6795407590`，商店名使用未被占用的正式品牌“韭菜盒子 Studio”，手机桌面产品名仍为“韭菜盒子”。
+- 构建完成苹果处理后由“缺少出口合规证明”进入“准备提交，90 天后过期”。代码实际包含 `rustls/ring` 标准 TLS，因此如实申报标准加密；首发不在法国分发，未伪称无加密。`Info.ios.plist` 同时声明 `ITSAppUsesNonExemptEncryption=false`，用于后续构建跳过重复的非豁免加密问卷。
+- 已创建自动分发的内部群组“4C-13 内部验收”，构建 `2.1.0.1` 已加入，并邀请账户持有人测试。当前只完成归档、正式签名、上传、苹果处理和邀请；必须由用户从 TestFlight 安装到同一台 iPhone 13 Pro Max，并完成启动、登录恢复、云项目、聊天/Raw/Wiki、附件/媒体及前后台重开回归后，才可把 4C-13 标为完成。
+
+结论：4C-13 进行中，发布侧已无阻断，当前唯一门槛是 TestFlight 安装后的真实 iPhone 回归。不得把本次上传成功写成 iPhone 正式验收完成。
 
 ## 15. 验收标准
 

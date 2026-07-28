@@ -246,10 +246,11 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
 })
 
-test('iPhone media saves declare the required Photos add-only permission', () => {
+test('iPhone release metadata declares Photos permission and exempt encryption use', () => {
   const infoPlist = source('src-tauri/Info.ios.plist')
 
   assert.match(infoPlist, /<key>NSPhotoLibraryAddUsageDescription<\/key>\s*<string>[^<]+<\/string>/)
+  assert.match(infoPlist, /<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/)
 })
 
 test('memory conversation virtualizes historical turns and keeps rich media out of the timeline', () => {
