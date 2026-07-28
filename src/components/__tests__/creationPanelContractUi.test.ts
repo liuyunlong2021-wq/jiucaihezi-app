@@ -31,6 +31,15 @@ test('creation panel counts only tasks with a live runtime execution as generati
   )
 })
 
+test('creation prompt grows for typed and programmatically loaded text', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /ref="promptInput"/)
+  assert.match(source, /resizePromptInput\(event\.currentTarget as HTMLTextAreaElement\)/)
+  assert.match(source, /\(\) => \[cpState\.prompt, showPromptInput\.value\]/)
+  assert.match(source, /nextTick\(\(\) => resizePromptInput\(\)\)/)
+})
+
 // Legacy ecommerce rollback contract; MemoryWorkbench owns the current media path.
 test.skip('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
@@ -56,6 +65,11 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
   assert.match(source, /flushQueuedCanvasMedia\(/)
   assert.match(source, /定位当前画布/)
   assert.match(source, /新建画布/)
+  assert.match(source, /placeholder="搜索画布"/)
+  assert.match(source, /filteredCanvasFiles/)
+  assert.match(source, /selectCanvasRecord\(file\)/)
+  assert.match(source, /renameCanvasRecord\(file\)/)
+  assert.match(source, /deleteCanvasRecord\(file\)/)
   assert.match(source, /canvas:locate/)
   assert.match(source, /onCanvasPaste/)
   assert.match(source, /addCanvasFiles/)

@@ -408,7 +408,14 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /else \{\s*releaseMediaUrl\(\)\s*previewResource\.value = resource\s*\}/)
   assert.match(workbench, />返回对话</)
   assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
+  assert.doesNotMatch(workbench, /resource\.type === 'canvas'[\s\S]*openCreationHost\(\)/)
   assert.doesNotMatch(workbench, /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/)
+})
+
+test('Windows startup does not infer WebView2 availability from the browser user agent', () => {
+  const main = source('src/main.ts')
+
+  assert.doesNotMatch(main, /当前使用的浏览器不是 Edge|LinkId=2124703|\/Edg\\\//)
 })
 
 test('memory settings expose the existing Desktop local model runtime', () => {

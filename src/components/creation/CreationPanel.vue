@@ -99,8 +99,10 @@ import {
 } from '@/runtime/workbench/mediaPlanBridge'
 import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
 
-import { emitEvent, onEvent, consumeLastEvent } from '@/utils/eventBus'
+import { emitEvent, emitEventAsync, onEvent, consumeLastEvent } from '@/utils/eventBus'
 import { openExternal } from '@/utils/httpClient'
+import { confirmAction } from '@/utils/confirmAction'
+import { safePrompt } from '@/utils/safePrompt'
 import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
@@ -114,9 +116,12 @@ import { CanvasAssetUrlResolver } from '@/components/canvas/canvasAssetUrlResolv
 import { unreferencedCanvasAssetIds } from '@/components/canvas/canvasDocument'
 import {
   createCanvasFile,
+  deleteCanvasFile,
   listCanvasFiles,
+  renameCanvasFile,
   restoreCanvasAtPath,
   saveCanvas,
+  type CanvasFile,
 } from '@/components/canvas/canvasPersistence'
 import {
   createRuntimeProjectFileService,
@@ -844,8 +849,13 @@ function fileToDataUrl(f: File): Promise<string> {
 
 const canvasContainer = ref<HTMLDivElement>()
 const canvasImportInput = ref<HTMLInputElement>()
+const promptInput = ref<HTMLTextAreaElement>()
 const canvasDragOver = ref(false)
 const showCanvasMore = ref(false)
+const canvasPickerOpen = ref(false)
+const canvasPickerRef = ref<HTMLElement>()
+const canvasFiles = ref<CanvasFile[]>([])
+const canvasSearch = ref('')
 const videoPreview = ref<{ src: string; name: string; filePath: string } | null>(null)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
@@ -1914,6 +1924,92 @@ async function createAndOpenCanvas(owner = selectedCanvasOwner(), keepGate = fal
   }
 }
 
+function canvasDisplayName(file: CanvasFile): string {
+  return file.name.replace(/\.jccanvas$/i, '')
+}
+
+const filteredCanvasFiles = computed(() => {
+  const query = canvasSearch.value.trim().toLocaleLowerCase()
+  return query
+    ? canvasFiles.value.filter(file => canvasDisplayName(file).toLocaleLowerCase().includes(query))
+    : canvasFiles.value
+})
+
+async function refreshCanvasFiles(owner = selectedCanvasOwner()) {
+  canvasFiles.value = owner ? await listCanvasFiles(owner) : []
+}
+
+async function toggleCanvasPicker() {
+  canvasPickerOpen.value = !canvasPickerOpen.value
+  canvasSearch.value = ''
+  if (canvasPickerOpen.value) {
+    await refreshCanvasFiles().catch(error => {
+      cpState.progressText = `读取画布记录失败: ${error instanceof Error ? error.message : String(error)}`
+    })
+  }
+}
+
+async function selectCanvasRecord(file: CanvasFile) {
+  canvasPickerOpen.value = false
+  await openCanvas(file.path).catch(error => {
+    cpState.progressText = `打开画布失败: ${error instanceof Error ? error.message : String(error)}`
+  })
+}
+
+async function createCanvasRecord() {
+  canvasPickerOpen.value = false
+  try {
+    await createAndOpenCanvas()
+    await refreshCanvasFiles()
+  } catch (error) {
+    cpState.progressText = `新建画布失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+async function renameCanvasRecord(file: CanvasFile) {
+  const name = await safePrompt('画布名称', canvasDisplayName(file), { forceDom: true })
+  if (!name?.trim()) return
+  const owner = selectedCanvasOwner()
+  if (!owner) return
+  const lifecycle = { path: file.path, owner, lifecycleId: crypto.randomUUID(), release: undefined as (() => void) | undefined }
+  let completed = false
+  try {
+    await emitEventAsync('canvas:before-rename', lifecycle)
+    if (!isCurrentCanvasOwner(owner)) throw new Error('项目已切换，请重试')
+    if (mediaTaskStore.hasPendingCanvasWrite(owner, file.path)) throw new Error('画布有待写入的生成结果，请稍候')
+    const renamed = await renameCanvasFile(file.path, name, owner)
+    completed = true
+    emitEvent('canvas:renamed', { ...lifecycle, oldPath: file.path, newPath: renamed.path })
+    await refreshCanvasFiles(owner)
+    emitEvent('refresh-file-list')
+  } catch (error) {
+    if (!completed) emitEvent('canvas:lifecycle-failed', lifecycle)
+    cpState.progressText = `重命名画布失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+async function deleteCanvasRecord(file: CanvasFile) {
+  if (!(await confirmAction(`确定删除画布「${canvasDisplayName(file)}」？图片素材不会删除。`))) return
+  const owner = selectedCanvasOwner()
+  if (!owner) return
+  const lifecycle = { path: file.path, owner, lifecycleId: crypto.randomUUID(), release: undefined as (() => void) | undefined }
+  let completed = false
+  try {
+    await emitEventAsync('canvas:before-delete', lifecycle)
+    if (!isCurrentCanvasOwner(owner)) throw new Error('项目已切换，请重试')
+    if (mediaTaskStore.hasPendingCanvasWrite(owner, file.path)) throw new Error('画布有待写入的生成结果，请稍候')
+    await deleteCanvasFile(file.path, owner)
+    completed = true
+    canvasPickerOpen.value = false
+    emitEvent('canvas:deleted', { ...lifecycle, path: file.path })
+    await refreshCanvasFiles(owner)
+    emitEvent('refresh-file-list')
+  } catch (error) {
+    if (!completed) emitEvent('canvas:lifecycle-failed', lifecycle)
+    cpState.progressText = `删除画布失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
 async function loadCanvasForProject(owner = selectedCanvasOwner()) {
   if (!app || !isCurrentCanvasOwner(owner)) return
   const staleGate = !owner || activeCanvasGate?.owner !== owner ? activeCanvasGate : undefined
@@ -1983,6 +2079,8 @@ async function loadCanvasForProject(owner = selectedCanvasOwner()) {
 watch(
   () => selectedCanvasOwner(),
   owner => {
+    canvasPickerOpen.value = false
+    canvasFiles.value = []
     void loadCanvasForProject(owner).catch(error => {
       if (owner !== selectedCanvasOwner()) return
       reportCanvasRestoreFailure(error)
@@ -3026,6 +3124,14 @@ function canvasTool(action: string) {
 onMounted(() => {
   if (!canvasContainer.value) return
 
+  const closeCanvasPicker = (event: Event) => {
+    if (canvasPickerOpen.value && !canvasPickerRef.value?.contains(event.target as Node)) {
+      canvasPickerOpen.value = false
+    }
+  }
+  document.addEventListener('pointerdown', closeCanvasPicker)
+  canvasCleanups.push(() => document.removeEventListener('pointerdown', closeCanvasPicker))
+
   canvasReady = false
   app = new App({
     view: canvasContainer.value,
@@ -3233,7 +3339,7 @@ async function updateCreationMention() {
 }
 
 function onCreationPromptInput(event: Event) {
-  autoGrow(event)
+  resizePromptInput(event.currentTarget as HTMLTextAreaElement)
   void updateCreationMention()
 }
 
@@ -3277,11 +3383,17 @@ const modelList = computed(() =>
   })),
 )
 
-function autoGrow(e: Event) {
-  const el = e.target as HTMLTextAreaElement
+function resizePromptInput(el = promptInput.value) {
+  if (!el) return
   el.style.height = 'auto'
   el.style.height = Math.min(el.scrollHeight, 200) + 'px'
 }
+
+watch(
+  () => [cpState.prompt, showPromptInput.value],
+  () => void nextTick(() => resizePromptInput()),
+  { immediate: true },
+)
 // 画布引用在发送时才读取；不能用附件为空的旧计划禁用发送按钮。
 const canSend = computed(
   () =>
@@ -3294,17 +3406,35 @@ const canSend = computed(
 <template>
   <div class="cp" data-panel="creation">
     <div class="cp-toolbar">
-      <span class="cp-title"
-        ><JcIcon name="movie_filter" /><span class="cp-title-text"
-          >创作面板 · {{ canvasStore.canvasName }}</span
-        ></span
-      >
+      <span class="cp-title"><JcIcon name="movie_filter" /><span class="cp-title-text">创作面板</span></span>
+      <div ref="canvasPickerRef" class="cp-canvas-picker">
+        <button class="cp-canvas-trigger" type="button" :aria-expanded="canvasPickerOpen" @click="toggleCanvasPicker">
+          <span>{{ canvasStore.canvasName }}</span>
+          <JcIcon :name="canvasPickerOpen ? 'expand-less' : 'expand-more'" />
+        </button>
+        <div v-if="canvasPickerOpen" class="cp-canvas-menu">
+          <input v-model="canvasSearch" type="search" placeholder="搜索画布" aria-label="搜索画布" />
+          <div class="cp-canvas-list">
+            <div
+              v-for="file in filteredCanvasFiles"
+              :key="file.path"
+              class="cp-canvas-item"
+              :class="{ active: file.path === canvasStore.canvasPath }"
+            >
+              <button class="cp-canvas-name" @click="selectCanvasRecord(file)">{{ canvasDisplayName(file) }}</button>
+              <button class="cp-canvas-action" title="重命名" @click="renameCanvasRecord(file)"><JcIcon name="edit" /></button>
+              <button class="cp-canvas-action" title="删除" @click="deleteCanvasRecord(file)"><JcIcon name="delete" /></button>
+            </div>
+            <p v-if="!filteredCanvasFiles.length" class="cp-canvas-empty">没有匹配的画布</p>
+          </div>
+        </div>
+      </div>
+      <button class="cp-toolbar-link cp-new-canvas" title="新建画布" @click="createCanvasRecord">
+        <JcIcon name="add" /><span>新建画布</span>
+      </button>
       <span class="cp-toolbar-spacer" />
       <button class="cp-toolbar-link cp-toolbar-icon" title="定位当前画布" @click="emitEvent('canvas:locate')">
         <JcIcon name="folder-open" />
-      </button>
-      <button class="cp-toolbar-link cp-toolbar-icon" title="新建画布" @click="createAndOpenCanvas()">
-        <JcIcon name="add" />
       </button>
       <button class="cp-toolbar-link cp-toolbar-icon" @click="openTaskHistory" title="查看生成历史">
         <JcIcon name="history" />
@@ -4258,6 +4388,7 @@ const canSend = computed(
           </div>
           <textarea
             v-if="showPromptInput"
+            ref="promptInput"
             v-model="cpState.prompt"
             rows="2"
             :placeholder="promptPlaceholder"
@@ -4373,6 +4504,20 @@ const canSend = computed(
 }
 .cp-toolbar-icon { width: 28px; padding: 0; justify-content: center; }
 .cp-toolbar-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.cp-canvas-picker { position: relative; min-width: 0; max-width: min(220px, 30vw); }
+.cp-canvas-trigger { display: flex; width: 100%; height: 28px; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink1); cursor: pointer; font: inherit; }
+.cp-canvas-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cp-canvas-menu { position: absolute; z-index: 60; top: calc(100% + 7px); left: 0; width: min(320px, 84vw); padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
+.cp-canvas-menu > input { width: 100%; height: 32px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--surface); color: var(--ink1); font: inherit; }
+.cp-canvas-menu > input:focus { border-color: var(--olive); }
+.cp-canvas-list { max-height: min(420px, 58vh); margin-top: 6px; overflow-y: auto; }
+.cp-canvas-item { display: grid; grid-template-columns: minmax(0, 1fr) 30px 30px; align-items: center; border-radius: 5px; }
+.cp-canvas-item:hover, .cp-canvas-item.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
+.cp-canvas-name, .cp-canvas-action { min-width: 0; height: 34px; border: 0; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; }
+.cp-canvas-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.cp-canvas-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
+.cp-canvas-action:hover { color: var(--olive); }
+.cp-canvas-empty { margin: 10px 8px; color: var(--ink3); font-size: 12px; }
 
 .cp-toolbar-link:hover {
   border-color: var(--olive);
@@ -5573,6 +5718,17 @@ const canSend = computed(
   .cp-toolbar {
     padding: 0 8px;
     gap: 4px;
+  }
+  .cp-title-text, .cp-new-canvas span {
+    display: none;
+  }
+  .cp-canvas-picker {
+    max-width: 112px;
+  }
+  .cp-new-canvas {
+    width: 28px;
+    padding: 0;
+    justify-content: center;
   }
   .cp-toolbar-link-text {
     display: none; /* 只显示图标 */
