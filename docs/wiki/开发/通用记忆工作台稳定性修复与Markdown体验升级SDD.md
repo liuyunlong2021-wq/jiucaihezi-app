@@ -79,12 +79,21 @@ GPT Image
   GPT 文生图
   GPT 图生图
 
-Banana
-  Banana Pro
-  Banana Flash
+Banana（Google 图片模型）
+  Nano Banana Flash  ← Gemini 3.1 Flash Image
+  Nano Banana Pro    ← Gemini 3 Pro Image
 ```
 
 模型家族必须由规范化模型 ID/能力信息推导，不只依赖显示名称。已下线模型不能出现在列表中，也不能成为默认模型。
+
+已确认的渠道别名关系：
+
+| UI 分组 | UI 显示名 | 底层模型/渠道名 |
+| --- | --- | --- |
+| Banana | Nano Banana Flash | `gemini-3.1-flash-image-preview` |
+| Banana | Nano Banana Pro | `gemini-3-pro-image-preview` |
+
+两者属于同一 Google 图片模型家族；前端按 Banana 家族归组，仍保留真实底层模型 ID 用于请求、能力判断和费用读取。
 
 费用只显示数字和明确单位，不显示人民币符号：
 
@@ -119,7 +128,9 @@ Banana
 }
 ```
 
-完整价格清单以实施时管理员/网关真实配置为准。当前清单尚未包含可确认的 Banana 模型 ID；实施前必须补齐。`rh-3d-image` 与 `rh-3d-text` 的“按次/按时长”合同必须用任务 ID、开始结束时间和管理员扣费记录核实后再展示。
+完整价格清单以实施时管理员/网关真实配置为准。`rh-3d-image` 与 `rh-3d-text` 当前不能直接标记为 `6.6/次`：已有一次 `rh-3d-text`、`Geometry=false` 的实测记录显示，上游扣费 `1.8/次`，New API 扣费 `23.76`（会员九折），与管理员预期的 `6.6/次` 不一致。该单次证据不足以判断是计费单位、任务参数倍率、渠道换算、会员折扣还是 New API 价格字段含义造成差异。
+
+3D 费用在根因查清前只显示“费用以实际扣费为准”，不得把 `6.6` 直接展示给用户。调查必须保留任务 ID、模型 ID、全部参数、上游返回费用、New API 扣费前后余额、渠道价格/倍率配置和会员折扣规则；至少对文生 3D 与图生 3D 各做两组参数对照后，才能确定展示单位和公式。
 
 ## 4. 实施顺序
 
