@@ -1246,6 +1246,12 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - 日志：重启过程保存 `/tmp/jiucaihezi-4d3-restart.log` 与 `/tmp/jiucaihezi-4d3-logout-restart.log`；未发现 App `FATAL EXCEPTION`、`AndroidRuntime` 或 panic。设备网络同时记录了系统网络错误，应用保持可用并显示可恢复的登录入口。
 - 结论：4D-3 登录、退出、杀进程恢复和失效后回登录页门禁通过；进入 4D-4 前需要再次登录，不能把退出后的未登录状态当作同步登录。
 
+### 14.32 Android 4D-4 Android 侧断网恢复结果（2026-07-28）
+
+- 在专用项目 `未命名项目Android4Dacceptance` 中关闭 Wi-Fi 和移动数据，创建文本路径 `wiki/untitled.android-offline-4d4.md`；本地同步状态立即记录 1 条 `pending` mutation，内容哈希为空文件 SHA-256 `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`，证明断网写入先落本地而非丢弃。
+- 恢复 Wi-Fi/移动数据并冷启动 App 后，自动同步将游标从 `693` 推进到 `713`，该文件 revision 为 `1`，`pending` 清空；未生成第二个同路径文件或重复 mutation。文件内容为空是本次 UI 新建文件验收的明确输入，不作为内容写入成功证据。
+- 该结果只完成 Android 侧断网恢复与去重前置证据；Android -> Web/Mac 和 Web/Mac -> Android 双向回流、同 revision 冲突及不同账号越权仍未验收。Mac App 和 Web 目前均无同账号登录会话，4D-4 不能标记完成。
+
 ## 15. 验收标准
 
 ### 15.1 导航与资源
