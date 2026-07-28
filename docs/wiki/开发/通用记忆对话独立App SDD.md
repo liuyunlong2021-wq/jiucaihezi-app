@@ -1220,6 +1220,7 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - Debug APK：`src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk`，大小 `259 MB`，SHA-256 `64a49a4fda80ca1badf8078e259e7521dea87099d01886549a14348727a48e47`。
 - 安装结果：执行 `adb install -r .../app-universal-debug.apk`，因 `adb devices` 为空返回 `adb: no devices/emulators found`，未安装。
 - 启动结果：未启动；没有截图或 logcat 证据。4D-2 不能标记完成，APK 构建成功不等于 App 完成。
+- 后续设备审计（2026-07-28）：`adb devices -l` 仍为空；`emulator` 命令不存在；`emulator -list-avds` 无法执行；SDK 未安装 system image。因此当前既无真实 Android 手机，也无可用模拟器，4D-2 的安装/启动门禁属于外部阻断。
 
 ## 15. 验收标准
 
