@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4C-1 至 4C-12 已完成，4C-13 进行中。V2.1.0 Web 与桌面三平台正式版已经发布，用户已从公开入口下载安装并实际使用。iOS `2.1.0 (2.1.0.1)` 已用 Apple Distribution 正式签名并上传 App Store Connect，苹果处理完成；自动分发群组“4C-13 内部验收”已包含该构建并邀请账户持有人。下一步仅需从 TestFlight 安装到同一台 iPhone 13 Pro Max，完成启动、登录恢复、云项目、聊天/Raw/Wiki、附件/媒体和前后台重开回归；通过后才能完成 4C-13，随后开始 Android。Excel/PPT 转换依赖仍待服务器部署和真实文件验证。
+**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4C-1 至 4C-13 已完成。V2.1.0 Web 与桌面三平台正式版已经发布，iOS `2.1.0 (2.1.0.1)` 已上传 App Store Connect，并由用户从 TestFlight 安装到 iPhone 13 Pro Max 后通过真实回归。下一步开始 Android 构建与权限适配；Excel/PPT 转换依赖仍待服务器部署和真实文件验证。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -30,4 +30,4 @@
 
 ---
 
-> 上次刷新: 2026-07-28（V2.1.0 Web/桌面已发布；TestFlight 2.1.0.1 已邀请内部测试，待真机安装回归。）
+> 上次刷新: 2026-07-28（V2.1.0 Web/桌面/iPhone TestFlight 已完成；下一阶段 Android。）
