@@ -1135,6 +1135,14 @@ Mobile App 目录 owner ─┘
 
 结论：三项共享发布阻断已经收口，但尚未发布生产 Web、桌面 V2.1.0 或 TestFlight。执行顺序固定为：先完成 V2.1.0 Web/桌面发布门禁并发布，再执行 4C-13 TestFlight，最后开始 Android 构建与真机适配；任何开发签名 IPA 都不能作为公开下载完成证据。
 
+### 14.21 V2.1.0 发布门禁同步循环修复（2026-07-28）
+
+- 首次完整 `pnpm run build` 在 `projectTextSync` 测试运行约 292 秒后达到约 4 GB Node 堆并 OOM。根因是同步器把自己写入的内部 `.raw/.sync/state.json` 状态变更再次当成用户文字变更，形成无限同步循环；不是业务数据规模、Vite 或整仓依赖版本问题。
+- 处理保持最小：项目变更监听现在只接收既有 `isSyncableTextPath` 允许的用户文字路径；重命名同时检查旧路径。内部同步状态继续落盘，但不再进入待同步队列；未新增依赖、后台任务或第二套状态。
+- 原失败测试整文件复验由约 292 秒 OOM 变为 `5/5` 通过、约 204 ms。随后完整 `pnpm run build` 以退出码 0 通过，覆盖 focused tests、Rust tests、TypeScript、Web 正式构建和 Web 产物审计；`pnpm run build:desktop:quick` 也以退出码 0 通过 TypeScript、Desktop 正式前端构建和 Desktop 产物审计。
+
+结论：V2.1.0 本地 Web/Desktop 自动发布门禁已通过。当前仍未合并 `main`、未发布生产 Web、未创建 `v2.1.0` tag，也未生成公开桌面安装包；须先将 `codex/iphone-app` 非强制推送到远端并完成主线合并，再按真实部署与安装包验收继续，不能用本地构建代替正式上线。
+
 ## 15. 验收标准
 
 ### 15.1 导航与资源

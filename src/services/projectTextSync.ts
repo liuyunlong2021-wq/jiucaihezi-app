@@ -121,7 +121,8 @@ export class ProjectTextSync {
     this.stopChanges = files.onDidChange(change => {
       const changes = flattenProjectResourceChange(change).filter(entry => {
         if (entry.resource.owner !== this.owner || entry.resource.isDirectory) return false
-        return true
+        return isSyncableTextPath(entry.resource.path)
+          || (entry.type === 'renamed' && isSyncableTextPath(entry.oldResource.path))
       })
       if (!changes.length) return
       void this.enqueue(async () => {
