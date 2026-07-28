@@ -742,7 +742,7 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 
 | 编号 | 阶段目标 | 实施边界 | 验收证据 | 状态 |
 | --- | --- | --- | --- | --- |
-| 4D-1 | Android 工具链与 Tauri 工程初始化 | 固定 JDK、Android SDK/NDK、Rust Android targets 和 Tauri v2 Android 工程；只补 Android 配置、图标和签名占位，不改共享业务。 | `java`、`adb`、`sdkmanager`、Rust targets 版本记录；`pnpm tauri android init` 可重复执行；`cargo check` 通过。 | 未开始 |
+| 4D-1 | Android 工具链与 Tauri 工程初始化 | 固定 JDK、Android SDK/NDK、Rust Android targets 和 Tauri v2 Android 工程；只补 Android 配置、图标和签名占位，不改共享业务。 | `java`、`adb`、`sdkmanager`、Rust targets 版本记录；`pnpm tauri android init` 可重复执行；`cargo check` 通过。 | 电脑端完成，待真机阶段 |
 | 4D-2 | Debug 构建与设备启动 | 生成 debug APK，安装到至少一台 Android 设备或模拟器；处理状态栏、导航栏、返回键和首次启动权限提示。 | 构建产物 SHA-256、安装结果、启动截图/日志；应用冷启动进入首页并稳定停留 60 秒。 | 未开始 |
 | 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 未开始 |
 | 4D-4 | 云项目与文字同步 | 复用 `syncClient` 和 `ProjectFileService`；支持云项目列表、下载、上传、Raw/Wiki/安全文本增量同步；媒体仍按本地合同处理。 | Android -> Web/Mac 与 Web/Mac -> Android 双向文字回流；断网不丢本地内容，重连不重复 turn；不同账号不可越权。 | 未开始 |
@@ -1193,6 +1193,26 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - 已在本地 `main` worktree 以保留主线文件的合并策略合入 `codex/iphone-app`，恢复了合并过程中被旧分支删除但主线仍需要的 Wiki、Skill 和计划文件；主线工作区通过 `diff --check`，`pnpm run build:desktop:quick` 和桌面产物审计通过。
 - 已将合并后的 `main` 推送到 `origin/main`，未强推远端历史；随后删除本地和远端 `codex/iphone-app`。iPhone TestFlight 的构建、签名、上传和真机证据已保留在 14.24，不因删分支丢失。
 - 已新增 4D-1 至 4D-9 Android 阶段验收清单。本轮只更新 SDD 与热缓存，不安装 Android 工具链、不创建 Android 工程、不修改 Web/Mac/iPhone 业务代码；Android 从新对话按 4D-1 开始。
+
+### 14.26 Android 4D-1 工具链基线（2026-07-28）
+
+- 工作分支：`codex/android-app`，基于 `main` / `3a9c3e21` 创建；未修改 `main`。
+- 项目依赖：pnpm `10.33.2`，Tauri CLI `2.11.4`，Rust `1.94.1`，Cargo `1.94.1`。
+- `rustup target list --installed` 当前只有 `aarch64-apple-darwin`、`aarch64-apple-ios`、`aarch64-apple-ios-sim`、`x86_64-apple-darwin`、`x86_64-apple-ios`、`x86_64-pc-windows-msvc`；尚无 `aarch64-linux-android`、`armv7-linux-androideabi`、`i686-linux-android` 或 `x86_64-linux-android`。
+- `java -version` 失败（本机未找到 Java Runtime）；`adb`、`sdkmanager` 和 `ndk-build` 均未安装或不在 `PATH`。`ANDROID_HOME`、`ANDROID_SDK_ROOT`、`JAVA_HOME` 均为空；未发现 Android Studio 或 Android SDK/NDK 目录。
+- 当前 `src-tauri/gen/` 只有既有 Apple 工程和 schemas，没有 Android 工程；截至本记录尚未执行 Android init、构建、安装或启动，因此这些结果均为“未执行”，不能视为 Android App 完成。
+- 4D-1 当前缺失项：JDK（建议固定 Android Studio/Gradle 兼容的 JDK 17）、Android SDK command-line tools、平台 SDK、Build Tools、NDK、`platform-tools/adb`、Rust Android targets，以及可运行 `pnpm tauri android init` 的完整环境。
+
+### 14.27 Android 4D-1 工具链与工程结果（2026-07-28）
+
+- 已安装并固定：Homebrew `openjdk@17` `17.0.20`；Android SDK command-line tools `20.0`；platform-tools `37.0.0`（Homebrew `adb` 二进制报告 `37.0.1-15733141`）；SDK Platform `android-35`、`android-36`；Build Tools `35.0.0`、`36.0.0`；SDK NDK `27.2.12479018`。Homebrew 同时安装的 NDK cask 为 `29`，未用于 Tauri 工程。
+- 已安装 Rust targets：`aarch64-linux-android`、`armv7-linux-androideabi`、`i686-linux-android`、`x86_64-linux-android`。
+- Tauri CLI `2.11.4`；`pnpm tauri android init --ci --skip-targets-install` 首次和第二次均成功，生成 `src-tauri/gen/android`，包含 Gradle wrapper、Android manifest、MainActivity、资源图标和 Rust Gradle 插件；未生成业务页面或第二套运行时。
+- 为让 Android 交叉检查不依赖 host OpenSSL，将现有 `reqwest` TLS 固定为 `rustls-tls`；将不支持 Android 的 `arboard` 限定为桌面目标，移动剪贴板命令暂返回明确未接入错误。没有改共享 Vue、同步、记忆或模型调用代码。
+- 构建结果：宿主 `cargo check --manifest-path src-tauri/Cargo.toml` 通过；Android `cargo check --manifest-path src-tauri/Cargo.toml --target aarch64-linux-android` 通过。仅有既有 dead-code/unused 警告，无错误。
+- Gradle wrapper `8.14.3` 可启动，使用 JDK `17.0.20`；本阶段未执行 APK 构建。
+- 安装结果：4D-1 未生成 APK，未安装；启动结果：未启动。按顺序留给 4D-2，不能把工程初始化或 `cargo check` 记为 App 完成。
+- 当前外部门槛：尚未连接 Android 真机，也未创建模拟器；4D-2 需要至少一台真实 Android 设备完成 debug APK 安装、冷启动和稳定运行 60 秒后才能继续。
 
 ## 15. 验收标准
 

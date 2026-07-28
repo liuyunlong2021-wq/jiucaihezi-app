@@ -20,7 +20,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
-reqwest = { version = "0.12", features = ["json", "multipart", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "multipart", "stream", "rustls-tls"] }
 keyring = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -35,7 +35,6 @@ base64 = "0.22"
 uuid = { version = "1", features = ["v4"] }
 chrono = { version = "0.4", features = ["serde"] }
 tauri-plugin-deep-link = "2"
-arboard = "3"
 md5 = "0.7"
 dirs-next = "2.0"
 tauri-plugin-updater = "2.10.1"
@@ -43,6 +42,7 @@ notify = "8.2"
 tauri-plugin-opener = "2.5.4"
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+arboard = "3"
 rfd = "0.15"
 trash = "5.2"
 
