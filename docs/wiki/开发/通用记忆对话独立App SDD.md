@@ -1143,6 +1143,16 @@ Mobile App 目录 owner ─┘
 
 结论：V2.1.0 本地 Web/Desktop 自动发布门禁已通过。当前仍未合并 `main`、未发布生产 Web、未创建 `v2.1.0` tag，也未生成公开桌面安装包；须先将 `codex/iphone-app` 非强制推送到远端并完成主线合并，再按真实部署与安装包验收继续，不能用本地构建代替正式上线。
 
+### 14.22 V2.1.0 Web 正式发布记录（2026-07-28）
+
+- `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` 和 `src-tauri/Cargo.lock` 已统一为 `2.1.0`；版本变更后的 Web quick build、产物审计与 Mac Rust `cargo check` 通过。
+- `codex/iphone-app` 以普通快进方式并入远端 `main`，发布源码提交为 `5d9c9ce0`，没有 force push 或覆盖远端独有提交。
+- Cloudflare Preview `cce800b4-eb11-41e8-86a0-8636c844620a` 部署成功，但预览域名受 Cloudflare Access 邮箱登录保护，不能把登录页当成应用验收。改用同一 `dist/` 在本地浏览器完成 `1440x900` 与 `390x844` 验收后，再部署 Production。
+- Cloudflare Pages Production 部署为 `20d49e07-68ea-4dbb-9d55-e45107e721fe`，对应提交 `5d9c9ce`，上一版 Production 仍保留为回滚点。正式域名 <https://jiucaihezi.studio> 返回 HTTP 200，并加载本次构建入口 `assets/index-Slv0EI0b-jc20260610b.js`。
+- 正式域名在 `1440x900` 与 `390x844` 浏览器视口均可进入首页；页面宽度与视口一致、无横向溢出，控制台无 error。此证据只证明 Web V2.1.0 上线，不代表桌面安装包或 TestFlight 已完成。
+
+结论：V2.1.0 Web 已正式上线。下一步以包含本记录的主线提交创建 `v2.1.0` tag，等待三平台桌面 CI 生成、公证、上传并完成真实安装包核对；桌面发布稳定后再进入 4C-13 TestFlight。
+
 ## 15. 验收标准
 
 ### 15.1 导航与资源
