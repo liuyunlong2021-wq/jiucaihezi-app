@@ -736,6 +736,24 @@ Mobile App 目录 owner ─┘
 
 4C-6 兼容规则：必须保留官方 issue、当前锁定版本、真机 `.ips` 调用栈和每次实验结果；不得将 IPA 安装成功称为 App 成功，也不得以长期私有 Wry fork 或整仓降级绕过此门槛。若官方尚未发布修复，只允许记录了上游来源、仅覆盖故障调用点且可随上游版本删除的临时补丁。
 
+#### 4D：Android App 阶段（iPhone TestFlight 完成后开始）
+
+Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同和同步合同；不复制一套 Android 专属业务流程，不影响 Web、Mac 或已发布 iPhone。Android 阶段的顺序固定为“工具链与工程 -> Debug 真机 -> 核心业务 -> 权限与恢复 -> 发布包”，任何 APK/AAB 构建成功都不能替代真实设备验收。
+
+| 编号 | 阶段目标 | 实施边界 | 验收证据 | 状态 |
+| --- | --- | --- | --- | --- |
+| 4D-1 | Android 工具链与 Tauri 工程初始化 | 固定 JDK、Android SDK/NDK、Rust Android targets 和 Tauri v2 Android 工程；只补 Android 配置、图标和签名占位，不改共享业务。 | `java`、`adb`、`sdkmanager`、Rust targets 版本记录；`pnpm tauri android init` 可重复执行；`cargo check` 通过。 | 未开始 |
+| 4D-2 | Debug 构建与设备启动 | 生成 debug APK，安装到至少一台 Android 设备或模拟器；处理状态栏、导航栏、返回键和首次启动权限提示。 | 构建产物 SHA-256、安装结果、启动截图/日志；应用冷启动进入首页并稳定停留 60 秒。 | 未开始 |
+| 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 未开始 |
+| 4D-4 | 云项目与文字同步 | 复用 `syncClient` 和 `ProjectFileService`；支持云项目列表、下载、上传、Raw/Wiki/安全文本增量同步；媒体仍按本地合同处理。 | Android -> Web/Mac 与 Web/Mac -> Android 双向文字回流；断网不丢本地内容，重连不重复 turn；不同账号不可越权。 | 未开始 |
+| 4D-5 | 移动核心工作流 | 适配聊天、Raw、Wiki、Skill、文件树、设置和对话删除；使用抽屉/全屏导航，不依赖右键、悬停或桌面拖放。 | 新建/继续对话、Raw 读写、Wiki 写入、Skill 调用、移动端永久删除均在真机完成并可重启恢复。 | 未开始 |
+| 4D-6 | 附件与媒体能力 | 接入 Android 系统文件选择器、相册/相机权限和现有媒体任务；只做首版必要的图片、视频、音频和 3D 预览，不扩展复杂画布。 | 文件附件与相册导入、媒体提交/恢复/播放、3D 旋转缩放、保存到系统相册均通过；拒绝权限有明确可恢复提示。 | 未开始 |
+| 4D-7 | 生命周期、网络与异常恢复 | 覆盖前后台、旋转/尺寸变化、进程被系统回收、断网、恢复网络、请求失败和重复提交；本地项目写入必须可恢复。 | 真机矩阵记录每项操作前后项目文件、会话和任务状态；无静默丢失、重复 turn 或无限轮询。 | 未开始 |
+| 4D-8 | 设备兼容矩阵 | 至少覆盖一台中高端 Android 真机和一台不同 Android 版本/屏幕尺寸设备；必要时补模拟器诊断。 | 每台设备记录型号、Android 版本、构建号、安装、启动、核心流程和异常结果；发现差异必须关闭或明确标记阻断。 | 未开始 |
+| 4D-9 | Release APK/AAB 与发布准备 | 配置正式 applicationId、签名密钥保管、版本号、隐私/权限说明和 Play Console 所需材料；不直接发布生产。 | Release APK/AAB 可安装并通过签名校验；产物 SHA-256、mapping/符号文件和回滚版本归档；真机回归通过后才允许进入 Google Play 内测。 | 未开始 |
+
+4D 阶段门槛：4D-1 至 4D-7 必须按顺序完成，4D-8 的设备矩阵全部通过后才能做 4D-9。每次实验必须记录工具/依赖版本、构建结果、安装结果、启动结果和真机行为；不得把“能生成 APK”“能安装”或“能打开空壳”写成 Android App 完成。Android 未完成前，不修改 Web/Mac/iPhone 的正式发布配置，不删除现有 iPhone 发布证据。
+
 ### 14.4 第一阶段实施记录（2026-07-25）
 
 已完成：
@@ -1169,6 +1187,12 @@ Mobile App 目录 owner ─┘
 - 用户已从 TestFlight 安装 `2.1.0 (2.1.0.1)` 到真实 iPhone 13 Pro Max，并确认测试通过。该验收覆盖发布安装、启动、登录恢复、云项目、聊天/Raw/Wiki、附件/媒体及前后台重开回归；不再把安装成功与 App 可用性混为一谈。
 
 结论：4C-13 已完成。iPhone TestFlight 正式构建已完成真实设备验收，下一步进入 Android 构建与权限适配；不提前宣称 Android 已完成。
+
+### 14.25 iPhone 收尾与 Android 阶段拆分（2026-07-28）
+
+- 已在本地 `main` worktree 以保留主线文件的合并策略合入 `codex/iphone-app`，恢复了合并过程中被旧分支删除但主线仍需要的 Wiki、Skill 和计划文件；主线工作区通过 `diff --check`，`pnpm run build:desktop:quick` 和桌面产物审计通过。
+- 已将合并后的 `main` 推送到 `origin/main`，未强推远端历史；随后删除本地和远端 `codex/iphone-app`。iPhone TestFlight 的构建、签名、上传和真机证据已保留在 14.24，不因删分支丢失。
+- 已新增 4D-1 至 4D-9 Android 阶段验收清单。本轮只更新 SDD 与热缓存，不安装 Android 工具链、不创建 Android 工程、不修改 Web/Mac/iPhone 业务代码；Android 从新对话按 4D-1 开始。
 
 ## 15. 验收标准
 
