@@ -744,7 +744,7 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 | --- | --- | --- | --- | --- |
 | 4D-1 | Android 工具链与 Tauri 工程初始化 | 固定 JDK、Android SDK/NDK、Rust Android targets 和 Tauri v2 Android 工程；只补 Android 配置、图标和签名占位，不改共享业务。 | `java`、`adb`、`sdkmanager`、Rust targets 版本记录；`pnpm tauri android init` 可重复执行；`cargo check` 通过。 | 电脑端完成，待真机阶段 |
 | 4D-2 | Debug 构建与设备启动 | 生成 debug APK，安装到至少一台 Android 设备或模拟器；处理状态栏、导航栏、返回键和首次启动权限提示。 | 构建产物 SHA-256、安装结果、启动截图/日志；应用冷启动进入首页并稳定停留 60 秒。 | 已完成（vivo V2443BA 真机） |
-| 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 未开始 |
+| 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 实现已接入，待真账号验收 |
 | 4D-4 | 云项目与文字同步 | 复用 `syncClient` 和 `ProjectFileService`；支持云项目列表、下载、上传、Raw/Wiki/安全文本增量同步；媒体仍按本地合同处理。 | Android -> Web/Mac 与 Web/Mac -> Android 双向文字回流；断网不丢本地内容，重连不重复 turn；不同账号不可越权。 | 未开始 |
 | 4D-5 | 移动核心工作流 | 适配聊天、Raw、Wiki、Skill、文件树、设置和对话删除；使用抽屉/全屏导航，不依赖右键、悬停或桌面拖放。 | 新建/继续对话、Raw 读写、Wiki 写入、Skill 调用、移动端永久删除均在真机完成并可重启恢复。 | 未开始 |
 | 4D-6 | 附件与媒体能力 | 接入 Android 系统文件选择器、相册/相机权限和现有媒体任务；只做首版必要的图片、视频、音频和 3D 预览，不扩展复杂画布。 | 文件附件与相册导入、媒体提交/恢复/播放、3D 旋转缩放、保存到系统相册均通过；拒绝权限有明确可恢复提示。 | 未开始 |
@@ -1229,6 +1229,14 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - 启动结果：执行 `adb shell am force-stop com.jiucaihezi.desktop` 后冷启动 `.MainActivity` 成功；前台首页显示“还没有打开项目 / 打开项目中心”，截图保存为 `/tmp/jiucaihezi-android-start.png`。
 - 稳定性结果：前台运行 60 秒后进程 PID `25064` 仍存活，`topResumedActivity` 仍为 `.MainActivity`；期间 `adb logcat` 未发现 `FATAL EXCEPTION`、`AndroidRuntime`、`SIGSEGV` 或崩溃记录。
 - 结论：4D-2 真机 Debug 安装、冷启动和 60 秒稳定运行门禁已通过。APK 构建或安装成功不代表 Android App 整体完成；后续仍须按顺序执行 4D-3 至 4D-9。
+
+### 14.30 Android 4D-3 Keystore 接入记录（2026-07-28）
+
+- 根因审计：`keyring` 3.6.3 在 Android 目标没有原生后端，会回退到 mock；不能用它保存登录凭据。因此没有把 Android 会话继续写入普通文件或 mock。
+- Android 条件实现：`MainActivity` 使用 Android Keystore 生成 AES-GCM 密钥，密文和随机 IV 只写入 App 私有 `SharedPreferences`；Rust `secure_store` 通过 JNI 调用读取、写入和清除。桌面/iOS 的既有 Keychain/平台实现保持不变。
+- 构建结果：Android `cargo check --target aarch64-linux-android` 通过；Debug APK 构建通过，SHA-256 `fb4d4d5a2a0540703660c70a7f17738257546de421d0f78c8247c8306879a746`，大小 `271,684,299` bytes。
+- 安装/启动结果：覆盖安装到 vivo `V2443BA` 成功，`com.jiucaihezi.desktop` 冷启动成功进入记忆空间页面；当前尚未输入真实账号，未产生登录凭据。
+- 当前门禁：4D-3 仍未完成。必须由用户在真机登录并勾选“保持登录”，再验证退出、杀进程恢复、失效 Session 回登录页及网络错误日志；在这些证据齐全前不得进入 4D-4。
 
 ## 15. 验收标准
 

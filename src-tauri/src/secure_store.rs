@@ -1,5 +1,52 @@
 use keyring::Entry;
 
+#[cfg(target_os = "android")]
+fn android_secure_get(alias: &str) -> Result<Option<String>, String> {
+    use jni::{objects::{JObject, JString, JValue}, JavaVM};
+    let context = ndk_context::android_context();
+    let vm = unsafe { JavaVM::from_raw(context.vm().cast()) }.map_err(|error| error.to_string())?;
+    let mut env = vm.attach_current_thread().map_err(|error| error.to_string())?;
+    let class = env.find_class("com/jiucaihezi/desktop/MainActivity").map_err(|error| error.to_string())?;
+    let alias = env.new_string(alias).map_err(|error| error.to_string())?;
+    let value = env
+        .call_static_method(class, "secureRead", "(Ljava/lang/String;)Ljava/lang/String;", &[JValue::Object(&JObject::from(alias))])
+        .map_err(|error| error.to_string())?
+        .l()
+        .map_err(|error| error.to_string())?;
+    if value.is_null() { return Ok(None); }
+    let value_string = JString::from(value);
+    let value = env.get_string(&value_string).map_err(|error| error.to_string())?;
+    let value = value.to_str().map_err(|error| error.to_string())?.trim().to_string();
+    Ok((!value.is_empty()).then_some(value))
+}
+
+#[cfg(target_os = "android")]
+fn android_secure_set(alias: &str, value: &str) -> Result<(), String> {
+    use jni::{objects::{JObject, JValue}, JavaVM};
+    let context = ndk_context::android_context();
+    let vm = unsafe { JavaVM::from_raw(context.vm().cast()) }.map_err(|error| error.to_string())?;
+    let mut env = vm.attach_current_thread().map_err(|error| error.to_string())?;
+    let class = env.find_class("com/jiucaihezi/desktop/MainActivity").map_err(|error| error.to_string())?;
+    let alias = env.new_string(alias).map_err(|error| error.to_string())?;
+    let value = env.new_string(value).map_err(|error| error.to_string())?;
+    env.call_static_method(class, "secureWrite", "(Ljava/lang/String;Ljava/lang/String;)V", &[JValue::Object(&JObject::from(alias)), JValue::Object(&JObject::from(value))])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+fn android_secure_clear(alias: &str) -> Result<(), String> {
+    use jni::{objects::{JObject, JValue}, JavaVM};
+    let context = ndk_context::android_context();
+    let vm = unsafe { JavaVM::from_raw(context.vm().cast()) }.map_err(|error| error.to_string())?;
+    let mut env = vm.attach_current_thread().map_err(|error| error.to_string())?;
+    let class = env.find_class("com/jiucaihezi/desktop/MainActivity").map_err(|error| error.to_string())?;
+    let alias = env.new_string(alias).map_err(|error| error.to_string())?;
+    env.call_static_method(class, "secureClear", "(Ljava/lang/String;)V", &[JValue::Object(&JObject::from(alias))])
+        .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 const KEYCHAIN_SERVICE: &str = "com.jiucaihezi.app";
 const KEYCHAIN_ACCOUNT: &str = "primary-api-key";
 const GATEWAY_SESSION_ACCOUNT: &str = "gateway-session-token";
@@ -99,7 +146,10 @@ fn clear_entry_value(entry: Entry) -> Result<(), String> {
 
 #[tauri::command]
 pub fn get_api_key() -> Result<Option<String>, String> {
-    get_entry_value(entry()?)
+    #[cfg(target_os = "android")]
+    { return android_secure_get(KEYCHAIN_ACCOUNT); }
+    #[cfg(not(target_os = "android"))]
+    { get_entry_value(entry()?) }
 }
 
 /// 兜底：直接从 CLI 文件读取 Key（Skill 同款路径）
@@ -129,32 +179,51 @@ pub fn get_cli_api_key() -> Result<Option<String>, String> {
 
 #[tauri::command]
 pub fn set_api_key(api_key: String) -> Result<(), String> {
-    let result = set_entry_value(entry()?, api_key.clone(), clear_api_key);
-    if result.is_ok() {
-        sync_key_to_cli_file(&api_key);
+    #[cfg(target_os = "android")]
+    { return if api_key.trim().is_empty() { android_secure_clear(KEYCHAIN_ACCOUNT) } else { android_secure_set(KEYCHAIN_ACCOUNT, api_key.trim()) }; }
+    #[cfg(not(target_os = "android"))]
+    {
+        let result = set_entry_value(entry()?, api_key.clone(), clear_api_key);
+        if result.is_ok() {
+            sync_key_to_cli_file(&api_key);
+        }
+        result
     }
-    result
 }
 
 #[tauri::command]
 pub fn clear_api_key() -> Result<(), String> {
-    clear_cli_key_file();
-    clear_entry_value(entry()?)
+    #[cfg(target_os = "android")]
+    { return android_secure_clear(KEYCHAIN_ACCOUNT); }
+    #[cfg(not(target_os = "android"))]
+    {
+        clear_cli_key_file();
+        clear_entry_value(entry()?)
+    }
 }
 
 #[tauri::command]
 pub fn get_gateway_session_token() -> Result<Option<String>, String> {
-    get_entry_value(gateway_session_entry()?)
+    #[cfg(target_os = "android")]
+    { return android_secure_get(GATEWAY_SESSION_ACCOUNT); }
+    #[cfg(not(target_os = "android"))]
+    { get_entry_value(gateway_session_entry()?) }
 }
 
 #[tauri::command]
 pub fn set_gateway_session_token(token: String) -> Result<(), String> {
-    set_entry_value(gateway_session_entry()?, token, clear_gateway_session_token)
+    #[cfg(target_os = "android")]
+    { return if token.trim().is_empty() { android_secure_clear(GATEWAY_SESSION_ACCOUNT) } else { android_secure_set(GATEWAY_SESSION_ACCOUNT, token.trim()) }; }
+    #[cfg(not(target_os = "android"))]
+    { set_entry_value(gateway_session_entry()?, token, clear_gateway_session_token) }
 }
 
 #[tauri::command]
 pub fn clear_gateway_session_token() -> Result<(), String> {
-    clear_entry_value(gateway_session_entry()?)
+    #[cfg(target_os = "android")]
+    { return android_secure_clear(GATEWAY_SESSION_ACCOUNT); }
+    #[cfg(not(target_os = "android"))]
+    { clear_entry_value(gateway_session_entry()?) }
 }
 
 #[tauri::command]
