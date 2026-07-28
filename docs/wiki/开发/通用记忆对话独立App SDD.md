@@ -743,7 +743,7 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 | 编号 | 阶段目标 | 实施边界 | 验收证据 | 状态 |
 | --- | --- | --- | --- | --- |
 | 4D-1 | Android 工具链与 Tauri 工程初始化 | 固定 JDK、Android SDK/NDK、Rust Android targets 和 Tauri v2 Android 工程；只补 Android 配置、图标和签名占位，不改共享业务。 | `java`、`adb`、`sdkmanager`、Rust targets 版本记录；`pnpm tauri android init` 可重复执行；`cargo check` 通过。 | 电脑端完成，待真机阶段 |
-| 4D-2 | Debug 构建与设备启动 | 生成 debug APK，安装到至少一台 Android 设备或模拟器；处理状态栏、导航栏、返回键和首次启动权限提示。 | 构建产物 SHA-256、安装结果、启动截图/日志；应用冷启动进入首页并稳定停留 60 秒。 | APK 已构建，待真机 |
+| 4D-2 | Debug 构建与设备启动 | 生成 debug APK，安装到至少一台 Android 设备或模拟器；处理状态栏、导航栏、返回键和首次启动权限提示。 | 构建产物 SHA-256、安装结果、启动截图/日志；应用冷启动进入首页并稳定停留 60 秒。 | 已完成（vivo V2443BA 真机） |
 | 4D-3 | 登录与会话恢复 | 复用现有登录网关；凭据只进 Android Keystore/安全存储；不新增 Android 专属账号体系。 | 真账号登录、退出、杀进程重开、会话失效回登录页各通过；网络请求和错误提示有日志证据。 | 未开始 |
 | 4D-4 | 云项目与文字同步 | 复用 `syncClient` 和 `ProjectFileService`；支持云项目列表、下载、上传、Raw/Wiki/安全文本增量同步；媒体仍按本地合同处理。 | Android -> Web/Mac 与 Web/Mac -> Android 双向文字回流；断网不丢本地内容，重连不重复 turn；不同账号不可越权。 | 未开始 |
 | 4D-5 | 移动核心工作流 | 适配聊天、Raw、Wiki、Skill、文件树、设置和对话删除；使用抽屉/全屏导航，不依赖右键、悬停或桌面拖放。 | 新建/继续对话、Raw 读写、Wiki 写入、Skill 调用、移动端永久删除均在真机完成并可重启恢复。 | 未开始 |
@@ -1221,6 +1221,14 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - 安装结果：执行 `adb install -r .../app-universal-debug.apk`，因 `adb devices` 为空返回 `adb: no devices/emulators found`，未安装。
 - 启动结果：未启动；没有截图或 logcat 证据。4D-2 不能标记完成，APK 构建成功不等于 App 完成。
 - 后续设备审计（2026-07-28）：`adb devices -l` 仍为空；`emulator` 命令不存在；`emulator -list-avds` 无法执行；SDK 未安装 system image。因此当前既无真实 Android 手机，也无可用模拟器，4D-2 的安装/启动门禁属于外部阻断。
+
+### 14.29 Android 4D-2 真机安装与稳定启动结果（2026-07-28）
+
+- 设备：vivo `V2443BA`，Android `15`，API `35`，ADB 序列号 `10AF8X1HSZ00164`；USB 调试及 USB 安装授权已由用户在设备端确认。
+- 安装结果：Debug APK 已通过系统安装器安装，包名 `com.jiucaihezi.desktop`，`versionName=2.1.0`、`versionCode=2001000`。
+- 启动结果：执行 `adb shell am force-stop com.jiucaihezi.desktop` 后冷启动 `.MainActivity` 成功；前台首页显示“还没有打开项目 / 打开项目中心”，截图保存为 `/tmp/jiucaihezi-android-start.png`。
+- 稳定性结果：前台运行 60 秒后进程 PID `25064` 仍存活，`topResumedActivity` 仍为 `.MainActivity`；期间 `adb logcat` 未发现 `FATAL EXCEPTION`、`AndroidRuntime`、`SIGSEGV` 或崩溃记录。
+- 结论：4D-2 真机 Debug 安装、冷启动和 60 秒稳定运行门禁已通过。APK 构建或安装成功不代表 Android App 整体完成；后续仍须按顺序执行 4D-3 至 4D-9。
 
 ## 15. 验收标准
 
