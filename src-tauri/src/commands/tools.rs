@@ -56,12 +56,7 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
 
     // Unix 平台补充查找（Windows 上 PATH 已足够）
     #[cfg(not(windows))]
-    for dir in [
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
-    ] {
+    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
         let candidate = PathBuf::from(dir).join(program);
         if candidate.exists() {
             return candidate;
@@ -101,11 +96,7 @@ pub(crate) fn opencode_resource_names() -> Vec<String> {
 }
 
 fn existing_file(path: PathBuf) -> Option<PathBuf> {
-    if path.is_file() {
-        Some(path)
-    } else {
-        None
-    }
+    if path.is_file() { Some(path) } else { None }
 }
 
 pub(crate) fn resolve_opencode_binary_from_inputs(
@@ -152,12 +143,7 @@ pub(crate) fn resolve_opencode_binary_from_inputs(
         }
     }
 
-    for dir in [
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
-    ] {
+    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
         if let Some(found) = existing_file(PathBuf::from(dir).join("opencode")) {
             return Ok(found);
         }
@@ -179,7 +165,9 @@ pub(crate) fn resolve_opencode_binary_from_inputs(
 }
 
 fn app_executable_dir() -> Option<PathBuf> {
-    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.to_path_buf()))
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
 }
 
 fn ensure_binary_executable(path: &Path) {
@@ -234,7 +222,10 @@ pub(crate) fn resolve_opencode_binary(app: Option<&tauri::AppHandle>) -> Result<
     Ok(path)
 }
 
-pub(crate) fn resolve_app_media_binary(_app: &tauri::AppHandle, program: &str) -> Result<PathBuf, String> {
+pub(crate) fn resolve_app_media_binary(
+    _app: &tauri::AppHandle,
+    program: &str,
+) -> Result<PathBuf, String> {
     // ponytail: 只从 PATH / ~/.jiucaihezi/tools/ 查找，不再内置媒体二进制。
     let local = resolve_local_binary(program);
     if local.exists() {
@@ -252,12 +243,14 @@ pub(crate) fn resolve_app_media_binary(_app: &tauri::AppHandle, program: &str) -
 }
 
 pub(crate) fn local_tools_python_path() -> Option<PathBuf> {
-    env::var_os("HOME").map(|home| {
-        PathBuf::from(home)
-            .join(".jiucaihezi")
-            .join("tools")
-            .join("python")
-    }).filter(|path| path.exists())
+    env::var_os("HOME")
+        .map(|home| {
+            PathBuf::from(home)
+                .join(".jiucaihezi")
+                .join("tools")
+                .join("python")
+        })
+        .filter(|path| path.exists())
 }
 
 fn python_path_from_token(token: &str) -> Option<PathBuf> {
@@ -266,11 +259,7 @@ fn python_path_from_token(token: &str) -> Option<PathBuf> {
         return None;
     }
     let python = PathBuf::from(trimmed);
-    if python.exists() {
-        Some(python)
-    } else {
-        None
-    }
+    if python.exists() { Some(python) } else { None }
 }
 
 fn python_from_wrapper_script(path: &Path) -> Option<PathBuf> {

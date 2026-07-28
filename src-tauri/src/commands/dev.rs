@@ -1,5 +1,8 @@
-use base64::engine::general_purpose;
+use crate::commands::opencode::open_path_with_system;
+use crate::*;
 use base64::Engine as _;
+use base64::engine::general_purpose;
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
@@ -7,12 +10,9 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::sync::{Mutex, OnceLock};
 use std::time::UNIX_EPOCH;
-use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
-use tokio::time::{timeout, Duration};
-use crate::commands::opencode::open_path_with_system;
-use crate::*;
+use tokio::time::{Duration, timeout};
 
 static PROJECT_WATCHERS: OnceLock<Mutex<HashMap<String, RecommendedWatcher>>> = OnceLock::new();
 
@@ -28,11 +28,9 @@ pub fn canonical_root(root: &str) -> Result<PathBuf, String> {
     // Windows: Tauri dialog 返回的路径可能因路径格式问题导致 canonicalize 失败，
     // 先尝试确保目录存在再 canonicalize
     if !path.exists() {
-        std::fs::create_dir_all(&path)
-            .map_err(|e| format!("项目目录不可访问: {}", e))?;
+        std::fs::create_dir_all(&path).map_err(|e| format!("项目目录不可访问: {}", e))?;
     }
-    let canonical = std::fs::canonicalize(&path)
-        .map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let canonical = std::fs::canonicalize(&path).map_err(|e| format!("项目目录不可访问: {}", e))?;
     if !canonical.is_dir() {
         return Err("项目根路径必须是文件夹".into());
     }
@@ -64,8 +62,8 @@ pub fn clean_relative_path(relative_path: &str) -> Result<PathBuf, String> {
 pub fn resolve_existing_path(root: &Path, relative_path: &str) -> Result<PathBuf, String> {
     let clean = clean_relative_path(relative_path)?;
     let joined = root.join(clean);
-    let canonical = std::fs::canonicalize(&joined)
-        .map_err(|e| format!("项目内路径不可访问: {}", e))?;
+    let canonical =
+        std::fs::canonicalize(&joined).map_err(|e| format!("项目内路径不可访问: {}", e))?;
     if !canonical.starts_with(root) {
         return Err("路径不能跳出项目目录".into());
     }
@@ -107,7 +105,8 @@ fn canonical_external_regular_file(path: &str) -> Result<PathBuf, String> {
     if !raw.is_absolute() {
         return Err("外部路径必须是绝对路径".into());
     }
-    let metadata = std::fs::symlink_metadata(&raw).map_err(|e| format!("外部路径不可访问: {}", e))?;
+    let metadata =
+        std::fs::symlink_metadata(&raw).map_err(|e| format!("外部路径不可访问: {}", e))?;
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err("来源必须是普通文件".into());
     }
@@ -120,7 +119,8 @@ pub fn resolve_external_write_path(path: &str) -> Result<PathBuf, String> {
         return Err("外部路径必须是绝对路径".into());
     }
     if raw.exists() {
-        let canonical = std::fs::canonicalize(&raw).map_err(|e| format!("外部路径不可访问: {}", e))?;
+        let canonical =
+            std::fs::canonicalize(&raw).map_err(|e| format!("外部路径不可访问: {}", e))?;
         if canonical.is_dir() {
             return Err("写入路径必须是文件".into());
         }
@@ -132,8 +132,8 @@ pub fn resolve_external_write_path(path: &str) -> Result<PathBuf, String> {
         .ancestors()
         .find(|candidate| candidate.exists())
         .ok_or_else(|| "找不到可用父目录".to_string())?;
-    let canonical_parent = std::fs::canonicalize(existing_parent)
-        .map_err(|e| format!("外部父目录不可访问: {}", e))?;
+    let canonical_parent =
+        std::fs::canonicalize(existing_parent).map_err(|e| format!("外部父目录不可访问: {}", e))?;
     let suffix = parent.strip_prefix(existing_parent).unwrap_or(parent);
     Ok(canonical_parent.join(suffix).join(file_name))
 }
@@ -157,12 +157,19 @@ fn copy_file_new(source: &Path, target: &Path) -> Result<(), String> {
     if !metadata.is_file() {
         return Err(format!("来源必须是文件: {}", display_external(source)));
     }
-    let mut source_file = std::fs::File::open(source).map_err(|e| format!("读取来源失败: {}", e))?;
+    let mut source_file =
+        std::fs::File::open(source).map_err(|e| format!("读取来源失败: {}", e))?;
     let mut target_file = std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
         .open(target)
-        .map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { "文件已存在".to_string() } else { format!("创建文件失败: {}", e) })?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "文件已存在".to_string()
+            } else {
+                format!("创建文件失败: {}", e)
+            }
+        })?;
     let result = std::io::copy(&mut source_file, &mut target_file)
         .map(|_| ())
         .map_err(|e| format!("复制文件失败: {}", e));
@@ -184,14 +191,19 @@ fn collect_directory_entries(source: &Path) -> Result<Vec<(PathBuf, PathBuf, boo
     let mut entries = vec![(source.to_path_buf(), PathBuf::new(), true)];
     let mut stack = vec![source.to_path_buf()];
     while let Some(current) = stack.pop() {
-        for child in std::fs::read_dir(&current).map_err(|e| format!("读取目录失败: {}", e))? {
+        for child in std::fs::read_dir(&current).map_err(|e| format!("读取目录失败: {}", e))?
+        {
             let child = child.map_err(|e| format!("读取目录失败: {}", e))?;
             let path = child.path();
-            let metadata = std::fs::symlink_metadata(&path).map_err(|e| format!("读取来源失败: {}", e))?;
+            let metadata =
+                std::fs::symlink_metadata(&path).map_err(|e| format!("读取来源失败: {}", e))?;
             if metadata.file_type().is_symlink() {
                 return Err(format!("不支持符号链接: {}", display_external(&path)));
             }
-            let relative = path.strip_prefix(source).map_err(|_| "来源路径无效".to_string())?.to_path_buf();
+            let relative = path
+                .strip_prefix(source)
+                .map_err(|_| "来源路径无效".to_string())?
+                .to_path_buf();
             if metadata.is_dir() {
                 entries.push((path.clone(), relative, true));
                 stack.push(path);
@@ -206,7 +218,8 @@ fn collect_directory_entries(source: &Path) -> Result<Vec<(PathBuf, PathBuf, boo
 }
 
 fn resolve_import_target_directory(root: &Path, target_relative: &Path) -> Result<PathBuf, String> {
-    let canonical_root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
+    let canonical_root =
+        std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
     let mut target = root.to_path_buf();
     for component in target_relative.components() {
         target.push(component);
@@ -221,7 +234,8 @@ fn resolve_import_target_directory(root: &Path, target_relative: &Path) -> Resul
             }
             Err(error) => return Err(format!("读取目标目录失败: {}", error)),
         }
-        let canonical = std::fs::canonicalize(&target).map_err(|e| format!("目标目录不可访问: {}", e))?;
+        let canonical =
+            std::fs::canonicalize(&target).map_err(|e| format!("目标目录不可访问: {}", e))?;
         if !canonical.starts_with(&canonical_root) {
             return Err("路径不能跳出项目目录".into());
         }
@@ -229,19 +243,32 @@ fn resolve_import_target_directory(root: &Path, target_relative: &Path) -> Resul
     Ok(target)
 }
 
-pub fn import_external_files(root: &Path, sources: &[PathBuf], target_relative: &Path) -> Result<Vec<String>, String> {
+pub fn import_external_files(
+    root: &Path,
+    sources: &[PathBuf],
+    target_relative: &Path,
+) -> Result<Vec<String>, String> {
     let target_directory = resolve_import_target_directory(root, target_relative)?;
     let mut targets = HashSet::new();
     let mut planned = Vec::new();
     for source in sources {
-        let metadata = std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
+        let metadata =
+            std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err(format!("来源必须是普通文件: {}", display_external(source)));
         }
-        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let name = source
+            .file_name()
+            .ok_or_else(|| "来源文件名无效".to_string())?;
         let target = target_directory.join(name);
-        let relative = target.strip_prefix(root).map_err(|_| "目标路径无效".to_string())?.to_path_buf();
-        if target.exists() || std::fs::symlink_metadata(&target).is_ok() || !targets.insert(target.clone()) {
+        let relative = target
+            .strip_prefix(root)
+            .map_err(|_| "目标路径无效".to_string())?
+            .to_path_buf();
+        if target.exists()
+            || std::fs::symlink_metadata(&target).is_ok()
+            || !targets.insert(target.clone())
+        {
             return Err(format!("文件已存在: {}", display_relative(root, &target)));
         }
         planned.push((source, target, relative));
@@ -257,8 +284,14 @@ pub fn import_external_files(root: &Path, sources: &[PathBuf], target_relative: 
     Ok(imported)
 }
 
-pub fn import_external_folder(root: &Path, source: &Path, target_relative: &Path) -> Result<String, String> {
-    let source_name = source.file_name().ok_or_else(|| "来源文件夹名无效".to_string())?;
+pub fn import_external_folder(
+    root: &Path,
+    source: &Path,
+    target_relative: &Path,
+) -> Result<String, String> {
+    let source_name = source
+        .file_name()
+        .ok_or_else(|| "来源文件夹名无效".to_string())?;
     let target = root.join(target_relative).join(source_name);
     if target.exists() || std::fs::symlink_metadata(&target).is_ok() {
         return Err(format!("文件夹已存在: {}", display_relative(root, &target)));
@@ -282,7 +315,11 @@ pub fn import_external_folder(root: &Path, source: &Path, target_relative: &Path
     result
 }
 
-pub fn batch_copy_project_paths(root: &Path, sources: &[String], target_relative: &str) -> Result<Vec<String>, String> {
+pub fn batch_copy_project_paths(
+    root: &Path,
+    sources: &[String],
+    target_relative: &str,
+) -> Result<Vec<String>, String> {
     let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
     let target = resolve_existing_path(&root, target_relative)?;
     if !target.is_dir() {
@@ -292,13 +329,18 @@ pub fn batch_copy_project_paths(root: &Path, sources: &[String], target_relative
     let mut targets = HashSet::new();
     for relative in sources {
         let source = resolve_existing_path(&root, relative)?;
-        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let name = source
+            .file_name()
+            .ok_or_else(|| "来源文件名无效".to_string())?;
         let destination = target.join(name);
         if source.is_dir() && target.starts_with(&source) {
             return Err("不能复制到资源自身或其子目录".into());
         }
         if destination.exists() || !targets.insert(destination.clone()) {
-            return Err(format!("目标已存在: {}", display_relative(&root, &destination)));
+            return Err(format!(
+                "目标已存在: {}",
+                display_relative(&root, &destination)
+            ));
         }
         planned.push((source, destination));
     }
@@ -313,7 +355,8 @@ pub fn batch_copy_project_paths(root: &Path, sources: &[String], target_relative
                 for (entry, relative, is_dir) in entries {
                     let target = destination.join(relative);
                     if is_dir {
-                        std::fs::create_dir_all(target).map_err(|e| format!("创建目录失败: {}", e))?;
+                        std::fs::create_dir_all(target)
+                            .map_err(|e| format!("创建目录失败: {}", e))?;
                     } else {
                         copy_file_new(&entry, &target)?;
                     }
@@ -353,11 +396,21 @@ fn copy_project_path(source: &Path, destination: &Path) -> Result<(), String> {
     result
 }
 
-fn next_available_destination(parent: &Path, name: &std::ffi::OsStr, reserved: &HashSet<PathBuf>) -> PathBuf {
+fn next_available_destination(
+    parent: &Path,
+    name: &std::ffi::OsStr,
+    reserved: &HashSet<PathBuf>,
+) -> PathBuf {
     let name = name.to_string_lossy();
     let path = Path::new(name.as_ref());
-    let stem = path.file_stem().unwrap_or_else(|| std::ffi::OsStr::new(name.as_ref())).to_string_lossy();
-    let extension = path.extension().map(|extension| format!(".{}", extension.to_string_lossy())).unwrap_or_default();
+    let stem = path
+        .file_stem()
+        .unwrap_or_else(|| std::ffi::OsStr::new(name.as_ref()))
+        .to_string_lossy();
+    let extension = path
+        .extension()
+        .map(|extension| format!(".{}", extension.to_string_lossy()))
+        .unwrap_or_default();
     for index in 1.. {
         let candidate = parent.join(format!("{} ({}){}", stem, index, extension));
         if !candidate.exists() && !reserved.contains(&candidate) {
@@ -375,28 +428,51 @@ fn batch_copy_project_paths_with_policy(
 ) -> Result<(Vec<String>, Vec<DevBatchProjectFileEntry>), String> {
     let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
     let target = resolve_existing_path(&root, target_relative)?;
-    if !target.is_dir() { return Err("目标必须是文件夹".into()); }
+    if !target.is_dir() {
+        return Err("目标必须是文件夹".into());
+    }
     let mut planned = Vec::new();
     let mut reserved = HashSet::new();
     let mut deleted = Vec::new();
     for relative in sources {
         let source = resolve_existing_path(&root, relative)?;
-        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
-        if source.is_dir() && target.starts_with(&source) { return Err("不能复制到资源自身或其子目录".into()); }
+        let name = source
+            .file_name()
+            .ok_or_else(|| "来源文件名无效".to_string())?;
+        if source.is_dir() && target.starts_with(&source) {
+            return Err("不能复制到资源自身或其子目录".into());
+        }
         let mut destination = target.join(name);
         if destination.exists() || reserved.contains(&destination) {
             match policy {
-                Some("keep-both") => destination = next_available_destination(&target, name, &reserved),
+                Some("keep-both") => {
+                    destination = next_available_destination(&target, name, &reserved)
+                }
                 Some("overwrite") if destination.exists() => {
                     let target_path = display_relative(&root, &destination);
                     deleted.extend(batch_project_entries(&root, &[target_path])?);
-                    if destination.is_dir() { std::fs::remove_dir_all(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
-                    else { std::fs::remove_file(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
+                    if destination.is_dir() {
+                        std::fs::remove_dir_all(&destination)
+                            .map_err(|e| format!("删除覆盖目标失败: {}", e))?;
+                    } else {
+                        std::fs::remove_file(&destination)
+                            .map_err(|e| format!("删除覆盖目标失败: {}", e))?;
+                    }
                 }
-                _ => return Err(format!("目标已存在: {}", display_relative(&root, &destination))),
+                _ => {
+                    return Err(format!(
+                        "目标已存在: {}",
+                        display_relative(&root, &destination)
+                    ));
+                }
             }
         }
-        if !reserved.insert(destination.clone()) { return Err(format!("目标已存在: {}", display_relative(&root, &destination))); }
+        if !reserved.insert(destination.clone()) {
+            return Err(format!(
+                "目标已存在: {}",
+                display_relative(&root, &destination)
+            ));
+        }
         planned.push((source, destination));
     }
     let mut copied = Vec::with_capacity(planned.len());
@@ -407,7 +483,11 @@ fn batch_copy_project_paths_with_policy(
     Ok((copied, deleted))
 }
 
-pub fn batch_move_project_paths(root: &Path, sources: &[String], target_relative: &str) -> Result<Vec<(String, String)>, String> {
+pub fn batch_move_project_paths(
+    root: &Path,
+    sources: &[String],
+    target_relative: &str,
+) -> Result<Vec<(String, String)>, String> {
     let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
     let target = resolve_existing_path(&root, target_relative)?;
     if !target.is_dir() {
@@ -424,17 +504,25 @@ pub fn batch_move_project_paths(root: &Path, sources: &[String], target_relative
         if source.is_dir() && target.starts_with(&source) {
             return Err("不能移动到资源自身或其子目录".into());
         }
-        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let name = source
+            .file_name()
+            .ok_or_else(|| "来源文件名无效".to_string())?;
         let destination = target.join(name);
         if destination.exists() || !targets.insert(destination.clone()) {
-            return Err(format!("目标已存在: {}", display_relative(&root, &destination)));
+            return Err(format!(
+                "目标已存在: {}",
+                display_relative(&root, &destination)
+            ));
         }
         planned.push((clean, source, destination));
     }
     let mut moved = Vec::with_capacity(planned.len());
     for (old_relative, source, destination) in planned {
         std::fs::rename(&source, &destination).map_err(|e| format!("移动失败: {}", e))?;
-        moved.push((display_relative(&root, &root.join(old_relative)), display_relative(&root, &destination)));
+        moved.push((
+            display_relative(&root, &root.join(old_relative)),
+            display_relative(&root, &destination),
+        ));
     }
     Ok(moved)
 }
@@ -447,42 +535,76 @@ fn batch_move_project_paths_with_policy(
 ) -> Result<(Vec<(String, String)>, Vec<DevBatchProjectFileEntry>), String> {
     let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
     let target = resolve_existing_path(&root, target_relative)?;
-    if !target.is_dir() { return Err("目标必须是文件夹".into()); }
+    if !target.is_dir() {
+        return Err("目标必须是文件夹".into());
+    }
     let mut planned = Vec::new();
     let mut reserved = HashSet::new();
     let mut deleted = Vec::new();
     for relative in sources {
         let clean = clean_relative_path(relative)?;
-        if clean.as_os_str().is_empty() { return Err("不能移动项目根目录".into()); }
+        if clean.as_os_str().is_empty() {
+            return Err("不能移动项目根目录".into());
+        }
         let source = resolve_existing_path(&root, relative)?;
-        if source.is_dir() && target.starts_with(&source) { return Err("不能移动到资源自身或其子目录".into()); }
-        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        if source.is_dir() && target.starts_with(&source) {
+            return Err("不能移动到资源自身或其子目录".into());
+        }
+        let name = source
+            .file_name()
+            .ok_or_else(|| "来源文件名无效".to_string())?;
         let mut destination = target.join(name);
-        if destination == source { return Err("目标已是来源目录".into()); }
+        if destination == source {
+            return Err("目标已是来源目录".into());
+        }
         if destination.exists() || reserved.contains(&destination) {
             match policy {
-                Some("keep-both") => destination = next_available_destination(&target, name, &reserved),
+                Some("keep-both") => {
+                    destination = next_available_destination(&target, name, &reserved)
+                }
                 Some("overwrite") if destination.exists() => {
                     let target_path = display_relative(&root, &destination);
                     deleted.extend(batch_project_entries(&root, &[target_path])?);
-                    if destination.is_dir() { std::fs::remove_dir_all(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
-                    else { std::fs::remove_file(&destination).map_err(|e| format!("删除覆盖目标失败: {}", e))?; }
+                    if destination.is_dir() {
+                        std::fs::remove_dir_all(&destination)
+                            .map_err(|e| format!("删除覆盖目标失败: {}", e))?;
+                    } else {
+                        std::fs::remove_file(&destination)
+                            .map_err(|e| format!("删除覆盖目标失败: {}", e))?;
+                    }
                 }
-                _ => return Err(format!("目标已存在: {}", display_relative(&root, &destination))),
+                _ => {
+                    return Err(format!(
+                        "目标已存在: {}",
+                        display_relative(&root, &destination)
+                    ));
+                }
             }
         }
-        if !reserved.insert(destination.clone()) { return Err(format!("目标已存在: {}", display_relative(&root, &destination))); }
+        if !reserved.insert(destination.clone()) {
+            return Err(format!(
+                "目标已存在: {}",
+                display_relative(&root, &destination)
+            ));
+        }
         planned.push((clean, source, destination));
     }
     let mut moved = Vec::with_capacity(planned.len());
     for (old_relative, source, destination) in planned {
         std::fs::rename(&source, &destination).map_err(|e| format!("移动失败: {}", e))?;
-        moved.push((display_relative(&root, &root.join(old_relative)), display_relative(&root, &destination)));
+        moved.push((
+            display_relative(&root, &root.join(old_relative)),
+            display_relative(&root, &destination),
+        ));
     }
     Ok((moved, deleted))
 }
 
-pub fn batch_delete_project_paths<F>(root: &Path, sources: &[String], mut mover: F) -> Result<Vec<String>, String>
+pub fn batch_delete_project_paths<F>(
+    root: &Path,
+    sources: &[String],
+    mut mover: F,
+) -> Result<Vec<String>, String>
 where
     F: FnMut(&Path) -> Result<(), String>,
 {
@@ -508,14 +630,19 @@ where
     Ok(deleted)
 }
 
-pub fn export_project_to_directory(root: &Path, destination_directory: &Path) -> Result<String, String> {
+pub fn export_project_to_directory(
+    root: &Path,
+    destination_directory: &Path,
+) -> Result<String, String> {
     if !destination_directory.is_dir() {
         return Err("导出位置必须是文件夹".into());
     }
     if destination_directory.starts_with(root) {
         return Err("不能导出到项目目录或其子目录".into());
     }
-    let project_name = root.file_name().ok_or_else(|| "项目文件夹名无效".to_string())?;
+    let project_name = root
+        .file_name()
+        .ok_or_else(|| "项目文件夹名无效".to_string())?;
     let target = destination_directory.join(project_name);
     if target.exists() || std::fs::symlink_metadata(&target).is_ok() {
         return Err(format!("文件夹已存在: {}", display_external(&target)));
@@ -539,21 +666,37 @@ pub fn export_project_to_directory(root: &Path, destination_directory: &Path) ->
     result
 }
 
-pub fn export_project_paths_to_directory(root: &Path, paths: &[String], destination: &Path, policy: Option<&str>) -> Result<Vec<String>, String> {
+pub fn export_project_paths_to_directory(
+    root: &Path,
+    paths: &[String],
+    destination: &Path,
+    policy: Option<&str>,
+) -> Result<Vec<String>, String> {
     let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
-    if !destination.is_dir() || destination.starts_with(&root) { return Err("导出位置无效".into()); }
+    if !destination.is_dir() || destination.starts_with(&root) {
+        return Err("导出位置无效".into());
+    }
     let mut reserved = HashSet::new();
     let mut exported = Vec::new();
     for relative in paths {
         let source = resolve_existing_path(&root, relative)?;
-        let name = source.file_name().ok_or_else(|| "来源文件名无效".to_string())?;
+        let name = source
+            .file_name()
+            .ok_or_else(|| "来源文件名无效".to_string())?;
         let mut target = destination.join(name);
         if target.exists() || reserved.contains(&target) {
             match policy {
-                Some("keep-both") => target = next_available_destination(destination, name, &reserved),
+                Some("keep-both") => {
+                    target = next_available_destination(destination, name, &reserved)
+                }
                 Some("overwrite") if target.exists() => {
-                    if target.is_dir() { std::fs::remove_dir_all(&target).map_err(|e| format!("覆盖导出目标失败: {}", e))?; }
-                    else { std::fs::remove_file(&target).map_err(|e| format!("覆盖导出目标失败: {}", e))?; }
+                    if target.is_dir() {
+                        std::fs::remove_dir_all(&target)
+                            .map_err(|e| format!("覆盖导出目标失败: {}", e))?;
+                    } else {
+                        std::fs::remove_file(&target)
+                            .map_err(|e| format!("覆盖导出目标失败: {}", e))?;
+                    }
                 }
                 _ => return Err(format!("导出目标已存在: {}", display_external(&target))),
             }
@@ -567,23 +710,45 @@ pub fn export_project_paths_to_directory(root: &Path, paths: &[String], destinat
 
 fn resource_revision(path: &Path) -> Result<DevResourceRevision, String> {
     let metadata = std::fs::metadata(path).map_err(|e| format!("读取文件信息失败: {}", e))?;
-    let updated_at = metadata.modified().ok().and_then(|value| value.duration_since(UNIX_EPOCH).ok()).map(|value| value.as_nanos());
+    let updated_at = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_nanos());
     let size = metadata.len() as usize;
     Ok(DevResourceRevision {
-        value: format!("{}:{}", updated_at.map(|value| value.to_string()).unwrap_or_default(), size),
+        value: format!(
+            "{}:{}",
+            updated_at
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            size
+        ),
         size,
         updated_at,
     })
 }
 
 fn modified_millis(metadata: &std::fs::Metadata) -> Option<u64> {
-    metadata.modified().ok().and_then(|value| value.duration_since(UNIX_EPOCH).ok()).map(|value| value.as_millis() as u64)
+    metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+        .map(|value| value.as_millis() as u64)
 }
 
 pub fn should_skip_dir(name: &str) -> bool {
     matches!(
         name,
-        "node_modules" | ".git" | "target" | "dist" | "dist-desktop" | ".next" | ".nuxt" | "build" | "coverage"
+        "node_modules"
+            | ".git"
+            | "target"
+            | "dist"
+            | "dist-desktop"
+            | ".next"
+            | ".nuxt"
+            | "build"
+            | "coverage"
     )
 }
 
@@ -729,7 +894,9 @@ pub fn dev_list_files(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, Str
                 break;
             }
             let path = child.path();
-            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let metadata = child
+                .metadata()
+                .map_err(|e| format!("读取文件信息失败: {}", e))?;
             let file_name = child.file_name().to_string_lossy().to_string();
             let is_dir = metadata.is_dir();
             entries.push(DevFileEntry {
@@ -762,43 +929,65 @@ pub fn dev_list_directory(input: DevListFilesInput) -> Result<Vec<DevFileEntry>,
         .collect::<Vec<_>>();
     children.sort_by_key(|entry| entry.file_name());
 
-    children.into_iter().map(|child| {
-        let path = child.path();
-        let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
-        let is_dir = metadata.is_dir();
-        Ok(DevFileEntry {
-            path: display_relative(&root, &path),
-            is_dir,
-            size: if is_dir { None } else { Some(metadata.len()) },
-            updated_at: modified_millis(&metadata),
+    children
+        .into_iter()
+        .map(|child| {
+            let path = child.path();
+            let metadata = child
+                .metadata()
+                .map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let is_dir = metadata.is_dir();
+            Ok(DevFileEntry {
+                path: display_relative(&root, &path),
+                is_dir,
+                size: if is_dir { None } else { Some(metadata.len()) },
+                updated_at: modified_millis(&metadata),
+            })
         })
-    }).collect()
+        .collect()
 }
 
 #[tauri::command]
-pub fn dev_search_project_paths(input: DevSearchProjectPathsInput) -> Result<Vec<DevFileEntry>, String> {
+pub fn dev_search_project_paths(
+    input: DevSearchProjectPathsInput,
+) -> Result<Vec<DevFileEntry>, String> {
     let root = canonical_root(&input.root)?;
     let needle = input.query.to_lowercase();
     let limit = input.limit.clamp(1, 2_000);
     let mut results = Vec::new();
     let mut stack = vec![root.clone()];
     while let Some(directory) = stack.pop() {
-        let mut children = std::fs::read_dir(&directory).map_err(|e| format!("读取目录失败: {}", e))?.filter_map(Result::ok).collect::<Vec<_>>();
+        let mut children = std::fs::read_dir(&directory)
+            .map_err(|e| format!("读取目录失败: {}", e))?
+            .filter_map(Result::ok)
+            .collect::<Vec<_>>();
         children.sort_by_key(|entry| entry.file_name());
         for child in children {
             let path = child.path();
-            let link_metadata = std::fs::symlink_metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let link_metadata =
+                std::fs::symlink_metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
             if link_metadata.file_type().is_symlink() {
                 continue;
             }
-            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let metadata = child
+                .metadata()
+                .map_err(|e| format!("读取文件信息失败: {}", e))?;
             let relative = display_relative(&root, &path);
             let is_dir = metadata.is_dir();
             if relative.to_lowercase().contains(&needle) {
-                results.push(DevFileEntry { path: relative.clone(), is_dir, size: if is_dir { None } else { Some(metadata.len()) }, updated_at: modified_millis(&metadata) });
-                if results.len() >= limit { return Ok(results); }
+                results.push(DevFileEntry {
+                    path: relative.clone(),
+                    is_dir,
+                    size: if is_dir { None } else { Some(metadata.len()) },
+                    updated_at: modified_millis(&metadata),
+                });
+                if results.len() >= limit {
+                    return Ok(results);
+                }
             }
-            if is_dir { stack.push(path); }
+            if is_dir {
+                stack.push(path);
+            }
         }
     }
     Ok(results)
@@ -812,17 +1001,32 @@ pub fn dev_watch_project(app: AppHandle, root: String) -> Result<(), String> {
     let emit_owner = owner.clone();
     let emit_app = app.clone();
     let mut watcher = notify::recommended_watcher(move |result: notify::Result<notify::Event>| {
-        let Ok(event) = result else { return; };
+        let Ok(event) = result else {
+            return;
+        };
         for path in event.paths {
             let relative = display_relative(&emit_root, &path);
-            if relative.is_empty() || relative == "." || relative.starts_with("../") { continue; }
-            let _ = emit_app.emit("project-fs-hint", DevProjectFsHint { owner: emit_owner.clone(), path: relative });
+            if relative.is_empty() || relative == "." || relative.starts_with("../") {
+                continue;
+            }
+            let _ = emit_app.emit(
+                "project-fs-hint",
+                DevProjectFsHint {
+                    owner: emit_owner.clone(),
+                    path: relative,
+                },
+            );
         }
-    }).map_err(|e| format!("启动项目文件监听失败: {}", e))?;
-    watcher.watch(&root_path, RecursiveMode::Recursive).map_err(|e| format!("监听项目目录失败: {}", e))?;
+    })
+    .map_err(|e| format!("启动项目文件监听失败: {}", e))?;
+    watcher
+        .watch(&root_path, RecursiveMode::Recursive)
+        .map_err(|e| format!("监听项目目录失败: {}", e))?;
 
     let watchers = PROJECT_WATCHERS.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut watchers = watchers.lock().map_err(|_| "项目文件监听状态不可用".to_string())?;
+    let mut watchers = watchers
+        .lock()
+        .map_err(|_| "项目文件监听状态不可用".to_string())?;
     watchers.clear();
     watchers.insert(owner, watcher);
     Ok(())
@@ -832,7 +1036,10 @@ pub fn dev_watch_project(app: AppHandle, root: String) -> Result<(), String> {
 pub fn dev_stop_project_watch(root: String) -> Result<(), String> {
     let root_path = canonical_root(&root)?;
     if let Some(watchers) = PROJECT_WATCHERS.get() {
-        watchers.lock().map_err(|_| "项目文件监听状态不可用".to_string())?.remove(&display_external(&root_path));
+        watchers
+            .lock()
+            .map_err(|_| "项目文件监听状态不可用".to_string())?
+            .remove(&display_external(&root_path));
     }
     Ok(())
 }
@@ -840,7 +1047,10 @@ pub fn dev_stop_project_watch(root: String) -> Result<(), String> {
 #[tauri::command]
 pub fn dev_list_file_descendants(input: DevListFilesInput) -> Result<Vec<DevFileEntry>, String> {
     let root = canonical_root(&input.root)?;
-    let relative_path = input.relative_path.as_deref().ok_or_else(|| "目录路径不能为空".to_string())?;
+    let relative_path = input
+        .relative_path
+        .as_deref()
+        .ok_or_else(|| "目录路径不能为空".to_string())?;
     let start = resolve_existing_path(&root, relative_path)?;
     let mut entries = Vec::new();
     let mut stack = vec![start];
@@ -863,7 +1073,9 @@ pub fn dev_list_file_descendants(input: DevListFilesInput) -> Result<Vec<DevFile
         children.sort_by_key(|entry| entry.file_name());
         for child in children.into_iter().rev() {
             let path = child.path();
-            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let metadata = child
+                .metadata()
+                .map_err(|e| format!("读取文件信息失败: {}", e))?;
             let file_name = child.file_name().to_string_lossy().to_string();
             let is_dir = metadata.is_dir();
             entries.push(DevFileEntry {
@@ -881,10 +1093,13 @@ pub fn dev_list_file_descendants(input: DevListFilesInput) -> Result<Vec<DevFile
 }
 
 #[tauri::command]
-pub fn dev_list_external_files(input: DevExternalListFilesInput) -> Result<Vec<DevFileEntry>, String> {
+pub fn dev_list_external_files(
+    input: DevExternalListFilesInput,
+) -> Result<Vec<DevFileEntry>, String> {
     let start = canonical_external_existing_path(&input.path)?;
     let max_entries = input.max_entries.unwrap_or(300).clamp(1, 1000);
-    let start_metadata = std::fs::metadata(&start).map_err(|e| format!("读取文件信息失败: {}", e))?;
+    let start_metadata =
+        std::fs::metadata(&start).map_err(|e| format!("读取文件信息失败: {}", e))?;
     if start_metadata.is_file() {
         return Ok(vec![DevFileEntry {
             path: display_external(&start),
@@ -893,7 +1108,12 @@ pub fn dev_list_external_files(input: DevExternalListFilesInput) -> Result<Vec<D
             updated_at: modified_millis(&start_metadata),
         }]);
     }
-    let mut entries = vec![DevFileEntry { path: display_external(&start), is_dir: true, size: None, updated_at: modified_millis(&start_metadata) }];
+    let mut entries = vec![DevFileEntry {
+        path: display_external(&start),
+        is_dir: true,
+        size: None,
+        updated_at: modified_millis(&start_metadata),
+    }];
     let mut stack = vec![start];
 
     while let Some(path) = stack.pop() {
@@ -910,12 +1130,18 @@ pub fn dev_list_external_files(input: DevExternalListFilesInput) -> Result<Vec<D
                 break;
             }
             let child_path = child.path();
-            let metadata = child.metadata().map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let metadata = child
+                .metadata()
+                .map_err(|e| format!("读取文件信息失败: {}", e))?;
             let file_name = child.file_name().to_string_lossy().to_string();
             entries.push(DevFileEntry {
                 path: display_external(&child_path),
                 is_dir: metadata.is_dir(),
-                size: if metadata.is_dir() { None } else { Some(metadata.len()) },
+                size: if metadata.is_dir() {
+                    None
+                } else {
+                    Some(metadata.len())
+                },
                 updated_at: modified_millis(&metadata),
             });
             if metadata.is_dir() && !should_skip_dir(&file_name) {
@@ -943,10 +1169,44 @@ pub fn is_probably_text_file(path: &Path) -> bool {
     };
     matches!(
         ext.as_str(),
-        "txt" | "md" | "csv" | "json" | "jsonl" | "xml" | "html" | "css" | "scss" | "js" | "jsx" |
-        "ts" | "tsx" | "vue" | "svelte" | "py" | "rs" | "go" | "java" | "c" | "cpp" | "h" | "hpp" |
-        "sh" | "bash" | "zsh" | "yaml" | "yml" | "toml" | "sql" | "rb" | "php" | "swift" |
-        "kt" | "lua" | "ini" | "conf" | "log"
+        "txt"
+            | "md"
+            | "csv"
+            | "json"
+            | "jsonl"
+            | "xml"
+            | "html"
+            | "css"
+            | "scss"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "vue"
+            | "svelte"
+            | "py"
+            | "rs"
+            | "go"
+            | "java"
+            | "c"
+            | "cpp"
+            | "h"
+            | "hpp"
+            | "sh"
+            | "bash"
+            | "zsh"
+            | "yaml"
+            | "yml"
+            | "toml"
+            | "sql"
+            | "rb"
+            | "php"
+            | "swift"
+            | "kt"
+            | "lua"
+            | "ini"
+            | "conf"
+            | "log"
     )
 }
 
@@ -993,7 +1253,10 @@ pub fn dev_search_text(input: DevSearchTextInput) -> Result<Vec<DevTextMatch>, S
         let Ok(content) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let lines = content.lines().map(|line| line.to_string()).collect::<Vec<_>>();
+        let lines = content
+            .lines()
+            .map(|line| line.to_string())
+            .collect::<Vec<_>>();
         for (index, line) in lines.iter().enumerate() {
             if results.len() >= max_results {
                 break;
@@ -1033,7 +1296,11 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
     let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 30_000_000);
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
     let truncated = bytes.len() > max_bytes;
-    let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+    let slice = if truncated {
+        &bytes[..max_bytes]
+    } else {
+        &bytes[..]
+    };
     let content = String::from_utf8_lossy(slice).to_string();
     let base64_str = general_purpose::STANDARD.encode(slice);
     Ok(DevReadFileOutput {
@@ -1047,7 +1314,9 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
 }
 
 #[tauri::command]
-pub fn dev_read_external_file(input: DevExternalReadFileInput) -> Result<DevReadFileOutput, String> {
+pub fn dev_read_external_file(
+    input: DevExternalReadFileInput,
+) -> Result<DevReadFileOutput, String> {
     let path = canonical_external_existing_path(&input.path)?;
     if !path.is_file() {
         return Err("读取路径必须是文件".into());
@@ -1055,7 +1324,11 @@ pub fn dev_read_external_file(input: DevExternalReadFileInput) -> Result<DevRead
     let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 30_000_000);
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
     let truncated = bytes.len() > max_bytes;
-    let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+    let slice = if truncated {
+        &bytes[..max_bytes]
+    } else {
+        &bytes[..]
+    };
     Ok(DevReadFileOutput {
         path: display_external(&path),
         content: String::from_utf8_lossy(slice).to_string(),
@@ -1093,7 +1366,11 @@ pub fn dev_read_many_files(input: DevReadManyFilesInput) -> Result<Vec<DevReadFi
         }
         let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
         let truncated = bytes.len() > max_bytes;
-        let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+        let slice = if truncated {
+            &bytes[..max_bytes]
+        } else {
+            &bytes[..]
+        };
         outputs.push(DevReadFileOutput {
             path: display_relative(&root, &path),
             content: String::from_utf8_lossy(slice).to_string(),
@@ -1132,8 +1409,15 @@ pub fn dev_create_file_if_missing(input: DevWriteFileInput) -> Result<DevWriteFi
         .write(true)
         .create_new(true)
         .open(&path)
-        .map_err(|e| if e.kind() == std::io::ErrorKind::AlreadyExists { "文件已存在".to_string() } else { format!("创建文件失败: {}", e) })?;
-    file.write_all(input.content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::AlreadyExists {
+                "文件已存在".to_string()
+            } else {
+                format!("创建文件失败: {}", e)
+            }
+        })?;
+    file.write_all(input.content.as_bytes())
+        .map_err(|e| format!("写入文件失败: {}", e))?;
     Ok(DevWriteFileOutput {
         path: display_relative(&root, &path),
         bytes_written: input.content.len(),
@@ -1141,11 +1425,16 @@ pub fn dev_create_file_if_missing(input: DevWriteFileInput) -> Result<DevWriteFi
 }
 
 #[tauri::command]
-pub fn dev_write_file_if_revision(input: DevWriteFileIfRevisionInput) -> Result<DevWriteFileIfRevisionOutput, String> {
+pub fn dev_write_file_if_revision(
+    input: DevWriteFileIfRevisionInput,
+) -> Result<DevWriteFileIfRevisionOutput, String> {
     let root = canonical_root(&input.root)?;
     let path = resolve_write_path(&root, &input.relative_path)?;
     if !path.exists() {
-        return Ok(DevWriteFileIfRevisionOutput { status: "missing".into(), revision: None });
+        return Ok(DevWriteFileIfRevisionOutput {
+            status: "missing".into(),
+            revision: None,
+        });
     }
     let path = resolve_existing_path(&root, &input.relative_path)?;
     if !path.is_file() {
@@ -1153,17 +1442,30 @@ pub fn dev_write_file_if_revision(input: DevWriteFileIfRevisionInput) -> Result<
     }
     let current_revision = resource_revision(&path)?;
     if current_revision.value != input.expected_revision {
-        return Ok(DevWriteFileIfRevisionOutput { status: "conflict".into(), revision: Some(current_revision) });
+        return Ok(DevWriteFileIfRevisionOutput {
+            status: "conflict".into(),
+            revision: Some(current_revision),
+        });
     }
 
     let parent = path.parent().ok_or_else(|| "写入路径无效".to_string())?;
-    let temporary_path = parent.join(format!(".{}.{}.tmp", path.file_name().and_then(|name| name.to_str()).unwrap_or("file"), uuid::Uuid::new_v4()));
-    std::fs::write(&temporary_path, input.content.as_bytes()).map_err(|e| format!("写入临时文件失败: {}", e))?;
+    let temporary_path = parent.join(format!(
+        ".{}.{}.tmp",
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("file"),
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::write(&temporary_path, input.content.as_bytes())
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
     if let Err(error) = replace_file_atomically(&temporary_path, &path) {
         let _ = std::fs::remove_file(&temporary_path);
         return Err(format!("原子替换文件失败: {}", error));
     }
-    Ok(DevWriteFileIfRevisionOutput { status: "saved".into(), revision: Some(resource_revision(&path)?) })
+    Ok(DevWriteFileIfRevisionOutput {
+        status: "saved".into(),
+        revision: Some(resource_revision(&path)?),
+    })
 }
 
 #[tauri::command]
@@ -1188,13 +1490,18 @@ pub fn dev_append_file(input: DevWriteFileInput) -> Result<DevWriteFileOutput, S
 }
 
 #[tauri::command]
-pub fn dev_write_external_file(input: DevExternalWriteFileInput) -> Result<DevWriteFileOutput, String> {
+pub fn dev_write_external_file(
+    input: DevExternalWriteFileInput,
+) -> Result<DevWriteFileOutput, String> {
     let path = resolve_external_write_path(&input.path)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
     }
     std::fs::write(&path, input.content.as_bytes()).map_err(|e| format!("写入文件失败: {}", e))?;
-    Ok(DevWriteFileOutput { path: display_external(&path), bytes_written: input.content.len() })
+    Ok(DevWriteFileOutput {
+        path: display_external(&path),
+        bytes_written: input.content.len(),
+    })
 }
 
 #[tauri::command]
@@ -1263,8 +1570,16 @@ fn replace_file_atomically(temporary_path: &Path, target_path: &Path) -> std::io
 
     const MOVEFILE_REPLACE_EXISTING: u32 = 0x0000_0001;
     const MOVEFILE_WRITE_THROUGH: u32 = 0x0000_0008;
-    let temporary = temporary_path.as_os_str().encode_wide().chain(once(0)).collect::<Vec<_>>();
-    let target = target_path.as_os_str().encode_wide().chain(once(0)).collect::<Vec<_>>();
+    let temporary = temporary_path
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
+    let target = target_path
+        .as_os_str()
+        .encode_wide()
+        .chain(once(0))
+        .collect::<Vec<_>>();
     let replaced = unsafe {
         MoveFileExW(
             temporary.as_ptr(),
@@ -1339,7 +1654,10 @@ pub struct DevBatchProjectOperationOutput {
     deleted: Vec<DevBatchProjectFileEntry>,
 }
 
-fn batch_project_entries(root: &Path, paths: &[String]) -> Result<Vec<DevBatchProjectFileEntry>, String> {
+fn batch_project_entries(
+    root: &Path,
+    paths: &[String],
+) -> Result<Vec<DevBatchProjectFileEntry>, String> {
     let mut entries = Vec::new();
     let mut seen = HashSet::new();
     for relative in paths {
@@ -1354,7 +1672,8 @@ fn batch_project_entries(root: &Path, paths: &[String]) -> Result<Vec<DevBatchPr
             if !seen.insert(relative_path.clone()) {
                 continue;
             }
-            let metadata = std::fs::metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
+            let metadata =
+                std::fs::metadata(&path).map_err(|e| format!("读取文件信息失败: {}", e))?;
             entries.push(DevBatchProjectFileEntry {
                 path: relative_path,
                 is_dir,
@@ -1372,21 +1691,41 @@ fn move_project_path_to_trash(path: &Path) -> Result<(), String> {
     trash::delete(path).map_err(|e| format!("移入废纸篓失败: {}", e))
 }
 
+#[cfg(any(test, target_os = "ios", target_os = "android"))]
+fn delete_project_path_permanently(path: &Path) -> Result<(), String> {
+    if path.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+    .map_err(|e| format!("永久删除失败: {}", e))
+}
+
 #[cfg(any(target_os = "ios", target_os = "android"))]
-fn move_project_path_to_trash(_path: &Path) -> Result<(), String> {
-    Err("移动端不支持废纸篓，请在文件树中确认后永久删除。".into())
+fn move_project_path_to_trash(path: &Path) -> Result<(), String> {
+    delete_project_path_permanently(path)
 }
 
 #[tauri::command]
-pub fn dev_batch_project_operation(input: DevBatchProjectOperationInput) -> Result<DevBatchProjectOperationOutput, String> {
+pub fn dev_batch_project_operation(
+    input: DevBatchProjectOperationInput,
+) -> Result<DevBatchProjectOperationOutput, String> {
     let root = canonical_root(&input.root)?;
     if input.relative_paths.is_empty() {
         return Err("请先选择项目资源".into());
     }
     match input.kind.as_str() {
         "copy" => {
-            let target = input.target_relative_path.as_deref().ok_or_else(|| "复制必须指定目标文件夹".to_string())?;
-            let (created_roots, deleted) = batch_copy_project_paths_with_policy(&root, &input.relative_paths, target, input.policy.as_deref())?;
+            let target = input
+                .target_relative_path
+                .as_deref()
+                .ok_or_else(|| "复制必须指定目标文件夹".to_string())?;
+            let (created_roots, deleted) = batch_copy_project_paths_with_policy(
+                &root,
+                &input.relative_paths,
+                target,
+                input.policy.as_deref(),
+            )?;
             Ok(DevBatchProjectOperationOutput {
                 created: batch_project_entries(&root, &created_roots)?,
                 renamed: Vec::new(),
@@ -1394,19 +1733,38 @@ pub fn dev_batch_project_operation(input: DevBatchProjectOperationInput) -> Resu
             })
         }
         "move" => {
-            let target = input.target_relative_path.as_deref().ok_or_else(|| "移动必须指定目标文件夹".to_string())?;
+            let target = input
+                .target_relative_path
+                .as_deref()
+                .ok_or_else(|| "移动必须指定目标文件夹".to_string())?;
             let before = batch_project_entries(&root, &input.relative_paths)?;
-            let (moved_roots, deleted) = batch_move_project_paths_with_policy(&root, &input.relative_paths, target, input.policy.as_deref())?;
-            let renamed = before.into_iter().map(|old| {
-                let (old_root, new_root) = moved_roots.iter()
-                    .find(|(old_root, _)| old.path == *old_root || old.path.starts_with(&format!("{}/", old_root)))
-                    .ok_or_else(|| format!("移动映射缺失: {}", old.path))?;
-                let new_path = format!("{}{}", new_root, &old.path[old_root.len()..]);
-                Ok(DevBatchProjectRename {
-                    old_path: old.path,
-                    entry: DevBatchProjectFileEntry { path: new_path, is_dir: old.is_dir, size: old.size, updated_at: old.updated_at },
+            let (moved_roots, deleted) = batch_move_project_paths_with_policy(
+                &root,
+                &input.relative_paths,
+                target,
+                input.policy.as_deref(),
+            )?;
+            let renamed = before
+                .into_iter()
+                .map(|old| {
+                    let (old_root, new_root) = moved_roots
+                        .iter()
+                        .find(|(old_root, _)| {
+                            old.path == *old_root || old.path.starts_with(&format!("{}/", old_root))
+                        })
+                        .ok_or_else(|| format!("移动映射缺失: {}", old.path))?;
+                    let new_path = format!("{}{}", new_root, &old.path[old_root.len()..]);
+                    Ok(DevBatchProjectRename {
+                        old_path: old.path,
+                        entry: DevBatchProjectFileEntry {
+                            path: new_path,
+                            is_dir: old.is_dir,
+                            size: old.size,
+                            updated_at: old.updated_at,
+                        },
+                    })
                 })
-            }).collect::<Result<Vec<_>, String>>()?;
+                .collect::<Result<Vec<_>, String>>()?;
             Ok(DevBatchProjectOperationOutput {
                 created: Vec::new(),
                 renamed,
@@ -1416,7 +1774,11 @@ pub fn dev_batch_project_operation(input: DevBatchProjectOperationInput) -> Resu
         "delete" => {
             let deleted = batch_project_entries(&root, &input.relative_paths)?;
             batch_delete_project_paths(&root, &input.relative_paths, move_project_path_to_trash)?;
-            Ok(DevBatchProjectOperationOutput { created: Vec::new(), renamed: Vec::new(), deleted })
+            Ok(DevBatchProjectOperationOutput {
+                created: Vec::new(),
+                renamed: Vec::new(),
+                deleted,
+            })
         }
         _ => Err("批量操作类型无效".into()),
     }
@@ -1442,13 +1804,17 @@ pub fn dev_delete_file(input: DevDeleteInput) -> Result<DevDeleteFileOutput, Str
     }
     match std::fs::symlink_metadata(root.join(&clean)) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok(DevDeleteFileOutput { status: "missing".into() });
+            return Ok(DevDeleteFileOutput {
+                status: "missing".into(),
+            });
         }
         Err(error) => return Err(format!("项目内路径不可访问: {}", error)),
         Ok(_) => {}
     }
     trash_project_path(&root, &input.relative_path, move_project_path_to_trash)?;
-    Ok(DevDeleteFileOutput { status: "trashed".into() })
+    Ok(DevDeleteFileOutput {
+        status: "trashed".into(),
+    })
 }
 
 #[tauri::command]
@@ -1477,7 +1843,10 @@ pub fn build_replacement_diff(path: &str, old_text: &str, new_text: &str) -> Str
         .map(|line| format!("+{}", line))
         .collect::<Vec<_>>()
         .join("\n");
-    format!("--- {}\n+++ {}\n{}\n{}", path, path, old_preview, new_preview)
+    format!(
+        "--- {}\n+++ {}\n{}\n{}",
+        path, path, old_preview, new_preview
+    )
 }
 
 #[tauri::command]
@@ -1515,16 +1884,14 @@ pub fn dev_replace_in_file(input: DevReplaceInFileInput) -> Result<DevReplaceInF
         path: display_path.clone(),
         replacements: if replace_all { matches } else { 1 },
         bytes_written: next.len(),
-        diff: build_replacement_diff(
-            &display_path,
-            &input.old_text,
-            &input.new_text,
-        ),
+        diff: build_replacement_diff(&display_path, &input.old_text, &input.new_text),
     })
 }
 
 #[tauri::command]
-pub fn dev_replace_in_external_file(input: DevExternalReplaceInFileInput) -> Result<DevReplaceInFileOutput, String> {
+pub fn dev_replace_in_external_file(
+    input: DevExternalReplaceInFileInput,
+) -> Result<DevReplaceInFileOutput, String> {
     let path = canonical_external_existing_path(&input.path)?;
     if !path.is_file() {
         return Err("替换路径必须是文件".into());
@@ -1581,14 +1948,17 @@ pub fn dev_get_diff(input: DevGetDiffInput) -> Result<DevGetDiffOutput, String> 
     }
     let bytes = output.stdout;
     let truncated = bytes.len() > max_bytes;
-    let slice = if truncated { &bytes[..max_bytes] } else { &bytes[..] };
+    let slice = if truncated {
+        &bytes[..max_bytes]
+    } else {
+        &bytes[..]
+    };
     Ok(DevGetDiffOutput {
         source: "git diff".into(),
         diff: String::from_utf8_lossy(slice).to_string(),
         truncated,
     })
 }
-
 
 #[tauri::command]
 pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandOutput, String> {
@@ -1625,10 +1995,17 @@ pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandO
 
 /// 文件树专用：后台提取并缓存视频缩略图，不让 WebView 解码视频首帧。
 #[tauri::command]
-pub async fn dev_generate_video_thumbnail(app: AppHandle, input: DevReadFileInput) -> Result<String, String> {
+pub async fn dev_generate_video_thumbnail(
+    app: AppHandle,
+    input: DevReadFileInput,
+) -> Result<String, String> {
     let root = canonical_root(&input.root)?;
     let source = resolve_existing_path(&root, &input.relative_path)?;
-    let extension = source.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
     if !matches!(extension.as_str(), "mp4" | "mov" | "avi" | "webm" | "mkv") {
         return Err("仅支持视频缩略图".into());
     }
@@ -1640,7 +2017,9 @@ pub async fn dev_generate_video_thumbnail(app: AppHandle, input: DevReadFileInpu
         metadata.len(),
         metadata.modified().ok(),
     );
-    let cache_dir = app.path().app_data_dir()
+    let cache_dir = app
+        .path()
+        .app_data_dir()
         .map_err(|e| format!("缩略图缓存目录不可用: {}", e))?
         .join("output")
         .join("thumbnails");
@@ -1693,6 +2072,71 @@ pub fn pick_project_folder() -> Result<Option<String>, String> {
     Err("移动端项目保存在 App 管理目录，请从云项目创建或打开。".into())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MobileProject {
+    path: String,
+    name: String,
+}
+
+fn mobile_projects_root(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path()
+        .app_data_dir()
+        .map(|path| path.join("projects"))
+        .map_err(|e| format!("无法定位移动项目目录: {e}"))
+}
+
+#[tauri::command]
+pub fn list_mobile_projects(app: AppHandle) -> Result<Vec<MobileProject>, String> {
+    let root = mobile_projects_root(&app)?;
+    std::fs::create_dir_all(&root).map_err(|e| format!("创建移动项目目录失败: {e}"))?;
+    let mut projects = std::fs::read_dir(root)
+        .map_err(|e| format!("读取移动项目失败: {e}"))?
+        .filter_map(Result::ok)
+        .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
+        .map(|entry| MobileProject {
+            name: entry.file_name().to_string_lossy().into_owned(),
+            path: entry.path().to_string_lossy().into_owned(),
+        })
+        .collect::<Vec<_>>();
+    projects.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(projects)
+}
+
+fn valid_mobile_project_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name
+            .chars()
+            .any(|character| character.is_control() || matches!(character, '/' | '\\' | ':'))
+}
+
+#[tauri::command]
+pub fn create_mobile_project(app: AppHandle, name: String) -> Result<MobileProject, String> {
+    let name = name.trim();
+    if !valid_mobile_project_name(name) {
+        return Err("项目名称无效".into());
+    }
+    let root = mobile_projects_root(&app)?;
+    std::fs::create_dir_all(&root).map_err(|e| format!("创建移动项目目录失败: {e}"))?;
+    let mut path = root.join(name);
+    let mut suffix = 2;
+    while path.exists() {
+        path = root.join(format!("{name} {suffix}"));
+        suffix += 1;
+    }
+    std::fs::create_dir(&path).map_err(|e| format!("创建项目失败: {e}"))?;
+    Ok(MobileProject {
+        name: path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned(),
+        path: path.to_string_lossy().into_owned(),
+    })
+}
+
 #[tauri::command]
 pub fn create_production_project(app: AppHandle) -> Result<String, String> {
     let root = app
@@ -1709,9 +2153,7 @@ pub fn create_production_project(app: AppHandle) -> Result<String, String> {
 #[tauri::command]
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn open_file_picker() -> Result<Option<String>, String> {
-    let file = rfd::FileDialog::new()
-        .set_title("选择文件")
-        .pick_file();
+    let file = rfd::FileDialog::new().set_title("选择文件").pick_file();
     Ok(file.map(|p| p.to_string_lossy().to_string()))
 }
 
@@ -1725,8 +2167,7 @@ pub fn open_file_picker() -> Result<Option<String>, String> {
 #[tauri::command]
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn save_file_picker(default_name: Option<String>) -> Result<Option<String>, String> {
-    let mut dialog = rfd::FileDialog::new()
-        .set_title("保存文件");
+    let mut dialog = rfd::FileDialog::new().set_title("保存文件");
     if let Some(name) = default_name {
         dialog = dialog.set_file_name(&name);
     }
@@ -1742,59 +2183,88 @@ pub fn save_file_picker(_default_name: Option<String>) -> Result<Option<String>,
 
 #[tauri::command]
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub fn dev_import_project_files(input: DevImportProjectFilesInput) -> Result<Option<Vec<String>>, String> {
+pub fn dev_import_project_files(
+    input: DevImportProjectFilesInput,
+) -> Result<Option<Vec<String>>, String> {
     let root = canonical_root(&input.root)?;
     let target_relative = clean_relative_path(&input.target_relative_path)?;
-    let Some(files) = rfd::FileDialog::new().set_title("上传文件到项目").pick_files() else {
+    let Some(files) = rfd::FileDialog::new()
+        .set_title("上传文件到项目")
+        .pick_files()
+    else {
         return Ok(None);
     };
-    Ok(Some(import_external_files(&root, &files, &target_relative)?))
+    Ok(Some(import_external_files(
+        &root,
+        &files,
+        &target_relative,
+    )?))
 }
 
 #[tauri::command]
 #[cfg(any(target_os = "ios", target_os = "android"))]
-pub fn dev_import_project_files(_input: DevImportProjectFilesInput) -> Result<Option<Vec<String>>, String> {
+pub fn dev_import_project_files(
+    _input: DevImportProjectFilesInput,
+) -> Result<Option<Vec<String>>, String> {
     Err("移动端请使用系统附件选择器导入文件。".into())
 }
 
 #[tauri::command]
-pub fn dev_import_project_drop(input: DevImportProjectDropInput) -> Result<Vec<DevFileEntry>, String> {
+pub fn dev_import_project_drop(
+    input: DevImportProjectDropInput,
+) -> Result<Vec<DevFileEntry>, String> {
     let root = canonical_root(&input.root)?;
     let target_relative = clean_relative_path(&input.target_relative_path)?;
     if input.source_paths.is_empty() {
         return Ok(Vec::new());
     }
-    let sources = input.source_paths.iter()
+    let sources = input
+        .source_paths
+        .iter()
         .map(|path| canonical_external_regular_file(path))
         .collect::<Result<Vec<_>, _>>()?;
     let imported = import_external_files(&root, &sources, &target_relative)?;
-    imported.into_iter().map(|relative| {
-        let path = root.join(&relative);
-        let metadata = std::fs::metadata(&path).map_err(|e| format!("读取导入文件失败: {}", e))?;
-        Ok(DevFileEntry {
-            path: relative,
-            is_dir: false,
-            size: Some(metadata.len()),
-            updated_at: modified_millis(&metadata),
+    imported
+        .into_iter()
+        .map(|relative| {
+            let path = root.join(&relative);
+            let metadata =
+                std::fs::metadata(&path).map_err(|e| format!("读取导入文件失败: {}", e))?;
+            Ok(DevFileEntry {
+                path: relative,
+                is_dir: false,
+                size: Some(metadata.len()),
+                updated_at: modified_millis(&metadata),
+            })
         })
-    }).collect()
+        .collect()
 }
 
 #[tauri::command]
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
-pub fn dev_import_project_folder(input: DevImportProjectFolderInput) -> Result<Option<String>, String> {
+pub fn dev_import_project_folder(
+    input: DevImportProjectFolderInput,
+) -> Result<Option<String>, String> {
     let root = canonical_root(&input.root)?;
     let target_relative = clean_relative_path(&input.target_relative_path)?;
-    let Some(folder) = rfd::FileDialog::new().set_title("上传文件夹到项目").pick_folder() else {
+    let Some(folder) = rfd::FileDialog::new()
+        .set_title("上传文件夹到项目")
+        .pick_folder()
+    else {
         return Ok(None);
     };
-    Ok(Some(import_external_folder(&root, &folder, &target_relative)?))
+    Ok(Some(import_external_folder(
+        &root,
+        &folder,
+        &target_relative,
+    )?))
 }
-
 
 #[tauri::command]
 #[cfg(any(target_os = "ios", target_os = "android"))]
-pub fn dev_import_project_folder(_input: DevImportProjectFolderInput) -> Result<Option<String>, String> {
+pub fn dev_import_project_folder(
+    _input: DevImportProjectFolderInput,
+) -> Result<Option<String>, String> {
     Err("移动端不支持导入外部文件夹。".into())
 }
 
@@ -1802,13 +2272,15 @@ pub fn dev_import_project_folder(_input: DevImportProjectFolderInput) -> Result<
 #[cfg(not(any(target_os = "ios", target_os = "android")))]
 pub fn dev_export_project(input: DevExportProjectInput) -> Result<Option<String>, String> {
     let root = canonical_root(&input.root)?;
-    let Some(destination) = rfd::FileDialog::new().set_title("选择项目导出位置").pick_folder() else {
+    let Some(destination) = rfd::FileDialog::new()
+        .set_title("选择项目导出位置")
+        .pick_folder()
+    else {
         return Ok(None);
     };
     let destination = canonical_external_existing_path(&destination.to_string_lossy())?;
     Ok(Some(export_project_to_directory(&root, &destination)?))
 }
-
 
 #[tauri::command]
 #[cfg(any(target_os = "ios", target_os = "android"))]
@@ -1820,12 +2292,28 @@ pub fn dev_export_project(_input: DevExportProjectInput) -> Result<Option<String
 pub fn dev_export_project_paths(input: DevExportProjectPathsInput) -> Result<Vec<String>, String> {
     let root = canonical_root(&input.root)?;
     let destination = canonical_external_existing_path(&input.destination_directory)?;
-    export_project_paths_to_directory(&root, &input.relative_paths, &destination, input.policy.as_deref())
+    export_project_paths_to_directory(
+        &root,
+        &input.relative_paths,
+        &destination,
+        input.policy.as_deref(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mobile_project_names_cannot_escape_the_managed_directory() {
+        assert!(valid_mobile_project_name("丹溪"));
+        for name in ["", ".", "..", "../丹溪", "a/b", "a\\b", "a:b", "a\nb"] {
+            assert!(
+                !valid_mobile_project_name(name),
+                "accepted unsafe name: {name:?}"
+            );
+        }
+    }
 
     #[test]
     fn replace_file_promotes_the_temporary_contents() {
@@ -1862,11 +2350,13 @@ mod tests {
         std::fs::create_dir_all(temp.path().join("jc-canvas")).unwrap();
         std::fs::write(temp.path().join("jc-canvas/default.jccanvas"), "{}").unwrap();
 
-        assert!(dev_file_exists(DevFileExistsInput {
-            root,
-            relative_path: "jc-canvas/default.jccanvas".into(),
-        })
-        .unwrap());
+        assert!(
+            dev_file_exists(DevFileExistsInput {
+                root,
+                relative_path: "jc-canvas/default.jccanvas".into(),
+            })
+            .unwrap()
+        );
     }
 
     #[test]
@@ -1877,12 +2367,14 @@ mod tests {
             root: root.clone(),
             relative_path: ".raw/sessions/jcses_test.jsonl".into(),
             content: "first\n".into(),
-        }).unwrap();
+        })
+        .unwrap();
         dev_append_file(DevWriteFileInput {
             root,
             relative_path: ".raw/sessions/jcses_test.jsonl".into(),
             content: "second\n".into(),
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
             std::fs::read_to_string(temp.path().join(".raw/sessions/jcses_test.jsonl")).unwrap(),
             "first\nsecond\n",
@@ -1898,7 +2390,8 @@ mod tests {
             root: root.clone(),
             relative_path: "note.md".into(),
             max_bytes: None,
-        }).unwrap();
+        })
+        .unwrap();
         std::fs::write(temp.path().join("note.md"), "external change").unwrap();
 
         let result = dev_write_file_if_revision(DevWriteFileIfRevisionInput {
@@ -1906,10 +2399,14 @@ mod tests {
             relative_path: "note.md".into(),
             content: "local".into(),
             expected_revision: read.revision.value,
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(result.status, "conflict");
-        assert_eq!(std::fs::read_to_string(temp.path().join("note.md")).unwrap(), "external change");
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("note.md")).unwrap(),
+            "external change"
+        );
     }
 
     #[test]
@@ -1925,7 +2422,10 @@ mod tests {
         });
 
         assert!(result.is_err());
-        assert_eq!(std::fs::read_to_string(temp.path().join("note.md")).unwrap(), "original");
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join("note.md")).unwrap(),
+            "original"
+        );
     }
 
     #[test]
@@ -1962,7 +2462,10 @@ mod tests {
         })
         .unwrap();
 
-        let paths = entries.into_iter().map(|entry| entry.path).collect::<Vec<_>>();
+        let paths = entries
+            .into_iter()
+            .map(|entry| entry.path)
+            .collect::<Vec<_>>();
         assert_eq!(paths, vec![".git", "README.md", "node_modules", "src"]);
     }
 
@@ -1981,7 +2484,10 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(std::fs::read(destination).unwrap(), [0, 1, 2, 253, 254, 255]);
+        assert_eq!(
+            std::fs::read(destination).unwrap(),
+            [0, 1, 2, 253, 254, 255]
+        );
     }
 
     #[test]
@@ -1990,7 +2496,11 @@ mod tests {
         std::fs::create_dir_all(project.path().join("assets/nested")).unwrap();
         std::fs::create_dir_all(project.path().join("target")).unwrap();
         std::fs::write(project.path().join("note.md"), "# note").unwrap();
-        std::fs::write(project.path().join("assets/nested/clip.bin"), [0, 1, 2, 253, 254, 255]).unwrap();
+        std::fs::write(
+            project.path().join("assets/nested/clip.bin"),
+            [0, 1, 2, 253, 254, 255],
+        )
+        .unwrap();
 
         let copied = batch_copy_project_paths(
             project.path(),
@@ -2000,8 +2510,14 @@ mod tests {
         .unwrap();
 
         assert_eq!(copied, vec!["target/note.md", "target/assets"]);
-        assert_eq!(std::fs::read_to_string(project.path().join("target/note.md")).unwrap(), "# note");
-        assert_eq!(std::fs::read(project.path().join("target/assets/nested/clip.bin")).unwrap(), [0, 1, 2, 253, 254, 255]);
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("target/note.md")).unwrap(),
+            "# note"
+        );
+        assert_eq!(
+            std::fs::read(project.path().join("target/assets/nested/clip.bin")).unwrap(),
+            [0, 1, 2, 253, 254, 255]
+        );
     }
 
     #[test]
@@ -2009,13 +2525,20 @@ mod tests {
         let project = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(project.path().join("assets/nested")).unwrap();
         std::fs::create_dir_all(project.path().join("target")).unwrap();
-        std::fs::write(project.path().join("assets/nested/clip.bin"), [0, 1, 2, 253, 254, 255]).unwrap();
+        std::fs::write(
+            project.path().join("assets/nested/clip.bin"),
+            [0, 1, 2, 253, 254, 255],
+        )
+        .unwrap();
 
         let moved = batch_move_project_paths(project.path(), &["assets".into()], "target").unwrap();
 
         assert_eq!(moved, vec![("assets".into(), "target/assets".into())]);
         assert!(!project.path().join("assets").exists());
-        assert_eq!(std::fs::read(project.path().join("target/assets/nested/clip.bin")).unwrap(), [0, 1, 2, 253, 254, 255]);
+        assert_eq!(
+            std::fs::read(project.path().join("target/assets/nested/clip.bin")).unwrap(),
+            [0, 1, 2, 253, 254, 255]
+        );
     }
 
     #[test]
@@ -2025,14 +2548,34 @@ mod tests {
         std::fs::write(project.path().join("two.md"), "two").unwrap();
         let mut trashed = Vec::new();
 
-        let deleted = batch_delete_project_paths(project.path(), &["one.md".into(), "two.md".into()], |path| {
-            trashed.push(path.file_name().unwrap().to_string_lossy().to_string());
-            Ok(())
-        })
+        let deleted = batch_delete_project_paths(
+            project.path(),
+            &["one.md".into(), "two.md".into()],
+            |path| {
+                trashed.push(path.file_name().unwrap().to_string_lossy().to_string());
+                Ok(())
+            },
+        )
         .unwrap();
 
         assert_eq!(deleted, vec!["one.md", "two.md"]);
         assert_eq!(trashed, vec!["one.md", "two.md"]);
+    }
+
+    #[test]
+    fn permanent_project_delete_removes_files_and_directories() {
+        let project = tempfile::tempdir().unwrap();
+        let file = project.path().join("note.md");
+        let directory = project.path().join("assets/nested");
+        std::fs::write(&file, "note").unwrap();
+        std::fs::create_dir_all(&directory).unwrap();
+        std::fs::write(directory.join("clip.bin"), [1, 2, 3]).unwrap();
+
+        delete_project_path_permanently(&file).unwrap();
+        delete_project_path_permanently(&project.path().join("assets")).unwrap();
+
+        assert!(!file.exists());
+        assert!(!project.path().join("assets").exists());
     }
 
     #[test]
@@ -2049,10 +2592,19 @@ mod tests {
             relative_paths: vec!["assets".into()],
             target_relative_path: Some("copy-target".into()),
             policy: None,
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
-            copied.created.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(),
-            vec!["copy-target/assets", "copy-target/assets/nested", "copy-target/assets/nested/one.md"],
+            copied
+                .created
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "copy-target/assets",
+                "copy-target/assets/nested",
+                "copy-target/assets/nested/one.md"
+            ],
         );
 
         let moved = dev_batch_project_operation(DevBatchProjectOperationInput {
@@ -2061,9 +2613,14 @@ mod tests {
             relative_paths: vec!["assets".into()],
             target_relative_path: Some("move-target".into()),
             policy: None,
-        }).unwrap();
+        })
+        .unwrap();
         assert_eq!(
-            moved.renamed.iter().map(|entry| (entry.old_path.as_str(), entry.entry.path.as_str())).collect::<Vec<_>>(),
+            moved
+                .renamed
+                .iter()
+                .map(|entry| (entry.old_path.as_str(), entry.entry.path.as_str()))
+                .collect::<Vec<_>>(),
             vec![
                 ("assets", "move-target/assets"),
                 ("assets/nested", "move-target/assets/nested"),
@@ -2081,19 +2638,41 @@ mod tests {
         std::fs::write(project.path().join("target/assets/old.md"), "old").unwrap();
 
         let kept = dev_batch_project_operation(DevBatchProjectOperationInput {
-            root: project.path().to_string_lossy().to_string(), kind: "copy".into(),
-            relative_paths: vec!["assets".into()], target_relative_path: Some("target".into()),
+            root: project.path().to_string_lossy().to_string(),
+            kind: "copy".into(),
+            relative_paths: vec!["assets".into()],
+            target_relative_path: Some("target".into()),
             policy: Some("keep-both".into()),
-        }).unwrap();
-        assert_eq!(kept.created.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["target/assets (1)", "target/assets (1)/new.md"]);
+        })
+        .unwrap();
+        assert_eq!(
+            kept.created
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["target/assets (1)", "target/assets (1)/new.md"]
+        );
 
         let overwritten = dev_batch_project_operation(DevBatchProjectOperationInput {
-            root: project.path().to_string_lossy().to_string(), kind: "copy".into(),
-            relative_paths: vec!["assets".into()], target_relative_path: Some("target".into()),
+            root: project.path().to_string_lossy().to_string(),
+            kind: "copy".into(),
+            relative_paths: vec!["assets".into()],
+            target_relative_path: Some("target".into()),
             policy: Some("overwrite".into()),
-        }).unwrap();
-        assert_eq!(overwritten.deleted.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["target/assets", "target/assets/old.md"]);
-        assert_eq!(std::fs::read_to_string(project.path().join("target/assets/new.md")).unwrap(), "new");
+        })
+        .unwrap();
+        assert_eq!(
+            overwritten
+                .deleted
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["target/assets", "target/assets/old.md"]
+        );
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("target/assets/new.md")).unwrap(),
+            "new"
+        );
         assert!(!project.path().join("target/assets/old.md").exists());
     }
 
@@ -2106,13 +2685,32 @@ mod tests {
         std::fs::write(project.path().join("target/assets/old.md"), "old").unwrap();
 
         let moved = dev_batch_project_operation(DevBatchProjectOperationInput {
-            root: project.path().to_string_lossy().to_string(), kind: "move".into(),
-            relative_paths: vec!["assets".into()], target_relative_path: Some("target".into()), policy: Some("overwrite".into()),
-        }).unwrap();
-        assert_eq!(moved.deleted.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["target/assets", "target/assets/old.md"]);
-        assert_eq!(moved.renamed.iter().map(|entry| (entry.old_path.as_str(), entry.entry.path.as_str())).collect::<Vec<_>>(), vec![
-            ("assets", "target/assets"), ("assets/new.md", "target/assets/new.md"),
-        ]);
+            root: project.path().to_string_lossy().to_string(),
+            kind: "move".into(),
+            relative_paths: vec!["assets".into()],
+            target_relative_path: Some("target".into()),
+            policy: Some("overwrite".into()),
+        })
+        .unwrap();
+        assert_eq!(
+            moved
+                .deleted
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["target/assets", "target/assets/old.md"]
+        );
+        assert_eq!(
+            moved
+                .renamed
+                .iter()
+                .map(|entry| (entry.old_path.as_str(), entry.entry.path.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("assets", "target/assets"),
+                ("assets/new.md", "target/assets/new.md"),
+            ]
+        );
         assert!(!project.path().join("assets").exists());
     }
 
@@ -2124,9 +2722,13 @@ mod tests {
         std::fs::write(&source, [0, 1, 2, 253, 254, 255]).unwrap();
 
         import_external_files(project.path(), &[source.clone()], Path::new("jc-media")).unwrap();
-        assert_eq!(std::fs::read(project.path().join("jc-media/track.mp3")).unwrap(), [0, 1, 2, 253, 254, 255]);
+        assert_eq!(
+            std::fs::read(project.path().join("jc-media/track.mp3")).unwrap(),
+            [0, 1, 2, 253, 254, 255]
+        );
 
-        let error = import_external_files(project.path(), &[source], Path::new("jc-media")).unwrap_err();
+        let error =
+            import_external_files(project.path(), &[source], Path::new("jc-media")).unwrap_err();
         assert_eq!(error, "文件已存在: jc-media/track.mp3");
     }
 
@@ -2141,12 +2743,16 @@ mod tests {
             root: project.path().to_string_lossy().to_string(),
             source_paths: vec![source.to_string_lossy().to_string()],
             target_relative_path: "jc-imports".into(),
-        }).unwrap();
+        })
+        .unwrap();
 
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].path, "jc-imports/reference.pdf");
         assert_eq!(entries[0].size, Some(3));
-        assert_eq!(std::fs::read(project.path().join("jc-imports/reference.pdf")).unwrap(), [1, 2, 3]);
+        assert_eq!(
+            std::fs::read(project.path().join("jc-imports/reference.pdf")).unwrap(),
+            [1, 2, 3]
+        );
     }
 
     #[cfg(unix)]
@@ -2200,9 +2806,16 @@ mod tests {
             root: project.path().to_string_lossy().to_string(),
             query: "".into(),
             limit: 20,
-        }).unwrap();
+        })
+        .unwrap();
 
-        assert_eq!(entries.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["inside.md"]);
+        assert_eq!(
+            entries
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["inside.md"]
+        );
     }
 
     #[test]
@@ -2214,9 +2827,13 @@ mod tests {
         std::fs::write(source.join("audio/track.mp3"), "audio").unwrap();
 
         import_external_folder(project.path(), &source, Path::new("assets")).unwrap();
-        assert_eq!(std::fs::read_to_string(project.path().join("assets/素材包/audio/track.mp3")).unwrap(), "audio");
+        assert_eq!(
+            std::fs::read_to_string(project.path().join("assets/素材包/audio/track.mp3")).unwrap(),
+            "audio"
+        );
 
-        let error = import_external_folder(project.path(), &source, Path::new("assets")).unwrap_err();
+        let error =
+            import_external_folder(project.path(), &source, Path::new("assets")).unwrap_err();
         assert_eq!(error, "文件夹已存在: assets/素材包");
     }
 
@@ -2235,7 +2852,10 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(moved.as_deref(), Some(std::fs::canonicalize(&uploaded).unwrap().as_path()));
+        assert_eq!(
+            moved.as_deref(),
+            Some(std::fs::canonicalize(&uploaded).unwrap().as_path())
+        );
         assert!(uploaded.is_dir());
     }
 
@@ -2266,7 +2886,10 @@ mod tests {
         })
         .unwrap();
 
-        assert_eq!(moved.as_deref(), Some(std::fs::canonicalize(&uploaded).unwrap().as_path()));
+        assert_eq!(
+            moved.as_deref(),
+            Some(std::fs::canonicalize(&uploaded).unwrap().as_path())
+        );
     }
 
     #[test]
@@ -2277,7 +2900,10 @@ mod tests {
 
         export_project_to_directory(project.path(), destination.path()).unwrap();
         let exported = destination.path().join(project.path().file_name().unwrap());
-        assert_eq!(std::fs::read_to_string(exported.join("note.md")).unwrap(), "note");
+        assert_eq!(
+            std::fs::read_to_string(exported.join("note.md")).unwrap(),
+            "note"
+        );
         assert!(export_project_to_directory(project.path(), destination.path()).is_err());
         assert!(export_project_to_directory(project.path(), project.path()).is_err());
     }
@@ -2295,7 +2921,11 @@ mod tests {
             max_entries: None,
         })
         .unwrap();
-        assert!(listed.iter().any(|entry| entry.path.ends_with("frames/frame_01.jpg")));
+        assert!(
+            listed
+                .iter()
+                .any(|entry| entry.path.ends_with("frames/frame_01.jpg"))
+        );
 
         let read = dev_read_external_file(DevExternalReadFileInput {
             path: image.to_string_lossy().to_string(),

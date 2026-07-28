@@ -1,4 +1,5 @@
 import {
+  clearGatewaySession,
   getGatewayBaseUrl,
   getGatewaySessionToken,
   initGatewaySessionToken,
@@ -55,6 +56,7 @@ async function syncJson<T>(path: string, init: RequestInit = {}): Promise<T> {
   })
   const payload = await response.json().catch(() => ({})) as any
   if (!response.ok) {
+    if (response.status === 401) await clearGatewaySession()
     throw new TextSyncError(
       String(payload?.message || `文字同步失败：HTTP ${response.status}`),
       response.status,

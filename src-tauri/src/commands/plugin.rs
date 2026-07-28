@@ -1,14 +1,23 @@
 #[tauri::command]
-pub async fn plugin_install_npm(package_name: String, install_dir: String) -> Result<String, String> {
+pub async fn plugin_install_npm(
+    package_name: String,
+    install_dir: String,
+) -> Result<String, String> {
     let dir = std::path::PathBuf::from(&install_dir);
     if let Some(parent) = dir.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("无法创建插件目录: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("无法创建插件目录: {e}"))?;
     }
 
     let result = tokio::task::spawn_blocking(move || {
         let output = std::process::Command::new("npm")
-            .args(["install", &package_name, "--prefix", &install_dir, "--no-save", "--silent"])
+            .args([
+                "install",
+                &package_name,
+                "--prefix",
+                &install_dir,
+                "--no-save",
+                "--silent",
+            ])
             .output()
             .map_err(|e| format!("npm install 失败: {e}"))?;
 
@@ -35,9 +44,15 @@ pub async fn plugin_read_manifest(install_dir: String) -> Result<String, String>
 
     for entry in std::fs::read_dir(&nm_dir).map_err(|e| format!("读取失败: {e}"))? {
         let entry = entry.map_err(|e| format!("读取条目失败: {e}"))?;
-        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue; }
-        if entry.file_name().to_string_lossy().starts_with('.') { continue; }
-        if entry.file_name() == "node_modules" { continue; }
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        if entry.file_name().to_string_lossy().starts_with('.') {
+            continue;
+        }
+        if entry.file_name() == "node_modules" {
+            continue;
+        }
 
         let pkg = entry.path().join("package.json");
         if pkg.exists() {

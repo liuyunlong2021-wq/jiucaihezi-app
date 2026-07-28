@@ -200,6 +200,23 @@ test('file tree context menus position from their measured DOM size instead of a
   assert.doesNotMatch(source, /CTX_MENU_EST_HEIGHT/)
 })
 
+test('mobile file tree opens the existing context menu on long press without blocking scroll', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+
+  assert.match(source, /const NODE_LONG_PRESS_MS = 500/)
+  assert.match(source, /function startNodeLongPress\(e: PointerEvent, node: TreeNode\)/)
+  assert.match(source, /if \(!isMobile \|\| e\.pointerType === 'mouse'\) return/)
+  assert.match(source, /openNodeContextMenu\(node, nodeLongPressStart\.x, nodeLongPressStart\.y\)/)
+  assert.match(source, /function moveNodeLongPress[\s\S]*?NODE_LONG_PRESS_MOVE_LIMIT[\s\S]*?cancelNodeLongPress\(\)/)
+  assert.match(source, /@pointerdown="startNodeLongPress\(\$event, item\.node\)"/)
+  assert.match(source, /@pointerup="cancelNodeLongPress"/)
+  assert.match(source, /-webkit-touch-callout:\s*none/)
+  assert.match(source, /user-select:\s*none/)
+})
+
 test('project file tree searches unloaded paths in a temporary ancestor-complete tree', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),

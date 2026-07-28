@@ -175,12 +175,19 @@ export function projectResourceForMediaTask(task: RecentMediaTask): ProjectResou
       kind: 'media',
     }
   }
-  if (task.directory && task.assetUri) {
-    const path = normalizeProjectMediaReferencePath(task.assetUri, task.directory, 'desktop')
+  const projectPath = String(task.projectPath || '').replace(/^\/+/, '')
+  const assetUri = String(task.assetUri || '').replace(/\\/g, '/')
+  const inferredDirectory =
+    !task.directory && projectPath && assetUri.endsWith(`/${projectPath}`)
+      ? assetUri.slice(0, -(projectPath.length + 1))
+      : ''
+  const directory = task.directory || inferredDirectory
+  if (directory && (projectPath || assetUri)) {
+    const path = normalizeProjectMediaReferencePath(projectPath || assetUri, directory, 'desktop')
     if (path) {
       return {
         runtime: 'desktop',
-        owner: task.directory,
+        owner: directory,
         path,
         name: path.split('/').pop() || path,
         isDirectory: false,

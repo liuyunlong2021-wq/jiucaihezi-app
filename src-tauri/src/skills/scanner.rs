@@ -3,11 +3,11 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use chrono::Utc;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tauri::State;
 
-use crate::skills::db::{self, AgentSkillObservation, DbPool, Skill, SkillInstallation};
 use crate::skills::SkillsAppState;
+use crate::skills::db::{self, AgentSkillObservation, DbPool, Skill, SkillInstallation};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -145,16 +145,19 @@ pub fn parse_skill_md(path: &Path, fallback_name: &str) -> SkillInfo {
 
     match yaml {
         Some(y) => {
-            let name = y.get("name")
+            let name = y
+                .get("name")
                 .and_then(|v| v.as_str())
                 .map(String::from)
                 .unwrap_or_else(|| fallback_name.to_string());
 
-            let description = y.get("description")
+            let description = y
+                .get("description")
                 .and_then(|v| v.as_str())
                 .map(String::from);
 
-            let triggers: Vec<String> = y.get("triggers")
+            let triggers: Vec<String> = y
+                .get("triggers")
                 .and_then(|v| v.as_sequence())
                 .map(|seq| {
                     seq.iter()
@@ -163,10 +166,17 @@ pub fn parse_skill_md(path: &Path, fallback_name: &str) -> SkillInfo {
                 })
                 .unwrap_or_default();
 
-            SkillInfo { name, description, triggers }
+            SkillInfo {
+                name,
+                description,
+                triggers,
+            }
         }
         None => {
-            eprintln!("[JC] warning: {} YAML frontmatter parse failed, using directory name", path.display());
+            eprintln!(
+                "[JC] warning: {} YAML frontmatter parse failed, using directory name",
+                path.display()
+            );
             SkillInfo {
                 name: fallback_name.to_string(),
                 description: None,
@@ -845,26 +855,34 @@ pub async fn scan_product_skills_impl(pool: &DbPool) -> Result<ScanResult, Strin
         found_ids.push(skill.id.clone());
         let commands = (!skill.commands.is_empty())
             .then(|| serde_json::to_string(&skill.commands).unwrap_or_default());
-        db::upsert_skill(pool, &Skill {
-            id: skill.id.clone(),
-            name: skill.name.clone(),
-            description: skill.description.clone(),
-            file_path: skill.file_path.clone(),
-            canonical_path: Some(skill.dir_path.clone()),
-            is_central: true,
-            source: Some("local".to_string()),
-            content: None,
-            commands,
-            scanned_at: now.clone(),
-        }).await?;
-        db::upsert_skill_installation(pool, &SkillInstallation {
-            skill_id: skill.id.clone(),
-            agent_id: "central".to_string(),
-            installed_path: skill.dir_path.clone(),
-            link_type: skill.link_type.clone(),
-            symlink_target: skill.symlink_target.clone(),
-            created_at: now.clone(),
-        }).await?;
+        db::upsert_skill(
+            pool,
+            &Skill {
+                id: skill.id.clone(),
+                name: skill.name.clone(),
+                description: skill.description.clone(),
+                file_path: skill.file_path.clone(),
+                canonical_path: Some(skill.dir_path.clone()),
+                is_central: true,
+                source: Some("local".to_string()),
+                content: None,
+                commands,
+                scanned_at: now.clone(),
+            },
+        )
+        .await?;
+        db::upsert_skill_installation(
+            pool,
+            &SkillInstallation {
+                skill_id: skill.id.clone(),
+                agent_id: "central".to_string(),
+                installed_path: skill.dir_path.clone(),
+                link_type: skill.link_type.clone(),
+                symlink_target: skill.symlink_target.clone(),
+                created_at: now.clone(),
+            },
+        )
+        .await?;
     }
 
     db::update_agent_detected(pool, "central", root.exists()).await?;
@@ -897,7 +915,10 @@ pub async fn scan_all_skills(state: State<'_, SkillsAppState>) -> Result<ScanRes
     // 如果上一把锁超过 120 秒未释放，强制重置（防止 panic/进程中断留下的死锁）
     let prev = SCAN_STARTED_AT.load(Ordering::SeqCst);
     if prev > 0 && now - prev > 120 {
-        eprintln!("[JC] scan_all_skills: 上一把锁超时 ({}s)，强制释放", now - prev);
+        eprintln!(
+            "[JC] scan_all_skills: 上一把锁超时 ({}s)，强制释放",
+            now - prev
+        );
         SCANNING.store(false, Ordering::SeqCst);
     }
 
@@ -1040,7 +1061,10 @@ mod tests {
 
         let result = parse_skill_md(&md_path, "directory-name");
         assert_eq!(result.name, "directory-name");
-        assert_eq!(result.description.as_deref(), Some("Has description but no name"));
+        assert_eq!(
+            result.description.as_deref(),
+            Some("Has description but no name")
+        );
     }
 
     #[test]
@@ -1327,9 +1351,11 @@ mod tests {
         assert_eq!(skills[0].id, "apple-reminders");
         assert!(skills[0].dir_path.contains("apple/apple-reminders"));
         assert_eq!(skills[1].id, "weights-and-biases");
-        assert!(skills[1]
-            .dir_path
-            .contains("mlops/evaluation/weights-and-biases"));
+        assert!(
+            skills[1]
+                .dir_path
+                .contains("mlops/evaluation/weights-and-biases")
+        );
     }
 
     #[test]
@@ -1748,8 +1774,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_all_skills_impl_claude_duplicate_rows_stay_distinct_without_install_pollution(
-    ) {
+    async fn test_scan_all_skills_impl_claude_duplicate_rows_stay_distinct_without_install_pollution()
+     {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
 
@@ -2006,9 +2032,11 @@ mod tests {
         assert_eq!(observations[0].skill_id, "using-superpowers");
         assert_eq!(observations[0].source_kind, "compatibility");
         assert!(observations[0].is_read_only);
-        assert!(observations[0]
-            .dir_path
-            .contains("superpowers/using-superpowers"));
+        assert!(
+            observations[0]
+                .dir_path
+                .contains("superpowers/using-superpowers")
+        );
 
         let platform_skills = db::get_skills_for_agent(&pool, "factory-droid")
             .await

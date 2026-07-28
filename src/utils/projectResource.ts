@@ -34,11 +34,11 @@ export interface ProjectTextRead extends ProjectTextContent {
   revision: ProjectResourceRevision
 }
 
-const MEDIA_EXT = /\.(?:png|jpe?g|gif|webp|svg|ico|bmp|mp4|mov|avi|webm|mkv|mp3|wav|ogg|m4a|flac)$/i
+const MEDIA_EXT = /\.(?:png|jpe?g|gif|webp|svg|ico|bmp|mp4|mov|avi|webm|mkv|mp3|wav|ogg|m4a|flac|glb|gltf)$/i
 
 export function classifyProjectResource(input: Pick<ProjectResource, 'path' | 'mimeType'>): ProjectResourceKind {
   if (/\.jccanvas$/i.test(input.path)) return 'canvas'
-  if (input.mimeType?.startsWith('image/') || input.mimeType?.startsWith('video/') || input.mimeType?.startsWith('audio/') || MEDIA_EXT.test(input.path)) return 'media'
+  if (input.mimeType?.startsWith('image/') || input.mimeType?.startsWith('video/') || input.mimeType?.startsWith('audio/') || input.mimeType?.startsWith('model/') || MEDIA_EXT.test(input.path)) return 'media'
   if (input.mimeType?.startsWith('text/') || input.mimeType === 'application/json' || SUPPORTED_TEXT_EXT.test(input.path)) return 'document'
   return 'binary'
 }

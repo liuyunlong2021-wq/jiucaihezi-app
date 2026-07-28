@@ -1,8 +1,8 @@
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{
-    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
     FromRow, Row, SqlitePool,
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -591,7 +591,10 @@ pub fn remove_seeded_preset_skills(src_dir: &std::path::Path) -> Result<(), Stri
     let entries = match std::fs::read_dir(src_dir) {
         Ok(e) => e,
         Err(e) => {
-            eprintln!("[JC] cleanup seeded skills: cannot read source {:?}: {e}", src_dir);
+            eprintln!(
+                "[JC] cleanup seeded skills: cannot read source {:?}: {e}",
+                src_dir
+            );
             return Ok(());
         }
     };
@@ -599,9 +602,15 @@ pub fn remove_seeded_preset_skills(src_dir: &std::path::Path) -> Result<(), Stri
     for entry in entries.flatten() {
         let path = entry.path();
         let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-        if name.starts_with('.') || name == "SKILL.md" { continue; }
-        if !path.is_dir() { continue; }
-        if !path.join("SKILL.md").exists() { continue; }
+        if name.starts_with('.') || name == "SKILL.md" {
+            continue;
+        }
+        if !path.is_dir() {
+            continue;
+        }
+        if !path.join("SKILL.md").exists() {
+            continue;
+        }
 
         let dst = target_dir.join(name);
         if dst.join(".seed_complete").exists() {
@@ -1096,14 +1105,7 @@ pub fn builtin_agents() -> Vec<Agent> {
             Some("skills"),
             "openclaw",
         ),
-        agent(
-            "grok",
-            "Grok",
-            "coding",
-            ".grok/skills",
-            None,
-            "grok",
-        ),
+        agent("grok", "Grok", "coding", ".grok/skills", None, "grok"),
         agent(
             "grok-bundled",
             "Grok (Bundled)",
@@ -1780,7 +1782,7 @@ pub async fn update_custom_agent(
     match agent {
         None => return Err(format!("Agent '{}' not found", agent_id)),
         Some(a) if a.is_builtin => {
-            return Err(format!("Cannot update built-in agent '{}'", agent_id))
+            return Err(format!("Cannot update built-in agent '{}'", agent_id));
         }
         Some(_) => {}
     }

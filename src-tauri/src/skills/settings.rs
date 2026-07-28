@@ -1,8 +1,8 @@
 use tauri::State;
 
+use crate::skills::SkillsAppState;
 use crate::skills::db::{self, DbPool, ScanDirectory};
 use crate::skills::path_utils::{app_data_dir, expand_home_path, path_to_string};
-use crate::skills::SkillsAppState;
 
 // ─── Core Implementations (testable without Tauri State) ──────────────────────
 
@@ -80,7 +80,10 @@ pub async fn add_scan_directory(
 
 /// Tauri command: remove a custom scan directory by path.
 #[tauri::command]
-pub async fn remove_scan_directory(state: State<'_, SkillsAppState>, path: String) -> Result<(), String> {
+pub async fn remove_scan_directory(
+    state: State<'_, SkillsAppState>,
+    path: String,
+) -> Result<(), String> {
     remove_scan_directory_impl(&state.db, &path).await
 }
 

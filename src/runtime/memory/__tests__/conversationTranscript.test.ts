@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   appendConversationTurn,
   createConversationTranscript,
+  mergeConversationTranscriptContents,
   parseConversationTranscript,
   renameConversationTranscript,
 } from '../conversationTranscript'
@@ -84,4 +85,23 @@ test('conversation transcript hides only the legacy rapid duplicate user turns',
     id: 'turn_3', role: 'user', content: '同一条消息', createdAt: '2026-07-24T10:01:10.000Z',
   })
   assert.deepEqual(parseConversationTranscript('.raw/对话记录/chat_duplicate.md', legitimate)?.turns.map(turn => turn.id), ['turn_1', 'turn_3'])
+})
+
+test('conversation transcript merges concurrent append-only turns by id', () => {
+  const path = '.raw/对话记录/chat_merge.md'
+  const empty = createConversationTranscript('chat_merge', '连续对话', '2026-07-24T10:00:00.000Z')
+  const first = appendConversationTurn(empty, {
+    id: 'turn_1', role: 'user', content: '第一问', createdAt: '2026-07-24T10:01:00.000Z',
+  })
+  const remote = appendConversationTurn(first, {
+    id: 'turn_2', role: 'assistant', content: '第一答', createdAt: '2026-07-24T10:01:10.000Z',
+  })
+  const local = appendConversationTurn(first, {
+    id: 'turn_3', role: 'user', content: '第二问', createdAt: '2026-07-24T10:01:20.000Z',
+  })
+  const merged = mergeConversationTranscriptContents(path, remote, local)
+
+  assert.deepEqual(parseConversationTranscript(path, merged || '')?.turns.map(turn => turn.content), [
+    '第一问', '第一答', '第二问',
+  ])
 })

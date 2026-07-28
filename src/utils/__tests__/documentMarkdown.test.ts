@@ -56,6 +56,15 @@ test('Web document conversion uses the shared converter instead of a desktop-onl
   assert.doesNotMatch(source, /TAURI_REQUIRED/)
 })
 
+test('iPhone document conversion uses the cloud service while Mac keeps local conversion', () => {
+  const source = readFileSync(join(process.cwd(), 'src/utils/documentMarkdown.ts'), 'utf8')
+
+  assert.match(source, /!isTauriRuntime\(\) \|\| isTauriMobileRuntime\(\)/)
+  assert.match(source, /return convertWebDocumentToMarkdown\(input, maxChars, outputFilename\)/)
+  assert.match(source, /isTauriMobileRuntime\(\)[\s\S]*document_markdown_request/)
+  assert.match(source, /invoke\('document_to_markdown_file'/)
+})
+
 test('Web document conversion rejects an HTML fallback even when it has HTTP 200', () => {
   const source = readFileSync(join(process.cwd(), 'src/utils/documentMarkdown.ts'), 'utf8')
 

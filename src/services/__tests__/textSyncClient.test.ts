@@ -2,13 +2,17 @@ import assert from 'node:assert/strict'
 import { afterEach, test } from 'node:test'
 import {
   __resetGatewaySessionMemoryCacheForTests,
+  gatewaySessionAuthenticated,
+  getGatewaySessionToken,
 } from '../newApiClient'
 import { textSyncClient, TextSyncError } from '../textSyncClient'
 
 const originalFetch = globalThis.fetch
+const originalLocalStorage = (globalThis as any).localStorage
 
 afterEach(() => {
   globalThis.fetch = originalFetch
+  ;(globalThis as any).localStorage = originalLocalStorage
   __resetGatewaySessionMemoryCacheForTests('')
 })
 
@@ -38,4 +42,21 @@ test('text sync client preserves revision conflicts as typed errors', async () =
     }]),
     (error: unknown) => error instanceof TextSyncError && error.status === 409 && error.code === 'sync_conflict',
   )
+})
+
+test('text sync client clears an expired session after unauthorized response', async () => {
+  __resetGatewaySessionMemoryCacheForTests('sess_expired_1234')
+  ;(globalThis as any).localStorage = {
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  }
+  globalThis.fetch = (async () => Response.json({ code: 'unauthorized', message: '请重新登录' }, { status: 401 })) as typeof fetch
+
+  await assert.rejects(
+    () => textSyncClient.listProjects(),
+    (error: unknown) => error instanceof TextSyncError && error.status === 401,
+  )
+  assert.equal(getGatewaySessionToken(), '')
+  assert.equal(gatewaySessionAuthenticated.value, false)
 })

@@ -24,6 +24,7 @@ test('memory file tree groups project identity above its three file actions', ()
 test('memory project entry unifies local and cloud projects while settings only diagnoses sync', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const settings = source('src/components/memory/MemorySettings.vue')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const main = source('src/main.ts')
 
   assert.match(tree, />项目中心</)
@@ -36,7 +37,18 @@ test('memory project entry unifies local and cloud projects while settings only 
   assert.match(tree, /projectTextSync\.cloudProjectIdFor\(project\.owner\)/)
   assert.match(tree, /webProjectFiles\.createProject\(cloud\.name\)[\s\S]*projectTextSync\.connect\(cloud\.id\)/)
   assert.match(tree, /projectFiles\.list\(dir\)[\s\S]*空文件夹[\s\S]*projectTextSync\.connect\(cloud\.id\)/)
+  assert.match(tree, /v-if="isDesktop && !isMobile"[\s\S]*打开本地文件夹[\s\S]*v-else-if="isMobile"[\s\S]*新建项目/)
+  assert.match(tree, /createMobileProject\(cloud\.name, false\)[\s\S]*projectTextSync\.connect\(cloud\.id\)[\s\S]*projectStore\.selectProject\(project\.path\)/)
+  assert.match(tree, /mobileProjects\.value\.find\(project => project\.name === projectStore\.projectName\.value\)[\s\S]*projectStore\.selectProject\(current\.path\)/)
+  assert.match(tree, /onMounted\(async \(\) => \{[\s\S]*if \(isMobile\) await refreshMobileProjects\(\)/)
   assert.match(settings, /立即同步/)
+  assert.match(settings, /mobileRuntime = isTauriMobileRuntime\(\)[\s\S]*isTauriRuntime\(\) && !mobileRuntime/)
+  assert.match(settings, /:logged-in="gatewaySessionAuthenticated"/)
+  assert.match(settings, /:open-url="openExternal"/)
+  assert.match(settings, /mobileRuntime && gatewaySessionAuthenticated[\s\S]*退出登录/)
+  assert.match(settings, /gatewayLogout\(\)/)
+  assert.match(workbench, /\.memory-tree \{[^}]*inset: 0;[^}]*width: auto;/)
+  assert.match(workbench, /\.memory-settings-drawer \{[^}]*inset: 0;[^}]*width: auto;/)
   assert.match(tree, /progressCurrent[\s\S]*只同步文字，媒体和空目录不同步/)
   assert.match(settings, /progressCurrent[\s\S]*只同步文字，媒体和空目录不同步/)
   assert.match(settings, /重新登录一次账号/)
@@ -56,6 +68,16 @@ test('memory space and conversations are created only by their explicit actions'
   assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
 })
 
+test('mobile conversation deletion confirms permanent removal', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+
+  assert.match(workbench, /mobileRuntime[\s\S]*永久删除对话[\s\S]*此操作无法恢复/)
+  assert.match(workbench, /okLabel: mobileRuntime \? '永久删除' : '删除'/)
+  assert.match(tree, /usesSystemTrash = isDesktop && !isMobile/)
+  assert.match(tree, /usesSystemTrash \? '移入废纸篓' : '永久删除'/)
+})
+
 test('memory workbench keeps project identity in the file tree and a native drag region in the header', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
@@ -68,12 +90,31 @@ test('memory workbench keeps project identity in the file tree and a native drag
   assert.match(tree, /class="pft-project-name pft-project-trigger"[\s\S]*projectStore\.projectName\.value/)
 })
 
+test('memory messages expose one copy action and project GLB files use the shared 3D viewer', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const viewer = source('src/components/media/Model3DViewer.vue')
+  const mediaViewer = source('src/components/media/MediaViewer.vue')
+
+  assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
+  assert.match(workbench, /class="memory-message-copy"/)
+  assert.match(workbench, /copiedTurnId === turn\.id \? 'check' : 'content-copy'/)
+  assert.match(workbench, /<Model3DViewer[^>]*previewResource\.mediaKind === 'model3d' && modelData[^>]*:data="modelData"/)
+  assert.match(workbench, /if \(resource\.mediaKind === 'model3d'\) \{\s+modelData\.value = data\.buffer/)
+  assert.match(mediaViewer, /<Model3DViewer[^>]*type === 'model3d'/)
+  assert.match(viewer, /GLTFLoader/)
+  assert.match(viewer, /OrbitControls/)
+  assert.match(viewer, /frameModel/)
+  assert.match(viewer, /loader\.parse\(props\.data, '', onLoad, onError\)/)
+  assert.match(viewer, /\.model-viewer \{ width: 100%; max-width: 100%; height: 68vh;/)
+})
+
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
   assert.match(tree, /props\.memoryMode \|\| isCanvasMediaFile/)
+  assert.match(tree, /props\.memoryMode[\s\S]*emitEvent\('reference-file', \{ resource: resourceForNode\(node\) \}\)/)
   assert.match(tree, /await projectFiles\.readText\(resourceForNode\(node\)\)/)
   assert.match(tree, /emitEvent\('reference-file', \{ name: node\.name, content: text\.content \}\)/)
   assert.match(workbench, /contenteditable="true"/)
@@ -82,6 +123,17 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.doesNotMatch(workbench, /<textarea/)
   assert.match(workbench, /files: referencedFiles\.value/)
   assert.match(runtime, /files: input\.files/)
+})
+
+test('memory workbench converts Office attachments before direct model requests', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /detectFileType\(file\) === 'office'/)
+  assert.match(workbench, /await processFile\(file\)/)
+  assert.match(workbench, /textContent: processed\.textContent/)
+  assert.match(workbench, /value: ''/)
+  assert.match(workbench, /await files\.readBinary\(resource\)/)
+  assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
 })
 
 test('memory composer keeps quick and memory execution in one Raw conversation', () => {
@@ -131,7 +183,8 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(workbench, /getCursorPosition\(editor\)/)
   assert.match(workbench, /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/)
   assert.match(workbench, /v-show="mentionOpen"/)
-  assert.match(workbench, /files\.readText\(option\.resource\)/)
+  assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
+  assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
   assert.match(workbench, /selectedSkillNames: selectedSkillNames\.value/)
   assert.match(runtime, /mergeCreativeSkillCatalog\(customSkills, await loadWebSkillCatalog\(\)\)/)
   assert.match(runtime, /根据用户任务自主决定是否加载 Skill/)
@@ -191,6 +244,12 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
   assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
+})
+
+test('iPhone media saves declare the required Photos add-only permission', () => {
+  const infoPlist = source('src-tauri/Info.ios.plist')
+
+  assert.match(infoPlist, /<key>NSPhotoLibraryAddUsageDescription<\/key>\s*<string>[^<]+<\/string>/)
 })
 
 test('memory conversation virtualizes historical turns and keeps rich media out of the timeline', () => {

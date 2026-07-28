@@ -1,4 +1,4 @@
-use base64::{engine::general_purpose, Engine as _};
+use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
@@ -22,7 +22,9 @@ pub fn greet(name: &str) -> String {
 }
 
 #[tauri::command]
-pub fn save_generated_file(input: SaveGeneratedFileInput) -> Result<SaveGeneratedFileOutput, String> {
+pub fn save_generated_file(
+    input: SaveGeneratedFileInput,
+) -> Result<SaveGeneratedFileOutput, String> {
     let path = PathBuf::from(&input.path);
     let bytes = general_purpose::STANDARD
         .decode(input.data_base64.as_bytes())

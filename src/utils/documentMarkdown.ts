@@ -1,4 +1,4 @@
-import { isTauriRuntime } from './tauriEnv'
+import { isTauriMobileRuntime, isTauriRuntime } from './tauriEnv'
 import { decodeApiKey, DEFAULT_PROVIDER_HOST, resolveWebApiBaseUrl } from './providerConfig'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 
@@ -93,20 +93,42 @@ async function convertWebDocumentToMarkdown(
   try {
     const apiKey = decodeApiKey(getApiKey() || await initApiKey())
     if (!apiKey) throw new Error('请先登录后再上传文档。')
-    const form = new FormData()
-    form.append('file', input.file)
-    form.append('max_chars', String(maxChars))
-    const response = await withTimeout(fetch(`${resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)}/documents/markdown`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
-      body: form,
-    }), Math.max(10_000, Math.min(Number(input.timeoutMs || 120_000), 120_000)), '云端文档转换超时，请稍后重试。')
-    const contentType = response.headers.get('content-type') || ''
+    const url = `${resolveWebApiBaseUrl(DEFAULT_PROVIDER_HOST)}/documents/markdown`
+    let status: number
+    let contentType: string
+    let payload: Partial<DocumentToMarkdownResult> & { detail?: string }
+    if (isTauriMobileRuntime()) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const response = await invoke<{ status: number; headers: Record<string, string>; body: string }>('document_markdown_request', {
+        request: {
+          url,
+          api_key: apiKey,
+          filename: input.file.name,
+          mime_type: input.file.type || 'application/octet-stream',
+          data_base64: arrayBufferToBase64(await input.file.arrayBuffer()),
+          max_chars: maxChars,
+        },
+      })
+      status = response.status
+      contentType = Object.entries(response.headers).find(([key]) => key.toLowerCase() === 'content-type')?.[1] || ''
+      payload = JSON.parse(response.body || '{}')
+    } else {
+      const form = new FormData()
+      form.append('file', input.file)
+      form.append('max_chars', String(maxChars))
+      const response = await withTimeout(fetch(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'x-api-key': apiKey },
+        body: form,
+      }), Math.max(10_000, Math.min(Number(input.timeoutMs || 120_000), 120_000)), '云端文档转换超时，请稍后重试。')
+      status = response.status
+      contentType = response.headers.get('content-type') || ''
+      payload = await response.json().catch(() => ({})) as Partial<DocumentToMarkdownResult> & { detail?: string }
+    }
     if (!contentType.includes('application/json')) {
       throw new Error('文档转换服务未部署或路由错误。')
     }
-    const payload = await response.json().catch(() => ({})) as Partial<DocumentToMarkdownResult> & { detail?: string }
-    if (!response.ok || payload.status !== 'success') {
+    if (status < 200 || status >= 300 || payload.status !== 'success') {
       throw new Error(payload.message || payload.detail || '云端文档转换失败。')
     }
     return {
@@ -163,7 +185,7 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
     }
   }
 
-  if (!isTauriRuntime()) {
+  if (!isTauriRuntime() || isTauriMobileRuntime()) {
     return convertWebDocumentToMarkdown(input, maxChars, outputFilename)
   }
 

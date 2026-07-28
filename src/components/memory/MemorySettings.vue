@@ -9,9 +9,10 @@ import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { getLocalOllamaModels } from '@/utils/providerConfig'
 import { openExternal } from '@/utils/httpClient'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import {
   gatewayLogin,
+  gatewayLogout,
   getApiKey,
   initApiKey,
   initGatewaySessionToken,
@@ -30,11 +31,13 @@ const apiKey = ref('')
 const status = ref('')
 const saved = ref(false)
 const advancedOpen = ref(false)
-const desktopRuntime = isTauriRuntime()
+const mobileRuntime = isTauriMobileRuntime()
+const desktopRuntime = isTauriRuntime() && !mobileRuntime
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
 const syncBusy = ref(false)
+const logoutBusy = ref(false)
 const syncError = ref('')
 const agentStore = useAgentStore()
 const { theme } = useTheme()
@@ -93,6 +96,17 @@ async function handleLogin(result: JcCloudLoginResult) {
   status.value = '已登录'
 }
 
+async function logout() {
+  if (logoutBusy.value) return
+  logoutBusy.value = true
+  try {
+    await gatewayLogout()
+    status.value = '已退出登录'
+  } finally {
+    logoutBusy.value = false
+  }
+}
+
 async function saveKey() {
   const key = apiKey.value.trim()
   if (!key) {
@@ -148,15 +162,19 @@ async function runSync() {
         <JcCloudLoginBox
           v-model:api-key="apiKey"
           v-model:advanced-open="advancedOpen"
-          :logged-in="Boolean(apiKey)"
+          :logged-in="gatewaySessionAuthenticated"
           :saved="saved"
           :status="status"
           :model="agentStore.currentModel"
           :chat-models="textModels"
           :login="login"
+          :open-url="openExternal"
           @login-success="handleLogin"
           @save-key="saveKey"
         />
+        <button v-if="mobileRuntime && gatewaySessionAuthenticated" class="memory-mobile-logout" :disabled="logoutBusy" @click="logout">
+          <JcIcon name="logout" />{{ logoutBusy ? '正在退出' : '退出登录' }}
+        </button>
         <section v-if="desktopRuntime" class="memory-local-model">
           <div>
             <strong>Ollama 本地模型</strong>
@@ -237,6 +255,7 @@ async function runSync() {
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
 .memory-account { display: grid; gap: 16px; }
+.memory-mobile-logout { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font: inherit; }
 .memory-local-model { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-local-model > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .memory-local-model span, .memory-local-model p { margin: 0; color: var(--ink3); font-size: 12px; }

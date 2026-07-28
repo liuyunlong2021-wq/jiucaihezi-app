@@ -68,5 +68,7 @@ test('resource open routing rejects truncated documents before an editor tab exi
 test('resource open routing sends canvas and media to the creation surface and leaves binary outside the editor', async () => {
   assert.equal((await openProjectResource(fileService(), resource('canvas', 'jc-canvas/plan.jccanvas'))).type, 'canvas')
   assert.equal((await openProjectResource(fileService(), resource('media', 'jc-media/voice.mp3'))).type, 'media')
+  const model = await openProjectResource(fileService(), resource('media', 'jc-media/models/character.glb'))
+  assert.equal(model.type === 'media' ? model.mediaKind : '', 'model3d')
   assert.equal((await openProjectResource(fileService(), resource('binary', 'assets/model.psd'))).type, 'binary')
 })

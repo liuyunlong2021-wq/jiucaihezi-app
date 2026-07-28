@@ -5,11 +5,11 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 use tauri::State;
 
-use crate::skills::db::{self, Collection, DbPool, SkillForAgent};
 use crate::skills::SkillsAppState;
+use crate::skills::db::{self, Collection, DbPool, SkillForAgent};
 
 use super::linker::uninstall_skill_from_agent_impl;
-use super::scanner::{scan_product_skills_impl, scan_skill_root, ScanDirectoryOptions};
+use super::scanner::{ScanDirectoryOptions, scan_product_skills_impl, scan_skill_root};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -202,8 +202,8 @@ fn skill_md_frontmatter_name(skill_md: &str) -> Result<String, String> {
         .find("\n---")
         .ok_or_else(|| "SKILL.md frontmatter is missing a closing delimiter".to_string())?;
     let frontmatter = &after_open[..close_pos];
-    let yaml: serde_yaml::Value =
-        serde_yaml::from_str(frontmatter).map_err(|e| format!("Invalid SKILL.md frontmatter: {}", e))?;
+    let yaml: serde_yaml::Value = serde_yaml::from_str(frontmatter)
+        .map_err(|e| format!("Invalid SKILL.md frontmatter: {}", e))?;
     yaml.get("name")
         .and_then(|value| value.as_str())
         .map(str::trim)
@@ -647,14 +647,11 @@ fn build_skill_directory_nodes(
         {
             continue;
         }
-        if canonical_dir
-            .as_ref()
-            .is_some_and(|canonical| {
-                !allowed_roots
-                    .iter()
-                    .any(|allowed_root| is_path_under_root(canonical, allowed_root))
-            })
-        {
+        if canonical_dir.as_ref().is_some_and(|canonical| {
+            !allowed_roots
+                .iter()
+                .any(|allowed_root| is_path_under_root(canonical, allowed_root))
+        }) {
             continue;
         }
 
@@ -894,7 +891,7 @@ async fn get_observation_detail(
             return Err(format!(
                 "Multiple observed rows found for skill '{}'; row_id is required",
                 skill_id
-            ))
+            ));
         }
     };
 
@@ -1118,7 +1115,9 @@ async fn central_bundle_preview_for_target(
 /// `linked_agents` array listing every agent that has an installation record
 /// for that skill (regardless of whether the link type is symlink or copy).
 #[tauri::command]
-pub async fn get_central_skills(state: State<'_, SkillsAppState>) -> Result<Vec<SkillWithLinks>, String> {
+pub async fn get_central_skills(
+    state: State<'_, SkillsAppState>,
+) -> Result<Vec<SkillWithLinks>, String> {
     let skills = db::get_central_skills(&state.db).await?;
 
     let mut result = Vec::with_capacity(skills.len());
@@ -1149,7 +1148,10 @@ pub async fn save_central_skill_impl(
             let existing_dir = existing_dir.canonicalize().unwrap_or(existing_dir);
             ensure_under_central_root(&existing_dir, &central_root)?;
         } else {
-            return Err(format!("Skill ID '{}' is already used outside Central Skills", skill_id));
+            return Err(format!(
+                "Skill ID '{}' is already used outside Central Skills",
+                skill_id
+            ));
         }
     }
 
@@ -1470,7 +1472,7 @@ pub async fn read_skill_content(
     // ponytail: 处理已删除目录的僵尸条目 — 文件不存在时返回空字符串
     let path = std::path::Path::new(&skill.file_path);
     if !path.exists() {
-        return Ok(String::new())
+        return Ok(String::new());
     }
     std::fs::read_to_string(&skill.file_path)
         .map_err(|e| format!("Failed to read '{}': {}", skill.file_path, e))
@@ -1587,8 +1589,8 @@ fn open_in_file_manager_impl(path: &str) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::skills::linker::create_symlink;
     use crate::skills::db::{self, AgentSkillObservation, Skill, SkillInstallation};
+    use crate::skills::linker::create_symlink;
     use chrono::Utc;
     use sqlx::SqlitePool;
     use std::{fs, path::Path};
@@ -1792,7 +1794,12 @@ mod tests {
 
         assert!(result.unwrap_err().contains("refusing to write through it"));
         assert!(!outside_dir.join("SKILL.md").exists());
-        assert!(db::get_skill_by_id(&pool, "escape").await.unwrap().is_none());
+        assert!(
+            db::get_skill_by_id(&pool, "escape")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     async fn create_nested_central_skill(
@@ -2044,10 +2051,12 @@ mod tests {
 
         assert_eq!(result.skill_id, "delete-me");
         assert!(!central_dir.join("delete-me").exists());
-        assert!(db::get_skill_by_id(&pool, "delete-me")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            db::get_skill_by_id(&pool, "delete-me")
+                .await
+                .unwrap()
+                .is_none()
+        );
 
         let collection_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM collection_skills WHERE skill_id = 'delete-me'",
@@ -2118,10 +2127,12 @@ mod tests {
 
         assert!(err.contains("installed on agents"));
         assert!(central_dir.join("linked-skill").exists());
-        assert!(db::get_skill_by_id(&pool, "linked-skill")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            db::get_skill_by_id(&pool, "linked-skill")
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -2170,10 +2181,12 @@ mod tests {
         assert_eq!(result.uninstalled_agents, vec!["claude-code".to_string()]);
         assert!(!install_path.exists());
         assert!(!central_dir.join("cascade-me").exists());
-        assert!(db::get_skill_installations(&pool, "cascade-me")
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            db::get_skill_installations(&pool, "cascade-me")
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -2204,10 +2217,12 @@ mod tests {
 
         assert!(err.contains("outside Central Skills root"));
         assert!(outside_dir.exists());
-        assert!(db::get_skill_by_id(&pool, "escape-skill")
-            .await
-            .unwrap()
-            .is_some());
+        assert!(
+            db::get_skill_by_id(&pool, "escape-skill")
+                .await
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[tokio::test]
@@ -2249,10 +2264,12 @@ mod tests {
 
         assert!(result.uninstalled_agents.is_empty());
         assert!(!central_dir.join("shared-root").exists());
-        assert!(db::get_skill_installations(&pool, "shared-root")
-            .await
-            .unwrap()
-            .is_empty());
+        assert!(
+            db::get_skill_installations(&pool, "shared-root")
+                .await
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
@@ -2430,14 +2447,18 @@ mod tests {
         assert_eq!(result.uninstalled_agents, vec!["claude-code".to_string()]);
         assert!(!bundle_dir.exists());
         assert!(!install_path.exists());
-        assert!(db::get_skill_by_id(&pool, "using-superpowers")
-            .await
-            .unwrap()
-            .is_none());
-        assert!(db::get_skill_by_id(&pool, "writing-plans")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            db::get_skill_by_id(&pool, "using-superpowers")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            db::get_skill_by_id(&pool, "writing-plans")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -2484,10 +2505,12 @@ mod tests {
         assert_eq!(result.removed_kind, "symlink");
         assert!(std::fs::symlink_metadata(&central_bundle_link).is_err());
         assert!(real_bundle_dir.join("using-superpowers/SKILL.md").exists());
-        assert!(db::get_skill_by_id(&pool, "using-superpowers")
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            db::get_skill_by_id(&pool, "using-superpowers")
+                .await
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[tokio::test]
@@ -3227,7 +3250,9 @@ mod tests {
 
         assert!(result.is_err());
         assert!(
-            result.unwrap_err().contains("outside the allowed Skill directories"),
+            result
+                .unwrap_err()
+                .contains("outside the allowed Skill directories"),
             "arbitrary files must not be readable"
         );
     }
@@ -3236,7 +3261,11 @@ mod tests {
     async fn test_read_file_by_path_allows_scanned_platform_skill_file() {
         let tmp = TempDir::new().unwrap();
         let pool = setup_test_db().await;
-        let skill_dir = tmp.path().join("claude").join("skills").join("platform-access");
+        let skill_dir = tmp
+            .path()
+            .join("claude")
+            .join("skills")
+            .join("platform-access");
         fs::create_dir_all(&skill_dir).unwrap();
         let skill_file = skill_dir.join("SKILL.md");
         fs::write(&skill_file, "# platform-access").unwrap();
@@ -3296,9 +3325,11 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("outside the allowed Skill directories"));
+        assert!(
+            result
+                .unwrap_err()
+                .contains("outside the allowed Skill directories")
+        );
     }
 
     #[tokio::test]

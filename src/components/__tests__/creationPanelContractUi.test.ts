@@ -750,28 +750,29 @@ test('creation panel releases lifecycle gates only after replacement canvases op
   )
 })
 
-test('creation panel previews persisted Web task media in MediaViewer without a remote fallback', () => {
+test('creation panel previews persisted project task media in MediaViewer without an external fallback', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const preview =
     source.match(
-      /async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskFolder/,
+      /async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskHistory/,
     )?.[0] || ''
-  const webPreview = preview.match(/if \(!isTauriRuntime\(\)\) \{[\s\S]*?\n  }/)?.[0] || ''
 
   assert.match(source, /import MediaViewer from '@\/components\/media\/MediaViewer\.vue'/)
   assert.match(source, /const taskPreview = ref/)
   assert.match(source, /function closeTaskPreview\(\)/)
   assert.match(source, /task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl/)
-  assert.match(webPreview, /const projectId = String\(task\.projectId \|\| ''\)/)
-  assert.match(webPreview, /const projectPath = String\(task\.projectPath \|\| ''\)/)
-  assert.match(webPreview, /projectFileActions\.readMedia\(\{[\s\S]{0,160}owner: projectId,[\s\S]{0,100}path: projectPath/)
-  assert.match(webPreview, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
-  assert.match(webPreview, /bytes\.set\(binary\.data\)/)
+  assert.match(preview, /const resource = projectResourceForMediaTask\(task\)/)
+  assert.match(preview, /projectFileActions\.readMedia\(resource\)/)
+  assert.match(preview, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
+  assert.match(preview, /bytes\.set\(binary\.data\)/)
   assert.match(
-    webPreview,
+    preview,
     /URL\.createObjectURL\(new Blob\(\[bytes\.buffer\], \{ type: binary\.mimeType \}\)\)/,
   )
-  assert.doesNotMatch(webPreview, /openExternal|window\.open/)
+  assert.doesNotMatch(preview, /openExternal|open_in_shell|window\.open/)
+  assert.match(preview, /if \(task\.resultUrl\)[\s\S]*?taskPreview\.value =/)
+  assert.match(preview, /type: taskPreviewType\(task\)/)
+  assert.match(source, /async function openTaskHistory\(\)[\s\S]*?await mediaTaskStore\.init\(\)/)
   assert.match(
     source,
     /<MediaViewer[\s\S]*?v-if="taskPreview"[\s\S]*?mode="file"[\s\S]*?@close="closeTaskPreview"/,

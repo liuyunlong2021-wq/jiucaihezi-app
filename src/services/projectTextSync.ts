@@ -12,6 +12,7 @@ import {
   type SyncProject,
 } from './textSyncClient'
 import type { ProjectResource } from '@/utils/projectResource'
+import { isConversationPath, mergeConversationTranscriptContents } from '@/runtime/memory/conversationTranscript'
 
 const STATE_DIRECTORY = '.raw/.sync'
 const STATE_PATH = `${STATE_DIRECTORY}/state.json`
@@ -111,7 +112,6 @@ export class ProjectTextSync {
   private projectName = ''
   private state = emptyState()
   private task: Promise<unknown> = Promise.resolve()
-  private suppressed = new Set<string>()
   private stopChanges: (() => void) | null = null
 
   constructor(
@@ -121,8 +121,7 @@ export class ProjectTextSync {
     this.stopChanges = files.onDidChange(change => {
       const changes = flattenProjectResourceChange(change).filter(entry => {
         if (entry.resource.owner !== this.owner || entry.resource.isDirectory) return false
-        if (this.suppressed.has(entry.resource.path)) return false
-        return entry.type !== 'renamed' || !this.suppressed.has(entry.oldResource.path)
+        return true
       })
       if (!changes.length) return
       void this.enqueue(async () => {
@@ -213,19 +212,14 @@ export class ProjectTextSync {
 
   private async persistState(): Promise<void> {
     const content = JSON.stringify(this.state)
-    this.suppressed.add(STATE_PATH)
-    try {
-      const existing = await this.find(STATE_PATH)
-      if (!existing) {
-        await this.files.createFolder(this.owner, STATE_DIRECTORY).catch(() => {})
-        await this.files.createText(this.owner, STATE_PATH, content)
-      } else {
-        const current = await this.files.readText(existing)
-        const result = await this.files.writeText(existing, content, current.revision)
-        if (result.status !== 'saved') throw new Error('本地同步队列保存冲突')
-      }
-    } finally {
-      this.suppressed.delete(STATE_PATH)
+    const existing = await this.find(STATE_PATH)
+    if (!existing) {
+      await this.files.createFolder(this.owner, STATE_DIRECTORY).catch(() => {})
+      await this.files.createText(this.owner, STATE_PATH, content)
+    } else {
+      const current = await this.files.readText(existing)
+      const result = await this.files.writeText(existing, content, current.revision)
+      if (result.status !== 'saved') throw new Error('本地同步队列保存冲突')
     }
     this.updateStatus(projectTextSyncStatus.phase)
   }
@@ -236,19 +230,33 @@ export class ProjectTextSync {
 
   private async enqueueUpsert(path: string, content?: string): Promise<void> {
     if (!isSyncableTextPath(path)) return
-    const value = content ?? (await this.files.readText((await this.find(path))!)).content
+    let value = content ?? (await this.files.readText((await this.find(path))!)).content
+    const pending = this.state.pending.filter(item => item.path === path)
+    if (isConversationPath(path)) {
+      for (const mutation of pending) {
+        if (mutation.operation !== 'upsert' || mutation.content == null) continue
+        value = mergeConversationTranscriptContents(path, mutation.content, value) || value
+      }
+      this.state.pending = this.state.pending.filter(item => item.path !== path)
+    }
+    const contentHash = await sha256(value)
+    const latest = [...this.state.pending].reverse().find(item => item.path === path)
+    if (latest?.operation === 'upsert' && latest.content_hash === contentHash) return
+    if (!latest && this.state.hashes[path] === contentHash) return
     this.state.pending.push({
       mutation_id: uniqueId('mutation'),
       path,
       operation: 'upsert',
       expected_revision: this.expectedRevision(path),
       content: value,
-      content_hash: await sha256(value),
+      content_hash: contentHash,
     })
   }
 
   private async enqueueDelete(path: string): Promise<void> {
     if (!isSyncableTextPath(path)) return
+    const latest = [...this.state.pending].reverse().find(item => item.path === path)
+    if (latest?.operation === 'delete' || (!latest && !(path in this.state.hashes))) return
     this.state.pending.push({
       mutation_id: uniqueId('mutation'),
       path,
@@ -368,36 +376,52 @@ export class ProjectTextSync {
   }
 
   private async applyRemote(remote: SyncFile): Promise<void> {
+    if (remote.revision <= (this.state.revisions[remote.path] || 0)) return
     const pending = this.state.pending.filter(item => item.path === remote.path)
     if (pending.length) {
       const local = [...pending].reverse().find(item => item.operation === 'upsert')
       this.state.pending = this.state.pending.filter(item => item.path !== remote.path)
       if (local?.content != null && local.content_hash !== remote.content_hash) {
+        const existing = await this.find(remote.path)
+        const localContent = existing ? (await this.files.readText(existing)).content : local.content
+        let merged = remote.deleted_at == null ? remote.content || '' : ''
+        for (const content of [...pending.flatMap(item => item.operation === 'upsert' && item.content != null ? [item.content] : []), localContent]) {
+          const next = mergeConversationTranscriptContents(remote.path, merged, content)
+          if (next) merged = next
+        }
+        if (!isConversationPath(remote.path)) merged = ''
+        if (merged) {
+          this.state.revisions[remote.path] = remote.revision
+          this.state.hashes[remote.path] = remote.content_hash
+          if (!existing) await this.files.createText(this.owner, remote.path, merged)
+          else if (localContent !== merged) {
+            const current = await this.files.readText(existing)
+            const result = await this.files.writeText(existing, merged, current.revision)
+            if (result.status !== 'saved') throw new Error(`本地文件正在更新：${remote.path}`)
+          }
+          await this.enqueueUpsert(remote.path, merged)
+          return
+        }
         await this.createConflictCopy(remote.path, local.content)
       }
     }
 
-    this.suppressed.add(remote.path)
-    try {
-      const existing = await this.find(remote.path)
-      if (remote.deleted_at != null) {
-        if (existing) await this.files.remove(existing)
-        delete this.state.hashes[remote.path]
-      } else if (!existing) {
-        await this.files.createText(this.owner, remote.path, remote.content || '')
-        this.state.hashes[remote.path] = remote.content_hash
-      } else {
-        const current = await this.files.readText(existing)
-        if (await sha256(current.content) !== remote.content_hash) {
-          const result = await this.files.writeText(existing, remote.content || '', current.revision)
-          if (result.status !== 'saved') throw new Error(`本地文件正在更新：${remote.path}`)
-        }
-        this.state.hashes[remote.path] = remote.content_hash
+    const existing = await this.find(remote.path)
+    if (remote.deleted_at != null) {
+      if (existing) await this.files.remove(existing)
+      delete this.state.hashes[remote.path]
+    } else if (!existing) {
+      await this.files.createText(this.owner, remote.path, remote.content || '')
+      this.state.hashes[remote.path] = remote.content_hash
+    } else {
+      const current = await this.files.readText(existing)
+      if (await sha256(current.content) !== remote.content_hash) {
+        const result = await this.files.writeText(existing, remote.content || '', current.revision)
+        if (result.status !== 'saved') throw new Error(`本地文件正在更新：${remote.path}`)
       }
-      this.state.revisions[remote.path] = remote.revision
-    } finally {
-      this.suppressed.delete(remote.path)
+      this.state.hashes[remote.path] = remote.content_hash
     }
+    this.state.revisions[remote.path] = remote.revision
   }
 
   private async createConflictCopy(path: string, content: string): Promise<void> {

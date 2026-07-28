@@ -315,11 +315,11 @@ export async function openExternal(url: string): Promise<void> {
   }
   if (isTauriRuntime()) {
     try {
-      const { open } = await import('@tauri-apps/plugin-shell')
-      await open(url)
+      const { openUrl } = await import('@tauri-apps/plugin-opener')
+      await openUrl(url)
       return
     } catch (e) {
-      console.warn('[JC] shell.open 失败:', e)
+      console.warn('[JC] opener.openUrl 失败:', e)
     }
   }
   window.open(url, '_blank')

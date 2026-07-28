@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
 import { ProjectTextSync, isSyncableTextPath, projectTextSyncStatus } from '../projectTextSync'
 import { createProjectFileService, type ProjectFileAdapter } from '../projectFileService'
 import { TextSyncError, type SyncFile, type SyncMutation, type SyncProject } from '../textSyncClient'
+import { appendConversationTurn, createConversationTranscript, parseConversationTranscript } from '../../runtime/memory/conversationTranscript'
 
 interface LocalFile { content: string; revision: number; mimeType: string }
 
@@ -117,6 +119,108 @@ async function replace(service: ReturnType<typeof createProjectFileService>, own
   const current = await service.readText(resource)
   assert.equal((await service.writeText(resource, content, current.revision)).status, 'saved')
 }
+
+function hash(content: string) {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+test('pending local edit ignores an already acknowledged remote revision', async () => {
+  const cloud = fakeCloud()
+  const local = localFiles('desktop')
+  const path = '.raw/对话记录/连续对话.md'
+  const previous = '第一轮'
+  const current = '第一轮\n第二轮'
+  cloud.files.set(path, {
+    path,
+    content: previous,
+    content_hash: hash(previous),
+    revision: 1,
+    updated_at: 1,
+    deleted_at: null,
+  })
+  local.records.set(path, { content: current, revision: 1, mimeType: 'text/markdown' })
+  local.records.set('.raw/.sync/state.json', {
+    content: JSON.stringify({
+      version: 1,
+      cloudProjectId: 'project_12345678',
+      cursor: 0,
+      revisions: { [path]: 1 },
+      hashes: { [path]: hash(previous) },
+      pending: [{
+        mutation_id: 'mutation_local_edit',
+        path,
+        operation: 'upsert',
+        expected_revision: 1,
+        content: current,
+        content_hash: hash(current),
+      }],
+    }),
+    revision: 1,
+    mimeType: 'application/json',
+  })
+  const sync = new ProjectTextSync(local.service, cloud.api)
+  try {
+    await sync.open('desktop-owner', '共同记忆')
+    assert.equal(await text(local.service, 'desktop-owner', path), current)
+    assert.equal(cloud.files.get(path)?.content, current)
+    assert.equal([...local.records.keys()].some(name => name.includes('(冲突 ')), false)
+  } finally {
+    sync.dispose()
+  }
+})
+
+test('concurrent Raw appends merge into one conversation without a conflict copy', async () => {
+  const cloud = fakeCloud()
+  const local = localFiles('desktop')
+  const path = '.raw/对话记录/连续对话.md'
+  const empty = createConversationTranscript('conversation_merge', '连续对话', '2026-07-27T10:00:00.000Z')
+  const first = appendConversationTurn(empty, {
+    id: 'turn_user_1', role: 'user', content: '第一问', createdAt: '2026-07-27T10:01:00.000Z',
+  })
+  const remote = appendConversationTurn(first, {
+    id: 'turn_assistant_1', role: 'assistant', content: '第一答', createdAt: '2026-07-27T10:01:10.000Z',
+  })
+  const current = appendConversationTurn(first, {
+    id: 'turn_user_2', role: 'user', content: '第二问', createdAt: '2026-07-27T10:01:20.000Z',
+  })
+  cloud.files.set(path, {
+    path, content: remote, content_hash: hash(remote), revision: 2, updated_at: 1, deleted_at: null,
+  })
+  local.records.set(path, { content: empty, revision: 1, mimeType: 'text/markdown' })
+  local.records.set('.raw/.sync/state.json', {
+    content: JSON.stringify({
+      version: 1,
+      cloudProjectId: 'project_12345678',
+      cursor: 0,
+      revisions: { [path]: 1 },
+      hashes: { [path]: hash(first) },
+      pending: [
+        {
+          mutation_id: 'mutation_second_turn', path, operation: 'upsert', expected_revision: 1,
+          content: current, content_hash: hash(current),
+        },
+        {
+          mutation_id: 'mutation_stale_header', path, operation: 'upsert', expected_revision: 2,
+          content: empty, content_hash: hash(empty),
+        },
+      ],
+    }),
+    revision: 1,
+    mimeType: 'application/json',
+  })
+  const sync = new ProjectTextSync(local.service, cloud.api)
+  try {
+    await sync.open('desktop-owner', '共同记忆')
+    const merged = cloud.files.get(path)?.content || ''
+    assert.deepEqual(parseConversationTranscript(path, merged)?.turns.map(turn => turn.content), [
+      '第一问', '第一答', '第二问',
+    ])
+    assert.equal(await text(local.service, 'desktop-owner', path), merged)
+    assert.equal([...local.records.keys()].some(name => name.includes('(冲突 ')), false)
+  } finally {
+    sync.dispose()
+  }
+})
 
 test('Web and Mac share text with offline retry, idempotency and visible conflict copies', async () => {
   const cloud = fakeCloud()

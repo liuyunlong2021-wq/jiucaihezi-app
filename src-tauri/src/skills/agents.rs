@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 use uuid::Uuid;
 
+use crate::skills::SkillsAppState;
 use crate::skills::db::{self, Agent, DbPool};
 use crate::skills::path_utils::{expand_home_path, path_to_string};
-use crate::skills::SkillsAppState;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,10 @@ pub fn is_agent_detected(global_skills_dir: &str) -> bool {
 }
 
 fn normalize_agent_path(path: &str) -> String {
-    path_to_string(&expand_home_path(path)).replace('\\', "/").trim_end_matches('/').to_string()
+    path_to_string(&expand_home_path(path))
+        .replace('\\', "/")
+        .trim_end_matches('/')
+        .to_string()
 }
 
 fn agent_uses_central_root(agent: &Agent, central_root: &str) -> bool {
@@ -84,8 +87,10 @@ fn agent_uses_central_root(agent: &Agent, central_root: &str) -> bool {
 fn agent_to_with_status(agent: Agent, central_root: &str) -> AgentWithStatus {
     let is_detected = is_agent_detected(&agent.global_skills_dir);
     let uses_central_root = agent_uses_central_root(&agent, central_root);
-    let is_install_target =
-        agent.is_enabled && agent.id != "central" && agent.category != "central" && !uses_central_root;
+    let is_install_target = agent.is_enabled
+        && agent.id != "central"
+        && agent.category != "central"
+        && !uses_central_root;
     AgentWithStatus {
         id: agent.id,
         display_name: agent.display_name,
@@ -132,8 +137,10 @@ pub async fn detect_agents_impl(pool: &DbPool) -> Result<Vec<AgentWithStatus>, S
     for agent in agents {
         let is_detected = is_agent_detected(&agent.global_skills_dir);
         let uses_central_root = agent_uses_central_root(&agent, &central_root);
-        let is_install_target =
-            agent.is_enabled && agent.id != "central" && agent.category != "central" && !uses_central_root;
+        let is_install_target = agent.is_enabled
+            && agent.id != "central"
+            && agent.category != "central"
+            && !uses_central_root;
         // Best-effort update; ignore errors (e.g., read-only DB in tests).
         let _ = db::update_agent_detected(pool, &agent.id, is_detected).await;
 
@@ -257,7 +264,9 @@ pub async fn get_agents(state: State<'_, SkillsAppState>) -> Result<Vec<AgentWit
 
 /// Tauri command: refresh detection status for all agents and return them.
 #[tauri::command]
-pub async fn detect_agents(state: State<'_, SkillsAppState>) -> Result<Vec<AgentWithStatus>, String> {
+pub async fn detect_agents(
+    state: State<'_, SkillsAppState>,
+) -> Result<Vec<AgentWithStatus>, String> {
     detect_agents_impl(&state.db).await
 }
 

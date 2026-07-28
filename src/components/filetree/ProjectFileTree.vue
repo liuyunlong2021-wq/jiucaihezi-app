@@ -15,7 +15,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { consumeLastEvent, emitEvent, emitEventAsync, onEvent } from '@/utils/eventBus'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
@@ -95,7 +95,7 @@ interface CtxMenu {
 }
 interface FilePreview {
   node: TreeNode
-  type: 'image' | 'video' | 'audio'
+  type: 'image' | 'video' | 'audio' | 'model3d'
   url: string
 }
 interface PendingCollision {
@@ -105,6 +105,10 @@ interface PendingCollision {
 interface ThumbnailRequest {
   node: TreeNode
   owner: string
+}
+interface MobileProject {
+  path: string
+  name: string
 }
 interface DirectoryExportWriter {
   write(data: Blob): Promise<void>
@@ -140,6 +144,8 @@ const projectFiles = createRuntimeProjectFileService()
 const projectFileActions = createProjectFileActions(projectFiles)
 const resourceWatcher = createProjectResourceWatcher()
 const isDesktop = isTauriRuntime()
+const isMobile = isTauriMobileRuntime()
+const usesSystemTrash = isDesktop && !isMobile
 const filterQuery = ref('')
 const searchTree = ref<TreeNode | null>(null)
 let searchRequestId = 0
@@ -163,6 +169,7 @@ const currentCloudProjectId = computed(() =>
   projectTextSyncStatus.owner === projectKey.value ? projectTextSyncStatus.cloudProjectId : '',
 )
 const webProjects = ref<Array<{ id: string; name: string }>>([])
+const mobileProjects = ref<MobileProject[]>([])
 const cloudProjects = ref<SyncProject[]>([])
 const showProjectMenu = ref(false)
 const projectMenuBusy = ref(false)
@@ -768,6 +775,10 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
     return
   }
   if (result.type === 'media') {
+    if (result.mediaKind === 'model3d') {
+      await openFilePreview(node)
+      return
+    }
     emitMediaToCanvas(result.resource, result.mediaKind)
     return
   }
@@ -800,6 +811,11 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
 
 /* ─── 右键菜单 ─── */
 const CTX_MENU_MARGIN = 8
+const NODE_LONG_PRESS_MS = 500
+const NODE_LONG_PRESS_MOVE_LIMIT = 10
+let nodeLongPressTimer: ReturnType<typeof setTimeout> | undefined
+let nodeLongPressStart = { x: 0, y: 0 }
+let suppressNodeClickUntil = 0
 async function positionCtxMenu(clientX: number, clientY: number) {
   await nextTick()
   const rect = ctxMenuRef.value?.getBoundingClientRect()
@@ -813,12 +829,44 @@ async function positionCtxMenu(clientX: number, clientY: number) {
     Math.min(clientY, window.innerHeight - rect.height - CTX_MENU_MARGIN),
   )
 }
+function openNodeContextMenu(node: TreeNode, clientX: number, clientY: number) {
+  if (!selectedPaths.value.has(node.path)) selectTreeNode(node)
+  ctxMenu.value = { show: true, x: clientX, y: clientY, node }
+  void positionCtxMenu(clientX, clientY)
+}
 function onContextMenu(e: MouseEvent, node: TreeNode) {
   e.preventDefault()
   e.stopPropagation()
-  if (!selectedPaths.value.has(node.path)) selectTreeNode(node)
-  ctxMenu.value = { show: true, x: e.clientX, y: e.clientY, node }
-  void positionCtxMenu(e.clientX, e.clientY)
+  openNodeContextMenu(node, e.clientX, e.clientY)
+}
+function cancelNodeLongPress() {
+  if (nodeLongPressTimer) clearTimeout(nodeLongPressTimer)
+  nodeLongPressTimer = undefined
+}
+function startNodeLongPress(e: PointerEvent, node: TreeNode) {
+  if (!isMobile || e.pointerType === 'mouse') return
+  cancelNodeLongPress()
+  nodeLongPressStart = { x: e.clientX, y: e.clientY }
+  nodeLongPressTimer = setTimeout(() => {
+    suppressNodeClickUntil = Date.now() + 800
+    openNodeContextMenu(node, nodeLongPressStart.x, nodeLongPressStart.y)
+    nodeLongPressTimer = undefined
+  }, NODE_LONG_PRESS_MS)
+}
+function moveNodeLongPress(e: PointerEvent) {
+  if (
+    Math.abs(e.clientX - nodeLongPressStart.x) > NODE_LONG_PRESS_MOVE_LIMIT ||
+    Math.abs(e.clientY - nodeLongPressStart.y) > NODE_LONG_PRESS_MOVE_LIMIT
+  )
+    cancelNodeLongPress()
+}
+function onNodeClick(node: TreeNode, e: MouseEvent) {
+  if (Date.now() < suppressNodeClickUntil) {
+    e.preventDefault()
+    e.stopPropagation()
+    return
+  }
+  void openFile(node, e)
 }
 /** 右键空白区域 */
 function onEmptyContextMenu(e: MouseEvent) {
@@ -1051,17 +1099,19 @@ function isCanvasMediaFile(node: TreeNode | null | undefined): boolean {
 }
 function isCanvasAddableMediaResource(node: TreeNode | null | undefined): boolean {
   if (!node || node.isDir) return false
-  return resourceForNode(node).kind === 'media'
+  return resourceForNode(node).kind === 'media' && previewType(node) !== 'model3d'
 }
 function previewType(node: TreeNode | null | undefined): FilePreview['type'] | null {
   if (!node || node.isDir) return null
   if (node.mimeType?.startsWith('image/')) return 'image'
   if (node.mimeType?.startsWith('video/')) return 'video'
   if (node.mimeType?.startsWith('audio/')) return 'audio'
+  if (node.mimeType?.startsWith('model/')) return 'model3d'
   const ext = node.name.split('.').pop()?.toLowerCase() || ''
   if (IMAGE_EXTS.has(ext)) return 'image'
   if (VIDEO_EXTS.has(ext)) return 'video'
   if (AUDIO_EXTS.has(ext)) return 'audio'
+  if (ext === 'glb' || ext === 'gltf') return 'model3d'
   return null
 }
 function mediaThumbnailUrl(node: TreeNode) {
@@ -1161,7 +1211,8 @@ async function ctxOpenInCanvas() {
   if (!n || n.isDir) return
   try {
     const result = await openProjectResource(projectFiles, resourceForNode(n))
-    if (result.type === 'media') emitMediaToCanvas(result.resource, result.mediaKind)
+    if (result.type === 'media' && result.mediaKind !== 'model3d')
+      emitMediaToCanvas(result.resource, result.mediaKind)
   } catch (error) {
     errorMsg.value = `加入画布失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -1176,6 +1227,10 @@ async function ctxReferenceInChat() {
       resources: [resourceForNode(node)],
       source: 'project',
     })
+    return
+  }
+  if (props.memoryMode) {
+    emitEvent('reference-file', { resource: resourceForNode(node) })
     return
   }
   try {
@@ -1316,12 +1371,19 @@ async function ctxAddProjectFolder() {
 async function refreshProjectCenter() {
   projectMenuError.value = ''
   try {
-    if (!isDesktop) await refreshWebProjects()
+    if (isMobile) await refreshMobileProjects()
+    else if (!isDesktop) await refreshWebProjects()
     const session = getGatewaySessionToken() || await initGatewaySessionToken()
     cloudProjects.value = session ? await projectTextSync.listCloudProjects() : []
   } catch (e) {
     projectMenuError.value = e instanceof Error ? e.message : String(e)
   }
+}
+async function refreshMobileProjects() {
+  const { invoke } = await import('@tauri-apps/api/core')
+  mobileProjects.value = await invoke<MobileProject[]>('list_mobile_projects')
+  const current = mobileProjects.value.find(project => project.name === projectStore.projectName.value)
+  if (current && current.path !== projectDir.value) projectStore.selectProject(current.path)
 }
 async function refreshWebProjects() {
   const projects = await webProjectFiles.listProjects()
@@ -1344,6 +1406,15 @@ async function createWebProject() {
   const project = await webProjectFiles.createProject(name.trim())
   webProjects.value.push({ id: project.id, name: project.name })
   await selectWebProject(project)
+}
+async function createMobileProject(name?: string, select = true): Promise<MobileProject | null> {
+  const projectName = name || await safePrompt('新建项目名称', '未命名项目', { forceDom: true })
+  if (!projectName?.trim()) return null
+  const { invoke } = await import('@tauri-apps/api/core')
+  const project = await invoke<MobileProject>('create_mobile_project', { name: projectName.trim() })
+  mobileProjects.value.push(project)
+  if (select) await selectDesktopProject(project.path)
+  return project
 }
 async function openLocalProjectFolder() {
   try {
@@ -1376,8 +1447,10 @@ function projectNameFromOwner(owner: string): string {
   return owner.replace(/\/+$/, '').split('/').pop() || owner
 }
 async function localOwnerForCloud(cloudProjectId: string): Promise<{ owner: string; name: string } | null> {
-  const localProjects = isDesktop
-    ? projectStore.recentProjectDirs.value.map(owner => ({ owner, name: projectNameFromOwner(owner) }))
+  const localProjects = isMobile
+    ? mobileProjects.value.map(project => ({ owner: project.path, name: project.name }))
+    : isDesktop
+      ? projectStore.recentProjectDirs.value.map(owner => ({ owner, name: projectNameFromOwner(owner) }))
     : webProjects.value.map(project => ({ owner: project.id, name: project.name }))
   for (const project of localProjects) {
     try {
@@ -1395,9 +1468,19 @@ async function openCloudProject(cloud: SyncProject) {
   try {
     const existing = await localOwnerForCloud(cloud.id)
     if (existing) {
-      if (isDesktop) projectStore.selectProject(existing.owner)
+      if (isDesktop || isMobile) projectStore.selectProject(existing.owner)
       else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
       await projectTextSync.open(existing.owner, existing.name)
+      showProjectMenu.value = false
+      return
+    }
+
+    if (isMobile) {
+      const project = await createMobileProject(cloud.name, false)
+      if (!project) return
+      await projectTextSync.open(project.path, project.name)
+      await projectTextSync.connect(cloud.id)
+      projectStore.selectProject(project.path)
       showProjectMenu.value = false
       return
     }
@@ -2188,6 +2271,7 @@ onMounted(async () => {
   const pendingProjectResourceExport = consumeLastEvent('project:export-resources')
   if (pendingProjectResourceExport)
     void handleProjectResourceExport(pendingProjectResourceExport[0])
+  if (isMobile) await refreshMobileProjects()
   if (!isDesktop) {
     if (typeof BroadcastChannel !== 'undefined') {
       webProjectChannel = new BroadcastChannel(WEB_PROJECT_FILES_CHANNEL)
@@ -2218,6 +2302,7 @@ onMounted(async () => {
   }
 })
 onBeforeUnmount(() => {
+  cancelNodeLongPress()
   chooseCollision('cancel')
   closeFilePreview()
   document.removeEventListener('click', onCtxMenuClick)
@@ -2351,8 +2436,12 @@ onBeforeUnmount(() => {
               item.node.isDir ? item.node.path : item.node.path.split('/').slice(0, -1).join('/')
             "
             draggable="true"
-            @click="openFile(item.node, $event)"
+            @click="onNodeClick(item.node, $event)"
             @contextmenu="onContextMenu($event, item.node)"
+            @pointerdown="startNodeLongPress($event, item.node)"
+            @pointermove="moveNodeLongPress"
+            @pointerup="cancelNodeLongPress"
+            @pointercancel="cancelNodeLongPress"
             @dragstart="onNodeDragStart($event, item.node)"
             @dragover.prevent.stop="onTreeDragOver"
             @dragleave.prevent.stop="onTreeDragLeave"
@@ -2415,15 +2504,18 @@ onBeforeUnmount(() => {
 
       <div class="pft-project-section">本机项目</div>
       <button
-        v-for="project in (isDesktop ? projectStore.recentProjectDirs.value.map(dir => ({ id: dir, name: projectNameFromOwner(dir) })) : webProjects)"
+        v-for="project in (isMobile ? mobileProjects.map(project => ({ id: project.path, name: project.name })) : isDesktop ? projectStore.recentProjectDirs.value.map(dir => ({ id: dir, name: projectNameFromOwner(dir) })) : webProjects)"
         :key="project.id"
         :class="{ active: project.id === projectKey }"
-        @click="isDesktop ? selectDesktopProject(project.id) : selectWebProject(project)"
+        @click="isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)"
       >
         <JcIcon name="folder" /><span>{{ project.name }}</span>
       </button>
-      <button v-if="isDesktop" @click="openLocalProjectFolder">
+      <button v-if="isDesktop && !isMobile" @click="openLocalProjectFolder">
         <JcIcon name="folder-open" /><span>打开本地文件夹</span>
+      </button>
+      <button v-else-if="isMobile" @click="createMobileProject()">
+        <JcIcon name="create-new-folder" /><span>新建项目</span>
       </button>
       <button v-else @click="createWebProject">
         <JcIcon name="create-new-folder" /><span>新建项目</span>
@@ -2659,16 +2751,16 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-if="pendingDelete.length" class="pft-delete-overlay" @click.self="cancelDelete">
-        <div class="pft-delete-dialog" role="dialog" aria-modal="true" aria-label="移入废纸篓确认">
-          <strong>移入废纸篓？</strong>
-          <p v-if="isDesktop">
+        <div class="pft-delete-dialog" role="dialog" aria-modal="true" :aria-label="usesSystemTrash ? '移入废纸篓确认' : '永久删除确认'">
+          <strong>{{ usesSystemTrash ? '移入废纸篓？' : '永久删除？' }}</strong>
+          <p v-if="usesSystemTrash">
             {{ pendingDelete.length }} 个项目会移入系统废纸篓，可在废纸篓中恢复。
           </p>
           <p v-else>{{ pendingDelete.length }} 个项目会被永久删除。</p>
           <div>
             <button :disabled="deletingDelete" @click="cancelDelete">取消</button>
             <button class="pft-delete-confirm" :disabled="deletingDelete" @click="confirmDelete">
-              {{ deletingDelete ? '正在移入...' : isDesktop ? '移入废纸篓' : '删除' }}
+              {{ deletingDelete ? (usesSystemTrash ? '正在移入...' : '正在删除...') : usesSystemTrash ? '移入废纸篓' : '永久删除' }}
             </button>
           </div>
         </div>
@@ -3010,6 +3102,8 @@ onBeforeUnmount(() => {
   font-size: 12px;
   white-space: nowrap;
   transition: background 0.08s;
+  -webkit-touch-callout: none;
+  user-select: none;
 }
 .pft-node-guides {
   background-image: repeating-linear-gradient(

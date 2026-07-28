@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4C-6 已完成：iPhone 13 Pro Max（iOS 26.5.2）使用 `com.jiucaihezi.mobile` 完成明确冷启动，PID 919 连续存活超过 60 秒，系统无新增崩溃报告。Tauri #14675 仍未有官方稳定修复；本分支采用可移除的 `tauri-runtime-wry` iOS 单点补丁、官方 Tao 主干 iOS 修复、Tauri 场景配置及 iOS 沙盒存储/Rustls 初始化，不影响 Web 或 Mac 正式版。登录、同步、媒体、TestFlight 与 4C-7 后续项均未开始。
+**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4C-1 至 4C-12 已完成。真实 iPhone 13 Pro Max 已通过稳定启动、手机布局、登录恢复、云项目与文字同步、Raw/Wiki/Skill、相册与文件附件、媒体任务、站内预览、Word 云端转换、移动永久删除、前后台/杀进程/断网恢复、消息复制及真实 GLB 旋转缩放。最终开发 IPA SHA-256 为 `0a924d4641e1b3e2abc28157a776e9d43b84ad0b503b70b8d0a5c0d5f20d3469`，覆盖安装后 PID 2272 存活。下一项仅为 4C-13 TestFlight 构建与真机回归；生产 Web 仍是旧前端包，Excel/PPT 转换依赖仍待服务器部署和真实文件验证。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -30,4 +30,4 @@
 
 ---
 
-> 上次刷新: 2026-07-27（4C-6 真机冷启动与 60 秒稳定运行已通过；仍待上游 #14675 发布后移除临时兼容补丁。）
+> 上次刷新: 2026-07-28（4C-12 真机验收已完成；下一项为 4C-13 TestFlight 构建与真机回归。）

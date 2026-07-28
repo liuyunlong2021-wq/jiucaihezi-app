@@ -9,6 +9,8 @@ export interface ResolvedDirectAttachment {
   size: number
   kind: DirectAttachmentKind
   value: string
+  /** Office 等二进制文档转换后的模型可读文本；存在时不再发送原始二进制。 */
+  textContent?: string
   cachePath?: string
   resourcePath?: string
 }
@@ -80,6 +82,12 @@ function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: stri
   }
   return parts
 }
+function attachmentTextFiles(attachments?: ResolvedDirectAttachment[]): DirectMessageFile[] {
+  return (attachments || []).flatMap(attachment => {
+    const content = String(attachment.textContent || '').trim()
+    return content ? [{ name: attachment.name, content }] : []
+  })
+}
 export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMessage[] {
   const result: DirectApiMessage[] = []
   const sys = buildSystemPrompt(args)
@@ -93,7 +101,8 @@ export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMe
   for (let i = 0; i < history.length; i++) {
     const msg = history[i]; const isLast = i === lastIdx
     if (isLast && msg.role === 'user') {
-      let text = chatContentToText(msg.content); text = appendFiles(text, args.files ?? msg.files)
+      let text = chatContentToText(msg.content)
+      text = appendFiles(text, [...(args.files ?? msg.files ?? []), ...attachmentTextFiles(args.attachments)])
       const images = args.images ?? msg.images ?? []
       const hasImages = images.length > 0
       const attachmentParts = args.apiFormat === 'openai' ? buildOpenAiAttachmentParts(args, images) : []

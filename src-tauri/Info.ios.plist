@@ -2,8 +2,16 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>zh-Hans</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>zh-Hans</string>
+  </array>
   <key>NSLocalNetworkUsageDescription</key>
   <string>允许韭菜盒子在开发期间连接此 Mac 上的本地服务。</string>
+  <key>NSPhotoLibraryAddUsageDescription</key>
+  <string>允许韭菜盒子将你选择的生成图片保存到系统照片。</string>
   <key>UIApplicationSceneManifest</key>
   <dict>
     <key>UIApplicationSupportsMultipleScenes</key>

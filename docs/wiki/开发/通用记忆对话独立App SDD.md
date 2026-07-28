@@ -1,7 +1,7 @@
 # 通用记忆对话工作台 SDD
 
-> 日期：2026-07-27
-> 状态：Web 与 Mac 已完成；第四阶段 4A、4B 已完成，4C-6 已在 iPhone 13 Pro Max 完成冷启动与 60 秒稳定运行；后续业务验收尚未开始。
+> 日期：2026-07-28
+> 状态：Web 与 Mac 已完成；第四阶段 4A、4B、4C-1 至 4C-12 已完成，下一项为 4C-13 TestFlight 构建与真机验收。
 > 首发目标：<https://jiucaihezi.studio>
 > 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
@@ -726,13 +726,13 @@ Mobile App 目录 owner ─┘
 | 4C-4 | Simulator 构建诊断 | 官方 debug Simulator `.app` 可构建、安装并产出启动诊断；不把“安装”当作“运行”。 | 已完成 |
 | 4C-5 | 真实设备签名与安装 | iPhone 13 Pro Max 使用 `com.jiucaihezi.mobile` 和 `RXD4L9387J` 完成签名、IPA 导出、安装及启动请求。 | 已完成 |
 | 4C-6 | 原生壳真机稳定启动 | 优先验证官方已发布组合；若其未修复上游问题，只允许最小、可移除的兼容补丁。真实 iPhone 冷启动进入首页，连续停留至少 60 秒且无崩溃报告。每次实验须记录版本、构建、安装、启动结果。 | 已完成 |
-| 4C-7 | 移动项目目录适配 | App 管理目录的 `ProjectFileService` 可创建、读取、修改安全文本项目，无任意目录权限依赖。 | 未开始 |
-| 4C-8 | 移动工作台导航 | 文件树与设置为抽屉，聊天/预览全屏；无悬停、右键或桌面拖放前提。 | 未开始 |
-| 4C-9 | 移动登录与云项目 | 同账号登录回调可用，云项目可下载为本地副本并恢复项目映射。 | 未开始 |
-| 4C-10 | 文字同步与离线恢复 | 手机上线后按先拉后推同步 Raw/Wiki/安全文本；离线写入、重连、冲突副本均可验证。 | 未开始 |
-| 4C-11 | 移动附件与媒体 | 系统导入/导出/分享、媒体提交、播放、任务恢复可用；媒体只存手机本地。 | 未开始 |
-| 4C-12 | 真机业务回归 | 真实 iPhone 验收登录、项目、对话、Wiki、附件、前后台恢复与断网重试；复杂画布不纳入首版门槛。 | 未开始 |
-| 4C-13 | TestFlight 与后续平台门槛 | 4C-12 全部通过后才提交 TestFlight；TestFlight 稳定后才开始 Android 构建与权限矩阵。 | 未开始 |
+| 4C-7 | 正式 Logo、启动图和手机布局 | 正式 AppIcon 与启动图可从仓库稳定重建；文件树、设置为全屏抽屉，聊天/预览占满主区，输入不触发 iOS 自动缩放。 | 已完成 |
+| 4C-8 | 登录、退出和登录状态恢复 | 真实账号可登录和退出；同步 Session 使用 iOS Keychain 保存，杀进程或冷启动后恢复，失效时明确回到登录态。 | 已完成 |
+| 4C-9 | 云项目列表、下载、上传和文字同步 | 同账号云项目可下载为 App 管理目录副本、上传本地项目并先拉后推 Raw/Wiki/安全文本；重启恢复映射。 | 已完成 |
+| 4C-10 | 移动聊天、Raw、Wiki 和 Skill | 手机可新建/继续 Raw 对话、读写 Wiki、调用已安装 Skill；结果仍落项目文件，不创建移动专属业务链。 | 已完成 |
+| 4C-11 | 手机相册、文件附件和媒体生成 | 系统相册/文件附件可导入，媒体任务可提交、恢复和播放；媒体只存原手机本地。 | 已完成 |
+| 4C-12 | 前后台恢复、断网和闪退恢复 | 真实 iPhone 验收前后台切换、杀进程、断网写入、重连重试和异常恢复，不丢本地项目内容。 | 已完成 |
+| 4C-13 | TestFlight 构建与真机验收 | 4C-7 至 4C-12 全部通过后归档上传 TestFlight；从 TestFlight 安装并完成同一真机回归。 | 未开始 |
 
 4C-6 兼容规则：必须保留官方 issue、当前锁定版本、真机 `.ips` 调用栈和每次实验结果；不得将 IPA 安装成功称为 App 成功，也不得以长期私有 Wry fork 或整仓降级绕过此门槛。若官方尚未发布修复，只允许记录了上游来源、仅覆盖故障调用点且可随上游版本删除的临时补丁。
 
@@ -1037,6 +1037,92 @@ Mobile App 目录 owner ─┘
 - 后续首页加载复核：iOS 开发包必须声明 `NSLocalNetworkUsageDescription`，否则手机不能连接 Tauri 代换后的 Mac `devUrl`。在 iPhone 授权本地网络后，重新冷启动的 App 与 Mac Vite 热更新端口 `192.168.1.51:1421` 保持已建立连接，PID 990 连续存活超过 60 秒且没有新增 `.ips`。这是开发构建访问本机首页资源所需权限，不是生产 IPA 的外部服务依赖。
 
 结论：4C-6 已完成。iPhone 已可冷启动并稳定停留首页；本轮没有开发登录、同步、媒体或 TestFlight。后续开始 4C-7 前，应持续跟踪 #14675，官方发布兼容版本后删除本地 runtime 补丁并重新做同一真机验证。
+
+### 14.14 4C-7 正式品牌资源与手机布局记录（2026-07-27）
+
+- 18 个正式 iOS AppIcon 已从现有韭菜盒子 Logo 生成并逐项核对尺寸；全部为不透明 PNG，避免 App Store 图标透明通道问题。
+- 启动页不再只保存在被忽略的 `src-tauri/gen/apple`。仓库持久保存 `src-tauri/ios/LaunchScreen.storyboard` 与图片集描述，iOS 平台的 `beforeBuildCommand` 使用纯 Node 标准库脚本将其和现有 `src-tauri/icons/icon.png` 写入官方生成工程；Web/Mac 构建命令不变。
+- `ibtool` 独立编译启动页无错误、警告或 notice。完整 `tauri ios build --debug --target aarch64 --export-method debugging --ci` 已确认自动注入实际执行，Xcode 编译并链接启动页和资源目录，最终 IPA 包含 `LaunchScreen.storyboardc`、`Assets.car`、正式 AppIcon，`Info.plist` 的 `UILaunchStoryboardName` 为 `LaunchScreen`。
+- iPhone 13 Pro Max 真机自动化已覆盖文件树和设置的全屏抽屉、登录输入、关闭按钮可点击与边界不越屏；输入账号后页面不发生 WebView 自动缩放。保留截图显示设置页完整占满 `428 x 926` 逻辑视口，手机端不显示 Desktop Ollama 控件。
+- 组件合同 `25/25`、TypeScript、Desktop quick build 与 Desktop dist 审计通过；新增 iOS 构建入口只在 iOS 配置中生效，没有改变 Web/Mac 正式产物。
+
+结论：4C-7 已完成，进入 4C-8 登录、退出与登录状态恢复真机验收。
+
+### 14.15 4C-8 登录与恢复完成记录（2026-07-27）
+
+- 会话合同已复核：模型 API Key 与文本同步 Session 分开保存；iOS 通过现有 Keychain 命令保存 `gateway-session-token`，应用启动按 API Key、同步 Session 的顺序恢复。同步接口返回 401 时会清除失效 Session 并让界面回到未登录态。
+- 退出根因修复：`gatewayLogout()` 现在使用专用 `X-JC-Session` 请求头撤销服务端同步 Session，并在 `finally` 中清理本地 Session；退出不会删除模型 API Key。对应登录、恢复、退出、401 失效测试与组件合同共 `63/63` 通过，TypeScript 检查通过。
+- 更新安装恢复根因修复：iOS 会改变 App 数据容器的绝对路径，旧版本把该路径保存在 WebView 存储中，更新安装后因此出现 `Operation not permitted`。移动端启动现在按已保存项目名重新匹配当前 App 管理目录中的真实路径；Web 和 Mac 路径逻辑不变。
+- 本轮真机版本仍为 `2.0.9`，`tauri ios build --debug --target aarch64 --export-method debugging --ci` 完成 Rust、前端与 Xcode 构建，正式启动页和图标被注入；2026-07-27 21:11 使用 Apple Development Team `RXD4L9387J` 将新归档安装到 iPhone 13 Pro Max 并成功启动。
+- 真机自动化 `testRestoresManagedProjectAfterInstall` 通过：更新安装后仍能找到 `iPhone验收未命名项目`，页面不再出现“项目目录不可访问”或 `Operation not permitted`。`testOpensLoginForOwner` 通过并确认真实手机仍处于未登录态，登录表单可正常打开。
+- 冷启动丢登录的根因不在 Gateway 或业务状态，而是 `keyring 3.6.3` 默认没有启用任何平台后端；iOS 因此使用进程内 mock store。`Cargo.toml` 只在 `cfg(target_os = "ios")` 启用官方 `apple-native` feature，新增的是 `security-framework` 平台实现，不改变 Web/Mac 依赖，也没有引入私有 Keychain 封装。`cargo tree -e features -i keyring` 已确认 `apple-native` 生效，`cargo check --target aarch64-apple-ios` 通过。
+- `gatewayLogin()` 现在要求生产合同中的独立 `sync_session`；响应缺失时明确失败，不再只保存模型 API Key 后误报登录成功。生产 Gateway 健康检查确认 `auth.login`、`auth.session`、`auth.logout` 与 `sync.text` 均在线；专项组件与客户端合同 `63/63`、TypeScript 检查通过。
+- 2026-07-27 21:30 完成带 Apple Keychain 后端的 `2.0.9` 真机构建和 IPA 导出；21:31 覆盖安装到 iPhone 13 Pro Max。真实账号重新登录后，`testAuthenticatedAccountRestoredAfterColdLaunch` 强制结束并重启 App，确认仍显示“退出登录”且不显示“一键登录”。
+- 云项目“丹溪”随后可从项目中心打开，聊天正文已经显示；设备容器在 `Library/Application Support/com.jiucaihezi.mobile/projects/丹溪` 落下 `.raw/.sync/state.json`、Raw 对话、正文与 Wiki 等约 393 项。再次冷启动后 `testRestoresCloudProjectAfterColdLaunch` 确认“丹溪”映射恢复，且没有 `Operation not permitted`。
+- `testLogoutReturnsToLogin` 在真机点击“退出登录”后确认界面回到“一键登录”且“退出登录”消失；单元合同同时确认退出只删除同步 Session、保留模型 API Key。登录、退出、冷启动恢复和失效回退的 4C-8 门槛全部满足。
+
+结论：4C-8 已完成，进入 4C-9 云项目上传与双向文字同步验收。上述“丹溪”下载、落盘和重启映射已作为 4C-9 的下载侧证据；仍需完成手机本地项目上传、先拉后推、另一端可见及增量回流，不能仅以项目已打开宣告 4C-9 完成。
+
+### 14.16 4C-9 云项目与文字双向同步完成记录（2026-07-27）
+
+- 下载侧：同账号云项目“丹溪”已下载到 iPhone App 管理目录，约 393 项 Raw、Wiki 与安全文本落盘；强制结束并冷启动后仍恢复“丹溪”映射，未出现旧容器路径或权限错误。
+- 上传侧：手机本地项目“iPhone验收未命名项目”创建 `untitled.md` 后执行“上传到云端”，界面到达“文字已同步”。设备 `.raw/.sync/state.json` 记录云项目 `project_f2ec26168a99477ea0f80cd49860293d`、revision 1、空待上传队列；生产 D1 只读查询确认项目归属当前账号，文件 revision 与空文件 SHA-256 一致。
+- 回流侧：在该专用验收云项目写入 `wiki/4C-9-云端回流验收.md` 作为另一端增量，手机下一次启动后自动拉取。设备文件内容为 `4C-9 云端回流验证 2026-07-27 21:50`，SHA-256 为 `9d77ffb31c8465a2734b3a53f727512f291555de2b25221b3713ac9ffc79a89c`，与云端完全一致。
+- 同步状态在回流后从 cursor 400 前进到 401，`wiki/4C-9-云端回流验收.md` revision 为 1，`pending` 仍为空，证明本轮执行了增量拉取而非本地伪造或整目录覆盖。
+- 22:01 再次使用 `--terminate-existing` 强制结束并冷启动；超过 60 秒后 App PID 579 仍存活，专用项目的 `.raw/.sync/state.json`、`untitled.md` 和回流 Wiki 文件均仍存在，项目映射与同步状态没有丢失。
+
+结论：4C-9 已完成。真实 iPhone 已通过云项目下载、本地项目上传、云端增量回流、同步状态核对和冷启动恢复；不能同步的媒体与空目录仍按既定合同留在本地。下一项为 4C-10 移动聊天、Raw、Wiki 和 Skill。
+
+### 14.17 4C-10 移动聊天、Raw、Wiki 与 Skill 完成记录（2026-07-28）
+
+- 真机自动化在 iPhone 13 Pro Max 上完成完整业务链：进入云项目“丹溪”、确认已安装 `4C10WikiWriter`、新建对话、选择 Skill、发送写 Wiki 指令，再追问上一轮写入路径。`testMobileConversationUsesSkillAndWritesWiki` 于 00:04:55 通过，1 项测试、0 失败，业务执行用时 59.719 秒。
+- Skill 写入的 `wiki/4C-10-mobile-acceptance.md` 内容为 `4C-10 mobile Wiki verified 2026-07-27`，真机文件 SHA-256 为 `eff6e4988636a45c613be56a4aba85976cefe98b0e136b478e3f76d264b8f90b`；第二轮模型只返回同一路径，证明当前对话上下文与 Skill 结果均可继续使用。
+- 首轮界面测试虽显示成功，但设备沙盒审计发现 Raw 只剩最后一条 assistant，未据此误报完成。根因为同步器按路径静默远端回流事件，静默窗口会同时吞掉并发的真实本地保存；多个同路径 append-only 快照也可能让旧标题快照覆盖完整对话。
+- 修复保持单一 Raw 合同：对话同步按 turn ID 合并同一 conversation 的 append-only 快照，同路径待上传快照先合并再入队；已确认 revision 的旧回流被忽略，内容哈希负责抑制远端回声，不再用路径级静默窗口过滤真实保存。普通 Wiki/文档仍保留原冲突副本规则。
+- 修复后的真机 Raw `.raw/对话记录/conversation-e2be87db-7d7d-45f8-8d07-9895ca494291.md` 含 2 条 user 和 2 条 assistant，共 4 个唯一 turn；同 ID 没有冲突副本。同步状态 cursor 为 508、该 Raw revision 为 2、`pending` 为空，证明最终完整内容已经完成同步而非只停留在界面内存。
+- 对话合并与文字同步专项测试、完整 focused tests、TypeScript 和 `cargo check --target aarch64-apple-ios` 均通过。06:19 重新生成正式开发签名 IPA，SHA-256 为 `6059dce0491f3fd38cbbd93bf7b0bc774f01088072669c1c69e3a5d377eed408`；06:20 覆盖安装并成功启动，原登录、项目、Raw、Wiki 与 Skill 数据均保留。
+- iOS 输入体验同步收口：Tauri 2.11 已提供官方 `with_input_accessory_view_builder`，iPhone 建窗返回 `None` 移除 WKWebView 自动添加的“上一项/下一项/完成”整行键盘附件栏；该配置受 `cfg(target_os = "ios")` 限制，不改变 Web/Mac。
+
+结论：4C-10 已完成。真实 iPhone 已证明移动聊天、连续 Raw、Wiki 写入和已安装 Skill 调用共用项目文件与既有 Direct Engine，没有创建移动专属对话存储。下一项为 4C-11 手机相册、文件附件和媒体生成。
+
+### 14.18 4C-11 相册、附件、媒体与移动删除完成记录（2026-07-28）
+
+- 真机已完成一次 GPT Image 2 文生图，结果文件 `jc-media/images/2026-07-28_073406_生成一个网红正在海边卖泳衣_1xx.png` 仍在项目“丹溪”中，大小约 2.3 MB。用户纠正了最初的“文件树中也没有”描述；本轮不再将问题归因于媒体文件丢失。
+- 长按图片并选择系统“保存到照片”后闪退。真机报告 `韭菜盒子-2026-07-28-073749.ips` 与 `韭菜盒子-2026-07-28-074045.ips` 均为 TCC `SIGABRT`，明确指出缺少 `NSPhotoLibraryAddUsageDescription`，调用栈进入 `kTCCServicePhotosAdd / PHPhotoLibrary`。根因是 iOS 包未声明相册添加用途，不是 Tauri #14675、生成接口或项目文件写入失败。
+- `src-tauri/Info.ios.plist` 已增加中文 `NSPhotoLibraryAddUsageDescription`，并加入静态回归门禁。没有增加相册插件、私有原生代码或新依赖，Web 与 Mac 业务路径不变。
+- 首次取证时真机数据库 `jc_media_tasks_v1` 包含原任务 `mtask_ms3v4v4r_9cch`。随后用户重开 App 并新建任务后，数据库只剩新任务；这证明不是历史筛选问题，而是 Vue 先挂载、SQLite 后初始化的启动竞态：媒体 Store 在 SQLite 未就绪时把 localStorage 空兜底当成真实历史，后续新任务再以单项列表覆盖 SQLite。
+- 验证结果：plist 语法通过；记忆工作台与媒体任务精确回归 `69/69` 通过；TypeScript 与 `cargo check --target aarch64-apple-ios` 通过；Desktop 正式前端构建及产物审计通过。完整 focused 运行中大量用例通过，但被现有 `projectTextSync` 长耗时进程拖住后主动停止，不记为完整通过。
+- 构建结果：`tauri ios build --debug --target aarch64 --export-method debugging --ci` 成功；IPA 内最终 `Info.plist` 已确认包含用途说明。IPA 路径 `src-tauri/gen/apple/build/arm64/韭菜盒子.ipa`，SHA-256 为 `82ffceca916593d791a669164d4161168fcde0325a0e797d793749666fca3b8d`，大小 42,117,794 bytes，生成时间 07:52:39。
+- 安装与启动结果：07:56 覆盖安装到 iPhone 13 Pro Max 成功，Bundle ID 仍为 `com.jiucaihezi.mobile`，随后 `--terminate-existing` 启动成功。Xcode UI runner 因 CoreDevice/IDE 测试通道断开而未执行历史可见性断言，不记为真机 UI 通过。
+- 用户已在真机接受相册权限，长按生成图并选择“保存到照片”后 App 未闪退，系统照片中能够找到图片；相册崩溃项已通过用户验收。
+- 任务历史竞态已在共享 `mediaTaskStore` 根因处修复：Tauri SQLite 未就绪或历史读取异常时初始化直接失败并允许重试，绝不把空数组持久化；用户点击“生成历史”会再次初始化。新任务提交仍必须先通过同一初始化门禁。回归明确证明连续两次加载失败均为 0 次保存调用。
+- 预览已改为 Web、Mac、iPhone 共用项目资源读取和现有 `MediaViewer`；图片、视频和音频不再调用 `open_in_shell`、Safari 或默认浏览器。项目副本暂时不可用但仍有安全远程结果时，也在 App 内预览；3D 仍保留下载语义。
+- 新完成的 Desktop 项目媒体会记录 `directory`；旧任务缺少该字段时可由 `assetUri + projectPath` 恢复。iOS 覆盖安装改变数据容器 UUID时，现有文件树仍按项目名重定位活动项目；本轮恢复任务同时已重定位到当前容器。
+- 自动验证：媒体任务、项目媒体引用和创作面板合同共 94 项，93 通过、1 项既有跳过；TypeScript、Desktop 正式前端构建及产物审计、Mac `cargo check`、iOS `cargo check` 全部通过。未引入依赖，Web/Mac 共用行为只从外部打开改为站内预览。
+- 08:50 完成新 IPA，SHA-256 `db837969a980ecd5fc6dc2dd4cec16cd1e9e54065f0d39c44cf26b99a8219c4a`，大小 42,118,054 bytes；08:51 覆盖安装并于 08:53 启动，PID 1816 存活。安装前分别保全手机新任务与原任务数据库，合并后写回当前数据容器；App 完成 SQLite 初始化后再次取回数据库，2 条任务 ID 均仍存在且 `pragma integrity_check` 为 `ok`，证明新版启动未再次清空历史。
+- 用户随后完成 4C-11 真机矩阵：两条生成历史均可见；预览留在 App 内；杀进程重开后历史仍在；相册图片与系统文件附件均可导入；项目图片、视频和音频均可预览或播放。文件树长按使用既有上下文菜单，不新增移动专属菜单实现。
+- Office 附件根因不是 iPhone 无法读取文件，而是模型不接受 Word 原始 MIME。Web/iPhone 现在复用生产 `POST /documents/markdown` 转换合同，Word 转为 Markdown 后通过 `textContent` 进入既有直连请求，原始 Office Base64 不再发送给模型；Mac 保留已有本地 MarkItDown 路径。
+- iPhone WebView 直接 `fetch(FormData)` 会因生产 CORS 未允许 Tauri origin 报 `Load failed`。移动端改用受限 Rust multipart 请求绕过 WebView CORS：只允许精确生产转换地址，限制 20 MB、120 秒超时且不记录 API Key。相关前端回归 `58/58`、Python 转换合同 `5/5`、Rust 端点固定测试、TypeScript 和 `git diff --check` 均通过。
+- 10:15 完成包含 Word 原生转换的 IPA，SHA-256 `538c9b4ef62d95411bd76e6fdcab65bc9b39690875e11d1e08e92e9098e28177`，大小 42,228,998 bytes；覆盖安装并启动后 PID 2073 存活。用户在真实 iPhone 选择同一 `.docx` 并要求总结，模型顺利识别文档内容，未再出现 `Load failed` 或 Gemini 不支持 Word MIME 的 500。
+- 生产 Web 截图中的同类失败来自线上旧前端包，本轮未从脏 iPhone 分支直接发布 Web。转换服务当前已真机验证 Word；`markitdown` 的 Excel、PPT 和 PDF extras 已写入部署依赖，但因 VPS 登录权限不可用尚未部署和真实文件验收，不将其记为已上线能力。
+- 移动端删除对话原先复用 Desktop 废纸篓命令，确认后固定返回“移动端不支持废纸篓”。共享原生命令现在保持 Mac 移入系统废纸篓，iOS/Android 则在明确的“永久删除、无法恢复”确认后执行受项目根目录约束的永久删除；文件树同步显示真实语义。界面合同 `60/60`、原生文件/目录永久删除测试、TypeScript 与 iOS `cargo check` 均通过。
+- 10:29 完成包含移动永久删除的最终 IPA，SHA-256 `88436aa142a4d14db2f0229f8910561a95901eea8c9a36e6616cd67727dff135`，大小 42,227,173 bytes；10:30 覆盖安装，10:31 启动后 PID 2122 存活。用户在真实 iPhone 确认对话永久删除成功，不再出现废纸篓占位错误。
+
+结论：4C-11 已完成。真实 iPhone 已通过相册与文件附件导入、媒体提交/恢复/播放、保存到系统照片、站内预览、Word 内容识别和移动端永久删除对话；媒体仍只保存在原手机项目中。下一项为 4C-12 前后台切换、杀进程、断网写入、重连重试与异常恢复，不提前开始 TestFlight。
+
+### 14.19 4C-12 恢复矩阵与 3D/复制收口记录（2026-07-28）
+
+- 用户在真实 iPhone 13 Pro Max 完成 4C-12 五项矩阵：前后台切换通过；杀进程重开恢复通过；断网时本地项目保护通过；断网发送明确显示 `HTTP 请求失败: error sending request for url (https://api.jiucaihezi.studio/v1/chat/completions)`；恢复网络后继续使用通过。没有发现项目内容丢失、重复 turn 或重连后持续异常。
+- 对话用户与助手 turn 各增加一个最小复制动作，统一复用 Tauri 原生剪贴板、Web Clipboard 和 DOM 兜底合同。用户已在真机确认复制可用；本轮只验收功能，不提前扩展编辑、重试、朗读、回复和复杂消息菜单。
+- 3D 采用成熟产品常见的独立查看器，而不把 Three.js 嵌入现有 Leafer 2D 画布：GLB/GLTF 点击后按需加载 Three.js，自动取包围盒居中，单指旋转、双指缩放，关闭后释放模型、材质、贴图和 WebGL 资源；普通首页与对话不会加载 3D 代码块。
+- 首版用远程标准 GLB 完成桌面及 430x932 手机视口的非空画布、无横向溢出、旋转和缩放验证，但真机打开真实生成文件仍报“3D 模型预览失败”。没有据此误报完成。
+- 从真机 App 数据容器只读取回失败文件 `jc-media/models/2026-07-28_104756_一个粉丝的小狗_3D_画风_f4d.glb`。文件为标准 GLB 2.0，8,998,352 bytes、249,919 顶点、499,882 三角面，不含 Draco/KTX2 扩展或外部贴图；同一文件在查看器中可以完整渲染，证明模型与 Three.js 均正常。
+- 根因是 iPhone 项目预览先把约 9 MB 本地文件复制成 Blob URL，再由 GLTFLoader 二次读取。项目内 3D 改为把 `ProjectFileService.readBinary()` 的字节直接交给 `GLTFLoader.parse()`；远程结果仍保留 URL 加载。手机渲染像素比上限为 1.5，只影响打开的 3D 预览，降低 GPU 压力，不改变首页和普通媒体。
+- 修复后用户用同一小狗模型完成真机验收：模型可见，单指旋转、双指缩放、关闭无闪退。随后将移动查看器宽度从错误的 `100vw` 改为父容器 `100%`，左右各保留相同内容边距；用户确认最终界面统一、对称、居中。
+- 自动验证：消息/记忆/文件树/创作面板与资源路由定向合同 180 项中 178 通过、2 项既有跳过；最终布局专项 29/29、TypeScript、Desktop 前端构建及产物审计、`git diff --check` 均通过。完整 focused 在已输出大量通过结果后仍有长时间并行进程，主动停止，不记为完整通过。
+- 最终开发签名 IPA SHA-256 为 `0a924d4641e1b3e2abc28157a776e9d43b84ad0b503b70b8d0a5c0d5f20d3469`，大小 42,541,955 bytes；覆盖安装到 `com.jiucaihezi.mobile` 后 PID 2272 存活。该构建已通过用户最终 3D 布局验收。
+
+结论：4C-12 已完成。iPhone 开发版已通过稳定启动、核心业务、前后台/杀进程/断网恢复、复制和真实 GLB 交互预览。下一项仅为 4C-13：生成正式 TestFlight 归档、上传、从 TestFlight 安装并完成同一真机回归。生产 Web 仍是旧前端包；Excel/PPT 转换依赖尚未部署和真实文件验收，均不得写成已正式上线。
 
 ## 15. 验收标准
 

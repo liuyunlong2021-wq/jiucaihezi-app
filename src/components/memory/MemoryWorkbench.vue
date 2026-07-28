@@ -44,16 +44,18 @@ import {
   type SkillInstallPlan,
 } from '@/runtime/memory/skillInstall'
 import { getCursorPosition, getPlainText, setEditorText } from '@/composables/useContentEditable'
+import { detectFileType, processFile } from '@/composables/useFileUpload'
 import { useFilteredList } from '@/composables/useFilteredList'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { SkillConfig } from '@/types/skill'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
 import { getGatewaySessionToken } from '@/services/newApiClient'
+import { writeClipboardText } from '@/utils/clipboard'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -61,7 +63,9 @@ const mediaTaskStore = useMediaTaskStore()
 const files = createRuntimeProjectFileService()
 const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
+const mobileRuntime = isTauriMobileRuntime()
 const CreationPanel = defineAsyncComponent(() => import('@/components/creation/CreationPanel.vue'))
+const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
 const conversations = ref<MemoryConversation[]>([])
@@ -80,6 +84,7 @@ const sending = ref(false)
 const projectActionPending = ref(false)
 const memoryReady = ref(false)
 const streamingText = ref('')
+const copiedTurnId = ref('')
 const status = ref('')
 const error = ref('')
 const settingsOpen = ref(false)
@@ -90,6 +95,7 @@ const composerRef = ref<HTMLElement | null>(null)
 const mentionPopoverRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const mediaUrl = ref('')
+const modelData = ref<ArrayBuffer | null>(null)
 const mediaPlans = ref<Record<string, MediaPlan[]>>({})
 const creationMounted = ref(false)
 const creationOpen = ref(false)
@@ -214,7 +220,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     .filter(resource => !resource.isDirectory
       && !resource.path.startsWith('.raw/')
       && resource.path !== '.raw'
-      && resource.kind !== 'binary')
+      && (resource.kind !== 'binary' || isOfficeResource(resource)))
     .slice(0, 40)
     .map(resource => ({
       type: 'file' as const,
@@ -285,7 +291,11 @@ onMounted(async () => {
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
   offToggleTree = onEvent('toggle-file-tree', () => { treeOpen.value = !treeOpen.value })
   offMediaTaskSettled = onEvent('media-task-settled', payload => void recordMediaResult(payload))
-  offReferenceFile = onEvent('reference-file', addReferencedFile)
+  offReferenceFile = onEvent('reference-file', payload => {
+    void addReferencedFile(payload).catch(cause => {
+      error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
+    })
+  })
   offMediaReferenceAdd = onEvent('media-reference:add', payload => void addProjectMediaReferences(payload))
   offMemoryMediaTaskSubmitted = onEvent('memory-media-task-submitted', payload => void rememberSubmittedMediaTask(payload))
   offSwitchPanel = onEvent('switch-panel', mode => {
@@ -491,13 +501,20 @@ async function openResource(resource: ProjectResourceOpenResult) {
   if (resource.type === 'media') {
     try {
       const binary = await files.readBinary(resource.resource)
-      mediaObjectUrl = URL.createObjectURL(new Blob(
-        [new Uint8Array(binary.data).buffer as ArrayBuffer],
-        { type: binary.mimeType || resource.resource.mimeType },
-      ))
-      mediaUrl.value = mediaObjectUrl
+      const data = new Uint8Array(binary.data.byteLength)
+      data.set(binary.data)
+      if (resource.mediaKind === 'model3d') {
+        modelData.value = data.buffer
+      } else {
+        mediaObjectUrl = URL.createObjectURL(new Blob(
+          [data.buffer],
+          { type: binary.mimeType || resource.resource.mimeType },
+        ))
+        mediaUrl.value = mediaObjectUrl
+      }
     } catch {
       mediaUrl.value = ''
+      modelData.value = null
     }
   }
   if (window.innerWidth <= 760) treeOpen.value = false
@@ -507,6 +524,14 @@ function rememberConversation(next: MemoryConversation) {
   const index = conversations.value.findIndex(item => item.resource.path === next.resource.path)
   if (index < 0) conversations.value.push(next)
   else conversations.value[index] = next
+}
+
+async function copyTurn(turn: ConversationTurn) {
+  if (!await writeClipboardText(displayTurnContent(turn))) return
+  copiedTurnId.value = turn.id
+  setTimeout(() => {
+    if (copiedTurnId.value === turn.id) copiedTurnId.value = ''
+  }, 1500)
 }
 
 async function selectConversation(item: MemoryConversation) {
@@ -528,7 +553,13 @@ async function renameConversation(item: MemoryConversation) {
 }
 
 async function deleteConversation(item: MemoryConversation) {
-  if (!(await confirmAction(`删除对话“${item.transcript.title}”？`, { title: '删除对话', okLabel: '删除' }))) return
+  const message = mobileRuntime
+    ? `永久删除对话“${item.transcript.title}”？此操作无法恢复。`
+    : `删除对话“${item.transcript.title}”？`
+  if (!(await confirmAction(message, {
+    title: mobileRuntime ? '永久删除对话' : '删除对话',
+    okLabel: mobileRuntime ? '永久删除' : '删除',
+  }))) return
   try {
     const plan = await files.planBatch({ kind: 'delete', resources: [item.resource] })
     const result = await files.executeBatch(plan)
@@ -653,10 +684,42 @@ function stop() {
   abortController?.abort()
 }
 
-function addReferencedFile(payload: unknown) {
+async function addReferencedFile(payload: unknown) {
+  const reference = payload as { resource?: ProjectResource } | null
+  if (reference?.resource) {
+    await addProjectFileReference(reference.resource)
+    return
+  }
   const file = payload as DirectMessageFile | null
   if (!file?.name || !file.content || referencedFiles.value.some(item => item.name === file.name)) return
   referencedFiles.value.push({ name: file.name, content: file.content })
+}
+
+function isOfficeResource(resource: Pick<ProjectResource, 'name' | 'mimeType'>): boolean {
+  return detectFileType(new File([], resource.name, { type: resource.mimeType || '' })) === 'office'
+}
+
+async function addProjectFileReference(resource: ProjectResource) {
+  if (isOfficeResource(resource)) {
+    const binary = await files.readBinary(resource)
+    const data = new Uint8Array(binary.data.byteLength)
+    data.set(binary.data)
+    const file = new File([data.buffer], resource.name, {
+      type: binary.mimeType || resource.mimeType || 'application/octet-stream',
+    })
+    const processed = await processFile(file)
+    if (processed.status !== 'ready' || !processed.textContent) {
+      throw new Error(processed.error || '文档转换失败')
+    }
+    if (!referencedFiles.value.some(item => item.name === resource.path)) {
+      referencedFiles.value.push({ name: resource.path, content: processed.textContent })
+    }
+    return
+  }
+  const text = await files.readText(resource)
+  if (!referencedFiles.value.some(file => file.name === resource.path)) {
+    referencedFiles.value.push({ name: resource.path, content: text.content })
+  }
 }
 
 async function addProjectMediaReferences(payload: unknown) {
@@ -759,10 +822,7 @@ async function selectMention(option: MemoryMentionOption) {
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {
-      const text = await files.readText(option.resource)
-      if (!referencedFiles.value.some(file => file.name === option.resource.path)) {
-        referencedFiles.value.push({ name: option.resource.path, content: text.content })
-      }
+      await addProjectFileReference(option.resource)
     }
     input.value = input.value.replace(/@([^\s@]*)$/, '')
     setEditorText(composerRef.value, input.value)
@@ -817,8 +877,15 @@ async function refreshSkills() {
 
 async function selectFiles(event: Event) {
   const selected = Array.from((event.target as HTMLInputElement).files || [])
-  await addAttachmentFiles(selected)
-  ;(event.target as HTMLInputElement).value = ''
+  try {
+    error.value = ''
+    await addAttachmentFiles(selected)
+  } catch (cause) {
+    error.value = `附件处理失败：${cause instanceof Error ? cause.message : String(cause)}`
+  } finally {
+    status.value = ''
+    ;(event.target as HTMLInputElement).value = ''
+  }
 }
 
 async function addAttachmentFiles(selected: File[]) {
@@ -832,6 +899,23 @@ async function addAttachmentFiles(selected: File[]) {
       data: new Uint8Array(await file.arrayBuffer()),
       mimeType: mime,
     })
+    if (detectFileType(file) === 'office') {
+      status.value = `正在解析 ${file.name}`
+      const processed = await processFile(file)
+      if (processed.status !== 'ready' || !processed.textContent) {
+        throw new Error(processed.error || '文档转换失败')
+      }
+      return {
+        id: crypto.randomUUID(),
+        name: file.name,
+        mime,
+        size: file.size,
+        kind: 'file',
+        value: '',
+        textContent: processed.textContent,
+        resourcePath: resource.path,
+      }
+    }
     return {
       id: crypto.randomUUID(),
       name: file.name,
@@ -1100,6 +1184,7 @@ function releaseMediaUrl() {
   if (mediaObjectUrl) URL.revokeObjectURL(mediaObjectUrl)
   mediaObjectUrl = ''
   mediaUrl.value = ''
+  modelData.value = null
 }
 
 function readDataUrl(file: File): Promise<string> {
@@ -1216,6 +1301,14 @@ function readDataUrl(file: File): Promise<string> {
             </div>
           </div>
           <div v-if="displayTurnContent(turn)" class="memory-message-text">{{ displayTurnContent(turn) }}</div>
+          <button
+            v-if="displayTurnContent(turn)"
+            class="memory-message-copy"
+            type="button"
+            :title="copiedTurnId === turn.id ? '已复制' : '复制'"
+            :aria-label="copiedTurnId === turn.id ? '已复制' : '复制消息'"
+            @click="copyTurn(turn)"
+          ><JcIcon :name="copiedTurnId === turn.id ? 'check' : 'content-copy'" /></button>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
               type="button"
@@ -1359,6 +1452,7 @@ function readDataUrl(file: File): Promise<string> {
           <img v-if="previewResource.mediaKind === 'image' && mediaUrl" :src="mediaUrl" :alt="previewResource.resource.name" />
           <video v-else-if="previewResource.mediaKind === 'video' && mediaUrl" :src="mediaUrl" controls />
           <audio v-else-if="previewResource.mediaKind === 'audio' && mediaUrl" :src="mediaUrl" controls />
+          <Model3DViewer v-else-if="previewResource.mediaKind === 'model3d' && modelData" :data="modelData" />
           <p v-else>该媒体文件暂时无法在浏览器中预览。</p>
         </div>
         <div v-else class="memory-empty-state">该文件不支持直接预览，请从文件树菜单导出。</div>
@@ -1460,6 +1554,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
 .memory-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-base); line-height: 1.72; }
+.memory-message-copy { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; margin-top: 5px; margin-left: auto; border: 0; border-radius: 5px; background: transparent; color: var(--ink3); }
+.memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-media-plan-link:hover { border-color: var(--olive); }
 .memory-media-plan-link .mso { color: var(--olive); }
@@ -1532,7 +1628,7 @@ function readDataUrl(file: File): Promise<string> {
 @media (max-width: 760px) {
   .memory-workbench, .memory-workbench.desktop-runtime { display: block; padding-top: 0; }
   .memory-main { height: 100%; }
-  .memory-tree { position: fixed; z-index: 38; inset: 0 auto 0 0; width: min(320px, 88vw); transform: translateX(-100%); transition: transform .18s ease; }
+  .memory-tree { position: fixed; z-index: 38; inset: 0; width: auto; transform: translateX(-100%); transition: transform .18s ease; }
   .memory-tree.open { transform: translateX(0); }
   .memory-tree-backdrop, .mobile-only { display: grid; }
   .memory-topbar { gap: 4px; padding: 0 8px; }
@@ -1545,6 +1641,7 @@ function readDataUrl(file: File): Promise<string> {
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }
+  .memory-settings-drawer { inset: 0; width: auto; border-left: 0; }
   .memory-creation { position: fixed; z-index: 45; inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
 }
 </style>

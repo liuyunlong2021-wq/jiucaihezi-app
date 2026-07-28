@@ -24,6 +24,7 @@ import {
   normalizeGatewayTopupOrder,
   normalizeGatewayUser,
   gatewayLogin,
+  gatewayLogout,
   initApiKey,
   initGatewaySessionToken,
   setApiKey,
@@ -207,7 +208,7 @@ test('gatewayLogin reports unified API routing problems when auth path returns H
   })
 })
 
-test('gatewayLogin ignores legacy session cookie when Auth Broker returns api_key', async () => {
+test('gatewayLogin rejects responses without the dedicated sync session', async () => {
   await withLocalStorage({}, async () => {
     const previousFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
@@ -222,13 +223,13 @@ test('gatewayLogin ignores legacy session cookie when Auth Broker returns api_ke
       },
     })) as typeof fetch
     try {
-      const result = await gatewayLogin({ username: 'alice', password: 'secret' })
-      assert.equal(result.apiKey, 'sk-cookie-ignored-12345678901234567890')
+      await assert.rejects(
+        () => gatewayLogin({ username: 'alice', password: 'secret' }),
+        /登录响应缺少同步会话/,
+      )
+      assert.equal(getApiKey(), '')
       assert.equal(getGatewaySessionToken(), '')
-      assert.deepEqual(buildGatewayHeaders(), {
-        Authorization: 'Bearer sk-cookie-ignored-12345678901234567890',
-        'x-api-key': 'sk-cookie-ignored-12345678901234567890',
-      })
+      assert.deepEqual(buildGatewayHeaders(), {})
     } finally {
       globalThis.fetch = previousFetch
     }
@@ -262,6 +263,27 @@ test('clearGatewaySession removes legacy session without clearing ordinary API k
     await clearGatewaySession()
     assert.equal(getApiKey(), 'sk-ordinary-12345678901234567890')
     assert.equal(getGatewaySessionToken(), '')
+  })
+})
+
+test('gatewayLogout revokes the dedicated sync session and preserves the model API key', async () => {
+  await withLocalStorage({
+    jcApiKey: 'sk-ordinary-12345678901234567890',
+    jcGatewaySessionToken: 'sess_logout_1234567890',
+  }, async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(new Headers(init?.headers).get('X-JC-Session'), 'sess_logout_1234567890')
+      return Response.json({ success: true })
+    }) as typeof fetch
+    try {
+      await gatewayLogout()
+      assert.equal(getApiKey(), 'sk-ordinary-12345678901234567890')
+      assert.equal(getGatewaySessionToken(), '')
+      assert.equal(gatewaySessionAuthenticated.value, false)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
   })
 })
 

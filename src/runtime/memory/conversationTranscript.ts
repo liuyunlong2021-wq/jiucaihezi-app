@@ -82,6 +82,23 @@ export function appendConversationTurn(content: string, turn: ConversationTurn):
   return `${content.replace(/\s+$/, '')}\n\n${block}\n`
 }
 
+export function mergeConversationTranscriptContents(path: string, remote: string, local: string): string | null {
+  const remoteTranscript = parseConversationTranscript(path, remote)
+  const localTranscript = parseConversationTranscript(path, local)
+  if (!remoteTranscript || !localTranscript || remoteTranscript.id !== localTranscript.id) return null
+
+  const turns = new Map(remoteTranscript.turns.map(turn => [turn.id, turn]))
+  for (const turn of localTranscript.turns) turns.set(turn.id, turn)
+  const ordered = [...turns.values()].sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+  let merged = createConversationTranscript(
+    localTranscript.id,
+    localTranscript.title === '新对话' ? remoteTranscript.title : localTranscript.title,
+    localTranscript.createdAt,
+  )
+  for (const turn of ordered) merged = appendConversationTurn(merged, turn)
+  return merged
+}
+
 function serializeAttachments(attachments?: ConversationAttachment[]): string {
   if (!attachments?.length) return ''
   return ` attachments="${attribute(encodeURIComponent(JSON.stringify(attachments)))}"`

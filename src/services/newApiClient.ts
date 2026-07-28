@@ -342,9 +342,9 @@ export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ 
   const apiKey = extractGatewayApiKey(data)
   if (!apiKey) throw new Error('登录响应缺少 API Key，请稍后重试')
   const syncSession = String(data?.sync_session || data?.data?.sync_session || '').trim()
+  if (!syncSession) throw new Error('登录响应缺少同步会话，请稍后重试')
   await setApiKey(apiKey)
-  if (syncSession) await setGatewaySessionToken(syncSession)
-  else await clearGatewaySession()
+  await setGatewaySessionToken(syncSession)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
   return { user, apiKey, baseUrl: extractGatewayBaseUrl(data), syncSession }
@@ -364,8 +364,12 @@ export async function gatewayRegister(payload: Record<string, unknown>): Promise
 }
 
 export async function gatewayLogout(): Promise<void> {
+  const session = getGatewaySessionToken()
   try {
-    await gatewayJson('/auth/logout', { method: 'POST' })
+    await gatewayJson('/auth/logout', {
+      method: 'POST',
+      headers: session ? { 'X-JC-Session': session } : {},
+    })
   } finally {
     await clearGatewaySession()
   }

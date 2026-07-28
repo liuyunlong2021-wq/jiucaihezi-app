@@ -5,3 +5,7 @@ export function isTauriRuntime(): boolean {
     typeof runtime.__TAURI_INTERNALS__ === 'object' ||
     '__TAURI__' in runtime
 }
+
+export function isTauriMobileRuntime(): boolean {
+  return isTauriRuntime() && /Android|iPad|iPhone|iPod/i.test(navigator.userAgent)
+}

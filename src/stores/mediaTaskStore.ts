@@ -13,7 +13,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getItem, setItem } from '@/utils/idb'
+import { getItem, isStorageDegraded, setItem } from '@/utils/idb'
 import {
   generateImage,
   generateVideo,
@@ -31,7 +31,7 @@ import { emitEvent, emitEventAsync } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { writeMediaAsset } from '@/utils/mediaFileWriter'
 import { writeProjectMedia } from '@/utils/projectMediaWriter'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { useProjectStore } from '@/stores/projectStore'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
@@ -197,12 +197,39 @@ const TASKS_KEY = 'jc_media_tasks_v1'
 
 async function loadTasks(): Promise<MediaTask[]> {
   try {
+    if (isStorageDegraded()) throw new Error('SQLite storage is not ready')
     const raw = await getItem(TASKS_KEY)
     if (!raw) return []
     const list = typeof raw === 'string' ? JSON.parse(raw) : raw
     return Array.isArray(list) ? list : []
-  } catch {
+  } catch (error) {
+    if (isTauriRuntime()) throw error
     return []
+  }
+}
+
+let mediaTaskLoader: typeof loadTasks = loadTasks
+
+export function __setMediaTaskLoaderForTests(loader: typeof loadTasks | null) {
+  mediaTaskLoader = loader || loadTasks
+}
+
+async function rebaseMobileTaskPaths(tasks: MediaTask[]) {
+  if (!isTauriMobileRuntime()) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const projects = await invoke<Array<{ name: string; path: string }>>('list_mobile_projects')
+    for (const task of tasks) {
+      if (!task.projectPath) continue
+      const owner = String(task.directory || task.assetUri?.slice(0, -(task.projectPath.length + 1)) || '')
+      const projectName = owner.replace(/\\/g, '/').replace(/\/+$/, '').split('/').pop()
+      const current = projects.find(project => project.name === projectName)
+      if (!current || current.path === task.directory) continue
+      task.directory = current.path
+      task.assetUri = `${current.path}/${task.projectPath}`
+    }
+  } catch {
+    // Keep the saved paths; remote preview remains available.
   }
 }
 
@@ -617,6 +644,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         })
         task.assetUri = filePath
         task.projectPath = projectPath
+        task.directory = projectDir
         task.assetStatus = 'local'
         task.assetRetryCount = 0
         console.log('[JC] 创作结果已落项目文件夹:', filePath)
@@ -809,7 +837,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (initialized.value) return
     if (initPromise) return initPromise
     initPromise = (async () => {
-      const saved = await loadTasks()
+      const saved = await mediaTaskLoader()
+      await rebaseMobileTaskPaths(saved)
       tasks.value = saved
       initialized.value = true
 

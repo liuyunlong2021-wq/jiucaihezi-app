@@ -284,7 +284,7 @@ async function resolveTaskFilePath(task: MediaTask): Promise<string> {
 
 const taskPreview = ref<{
   url: string
-  type: 'image' | 'video' | 'audio'
+  type: 'image' | 'video' | 'audio' | 'model3d'
   model: string
   sourceUrl: string
   filename: string
@@ -303,8 +303,8 @@ function closeTaskPreview() {
   taskPreview.value = null
 }
 
-function taskPreviewType(task: MediaTask): 'image' | 'video' | 'audio' {
-  return task.type === 'video' ? 'video' : task.type === 'audio' ? 'audio' : 'image'
+function taskPreviewType(task: MediaTask): 'image' | 'video' | 'audio' | 'model3d' {
+  return task.type === 'video' ? 'video' : task.type === 'audio' ? 'audio' : task.type === 'model3d' ? 'model3d' : 'image'
 }
 
 function downloadTaskPreview() {
@@ -317,34 +317,21 @@ function downloadTaskPreview() {
 }
 
 async function previewTask(task: MediaTask) {
+  const resource = projectResourceForMediaTask(task)
   if (props.previewSurface === 'host') {
-    const resource = projectResourceForMediaTask(task)
     if (resource) {
       showTaskHistory.value = false
       emit('previewResource', resource)
       return
     }
   }
-  if (!isTauriRuntime()) {
-    const projectId = String(task.projectId || '')
-    const projectPath = String(task.projectPath || '')
-    if (!projectId || !projectPath) {
-      cpState.progressText = task.errorMsg || '保存到项目失败，无法预览'
-      return
-    }
+  if (resource) {
     const requestId = ++taskPreviewRequestId
     releaseTaskPreviewUrl()
     taskPreview.value = null
     let objectUrl = ''
     try {
-      const binary = await projectFileActions.readMedia({
-        runtime: 'web',
-        owner: projectId,
-        path: projectPath,
-        name: projectPath.split('/').pop() || projectPath,
-        isDirectory: false,
-        kind: 'media',
-      })
+      const binary = await projectFileActions.readMedia(resource)
       if (requestId !== taskPreviewRequestId) return
       const bytes = new Uint8Array(binary.data.byteLength)
       bytes.set(binary.data)
@@ -354,20 +341,12 @@ async function previewTask(task: MediaTask) {
         return
       }
       taskPreviewObjectUrl = objectUrl
-      if (task.type === 'model3d') {
-        const link = document.createElement('a')
-        link.href = objectUrl
-        link.download = projectPath.split('/').pop() || 'model.glb'
-        link.click()
-        releaseTaskPreviewUrl()
-        return
-      }
       taskPreview.value = {
         url: objectUrl,
         type: taskPreviewType(task),
         model: task.modelLabel || task.model,
         sourceUrl: task.resultUrl || '',
-        filename: projectPath.split('/').pop() || 'creation',
+        filename: resource.name || 'creation',
       }
     } catch (error) {
       if (requestId !== taskPreviewRequestId) return
@@ -377,18 +356,25 @@ async function previewTask(task: MediaTask) {
     return
   }
 
-  const target = task.assetUri || task.resultUrl
-  if (!target) return
-  try {
-    const filePath = await resolveTaskFilePath(task)
-    if (filePath && isLocalFilePath(filePath)) {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('open_in_shell', { path: filePath })
-      return
+  if (task.resultUrl) {
+    taskPreview.value = {
+      url: task.resultUrl,
+      type: taskPreviewType(task),
+      model: task.modelLabel || task.model,
+      sourceUrl: task.resultUrl,
+      filename: taskPath(task).split('/').pop() || 'creation',
     }
-    if (task.resultUrl) await openExternal(task.resultUrl)
-  } catch {
-    if (task.resultUrl) window.open(task.resultUrl, '_blank')
+    return
+  }
+  cpState.progressText = task.errorMsg || '结果尚未保存到项目，无法预览'
+}
+
+async function openTaskHistory() {
+  try {
+    await mediaTaskStore.init()
+    showTaskHistory.value = true
+  } catch (error) {
+    cpState.progressText = `历史记录加载失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
 
@@ -3320,7 +3306,7 @@ const canSend = computed(
       <button class="cp-toolbar-link cp-toolbar-icon" title="新建画布" @click="createAndOpenCanvas()">
         <JcIcon name="add" />
       </button>
-      <button class="cp-toolbar-link cp-toolbar-icon" @click="showTaskHistory = true" title="查看生成历史">
+      <button class="cp-toolbar-link cp-toolbar-icon" @click="openTaskHistory" title="查看生成历史">
         <JcIcon name="history" />
       </button>
       <button

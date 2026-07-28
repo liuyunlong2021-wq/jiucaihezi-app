@@ -11,6 +11,7 @@ import * as eventBus from '@/utils/eventBus'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import {
   __setCreationSubmitExecutorForTests,
+  __setMediaTaskLoaderForTests,
   __setMediaTaskSaverForTests,
   useMediaTaskStore,
 } from '../mediaTaskStore'
@@ -1559,6 +1560,45 @@ test(
     }
   },
 )
+
+test(
+  'mediaTaskStore never overwrites history while Tauri SQLite is unavailable',
+  { concurrency: false },
+  async () => {
+    setActivePinia(createPinia())
+    let loadCalls = 0
+    let saveCalls = 0
+    __setMediaTaskLoaderForTests(async () => {
+      loadCalls++
+      throw new Error('SQLite storage is not ready')
+    })
+    __setMediaTaskSaverForTests(async () => {
+      saveCalls++
+    })
+
+    try {
+      const store = useMediaTaskStore()
+      await assert.rejects(store.init(), /SQLite storage is not ready/)
+      await assert.rejects(store.init(), /SQLite storage is not ready/)
+      assert.equal(loadCalls, 2)
+      assert.equal(saveCalls, 0)
+    } finally {
+      __setMediaTaskLoaderForTests(null)
+      __setMediaTaskSaverForTests(null)
+    }
+  },
+)
+
+test('mediaTaskStore rebases persisted iOS media paths after an app update', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  const rebase = source.match(/async function rebaseMobileTaskPaths[\s\S]*?\n}/)?.[0] || ''
+
+  assert.match(rebase, /isTauriMobileRuntime\(\)/)
+  assert.match(rebase, /invoke<Array<\{ name: string; path: string \}>>\('list_mobile_projects'\)/)
+  assert.match(rebase, /projects\.find\(project => project\.name === projectName\)/)
+  assert.match(rebase, /task\.directory = current\.path/)
+  assert.match(rebase, /task\.assetUri = `\$\{current\.path}\/{1}\$\{task\.projectPath}`/)
+})
 
 test(
   'mediaTaskStore rolls back the inserted task when initial persistence fails',

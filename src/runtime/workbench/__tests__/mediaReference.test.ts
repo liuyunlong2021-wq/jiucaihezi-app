@@ -203,6 +203,24 @@ test('completed task locators prefer their persisted project resource', () => {
   )
   assert.deepEqual(
     projectResourceForMediaTask({
+      id: 'legacy-desktop-task',
+      type: 'image',
+      status: 'success',
+      createdAt: 1,
+      projectPath: 'jc-media/images/legacy.png',
+      assetUri: '/Users/me/project/jc-media/images/legacy.png',
+    }),
+    {
+      runtime: 'desktop',
+      owner: '/Users/me/project',
+      path: 'jc-media/images/legacy.png',
+      name: 'legacy.png',
+      isDirectory: false,
+      kind: 'media',
+    },
+  )
+  assert.deepEqual(
+    projectResourceForMediaTask({
       id: 'desktop-task',
       type: 'video',
       status: 'success',
