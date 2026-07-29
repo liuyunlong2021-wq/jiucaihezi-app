@@ -25,9 +25,8 @@ import {
 } from '@/utils/api'
 import { emitEvent } from '@/utils/eventBus'
 import { useSessionStore } from '@/stores/sessionStore'
-import { jinaWebSearch } from '@/utils/webSearch'
+import { executeJinaWebSearchTool, WEB_SEARCH_TOOL_DEFINITION } from '@/utils/webSearch'
 import {
-  appendSystemEvidence,
   resolveDirectCompletionText,
   runDirectChatCompletion,
   type DirectChatCompletionRequest,
@@ -56,21 +55,6 @@ import type { SendMessageOptions, ChatMessage, AgentPhase } from '../useChat'
 // --- Constants and helpers (extracted/adapted from useChat.ts for cloud only) ---
 
 const WEB_CLOUD_DEFAULT_MODEL = DEFAULT_TEXT_MODEL
-
-const DIRECT_WEB_SEARCH_TOOL = {
-  type: 'function' as const,
-  function: {
-    name: 'web_search',
-    description: '当用户问题需要最新事实、新闻、数据或超出知识截止的信息时，使用此工具通过 Jina 进行联网搜索。',
-    parameters: {
-      type: 'object' as const,
-      properties: {
-        query: { type: 'string' as const, description: '搜索关键词（中英文均可）' },
-      },
-      required: ['query'],
-    },
-  },
-}
 
 function chatContentToText(value: unknown): string {
   if (typeof value === 'string') return value
@@ -248,7 +232,7 @@ export async function sendWebCloudMessage(
     }
     const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
     const toolsAllowed = !isDaoMode && currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
-    let apiMessages = buildDirectMessages({
+    const apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
       systemPrompt: isDaoMode ? '' : [options.systemPrompt, context.systemPrompt].filter(Boolean).join('\n\n'),
@@ -260,16 +244,6 @@ export async function sendWebCloudMessage(
       platform: isDaoMode && isTauriRuntime() ? 'desktop' : 'web',
       attachments: modelAttachments,
     })
-    const searchEnabled = !isDaoMode && typeof localStorage !== 'undefined' && localStorage.getItem('jcWebSearchEnabled') === 'true'
-    if (searchEnabled) {
-      const query = getLatestUserText(currentMessages).slice(0, 300)
-      if (query) {
-        const search = await jinaWebSearch(query, 5)
-        if (search.markdown && !search.error) {
-          apiMessages = appendSystemEvidence(apiMessages as any, search.markdown) as any
-        }
-      }
-    }
     console.log('[JC:cloud] 准备 fetch, apiBase:', config.apiBase, 'model:', config.model, 'messages count:', apiMessages.length)
     const bodyPayload: any = {
       model: config.model,
@@ -336,13 +310,7 @@ export async function sendWebCloudMessage(
       if (controller.signal.aborted || runId !== getActiveRunId()) throw new DOMException('Aborted', 'AbortError')
       let result
       if (call.function.name !== 'web_search') result = await projectToolExecutor(call)
-      else {
-        const args = JSON.parse(call.function.arguments || '{}')
-        const query = String(args?.query || '').trim()
-        if (!query) throw new Error('query is required')
-        const search = await jinaWebSearch(query, 5)
-        result = { content: search.markdown || search.error || 'No search results' }
-      }
+      else result = await executeJinaWebSearchTool(call.function.arguments)
       if (controller.signal.aborted || runId !== getActiveRunId()) {
         throw new DOMException('Aborted', 'AbortError')
       }
@@ -352,7 +320,7 @@ export async function sendWebCloudMessage(
     const directResult = await runDirectChatCompletion({
       messages: apiMessages,
       tools: toolsAllowed
-        ? [...buildWebProjectToolDefinitions(), ...(searchEnabled ? [DIRECT_WEB_SEARCH_TOOL] : [])]
+        ? [...buildWebProjectToolDefinitions(), WEB_SEARCH_TOOL_DEFINITION]
         : [],
       onText: text => {
         directRoundText = text

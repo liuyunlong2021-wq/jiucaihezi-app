@@ -29,6 +29,7 @@ import { webProjectFiles } from '@/utils/webProjectFiles'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { safeFetch } from '@/utils/httpClient'
 import { supportsVision } from '@/utils/providerConfig'
+import { executeJinaWebSearchTool, WEB_SEARCH_TOOL_DEFINITION } from '@/utils/webSearch'
 
 import type { ConversationMode, ConversationTurn } from './conversationTranscript'
 
@@ -131,6 +132,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   const builtInNames = new Set(catalog.filter(skill => skill.source === 'builtin').map(skill => skill.name))
   const executeMemoryTool = async (call: DirectToolCall) => {
+    if (call.function.name === 'web_search') {
+      return await executeJinaWebSearchTool(call.function.arguments)
+    }
     if (call.function.name === 'skill') {
       const skillName = String(parseArguments(call.function.arguments).name || '')
       const customSkill = !builtInNames.has(skillName) ? customSkillsByName.get(skillName) : null
@@ -161,7 +165,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
   const result = await runDirectChatCompletion({
     messages,
-    tools: buildWebProjectToolDefinitions(),
+    tools: [...buildWebProjectToolDefinitions(), WEB_SEARCH_TOOL_DEFINITION],
     sendChatCompletion,
     signal: input.signal,
     onText: input.onText,

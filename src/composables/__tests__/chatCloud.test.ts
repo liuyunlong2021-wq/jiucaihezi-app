@@ -6,6 +6,7 @@ import { sendWebCloudMessage } from '../web/chatCloud'
 import type { ChatMessage } from '../useChat'
 import { useAgentStore, type ModelEntry } from '../../stores/agentStore'
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
+import { executeJinaWebSearchTool, WEB_SEARCH_TOOL_DEFINITION } from '../../utils/webSearch'
 
 function installStorage(values: Record<string, string> = {}) {
   const store = new Map(Object.entries(values))
@@ -74,6 +75,21 @@ function skillCatalogResponse(url: string | URL | Request): Response | null {
     ? new Response('[]', { headers: { 'content-type': 'application/json' } })
     : null
 }
+
+test('web search tool validates its query and returns Jina evidence', async () => {
+  assert.equal(WEB_SEARCH_TOOL_DEFINITION.function.name, 'web_search')
+  await assert.rejects(() => executeJinaWebSearchTool('{"query":"  "}'), /搜索关键词不能为空/)
+
+  const result = await executeJinaWebSearchTool('{"query":"今日新闻"}', async query => ({
+    query,
+    results: [],
+    markdown: `[联网搜索结果] ${query}`,
+    tokenEstimate: 0,
+    searchTime: 1,
+  }))
+
+  assert.equal(result.content, '[联网搜索结果] 今日新闻')
+})
 
 test('Web creative mode never uploads local-model media to a cloud fallback', async () => {
   const restoreStorage = installStorage({
@@ -177,6 +193,7 @@ test('Web sends MP4 once to the selected model even when it explicitly declares 
     }, 1, new AbortController(), assistant, () => {}, () => 1, messages)
     assert.equal(completionBodies.length, 1)
     assert.equal(completionBodies[0]?.model, primaryTextModel.id)
+    assert.equal(completionBodies[0]?.tools?.some((tool: any) => tool.function?.name === 'web_search'), true)
     assert.match(JSON.stringify(completionBodies[0]), /data:video\/mp4;base64,AAAA/)
   } finally {
     __resetApiKeyMemoryCacheForTests('')

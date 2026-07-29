@@ -145,6 +145,8 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(workbench, /appendMemoryTurn\([\s\S]*attachmentMetadata\(pendingAttachments\),[\s\S]*pendingMode/)
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
   assert.match(runtime, /if \(!memoryMode\)[\s\S]*runDirectChatCompletion\([\s\S]*tools: undefined/)
+  assert.match(runtime, /call\.function\.name === 'web_search'[\s\S]*executeJinaWebSearchTool\(call\.function\.arguments\)/)
+  assert.match(runtime, /tools: \[\.\.\.buildWebProjectToolDefinitions\(\), WEB_SEARCH_TOOL_DEFINITION\]/)
 })
 
 test('memory composer routes pasted images and media plans into the existing creation panel', () => {

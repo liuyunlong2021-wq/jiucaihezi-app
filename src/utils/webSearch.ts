@@ -9,6 +9,7 @@
  *   POST /v1/chat/completions  { model: "jina-search", messages: [{role:"user", content: query}] }
  */
 import { buildHeaders, resolveApiConfig } from '@/utils/api'
+import { safeFetch } from '@/utils/httpClient'
 
 export interface SearchResult {
   title: string
@@ -27,6 +28,20 @@ export interface WebSearchResponse {
 }
 
 export const JINA_SEARCH_MODEL = 'jina-search'
+export const WEB_SEARCH_TOOL_DEFINITION = {
+  type: 'function' as const,
+  function: {
+    name: 'web_search',
+    description: '当用户问题需要最新事实、新闻、数据或网页内容时，通过 Jina 联网搜索。',
+    parameters: {
+      type: 'object' as const,
+      properties: {
+        query: { type: 'string' as const, description: '搜索关键词（中英文均可）' },
+      },
+      required: ['query'],
+    },
+  },
+}
 
 /**
  * 调 NewAPI jina-search 模型执行联网搜索
@@ -43,7 +58,7 @@ export async function jinaWebSearch(query: string, maxResults = 5): Promise<WebS
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 8000)
 
-    const resp = await fetch(`${config.apiBase}/v1/chat/completions`, {
+    const resp = await safeFetch(`${config.apiBase}/v1/chat/completions`, {
       method: 'POST',
       signal: controller.signal,
       headers: buildHeaders(config),
@@ -79,6 +94,19 @@ export async function jinaWebSearch(query: string, maxResults = 5): Promise<WebS
     console.warn('[jina-search] exception:', errMsg)
     return { query, results: [], markdown: '', tokenEstimate: 0, searchTime: Date.now() - start, error: errMsg }
   }
+}
+
+export async function executeJinaWebSearchTool(
+  argumentsText: string,
+  search = jinaWebSearch,
+): Promise<{ content: string }> {
+  let args: unknown
+  try { args = JSON.parse(argumentsText || '{}') }
+  catch { throw new Error('搜索参数不是有效 JSON') }
+  const query = String((args as { query?: unknown })?.query || '').trim()
+  if (!query) throw new Error('搜索关键词不能为空')
+  const result = await search(query, 5)
+  return { content: result.markdown || result.error || '没有搜索结果' }
 }
 
 // ─── 兼容旧接口 ───
