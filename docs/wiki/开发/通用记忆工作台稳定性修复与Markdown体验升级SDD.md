@@ -291,7 +291,7 @@ Mac 构建证据：`pnpm run tauri:build` 成功，生成 Apple Silicon `.app` �
 
 - 用户已在最新 Mac 开发包真实发送长回复，确认流式文字持续显示、视口停在当前回复、结束后不跳回旧消息，Task 1.5 的 Mac 用户功能验收通过；这项证据不是单纯构建或安装成功。
 - 版本已统一为 `2.1.1`；`b0655db8`、`40b634c4` 已推送 `main`。Web 正式产物重新构建并通过审计，Cloudflare Production 部署成功，部署证据为 `https://55beb256.jiucaihezi.pages.dev`。
-- annotated tag `v2.1.1` 已推送并触发 GitHub Actions `30466581443`。记录时 Mac Apple Silicon、Mac Intel、Windows x64 仍在云端构建，不提前写成三平台发布成功；用户将在工作流结束后补充结果。
+- annotated tag `v2.1.1` 已推送；GitHub Actions `30466581443` 已成功完成 Mac Apple Silicon、Mac Intel、Windows x64 构建。正式 Release 已包含两种 Mac DMG、两种 Mac App 压缩包和 Windows x64 便携包；`https://api.jiucaihezi.studio/updates/latest.json` 已返回 `2.1.1` 及三个桌面平台下载地址。这里证明发布产物可用，不代替 Windows/Intel Mac 的用户功能验收。
 - 发布仍使用既有合同：`push main -> Web Production -> push version tag -> GitHub Actions 自动上传并生成 latest.json`。本机 GitHub 凭据过期只需恢复官方登录，不构成新的发布步骤。
 - iPhone/iPad 正式开发与完整回归仍按既定节奏放在 Web/桌面发布之后；Android 继续暂停。
 

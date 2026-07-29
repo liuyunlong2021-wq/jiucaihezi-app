@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/显示系统统一SDD]]（共享代码已实施，跨端验收待完成）· [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]]** — 共享代码修复已完成：移动预览自动返回与自动同步根因已切断；文件/对话共用安全 Markdown；双链按项目文件按需扫描；Markdown 保存使用 revision；下线模型已从能力表、注册表和默认回退清除；复制按钮已收紧。2026-07-29 追加修复流式闪烁与“只显示角色、正文在视口下方”：记忆工作台删除绝对定位虚拟列表、估算高度和手工测量，已保存消息与内存中的 `streamingText` 进入同一普通 Markdown 文档流；流式阶段轻量显示，完成后一次写入当前 Raw 并替换临时行。用户已在最新 Mac 开发包真实验证长回复持续显示、底部跟随和结束后不跳旧消息。`v2.1.1` 源码与 tag 已推送，Web Production 已部署；GitHub Actions `30466581443` 正在构建 Mac Apple Silicon、Mac Intel、Windows x64，尚不宣称桌面发布完成。新发现 Veo 3.1 受保护 `/content` 在 Desktop 本地化时缺少 Bearer Token，导致任务只剩远程预览、播放器黑屏和下载“无效的令牌”；根因与最小边界已记录在 SDD 5.3，尚未改代码。iPhone、iPad 完整矩阵仍待补；Android 继续暂停。
+**当前焦点：[[开发/显示系统统一SDD]]（共享代码已实施，跨端验收待完成）· [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]]** — 共享代码修复已完成：移动预览自动返回与自动同步根因已切断；文件/对话共用安全 Markdown；双链按项目文件按需扫描；Markdown 保存使用 revision；下线模型已从能力表、注册表和默认回退清除；复制按钮已收紧。2026-07-29 追加修复流式闪烁与“只显示角色、正文在视口下方”：记忆工作台删除绝对定位虚拟列表、估算高度和手工测量，已保存消息与内存中的 `streamingText` 进入同一普通 Markdown 文档流；流式阶段轻量显示，完成后一次写入当前 Raw 并替换临时行。用户已在最新 Mac 开发包真实验证长回复持续显示、底部跟随和结束后不跳旧消息。`v2.1.1` 源码、tag、Web Production 和桌面正式 Release 均已发布；GitHub Actions `30466581443` 成功生成 Mac Apple Silicon、Mac Intel、Windows x64 产物，更新清单已返回三个桌面平台地址。新发现 Veo 3.1 受保护 `/content` 在 Desktop 本地化时缺少 Bearer Token，导致任务只剩远程预览、播放器黑屏和下载“无效的令牌”；根因与最小边界已记录在 SDD 5.3，尚未改代码。iPhone、iPad 完整矩阵仍待补；Android 继续暂停。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-07-29（`v2.1.1` main、Web Production 和版本 tag 已发布；桌面三平台 GitHub Actions 构建中。Mac 流式与显示真实验收通过；Veo 3.1 Desktop 受保护结果下载缺少认证已完成根因分析、尚未修复；Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）
+> 上次刷新: 2026-07-30（`v2.1.1` main、Web Production、版本 tag 和桌面三平台 Release 已发布；Mac 流式与显示真实验收通过。Veo 3.1 Desktop 受保护结果下载缺少认证已完成根因分析、尚未修复；RunningHub 部分标准 API 迁移全球站，需逐端点验证；Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）
