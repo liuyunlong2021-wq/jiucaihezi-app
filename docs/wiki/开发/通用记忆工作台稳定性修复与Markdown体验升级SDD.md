@@ -287,6 +287,30 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 
 Mac 构建证据：`pnpm run tauri:build` 成功，生成 Apple Silicon `.app` 与 `.dmg`。构建后发现 `fix-macos-app.mjs` 会把 Tauri 的 Developer ID 签名覆盖成 ad-hoc；最小修复为复用 `tauri.conf.json` 现有签名身份并保留 hardened runtime/entitlements，不新增签名配置。最终 APP 与 DMG 均使用 `Developer ID Application: yunlong liu (RXD4L9387J)` 签名；APP `codesign --verify --deep --strict` 与 DMG `codesign --verify` 均通过，最终 APP `TeamIdentifier=RXD4L9387J`。DMG SHA-256：`5483db8514c1c3004fdff000762f14febf619d2a38315495e13f57e67086b825`。未配置 Apple 公证凭据，因此不宣称已公证或发布。版本仍为 `2.1.0`。
 
+### 5.2 v2.1.1 发布与真实验收补充（2026-07-29）
+
+- 用户已在最新 Mac 开发包真实发送长回复，确认流式文字持续显示、视口停在当前回复、结束后不跳回旧消息，Task 1.5 的 Mac 用户功能验收通过；这项证据不是单纯构建或安装成功。
+- 版本已统一为 `2.1.1`；`b0655db8`、`40b634c4` 已推送 `main`。Web 正式产物重新构建并通过审计，Cloudflare Production 部署成功，部署证据为 `https://55beb256.jiucaihezi.pages.dev`。
+- annotated tag `v2.1.1` 已推送并触发 GitHub Actions `30466581443`。记录时 Mac Apple Silicon、Mac Intel、Windows x64 仍在云端构建，不提前写成三平台发布成功；用户将在工作流结束后补充结果。
+- 发布仍使用既有合同：`push main -> Web Production -> push version tag -> GitHub Actions 自动上传并生成 latest.json`。本机 GitHub 凭据过期只需恢复官方登录，不构成新的发布步骤。
+- iPhone/iPad 正式开发与完整回归仍按既定节奏放在 Web/桌面发布之后；Android 继续暂停。
+
+### 5.3 Veo 3.1 远程结果待修诊断（2026-07-29，仅分析）
+
+真实现象：Veo 3.1 生成成功后，任务历史只显示远程 `https://api.jiucaihezi.studio/v1/videos/{task}/content` 和“预览”；没有“放到画布”“打开文件夹”。预览播放器黑屏，下载会显示 New API“无效的令牌”。用户把结果地址放到外部浏览器后可以取得视频，证明上游生成结果和 MP4 本体没有损坏。
+
+根因链路：
+
+1. `CreationPanel` 只有在任务存在 `projectPath` 或 `assetUri` 时才显示“放到画布”，只有本地 `assetUri` 才显示“打开文件夹”；只有远程 `resultUrl` 时按设计只显示“预览”。
+2. Veo 的 `/v1/videos/{task}/content` 属于韭菜盒子 API 同源受保护结果，读取时需要当前 New API Bearer Token。
+3. Web 的 `fetchCreationMediaBlob()` 已按同源规则附加 Token，并明确禁止把 Token 发往第三方 CDN；Desktop 的 `http_download_base64` 请求结构只有 `url` 和 `timeout_secs`，下载时没有请求头。
+4. Desktop 生成结束后的项目落盘因此收到未认证响应，任务无法产生 `projectPath/assetUri`，退化为 remote-only 结果。
+5. remote-only 预览把远程 URL 直接交给 `<video>`，下载把同一 URL 直接交给 `<a download>`；两者都不能附加 Bearer Token，所以分别表现为黑屏和“无效的令牌”。
+
+现有测试只验证 Web 同源下载会附加 Token；Desktop 测试桩对任意 `http_download_base64` 都直接返回 200，没有断言同源认证头，因此发布门禁没有覆盖这条真实合同。
+
+最小修复边界（本轮尚未实施）：只补齐共享下载命令的可选请求头，并在韭菜盒子 API 同源结果上复用当前 Token；第三方 CDN 仍不带 Token。生成完成后优先把视频一次写入当前项目，预览、下载和放到画布继续消费现有项目文件，不增加 Veo 专用分支、第二套下载器或远程媒体存储。
+
 ## 6. 不做事项
 
 - 不新建 Markdown 数据库、向量库或隐藏摘要。
