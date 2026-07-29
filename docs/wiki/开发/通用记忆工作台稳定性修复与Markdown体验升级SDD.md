@@ -1,8 +1,8 @@
 # 通用记忆工作台稳定性修复与 Markdown 体验升级 SDD
 
-> 状态：待 Android 阶段完成后实施
+> 状态：Android 阶段暂停期间实施；Android 恢复后复用本 SDD 的共享修复并补做 Android 验收
 > 范围：通用记忆 Web、Mac、Windows、iPhone、iPad、Android
-> 原则：先稳定 Android，再集中修复；不改变项目文件为真源，不新增第二套会话或记忆系统。
+> 原则：先夯实共享 Web/Desktop/iPhone/iPad 地基，再恢复 Android；不改变项目文件为真源，不新增第二套会话或记忆系统。
 
 ## 1. 目标
 
@@ -172,8 +172,8 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 
 ### Task 0：冻结基线
 
-- Android 4D-1 至 4D-9 完成并合并到 `main`。
-- 保留 Web、Mac、iPhone、Android 的构建和真机验收证据。
+- 从当前稳定 `main` 冻结基线；不等待 Android 4D 阶段恢复，也不把 Android 未完成代码带入本轮。
+- 保留 Web、Mac、Windows、iPhone、iPad 的构建和真机验收证据；Android 恢复后补做同一修复的 Android 验收。
 - 确认 Markdown 渲染库、文件服务、模型注册表和费用来源。
 - 抓取一次 iPad 自动返回问题的最小复现日志。
 
@@ -185,7 +185,7 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 - 检查移动平台识别、项目切换 watcher、异步文件读取和预览组件卸载链路。
 - 修复后，打开 Markdown 至少停留 3 分钟、滚动到底部、切换后台再返回，仍停留在预览页。
 
-验收：iPhone、iPad、Android 各完成一次冷启动、打开、滚动、后台恢复；无自动跳转、无空白预览、无控制台/原生错误。
+验收：iPhone、iPad 各完成一次冷启动、打开、滚动、后台恢复；无自动跳转、无空白预览、无控制台/原生错误。Android 恢复后补做同一矩阵。
 
 ### Task 1.5：发送、流式输出与自动滚动
 
@@ -211,7 +211,7 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 ### Task 2：统一 Markdown 阅读渲染
 
 - 文件阅读和对话显示共用安全 Markdown 渲染合同。
-- 支持标题、段落、列表、表格、引用、分割线、代码块、链接、图片和基础数学/特殊字符兼容。
+- 支持标题、段落、列表、表格、引用、分割线、代码块、链接、图片和常见特殊字符兼容。
 - 保留原文复制和 Raw 内容，不对源文件做破坏性清洗。
 
 验收：同一份 Markdown 在文件阅读和对话中排版语义一致；标题不显示 `#`，粗体不显示 `**`，表格不显示分隔竖线；恶意 HTML 不执行。
@@ -227,7 +227,6 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 
 ### Task 4：Markdown 编辑与保存
 
-- 增加阅读/编辑切换。
 - 编辑器提供 Markdown 语法高亮、双链可识别和稳定光标。
 - 保存使用 `ProjectFileService` 和 revision 冲突合同。
 - Web 使用浏览器项目文件系统，Desktop/Mobile 使用各自项目目录。
@@ -241,7 +240,7 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 - 显示真实费用数字和计费单位，不显示人民币符号。
 - 模型不可用或价格缺失时明确标记，不允许选择后才失败。
 
-验收：模型分组顺序稳定；选择的具体模型 ID 与请求一致；费用单位与管理员扣费记录一致；失效模型不出现在 Web、Mac、iPhone、Android。
+验收：模型分组顺序稳定；选择的具体模型 ID 与请求一致；费用单位与管理员扣费记录一致；失效模型不出现在 Web、Mac、iPhone。Android 恢复后补做模型列表验收。
 
 ### Task 6：复制和界面收口
 
@@ -252,11 +251,11 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 
 ### Task 7：跨端回归和发布
 
-- Web、Mac Apple Silicon、Mac Intel、Windows、iPhone、iPad、Android 各完成核心矩阵。
+- Web、Mac Apple Silicon、Mac Intel、Windows、iPhone、iPad 各完成核心矩阵；Android 阶段恢复后复用本 SDD 并补做 Android 核心矩阵，不阻塞本轮共享修复收口。
 - 记录构建、安装、启动、阅读、编辑、保存、双链、模型选择和费用显示结果。
 - 修复完成后更新本文件和 `hot.md`，再发布对应版本。
 
-验收：所有平台通过后才能标记本 SDD 完成；不能用单个平台或“构建成功”代替跨端证据。
+验收：当前 Web、Mac、Windows、iPhone、iPad 全部通过后，本轮共享修复才能标记完成；不能用单个平台或“构建成功”代替跨端证据。Android 作为恢复后的追加验收，不得据此提前宣称 Android 完成。
 
 ## 5. 不做事项
 
