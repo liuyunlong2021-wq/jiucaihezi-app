@@ -31,9 +31,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
     'gpt-image-2',
-    'newapi/vip/gpt-image-2-vip',
-    'newapi/t8/grok-video-3',
-    'newapi/t8/veo3.1-fast',
+    'gpt-image-2-vip',
     'newapi/trump/seedance-2.0',
     'runninghub/api/rh-gpt2-image',
     'runninghub/api/rh-gpt2-text',
@@ -43,7 +41,6 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/api/rh-video-v31-fast',
     'runninghub/api/rh-grok-text-video',
     'runninghub/api/rh-grok-image-video',
-    'runninghub/api/rh-grok-video-edit',
     'runninghub/api/rh-seedance2-mini',
     'runninghub/api/rh-seedance2-fast',
     'runninghub/api/rh-seedance2',
@@ -73,8 +70,13 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
 test('removed defaults stay absent and model metadata drives family and fee labels', () => {
   assert.equal(getCreationModelSpec('runninghub/api/rh-gpt2-official'), undefined)
   assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2')!), 'GPT Image')
-  assert.equal(creationModelFamily(getCreationModelSpec('newapi/t8/gemini-3-pro-image-preview')!), 'Banana')
-  assert.equal(displayModelPrice(getCreationModelSpec('newapi/t8/gemini-3-pro-image-preview')!), '0.2/张')
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-gpt2-image')!), 'GPT Image')
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-gpt2-text')!), 'GPT Image')
+  assert.equal(creationModelFamily(getCreationModelSpec('gemini-3-pro-image-preview')!), 'Banana')
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-mini-image')!), 'Seedance 2.0 Mini')
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-fast-text')!), 'Seedance 2.0 Fast')
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-image')!), 'Seedance 2.0')
+  assert.equal(displayModelPrice(getCreationModelSpec('gemini-3-pro-image-preview')!), '0.2/张')
   assert.equal(displayModelPrice(getCreationModelSpec('runninghub/api/rh-3d-image')!), '6.6/次')
 })
 
@@ -109,7 +111,7 @@ test('every registry model has a valid route contract and can produce a run plan
 
 test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('gpt-image-2')?.model, 'gpt-image-2')
-  assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.model, 'gpt-image-2-vip')
+  assert.equal(getCreationModelSpec('gpt-image-2-vip')?.model, 'gpt-image-2-vip')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
   assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
@@ -118,11 +120,11 @@ test('model lookup prefers exact ids and resolves aliases', () => {
 
 test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
   const textOnly = buildCreationRunPlan({
-    modelId: 'newapi/vip/gpt-image-2-vip',
+    modelId: 'gpt-image-2-vip',
     params: { prompt: '一张产品图', ratio: '1:1', resolution: '2k' },
   })
   const withImage = buildCreationRunPlan({
-    modelId: 'newapi/vip/gpt-image-2-vip',
+    modelId: 'gpt-image-2-vip',
     params: { prompt: '改成产品图', images: ['https://example.com/ref.png'] },
   })
 
@@ -154,8 +156,8 @@ test('GPT Image 2 default uses the registered direct route', () => {
 
 test('Gemini image models use the verified generation and edit contracts', () => {
   for (const [modelId, model, price] of [
-    ['newapi/t8/gemini-3.1-flash-image-preview', 'gemini-3.1-flash-image-preview', 0.1],
-    ['newapi/t8/gemini-3-pro-image-preview', 'gemini-3-pro-image-preview', 0.2],
+    ['gemini-3.1-flash-image-preview', 'gemini-3.1-flash-image-preview', 0.1],
+    ['gemini-3-pro-image-preview', 'gemini-3-pro-image-preview', 0.2],
   ] as const) {
     const spec = getCreationModelSpec(modelId)
     const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一张产品图' } })
@@ -217,7 +219,7 @@ test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () 
 
 test('direct GPT Image 2 models show the configured group and VIP prices', () => {
   assert.equal(getCreationModelSpec('gpt-image-2')?.price, '0.08/次（起）')
-  assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.price, '¥0.20')
+  assert.equal(getCreationModelSpec('gpt-image-2-vip')?.price, '0.20/张')
 })
 
 test('direct GPT Image 2 switches generation and edit contracts by reference image presence', () => {

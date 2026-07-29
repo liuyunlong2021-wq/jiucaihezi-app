@@ -593,8 +593,6 @@ test('不可用的非 RH 视频模型 contractStatus 不为 verified（通过 sp
   // broken 模型会触发 validateCreationModelSpec 抛出异常，
   // 直接检查 spec 的 contractStatus 而非通过 buildCreationRunPlan
   const brokenIds = [
-    'newapi/t8/grok-video-3-fast',
-    'newapi/t8/veo3.1-fast',
     'newapi/trump/seedance-2.0',
     'newapi/trump/seedance-2.0-fast',
   ]

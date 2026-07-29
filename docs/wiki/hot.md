@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]]** — 共享代码修复已完成：移动预览自动返回与自动同步根因已切断；流式行进入同一虚拟列表；文件/对话共用安全 Markdown；双链按项目文件按需扫描；Markdown 保存使用 revision；下线模型已从能力表、注册表和默认回退清除；复制按钮已收紧。focused、TypeScript、Web/Desktop/iOS quick build 通过，Web 已完成创建、编辑、保存、标题/表格渲染和双链缺失提示真实验收。Mac、Windows、iPhone、iPad 本轮完整功能矩阵仍待补，SDD 未完成；Android 继续暂停，不计入本轮完成。
+**当前焦点：[[开发/显示系统统一SDD]]（共享代码已实施，跨端验收待完成）· [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]]** — 共享代码修复已完成：移动预览自动返回与自动同步根因已切断；文件/对话共用安全 Markdown；双链按项目文件按需扫描；Markdown 保存使用 revision；下线模型已从能力表、注册表和默认回退清除；复制按钮已收紧。2026-07-29 追加修复流式闪烁与“只显示角色、正文在视口下方”：记忆工作台删除绝对定位虚拟列表、估算高度和手工测量，已保存消息与内存中的 `streamingText` 进入同一普通 Markdown 文档流；流式阶段轻量显示，完成后一次写入当前 Raw 并替换临时行。focused `1387/1387`、Tauri `400/400`、TypeScript、Web/Desktop/iOS quick build 及 Web/Desktop 产物审计通过；包含本次修复的 Mac Apple Silicon `.app/.dmg` 已重新打包并通过签名校验，真实长回复仍待用户验收；未公证。Windows、iPhone、iPad 本轮完整功能矩阵仍待补，SDD 未完成；Android 继续暂停，不计入本轮完成。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -28,6 +28,8 @@
 
 当前状态：手动“继续写”已从文、武、创全部模式移除；创模式仅保留首次最终正文 SSE 断流的自动续写。
 
+显示系统共享代码已实施：[[开发/显示系统统一SDD]] 把主题、字号与 Markdown 排版收敛为变量驱动的单一显示系统。已定位并处理两个真根因——`MemoryWorkbench.vue` 消息容器的 `white-space: pre-wrap` 覆盖 `.markdown-body` 的 `normal`，以及 `markdown.css` 硬编码 px 导致大字/特大字号下 Markdown 层级反转。排版真源收归 `markdown.css`，`MessageBubble.vue` 重复定义整块删除；颜色只用主题变量、字号只用 em、方向只用逻辑属性（为 RTL 零成本预埋）。focused、TypeScript、Web quick build 和 Web 产物审计通过；跨端截图和人工验收仍待完成。多语言明确划为独立“语言系统”，本轮不做。
+
 ---
 
-> 上次刷新: 2026-07-29（共享修复已完成，跨端真实矩阵未闭环；Android 继续暂停。）
+> 上次刷新: 2026-07-29（显示系统共享代码已实施；代码块字号继承和编辑器覆盖修正后 TypeScript、focused、Web/Desktop/iOS quick build、产物审计通过；Mac 最新 `.app/.dmg` 已重打包并通过签名校验；Web/Mac 已完成真实显示检查和 Mac 12 组组合回归；iPhone 17 Pro、iPad Pro 11 模拟器已启动并检查移动布局，但内容流程和 Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）

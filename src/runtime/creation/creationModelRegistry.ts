@@ -34,7 +34,7 @@ const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
-/** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
+/** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型。 */
 export const RH_ONLY_MODE = false
 
 function options(values: Array<string | number | boolean>) {
@@ -144,7 +144,7 @@ function directImage(input: {
     task: 'image',
     source: 'newapi-direct',
     route: 'newapi-direct',
-    upstreamFamily: input.upstreamFamily || 't8',
+    upstreamFamily: input.upstreamFamily || 'openai-compatible',
     apiStyle: input.apiStyle || 'openai-image-edits',
     mode: input.mode || 'image-to-image',
     contractStatus: input.contractStatus,
@@ -382,7 +382,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     resolutions: ['1k', '2k', '4k'],
   }),
   baseSpec({
-    id: 'newapi/vip/gpt-image-2-vip',
+    id: 'gpt-image-2-vip',
     model: 'gpt-image-2-vip',
     label: 'GPT Image 2 VIP · 直连',
     task: 'image',
@@ -393,7 +393,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'none',
     mode: 'text-to-image',
     contractStatus: 'verified',
-    price: '¥0.20',
+    price: '0.20/张',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
@@ -427,20 +427,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: [],
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: ['1k', '2k', '4k'],
-  }),
-  directImage({
-    id: 'newapi/t8/grok-4.2-image',
-    model: 'grok-4.2-image',
-    label: 'Grok 4.2 Image · T8（已下线）',
-    price: 0.2,
-    apiStyle: 'newapi-task',
-    mode: 'text-to-image',
-    endpoint: '/v1/images/generations',
-    assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8grok.md'],
-    contractIssues: ['T8 渠道已关闭'],
   }),
   runninghubStandard({
     id: 'runninghub/api/z-image-turbo',
@@ -479,7 +465,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: ['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2'],
   }),
   directImage({
-    id: 'newapi/t8/gemini-3.1-flash-image-preview',
+    id: 'gemini-3.1-flash-image-preview',
     model: 'gemini-3.1-flash-image-preview',
     label: 'Gemini 3.1 Flash Image',
     price: 0.1,
@@ -493,21 +479,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
   directImage({
-    id: 'newapi/t8/gemini-3.1-flash-image-preview-2k',
-    model: 'gemini-3.1-flash-image-preview-2k',
-    label: 'Gemini 3.1 Flash Image 2K · T8（已下线）',
-    price: 0.1,
-    apiStyle: 'newapi-task',
-    mode: 'text-to-image',
-    endpoint: '/v1/images/generations',
-    assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
-  directImage({
-    id: 'newapi/t8/gemini-3-pro-image-preview',
+    id: 'gemini-3-pro-image-preview',
     model: 'gemini-3-pro-image-preview',
     label: 'Gemini 3 Pro Image',
     price: 0.2,
@@ -520,111 +492,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'verified',
     notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
-  directImage({
-    id: 'newapi/t8/gemini-3-pro-image-preview-2k',
-    model: 'gemini-3-pro-image-preview-2k',
-    label: 'Gemini 3 Pro Image 2K · T8（已下线）',
-    price: 0.4,
-    apiStyle: 'newapi-task',
-    mode: 'text-to-image',
-    endpoint: '/v1/images/generations',
-    assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
-  directImage({
-    id: 'newapi/t8/gemini-3-pro-image-preview-4k',
-    model: 'gemini-3-pro-image-preview-4k',
-    label: 'Gemini 3 Pro Image 4K · T8（已下线）',
-    price: 0.5,
-    apiStyle: 'newapi-task',
-    mode: 'text-to-image',
-    endpoint: '/v1/images/generations',
-    assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8gemini.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
 
-  // ── MJ (Midjourney) relax imagine (T8/NewAPI) ──
-  // 文档: docs/notes/T8mj模型.md
-  // 提交 POST /mj/submit/imagine → 轮询 GET /mj/task/{id}/fetch
-  baseSpec({
-    id: 'newapi/t8/mj-relax-imagine',
-    model: 'mj_relax_imagine',
-    label: 'MJ Relax Imagine · T8（已下线）',
-    task: 'image',
-    source: 'newapi-direct',
-    route: 'newapi-direct',
-    upstreamFamily: 't8',
-    apiStyle: 'mj-task',
-    mode: 'text-to-image',
-    contractStatus: 'broken',
-    price: 0.1,
-    endpoint: '/mj/submit/imagine',
-    pollKind: 'mj-task',
-    assetFlow: 'none',
-    resultExtractor: 'generic-media',
-    fields: promptFields(),
-    notes: ['docs/notes/T8mj模型.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
-
-  directVideo({
-    id: 'newapi/t8/grok-video-3',
-    model: 'grok-video-3',
-    label: 'Grok Video 3 · T8（已下线）',
-    price: 0.2,
-    upstreamFamily: 't8',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8grok.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
-  directVideo({
-    id: 'newapi/t8/grok-video-3-fast',
-    model: 'grok-video-3-fast',
-    label: 'Grok Video 3 Fast · T8（已下线）',
-    price: 0.2,
-    upstreamFamily: 't8',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8grok.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
-
-  // ── ZX 渠道 ──
-  directImage({
-    id: 'newapi/zx/grok-imagine-1.0',
-    model: 'grok-imagine-1.0',
-    label: 'Grok Imagine 1.0 · ZX',
-    price: 0.05,
-    upstreamFamily: 'zx',
-    apiStyle: 'openai-images',
-    endpoint: '/v1/images/generations',
-    notes: ['docs/notes/ZX-grok-imagine.md'],
-  }),
-  directVideo({
-    id: 'newapi/t8/veo3.1-fast',
-    model: 'veo3.1-fast',
-    label: 'Veo 3.1 Fast · T8（已下线）',
-    price: 0.4,
-    upstreamFamily: 't8',
-    contractStatus: 'broken',
-    notes: ['docs/notes/T8模型接口配置文档.md'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
-  directVideo({
-    id: 'newapi/t8/veo_3_1-fast',
-    model: 'veo_3_1-fast',
-    label: 'Veo 3.1 Fast · T8（已下线）',
-    price: 0.4,
-    upstreamFamily: 't8',
-    contractStatus: 'broken',
-    notes: ['NewAPI alias'],
-    contractIssues: ['T8 渠道已关闭'],
-  }),
   directVideo({
     id: 'newapi/zx/veo-3.1-generate-preview',
     model: 'veo-3.1-generate-preview',
@@ -687,43 +555,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['docs/notes/特朗普seedace2.md'],
     contractIssues: ['/api/v3/contents/generations/tasks 返回 404'],
   }),
-  directVideo({
-    id: 'newapi/t8/seedance-2-0',
-    model: 'seedance-2-0',
-    label: 'Seedance 2.0 · T8/火山（已下线）',
-    price: 1,
-    upstreamFamily: 't8',
-    apiStyle: 'seedance-task',
-    endpoint: '/api/seedance/v1/videos',
-    contractStatus: 'broken',
-    notes: ['docs/notes/t8seedance.md'],
-    contractIssues: ['T8 渠道已关闭，请使用火山直连'],
-  }),
-  directVideo({
-    id: 'newapi/t8/seedance-2-0-pro',
-    model: 'seedance-2-0-pro',
-    label: 'Seedance 2.0 Pro · T8/火山（已下线）',
-    price: 1,
-    upstreamFamily: 't8',
-    apiStyle: 'seedance-task',
-    endpoint: '/api/seedance/v1/videos',
-    contractStatus: 'broken',
-    notes: ['docs/notes/t8seedance.md'],
-    contractIssues: ['T8 渠道已关闭，请使用火山直连'],
-  }),
-  directVideo({
-    id: 'newapi/t8/seedance-2-0-fast',
-    model: 'seedance-2-0-fast',
-    label: 'Seedance 2.0 Fast · T8/火山（已下线）',
-    price: 1,
-    upstreamFamily: 't8',
-    apiStyle: 'seedance-task',
-    endpoint: '/api/seedance/v1/videos',
-    contractStatus: 'broken',
-    notes: ['docs/notes/t8seedance.md'],
-    contractIssues: ['T8 渠道已关闭，请使用火山直连'],
-  }),
-
   runninghubStandard({
     id: 'runninghub/api/rh-gpt2-image',
     model: 'rh-gpt2-image',
@@ -779,7 +610,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   runninghubStandard({
     id: 'runninghub/api/rh-image-v2',
     model: 'rh-image-v2',
-    label: '全能图片 V2 · RunningHub',
+    label: 'Banana Fresh · RunningHub',
     task: 'image',
     mode: 'text-to-image',
     price: 0.3,
@@ -790,10 +621,10 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   runninghubStandard({
     id: 'runninghub/api/rh-pro-image',
     model: 'rh-pro-image',
-    label: '全能图片 PRO · RunningHub',
+    label: 'Banana Pro · RunningHub',
     task: 'image',
     mode: 'image-to-image',
-    price: 0.3,
+    price: 0.5,
     notes: ['docs/notes/runninghub-banana.md'],
     files: { images: { min: 0, max: 8 } },
   }),
@@ -950,64 +781,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: ['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2', 'custom'],
   }),
 
-  // ── 🆕 Midjourney.1 ──
-  runninghubStandard({
-    id: 'runninghub/api/rh-midjourney-v81',
-    model: 'rh-midjourney-v81',
-    label: 'Midjourney.1 · RunningHub',
-    task: 'image',
-    mode: 'text-to-image',
-    price: 0.1,
-    contractStatus: 'partial',
-    notes: ['docs/notes/RH-图片模型.md'],
-    files: { images: { min: 0, max: 1 } },
-    fields: promptFields([
-      {
-        key: 'aspectRatio',
-        label: '比例',
-        kind: 'select',
-        defaultValue: '1:1',
-        options: options(['1:1', '4:3', '3:2', '16:9', '3:4', '2:3', '9:16']),
-      },
-      { key: 'hd', label: '原生 2K', kind: 'boolean', defaultValue: false },
-      { key: 'images', label: '垫图', kind: 'images' },
-      {
-        key: 'quality',
-        label: '质量',
-        kind: 'select',
-        defaultValue: '1',
-        options: options(['1', '4']),
-      },
-      {
-        key: 'stylize',
-        label: '风格化',
-        kind: 'number',
-        defaultValue: 100,
-        min: 0,
-        max: 1000,
-        step: 10,
-      },
-      { key: 'chaos', label: '混沌', kind: 'number', defaultValue: 0, min: 0, max: 100, step: 1 },
-      { key: 'raw', label: '原始模式', kind: 'boolean', defaultValue: false },
-      { key: 'iw', label: '图像权重', kind: 'number', defaultValue: 1, min: 0, max: 3, step: 1 },
-      { key: 'sref', label: '风格参考', kind: 'text' },
-      {
-        key: 'sw',
-        label: '风格权重',
-        kind: 'number',
-        defaultValue: 100,
-        min: 0,
-        max: 1000,
-        step: 10,
-      },
-      { key: 'sv', label: '风格版本', kind: 'number', defaultValue: 6, min: 6, max: 6 },
-    ]),
-    ratios: ['1:1', '4:3', '3:2', '16:9', '3:4', '2:3', '9:16'],
-    contractIssues: [
-      '全部 11 个参数已注册。高级参数(raw/iw/sref/sw/sv) UI 折叠展示。需验证全部 11 个参数进入 RH payload。',
-    ],
-  }),
-
   // ── 🆕 Grok Image 4.2 系列 (2 个) ──
   runninghubStandard({
     id: 'runninghub/api/rh-grok-image-text',
@@ -1015,7 +788,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Grok Image 4.2 文生图 · RunningHub',
     task: 'image',
     mode: 'text-to-image',
-    price: 0.03,
+    price: 0.1,
     contractStatus: 'partial',
     notes: ['docs/notes/RH-图片模型.md'],
     fields: promptFields([
@@ -1044,7 +817,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Grok Image 4.2 图生图 · RunningHub',
     task: 'image',
     mode: 'image-to-image',
-    price: 0.05,
+    price: 0.1,
     contractStatus: 'partial',
     notes: ['docs/notes/RH-图片模型.md'],
     files: { images: { min: 1, max: 1 } },
@@ -1093,16 +866,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['docs/notes/runninghub-grok-video-3文档.md'],
     files: { images: { min: 1, max: 3 } },
     duration: { min: 6, max: 30 },
-  }),
-  runninghubStandard({
-    id: 'runninghub/api/rh-grok-video-edit',
-    model: 'rh-grok-video-edit',
-    label: 'Grok Video 视频编辑 · RunningHub',
-    task: 'video',
-    mode: 'video-edit',
-    price: 0.08,
-    notes: ['docs/notes/runninghub-grok-video-3文档.md'],
-    files: { videos: { min: 1, max: 1 } },
   }),
   // ── Seedance 2.0 多模态 (3 个，最低计费时长使成本更高) ──
   runninghubStandard({
@@ -1220,7 +983,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Sora2 文生视频',
     task: 'video',
     mode: 'text-to-video',
-    price: 0.12,
+    price: 2,
     notes: ['docs/notes/RH-SORA2-4模型.md'],
     fields: promptFields([
       {
@@ -1247,7 +1010,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Sora2 图生视频',
     task: 'video',
     mode: 'image-to-video',
-    price: 0.12,
+    price: 2,
     notes: ['docs/notes/RH-SORA2-4模型.md'],
     files: { images: { min: 1, max: 1 } },
     fields: promptFields([
@@ -1270,18 +1033,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     resolutions: ['720p'],
   }),
   runninghubStandard({
-    id: 'runninghub/api/rh-sora2-realistic',
-    model: 'rh-sora2-realistic',
-    label: 'Sora2 真人图生视频',
-    task: 'video',
-    mode: 'image-to-video',
-    price: 1.0,
-    notes: ['docs/notes/RH-SORA2-4模型.md'],
-    files: { images: { min: 1, max: 1 } },
-    duration: { allowedValues: [4, 8, 12], min: 4, max: 12 },
-    resolutions: ['720p'],
-  }),
-  runninghubStandard({
     id: 'runninghub/api/rh-sora2-character',
     model: 'rh-sora2-character',
     label: 'Sora2 角色上传',
@@ -1300,7 +1051,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'LTX 2.3 文生视频 · RunningHub',
     task: 'video',
     mode: 'text-to-video',
-    price: 0.5,
+    price: 0.2,
     contractStatus: 'partial',
     notes: ['docs/notes/RH-视频模型.md'],
     fields: promptFields([
@@ -1338,7 +1089,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'LTX 2.3 图生视频 · RunningHub',
     task: 'video',
     mode: 'image-to-video',
-    price: 0.5,
+    price: 0.2,
     contractStatus: 'partial',
     notes: ['docs/notes/RH-视频模型.md'],
     files: { images: { min: 1, max: 1 } },
@@ -1406,7 +1157,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Suno 创作歌词 · RunningHub',
     task: 'audio',
     mode: 'lyrics',
-    price: 0.02,
+    price: 0.05,
     notes: ['docs/notes/runninghub-suno.md'],
     outputModalities: ['text'],
   }),
@@ -1452,7 +1203,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'AI 应用（自定义）· RunningHub 工作流',
     task: 'ai-app',
     mode: 'workflow',
-    price: 1.0,
+    price: 0.3,
     apiStyle: 'rh-aiapp',
     contractStatus: 'partial',
     notes: [],
@@ -1538,8 +1289,20 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
-  if (spec.task === 'image' && id.includes('gpt-image')) return 'GPT Image'
-  if (spec.task === 'image' && (id.includes('gemini') || id.includes('banana'))) return 'Banana'
+  if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'
+  if (spec.task === 'image' && ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'rh-image-v2', 'rh-pro-image'].some(key => id.includes(key))) return 'Banana'
+  if (id.includes('z-image')) return 'Z Image'
+  if (id.includes('flux-klein')) return 'FLUX Klein'
+  if (id.includes('grok-image') || (id.includes('grok-') && id.includes('video'))) return spec.task === 'video' ? 'Grok Video' : 'Grok Image'
+  if (id.includes('veo-') || id.includes('rh-video-v31-fast')) return 'Veo'
+  if (id.includes('seedance2-mini')) return 'Seedance 2.0 Mini'
+  if (id.includes('seedance2-fast')) return 'Seedance 2.0 Fast'
+  if (id.includes('seedance2')) return 'Seedance 2.0'
+  if (id.includes('sora2')) return 'Sora2'
+  if (id.includes('ltx23')) return 'LTX 2.3'
+  if (id.includes('suno')) return 'Suno'
+  if (id.includes('rh-3d')) return '3D'
+  if (spec.task === 'ai-app' || id.includes('rh-aiapp')) return 'AI 应用'
   return '其他模型'
 }
 
@@ -1549,7 +1312,8 @@ export function displayModelPrice(spec: Pick<CreationModelSpec, 'price' | 'task'
   if (raw.includes('/')) return raw
   const amount = raw.match(/\d+(?:\.\d+)?/)?.[0]
   if (!amount) return '费用以实际扣费为准'
-  return `${amount}/${spec.task === 'image' ? '张' : '次'}`
+  const unit = spec.task === 'image' ? '张' : spec.task === 'video' || spec.task === 'ai-app' ? '秒' : '次'
+  return `${amount}/${unit}`
 }
 
 function buildPanelPreviewParams(spec: CreationModelSpec): Record<string, unknown> {
@@ -1594,7 +1358,6 @@ function buildPanelSummaryPreview(
 ): string {
   const sourceLabel = spec.source === 'runninghub' ? 'RunningHub' : '直连'
   const upstreamLabels: Record<CreationUpstreamFamily, string> = {
-    t8: 'T8',
     volcengine: '火山',
     worldrouter: 'WorldRouter',
     trump: '特朗普',
@@ -1616,7 +1379,6 @@ function buildPanelSummaryPreview(
 
 function upstreamBadge(upstreamFamily: CreationUpstreamFamily): string {
   const labels: Record<CreationUpstreamFamily, string> = {
-    t8: 'T8',
     volcengine: '火山',
     worldrouter: 'WorldRouter',
     trump: '特朗普',

@@ -648,7 +648,7 @@ function firstMediaValue(params: Record<string, unknown>, keys: string[]): unkno
 function imageValueForRequest(params: Record<string, unknown>): string | string[] | undefined {
   const images = asStringArray(firstMediaValue(params, ['images', 'imageUrls', 'imageUrl', 'image']))
   if (!images.length) return undefined
-  // 始终返回数组 — T8 /v1/images/generations 的 image 字段要求 type: array
+  // 始终返回数组，兼容 NewAPI 图片接口。
   return images
 }
 

@@ -3390,8 +3390,11 @@ const modelList = computed(() =>
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof modelList.value>()
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
-  const order: Record<string, number> = { 'GPT Image': 0, Banana: 1, '其他模型': 2 }
-  return [...groups].sort(([left], [right]) => order[left] - order[right])
+  const order = [
+    'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Veo', 'Grok Video',
+    'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+  ]
+  return [...groups].sort(([left], [right]) => order.indexOf(left) - order.indexOf(right))
 })
 
 function resizePromptInput(el = promptInput.value) {
@@ -3701,7 +3704,7 @@ const canSend = computed(
               ctxMenu.show = false
             "
           >
-            📋 复制 Ctrl+C
+            <JcIcon name="content-copy" />复制 Ctrl+C
           </button>
           <button
             @click="
@@ -3709,7 +3712,7 @@ const canSend = computed(
               ctxMenu.show = false
             "
           >
-            📄 粘贴 Ctrl+V
+            <JcIcon name="content-paste" />粘贴 Ctrl+V
           </button>
           <button
             @click="

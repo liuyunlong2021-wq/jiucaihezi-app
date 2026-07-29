@@ -1,6 +1,6 @@
 import { rhOfficialFields, rhOfficialMaxFiles } from './runninghubOfficialCapabilities'
 
-/** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型，隐藏 T8/火山/WorldRouter/特朗普等不稳定渠道 */
+/** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型。 */
 const RH_ONLY_MODE = false
 
 export type MediaTaskKind = 'image' | 'video' | 'audio' | 'model3d' | 'ai-app'
@@ -476,20 +476,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'images', label: '参考图片', kind: 'images', required: true },
     ],
   },
-  // ── Sora2 真人图生视频 ──
-  {
-    id: 'rh-sora2-realistic',
-    label: 'Sora2 真人图生视频',
-    task: 'video',
-    model: 'rh-sora2-realistic',
-    provider: 'gateway-video',
-    maxFiles: 1,
-    acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'images', label: '参考图片', kind: 'images', required: true },
-    ],
-  },
   // ── Sora2 角色上传 ──
   {
     id: 'rh-sora2-character',
@@ -540,22 +526,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     maxFiles: rhOfficialMaxFiles('rhart-video-g/image-to-video'),
     acceptedFiles: ['image'],
     fields: rhOfficialFields('rhart-video-g/image-to-video'),
-  },
-  {
-    id: 'rh-grok-video-edit',
-    label: 'Grok Video 视频编辑',
-    task: 'video',
-    model: 'rh-grok-video-edit',
-    provider: 'gateway-video',
-    enabled: true,
-    webappId: 'rhart-video-g-official/edit-video',
-    maxFiles: 1,
-    acceptedFiles: ['video'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '480p']) },
-      { key: 'video', label: '输入视频', kind: 'video', required: true },
-    ],
   },
 
   // 普 prefixed models for general users (group=1 / 普 channel)
@@ -711,7 +681,6 @@ export function isRemovedMediaModelId(id: string): boolean {
   if (value === 'nano-banana' || value === 'nano-banana-hd') return true
   if (value === 'nano-banana-2k' || value === 'nano-banana-pro-2k') return true
   if (value === 'grok-4.2-image' || value === 'grok-4.1-image') return true
-  // ponytail: T8 Grok 视频渠道已下线，统一走 RH (rh-grok-text-video / rh-grok-image-video)
   if (value === 'grok-video-3' || value === 'grok-video-3-fast') return true
   if (value.includes('seedance')) {
     if (value.startsWith('rh-seedance2-')) return false

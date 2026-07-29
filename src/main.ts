@@ -16,6 +16,7 @@ import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 // Styles — design tokens first, then base
 import './styles/design-tokens.css'
 import './styles/highlight-theme.css'
+import './styles/markdown.css'
 import 'katex/dist/katex.min.css'
 import './styles/base.css'
 

@@ -71,7 +71,6 @@
       {"title":"图生图","desc":"以参考图为基础生成新图","template":"请用媒体创作引擎帮我在参考图基础上生成新图：\n提示词：[画面修改描述]\n参考图：[图片路径]\n模型：[如 rh-grok-image-image / rh-flux-klein-edit]\n输出路径：[文件路径]"},
       {"title":"生成视频","desc":"提交视频生成任务","template":"请用媒体创作引擎帮我生成视频：\n提示词：[完整视频描述]\n模型：[model_id，先 jc_media list --type video 查询]\n参数：[如 --params duration=5 ratio=16:9]\n输出路径：[文件路径]"},
       {"title":"图生视频","desc":"以图片为首帧生成视频","template":"请用媒体创作引擎帮我把这张图生成视频：\n提示词：[动作描述]\n参考图：[图片路径]\n模型：[如 rh-ltx23-image-video / rh-grok-image-video / rh-video-v31-fast]\n参数：[如 --params duration=4 motion_bucket_id=127]\n输出路径：[文件路径]"},
-      {"title":"视频编辑","desc":"对已有视频编辑修改","template":"请用媒体创作引擎帮我编辑视频：\n提示词：[编辑描述]\n参考视频URL：[视频公网URL]\n模型：[rh-grok-video-edit]\n参数：[可选，如 --params ratio=16:9]\n输出路径：[文件路径]\n注意：--input-video 必须是公网可访问的URL。"},
       {"title":"生成音频","desc":"提交音频/音乐/TTS任务","template":"请用媒体创作引擎帮我生成音频：\n提示词/歌词：[内容]\n模型：[model_id，先 jc_media list --type audio 查询]\n输出路径：[文件路径]"},
       {"title":"批量并发生成","desc":"连续提交多任务后批量轮询","template":"请用媒体创作引擎批量生成：\n1. 每个任务用 submit 提交 jc_media submit --type [image|video|audio] --model xxx --prompt \"...\"\n2. 全部提交后批量轮询 jc_media poll --task-ids \"id1,id2,id3\" --output-dir ./output/"},
       {"title":"检查连接","desc":"验证 rh-adapter 和 NewAPI 状态","template":"请用媒体创作引擎检查连接：\njc_media check [--host http://127.0.0.1:8789|https://api.jiucaihezi.studio]"}

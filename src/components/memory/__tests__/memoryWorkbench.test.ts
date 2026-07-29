@@ -219,6 +219,14 @@ test('memory message copy stays compact and copies the original markdown', () =>
   assert.match(workbench, /\.memory-message-copy \{ position: absolute; top: 0; right: 0;[\s\S]*width: 26px; height: 26px;/)
 })
 
+test('markdown editor keeps pre and textarea under the shared stylesheet', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const markdownCss = source('src/styles/markdown.css')
+
+  assert.doesNotMatch(workbench, /\.memory-document pre\s*\{/)
+  assert.match(markdownCss, /\.memory-markdown-editor pre,\s*\n\.memory-markdown-editor textarea\s*\{[\s\S]*font: \.92em\/1\.6/)
+})
+
 test('memory document and file tree keep independent visible scrolling', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
@@ -260,19 +268,21 @@ test('iPhone release metadata declares Photos permission and exempt encryption u
   assert.match(infoPlist, /<key>ITSAppUsesNonExemptEncryption<\/key>\s*<false\/>/)
 })
 
-test('memory conversation virtualizes historical turns and keeps rich media out of the timeline', () => {
+test('memory conversation uses one natural document flow for saved and streaming turns', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const scrollNav = source('src/components/chat/ChatScrollNav.vue')
 
-  assert.match(workbench, /import \{ useVirtualizer \} from '@tanstack\/vue-virtual'/)
-  assert.match(workbench, /const memoryTimelineVirtualizer = useVirtualizer/)
   assert.match(workbench, /const timelineTurns = computed<ConversationTurn\[\]>/)
   assert.match(workbench, /id: 'streaming-assistant'/)
-  assert.match(workbench, /count: timelineTurns\.value\.length/)
-  assert.doesNotMatch(workbench, /<article v-if="sending && streamingText"/)
-  assert.match(workbench, /const virtualConversationTurns = computed/)
-  assert.match(workbench, /v-for="\{ row, turn \} in virtualConversationTurns"/)
-  assert.match(workbench, /:data-index="row\.index"/)
-  assert.match(workbench, /measureMemoryTurn/)
+  assert.match(workbench, /v-for="turn in timelineTurns"/)
+  assert.match(workbench, /turn\.id === 'streaming-assistant' \? renderStreamingText\(content\) : renderMemoryMarkdown\(content\)/)
+  assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
+  assert.match(workbench, /const complete = await appendMemoryTurn[\s\S]*streamingText\.value = ''\s*\n\s*rememberConversation\(complete\)/)
+  assert.match(workbench, /executionMode\.value =[\s\S]*await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
+  assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
+  assert.match(scrollNav, /querySelectorAll\('\.msg, \.memory-message'\)/)
+  assert.doesNotMatch(workbench, /useVirtualizer|estimateSize|measureElement|getTotalSize|translateY\(/)
+  assert.doesNotMatch(workbench, /\.memory-message-list > \.memory-message \{[^}]*position: absolute/)
 })
 
 test('memory media execution stays in the creation panel while settled results return to chat', () => {
@@ -429,7 +439,9 @@ test('memory navigation separates Raw conversations from project files and trans
 test('memory files and conversation turns use the shared safe Markdown renderer', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /renderMemoryMarkdown\(displayTurnContent\(turn\)\)/)
+  assert.match(workbench, /function renderMemoryTurn\(turn: ConversationTurn\)/)
+  assert.match(workbench, /turn\.id === 'streaming-assistant' \? renderStreamingText\(content\) : renderMemoryMarkdown\(content\)/)
+  assert.match(workbench, /v-html="renderMemoryTurn\(turn\)"/)
   assert.match(workbench, /renderMemoryMarkdown\(previewResource\.text\.content\)/)
   assert.match(workbench, /v-html="renderMemoryMarkdown\(/)
   assert.doesNotMatch(workbench, /<pre>\{\{ previewResource\.text\.content \}\}<\/pre>/)

@@ -139,3 +139,36 @@
 .hljs-template-tag { color: var(--hl-template-tag); }
 
 .hljs-selector-pseudo { color: var(--hl-selector); }
+
+/* Markdown source uses a stronger hierarchy than generic code. */
+.language-markdown .hljs-section,
+.language-markdown .hljs-title,
+.memory-markdown-editor .hljs-section,
+.memory-markdown-editor .hljs-title {
+  color: var(--olive);
+  font-weight: 700;
+}
+.language-markdown .hljs-strong,
+.memory-markdown-editor .hljs-strong {
+  color: var(--hl-keyword);
+  font-weight: 700;
+}
+.language-markdown .hljs-emphasis,
+.memory-markdown-editor .hljs-emphasis {
+  color: var(--hl-builtin);
+  font-style: italic;
+}
+.language-markdown .hljs-code,
+.memory-markdown-editor .hljs-code {
+  color: var(--hl-string);
+}
+.language-markdown .hljs-bullet,
+.memory-markdown-editor .hljs-bullet {
+  color: var(--hl-symbol);
+  font-weight: 700;
+}
+.language-markdown .hljs-quote,
+.memory-markdown-editor .hljs-quote {
+  color: var(--hl-comment);
+  font-style: italic;
+}

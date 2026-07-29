@@ -5,7 +5,6 @@ export type CreationSource = 'newapi-direct' | 'runninghub'
 export type CreationRoute = 'newapi-direct' | 'runninghub-adapter'
 
 export type CreationUpstreamFamily =
-  | 't8'
   | 'volcengine'
   | 'worldrouter'
   | 'trump'

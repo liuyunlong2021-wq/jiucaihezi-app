@@ -387,7 +387,7 @@ async function exportLocalFormat(format: LocalExportFormat) {
 }
 
 function setCodeCopyLabel(btn: HTMLButtonElement, label: string, copied: boolean) {
-  const labelEl = btn.querySelector<HTMLSpanElement>('span:not(.mso)')
+  const labelEl = btn.querySelector<HTMLSpanElement>('.md-code-copy-label')
   if (labelEl) {
     labelEl.textContent = label
   } else {
@@ -645,7 +645,7 @@ onBeforeUnmount(() => {
         data-component="reasoning-part"
         :data-timeline-part-id="part.id"
       >
-        <div class="msg-body" @click="onRenderedClick" v-html="renderOpenCodeTextPart(part)"></div>
+        <div class="msg-body markdown-body" @click="onRenderedClick" v-html="renderOpenCodeTextPart(part)"></div>
       </div>
 
       <div
@@ -656,7 +656,7 @@ onBeforeUnmount(() => {
       >
         <div
           data-slot="text-part-body"
-          class="msg-body"
+          class="msg-body markdown-body"
           @click="onRenderedClick"
           v-html="renderOpenCodeTextPart(part)"
         ></div>
@@ -750,7 +750,7 @@ onBeforeUnmount(() => {
 
       <MessageTextWarning v-if="showTextWarning" :message="textWarningMessage" />
 
-      <div v-if="hasMarkdownBody" class="msg-body" @click="onRenderedClick" v-html="finalHtml"></div>
+      <div v-if="hasMarkdownBody" class="msg-body markdown-body" @click="onRenderedClick" v-html="finalHtml"></div>
 
       <MediaPlanCard
         v-if="role === 'assistant' && mediaPlan"
@@ -1016,14 +1016,14 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 0;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: transparent;
-  color: var(--ink3);
+  background: var(--surface);
+  color: var(--ink2);
   cursor: pointer;
 }
 .msg-user-action:hover {
-  background: var(--surface);
+  background: var(--surface-alt);
   color: var(--ink1);
 }
 .msg-user-action :deep(.jc-icon),
@@ -1105,73 +1105,6 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: var(--ink3);
 }
-.msg-body { white-space: normal; }
-
-/* 代码块 */
-:deep(.md-code) {
-  max-width: 100%;
-  border-radius: 8px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  margin: 10px 0;
-  background: var(--surface);
-}
-:deep(.md-code-head) {
-  display: flex; justify-content: space-between; align-items: center;
-  gap: 10px;
-  padding: 6px 10px; background: var(--surface-alt);
-  border-bottom: 1px solid var(--line);
-}
-:deep(.md-code-lang) {
-  min-width: 0;
-  color: var(--ink3);
-  font-size: 11px;
-  font-weight: 650;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-:deep(.md-code-copy) {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  flex: 0 0 auto;
-  padding: 3px 8px;
-  border: none;
-  border-radius: 5px;
-  background: var(--paper);
-  color: var(--ink2);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  font-family: inherit;
-  transition: all .12s;
-}
-:deep(.md-code-copy .mso) { font-size: 13px; }
-:deep(.md-code-copy:hover) { background: var(--olive); color: #fff; }
-:deep(.md-code-copy:focus-visible) {
-  outline: 2px solid color-mix(in srgb, var(--olive) 70%, transparent);
-  outline-offset: 2px;
-}
-:deep(.md-code-copy.copied) { background: #4a7; color: #fff; }
-:deep(.md-code pre) {
-  max-width: 100%;
-  margin: 0;
-  padding: 13px 14px;
-  overflow-x: auto;
-  font-size: 12px;
-  line-height: 1.62;
-  font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-  tab-size: 2;
-}
-:deep(.md-code code) {
-  display: block;
-  width: max-content;
-  min-width: 100%;
-  background: none !important;
-  padding: 0 !important;
-}
-
 /* 助手长文正文流：让长输出像文档，而不是重卡片 */
 .msg.layout-assistant-prose .msg-bubble {
   max-width: 820px;
@@ -1180,103 +1113,9 @@ onBeforeUnmount(() => {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
-  line-height: 1.76;
-  font-size: 14px;
 }
 .msg.layout-assistant-prose .msg-meta {
   margin-bottom: 6px;
-}
-
-/* Markdown 内容 */
-:deep(.msg-body h1),
-:deep(.msg-body h2),
-:deep(.msg-body h3) { margin: 12px 0 6px; font-weight: 700; color: var(--ink1); }
-:deep(.msg-body h1) { font-size: 18px; }
-:deep(.msg-body h2) { font-size: 16px; }
-:deep(.msg-body h3) { font-size: 14px; }
-:deep(.msg-body p) { margin: 4px 0; }
-:deep(.msg-body ul),
-:deep(.msg-body ol) { padding-left: 20px; margin: 4px 0; }
-:deep(.msg-body li) { margin: 2px 0; }
-:deep(.msg-body code) {
-  background: rgba(107,142,35,.08); padding: 1px 5px; border-radius: 4px;
-  font-size: 12px; font-family: 'SF Mono', monospace;
-}
-:deep(.msg-body blockquote) {
-  border-left: 3px solid var(--olive); margin: 8px 0;
-  padding: 4px 12px; color: var(--ink2); background: rgba(107,142,35,.03);
-}
-:deep(.md-table-wrap) {
-  max-width: 100%;
-  margin: 10px 0;
-  overflow-x: auto;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--surface);
-}
-:deep(.md-table-wrap table) {
-  min-width: 520px;
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-:deep(.md-table-wrap th),
-:deep(.md-table-wrap td) {
-  border-bottom: 1px solid var(--line);
-  border-right: 1px solid var(--line);
-  padding: 7px 10px;
-  text-align: left;
-  vertical-align: top;
-  overflow-wrap: anywhere;
-}
-:deep(.md-table-wrap th:last-child),
-:deep(.md-table-wrap td:last-child) {
-  border-right: none;
-}
-:deep(.md-table-wrap tr:last-child td) {
-  border-bottom: none;
-}
-:deep(.md-table-wrap th) {
-  background: var(--surface-alt);
-  color: var(--ink2);
-  font-weight: 650;
-}
-:deep(.md-table-wrap td) {
-  max-width: 320px;
-}
-:deep(.msg-body a) { color: var(--olive); text-decoration: underline; }
-:deep(.msg-body hr) { border: none; border-top: 1px solid var(--line); margin: 12px 0; }
-
-.msg.layout-assistant-prose :deep(.msg-body p) {
-  margin: 0 0 .42em;
-}
-.msg.layout-assistant-prose :deep(.msg-body h1) {
-  margin: 1.45em 0 .7em;
-  font-size: 20px;
-  line-height: 1.35;
-}
-.msg.layout-assistant-prose :deep(.msg-body h2) {
-  margin-top: 1.35em;
-  margin-bottom: .62em;
-  font-size: 17px;
-  line-height: 1.4;
-}
-.msg.layout-assistant-prose :deep(.msg-body h3) {
-  margin: 1.1em 0 .5em;
-  font-size: 15px;
-  line-height: 1.45;
-}
-.msg.layout-assistant-prose :deep(.msg-body ul),
-.msg.layout-assistant-prose :deep(.msg-body ol) {
-  margin: .42em 0 .62em;
-  padding-left: 1.55em;
-}
-.msg.layout-assistant-prose :deep(.msg-body li) {
-  margin: .16em 0;
-}
-.msg.layout-assistant-prose :deep(.msg-body blockquote) {
-  margin: .9em 0;
-  padding: .42em .9em;
 }
 
 /* 图片附件 */

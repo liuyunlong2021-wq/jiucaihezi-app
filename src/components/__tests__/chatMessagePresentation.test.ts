@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 const messageBubble = readFileSync('src/components/chat/MessageBubble.vue', 'utf8')
+const markdownCss = readFileSync('src/styles/markdown.css', 'utf8')
 const mediaPlanCard = readFileSync('src/components/chat/MediaPlanCard.vue', 'utf8')
 const fileTreePanel = readFileSync('src/components/filetree/FileTreePanel.vue', 'utf8')
 const messageReferences = readFileSync('src/components/chat/MessageReferences.vue', 'utf8')
@@ -131,22 +132,20 @@ test('search references are collapsed instead of leading the reading flow', () =
 test('assistant prose layout makes long answers read like documents instead of heavy cards', () => {
   assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+\.msg-bubble\s*\{[\s\S]*max-width:\s*820px;/)
   assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+\.msg-bubble\s*\{[\s\S]*background:\s*transparent;/)
-  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+\.msg-bubble\s*\{[\s\S]*line-height:\s*1\.76;/)
-  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body p\)\s*\{[\s\S]*margin:\s*0 0 \.42em;/)
-  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body h2\)\s*\{[\s\S]*margin-top:\s*1\.35em;/)
-  assert.match(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body li\)\s*\{[\s\S]*margin:\s*\.16em 0;/)
+  assert.doesNotMatch(messageBubble, /\.msg\.layout-assistant-prose\s+:deep\(\.msg-body (?:p|h1|h2|li|blockquote)/)
+  assert.match(markdownCss, /\.markdown-body\s*\{[\s\S]*font-size:\s*var\(--font-base\);[\s\S]*line-height:\s*1\.7;/)
 })
 
 test('code blocks and tables are contained like professional answer artifacts', () => {
   assert.match(messageBubble, /renderMessageMarkdown/)
   assert.match(markdownDisplayPolicy, /class="md-table-wrap"/)
   assert.match(markdownDisplayPolicy, /aria-label="复制代码"/)
-  assert.match(markdownDisplayPolicy, /<span aria-hidden="true">📋<\/span>/)
-  assert.match(messageBubble, /:deep\(\.md-code\)\s*\{[\s\S]*max-width:\s*100%;/)
-  assert.match(messageBubble, /:deep\(\.md-code pre\)\s*\{[\s\S]*overflow-x:\s*auto;/)
-  assert.match(messageBubble, /:deep\(\.md-table-wrap\)\s*\{[\s\S]*overflow-x:\s*auto;/)
-  assert.match(messageBubble, /:deep\(\.md-table-wrap table\)\s*\{[\s\S]*min-width:\s*520px;/)
-  assert.match(messageBubble, /:deep\(\.md-table-wrap td\)\s*\{[\s\S]*max-width:\s*320px;/)
+  assert.match(markdownDisplayPolicy, /md-code-copy-icon/)
+  assert.match(markdownCss, /\.md-code\s*\{[\s\S]*max-width:\s*100%;/)
+  assert.match(markdownCss, /\.md-code pre\s*\{[\s\S]*overflow-x:\s*auto;/)
+  assert.match(markdownCss, /\.md-table-wrap\s*\{[\s\S]*overflow-x:\s*auto;/)
+  assert.match(markdownCss, /\.markdown-body table\s*\{[\s\S]*min-width:\s*520px;/)
+  assert.match(markdownCss, /\.markdown-body th,[\s\S]*max-width:\s*320px;/)
 })
 
 test('message copy actions prefer native desktop clipboard before WebView fallbacks', () => {

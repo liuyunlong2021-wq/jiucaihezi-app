@@ -59,7 +59,6 @@ export type CreationErrorCategory =
   | 'newapi'
   | 'rh-adapter'
   | 'upstream-rh'
-  | 'upstream-t8'
   | 'upstream-volcengine'
   | 'upstream-worldrouter'
   | 'upstream-trump'
@@ -321,8 +320,6 @@ function classifyExecutionError(task: MediaTask, error: unknown): CreationTaskEr
   }
   if (plan?.upstreamFamily === 'runninghub')
     return { category: 'upstream-rh', stage: 'submit', message: message.slice(0, 200), raw: error }
-  if (plan?.upstreamFamily === 't8')
-    return { category: 'upstream-t8', stage: 'submit', message: message.slice(0, 200), raw: error }
   if (plan?.upstreamFamily === 'volcengine')
     return {
       category: 'upstream-volcengine',

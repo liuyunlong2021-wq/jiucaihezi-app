@@ -107,32 +107,30 @@ Banana（Google 图片模型）
 
 费用来源必须是现有模型注册表、New API 或已核实的管理员配置；前端不得猜测、硬编码或把不同计费单位混写。若无法确认单位，显示“费用以实际扣费为准”，不得显示孤立数字。
 
-当前价格快照（待核实计费单位）：
+当前价格快照（完整清单见 `docs/wiki/运维/模型价格表-2026-07-29.md`）：
 
 ```json
 {
-  "rh-3d-image": 4.2,
-  "rh-3d-text": 6.6,
-  "rh-gpt2-text": 0.12,
-  "rh-gpt2-image": 0.12,
+  "rh-3d-image": 6.6,
+  "rh-3d-text": 4.8,
+  "rh-gpt2-text": 0.15,
+  "rh-gpt2-image": 0.15,
   "gpt-image-2": 0.08,
   "gpt-image-2-vip": 0.2,
   "gemini-3-pro-image-preview": 0.2,
   "gemini-3.1-flash-image-preview": 0.1,
   "rh-image-v2": 0.3,
   "rh-pro-image": 0.5,
-  "rh-seedance2": 2.4,
+  "rh-seedance2": 2.3,
   "rh-seedance2-text": 1.5,
   "rh-seedance2-image": 1.5,
-  "rh-sora2-text": 1.2,
-  "rh-sora2-image": 1.2,
-  "grok-4.2-image": 0.2
+  "rh-sora2-text": 2,
+  "rh-sora2-image": 2,
+  "rh-aiapp": 0.3
 }
 ```
 
-完整价格清单以实施时管理员/网关真实配置为准。`rh-3d-image` 与 `rh-3d-text` 当前不能直接标记为 `6.6/次`：已有一次 `rh-3d-text`、`Geometry=false` 的实测记录显示，上游扣费 `1.8/次`，New API 扣费 `23.76`（会员九折），与管理员预期的 `6.6/次` 不一致。该单次证据不足以判断是计费单位、任务参数倍率、渠道换算、会员折扣还是 New API 价格字段含义造成差异。
-
-3D 费用在根因查清前只显示“费用以实际扣费为准”，不得把 `6.6` 直接展示给用户。调查必须保留任务 ID、模型 ID、全部参数、上游返回费用、New API 扣费前后余额、渠道价格/倍率配置和会员折扣规则；至少对文生 3D 与图生 3D 各做两组参数对照后，才能确定展示单位和公式。
+完整价格清单以该价格表和管理员/网关真实配置为准；客户端只负责展示注册表数值和单位，不拼接渠道前缀，也不推导渠道价格。
 
 ### 3.5 手动同步合同
 
@@ -166,7 +164,9 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 2. 用户主动向上滚动时，停止自动跟随，不抢回视口；
 3. 用户回到底部时，恢复自动跟随。
 
-临时流式显示行与已保存对话使用同一个消息列表、同一套高度测量和底部锚点；“临时”只表示尚未落盘，不表示新增持久化容器。实现优先复用现有 `ChatScrollNav` 和虚拟列表，不搬入 OpenCode 的完整 Part/事件存储体系。
+临时流式显示行与已保存对话使用同一个普通文档流和同一个底部锚点；“临时”只表示尚未落盘，不表示新增持久化容器。记忆工作台不使用虚拟列表、绝对定位、估算高度或手工测量，正文增长由浏览器自然布局处理；只复用现有 `ChatScrollNav` 的底部跟随状态，不搬入 OpenCode 的完整 Part/事件存储体系。
+
+工具调用属于当前运行状态，不属于对话文件真源。运行中只在内存保留 `status`、`streamingText` 和既有工具循环所需消息；工具修改项目文件时继续通过现有 `ProjectFileService`/工具执行器写入真实文件并标记待同步，不把工具事件、工具结果或流式片段另存为 Raw 消息。工具结束后，模型最终正文仍只追加一次到当前 Raw。
 
 ## 4. 实施顺序
 
@@ -190,9 +190,10 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 ### Task 1.5：发送、流式输出与自动滚动
 
 - 保留一个内存中的 `streamingText`，每次收到模型文字就追加显示；不保存流式片段，不新增消息数据库或事件存储。
-- 将临时流式助手行纳入现有消息列表，与已保存 Raw 消息使用一致的高度测量和底部锚点；流式结束后一次写入 Raw 并替换该行。
+- 将临时流式助手行纳入现有普通文档流，与已保存 Raw 消息使用同一个底部锚点；不使用虚拟列表、绝对定位、估算高度或手工测量；流式结束后一次写入 Raw 并替换该行。
 - 复用主 App 已验证的粘性跟随合同：底部自动跟随、用户上滚停止、回到底部恢复；不创建第二套滚动状态机。
 - 发送开始、流式文字变化、流式结束和最终 Raw 落盘只经过同一个滚动入口，避免多个 watcher 互相抢夺视口。
+- 工具执行只更新当前运行内存状态；真实文件修改继续走现有文件工具，工具事件和中间结果不写入 Raw、不建立 Part/事件存储。
 
 验收：连续发送长文本、触发 Wiki 工具、触发多轮工具和普通直答各 3 次；文字按返回过程持续出现，最终完整回复只写入一个 Raw；每次都能看到自己的最新输入和当前流式输出，结束后不跳到旧消息；主动上滚时不抢回视口；中断时不产生不完整 assistant Raw。
 
@@ -265,7 +266,7 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 | --- | --- | --- | --- | --- |
 | Task 0 | `main` 缺少三笔纯文档提交；只同步 `13213c19`、`0f3e0d5b`、`8dce98e8`，未合并 Android 代码 | 本 SDD、独立 App SDD | 基线 focused、TypeScript、Web/Desktop quick build 通过 | 不适用 |
 | Task 1 | 自动同步后的 `refreshProjectView -> openResource` 会关闭 Markdown 预览；删除打开项目、窗口 focus 和创建空间时的自动联网/刷新 | `projectTextSync.ts`、`MemoryWorkbench.vue` | 同步与工作台回归通过 | Web 预览保持；iPhone/iPad 待本轮真机 |
-| Task 1.5 | 临时流式行位于虚拟列表外，列表高度不包含它；改为同一 `timelineTurns` 虚拟列表、同一测量与滚动容器 | `MemoryWorkbench.vue` | 流式行、单次 Raw 落盘合同测试通过 | Web DOM/布局通过；移动端手势待真机 |
+| Task 1.5 | 根因是记忆工作台把连续 Markdown 对话套进绝对定位虚拟列表，流式正文增长必须依赖估算高度、手工测量和滚动补偿；临时行、落盘替换和通用滚动观察器之间的合同反复失配。删除记忆工作台虚拟列表和全部手工测高，已保存消息与 `streamingText` 使用同一普通文档流；工具调用只保留当前运行状态，真实文件修改继续走既有文件工具；Raw 写入后立即替换临时行，完整 Markdown 仅在结束后渲染 | `MemoryWorkbench.vue`、`ChatScrollNav.vue`、`memoryWorkbench.test.ts` | 专项 `39/39`、完整 focused `1387/1387`、TypeScript、Desktop quick build、正式 Mac 构建与产物审计通过；合同覆盖普通文档流、单次 Raw 落盘、工具状态不持久化和粘性滚动 | Mac 新包已生成，待用户真实长回复验收；移动端手势待真机 |
 | Task 1.6 | 文件监听和 `open()` 直接触发 `syncCycle()`；删除自动网络动作，只保留 pending 标记和手动上传/同步 | `projectTextSync.ts` | 新增“打开/编辑不上传，手动同步才上传”测试 | Web 本地创建/保存无自动同步；其余平台待真机 |
 | Task 2 | 记忆对话和文件预览绕过共享安全 Markdown 策略；统一复用 `renderMessageMarkdown` | `MemoryWorkbench.vue` | 既有 XSS、链接、代码、表格测试与工作台测试通过 | Web 标题、表格真实渲染通过 |
 | Task 3 | 缺少 WikiLink 解析与反向来源投影；从当前项目 Markdown 文件按需扫描，不建索引库 | `markdownLinks.ts`、对应测试、`MemoryWorkbench.vue` | 正向、别名、相对路径、反向引用测试通过 | Web `[[人物小传]]` 点击与缺失提示通过；真实双文件往返待矩阵 |
@@ -275,6 +276,16 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 | Task 7 | 共享实现完成后再逐平台验收 | 本记录、`hot.md` | focused：Rust `400 passed, 0 failed, 1 ignored`；TypeScript 通过；Web/Desktop/iOS quick build 通过 | Web：创建项目、编辑保存、标题/表格渲染、双链缺失提示通过。Mac、Windows、iPhone、iPad 本轮完整功能矩阵未完成；Android 未开始 |
 
 构建说明：Vite 仍有既有大 chunk 和 ineffective dynamic import 警告，不影响本轮构建结果。Web 与 Desktop 构建必须串行执行；并行执行会竞争同一 `dist`，曾导致一次 Web 审计误报缺少 `404.html`/`_headers`，不作为产品失败证据。
+
+### 5.1 Markdown 视觉与创作面板审计补充（2026-07-29）
+
+| 项目 | 根因与最小修改 | 修改文件 | 自动验证 | 真实平台结果 |
+| --- | --- | --- | --- | --- |
+| Markdown 统一视觉 | 消息组件和记忆工作台各自维护局部 Markdown/代码块 CSS，且复制图标使用彩色 Emoji；新增全局样式入口，阅读/对话使用 `.markdown-body`，编辑层与代码块共用 `--hl-*` 变量，复制按钮改为单色符号并接入记忆工作台事件 | `src/styles/markdown.css`、`main.ts`、`MessageBubble.vue`、`MemoryWorkbench.vue`、`markdownDisplayPolicy.ts`、`streamingTextRenderer.ts`、`highlight-theme.css` | focused 1387/1387；TypeScript；桌面产物审计 | Mac 新包已生成；用户待安装测试 |
+| 创作面板分组 | 仅识别 `gpt-image-*` 导致 `rh-gpt2-*` 被放入其他模型；按价格表增加 GPT Image、Banana、Seedance Mini/Fast/2、Veo、Sora2、Grok、LTX、Suno、3D、AI 应用等家族分组，仍按原始 `model` 请求 | `creationModelRegistry.ts`、`CreationPanel.vue`、对应测试 | 分组/价格测试通过；全部模型注册表计划校验通过 | Mac 待用户核对菜单与真实渠道可用性 |
+| 价格一致性 | 价格表视频章节中 `rh-video-v31-fast` 的 `2/次` 与“视频按秒”矛盾；按统一规则改为 `2/秒`，注册表数值保持不变 | `docs/wiki/运维/模型价格表-2026-07-29.md` | `displayModelPrice` 输出 `2/秒` | 尚未做真实扣费核对 |
+
+Mac 构建证据：`pnpm run tauri:build` 成功，生成 Apple Silicon `.app` 与 `.dmg`。构建后发现 `fix-macos-app.mjs` 会把 Tauri 的 Developer ID 签名覆盖成 ad-hoc；最小修复为复用 `tauri.conf.json` 现有签名身份并保留 hardened runtime/entitlements，不新增签名配置。最终 APP 与 DMG 均使用 `Developer ID Application: yunlong liu (RXD4L9387J)` 签名；APP `codesign --verify --deep --strict` 与 DMG `codesign --verify` 均通过，最终 APP `TeamIdentifier=RXD4L9387J`。DMG SHA-256：`5483db8514c1c3004fdff000762f14febf619d2a38315495e13f57e67086b825`。未配置 Apple 公证凭据，因此不宣称已公证或发布。版本仍为 `2.1.0`。
 
 ## 6. 不做事项
 

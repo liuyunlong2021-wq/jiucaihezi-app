@@ -16,7 +16,6 @@ const SOURCE_LABELS = {
 } as const
 
 const UPSTREAM_LABELS = {
-  t8: 'T8',
   volcengine: '火山',
   worldrouter: 'WorldRouter',
   trump: '特朗普',

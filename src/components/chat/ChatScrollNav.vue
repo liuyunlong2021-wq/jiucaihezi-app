@@ -146,7 +146,7 @@ function observeMessageElements() {
   })
   resizeObserver.observe(el)
   // 观察最后 4 条消息的大小变化（图片加载等）
-  for (const messageEl of Array.from(el.querySelectorAll('.msg')).slice(-4)) {
+  for (const messageEl of Array.from(el.querySelectorAll('.msg, .memory-message')).slice(-4)) {
     resizeObserver.observe(messageEl)
   }
 }

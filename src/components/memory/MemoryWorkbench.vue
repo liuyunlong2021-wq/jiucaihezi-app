@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useVirtualizer } from '@tanstack/vue-virtual'
 import ProjectFileTree from '@/components/filetree/ProjectFileTree.vue'
 import ChatScrollNav from '@/components/chat/ChatScrollNav.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
@@ -56,6 +55,7 @@ import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { writeClipboardText } from '@/utils/clipboard'
 import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
+import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
 import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
 
@@ -266,26 +266,6 @@ const timelineTurns = computed<ConversationTurn[]>(() => {
     createdAt: new Date().toISOString(),
   }]
 })
-const memoryTimelineVirtualizer = useVirtualizer(
-  computed(() => ({
-    count: timelineTurns.value.length,
-    getScrollElement: () => messagesEl.value,
-    getItemKey: index => timelineTurns.value[index]?.id || index,
-    estimateSize: () => 180,
-    overscan: 6,
-    measureElement: (element: Element) => Math.max(element.getBoundingClientRect().height + 24, 80),
-  })),
-)
-const virtualConversationTurns = computed(() => memoryTimelineVirtualizer.value
-  .getVirtualItems()
-  .flatMap(row => {
-    const turn = timelineTurns.value[row.index]
-    return turn ? [{ row, turn }] : []
-  }))
-
-function measureMemoryTurn(element: unknown) {
-  if (element instanceof Element) memoryTimelineVirtualizer.value.measureElement(element)
-}
 const filteredConversations = computed(() => {
   const query = conversationSearch.value.trim().toLowerCase()
   return conversations.value
@@ -462,9 +442,14 @@ async function startNewConversation() {
   }
 }
 
-watch([() => conversation.value?.transcript.turns.length, streamingText, sending], async () => {
+watch(() => conversation.value?.transcript.turns.length, async () => {
   await nextTick()
-  memoryTimelineVirtualizer.value.measure()
+  memoryScrollNav.value?.scheduleAutoScrollIfNeeded()
+})
+
+watch(streamingText, async text => {
+  if (!text) return
+  await nextTick()
   memoryScrollNav.value?.scheduleAutoScrollIfNeeded()
 })
 
@@ -483,6 +468,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
     conversationSearch.value = ''
     executionMode.value = [...resource.transcript.turns].reverse()
       .find(turn => turn.role === 'user' && turn.mode)?.mode || 'memory'
+    await nextTick()
+    memoryScrollNav.value?.startStickyFollow()
     let previousUserTurnId = ''
     for (const turn of resource.transcript.turns) {
       if (turn.role === 'user') {
@@ -572,11 +559,30 @@ function renderMemoryMarkdown(content: string): string {
   return renderMessageMarkdown(renderWikiLinks(content), 'assistant')
 }
 
+function renderMemoryTurn(turn: ConversationTurn): string {
+  const content = displayTurnContent(turn)
+  return turn.id === 'streaming-assistant' ? renderStreamingText(content) : renderMemoryMarkdown(content)
+}
+
 async function openWikiResource(resource: ProjectResource) {
   await openResource(await openProjectResource(files, resource))
 }
 
 async function handleMarkdownClick(event: MouseEvent) {
+  const copyButton = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-code-copy="1"]')
+  if (copyButton) {
+    const code = copyButton.closest('.md-code')?.querySelector('code')?.textContent || ''
+    if (!code) return
+    const copied = await writeClipboardText(code)
+    copyButton.classList.toggle('copied', copied)
+    const label = copyButton.querySelector('.md-code-copy-label')
+    if (label) label.textContent = copied ? '已复制' : '复制失败'
+    window.setTimeout(() => {
+      copyButton.classList.remove('copied')
+      if (label) label.textContent = '复制'
+    }, copied ? 1200 : 1800)
+    return
+  }
   const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#jc-file="]')
   if (!anchor) return
   event.preventDefault()
@@ -739,6 +745,7 @@ async function send() {
       },
     })
     const complete = await appendMemoryTurn(saved.resource, 'assistant', reply, files)
+    streamingText.value = ''
     rememberConversation(complete)
     opened.value = await openProjectResource(files, complete.resource)
     const turn = complete.transcript.turns.at(-1)
@@ -1371,19 +1378,12 @@ function readDataUrl(file: File): Promise<string> {
 
       <section v-if="conversation" ref="messagesEl" class="memory-messages">
         <div v-if="!conversation.transcript.turns.length" class="memory-empty-state">开始一段对话</div>
-        <div
-          v-else
-          class="memory-message-list"
-          :style="{ height: `${memoryTimelineVirtualizer.getTotalSize()}px` }"
-        >
+        <div v-else class="memory-message-list">
         <article
-          v-for="{ row, turn } in virtualConversationTurns"
+          v-for="turn in timelineTurns"
           :key="turn.id"
-          :ref="measureMemoryTurn"
-          :data-index="row.index"
           class="memory-message"
           :class="[turn.role, { streaming: turn.id === 'streaming-assistant' }]"
-          :style="{ transform: `translateY(${row.start}px)` }"
         >
           <span class="memory-role">{{ turn.role === 'user' ? '你' : '韭菜盒子' }}</span>
           <div v-if="turn.role === 'user' && turnAttachments(turn).length" class="memory-message-attachments">
@@ -1394,10 +1394,10 @@ function readDataUrl(file: File): Promise<string> {
           </div>
           <div
             v-if="displayTurnContent(turn)"
-            class="memory-message-text memory-markdown"
+            class="memory-message-text memory-markdown markdown-body"
             :data-wiki-source="conversation?.resource.path"
             @click="handleMarkdownClick"
-            v-html="renderMemoryMarkdown(displayTurnContent(turn))"
+            v-html="renderMemoryTurn(turn)"
           ></div>
           <button
             v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
@@ -1550,7 +1550,7 @@ function readDataUrl(file: File): Promise<string> {
         </header>
         <div v-if="previewResource.type === 'editor'" class="memory-document">
           <div v-if="!editingMarkdown"
-            class="memory-markdown"
+            class="memory-markdown markdown-body"
             :data-wiki-source="previewResource.resource.path"
             @click="handleMarkdownClick"
             v-html="renderMemoryMarkdown(previewResource.text.content)"
@@ -1661,14 +1661,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-model-empty { margin: 8px; color: var(--ink3); font-size: 12px; }
 .icon-button, .send-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; }
 .icon-button:hover { color: var(--olive); border-color: var(--olive); }
-.memory-messages { min-height: 0; overflow-y: auto; padding: 24px max(20px, calc((100% - 820px) / 2)); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
+.memory-messages { min-height: 0; overflow-y: scroll; padding: 24px max(20px, calc((100% - 820px) / 2)); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
 .memory-messages::-webkit-scrollbar { width: 18px; }
 .memory-messages::-webkit-scrollbar-track { border-radius: 999px; background: transparent; }
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .memory-messages::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--olive-dark) 78%, transparent); background-clip: content-box; }
-.memory-message-list { position: relative; width: 100%; }
+.memory-message-list { width: 100%; }
 .memory-message { position: relative; margin-bottom: 24px; padding-right: 30px; }
-.memory-message-list > .memory-message { position: absolute; top: 0; right: 0; left: 0; }
 .memory-message.user { margin-left: min(18%, 130px); padding: 12px 42px 12px 14px; border-radius: 8px; background: var(--surface); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
@@ -1676,31 +1675,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-attachment.image { width: 64px; padding: 0; }
 .memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
-.memory-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-base); line-height: 1.72; }
-.memory-markdown { white-space: normal; }
-.memory-markdown :deep(h1), .memory-markdown :deep(h2), .memory-markdown :deep(h3) { margin: 12px 0 6px; color: var(--ink1); font-weight: 700; line-height: 1.35; }
-.memory-markdown :deep(h1) { font-size: 20px; }
-.memory-markdown :deep(h2) { font-size: 17px; }
-.memory-markdown :deep(h3) { font-size: 15px; }
-.memory-markdown :deep(p) { margin: 5px 0; }
-.memory-markdown :deep(ul), .memory-markdown :deep(ol) { margin: 5px 0; padding-left: 22px; }
-.memory-markdown :deep(blockquote) { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--olive); color: var(--ink2); background: color-mix(in srgb, var(--olive) 5%, transparent); }
-.memory-markdown :deep(a) { color: var(--olive); text-decoration: underline; }
-.memory-markdown :deep(pre) { overflow-x: auto; padding: 10px; border-radius: 6px; background: var(--surface-alt); }
-.memory-markdown :deep(.md-table-wrap) { max-width: 100%; overflow-x: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: 6px; }
-.memory-markdown :deep(table) { width: 100%; border-collapse: collapse; }
-.memory-markdown :deep(th), .memory-markdown :deep(td) { padding: 6px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.memory-message-text { overflow-wrap: anywhere; }
 .memory-backlinks { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
 .memory-backlinks h2 { margin: 0 0 8px; font-size: 14px; }
 .memory-backlinks button { display: block; width: 100%; padding: 7px 0; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; text-align: left; }
 .memory-preview-actions { display: flex; align-items: center; gap: 4px; }
-.memory-markdown-editor { position: relative; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-.memory-markdown-editor pre, .memory-markdown-editor textarea { box-sizing: border-box; width: 100%; min-height: 320px; margin: 0; padding: 14px; border: 0; font: 13px/1.6 'SF Mono', 'Cascadia Code', monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
-.memory-markdown-editor pre { overflow: auto; color: var(--ink1); pointer-events: none; }
-.memory-markdown-editor textarea { position: absolute; inset: 0; resize: none; overflow: auto; background: transparent; color: transparent; caret-color: var(--ink1); outline: none; }
-.memory-markdown-editor textarea::selection { background: color-mix(in srgb, var(--olive) 28%, transparent); color: transparent; }
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
-.memory-message-copy { position: absolute; top: 0; right: 0; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--ink3); }
+.memory-message-copy { position: absolute; top: 0; right: 0; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-media-plan-link:hover { border-color: var(--olive); }
@@ -1735,7 +1716,6 @@ function readDataUrl(file: File): Promise<string> {
 .memory-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; }
 .memory-document { min-height: 0; height: 100%; overflow-y: scroll; overflow-x: auto; overscroll-behavior: contain; scrollbar-gutter: stable; box-sizing: border-box; padding: 28px max(24px, calc((100% - 900px) / 2)); }
-.memory-document pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink1); font: var(--font-base)/1.7 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .memory-document, .memory-model-menu { scrollbar-color: color-mix(in srgb, var(--ink3) 48%, transparent) transparent; scrollbar-width: thin; }
 .memory-document::-webkit-scrollbar, .memory-model-menu::-webkit-scrollbar { width: 10px; }
 .memory-document::-webkit-scrollbar-thumb, .memory-model-menu::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 48%, transparent); background-clip: content-box; }
