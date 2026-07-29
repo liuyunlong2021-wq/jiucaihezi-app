@@ -12,7 +12,7 @@ MAX_QUERY_CHARS = 500
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(7.0, connect=3.0))
+    app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=3.0))
     yield
     await app.state.http.aclose()
 
