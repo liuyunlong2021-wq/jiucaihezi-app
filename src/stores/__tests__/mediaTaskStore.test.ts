@@ -1271,7 +1271,7 @@ test(
 
     try {
       const plan = buildCreationRunPlan({
-        modelId: 'newapi/t8/gpt-image-2',
+        modelId: 'gpt-image-2',
         params: { prompt: 'Base64 图片', ratio: '16:9', resolution: '2k' },
       })
       const taskId = await store.submitTask({

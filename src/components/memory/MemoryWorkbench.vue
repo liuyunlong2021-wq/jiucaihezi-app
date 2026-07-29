@@ -53,9 +53,11 @@ import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import type { ProjectResource } from '@/utils/projectResource'
-import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
-import { getGatewaySessionToken } from '@/services/newApiClient'
+import { projectTextSync } from '@/services/projectTextSync'
 import { writeClipboardText } from '@/utils/clipboard'
+import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
+import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
+import { highlightCode } from '@/utils/highlight'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -68,6 +70,13 @@ const CreationPanel = defineAsyncComponent(() => import('@/components/creation/C
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
+const backlinks = ref<ProjectResource[]>([])
+const editingMarkdown = ref(false)
+const markdownDraft = ref('')
+const markdownSavePending = ref(false)
+const markdownSaveError = ref('')
+const markdownEditorRef = ref<HTMLTextAreaElement | null>(null)
+const markdownHighlightRef = ref<HTMLElement | null>(null)
 const conversations = ref<MemoryConversation[]>([])
 const conversationPickerOpen = ref(false)
 const conversationSearch = ref('')
@@ -111,6 +120,7 @@ const transientAttachments = ref<Record<string, ResolvedDirectAttachment[]>>({})
 let abortController: AbortController | null = null
 let mediaObjectUrl = ''
 let projectGeneration = 0
+let backlinkGeneration = 0
 let sendInFlight = false
 let offOpenResource: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
@@ -247,11 +257,20 @@ const {
   noInitialSelection: true,
 })
 const conversationTurns = computed(() => conversation.value?.transcript.turns || [])
+const timelineTurns = computed<ConversationTurn[]>(() => {
+  if (!sending.value || !streamingText.value) return conversationTurns.value
+  return [...conversationTurns.value, {
+    id: 'streaming-assistant',
+    role: 'assistant',
+    content: streamingText.value,
+    createdAt: new Date().toISOString(),
+  }]
+})
 const memoryTimelineVirtualizer = useVirtualizer(
   computed(() => ({
-    count: conversationTurns.value.length,
+    count: timelineTurns.value.length,
     getScrollElement: () => messagesEl.value,
-    getItemKey: index => conversationTurns.value[index]?.id || index,
+    getItemKey: index => timelineTurns.value[index]?.id || index,
     estimateSize: () => 180,
     overscan: 6,
     measureElement: (element: Element) => Math.max(element.getBoundingClientRect().height + 24, 80),
@@ -260,7 +279,7 @@ const memoryTimelineVirtualizer = useVirtualizer(
 const virtualConversationTurns = computed(() => memoryTimelineVirtualizer.value
   .getVirtualItems()
   .flatMap(row => {
-    const turn = conversationTurns.value[row.index]
+    const turn = timelineTurns.value[row.index]
     return turn ? [{ row, turn }] : []
   }))
 
@@ -305,7 +324,6 @@ onMounted(async () => {
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
   document.addEventListener('pointerdown', closeModelPicker)
   document.addEventListener('keydown', handleGlobalKeydown)
-  window.addEventListener('focus', syncOnFocus)
   window.addEventListener('resize', resizeCreationForWindow)
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
   await Promise.all([
@@ -325,7 +343,6 @@ onBeforeUnmount(() => {
   offSwitchPanel?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
-  window.removeEventListener('focus', syncOnFocus)
   window.removeEventListener('resize', resizeCreationForWindow)
   stopCreationResize()
   stopProjectWatch?.()
@@ -391,20 +408,11 @@ async function openProject(owner: string) {
     conversations.value = state.conversations
     const first = state.conversations[0]
     if (first) await openResource(await openProjectResource(files, first.resource))
-    void projectTextSync.open(owner, projectStore.projectName.value).then(async () => {
-      if (generation === projectGeneration) await refreshProjectView(owner)
-    })
+    void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {
     if (generation !== projectGeneration) return
     error.value = cause instanceof Error ? cause.message : String(cause)
   }
-}
-
-async function syncOnFocus() {
-  const owner = projectOwner.value
-  if (!owner || !projectTextSyncStatus.cloudProjectId) return
-  await projectTextSync.syncNow().catch(() => {})
-  await refreshProjectView(owner)
 }
 
 async function refreshProjectView(owner = projectOwner.value) {
@@ -428,12 +436,7 @@ async function createMemorySpace() {
     memoryReady.value = true
     opened.value = null
     conversations.value = []
-    if (getGatewaySessionToken()) {
-      void projectTextSync.open(owner, projectStore.projectName.value)
-        .then(() => projectTextSync.enable())
-        .then(() => refreshProjectView(owner))
-        .catch(() => {})
-    }
+    void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
@@ -459,7 +462,7 @@ async function startNewConversation() {
   }
 }
 
-watch(() => conversation.value?.transcript.turns.length, async () => {
+watch([() => conversation.value?.transcript.turns.length, streamingText, sending], async () => {
   await nextTick()
   memoryTimelineVirtualizer.value.measure()
   memoryScrollNav.value?.scheduleAutoScrollIfNeeded()
@@ -469,7 +472,10 @@ async function openResource(resource: ProjectResourceOpenResult) {
   error.value = ''
   if (!sending.value) status.value = ''
   streamingText.value = ''
+  editingMarkdown.value = false
+  markdownSaveError.value = ''
   if (resource.type === 'conversation') {
+    backlinks.value = []
     closePreview()
     opened.value = resource
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
@@ -497,6 +503,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
   } else {
     releaseMediaUrl()
     previewResource.value = resource
+    if (resource.type === 'editor') void loadBacklinks(resource.resource)
+    else backlinks.value = []
   }
   if (resource.type === 'media') {
     try {
@@ -518,6 +526,86 @@ async function openResource(resource: ProjectResourceOpenResult) {
     }
   }
   if (window.innerWidth <= 760) treeOpen.value = false
+}
+
+function startMarkdownEdit() {
+  if (previewResource.value?.type !== 'editor') return
+  markdownDraft.value = previewResource.value.text.content
+  markdownSaveError.value = ''
+  editingMarkdown.value = true
+  void nextTick(() => markdownEditorRef.value?.focus())
+}
+
+function cancelMarkdownEdit() {
+  editingMarkdown.value = false
+  markdownSaveError.value = ''
+}
+
+function syncMarkdownEditorScroll() {
+  if (!markdownEditorRef.value || !markdownHighlightRef.value) return
+  markdownHighlightRef.value.scrollTop = markdownEditorRef.value.scrollTop
+  markdownHighlightRef.value.scrollLeft = markdownEditorRef.value.scrollLeft
+}
+
+async function saveMarkdownEdit() {
+  const current = previewResource.value
+  if (current?.type !== 'editor' || markdownSavePending.value) return
+  markdownSavePending.value = true
+  markdownSaveError.value = ''
+  try {
+    const result = await files.writeText(current.resource, markdownDraft.value, current.text.revision)
+    if (result.status === 'conflict') {
+      markdownSaveError.value = '文件已在其他位置更新。当前草稿已保留，请核对后再处理。'
+      return
+    }
+    if (result.status !== 'saved') throw new Error('文件已不存在')
+    editingMarkdown.value = false
+    await openResource(await openProjectResource(files, current.resource))
+  } catch (cause) {
+    markdownSaveError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    markdownSavePending.value = false
+  }
+}
+
+function renderMemoryMarkdown(content: string): string {
+  return renderMessageMarkdown(renderWikiLinks(content), 'assistant')
+}
+
+async function openWikiResource(resource: ProjectResource) {
+  await openResource(await openProjectResource(files, resource))
+}
+
+async function handleMarkdownClick(event: MouseEvent) {
+  const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#jc-file="]')
+  if (!anchor) return
+  event.preventDefault()
+  const owner = projectOwner.value
+  if (!owner) return
+  const target = decodeURIComponent(anchor.getAttribute('href')!.slice('#jc-file='.length))
+  const sourcePath = (event.currentTarget as HTMLElement).dataset.wikiSource || ''
+  const resource = resolveWikiLinkTarget(target, sourcePath, await files.list(owner))
+  if (!resource) {
+    error.value = `文件不存在：${target}`
+    return
+  }
+  await openWikiResource(resource)
+}
+
+async function loadBacklinks(target: ProjectResource) {
+  const generation = ++backlinkGeneration
+  const resources = (await files.list(target.owner)).filter(resource =>
+    !resource.isDirectory && /\.md$/i.test(resource.path),
+  )
+  const sources: Array<{ resource: ProjectResource; content: string }> = []
+  for (const resource of resources) {
+    try {
+      sources.push({ resource, content: (await files.readText(resource)).content })
+    } catch { /* unreadable files are not backlink sources */ }
+  }
+  if (generation === backlinkGeneration && previewResource.value?.resource.path === target.path) {
+    backlinks.value = findWikiBacklinks(target, sources)
+  }
 }
 
 function rememberConversation(next: MemoryConversation) {
@@ -576,6 +664,10 @@ async function deleteConversation(item: MemoryConversation) {
 }
 
 function closePreview() {
+  backlinkGeneration++
+  backlinks.value = []
+  editingMarkdown.value = false
+  markdownSaveError.value = ''
   previewResource.value = null
   releaseMediaUrl()
 }
@@ -1290,7 +1382,7 @@ function readDataUrl(file: File): Promise<string> {
           :ref="measureMemoryTurn"
           :data-index="row.index"
           class="memory-message"
-          :class="turn.role"
+          :class="[turn.role, { streaming: turn.id === 'streaming-assistant' }]"
           :style="{ transform: `translateY(${row.start}px)` }"
         >
           <span class="memory-role">{{ turn.role === 'user' ? '你' : '韭菜盒子' }}</span>
@@ -1300,9 +1392,15 @@ function readDataUrl(file: File): Promise<string> {
               <template v-else><JcIcon :name="attachment.kind === 'video' ? 'movie' : attachment.kind === 'audio' ? 'music-note' : 'description'" /><span :title="attachment.name">{{ attachment.name }}</span></template>
             </div>
           </div>
-          <div v-if="displayTurnContent(turn)" class="memory-message-text">{{ displayTurnContent(turn) }}</div>
-          <button
+          <div
             v-if="displayTurnContent(turn)"
+            class="memory-message-text memory-markdown"
+            :data-wiki-source="conversation?.resource.path"
+            @click="handleMarkdownClick"
+            v-html="renderMemoryMarkdown(displayTurnContent(turn))"
+          ></div>
+          <button
+            v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
             class="memory-message-copy"
             type="button"
             :title="copiedTurnId === turn.id ? '已复制' : '复制'"
@@ -1337,10 +1435,6 @@ function readDataUrl(file: File): Promise<string> {
           />
         </article>
         </div>
-        <article v-if="sending && streamingText" class="memory-message assistant streaming">
-          <span class="memory-role">韭菜盒子</span>
-          <div class="memory-message-text">{{ streamingText }}</div>
-        </article>
       </section>
       <section v-else-if="projectOwner && !memoryReady" class="memory-onboarding">
         <div>
@@ -1443,10 +1537,39 @@ function readDataUrl(file: File): Promise<string> {
         <header class="memory-preview-header">
           <button class="memory-preview-back" @click="closePreview"><JcIcon name="arrow-back" /><span>返回对话</span></button>
           <strong>{{ previewResource.resource.name }}</strong>
-          <button class="icon-button" title="关闭预览" @click="closePreview"><JcIcon name="close" /></button>
+          <div class="memory-preview-actions">
+            <template v-if="previewResource.type === 'editor' && !editingMarkdown">
+              <button class="icon-button" title="编辑 Markdown" @click="startMarkdownEdit"><JcIcon name="edit" /></button>
+            </template>
+            <template v-else-if="previewResource.type === 'editor'">
+              <button class="icon-button" title="取消编辑" @click="cancelMarkdownEdit"><JcIcon name="close" /></button>
+              <button class="icon-button" title="保存 Markdown" :disabled="markdownSavePending" @click="saveMarkdownEdit"><JcIcon name="save" /></button>
+            </template>
+            <button class="icon-button" title="关闭预览" @click="closePreview"><JcIcon name="close" /></button>
+          </div>
         </header>
         <div v-if="previewResource.type === 'editor'" class="memory-document">
-          <pre>{{ previewResource.text.content }}</pre>
+          <div v-if="!editingMarkdown"
+            class="memory-markdown"
+            :data-wiki-source="previewResource.resource.path"
+            @click="handleMarkdownClick"
+            v-html="renderMemoryMarkdown(previewResource.text.content)"
+          ></div>
+          <div v-else class="memory-markdown-editor">
+            <pre ref="markdownHighlightRef" aria-hidden="true" v-html="highlightCode(markdownDraft, 'markdown')"></pre>
+            <textarea
+              ref="markdownEditorRef"
+              v-model="markdownDraft"
+              spellcheck="false"
+              aria-label="Markdown 原文编辑器"
+              @scroll="syncMarkdownEditorScroll"
+            ></textarea>
+          </div>
+          <p v-if="markdownSaveError" class="memory-editor-error">{{ markdownSaveError }}</p>
+          <section v-if="backlinks.length" class="memory-backlinks">
+            <h2>被以下文件引用</h2>
+            <button v-for="source in backlinks" :key="source.path" type="button" @click="openWikiResource(source)">{{ source.path }}</button>
+          </section>
         </div>
         <div v-else-if="previewResource.type === 'media'" class="memory-media">
           <img v-if="previewResource.mediaKind === 'image' && mediaUrl" :src="mediaUrl" :alt="previewResource.resource.name" />
@@ -1544,9 +1667,9 @@ function readDataUrl(file: File): Promise<string> {
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .memory-messages::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--olive-dark) 78%, transparent); background-clip: content-box; }
 .memory-message-list { position: relative; width: 100%; }
-.memory-message { margin-bottom: 24px; }
+.memory-message { position: relative; margin-bottom: 24px; padding-right: 30px; }
 .memory-message-list > .memory-message { position: absolute; top: 0; right: 0; left: 0; }
-.memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border-radius: 8px; background: var(--surface); }
+.memory-message.user { margin-left: min(18%, 130px); padding: 12px 42px 12px 14px; border-radius: 8px; background: var(--surface); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .memory-message-attachment { display: flex; width: min(220px, 100%); height: 48px; align-items: center; gap: 8px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); overflow: hidden; color: var(--ink3); }
@@ -1554,7 +1677,30 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
 .memory-message-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--font-base); line-height: 1.72; }
-.memory-message-copy { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; margin-top: 5px; margin-left: auto; border: 0; border-radius: 5px; background: transparent; color: var(--ink3); }
+.memory-markdown { white-space: normal; }
+.memory-markdown :deep(h1), .memory-markdown :deep(h2), .memory-markdown :deep(h3) { margin: 12px 0 6px; color: var(--ink1); font-weight: 700; line-height: 1.35; }
+.memory-markdown :deep(h1) { font-size: 20px; }
+.memory-markdown :deep(h2) { font-size: 17px; }
+.memory-markdown :deep(h3) { font-size: 15px; }
+.memory-markdown :deep(p) { margin: 5px 0; }
+.memory-markdown :deep(ul), .memory-markdown :deep(ol) { margin: 5px 0; padding-left: 22px; }
+.memory-markdown :deep(blockquote) { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--olive); color: var(--ink2); background: color-mix(in srgb, var(--olive) 5%, transparent); }
+.memory-markdown :deep(a) { color: var(--olive); text-decoration: underline; }
+.memory-markdown :deep(pre) { overflow-x: auto; padding: 10px; border-radius: 6px; background: var(--surface-alt); }
+.memory-markdown :deep(.md-table-wrap) { max-width: 100%; overflow-x: auto; margin: 10px 0; border: 1px solid var(--line); border-radius: 6px; }
+.memory-markdown :deep(table) { width: 100%; border-collapse: collapse; }
+.memory-markdown :deep(th), .memory-markdown :deep(td) { padding: 6px 9px; border: 1px solid var(--line); text-align: left; vertical-align: top; }
+.memory-backlinks { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
+.memory-backlinks h2 { margin: 0 0 8px; font-size: 14px; }
+.memory-backlinks button { display: block; width: 100%; padding: 7px 0; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; text-align: left; }
+.memory-preview-actions { display: flex; align-items: center; gap: 4px; }
+.memory-markdown-editor { position: relative; min-height: 320px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.memory-markdown-editor pre, .memory-markdown-editor textarea { box-sizing: border-box; width: 100%; min-height: 320px; margin: 0; padding: 14px; border: 0; font: 13px/1.6 'SF Mono', 'Cascadia Code', monospace; white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 2; }
+.memory-markdown-editor pre { overflow: auto; color: var(--ink1); pointer-events: none; }
+.memory-markdown-editor textarea { position: absolute; inset: 0; resize: none; overflow: auto; background: transparent; color: transparent; caret-color: var(--ink1); outline: none; }
+.memory-markdown-editor textarea::selection { background: color-mix(in srgb, var(--olive) 28%, transparent); color: transparent; }
+.memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
+.memory-message-copy { position: absolute; top: 0; right: 0; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: transparent; color: var(--ink3); }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-media-plan-link:hover { border-color: var(--olive); }

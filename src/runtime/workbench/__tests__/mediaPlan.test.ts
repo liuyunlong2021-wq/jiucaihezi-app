@@ -25,7 +25,7 @@ test('media plan parser accepts one fenced image plan', () => {
       kind: 'image',
       title: '精华液主图',
       prompt: '白色台面上的精华液产品摄影',
-      modelId: 'newapi/t8/gpt-image-2',
+      modelId: 'gpt-image-2',
       ratio: '1:1',
       resolution: '2k',
       referenceIds: ['ref_product'],
@@ -37,7 +37,7 @@ test('media plan parser accepts one fenced image plan', () => {
     kind: 'image',
     title: '精华液主图',
     prompt: '白色台面上的精华液产品摄影',
-    modelId: 'runninghub/api/rh-gpt2-official',
+    modelId: 'gpt-image-2',
     usesProductDefaultModel: true,
     ratio: '1:1',
     resolution: '2k',
@@ -104,7 +104,7 @@ test('model-free plans use the product defaults for images and text-to-video', (
     kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
   }) + '\n```')
 
-  assert.equal(image.modelId, 'runninghub/api/rh-gpt2-official')
+  assert.equal(image.modelId, 'gpt-image-2')
   assert.equal(video.modelId, 'runninghub/api/rh-seedance2-text')
 })
 
@@ -167,7 +167,7 @@ test('native media planning excludes models disabled by live availability', () =
           kind: 'image',
           title: '已下线模型',
           prompt: '生成图片',
-          modelId: 'newapi/t8/gpt-image-2',
+          modelId: 'gpt-image-2',
         }),
       /当前不可用/,
     )
@@ -178,7 +178,7 @@ test('native media planning excludes models disabled by live availability', () =
 
 test('media plan parser rejects prose or incomplete plans', () => {
   assert.throws(() => parseMediaPlan('只有一段提示词，没有计划块'), /媒体计划/)
-  assert.throws(() => parseMediaPlan('```jc-media-plan\n{"kind":"image","title":"主图","modelId":"newapi/t8/gpt-image-2"}\n```'), /prompt/)
+  assert.throws(() => parseMediaPlan('```jc-media-plan\n{"kind":"image","title":"主图","modelId":"gpt-image-2"}\n```'), /prompt/)
 })
 
 test('media plan validator only permits registered image models and their declared options', () => {
@@ -186,7 +186,7 @@ test('media plan validator only permits registered image models and their declar
     kind: 'image' as const,
     title: '精华液主图',
     prompt: '白色台面上的精华液产品摄影',
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     ratio: '1:1',
     resolution: '2k',
   }
@@ -202,7 +202,7 @@ test('accepts the fixed GPT Image 2 official handoff with a user-selected ratio'
     kind: 'image' as const,
     title: '商品图复刻',
     prompt: '保留用户产品图中的包装和文字，生成电商主图。',
-    modelId: 'runninghub/api/rh-gpt2-official',
+    modelId: 'gpt-image-2',
     ratio: '3:4',
     referenceImages: ['data:image/png;base64,product'],
   }
@@ -256,18 +256,18 @@ test('media plan editor uses compatible registry models and normalizes changed m
     kind: 'image' as const,
     title: '精华液主图',
     prompt: '白色台面上的精华液产品摄影',
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     ratio: '16:9',
     resolution: '2k',
   }
 
   const controls = getMediaPlanEditorControls(plan)
-  assert.equal(controls.models.some(model => model.value === 'newapi/t8/gpt-image-2'), true)
+  assert.equal(controls.models.some(model => model.value === 'gpt-image-2'), true)
 
   const updated = updateMediaPlanParameters(plan, {
     ratio: '100:1',
   })
-  assert.equal(updated.modelId, 'newapi/t8/gpt-image-2')
+  assert.equal(updated.modelId, 'gpt-image-2')
   assert.equal(updated.ratio, '1:1')
   assert.equal(updated.resolution, '2k')
   assert.doesNotThrow(() => validateMediaPlan(updated))

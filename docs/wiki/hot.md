@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆对话独立App SDD]]** — 4C-1 至 4C-13 已完成，iPhone 分支已合并 `main` 并删除。V2.1.0 Web、桌面三平台和 iOS TestFlight 已通过真实验收；Android 4D-1 至 4D-9 已拆成独立验收清单，下一步在新对话开始 4D-1。Excel/PPT 转换依赖仍待服务器部署和真实文件验证。
+**当前焦点：[[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]]** — 共享代码修复已完成：移动预览自动返回与自动同步根因已切断；流式行进入同一虚拟列表；文件/对话共用安全 Markdown；双链按项目文件按需扫描；Markdown 保存使用 revision；下线模型已从能力表、注册表和默认回退清除；复制按钮已收紧。focused、TypeScript、Web/Desktop/iOS quick build 通过，Web 已完成创建、编辑、保存、标题/表格渲染和双链缺失提示真实验收。Mac、Windows、iPhone、iPad 本轮完整功能矩阵仍待补，SDD 未完成；Android 继续暂停，不计入本轮完成。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -30,4 +30,4 @@
 
 ---
 
-> 上次刷新: 2026-07-28（V2.1.0 Web/桌面/iPhone TestFlight 已完成；下一阶段 Android。）
+> 上次刷新: 2026-07-29（共享修复已完成，跨端真实矩阵未闭环；Android 继续暂停。）

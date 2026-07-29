@@ -7,6 +7,8 @@ import {
 } from '../creationMediaPlan'
 import {
   CREATION_MODEL_REGISTRY,
+  creationModelFamily,
+  displayModelPrice,
   getCreationModelSpec,
   listCreationPanelModels,
   listCreationModels,
@@ -28,7 +30,7 @@ test('listCreationModels excludes jina-search and filters by source', () => {
 test('registry keeps current direct, RunningHub and generic AI App entries', () => {
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
-    'newapi/t8/gpt-image-2',
+    'gpt-image-2',
     'newapi/vip/gpt-image-2-vip',
     'newapi/t8/grok-video-3',
     'newapi/t8/veo3.1-fast',
@@ -68,6 +70,14 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   }
 })
 
+test('removed defaults stay absent and model metadata drives family and fee labels', () => {
+  assert.equal(getCreationModelSpec('runninghub/api/rh-gpt2-official'), undefined)
+  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2')!), 'GPT Image')
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/t8/gemini-3-pro-image-preview')!), 'Banana')
+  assert.equal(displayModelPrice(getCreationModelSpec('newapi/t8/gemini-3-pro-image-preview')!), '0.2/张')
+  assert.equal(displayModelPrice(getCreationModelSpec('runninghub/api/rh-3d-image')!), '6.6/次')
+})
+
 test('every registry model has a valid route contract and can produce a run plan summary', () => {
   for (const spec of CREATION_MODEL_REGISTRY) {
     // 跳过 broken 模型 — validateCreationModelSpec 会对其抛出异常
@@ -98,7 +108,7 @@ test('every registry model has a valid route contract and can produce a run plan
 })
 
 test('model lookup prefers exact ids and resolves aliases', () => {
-  assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.model, 'gpt-image-2')
+  assert.equal(getCreationModelSpec('gpt-image-2')?.model, 'gpt-image-2')
   assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.model, 'gpt-image-2-vip')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
@@ -123,10 +133,10 @@ test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
   assert.equal(withImage.apiStyle, 'openai-image-edits')
 })
 
-test('RH GPT Image 2 official keeps its price and RH adapter route', () => {
-  const spec = getCreationModelSpec('runninghub/api/rh-gpt2-official')
+test('GPT Image 2 default uses the registered direct route', () => {
+  const spec = getCreationModelSpec('gpt-image-2')
   const plan = buildCreationRunPlan({
-    modelId: 'runninghub/api/rh-gpt2-official',
+    modelId: 'gpt-image-2',
     params: {
       prompt: '商品图',
       ratio: '1:1',
@@ -134,12 +144,12 @@ test('RH GPT Image 2 official keeps its price and RH adapter route', () => {
     },
   })
 
-  assert.equal(spec?.price, 0.25)
-  assert.equal(plan.model, 'rh-gpt2-official')
-  assert.equal(plan.source, 'runninghub')
-  assert.equal(plan.route, 'runninghub-adapter')
-  assert.equal(plan.usesRhAdapter, true)
-  assert.equal(plan.endpoint, '/v1/images/generations')
+  assert.equal(spec?.model, 'gpt-image-2')
+  assert.equal(plan.model, 'gpt-image-2')
+  assert.equal(plan.source, 'newapi-direct')
+  assert.equal(plan.route, 'newapi-direct')
+  assert.equal(plan.usesRhAdapter, false)
+  assert.equal(plan.endpoint, '/v1/images/edits')
 })
 
 test('Gemini image models use the verified generation and edit contracts', () => {
@@ -184,7 +194,7 @@ test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
 
 test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     params: {
       prompt: '一张电影感海报',
       ratio: '16:9',
@@ -195,24 +205,24 @@ test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () 
 
   assert.equal(plan.source, 'newapi-direct')
   assert.equal(plan.route, 'newapi-direct')
-  assert.equal(plan.upstreamFamily, 't8')
+  assert.equal(plan.upstreamFamily, 'openai-compatible')
   assert.equal(plan.usesRhAdapter, false)
   assert.equal(plan.debug.normalizedParams.size, '2048x1152')
   assert.equal('aspectRatio' in plan.debug.normalizedParams, false)
   assert.equal('resolution' in plan.debug.normalizedParams, false)
   assert.match(plan.submitSummary, /直连/)
-  assert.match(plan.submitSummary, /T8/)
+  assert.match(plan.submitSummary, /OpenAI-compatible/)
   assert.match(plan.submitSummary, /size=2048x1152/)
 })
 
 test('direct GPT Image 2 models show the configured group and VIP prices', () => {
-  assert.equal(getCreationModelSpec('newapi/t8/gpt-image-2')?.price, '分组计价 · 自动账户 ¥0.12')
+  assert.equal(getCreationModelSpec('gpt-image-2')?.price, '0.08/次（起）')
   assert.equal(getCreationModelSpec('newapi/vip/gpt-image-2-vip')?.price, '¥0.20')
 })
 
 test('direct GPT Image 2 switches generation and edit contracts by reference image presence', () => {
   const textOnly = buildCreationRunPlan({
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     params: {
       prompt: '一张电影感海报',
       ratio: '16:9',
@@ -220,7 +230,7 @@ test('direct GPT Image 2 switches generation and edit contracts by reference ima
     },
   })
   const withImage = buildCreationRunPlan({
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     params: {
       prompt: '改成电影感海报',
       ratio: '16:9',
@@ -331,7 +341,7 @@ test('Hunyuan 3D plans preserve the verified v3.1 parameters', () => {
 
   assert.equal(text.task, 'model3d')
   assert.equal(text.mode, 'text-to-3d')
-  assert.equal(text.price, 4.2)
+  assert.equal(text.price, 4.8)
   assert.equal(text.endpoint, '/v1/videos')
   assert.equal(text.debug.normalizedParams.faceCount, 500000)
   assert.equal(text.debug.normalizedParams.enablePbr, false)
@@ -391,7 +401,7 @@ test('generic AI App registry leaves workflow fields to runtime discovery', () =
 
 test('RunPlan blocks invalid required fields, file counts, select options and number ranges', () => {
   assert.throws(
-    () => buildCreationRunPlan({ modelId: 'newapi/t8/gpt-image-2', params: { ratio: '16:9' } }),
+    () => buildCreationRunPlan({ modelId: 'gpt-image-2', params: { ratio: '16:9' } }),
     /缺少必填字段.*提示词/,
   )
   assert.throws(
@@ -433,7 +443,7 @@ test('validateCreationModelSpec rejects apiStyle contracts that do not match the
     apiStyle: 'newapi-task' as const,
   } satisfies CreationModelSpec
   const directSpec = {
-    ...getCreationModelSpec('newapi/t8/gpt-image-2')!,
+    ...getCreationModelSpec('gpt-image-2')!,
     apiStyle: 'rh-standard' as const,
   } satisfies CreationModelSpec
 
@@ -443,7 +453,7 @@ test('validateCreationModelSpec rejects apiStyle contracts that do not match the
 
 test('invalid route and source combinations are rejected before runtime dispatch', () => {
   const badSpec: CreationModelSpec = {
-    ...getCreationModelSpec('newapi/t8/gpt-image-2')!,
+    ...getCreationModelSpec('gpt-image-2')!,
     id: 'bad/direct-through-rh',
     route: 'runninghub-adapter',
   }
@@ -465,7 +475,7 @@ test('partial contracts produce plan warnings instead of silent submits', () => 
   assert.match((partial.warnings || []).join('\n'), /nodeInfoList|部分核对/)
 
   const verified = buildCreationRunPlan({
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     params: {
       prompt: '一张产品图',
       ratio: '1:1',
@@ -477,7 +487,7 @@ test('partial contracts produce plan warnings instead of silent submits', () => 
 
 test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary', () => {
   const items = listCreationPanelModels({ task: 'image', source: 'all' })
-  const gpt = items.find(item => item.id === 'newapi/t8/gpt-image-2')
+  const gpt = items.find(item => item.id === 'gpt-image-2')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
   const zImage = items.find(item => item.id === 'runninghub/api/z-image-turbo')
 
@@ -497,7 +507,7 @@ test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary'
 
 test('panel model labels omit route/channel suffix because channel has its own field', () => {
   const items = listCreationPanelModels({ task: 'image', source: 'all' })
-  const gpt = items.find(item => item.id === 'newapi/t8/gpt-image-2')
+  const gpt = items.find(item => item.id === 'gpt-image-2')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
   const zImage = items.find(item => item.id === 'runninghub/api/z-image-turbo')
 

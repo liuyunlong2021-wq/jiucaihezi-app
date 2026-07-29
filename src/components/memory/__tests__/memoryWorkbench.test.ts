@@ -120,7 +120,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(workbench, /contenteditable="true"/)
   assert.match(workbench, /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/)
   assert.match(workbench, /function resizeComposer\(\)/)
-  assert.doesNotMatch(workbench, /<textarea/)
+  assert.match(workbench, /<textarea[\s\S]*v-model="markdownDraft"/)
   assert.match(workbench, /files: referencedFiles\.value/)
   assert.match(runtime, /files: input\.files/)
 })
@@ -212,6 +212,13 @@ test('memory topbar uses a grouped model popover and a text-only new conversatio
   assert.match(workbench, /agentStore\.setModel\(modelId\)/)
 })
 
+test('memory message copy stays compact and copies the original markdown', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
+  assert.match(workbench, /\.memory-message-copy \{ position: absolute; top: 0; right: 0;[\s\S]*width: 26px; height: 26px;/)
+})
+
 test('memory document and file tree keep independent visible scrolling', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
@@ -258,6 +265,10 @@ test('memory conversation virtualizes historical turns and keeps rich media out 
 
   assert.match(workbench, /import \{ useVirtualizer \} from '@tanstack\/vue-virtual'/)
   assert.match(workbench, /const memoryTimelineVirtualizer = useVirtualizer/)
+  assert.match(workbench, /const timelineTurns = computed<ConversationTurn\[\]>/)
+  assert.match(workbench, /id: 'streaming-assistant'/)
+  assert.match(workbench, /count: timelineTurns\.value\.length/)
+  assert.doesNotMatch(workbench, /<article v-if="sending && streamingText"/)
   assert.match(workbench, /const virtualConversationTurns = computed/)
   assert.match(workbench, /v-for="\{ row, turn \} in virtualConversationTurns"/)
   assert.match(workbench, /:data-index="row\.index"/)
@@ -376,6 +387,8 @@ test('memory workbench follows the current project owner on both runtimes', () =
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
   assert.match(workbench, /memoryReady\.value = state\.initialized[\s\S]*void projectTextSync\.open/)
   assert.match(workbench, /initializeMemoryProject\(owner, files\)[\s\S]*memoryReady\.value = true[\s\S]*void projectTextSync\.open/)
+  assert.doesNotMatch(workbench, /syncOnFocus|addEventListener\('focus'/)
+  assert.doesNotMatch(workbench, /projectTextSync\.open\([\s\S]{0,180}projectTextSync\.enable\(\)/)
 })
 
 test('memory text models default to tools unless the gateway explicitly disables them', () => {
@@ -406,11 +419,45 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /files\.planBatch\(\{ kind: 'delete', resources: \[item\.resource\] \}\)/)
   assert.match(workbench, /files\.executeBatch\(plan\)/)
   assert.match(workbench, /const previewResource = ref<ProjectResourceOpenResult \| null>\(null\)/)
-  assert.match(workbench, /else \{\s*releaseMediaUrl\(\)\s*previewResource\.value = resource\s*\}/)
+  assert.match(workbench, /else \{\s*releaseMediaUrl\(\)\s*previewResource\.value = resource/)
   assert.match(workbench, />返回对话</)
   assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
   assert.doesNotMatch(workbench, /resource\.type === 'canvas'[\s\S]*openCreationHost\(\)/)
   assert.doesNotMatch(workbench, /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/)
+})
+
+test('memory files and conversation turns use the shared safe Markdown renderer', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /renderMemoryMarkdown\(displayTurnContent\(turn\)\)/)
+  assert.match(workbench, /renderMemoryMarkdown\(previewResource\.text\.content\)/)
+  assert.match(workbench, /v-html="renderMemoryMarkdown\(/)
+  assert.doesNotMatch(workbench, /<pre>\{\{ previewResource\.text\.content \}\}<\/pre>/)
+})
+
+test('memory Markdown supports forward links and scanned backlink sources', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const links = source('src/runtime/memory/markdownLinks.ts')
+
+  assert.match(workbench, /resolveWikiLinkTarget\(target, sourcePath, await files\.list\(owner\)\)/)
+  assert.match(workbench, /findWikiBacklinks\(target, sources\)/)
+  assert.match(workbench, /被以下文件引用/)
+  assert.match(workbench, /文件不存在：\$\{target\}/)
+  assert.doesNotMatch(workbench, /wiki.*index.*database/i)
+  assert.match(links, /parseWikiLinks/)
+  assert.match(links, /resources: ProjectResource\[\]/)
+})
+
+test('memory Markdown editing keeps source text and protects revision conflicts', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /const markdownDraft = ref\(''\)/)
+  assert.match(workbench, /files\.writeText\(current\.resource, markdownDraft\.value, current\.text\.revision\)/)
+  assert.match(workbench, /result\.status === 'conflict'/)
+  assert.match(workbench, /当前草稿已保留/)
+  assert.match(workbench, /v-model="markdownDraft"/)
+  assert.match(workbench, /highlightCode\(markdownDraft, 'markdown'\)/)
+  assert.match(workbench, /title="编辑 Markdown"/)
 })
 
 test('Windows startup does not infer WebView2 availability from the browser user agent', () => {

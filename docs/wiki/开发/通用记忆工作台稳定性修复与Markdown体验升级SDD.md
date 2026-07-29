@@ -257,7 +257,26 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 
 验收：当前 Web、Mac、Windows、iPhone、iPad 全部通过后，本轮共享修复才能标记完成；不能用单个平台或“构建成功”代替跨端证据。Android 作为恢复后的追加验收，不得据此提前宣称 Android 完成。
 
-## 5. 不做事项
+## 5. 2026-07-29 实施记录
+
+状态：共享代码修复已完成，平台矩阵未完成，因此本 SDD **未完成**，Android 阶段继续暂停。
+
+| 任务 | 根因与最小修改 | 修改文件 | 自动验证 | 真实平台结果 |
+| --- | --- | --- | --- | --- |
+| Task 0 | `main` 缺少三笔纯文档提交；只同步 `13213c19`、`0f3e0d5b`、`8dce98e8`，未合并 Android 代码 | 本 SDD、独立 App SDD | 基线 focused、TypeScript、Web/Desktop quick build 通过 | 不适用 |
+| Task 1 | 自动同步后的 `refreshProjectView -> openResource` 会关闭 Markdown 预览；删除打开项目、窗口 focus 和创建空间时的自动联网/刷新 | `projectTextSync.ts`、`MemoryWorkbench.vue` | 同步与工作台回归通过 | Web 预览保持；iPhone/iPad 待本轮真机 |
+| Task 1.5 | 临时流式行位于虚拟列表外，列表高度不包含它；改为同一 `timelineTurns` 虚拟列表、同一测量与滚动容器 | `MemoryWorkbench.vue` | 流式行、单次 Raw 落盘合同测试通过 | Web DOM/布局通过；移动端手势待真机 |
+| Task 1.6 | 文件监听和 `open()` 直接触发 `syncCycle()`；删除自动网络动作，只保留 pending 标记和手动上传/同步 | `projectTextSync.ts` | 新增“打开/编辑不上传，手动同步才上传”测试 | Web 本地创建/保存无自动同步；其余平台待真机 |
+| Task 2 | 记忆对话和文件预览绕过共享安全 Markdown 策略；统一复用 `renderMessageMarkdown` | `MemoryWorkbench.vue` | 既有 XSS、链接、代码、表格测试与工作台测试通过 | Web 标题、表格真实渲染通过 |
+| Task 3 | 缺少 WikiLink 解析与反向来源投影；从当前项目 Markdown 文件按需扫描，不建索引库 | `markdownLinks.ts`、对应测试、`MemoryWorkbench.vue` | 正向、别名、相对路径、反向引用测试通过 | Web `[[人物小传]]` 点击与缺失提示通过；真实双文件往返待矩阵 |
+| Task 4 | Markdown 只有阅读态；在现有预览内加原文 textarea/高亮层，并用 `writeText(..., revision)` 保存 | `MemoryWorkbench.vue` | 保存 revision、冲突保留草稿合同测试通过 | Web 编辑、保存、重新渲染通过；重启和跨设备冲突待矩阵 |
+| Task 5 | 下线 `rh-gpt2-official` 仍在能力表、注册表和默认回退；删除旧渠道绑定，默认使用模型级 ID `gpt-image-2`，请求仍交给 NewAPI 选择可用渠道。前端不再硬编码 T8 价格；价格未从 NewAPI 返回时显示“费用以实际扣费为准” | 模型注册表、能力表、`mediaPlan.ts`、`CreationPanel.vue`、`MediaPlanCard.vue` 及测试 | 下线 ID 不可解析、模型级默认 ID、家族、未知费用提示测试通过 | Web 模型 UI 可启动；真实扣费记录核对待管理员/平台矩阵 |
+| Task 6 | 复制按钮在正文后独占一行；改为消息右上角 26px 图标，复制函数仍读取原始 Markdown | `MemoryWorkbench.vue` 及测试 | 原文复制和紧凑布局合同通过 | Web 布局通过；移动端密度待真机 |
+| Task 7 | 共享实现完成后再逐平台验收 | 本记录、`hot.md` | focused：Rust `400 passed, 0 failed, 1 ignored`；TypeScript 通过；Web/Desktop/iOS quick build 通过 | Web：创建项目、编辑保存、标题/表格渲染、双链缺失提示通过。Mac、Windows、iPhone、iPad 本轮完整功能矩阵未完成；Android 未开始 |
+
+构建说明：Vite 仍有既有大 chunk 和 ineffective dynamic import 警告，不影响本轮构建结果。Web 与 Desktop 构建必须串行执行；并行执行会竞争同一 `dist`，曾导致一次 Web 审计误报缺少 `404.html`/`_headers`，不作为产品失败证据。
+
+## 6. 不做事项
 
 - 不新建 Markdown 数据库、向量库或隐藏摘要。
 - 不把 Obsidian 插件系统搬入项目。
@@ -265,7 +284,7 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 - 不因为 Markdown 改造重写 ProjectFileService、同步服务或对话存储。
 - 不把费用配置复制成另一份前端真源。
 
-## 6. 完成标准
+## 7. 完成标准
 
 用户可以在任一正式平台：
 

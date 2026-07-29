@@ -31,7 +31,7 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
 
 test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapter fields', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'newapi/t8/gpt-image-2',
+    modelId: 'gpt-image-2',
     params: {
       prompt: '一张产品主图',
       ratio: '16:9',
@@ -69,7 +69,7 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'newapi/t8/gpt-image-2',
+      modelId: 'gpt-image-2',
       params: {
         prompt: '把手表改成黄色',
         ratio: '16:9',

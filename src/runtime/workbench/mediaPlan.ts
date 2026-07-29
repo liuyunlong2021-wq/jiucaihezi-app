@@ -1,6 +1,7 @@
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import {
   displayModelLabel,
+  displayModelPrice,
   getCreationModelSpec,
   listCreationModels,
 } from '@/runtime/creation/creationModelRegistry'
@@ -51,7 +52,7 @@ export const MEDIA_PLAN_POLICY = [
   '媒体执行规则：当用户明确要求生成图片、视频、音频或 3D 模型时，从应用提供的模型目录中选择真实模型和参数，再在最终回复中输出一个 jc-media-plan JSON 代码块。',
   '媒体计划字段：kind(image|video|audio|model3d)、title、prompt；modelId 由应用决定，可按任务补充 ratio、resolution、duration、referenceIds。',
   '用户明确给出媒体提示词或动作描述时，prompt 必须原样使用，不得擅自扩写、润色或替换；只有用户明确要求优化，或没有给出可执行描述时，才可以补全。',
-  '不要自行选择默认模型：应用会默认使用 GPT Image 2 官方生图；视频按无参考、一张参考图、多素材分别使用标准 Seedance 2.0 文生、图生、多模态。用户可在确认卡手动调整模型。',
+  '不要自行选择默认模型：应用会默认使用当前注册表中的 GPT Image 2 生图；视频按无参考、一张参考图、多素材分别使用标准 Seedance 2.0 文生、图生、多模态。用户可在确认卡手动调整模型。',
   '只能使用应用提供的素材 referenceId；不要输出 referenceImages、referenceVideos、URL、data URL 或文件路径。',
   '不要直接运行媒体 API、轮询或下载；用户确认后由应用的公共媒体任务引擎执行。没有媒体生成意图时不要输出媒体计划。',
 ].join('\n')
@@ -74,7 +75,7 @@ export function buildMediaPlanPolicy(referencePolicy = ''): string {
         duration
           ? `时长 ${duration.allowedValues?.join('/') || `${duration.min ?? 0}-${duration.max ?? '不限'}`}s`
           : '',
-        model.price === undefined ? '' : `价格 ${model.price}`,
+        `费用 ${displayModelPrice(spec)}`,
       ]
         .filter(Boolean)
         .join(' | ')
@@ -261,7 +262,7 @@ export function updateMediaPlanParameters(
 }
 
 export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
-  if (plan.kind === 'image') return 'runninghub/api/rh-gpt2-official'
+  if (plan.kind === 'image') return 'gpt-image-2'
   if (plan.kind === 'audio') return 'runninghub/api/rh-suno-v55-single'
 
   const imageCount = Math.max(

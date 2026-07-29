@@ -7,7 +7,7 @@ import {
   type MediaPlanParameterPatch,
 } from '@/runtime/workbench/mediaPlan'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
-import { displayModelLabel, getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
+import { displayModelLabel, displayModelPrice, getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
 
 const props = defineProps<{
   plan: MediaPlan
@@ -36,6 +36,7 @@ const spec = computed(() => getCreationModelSpec(props.plan.modelId))
 const controls = computed(() => getMediaPlanEditorControls(props.plan))
 const showEditor = ref(false)
 const modelLabel = computed(() => displayModelLabel(spec.value?.label || props.plan.modelId))
+const modelPrice = computed(() => spec.value ? displayModelPrice(spec.value) : '费用以实际扣费为准')
 const effectiveMode = computed(() => {
   try {
     return buildCreationRunPlan({
@@ -132,7 +133,7 @@ function updateGenerationCount(event: Event) {
       个
     </p>
     <p
-      v-if="plan.ratio || plan.resolution || plan.duration !== undefined || spec?.price !== undefined"
+      v-if="plan.ratio || plan.resolution || plan.duration !== undefined || spec"
       class="media-plan-meta"
     >
       <span v-if="plan.ratio">比例 {{ plan.ratio }}</span>
@@ -140,8 +141,8 @@ function updateGenerationCount(event: Event) {
       <span v-if="plan.duration !== undefined"
         >{{ plan.ratio || plan.resolution ? ' · ' : '' }}时长 {{ plan.duration }} 秒</span
       >
-      <span v-if="spec?.price !== undefined"
-        >{{ plan.ratio || plan.resolution || plan.duration !== undefined ? ' · ' : '' }}价格 {{ spec.price }}</span
+      <span v-if="spec"
+        >{{ plan.ratio || plan.resolution || plan.duration !== undefined ? ' · ' : '' }}{{ modelPrice }}</span
       >
     </p>
     <p v-if="plan.kind === 'image' && (generationCount || 1) > 1" class="media-plan-meta">

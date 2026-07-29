@@ -90,7 +90,7 @@ import {
   buildCurrentCreationParams,
   discoverAiAppNodes,
 } from '@/composables/useCreation'
-import { displayModelLabel, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
+import { creationModelFamily, displayModelLabel, displayModelPrice, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import type { CreationFieldSpec } from '@/runtime/creation/creationMediaTypes'
 import {
@@ -3377,11 +3377,22 @@ const tasks = computed(() =>
   getVisibleCreationTasks().map(key => ({ key, label: RH_TASK_LABELS[key] })),
 )
 const modelList = computed(() =>
-  availableModels.value.map(key => ({
-    key,
-    label: displayModelLabel(CREATION_PANEL_MODELS[key]?.label || key),
-  })),
+  availableModels.value.flatMap(key => {
+    const spec = getCreationModelSpec(key)
+    return spec ? [{
+      key,
+      label: displayModelLabel(spec.label),
+      family: creationModelFamily(spec),
+      price: displayModelPrice(spec),
+    }] : []
+  }),
 )
+const modelGroups = computed(() => {
+  const groups = new Map<string, typeof modelList.value>()
+  for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
+  const order: Record<string, number> = { 'GPT Image': 0, Banana: 1, '其他模型': 2 }
+  return [...groups].sort(([left], [right]) => order[left] - order[right])
+})
 
 function resizePromptInput(el = promptInput.value) {
   if (!el) return
@@ -3996,18 +4007,21 @@ const canSend = computed(
           {{ displayModelLabel(currentModel?.label || cpState.modelKey) }}
         </div>
         <div v-if="openPop === 'model'" class="cp-popover" @click.stop>
-          <button
-            v-for="m in modelList"
-            :key="m.key"
-            class="cp-pop-item"
-            :class="{ active: cpState.modelKey === m.key }"
-            @click="
-              switchModel(m.key);
-              openPop = ''
-            "
-          >
-            {{ m.label }}
-          </button>
+          <section v-for="[family, models] in modelGroups" :key="family" class="cp-model-group">
+            <strong>{{ family }}</strong>
+            <button
+              v-for="m in models"
+              :key="m.key"
+              class="cp-pop-item"
+              :class="{ active: cpState.modelKey === m.key }"
+              @click="
+                switchModel(m.key);
+                openPop = ''
+              "
+            >
+              <span>{{ m.label }}</span><small>{{ m.price }}</small>
+            </button>
+          </section>
         </div>
       </div>
       <!-- AI 应用选择 -->
@@ -5155,6 +5169,10 @@ const canSend = computed(
   color: var(--olive-dark);
   font-weight: 700;
 }
+.cp-model-group + .cp-model-group { margin-top: 6px; padding-top: 6px; border-top: 1px solid var(--line); }
+.cp-model-group > strong { display: block; padding: 4px 8px 2px; color: var(--ink3); font-size: 10px; }
+.cp-model-group .cp-pop-item { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.cp-model-group small { color: var(--ink3); font-size: 10px; font-weight: 400; white-space: nowrap; }
 
 .cp-btn-group {
   display: flex;

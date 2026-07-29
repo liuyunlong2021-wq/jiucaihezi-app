@@ -335,43 +335,19 @@ function runninghubStandard(input: {
 }
 
 export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
-  // ── ★ GPT Image 2 官方（推荐 · 置顶）──
-  // 不上传参考图→文生图，上传参考图→图生图。
-  // quality/resolution 由 rh-adapter 强制设为 low/1k，计费统一 0.25。
-  runninghubStandard({
-    id: 'runninghub/api/rh-gpt2-official',
-    model: 'rh-gpt2-official',
-    label: 'GPT Image 2 官方',
-    task: 'image',
-    mode: 'text-to-image',
-    price: 0.25,
-    notes: ['docs/notes/RH-GPTImage2官方.md'],
-    files: { images: { min: 0, max: 10 } },
-    fields: promptFields([
-      {
-        key: 'aspectRatio',
-        label: '比例',
-        kind: 'select',
-        defaultValue: '16:9',
-        options: options(RATIOS.filter(value => value !== 'adaptive')),
-      },
-      { key: 'images', label: '参考图', kind: 'images', required: false },
-    ]),
-    resolutions: [],
-  }),
   baseSpec({
-    id: 'newapi/t8/gpt-image-2',
+    id: 'gpt-image-2',
     model: 'gpt-image-2',
     label: 'GPT Image 2 · 直连',
     task: 'image',
     source: 'newapi-direct',
     route: 'newapi-direct',
-    upstreamFamily: 't8',
+    upstreamFamily: 'openai-compatible',
     apiStyle: 'openai-images',
     pollKind: 'newapi-task',
     mode: 'text-to-image',
     contractStatus: 'verified',
-    price: '分组计价 · 自动账户 ¥0.12',
+    price: '0.08/次（起）',
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
@@ -401,8 +377,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         options: options(['url', 'b64_json']),
       },
     ],
-    aliases: ['gpt-image-2'],
-    notes: ['docs/notes/T8gpt2.md'],
+    notes: ['docs/wiki/运维/模型矩阵.md'],
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: ['1k', '2k', '4k'],
   }),
@@ -1442,7 +1417,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: '混元 3D v3.1 文生 3D · RunningHub',
     task: 'model3d',
     mode: 'text-to-3d',
-    price: 4.2,
+    price: 4.8,
     webappId: 'hunyuan3d-v3.1/text-to-3d',
     notes: ['docs/wiki/归档/模型文档/RH-混元3D.md'],
     outputModalities: ['model3d'],
@@ -1559,6 +1534,22 @@ export function displayModelLabel(label: string): string {
     .split('·')[0]
     .trim()
   return LABEL_OVERRIDES[base] || base
+}
+
+export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
+  const id = `${spec.id} ${spec.model}`.toLowerCase()
+  if (spec.task === 'image' && id.includes('gpt-image')) return 'GPT Image'
+  if (spec.task === 'image' && (id.includes('gemini') || id.includes('banana'))) return 'Banana'
+  return '其他模型'
+}
+
+export function displayModelPrice(spec: Pick<CreationModelSpec, 'price' | 'task'>): string {
+  if (spec.price === undefined) return '费用以实际扣费为准'
+  const raw = String(spec.price).replace(/[¥￥]/g, '')
+  if (raw.includes('/')) return raw
+  const amount = raw.match(/\d+(?:\.\d+)?/)?.[0]
+  if (!amount) return '费用以实际扣费为准'
+  return `${amount}/${spec.task === 'image' ? '张' : '次'}`
 }
 
 function buildPanelPreviewParams(spec: CreationModelSpec): Record<string, unknown> {

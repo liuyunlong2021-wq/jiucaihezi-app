@@ -127,7 +127,6 @@ export class ProjectTextSync {
       if (!changes.length) return
       void this.enqueue(async () => {
         await this.captureChanges(changes)
-        if (this.state.cloudProjectId) await this.syncCycle()
       }).catch(() => {})
     })
   }
@@ -138,13 +137,6 @@ export class ProjectTextSync {
       this.projectName = name
       this.state = owner ? await this.readState() : emptyState()
       this.updateStatus(owner ? (this.state.cloudProjectId ? 'idle' : 'disabled') : 'idle')
-      if (!owner || !this.state.cloudProjectId) return
-      try {
-        await this.reconcileLocalFiles()
-        await this.syncCycle()
-      } catch (error) {
-        this.setFailure(error)
-      }
     })
   }
 

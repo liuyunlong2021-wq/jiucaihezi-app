@@ -161,6 +161,7 @@ test('pending local edit ignores an already acknowledged remote revision', async
   const sync = new ProjectTextSync(local.service, cloud.api)
   try {
     await sync.open('desktop-owner', '共同记忆')
+    await sync.syncNow()
     assert.equal(await text(local.service, 'desktop-owner', path), current)
     assert.equal(cloud.files.get(path)?.content, current)
     assert.equal([...local.records.keys()].some(name => name.includes('(冲突 ')), false)
@@ -211,6 +212,7 @@ test('concurrent Raw appends merge into one conversation without a conflict copy
   const sync = new ProjectTextSync(local.service, cloud.api)
   try {
     await sync.open('desktop-owner', '共同记忆')
+    await sync.syncNow()
     const merged = cloud.files.get(path)?.content || ''
     assert.deepEqual(parseConversationTranscript(path, merged)?.turns.map(turn => turn.content), [
       '第一问', '第一答', '第二问',
@@ -280,6 +282,42 @@ test('sync path contract excludes queue state, media, credentials and binary fil
   assert.equal(isSyncableTextPath('.raw/对话记录/今天.md'), true)
   for (const path of ['.raw/.sync/state.json', 'jc-media/a.txt', '.env.local', 'credentials.json', 'wiki/a.png']) {
     assert.equal(isSyncableTextPath(path), false)
+  }
+})
+
+test('opening and editing a cloud project stay local until manual sync', async () => {
+  const cloud = fakeCloud()
+  const local = localFiles('web')
+  const path = 'wiki/人物.md'
+  local.records.set(path, { content: '本地初稿', revision: 1, mimeType: 'text/markdown' })
+  local.records.set('.raw/.sync/state.json', {
+    content: JSON.stringify({
+      version: 1,
+      cloudProjectId: 'project_12345678',
+      cursor: 0,
+      revisions: {},
+      hashes: {},
+      pending: [],
+    }),
+    revision: 1,
+    mimeType: 'application/json',
+  })
+  const sync = new ProjectTextSync(local.service, cloud.api)
+  try {
+    await sync.open('web-owner', '共同记忆')
+    assert.equal(cloud.files.size, 0)
+
+    await replace(local.service, 'web-owner', path, '只保存在本地')
+    for (let attempt = 0; attempt < 20 && projectTextSyncStatus.pending === 0; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    assert.equal(cloud.files.size, 0)
+    assert.equal(projectTextSyncStatus.pending, 1)
+
+    await sync.syncNow()
+    assert.equal(cloud.files.get(path)?.content, '只保存在本地')
+  } finally {
+    sync.dispose()
   }
 })
 

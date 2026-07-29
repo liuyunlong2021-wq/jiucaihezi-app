@@ -40,6 +40,7 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/creativeSkillCatalog.test.ts',
   'src/runtime/direct/__tests__/wikiRuntime.test.ts',
   'src/components/memory/__tests__/memoryWorkbench.test.ts',
+  'src/runtime/memory/__tests__/markdownLinks.test.ts',
   'src/runtime/memory/__tests__/conversationTranscript.test.ts',
   'src/runtime/memory/__tests__/skillInstall.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
