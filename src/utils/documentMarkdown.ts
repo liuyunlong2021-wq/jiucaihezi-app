@@ -97,7 +97,7 @@ async function convertWebDocumentToMarkdown(
     let status: number
     let contentType: string
     let payload: Partial<DocumentToMarkdownResult> & { detail?: string }
-    if (isTauriMobileRuntime()) {
+    if (isTauriRuntime()) {
       const { invoke } = await import('@tauri-apps/api/core')
       const response = await invoke<{ status: number; headers: Record<string, string>; body: string }>('document_markdown_request', {
         request: {
@@ -212,7 +212,7 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
       error?: string
     }
 
-    return {
+    const localResult: DocumentToMarkdownResult = {
       status: result.status === 'success' ? 'success' : 'error',
       source: result.source || input.file.name,
       filename: result.filename || outputFilename,
@@ -224,16 +224,10 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
       message: result.message || (result.status === 'success' ? '转换完成。' : '转换失败。'),
       error: result.error,
     }
+    return localResult.status === 'success'
+      ? localResult
+      : convertWebDocumentToMarkdown(input, maxChars, outputFilename)
   } catch (err) {
-    return {
-      status: 'error',
-      source: input.file.name,
-      filename: outputFilename,
-      content: '',
-      engine: 'unsupported',
-      truncated: false,
-      message: (err as Error).message || '本地 Markdown 转换失败。',
-      error: 'LOCAL_CONVERSION_FAILED',
-    }
+    return convertWebDocumentToMarkdown(input, maxChars, outputFilename)
   }
 }
