@@ -201,7 +201,25 @@ jobs:
             ### 校验
             下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
           tauriScript: pnpm tauri
-          args: --target x86_64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+          # macos-15-intel 没有可用 Finder 会话；Tauri 默认 DMG 的 AppleScript 美化会失败。
+          # 先只生成已签名 .app，下一步用 hdiutil 生成可安装 DMG。
+          args: --target x86_64-apple-darwin --bundles app --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Create DMG (Intel, headless)
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/x86_64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+          BUNDLE="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg"
+          SOURCE=$(mktemp -d)
+          DMG="$BUNDLE/韭菜盒子_${GITHUB_REF_NAME}_x64.dmg"
+          mkdir -p "$BUNDLE"
+          cp -R "$APP" "$SOURCE/韭菜盒子.app"
+          ln -s /Applications "$SOURCE/Applications"
+          hdiutil create -volname "韭菜盒子" -srcfolder "$SOURCE" -ov -format UDZO "$DMG"
+          rm -rf "$SOURCE"
+          gh release upload "$GITHUB_REF_NAME" "$DMG" --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notarize macOS app (Intel)
         env:
