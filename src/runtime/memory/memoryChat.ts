@@ -32,6 +32,7 @@ import { supportsVision } from '@/utils/providerConfig'
 import { executeJinaWebSearchTool, WEB_SEARCH_TOOL_DEFINITION } from '@/utils/webSearch'
 
 import type { ConversationMode, ConversationTurn } from './conversationTranscript'
+import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 
 export interface MemoryChatInput {
   projectId: string
@@ -42,9 +43,10 @@ export interface MemoryChatInput {
   attachments?: ResolvedDirectAttachment[]
   files?: DirectMessageFile[]
   selectedSkillNames?: string[]
+  webSearchEnabled?: boolean
   signal?: AbortSignal
   onText: (text: string) => void
-  onTool?: (name: string) => void
+  onToolEvent?: (event: DirectToolExecutionEvent) => void
 }
 
 export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
@@ -158,19 +160,22 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       {
         signal: input.signal,
         onToolEvent(event) {
-          if (event.type === 'tool_execution_start') input.onTool?.(event.call.function.name)
+          input.onToolEvent?.(event)
         },
       },
     ))
   }
   const result = await runDirectChatCompletion({
     messages,
-    tools: [...buildWebProjectToolDefinitions(), WEB_SEARCH_TOOL_DEFINITION],
+    tools: [
+      ...buildWebProjectToolDefinitions(),
+      ...(input.webSearchEnabled ? [WEB_SEARCH_TOOL_DEFINITION] : []),
+    ],
     sendChatCompletion,
     signal: input.signal,
     onText: input.onText,
     onToolEvent(event) {
-      if (event.type === 'tool_execution_start') input.onTool?.(event.call.function.name)
+      input.onToolEvent?.(event)
     },
     executeTool: executeMemoryTool,
   })

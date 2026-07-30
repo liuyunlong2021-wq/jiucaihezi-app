@@ -16,7 +16,6 @@ import httpx
 
 from ..config import (
     RH_API_V2,
-    RH_STANDARD_UPLOAD,
     RH_AI_APP_UPLOAD,
     RH_AI_APP_RUN,
     RH_AI_APP_STATUS,
@@ -24,6 +23,7 @@ from ..config import (
     MAX_POLL_SECONDS,
     POLL_INTERVAL_IMAGE,
     POLL_INTERVAL_VIDEO,
+    runninghub_api_v2,
 )
 
 logger = logging.getLogger(__name__)
@@ -156,6 +156,7 @@ async def upload_file(
     file_content: bytes,
     filename: str = "image.png",
     mime_type: str = "image/png",
+    site: str = "cn",
 ) -> str:
     """Upload to RunningHub standard API. Returns a downloadable file URL."""
     files = {"file": (filename, file_content, mime_type)}
@@ -165,7 +166,7 @@ async def upload_file(
 
     try:
         resp = await client.post(
-            RH_STANDARD_UPLOAD,
+            f"{runninghub_api_v2(site)}/media/upload/binary",
             files=files,
             data=data_payload,
             headers={"Authorization": f"Bearer {api_key}"},
@@ -226,12 +227,13 @@ async def submit_task(
     api_key: str,
     endpoint: str,
     payload: dict,
+    site: str = "cn",
 ) -> dict:
     """Submit a generation task to RunningHub standard API.
 
     Returns: {task_id, ...}
     """
-    url = f"{RH_API_V2}/{endpoint}"
+    url = f"{runninghub_api_v2(site)}/{endpoint}"
     payload["apikey"] = api_key  # RH v2 uses lowercase key
     data = await _post(client, url, payload, api_key, timeout=60)
     task_data = data.get("data", data)
@@ -380,6 +382,7 @@ async def maybe_upload(
     *,
     mode: str = "standard",
     force: bool = False,
+    site: str = "cn",
 ) -> str:
     """Resolve media for RH.
 
@@ -410,7 +413,7 @@ async def maybe_upload(
     if mode == "ai_app":
         return await upload_ai_app_file(client, api_key, raw, f"input.{ext}", mime)
     if force or len(raw) > UPLOAD_THRESHOLD:
-        return await upload_file(client, api_key, raw, f"upload.{ext}", mime)
+        return await upload_file(client, api_key, raw, f"upload.{ext}", mime, site)
     return data_url
 
 
@@ -418,9 +421,10 @@ async def query_task(
     client: httpx.AsyncClient,
     api_key: str,
     task_id: str,
+    site: str = "cn",
 ) -> dict:
     """Single-shot query of a RH task status. No polling, no waiting."""
-    poll_url = f"{RH_API_V2}/query"
+    poll_url = f"{runninghub_api_v2(site)}/query"
     data = await _get(
         client, poll_url,
         {"taskId": task_id, "apikey": api_key},
@@ -428,6 +432,16 @@ async def query_task(
         timeout=30,
     )
     return data.get("data", data)
+
+
+def encode_task_id(task_id: str, site: str = "cn") -> str:
+    return f"global:{task_id}" if site == "global" else task_id
+
+
+def decode_task_id(task_id: str) -> tuple[str, str]:
+    if task_id.startswith("global:"):
+        return task_id[len("global:"):], "global"
+    return task_id, "cn"
 
 
 async def query_ai_app_task(

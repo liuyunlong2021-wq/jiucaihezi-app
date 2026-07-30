@@ -1,10 +1,10 @@
 # Jina 联网搜索 New API 计费适配器 SDD
 
-> 状态：本地代码已实现，待 Docker 构建与生产部署 · 2026-07-29
+> 状态：本地代码已实现；App 已改为显式单轮启用，适配器待 Docker 构建与生产部署 · 2026-07-30
 
 ## 目标
 
-让通用记忆工作台的 `web_search` 工具继续只调用 New API，由 New API 完成用户鉴权、分组、按次预扣、失败退款和使用日志；独立 `jina-adapter` 只把 OpenAI Chat Completions 请求翻译为 Jina Search 原生请求。
+让通用记忆工作台在用户本轮明确选择 `@联网搜索` 后才提供 `web_search` 工具。搜索继续只调用 New API，由 New API 完成用户鉴权、分组、按次预扣、失败退款和使用日志；独立 `jina-adapter` 只把 OpenAI Chat Completions 请求翻译为 Jina Search 原生请求。
 
 ## 不做什么
 
@@ -27,7 +27,7 @@
 ## 架构
 
 ```text
-通用记忆工作台（记忆模式）
+通用记忆工作台（记忆模式 + 本轮已选择 @联网搜索）
   -> POST https://api.jiucaihezi.studio/v1/chat/completions
        model: jina-search
        Authorization: 用户的 New API Key
@@ -109,7 +109,14 @@
 4. 管理员测试 Token 通过公开 New API 调用 `jina-search`，得到包含真实来源的搜索结果；不能用宿主机直连 Jina 代替该验收。
 5. New API 使用日志记录模型 `jina-search`、渠道 53 和一次固定价格扣费；用户余额变化与 `ModelPrice × 分组倍率` 一致。
 6. 临时使用无效 Jina Key 发起一次失败请求，确认响应失败且用户余额净变化为 0，再立即恢复新 Key。构建成功、容器启动成功或渠道测试成功均不能代替此退款验收。
-7. App 中记忆模式由模型按需调用 `web_search`；快速模式保持无工具；普通聊天不做每轮预搜索。
+7. App 默认不把 `web_search` 放入工具池；选择 `@联网搜索` 后仅本轮提供该工具，成功发送后清除；快速模式始终无工具。该开关只存在于输入框状态，不写入 Raw。
+
+## App 单轮开关实施记录（2026-07-30）
+
+- 根因：`memoryChat.ts` 曾在每轮记忆模式请求中无条件追加 `WEB_SEARCH_TOOL_DEFINITION`，模型可绕过已有 GitHub MCP 直接反复搜索。
+- 修复：复用现有 `@` 菜单和附件 chip；默认关闭，选择 `@联网搜索` 后本轮开启，可手动移除，成功发送或切换快速模式后清除。
+- 边界：不调整 GitHub MCP，不新增搜索模式、持久化设置、组件、Store 或依赖。
+- 验证：`node --test src/components/memory/__tests__/memoryWorkbench.test.ts` 通过（38/38）。
 
 ## 回滚
 

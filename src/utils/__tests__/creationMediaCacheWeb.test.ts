@@ -110,3 +110,21 @@ test('Web media download authenticates only Jiucaihezi API result URLs', { concu
     globalThis.fetch = previousFetch
   }
 })
+
+test('Desktop media download headers authenticate only Jiucaihezi API result URLs', () => {
+  __resetApiKeyMemoryCacheForTests('desktop-media-token')
+  try {
+    assert.deepEqual(
+      creationMediaCache.creationResultRequestHeaders(
+        'https://api.jiucaihezi.studio/v1/videos/task_veo/content',
+      ),
+      { Authorization: 'Bearer desktop-media-token' },
+    )
+    assert.equal(
+      creationMediaCache.creationResultRequestHeaders('https://cdn.example.com/video.mp4'),
+      undefined,
+    )
+  } finally {
+    __resetApiKeyMemoryCacheForTests()
+  }
+})

@@ -338,6 +338,7 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
       params: {
         webappId: '12345',
         billingModel: 'rh-aiapp-fast-digital-human',
+        outputType: 'video',
         '3:audio': 'https://cdn.jiucaihezi.studio/voice.mp3',
         '4:image': 'https://cdn.jiucaihezi.studio/person.png',
         '10:value': 832,
@@ -354,6 +355,58 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
     assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/rh-aiapp-runtime.mp4')
     assert.equal(result.taskId, 'rh_aiapp_runtime_001')
     assert.equal(result.pollUrl, '/rh/tasks/rh_aiapp_runtime_001?ai_app=true')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('generic RunningHub image and audio AI Apps use their existing media runtimes', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-custom-image')
+      assert.deepEqual(body.nodeInfoList, [{ nodeId: '1', fieldName: 'text', fieldValue: 'poster' }])
+      assert.deepEqual(body.extra_fields, { webappId: 'image-app' })
+      return Response.json({ task_id: 'rh_aiapp_image', status: 'processing', ai_app: true })
+    }
+    if (url.endsWith('/v1/audio/speech')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-custom-audio')
+      assert.deepEqual(body.nodeInfoList, [{ nodeId: '2', fieldName: 'text', fieldValue: 'hello' }])
+      assert.deepEqual(body.extra_fields, { webappId: 'audio-app' })
+      assert.match(body.voice, /^__rh_nodeinfo__/)
+      return Response.json({ task_id: 'rh_aiapp_audio', status: 'processing', ai_app: true })
+    }
+    if (url.endsWith('/rh/tasks/rh_aiapp_image?ai_app=true')) {
+      return Response.json({ status: 'success', url: 'https://example.com/result.png' })
+    }
+    if (url.endsWith('/rh/tasks/rh_aiapp_audio?ai_app=true')) {
+      return Response.json({ status: 'success', results: [{ url: 'https://example.com/result.mp3' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    for (const outputType of ['image', 'audio'] as const) {
+      const plan = buildCreationRunPlan({
+        modelId: 'runninghub/aiapp/rh-aiapp',
+        params: {
+          webappId: `${outputType}-app`,
+          billingModel: `rh-custom-${outputType}`,
+          outputType,
+          [`${outputType === 'image' ? 1 : 2}:text`]: outputType === 'image' ? 'poster' : 'hello',
+        },
+      })
+      const request = buildCreationSubmitRequest(plan)
+      assert.equal(request.taskType, outputType)
+      const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+      assert.equal(result.type, outputType)
+    }
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

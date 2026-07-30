@@ -27,12 +27,13 @@ export interface CreationSubmitRequest {
 }
 
 export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmitRequest {
+  if (plan.task === 'ai-app') throw new Error('AI 应用缺少服务器注册的输出类型')
   const runtime = plan.usesRhAdapter ? 'runninghub-adapter' : 'newapi-direct'
   const params = plan.debug.normalizedParams
   const request: CreationSubmitRequest = {
     runtime,
     taskType: plan.task === 'image' ? 'image'
-      : plan.task === 'video' || plan.task === 'model3d' || plan.task === 'ai-app' ? 'video'
+      : plan.task === 'video' || plan.task === 'model3d' ? 'video'
       : 'audio',
     endpoint: plan.endpoint,
     pollKind: plan.pollKind,
@@ -320,6 +321,15 @@ async function executeRunningHubImageRequest(
     images: images.length ? images : undefined,
     extra_fields: Object.keys(extraFields).length ? extraFields : undefined,
   })
+  if (request.plan.apiStyle === 'rh-aiapp') {
+    const billingModel = asOptionalString(normalized.billingModel)
+    if (billingModel) body.model = billingModel
+    const nodeInfoList = buildRhAiAppNodeInfoList(request)
+    if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
+    body.nodeInfoList = nodeInfoList
+    const webappId = asOptionalString(normalized.webappId)
+    if (webappId) body.extra_fields = { webappId }
+  }
   // ★ 扩大的调试日志：覆盖所有 RH 图片模型，帮助排查 image-to-image 422 问题
   if (request.plan.usesRhAdapter && request.plan.task === 'image') {
     console.log('[DEBUG RH IMAGE] model:', request.plan.model, 'endpoint:', request.endpoint)
@@ -424,6 +434,8 @@ async function executeRunningHubAudioRequest(
     const nodeInfoList = buildRhAiAppNodeInfoList(request)
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList
+    const webappId = asOptionalString(normParams['webappId'])
+    if (webappId) body.extra_fields = { webappId }
     // ★ 防止 NewAPI TTS adaptor 丢弃非标准字段 nodeInfoList：
     //    同时把 nodeInfoList base64 编码后塞进 voice 字段（rh-aiapp 模型不使用 voice）
     //    rh-adapter audio.py 会优先使用 nodeInfoList，fallback 时从 voice 恢复。

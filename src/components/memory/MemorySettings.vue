@@ -40,6 +40,7 @@ const syncBusy = ref(false)
 const logoutBusy = ref(false)
 const syncError = ref('')
 const agentStore = useAgentStore()
+const appVersion = __APP_VERSION__
 const { theme } = useTheme()
 const textModels = computed(() => agentStore.textModels.map(model => ({ id: model.id, label: model.label })))
 const themeOptions = [
@@ -245,6 +246,7 @@ async function runSync() {
         </section>
       </div>
     </div>
+    <footer class="memory-settings-version">版本 {{ appVersion }}</footer>
   </div>
 </template>
 
@@ -254,6 +256,7 @@ async function runSync() {
 .memory-settings-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 36px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+.memory-settings-version { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--ink3); font-size: 12px; text-align: center; }
 .memory-account { display: grid; gap: 16px; }
 .memory-mobile-logout { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font: inherit; }
 .memory-local-model { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }

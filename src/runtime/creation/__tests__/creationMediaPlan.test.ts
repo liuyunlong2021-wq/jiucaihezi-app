@@ -312,6 +312,7 @@ test('RunningHub audio and generic AI App plans do not receive image ratio defau
     params: {
       webappId: '12345',
       billingModel: 'rh-aiapp-fast-digital-human',
+      outputType: 'video',
       '3:audio': 'https://example.com/voice.mp3',
       '4:image': 'https://example.com/person.png',
     },
@@ -362,6 +363,7 @@ test('generic RunningHub AI App plans preserve dynamic workflow params', () => {
     params: {
       webappId: '12345',
       billingModel: 'rh-aiapp-fast-digital-human',
+      outputType: 'video',
       '3:audio': 'https://example.com/voice.wav',
       '4:image': 'https://example.com/actor.png',
       '10:value': 832,
@@ -370,9 +372,35 @@ test('generic RunningHub AI App plans preserve dynamic workflow params', () => {
 
   assert.equal(aiApp.debug.normalizedParams.webappId, '12345')
   assert.equal(aiApp.debug.normalizedParams.billingModel, 'rh-aiapp-fast-digital-human')
+  assert.equal(aiApp.task, 'video')
   assert.equal(aiApp.debug.normalizedParams['3:audio'], 'https://example.com/voice.wav')
   assert.equal(aiApp.debug.normalizedParams['4:image'], 'https://example.com/actor.png')
   assert.equal(aiApp.debug.normalizedParams['10:value'], 832)
+})
+
+test('generic AI App plans route by the server-declared output type', () => {
+  for (const outputType of ['image', 'audio', 'video'] as const) {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/aiapp/rh-aiapp',
+      params: {
+        webappId: '12345',
+        billingModel: `rh-custom-${outputType}`,
+        outputType,
+        '1:text': 'hello',
+      },
+    })
+    assert.equal(plan.task, outputType)
+    assert.equal(plan.endpoint, outputType === 'image'
+      ? '/v1/images/generations'
+      : outputType === 'audio' ? '/v1/audio/speech' : '/v1/videos')
+  }
+  assert.throws(
+    () => buildCreationRunPlan({
+      modelId: 'runninghub/aiapp/rh-aiapp',
+      params: { webappId: '12345', billingModel: 'rh-custom', '1:text': 'hello' },
+    }),
+    /输出类型/,
+  )
 })
 
 test('generic AI App plan dedupes singular and plural media references', () => {
@@ -383,6 +411,7 @@ test('generic AI App plan dedupes singular and plural media references', () => {
       image: ['https://example.com/actor.png'],
       audios: ['https://example.com/voice.mp3'],
       audio: 'https://example.com/voice.mp3',
+      outputType: 'video',
       value: 832,
     },
   })
@@ -469,6 +498,7 @@ test('partial contracts produce plan warnings instead of silent submits', () => 
     params: {
       webappId: '12345',
       billingModel: 'rh-aiapp-fast-digital-human',
+      outputType: 'video',
       '3:audio': 'voice.mp3',
     },
   })

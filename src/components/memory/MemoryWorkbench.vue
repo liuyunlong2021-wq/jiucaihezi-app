@@ -22,6 +22,7 @@ import {
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
+import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import {
   parseMediaPlans,
   stripMediaPlanBlocks,
@@ -85,6 +86,7 @@ const input = ref('')
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
+const webSearchEnabled = ref(false)
 const mentionOpen = ref(false)
 const executionMode = ref<ConversationMode>('memory')
 const modelPickerOpen = ref(false)
@@ -96,6 +98,10 @@ const streamingText = ref('')
 const copiedTurnId = ref('')
 const status = ref('')
 const error = ref('')
+type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed' }
+const runVisible = ref(false)
+const runElapsed = ref(0)
+const runSteps = ref<MemoryRunStep[]>([])
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
 const messagesEl = ref<HTMLElement | null>(null)
@@ -133,6 +139,7 @@ let stopProjectWatch: (() => void) | null = null
 let creationResizeStartX = 0
 let creationResizeStartWidth = 0
 let creationResizeFrame = 0
+let runTimer: ReturnType<typeof setInterval> | null = null
 
 const MEMORY_TREE_WIDTH = 280
 const MEMORY_CHAT_MIN = 420
@@ -212,8 +219,10 @@ const projectOwner = computed(() => desktopRuntime
 type MemoryMentionOption =
   | { type: 'file'; display: string; description: string; resource: ProjectResource }
   | { type: 'skill'; display: string; description: string; name: string }
+  | { type: 'search'; display: string; description: string }
 
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
+  const search = { type: 'search' as const, display: '联网搜索', description: '仅本轮搜索公开网络' }
   const skills = agentStore.getCustomSkills()
     .filter(skill => skill.enabled !== false)
     .map(skill => ({
@@ -238,11 +247,11 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       description: resource.kind === 'media' ? '项目媒体' : '项目文件',
       resource,
     }))
-  return query.trim() ? [...skills, ...projectOptions] : [...skills.slice(0, 5), ...projectOptions]
+  return query.trim() ? [search, ...skills, ...projectOptions] : [search, ...skills.slice(0, 5), ...projectOptions]
 }
 const mentionKey = (item: MemoryMentionOption) => item.type === 'skill'
   ? `skill:${item.name}`
-  : `file:${item.resource.path}`
+  : item.type === 'search' ? 'tool:web_search' : `file:${item.resource.path}`
 const {
   flat: mentionFlat,
   active: mentionActive,
@@ -285,6 +294,7 @@ const modelGroups = computed(() => {
   return [...groups.entries()].map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
 const currentModelLabel = computed(() => textModels.value.find(model => model.id === agentStore.currentModel)?.label || agentStore.currentModel || '登录后加载模型')
+const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 
 onMounted(async () => {
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
@@ -326,6 +336,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCreationForWindow)
   stopCreationResize()
   stopProjectWatch?.()
+  stopRunTimer()
   projectGeneration++
   abortController?.abort()
   releaseMediaUrl()
@@ -455,7 +466,10 @@ watch(streamingText, async text => {
 
 async function openResource(resource: ProjectResourceOpenResult) {
   error.value = ''
-  if (!sending.value) status.value = ''
+  if (!sending.value) {
+    status.value = ''
+    runVisible.value = false
+  }
   streamingText.value = ''
   editingMarkdown.value = false
   markdownSaveError.value = ''
@@ -698,6 +712,7 @@ async function send() {
   if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
   sending.value = true
+  beginRunStatus()
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
   status.value = '正在保存你的消息'
@@ -727,7 +742,7 @@ async function send() {
       userTurn?.id,
       pendingAttachments,
     )
-    status.value = '正在回复'
+    status.value = '正在思考'
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
       turns: saved.transcript.turns,
@@ -737,17 +752,19 @@ async function send() {
       attachments: pendingAttachments,
       files: referencedFiles.value,
       selectedSkillNames: selectedSkillNames.value,
+      webSearchEnabled: webSearchEnabled.value,
       signal: abortController.signal,
-      onTool(name) { status.value = name === 'skill' ? '正在加载 Skill' : '正在使用工具' },
+      onToolEvent: updateRunTool,
       onText(text) {
-        status.value = '正在回复'
+        status.value = '正在整理回答'
         streamingText.value = text
       },
     })
     const complete = await appendMemoryTurn(saved.resource, 'assistant', reply, files)
-    streamingText.value = ''
+    const completeResource = await openProjectResource(files, complete.resource)
     rememberConversation(complete)
-    opened.value = await openProjectResource(files, complete.resource)
+    opened.value = completeResource
+    streamingText.value = ''
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
       try {
@@ -764,14 +781,17 @@ async function send() {
     attachments.value = []
     referencedFiles.value = []
     selectedSkillNames.value = []
+    webSearchEnabled.value = false
     streamingText.value = ''
-    status.value = ''
+    status.value = '已完成'
+    stopRunTimer()
   } catch (cause) {
     if (cause instanceof DOMException && cause.name === 'AbortError') status.value = '已停止'
     else {
-      status.value = ''
+      status.value = '处理失败'
       error.value = cause instanceof Error ? cause.message : String(cause)
     }
+    stopRunTimer()
   } finally {
     sending.value = false
     abortController = null
@@ -781,6 +801,51 @@ async function send() {
 
 function stop() {
   abortController?.abort()
+}
+
+function beginRunStatus() {
+  stopRunTimer()
+  runVisible.value = true
+  runElapsed.value = 0
+  runSteps.value = []
+  const startedAt = Date.now()
+  runTimer = setInterval(() => { runElapsed.value = Math.floor((Date.now() - startedAt) / 1000) }, 1000)
+}
+
+function stopRunTimer() {
+  if (runTimer) clearInterval(runTimer)
+  runTimer = null
+}
+
+function updateRunTool(event: DirectToolExecutionEvent) {
+  const label = memoryToolLabel(event.call.function.name)
+  if (event.type === 'tool_execution_start') {
+    runSteps.value.push({ id: event.call.id, label, state: 'running' })
+    status.value = `正在${label}`
+    return
+  }
+  const step = runSteps.value.find(item => item.id === event.call.id)
+  if (step) step.state = event.status === 'succeeded' ? 'done' : 'failed'
+  status.value = '正在等待模型继续处理'
+}
+
+function memoryToolLabel(name: string): string {
+  return ({
+    skill: '加载 Skill',
+    wiki: '检查 Wiki',
+    read: '读取文件',
+    glob: '查找文件',
+    grep: '搜索内容',
+    write: '写入文件',
+    edit: '编辑文件',
+    terminal: '执行命令',
+    web_search: '搜索网络',
+  } as Record<string, string>)[name] || '使用扩展工具'
+}
+
+function formatRunElapsed(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
 async function addReferencedFile(payload: unknown) {
@@ -918,6 +983,9 @@ async function selectMention(option: MemoryMentionOption) {
     if (option.type === 'skill') {
       if (!selectedSkillNames.value.includes(option.name)) selectedSkillNames.value.push(option.name)
       executionMode.value = 'memory'
+    } else if (option.type === 'search') {
+      webSearchEnabled.value = true
+      executionMode.value = 'memory'
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {
@@ -937,7 +1005,10 @@ async function selectMention(option: MemoryMentionOption) {
 
 function selectExecutionMode(mode: ConversationMode) {
   executionMode.value = mode
-  if (mode === 'quick') selectedSkillNames.value = []
+  if (mode === 'quick') {
+    selectedSkillNames.value = []
+    webSearchEnabled.value = false
+  }
 }
 
 async function handleComposerPaste(event: ClipboardEvent) {
@@ -1500,10 +1571,31 @@ function readDataUrl(file: File): Promise<string> {
             <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
           </div>
         </div>
-        <div v-if="status || error" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
+        <div v-if="webSearchEnabled" class="memory-attachments memory-references">
+          <div class="memory-attachment-chip">
+            <JcIcon name="search" />
+            <span class="memory-attachment-name">联网搜索</span>
+            <button title="关闭本轮联网搜索" @click="webSearchEnabled = false">×</button>
+          </div>
+        </div>
+        <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(error) }" aria-live="polite">
+          <div class="memory-run-head">
+            <JcIcon :name="error ? 'error' : status === '已完成' ? 'check_circle' : status === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !error }" />
+            <strong>{{ status }}</strong>
+            <span>{{ formatRunElapsed(runElapsed) }}</span>
+          </div>
+          <div v-if="(sending || error) && visibleRunSteps.length" class="memory-run-steps">
+            <div v-for="step in visibleRunSteps" :key="step.id" :class="step.state">
+              <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
+              <span>{{ step.label }}</span>
+            </div>
+          </div>
+          <small v-if="error">{{ error }}</small>
+        </div>
+        <div v-else-if="status || error" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
         <div class="memory-input-row">
           <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
-            <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配的项目文件或 Skill</div>
+            <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>
             <button
               v-for="item in mentionFlat.slice(0, 12)"
               :key="mentionKey(item)"
@@ -1512,7 +1604,7 @@ function readDataUrl(file: File): Promise<string> {
               @click="selectMention(item)"
               @pointermove="setMentionActive(mentionKey(item))"
             >
-              <JcIcon :name="item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
+              <JcIcon :name="item.type === 'search' ? 'search' : item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
               <span class="memory-mention-name">{{ item.display }}</span>
               <span class="memory-mention-kind">{{ item.type === 'skill' ? 'Skill' : item.description }}</span>
             </button>
@@ -1710,6 +1802,18 @@ function readDataUrl(file: File): Promise<string> {
 .send-button:disabled { opacity: .4; cursor: default; }
 .memory-status { padding: 6px 12px 0; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-status.error { color: var(--danger); }
+.memory-run-status { margin: 7px 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-run-head { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.memory-run-head strong { overflow-wrap: anywhere; color: var(--ink1); font-weight: 600; }
+.memory-run-head > span { color: var(--ink3); font-variant-numeric: tabular-nums; }
+.memory-run-status .mso { font-size: 15px; }
+.memory-run-status .spinning { animation: memory-run-spin .9s linear infinite; }
+.memory-run-steps { display: grid; gap: 4px; margin: 7px 0 0 24px; }
+.memory-run-steps > div { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 4px; color: var(--ink3); }
+.memory-run-steps > div.running { color: var(--ink1); }
+.memory-run-steps > div.failed, .memory-run-status.error, .memory-run-status.error strong { color: var(--danger); }
+.memory-run-status small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }
+@keyframes memory-run-spin { to { transform: rotate(360deg); } }
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }
 .memory-attachment-chip { display: flex; height: 34px; max-width: 240px; align-items: center; gap: 5px; padding: 0 7px; box-sizing: border-box; border-radius: 5px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); }
 .memory-attachment-chip img { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 4px; object-fit: cover; }

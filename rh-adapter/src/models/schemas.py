@@ -201,6 +201,7 @@ class AudioRequest(BaseModel):
         fill("prompt")
         fill("audio_url", "audioUrl")
         fill("audio")
+        fill("webappId")
         return merged
 
     @property

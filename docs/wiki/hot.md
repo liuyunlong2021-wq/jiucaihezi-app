@@ -7,7 +7,7 @@
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
 2. **[[开发/创模式Raw账本与对话Wiki移除SDD]]** — 创模式使用独立会话和模型原生能力优先的直连运行时，项目工具只按需进入工具循环；Desktop 文件适配与媒体任务均不启动 OpenCode。App 不再自动写项目 `.raw` 或打包 `jc-chat-wiki`；对话仍由 UI 会话保存，按模型容量装配最新完整对话，并按需只读 `CLAUDE.md` 与 `wiki/hot.md`。Desktop 合并 `public/skills` 内置 Skill 与 `~/.agents/skills` 本机 Skill，名称相同时内置优先，本机独有 Skill 正常可用；内置资源不复制到用户目录。
-3. **[[开发/创模式MCP工具接入SDD]]** — 同一 `mcpStore` 中已启用且已连接的 MCP 工具构成创模式候选工具池，最终请求必须按模型 function calling 能力和任务需要裁剪；当前无条件追加是待修实现缺口。GitHub OAuth 连接、深链回调、Keychain 凭据和网关 token 代换已实现；真实验收前仍需配置 GitHub OAuth App 并发布网关。
+3. **[[开发/创模式MCP工具接入SDD]]** — 同一 `mcpStore` 中已启用且已连接的 MCP 工具构成创模式候选工具池，最终请求必须按模型 function calling 能力和任务需要裁剪；MCP 候选工具的无条件追加仍是待修实现缺口。`web_search` 已从默认工具池移除，仅在用户本轮选择 `@联网搜索` 后提供，成功发送或切换快速模式后清除。GitHub OAuth 连接、深链回调、Keychain 凭据和网关 token 代换已实现；真实验收前仍需配置 GitHub OAuth App 并发布网关。
 4. **[[开发/创模式原生附件直连合同SDD]]** — 现行目标已收缩为“当前模型 + 当前 Provider/K + NewAPI 官方附件合同”。当前模型支持就发原件，不支持就明确结束；不自动换 Gemini，不询问本地工具补位。本轮只修 `video/quicktime` 等官方 MIME、最终请求预算、HTTP/`content_filter` 错误、失败历史污染和旧附件重发；不私改 NewAPI，不定义剧本或其他业务输出。
 5. **[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]** — Web 项目适配已完成：项目树、画布、上传/导入导出、站内预览和创作媒体均使用当前浏览器 IndexedDB + OPFS；创作任务冻结提交时项目，媒体落 `jc-media`。无 D1/R2/服务器媒体存储或跨浏览器同步。
 6. **[[开发/画布开发与排障]]** — 创作面板画布架构、保存恢复、工具、性能与已知问题的唯一入口；2026-07-16 项目文件树改为虚拟行渲染，视频缩略图由桌面后台生成并缓存，定向任务仍以 `owner:path` 队列和 scoped gate 保护 `read -> modify -> write`。
@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-07-30（`v2.1.1` main、Web Production、版本 tag 和桌面三平台 Release 已发布；Mac 流式与显示真实验收通过。Veo 3.1 Desktop 受保护结果下载缺少认证已完成根因分析、尚未修复；RunningHub 部分标准 API 迁移全球站，需逐端点验证；Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）
+> 上次刷新: 2026-07-30（`v2.1.2` 待发布：通用记忆工作台联网搜索改为 `@联网搜索` 显式单轮启用，首次回复不再提前清空流式正文，运行状态显示真实工具步骤，设置页恢复版本号；Veo 3.1 Desktop 同源受保护结果下载已补 Bearer Token，第三方 CDN 不携带；`rh-grok-image-video` 已按模型路由全球站，其余迁移模型仍待逐端点验证；Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）

@@ -1,4 +1,4 @@
-import { reactive, computed } from 'vue'
+import { reactive, computed, ref } from 'vue'
 import {
   type CreationTask,
   type CreationModel,
@@ -74,29 +74,26 @@ export interface CpState {
   results: CreationResult[]
   // AI 应用
   aiAppWebappId: string
+  aiAppLabel: string
+  aiAppOutputType: AiAppOutputType | ''
+  aiAppBillingModel: string
   aiAppFields: CreationFieldSpec[]
   aiAppDiscovering: boolean
+}
+
+export type AiAppOutputType = 'image' | 'audio' | 'video'
+
+export interface AiAppDirectoryEntry {
+  webappId: string
+  label: string
+  outputType: AiAppOutputType
+  billingModel: string
 }
 
 const STORAGE_KEY = 'jc_cp_state_v3'
 const DELETED_KEY = 'jc_cp_deleted_v1'
 const MAX_CREATION_FILE_BYTES = 50 * 1024 * 1024
 const MAX_DELETED_MARKERS = 200
-
-// AI 应用白名单标签映射
-const AI_APP_LABELS: Record<string, string> = {
-  '2028055408421642241': '极速数字人',
-  '2036019863617015809': '数字人',
-  '2029950473750454274': '我是导演',
-  '2046193597401276417': '声音克隆',
-  '2035739697670000642': '声音设计',
-  '2078130281814519809': '我是歌手',
-}
-
-// AI 应用 → 计费模型映射（复用已有模型名，无需在 NewAPI 新建渠道）
-const AI_APP_BILLING_MODEL: Record<string, string> = {
-  '2078130281814519809': 'rh-aiapp-director',
-}
 
 function loadSaved(): Partial<CpState> {
   try {
@@ -319,6 +316,9 @@ export const cpState = reactive<CpState>({
   progressText: '',
   results: saved.results || [],
   aiAppWebappId: '',
+  aiAppLabel: '',
+  aiAppOutputType: '',
+  aiAppBillingModel: '',
   aiAppFields: [],
   aiAppDiscovering: false,
 })
@@ -435,7 +435,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
   return {
     ...modelFieldParams(),
     prompt: cpState.task === 'ai-app' && cpState.aiAppWebappId
-      ? (AI_APP_LABELS[cpState.aiAppWebappId] || cpState.prompt)
+      ? (cpState.aiAppLabel || cpState.prompt)
       : cpState.prompt,
     title: cpState.title,
     tags: cpState.tags,
@@ -465,7 +465,8 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     audio: audios[0],
     // AI 应用
     webappId: cpState.aiAppWebappId,
-    billingModel: cpState.task === 'ai-app' ? (AI_APP_BILLING_MODEL[cpState.aiAppWebappId] || undefined) : undefined,
+    outputType: cpState.task === 'ai-app' ? cpState.aiAppOutputType : undefined,
+    billingModel: cpState.task === 'ai-app' ? cpState.aiAppBillingModel : undefined,
     ...(cpState.task === 'ai-app' ? aiAppFieldParams() : {}),
   }
 }
@@ -758,6 +759,50 @@ interface AiAppNode {
   options?: any[]
 }
 
+export const aiAppDirectory = ref<AiAppDirectoryEntry[]>([])
+
+function parseAiAppDirectoryEntry(value: unknown): AiAppDirectoryEntry {
+  const entry = value as Partial<AiAppDirectoryEntry> | undefined
+  if (
+    !entry || typeof entry.webappId !== 'string' || !entry.webappId
+    || typeof entry.label !== 'string' || !entry.label
+    || typeof entry.billingModel !== 'string' || !entry.billingModel
+    || !['image', 'audio', 'video'].includes(String(entry.outputType))
+  ) {
+    throw new Error('AI 应用目录合同无效')
+  }
+  return entry as AiAppDirectoryEntry
+}
+
+async function fetchAiAppJson(path: string): Promise<any> {
+  const { getApiKey } = await import('@/services/newApiAuth')
+  const { DEFAULT_API_BASE_URL } = await import('@/services/newApiClient')
+  const apiKey = getApiKey()
+  if (!apiKey) throw new Error('未登录，请先在设置中登录')
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 10000)
+  try {
+    const resp = await fetch(`${DEFAULT_API_BASE_URL}${path}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+      signal: controller.signal,
+    })
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '')
+      throw new Error(`API 返回 ${resp.status}: ${body.slice(0, 200)}`)
+    }
+    return await resp.json()
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+export async function fetchAiAppDirectory(): Promise<AiAppDirectoryEntry[]> {
+  const payload = await fetchAiAppJson('/api/runninghub/app-directory')
+  if (!Array.isArray(payload?.data)) throw new Error('AI 应用目录合同无效')
+  aiAppDirectory.value = payload.data.map(parseAiAppDirectoryEntry)
+  return aiAppDirectory.value
+}
+
 export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
   const mediaTypes = ['IMAGE', 'VIDEO', 'AUDIO']
   const isMedia = mediaTypes.includes(node.fieldType)
@@ -778,26 +823,11 @@ export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
   }
 }
 
-export async function discoverAiAppNodes(webappId: string): Promise<CreationFieldSpec[]> {
-  const { getApiKey } = await import('@/services/newApiAuth')
-  const { DEFAULT_API_BASE_URL } = await import('@/services/newApiClient')
-  const apiKey = getApiKey()
-  if (!apiKey) throw new Error('未登录，请先在设置中登录')
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 10000)
-  try {
-    const resp = await fetch(`${DEFAULT_API_BASE_URL}/api/runninghub/app-info?webappId=${webappId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: controller.signal,
-    })
-    if (!resp.ok) {
-      const body = await resp.text().catch(() => '')
-      throw new Error(`API 返回 ${resp.status}: ${body.slice(0, 200)}`)
-    }
-    const data = await resp.json()
-    const nodes = data.nodeInfoList || []
-    return nodes.map(aiAppNodeToField)
-  } finally {
-    clearTimeout(timeout)
-  }
+export async function discoverAiAppNodes(webappId: string): Promise<{
+  app: AiAppDirectoryEntry
+  fields: CreationFieldSpec[]
+}> {
+  const data = await fetchAiAppJson(`/api/runninghub/app-info?webappId=${encodeURIComponent(webappId)}`)
+  const nodes = Array.isArray(data?.nodeInfoList) ? data.nodeInfoList : []
+  return { app: parseAiAppDirectoryEntry(data), fields: nodes.map(aiAppNodeToField) }
 }

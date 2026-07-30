@@ -146,7 +146,7 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
   assert.match(runtime, /if \(!memoryMode\)[\s\S]*runDirectChatCompletion\([\s\S]*tools: undefined/)
   assert.match(runtime, /call\.function\.name === 'web_search'[\s\S]*executeJinaWebSearchTool\(call\.function\.arguments\)/)
-  assert.match(runtime, /tools: \[\.\.\.buildWebProjectToolDefinitions\(\), WEB_SEARCH_TOOL_DEFINITION\]/)
+  assert.match(runtime, /\.\.\.\(input\.webSearchEnabled \? \[WEB_SEARCH_TOOL_DEFINITION\] : \[\]\)/)
 })
 
 test('memory composer routes pasted images and media plans into the existing creation panel', () => {
@@ -195,6 +195,22 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(runtime, /buildToolResultMessages\(/)
   assert.match(runtime, /selectedSkillNames\.map\(\(name, index\)/)
   assert.match(runtime, /function: \{ name: 'skill', arguments: JSON\.stringify\(\{ name \}\) \}/)
+})
+
+test('memory web search is an explicit removable one-turn @ option', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(workbench, /const webSearchEnabled = ref\(false\)/)
+  assert.match(workbench, /type: 'search'[\s\S]*display: '联网搜索'[\s\S]*仅本轮搜索公开网络/)
+  assert.match(workbench, /option\.type === 'search'[\s\S]*webSearchEnabled\.value = true[\s\S]*executionMode\.value = 'memory'/)
+  assert.match(workbench, /v-if="webSearchEnabled"[\s\S]*<JcIcon name="search"[\s\S]*联网搜索[\s\S]*webSearchEnabled = false/)
+  assert.match(workbench, /webSearchEnabled: webSearchEnabled\.value/)
+  assert.match(workbench, /selectedSkillNames\.value = \[\][\s\S]*webSearchEnabled\.value = false/)
+  assert.match(workbench, /mode === 'quick'[\s\S]*webSearchEnabled\.value = false/)
+  assert.match(runtime, /webSearchEnabled\?: boolean/)
+  assert.match(runtime, /\.\.\.\(input\.webSearchEnabled \? \[WEB_SEARCH_TOOL_DEFINITION\] : \[\]\)/)
+  assert.doesNotMatch(runtime, /tools: \[\.\.\.buildWebProjectToolDefinitions\(\), WEB_SEARCH_TOOL_DEFINITION\]/)
 })
 
 test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {
@@ -279,12 +295,36 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /v-for="turn in timelineTurns"/)
   assert.match(workbench, /turn\.id === 'streaming-assistant' \? renderStreamingText\(content\) : renderMemoryMarkdown\(content\)/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
-  assert.match(workbench, /const complete = await appendMemoryTurn[\s\S]*streamingText\.value = ''\s*\n\s*rememberConversation\(complete\)/)
+  assert.match(workbench, /const complete = await appendMemoryTurn[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/)
   assert.match(workbench, /executionMode\.value =[\s\S]*await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
   assert.match(scrollNav, /querySelectorAll\('\.msg, \.memory-message'\)/)
   assert.doesNotMatch(workbench, /useVirtualizer|estimateSize|measureElement|getTotalSize|translateY\(/)
   assert.doesNotMatch(workbench, /\.memory-message-list > \.memory-message \{[^}]*position: absolute/)
+})
+
+test('memory run status follows real tool start and end events without entering Raw', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(runtime, /onToolEvent\?: \(event: DirectToolExecutionEvent\) => void/)
+  assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 2)
+  assert.doesNotMatch(runtime, /event\.type === 'tool_execution_start'\) input\.onToolEvent/)
+  assert.match(workbench, /onToolEvent: updateRunTool/)
+  assert.match(workbench, /event\.type === 'tool_execution_start'[\s\S]*status\.value = `正在\$\{label\}`/)
+  assert.match(workbench, /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*正在等待模型继续处理/)
+  assert.match(workbench, /v-if="runVisible" class="memory-run-status"/)
+  assert.match(workbench, /v-for="step in visibleRunSteps"/)
+  assert.match(workbench, /\(sending \|\| error\) && visibleRunSteps\.length/)
+  assert.match(workbench, /formatRunElapsed\(runElapsed\)/)
+  assert.doesNotMatch(workbench, /opencodeClient|openCodeSyncStore|AgentStatusBar/)
+})
+
+test('memory settings show the build version at the bottom', () => {
+  const settings = source('src/components/memory/MemorySettings.vue')
+
+  assert.match(settings, /const appVersion = __APP_VERSION__/)
+  assert.match(settings, /<footer class="memory-settings-version">版本 \{\{ appVersion \}\}<\/footer>/)
 })
 
 test('memory media execution stays in the creation panel while settled results return to chat', () => {

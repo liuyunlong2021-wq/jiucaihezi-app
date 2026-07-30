@@ -132,6 +132,11 @@ function normalizeContentType(headers: Record<string, string>, fallback: string)
   return normalizeMimeType(raw, fallback)
 }
 
+export function creationResultRequestHeaders(url: string): Record<string, string> | undefined {
+  const apiKey = new URL(url).origin === new URL(DEFAULT_API_BASE_URL).origin ? getApiKey() : ''
+  return apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+}
+
 function debugMediaDownloadPath(path: 'tauri' | 'browser', url: string) {
   if (!(import.meta as any).env?.DEV) return
   try {
@@ -162,7 +167,7 @@ async function fetchMediaAsDataUrl(
     debugMediaDownloadPath('tauri', url)
     const { invoke } = await import('@tauri-apps/api/core')
     const response = await invoke<DownloadBase64Response>('http_download_base64', {
-      request: { url, timeout_secs: 120 },
+      request: { url, headers: creationResultRequestHeaders(url), timeout_secs: 120 },
     })
     if (response.status < 200 || response.status >= 300) {
       throw new Error(`媒体缓存失败: HTTP ${response.status}`)
@@ -189,12 +194,8 @@ export async function fetchCreationMediaBlob(
   if (!isAllowedCreationResultUrl(url)) throw new Error('媒体地址不安全，已阻止缓存')
 
   debugMediaDownloadPath('browser', url)
-  const apiOrigin = new URL(DEFAULT_API_BASE_URL).origin
-  const resultOrigin = new URL(url).origin
-  const apiKey = resultOrigin === apiOrigin ? getApiKey() : ''
-  const response = await fetch(url, apiKey
-    ? { headers: { Authorization: `Bearer ${apiKey}` } }
-    : undefined)
+  const headers = creationResultRequestHeaders(url)
+  const response = await fetch(url, headers ? { headers } : undefined)
   if (!response.ok) throw new Error(`媒体缓存失败: HTTP ${response.status}`)
   const blob = await response.blob()
   const mimeType = normalizeMimeType(response.headers.get('content-type') || blob.type, mimeFor(type))
@@ -219,7 +220,7 @@ export async function cacheCreationMediaResult(params: {
     try {
       const { invoke } = await import('@tauri-apps/api/core')
       const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
-        request: { url: params.url, timeout_secs: 120 },
+        request: { url: params.url, headers: creationResultRequestHeaders(params.url), timeout_secs: 120 },
       })
       if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
         const contentType = normalizeContentType(dl.headers || {}, mimeFor(params.type))

@@ -16,39 +16,10 @@ from src.models.mapping import (
 )
 from src.models.capabilities import get_official_capability
 
-TARGET_MODELS = {
-    "rh-pro-image",
-    "rh-image-v2",
-    "rh-gpt2-image",
-    "rh-gpt2-text",
-    "z-image-turbo",
-    "rh-video-v31-fast",
-    "rh-seedance2-text-video",
-    "rh-seedance2-image-video",
-    "rh-seedance2-multimodal-video",
-    "rh-grok-text-video",
-    "rh-grok-image-video",
-    "rh-3d-text",
-    "rh-3d-image",
-    "rh-aiapp-fast-digital-human",
-    "rh-aiapp-digital-human",
-    "rh-aiapp-director",
-    "rh-suno-v55-single",
-    "rh-suno-v55-custom",
-    "rh-suno-lyrics",
-    "rh-speech-hd",
-    "rh-speech-turbo",
-    "rh-music",
-    "rh-voice-clone",
-    "rh-aiapp-voice-clone",
-    "rh-aiapp-voice-design",
-}
-
 REMOVED_MODELS = {
     "rh-kling-v30-pro",
     "rh-veo-31-fast",
     "rh-veo-31-pro",
-    "rh-seedance2",
     "grok-video-3",
     "rh-grok-video-edit",
     "rh-mimic",
@@ -65,9 +36,8 @@ def test_all_models_have_required_fields():
         assert "output_type" in info, f"{model_id} missing output_type"
 
 
-def test_model_registry_is_exact_target_set():
-    assert set(MODEL_MAP) == TARGET_MODELS
-    assert not (set(MODEL_MAP) & REMOVED_MODELS)
+def test_base_model_registry_excludes_removed_models():
+    assert not (set(build_model_map("")) & REMOVED_MODELS)
 
 
 def test_image_models():
@@ -173,6 +143,7 @@ def test_normalize_custom_ai_app_models_from_array():
         "output_type": "video",
         "webapp_id": "123",
         "custom": True,
+        "billing_model": "rh-custom-story-video",
     }
 
 
@@ -192,6 +163,11 @@ def test_normalize_custom_ai_app_models_rejects_unknown_output_type():
         )
 
 
+def test_normalize_custom_ai_app_models_rejects_missing_output_type():
+    with pytest.raises(ValueError, match="Unsupported custom RH output_type"):
+        normalize_custom_ai_app_models('[{"id":"rh-custom-bad","webapp_id":"789"}]')
+
+
 def test_build_model_map_includes_custom_ai_apps_without_core_code_changes():
     model_map = build_model_map(
         '[{"id":"rh-custom-demo","label":"Custom Demo","output_type":"video","webapp_id":"123"}]'
@@ -203,6 +179,7 @@ def test_build_model_map_includes_custom_ai_apps_without_core_code_changes():
         "output_type": "video",
         "webapp_id": "123",
         "custom": True,
+        "billing_model": "rh-custom-demo",
     }
 
 

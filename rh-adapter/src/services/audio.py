@@ -6,13 +6,14 @@ import logging
 
 import httpx
 
-from ..config import RUNNINGHUB_API_KEY
-from ..models.mapping import get_rh_endpoint, get_webapp_id, is_ai_app_model
+from ..config import RUNNINGHUB_API_KEY, runninghub_api_key
+from ..models.mapping import get_rh_endpoint, get_rh_site, get_webapp_id, is_ai_app_model, matches_ai_app_registration
 from ..models.schemas import AudioRequest
 from .ai_app import apply_ai_app_inputs, fetch_ai_app_node_info, resolve_ai_app_node_media
 from .rh_client import (
     submit_ai_app,
     submit_task,
+    encode_task_id,
     RHError,
 )
 from .standard_payload import build_standard_payload
@@ -67,11 +68,14 @@ async def generate_audio(
         raise RHError("No RunningHub API key configured", code=500)
 
     model = request.model
-    if is_ai_app_model(model):
-        return await _submit_via_app(client, request, key)
+    webapp_id = request.webappId or (request.extra_fields or {}).get("webappId")
+    if is_ai_app_model(model) or webapp_id:
+        return await _submit_via_app(client, request, key, webapp_id=webapp_id)
 
     endpoint = get_rh_endpoint(model)
-    logger.info("Audio submit: model=%s endpoint=%s", model, endpoint)
+    site = get_rh_site(model)
+    key = runninghub_api_key(site, key)
+    logger.info("Audio submit: model=%s endpoint=%s site=%s", model, endpoint, site)
 
     payload = _build_suno_payload(request)
     if payload is None:
@@ -82,26 +86,29 @@ async def generate_audio(
             "voice_id": request.voice,
             "custom_voice_id": request.voice,
             "language_boost": request.language,
-        })
+        }, site=site)
 
-    task_data = await submit_task(client, key, endpoint, payload)
+    task_data = await submit_task(client, key, endpoint, payload, site=site)
     task_id = task_data.get("taskId") or task_data.get("task_id", "")
     if not task_id:
         raise RHError("No task ID returned from RunningHub")
 
     logger.info("Audio task submitted: task_id=%s", task_id)
-    return {"task_id": task_id, "status": "processing"}
+    return {"task_id": encode_task_id(task_id, site), "status": "processing"}
 
 
 async def _submit_via_app(
     client: httpx.AsyncClient,
     request: AudioRequest,
     api_key: str,
+    webapp_id: str = "",
 ) -> dict:
     """Submit an audio-producing AI Application."""
-    webapp_id = get_webapp_id(request.model)
+    webapp_id = webapp_id or get_webapp_id(request.model)
     if not webapp_id:
         raise RHError(f"No webapp ID for model: {request.model}")
+    if not matches_ai_app_registration(webapp_id, request.model):
+        raise RHError("AI app registration does not match billing model", code=403)
 
     # ★ 诊断日志：记录实际收到的 AudioRequest 关键字段
     ni_len = len(request.nodeInfoList) if request.nodeInfoList else 0

@@ -45,3 +45,19 @@ test('buildCurrentCreationParams materializes current model field defaults into 
   assert.equal(params.outputFormat, 'png')
   assert.equal(params.lora_strength, 1)
 })
+
+test('buildCurrentCreationParams uses the selected server AI App contract', () => {
+  switchTask('ai-app')
+  switchModel('runninghub/aiapp/rh-aiapp')
+  cpState.aiAppWebappId = '12345'
+  cpState.aiAppLabel = '图片应用'
+  cpState.aiAppOutputType = 'image'
+  cpState.aiAppBillingModel = 'rh-custom-image'
+
+  const params = buildCurrentCreationParams()
+
+  assert.equal(params.webappId, '12345')
+  assert.equal(params.outputType, 'image')
+  assert.equal(params.billingModel, 'rh-custom-image')
+  assert.equal(params.prompt, '图片应用')
+})

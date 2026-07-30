@@ -130,11 +130,12 @@ async def _resolve_media_value(
     *,
     multiple: bool,
     output_type: str,
+    site: str,
 ) -> Any:
     values = value if isinstance(value, list) else [value]
     force_upload = output_type == "video"
     resolved = [
-        await maybe_upload(client, api_key, item, mode="standard", force=force_upload)
+        await maybe_upload(client, api_key, item, mode="standard", force=force_upload, site=site)
         for item in values
         if _value_present(item)
     ]
@@ -148,6 +149,7 @@ async def build_standard_payload(
     api_key: str,
     endpoint: str,
     inputs: dict[str, Any],
+    site: str = "cn",
 ) -> dict[str, Any]:
     """Build a payload whose keys are exactly official capability params."""
     import logging
@@ -195,6 +197,7 @@ async def build_standard_payload(
                 raw_value,
                 multiple=bool(param.get("multiple")),
                 output_type=output_type,
+                site=site,
             )
             if not _value_present(value):
                 if required:

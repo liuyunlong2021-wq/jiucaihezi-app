@@ -88,7 +88,10 @@ import {
   saveCpState,
   getVisibleCreationTasks,
   buildCurrentCreationParams,
+  aiAppDirectory,
+  fetchAiAppDirectory,
   discoverAiAppNodes,
+  type AiAppDirectoryEntry,
 } from '@/composables/useCreation'
 import { creationModelFamily, displayModelLabel, displayModelPrice, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
@@ -468,26 +471,26 @@ function modeLabel(mode?: string): string {
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
+  fetchAiAppDirectory().catch(() => {})
 })
 
-// ─── AI 应用白名单 ───
-const AI_APP_WHITELIST = [
-  { id: '2028055408421642241', label: '极速数字人' },
-  { id: '2036019863617015809', label: '数字人' },
-  { id: '2029950473750454274', label: '我是导演' },
-  { id: '2046193597401276417', label: '声音克隆' },
-  { id: '2035739697670000642', label: '声音设计' },
-  { id: '2078130281814519809', label: '我是歌手' },
-]
-
 function aiAppLabel(webappId: string): string {
-  const app = AI_APP_WHITELIST.find(a => a.id === webappId)
+  const app = aiAppDirectory.value.find(a => a.webappId === webappId)
   return app ? app.label : webappId.slice(0, 12) + '...'
 }
 
-function selectAiApp(webappId: string) {
-  cpState.aiAppWebappId = webappId
+function selectAiApp(app: AiAppDirectoryEntry) {
+  cpState.aiAppWebappId = app.webappId
+  cpState.aiAppLabel = app.label
+  cpState.aiAppOutputType = app.outputType
+  cpState.aiAppBillingModel = app.billingModel
   handleDiscoverAiApp()
+}
+
+function clearAiAppRegistration() {
+  cpState.aiAppLabel = ''
+  cpState.aiAppOutputType = ''
+  cpState.aiAppBillingModel = ''
 }
 
 function discoverAndCloseAiAppPop() {
@@ -501,7 +504,10 @@ async function handleDiscoverAiApp() {
   cpState.aiAppDiscovering = true
   cpState.aiAppFields = []
   try {
-    const fields = await discoverAiAppNodes(cpState.aiAppWebappId)
+    const { app, fields } = await discoverAiAppNodes(cpState.aiAppWebappId)
+    cpState.aiAppLabel = app.label
+    cpState.aiAppOutputType = app.outputType
+    cpState.aiAppBillingModel = app.billingModel
     cpState.aiAppFields = fields
     saveCpState()
   } catch (e: any) {
@@ -2309,7 +2315,7 @@ function getCanvasAccent(): string {
 
 function refreshCanvasTheme() {
   if (!app) return
-  ;(app as any).config.fill = getCanvasFill()
+  app.renderer.config.fill = getCanvasFill()
   Object.assign((app.editor as any)?.config || {}, {
     stroke: getCanvasAccent(),
     pointFill: getCanvasAccent(),
@@ -2324,6 +2330,7 @@ function refreshCanvasTheme() {
     } else if (child.tag === 'Image') child.set({ stroke: getCanvasFrame() })
   }
   app.editor?.update()
+  app.requestRender(true)
 }
 
 function formatVideoDuration(seconds?: number): string {
@@ -4035,13 +4042,13 @@ const canSend = computed(
         </div>
         <div v-if="openPop === 'aiApp'" class="cp-popover cp-ai-app-pop" @click.stop>
           <button
-            v-for="app in AI_APP_WHITELIST"
-            :key="app.id"
+            v-for="app in aiAppDirectory"
+            :key="app.webappId"
             class="cp-pop-item"
-            :class="{ active: cpState.aiAppWebappId === app.id }"
-            :title="app.id"
+            :class="{ active: cpState.aiAppWebappId === app.webappId }"
+            :title="app.webappId"
             @click="
-              selectAiApp(app.id);
+              selectAiApp(app);
               openPop = ''
             "
           >
@@ -4053,6 +4060,7 @@ const canSend = computed(
               v-model="cpState.aiAppWebappId"
               class="cp-mini-input cp-ai-app-webapp-input"
               placeholder="或粘贴 ID..."
+              @input="clearAiAppRegistration()"
               @keyup.enter="discoverAndCloseAiAppPop()"
             />
             <button

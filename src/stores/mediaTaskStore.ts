@@ -39,7 +39,7 @@ import { useFileStore } from '@/composables/useFileStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { createProjectFileActions } from '@/services/projectFileActions'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
-import { fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
+import { creationResultRequestHeaders, fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
 import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
@@ -602,7 +602,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           data_base64: string
           headers?: Record<string, string>
         }>('http_download_base64', {
-          request: { url, timeout_secs: 120 },
+          request: { url, headers: creationResultRequestHeaders(url), timeout_secs: 120 },
         })
         if (dl.status < 200 || dl.status >= 300) {
           console.warn('[JC] 创作结果下载失败 HTTP', dl.status)

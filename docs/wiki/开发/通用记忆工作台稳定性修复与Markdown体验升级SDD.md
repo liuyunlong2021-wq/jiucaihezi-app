@@ -168,6 +168,8 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 
 工具调用属于当前运行状态，不属于对话文件真源。运行中只在内存保留 `status`、`streamingText` 和既有工具循环所需消息；工具修改项目文件时继续通过现有 `ProjectFileService`/工具执行器写入真实文件并标记待同步，不把工具事件、工具结果或流式片段另存为 Raw 消息。工具结束后，模型最终正文仍只追加一次到当前 Raw。
 
+运行状态必须消费 Direct Engine 已有的工具开始和结束事件，在输入框上方显示当前阶段、实际完成的最近步骤与耗时。工具结束后立即切换为“正在等待模型继续处理”，不得继续显示“正在使用工具”；只展示已经发生的真实动作，不伪造未来计划。该状态仅存在于 `MemoryWorkbench` 内存与界面，不引入 OpenCode、全局 Store 或新的持久化结构，也不进入 Markdown/Raw。
+
 ## 4. 实施顺序
 
 ### Task 0：冻结基线
@@ -267,6 +269,7 @@ Markdown/Raw 仍是对话唯一真源。流式阶段只保留一个内存中的 
 | Task 0 | `main` 缺少三笔纯文档提交；只同步 `13213c19`、`0f3e0d5b`、`8dce98e8`，未合并 Android 代码 | 本 SDD、独立 App SDD | 基线 focused、TypeScript、Web/Desktop quick build 通过 | 不适用 |
 | Task 1 | 自动同步后的 `refreshProjectView -> openResource` 会关闭 Markdown 预览；删除打开项目、窗口 focus 和创建空间时的自动联网/刷新 | `projectTextSync.ts`、`MemoryWorkbench.vue` | 同步与工作台回归通过 | Web 预览保持；iPhone/iPad 待本轮真机 |
 | Task 1.5 | 根因是记忆工作台把连续 Markdown 对话套进绝对定位虚拟列表，流式正文增长必须依赖估算高度、手工测量和滚动补偿；临时行、落盘替换和通用滚动观察器之间的合同反复失配。删除记忆工作台虚拟列表和全部手工测高，已保存消息与 `streamingText` 使用同一普通文档流；工具调用只保留当前运行状态，真实文件修改继续走既有文件工具；Raw 写入后立即替换临时行，完整 Markdown 仅在结束后渲染 | `MemoryWorkbench.vue`、`ChatScrollNav.vue`、`memoryWorkbench.test.ts` | 专项 `39/39`、完整 focused `1387/1387`、TypeScript、Desktop quick build、正式 Mac 构建与产物审计通过；合同覆盖普通文档流、单次 Raw 落盘、工具状态不持久化和粘性滚动 | Mac 新包已生成，待用户真实长回复验收；移动端手势待真机 |
+| Task 1.5.1 | 记忆工作台只消费工具开始事件，工具结束后仍显示“正在使用工具”；转发现有开始/结束事件，并在输入框上方显示真实阶段、最近步骤和耗时，不保存工具状态；最终 Raw 打开后再清除流式正文，避免首次回复闪空 | `memoryChat.ts`、`MemoryWorkbench.vue`、`memoryWorkbench.test.ts` | 专项 `38/38`、完整前端 focused `1396 passed, 8 skipped`、TypeScript、Desktop quick build 与产物审计通过；覆盖工具结束切换等待模型、完成/停止/失败收口、OpenCode 边界、Raw 单次落盘和最终正文无空窗合同 | 待正式签名包真机 |
 | Task 1.6 | 文件监听和 `open()` 直接触发 `syncCycle()`；删除自动网络动作，只保留 pending 标记和手动上传/同步 | `projectTextSync.ts` | 新增“打开/编辑不上传，手动同步才上传”测试 | Web 本地创建/保存无自动同步；其余平台待真机 |
 | Task 2 | 记忆对话和文件预览绕过共享安全 Markdown 策略；统一复用 `renderMessageMarkdown` | `MemoryWorkbench.vue` | 既有 XSS、链接、代码、表格测试与工作台测试通过 | Web 标题、表格真实渲染通过 |
 | Task 3 | 缺少 WikiLink 解析与反向来源投影；从当前项目 Markdown 文件按需扫描，不建索引库 | `markdownLinks.ts`、对应测试、`MemoryWorkbench.vue` | 正向、别名、相对路径、反向引用测试通过 | Web `[[人物小传]]` 点击与缺失提示通过；真实双文件往返待矩阵 |

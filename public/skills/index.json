@@ -558,22 +558,6 @@
     ]
   },
   {
-    "id": "jc-product-image",
-    "name": "jc-product-image",
-    "description": "Use when a user asks to plan e-commerce product images, product-image prompts, reference-image use, or a compliant media generation plan.",
-    "triggers": [
-      "商品图",
-      "电商主图",
-      "电商图片",
-      "淘宝主图",
-      "京东主图"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md"
-    ]
-  },
-  {
     "id": "jc-prop-prompt",
     "name": "jc-prop-prompt",
     "description": "Use when a user asks to create a prop design prompt, prop concept image, or reusable prop visual asset from story material.",

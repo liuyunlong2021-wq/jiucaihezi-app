@@ -22,6 +22,7 @@ pub struct HttpResponse {
 #[derive(Deserialize)]
 pub struct HttpDownloadRequest {
     pub url: String,
+    pub headers: Option<HashMap<String, String>>,
     pub timeout_secs: Option<u64>,
 }
 
@@ -323,8 +324,13 @@ pub async fn http_download_base64(
     let client = client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-    let resp = client
-        .get(&request.url)
+    let mut request_builder = client.get(&request.url);
+    if let Some(headers) = &request.headers {
+        for (key, value) in headers {
+            request_builder = request_builder.header(key, value);
+        }
+    }
+    let resp = request_builder
         .send()
         .await
         .map_err(|e| format!("HTTP 下载失败: {}", e))?;

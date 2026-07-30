@@ -28,8 +28,8 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 
-from .config import RUNNINGHUB_API_KEY, LOG_LEVEL
-from .models.mapping import MODEL_MAP
+from .config import RUNNINGHUB_API_KEY, LOG_LEVEL, runninghub_api_key
+from .models.mapping import MODEL_MAP, get_ai_app_directory, get_ai_app_registration
 from .models.capabilities import load_official_capabilities
 from .models.schemas import ImageRequest, VideoRequest, AudioRequest
 from .services.image import generate_image
@@ -38,6 +38,7 @@ from .services.audio import generate_audio
 from .services.rh_client import (
     check_health, query_task, query_ai_app_task,
     extract_result_url, extract_result_text, extract_cost, extract_task_time,
+    decode_task_id,
     RHError,
 )
 from .middleware.error_handler import rh_error_handler, general_exception_handler
@@ -256,13 +257,23 @@ async def app_info(webappId: str = ""):
         raise HTTPException(400, "webappId required")
 
     from .config import RH_AI_APP_WHITELIST
-    if RH_AI_APP_WHITELIST and webappId not in RH_AI_APP_WHITELIST:
+    registration = get_ai_app_registration(webappId)
+    if not registration or (RH_AI_APP_WHITELIST and webappId not in RH_AI_APP_WHITELIST):
         raise HTTPException(403, "此 AI 应用不在可用列表中")
 
     client = await get_client()
     from .services.ai_app import fetch_ai_app_node_info
     nodes = await fetch_ai_app_node_info(client, RUNNINGHUB_API_KEY, webappId)
-    return {"nodeInfoList": nodes}
+    return {**registration, "nodeInfoList": nodes}
+
+
+@app.get("/api/runninghub/app-directory")
+async def app_directory():
+    from .config import RH_AI_APP_WHITELIST
+    apps = get_ai_app_directory()
+    if RH_AI_APP_WHITELIST:
+        apps = [app for app in apps if app["webappId"] in RH_AI_APP_WHITELIST]
+    return {"data": apps}
 
 
 @app.get("/api/runninghub/app-list")
@@ -316,7 +327,12 @@ async def get_video_task_status(task_id: str):
         raise HTTPException(500, "RUNNINGHUB_API_KEY not configured")
 
     client = await get_client()
-    task_data = await query_task(client, RUNNINGHUB_API_KEY, task_id)
+    upstream_task_id, site = decode_task_id(task_id)
+    task_data = (
+        await query_task(client, runninghub_api_key(site), upstream_task_id, site=site)
+        if site == "global"
+        else await query_task(client, RUNNINGHUB_API_KEY, upstream_task_id)
+    )
     return build_task_status_response(task_id, task_data)
 
 
@@ -347,7 +363,12 @@ async def get_task_status(task_id: str, ai_app: bool = False):
     if ai_app:
         task_data = await query_ai_app_task(client, RUNNINGHUB_API_KEY, task_id)
     else:
-        task_data = await query_task(client, RUNNINGHUB_API_KEY, task_id)
+        upstream_task_id, site = decode_task_id(task_id)
+        task_data = (
+            await query_task(client, runninghub_api_key(site), upstream_task_id, site=site)
+            if site == "global"
+            else await query_task(client, RUNNINGHUB_API_KEY, upstream_task_id)
+        )
 
     return build_task_status_response(task_id, task_data)
 

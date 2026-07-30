@@ -6,13 +6,14 @@ import logging
 
 import httpx
 
-from ..config import RUNNINGHUB_API_KEY
-from ..models.mapping import get_rh_endpoint, is_ai_app_model, get_webapp_id
+from ..config import RUNNINGHUB_API_KEY, runninghub_api_key
+from ..models.mapping import get_rh_endpoint, get_rh_site, is_ai_app_model, get_webapp_id, matches_ai_app_registration
 from ..models.schemas import ImageRequest
 from .ai_app import apply_ai_app_inputs, fetch_ai_app_node_info, resolve_ai_app_node_media
 from .rh_client import (
     submit_task,
     submit_ai_app,
+    encode_task_id,
     RHError,
 )
 from .standard_payload import build_standard_payload
@@ -58,7 +59,9 @@ async def generate_image(
         return await _submit_via_app(client, request, key, webapp_id=webapp_id)
 
     endpoint = get_rh_endpoint(model, has_image=has_image)
-    logger.info("Image submit: model=%s endpoint=%s has_image=%s", model, endpoint, has_image)
+    site = get_rh_site(model)
+    key = runninghub_api_key(site, key)
+    logger.info("Image submit: model=%s endpoint=%s site=%s has_image=%s", model, endpoint, site, has_image)
 
     images = request.images or ([request.image] if request.image else [])
     aspect_ratio = request.aspect_ratio or _aspect_ratio_from_size(request.size)
@@ -94,7 +97,7 @@ async def generate_image(
         "variant": extra.get("variant"),
         "customWidth": extra.get("customWidth"),
         "customHight": extra.get("customHight"),  # RH upstream typo
-    })
+    }, site=site)
 
     # ── Grok Image: variant → model 映射 ──
     if endpoint.startswith("rhart-image-g/"):
@@ -102,13 +105,13 @@ async def generate_image(
         if variant:
             payload["model"] = variant
 
-    task_data = await submit_task(client, key, endpoint, payload)
+    task_data = await submit_task(client, key, endpoint, payload, site=site)
     task_id = task_data.get("taskId") or task_data.get("task_id", "")
     if not task_id:
         raise RHError("No task ID returned from RunningHub")
 
     logger.info("Image task submitted: task_id=%s", task_id)
-    return {"task_id": task_id, "status": "processing"}
+    return {"task_id": encode_task_id(task_id, site), "status": "processing"}
 
 
 async def _submit_via_app(
@@ -121,6 +124,8 @@ async def _submit_via_app(
     wid = webapp_id or get_webapp_id(request.model)
     if not wid:
         raise RHError(f"No webapp ID for model: {request.model}")
+    if not matches_ai_app_registration(wid, request.model):
+        raise RHError("AI app registration does not match billing model", code=403)
 
     from ..config import RH_AI_APP_WHITELIST
     if RH_AI_APP_WHITELIST and wid not in RH_AI_APP_WHITELIST:

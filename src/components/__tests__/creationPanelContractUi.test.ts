@@ -81,6 +81,15 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
   assert.match(source, /cornerRadius:\s*6/)
 })
 
+test('creation panel refreshes the live Leafer renderer when the theme changes', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /app\.renderer\.config\.fill = getCanvasFill\(\)/)
+  assert.match(source, /app\.requestRender\(true\)/)
+  assert.match(source, /attributeFilter: \['data-theme'\]/)
+  assert.doesNotMatch(source, /app as any\)\.config\.fill/)
+})
+
 test('creation panel uses a static video reference node and native preview instead of a canvas player', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

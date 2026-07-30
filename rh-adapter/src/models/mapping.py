@@ -109,11 +109,7 @@ VIDEO_MODELS: dict[str, dict] = {
         "endpoint": "rhart-video-g/image-to-video",
         "label": "Grok Video 图生视频",
         "output_type": "video",
-    },
-    "rh-grok-video-edit": {
-        "endpoint": "rhart-video-g-official/edit-video",
-        "label": "Grok Video 视频编辑",
-        "output_type": "video",
+        "site": "global",
     },
     "rh-aiapp-fast-digital-human": {
         "endpoint": None,
@@ -205,11 +201,6 @@ VIDEO_MODELS: dict[str, dict] = {
     "rh-sora2-image": {
         "endpoint": "rhart-video-s/image-to-video",
         "label": "Sora2 图生视频",
-        "output_type": "video",
-    },
-    "rh-sora2-realistic": {
-        "endpoint": "rhart-video-s-official/image-to-video-realistic",
-        "label": "Sora2 真人图生视频",
         "output_type": "video",
     },
     "rh-sora2-character": {
@@ -308,7 +299,7 @@ def normalize_custom_ai_app_models(raw: str) -> dict[str, dict]:
     for model_id, item in items:
         model_id = model_id.strip()
         webapp_id = str(item.get("webapp_id") or item.get("webappId") or "").strip()
-        output_type = str(item.get("output_type") or item.get("outputType") or "video").strip()
+        output_type = str(item.get("output_type") or item.get("outputType") or "").strip()
         if not model_id or not webapp_id:
             continue
         if output_type not in ("image", "video", "audio"):
@@ -319,6 +310,7 @@ def normalize_custom_ai_app_models(raw: str) -> dict[str, dict]:
             "output_type": output_type,
             "webapp_id": webapp_id,
             "custom": True,
+            "billing_model": str(item.get("billing_model") or item.get("billingModel") or model_id),
         }
     return models
 
@@ -368,6 +360,35 @@ def get_rh_endpoint(model: str, has_image: bool = False) -> str:
             return fallback
     
     return endpoint
+
+
+def get_rh_site(model: str) -> str:
+    entry = MODEL_MAP.get(model)
+    if not entry:
+        raise ValueError(f"Unknown model: {model}")
+    return entry.get("site", "cn")
+
+
+def get_ai_app_directory() -> list[dict[str, str]]:
+    return [
+        {
+            "webappId": str(entry["webapp_id"]),
+            "label": str(entry.get("label") or model_id),
+            "outputType": str(entry["output_type"]),
+            "billingModel": str(entry.get("billing_model") or model_id),
+        }
+        for model_id, entry in MODEL_MAP.items()
+        if entry.get("endpoint") is None and entry.get("webapp_id")
+    ]
+
+
+def get_ai_app_registration(webapp_id: str) -> dict[str, str] | None:
+    return next((app for app in get_ai_app_directory() if app["webappId"] == str(webapp_id)), None)
+
+
+def matches_ai_app_registration(webapp_id: str, billing_model: str) -> bool:
+    registration = get_ai_app_registration(webapp_id)
+    return bool(registration and registration["billingModel"] == billing_model)
 
 
 def get_webapp_id(model: str) -> Optional[str]:

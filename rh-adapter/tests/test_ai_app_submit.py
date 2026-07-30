@@ -28,7 +28,7 @@ class FakeClient:
         self.calls.append((url, kwargs))
         if url == RH_AI_APP_UPLOAD:
             return FakeResponse({"code": 0, "msg": "success", "data": {"fileName": "input_123.png"}})
-        if url == RH_STANDARD_UPLOAD:
+        if url.endswith("/openapi/v2/media/upload/binary"):
             return FakeResponse({"code": 0, "data": {"download_url": "https://rh.example/upload.png"}})
         return FakeResponse({"code": 0, "data": {"taskId": "task_123"}})
 
@@ -169,7 +169,8 @@ async def test_standard_video_uses_official_image_urls_field():
         api_key="rh_key",
     )
 
-    assert result == {"task_id": "task_123", "status": "processing"}
+    assert result == {"task_id": "global:task_123", "status": "processing"}
+    assert client.calls[0][0] == "https://www.runninghub.ai/openapi/v2/media/upload/binary"
     submit_url, submit_kwargs = client.calls[-1]
     assert submit_url.endswith("/openapi/v2/rhart-video-g/image-to-video")
     payload = submit_kwargs["json"]
@@ -195,10 +196,11 @@ async def test_ai_app_image_node_info_list_uploads_data_url_media_values(monkeyp
         api_key="rh_key",
     )
 
-    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True}
+    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True, "rh_task_id": "task_123"}
     submit_payload = client.calls[-1][1]["json"]
-    assert submit_payload["nodeInfoList"][0]["fieldValue"] == "input_123.png"
-    assert submit_payload["nodeInfoList"][1]["fieldValue"] == "move"
+    values = {(node["nodeId"], node["fieldName"]): node["fieldValue"] for node in submit_payload["nodeInfoList"]}
+    assert values[("39", "image")] == "input_123.png"
+    assert values[("52", "prompt")] == "move"
 
 
 @pytest.mark.asyncio
@@ -208,7 +210,7 @@ async def test_standard_seedance_image_video_uses_first_and_last_frame_urls():
     result = await generate_video(
         client,
         request=VideoRequest(
-            model="rh-seedance2-image-video",
+            model="rh-seedance2-image",
             prompt="seedance prompt",
             images=[
                 "data:image/png;base64,ZmFrZQ==",
@@ -239,7 +241,7 @@ async def test_standard_seedance_multimodal_uses_official_media_arrays():
     result = await generate_video(
         client,
         request=VideoRequest(
-            model="rh-seedance2-multimodal-video",
+            model="rh-seedance2",
             prompt="multimodal prompt",
             images=["data:image/png;base64,ZmFrZQ=="],
             video="data:video/mp4;base64,ZmFrZQ==",
@@ -274,7 +276,7 @@ async def test_ai_app_image_discovers_nodes_before_default_submit(monkeypatch):
         api_key="rh_key",
     )
 
-    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True}
+    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True, "rh_task_id": "task_123"}
     assert client.calls[0][0] == RH_AI_APP_NODE_INFO
     submit_payload = client.calls[-1][1]["json"]
     assert submit_payload["nodeInfoList"][0]["fieldValue"] == "image prompt"
@@ -345,7 +347,7 @@ async def test_custom_video_ai_app_model_uses_registered_webapp_and_node_discove
         api_key="rh_key",
     )
 
-    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True}
+    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True, "rh_task_id": "task_123"}
     assert client.calls[0][0] == RH_AI_APP_NODE_INFO
     assert client.calls[0][1]["params"] == {"apiKey": "rh_key", "webappId": "123456789"}
     submit_payload = client.calls[-1][1]["json"]
@@ -377,7 +379,7 @@ async def test_custom_audio_ai_app_model_uses_registered_webapp_and_node_discove
         api_key="rh_key",
     )
 
-    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True}
+    assert result == {"task_id": "task_123", "status": "processing", "ai_app": True, "rh_task_id": "task_123"}
     assert client.calls[0][0] == RH_AI_APP_NODE_INFO
     assert client.calls[0][1]["params"] == {"apiKey": "rh_key", "webappId": "987654321"}
     submit_payload = client.calls[-1][1]["json"]

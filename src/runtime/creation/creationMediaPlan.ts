@@ -67,6 +67,12 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
   const effective = resolveEffectiveContract(spec, referenceImageCount)
   const normalizedParams = normalizeParams(spec, params, effective.apiStyle)
   assertParamShape(effective.apiStyle, normalizedParams)
+  const task = resolvePlanTask(spec, normalizedParams)
+  if (spec.task === 'ai-app') {
+    effective.endpoint = task === 'image'
+      ? '/v1/images/generations'
+      : task === 'audio' ? '/v1/audio/speech' : '/v1/videos'
+  }
 
   const usesRhAdapter = spec.route === 'runninghub-adapter'
 
@@ -74,7 +80,7 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
     modelId: spec.id,
     model: spec.model,
     label: spec.label,
-    task: spec.task,
+    task,
     source: spec.source,
     route: spec.route,
     upstreamFamily: spec.upstreamFamily,
@@ -102,6 +108,17 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
 
   plan.submitSummary = buildSubmitSummary(plan)
   return plan
+}
+
+function resolvePlanTask(
+  spec: CreationModelSpec,
+  params: Record<string, unknown>,
+): CreationRunPlan['task'] {
+  if (spec.task !== 'ai-app') return spec.task
+  if (params.outputType === 'image' || params.outputType === 'audio' || params.outputType === 'video') {
+    return params.outputType
+  }
+  throw new Error('AI 应用缺少服务器注册的输出类型')
 }
 
 function buildWarnings(spec: CreationModelSpec): string[] {

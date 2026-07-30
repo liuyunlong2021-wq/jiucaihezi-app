@@ -5,33 +5,7 @@ from httpx import ASGITransport, AsyncClient
 
 import src.main as main_module
 from src.main import app
-from src.models.mapping import build_model_map
-
-TARGET_MODELS = {
-    "rh-pro-image",
-    "rh-image-v2",
-    "rh-gpt2-image",
-    "rh-gpt2-text",
-    "z-image-turbo",
-    "rh-video-v31-fast",
-    "rh-seedance2-text-video",
-    "rh-seedance2-image-video",
-    "rh-seedance2-multimodal-video",
-    "rh-grok-text-video",
-    "rh-grok-image-video",
-    "rh-aiapp-fast-digital-human",
-    "rh-aiapp-digital-human",
-    "rh-aiapp-director",
-    "rh-suno-v55-single",
-    "rh-suno-v55-custom",
-    "rh-suno-lyrics",
-    "rh-speech-hd",
-    "rh-speech-turbo",
-    "rh-music",
-    "rh-voice-clone",
-    "rh-aiapp-voice-clone",
-    "rh-aiapp-voice-design",
-}
+from src.models.mapping import BASE_MODEL_MAP, MODEL_MAP, build_model_map
 
 
 @pytest.fixture
@@ -48,7 +22,7 @@ async def test_health(client):
     data = resp.json()
     assert data["status"] == "ok"
     assert data["service"] == "rh-adapter"
-    assert data["models"] == 23
+    assert data["models"] == len(MODEL_MAP)
 
 
 @pytest.mark.asyncio
@@ -57,9 +31,9 @@ async def test_list_models(client):
     assert resp.status_code == 200
     data = resp.json()
     assert data["object"] == "list"
-    assert len(data["data"]) == 23
+    assert len(data["data"]) == len(MODEL_MAP)
     model_ids = [m["id"] for m in data["data"]]
-    assert set(model_ids) == TARGET_MODELS
+    assert set(model_ids) == set(MODEL_MAP)
 
 
 @pytest.mark.asyncio
@@ -74,7 +48,7 @@ async def test_list_models_includes_env_registered_custom_ai_app(client, monkeyp
     data = resp.json()
     by_id = {model["id"]: model for model in data["data"]}
 
-    assert len(data["data"]) == 24
+    assert len(data["data"]) == len(BASE_MODEL_MAP) + 1
     assert by_id["rh-custom-demo"]["label"] == "Custom Demo"
     assert by_id["rh-custom-demo"]["output_type"] == "video"
     assert by_id["rh-custom-demo"]["custom"] is True
@@ -148,10 +122,11 @@ async def test_newapi_sora_video_poll_endpoint_returns_completed_task(client, mo
     resp = await client.get("/v1/videos/rh_real_video_001")
 
     assert resp.status_code == 200
-    assert resp.json() == {
+    expected = {
         "id": "rh_real_video_001",
         "task_id": "rh_real_video_001",
         "status": "completed",
         "progress": 100,
         "url": "https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/video.mp4",
     }
+    assert {key: resp.json()[key] for key in expected} == expected

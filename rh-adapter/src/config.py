@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 RUNNINGHUB_API_KEY: str = os.getenv("RUNNINGHUB_API_KEY", "")
+RUNNINGHUB_GLOBAL_API_KEY: str = os.getenv("RUNNINGHUB_GLOBAL_API_KEY", "") or RUNNINGHUB_API_KEY
 
 HOST: str = os.getenv("HOST", "0.0.0.0")
 PORT: int = int(os.getenv("PORT", "8789"))
@@ -32,3 +33,17 @@ RH_AI_APP_NODE_INFO = f"{RH_BASE_URL}/api/webapp/apiCallDemo"
 RH_AI_APP_RUN = "https://www.runninghub.ai/task/openapi/ai-app/run"
 RH_AI_APP_STATUS = "https://www.runninghub.ai/task/openapi/status"
 RH_AI_APP_OUTPUTS = "https://www.runninghub.ai/task/openapi/outputs"
+
+
+def runninghub_base_url(site: str = "cn") -> str:
+    return "https://www.runninghub.ai" if site == "global" else RH_BASE_URL
+
+
+def runninghub_api_v2(site: str = "cn") -> str:
+    return f"{runninghub_base_url(site)}/openapi/v2"
+
+
+def runninghub_api_key(site: str = "cn", fallback: str = "") -> str:
+    if site == "global":
+        return RUNNINGHUB_GLOBAL_API_KEY or fallback
+    return fallback or RUNNINGHUB_API_KEY
