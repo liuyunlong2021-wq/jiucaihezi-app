@@ -39,7 +39,7 @@ function chatContentToText(value: unknown): string {
 }
 function appendFiles(content: string, files?: DirectMessageFile[]): string {
   if (!files?.length) return content
-  const blocks = files.map(f => { const name = String(f.name || 'file'); const body = String(f.content || '').trim(); return body ? `[附件: ${name}]\n${body.slice(0, 8000)}` : `[附件: ${name}]` }).join('\n\n')
+  const blocks = files.map(f => { const name = String(f.name || 'file'); const body = String(f.content || '').trim(); return body ? `[附件: ${name}]\n${body.slice(0, 120000)}` : `[附件: ${name}]` }).join('\n\n')
   return [content, blocks].filter(Boolean).join('\n\n')
 }
 function buildSystemPrompt(args: BuildDirectMessagesInput): string {

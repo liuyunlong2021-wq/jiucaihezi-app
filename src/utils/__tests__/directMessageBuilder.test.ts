@@ -125,6 +125,22 @@ describe('buildDirectMessages', () => {
     assert.doesNotMatch(JSON.stringify(result), /file_data/)
   })
 
+  test('Office 正文不会在 8000 字符处被截断', () => {
+    const tail = '第六章之后的正文'
+    const result = buildDirectMessages({
+      messages: [user('u1', '分析完整附件')],
+      attachments: [{
+        id: 'word', name: '长篇.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 1024, kind: 'file', value: '', textContent: `${'正文'.repeat(5000)}${tail}`,
+      }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    assert.match(result.at(-1)?.content as string, new RegExp(tail))
+  })
+
   test('原生附件按 NewAPI 官方媒体类型构造内容 parts', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析附件')],
