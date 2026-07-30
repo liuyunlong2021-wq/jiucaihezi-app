@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-07-30（`v2.1.2` 待发布：通用记忆工作台联网搜索改为 `@联网搜索` 显式单轮启用，首次回复不再提前清空流式正文，运行状态显示真实工具步骤，设置页恢复版本号；Veo 3.1 Desktop 同源受保护结果下载已补 Bearer Token，第三方 CDN 不携带；`rh-grok-image-video` 已按模型路由全球站，其余迁移模型仍待逐端点验证；Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）
+> 上次刷新: 2026-07-30（`v2.1.2` 发布进行中：Web Production 已部署，GitHub Release 已有 Mac Apple Silicon 与 Windows x64 产物，Intel 与 `latest.json` 等流水线完成；正式 CI 包使用 Developer ID 签名和公证，临时 ad-hoc 包不作为 macOS 权限验收包。通用记忆工作台联网搜索改为 `@联网搜索` 显式单轮启用，首次回复不再提前清空流式正文，运行状态显示真实工具步骤，设置页恢复版本号；Veo 3.1 Desktop 同源受保护结果下载已补 Bearer Token，第三方 CDN 不携带；`rh-grok-image-video` 已按模型路由全球站，其余迁移模型仍待逐端点验证；Windows/iPhone/iPad 真机矩阵未闭环；Android 继续暂停。）
