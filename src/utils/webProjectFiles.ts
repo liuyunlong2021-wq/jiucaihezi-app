@@ -663,11 +663,22 @@ export function createWebProjectFiles(
       }
       if (request.kind === 'move') {
         const renamed: Array<{ oldPath: string; entry: FileEntry }> = []
+        const reservedPaths = new Set(entries.map(entry => entryPath(entry)))
         for (const rootPath of sourceRoots) {
           const root = entries.find(entry => entryPath(entry) === rootPath)
           if (!root) throw new Error(`文件不存在: ${rootPath}`)
-          const targetRoot = targetDirectory ? `${targetDirectory}/${root.name}` : root.name
-          if (entries.some(entry => entryPath(entry) === targetRoot)) throw new Error(`目标已存在: ${targetRoot}`)
+          let targetRoot = targetDirectory ? `${targetDirectory}/${root.name}` : root.name
+          if (reservedPaths.has(targetRoot)) {
+            if (request.policy !== 'keep-both') throw new Error(`目标已存在: ${targetRoot}`)
+            const dot = root.name.lastIndexOf('.')
+            const base = dot > 0 ? root.name.slice(0, dot) : root.name
+            const extension = dot > 0 ? root.name.slice(dot) : ''
+            let index = 1
+            do {
+              const name = `${base} (${index++})${extension}`
+              targetRoot = targetDirectory ? `${targetDirectory}/${name}` : name
+            } while (reservedPaths.has(targetRoot))
+          }
           const sources = [root, ...(isFolder(root) ? entries.filter(entry => entryPath(entry).startsWith(`${rootPath}/`)) : [])]
             .sort((a, b) => entryPath(a).length - entryPath(b).length)
           for (const source of sources) {
@@ -679,6 +690,7 @@ export function createWebProjectFiles(
               metadata: { ...(source.metadata || {}), projectId, relativePath: destination },
             }
             await adapter.put(next)
+            reservedPaths.add(destination)
             renamed.push({ oldPath, entry: next })
           }
         }

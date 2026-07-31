@@ -15,7 +15,7 @@ import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFi
 import type { ProjectResourceOpenResult } from '@/services/projectExplorerService'
 import { openProjectResource } from '@/services/projectExplorerService'
 import {
-  appendMemoryTurn,
+  appendMemoryRound,
   createMemoryConversation,
   initializeMemoryProject,
   inspectMemoryProject,
@@ -60,7 +60,7 @@ import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplay
 import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
 import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
-import { materialMarkdownPath, nextMaterialMarkdownPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
+import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -97,6 +97,7 @@ const sending = ref(false)
 const projectActionPending = ref(false)
 const memoryReady = ref(false)
 const streamingText = ref('')
+const pendingUserTurn = ref<ConversationTurn | null>(null)
 const copiedTurnId = ref('')
 const status = ref('')
 const error = ref('')
@@ -105,6 +106,8 @@ const pendingMemoryToolApproval = ref<{
   message: string
   resolve: (decision: MemoryToolApprovalDecision) => void
 } | null>(null)
+const memoryToolAlwaysAllowedConversations = new Set<string>()
+const referencingDocuments = new Set<string>()
 type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed' }
 const runVisible = ref(false)
 const runElapsed = ref(0)
@@ -127,8 +130,6 @@ const creationResizing = ref(false)
 const skillInstallPlans = ref<Record<string, SkillInstallPlan>>({})
 const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installed' | 'failed'>>({})
 const skillInstallErrors = ref<Record<string, string>>({})
-const mediaTaskResources = new Map<string, ProjectResourceOpenResult & { type: 'conversation' }>()
-const recordedMediaTasks = new Set<string>()
 const transientAttachments = ref<Record<string, ResolvedDirectAttachment[]>>({})
 let abortController: AbortController | null = null
 let mediaObjectUrl = ''
@@ -138,10 +139,8 @@ let sendInFlight = false
 let memoryRunGeneration = 0
 let offOpenResource: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
-let offMediaTaskSettled: (() => void) | null = null
 let offReferenceFile: (() => void) | null = null
 let offMediaReferenceAdd: (() => void) | null = null
-let offMemoryMediaTaskSubmitted: (() => void) | null = null
 let offSwitchPanel: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 let creationResizeStartX = 0
@@ -245,8 +244,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     : files.list(owner))
   const projectOptions = resources
     .filter(resource => !resource.isDirectory
-      && !resource.path.startsWith('.raw/')
-      && resource.path !== '.raw'
+      && !resource.path.startsWith('.raw/对话记录/')
       && (resource.kind !== 'binary' || isOfficeResource(resource)))
     .slice(0, 40)
     .map(resource => ({
@@ -275,8 +273,9 @@ const {
 })
 const conversationTurns = computed(() => conversation.value?.transcript.turns || [])
 const timelineTurns = computed<ConversationTurn[]>(() => {
-  if (!sending.value || !streamingText.value) return conversationTurns.value
-  return [...conversationTurns.value, {
+  const turns = pendingUserTurn.value ? [...conversationTurns.value, pendingUserTurn.value] : conversationTurns.value
+  if (!sending.value || !streamingText.value) return turns
+  return [...turns, {
     id: 'streaming-assistant',
     role: 'assistant',
     content: streamingText.value,
@@ -307,14 +306,12 @@ const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 onMounted(async () => {
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
   offToggleTree = onEvent('toggle-file-tree', () => { treeOpen.value = !treeOpen.value })
-  offMediaTaskSettled = onEvent('media-task-settled', payload => void recordMediaResult(payload))
   offReferenceFile = onEvent('reference-file', payload => {
     void addReferencedFile(payload).catch(cause => {
       error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
     })
   })
   offMediaReferenceAdd = onEvent('media-reference:add', payload => void addProjectMediaReferences(payload))
-  offMemoryMediaTaskSubmitted = onEvent('memory-media-task-submitted', payload => void rememberSubmittedMediaTask(payload))
   offSwitchPanel = onEvent('switch-panel', mode => {
     if (mode === 'creation') openCreationHost()
   })
@@ -334,10 +331,8 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   offOpenResource?.()
   offToggleTree?.()
-  offMediaTaskSettled?.()
   offReferenceFile?.()
   offMediaReferenceAdd?.()
-  offMemoryMediaTaskSubmitted?.()
   offSwitchPanel?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
@@ -683,6 +678,7 @@ async function deleteConversation(item: MemoryConversation) {
     const plan = await files.planBatch({ kind: 'delete', resources: [item.resource] })
     const result = await files.executeBatch(plan)
     if (result.failures.length) throw new Error(result.failures[0].message)
+    memoryToolAlwaysAllowedConversations.delete(item.transcript.id)
     conversations.value = conversations.value.filter(entry => entry.resource.path !== item.resource.path)
     if (conversation.value?.resource.path === item.resource.path) {
       opened.value = null
@@ -724,41 +720,31 @@ async function send() {
   sendInFlight = true
   const runGeneration = ++memoryRunGeneration
   sending.value = true
+  const userTurn: ConversationTurn = {
+    id: `turn-${crypto.randomUUID()}`,
+    role: 'user',
+    content: message || '请查看以下附件。',
+    createdAt: new Date().toISOString(),
+    attachments: attachmentMetadata(pendingAttachments),
+    mode: pendingMode,
+  }
+  pendingUserTurn.value = userTurn
   beginRunStatus()
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
-  status.value = '正在保存你的消息'
+  status.value = '正在思考'
   streamingText.value = ''
   abortController = new AbortController()
   try {
-    let memoryToolAlwaysAllowed = false
-    let saved = await appendMemoryTurn(
-      active.resource,
-      'user',
-      message || '请查看以下附件。',
-      files,
-      attachmentMetadata(pendingAttachments),
-      pendingMode,
-    )
-    const userTurn = saved.transcript.turns.at(-1)
-    if (userTurn?.role === 'user' && pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
-    if (saved.transcript.turns.filter(turn => turn.role === 'user').length === 1 && saved.transcript.title === '新对话') {
-      const titleSource = message || pendingAttachments[0]?.name || '新对话'
-      saved = await renameMemoryConversation(saved.resource, titleSource.replace(/\s+/g, ' ').slice(0, 28), files)
-    }
-    rememberConversation(saved)
-    opened.value = await openProjectResource(files, saved.resource)
-    input.value = ''
-    setEditorText(composerRef.value, '')
     const mediaContext = conversationMediaContext(
-      saved.transcript.turns,
-      userTurn?.id,
+      [...active.transcript.turns, userTurn],
+      userTurn.id,
       pendingAttachments,
     )
-    status.value = '正在思考'
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
-      turns: saved.transcript.turns,
+      userTurn,
+      rawPath: active.resource.path,
       modelId: agentStore.currentModel,
       mode: pendingMode,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
@@ -769,12 +755,12 @@ async function send() {
       signal: abortController.signal,
       onToolEvent: updateRunTool,
       confirmTool: async call => {
-        if (memoryToolAlwaysAllowed && call.function.name !== 'delete') return true
+        if (memoryToolAlwaysAllowedConversations.has(active.transcript.id) && call.function.name !== 'delete') return true
         return await new Promise<boolean>(resolve => {
           pendingMemoryToolApproval.value = {
             message: memoryToolApprovalMessage(call),
             resolve: decision => {
-              if (decision === 'always' && call.function.name !== 'delete') memoryToolAlwaysAllowed = true
+              if (decision === 'always' && call.function.name !== 'delete') memoryToolAlwaysAllowedConversations.add(active.transcript.id)
               resolve(decision !== 'reject')
             },
           }
@@ -786,7 +772,11 @@ async function send() {
       },
     })
     if (runGeneration !== memoryRunGeneration) return
-    const complete = await appendMemoryTurn(saved.resource, 'assistant', reply, files)
+    const title = !active.transcript.turns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
+      ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
+      : undefined
+    const complete = await appendMemoryRound(active.resource, userTurn, reply, files, title)
+    if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
     const completeResource = await openProjectResource(files, complete.resource)
     rememberConversation(complete)
     opened.value = completeResource
@@ -808,6 +798,8 @@ async function send() {
     referencedFiles.value = []
     selectedSkillNames.value = []
     webSearchEnabled.value = false
+    input.value = ''
+    setEditorText(composerRef.value, '')
     streamingText.value = ''
     status.value = '已完成'
     stopRunTimer()
@@ -819,6 +811,7 @@ async function send() {
     }
     stopRunTimer()
   } finally {
+    pendingUserTurn.value = null
     settleMemoryToolApproval('reject')
     sending.value = false
     abortController = null
@@ -887,6 +880,9 @@ function memoryToolLabel(name: string): string {
     mkdir: '创建文件夹',
     move: '移动文件',
     delete: '删除文件',
+    export_markdown_png: '导出 Markdown 图片',
+    create_document: '生成文档',
+    create_html: '生成网页',
     terminal: '执行命令',
     read_url: '读取网页',
     web_search: '搜索网络',
@@ -916,31 +912,62 @@ function isOfficeResource(resource: Pick<ProjectResource, 'name' | 'mimeType'>):
 
 async function addProjectFileReference(resource: ProjectResource) {
   if (isOfficeResource(resource)) {
-    const existing = new Set((await files.list(resource.owner)).map(item => item.path))
-    const preferredPath = resource.path.startsWith('jc-materials/originals/') ? materialMarkdownPath(resource.path) : ''
-    let readablePath = preferredPath && existing.has(preferredPath) ? preferredPath : ''
-    let content = ''
-    if (readablePath) content = (await files.readText((await files.list(resource.owner)).find(item => item.path === readablePath)!)).content
-    else {
-    const binary = await files.readBinary(resource)
-    const data = new Uint8Array(binary.data.byteLength)
-    data.set(binary.data)
-    const file = new File([data.buffer], resource.name, {
-      type: binary.mimeType || resource.mimeType || 'application/octet-stream',
-    })
-      const processed = await processFile(file, { maxTextLength: 20_000_000 })
-      if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
-      throw new Error(processed.error || '文档转换失败')
+    const referenceKey = `${resource.runtime}:${resource.owner}:${resource.path}`
+    if (referencingDocuments.has(referenceKey)
+      || attachments.value.some(item => item.resourcePath === resource.path)) return
+    referencingDocuments.add(referenceKey)
+    try {
+      const listed = await files.list(resource.owner)
+      const existing = new Set(listed.map(item => item.path))
+      const preferredPath = resource.path.startsWith('.raw/jc-media/文档/') ? materialMarkdownPath(resource.path) : ''
+      const legacyPath = resource.path.startsWith('.raw/jc-media/文档/') ? `${resource.path}.md` : ''
+      let readablePath = preferredPath && existing.has(preferredPath)
+        ? preferredPath
+        : legacyPath && existing.has(legacyPath) ? legacyPath : ''
+      let content = ''
+      if (readablePath) {
+        content = (await files.readText(listed.find(item => item.path === readablePath)!)).content
+      } else {
+        let localError = ''
+        if (resource.runtime === 'desktop') {
+          const { invoke } = await import('@tauri-apps/api/core')
+          const result = await invoke<{ status: string; content: string; outputPath?: string; truncated?: boolean; message?: string }>('document_path_to_markdown_file', {
+            input: {
+              sourcePath: `${resource.owner}/${resource.path}`,
+              outputDir: `${resource.owner}/.raw/jc-media/文档`,
+              maxChars: 20_000_000,
+            },
+          })
+          if (result.status === 'success' && result.content && !result.truncated) {
+            readablePath = `.raw/jc-media/文档/${String(result.outputPath || '').replace(/\\/g, '/').split('/').pop() || materialMarkdownPath(resource.path).split('/').pop()}`
+            content = result.content
+          } else {
+            localError = result.message || '本地文档转换不可用'
+          }
+        }
+        if (!content) {
+          if ((resource.size || 0) > 20 * 1024 * 1024) throw new Error(`${localError || '本地文档转换不可用'}，且文件超过云端 20 MB 上限`)
+          const binary = await files.readBinary(resource)
+          const data = new Uint8Array(binary.data.byteLength)
+          data.set(binary.data)
+          const file = new File([data.buffer], resource.name, {
+            type: binary.mimeType || resource.mimeType || 'application/octet-stream',
+          })
+          const processed = await processFile(file, { maxTextLength: 20_000_000 })
+          if (processed.status !== 'ready' || !processed.textContent || processed.truncated) throw new Error(processed.error || localError || '文档转换失败')
+          readablePath = preferredPath || nextMaterialMarkdownPath(resource.path, existing)
+          await files.createText(resource.owner, readablePath, processed.textContent)
+          content = processed.textContent
+        }
+      }
+      if (!attachments.value.some(item => item.readablePath === readablePath)) attachments.value.push({
+        id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'application/octet-stream',
+        size: resource.size || 0, kind: 'file', value: '', resourcePath: resource.path,
+        readablePath, characterCount: content.length,
+      })
+    } finally {
+      referencingDocuments.delete(referenceKey)
     }
-      readablePath = preferredPath || nextMaterialMarkdownPath(resource.path, existing)
-      await files.createText(resource.owner, readablePath, processed.textContent)
-      content = processed.textContent
-    }
-    if (!attachments.value.some(item => item.readablePath === readablePath)) attachments.value.push({
-      id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'application/octet-stream',
-      size: resource.size || 0, kind: 'file', value: '', resourcePath: resource.path,
-      readablePath, characterCount: content.length,
-    })
     return
   }
   const text = await files.readText(resource)
@@ -1154,7 +1181,7 @@ async function addAttachmentFiles(selected: File[]) {
         if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
           throw new Error(processed.truncated
             ? '文档超过当前安全解析上限，原件已保存'
-            : `${processed.error || '文档转换失败'}，原件已保存，可从 JC 原始素材重新引用`)
+            : `${processed.error || '文档转换失败'}，原件已保存，可从 .raw/jc-media/文档 重新引用`)
         }
         const readablePath = nextMaterialMarkdownPath(resource.path, existing)
         await files.createText(owner, readablePath, processed.textContent)
@@ -1179,10 +1206,15 @@ async function addAttachmentFiles(selected: File[]) {
       }
       const resource = await fileActions.importMedia({
         owner,
-        path: `jc-media/uploads/${crypto.randomUUID()}-${safeAttachmentName(file.name)}`,
+        path: nextMaterialPath(
+          `.raw/jc-media/${type === 'image' ? '图片' : type === 'video' ? '视频' : '音频'}`,
+          file.name,
+          existing,
+        ),
         data: new Uint8Array(await file.arrayBuffer()),
         mimeType: mime,
       })
+      existing.add(resource.path)
       resolved.push({
         id: crypto.randomUUID(), name: file.name, mime, size: file.size,
         kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
@@ -1200,6 +1232,13 @@ async function addAttachmentFiles(selected: File[]) {
 
 function mediaPlanKey(turnId: string, planIndex: number): string {
   return `${turnId}:${planIndex}`
+}
+
+function mediaTaskIdForPlan(turnId: string, planIndex: number): string {
+  const sessionId = conversation.value?.transcript.id
+  return mediaTaskStore.tasks.find(task =>
+    task.sessionId === sessionId && task.chatMessageId === mediaPlanKey(turnId, planIndex),
+  )?.id || ''
 }
 
 function mediaPlanResources(plan: MediaPlan): ProjectResource[] {
@@ -1257,47 +1296,6 @@ async function openCreationForCurrentConversation() {
       conversationId: active.transcript.id,
     },
   })
-}
-
-async function rememberSubmittedMediaTask(payload: unknown) {
-  const data = payload as {
-    taskId?: string
-    origin?: { key?: string; owner?: string; conversationPath?: string }
-  }
-  const taskId = String(data.taskId || '')
-  const key = String(data.origin?.key || '')
-  const owner = String(data.origin?.owner || '')
-  const conversationPath = String(data.origin?.conversationPath || '')
-  if (!taskId || !key || !owner || !conversationPath) return
-  if (conversation.value?.resource.owner === owner && conversation.value.resource.path === conversationPath) {
-    mediaTaskResources.set(taskId, conversation.value)
-    return
-  }
-  const target = conversations.value.find(item => item.resource.owner === owner && item.resource.path === conversationPath)
-  if (!target) return
-  const openedTarget = await openProjectResource(files, target.resource)
-  if (openedTarget.type === 'conversation') mediaTaskResources.set(taskId, openedTarget)
-}
-
-async function recordMediaResult(payload: unknown) {
-  const result = payload as { taskId?: string; status?: string; url?: string; text?: string; errorMsg?: string }
-  const taskId = String(result.taskId || '')
-  const target = mediaTaskResources.get(taskId)
-  if (!target || recordedMediaTasks.has(taskId)) return
-  recordedMediaTasks.add(taskId)
-  const projectPath = mediaTaskStore.getTask(taskId)?.projectPath
-  const summary = result.status === 'success'
-    ? `[媒体结果]\n任务 ${taskId} 已完成${projectPath ? `并保存到 ${projectPath}` : '，可在任务卡下载'}。`
-    : `[媒体结果]\n任务 ${taskId} 失败：${result.errorMsg || '未知错误'}`
-  try {
-    const updated = await appendMemoryTurn(target.resource, 'assistant', summary, files)
-    if (conversation.value?.resource.owner === target.resource.owner
-      && conversation.value.resource.path === target.resource.path) {
-      opened.value = await openProjectResource(files, updated.resource)
-    }
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause)
-  }
 }
 
 function installedSkill(plan: SkillInstallPlan): SkillConfig | undefined {
@@ -1441,10 +1439,6 @@ function attachmentResource(owner: string, attachment: ConversationAttachment): 
   }
 }
 
-function safeAttachmentName(name: string): string {
-  return String(name || 'attachment.bin').replace(/[^a-zA-Z0-9._\-\u4e00-\u9fff]/g, '_').slice(-100)
-}
-
 function releaseMediaUrl() {
   if (mediaObjectUrl) URL.revokeObjectURL(mediaObjectUrl)
   mediaObjectUrl = ''
@@ -1543,7 +1537,7 @@ function readDataUrl(file: File): Promise<string> {
       </header>
 
       <section v-if="conversation" ref="messagesEl" class="memory-messages">
-        <div v-if="!conversation.transcript.turns.length" class="memory-empty-state">开始一段对话</div>
+        <div v-if="!timelineTurns.length" class="memory-empty-state">开始一段对话</div>
         <div v-else class="memory-message-list">
         <article
           v-for="turn in timelineTurns"
@@ -1583,6 +1577,11 @@ function readDataUrl(file: File): Promise<string> {
               <span>{{ plan.title }}</span>
               <small>在创作面板中调整</small>
             </button>
+            <MediaTaskBubble
+              v-if="mediaTaskIdForPlan(turn.id, planIndex)"
+              :task-id="mediaTaskIdForPlan(turn.id, planIndex)"
+              workbench-mode
+            />
           </template>
           <MediaTaskBubble
             v-if="mediaResultTaskId(turn)"
@@ -1697,7 +1696,7 @@ function readDataUrl(file: File): Promise<string> {
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="status || error" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
+        <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
         <div class="memory-input-row">
           <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
             <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>

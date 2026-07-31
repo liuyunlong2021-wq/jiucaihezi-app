@@ -17,7 +17,7 @@ import { isConversationPath, mergeConversationTranscriptContents } from '@/runti
 const STATE_DIRECTORY = '.raw/.sync'
 const STATE_PATH = `${STATE_DIRECTORY}/state.json`
 const TEXT_EXTENSIONS = new Set(['md', 'markdown', 'txt', 'json', 'yaml', 'yml', 'csv', 'tsv', 'srt', 'vtt'])
-const BLOCKED_PARTS = new Set(['.sync', '.git', '.ssh', '.aws', '.config', '.claude', '.codex', '.agents', 'node_modules', 'skills', 'jc-media'])
+const BLOCKED_PARTS = new Set(['.sync', '.git', '.ssh', '.aws', '.config', '.claude', '.codex', '.agents', 'node_modules', 'skills'])
 const BLOCKED_FILES = new Set(['credentials.json', 'secrets.json', 'secrets.yaml', 'secrets.yml', 'api-keys.json', 'mcp.json'])
 
 interface PendingMutation extends SyncMutation {
@@ -59,6 +59,7 @@ export function isSyncableTextPath(path: string): boolean {
   const lower = parts.map(part => part.toLowerCase())
   const fileName = lower.at(-1) || ''
   if (lower.some(part => BLOCKED_PARTS.has(part) || part === '.env' || part.startsWith('.env.'))) return false
+  if (lower.includes('jc-media') && !(lower[0] === '.raw' && lower[1] === 'jc-media' && parts[2] === '文档')) return false
   if (BLOCKED_FILES.has(fileName)) return false
   return TEXT_EXTENSIONS.has(fileName.split('.').pop() || '')
 }

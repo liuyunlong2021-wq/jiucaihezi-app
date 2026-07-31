@@ -232,6 +232,7 @@ test('Web and Mac share text with offline retry, idempotency and visible conflic
   const macSync = new ProjectTextSync(mac.service, cloud.api)
   try {
     await web.service.createText('web-owner', '.raw/对话记录/第一轮.md', 'Web 第一轮')
+    await web.service.createText('web-owner', '.raw/jc-media/文档/资料.md', '资料正文')
     await web.service.createText('web-owner', 'wiki/人物.md', '人物初稿')
     await web.service.createText('web-owner', 'jc-media/video.txt', '不应同步')
     await webSync.open('web-owner', '共同记忆')
@@ -240,6 +241,7 @@ test('Web and Mac share text with offline retry, idempotency and visible conflic
     assert.equal(await webSync.cloudProjectIdFor('web-owner'), 'project_12345678')
 
     assert.equal(cloud.files.get('.raw/对话记录/第一轮.md')?.content, 'Web 第一轮')
+    assert.equal(cloud.files.get('.raw/jc-media/文档/资料.md')?.content, '资料正文')
     assert.equal(cloud.files.get('wiki/人物.md')?.content, '人物初稿')
     assert.equal(cloud.files.has('jc-media/video.txt'), false)
     assert.equal(cloud.files.has('.raw/.sync/state.json'), false)
@@ -280,7 +282,8 @@ test('Web and Mac share text with offline retry, idempotency and visible conflic
 
 test('sync path contract excludes queue state, media, credentials and binary files', () => {
   assert.equal(isSyncableTextPath('.raw/对话记录/今天.md'), true)
-  for (const path of ['.raw/.sync/state.json', 'jc-media/a.txt', '.env.local', 'credentials.json', 'wiki/a.png']) {
+  assert.equal(isSyncableTextPath('.raw/jc-media/文档/资料.md'), true)
+  for (const path of ['.raw/.sync/state.json', 'jc-media/a.txt', '.raw/jc-media/图片/a.txt', '.env.local', 'credentials.json', 'wiki/a.png']) {
     assert.equal(isSyncableTextPath(path), false)
   }
 })

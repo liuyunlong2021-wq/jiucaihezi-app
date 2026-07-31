@@ -136,6 +136,7 @@ export interface MediaTask {
   /** Desktop ChatPanel 归属；只用于媒体任务投影，不属于 OpenCode 文本状态 */
   sessionId?: string
   directory?: string
+  memory?: boolean
   /** 生成参数快照 */
   params?: Record<string, unknown>
   route?: CreationRunPlan['route']
@@ -420,6 +421,7 @@ interface MediaTaskSubmitParams {
   chatMessageId?: string
   sessionId?: string
   directory?: string
+  memory?: boolean
   /** 图片生成参数 */
   imageParams?: Partial<ImageGenParams>
   /** 视频生成参数 */
@@ -575,6 +577,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         taskId: task.id,
         mimeType,
         sourceUrl: url,
+        memory: task.memory,
       })
       await createProjectFileActions(createRuntimeProjectFileService()).importMedia({
         owner: projectId,
@@ -638,6 +641,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           kind,
           prompt: task.prompt || task.modelLabel || '',
           sourceUrl: url,
+          memory: task.memory,
         })
         task.assetUri = filePath
         task.projectPath = projectPath
@@ -1036,6 +1040,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       chatMessageId: params.chatMessageId,
       sessionId: params.sessionId,
       directory: params.directory,
+      memory: params.memory,
       params: {
         ...(params.imageParams || {}),
         ...(params.videoParams || {}),

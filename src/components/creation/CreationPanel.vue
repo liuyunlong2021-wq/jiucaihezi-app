@@ -663,7 +663,7 @@ async function runCreationViaTaskStore() {
 
     try {
       const origin = memoryMediaOrigin.value
-      const taskId = await mediaTaskStore.submitTask({
+      await mediaTaskStore.submitTask({
         type: mediaType,
         model: m.modelName,
         modelLabel: m.label,
@@ -677,9 +677,9 @@ async function runCreationViaTaskStore() {
           chatMessageId: origin.key,
           sessionId: origin.conversationId,
           directory: isTauriRuntime() ? origin.owner : undefined,
+          memory: true,
         } : {}),
       })
-      if (origin) emitEvent('memory-media-task-submitted', { taskId, origin })
     } catch (e: any) {
       cpState.generating = creationRunningCount.value > 0
       cpState.progressText = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
@@ -1536,6 +1536,7 @@ async function addCanvasFiles(files: Iterable<File>) {
         projectDir: owner,
         kind,
         prompt: file.name,
+        memory: Boolean(memoryMediaOrigin.value),
       })
       if (!isCurrentCanvasMediaRequest(ownership)) return
       const filePath = isTauriRuntime() ? persisted.filePath : persisted.projectPath

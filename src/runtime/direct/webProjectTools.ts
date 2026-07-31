@@ -6,10 +6,18 @@ import {
   linesPage,
   parseCreativeToolArguments,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
+  MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   MEMORY_FILE_TOOL_DEFINITIONS,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
+import {
+  artifactFilename,
+  createArtifactHtml,
+  createDocumentArtifact,
+  renderMemoryArtifactImage,
+  type MemoryImageRenderer,
+} from '@/runtime/memory/memoryArtifactTools'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
@@ -33,7 +41,11 @@ export function buildWebProjectToolDefinitions() {
 }
 
 export function buildMemoryWebProjectToolDefinitions() {
-  const tools = [...WEB_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS]
+  const tools = [
+    ...WEB_PROJECT_TOOL_DEFINITIONS,
+    ...MEMORY_FILE_TOOL_DEFINITIONS,
+    ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
+  ]
   return [
     ...tools,
     ...getMcpBridgeToolDefinitions({ coreToolNames: tools.map(tool => tool.function.name) }),
@@ -44,6 +56,7 @@ export function createWebProjectToolExecutor(input: {
   projectId: string
   files: WebProjectFiles
   fetcher?: typeof fetch
+  renderImage?: MemoryImageRenderer
 }): DirectToolExecutor {
   const fetcher = input.fetcher || fetch
   const skills = createCreativeSkillSession(fetcher)
@@ -179,6 +192,36 @@ export function createWebProjectToolExecutor(input: {
     if (name === 'delete') {
       await input.files.remove(requireProject(), String(args.path || ''))
       return { content: `已删除浏览器本地项目资源: ${args.path}` }
+    }
+
+    if (name === 'export_markdown_png') {
+      const blob = await (input.renderImage || renderMemoryArtifactImage)({
+        title: String(args.title), content: String(args.content), width: args.width as number | undefined,
+      })
+      const entry = await input.files.writeBinary(
+        requireProject(), `.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`, blob,
+        { category: 'image', mimeType: 'image/png', collision: 'keep-both' },
+      )
+      return { content: `已导出 Markdown 图片: ${entry.metadata?.relativePath}` }
+    }
+
+    if (name === 'create_document') {
+      const artifact = createDocumentArtifact(String(args.title), String(args.content), String(args.format) as 'docx' | 'md' | 'txt')
+      const requestedPath = `.raw/jc-media/文档/${artifact.filename}`
+      const entry = typeof artifact.data === 'string'
+        ? await input.files.write(requireProject(), requestedPath, artifact.data, { collision: 'keep-both' })
+        : await input.files.writeBinary(requireProject(), requestedPath, new Blob([artifact.data as BlobPart], { type: artifact.mimeType }), {
+            category: 'binary', mimeType: artifact.mimeType, collision: 'keep-both',
+          })
+      return { content: `已生成文档: ${entry.metadata?.relativePath}` }
+    }
+
+    if (name === 'create_html') {
+      const entry = await input.files.write(
+        requireProject(), `.raw/jc-media/文档/${artifactFilename(String(args.title), 'html')}`,
+        createArtifactHtml(String(args.title), String(args.content)), { collision: 'keep-both' },
+      )
+      return { content: `已生成 HTML: ${entry.metadata?.relativePath}` }
     }
 
     if (isMcpToolName(name)) {

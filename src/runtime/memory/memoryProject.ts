@@ -1,5 +1,6 @@
 import {
   createRuntimeProjectFileService,
+  flattenProjectResourceChange,
   type ProjectFileService,
 } from '@/services/projectFileService'
 import { executeWikiAction, type WikiWorkspace } from '@/runtime/direct/wikiRuntime'
@@ -10,13 +11,19 @@ import {
   appendConversationTurn,
   createConversationTranscript,
   parseConversationTranscript,
+  remapConversationAttachmentPaths,
   renameConversationTranscript,
-  type ConversationAttachment,
   type ConversationTranscript,
   type ConversationTurn,
 } from './conversationTranscript'
 
 const MAX_WRITE_ATTEMPTS = 3
+export const MEMORY_MEDIA_DIRECTORIES = [
+  '.raw/jc-media/文档',
+  '.raw/jc-media/图片',
+  '.raw/jc-media/视频',
+  '.raw/jc-media/音频',
+] as const
 
 export interface MemoryConversation {
   resource: ProjectResource
@@ -35,6 +42,10 @@ export async function inspectMemoryProject(
   const resources = await files.list(owner)
   const hasTree = (path: string) => resources.some(resource => resource.path === path || resource.path.startsWith(`${path}/`))
   const initialized = (hasTree('wiki') || hasTree('docs/wiki')) && hasTree(CONVERSATION_DIRECTORY)
+  if (initialized) {
+    await ensureMemoryDirectories(owner, files, resources)
+    await migrateLegacyMemoryMaterials(owner, files)
+  }
   return {
     initialized,
     conversations: initialized ? await listMemoryConversations(owner, files) : [],
@@ -46,7 +57,8 @@ export async function initializeMemoryProject(
   files: ProjectFileService = createRuntimeProjectFileService(),
 ): Promise<void> {
   await executeWikiAction(wikiWorkspace(owner, files), { action: 'scaffold', type: 'generic' })
-  await files.createFolder(owner, CONVERSATION_DIRECTORY)
+  await ensureMemoryDirectories(owner, files)
+  await migrateLegacyMemoryMaterials(owner, files)
 }
 
 export async function listMemoryConversations(
@@ -92,23 +104,24 @@ export async function loadMemoryConversation(
   return { resource, transcript }
 }
 
-export async function appendMemoryTurn(
+export async function appendMemoryRound(
   resource: ProjectResource,
-  role: ConversationTurn['role'],
-  content: string,
+  userTurn: ConversationTurn,
+  assistantContent: string,
   files: ProjectFileService = createRuntimeProjectFileService(),
-  attachments?: ConversationAttachment[],
-  mode?: ConversationTurn['mode'],
+  title?: string,
 ): Promise<MemoryConversation> {
-  const turn: ConversationTurn = {
+  if (userTurn.role !== 'user') throw new Error('本轮消息必须来自用户')
+  const assistantTurn: ConversationTurn = {
     id: uniqueId('turn'),
-    role,
-    content: String(content || '').trim(),
+    role: 'assistant',
+    content: String(assistantContent || '').trim(),
     createdAt: new Date().toISOString(),
-    attachments: attachments?.length ? attachments : undefined,
-    mode,
   }
-  return mutateConversation(resource, files, current => appendConversationTurn(current, turn))
+  return mutateConversation(resource, files, current => {
+    const complete = appendConversationTurn(appendConversationTurn(current, userTurn), assistantTurn)
+    return title ? renameConversationTranscript(complete, title) : complete
+  })
 }
 
 export async function renameMemoryConversation(
@@ -173,4 +186,72 @@ async function findResource(owner: string, path: string, files: ProjectFileServi
 function uniqueId(prefix: string): string {
   const id = globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   return `${prefix}-${id}`
+}
+
+async function ensureMemoryDirectories(
+  owner: string,
+  files: ProjectFileService,
+  current?: ProjectResource[],
+): Promise<void> {
+  const existing = new Set((current || await files.list(owner))
+    .filter(resource => resource.isDirectory).map(resource => resource.path))
+  for (const path of [CONVERSATION_DIRECTORY, ...MEMORY_MEDIA_DIRECTORIES]) {
+    if (!existing.has(path)) await files.createFolder(owner, path)
+  }
+}
+
+async function migrateLegacyMemoryMaterials(owner: string, files: ProjectFileService): Promise<void> {
+  const resources = await files.list(owner)
+  const directories = new Map(resources.filter(resource => resource.isDirectory).map(resource => [resource.path, resource]))
+  const groups = new Map<string, ProjectResource[]>()
+  const movedPaths = new Map<string, string>()
+  for (const resource of resources) {
+    if (resource.isDirectory) continue
+    const target = legacyMaterialTarget(resource)
+    if (target) groups.set(target, [...(groups.get(target) || []), resource])
+  }
+  for (const [target, sources] of groups) {
+    const directory = directories.get(target)
+    if (!directory) throw new Error(`素材目录不存在: ${target}`)
+    const plan = await files.planBatch({ kind: 'move', resources: sources, targetDirectory: directory })
+    const result = await files.executeBatch(plan, 'keep-both')
+    if (result.failures.length) throw new Error(result.failures[0]!.message)
+    if (result.change) {
+      for (const change of flattenProjectResourceChange(result.change)) {
+        if (change.type === 'renamed') movedPaths.set(change.oldResource.path, change.resource.path)
+      }
+    }
+  }
+  if (movedPaths.size) {
+    for (const conversation of await listMemoryConversations(owner, files)) {
+      await mutateConversation(conversation.resource, files, current =>
+        remapConversationAttachmentPaths(conversation.resource.path, current, movedPaths),
+      )
+    }
+  }
+
+  const after = await files.list(owner)
+  const paths = new Set(after.map(resource => resource.path))
+  for (const path of [
+    'jc-materials/originals', 'jc-materials/markdown', 'jc-materials',
+    'jc-media/uploads', 'jc-media/images', 'jc-media/videos', 'jc-media/audios', 'jc-media',
+  ]) {
+    const directory = after.find(resource => resource.isDirectory && resource.path === path)
+    if (!directory || [...paths].some(item => item.startsWith(`${path}/`))) continue
+    await files.remove(directory)
+    paths.delete(path)
+  }
+}
+
+function legacyMaterialTarget(resource: ProjectResource): string | null {
+  if (resource.path.startsWith('jc-materials/')) return '.raw/jc-media/文档'
+  if (resource.path.startsWith('jc-media/images/')) return '.raw/jc-media/图片'
+  if (resource.path.startsWith('jc-media/videos/')) return '.raw/jc-media/视频'
+  if (resource.path.startsWith('jc-media/audios/')) return '.raw/jc-media/音频'
+  if (!resource.path.startsWith('jc-media/uploads/')) return null
+  const mime = resource.mimeType || ''
+  if (mime.startsWith('image/') || /\.(?:png|jpe?g|gif|webp|svg|ico|bmp)$/i.test(resource.path)) return '.raw/jc-media/图片'
+  if (mime.startsWith('video/') || /\.(?:mp4|mov|avi|webm|mkv)$/i.test(resource.path)) return '.raw/jc-media/视频'
+  if (mime.startsWith('audio/') || /\.(?:mp3|wav|ogg|m4a|flac)$/i.test(resource.path)) return '.raw/jc-media/音频'
+  return '.raw/jc-media/文档'
 }

@@ -66,6 +66,11 @@ test('memory space and conversations are created only by their explicit actions'
   assert.match(workbench, /'新建记忆空间'/)
   assert.match(workbench, /<span>新建对话<\/span>/)
   assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
+  for (const path of ['.raw/jc-media/文档', '.raw/jc-media/图片', '.raw/jc-media/视频', '.raw/jc-media/音频']) {
+    assert.match(project, new RegExp(path))
+  }
+  assert.match(project, /migrateLegacyMemoryMaterials[\s\S]*kind: 'move'[\s\S]*'keep-both'/)
+  assert.match(project, /appendMemoryRound[\s\S]*return mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/)
 })
 
 test('mobile conversation deletion confirms permanent removal', () => {
@@ -139,14 +144,20 @@ test('memory workbench saves Office attachments as durable project materials', (
   assert.match(workbench, /已保存 · 已解析/)
   assert.doesNotMatch(workbench, /textContent: processed\.textContent/)
   assert.match(workbench, /value: ''/)
+  assert.match(workbench, /resource\.runtime === 'desktop'/)
+  assert.match(workbench, /document_path_to_markdown_file/)
+  assert.match(workbench, /sourcePath: `\$\{resource\.owner\}\/\$\{resource\.path\}`/)
+  assert.match(workbench, /outputDir: `\$\{resource\.owner\}\/\.raw\/jc-media\/文档`/)
+  assert.match(workbench, /referencingDocuments\.has\(referenceKey\)/)
+  assert.match(workbench, /\(resource\.size \|\| 0\) > 20 \* 1024 \* 1024/)
   assert.match(workbench, /await files\.readBinary\(resource\)/)
+  assert.match(workbench, /legacyPath = resource\.path\.startsWith/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
-  assert.match(tree, /path === 'jc-materials'\) return 'JC 原始素材'/)
-  assert.match(tree, /path === 'jc-materials\/originals'\) return '原始文件'/)
-  assert.match(tree, /path === 'jc-materials\/markdown'\) return '可读文档'/)
-  assert.match(tree, /memoryMaterialDisplayName\(item\.node\.path, item\.node\.name\)/)
+  assert.match(workbench, /\.raw\/jc-media\/文档/)
+  assert.doesNotMatch(workbench, /jc-materials/)
+  assert.doesNotMatch(tree, /memoryMaterialDisplayName/)
   assert.match(tree, /while \(parts\.length\)[\s\S]*findLoadedDirectory\(parts\.join\('\/'\)\)[\s\S]*parts\.pop\(\)/)
-  assert.match(runtime, /只写了尚未执行的脚本不算完成/)
+  assert.doesNotMatch(runtime, /只写了尚未执行的脚本不算完成/)
 })
 
 test('memory composer keeps quick and memory execution in one Raw conversation', () => {
@@ -155,7 +166,9 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
 
   assert.match(workbench, /executionMode = ref<ConversationMode>\('memory'\)/)
   assert.match(workbench, /快速[\s\S]*记忆/)
-  assert.match(workbench, /appendMemoryTurn\([\s\S]*attachmentMetadata\(pendingAttachments\),[\s\S]*pendingMode/)
+  assert.match(workbench, /appendMemoryRound\(active\.resource, userTurn, reply, files, title\)/)
+  assert.match(runtime, /messages: \[input\.userTurn\]/)
+  assert.match(runtime, /rawPath: string/)
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
   assert.match(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS/)
   assert.match(runtime, /if \(!memoryMode && !hasDocumentSources && !hasDirectUrls\)[\s\S]*tools: undefined/)
@@ -170,7 +183,7 @@ test('memory composer routes pasted images and media plans into the existing cre
   assert.match(workbench, /@paste="handleComposerPaste"/)
   assert.match(workbench, /clipboardData\?\.items/)
   assert.match(workbench, /buildExplicitMediaReferences/)
-  assert.match(workbench, /jc-media\/uploads/)
+  assert.match(workbench, /\.raw\/jc-media\/\$\{type === 'image' \? '图片'/)
   assert.match(workbench, /projectPath: resourcePath/)
   assert.match(workbench, /conversationMediaContext/)
   assert.match(workbench, /refreshMediaPlanReferenceValues/)
@@ -210,6 +223,8 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(runtime, /buildToolResultMessages\(/)
   assert.match(runtime, /selectedSkillNames\.map\(\(name, index\)/)
   assert.match(runtime, /function: \{ name: 'skill', arguments: JSON\.stringify\(\{ name \}\) \}/)
+  assert.match(runtime, /buildMemoryDesktopToolDefinitions\(\)/)
+  assert.match(runtime, /buildMemoryWebProjectToolDefinitions\(\)/)
 })
 
 test('memory web search is an explicit removable one-turn @ option', () => {
@@ -287,7 +302,7 @@ test('memory media results stay project-first, downloadable, locatable and theme
 
   assert.match(writer, /projectPath: resource\.path/)
   assert.match(tasks, /task\.projectPath = projectPath/)
-  assert.match(workbench, /\u5e76\u4fdd\u5b58\u5230 \$\{projectPath\}/)
+  assert.match(workbench, /mediaTaskIdForPlan/)
   assert.doesNotMatch(workbench, /\$\{result\.url \|\| result\.text \|\| ''\}/)
   assert.match(bubble, /> \u4e0b\u8f7d\s*<\/button>/)
   assert.match(bubble, /project-filetree:locate/)
@@ -320,7 +335,8 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /v-for="turn in timelineTurns"/)
   assert.match(workbench, /turn\.id === 'streaming-assistant' \? renderStreamingText\(content\) : renderMemoryMarkdown\(content\)/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
-  assert.match(workbench, /const complete = await appendMemoryTurn[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/)
+  assert.match(workbench, /const complete = await appendMemoryRound[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/)
+  assert.match(workbench, /pendingUserTurn\.value = userTurn/)
   assert.match(workbench, /executionMode\.value =[\s\S]*await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
   assert.match(scrollNav, /querySelectorAll\('\.msg, \.memory-message'\)/)
@@ -345,7 +361,7 @@ test('memory run status follows real tool start and end events without entering 
   assert.doesNotMatch(workbench, /opencodeClient|openCodeSyncStore|AgentStatusBar/)
 })
 
-test('memory Desktop reuses the three-action tool approval for the current run', () => {
+test('memory Desktop keeps always-allow for the current conversation in this App session', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
@@ -354,10 +370,20 @@ test('memory Desktop reuses the three-action tool approval for the current run',
   assert.match(workbench, /pendingMemoryToolApproval/)
   assert.match(workbench, /<ToolApprovalStrip/)
   assert.match(workbench, /decision === 'always'/)
+  assert.match(workbench, /memoryToolAlwaysAllowedConversations\.has\(active\.transcript\.id\)/)
+  assert.match(workbench, /memoryToolAlwaysAllowedConversations\.add\(active\.transcript\.id\)/)
   assert.match(workbench, /call\.function\.name !== 'delete'/)
   assert.doesNotMatch(workbench, /localStorage[\s\S]{0,120}始终允许/)
   assert.match(workbench, /memoryRunGeneration\+\+/)
   assert.match(workbench, /settleMemoryToolApproval\('reject'\)[\s\S]*abortController\?\.abort\(\)/)
+})
+
+test('memory run status does not render the legacy duplicate status line', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(workbench, /v-else-if="!runVisible && \(status \|\| error\)" class="memory-status"/)
+  assert.doesNotMatch(runtime, /以最后一条用户消息为当前指令/)
 })
 
 test('memory settings show the build version at the bottom', () => {
@@ -370,11 +396,11 @@ test('memory settings show the build version at the bottom', () => {
 test('memory media execution stays in the creation panel while settled results return to chat', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /onEvent\('memory-media-task-submitted'/)
-  assert.match(workbench, /mediaTaskResources\.set\(taskId/)
+  assert.match(workbench, /emitEvent\('memory-media-plan-load'/)
+  assert.match(workbench, /mediaTaskIdForPlan/)
   assert.match(workbench, /mediaResultTaskId/)
   assert.match(workbench, /<MediaTaskBubble/)
-  assert.match(workbench, /recordMediaResult/)
+  assert.doesNotMatch(workbench, /appendMemoryTurn/)
   assert.doesNotMatch(workbench, /mediaPlanStatus|mediaGenerationCounts|approveMediaPlan/)
 })
 
@@ -503,7 +529,9 @@ test('memory navigation separates Raw conversations from project files and trans
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(tree, /path === '\.raw' \|\| path\.startsWith\('\.raw\/'\)/)
+  assert.match(tree, /'\.raw\/\.sync'/)
+  assert.match(tree, /'\.raw\/对话记录'/)
+  assert.match(tree, /isProtectedMemoryPath[\s\S]*path === '\.raw'/)
   assert.match(workbench, /const conversations = ref<MemoryConversation\[\]>\(\[\]\)/)
   assert.match(workbench, /class="memory-conversation-trigger"/)
   assert.match(workbench, /filteredConversations/)

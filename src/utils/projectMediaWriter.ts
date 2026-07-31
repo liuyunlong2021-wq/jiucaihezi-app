@@ -57,6 +57,7 @@ export async function writeProjectMedia(opts: {
   kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
   prompt?: string
   sourceUrl?: string
+  memory?: boolean
 }): Promise<WriteProjectMediaResult> {
   const ext = mimeToExt(opts.mime, opts.sourceUrl)
   const promptPart = sanitizeFilename(opts.prompt || '')
@@ -65,8 +66,10 @@ export async function writeProjectMedia(opts: {
   const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
   const filename = promptPart ? `${ts}_${promptPart}_${rand}${ext}` : `${ts}_${rand}${ext}`
 
-  const folderName = opts.kind === 'text' ? 'text' : opts.kind === 'model3d' ? 'models' : `${opts.kind}s`
-  const relativePath = `jc-media/${folderName}/${filename}`
+  const folderName = opts.memory
+    ? opts.kind === 'image' ? '图片' : opts.kind === 'video' ? '视频' : opts.kind === 'audio' ? '音频' : '文档'
+    : opts.kind === 'text' ? 'text' : opts.kind === 'model3d' ? 'models' : `${opts.kind}s`
+  const relativePath = `${opts.memory ? '.raw/jc-media' : 'jc-media'}/${folderName}/${filename}`
 
   const [{ createProjectFileActions }, { createRuntimeProjectFileService }] = await Promise.all([
     import('@/services/projectFileActions'), import('@/services/projectFileService'),

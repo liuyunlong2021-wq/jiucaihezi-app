@@ -101,6 +101,34 @@ export function mergeConversationTranscriptContents(path: string, remote: string
   return merged
 }
 
+export function remapConversationAttachmentPaths(
+  path: string,
+  content: string,
+  paths: ReadonlyMap<string, string>,
+): string {
+  const transcript = parseConversationTranscript(path, content)
+  if (!transcript) return content
+  let changed = false
+  const turns = transcript.turns.map(turn => ({
+    ...turn,
+    attachments: turn.attachments?.map(attachment => {
+      const projectPath = attachment.projectPath && paths.get(attachment.projectPath)
+      const readablePath = attachment.readablePath && paths.get(attachment.readablePath)
+      if (!projectPath && !readablePath) return attachment
+      changed = true
+      return {
+        ...attachment,
+        ...(projectPath ? { projectPath } : {}),
+        ...(readablePath ? { readablePath } : {}),
+      }
+    }),
+  }))
+  if (!changed) return content
+  let remapped = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt)
+  for (const turn of turns) remapped = appendConversationTurn(remapped, turn)
+  return remapped
+}
+
 function serializeAttachments(attachments?: ConversationAttachment[]): string {
   if (!attachments?.length) return ''
   return ` attachments="${attribute(encodeURIComponent(JSON.stringify(attachments)))}"`
@@ -130,13 +158,13 @@ function parseAttachments(value?: string): ConversationAttachment[] | undefined 
 
 function validProjectAttachmentPath(value: unknown): value is string {
   return typeof value === 'string'
-    && (value.startsWith('jc-media/') || value.startsWith('jc-materials/'))
-    && !value.split('/').some(part => !part || part === '.' || part === '..')
+    && (value.startsWith('.raw/jc-media/') || value.startsWith('jc-media/') || value.startsWith('jc-materials/'))
+    && validSafeRelativePath(value)
 }
 
 function validReadablePath(value: unknown): value is string {
   return typeof value === 'string'
-    && !value.startsWith('.raw/')
+    && (value.startsWith('.raw/jc-media/文档/') || value.startsWith('jc-materials/'))
     && /\.(?:md|markdown|txt|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log)$/i.test(value)
     && validSafeRelativePath(value)
 }

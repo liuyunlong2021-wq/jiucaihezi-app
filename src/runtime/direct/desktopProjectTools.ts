@@ -9,6 +9,14 @@ import {
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
+import { uint8ArrayToBase64 } from '@/utils/exportSave'
+import {
+  artifactFilename,
+  createArtifactHtml,
+  createDocumentArtifact,
+  renderMemoryArtifactImage,
+  type MemoryImageRenderer,
+} from '@/runtime/memory/memoryArtifactTools'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
 type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
@@ -96,6 +104,7 @@ export function createDesktopProjectToolExecutor(input: {
   fetcher?: typeof fetch
   loadSkill?: LocalSkillLoader
   attachments?: TerminalAttachment[]
+  renderImage?: MemoryImageRenderer
 }): DirectToolExecutor {
   const root = String(input.projectDir || '').trim()
   const skills = createCreativeSkillSession(input.fetcher)
@@ -127,6 +136,19 @@ export function createDesktopProjectToolExecutor(input: {
 
   async function readExternalFile(path: string): Promise<DesktopReadFile> {
     return await invoke('dev_read_external_file', { path, maxBytes: 30_000_000 })
+  }
+
+  async function writeGeneratedFile(path: string, data: Blob | Uint8Array | string): Promise<string> {
+    const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data
+    const encoded = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes
+    const result = await invoke('save_generated_file', {
+      path: `${requireProject().replace(/[\\/]+$/, '')}/${path}`,
+      dataBase64: uint8ArrayToBase64(encoded),
+      keepBoth: true,
+    })
+    const rootPath = requireProject().replace(/\\/g, '/').replace(/\/+$/, '')
+    const outputPath = String(result.path || '').replace(/\\/g, '/')
+    return outputPath.startsWith(`${rootPath}/`) ? outputPath.slice(rootPath.length + 1) : path
   }
 
   const wikiWorkspace: WikiWorkspace = {
@@ -311,6 +333,28 @@ export function createDesktopProjectToolExecutor(input: {
       const path = normalizeCreativeProjectPath(String(args.path))
       const result = await invoke('dev_delete_file', { root: requireProject(), relativePath: path })
       return { content: result.status === 'missing' ? `文件不存在，未删除: ${path}` : `已移入废纸篓: ${path}` }
+    }
+
+    if (name === 'export_markdown_png') {
+      const blob = await (input.renderImage || renderMemoryArtifactImage)({
+        title: String(args.title), content: String(args.content), width: args.width as number | undefined,
+      })
+      const path = await writeGeneratedFile(`.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`, blob)
+      return { content: `已导出 Markdown 图片: ${path}` }
+    }
+
+    if (name === 'create_document') {
+      const artifact = createDocumentArtifact(String(args.title), String(args.content), String(args.format) as 'docx' | 'md' | 'txt')
+      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data)
+      return { content: `已生成文档: ${path}` }
+    }
+
+    if (name === 'create_html') {
+      const path = await writeGeneratedFile(
+        `.raw/jc-media/文档/${artifactFilename(String(args.title), 'html')}`,
+        createArtifactHtml(String(args.title), String(args.content)),
+      )
+      return { content: `已生成 HTML: ${path}` }
     }
 
     if (name === 'terminal') {

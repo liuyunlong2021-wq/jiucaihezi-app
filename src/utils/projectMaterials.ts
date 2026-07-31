@@ -1,5 +1,4 @@
-const ORIGINALS = 'jc-materials/originals'
-const MARKDOWN = 'jc-materials/markdown'
+const DOCUMENTS = '.raw/jc-media/文档'
 
 function safeName(name: string): string {
   return (String(name || '').replace(/\\/g, '/').split('/').pop() || 'document')
@@ -18,13 +17,13 @@ export function nextMaterialPath(directory: string, name: string, existing: Set<
 }
 
 export function nextOriginalMaterialPath(name: string, existing: Set<string>): string {
-  return nextMaterialPath(ORIGINALS, name, existing)
+  return nextMaterialPath(DOCUMENTS, name, existing)
 }
 
 export function materialMarkdownPath(originalPath: string): string {
-  return `${MARKDOWN}/${safeName(originalPath)}.md`
+  return `${DOCUMENTS}/${safeName(originalPath).replace(/\.[^.]+$/, '') || 'document'}.md`
 }
 
 export function nextMaterialMarkdownPath(originalPath: string, existing: Set<string>): string {
-  return nextMaterialPath(MARKDOWN, `${safeName(originalPath)}.md`, existing)
+  return nextMaterialPath(DOCUMENTS, materialMarkdownPath(originalPath).split('/').pop()!, existing)
 }

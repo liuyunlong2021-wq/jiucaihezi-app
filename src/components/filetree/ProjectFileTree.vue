@@ -442,13 +442,6 @@ async function refreshAffectedDirectory(changedPath: string) {
   if (treeRoot.value) await refreshDirectory(treeRoot.value)
 }
 
-function memoryMaterialDisplayName(path: string, fallback: string): string {
-  if (!props.memoryMode) return fallback
-  if (path === 'jc-materials') return 'JC 原始素材'
-  if (path === 'jc-materials/originals') return '原始文件'
-  if (path === 'jc-materials/markdown') return '可读文档'
-  return fallback
-}
 async function refreshLoadedDirectories() {
   const root = treeRoot.value
   if (!root) {
@@ -603,7 +596,16 @@ const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
 function isVisibleMemoryResource(path: string): boolean {
-  return !(props.memoryMode && (path === '.raw' || path.startsWith('.raw/')))
+  return !(props.memoryMode && [
+    '.raw/.sync',
+    '.raw/对话记录',
+  ].some(hidden => path === hidden || path.startsWith(`${hidden}/`)))
+}
+function isProtectedMemoryPath(path: string): boolean {
+  return path === '.raw' || [
+    '.raw/.sync',
+    '.raw/对话记录',
+  ].some(protectedPath => path === protectedPath || path.startsWith(`${protectedPath}/`))
 }
 function isCanvasFile(node: TreeNode | null | undefined): node is TreeNode {
   return Boolean(node && !node.isDir && node.name.toLowerCase().endsWith(`.${CANVAS_EXT}`))
@@ -926,6 +928,11 @@ async function ctxCopyRelativePath() {
 }
 function ctxCopyResources() {
   const roots = selectedResources()
+  if (props.memoryMode && roots.some(resource => isProtectedMemoryPath(resource.path))) {
+    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    closeCtxMenu()
+    return
+  }
   if (roots.length)
     resourceClipboard.value = {
       owner: roots[0].owner,
@@ -937,6 +944,11 @@ function ctxCopyResources() {
 }
 function ctxCutResources() {
   const roots = selectedResources()
+  if (props.memoryMode && roots.some(resource => isProtectedMemoryPath(resource.path))) {
+    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    closeCtxMenu()
+    return
+  }
   if (roots.length)
     resourceClipboard.value = {
       owner: roots[0].owner,
@@ -1583,6 +1595,10 @@ async function ctxRename() {
   const n = ctxMenu.value.node
   if (!n) return
   closeCtxMenu()
+  if (props.memoryMode && isProtectedMemoryPath(n.path)) {
+    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    return
+  }
   const newName = await safePrompt('重命名', n.name, { forceDom: props.memoryMode })
   if (!newName?.trim() || newName.trim() === n.name) return
   try {
@@ -1596,6 +1612,10 @@ async function ctxDelete() {
   if (!n) return
   closeCtxMenu()
   const resources = selectedResources()
+  if (props.memoryMode && resources.some(resource => isProtectedMemoryPath(resource.path))) {
+    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    return
+  }
   if (
     !resources.length ||
     resources.some(resource => deletingResourceKeys.has(resourceKey(resource)))
@@ -2482,7 +2502,7 @@ onBeforeUnmount(() => {
               <i v-if="VIDEO_EXTS.has(item.node.name.split('.').pop()?.toLowerCase() || '')">▶</i>
             </span>
             <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
-            <span class="pft-name">{{ memoryMaterialDisplayName(item.node.path, item.node.name) }}</span>
+            <span class="pft-name">{{ item.node.name }}</span>
             <span
               v-if="isDirtyProjectResource(item.node.path)"
               class="pft-dirty-dot"

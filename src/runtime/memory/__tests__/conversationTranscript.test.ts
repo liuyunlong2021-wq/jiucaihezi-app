@@ -6,6 +6,7 @@ import {
   createConversationTranscript,
   mergeConversationTranscriptContents,
   parseConversationTranscript,
+  remapConversationAttachmentPaths,
   renameConversationTranscript,
 } from '../conversationTranscript'
 
@@ -46,14 +47,14 @@ test('conversation transcript keeps a project attachment locator without embeddi
     createdAt: '2026-07-24T10:01:00.000Z',
     attachments: [{
       id: 'image-1', name: 'logo.png', mime: 'image/png', size: 12, kind: 'image',
-      projectPath: 'jc-media/uploads/image-1-logo.png',
+      projectPath: '.raw/jc-media/图片/logo.png',
     }],
   })
   const parsed = parseConversationTranscript('.raw/对话记录/chat_attachment.md', withAttachment)
 
   assert.deepEqual(parsed?.turns[0]?.attachments, [{
     id: 'image-1', name: 'logo.png', mime: 'image/png', size: 12, kind: 'image',
-    projectPath: 'jc-media/uploads/image-1-logo.png',
+    projectPath: '.raw/jc-media/图片/logo.png',
   }])
   assert.doesNotMatch(withAttachment, /data:image|base64/)
 })
@@ -64,15 +65,15 @@ test('conversation transcript keeps document source and readable locators withou
     id: 'turn_document', role: 'user', content: '请总结文档', createdAt: '2026-07-24T10:01:00.000Z',
     attachments: [{
       id: 'document-1', name: '方案.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      size: 1024, kind: 'file', projectPath: 'jc-materials/originals/方案.docx',
-      readablePath: 'jc-materials/markdown/方案.docx.md', characterCount: 83017,
+      size: 1024, kind: 'file', projectPath: '.raw/jc-media/文档/方案.docx',
+      readablePath: '.raw/jc-media/文档/方案.docx.md', characterCount: 83017,
     }],
   })
 
   assert.deepEqual(parseConversationTranscript('.raw/对话记录/chat_document.md', content)?.turns[0]?.attachments?.[0], {
     id: 'document-1', name: '方案.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-    size: 1024, kind: 'file', projectPath: 'jc-materials/originals/方案.docx',
-    readablePath: 'jc-materials/markdown/方案.docx.md', characterCount: 83017,
+    size: 1024, kind: 'file', projectPath: '.raw/jc-media/文档/方案.docx',
+    readablePath: '.raw/jc-media/文档/方案.docx.md', characterCount: 83017,
   })
   assert.doesNotMatch(content, /正文内容|base64|data:/)
 })
@@ -82,14 +83,14 @@ test('conversation transcript preserves safe text sources and rejects Raw or bin
   const content = appendConversationTurn(empty, {
     id: 'turn_text', role: 'user', content: '查看文本', createdAt: '2026-07-24T10:01:00.000Z',
     attachments: [
-      { id: 'text', name: '笔记.txt', mime: 'text/plain', size: 10, kind: 'file', readablePath: 'jc-materials/originals/笔记.txt' },
+      { id: 'text', name: '笔记.txt', mime: 'text/plain', size: 10, kind: 'file', readablePath: '.raw/jc-media/文档/笔记.txt' },
       { id: 'raw', name: 'raw.md', mime: 'text/markdown', size: 10, kind: 'file', readablePath: '.raw/对话记录/raw.md' },
-      { id: 'binary', name: 'word.docx', mime: 'application/octet-stream', size: 10, kind: 'file', readablePath: 'jc-materials/originals/word.docx' },
+      { id: 'binary', name: 'word.docx', mime: 'application/octet-stream', size: 10, kind: 'file', readablePath: '.raw/jc-media/文档/word.docx' },
     ],
   })
   const attachments = parseConversationTranscript('.raw/对话记录/chat_text.md', content)?.turns[0]?.attachments
 
-  assert.equal(attachments?.[0]?.readablePath, 'jc-materials/originals/笔记.txt')
+  assert.equal(attachments?.[0]?.readablePath, '.raw/jc-media/文档/笔记.txt')
   assert.equal(attachments?.[1]?.readablePath, undefined)
   assert.equal(attachments?.[2]?.readablePath, undefined)
 })
@@ -140,4 +141,28 @@ test('conversation transcript merges concurrent append-only turns by id', () => 
   assert.deepEqual(parseConversationTranscript(path, merged || '')?.turns.map(turn => turn.content), [
     '第一问', '第一答', '第二问',
   ])
+})
+
+test('conversation transcript remaps legacy attachment paths without changing the turn pair', () => {
+  const path = '.raw/对话记录/chat_migrate.md'
+  let content = createConversationTranscript('chat_migrate', '迁移')
+  content = appendConversationTurn(content, {
+    id: 'turn_1', role: 'user', content: '总结资料', createdAt: '2026-07-24T10:01:00.000Z',
+    attachments: [{
+      id: 'doc', name: '资料.docx', mime: 'application/octet-stream', size: 10, kind: 'file',
+      projectPath: 'jc-materials/originals/资料.docx', readablePath: 'jc-materials/markdown/资料.docx.md',
+    }],
+  })
+  content = appendConversationTurn(content, {
+    id: 'turn_2', role: 'assistant', content: '已总结', createdAt: '2026-07-24T10:01:01.000Z',
+  })
+  const remapped = remapConversationAttachmentPaths(path, content, new Map([
+    ['jc-materials/originals/资料.docx', '.raw/jc-media/文档/资料.docx'],
+    ['jc-materials/markdown/资料.docx.md', '.raw/jc-media/文档/资料.docx.md'],
+  ]))
+  const parsed = parseConversationTranscript(path, remapped)
+
+  assert.deepEqual(parsed?.turns.map(turn => turn.role), ['user', 'assistant'])
+  assert.equal(parsed?.turns[0]?.attachments?.[0]?.projectPath, '.raw/jc-media/文档/资料.docx')
+  assert.equal(parsed?.turns[0]?.attachments?.[0]?.readablePath, '.raw/jc-media/文档/资料.docx.md')
 })

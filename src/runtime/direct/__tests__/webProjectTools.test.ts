@@ -96,11 +96,38 @@ test('web project tool definitions append connected MCP tools without Desktop te
     )
     assert.deepEqual(
       buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'mcp__docs__lookup'],
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'mcp__docs__lookup'],
     )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
+})
+
+test('web memory artifact tools generate real project files and keep same-name outputs', async () => {
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
+  const project = await files.createProject('作品工具')
+  const execute = createWebProjectToolExecutor({
+    projectId: project.id,
+    files,
+    renderImage: async () => new Blob(['PNG'], { type: 'image/png' }),
+  })
+
+  assert.match((await execute(call('export_markdown_png', { title: '周报', content: '# 周报' }))).content, /\.raw\/jc-media\/图片\/周报\.png/)
+  assert.match((await execute(call('export_markdown_png', { title: '周报', content: '# 周报' }))).content, /周报 \(1\)\.png/)
+  assert.match((await execute(call('create_document', { title: '周报', content: '# 周报', format: 'docx' }))).content, /\.raw\/jc-media\/文档\/周报\.docx/)
+  assert.match((await execute(call('create_html', { title: '周报', content: '# 周报' }))).content, /\.raw\/jc-media\/文档\/周报\.html/)
+
+  const image = await files.readBinary(project.id, '.raw/jc-media/图片/周报.png')
+  const docx = new Uint8Array(await (await files.readBinary(project.id, '.raw/jc-media/文档/周报.docx')).arrayBuffer())
+  const html = await files.read(project.id, '.raw/jc-media/文档/周报.html')
+  assert.equal(await image.text(), 'PNG')
+  assert.deepEqual([...docx.slice(0, 2)], [0x50, 0x4b])
+  assert.match(html.content, /<!doctype html>/i)
+  assert.match(html.content, /<h1>周报<\/h1>/)
+  await assert.rejects(
+    () => execute(call('create_document', { title: '错误', content: '正文', format: 'pdf' })),
+    /不支持的文档格式/,
+  )
 })
 
 test('web project tools execute the native Wiki runtime without Python or Node', async () => {

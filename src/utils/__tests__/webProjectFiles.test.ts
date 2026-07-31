@@ -582,6 +582,24 @@ test('web project batch move preserves binary identity and returns every renamed
   assert.equal(await (await files.readBinary(project.id, 'target/assets/poster.png')).text(), '像素')
 })
 
+test('web project batch move keep-both preserves every same-name source', async () => {
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter().adapter)
+  const project = await files.createProject('批量移动重名')
+  await files.write(project.id, 'one/note.md', '一')
+  await files.write(project.id, 'two/note.md', '二')
+  await files.write(project.id, 'target/note.md', '原')
+
+  const result = await files.executeBatch(project.id, {
+    kind: 'move', roots: ['one/note.md', 'two/note.md'], targetDirectory: 'target', policy: 'keep-both',
+  })
+
+  assert.deepEqual(result.renamed.map(item => String(item.entry.metadata?.relativePath)), [
+    'target/note (1).md', 'target/note (2).md',
+  ])
+  assert.equal((await files.read(project.id, 'target/note (1).md')).content, '一')
+  assert.equal((await files.read(project.id, 'target/note (2).md')).content, '二')
+})
+
 test('web project batch overwrite deletes the complete target before creating the copy', async () => {
   const binary = memoryBinaryAdapter()
   const files = createWebProjectFiles(memoryAdapter(), () => {}, binary.adapter)

@@ -88,9 +88,12 @@ export function webCreationMediaProjectPath(params: {
   taskId?: string
   mimeType?: string
   sourceUrl?: string
+  memory?: boolean
 }): string {
-  const directory = params.type === 'video' ? 'videos' : params.type === 'audio' ? 'audios' : params.type === 'model3d' ? 'models' : 'images'
-  return `jc-media/${directory}/${webMediaFilename(params)}`
+  const directory = params.memory
+    ? params.type === 'video' ? '视频' : params.type === 'audio' ? '音频' : params.type === 'image' ? '图片' : '文档'
+    : params.type === 'video' ? 'videos' : params.type === 'audio' ? 'audios' : params.type === 'model3d' ? 'models' : 'images'
+  return `${params.memory ? '.raw/jc-media' : 'jc-media'}/${directory}/${webMediaFilename(params)}`
 }
 
 function webRemoteMediaFile(params: {

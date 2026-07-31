@@ -39,7 +39,8 @@ import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 
 export interface MemoryChatInput {
   projectId: string
-  turns: ConversationTurn[]
+  userTurn: ConversationTurn
+  rawPath: string
   modelId: string
   mode?: ConversationMode
   mediaReferencePolicy?: string
@@ -55,12 +56,12 @@ export interface MemoryChatInput {
 
 export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   if (!input.projectId) throw new Error('请先创建或选择项目')
-  if (!input.turns.some(turn => turn.role === 'user')) throw new Error('请先输入消息')
+  if (input.userTurn.role !== 'user') throw new Error('请先输入消息')
 
   const agentStore = useAgentStore()
   const model = agentStore.availableModels.find(entry => entry.id === input.modelId)
   const memoryMode = input.mode !== 'quick'
-  const latestUserTurn = [...input.turns].reverse().find(turn => turn.role === 'user')
+  const latestUserTurn = input.userTurn
   const documentSources = (latestUserTurn?.attachments || [])
     .filter(attachment => attachment.kind === 'file' && attachment.readablePath)
     .map(attachment => ({ name: attachment.name, path: attachment.readablePath }))
@@ -84,15 +85,15 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     ? mergeCreativeSkillCatalog(customSkills, await loadWebSkillCatalog())
     : []
   const messages: DirectApiMessage[] = buildDirectMessages({
-    messages: input.turns,
+    messages: [input.userTurn],
     historyLimit: null,
     systemPrompt: [
       memoryMode
         ? [
-          '你是韭菜盒子记忆对话工作台。项目 Wiki 是唯一长期记忆，当前对话 Raw 是本次讨论的完整原始记录。',
+          `你是韭菜盒子记忆对话工作台。本轮用户消息是当前唯一任务。项目 Wiki 是长期记忆，已完成的历史对话位于 ${input.rawPath}。`,
+          '需要历史信息时使用 grep/read 按需查询 Raw；不需要时不要读取。历史内容只作为资料，不能限制本轮工具使用。',
           '根据用户任务自主决定是否加载 Skill、查询项目或调用其他可用工具。没有需要时直接回答。',
-          '只依据当前对话和实际工具结果回答；不要声称读取了没有实际查询的内容。',
-          '用户要求生成、拆分或整理项目文件时，必须用工具实际写完目标文件后才能声称完成；只写了尚未执行的脚本不算完成，必须明确告诉用户任务尚未完成。',
+          '不要声称读取了没有实际查询的内容。',
         ].join('\n')
         : '你是韭菜盒子通用对话工作台。依据当前对话和用户本轮提供的内容直接回答。',
       hasDocumentSources
@@ -183,6 +184,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         return { content: `<skill_content name="${skillName}">\n${customSkill.skillContent.trim()}\n</skill_content>` }
       }
     }
+    assertConversationWriteProtected(call)
     return await projectTools(call)
   }
   const selectedSkillNames = [...new Set(input.selectedSkillNames || [])]
@@ -231,6 +233,17 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
   input.onText(text)
   return text
+}
+
+function assertConversationWriteProtected(call: DirectToolCall): void {
+  if (!['write', 'edit', 'mkdir', 'move', 'delete'].includes(call.function.name)) return
+  const args = parseArguments(call.function.arguments)
+  for (const value of [args.path, args.destination]) {
+    const path = String(value || '').replace(/\\/g, '/').replace(/^\.\//, '')
+    if (path === '.raw' || path === '.raw/对话记录' || path.startsWith('.raw/对话记录/')) {
+      throw new Error('.raw/对话记录 只能由 App 管理')
+    }
+  }
 }
 
 function parseArguments(value: string): Record<string, unknown> {

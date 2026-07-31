@@ -87,10 +87,28 @@ export const MEMORY_FILE_TOOL_DEFINITIONS = [
   }, ['path']),
 ]
 
+export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
+  tool('export_markdown_png', 'Export existing text or Markdown as a styled PNG. Do not use it to create a new photo, illustration, product image, or other visual.', {
+    title: { type: 'string', description: 'Output title and filename without extension' },
+    content: { type: 'string', description: 'Complete Markdown content to render' },
+    width: { type: 'integer', description: 'Optional image width in pixels, from 480 to 1920' },
+  }, ['title', 'content']),
+  tool('create_document', 'Create a real DOCX, Markdown, or text document in the project document materials folder.', {
+    title: { type: 'string', description: 'Output title and filename without extension' },
+    content: { type: 'string', description: 'Complete document content' },
+    format: { type: 'string', enum: ['docx', 'md', 'txt'], description: 'Output document format' },
+  }, ['title', 'content', 'format']),
+  tool('create_html', 'Create a self-contained static HTML document from Markdown content in the project document materials folder.', {
+    title: { type: 'string', description: 'Output title and filename without extension' },
+    content: { type: 'string', description: 'Complete Markdown content' },
+  }, ['title', 'content']),
+]
+
 const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
 const MEMORY_DESKTOP_TOOL_DEFINITIONS = [
   ...CREATIVE_PROJECT_TOOL_DEFINITIONS.slice(0, -1),
   ...MEMORY_FILE_TOOL_DEFINITIONS,
+  ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   CREATIVE_PROJECT_TOOL_DEFINITIONS.at(-1)!,
 ]
 
@@ -126,6 +144,9 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   mkdir: { path: 'string' },
   move: { path: 'string', destination: 'string' },
   delete: { path: 'string' },
+  export_markdown_png: { title: 'string', content: 'string', width: 'integer' },
+  create_document: { title: 'string', content: 'string', format: 'string' },
+  create_html: { title: 'string', content: 'string' },
   terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }
 
@@ -150,7 +171,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
       throw new Error(`工具参数类型无效: ${key}`)
     }
   }
-  const definition = [...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS]
+  const definition = [...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS, ...MEMORY_ARTIFACT_TOOL_DEFINITIONS]
     .find(tool => tool.function.name === call.function.name)!
   for (const field of definition.function.parameters.required) {
     if (!(field in args)) throw new Error(`缺少工具参数: ${field}`)
