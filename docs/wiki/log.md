@@ -320,3 +320,5 @@
 - 版本统一为 `2.1.3`。发布前验证：focused Node 1412/1420（8 跳过）、Rust 401/402（1 忽略）、TypeScript、Web/Desktop 正式构建与产物审计通过。
 - `.raw/jc-media/{文档,图片,视频,音频}` 的 App 层迁移仍待实施；Web 生产地址和三平台 CI/Release 结果仅在真实完成后补记。
 - Web Production 已部署至 `https://04db458f.jiucaihezi.pages.dev`；正式域名 `https://jiucaihezi.studio` 返回 HTTP 200，防缓存请求加载本次构建的 `index-Bub6mWvw-jc20260610b.js`。三平台结果继续等待 tag 流水线真实完成。
+- `v2.1.3` tag 触发 GitHub Actions `30616993714`：Mac Apple Silicon、Mac Intel、Windows x64 与 `publish-manifest` 全部成功；两份 macOS DMG 均完成 Developer ID 签名、公证、SHA256 和记忆 App 边界冒烟，Windows ZIP 完成内容冒烟。
+- GitHub Release `https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v2.1.3` 为正式非草稿，含 ARM DMG、Intel DMG 和 Windows portable ZIP；服务器三个下载地址均返回 HTTP 200，`https://api.jiucaihezi.studio/updates/latest.json` 已更新为 `2.1.3`。

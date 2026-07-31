@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-07-31（`v2.1.3` Web Production 已部署：`https://04db458f.jiucaihezi.pages.dev`，正式域名 `https://jiucaihezi.studio` 返回 HTTP 200 且资源指纹与本次构建一致；三平台 CI/Release 结果在真实完成后补记。）
+> 上次刷新: 2026-07-31（`v2.1.3` 已正式发布：Web Production `https://04db458f.jiucaihezi.pages.dev` 与正式域名资源指纹一致；GitHub Actions `30616993714` 的 Mac Apple Silicon、Mac Intel、Windows x64 和更新清单任务全部成功。GitHub Release 为正式非草稿，服务器 `latest.json` 已返回 `2.1.3` 与三个平台下载地址。）
