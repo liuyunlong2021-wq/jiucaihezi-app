@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-07-31（`v2.1.3` 发布前门禁通过；Web 正式发布与三平台 CI/Release 结果在真实完成后补记。）
+> 上次刷新: 2026-07-31（`v2.1.3` Web Production 已部署：`https://04db458f.jiucaihezi.pages.dev`，正式域名 `https://jiucaihezi.studio` 返回 HTTP 200 且资源指纹与本次构建一致；三平台 CI/Release 结果在真实完成后补记。）

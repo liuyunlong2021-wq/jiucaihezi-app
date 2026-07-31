@@ -319,3 +319,4 @@
 - 文档上传后保存可读副本并由模型按需 `grep/read`，不再逐轮注入全文；画布快捷键只在焦点或事件目标位于画布内时拦截复制。
 - 版本统一为 `2.1.3`。发布前验证：focused Node 1412/1420（8 跳过）、Rust 401/402（1 忽略）、TypeScript、Web/Desktop 正式构建与产物审计通过。
 - `.raw/jc-media/{文档,图片,视频,音频}` 的 App 层迁移仍待实施；Web 生产地址和三平台 CI/Release 结果仅在真实完成后补记。
+- Web Production 已部署至 `https://04db458f.jiucaihezi.pages.dev`；正式域名 `https://jiucaihezi.studio` 返回 HTTP 200，防缓存请求加载本次构建的 `index-Bub6mWvw-jc20260610b.js`。三平台结果继续等待 tag 流水线真实完成。
