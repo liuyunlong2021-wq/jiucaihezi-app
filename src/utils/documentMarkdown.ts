@@ -155,7 +155,7 @@ async function convertWebDocumentToMarkdown(
 }
 
 export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput): Promise<DocumentToMarkdownResult> {
-  const maxChars = Math.max(1, Math.min(Number(input.maxChars || 500000), 1_000_000))
+  const maxChars = Math.max(1, Math.min(Number(input.maxChars || 20_000_000), 20_000_000))
   const outputFilename = normalizeMarkdownOutputFilename(input.file.name)
 
   if (isLikelyTextFile(input.file)) {

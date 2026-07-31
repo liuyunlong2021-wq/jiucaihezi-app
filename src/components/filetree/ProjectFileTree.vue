@@ -430,10 +430,24 @@ async function refreshDirectory(directory: TreeNode) {
   }))
 }
 async function refreshAffectedDirectory(changedPath: string) {
-  const directoryPath = changedPath.split('/').slice(0, -1).join('/')
-  const directory = findLoadedDirectory(directoryPath)
-  const target = directory?.loaded ? directory : treeRoot.value
-  if (target) await refreshDirectory(target)
+  const parts = changedPath.split('/').slice(0, -1)
+  while (parts.length) {
+    const directory = findLoadedDirectory(parts.join('/'))
+    if (directory?.loaded) {
+      await refreshDirectory(directory)
+      return
+    }
+    parts.pop()
+  }
+  if (treeRoot.value) await refreshDirectory(treeRoot.value)
+}
+
+function memoryMaterialDisplayName(path: string, fallback: string): string {
+  if (!props.memoryMode) return fallback
+  if (path === 'jc-materials') return 'JC 原始素材'
+  if (path === 'jc-materials/originals') return '原始文件'
+  if (path === 'jc-materials/markdown') return '可读文档'
+  return fallback
 }
 async function refreshLoadedDirectories() {
   const root = treeRoot.value
@@ -2468,7 +2482,7 @@ onBeforeUnmount(() => {
               <i v-if="VIDEO_EXTS.has(item.node.name.split('.').pop()?.toLowerCase() || '')">▶</i>
             </span>
             <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
-            <span class="pft-name">{{ item.node.name }}</span>
+            <span class="pft-name">{{ memoryMaterialDisplayName(item.node.path, item.node.name) }}</span>
             <span
               v-if="isDirtyProjectResource(item.node.path)"
               class="pft-dirty-dot"

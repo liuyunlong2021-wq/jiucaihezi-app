@@ -4,6 +4,7 @@ import ProjectFileTree from '@/components/filetree/ProjectFileTree.vue'
 import ChatScrollNav from '@/components/chat/ChatScrollNav.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
 import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
+import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import MemorySettings from './MemorySettings.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
@@ -22,7 +23,7 @@ import {
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
-import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
+import type { DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import {
   parseMediaPlans,
   stripMediaPlanBlocks,
@@ -59,6 +60,7 @@ import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplay
 import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
 import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
+import { materialMarkdownPath, nextMaterialMarkdownPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -98,6 +100,11 @@ const streamingText = ref('')
 const copiedTurnId = ref('')
 const status = ref('')
 const error = ref('')
+type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
+const pendingMemoryToolApproval = ref<{
+  message: string
+  resolve: (decision: MemoryToolApprovalDecision) => void
+} | null>(null)
 type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed' }
 const runVisible = ref(false)
 const runElapsed = ref(0)
@@ -128,6 +135,7 @@ let mediaObjectUrl = ''
 let projectGeneration = 0
 let backlinkGeneration = 0
 let sendInFlight = false
+let memoryRunGeneration = 0
 let offOpenResource: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
 let offMediaTaskSettled: (() => void) | null = null
@@ -338,6 +346,7 @@ onBeforeUnmount(() => {
   stopProjectWatch?.()
   stopRunTimer()
   projectGeneration++
+  settleMemoryToolApproval('reject')
   abortController?.abort()
   releaseMediaUrl()
 })
@@ -362,7 +371,7 @@ function modelGroupLabel(key: string): string {
 
 function isInternalMediaModel(modelId: string): boolean {
   const id = modelId.toLowerCase()
-  return id.startsWith('rh-') || id.includes('/rh-') || id.includes('runninghub')
+  return id.startsWith('rh-') || id.includes('/rh-') || id.includes('runninghub') || id === 'jina-search' || id === 'jina-reader'
 }
 
 function closeModelPicker(event: PointerEvent) {
@@ -383,6 +392,7 @@ function selectModel(modelId: string) {
 }
 
 async function openProject(owner: string) {
+  if (sending.value) stop()
   const generation = ++projectGeneration
   creationOpen.value = false
   creationFocused.value = false
@@ -643,6 +653,7 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 async function selectConversation(item: MemoryConversation) {
+  if (sending.value) stop()
   await openResource(await openProjectResource(files, item.resource))
 }
 
@@ -711,6 +722,7 @@ async function send() {
   const pendingMode = executionMode.value
   if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
+  const runGeneration = ++memoryRunGeneration
   sending.value = true
   beginRunStatus()
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
@@ -719,6 +731,7 @@ async function send() {
   streamingText.value = ''
   abortController = new AbortController()
   try {
+    let memoryToolAlwaysAllowed = false
     let saved = await appendMemoryTurn(
       active.resource,
       'user',
@@ -755,11 +768,24 @@ async function send() {
       webSearchEnabled: webSearchEnabled.value,
       signal: abortController.signal,
       onToolEvent: updateRunTool,
+      confirmTool: async call => {
+        if (memoryToolAlwaysAllowed && call.function.name !== 'delete') return true
+        return await new Promise<boolean>(resolve => {
+          pendingMemoryToolApproval.value = {
+            message: memoryToolApprovalMessage(call),
+            resolve: decision => {
+              if (decision === 'always' && call.function.name !== 'delete') memoryToolAlwaysAllowed = true
+              resolve(decision !== 'reject')
+            },
+          }
+        })
+      },
       onText(text) {
         status.value = '正在整理回答'
         streamingText.value = text
       },
     })
+    if (runGeneration !== memoryRunGeneration) return
     const complete = await appendMemoryTurn(saved.resource, 'assistant', reply, files)
     const completeResource = await openProjectResource(files, complete.resource)
     rememberConversation(complete)
@@ -793,6 +819,7 @@ async function send() {
     }
     stopRunTimer()
   } finally {
+    settleMemoryToolApproval('reject')
     sending.value = false
     abortController = null
     sendInFlight = false
@@ -800,7 +827,26 @@ async function send() {
 }
 
 function stop() {
+  memoryRunGeneration++
+  settleMemoryToolApproval('reject')
   abortController?.abort()
+}
+
+function settleMemoryToolApproval(decision: MemoryToolApprovalDecision) {
+  const pending = pendingMemoryToolApproval.value
+  if (!pending) return
+  pendingMemoryToolApproval.value = null
+  pending.resolve(decision)
+}
+
+function memoryToolApprovalMessage(call: DirectToolCall): string {
+  let args: Record<string, unknown> = {}
+  try { args = JSON.parse(call.function.arguments || '{}') } catch { /* runtime reports malformed arguments */ }
+  if (call.function.name === 'terminal') return String(args.reason || '').split(/[。；;\n]/)[0]?.trim().slice(0, 24) || '执行本机命令'
+  if (call.function.name === 'delete') return `删除项目资源：${String(args.path || '')}`
+  if (call.function.name === 'wiki') return '修改项目 Wiki'
+  if (call.function.name === 'write' || call.function.name === 'edit') return `修改项目外文件：${String(args.path || '')}`
+  return '允许扩展工具继续操作'
 }
 
 function beginRunStatus() {
@@ -838,7 +884,11 @@ function memoryToolLabel(name: string): string {
     grep: '搜索内容',
     write: '写入文件',
     edit: '编辑文件',
+    mkdir: '创建文件夹',
+    move: '移动文件',
+    delete: '删除文件',
     terminal: '执行命令',
+    read_url: '读取网页',
     web_search: '搜索网络',
   } as Record<string, string>)[name] || '使用扩展工具'
 }
@@ -860,30 +910,45 @@ async function addReferencedFile(payload: unknown) {
 }
 
 function isOfficeResource(resource: Pick<ProjectResource, 'name' | 'mimeType'>): boolean {
-  return detectFileType(new File([], resource.name, { type: resource.mimeType || '' })) === 'office'
+  const type = detectFileType(new File([], resource.name, { type: resource.mimeType || '' }))
+  return type === 'office' || type === 'pdf'
 }
 
 async function addProjectFileReference(resource: ProjectResource) {
   if (isOfficeResource(resource)) {
+    const existing = new Set((await files.list(resource.owner)).map(item => item.path))
+    const preferredPath = resource.path.startsWith('jc-materials/originals/') ? materialMarkdownPath(resource.path) : ''
+    let readablePath = preferredPath && existing.has(preferredPath) ? preferredPath : ''
+    let content = ''
+    if (readablePath) content = (await files.readText((await files.list(resource.owner)).find(item => item.path === readablePath)!)).content
+    else {
     const binary = await files.readBinary(resource)
     const data = new Uint8Array(binary.data.byteLength)
     data.set(binary.data)
     const file = new File([data.buffer], resource.name, {
       type: binary.mimeType || resource.mimeType || 'application/octet-stream',
     })
-    const processed = await processFile(file)
-    if (processed.status !== 'ready' || !processed.textContent) {
+      const processed = await processFile(file, { maxTextLength: 20_000_000 })
+      if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
       throw new Error(processed.error || '文档转换失败')
     }
-    if (!referencedFiles.value.some(item => item.name === resource.path)) {
-      referencedFiles.value.push({ name: resource.path, content: processed.textContent })
+      readablePath = preferredPath || nextMaterialMarkdownPath(resource.path, existing)
+      await files.createText(resource.owner, readablePath, processed.textContent)
+      content = processed.textContent
     }
+    if (!attachments.value.some(item => item.readablePath === readablePath)) attachments.value.push({
+      id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'application/octet-stream',
+      size: resource.size || 0, kind: 'file', value: '', resourcePath: resource.path,
+      readablePath, characterCount: content.length,
+    })
     return
   }
   const text = await files.readText(resource)
-  if (!referencedFiles.value.some(file => file.name === resource.path)) {
-    referencedFiles.value.push({ name: resource.path, content: text.content })
-  }
+  if (!attachments.value.some(item => item.resourcePath === resource.path)) attachments.value.push({
+    id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'text/plain', size: text.size,
+    kind: 'file', value: '', resourcePath: resource.path, readablePath: resource.path,
+    characterCount: text.content.length,
+  })
 }
 
 async function addProjectMediaReferences(payload: unknown) {
@@ -1061,46 +1126,76 @@ async function selectFiles(event: Event) {
 async function addAttachmentFiles(selected: File[]) {
   const owner = projectOwner.value
   if (!owner || !memoryReady.value) throw new Error('请先创建记忆空间')
-  const resolved = await Promise.all(selected.map(async (file): Promise<ResolvedDirectAttachment> => {
+  const existing = new Set((await files.list(owner)).map(resource => resource.path))
+  const resolved: ResolvedDirectAttachment[] = []
+  const failures: string[] = []
+  for (const file of selected) {
+    try {
     const mime = file.type || 'application/octet-stream'
-    const resource = await fileActions.importMedia({
-      owner,
-      path: `jc-media/uploads/${crypto.randomUUID()}-${safeAttachmentName(file.name)}`,
-      data: new Uint8Array(await file.arrayBuffer()),
-      mimeType: mime,
-    })
-    if (detectFileType(file) === 'office') {
+      const type = detectFileType(file)
+      if (type === 'office' || type === 'pdf' || type === 'text') {
+        const originalPath = nextOriginalMaterialPath(file.name, existing)
+        const textContent = type === 'text' ? await file.text() : ''
+        const resource = type === 'text'
+          ? await files.createText(owner, originalPath, textContent)
+          : await files.importBinary({
+              owner, path: originalPath, data: new Uint8Array(await file.arrayBuffer()), mimeType: mime,
+            })
+        existing.add(resource.path)
+        if (type === 'text') {
+          resolved.push({
+            id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
+            resourcePath: resource.path, readablePath: resource.path, characterCount: textContent.length,
+          })
+          continue
+        }
       status.value = `正在解析 ${file.name}`
-      const processed = await processFile(file)
-      if (processed.status !== 'ready' || !processed.textContent) {
-        throw new Error(processed.error || '文档转换失败')
+        const processed = await processFile(file, { maxTextLength: 20_000_000 })
+        if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
+          throw new Error(processed.truncated
+            ? '文档超过当前安全解析上限，原件已保存'
+            : `${processed.error || '文档转换失败'}，原件已保存，可从 JC 原始素材重新引用`)
+        }
+        const readablePath = nextMaterialMarkdownPath(resource.path, existing)
+        await files.createText(owner, readablePath, processed.textContent)
+        existing.add(readablePath)
+        resolved.push({
+          id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
+          resourcePath: resource.path, readablePath, characterCount: processed.textContent.length,
+        })
+        continue
       }
-      return {
-        id: crypto.randomUUID(),
-        name: file.name,
-        mime,
-        size: file.size,
-        kind: 'file',
-        value: '',
-        textContent: processed.textContent,
-        resourcePath: resource.path,
+      if (!['image', 'video', 'audio'].includes(type)) {
+        const originalPath = nextOriginalMaterialPath(file.name, existing)
+        const resource = await files.importBinary({
+          owner, path: originalPath, data: new Uint8Array(await file.arrayBuffer()), mimeType: mime,
+        })
+        existing.add(resource.path)
+        resolved.push({
+          id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file',
+          value: await readDataUrl(file), resourcePath: resource.path,
+        })
+        continue
       }
+      const resource = await fileActions.importMedia({
+        owner,
+        path: `jc-media/uploads/${crypto.randomUUID()}-${safeAttachmentName(file.name)}`,
+        data: new Uint8Array(await file.arrayBuffer()),
+        mimeType: mime,
+      })
+      resolved.push({
+        id: crypto.randomUUID(), name: file.name, mime, size: file.size,
+        kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
+        value: await readDataUrl(file), resourcePath: resource.path,
+      })
+    } catch (cause) {
+      failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`)
     }
-    return {
-      id: crypto.randomUUID(),
-      name: file.name,
-      mime,
-      size: file.size,
-      kind: mime.startsWith('image/') ? 'image'
-        : mime.startsWith('video/') ? 'video'
-          : mime.startsWith('audio/') ? 'audio' : 'file',
-      value: await readDataUrl(file),
-      resourcePath: resource.path,
-    }
-  }))
+  }
   const byId = new Map(attachments.value.map(attachment => [attachment.id, attachment]))
   for (const attachment of resolved) byId.set(attachment.id, attachment)
   attachments.value = [...byId.values()]
+  if (failures.length) throw new Error(failures.join('；'))
 }
 
 function mediaPlanKey(turnId: string, planIndex: number): string {
@@ -1261,8 +1356,8 @@ function mediaResultTaskId(turn: ConversationTurn): string {
 }
 
 function attachmentMetadata(attachments: ResolvedDirectAttachment[]): ConversationAttachment[] {
-  return attachments.map(({ id, name, mime, size, kind, resourcePath }) => ({
-    id, name, mime, size, kind, projectPath: resourcePath,
+  return attachments.map(({ id, name, mime, size, kind, resourcePath, readablePath, characterCount }) => ({
+    id, name, mime, size, kind, projectPath: resourcePath, readablePath, characterCount,
   }))
 }
 
@@ -1553,7 +1648,10 @@ function readDataUrl(file: File): Promise<string> {
           <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip">
             <img v-if="file.kind === 'image'" :src="file.value" :alt="file.name" />
             <JcIcon v-else :name="file.kind === 'video' ? 'movie' : file.kind === 'audio' ? 'music-note' : 'description'" />
-            <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
+            <span class="memory-attachment-copy">
+              <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
+              <small v-if="file.readablePath">已保存 · 已解析 {{ (file.characterCount || 0).toLocaleString() }} 字</small>
+            </span>
             <button title="移除附件" @click="attachments = attachments.filter(item => item.id !== file.id)">×</button>
           </div>
         </div>
@@ -1592,6 +1690,13 @@ function readDataUrl(file: File): Promise<string> {
           </div>
           <small v-if="error">{{ error }}</small>
         </div>
+        <ToolApprovalStrip
+          v-if="pendingMemoryToolApproval"
+          :message="pendingMemoryToolApproval.message"
+          @reject="settleMemoryToolApproval('reject')"
+          @once="settleMemoryToolApproval('once')"
+          @always="settleMemoryToolApproval('always')"
+        />
         <div v-else-if="status || error" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
         <div class="memory-input-row">
           <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
@@ -1817,6 +1922,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }
 .memory-attachment-chip { display: flex; height: 34px; max-width: 240px; align-items: center; gap: 5px; padding: 0 7px; box-sizing: border-box; border-radius: 5px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); }
 .memory-attachment-chip img { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 4px; object-fit: cover; }
+.memory-attachment-copy { display: grid; min-width: 0; line-height: 1.2; }
+.memory-attachment-copy small { overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; }
 .memory-document { min-height: 0; height: 100%; overflow-y: scroll; overflow-x: auto; overscroll-behavior: contain; scrollbar-gutter: stable; box-sizing: border-box; padding: 28px max(24px, calc((100% - 900px) / 2)); }

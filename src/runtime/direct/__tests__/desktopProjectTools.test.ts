@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   buildCreativeToolDefinitions,
+  buildMemoryDesktopToolDefinitions,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
 } from '../creativeToolContract'
 import { createDesktopProjectToolExecutor } from '../desktopProjectTools'
@@ -45,6 +46,9 @@ function fixtureInvoke(command: string, payload: any): Promise<any> {
   }
   if (command === 'dev_write_file') return Promise.resolve({ path, bytesWritten: payload.input.content.length })
   if (command === 'dev_replace_in_file') return Promise.resolve({ path, replacements: 1 })
+  if (command === 'dev_create_dir') return Promise.resolve()
+  if (command === 'dev_rename_file') return Promise.resolve(payload.input.newRelativePath)
+  if (command === 'dev_delete_file') return Promise.resolve({ status: 'trashed' })
   if (command === 'dev_write_external_file') return Promise.resolve({ path, bytesWritten: payload.input.content.length })
   if (command === 'dev_replace_in_external_file') return Promise.resolve({ path, replacements: 1 })
   throw new Error(`unexpected command: ${command}`)
@@ -90,6 +94,10 @@ test('creative tool definitions append connected MCP tools without changing core
       buildCreativeToolDefinitions().map(tool => tool.function.name),
       ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
     )
+    assert.deepEqual(
+      buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'terminal', 'mcp__docs__lookup'],
+    )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
@@ -109,6 +117,7 @@ test('desktop project tools use relative Tauri IPC with Web-compatible output', 
 
   assert.match((await execute(call('read', { path: '.' }))).content, /dir\twiki/)
   assert.match((await execute(call('read', { path: 'wiki/hot.md' }))).content, /2: 林风/)
+  assert.match((await execute(call('read', { path: 'wiki/hot.md', offset: 2, limit: 1 }))).content, /lines 2-2 of 2; eof=true/)
   assert.deepEqual((await execute(call('read', { path: 'media/ref.png' }))).followupMessages, [{
     role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,aW1n' } }],
   }])
@@ -118,6 +127,9 @@ test('desktop project tools use relative Tauri IPC with Web-compatible output', 
   assert.match((await execute(call('grep', { pattern: '林风', include: '*.md' }))).content, /wiki\/hot.md: Line 2: 林风/)
   assert.match((await execute(call('write', { path: 'wiki/new.md', content: '正文' }))).content, /wiki\/new.md/)
   assert.match((await execute(call('edit', { path: 'wiki/hot.md', oldString: '林风', newString: '陆川' }))).content, /Replacements: 1/)
+  assert.match((await execute(call('mkdir', { path: '资料/会议' }))).content, /资料\/会议/)
+  assert.match((await execute(call('move', { path: 'wiki/new.md', destination: '资料/会议/纪要.md' }))).content, /资料\/会议\/纪要.md/)
+  assert.match((await execute(call('delete', { path: '资料/会议/纪要.md' }))).content, /废纸篓/)
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
   await assert.rejects(() => execute(call('read', { path: 'missing.md' })), /file not found/)
 })

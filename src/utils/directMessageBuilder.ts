@@ -13,6 +13,8 @@ export interface ResolvedDirectAttachment {
   textContent?: string
   cachePath?: string
   resourcePath?: string
+  readablePath?: string
+  characterCount?: number
 }
 type DirectTextPart = { type: 'text'; text: string }
 type DirectImagePart = { type: 'image_url'; image_url: { url: string } }

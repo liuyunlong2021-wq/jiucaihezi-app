@@ -193,7 +193,7 @@ pub fn is_successful_markdown_content(content: &str) -> bool {
 }
 
 pub fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
-    let max = max_chars.clamp(1, 1_000_000);
+    let max = max_chars.clamp(1, 20_000_000);
     if content.chars().count() <= max {
         return (content, false);
     }
@@ -1406,7 +1406,7 @@ pub async fn document_to_markdown_file(
     } else {
         output_dir.join(unique_media_filename(&markdown_output_filename))
     };
-    let max_chars = input.max_chars.unwrap_or(500_000);
+    let max_chars = input.max_chars.unwrap_or(20_000_000);
     let mode = parse_markdown_conversion_mode(input.conversion_mode.as_deref());
     let timeout_seconds = input.timeout_seconds;
 

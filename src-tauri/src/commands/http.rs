@@ -270,7 +270,7 @@ pub async fn document_markdown_request(
     let form = reqwest::multipart::Form::new()
         .text(
             "max_chars",
-            request.max_chars.clamp(1, 1_000_000).to_string(),
+            request.max_chars.clamp(1, 20_000_000).to_string(),
         )
         .part("file", file);
     let client = reqwest::Client::builder()

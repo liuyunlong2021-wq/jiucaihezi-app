@@ -125,15 +125,28 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(runtime, /files: input\.files/)
 })
 
-test('memory workbench converts Office attachments before direct model requests', () => {
+test('memory workbench saves Office attachments as durable project materials', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(workbench, /detectFileType\(file\) === 'office'/)
-  assert.match(workbench, /await processFile\(file\)/)
-  assert.match(workbench, /textContent: processed\.textContent/)
+  assert.match(workbench, /type === 'office' \|\| type === 'pdf'/)
+  assert.match(workbench, /processFile\(file, \{ maxTextLength: 20_000_000 \}\)/)
+  assert.match(workbench, /files\.createText\(owner, readablePath, processed\.textContent\)/)
+  assert.match(workbench, /readablePath/)
+  assert.match(workbench, /characterCount: processed\.textContent\.length/)
+  assert.match(workbench, /!\['image', 'video', 'audio'\]\.includes\(type\)[\s\S]*files\.importBinary/)
+  assert.match(workbench, /已保存 · 已解析/)
+  assert.doesNotMatch(workbench, /textContent: processed\.textContent/)
   assert.match(workbench, /value: ''/)
   assert.match(workbench, /await files\.readBinary\(resource\)/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
+  assert.match(tree, /path === 'jc-materials'\) return 'JC 原始素材'/)
+  assert.match(tree, /path === 'jc-materials\/originals'\) return '原始文件'/)
+  assert.match(tree, /path === 'jc-materials\/markdown'\) return '可读文档'/)
+  assert.match(tree, /memoryMaterialDisplayName\(item\.node\.path, item\.node\.name\)/)
+  assert.match(tree, /while \(parts\.length\)[\s\S]*findLoadedDirectory\(parts\.join\('\/'\)\)[\s\S]*parts\.pop\(\)/)
+  assert.match(runtime, /只写了尚未执行的脚本不算完成/)
 })
 
 test('memory composer keeps quick and memory execution in one Raw conversation', () => {
@@ -144,7 +157,9 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(workbench, /快速[\s\S]*记忆/)
   assert.match(workbench, /appendMemoryTurn\([\s\S]*attachmentMetadata\(pendingAttachments\),[\s\S]*pendingMode/)
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
-  assert.match(runtime, /if \(!memoryMode\)[\s\S]*runDirectChatCompletion\([\s\S]*tools: undefined/)
+  assert.match(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS/)
+  assert.match(runtime, /if \(!memoryMode && !hasDocumentSources && !hasDirectUrls\)[\s\S]*tools: undefined/)
+  assert.match(runtime, /if \(!memoryMode && !\['read', 'grep', 'read_url'\]\.includes\(call\.function\.name\)\)/)
   assert.match(runtime, /call\.function\.name === 'web_search'[\s\S]*executeJinaWebSearchTool\(call\.function\.arguments\)/)
   assert.match(runtime, /\.\.\.\(input\.webSearchEnabled \? \[WEB_SEARCH_TOOL_DEFINITION\] : \[\]\)/)
 })
@@ -213,6 +228,15 @@ test('memory web search is an explicit removable one-turn @ option', () => {
   assert.doesNotMatch(runtime, /tools: \[\.\.\.buildWebProjectToolDefinitions\(\), WEB_SEARCH_TOOL_DEFINITION\]/)
 })
 
+test('memory reads an explicit URL without enabling web search', () => {
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(runtime, /extractPublicHttpUrls\(latestUserText\)/)
+  assert.match(runtime, /hasDirectUrls \? \[READ_URL_TOOL_DEFINITION\] : \[\]/)
+  assert.match(runtime, /call\.function\.name === 'read_url'/)
+  assert.match(runtime, /不要把读网址说成联网搜索/)
+})
+
 test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
@@ -223,6 +247,7 @@ test('memory topbar uses a grouped model popover and a text-only new conversatio
   assert.match(workbench, /const modelGroups = computed/)
   assert.match(workbench, /Claude[\s\S]*GPT \/ OpenAI[\s\S]*Gemini \/ Google/)
   assert.match(workbench, /agentStore\.textModels\.filter\(model => !isInternalMediaModel\(model\.id\)\)/)
+  assert.match(workbench, /id === 'jina-search' \|\| id === 'jina-reader'/)
   assert.doesNotMatch(workbench, /runninghub: 'RunningHub'/)
   assert.match(workbench, /class="memory-model-menu" role="listbox"/)
   assert.match(workbench, /\.memory-model-menu \{[\s\S]*left: 0;/)
@@ -318,6 +343,21 @@ test('memory run status follows real tool start and end events without entering 
   assert.match(workbench, /\(sending \|\| error\) && visibleRunSteps\.length/)
   assert.match(workbench, /formatRunElapsed\(runElapsed\)/)
   assert.doesNotMatch(workbench, /opencodeClient|openCodeSyncStore|AgentStatusBar/)
+})
+
+test('memory Desktop reuses the three-action tool approval for the current run', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(runtime, /beforeToolCall:/)
+  assert.match(runtime, /memoryToolNeedsApproval/)
+  assert.match(workbench, /pendingMemoryToolApproval/)
+  assert.match(workbench, /<ToolApprovalStrip/)
+  assert.match(workbench, /decision === 'always'/)
+  assert.match(workbench, /call\.function\.name !== 'delete'/)
+  assert.doesNotMatch(workbench, /localStorage[\s\S]{0,120}始终允许/)
+  assert.match(workbench, /memoryRunGeneration\+\+/)
+  assert.match(workbench, /settleMemoryToolApproval\('reject'\)[\s\S]*abortController\?\.abort\(\)/)
 })
 
 test('memory settings show the build version at the bottom', () => {

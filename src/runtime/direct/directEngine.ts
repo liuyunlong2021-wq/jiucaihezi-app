@@ -132,13 +132,27 @@ export async function runDirectChatCompletion(
     if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
+    const advertisedToolNames = toolNames(options.tools)
     messages.push(...await buildToolResultMessages(toolCalls, executeToolWithRepeatGuard, {
       signal: options.signal,
-      beforeToolCall: options.beforeToolCall,
+      beforeToolCall: async call => {
+        if (!advertisedToolNames.has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
+        return await options.beforeToolCall?.(call)
+      },
       onToolEvent: options.onToolEvent,
     }))
     toolRounds += 1
   }
+}
+
+function toolNames(tools: unknown[] | undefined): Set<string> {
+  return new Set((tools || []).flatMap(tool => {
+    if (!tool || typeof tool !== 'object') return []
+    const definition = (tool as { function?: unknown }).function
+    if (!definition || typeof definition !== 'object') return []
+    const name = (definition as { name?: unknown }).name
+    return typeof name === 'string' ? [name] : []
+  }))
 }
 
 function normalizeToolCall(call: DirectToolCall, tools: unknown[] | undefined): DirectToolCall {

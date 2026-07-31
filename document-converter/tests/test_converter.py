@@ -20,7 +20,8 @@ class ConverterContractTest(unittest.TestCase):
     def test_clamps_client_text_limit_to_server_bounds(self):
         self.assertEqual(clamp_max_chars(0), 1)
         self.assertEqual(clamp_max_chars(500_000), 500_000)
-        self.assertEqual(clamp_max_chars(9_999_999), 1_000_000)
+        self.assertEqual(clamp_max_chars(9_999_999), 9_999_999)
+        self.assertEqual(clamp_max_chars(99_999_999), 20_000_000)
 
     def test_public_error_never_leaks_temporary_server_paths(self):
         message = public_error_message('MarkItDown failed at /tmp/jc-document-abc/source.docx')

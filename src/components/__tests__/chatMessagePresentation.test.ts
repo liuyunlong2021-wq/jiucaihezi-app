@@ -797,11 +797,13 @@ test('mode selector keeps 文武 on Desktop and exposes 道创 to both runtimes'
 })
 
 test('creative tool approval is an in-app three-action strip for the current run', () => {
+  const approval = readFileSync('src/components/chat/ToolApprovalStrip.vue', 'utf8')
   assert.match(chatPanel, /pendingCreativeToolApproval/)
   assert.match(chatPanel, /终端附件|读取视频信息并截取视频画面/)
-  assert.match(chatPanel, />\s*始终允许\s*</)
-  assert.match(chatPanel, />\s*允许\s*</)
-  assert.match(chatPanel, />\s*拒绝\s*</)
+  assert.match(chatPanel, /<ToolApprovalStrip/)
+  assert.match(approval, />始终允许</)
+  assert.match(approval, />允许</)
+  assert.match(approval, />拒绝</)
   assert.match(chatPanel, /creativeToolAlwaysAllowed\s*=\s*true/)
 })
 

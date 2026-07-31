@@ -2,7 +2,7 @@ import re
 from pathlib import Path
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
-MAX_CHARS = 1_000_000
+MAX_CHARS = 20_000_000
 SUPPORTED_EXTENSIONS = {
     '.doc', '.docx', '.pdf', '.xls', '.xlsx', '.ppt', '.pptx',
     '.odt', '.ods', '.odp', '.rtf',
@@ -15,10 +15,10 @@ def is_supported_filename(filename: str) -> bool:
 
 def clamp_max_chars(value: int | str | None) -> int:
     try:
-        raw = 500_000 if value is None or value == '' else int(value)
+        raw = MAX_CHARS if value is None or value == '' else int(value)
         return max(1, min(raw, MAX_CHARS))
     except (TypeError, ValueError):
-        return 500_000
+        return MAX_CHARS
 
 
 def markdown_filename(filename: str) -> str:

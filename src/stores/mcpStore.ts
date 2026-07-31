@@ -36,6 +36,10 @@ export interface McpToolSchema {
   inputSchema: Record<string, unknown>
   serverId: string
   originalName: string
+  annotations?: {
+    readOnlyHint?: boolean
+    destructiveHint?: boolean
+  }
 }
 
 // ─── Storage key ─────────────────────────────────────

@@ -180,24 +180,8 @@ def wiki_path(content_type: str, root: Path) -> Path:
 
 
 def raw_path(root: Path) -> Path:
-    """Use the hidden raw store, falling back to a legacy raw directory."""
-    root = root.resolve()
-    hidden_raw = root / ".raw"
-    legacy_raw = root / "raw"
-    if hidden_raw.is_dir():
-        return hidden_raw
-    if legacy_raw.is_dir():
-        return legacy_raw
-    return hidden_raw
-
-
-def ensure_raw_structure(root: Path, content_type: str) -> Path:
-    raw = raw_path(root)
-    (raw / "sessions").mkdir(parents=True, exist_ok=True)
-    if content_type in {"novel", "manju", "short_story", "film", "tv_series", "advertisement"}:
-        (raw / "参考资料").mkdir(parents=True, exist_ok=True)
-        (raw / "创作笔记").mkdir(parents=True, exist_ok=True)
-    return raw
+    """Locate the App-owned Raw root without creating or normalizing it."""
+    return root.resolve() / ".raw"
 
 
 def ensure_file(path: Path, content: str) -> bool:
@@ -284,7 +268,6 @@ def scaffold(content_type: str, root: Path) -> None:
 
     wiki = wiki_path(content_type, root)
     wiki.mkdir(parents=True, exist_ok=True)
-    ensure_raw_structure(root, content_type)
 
     for folder, files in structure.items():
         folder_path = wiki / folder
@@ -321,18 +304,13 @@ def validate(root: Path, content_type: Optional[str]) -> int:
         return 1
 
     if content_type == "dev_project" or (wiki / "CLAUDE.md").exists():
-        raw = raw_path(root)
         required = [
             "CLAUDE.md", "hot.md", "log.md", "来源索引.md",
             "开发", "架构", "运维", "排障", "学习", "巡检报告", "归档",
         ]
         missing = [name for name in required if not (wiki / name).exists()]
-        raw_missing = [name for name in ["sessions"] if not (raw / name).exists()]
         if missing:
             print(f"缺少开发项目入口: {', '.join(missing)}")
-            return 1
-        if raw_missing:
-            print(f"缺少原始材料入口: {', '.join(raw_missing)}")
             return 1
         print(f"开发项目 Wiki 结构完整: {wiki}")
         return 0

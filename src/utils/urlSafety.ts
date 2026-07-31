@@ -29,6 +29,17 @@ function isPrivateNetworkHost(hostname: string): boolean {
     (a === 198 && (b === 18 || b === 19))
 }
 
+export function isSafePublicHttpUrl(input: string): boolean {
+  const parsed = parseUrl(input)
+  return Boolean(
+    parsed &&
+    (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+    !parsed.username &&
+    !parsed.password &&
+    !isPrivateNetworkHost(parsed.hostname)
+  )
+}
+
 function parseUrl(input: string, defaultHttp = false): URL | null {
   const text = String(input || '').trim()
   if (!text) return null

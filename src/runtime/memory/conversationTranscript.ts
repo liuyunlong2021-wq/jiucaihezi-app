@@ -7,6 +7,8 @@ export interface ConversationAttachment {
   size: number
   kind: 'image' | 'video' | 'audio' | 'file'
   projectPath?: string
+  readablePath?: string
+  characterCount?: number
 }
 
 export type ConversationMode = 'quick' | 'memory'
@@ -116,7 +118,9 @@ function parseAttachments(value?: string): ConversationAttachment[] | undefined 
         mime: String(item.mime),
         size: Number(item.size) || 0,
         kind: ['image', 'video', 'audio', 'file'].includes(item.kind) ? item.kind : 'file',
-        ...(validProjectMediaPath(item.projectPath) ? { projectPath: item.projectPath } : {}),
+        ...(validProjectAttachmentPath(item.projectPath) ? { projectPath: item.projectPath } : {}),
+        ...(validReadablePath(item.readablePath) ? { readablePath: item.readablePath } : {}),
+        ...(Number.isSafeInteger(item.characterCount) && item.characterCount >= 0 ? { characterCount: item.characterCount } : {}),
       })) as ConversationAttachment[]
     return attachments.length ? attachments : undefined
   } catch {
@@ -124,9 +128,23 @@ function parseAttachments(value?: string): ConversationAttachment[] | undefined 
   }
 }
 
-function validProjectMediaPath(value: unknown): value is string {
+function validProjectAttachmentPath(value: unknown): value is string {
   return typeof value === 'string'
-    && value.startsWith('jc-media/')
+    && (value.startsWith('jc-media/') || value.startsWith('jc-materials/'))
+    && !value.split('/').some(part => !part || part === '.' || part === '..')
+}
+
+function validReadablePath(value: unknown): value is string {
+  return typeof value === 'string'
+    && !value.startsWith('.raw/')
+    && /\.(?:md|markdown|txt|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log)$/i.test(value)
+    && validSafeRelativePath(value)
+}
+
+function validSafeRelativePath(value: string): boolean {
+  return !value.startsWith('/')
+    && !value.includes('\\')
+    && !value.includes('\0')
     && !value.split('/').some(part => !part || part === '.' || part === '..')
 }
 

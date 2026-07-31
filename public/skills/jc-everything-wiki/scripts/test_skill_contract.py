@@ -106,6 +106,24 @@ class WikiSkillContractTests(unittest.TestCase):
         self.assertIn("## Raw 填充标准", novel)
         self.assertIn("完整会话", novel)
 
+    def test_skill_never_prescribes_or_creates_raw_subdirectories(self) -> None:
+        source_files = [
+            SKILL_ROOT / "SKILL.md",
+            *sorted((SKILL_ROOT / "references").rglob("*.md")),
+            SKILL_ROOT / "scripts" / "everything_to_wiki.py",
+        ]
+        combined = "\n".join(path.read_text(encoding="utf-8") for path in source_files)
+        for obsolete in (
+            '.raw/sessions',
+            '.raw/参考资料',
+            '.raw/创作笔记',
+            'raw / "sessions"',
+            'raw / "参考资料"',
+            'raw / "创作笔记"',
+            'ensure_raw_structure',
+        ):
+            self.assertNotIn(obsolete, combined)
+
 
 if __name__ == "__main__":
     unittest.main()

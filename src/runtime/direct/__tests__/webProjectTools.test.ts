@@ -6,6 +6,8 @@ import { createWebProjectFiles, type WebProjectRecordAdapter } from '@/utils/web
 import type { WebBinarySource, WebProjectBinaryAdapter } from '@/utils/webProjectBinaryStore'
 import {
   buildWebProjectToolDefinitions,
+  buildMemoryWebProjectToolDefinitions,
+  READ_ONLY_DOCUMENT_TOOL_DEFINITIONS,
   WEB_PROJECT_TOOL_DEFINITIONS,
   createWebProjectToolExecutor,
 } from '../webProjectTools'
@@ -66,6 +68,11 @@ test('web project tools use OpenCode-compatible names', () => {
   )
 })
 
+test('quick document grep requires the approved attachment path', () => {
+  const grep = READ_ONLY_DOCUMENT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'grep')
+  assert.deepEqual(grep?.function.parameters.required, ['pattern', 'path'])
+})
+
 test('web project tool definitions append connected MCP tools without Desktop terminal', () => {
   const original = (globalThis as any).__jiucaihezi_mcpStore__
   ;(globalThis as any).__jiucaihezi_mcpStore__ = {
@@ -86,6 +93,10 @@ test('web project tool definitions append connected MCP tools without Desktop te
     assert.deepEqual(
       buildWebProjectToolDefinitions().map(tool => tool.function.name),
       ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mcp__docs__lookup'],
+    )
+    assert.deepEqual(
+      buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'mcp__docs__lookup'],
     )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
@@ -110,12 +121,18 @@ test('web project tool executor reads writes searches and edits the bound projec
   await execute(call('write', { path: 'wiki/hot.md', content: '# 热缓存\n林风' }))
   assert.match((await execute(call('read', { path: '.' }))).content, /wiki/)
   assert.match((await execute(call('read', { path: 'wiki/hot.md' }))).content, /林风/)
+  assert.match((await execute(call('read', { path: 'wiki/hot.md', offset: 2, limit: 1 }))).content, /lines 2-2 of 2; eof=true/)
   assert.match((await execute(call('glob', { pattern: 'wiki/**/*.md' }))).content, /wiki\/hot.md/)
   assert.match((await execute(call('grep', { pattern: '林风' }))).content, /Line 2/)
   assert.match((await execute(call('edit', {
     path: 'wiki/hot.md', oldString: '林风', newString: '陆川', replaceAll: false,
   }))).content, /Replacements: 1/)
   assert.match((await execute(call('read', { path: 'wiki/hot.md' }))).content, /陆川/)
+  assert.match((await execute(call('mkdir', { path: '资料/会议' }))).content, /资料\/会议/)
+  assert.match((await execute(call('move', { path: 'wiki/hot.md', destination: '资料/会议/纪要.md' }))).content, /资料\/会议\/纪要.md/)
+  assert.match((await execute(call('read', { path: '资料/会议/纪要.md' }))).content, /陆川/)
+  assert.match((await execute(call('delete', { path: '资料/会议/纪要.md' }))).content, /已删除/)
+  await assert.rejects(() => execute(call('read', { path: '资料/会议/纪要.md' })), /文件不存在/)
 
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
 })

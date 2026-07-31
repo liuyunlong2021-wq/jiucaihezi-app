@@ -2,7 +2,7 @@ import unittest
 
 import httpx
 
-from src.main import JINA_SEARCH_URL, app
+from src.main import JINA_READER_URL, JINA_SEARCH_URL, app
 
 
 class JinaAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -68,6 +68,27 @@ class JinaAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 400)
         self.assertEqual(self.upstream_requests, [])
 
+    async def test_reader_fetches_only_a_public_url(self):
+        self.upstream_body = "# Mage-VL"
+        url = "https://huggingface.co/microsoft/Mage-VL"
+        response = await self.client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer jina-test-key"},
+            json={"model": "jina-reader", "messages": [{"role": "user", "content": url}]},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "jina-reader")
+        self.assertEqual(str(self.upstream_requests[0].url), f"{JINA_READER_URL}{url}")
+
+        for unsafe in ("file:///tmp/a", "http://127.0.0.1/admin", "http://192.168.1.1"):
+            response = await self.client.post(
+                "/v1/chat/completions",
+                headers={"Authorization": "Bearer jina-test-key"},
+                json={"model": "jina-reader", "messages": [{"role": "user", "content": unsafe}]},
+            )
+            self.assertEqual(response.status_code, 400)
+
     async def test_hides_upstream_error_body(self):
         self.upstream_status = 401
         self.upstream_body = "Authorization: Bearer leaked-secret"
@@ -79,6 +100,15 @@ class JinaAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(response.status_code, 502)
         self.assertNotIn("leaked-secret", response.text)
+
+    async def test_rejects_an_abnormally_large_reader_response(self):
+        self.upstream_body = "x" * 2_000_001
+        response = await self.client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": "Bearer jina-test-key"},
+            json={"model": "jina-reader", "messages": [{"role": "user", "content": "https://example.com"}]},
+        )
+        self.assertEqual(response.status_code, 413)
 
     async def test_translates_upstream_timeout_to_502(self):
         async def timeout_handler(request: httpx.Request):

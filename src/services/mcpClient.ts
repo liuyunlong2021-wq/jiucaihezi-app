@@ -194,6 +194,7 @@ async function listMcpTools(serverId: string, client: Client | null): Promise<Mc
     inputSchema: tool.inputSchema as Record<string, unknown> || { type: 'object', properties: {} },
     serverId,
     originalName: tool.name,
+    annotations: tool.annotations,
   }))
 
   return tools

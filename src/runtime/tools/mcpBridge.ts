@@ -96,6 +96,10 @@ export function getMcpToolLabel(toolName: string): string {
   return `外挂工具 · ${parsed.serverId} / ${parsed.originalName}`
 }
 
+export function isMcpToolReadOnly(toolName: string): boolean {
+  return getMcpToolByName(toolName, resolveMcpStore())?.annotations?.readOnlyHint === true
+}
+
 async function executeMcpBridgeTool(input: {
   toolName: string
   callId?: string

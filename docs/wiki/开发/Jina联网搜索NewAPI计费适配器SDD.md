@@ -1,6 +1,8 @@
-# Jina 联网搜索 New API 计费适配器 SDD
+# Jina 联网搜索与网址读取 New API 计费适配器 SDD
 
 > 状态：本地代码已实现；App 已改为显式单轮启用，适配器待 Docker 构建与生产部署 · 2026-07-30
+
+> 2026-07-31 增补：搜索和读取网址是两个独立能力。`web_search / jina-search` 只负责按关键词发现网页；`read_url / jina-reader` 只读取用户本轮明确给出的公开 URL。粘贴明确 URL 时自动临时提供 `read_url`，不启用 `web_search`，也不要求选择 `@联网搜索`。
 
 ## 目标
 
@@ -51,8 +53,10 @@
 `jina-adapter` 只实现三个端点：
 
 - `GET /health`：返回服务名和状态，不访问 Jina。
-- `GET /v1/models`：只返回 `jina-search`，用于容器内检查。
-- `POST /v1/chat/completions`：只接受 `model=jina-search`、`stream=false` 和至少一条文字 user message。
+- `GET /v1/models`：返回 `jina-search` 与 `jina-reader`，用于容器内检查。
+- `POST /v1/chat/completions`：只接受 `model=jina-search|jina-reader`、`stream=false` 和至少一条文字 user message。
+
+`jina-search` 将最后一条 user 文字转成 `POST https://s.jina.ai/ {q}`。`jina-reader` 将最后一条 user 文字校验为公开 `http/https` URL 后请求 `GET https://r.jina.ai/{url}`。Reader 禁止凭据 URL、localhost、私网、回环、链路本地和保留 IP；超过 200 万字符的异常响应直接失败，不截断冒充完整。
 
 适配器取最后一条 user message 的文字作为 `q`，不接受文件、图片、工具调用或任意上游 URL。查询为空或超过约定上限时返回 400；缺少渠道 Authorization 返回 401；Jina 超时或非 2xx 返回 502。适配器不重试，避免重复消耗 Jina 额度。
 
@@ -95,11 +99,11 @@
 | 类型 | OpenAI 兼容渠道 |
 | Base URL | `http://jina-adapter:8000` |
 | Key | 新 Jina API Key |
-| 模型 | `jina-search` |
+| 模型 | `jina-search,jina-reader` |
 | 分组 | 覆盖实际用户 Token 分组；先只开放测试分组 |
 | 价格 | New API `ModelPrice` 固定按次；生产值待确认 Jina 付费成本后由管理员决定 |
 
-不使用模型映射，不把 `jina-search` 改写为 `jina-deepsearch-v1`。
+不使用模型映射，不把 `jina-search` 改写为 `jina-deepsearch-v1`。`jina-reader` 在 New API 单独配置固定按次价格；可与搜索同渠道、同 Jina Key、同容器，不新增充值账户。
 
 ## 验收
 

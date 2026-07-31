@@ -130,6 +130,29 @@ test('runDirectChatCompletion emits start then successful end for a tool call', 
   ])
 })
 
+test('runDirectChatCompletion rejects a tool that was not advertised in the request', async () => {
+  let executions = 0
+  const sentMessages: any[][] = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_delete', function: { name: 'delete', arguments: '{"path":"note.md"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '未执行删除。' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '查看文件' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    executeTool: async () => { executions += 1; return { content: '不应执行' } },
+    sendChatCompletion: async request => { sentMessages.push(request.messages); return responses.shift()! },
+  })
+
+  assert.equal(executions, 0)
+  assert.match(sentMessages[1].at(-1).content, /工具未在当前请求中开放: delete/)
+})
+
 test('runDirectChatCompletion ends a rejected tool without executing it', async () => {
   const events: Array<{ type: string; call: { id: string }; status?: string }> = []
   let executions = 0
@@ -319,7 +342,7 @@ test('runDirectChatCompletion continues through multiple tool rounds', async () 
 
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '写第一集' }],
-    tools: [{ type: 'function', function: { name: 'skill' } }],
+    tools: ['skill', 'read', 'write'].map(name => ({ type: 'function', function: { name } })),
     onText: () => {},
     executeTool: async call => {
       executed.push(call.function.name)
@@ -334,7 +357,7 @@ test('runDirectChatCompletion continues through multiple tool rounds', async () 
   assert.equal(result.text, '第一集已保存')
   assert.deepEqual(executed, ['skill', 'read', 'write'])
   assert.equal(requests.length, 4)
-  assert.ok(requests.every(request => request.tools?.length === 1))
+  assert.ok(requests.every(request => request.tools?.length === 3))
   assert.equal(result.usedSecondPass, true)
 })
 

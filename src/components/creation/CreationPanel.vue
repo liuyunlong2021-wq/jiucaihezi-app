@@ -3183,13 +3183,11 @@ onMounted(() => {
   const onKeyDown = (e: KeyboardEvent) => {
     if (!app || canvasInteractionBlocked.value) return
     const el = document.activeElement
-    // 只在画布区域或没有输入框聚焦时处理
-    const inCanvas = canvasContainer.value?.contains(el)
-    const inInput =
-      el?.tagName === 'INPUT' ||
-      el?.tagName === 'TEXTAREA' ||
-      (el as HTMLElement)?.isContentEditable
-    if (inInput && !inCanvas) return
+    const target = e.target instanceof Node ? e.target : null
+    const inCanvas = Boolean(
+      canvasContainer.value?.contains(el) || (target && canvasContainer.value?.contains(target)),
+    )
+    if (!inCanvas) return
 
     const ctrl = e.ctrlKey || e.metaKey
     if (e.key === 'Escape' && drawMode.value) {

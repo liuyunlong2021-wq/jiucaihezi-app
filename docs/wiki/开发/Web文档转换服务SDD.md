@@ -2,6 +2,8 @@
 
 > 状态：代码已实现，待生产部署 · 2026-07-18
 
+> 2026-07-30：本文保留转换服务的历史接口与部署记录；“转换结果直接进入聊天模型”的产品合同已由 [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] 取代。记忆工作台现在把完整转换稿保存到 `jc-materials/markdown/`，模型通过 `read/grep` 阅读，不再注入全文。
+
 ## 目标
 
 让 Web 创模式能上传 `DOC/DOCX/PDF/XLS/XLSX/PPT/PPTX/ODT/ODS/ODP/RTF`。文件先转换为 Markdown，再沿用现有 `files: [{ name, content }]` 聊天链路送给模型。桌面端继续使用本机 MarkItDown，行为不变。

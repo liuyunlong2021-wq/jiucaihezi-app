@@ -292,6 +292,27 @@ export function createDesktopProjectToolExecutor(input: {
       return { content: `Edited file successfully: ${path}\nReplacements: ${Number(result.replacements || 0)}` }
     }
 
+    if (name === 'mkdir') {
+      const path = normalizeCreativeProjectPath(String(args.path))
+      await invoke('dev_create_dir', { root: requireProject(), relativePath: path, content: '' })
+      return { content: `已创建文件夹: ${path}` }
+    }
+
+    if (name === 'move') {
+      const path = normalizeCreativeProjectPath(String(args.path))
+      const destination = normalizeCreativeProjectPath(String(args.destination))
+      const moved = await invoke('dev_rename_file', {
+        root: requireProject(), oldRelativePath: path, newRelativePath: destination,
+      })
+      return { content: `已移动: ${path} -> ${String(moved || destination)}` }
+    }
+
+    if (name === 'delete') {
+      const path = normalizeCreativeProjectPath(String(args.path))
+      const result = await invoke('dev_delete_file', { root: requireProject(), relativePath: path })
+      return { content: result.status === 'missing' ? `文件不存在，未删除: ${path}` : `已移入废纸篓: ${path}` }
+    }
+
     if (name === 'terminal') {
       const command = String(args.command || '').trim()
       if (command && command === lastFailedTerminalCommand) {

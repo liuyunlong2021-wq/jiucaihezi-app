@@ -1534,6 +1534,9 @@ pub fn dev_rename_file(input: DevRenameInput) -> Result<String, String> {
     let root = canonical_root(&input.root)?;
     let old_path = resolve_existing_path(&root, &input.old_relative_path)?;
     let new_path = resolve_write_path(&root, &input.new_relative_path)?;
+    if new_path.exists() {
+        return Err(format!("目标已存在: {}", display_relative(&root, &new_path)));
+    }
     if let Some(parent) = new_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
     }
@@ -2303,6 +2306,24 @@ pub fn dev_export_project_paths(input: DevExportProjectPathsInput) -> Result<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_refuses_to_overwrite_an_existing_target() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("source.md"), "source").unwrap();
+        std::fs::write(project.path().join("target.md"), "target").unwrap();
+
+        let error = dev_rename_file(DevRenameInput {
+            root: project.path().to_string_lossy().to_string(),
+            old_relative_path: "source.md".into(),
+            new_relative_path: "target.md".into(),
+        })
+        .unwrap_err();
+
+        assert!(error.starts_with("目标已存在:"));
+        assert_eq!(std::fs::read_to_string(project.path().join("source.md")).unwrap(), "source");
+        assert_eq!(std::fs::read_to_string(project.path().join("target.md")).unwrap(), "target");
+    }
 
     #[test]
     fn mobile_project_names_cannot_escape_the_managed_directory() {

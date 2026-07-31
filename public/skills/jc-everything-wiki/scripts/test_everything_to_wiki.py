@@ -39,8 +39,7 @@ class DevelopmentWikiScaffoldTests(unittest.TestCase):
             for directory_name in ("开发", "架构", "运维", "排障", "学习", "巡检报告", "归档"):
                 self.assertTrue((wiki / directory_name).is_dir(), directory_name)
             self.assertTrue((wiki / "来源索引.md").is_file())
-            self.assertTrue((root / ".raw" / "sessions").is_dir())
-            self.assertFalse((root / ".raw" / "imports").exists())
+            self.assertFalse((root / ".raw").exists())
             self.assertFalse((root / "wiki").exists())
 
             source_index = (wiki / "来源索引.md").read_text(encoding="utf-8")
@@ -63,8 +62,7 @@ class DevelopmentWikiScaffoldTests(unittest.TestCase):
             self.assertTrue((wiki / "log.md").is_file())
             self.assertTrue((wiki / "开发").is_dir())
             self.assertTrue((wiki / "来源索引.md").is_file())
-            self.assertTrue((root / ".raw" / "sessions").is_dir())
-            self.assertFalse((root / ".raw" / "imports").exists())
+            self.assertFalse((root / ".raw").exists())
             self.assertFalse((root / "wiki").exists())
 
     def test_generic_wiki_validates_after_scaffolding(self) -> None:
@@ -96,11 +94,24 @@ class DevelopmentWikiScaffoldTests(unittest.TestCase):
                 if content_type == "manju":
                     for obsolete_path in ("作品/分季", "作品/分集", "作品/分镜"):
                         self.assertFalse((wiki / obsolete_path).exists(), obsolete_path)
-                self.assertTrue((root / ".raw" / "sessions").is_dir())
-                self.assertTrue((root / ".raw" / "参考资料").is_dir())
-                self.assertTrue((root / ".raw" / "创作笔记").is_dir())
+                self.assertFalse((root / ".raw").exists())
                 result = self.run_command("validate", str(root), content_type)
                 self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_scaffold_never_changes_existing_raw(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            conversation = root / ".raw" / "对话记录" / "existing.md"
+            conversation.parent.mkdir(parents=True)
+            conversation.write_text("原始内容\n", encoding="utf-8")
+
+            self.run_command("scaffold", "novel", str(root))
+
+            self.assertEqual(conversation.read_text(encoding="utf-8"), "原始内容\n")
+            self.assertEqual(
+                sorted(path.relative_to(root / ".raw").as_posix() for path in (root / ".raw").rglob("*")),
+                ["对话记录", "对话记录/existing.md"],
+            )
 
     def test_dialogue_is_not_a_wiki_project_type(self) -> None:
         result = self.run_command("types")

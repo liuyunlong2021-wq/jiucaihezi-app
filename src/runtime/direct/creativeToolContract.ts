@@ -74,12 +74,38 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   }, ['command']),
 ]
 
+export const MEMORY_FILE_TOOL_DEFINITIONS = [
+  tool('mkdir', 'Create a directory inside the current project, including missing parent directories.', {
+    path: { type: 'string', description: 'Project-relative directory path' },
+  }, ['path']),
+  tool('move', 'Move or rename one file or directory inside the current project.', {
+    path: { type: 'string', description: 'Existing project-relative path' },
+    destination: { type: 'string', description: 'New project-relative path, including the final name' },
+  }, ['path', 'destination']),
+  tool('delete', 'Move one project file or directory to the system trash on Desktop, or delete it from the browser-local project on Web. Always requires user approval.', {
+    path: { type: 'string', description: 'Existing project-relative path' },
+  }, ['path']),
+]
+
 const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
+const MEMORY_DESKTOP_TOOL_DEFINITIONS = [
+  ...CREATIVE_PROJECT_TOOL_DEFINITIONS.slice(0, -1),
+  ...MEMORY_FILE_TOOL_DEFINITIONS,
+  CREATIVE_PROJECT_TOOL_DEFINITIONS.at(-1)!,
+]
 
 export function buildCreativeToolDefinitions() {
   return [
     ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
     ...getMcpBridgeToolDefinitions({ coreToolNames: CORE_TOOL_NAMES }),
+  ]
+}
+
+export function buildMemoryDesktopToolDefinitions() {
+  const coreToolNames = MEMORY_DESKTOP_TOOL_DEFINITIONS.map(tool => tool.function.name)
+  return [
+    ...MEMORY_DESKTOP_TOOL_DEFINITIONS,
+    ...getMcpBridgeToolDefinitions({ coreToolNames }),
   ]
 }
 
@@ -97,6 +123,9 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   grep: { pattern: 'string', path: 'string', include: 'string', limit: 'integer' },
   write: { path: 'string', content: 'string' },
   edit: { path: 'string', oldString: 'string', newString: 'string', replaceAll: 'boolean' },
+  mkdir: { path: 'string' },
+  move: { path: 'string', destination: 'string' },
+  delete: { path: 'string' },
   terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }
 
@@ -121,7 +150,9 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
       throw new Error(`工具参数类型无效: ${key}`)
     }
   }
-  for (const field of CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === call.function.name)!.function.parameters.required) {
+  const definition = [...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS]
+    .find(tool => tool.function.name === call.function.name)!
+  for (const field of definition.function.parameters.required) {
     if (!(field in args)) throw new Error(`缺少工具参数: ${field}`)
   }
   return args
@@ -137,7 +168,9 @@ export function linesPage(content: string, offsetValue: unknown, limitValue: unk
   const lines = content.split(/\r?\n/)
   const offset = boundedInteger(offsetValue, 1)
   const limit = boundedInteger(limitValue, 200)
-  return lines.slice(offset - 1, offset - 1 + limit).map((line, index) => `${offset + index}: ${line}`).join('\n')
+  const page = lines.slice(offset - 1, offset - 1 + limit)
+  const end = page.length ? offset + page.length - 1 : Math.min(offset - 1, lines.length)
+  return [`[lines ${page.length ? offset : 0}-${end} of ${lines.length}; eof=${end >= lines.length}]`, ...page.map((line, index) => `${offset + index}: ${line}`)].join('\n')
 }
 
 export function normalizeCreativeProjectPath(input: string, allowRoot = false): string {

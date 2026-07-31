@@ -581,12 +581,14 @@ export function createWebProjectFiles(
   async function rename(projectId: string, path: string, newName: string): Promise<FileEntry> {
     return await withProjectMutationLock(projectId, async () => {
       const normalized = normalizePath(path)
-      const cleanName = String(newName || '').trim()
-      if (!cleanName || cleanName.includes('/') || cleanName === '.' || cleanName === '..') throw new Error('新名称无效')
       const entry = await read(projectId, normalized)
       const parentPath = normalized.split('/').slice(0, -1).join('/')
-      const nextPath = parentPath ? `${parentPath}/${cleanName}` : cleanName
+      const requested = String(newName || '').replace(/\\/g, '/')
+      const nextPath = requested.includes('/') ? normalizePath(requested) : normalizePath(parentPath ? `${parentPath}/${requested}` : requested)
+      const cleanName = nextPath.split('/').pop()!
+      if (nextPath === normalized || nextPath.startsWith(`${normalized}/`)) throw new Error('新位置无效')
       if (await findEntry(projectId, nextPath)) throw new Error(`目标已存在: ${nextPath}`)
+      const nextParentId = await ensureParents(projectId, nextPath)
       const entries = [entry, ...(isFolder(entry)
         ? (await allProjectEntries(projectId)).filter(item => entryPath(item).startsWith(`${normalized}/`))
         : [])]
@@ -596,6 +598,7 @@ export function createWebProjectFiles(
         await adapter.put({
           ...item,
           name: item.id === entry.id ? cleanName : item.name,
+          folderId: item.id === entry.id ? nextParentId : item.folderId,
           updatedAt: Date.now(),
           metadata: { ...(item.metadata || {}), relativePath },
         })

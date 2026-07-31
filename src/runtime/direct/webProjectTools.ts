@@ -6,6 +6,7 @@ import {
   linesPage,
   parseCreativeToolArguments,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
+  MEMORY_FILE_TOOL_DEFINITIONS,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
@@ -16,12 +17,26 @@ type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS
   .filter(tool => tool.function.name !== 'terminal')
 
+export const READ_ONLY_DOCUMENT_TOOL_DEFINITIONS = WEB_PROJECT_TOOL_DEFINITIONS
+  .filter(tool => tool.function.name === 'read' || tool.function.name === 'grep')
+  .map(tool => tool.function.name === 'grep'
+    ? { ...tool, function: { ...tool.function, parameters: { ...tool.function.parameters, required: ['pattern', 'path'] } } }
+    : tool)
+
 const WEB_CORE_TOOL_NAMES = WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
 
 export function buildWebProjectToolDefinitions() {
   return [
     ...WEB_PROJECT_TOOL_DEFINITIONS,
     ...getMcpBridgeToolDefinitions({ coreToolNames: WEB_CORE_TOOL_NAMES }),
+  ]
+}
+
+export function buildMemoryWebProjectToolDefinitions() {
+  const tools = [...WEB_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS]
+  return [
+    ...tools,
+    ...getMcpBridgeToolDefinitions({ coreToolNames: tools.map(tool => tool.function.name) }),
   ]
 }
 
@@ -149,6 +164,21 @@ export function createWebProjectToolExecutor(input: {
         args.replaceAll === true,
       )
       return { content: `Edited file successfully: ${args.path}\nReplacements: ${replacements}` }
+    }
+
+    if (name === 'mkdir') {
+      const entry = await input.files.createFolder(requireProject(), String(args.path || ''))
+      return { content: `已创建文件夹: ${entry.metadata?.relativePath}` }
+    }
+
+    if (name === 'move') {
+      const entry = await input.files.rename(requireProject(), String(args.path || ''), String(args.destination || ''))
+      return { content: `已移动: ${args.path} -> ${entry.metadata?.relativePath}` }
+    }
+
+    if (name === 'delete') {
+      await input.files.remove(requireProject(), String(args.path || ''))
+      return { content: `已删除浏览器本地项目资源: ${args.path}` }
     }
 
     if (isMcpToolName(name)) {

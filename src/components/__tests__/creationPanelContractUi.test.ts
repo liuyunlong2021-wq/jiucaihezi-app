@@ -5,6 +5,14 @@ import { test } from 'node:test'
 
 const root = process.cwd()
 
+test('canvas shortcuts do not consume copy outside the canvas', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /canvasContainer\.value\?\.contains\(el\)/)
+  assert.match(source, /canvasContainer\.value\?\.contains\(target\)/)
+  assert.match(source, /if \(!inCanvas\) return/)
+})
+
 test('creation panel reads registry-backed plan state instead of legacy RH-only model heuristics', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

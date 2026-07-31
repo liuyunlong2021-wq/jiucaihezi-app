@@ -26,6 +26,7 @@ import MessageBubble from './MessageBubble.vue'
 import MediaTaskBubble from './MediaTaskBubble.vue'
 import FileUploader from './FileUploader.vue'
 import ChatScrollNav from './ChatScrollNav.vue'
+import ToolApprovalStrip from './ToolApprovalStrip.vue'
 import { useVirtualizer } from '@tanstack/vue-virtual'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import SessionContextUsage from './SessionContextUsage.vue'
@@ -3997,37 +3998,13 @@ function onDrop(e: DragEvent) {
         </button>
       </div>
     </div>
-    <div
+    <ToolApprovalStrip
       v-if="pendingCreativeToolApproval && !isDaoMode"
-      class="cp-creative-approval"
-      role="alertdialog"
-      aria-live="assertive"
-    >
-      <span class="cp-creative-approval-message">{{ pendingCreativeToolApproval.message }}</span>
-      <div class="cp-creative-approval-actions">
-        <button
-          type="button"
-          class="cp-creative-approval-reject"
-          @click="settleCreativeToolApproval('reject')"
-        >
-          拒绝
-        </button>
-        <button
-          type="button"
-          class="cp-creative-approval-once"
-          @click="settleCreativeToolApproval('once')"
-        >
-          允许
-        </button>
-        <button
-          type="button"
-          class="cp-creative-approval-always"
-          @click="settleCreativeToolApproval('always')"
-        >
-          始终允许
-        </button>
-      </div>
-    </div>
+      :message="pendingCreativeToolApproval.message"
+      @reject="settleCreativeToolApproval('reject')"
+      @once="settleCreativeToolApproval('once')"
+      @always="settleCreativeToolApproval('always')"
+    />
     <PermissionDock
       v-if="!isWebRuntime && !isCreativeMode && !isDaoMode"
       :requests="pendingPermissions"

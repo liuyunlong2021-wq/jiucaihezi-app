@@ -143,10 +143,18 @@ test('global bridge reconnects after repeated transport failures until stopped',
     onError: error => errors.push(error),
   })
   const received: QueuedServerEvent[] = []
-  bridge.subscribe(event => received.push(event))
+  let resolveConnected: (() => void) | undefined
+  const connected = new Promise<void>(resolve => { resolveConnected = resolve })
+  bridge.subscribe(event => {
+    received.push(event)
+    if (event.payload.type === 'server.connected') resolveConnected?.()
+  })
 
   const running = bridge.start()
-  await new Promise(resolve => setTimeout(resolve, 20))
+  await Promise.race([
+    connected,
+    new Promise((_, reject) => setTimeout(() => reject(new Error('bridge did not reconnect')), 1_000)),
+  ])
   bridge.stop()
   await running
 

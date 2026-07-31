@@ -58,6 +58,42 @@ test('conversation transcript keeps a project attachment locator without embeddi
   assert.doesNotMatch(withAttachment, /data:image|base64/)
 })
 
+test('conversation transcript keeps document source and readable locators without embedding text', () => {
+  const empty = createConversationTranscript('chat_document')
+  const content = appendConversationTurn(empty, {
+    id: 'turn_document', role: 'user', content: '请总结文档', createdAt: '2026-07-24T10:01:00.000Z',
+    attachments: [{
+      id: 'document-1', name: '方案.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      size: 1024, kind: 'file', projectPath: 'jc-materials/originals/方案.docx',
+      readablePath: 'jc-materials/markdown/方案.docx.md', characterCount: 83017,
+    }],
+  })
+
+  assert.deepEqual(parseConversationTranscript('.raw/对话记录/chat_document.md', content)?.turns[0]?.attachments?.[0], {
+    id: 'document-1', name: '方案.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    size: 1024, kind: 'file', projectPath: 'jc-materials/originals/方案.docx',
+    readablePath: 'jc-materials/markdown/方案.docx.md', characterCount: 83017,
+  })
+  assert.doesNotMatch(content, /正文内容|base64|data:/)
+})
+
+test('conversation transcript preserves safe text sources and rejects Raw or binary readable paths', () => {
+  const empty = createConversationTranscript('chat_text')
+  const content = appendConversationTurn(empty, {
+    id: 'turn_text', role: 'user', content: '查看文本', createdAt: '2026-07-24T10:01:00.000Z',
+    attachments: [
+      { id: 'text', name: '笔记.txt', mime: 'text/plain', size: 10, kind: 'file', readablePath: 'jc-materials/originals/笔记.txt' },
+      { id: 'raw', name: 'raw.md', mime: 'text/markdown', size: 10, kind: 'file', readablePath: '.raw/对话记录/raw.md' },
+      { id: 'binary', name: 'word.docx', mime: 'application/octet-stream', size: 10, kind: 'file', readablePath: 'jc-materials/originals/word.docx' },
+    ],
+  })
+  const attachments = parseConversationTranscript('.raw/对话记录/chat_text.md', content)?.turns[0]?.attachments
+
+  assert.equal(attachments?.[0]?.readablePath, 'jc-materials/originals/笔记.txt')
+  assert.equal(attachments?.[1]?.readablePath, undefined)
+  assert.equal(attachments?.[2]?.readablePath, undefined)
+})
+
 test('conversation transcript records the execution mode on user turns', () => {
   const empty = createConversationTranscript('chat_mode')
   const content = appendConversationTurn(empty, {

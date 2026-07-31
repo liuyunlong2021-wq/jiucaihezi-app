@@ -33,6 +33,8 @@ export interface ProcessedFile {
   markdownFilename?: string
   /** Markdown 转换引擎 */
   markdownEngine?: string
+  /** 转换结果是否因服务上限而不完整 */
+  truncated?: boolean
   /** 处理状态 */
   status: 'processing' | 'ready' | 'error'
   /** 错误信息 */
@@ -200,6 +202,7 @@ async function processOfficeFile(result: ProcessedFile, maxTextLength: number, o
 
   result.markdownFilename = converted.filename
   result.markdownEngine = converted.engine
+  result.truncated = converted.truncated
   if (converted.status === 'success') {
     result.textContent = converted.content
     result.error = undefined
