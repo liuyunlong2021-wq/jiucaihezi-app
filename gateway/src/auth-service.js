@@ -490,8 +490,12 @@ async function fetchOrCreateLegacyManagedTokenKey(env, userId, accessToken, targ
   });
   const listPayload = await fetchJsonPayload(listResponse, '读取账号对话令牌失败');
   if (!listResponse.ok || !listPayload || listPayload.success === false) throw new Error(listPayload && listPayload.message ? listPayload.message : '读取账号对话令牌失败');
+  const matchesManagedToken = (item) => item
+    && item.name === tokenName
+    && item.group === group
+    && (item.status == null || Number(item.status) === 1);
   let items = extractNewApiItems(listPayload);
-  let found = items.find((item) => item && item.name === tokenName);
+  let found = items.find(matchesManagedToken);
   if (!found) {
     const createResponse = await fetch(`${legacyApiBase(env)}/api/token/`, {
       method: 'POST',
@@ -512,7 +516,7 @@ async function fetchOrCreateLegacyManagedTokenKey(env, userId, accessToken, targ
     });
     const relistPayload = await fetchJsonPayload(relistResponse, '刷新账号对话令牌失败');
     items = extractNewApiItems(relistPayload);
-    found = items.find((item) => item && item.name === tokenName);
+    found = items.find(matchesManagedToken);
   }
   if (!found || !found.id) throw new Error('账号对话令牌创建后未找到');
   return fetchLegacyTokenKeyById(env, userId, found.id, accessToken);

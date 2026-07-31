@@ -41,7 +41,7 @@ test('auth login returns an ordinary NewAPI key plus a dedicated sync session', 
       });
     }
     if (String(url).includes('/api/token/?')) {
-      return Response.json({ success: true, data: [{ id: 701, name: '韭菜盒子工作台' }] });
+      return Response.json({ success: true, data: [{ id: 701, name: '韭菜盒子工作台', group: 'auto', status: 1 }] });
     }
     if (String(url).endsWith('/api/token/701/key')) {
       return Response.json({ success: true, data: { key: 'sk-existing-workbench-key' } });
@@ -70,6 +70,46 @@ test('auth login returns an ordinary NewAPI key plus a dedicated sync session', 
   }
 });
 
+test('auth login ignores a same-name token outside the auto group', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url).endsWith('/api/user/login')) {
+      return Response.json({ success: true, data: { id: 88, username: 'alice', access_token: 'user_access_88' } });
+    }
+    if (String(url).includes('/api/token/?')) {
+      return Response.json({
+        success: true,
+        data: [
+          { id: 700, name: '韭菜盒子工作台', group: 'site_member', status: 1 },
+          { id: 701, name: '韭菜盒子工作台', group: 'auto', status: 1 }
+        ]
+      });
+    }
+    if (String(url).endsWith('/api/token/701/key')) {
+      return Response.json({ success: true, data: { key: 'sk-auto-workbench-key' } });
+    }
+    throw new Error(`unexpected fetch ${url}`);
+  };
+
+  try {
+    const response = await gateway.fetch(request('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: 'alice', password: 'secret' })
+    }), env);
+    const payload = await readJson(response);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.api_key, 'sk-auto-workbench-key');
+    assert.equal(calls.some((call) => call.url.endsWith('/api/token/700/key')), false);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('auth login creates and reads a workbench key when none exists', async () => {
   const env = createEnv();
   const previousFetch = globalThis.fetch;
@@ -82,7 +122,7 @@ test('auth login creates and reads a workbench key when none exists', async () =
     }
     if (String(url).includes('/api/token/?')) {
       if (!listedAfterCreate) return Response.json({ success: true, data: [] });
-      return Response.json({ success: true, data: [{ id: 702, name: '韭菜盒子工作台' }] });
+      return Response.json({ success: true, data: [{ id: 702, name: '韭菜盒子工作台', group: 'auto', status: 1 }] });
     }
     if (String(url).endsWith('/api/token/')) {
       const body = JSON.parse(String(init.body || '{}'));
