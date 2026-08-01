@@ -328,3 +328,9 @@
 - 收口 `v2.1.3..main`：自动分组登录 Key、记忆工作台消息/Raw/基础作品工具、HTML/PNG 渲染、Three.js 3D 白膜与 RH 全球站逐模型路由。
 - RH adapter 已在服务器重建；全球 Key 已进入容器，`/health` 返回 `status=ok`、44 个模型。真实 Grok/Suno 与其他迁移模型任务尚未验收，不记为成功。
 - 版本号统一为 `2.1.4`；发布前门禁通过：focused Node 1422/1430（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与两端产物审计。Web Production 和三平台 CI 仅在真实触发后补充证据。
+
+## [2026-08-01] 发布准备 | v2.1.5
+
+- 修复 Suno 经 NewAPI 标准音频合同调用时自定义字段丢失：App 同时发送标准 `input`，RH adapter 将其兜底映射为 `prompt / description / lyrics`；服务器必须拉取本提交后只重建 `rh-adapter` 才生效。
+- 修复 3D 白膜标签遮挡主体和 Web 崩溃：标签固定小尺寸、人物头顶锚定并恢复深度遮挡；底部提供九个通用机位；空白/截断 `.jcscene` 降级为纯文本，编辑器通过现有解析器获得可克隆纯数据。
+- 用户已完成 Web 人工验收；版本统一为 `2.1.5`。发布门禁通过：Node 1424/1432（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与两端产物审计。Web Production 和三平台 CI 结果只按本轮真实执行结果继续补充。

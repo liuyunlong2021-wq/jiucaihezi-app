@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
-import type { Scene3DCamera, Scene3DDocument, Scene3DFormation, Scene3DObject } from '@/runtime/memory/scene3d'
+import { parseScene3DDocument, type Scene3DCamera, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
 
 const props = defineProps<{ document: Scene3DDocument }>()
 const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string] }>()
@@ -13,7 +13,7 @@ const labelsVisible = ref(true)
 const selectedId = ref('')
 const cameraName = ref('')
 const renderRevision = ref(0)
-let document = structuredClone(toRaw(props.document))
+let document = parseScene3DDocument(props.document)
 let scene: THREE.Scene | null = null
 let root: THREE.Group | null = null
 let renderer: THREE.WebGLRenderer | null = null
@@ -30,6 +30,32 @@ const selectable = new Map<string, THREE.Object3D>()
 
 const currentAspect = computed(() => { renderRevision.value; return document.canvas.aspect })
 const savedCameras = computed(() => { renderRevision.value; return document.savedCameras })
+const defaultCameras = computed(() => {
+  renderRevision.value
+  const characters = [
+    ...document.objects.filter(item => item.type === 'person').map(item => ({ name: item.label, position: item.position })),
+    ...document.formations.filter(item => (item.shape || 'person') === 'person').map(item => ({ name: item.label, position: item.position })),
+  ]
+  const first = characters[0] || { name: '人物 A', position: [-2, 0, 0] as [number, number, number] }
+  const second = characters[1] || { name: '人物 B', position: [2, 0, 0] as [number, number, number] }
+  const firstName = first.name || '人物 A'
+  const secondName = second.name || '人物 B'
+  const midpoint: [number, number, number] = [
+    (first.position[0] + second.position[0]) / 2,
+    (first.position[1] + second.position[1]) / 2 + 1,
+    (first.position[2] + second.position[2]) / 2,
+  ]
+  const camera = (name: string, position: [number, number, number], target = document.camera.target, projection: Scene3DCamera['projection'] = 'perspective'): Scene3DCamera =>
+    ({ name, position, target, projection, lens: 'standard', aspect: document.canvas.aspect })
+  return [
+    camera('全景', [12, 9, 14]), camera('正面中景', [0, 4, 10]), camera('俯拍', [0, 20, .01], midpoint, 'orthographic'),
+    camera('低机位', [8, 2, 12]), camera('双人中景', [midpoint[0], midpoint[1] + 2, midpoint[2] + 8], midpoint),
+    camera(`${firstName}过肩`, [first.position[0], first.position[1] + 2, first.position[2] + 2], [second.position[0], second.position[1] + 1, second.position[2]]),
+    camera(`${secondName}过肩`, [second.position[0], second.position[1] + 2, second.position[2] + 2], [first.position[0], first.position[1] + 1, first.position[2]]),
+    camera(`${firstName}近景`, [first.position[0], first.position[1] + 2, first.position[2] + 5], [first.position[0], first.position[1] + 1, first.position[2]]),
+    camera(`${secondName}近景`, [second.position[0], second.position[1] + 2, second.position[2] + 5], [second.position[0], second.position[1] + 1, second.position[2]]),
+  ]
+})
 
 function vector(value: [number, number, number]) { return new THREE.Vector3(...value) }
 function tuple(value: THREE.Vector3): [number, number, number] { return [value.x, value.y, value.z] }
@@ -47,20 +73,21 @@ function addLabel(parent: THREE.Object3D, label: string, color: string, y = 1.8)
   if (!label) return
   const surface = window.document.createElement('canvas')
   const context = surface.getContext('2d')!
-  context.font = '600 28px sans-serif'
-  const width = Math.max(72, Math.ceil(context.measureText(label).width) + 28)
+  context.font = '600 18px sans-serif'
+  const width = Math.max(48, Math.ceil(context.measureText(label).width) + 18)
   surface.width = width
-  surface.height = 46
-  context.font = '600 28px sans-serif'
+  surface.height = 30
+  context.font = '600 18px sans-serif'
   context.fillStyle = 'rgba(14, 20, 19, .84)'
-  context.fillRect(0, 0, width, 46)
+  context.fillRect(0, 0, width, 30)
   context.fillStyle = color
   context.textBaseline = 'middle'
-  context.fillText(label, 14, 24)
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(surface), depthTest: false }))
+  context.fillText(label, 9, 16)
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(surface), depthTest: true, depthWrite: false, sizeAttenuation: false }))
   sprite.name = 'scene-label'
+  sprite.center.set(.5, 0)
   sprite.position.set(0, y, 0)
-  sprite.scale.set(width / 52, 0.88, 1)
+  sprite.scale.set(width / 1100, .036, 1)
   parent.add(sprite)
 }
 
@@ -379,7 +406,7 @@ onMounted(() => {
 })
 
 watch(() => props.document, value => {
-  document = structuredClone(toRaw(value)); renderRevision.value++; buildScene(); createCameraControls()
+  document = parseScene3DDocument(value); renderRevision.value++; buildScene(); createCameraControls()
 })
 
 onBeforeUnmount(() => {
@@ -428,8 +455,9 @@ onBeforeUnmount(() => {
       <div class="scene3d-frame"></div>
       <p v-if="!selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
     </div>
-    <footer v-if="savedCameras.length" class="scene3d-cameras">
+    <footer class="scene3d-cameras">
       <span>机位</span>
+      <button v-for="item in defaultCameras" :key="item.name" @click="useSavedCamera(item)">{{ item.name }}</button>
       <div v-for="(item, index) in savedCameras" :key="`${item.name}-${index}`" class="scene3d-camera-chip">
         <button @click="useSavedCamera(item)">{{ item.name || `机位 ${index + 1}` }}</button>
         <button :title="`删除 ${item.name || `机位 ${index + 1}`}`" @click="removeSavedCamera(index)"><JcIcon name="close" /></button>
@@ -443,7 +471,7 @@ onBeforeUnmount(() => {
 .scene3d-toolbar { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
 .scene3d-tools { display: flex; align-items: center; gap: 3px; }
-.scene3d-tools button, .scene3d-camera-chip button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.scene3d-tools button, .scene3d-cameras button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
 .scene3d-tools button:hover, .scene3d-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
 .scene3d-tools button.primary { background: #86c8a5; color: #122018; }
 .scene3d-tools .mso { font-size: 18px; }
@@ -454,6 +482,8 @@ onBeforeUnmount(() => {
 .scene3d-hint { position: absolute; left: 12px; bottom: 10px; margin: 0; padding: 6px 8px; color: #dce8e1; background: rgba(10, 17, 14, .72); border-radius: 4px; font-size: 12px; pointer-events: none; }
 .scene3d-cameras { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 5px 10px; border-top: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
 .scene3d-cameras > span { color: #aebcb5; font-size: 12px; }
+.scene3d-cameras > button { flex: 0 0 auto; padding: 0 8px; border-color: rgba(216, 235, 223, .18); }
+.scene3d-cameras > button:hover { background: rgba(222, 243, 229, .14); }
 .scene3d-camera-chip { display: flex; align-items: center; border: 1px solid rgba(216, 235, 223, .18); border-radius: 4px; }
 .scene3d-camera-chip button:first-child { padding: 0 8px; min-width: auto; }
 .scene3d-camera-chip button:last-child { min-width: 24px; width: 24px; }

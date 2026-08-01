@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { reactive } from 'vue'
 
 import { createScene3DDocument, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
 
@@ -23,6 +24,11 @@ test('scene3d rejects unsupported shapes, runaway counts and missing group membe
   assert.throws(() => createScene3DDocument({ title: '错', objects: [], groups: [{ id: 'group', memberIds: ['missing'] }] }), /分组成员/)
   assert.throws(() => parseScene3DDocument({ version: 2, title: '未来场景' }), /不支持/)
   assert.throws(() => parseScene3DDocument(null), /必须是对象/)
+})
+
+test('scene3d parser removes nested Vue proxies before the editor receives data', () => {
+  const scene = parseScene3DDocument(reactive({ title: '可打开场景', objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }] }))
+  assert.doesNotThrow(() => structuredClone(scene))
 })
 
 test('scene3d result markers survive Raw while remaining hidden from display text', () => {

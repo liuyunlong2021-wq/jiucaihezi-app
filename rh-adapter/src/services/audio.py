@@ -36,20 +36,20 @@ def _build_suno_payload(request: AudioRequest) -> dict | None:
     if request.model == "rh-suno-v55-single":
         return {
             "title": request.title or extra.get("title") or "未命名歌曲",
-            "description": request.description or extra.get("description") or request.prompt or request.text,
+            "description": request.description or extra.get("description") or request.prompt or request.text or request.input,
             "make_instrumental": _bool_string(request.make_instrumental or extra.get("make_instrumental")),
         }
     if request.model == "rh-suno-v55-custom":
         return {
             "title": request.title or extra.get("title") or "未命名歌曲",
-            "lyrics": request.lyrics or extra.get("lyrics") or request.prompt or request.text,
+            "lyrics": request.lyrics or extra.get("lyrics") or request.prompt or request.text or request.input,
             "tags": request.tags or extra.get("tags") or "",
             "negative_tags": request.negative_tags or extra.get("negative_tags") or "",
             "make_instrumental": _bool_string(request.make_instrumental or extra.get("make_instrumental")),
         }
     if request.model == "rh-suno-lyrics":
         return {
-            "prompt": request.prompt or request.text,
+            "prompt": request.prompt or request.text or request.input,
         }
     return None
 

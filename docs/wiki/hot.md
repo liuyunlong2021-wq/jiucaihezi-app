@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆工作台模型主导工具与审批SDD]] · [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] · [[开发/通用记忆工作台本地作品生成基础工具SDD]] · [[开发/通用记忆工作台3D白膜场景基础工具SDD]] · [[运维/模型矩阵]]** — `v2.1.4` 发布内容已收口：本轮用户消息是唯一当前任务，Raw 只按需提供已完成历史，完整回复成功后一次写入 user/assistant 对；`.raw` 已恢复到文件树，上传与生成统一进入 `.raw/jc-media/{文档,图片,视频,音频}`。记忆模式常驻 `export_markdown_png / create_document / create_html / create_3d_scene` 四个本地作品基础工具，任何 Skill 均可组合调用；Three.js 白膜支持通用积木、排列、分组、标签、拖动、机位、画幅、灯光和截图。用户已实测 HTML、图片和 3D 白膜成功。RunningHub 15 个受中国站下架影响的现有 RH 模型已逐模型切全球站，国内 RH 模型不动；服务器容器读取全球 Key 且健康检查通过，真实付费任务仍待验收。Web Production 与三平台正式构建尚未触发。Android 继续暂停。
+**当前焦点：[[开发/通用记忆工作台模型主导工具与审批SDD]] · [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] · [[开发/通用记忆工作台本地作品生成基础工具SDD]] · [[开发/通用记忆工作台3D白膜场景基础工具SDD]] · [[运维/模型矩阵]]** — `v2.1.5` 发布准备已收口：Suno 请求统一补标准 `input` 并由 RH adapter 兜底映射到歌词和歌曲字段；3D 白膜标签固定为小号屏幕尺寸、恢复深度遮挡并提供九个默认机位；空白/截断 `.jcscene` 与嵌套 Vue Proxy 不再击穿 Web 组件树。用户已完成人工验收；Node 1424/1432（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与产物审计通过。Web Production、三平台 CI 和新版 RH adapter 服务器部署仅在真实触发后补证据。Android 继续暂停。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-08-01（`v2.1.4` 版本号与发布前门禁已通过：focused Node 1422/1430（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与产物审计。Web Production 和三平台 CI 待触发；RunningHub 全球站 adapter 已部署并通过健康检查，真实付费任务待验收。）
+> 上次刷新: 2026-08-01（`v2.1.5` 版本和发布门禁已通过；Suno、3D 标签/九机位和 Web 场景崩溃修复已由用户验收。正式发布流程进行中，Pages 地址、tag 流水线运行号与服务器 adapter 部署状态只按真实结果更新。）

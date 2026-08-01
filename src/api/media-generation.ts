@@ -1014,6 +1014,7 @@ export async function generateAudio(
     onProgress?.(0, '提交 RunningHub...')
     const makeInstrumental = String(audioParams.makeInstrumental ?? false)
     const rhBody: any = { model }
+    if (model.startsWith('rh-suno-')) rhBody.input = audioParams.prompt || audioParams.text || ''
     if (model === 'rh-suno-v55-single') {
       rhBody.title = audioParams.title || '未命名歌曲'
       rhBody.description = audioParams.prompt || audioParams.text || audioParams.title || '一首好听的歌'

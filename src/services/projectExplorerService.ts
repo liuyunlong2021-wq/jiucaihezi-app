@@ -36,7 +36,11 @@ export async function openProjectResource(
   const text = await fileService.readText(resource)
   if (/\.jcscene$/i.test(resource.path)) {
     if (text.truncated) return { type: 'unsafe-text', resource }
-    return { type: 'scene3d', resource, text, document: parseScene3DDocument(JSON.parse(text.content)) }
+    try {
+      return { type: 'scene3d', resource, text, document: parseScene3DDocument(JSON.parse(text.content)) }
+    } catch {
+      return { type: 'editor', resource, text, editorMode: 'plain' }
+    }
   }
   const transcript = canEditProjectText(text)
     ? parseConversationTranscript(resource.path, text.content)

@@ -576,6 +576,7 @@ test('RH Suno custom submits lyrics and style tags through the RunningHub audio 
     if (url.endsWith('/v1/audio/speech')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-suno-v55-custom')
+      assert.equal(body.input, '[Verse]\n雨落下来')
       assert.equal(body.title, '雨夜')
       assert.equal(body.lyrics, '[Verse]\n雨落下来')
       assert.equal(body.tags, 'cinematic ballad')
@@ -614,6 +615,7 @@ test('RH Suno lyrics returns a text media result for the creation gallery', asyn
     if (url.endsWith('/v1/audio/speech')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-suno-lyrics')
+      assert.equal(body.input, '成长后的平静')
       assert.equal(body.prompt, '成长后的平静')
       return Response.json({ task_id: 'lyrics_task_001' })
     }

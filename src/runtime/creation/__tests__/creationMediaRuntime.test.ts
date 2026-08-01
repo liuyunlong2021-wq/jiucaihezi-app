@@ -508,6 +508,7 @@ test('P5 smoke RH Suno single returns audio result through rh-adapter polling', 
     if (url.endsWith('/v1/audio/speech')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-suno-v55-single')
+      assert.equal(body.input, '温暖的民谣')
       assert.equal(body.extra_fields?.title, '清晨')
       assert.equal(body.extra_fields?.description, '温暖的民谣')
       assert.equal(body.extra_fields?.make_instrumental, 'false')
@@ -550,6 +551,7 @@ test('P5 smoke RH lyrics returns text result through rh-adapter polling', async 
     if (url.endsWith('/v1/audio/speech')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-suno-lyrics')
+      assert.equal(body.input, '成长后的平静')
       assert.equal(body.prompt, '成长后的平静')
       return Response.json({ task_id: 'rh_lyrics_001', status: 'processing' })
     }

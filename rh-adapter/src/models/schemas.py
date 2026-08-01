@@ -149,6 +149,7 @@ class AudioRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     model: str = Field(..., description="NewAPI model name, e.g. rh-speech-hd")
+    input: Optional[str] = Field(None, description="OpenAI-compatible audio input")
     prompt: str = Field("", description="Text to synthesize")
     title: Optional[str] = Field(None, description="Song title")
     description: Optional[str] = Field(None, description="Suno one-shot song description")

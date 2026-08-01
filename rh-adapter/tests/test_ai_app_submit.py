@@ -419,6 +419,19 @@ async def test_suno_custom_audio_model_uses_runninghub_standard_endpoint():
 
 
 @pytest.mark.asyncio
+async def test_suno_uses_openai_audio_input_when_newapi_drops_custom_fields():
+    client = FakeClient()
+
+    await generate_audio(
+        client,
+        request=AudioRequest(model="rh-suno-lyrics", input="写一段春天歌词"),
+        api_key="rh_key",
+    )
+
+    assert client.calls[0][1]["json"]["prompt"] == "写一段春天歌词"
+
+
+@pytest.mark.asyncio
 async def test_fetch_ai_app_node_info_uses_official_api_call_demo():
     client = FakeClient()
 

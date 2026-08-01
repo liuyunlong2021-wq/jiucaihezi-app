@@ -488,8 +488,12 @@ test('memory tree toggle collapses the desktop file tree and exposes reopen cont
 test('3D scene editor clones plain scene data instead of Vue proxies', () => {
   const editor = source('src/components/memory/Scene3DEditor.vue')
 
-  assert.match(editor, /structuredClone\(toRaw\(props\.document\)\)/)
-  assert.match(editor, /structuredClone\(toRaw\(value\)\)/)
+  assert.match(editor, /let document = parseScene3DDocument\(props\.document\)/)
+  assert.match(editor, /document = parseScene3DDocument\(value\)/)
+  assert.match(editor, /sizeAttenuation: false/)
+  assert.doesNotMatch(editor, /depthTest: false/)
+  assert.match(editor, /camera\('全景'/)
+  assert.match(editor, /camera\(`\$\{secondName\}近景`/)
 })
 
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {

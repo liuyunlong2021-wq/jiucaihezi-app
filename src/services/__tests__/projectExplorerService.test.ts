@@ -79,3 +79,11 @@ test('resource open routing recognizes versioned 3D blockout scenes', async () =
   assert.equal(result.type, 'scene3d')
   if (result.type === 'scene3d') assert.equal(result.document.title, '街道')
 })
+
+test('resource open routing keeps incomplete 3D scenes editable instead of throwing', async () => {
+  for (const content of ['', '{"version":1']) {
+    const result = await openProjectResource(fileService(content), resource('document', '.raw/jc-media/文档/未完成.jcscene'))
+    assert.equal(result.type, 'editor')
+    if (result.type === 'editor') assert.equal(result.editorMode, 'plain')
+  }
+})
