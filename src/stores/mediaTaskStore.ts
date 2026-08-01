@@ -926,6 +926,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     return persistTasksSafely('mark-submitted')
   }
 
+  function markTaskSubmittedWithoutBlocking(
+    task: MediaTask,
+    result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' | 'text' },
+  ): void {
+    void markTaskSubmitted(task, result).then(persisted => {
+      if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+    })
+  }
+
   /** 恢复单个任务的轮询 */
   async function _resumePolling(task: MediaTask) {
     if (!task.pollUrl || !task.pollKind) return
@@ -1213,13 +1222,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.upstreamFamily = params.plan!.upstreamFamily
         task.apiStyle = params.plan!.apiStyle
         task.mode = params.plan!.mode
-        result = await creationSubmitExecutor(request, onProgress, async submitted => {
-          const persisted = await markTaskSubmitted(task, submitted)
-          if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+        result = await creationSubmitExecutor(request, onProgress, submitted => {
+          markTaskSubmittedWithoutBlocking(task, submitted)
         })
         resultUrl = result.url
-        const persisted = await markTaskSubmitted(task, result)
-        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+        markTaskSubmittedWithoutBlocking(task, result)
       } else if (params.type === 'image') {
         console.log(
           '[mediaTaskStore] _executeTask image, model=',
@@ -1236,16 +1243,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
                 ? params.referenceImages
                 : params.referenceImages?.[0],
             ...(params.imageParams || {}),
-            onSubmitted: async submitted => {
-              const persisted = await markTaskSubmitted(task, submitted)
-              if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+            onSubmitted: submitted => {
+              markTaskSubmittedWithoutBlocking(task, submitted)
             },
           },
           onProgress,
         )
         resultUrl = result.url
-        const persisted = await markTaskSubmitted(task, result)
-        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+        markTaskSubmittedWithoutBlocking(task, result)
       } else if (params.type === 'video') {
         result = await generateVideo(
           {
@@ -1257,9 +1262,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
                 ? params.referenceImages
                 : undefined,
             ...(params.videoParams || {}),
-            onSubmitted: async submitted => {
-              const persisted = await markTaskSubmitted(task, submitted)
-              if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+            onSubmitted: submitted => {
+              markTaskSubmittedWithoutBlocking(task, submitted)
             },
           },
           onProgress,
@@ -1267,8 +1271,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         resultUrl = result.url
 
         // ★ 保存上游任务 ID 和轮询地址（用于刷新后恢复）
-        const persisted = await markTaskSubmitted(task, result)
-        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+        markTaskSubmittedWithoutBlocking(task, result)
       } else if (params.type === 'model3d') {
         throw new Error('3D 任务必须通过共用 Creation 运行计划提交')
       } else if (params.type === 'audio' || params.type === 'text') {
@@ -1277,16 +1280,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             model: params.model,
             prompt: params.prompt,
             ...(params.audioParams || {}),
-            onSubmitted: async submitted => {
-              const persisted = await markTaskSubmitted(task, submitted)
-              if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+            onSubmitted: submitted => {
+              markTaskSubmittedWithoutBlocking(task, submitted)
             },
           },
           onProgress,
         )
         resultUrl = result.url
-        const persisted = await markTaskSubmitted(task, result)
-        if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
+        markTaskSubmittedWithoutBlocking(task, result)
       }
 
       if ((task as MediaTask).status === 'cancelled') {

@@ -335,3 +335,6 @@
 - 修复 3D 白膜标签遮挡主体和 Web 崩溃：标签固定小尺寸、人物头顶锚定并恢复深度遮挡；底部提供九个通用机位；空白/截断 `.jcscene` 降级为纯文本，编辑器通过现有解析器获得可克隆纯数据。
 - 用户已完成 Web 人工验收；版本统一为 `2.1.5`。发布门禁通过：Node 1424/1432（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与两端产物审计。Web Production 和三平台 CI 结果只按本轮真实执行结果继续补充。
 - Web Production 已部署至 `https://ae9a1a0b.jiucaihezi.pages.dev`；正式域名 `https://jiucaihezi.studio` 返回 HTTP 200，并与本地正式产物共同加载 `index-Dlc60MQ5-jc20260610b.js`。三平台构建状态在 tag 真实触发后记录。
+- `v2.1.5` tag 已触发 GitHub Actions `30690007566`；Mac Apple Silicon、Mac Intel 和 Windows x64 均已进入运行状态，按发布要求未等待完成，不记为构建成功。
+- 服务器仅重建 `rh-adapter`，容器健康检查返回 `status=ok`、44 个模型。真实海外 Suno 歌词任务提交约 113ms，RunningHub 约 15 秒完成，adapter 和公网 `/rh/tasks/global:<id>` 均能返回 `completed` 与完整歌词。
+- Web 一直显示“提交中”的根因不是 RH 或 NewAPI 慢：NewAPI 约 125ms 返回 200 后，前端等待任务历史持久化完成才开始轮询；Web 存储等待会阻断后续查询。现改为任务 ID 和轮询地址先写内存并立即轮询，持久化后台执行；focused Node 1424/1432（8 跳过）和类型检查通过。

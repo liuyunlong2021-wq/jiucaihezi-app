@@ -1848,22 +1848,22 @@ test('mediaTaskStore routes all creation plans through the plan-driven runtime, 
     source,
     /const shouldUseCreationRuntime = params\.source === 'creation' && params\.plan && !params\.plan\.usesRhAdapter/,
   )
-  assert.match(source, /creationSubmitExecutor\(\s*request,\s*onProgress,\s*async submitted => \{/)
+  assert.match(source, /creationSubmitExecutor\(\s*request,\s*onProgress,\s*submitted => \{/)
 })
 
-test('mediaTaskStore persists submitted upstream task metadata before polling continues', () => {
+test('mediaTaskStore starts polling without waiting for submitted task persistence', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
-  assert.equal(source.includes('void markTaskSubmitted(task, submitted)'), false)
+  assert.match(source, /function markTaskSubmittedWithoutBlocking/)
   assert.match(
     source,
-    /onSubmitted: async submitted => \{\s+const persisted = await markTaskSubmitted\(task, submitted\)/,
+    /onSubmitted: submitted => \{\s+markTaskSubmittedWithoutBlocking\(task, submitted\)/,
   )
   assert.match(
     source,
-    /if \(!persisted\) markPersistenceWarning\(task, '任务已提交，但本地保存失败'\)/,
+    /void markTaskSubmitted\(task, result\)\.then\(persisted => \{/,
   )
-  assert.doesNotMatch(source, /catch\s*\{\s*\/\* noop \*\/\s*\}/)
+  assert.doesNotMatch(source, /await markTaskSubmitted\(task, submitted\)/)
   assert.match(source, /async function saveTasks[\s\S]*catch \(error\)[\s\S]*throw error/)
 })
 
