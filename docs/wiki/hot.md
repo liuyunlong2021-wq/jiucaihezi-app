@@ -2,7 +2,7 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆工作台模型主导工具与审批SDD]] · [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] · [[开发/通用记忆工作台本地作品生成基础工具SDD]] · [[开发/通用记忆工作台3D白膜场景基础工具SDD]] · [[开发/显示系统统一SDD]]** — `v2.1.3` 发布后续稳定性升级已实施：本轮用户消息是唯一当前任务，Raw 只按需提供已完成历史，完整回复成功后一次写入 user/assistant 对；失败或停止不写半轮。`.raw` 已恢复到文件树，只隐藏 App 管理的 `.raw/对话记录` 与 `.raw/.sync`；上传、生成与旧目录迁移统一进入 `.raw/jc-media/{文档,图片,视频,音频}`，同名 keep-both，旧附件定位同步更新。文档转换副本统一为 `原文件名.md`，Desktop 项目文档直接走本地路径转换并保留 20 MB 内的云端回退。记忆模式常驻新增 `export_markdown_png / create_document / create_html / create_3d_scene` 四个本地作品基础工具，任何 Skill 均可组合调用；`export_markdown_png` 只排版导出已有文字，创作新画面仍走 AI 媒体卡，不增加 Skill 门控、弹窗、模板或 Playwright/Chromium。3D 白膜已复用现有 Three.js 实施：通用积木、排列、分组、标签、拖动、机位、画幅、灯光和截图均在本地完成，不调用 AI 3D、不引入素材库；自动测试、Web/Desktop 构建与浏览器实景验收通过。真实模型自然语言调用、跨设备、审批交互和三平台安装包仍待人工验收。Android 继续暂停。
+**当前焦点：[[开发/通用记忆工作台模型主导工具与审批SDD]] · [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] · [[开发/通用记忆工作台本地作品生成基础工具SDD]] · [[开发/通用记忆工作台3D白膜场景基础工具SDD]] · [[运维/模型矩阵]]** — `v2.1.4` 发布内容已收口：本轮用户消息是唯一当前任务，Raw 只按需提供已完成历史，完整回复成功后一次写入 user/assistant 对；`.raw` 已恢复到文件树，上传与生成统一进入 `.raw/jc-media/{文档,图片,视频,音频}`。记忆模式常驻 `export_markdown_png / create_document / create_html / create_3d_scene` 四个本地作品基础工具，任何 Skill 均可组合调用；Three.js 白膜支持通用积木、排列、分组、标签、拖动、机位、画幅、灯光和截图。用户已实测 HTML、图片和 3D 白膜成功。RunningHub 15 个受中国站下架影响的现有 RH 模型已逐模型切全球站，国内 RH 模型不动；服务器容器读取全球 Key 且健康检查通过，真实付费任务仍待验收。Web Production 与三平台正式构建尚未触发。Android 继续暂停。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
@@ -32,4 +32,4 @@
 
 ---
 
-> 上次刷新: 2026-07-31（`v2.1.3` 已正式发布：Web Production `https://04db458f.jiucaihezi.pages.dev` 与正式域名资源指纹一致；GitHub Actions `30616993714` 的 Mac Apple Silicon、Mac Intel、Windows x64 和更新清单任务全部成功。GitHub Release 为正式非草稿，服务器 `latest.json` 已返回 `2.1.3` 与三个平台下载地址。）
+> 上次刷新: 2026-08-01（`v2.1.4` 版本号与发布前门禁已通过：focused Node 1422/1430（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与产物审计。Web Production 和三平台 CI 待触发；RunningHub 全球站 adapter 已部署并通过健康检查，真实付费任务待验收。）

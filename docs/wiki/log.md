@@ -322,3 +322,9 @@
 - Web Production 已部署至 `https://04db458f.jiucaihezi.pages.dev`；正式域名 `https://jiucaihezi.studio` 返回 HTTP 200，防缓存请求加载本次构建的 `index-Bub6mWvw-jc20260610b.js`。三平台结果继续等待 tag 流水线真实完成。
 - `v2.1.3` tag 触发 GitHub Actions `30616993714`：Mac Apple Silicon、Mac Intel、Windows x64 与 `publish-manifest` 全部成功；两份 macOS DMG 均完成 Developer ID 签名、公证、SHA256 和记忆 App 边界冒烟，Windows ZIP 完成内容冒烟。
 - GitHub Release `https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v2.1.3` 为正式非草稿，含 ARM DMG、Intel DMG 和 Windows portable ZIP；服务器三个下载地址均返回 HTTP 200，`https://api.jiucaihezi.studio/updates/latest.json` 已更新为 `2.1.3`。
+
+## [2026-08-01] 发布准备 | v2.1.4
+
+- 收口 `v2.1.3..main`：自动分组登录 Key、记忆工作台消息/Raw/基础作品工具、HTML/PNG 渲染、Three.js 3D 白膜与 RH 全球站逐模型路由。
+- RH adapter 已在服务器重建；全球 Key 已进入容器，`/health` 返回 `status=ok`、44 个模型。真实 Grok/Suno 与其他迁移模型任务尚未验收，不记为成功。
+- 版本号统一为 `2.1.4`；发布前门禁通过：focused Node 1422/1430（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与两端产物审计。Web Production 和三平台 CI 仅在真实触发后补充证据。
