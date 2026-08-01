@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | `export_markdown_png` | 已有文字或 Markdown、标题和可选宽度 | `.raw/jc-media/图片/*.png` |
 | `create_document` | Markdown/文本、标题和 `docx/md/txt` 格式 | `.raw/jc-media/文档/*` |
-| `create_html` | Markdown 内容和标题 | `.raw/jc-media/文档/*.html` |
+| `create_html` | 完整单文件 HTML 和标题；普通 Markdown 仅作基础兜底 | `.raw/jc-media/文档/*.html` |
 
 它们不属于任何 Skill。模型可以直接调用，用户创建的任何 Skill 也可以自由组合调用。
 
@@ -35,7 +35,7 @@
 - 不增加二选一弹窗、模式开关、主题、模板或额外路由。
 - 输出路径由 App 决定，模型不能借生成工具写任意路径。
 - PNG 第一期不增加 JPG、分页或多尺寸模板。
-- HTML 不执行脚本；不增加 PDF、PPTX、Playwright、FFmpeg 或 Whisper。
+- HTML 原样保存完整网页；半截 HTML 明确失败，不再把标签转义后冒充成功。不增加 PDF、PPTX、Playwright、FFmpeg 或 Whisper。
 - 只有真实文件写入成功才返回成功和项目相对路径。
 
 ## 4. 验收
@@ -57,4 +57,5 @@
 
 - `jc-bendi-media` 及其 Skill 门控已删除，公开 Skill 索引不再包含它。
 - Web 与 Desktop 记忆模式常驻提供三个工具；图片工具已更名为 `export_markdown_png` 并明确排除新画面创作。
+- 真实测试发现并修复两个基础工具缺陷：完整 HTML 不再被二次转义；PNG 截图节点不再继承离屏坐标，最终图片增加非空像素校验。
 - TypeScript、focused（前端 1417/1417、Rust 402/402）、Web/Desktop quick build 与两端产物审计通过。

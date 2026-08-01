@@ -98,9 +98,9 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
     content: { type: 'string', description: 'Complete document content' },
     format: { type: 'string', enum: ['docx', 'md', 'txt'], description: 'Output document format' },
   }, ['title', 'content', 'format']),
-  tool('create_html', 'Create a self-contained static HTML document from Markdown content in the project document materials folder.', {
+  tool('create_html', 'Save a complete standalone HTML document in the project document materials folder. Provide the full HTML including html, head with styles, and body.', {
     title: { type: 'string', description: 'Output title and filename without extension' },
-    content: { type: 'string', description: 'Complete Markdown content' },
+    content: { type: 'string', description: 'Complete standalone HTML document; plain Markdown is accepted only as a basic fallback' },
   }, ['title', 'content']),
 ]
 

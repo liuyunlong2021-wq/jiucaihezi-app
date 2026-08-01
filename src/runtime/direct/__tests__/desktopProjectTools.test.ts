@@ -102,6 +102,10 @@ test('creative tool definitions append connected MCP tools without changing core
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
       /Do not use it to create a new photo, illustration, product image, or other visual/,
     )
+    assert.match(
+      buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'create_html')!.function.description,
+      /complete standalone HTML document/,
+    )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }

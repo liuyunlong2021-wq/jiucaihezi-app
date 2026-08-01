@@ -116,14 +116,26 @@ test('web memory artifact tools generate real project files and keep same-name o
   assert.match((await execute(call('export_markdown_png', { title: '周报', content: '# 周报' }))).content, /周报 \(1\)\.png/)
   assert.match((await execute(call('create_document', { title: '周报', content: '# 周报', format: 'docx' }))).content, /\.raw\/jc-media\/文档\/周报\.docx/)
   assert.match((await execute(call('create_html', { title: '周报', content: '# 周报' }))).content, /\.raw\/jc-media\/文档\/周报\.html/)
+  assert.match((await execute(call('create_html', {
+    title: '完整网页',
+    content: '<!doctype html><html><head><style>button{color:red}</style></head><body><button>开始</button></body></html>',
+  }))).content, /\.raw\/jc-media\/文档\/完整网页\.html/)
 
   const image = await files.readBinary(project.id, '.raw/jc-media/图片/周报.png')
   const docx = new Uint8Array(await (await files.readBinary(project.id, '.raw/jc-media/文档/周报.docx')).arrayBuffer())
   const html = await files.read(project.id, '.raw/jc-media/文档/周报.html')
+  const fullHtml = await files.read(project.id, '.raw/jc-media/文档/完整网页.html')
   assert.equal(await image.text(), 'PNG')
   assert.deepEqual([...docx.slice(0, 2)], [0x50, 0x4b])
   assert.match(html.content, /<!doctype html>/i)
   assert.match(html.content, /<h1>周报<\/h1>/)
+  assert.match(fullHtml.content, /<style>button\{color:red\}<\/style>/)
+  assert.match(fullHtml.content, /<button>开始<\/button>/)
+  assert.doesNotMatch(fullHtml.content, /&lt;button/)
+  await assert.rejects(
+    () => execute(call('create_html', { title: '半截网页', content: '<div>缺少网页结构</div>' })),
+    /网页内容不完整/,
+  )
   await assert.rejects(
     () => execute(call('create_document', { title: '错误', content: '正文', format: 'pdf' })),
     /不支持的文档格式/,
