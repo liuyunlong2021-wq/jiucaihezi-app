@@ -334,3 +334,4 @@
 - 修复 Suno 经 NewAPI 标准音频合同调用时自定义字段丢失：App 同时发送标准 `input`，RH adapter 将其兜底映射为 `prompt / description / lyrics`；服务器必须拉取本提交后只重建 `rh-adapter` 才生效。
 - 修复 3D 白膜标签遮挡主体和 Web 崩溃：标签固定小尺寸、人物头顶锚定并恢复深度遮挡；底部提供九个通用机位；空白/截断 `.jcscene` 降级为纯文本，编辑器通过现有解析器获得可克隆纯数据。
 - 用户已完成 Web 人工验收；版本统一为 `2.1.5`。发布门禁通过：Node 1424/1432（8 跳过）、Rust 402/403（1 忽略）、类型检查、Web/Desktop 正式构建与两端产物审计。Web Production 和三平台 CI 结果只按本轮真实执行结果继续补充。
+- Web Production 已部署至 `https://ae9a1a0b.jiucaihezi.pages.dev`；正式域名 `https://jiucaihezi.studio` 返回 HTTP 200，并与本地正式产物共同加载 `index-Dlc60MQ5-jc20260610b.js`。三平台构建状态在 tag 真实触发后记录。
