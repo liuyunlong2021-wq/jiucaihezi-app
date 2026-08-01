@@ -28,9 +28,27 @@ class FakeClient:
         return FakeResponse({"code": 0, "data": {"taskId": "task-1"}})
 
 
-def test_model_mapping_routes_only_confirmed_grok_image_video_to_global():
-    assert get_rh_site("rh-grok-image-video") == "global"
-    assert get_rh_site("rh-grok-text-video") == "cn"
+def test_model_mapping_routes_selected_overseas_models_to_global():
+    global_models = {
+        "rh-pro-image",
+        "rh-image-v2",
+        "rh-gpt2-image",
+        "rh-gpt2-text",
+        "rh-grok-image-text",
+        "rh-grok-image-image",
+        "rh-video-v31-fast",
+        "rh-grok-text-video",
+        "rh-grok-image-video",
+        "rh-sora2-text",
+        "rh-sora2-image",
+        "rh-sora2-character",
+        "rh-suno-v55-single",
+        "rh-suno-v55-custom",
+        "rh-suno-lyrics",
+    }
+    assert {model for model in MODEL_MAP if get_rh_site(model) == "global"} == global_models
+    assert get_rh_site("rh-3d-text") == "cn"
+    assert get_rh_site("rh-seedance2") == "cn"
     assert "rh-grok-video-edit" not in MODEL_MAP
     assert "rh-sora2-realistic" not in MODEL_MAP
 

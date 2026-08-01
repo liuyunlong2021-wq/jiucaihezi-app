@@ -19,22 +19,26 @@ IMAGE_MODELS: dict[str, dict] = {
         "label": "全能图片PRO",
         "output_type": "image",
         "fallback_endpoint": "rhart-image-n-pro/edit",
+        "site": "global",
     },
     "rh-image-v2": {
         "endpoint": "rhart-image-n-g31-flash/text-to-image",
         "fallback_endpoint": "rhart-image-n-g31-flash/image-to-image",
         "label": "全能图片V2",
         "output_type": "image",
+        "site": "global",
     },
     "rh-gpt2-image": {
         "endpoint": "rhart-image-g-2/image-to-image",
         "label": "GPT2.0",
         "output_type": "image",
+        "site": "global",
     },
     "rh-gpt2-text": {
         "endpoint": "rhart-image-g-2/text-to-image",
         "label": "GPT2.0 文生图",
         "output_type": "image",
+        "site": "global",
     },
     "rh-gpt2-official": {
         "endpoint": "rhart-image-g-2-official/text-to-image",
@@ -73,11 +77,13 @@ IMAGE_MODELS: dict[str, dict] = {
         "endpoint": "rhart-image-g/text-to-image",
         "label": "Grok Image 4.2 文生图",
         "output_type": "image",
+        "site": "global",
     },
     "rh-grok-image-image": {
         "endpoint": "rhart-image-g/image-to-image",
         "label": "Grok Image 4.2 图生图",
         "output_type": "image",
+        "site": "global",
     },
 }
 
@@ -99,11 +105,13 @@ VIDEO_MODELS: dict[str, dict] = {
         "label": "全能视频V3.1-Fast",
         "output_type": "video",
         "fallback_endpoint": "rhart-video-v3.1-fast/image-to-video",
+        "site": "global",
     },
     "rh-grok-text-video": {
         "endpoint": "rhart-video-g/text-to-video",
         "label": "Grok Video 文生视频",
         "output_type": "video",
+        "site": "global",
     },
     "rh-grok-image-video": {
         "endpoint": "rhart-video-g/image-to-video",
@@ -197,16 +205,19 @@ VIDEO_MODELS: dict[str, dict] = {
         "endpoint": "rhart-video-s/text-to-video",
         "label": "Sora2 文生视频",
         "output_type": "video",
+        "site": "global",
     },
     "rh-sora2-image": {
         "endpoint": "rhart-video-s/image-to-video",
         "label": "Sora2 图生视频",
         "output_type": "video",
+        "site": "global",
     },
     "rh-sora2-character": {
         "endpoint": "rhart-video-s/sora-upload-character",
         "label": "Sora2 角色上传",
         "output_type": "video",
+        "site": "global",
     },
 }
 
@@ -217,16 +228,19 @@ AUDIO_MODELS: dict[str, dict] = {
         "endpoint": "rhart-audio/suno-v5.5/single",
         "label": "Suno v5.5 一句话成歌",
         "output_type": "audio",
+        "site": "global",
     },
     "rh-suno-v55-custom": {
         "endpoint": "rhart-audio/suno-v5.5/custom",
         "label": "Suno v5.5 自定义成歌",
         "output_type": "audio",
+        "site": "global",
     },
     "rh-suno-lyrics": {
         "endpoint": "rhart-audio/suno/lyrics",
         "label": "Suno 创作歌词",
         "output_type": "audio",
+        "site": "global",
     },
     "rh-speech-hd": {
         "endpoint": "rhart-audio/text-to-audio/speech-2.8-hd",

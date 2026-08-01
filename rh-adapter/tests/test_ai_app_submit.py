@@ -405,7 +405,7 @@ async def test_suno_custom_audio_model_uses_runninghub_standard_endpoint():
         api_key="rh_key",
     )
 
-    assert result == {"task_id": "task_123", "status": "processing"}
+    assert result == {"task_id": "global:task_123", "status": "processing"}
     url, kwargs = client.calls[0]
     assert url.endswith("/openapi/v2/rhart-audio/suno-v5.5/custom")
     assert kwargs["json"] == {
