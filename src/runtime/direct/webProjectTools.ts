@@ -18,6 +18,7 @@ import {
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
+import { createScene3DDocument, scene3DResultMarker, serializeScene3DDocument } from '@/runtime/memory/scene3d'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
@@ -222,6 +223,19 @@ export function createWebProjectToolExecutor(input: {
         createArtifactHtml(String(args.title), String(args.content)), { collision: 'keep-both' },
       )
       return { content: `已生成 HTML: ${entry.metadata?.relativePath}` }
+    }
+
+    if (name === 'create_3d_scene') {
+      const scene = createScene3DDocument(args)
+      const existingPath = String(args.existingPath || '')
+      if (existingPath && !/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(existingPath)) throw new Error('已有白膜场景路径无效')
+      const requestedPath = existingPath || `.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`
+      const entry = await input.files.write(
+        requireProject(), requestedPath, serializeScene3DDocument(scene),
+        existingPath ? {} : { collision: 'keep-both' },
+      )
+      const path = String(entry.metadata?.relativePath || requestedPath)
+      return { content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}` }
     }
 
     if (isMcpToolName(name)) {

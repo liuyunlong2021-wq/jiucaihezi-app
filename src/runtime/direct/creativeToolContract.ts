@@ -18,6 +18,7 @@ function tool(name: string, description: string, properties: Record<string, unkn
 }
 
 const pathProperty = { type: 'string', description: 'Path relative to the current project, or an absolute path after the user approves this task' }
+const vectorProperty = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
 
 export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool('skill', 'Load a specialized Skill from the available skills list.', {
@@ -102,6 +103,36 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
     title: { type: 'string', description: 'Output title and filename without extension' },
     content: { type: 'string', description: 'Complete standalone HTML document; plain Markdown is accepted only as a basic fallback' },
   }, ['title', 'content']),
+  tool('create_3d_scene', 'Create or replace a lightweight local 3D blockout scene for spatial layout, character staging, camera composition, or an image-generation reference. Use it when the user asks for a white-box scene, simple people and blocks, staging, spatial arrangement, a rotatable composition, or camera planning. Do not use it to generate a finished image or detailed 3D model.', {
+    title: { type: 'string', description: 'Scene title and filename without extension' },
+    existingPath: { type: 'string', description: 'Optional existing .raw/jc-media/文档/*.jcscene path to replace after reading it; omit when creating' },
+    objects: {
+      type: 'array', description: 'Individually editable primitives. Use formations for repeated crowds.', maxItems: 500,
+      items: { type: 'object', additionalProperties: false, required: ['id', 'type', 'position'], properties: {
+        id: { type: 'string' }, type: { type: 'string', enum: ['person', 'box', 'plane', 'wall', 'entrance', 'cylinder', 'sphere', 'cone', 'line', 'arrow'] },
+        label: { type: 'string' }, color: { type: 'string' }, position: vectorProperty, rotation: vectorProperty,
+        size: vectorProperty, end: vectorProperty, pose: { type: 'string', enum: ['standing', 'sitting', 'crouching', 'lying'] },
+      } },
+    },
+    formations: {
+      type: 'array', description: 'Repeated local arrangements; use one formation instead of hundreds of individual objects.', maxItems: 100,
+      items: { type: 'object', additionalProperties: false, required: ['id', 'type', 'count', 'position'], properties: {
+        id: { type: 'string' }, type: { type: 'string', enum: ['line', 'grid', 'circle', 'scatter'] },
+        shape: { type: 'string', enum: ['person', 'box', 'plane', 'wall', 'entrance', 'cylinder', 'sphere', 'cone'] },
+        label: { type: 'string' }, color: { type: 'string' }, position: vectorProperty, count: { type: 'integer', minimum: 1, maximum: 10000 },
+        rows: { type: 'integer', minimum: 1 }, columns: { type: 'integer', minimum: 1 }, spacing: { type: 'number', minimum: 0.1 },
+        radius: { type: 'number', minimum: 0.1 }, width: { type: 'number', minimum: 0.1 }, depth: { type: 'number', minimum: 0.1 },
+        facing: { type: 'number' }, size: vectorProperty,
+      } },
+    },
+    groups: { type: 'array', maxItems: 100, items: { type: 'object', additionalProperties: false, required: ['id', 'memberIds'], properties: {
+      id: { type: 'string' }, label: { type: 'string' }, memberIds: { type: 'array', items: { type: 'string' } }, position: vectorProperty,
+    } } },
+    camera: { type: 'object', description: 'Optional initial camera', additionalProperties: true },
+    savedCameras: { type: 'array', description: 'Optional named cameras', maxItems: 20, items: { type: 'object', additionalProperties: true } },
+    lighting: { type: 'object', description: 'direction(left/right/front/back/top), intensity(low/medium/high), shadows(boolean)', additionalProperties: true },
+    canvas: { type: 'object', description: 'aspect(16:9/9:16/1:1/4:3/3:4), grid(boolean), snap(boolean)', additionalProperties: true },
+  }, ['title', 'objects']),
 ]
 
 const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
@@ -127,7 +158,7 @@ export function buildMemoryDesktopToolDefinitions() {
   ]
 }
 
-type ToolFieldType = 'string' | 'boolean' | 'integer' | 'stringArray'
+type ToolFieldType = 'string' | 'boolean' | 'integer' | 'stringArray' | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   skill: { name: 'string' },
@@ -147,6 +178,7 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   export_markdown_png: { title: 'string', content: 'string', width: 'integer' },
   create_document: { title: 'string', content: 'string', format: 'string' },
   create_html: { title: 'string', content: 'string' },
+  create_3d_scene: { title: 'string', existingPath: 'string', objects: 'json', formations: 'json', groups: 'json', camera: 'json', savedCameras: 'json', lighting: 'json', canvas: 'json' },
   terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }
 
@@ -162,7 +194,9 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   for (const [key, item] of Object.entries(args)) {
     const expected = types[key]
     if (!expected) throw new Error(`工具参数不支持: ${key}`)
-    const invalid = expected === 'integer'
+    const invalid = expected === 'json'
+      ? false
+      : expected === 'integer'
       ? !Number.isInteger(item)
       : expected === 'stringArray'
         ? !Array.isArray(item) || item.some(value => typeof value !== 'string')

@@ -72,3 +72,10 @@ test('resource open routing sends canvas and media to the creation surface and l
   assert.equal(model.type === 'media' ? model.mediaKind : '', 'model3d')
   assert.equal((await openProjectResource(fileService(), resource('binary', 'assets/model.psd'))).type, 'binary')
 })
+
+test('resource open routing recognizes versioned 3D blockout scenes', async () => {
+  const content = JSON.stringify({ version: 1, title: '街道', objects: [], formations: [], groups: [] })
+  const result = await openProjectResource(fileService(content), resource('document', '.raw/jc-media/文档/街道.jcscene'))
+  assert.equal(result.type, 'scene3d')
+  if (result.type === 'scene3d') assert.equal(result.document.title, '街道')
+})

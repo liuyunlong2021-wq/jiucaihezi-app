@@ -1,6 +1,7 @@
 import type { ProjectFileService } from '@/services/projectFileService'
 import { parseConversationTranscript, type ConversationTranscript } from '@/runtime/memory/conversationTranscript'
 import { canEditProjectText, projectTextEditorMode, type ProjectResource, type ProjectTextRead } from '@/utils/projectResource'
+import { parseScene3DDocument, type Scene3DDocument } from '@/runtime/memory/scene3d'
 
 export type ProjectCanvasMediaKind = 'image' | 'video' | 'audio'
 export type ProjectPreviewMediaKind = ProjectCanvasMediaKind | 'model3d'
@@ -10,6 +11,7 @@ export type ProjectResourceOpenResult =
   | { type: 'editor'; resource: ProjectResource; text: ProjectTextRead; editorMode: 'rich' | 'plain' }
   | { type: 'unsafe-text'; resource: ProjectResource }
   | { type: 'canvas'; resource: ProjectResource }
+  | { type: 'scene3d'; resource: ProjectResource; text: ProjectTextRead; document: Scene3DDocument }
   | { type: 'media'; resource: ProjectResource; mediaKind: ProjectPreviewMediaKind }
   | { type: 'binary'; resource: ProjectResource }
 
@@ -32,6 +34,10 @@ export async function openProjectResource(
   if (resource.kind === 'media') return { type: 'media', resource, mediaKind: projectPreviewMediaKind(resource) }
   if (resource.kind !== 'document') return { type: 'binary', resource }
   const text = await fileService.readText(resource)
+  if (/\.jcscene$/i.test(resource.path)) {
+    if (text.truncated) return { type: 'unsafe-text', resource }
+    return { type: 'scene3d', resource, text, document: parseScene3DDocument(JSON.parse(text.content)) }
+  }
   const transcript = canEditProjectText(text)
     ? parseConversationTranscript(resource.path, text.content)
     : null

@@ -17,6 +17,7 @@ import {
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
+import { createScene3DDocument, scene3DResultMarker, serializeScene3DDocument } from '@/runtime/memory/scene3d'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
 type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
@@ -355,6 +356,17 @@ export function createDesktopProjectToolExecutor(input: {
         createArtifactHtml(String(args.title), String(args.content)),
       )
       return { content: `已生成 HTML: ${path}` }
+    }
+
+    if (name === 'create_3d_scene') {
+      const scene = createScene3DDocument(args)
+      const existingPath = String(args.existingPath || '')
+      if (existingPath && !/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(existingPath)) throw new Error('已有白膜场景路径无效')
+      const content = serializeScene3DDocument(scene)
+      const path = existingPath
+        ? (await invoke('dev_write_file', { root: requireProject(), relativePath: existingPath, content }), existingPath)
+        : await writeGeneratedFile(`.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`, content)
+      return { content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}` }
     }
 
     if (name === 'terminal') {

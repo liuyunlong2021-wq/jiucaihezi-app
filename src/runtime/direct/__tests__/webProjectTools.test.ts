@@ -96,7 +96,7 @@ test('web project tool definitions append connected MCP tools without Desktop te
     )
     assert.deepEqual(
       buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'mcp__docs__lookup'],
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'create_3d_scene', 'mcp__docs__lookup'],
     )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
@@ -116,6 +116,12 @@ test('web memory artifact tools generate real project files and keep same-name o
   assert.match((await execute(call('export_markdown_png', { title: '周报', content: '# 周报' }))).content, /周报 \(1\)\.png/)
   assert.match((await execute(call('create_document', { title: '周报', content: '# 周报', format: 'docx' }))).content, /\.raw\/jc-media\/文档\/周报\.docx/)
   assert.match((await execute(call('create_html', { title: '周报', content: '# 周报' }))).content, /\.raw\/jc-media\/文档\/周报\.html/)
+  const sceneResult = await execute(call('create_3d_scene', {
+    title: '宫殿排位', objects: [{ id: 'emperor', type: 'person', position: [0, 0, 0] }],
+    formations: [{ id: 'ministers', type: 'grid', count: 20, position: [0, 0, 3] }],
+  }))
+  assert.match(sceneResult.content, /\.raw\/jc-media\/文档\/宫殿排位\.jcscene/)
+  assert.match(sceneResult.content, /jc:scene/)
   assert.match((await execute(call('create_html', {
     title: '完整网页',
     content: '<!doctype html><html><head><style>button{color:red}</style></head><body><button>开始</button></body></html>',

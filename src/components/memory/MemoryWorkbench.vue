@@ -61,6 +61,7 @@ import { renderStreamingText } from '@/components/chat/display/streamingTextRend
 import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
+import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -71,6 +72,7 @@ const desktopRuntime = isTauriRuntime()
 const mobileRuntime = isTauriMobileRuntime()
 const CreationPanel = defineAsyncComponent(() => import('@/components/creation/CreationPanel.vue'))
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
+const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
 const backlinks = ref<ProjectResource[]>([])
@@ -147,6 +149,7 @@ let creationResizeStartX = 0
 let creationResizeStartWidth = 0
 let creationResizeFrame = 0
 let runTimer: ReturnType<typeof setInterval> | null = null
+let sceneSaveQueue = Promise.resolve()
 
 const MEMORY_TREE_WIDTH = 280
 const MEMORY_CHAT_MIN = 420
@@ -883,6 +886,7 @@ function memoryToolLabel(name: string): string {
     export_markdown_png: '导出 Markdown 图片',
     create_document: '生成文档',
     create_html: '生成网页',
+    create_3d_scene: '搭建 3D 白膜',
     terminal: '执行命令',
     read_url: '读取网页',
     web_search: '搜索网络',
@@ -1343,9 +1347,50 @@ async function continueSkillRevision(plan: SkillInstallPlan) {
 }
 
 function displayTurnContent(turn: ConversationTurn): string {
-  const content = stripSkillInstallBlock(turn.content)
+  const content = stripScene3DResultMarkers(stripSkillInstallBlock(turn.content))
   if (mediaResultTaskId(turn)) return ''
   return mediaPlans.value[turn.id]?.length ? stripMediaPlanBlocks(content) : content
+}
+
+function sceneCards(turn: ConversationTurn) {
+  return turn.role === 'assistant' ? parseScene3DResultMarkers(turn.content) : []
+}
+
+async function openSceneCard(path: string) {
+  const resource = (await files.list(projectOwner.value)).find(item => item.path === path)
+  if (!resource) {
+    error.value = '白膜场景文件不存在，请检查文件树'
+    return
+  }
+  await previewProjectResource(resource)
+}
+
+function saveScene3D(next: Scene3DDocument) {
+  const path = previewResource.value?.resource.path
+  sceneSaveQueue = sceneSaveQueue.then(async () => {
+    const current = previewResource.value
+    if (current?.type !== 'scene3d' || current.resource.path !== path) return
+    const content = serializeScene3DDocument(next)
+    const result = await files.writeText(current.resource, content, current.text.revision)
+    if (result.status !== 'saved') {
+      error.value = result.status === 'conflict' ? '白膜场景已在其他位置修改，请关闭后重新打开' : '白膜场景文件不存在'
+      return
+    }
+    previewResource.value = { ...current, text: { ...current.text, content, revision: result.revision } }
+  }).catch(cause => { error.value = `白膜场景保存失败：${cause instanceof Error ? cause.message : String(cause)}` })
+}
+
+async function saveSceneScreenshot(blob: Blob, title: string) {
+  const owner = projectOwner.value
+  if (!owner) return
+  const existing = new Set((await files.list(owner)).map(item => item.path))
+  const resource = await files.importBinary({
+    owner,
+    path: nextMaterialPath('.raw/jc-media/图片', `${title}.png`, existing),
+    data: new Uint8Array(await blob.arrayBuffer()),
+    mimeType: 'image/png',
+  })
+  status.value = `截图已保存：${resource.path}`
 }
 
 function mediaResultTaskId(turn: ConversationTurn): string {
@@ -1598,6 +1643,17 @@ function readDataUrl(file: File): Promise<string> {
             @approve="approveSkillInstall(turn.id)"
             @revise="continueSkillRevision(skillInstallPlans[turn.id])"
           />
+          <button
+            v-for="sceneCard in sceneCards(turn)"
+            :key="sceneCard.path"
+            type="button"
+            class="memory-scene-card"
+            @click="openSceneCard(sceneCard.path)"
+          >
+            <JcIcon name="view-in-ar" />
+            <span><strong>{{ sceneCard.title }}</strong><small>{{ sceneCard.objectCount }} 个独立对象 · {{ sceneCard.formationCount }} 组排列</small></span>
+            <em>打开场景</em>
+          </button>
         </article>
         </div>
       </section>
@@ -1744,7 +1800,13 @@ function readDataUrl(file: File): Promise<string> {
             <button class="icon-button" title="关闭预览" @click="closePreview"><JcIcon name="close" /></button>
           </div>
         </header>
-        <div v-if="previewResource.type === 'editor'" class="memory-document">
+        <Scene3DEditor
+          v-if="previewResource.type === 'scene3d'"
+          :document="previewResource.document"
+          @save="saveScene3D"
+          @screenshot="saveSceneScreenshot"
+        />
+        <div v-else-if="previewResource.type === 'editor'" class="memory-document">
           <div v-if="!editingMarkdown"
             class="memory-markdown markdown-body"
             :data-wiki-source="previewResource.resource.path"
@@ -1884,6 +1946,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-media-plan-link .mso { color: var(--olive); }
 .memory-media-plan-link span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-media-plan-link small { flex: 0 0 auto; color: var(--ink3); }
+.memory-scene-card { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, #4b9978 38%, var(--line)); border-radius: 6px; background: color-mix(in srgb, #4b9978 7%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
+.memory-scene-card:hover { border-color: #4b9978; }
+.memory-scene-card > .mso { flex: 0 0 auto; color: #398362; font-size: 22px; }
+.memory-scene-card span { min-width: 0; display: grid; flex: 1; gap: 2px; }
+.memory-scene-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.memory-scene-card small { color: var(--ink3); font-size: 11px; }
+.memory-scene-card em { flex: 0 0 auto; color: #398362; font-size: 12px; font-style: normal; }
 .memory-message.streaming { opacity: .85; }
 .memory-composer { width: min(860px, calc(100% - 28px)); margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
 .memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }

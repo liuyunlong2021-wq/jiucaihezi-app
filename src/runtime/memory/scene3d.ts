@@ -1,0 +1,214 @@
+export type Scene3DShape = 'person' | 'box' | 'plane' | 'wall' | 'entrance' | 'cylinder' | 'sphere' | 'cone' | 'line' | 'arrow'
+export type Scene3DFormationType = 'line' | 'grid' | 'circle' | 'scatter'
+export type Scene3DAspect = '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
+export type Scene3DProjection = 'perspective' | 'orthographic'
+
+export interface Scene3DObject {
+  id: string
+  type: Scene3DShape
+  label?: string
+  color?: string
+  position: [number, number, number]
+  rotation?: [number, number, number]
+  size?: [number, number, number]
+  end?: [number, number, number]
+  pose?: 'standing' | 'sitting' | 'crouching' | 'lying'
+}
+
+export interface Scene3DFormation {
+  id: string
+  type: Scene3DFormationType
+  shape?: Scene3DShape
+  label?: string
+  color?: string
+  position: [number, number, number]
+  count: number
+  rows?: number
+  columns?: number
+  spacing?: number
+  radius?: number
+  width?: number
+  depth?: number
+  facing?: number
+  size?: [number, number, number]
+}
+
+export interface Scene3DGroup {
+  id: string
+  label?: string
+  memberIds: string[]
+  position?: [number, number, number]
+}
+
+export interface Scene3DCamera {
+  name?: string
+  position: [number, number, number]
+  target: [number, number, number]
+  projection?: Scene3DProjection
+  lens?: 'wide' | 'standard' | 'telephoto'
+  aspect?: Scene3DAspect
+}
+
+export interface Scene3DDocument {
+  version: 1
+  title: string
+  objects: Scene3DObject[]
+  formations: Scene3DFormation[]
+  groups: Scene3DGroup[]
+  camera: Scene3DCamera
+  savedCameras: Scene3DCamera[]
+  lighting: { direction: 'left' | 'right' | 'front' | 'back' | 'top'; intensity: 'low' | 'medium' | 'high'; shadows: boolean }
+  canvas: { aspect: Scene3DAspect; grid: boolean; snap: boolean }
+}
+
+const SHAPES = new Set<Scene3DShape>(['person', 'box', 'plane', 'wall', 'entrance', 'cylinder', 'sphere', 'cone', 'line', 'arrow'])
+const FORMATIONS = new Set<Scene3DFormationType>(['line', 'grid', 'circle', 'scatter'])
+const ASPECTS = new Set<Scene3DAspect>(['16:9', '9:16', '1:1', '4:3', '3:4'])
+const PROJECTIONS = new Set<Scene3DProjection>(['perspective', 'orthographic'])
+const CSS_COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20})$/i
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}必须是对象`)
+  return value as Record<string, unknown>
+}
+
+function text(value: unknown, fallback = '', maximum = 80): string {
+  return String(value ?? fallback).trim().slice(0, maximum)
+}
+
+function id(value: unknown, label: string): string {
+  const result = text(value, '', 64)
+  if (!/^[a-zA-Z0-9_-]+$/.test(result)) throw new Error(`${label}无效`)
+  return result
+}
+
+function number(value: unknown, fallback = 0, minimum = -10_000, maximum = 10_000): number {
+  const result = value === undefined ? fallback : Number(value)
+  if (!Number.isFinite(result) || result < minimum || result > maximum) throw new Error('场景数值超出范围')
+  return result
+}
+
+function vector(value: unknown, fallback: [number, number, number] = [0, 0, 0], minimum = -10_000): [number, number, number] {
+  if (value === undefined) return [...fallback]
+  if (!Array.isArray(value) || value.length !== 3) throw new Error('场景坐标必须包含三个数值')
+  return [number(value[0], 0, minimum), number(value[1], 0, minimum), number(value[2], 0, minimum)]
+}
+
+function color(value: unknown, fallback = '#e7ece9'): string {
+  const result = text(value, fallback, 24)
+  if (!CSS_COLOR.test(result)) throw new Error('场景颜色无效')
+  return result
+}
+
+function enumValue<T extends string>(value: unknown, allowed: Set<T>, fallback: T, label: string): T {
+  const result = String(value ?? fallback) as T
+  if (!allowed.has(result)) throw new Error(`${label}无效`)
+  return result
+}
+
+function parseCamera(value: unknown, fallbackName = ''): Scene3DCamera {
+  const item = record(value ?? {}, '机位')
+  const lens = String(item.lens || 'standard')
+  if (!['wide', 'standard', 'telephoto'].includes(lens)) throw new Error('镜头类型无效')
+  return {
+    ...(text(item.name || fallbackName) ? { name: text(item.name || fallbackName) } : {}),
+    position: vector(item.position, [10, 8, 12]),
+    target: vector(item.target, [0, 1, 0]),
+    projection: enumValue(item.projection, PROJECTIONS, 'perspective', '投影类型'),
+    lens: lens as Scene3DCamera['lens'],
+    aspect: enumValue(item.aspect, ASPECTS, '16:9', '画幅'),
+  }
+}
+
+export function parseScene3DDocument(input: unknown): Scene3DDocument {
+  const root = record(input, '3D 白膜场景')
+  if (root.version !== undefined && root.version !== 1) throw new Error('不支持的 3D 白膜场景版本')
+  const title = text(root.title)
+  if (!title) throw new Error('场景标题不能为空')
+  const rawObjects = Array.isArray(root.objects) ? root.objects : []
+  const rawFormations = Array.isArray(root.formations) ? root.formations : []
+  const rawGroups = Array.isArray(root.groups) ? root.groups : []
+  if (rawObjects.length > 500) throw new Error('独立对象最多 500 个，请使用排列')
+  if (rawFormations.length > 100 || rawGroups.length > 100) throw new Error('场景排列或分组过多')
+
+  const objects = rawObjects.map((value, index): Scene3DObject => {
+    const item = record(value, `对象 ${index + 1}`)
+    const type = enumValue(item.type, SHAPES, 'box', '积木类型')
+    const pose = String(item.pose || 'standing')
+    if (!['standing', 'sitting', 'crouching', 'lying'].includes(pose)) throw new Error('人物姿势无效')
+    return {
+      id: id(item.id || `object_${index + 1}`, '对象 ID'), type,
+      ...(text(item.label) ? { label: text(item.label) } : {}), color: color(item.color),
+      position: vector(item.position), rotation: vector(item.rotation), size: vector(item.size, [1, 1, 1], 0.01),
+      ...(item.end === undefined ? {} : { end: vector(item.end) }), pose: pose as Scene3DObject['pose'],
+    }
+  })
+
+  const formations = rawFormations.map((value, index): Scene3DFormation => {
+    const item = record(value, `排列 ${index + 1}`)
+    const count = Math.floor(number(item.count, 1, 1, 10_000))
+    return {
+      id: id(item.id || `formation_${index + 1}`, '排列 ID'),
+      type: enumValue(item.type, FORMATIONS, 'line', '排列类型'),
+      shape: enumValue(item.shape, SHAPES, 'person', '积木类型'),
+      ...(text(item.label) ? { label: text(item.label) } : {}), color: color(item.color, '#8fb7a5'),
+      position: vector(item.position), count,
+      rows: Math.floor(number(item.rows, Math.max(1, Math.round(Math.sqrt(count))), 1, count)),
+      columns: Math.floor(number(item.columns, Math.max(1, Math.ceil(Math.sqrt(count))), 1, count)),
+      spacing: number(item.spacing, 1.5, 0.1, 100), radius: number(item.radius, 5, 0.1, 1_000),
+      width: number(item.width, 10, 0.1, 1_000), depth: number(item.depth, 10, 0.1, 1_000),
+      facing: number(item.facing, 0, -360, 360), size: vector(item.size, [1, 1, 1], 0.01),
+    }
+  })
+
+  const knownIds = new Set([...objects, ...formations].map(item => item.id))
+  if (knownIds.size !== objects.length + formations.length) throw new Error('对象和排列 ID 不能重复')
+  const groups = rawGroups.map((value, index): Scene3DGroup => {
+    const item = record(value, `分组 ${index + 1}`)
+    const memberIds = Array.isArray(item.memberIds) ? item.memberIds.map(value => id(value, '分组成员 ID')) : []
+    if (!memberIds.length || memberIds.some(memberId => !knownIds.has(memberId))) throw new Error('分组成员不存在')
+    return { id: id(item.id || `group_${index + 1}`, '分组 ID'), ...(text(item.label) ? { label: text(item.label) } : {}), memberIds, position: vector(item.position) }
+  })
+
+  const canvas = record(root.canvas ?? {}, '画布设置')
+  const lighting = record(root.lighting ?? {}, '灯光设置')
+  const direction = String(lighting.direction || 'front')
+  const intensity = String(lighting.intensity || 'medium')
+  if (!['left', 'right', 'front', 'back', 'top'].includes(direction) || !['low', 'medium', 'high'].includes(intensity)) throw new Error('灯光设置无效')
+  const camera = parseCamera(root.camera)
+  const aspect = enumValue(canvas.aspect ?? camera.aspect, ASPECTS, '16:9', '画幅')
+  camera.aspect = aspect
+  return {
+    version: 1, title, objects, formations, groups, camera,
+    savedCameras: (Array.isArray(root.savedCameras) ? root.savedCameras : []).slice(0, 20).map((item, index) => parseCamera(item, `机位 ${index + 1}`)),
+    lighting: { direction: direction as Scene3DDocument['lighting']['direction'], intensity: intensity as Scene3DDocument['lighting']['intensity'], shadows: lighting.shadows !== false },
+    canvas: { aspect, grid: canvas.grid !== false, snap: canvas.snap !== false },
+  }
+}
+
+export function createScene3DDocument(args: Record<string, unknown>): Scene3DDocument {
+  return parseScene3DDocument({ version: 1, ...args })
+}
+
+export function serializeScene3DDocument(document: Scene3DDocument): string {
+  return `${JSON.stringify(parseScene3DDocument(document), null, 2)}\n`
+}
+
+export function scene3DResultMarker(artifact: { path: string; title: string; objectCount: number; formationCount: number }): string {
+  return `<!-- jc:scene ${encodeURIComponent(JSON.stringify(artifact))} -->`
+}
+
+export function parseScene3DResultMarkers(content: string): Array<{ path: string; title: string; objectCount: number; formationCount: number }> {
+  return [...content.matchAll(/<!-- jc:scene ([^\s]+) -->/g)].flatMap(match => {
+    try {
+      const value = JSON.parse(decodeURIComponent(match[1])) as Record<string, unknown>
+      const path = String(value.path || '')
+      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) return []
+      return [{ path, title: text(value.title || path.split('/').pop()?.replace(/\.jcscene$/i, '') || '白膜场景'), objectCount: Math.max(0, Number(value.objectCount) || 0), formationCount: Math.max(0, Number(value.formationCount) || 0) }]
+    } catch { return [] }
+  })
+}
+
+export function stripScene3DResultMarkers(content: string): string {
+  return content.replace(/\n*<!-- jc:scene [^\s]+ -->/g, '').trim()
+}

@@ -33,6 +33,7 @@ import { supportsVision } from '@/utils/providerConfig'
 import { executeJinaWebSearchTool, WEB_SEARCH_TOOL_DEFINITION } from '@/utils/webSearch'
 import { executeReadUrlTool, extractPublicHttpUrls, READ_URL_TOOL_DEFINITION } from '@/utils/webReader'
 import { memoryToolNeedsApproval } from './memoryToolPolicy'
+import { parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from './scene3d'
 
 import type { ConversationMode, ConversationTurn } from './conversationTranscript'
 import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
@@ -185,8 +186,13 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       }
     }
     assertConversationWriteProtected(call)
-    return await projectTools(call)
+    const toolResult = await projectTools(call)
+    if (call.function.name === 'create_3d_scene') {
+      for (const marker of parseScene3DResultMarkers(toolResult.content)) sceneResults.set(marker.path, marker)
+    }
+    return toolResult
   }
+  const sceneResults = new Map<string, ReturnType<typeof parseScene3DResultMarkers>[number]>()
   const selectedSkillNames = [...new Set(input.selectedSkillNames || [])]
   const unknownSkill = selectedSkillNames.find(name => !catalog.some(skill => skill.name === name))
   if (unknownSkill) throw new Error(`Skill 不存在或未启用: ${unknownSkill}`)
@@ -230,7 +236,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     },
     executeTool: executeMemoryTool,
   })
-  const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
+  const answer = stripScene3DResultMarkers(resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容'))
+  const markers = [...sceneResults.values()].map(scene3DResultMarker)
+  const text = markers.length ? `${answer}\n\n${markers.join('\n')}` : answer
   input.onText(text)
   return text
 }

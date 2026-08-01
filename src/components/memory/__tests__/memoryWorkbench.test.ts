@@ -485,6 +485,13 @@ test('memory tree toggle collapses the desktop file tree and exposes reopen cont
   assert.match(workbench, /\.memory-workbench\.tree-closed \.memory-tree \{ overflow: hidden; border-right: 0; \}/)
 })
 
+test('3D scene editor clones plain scene data instead of Vue proxies', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+
+  assert.match(editor, /structuredClone\(toRaw\(props\.document\)\)/)
+  assert.match(editor, /structuredClone\(toRaw\(value\)\)/)
+})
+
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {
   const app = source('src/App.vue')
   const studioApp = source('src/StudioApp.vue')

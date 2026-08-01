@@ -201,7 +201,7 @@ async function removeBinaryBestEffort(binary: WebProjectBinaryAdapter, fileId: s
 function mimeForPath(path: string): string {
   const extension = path.split('.').pop()?.toLowerCase()
   if (extension === 'md' || extension === 'markdown') return 'text/markdown'
-  if (extension === 'json') return 'application/json'
+  if (extension === 'json' || extension === 'jcscene') return 'application/json'
   if (extension === 'csv') return 'text/csv'
   if (extension === 'html') return 'text/html'
   return 'text/plain'
