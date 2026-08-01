@@ -55,7 +55,7 @@ import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
-import { writeClipboardText } from '@/utils/clipboard'
+import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
 import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
 import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
 import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
@@ -1112,13 +1112,18 @@ async function handleComposerPaste(event: ClipboardEvent) {
     .filter(item => item.kind === 'file' && item.type.startsWith('image/'))
     .map(item => item.getAsFile())
     .filter((file): file is File => Boolean(file))
+  const text = event.clipboardData?.getData('text/plain') || ''
   event.preventDefault()
   if (imageFiles.length) {
     await addAttachmentFiles(imageFiles)
     return
   }
+  if (shouldReadNativeClipboardImage(imageFiles.length, text, desktopRuntime, mobileRuntime)) {
+    const image = await readClipboardImageFile()
+    if (image) await addAttachmentFiles([image])
+    return
+  }
 
-  const text = event.clipboardData?.getData('text/plain') || ''
   if (!text || !composerRef.value) return
   const selection = window.getSelection()
   const range = selection?.rangeCount ? selection.getRangeAt(0) : null

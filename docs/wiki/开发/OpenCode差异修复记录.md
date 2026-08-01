@@ -758,3 +758,9 @@ Tauri Store 的优势：
 **官方对照**：OpenCode v1.18.4 `packages/app/src/pages/session/timeline/model.ts` 由 session ID resource 调用 `sync().session.sync(id)`，而 `message-timeline.tsx` 只读 `sync().data.message[sessionID] ?? []`。没有组件本地 session-ID guard，也没有旧 timeline fallback。
 
 **修复与验证**：Desktop 路径始终先执行 `openCodeSyncStore.openSession(directory, newId)`；请求返回后仅用请求序号和当前选中 ID 忽略过期结果，再恢复模型/variant。`currentSessionId` guard 保留在 Web 本地历史路径。专项测试先以旧 `pendingDesktopMessages` 合同失败，再改为断言 Desktop 不存在本地消息镜像、ChatPanel 直接投影 Store；`desktopOpenCodeSyncCutover` 39/39、`vue-tsc -b` 通过。Desktop 人工验收仍需点击非首条历史会话确认。
+
+## 2026-08-01：Desktop 图片粘贴无响应
+
+**根因**：记忆工作台只读取 WebView `clipboardData.items`；macOS 原生剪贴板有图片但 WebView 未投影为 `File` 时，处理器阻止默认粘贴后因无图片、无文本直接返回。OpenCode v1.18.4 在相同边界调用 Desktop `readClipboardImage()`，本项目只翻译了 DOM 路径，遗漏原生兜底。
+
+**修复与验证**：复用既有 `arboard` 增加原生 RGBA 读取，前端仅在 Desktop 空图片/空文本事件中转为 PNG 并进入现有附件链路；无新增依赖。完整 focused `1426 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、Desktop quick build和产物审计通过；正式 Mac 安装包图片粘贴仍待人工验收。

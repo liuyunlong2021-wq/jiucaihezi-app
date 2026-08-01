@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { shouldReadNativeClipboardImage } from '@/utils/clipboard'
 
 function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
@@ -200,6 +201,14 @@ test('memory composer routes pasted images and media plans into the existing cre
   assert.doesNotMatch(workbench, /import MediaPlanCard/)
   assert.doesNotMatch(workbench, /<MediaPlanCard/)
   assert.match(workbench, /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/)
+})
+
+test('memory composer reads the native clipboard only for an empty Desktop image paste', () => {
+  assert.equal(shouldReadNativeClipboardImage(0, '', true, false), true)
+  assert.equal(shouldReadNativeClipboardImage(1, '', true, false), false)
+  assert.equal(shouldReadNativeClipboardImage(0, 'text', true, false), false)
+  assert.equal(shouldReadNativeClipboardImage(0, '', false, false), false)
+  assert.equal(shouldReadNativeClipboardImage(0, '', true, true), false)
 })
 
 test('memory mode keeps automatic discovery and lets @ explicitly load an installed Skill', () => {

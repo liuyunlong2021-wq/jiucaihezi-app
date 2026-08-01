@@ -1090,15 +1090,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
   }
 
-  async function retryWebMediaPersistence(taskId: string): Promise<boolean> {
+  async function retryMediaPersistence(taskId: string): Promise<boolean> {
     const task = tasks.value.find(item => item.id === taskId)
     if (
-      isTauriRuntime() ||
       !task ||
       task.source !== 'creation' ||
       task.status !== 'success' ||
-      task.assetStatus !== 'failed' ||
-      !task.projectId ||
+      Boolean(task.projectPath || task.assetUri) ||
+      (!isTauriRuntime() && !task.projectId) ||
       !task.resultUrl
     )
       return false
@@ -1117,9 +1116,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     task.error = undefined
     task.assetStatus = 'pending'
     task.completedAt = undefined
-    await persistTasksSafely('retry-web-media-persistence-start')
-    await completeMediaTask(task, resultUrl, 'retry-web-media-persistence')
-    return isTaskSuccessful(task)
+    await persistTasksSafely('retry-media-persistence-start')
+    await completeMediaTask(task, resultUrl, 'retry-media-persistence')
+    return Boolean(task.projectPath || task.assetUri)
   }
 
   // ─── 清除已完成/失败的任务 ───
@@ -1366,7 +1365,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     init,
     submitTask,
     cancelTask,
-    retryWebMediaPersistence,
+    retryMediaPersistence,
     clearFinished,
     deleteTask,
     getTask,

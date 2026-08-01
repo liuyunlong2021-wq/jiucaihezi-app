@@ -58,7 +58,7 @@ function cancel() {
 }
 
 async function retrySave() {
-  await taskStore.retryWebMediaPersistence(props.taskId)
+  await taskStore.retryMediaPersistence(props.taskId)
 }
 
 async function downloadCopy() {

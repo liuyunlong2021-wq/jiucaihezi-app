@@ -28,8 +28,10 @@
 
 当前状态：手动“继续写”已从文、武、创全部模式移除；创模式仅保留首次最终正文 SSE 断流的自动续写。
 
+Desktop 图片粘贴无响应的根因已修复：记忆工作台在 WebView 没有图片 `File` 且没有文本时，使用既有 `arboard` 读取原生剪贴板图片，再复用现有附件链路；Web、Mobile、文本粘贴、上传和拖拽不变。完整 focused `1426 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、Desktop quick build和产物审计通过；正式 Mac 安装包真机粘贴待验收。
+
 显示系统共享代码已实施：[[开发/显示系统统一SDD]] 把主题、字号与 Markdown 排版收敛为变量驱动的单一显示系统。已定位并处理两个真根因——`MemoryWorkbench.vue` 消息容器的 `white-space: pre-wrap` 覆盖 `.markdown-body` 的 `normal`，以及 `markdown.css` 硬编码 px 导致大字/特大字号下 Markdown 层级反转。排版真源收归 `markdown.css`，`MessageBubble.vue` 重复定义整块删除；颜色只用主题变量、字号只用 em、方向只用逻辑属性（为 RTL 零成本预埋）。focused、TypeScript、Web quick build 和 Web 产物审计通过；跨端截图和人工验收仍待完成。多语言明确划为独立“语言系统”，本轮不做。
 
 ---
 
-> 上次刷新: 2026-08-01（`v2.1.5` Web Production 与 RH adapter 已部署；海外 Suno 提交和查询闭环已验证，Web 轮询不再等待任务历史持久化。三平台 Actions `30690007566` 已触发，未等待完成。）
+> 上次刷新: 2026-08-01（`v2.1.5` Web Production 与 RH adapter 已部署；海外 Suno 提交和查询闭环已验证，Web 轮询不再等待任务历史持久化。ZX Grok 1.5 Video 6 秒真实任务由上游失败，10/15 秒未继续提交。三平台 Actions `30690007566` 已触发，未等待完成。）

@@ -249,20 +249,21 @@ async function bindLegacyTaskToCurrentSession(task: MediaTask) {
   await mediaTaskStore.bindLegacyChatTask(task.id, sessionID, directory)
 }
 
-function canRetryWebMediaPersistence(task: MediaTask): boolean {
+function canPersistMediaResult(task: MediaTask): boolean {
   return (
-    !isTauriRuntime() &&
     task.source === 'creation' &&
     task.status === 'success' &&
-    task.assetStatus === 'failed' &&
-    Boolean(task.projectId && task.resultUrl)
+    !task.projectPath &&
+    !task.assetUri &&
+    Boolean(task.resultUrl) &&
+    (isTauriRuntime() || Boolean(task.projectId))
   )
 }
 
 async function retryTaskPersistence(task: MediaTask) {
-  if (!canRetryWebMediaPersistence(task)) return
+  if (!canPersistMediaResult(task)) return
   try {
-    const retried = await mediaTaskStore.retryWebMediaPersistence(task.id)
+    const retried = await mediaTaskStore.retryMediaPersistence(task.id)
     if (!retried) cpState.progressText = task.errorMsg || '保存到项目失败，请稍后重试'
   } catch (error) {
     cpState.progressText = `重新保存失败: ${error instanceof Error ? error.message : String(error)}`
@@ -3937,7 +3938,7 @@ const canSend = computed(
                 v-if="
                   task.status === 'success' ||
                   isLegacyChatTask(task) ||
-                  canRetryWebMediaPersistence(task)
+                  canPersistMediaResult(task)
                 "
                 class="cp-task-actions"
               >
@@ -3945,10 +3946,10 @@ const canSend = computed(
                   绑定当前会话
                 </button>
                 <button
-                  v-if="canRetryWebMediaPersistence(task)"
+                  v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"
                 >
-                  重试保存
+                  保存到项目
                 </button>
                 <button
                   v-if="

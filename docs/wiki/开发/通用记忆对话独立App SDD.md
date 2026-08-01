@@ -1309,3 +1309,28 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 ```
 
 这条路径成立，就说明第一个工作台完成跨设备闭环。第四阶段必须先让 Web 与 Mac 通过同一同步合同，再接 Mobile；不提前创建三套业务代码，不让手机成为第二个数据孤岛。
+
+## 17. Desktop 原生剪贴板图片兜底（2026-08-01）
+
+### 17.1 根因
+
+记忆工作台只读取 WebView `paste` 事件的 `clipboardData.items`。macOS 部分图片来源只把图片保留在原生剪贴板，不向 WebView 投影为 `File`；现有处理先阻止默认粘贴，再因没有图片文件和纯文本直接返回，因此界面无反馈。2026-07-25 的记录只证明浏览器图片粘贴通过，Desktop 安装包仅完成构建、签名和启动，不能作为原生图片剪贴板验收证据。
+
+### 17.2 最小方案与边界
+
+1. 保留现有 WebView 图片和纯文本粘贴为第一优先级。
+2. 仅在 Desktop、`clipboardData.items` 没有图片且剪贴板没有纯文本时，通过现有 `arboard` 读取原生图片。
+3. Rust 只返回 RGBA、宽高；前端用浏览器原生 Canvas 转为 PNG `File`，继续复用 `addAttachmentFiles()`，不新增图片编码依赖或第二套附件链路。
+4. 原生剪贴板不可用或没有图片时安静返回；不改变 Web、Mobile、文本粘贴、上传、拖拽、附件落盘和模型请求合同。
+
+### 17.3 验收
+
+- 行为测试覆盖：WebView 已提供图片时不调用原生兜底；没有图片但有文本时仍粘贴文本；Desktop 两者都没有时调用原生读图并进入现有附件链路。
+- Rust 测试覆盖 RGBA 长度校验和返回合同；TypeScript、记忆工作台专项测试和 Rust 测试通过。
+- 正式 Mac 安装包需分别从截图、预览/微信图片和 Finder 图片文件复制后用 `Command+V` 验收；自动测试和浏览器粘贴不能替代这项真机证据。
+
+### 17.4 实施记录
+
+已实施：新增 `read_clipboard_image`，使用既有 `arboard` 返回校验后的 RGBA；`readClipboardImageFile()` 仅在 Desktop 空图片/空文本粘贴时调用，并经 Canvas 转成 PNG 后复用现有附件入口。没有新增依赖，也没有修改 Web、Mobile、文本粘贴、上传、拖拽或附件落盘合同。
+
+验证通过：触发矩阵与记忆工作台专项 `43/43`、完整 focused `1426 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、oxlint、Desktop quick build、产物审计及补丁检查。本机另生成 `v2.1.5` Apple Silicon ad-hoc 测试 App，架构为 arm64 且严格签名校验通过；Developer ID 正式打包因本机钥匙串返回 `errSecInternalComponent` 未完成，因此没有生成正式 DMG、没有发布。三类来源的 `Command+V` 仍待人工验收，不登记为已通过。

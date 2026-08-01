@@ -1447,6 +1447,7 @@ pub fn run() {
             commands::session::read_session_token,
             commands::session::write_session_token,
             commands::clipboard::write_clipboard_text,
+            commands::clipboard::read_clipboard_image,
             commands::tools::check_whisper_available,
             commands::http::http_request,
             commands::http::document_markdown_request,

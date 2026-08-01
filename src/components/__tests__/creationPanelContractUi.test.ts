@@ -812,20 +812,21 @@ test('creation panel previews persisted project task media in MediaViewer withou
   assert.match(source, /URL\.revokeObjectURL\(taskPreviewObjectUrl\)/)
 })
 
-test('creation panel exposes a retry when a successful result failed Web project persistence', () => {
+test('creation panel lets a remote successful result be saved into its project', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const retry =
     source.match(
-      /function canRetryWebMediaPersistence[\s\S]*?\n}\n\nasync function retryTaskPersistence[\s\S]*?\n}/,
+      /function canPersistMediaResult[\s\S]*?\n}\n\nasync function retryTaskPersistence[\s\S]*?\n}/,
     )?.[0] || ''
-  assert.match(retry, /!isTauriRuntime\(\)/)
   assert.match(retry, /task\.source === 'creation'/)
   assert.match(retry, /task\.status === 'success'/)
-  assert.match(retry, /task\.assetStatus === 'failed'/)
-  assert.match(retry, /await mediaTaskStore\.retryWebMediaPersistence\(task\.id\)/)
+  assert.match(retry, /!task\.projectPath/)
+  assert.match(retry, /!task\.assetUri/)
+  assert.match(retry, /isTauriRuntime\(\) \|\| Boolean\(task\.projectId\)/)
+  assert.match(retry, /await mediaTaskStore\.retryMediaPersistence\(task\.id\)/)
   assert.match(
     source,
-    /v-if="canRetryWebMediaPersistence\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*重试保存\s*<\/button>/,
+    /v-if="canPersistMediaResult\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*保存到项目\s*<\/button>/,
   )
   assert.match(
     source,

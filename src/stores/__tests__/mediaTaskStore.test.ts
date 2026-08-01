@@ -1235,7 +1235,7 @@ test(
       await waitFor(() => store.getTask(taskId)?.assetStatus === 'failed')
       assert.equal(store.getTask(taskId)?.resultUrl, resultUrl)
 
-      assert.equal(await store.retryWebMediaPersistence(taskId), true)
+      assert.equal(await store.retryMediaPersistence(taskId), true)
       assert.equal(store.getTask(taskId)?.status, 'success')
       assert.equal(store.getTask(taskId)?.assetStatus, 'local')
       assert.equal(binaryWriteAttempts, 2)
@@ -1294,6 +1294,39 @@ test(
       __setCreationSubmitExecutorForTests(null)
       files.restore()
       projectStore.projectDir.value = originalProjectDir
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore saves a legacy remote Veo result into the current Desktop project',
+  { concurrency: false },
+  async () => {
+    const resultUrl = 'https://api.jiucaihezi.studio/v1/videos/task_veo_legacy/content'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_veo_legacy', type: 'video', model: 'veo-3.1-generate-preview',
+      modelLabel: 'Veo 3.1', prompt: '旧 VEO 视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl, assetStatus: 'remote-only',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/veo'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      assert.equal(await store.retryMediaPersistence('mtask_veo_legacy'), true)
+      const task = store.getTask('mtask_veo_legacy')
+      assert.deepEqual(files.downloads, [resultUrl])
+      assert.match(task?.assetUri || '', /^\/projects\/veo\/jc-media\/videos\//)
+      assert.equal(task?.assetStatus, 'local')
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
       storage.restore()
     }
   },
@@ -2438,6 +2471,7 @@ test('MediaTaskBubble downloads project media first and keeps the remote fallbac
     ),
     true,
   )
+  assert.equal(source.includes('taskStore.retryMediaPersistence(props.taskId)'), true)
   assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
   assert.match(source, /props\.workbenchMode[\s\S]*fetchCreationMediaBlob\(t\.resultUrl[\s\S]*fetchBlobForExport\(t\.resultUrl\)/)
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
