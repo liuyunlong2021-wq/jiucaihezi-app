@@ -157,9 +157,11 @@
   background: var(--hl-bg);
   pointer-events: none;
 }
+.memory-markdown-editor pre * { font: inherit; }
 .memory-markdown-editor textarea {
   position: absolute;
   inset: 0;
+  border: 0;
   overflow: auto;
   resize: none;
   background: transparent;

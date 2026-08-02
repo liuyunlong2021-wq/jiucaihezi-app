@@ -311,6 +311,8 @@ test('markdown editor keeps pre and textarea under the shared stylesheet', () =>
 
   assert.doesNotMatch(workbench, /\.memory-document pre\s*\{/)
   assert.match(markdownCss, /\.memory-markdown-editor pre,\s*\n\.memory-markdown-editor textarea\s*\{[\s\S]*font: \.92em\/1\.6/)
+  assert.match(markdownCss, /\.memory-markdown-editor pre \* \{ font: inherit; \}/)
+  assert.match(markdownCss, /\.memory-markdown-editor textarea \{[\s\S]*border: 0;/)
 })
 
 test('memory document and file tree keep independent visible scrolling', () => {
