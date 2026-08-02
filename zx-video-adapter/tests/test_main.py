@@ -1,3 +1,4 @@
+import json
 import unittest
 
 import httpx
@@ -68,14 +69,28 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["status"], "completed")
         self.assertEqual(response.json()["video_url"], "https://cdn.example/video.mp4")
 
-    async def test_requires_reference_before_upstream_submission(self):
+    async def test_forwards_text_video_as_json(self):
         response = await self.client.post(
             "/v1/videos",
             headers={"Authorization": "Bearer zx-test-key"},
-            json={"model": "grok-1.5-video-10s", "prompt": "主体运动", "size": "1280x720"},
+            json={
+                "model": "grok-1.5-video-10s",
+                "prompt": "主体运动",
+                "size": "1280x720",
+                "seconds": 10,
+            },
         )
-        self.assertEqual(response.status_code, 400)
-        self.assertEqual(self.upstream_requests, [])
+        self.assertEqual(response.status_code, 200)
+        create_request = self.upstream_requests[0]
+        self.assertEqual(create_request.headers["content-type"], "application/json")
+        self.assertEqual(
+            json.loads(create_request.read()),
+            {
+                "model": "grok-1.5-video-10s",
+                "prompt": "主体运动",
+                "resolution": "720p",
+            },
+        )
 
     async def test_accepts_direct_multipart_reference(self):
         response = await self.client.post(

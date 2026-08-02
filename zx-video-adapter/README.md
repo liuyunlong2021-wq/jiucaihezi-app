@@ -8,7 +8,7 @@
 - `grok-1.5-video-10s`
 - `grok-1.5-video-15s`
 
-ZX 要求 `multipart/form-data`、`input_reference` 参考图和 `size=1280x720`。适配器接受 NewAPI 转发的 JSON（`image`/`images`/`reference_images`）或直接 multipart，并统一转换为 ZX 合同。模型名决定时长，不发送 `seconds`。
+无参考图时，适配器按 ZX 文生视频合同发送 JSON；有参考图时，将 `image`/`images`/`reference_images` 或直接 multipart 统一转换为 `input_reference` 文件。模型名决定时长，不发送 `seconds`。
 
 ## 本地验证
 

@@ -69,21 +69,28 @@ async def create_video(request: Request):
     model = payload.get("model")
     prompt = payload.get("prompt")
     size = payload.get("size") or "1280x720"
-    validate_request(model, prompt, size, image)
+    validate_request(model, prompt, size)
 
-    image_name, image_bytes, image_mime = await materialize_image(image, request.app.state.http)
-    form = {
-        "model": str(model),
-        "prompt": str(prompt),
-        "size": str(size),
-    }
-    files = {"input_reference": (image_name, image_bytes, image_mime)}
+    post_kwargs = {}
+    if image:
+        image_name, image_bytes, image_mime = await materialize_image(image, request.app.state.http)
+        post_kwargs = {
+            "data": {"model": str(model), "prompt": str(prompt), "size": str(size)},
+            "files": {"input_reference": (image_name, image_bytes, image_mime)},
+        }
+    else:
+        post_kwargs = {
+            "json": {
+                "model": str(model),
+                "prompt": str(prompt),
+                "resolution": str(payload.get("resolution") or "720p"),
+            }
+        }
     try:
         response = await request.app.state.http.post(
             f"{BASE_URL}/v1/videos",
             headers={"Authorization": authorization},
-            data=form,
-            files=files,
+            **post_kwargs,
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
@@ -189,15 +196,13 @@ def first_reference(payload: dict):
     return None
 
 
-def validate_request(model, prompt, size, image):
+def validate_request(model, prompt, size):
     if model not in MODELS:
         raise HTTPException(status_code=400, detail="Unsupported ZX Grok video model")
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > MAX_PROMPT_CHARS:
         raise HTTPException(status_code=400, detail="Prompt is required and too long")
     if size != "1280x720":
         raise HTTPException(status_code=400, detail="ZX Grok video requires size=1280x720")
-    if not image:
-        raise HTTPException(status_code=400, detail="ZX Grok video requires one reference image")
 
 
 async def materialize_image(image, client: httpx.AsyncClient):
