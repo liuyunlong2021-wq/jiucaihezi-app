@@ -6,6 +6,7 @@ import {
   linesPage,
   normalizeCreativeProjectPath,
   parseCreativeToolArguments,
+  WIKI_SEARCH_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
@@ -14,6 +15,7 @@ import {
   artifactFilename,
   createArtifactHtml,
   createDocumentArtifact,
+  createMarkdownSlidesArtifact,
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
@@ -210,6 +212,10 @@ export function createDesktopProjectToolExecutor(input: {
       return { content: await executeWikiAction(wikiWorkspace, args as any) }
     }
 
+    if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {
+      return { content: await executeWikiAction(wikiWorkspace, { ...args, action: 'search' } as any) }
+    }
+
     if (name === 'read') {
       const rawPath = String(args.path)
       const resource = await skills.read(rawPath)
@@ -356,6 +362,12 @@ export function createDesktopProjectToolExecutor(input: {
         createArtifactHtml(String(args.title), String(args.content)),
       )
       return { content: `已生成 HTML: ${path}` }
+    }
+
+    if (name === 'export_markdown_slides') {
+      const artifact = await createMarkdownSlidesArtifact(String(args.title), String(args.content), String(args.format) as 'html' | 'pdf' | 'pptx')
+      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data)
+      return { content: `已生成 Markdown 幻灯片: ${path}` }
     }
 
     if (name === 'create_3d_scene') {

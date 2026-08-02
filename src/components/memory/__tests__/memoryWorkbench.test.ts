@@ -186,7 +186,8 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(runtime, /messages: \[\.\.\.input\.conversationTurns, input\.userTurn\]/)
   assert.match(runtime, /rawPath: string/)
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
-  assert.match(runtime, /if \(!memoryMode\)[\s\S]*tools: undefined/)
+  assert.match(runtime, /if \(!memoryMode\)[\s\S]*tools: \[WIKI_SEARCH_TOOL_DEFINITION\][\s\S]*executeTool: projectTools/)
+  assert.match(workbench, /wiki_search: '搜索 Wiki'/)
   assert.doesNotMatch(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS|快速模式只能读取/)
   assert.match(runtime, /attachments: memoryMode \? input\.attachments : undefined/)
   assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
@@ -360,7 +361,7 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /const timelineTurns = computed<ConversationTurn\[\]>/)
   assert.match(workbench, /id: 'streaming-assistant'/)
   assert.match(workbench, /v-for="turn in timelineTurns"/)
-  assert.match(workbench, /turn\.id === 'streaming-assistant' \? renderStreamingText\(content\) : renderMemoryMarkdown\(content\)/)
+  assert.match(workbench, /:streaming="turn\.id === 'streaming-assistant'"/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
   assert.match(workbench, /const complete = await appendMemoryRound[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/)
   assert.match(workbench, /pendingUserTurn\.value = userTurn/)
@@ -376,7 +377,7 @@ test('memory run status follows real tool start and end events without entering 
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
   assert.match(runtime, /onToolEvent\?: \(event: DirectToolExecutionEvent\) => void/)
-  assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 2)
+  assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 3)
   assert.doesNotMatch(runtime, /event\.type === 'tool_execution_start'\) input\.onToolEvent/)
   assert.match(workbench, /onToolEvent: updateRunTool/)
   assert.match(workbench, /event\.type === 'tool_execution_start'[\s\S]*status\.value = `正在\$\{label\}`/)
@@ -521,6 +522,8 @@ test('3D scene editor clones plain scene data instead of Vue proxies', () => {
   assert.doesNotMatch(editor, /depthTest: false/)
   assert.match(editor, /camera\('全景'/)
   assert.match(editor, /camera\(`\$\{secondName\}近景`/)
+  assert.match(editor, /person\.add\(body, head, leftArm, rightArm, leftLeg, rightLeg, direction\)/)
+  assert.match(editor, /if \(pose === 'lying'\)/)
 })
 
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {
@@ -581,21 +584,34 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /files\.executeBatch\(plan\)/)
   assert.match(workbench, /const previewResource = ref<ProjectResourceOpenResult \| null>\(null\)/)
   assert.match(workbench, /else \{\s*releaseMediaUrl\(\)\s*previewResource\.value = resource/)
-  assert.match(workbench, />返回对话</)
+  assert.match(workbench, /projectMapReturn \? '返回项目地图' : '返回对话'/)
   assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
-  assert.doesNotMatch(workbench, /resource\.type === 'canvas'[\s\S]*openCreationHost\(\)/)
+  assert.match(workbench, /resource\.type === 'canvas'[\s\S]{0,160}openCreationHost\(\)/)
   assert.doesNotMatch(workbench, /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/)
 })
 
 test('memory files and conversation turns use the shared safe Markdown renderer', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const renderer = source('src/components/memory/MemoryMarkdown.vue')
 
-  assert.match(workbench, /function renderMemoryTurn\(turn: ConversationTurn\)/)
-  assert.match(workbench, /turn\.id === 'streaming-assistant' \? renderStreamingText\(content\) : renderMemoryMarkdown\(content\)/)
-  assert.match(workbench, /v-html="renderMemoryTurn\(turn\)"/)
-  assert.match(workbench, /renderMemoryMarkdown\(previewResource\.text\.content\)/)
-  assert.match(workbench, /v-html="renderMemoryMarkdown\(/)
+  assert.match(workbench, /<MemoryMarkdown/)
+  assert.match(renderer, /renderMessageMarkdown\(renderWikiLinks\(props\.content\), 'assistant'\)/)
+  assert.match(renderer, /renderStreamingText\(props\.content\)/)
+  assert.match(renderer, /renderMermaidBlocks\(base,/)
+  assert.match(renderer, /querySelectorAll<HTMLElement>\('h1,h2,h3'\)/)
+  assert.match(renderer, /window\.innerWidth > 760/)
   assert.doesNotMatch(workbench, /<pre>\{\{ previewResource\.text\.content \}\}<\/pre>/)
+})
+
+test('memory project maps stay separate from the creation canvas and preserve return navigation', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const viewer = source('src/components/memory/ProjectMapViewer.vue')
+
+  assert.match(workbench, /previewResource\.type === 'project-map'/)
+  assert.match(workbench, /serializeJsonCanvas\(next\)/)
+  assert.match(workbench, /projectMapReturn\.value = \{ resource: current, viewport \}/)
+  assert.doesNotMatch(viewer, /CreationPanel|CanvasDocumentV3|\.jccanvas/)
+  assert.match(viewer, /emit\('save', structuredClone\(document\.value\)\)/)
 })
 
 test('memory Markdown supports forward links and scanned backlink sources', () => {

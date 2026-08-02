@@ -73,6 +73,20 @@ test('resource open routing sends canvas and media to the creation surface and l
   assert.equal((await openProjectResource(fileService(), resource('binary', 'assets/model.psd'))).type, 'binary')
 })
 
+test('resource open routing keeps standard JSON Canvas independent from the creation canvas', async () => {
+  const content = JSON.stringify({
+    nodes: [{ id: 'a', type: 'text', x: 0, y: 0, width: 240, height: 120, text: '[[wiki/hot]]' }],
+    edges: [],
+  })
+  const result = await openProjectResource(fileService(content), resource('project-map', 'docs/wiki/关系图.canvas'))
+  assert.equal(result.type, 'project-map')
+  if (result.type === 'project-map') assert.equal(result.document.nodes[0]?.id, 'a')
+
+  const broken = await openProjectResource(fileService('{'), resource('project-map', 'docs/wiki/损坏.canvas'))
+  assert.equal(broken.type, 'editor')
+  if (broken.type === 'editor') assert.equal(broken.editorMode, 'plain')
+})
+
 test('resource open routing recognizes versioned 3D blockout scenes', async () => {
   const content = JSON.stringify({ version: 1, title: '街道', objects: [], formations: [], groups: [] })
   const result = await openProjectResource(fileService(content), resource('document', '.raw/jc-media/文档/街道.jcscene'))

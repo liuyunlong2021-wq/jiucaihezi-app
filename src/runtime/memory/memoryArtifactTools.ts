@@ -3,6 +3,7 @@ import { createDocxFromText } from '@/utils/localDocx'
 import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
 
 export type MemoryArtifactFormat = 'docx' | 'md' | 'txt'
+export type MemorySlideFormat = 'html' | 'pdf' | 'pptx'
 export type MemoryImageRenderer = (input: { title: string; content: string; width?: number }) => Promise<Blob>
 
 const ARTIFACT_STYLE = `
@@ -20,6 +21,110 @@ export function artifactFilename(title: string, extension: string): string {
 
 function safeMarkdownHtml(content: string): string {
   return renderMessageMarkdown(String(content || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'), 'assistant')
+}
+
+function markdownSlides(content: string): string[] {
+  const slides = String(content || '').trim().split(/^\s*---\s*$/m).map(value => value.trim()).filter(Boolean)
+  if (!slides.length) throw new Error('幻灯片内容不能为空')
+  return slides
+}
+
+export function createMarkdownSlidesHtml(title: string, content: string): string {
+  const safeTitle = String(title || '韭菜盒子幻灯片').replace(/[&<>"']/g, value => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  })[value]!)
+  const slides = markdownSlides(content).map((slide, index) =>
+    `<section class="slide" id="slide-${index + 1}"><div>${safeMarkdownHtml(slide)}</div><small>${index + 1}</small></section>`)
+  return `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${safeTitle}</title><style>
+*{box-sizing:border-box}html{scroll-snap-type:y mandatory}body{margin:0;background:#171916;color:#f7f7f2;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif}.slide{position:relative;width:100vw;min-height:100vh;padding:8vh 9vw;display:flex;align-items:center;scroll-snap-align:start;background:#f8f8f4;color:#20231f;overflow:hidden}.slide>div{width:100%;font-size:clamp(20px,2.2vw,34px);line-height:1.55}.slide h1{font-size:2.15em;margin:.2em 0}.slide h2{font-size:1.55em;margin:.25em 0}.slide h3{font-size:1.2em}.slide img{max-width:100%;max-height:58vh}.slide pre{font-size:.62em;overflow:auto;background:#e9ebe5;padding:18px}.slide small{position:absolute;right:3vw;bottom:3vh;color:#73776f}@media print{html{scroll-snap-type:none}.slide{width:13.333in;height:7.5in;min-height:0;break-after:page}}
+</style></head><body>${slides.join('')}<script>addEventListener('keydown',event=>{const pages=[...document.querySelectorAll('.slide')];const current=Math.max(0,pages.findIndex(page=>page.getBoundingClientRect().top>=-innerHeight/2));const delta=['ArrowRight','ArrowDown','PageDown',' '].includes(event.key)?1:['ArrowLeft','ArrowUp','PageUp'].includes(event.key)?-1:0;if(delta){event.preventDefault();pages[Math.max(0,Math.min(pages.length-1,current+delta))]?.scrollIntoView({behavior:'smooth'})}})</script></body></html>`
+}
+
+function slideEditableContent(markdown: string) {
+  const lines = markdown.split('\n')
+  const titleIndex = lines.findIndex(line => /^#{1,3}\s+/.test(line))
+  const title = titleIndex >= 0 ? lines[titleIndex]!.replace(/^#{1,3}\s+/, '').trim() : ''
+  const body = lines.filter((_, index) => index !== titleIndex)
+  const separator = body.findIndex(line => /^\s*\|?(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(line))
+  const tableStart = separator > 0 && body[separator - 1]!.includes('|') ? separator - 1 : -1
+  let tableEnd = tableStart >= 0 ? separator + 1 : -1
+  while (tableEnd >= 0 && tableEnd < body.length && body[tableEnd]!.includes('|')) tableEnd += 1
+  const table = tableStart >= 0 ? body.slice(tableStart, tableEnd).filter((_, index) => index !== 1).map(line =>
+    line.trim().replace(/^\||\|$/g, '').split('|').map(cell => ({ text: cell.trim() }))) : []
+  const textLines = body.filter((_, index) => tableStart < 0 || index < tableStart || index >= tableEnd).map(line => {
+    const bullet = /^\s*[-*+]\s+/.test(line)
+    const numbered = /^\s*\d+[.)]\s+/.test(line)
+    return {
+      bullet: bullet || numbered,
+      numbered,
+      text: line
+        .replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '')
+        .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+        .replace(/^[#>]+\s*/, '')
+        .replace(/[*_`]/g, '')
+        .trim(),
+    }
+  }).filter(line => line.text)
+  return { title, textLines, table }
+}
+
+async function createMarkdownSlidesPptx(title: string, content: string): Promise<Uint8Array> {
+  const { default: PptxGenJS } = await import('pptxgenjs')
+  const deck = new PptxGenJS()
+  deck.layout = 'LAYOUT_WIDE'
+  deck.author = '韭菜盒子 Studio'
+  deck.title = title
+  for (const source of markdownSlides(content)) {
+    const slide = deck.addSlide()
+    slide.background = { color: 'F8F8F4' }
+    const text = slideEditableContent(source)
+    slide.addText(text.title || title, { x: .8, y: .65, w: 11.7, h: .8, fontFace: 'Microsoft YaHei', fontSize: 28, bold: true, color: '20231F', margin: 0 })
+    let y = 1.75
+    for (const line of text.textLines) {
+      slide.addText(line.text, { x: .95, y, w: 11.2, h: .45, fontFace: 'Microsoft YaHei', fontSize: 19, color: '30342E', margin: 0, bullet: line.bullet ? { type: line.numbered ? 'number' : 'bullet' } : undefined })
+      y += .52
+    }
+    if (text.table.length) slide.addTable(text.table, { x: .85, y: Math.min(y + .12, 5.6), w: 11.5, fontFace: 'Microsoft YaHei', fontSize: 14, color: '30342E', border: { type: 'solid', color: 'C9CEC6', pt: 1 }, fill: { color: 'FFFFFF' }, margin: .08 })
+  }
+  const output = await deck.write({ outputType: 'uint8array' })
+  return output instanceof Uint8Array ? output : new Uint8Array(output as ArrayBuffer)
+}
+
+async function createMarkdownSlidesPdf(title: string, content: string): Promise<Uint8Array> {
+  if (typeof document === 'undefined') throw new Error('PDF 幻灯片需要在应用页面中生成')
+  const { PDFDocument } = await import('pdf-lib')
+  const pdf = await PDFDocument.create()
+  const host = document.createElement('div')
+  host.style.cssText = 'position:fixed;left:-20000px;top:0;width:1280px;pointer-events:none;'
+  document.body.appendChild(host)
+  try {
+    for (const source of markdownSlides(content)) {
+      const page = document.createElement('section')
+      page.style.cssText = 'width:1280px;height:720px;padding:70px 88px;background:#f8f8f4;color:#20231f;font:28px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei",sans-serif;overflow:hidden;'
+      page.innerHTML = safeMarkdownHtml(source)
+      host.replaceChildren(page)
+      await document.fonts?.ready
+      const blob = await toBlob(page, { backgroundColor: '#f8f8f4', pixelRatio: 1 })
+      if (!blob) throw new Error('PDF 页面渲染失败')
+      const image = await pdf.embedPng(await blob.arrayBuffer())
+      const pdfPage = pdf.addPage([960, 540])
+      pdfPage.drawImage(image, { x: 0, y: 0, width: 960, height: 540 })
+    }
+    pdf.setTitle(title)
+    return pdf.save()
+  } finally {
+    host.remove()
+  }
+}
+
+export async function createMarkdownSlidesArtifact(title: string, content: string, format: MemorySlideFormat) {
+  if (!['html', 'pdf', 'pptx'].includes(format)) throw new Error(`不支持的幻灯片格式: ${format}`)
+  if (format === 'html') return { filename: artifactFilename(title, 'html'), mimeType: 'text/html;charset=utf-8', data: createMarkdownSlidesHtml(title, content) }
+  if (format === 'pdf') return { filename: artifactFilename(title, 'pdf'), mimeType: 'application/pdf', data: await createMarkdownSlidesPdf(title, content) }
+  return { filename: artifactFilename(title, 'pptx'), mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', data: await createMarkdownSlidesPptx(title, content) }
 }
 
 export function createArtifactHtml(title: string, content: string): string {

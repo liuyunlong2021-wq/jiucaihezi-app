@@ -95,15 +95,32 @@ function makePerson(color: string, pose = 'standing'): THREE.Group {
   const person = new THREE.Group()
   const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.26, 0.68, 4, 8), material(color))
   const head = new THREE.Mesh(new THREE.SphereGeometry(0.22, 12, 8), material('#f4f4ee'))
+  const limbGeometry = new THREE.CapsuleGeometry(0.075, 0.4, 3, 7)
+  const leftArm = new THREE.Mesh(limbGeometry, material(color))
+  const rightArm = new THREE.Mesh(limbGeometry, material(color))
+  const leftLeg = new THREE.Mesh(limbGeometry, material(color))
+  const rightLeg = new THREE.Mesh(limbGeometry, material(color))
   const direction = new THREE.Mesh(new THREE.ConeGeometry(0.14, 0.35, 4), material(color))
-  body.position.y = 0.7
-  head.position.y = 1.35
+  body.position.y = 0.9
+  head.position.y = 1.55
+  leftArm.position.set(-0.38, 0.9, 0); rightArm.position.set(0.38, 0.9, 0)
+  leftLeg.position.set(-0.14, 0.28, 0); rightLeg.position.set(0.14, 0.28, 0)
   direction.position.set(0, 0.18, 0.38)
   direction.rotation.x = Math.PI / 2
-  if (pose === 'sitting') { body.position.set(0, 0.55, -0.14); body.rotation.x = Math.PI / 2; head.position.set(0, 0.88, -0.42) }
-  if (pose === 'crouching') { body.position.y = 0.45; head.position.y = 0.85 }
-  if (pose === 'lying') { body.position.set(0, 0.27, 0); body.rotation.z = Math.PI / 2; head.position.set(0.52, 0.27, 0) }
-  person.add(body, head, direction)
+  if (pose === 'sitting') {
+    body.position.y = 0.75; head.position.y = 1.38
+    leftArm.position.y = rightArm.position.y = 0.77
+    leftLeg.position.set(-0.14, 0.3, 0.2); rightLeg.position.set(0.14, 0.3, 0.2)
+    leftLeg.rotation.x = rightLeg.rotation.x = Math.PI / 2
+  }
+  if (pose === 'crouching') {
+    body.position.y = 0.65; head.position.y = 1.2
+    leftArm.position.y = rightArm.position.y = 0.65
+    leftLeg.position.set(-0.16, 0.25, 0); rightLeg.position.set(0.16, 0.25, 0)
+    leftLeg.rotation.z = -0.45; rightLeg.rotation.z = 0.45
+  }
+  person.add(body, head, leftArm, rightArm, leftLeg, rightLeg, direction)
+  if (pose === 'lying') { person.rotation.z = Math.PI / 2; person.position.y = 0.55 }
   return person
 }
 

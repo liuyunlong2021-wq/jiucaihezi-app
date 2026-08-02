@@ -639,6 +639,8 @@ function iconForNode(node: TreeNode): string {
       return 'data-object'
     case CANVAS_EXT:
       return 'dashboard'
+    case 'canvas':
+      return 'hub'
     case 'md':
     case 'txt':
     case 'csv':

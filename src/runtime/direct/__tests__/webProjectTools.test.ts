@@ -90,7 +90,7 @@ test('web project tool definitions append connected MCP tools without Desktop te
     )
     assert.deepEqual(
       buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'create_3d_scene', 'mcp__docs__lookup'],
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'mcp__docs__lookup'],
     )
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
@@ -110,6 +110,8 @@ test('web memory artifact tools generate real project files and keep same-name o
   assert.match((await execute(call('export_markdown_png', { title: '周报', content: '# 周报' }))).content, /周报 \(1\)\.png/)
   assert.match((await execute(call('create_document', { title: '周报', content: '# 周报', format: 'docx' }))).content, /\.raw\/jc-media\/文档\/周报\.docx/)
   assert.match((await execute(call('create_html', { title: '周报', content: '# 周报' }))).content, /\.raw\/jc-media\/文档\/周报\.html/)
+  assert.match((await execute(call('export_markdown_slides', { title: '汇报', content: '# 首页\n\n---\n\n# 结尾', format: 'html' }))).content, /汇报\.html/)
+  assert.match((await execute(call('export_markdown_slides', { title: '汇报', content: '# 首页\n\n- 结论\n\n| 指标 | 结果 |\n| --- | --- |\n| 测试 | 通过 |\n\n---\n\n# 结尾', format: 'pptx' }))).content, /汇报\.pptx/)
   const sceneResult = await execute(call('create_3d_scene', {
     title: '宫殿排位', objects: [{ id: 'emperor', type: 'person', position: [0, 0, 0] }],
     formations: [{ id: 'ministers', type: 'grid', count: 20, position: [0, 0, 3] }],
@@ -125,12 +127,17 @@ test('web memory artifact tools generate real project files and keep same-name o
   const docx = new Uint8Array(await (await files.readBinary(project.id, '.raw/jc-media/文档/周报.docx')).arrayBuffer())
   const html = await files.read(project.id, '.raw/jc-media/文档/周报.html')
   const fullHtml = await files.read(project.id, '.raw/jc-media/文档/完整网页.html')
+  const slideHtml = await files.read(project.id, '.raw/jc-media/文档/汇报.html')
+  const slidePptx = new Uint8Array(await (await files.readBinary(project.id, '.raw/jc-media/文档/汇报.pptx')).arrayBuffer())
   assert.equal(await image.text(), 'PNG')
   assert.deepEqual([...docx.slice(0, 2)], [0x50, 0x4b])
   assert.match(html.content, /<!doctype html>/i)
   assert.match(html.content, /<h1>周报<\/h1>/)
   assert.match(fullHtml.content, /<style>button\{color:red\}<\/style>/)
   assert.match(fullHtml.content, /<button>开始<\/button>/)
+  assert.equal((slideHtml.content.match(/class="slide"/g) || []).length, 2)
+  assert.match(slideHtml.content, /addEventListener\('keydown'/)
+  assert.deepEqual([...slidePptx.slice(0, 2)], [0x50, 0x4b])
   assert.doesNotMatch(fullHtml.content, /&lt;button/)
   await assert.rejects(
     () => execute(call('create_html', { title: '半截网页', content: '<div>缺少网页结构</div>' })),
@@ -149,6 +156,8 @@ test('web project tools execute the native Wiki runtime without Python or Node',
 
   assert.match((await execute(call('wiki', { action: 'scaffold', type: 'dev_project' }))).content, /created-or-completed: docs\/wiki/)
   assert.match((await execute(call('wiki', { action: 'inspect' }))).content, /path: docs\/wiki/)
+  assert.match((await execute(call('wiki_search', { query: 'Hot' }))).content, /CLAUDE\.md/)
+  await assert.rejects(() => execute(call('wiki_search', { query: 'Hot', action: 'replace' })), /工具参数不支持/)
   assert.equal((await files.list(project.id)).some(entry => entry.path === '.raw' || entry.path.startsWith('.raw/')), false)
 })
 

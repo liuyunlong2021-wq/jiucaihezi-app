@@ -20,6 +20,12 @@ function tool(name: string, description: string, properties: Record<string, unkn
 const pathProperty = { type: 'string', description: 'Path relative to the current project, or an absolute path after the user approves this task' }
 const vectorProperty = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
 
+export const WIKI_SEARCH_TOOL_DEFINITION = tool('wiki_search', 'Search the current project Wiki read-only. Use it only when the answer depends on project facts.', {
+  query: { type: 'string', description: 'Search terms for the current project Wiki' },
+  scope: { type: 'string', enum: ['active', 'all'], description: 'active excludes archived knowledge; all includes it' },
+  limit: { type: 'integer', minimum: 1, maximum: 1000 },
+}, ['query'])
+
 export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool('skill', 'Load a specialized Skill from the available skills list.', {
     name: { type: 'string', description: 'Exact Skill name from the available skills list' },
@@ -103,6 +109,11 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
     title: { type: 'string', description: 'Output title and filename without extension' },
     content: { type: 'string', description: 'Complete standalone HTML document; plain Markdown is accepted only as a basic fallback' },
   }, ['title', 'content']),
+  tool('export_markdown_slides', 'Export Markdown slides separated by a line containing only --- as HTML, PDF, or an editable PPTX.', {
+    title: { type: 'string', description: 'Output title and filename without extension' },
+    content: { type: 'string', description: 'Complete Markdown slides; separate slides with a line containing only ---' },
+    format: { type: 'string', enum: ['html', 'pdf', 'pptx'], description: 'Output slide format' },
+  }, ['title', 'content', 'format']),
   tool('create_3d_scene', 'Create or replace a lightweight local 3D blockout scene for spatial layout, character staging, camera composition, or an image-generation reference. Use it when the user asks for a white-box scene, simple people and blocks, staging, spatial arrangement, a rotatable composition, or camera planning. Do not use it to generate a finished image or detailed 3D model.', {
     title: { type: 'string', description: 'Scene title and filename without extension' },
     existingPath: { type: 'string', description: 'Optional existing .raw/jc-media/文档/*.jcscene path to replace after reading it; omit when creating' },
@@ -161,6 +172,7 @@ export function buildMemoryDesktopToolDefinitions() {
 type ToolFieldType = 'string' | 'boolean' | 'integer' | 'stringArray' | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
+  wiki_search: { query: 'string', scope: 'string', limit: 'integer' },
   skill: { name: 'string' },
   wiki: {
     action: 'string', type: 'string', query: 'string', scope: 'string', limit: 'integer',
@@ -178,6 +190,7 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   export_markdown_png: { title: 'string', content: 'string', width: 'integer' },
   create_document: { title: 'string', content: 'string', format: 'string' },
   create_html: { title: 'string', content: 'string' },
+  export_markdown_slides: { title: 'string', content: 'string', format: 'string' },
   create_3d_scene: { title: 'string', existingPath: 'string', objects: 'json', formations: 'json', groups: 'json', camera: 'json', savedCameras: 'json', lighting: 'json', canvas: 'json' },
   terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }
@@ -205,7 +218,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
       throw new Error(`工具参数类型无效: ${key}`)
     }
   }
-  const definition = [...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS, ...MEMORY_ARTIFACT_TOOL_DEFINITIONS]
+  const definition = [WIKI_SEARCH_TOOL_DEFINITION, ...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS, ...MEMORY_ARTIFACT_TOOL_DEFINITIONS]
     .find(tool => tool.function.name === call.function.name)!
   for (const field of definition.function.parameters.required) {
     if (!(field in args)) throw new Error(`缺少工具参数: ${field}`)

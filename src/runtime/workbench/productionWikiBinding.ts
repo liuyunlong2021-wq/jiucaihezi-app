@@ -5,7 +5,7 @@ export interface ProductionWikiResource {
   path: string
   name: string
   isDirectory: boolean
-  kind: 'document' | 'media' | 'canvas' | 'binary'
+  kind: 'document' | 'media' | 'canvas' | 'project-map' | 'binary'
 }
 
 export interface ProductionWikiEntity {

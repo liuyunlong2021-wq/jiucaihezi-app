@@ -6,6 +6,7 @@ import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
 import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import MemorySettings from './MemorySettings.vue'
+import MemoryMarkdown from './MemoryMarkdown.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -56,12 +57,11 @@ import type { ConversationAttachment, ConversationMode, ConversationTurn } from 
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
-import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
-import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
-import { findWikiBacklinks, renderWikiLinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
+import { findWikiBacklinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
+import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -73,8 +73,11 @@ const mobileRuntime = isTauriMobileRuntime()
 const CreationPanel = defineAsyncComponent(() => import('@/components/creation/CreationPanel.vue'))
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
+const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
+const projectMapReturn = ref<{ resource: Extract<ProjectResourceOpenResult, { type: 'project-map' }>; viewport: { x: number; y: number; zoom: number } } | null>(null)
+const projectMapViewport = ref<{ x: number; y: number; zoom: number } | null>(null)
 const backlinks = ref<ProjectResource[]>([])
 const editingMarkdown = ref(false)
 const markdownDraft = ref('')
@@ -150,6 +153,7 @@ let creationResizeStartWidth = 0
 let creationResizeFrame = 0
 let runTimer: ReturnType<typeof setInterval> | null = null
 let sceneSaveQueue = Promise.resolve()
+let projectMapSaveQueue = Promise.resolve()
 
 const MEMORY_TREE_WIDTH = 280
 const MEMORY_CHAT_MIN = 420
@@ -473,6 +477,11 @@ watch(streamingText, async text => {
 })
 
 async function openResource(resource: ProjectResourceOpenResult) {
+  if (resource.type === 'canvas') {
+    emitEvent('canvas:open', { path: resource.resource.path })
+    openCreationHost()
+    return
+  }
   error.value = ''
   if (!sending.value) {
     status.value = ''
@@ -575,15 +584,6 @@ async function saveMarkdownEdit() {
   } finally {
     markdownSavePending.value = false
   }
-}
-
-function renderMemoryMarkdown(content: string): string {
-  return renderMessageMarkdown(renderWikiLinks(content), 'assistant')
-}
-
-function renderMemoryTurn(turn: ConversationTurn): string {
-  const content = displayTurnContent(turn)
-  return turn.id === 'streaming-assistant' ? renderStreamingText(content) : renderMemoryMarkdown(content)
 }
 
 async function openWikiResource(resource: ProjectResource) {
@@ -699,7 +699,48 @@ function closePreview() {
   editingMarkdown.value = false
   markdownSaveError.value = ''
   previewResource.value = null
+  projectMapReturn.value = null
+  projectMapViewport.value = null
   releaseMediaUrl()
+}
+
+async function returnFromPreview() {
+  if (!projectMapReturn.value) return closePreview()
+  const target = projectMapReturn.value
+  projectMapReturn.value = null
+  projectMapViewport.value = target.viewport
+  await openResource(target.resource)
+}
+
+async function openProjectMapPath(rawPath: string, viewport: { x: number; y: number; zoom: number }) {
+  const current = previewResource.value
+  if (current?.type !== 'project-map' || !rawPath || rawPath.startsWith('/') || /^[a-z]:[\\/]/i.test(rawPath)) return
+  const clean = rawPath.replace(/\\/g, '/').replace(/^\.\//, '')
+  if (clean.split('/').includes('..')) return
+  const directory = current.resource.path.includes('/') ? current.resource.path.replace(/\/[^/]+$/, '') : ''
+  const listed = await files.list(projectOwner.value)
+  const candidates = [clean, `${clean}.md`, directory && `${directory}/${clean}`, directory && `${directory}/${clean}.md`].filter(Boolean)
+  const resource = candidates.map(path => listed.find(item => item.path === path)).find(Boolean)
+    || listed.find(item => item.path.endsWith(`/${clean}`) || item.path.endsWith(`/${clean}.md`))
+  if (!resource) { error.value = `项目地图引用不存在：${rawPath}`; return }
+  projectMapReturn.value = { resource: current, viewport }
+  projectMapViewport.value = viewport
+  await openResource(await openProjectResource(files, resource))
+}
+
+function saveProjectMap(next: JsonCanvasDocument) {
+  const path = previewResource.value?.resource.path
+  projectMapSaveQueue = projectMapSaveQueue.then(async () => {
+    const current = previewResource.value
+    if (current?.type !== 'project-map' || current.resource.path !== path) return
+    const content = serializeJsonCanvas(next)
+    const result = await files.writeText(current.resource, content, current.text.revision)
+    if (result.status !== 'saved') {
+      error.value = result.status === 'conflict' ? '项目地图已在其他位置修改，请关闭后重新打开' : '项目地图文件不存在'
+      return
+    }
+    previewResource.value = { ...current, document: next, text: { ...current.text, content, revision: result.revision } }
+  }).catch(cause => { error.value = `项目地图保存失败：${cause instanceof Error ? cause.message : String(cause)}` })
 }
 
 async function previewProjectResource(resource: ProjectResource) {
@@ -708,6 +749,7 @@ async function previewProjectResource(resource: ProjectResource) {
     return
   }
   try {
+    if (resource.kind === 'project-map') projectMapViewport.value = null
     await openResource(await openProjectResource(files, resource))
   } catch (cause) {
     error.value = `预览失败: ${cause instanceof Error ? cause.message : String(cause)}`
@@ -876,6 +918,7 @@ function memoryToolLabel(name: string): string {
   return ({
     skill: '加载 Skill',
     wiki: '检查 Wiki',
+    wiki_search: '搜索 Wiki',
     read: '读取文件',
     glob: '查找文件',
     grep: '搜索内容',
@@ -887,6 +930,7 @@ function memoryToolLabel(name: string): string {
     export_markdown_png: '导出 Markdown 图片',
     create_document: '生成文档',
     create_html: '生成网页',
+    export_markdown_slides: '生成幻灯片',
     create_3d_scene: '搭建 3D 白膜',
     terminal: '执行命令',
     read_url: '读取网页',
@@ -1608,13 +1652,15 @@ function readDataUrl(file: File): Promise<string> {
               <template v-else><JcIcon :name="attachment.kind === 'video' ? 'movie' : attachment.kind === 'audio' ? 'music-note' : 'description'" /><span :title="attachment.name">{{ attachment.name }}</span></template>
             </div>
           </div>
-          <div
+          <MemoryMarkdown
             v-if="displayTurnContent(turn)"
             class="memory-message-text memory-markdown markdown-body"
             :data-wiki-source="conversation?.resource.path"
+            :content="displayTurnContent(turn)"
+            :render-id="turn.id"
+            :streaming="turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
-            v-html="renderMemoryTurn(turn)"
-          ></div>
+          />
           <button
             v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
             class="memory-message-copy"
@@ -1798,7 +1844,7 @@ function readDataUrl(file: File): Promise<string> {
 
       <section v-if="previewResource" class="memory-preview">
         <header class="memory-preview-header">
-          <button class="memory-preview-back" @click="closePreview"><JcIcon name="arrow-back" /><span>返回对话</span></button>
+          <button class="memory-preview-back" @click="returnFromPreview"><JcIcon name="arrow-back" /><span>{{ projectMapReturn ? '返回项目地图' : '返回对话' }}</span></button>
           <strong>{{ previewResource.resource.name }}</strong>
           <div class="memory-preview-actions">
             <template v-if="previewResource.type === 'editor' && !editingMarkdown">
@@ -1817,13 +1863,22 @@ function readDataUrl(file: File): Promise<string> {
           @save="saveScene3D"
           @screenshot="saveSceneScreenshot"
         />
+        <ProjectMapViewer
+          v-else-if="previewResource.type === 'project-map'"
+          :document="previewResource.document"
+          :viewport="projectMapViewport"
+          @open="openProjectMapPath"
+          @save="saveProjectMap"
+        />
         <div v-else-if="previewResource.type === 'editor'" class="memory-document">
-          <div v-if="!editingMarkdown"
+          <MemoryMarkdown v-if="!editingMarkdown"
             class="memory-markdown markdown-body"
             :data-wiki-source="previewResource.resource.path"
+            :content="previewResource.text.content"
+            :render-id="previewResource.resource.path"
+            :outline="/\.md$/i.test(previewResource.resource.path)"
             @click="handleMarkdownClick"
-            v-html="renderMemoryMarkdown(previewResource.text.content)"
-          ></div>
+          />
           <div v-else class="memory-markdown-editor">
             <pre ref="markdownHighlightRef" aria-hidden="true" v-html="highlightCode(markdownDraft, 'markdown')"></pre>
             <textarea

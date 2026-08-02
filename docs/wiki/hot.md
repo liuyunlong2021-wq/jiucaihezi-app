@@ -6,6 +6,10 @@
 
 **项目骨架最高优先合同：[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]。** 四类归档、隐藏目录和系统目录保护准则已完成代码对齐；任何冲突的旧产品路径不得用于当前实现。真实设备升级和打开既有项目仍需人工验收。
 
+**快速模式现行合同：** 与记忆模式共享当前对话上下文，唯一工具是只读 `wiki_search`；不提供附件、项目引用、网址、Skill、MCP 或其他工具。模式选择器是权限唯一来源。定向 69/69、完整 focused 1429/1437（8 跳过）和 TypeScript 通过；真实模型自主查询仍待人工验收。
+
+**通用记忆工作台内容与空间能力已实施：** [[开发/通用记忆工作台本地作品生成基础工具SDD]] 已接入 Mermaid、H1-H3 文档大纲及 HTML/PDF/可编辑 PPTX 幻灯片；[[开发/通用记忆工作台项目地图SDD]] 已把标准 `.canvas` 作为连接 Markdown、媒体、创作画布和 3D 场景的独立项目地图；[[开发/通用记忆工作台3D白膜场景基础工具SDD]] 已为独立主要人物补齐双臂双腿，群众阵列保持实例化简模。自动测试、类型检查、Web/Desktop 构建与产物审计、Web 桌面/移动视口验收通过；PowerPoint/WPS 与三平台安装包人工矩阵待补。
+
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
 2. **[[开发/创模式Raw账本与对话Wiki移除SDD]]** — 创模式使用独立会话和模型原生能力优先的直连运行时，项目工具只按需进入工具循环；Desktop 文件适配与媒体任务均不启动 OpenCode。App 不再自动写项目 `.raw` 或打包 `jc-chat-wiki`；对话仍由 UI 会话保存，按模型容量装配最新完整对话，并按需只读 `CLAUDE.md` 与 `wiki/hot.md`。Desktop 合并 `public/skills` 内置 Skill 与 `~/.agents/skills` 本机 Skill，名称相同时内置优先，本机独有 Skill 正常可用；内置资源不复制到用户目录。

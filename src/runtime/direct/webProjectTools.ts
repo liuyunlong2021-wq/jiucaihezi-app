@@ -8,6 +8,7 @@ import {
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
   MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   MEMORY_FILE_TOOL_DEFINITIONS,
+  WIKI_SEARCH_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
@@ -15,6 +16,7 @@ import {
   artifactFilename,
   createArtifactHtml,
   createDocumentArtifact,
+  createMarkdownSlidesArtifact,
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
@@ -88,6 +90,10 @@ export function createWebProjectToolExecutor(input: {
 
     if (name === 'wiki') {
       return { content: await executeWikiAction(wikiWorkspace, args as any) }
+    }
+
+    if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {
+      return { content: await executeWikiAction(wikiWorkspace, { ...args, action: 'search' } as any) }
     }
 
     if (name === 'read') {
@@ -217,6 +223,17 @@ export function createWebProjectToolExecutor(input: {
         createArtifactHtml(String(args.title), String(args.content)), { collision: 'keep-both' },
       )
       return { content: `已生成 HTML: ${entry.metadata?.relativePath}` }
+    }
+
+    if (name === 'export_markdown_slides') {
+      const artifact = await createMarkdownSlidesArtifact(String(args.title), String(args.content), String(args.format) as 'html' | 'pdf' | 'pptx')
+      const requestedPath = `.raw/jc-media/文档/${artifact.filename}`
+      const entry = typeof artifact.data === 'string'
+        ? await input.files.write(requireProject(), requestedPath, artifact.data, { collision: 'keep-both' })
+        : await input.files.writeBinary(requireProject(), requestedPath, new Blob([artifact.data as BlobPart], { type: artifact.mimeType }), {
+            category: 'binary', mimeType: artifact.mimeType, collision: 'keep-both',
+          })
+      return { content: `已生成 Markdown 幻灯片: ${entry.metadata?.relativePath}` }
     }
 
     if (name === 'create_3d_scene') {

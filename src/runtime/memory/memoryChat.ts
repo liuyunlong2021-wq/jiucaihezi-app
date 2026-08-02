@@ -24,7 +24,7 @@ import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import { buildMemoryWebProjectToolDefinitions, createWebProjectToolExecutor } from '@/runtime/direct/webProjectTools'
 import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
-import { buildMemoryDesktopToolDefinitions } from '@/runtime/direct/creativeToolContract'
+import { buildMemoryDesktopToolDefinitions, WIKI_SEARCH_TOOL_DEFINITION } from '@/runtime/direct/creativeToolContract'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
 import { buildMediaPlanPolicy } from '@/runtime/workbench/mediaPlan'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
@@ -76,7 +76,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const directUrls = memoryMode ? extractPublicHttpUrls(latestUserText) : []
   const hasDirectUrls = directUrls.length > 0
   const desktopRuntime = isTauriRuntime() && !isTauriMobileRuntime()
-  if (memoryMode && agentStore.modelsFetched && model?.toolCall === false) {
+  if (agentStore.modelsFetched && model?.toolCall === false) {
     throw new Error('当前模型不支持工具调用，请选择支持工具调用的模型')
   }
   const providerId = model?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
@@ -107,7 +107,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           '根据用户任务自主决定是否加载 Skill、查询项目或调用其他可用工具。没有需要时直接回答。',
           '不要声称读取了没有实际查询的内容。',
         ].join('\n')
-        : '快速模式基于当前上下文和模型自身已有的知识回答，不得调用任何工具访问项目资料。',
+        : '快速模式基于当前上下文、模型自身已有的知识和按需只读 Wiki 查询回答；只允许调用 wiki_search，不得调用其他工具或访问 Wiki 之外的项目资料。',
       hasDocumentSources
         ? [
             '以下附件已经解析并保存为项目资料。必须使用 grep/read 实际读取后回答，不要声称读取了未查询的内容。',
@@ -155,22 +155,27 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return response
   }
 
+  const projectTools = isTauriRuntime()
+    ? createDesktopProjectToolExecutor({ projectDir: input.projectId })
+    : createWebProjectToolExecutor({ projectId: input.projectId, files: webProjectFiles })
+
   if (!memoryMode) {
     const result = await runDirectChatCompletion({
       messages,
-      tools: undefined,
+      tools: [WIKI_SEARCH_TOOL_DEFINITION],
       sendChatCompletion,
       signal: input.signal,
       onText: input.onText,
+      onToolEvent(event) {
+        input.onToolEvent?.(event)
+      },
+      executeTool: projectTools,
     })
     const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
     input.onText(text)
     return text
   }
 
-  const projectTools = isTauriRuntime()
-    ? createDesktopProjectToolExecutor({ projectDir: input.projectId })
-    : createWebProjectToolExecutor({ projectId: input.projectId, files: webProjectFiles })
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   const builtInNames = new Set(catalog.filter(skill => skill.source === 'builtin').map(skill => skill.name))
   const allowedUrls = new Set(directUrls)

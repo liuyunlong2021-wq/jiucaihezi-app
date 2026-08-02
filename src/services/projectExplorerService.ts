@@ -2,6 +2,7 @@ import type { ProjectFileService } from '@/services/projectFileService'
 import { parseConversationTranscript, type ConversationTranscript } from '@/runtime/memory/conversationTranscript'
 import { canEditProjectText, projectTextEditorMode, type ProjectResource, type ProjectTextRead } from '@/utils/projectResource'
 import { parseScene3DDocument, type Scene3DDocument } from '@/runtime/memory/scene3d'
+import { parseJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 
 export type ProjectCanvasMediaKind = 'image' | 'video' | 'audio'
 export type ProjectPreviewMediaKind = ProjectCanvasMediaKind | 'model3d'
@@ -11,6 +12,7 @@ export type ProjectResourceOpenResult =
   | { type: 'editor'; resource: ProjectResource; text: ProjectTextRead; editorMode: 'rich' | 'plain' }
   | { type: 'unsafe-text'; resource: ProjectResource }
   | { type: 'canvas'; resource: ProjectResource }
+  | { type: 'project-map'; resource: ProjectResource; text: ProjectTextRead; document: JsonCanvasDocument }
   | { type: 'scene3d'; resource: ProjectResource; text: ProjectTextRead; document: Scene3DDocument }
   | { type: 'media'; resource: ProjectResource; mediaKind: ProjectPreviewMediaKind }
   | { type: 'binary'; resource: ProjectResource }
@@ -31,6 +33,12 @@ export async function openProjectResource(
   resource: ProjectResource,
 ): Promise<ProjectResourceOpenResult> {
   if (resource.kind === 'canvas') return { type: 'canvas', resource }
+  if (resource.kind === 'project-map') {
+    const text = await fileService.readText(resource)
+    if (!canEditProjectText(text)) return { type: 'unsafe-text', resource }
+    try { return { type: 'project-map', resource, text, document: parseJsonCanvas(JSON.parse(text.content)) } }
+    catch { return { type: 'editor', resource, text, editorMode: 'plain' } }
+  }
   if (resource.kind === 'media') return { type: 'media', resource, mediaKind: projectPreviewMediaKind(resource) }
   if (resource.kind !== 'document') return { type: 'binary', resource }
   const text = await fileService.readText(resource)

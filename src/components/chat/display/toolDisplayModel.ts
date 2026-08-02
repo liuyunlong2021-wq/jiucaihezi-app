@@ -38,6 +38,7 @@ export interface ToolDisplayInput {
 const TOOL_LABELS: Record<string, string> = {
   office_create: '创建文档',
   create_document: '创建文档',
+  export_markdown_slides: '生成幻灯片',
   office_convert: '转换文档',
   convert_document: '转换文档',
   office_execute: '执行代码',
