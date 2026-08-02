@@ -5,6 +5,11 @@ import {
 } from '@/services/projectFileService'
 import { executeWikiAction, type WikiWorkspace } from '@/runtime/direct/wikiRuntime'
 import type { ProjectResource } from '@/utils/projectResource'
+import {
+  MEMORY_MEDIA_DIRECTORIES,
+  MEMORY_PROJECT_SKELETON_DIRECTORIES,
+  memoryMediaDirectoryFor,
+} from '@/utils/memoryProjectPaths'
 
 import {
   CONVERSATION_DIRECTORY,
@@ -18,12 +23,6 @@ import {
 } from './conversationTranscript'
 
 const MAX_WRITE_ATTEMPTS = 3
-export const MEMORY_MEDIA_DIRECTORIES = [
-  '.raw/jc-media/文档',
-  '.raw/jc-media/图片',
-  '.raw/jc-media/视频',
-  '.raw/jc-media/音频',
-] as const
 
 export interface MemoryConversation {
   resource: ProjectResource
@@ -195,7 +194,7 @@ async function ensureMemoryDirectories(
 ): Promise<void> {
   const existing = new Set((current || await files.list(owner))
     .filter(resource => resource.isDirectory).map(resource => resource.path))
-  for (const path of [CONVERSATION_DIRECTORY, ...MEMORY_MEDIA_DIRECTORIES]) {
+  for (const path of MEMORY_PROJECT_SKELETON_DIRECTORIES) {
     if (!existing.has(path)) await files.createFolder(owner, path)
   }
 }
@@ -244,14 +243,10 @@ async function migrateLegacyMemoryMaterials(owner: string, files: ProjectFileSer
 }
 
 function legacyMaterialTarget(resource: ProjectResource): string | null {
-  if (resource.path.startsWith('jc-materials/')) return '.raw/jc-media/文档'
-  if (resource.path.startsWith('jc-media/images/')) return '.raw/jc-media/图片'
-  if (resource.path.startsWith('jc-media/videos/')) return '.raw/jc-media/视频'
-  if (resource.path.startsWith('jc-media/audios/')) return '.raw/jc-media/音频'
+  if (resource.path.startsWith('jc-materials/')) return MEMORY_MEDIA_DIRECTORIES.document
+  if (resource.path.startsWith('jc-media/images/')) return MEMORY_MEDIA_DIRECTORIES.image
+  if (resource.path.startsWith('jc-media/videos/')) return MEMORY_MEDIA_DIRECTORIES.video
+  if (resource.path.startsWith('jc-media/audios/')) return MEMORY_MEDIA_DIRECTORIES.audio
   if (!resource.path.startsWith('jc-media/uploads/')) return null
-  const mime = resource.mimeType || ''
-  if (mime.startsWith('image/') || /\.(?:png|jpe?g|gif|webp|svg|ico|bmp)$/i.test(resource.path)) return '.raw/jc-media/图片'
-  if (mime.startsWith('video/') || /\.(?:mp4|mov|avi|webm|mkv)$/i.test(resource.path)) return '.raw/jc-media/视频'
-  if (mime.startsWith('audio/') || /\.(?:mp3|wav|ogg|m4a|flac)$/i.test(resource.path)) return '.raw/jc-media/音频'
-  return '.raw/jc-media/文档'
+  return memoryMediaDirectoryFor(resource.path, resource.mimeType)
 }

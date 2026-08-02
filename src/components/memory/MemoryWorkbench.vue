@@ -746,6 +746,7 @@ async function send() {
     )
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
+      conversationTurns: active.transcript.turns,
       userTurn,
       rawPath: active.resource.path,
       modelId: agentStore.currentModel,
@@ -899,6 +900,7 @@ function formatRunElapsed(seconds: number): string {
 }
 
 async function addReferencedFile(payload: unknown) {
+  executionMode.value = 'memory'
   const reference = payload as { resource?: ProjectResource } | null
   if (reference?.resource) {
     await addProjectFileReference(reference.resource)
@@ -915,6 +917,7 @@ function isOfficeResource(resource: Pick<ProjectResource, 'name' | 'mimeType'>):
 }
 
 async function addProjectFileReference(resource: ProjectResource) {
+  executionMode.value = 'memory'
   if (isOfficeResource(resource)) {
     const referenceKey = `${resource.runtime}:${resource.owner}:${resource.path}`
     if (referencingDocuments.has(referenceKey)
@@ -983,6 +986,7 @@ async function addProjectFileReference(resource: ProjectResource) {
 }
 
 async function addProjectMediaReferences(payload: unknown) {
+  executionMode.value = 'memory'
   const resources = (payload as { resources?: ProjectResource[] } | null)?.resources || []
   for (const resource of resources) {
     if (resource.isDirectory || resource.kind !== 'media'
@@ -1076,12 +1080,11 @@ function closeMention() {
 
 async function selectMention(option: MemoryMentionOption) {
   try {
+    executionMode.value = 'memory'
     if (option.type === 'skill') {
       if (!selectedSkillNames.value.includes(option.name)) selectedSkillNames.value.push(option.name)
-      executionMode.value = 'memory'
     } else if (option.type === 'search') {
       webSearchEnabled.value = true
-      executionMode.value = 'memory'
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {
@@ -1102,6 +1105,8 @@ async function selectMention(option: MemoryMentionOption) {
 function selectExecutionMode(mode: ConversationMode) {
   executionMode.value = mode
   if (mode === 'quick') {
+    attachments.value = []
+    referencedFiles.value = []
     selectedSkillNames.value = []
     webSearchEnabled.value = false
   }
@@ -1160,6 +1165,7 @@ async function selectFiles(event: Event) {
 }
 
 async function addAttachmentFiles(selected: File[]) {
+  executionMode.value = 'memory'
   const owner = projectOwner.value
   if (!owner || !memoryReady.value) throw new Error('请先创建记忆空间')
   const existing = new Set((await files.list(owner)).map(resource => resource.path))

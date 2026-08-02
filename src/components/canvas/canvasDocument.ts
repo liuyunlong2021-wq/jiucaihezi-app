@@ -7,6 +7,7 @@ import type {
   PersistedCanvasDocument,
 } from '@/types/canvas'
 import type { ProjectResourceRevision } from '@/utils/projectResource'
+import { MEMORY_CANVAS_DIRECTORY } from '@/utils/memoryProjectPaths'
 
 export interface CanvasDocumentInput {
   canvasId: string
@@ -17,7 +18,7 @@ export interface CanvasDocumentInput {
   idFactory?: () => string
 }
 
-export const CANVAS_DIRECTORY = 'jc-canvas'
+export const CANVAS_DIRECTORY = MEMORY_CANVAS_DIRECTORY
 
 export function canvasDocumentRelativePath(canvasId: string): string {
   return `${CANVAS_DIRECTORY}/${canvasId}.jccanvas`

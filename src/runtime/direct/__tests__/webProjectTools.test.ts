@@ -7,7 +7,6 @@ import type { WebBinarySource, WebProjectBinaryAdapter } from '@/utils/webProjec
 import {
   buildWebProjectToolDefinitions,
   buildMemoryWebProjectToolDefinitions,
-  READ_ONLY_DOCUMENT_TOOL_DEFINITIONS,
   WEB_PROJECT_TOOL_DEFINITIONS,
   createWebProjectToolExecutor,
 } from '../webProjectTools'
@@ -66,11 +65,6 @@ test('web project tools use OpenCode-compatible names', () => {
     WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
     ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
   )
-})
-
-test('quick document grep requires the approved attachment path', () => {
-  const grep = READ_ONLY_DOCUMENT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'grep')
-  assert.deepEqual(grep?.function.parameters.required, ['pattern', 'path'])
 })
 
 test('web project tool definitions append connected MCP tools without Desktop terminal', () => {

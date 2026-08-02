@@ -26,12 +26,6 @@ type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS
   .filter(tool => tool.function.name !== 'terminal')
 
-export const READ_ONLY_DOCUMENT_TOOL_DEFINITIONS = WEB_PROJECT_TOOL_DEFINITIONS
-  .filter(tool => tool.function.name === 'read' || tool.function.name === 'grep')
-  .map(tool => tool.function.name === 'grep'
-    ? { ...tool, function: { ...tool.function, parameters: { ...tool.function.parameters, required: ['pattern', 'path'] } } }
-    : tool)
-
 const WEB_CORE_TOOL_NAMES = WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
 
 export function buildWebProjectToolDefinitions() {

@@ -91,6 +91,46 @@ test('shared media import creates a media resource under the project media direc
   assert.deepEqual(files.get(resource.path), new Uint8Array([1, 2, 3]))
 })
 
+test('memory media import accepts the protected raw media directory', async () => {
+  const files = new Map<string, Uint8Array>()
+  const adapter: ProjectFileAdapter = {
+    runtime: 'desktop',
+    async list() { return [...files].map(([path, data]) => ({ path, isDirectory: false, size: data.byteLength, mimeType: 'image/png' })) },
+    async readText() { throw new Error('not used') },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+    async importBinary(_owner, path, data, mimeType) {
+      files.set(path, data)
+      return { path, isDirectory: false, size: data.byteLength, mimeType }
+    },
+  }
+  const actions = createProjectFileActions(createProjectFileService(adapter))
+
+  const resource = await actions.importMedia({
+    owner: '/tmp/project',
+    path: '.raw/jc-media/图片/generated.png',
+    data: new Uint8Array([4, 5, 6]),
+    mimeType: 'image/png',
+  })
+
+  assert.equal(resource.path, '.raw/jc-media/图片/generated.png')
+  assert.deepEqual(files.get(resource.path), new Uint8Array([4, 5, 6]))
+
+  await assert.rejects(() => actions.importMedia({
+    owner: '/tmp/project',
+    path: '.raw/jc-media/文档/wrong.png',
+    data: new Uint8Array([7]),
+    mimeType: 'image/png',
+  }), /必须按图片、视频、音频或文档分类/)
+  await assert.rejects(() => actions.importMedia({
+    owner: '/tmp/project',
+    path: '.raw/jc-media/generated/wrong.png',
+    data: new Uint8Array([8]),
+    mimeType: 'image/png',
+  }), /必须按图片、视频、音频或文档分类/)
+})
+
 test('shared media read returns binary data only for a project media resource', async () => {
   const adapter: ProjectFileAdapter = {
     runtime: 'web',

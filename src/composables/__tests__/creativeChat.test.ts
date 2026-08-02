@@ -116,9 +116,9 @@ test('Desktop sends one MP4 video part once with the selected model and current 
   }
 })
 
-test('tool capability and explicit user restrictions do not block supported attachments', () => {
-  assert.match(source, /const requestConstraints = resolveDirectRequestConstraints/)
-  assert.match(source, /const toolsAllowed = input\.modelToolCall !== false && !requestConstraints\.toolsForbidden/)
+test('tool capability alone controls available tools and does not block supported attachments', () => {
+  assert.doesNotMatch(source, /resolveDirectRequestConstraints|toolsForbidden|modelLocked/)
+  assert.match(source, /const toolsAllowed = input\.modelToolCall !== false/)
   assert.match(source, /tools:\s*toolsAllowed \? buildCreativeToolDefinitions\(\) : \[\]/)
   assert.match(source, /attachments:\s*input\.modelAttachments/)
   assert.match(source, /\.\.\.\(request\.tools\?\.length \? \{ tools: request\.tools \} : \{\}\)/)

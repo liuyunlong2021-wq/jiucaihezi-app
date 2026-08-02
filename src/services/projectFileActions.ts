@@ -8,6 +8,7 @@ import {
 } from '@/components/canvas/canvasDocument'
 import type { CanvasDocumentV3 } from '@/types/canvas'
 import type { ProjectResource, ProjectResourceRevision, ProjectTextRead } from '@/utils/projectResource'
+import { isMemoryMediaFilePath, MEMORY_MEDIA_DIRECTORY } from '@/utils/memoryProjectPaths'
 import type { ImportProjectExternalFilesInput, ProjectFileService, ProjectFileWriteResult } from './projectFileService'
 
 export interface CreateProjectCanvasInput {
@@ -94,7 +95,13 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
       return parseCanvasRead(resource, await projectFiles.readText(resource))
     },
     async importMedia(input: ImportProjectMediaInput): Promise<ProjectResource> {
-      if (!input.path.startsWith('jc-media/')) throw new Error('项目媒体必须保存到 jc-media 目录')
+      if (input.path.startsWith(`${MEMORY_MEDIA_DIRECTORY}/`)) {
+        if (!isMemoryMediaFilePath(input.path, input.mimeType)) {
+          throw new Error('记忆工作台媒体必须按图片、视频、音频或文档分类保存')
+        }
+      } else if (!input.path.startsWith('jc-media/')) {
+        throw new Error('项目媒体必须保存到项目媒体目录')
+      }
       return await projectFiles.importBinary(input)
     },
     async importDesktopPaths(input: ImportDesktopProjectPathsInput): Promise<ProjectResource[]> {

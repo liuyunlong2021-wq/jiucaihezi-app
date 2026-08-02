@@ -60,6 +60,7 @@ test('memory project entry unifies local and cloud projects while settings only 
 test('memory space and conversations are created only by their explicit actions', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const project = source('src/runtime/memory/memoryProject.ts')
+  const paths = source('src/utils/memoryProjectPaths.ts')
 
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
   assert.match(workbench, /async function createMemorySpace\(\)[\s\S]*initializeMemoryProject\(owner, files\)/)
@@ -67,11 +68,24 @@ test('memory space and conversations are created only by their explicit actions'
   assert.match(workbench, /'新建记忆空间'/)
   assert.match(workbench, /<span>新建对话<\/span>/)
   assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
-  for (const path of ['.raw/jc-media/文档', '.raw/jc-media/图片', '.raw/jc-media/视频', '.raw/jc-media/音频']) {
-    assert.match(project, new RegExp(path))
+  for (const path of ['.raw', '.raw/jc-media', '文档', '图片', '视频', '音频', '对话记录', '.sync', 'jc-canvas', 'wiki']) {
+    assert.match(paths, new RegExp(path.replace('.', '\\.')))
   }
+  assert.match(project, /MEMORY_PROJECT_SKELETON_DIRECTORIES/)
   assert.match(project, /migrateLegacyMemoryMaterials[\s\S]*kind: 'move'[\s\S]*'keep-both'/)
   assert.match(project, /appendMemoryRound[\s\S]*return mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/)
+})
+
+test('memory file tree and model tools share the hidden and protected project contract', () => {
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(tree, /isMemoryProjectHiddenPath\(path\)/)
+  assert.match(tree, /isMemoryProjectMutationBlocked\(path\)/)
+  assert.match(tree, /props\.memoryMode \? memoryMediaDirectoryFor\(file\.name, file\.type\) : targetPath/)
+  assert.match(tree, /v-if="!memoryMode" class="pft-ctx-item" @click="ctxUploadDirectory"/)
+  assert.match(runtime, /assertMemoryProjectMutationProtected\(call\)/)
+  assert.match(runtime, /isMemoryProjectMutationBlocked\(String\(value\), operation\)/)
 })
 
 test('mobile conversation deletion confirms permanent removal', () => {
@@ -128,7 +142,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(workbench, /function resizeComposer\(\)/)
   assert.match(workbench, /<textarea[\s\S]*v-model="markdownDraft"/)
   assert.match(workbench, /files: referencedFiles\.value/)
-  assert.match(runtime, /files: input\.files/)
+  assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
 })
 
 test('memory workbench saves Office attachments as durable project materials', () => {
@@ -168,12 +182,16 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(workbench, /executionMode = ref<ConversationMode>\('memory'\)/)
   assert.match(workbench, /快速[\s\S]*记忆/)
   assert.match(workbench, /appendMemoryRound\(active\.resource, userTurn, reply, files, title\)/)
-  assert.match(runtime, /messages: \[input\.userTurn\]/)
+  assert.match(workbench, /conversationTurns: active\.transcript\.turns/)
+  assert.match(runtime, /messages: \[\.\.\.input\.conversationTurns, input\.userTurn\]/)
   assert.match(runtime, /rawPath: string/)
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
-  assert.match(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS/)
-  assert.match(runtime, /if \(!memoryMode && !hasDocumentSources && !hasDirectUrls\)[\s\S]*tools: undefined/)
-  assert.match(runtime, /if \(!memoryMode && !\['read', 'grep', 'read_url'\]\.includes\(call\.function\.name\)\)/)
+  assert.match(runtime, /if \(!memoryMode\)[\s\S]*tools: undefined/)
+  assert.doesNotMatch(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS|快速模式只能读取/)
+  assert.match(runtime, /attachments: memoryMode \? input\.attachments : undefined/)
+  assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
+  assert.match(workbench, /mode === 'quick'[\s\S]*attachments\.value = \[\][\s\S]*referencedFiles\.value = \[\][\s\S]*selectedSkillNames\.value = \[\][\s\S]*webSearchEnabled\.value = false/)
+  assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{\s*executionMode\.value = 'memory'/)
   assert.match(runtime, /call\.function\.name === 'web_search'[\s\S]*executeJinaWebSearchTool\(call\.function\.arguments\)/)
   assert.match(runtime, /\.\.\.\(input\.webSearchEnabled \? \[WEB_SEARCH_TOOL_DEFINITION\] : \[\]\)/)
 })
@@ -242,7 +260,7 @@ test('memory web search is an explicit removable one-turn @ option', () => {
 
   assert.match(workbench, /const webSearchEnabled = ref\(false\)/)
   assert.match(workbench, /type: 'search'[\s\S]*display: '联网搜索'[\s\S]*仅本轮搜索公开网络/)
-  assert.match(workbench, /option\.type === 'search'[\s\S]*webSearchEnabled\.value = true[\s\S]*executionMode\.value = 'memory'/)
+  assert.match(workbench, /executionMode\.value = 'memory'[\s\S]*option\.type === 'search'[\s\S]*webSearchEnabled\.value = true/)
   assert.match(workbench, /v-if="webSearchEnabled"[\s\S]*<JcIcon name="search"[\s\S]*联网搜索[\s\S]*webSearchEnabled = false/)
   assert.match(workbench, /webSearchEnabled: webSearchEnabled\.value/)
   assert.match(workbench, /selectedSkillNames\.value = \[\][\s\S]*webSearchEnabled\.value = false/)
@@ -548,10 +566,13 @@ test('memory file actions stay inside the memory resource route on Desktop', () 
 test('memory navigation separates Raw conversations from project files and transient previews', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const paths = source('src/utils/memoryProjectPaths.ts')
 
-  assert.match(tree, /'\.raw\/\.sync'/)
-  assert.match(tree, /'\.raw\/对话记录'/)
-  assert.match(tree, /isProtectedMemoryPath[\s\S]*path === '\.raw'/)
+  assert.match(paths, /MEMORY_SYNC_DIRECTORY = '\.raw\/\.sync'/)
+  assert.match(paths, /MEMORY_CONVERSATION_DIRECTORY = '\.raw\/对话记录'/)
+  assert.match(paths, /MEMORY_CANVAS_DIRECTORY = 'jc-canvas'/)
+  assert.match(tree, /isMemoryProjectHiddenPath\(path\)/)
+  assert.match(tree, /isProtectedMemoryPath[\s\S]*isMemoryProjectMutationBlocked\(path\)/)
   assert.match(workbench, /const conversations = ref<MemoryConversation\[\]>\(\[\]\)/)
   assert.match(workbench, /class="memory-conversation-trigger"/)
   assert.match(workbench, /filteredConversations/)

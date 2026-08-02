@@ -1,4 +1,6 @@
-export const CONVERSATION_DIRECTORY = '.raw/对话记录'
+import { MEMORY_CONVERSATION_DIRECTORY } from '@/utils/memoryProjectPaths'
+
+export const CONVERSATION_DIRECTORY = MEMORY_CONVERSATION_DIRECTORY
 
 export interface ConversationAttachment {
   id: string

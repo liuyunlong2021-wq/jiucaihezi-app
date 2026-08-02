@@ -25,7 +25,6 @@ import {
 import type { ChatMessage } from '@/composables/useChat'
 import type { DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
-import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 
@@ -77,9 +76,7 @@ export function useCreativeChat() {
         reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
         projectMemory,
       })
-      const userGoal = String(input.messages.at(-1)?.content || '')
-      const requestConstraints = resolveDirectRequestConstraints(userGoal)
-      const toolsAllowed = input.modelToolCall !== false && !requestConstraints.toolsForbidden
+      const toolsAllowed = input.modelToolCall !== false
       const messages = buildDirectMessages({
         messages: context.messages,
         historyLimit: null,

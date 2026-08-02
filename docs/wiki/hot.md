@@ -2,7 +2,9 @@
 
 > 当前开发阶段最需要被 AI 读的二十份文档。
 
-**当前焦点：[[开发/通用记忆工作台模型主导工具与审批SDD]] · [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] · [[开发/通用记忆工作台本地作品生成基础工具SDD]] · [[开发/通用记忆工作台3D白膜场景基础工具SDD]] · [[运维/模型矩阵]]** — `v2.1.5` Web Production 与新版 RH adapter 已部署；adapter 健康检查为 44 个模型，海外 Suno 真实提交、RunningHub 完成和公网结果查询均已验证。Web “提交中”根因是轮询被任务历史持久化等待阻断，现改为先轮询、后台持久化，focused Node 1424/1432（8 跳过）和类型检查通过。三平台 Actions `30690007566` 已触发但未等待结果。Android 继续暂停。
+**当前唯一焦点：通用记忆工作台**。优先读取 [[开发/通用记忆对话独立App SDD]]、[[开发/通用记忆工作台模型主导工具与审批SDD]]、[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]、[[开发/通用记忆工作台本地作品生成基础工具SDD]]、[[开发/通用记忆工作台3D白膜场景基础工具SDD]]。主 Studio/旧主 Web、媒体、电商、漫剧和制作工作台仅作兼容或后续参考，不是当前阶段并行主线。当前发布与 RH 运行证据仍保留在下方，避免把历史状态误读为产品优先级。
+
+**项目骨架最高优先合同：[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]。** 四类归档、隐藏目录和系统目录保护准则已完成代码对齐；任何冲突的旧产品路径不得用于当前实现。真实设备升级和打开既有项目仍需人工验收。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。

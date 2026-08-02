@@ -36,7 +36,6 @@ import { getModelContextWindow } from '@/data/modelContextWindows'
 import { resolveWebSkillSystemPrompt } from '@/utils/skillContentResolver'
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { buildDirectMessages } from '@/utils/directMessageBuilder'
-import { resolveDirectRequestConstraints } from '@/runtime/direct/directRequestConstraints'
 import { buildDirectAttachmentHttpError } from '@/runtime/direct/directAttachmentErrors'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import { MEDIA_PLAN_POLICY } from '@/runtime/workbench/mediaPlan'
@@ -168,7 +167,7 @@ export async function sendWebCloudMessage(
   webAssistantMsg: ChatMessage,  // pre-created by caller; we mutate its content/finishReason during stream
   setPhase: (phase: AgentPhase, detail?: string) => void,
   getActiveRunId: () => number,
-  currentMessages: ChatMessage[]  // passed to buildDirectMessages & getLatestUserText
+  currentMessages: ChatMessage[]
 ) {
   const agentStore = useAgentStore()
   const isDaoMode = options.chatMode === 'dao'
@@ -230,8 +229,7 @@ export async function sendWebCloudMessage(
         value,
       })
     }
-    const requestConstraints = resolveDirectRequestConstraints(getLatestUserText(currentMessages))
-    const toolsAllowed = !isDaoMode && currentModel?.toolCall !== false && !requestConstraints.toolsForbidden
+    const toolsAllowed = !isDaoMode && currentModel?.toolCall !== false
     const apiMessages = buildDirectMessages({
       messages: context.messages,
       historyLimit: null,
@@ -394,13 +392,4 @@ export async function sendWebCloudMessage(
     }
     throw error
   }
-}
-
-function getLatestUserText(messages: ChatMessage[]): string {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index]
-    if (message.role !== 'user') continue
-    return chatContentToText(message.content).trim()
-  }
-  return ''
 }

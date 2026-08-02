@@ -57,6 +57,13 @@ import {
 } from '@/services/newApiClient'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
 import type { SyncProject } from '@/services/textSyncClient'
+import {
+  isMemoryProjectHiddenPath,
+  isMemoryProjectMutationBlocked,
+  MEMORY_MEDIA_DIRECTORY,
+  MEMORY_MEDIA_DIRECTORIES,
+  memoryMediaDirectoryFor,
+} from '@/utils/memoryProjectPaths'
 
 interface FlatEntry {
   id?: string
@@ -578,7 +585,18 @@ async function importDesktopDroppedPaths(paths: string[], targetPath = '') {
     return
   }
   try {
-    await projectFileActions.importDesktopPaths({ owner, paths, targetPath })
+    if (!props.memoryMode) {
+      await projectFileActions.importDesktopPaths({ owner, paths, targetPath })
+      return
+    }
+    const groups = new Map<string, string[]>()
+    for (const path of paths) {
+      const target = memoryMediaDirectoryFor(path)
+      groups.set(target, [...(groups.get(target) || []), path])
+    }
+    for (const [target, sources] of groups) {
+      await projectFileActions.importDesktopPaths({ owner, paths: sources, targetPath: target })
+    }
   } catch (error) {
     errorMsg.value = `导入失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -596,16 +614,10 @@ const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
 function isVisibleMemoryResource(path: string): boolean {
-  return !(props.memoryMode && [
-    '.raw/.sync',
-    '.raw/对话记录',
-  ].some(hidden => path === hidden || path.startsWith(`${hidden}/`)))
+  return !props.memoryMode || !isMemoryProjectHiddenPath(path)
 }
 function isProtectedMemoryPath(path: string): boolean {
-  return path === '.raw' || [
-    '.raw/.sync',
-    '.raw/对话记录',
-  ].some(protectedPath => path === protectedPath || path.startsWith(`${protectedPath}/`))
+  return isMemoryProjectMutationBlocked(path)
 }
 function isCanvasFile(node: TreeNode | null | undefined): node is TreeNode {
   return Boolean(node && !node.isDir && node.name.toLowerCase().endsWith(`.${CANVAS_EXT}`))
@@ -929,7 +941,7 @@ async function ctxCopyRelativePath() {
 function ctxCopyResources() {
   const roots = selectedResources()
   if (props.memoryMode && roots.some(resource => isProtectedMemoryPath(resource.path))) {
-    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     closeCtxMenu()
     return
   }
@@ -945,7 +957,7 @@ function ctxCopyResources() {
 function ctxCutResources() {
   const roots = selectedResources()
   if (props.memoryMode && roots.some(resource => isProtectedMemoryPath(resource.path))) {
-    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     closeCtxMenu()
     return
   }
@@ -1062,6 +1074,11 @@ async function ctxPasteResources(target?: TreeNode | null) {
     clipboard.runtime !== (isDesktop ? 'desktop' : 'web')
   )
     return
+  if (props.memoryMode && target?.path === MEMORY_MEDIA_DIRECTORY) {
+    errorMsg.value = '请选择图片、视频、音频或文档分类'
+    closeCtxMenu()
+    return
+  }
   try {
     const targetResource = target?.isDir
       ? resourceForNode(target)
@@ -1552,6 +1569,10 @@ async function ctxNewFile() {
   const parentNode = ctxMenu.value.node
   const dirRel = parentNode?.isDir ? parentNode.path : ''
   closeCtxMenu()
+  if (props.memoryMode && dirRel === MEMORY_MEDIA_DIRECTORY) {
+    errorMsg.value = '请选择图片、视频、音频或文档分类'
+    return
+  }
   const name = await safePrompt('新建文件名（含扩展名）', 'untitled.md', { forceDom: props.memoryMode })
   if (!name?.trim()) return
   const relPath = dirRel
@@ -1563,6 +1584,10 @@ async function ctxNewFolder() {
   const parentNode = ctxMenu.value.node
   const dirRel = parentNode?.isDir ? parentNode.path : ''
   closeCtxMenu()
+  if (props.memoryMode && dirRel === MEMORY_MEDIA_DIRECTORY) {
+    errorMsg.value = '媒体根目录只保留四个固定分类'
+    return
+  }
   const name = await safePrompt('新建文件夹名', 'new-folder', { forceDom: props.memoryMode })
   if (!name?.trim()) return
   const relPath = (dirRel ? dirRel + '/' : '') + name.trim().replace(/^\/+/, '')
@@ -1596,7 +1621,7 @@ async function ctxRename() {
   if (!n) return
   closeCtxMenu()
   if (props.memoryMode && isProtectedMemoryPath(n.path)) {
-    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     return
   }
   const newName = await safePrompt('重命名', n.name, { forceDom: props.memoryMode })
@@ -1613,7 +1638,7 @@ async function ctxDelete() {
   closeCtxMenu()
   const resources = selectedResources()
   if (props.memoryMode && resources.some(resource => isProtectedMemoryPath(resource.path))) {
-    errorMsg.value = '.raw 与对话记录只能由 App 管理'
+    errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     return
   }
   if (
@@ -1714,7 +1739,10 @@ async function uploadWebFiles(files: File[], targetPath = '') {
     await writeWebProjectEntries(
       webProjectFiles,
       projectId,
-      files.map(file => transferEntryForFile(file, uploadPathForFile(file, targetPath))),
+      files.map(file => transferEntryForFile(
+        file,
+        uploadPathForFile(file, props.memoryMode ? memoryMediaDirectoryFor(file.name, file.type) : targetPath),
+      )),
       { resolveCollision: ({ path }) => requestCollision(path) },
     )
   } catch (error) {
@@ -1726,14 +1754,40 @@ async function importDesktopFiles(targetPath = '') {
   if (!owner) return
   try {
     const { invoke } = await import('@tauri-apps/api/core')
+    const importTarget = props.memoryMode ? MEMORY_MEDIA_DIRECTORIES.document : targetPath
     const imported = await invoke<string[] | null>('dev_import_project_files', {
-      input: { root: owner, targetRelativePath: targetPath },
+      input: { root: owner, targetRelativePath: importTarget },
     })
-    if (imported && owner === projectDir.value)
-      await refreshAffectedDirectory(targetPath ? `${targetPath}/` : '')
+    if (imported && owner === projectDir.value) {
+      if (props.memoryMode) await classifyImportedMemoryFiles(owner, imported)
+      else await refreshAffectedDirectory(targetPath ? `${targetPath}/` : '')
+    }
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
+}
+async function classifyImportedMemoryFiles(owner: string, importedPaths: string[]) {
+  const resources = await projectFiles.list(owner)
+  const byPath = new Map(resources.map(resource => [resource.path, resource]))
+  const directories = new Map(resources.filter(resource => resource.isDirectory).map(resource => [resource.path, resource]))
+  const groups = new Map<string, ProjectResource[]>()
+  for (const path of importedPaths) {
+    const resource = byPath.get(path)
+    if (!resource || resource.isDirectory) continue
+    const target = memoryMediaDirectoryFor(resource.path, resource.mimeType)
+    if (resource.path.startsWith(`${target}/`)) continue
+    groups.set(target, [...(groups.get(target) || []), resource])
+  }
+  for (const [target, resources] of groups) {
+    const directory = directories.get(target)
+    if (!directory) throw new Error(`素材目录不存在: ${target}`)
+    const result = await projectFiles.executeBatch(
+      await projectFiles.planBatch({ kind: 'move', resources, targetDirectory: directory }),
+      'keep-both',
+    )
+    if (result.failures.length) throw new Error(result.failures[0]!.message)
+  }
+  await refreshLoadedDirectories()
 }
 async function importDesktopDirectory(targetPath = '') {
   const owner = projectDir.value
@@ -2594,7 +2648,7 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxUploadFiles">
             <JcIcon name="upload" /><span>上传文件</span>
           </button>
-          <button class="pft-ctx-item" @click="ctxUploadDirectory">
+          <button v-if="!memoryMode" class="pft-ctx-item" @click="ctxUploadDirectory">
             <JcIcon name="folder-open" /><span>上传文件夹</span>
           </button>
           <button class="pft-ctx-item" @click="ctxImportProject">
@@ -2629,7 +2683,7 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxUploadFiles">
             <JcIcon name="upload" /><span>上传文件</span>
           </button>
-          <button class="pft-ctx-item" @click="ctxUploadDirectory">
+          <button v-if="!memoryMode" class="pft-ctx-item" @click="ctxUploadDirectory">
             <JcIcon name="folder-open" /><span>上传文件夹</span>
           </button>
           <div class="pft-ctx-divider"></div>
