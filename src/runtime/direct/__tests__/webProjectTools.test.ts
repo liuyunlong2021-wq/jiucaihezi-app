@@ -67,34 +67,15 @@ test('web project tools use OpenCode-compatible names', () => {
   )
 })
 
-test('web project tool definitions append connected MCP tools without Desktop terminal', () => {
-  const original = (globalThis as any).__jiucaihezi_mcpStore__
-  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
-    useMcpStore: () => ({
-      allMcpTools: [{
-        name: 'mcp__docs__lookup',
-        description: 'Lookup docs',
-        inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
-        serverId: 'docs',
-        originalName: 'lookup',
-      }],
-      isServerEnabled: () => true,
-      isServerConnected: () => true,
-    }),
-  }
-
-  try {
-    assert.deepEqual(
-      buildWebProjectToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mcp__docs__lookup'],
-    )
-    assert.deepEqual(
-      buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'mcp__docs__lookup'],
-    )
-  } finally {
-    ;(globalThis as any).__jiucaihezi_mcpStore__ = original
-  }
+test('web project tool definitions exclude Desktop-only 3D and custom MCP tools', () => {
+  assert.deepEqual(
+    buildWebProjectToolDefinitions().map(tool => tool.function.name),
+    ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
+  )
+  assert.deepEqual(
+    buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
+    ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
+  )
 })
 
 test('web memory artifact tools generate real project files and keep same-name outputs', async () => {
@@ -112,12 +93,6 @@ test('web memory artifact tools generate real project files and keep same-name o
   assert.match((await execute(call('create_html', { title: '周报', content: '# 周报' }))).content, /\.raw\/jc-media\/文档\/周报\.html/)
   assert.match((await execute(call('export_markdown_slides', { title: '汇报', content: '# 首页\n\n---\n\n# 结尾', format: 'html' }))).content, /汇报\.html/)
   assert.match((await execute(call('export_markdown_slides', { title: '汇报', content: '# 首页\n\n- 结论\n\n| 指标 | 结果 |\n| --- | --- |\n| 测试 | 通过 |\n\n---\n\n# 结尾', format: 'pptx' }))).content, /汇报\.pptx/)
-  const sceneResult = await execute(call('create_3d_scene', {
-    title: '宫殿排位', objects: [{ id: 'emperor', type: 'person', position: [0, 0, 0] }],
-    formations: [{ id: 'ministers', type: 'grid', count: 20, position: [0, 0, 3] }],
-  }))
-  assert.match(sceneResult.content, /\.raw\/jc-media\/文档\/宫殿排位\.jcscene/)
-  assert.match(sceneResult.content, /jc:scene/)
   assert.match((await execute(call('create_html', {
     title: '完整网页',
     content: '<!doctype html><html><head><style>button{color:red}</style></head><body><button>开始</button></body></html>',
@@ -183,27 +158,6 @@ test('web project tool executor reads writes searches and edits the bound projec
   await assert.rejects(() => execute(call('read', { path: '资料/会议/纪要.md' })), /文件不存在/)
 
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
-})
-
-test('web project tools return MCP bridge connection errors to the model', async () => {
-  const original = (globalThis as any).__jiucaihezi_mcpStore__
-  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
-    useMcpStore: () => ({
-      allMcpTools: [],
-      isServerEnabled: () => true,
-      isServerConnected: () => false,
-    }),
-  }
-
-  try {
-    const files = createWebProjectFiles(memoryAdapter())
-    const project = await files.createProject('MCP 工具')
-    const execute = createWebProjectToolExecutor({ projectId: project.id, files })
-    const result = await execute(call('mcp__docs__lookup', { query: 'MCP' }))
-    assert.match(result.content, /MCP_NOT_CONNECTED/)
-  } finally {
-    ;(globalThis as any).__jiucaihezi_mcpStore__ = original
-  }
 })
 
 test('web project tools send OPFS images as data URLs and summarize OPFS video and audio', async () => {

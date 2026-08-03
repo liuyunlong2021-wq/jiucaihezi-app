@@ -407,3 +407,28 @@
 - 快速模式与记忆模式继续共享当前对话上下文，工具池固定为唯一只读 `wiki_search`；用户文字不能增减工具。
 - `wiki_search` 复用现有 Wiki `search` 运行时，只接收 `query / scope / limit`，无写入、修正、建图或任意文件读取能力；Web 和 Desktop 执行路径已对齐。
 - 自动验证：定向 69/69、完整 focused 1429/1437（8 跳过）、`vue-tsc -b` 和 `git diff --check` 通过；未执行正式构建，真实模型自主调用待人工验收。
+
+## [2026-08-03] 设计确认 | Web / Mobile 核心能力收敛
+
+- [[开发/通用记忆对话独立App SDD]] 新增第 18 节，确认 Desktop 完全不动，Web / Mobile 保留项目、对话、Wiki、项目内受限读写、附件/文档转换、项目地图和云媒体。
+- Web / Mobile 计划移除 Three.js `.jcscene`、本机 FFmpeg、Terminal、本地模型和本地 `stdio MCP`；自定义 MCP / Skill 管理 UI 可隐藏，但内置 Wiki Skill 必须保留。
+- 创作面板不删除、不重构；Web / Mobile 关闭时应卸载 LeaferJS 资源。文字同步合同不变，媒体二进制绝不同步。
+- 当前仅完成设计记录，尚未改代码或执行功能验证。
+
+## [2026-08-03] 开发收尾 | 历史文档定位续聊
+
+- 记忆模式现在只从当前已装入上下文的历史用户轮次提取唯一文档名称和 `readablePath`；第二轮说“这个文档”时，模型可按原路径重新 `grep/read`。
+- 文档正文和上一轮工具结果不重复注入；快速模式、当前轮附件、Raw 格式与项目工具不变。
+- 自动验证：定向 55/55、完整 focused 1436/1444（8 个既有跳过）、TypeScript 和 `git diff --check` 通过。真实模型第二轮口语指代待人工验收。
+
+## [2026-08-03] 设计修正 | 三端创作面板关闭释放资源
+
+- 修正 [[开发/通用记忆对话独立App SDD]] 第 18 节：Desktop 不再长期挂载已关闭的创作面板；三端统一为关闭前保存 `.jccanvas`，保存后卸载 LeaferJS、Canvas、运行时媒体 URL、事件和画布写入锁。
+- 已提交媒体任务继续由 `mediaTaskStore` 运行，关闭面板不得取消任务；重新打开后从任务状态和已保存画布恢复。
+- Desktop 的 3D、FFmpeg、Terminal、本地模型和本地 MCP 能力不裁剪。当前仅更新设计，尚未执行代码或功能验证。
+
+## [2026-08-03] 开发收尾 | Web / Mobile 能力收敛与创作面板卸载
+
+- Web / Mobile 记忆工具白名单移除 `create_3d_scene` 和自定义 MCP；`.jcscene` 文件树入口与旧对话场景卡不再显示，自定义 Skill / MCP 管理入口仅保留 Desktop。Desktop 的 3D、FFmpeg、Terminal、本地模型和 MCP 工具装配未裁剪。
+- 三端创作面板关闭与切换项目统一先保存 `.jccanvas`，保存成功后卸载 `CreationPanel`；既有卸载清理继续释放 LeaferJS、Canvas、事件、运行时媒体 URL 和画布写入锁，`mediaTaskStore` 中已提交任务不随面板卸载。
+- 自动验证：focused 1435/1443（8 个既有跳过）、TypeScript、Web quick build、Web 产物审计与补丁检查通过，验证摘要指纹 `sha256:e146f804f114`。Desktop、Web 浏览器与真实 iPhone 人工矩阵待验收。

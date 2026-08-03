@@ -1741,10 +1741,10 @@ function scheduleCanvasSave() {
   }, 500)
 }
 
-async function flushCanvasSave() {
+async function flushCanvasSave(allowPreviousOwner = false) {
   if (!app || !canvasReady) return
   const owner = canvasOwner.value || undefined
-  if (!owner || owner !== selectedCanvasOwner()) return
+  if (!owner || (!allowPreviousOwner && owner !== selectedCanvasOwner())) return
   const path = canvasStore.canvasPath
   if (!path) return
   if (saveTimer) {
@@ -1753,6 +1753,8 @@ async function flushCanvasSave() {
   }
   await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, owner)
 }
+
+defineExpose({ flushCanvasSave: () => flushCanvasSave(true) })
 
 async function restoreCanvasScene(
   document: CanvasDocumentV3,

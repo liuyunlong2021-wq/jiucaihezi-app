@@ -70,6 +70,7 @@ const files = createRuntimeProjectFileService()
 const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
 const mobileRuntime = isTauriMobileRuntime()
+const desktopOnlyRuntime = desktopRuntime && !mobileRuntime
 const CreationPanel = defineAsyncComponent(() => import('@/components/creation/CreationPanel.vue'))
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
@@ -132,6 +133,8 @@ const mediaPlans = ref<Record<string, MediaPlan[]>>({})
 const creationMounted = ref(false)
 const creationOpen = ref(false)
 const creationFocused = ref(false)
+const creationPanelRef = ref<{ flushCanvasSave: () => Promise<void> } | null>(null)
+const creationClosing = ref(false)
 const creationWidth = ref(Number(localStorage.getItem('jcMemoryCreationWidth')) || 620)
 const creationResizing = ref(false)
 const skillInstallPlans = ref<Record<string, SkillInstallPlan>>({})
@@ -180,6 +183,24 @@ function openCreationHost() {
   prepareCreationLayout()
   creationMounted.value = true
   creationOpen.value = true
+}
+
+async function closeCreationHost(): Promise<boolean> {
+  if (!creationMounted.value) return true
+  if (creationClosing.value) return false
+  creationClosing.value = true
+  try {
+    await creationPanelRef.value?.flushCanvasSave()
+    creationOpen.value = false
+    creationFocused.value = false
+    creationMounted.value = false
+    return true
+  } catch (cause) {
+    error.value = `创作画布保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+    return false
+  } finally {
+    creationClosing.value = false
+  }
 }
 
 function resizeCreationPanel(clientX: number) {
@@ -397,9 +418,8 @@ function selectModel(modelId: string) {
 
 async function openProject(owner: string) {
   if (sending.value) stop()
+  if (!await closeCreationHost()) return
   const generation = ++projectGeneration
-  creationOpen.value = false
-  creationFocused.value = false
   opened.value = null
   previewResource.value = null
   conversations.value = []
@@ -479,6 +499,7 @@ watch(streamingText, async text => {
 })
 
 async function openResource(resource: ProjectResourceOpenResult) {
+  if (resource.type === 'scene3d' && !desktopOnlyRuntime) return
   if (resource.type === 'canvas') {
     emitEvent('canvas:open', { path: resource.resource.path })
     openCreationHost()
@@ -1412,7 +1433,7 @@ function displayTurnContent(turn: ConversationTurn): string {
 }
 
 function sceneCards(turn: ConversationTurn) {
-  return turn.role === 'assistant' ? parseScene3DResultMarkers(turn.content) : []
+  return desktopOnlyRuntime && turn.role === 'assistant' ? parseScene3DResultMarkers(turn.content) : []
 }
 
 async function openSceneCard(path: string) {
@@ -1633,7 +1654,7 @@ function readDataUrl(file: File): Promise<string> {
             v-if="conversation"
             class="icon-button"
             title="创作面板"
-            @click="creationOpen ? creationOpen = false : openCreationForCurrentConversation()"
+            @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
           ><JcIcon name="palette" /></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
@@ -1921,14 +1942,14 @@ function readDataUrl(file: File): Promise<string> {
       </section>
     </main>
 
-    <aside v-if="creationMounted" v-show="creationOpen" class="memory-creation">
+    <aside v-if="creationMounted" class="memory-creation">
       <div
         v-if="!creationFocused"
         class="memory-creation-resizer"
         title="拖动调整创作面板宽度"
         @pointerdown.prevent="startCreationResize"
       />
-      <CreationPanel preview-surface="host" @preview-resource="previewProjectResource">
+      <CreationPanel ref="creationPanelRef" preview-surface="host" @preview-resource="previewProjectResource">
         <template #toolbar-actions>
           <button
             class="memory-creation-action"
@@ -1938,7 +1959,7 @@ function readDataUrl(file: File): Promise<string> {
           <button
             class="memory-creation-action"
             title="收起创作面板"
-            @click="creationOpen = false; creationFocused = false"
+            @click="closeCreationHost"
           ><JcIcon name="close" /></button>
         </template>
       </CreationPanel>

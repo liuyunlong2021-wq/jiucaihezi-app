@@ -1,9 +1,7 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
-import WebSkillPanel from '@/components/skills/WebSkillPanel.vue'
-import McpManagerPanel from '@/components/mcp/McpManagerPanel.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
@@ -33,6 +31,8 @@ const saved = ref(false)
 const advancedOpen = ref(false)
 const mobileRuntime = isTauriMobileRuntime()
 const desktopRuntime = isTauriRuntime() && !mobileRuntime
+const WebSkillPanel = defineAsyncComponent(() => import('@/components/skills/WebSkillPanel.vue'))
+const McpManagerPanel = defineAsyncComponent(() => import('@/components/mcp/McpManagerPanel.vue'))
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
@@ -148,10 +148,10 @@ async function runSync() {
       <button :class="{ active: tab === 'sync' }" @click="showSync">
         <JcIcon name="sync" />同步
       </button>
-      <button :class="{ active: tab === 'skills' }" @click="tab = 'skills'">
+      <button v-if="desktopRuntime" :class="{ active: tab === 'skills' }" @click="tab = 'skills'">
         <JcIcon name="extension" />Skill
       </button>
-      <button :class="{ active: tab === 'mcp' }" @click="tab = 'mcp'">
+      <button v-if="desktopRuntime" :class="{ active: tab === 'mcp' }" @click="tab = 'mcp'">
         <JcIcon name="hub" />MCP
       </button>
       <button :class="{ active: tab === 'theme' }" @click="tab = 'theme'">
@@ -217,8 +217,8 @@ async function runSync() {
         </template>
         <p v-if="syncError" class="memory-sync-error">{{ syncError }}</p>
       </div>
-      <WebSkillPanel v-else-if="tab === 'skills'" />
-      <McpManagerPanel v-else-if="tab === 'mcp'" />
+      <WebSkillPanel v-else-if="desktopRuntime && tab === 'skills'" />
+      <McpManagerPanel v-else-if="desktopRuntime && tab === 'mcp'" />
       <div v-else class="memory-appearance">
         <div class="memory-theme-options" aria-label="主题">
           <button

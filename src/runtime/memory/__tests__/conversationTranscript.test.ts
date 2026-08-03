@@ -3,12 +3,33 @@ import { test } from 'node:test'
 
 import {
   appendConversationTurn,
+  conversationDocumentSources,
   createConversationTranscript,
   mergeConversationTranscriptContents,
   parseConversationTranscript,
   remapConversationAttachmentPaths,
   renameConversationTranscript,
 } from '../conversationTranscript'
+
+test('conversation document sources keep only unique readable document locators', () => {
+  assert.deepEqual(conversationDocumentSources([
+    {
+      id: 'turn-1', role: 'user', content: '看文档', createdAt: '2026-08-03T10:00:00.000Z',
+      attachments: [
+        { id: 'doc-1', name: '剧情.docx', mime: 'application/octet-stream', size: 10, kind: 'file', readablePath: '.raw/jc-media/文档/剧情.docx.md' },
+        { id: 'image-1', name: '人物.png', mime: 'image/png', size: 10, kind: 'image', projectPath: '.raw/jc-media/图片/人物.png' },
+      ],
+    },
+    {
+      id: 'turn-2', role: 'assistant', content: '读完了', createdAt: '2026-08-03T10:00:01.000Z',
+      attachments: [{ id: 'doc-2', name: '忽略.md', mime: 'text/markdown', size: 10, kind: 'file', readablePath: '.raw/jc-media/文档/忽略.md' }],
+    },
+    {
+      id: 'turn-3', role: 'user', content: '继续', createdAt: '2026-08-03T10:00:02.000Z',
+      attachments: [{ id: 'doc-3', name: '剧情.docx', mime: 'application/octet-stream', size: 10, kind: 'file', readablePath: '.raw/jc-media/文档/剧情.docx.md' }],
+    },
+  ]), [{ name: '剧情.docx', path: '.raw/jc-media/文档/剧情.docx.md' }])
+})
 
 test('conversation transcript requires both the Raw path and metadata marker', () => {
   const content = createConversationTranscript('chat_fixed', '聊聊历史', '2026-07-24T10:00:00.000Z')

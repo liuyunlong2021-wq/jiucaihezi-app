@@ -31,6 +31,18 @@ export interface ConversationTranscript {
   turns: ConversationTurn[]
 }
 
+export function conversationDocumentSources(turns: ConversationTurn[]): Array<{ name: string; path: string }> {
+  const sources = new Map<string, { name: string; path: string }>()
+  for (const turn of turns) {
+    if (turn.role !== 'user') continue
+    for (const attachment of turn.attachments || []) {
+      if (attachment.kind !== 'file' || !attachment.readablePath) continue
+      sources.set(attachment.readablePath, { name: attachment.name, path: attachment.readablePath })
+    }
+  }
+  return [...sources.values()]
+}
+
 const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"\s*-->/
 const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(quick|memory)")?(?:\s+attachments="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
 

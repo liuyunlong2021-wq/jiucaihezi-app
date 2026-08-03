@@ -721,7 +721,7 @@ test('creation panel does not requeue a gated canvas snapshot while clearing an 
   assert.doesNotMatch(clearOwner, /flushCanvasSave\(/)
   assert.match(
     source,
-    /async function flushCanvasSave\(\) \{\s+if \(!app \|\| !canvasReady\) return\s+const owner = canvasOwner\.value \|\| undefined\s+if \(!owner \|\| owner !== selectedCanvasOwner\(\)\) return/,
+    /async function flushCanvasSave\(allowPreviousOwner = false\) \{\s+if \(!app \|\| !canvasReady\) return\s+const owner = canvasOwner\.value \|\| undefined\s+if \(!owner \|\| \(!allowPreviousOwner && owner !== selectedCanvasOwner\(\)\)\) return/,
   )
   assert.doesNotMatch(unmount, /flushCanvasSave\(/)
 })

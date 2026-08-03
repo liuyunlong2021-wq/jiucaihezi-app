@@ -614,7 +614,8 @@ const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
 function isVisibleMemoryResource(path: string): boolean {
-  return !props.memoryMode || !isMemoryProjectHiddenPath(path)
+  return (!props.memoryMode || !isMemoryProjectHiddenPath(path))
+    && ((isDesktop && !isMobile) || !path.toLowerCase().endsWith('.jcscene'))
 }
 function isProtectedMemoryPath(path: string): boolean {
   return isMemoryProjectMutationBlocked(path)

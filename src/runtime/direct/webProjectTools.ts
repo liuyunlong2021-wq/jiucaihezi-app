@@ -1,4 +1,4 @@
-import type { DirectToolCall, DirectToolExecutor, DirectToolResult } from './directTypes'
+import type { DirectToolExecutor, DirectToolResult } from './directTypes'
 import type { createWebProjectFiles } from '@/utils/webProjectFiles'
 import {
   boundedInteger,
@@ -10,7 +10,6 @@ import {
   MEMORY_FILE_TOOL_DEFINITIONS,
   WIKI_SEARCH_TOOL_DEFINITION,
 } from './creativeToolContract'
-import { executeMcpBridgeToolCall, getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
 import {
   artifactFilename,
@@ -20,7 +19,6 @@ import {
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
-import { createScene3DDocument, scene3DResultMarker, serializeScene3DDocument } from '@/runtime/memory/scene3d'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
@@ -28,25 +26,16 @@ type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS
   .filter(tool => tool.function.name !== 'terminal')
 
-const WEB_CORE_TOOL_NAMES = WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
-
 export function buildWebProjectToolDefinitions() {
-  return [
-    ...WEB_PROJECT_TOOL_DEFINITIONS,
-    ...getMcpBridgeToolDefinitions({ coreToolNames: WEB_CORE_TOOL_NAMES }),
-  ]
+  return [...WEB_PROJECT_TOOL_DEFINITIONS]
 }
 
 export function buildMemoryWebProjectToolDefinitions() {
-  const tools = [
+  return [
     ...WEB_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
-  ]
-  return [
-    ...tools,
-    ...getMcpBridgeToolDefinitions({ coreToolNames: tools.map(tool => tool.function.name) }),
-  ]
+  ].filter(tool => tool.function.name !== 'create_3d_scene')
 }
 
 export function createWebProjectToolExecutor(input: {
@@ -234,23 +223,6 @@ export function createWebProjectToolExecutor(input: {
             category: 'binary', mimeType: artifact.mimeType, collision: 'keep-both',
           })
       return { content: `已生成 Markdown 幻灯片: ${entry.metadata?.relativePath}` }
-    }
-
-    if (name === 'create_3d_scene') {
-      const scene = createScene3DDocument(args)
-      const existingPath = String(args.existingPath || '')
-      if (existingPath && !/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(existingPath)) throw new Error('已有白膜场景路径无效')
-      const requestedPath = existingPath || `.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`
-      const entry = await input.files.write(
-        requireProject(), requestedPath, serializeScene3DDocument(scene),
-        existingPath ? {} : { collision: 'keep-both' },
-      )
-      const path = String(entry.metadata?.relativePath || requestedPath)
-      return { content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}` }
-    }
-
-    if (isMcpToolName(name)) {
-      return { content: await executeMcpBridgeToolCall(name, args) }
     }
 
     throw new Error(`Unsupported tool: ${name}`)

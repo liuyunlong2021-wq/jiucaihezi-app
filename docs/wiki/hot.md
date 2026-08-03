@@ -8,6 +8,10 @@
 
 **快速/记忆对话现行合同：** 对话 Markdown 是唯一持久化真源；App 只读取当前选中的 Raw，发送时按模型容量从最新完整问答轮次向前装入，能装下就装入当前对话全部历史。快速模式唯一工具是只读 `wiki_search`；记忆模式在同一上下文上提供完整候选工具。模式选择器是工具权限唯一来源，用户文字不能改变工具池，模型只决定是否实际调用。新对话不自动装入其他 Raw；快速模式不能读取其他 Raw，记忆模式仅可能通过项目级 `read/grep` 主动读取。
 
+**历史文档续聊已实现：** [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] 固定只从当前已装入上下文的历史用户轮次提取唯一文档名称与 `readablePath`，交给记忆模式重新 `grep/read`；不重复注入正文或上一轮工具结果，不改变快速模式。定向 55/55、完整 focused 1436/1444（8 跳过）、TypeScript 与差异检查通过；真实模型第二轮口语指代待人工验收。
+
+**Web / Mobile 核心能力收敛已实施：** [[开发/通用记忆对话独立App SDD]] 第 18 节固定 Web / Mobile 保留项目、对话、完整 Wiki 能力、项目内受限读写、附件/文档转换、站内预览、标准 `.canvas` 项目地图和云媒体，移除 Three.js `.jcscene`、本机 FFmpeg、Terminal、本地模型及自定义 MCP；Desktop 不裁剪这些能力。三端创作面板关闭前保存 `.jccanvas`，成功后卸载 LeaferJS 资源，媒体任务继续由 `mediaTaskStore` 运行；媒体二进制绝不同步。focused 1435/1443（8 跳过）、TypeScript、Web quick build 与产物审计通过；Desktop/Web/iPhone 人工矩阵待补。
+
 **记忆长对话屏外绘制已降载：** [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]] 保留完整自然文档流，只给 `.memory-message` 复用主聊天已有的 `content-visibility: auto`；不改显示、Raw、模型上下文、Markdown、媒体卡和滚动，不恢复虚拟列表或手工测高。定向 `45/45`、TypeScript、Wiki validate 与差异检查通过；Desktop/Web/iPhone 长对话体感待人工矩阵。
 
 **通用记忆工作台内容与空间能力已实施：** [[开发/通用记忆工作台本地作品生成基础工具SDD]] 已接入 Mermaid、H1-H3 文档大纲及 HTML/PDF/可编辑 PPTX 幻灯片；[[开发/通用记忆工作台项目地图SDD]] 已把标准 `.canvas` 作为连接 Markdown、媒体、创作画布和 3D 场景的独立项目地图；[[开发/通用记忆工作台3D白膜场景基础工具SDD]] 已为独立主要人物补齐双臂双腿，群众阵列保持实例化简模。自动测试、类型检查、Web/Desktop 构建与产物审计、Web 桌面/移动视口验收通过；PowerPoint/WPS 与三平台安装包人工矩阵待补。
