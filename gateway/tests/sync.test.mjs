@@ -240,9 +240,10 @@ test('incremental pull returns the latest text state and tombstones', async () =
   assert.equal(payload.files[1].content, null);
 });
 
-test('sync path validation rejects traversal, media and credential files', () => {
+test('sync path validation allows document markdown and rejects media or credentials', () => {
   assert.equal(validateSyncPath('.raw/对话记录/今天.md'), '.raw/对话记录/今天.md');
-  for (const path of ['../secret.md', '/absolute.md', '.raw/.sync/state.json', 'jc-media/images/a.txt', '.env', 'credentials.json', '.claude/skills/demo.md', 'wiki/image.png']) {
+  assert.equal(validateSyncPath('.raw/jc-media/文档/资料.md'), '.raw/jc-media/文档/资料.md');
+  for (const path of ['../secret.md', '/absolute.md', '.raw/.sync/state.json', 'jc-media/images/a.txt', '.raw/jc-media/图片/a.txt', '.env', 'credentials.json', '.claude/skills/demo.md', 'wiki/image.png']) {
     assert.throws(() => validateSyncPath(path));
   }
 });
