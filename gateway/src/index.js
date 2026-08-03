@@ -1,9 +1,11 @@
 import { corsHeaders, dedupeCorsOrigin, handleOptions, resolveOrigin } from './cors.js';
-import { badRequest } from './errors.js';
+import { badRequest, unauthorized } from './errors.js';
 import { errorResponse, jsonResponse, notFound, readJson } from './http.js';
 import {
   createDesktopManagedTokenKeyFromBrowserCookie,
   createSession,
+  deleteGatewayUserMirror,
+  deleteLegacyWebAccount,
   destroySession,
   expiredSessionCookie,
   ensureLegacyManagedTokenKey,
@@ -12,7 +14,7 @@ import {
   publicUser,
   sessionCookie
 } from './auth-service.js';
-import { handleSync } from './sync-service.js';
+import { deleteSyncUserData, handleSync } from './sync-service.js';
 
 async function handleLogin(request, env) {
   const body = await readJson(request);
@@ -39,6 +41,15 @@ async function handleLogin(request, env) {
 
 async function handleLogout(request, env) {
   await destroySession(env, request);
+  return jsonResponse({ success: true }, 200, request, { 'Set-Cookie': expiredSessionCookie() });
+}
+
+async function handleDeleteAccount(request, env) {
+  const user = await getSessionUser(request, env);
+  if (!user || user.authProvider !== 'web') throw unauthorized('请重新登录韭菜盒子账号');
+  await deleteSyncUserData(env, user.id);
+  await deleteLegacyWebAccount(env, user);
+  await deleteGatewayUserMirror(env, request, user);
   return jsonResponse({ success: true }, 200, request, { 'Set-Cookie': expiredSessionCookie() });
 }
 
@@ -375,7 +386,7 @@ function handleHealth(request) {
   return jsonResponse({
     success: true,
     service: 'jiucaihezi-studio-login-gateway',
-    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'sync.text']
+    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'auth.delete', 'sync.text']
   }, 200, request);
 }
 
@@ -476,6 +487,7 @@ export default {
       if (request.method === 'POST' && url.pathname === '/auth/mcp/github/token') return await handleGitHubMcpToken(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/login') return await handleLogin(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/logout') return await handleLogout(request, env);
+      if (request.method === 'DELETE' && url.pathname === '/auth/account') return await handleDeleteAccount(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/session') return await handleSession(request, env);
       if (url.pathname.startsWith('/sync/')) return await handleSync(request, env);
 

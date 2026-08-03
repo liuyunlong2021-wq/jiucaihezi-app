@@ -21,6 +21,11 @@ function requireSyncDb(env) {
   return env.SYNC_DB;
 }
 
+export async function deleteSyncUserData(env, userId) {
+  const db = requireSyncDb(env);
+  await db.prepare('DELETE FROM projects WHERE user_id = ?1').bind(String(userId || '')).run();
+}
+
 function byteLength(value) {
   return new TextEncoder().encode(value).byteLength;
 }

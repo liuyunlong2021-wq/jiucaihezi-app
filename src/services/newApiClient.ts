@@ -375,6 +375,17 @@ export async function gatewayLogout(): Promise<void> {
   }
 }
 
+export async function gatewayDeleteAccount(): Promise<void> {
+  const session = getGatewaySessionToken()
+  if (!session) throw new Error('请先登录后再注销账号')
+  await gatewayJson('/auth/account', {
+    method: 'DELETE',
+    headers: { 'X-JC-Session': session },
+  })
+  await clearApiKey()
+  await clearGatewaySession()
+}
+
 export async function gatewaySession(): Promise<{ authenticated: boolean; user: GatewayUser | null }> {
   const data = await gatewayJson<any>('/auth/session')
   const authenticated = Boolean(data?.authenticated ?? data?.success ?? data?.data?.authenticated)

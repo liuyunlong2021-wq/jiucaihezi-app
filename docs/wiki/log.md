@@ -432,3 +432,18 @@
 - Web / Mobile 记忆工具白名单移除 `create_3d_scene` 和自定义 MCP；`.jcscene` 文件树入口与旧对话场景卡不再显示，自定义 Skill / MCP 管理入口仅保留 Desktop。Desktop 的 3D、FFmpeg、Terminal、本地模型和 MCP 工具装配未裁剪。
 - 三端创作面板关闭与切换项目统一先保存 `.jccanvas`，保存成功后卸载 `CreationPanel`；既有卸载清理继续释放 LeaferJS、Canvas、事件、运行时媒体 URL 和画布写入锁，`mediaTaskStore` 中已提交任务不随面板卸载。
 - 自动验证：focused 1435/1443（8 个既有跳过）、TypeScript、Web quick build、Web 产物审计与补丁检查通过，验证摘要指纹 `sha256:e146f804f114`。Desktop、Web 浏览器与真实 iPhone 人工矩阵待验收。
+
+## [2026-08-03] 发布与记忆收尾 | v2.1.7 和新手指引
+
+- `main`、`origin/main` 与 `v2.1.7` tag 指向 `cf599f26`；Web Production 已正式部署并加载 `assets/index-DeAQeEjp-jc20260610b.js`，GitHub Release 已建立。
+- Actions `30805047950` 按用户要求不等待；检查时 Apple Silicon 产物已存在，Windows、Intel Mac 和生产 `latest.json` 切换仍未全部完成，不登记为三平台全部成功。
+- iPhone `2.1.7` 开发签名版已安装、启动并由用户确认当前流程通过；它不是 TestFlight / App Store 公开版。现有 TestFlight 仍是 `2.1.0` 内部测试，Android 无公开版本。
+- `jc-new-user-guide` 删除强制 GIF / 菜单、旧模式和静默上传问答，按现行三端能力重写；Skill 校验与 27 项索引生成通过，证据 `sha256:0f24861b8194`；Web quick build、TypeScript 和产物审计通过，证据 `sha256:3d9ac46c07c8`。变更发生在 `v2.1.7` tag 之后，进入后续构建。
+
+## [2026-08-03] iPhone App Store 账号入口最小收敛与注销
+
+- 只在 iPhone 开启账号精简：保留已有账号登录、退出和文字同步，隐藏注册、API Key、充值、日志、邀请与签到；Desktop / Web 默认行为不变。
+- 新增 `DELETE /auth/account`：Gateway 只信任现有 Session，删除当前用户同步文字，调用 NewAPI 官方自助注销，再清理 Gateway 身份；客户端成功后清除本机登录凭据和当前项目云绑定，本地 Raw、Wiki、媒体不删除。
+- 新增隐私政策、用户支持和服务条款静态页；Web 产物允许，Desktop / iOS 产物继续裁剪。
+- 自动验证：focused 1439/1447（8 个既有跳过，`sha256:cc4dcb81d4ef`）、Gateway 20/20（`sha256:86ea9f00f57f`）、TypeScript（`sha256:1d58a6f525b8`）、Web quick build 与产物审计（`sha256:0321306433c2`）、iOS quick build 和补丁检查通过；三个合规路径本地 HTTP 均为 200。
+- 尚未部署 Gateway / 合规页面，未执行真实 iPhone 不可恢复注销或生产旧 Key 失效验收；本轮未提交、未推送、未发布。

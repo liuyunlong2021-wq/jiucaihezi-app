@@ -26,6 +26,7 @@ Studio text sync -> /sync/* -> SYNC_DB
 ```
 
 - `GET /sync/projects`: lists the logged-in user's projects.
+- `DELETE /auth/account`: deletes the logged-in NewAPI account and its synced text data.
 - `POST /sync/projects`: creates a project for the logged-in user.
 - `GET /sync/projects/:id/files?cursor=0`: pulls changed text files and tombstones.
 - `POST /sync/projects/:id/files`: pushes 1-100 idempotent, revision-checked text mutations.

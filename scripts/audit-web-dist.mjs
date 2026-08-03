@@ -44,6 +44,7 @@ const allowedRootFiles = new Set([
   'icons.svg',
   'index.html',
   'jiucaihua-balance.svg',
+  'legal.css',
   'logo.svg',
   'logo-solid.svg',
 ])
@@ -51,7 +52,10 @@ const allowedRootFiles = new Set([
 const allowedTopLevelDirs = new Set([
   'assets',
   'help',
+  'privacy',
   'skills',
+  'support',
+  'terms',
 ])
 
 function walk(directory) {

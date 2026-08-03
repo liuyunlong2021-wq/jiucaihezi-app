@@ -6,6 +6,10 @@ const distDir = resolve(process.env.DESKTOP_DIST_DIR || 'dist')
 const desktopExcludedPaths = [
   '404.html',
   'landing',
+  'legal.css',
+  'privacy',
+  'support',
+  'terms',
   '_headers',
   '_redirects',
 ]

@@ -1,4 +1,4 @@
-import { badRequest, unauthorized } from './errors.js';
+import { badRequest, unauthorized, upstreamError } from './errors.js';
 import { NEWAPI_ADMIN_TOKEN_ENV_NAMES, readFirstEnv, trimBaseUrl } from './env.js';
 
 export const SESSION_COOKIE_NAME = 'jc_session';
@@ -442,6 +442,37 @@ export async function requireWebUser(request, env) {
   const user = await getSessionUser(request, env);
   if (!user || user.authProvider !== 'web') throw unauthorized('请重新登录韭菜盒子账号');
   return user;
+}
+
+export async function deleteLegacyWebAccount(env, user) {
+  const userId = legacyUserIdFrom(user);
+  if (!userId) throw unauthorized('请重新登录韭菜盒子账号');
+  const headers = buildLegacyUserHeaders(userId, user.legacyAccessToken || '', false);
+  if (user.legacySessionCookie) headers.Cookie = user.legacySessionCookie;
+  const response = await fetch(`${legacyApiBase(env)}/api/user/self`, {
+    method: 'DELETE',
+    headers: withGatewaySecret(env, headers)
+  });
+  const payload = await readJsonPayload(response);
+  if (!response.ok || payload && payload.success === false) {
+    throw upstreamError(payload && payload.message || `账号注销失败：HTTP ${response.status}`);
+  }
+}
+
+export async function deleteGatewayUserMirror(env, request, user) {
+  const sessionId = getSessionId(request);
+  if (hasDb(env)) {
+    const statements = [
+      env.DB.prepare('DELETE FROM sessions WHERE user_id = ?1').bind(user.id),
+      env.DB.prepare('DELETE FROM users WHERE id = ?1').bind(user.id)
+    ];
+    if (typeof env.DB.batch === 'function') await env.DB.batch(statements);
+    else for (const statement of statements) await statement.run();
+  }
+  await safeKvDelete(env, `user:${user.id}`);
+  if (user.username) await safeKvDelete(env, `user:username:${String(user.username).toLowerCase()}`);
+  if (user.email) await safeKvDelete(env, `user:email:${String(user.email).toLowerCase()}`);
+  if (sessionId) await safeKvDelete(env, `session:${sessionId}`);
 }
 
 function legacyUserIdFrom(user) {

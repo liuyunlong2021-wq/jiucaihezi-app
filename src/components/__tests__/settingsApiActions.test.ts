@@ -8,8 +8,8 @@ test('SettingsPanel keeps requested API action order with one-click login first'
   const loginSource = readFileSync(join(process.cwd(), 'src/components/auth/JcCloudLoginBox.vue'), 'utf8')
   const firstActionsStart = loginSource.indexOf('<div class="jc-login-actions primary">')
   const firstActionsEnd = loginSource.indexOf('<label class="jc-login-label">API Key</label>')
-  const secondActionsStart = loginSource.indexOf('<div class="jc-login-actions secondary">')
-  const secondActionsEnd = loginSource.indexOf('<button class="jc-login-save"')
+  const secondActionsStart = loginSource.indexOf('class="jc-login-actions secondary"')
+  const secondActionsEnd = loginSource.indexOf('class="jc-login-save"')
 
   assert.ok(firstActionsStart > -1)
   assert.ok(firstActionsEnd > firstActionsStart)

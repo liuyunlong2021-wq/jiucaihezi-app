@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   login?: (payload: JcCloudLoginPayload) => Promise<JcCloudLoginResult>
   browserLogin?: () => Promise<void>
   openUrl?: (url: string) => void
+  accountOnly?: boolean
 }>(), {
   apiBase: 'https://api.jiucaihezi.studio',
   apiKey: '',
@@ -28,6 +29,7 @@ const props = withDefaults(defineProps<{
   title: 'API 配置',
   model: 'claude-sonnet-4-6',
   chatModels: () => [],
+  accountOnly: false,
 })
 
 const emit = defineEmits<{
@@ -213,33 +215,33 @@ function closeConfigDialog() {
 
 <template>
   <section class="jc-login-box">
-    <div class="jc-login-title">{{ title }}</div>
+    <div v-if="!accountOnly" class="jc-login-title">{{ title }}</div>
 
     <div class="jc-login-actions primary">
       <button class="jc-login-link jc-login-primary" :disabled="loginBusy" @click="openLoginDialog">
         <JcIcon name="login" />
         {{ loggedIn ? '已登录' : '一键登录' }}
       </button>
-      <button class="jc-login-link" @click="open('https://api.jiucaihezi.studio/download/')">
+      <button v-if="!accountOnly" class="jc-login-link" @click="open('https://api.jiucaihezi.studio/download/')">
         <JcIcon name="download" />
         下载APP
       </button>
-      <button class="jc-login-link jc-login-gold" @click="open(`${normalizedApiBase}/wallet`)">
+      <button v-if="!accountOnly" class="jc-login-link jc-login-gold" @click="open(`${normalizedApiBase}/wallet`)">
         <JcIcon name="account_balance_wallet" />
         充值
       </button>
-      <button class="jc-login-link" @click="open(`${normalizedApiBase}/usage-logs/common`)">
+      <button v-if="!accountOnly" class="jc-login-link" @click="open(`${normalizedApiBase}/usage-logs/common`)">
         <JcIcon name="receipt_long" />
         使用日志
       </button>
     </div>
 
-    <div v-if="loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
+    <div v-if="!accountOnly && loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
       <strong>已登录，可直接使用</strong>
       <button class="jc-login-inline" @click="setAdvancedOpen(true)">高级：使用自己的 API Key</button>
     </div>
 
-    <div v-else>
+    <div v-else-if="!accountOnly">
       <label class="jc-login-label">API Key</label>
       <div class="jc-login-key-row">
         <input
@@ -258,7 +260,7 @@ function closeConfigDialog() {
       </button>
     </div>
 
-    <div class="jc-login-actions secondary">
+    <div v-if="!accountOnly" class="jc-login-actions secondary">
       <button class="jc-login-link jc-login-copy-config" :disabled="configBusy" @click="handleCopyConfig">
         <JcIcon name="auto_awesome" />
         {{ configBusy ? '获取中...' : '一键抄配置' }}
@@ -277,7 +279,7 @@ function closeConfigDialog() {
       </button>
     </div>
 
-    <button class="jc-login-save" :disabled="busy" @click="emit('save-key')">
+    <button v-if="!accountOnly" class="jc-login-save" :disabled="busy" @click="emit('save-key')">
       <JcIcon :name="busy ? 'hourglass_top' : saved ? 'check' : 'save'" />
       {{ busy ? '诊断中' : saved ? '已保存' : '保存设置' }}
     </button>
@@ -304,7 +306,7 @@ function closeConfigDialog() {
           <span>保持登录</span>
         </label>
         <div class="jc-login-dialog-actions">
-          <button class="jc-login-secondary" :disabled="loginBusy" @click="open(`${normalizedApiBase}/sign-up`)">注册账号</button>
+          <button v-if="!accountOnly" class="jc-login-secondary" :disabled="loginBusy" @click="open(`${normalizedApiBase}/sign-up`)">注册账号</button>
           <button class="jc-login-secondary" :disabled="loginBusy" @click="closeLoginDialog">取消</button>
           <button class="jc-login-submit" :disabled="loginBusy || !loginUsername || !loginPassword" @click="submitLogin">
             {{ loginBusy ? '登录中' : '登录' }}

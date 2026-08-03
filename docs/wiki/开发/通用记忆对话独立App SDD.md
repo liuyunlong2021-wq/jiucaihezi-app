@@ -1436,3 +1436,90 @@ Web / Mobile 记忆模式候选工具只来自以下既有能力：
 `CreationPanel` 复用现有 `flushCanvasSave()` 和卸载清理，在关闭与切换项目前先保存当前 `.jccanvas`，保存成功后卸载；旧项目保存使用画布自身 owner，内部任务写入仍保留过期 owner 防护。任务生成与轮询仍由独立 `mediaTaskStore` 持有，未新增任务引擎、依赖、同步协议或媒体二进制同步。
 
 自动验证通过：focused `1435 passed / 8 skipped / 0 failed`，`vue-tsc -b`、Web `build:quick`、`audit:web-dist` 与 `git diff --check` 通过，验证摘要指纹 `sha256:e146f804f114`。Desktop、Web 浏览器和真实 iPhone 的关闭恢复、长对话、Wiki 读写、附件与云媒体人工矩阵仍待执行。
+
+### 18.10 v2.1.7 发布与 Mobile 公开范围（2026-08-03）
+
+- 发布源码提交为 `cf599f26`，`main`、`origin/main` 与 `v2.1.7` tag 一致。发布前门禁记录为 Node `1435 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、Web build 和 Web 产物审计通过。
+- Web Production 部署 ID 为 `fe551f2f-04c0-4ecf-9c5c-b56bbbe5aa74`；正式域名 <https://jiucaihezi.studio> 返回 HTTP 200 并加载 `assets/index-DeAQeEjp-jc20260610b.js`。
+- GitHub Release <https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v2.1.7> 已建立。2026-08-03 18:25 检查时已有 Apple Silicon DMG / app tarball，Actions `30805047950` 的 Windows、Intel Mac 和最终发布清单仍未全部完成；生产 <https://api.jiucaihezi.studio/updates/latest.json> 仍返回 `2.1.6`。按用户要求不继续等待，不把进行中任务写成成功。
+- iPhone 13 Pro Max 已安装并启动 `com.jiucaihezi.mobile` 的 `2.1.7` 开发签名版，用户确认当前流程通过。该证据只证明本机开发版可用，不等于 TestFlight 或 App Store 发布。
+- 现有 TestFlight 证据仍是 14.24 节的 `2.1.0 (2.1.0.1)` 内部测试构建；普通用户不能从 App Store 公开下载 iPhone `2.1.7`。Android 仍无公开下载版本。手机浏览器可以直接使用已发布 Web。
+- `public/skills/jc-new-user-guide` 在 `v2.1.7` tag 之后校准：移除强制 GIF / 菜单、旧文武模式、Web 远程 MCP 和静默上传问答，改为真实的快速 / 记忆模式及 Desktop / Web / Mobile 能力边界。Skill 校验和索引生成通过，证据日志 `sha256:0f24861b8194`；Web quick build、TypeScript 与产物审计通过，构建日志 `sha256:3d9ac46c07c8`。该变更不属于现有 `v2.1.7` 安装包，进入后续构建。
+
+## 19. iPhone App Store 账号入口最小收敛与账号注销（2026-08-03）
+
+> 状态：已实施，待部署与真实 iPhone 注销验收。本节只改 iPhone；Desktop 和 Web 的账号、API Key、充值及其他现有功能全部保持不变。
+
+### 19.1 目标与边界
+
+1. iPhone 账号区只承担已有账号的登录、退出、账号注销和文字同步身份管理。
+2. 保留现有“一键登录”的账号、密码和 Gateway 登录链路；不新增 iPhone 账号体系、Apple 登录或同步协议。
+3. iPhone 不提供注册，也不跳转外部注册页；只允许已有账号登录。
+4. 登录仍由 Gateway 返回模型 API Key 与独立 `sync_session`。API Key 只在内部保存和调用模型，iPhone 界面不显示、不允许手动填写；`sync_session` 继续是文字同步的唯一身份。
+5. 本节只收敛账号设置界面，不裁剪 iPhone 已有的项目、对话、Raw、Wiki、附件和文字同步能力。媒体二进制仍绝不同步。
+
+### 19.2 平台合同
+
+| 能力 | iPhone | Desktop / Web |
+| --- | --- | --- |
+| 已有账号登录 | 保留现有一键登录 | 不变 |
+| 退出登录 | 保留 | 不变 |
+| 账号注册 | 不提供，不放外链 | 不变 |
+| API 地址 / API Key | 不显示、不可手动填写 | 不变 |
+| 充值、价格、购买引导 | 不显示 | 不变 |
+| 使用日志、下载 App、一键抄配置、管理密钥 | 不显示 | 不变 |
+| 邀请赚米、白嫖签到 | 不显示 | 不变 |
+| 账号注销 | 新增 | 不变 |
+| 同步状态与立即同步 | 保留 | 不变 |
+
+### 19.3 iPhone 账号界面
+
+- 未登录：只显示“一键登录”；弹窗只包含账号、密码、保持登录、取消和登录，移除“注册账号”。
+- 已登录：显示已登录状态、退出登录和账号注销；不显示 API Key 或高级配置。
+- 同步页继续显示当前项目、待同步数量、进度和“立即同步”。
+- 保留隐私政策、用户支持和服务条款三个合规入口；不保留任何商业购买或外部注册入口。
+
+### 19.4 账号注销链路
+
+1. 用户在 iPhone 账号页点击“注销账号”，弹窗明确告知：NewAPI 账号和云端文字同步数据将删除，无法恢复。
+2. 用户二次确认后，iPhone 使用现有 `sync_session` 请求 Gateway 新增的 `DELETE /auth/account`；客户端不上传 `user_id`、API Key 或 NewAPI 管理凭据。
+3. Gateway 从 Session 确认当前用户，复用登录时已保存的 NewAPI 身份，调用官方 `DELETE /api/user/self`。该官方接口不需要请求体，不新建 NewAPI 接口。
+4. Gateway 删除该用户在 `SYNC_DB` 的 `projects`，由现有外键级联删除 `text_files` 和 `sync_mutations`；同时清理 Gateway 的用户镜像、登录 Session 和 KV 映射。
+5. 两端删除都完成后才返回成功。iPhone 随后清除内部 API Key、`sync_session`、账号状态和云项目绑定，回到未登录状态。任一步失败都不显示“注销成功”。
+6. 注销不自动删除 iPhone 本地项目、Raw、Wiki 和本地媒体；它们是用户的本地作品，只解除云端绑定。
+
+### 19.5 最小实施
+
+1. 给现有 `JcCloudLoginBox` 增加默认关闭的 iPhone 账号精简开关；只由 `MemorySettings` 在 `mobileRuntime` 为真时开启。复用原登录弹窗和登录事件，不新建第二个登录组件。
+2. 在精简开关下只隐藏 iPhone 不需要的按钮、API Key 和注册入口；开关默认值保证 Desktop / Web DOM 和行为不变。
+3. Gateway 只新增一个账号注销路由和必要的用户数据清理函数，复用现有 Session、NewAPI 身份、D1、KV 和 CORS 链路，不增加依赖或第二套账号服务。
+4. 客户端只新增注销请求、二次确认和成功后的本地身份清理；不修改对话、Wiki、附件、媒体或文字同步协议。
+
+### 19.6 验收标准
+
+1. iPhone 未登录账号页只有一键登录；登录弹窗没有注册按钮。
+2. iPhone 不显示 API Key、API 地址、充值、价格、购买引导、使用日志、下载 App、一键抄配置、管理密钥、邀请赚米或白嫖签到。
+3. 已有账号可登录、退出，杀进程重开后正确恢复；文字同步仍能正常上传、下载和增量回流。
+4. 注销成功后：NewAPI 无法再登录该账号，旧工作台 API Key 无法再调用模型，Gateway Session 失效，云端项目与文字记录不可再读取。
+5. 注销失败时不误报成功，不清空 iPhone 本地项目；重复点击不得越权删除其他用户数据。
+6. Desktop 与 Web 的登录、注册外链、API Key、充值及其他现有账号功能与实施前一致。
+7. iPhone 设置可访问隐私政策、用户支持和服务条款；App Store Connect 提供同一隐私政策与支持地址。
+8. 自动验证至少覆盖 iPhone 精简 DOM、Desktop / Web 不变、Gateway 未登录拒绝、当前用户注销、同步数据清理和旧 Session / Key 失效；最后用真实 iPhone 和专用测试账号完成一次不可恢复的真实注销验收。
+
+### 19.7 明确不做
+
+- 不修改 Desktop 或 Web 界面与行为。
+- 不让 iPhone 用 API Key 代替账号登录或同步 Session。
+- 不在 iPhone 提供注册、充值、价格、购买、邀请、签到或其他商业跳转。
+- 不新增 Sign in with Apple、CloudKit、同步码、扫码配对或第二套身份系统。
+- 不同步、上传或删除本地媒体二进制。
+- 不发布、不打包、不提交 Git；实施必须在本 SDD 经用户确认后单独执行。
+
+### 19.8 实施结果（2026-08-03）
+
+- `JcCloudLoginBox` 增加默认关闭的 `accountOnly`，仅由 `MemorySettings` 在 iPhone runtime 开启；iPhone 只显示已有账号登录，已登录后保留退出和注销，Desktop / Web 继续使用原账号、API Key 与商业入口。
+- 客户端复用现有 `sync_session` 调用 `DELETE /auth/account`；成功后清理本机模型 Key、同步 Session 和当前项目云绑定，不删除本地 Raw、Wiki 或媒体。失败时保留本机凭据并显示真实错误。
+- Gateway 从 Session 派生当前用户，按用户删除 `SYNC_DB.projects` 及其级联文字数据，调用 NewAPI 官方 `DELETE /api/user/self`，再清理 Gateway 用户镜像、Session 与 KV 映射；不接收客户端 `user_id`，未增加依赖或第二套账号服务。
+- Web 新增 `/privacy/`、`/support/`、`/terms/` 和共享 `legal.css`；Web 产物白名单只登记这四项，Desktop / iOS 构建继续由现有裁剪脚本移除它们。
+- 自动验证通过：focused `1439 passed / 8 skipped / 0 failed`（`sha256:cc4dcb81d4ef`）、Gateway 注销与同步 `20/20`（`sha256:86ea9f00f57f`）、TypeScript（`sha256:1d58a6f525b8`）、Web quick build 与产物审计（`sha256:0321306433c2`）、`build:ios:quick`、`git diff --check`。三个合规路径经本地 HTTP 预览均返回 200。
+- 尚未部署 Gateway 和合规页面；尚未用真实 iPhone 专用账号执行不可恢复注销，也未验证生产 NewAPI 注销后旧工作台 Key 立即失效。跨 NewAPI、D1、KV 的删除是顺序操作而非跨服务事务：失败不会误报成功，但已完成的前序删除不回滚；本地作品始终保留。

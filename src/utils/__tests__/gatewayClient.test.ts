@@ -24,6 +24,7 @@ import {
   normalizeGatewayTopupOrder,
   normalizeGatewayUser,
   gatewayLogin,
+  gatewayDeleteAccount,
   gatewayLogout,
   initApiKey,
   initGatewaySessionToken,
@@ -281,6 +282,46 @@ test('gatewayLogout revokes the dedicated sync session and preserves the model A
       assert.equal(getApiKey(), 'sk-ordinary-12345678901234567890')
       assert.equal(getGatewaySessionToken(), '')
       assert.equal(gatewaySessionAuthenticated.value, false)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+})
+
+test('gatewayDeleteAccount uses the sync session and clears all local credentials after success', async () => {
+  await withLocalStorage({
+    jcApiKey: 'sk-delete-12345678901234567890',
+    jcGatewaySessionToken: 'sess_delete_1234567890',
+    [API_ACCOUNT_CACHE_KEY]: JSON.stringify({ id: 'u1', username: 'alice' }),
+  }, async store => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      assert.equal(init?.method, 'DELETE')
+      assert.equal(new Headers(init?.headers).get('X-JC-Session'), 'sess_delete_1234567890')
+      return Response.json({ success: true })
+    }) as typeof fetch
+    try {
+      await gatewayDeleteAccount()
+      assert.equal(getApiKey(), '')
+      assert.equal(getGatewaySessionToken(), '')
+      assert.equal(store.has(API_ACCOUNT_CACHE_KEY), false)
+    } finally {
+      globalThis.fetch = previousFetch
+    }
+  })
+})
+
+test('gatewayDeleteAccount preserves local credentials when deletion fails', async () => {
+  await withLocalStorage({
+    jcApiKey: 'sk-delete-failed-12345678901234567890',
+    jcGatewaySessionToken: 'sess_delete_failed_1234567890',
+  }, async () => {
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = (async () => Response.json({ success: false, message: '注销失败' }, { status: 502 })) as typeof fetch
+    try {
+      await assert.rejects(() => gatewayDeleteAccount(), /注销失败/)
+      assert.equal(getApiKey(), 'sk-delete-failed-12345678901234567890')
+      assert.equal(getGatewaySessionToken(), 'sess_delete_failed_1234567890')
     } finally {
       globalThis.fetch = previousFetch
     }

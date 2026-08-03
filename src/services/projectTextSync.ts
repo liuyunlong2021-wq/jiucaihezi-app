@@ -164,6 +164,15 @@ export class ProjectTextSync {
     })
   }
 
+  async disconnect(): Promise<void> {
+    await this.enqueue(async () => {
+      if (!this.owner) return
+      this.state = emptyState()
+      await this.persistState()
+      this.updateStatus('disabled', '当前项目未连接云端')
+    })
+  }
+
   async syncNow(): Promise<void> {
     await this.enqueue(async () => {
       if (!this.state.cloudProjectId) throw new Error('当前项目尚未开启云同步')

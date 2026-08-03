@@ -367,21 +367,8 @@
   {
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
-    "description": "Use when a user asks for beginner help, tutorials, first-use guidance, or customer support for Jiucaihezi Studio.",
-    "triggers": [
-      "新手",
-      "帮助",
-      "教程",
-      "怎么用",
-      "第一次",
-      "入门",
-      "你好",
-      "韭菜盒子",
-      "客服",
-      "help",
-      "咋整",
-      "搞不懂"
-    ],
+    "description": "Use when a user asks for beginner help, first-use guidance, tutorials, feature explanations, platform differences, download help, or customer support for Jiucaihezi Studio. Trigger on 新手、帮助、教程、怎么用、第一次、入门、韭菜盒子、客服、help、咋整 or 搞不懂.",
+    "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",

@@ -9,6 +9,7 @@ import { getLocalOllamaModels } from '@/utils/providerConfig'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import {
+  gatewayDeleteAccount,
   gatewayLogin,
   gatewayLogout,
   getApiKey,
@@ -18,6 +19,7 @@ import {
   gatewaySessionAuthenticated,
 } from '@/services/newApiClient'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
+import { confirmAction } from '@/utils/confirmAction'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
 const emit = defineEmits<{ (event: 'synced'): void }>()
@@ -38,6 +40,8 @@ const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
 const syncBusy = ref(false)
 const logoutBusy = ref(false)
+const deleteBusy = ref(false)
+const deleteError = ref('')
 const syncError = ref('')
 const agentStore = useAgentStore()
 const appVersion = __APP_VERSION__
@@ -108,6 +112,28 @@ async function logout() {
   }
 }
 
+async function deleteAccount() {
+  if (deleteBusy.value) return
+  const confirmed = await confirmAction('注销后，账号和云端文字同步数据将永久删除，无法恢复。手机里的本地项目、Wiki 和媒体不会删除。', {
+    title: '注销账号',
+    kind: 'error',
+    okLabel: '永久注销',
+  })
+  if (!confirmed) return
+  deleteBusy.value = true
+  deleteError.value = ''
+  try {
+    await gatewayDeleteAccount()
+    apiKey.value = ''
+    await projectTextSync.disconnect().catch(() => {})
+    status.value = '账号已注销'
+  } catch (error) {
+    deleteError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    deleteBusy.value = false
+  }
+}
+
 async function saveKey() {
   const key = apiKey.value.trim()
   if (!key) {
@@ -169,13 +195,25 @@ async function runSync() {
           :model="agentStore.currentModel"
           :chat-models="textModels"
           :login="login"
+          :account-only="mobileRuntime"
           :open-url="openExternal"
           @login-success="handleLogin"
           @save-key="saveKey"
         />
-        <button v-if="mobileRuntime && gatewaySessionAuthenticated" class="memory-mobile-logout" :disabled="logoutBusy" @click="logout">
-          <JcIcon name="logout" />{{ logoutBusy ? '正在退出' : '退出登录' }}
-        </button>
+        <div v-if="mobileRuntime && gatewaySessionAuthenticated" class="memory-mobile-account-actions">
+          <button class="memory-mobile-logout" :disabled="logoutBusy || deleteBusy" @click="logout">
+            <JcIcon name="logout" />{{ logoutBusy ? '正在退出' : '退出登录' }}
+          </button>
+          <button class="memory-mobile-delete" :disabled="logoutBusy || deleteBusy" @click="deleteAccount">
+            <JcIcon name="delete" />{{ deleteBusy ? '正在注销' : '注销账号' }}
+          </button>
+        </div>
+        <p v-if="deleteError" class="memory-account-error">{{ deleteError }}</p>
+        <nav v-if="mobileRuntime" class="memory-mobile-legal" aria-label="账号与隐私">
+          <button @click="openExternal('https://jiucaihezi.studio/privacy/')">隐私政策</button>
+          <button @click="openExternal('https://jiucaihezi.studio/support/')">用户支持</button>
+          <button @click="openExternal('https://jiucaihezi.studio/terms/')">服务条款</button>
+        </nav>
         <section v-if="desktopRuntime" class="memory-local-model">
           <div>
             <strong>Ollama 本地模型</strong>
@@ -258,7 +296,13 @@ async function runSync() {
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
 .memory-settings-version { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--ink3); font-size: 12px; text-align: center; }
 .memory-account { display: grid; gap: 16px; }
-.memory-mobile-logout { display: flex; width: 100%; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font: inherit; }
+.memory-mobile-account-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.memory-mobile-logout, .memory-mobile-delete { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font: inherit; }
+.memory-mobile-delete { border-color: color-mix(in srgb, var(--danger) 45%, var(--line)); color: var(--danger); }
+.memory-mobile-logout:disabled, .memory-mobile-delete:disabled { opacity: .55; }
+.memory-account-error { margin: 0; color: var(--danger); font-size: 12px; }
+.memory-mobile-legal { display: flex; justify-content: center; gap: 12px; }
+.memory-mobile-legal button { padding: 0; border: 0; background: transparent; color: var(--ink3); font: inherit; font-size: 12px; text-decoration: underline; }
 .memory-local-model { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-local-model > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .memory-local-model span, .memory-local-model p { margin: 0; color: var(--ink3); font-size: 12px; }

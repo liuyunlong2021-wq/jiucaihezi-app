@@ -70,6 +70,70 @@ test('auth login returns an ordinary NewAPI key plus a dedicated sync session', 
   }
 });
 
+test('account deletion requires the sync session and removes only its account data', async () => {
+  const env = createEnv();
+  const syncCalls = [];
+  env.SYNC_DB = {
+    prepare(sql) {
+      return {
+        bind(...values) {
+          return { async run() { syncCalls.push({ sql, values }); } };
+        }
+      };
+    }
+  };
+  await env.PLUGIN_KV.put('user:user_web_88', JSON.stringify({
+    id: 'user_web_88',
+    username: 'alice',
+    email: 'alice@example.com',
+    authProvider: 'web',
+    legacyUserId: '88',
+    legacyAccessToken: 'user_access_88',
+    legacySessionCookie: 'session=newapi-session-88'
+  }));
+  await env.PLUGIN_KV.put('user:username:alice', 'user_web_88');
+  await env.PLUGIN_KV.put('user:email:alice@example.com', 'user_web_88');
+  await env.PLUGIN_KV.put('session:sess_delete_alice', JSON.stringify({
+    id: 'sess_delete_alice',
+    userId: 'user_web_88',
+    expiresAt: '2099-01-01T00:00:00.000Z'
+  }));
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    assert.equal(String(url), 'https://newapi.example.com/api/user/self');
+    assert.equal(init.method, 'DELETE');
+    assert.equal(init.headers.Cookie, 'session=newapi-session-88');
+    return Response.json({ success: true });
+  };
+
+  try {
+    const response = await gateway.fetch(request('/auth/account', {
+      method: 'DELETE',
+      headers: { 'X-JC-Session': 'sess_delete_alice' }
+    }), env);
+    const payload = await readJson(response);
+
+    assert.equal(response.status, 200);
+    assert.equal(payload.success, true);
+    assert.equal(syncCalls.length, 1);
+    assert.match(syncCalls[0].sql, /DELETE FROM projects WHERE user_id/);
+    assert.deepEqual(syncCalls[0].values, ['user_web_88']);
+    assert.equal(await env.PLUGIN_KV.get('user:user_web_88'), null);
+    assert.equal(await env.PLUGIN_KV.get('user:username:alice'), null);
+    assert.equal(await env.PLUGIN_KV.get('user:email:alice@example.com'), null);
+    assert.equal(await env.PLUGIN_KV.get('session:sess_delete_alice'), null);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('account deletion rejects requests without a sync session', async () => {
+  const env = createEnv();
+  const response = await gateway.fetch(request('/auth/account', { method: 'DELETE' }), env);
+  assert.equal(response.status, 401);
+  assert.equal((await readJson(response)).success, false);
+});
+
 test('auth login ignores a same-name token outside the auto group', async () => {
   const env = createEnv();
   const previousFetch = globalThis.fetch;

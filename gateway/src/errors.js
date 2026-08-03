@@ -28,4 +28,3 @@ export function toErrorPayload(error) {
     status
   };
 }
-

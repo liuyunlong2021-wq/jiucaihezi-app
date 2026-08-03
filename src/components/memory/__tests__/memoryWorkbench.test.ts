@@ -57,6 +57,24 @@ test('memory project entry unifies local and cloud projects while settings only 
   assert.doesNotMatch(settings, /selectedCloudProjectId|projectTextSync\.connect|projectTextSync\.enable/)
 })
 
+test('iPhone account settings reuse login while hiding commercial and key controls only on mobile', () => {
+  const settings = source('src/components/memory/MemorySettings.vue')
+  const login = source('src/components/auth/JcCloudLoginBox.vue')
+
+  assert.match(settings, /:account-only="mobileRuntime"/)
+  assert.match(settings, /gatewayDeleteAccount\(\)/)
+  assert.match(settings, /注销账号/)
+  assert.match(login, /accountOnly\?: boolean/)
+  assert.match(login, /v-if="!accountOnly" class="jc-login-link"[\s\S]*下载APP/)
+  assert.match(login, /v-if="!accountOnly"[\s\S]*API Key/)
+  assert.match(login, /v-if="!accountOnly" class="jc-login-secondary"[\s\S]*注册账号/)
+  assert.match(login, /v-if="!accountOnly" class="jc-login-save"/)
+  for (const page of ['privacy', 'support', 'terms']) {
+    assert.match(source(`public/${page}/index.html`), /韭菜盒子/)
+    assert.match(settings, new RegExp(`https://jiucaihezi\\.studio/${page}/`))
+  }
+})
+
 test('memory space and conversations are created only by their explicit actions', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const project = source('src/runtime/memory/memoryProject.ts')

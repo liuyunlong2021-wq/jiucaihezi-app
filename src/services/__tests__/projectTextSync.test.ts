@@ -280,6 +280,23 @@ test('Web and Mac share text with offline retry, idempotency and visible conflic
   }
 })
 
+test('disconnect removes only the current local cloud binding', async () => {
+  const cloud = fakeCloud()
+  const local = localFiles('web')
+  const sync = new ProjectTextSync(local.service, cloud.api)
+  try {
+    await sync.open('web-owner', '共同记忆')
+    await sync.connect('project_12345678')
+    await sync.disconnect()
+
+    assert.equal(await sync.cloudProjectIdFor('web-owner'), '')
+    assert.equal(projectTextSyncStatus.cloudProjectId, '')
+    assert.equal(projectTextSyncStatus.phase, 'disabled')
+  } finally {
+    sync.dispose()
+  }
+})
+
 test('sync path contract excludes queue state, media, credentials and binary files', () => {
   assert.equal(isSyncableTextPath('.raw/对话记录/今天.md'), true)
   assert.equal(isSyncableTextPath('.raw/jc-media/文档/资料.md'), true)
