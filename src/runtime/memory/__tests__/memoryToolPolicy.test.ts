@@ -12,6 +12,7 @@ test('memory tools approve side effects without blocking safe project work', () 
   assert.equal(memoryToolNeedsApproval(call('write', { path: 'wiki/new.md', content: 'x' }), '保存资料'), false)
   assert.equal(memoryToolNeedsApproval(call('terminal', { command: 'ls' }), '运行命令'), true)
   assert.equal(memoryToolNeedsApproval(call('delete', { path: 'wiki/new.md' }), '删除资料'), true)
+  assert.equal(memoryToolNeedsApproval(call('export_3d_scene_video', { path: '.raw/jc-media/文档/选矿.jcscene' }), '导出视频'), true)
 })
 
 test('memory tools require explicit current-turn paths before external access', () => {

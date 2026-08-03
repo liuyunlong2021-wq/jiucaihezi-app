@@ -1,15 +1,13 @@
 # 全能视频X-文生视频-低价渠道版-v1.5
+它的核心优势在于能够极其精准地解析复杂的长文本逻辑，不仅能还原画面的视觉美感，更在因果关系模拟与电影级镜头调度上展现出深厚的“大模型底蕴”。该模型在处理光影演变、复杂物理交互及环境叙事时，能保持极低的语义损耗，让每一帧都符合逻辑直觉，是追求高叙事精度与视觉真实感创作者的理想之选。低价渠道版，价格远低于官方稳定版，不稳定。
 接口:
 /rhart-video-g/text-to-video
-copy
-
-它的核心优势在于能够极其精准地解析复杂的长文本逻辑，不仅能还原画面的视觉美感，更在因果关系模拟与电影级镜头调度上展现出深厚的“大模型底蕴”。该模型在处理光影演变、复杂物理交互及环境叙事时，能保持极低的语义损耗，让每一帧都符合逻辑直觉，是追求高叙事精度与视觉真实感创作者的理想之选。低价渠道版，价格远低于官方稳定版，不稳定。
 ### 提交请求
 
 提交 API 请求。RunningHub API 已为您处理 API Key，您只需提交请求即可
 
 ```curl
-curl --location --request POST 'https://www.runninghub.cn/openapi/v2/rhart-video-g/text-to-video' \
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/rhart-video-g/text-to-video' \
 --header "Content-Type: application/json" \
 --header "Authorization: Bearer ${RUNNINGHUB_API_KEY}" \
 --data-raw '{
@@ -66,7 +64,7 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/rhart-video
 #### 请求示例
 
 ```curl
-curl --location --request POST 'https://www.runninghub.cn/openapi/v2/query' \
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/query' \
 --header "Content-Type: application/json" \
 --header "Authorization: Bearer ${RUNNINGHUB_API_KEY}" \
 --data-raw '{
@@ -153,12 +151,12 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/query' \
 
 上传本地文件以获取一个 URL。
 
-**Endpoint:** `https://www.runninghub.cn/openapi/v2/media/upload/binary`
+**Endpoint:** `https://www.runninghub.ai/openapi/v2/media/upload/binary`
 
 **请求**
 
 ```curl
-curl --location --request POST 'https://www.runninghub.cn/openapi/v2/media/upload/binary' \
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/media/upload/binary' \
 --header 'Authorization: Bearer [Your API KEY]' \
 --form 'file=@/path/to/image.png'
 ```
@@ -180,19 +178,35 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/media/uploa
 
 **备注:** 上传后获得的链接有效期为 1 天，超期将无法通过 URL 直接访问。
 
+
+
+
+
 # 全能视频X-图生视频-低价渠道版-v1.5
+专注于将静态灵感转化为极具动感的视觉现实，其最大的突破在于主体身份（Identity）的绝对锁定。通过深度解析原图的几何结构与材质属性，模型能自动推演出最符合逻辑的动态演变，无论是微细的纹理抖动还是大幅度的空间流转，都能确保核心元素不产生形变。它在时空稳定性与光影继承方面表现卓越，能将单张参考图平滑扩展为一段充满张力的影视级长镜头。低价渠道版，价格远低于官方稳定版，不稳定。
 接口:
 /rhart-video-g/image-to-video
-copy
 
-专注于将静态灵感转化为极具动感的视觉现实，其最大的突破在于主体身份（Identity）的绝对锁定。通过深度解析原图的几何结构与材质属性，模型能自动推演出最符合逻辑的动态演变，无论是微细的纹理抖动还是大幅度的空间流转，都能确保核心元素不产生形变。它在时空稳定性与光影继承方面表现卓越，能将单张参考图平滑扩展为一段充满张力的影视级长镜头。低价渠道版，价格远低于官方稳定版，不稳定。
+# 欢迎使用 RunningHub API，轻松调用 RunningHub 标准模型API
+
+## 开始使用
+
+### 注册用户
+
+先注册成为RunningHub网站的用户，并充值钱包。标准模型API仅支持企业级-共享API Key
+
+### 获取您的 API Key
+
+RunningHub 为每位用户自动生成一个独特的 32 位 API KEY
+
+请妥善保存您的 API KEY，不要外泄，后续步骤将依赖此密钥进行操作
 
 ### 提交请求
 
 提交 API 请求。RunningHub API 已为您处理 API Key，您只需提交请求即可
 
 ```curl
-curl --location --request POST 'https://www.runninghub.cn/openapi/v2/rhart-video-g/image-to-video' \
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/rhart-video-g/image-to-video' \
 --header "Content-Type: application/json" \
 --header "Authorization: Bearer ${RUNNINGHUB_API_KEY}" \
 --data-raw '{
@@ -253,7 +267,7 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/rhart-video
 #### 请求示例
 
 ```curl
-curl --location --request POST 'https://www.runninghub.cn/openapi/v2/query' \
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/query' \
 --header "Content-Type: application/json" \
 --header "Authorization: Bearer ${RUNNINGHUB_API_KEY}" \
 --data-raw '{
@@ -340,12 +354,12 @@ curl --location --request POST 'https://www.runninghub.cn/openapi/v2/query' \
 
 上传本地文件以获取一个 URL。
 
-**Endpoint:** `https://www.runninghub.cn/openapi/v2/media/upload/binary`
+**Endpoint:** `https://www.runninghub.ai/openapi/v2/media/upload/binary`
 
 **请求**
 
 ```curl
-curl --location --request POST 'https://www.runninghub.cn/openapi/v2/media/upload/binary' \
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/media/upload/binary' \
 --header 'Authorization: Bearer [Your API KEY]' \
 --form 'file=@/path/to/image.png'
 ```

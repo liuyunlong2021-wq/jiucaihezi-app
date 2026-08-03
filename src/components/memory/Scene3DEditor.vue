@@ -3,9 +3,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
-import { parseScene3DDocument, type Scene3DCamera, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
+import { evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
 
-const props = defineProps<{ document: Scene3DDocument }>()
+const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean }>(), { recordingOnly: false })
 const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -13,6 +13,8 @@ const labelsVisible = ref(true)
 const selectedId = ref('')
 const cameraName = ref('')
 const renderRevision = ref(0)
+const playing = ref(false)
+const currentTime = ref(0)
 let document = parseScene3DDocument(props.document)
 let scene: THREE.Scene | null = null
 let root: THREE.Group | null = null
@@ -26,10 +28,13 @@ let transformHelper: THREE.Object3D | null = null
 let resizeObserver: ResizeObserver | null = null
 let animationFrame = 0
 let raycaster: THREE.Raycaster | null = null
+let playStartedAt = 0
+let stepLabel: THREE.Sprite | null = null
 const selectable = new Map<string, THREE.Object3D>()
 
 const currentAspect = computed(() => { renderRevision.value; return document.canvas.aspect })
 const savedCameras = computed(() => { renderRevision.value; return document.savedCameras })
+const duration = computed(() => { renderRevision.value; return document.duration || 0 })
 const defaultCameras = computed(() => {
   renderRevision.value
   const characters = [
@@ -233,14 +238,14 @@ function buildScene() {
   const nodes = new Map<string, THREE.Object3D>()
   for (const item of document.objects) {
     const node = makePrimitive(item)
-    node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true } })
+    node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]; materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.userData.baseColor = item.color.getHex() }) } })
     node.position.copy(vector(item.position)); node.rotation.set(...(item.rotation || [0, 0, 0]))
     addLabel(node, item.label || '', item.color || '#ffffff', item.type === 'person' ? 1.8 : (item.size?.[1] || 1) + .45)
     setSelectable(node, item.id, 'object'); nodes.set(item.id, node); root.add(node)
   }
   for (const item of document.formations) {
     const node = makeFormation(item)
-    node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true } })
+    node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]; materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.userData.baseColor = item.color.getHex() }) } })
     node.position.copy(vector(item.position))
     addLabel(node, item.label || '', item.color || '#ffffff', 1.8)
     setSelectable(node, item.id, 'formation'); nodes.set(item.id, node); root.add(node)
@@ -258,8 +263,53 @@ function buildScene() {
     root.add(group)
   }
   scene.add(root)
+  applyAnimation(currentTime.value)
   attachSelection(selectedId.value)
 }
+
+function updateStepLabel(value: string) {
+  if (!scene || !camera) return
+  if (stepLabel) { scene.remove(stepLabel); stepLabel.material.map?.dispose(); stepLabel.material.dispose(); stepLabel = null }
+  if (!value) return
+  const surface = window.document.createElement('canvas')
+  const context = surface.getContext('2d')!
+  surface.width = 900; surface.height = 100
+  context.fillStyle = 'rgba(14, 20, 19, .84)'; context.fillRect(0, 0, surface.width, surface.height)
+  context.fillStyle = '#ffffff'; context.font = '600 42px sans-serif'; context.textAlign = 'center'; context.textBaseline = 'middle'; context.fillText(value, 450, 52, 850)
+  stepLabel = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(surface), depthTest: true, depthWrite: false, sizeAttenuation: false }))
+  stepLabel.scale.set(.9, .1, 1); scene.add(stepLabel)
+}
+
+function applyAnimation(time: number) {
+  if (!document.timeline?.length || !camera) return
+  const state = evaluateScene3DAnimation(document, time)
+  for (const [id, value] of Object.entries(state.targets)) {
+    const node = selectable.get(id)
+    if (!node) continue
+    node.position.set(...value.position); node.rotation.set(...value.rotation); node.scale.set(...value.scale); node.visible = value.visible
+    if (value.color) node.traverse(child => {
+      const mesh = child as THREE.Mesh
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.color.set(value.color || item.userData.baseColor) })
+    })
+  }
+  camera.position.set(...state.camera.position); camera.lookAt(vector(state.camera.target)); orbit?.target.set(...state.camera.target)
+  if (stepLabel?.userData.text !== state.label) { updateStepLabel(state.label); if (stepLabel) stepLabel.userData.text = state.label }
+  if (stepLabel) {
+    const direction = new THREE.Vector3(); camera.getWorldDirection(direction)
+    stepLabel.position.copy(camera.position).add(direction.multiplyScalar(2)); stepLabel.quaternion.copy(camera.quaternion)
+  }
+}
+
+function togglePlayback() {
+  if (!duration.value) return
+  if (playing.value) { playing.value = false; return }
+  if (currentTime.value >= duration.value) currentTime.value = 0
+  playStartedAt = performance.now() - currentTime.value * 1000
+  transform?.detach(); playing.value = true
+}
+
+function replay() { currentTime.value = 0; applyAnimation(0); playing.value = false; togglePlayback() }
 
 function activeCamera() { return camera as THREE.Camera }
 function applyCamera(source: Scene3DCamera) {
@@ -402,28 +452,69 @@ async function capture() {
 
 function resize() {
   if (!renderer || !canvas.value || !camera) return
-  const width = Math.max(canvas.value.clientWidth, 1); const height = Math.max(canvas.value.clientHeight, 1)
+  const ratio = aspectRatio(currentAspect.value)
+  const width = props.recordingOnly ? (ratio >= 1 ? 1920 : Math.round(1920 * ratio)) : Math.max(canvas.value.clientWidth, 1)
+  const height = props.recordingOnly ? (ratio >= 1 ? Math.round(1920 / ratio) : 1920) : Math.max(canvas.value.clientHeight, 1)
   renderer.setSize(width, height, false)
-  const ratio = width / height
-  if (perspective && camera === perspective) { perspective.aspect = ratio; perspective.updateProjectionMatrix() }
-  if (orthographic && camera === orthographic) { const size = 18; orthographic.left = -size * ratio / 2; orthographic.right = size * ratio / 2; orthographic.top = size / 2; orthographic.bottom = -size / 2; orthographic.updateProjectionMatrix() }
+  const renderRatio = width / height
+  if (perspective && camera === perspective) { perspective.aspect = renderRatio; perspective.updateProjectionMatrix() }
+  if (orthographic && camera === orthographic) { const size = 18; orthographic.left = -size * renderRatio / 2; orthographic.right = size * renderRatio / 2; orthographic.top = size / 2; orthographic.bottom = -size / 2; orthographic.updateProjectionMatrix() }
 }
 
-function render() { animationFrame = requestAnimationFrame(render); orbit?.update(); if (scene && camera) renderer?.render(scene, activeCamera()) }
+function render() {
+  animationFrame = requestAnimationFrame(render)
+  if (playing.value) {
+    currentTime.value = Math.min(duration.value, (performance.now() - playStartedAt) / 1000)
+    applyAnimation(currentTime.value)
+    if (currentTime.value >= duration.value) playing.value = false
+  } else if (!props.recordingOnly) orbit?.update()
+  if (scene && camera) renderer?.render(scene, activeCamera())
+}
+
+async function recordVideo(signal?: AbortSignal): Promise<Blob> {
+  if (!renderer || !canvas.value || !duration.value || !document.timeline?.length) throw new Error('当前场景没有可录制的动画时间线')
+  const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
+  if (!mimeType) throw new Error('当前系统不支持画布视频录制')
+  resize(); currentTime.value = 0; applyAnimation(0); renderer.render(scene!, activeCamera())
+  const chunks: Blob[] = []
+  const recorder = new MediaRecorder(canvas.value.captureStream(30), { mimeType, videoBitsPerSecond: 12_000_000 })
+  recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data) }
+  const completed = new Promise<Blob>((resolve, reject) => {
+    recorder.onerror = () => reject(new Error('录制 3D 动画失败'))
+    recorder.onstop = () => {
+      const blob = new Blob(chunks, { type: mimeType })
+      if (!blob.size) reject(new Error('录制结果为空'))
+      else resolve(blob)
+    }
+  })
+  recorder.start(1000); replay()
+  await new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(resolve, duration.value * 1000 + 100)
+    signal?.addEventListener('abort', () => {
+      window.clearTimeout(timer); playing.value = false
+      if (recorder.state !== 'inactive') recorder.stop()
+      reject(new DOMException('已停止录制', 'AbortError'))
+    }, { once: true })
+  })
+  playing.value = false; recorder.stop()
+  return await completed
+}
+
+defineExpose({ recordVideo })
 
 onMounted(() => {
   if (!canvas.value) return
   scene = new THREE.Scene(); scene.background = new THREE.Color(0x15201c)
   renderer = new THREE.WebGLRenderer({ canvas: canvas.value, antialias: true, preserveDrawingBuffer: true })
-  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.5)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.shadowMap.enabled = document.lighting.shadows
+  renderer.setPixelRatio(props.recordingOnly ? 1 : Math.min(devicePixelRatio || 1, 1.5)); renderer.outputColorSpace = THREE.SRGBColorSpace; renderer.shadowMap.enabled = document.lighting.shadows
   raycaster = new THREE.Raycaster()
-  updateLights(); updateGrid(); buildScene(); createCameraControls()
+  updateLights(); updateGrid(); buildScene(); createCameraControls(); applyAnimation(0)
   canvas.value.addEventListener('pointerup', pick)
   resizeObserver = new ResizeObserver(resize); resizeObserver.observe(canvas.value); render()
 })
 
 watch(() => props.document, value => {
-  document = parseScene3DDocument(value); renderRevision.value++; buildScene(); createCameraControls()
+  document = parseScene3DDocument(value); currentTime.value = 0; playing.value = false; renderRevision.value++; buildScene(); createCameraControls(); applyAnimation(0)
 })
 
 onBeforeUnmount(() => {
@@ -438,8 +529,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="scene3d-editor">
-    <header class="scene3d-toolbar">
+  <section class="scene3d-editor" :class="{ 'recording-only': recordingOnly }">
+    <header v-if="!recordingOnly" class="scene3d-toolbar">
       <strong>{{ document.title }}</strong>
       <div class="scene3d-tools">
         <button title="俯拍" @click="setCameraPreset('top')"><JcIcon name="north" /></button>
@@ -465,14 +556,20 @@ onBeforeUnmount(() => {
         <span class="scene3d-divider"></span>
         <button title="保存当前机位" @click="saveCamera"><JcIcon name="bookmark-add" /></button>
         <button class="primary" title="截图保存到图片" @click="capture"><JcIcon name="photo-camera" /></button>
+        <template v-if="duration">
+          <span class="scene3d-divider"></span>
+          <button :title="playing ? '暂停' : '播放'" @click="togglePlayback"><JcIcon :name="playing ? 'pause' : 'play_arrow'" /></button>
+          <button title="从头重播" @click="replay"><JcIcon name="restart-alt" /></button>
+          <span class="scene3d-time">{{ currentTime.toFixed(1) }} / {{ duration.toFixed(1) }}s</span>
+        </template>
       </div>
     </header>
     <div class="scene3d-stage" :style="{ '--scene-aspect': String(aspectRatio(currentAspect)) }">
       <canvas ref="canvas" aria-label="3D 白膜场景"></canvas>
-      <div class="scene3d-frame"></div>
-      <p v-if="!selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
+      <div v-if="!recordingOnly" class="scene3d-frame"></div>
+      <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
     </div>
-    <footer class="scene3d-cameras">
+    <footer v-if="!recordingOnly" class="scene3d-cameras">
       <span>机位</span>
       <button v-for="item in defaultCameras" :key="item.name" @click="useSavedCamera(item)">{{ item.name }}</button>
       <div v-for="(item, index) in savedCameras" :key="`${item.name}-${index}`" class="scene3d-camera-chip">
@@ -492,6 +589,7 @@ onBeforeUnmount(() => {
 .scene3d-tools button:hover, .scene3d-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
 .scene3d-tools button.primary { background: #86c8a5; color: #122018; }
 .scene3d-tools .mso { font-size: 18px; }
+.scene3d-time { min-width: 84px; font-size: 11px; color: #b9c8c0; text-align: center; }
 .scene3d-divider { width: 1px; height: 22px; background: rgba(216, 235, 223, .16); margin: 0 3px; }
 .scene3d-stage { position: relative; min-height: 320px; overflow: hidden; }
 .scene3d-stage canvas { width: 100%; height: 100%; display: block; touch-action: none; }
@@ -499,6 +597,7 @@ onBeforeUnmount(() => {
 .scene3d-hint { position: absolute; left: 12px; bottom: 10px; margin: 0; padding: 6px 8px; color: #dce8e1; background: rgba(10, 17, 14, .72); border-radius: 4px; font-size: 12px; pointer-events: none; }
 .scene3d-cameras { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 5px 10px; border-top: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
 .scene3d-cameras > span { color: #aebcb5; font-size: 12px; }
+.scene3d-editor.recording-only { width: 100%; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .scene3d-cameras > button { flex: 0 0 auto; padding: 0 8px; border-color: rgba(216, 235, 223, .18); }
 .scene3d-cameras > button:hover { background: rgba(222, 243, 229, .14); }
 .scene3d-camera-chip { display: flex; align-items: center; border: 1px solid rgba(216, 235, 223, .18); border-radius: 4px; }

@@ -41,6 +41,9 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/api/rh-video-v31-fast',
     'runninghub/api/rh-grok-text-video',
     'runninghub/api/rh-grok-image-video',
+    'newapi/zx/grok-1.5-video-6s',
+    'newapi/zx/grok-1.5-video-10s',
+    'newapi/zx/grok-1.5-video-15s',
     'runninghub/api/rh-seedance2-mini',
     'runninghub/api/rh-seedance2-fast',
     'runninghub/api/rh-seedance2',
@@ -188,6 +191,25 @@ test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
     assert.equal(textOnly.apiStyle, 'openai-videos')
     assert.equal(textOnly.endpoint, '/v1/videos')
     assert.equal(textOnly.pollKind, 'newapi-task')
+    assert.equal(textOnly.mode, 'text-to-video')
+    assert.equal(withImage.mode, 'image-to-video')
+    assert.equal(withImage.debug.referenceImageCount, 1)
+  }
+})
+
+test('ZX Grok fixed-duration aliases support text and single-image video', () => {
+  for (const seconds of [6, 10, 15] as const) {
+    const modelId = `newapi/zx/grok-1.5-video-${seconds}s`
+    const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一个大西瓜超人救火', duration: seconds } })
+    const withImage = buildCreationRunPlan({
+      modelId,
+      params: { prompt: '一个大西瓜超人救火', duration: seconds, images: ['https://example.com/ref.jpg'] },
+    })
+
+    assert.equal(textOnly.model, `grok-1.5-video-${seconds}s`)
+    assert.equal(textOnly.endpoint, '/v1/videos')
+    assert.equal(textOnly.pollKind, 'newapi-task')
+    assert.equal(textOnly.usesRhAdapter, false)
     assert.equal(textOnly.mode, 'text-to-video')
     assert.equal(withImage.mode, 'image-to-video')
     assert.equal(withImage.debug.referenceImageCount, 1)

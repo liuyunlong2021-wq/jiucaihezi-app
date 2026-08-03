@@ -1996,6 +1996,77 @@ pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandO
     })
 }
 
+#[tauri::command]
+pub async fn dev_export_scene_video(
+    input: DevExportSceneVideoInput,
+) -> Result<DevExportSceneVideoOutput, String> {
+    let root = canonical_root(&input.root)?;
+    let filename = Path::new(&input.output_filename)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| value == &input.output_filename && value.to_ascii_lowercase().ends_with(".mp4"))
+        .ok_or_else(|| "MP4 文件名无效".to_string())?;
+    let bytes = general_purpose::STANDARD
+        .decode(&input.data_base64)
+        .map_err(|e| format!("录制数据解码失败: {}", e))?;
+    if bytes.is_empty() { return Err("录制数据为空".into()); }
+
+    let temp_dir = std::env::temp_dir().join(format!("jc-scene-video-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_dir).map_err(|e| format!("创建视频临时目录失败: {}", e))?;
+    let recording = temp_dir.join(if input.mime_type.starts_with("video/mp4") { "recording.mp4" } else { "recording.webm" });
+    let encoded = temp_dir.join("output.mp4");
+    let result = async {
+        std::fs::write(&recording, bytes).map_err(|e| format!("写入录制文件失败: {}", e))?;
+        #[cfg(windows)]
+        let ffmpeg = PathBuf::from("ffmpeg");
+        #[cfg(not(windows))]
+        let ffmpeg = {
+            let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+            let lookup = Command::new(shell).args(["-lc", "command -v ffmpeg"]).output().await
+                .map_err(|_| "找不到系统 FFmpeg，请先安装并确保终端可以运行 ffmpeg".to_string())?;
+            if !lookup.status.success() { return Err("找不到系统 FFmpeg，请先安装并确保终端可以运行 ffmpeg".into()); }
+            PathBuf::from(String::from_utf8_lossy(&lookup.stdout).trim())
+        };
+        let output = timeout(
+            Duration::from_secs(900),
+            Command::new(ffmpeg)
+                .args(["-y", "-hide_banner", "-i"])
+                .arg(&recording)
+                .args(["-an", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart"])
+                .arg(&encoded)
+                .kill_on_drop(true)
+                .output(),
+        ).await
+            .map_err(|_| "FFmpeg 导出超时".to_string())?
+            .map_err(|_| "找不到系统 FFmpeg，请先安装并确保终端可以运行 ffmpeg".to_string())?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("FFmpeg 导出失败: {}", detail.lines().last().unwrap_or("未知错误")));
+        }
+        let output_dir = root.join(".raw").join("jc-media").join("视频");
+        std::fs::create_dir_all(&output_dir).map_err(|e| format!("创建视频目录失败: {}", e))?;
+        let stem = filename.trim_end_matches(".mp4");
+        let mut index = 0;
+        let destination = loop {
+            let name = if index == 0 { filename.to_string() } else { format!("{} ({}).mp4", stem, index) };
+            let candidate = output_dir.join(name);
+            match std::fs::OpenOptions::new().write(true).create_new(true).open(&candidate) {
+                Ok(mut file) => {
+                    let data = std::fs::read(&encoded).map_err(|e| format!("读取 MP4 失败: {}", e))?;
+                    file.write_all(&data).map_err(|e| format!("保存 MP4 失败: {}", e))?;
+                    break candidate;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => index += 1,
+                Err(error) => return Err(format!("保存 MP4 失败: {}", error)),
+            }
+        };
+        let bytes_written = std::fs::metadata(&destination).map_err(|e| format!("读取 MP4 失败: {}", e))?.len();
+        Ok(DevExportSceneVideoOutput { path: display_relative(&root, &destination), bytes_written })
+    }.await;
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    result
+}
+
 /// 文件树专用：后台提取并缓存视频缩略图，不让 WebView 解码视频首帧。
 #[tauri::command]
 pub async fn dev_generate_video_thumbnail(

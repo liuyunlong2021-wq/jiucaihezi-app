@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { reactive } from 'vue'
 
-import { createScene3DDocument, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
+import { createScene3DDocument, evaluateScene3DAnimation, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
 
 test('scene3d normalizes reusable primitives, formations and cameras', () => {
   const scene = createScene3DDocument({
@@ -36,4 +36,36 @@ test('scene3d result markers survive Raw while remaining hidden from display tex
   const content = `已经创建。\n\n${marker}`
   assert.deepEqual(parseScene3DResultMarkers(content), [{ path: '.raw/jc-media/文档/宫殿.jcscene', title: '宫殿', objectCount: 1, formationCount: 2 }])
   assert.equal(stripScene3DResultMarkers(content), '已经创建。')
+})
+
+test('scene3d animation evaluates the same timeline deterministically', () => {
+  const scene = createScene3DDocument({
+    title: '选矿', duration: 5,
+    objects: [{ id: 'ore', type: 'box', position: [0, 0, 0], color: '#777777' }],
+    timeline: [
+      { at: 0, target: 'scene', action: 'label', text: '破碎' },
+      { at: 1, duration: 2, target: 'ore', action: 'move', to: [4, 0, 0], easing: 'ease-in-out' },
+      { at: 3, target: 'ore', action: 'color', color: '#cc3300' },
+      { at: 4, target: 'ore', action: 'hide' },
+    ],
+  })
+  assert.deepEqual(evaluateScene3DAnimation(scene, 2).targets.ore.position, [2, 0, 0])
+  assert.equal(evaluateScene3DAnimation(scene, 3).targets.ore.color, '#cc3300')
+  assert.equal(evaluateScene3DAnimation(scene, 4).targets.ore.visible, false)
+  assert.equal(evaluateScene3DAnimation(scene, 2).label, '破碎')
+  assert.throws(() => createScene3DDocument({ title: '错', duration: 2, objects: [], timeline: [{ at: 1, target: 'missing', action: 'show' }] }), /动画目标不存在/)
+})
+
+test('scene3d camera timeline supports hard cuts and continuous camera moves', () => {
+  const scene = createScene3DDocument({
+    title: '分段镜头', duration: 5, objects: [], camera: { position: [0, 4, 12], target: [0, 1, 0] },
+    timeline: [
+      { at: 0, target: 'camera', action: 'camera', to: [10, 5, 8], lookAt: [4, 1, 0] },
+      { at: 2, duration: 2, target: 'camera', action: 'camera', to: [6, 3, 4], lookAt: [6, 1, 0] },
+    ],
+  })
+
+  assert.deepEqual(evaluateScene3DAnimation(scene, 0).camera, { position: [10, 5, 8], target: [4, 1, 0] })
+  assert.deepEqual(evaluateScene3DAnimation(scene, 3).camera, { position: [8, 4, 6], target: [5, 1, 0] })
+  assert.deepEqual(evaluateScene3DAnimation(scene, 4).camera, { position: [6, 3, 4], target: [6, 1, 0] })
 })

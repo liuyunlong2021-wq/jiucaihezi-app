@@ -37,6 +37,7 @@ import { executeJinaWebSearchTool, WEB_SEARCH_TOOL_DEFINITION } from '@/utils/we
 import { executeReadUrlTool, extractPublicHttpUrls, READ_URL_TOOL_DEFINITION } from '@/utils/webReader'
 import { memoryToolNeedsApproval } from './memoryToolPolicy'
 import { parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from './scene3d'
+import type { Scene3DDocument } from './scene3d'
 
 import type { ConversationMode, ConversationTurn } from './conversationTranscript'
 import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
@@ -57,6 +58,7 @@ export interface MemoryChatInput {
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
+  recordSceneVideo?: (document: Scene3DDocument, signal?: AbortSignal) => Promise<Blob>
 }
 
 export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
@@ -156,7 +158,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
 
   const projectTools = isTauriRuntime()
-    ? createDesktopProjectToolExecutor({ projectDir: input.projectId })
+    ? createDesktopProjectToolExecutor({
+      projectDir: input.projectId,
+      recordSceneVideo: input.recordSceneVideo ? document => input.recordSceneVideo!(document, input.signal) : undefined,
+    })
     : createWebProjectToolExecutor({ projectId: input.projectId, files: webProjectFiles })
 
   if (!memoryMode) {

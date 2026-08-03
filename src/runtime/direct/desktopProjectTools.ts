@@ -19,7 +19,7 @@ import {
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
-import { createScene3DDocument, scene3DResultMarker, serializeScene3DDocument } from '@/runtime/memory/scene3d'
+import { createScene3DDocument, parseScene3DDocument, scene3DResultMarker, serializeScene3DDocument, type Scene3DDocument } from '@/runtime/memory/scene3d'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
 type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
@@ -108,6 +108,7 @@ export function createDesktopProjectToolExecutor(input: {
   loadSkill?: LocalSkillLoader
   attachments?: TerminalAttachment[]
   renderImage?: MemoryImageRenderer
+  recordSceneVideo?: (document: Scene3DDocument) => Promise<Blob>
 }): DirectToolExecutor {
   const root = String(input.projectDir || '').trim()
   const skills = createCreativeSkillSession(input.fetcher)
@@ -379,6 +380,19 @@ export function createDesktopProjectToolExecutor(input: {
         ? (await invoke('dev_write_file', { root: requireProject(), relativePath: existingPath, content }), existingPath)
         : await writeGeneratedFile(`.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`, content)
       return { content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}` }
+    }
+
+    if (name === 'export_3d_scene_video') {
+      const path = normalizeCreativeProjectPath(String(args.path))
+      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) throw new Error('动画场景路径无效')
+      if (!input.recordSceneVideo) throw new Error('当前环境不能录制 3D 动画')
+      const scene = parseScene3DDocument(JSON.parse((await readFile(path)).content))
+      const recording = await input.recordSceneVideo(scene)
+      const result = await invoke('dev_export_scene_video', {
+        root: requireProject(), dataBase64: uint8ArrayToBase64(new Uint8Array(await recording.arrayBuffer())),
+        mimeType: recording.type, outputFilename: artifactFilename(scene.title, 'mp4'),
+      })
+      return { content: `已导出 3D 动画 MP4: ${String(result.path || '')}` }
     }
 
     if (name === 'terminal') {

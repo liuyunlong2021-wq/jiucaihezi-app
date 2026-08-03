@@ -155,6 +155,15 @@ struct DevRunCommandInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevExportSceneVideoInput {
+    root: String,
+    data_base64: String,
+    mime_type: String,
+    output_filename: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevExternalListFilesInput {
     path: String,
     max_entries: Option<usize>,
@@ -381,6 +390,13 @@ struct DevRunCommandOutput {
     stdout: String,
     stderr: String,
     duration_ms: u128,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExportSceneVideoOutput {
+    path: String,
+    bytes_written: u64,
 }
 
 #[derive(Serialize, Clone)]
@@ -1245,12 +1261,20 @@ pub fn run() {
             std::fs::create_dir_all(app_data.join("vault")).ok();
 
             // ★ 手动建窗以挂载 on_navigation 拦截 NewAPI 登录回调
-            let window_config = app.config().app.windows.first()
-                .ok_or("missing main window config")?;
+            let mut window_config = app.config().app.windows.first()
+                .ok_or("missing main window config")?
+                .clone();
+            #[cfg(debug_assertions)]
+            {
+                let dev_url = app.config().build.dev_url.clone().unwrap_or_else(|| {
+                    "http://localhost:1420".parse().expect("valid desktop dev URL")
+                });
+                window_config.url = tauri::WebviewUrl::External(dev_url);
+            }
             let app_handle_nav = app.handle().clone();
             let app_handle_new = app.handle().clone();
 
-            let window_builder = WebviewWindowBuilder::from_config(app.handle(), window_config)?
+            let window_builder = WebviewWindowBuilder::from_config(app.handle(), &window_config)?
                 .on_navigation(move |url| {
                     if is_workbench_return_url(url) {
                         if let Some(main) = app_handle_nav.get_webview_window("main") {
@@ -1510,6 +1534,7 @@ pub fn run() {
             commands::dev::dev_replace_in_external_file,
             commands::dev::dev_get_diff,
             commands::dev::dev_run_command,
+            commands::dev::dev_export_scene_video,
             commands::dev::dev_generate_video_thumbnail,
             commands::dev::pick_project_folder,
             commands::dev::list_mobile_projects,

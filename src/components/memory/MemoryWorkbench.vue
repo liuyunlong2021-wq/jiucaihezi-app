@@ -76,6 +76,8 @@ const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
+const recordingScene = ref<Scene3DDocument | null>(null)
+const recordingSceneEditor = ref<{ recordVideo: (signal?: AbortSignal) => Promise<Blob> } | null>(null)
 const projectMapReturn = ref<{ resource: Extract<ProjectResourceOpenResult, { type: 'project-map' }>; viewport: { x: number; y: number; zoom: number } } | null>(null)
 const projectMapViewport = ref<{ x: number; y: number; zoom: number } | null>(null)
 const backlinks = ref<ProjectResource[]>([])
@@ -798,6 +800,7 @@ async function send() {
       files: referencedFiles.value,
       selectedSkillNames: selectedSkillNames.value,
       webSearchEnabled: webSearchEnabled.value,
+      recordSceneVideo,
       signal: abortController.signal,
       onToolEvent: updateRunTool,
       confirmTool: async call => {
@@ -882,6 +885,7 @@ function memoryToolApprovalMessage(call: DirectToolCall): string {
   let args: Record<string, unknown> = {}
   try { args = JSON.parse(call.function.arguments || '{}') } catch { /* runtime reports malformed arguments */ }
   if (call.function.name === 'terminal') return String(args.reason || '').split(/[。；;\n]/)[0]?.trim().slice(0, 24) || '执行本机命令'
+  if (call.function.name === 'export_3d_scene_video') return '调用本机 FFmpeg 导出 MP4'
   if (call.function.name === 'delete') return `删除项目资源：${String(args.path || '')}`
   if (call.function.name === 'wiki') return '修改项目 Wiki'
   if (call.function.name === 'write' || call.function.name === 'edit') return `修改项目外文件：${String(args.path || '')}`
@@ -1448,6 +1452,17 @@ async function saveSceneScreenshot(blob: Blob, title: string) {
   status.value = `截图已保存：${resource.path}`
 }
 
+async function recordSceneVideo(document: Scene3DDocument, signal?: AbortSignal): Promise<Blob> {
+  recordingScene.value = document
+  await nextTick()
+  for (let index = 0; index < 600 && !recordingSceneEditor.value; index += 1) {
+    await new Promise(resolve => requestAnimationFrame(resolve))
+  }
+  if (!recordingSceneEditor.value) throw new Error('3D 动画录制器启动失败')
+  try { return await recordingSceneEditor.value.recordVideo(signal) }
+  finally { recordingScene.value = null; await nextTick() }
+}
+
 function mediaResultTaskId(turn: ConversationTurn): string {
   if (turn.role !== 'assistant') return ''
   return /^\[媒体结果\]\n任务\s+(mtask_[^\s，。]+)/.exec(turn.content)?.[1] || ''
@@ -1938,12 +1953,16 @@ function readDataUrl(file: File): Promise<string> {
         @synced="refreshProjectView()"
       />
     </aside>
+    <div v-if="recordingScene" class="memory-scene-recorder" aria-hidden="true">
+      <Scene3DEditor ref="recordingSceneEditor" :document="recordingScene" recording-only />
+    </div>
   </div>
 </template>
 
 <style scoped>
 .memory-workbench { --memory-header-height: 52px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--paper); color: var(--ink1); font-size: var(--font-base); }
 .memory-workbench.desktop-runtime { padding-top: 28px; box-sizing: border-box; }
+.memory-scene-recorder { position: fixed; top: 0; left: -10000px; width: 640px; height: 640px; pointer-events: none; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
 .memory-workbench.creation-open { grid-template-columns: 280px minmax(420px, 1fr) var(--memory-creation-width); }
 .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(420px, 1fr) var(--memory-creation-width); }
@@ -1991,7 +2010,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .memory-messages::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--olive-dark) 78%, transparent); background-clip: content-box; }
 .memory-message-list { width: 100%; }
-.memory-message { position: relative; margin-bottom: 24px; padding-right: 30px; }
+.memory-message { position: relative; margin-bottom: 24px; padding-right: 30px; content-visibility: auto; }
 .memory-message.user { margin-left: min(18%, 130px); padding: 12px 42px 12px 14px; border-radius: 8px; background: var(--surface); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }

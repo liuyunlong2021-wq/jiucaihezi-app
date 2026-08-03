@@ -2,6 +2,7 @@ export type Scene3DShape = 'person' | 'box' | 'plane' | 'wall' | 'entrance' | 'c
 export type Scene3DFormationType = 'line' | 'grid' | 'circle' | 'scatter'
 export type Scene3DAspect = '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
 export type Scene3DProjection = 'perspective' | 'orthographic'
+export type Scene3DAnimationAction = 'show' | 'hide' | 'move' | 'rotate' | 'scale' | 'color' | 'camera' | 'label'
 
 export interface Scene3DObject {
   id: string
@@ -49,6 +50,18 @@ export interface Scene3DCamera {
   aspect?: Scene3DAspect
 }
 
+export interface Scene3DTimelineEntry {
+  at: number
+  duration?: number
+  target: string
+  action: Scene3DAnimationAction
+  to?: [number, number, number]
+  lookAt?: [number, number, number]
+  color?: string
+  text?: string
+  easing?: 'linear' | 'ease-in-out'
+}
+
 export interface Scene3DDocument {
   version: 1
   title: string
@@ -59,12 +72,21 @@ export interface Scene3DDocument {
   savedCameras: Scene3DCamera[]
   lighting: { direction: 'left' | 'right' | 'front' | 'back' | 'top'; intensity: 'low' | 'medium' | 'high'; shadows: boolean }
   canvas: { aspect: Scene3DAspect; grid: boolean; snap: boolean }
+  duration?: number
+  timeline?: Scene3DTimelineEntry[]
+}
+
+export interface Scene3DAnimationState {
+  targets: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number]; visible: boolean; color?: string }>
+  camera: { position: [number, number, number]; target: [number, number, number] }
+  label: string
 }
 
 const SHAPES = new Set<Scene3DShape>(['person', 'box', 'plane', 'wall', 'entrance', 'cylinder', 'sphere', 'cone', 'line', 'arrow'])
 const FORMATIONS = new Set<Scene3DFormationType>(['line', 'grid', 'circle', 'scatter'])
 const ASPECTS = new Set<Scene3DAspect>(['16:9', '9:16', '1:1', '4:3', '3:4'])
 const PROJECTIONS = new Set<Scene3DProjection>(['perspective', 'orthographic'])
+const ANIMATION_ACTIONS = new Set<Scene3DAnimationAction>(['show', 'hide', 'move', 'rotate', 'scale', 'color', 'camera', 'label'])
 const CSS_COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20})$/i
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -178,12 +200,75 @@ export function parseScene3DDocument(input: unknown): Scene3DDocument {
   const camera = parseCamera(root.camera)
   const aspect = enumValue(canvas.aspect ?? camera.aspect, ASPECTS, '16:9', '画幅')
   camera.aspect = aspect
+  const duration = root.duration === undefined ? undefined : number(root.duration, 0, 0.1, 600)
+  const targetIds = new Set([...knownIds, ...groups.map(item => item.id), 'camera', 'scene'])
+  const rawTimeline = Array.isArray(root.timeline) ? root.timeline : []
+  if (rawTimeline.length > 1000) throw new Error('动画动作最多 1000 个')
+  const timeline = rawTimeline.map((value, index): Scene3DTimelineEntry => {
+    const item = record(value, `动画动作 ${index + 1}`)
+    const action = enumValue(item.action, ANIMATION_ACTIONS, 'move', '动画动作')
+    const target = id(item.target, '动画目标')
+    if (!targetIds.has(target)) throw new Error(`动画目标不存在: ${target}`)
+    const at = number(item.at, 0, 0, duration ?? 600)
+    const actionDuration = item.duration === undefined ? undefined : number(item.duration, 0, 0, 600)
+    if (duration !== undefined && at + (actionDuration || 0) > duration) throw new Error('动画动作超出总时长')
+    if (['move', 'rotate', 'scale'].includes(action) && item.to === undefined) throw new Error(`${action} 动作缺少目标值`)
+    if (action === 'color' && item.color === undefined) throw new Error('color 动作缺少颜色')
+    if (action === 'camera' && item.to === undefined && item.lookAt === undefined) throw new Error('camera 动作缺少机位')
+    if (action === 'label' && !text(item.text)) throw new Error('label 动作缺少文字')
+    return {
+      at, ...(actionDuration === undefined ? {} : { duration: actionDuration }), target, action,
+      ...(item.to === undefined ? {} : { to: vector(item.to, [0, 0, 0], action === 'scale' ? 0.01 : -10_000) }),
+      ...(item.lookAt === undefined ? {} : { lookAt: vector(item.lookAt) }),
+      ...(item.color === undefined ? {} : { color: color(item.color) }),
+      ...(text(item.text) ? { text: text(item.text, '', 120) } : {}),
+      ...(item.easing === 'ease-in-out' ? { easing: 'ease-in-out' as const } : {}),
+    }
+  }).sort((left, right) => left.at - right.at)
+  if (timeline.length && duration === undefined) throw new Error('动画场景必须提供总时长')
   return {
     version: 1, title, objects, formations, groups, camera,
     savedCameras: (Array.isArray(root.savedCameras) ? root.savedCameras : []).slice(0, 20).map((item, index) => parseCamera(item, `机位 ${index + 1}`)),
     lighting: { direction: direction as Scene3DDocument['lighting']['direction'], intensity: intensity as Scene3DDocument['lighting']['intensity'], shadows: lighting.shadows !== false },
     canvas: { aspect, grid: canvas.grid !== false, snap: canvas.snap !== false },
+    ...(duration === undefined ? {} : { duration }),
+    ...(timeline.length ? { timeline } : {}),
   }
+}
+
+function mix(from: [number, number, number], to: [number, number, number], amount: number): [number, number, number] {
+  return from.map((value, index) => value + (to[index]! - value) * amount) as [number, number, number]
+}
+
+export function evaluateScene3DAnimation(source: Scene3DDocument, time: number): Scene3DAnimationState {
+  const document = source
+  const targets: Scene3DAnimationState['targets'] = {}
+  for (const item of [...document.objects, ...document.formations]) targets[item.id] = {
+    position: [...item.position], rotation: 'rotation' in item && item.rotation ? [...item.rotation] : [0, 0, 0], scale: [1, 1, 1], visible: true,
+  }
+  for (const item of document.groups) targets[item.id] = { position: [...(item.position || [0, 0, 0])], rotation: [0, 0, 0], scale: [1, 1, 1], visible: true }
+  const state: Scene3DAnimationState = { targets, camera: { position: [...document.camera.position], target: [...document.camera.target] }, label: '' }
+  const now = Math.max(0, Math.min(time, document.duration || 0))
+  for (const entry of document.timeline || []) {
+    if (entry.at > now) break
+    const progress = entry.duration ? Math.min(1, (now - entry.at) / entry.duration) : 1
+    const amount = entry.easing === 'ease-in-out' ? progress * progress * (3 - 2 * progress) : progress
+    if (entry.action === 'label') state.label = entry.text || ''
+    else if (entry.action === 'camera') {
+      if (entry.to) state.camera.position = mix(state.camera.position, entry.to, amount)
+      if (entry.lookAt) state.camera.target = mix(state.camera.target, entry.lookAt, amount)
+    } else {
+      const target = state.targets[entry.target]
+      if (!target) continue
+      if (entry.action === 'show') target.visible = true
+      if (entry.action === 'hide') target.visible = false
+      if (entry.action === 'move' && entry.to) target.position = mix(target.position, entry.to, amount)
+      if (entry.action === 'rotate' && entry.to) target.rotation = mix(target.rotation, entry.to, amount)
+      if (entry.action === 'scale' && entry.to) target.scale = mix(target.scale, entry.to, amount)
+      if (entry.action === 'color' && entry.color && amount === 1) target.color = entry.color
+    }
+  }
+  return state
 }
 
 export function createScene3DDocument(args: Record<string, unknown>): Scene3DDocument {

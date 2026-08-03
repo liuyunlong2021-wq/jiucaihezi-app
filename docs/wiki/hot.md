@@ -6,9 +6,13 @@
 
 **项目骨架最高优先合同：[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]。** 四类归档、隐藏目录和系统目录保护准则已完成代码对齐；任何冲突的旧产品路径不得用于当前实现。真实设备升级和打开既有项目仍需人工验收。
 
-**快速模式现行合同：** 与记忆模式共享当前对话上下文，唯一工具是只读 `wiki_search`；不提供附件、项目引用、网址、Skill、MCP 或其他工具。模式选择器是权限唯一来源。定向 69/69、完整 focused 1429/1437（8 跳过）和 TypeScript 通过；真实模型自主查询仍待人工验收。
+**快速/记忆对话现行合同：** 对话 Markdown 是唯一持久化真源；App 只读取当前选中的 Raw，发送时按模型容量从最新完整问答轮次向前装入，能装下就装入当前对话全部历史。快速模式唯一工具是只读 `wiki_search`；记忆模式在同一上下文上提供完整候选工具。模式选择器是工具权限唯一来源，用户文字不能改变工具池，模型只决定是否实际调用。新对话不自动装入其他 Raw；快速模式不能读取其他 Raw，记忆模式仅可能通过项目级 `read/grep` 主动读取。
+
+**记忆长对话屏外绘制已降载：** [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]] 保留完整自然文档流，只给 `.memory-message` 复用主聊天已有的 `content-visibility: auto`；不改显示、Raw、模型上下文、Markdown、媒体卡和滚动，不恢复虚拟列表或手工测高。定向 `45/45`、TypeScript、Wiki validate 与差异检查通过；Desktop/Web/iPhone 长对话体感待人工矩阵。
 
 **通用记忆工作台内容与空间能力已实施：** [[开发/通用记忆工作台本地作品生成基础工具SDD]] 已接入 Mermaid、H1-H3 文档大纲及 HTML/PDF/可编辑 PPTX 幻灯片；[[开发/通用记忆工作台项目地图SDD]] 已把标准 `.canvas` 作为连接 Markdown、媒体、创作画布和 3D 场景的独立项目地图；[[开发/通用记忆工作台3D白膜场景基础工具SDD]] 已为独立主要人物补齐双臂双腿，群众阵列保持实例化简模。自动测试、类型检查、Web/Desktop 构建与产物审计、Web 桌面/移动视口验收通过；PowerPoint/WPS 与三平台安装包人工矩阵待补。
+
+**本地三维科普动画真实闭环已通过：** [[开发/通用记忆工作台本地三维科普动画与MP4导出SDD]] 已为 `.jcscene` 接入确定性对象与镜头时间线、原生画布录制和 Desktop-only `export_3d_scene_video`；复用现有三项审批并调用用户系统 FFmpeg 输出 H.264 MP4，不内置新运行时。2026-08-03 用户已两次完成真实 Desktop 一句话选矿成片，第二次确认分段镜头语言生效；相关自动门禁与镜头定向 25/25、TypeScript 均通过。
 
 1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
 2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。

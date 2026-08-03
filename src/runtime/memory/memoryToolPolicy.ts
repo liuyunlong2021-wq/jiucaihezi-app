@@ -34,7 +34,7 @@ export function memoryToolNeedsApproval(call: DirectToolCall, currentUserText: s
   for (const path of paths) {
     if (!isPathExplicitlyMentioned(currentUserText, path)) throw new Error(`项目外路径必须由用户在本轮明确提供: ${path}`)
   }
-  if (name === 'terminal' || name === 'delete') return true
+  if (name === 'terminal' || name === 'delete' || name === 'export_3d_scene_video') return true
   if (name === 'wiki') {
     const action = String(args.action || '')
     return action === 'scaffold' || action === 'graph'

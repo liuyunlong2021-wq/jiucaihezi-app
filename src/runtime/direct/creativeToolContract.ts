@@ -114,7 +114,7 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
     content: { type: 'string', description: 'Complete Markdown slides; separate slides with a line containing only ---' },
     format: { type: 'string', enum: ['html', 'pdf', 'pptx'], description: 'Output slide format' },
   }, ['title', 'content', 'format']),
-  tool('create_3d_scene', 'Create or replace a lightweight local 3D blockout scene for spatial layout, character staging, camera composition, or an image-generation reference. Use it when the user asks for a white-box scene, simple people and blocks, staging, spatial arrangement, a rotatable composition, or camera planning. Do not use it to generate a finished image or detailed 3D model.', {
+  tool('create_3d_scene', 'Create or replace a lightweight local 3D blockout scene for spatial layout, character staging, camera composition, an image-generation reference, or a geometric explainer. For an animated explainer, divide the timeline into sections and add a camera action for every section instead of keeping one wide shot. Do not use it to generate a finished image or detailed 3D model.', {
     title: { type: 'string', description: 'Scene title and filename without extension' },
     existingPath: { type: 'string', description: 'Optional existing .raw/jc-media/文档/*.jcscene path to replace after reading it; omit when creating' },
     objects: {
@@ -143,7 +143,21 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
     savedCameras: { type: 'array', description: 'Optional named cameras', maxItems: 20, items: { type: 'object', additionalProperties: true } },
     lighting: { type: 'object', description: 'direction(left/right/front/back/top), intensity(low/medium/high), shadows(boolean)', additionalProperties: true },
     canvas: { type: 'object', description: 'aspect(16:9/9:16/1:1/4:3/3:4), grid(boolean), snap(boolean)', additionalProperties: true },
+    duration: { type: 'number', description: 'Optional animation duration in seconds, from 0.1 to 600', minimum: 0.1, maximum: 600 },
+    timeline: { type: 'array', description: 'Optional deterministic animation timeline. For each explainer section add a label and a camera action with target=camera, to=camera position, and lookAt=subject. A camera action without duration is a hard cut; with duration it is a push, pull, pan, or tracking move.', maxItems: 1000, items: {
+      type: 'object', additionalProperties: false, required: ['at', 'target', 'action'], properties: {
+        at: { type: 'number', minimum: 0 }, duration: { type: 'number', minimum: 0, description: 'Omit for an instant action or hard camera cut; set for continuous movement.' }, target: { type: 'string', description: 'Object ID, group ID, scene, or camera. Camera actions use camera.' },
+        action: { type: 'string', enum: ['show', 'hide', 'move', 'rotate', 'scale', 'color', 'camera', 'label'] },
+        to: vectorProperty, lookAt: { ...vectorProperty, description: 'Camera subject or look direction target.' }, color: { type: 'string' }, text: { type: 'string' }, easing: { type: 'string', enum: ['linear', 'ease-in-out'] },
+      },
+    } },
   }, ['title', 'objects']),
+]
+
+const MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS = [
+  tool('export_3d_scene_video', 'Record an existing animated .jcscene with the local Three.js renderer and export it as H.264 MP4 using the computer system FFmpeg. Use only for local geometric explainers, after create_3d_scene has created a duration and timeline. This starts a local process and requires approval.', {
+    path: { type: 'string', description: 'Existing project-relative .raw/jc-media/文档/*.jcscene path' },
+  }, ['path']),
 ]
 
 const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
@@ -151,6 +165,7 @@ const MEMORY_DESKTOP_TOOL_DEFINITIONS = [
   ...CREATIVE_PROJECT_TOOL_DEFINITIONS.slice(0, -1),
   ...MEMORY_FILE_TOOL_DEFINITIONS,
   ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
+  ...MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS,
   CREATIVE_PROJECT_TOOL_DEFINITIONS.at(-1)!,
 ]
 
@@ -191,7 +206,8 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   create_document: { title: 'string', content: 'string', format: 'string' },
   create_html: { title: 'string', content: 'string' },
   export_markdown_slides: { title: 'string', content: 'string', format: 'string' },
-  create_3d_scene: { title: 'string', existingPath: 'string', objects: 'json', formations: 'json', groups: 'json', camera: 'json', savedCameras: 'json', lighting: 'json', canvas: 'json' },
+  create_3d_scene: { title: 'string', existingPath: 'string', objects: 'json', formations: 'json', groups: 'json', camera: 'json', savedCameras: 'json', lighting: 'json', canvas: 'json', duration: 'json', timeline: 'json' },
+  export_3d_scene_video: { path: 'string' },
   terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }
 
@@ -218,7 +234,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
       throw new Error(`工具参数类型无效: ${key}`)
     }
   }
-  const definition = [WIKI_SEARCH_TOOL_DEFINITION, ...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS, ...MEMORY_ARTIFACT_TOOL_DEFINITIONS]
+  const definition = [WIKI_SEARCH_TOOL_DEFINITION, ...CREATIVE_PROJECT_TOOL_DEFINITIONS, ...MEMORY_FILE_TOOL_DEFINITIONS, ...MEMORY_ARTIFACT_TOOL_DEFINITIONS, ...MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS]
     .find(tool => tool.function.name === call.function.name)!
   for (const field of definition.function.parameters.required) {
     if (!(field in args)) throw new Error(`缺少工具参数: ${field}`)
