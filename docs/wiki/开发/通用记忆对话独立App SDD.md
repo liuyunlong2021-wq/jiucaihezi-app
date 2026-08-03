@@ -1523,3 +1523,10 @@ Web / Mobile 记忆模式候选工具只来自以下既有能力：
 - Web 新增 `/privacy/`、`/support/`、`/terms/` 和共享 `legal.css`；Web 产物白名单只登记这四项，Desktop / iOS 构建继续由现有裁剪脚本移除它们。
 - 自动验证通过：focused `1439 passed / 8 skipped / 0 failed`（`sha256:cc4dcb81d4ef`）、Gateway 注销与同步 `20/20`（`sha256:86ea9f00f57f`）、TypeScript（`sha256:1d58a6f525b8`）、Web quick build 与产物审计（`sha256:0321306433c2`）、`build:ios:quick`、`git diff --check`。三个合规路径经本地 HTTP 预览均返回 200。
 - 尚未部署 Gateway 和合规页面；尚未用真实 iPhone 专用账号执行不可恢复注销，也未验证生产 NewAPI 注销后旧工作台 Key 立即失效。跨 NewAPI、D1、KV 的删除是顺序操作而非跨服务事务：失败不会误报成功，但已完成的前序删除不回滚；本地作品始终保留。
+
+### 19.9 App Store 审核提交（2026-08-03）
+
+- App Store Connect 已提交 iOS App `2.1.7`，构建版本 `2.1.7.1`；页面明确显示“已提交 1 个项目”和“正在等待审核”。
+- App ID 为 `6795407590`，Bundle ID 为 `com.jiucaihezi.mobile`；供应范围为 175 个国家和地区并包含中国大陆，价格为免费。
+- iPhone 与 13 英寸 iPad 截图均已通过上传校验。iPad 原始 PNG 因包含 alpha 通道被拒，转换为同尺寸 `2048 x 2732`、无 alpha 的 JPEG 后成功提交。
+- 发布方式为审核通过后自动发布。当前只能写成“已提交 Apple 审核”，普通用户尚不能从 App Store 下载；通过审核并实际发布后再更新公开下载状态。

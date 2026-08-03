@@ -12,7 +12,7 @@
 
 **Web / Mobile 核心能力收敛已实施：** [[开发/通用记忆对话独立App SDD]] 第 18 节固定 Web / Mobile 保留项目、对话、完整 Wiki 能力、项目内受限读写、附件/文档转换、站内预览、标准 `.canvas` 项目地图和云媒体，移除 Three.js `.jcscene`、本机 FFmpeg、Terminal、本地模型及自定义 MCP；Desktop 不裁剪这些能力。三端创作面板关闭前保存 `.jccanvas`，成功后卸载 LeaferJS 资源，媒体任务继续由 `mediaTaskStore` 运行；媒体二进制绝不同步。focused 1435/1443（8 跳过）、TypeScript、Web quick build 与产物审计通过；2026-08-03 真实 iPhone 已完成 `2.1.7` 开发签名安装、启动和用户当前流程验收，Desktop/Web 详细人工矩阵仍按后续使用补充。
 
-**v2.1.7 当前发布边界：** `main` 与 `v2.1.7` 指向 `cf599f26`；Web Production 已部署，正式域名返回 200 并加载 `assets/index-DeAQeEjp-jc20260610b.js`。GitHub Release 已建立并已有 Apple Silicon 产物；2026-08-03 18:25 检查时 Actions `30805047950` 的 Windows、Intel Mac 和发布清单仍未全部完成，生产 `latest.json` 仍为 `2.1.6`，不得写成三平台更新通道已经全部切换。iPhone `2.1.7` 是开发签名直装，不是 TestFlight / App Store 公开版；现有 TestFlight 分发范围仍是 `2.1.0` 内部测试，Android 尚无公开版本。
+**v2.1.7 当前发布边界：** `main` 与 `v2.1.7` 指向 `cf599f26`；Web Production 已部署，正式域名返回 200 并加载 `assets/index-DeAQeEjp-jc20260610b.js`。GitHub Release 已建立并已有 Apple Silicon 产物；2026-08-03 18:25 检查时 Actions `30805047950` 的 Windows、Intel Mac 和发布清单仍未全部完成，生产 `latest.json` 仍为 `2.1.6`，不得写成三平台更新通道已经全部切换。iOS `2.1.7`（构建 `2.1.7.1`）已提交 App Store Connect，当前“正在等待审核”，审核通过后自动发布；在实际发布前普通用户仍不能从 App Store 下载。现有 TestFlight 分发范围仍是 `2.1.0` 内部测试，Android 尚无公开版本。
 
 **iPhone App Store 账号收敛已在本地实施：** [[开发/通用记忆对话独立App SDD]] 第 19 节固定只在 iPhone 隐藏注册、API Key、充值、签到、邀请等入口，保留已有账号登录、退出、文字同步并增加账号注销；Desktop / Web 不变。Gateway 注销使用现有 `sync_session` 鉴权并从 Session 派生用户，客户端成功后只解除云绑定，不删本地作品。focused 1439/1447（8 跳过）、Gateway 20/20、TypeScript、Web/iOS quick build和产物审计通过；Gateway、合规页面尚未部署，真实 iPhone 不可恢复注销和旧 Key 失效仍待专用账号验收。
 
@@ -52,4 +52,4 @@ Desktop 图片粘贴无响应的根因已修复：记忆工作台在 WebView 没
 
 ---
 
-> 上次刷新: 2026-08-03（`v2.1.7` Web 已正式部署；GitHub Release 已建立，桌面 Actions 仍按用户要求不等待。真实 iPhone `2.1.7` 开发签名版已通过当前流程，但尚未成为 TestFlight / App Store 公开版。）
+> 上次刷新: 2026-08-03（`v2.1.7` Web 已正式部署；GitHub Release 已建立，桌面 Actions 仍按用户要求不等待。iOS `2.1.7` / `2.1.7.1` 已提交 Apple 审核并正在等待审核，尚未成为 App Store 公开版。）
