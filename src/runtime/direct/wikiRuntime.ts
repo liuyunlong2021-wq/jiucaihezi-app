@@ -232,7 +232,7 @@ async function status(workspace: WikiWorkspace, state: Snapshot): Promise<string
   if (!isDev) return `📊 类型：通用 Wiki\n文件总数：${files.length}`
   let lastOperation = '无记录'
   if (state.files.has(`${wiki}/log.md`)) {
-    lastOperation = (await workspace.read(`${wiki}/log.md`)).split(/\r?\n/).find(line => line.startsWith('## ['))?.replace(/^#+\s*/, '') || lastOperation
+    lastOperation = (await workspace.read(`${wiki}/log.md`)).split(/\r?\n/).reverse().find(line => line.startsWith('## ['))?.replace(/^#+\s*/, '') || lastOperation
   }
   return [
     '📊 类型：开发项目',

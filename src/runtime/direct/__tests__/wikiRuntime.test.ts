@@ -111,12 +111,14 @@ test('search prioritizes current entry pages and excludes log and archive by def
 })
 
 test('status reports development category counts and latest operation', async () => {
-  const { workspace } = developmentWiki()
+  const { workspace } = developmentWiki({
+    'docs/wiki/log.md': '# Log\n\n## [2026-07-22] 更早操作\n\n## [2026-08-04] 最近操作\n',
+  })
   const output = await executeWikiAction(workspace, { action: 'status' })
 
   assert.match(output, /类型：开发项目/)
   assert.match(output, /开发：1 篇/)
-  assert.match(output, /2026-07-22/)
+  assert.match(output, /上次操作：\[2026-08-04\] 最近操作/)
 })
 
 test('graph writes Canvas from real Markdown links but ignores code and comments', async () => {

@@ -1,10 +1,10 @@
 # 通用记忆对话工作台 SDD
 
 > 日期：2026-07-28
-> 更新：2026-08-03（Web / Mobile 核心能力收敛设计）
-> 状态：V2.1.3 Web 与桌面正式版已发布；`.raw/jc-media` 目录迁移、完整项目骨架、隐藏与保护准则均已实施；快速/记忆新合同已实施并通过自动验证；Web / Mobile 核心能力收敛设计已确认、待实施，Android 继续暂停。
+> 更新：2026-08-04（单产品化边界与方向性文字覆盖）
+> 状态：V2.1.9 Web 与桌面正式版已发布；`.raw/jc-media` 目录迁移、完整项目骨架、隐藏与保护准则均已实施；快速/记忆新合同与 Web / Mobile 核心能力收敛均已实施，Android 继续暂停。iOS `2.1.7 (2.1.7.1)` 仍为已提交 Apple 审核，未成为公开 App Store 版。
 > 首发目标：<https://jiucaihezi.studio>
-> 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/通用记忆工作台模型主导工具与审批SDD]]、[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
+> 依据：`AGENTS.md`、[[架构/产品架构]]、[[开发/通用记忆工作台单产品化分离SDD]]、[[开发/通用记忆工作台模型主导工具与审批SDD]]、[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]、[[开发/Wiki四Skill产品化升级SDD]]、[[开发/文件系统/索引]]、[[开发/文件系统/文件树一期资源身份与文件安全SDD]]、[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]、[[开发/创模式MCP工具接入SDD]]、[[开发/韭菜盒子原生媒体编排能力SDD]]
 
 ## 1. 决断
 
@@ -31,25 +31,11 @@ Markdown/文本  -> 临时预览层显示文档阅读器
 
 ## 2. 为什么这是正确边界
 
-### 2.0 一个底座，多产品壳
+### 2.0 一个保留产品，一条依赖闭包
 
-通用记忆能力是后续产品共用的底座，不是把所有产品界面和运行时一起塞进一个安装包。仓库保持一个，交付物按产品独立：
+本仓库只保留通用记忆工作台。边界以 [[开发/通用记忆工作台单产品化分离SDD]] 为准：记忆工作台现在拥有的全部功能保留，当前没有的功能迁出。
 
-```text
-通用底座
-├── 登录、Gateway 与云项目同步
-├── ProjectFileService、Raw 与 Wiki
-├── 对话、模型、Skill 与公共媒体能力
-└── 跨端资源合同
-
-独立产品壳
-├── 记忆工作台 App
-├── 韭菜盒子 Studio 主 App
-├── 电商工作台 App
-└── 漫剧工作台 App
-```
-
-每个产品壳只选择自己的前端入口、Bundle ID、Deep Link、更新通道和原生能力。共享底座不复制，未被目标入口引用的界面不进入前端产物；OpenCode sidecar 只属于 Studio，记忆、电商、漫剧和 Mobile 不得携带。当前已经发布的记忆 App 继续使用 `com.jiucaihezi.desktop`，避免现有用户的数据目录和升级链路断开；恢复主 Studio 时使用新的 `com.jiucaihezi.studio.desktop` 身份和独立发布通道。
+代码归属按默认记忆入口、各平台入口、Gateway、同步、发布配置和测试形成的实际依赖闭包判断，不按目录名判断。OpenCode、旧 Studio、文/武/道/创、电商、漫剧和制作工作台属于迁出范围；但任何仍被记忆工作台直接或间接使用的共享模块必须保留，直到依赖被等价替换。当前已经发布的记忆 App 继续使用 `com.jiucaihezi.desktop`，现有数据目录、Deep Link 和升级链路不得变化。
 
 ### 2.1 对话导航与文件导航必须分离
 
@@ -515,7 +501,7 @@ type ProjectResourceOpenResult =
 
 - 第二阶段继续使用现有“韭菜盒子”产品名、Bundle ID、签名、Deep Link 和更新通道。
 - 不建立新安装身份，不要求用户并装第二个客户端。
-- 现有主 App 源码、发布记录和可回退版本继续保留；新工作台验证失败可按现有版本回滚。
+- 记忆 App 源码、发布记录和可回退版本继续保留；分离失败可回滚到 `v2.1.9` / `f302c251`。
 - Mac 私测先于 Web 正式发布；在 Desktop 适配完成前，现有 Mac 构建仍是旧 `WorkspaceLayout`，不能作为新工作台验收证据。
 - Mac 私测使用本机调试/测试构建，不触发正式更新通道；真实 RH 3D 验收须在新版 `rh-adapter` 和 NewAPI 模型配置完成后进行。
 
@@ -1448,6 +1434,13 @@ Web / Mobile 记忆模式候选工具只来自以下既有能力：
 - iPhone 13 Pro Max 已安装并启动 `com.jiucaihezi.mobile` 的 `2.1.7` 开发签名版，用户确认当前流程通过。该证据只证明本机开发版可用，不等于 TestFlight 或 App Store 发布。
 - 现有 TestFlight 证据仍是 14.24 节的 `2.1.0 (2.1.0.1)` 内部测试构建；普通用户不能从 App Store 公开下载 iPhone `2.1.7`。Android 仍无公开下载版本。手机浏览器可以直接使用已发布 Web。
 - `public/skills/jc-new-user-guide` 在 `v2.1.7` tag 之后校准：移除强制 GIF / 菜单、旧文武模式、Web 远程 MCP 和静默上传问答，改为真实的快速 / 记忆模式及 Desktop / Web / Mobile 能力边界。Skill 校验和索引生成通过，证据日志 `sha256:0f24861b8194`；Web quick build、TypeScript 与产物审计通过，构建日志 `sha256:3d9ac46c07c8`。该变更不属于现有 `v2.1.7` 安装包，进入后续构建。
+
+### 18.11 v2.1.9 方向性文字覆盖与桌面正式发布（2026-08-04）
+
+- 发布源码为 `f302c251`，`main`、`origin/main` 与 `v2.1.9` tag 一致；版本统一为 `2.1.9`。发布前 `pnpm run build` 通过：focused Node `1438 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、Web 正式构建和产物审计均成功。
+- Web Production 已部署到 <https://b45e2960.jiucaihezi.pages.dev>；正式域名 <https://jiucaihezi.studio> 返回 HTTP 200 并加载 `assets/index-C0PmvFme-jc20260610b.js`。
+- GitHub Actions <https://github.com/liuyunlong2021-wq/jiucaihezi-app/actions/runs/30904082094> 完成 macOS ARM、macOS Intel、Windows x64 与发布清单；Release <https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases/tag/v2.1.9> 为正式公开版。生产 <https://api.jiucaihezi.studio/updates/latest.json> 返回 `2.1.9`，三个桌面更新地址均由该清单提供。
+- 此处“三平台”仅指桌面安装包。iOS 公开范围保持 18.10 节结论，Android 仍无公开下载；发布成功不替代真实 Web/Desktop/iPhone 的方向性覆盖人工矩阵。
 
 ## 19. iPhone App Store 账号入口最小收敛与账号注销（2026-08-03）
 

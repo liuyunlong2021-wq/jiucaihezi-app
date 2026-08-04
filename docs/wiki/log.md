@@ -465,3 +465,17 @@
 - 现行合同：项目中心提供 `上传并覆盖云端` 和 `下载并覆盖本地`；前者以本地允许同步文字快照覆盖云端并 tombstone 云端独有文字，后者以云端文字快照覆盖本地并删除本地独有可同步文字。媒体、空目录、凭据、设置、Skill/MCP/Provider/Session 和 `.raw/.sync` 不处理。
 - 实施：`src/services/projectTextSync.ts` 移除文件变化监听、待上传队列合并和冲突副本，复用现有 `pullFiles/pushFiles` 完整快照；项目中心增加两个明确按钮和覆盖确认，设置页改为只读状态；旧实现记录保留为历史并在 SDD 标注已被替代。
 - 验证：方向性同步与界面定向 `52/52`；完整 focused `1438 passed / 8 skipped / 0 failed`；`vue-tsc -b` 通过；`pnpm run build:quick` 与 Web 产物审计通过；`git diff --check` 通过。真实 Web/Desktop/iPhone 覆盖删除人工矩阵待验收。
+
+## [2026-08-04] 正式发布 | v2.1.9
+
+- 发布提交 `f302c251` 已推送 `main`，`v2.1.9` tag 已推送；版本已统一为 `2.1.9`。
+- `pnpm run build` 通过：focused Node `1438 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、Web 构建和产物审计成功。Cloudflare Pages Production 已部署至 `https://b45e2960.jiucaihezi.pages.dev`；正式域名返回 HTTP 200 并加载 `assets/index-C0PmvFme-jc20260610b.js`。
+- GitHub Actions `30904082094` 成功完成 macOS ARM、macOS Intel、Windows x64 和发布清单；GitHub Release `v2.1.9` 已公开，生产 `latest.json` 返回 `2.1.9` 及三种桌面更新地址。iOS App Store 与 Android 商店公开状态未改变。
+
+## [2026-08-04] 架构决策 | 记忆工作台单产品化边界与同步合同收口
+
+- 用户确认唯一规则：记忆工作台当前拥有的全部功能保留，当前没有的功能迁出；OpenCode、旧 Studio、文/武/道/创、电商、漫剧和制作工作台属于迁出范围。
+- 新增 [[开发/通用记忆工作台单产品化分离SDD]]，共享模块按记忆入口实际依赖闭包归属；Desktop/Mobile Bundle ID、Deep Link、Web/Gateway、更新通道、数据目录、账号和云项目绑定不得改变。`v2.1.9` / `f302c251` 为回滚基线。
+- 现行同步只保留项目中心的 `上传并覆盖云端` 与 `下载并覆盖本地`；不合并、不创建冲突副本、不自动同步，媒体、空目录、凭据、设置和 `.raw/.sync` 不处理。设置页只显示状态。本轮未移动或删除代码和目录。
+- [修复回执] [[开发/制作工作台零隐式上下文SDD]] 的不存在链接 `[[开发/电商工作台无上下文单次运行SDD]]` 已改指现存唯一目标 `[[开发/电商工作台绝对独立SDD]]`；文件指纹 `c0a627ca0197 -> 0a4085108df5`，旧值剩余 0。
+- Wiki 状态查询根因已修复：应用内 `wikiRuntime` 与随包 `wiki_query.py` 原先都读取 append-only `log.md` 的第一条标题，现统一从末尾读取最新标题。TDD 红灯双端复现后，应用内运行时 `12/12`、Wiki Skill 专项 `18/18`、完整 focused 和 TypeScript 均通过；真实状态输出已指向本条 2026-08-04 决策。

@@ -164,7 +164,7 @@ class WikiSkillMigrationTests(unittest.TestCase):
                 (wiki / name).mkdir(parents=True)
                 (wiki / name / "页面.md").write_text(f"# {name}\n", encoding="utf-8")
             (wiki / "log.md").write_text(
-                "## [2026-07-20] 最近操作\n\n## [2026-07-18] 更早操作\n",
+                "## [2026-07-18] 更早操作\n\n## [2026-07-20] 最近操作\n",
                 encoding="utf-8",
             )
 

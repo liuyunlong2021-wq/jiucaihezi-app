@@ -1,57 +1,22 @@
-# 🔥 热缓存
+# 热缓存
 
-> 当前开发阶段最需要被 AI 读的二十份文档。
+> 更新：2026-08-04 | 阶段：记忆工作台单产品化分离准备
 
-**当前唯一焦点：通用记忆工作台**。优先读取 [[开发/通用记忆对话独立App SDD]]、[[开发/通用记忆工作台模型主导工具与审批SDD]]、[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]、[[开发/通用记忆工作台本地作品生成基础工具SDD]]、[[开发/通用记忆工作台3D白膜场景基础工具SDD]]。主 Studio/旧主 Web、媒体、电商、漫剧和制作工作台仅作兼容或后续参考，不是当前阶段并行主线。当前发布与 RH 运行证据仍保留在下方，避免把历史状态误读为产品优先级。
+## 当前结论
 
-**项目骨架最高优先合同：[[开发/通用记忆工作台原始素材与文档按需阅读SDD]]。** 四类归档、隐藏目录和系统目录保护准则已完成代码对齐；任何冲突的旧产品路径不得用于当前实现。真实设备升级和打开既有项目仍需人工验收。
+- **唯一产品边界：保留记忆工作台现在拥有的全部功能；记忆工作台现在没有的功能全部迁出。** OpenCode、旧 Studio、文/武/道/创、电商、漫剧、制作工作台均属迁出范围。共享代码只要仍被记忆工作台直接或间接依赖，就必须保留，不能按目录名删除。唯一实施合同见 [[开发/通用记忆工作台单产品化分离SDD]]。
+- 记忆工作台继续保留项目中心与文件树、Raw 对话、快速/记忆模式、完整 Wiki 能力、项目内工具、附件与文档转换、Markdown 阅读编辑、`.canvas` / `.jccanvas` / `.jcscene`、媒体生成、登录/模型/Skill/MCP，以及当前 Desktop、Web、Mobile 各自已经具备的能力。
+- **文字云合同只有两个手动动作：** `上传并覆盖云端`以本地完整可同步文字快照覆盖云端，`下载并覆盖本地`以云端完整可同步文字快照覆盖本地。两者都不合并、不创建冲突副本、不自动双向同步；媒体、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不比较、不传输、不删除。设置页只显示状态，操作只在项目中心。
+- 发布身份不得因分离改变：Desktop `com.jiucaihezi.desktop`、Mobile `com.jiucaihezi.mobile`、`jiucaihezi://`、正式 Web <https://jiucaihezi.studio>、现有更新地址与公钥、应用数据目录、账号及云项目绑定全部保持连续。
 
-**快速/记忆对话现行合同：** 对话 Markdown 是唯一持久化真源；App 只读取当前选中的 Raw，发送时按模型容量从最新完整问答轮次向前装入，能装下就装入当前对话全部历史。快速模式唯一工具是只读 `wiki_search`；记忆模式在同一上下文上提供完整候选工具。模式选择器是工具权限唯一来源，用户文字不能改变工具池，模型只决定是否实际调用。新对话不自动装入其他 Raw；快速模式不能读取其他 Raw，记忆模式仅可能通过项目级 `read/grep` 主动读取。
+## 已验证 / 未验证
 
-**历史文档续聊已实现：** [[开发/通用记忆工作台原始素材与文档按需阅读SDD]] 固定只从当前已装入上下文的历史用户轮次提取唯一文档名称与 `readablePath`，交给记忆模式重新 `grep/read`；不重复注入正文或上一轮工具结果，不改变快速模式。定向 55/55、完整 focused 1436/1444（8 跳过）、TypeScript 与差异检查通过；真实模型第二轮口语指代待人工验收。
+- `v2.1.9` 已发布：`main` 与 tag 指向 `f302c251`；Web Production 正式域名返回 HTTP 200；GitHub Actions `30904082094` 的 macOS ARM、macOS Intel、Windows x64 和发布清单均成功；生产 `latest.json` 返回 `2.1.9`。
+- 方向性文字覆盖已通过 focused `1438/1446`、TypeScript、Web quick build 和产物审计；真实 Web/Desktop/iPhone 覆盖删除矩阵仍待人工验收。
+- Wiki 状态查询已按 append-only 合同改为从 `log.md` 末尾读取最新标题；应用内运行时 `12/12`、Wiki Skill 专项 `18/18`、完整 focused 与 TypeScript 通过，当前状态正确显示 2026-08-04 的最新决策。
+- iOS 仍是已提交审核的 `2.1.7 (2.1.7.1)`，Android 无公开版；桌面三平台发布不等于 App Store 或 Google Play 上架。
+- 单产品化分离尚未改代码、移动目录或删除文件。`v2.1.9` / `f302c251` 是正式回滚基线。
 
-**Web / Mobile 核心能力收敛已实施：** [[开发/通用记忆对话独立App SDD]] 第 18 节固定 Web / Mobile 保留项目、对话、完整 Wiki 能力、项目内受限读写、附件/文档转换、站内预览、标准 `.canvas` 项目地图和云媒体，移除 Three.js `.jcscene`、本机 FFmpeg、Terminal、本地模型及自定义 MCP；Desktop 不裁剪这些能力。三端创作面板关闭前保存 `.jccanvas`，成功后卸载 LeaferJS 资源，媒体任务继续由 `mediaTaskStore` 运行；媒体二进制绝不同步。focused 1435/1443（8 跳过）、TypeScript、Web quick build 与产物审计通过；2026-08-03 真实 iPhone 已完成 `2.1.7` 开发签名安装、启动和用户当前流程验收，Desktop/Web 详细人工矩阵仍按后续使用补充。
+## 下一步
 
-**方向性文字覆盖已实施（2026-08-04）：** [[开发/通用记忆对话独立App SDD]] 与 [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]] 已将旧的“同步云端/立即同步、先拉后推、冲突副本”合同替换为项目中心两个明确动作：`上传并覆盖云端`和`下载并覆盖本地`。两者只覆盖允许同步的文字快照；媒体、空目录、凭据、设置和 `.raw/.sync` 不处理。代码、focused、TypeScript、Web quick build 和产物审计均已通过；真实三端人工覆盖验收仍待执行。
-
-**v2.1.7 当前发布边界：** `main` 与 `v2.1.7` 指向 `cf599f26`；Web Production 已部署，正式域名返回 200 并加载 `assets/index-DeAQeEjp-jc20260610b.js`。GitHub Release 已建立并已有 Apple Silicon 产物；2026-08-03 18:25 检查时 Actions `30805047950` 的 Windows、Intel Mac 和发布清单仍未全部完成，生产 `latest.json` 仍为 `2.1.6`，不得写成三平台更新通道已经全部切换。iOS `2.1.7`（构建 `2.1.7.1`）已提交 App Store Connect，当前“正在等待审核”，审核通过后自动发布；在实际发布前普通用户仍不能从 App Store 下载。现有 TestFlight 分发范围仍是 `2.1.0` 内部测试，Android 尚无公开版本。
-
-**iPhone App Store 账号收敛已在本地实施：** [[开发/通用记忆对话独立App SDD]] 第 19 节固定只在 iPhone 隐藏注册、API Key、充值、签到、邀请等入口，保留已有账号登录、退出、文字同步并增加账号注销；Desktop / Web 不变。Gateway 注销使用现有 `sync_session` 鉴权并从 Session 派生用户，客户端成功后只解除云绑定，不删本地作品。focused 1439/1447（8 跳过）、Gateway 20/20、TypeScript、Web/iOS quick build和产物审计通过；Gateway、合规页面尚未部署，真实 iPhone 不可恢复注销和旧 Key 失效仍待专用账号验收。
-
-**记忆长对话屏外绘制已降载：** [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]] 保留完整自然文档流，只给 `.memory-message` 复用主聊天已有的 `content-visibility: auto`；不改显示、Raw、模型上下文、Markdown、媒体卡和滚动，不恢复虚拟列表或手工测高。定向 `45/45`、TypeScript、Wiki validate 与差异检查通过；Desktop/Web/iPhone 长对话体感待人工矩阵。
-
-**通用记忆工作台内容与空间能力已实施：** [[开发/通用记忆工作台本地作品生成基础工具SDD]] 已接入 Mermaid、H1-H3 文档大纲及 HTML/PDF/可编辑 PPTX 幻灯片；[[开发/通用记忆工作台项目地图SDD]] 已把标准 `.canvas` 作为连接 Markdown、媒体、创作画布和 3D 场景的独立项目地图；[[开发/通用记忆工作台3D白膜场景基础工具SDD]] 已为独立主要人物补齐双臂双腿，群众阵列保持实例化简模。自动测试、类型检查、Web/Desktop 构建与产物审计、Web 桌面/移动视口验收通过；PowerPoint/WPS 与三平台安装包人工矩阵待补。
-
-**本地三维科普动画真实闭环已通过：** [[开发/通用记忆工作台本地三维科普动画与MP4导出SDD]] 已为 `.jcscene` 接入确定性对象与镜头时间线、原生画布录制和 Desktop-only `export_3d_scene_video`；复用现有三项审批并调用用户系统 FFmpeg 输出 H.264 MP4，不内置新运行时。2026-08-03 用户已两次完成真实 Desktop 一句话选矿成片，第二次确认分段镜头语言生效；相关自动门禁与镜头定向 25/25、TypeScript 均通过。
-
-1. **[[开发/文武道模式OpenCode-v1.18.4官方对齐升级SDD]]**、[[开发/OpenCode官方信息流翻译SDD]] — v1.18.4 对齐已实施：sidecar 不再随目录切换重启，Shell 环境按 App 缓存，暖发送只等既有 ready/session/prompt，目录 bootstrap 按 Server generation 缓存，事件桥会持续重连。SDK、更新器、CI 与 ARM64 runtime 固定 `v1.18.4`；variants 来自官方目录并随 prompt/session 恢复。focused、类型检查和 Desktop 前端产物审计通过。仍待人工三平台安装包、真实 Provider 性能和 orphan 进程矩阵；本机 Intel/Windows runtime 下载器挂起，CI 仍从同一 tag 下载。
-2. **[[开发/文武道模式OpenCodePrompt上下文对齐SDD]]** — 本分支准备并入 `main`：`@` 引用、Skill permission、附件、等待态、历史分页和 Desktop Store 单一时间线均已按 OpenCode v1.18.4 接线。侧栏选择总是先加载 Store session，再丢弃过期响应；不保留本地消息镜像或跨会话 fallback。定向回归 39/39、TypeScript、Desktop quick build 与产物审计通过；完整 focused 本轮受 2026-07-19 遗留 Node 测试进程占用固定临时目录影响，未作为通过证据。Desktop Provider 连续会话和跨平台安装包仍待人工矩阵。
-2. **[[开发/创模式Raw账本与对话Wiki移除SDD]]** — 创模式使用独立会话和模型原生能力优先的直连运行时，项目工具只按需进入工具循环；Desktop 文件适配与媒体任务均不启动 OpenCode。App 不再自动写项目 `.raw` 或打包 `jc-chat-wiki`；对话仍由 UI 会话保存，按模型容量装配最新完整对话，并按需只读 `CLAUDE.md` 与 `wiki/hot.md`。Desktop 合并 `public/skills` 内置 Skill 与 `~/.agents/skills` 本机 Skill，名称相同时内置优先，本机独有 Skill 正常可用；内置资源不复制到用户目录。
-3. **[[开发/创模式MCP工具接入SDD]]** — 同一 `mcpStore` 中已启用且已连接的 MCP 工具构成创模式候选工具池，最终请求必须按模型 function calling 能力和任务需要裁剪；MCP 候选工具的无条件追加仍是待修实现缺口。`web_search` 已从默认工具池移除，仅在用户本轮选择 `@联网搜索` 后提供，成功发送或切换快速模式后清除。GitHub OAuth 连接、深链回调、Keychain 凭据和网关 token 代换已实现；真实验收前仍需配置 GitHub OAuth App 并发布网关。
-4. **[[开发/创模式原生附件直连合同SDD]]** — 现行目标已收缩为“当前模型 + 当前 Provider/K + NewAPI 官方附件合同”。当前模型支持就发原件，不支持就明确结束；不自动换 Gemini，不询问本地工具补位。本轮只修 `video/quicktime` 等官方 MIME、最终请求预算、HTTP/`content_filter` 错误、失败历史污染和旧附件重发；不私改 NewAPI，不定义剧本或其他业务输出。
-5. **[[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]** — Web 项目适配已完成：项目树、画布、上传/导入导出、站内预览和创作媒体均使用当前浏览器 IndexedDB + OPFS；创作任务冻结提交时项目，媒体落 `jc-media`。无 D1/R2/服务器媒体存储或跨浏览器同步。
-6. **[[开发/画布开发与排障]]** — 创作面板画布架构、保存恢复、工具、性能与已知问题的唯一入口；2026-07-16 项目文件树改为虚拟行渲染，视频缩略图由桌面后台生成并缓存，定向任务仍以 `owner:path` 队列和 scoped gate 保护 `read -> modify -> write`。
-7. **[[开发/全仓测试失败审计-2026-07-13]]** — 测试债务已清理：Node 747/747、Rust 371/371；剩余是文→武、Intel/Ollama/交互人工矩阵。
-8. **[[架构/对照表]]** — 韭菜盒子 ↔ OpenCode 文件映射，发现 Bug 的入口。
-9. **[[开发/电商工作台绝对独立SDD]]**、[[开发/电商工作台绝对独立成功总结]] — 电商是独立工作台，不连接 Chat、文武创道或 OpenCode 运行时。当前字段、原始附件、选择的模型和静态 Skill 组成一次无工具直连；结果只保存项目定位文件。确认媒体计划后复用 `MediaPlanCard -> CreationPanel -> mediaTaskStore`，不自建历史、Wiki 双写或媒体回写链路。真实 Provider 和付费媒体仍待人工验收。
-10. **[[开发/AI应用适配-交接-2026-07-17]]** — AI 应用白名单全链路：rh-adapter + 创作面板下拉菜单，5 个预置应用（极速数字人/数字人/我是导演/声音克隆/声音设计），运行时动态发现节点，通用 `rh-aiapp` 模型收敛。
-11. **[[开发/文件系统/索引]]**、[[开发/文件系统/编辑区与Explorer稳定性修复SDD]] — 文件系统六期最终入口：`ProjectFileService` 是唯一项目文件总管，文件树是可视化入口，编辑区、创作面板和画布消费同一资源合同。编辑区旧草稿覆盖、Explorer 刷新折叠和底部右键菜单裁切已修复并完成自动测试、构建及 Web 真实验收；Desktop 人工验收待补。
-12. **[[开发/对话Markdown正文紧凑化SDD]]** — 助手 Markdown 正文不再保留渲染 HTML 的源码换行；长文段落和列表已收紧，代码块、表格、标题及用户输入换行不变。
-13. **[[开发/v1.3.0全仓53条失败清零SDD]]** — 发布门禁中的 53 条失败已全部清零：过期源码排版合同对齐当前语义，模型校验改用现存能力，创作面板多行事件表达式补齐语句分隔。focused 1096/1096、TypeScript、Web/Desktop 正式构建及两端产物审计全部通过；Production 部署、桌面签名和跨平台人工矩阵仍待执行。
-14. **[[开发/Wiki四Skill产品化升级SDD]]** — 查询默认现行优先并输出结论/证据/风险/下一步；Raw 新增收尾预览与来源指纹；巡检分离现行风险和归档卫生并使用自包含 Markdown 解析器；修正新增精确预览与回执。专项、完整 focused 与 Web 正式构建通过，正式 Desktop 三平台工具环境和普通用户闭环待人工验收。
-15. **[[排障/Web创作面板控制台红字排障-2026-07-20]]** — Web 创作面板三类控制台红字的根因与修复：启动脚本 CSP、创作模型接口误走 Pages、画布项目图片路径被当成网站 URL；RunningHub CORS 已在生产 Nginx 验证，前端修复待重新发布后人工验收。
-16. **[[开发/韭菜盒子原生媒体编排能力SDD]]** — Desktop 创模式与 Web 直连可用受控素材 ID 编排本轮附件、项目/画布素材和同会话最近成功任务；确认后仍只走 CreationPanel 与 mediaTaskStore。自动验证、Web/Desktop 构建和产物审计通过；真实付费、刷新恢复与 Windows/Intel/Apple Silicon 安装包人工矩阵待验收。
-17. **[[排障/ZX-Grok参考图视频真实失败交接-2026-07-21]]** — ZX Grok 选 1 参考图实测仍返回 `Alias.image` 对象类型 400；已停止局部补丁，交接页给出必须先抓代理端真实请求体的排查步骤。相关代码提交与自动测试不等于真实闭环验收。
-18. **[[开发/三项生产故障闭环SDD-2026-07-21]]** — RH 失败终态要求 adapter 与 APP 双端对齐：adapter 不再把 `FAILED + errorCode/errorMessage` 变成 HTTP 500，而是返回 `status=failed` 并透传原因；APP 收到后立即停止轮询并持久化失败。定向回归通过，仍待部署新版 adapter 与 APP 后用真实失败任务验收。
-19. **[[开发/绝对纯直连道模式实施记录]]** — 道模式已改为 Desktop / Web 共用的 Direct Engine 单次请求：不注册 OpenCode `dao` Agent，不带工具、项目记忆、Wiki、Skill、MCP、搜索、媒体计划、项目 pill 或产品插件钩子；保留当前模型、可见对话和原始附件。Desktop 道会话不按项目目录筛选，切换只投影用户/助手可见消息，不建立或恢复 `ses_*`，也不显示媒体任务或审批过程。focused、类型检查、Web/Desktop 产物审计通过；真实 Provider 和跨平台人工矩阵待验收。
-20. **[[开发/通用记忆对话独立App SDD]]** — 第四阶段 4A 已完成 Mac 上传 → Web 下载真机闭环，Raw/Wiki 文字一致；媒体和空目录不参与同步。首次上传改用 Gateway 既有的最多 100 项批量合同，项目中心与设置页显示扫描、上传、下载进度。v2.0.4 暴露的独立 `sync_session` 启动恢复问题也已修正。
-
-当前状态：手动“继续写”已从文、武、创全部模式移除；创模式仅保留首次最终正文 SSE 断流的自动续写。
-
-Desktop 图片粘贴无响应的根因已修复：记忆工作台在 WebView 没有图片 `File` 且没有文本时，使用既有 `arboard` 读取原生剪贴板图片，再复用现有附件链路；Web、Mobile、文本粘贴、上传和拖拽不变。完整 focused `1426 passed / 8 skipped`、Rust `403 passed / 1 ignored`、TypeScript、Desktop quick build和产物审计通过；正式 Mac 安装包真机粘贴待验收。
-
-显示系统共享代码已实施：[[开发/显示系统统一SDD]] 把主题、字号与 Markdown 排版收敛为变量驱动的单一显示系统。已定位并处理两个真根因——`MemoryWorkbench.vue` 消息容器的 `white-space: pre-wrap` 覆盖 `.markdown-body` 的 `normal`，以及 `markdown.css` 硬编码 px 导致大字/特大字号下 Markdown 层级反转。排版真源收归 `markdown.css`，`MessageBubble.vue` 重复定义整块删除；颜色只用主题变量、字号只用 em、方向只用逻辑属性（为 RTL 零成本预埋）。focused、TypeScript、Web quick build 和 Web 产物审计通过；跨端截图和人工验收仍待完成。多语言明确划为独立“语言系统”，本轮不做。
-
----
-
-> 上次刷新: 2026-08-03（`v2.1.7` Web 已正式部署；GitHub Release 已建立，桌面 Actions 仍按用户要求不等待。iOS `2.1.7` / `2.1.7.1` 已提交 Apple 审核并正在等待审核，尚未成为 App Store 公开版。）
+- 先读 [[开发/通用记忆工作台单产品化分离SDD]] 和 [[开发/通用记忆对话独立App SDD]]，再按 TDD 逐项建立“记忆入口依赖闭包”和发布身份门禁；测试通过前不移动任何目录。

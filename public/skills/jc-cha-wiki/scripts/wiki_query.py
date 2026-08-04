@@ -85,7 +85,7 @@ def _status_dev(wiki: Path) -> None:
     last_op = "无记录"
     if log.exists():
         lines = log.read_text(encoding="utf-8").strip().split("\n")
-        for line in lines:
+        for line in reversed(lines):
             if line.startswith("## ["):
                 last_op = line.lstrip("# ")
                 break
@@ -127,7 +127,7 @@ def _status_novel(wiki: Path) -> None:
     last_op = "无记录"
     if log.exists():
         lines = log.read_text(encoding="utf-8").strip().split("\n")
-        for line in lines:
+        for line in reversed(lines):
             if line.startswith("## ["):
                 last_op = line.lstrip("# ")
                 break
