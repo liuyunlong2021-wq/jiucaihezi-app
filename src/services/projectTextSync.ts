@@ -1,18 +1,7 @@
 import { reactive } from 'vue'
-import {
-  createRuntimeProjectFileService,
-  flattenProjectResourceChange,
-  type ProjectFileService,
-} from './projectFileService'
-import {
-  textSyncClient,
-  TextSyncError,
-  type SyncFile,
-  type SyncMutation,
-  type SyncProject,
-} from './textSyncClient'
+import { createRuntimeProjectFileService, type ProjectFileService } from './projectFileService'
+import { textSyncClient, TextSyncError, type SyncFile, type SyncMutation, type SyncProject } from './textSyncClient'
 import type { ProjectResource } from '@/utils/projectResource'
-import { isConversationPath, mergeConversationTranscriptContents } from '@/runtime/memory/conversationTranscript'
 
 const STATE_DIRECTORY = '.raw/.sync'
 const STATE_PATH = `${STATE_DIRECTORY}/state.json`
@@ -20,17 +9,13 @@ const TEXT_EXTENSIONS = new Set(['md', 'markdown', 'txt', 'json', 'yaml', 'yml',
 const BLOCKED_PARTS = new Set(['.sync', '.git', '.ssh', '.aws', '.config', '.claude', '.codex', '.agents', 'node_modules', 'skills'])
 const BLOCKED_FILES = new Set(['credentials.json', 'secrets.json', 'secrets.yaml', 'secrets.yml', 'api-keys.json', 'mcp.json'])
 
-interface PendingMutation extends SyncMutation {
-  content_hash: string
-}
-
 interface LocalSyncState {
   version: 1
   cloudProjectId: string
   cursor: number
   revisions: Record<string, number>
   hashes: Record<string, string>
-  pending: PendingMutation[]
+  pending: []
 }
 
 interface TextSyncApi {
@@ -101,7 +86,7 @@ function parseState(content: string): LocalSyncState {
       cursor: Number.isSafeInteger(value.cursor) && value.cursor >= 0 ? value.cursor : 0,
       revisions: value.revisions && typeof value.revisions === 'object' ? value.revisions : {},
       hashes: value.hashes && typeof value.hashes === 'object' ? value.hashes : {},
-      pending: Array.isArray(value.pending) ? value.pending : [],
+      pending: [],
     }
   } catch {
     return emptyState()
@@ -113,24 +98,11 @@ export class ProjectTextSync {
   private projectName = ''
   private state = emptyState()
   private task: Promise<unknown> = Promise.resolve()
-  private stopChanges: (() => void) | null = null
 
   constructor(
     private readonly files: ProjectFileService = createRuntimeProjectFileService(),
     private readonly api: TextSyncApi = textSyncClient,
-  ) {
-    this.stopChanges = files.onDidChange(change => {
-      const changes = flattenProjectResourceChange(change).filter(entry => {
-        if (entry.resource.owner !== this.owner || entry.resource.isDirectory) return false
-        return isSyncableTextPath(entry.resource.path)
-          || (entry.type === 'renamed' && isSyncableTextPath(entry.oldResource.path))
-      })
-      if (!changes.length) return
-      void this.enqueue(async () => {
-        await this.captureChanges(changes)
-      }).catch(() => {})
-    })
-  }
+  ) {}
 
   async open(owner: string, name: string): Promise<void> {
     await this.enqueue(async () => {
@@ -141,16 +113,15 @@ export class ProjectTextSync {
     })
   }
 
-  async enable(): Promise<void> {
+  async uploadNow(): Promise<void> {
     await this.enqueue(async () => {
       if (!this.owner) throw new Error('请先选择本地项目')
       if (!this.state.cloudProjectId) {
         const project = await this.api.createProject(this.projectName || '记忆空间')
         this.state.cloudProjectId = project.id
+        await this.persistState()
       }
-      await this.reconcileLocalFiles()
-      await this.persistState()
-      await this.syncCycle()
+      await this.uploadSnapshot()
     })
   }
 
@@ -158,9 +129,15 @@ export class ProjectTextSync {
     await this.enqueue(async () => {
       if (!this.owner) throw new Error('请先选择本地项目')
       this.state = { ...emptyState(), cloudProjectId }
-      await this.reconcileLocalFiles()
       await this.persistState()
-      await this.syncCycle()
+      await this.downloadSnapshot()
+    })
+  }
+
+  async downloadNow(): Promise<void> {
+    await this.enqueue(async () => {
+      if (!this.state.cloudProjectId) throw new Error('当前项目尚未连接云端')
+      await this.downloadSnapshot()
     })
   }
 
@@ -170,14 +147,6 @@ export class ProjectTextSync {
       this.state = emptyState()
       await this.persistState()
       this.updateStatus('disabled', '当前项目未连接云端')
-    })
-  }
-
-  async syncNow(): Promise<void> {
-    await this.enqueue(async () => {
-      if (!this.state.cloudProjectId) throw new Error('当前项目尚未开启云同步')
-      await this.reconcileLocalFiles()
-      await this.syncCycle()
     })
   }
 
@@ -192,10 +161,7 @@ export class ProjectTextSync {
     return parseState((await this.files.readText(resource)).content).cloudProjectId
   }
 
-  dispose(): void {
-    this.stopChanges?.()
-    this.stopChanges = null
-  }
+  dispose(): void {}
 
   private enqueue<T>(action: () => Promise<T>): Promise<T> {
     const next = this.task.catch(() => undefined).then(action)
@@ -222,221 +188,127 @@ export class ProjectTextSync {
     } else {
       const current = await this.files.readText(existing)
       const result = await this.files.writeText(existing, content, current.revision)
-      if (result.status !== 'saved') throw new Error('本地同步队列保存冲突')
+      if (result.status !== 'saved') throw new Error('本地同步状态保存冲突')
     }
     this.updateStatus(projectTextSyncStatus.phase)
   }
 
-  private expectedRevision(path: string): number {
-    return (this.state.revisions[path] || 0) + this.state.pending.filter(item => item.path === path).length
-  }
-
-  private async enqueueUpsert(path: string, content?: string): Promise<void> {
-    if (!isSyncableTextPath(path)) return
-    let value = content ?? (await this.files.readText((await this.find(path))!)).content
-    const pending = this.state.pending.filter(item => item.path === path)
-    if (isConversationPath(path)) {
-      for (const mutation of pending) {
-        if (mutation.operation !== 'upsert' || mutation.content == null) continue
-        value = mergeConversationTranscriptContents(path, mutation.content, value) || value
-      }
-      this.state.pending = this.state.pending.filter(item => item.path !== path)
-    }
-    const contentHash = await sha256(value)
-    const latest = [...this.state.pending].reverse().find(item => item.path === path)
-    if (latest?.operation === 'upsert' && latest.content_hash === contentHash) return
-    if (!latest && this.state.hashes[path] === contentHash) return
-    this.state.pending.push({
-      mutation_id: uniqueId('mutation'),
-      path,
-      operation: 'upsert',
-      expected_revision: this.expectedRevision(path),
-      content: value,
-      content_hash: contentHash,
-    })
-  }
-
-  private async enqueueDelete(path: string): Promise<void> {
-    if (!isSyncableTextPath(path)) return
-    const latest = [...this.state.pending].reverse().find(item => item.path === path)
-    if (latest?.operation === 'delete' || (!latest && !(path in this.state.hashes))) return
-    this.state.pending.push({
-      mutation_id: uniqueId('mutation'),
-      path,
-      operation: 'delete',
-      expected_revision: this.expectedRevision(path),
-      content_hash: await sha256(''),
-    })
-  }
-
-  private async captureChanges(entries: ReturnType<typeof flattenProjectResourceChange>): Promise<void> {
-    if (!this.owner) return
-    let changed = false
-    for (const entry of entries) {
-      if (entry.type === 'renamed') {
-        await this.enqueueDelete(entry.oldResource.path)
-        changed = true
-      }
-      const path = entry.resource.path
-      if (!isSyncableTextPath(path)) continue
-      if (entry.type === 'deleted') await this.enqueueDelete(path)
-      else {
-        const resource = await this.find(path)
-        if (resource) await this.enqueueUpsert(path, (await this.files.readText(resource)).content)
-      }
-      changed = true
-    }
-    if (changed) await this.persistState()
-  }
-
-  private async reconcileLocalFiles(): Promise<void> {
-    this.updateProgress('正在扫描文字文件...', 0, 0)
-    const resources = (await this.files.list(this.owner)).filter(resource =>
-      !resource.isDirectory && isSyncableTextPath(resource.path),
-    )
-    const present = new Set(resources.map(resource => resource.path))
-    const pendingPaths = new Set(this.state.pending.map(item => item.path))
+  private async readLocalSnapshot(): Promise<Map<string, { content: string; hash: string; resource: ProjectResource }>> {
+    const resources = (await this.files.list(this.owner)).filter(resource => !resource.isDirectory && isSyncableTextPath(resource.path))
+    const snapshot = new Map<string, { content: string; hash: string; resource: ProjectResource }>()
     for (const [index, resource] of resources.entries()) {
-      if (!pendingPaths.has(resource.path)) {
-        const content = (await this.files.readText(resource)).content
-        const hash = await sha256(content)
-        if (this.state.hashes[resource.path] !== hash) await this.enqueueUpsert(resource.path, content)
-      }
+      const content = (await this.files.readText(resource)).content
+      snapshot.set(resource.path, { content, hash: await sha256(content), resource })
       this.updateProgress(`正在扫描 ${index + 1}/${resources.length}`, index + 1, resources.length)
     }
-    for (const path of Object.keys(this.state.hashes)) {
-      if (!present.has(path) && !pendingPaths.has(path)) await this.enqueueDelete(path)
-    }
-    await this.persistState()
+    return snapshot
   }
 
-  private async syncCycle(): Promise<void> {
-    this.updateStatus('syncing', '正在同步文字...')
+  private async readRemoteSnapshot(): Promise<{ cursor: number; files: Map<string, SyncFile> }> {
+    const files = new Map<string, SyncFile>()
+    let cursor = 0
+    let more = true
+    while (more) {
+      const page = await this.api.pullFiles(this.state.cloudProjectId, cursor)
+      for (const file of page.files) if (isSyncableTextPath(file.path)) files.set(file.path, file)
+      cursor = page.cursor
+      more = page.has_more
+    }
+    return { cursor, files }
+  }
+
+  private async uploadSnapshot(): Promise<void> {
+    this.updateStatus('syncing', '正在扫描文字...')
     try {
-      await this.pullAll()
-      const uploadTotal = this.state.pending.length
-      let uploaded = 0
-      while (this.state.pending.length) {
-        const paths = new Set<string>()
-        const batch = this.state.pending.filter(mutation => {
-          if (paths.has(mutation.path) || paths.size >= 100) return false
-          paths.add(mutation.path)
-          return true
-        })
-        this.updateProgress(`上传 ${uploaded}/${uploadTotal}`, uploaded, uploadTotal)
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        const [local, remote] = await Promise.all([this.readLocalSnapshot(), this.readRemoteSnapshot()])
+        const mutations: SyncMutation[] = []
+        for (const [path, file] of local) {
+          const current = remote.files.get(path)
+          if (current && current.deleted_at == null && current.content_hash === file.hash) continue
+          mutations.push({ mutation_id: uniqueId('mutation'), path, operation: 'upsert', expected_revision: current?.revision || 0, content: file.content, content_hash: file.hash })
+        }
+        for (const [path, remoteFile] of remote.files) {
+          if (remoteFile.deleted_at == null && !local.has(path)) {
+            mutations.push({ mutation_id: uniqueId('mutation'), path, operation: 'delete', expected_revision: remoteFile.revision, content_hash: await sha256('') })
+          }
+        }
         try {
-          const results = await this.api.pushFiles(this.state.cloudProjectId, deviceId(), batch)
-          if (results.length !== batch.length) throw new Error('云端返回的同步结果数量不完整')
-          for (const [index, mutation] of batch.entries()) {
-            const result = results[index]
-            if (result.mutation_id !== mutation.mutation_id || result.path !== mutation.path) {
-              throw new Error('云端返回的同步结果顺序无效')
-            }
-            this.state.revisions[mutation.path] = result.revision
-            if (mutation.operation === 'delete') delete this.state.hashes[mutation.path]
-            else this.state.hashes[mutation.path] = mutation.content_hash
-          }
-          const completed = new Set(batch.map(mutation => mutation.mutation_id))
-          this.state.pending = this.state.pending.filter(mutation => !completed.has(mutation.mutation_id))
-          uploaded += batch.length
-          this.updateProgress(`上传 ${uploaded}/${uploadTotal}`, uploaded, uploadTotal)
+          await this.pushMutations(mutations)
+          this.state.cursor = remote.cursor
+          this.state.revisions = Object.fromEntries([...remote.files].map(([path, file]) => [path, file.revision]))
+          this.state.hashes = Object.fromEntries([...local].map(([path, file]) => [path, file.hash]))
           await this.persistState()
+          projectTextSyncStatus.lastSyncedAt = Date.now()
+          this.updateStatus('synced', `已上传并覆盖云端（${mutations.filter(item => item.operation === 'upsert').length} 个文字文件，删除 ${mutations.filter(item => item.operation === 'delete').length} 个）`)
+          return
         } catch (error) {
-          if (error instanceof TextSyncError && error.status === 409) {
-            const before = this.state.pending.length
-            await this.pullAll()
-            if (this.state.pending.length < before) continue
-          }
-          throw error
+          if (!(error instanceof TextSyncError) || error.status !== 409 || attempt === 2) throw error
         }
       }
-      await this.pullAll()
-      projectTextSyncStatus.lastSyncedAt = Date.now()
-      this.updateStatus('synced', '文字已同步')
     } catch (error) {
       this.setFailure(error)
       throw error
     }
   }
 
-  private async pullAll(): Promise<void> {
-    let more = true
-    let downloaded = 0
-    let total = 0
-    while (more) {
-      const page = await this.api.pullFiles(this.state.cloudProjectId, this.state.cursor)
-      if (!total) total = page.total
-      if (total) this.updateProgress(`下载 ${downloaded}/${total}`, downloaded, total)
-      for (const remote of page.files) {
-        await this.applyRemote(remote)
+  private async pushMutations(mutations: SyncMutation[]): Promise<void> {
+    const total = mutations.length
+    let completed = 0
+    for (let index = 0; index < mutations.length; index += 100) {
+      const batch = mutations.slice(index, index + 100)
+      this.updateProgress(`上传 ${completed}/${total}`, completed, total)
+      const results = await this.api.pushFiles(this.state.cloudProjectId, deviceId(), batch)
+      if (results.length !== batch.length) throw new Error('云端返回的同步结果数量不完整')
+      for (const [resultIndex, result] of results.entries()) {
+        if (result.mutation_id !== batch[resultIndex].mutation_id || result.path !== batch[resultIndex].path) throw new Error('云端返回的同步结果顺序无效')
+      }
+      completed += batch.length
+      this.updateProgress(`上传 ${completed}/${total}`, completed, total)
+    }
+  }
+
+  private async downloadSnapshot(): Promise<void> {
+    this.updateStatus('syncing', '正在下载文字...')
+    try {
+      const [local, remote] = await Promise.all([this.readLocalSnapshot(), this.readRemoteSnapshot()])
+      const active = new Set<string>()
+      const remoteActive = [...remote.files].filter(([, file]) => file.deleted_at == null)
+      const total = remoteActive.length
+      let downloaded = 0
+      let deleted = 0
+      for (const [path, file] of remoteActive) {
+        if (file.deleted_at != null) continue
+        active.add(path)
+        const existing = local.get(path)?.resource
+        if (!existing) await this.files.createText(this.owner, path, file.content || '')
+        else {
+          const current = await this.files.readText(existing)
+          if (current.content !== (file.content || '')) {
+            const result = await this.files.writeText(existing, file.content || '', current.revision)
+            if (result.status !== 'saved') throw new Error(`本地文件正在更新：${path}`)
+          }
+        }
         downloaded += 1
         this.updateProgress(`下载 ${downloaded}/${total}`, downloaded, total)
       }
-      this.state.cursor = page.cursor
-      more = page.has_more
+      for (const [path, file] of local) {
+        if (!active.has(path)) {
+          await this.files.remove(file.resource)
+          deleted += 1
+        }
+      }
+      this.state.cursor = remote.cursor
+      this.state.revisions = Object.fromEntries([...remote.files].map(([path, file]) => [path, file.revision]))
+      this.state.hashes = Object.fromEntries([...remote.files].filter(([, file]) => file.deleted_at == null).map(([path, file]) => [path, file.content_hash]))
+      this.state.pending = []
       await this.persistState()
+      projectTextSyncStatus.lastSyncedAt = Date.now()
+      this.updateStatus('synced', `已下载并覆盖本地（${downloaded} 个文字文件，删除 ${deleted} 个）`)
+    } catch (error) {
+      this.setFailure(error)
+      throw error
     }
-  }
-
-  private async applyRemote(remote: SyncFile): Promise<void> {
-    if (remote.revision <= (this.state.revisions[remote.path] || 0)) return
-    const pending = this.state.pending.filter(item => item.path === remote.path)
-    if (pending.length) {
-      const local = [...pending].reverse().find(item => item.operation === 'upsert')
-      this.state.pending = this.state.pending.filter(item => item.path !== remote.path)
-      if (local?.content != null && local.content_hash !== remote.content_hash) {
-        const existing = await this.find(remote.path)
-        const localContent = existing ? (await this.files.readText(existing)).content : local.content
-        let merged = remote.deleted_at == null ? remote.content || '' : ''
-        for (const content of [...pending.flatMap(item => item.operation === 'upsert' && item.content != null ? [item.content] : []), localContent]) {
-          const next = mergeConversationTranscriptContents(remote.path, merged, content)
-          if (next) merged = next
-        }
-        if (!isConversationPath(remote.path)) merged = ''
-        if (merged) {
-          this.state.revisions[remote.path] = remote.revision
-          this.state.hashes[remote.path] = remote.content_hash
-          if (!existing) await this.files.createText(this.owner, remote.path, merged)
-          else if (localContent !== merged) {
-            const current = await this.files.readText(existing)
-            const result = await this.files.writeText(existing, merged, current.revision)
-            if (result.status !== 'saved') throw new Error(`本地文件正在更新：${remote.path}`)
-          }
-          await this.enqueueUpsert(remote.path, merged)
-          return
-        }
-        await this.createConflictCopy(remote.path, local.content)
-      }
-    }
-
-    const existing = await this.find(remote.path)
-    if (remote.deleted_at != null) {
-      if (existing) await this.files.remove(existing)
-      delete this.state.hashes[remote.path]
-    } else if (!existing) {
-      await this.files.createText(this.owner, remote.path, remote.content || '')
-      this.state.hashes[remote.path] = remote.content_hash
-    } else {
-      const current = await this.files.readText(existing)
-      if (await sha256(current.content) !== remote.content_hash) {
-        const result = await this.files.writeText(existing, remote.content || '', current.revision)
-        if (result.status !== 'saved') throw new Error(`本地文件正在更新：${remote.path}`)
-      }
-      this.state.hashes[remote.path] = remote.content_hash
-    }
-    this.state.revisions[remote.path] = remote.revision
-  }
-
-  private async createConflictCopy(path: string, content: string): Promise<void> {
-    const dot = path.lastIndexOf('.')
-    const base = dot > path.lastIndexOf('/') ? path.slice(0, dot) : path
-    const extension = dot > path.lastIndexOf('/') ? path.slice(dot) : '.txt'
-    const stamp = new Date().toISOString().replace(/[-:TZ.]/g, '').slice(0, 14)
-    let candidate = `${base} (冲突 ${stamp})${extension}`
-    for (let index = 2; await this.find(candidate); index += 1) {
-      candidate = `${base} (冲突 ${stamp}-${index})${extension}`
-    }
-    await this.files.createText(this.owner, candidate, content)
   }
 
   private updateProgress(message: string, current: number, total: number): void {
@@ -450,7 +322,7 @@ export class ProjectTextSync {
     projectTextSyncStatus.cloudProjectId = this.state.cloudProjectId
     projectTextSyncStatus.phase = phase
     if (message !== undefined) projectTextSyncStatus.message = message
-    projectTextSyncStatus.pending = this.state.pending.length
+    projectTextSyncStatus.pending = 0
     if (phase !== 'syncing') {
       projectTextSyncStatus.progressCurrent = 0
       projectTextSyncStatus.progressTotal = 0
@@ -458,13 +330,9 @@ export class ProjectTextSync {
   }
 
   private setFailure(error: unknown): void {
-    if (error instanceof TextSyncError && error.status === 401) {
-      this.updateStatus('auth', error.message)
-    } else if (error instanceof TypeError) {
-      this.updateStatus('offline', '当前离线，文字将在联网后继续同步')
-    } else {
-      this.updateStatus('error', error instanceof Error ? error.message : String(error))
-    }
+    if (error instanceof TextSyncError && error.status === 401) this.updateStatus('auth', error.message)
+    else if (error instanceof TypeError) this.updateStatus('offline', '当前离线，本次文字覆盖未完成')
+    else this.updateStatus('error', error instanceof Error ? error.message : String(error))
   }
 }
 

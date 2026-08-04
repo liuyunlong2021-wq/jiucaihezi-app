@@ -22,8 +22,6 @@ import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSy
 import { confirmAction } from '@/utils/confirmAction'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
-const emit = defineEmits<{ (event: 'synced'): void }>()
-
 type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'theme'
 
 const tab = ref<SettingsTab>('account')
@@ -38,11 +36,9 @@ const McpManagerPanel = defineAsyncComponent(() => import('@/components/mcp/McpM
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
-const syncBusy = ref(false)
 const logoutBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteError = ref('')
-const syncError = ref('')
 const agentStore = useAgentStore()
 const appVersion = __APP_VERSION__
 const { theme } = useTheme()
@@ -146,22 +142,8 @@ async function saveKey() {
   status.value = '已保存'
 }
 
-async function showSync() {
+function showSync() {
   tab.value = 'sync'
-}
-
-async function runSync() {
-  if (syncBusy.value || !props.owner) return
-  syncBusy.value = true
-  syncError.value = ''
-  try {
-    await projectTextSync.syncNow()
-    emit('synced')
-  } catch (error) {
-    syncError.value = error instanceof Error ? error.message : String(error)
-  } finally {
-    syncBusy.value = false
-  }
 }
 </script>
 
@@ -246,14 +228,13 @@ async function runSync() {
               :value="projectTextSyncStatus.progressCurrent"
               :max="projectTextSyncStatus.progressTotal"
             ></progress>
-            <span>只同步文字，媒体和空目录不同步</span>
+            <span>只处理文字，媒体和空目录不处理</span>
           </div>
-          <button :disabled="syncBusy" @click="runSync">{{ syncBusy ? '同步中' : '立即同步' }}</button>
+          <p>请在项目中心选择上传或下载。</p>
         </template>
         <template v-else>
           <p>当前项目尚未上传。请点击左上角项目名，在项目中心上传当前项目或下载云项目。</p>
         </template>
-        <p v-if="syncError" class="memory-sync-error">{{ syncError }}</p>
       </div>
       <WebSkillPanel v-else-if="desktopRuntime && tab === 'skills'" />
       <McpManagerPanel v-else-if="desktopRuntime && tab === 'mcp'" />

@@ -458,3 +458,10 @@
 - 新增隐私政策、用户支持和服务条款静态页；Web 产物允许，Desktop / iOS 产物继续裁剪。
 - 自动验证：focused 1439/1447（8 个既有跳过，`sha256:cc4dcb81d4ef`）、Gateway 20/20（`sha256:86ea9f00f57f`）、TypeScript（`sha256:1d58a6f525b8`）、Web quick build 与产物审计（`sha256:0321306433c2`）、iOS quick build 和补丁检查通过；三个合规路径本地 HTTP 均为 200。
 - 尚未部署 Gateway / 合规页面，未执行真实 iPhone 不可恢复注销或生产旧 Key 失效验收；本轮未提交、未推送、未发布。
+
+## [2026-08-04] 修正并实施 | 文字同步改为方向性覆盖
+
+- 根因：旧 `ProjectTextSync.syncCycle()` 固定先拉后推，并在冲突时合并 Raw 或生成冲突副本；项目中心与设置页又把该行为分别命名为“立即同步/上传到云端”，导致用户无法知道哪一侧覆盖哪一侧。
+- 现行合同：项目中心提供 `上传并覆盖云端` 和 `下载并覆盖本地`；前者以本地允许同步文字快照覆盖云端并 tombstone 云端独有文字，后者以云端文字快照覆盖本地并删除本地独有可同步文字。媒体、空目录、凭据、设置、Skill/MCP/Provider/Session 和 `.raw/.sync` 不处理。
+- 实施：`src/services/projectTextSync.ts` 移除文件变化监听、待上传队列合并和冲突副本，复用现有 `pullFiles/pushFiles` 完整快照；项目中心增加两个明确按钮和覆盖确认，设置页改为只读状态；旧实现记录保留为历史并在 SDD 标注已被替代。
+- 验证：方向性同步与界面定向 `52/52`；完整 focused `1438 passed / 8 skipped / 0 failed`；`vue-tsc -b` 通过；`pnpm run build:quick` 与 Web 产物审计通过；`git diff --check` 通过。真实 Web/Desktop/iPhone 覆盖删除人工矩阵待验收。

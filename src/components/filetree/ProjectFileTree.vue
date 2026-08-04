@@ -1473,6 +1473,10 @@ async function openLocalProjectFolder() {
 }
 async function uploadCurrentProject() {
   if (!projectKey.value || projectMenuBusy.value) return
+  if (!(await confirmAction('本地允许同步的文字将覆盖云端文字，云端独有文字将被删除。媒体和空目录不处理。', {
+    title: '上传并覆盖云端',
+    okLabel: '确认上传并覆盖',
+  }))) return
   if (!(getGatewaySessionToken() || await initGatewaySessionToken())) {
     projectMenuError.value = '请先在设置的“账号”中重新登录一次，以启用云同步'
     return
@@ -1481,7 +1485,7 @@ async function uploadCurrentProject() {
   projectMenuError.value = ''
   try {
     await projectTextSync.open(projectKey.value, projectStore.projectName.value)
-    await projectTextSync.enable()
+    await projectTextSync.uploadNow()
     await refreshProjectCenter()
   } catch (e) {
     projectMenuError.value = e instanceof Error ? e.message : String(e)
@@ -1514,9 +1518,14 @@ async function openCloudProject(cloud: SyncProject) {
   try {
     const existing = await localOwnerForCloud(cloud.id)
     if (existing) {
+      if (!(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
+        title: '下载并覆盖本地',
+        okLabel: '确认下载并覆盖',
+      }))) return
       if (isDesktop || isMobile) projectStore.selectProject(existing.owner)
       else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
       await projectTextSync.open(existing.owner, existing.name)
+      await projectTextSync.downloadNow()
       showProjectMenu.value = false
       return
     }
@@ -1556,12 +1565,16 @@ async function openCloudProject(cloud: SyncProject) {
     projectMenuBusy.value = false
   }
 }
-async function syncCurrentProject() {
+async function downloadCurrentProject() {
   if (projectMenuBusy.value) return
+  if (!(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
+    title: '下载并覆盖本地',
+    okLabel: '确认下载并覆盖',
+  }))) return
   projectMenuBusy.value = true
   projectMenuError.value = ''
   try {
-    await projectTextSync.syncNow()
+    await projectTextSync.downloadNow()
   } catch (e) {
     projectMenuError.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -2582,13 +2595,18 @@ onBeforeUnmount(() => {
             :value="projectTextSyncStatus.progressCurrent"
             :max="projectTextSyncStatus.progressTotal"
           ></progress>
-          <span v-if="currentCloudProjectId">只同步文字，媒体和空目录不同步</span>
+          <span v-if="currentCloudProjectId">只处理文字，媒体和空目录不处理</span>
         </div>
-        <button v-if="currentCloudProjectId" :disabled="projectMenuBusy" @click="syncCurrentProject">
-          <JcIcon name="sync" /><span>{{ projectMenuBusy ? '同步中' : '立即同步' }}</span>
-        </button>
+        <template v-if="currentCloudProjectId">
+          <button :disabled="projectMenuBusy" @click="uploadCurrentProject">
+            <JcIcon name="upload" /><span>{{ projectMenuBusy ? '上传中' : '上传并覆盖云端' }}</span>
+          </button>
+          <button :disabled="projectMenuBusy" @click="downloadCurrentProject">
+            <JcIcon name="download" /><span>{{ projectMenuBusy ? '下载中' : '下载并覆盖本地' }}</span>
+          </button>
+        </template>
         <button v-else :disabled="projectMenuBusy" @click="uploadCurrentProject">
-          <JcIcon name="upload" /><span>{{ projectMenuBusy ? '上传中' : '上传到云端' }}</span>
+          <JcIcon name="upload" /><span>{{ projectMenuBusy ? '上传中' : '上传并覆盖云端' }}</span>
         </button>
         <div class="pft-ctx-divider"></div>
       </template>
