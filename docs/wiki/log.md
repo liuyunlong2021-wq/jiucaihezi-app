@@ -493,3 +493,13 @@
 - 旧 Studio、OpenCode、文/武/道/创、电商、制作、漫剧工作台产品代码与专属发布物已从主仓迁出；Raw、Wiki、媒体、同步、身份、Gateway、云绑定、更新与发布链路保留。独立备份仓库 `../jiucaihezi-legacy-products/` 固定于 `f302c251` 并通过完整性检查。
 - 自动验证通过：分离门禁 `5/5`、Node `985/985`、Rust `395 passed / 1 ignored`、TypeScript、Web/Desktop quick build和两端产物审计。证据指纹依次为 `7d1c33ff370d`、`372d120b0593`、`acd2fc7fee37`。
 - 未验证：真实 Windows、Intel Mac、iOS 升级与云绑定连续性；Android 按既定决策暂停。`jc-raw-wiki closeout` 因删除的 PDF/PPTX 二进制 diff 触发 UTF-8 解码错误，Wiki validate 独立执行。
+
+## [2026-08-05] 修正 | 单产品分离第二轮 Wiki 与随包 Skill 一致性
+
+- README、AGENTS 和工作区配置已收口为通用记忆工作台；旧 Studio/OpenCode 架构页、模式 Canvas 和旧存储 SDD 完整移入 [[归档/单产品分离前/README]]，不再充当现行入口。
+- `jc-everything-wiki` 与 `jc-raw-wiki` 的对话来源统一为当前项目 `.raw/对话记录/*.md`，Markdown 是唯一持久化真源；旧 Studio/OpenCode `ses_*` 来源模板已移除。
+- 修正当前记忆审批 SDD、Wiki Skill 规范、生存手册、来源索引、发布边界和移动身份措辞；详见 [[巡检报告/2026-08-05-单产品分离第二轮Wiki一致性巡检]]。
+- 自动复检：单产品分离门禁 10/10、Wiki Skill 18/18、Wiki 建库脚本 7/7、完整 focused 969/969、Rust `395 passed / 1 ignored`、TypeScript、Gateway 36/36、Wiki validate、Web/Desktop quick build 与两端产物审计全部通过。
+- Gateway 同步收口：根路径测试对齐现行账号登录跳转；删除无生产调用者、且与登录/同步专用边界冲突的旧 `/api/*` 同源代理。本轮未推送、未发布。
+- 最后一份 Tiptap smoke 试验说明已删除，历史 TDD 继续留在归档；分离门禁覆盖整个旧 smoke 目录。
+- 并发审计补强：动态图标扫描恢复播放图标；Web/Desktop 递归清理并拒绝 Python 缓存；删除无调用的 `lowlight` 和孤立旧测试说明。现行 Wiki 断链为 0，追加日志与历史巡检断链只记归档卫生；15 条孤儿页建议保留。

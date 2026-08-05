@@ -1606,7 +1606,7 @@ function readDataUrl(file: File): Promise<string> {
     data-tauri-drag-region
   >
     <aside class="memory-tree" :class="{ open: treeOpen }">
-      <ProjectFileTree memory-mode />
+      <ProjectFileTree />
     </aside>
     <button v-if="treeOpen" class="memory-tree-backdrop" aria-label="关闭文件树" @click="treeOpen = false"></button>
 
@@ -1718,13 +1718,11 @@ function readDataUrl(file: File): Promise<string> {
             <MediaTaskBubble
               v-if="mediaTaskIdForPlan(turn.id, planIndex)"
               :task-id="mediaTaskIdForPlan(turn.id, planIndex)"
-              workbench-mode
             />
           </template>
           <MediaTaskBubble
             v-if="mediaResultTaskId(turn)"
             :task-id="mediaResultTaskId(turn)"
-            workbench-mode
           />
           <SkillInstallCard
             v-if="skillInstallPlans[turn.id]"
@@ -1949,7 +1947,7 @@ function readDataUrl(file: File): Promise<string> {
         title="拖动调整创作面板宽度"
         @pointerdown.prevent="startCreationResize"
       />
-      <CreationPanel ref="creationPanelRef" preview-surface="host" @preview-resource="previewProjectResource">
+      <CreationPanel ref="creationPanelRef" @preview-resource="previewProjectResource">
         <template #toolbar-actions>
           <button
             class="memory-creation-action"

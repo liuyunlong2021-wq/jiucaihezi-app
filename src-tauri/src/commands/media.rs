@@ -1145,7 +1145,7 @@ pub async fn convert_pdf_to_markdown(
 ) -> Result<MarkdownConversion, String> {
     if mode == MarkdownConversionMode::Ocr {
         return Err(
-            "OCR 模式已移除。请使用快速模式，或安装第三方 OCR 工具后通过 OpenCode 处理。".into(),
+            "OCR 模式已移除。请使用带文字层的 PDF，或先通过第三方 OCR 工具生成文字文件。".into(),
         );
     }
 
@@ -1264,7 +1264,7 @@ pub async fn convert_source_to_markdown(
     }
 
     if is_image_path(source_path) {
-        return Err("图片 OCR 已移除。请安装第三方 OCR 工具后通过 OpenCode 处理。".into());
+        return Err("图片 OCR 已移除。请先通过第三方 OCR 工具生成文字文件后再导入。".into());
     }
 
     if mode == MarkdownConversionMode::Ocr {

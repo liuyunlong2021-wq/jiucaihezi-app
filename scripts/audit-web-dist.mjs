@@ -6,6 +6,7 @@ const distDir = resolve(process.env.WEB_DIST_DIR || 'dist')
 const forbiddenExact = new Set([
   '.DS_Store',
   'Thumbs.db',
+  '__pycache__',
   'package.json',
   'pnpm-lock.yaml',
   'tsconfig.json',
@@ -25,6 +26,7 @@ const forbiddenTopLevelDirs = new Set([
 
 const forbiddenExtensions = new Set([
   '.map',
+  '.pyc',
 ])
 
 const requiredFiles = [

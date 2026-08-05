@@ -194,7 +194,7 @@ def check_foreshadow(vault, problems):
 
 def page_scope(root, path):
     relative = os.path.relpath(path, root).replace(os.sep, "/")
-    if relative.startswith("归档/"):
+    if relative == "log.md" or relative.startswith("归档/"):
         return "archive"
     head = "\n".join(read(path).splitlines()[:12])
     if re.search(r"状态[：:]\s*(历史|已归档|已替代)", head):

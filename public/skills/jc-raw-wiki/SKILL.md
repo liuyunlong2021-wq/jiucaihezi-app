@@ -78,7 +78,7 @@ triggers:
 
 ## 工具出口
 
-Studio 原生 `wiki` 工具可用时，必须使用 `inspect`、`closeout`、`validate`；`closeout` 只生成证据预览，不直接写 Wiki。没有 `wiki` 工具的外部 Agent 才使用 `scripts/digest_raw.py` 的同名命令。
+App 原生 `wiki` 工具可用时，必须使用 `inspect`、`closeout`、`validate`；`closeout` 只生成证据预览，不直接写 Wiki。没有 `wiki` 工具的外部 Agent 才使用 `scripts/digest_raw.py` 的同名命令。
 
 ## Reference 索引
 

@@ -49,6 +49,6 @@ triggers:
 
 ## 工具出口
 
-Studio 原生 `wiki` 工具可用时，必须使用 `search`、`status`、`graph`；不要通过终端调用 Python/Node。
+App 原生 `wiki` 工具可用时，必须使用 `search`、`status`、`graph`；不要通过终端调用 Python/Node。
 
 没有 `wiki` 工具的外部 Agent 才使用 `scripts/wiki_query.py`：默认现行检索用 `search`，追溯历史追加 `--scope all`，状态查询用 `status`，关系图用 `graph`。

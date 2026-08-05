@@ -26,6 +26,9 @@ const msoData = require('@iconify-json/material-symbols/icons.json')
 // <JcIcon name="add_circle" /> 或 <JcIcon ... name="add_circle" /> 或单引号
 const STATIC_RE = /<JcIcon\b[^>]*\sname=["']([a-z][a-z0-9_]*)["']/g
 
+// :name="condition ? 'pause' : 'play_arrow'"
+const DYNAMIC_NAME_RE = /<JcIcon\b[^>]*\s:name=(["'])(.*?)\1[^>]*>/gs
+
 // 任何引号字符串（用于扫 6 个映射函数所在文件的所有候选）
 const STRING_RE = /["']([a-z][a-z0-9_]{2,})["']/g
 
@@ -72,6 +75,14 @@ for (const file of files) {
   // Pass 1：所有显式 <JcIcon name="X" />
   for (const m of src.matchAll(STATIC_RE)) {
     collected.add(m[1])
+  }
+
+  for (const tag of src.matchAll(DYNAMIC_NAME_RE)) {
+    for (const m of tag[2].matchAll(STRING_RE)) {
+      const name = m[1]
+      const resolved = ICON_ALIAS[name] ?? name
+      if (msoData.icons[resolved.replace(/_/g, '-')]) collected.add(name)
+    }
   }
 
   // Pass 1.5：JS 数据对象如 { icon: 'translate' } 或 icon: "analytics"

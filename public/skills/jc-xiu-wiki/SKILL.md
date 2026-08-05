@@ -47,5 +47,5 @@ triggers:
 
 ## 工具出口
 
-- Studio 原生 `wiki` 工具可用时，机械修正使用 `replace`、`link`、`extend`，默认只预览；用户确认后才传 `apply: true`。
+- App 原生 `wiki` 工具可用时，机械修正使用 `replace`、`link`、`extend`，默认只预览；用户确认后才传 `apply: true`。
 - 没有 `wiki` 工具的外部 Agent 才使用 `scripts/apply_fix.py`；脚本的 `scaffold` 对应原生 `extend`。

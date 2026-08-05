@@ -61,7 +61,7 @@ test('project file tree adds images videos and audio to canvas as selectable med
   )
 
   assert.match(source, /openProjectResource\(projectFiles, resource\)/)
-  assert.match(source, /if \(result\.type === 'media'\)/)
+  assert.match(source, /if \(result\.type === 'media' && result\.mediaKind !== 'model3d'\)/)
   assert.match(source, /emitMediaToCanvas\(result\.resource, result\.mediaKind\)/)
   assert.match(
     source,
@@ -335,7 +335,7 @@ test('top toolbar creates beside a selected file instead of falling back to proj
   )
 })
 
-test('editor requests new project documents through the tree command host without duplicating it in creation', () => {
+test('memory file tree has no dead editor command host', () => {
   const tree = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
@@ -345,11 +345,7 @@ test('editor requests new project documents through the tree command host withou
     'utf8',
   )
 
-  assert.match(tree, /onEvent\('project:new-document'/)
-  assert.match(
-    tree,
-    /emitEvent\('open-in-editor', \{\s+resource,\s+content: '',\s+revision: text\.revision/,
-  )
+  assert.doesNotMatch(tree, /project:new-document|open-in-editor/)
   assert.doesNotMatch(creation, /emitEvent\('project:new-document'\)/)
 })
 
@@ -363,18 +359,17 @@ test('project export requests survive until the file tree command host mounts', 
   assert.match(source, /handleProjectResourceExport\(pendingProjectResourceExport\[0\]\)/)
 })
 
-test('desktop exposes the same upload import and export actions as Web', () => {
+test('desktop exposes memory file import and project export without the old folder-upload branch', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
   )
 
-  assert.match(source, /async function importDesktopFiles\(targetPath = ''\)/)
-  assert.match(source, /async function importDesktopDirectory\(targetPath = ''\)/)
+  assert.match(source, /async function importDesktopFiles\(\)/)
   assert.match(source, /async function exportDesktopProject\(\)/)
   assert.match(source, /dev_import_project_files/)
-  assert.match(source, /dev_import_project_folder/)
   assert.match(source, /dev_export_project/)
+  assert.doesNotMatch(source, /importDesktopDirectory|dev_import_project_folder|ctxUploadDirectory/)
   assert.doesNotMatch(
     source,
     /<template v-if="!isDesktop">\s*<button class="pft-ctx-item" @click="ctxUploadFiles">/,
@@ -480,7 +475,7 @@ test('project export resolves external file collisions before opening a writable
   assert.match(write, /await writer\.abort\(\)\.catch\(\(\) => \{\}\)/)
 })
 
-test('new project files are opened in the editor from the same creation path', () => {
+test('new project files open in the memory workbench', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
@@ -494,14 +489,11 @@ test('new project files are opened in the editor from the same creation path', (
     createFile,
     /const resource = await projectFiles\.createText\(projectKey\.value, relPath, ''\)/,
   )
-  assert.match(
-    createFile,
-    /emitEvent\('open-in-editor', \{\s+resource,\s+content: '',\s+revision: text\.revision,\s+editorMode: projectTextEditorMode\(resource\),?\s+\}\)/,
-  )
-  assert.match(source, /const offNewProjectDocument = onEvent\('project:new-document'/)
+  assert.match(createFile, /emitEvent\('memory:open-resource', await openProjectResource\(projectFiles, resource\)\)/)
+  assert.doesNotMatch(source, /projectTextEditorMode|project:new-document/)
 })
 
-test('a project tree consumes a pending new-document request after it remounts', () => {
+test('a project tree only consumes the still-supported pending export request after remount', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
@@ -509,11 +501,8 @@ test('a project tree consumes a pending new-document request after it remounts',
   const mounted =
     source.match(/onMounted\(async \(\) => \{[\s\S]*?\n}\)\nonBeforeUnmount/)?.[0] || ''
 
-  assert.match(
-    mounted,
-    /const pendingNewProjectDocument = consumeLastEvent\('project:new-document'\)/,
-  )
-  assert.match(mounted, /if \(pendingNewProjectDocument\) void ctxNewFileFromSelection\(\)/)
+  assert.doesNotMatch(mounted, /project:new-document/)
+  assert.match(mounted, /consumeLastEvent\('project:export-resources'\)/)
 })
 
 test('project switches remove stale tree actions before the replacement tree loads', () => {

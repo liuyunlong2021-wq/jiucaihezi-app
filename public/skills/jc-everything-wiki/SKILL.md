@@ -39,21 +39,21 @@ triggers:
 
 ## 执行流程
 
-1. **盘点**：调用 Studio 原生 `wiki` 工具的 `inspect`，确认已有 Wiki 与 Raw 状态。
+1. **盘点**：调用 App 原生 `wiki` 工具的 `inspect`，确认已有 Wiki 与 Raw 状态。
 2. **判断**：确定类型，读取类型 -> Reference 表中对应的项目语境，再选择目标位置。
 3. **建库/接管**：调用 `scaffold` 并传入类型，只创建 Wiki 中缺失的目录和入口，不覆盖已有文件，也不创建或修改 `.raw/`。
 4. **验证**：调用 `validate`，报告实际路径、创建项、Raw 位置和未处理项。
 
 ## 工具出口
 
-- Studio 原生 `wiki` 工具可用时，必须使用 `inspect`、`scaffold`、`validate`；不要通过终端调用 Python/Node。
+- App 原生 `wiki` 工具可用时，必须使用 `inspect`、`scaffold`、`validate`；不要通过终端调用 Python/Node。
 - 没有 `wiki` 工具的外部 Agent 才使用 `scripts/everything_to_wiki.py` 兼容出口。
 
 ## 输出标准
 
 - 一个项目只接管或创建一套 Wiki；开发项目新建在 `docs/wiki/`，其他项目新建在 `wiki/`。
 - 必须创建或保留 `来源索引.md`，记录 Wiki 到真实 Raw、原始文件、SDD、代码、Git 或测试证据的映射。
-- 原始材料不复制、不移动、不删除；Studio 创模式不自动生成项目内会话副本，已有用户资料只补机械缺失，不覆盖正文。
+- 原始材料不复制、不移动、不删除；记忆工作台对话只从当前项目 `.raw/对话记录/*.md` 定位，已有用户资料只补机械缺失，不覆盖正文。
 - `.raw` 的名称、基础结构和保留目录由 App 管理；本 Skill 只读取真实来源并登记路径，不预设 `sessions`、`参考资料`、`创作笔记` 或任何其他 Raw 子目录。
 - 产物符合命中的项目语境；需要语义填充时交给 `jc-raw-wiki`，并明确传递当前项目 Reference、来源索引要求及其中的双链/回链规则。
 

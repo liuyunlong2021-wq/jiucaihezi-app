@@ -139,9 +139,6 @@ import type {
   CanvasTaskTarget,
 } from '@/types/canvas'
 
-const props = withDefaults(defineProps<{ previewSurface?: 'dialog' | 'host' }>(), {
-  previewSurface: 'dialog',
-})
 const emit = defineEmits<{ previewResource: [resource: ProjectResource] }>()
 
 const mediaTaskStore = useMediaTaskStore()
@@ -281,22 +278,9 @@ const taskPreview = ref<{
   sourceUrl: string
   filename: string
 } | null>(null)
-let taskPreviewObjectUrl = ''
-let taskPreviewRequestId = 0
-
-function releaseTaskPreviewUrl() {
-  if (taskPreviewObjectUrl) URL.revokeObjectURL(taskPreviewObjectUrl)
-  taskPreviewObjectUrl = ''
-}
 
 function closeTaskPreview() {
-  taskPreviewRequestId++
-  releaseTaskPreviewUrl()
   taskPreview.value = null
-}
-
-function taskPreviewType(task: MediaTask): 'image' | 'video' | 'audio' | 'model3d' {
-  return task.type === 'video' ? 'video' : task.type === 'audio' ? 'audio' : task.type === 'model3d' ? 'model3d' : 'image'
 }
 
 function downloadTaskPreview() {
@@ -310,48 +294,22 @@ function downloadTaskPreview() {
 
 async function previewTask(task: MediaTask) {
   const resource = projectResourceForMediaTask(task)
-  if (props.previewSurface === 'host') {
-    if (resource) {
-      showTaskHistory.value = false
-      emit('previewResource', resource)
-      return
-    }
-  }
   if (resource) {
-    const requestId = ++taskPreviewRequestId
-    releaseTaskPreviewUrl()
-    taskPreview.value = null
-    let objectUrl = ''
-    try {
-      const binary = await projectFileActions.readMedia(resource)
-      if (requestId !== taskPreviewRequestId) return
-      const bytes = new Uint8Array(binary.data.byteLength)
-      bytes.set(binary.data)
-      objectUrl = URL.createObjectURL(new Blob([bytes.buffer], { type: binary.mimeType }))
-      if (requestId !== taskPreviewRequestId) {
-        URL.revokeObjectURL(objectUrl)
-        return
-      }
-      taskPreviewObjectUrl = objectUrl
-      taskPreview.value = {
-        url: objectUrl,
-        type: taskPreviewType(task),
-        model: task.modelLabel || task.model,
-        sourceUrl: task.resultUrl || '',
-        filename: resource.name || 'creation',
-      }
-    } catch (error) {
-      if (requestId !== taskPreviewRequestId) return
-      releaseTaskPreviewUrl()
-      cpState.progressText = `预览失败: ${error instanceof Error ? error.message : String(error)}`
-    }
+    showTaskHistory.value = false
+    emit('previewResource', resource)
     return
   }
-
   if (task.resultUrl) {
     taskPreview.value = {
       url: task.resultUrl,
-      type: taskPreviewType(task),
+      type:
+        task.type === 'video'
+          ? 'video'
+          : task.type === 'audio'
+            ? 'audio'
+            : task.type === 'model3d'
+              ? 'model3d'
+              : 'image',
       model: task.modelLabel || task.model,
       sourceUrl: task.resultUrl,
       filename: taskPath(task).split('/').pop() || 'creation',
@@ -3190,7 +3148,6 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   ++canvasLoadToken
-  closeTaskPreview()
   queuedCanvasMedia.length = 0
   releaseCanvasRuntimeMediaUrls()
   offFileTreeMedia()

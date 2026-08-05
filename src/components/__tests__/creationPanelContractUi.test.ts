@@ -454,17 +454,17 @@ test('creation panel resolves file-tree media from its project-relative event pa
   assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
 })
 
-test('creation panel consumes project-tree media drops and delegates saved task preview to its host', () => {
+test('creation panel consumes project-tree media drops and delegates task preview to its only host', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const drop = source.match(/async function onCanvasDrop[\s\S]*?\n}/)?.[0] || ''
   const preview = source.match(/async function previewTask[\s\S]*?\n}/)?.[0] || ''
 
   assert.match(drop, /application\/x-jc-media-reference/)
   assert.match(drop, /addFileTreeMediaToCanvas/)
-  assert.match(preview, /props\.previewSurface === 'host'/)
   assert.match(preview, /projectResourceForMediaTask\(task\)/)
   assert.match(preview, /emit\('previewResource', resource\)/)
   assert.match(preview, /showTaskHistory\.value = false/)
+  assert.doesNotMatch(source, /previewSurface/)
 })
 
 test('creation panel persists direct Web and Desktop imports before adding them to canvas', () => {
@@ -770,34 +770,21 @@ test('creation panel releases lifecycle gates only after replacement canvases op
   )
 })
 
-test('creation panel previews persisted project task media in MediaViewer without an external fallback', () => {
+test('creation panel delegates persisted previews to the host and keeps failed-save remote previews', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const preview =
     source.match(
       /async function previewTask\(task: MediaTask\)[\s\S]*?\n}\n\nasync function openTaskHistory/,
     )?.[0] || ''
 
-  assert.match(source, /import MediaViewer from '@\/components\/media\/MediaViewer\.vue'/)
-  assert.match(source, /const taskPreview = ref/)
-  assert.match(source, /function closeTaskPreview\(\)/)
   assert.match(source, /task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl/)
   assert.match(preview, /const resource = projectResourceForMediaTask\(task\)/)
-  assert.match(preview, /projectFileActions\.readMedia\(resource\)/)
-  assert.match(preview, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
-  assert.match(preview, /bytes\.set\(binary\.data\)/)
-  assert.match(
-    preview,
-    /URL\.createObjectURL\(new Blob\(\[bytes\.buffer\], \{ type: binary\.mimeType \}\)\)/,
-  )
-  assert.doesNotMatch(preview, /openExternal|open_in_shell|window\.open/)
-  assert.match(preview, /if \(task\.resultUrl\)[\s\S]*?taskPreview\.value =/)
-  assert.match(preview, /type: taskPreviewType\(task\)/)
+  assert.match(preview, /showTaskHistory\.value = false[\s\S]*emit\('previewResource', resource\)/)
+  assert.match(preview, /if \(task\.resultUrl\)[\s\S]*taskPreview\.value =/)
+  assert.match(source, /<MediaViewer[\s\S]*v-if="taskPreview"/)
+  assert.doesNotMatch(preview, /readMedia|createObjectURL/)
   assert.match(source, /async function openTaskHistory\(\)[\s\S]*?await mediaTaskStore\.init\(\)/)
-  assert.match(
-    source,
-    /<MediaViewer[\s\S]*?v-if="taskPreview"[\s\S]*?mode="file"[\s\S]*?@close="closeTaskPreview"/,
-  )
-  assert.match(source, /URL\.revokeObjectURL\(taskPreviewObjectUrl\)/)
+  assert.doesNotMatch(source, /taskPreviewObjectUrl/)
 })
 
 test('creation panel lets a remote successful result be saved into its project', () => {

@@ -43,9 +43,11 @@ class DevelopmentWikiScaffoldTests(unittest.TestCase):
             self.assertFalse((root / "wiki").exists())
 
             source_index = (wiki / "来源索引.md").read_text(encoding="utf-8")
-            self.assertIn("Studio 创模式", source_index)
-            self.assertIn("Studio 文/武模式", source_index)
+            self.assertIn("记忆工作台对话", source_index)
+            self.assertIn(".raw/对话记录/*.md", source_index)
             self.assertIn("VS Code Chat", source_index)
+            self.assertNotIn("ses_", source_index)
+            self.assertNotIn("OpenCode", source_index)
 
     def test_existing_development_wiki_is_completed_without_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

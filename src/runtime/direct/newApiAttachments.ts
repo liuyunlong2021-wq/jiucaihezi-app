@@ -7,10 +7,6 @@ export class NewApiRequestTooLargeError extends Error {
   }
 }
 
-export function shouldClearCreativeAttachments(finishReason?: string): boolean {
-  return finishReason !== 'content_filter'
-}
-
 const MIME_ALIASES: Readonly<Record<string, string>> = {
   'video/quicktime': 'video/mov',
   'video/x-msvideo': 'video/avi',

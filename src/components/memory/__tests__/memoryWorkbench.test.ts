@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { shouldReadNativeClipboardImage } from '@/utils/clipboard'
@@ -10,14 +10,14 @@ function source(path: string) {
 
 test('memory file tree groups project identity above its three file actions', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
-  const toolbar = tree.match(/<template v-if="props\.memoryMode">([\s\S]*?)<\/template>/)?.[1] || ''
+  const toolbar = tree.match(/<header class="pft-head">([\s\S]*?)<\/header>/)?.[1] || ''
 
   assert.deepEqual(Array.from(toolbar.matchAll(/title="([^"]+)"/g), match => match[1]), [
     '`切换项目：${projectStore.projectName.value}`',
     '隐藏文件树',
   ])
   assert.match(toolbar, /:title="`切换项目：\$\{projectStore\.projectName\.value\}`"/)
-  assert.match(tree, /<\/header>\s*<div v-if="props\.memoryMode" class="pft-actions pft-memory-actions">[\s\S]*title="新建文件"[\s\S]*title="新建文件夹"[\s\S]*title="刷新"/)
+  assert.match(tree, /<\/header>\s*<div class="pft-actions pft-memory-actions">[\s\S]*title="新建文件"[\s\S]*title="新建文件夹"[\s\S]*title="刷新"/)
   assert.doesNotMatch(toolbar, /新建对话|上传|导入|导出/)
   assert.doesNotMatch(tree, /async function selectWebProject[\s\S]*initializeMemoryProject/)
 })
@@ -104,8 +104,8 @@ test('memory file tree and model tools share the hidden and protected project co
 
   assert.match(tree, /isMemoryProjectHiddenPath\(path\)/)
   assert.match(tree, /isMemoryProjectMutationBlocked\(path\)/)
-  assert.match(tree, /props\.memoryMode \? memoryMediaDirectoryFor\(file\.name, file\.type\) : targetPath/)
-  assert.match(tree, /v-if="!memoryMode" class="pft-ctx-item" @click="ctxUploadDirectory"/)
+  assert.match(tree, /uploadPathForFile\(file, memoryMediaDirectoryFor\(file\.name, file\.type\)\)/)
+  assert.doesNotMatch(tree, /ctxUploadDirectory|dev_import_project_folder/)
   assert.match(runtime, /assertMemoryProjectMutationProtected\(call\)/)
   assert.match(runtime, /isMemoryProjectMutationBlocked\(String\(value\), operation\)/)
 })
@@ -155,10 +155,9 @@ test('memory workbench accepts text references and uses the adaptive main compos
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(tree, /props\.memoryMode \|\| isCanvasMediaFile/)
-  assert.match(tree, /props\.memoryMode[\s\S]*emitEvent\('reference-file', \{ resource: resourceForNode\(node\) \}\)/)
-  assert.match(tree, /await projectFiles\.readText\(resourceForNode\(node\)\)/)
-  assert.match(tree, /emitEvent\('reference-file', \{ name: node\.name, content: text\.content \}\)/)
+  assert.match(tree, /v-if="!ctxMenu\.node\.isDir"[\s\S]*@click="ctxReferenceInChat"/)
+  assert.match(tree, /emitEvent\('reference-file', \{ resource: resourceForNode\(node\) \}\)/)
+  assert.doesNotMatch(tree, /emitEvent\('reference-file', \{ name:/)
   assert.match(workbench, /contenteditable="true"/)
   assert.match(workbench, /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/)
   assert.match(workbench, /function resizeComposer\(\)/)
@@ -490,9 +489,9 @@ test('memory file actions use the supported DOM prompt and headers share one bas
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   for (const label of ['新建文件名', '新建文件夹名', '重命名']) {
-    assert.match(tree, new RegExp(`safePrompt\\('${label}[\\s\\S]*?forceDom: props\\.memoryMode`))
+    assert.match(tree, new RegExp(`safePrompt\\('${label}[\\s\\S]*?forceDom: true`))
   }
-  assert.match(tree, /'memory-mode': props\.memoryMode/)
+  assert.match(tree, /class="pft memory-mode"/)
   assert.match(tree, /\.pft\.memory-mode \.pft-head[\s\S]*border-bottom-color: var\(--line\)/)
   assert.match(workbench, /--memory-header-height: 52px/)
   assert.match(tree, /\.pft\.memory-mode \.pft-head \{[\s\S]*height: var\(--memory-header-height\)/)
@@ -511,7 +510,7 @@ test('memory creation surface reuses resizable columns, host preview, and sticky
   assert.match(workbench, /localStorage\.setItem\('jcMemoryCreationWidth'/)
   assert.match(workbench, /@pointerdown\.prevent="startCreationResize"/)
   assert.match(workbench, /<ChatScrollNav/)
-  assert.match(workbench, /preview-surface="host"/)
+  assert.doesNotMatch(workbench, /preview-surface/)
   assert.match(workbench, /@preview-resource="previewProjectResource"/)
   assert.match(workbench, /#toolbar-actions/)
   assert.match(workbench, /:title="creationFocused \? '\u9000\u51fa\u4e13\u6ce8\u521b\u4f5c' : '\u4e13\u6ce8\u521b\u4f5c'"/)
@@ -526,6 +525,25 @@ test('memory creation surface reuses resizable columns, host preview, and sticky
   assert.match(creation, /<slot name="toolbar-actions"/)
   assert.match(creation, />\u63d0\u793a\u8bcd\u53c2\u8003</)
   assert.doesNotMatch(creation, /title="\u65b0\u5efa\u9879\u76ee\u6587\u6863"/)
+})
+
+test('single-product UI contains no dormant Studio mode switches or editor session runtime', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const creation = source('src/components/creation/CreationPanel.vue')
+  const bubble = source('src/components/chat/MediaTaskBubble.vue')
+  const scroll = source('src/components/chat/ChatScrollNav.vue')
+  const attachments = source('src/runtime/direct/newApiAttachments.ts')
+
+  assert.doesNotMatch(workbench, /\smemory-mode(?:\s|\/?>)|preview-surface|workbench-mode/)
+  assert.doesNotMatch(tree, /memoryMode|open-in-editor|editor-file-changed|project:new-document/)
+  assert.doesNotMatch(creation, /previewSurface/)
+  assert.doesNotMatch(bubble, /workbenchMode|sendToGallery|sendAsReference|send-to-gallery|import-to-creation/)
+  assert.doesNotMatch(scroll, /messages\?:/)
+  assert.doesNotMatch(attachments, /shouldClearCreativeAttachments/)
+  assert.equal(existsSync(join(process.cwd(), 'src/components/editor/editorSessionStore.ts')), false)
+  assert.equal(existsSync(join(process.cwd(), 'src/components/editor/__tests__/editorSessionStore.test.ts')), false)
+  assert.equal(existsSync(join(process.cwd(), 'src/types/mention.ts')), false)
 })
 
 test('memory settings provide and persist three accessible font sizes', () => {
@@ -599,9 +617,9 @@ test('memory text models default to tools unless the gateway explicitly disables
 test('memory file actions stay inside the memory resource route on Desktop', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
-  assert.match(tree, /if \(props\.memoryMode\) \{\s*emitEvent\('memory:open-resource', result\)\s*return/)
-  assert.match(tree, /createText\(projectKey\.value, relPath, ''\)[\s\S]*if \(props\.memoryMode\)[\s\S]*memory:open-resource/)
-  assert.match(tree, /isDesktop && props\.memoryMode[\s\S]*用系统默认应用打开/)
+  assert.match(tree, /const result = await openProjectResource\(projectFiles, resource\)\s*emitEvent\('memory:open-resource', result\)/)
+  assert.match(tree, /createText\(projectKey\.value, relPath, ''\)[\s\S]*memory:open-resource/)
+  assert.match(tree, /v-if="isDesktop"[\s\S]*用系统默认应用打开/)
 })
 
 test('memory navigation separates Raw conversations from project files and transient previews', () => {

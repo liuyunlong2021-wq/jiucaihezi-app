@@ -6,6 +6,7 @@ const distDir = resolve(process.env.DESKTOP_DIST_DIR || 'dist')
 const forbiddenExact = new Set([
   '.DS_Store',
   'Thumbs.db',
+  '__pycache__',
   '_headers',
   '_redirects',
   'package.json',
@@ -28,6 +29,7 @@ const forbiddenTopLevelDirs = new Set([
 
 const forbiddenExtensions = new Set([
   '.map',
+  '.pyc',
 ])
 
 const allowedRootFiles = new Set([

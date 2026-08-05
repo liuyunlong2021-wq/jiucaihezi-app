@@ -4,7 +4,7 @@
 > 状态：一期代码合同已完成；Desktop 已完成核心人工验收，完整双端人工矩阵未完成
 > 分支：`0718-wenjianshu&bianjiqu`
 > 参考：本机 VS Code `src/vs/workbench/contrib/files/{common/explorerModel,browser/explorerService,browser/fileActions,browser/views/explorerView}.ts`
-> 前置：[[开发/创作工作台架构SDD]] 已定义“项目文件树是内容真源”；本文件只落实该真源在文件变更、编辑器和画布之间的身份合同。
+> 前置：[[开发/通用记忆工作台原始素材与文档按需阅读SDD]] 定义“项目文件树是内容真源”；本文件只落实该真源在文件变更、编辑器和画布之间的身份合同。
 
 ## 1. 一句话目标
 
@@ -259,7 +259,7 @@ ProjectFileTree 点击/键盘 Enter/右键“打开”
 | 树的常用单文件操作 | `ProjectFileTree.vue` | 新建文件/目录、改名、删除、文本打开已改走文件服务；目录可在当前项目内展开，画布改名/删除仍先经过既有 lifecycle gate。 |
 | 编辑器的最小资源联动 | `EditorPanel.vue`、`EditorTabs.vue` | 打开的项目文本 Tab 会保存 `ProjectResource`；改名更新当前路径，删除后阻止保存回旧路径。 |
 | 回归测试 | `projectResource.test.ts`、`projectFileService.test.ts`、`projectFileTreeCanvas.test.ts` | 已执行并通过：3/3、4/4、11/11；`git diff --check` 通过。 |
-| 编辑区与画布前置能力 | [[开发/文件系统/编辑区与创作面板基础能力升级SDD]] | 条件保存、删除脏文档另存为、外部变更冲突、画布音频和资源 lifecycle 已实现；文件树二期前仍需完成双端人工验收。 |
+| 历史编辑区与画布前置能力 | [[归档/单产品分离前/编辑区与创作面板基础能力升级SDD]] | 旧编辑区已迁出；画布和创作面板现行入口见 [[开发/文件系统/索引]]。 |
 | 目录后代变更 | `projectFileService.ts`、`editorSessionStore.ts` | 目录重命名/删除在成功后发布一笔 `batch` 资源事件，包含目录和全部后代；编辑器逐条消费，打开的后代 Tab 会改到新路径，或沿用既有的干净关闭/脏文档另存为策略。 |
 | 统一资源打开路由 | `projectExplorerService.ts` | 文件树不再自行判断文档、媒体和画布的打开分支。服务统一返回编辑区、画布、媒体、二进制或安全拒绝动作；`truncated`/NUL 文本不会产生编辑 Tab。 |
 
@@ -316,7 +316,7 @@ Desktop 仍以 `owner + path` 表示当前资源。没有添加 inode、sidecar 
 
 ## 12. 相关
 
-- [[开发/创作工作台架构SDD]]
+- [[开发/通用记忆工作台原始素材与文档按需阅读SDD]]
 - [[开发/文件系统/Web云端项目Wiki媒体同步与APP升级SDD]]
 - [[开发/画布开发与排障]]
-- [[开发/存储设计]]
+- [[归档/单产品分离前/存储设计]]

@@ -11,7 +11,6 @@ import {
   normalizeNewApiAttachment,
   sendNewApiRequest,
   serializeNewApiRequest,
-  shouldClearCreativeAttachments,
 } from '../../runtime/direct/newApiAttachments'
 
 const user = (id: string, content: string, files?: any[], images?: string[]) =>
@@ -369,13 +368,6 @@ describe('buildDirectMessages', () => {
       },
     )
     assert.equal(fetches, 0)
-  })
-
-  test('创模式仅在正常 stop 或 length 完成后清理附件', () => {
-    assert.equal(shouldClearCreativeAttachments('stop'), true)
-    assert.equal(shouldClearCreativeAttachments('length'), true)
-    assert.equal(shouldClearCreativeAttachments('content_filter'), false)
-    assert.equal(shouldClearCreativeAttachments(undefined), true)
   })
 
   test('system prompt 合并三部分', () => {

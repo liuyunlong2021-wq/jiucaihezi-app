@@ -1,4 +1,4 @@
-import { corsHeaders, dedupeCorsOrigin, handleOptions, resolveOrigin } from './cors.js';
+import { corsHeaders, handleOptions } from './cors.js';
 import { badRequest, unauthorized } from './errors.js';
 import { errorResponse, jsonResponse, notFound, readJson } from './http.js';
 import {
@@ -491,25 +491,7 @@ export default {
       if (request.method === 'GET' && url.pathname === '/auth/session') return await handleSession(request, env);
       if (url.pathname.startsWith('/sync/')) return await handleSync(request, env);
 
-      // ★ API 代理（CORS 去重）：浏览器同源请求 Gateway，Gateway 转发到 api.jiucaihezi.studio
-      if (url.pathname.startsWith('/api/')) {
-        const upstreamUrl = `https://api.jiucaihezi.studio${url.pathname}${url.search}`;
-        const upstream = await fetch(upstreamUrl, {
-          method: request.method,
-          headers: request.headers,
-          body: request.method !== 'GET' && request.method !== 'HEAD' ? request.body : undefined,
-        });
-        const respHeaders = new Headers(upstream.headers);
-        dedupeCorsOrigin(respHeaders);
-        respHeaders.set('Access-Control-Allow-Origin', resolveOrigin(request));
-        respHeaders.set('Access-Control-Allow-Credentials', 'true');
-        return new Response(upstream.body, {
-          status: upstream.status,
-          headers: respHeaders,
-        });
-      }
-
-      // ★ SPA fallback：非 /auth/、/landing/、/api/ 的 GET 返回 index.html
+      // SPA fallback for public landing routes.
       if (request.method === 'GET'
         && !url.pathname.startsWith('/auth/')
         && !url.pathname.startsWith('/landing/')

@@ -13,12 +13,11 @@ import { useProjectStore } from '@/stores/projectStore'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
 import { openProjectResource } from '@/services/projectExplorerService'
 import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
-import { fetchBlobForExport, saveGeneratedFile } from '@/utils/exportSave'
+import { saveGeneratedFile } from '@/utils/exportSave'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
 
 const props = defineProps<{
   taskId: string
-  workbenchMode?: boolean
 }>()
 
 const taskStore = useMediaTaskStore()
@@ -77,9 +76,7 @@ async function downloadCopy() {
   await saveGeneratedFile({
     filename: `${t.modelLabel}_${t.id}.${t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : t.type === 'model3d' ? 'glb' : 'png'}`,
     mimeType: t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : t.type === 'model3d' ? 'model/gltf-binary' : 'image/png',
-    data: props.workbenchMode
-      ? (await fetchCreationMediaBlob(t.resultUrl, t.type === 'video' ? 'video' : t.type === 'audio' ? 'audio' : t.type === 'model3d' ? 'model3d' : 'image')).blob
-      : await fetchBlobForExport(t.resultUrl),
+    data: (await fetchCreationMediaBlob(t.resultUrl, t.type === 'video' ? 'video' : t.type === 'audio' ? 'audio' : t.type === 'model3d' ? 'model3d' : 'image')).blob,
   })
 }
 
@@ -95,7 +92,7 @@ async function revealInTree() {
   const resource = projectResource.value
   if (!resource) return
   emitEvent('project-filetree:locate', { path: resource.path })
-  if (props.workbenchMode) emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
+  emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
 }
 
 async function previewResult() {
@@ -103,27 +100,6 @@ async function previewResult() {
   await revealInTree()
 }
 
-/** 发送到创作面板画廊 */
-function sendToGallery() {
-  if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl)) return
-  emitEvent('send-to-gallery', {
-    url: task.value.resultUrl,
-    type: task.value.type,
-    name: `${task.value.modelLabel} 生成`,
-  })
-  emitEvent('switch-panel', 'creation')
-}
-
-/** 作为参考图发送到创作面板 */
-function sendAsReference() {
-  if (!task.value?.resultUrl || !isAllowedCreationResultUrl(task.value.resultUrl)) return
-  emitEvent('import-to-creation', {
-    url: task.value.resultUrl,
-    type: task.value.type === 'video' ? 'video' : 'image',
-    name: `${task.value.modelLabel} 参考`,
-  })
-  emitEvent('switch-panel', 'creation')
-}
 </script>
 
 <template>
@@ -176,12 +152,6 @@ function sendAsReference() {
         </button>
         <button v-if="projectResource" class="mtb-act-btn" @click="revealInTree" title="在文件树中查看">
           <JcIcon name="folder_open" /> 在文件树中查看
-        </button>
-        <button v-if="!props.workbenchMode && task.type !== 'model3d'" class="mtb-act-btn" @click="sendToGallery" title="加入画廊">
-          <JcIcon name="filter" /> 画廊
-        </button>
-        <button v-if="!props.workbenchMode && task.type === 'image'" class="mtb-act-btn" @click="sendAsReference" title="作为参考图">
-          <JcIcon name="image" /> 参考图
         </button>
       </div>
     </div>

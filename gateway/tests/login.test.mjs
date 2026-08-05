@@ -317,27 +317,11 @@ test('landing assets redirect only approved download files to static hosting', a
   assert.equal(missing.status, 404);
 });
 
-test('root landing page is served from static hosting', async () => {
-  const env = createEnv();
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    assert.equal(url, 'https://static.example.com/landing/index.html');
-    assert.equal(init.method, 'GET');
-    return new Response('<!doctype html><title>韭菜盒子 Studio</title>', {
-      headers: { 'Content-Type': 'text/html' }
-    });
-  };
+test('root opens the current account sign-in', async () => {
+  const response = await gateway.fetch(request('/'), createEnv());
 
-  try {
-    const response = await gateway.fetch(request('/'), env);
-    const html = await response.text();
-
-    assert.equal(response.status, 200);
-    assert.match(response.headers.get('Content-Type'), /text\/html/);
-    assert.match(html, /韭菜盒子 Studio/);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('Location'), 'https://api.jiucaihezi.studio/sign-in');
 });
 
 test('landing image and logo paths redirect to static hosting', async () => {

@@ -1,10 +1,10 @@
 <script setup lang="ts">
 /**
- * ProjectFileTree.vue — 项目文件树（VS Code Explorer 1:1 复刻）
+ * ProjectFileTree.vue — 记忆工作台项目文件树
  *
  * 顶部：新建文件 / 新建文件夹 / 折叠全部 / 刷新 / 隐藏
- * 左键文件 → 编辑区 | 左键目录 → 展开/折叠
- * 右键文件 → 复制路径/复制相对路径/重命名/删除/电脑打开/编辑区打开
+ * 左键文件 → 记忆工作台预览 | 左键目录 → 展开/折叠
+ * 右键文件 → 引用/复制/重命名/删除/预览/系统打开
  * 右键目录 → 新建文件/新建文件夹/重命名/删除/电脑打开/复制路径/复制相对路径
  * 键盘：Enter=打开 F2=重命名 Delete=删除
  * 自动刷新：Desktop 文件系统提示，Web 项目通知
@@ -26,7 +26,6 @@ import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
 import { isTextFile } from '@/utils/fileProcessor'
 import {
   classifyProjectResource,
-  projectTextEditorMode,
   type ProjectResource,
 } from '@/utils/projectResource'
 import {
@@ -36,10 +35,6 @@ import {
 } from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
 import { openProjectResource } from '@/services/projectExplorerService'
-import {
-  projectEditorSessionEpoch,
-  projectEditorSessionStore,
-} from '@/components/editor/editorSessionStore'
 import { createProjectResourceWatcher } from '@/services/projectResourceWatcher'
 import {
   exportWebProject,
@@ -139,12 +134,6 @@ interface ProjectResourceClipboard {
   roots: ProjectResource[]
 }
 
-const props = withDefaults(defineProps<{
-  memoryMode?: boolean
-}>(), {
-  memoryMode: false,
-})
-
 const projectStore = useProjectStore()
 const mediaTaskStore = useMediaTaskStore()
 const projectFiles = createRuntimeProjectFileService()
@@ -187,10 +176,6 @@ const pendingCollision = ref<PendingCollision | null>(null)
 const pendingDelete = ref<ProjectResource[]>([])
 const deletingDelete = ref(false)
 const deletingResourceKeys = new Set<string>()
-let directoryPickerAction: { kind: 'upload' | 'import'; targetPath: string } = {
-  kind: 'upload',
-  targetPath: '',
-}
 let filePreviewObjectUrl = ''
 let filePreviewRequestId = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
@@ -415,7 +400,7 @@ async function refreshDirectory(directory: TreeNode) {
   directory.children = await Promise.all(children.map(async resource => {
     const old = previous.get(resource.path)
     let displayName = resource.name
-    if (props.memoryMode && !resource.isDirectory && resource.path.startsWith('.raw/对话记录/')) {
+    if (!resource.isDirectory && resource.path.startsWith('.raw/对话记录/')) {
       try {
         const text = await projectFiles.readText(resource)
         displayName = parseConversationTranscript(resource.path, text.content)?.title || displayName
@@ -469,16 +454,6 @@ async function refreshLoadedDirectories() {
 }
 function resourceKey(resource: ProjectResource): string {
   return `${resource.runtime}:${resource.owner}:${resource.path}`
-}
-function isDirtyProjectResource(path: string): boolean {
-  projectEditorSessionEpoch.value
-  const owner = projectKey.value
-  return Boolean(
-    owner &&
-    projectEditorSessionStore
-      .dirtyResourcePaths(isDesktop ? 'desktop' : 'web', owner)
-      .includes(path),
-  )
 }
 function startPolling() {
   stopPolling()
@@ -578,17 +553,13 @@ const offProjectResourceChanged = onProjectResourceChange(change => {
   }
 })
 
-async function importDesktopDroppedPaths(paths: string[], targetPath = '') {
+async function importDesktopDroppedPaths(paths: string[]) {
   const owner = projectDir.value
   if (!owner) {
     errorMsg.value = '请先选择项目文件夹'
     return
   }
   try {
-    if (!props.memoryMode) {
-      await projectFileActions.importDesktopPaths({ owner, paths, targetPath })
-      return
-    }
     const groups = new Map<string, string[]>()
     for (const path of paths) {
       const target = memoryMediaDirectoryFor(path)
@@ -603,9 +574,9 @@ async function importDesktopDroppedPaths(paths: string[], targetPath = '') {
 }
 
 const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
-  const drop = payload as { target?: string; paths?: string[]; targetPath?: string }
+  const drop = payload as { target?: string; paths?: string[] }
   if (drop.target === 'project' && Array.isArray(drop.paths))
-    void importDesktopDroppedPaths(drop.paths, drop.targetPath || '')
+    void importDesktopDroppedPaths(drop.paths)
 })
 
 /* ─── 工具函数 ─── */
@@ -614,7 +585,7 @@ const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
 function isVisibleMemoryResource(path: string): boolean {
-  return (!props.memoryMode || !isMemoryProjectHiddenPath(path))
+  return !isMemoryProjectHiddenPath(path)
     && ((isDesktop && !isMobile) || !path.toLowerCase().endsWith('.jcscene'))
 }
 function isProtectedMemoryPath(path: string): boolean {
@@ -705,7 +676,7 @@ async function ensureDirectoryLoaded(node: TreeNode): Promise<boolean> {
     if (owner !== projectKey.value) return false
     node.children = await Promise.all(children.map(async resource => {
       let displayName = resource.name
-      if (props.memoryMode && !resource.isDirectory && resource.path.startsWith('.raw/对话记录/')) {
+      if (!resource.isDirectory && resource.path.startsWith('.raw/对话记录/')) {
         try {
           const text = await projectFiles.readText(resource)
           displayName = parseConversationTranscript(resource.path, text.content)?.title || displayName
@@ -796,48 +767,7 @@ async function openFile(node: TreeNode, event?: MouseEvent) {
   }
   const resource = resourceForNode(node)
   const result = await openProjectResource(projectFiles, resource)
-  if (props.memoryMode) {
-    emitEvent('memory:open-resource', result)
-    return
-  }
-  if (result.type === 'canvas') {
-    emitEvent('canvas:open', { path: result.resource.path })
-    emitEvent('switch-panel', 'creation')
-    return
-  }
-  if (result.type === 'media') {
-    if (result.mediaKind === 'model3d') {
-      await openFilePreview(node)
-      return
-    }
-    emitMediaToCanvas(result.resource, result.mediaKind)
-    return
-  }
-  if (result.type === 'unsafe-text') {
-    errorMsg.value = '文件过大或包含二进制内容，不能在编辑区安全编辑'
-    return
-  }
-  if (result.type === 'editor') {
-    emitEvent('open-in-editor', {
-      resource: result.resource,
-      content: result.text.content,
-      revision: result.text.revision,
-      editorMode: result.editorMode,
-      filePath: isDesktop ? node.path : undefined,
-      fileId: isDesktop ? undefined : node.id,
-      name: node.name,
-      projectDir: projectDir.value,
-    })
-    emitEvent('switch-panel', 'editor')
-    return
-  }
-  if (isDesktop)
-    try {
-      const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('open_in_shell', { path: projectDir.value + '/' + node.path })
-    } catch {
-      /* */
-    }
+  emitEvent('memory:open-resource', result)
 }
 
 /* ─── 右键菜单 ─── */
@@ -943,7 +873,7 @@ async function ctxCopyRelativePath() {
 }
 function ctxCopyResources() {
   const roots = selectedResources()
-  if (props.memoryMode && roots.some(resource => isProtectedMemoryPath(resource.path))) {
+  if (roots.some(resource => isProtectedMemoryPath(resource.path))) {
     errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     closeCtxMenu()
     return
@@ -959,7 +889,7 @@ function ctxCopyResources() {
 }
 function ctxCutResources() {
   const roots = selectedResources()
-  if (props.memoryMode && roots.some(resource => isProtectedMemoryPath(resource.path))) {
+  if (roots.some(resource => isProtectedMemoryPath(resource.path))) {
     errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     closeCtxMenu()
     return
@@ -1077,7 +1007,7 @@ async function ctxPasteResources(target?: TreeNode | null) {
     clipboard.runtime !== (isDesktop ? 'desktop' : 'web')
   )
     return
-  if (props.memoryMode && target?.path === MEMORY_MEDIA_DIRECTORY) {
+  if (target?.path === MEMORY_MEDIA_DIRECTORY) {
     errorMsg.value = '请选择图片、视频、音频或文档分类'
     closeCtxMenu()
     return
@@ -1275,16 +1205,7 @@ async function ctxReferenceInChat() {
     })
     return
   }
-  if (props.memoryMode) {
-    emitEvent('reference-file', { resource: resourceForNode(node) })
-    return
-  }
-  try {
-    const text = await projectFiles.readText(resourceForNode(node))
-    emitEvent('reference-file', { name: node.name, content: text.content })
-  } catch (e) {
-    errorMsg.value = `引用失败: ${e instanceof Error ? e.message : String(e)}`
-  }
+  emitEvent('reference-file', { resource: resourceForNode(node) })
 }
 async function ctxOpenInSystem() {
   const n = ctxMenu.value.node
@@ -1321,7 +1242,7 @@ async function ctxRenameCanvas() {
   const n = ctxMenu.value.node
   if (!isCanvasFile(n)) return
   closeCtxMenu()
-  const name = await safePrompt('画布名称', n.name.replace(/\.jccanvas$/i, ''), { forceDom: props.memoryMode })
+  const name = await safePrompt('画布名称', n.name.replace(/\.jccanvas$/i, ''), { forceDom: true })
   if (!name?.trim()) return
   const owner = projectKey.value
   if (!owner) return
@@ -1392,27 +1313,12 @@ function ctxOpen() {
 /** 右键空白 → 切换项目文件夹（当前单根架构，后续可升级为 VS Code 多根 workspace） */
 async function ctxAddProjectFolder() {
   closeCtxMenu()
-  if (props.memoryMode) {
-    if (showProjectMenu.value) {
-      showProjectMenu.value = false
-      return
-    }
-    showProjectMenu.value = true
-    await refreshProjectCenter()
+  if (showProjectMenu.value) {
+    showProjectMenu.value = false
     return
   }
-  if (!isDesktop) {
-    await refreshWebProjects()
-    showProjectMenu.value = true
-    return
-  }
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const dir = await invoke<string | null>('pick_project_folder')
-    if (dir) projectStore.selectProject(dir)
-  } catch (e) {
-    errorMsg.value = `选择文件夹失败: ${e instanceof Error ? e.message : String(e)}`
-  }
+  showProjectMenu.value = true
+  await refreshProjectCenter()
 }
 async function refreshProjectCenter() {
   projectMenuError.value = ''
@@ -1447,7 +1353,7 @@ async function selectDesktopProject(dir: string) {
   showProjectMenu.value = false
 }
 async function createWebProject() {
-  const name = await safePrompt('新建项目名称', '未命名项目', { forceDom: props.memoryMode })
+  const name = await safePrompt('新建项目名称', '未命名项目', { forceDom: true })
   if (!name?.trim()) return
   const project = await webProjectFiles.createProject(name.trim())
   webProjects.value.push({ id: project.id, name: project.name })
@@ -1585,11 +1491,11 @@ async function ctxNewFile() {
   const parentNode = ctxMenu.value.node
   const dirRel = parentNode?.isDir ? parentNode.path : ''
   closeCtxMenu()
-  if (props.memoryMode && dirRel === MEMORY_MEDIA_DIRECTORY) {
+  if (dirRel === MEMORY_MEDIA_DIRECTORY) {
     errorMsg.value = '请选择图片、视频、音频或文档分类'
     return
   }
-  const name = await safePrompt('新建文件名（含扩展名）', 'untitled.md', { forceDom: props.memoryMode })
+  const name = await safePrompt('新建文件名（含扩展名）', 'untitled.md', { forceDom: true })
   if (!name?.trim()) return
   const relPath = dirRel
     ? dirRel + '/' + name.trim().replace(/^\/+/, '')
@@ -1600,11 +1506,11 @@ async function ctxNewFolder() {
   const parentNode = ctxMenu.value.node
   const dirRel = parentNode?.isDir ? parentNode.path : ''
   closeCtxMenu()
-  if (props.memoryMode && dirRel === MEMORY_MEDIA_DIRECTORY) {
+  if (dirRel === MEMORY_MEDIA_DIRECTORY) {
     errorMsg.value = '媒体根目录只保留四个固定分类'
     return
   }
-  const name = await safePrompt('新建文件夹名', 'new-folder', { forceDom: props.memoryMode })
+  const name = await safePrompt('新建文件夹名', 'new-folder', { forceDom: true })
   if (!name?.trim()) return
   const relPath = (dirRel ? dirRel + '/' : '') + name.trim().replace(/^\/+/, '')
   try {
@@ -1616,18 +1522,7 @@ async function ctxNewFolder() {
 async function createFileAt(relPath: string) {
   try {
     const resource = await projectFiles.createText(projectKey.value, relPath, '')
-    if (props.memoryMode) {
-      emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
-      return
-    }
-    const text = await projectFiles.readText(resource)
-    emitEvent('open-in-editor', {
-      resource,
-      content: '',
-      revision: text.revision,
-      editorMode: projectTextEditorMode(resource),
-    })
-    emitEvent('switch-panel', 'editor')
+    emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
   } catch (e) {
     errorMsg.value = `创建失败: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -1636,11 +1531,11 @@ async function ctxRename() {
   const n = ctxMenu.value.node
   if (!n) return
   closeCtxMenu()
-  if (props.memoryMode && isProtectedMemoryPath(n.path)) {
+  if (isProtectedMemoryPath(n.path)) {
     errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     return
   }
-  const newName = await safePrompt('重命名', n.name, { forceDom: props.memoryMode })
+  const newName = await safePrompt('重命名', n.name, { forceDom: true })
   if (!newName?.trim() || newName.trim() === n.name) return
   try {
     await projectFiles.rename(resourceForNode(n), newName.trim())
@@ -1653,7 +1548,7 @@ async function ctxDelete() {
   if (!n) return
   closeCtxMenu()
   const resources = selectedResources()
-  if (props.memoryMode && resources.some(resource => isProtectedMemoryPath(resource.path))) {
+  if (resources.some(resource => isProtectedMemoryPath(resource.path))) {
     errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
     return
   }
@@ -1748,7 +1643,7 @@ function chooseCollision(decision: WebProjectCollisionDecision) {
   pendingCollision.value = null
   pending.resolve(decision)
 }
-async function uploadWebFiles(files: File[], targetPath = '') {
+async function uploadWebFiles(files: File[]) {
   const projectId = webProjectId.value
   if (isDesktop || !projectId || !files.length) return
   try {
@@ -1757,7 +1652,7 @@ async function uploadWebFiles(files: File[], targetPath = '') {
       projectId,
       files.map(file => transferEntryForFile(
         file,
-        uploadPathForFile(file, props.memoryMode ? memoryMediaDirectoryFor(file.name, file.type) : targetPath),
+        uploadPathForFile(file, memoryMediaDirectoryFor(file.name, file.type)),
       )),
       { resolveCollision: ({ path }) => requestCollision(path) },
     )
@@ -1765,18 +1660,17 @@ async function uploadWebFiles(files: File[], targetPath = '') {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
-async function importDesktopFiles(targetPath = '') {
+async function importDesktopFiles() {
   const owner = projectDir.value
   if (!owner) return
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    const importTarget = props.memoryMode ? MEMORY_MEDIA_DIRECTORIES.document : targetPath
+    const importTarget = MEMORY_MEDIA_DIRECTORIES.document
     const imported = await invoke<string[] | null>('dev_import_project_files', {
       input: { root: owner, targetRelativePath: importTarget },
     })
     if (imported && owner === projectDir.value) {
-      if (props.memoryMode) await classifyImportedMemoryFiles(owner, imported)
-      else await refreshAffectedDirectory(targetPath ? `${targetPath}/` : '')
+      await classifyImportedMemoryFiles(owner, imported)
     }
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
@@ -1805,41 +1699,18 @@ async function classifyImportedMemoryFiles(owner: string, importedPaths: string[
   }
   await refreshLoadedDirectories()
 }
-async function importDesktopDirectory(targetPath = '') {
-  const owner = projectDir.value
-  if (!owner) return
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const imported = await invoke<string | null>('dev_import_project_folder', {
-      input: { root: owner, targetRelativePath: targetPath },
-    })
-    if (imported && owner === projectDir.value)
-      await refreshAffectedDirectory(targetPath ? `${targetPath}/` : '')
-  } catch (error) {
-    errorMsg.value = `上传文件夹失败: ${error instanceof Error ? error.message : String(error)}`
-  }
-}
-function openFileUpload(targetPath = '') {
+function openFileUpload() {
   if (isDesktop) {
-    void importDesktopFiles(targetPath)
+    void importDesktopFiles()
     return
   }
-  directoryPickerAction = { kind: 'upload', targetPath }
   uploadInput.value?.click()
-}
-function openDirectoryUpload(targetPath = '') {
-  if (isDesktop) {
-    void importDesktopDirectory(targetPath)
-    return
-  }
-  directoryPickerAction = { kind: 'upload', targetPath }
-  directoryInput.value?.click()
 }
 async function onUploadInputChange(event: Event) {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files || [])
   input.value = ''
-  await uploadWebFiles(files, directoryPickerAction.targetPath)
+  await uploadWebFiles(files)
 }
 async function importWebDirectory(files: File[]) {
   if (!files.length) return
@@ -1857,24 +1728,16 @@ async function importWebDirectory(files: File[]) {
 async function onDirectoryInputChange(event: Event) {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files || [])
-  const action = directoryPickerAction
   input.value = ''
   try {
-    if (action.kind === 'import') await importWebDirectory(files)
-    else await uploadWebFiles(files, action.targetPath)
+    await importWebDirectory(files)
   } catch (error) {
     errorMsg.value = `导入失败: ${error instanceof Error ? error.message : String(error)}`
   }
 }
 function ctxUploadFiles() {
-  const targetPath = ctxMenu.value.node?.isDir ? ctxMenu.value.node.path : ''
   closeCtxMenu()
-  openFileUpload(targetPath)
-}
-function ctxUploadDirectory() {
-  const targetPath = ctxMenu.value.node?.isDir ? ctxMenu.value.node.path : ''
-  closeCtxMenu()
-  openDirectoryUpload(targetPath)
+  openFileUpload()
 }
 async function ctxImportProject() {
   closeCtxMenu()
@@ -1882,7 +1745,6 @@ async function ctxImportProject() {
     await ctxAddProjectFolder()
     return
   }
-  directoryPickerAction = { kind: 'import', targetPath: '' }
   directoryInput.value?.click()
 }
 async function existingExportFile(
@@ -2163,10 +2025,10 @@ function onTreeDragOver(event: DragEvent) {
 function onTreeDragLeave() {
   treeDropActive.value = false
 }
-function onTreeDrop(event: DragEvent, targetPath = '') {
+function onTreeDrop(event: DragEvent) {
   treeDropActive.value = false
   if (isDesktop) return
-  void uploadWebFiles(Array.from(event.dataTransfer?.files || []), targetPath)
+  void uploadWebFiles(Array.from(event.dataTransfer?.files || []))
 }
 function onNodeDrop(event: DragEvent, node: TreeNode) {
   const internal = event.dataTransfer?.getData('application/x-jc-project-resources')
@@ -2174,8 +2036,7 @@ function onNodeDrop(event: DragEvent, node: TreeNode) {
     void ctxPasteResources(node)
     return
   }
-  const targetPath = node.isDir ? node.path : node.path.split('/').slice(0, -1).join('/')
-  onTreeDrop(event, targetPath)
+  onTreeDrop(event)
 }
 function onNodeDragStart(event: DragEvent, node: TreeNode) {
   selectTreeNode(node)
@@ -2233,9 +2094,6 @@ function ctxNewFolderFromSelection() {
   useSelectedDirectoryAsCreationTarget()
   void ctxNewFolder()
 }
-const offNewProjectDocument = onEvent('project:new-document', () => {
-  void ctxNewFileFromSelection()
-})
 function doCollapseAll() {
   /* ponytail: clone → collapse → assign. Mutating the reactive proxy then cloning
      can race with Vue's async scheduling, causing the computed to re-eval against
@@ -2308,30 +2166,6 @@ function onTreeKeydown(e: KeyboardEvent) {
   }
 }
 
-/* ─── 自动定位：编辑器打开文件时，文件树选中对应节点 ─── */
-const offEditorChanged = onEvent('editor-file-changed', (payload: unknown) => {
-  const p = payload as { filePath?: string | null }
-  if (p?.filePath) {
-    // 从完整路径提取相对路径
-    const rel = projectDir.value
-      ? p.filePath.replace(projectDir.value.replace(/\/+$/, '') + '/', '')
-      : ''
-    selectedPath.value = rel || null
-    focusedPath.value = rel || null
-    // 确保父目录展开
-    if (rel && treeRoot.value) expandParents(treeRoot.value, rel)
-  }
-})
-function expandParents(root: TreeNode, targetRel: string) {
-  const parts = targetRel.split('/')
-  let current: TreeNode | undefined = root
-  for (let i = 0; i < parts.length - 1; i++) {
-    if (!current) break
-    current.expanded = true
-    current = current.children.find(c => c.name === parts[i])
-  }
-}
-
 /* ─── 生命周期 ─── */
 watch(
   projectKey,
@@ -2370,8 +2204,6 @@ watch(filterQuery, async query => {
 })
 onMounted(async () => {
   document.addEventListener('click', onCtxMenuClick)
-  const pendingNewProjectDocument = consumeLastEvent('project:new-document')
-  if (pendingNewProjectDocument) void ctxNewFileFromSelection()
   const pendingProjectResourceExport = consumeLastEvent('project:export-resources')
   if (pendingProjectResourceExport)
     void handleProjectResourceExport(pendingProjectResourceExport[0])
@@ -2413,17 +2245,15 @@ onBeforeUnmount(() => {
   webProjectChannel?.close()
   stopDesktopProjectFsHints?.()
   stopPolling()
-  offEditorChanged()
   offCanvasLocate()
   offWebProjectFilesChanged()
   offProjectResourceChanged()
   offDesktopProjectDrop()
-  offNewProjectDocument()
 })
 </script>
 
 <template>
-  <div class="pft" :class="{ 'memory-mode': props.memoryMode, 'memory-desktop': props.memoryMode && isDesktop }" data-project-drop-target="project" @keydown="onTreeKeydown" tabindex="0">
+  <div class="pft memory-mode" :class="{ 'memory-desktop': isDesktop }" data-project-drop-target="project" @keydown="onTreeKeydown" tabindex="0">
     <input
       ref="uploadInput"
       class="pft-native-input"
@@ -2444,40 +2274,24 @@ onBeforeUnmount(() => {
       <p>还没有打开项目</p>
       <button class="pft-empty-btn pft-project-trigger" @click="ctxAddProjectFolder">
         <JcIcon name="create_new_folder" style="font-size: 14px" />
-        {{ props.memoryMode ? '打开项目中心' : isDesktop ? '选择项目文件夹' : '新建或切换项目' }}
+        打开项目中心
       </button>
     </div>
 
     <template v-else>
       <!-- ═══ 顶部工具栏 ═══ -->
       <header class="pft-head">
-        <template v-if="props.memoryMode">
-          <div class="pft-project-row">
-            <button class="pft-project-name pft-project-trigger" :title="`切换项目：${projectStore.projectName.value}`" @click="ctxAddProjectFolder">
-              <img class="pft-brand-logo" src="/logo.svg" alt="" />
-              <strong>{{ projectStore.projectName.value }}</strong>
-              <JcIcon name="expand-more" />
-            </button>
-            <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
-          </div>
-        </template>
-        <template v-else>
-          <div class="pft-title-row"><strong class="pft-title">{{ projectStore.projectName.value }}</strong></div>
-          <div class="pft-actions">
-            <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
-            <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
-            <button class="pft-icon-btn" title="上传文件" @click="openFileUpload()"><JcIcon name="upload" /></button>
-            <button class="pft-icon-btn" title="上传文件夹" @click="openDirectoryUpload()"><JcIcon name="folder-open" /></button>
-            <button class="pft-icon-btn" title="导入项目" @click="ctxImportProject"><JcIcon name="upload" /></button>
-            <button class="pft-icon-btn" title="导出项目" @click="ctxExportProject"><JcIcon name="download" /></button>
-            <button class="pft-icon-btn pft-project-trigger" :title="isDesktop ? '切换项目文件夹' : '切换项目'" @click="ctxAddProjectFolder"><JcIcon name="call-split" /></button>
-            <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories"><JcIcon name="refresh" /></button>
-            <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
-          </div>
-        </template>
+        <div class="pft-project-row">
+          <button class="pft-project-name pft-project-trigger" :title="`切换项目：${projectStore.projectName.value}`" @click="ctxAddProjectFolder">
+            <img class="pft-brand-logo" src="/logo.svg" alt="" />
+            <strong>{{ projectStore.projectName.value }}</strong>
+            <JcIcon name="expand-more" />
+          </button>
+          <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
+        </div>
       </header>
 
-      <div v-if="props.memoryMode" class="pft-actions pft-memory-actions">
+      <div class="pft-actions pft-memory-actions">
         <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
         <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
         <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories"><JcIcon name="refresh" /></button>
@@ -2573,11 +2387,6 @@ onBeforeUnmount(() => {
             </span>
             <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
             <span class="pft-name">{{ item.node.name }}</span>
-            <span
-              v-if="isDirtyProjectResource(item.node.path)"
-              class="pft-dirty-dot"
-              aria-label="未保存修改"
-            ></span>
           </div>
         </div>
       </div>
@@ -2669,9 +2478,6 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxUploadFiles">
             <JcIcon name="upload" /><span>上传文件</span>
           </button>
-          <button v-if="!memoryMode" class="pft-ctx-item" @click="ctxUploadDirectory">
-            <JcIcon name="folder-open" /><span>上传文件夹</span>
-          </button>
           <button class="pft-ctx-item" @click="ctxImportProject">
             <JcIcon name="upload" /><span>导入项目</span>
           </button>
@@ -2703,9 +2509,6 @@ onBeforeUnmount(() => {
           </button>
           <button class="pft-ctx-item" @click="ctxUploadFiles">
             <JcIcon name="upload" /><span>上传文件</span>
-          </button>
-          <button v-if="!memoryMode" class="pft-ctx-item" @click="ctxUploadDirectory">
-            <JcIcon name="folder-open" /><span>上传文件夹</span>
           </button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxCopyResources">
@@ -2747,7 +2550,7 @@ onBeforeUnmount(() => {
             <JcIcon name="visibility" /><span>预览</span>
           </button>
           <button
-            v-if="!ctxMenu.node.isDir && (props.memoryMode || isCanvasMediaFile(ctxMenu.node))"
+            v-if="!ctxMenu.node.isDir"
             class="pft-ctx-item"
             @click="ctxReferenceInChat"
           >
@@ -2761,29 +2564,17 @@ onBeforeUnmount(() => {
             <JcIcon name="palette" /><span>加入画布</span>
           </button>
           <button
-            v-if="isDesktop && props.memoryMode"
+            v-if="isDesktop"
             class="pft-ctx-item"
             @click="ctxOpenInSystem"
           >
             <JcIcon name="open_in_new" /><span>用系统默认应用打开</span>
           </button>
-          <button
-            class="pft-ctx-item"
-            v-if="
-              !props.memoryMode &&
-              ctxMenu.node &&
-              (ctxMenu.node.mimeType?.startsWith('video/') ||
-                VIDEO_EXTS.has(ctxMenu.node.name.split('.').pop()?.toLowerCase() || ''))
-            "
-            @click="ctxOpenInSystem"
-          >
-            <JcIcon name="play_arrow" /><span>用系统播放器打开</span>
-          </button>
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxOpen">
             <JcIcon name="dashboard" /><span>打开画布</span>
           </button>
           <button v-else class="pft-ctx-item" @click="ctxOpen">
-            <JcIcon name="edit" /><span>{{ props.memoryMode ? '打开' : '编辑区打开' }}</span>
+            <JcIcon name="edit" /><span>打开</span>
           </button>
           <div class="pft-ctx-divider"></div>
           <button class="pft-ctx-item" @click="ctxCopyResources">
@@ -3239,14 +3030,6 @@ onBeforeUnmount(() => {
 }
 .pft-node.cutting {
   opacity: 0.48;
-}
-.pft-dirty-dot {
-  width: 6px;
-  height: 6px;
-  margin-left: auto;
-  border-radius: 50%;
-  background: var(--olive-dark);
-  flex: 0 0 auto;
 }
 .pft-arrow {
   display: flex;

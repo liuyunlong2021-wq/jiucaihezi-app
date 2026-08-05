@@ -84,7 +84,7 @@
 | --- | --- | --- |
 | `src/runtime/workbench/` | `mediaPlan.ts`、`mediaPlanBridge.ts`、`mediaReference.ts` 及测试；记忆工作台和创作面板正在使用 | `ecommerce*`、`production*`、`singleTurnWorkbench.ts`、`workbenchManifest.ts` 及对应测试 |
 | `src/components/chat/` | `ChatScrollNav.vue`、`MediaTaskBubble.vue`、`SkillInstallCard.vue`、`ToolApprovalStrip.vue`、记忆 Markdown/流式显示实际依赖及其测试 | `ChatPanel.vue`、OpenCode timeline/permission/question/todo/diff/context UI；迁出前必须用 import 图确认无记忆依赖 |
-| `src/components/editor/` | `editorSessionStore.ts` 当前被 `ProjectFileTree.vue` 引用；其他被项目文件链路引用的模块 | `EditorPanel.vue` 与旧 Studio 独立编辑区；剩余文件逐项判定 |
+| `src/components/editor/` | 无；当前文件打开与 Markdown 编辑由 `ProjectFileTree.vue`、`MemoryWorkbench.vue` 和项目资源服务承担 | `editorSessionStore.ts`、`EditorPanel.vue` 与旧 Studio 独立编辑区已迁出 |
 | `src/components/filetree/` | `ProjectFileTree.vue` 及测试 | `FileTreePanel.vue` 旧 Studio 文件栏 |
 | `src/components/settings/` | `LocalCapabilitySetup.vue` 被默认 `App.vue` 使用 | `SettingsPanel.vue` 旧 Studio 设置面 |
 | `src/stores/` | `agentStore.ts`、`mediaTaskStore.ts`、`projectStore.ts`、`mcpStore.ts`、`skillsManageStore.ts` 等记忆依赖 | `ecommerceWorkbenchStore.ts`；OpenCode Store 须先解除下节依赖 |
@@ -137,12 +137,12 @@
 
 ## 6. TDD 实施结果
 
-1. **基线门禁完成**：5 项单产品分离测试锁定记忆入口、旧路径禁入和测试清单完整性。
+1. **基线门禁完成**：10 项单产品分离测试锁定记忆入口、旧路径禁入、测试清单、依赖、动态图标和发布产物卫生。
 2. **旧壳迁出完成**：旧 Studio、多产品布局、导航、插件面、产品工作台和宣传项目已从主仓删除。
 3. **混合目录拆分完成**：保留记忆工作台实际使用的媒体计划、聊天卡片、项目文件和编辑状态；移出旧产品专属文件。
 4. **OpenCode 阻塞解除完成**：模型、创作面板、搜索和 Rust 四组并发解耦后，OpenCode TypeScript/Rust/SDK/脚本已删除。
 5. **文档收口完成**：旧产品 Wiki 由独立备份仓库保留；当前 Wiki 只保留记忆工作台现行合同和历史必要证据。
-6. **自动验收完成**：分离门禁 `5/5`、Node `985/985`、Rust `395 passed / 1 ignored`、TypeScript、Web quick build、Desktop quick build和两端产物审计均通过。
+6. **自动验收完成**：分离门禁 `10/10`、Node `969/969`、Rust `395 passed / 1 ignored`、Wiki Skill `18/18`、Gateway `36/36`、TypeScript、Web quick build、Desktop quick build和两端产物审计均通过。
 
 整体异常仍可回到独立备份仓库中的 `v2.1.9` / `f302c251`。
 

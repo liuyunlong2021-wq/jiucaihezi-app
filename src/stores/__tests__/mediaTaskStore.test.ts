@@ -2346,7 +2346,7 @@ test('creation gallery cards recover when async media urls resolve', () => {
   assert.match(cardSource, /v-if="isImage && url && !imgError"/)
 })
 
-test('MediaTaskBubble downloads project media first and keeps the remote fallback safe', () => {
+test('MediaTaskBubble stays on the memory-workbench project and media paths', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/chat/MediaTaskBubble.vue'),
     'utf8',
@@ -2364,7 +2364,8 @@ test('MediaTaskBubble downloads project media first and keeps the remote fallbac
   )
   assert.equal(source.includes('taskStore.retryMediaPersistence(props.taskId)'), true)
   assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
-  assert.match(source, /props\.workbenchMode[\s\S]*fetchCreationMediaBlob\(t\.resultUrl[\s\S]*fetchBlobForExport\(t\.resultUrl\)/)
+  assert.match(source, /fetchCreationMediaBlob\(t\.resultUrl/)
+  assert.doesNotMatch(source, /workbenchMode|fetchBlobForExport|sendToGallery|sendAsReference/)
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
   assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
   assert.equal(source.includes('v-else-if="isSuccess && isSafeResult"'), true)

@@ -1389,7 +1389,6 @@ pub fn run() {
             commands::dev::pick_project_folder,
             commands::dev::list_mobile_projects,
             commands::dev::create_mobile_project,
-            commands::dev::create_production_project,
             commands::dev::open_file_picker,
             commands::dev::save_file_picker,
             commands::skill_material::skill_material_compile,

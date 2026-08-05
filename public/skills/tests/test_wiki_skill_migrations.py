@@ -48,7 +48,7 @@ class WikiSkillMigrationTests(unittest.TestCase):
         }
         for name, actions in expected_actions.items():
             text = self.read_skill(name)
-            self.assertIn("Studio 原生 `wiki` 工具", text, name)
+            self.assertIn("App 原生 `wiki` 工具", text, name)
             self.assertIn("没有 `wiki` 工具", text, name)
             self.assertIn("scripts/", text, name)
             for action in actions:
@@ -213,6 +213,7 @@ class WikiSkillMigrationTests(unittest.TestCase):
             active.mkdir(parents=True)
             archive.mkdir(parents=True)
             (wiki / "CLAUDE.md").write_text("# 入口\n\n[[开发/当前页]]\n", encoding="utf-8")
+            (wiki / "log.md").write_text("# 流水日志\n\n[[不存在的历史日志页]]\n", encoding="utf-8")
             (active / "当前页.md").write_text("# 当前页\n\n[[不存在的现行页]]\n", encoding="utf-8")
             (archive / "旧页.md").write_text("# 旧页\n\n[[不存在的历史页]]\n", encoding="utf-8")
 
@@ -228,6 +229,7 @@ class WikiSkillMigrationTests(unittest.TestCase):
             self.assertIn("归档卫生", audit.stdout)
             self.assertIn("不存在的现行页", audit.stdout)
             self.assertIn("不存在的历史页", audit.stdout)
+            self.assertIn("不存在的历史日志页", audit.stdout)
 
             (active / "不存在的现行页.md").write_text("# 已补现行页\n", encoding="utf-8")
             clean_active = subprocess.run(

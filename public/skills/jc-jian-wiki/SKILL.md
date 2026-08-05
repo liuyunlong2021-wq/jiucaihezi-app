@@ -46,5 +46,5 @@ triggers:
 
 ## 工具出口
 
-- Studio 原生 `wiki` 工具可用时，必须使用 `audit` 完成机械巡检；语义矛盾仍由模型阅读事实页判断。
+- App 原生 `wiki` 工具可用时，必须使用 `audit` 完成机械巡检；语义矛盾仍由模型阅读事实页判断。
 - 没有 `wiki` 工具的外部 Agent 才使用 `scripts/scan_vault.py`；其 Markdown helper 位于 `scripts/extract_wikilinks.mjs`。

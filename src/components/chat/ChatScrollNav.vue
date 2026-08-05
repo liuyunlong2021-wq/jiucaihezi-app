@@ -1,15 +1,12 @@
 <script setup lang="ts">
 /**
- * ChatScrollNav.vue — 粘性滚动控制（对标 OpenCode ScrollBoxRenderable）
+ * ChatScrollNav.vue — 记忆工作台粘性滚动控制
  *
  * 核心机制：
  *   stickyScrollBottom = true  → 新内容到达时自动滚到底部
  *   stickyScrollBottom = false → 用户手动离开了底部，停止自动跟滚
  *   用户滚回底部 → stickyScrollBottom 恢复 true → 重新开始跟滚
  *
- * 对标 OpenCode index.tsx：
- *   stickyScroll={true} + stickyStart="bottom"
- *   ScrollBoxRenderable._stickyScrollBottom
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { isNearBottom } from './display/autoScrollPolicy'
@@ -17,10 +14,8 @@ import { isNearBottom } from './display/autoScrollPolicy'
 const props = defineProps<{
   container: HTMLElement | null
   isStreaming: boolean
-  messages?: Array<{ id: string }>
 }>()
 
-// ─── 核心状态：对标 ScrollBoxRenderable._stickyScrollBottom ───
 const stickyScrollBottom = ref(true)
 
 let programmaticScroll = false
@@ -31,10 +26,9 @@ let autoScrollTimer: ReturnType<typeof setTimeout> | null = null
 let settling = false
 let settlingTimer: number | null = null
 
-// ─── 公开给 ChatPanel 渲染「滚到底部」按钮 ───
+// ─── 公开给记忆工作台渲染「滚到底部」按钮 ───
 const showScrollToBottom = computed(() => !stickyScrollBottom.value)
 
-// ─── 公开给 ChatPanel（保持向后兼容） ───
 const userScrolled = computed(() => !stickyScrollBottom.value)
 
 // ─── 滚动位置判断 ───
@@ -236,5 +230,5 @@ watch(() => props.container, (newEl, oldEl) => {
 </script>
 
 <template>
-  <!-- renderless: 所有逻辑通过 defineExpose 暴露给 ChatPanel -->
+  <!-- renderless: 所有逻辑通过 defineExpose 暴露给记忆工作台 -->
 </template>

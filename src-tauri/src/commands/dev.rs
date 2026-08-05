@@ -2229,18 +2229,6 @@ pub fn create_mobile_project(app: AppHandle, name: String) -> Result<MobileProje
     })
 }
 
-#[tauri::command]
-pub fn create_production_project(app: AppHandle) -> Result<String, String> {
-    let root = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("无法定位应用数据目录: {e}"))?
-        .join("production-projects")
-        .join("未命名制作项目");
-    std::fs::create_dir_all(&root).map_err(|e| format!("创建制作项目失败: {e}"))?;
-    Ok(root.to_string_lossy().to_string())
-}
-
 // ponytail: 照抄 OpenCode desktop/main/ipc.ts "open-file-picker" handler
 #[tauri::command]
 #[cfg(not(any(target_os = "ios", target_os = "android")))]

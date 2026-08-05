@@ -6,7 +6,7 @@
 
 ## 输入
 
-Studio 创模式用户明确提供的导出、Studio 文/武 `ses_*`、VS Code 当前项目 `chatSessions/*.jsonl`、原始文件/URL、SDD、代码、Git、测试或巡检输出。
+当前项目记忆工作台 `.raw/对话记录/*.md`、VS Code 当前项目 `chatSessions/*.jsonl`、原始文件/URL、SDD、代码、Git、测试或巡检输出。
 
 ## 输出标准
 
