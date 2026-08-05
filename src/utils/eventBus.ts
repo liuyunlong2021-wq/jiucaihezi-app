@@ -1,6 +1,6 @@
 /**
  * eventBus.ts — 极简全局事件总线
- * 用于跨组件通信（如 MessageBubble → WorkspaceLayout 切换面板）
+ * 用于记忆工作台跨组件通信。
  */
 type Handler = (...args: unknown[]) => unknown
 

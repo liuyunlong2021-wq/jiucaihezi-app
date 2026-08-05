@@ -48,18 +48,6 @@ test('creation prompt grows for typed and programmatically loaded text', () => {
   assert.match(source, /nextTick\(\(\) => resizePromptInput\(\)\)/)
 })
 
-// Legacy ecommerce rollback contract; MemoryWorkbench owns the current media path.
-test.skip('ecommerce-approved media plans enter the existing Creation task engine and return their task result', () => {
-  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-
-  assert.match(source, /preparePublicMediaPlan/)
-  assert.match(source, /data\.preparedSubmission/)
-  assert.match(source, /ecommerce-media-plan-approved/)
-  assert.match(source, /mediaTaskStore\.submitTask\(submission\)/)
-  assert.match(source, /source: 'creation'/)
-  assert.match(source, /ecommerce-media-plan-submitted/)
-})
-
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
@@ -830,6 +818,6 @@ test('creation panel lets a remote successful result be saved into its project',
   )
   assert.match(
     source,
-    /v-if="\s+\(task\.status === 'success' \|\| isLegacyChatTask\(task\)\) &&\s+\(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)\s+"\s+@click="previewTask\(task\)"/,
+    /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)\s+"\s+@click="previewTask\(task\)"/,
   )
 })

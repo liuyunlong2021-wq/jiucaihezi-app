@@ -12,13 +12,12 @@
  *   ScrollBoxRenderable._stickyScrollBottom
  */
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import type { ChatMessage } from '@/composables/useChat'
 import { isNearBottom } from './display/autoScrollPolicy'
 
 const props = defineProps<{
   container: HTMLElement | null
   isStreaming: boolean
-  messages?: ChatMessage[]
+  messages?: Array<{ id: string }>
 }>()
 
 // ─── 核心状态：对标 ScrollBoxRenderable._stickyScrollBottom ───

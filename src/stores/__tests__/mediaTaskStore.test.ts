@@ -1469,90 +1469,34 @@ test(
 )
 
 test(
-  'mediaTaskStore restores and projects persisted chat tasks only for their Desktop session',
+  'mediaTaskStore restores persisted Raw conversation and project ownership',
   { concurrency: false },
   async () => {
-    const savedTasks = [
-      {
-        id: 'mtask_session_one',
-        type: 'image',
-        model: 'gpt-image-1',
-        modelLabel: '图片模型',
-        prompt: '第一会话',
-        referenceImages: [],
-        status: 'success',
-        progress: 100,
-        progressText: '完成',
-        createdAt: 1,
-        source: 'chat',
-        sessionId: 'ses_one',
-        directory: '/project',
-        resultUrl: 'https://webstatic.aiproxy.vip/one.png',
-      },
-      {
-        id: 'mtask_session_two',
-        type: 'image',
-        model: 'gpt-image-1',
-        modelLabel: '图片模型',
-        prompt: '第二会话',
-        referenceImages: [],
-        status: 'success',
-        progress: 100,
-        progressText: '完成',
-        createdAt: 2,
-        source: 'chat',
-        sessionId: 'ses_two',
-        directory: '/project',
-        resultUrl: 'https://webstatic.aiproxy.vip/two.png',
-      },
-      {
-        id: 'mtask_empty_draft',
-        type: 'image',
-        model: 'gpt-image-1',
-        modelLabel: '图片模型',
-        prompt: '旧空草稿',
-        referenceImages: [],
-        status: 'success',
-        progress: 100,
-        progressText: '完成',
-        createdAt: 3,
-        source: 'chat',
-        sessionId: '',
-        directory: '/project',
-        resultUrl: 'https://webstatic.aiproxy.vip/draft.png',
-      },
-      {
-        id: 'mtask_legacy',
-        type: 'image',
-        model: 'gpt-image-1',
-        modelLabel: '图片模型',
-        prompt: '旧任务',
-        referenceImages: [],
-        status: 'success',
-        progress: 100,
-        progressText: '完成',
-        createdAt: 4,
-        source: 'chat',
-        resultUrl: 'https://webstatic.aiproxy.vip/legacy.png',
-      },
-    ]
-    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify(savedTasks) })
+    const savedTask = {
+      id: 'mtask_memory',
+      type: 'image',
+      model: 'gpt-image-1',
+      modelLabel: '图片模型',
+      prompt: '记忆媒体任务',
+      referenceImages: [],
+      status: 'success',
+      progress: 100,
+      progressText: '完成',
+      createdAt: 1,
+      source: 'creation',
+      sessionId: 'raw_conversation_one',
+      chatMessageId: 'turn_1:0',
+      directory: '/project',
+      memory: true,
+      resultUrl: 'https://webstatic.aiproxy.vip/one.png',
+    }
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([savedTask]) })
     try {
       setActivePinia(createPinia())
       const store = useMediaTaskStore()
       await store.init()
 
-      assert.deepEqual(
-        store.chatTasksFor('ses_one', '/project').map(task => task.id),
-        ['mtask_session_one'],
-      )
-      assert.deepEqual(
-        store.chatTasksFor('ses_two', '/project').map(task => task.id),
-        ['mtask_session_two'],
-      )
-      assert.deepEqual(store.chatTasksFor('ses_one', '/other'), [])
-      assert.deepEqual(store.chatTasksFor('', '/project'), [])
-      assert.deepEqual(store.chatTasksFor('', '/other'), [])
+      assert.deepEqual(store.getTask('mtask_memory'), savedTask)
     } finally {
       storage.restore()
     }
@@ -1752,49 +1696,6 @@ test(
   },
 )
 
-test(
-  'legacy chat tasks require explicit binding and persist their selected official session',
-  { concurrency: false },
-  async () => {
-    const legacy = {
-      id: 'mtask_legacy_bind',
-      type: 'image',
-      model: 'gpt-image-2',
-      modelLabel: '旧模型',
-      prompt: '旧任务',
-      referenceImages: [],
-      status: 'success',
-      progress: 100,
-      progressText: '完成',
-      createdAt: 1,
-      source: 'chat',
-      resultUrl: 'https://webstatic.aiproxy.vip/output/legacy.png',
-    }
-    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([legacy]) })
-    try {
-      setActivePinia(createPinia())
-      const store = useMediaTaskStore()
-      await store.init()
-      assert.equal(
-        await store.bindLegacyChatTask('mtask_legacy_bind', 'ses_selected', '/project'),
-        true,
-      )
-
-      setActivePinia(createPinia())
-      const restored = useMediaTaskStore()
-      await restored.init()
-      assert.equal(restored.getTask('mtask_legacy_bind')?.sessionId, 'ses_selected')
-      assert.equal(restored.getTask('mtask_legacy_bind')?.directory, '/project')
-      assert.equal(
-        await restored.bindLegacyChatTask('mtask_legacy_bind', 'sess_fake', '/other'),
-        false,
-      )
-    } finally {
-      storage.restore()
-    }
-  },
-)
-
 test('all media task writes share one queued snapshot writer', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
   assert.equal((source.match(/mediaTaskSaver\(/g) || []).length, 1)
@@ -1820,29 +1721,19 @@ test('mediaTaskStore preserves submitted poll tasks for recovery after a transie
   assert.match(source, /轮询暂时失败，重启后将继续恢复/)
 })
 
-test('task history exposes unscoped legacy chat tasks with explicit recovery only', () => {
+test('memory media task history has no OpenCode task recovery path', () => {
   const panel = readFileSync(
     join(process.cwd(), 'src/components/creation/CreationPanel.vue'),
     'utf8',
   )
-  assert.match(panel, /isLegacyChatTask\(task\)/)
-  assert.match(panel, /旧任务 \/ 未归属/)
-  assert.match(panel, /bindLegacyTaskToCurrentSession\(task\)/)
-  assert.doesNotMatch(panel, /bindLegacyChatTask\([^,]+,\s*['"`]ses_/)
-})
+  const store = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
-test('legacy task classification and recovery controls are Desktop-only', () => {
-  const panel = readFileSync(
-    join(process.cwd(), 'src/components/creation/CreationPanel.vue'),
-    'utf8',
-  )
-  const classifier = panel.slice(
-    panel.indexOf('function isLegacyChatTask'),
-    panel.indexOf('const creationTasks'),
-  )
-  assert.match(classifier, /return isTauriRuntime\(\) && task\.source === 'chat'/)
-  assert.match(panel, /v-if="isLegacyChatTask\(task\)"[\s\S]*旧任务 \/ 未归属/)
-  assert.match(panel, /v-if="isLegacyChatTask\(task\)"[\s\S]*绑定当前会话/)
+  assert.doesNotMatch(panel, /useOpenCodeSyncStore|isLegacyChatTask|bindLegacyChatTask|绑定当前会话/)
+  assert.match(panel, /\.filter\(t => t\.source === 'creation'\)/)
+  assert.doesNotMatch(store, /function chatTasksFor|function bindLegacyChatTask/)
+  assert.match(store, /sessionId\?: string/)
+  assert.match(store, /chatMessageId\?: string/)
+  assert.match(store, /directory\?: string/)
 })
 
 test('mediaTaskStore persists planSnapshot and route identity for creation task recovery', () => {

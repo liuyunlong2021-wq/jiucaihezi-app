@@ -2,8 +2,7 @@
  * stores/mediaTaskStore.ts — 全局统一任务引擎 (Media Task Engine)
  *
  * 核心理念：
- *   无论从 ChatPanel 还是 CreationPanel 发起媒体生成，
- *   都统一通过 submitTask() 提交。
+ *   记忆工作台媒体生成统一通过 submitTask() 提交。
  *   任务状态是响应式的 (Pinia)，UI 自动更新。
  *   任务列表持久化到 IndexedDB kv_store，刷新页面不丢。
  *
@@ -131,10 +130,11 @@ export interface MediaTask {
   source: TaskSource
   /** Web 创作任务提交时冻结的项目归属，不能在完成时读取活动项目 */
   projectId?: string
-  /** 来源对话的消息 ID（用于 ChatPanel 气泡渲染） */
+  /** 来源对话的媒体计划键 */
   chatMessageId?: string
-  /** Desktop ChatPanel 归属；只用于媒体任务投影，不属于 OpenCode 文本状态 */
+  /** Raw 对话归属 */
   sessionId?: string
+  /** 项目 owner；字段名为历史持久化合同 */
   directory?: string
   memory?: boolean
   /** 生成参数快照 */
@@ -483,20 +483,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   function isTaskActive(taskId: string): boolean {
     return activeTaskIds.value.has(taskId)
-  }
-
-  function chatTasksFor(sessionId: string, directory: string): MediaTask[] {
-    const targetSession = String(sessionId || '')
-    const targetDirectory = String(directory || '')
-    if (!targetSession.startsWith('ses_') || !targetDirectory) return []
-    return tasks.value
-      .filter(
-        task =>
-          task.source === 'chat' &&
-          task.sessionId === targetSession &&
-          task.directory === targetDirectory,
-      )
-      .sort((a, b) => a.createdAt - b.createdAt)
   }
 
   function queueTaskPersistence(mutate?: () => void, rollback?: () => void): Promise<void> {
@@ -1135,29 +1121,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (tasks.value.length !== before) void persistTasksSafely('delete-task')
   }
 
-  async function bindLegacyChatTask(
-    taskId: string,
-    sessionId: string,
-    directory: string,
-  ): Promise<boolean> {
-    const task = tasks.value.find(item => item.id === taskId)
-    const targetSession = String(sessionId || '').trim()
-    const targetDirectory = String(directory || '').trim()
-    if (
-      !task ||
-      task.source !== 'chat' ||
-      (task.sessionId && task.directory) ||
-      !targetSession.startsWith('ses_') ||
-      !targetDirectory
-    )
-      return false
-    await queueTaskPersistence(() => {
-      task.sessionId = targetSession
-      task.directory = targetDirectory
-    })
-    return true
-  }
-
   // ─── 获取任务 ───
   function getTask(taskId: string): MediaTask | undefined {
     return tasks.value.find(t => t.id === taskId)
@@ -1369,8 +1332,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     clearFinished,
     deleteTask,
     getTask,
-    chatTasksFor,
-    bindLegacyChatTask,
     hasPendingCanvasWrite,
   }
 })

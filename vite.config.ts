@@ -15,13 +15,13 @@ const apiProxy = {
   rewrite: (path: string) => path.replace(/^\/__jc_api/, ''),
 }
 
-export default defineConfig(({ mode }) => ({
+export default defineConfig({
   plugins: [vue()],
   base: './',
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
-      '@app-root': resolve(__dirname, mode === 'studio' ? 'src/StudioApp.vue' : 'src/App.vue'),
+      '@app-root': resolve(__dirname, 'src/App.vue'),
     },
   },
   define: {
@@ -99,4 +99,4 @@ export default defineConfig(({ mode }) => ({
       },
     },
   },
-}))
+})

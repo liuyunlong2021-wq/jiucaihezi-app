@@ -4,57 +4,74 @@
  * 搜索范围：会话标题
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useSessionStore } from '@/stores/sessionStore'
+import { useProjectStore } from '@/stores/projectStore'
 import { emitEvent } from '@/utils/eventBus'
 import { searchItems } from '@/utils/generalSearch'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { openProjectResource } from '@/services/projectExplorerService'
+import { inspectMemoryProject, type MemoryConversation } from '@/runtime/memory/memoryProject'
+import type { ProjectResource } from '@/utils/projectResource'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
-const sessionStore = useSessionStore()
+const projectStore = useProjectStore()
+const files = createRuntimeProjectFileService()
 
 const visible = ref(false)
 const query = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const selectedIndex = ref(0)
+const conversations = ref<MemoryConversation[]>([])
+const projectOwner = computed(() => isTauriRuntime()
+  ? projectStore.projectDir.value
+  : projectStore.webProjectId.value)
 
 interface SearchResult {
-  type: 'session'
+  type: 'conversation'
   id: string
   title: string
+  resource: ProjectResource
   subtitle?: string
 }
 
 const results = computed<SearchResult[]>(() => {
   if (!query.value.trim()) return []
 
-  const sessions = sessionStore.projectSessions.map(s => ({ name: s.title, _s: s }))
-  const matched = searchItems(query.value, sessions) as any[]
+  const items = conversations.value.map(item => ({ name: item.transcript.title, item }))
+  const matched = searchItems(query.value, items) as Array<{ item: MemoryConversation }>
 
-  return matched.slice(0, 12).map((m: any) => ({
-    type: 'session' as const,
-    id: m._s.id,
-    title: m._s.title,
+  return matched.slice(0, 12).map(m => ({
+    type: 'conversation' as const,
+    id: m.item.transcript.id,
+    title: m.item.transcript.title,
+    resource: m.item.resource,
     subtitle: '',
   }))
 })
 
 const groupedResults = computed(() => {
   const groups: Record<string, SearchResult[]> = {
-    session: [],
+    conversation: [],
   }
   for (const r of results.value) {
     groups[r.type].push(r)
   }
-  return [
-    ...(groups.session.length ? [{ label: '会话', items: groups.session }] : []),
-  ]
+  return groups.conversation.length ? [{ label: '会话', items: groups.conversation }] : []
 })
 
 const flatResults = computed(() => groupedResults.value.flatMap(g => g.items))
 
-function open() {
+async function open() {
   visible.value = true
   query.value = ''
   selectedIndex.value = 0
   nextTick(() => inputRef.value?.focus())
+  try {
+    conversations.value = projectOwner.value
+      ? (await inspectMemoryProject(projectOwner.value, files)).conversations
+      : []
+  } catch {
+    conversations.value = []
+  }
 }
 
 function close() {
@@ -62,12 +79,10 @@ function close() {
   query.value = ''
 }
 
-function selectItem(item: SearchResult) {
+async function selectItem(item: SearchResult) {
   close()
-  if (item.type === 'session') {
-    sessionStore.switchSession(item.id)
-    emitEvent('switch-panel', 'chat')
-  }
+  const resource = await openProjectResource(files, item.resource)
+  emitEvent('memory:open-resource', resource)
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -87,7 +102,7 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (e.key === 'Enter') {
     const item = flatResults.value[selectedIndex.value]
-    if (item) selectItem(item)
+    if (item) void selectItem(item)
     return
   }
 }
@@ -149,7 +164,7 @@ onBeforeUnmount(() => {
               @click="selectItem(item)"
               @mouseenter="selectedIndex = flatResults.indexOf(item)"
             >
-              <JcIcon :name="item.type === 'session' ? 'chat_bubble' : 'folder_special'" class="gs-item-icon" style="font-size:16px" />
+              <JcIcon name="chat_bubble" class="gs-item-icon" style="font-size:16px" />
               <div class="gs-item-text">
                 <span class="gs-item-title">{{ item.title }}</span>
                 <span v-if="item.subtitle" class="gs-item-sub">{{ item.subtitle }}</span>

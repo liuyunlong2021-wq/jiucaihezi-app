@@ -66,7 +66,7 @@ onMounted(async () => {
   if (desktopRuntime) installedLocalModelCount.value = getLocalOllamaModels().length
   apiKey.value = getApiKey() || await initApiKey()
   await initGatewaySessionToken()
-  if (apiKey.value) await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
+  if (apiKey.value) await agentStore.fetchModels().catch(() => {})
 })
 
 async function connectOllama() {
@@ -93,7 +93,7 @@ async function login(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> 
 async function handleLogin(result: JcCloudLoginResult) {
   apiKey.value = result.apiKey
   await setApiKey(result.apiKey)
-  await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
+  await agentStore.fetchModels().catch(() => {})
   status.value = '已登录'
 }
 
@@ -137,7 +137,7 @@ async function saveKey() {
     return
   }
   await setApiKey(key)
-  await agentStore.fetchModels({ skipOpenCode: true }).catch(() => {})
+  await agentStore.fetchModels().catch(() => {})
   saved.value = true
   status.value = '已保存'
 }

@@ -1,4 +1,3 @@
-use crate::commands::opencode::open_path_with_system;
 use crate::*;
 use base64::Engine as _;
 use base64::engine::general_purpose;
@@ -1830,7 +1829,26 @@ pub fn dev_create_dir(input: DevWriteFileInput) -> Result<(), String> {
 
 #[tauri::command]
 pub fn dev_reveal_in_finder(path: String) -> Result<(), String> {
-    open_path_with_system(&PathBuf::from(&path), true)
+    let path = PathBuf::from(path);
+    if !path.exists() {
+        return Err("文件不存在。".into());
+    }
+    #[cfg(target_os = "macos")]
+    let status = StdCommand::new("open").arg("-R").arg(path).status();
+    #[cfg(target_os = "windows")]
+    let status = StdCommand::new("explorer")
+        .arg(format!("/select,{}", path.to_string_lossy()))
+        .status();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let status = StdCommand::new("xdg-open")
+        .arg(path.parent().unwrap_or(&path))
+        .status();
+
+    status
+        .map_err(|e| format!("打开文件失败: {}", e))?
+        .success()
+        .then_some(())
+        .ok_or_else(|| "打开文件失败。".to_string())
 }
 
 pub fn build_replacement_diff(path: &str, old_text: &str, new_text: &str) -> String {

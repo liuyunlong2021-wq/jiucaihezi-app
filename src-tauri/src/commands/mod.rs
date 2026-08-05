@@ -4,7 +4,6 @@ pub mod greet;
 pub mod http;
 pub mod mcp;
 pub mod media;
-pub mod opencode;
 pub mod plugin;
 pub mod session;
 pub mod skill_material;

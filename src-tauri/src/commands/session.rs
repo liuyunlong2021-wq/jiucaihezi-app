@@ -1,10 +1,12 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-use crate::commands::opencode::user_home_dir;
-
 fn jiucaihezi_home_dir() -> Result<PathBuf, String> {
-    let home = user_home_dir().ok_or_else(|| "无法读取用户目录".to_string())?;
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+        .filter(|path| path.is_dir())
+        .ok_or_else(|| "无法读取用户目录".to_string())?;
     Ok(home.join(".jiucaihezi"))
 }
 

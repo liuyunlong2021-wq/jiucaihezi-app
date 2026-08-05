@@ -14,9 +14,14 @@ import {
   removeRecord,
   setRecord,
 } from '@/utils/idb'
-import type { ChatMessage } from '@/composables/useChat'
 import type { SkillConfig } from '@/types/skill'
 import { serializeToSkillMd } from '@/types/skill'
+
+interface HistoryMessage {
+  id?: string
+  role: string
+  content?: unknown
+}
 
 export interface FileEntry {
   id: string
@@ -59,7 +64,7 @@ function collectDescendantEntries(folderId: string, all: FileEntry[]): FileEntry
   return result
 }
 
-function buildHistoryMarkdown(conversation: any, messages: ChatMessage[]): string {
+function buildHistoryMarkdown(conversation: any, messages: HistoryMessage[]): string {
   const title = conversation.title || '未命名对话'
   const parts = [`# ${title}`]
   for (const msg of messages) {
@@ -142,7 +147,7 @@ export function useFileStore() {
     for (const conversation of conversations) {
       if (!conversation?.id) continue
       const messageRecord = messagesData.find((m: any) => m.id === conversation.id)
-      const messages = Array.isArray(messageRecord?.items) ? messageRecord.items : []
+      const messages: HistoryMessage[] = Array.isArray(messageRecord?.items) ? messageRecord.items : []
       const id = toSafeDocId(HISTORY_DOC_PREFIX, conversation.id)
       const existing = existingDocs.find(f => f.id === id)
       const content = buildHistoryMarkdown(conversation, messages)
@@ -157,7 +162,7 @@ export function useFileStore() {
         updatedAt: conversation.updatedAt || Date.now(),
         kind: 'raw',
         sourceSessionId: conversation.id,
-        sourceMessageIds: messages.map((message: ChatMessage) => message.id).filter(Boolean),
+        sourceMessageIds: messages.map((message: HistoryMessage) => message.id).filter((id): id is string => Boolean(id)),
         metadata: {
           ...(existing?.metadata || {}),
           kind: 'session-history',

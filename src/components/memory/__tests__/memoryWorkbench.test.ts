@@ -564,15 +564,13 @@ test('3D scene editor clones plain scene data instead of Vue proxies', () => {
 
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {
   const app = source('src/App.vue')
-  const studioApp = source('src/StudioApp.vue')
   const vite = source('vite.config.ts')
   const desktop = source('src-tauri/src/lib.rs')
 
   assert.match(app, /<MemoryWorkbench \/>/)
   assert.doesNotMatch(app, /WorkspaceLayout|useOpenCodeSyncStore|projectStoredNewApiForOpenCode/)
-  assert.match(studioApp, /<WorkspaceLayout \/>/)
-  assert.match(studioApp, /useOpenCodeSyncStore|projectStoredNewApiForOpenCode/)
-  assert.match(vite, /mode === 'studio' \? 'src\/StudioApp\.vue' : 'src\/App\.vue'/)
+  assert.match(vite, /'@app-root': resolve\(__dirname, 'src\/App\.vue'\)/)
+  assert.doesNotMatch(vite, /StudioApp|mode === 'studio'/)
   assert.match(desktop, /app\.config\(\)\.build\.dev_url/)
   assert.match(desktop, /"http:\/\/localhost:1420"\.parse\(\)/)
   assert.match(desktop, /window_config\.url = tauri::WebviewUrl::External\(dev_url\)/)
@@ -628,6 +626,16 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
   assert.match(workbench, /resource\.type === 'canvas'[\s\S]{0,160}openCreationHost\(\)/)
   assert.doesNotMatch(workbench, /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/)
+})
+
+test('global search opens current Raw conversations through the memory resource route', () => {
+  const search = source('src/components/search/GlobalSearch.vue')
+
+  assert.match(search, /inspectMemoryProject\(projectOwner\.value, files\)/)
+  assert.match(search, /openProjectResource\(files, item\.resource\)/)
+  assert.match(search, /emitEvent\('memory:open-resource', resource\)/)
+  assert.match(search, /\(e\.metaKey \|\| e\.ctrlKey\) && e\.key === 'k'/)
+  assert.doesNotMatch(search, /useSessionStore|projectSessions|switchSession|emitEvent\('switch-panel', 'chat'\)/)
 })
 
 test('memory files and conversation turns use the shared safe Markdown renderer', () => {

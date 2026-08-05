@@ -1,7 +1,7 @@
 # 通用记忆工作台单产品化分离 SDD
 
 > 日期：2026-08-04
-> 状态：边界已确认，待按 TDD 实施
+> 状态：已按 TDD 实施（2026-08-05）
 > 回滚基线：`v2.1.9` / `f302c251`
 > 依据：用户 2026-08-04 最终决策、[[架构/产品架构]]、[[开发/通用记忆对话独立App SDD]]
 
@@ -63,7 +63,7 @@
 
 ### 3.3 已确认移出项
 
-以下内容只属于旧 Studio/OpenCode UI、文/武/道/创模式、电商或制作工作台。执行迁出前，先把回滚基线完整克隆到默认兄弟目录 `../jiucaihezi-legacy-products/`，验证其 `HEAD` 为 `f302c251` 且工作树干净；随后每组必须先通过对应红灯测试，再在主仓正常删除并提交。执行前可由用户指定其他备份目标。
+以下内容只属于旧 Studio/OpenCode UI、文/武/道/创模式、电商或制作工作台。实施前已把回滚基线完整保存在独立兄弟仓库 `../jiucaihezi-legacy-products/`；其 `HEAD` 为 `f302c251`、工作树干净，且 `git fsck --full` 通过。主仓按红灯门禁完成删除，历史内容继续由备份仓库保留。
 
 | 目录或文件 | 归属 | 前置条件 |
 | --- | --- | --- |
@@ -93,19 +93,19 @@
 | `scripts/` | 版本、Skill 索引、图标、Web/Desktop 审计、DMG、文档与媒体部署脚本 | `update-opencode-runtime.mjs` 和 Studio 专属脚本；先清理调用和测试 |
 | `docs/wiki/` | 当前记忆 SDD、架构、运维、排障、学习、发布证据 | 旧产品 SDD 迁到备份 Wiki；先补替代链接，不直接删 |
 
-### 3.5 现阶段禁止删除的迁出阻塞项
+### 3.5 已解除的迁出阻塞项
 
-以下内容最终属于 OpenCode/旧 Studio，但仍在当前记忆依赖闭包中，**现在禁止删除或移动**：
+以下项目在实施前阻塞迁出；四组 TDD 已解除依赖并完成删除：
 
-| 阻塞项 | 当前依赖证据 | 解锁条件 |
+| 阻塞项 | 实施前依赖 | 实施结果 |
 | --- | --- | --- |
-| `src/opencodeClient/` | `src/stores/agentStore.ts` 静态引用 `daemon/client/catalog/providerProjection`；记忆工作台直接使用 `agentStore` | 把记忆模型目录、Provider 和 Skill 能力拆成无 OpenCode 依赖的 Store，门禁证明功能等价 |
-| `src/stores/openCodeSyncStore.ts` | 当前 `CreationPanel.vue` 仍读取活动 session/目录；记忆工作台动态加载该面板 | 创作面板改为只使用记忆项目 owner/path，不再读取 OpenCode session |
-| `src/stores/sessionStore.ts`、`src/stores/chatModeStore.ts` | 默认 `App.vue` 加载的 `GlobalSearch.vue` 仍使用旧 Session Store | 全局搜索改为搜索 Raw 对话/项目文件，且默认入口无旧 Store 引用 |
-| `src-tauri/src/commands/opencode.rs` 与 `src-tauri/src/lib.rs` 的 OpenCode 注册 | 默认原生库仍管理 `OpenCodeRuntime` 并注册命令 | Rust 门禁先证明默认记忆构建不注册 OpenCode 状态和命令 |
-| `@opencode-ai/sdk`、`scripts/update-opencode-runtime.mjs`、OpenCode focused tests | `agentStore`、旧 Store 和当前测试编译仍引用 | 前述 TypeScript/Rust 依赖全部清零，再从 `package.json`、lockfile和测试清单移出 |
+| `src/opencodeClient/` | `agentStore` 静态引用 OpenCode 目录与 Provider 投影 | `agentStore` 改用 Gateway 目录；OpenCode 客户端已删除 |
+| `src/stores/openCodeSyncStore.ts` | `CreationPanel.vue` 读取 OpenCode session/目录 | 创作面板只使用记忆项目 owner/path；旧 Store 已删除 |
+| `src/stores/sessionStore.ts`、`src/stores/chatModeStore.ts` | `GlobalSearch.vue` 使用旧 Session Store | 全局搜索改为检索并打开 Raw 对话；旧 Store 已删除 |
+| `src-tauri/src/commands/opencode.rs` 与 `src-tauri/src/lib.rs` 的 OpenCode 注册 | 原生库管理 `OpenCodeRuntime` 和命令 | OpenCode 状态、命令、清理和二进制发现已删除；项目、MCP、媒体、FFmpeg、剪贴板和安全存储保留 |
+| `@opencode-ai/sdk`、`scripts/update-opencode-runtime.mjs`、OpenCode focused tests | TypeScript、Rust 和测试仍引用 | 引用清零后已从依赖、锁文件、脚本和测试清单移出 |
 
-这张表是防误删清单，不代表 OpenCode 可以继续留在最终产品。正确顺序是“先替换记忆依赖，再迁出 OpenCode”，不是先删目录再补功能。
+执行顺序保持为“先替换记忆依赖，再迁出 OpenCode”；分离门禁继续防止旧产品路径回流。
 
 ### 3.6 永久禁止删除的身份、数据与发布路径
 
@@ -135,20 +135,22 @@
 - 数据：本地项目路径/owner、浏览器项目存储、账号、云 `project_id`、Raw/Wiki 路径与现有升级数据。
 - 发布：`v*` tag、生产 `latest.json`、macOS ARM、macOS Intel、Windows x64 通道。
 
-## 6. TDD 实施顺序
+## 6. TDD 实施结果
 
-1. **基线门禁**：先写测试锁定记忆入口、现有功能入口、同步按钮文字与行为、Bundle ID、Deep Link、更新地址、公钥和产物禁入项。
-2. **直接迁出旧壳**：让测试先失败，再迁出 3.3 已确认项；记忆共享依赖保持不动。
-3. **拆分混合目录**：按 3.4 逐文件迁出电商、制作和旧 Studio 内容；每批独立提交。
-4. **解除 OpenCode 阻塞**：按 3.5 先替换 `agentStore`、创作面板和全局搜索依赖，再迁出 OpenCode TypeScript/Rust/SDK/脚本。
-5. **文档与发布收口**：迁出旧产品 Wiki，移除 Studio 构建命令，保留记忆发布身份和历史回滚证据。
-6. **发布验收**：运行 focused、TypeScript、Web/Desktop/iOS 构建、产物审计和真实平台矩阵，确认旧版升级与云项目绑定连续；Android 仅在独立身份和工具链建立后另行验收。
+1. **基线门禁完成**：5 项单产品分离测试锁定记忆入口、旧路径禁入和测试清单完整性。
+2. **旧壳迁出完成**：旧 Studio、多产品布局、导航、插件面、产品工作台和宣传项目已从主仓删除。
+3. **混合目录拆分完成**：保留记忆工作台实际使用的媒体计划、聊天卡片、项目文件和编辑状态；移出旧产品专属文件。
+4. **OpenCode 阻塞解除完成**：模型、创作面板、搜索和 Rust 四组并发解耦后，OpenCode TypeScript/Rust/SDK/脚本已删除。
+5. **文档收口完成**：旧产品 Wiki 由独立备份仓库保留；当前 Wiki 只保留记忆工作台现行合同和历史必要证据。
+6. **自动验收完成**：分离门禁 `5/5`、Node `985/985`、Rust `395 passed / 1 ignored`、TypeScript、Web quick build、Desktop quick build和两端产物审计均通过。
 
-任何一批失败都停止并回退该批；无需回滚已经通过的前一批。整体异常可回到 `v2.1.9` / `f302c251`。
+整体异常仍可回到独立备份仓库中的 `v2.1.9` / `f302c251`。
 
-## 7. 本轮范围
+## 7. 实施范围与未验证项
 
-本轮只完成目录级 SDD，不移动、删除或归档代码与目录，不改变发布产物。下一轮从基线门禁测试和备份仓库初始化开始。
+本轮完成单产品代码、依赖、构建入口、测试清单和 Wiki 分离，不改变 Desktop/Mobile Bundle ID、Deep Link、更新公钥、Gateway、云项目绑定、文字覆盖合同、用户数据路径或版本号 `2.1.9`。
+
+验证证据：focused `sha256:7d1c33ff370d`，Web quick build `sha256:372d120b0593`，Desktop quick build `sha256:acd2fc7fee37`。真实 Windows、Intel Mac、iOS 升级和云绑定连续性仍待人工验收；Android 按既定决策暂停，不能登记为已构建或已发布。`jc-raw-wiki closeout` 因本轮已删除 PDF/PPTX 的二进制 diff 触发 UTF-8 解码错误，三份证据改用系统 `shasum -a 256` 固化；Wiki validate 独立执行。
 
 ## 反向链接
 

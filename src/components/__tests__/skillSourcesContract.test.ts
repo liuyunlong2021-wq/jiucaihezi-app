@@ -2,18 +2,17 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-const chatPanel = readFileSync('src/components/chat/ChatPanel.vue', 'utf8')
+const memoryWorkbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
 const centralPanel = readFileSync('src/components/skills/CentralSkillsPanel.vue', 'utf8')
 const webPanel = readFileSync('src/components/skills/WebSkillPanel.vue', 'utf8')
 const builtInList = readFileSync('src/components/skills/BuiltInSkillList.vue', 'utf8')
 const scanner = readFileSync('src-tauri/src/skills/scanner.rs', 'utf8')
 const skillsDb = readFileSync('src-tauri/src/skills/db.rs', 'utf8')
 
-test('Desktop combines only local and bundled Skill sources before selection and loading', () => {
-  assert.match(chatPanel, /mergeCreativeSkillCatalog\(skillsManageStore\.centralSkills, builtInSkills\.value\)/)
-  assert.match(chatPanel, /loadWebSkillCatalog\(\)/)
-  assert.match(chatPanel, /if \(isTauriRuntime\(\)\) return desktopProductSkills\.value/)
-  assert.doesNotMatch(chatPanel, /for \(const skill of openCodeSkills\.value\)/)
+test('memory workbench reads installed Skills from the shared store', () => {
+  assert.match(memoryWorkbench, /agentStore\.getCustomSkills\(\)/)
+  assert.match(memoryWorkbench, /agentStore\.refreshSkills\(\)/)
+  assert.doesNotMatch(memoryWorkbench, /openCodeSkills|mergeCreativeSkillCatalog/)
 })
 
 test('Desktop keeps the bundled list while Web exposes only user-installed Skills', () => {

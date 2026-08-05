@@ -1,6 +1,6 @@
 # 热缓存
 
-> 更新：2026-08-04 | 阶段：记忆工作台单产品化分离准备
+> 更新：2026-08-05 | 阶段：记忆工作台单产品化分离已实施
 
 ## 当前结论
 
@@ -15,9 +15,10 @@
 - 方向性文字覆盖已通过 focused `1438/1446`、TypeScript、Web quick build 和产物审计；真实 Web/Desktop/iPhone 覆盖删除矩阵仍待人工验收。
 - Wiki 状态查询已按 append-only 合同改为从 `log.md` 末尾读取最新标题；应用内运行时 `12/12`、Wiki Skill 专项 `18/18`、完整 focused 与 TypeScript 通过，当前状态正确显示 2026-08-04 的最新决策。
 - iOS 仍是已提交审核的 `2.1.7 (2.1.7.1)`，Android 无公开版；桌面三平台发布不等于 App Store 或 Google Play 上架。
-- 单产品化分离尚未改代码、移动目录或删除文件。`v2.1.9` / `f302c251` 是正式回滚基线。
-- 分离 SDD 已列出整目录保留、确认移出、混合目录拆分和禁止删除清单。`runtime/workbench` 的媒体文件、`public/skills/`、发布身份与用户数据永久保留；`opencodeClient` 必须等 `agentStore`、创作面板和全局搜索解除依赖后再迁出。
+- 单产品化分离已按四组 TDD 实施：模型目录改用 Gateway，创作面板解除 OpenCode owner/session，搜索改用 Raw 对话，Rust 移除 OpenCode Runtime/命令；旧 Studio、OpenCode、四模式、电商、制作、漫剧工作台产品代码与发布物已从主仓迁出。
+- 独立备份仓库 `../jiucaihezi-legacy-products/` 保留 `v2.1.9` / `f302c251` 完整历史，工作树干净且 `git fsck --full` 通过。主仓保留 Raw、Wiki、媒体、同步、身份、Gateway、云绑定、更新与发布路径。
+- 自动验证通过：分离门禁 `5/5`、Node `985/985`、Rust `395 passed / 1 ignored`、TypeScript、Web/Desktop quick build 和两端产物审计。真实 Windows、Intel Mac、iOS 升级与云绑定连续性待人工验收；Android 继续暂停。
 
 ## 下一步
 
-- 先读 [[开发/通用记忆工作台单产品化分离SDD]] 第 3 节，再初始化独立备份仓库并按 TDD 建立记忆入口、能力、身份和产物门禁；测试通过前不移动任何目录。
+- 先读 [[开发/通用记忆工作台单产品化分离SDD]] 第 7 节；下一步提交本轮分离结果，再安排真实 Windows、Intel Mac、iOS 升级和云绑定连续性验收。发布须另行明确授权。

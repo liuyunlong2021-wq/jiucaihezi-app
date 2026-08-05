@@ -4,10 +4,9 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 const CHECKED_FILES = [
-  'src/layouts/WorkspaceLayout.vue',
-  'src/components/filetree/FileTreePanel.vue',
-  'src/components/chat/ChatPanel.vue',
-  'src/components/editor/EditorPanel.vue',
+  'src/components/memory/MemoryWorkbench.vue',
+  'src/components/filetree/ProjectFileTree.vue',
+  'src/components/creation/CreationPanel.vue',
   'src/components/mcp/McpManagerPanel.vue',
   'src/components/canvas/canvasStore.ts',
 ]

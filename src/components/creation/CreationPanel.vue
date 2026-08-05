@@ -96,10 +96,6 @@ import {
 import { creationModelFamily, displayModelLabel, displayModelPrice, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
 import type { CreationFieldSpec } from '@/runtime/creation/creationMediaTypes'
-import {
-  preparePublicMediaPlan,
-  type PublicMediaPlanResult,
-} from '@/runtime/workbench/mediaPlanBridge'
 import type { MediaPlan } from '@/runtime/workbench/mediaPlan'
 
 import { emitEvent, emitEventAsync, onEvent, consumeLastEvent } from '@/utils/eventBus'
@@ -112,7 +108,6 @@ import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
-import { useOpenCodeSyncStore } from '@/stores/openCodeSyncStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { CanvasAssetUrlResolver } from '@/components/canvas/canvasAssetUrlResolver'
@@ -150,7 +145,6 @@ const props = withDefaults(defineProps<{ previewSurface?: 'dialog' | 'host' }>()
 const emit = defineEmits<{ previewResource: [resource: ProjectResource] }>()
 
 const mediaTaskStore = useMediaTaskStore()
-const openCodeSyncStore = useOpenCodeSyncStore()
 const projectStore = useProjectStore()
 const canvasStore = useCanvasStore()
 const projectFiles = createRuntimeProjectFileService()
@@ -186,13 +180,9 @@ const creationProgress = computed(() => {
 
 // ─── 任务列表（分页） ───
 
-function isLegacyChatTask(task: MediaTask): boolean {
-  return isTauriRuntime() && task.source === 'chat' && (!task.sessionId || !task.directory)
-}
-
 const creationTasks = computed(() =>
   mediaTaskStore.tasks
-    .filter(t => t.source === 'creation' || isLegacyChatTask(t))
+    .filter(t => t.source === 'creation')
     .sort((a, b) => (b.completedAt || b.createdAt) - (a.completedAt || a.createdAt)),
 )
 const creationTasksTotal = computed(() => creationTasks.value.length)
@@ -240,13 +230,6 @@ function statusIcon(status: string): string {
 function taskPromptLine(task: MediaTask): string {
   const prompt = (task.prompt || '无提示词').slice(0, 80)
   return `${prompt} · ${task.modelLabel || task.model}`
-}
-
-async function bindLegacyTaskToCurrentSession(task: MediaTask) {
-  const sessionID = openCodeSyncStore.activeSessionId
-  const directory = openCodeSyncStore.activeDirectory
-  if (!sessionID.startsWith('ses_') || !directory) return
-  await mediaTaskStore.bindLegacyChatTask(task.id, sessionID, directory)
 }
 
 function canPersistMediaResult(task: MediaTask): boolean {
@@ -691,59 +674,6 @@ async function runCreationViaTaskStore() {
   }
 }
 
-async function handleMediaPlanApproved(
-  payload: unknown,
-  events: { submitted: string; failed: string },
-) {
-  const data = (payload as {
-    plan?: MediaPlan
-    sessionId?: string
-    messageId?: string
-    runId?: string
-    mediaCardId?: string
-    preparedSubmission?: PublicMediaPlanResult['submission']
-  } | null) || {}
-  if (!data.plan || !data.sessionId) return
-
-  try {
-    const submission = {
-      ...(data.preparedSubmission || (await preparePublicMediaPlan({
-        plan: data.plan,
-        owner: selectedCanvasOwner(),
-      })).submission),
-      sessionId: data.sessionId,
-      chatMessageId: data.messageId,
-      directory: isTauriRuntime() ? projectStore.projectDir.value : undefined,
-    }
-    switchTask(data.plan.kind)
-    switchModel(data.plan.modelId)
-    if (data.plan.ratio) setAspect(data.plan.ratio)
-    if (data.plan.resolution) setResolution(data.plan.resolution)
-    cpState.prompt = data.plan.prompt
-    cpState.generating = true
-    cpState.progressText = '提交媒体任务...'
-
-    const taskId = await mediaTaskStore.submitTask(submission)
-    emitEvent(events.submitted, {
-      sessionId: data.sessionId,
-      messageId: data.messageId,
-      runId: data.runId,
-      mediaCardId: data.mediaCardId,
-      taskId,
-    })
-  } catch (error) {
-    cpState.generating = creationRunningCount.value > 0
-    cpState.progressText = `媒体任务提交失败：${error instanceof Error ? error.message : String(error)}`
-    emitEvent(events.failed, {
-      sessionId: data.sessionId,
-      messageId: data.messageId,
-      runId: data.runId,
-      mediaCardId: data.mediaCardId,
-      error: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
 async function flushPendingMemoryPlanResources() {
   if (!canvasReady || canvasRestoring || !app || !pendingMemoryPlanResources.length) return
   const resources = pendingMemoryPlanResources.splice(0)
@@ -783,38 +713,6 @@ const offMemoryMediaPlanLoad = onEvent('memory-media-plan-load', loadMemoryMedia
 const pendingMemoryMediaPlan = consumeLastEvent('memory-media-plan-load')
 if (pendingMemoryMediaPlan) loadMemoryMediaPlan(pendingMemoryMediaPlan[0])
 
-const offMediaPlanApproved = onEvent('media-plan-approved', payload =>
-  handleMediaPlanApproved(payload, { submitted: 'media-plan-submitted', failed: 'media-plan-failed' }),
-)
-const offEcommercePlanApproved = onEvent('ecommerce-media-plan-approved', payload =>
-  handleMediaPlanApproved(payload, {
-    submitted: 'ecommerce-media-plan-submitted',
-    failed: 'ecommerce-media-plan-failed',
-  }),
-)
-const offProductionPlanApproved = onEvent('production-media-plan-approved', payload => {
-  return handleMediaPlanApproved(payload, {
-    submitted: 'production-media-plan-submitted',
-    failed: 'production-media-plan-failed',
-  }).then(() => undefined).catch(() => undefined)
-})
-const pendingMediaPlan = consumeLastEvent('media-plan-approved')
-if (pendingMediaPlan) {
-  void handleMediaPlanApproved(pendingMediaPlan[0], {
-    submitted: 'media-plan-submitted',
-    failed: 'media-plan-failed',
-  })
-}
-const pendingEcommercePlan = consumeLastEvent('ecommerce-media-plan-approved')
-if (pendingEcommercePlan) {
-  void handleMediaPlanApproved(pendingEcommercePlan[0], {
-    submitted: 'ecommerce-media-plan-submitted',
-    failed: 'ecommerce-media-plan-failed',
-  })
-}
-onBeforeUnmount(offMediaPlanApproved)
-onBeforeUnmount(offEcommercePlanApproved)
-onBeforeUnmount(offProductionPlanApproved)
 onBeforeUnmount(offMemoryMediaPlanLoad)
 
 // 任务完成/失败 → 更新进度
@@ -3921,7 +3819,6 @@ const canSend = computed(
                 }}</span>
               </div>
               <div class="cp-task-prompt">{{ taskPromptLine(task) }}</div>
-              <div v-if="isLegacyChatTask(task)" class="cp-task-legacy">旧任务 / 未归属</div>
               <div v-if="task.status === 'running'" class="cp-task-progress">
                 <span>{{ task.progressText || '生成中...' }}</span>
                 <div class="cp-task-progress-bar">
@@ -3937,16 +3834,9 @@ const canSend = computed(
                 {{ taskPath(task) }}
               </div>
               <div
-                v-if="
-                  task.status === 'success' ||
-                  isLegacyChatTask(task) ||
-                  canPersistMediaResult(task)
-                "
+                v-if="task.status === 'success' || canPersistMediaResult(task)"
                 class="cp-task-actions"
               >
-                <button v-if="isLegacyChatTask(task)" @click="bindLegacyTaskToCurrentSession(task)">
-                  绑定当前会话
-                </button>
                 <button
                   v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"
@@ -3955,7 +3845,7 @@ const canSend = computed(
                 </button>
                 <button
                   v-if="
-                    (task.status === 'success' || isLegacyChatTask(task)) &&
+                    task.status === 'success' &&
                     (task.projectPath || task.assetUri || task.resultUrl)
                   "
                   @click="previewTask(task)"

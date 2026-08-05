@@ -233,11 +233,6 @@ test('project file tree adapts the existing UI to IndexedDB on Web', () => {
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
   )
-  const panelSource = readFileSync(
-    join(process.cwd(), 'src/components/filetree/FileTreePanel.vue'),
-    'utf8',
-  )
-
   assert.match(source, /createRuntimeProjectFileService/)
   assert.match(source, /await projectFiles\.listDirectory\(/)
   assert.match(source, /await webProjectFiles\.createProject\(/)
@@ -246,10 +241,6 @@ test('project file tree adapts the existing UI to IndexedDB on Web', () => {
   assert.match(source, /await projectFiles\.planBatch\(\{ kind: 'delete', resources \}\)/)
   assert.match(source, /await projectFiles\.executeBatch\(plan\)/)
   assert.match(source, /id: node\.id/)
-  assert.match(panelSource, /\{ key: 'project' as const, icon: 'folder', label: '项目' \}/)
-  assert.doesNotMatch(panelSource, /\.\.\.\(isDesktop \? \[/)
-  assert.doesNotMatch(panelSource, /tab === 'project'\) return isDesktop/)
-  assert.doesNotMatch(panelSource, /has && isDesktop/)
 })
 
 test('project file tree recovers stale Web projects and supports save as on both runtimes', () => {

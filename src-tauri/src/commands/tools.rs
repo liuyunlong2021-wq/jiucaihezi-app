@@ -1,8 +1,6 @@
 use std::env;
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use tauri;
-use tauri::Manager;
 
 #[tauri::command]
 pub fn check_whisper_available(app: tauri::AppHandle) -> Result<bool, String> {
@@ -66,110 +64,6 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
     PathBuf::from(program)
 }
 
-pub(crate) fn opencode_platform_package_dir() -> Option<&'static str> {
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    return Some("opencode-darwin-arm64");
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    return Some("opencode-darwin-x64");
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    return Some("opencode-linux-x64");
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    return Some("opencode-windows-x64");
-    #[allow(unreachable_code)]
-    None
-}
-
-pub(crate) fn opencode_resource_names() -> Vec<String> {
-    let mut names = vec!["opencode".to_string()];
-    #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
-    names.push("opencode-aarch64-apple-darwin".to_string());
-    #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
-    names.push("opencode-x86_64-apple-darwin".to_string());
-    #[cfg(all(target_os = "linux", target_arch = "x86_64"))]
-    names.push("opencode-x86_64-unknown-linux-gnu".to_string());
-    #[cfg(all(target_os = "windows", target_arch = "x86_64"))]
-    {
-        names.push("opencode.exe".to_string());
-        names.push("opencode-x86_64-pc-windows-msvc.exe".to_string());
-    }
-    names
-}
-
-fn existing_file(path: PathBuf) -> Option<PathBuf> {
-    if path.is_file() { Some(path) } else { None }
-}
-
-pub(crate) fn resolve_opencode_binary_from_inputs(
-    resource_dirs: &[PathBuf],
-    home: Option<&Path>,
-    jc_opencode_bin: Option<&OsStr>,
-    opencode_bin_path: Option<&OsStr>,
-    path_env: Option<&OsStr>,
-) -> Result<PathBuf, String> {
-    for value in [jc_opencode_bin, opencode_bin_path].into_iter().flatten() {
-        let path = PathBuf::from(value);
-        if let Some(found) = existing_file(path.clone()) {
-            return Ok(found);
-        }
-        return Err(format!(
-            "OpenCode runtime 路径不可用：{}。请检查 JC_OPENCODE_BIN / OPENCODE_BIN_PATH。",
-            path.to_string_lossy()
-        ));
-    }
-
-    for dir in resource_dirs {
-        for name in opencode_resource_names() {
-            if let Some(found) = existing_file(dir.join(name)) {
-                return Ok(found);
-            }
-        }
-    }
-
-    if let Some(home) = home {
-        if let Some(found) = existing_file(home.join(".jiucaihezi/tools/bin/opencode")) {
-            return Ok(found);
-        }
-    }
-
-    if let Some(paths) = path_env {
-        for dir in env::split_paths(paths) {
-            if let Some(found) = existing_file(dir.join("opencode")) {
-                return Ok(found);
-            }
-            #[cfg(windows)]
-            if let Some(found) = existing_file(dir.join("opencode.exe")) {
-                return Ok(found);
-            }
-        }
-    }
-
-    for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {
-        if let Some(found) = existing_file(PathBuf::from(dir).join("opencode")) {
-            return Ok(found);
-        }
-    }
-
-    if let (Some(home), Some(package_dir)) = (home, opencode_platform_package_dir()) {
-        let dev_checkout_binary = home
-            .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
-            .join(package_dir)
-            .join("bin/opencode");
-        if let Some(found) = existing_file(dev_checkout_binary) {
-            return Ok(found);
-        }
-    }
-
-    Err(
-        "OpenCode runtime 未安装或不可执行。请安装官方 opencode-ai，或设置 JC_OPENCODE_BIN / OPENCODE_BIN_PATH 指向 opencode 原生二进制。".into(),
-    )
-}
-
-fn app_executable_dir() -> Option<PathBuf> {
-    std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
-}
-
 fn ensure_binary_executable(path: &Path) {
     #[cfg(target_os = "macos")]
     {
@@ -190,36 +84,6 @@ fn ensure_binary_executable(path: &Path) {
             }
         }
     }
-}
-
-fn opencode_resource_dirs(app: Option<&tauri::AppHandle>) -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(app) = app {
-        if let Ok(resource_dir) = app.path().resource_dir() {
-            dirs.push(resource_dir.clone());
-            dirs.push(resource_dir.join("binaries"));
-            dirs.push(resource_dir.join("bin"));
-        }
-    }
-    if let Some(exe_dir) = app_executable_dir() {
-        if !dirs.contains(&exe_dir) {
-            dirs.push(exe_dir);
-        }
-    }
-    dirs
-}
-
-pub(crate) fn resolve_opencode_binary(app: Option<&tauri::AppHandle>) -> Result<PathBuf, String> {
-    let home = env::var_os("HOME").map(PathBuf::from);
-    let path = resolve_opencode_binary_from_inputs(
-        &opencode_resource_dirs(app),
-        home.as_deref(),
-        env::var_os("JC_OPENCODE_BIN").as_deref(),
-        env::var_os("OPENCODE_BIN_PATH").as_deref(),
-        env::var_os("PATH").as_deref(),
-    )?;
-    ensure_binary_executable(&path);
-    Ok(path)
 }
 
 pub(crate) fn resolve_app_media_binary(

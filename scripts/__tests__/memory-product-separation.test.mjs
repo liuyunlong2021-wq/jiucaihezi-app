@@ -44,6 +44,7 @@ test('memory product keeps its entry, release identity, updater, and desktop rel
 test('legacy product-only paths are removed from the memory repository', () => {
   const legacyPaths = [
     'src/StudioApp.vue',
+    'scripts/remove-canvas.sh',
     'src/layouts',
     'src/components/rail',
     'src/components/workbench',

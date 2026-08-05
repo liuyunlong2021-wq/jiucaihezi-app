@@ -353,7 +353,7 @@ onMounted(async () => {
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
   await Promise.all([
     refreshSkills().catch(() => {}),
-    agentStore.fetchModels({ skipOpenCode: true }).catch(() => {}),
+    agentStore.fetchModels().catch(() => {}),
     mediaTaskStore.init(),
   ])
 })

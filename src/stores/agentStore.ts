@@ -15,11 +15,6 @@ import { gatewayModels } from '@/services/newApiClient'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import type { SkillWithLinks } from '@/types/skillsManage'
-import { ensureOpenCodeServer } from '@/opencodeClient/daemon'
-import { createJiucaiOpenCodeClient } from '@/opencodeClient/client'
-import { listOpenCodeModels } from '@/opencodeClient/catalog'
-import { useSessionStore } from '@/stores/sessionStore'
-import { projectStoredNewApiForOpenCode } from '@/opencodeClient/providerProjection'
 import {
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
@@ -28,7 +23,7 @@ import {
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
-import { DEFAULT_TEXT_MODEL, chooseModelCatalogForProjection, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
+import { DEFAULT_TEXT_MODEL, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
 import { resolveModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
@@ -52,7 +47,7 @@ export interface ModelEntry {
   providerId?: string
   /** 能力分类：text=文本LLM, image=图片生成, video=视频生成, audio=音频生成 */
   capability?: 'text' | 'image' | 'video' | 'audio'
-  /** OpenCode 官方 context token 上限（tokens），用于 session.context 使用量换算 */
+  /** 模型上下文 token 上限 */
   contextWindow?: number
   toolCall?: boolean
   inputModalities?: ModelInputModality[]
@@ -139,8 +134,7 @@ function loadCachedModelEntries(): ModelEntry[] | null {
       : []
     const filtered = filterExecutableModels(normalized)
     if (filtered.length === 0) return null
-    // 检查来源：至少有一个 gateway/jiucaihezi 模型 → 非纯 OpenCode 缓存
-    // 老缓存无 source 字段，用 providerId === 'jiucaihezi' 兜底
+    // 旧缓存无 source 字段，用 providerId === 'jiucaihezi' 兜底。
     const hasGatewayModels = filtered.some(
       m => (m as any).source === 'gateway' || m.providerId === 'jiucaihezi'
     )
@@ -198,8 +192,6 @@ export const useAgentStore = defineStore('agents', () => {
   const availableModels = ref<ModelEntry[]>(mergeLocalModels(getInitialModels()))
   const modelsFetched = ref(false)
   const modelsFetchError = ref('')
-  const modelCatalogSource = ref<'initial' | 'opencode' | 'gateway' | 'cache'>('initial')
-  const officialOpenCodeModelIds = ref<string[]>([])
 
   function syncModelProviderStorage(modelId = currentModel.value, explicitProviderId?: string) {
     const model = availableModels.value.find(x => x.id === modelId) || modelId
@@ -215,21 +207,14 @@ export const useAgentStore = defineStore('agents', () => {
 
   /** 按能力分类的视图 */
   const textModels = computed(() => availableModels.value.filter(m => (m.capability || inferCapability(m.id)) === 'text'))
-  const openCodeTextModels = computed(() => {
-    if (modelCatalogSource.value !== 'opencode') return textModels.value
-    const officialIds = new Set(officialOpenCodeModelIds.value)
-    return textModels.value.filter(model => officialIds.has(model.id))
-  })
   const imageModels = computed(() => availableModels.value.filter(m => m.capability === 'image'))
   const videoModels = computed(() => availableModels.value.filter(m => m.capability === 'video'))
   const audioModels = computed(() => availableModels.value.filter(m => m.capability === 'audio'))
 
-  function adoptFetchedModels(models: ModelEntry[], source: 'opencode' | 'gateway' | 'cache') {
+  function adoptFetchedModels(models: ModelEntry[]) {
     const merged = filterExecutableModels(models)
     if (merged.length === 0) return false
     availableModels.value = mergeLocalModels(merged)
-    modelCatalogSource.value = source
-    officialOpenCodeModelIds.value = source === 'opencode' ? merged.map(model => model.id) : []
     const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
     if (resolvedModel !== currentModel.value) {
       setModel(resolvedModel)
@@ -239,10 +224,7 @@ export const useAgentStore = defineStore('agents', () => {
     modelsFetched.value = true
     modelsFetchError.value = ''
     try {
-      // 仅缓存 gateway 来源的模型。OpenCode 模型不持久化，避免污染后续启动。
-      if (source === 'gateway') {
-        localStorage.setItem('jc_models_cache', JSON.stringify(merged))
-      }
+      localStorage.setItem('jc_models_cache', JSON.stringify(merged))
       updateDefaultProviderModels(merged)
     } catch { /* quota exceeded, ignore */ }
     return true
@@ -273,12 +255,8 @@ export const useAgentStore = defineStore('agents', () => {
     }).filter(Boolean) as ModelEntry[]
   }
 
-  /**
-   * 静默拉取模型列表。OpenCode 官方 model.list 是优先数据源；
-   * Gateway /api/models 只作为桌面内核未连接或官方列表失败时的兜底。
-   */
-  async function fetchModels(options: { skipOpenCode?: boolean; shouldSkipOpenCode?: () => boolean } = {}) {
-    const shouldSkipOpenCode = () => Boolean(options.skipOpenCode || options.shouldSkipOpenCode?.())
+  /** 静默从 Gateway 拉取模型列表，失败时保留现有缓存。 */
+  async function fetchModels() {
     // 网关请求带一次重试（缓解偶发 ERR_CONNECTION_CLOSED）
     async function gatewayWithRetry(): Promise<ModelEntry[] | null> {
       try {
@@ -296,54 +274,10 @@ export const useAgentStore = defineStore('agents', () => {
       }
     }
 
-    let gatewayCatalog: ModelEntry[] | null = null
-    if (!shouldSkipOpenCode()) {
-      try {
-        gatewayCatalog = await gatewayWithRetry()
-      } catch {
-        gatewayCatalog = null
-      }
-
-      if (!shouldSkipOpenCode()) {
-        try {
-          const projectionModels = chooseModelCatalogForProjection(availableModels.value, gatewayCatalog)
-          const projectedConfig = await projectStoredNewApiForOpenCode({
-            currentModel: currentModel.value,
-            models: projectionModels,
-          })
-          if (!shouldSkipOpenCode()) {
-            const handle = await ensureOpenCodeServer({ config: projectedConfig })
-            if (!shouldSkipOpenCode()) {
-              // ponytail: 照抄 OpenCode home.tsx L304-308 — server 就绪后同步会话列表
-              const client = createJiucaiOpenCodeClient(handle)
-              await listOpenCodeModels(client, {
-                directory: handle.directory,
-              })
-              // ─── 同步 OpenCode 会话到本地列表 · 照抄 OpenCode home.tsx ───
-              if (isTauriRuntime() && handle.directory) {
-                try {
-                  const sessionStore = useSessionStore()
-                  sessionStore.loadAllSessions(client)
-                } catch {
-                  // 会话同步失败不阻塞启动
-                }
-              }
-            }
-          }
-          // 对齐官方 OpenCode：模型列表来自已配置的 provider（gateway）。
-          // OpenCode 内置模型 ≠ NewAPI 云端模型，禁止进入选择器。
-          // OpenCode model.list 仅用于 provider 投影，不替代 gateway 模型列表。
-          // gatewayCatalog 为空时跳过，后续走缓存或 gateway 重试。
-        } catch (e: any) {
-          modelsFetchError.value = e.message || '模型列表读取失败'
-        }
-      }
-    }
-
     try {
-      const merged = gatewayCatalog || await gatewayWithRetry()
+      const merged = await gatewayWithRetry()
       if (merged && merged.length > 0) {
-        adoptFetchedModels(merged, 'gateway')
+        adoptFetchedModels(merged)
       } else {
         throw new Error('empty gateway catalog')
       }
@@ -365,8 +299,6 @@ export const useAgentStore = defineStore('agents', () => {
           const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
           if (filtered.length > 0 && cachedTextCount >= defaultTextCount) {
             availableModels.value = mergeLocalModels(filtered)
-            modelCatalogSource.value = 'cache'
-            officialOpenCodeModelIds.value = []
             const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
             if (resolvedModel !== currentModel.value) setModel(resolvedModel)
             else syncModelProviderStorage()
@@ -884,9 +816,7 @@ export const useAgentStore = defineStore('agents', () => {
     availableModels,
     modelsFetched,
     modelsFetchError,
-    modelCatalogSource,
     textModels,
-    openCodeTextModels,
     imageModels,
     videoModels,
     audioModels,

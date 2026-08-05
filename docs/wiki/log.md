@@ -486,3 +486,10 @@
 - 确认 `runtime/workbench` 的媒体计划、`public/skills/`、Gateway、文档/媒体服务、发布身份和用户项目数据属于记忆工作台；漫剧工作台迁出不等于删除记忆工作台可调用的漫剧 Skill。
 - `src/opencodeClient/` 最终必须迁出，但当前仍被 `agentStore`、创作面板和全局搜索间接依赖；执行顺序固定为先用 TDD 完成等价替换，再迁出 TypeScript/Rust/SDK/脚本。本轮未移动或删除任何文件。
 - [修复回执] SDD 已取消不可执行的跨仓库 `git mv`，改为先验证 `f302c251` 独立备份再在主仓分批删除；移动端身份明确为 iOS `com.jiucaihezi.mobile`，Android 暂停且 `src-tauri/gen/` 不作为 Git 回滚或身份验证证据。
+
+## [2026-08-05] 开发收尾 | 记忆工作台单产品化分离实施
+
+- 四组 TDD 已完成：模型目录改用 Gateway；创作面板解除 OpenCode session/owner；全局搜索改为 Raw 对话；Rust 移除 OpenCode Runtime、命令和二进制发现。
+- 旧 Studio、OpenCode、文/武/道/创、电商、制作、漫剧工作台产品代码与专属发布物已从主仓迁出；Raw、Wiki、媒体、同步、身份、Gateway、云绑定、更新与发布链路保留。独立备份仓库 `../jiucaihezi-legacy-products/` 固定于 `f302c251` 并通过完整性检查。
+- 自动验证通过：分离门禁 `5/5`、Node `985/985`、Rust `395 passed / 1 ignored`、TypeScript、Web/Desktop quick build和两端产物审计。证据指纹依次为 `7d1c33ff370d`、`372d120b0593`、`acd2fc7fee37`。
+- 未验证：真实 Windows、Intel Mac、iOS 升级与云绑定连续性；Android 按既定决策暂停。`jc-raw-wiki closeout` 因删除的 PDF/PPTX 二进制 diff 触发 UTF-8 解码错误，Wiki validate 独立执行。

@@ -18,9 +18,6 @@ use tokio::time::{Duration, timeout};
 mod commands;
 mod secure_store;
 mod skills;
-// re-export tools functions for remaining inline code
-use crate::commands::opencode::{OpenCodeRuntime, stop_opencode_runtime};
-
 // ─── Plugin 系统命令 ───
 
 fn is_workbench_return_url(url: &tauri::Url) -> bool {
@@ -659,13 +656,9 @@ mod tests {
         convert_markdown_for_output, find_transcript_output, is_meaningful_markdown,
         is_successful_markdown_content, validate_selected_media_path,
     };
-    use crate::commands::opencode::prepare_opencode_runtime_dirs;
     use crate::commands::skill_material::{
         build_skill_material_command, collect_skill_material_raw_files,
         latest_skill_seekers_output_dir,
-    };
-    use crate::commands::tools::{
-        opencode_platform_package_dir, opencode_resource_names, resolve_opencode_binary_from_inputs,
     };
     use std::time::SystemTime;
 
@@ -987,115 +980,6 @@ mod tests {
     }
 
     #[test]
-    fn opencode_binary_resolution_prefers_explicit_jc_path() {
-        let root = temp_test_dir("opencode_explicit");
-        let explicit = root.join("custom-opencode");
-        std::fs::write(&explicit, b"#!/bin/sh\n").expect("write fake opencode");
-
-        let resolved =
-            resolve_opencode_binary_from_inputs(&[], None, Some(explicit.as_os_str()), None, None)
-                .expect("resolve explicit opencode");
-
-        assert_eq!(resolved, explicit);
-    }
-
-    #[test]
-    fn opencode_binary_resolution_uses_path_before_dev_checkout() {
-        let home = temp_test_dir("opencode_home");
-        let path_dir = temp_test_dir("opencode_path");
-        let path_binary = path_dir.join("opencode");
-        std::fs::write(&path_binary, b"#!/bin/sh\n").expect("write path opencode");
-
-        let dev_binary = home
-            .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
-            .join(opencode_platform_package_dir().expect("platform package"))
-            .join("bin/opencode");
-        std::fs::create_dir_all(dev_binary.parent().expect("dev parent"))
-            .expect("mkdir dev parent");
-        std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
-
-        let resolved = resolve_opencode_binary_from_inputs(
-            &[],
-            Some(home.as_path()),
-            None,
-            None,
-            Some(path_dir.as_os_str()),
-        )
-        .expect("resolve path opencode");
-
-        assert_eq!(resolved, path_binary);
-    }
-
-    #[test]
-    fn opencode_binary_resolution_can_use_local_dev_checkout() {
-        let home = temp_test_dir("opencode_dev_home");
-        let dev_binary = home
-            .join("Documents/1OKAPP/my-opencode/packages/opencode/dist")
-            .join(opencode_platform_package_dir().expect("platform package"))
-            .join("bin/opencode");
-        std::fs::create_dir_all(dev_binary.parent().expect("dev parent"))
-            .expect("mkdir dev parent");
-        std::fs::write(&dev_binary, b"#!/bin/sh\n").expect("write dev opencode");
-
-        let resolved =
-            resolve_opencode_binary_from_inputs(&[], Some(home.as_path()), None, None, None)
-                .expect("resolve dev checkout opencode");
-
-        assert_eq!(resolved, dev_binary);
-    }
-
-    #[test]
-    fn opencode_binary_resolution_uses_bundled_resource_before_path() {
-        let resource_dir = temp_test_dir("opencode_resource");
-        let path_dir = temp_test_dir("opencode_path_with_resource");
-        let bundled = resource_dir
-            .join("binaries")
-            .join(opencode_resource_names()[0].clone());
-        let path_binary = path_dir.join("opencode");
-        std::fs::create_dir_all(bundled.parent().expect("bundled parent"))
-            .expect("mkdir bundled parent");
-        std::fs::write(&bundled, b"#!/bin/sh\n").expect("write bundled opencode");
-        std::fs::write(&path_binary, b"#!/bin/sh\n").expect("write path opencode");
-
-        let resolved = resolve_opencode_binary_from_inputs(
-            &[resource_dir.join("binaries")],
-            None,
-            None,
-            None,
-            Some(path_dir.as_os_str()),
-        )
-        .expect("resolve bundled opencode");
-
-        assert_eq!(resolved, bundled);
-    }
-
-    #[test]
-    fn opencode_binary_resolution_reports_missing_runtime() {
-        let err = resolve_opencode_binary_from_inputs(&[], None, None, None, None)
-            .expect_err("missing opencode should be explicit");
-
-        assert!(err.contains("OpenCode runtime 未安装"));
-        assert!(err.contains("JC_OPENCODE_BIN"));
-    }
-
-    #[test]
-    fn opencode_runtime_dirs_are_created_under_runtime_root() {
-        let root = temp_test_dir("opencode_runtime_dirs");
-
-        let (data, state, config, workspace) =
-            prepare_opencode_runtime_dirs(&root).expect("prepare runtime dirs");
-
-        assert_eq!(data, root.join("data"));
-        assert_eq!(state, root.join("state"));
-        assert_eq!(config, root.join("config"));
-        assert_eq!(workspace, root.join("workspace/default"));
-        assert!(data.is_dir());
-        assert!(state.is_dir());
-        assert!(config.is_dir());
-        assert!(workspace.is_dir());
-    }
-
-    #[test]
     fn manual_key_unified_api_requests_direct_to_newapi_source() {
         let mut headers = HashMap::new();
         headers.insert("Authorization".into(), "Bearer sk-manual-key".into());
@@ -1180,7 +1064,6 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(ConversionJobs::default())
-        .manage(OpenCodeRuntime::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -1362,34 +1245,6 @@ pub fn run() {
             let window_builder = window_builder.with_input_accessory_view_builder(|_| None);
             let window = window_builder.build()?;
 
-            #[cfg(unix)]
-            {
-                let app_signal = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    use tokio::signal::unix::{signal, SignalKind};
-                    let Ok(mut interrupt) = signal(SignalKind::interrupt()) else { return };
-                    let Ok(mut terminate) = signal(SignalKind::terminate()) else { return };
-                    tokio::select! {
-                        _ = interrupt.recv() => {}
-                        _ = terminate.recv() => {}
-                    }
-                    let runtime = app_signal.state::<OpenCodeRuntime>();
-                    stop_opencode_runtime(&runtime).await;
-                    app_signal.exit(0);
-                });
-            }
-
-            #[cfg(windows)]
-            {
-                let app_signal = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    if tokio::signal::ctrl_c().await.is_err() { return; }
-                    let runtime = app_signal.state::<OpenCodeRuntime>();
-                    stop_opencode_runtime(&runtime).await;
-                    app_signal.exit(0);
-                });
-            }
-
             // ponytail: 照抄 OpenCode desktop/main/menu.ts — macOS 应用菜单
             #[cfg(target_os = "macos")]
             {
@@ -1493,11 +1348,6 @@ pub fn run() {
             commands::mcp::mcp_spawn_stdio,
             commands::mcp::mcp_write_stdin,
             commands::mcp::mcp_kill_stdio,
-            commands::opencode::opencode_mcp_status,
-            commands::opencode::opencode_ensure_server,
-            commands::opencode::opencode_stop,
-            commands::opencode::opencode_relaunch,
-            commands::opencode::opencode_export_debug_logs,
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
@@ -1624,10 +1474,5 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|app_handle, event| {
-        if matches!(event, tauri::RunEvent::Exit) {
-            let runtime = app_handle.state::<OpenCodeRuntime>();
-            tauri::async_runtime::block_on(stop_opencode_runtime(&runtime));
-        }
-    });
+    app.run(|_, _| {});
 }

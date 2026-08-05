@@ -29,27 +29,6 @@ function readTypeScriptSourcesUnder(path: string): Array<{ path: string; source:
   return entries
 }
 
-test('chat UI has no Superpower execution path', () => {
-  const source = readSource('src/components/chat/ChatPanel.vue')
-
-  assert.equal(source.includes('buildSuperpowersPrompt'), false)
-  assert.equal(source.includes('buildConnectionSuperpowerSystemPrompt'), false)
-  assert.equal(source.includes('buildSuperpowerSystemPrompt'), false)
-  assert.equal(source.includes('routeMessage('), false)
-  assert.equal(source.includes('processChainInvoke'), false)
-  assert.equal(source.includes('handleConfirmChain'), false)
-  assert.equal(source.includes('pipelineActive'), false)
-  assert.equal(source.includes('pendingInvoke'), false)
-})
-
-test('chat surface exposes Skill controls without legacy knowledge controls', () => {
-  const chatSource = readSource('src/components/chat/ChatPanel.vue')
-  assert.match(chatSource, /SkillPickerBar/)
-  assert.doesNotMatch(chatSource, /VaultPickerBar/)
-  assert.doesNotMatch(chatSource, /ToolPickerBar/)
-  assert.equal(existsSync(join(process.cwd(), 'src/components/chat/VaultPickerBar.vue')), false)
-})
-
 test('Connection index exports the public runtime boundary without knowledge adapters', () => {
   const source = readSource('src/runtime/connection/index.ts')
 
