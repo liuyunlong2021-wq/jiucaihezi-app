@@ -331,7 +331,7 @@ previewReturn: { conversationId: string; scrollTop: number; draft: string; attac
 | 用户确认修正错误 | `jc-xiu-wiki` |
 | 用户要求巡检 | `jc-jian-wiki` |
 
-这些系统 Skill 与 `skill-creator`、`jc-new-user-guide` 等产品能力继续放在 `public/skills/`，由产品或模型按动作调用，不进入 Skill 仓库和 Skill 选择器。`public/skills/index.json` 只服务内部路由，不再作为用户 Skill 列表。
+产品只随包提供 `jc-cha-wiki`、`jc-everything-wiki`、`jc-jian-wiki`、`jc-new-user-guide`、`jc-raw-wiki`、`jc-xiu-wiki` 和 `skill-creator`，由产品或模型按动作调用，不进入 Skill 仓库和 Skill 选择器。`public/skills/index.json` 只服务内部路由，不再作为用户 Skill 列表。
 
 ### 8.2 用户 Skill
 

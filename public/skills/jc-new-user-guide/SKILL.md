@@ -27,12 +27,9 @@ description: Use when a user asks for beginner help, first-use guidance, tutoria
 | 用户问题 | 读取 |
 | --- | --- |
 | Wiki / 知识库 | `references/1-Wiki使用.md` |
-| 漫剧制作 | `references/2-漫剧制作.md` |
 | Skill | `references/3-Skill科普.md` |
 | 产品功能、平台差异 | `references/4-产品功能.md` |
 | 模型、API、价格 | `references/5-模型科普.md` |
-| 应用赛道 | `references/6-应用赛道.md` |
-| 电商 | `references/7-电商.md` |
 | 办公、格式转换 | `references/8-办公.md` |
 
 ## 表达标准

@@ -503,3 +503,11 @@
 - Gateway 同步收口：根路径测试对齐现行账号登录跳转；删除无生产调用者、且与登录/同步专用边界冲突的旧 `/api/*` 同源代理。本轮未推送、未发布。
 - 最后一份 Tiptap smoke 试验说明已删除，历史 TDD 继续留在归档；分离门禁覆盖整个旧 smoke 目录。
 - 并发审计补强：动态图标扫描恢复播放图标；Web/Desktop 递归清理并拒绝 Python 缓存；删除无调用的 `lowlight` 和孤立旧测试说明。现行 Wiki 断链为 0，追加日志与历史巡检断链只记归档卫生；15 条孤儿页建议保留。
+
+## [2026-08-05] 开发收尾 | 产品内置 Skill 收口为 7 项
+
+- TDD 锁定 App 只随包提供 `jc-cha-wiki`、`jc-everything-wiki`、`jc-jian-wiki`、`jc-new-user-guide`、`jc-raw-wiki`、`jc-xiu-wiki` 和 `skill-creator`。
+- 20 个个人写作、视觉、旁白 Skill 先逐字迁入 `/Users/by3/Documents/jiucaihezi-personal-skills` 并提交为 `863a738`，再从 App 删除；原 `/Users/by3/.agents/skills/` 未修改。
+- 产品侧删除旧推荐指令总表、个人创作模板和无人调用的一次性迁移配置；Skill 卡片只读取当前 Skill 包自己的 `commands`。旧客服自动上传草案与个人媒体 Skill 方案移入单产品分离前归档。
+- 验证通过：分离门禁 `11/11`、Node `970/970`、Rust `395 passed / 1 ignored`、Wiki Skill `20/20`、建库脚本 `7/7`、Gateway `36/36`、TypeScript、Wiki validate、Web/Desktop quick build 与两端产物审计；最终产物只有 7 个产品 Skill。Wiki 深层巡检现行必修 `0`、重要 `0`、断链 `0`。
+- [修复回执] 依据用户确认的 7/20 清单修正现行边界：分离 SDD `69f6144b0434 -> 9e58f1265b19`，`hot.md` `9c4be1a65a78 -> eae4eac42691`，来源索引 `65a606f0ced1 -> 6785e6530237`，第二轮巡检报告 `e6df640d314f -> fc19627a7fb5`。本轮未推送、未发布、未改版本号。

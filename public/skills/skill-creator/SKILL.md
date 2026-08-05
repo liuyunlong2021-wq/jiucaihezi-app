@@ -56,25 +56,6 @@ It's OK to briefly explain terms if you're in doubt, and feel free to clarify te
 
 ## Creating a skill
 
-### 创作型 Skill 模式（新增）
-
-当用户说"创建一个XX创作Skill""复制短剧模式"时，使用 `references/创作Skill模板.md` 生成。
-
-**与普通 Skill 的区别**：创作型 Skill 有固定的文件骨架（统帅+建制+工作流+质量手册+素材库），需要配合 Wiki 记忆系统 + 三 Skill 管道。
-
-**生成步骤**：
-
-1. 第0轮：确定领域（小说/论文/演讲/短故事/其他）
-2. 第1轮：确定建制收集的轮次和内容
-3. 第2轮：确定 Wiki 目录结构
-4. 第3轮：确定质量约束章节
-5. 第4轮：确定命名和触发词
-6. 生成全套文件：SKILL.md + references/
-
-**参考**：`jc-duanju-world` 已完成，作为模板参考。详细说明见 `docs/handover/AI交互创作模式-可复制Skill架构.md`。
-
-### 通用 Skill 模式（原有）
-
 ### Capture Intent
 
 Start by understanding the user's intent. The current conversation might already contain a workflow the user wants to capture (e.g., they say "turn this into a skill"). If so, extract answers from the conversation history first — the tools used, the sequence of steps, corrections the user made, input/output formats observed. The user may need to fill the gaps, and should confirm before proceeding to the next step.

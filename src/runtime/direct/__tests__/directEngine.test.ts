@@ -222,12 +222,12 @@ test('runDirectChatCompletion ends approval errors and tool failures in source o
   assert.deepEqual(sentMessages[1].slice(-2).map(message => message.tool_call_id), ['call_read', 'call_glob'])
 })
 
-test('runDirectChatCompletion repairs the observed available_skills-prefixed skill call', async () => {
+test('runDirectChatCompletion repairs an available_skills-prefixed skill call', async () => {
   const reportedCalls: Array<{ name: string; arguments: string }> = []
   const executedCalls: Array<{ name: string; arguments: string }> = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_skill', function: { name: 'available_skills:jc-reverse-video-prompt', arguments: '{}' } }] } }] }),
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_skill', function: { name: 'available_skills:user-example', arguments: '{}' } }] } }] }),
       '[DONE]',
     ]),
     sseResponse([
@@ -250,7 +250,7 @@ test('runDirectChatCompletion repairs the observed available_skills-prefixed ski
     sendChatCompletion: async () => responses.shift()!,
   })
 
-  const expected = [{ name: 'skill', arguments: '{"name":"jc-reverse-video-prompt"}' }]
+  const expected = [{ name: 'skill', arguments: '{"name":"user-example"}' }]
   assert.deepEqual(reportedCalls, expected)
   assert.deepEqual(executedCalls, expected)
 })

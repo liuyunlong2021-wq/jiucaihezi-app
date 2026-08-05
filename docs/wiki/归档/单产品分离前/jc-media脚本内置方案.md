@@ -1,5 +1,7 @@
 # jc_media.py 脚本内置方案
 
+> **现行状态（2026-08-05）**：本文是个人媒体 Skill 的历史实施记录，不再定义 App 随包能力。对应 Skill 已迁入 `/Users/by3/Documents/jiucaihezi-personal-skills/jc-instant-create/`；App 原生媒体能力以 [[开发/韭菜盒子原生媒体编排能力SDD]] 为准。
+>
 > **状态**: ✅ 已完成  
 > **日期**: 2026-07-17  
 > **关联**: `public/skills/JC-瞬间创作/SKILL.md` · `~/.jiucaihezi/tools/jc_media.py`

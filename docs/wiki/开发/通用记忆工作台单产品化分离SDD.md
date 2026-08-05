@@ -56,10 +56,10 @@
 | `src/api/`、`src/data/`、`src/services/`、`src/styles/`、`src/types/`、`src/utils/` | 记忆入口当前共享基础设施；内部可后续逐文件清理，不能整目录迁出 |
 | `gateway/` | 登录、账号、文字覆盖、文档和媒体网关 |
 | `document-converter/`、`rh-adapter/` | 当前文档转换与媒体生成服务 |
-| `public/` | Web 静态资源、帮助/合规页和记忆工作台可调用的全部内置 Skill |
+| `public/` | Web 静态资源、帮助/合规页和 7 个记忆工作台产品内置 Skill |
 | `.github/` | Web/桌面正式发布与安装包门禁 |
 
-`public/skills/` 中的漫剧、小说、分镜、海报等 Skill 是记忆工作台当前 Skill 能力的一部分。**迁出漫剧工作台不等于删除漫剧 Skill**；除非未来用户明确取消某个 Skill，否则 `public/skills/` 整体禁止迁出。
+`public/skills/` 只随包提供 `jc-cha-wiki`、`jc-everything-wiki`、`jc-jian-wiki`、`jc-new-user-guide`、`jc-raw-wiki`、`jc-xiu-wiki` 和 `skill-creator`。小说、短剧、视觉、旁白等 20 个个人 Skill 已完整迁入独立仓库 `/Users/by3/Documents/jiucaihezi-personal-skills`，不再进入 App 索引、推荐指令或新手指南。用户自行安装的 Skill 继续走现有用户 Skill 仓库，不因此删除或覆盖。
 
 ### 3.3 已确认移出项
 
@@ -142,15 +142,16 @@
 3. **混合目录拆分完成**：保留记忆工作台实际使用的媒体计划、聊天卡片、项目文件和编辑状态；移出旧产品专属文件。
 4. **OpenCode 阻塞解除完成**：模型、创作面板、搜索和 Rust 四组并发解耦后，OpenCode TypeScript/Rust/SDK/脚本已删除。
 5. **文档收口完成**：旧产品 Wiki 由独立备份仓库保留；当前 Wiki 只保留记忆工作台现行合同和历史必要证据。
-6. **自动验收完成**：分离门禁 `10/10`、Node `969/969`、Rust `395 passed / 1 ignored`、Wiki Skill `18/18`、Gateway `36/36`、TypeScript、Web quick build、Desktop quick build和两端产物审计均通过。
+6. **自动验收完成**：分离门禁 `11/11`、Node `970/970`、Rust `395 passed / 1 ignored`、Wiki Skill `20/20`、建库脚本 `7/7`、Gateway `36/36`、TypeScript、Web quick build、Desktop quick build和两端产物审计均通过；最终 `dist/skills/` 只有 7 个产品 Skill。
+7. **随包 Skill 收口完成**：TDD 锁定 7 项产品 allowlist；20 个个人 Skill 先逐字迁入独立 Git 仓库并提交，再从 App 删除；旧推荐指令表、个人创作模板和一次性迁移脚本同步移出当前产品。
 
 整体异常仍可回到独立备份仓库中的 `v2.1.9` / `f302c251`。
 
 ## 7. 实施范围与未验证项
 
-本轮完成单产品代码、依赖、构建入口、测试清单和 Wiki 分离，不改变 Desktop/Mobile Bundle ID、Deep Link、更新公钥、Gateway、云项目绑定、文字覆盖合同、用户数据路径或版本号 `2.1.9`。
+本轮完成单产品代码、依赖、构建入口、测试清单、Wiki 和随包 Skill 分离，不改变 Desktop/Mobile Bundle ID、Deep Link、更新公钥、Gateway、云项目绑定、文字覆盖合同、用户 Skill 数据路径或版本号 `2.1.9`。
 
-验证证据：focused `sha256:7d1c33ff370d`，Web quick build `sha256:372d120b0593`，Desktop quick build `sha256:acd2fc7fee37`。真实 Windows、Intel Mac、iOS 升级和云绑定连续性仍待人工验收；Android 按既定决策暂停，不能登记为已构建或已发布。`jc-raw-wiki closeout` 因本轮已删除 PDF/PPTX 的二进制 diff 触发 UTF-8 解码错误，三份证据改用系统 `shasum -a 256` 固化；Wiki validate 独立执行。
+本轮随包 Skill 收口的 focused、Rust、TypeScript、Wiki、Gateway、Web/Desktop quick build 与产物审计均已通过。真实 Windows、Intel Mac、iOS 升级和云绑定连续性仍待人工验收；Android 按既定决策暂停，不能登记为已构建或已发布。
 
 ## 反向链接
 

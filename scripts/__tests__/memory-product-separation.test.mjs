@@ -128,6 +128,26 @@ test('current product instructions and packaged Wiki templates use the memory co
   assert.deepEqual(blockers, [])
 })
 
+test('App bundles only the seven product Skills', () => {
+  const expected = [
+    'jc-cha-wiki',
+    'jc-everything-wiki',
+    'jc-jian-wiki',
+    'jc-new-user-guide',
+    'jc-raw-wiki',
+    'jc-xiu-wiki',
+    'skill-creator',
+  ]
+  const directories = readdirSync('public/skills', { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && existsSync(join('public/skills', entry.name, 'SKILL.md')))
+    .map(entry => entry.name)
+    .sort()
+  const index = JSON.parse(source('public/skills/index.json')).map(skill => skill.id).sort()
+
+  assert.deepEqual(directories, expected)
+  assert.deepEqual(index, expected)
+})
+
 test('memory product bundles its dynamic playback icon', () => {
   const icons = JSON.parse(source('src/assets/icons-bundle.json')).icons
   assert.ok(icons['play-arrow'])
