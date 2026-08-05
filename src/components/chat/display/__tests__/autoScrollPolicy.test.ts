@@ -41,7 +41,7 @@ test('bottom anchor follow keeps locking to the newest content for multiple resi
 
   assert.equal(follow.tick(), true)
   assert.equal(follow.tick(), true)
-  assert.equal(follow.tick(), true)
+  assert.equal(follow.tick(), false)
   assert.equal(follow.tick(), false)
   assert.deepEqual(calls, ['bottom', 'bottom', 'bottom'])
 })

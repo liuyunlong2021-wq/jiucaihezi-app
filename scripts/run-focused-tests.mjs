@@ -165,12 +165,52 @@ const wave1FocusedTests = [
   'src/components/__tests__/desktopOpenCodeSyncCutover.test.ts',
   'src/components/__tests__/desktopProjectDrop.test.ts',
   'src/components/filetree/__tests__/projectFileTreeCanvas.test.ts',
+  'src/components/chat/__tests__/chatPasteAttachment.test.ts',
+  'src/components/chat/display/__tests__/autoScrollPolicy.test.ts',
+  'src/utils/__tests__/idbPath.test.ts',
+  'src/utils/__tests__/localDocxNamespaces.test.ts',
+  'src/utils/__tests__/mediaAssetTypes.test.ts',
+  'src/utils/__tests__/projectResource.test.ts',
+  'src/utils/__tests__/webSearch.test.ts',
 ]
 
 const externalNodeTests = [
   'scripts/creation-models/__tests__/server.test.mjs',
+  'scripts/__tests__/audit-skills-manage-parity.test.mjs',
+  'scripts/__tests__/create-official-dmg.test.mjs',
+  'scripts/__tests__/memory-product-separation.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]
+
+// Registered for removal with the old product; do not make current Memory baseline depend on them.
+const legacyOrSupersededTests = [
+  'scripts/rh-deploy/__tests__/config.test.mjs',
+  'src/components/__tests__/activityRailAuthGate.test.ts',
+  'src/components/__tests__/settingsPanel.test.ts',
+  'src/components/editor/__tests__/editorContent.test.ts',
+  'src/components/editor/__tests__/editorDocument.test.ts',
+  'src/composables/__tests__/useCreationFileFiltering.test.ts',
+  'src/opencodeClient/__tests__/catalog.test.ts',
+  'src/opencodeClient/__tests__/contextBreakdown.test.ts',
+  'src/opencodeClient/__tests__/contextMetrics.test.ts',
+  'src/runtime/connection/__tests__/architectureGuards.test.ts',
+  'src/runtime/connection/__tests__/runtimeConnection.test.ts',
+  'src/runtime/connection/__tests__/skillApplicability.test.ts',
+  'src/runtime/connection/__tests__/skillConnection.test.ts',
+  'src/services/__tests__/desktopBrowserLogin.test.ts',
+  'src/utils/__tests__/chatToolPolicy.test.ts',
+  'src/utils/__tests__/devProjectTools.test.ts',
+  'src/utils/__tests__/fileTreeView.test.ts',
+  'src/utils/__tests__/formatConverter.test.ts',
+  'src/utils/__tests__/longFormPolicy.test.ts',
+  'src/utils/__tests__/materialSymbolsCoverage.test.ts',
+  'src/utils/__tests__/mediaDisplayResolver.test.ts',
+  'src/utils/__tests__/messageExport.test.ts',
+  'src/utils/__tests__/runninghubGatewayPolicy.test.ts',
+  'src/utils/__tests__/webDataMigration.test.ts',
+]
+
+void legacyOrSupersededTests
 
 function compiledTestPath(sourcePath) {
   return `${outdir}/${sourcePath.replace(/^src\//, '').replace(/\.ts$/, '.js')}`
