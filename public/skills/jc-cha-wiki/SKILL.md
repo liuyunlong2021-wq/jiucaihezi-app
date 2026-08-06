@@ -1,54 +1,22 @@
 ---
 name: jc-cha-wiki
-description: Use when a user asks to find, explain, inspect, summarize, or visualize knowledge already stored in a project Wiki. Trigger on 查询Wiki, 查角色, 查设定, 查看状态, 知识库状态, 关系图, or 项目现在怎么样.
-triggers:
-  - 查询Wiki
-  - 查询知识库
-  - 查角色
-  - 查设定
-  - 查看状态
-  - 知识库状态
-  - 关系图
-  - 项目现在怎么样
+description: Use when a Jiucaihezi user asks to answer questions from an existing project Wiki about project facts, company rules, current status, history, counts, comparisons, or an explicit relationship graph. Trigger on 查询Wiki, 查角色, 查设定, 项目现在怎么样, 统计Wiki, or 关系图. Do not use for general web search or general knowledge outside the Wiki.
 ---
 
 # JC Cha Wiki
 
-## 作用
+从已有 Wiki 找到可信答案；默认只读。
 
-从已有 Wiki 找到并解释事实、当前状态或关系。它读取源文件，不改项目事实；仅在图形确实提升理解时生成 Canvas 等衍生产物。
+1. 定位当前项目唯一的 Wiki；同时存在 `wiki/` 与 `docs/wiki/` 时请用户确认，不读取固定必读页。
+2. 从问题提取实体、事项、属性和时间，先选 1-3 个辨识度高的短词分别检索；不足时再补同义词、旧称、文件名或路径词。
+3. 搜索结果只是候选。读取原页面中支持答案的段落；只有引用页或反向引用会改变答案时，才继续读取一层相关页面。
+4. 查到足够证据就停止。用户要求全面盘点时才扩大范围，并说明实际读取边界。
+5. 直接回答问题并标出真实 Wiki 页面，重要结论精确到 Wiki 章节。公司或项目专属的重要结论还要查询 `来源索引.md` 的相关行：有映射时附原始来源和已处理范围；没有时标明“原始来源未登记或登记不完整”。来源记录不等于权威结论。
+6. 当前与历史按页面语义判断；多页冲突时并列证据，不自行裁决；没有依据时明确说 Wiki 未记录。
+7. 公司或项目专属问题不得用训练知识补成项目事实；通用知识有帮助时，与 Wiki 记录分开说明。
 
-## 判断标准
-
-- 用户只表达目标，模型自主判断是检索事实、汇总状态、追溯来源，还是生成关系图；不要求用户选择模式。
-- 先定位已有 `docs/wiki/`，其次 `wiki/`；只接管现有 Wiki，不新建平行库。
-- 查询使用 Wiki 作为结论入口。用户要求完整过程或证据时，再按 `来源索引.md` 指向读取真实 Raw、原始文件、SDD、代码、Git 或测试证据。
-- 默认只查现行知识：`hot.md`、`CLAUDE.md`、`架构/`、`开发/`、`运维/`、`排障/`、`学习/` 和 `巡检报告/`；只有用户明确追溯历史时才把 `归档/` 纳入结果。
-
-## 执行流程
-
-1. **定位**：确认项目已有的 `docs/wiki/` 或 `wiki/`，读取 `index.md`、`hot.md`、`CLAUDE.md` 和相关页面。
-2. **判断**：选择最少的检索、状态统计、来源追溯或关系图能力；没有稳定关系时不生成图。
-3. **输出**：按“结论、证据、风险、下一步”四段直接回答；没有风险或下一步时写“无”，不拿文件列表代替答案。关系图只写为衍生产物，不修改事实页。
-4. **验证**：核对所引用页面和链接目标存在，说明实际读取范围与未验证项。
-
-## 安全标准
-
-- 查询不追加 `log.md`，不修改角色、剧情、架构、正文或其他业务事实。
-- 不复制、不移动、不删除 Raw；不把完整会话或原文写进 Wiki。
-- Canvas、状态报告等衍生产物必须可以从源页面重新生成，且不能成为唯一事实源。
-- 发现事实冲突时如实列出来源，不自行裁决；需修正时交给 `jc-xiu-wiki`，需要填充结论时交给 `jc-raw-wiki`。
-
-## Reference 索引
-
-| 能力       | Reference                             |
-| ---------- | ------------------------------------- |
-| 检索与回答 | `references/能力标准/查询规范.md`     |
-| 状态查询   | `references/能力标准/状态查询规范.md` |
-| 关系图     | `references/能力标准/关系图规范.md`   |
-
-## 工具出口
-
-App 原生 `wiki` 工具可用时，必须使用 `search`、`status`、`graph`；不要通过终端调用 Python/Node。
-
-没有 `wiki` 工具的外部 Agent 才使用 `scripts/wiki_query.py`：默认现行检索用 `search`，追溯历史追加 `--scope all`，状态查询用 `status`，关系图用 `graph`。
+- 默认只读：不扫描 Raw、附件、项目全部文件、历史会话或互联网，不更新 `hot.md`，不追加 `log.md`，不补链或修改事实页。
+- 不为回答补写来源索引；默认简洁引用，用户追问时再展开来源范围和指纹。
+- 统计依据实际页面内容和明确口径；只有用户明确要求保存时才写 Markdown 派生报告。
+- 只有用户明确要求关系图且存在稳定关系时才生成局部 `.canvas`；使用真实文件节点和内部链接，不生成全库图，不静默覆盖已有布局。
+- 当前不生成 `.base`；需要沉淀、规划、巡检或修正时，分别交给对应 Wiki Skill。

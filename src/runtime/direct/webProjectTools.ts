@@ -10,7 +10,7 @@ import {
   MEMORY_FILE_TOOL_DEFINITIONS,
   WIKI_SEARCH_TOOL_DEFINITION,
 } from './creativeToolContract'
-import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
+import { executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
 import {
   artifactFilename,
   createArtifactHtml,
@@ -60,6 +60,20 @@ export function createWebProjectToolExecutor(input: {
       const entry = await input.files.read(requireProject(), path)
       if (entry.mimeType === 'folder') throw new Error(`读取路径必须是文件: ${path}`)
       return entry.content
+    },
+    async fingerprint(path) {
+      const entry = await input.files.read(requireProject(), path)
+      if (entry.mimeType === 'folder') throw new Error(`来源证据必须是文件: ${path}`)
+      if (entry.metadata?.sourceUrl && entry.metadata?.binaryStorage !== 'opfs') {
+        throw new Error(`远程媒体没有原始字节，无法计算指纹: ${path}`)
+      }
+      if (entry.metadata?.binaryStorage === 'opfs' && entry.size > 30_000_000) {
+        throw new Error(`文件超过 30 MB，无法计算完整指纹: ${path}`)
+      }
+      const bytes = entry.metadata?.binaryStorage === 'opfs'
+        ? new Uint8Array(await (await input.files.readBinary(requireProject(), path)).arrayBuffer())
+        : new TextEncoder().encode(entry.content)
+      return await sha256Hex(bytes)
     },
     async write(path, content) {
       await input.files.write(requireProject(), path, content)

@@ -9,7 +9,7 @@ import {
   WIKI_SEARCH_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
-import { executeWikiAction, type WikiWorkspace } from './wikiRuntime'
+import { executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import {
   artifactFilename,
@@ -161,6 +161,11 @@ export function createDesktopProjectToolExecutor(input: {
     },
     async read(path) {
       return (await readFile(path)).content
+    },
+    async fingerprint(path) {
+      const file = await readFile(path)
+      if (file.truncated) throw new Error(`文件超过 30 MB，无法计算完整指纹: ${path}`)
+      return await sha256Hex(Uint8Array.from(atob(file.base64), char => char.charCodeAt(0)))
     },
     async write(path, content) {
       await invoke('dev_write_file', { root: requireProject(), relativePath: path, content })

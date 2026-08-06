@@ -128,14 +128,13 @@ App 不再把同一份对话正文保存进 conversations/messages 数据库。�
 │       ├── 视频/
 │       └── 音频/
 └── wiki/                     # 已有 docs/wiki/ 时接管原位置
-    ├── CLAUDE.md
-    ├── index.md
+    ├── index.md              # 顶层分类导航
     ├── hot.md
     ├── log.md
     └── 来源索引.md
 ```
 
-新建通用 Wiki 不预设“资料、主题、参考”等业务目录。用户需要什么，模型在用户确认后创建什么。已有 Wiki 只接管，不迁移、不删除、不覆盖。
+新建通用 Wiki 不预设“资料、主题、参考”等业务目录，也不创建 README、CLAUDE 或其他强制读取页。用户需要什么，模型在用户确认后创建什么；分类目录用 `_index.md` 说明用途并导航直属子目录。已有 Wiki 只接管，不迁移、不删除、不覆盖。
 
 ### 5.2 对话身份
 
@@ -1526,3 +1525,32 @@ Web / Mobile 记忆模式候选工具只来自以下既有能力：
 - App ID 为 `6795407590`，Bundle ID 为 `com.jiucaihezi.mobile`；供应范围为 175 个国家和地区并包含中国大陆，价格为免费。
 - iPhone 与 13 英寸 iPad 截图均已通过上传校验。iPad 原始 PNG 因包含 alpha 通道被拒，转换为同尺寸 `2048 x 2732`、无 alpha 的 JPEG 后成功提交。
 - 发布方式为审核通过后自动发布。当前只能写成“已提交 Apple 审核”，普通用户尚不能从 App Store 下载；通过审核并实际发布后再更新公开下载状态。
+
+## 20. 通用文件附件 Markdown 合同（2026-08-05）
+
+> 状态：现有合同已实施；本轮不改附件链路。生产模型对每种 MIME 的真实付费请求、Web/Desktop/iPhone 人工矩阵尚未验证。
+
+### 20.1 目标与数据流
+
+记忆工作台使用 Markdown 作为跨 Provider 的文档读取表示，但不删除或替代原始文件。统一链路为：
+
+`上传文档 -> 保存原件 -> 生成 Markdown 可读副本 -> 将 Markdown 发送给 NewAPI 模型`
+
+原件仍写入项目 `.raw/jc-media/文档` 或对应文件材料目录；Markdown 只作为模型可读表示，不替代原件。
+
+### 20.2 请求合同
+
+1. Office/PDF 等文档附件生成 `textContent` Markdown 并发送到记忆模式请求；图片、视频、音频继续使用现有 `image_url`、`video_url`、`input_audio` 原生媒体 part。
+2. 原件路径和 Markdown 路径都保留在附件元数据中；原件是事实来源，Markdown 是模型读取表示。
+3. 更换 NewAPI 或 Provider 时，只依赖普通文本消息，不需要为文档格式增加原生文件适配。
+4. 快速模式继续遵守既有合同，不发送附件；Markdown 转换失败时保留原件并明确报错。
+
+### 20.3 Provider 边界
+
+App 不写 Gemini 分支或 MIME 白名单。Markdown 文档表示使 Provider 只需处理稳定的文本请求；未来如真实数据证明原生文件能力有必要，再另行设计 NewAPI 适配。
+
+### 20.4 实施与验证
+
+- 本轮不改附件实施文件；附件既有 Markdown 链路保持不变。
+- 记忆请求不自动注入 `CLAUDE.md`、`hot.md` 或其他 Wiki 页面；模型只在任务需要时通过候选工具读取。
+- 未验证：真实生产文件请求、超大附件端到端、Windows/Intel Mac/iPhone 人工矩阵。不得把本节写成已完成生产发布。

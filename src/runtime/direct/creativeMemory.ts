@@ -1,7 +1,3 @@
-export interface CreativeProjectTextFiles {
-  read(path: string): Promise<string | null>
-}
-
 export interface CreativeContextMessage {
   id: string
   role: string
@@ -21,19 +17,6 @@ const FAILED_ASSISTANT_FINISH_REASONS = new Set([
   'content_filter',
 ])
 
-export async function readCreativeProjectMemory(files?: CreativeProjectTextFiles): Promise<{ claude: string | null; hot: string | null }> {
-  if (!files) return { claude: null, hot: null }
-  const read = async (path: string) => {
-    try {
-      return await files.read(path)
-    } catch {
-      return null
-    }
-  }
-  const [claude, hot] = await Promise.all([read('CLAUDE.md'), read('wiki/hot.md')])
-  return { claude, hot }
-}
-
 function textLength(value: unknown): number {
   if (typeof value === 'string') return value.length
   if (value == null) return 0
@@ -45,15 +28,6 @@ function estimateTokens(value: unknown): number {
   return Math.ceil(textLength(value) / 4)
 }
 
-function hotMemoryPrompt(memory?: { claude?: string | null; hot?: string | null }): string {
-  const claude = String(memory?.claude || '').trim()
-  const hot = String(memory?.hot || '').trim()
-  return [
-    claude ? `[项目 CLAUDE.md]\n${claude}` : '',
-    hot ? `[项目 wiki/hot.md]\n${hot}` : '',
-  ].filter(Boolean).join('\n\n')
-}
-
 /**
  * Keeps the current user message and then walks backwards by complete user/assistant turns.
  * Older context is omitted whole; the model never receives a half message.
@@ -63,11 +37,9 @@ export function buildCreativeContext(input: {
   modelId: string
   contextWindow: number
   reservedTokens: number
-  projectMemory?: { claude?: string | null; hot?: string | null }
-}): { messages: CreativeContextMessage[]; systemPrompt: string; estimatedTokens: number } {
-  const systemPrompt = hotMemoryPrompt(input.projectMemory)
+}): { messages: CreativeContextMessage[]; estimatedTokens: number } {
   const contextWindow = input.contextWindow || getModelContextWindow(input.modelId)
-  const budget = Math.max(0, contextWindow - input.reservedTokens - estimateTokens(systemPrompt))
+  const budget = Math.max(0, contextWindow - input.reservedTokens)
   const history: CreativeContextMessage[] = []
   for (const message of input.messages) {
     if (message.role !== 'user' && message.role !== 'assistant') continue
@@ -77,7 +49,7 @@ export function buildCreativeContext(input: {
     }
     if (textLength(message.content) > 0) history.push(message)
   }
-  if (!history.length) return { messages: [], systemPrompt, estimatedTokens: estimateTokens(systemPrompt) }
+  if (!history.length) return { messages: [], estimatedTokens: 0 }
 
   const selected: CreativeContextMessage[] = []
   let used = 0
@@ -101,8 +73,7 @@ export function buildCreativeContext(input: {
 
   return {
     messages: selected,
-    systemPrompt,
-    estimatedTokens: estimateTokens(systemPrompt) + used,
+    estimatedTokens: used,
   }
 }
 import { getModelContextWindow } from '@/data/modelContextWindows'

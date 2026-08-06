@@ -511,3 +511,116 @@
 - 产品侧删除旧推荐指令总表、个人创作模板和无人调用的一次性迁移配置；Skill 卡片只读取当前 Skill 包自己的 `commands`。旧客服自动上传草案与个人媒体 Skill 方案移入单产品分离前归档。
 - 验证通过：分离门禁 `11/11`、Node `970/970`、Rust `395 passed / 1 ignored`、Wiki Skill `20/20`、建库脚本 `7/7`、Gateway `36/36`、TypeScript、Wiki validate、Web/Desktop quick build 与两端产物审计；最终产物只有 7 个产品 Skill。Wiki 深层巡检现行必修 `0`、重要 `0`、断链 `0`。
 - [修复回执] 依据用户确认的 7/20 清单修正现行边界：分离 SDD `69f6144b0434 -> 9e58f1265b19`，`hot.md` `9c4be1a65a78 -> eae4eac42691`，来源索引 `65a606f0ced1 -> 6785e6530237`，第二轮巡检报告 `e6df640d314f -> fc19627a7fb5`。本轮未推送、未发布、未改版本号。
+
+## [2026-08-05] 开发收尾 | 通用文件附件原生优先与 Markdown 降级
+
+- 附件合同已收口为“保存原件 -> 原生文件优先 -> 明确不支持时 Markdown/OCR 降级 -> 两者都失败则明确报错”；App 不再限制模型只能读取 Markdown。
+- 单个原生 data URL 上限为 32 MiB；Office/PDF/其他文档在可用时同时保留原件与 `textContent`，媒体仍走原有原生媒体 part；生产 NewAPI MIME 能力只由 Gateway/Provider 适配器决定。
+- 自动验证：完整 `pnpm run build` 通过，包含 focused Node `974/974`、Rust `395 passed / 1 ignored`、TypeScript、Web 构建与产物审计；构建日志指纹 `sha256:88d767bf7043`。真实付费文件请求和跨端人工矩阵仍未验证，不能写成已发布。
+
+## [2026-08-05] 决策修正 | 附件表示按需解析第一阶段
+
+- 用户确认当前只实施第一阶段：原件作为唯一真源，上传不提前生成 Markdown，发送时原生表示优先，原生明确不可用时才按需生成并缓存 Markdown/OCR。
+- 第二阶段的 NewAPI `unsupported_input` 统一错误码、Provider 能力探测、文件句柄和大文件通道，第三阶段的分页读取、结构化抽取、索引和 RAG 均暂不建设，等待真实使用数据。
+- 同步修正通用记忆工作台 TDD、核心 SDD、`hot.md` 和来源索引；当前 TDD 保持 RED，上一轮请求层 native-first 改动不代表上传合同已完成。
+
+## [2026-08-05] 决策修正 | Markdown-first 作为跨 Provider 文档表示
+
+- 用户确认记忆工作台不应把 NewAPI 或任何 Provider 的原生附件能力作为主链路；DOCX/PDF/XLSX/PPTX 默认使用按需生成并缓存的 Markdown/结构化文本表示。
+- 原件仍是唯一事实来源；原生文档附件只作为视觉、复杂版式等场景的可选增强。更换 NewAPI 或后端时，Markdown 主链路不变。
+- 第一阶段只实施上述稳定边界；NewAPI 原生文件错误码、文件句柄、大文件通道、分页读取、结构化抽取、索引和 RAG 延后到真实数据证明必要时再做。
+
+## [2026-08-05] 决策确认 | 附件沿用 Markdown 主链路
+
+- 用户确认当前产品逻辑已满足后端无关诉求：Office/PDF/XLSX/PPTX 保存原件、生成 Markdown 并将 Markdown 发送给 NewAPI；本轮不改附件链路。
+- 本轮唯一代码修复是记忆系统提示读取 canonical `wiki/CLAUDE.md`，忽略项目根部旧 `CLAUDE.md`；已有根部文件不迁移、不删除、不覆盖。
+
+## [2026-08-05] 决策修正 | Everything Wiki 不再负责完整建库
+
+- 原“知识库建库与企业 Schema”草案已被 [[开发/通用记忆工作台基础README与EverythingWiki按需规划TDD]] 取代；generic 基础骨架由 App 初始化，业务结构按用户确认后扩展。
+- 旧 `jc-everything-wiki` 的 Reference 与 scaffold 已移到工作区外备份；Raw 所需项目语境归 `jc-raw-wiki` 持有。
+
+## [2026-08-05] 开发收尾 | 基础 README 与 Everything Wiki 按需规划
+
+- generic 记忆空间新增 `wiki/README.md`，解释 `wiki/` 入口和 `.raw/jc-media/` 原件目录；`对话记录`、`.sync`、`jc-canvas` 仅标为系统管理目录。
+- `jc-everything-wiki` 改为对话式 Wiki 架构规划：读取现状、理解目标、提出最小方案、用户确认后用 `extend`/`link` 执行；不再创建完整业务模板。
+- 旧 Everything Skill 的 Reference 与 scaffold 脚本已备份到 `/Users/by3/Documents/jiucaihezi-legacy-local-artifacts/wiki-skills/jc-everything-wiki-2026-08-05`；项目语境 Reference 迁入 `jc-raw-wiki/references/项目语境/`，避免 Raw 填充断链。
+
+## [2026-08-05] 决策修正 | Obsidian 兼容最小 Wiki 骨架
+
+- 对照 Obsidian 官方 Help 确认 Vault、Markdown、目录和内部链接均按需存在，官方没有“每次必读文件”；generic 新建记忆空间因此只创建 `index.md`、`hot.md`、`log.md` 和 `来源索引.md`。
+- App 不创建 README、CLAUDE 或任何替代性的强制读取页，记忆请求不自动注入 Wiki 页面；已有用户文件不迁移、不删除、不覆盖。
+- `jc-everything-wiki` 只在现有 Wiki 上规划最小目录结构；`index.md` 导航顶层分类，各目录 `_index.md` 说明用途并导航直属子目录。
+
+## [2026-08-05] TDD | Raw Wiki 精准沉淀
+
+- 审计确认 `jc-raw-wiki` 当前把内容沉淀、项目类型模板、Canvas、Bases、开发收尾和全 Raw 盘点混在一个 Skill；这与已修正的 Everything Wiki 属于同类过度设计。
+- 新 TDD 将唯一职责固定为：把用户明确指定范围内的已确认、可复用信息增量写入现有 Wiki，并登记真实来源；不自动扫描全部 Raw，不设计目录，不生成派生视图。
+- 本轮只写 TDD，尚未修改 Skill；实施时先备份旧包、补红灯测试，再删除旧 Reference 和脚本。
+
+## [2026-08-05] 开发收尾 | Raw Wiki 精准沉淀
+
+- `jc-raw-wiki` 已收缩为只处理用户指定来源和本轮确认内容的增量沉淀 Skill；不再默认扫描 Raw、识别行业类型、设计目录或执行开发收尾。
+- 旧包完整备份到 `/Users/by3/Documents/jiucaihezi-legacy-local-artifacts/wiki-skills/jc-raw-wiki-2026-08-05/` 后，17 份 Reference、`digest_raw.py` 与旧专项测试已移出产品包。
+- 关系图、标准 `.canvas` 和统计归 `jc-cha-wiki`；统计保存为 Markdown，`.base` 等 App 支持解析和显示后再实现。
+- 验证通过：旧实现红灯 `5/5`、新合同 `5/5`、Wiki Skill `26/26`、分离门禁 `11/11`、Skill Creator 校验、完整 focused、Rust `395 passed / 1 ignored`、TypeScript及两项独立模型前向检查。
+
+## [2026-08-05] TDD | Cha Wiki 精准检索
+
+- 对照 Obsidian 官方 Search、Graph、Backlinks 与当前原生 Wiki 工具，确认 Cha Wiki 的核心是“问题 -> 多词召回 -> 读取原页 -> 证据回答”，不是固定必读页、开发目录排序、状态计数或固定四段模板。
+- 当前随包 Python 查询器与 App 原生工具重复；原生 `graph` 还会扫描全库并覆盖固定 `关系图.canvas`，与现行局部项目地图合同冲突。
+- 新 TDD 保留查询、统计和显式派生视图；Canvas 收紧为用户指定主题的局部可点击文件图并保护既有布局。RAG、向量库、BM25、Bases 和自动回写答案本轮不建设。
+- 本轮只写 TDD 和修正现行文档入口，尚未修改 `jc-cha-wiki`、查询脚本、原生 Wiki 工具或测试。
+
+## [2026-08-05] 开发收尾 | Cha Wiki 精准检索
+
+- `jc-cha-wiki` 已收缩为“短词多轮召回 -> 读取原页 -> 必要关联核对 -> 带来源回答”的只读查询 Skill；不再绑定固定必读页、开发目录、查询模式或固定四段回答。
+- 旧包完整备份到 `/Users/by3/Documents/jiucaihezi-legacy-local-artifacts/wiki-skills/jc-cha-wiki-2026-08-05/` 后，3 份 Reference、Python 查询器及缓存已移出产品包。
+- 原生关系图必须提供种子页面，默认一层、最多两层，生成可点击 `file` 节点；已有 Canvas 默认只预览，确认更新后保留无关节点和既有坐标。
+- 红灯已确认：旧 Skill 合同 `5/5`、旧 Canvas 合同 `3/3`；绿色验证：Cha 专项 `5/5`、Wiki Skill `28/28`、原生 Wiki 运行时 `15/15`、Skill Creator 校验。完整 focused、TypeScript 与最终门禁结果见本条后续验证回执。
+- 四类真实模型前向检查未完成：Claude CLI 只读调用出现预算超限或无输出超时，未将其记作通过；需在可用模型环境复跑单页事实、同义词跨页、冲突和无答案用例。
+
+## [2026-08-05] TDD | Jian Wiki 精准巡检
+
+- 审计确认 `jc-jian-wiki` 当前把通用 Wiki 健康检查、语义一致性、换皮漏改、映射撞车、时代穿帮、伏笔回收和 Python/Node 运行时混在一个 Skill；其中个人创作规则不属于通用记忆工作台。
+- 新 TDD 将唯一职责固定为：只读检查机械完整性和用户指定主题的语义一致性，并给出可追溯的问题证据；默认只在对话报告，显式要求时才保存 Markdown 派生报告。
+- 原生 `audit` 将区分导航断链、普通未解析链接、同名歧义、孤儿候选和历史卫生；删除“目录文件数失衡就是架构问题”的误报规则。RAG、Embedding、Dataview、定时任务和自动修复本轮不建设。
+- 本轮只写 TDD 和修正现行文档入口，尚未修改 `jc-jian-wiki`、原生 `audit`、旧脚本、构建逻辑、新手指南或测试。
+
+## [2026-08-05] 开发收尾 | Jian Wiki 精准只读巡检
+
+- `jc-jian-wiki` 已收缩为“机械完整性 + 用户指定主题语义一致性”的只读巡检 Skill；默认在对话报告，只有显式要求时才保存 Markdown 派生报告。
+- 旧包完整备份到 `/Users/by3/Documents/jiucaihezi-legacy-local-artifacts/wiki-skills/jc-jian-wiki-2026-08-05/`；Reference、Python/Node 扫描器、缓存和专用构建步骤不再随 App 分发。无人引用的旧个人预设迁到 `/Users/by3/Documents/jiucaihezi-legacy-local-artifacts/source/kbCommandPresets-2026-08-05.ts`。
+- 原生 `wiki audit` 已支持 `evidencePaths`，并区分导航断链、同名歧义、普通未解析链接、孤儿候选和历史卫生；`log.md` 按历史流水处理，目录数量不再作为架构错误。
+- 红灯确认：Jian Skill 合同 `8/8`、原生新增场景 `3/3` 均在旧实现失败。绿色验证：Skill Creator、Wiki Skill `30/30`、原生 Wiki `17/17`、分离门禁 `11/11`、完整 focused、Rust `395 passed / 1 ignored`、TypeScript。四类独立模型前向检查仍留作发布前人工验收，本轮未提交、未推送、未发布。
+
+## [2026-08-05] TDD | Xiu Wiki 精准修正
+
+- 审计确认 `jc-xiu-wiki` 当前把确定性改错、架构扩展、巡检报告回写、日志留痕和个人创作规则混在一个 Skill；随包 Python 修正器还与 App 原生 Wiki 工具重复。
+- 新 TDD 将唯一职责固定为：对一个明确 Wiki Markdown 文件中的唯一旧值，按用户或可靠证据已经确认的新值执行“预览 -> 批准 -> 精确替换 -> 重读验证”。
+- 原生 `replace` 将强制单文件范围，多命中默认拒绝并要求显式 `replaceAll`；只会向文末追加裸链接的 `link` action 删除。目录规划与 `extend` 归 Everything，新事实归 Raw，复检归 Jian。
+- Obsidian 的重命名自动更新内部链接、废纸篓和 File recovery 被记录为独立文件生命周期差距，本轮不冒充 Xiu 已具备。本轮只写 TDD 和修正现行文档入口，尚未修改 Skill、原生修正工具、旧脚本、新手指南或测试。
+
+## [2026-08-05] 开发收尾 | Xiu Wiki 精准修正已实施
+
+- 原 `jc-xiu-wiki` 已完整备份到 `/Users/by3/Documents/jiucaihezi-legacy-local-artifacts/wiki-skills/jc-xiu-wiki-2026-08-05/`；产品包现在只保留标准 `SKILL.md`。
+- 已删除随包 Reference、`apply_fix.py` 和 Python 缓存；新 Skill 只声明“一个明确 Markdown 文件 + 唯一旧值/新值 + 依据”的预览、批准、精确替换和重读验证合同。
+- 原生 `wiki replace` 已拒绝无路径、Wiki 外路径、非 Markdown 文件；单文件多命中默认拒绝，显式 `replaceAll: true` 才允许全部替换，并返回行号、指纹和验证结果。
+- 原生 `link` 已从工具合同、参数解析、审批策略和运行时删除；断链修正统一使用 scoped `replace`，目录扩展继续由 Everything 使用 `extend`。
+- 红灯先在旧实现失败；当前 Skill 契约 `32/32`、focused `978/978` 已通过。TypeScript、Rust 和最终 diff 门禁待本轮最后验证。
+
+## [2026-08-05] 验证回执 | Xiu Wiki 精准修正
+
+- Skill Creator 校验通过；Wiki Skill 契约 `32/32`、focused `978/978`、TypeScript 和 Rust `395 passed / 1 ignored` 全部通过。
+- `git diff --check` 通过。Xiu 实施完成；本轮未提交、未推送、未发布。
+
+## [2026-08-05] 最终门禁 | Xiu Wiki 精准修正
+
+- 补齐工具 Schema 不暴露 `link/target`、缺少 `reason/basis` 拒绝和新手指南职责测试后，最终结果为 Skill 契约 `34/34`、focused `980/980`、TypeScript、Rust `395 passed / 1 ignored`、`git diff --check` 全部通过。
+
+## [2026-08-06] 开发收尾 | Raw、Cha、Jian 证据链与可信检索
+
+- 原生 Wiki 工具新增只读 `evidence`，Web 与 Desktop 按项目文件原始字节计算完整 SHA-256；generic 来源索引使用空六列表，`audit` 能检查来源一致、变化、丢失、无法验证和登记不完整。
+- `jc-raw-wiki` 在正文写入成功后登记证据，`jc-cha-wiki` 回答重要项目事实时展示 Wiki 章节和已登记原始来源，`jc-jian-wiki` 复用原生审计且不自动判错或改写。
+- 红灯先确认旧实现缺少上述合同；绿色验证为相关原生/Web/Desktop/审批 `57/57`、Wiki Skill `38/38`、完整 focused `986/986`、Rust `395 passed / 1 ignored`、TypeScript、Web/Desktop quick build、两端产物审计与 `git diff --check`。
+- 五类脱敏用例已建立，独立模型前向验收尚未执行，不记为通过。本轮未增加 RAG、向量库、BM25、新依赖或遥测，未提交、未推送、未发布。

@@ -118,14 +118,17 @@ test('current product instructions and packaged Wiki templates use the memory co
     ['README.md', /OpenCode 项目协作|100% 复刻官方 OpenCode/],
     ['AGENTS.md', /OpenCode 有的照抄/],
     ['docs/jiucaihezi-app.code-workspace', /MYnewapi|my-opencode/],
-    ['public/skills/jc-everything-wiki/scripts/everything_to_wiki.py', /Studio 创模式|Studio 文\/武模式|ses_<会话ID>/],
-    ['public/skills/jc-everything-wiki/references/项目语境/开发项目.md', /Studio 创模式|OpenCode `ses_\*`/],
-    ['public/skills/jc-raw-wiki/references/能力标准/Raw与来源索引.md', /Studio 创模式|Studio 文\/武/],
+    ['public/skills/jc-everything-wiki/SKILL.md', /Studio 创模式|Studio 文\/武模式|OpenCode|ses_<会话ID>/],
+    ['public/skills/jc-raw-wiki/SKILL.md', /Studio 创模式|Studio 文\/武模式|OpenCode|ses_<会话ID>/],
     ['docs/wiki/开发/通用记忆工作台单产品化分离SDD.md', /`src\/components\/editor\/` \| `editorSessionStore\.ts` 当前/],
     ['docs/wiki/开发/文件系统/索引.md', /src\/components\/editor\/(?:editorSessionStore\.ts|EditorPanel\.vue)/],
   ].filter(([path, pattern]) => pattern.test(source(path))).map(([path]) => path)
 
   assert.deepEqual(blockers, [])
+  assert.equal(existsSync('public/skills/jc-everything-wiki/scripts'), false)
+  assert.equal(existsSync('public/skills/jc-everything-wiki/references'), false)
+  assert.equal(existsSync('public/skills/jc-raw-wiki/scripts'), false)
+  assert.equal(existsSync('public/skills/jc-raw-wiki/references'), false)
 })
 
 test('App bundles only the seven product Skills', () => {

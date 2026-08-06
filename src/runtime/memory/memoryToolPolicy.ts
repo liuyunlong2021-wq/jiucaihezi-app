@@ -38,7 +38,7 @@ export function memoryToolNeedsApproval(call: DirectToolCall, currentUserText: s
   if (name === 'wiki') {
     const action = String(args.action || '')
     return action === 'scaffold' || action === 'graph'
-      || (args.apply === true && ['replace', 'link', 'extend'].includes(action))
+      || (args.apply === true && ['replace', 'extend'].includes(action))
   }
   if ((name === 'write' || name === 'edit') && paths.length) return true
   if (name.startsWith('mcp__')) return !isMcpToolReadOnly(name)

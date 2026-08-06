@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
 import type { FileEntry } from '@/composables/useFileStore'
@@ -134,6 +135,54 @@ test('web project tools execute the native Wiki runtime without Python or Node',
   assert.match((await execute(call('wiki_search', { query: 'Hot' }))).content, /CLAUDE\.md/)
   await assert.rejects(() => execute(call('wiki_search', { query: 'Hot', action: 'replace' })), /工具参数不支持/)
   assert.equal((await files.list(project.id)).some(entry => entry.path === '.raw' || entry.path.startsWith('.raw/')), false)
+})
+
+test('web wiki evidence fingerprints OPFS binary bytes', async () => {
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
+  const project = await files.createProject('证据指纹')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+  await files.writeBinary(project.id, '资料/制度.docx', new Blob(['docx-bytes']), {
+    category: 'binary', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  })
+
+  const output = (await execute(call('wiki', { action: 'evidence', evidencePaths: ['资料/制度.docx'] }))).content
+
+  assert.match(output, new RegExp(`资料/制度\\.docx sha256:${createHash('sha256').update('docx-bytes').digest('hex')}`))
+})
+
+test('web wiki evidence rejects remote media placeholders without original bytes', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('远程媒体证据')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+  await files.addMedia(project.id, '资料/远程图片.png', 'https://example.com/image.png', 'image', 'image/png')
+
+  await assert.rejects(
+    () => execute(call('wiki', { action: 'evidence', evidencePaths: ['资料/远程图片.png'] })),
+    /没有原始字节|无法计算.*指纹/,
+  )
+})
+
+test('web wiki evidence rejects oversized OPFS files before loading their bytes', async () => {
+  let binaryRead = false
+  const binary: WebProjectBinaryAdapter = {
+    async write(_id, source) { return (await sourceBlob(source)).size },
+    async read() { binaryRead = true; throw new Error('should not read oversized bytes') },
+    async remove() {},
+    async estimate() { return { usage: 0, quota: 1_000_000_000 } },
+    async persist() { return true },
+  }
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary)
+  const project = await files.createProject('超大证据')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+  await files.writeBinary(project.id, '资料/超大.bin', new Blob([new Uint8Array(30_000_001)]), {
+    category: 'binary', mimeType: 'application/octet-stream',
+  })
+
+  await assert.rejects(
+    () => execute(call('wiki', { action: 'evidence', evidencePaths: ['资料/超大.bin'] })),
+    /超过 30 MB/,
+  )
+  assert.equal(binaryRead, false)
 })
 
 test('web project tool executor reads writes searches and edits the bound project', async () => {

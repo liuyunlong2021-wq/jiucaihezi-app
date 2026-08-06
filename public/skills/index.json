@@ -2,83 +2,37 @@
   {
     "id": "jc-cha-wiki",
     "name": "jc-cha-wiki",
-    "description": "Use when a user asks to find, explain, inspect, summarize, or visualize knowledge already stored in a project Wiki. Trigger on 查询Wiki, 查角色, 查设定, 查看状态, 知识库状态, 关系图, or 项目现在怎么样.",
-    "triggers": [
-      "查询Wiki",
-      "查询知识库",
-      "查角色",
-      "查设定",
-      "查看状态",
-      "知识库状态",
-      "关系图",
-      "项目现在怎么样"
-    ],
+    "description": "Use when a Jiucaihezi user asks to answer questions from an existing project Wiki about project facts, company rules, current status, history, counts, comparisons, or an explicit relationship graph. Trigger on 查询Wiki, 查角色, 查设定, 项目现在怎么样, 统计Wiki, or 关系图. Do not use for general web search or general knowledge outside the Wiki.",
+    "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/能力标准/关系图规范.md",
-      "references/能力标准/查询规范.md",
-      "references/能力标准/状态查询规范.md",
-      "scripts/wiki_query.py"
+      "SKILL.md"
     ]
   },
   {
     "id": "jc-everything-wiki",
     "name": "jc-everything-wiki",
-    "description": "Use when a user asks to create, convert, organize, or complete a project Wiki from code, documents, writing, conversations, or other material. Trigger on 转Wiki, 建Wiki, 建知识库, 初始化知识库, 项目Wiki, 文档归档, 内容转Wiki, or 整理成知识库.",
-    "triggers": [
-      "转Wiki",
-      "建Wiki",
-      "建知识库",
-      "初始化知识库",
-      "项目Wiki",
-      "文档归档",
-      "内容转Wiki",
-      "整理成知识库"
-    ],
+    "description": "Use when a user wants help designing or creating a precise Wiki folder structure for an existing Jiucaihezi memory space. Trigger on 规划Wiki, 创建Wiki目录, 完善Wiki架构, 我不知道Wiki该建什么, 根据我的需求设计Wiki, or 把这个项目整理成Wiki.",
+    "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/能力标准/Raw与来源索引.md",
-      "references/能力标准/对话原始材料.md",
-      "references/能力标准/建库与接管.md",
-      "references/项目语境/小说项目.md",
-      "references/项目语境/广告项目.md",
-      "references/项目语境/开发项目.md",
-      "references/项目语境/漫剧项目.md",
-      "references/项目语境/电影项目.md",
-      "references/项目语境/电视剧项目.md",
-      "references/项目语境/短故事项目.md",
-      "references/项目语境/通用资料.md",
-      "scripts/everything_to_wiki.py",
-      "scripts/test_everything_to_wiki.py",
-      "scripts/test_skill_contract.py"
+      "SKILL.md"
     ]
   },
   {
     "id": "jc-jian-wiki",
     "name": "jc-jian-wiki",
-    "description": "Use when a user asks to inspect a project Wiki for consistency, broken links, missing relationships, contradictions, stale structure, or a health report. Trigger on 巡检Wiki, 一致性检查, 知识库体检, 查断链, 查矛盾, or 查有没有漏改.",
-    "triggers": [
-      "巡检Wiki",
-      "一致性检查",
-      "知识库体检",
-      "查断链",
-      "查矛盾",
-      "查有没有漏改"
-    ],
+    "description": "Use when a user asks to inspect an existing project Wiki for Wiki health, consistency, broken links, contradictions, omissions, or a recheck after repairs. Trigger on 巡检Wiki, 知识库体检, 一致性检查, 查断链, 查矛盾, 查漏改, or 复检.",
+    "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/能力标准/巡检清单.md",
-      "scripts/extract_wikilinks.mjs",
-      "scripts/scan_vault.py"
+      "SKILL.md"
     ]
   },
   {
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
-    "description": "Use when a user asks for beginner help, first-use guidance, tutorials, feature explanations, platform differences, download help, or customer support for Jiucaihezi Studio. Trigger on 新手、帮助、教程、怎么用、第一次、入门、韭菜盒子、客服、help、咋整 or 搞不懂.",
+    "description": "Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, Wiki, synchronization, attachments, or model selection. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子 Wiki、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、jc-new-user-guide.",
     "triggers": [],
     "commands": [],
     "files": [
@@ -95,51 +49,21 @@
   {
     "id": "jc-raw-wiki",
     "name": "jc-raw-wiki",
-    "description": "Use when a user asks to fill, update, maintain, or refresh a project Wiki from recent writing, development work, conversations, Raw material, documents, or verified evidence. Trigger on 填充Wiki, 整理记忆体, 更新知识库, 刷新热缓存, 开发收尾, 续写前整理, or 我刚写完/做完一段内容.",
-    "triggers": [
-      "填充Wiki",
-      "整理记忆体",
-      "更新知识库",
-      "刷新热缓存",
-      "开发收尾",
-      "续写前整理",
-      "我刚写完",
-      "我刚开发完"
-    ],
+    "description": "Use when a Jiucaihezi user explicitly asks to write confirmed information from specified files, pages, URLs, or the current conversation into an existing project Wiki. Trigger on 填充Wiki, 更新Wiki, 写入Wiki, 沉淀到Wiki, 把本轮结论写进Wiki, or 用这些文件更新知识库.",
+    "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/能力标准/Bases统计表.md",
-      "references/能力标准/Canvas关系图.md",
-      "references/能力标准/Raw与来源索引.md",
-      "references/能力标准/催化提取.md",
-      "references/能力标准/内容填充.md",
-      "references/能力标准/双链与Obsidian.md",
-      "references/能力标准/开发阶段收尾.md",
-      "references/能力标准/热缓存.md",
-      "references/能力标准/资料摄入.md",
-      "scripts/digest_raw.py",
-      "scripts/test_jc_raw_wiki_contract.py"
+      "SKILL.md"
     ]
   },
   {
     "id": "jc-xiu-wiki",
     "name": "jc-xiu-wiki",
-    "description": "Use when a user asks to correct a confirmed Wiki error, apply a Wiki inspection report, repair a deterministic link or name, or extend an existing Wiki structure. Trigger on 修正Wiki, 执行巡检修正, 修复断链, 改错, 新建分类, or Wiki架构扩展.",
-    "triggers": [
-      "修正Wiki",
-      "执行巡检修正",
-      "修复断链",
-      "改错",
-      "新建分类",
-      "Wiki架构扩展"
-    ],
+    "description": "Use when a user asks to precisely repair an already confirmed Wiki error in one existing Markdown file, such as a typo, name, value, or wrong Wiki target. Trigger on 修正Wiki, 执行已确认修正, 修复确定性断链, or 改错. Do not use for querying, inspection, new facts, structure planning, or page lifecycle changes.",
+    "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md",
-      "references/能力标准/巡检修正规范.md",
-      "references/能力标准/架构扩展规范.md",
-      "scripts/apply_fix.py"
+      "SKILL.md"
     ]
   },
   {

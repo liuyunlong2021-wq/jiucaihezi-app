@@ -160,6 +160,9 @@ function wikiWorkspace(owner: string, files: ProjectFileService): WikiWorkspace 
       const resource = await findResource(owner, path, files)
       return (await files.readText(resource)).content
     },
+    async fingerprint() {
+      throw new Error('初始化过程不支持来源指纹')
+    },
     async write(path, content) {
       const existing = (await files.list(owner)).find(resource => resource.path === path)
       if (!existing) {

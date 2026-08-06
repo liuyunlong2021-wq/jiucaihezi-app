@@ -1,9 +1,18 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { createProjectFileService, type ProjectFileAdapter, type ProjectFileEntry } from '@/services/projectFileService'
 import { MEMORY_PROJECT_SKELETON_DIRECTORIES } from '@/utils/memoryProjectPaths'
 import { initializeMemoryProject } from '../memoryProject'
+
+const memoryProjectSource = readFileSync(join(process.cwd(), 'src/runtime/memory/memoryProject.ts'), 'utf8')
+
+test('memory project initialization does not implement a lossy evidence fingerprint path', () => {
+  assert.match(memoryProjectSource, /async fingerprint\(\) \{[\s\S]*初始化过程不支持来源指纹/)
+  assert.doesNotMatch(memoryProjectSource, /async fingerprint\([^)]*\) \{[\s\S]{0,300}readText/)
+})
 
 test('memory project initialization creates the complete protected skeleton', async () => {
   const entries = new Map<string, ProjectFileEntry>()

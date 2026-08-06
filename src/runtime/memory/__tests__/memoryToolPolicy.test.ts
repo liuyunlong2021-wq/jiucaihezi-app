@@ -47,11 +47,11 @@ test('memory tools require explicit current-turn paths before external access', 
 
 test('memory wiki previews auto-run but writing actions require approval', () => {
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'inspect' }), '检查 Wiki'), false)
+  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'evidence', evidencePaths: ['资料/制度.md'] }), '核对来源'), false)
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'replace', apply: false }), '预览修改'), false)
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'scaffold' }), '创建 Wiki'), true)
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'graph' }), '生成关系图'), true)
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'replace', apply: true }), '修改 Wiki'), true)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'link', apply: true }), '修改 Wiki'), true)
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'extend', apply: true }), '修改 Wiki'), true)
 })
 

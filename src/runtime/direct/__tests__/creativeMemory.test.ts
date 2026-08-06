@@ -9,9 +9,10 @@ test('creative memory only assembles context and never defines a project raw led
 
   assert.doesNotMatch(source, /appendCreativeMemoryEvent|createCreativeMemoryRecorder|encodeCreativeMemoryEvent/)
   assert.doesNotMatch(source, /\.raw\/sessions|jcses_/)
+  assert.doesNotMatch(source, /readCreativeProjectMemory|projectMemory|hotMemoryPrompt/)
 })
 
-test('builds creative context by capacity, keeps the newest complete turn, and adds hot project memory', () => {
+test('builds creative context by capacity without mandatory Wiki injection', () => {
   const messages = [
     { id: 'u1', role: 'user', content: '旧消息'.repeat(80) },
     { id: 'a1', role: 'assistant', content: '旧回答'.repeat(80) },
@@ -22,12 +23,9 @@ test('builds creative context by capacity, keeps the newest complete turn, and a
     modelId: 'openai/gpt-oss-120b:free',
     contextWindow: 150,
     reservedTokens: 100,
-    projectMemory: { claude: '项目规则', hot: '当前热记忆' },
   })
 
   assert.deepEqual(result.messages.map(message => message.id), ['u2'])
-  assert.match(result.systemPrompt, /项目规则/)
-  assert.match(result.systemPrompt, /当前热记忆/)
   assert.ok(result.estimatedTokens <= 150)
 })
 

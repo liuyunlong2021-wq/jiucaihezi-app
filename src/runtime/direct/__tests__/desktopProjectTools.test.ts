@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
 import {
@@ -62,6 +63,55 @@ test('creative tool contract exposes the project tools and Desktop terminal', ()
   const terminal = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'terminal')
   assert.match(terminal?.function.description || '', /explicitly lists that exact token/)
   assert.match(terminal?.function.description || '', /absolute paths supplied in user text directly/)
+})
+
+test('wiki tool contract exposes evidence, scoped replace, and no bare link action', () => {
+  const wiki = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'wiki')!
+  const properties = wiki.function.parameters.properties as Record<string, any>
+
+  assert.deepEqual(properties.action.enum, ['inspect', 'scaffold', 'search', 'status', 'graph', 'validate', 'audit', 'evidence', 'closeout', 'replace', 'extend'])
+  assert.equal(properties.replaceAll.type, 'boolean')
+  assert.equal(properties.target, undefined)
+})
+
+test('desktop wiki evidence fingerprints the original project bytes', async () => {
+  const execute = createDesktopProjectToolExecutor({ projectDir: '/tmp/project', invoke: fixtureInvoke })
+
+  const output = (await execute(call('wiki', { action: 'evidence', evidencePaths: ['media/ref.png'] }))).content
+
+  assert.match(output, new RegExp(`media/ref\\.png sha256:${createHash('sha256').update('img').digest('hex')}`))
+})
+
+test('desktop Wiki audit classifies Rust ENOENT as a missing source', async () => {
+  const invoke = async (command: string, payload: { input: Record<string, unknown> }) => {
+    const path = String(payload.input.relativePath || '')
+    if (command === 'dev_list_files') {
+      return [
+        { path: 'wiki', isDir: true },
+        { path: 'wiki/index.md', isDir: false, size: 5 },
+        { path: 'wiki/hot.md', isDir: false, size: 5 },
+        { path: 'wiki/log.md', isDir: false, size: 5 },
+        { path: 'wiki/来源索引.md', isDir: false, size: 260 },
+        { path: 'wiki/制度.md', isDir: false, size: 20 },
+      ]
+    }
+    if (command !== 'dev_read_file') throw new Error(`unexpected command: ${command}`)
+    if (path === 'wiki/来源索引.md') {
+      return {
+        path,
+        content: '# 来源索引\n\n## 证据记录\n\n| Wiki 位置 | 来源角色 | 原始来源 | 已处理范围 | 写入时指纹 | 记录时间 |\n|---|---|---|---|---|---|\n| [[制度#期限]] | 原件 | 资料/不存在.md | 全文 | sha256:' + 'a'.repeat(64) + ' | 2026-08-05T22:00:00+08:00 |\n',
+        base64: '', size: 260, truncated: false,
+      }
+    }
+    if (path === 'wiki/制度.md') return { path, content: '# 制度\n\n## 期限\n', base64: '', size: 20, truncated: false }
+    if (path.startsWith('wiki/')) return { path, content: '# 页面\n', base64: '', size: 5, truncated: false }
+    throw new Error('项目内路径不可访问: No such file or directory (os error 2)')
+  }
+
+  const execute = createDesktopProjectToolExecutor({ projectDir: '/tmp/project', invoke })
+  const output = (await execute(call('wiki', { action: 'audit' }))).content
+
+  assert.match(output, /来源不存在.*制度#期限/s)
 })
 
 test('creative tool definitions append connected MCP tools without changing core tools', () => {

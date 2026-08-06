@@ -1,88 +1,20 @@
 ---
 name: jc-raw-wiki
-description: Use when a user asks to fill, update, maintain, or refresh a project Wiki from recent writing, development work, conversations, Raw material, documents, or verified evidence. Trigger on 填充Wiki, 整理记忆体, 更新知识库, 刷新热缓存, 开发收尾, 续写前整理, or 我刚写完/做完一段内容.
-triggers:
-  - 填充Wiki
-  - 整理记忆体
-  - 更新知识库
-  - 刷新热缓存
-  - 开发收尾
-  - 续写前整理
-  - 我刚写完
-  - 我刚开发完
+description: Use when a Jiucaihezi user explicitly asks to write confirmed information from specified files, pages, URLs, or the current conversation into an existing project Wiki. Trigger on 填充Wiki, 更新Wiki, 写入Wiki, 沉淀到Wiki, 把本轮结论写进Wiki, or 用这些文件更新知识库.
 ---
 
 # JC Raw Wiki
 
-## 作用
+把用户指定范围内新增的、已确认且后续会复用的信息，增量沉淀进已有 Wiki。
 
-将项目新产生的事实、内容和证据沉淀进 Wiki。Raw 保存完整过程；Wiki 保存可复用结论、结构和导航。
+1. 确定来源：使用用户指定的文件、页面、URL 或对话范围；用户明确说“本轮”时只使用当前对话。范围会改变结果时先问一个问题，不得默认扫描全部 Raw、项目文件或历史对话。
+2. 定位现有 Wiki 根目录，沿用实际目录结构；读取指定来源、相关目标页、直接父目录 `_index.md` 和 `来源索引.md`，不读取固定必读页。
+3. 将候选信息分为新增、更新、重复、冲突和过程信息；只写新增或用户已确认的更新。
+4. 优先增量更新已有页面，不整篇覆盖。分类明确但页面缺失时可创建最小页面并更新直接父目录 `_index.md`；缺少合适分类时先交给 `jc-everything-wiki` 规划。
+5. 每个重要结论定位到真实 Wiki 章节，并登记来源角色、真实来源、已处理范围、写入时指纹和记录时间。项目内来源先用 App 原生 `wiki evidence` 按原始字节取得完整 SHA-256；无法计算时写 `未计算（原因）`。原件和 Markdown 可读副本分行登记，模型生成文本不能冒充事实来源。
+6. 正文写入成功后，才向 `来源索引.md` 增量增加对应行；重复映射不重复写。当前状态确实变化时才更新 `hot.md`，发生实际写入时才向 `log.md` 追加事实，不修改 CLAUDE。
+7. 写后重新读取受影响文件和来源索引，报告实际写入、来源、冲突和未处理项。
 
-## 判断标准
-
-- 用户只表达目标；模型自主判断内容、项目和既有 Wiki 对应的语境与能力。
-- 模型可组合内容填充、来源索引、双链、热缓存、Canvas、Bases、资料摄入、催化提取和开发收尾；不把能力选择交给用户。
-- 没有 Wiki 时调用 `jc-everything-wiki` 建立骨架；已有 Wiki 时接管现有结构。
-
-## 类型 -> Reference
-
-叙事和广告项目必须读取 `jc-everything-wiki/references/项目语境/` 中的同名 Reference；不使用通用故事语境替代具体项目标准。
-
-| 类型            | 必读 Reference  |
-| --------------- | --------------- |
-| `dev_project`   | `开发项目.md`   |
-| `novel`         | `小说项目.md`   |
-| `manju`         | `漫剧项目.md`   |
-| `short_story`   | `短故事项目.md` |
-| `film`          | `电影项目.md`   |
-| `tv_series`     | `电视剧项目.md` |
-| `advertisement` | `广告项目.md`   |
-| `generic`       | `通用资料.md`   |
-
-`novel` 写入前还必须读取 `jc-everything-wiki/references/项目语境/小说项目.md` 的“Raw 填充标准”；它规定事实落位、双链、来源范围和不复制会话的边界。
-
-`manju` 写入前还必须读取 `jc-everything-wiki/references/项目语境/漫剧项目.md` 的“Raw 填充标准”；它规定事实落位、双链、来源范围和不复制会话的边界。
-
-`short_story` 写入前必须读取 `jc-everything-wiki/references/项目语境/短故事项目.md` 的“Raw 填充标准”。
-
-`film` 写入前必须读取 `jc-everything-wiki/references/项目语境/电影项目.md` 的“Raw 填充标准”。
-
-`tv_series` 写入前必须读取 `jc-everything-wiki/references/项目语境/电视剧项目.md` 的“Raw 填充标准”。
-
-`advertisement` 写入前必须读取 `jc-everything-wiki/references/项目语境/广告项目.md` 的“Raw 填充标准”。
-
-`generic` 写入前必须读取 `jc-everything-wiki/references/项目语境/通用资料.md` 的“Raw 填充标准”。
-
-`dev_project` 写入前还必须读取 `jc-everything-wiki/references/项目语境/开发项目.md` 的“Raw 填充标准”；它规定开发事实落位、证据范围和不复制原始材料的边界。
-
-## 执行流程
-
-1. **盘点**：读取本轮内容、现有 Wiki、Raw 和可用证据；必要时运行 `digest_raw.py inspect`。
-2. **判断**：识别项目类型，先读取类型 -> Reference 中对应的项目标准，再选择必要的能力标准与目标页面。开发项目收尾先运行 `digest_raw.py closeout`，查看 Git、测试、构建和来源指纹的只读预览。
-3. **写入**：按命中的标准更新 Wiki、来源索引及必要的派生内容；项目标准要求双链/回链时必须创建。
-4. **验证**：核对实际文件与来源；必要时运行 `digest_raw.py validate`，报告更新、证据和未验证项。
-
-## 输出标准
-
-- 写入有来源的结论，重要结论可从 `来源索引.md` 回到 Raw、原始文件、SDD、代码、Git 或测试证据。
-- 产物符合命中的项目语境和能力标准；项目标准要求的双链/回链必须生成，Canvas、Bases 等其它派生内容仅在确实提升检索或理解时生成。
-- `hot.md` 只保留当前必要事实；`log.md` 只追加事实；`CLAUDE.md` 只保留稳定入口和长期结构。
-- 完成后如实报告实际更新、证据和未验证项。
-- 开发收尾预览固定包含“写入预览、证据状态、来源指纹、未验证项”；缺少测试或构建证据时不得写成已通过。
-
-## 安全标准
-
-- Raw 不复制、不移动、不删除。
-- 不整篇覆盖用户正文，不编造事实，不创建平行 Wiki。
-- 事实冲突、不可逆操作、正式稿判定或权限不足时才询问用户。
-
-## 工具出口
-
-App 原生 `wiki` 工具可用时，必须使用 `inspect`、`closeout`、`validate`；`closeout` 只生成证据预览，不直接写 Wiki。没有 `wiki` 工具的外部 Agent 才使用 `scripts/digest_raw.py` 的同名命令。
-
-## Reference 索引
-
-| 层级     | Reference                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 项目语境 | `jc-everything-wiki/references/项目语境/开发项目.md`、`jc-everything-wiki/references/项目语境/小说项目.md`、`jc-everything-wiki/references/项目语境/漫剧项目.md`、`jc-everything-wiki/references/项目语境/短故事项目.md`、`jc-everything-wiki/references/项目语境/电影项目.md`、`jc-everything-wiki/references/项目语境/电视剧项目.md`、`jc-everything-wiki/references/项目语境/广告项目.md`、`jc-everything-wiki/references/项目语境/通用资料.md` |
-| 能力标准 | `能力标准/Raw与来源索引.md`、`内容填充.md`、`双链与Obsidian.md`、`热缓存.md`、`Canvas关系图.md`、`Bases统计表.md`、`资料摄入.md`、`催化提取.md`、`开发阶段收尾.md` |
+- Raw 不复制、不移动、不删除；不复制完整会话、原文或附件内容。
+- 不编造事实，不把参考资料写成项目已确认事实，不创建平行 Wiki。
+- 事实冲突、正式稿无法判断或需要移动、合并、删除时，停止并请用户决定。

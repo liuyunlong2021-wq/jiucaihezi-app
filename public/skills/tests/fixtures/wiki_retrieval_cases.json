@@ -1,0 +1,37 @@
+[
+  {
+    "id": "single-page-with-source",
+    "question": "公司的报销期限是多少？",
+    "answerable": true,
+    "expectedWikiPaths": ["wiki/制度/报销.md"],
+    "expectedSourcePaths": ["资料/财务制度.docx"]
+  },
+  {
+    "id": "synonym-recall",
+    "question": "差旅花费最迟什么时候提交？",
+    "answerable": true,
+    "expectedWikiPaths": ["wiki/制度/报销.md"],
+    "expectedSourcePaths": ["资料/财务制度.docx"]
+  },
+  {
+    "id": "conflict",
+    "question": "试用期到底是三个月还是六个月？",
+    "answerable": true,
+    "expectedWikiPaths": ["wiki/制度/入职.md", "wiki/人事/员工手册.md"],
+    "expectedSourcePaths": ["资料/入职制度.docx", "资料/员工手册.pdf"]
+  },
+  {
+    "id": "wiki-only",
+    "question": "当前发布负责人是谁？",
+    "answerable": true,
+    "expectedWikiPaths": ["wiki/项目/发布.md"],
+    "expectedSourcePaths": []
+  },
+  {
+    "id": "missing",
+    "question": "公司海外差旅补助是多少？",
+    "answerable": false,
+    "expectedWikiPaths": [],
+    "expectedSourcePaths": []
+  }
+]

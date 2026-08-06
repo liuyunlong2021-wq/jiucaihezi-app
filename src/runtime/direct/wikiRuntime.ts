@@ -9,6 +9,7 @@ export interface WikiWorkspaceEntry {
 export interface WikiWorkspace {
   list(): Promise<WikiWorkspaceEntry[]>
   read(path: string): Promise<string>
+  fingerprint(path: string): Promise<string>
   write(path: string, content: string): Promise<void>
   createDirectory(path: string): Promise<void>
   gitEvidence?(): Promise<{ status: string; diff: string } | null>
@@ -22,9 +23,9 @@ export type WikiAction =
   | 'graph'
   | 'validate'
   | 'audit'
+  | 'evidence'
   | 'closeout'
   | 'replace'
-  | 'link'
   | 'extend'
 
 export interface WikiActionInput {
@@ -33,11 +34,12 @@ export interface WikiActionInput {
   query?: string
   scope?: 'active' | 'all'
   limit?: number
+  depth?: number
   evidencePaths?: string[]
   path?: string
   oldText?: string
   newText?: string
-  target?: string
+  replaceAll?: boolean
   category?: string
   description?: string
   reason?: string
@@ -54,7 +56,9 @@ interface Snapshot {
 
 function normalizePath(input: string, allowRoot = false): string {
   const raw = String(input || '').replace(/\\/g, '/')
-  if (raw.startsWith('/') || raw.includes('\0')) throw new Error('Wiki 路径必须位于当前项目内')
+  if (raw.startsWith('/') || /^[A-Za-z]:\//.test(raw) || /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) || raw.includes('\0')) {
+    throw new Error('Wiki 路径必须位于当前项目内')
+  }
   const parts = raw.split('/').filter(part => part && part !== '.')
   if (parts.some(part => part === '..')) throw new Error('Wiki 路径不能越过项目根目录')
   const path = parts.join('/')
@@ -138,8 +142,12 @@ function linkExists(state: Snapshot, wiki: string, target: string): boolean {
 }
 
 async function shortSha256(content: string): Promise<string> {
-  const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
-  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('').slice(0, 12)
+  return (await sha256Hex(new TextEncoder().encode(content))).slice(0, 12)
+}
+
+export async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes as BufferSource)
+  return [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
 async function ensureDirectory(workspace: WikiWorkspace, state: Snapshot, path: string, created: string[]) {
@@ -177,7 +185,6 @@ async function scaffold(workspace: WikiWorkspace, state: Snapshot, type: WikiPro
     await ensureFile(workspace, state, joinPath(root, 'hot.md'), WIKI_TEMPLATES.hot, created)
     await ensureFile(workspace, state, joinPath(root, 'log.md'), WIKI_TEMPLATES.log, created)
   } else if (type === 'generic') {
-    await ensureFile(workspace, state, joinPath(root, 'CLAUDE.md'), WIKI_TEMPLATES.genericClaude, created)
     await ensureFile(workspace, state, joinPath(root, 'index.md'), WIKI_TEMPLATES.index, created)
     await ensureFile(workspace, state, joinPath(root, 'log.md'), WIKI_TEMPLATES.log, created)
     await ensureFile(workspace, state, joinPath(root, 'hot.md'), WIKI_TEMPLATES.hot, created)
@@ -242,28 +249,113 @@ async function status(workspace: WikiWorkspace, state: Snapshot): Promise<string
   ].join('\n')
 }
 
-async function graph(workspace: WikiWorkspace, state: Snapshot): Promise<string> {
+async function graph(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
   const wiki = findWiki(state)
   if (!wiki) throw new Error('未找到 docs/wiki/ 或 wiki/')
-  const pages = wikiMarkdownFiles(state, wiki).filter(path => !['index.md', 'log.md', 'hot.md', '_index.md'].includes(path.split('/').at(-1)!))
-  const pageByTarget = new Map<string, string>()
-  const nodes = pages.map((path, index) => {
+  if (!input.evidencePaths?.length) throw new Error('生成局部关系图必须提供至少一个种子页面')
+
+  const depth = input.depth ?? 1
+  if (!Number.isInteger(depth) || depth < 1 || depth > 2) throw new Error('局部关系图 depth 仅支持 1 或 2')
+  const pages = wikiMarkdownFiles(state, wiki)
+  const aliases = new Map<string, string | null>()
+  for (const path of pages) {
     const relative = relativeToWiki(wiki, path).replace(/\.md$/, '')
-    const id = `wiki_${index + 1}`
-    pageByTarget.set(relative, id)
-    if (!pageByTarget.has(relative.split('/').at(-1)!)) pageByTarget.set(relative.split('/').at(-1)!, id)
-    return { id, type: 'text', x: (index % 5) * 300 + 50, y: Math.floor(index / 5) * 150 + 50, width: 250, height: 60, text: `**${relative.split('/').at(-1)}**` }
-  })
-  const edges: Array<{ id: string; fromNode: string; toNode: string }> = []
-  for (const [index, path] of pages.entries()) {
-    for (const target of extractWikiLinks(await workspace.read(path))) {
-      const toNode = pageByTarget.get(normalizedLinkTarget(target)) || pageByTarget.get(normalizedLinkTarget(target).split('/').at(-1)!)
-      if (toNode) edges.push({ id: `edge_${edges.length + 1}`, fromNode: `wiki_${index + 1}`, toNode })
+    for (const alias of [relative, relative.split('/').at(-1)!]) {
+      aliases.set(alias, aliases.has(alias) && aliases.get(alias) !== path ? null : path)
     }
   }
-  const output = `${wiki}/关系图.canvas`
+  const resolveTarget = (target: string) => {
+    const normalized = normalizedLinkTarget(target)
+    return aliases.get(normalized) || aliases.get(normalized.split('/').at(-1)!) || null
+  }
+  const seeds = [...new Set(input.evidencePaths.map(rawPath => {
+    const candidate = resolveWikiFile(state, wiki, rawPath)
+    const path = candidate.endsWith('.md') ? candidate : `${candidate}.md`
+    if (!state.files.has(path)) throw new Error(`种子页面不存在：${path}`)
+    return path
+  }))]
+
+  const adjacency = new Map(pages.map(path => [path, new Set<string>()]))
+  const links: Array<[string, string]> = []
+  for (const source of pages) {
+    for (const target of extractWikiLinks(await workspace.read(source))) {
+      const targetPath = resolveTarget(target)
+      if (!targetPath || targetPath === source) continue
+      adjacency.get(source)!.add(targetPath)
+      adjacency.get(targetPath)!.add(source)
+      links.push([source, targetPath])
+    }
+  }
+
+  const selected = new Set(seeds)
+  let frontier = seeds
+  for (let level = 0; level < depth; level += 1) {
+    const next = [...new Set(frontier.flatMap(path => [...(adjacency.get(path) || [])]))].filter(path => !selected.has(path))
+    next.forEach(path => selected.add(path))
+    frontier = next
+  }
+
+  const rawOutput = String(input.path || '').trim()
+  const defaultName = `${relativeToWiki(wiki, seeds[0]!).replace(/\.md$/, '').split('/').at(-1)}-关系图.canvas`
+  const normalizedOutput = normalizePath(rawOutput || defaultName)
+  const output = normalizedOutput.startsWith('wiki/') || normalizedOutput.startsWith('docs/wiki/')
+    ? normalizedOutput
+    : joinPath(wiki, normalizedOutput)
+  if (!output.startsWith(`${wiki}/`) || !output.endsWith('.canvas')) throw new Error('关系图必须保存为当前 Wiki 内的 .canvas 文件')
+
+  type CanvasNode = { id: string; type: string; x: number; y: number; width: number; height: number; file?: string; [key: string]: unknown }
+  type CanvasEdge = { id: string; fromNode: string; toNode: string; [key: string]: unknown }
+  let existing: { nodes: CanvasNode[]; edges: CanvasEdge[] } = { nodes: [], edges: [] }
+  if (state.files.has(output)) {
+    try {
+      const parsed = JSON.parse(await workspace.read(output)) as Partial<typeof existing>
+      if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.edges)) throw new Error('缺少 nodes 或 edges')
+      existing = { nodes: parsed.nodes, edges: parsed.edges }
+    } catch (error) {
+      throw new Error(`现有 Canvas 无法安全更新：${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!input.apply) return `关系图更新预览（未写盘，加 apply:true 才真正执行）：${output}\n局部页面: ${selected.size}`
+  }
+
+  const nodes = [...existing.nodes]
+  const usedIds = new Set([...nodes.map(node => node.id), ...existing.edges.map(edge => edge.id)])
+  const nodeByFile = new Map(nodes.filter(node => node.type === 'file' && node.file).map(node => [node.file!, node]))
+  let nextNode = 1
+  const nextId = (prefix: string) => {
+    while (usedIds.has(`${prefix}_${nextNode}`)) nextNode += 1
+    const id = `${prefix}_${nextNode++}`
+    usedIds.add(id)
+    return id
+  }
+  const nodeIdByPath = new Map<string, string>()
+  for (const [index, path] of [...selected].sort().entries()) {
+    const found = nodeByFile.get(path)
+    if (found) {
+      nodeIdByPath.set(path, found.id)
+      continue
+    }
+    const node: CanvasNode = {
+      id: nextId('wiki'), type: 'file', file: path,
+      x: (index % 5) * 300 + 50, y: Math.floor(index / 5) * 150 + 50,
+      width: 250, height: 80,
+    }
+    nodes.push(node)
+    nodeIdByPath.set(path, node.id)
+  }
+
+  const selectedIds = new Set(nodeIdByPath.values())
+  const edges = existing.edges.filter(edge => !(selectedIds.has(edge.fromNode) && selectedIds.has(edge.toNode)))
+  const edgePairs = new Set(edges.map(edge => `${edge.fromNode}\0${edge.toNode}`))
+  for (const [source, target] of links) {
+    const fromNode = nodeIdByPath.get(source)
+    const toNode = nodeIdByPath.get(target)
+    if (!fromNode || !toNode || edgePairs.has(`${fromNode}\0${toNode}`)) continue
+    edges.push({ id: nextId('edge'), fromNode, toNode })
+    edgePairs.add(`${fromNode}\0${toNode}`)
+  }
+
   await workspace.write(output, JSON.stringify({ nodes, edges }, null, 2))
-  return `✅ ${output}\n节点: ${nodes.length}，边: ${edges.length}`
+  return `✅ ${output}\n局部节点: ${selected.size}，总节点: ${nodes.length}，总边: ${edges.length}`
 }
 
 async function validate(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
@@ -274,7 +366,7 @@ async function validate(workspace: WikiWorkspace, state: Snapshot, input: WikiAc
   const required = isDev
     ? ['CLAUDE.md', 'hot.md', 'log.md', '来源索引.md', '开发', '架构', '运维', '排障', '学习', '巡检报告', '归档']
     : isGeneric
-      ? ['CLAUDE.md', 'index.md', 'hot.md', 'log.md', '来源索引.md']
+      ? ['index.md', 'hot.md', 'log.md', '来源索引.md']
       : ['index.md', '方向.md', 'hot.md', 'log.md', '来源索引.md']
   const missing = required.filter(name => !state.paths.has(`${wiki}/${name}`))
   if (missing.length) throw new Error(`验证失败：${wiki} 缺少 ${missing.join(', ')}`)
@@ -289,49 +381,235 @@ async function validate(workspace: WikiWorkspace, state: Snapshot, input: WikiAc
   return `验证通过：${wiki} 的稳定入口存在且链接可达`
 }
 
-async function audit(workspace: WikiWorkspace, state: Snapshot): Promise<string> {
+async function evidence(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
+  if (!input.evidencePaths?.length) throw new Error('来源证据路径不能为空')
+  const paths = [...new Set(input.evidencePaths.map(rawPath => normalizePath(rawPath)))]
+  const lines = ['[来源证据]']
+  for (const path of paths) {
+    if (state.dirs.has(path)) throw new Error(`来源证据必须是文件: ${path}`)
+    let fingerprint: string
+    try {
+      fingerprint = await workspace.fingerprint(path)
+    } catch (error) {
+      throw new Error(`来源证据文件无法读取: ${path}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    if (!/^[a-f0-9]{64}$/i.test(fingerprint)) throw new Error(`来源证据指纹无效: ${path}`)
+    lines.push(`- ${path} sha256:${fingerprint.toLowerCase()}`)
+  }
+  return lines.join('\n')
+}
+
+interface EvidenceRecord {
+  wikiLocation: string
+  sourceRole: string
+  sourcePath: string
+  processedRange: string
+  fingerprint: string
+  recordedAt: string
+}
+
+const EVIDENCE_HEADERS = ['Wiki 位置', '来源角色', '原始来源', '已处理范围', '写入时指纹', '记录时间']
+
+function tableCellText(cell: unknown): string {
+  if (!cell || typeof cell !== 'object') return ''
+  const tokens = (cell as { tokens?: Array<Record<string, unknown>> }).tokens || []
+  return tokens.map(token => String(token.text || token.raw || '')).join('').trim()
+}
+
+function parseEvidenceRecords(markdown: string): { records: EvidenceRecord[]; problem?: string } {
+  const tokens = marked.lexer(markdown) as Array<Record<string, any>>
+  const tables: Array<Record<string, any>> = []
+  for (const [index, token] of tokens.entries()) {
+    if (token.type !== 'heading' || token.depth !== 2 || String(token.text).trim() !== '证据记录') continue
+    const table = tokens.slice(index + 1).find(item => item.type !== 'space')
+    if (table?.type === 'table') tables.push(table)
+  }
+  if (tables.length > 1) return { records: [], problem: '存在多个六列「证据记录」表，需要确认唯一现行表' }
+  if (!tables.length) {
+    const hasLegacyTable = tokens.some(token => token.type === 'table')
+    return { records: [], problem: hasLegacyTable ? '旧来源记录尚未迁移' : undefined }
+  }
+  const table = tables[0]!
+  const headers = (table.header || []).map(tableCellText)
+  if (headers.join('\0') !== EVIDENCE_HEADERS.join('\0')) {
+    return { records: [], problem: '「证据记录」表头不完整' }
+  }
+  const records = (table.rows || []).map((row: unknown[]) => {
+    const cells = row.map(tableCellText)
+    return {
+      wikiLocation: cells[0] || '',
+      sourceRole: cells[1] || '',
+      sourcePath: cells[2] || '',
+      processedRange: cells[3] || '',
+      fingerprint: cells[4] || '',
+      recordedAt: cells[5] || '',
+    }
+  })
+  return { records }
+}
+
+function evidenceWikiTarget(state: Snapshot, wiki: string, location: string): { path?: string; label: string } {
+  const match = /^\[\[([^\]|]+)(?:\|[^\]]+)?\]\]$/.exec(location.trim())
+  const label = match?.[1]?.trim() || location.trim()
+  if (!match) return { label }
+  const [rawTarget, heading] = label.split('#', 2)
+  let candidate: string
+  try {
+    candidate = resolveWikiFile(state, wiki, rawTarget!)
+  } catch {
+    return { label }
+  }
+  let path = candidate.endsWith('.md') ? candidate : `${candidate}.md`
+  if (!state.files.has(path)) {
+    const normalized = normalizedLinkTarget(rawTarget!)
+    const stem = normalized.split('/').at(-1)!
+    const matches = wikiMarkdownFiles(state, wiki).filter(item => item.slice(0, -3).split('/').at(-1) === stem)
+    if (matches.length !== 1) return { label }
+    path = matches[0]!
+  }
+  if (!state.files.has(path)) return { label }
+  return { path, label: heading ? `${relativeToWiki(wiki, path).replace(/\.md$/, '')}#${heading}` : relativeToWiki(wiki, path) }
+}
+
+async function auditEvidence(
+  workspace: WikiWorkspace,
+  state: Snapshot,
+  wiki: string,
+  scopedWikiPaths?: Set<string>,
+): Promise<string[]> {
+  const sourceIndex = `${wiki}/来源索引.md`
+  if (!state.files.has(sourceIndex)) return ['- [登记不完整] 来源索引.md 不存在']
+  const parsed = parseEvidenceRecords(await workspace.read(sourceIndex))
+  const lines: string[] = parsed.problem ? [`- [登记不完整] ${parsed.problem}`] : []
+  for (const record of parsed.records) {
+    const target = evidenceWikiTarget(state, wiki, record.wikiLocation)
+    if (scopedWikiPaths && (!target.path || !scopedWikiPaths.has(target.path))) continue
+    const required = [record.wikiLocation, record.sourceRole, record.sourcePath, record.processedRange, record.fingerprint, record.recordedAt]
+    if (required.some(value => !value) || !target.path || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(record.recordedAt)) {
+      lines.push(`- [登记不完整] ${target.label || record.wikiLocation}: Wiki 位置或字段无效`)
+      continue
+    }
+    const heading = target.label.includes('#') ? target.label.split('#').slice(1).join('#') : ''
+    if (heading) {
+      const headings = marked.lexer(await workspace.read(target.path))
+        .filter(token => token.type === 'heading')
+        .map(token => String((token as { text?: string }).text || '').trim())
+      if (!headings.includes(heading)) {
+        lines.push(`- [登记不完整] ${target.label}: Wiki 章节不存在`)
+        continue
+      }
+    }
+    if (/^https?:\/\//i.test(record.sourcePath) || /^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(record.sourcePath) || record.fingerprint.startsWith('未计算')) {
+      lines.push(`- [无法验证] ${target.label} <- ${record.sourcePath}`)
+      continue
+    }
+    let sourcePath: string
+    try {
+      sourcePath = normalizePath(record.sourcePath)
+    } catch {
+      lines.push(`- [无法验证] ${target.label} <- ${record.sourcePath}`)
+      continue
+    }
+    if (sourcePath === wiki || sourcePath.startsWith(`${wiki}/`)) {
+      lines.push(`- [登记不完整] ${target.label}: Wiki 页面不能作为原始来源`)
+      continue
+    }
+    const stored = /^sha256:([a-f0-9]{64})$/i.exec(record.fingerprint)?.[1]?.toLowerCase()
+    if (!stored) {
+      lines.push(`- [登记不完整] ${target.label}: 写入时指纹无效`)
+      continue
+    }
+    try {
+      const current = (await workspace.fingerprint(sourcePath)).toLowerCase()
+      lines.push(`- [${current === stored ? '当前一致' : '来源已变化'}] ${target.label} <- ${sourcePath}`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      lines.push(`- [${/不存在|not found|not exist|no such file/i.test(message) ? '来源不存在' : '无法验证'}] ${target.label} <- ${sourcePath}${message ? `: ${message}` : ''}`)
+    }
+  }
+  return lines.length ? lines : ['无已登记的新版来源记录。']
+}
+
+async function audit(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
   const wiki = findWiki(state)
   if (!wiki) throw new Error('未找到 docs/wiki/ 或 wiki/')
   const files = wikiMarkdownFiles(state, wiki)
-  const linkedTo = new Set<string>()
-  const active: string[] = []
-  const archive: string[] = []
-  const hasOutlink = new Map<string, boolean>()
+  const sources = input.evidencePaths?.length
+    ? [...new Set(input.evidencePaths.flatMap(rawPath => {
+        const candidate = resolveWikiFile(state, wiki, rawPath)
+        const file = candidate.endsWith('.md') ? candidate : `${candidate}.md`
+        if (state.files.has(file)) return [file]
+        if (state.dirs.has(candidate)) return files.filter(path => path.startsWith(`${candidate}/`))
+        throw new Error(`巡检范围不存在：${candidate}`)
+      }))]
+    : files
+  const byStem = new Map<string, string[]>()
   for (const path of files) {
+    const stem = path.split('/').at(-1)!.replace(/\.md$/, '')
+    byStem.set(stem, [...(byStem.get(stem) || []), path])
+  }
+  const resolveTarget = (target: string): { path?: string; ambiguous?: string[] } => {
+    const normalized = normalizedLinkTarget(target)
+    const exact = `${wiki}/${normalized}.md`
+    if (state.files.has(exact)) return { path: exact }
+    if (state.dirs.has(`${wiki}/${normalized}`)) return { path: `${wiki}/${normalized}` }
+    const matches = byStem.get(normalized.split('/').at(-1)!) || []
+    if (matches.length === 1) return { path: matches[0] }
+    return matches.length > 1 ? { ambiguous: matches } : {}
+  }
+  const linkedTo = new Set<string>()
+  const confirmed: string[] = []
+  const candidates: string[] = []
+  const historical: string[] = []
+  const navigation = new Set(['CLAUDE.md', 'index.md', '_index.md', 'hot.md', '来源索引.md'])
+  const isHistorical = (relative: string, text: string) => relative === 'log.md'
+    || relative.startsWith('归档/')
+    || /^.{0,300}状态[：:]\s*(历史|已归档|已替代)/s.test(text.slice(0, 500))
+  for (const path of sources) {
     const relative = relativeToWiki(wiki, path)
     const text = await workspace.read(path)
-    const pageArchive = relative.startsWith('归档/') || /^.{0,300}状态[：:]\s*(历史|已归档|已替代)/s.test(text.slice(0, 500))
-    const links = extractWikiLinks(text)
-    hasOutlink.set(path, links.length > 0)
-    for (const target of links) {
-      linkedTo.add(normalizedLinkTarget(target).split('/').at(-1)!)
-      if (!linkExists(state, wiki, target)) (pageArchive ? archive : active).push(`${relative}: [[${target}]] 指向的笔记不存在`)
+    const pageHistorical = isHistorical(relative, text)
+    for (const target of extractWikiLinks(text)) {
+      const resolved = resolveTarget(target)
+      if (resolved.path) {
+        if (state.files.has(resolved.path)) linkedTo.add(resolved.path)
+      } else if (pageHistorical) {
+        historical.push(`${relative}: [[${target}]] ${resolved.ambiguous ? '目标不唯一' : '指向的笔记不存在'}`)
+      } else if (resolved.ambiguous) {
+        confirmed.push(`${relative}: 歧义链接 [[${target}]] 可指向 ${resolved.ambiguous.map(item => relativeToWiki(wiki, item)).join('、')}`)
+      } else if (navigation.has(relative.split('/').at(-1)!)) {
+        confirmed.push(`${relative}: 导航断链 [[${target}]] 指向的笔记不存在`)
+      } else {
+        candidates.push(`${relative}: 普通未解析链接 [[${target}]]，需确认是否为待创建页面`)
+      }
     }
   }
-  const ignored = new Set(['hot', 'index', 'log', 'overview', 'CLAUDE', '映射表', '伏笔账本', '悬念账本', '来源索引'])
-  for (const path of files) {
-    const relative = relativeToWiki(wiki, path)
-    const stem = path.split('/').at(-1)!.replace(/\.md$/, '')
-    if (relative.startsWith('归档/') || ignored.has(stem)) continue
-    if (!linkedTo.has(stem) && !hasOutlink.get(path)) active.push(`${relative}: 没有任何笔记链入，自身也无 [[双链]]`)
+  if (!input.evidencePaths?.length) {
+    for (const path of files) {
+      const relative = relativeToWiki(wiki, path)
+      const name = relative.split('/').at(-1)!
+      const text = await workspace.read(path)
+      if (isHistorical(relative, text) || navigation.has(name) || relative.startsWith('巡检报告/')) continue
+      if (!linkedTo.has(path)) candidates.push(`${relative}: 孤儿候选，没有其他页面链入`)
+    }
   }
-  const categoryCounts = [...state.dirs]
-    .filter(path => path.startsWith(`${wiki}/`) && !path.slice(wiki.length + 1).includes('/'))
-    .map(path => ({ name: relativeToWiki(wiki, path), count: files.filter(file => file.startsWith(`${path}/`)).length }))
-    .filter(item => item.count > 0)
-  for (const item of categoryCounts) {
-    const others = categoryCounts.filter(other => other !== item).map(other => other.count)
-    if (!others.length) continue
-    const average = others.reduce((sum, count) => sum + count, 0) / others.length
-    if (item.count >= Math.max(8, average * 3)) active.push(`${item.name}/: ${item.count} 篇笔记，明显多于其他分类，建议检查是否需要拆分`)
-  }
+  const sourceStatus = await auditEvidence(
+    workspace,
+    state,
+    wiki,
+    input.evidencePaths?.length ? new Set(sources) : undefined,
+  )
   return [
-    `问题统计：现行 ${active.length} / 归档卫生 ${archive.length}`,
-    `归档卫生：${archive.length} 条（不阻断现行巡检）`,
-    '[现行风险]',
-    ...(active.length ? active.map(item => `- ${item}`) : ['✅ 无机械风险']),
-    '[归档卫生]',
-    ...(archive.length ? archive.map(item => `- ${item}`) : ['无归档链接卫生问题。']),
+    `检查范围：${input.evidencePaths?.length ? sources.map(path => relativeToWiki(wiki, path)).join('、') : '全部 Wiki Markdown'}`,
+    `问题统计：明确风险 ${confirmed.length} / 待确认候选 ${candidates.length} / 历史卫生 ${historical.length}`,
+    '[明确风险]',
+    ...(confirmed.length ? confirmed.map(item => `- ${item}`) : ['无明确机械风险。']),
+    '[待确认候选]',
+    ...(candidates.length ? candidates.map(item => `- ${item}`) : ['无待确认候选。']),
+    '[历史卫生]',
+    ...(historical.length ? historical.map(item => `- ${item}`) : ['无历史链接卫生问题。']),
+    '[来源状态]',
+    ...sourceStatus,
   ].join('\n')
 }
 
@@ -384,51 +662,50 @@ async function replace(workspace: WikiWorkspace, state: Snapshot, input: WikiAct
   const oldText = String(input.oldText || '')
   const newText = String(input.newText ?? '')
   if (!oldText || oldText === newText) throw new Error('Wiki 替换的新旧内容无效')
-  const target = input.path ? resolveWikiFile(state, wiki, input.path) : ''
-  const files = target ? [target] : wikiMarkdownFiles(state, wiki)
-  const touched: Array<{ path: string; before: string; after: string; count: number }> = []
-  for (const path of files) {
-    if (!state.files.has(path)) throw new Error(`文件不存在: ${path}`)
-    const before = await workspace.read(path)
-    const count = before.split(oldText).length - 1
-    if (count) touched.push({ path, before, after: before.split(oldText).join(newText), count })
+  if (!String(input.path || '').trim()) throw new Error('Wiki 修正必须提供目标 Markdown 文件路径')
+  let target: string
+  try {
+    target = resolveWikiFile(state, wiki, input.path!)
+  } catch {
+    throw new Error('修正目标必须是当前 Wiki 内的 Markdown 文件')
   }
-  if (!touched.length) throw new Error('没有任何文件命中')
-  if (input.apply) for (const item of touched) await workspace.write(item.path, item.after)
+  if (!target.startsWith(`${wiki}/`) || !target.endsWith('.md') || !state.files.has(target)) {
+    throw new Error('修正目标必须是当前 Wiki 内的 Markdown 文件')
+  }
+  const before = await workspace.read(target)
+  const matches: number[] = []
+  let cursor = 0
+  while (true) {
+    const index = before.indexOf(oldText, cursor)
+    if (index < 0) break
+    matches.push(index)
+    cursor = index + oldText.length
+  }
+  if (!matches.length) throw new Error(`目标文件没有命中旧值: ${target}`)
+  const lineNumbers = matches.map(index => before.slice(0, index).split(/\r?\n/).length)
+  if (matches.length > 1 && input.apply && input.replaceAll !== true) {
+    throw new Error(`目标文件多处命中（${matches.length} 处，行 ${lineNumbers.join('、')}），需要明确 replaceAll:true`)
+  }
+  const after = input.replaceAll === true ? before.split(oldText).join(newText) : before.replace(oldText, newText)
   const lines = [
     '[修前预览]',
     `问题：${input.reason}`,
     `依据：${input.basis}`,
-    `替换：「${oldText}」→「${newText}」  模式：${input.apply ? '已执行' : '预览（未写盘，加 apply:true 才真正执行）'}`,
-    ...touched.map(item => `- ${item.path} (${item.count} 处)`),
+    `目标：${target}`,
+    `命中 ${matches.length} 处，命中行：${lineNumbers.join('、')}`,
+    `旧值：「${oldText}」`,
+    `新值：「${newText}」`,
+    `模式：${input.apply ? '已执行' : '预览（未写盘，加 apply:true 才真正执行）'}`,
   ]
   if (input.apply) {
+    await workspace.write(target, after)
+    const verified = await workspace.read(target)
+    if (verified !== after) throw new Error(`Wiki 修正写后验证失败: ${target}`)
     lines.push('[修复回执]')
-    for (const item of touched) lines.push(`- ${item.path} sha256:${await shortSha256(item.before)} -> sha256:${await shortSha256(item.after)}`)
+    lines.push(`- ${target} sha256:${await shortSha256(before)} -> sha256:${await shortSha256(verified)}`)
+    lines.push(`验证：内容一致=是，新值存在=${newText ? (verified.includes(newText) ? '是' : '否') : '空值替换'}，旧值剩余=${verified.split(oldText).length - 1}`)
   }
   return lines.join('\n')
-}
-
-async function link(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
-  requireRepairBasis(input)
-  const wiki = findWiki(state)
-  if (!wiki) throw new Error('未找到 docs/wiki/ 或 wiki/')
-  const path = resolveWikiFile(state, wiki, String(input.path || ''))
-  if (!state.files.has(path)) throw new Error(`文件不存在: ${path}`)
-  const target = String(input.target || '').trim().replace(/^\[\[|\]\]$/g, '')
-  if (!target) throw new Error('补链目标不能为空')
-  const before = await workspace.read(path)
-  const wikiLink = `[[${target}]]`
-  if (before.includes(wikiLink)) return `${path} 已包含 ${wikiLink}，无需重复添加。`
-  const after = `${before.replace(/\n*$/, '')}\n\n${wikiLink}\n`
-  if (input.apply) await workspace.write(path, after)
-  return [
-    '[修前预览]',
-    `问题：${input.reason}`,
-    `依据：${input.basis}`,
-    `补链：${path} 追加 ${wikiLink}  模式：${input.apply ? '已执行' : '预览（未写盘，加 apply:true 才真正执行）'}`,
-    ...(input.apply ? ['[修复回执]', `- ${path} sha256:${await shortSha256(before)} -> sha256:${await shortSha256(after)}`] : []),
-  ].join('\n')
 }
 
 async function extend(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
@@ -444,10 +721,12 @@ async function extend(workspace: WikiWorkspace, state: Snapshot, input: WikiActi
   if (input.apply) {
     await workspace.createDirectory(directory)
     await workspace.write(indexPath, `# ${category.split('/').at(-1)}\n\n> ${description}\n`)
-    const rootIndex = `${wiki}/index.md`
-    if (state.files.has(rootIndex)) {
-      const before = await workspace.read(rootIndex)
-      await workspace.write(rootIndex, `${before.replace(/\n*$/, '')}\n\n- [[${category}/_index|${category.split('/').at(-1)}]] — ${description}\n`)
+    const parts = category.split('/')
+    const parent = parts.slice(0, -1).join('/')
+    const navigationIndex = parent ? joinPath(wiki, parent, '_index.md') : `${wiki}/index.md`
+    if (state.files.has(navigationIndex)) {
+      const before = await workspace.read(navigationIndex)
+      await workspace.write(navigationIndex, `${before.replace(/\n*$/, '')}\n\n- [[${category}/_index|${parts.at(-1)}]] — ${description}\n`)
     }
   }
   return [
@@ -476,12 +755,12 @@ export async function executeWikiAction(workspace: WikiWorkspace, input: WikiAct
     case 'scaffold': return await scaffold(workspace, state, input.type || 'generic')
     case 'search': return await searchWiki(workspace, state, input)
     case 'status': return await status(workspace, state)
-    case 'graph': return await graph(workspace, state)
+    case 'graph': return await graph(workspace, state, input)
     case 'validate': return await validate(workspace, state, input)
-    case 'audit': return await audit(workspace, state)
+    case 'audit': return await audit(workspace, state, input)
+    case 'evidence': return await evidence(workspace, state, input)
     case 'closeout': return await closeout(workspace, state, input)
     case 'replace': return await replace(workspace, state, input)
-    case 'link': return await link(workspace, state, input)
     case 'extend': return await extend(workspace, state, input)
     default: throw new Error(`不支持的 Wiki action: ${String(input.action)}`)
   }
