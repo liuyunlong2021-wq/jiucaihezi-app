@@ -30,7 +30,10 @@ const isRunning = computed(() => task.value?.status === 'running' || task.value?
 const isSuccess = computed(() => task.value?.status === 'success')
 const isFailed = computed(() => task.value?.status === 'failed')
 const hasSaveWarning = computed(() => task.value?.status === 'success' && task.value.assetStatus === 'failed')
-const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))
+const isSafeResult = computed(() => {
+  const t = task.value
+  return Boolean(t && (t.projectPath || t.assetUri || t.resultUrl))
+})
 const linkCopied = ref(false)
 const projectResource = computed<ProjectResource | undefined>(() => {
   const t = task.value
@@ -82,7 +85,7 @@ async function downloadCopy() {
 
 async function copyOriginalLink() {
   const url = task.value?.resultUrl
-  if (!url || !isAllowedCreationResultUrl(url)) return
+  if (!url) return
   await navigator.clipboard.writeText(url)
   linkCopied.value = true
   window.setTimeout(() => { linkCopied.value = false }, 1400)
@@ -122,7 +125,11 @@ async function previewResult() {
 
     <!-- 成功 -->
     <div v-else-if="isSuccess && isSafeResult" class="mtb-result">
-      <img v-if="task.type === 'image'" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
+      <img v-if="task.type === 'image' && isAllowedCreationResultUrl(displayUrl)" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
+      <div v-else-if="task.type === 'image'" class="mtb-file-result">
+        <JcIcon name="image" />
+        <span>{{ projectResource ? '图片已保存到项目' : '图片已生成，等待保存' }}</span>
+      </div>
       <button
         v-else-if="task.type === 'video' || task.type === 'audio'"
         type="button"

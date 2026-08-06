@@ -89,11 +89,7 @@ export function isAllowedMediaAttachmentUrl(input: string): boolean {
 export function isAllowedCreationResultUrl(input: string): boolean {
   const text = String(input || '').trim()
   if (/^data:(image|video|audio)\//i.test(text)) return isAllowedMediaAttachmentUrl(text)
-  const parsed = parseUrl(text)
-  if (!parsed) return false
-  if (parsed.protocol !== 'https:') return false
-  if (parsed.username || parsed.password) return false
-  return !isPrivateNetworkHost(parsed.hostname)
+  return isSafePublicHttpUrl(text)
 }
 
 export function isAllowedCreationPollUrl(input: string): boolean {

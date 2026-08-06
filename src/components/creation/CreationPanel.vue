@@ -106,6 +106,7 @@ import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -299,7 +300,7 @@ async function previewTask(task: MediaTask) {
     emit('previewResource', resource)
     return
   }
-  if (task.resultUrl) {
+  if (task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
     taskPreview.value = {
       url: task.resultUrl,
       type:
@@ -316,7 +317,7 @@ async function previewTask(task: MediaTask) {
     }
     return
   }
-  cpState.progressText = task.errorMsg || '结果尚未保存到项目，无法预览'
+  cpState.progressText = task.errorMsg || '结果已生成，请先保存到项目后再预览'
 }
 
 async function openTaskHistory() {

@@ -248,15 +248,6 @@ export function __setMediaTaskSaverForTests(saver: typeof saveTasks | null) {
   mediaTaskSaver = saver || saveTasks
 }
 
-function assertSafeResultUrl(url: string): string {
-  const clean = String(url || '').trim()
-  if (!clean || !isAllowedCreationResultUrl(clean)) {
-    console.error('[mediaTaskStore] URL BLOCKED:', clean.slice(0, 200))
-    throw new Error('媒体结果地址不安全，已阻止展示')
-  }
-  return clean
-}
-
 function toPlanSnapshot(plan: CreationRunPlan): CreationPlanSnapshot {
   return {
     modelId: plan.modelId,
@@ -536,6 +527,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
+    if (!isAllowedCreationResultUrl(url)) throw new Error('媒体结果地址不安全，已阻止缓存')
     const canvasOwner = canvasTaskOwner(task)
     if (task.canvasTarget && !canvasOwner) {
       markCanvasWriteUnwritten(task)
@@ -778,7 +770,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         await persistTasksSafely(`${persistenceContext}-cancelled`)
         return
       }
-      if (isTauriRuntime() || task.source !== 'creation') throw error
+      if (task.source !== 'creation') throw error
       markWebMediaPersistenceFailure(task, error)
       emitEvent('media-task-complete', {
         taskId: task.id,
@@ -956,9 +948,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
         return
       } else if (mediaUrl) {
-        const safeMediaUrl = assertSafeResultUrl(mediaUrl)
-        task.resultUrl = safeMediaUrl
-        await completeMediaTask(task, safeMediaUrl, 'resume-media-success')
+        await completeMediaTask(task, mediaUrl, 'resume-media-success')
         return
       } else {
         task.status = 'failed'
@@ -1090,7 +1080,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     let resultUrl: string
     try {
-      resultUrl = assertSafeResultUrl(task.resultUrl)
+      resultUrl = task.resultUrl.trim()
     } catch {
       return false
     }
@@ -1281,9 +1271,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
         resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000)
       }
-      const safeResultUrl = assertSafeResultUrl(resultUrl)
-      task.resultUrl = safeResultUrl
-      await completeMediaTask(task, safeResultUrl, 'execute-success')
+      await completeMediaTask(task, resultUrl, 'execute-success')
       return
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') {

@@ -46,6 +46,7 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('https://webstatic.aiproxy.vip/output/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://vip.edu888.top/media/siphonlab-media/images/outputs/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://new-partner-cdn.example/result.png'), true)
+  assert.equal(isAllowedCreationResultUrl('http://new-partner-cdn.example/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://user:password@cdn.example.com/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('https://localhost/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('https://127.0.0.1/result.png'), false)

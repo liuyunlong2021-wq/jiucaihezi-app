@@ -780,7 +780,10 @@ test('creation panel delegates persisted previews to the host and keeps failed-s
   assert.match(source, /task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl/)
   assert.match(preview, /const resource = projectResourceForMediaTask\(task\)/)
   assert.match(preview, /showTaskHistory\.value = false[\s\S]*emit\('previewResource', resource\)/)
-  assert.match(preview, /if \(task\.resultUrl\)[\s\S]*taskPreview\.value =/)
+  assert.match(
+    preview,
+    /if \(task\.resultUrl && isAllowedCreationResultUrl\(task\.resultUrl\)\)[\s\S]*taskPreview\.value =/,
+  )
   assert.match(source, /<MediaViewer[\s\S]*v-if="taskPreview"/)
   assert.doesNotMatch(preview, /readMedia|createObjectURL/)
   assert.match(source, /async function openTaskHistory\(\)[\s\S]*?await mediaTaskStore\.init\(\)/)

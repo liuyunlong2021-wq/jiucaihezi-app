@@ -376,31 +376,25 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-test('mediaTaskStore validates result URLs before publishing successful tasks', () => {
+test('mediaTaskStore keeps result URL validation at the media boundary', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
   assert.equal(source.includes('function validateTaskInputs'), true)
   assert.equal(source.includes('validateTaskInputs(params)'), true)
-  assert.equal(
-    source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"),
-    true,
-  )
-  assert.equal(source.includes('function assertSafeResultUrl'), true)
-  assert.equal(source.includes("throw new Error('媒体结果地址不安全，已阻止展示')"), true)
-  assert.equal(source.includes('const safeMediaUrl = assertSafeResultUrl(mediaUrl)'), true)
-  assert.equal(source.includes('const safeResultUrl = assertSafeResultUrl(resultUrl)'), true)
-  assert.equal(source.includes('task.resultUrl = safeResultUrl'), true)
+  assert.equal(source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"), true)
+  assert.equal(source.includes('function assertSafeResultUrl'), false)
+  assert.equal(source.includes("if (!isAllowedCreationResultUrl(url)) throw new Error('媒体结果地址不安全，已阻止缓存')"), true)
+  assert.equal(source.includes('const safeMediaUrl = assertSafeResultUrl(mediaUrl)'), false)
+  assert.equal(source.includes('const safeResultUrl = assertSafeResultUrl(resultUrl)'), false)
+  assert.equal(source.includes('task.resultUrl = resultUrl'), true)
 })
 
-test('mediaTaskStore polls async media results before URL safety validation', () => {
+test('mediaTaskStore polls async media results before persistence', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
 
-  assert.match(source, /if \(!resultUrl && result\?\.pollUrl && result\?\.pollKind\)/)
-  assert.match(source, /resultUrl = await pollTask\(result\.pollUrl, result\.pollKind, onProgress/)
-  assert.equal(
-    source.indexOf('resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress') <
-      source.indexOf('const safeResultUrl = assertSafeResultUrl(resultUrl)'),
-    true,
+  assert.match(
+    source,
+    /if \(!resultUrl && result\?\.pollUrl && result\?\.pollKind\) \{\s+resultUrl = await pollTask\(result\.pollUrl, result\.pollKind, onProgress[\s\S]*?\s+\}\s+await completeMediaTask\(task, resultUrl, 'execute-success'\)/,
   )
 })
 
@@ -763,6 +757,62 @@ test(
       assert.equal(task?.assetStatus, 'local')
       assert.equal(task?.assetUri, undefined)
       assert.equal(task?.resultUrl, resultUrl)
+    } finally {
+      __setCreationSubmitExecutorForTests(null)
+      globalThis.fetch = previousFetch
+      projectStore.webProjectId.value = originalProjectId
+      projectStore.webProjectName.value = originalProjectName
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore accepts a public HTTP creation result and persists it before success',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage()
+    const files = installWebTaskFileStore()
+    const projectStore = useProjectStore()
+    const originalProjectId = projectStore.webProjectId.value
+    const originalProjectName = projectStore.webProjectName.value
+    const previousFetch = globalThis.fetch
+    const resultUrl = 'http://cdn.example.com/output/gpt-image-2.png'
+
+    projectStore.webProjectId.value = 'web-project-http'
+    projectStore.webProjectName.value = 'HTTP 项目'
+    globalThis.fetch = async input => {
+      assert.equal(String(input), resultUrl)
+      return new Response(new Blob(['gpt-image-2'], { type: 'image/png' }), {
+        status: 200,
+        headers: { 'content-type': 'image/png' },
+      })
+    }
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const store = useMediaTaskStore()
+    __setCreationSubmitExecutorForTests(async () => ({ url: resultUrl, type: 'image' }))
+
+    try {
+      const plan = buildCreationRunPlan({
+        modelId: 'gpt-image-2',
+        params: { prompt: '公开 HTTP 图片', size: '1024x1024' },
+      })
+      const taskId = await store.submitTask({
+        type: 'image',
+        model: 'gpt-image-2',
+        modelLabel: 'GPT Image 2',
+        prompt: '公开 HTTP 图片',
+        source: 'creation',
+        plan,
+      })
+
+      await waitFor(() => store.getTask(taskId)?.status === 'success')
+      const task = store.getTask(taskId)
+      assert.equal(task?.resultUrl, resultUrl)
+      assert.equal(task?.assetStatus, 'local')
+      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       globalThis.fetch = previousFetch
@@ -2356,12 +2406,7 @@ test('MediaTaskBubble stays on the memory-workbench project and media paths', ()
     source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"),
     true,
   )
-  assert.equal(
-    source.includes(
-      'const isSafeResult = computed(() => Boolean(task.value?.resultUrl && isAllowedCreationResultUrl(task.value.resultUrl)))',
-    ),
-    true,
-  )
+  assert.match(source, /const isSafeResult = computed\(\(\) => \{[\s\S]*t\.projectPath \|\| t\.assetUri \|\| t\.resultUrl/)
   assert.equal(source.includes('taskStore.retryMediaPersistence(props.taskId)'), true)
   assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
   assert.match(source, /fetchCreationMediaBlob\(t\.resultUrl/)
