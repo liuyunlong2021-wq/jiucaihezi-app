@@ -13,6 +13,7 @@ import {
   __setCreationSubmitExecutorForTests,
   __setMediaTaskLoaderForTests,
   __setMediaTaskSaverForTests,
+  __setMediaTaskStorageInitializerForTests,
   useMediaTaskStore,
 } from '../mediaTaskStore'
 
@@ -1584,6 +1585,51 @@ test(
       assert.equal(store.hasRunning, false)
     } finally {
       storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore waits for SQLite initialization before loading persisted tasks',
+  { concurrency: false },
+  async () => {
+    setActivePinia(createPinia())
+    let releaseStorage!: () => void
+    let loadCalls = 0
+    __setMediaTaskStorageInitializerForTests(() => new Promise<void>((resolve) => {
+      releaseStorage = resolve
+    }))
+    __setMediaTaskLoaderForTests(async () => {
+      loadCalls++
+      return [{
+        id: 'mtask_wait_for_sqlite',
+        type: 'video',
+        model: 'rh-grok-text-video',
+        modelLabel: 'Grok Video',
+        prompt: '恢复任务',
+        referenceImages: [],
+        status: 'pending',
+        progress: 0,
+        progressText: '等待恢复',
+        createdAt: 1,
+        source: 'creation',
+        planSnapshot: { pollKind: 'video' },
+      }]
+    })
+
+    try {
+      const store = useMediaTaskStore()
+      const initialization = store.init()
+      await Promise.resolve()
+
+      assert.equal(loadCalls, 0)
+      releaseStorage()
+      await initialization
+      assert.equal(loadCalls, 1)
+      assert.equal(store.getTask('mtask_wait_for_sqlite')?.status, 'pending')
+    } finally {
+      __setMediaTaskStorageInitializerForTests(null)
+      __setMediaTaskLoaderForTests(null)
     }
   },
 )

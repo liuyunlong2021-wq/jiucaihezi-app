@@ -624,3 +624,16 @@
 - `jc-raw-wiki` 在正文写入成功后登记证据，`jc-cha-wiki` 回答重要项目事实时展示 Wiki 章节和已登记原始来源，`jc-jian-wiki` 复用原生审计且不自动判错或改写。
 - 红灯先确认旧实现缺少上述合同；绿色验证为相关原生/Web/Desktop/审批 `57/57`、Wiki Skill `38/38`、完整 focused `986/986`、Rust `395 passed / 1 ignored`、TypeScript、Web/Desktop quick build、两端产物审计与 `git diff --check`。
 - 五类脱敏用例已建立，独立模型前向验收尚未执行，不记为通过。本轮未增加 RAG、向量库、BM25、新依赖或遥测，未提交、未推送、未发布。
+
+## [2026-08-06] 产品决策 | 媒体与 3D 继续保留
+
+- 用户最终撤销媒体与 3D 迁出决定；图片、视频、音频、`.jccanvas`、`.jcscene`、GLB/GLTF 和 Desktop 动画导出继续属于韭菜盒子现有能力闭包。
+- 原迁出 SDD/TDD 在实施前停止，短视频工厂未被修改，韭菜盒子没有迁出提交、源端删除或迁移发布。两份文档已收口为不可执行的撤销记录。
+- 性能方向固定为按需加载、卸载和减少非活动资源；不得降低最终画质、删除功能或限制高性能设备正常并发。后续性能实现必须另写 TDD。
+
+## [2026-08-06] 稳定性修复 | 媒体任务等待 SQLite 初始化
+
+- 真实 Desktop 启动复现 `MemoryWorkbench mounted -> mediaTaskStore.init -> loadTasks -> SQLite storage is not ready`，证明共享 Store 仍会与后台 `initDB()` 竞态。
+- TDD 先暂停存储初始化，确认数据库放行前任务历史读取次数为 0，放行后只读取 1 次；随后让 `initDB()` 并发调用复用同一个 Promise，并让媒体 Store 在读历史前等待该 Promise。
+- 媒体任务专项 `46/46`、完整 focused、TypeScript、Desktop quick build、产物审计和 `git diff --check` 通过。两次干净启动中 SQLite 约 5.1 秒、4.9 秒完成，均未再出现 mounted-hook 未处理异常。
+- 此前中断的 Grok Video 任务按已保存 `pollUrl` 自动恢复并最终 `success 100%`；Veo 3.1 与 Fast 仍在提交阶段返回真实 `404 fail_to_fetch_task`，本轮没有修改或宣称修复其 NewAPI/上游链路。

@@ -12,7 +12,7 @@
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getItem, isStorageDegraded, setItem } from '@/utils/idb'
+import { getItem, initDB, setItem } from '@/utils/idb'
 import {
   generateImage,
   generateVideo,
@@ -197,7 +197,6 @@ const TASKS_KEY = 'jc_media_tasks_v1'
 
 async function loadTasks(): Promise<MediaTask[]> {
   try {
-    if (isStorageDegraded()) throw new Error('SQLite storage is not ready')
     const raw = await getItem(TASKS_KEY)
     if (!raw) return []
     const list = typeof raw === 'string' ? JSON.parse(raw) : raw
@@ -209,9 +208,14 @@ async function loadTasks(): Promise<MediaTask[]> {
 }
 
 let mediaTaskLoader: typeof loadTasks = loadTasks
+let mediaTaskStorageInitializer: () => Promise<void> = initDB
 
 export function __setMediaTaskLoaderForTests(loader: typeof loadTasks | null) {
   mediaTaskLoader = loader || loadTasks
+}
+
+export function __setMediaTaskStorageInitializerForTests(initializer: (() => Promise<void>) | null) {
+  mediaTaskStorageInitializer = initializer || initDB
 }
 
 async function rebaseMobileTaskPaths(tasks: MediaTask[]) {
@@ -816,6 +820,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (initialized.value) return
     if (initPromise) return initPromise
     initPromise = (async () => {
+      await mediaTaskStorageInitializer()
       const saved = await mediaTaskLoader()
       await rebaseMobileTaskPaths(saved)
       tasks.value = saved

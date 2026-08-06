@@ -1108,6 +1108,8 @@ Android 只复用已完成的 Vue 业务层、Direct Engine、项目文件合同
 - 安装与启动结果：07:56 覆盖安装到 iPhone 13 Pro Max 成功，Bundle ID 仍为 `com.jiucaihezi.mobile`，随后 `--terminate-existing` 启动成功。Xcode UI runner 因 CoreDevice/IDE 测试通道断开而未执行历史可见性断言，不记为真机 UI 通过。
 - 用户已在真机接受相册权限，长按生成图并选择“保存到照片”后 App 未闪退，系统照片中能够找到图片；相册崩溃项已通过用户验收。
 - 任务历史竞态已在共享 `mediaTaskStore` 根因处修复：Tauri SQLite 未就绪或历史读取异常时初始化直接失败并允许重试，绝不把空数组持久化；用户点击“生成历史”会再次初始化。新任务提交仍必须先通过同一初始化门禁。回归明确证明连续两次加载失败均为 0 次保存调用。
+- 2026-08-06 Desktop 真实复测发现上述“失败后允许重试”仍不能阻止首次挂载报错：`MemoryWorkbench` 与 `initBackend()` 并发启动，`mediaTaskStore.init()` 可能在 `initDB()` 完成前读取历史并抛出 `SQLite storage is not ready`。本轮让所有 `initDB()` 调用共用同一个初始化 Promise，媒体任务初始化先等待该 Promise，再读取和恢复历史；没有增加定时轮询、第二套状态机或降级空历史写入。
+- 新 TDD 先暂停存储初始化并确认媒体历史不会提前读取，放行后只读取一次。媒体任务专项 `46/46`、完整 focused、TypeScript、Desktop quick build 与产物审计通过；干净 Desktop 启动中 SQLite 分别约 5.1 秒和 4.9 秒完成，均未再出现 mounted-hook 未处理异常。此前中断的 Grok Video 任务从持久化 `pollUrl` 自动恢复，最终状态为 `success 100%` 并取得 MP4 结果；Veo 3.1 与 Fast 的真实 `404 fail_to_fetch_task` 仍属于独立 NewAPI/上游问题，本轮未改其请求合同。
 - 预览已改为 Web、Mac、iPhone 共用项目资源读取和现有 `MediaViewer`；图片、视频和音频不再调用 `open_in_shell`、Safari 或默认浏览器。项目副本暂时不可用但仍有安全远程结果时，也在 App 内预览；3D 仍保留下载语义。
 - 新完成的 Desktop 项目媒体会记录 `directory`；旧任务缺少该字段时可由 `assetUri + projectPath` 恢复。iOS 覆盖安装改变数据容器 UUID时，现有文件树仍按项目名重定位活动项目；本轮恢复任务同时已重定位到当前容器。
 - 自动验证：媒体任务、项目媒体引用和创作面板合同共 94 项，93 通过、1 项既有跳过；TypeScript、Desktop 正式前端构建及产物审计、Mac `cargo check`、iOS `cargo check` 全部通过。未引入依赖，Web/Mac 共用行为只从外部打开改为站内预览。

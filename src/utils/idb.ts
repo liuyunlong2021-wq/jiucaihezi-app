@@ -16,6 +16,7 @@ import { isTauriRuntime } from './tauriEnv'
 // ═══════════════════════════════════════════════════
 
 let db: Database | null = null
+let dbInitPromise: Promise<void> | null = null
 let webDb: IDBDatabase | null = null
 let webDbPromise: Promise<IDBDatabase | null> | null = null
 const isTauri = isTauriRuntime()
@@ -94,7 +95,16 @@ const WEB_KV_MIGRATION_KEYS = [
   'jc_canvas_document_v1',
 ]
 
-export async function initDB(): Promise<void> {
+export function initDB(): Promise<void> {
+  if (dbInitPromise) return dbInitPromise
+  dbInitPromise = initializeDB().catch((error) => {
+    dbInitPromise = null
+    throw error
+  })
+  return dbInitPromise
+}
+
+async function initializeDB(): Promise<void> {
   if (!isTauri) {
     const opened = await openWebDb()
     if (opened) {
