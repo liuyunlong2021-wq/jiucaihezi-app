@@ -37,6 +37,10 @@ fn workbench_url_from_return(url: &tauri::Url) -> tauri::Url {
         .expect("valid local workbench entry url")
 }
 
+fn is_valid_window_state(x: i64, y: i64, width: u64, height: u64) -> bool {
+    width > 0 && height > 0 && x > -30_000 && y > -30_000
+}
+
 /// 检测 whisper-cli sidecar 是否为真实二进制（非占位脚本）
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1024,6 +1028,23 @@ mod tests {
 
         assert!(!should_direct_unified_api_to_newapi(&request));
     }
+
+    #[test]
+    fn window_state_rejects_windows_minimized_geometry() {
+        let broken: serde_json::Value =
+            serde_json::from_str(r#"{"height":0,"width":0,"x":-32000,"y":-32000}"#)
+                .expect("parse real Windows failure state");
+
+        assert!(!is_valid_window_state(
+            broken["x"].as_i64().unwrap(),
+            broken["y"].as_i64().unwrap(),
+            broken["width"].as_u64().unwrap(),
+            broken["height"].as_u64().unwrap(),
+        ));
+        assert!(!is_valid_window_state(-32_000, -32_000, 1280, 800));
+        assert!(is_valid_window_state(-1920, 80, 1280, 800));
+        assert!(is_valid_window_state(120, 80, 1280, 800));
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -1286,10 +1307,13 @@ pub fn run() {
                 // 恢复窗口位置和大小
                 if let Ok(json) = std::fs::read_to_string(&state_path) {
                     if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
-                        if let (Some(x), Some(y)) = (state["x"].as_i64(), state["y"].as_i64()) {
+                        if let (Some(x), Some(y), Some(w), Some(h)) = (
+                            state["x"].as_i64(),
+                            state["y"].as_i64(),
+                            state["width"].as_u64(),
+                            state["height"].as_u64(),
+                        ) && is_valid_window_state(x, y, w, h) {
                             let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x as i32, y as i32)));
-                        }
-                        if let (Some(w), Some(h)) = (state["width"].as_u64(), state["height"].as_u64()) {
                             let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w as u32, h as u32)));
                         }
                     }
@@ -1304,6 +1328,10 @@ pub fn run() {
                     let saving = saving.clone();
                     let state_path = state_path_save.clone();
                     if let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) {
+                        if !is_valid_window_state(pos.x.into(), pos.y.into(), size.width.into(), size.height.into()) {
+                            saving.store(false, Ordering::Release);
+                            return;
+                        }
                         let state = serde_json::json!({
                             "x": pos.x, "y": pos.y,
                             "width": size.width, "height": size.height,
