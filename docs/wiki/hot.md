@@ -25,7 +25,7 @@
 - **3D 文件与对话编辑（2026-08-07）：** `.jcscene` 是 `.raw/jc-media/文档/` 中的可编辑源文件，截图进`图片`，自动动画和手动运镜进`视频`。打开场景后可在编辑器下方直接说“加、移、删、改镜头”，普通请求调用 `edit_3d_scene` 原子写回并刷新；只有明确“重做/重新生成”才使用 `create_3d_scene` 完整覆盖。本阶段只保留白模基础，不建设写实资产库。
 - **下一版发布门禁（2026-08-07）：** Windows Release 上传步骤已在本步骤重新声明并校验 NSIS/ZIP 路径；失效 OTA 与 `latest.json` 发布任务已停用，避免发布无效签名。3D 默认只显示人物及人物编队标签，非人物对象不显示文字；场景指令发送后恢复主输入草稿。
 - **`v2.1.11` Desktop 启动失败已定位并修复（2026-08-07）：** 关闭 OTA 配置后 Rust 仍注册 updater 插件，插件读取空配置时在 Tauri Builder 阶段 panic，导致 macOS 冒烟失败且 Windows EXE 双击秒退；这次故障与 WebView2 无关。updater 注册、依赖和未使用前端 composable 已全部移除；Windows CI 新增构建后 EXE 存活 15 秒门禁。本机 aarch64 macOS 生产 release 已构建并真实启动存活 15 秒，修复包需使用新版本号发布，不能覆盖 `v2.1.11` tag。
-- **`v2.1.12` 发布修复（2026-08-07）：** 下载页读取 `/updates/latest.json`，不读取 GitHub Latest Release；桌面发布工作流已将 GitHub Release 预创建、三平台资产上传、官网下载清单三者解耦。OTA 签名仍停用，但官网下载清单不再依赖 OTA。现有 v2.1.12 ARM 重跑完成后，使用 workflow dispatch 的 `publish_tag=v2.1.12` 补发 `/opt/updates/latest.json` 与三平台下载资产。
+- **`v2.1.13` 发布链路修复（2026-08-07）：** 下载页读取 `/updates/latest.json`，不读取 GitHub Latest Release；桌面发布工作流已将 GitHub Release 预创建、三平台资产上传、官网下载清单三者解耦。OTA 签名仍停用，但官网下载清单不再依赖 OTA。v2.1.13 正常 tag 发布将完整验证“创建 Release → 三平台成功 → 自动发布官网下载清单”。
 
 ## 已验证 / 未验证
 
