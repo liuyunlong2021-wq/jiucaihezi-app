@@ -153,6 +153,18 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
       },
     } },
   }, ['title', 'objects']),
+  tool('edit_3d_scene', 'Incrementally edit the currently opened 3D blockout scene. Use this for ordinary add, move, remove, or camera requests. Do not recreate or replace the full scene unless the user explicitly asks to rebuild it.', {
+    path: { type: 'string', description: 'Current project-relative .raw/jc-media/文档/*.jcscene path' },
+    operations: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', additionalProperties: true, required: ['action'], properties: {
+      action: { type: 'string', enum: ['add_object', 'add_formation', 'move', 'remove', 'camera'] },
+      object: { type: 'object', description: 'Complete new object using the create_3d_scene object contract' },
+      formation: { type: 'object', description: 'Complete new formation using the create_3d_scene formation contract' },
+      target: { type: 'string', description: 'Existing object, formation, or group ID; for camera, the new look-at point is supplied in lookAt' },
+      to: vectorProperty,
+      position: vectorProperty,
+      lookAt: vectorProperty,
+    } } },
+  }, ['path', 'operations']),
 ]
 
 const MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS = [
@@ -208,6 +220,7 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   create_html: { title: 'string', content: 'string' },
   export_markdown_slides: { title: 'string', content: 'string', format: 'string' },
   create_3d_scene: { title: 'string', existingPath: 'string', objects: 'json', formations: 'json', groups: 'json', camera: 'json', savedCameras: 'json', lighting: 'json', canvas: 'json', duration: 'json', timeline: 'json' },
+  edit_3d_scene: { path: 'string', operations: 'json' },
   export_3d_scene_video: { path: 'string' },
   terminal: { command: 'string', reason: 'string', workdir: 'string', timeoutSeconds: 'integer' },
 }

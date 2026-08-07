@@ -127,6 +127,7 @@ const externalNodeTests = [
   'scripts/__tests__/audit-skills-manage-parity.test.mjs',
   'scripts/__tests__/create-official-dmg.test.mjs',
   'scripts/__tests__/memory-product-separation.test.mjs',
+  'scripts/__tests__/windows-release-contract.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]
 

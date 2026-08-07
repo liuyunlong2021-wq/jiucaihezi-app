@@ -637,3 +637,30 @@
 - TDD 先暂停存储初始化，确认数据库放行前任务历史读取次数为 0，放行后只读取 1 次；随后让 `initDB()` 并发调用复用同一个 Promise，并让媒体 Store 在读历史前等待该 Promise。
 - 媒体任务专项 `46/46`、完整 focused、TypeScript、Desktop quick build、产物审计和 `git diff --check` 通过。两次干净启动中 SQLite 约 5.1 秒、4.9 秒完成，均未再出现 mounted-hook 未处理异常。
 - 此前中断的 Grok Video 任务按已保存 `pollUrl` 自动恢复并最终 `success 100%`；Veo 3.1 与 Fast 仍在提交阶段返回真实 `404 fail_to_fetch_task`，本轮没有修改或宣称修复其 NewAPI/上游链路。
+
+## [2026-08-07] 修复 | 附件图标与 Windows 启动合同
+
+- 根因：图标离线扫描器只匹配下划线名称，漏掉输入框使用的 `attach-file`；Windows 发布仅生成便携 ZIP，未提供处理 WebView2 的安装入口。OpenCode 不是运行依赖。
+- 修复：扫描器及覆盖测试支持连字符并重新生成 `icons-bundle.json`；Windows CI 同时构建 NSIS 安装器和便携 ZIP，安装器使用可见 `downloadBootstrapper` 引导 WebView2。
+- 验证：Windows 发布合同测试、完整 focused `986/986`、Rust `395 passed / 1 ignored`、TypeScript 与 `git diff --check` 通过。
+- 未验证：当前环境没有 Windows 真机，缺少 WebView2 的安装、首次启动和升级仍需人工验收；因此本条不记作 Windows 真机通过。
+
+## [2026-08-07] 功能 | 3D 手动运镜录制
+
+- 根因：3D 编辑器已有 OrbitControls 和 Canvas/FFmpeg 录制链路，但界面录制入口只支持自动时间线，没有手动录制入口。
+- 实施：新增开始/停止按钮；录制时隐藏网格和变换控件，保留旋转、平移、推进、拉远；停止后交给现有 `dev_export_scene_video` 保存 MP4。
+- 验证：合同测试 `49/49`、TypeScript、图标检查和 `git diff --check` 通过；真实 Desktop 手动操作与成片播放待人工验收。
+
+## [2026-08-07] 功能 | 3D 白膜对话增量编辑
+
+- 决策：`.jcscene` 继续作为 `.raw/jc-media/文档/` 中的源工程；图片和视频只是导出结果，不与源文件混放。
+- 实施：Desktop 新增 `edit_3d_scene` 原子操作，支持新增对象/排列、移动、删除和调整镜头；整批操作先校验后一次写回，失败不改变原文件。场景预览下方增加当前场景输入框，发送后自动重读并刷新；Web 保持现有只查看边界。
+- 边界：普通修改不重建、不增加第二套聊天；只有明确“重做/重新生成”才使用 `create_3d_scene` 覆盖；本阶段只做白模基础。
+- 验证：3D 增量编辑专项 `81/81`、TypeScript 通过；完整 focused 和真实 Desktop 对话修改待最终验收。
+
+## [2026-08-07] 发布准备 | Windows 上传与 OTA 合同收口
+
+- Windows GitHub Release 上传步骤不再依赖前一步的 PowerShell 局部变量，当前步骤重新声明并校验 NSIS 与便携 ZIP 路径。
+- 旧 OTA 的 RSA 公钥、OpenSSL 签名和 Tauri 2 minisign 验签合同不兼容；在没有新的生产 signer 密钥前，配置与发布清单任务暂时关闭，安装包继续通过 GitHub Release/官网分发。
+- 3D 非人物标签默认隐藏，人物及人物编队保留标签；吸附按钮改用现有 `sync` 图标，场景修改发送后恢复主输入框草稿。
+- 自动验证：发布合同 `12/12`、TypeScript、完整 focused、Rust `395 passed / 1 ignored` 与 `git diff --check` 通过；真实 Windows NSIS 安装启动、Web/桌面正式构建和发布尚未执行。

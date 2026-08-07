@@ -6,12 +6,14 @@ import { TransformControls } from 'three/examples/jsm/controls/TransformControls
 import { evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
 
 const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean }>(), { recordingOnly: false })
-const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string] }>()
+const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const labelsVisible = ref(true)
 const selectedId = ref('')
 const cameraName = ref('')
+const manualRecording = ref(false)
+const recordingError = ref('')
 const renderRevision = ref(0)
 const playing = ref(false)
 const currentTime = ref(0)
@@ -27,6 +29,10 @@ let transform: TransformControls | null = null
 let transformHelper: THREE.Object3D | null = null
 let resizeObserver: ResizeObserver | null = null
 let animationFrame = 0
+let manualRecorder: MediaRecorder | null = null
+let manualChunks: Blob[] = []
+let manualRecordingFailed = false
+let discardManualRecording = false
 let raycaster: THREE.Raycaster | null = null
 let playStartedAt = 0
 let stepLabel: THREE.Sprite | null = null
@@ -240,14 +246,14 @@ function buildScene() {
     const node = makePrimitive(item)
     node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]; materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.userData.baseColor = item.color.getHex() }) } })
     node.position.copy(vector(item.position)); node.rotation.set(...(item.rotation || [0, 0, 0]))
-    addLabel(node, item.label || '', item.color || '#ffffff', item.type === 'person' ? 1.8 : (item.size?.[1] || 1) + .45)
+    if (item.type === 'person') addLabel(node, item.label || '', item.color || '#ffffff', 1.8)
     setSelectable(node, item.id, 'object'); nodes.set(item.id, node); root.add(node)
   }
   for (const item of document.formations) {
     const node = makeFormation(item)
     node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]; materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.userData.baseColor = item.color.getHex() }) } })
     node.position.copy(vector(item.position))
-    addLabel(node, item.label || '', item.color || '#ffffff', 1.8)
+    if ((item.shape || 'person') === 'person') addLabel(node, item.label || '', item.color || '#ffffff', 1.8)
     setSelectable(node, item.id, 'formation'); nodes.set(item.id, node); root.add(node)
   }
   for (const groupData of document.groups) {
@@ -256,7 +262,7 @@ function buildScene() {
       const node = nodes.get(memberId)
       if (node) { node.traverse(child => { child.userData.sceneSelection = { id: groupData.id, kind: 'group' } }); group.add(node) }
     })
-    addLabel(group, groupData.label || '', '#ffffff', 2.2)
+    if (groupData.memberIds.some(id => document.objects.find(item => item.id === id)?.type === 'person')) addLabel(group, groupData.label || '', '#ffffff', 2.2)
     group.userData.sceneSelection = { id: groupData.id, kind: 'group' }
     for (const memberId of groupData.memberIds) selectable.delete(memberId)
     selectable.set(groupData.id, group)
@@ -399,7 +405,7 @@ function attachSelection(id: string) {
 }
 
 function pick(event: PointerEvent) {
-  if (!canvas.value || !camera || !root || !raycaster || transform?.dragging) return
+  if (manualRecording.value || !canvas.value || !camera || !root || !raycaster || transform?.dragging) return
   const rect = canvas.value.getBoundingClientRect()
   const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
   raycaster.setFromCamera(pointer, activeCamera())
@@ -450,6 +456,47 @@ async function capture() {
   if (blob && blob.size) emit('screenshot', blob, `${document.title}-${cameraName.value || '机位'}`)
 }
 
+function recordingMimeType() {
+  return ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
+}
+
+function restoreManualRecordingUi() {
+  manualRecording.value = false
+  manualRecorder = null
+  manualChunks = []
+  updateGrid()
+  attachSelection(selectedId.value)
+}
+
+function startManualRecording() {
+  if (!canvas.value || manualRecorder) return
+  const mimeType = recordingMimeType()
+  if (!mimeType) { recordingError.value = '当前系统不支持 3D 画布录制'; return }
+  recordingError.value = ''
+  manualRecordingFailed = false
+  discardManualRecording = false
+  manualChunks = []
+  transform?.detach()
+  if (scene?.getObjectByName('scene-grid')) scene.getObjectByName('scene-grid')!.visible = false
+  const recorder = new MediaRecorder(canvas.value.captureStream(30), { mimeType, videoBitsPerSecond: 12_000_000 })
+  manualRecorder = recorder
+  manualRecording.value = true
+  recorder.ondataavailable = event => { if (event.data.size) manualChunks.push(event.data) }
+  recorder.onerror = () => { manualRecordingFailed = true; recordingError.value = '3D 手动录制失败'; if (recorder.state !== 'inactive') recorder.stop() }
+  recorder.onstop = () => {
+    const blob = new Blob(manualChunks, { type: mimeType })
+    const shouldEmit = !manualRecordingFailed && !discardManualRecording && blob.size > 0
+    restoreManualRecordingUi()
+    if (shouldEmit) emit('video', blob, `${document.title}-手动运镜`)
+    else if (!manualRecordingFailed && !discardManualRecording) recordingError.value = '录制结果为空'
+  }
+  recorder.start(1000)
+}
+
+function stopManualRecording() {
+  if (manualRecorder?.state !== 'inactive') manualRecorder?.stop()
+}
+
 function resize() {
   if (!renderer || !canvas.value || !camera) return
   const ratio = aspectRatio(currentAspect.value)
@@ -473,7 +520,7 @@ function render() {
 
 async function recordVideo(signal?: AbortSignal): Promise<Blob> {
   if (!renderer || !canvas.value || !duration.value || !document.timeline?.length) throw new Error('当前场景没有可录制的动画时间线')
-  const mimeType = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm', 'video/mp4'].find(value => MediaRecorder.isTypeSupported(value))
+  const mimeType = recordingMimeType()
   if (!mimeType) throw new Error('当前系统不支持画布视频录制')
   resize(); currentTime.value = 0; applyAnimation(0); renderer.render(scene!, activeCamera())
   const chunks: Blob[] = []
@@ -518,6 +565,9 @@ watch(() => props.document, value => {
 })
 
 onBeforeUnmount(() => {
+  discardManualRecording = true
+  const recorder = manualRecorder
+  if (recorder && recorder.state !== 'inactive') recorder.stop()
   cancelAnimationFrame(animationFrame); resizeObserver?.disconnect(); canvas.value?.removeEventListener('pointerup', pick)
   orbit?.dispose(); transform?.dispose(); renderer?.dispose(); root?.traverse(node => {
     const mesh = node as THREE.Mesh
@@ -548,7 +598,7 @@ onBeforeUnmount(() => {
         <button v-for="aspect in ['16:9', '9:16', '1:1', '4:3', '3:4']" :key="aspect" :class="{ active: currentAspect === aspect }" :title="`${aspect} 画幅`" @click="setAspect(aspect as Scene3DDocument['canvas']['aspect'])">{{ aspect }}</button>
         <span class="scene3d-divider"></span>
         <button :class="{ active: document.canvas.grid }" title="显示或隐藏网格" @click="toggleGrid"><JcIcon name="grid-on" /></button>
-        <button :class="{ active: document.canvas.snap }" title="开启或关闭网格吸附" @click="toggleSnap"><JcIcon name="magnet-on" /></button>
+        <button :class="{ active: document.canvas.snap }" title="开启或关闭网格吸附" @click="toggleSnap"><JcIcon name="sync" /></button>
         <button :class="{ active: labelsVisible }" title="显示或隐藏标签" @click="toggleLabels"><JcIcon name="label" /></button>
         <button v-for="direction in ['left', 'right', 'front', 'back', 'top']" :key="direction" :class="{ active: document.lighting.direction === direction }" :title="`${({ left: '左侧', right: '右侧', front: '正面', back: '背面', top: '顶部' } as Record<string, string>)[direction]}来光`" @click="setLighting(direction as Scene3DDocument['lighting']['direction'])"><JcIcon name="light-mode" /></button>
         <button v-for="intensity in ['low', 'medium', 'high']" :key="intensity" :class="{ active: document.lighting.intensity === intensity }" :title="`${({ low: '低', medium: '中', high: '高' } as Record<string, string>)[intensity]}亮度`" @click="setLightIntensity(intensity as Scene3DDocument['lighting']['intensity'])">{{ intensity[0].toUpperCase() }}</button>
@@ -556,6 +606,9 @@ onBeforeUnmount(() => {
         <span class="scene3d-divider"></span>
         <button title="保存当前机位" @click="saveCamera"><JcIcon name="bookmark-add" /></button>
         <button class="primary" title="截图保存到图片" @click="capture"><JcIcon name="photo-camera" /></button>
+        <button v-if="!manualRecording" title="开始手动运镜录制" @click="startManualRecording"><JcIcon name="radio-button-checked" /></button>
+        <button v-else class="recording" title="停止并保存录制" @click="stopManualRecording"><JcIcon name="stop" /></button>
+        <span v-if="recordingError" class="scene3d-recording-error">{{ recordingError }}</span>
         <template v-if="duration">
           <span class="scene3d-divider"></span>
           <button :title="playing ? '暂停' : '播放'" @click="togglePlayback"><JcIcon :name="playing ? 'pause' : 'play_arrow'" /></button>
@@ -586,6 +639,8 @@ onBeforeUnmount(() => {
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
 .scene3d-tools { display: flex; align-items: center; gap: 3px; }
 .scene3d-tools button, .scene3d-cameras button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.scene3d-tools button.recording { color: #ff8f8f; }
+.scene3d-recording-error { color: #ff9d9d; font-size: 11px; white-space: nowrap; }
 .scene3d-tools button:hover, .scene3d-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
 .scene3d-tools button.primary { background: #86c8a5; color: #122018; }
 .scene3d-tools .mso { font-size: 18px; }

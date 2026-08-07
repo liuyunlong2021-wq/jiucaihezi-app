@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { reactive } from 'vue'
 
-import { createScene3DDocument, evaluateScene3DAnimation, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
+import { applyScene3DEdits, createScene3DDocument, evaluateScene3DAnimation, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
 
 test('scene3d normalizes reusable primitives, formations and cameras', () => {
   const scene = createScene3DDocument({
@@ -68,4 +68,33 @@ test('scene3d camera timeline supports hard cuts and continuous camera moves', (
   assert.deepEqual(evaluateScene3DAnimation(scene, 0).camera, { position: [10, 5, 8], target: [4, 1, 0] })
   assert.deepEqual(evaluateScene3DAnimation(scene, 3).camera, { position: [8, 4, 6], target: [5, 1, 0] })
   assert.deepEqual(evaluateScene3DAnimation(scene, 4).camera, { position: [6, 3, 4], target: [6, 1, 0] })
+})
+
+test('scene3d applies atomic object, formation, movement, removal and camera edits', () => {
+  const source = createScene3DDocument({
+    title: '街道',
+    objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }],
+    formations: [{ id: 'crowd', type: 'line', count: 5, position: [3, 0, 0] }],
+  })
+  const result = applyScene3DEdits(source, [
+    { action: 'add_object', object: { id: 'tree', type: 'cylinder', position: [5, 0, 2], size: [1, 4, 1] } },
+    { action: 'add_formation', formation: { id: 'visitors', type: 'line', count: 2, position: [-3, 0, 0] } },
+    { action: 'move', target: 'person', to: [-2, 0, 1] },
+    { action: 'remove', target: 'crowd' },
+    { action: 'camera', position: [0, 3, 7], lookAt: [0, 1, 0] },
+  ])
+  assert.deepEqual(result.objects.map(item => item.id), ['person', 'tree'])
+  assert.deepEqual(result.objects[0].position, [-2, 0, 1])
+  assert.deepEqual(result.formations.map(item => item.id), ['visitors'])
+  assert.deepEqual(result.camera.position, [0, 3, 7])
+  assert.deepEqual(source.objects[0].position, [0, 0, 0])
+})
+
+test('scene3d rejects an invalid edit batch without mutating the source', () => {
+  const source = createScene3DDocument({ title: '街道', objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }] })
+  assert.throws(() => applyScene3DEdits(source, [
+    { action: 'move', target: 'person', to: [1, 0, 0] },
+    { action: 'remove', target: 'missing' },
+  ]), /目标不存在/)
+  assert.deepEqual(source.objects[0].position, [0, 0, 0])
 })

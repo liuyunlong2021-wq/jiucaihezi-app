@@ -51,6 +51,7 @@ import { useFilteredList } from '@/composables/useFilteredList'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { SkillConfig } from '@/types/skill'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
+import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
@@ -79,6 +80,8 @@ const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
 const recordingScene = ref<Scene3DDocument | null>(null)
 const recordingSceneEditor = ref<{ recordVideo: (signal?: AbortSignal) => Promise<Blob> } | null>(null)
+const sceneInstruction = ref('')
+const sceneInstructionSending = ref(false)
 const projectMapReturn = ref<{ resource: Extract<ProjectResourceOpenResult, { type: 'project-map' }>; viewport: { x: number; y: number; zoom: number } } | null>(null)
 const projectMapViewport = ref<{ x: number; y: number; zoom: number } | null>(null)
 const backlinks = ref<ProjectResource[]>([])
@@ -1473,6 +1476,51 @@ async function saveSceneScreenshot(blob: Blob, title: string) {
   status.value = `截图已保存：${resource.path}`
 }
 
+async function saveSceneVideo(blob: Blob, title: string) {
+  const owner = projectOwner.value
+  if (!owner || !desktopOnlyRuntime) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const result = await invoke<{ path: string }>('dev_export_scene_video', {
+      input: {
+        root: owner,
+        dataBase64: uint8ArrayToBase64(new Uint8Array(await blob.arrayBuffer())),
+        mimeType: blob.type,
+        outputFilename: `${title}.mp4`,
+      },
+    })
+    status.value = `视频已保存：${result.path}`
+  } catch (cause) {
+    error.value = `3D 手动录制保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
+async function refreshOpenScene(path: string) {
+  const current = previewResource.value
+  if (current?.type !== 'scene3d' || current.resource.path !== path) return
+  try { previewResource.value = await openProjectResource(files, current.resource) }
+  catch (cause) { error.value = `3D 场景刷新失败：${cause instanceof Error ? cause.message : String(cause)}` }
+}
+
+async function sendSceneInstruction() {
+  const current = previewResource.value
+  const instruction = sceneInstruction.value.trim()
+  if (current?.type !== 'scene3d' || !instruction || sceneInstructionSending.value || sending.value) return
+  sceneInstructionSending.value = true
+  const draft = input.value
+  input.value = `当前打开的 3D 场景路径是：${current.resource.path}\n请先读取这个场景。除非我明确说“重做”或“重新生成”，否则只用 edit_3d_scene 做增量修改。我的修改要求：${instruction}`
+  setEditorText(composerRef.value, input.value)
+  sceneInstruction.value = ''
+  try {
+    await send()
+    await refreshOpenScene(current.resource.path)
+  } finally {
+    input.value = draft
+    setEditorText(composerRef.value, draft)
+    sceneInstructionSending.value = false
+  }
+}
+
 async function recordSceneVideo(document: Scene3DDocument, signal?: AbortSignal): Promise<Blob> {
   recordingScene.value = document
   await nextTick()
@@ -1891,12 +1939,18 @@ function readDataUrl(file: File): Promise<string> {
             <button class="icon-button" title="关闭预览" @click="closePreview"><JcIcon name="close" /></button>
           </div>
         </header>
-        <Scene3DEditor
-          v-if="previewResource.type === 'scene3d'"
-          :document="previewResource.document"
-          @save="saveScene3D"
-          @screenshot="saveSceneScreenshot"
-        />
+        <div v-if="previewResource.type === 'scene3d'" class="memory-scene-workspace">
+          <Scene3DEditor
+            :document="previewResource.document"
+            @save="saveScene3D"
+            @screenshot="saveSceneScreenshot"
+            @video="saveSceneVideo"
+          />
+          <form v-if="desktopOnlyRuntime" class="memory-scene-composer" @submit.prevent="sendSceneInstruction">
+            <input v-model="sceneInstruction" data-placeholder="直接说怎么修改当前场景" placeholder="直接说怎么修改当前场景" :disabled="sceneInstructionSending || sending" />
+            <button type="submit" title="发送场景修改" :disabled="!sceneInstruction.trim() || sceneInstructionSending || sending"><JcIcon name="arrow-upward" /></button>
+          </form>
+        </div>
         <ProjectMapViewer
           v-else-if="previewResource.type === 'project-map'"
           :document="previewResource.document"
@@ -2042,6 +2096,11 @@ function readDataUrl(file: File): Promise<string> {
 .memory-backlinks h2 { margin: 0 0 8px; font-size: 14px; }
 .memory-backlinks button { display: block; width: 100%; padding: 7px 0; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; text-align: left; }
 .memory-preview-actions { display: flex; align-items: center; gap: 4px; }
+.memory-scene-workspace { display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 0; }
+.memory-scene-composer { display: grid; grid-template-columns: minmax(0, 1fr) 36px; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line); background: var(--paper); }
+.memory-scene-composer input { min-width: 0; height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; }
+.memory-scene-composer button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 6px; background: var(--olive); color: white; cursor: pointer; }
+.memory-scene-composer button:disabled { cursor: default; opacity: .45; }
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
 .memory-message-copy { position: absolute; top: 0; right: 0; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }

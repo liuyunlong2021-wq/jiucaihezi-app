@@ -35,7 +35,7 @@ export function buildMemoryWebProjectToolDefinitions() {
     ...WEB_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
-  ].filter(tool => tool.function.name !== 'create_3d_scene')
+  ].filter(tool => !['create_3d_scene', 'edit_3d_scene'].includes(tool.function.name))
 }
 
 export function createWebProjectToolExecutor(input: {

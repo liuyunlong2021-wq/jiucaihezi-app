@@ -24,13 +24,13 @@ const CHECK_ONLY = process.argv.includes('--check')
 const msoData = require('@iconify-json/material-symbols/icons.json')
 
 // <JcIcon name="add_circle" /> 或 <JcIcon ... name="add_circle" /> 或单引号
-const STATIC_RE = /<JcIcon\b[^>]*\sname=["']([a-z][a-z0-9_]*)["']/g
+const STATIC_RE = /<JcIcon\b[^>]*\sname=["']([a-z][a-z0-9_-]*)["']/g
 
 // :name="condition ? 'pause' : 'play_arrow'"
 const DYNAMIC_NAME_RE = /<JcIcon\b[^>]*\s:name=(["'])(.*?)\1[^>]*>/gs
 
 // 任何引号字符串（用于扫 6 个映射函数所在文件的所有候选）
-const STRING_RE = /["']([a-z][a-z0-9_]{2,})["']/g
+const STRING_RE = /["']([a-z][a-z0-9_-]{2,})["']/g
 
 // 6 个已知的动态映射函数名（用来识别需要全字符串扫描的文件）
 const DYNAMIC_FUNC_RE = /\b(statusIcon|iconFor|getIcon|fileStatusIcon|toolLabel)\b|const\s+icon\s*=\s*computed\s*\(/
@@ -86,7 +86,7 @@ for (const file of files) {
   }
 
   // Pass 1.5：JS 数据对象如 { icon: 'translate' } 或 icon: "analytics"
-  for (const m of src.matchAll(/icon:\s*["']([a-z][a-z0-9_]*)["']/g)) {
+  for (const m of src.matchAll(/icon:\s*["']([a-z][a-z0-9_-]*)["']/g)) {
     const name = m[1]
     const resolved = ICON_ALIAS[name] ?? name
     const kebab = resolved.replace(/_/g, '-')

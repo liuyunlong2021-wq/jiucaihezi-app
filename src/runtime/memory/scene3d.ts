@@ -82,6 +82,13 @@ export interface Scene3DAnimationState {
   label: string
 }
 
+export type Scene3DEditOperation =
+  | { action: 'add_object'; object: unknown }
+  | { action: 'add_formation'; formation: unknown }
+  | { action: 'move'; target: string; to: [number, number, number] }
+  | { action: 'remove'; target: string }
+  | { action: 'camera'; position?: [number, number, number]; lookAt?: [number, number, number] }
+
 const SHAPES = new Set<Scene3DShape>(['person', 'box', 'plane', 'wall', 'entrance', 'cylinder', 'sphere', 'cone', 'line', 'arrow'])
 const FORMATIONS = new Set<Scene3DFormationType>(['line', 'grid', 'circle', 'scatter'])
 const ASPECTS = new Set<Scene3DAspect>(['16:9', '9:16', '1:1', '4:3', '3:4'])
@@ -273,6 +280,39 @@ export function evaluateScene3DAnimation(source: Scene3DDocument, time: number):
 
 export function createScene3DDocument(args: Record<string, unknown>): Scene3DDocument {
   return parseScene3DDocument({ version: 1, ...args })
+}
+
+export function applyScene3DEdits(source: Scene3DDocument, operations: unknown): Scene3DDocument {
+  if (!Array.isArray(operations) || !operations.length || operations.length > 100) throw new Error('3D 场景增量操作必须包含 1 到 100 项')
+  const next = structuredClone(parseScene3DDocument(source))
+  for (const raw of operations) {
+    const operation = record(raw, '3D 场景增量操作')
+    const action = text(operation.action)
+    if (action === 'add_object') next.objects.push(record(operation.object, '新增对象') as unknown as Scene3DObject)
+    else if (action === 'add_formation') next.formations.push(record(operation.formation, '新增排列') as unknown as Scene3DFormation)
+    else if (action === 'move') {
+      const targetId = id(operation.target, '移动目标')
+      const target = [...next.objects, ...next.formations, ...next.groups].find(item => item.id === targetId)
+      if (!target) throw new Error(`3D 场景目标不存在: ${targetId}`)
+      target.position = vector(operation.to)
+    } else if (action === 'remove') {
+      const targetId = id(operation.target, '删除目标')
+      const before = next.objects.length + next.formations.length + next.groups.length
+      next.objects = next.objects.filter(item => item.id !== targetId)
+      next.formations = next.formations.filter(item => item.id !== targetId)
+      next.groups = next.groups
+        .filter(item => item.id !== targetId)
+        .map(item => ({ ...item, memberIds: item.memberIds.filter(memberId => memberId !== targetId) }))
+        .filter(item => item.memberIds.length)
+      if (before === next.objects.length + next.formations.length + next.groups.length) throw new Error(`3D 场景目标不存在: ${targetId}`)
+      next.timeline = next.timeline?.filter(item => item.target !== targetId)
+    } else if (action === 'camera') {
+      if (operation.position === undefined && operation.lookAt === undefined) throw new Error('相机操作缺少位置或观察目标')
+      if (operation.position !== undefined) next.camera.position = vector(operation.position)
+      if (operation.lookAt !== undefined) next.camera.target = vector(operation.lookAt)
+    } else throw new Error(`不支持的 3D 场景增量操作: ${action}`)
+  }
+  return parseScene3DDocument(next)
 }
 
 export function serializeScene3DDocument(document: Scene3DDocument): string {

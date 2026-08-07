@@ -45,9 +45,6 @@
     "sql:default",
     "sql:allow-load",
     "sql:allow-execute",
-    "sql:allow-select",
-    "updater:default",
-    "updater:allow-check",
-    "updater:allow-download-and-install"
+    "sql:allow-select"
   ]
 }

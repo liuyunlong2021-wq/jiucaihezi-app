@@ -146,7 +146,7 @@ test('creative tool definitions append connected MCP tools without changing core
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs__lookup'],
+      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs__lookup'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
@@ -159,9 +159,31 @@ test('creative tool definitions append connected MCP tools without changing core
     const sceneTool = buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'create_3d_scene')!
     assert.match(sceneTool.function.description, /add a camera action for every section/)
     assert.match(sceneTool.function.parameters.properties.timeline.description, /without duration is a hard cut/)
+    const editSceneTool = buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'edit_3d_scene')!
+    assert.equal(editSceneTool.function.parameters.required.join(','), 'path,operations')
+    assert.equal('objects' in editSceneTool.function.parameters.properties, false)
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
+})
+
+test('desktop incrementally edits one existing scene and writes it once', async () => {
+  const writes: any[] = []
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    invoke: async (command, payload) => {
+      if (command === 'dev_read_file') return { content: JSON.stringify({ title: '街道', objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }] }) }
+      if (command === 'dev_write_file') { writes.push(payload.input); return payload.input.relativePath }
+      throw new Error(`unexpected command: ${command}`)
+    },
+  })
+  const result = await execute(call('edit_3d_scene', {
+    path: '.raw/jc-media/文档/街道.jcscene',
+    operations: [{ action: 'move', target: 'person', to: [-2, 0, 1] }],
+  }))
+  assert.match(result.content, /已增量修改 3D 白膜场景/)
+  assert.equal(writes.length, 1)
+  assert.deepEqual(JSON.parse(writes[0].content).objects[0].position, [-2, 0, 1])
 })
 
 test('desktop exports an animated scene through the local recorder and FFmpeg command', async () => {

@@ -580,6 +580,30 @@ test('3D scene editor clones plain scene data instead of Vue proxies', () => {
   assert.match(editor, /if \(pose === 'lying'\)/)
 })
 
+test('3D scene editor records manual camera movement without requiring a timeline', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(editor, /const manualRecording = ref\(false\)/)
+  assert.match(editor, /canvas\.value\.captureStream\(30\)/)
+  assert.match(editor, /emit\('video', blob, `\$\{document\.title\}-手动运镜`\)/)
+  assert.match(editor, /title="开始手动运镜录制"/)
+  assert.match(editor, /title="停止并保存录制"/)
+  assert.doesNotMatch(editor, /function startManualRecording[\s\S]{0,500}document\.timeline/)
+  assert.match(workbench, /@video="saveSceneVideo"/)
+  assert.match(workbench, /'dev_export_scene_video'/)
+})
+
+test('3D scene preview sends edits with the current path and refreshes after completion', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /const sceneInstruction = ref\(''\)/)
+  assert.match(workbench, /当前打开的 3D 场景路径是：\$\{current\.resource\.path\}/)
+  assert.match(workbench, /data-placeholder="直接说怎么修改当前场景"/)
+  assert.match(workbench, /await refreshOpenScene\(current\.resource\.path\)/)
+  assert.match(workbench, /class="memory-scene-composer"/)
+})
+
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {
   const app = source('src/App.vue')
   const vite = source('vite.config.ts')

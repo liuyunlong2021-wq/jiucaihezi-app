@@ -20,7 +20,7 @@ function walkFiles(dir: string, acc: string[] = []): string[] {
 function collectProjectIconNames(root: string): Map<string, Set<string>> {
   const icons = new Map<string, Set<string>>()
   const add = (name: string, source: string) => {
-    if (!/^[a-z][a-z0-9_]*$/.test(name)) return
+    if (!/^[a-z][a-z0-9_-]*$/.test(name)) return
     if (!icons.has(name)) icons.set(name, new Set())
     icons.get(name)!.add(source)
   }
@@ -28,14 +28,14 @@ function collectProjectIconNames(root: string): Map<string, Set<string>> {
   for (const path of walkFiles(resolve(root, 'src'))) {
     const rel = relative(root, path)
     const text = readFileSync(path, 'utf8')
-    for (const match of text.matchAll(/<span[^>]*class="[^"]*\bmso\b[^"]*"[^>]*>\s*([a-z][a-z0-9_]*)\s*<\/span>/g)) {
+    for (const match of text.matchAll(/<span[^>]*class="[^"]*\bmso\b[^"]*"[^>]*>\s*([a-z][a-z0-9_-]*)\s*<\/span>/g)) {
       add(match[1], `${rel}:literal-mso`)
     }
-    for (const match of text.matchAll(/\bicon\s*:\s*['"]([a-z][a-z0-9_]*)['"]/g)) {
+    for (const match of text.matchAll(/\bicon\s*:\s*['"]([a-z][a-z0-9_-]*)['"]/g)) {
       add(match[1], `${rel}:icon-field`)
     }
     for (const match of text.matchAll(/<span[^>]*class="[^"]*\bmso\b[^"]*"[^>]*>([\s\S]{0,180}?)<\/span>/g)) {
-      for (const nested of match[1].matchAll(/['"]([a-z][a-z0-9_]*)['"]/g)) {
+      for (const nested of match[1].matchAll(/['"]([a-z][a-z0-9_-]*)['"]/g)) {
         add(nested[1], `${rel}:mso-expression`)
       }
     }
@@ -80,4 +80,11 @@ test('project Material Symbols icon names exist in the bundled local font', () =
     missing.map(name => `${name}: ${Array.from(icons.get(name) || []).sort().join(', ')}`),
     [],
   )
+})
+
+test('attachment icon is present in the offline Iconify bundle', () => {
+  const bundle = JSON.parse(readFileSync(resolve(process.cwd(), 'src/assets/icons-bundle.json'), 'utf8')) as {
+    icons?: Record<string, unknown>
+  }
+  assert.ok(bundle.icons?.['attach-file'], 'attach-file must be bundled for the attachment button')
 })
