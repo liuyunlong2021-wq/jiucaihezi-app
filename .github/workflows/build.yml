@@ -332,6 +332,21 @@ jobs:
           $setupPath = "src-tauri\target\韭菜盒子_${env:GITHUB_REF_NAME}_x64_windows_setup.exe"
           Copy-Item $setup.FullName $setupPath
 
+      - name: Smoke test — Windows app startup
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = "src-tauri\target\x86_64-pc-windows-msvc\release\jiucaihezi-app.exe"
+          $stderr = Join-Path $env:RUNNER_TEMP "jiucaihezi-startup.stderr.log"
+          $app = Start-Process -FilePath $exe -PassThru -RedirectStandardError $stderr
+          Start-Sleep -Seconds 15
+          if ($app.HasExited) {
+            if (Test-Path $stderr) { Get-Content $stderr }
+            throw "Windows 应用启动后提前退出，exit=$($app.ExitCode)"
+          }
+          Stop-Process -Id $app.Id -Force
+          Write-Host "✅ Windows 应用启动存活 15 秒"
+
       - name: Package Windows portable zip
         shell: pwsh
         run: |

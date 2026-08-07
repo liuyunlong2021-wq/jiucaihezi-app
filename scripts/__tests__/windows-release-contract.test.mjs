@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs'
 
 const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
 const workflow = readFileSync('.github/workflows/build.yml', 'utf8')
+const rustApp = readFileSync('src-tauri/src/lib.rs', 'utf8')
+const rustManifest = readFileSync('src-tauri/Cargo.toml', 'utf8')
+const packageManifest = JSON.parse(readFileSync('package.json', 'utf8'))
 
 test('Windows release config installs WebView2 through the NSIS installer', () => {
   assert.deepEqual(tauriConfig.bundle.windows.webviewInstallMode, {
@@ -14,4 +17,14 @@ test('Windows release config installs WebView2 through the NSIS installer', () =
   assert.match(workflow, /windows_setup\.exe/)
   assert.match(workflow, /\$setupPath = "src-tauri\\target\\韭菜盒子_\$\{tag\}_x64_windows_setup\.exe"/)
   assert.match(workflow, /gh release upload \$tag \$zipPath \$setupPath --clobber/)
+})
+
+test('disabled updater cannot panic application startup', () => {
+  assert.equal(tauriConfig.plugins.updater, undefined)
+  assert.doesNotMatch(rustApp, /tauri_plugin_updater/)
+  assert.doesNotMatch(rustManifest, /tauri-plugin-updater/)
+  assert.equal(packageManifest.dependencies['@tauri-apps/plugin-updater'], undefined)
+  assert.match(workflow, /Smoke test — Windows app startup/)
+  assert.match(workflow, /Start-Process[\s\S]*jiucaihezi-app\.exe/)
+  assert.match(workflow, /HasExited/)
 })

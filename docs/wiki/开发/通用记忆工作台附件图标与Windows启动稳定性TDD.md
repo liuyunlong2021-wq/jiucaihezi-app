@@ -1,7 +1,7 @@
 # 通用记忆工作台附件图标与 Windows 启动稳定性 TDD
 
 > 日期：2026-08-07
-> 状态：已实施，待 Windows 真机验收
+> 状态：已实施；v2.1.11 updater 启动 panic 已修复，待新版本 Windows 真机验收
 
 ## 1. 目标
 
@@ -14,6 +14,7 @@
 - 离线图标包必须包含 `attach-file`。
 - Windows Tauri 配置必须声明 `downloadBootstrapper` 且安装器不静默吞掉 WebView2 安装过程。
 - Windows 发布工作流必须构建并上传 NSIS 安装器，不能只验证 ZIP 文件存在。
+- OTA 配置停用时不得继续注册 updater 插件；Windows CI 必须真实启动 release EXE 并观察存活状态。
 
 ## 3. 非目标
 
@@ -34,3 +35,10 @@
 - Windows CI 已改为同时构建 NSIS 安装器和便携 ZIP；安装器使用 `downloadBootstrapper` 且不静默隐藏 WebView2 安装。
 - 通过：Windows 发布合同测试、完整 focused `986/986`、TypeScript、`git diff --check`。
 - 未执行：当前环境无法启动 Windows EXE；必须在缺少 WebView2 的真实 Windows 设备安装 NSIS 包并启动验收。便携 ZIP 仍要求系统已有 WebView2。
+
+## 6. v2.1.11 发布后补充
+
+- macOS ARM/Intel 冒烟与用户 Windows 实测共同证明 App 在窗口创建前崩溃，日志为 `PluginInitialization("updater")`；Windows job 仅检查文件存在，因此错误显示绿色。
+- 关闭 OTA 配置时遗漏了 Rust Builder 的 updater 注册，插件读取空配置后 panic。现已删除注册、Cargo/npm 依赖及无人调用的前端 composable。
+- Windows workflow 在构建后、打包前启动 `jiucaihezi-app.exe`，等待 15 秒；提前退出时输出 stderr 并使 job 失败。
+- 自动验证：完整 focused `1002/1002`、Rust `395 passed / 1 ignored`、TypeScript、`git diff --check` 通过；本机 aarch64 macOS 生产 release 已成功构建并真实启动存活 15 秒。修复必须使用新 tag 发布，不覆盖 `v2.1.11`。

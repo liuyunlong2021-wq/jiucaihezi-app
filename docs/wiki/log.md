@@ -664,3 +664,10 @@
 - 旧 OTA 的 RSA 公钥、OpenSSL 签名和 Tauri 2 minisign 验签合同不兼容；在没有新的生产 signer 密钥前，配置与发布清单任务暂时关闭，安装包继续通过 GitHub Release/官网分发。
 - 3D 非人物标签默认隐藏，人物及人物编队保留标签；吸附按钮改用现有 `sync` 图标，场景修改发送后恢复主输入框草稿。
 - 自动验证：发布合同 `12/12`、TypeScript、完整 focused、Rust `395 passed / 1 ignored` 与 `git diff --check` 通过；真实 Windows NSIS 安装启动、Web/桌面正式构建和发布尚未执行。
+
+## [2026-08-07] 紧急修复 | v2.1.11 Desktop 启动 panic
+
+- 真实发布结果：macOS ARM/Intel 构建后启动冒烟均在 `PluginInitialization("updater")` 失败；Windows job 因只检查包内容而显示绿色，但用户双击 EXE 同样无法启动。
+- 根因：`plugins.updater` 配置已删除，Rust Builder 仍注册 `tauri-plugin-updater`，插件反序列化空配置时在窗口创建前 panic；不是 WebView2 或 OpenCode 依赖问题。
+- 修复：删除 Rust updater 注册、Cargo/npm updater 依赖和无人调用的 `useUpdater.ts`；Windows CI 在打包前启动 release EXE 并要求存活 15 秒，提前退出时打印 stderr 并阻断发布。
+- 验证：红灯合同先复现 updater 注册和 Windows 启动门禁缺失；完整 focused `1002/1002`、Rust `395 passed / 1 ignored`、TypeScript 与 `git diff --check` 通过。本机 aarch64 macOS 生产 release 已成功构建并真实启动存活 15 秒；真实 Windows 修复包待新版本发布后验收。
