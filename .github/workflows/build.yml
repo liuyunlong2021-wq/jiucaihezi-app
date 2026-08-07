@@ -3,12 +3,31 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      publish_tag:
+        description: Existing release tag to republish downloads without rebuilding apps
+        required: false
+        type: string
 
 permissions:
   contents: write
 
 jobs:
+  prepare-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure GitHub Release exists
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --title "韭菜盒子 $GITHUB_REF_NAME" --notes "Desktop builds"
+
   macos-arm:
+    needs: prepare-release
+    if: inputs.publish_tag == ''
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -111,7 +130,10 @@ jobs:
         run: |
           for dmg in src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg; do
             shasum -a 256 "$dmg" > "${dmg}.sha256"
+            gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
           done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Smoke test — memory app boundary (ARM)
         run: |
@@ -132,31 +154,9 @@ jobs:
           if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
           hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
 
-      - name: Sign + upload to server (ARM)
-        if: startsWith(github.ref, 'refs/tags/v') && false
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
-          echo "Signing DMG for v$VERSION..."
-          for dmg in "$BUNDLE"/*.dmg; do
-            [ -f "$dmg" ] || continue
-            pnpm tauri signer sign "$dmg" --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" > "${dmg}.sig"
-            echo "✅ signed: $(basename "$dmg")"
-          done
-          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p /opt/updates/${VERSION}"
-          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no "$BUNDLE"/*.dmg "$BUNDLE"/*.dmg.sig ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/
-          rm /tmp/deploy_key
-          echo "✅ uploaded"
-
   macos-intel:
+    needs: prepare-release
+    if: inputs.publish_tag == ''
     # 使用 macos-15-intel（原生 Intel x86_64）而非 macos-latest（ARM64），
     # 避免交叉编译 libsqlite3-sys / ring 等 C 依赖到 x86_64 的潜在问题。
     # GitHub 已公告 macos-13 退役；fallback: macos-13 或交叉编译 + 显式 SDKROOT。
@@ -216,9 +216,6 @@ jobs:
           ln -s /Applications "$SOURCE/Applications"
           hdiutil create -volname "韭菜盒子" -srcfolder "$SOURCE" -ov -format UDZO "$DMG"
           rm -rf "$SOURCE"
-          gh release upload "$GITHUB_REF_NAME" "$DMG" --clobber
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Notarize macOS app (Intel)
         env:
@@ -258,7 +255,10 @@ jobs:
         run: |
           for dmg in src-tauri/target/x86_64-apple-darwin/release/bundle/dmg/*.dmg; do
             shasum -a 256 "$dmg" > "${dmg}.sha256"
+            gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
           done
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Smoke test — memory app boundary (Intel)
         run: |
@@ -281,28 +281,9 @@ jobs:
           if kill -0 $APP_PID 2>/dev/null; then echo "✅ 存活"; kill $APP_PID; else echo "❌ 提前退出"; exit 1; fi
           hdiutil detach "$(echo "$APP_PATH" | sed -E 's#(/Volumes/[^/]+).*#\1#')" -quiet || true
 
-      - name: Sign + upload to server (Intel)
-        if: startsWith(github.ref, 'refs/tags/v') && false
-        env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          BUNDLE="src-tauri/target/x86_64-apple-darwin/release/bundle/dmg"
-          for dmg in "$BUNDLE"/*.dmg; do
-            [ -f "$dmg" ] || continue
-            pnpm tauri signer sign "$dmg" --private-key "$TAURI_SIGNING_PRIVATE_KEY" --password "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" > "${dmg}.sig"
-          done
-          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p /opt/updates/${VERSION}"
-          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no "$BUNDLE"/*.dmg "$BUNDLE"/*.dmg.sig ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/
-          rm /tmp/deploy_key
-
   windows:
+    needs: prepare-release
+    if: inputs.publish_tag == ''
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -436,84 +417,61 @@ jobs:
           $tag = "${env:GITHUB_REF_NAME}"
           $zipPath = "src-tauri\target\韭菜盒子_${tag}_x64_windows_portable.zip"
           $setupPath = "src-tauri\target\韭菜盒子_${tag}_x64_windows_setup.exe"
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title $tag --notes "Desktop builds"
-          }
           if (-not (Test-Path $zipPath) -or -not (Test-Path $setupPath)) { throw "Windows 发布资产缺失" }
           gh release upload $tag $zipPath $setupPath --clobber
 
-      - name: Upload Windows zip to server
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-        run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "mkdir -p /opt/updates/${VERSION}"
-          scp -i /tmp/deploy_key -o StrictHostKeyChecking=no src-tauri/target/韭菜盒子_*_x64_windows_portable.zip src-tauri/target/韭菜盒子_*_x64_windows_setup.exe ${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/
-          rm /tmp/deploy_key
-
-  publish-manifest:
+  publish-download-manifest:
     needs: [macos-arm, macos-intel, windows]
     runs-on: ubuntu-latest
-    # OTA is disabled until a Tauri minisign key pair is provisioned.
-    if: startsWith(github.ref, 'refs/tags/v') && false
+    if: >-
+      always() &&
+      (inputs.publish_tag != '' ||
+      (startsWith(github.ref, 'refs/tags/v') &&
+      needs.macos-arm.result == 'success' &&
+      needs.macos-intel.result == 'success' &&
+      needs.windows.result == 'success'))
     steps:
-      - name: Generate and upload latest.json
+      - name: Publish desktop assets and public download manifest
         env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          VERSION="${GITHUB_REF#refs/tags/v}"
-          echo "$DEPLOY_SSH_KEY" > /tmp/deploy_key
-          chmod 600 /tmp/deploy_key
-          # 在服务器端生成 latest.json + 清理旧版本
-          ssh -i /tmp/deploy_key -o StrictHostKeyChecking=no ${DEPLOY_USER}@${DEPLOY_HOST} "bash -s" << 'REMOTE_SCRIPT'
-          set -e
-          cd /opt/updates
-          V="${VERSION}"
-          if [ -z "$V" ]; then echo "No versions found"; exit 1; fi
-          ARM_DMG=$(ls $V/*aarch64.dmg 2>/dev/null | head -1)
-          INTEL_DMG=$(ls $V/*x64.dmg 2>/dev/null | grep -v aarch64 | head -1)
-          WIN_INSTALLER=$(ls $V/*windows_setup.exe 2>/dev/null | head -1)
-          WIN_ZIP=$(ls $V/*windows_portable.zip 2>/dev/null | head -1)
-          WIN_ASSET="$WIN_INSTALLER"
-          if [ -z "$WIN_ASSET" ]; then WIN_ASSET="$WIN_ZIP"; fi
-          for asset in "$ARM_DMG" "$INTEL_DMG" "$WIN_ASSET"; do
+          set -euo pipefail
+          TAG="${{ inputs.publish_tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          ASSET_DIR="$RUNNER_TEMP/download-assets"
+          KEY_PATH="$RUNNER_TEMP/deploy-key"
+          mkdir -p "$ASSET_DIR"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$ASSET_DIR" \
+            --pattern '*_aarch64.dmg' \
+            --pattern '*_x64.dmg' \
+            --pattern '*_x64_windows_setup.exe'
+
+          ARM_DMG=$(find "$ASSET_DIR" -maxdepth 1 -name '*_aarch64.dmg' -print -quit)
+          INTEL_DMG=$(find "$ASSET_DIR" -maxdepth 1 -name '*_x64.dmg' -print -quit)
+          WIN_INSTALLER=$(find "$ASSET_DIR" -maxdepth 1 -name '*_x64_windows_setup.exe' -print -quit)
+          for asset in "$ARM_DMG" "$INTEL_DMG" "$WIN_INSTALLER"; do
             [ -f "$asset" ] || { echo "Missing release asset: $asset"; exit 1; }
           done
-          ARM_SIG=$(cat "$V/$(basename "$ARM_DMG" .dmg).dmg.sig" 2>/dev/null | base64 -w0 || echo '')
-          INTEL_SIG=$(cat "$V/$(basename "$INTEL_DMG" .dmg).dmg.sig" 2>/dev/null | base64 -w0 || echo '')
-          [ -n "$ARM_SIG" ] && [ -n "$INTEL_SIG" ] || { echo "Missing updater signature"; exit 1; }
-          cat > /opt/updates/latest.json << EOF
-          {
-            "version": "$V",
-            "notes": "更新内容见 GitHub Releases",
-            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-            "platforms": {
-              "darwin-aarch64": {
-                "signature": "$ARM_SIG",
-                "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$ARM_DMG")"
-              },
-              "darwin-x86_64": {
-                "signature": "$INTEL_SIG",
-                "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$INTEL_DMG")"
-              },
-              "windows-x86_64": {
-                "url": "https://api.jiucaihezi.studio/updates/$V/$(basename "$WIN_ASSET")",
-                "signature": ""
-              }
-            }
-          }
-          EOF
-          echo "latest.json generated for v$V"
-          # 清理旧版本（保留最新 5 版）
-          ls -d */ 2>/dev/null | sort -V | head -n -5 | xargs rm -rf
-          REMOTE_SCRIPT
-          rm /tmp/deploy_key
+
+          BASE_URL="https://api.jiucaihezi.studio/updates/$VERSION"
+          jq -n \
+            --arg version "$VERSION" \
+            --arg published "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --arg arm "$BASE_URL/$(basename "$ARM_DMG")" \
+            --arg intel "$BASE_URL/$(basename "$INTEL_DMG")" \
+            --arg windows "$BASE_URL/$(basename "$WIN_INSTALLER")" \
+            '{version:$version,notes:"更新内容见 GitHub Releases",pub_date:$published,platforms:{"darwin-aarch64":{url:$arm},"darwin-x86_64":{url:$intel},"windows-x86_64":{url:$windows}}}' \
+            > "$RUNNER_TEMP/latest.json"
+
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p /opt/updates/${VERSION}"
+          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
+            "$ARM_DMG" "$INTEL_DMG" "$WIN_INSTALLER" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/"
+          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
+            "$RUNNER_TEMP/latest.json" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/latest.json"

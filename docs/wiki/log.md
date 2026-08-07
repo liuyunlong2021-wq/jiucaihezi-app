@@ -671,3 +671,9 @@
 - 根因：`plugins.updater` 配置已删除，Rust Builder 仍注册 `tauri-plugin-updater`，插件反序列化空配置时在窗口创建前 panic；不是 WebView2 或 OpenCode 依赖问题。
 - 修复：删除 Rust updater 注册、Cargo/npm updater 依赖和无人调用的 `useUpdater.ts`；Windows CI 在打包前启动 release EXE 并要求存活 15 秒，提前退出时打印 stderr 并阻断发布。
 - 验证：红灯合同先复现 updater 注册和 Windows 启动门禁缺失；完整 focused `1002/1002`、Rust `395 passed / 1 ignored`、TypeScript 与 `git diff --check` 通过。本机 aarch64 macOS 生产 release 已成功构建并真实启动存活 15 秒；真实 Windows 修复包待新版本发布后验收。
+
+## [2026-08-07] v2.1.12 发布链路修复
+
+- 根因：下载页使用 `api.jiucaihezi.studio/updates/latest.json`，而该文件由已停用的 OTA `publish-manifest` 任务生成，因此仍停在 `2.1.10`；同时三个 Tauri job 并发尝试创建同一个 GitHub Release，ARM 任务在创建 Release 时收到 `Resource not accessible by integration`。
+- 修复：新增 `prepare-release` 单一预创建任务；三平台只上传资产，不再自行创建 Release；新增独立 `publish-download-manifest`，从 GitHub Release 下载并上传资产，生成不含 updater 签名的公开下载清单；支持 `workflow_dispatch` 的 `publish_tag` 对既有 tag 补发清单。
+- 红灯/绿灯：发布合同先失败后通过；YAML、`git diff --check`、完整 focused `1002/1002`、Rust `395 passed / 1 ignored` 通过。v2.1.12 ARM 重跑仍在进行，完成后执行 `publish_tag=v2.1.12`。
