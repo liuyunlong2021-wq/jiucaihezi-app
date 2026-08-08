@@ -96,3 +96,10 @@ McpManagerPanel 添加表单
 - Windows 运行本地 stdio 时先解析 `npx.cmd` 的 PATH、`Program Files/nodejs` 和用户 npm 常见目录，再通过 `cmd.exe /C` 启动。App 不打包 Node、Playwright 或 Chromium。
 - 已验证：用户在最新开发版点击 Playwright 连接成功；MCP 专项 `7/7`、完整 focused、Rust `396 passed / 1 ignored`、TypeScript、Desktop quick build 与产物审计通过；`npx -y @playwright/mcp@0.0.79 --help` 真实成功。
 - 待验证：尚未发布包含本修复的新版本，也未在从未安装 Node 的干净 Windows/macOS 上完整走完“下载 Node -> 安装 -> 重新检测 -> npm 下载 MCP -> 工具发现”。因此 `v2.1.15` 的理论链路已闭环，但不能提前记录为所有外部用户真机通过。
+
+## 本地 short-video-factory stdio 验收（2026-08-08）
+
+- Git `10553f10` 修复本地 stdio 生命周期：`tsx` 入口会归一为 Node + `tsx/dist/cli.mjs`；initialize 与 tools/list 为 30 秒，tools/call 为 120 秒；stdout 只处理 JSON-RPC，stderr、退出码、signal、实际启动参数和已发送方法作为连接诊断保留。
+- 连接或调用失败会关闭旧进程、删除旧连接；MCP Store 在 connecting、error、disconnected 时清空工具列表，重新连接必须重新 initialize 与 tools/list，不复用失败会话。
+- 用户在 Desktop 开发版真实添加 `/Users/by3/Documents/short-video-factory` 后，服务端 tools/list 返回 8 个工具：`open_project`、`read_wiki_document`、`refresh_production_materials`、`get_production_status`、`list_missing_materials`、`run_production_stage`、`get_task_status`、`resume_task`。随后真实调用 `open_project` 成功打开 `/Users/by3/Documents/0807功夫女友`，返回项目 ID、项目名称和 `episode-001`。
+- 未验证：`refresh_production_materials` 的真实 tools/call、断 pipe 后重连，以及外部 macOS/Windows 安装包链路；不得把这些写成已通过。

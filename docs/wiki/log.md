@@ -1,5 +1,10 @@
 # Wiki 操作日志
 
+## [2026-08-08] 真实验收 | short-video-factory 本地 stdio MCP
+
+- [[开发/自定义MCP添加SDD]] 记录 Git `10553f10`：Node + tsx 启动归一、stdio 诊断、30 秒连接/列表超时、120 秒工具调用超时，以及失败连接和旧工具缓存清理。
+- 用户在 Desktop 开发版确认服务端真实返回 8 个工具，并成功调用 `open_project` 打开 `0807功夫女友`，获得项目 ID 与 `episode-001`。`refresh_production_materials`、断 pipe 重连和外部安装包矩阵未执行。
+
 ## [2026-08-03] iOS 发布 | 2.1.7 已提交 App Store 审核
 
 - App Store Connect 已提交 iOS App `2.1.7`（构建 `2.1.7.1`），页面确认“已提交 1 个项目”，当前状态为“正在等待审核”。
