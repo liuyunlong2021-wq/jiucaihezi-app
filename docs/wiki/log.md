@@ -701,3 +701,8 @@
 
 - Windows 启动问题通过“绝对 EXE 路径 + stderr + 进程存活”确认程序主体可运行，再通过改名 App 数据目录确认是持久化状态；真实失败状态包含零尺寸和 `-32000` 坐标。共同读写入口已拒绝无效状态，用户随后确认桌面和开始菜单可正常打开。
 - MCP 问题必须先区分权限错误与依赖缺失：`Plugin not found` 不能引导安装 Node；只有真实找不到 `npx` 才显示下载和重试。Tauri 应用自定义 ACL 不能只登记新增命令，必须与全部 `generate_handler!` 注册命令保持一致。
+
+## [2026-08-08] 运维验证 | 火山方舟豆包渠道
+
+- 用户确认 NewAPI 中必须选择“火山方舟”渠道类型；使用 OpenAI 渠道会把请求错误拼成 `/v1/chat/completions`，不适用于豆包媒体/音频模型。
+- 方舟渠道配置已由用户实测成功；模型列表包含 `doubao-seed-2-1-turbo-260628`、`doubao-seed-evolving`、`doubao-seed-2-1-pro-260628`、`seed-audio-1.0`。API Key 内容不写入 Wiki。
