@@ -214,10 +214,8 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
   assert.match(runtime, /conversationDocumentSources\(input\.conversationTurns\.filter\(turn => contextualTurnIds\.has\(turn\.id\)\)\)/)
   assert.match(runtime, /historicalDocumentSources\.length[\s\S]*正文和上一轮工具结果没有重复注入[\s\S]*JSON\.stringify\(historicalDocumentSources\)/)
-  assert.match(workbench, /mode === 'quick'[\s\S]*attachments\.value = \[\][\s\S]*referencedFiles\.value = \[\][\s\S]*selectedSkillNames\.value = \[\][\s\S]*webSearchEnabled\.value = false/)
+  assert.match(workbench, /mode === 'quick'[\s\S]*attachments\.value = \[\][\s\S]*referencedFiles\.value = \[\][\s\S]*selectedSkillNames\.value = \[\]/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{\s*executionMode\.value = 'memory'/)
-  assert.match(runtime, /call\.function\.name === 'web_search'[\s\S]*executeJinaWebSearchTool\(call\.function\.arguments\)/)
-  assert.match(runtime, /\.\.\.\(input\.webSearchEnabled \? \[WEB_SEARCH_TOOL_DEFINITION\] : \[\]\)/)
 })
 
 test('memory composer routes pasted images and media plans into the existing creation panel', () => {
@@ -278,29 +276,12 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(runtime, /buildMemoryWebProjectToolDefinitions\(\)/)
 })
 
-test('memory web search is an explicit removable one-turn @ option', () => {
+test('memory composer does not expose removed Jina web tools', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(workbench, /const webSearchEnabled = ref\(false\)/)
-  assert.match(workbench, /type: 'search'[\s\S]*display: '联网搜索'[\s\S]*仅本轮搜索公开网络/)
-  assert.match(workbench, /executionMode\.value = 'memory'[\s\S]*option\.type === 'search'[\s\S]*webSearchEnabled\.value = true/)
-  assert.match(workbench, /v-if="webSearchEnabled"[\s\S]*<JcIcon name="search"[\s\S]*联网搜索[\s\S]*webSearchEnabled = false/)
-  assert.match(workbench, /webSearchEnabled: webSearchEnabled\.value/)
-  assert.match(workbench, /selectedSkillNames\.value = \[\][\s\S]*webSearchEnabled\.value = false/)
-  assert.match(workbench, /mode === 'quick'[\s\S]*webSearchEnabled\.value = false/)
-  assert.match(runtime, /webSearchEnabled\?: boolean/)
-  assert.match(runtime, /\.\.\.\(input\.webSearchEnabled \? \[WEB_SEARCH_TOOL_DEFINITION\] : \[\]\)/)
-  assert.doesNotMatch(runtime, /tools: \[\.\.\.buildWebProjectToolDefinitions\(\), WEB_SEARCH_TOOL_DEFINITION\]/)
-})
-
-test('memory reads an explicit URL without enabling web search', () => {
-  const runtime = source('src/runtime/memory/memoryChat.ts')
-
-  assert.match(runtime, /extractPublicHttpUrls\(latestUserText\)/)
-  assert.match(runtime, /hasDirectUrls \? \[READ_URL_TOOL_DEFINITION\] : \[\]/)
-  assert.match(runtime, /call\.function\.name === 'read_url'/)
-  assert.match(runtime, /不要把读网址说成联网搜索/)
+  assert.doesNotMatch(workbench, /webSearchEnabled|type: 'search'|web_search|read_url/)
+  assert.doesNotMatch(runtime, /webSearchEnabled|WEB_SEARCH_TOOL_DEFINITION|READ_URL_TOOL_DEFINITION|web_search|read_url|Jina/)
 })
 
 test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {

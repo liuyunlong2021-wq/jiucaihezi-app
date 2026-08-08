@@ -1,39 +1,21 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import {
-  appendSystemEvidence,
-  buildToolResultMessages,
-} from '../directTools'
-
-test('appendSystemEvidence merges search evidence into the first system message', () => {
-  const messages = [
-    { role: 'system', content: '基础规则' },
-    { role: 'user', content: '今天有什么新闻' },
-  ]
-
-  const merged = appendSystemEvidence(messages, '搜索结果')
-
-  assert.equal(merged.length, 2)
-  assert.equal(merged[0].role, 'system')
-  assert.match(merged[0].content, /基础规则/)
-  assert.match(merged[0].content, /搜索结果/)
-  assert.equal(merged[1].role, 'user')
-})
+import { buildToolResultMessages } from '../directTools'
 
 test('buildToolResultMessages always returns paired assistant tool_calls and tool messages', async () => {
   const messages = await buildToolResultMessages([
     {
       id: '',
       type: 'function',
-      function: { name: 'web_search', arguments: 'not json' },
+      function: { name: 'wiki_search', arguments: 'not json' },
     },
   ], async () => { throw new Error('Tool argument parse failed') })
 
   assert.equal(messages.length, 2)
   assert.equal(messages[0].role, 'assistant')
   assert.equal(messages[0].tool_calls.length, 1)
-  assert.match(messages[0].tool_calls[0].id, /^call_web_search_/)
+  assert.match(messages[0].tool_calls[0].id, /^call_wiki_search_/)
   assert.equal(messages[1].role, 'tool')
   assert.equal(messages[1].tool_call_id, messages[0].tool_calls[0].id)
   assert.match(messages[1].content, /Tool argument parse failed/)
@@ -65,7 +47,7 @@ test('buildToolResultMessages appends executor followup messages after tool outp
     {
       id: 'call_empty_query',
       type: 'function',
-      function: { name: 'web_search', arguments: '{"query":"   "}' },
+      function: { name: 'wiki_search', arguments: '{"query":"   "}' },
     },
   ], async () => ({
     content: 'Image read successfully',

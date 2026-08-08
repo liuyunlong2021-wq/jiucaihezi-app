@@ -22,7 +22,20 @@ pub async fn mcp_spawn_stdio(
     env: Option<HashMap<String, String>>,
     on_stdout: Channel<String>,
 ) -> Result<String, String> {
-    let mut cmd = Command::new(resolve_local_binary(&command));
+    let resolved_command = resolve_local_binary(&command);
+    #[cfg(windows)]
+    let mut cmd = if resolved_command
+        .extension()
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("cmd"))
+    {
+        let mut command = Command::new("cmd.exe");
+        command.arg("/C").arg(&resolved_command);
+        command
+    } else {
+        Command::new(&resolved_command)
+    };
+    #[cfg(not(windows))]
+    let mut cmd = Command::new(&resolved_command);
     cmd.args(args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())

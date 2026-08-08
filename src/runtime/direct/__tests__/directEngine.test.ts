@@ -21,20 +21,20 @@ function interruptedSseResponse(rows: string[]): Response {
   }), { headers: { 'content-type': 'text/event-stream' } })
 }
 
-test('runDirectChatCompletion performs a second pass when the model requests web_search', async () => {
+test('runDirectChatCompletion performs a second pass when the model requests a tool', async () => {
   const seen: string[] = []
   const sentMessages: any[][] = []
 
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '查一下韭菜盒子' }],
-    tools: [{ type: 'function', function: { name: 'web_search' } }],
+    tools: [{ type: 'function', function: { name: 'wiki_search' } }],
     onText: value => seen.push(value),
-    runWebSearch: async query => `[search:${query}]`,
+    executeTool: async call => ({ content: `[result:${JSON.parse(call.function.arguments).query}]` }),
     sendChatCompletion: async request => {
       sentMessages.push(request.messages)
       if (sentMessages.length === 1) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'web_search', arguments: '{"query":"韭菜盒子"}' } }] } }] }),
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'wiki_search', arguments: '{"query":"韭菜盒子"}' } }] } }] }),
           '[DONE]',
         ])
       }
@@ -51,7 +51,7 @@ test('runDirectChatCompletion performs a second pass when the model requests web
   assert.deepEqual(sentMessages[0], [{ role: 'user', content: '查一下韭菜盒子' }])
   assert.equal(sentMessages[1][1].role, 'assistant')
   assert.equal(sentMessages[1][2].role, 'tool')
-  assert.equal(sentMessages[1][2].content, '[search:韭菜盒子]')
+  assert.equal(sentMessages[1][2].content, '[result:韭菜盒子]')
 })
 
 test('runDirectChatCompletion does not continue an interrupted stream when continuation is disabled', async () => {
@@ -283,7 +283,6 @@ test('runDirectChatCompletion keeps the first-pass text when there are no tool c
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '你好' }],
     onText: () => {},
-    runWebSearch: async query => `[search:${query}]`,
     sendChatCompletion: async () => sseResponse([
       JSON.stringify({ choices: [{ delta: { content: '你好呀' } }] }),
       '[DONE]',

@@ -5,13 +5,12 @@ import type {
   DirectToolCall,
   DirectToolExecutionEvent,
   DirectToolExecutor,
-  DirectToolResult,
 } from './directTypes'
 import { DirectStreamInterruptionError, readChatCompletionDetails, readChatCompletionResponse } from './directStream'
 import { buildToolResultMessages } from './directTools'
 
 export { readChatCompletionResponse, resolveDirectCompletionText } from './directStream'
-export { appendSystemEvidence, buildToolResultMessages } from './directTools'
+export { buildToolResultMessages } from './directTools'
 
 export interface DirectChatCompletionRequest {
   messages: DirectApiMessage[]
@@ -25,7 +24,6 @@ export interface RunDirectChatCompletionOptions {
   onToolEvent?: (event: DirectToolExecutionEvent) => void
   beforeToolCall?: DirectBeforeToolCall
   sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
-  runWebSearch?: (query: string) => Promise<string>
   executeTool?: DirectToolExecutor
   maxToolRounds?: number
   allowToolCalls?: boolean
@@ -46,7 +44,9 @@ export async function runDirectChatCompletion(
   const messages = [...options.messages]
   const allToolCalls: DirectToolCall[] = []
   const maxToolRounds = Math.max(1, options.maxToolRounds || 64)
-  const executeTool = options.executeTool || legacyWebSearchExecutor(options.runWebSearch)
+  const executeTool: DirectToolExecutor = options.executeTool || (async call => {
+    throw new Error(`Unsupported tool: ${call.function.name}`)
+  })
   let toolRounds = 0
   let fallbackText = ''
   let lastFailedToolSignature = ''
@@ -178,16 +178,4 @@ function normalizeToolCall(call: DirectToolCall, tools: unknown[] | undefined): 
 
 function joinText(prefix: string, suffix: string): string {
   return [prefix, suffix].filter(Boolean).join('')
-}
-
-function legacyWebSearchExecutor(runWebSearch?: (query: string) => Promise<string>): DirectToolExecutor {
-  return async (call): Promise<DirectToolResult> => {
-    if (call.function.name !== 'web_search' || !runWebSearch) throw new Error(`Unsupported tool: ${call.function.name}`)
-    let args: any
-    try { args = JSON.parse(call.function.arguments || '{}') }
-    catch (error) { throw new Error(`Tool argument parse failed: ${error instanceof Error ? error.message : String(error)}`) }
-    const query = String(args?.query || '').trim()
-    if (!query) throw new Error('Tool argument parse failed: query is required')
-    return { content: await runWebSearch(query) }
-  }
 }

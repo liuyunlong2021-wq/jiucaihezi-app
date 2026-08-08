@@ -2,9 +2,13 @@
   "identifier": "default",
   "description": "Main window capabilities — FS access scoped to app data",
   "windows": ["main"],
+  "remote": {
+    "urls": ["http://localhost:1420/*"]
+  },
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",
+    "allow-app-commands",
     {
       "identifier": "fs:default",
       "allow": [

@@ -49,6 +49,32 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
             if candidate.exists() {
                 return candidate;
             }
+            #[cfg(windows)]
+            if Path::new(program).extension().is_none() {
+                for extension in ["exe", "cmd"] {
+                    let candidate = dir.join(format!("{program}.{extension}"));
+                    if candidate.exists() {
+                        return candidate;
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    if program.eq_ignore_ascii_case("npx") {
+        let candidates = [
+            env::var_os("ProgramFiles")
+                .map(PathBuf::from)
+                .map(|path| path.join("nodejs").join("npx.cmd")),
+            env::var_os("APPDATA")
+                .map(PathBuf::from)
+                .map(|path| path.join("npm").join("npx.cmd")),
+        ];
+        for candidate in candidates.into_iter().flatten() {
+            if candidate.exists() {
+                return candidate;
+            }
         }
     }
 

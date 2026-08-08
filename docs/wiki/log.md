@@ -677,3 +677,27 @@
 - 根因：下载页使用 `api.jiucaihezi.studio/updates/latest.json`，而该文件由已停用的 OTA `publish-manifest` 任务生成，因此仍停在 `2.1.10`；同时三个 Tauri job 并发尝试创建同一个 GitHub Release，ARM 任务在创建 Release 时收到 `Resource not accessible by integration`。
 - 修复：新增 `prepare-release` 单一预创建任务；三平台只上传资产，不再自行创建 Release；新增独立 `publish-download-manifest`，从 GitHub Release 下载并上传资产，生成不含 updater 签名的公开下载清单；支持 `workflow_dispatch` 的 `publish_tag` 对既有 tag 补发清单。
 - 红灯/绿灯：发布合同先失败后通过；YAML、`git diff --check`、完整 focused `1002/1002`、Rust `395 passed / 1 ignored` 通过。v2.1.12 ARM 重跑已成功并补齐 GitHub Release 资产；根因修复作为 v2.1.13 走正常 tag 发布，不覆盖旧 tag，也不采用一次性清单补发作为正式方案。
+
+## [2026-08-07] 产品收缩 | Jina 网页工具迁出
+
+- 用户确认 Desktop 是核心平台，Web 与 Mobile 不需要为网页读取或搜索保留 Jina 辅助链路；Desktop 继续使用需审批的本机 Terminal 联网。
+- `web_search`、`read_url`、输入框 `@联网搜索`、前端实现和 `jina-adapter` 已从主仓迁出，原实现备份于 `/Users/by3/Documents/jiucaihezi-jina-backup`；普通聊天、Wiki、文件、MCP、媒体和 3D 不受影响。
+- 当前无法登录生产服务器，旧容器和 NewAPI 渠道只记录为待核验下线，未写成已经停止。
+
+## [2026-08-07] 功能 | 官方 Playwright MCP 零内置接入
+
+- 内置 MCP 目录增加固定版本 `@playwright/mcp@0.0.79`；Desktop 点击连接后复用现有 `npx` stdio、工具发现和 MCP Bridge，不新增依赖或浏览器引擎。
+- 缺少 Node/npx 时显示真实错误、Node.js 官方下载入口和重新检测按钮；Windows 补齐 `npx.cmd` 常见路径解析及 `cmd.exe /C` 启动。
+- Web 与 Mobile 保持不能运行本地 stdio MCP 的边界；Playwright 作为高权限扩展，只有用户主动连接后才向模型暴露完整官方工具。
+- TDD 先确认目录项、一键连接、安装引导和 Windows 命令入口合同缺失；专项合同 `6/6`、完整 focused、TypeScript、Rust `396 passed / 1 ignored`、Desktop 生产构建与产物审计已通过。macOS Desktop 已确认卡片与高权限标识正确，官方 MCP 命令可启动；真实点击连接及 Windows 安装后重连仍待人工验收。
+
+## [2026-08-08] 修复 | Playwright MCP 点击无反应
+
+- 根因一：Tauri 开发页是远程 URL，原能力地址没有使用 URLPattern 路径通配符，IPC 与外链打开均未得到开发环境权限。根因二：只声明 3 个 MCP 自定义命令会触发 Tauri 对全部应用命令的 ACL 检查，造成文件、Skill、密钥等既有命令被拦截。
+- 修复：开发能力改为 `http://localhost:1420/*`；新增 `allow-app-commands`，与 `generate_handler!` 当前 147 个 Rust 命令全量一致；合同测试逐项比较两份清单。`Plugin not found` 不再误判为缺少 Node，下载按钮复用统一外链打开。
+- 验证：MCP 专项 `7/7`、完整 focused、Rust `396 passed / 1 ignored`、TypeScript、Desktop quick build 与产物审计通过；开发启动日志已无 `not allowed`，`npx -y @playwright/mcp@0.0.79 --help` 真实成功，用户已确认最新开发版点击连接成功。包含修复的新版本和干净外部电脑安装链仍待验收。
+
+## [2026-08-08] 经验沉淀 | Windows 窗口不可见与 MCP 依赖诊断
+
+- Windows 启动问题通过“绝对 EXE 路径 + stderr + 进程存活”确认程序主体可运行，再通过改名 App 数据目录确认是持久化状态；真实失败状态包含零尺寸和 `-32000` 坐标。共同读写入口已拒绝无效状态，用户随后确认桌面和开始菜单可正常打开。
+- MCP 问题必须先区分权限错误与依赖缺失：`Plugin not found` 不能引导安装 Node；只有真实找不到 `npx` 才显示下载和重试。Tauri 应用自定义 ACL 不能只登记新增命令，必须与全部 `generate_handler!` 注册命令保持一致。

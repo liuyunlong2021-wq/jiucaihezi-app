@@ -84,7 +84,6 @@ const wave1FocusedTests = [
   'src/utils/__tests__/skillCreatorScriptRunner.test.ts',
   'src/utils/__tests__/fileEntryFilters.test.ts',
   'src/utils/__tests__/webProjectFiles.test.ts',
-  'src/utils/__tests__/webReader.test.ts',
   'src/utils/__tests__/webProjectBinaryStore.test.ts',
   'src/utils/__tests__/webProjectTransfer.test.ts',
   'src/utils/__tests__/creationMediaCacheWeb.test.ts',
@@ -119,7 +118,6 @@ const wave1FocusedTests = [
   'src/utils/__tests__/idbPath.test.ts',
   'src/utils/__tests__/mediaAssetTypes.test.ts',
   'src/utils/__tests__/projectResource.test.ts',
-  'src/utils/__tests__/webSearch.test.ts',
 ]
 
 const externalNodeTests = [

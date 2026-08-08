@@ -1,6 +1,6 @@
 # 热缓存
 
-> 更新：2026-08-06 | 阶段：媒体与 3D 保留决策、SQLite 任务恢复已验证
+> 更新：2026-08-08 | 阶段：Playwright MCP 接入
 
 ## 当前结论
 
@@ -17,10 +17,15 @@
 - **媒体与 3D 迁出决定已撤销且从未实施。** 图片、视频、音频、创作画布、3D 白膜、GLB/GLTF 查看和 Desktop 动画导出继续随韭菜盒子保留；短视频工厂未被本计划修改。老电脑适配只优化空闲刷新与按需加载，不降低最终质量、不删除高性能设备能力，见 [[开发/韭菜盒子媒体与3D能力迁出SDD]]。
 - **媒体任务启动竞态已按 TDD 修复。** `initDB()` 并发调用现在共用同一个 Promise，`mediaTaskStore.init()` 等待 SQLite 真正完成后才读取和恢复历史；不再在首次挂载抛出 `SQLite storage is not ready`，也不增加定时重试或第二套任务状态。
 - **App 只随包提供 7 个产品 Skill：** `jc-cha-wiki`、`jc-everything-wiki`、`jc-jian-wiki`、`jc-new-user-guide`、`jc-raw-wiki`、`jc-xiu-wiki`、`skill-creator`。20 个个人写作、视觉、旁白 Skill 已迁入 `/Users/by3/Documents/jiucaihezi-personal-skills`，不再进入 App 索引、推荐指令或新手指南；用户自行安装的 Skill 不受影响。
+- **Jina 网页工具已迁出产品。** App 不再提供 `@联网搜索`、`web_search` 或 `read_url`，也不再携带 `jina-adapter`；原实现完整备份于 `/Users/by3/Documents/jiucaihezi-jina-backup`。Desktop 仍可在用户批准后通过 Terminal 使用本机网络；Web 与 Mobile 不提供替代网页工具。生产服务器上的旧容器和 NewAPI 渠道尚未核验或下线，但新 App 已无调用入口。
+- **Desktop 增加官方 Playwright MCP。** 设置里的内置卡片使用固定版本 `@playwright/mcp@0.0.79`，复用现有 stdio MCP 和统一工具桥接；App 不打包 Node、Playwright 或 Chromium。缺少 Node 时提供官方下载和重新连接，Windows 额外识别并正确启动 `npx.cmd`。该扩展拥有浏览、页面操作、上传下载和脚本执行等高权限，只有用户主动连接后才启用；Web 与 Mobile 不支持本地 stdio。
+- **Tauri 自定义命令权限已闭环。** 开发地址使用 `http://localhost:1420/*`，`allow-app-commands` 与 Rust `generate_handler!` 全量一致；Playwright MCP 与现有文件、Skill、密钥等命令不会再因局部 ACL 出现“点击无反应”。
+- **Playwright MCP 已完成本机点击验收。** 上一轮“下载 Node.js”是把 `Plugin not found` 误判为缺少 `npx`，且开发 URL 与自定义命令 ACL 同时阻断；当前开发版已连接成功。新版本发布后，外部 Desktop 用户仍需本机 Node/npx 和可访问 npm 的网络，干净 Windows/macOS 安装链待真机验收。
 - **文字云合同只有两个手动动作：** `上传并覆盖云端`以本地完整可同步文字快照覆盖云端，`下载并覆盖本地`以云端完整可同步文字快照覆盖本地。两者都不合并、不创建冲突副本、不自动双向同步；媒体、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不比较、不传输、不删除。设置页只显示状态，操作只在项目中心。
 - 发布身份不得因分离改变：Desktop `com.jiucaihezi.desktop`、iOS `com.jiucaihezi.mobile`、`jiucaihezi://`、正式 Web <https://jiucaihezi.studio>、应用数据目录、账号及云项目绑定全部保持连续；Android 当前无稳定独立身份，继续暂停。旧 OTA 使用 RSA 签名，与 Tauri 2 minisign 合同不兼容，下一版暂时关闭自动更新，继续通过 GitHub Release/官网下载安装包；生成新 signer 密钥并完成三平台旧版升级验收后再恢复 OTA。
 - **通用附件合同保持现状：** Office/PDF/XLSX/PPTX 保存原件并生成 Markdown 可读副本，再把 Markdown 发送给 NewAPI；原件不被删除，图片、视频、音频继续走原生媒体链路。本轮不改附件逻辑。
-- **附件图标与 Windows 启动修复（2026-08-07）：** 离线 Material Symbols 扫描器已支持连字符，输入框 `attach-file` 图标已重新打入 `icons-bundle.json`。Windows 发布同时提供 NSIS 安装器和便携 ZIP；普通用户优先运行安装器，由 `downloadBootstrapper` 引导安装 Microsoft Edge WebView2 Runtime。便携 ZIP 仅适用于已安装 WebView2 的系统。Windows 真机缺运行时和双击启动仍待人工验收。
+- **附件图标与 Windows 启动修复（2026-08-07）：** 离线 Material Symbols 扫描器已支持连字符，输入框 `attach-file` 图标已重新打入 `icons-bundle.json`。Windows 发布同时提供 NSIS 安装器和便携 ZIP；普通用户优先运行安装器，由 `downloadBootstrapper` 引导安装 Microsoft Edge WebView2 Runtime。已具备 WebView2 的 Windows 用户已完成双击启动验收；缺少运行时的干净设备安装引导仍待人工验收。
+- **Windows“闪退”真机根因已闭环。** 绝对 EXE 路径启动与清理 App 数据后普通启动均成功，证明程序和 WebView2 链路可用；失败来自 Windows 保存的零尺寸、`-32000` 坐标窗口状态，使运行中的窗口不可见。现在读写入口都拒绝无效状态，同时保留合法多显示器负坐标。
 - **3D 手动运镜录制（2026-08-07）：** Desktop 3D 编辑器已增加开始/停止录制按钮。用户可以直接旋转、平移、推进和拉远视角；停止后复用现有 FFmpeg 链路保存 MP4。录制不生成关键帧，不改变现有 `.jcscene` 时间线能力；真实 Desktop 手动录制验收待执行。
 - **3D 文件与对话编辑（2026-08-07）：** `.jcscene` 是 `.raw/jc-media/文档/` 中的可编辑源文件，截图进`图片`，自动动画和手动运镜进`视频`。打开场景后可在编辑器下方直接说“加、移、删、改镜头”，普通请求调用 `edit_3d_scene` 原子写回并刷新；只有明确“重做/重新生成”才使用 `create_3d_scene` 完整覆盖。本阶段只保留白模基础，不建设写实资产库。
 - **下一版发布门禁（2026-08-07）：** Windows Release 上传步骤已在本步骤重新声明并校验 NSIS/ZIP 路径；失效 OTA 与 `latest.json` 发布任务已停用，避免发布无效签名。3D 默认只显示人物及人物编队标签，非人物对象不显示文字；场景指令发送后恢复主输入草稿。

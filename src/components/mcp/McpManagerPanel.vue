@@ -10,6 +10,7 @@ import {
 import type { McpOAuthCallback } from '@/services/mcpOAuth'
 import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
 import { confirmAction } from '@/utils/confirmAction'
+import { openExternal } from '@/utils/httpClient'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
 type ViewMode = 'grid' | 'list'
@@ -118,6 +119,20 @@ function statusClass(server?: McpServerConfig) {
   return server.enabled ? 'enabled' : 'idle'
 }
 
+function needsNodeInstall(server?: McpServerConfig) {
+  const error = server?.error || ''
+  return Boolean(
+    server?.command === 'npx' &&
+      server.status === 'error' &&
+      !/plugin not found/i.test(error) &&
+      /not found|找不到|os error 2|无法启动 MCP 进程/i.test(error),
+  )
+}
+
+async function openNodeDownload() {
+  await openExternal('https://nodejs.org/zh-cn/download')
+}
+
 function resetAddForm() {
   newServer.value = {
     name: '',
@@ -200,12 +215,15 @@ async function configureSecret(entry: BuiltinMcpCatalogEntry): Promise<boolean> 
 
 async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   message.value = ''
+  if (entry.transport === 'stdio' && !isDesktopRuntime) {
+    message.value = `「${entry.name}」仅支持桌面版。`
+    return
+  }
   if (configuredIds.value.has(entry.id)) {
     message.value = `「${entry.name}」已经在 MCP 扩展中。`
     return
   }
 
-  const { safePrompt } = await import('@/utils/safePrompt')
   let config: Omit<McpServerConfig, 'status' | 'error' | 'enabled'>
   if (entry.auth === 'oauth') {
     if (!entry.url || !entry.oauthClientId) {
@@ -229,6 +247,7 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
     entry.transport === 'remote' ||
     entry.transport === 'streamable-http'
   ) {
+    const { safePrompt } = await import('@/utils/safePrompt')
     const url = await safePrompt(`配置「${entry.name}」连接地址`, entry.url || '')
     if (!url) return
     config = {
@@ -248,7 +267,17 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       env: entry.env,
       secretEnvVar: entry.secretEnvVar,
     }
+  } else if (entry.transport === 'stdio' && entry.command) {
+    config = {
+      id: entry.id,
+      name: entry.name,
+      transport: 'stdio',
+      command: entry.command,
+      args: entry.args,
+      env: entry.env,
+    }
   } else {
+    const { safePrompt } = await import('@/utils/safePrompt')
     const command = await safePrompt(`配置「${entry.name}」启动命令`, entry.command || '')
     if (!command) return
     const argsText = (await safePrompt('启动参数（空格分隔）', (entry.args || []).join(' '))) || ''
@@ -265,7 +294,7 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   }
 
   const server = mcpStore.addServer(config)
-  if (entry.auth === 'oauth') {
+  if (entry.auth === 'oauth' || (entry.transport === 'stdio' && entry.command && !entry.secretEnvVar)) {
     await toggleServer(server)
     return
   }
@@ -484,10 +513,22 @@ async function removeServer(server: McpServerConfig) {
             </div>
 
             <div class="mcp-hint">{{ card.installHint }}</div>
+            <div v-if="card.server?.error" class="mcp-error">{{ card.server.error }}</div>
 
             <div class="mcp-actions">
-              <button v-if="!card.installed" class="mcp-primary" @click="addFromCatalog(card)">
-                {{ card.auth === 'oauth' ? '连接' : '加入仓库' }}
+              <button
+                v-if="!card.installed"
+                class="mcp-primary"
+                :disabled="card.transport === 'stdio' && !isDesktopRuntime"
+                @click="addFromCatalog(card)"
+              >
+                {{
+                  card.transport === 'stdio' && !isDesktopRuntime
+                    ? '仅桌面版'
+                    : card.auth === 'oauth' || (card.transport === 'stdio' && !card.secretEnvVar)
+                      ? '连接'
+                      : '加入仓库'
+                }}
               </button>
               <template v-else-if="card.server">
                 <button
@@ -498,10 +539,19 @@ async function removeServer(server: McpServerConfig) {
                   {{
                     card.server.status === 'connected'
                       ? '停用'
+                      : needsNodeInstall(card.server)
+                        ? '重新检测并连接'
                       : card.server.auth === 'oauth'
                         ? '连接'
                         : '启用'
                   }}
+                </button>
+                <button
+                  v-if="needsNodeInstall(card.server)"
+                  class="mcp-ghost"
+                  @click="openNodeDownload"
+                >
+                  下载 Node.js
                 </button>
                 <button
                   v-if="card.secretEnvVar"

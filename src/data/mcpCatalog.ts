@@ -62,4 +62,18 @@ export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
     },
     secretEnvVar: 'OBSIDIAN_API_KEY',
   },
+  {
+    id: 'playwright',
+    name: 'Playwright',
+    icon: 'travel_explore',
+    category: '浏览器',
+    transport: 'stdio',
+    description: '让 AI 操作本机浏览器，浏览网页、填写页面并处理上传与下载。',
+    tasks: ['浏览网页', '操作页面', '上传与下载'],
+    auth: 'none',
+    risk: 'high',
+    installHint: '仅桌面版可用。需要本机 Node.js；首次连接由 npx 下载官方 Playwright MCP。',
+    command: 'npx',
+    args: ['-y', '@playwright/mcp@0.0.79'],
+  },
 ]

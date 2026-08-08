@@ -80,3 +80,19 @@ McpManagerPanel 添加表单
 - Web 端不渲染 stdio 选项；GitHub 和 Obsidian 的内置卡片、OAuth 和系统钥匙串流程未改。
 - 连接类型从系统原生下拉改成产品内三段选择，避免 macOS 原生菜单破坏产品主题；添加与取消按钮统一高度，窄窗口工具条可换行。
 - 自动验证：新增 MCP 面板合同测试；pnpm run test:focused 通过；git diff --check 通过。pnpm exec vue-tsc -b 仍由改动前已存在的 CreationPanel、ProjectFileTree、媒体注册、项目文件服务和 PluginStore 错误阻断，本次 MCP 文件未出现类型错误。
+
+## 内置 Playwright MCP（2026-08-07）
+
+- Desktop 的内置目录增加 Microsoft Playwright MCP，固定使用 `npx -y @playwright/mcp@0.0.79`，允许官方提供的完整浏览器操作能力；它属于高权限扩展，只有用户主动连接后才向模型暴露工具。
+- App 不内置 Node.js、Playwright 或 Chromium。首次连接由用户本机的 `npx` 下载 MCP 包，因此安装包体积不因浏览器运行时增加；Web 与 Mobile 不能启动本地 stdio MCP。
+- 缺少 `npx` 时保留连接配置并显示真实错误，同时提供 Node.js 官方下载入口和“重新检测并连接”。Windows 会识别 `npx.cmd`、`Program Files/nodejs` 和用户 npm 目录，并通过 `cmd.exe /C` 启动命令入口。
+- 不增加第二套 MCP Store、传输层、工具桥接或自动提权安装器；连接、工具发现、调用和停用均复用现有 MCP 链路。
+- Tauri 开发页属于远程 URL，能力范围必须匹配 `http://localhost:1420/*`。应用自定义 ACL 一旦启用，就必须覆盖 `generate_handler!` 注册的全部 Rust 命令；合同测试逐项比较注册表和 `allow-app-commands`，避免局部授权导致其他功能被静默拦截。
+
+## 连接成功经验（2026-08-08）
+
+- 上一轮卡片显示“下载 Node.js”并不代表真的缺少 Node。真实错误是 `mcp_spawn_stdio not allowed. Plugin not found`，旧判断只要看到 `not found` 就误判为缺少 `npx`；同时开发 URL 没有匹配 Tauri ACL，外链打开和 MCP Rust 命令都被拦截，因此安装 Node 也无法解决。
+- 根修包含四点：`Plugin not found` 不再进入 Node 缺失分支；下载按钮复用统一外链打开；开发能力使用 `http://localhost:1420/*`；`allow-app-commands` 覆盖全部 Rust 注册命令，避免只授权 MCP 后破坏文件、Skill、密钥等既有能力。
+- Windows 运行本地 stdio 时先解析 `npx.cmd` 的 PATH、`Program Files/nodejs` 和用户 npm 常见目录，再通过 `cmd.exe /C` 启动。App 不打包 Node、Playwright 或 Chromium。
+- 已验证：用户在最新开发版点击 Playwright 连接成功；MCP 专项 `7/7`、完整 focused、Rust `396 passed / 1 ignored`、TypeScript、Desktop quick build 与产物审计通过；`npx -y @playwright/mcp@0.0.79 --help` 真实成功。
+- 待验证：尚未发布包含本修复的新版本，也未在从未安装 Node 的干净 Windows/macOS 上完整走完“下载 Node -> 安装 -> 重新检测 -> npm 下载 MCP -> 工具发现”。因此 `v2.1.15` 的理论链路已闭环，但不能提前记录为所有外部用户真机通过。

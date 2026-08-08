@@ -60,6 +60,24 @@ test('legacy product-only paths are removed from the memory repository', () => {
   assert.deepEqual(legacyPaths.filter(existsSync), [])
 })
 
+test('Jina web tools are removed from the memory product', () => {
+  const removedPaths = [
+    'jina-adapter',
+    'src/utils/webReader.ts',
+    'src/utils/webSearch.ts',
+    'src/utils/__tests__/webReader.test.ts',
+    'src/utils/__tests__/webSearch.test.ts',
+  ]
+  const activeSources = [
+    'src/components/memory/MemoryWorkbench.vue',
+    'src/runtime/memory/memoryChat.ts',
+    'src/runtime/direct/directEngine.ts',
+  ].map(source).join('\n')
+
+  assert.deepEqual(removedPaths.filter(existsSync), [])
+  assert.doesNotMatch(activeSources, /read_url|web_search|webSearchEnabled|runWebSearch/i)
+})
+
 test('Studio and OpenCode build paths are removed', () => {
   const pkg = JSON.parse(source('package.json'))
   const vite = source('vite.config.ts')

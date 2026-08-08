@@ -99,7 +99,6 @@ const input = ref('')
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
-const webSearchEnabled = ref(false)
 const mentionOpen = ref(false)
 const executionMode = ref<ConversationMode>('memory')
 const modelPickerOpen = ref(false)
@@ -259,10 +258,8 @@ const projectOwner = computed(() => desktopRuntime
 type MemoryMentionOption =
   | { type: 'file'; display: string; description: string; resource: ProjectResource }
   | { type: 'skill'; display: string; description: string; name: string }
-  | { type: 'search'; display: string; description: string }
 
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
-  const search = { type: 'search' as const, display: '联网搜索', description: '仅本轮搜索公开网络' }
   const skills = agentStore.getCustomSkills()
     .filter(skill => skill.enabled !== false)
     .map(skill => ({
@@ -286,11 +283,11 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       description: resource.kind === 'media' ? '项目媒体' : '项目文件',
       resource,
     }))
-  return query.trim() ? [search, ...skills, ...projectOptions] : [search, ...skills.slice(0, 5), ...projectOptions]
+  return query.trim() ? [...skills, ...projectOptions] : [...skills.slice(0, 5), ...projectOptions]
 }
 const mentionKey = (item: MemoryMentionOption) => item.type === 'skill'
   ? `skill:${item.name}`
-  : item.type === 'search' ? 'tool:web_search' : `file:${item.resource.path}`
+  : `file:${item.resource.path}`
 const {
   flat: mentionFlat,
   active: mentionActive,
@@ -823,7 +820,6 @@ async function send() {
       attachments: pendingAttachments,
       files: referencedFiles.value,
       selectedSkillNames: selectedSkillNames.value,
-      webSearchEnabled: webSearchEnabled.value,
       recordSceneVideo,
       signal: abortController.signal,
       onToolEvent: updateRunTool,
@@ -870,7 +866,6 @@ async function send() {
     attachments.value = []
     referencedFiles.value = []
     selectedSkillNames.value = []
-    webSearchEnabled.value = false
     input.value = ''
     setEditorText(composerRef.value, '')
     streamingText.value = ''
@@ -961,8 +956,6 @@ function memoryToolLabel(name: string): string {
     export_markdown_slides: '生成幻灯片',
     create_3d_scene: '搭建 3D 白膜',
     terminal: '执行命令',
-    read_url: '读取网页',
-    web_search: '搜索网络',
   } as Record<string, string>)[name] || '使用扩展工具'
 }
 
@@ -1155,8 +1148,6 @@ async function selectMention(option: MemoryMentionOption) {
     executionMode.value = 'memory'
     if (option.type === 'skill') {
       if (!selectedSkillNames.value.includes(option.name)) selectedSkillNames.value.push(option.name)
-    } else if (option.type === 'search') {
-      webSearchEnabled.value = true
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {
@@ -1180,7 +1171,6 @@ function selectExecutionMode(mode: ConversationMode) {
     attachments.value = []
     referencedFiles.value = []
     selectedSkillNames.value = []
-    webSearchEnabled.value = false
   }
 }
 
@@ -1863,13 +1853,6 @@ function readDataUrl(file: File): Promise<string> {
             <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
           </div>
         </div>
-        <div v-if="webSearchEnabled" class="memory-attachments memory-references">
-          <div class="memory-attachment-chip">
-            <JcIcon name="search" />
-            <span class="memory-attachment-name">联网搜索</span>
-            <button title="关闭本轮联网搜索" @click="webSearchEnabled = false">×</button>
-          </div>
-        </div>
         <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(error) }" aria-live="polite">
           <div class="memory-run-head">
             <JcIcon :name="error ? 'error' : status === '已完成' ? 'check_circle' : status === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !error }" />
@@ -1903,7 +1886,7 @@ function readDataUrl(file: File): Promise<string> {
               @click="selectMention(item)"
               @pointermove="setMentionActive(mentionKey(item))"
             >
-              <JcIcon :name="item.type === 'search' ? 'search' : item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
+              <JcIcon :name="item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
               <span class="memory-mention-name">{{ item.display }}</span>
               <span class="memory-mention-kind">{{ item.type === 'skill' ? 'Skill' : item.description }}</span>
             </button>
