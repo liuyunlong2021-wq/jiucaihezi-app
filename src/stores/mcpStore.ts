@@ -135,7 +135,7 @@ export const useMcpStore = defineStore('mcp', () => {
     if (!server) return
     server.status = status
     server.error = error
-    if (status === 'disconnected') {
+    if (status !== 'connected') {
       tools.value.delete(id)
     }
     persist()

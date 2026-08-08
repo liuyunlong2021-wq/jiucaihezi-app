@@ -11,6 +11,15 @@ struct McpStdioProcess {
     stdin: tokio::process::ChildStdin,
 }
 
+#[cfg(unix)]
+fn exit_signal(status: &std::process::ExitStatus) -> Option<String> {
+    use std::os::unix::process::ExitStatusExt;
+    status.signal().map(|signal| signal.to_string())
+}
+
+#[cfg(not(unix))]
+fn exit_signal(_status: &std::process::ExitStatus) -> Option<String> { None }
+
 static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -21,8 +30,20 @@ pub async fn mcp_spawn_stdio(
     cwd: Option<String>,
     env: Option<HashMap<String, String>>,
     on_stdout: Channel<String>,
+    on_stderr: Channel<String>,
+    on_exit: Channel<String>,
 ) -> Result<String, String> {
-    let resolved_command = resolve_local_binary(&command);
+    let mut resolved_command = resolve_local_binary(&command);
+    let mut resolved_args = args;
+    if command.replace('\\', "/").ends_with("/tsx/dist/cli.mjs") {
+        for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node"] {
+            if std::path::Path::new(candidate).exists() {
+                resolved_command = std::path::PathBuf::from(candidate);
+                resolved_args.insert(0, command.clone());
+                break;
+            }
+        }
+    }
     #[cfg(windows)]
     let mut cmd = if resolved_command
         .extension()
@@ -36,7 +57,7 @@ pub async fn mcp_spawn_stdio(
     };
     #[cfg(not(windows))]
     let mut cmd = Command::new(&resolved_command);
-    cmd.args(args)
+    cmd.args(resolved_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
@@ -69,6 +90,7 @@ pub async fn mcp_spawn_stdio(
     tokio::spawn(async move {
         let mut lines = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = lines.next_line().await {
+            let _ = on_stderr.send(line.clone());
             eprintln!("[MCP stderr:{stderr_handle_id}] {line}");
         }
     });
@@ -77,8 +99,28 @@ pub async fn mcp_spawn_stdio(
         .lock()
         .await
         .insert(handle_id.clone(), McpStdioProcess { child, stdin });
+    let exit_handle_id = handle_id.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let mut processes = MCP_PROCESSES.lock().await;
+            let Some(process) = processes.get_mut(&exit_handle_id) else { break };
+            match process.child.try_wait() {
+                Ok(Some(status)) => {
+                    let _ = on_exit.send(serde_json::json!({
+                            "code": status.code(),
+                            "signal": exit_signal(&status),
+                    }).to_string());
+                    break;
+                }
+                Ok(None) => {}
+                Err(_) => break,
+            }
+        }
+    });
     Ok(handle_id)
 }
+
 
 #[tauri::command]
 pub async fn mcp_write_stdin(handle_id: String, message: String) -> Result<(), String> {
@@ -109,4 +151,14 @@ pub async fn mcp_kill_stdio(handle_id: String) -> Result<(), String> {
         let _ = process.child.kill().await;
     }
     Ok(())
+}
+
+#[tauri::command]
+pub fn resolve_mcp_node() -> Result<String, String> {
+    for candidate in ["/opt/homebrew/bin/node", "/usr/local/bin/node"] {
+        if std::path::Path::new(candidate).exists() { return Ok(candidate.to_string()); }
+    }
+    let candidate = resolve_local_binary("node");
+    candidate.exists().then(|| candidate.to_string_lossy().into_owned())
+        .ok_or_else(|| "找不到 Node.js 运行时".to_string())
 }

@@ -32,6 +32,7 @@
           "mcp_spawn_stdio",
           "mcp_write_stdin",
           "mcp_kill_stdio",
+          "resolve_mcp_node",
           "save_generated_file",
           "dev_detect_project",
           "dev_list_files",

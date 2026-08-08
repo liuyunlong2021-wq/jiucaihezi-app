@@ -6,6 +6,7 @@ import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprot
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
 import { McpStdioTransport } from './mcpStdioTransport'
+import type { McpStdioDiagnostics } from './mcpStdioTransport'
 import { createMcpOAuthProvider, McpOAuthInteractionRequiredError } from './mcpOAuthProvider'
 
 // ─── Types ───────────────────────────────────────────
@@ -33,6 +34,24 @@ export function mcpOAuthPostAuthFailureMessage(hasAccessToken: boolean): string 
 // ─── Connection pool ─────────────────────────────────
 
 const connections = new Map<string, McpConnectionState>()
+
+const STDIO_TIMEOUT = 30_000
+const TOOL_TIMEOUT = 120_000
+
+async function normalizeStdioConfig(config: McpServerConfig): Promise<McpServerConfig> {
+  if (config.transport !== 'stdio' || !config.command) return config
+  const command = config.command.replaceAll('\\', '/')
+  const isTsx = /(?:^|\/)tsx(?:\.cmd)?$/.test(command) || /\/tsx\/dist\/cli\.mjs$/.test(command)
+  if (!isTsx) return config
+  let node = ''
+  try { node = await (await import('@tauri-apps/api/core')).invoke<string>('resolve_mcp_node') } catch { /* web/tests */ }
+  if (!node) node = String((globalThis as { process?: { execPath?: string } }).process?.execPath || '')
+  if (!node) return config
+  const args = [...(config.args || [])]
+  if (/\/tsx\/dist\/cli\.mjs$/.test(command)) args.unshift(config.command)
+  else args.unshift(command)
+  return { ...config, command: node, args }
+}
 
 function createOAuthDiscoveryState(config: McpServerConfig): OAuthDiscoveryState | undefined {
   if (!config.oauthAuthorizationServerUrl || !config.oauthAuthorizationEndpoint || !config.oauthTokenEndpoint) return undefined
@@ -122,19 +141,32 @@ export async function connectMcpServer(config: McpServerConfig, options: { inter
   // Disconnect if already connected
   await disconnectMcpServer(config.id)
 
-  const connection = await createMcpConnection(config, options.interactiveAuth !== false)
+  const normalizedConfig = await normalizeStdioConfig(config)
+  const connection = await createMcpConnection(normalizedConfig, options.interactiveAuth !== false)
   connections.set(config.id, connection)
   try {
-    await connection.client?.connect(connection.transport!)
+    await connection.client?.connect(connection.transport!, { timeout: STDIO_TIMEOUT })
   } catch (error) {
     if (error instanceof UnauthorizedError || error instanceof McpOAuthInteractionRequiredError) {
       throw new McpAuthorizationRequiredError(config.id)
     }
-    connections.delete(config.id)
-    throw error
+    await disconnectMcpServer(config.id)
+    throw withMcpDiagnostics(error, connection)
   }
+  try {
+    return await listMcpTools(config.id, connection.client)
+  } catch (error) {
+    await disconnectMcpServer(config.id)
+    throw withMcpDiagnostics(error, connection)
+  }
+}
 
-  return await listMcpTools(config.id, connection.client)
+function withMcpDiagnostics(error: unknown, connection: McpConnectionState): Error {
+  const transport = connection.transport as McpStdioTransport
+  const details = typeof transport.diagnostics === 'function' ? transport.diagnostics() as McpStdioDiagnostics : null
+  if (!details) return error instanceof Error ? error : new Error(String(error))
+  const message = error instanceof Error ? error.message : String(error)
+  return new Error(`${message}\nMCP diagnostics: command=${details.command}; args=${JSON.stringify(details.args)}; cwd=${details.cwd || ''}; methods=${details.methods.join(',')}; stderr=${details.stderr.join(' | ')}; exitCode=${details.exitCode ?? 'unknown'}; signal=${details.signal ?? 'unknown'}`)
 }
 
 export async function completeMcpServerAuthorization(serverId: string, authorizationCode: string): Promise<McpToolSchema[]> {
@@ -187,7 +219,7 @@ export async function restoreMcpServers(input: McpRestoreStoreLike & {
 async function listMcpTools(serverId: string, client: Client | null): Promise<McpToolSchema[]> {
   if (!client) throw new Error(`MCP server "${serverId}" 未连接`)
   // List tools
-  const result = await client.listTools()
+  const result = await client.listTools(undefined, { timeout: STDIO_TIMEOUT })
   const tools: McpToolSchema[] = (result.tools || []).map(tool => ({
     name: `mcp__${serverId}__${tool.name}`,
     description: tool.description || '',
@@ -228,10 +260,16 @@ export async function callMcpTool(
     ? toolName.slice(`mcp__${serverId}__`.length)
     : toolName
 
-  const result = await conn.client.callTool({
-    name: originalName,
-    arguments: args,
-  })
+  let result
+  try {
+    result = await conn.client.callTool({
+      name: originalName,
+      arguments: args,
+    }, undefined, { timeout: TOOL_TIMEOUT })
+  } catch (error) {
+    await disconnectMcpServer(serverId)
+    throw withMcpDiagnostics(error, conn)
+  }
 
   // Serialize result
   const contents = (result.content as any[]) || []

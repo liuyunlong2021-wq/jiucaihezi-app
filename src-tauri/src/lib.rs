@@ -1375,6 +1375,7 @@ pub fn run() {
             commands::mcp::mcp_spawn_stdio,
             commands::mcp::mcp_write_stdin,
             commands::mcp::mcp_kill_stdio,
+            commands::mcp::resolve_mcp_node,
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,

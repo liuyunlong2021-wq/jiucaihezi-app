@@ -16,12 +16,25 @@ export interface McpStdioOptions {
   env?: Record<string, string>
 }
 
+export interface McpStdioDiagnostics {
+  command: string
+  args: string[]
+  cwd?: string
+  methods: string[]
+  stderr: string[]
+  exitCode?: number | null
+  signal?: string | null
+}
+
 export class McpStdioTransport implements Transport {
   private _handleId: string | null = null
   private _options: McpStdioOptions
   private _onMessage?: (message: JSONRPCMessage) => void
   private _onError?: (error: Error) => void
   private _onClose?: () => void
+  private _stderr: string[] = []
+  private _methods: string[] = []
+  private _exit: { code?: number | null; signal?: string | null } = {}
 
   constructor(options: McpStdioOptions) {
     this._options = options
@@ -29,9 +42,16 @@ export class McpStdioTransport implements Transport {
 
   async start(): Promise<void> {
     const channel = new Channel<string>()
+    const stderr = new Channel<string>()
+    stderr.onmessage = line => this._stderr.push(line)
+    const exit = new Channel<string>()
+    exit.onmessage = raw => {
+      try { this._exit = JSON.parse(raw) } catch { /* diagnostics only */ }
+      this._onClose?.()
+      this.onclose?.()
+    }
     channel.onmessage = (line: string) => {
       if (line === '__MCP_EOF__') {
-        this._onClose?.()
         return
       }
       this._processLine(line)
@@ -44,6 +64,8 @@ export class McpStdioTransport implements Transport {
         cwd: this._options.cwd || null,
         env: this._options.env || null,
         onStdout: channel,
+        onStderr: stderr,
+        onExit: exit,
       })
     } catch (err: any) {
       this._onError?.(new Error(`MCP stdio spawn failed: ${err}`))
@@ -57,6 +79,7 @@ export class McpStdioTransport implements Transport {
     }
 
     const json = JSON.stringify(message)
+    if ('method' in message && typeof message.method === 'string') this._methods.push(message.method)
     try {
       await invoke('mcp_write_stdin', {
         handleId: this._handleId,
@@ -96,5 +119,9 @@ export class McpStdioTransport implements Transport {
     } catch {
       // Ignore non-JSON lines (e.g., stderr, logs)
     }
+  }
+
+  diagnostics(): McpStdioDiagnostics {
+    return { ...this._options, methods: [...this._methods], stderr: [...this._stderr], ...this._exit }
   }
 }
