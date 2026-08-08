@@ -74,6 +74,19 @@ test('wiki tool contract exposes evidence, scoped replace, and no bare link acti
   assert.equal(properties.target, undefined)
 })
 
+test('3D scene tool schema requires a valid nested Storyboarder character', () => {
+  const tool = buildMemoryDesktopToolDefinitions().find(item => item.function.name === 'create_3d_scene')!
+  const object = (tool.function.parameters.properties as any).objects.items
+  const character = object.properties.character
+  const quaternion = character.properties.bones.additionalProperties
+
+  assert.deepEqual(character.required, ['model'])
+  assert.deepEqual(quaternion, {
+    type: 'array', minItems: 4, maxItems: 4,
+    items: { type: 'number', minimum: -1, maximum: 1 },
+  })
+})
+
 test('desktop wiki evidence fingerprints the original project bytes', async () => {
   const execute = createDesktopProjectToolExecutor({ projectDir: '/tmp/project', invoke: fixtureInvoke })
 

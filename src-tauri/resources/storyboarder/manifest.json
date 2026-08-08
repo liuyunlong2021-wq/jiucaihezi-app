@@ -1,0 +1,14 @@
+{
+  "source": "https://github.com/wonderunit/storyboarder",
+  "commit": "8b81a25c71d5f7ca46e8d5b8e3d4f7b3968f95c2",
+  "authorization": "Redistribution permission confirmed by the project owner via email from the rights holder on 2026-08-08; the email is retained by the project owner.",
+  "assets": [
+    { "path": "models/adult-male.glb", "sourcePath": "src/data/shot-generator/dummies/gltf/adult-male.glb", "bytes": 2481908, "sha256": "c77cba28bb0b71ee252f797bbbd7fe2a289a0ec4682bd9458e74a710b1488367" },
+    { "path": "models/adult-female.glb", "sourcePath": "src/data/shot-generator/dummies/gltf/adult-female.glb", "bytes": 2044412, "sha256": "95782948eebc95c9c7784db98cc0c58cd7c38715f879a9956b0281310e59bb81" },
+    { "path": "models/teen-male.glb", "sourcePath": "src/data/shot-generator/dummies/gltf/teen-male.glb", "bytes": 1981332, "sha256": "bb8c0fc2389bfbbbc1a6b92d73f024245baa6cb0096260161ba63f327af1d355" },
+    { "path": "models/teen-female.glb", "sourcePath": "src/data/shot-generator/dummies/gltf/teen-female.glb", "bytes": 1969388, "sha256": "2432ff485efce06906ef287b84281b5baffac543dd6bf9b5471f6ea124302fa5" },
+    { "path": "models/child.glb", "sourcePath": "src/data/shot-generator/dummies/gltf/child.glb", "bytes": 1677512, "sha256": "412ce0641cc43f6ba511bf113108f74118d60db3c2d9af4ec2cb462ca577b574" },
+    { "path": "src/assets/storyboarder/poses.json", "sourcePath": "src/js/shared/reducers/shot-generator-presets/poses.json", "bytes": 1709405, "sha256": "1511b117fa929ffd120c7511b3dd4148f554cac2def675336388b8a2f4bf9647" },
+    { "path": "src/assets/storyboarder/hand-poses.json", "sourcePath": "src/js/shared/reducers/shot-generator-presets/hand-poses.json", "bytes": 98483, "sha256": "df88e40fa6f457eefea575368963ca437e2a3833f1df351edad9309fb8ba8e86" }
+  ]
+}

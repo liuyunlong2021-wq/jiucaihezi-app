@@ -575,6 +575,35 @@ test('3D scene editor records manual camera movement without requiring a timelin
   assert.match(workbench, /'dev_export_scene_video'/)
 })
 
+test('3D scene editor safely switches and loads Storyboarder characters', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+  const assets = source('src/runtime/memory/storyboarderAssets.ts')
+
+  assert.match(editor, /function setCharacterModel[\s\S]{0,300}delete item\.character\.bones[\s\S]{0,200}buildScene\(\)/)
+  assert.match(editor, /const characterLoading = ref\(0\)/)
+  assert.match(editor, /const characterLoadError = ref\(''\)/)
+  assert.match(editor, /characterLoading\.value\+\+/)
+  assert.match(editor, /characterLoading\.value--/)
+  assert.match(editor, /v-if="characterLoadError"[^>]*>\{\{ characterLoadError \}\}/)
+  assert.match(editor, /:disabled="characterLoading > 0 \|\| Boolean\(characterLoadError\)"/)
+  assert.match(editor, /cloneSkeleton\(template\)/)
+  assert.match(editor, /const node = makePrimitive\(item\)[\s\S]{0,900}hydrateCharacter\(node, item, token\)/)
+  assert.match(assets, /import poses from '@\/assets\/storyboarder\/poses\.json'/)
+  assert.match(assets, /import handPoses from '@\/assets\/storyboarder\/hand-poses\.json'/)
+})
+
+test('3D scene editor releases rebuilt scenes and keeps bone selection stable', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+
+  assert.match(editor, /if \(root\) \{ scene\.remove\(root\); disposeObject\(root\) \}/)
+  assert.match(editor, /storyboarderSharedResource/)
+  assert.match(editor, /disposeObject\(root\)/)
+  assert.match(editor, /ignoreScenePick = true[\s\S]{0,300}queueMicrotask\(\(\) => \{ ignoreScenePick = false \}\)/)
+  assert.match(editor, /if \(manualRecording\.value \|\| ignoreScenePick \|\|/)
+  assert.match(editor, /\.scene3d-tools button, \.scene3d-character-tools button, \.scene3d-cameras button/)
+  assert.match(editor, /\.scene3d-character-tools button:hover, \.scene3d-character-tools button\.active/)
+})
+
 test('3D scene preview sends edits with the current path and refreshes after completion', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 

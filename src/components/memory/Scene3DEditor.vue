@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import * as THREE from 'three'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
-import { evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
+import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
+import { STORYBOARDER_BONE_NAMES, evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DCharacter, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
+import { STORYBOARDER_CHARACTER_MODELS, STORYBOARDER_EDITABLE_BONES, STORYBOARDER_HAND_POSES, STORYBOARDER_POSES, handPosePreset, posePreset, resolveStoryboarderModelUrl } from '@/runtime/memory/storyboarderAssets'
 
 const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean }>(), { recordingOnly: false })
 const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string] }>()
@@ -17,6 +20,9 @@ const recordingError = ref('')
 const renderRevision = ref(0)
 const playing = ref(false)
 const currentTime = ref(0)
+const activeBoneName = ref('')
+const characterLoading = ref(0)
+const characterLoadError = ref('')
 let document = parseScene3DDocument(props.document)
 let scene: THREE.Scene | null = null
 let root: THREE.Group | null = null
@@ -33,14 +39,28 @@ let manualRecorder: MediaRecorder | null = null
 let manualChunks: Blob[] = []
 let manualRecordingFailed = false
 let discardManualRecording = false
+let ignoreScenePick = false
 let raycaster: THREE.Raycaster | null = null
 let playStartedAt = 0
 let stepLabel: THREE.Sprite | null = null
+let sceneBuildToken = 0
+const characterTemplates = new Map<string, THREE.Object3D>()
+const characterLoads = new Map<string, Promise<THREE.Object3D | null>>()
 const selectable = new Map<string, THREE.Object3D>()
 
 const currentAspect = computed(() => { renderRevision.value; return document.canvas.aspect })
 const savedCameras = computed(() => { renderRevision.value; return document.savedCameras })
 const duration = computed(() => { renderRevision.value; return document.duration || 0 })
+const selectedCharacter = computed(() => {
+  renderRevision.value
+  const item = document.objects.find(item => item.id === selectedId.value)
+  return item?.type === 'person' && item.character ? item : null
+})
+const poseOptions = computed(() => {
+  const preferred = ['stand', 'sit chair', 'crouch inspect', 'walk', 'run', 'point', 'cross arms']
+  return preferred.map(name => STORYBOARDER_POSES.find(item => item.name.toLowerCase() === name)).filter((item): item is (typeof STORYBOARDER_POSES)[number] => Boolean(item))
+})
+const handOptions = computed(() => ['Relaxed', 'Flat Spread', 'Point', 'Peace', 'Fist'].map(name => STORYBOARDER_HAND_POSES.find(item => item.name === name)).filter((item): item is (typeof STORYBOARDER_HAND_POSES)[number] => Boolean(item)))
 const defaultCameras = computed(() => {
   renderRevision.value
   const characters = [
@@ -100,6 +120,86 @@ function addLabel(parent: THREE.Object3D, label: string, color: string, y = 1.8)
   sprite.position.set(0, y, 0)
   sprite.scale.set(width / 1100, .036, 1)
   parent.add(sprite)
+}
+
+function disposeObject(object: THREE.Object3D, includeShared = false) {
+  object.traverse(child => {
+    if (!includeShared && child.userData.storyboarderSharedResource) return
+    const mesh = child as THREE.Mesh
+    if (!(child as THREE.Sprite).isSprite) mesh.geometry?.dispose?.()
+    const materials = Array.isArray(mesh.material) ? mesh.material : mesh.material ? [mesh.material] : []
+    materials.forEach(item => {
+      Object.values(item).forEach(value => { if (value instanceof THREE.Texture) value.dispose() })
+      item.dispose()
+    })
+  })
+}
+
+function setPresetRotation(root: THREE.Object3D, state: Record<string, { rotation?: { x?: number; y?: number; z?: number } }> | undefined, mirror = false) {
+  for (const [name, entry] of Object.entries(state || {})) {
+    const bone = root.getObjectByName(mirror ? name.replace(/^Right/, 'Left') : name)
+    const rotation = entry.rotation
+    if (!bone || !rotation) continue
+    bone.rotation.set(Number(rotation.x || 0), mirror ? -Number(rotation.y || 0) : Number(rotation.y || 0), mirror ? -Number(rotation.z || 0) : Number(rotation.z || 0))
+  }
+}
+
+function applyCharacterState(root: THREE.Object3D, character: Scene3DCharacter) {
+  root.traverse(node => {
+    const bind = node.userData.storyboarderBindQuaternion as [number, number, number, number] | undefined
+    if (bind) node.quaternion.fromArray(bind)
+  })
+  for (const [name, values] of Object.entries(character.bones || {})) {
+    const bone = root.getObjectByName(name)
+    if (bone) bone.quaternion.fromArray(values)
+  }
+}
+
+async function storyboarderTemplate(model: Scene3DCharacter['model']): Promise<THREE.Object3D | null> {
+  const cached = characterTemplates.get(model)
+  if (cached) return cached
+  const pending = characterLoads.get(model)
+  if (pending) return pending
+  characterLoading.value++
+  characterLoadError.value = ''
+  const load = resolveStoryboarderModelUrl(model).then(url => new Promise<THREE.Object3D | null>((resolve, reject) => {
+    if (!url) throw new Error('未找到人物资源')
+    new GLTFLoader().load(url, gltf => {
+      characterTemplates.set(model, gltf.scene)
+      resolve(gltf.scene)
+    }, undefined, () => reject(new Error('人物模型加载失败')))
+  })).catch(error => {
+    console.warn('[Scene3DEditor] Storyboarder 人物资源路径解析失败', error)
+    characterLoadError.value = '人物模型加载失败，已显示基础白模'
+    return null
+  }).finally(() => {
+    characterLoading.value--
+    characterLoads.delete(model)
+  })
+  characterLoads.set(model, load)
+  return load
+}
+
+async function hydrateCharacter(node: THREE.Object3D, item: Scene3DObject, token: number) {
+  if (!item.character) return
+  const template = await storyboarderTemplate(item.character.model)
+  if (!template || token !== sceneBuildToken || !node.parent) return
+  const label = node.children.find(child => child.name === 'scene-label')
+  node.children.slice().forEach(child => {
+    if (child === label) return
+    node.remove(child); disposeObject(child)
+  })
+  const model = cloneSkeleton(template)
+  model.name = 'scene-character'
+  model.scale.setScalar(item.character.scale)
+  model.traverse(child => {
+    const mesh = child as THREE.Mesh
+    if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; child.userData.storyboarderSharedResource = true }
+    if ((child as THREE.Bone).isBone) child.userData.storyboarderBindQuaternion = child.quaternion.toArray()
+  })
+  applyCharacterState(model, item.character)
+  node.add(model)
+  renderRevision.value++
 }
 
 function makePerson(color: string, pose = 'standing'): THREE.Group {
@@ -238,7 +338,8 @@ function setSelectable(node: THREE.Object3D, id: string, kind: 'object' | 'forma
 
 function buildScene() {
   if (!scene) return
-  if (root) scene.remove(root)
+  const token = ++sceneBuildToken
+  if (root) { scene.remove(root); disposeObject(root) }
   root = new THREE.Group()
   selectable.clear()
   const nodes = new Map<string, THREE.Object3D>()
@@ -248,6 +349,7 @@ function buildScene() {
     node.position.copy(vector(item.position)); node.rotation.set(...(item.rotation || [0, 0, 0]))
     if (item.type === 'person') addLabel(node, item.label || '', item.color || '#ffffff', 1.8)
     setSelectable(node, item.id, 'object'); nodes.set(item.id, node); root.add(node)
+    if (item.character) void hydrateCharacter(node, item, token)
   }
   for (const item of document.formations) {
     const node = makeFormation(item)
@@ -347,7 +449,11 @@ function createCameraControls() {
   transform.setTranslationSnap(document.canvas.snap ? 1 : null)
   transform.addEventListener('dragging-changed', event => {
     orbit!.enabled = !event.value
-    if (!event.value) persistSelection()
+    if (!event.value) {
+      ignoreScenePick = true
+      activeBoneName.value ? persistCharacterBones() : persistSelection()
+      queueMicrotask(() => { ignoreScenePick = false })
+    }
   })
   transformHelper = transform.getHelper()
   scene?.add(transformHelper)
@@ -399,13 +505,79 @@ function updateGrid() {
 
 function attachSelection(id: string) {
   selectedId.value = id
+  activeBoneName.value = ''
   transform?.detach()
+  transform?.setMode('translate')
   const target = selectable.get(id)
   if (target) transform?.attach(target)
 }
 
+function characterNode() {
+  const target = selectable.get(selectedId.value)
+  return target?.getObjectByName('scene-character') || null
+}
+
+function attachBone(name: string) {
+  const target = characterNode()
+  const bone = target?.getObjectByName(name)
+  if (!bone || !transform) return
+  activeBoneName.value = name
+  transform.setMode('rotate')
+  transform.detach()
+  transform.attach(bone)
+}
+
+function rotateCharacter() {
+  const target = selectable.get(selectedId.value)
+  if (!target || !transform) return
+  activeBoneName.value = ''
+  transform.setMode('rotate')
+  transform.detach()
+  transform.attach(target)
+}
+
+function setCharacterModel(model: Scene3DCharacter['model']) {
+  const item = selectedCharacter.value
+  if (!item?.character || item.character.model === model) return
+  item.character.model = model
+  delete item.character.bones
+  buildScene()
+  persist()
+}
+
+function adjustCharacterScale(amount: number) {
+  const item = selectedCharacter.value
+  const target = characterNode()
+  if (!item?.character || !target) return
+  item.character.scale = Math.max(0.1, Math.min(10, Math.round((item.character.scale + amount) * 10) / 10))
+  target.scale.setScalar(item.character.scale)
+  persist()
+}
+
+function applyPose(id: string) {
+  const item = selectedCharacter.value
+  const target = characterNode()
+  const preset = posePreset(id)
+  if (!item?.character || !target || !preset) return
+  target.traverse(node => {
+    const bind = node.userData.storyboarderBindQuaternion as [number, number, number, number] | undefined
+    if (bind) node.quaternion.fromArray(bind)
+  })
+  setPresetRotation(target, preset.state.skeleton)
+  persistCharacterBones()
+}
+
+function applyHand(id: string, side: 'left' | 'right') {
+  const item = selectedCharacter.value
+  const target = characterNode()
+  const preset = handPosePreset(id)
+  if (!item?.character || !target || !preset) return
+  setPresetRotation(target, preset.state.handSkeleton, side === 'left')
+  persistCharacterBones()
+}
+
 function pick(event: PointerEvent) {
-  if (manualRecording.value || !canvas.value || !camera || !root || !raycaster || transform?.dragging) return
+  if (manualRecording.value || ignoreScenePick || !canvas.value || !camera || !root || !raycaster || transform?.dragging) return
   const rect = canvas.value.getBoundingClientRect()
   const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
   raycaster.setFromCamera(pointer, activeCamera())
@@ -424,8 +596,24 @@ function persistSelection() {
     if (group) group.position = tuple(target.position)
   } else {
     const item = selection.kind === 'object' ? document.objects.find(item => item.id === selection.id) : document.formations.find(item => item.id === selection.id)
-    if (item) item.position = tuple(target.position)
+    if (item) {
+      item.position = tuple(target.position)
+      if ('rotation' in item) item.rotation = [target.rotation.x, target.rotation.y, target.rotation.z]
+    }
   }
+  persist()
+}
+
+function persistCharacterBones() {
+  const item = selectedCharacter.value
+  const target = characterNode()
+  if (!item?.character || !target) return
+  const bones: Record<string, [number, number, number, number]> = {}
+  target.traverse(node => {
+    if (!((node as THREE.Bone).isBone && STORYBOARDER_BONE_NAMES.includes(node.name as (typeof STORYBOARDER_BONE_NAMES)[number]))) return
+    bones[node.name] = node.quaternion.toArray() as [number, number, number, number]
+  })
+  item.character.bones = bones
   persist()
 }
 
@@ -569,12 +757,10 @@ onBeforeUnmount(() => {
   const recorder = manualRecorder
   if (recorder && recorder.state !== 'inactive') recorder.stop()
   cancelAnimationFrame(animationFrame); resizeObserver?.disconnect(); canvas.value?.removeEventListener('pointerup', pick)
-  orbit?.dispose(); transform?.dispose(); renderer?.dispose(); root?.traverse(node => {
-    const mesh = node as THREE.Mesh
-    mesh.geometry?.dispose?.()
-    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-    materials.forEach(item => item?.dispose?.())
-  })
+  orbit?.dispose(); transform?.dispose(); renderer?.dispose()
+  if (root) disposeObject(root)
+  characterTemplates.forEach(template => disposeObject(template, true))
+  characterTemplates.clear()
 })
 </script>
 
@@ -616,6 +802,23 @@ onBeforeUnmount(() => {
           <span class="scene3d-time">{{ currentTime.toFixed(1) }} / {{ duration.toFixed(1) }}s</span>
         </template>
       </div>
+      <div v-if="selectedCharacter" class="scene3d-character-tools">
+        <button v-for="model in STORYBOARDER_CHARACTER_MODELS" :key="model" :class="{ active: selectedCharacter.character?.model === model }" :title="`切换人物：${model}`" @click="setCharacterModel(model)">{{ model }}</button>
+        <button title="移动整个人物" @click="attachSelection(selectedCharacter.id)">移动</button>
+        <button title="旋转整个人物" @click="rotateCharacter">转向</button>
+        <button title="人物缩小" @click="adjustCharacterScale(-0.1)">−</button>
+        <span class="scene3d-character-name">{{ selectedCharacter.character?.scale.toFixed(1) }}x</span>
+        <button title="人物放大" @click="adjustCharacterScale(0.1)">+</button>
+        <span class="scene3d-divider"></span>
+        <button v-for="item in poseOptions" :key="item.id" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`应用姿势：${item.name}`" @click="applyPose(item.id)">{{ item.name }}</button>
+        <span class="scene3d-divider"></span>
+        <button v-for="item in handOptions" :key="`right-${item.id}`" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`右手：${item.name}`" @click="applyHand(item.id, 'right')">右{{ item.name }}</button>
+        <button v-for="item in handOptions" :key="`left-${item.id}`" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`左手：${item.name}`" @click="applyHand(item.id, 'left')">左{{ item.name }}</button>
+        <span class="scene3d-divider"></span>
+        <button v-for="name in STORYBOARDER_EDITABLE_BONES" :key="name" :class="{ active: activeBoneName === name }" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`旋转骨骼：${name}`" @click="attachBone(name)">{{ name }}</button>
+        <span v-if="characterLoading" class="scene3d-character-name">人物加载中…</span>
+        <span v-if="characterLoadError" class="scene3d-recording-error">{{ characterLoadError }}</span>
+      </div>
     </header>
     <div class="scene3d-stage" :style="{ '--scene-aspect': String(aspectRatio(currentAspect)) }">
       <canvas ref="canvas" aria-label="3D 白膜场景"></canvas>
@@ -635,13 +838,16 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .scene3d-editor { min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: #15201c; color: #e8efeb; }
-.scene3d-toolbar { display: flex; align-items: center; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
+.scene3d-toolbar { display: flex; align-items: flex-start; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
 .scene3d-tools { display: flex; align-items: center; gap: 3px; }
-.scene3d-tools button, .scene3d-cameras button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.scene3d-character-tools { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; max-width: 58vw; overflow-x: auto; padding-left: 8px; border-left: 1px solid rgba(216, 235, 223, .16); }
+.scene3d-character-name { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
+.scene3d-tools button, .scene3d-character-tools button, .scene3d-cameras button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
 .scene3d-tools button.recording { color: #ff8f8f; }
 .scene3d-recording-error { color: #ff9d9d; font-size: 11px; white-space: nowrap; }
-.scene3d-tools button:hover, .scene3d-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
+.scene3d-tools button:hover, .scene3d-tools button.active, .scene3d-character-tools button:hover, .scene3d-character-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
+.scene3d-character-tools button:disabled { opacity: .45; cursor: not-allowed; }
 .scene3d-tools button.primary { background: #86c8a5; color: #122018; }
 .scene3d-tools .mso { font-size: 18px; }
 .scene3d-time { min-width: 84px; font-size: 11px; color: #b9c8c0; text-align: center; }

@@ -14,6 +14,14 @@ export interface Scene3DObject {
   size?: [number, number, number]
   end?: [number, number, number]
   pose?: 'standing' | 'sitting' | 'crouching' | 'lying'
+  character?: Scene3DCharacter
+}
+
+export type Scene3DCharacterModel = 'adult-male' | 'adult-female' | 'teen-male' | 'teen-female' | 'child'
+export interface Scene3DCharacter {
+  model: Scene3DCharacterModel
+  scale: number
+  bones?: Record<string, [number, number, number, number]>
 }
 
 export interface Scene3DFormation {
@@ -95,6 +103,19 @@ const ASPECTS = new Set<Scene3DAspect>(['16:9', '9:16', '1:1', '4:3', '3:4'])
 const PROJECTIONS = new Set<Scene3DProjection>(['perspective', 'orthographic'])
 const ANIMATION_ACTIONS = new Set<Scene3DAnimationAction>(['show', 'hide', 'move', 'rotate', 'scale', 'color', 'camera', 'label'])
 const CSS_COLOR = /^(?:#[0-9a-f]{3,8}|[a-z]{3,20})$/i
+const CHARACTER_MODELS = new Set<Scene3DCharacterModel>(['adult-male', 'adult-female', 'teen-male', 'teen-female', 'child'])
+const CHARACTER_SCALE = { minimum: 0.1, maximum: 10 }
+export const STORYBOARDER_BONE_NAMES = [
+  'Hips', 'Spine', 'Spine1', 'Spine2', 'Neck', 'Head', 'LeftEye', 'RightEye',
+  'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand', 'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand',
+  'LeftUpLeg', 'LeftLeg', 'LeftFoot', 'LeftToeBase', 'RightUpLeg', 'RightLeg', 'RightFoot', 'RightToeBase',
+  'LeftHandThumb1', 'LeftHandThumb2', 'LeftHandThumb3', 'LeftHandIndex1', 'LeftHandIndex2', 'LeftHandIndex3',
+  'LeftHandMiddle1', 'LeftHandMiddle2', 'LeftHandMiddle3', 'LeftHandRing1', 'LeftHandRing2', 'LeftHandRing3',
+  'LeftHandPinky1', 'LeftHandPinky2', 'LeftHandPinky3', 'RightHandThumb1', 'RightHandThumb2', 'RightHandThumb3',
+  'RightHandIndex1', 'RightHandIndex2', 'RightHandIndex3', 'RightHandMiddle1', 'RightHandMiddle2', 'RightHandMiddle3',
+  'RightHandRing1', 'RightHandRing2', 'RightHandRing3', 'RightHandPinky1', 'RightHandPinky2', 'RightHandPinky3',
+] as const
+const STORYBOARDER_BONES = new Set<string>(STORYBOARDER_BONE_NAMES)
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${label}必须是对象`)
@@ -149,6 +170,30 @@ function parseCamera(value: unknown, fallbackName = ''): Scene3DCamera {
   }
 }
 
+function quaternion(value: unknown): [number, number, number, number] {
+  if (!Array.isArray(value) || value.length !== 4 || value.some(item => typeof item !== 'number' || !Number.isFinite(item))) throw new Error('人物骨骼四元数无效')
+  const result = value as [number, number, number, number]
+  const normSquared = result.reduce((sum, item) => sum + item * item, 0)
+  if (!Number.isFinite(normSquared) || Math.abs(normSquared - 1) > 0.1) throw new Error('人物骨骼四元数无效')
+  return result
+}
+
+function parseCharacter(value: unknown): Scene3DCharacter {
+  const item = record(value, '人物资源')
+  const model = String(item.model) as Scene3DCharacterModel
+  if (!CHARACTER_MODELS.has(model)) throw new Error('人物模型不在允许清单')
+  const scale = number(item.scale, 1, CHARACTER_SCALE.minimum, CHARACTER_SCALE.maximum)
+  const rawBones = item.bones
+  const bones = rawBones === undefined ? undefined : (() => {
+    const source = record(rawBones, '人物骨骼')
+    return Object.fromEntries(Object.entries(source).map(([name, value]) => {
+      if (!STORYBOARDER_BONES.has(name)) throw new Error(`人物骨骼不在允许清单: ${name}`)
+      return [name, quaternion(value)]
+    }))
+  })()
+  return { model, scale, ...(bones ? { bones } : {}) }
+}
+
 export function parseScene3DDocument(input: unknown): Scene3DDocument {
   const root = record(input, '3D 白膜场景')
   if (root.version !== undefined && root.version !== 1) throw new Error('不支持的 3D 白膜场景版本')
@@ -163,6 +208,7 @@ export function parseScene3DDocument(input: unknown): Scene3DDocument {
   const objects = rawObjects.map((value, index): Scene3DObject => {
     const item = record(value, `对象 ${index + 1}`)
     const type = enumValue(item.type, SHAPES, 'box', '积木类型')
+    if (item.character !== undefined && type !== 'person') throw new Error('Storyboarder 角色只允许人物对象使用')
     const pose = String(item.pose || 'standing')
     if (!['standing', 'sitting', 'crouching', 'lying'].includes(pose)) throw new Error('人物姿势无效')
     return {
@@ -170,6 +216,7 @@ export function parseScene3DDocument(input: unknown): Scene3DDocument {
       ...(text(item.label) ? { label: text(item.label) } : {}), color: color(item.color),
       position: vector(item.position), rotation: vector(item.rotation), size: vector(item.size, [1, 1, 1], 0.01),
       ...(item.end === undefined ? {} : { end: vector(item.end) }), pose: pose as Scene3DObject['pose'],
+      ...(item.character === undefined ? {} : { character: parseCharacter(item.character) }),
     }
   })
 

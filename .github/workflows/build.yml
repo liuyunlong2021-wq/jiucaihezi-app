@@ -344,6 +344,7 @@ jobs:
           New-Item -ItemType Directory -Force $portableDir | Out-Null
 
           Copy-Item "$releaseDir\jiucaihezi-app.exe" (Join-Path $portableDir "韭菜盒子.exe")
+          Copy-Item "$releaseDir\storyboarder" (Join-Path $portableDir "storyboarder") -Recurse
           # 生成 README.txt（Windows 用户解压后可见）
           $readme = @"
           韭菜盒子 — Windows 便携版
@@ -391,6 +392,7 @@ jobs:
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
           $names = $zip.Entries | ForEach-Object { $_.Name }
+          $paths = $zip.Entries | ForEach-Object { $_.FullName.Replace("\", "/") }
           $zip.Dispose()
           $required = @("韭菜盒子.exe", "README.txt")
           foreach ($name in $required) {
@@ -398,6 +400,22 @@ jobs:
               Write-Host "✅ $name"
             } else {
               Write-Host "❌ 缺失: $name"
+              exit 1
+            }
+          }
+          $requiredResources = @(
+            "storyboarder/manifest.json",
+            "storyboarder/models/adult-male.glb",
+            "storyboarder/models/adult-female.glb",
+            "storyboarder/models/teen-male.glb",
+            "storyboarder/models/teen-female.glb",
+            "storyboarder/models/child.glb"
+          )
+          foreach ($path in $requiredResources) {
+            if ($paths | Where-Object { $_ -like "*/$path" }) {
+              Write-Host "✅ $path"
+            } else {
+              Write-Host "❌ 缺失: $path"
               exit 1
             }
           }

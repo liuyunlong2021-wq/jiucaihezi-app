@@ -124,6 +124,11 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
         id: { type: 'string' }, type: { type: 'string', enum: ['person', 'box', 'plane', 'wall', 'entrance', 'cylinder', 'sphere', 'cone', 'line', 'arrow'] },
         label: { type: 'string' }, color: { type: 'string' }, position: vectorProperty, rotation: vectorProperty,
         size: vectorProperty, end: vectorProperty, pose: { type: 'string', enum: ['standing', 'sitting', 'crouching', 'lying'] },
+        character: { type: 'object', additionalProperties: false, required: ['model'], properties: {
+          model: { type: 'string', enum: ['adult-male', 'adult-female', 'teen-male', 'teen-female', 'child'] },
+          scale: { type: 'number', minimum: 0.1, maximum: 10 },
+          bones: { type: 'object', additionalProperties: { type: 'array', minItems: 4, maxItems: 4, items: { type: 'number', minimum: -1, maximum: 1 } }, description: '已确认骨骼名到单位四元数 [x,y,z,w] 的映射' },
+        } },
       } },
     },
     formations: {

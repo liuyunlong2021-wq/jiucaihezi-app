@@ -44,3 +44,20 @@ test('desktop release creation and public download manifest are independent from
   assert.match(downloadJob, /inputs\.publish_tag \|\| github\.ref_name/)
   assert.match(downloadJob, /\/opt\/updates\/latest\.json/)
 })
+
+test('Storyboarder assets are fetchable and included in the Windows portable zip', () => {
+  const csp = tauriConfig.app.security.csp
+  const connectSrc = csp.match(/connect-src ([^;]+)/)?.[1] || ''
+  assert.match(connectSrc, /(?:^|\s)asset:(?:\s|$)/)
+  assert.match(connectSrc, /(?:^|\s)http:\/\/asset\.localhost(?:\s|$)/)
+
+  assert.match(workflow, /Copy-Item "\$releaseDir\\storyboarder" \(Join-Path \$portableDir "storyboarder"\) -Recurse/)
+  for (const path of [
+    'storyboarder/manifest.json',
+    'storyboarder/models/adult-male.glb',
+    'storyboarder/models/adult-female.glb',
+    'storyboarder/models/teen-male.glb',
+    'storyboarder/models/teen-female.glb',
+    'storyboarder/models/child.glb',
+  ]) assert.ok(workflow.includes(`"${path}"`), path)
+})
