@@ -717,3 +717,10 @@
 
 - 用户确认 NewAPI 中必须选择“火山方舟”渠道类型；使用 OpenAI 渠道会把请求错误拼成 `/v1/chat/completions`，不适用于豆包媒体/音频模型。
 - 方舟渠道配置已由用户实测成功；模型列表包含 `doubao-seed-2-1-turbo-260628`、`doubao-seed-evolving`、`doubao-seed-2-1-pro-260628`、`seed-audio-1.0`。API Key 内容不写入 Wiki。
+
+## [2026-08-09] 稳定性修复与经验沉淀 | 模型请求中断恢复
+
+- 根因不是单一“网络不稳定”：旧链路没有当前模型请求重试；浏览器与 Tauri/reqwest 的网络错误文本不同；失败落盘、项目切换和可编辑 composer 之间还存在错误分类与竞态。
+- 最小修复只重试当前模型请求两次，退避 `2 秒、4 秒`；仅把明确的请求或流中断写入 Markdown/Raw 恢复点。Raw 追加按 `userTurn.id` 幂等，旧 generation 不能更新新项目状态，发送期间锁定输入、附件、引用、Skill 和执行模式。
+- Markdown 恢复点不冒充完整工具 checkpoint：它保存原任务、已有正文和风险提示，继续前必须检查项目现状，避免重复写入或外部操作。客户端取消也不宣称能终止已经进入 Tauri/Rust 或上游的请求。
+- 经验已增量写入 [[学习/AI编程生存手册#34 失败恢复不是只加重试]]，具体合同保留在 [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD#3.6.1 网络中断恢复合同]]。定向 `77/77`、完整前端 focused `1020/1020`、TypeScript、定向 lint 和 `git diff --check` 通过；真实 NewAPI/Cloudflare 三端故障注入未执行。

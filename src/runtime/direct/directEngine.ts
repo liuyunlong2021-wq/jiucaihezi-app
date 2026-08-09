@@ -6,7 +6,7 @@ import type {
   DirectToolExecutionEvent,
   DirectToolExecutor,
 } from './directTypes'
-import { DirectStreamInterruptionError, readChatCompletionDetails, readChatCompletionResponse } from './directStream'
+import { DirectStreamInterruptionError, readChatCompletionDetails } from './directStream'
 import { buildToolResultMessages } from './directTools'
 
 export { readChatCompletionResponse, resolveDirectCompletionText } from './directStream'
@@ -36,6 +36,55 @@ export interface RunDirectChatCompletionResult {
   toolCalls: DirectToolCall[]
   usedSecondPass: boolean
   finishReason?: string
+}
+
+const DIRECT_REQUEST_RETRY_DELAYS = [2000, 4000]
+const DIRECT_REQUEST_RETRY_STATUSES = new Set([502, 503, 504, 524])
+
+export class DirectTransportFailure extends Error {
+  constructor(cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause))
+    this.name = 'DirectTransportFailure'
+  }
+}
+
+export function isRetryableDirectResponseStatus(status: number): boolean {
+  return DIRECT_REQUEST_RETRY_STATUSES.has(status)
+}
+
+export function isRetryableDirectRequestFailure(error: unknown): boolean {
+  const message = String((error as Error)?.message || error || '').toLowerCase()
+  return /\b(?:502|503|504|524)\b|network|fetch|load failed|connection|socket|timeout|timed out|error sending request|dns|econn/.test(message)
+}
+
+export function isRecoverableDirectTransportFailure(error: unknown): boolean {
+  return error instanceof DirectTransportFailure || error instanceof DirectStreamInterruptionError
+}
+
+export async function sendDirectRequestWithRetry(
+  send: () => Promise<Response>,
+  options: {
+    signal?: AbortSignal
+    onRetry?: (attempt: number, total: number) => void
+    wait?: (delay: number) => Promise<void>
+  } = {},
+): Promise<Response> {
+  for (let attempt = 0; attempt <= DIRECT_REQUEST_RETRY_DELAYS.length; attempt += 1) {
+    try {
+      const response = await send()
+      if (!isRetryableDirectResponseStatus(response.status) || attempt === DIRECT_REQUEST_RETRY_DELAYS.length) return response
+      await response.body?.cancel().catch(() => {})
+    } catch (error) {
+      if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+      if (!isRetryableDirectRequestFailure(error)) throw error
+      if (attempt === DIRECT_REQUEST_RETRY_DELAYS.length) throw new DirectTransportFailure(error)
+    }
+
+    options.onRetry?.(attempt + 1, DIRECT_REQUEST_RETRY_DELAYS.length)
+    const delay = DIRECT_REQUEST_RETRY_DELAYS[attempt]
+    await (options.wait ? options.wait(delay) : waitForDirectRetry(delay, options.signal))
+  }
+  throw new Error('请求重试状态异常')
 }
 
 export async function runDirectChatCompletion(
@@ -178,4 +227,20 @@ function normalizeToolCall(call: DirectToolCall, tools: unknown[] | undefined): 
 
 function joinText(prefix: string, suffix: string): string {
   return [prefix, suffix].filter(Boolean).join('')
+}
+
+function waitForDirectRetry(delay: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'))
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, delay)
+    signal?.addEventListener('abort', aborted, { once: true })
+    function done() {
+      signal?.removeEventListener('abort', aborted)
+      resolve()
+    }
+    function aborted() {
+      clearTimeout(timer)
+      reject(new DOMException('Aborted', 'AbortError'))
+    }
+  })
 }

@@ -14,8 +14,11 @@ import {
 import { buildWebSkillCatalogPrompt, loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import {
   buildToolResultMessages,
+  DirectTransportFailure,
+  isRetryableDirectResponseStatus,
   resolveDirectCompletionText,
   runDirectChatCompletion,
+  sendDirectRequestWithRetry,
   type DirectApiMessage,
   type DirectToolCall,
   type DirectChatCompletionRequest,
@@ -54,6 +57,7 @@ export interface MemoryChatInput {
   signal?: AbortSignal
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
+  onRetry?: (attempt: number, total: number) => void
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
   recordSceneVideo?: (document: Scene3DDocument, signal?: AbortSignal) => Promise<Blob>
 }
@@ -140,18 +144,26 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     ...buildChatCompletionExtras(config),
   }
   const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
-    const response = await sendNewApiRequest({
-      ...body,
-      messages: request.messages,
-      ...(request.tools?.length ? { tools: request.tools } : {}),
-    }, payload => safeFetch(`${config.apiBase}/v1/chat/completions`, {
-      method: 'POST',
-      headers: buildHeaders(config),
+    const response = await sendDirectRequestWithRetry(() => sendNewApiRequest(
+      {
+        ...body,
+        messages: request.messages,
+        ...(request.tools?.length ? { tools: request.tools } : {}),
+      },
+      payload => safeFetch(`${config.apiBase}/v1/chat/completions`, {
+        method: 'POST',
+        headers: buildHeaders(config),
+        signal: input.signal,
+        body: payload,
+      }),
+    ), {
       signal: input.signal,
-      body: payload,
-    }))
+      onRetry: input.onRetry,
+    })
     if (!response.ok) {
-      throw new ChatHttpError(await readChatErrorResponse(response, '云端请求失败', config.apiKey))
+      const error = new ChatHttpError(await readChatErrorResponse(response, '云端请求失败', config.apiKey))
+      if (isRetryableDirectResponseStatus(response.status)) throw new DirectTransportFailure(error)
+      throw error
     }
     return response
   }

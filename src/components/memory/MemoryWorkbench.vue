@@ -25,6 +25,7 @@ import {
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
 import type { DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
+import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
 import {
   parseMediaPlans,
   stripMediaPlanBlocks,
@@ -796,6 +797,9 @@ async function send() {
     attachments: attachmentMetadata(pendingAttachments),
     mode: pendingMode,
   }
+  const title = !active.transcript.turns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
+    ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
+    : undefined
   pendingUserTurn.value = userTurn
   beginRunStatus()
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
@@ -803,6 +807,7 @@ async function send() {
   status.value = '正在思考'
   streamingText.value = ''
   abortController = new AbortController()
+  let replyCompleted = false
   try {
     const mediaContext = conversationMediaContext(
       [...active.transcript.turns, userTurn],
@@ -823,6 +828,9 @@ async function send() {
       recordSceneVideo,
       signal: abortController.signal,
       onToolEvent: updateRunTool,
+      onRetry(attempt, total) {
+        status.value = `通道超时，正在重连 ${attempt}/${total}`
+      },
       confirmTool: async call => {
         if (memoryToolAlwaysAllowedConversations.has(active.transcript.id) && call.function.name !== 'delete') return true
         return await new Promise<boolean>(resolve => {
@@ -840,11 +848,10 @@ async function send() {
         streamingText.value = text
       },
     })
+    replyCompleted = true
     if (runGeneration !== memoryRunGeneration) return
-    const title = !active.transcript.turns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
-      ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
-      : undefined
     const complete = await appendMemoryRound(active.resource, userTurn, reply, files, title)
+    if (runGeneration !== memoryRunGeneration) return
     if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
     const completeResource = await openProjectResource(files, complete.resource)
     rememberConversation(complete)
@@ -872,10 +879,34 @@ async function send() {
     status.value = '已完成'
     stopRunTimer()
   } catch (cause) {
-    if (cause instanceof DOMException && cause.name === 'AbortError') status.value = '已停止'
+    if (runGeneration !== memoryRunGeneration) return
+    const aborted = cause instanceof DOMException && cause.name === 'AbortError'
+    if (aborted) status.value = '已停止'
     else {
       status.value = '处理失败'
       error.value = cause instanceof Error ? cause.message : String(cause)
+      if (!replyCompleted && isRecoverableDirectTransportFailure(cause)) {
+        const interruptedReply = [
+          streamingText.value.trim(),
+          '> 本轮因网络或上游服务中断，已保留当前结果。继续前请先检查项目现状，避免重复写入或外部操作。',
+        ].filter(Boolean).join('\n\n')
+        try {
+          if (runGeneration !== memoryRunGeneration) return
+          const interrupted = await appendMemoryRound(active.resource, userTurn, interruptedReply, files, title)
+          if (runGeneration !== memoryRunGeneration) return
+          if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
+          rememberConversation(interrupted)
+          opened.value = await openProjectResource(files, interrupted.resource)
+          attachments.value = []
+          referencedFiles.value = []
+          selectedSkillNames.value = []
+          input.value = ''
+          setEditorText(composerRef.value, '')
+          streamingText.value = ''
+        } catch (persistCause) {
+          error.value += `；中断记录保存失败：${persistCause instanceof Error ? persistCause.message : String(persistCause)}`
+        }
+      }
     }
     stopRunTimer()
   } finally {
@@ -1816,12 +1847,14 @@ function readDataUrl(file: File): Promise<string> {
           <div class="memory-mode-segment" role="group" aria-label="回答方式">
             <button
               type="button"
+              :disabled="sending"
               :class="{ active: executionMode === 'quick' }"
               title="直接回答，不使用 Skill 和项目工具"
               @click="selectExecutionMode('quick')"
             >快速</button>
             <button
               type="button"
+              :disabled="sending"
               :class="{ active: executionMode === 'memory' }"
               title="按需使用 Skill 和项目工具"
               @click="selectExecutionMode('memory')"
@@ -1836,21 +1869,21 @@ function readDataUrl(file: File): Promise<string> {
               <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
               <small v-if="file.readablePath">已保存 · 已解析 {{ (file.characterCount || 0).toLocaleString() }} 字</small>
             </span>
-            <button title="移除附件" @click="attachments = attachments.filter(item => item.id !== file.id)">×</button>
+            <button title="移除附件" :disabled="sending" @click="attachments = attachments.filter(item => item.id !== file.id)">×</button>
           </div>
         </div>
         <div v-if="referencedFiles.length" class="memory-attachments memory-references">
           <div v-for="file in referencedFiles" :key="file.name" class="memory-attachment-chip">
             <JcIcon name="attach-file" />
             <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
-            <button title="移除引用" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
+            <button title="移除引用" :disabled="sending" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
           </div>
         </div>
         <div v-if="selectedSkillNames.length" class="memory-attachments memory-references">
           <div v-for="name in selectedSkillNames" :key="name" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name">Skill · {{ name }}</span>
-            <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+            <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
           </div>
         </div>
         <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(error) }" aria-live="polite">
@@ -1876,7 +1909,7 @@ function readDataUrl(file: File): Promise<string> {
         />
         <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
         <div class="memory-input-row">
-          <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
+          <div v-show="mentionOpen && !sending" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
             <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>
             <button
               v-for="item in mentionFlat.slice(0, 12)"
@@ -1891,12 +1924,12 @@ function readDataUrl(file: File): Promise<string> {
               <span class="memory-mention-kind">{{ item.type === 'skill' ? 'Skill' : item.description }}</span>
             </button>
           </div>
-          <input ref="fileInput" type="file" multiple hidden @change="selectFiles" />
-          <button class="icon-button" title="添加附件" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
+          <input ref="fileInput" type="file" multiple hidden :disabled="sending" @change="selectFiles" />
+          <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
           <div
             ref="composerRef"
             class="memory-composer-editable"
-            contenteditable="true"
+            :contenteditable="!sending"
             data-placeholder="输入消息"
             @input="handleComposerInput"
             @keydown="handleComposerKeydown"

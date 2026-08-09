@@ -158,7 +158,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(tree, /v-if="!ctxMenu\.node\.isDir"[\s\S]*@click="ctxReferenceInChat"/)
   assert.match(tree, /emitEvent\('reference-file', \{ resource: resourceForNode\(node\) \}\)/)
   assert.doesNotMatch(tree, /emitEvent\('reference-file', \{ name:/)
-  assert.match(workbench, /contenteditable="true"/)
+  assert.match(workbench, /:contenteditable="!sending"/)
   assert.match(workbench, /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/)
   assert.match(workbench, /function resizeComposer\(\)/)
   assert.match(workbench, /<textarea[\s\S]*v-model="markdownDraft"/)
@@ -261,7 +261,7 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(workbench, /const selectedSkillNames = ref<string\[\]>\(\[\]\)/)
   assert.match(workbench, /getCursorPosition\(editor\)/)
   assert.match(workbench, /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/)
-  assert.match(workbench, /v-show="mentionOpen"/)
+  assert.match(workbench, /v-show="mentionOpen && !sending"/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
   assert.match(workbench, /selectedSkillNames: selectedSkillNames\.value/)
@@ -395,6 +395,22 @@ test('memory run status follows real tool start and end events without entering 
   assert.match(workbench, /\(sending \|\| error\) && visibleRunSteps\.length/)
   assert.match(workbench, /formatRunElapsed\(runElapsed\)/)
   assert.doesNotMatch(workbench, /opencodeClient|openCodeSyncStore|AgentStatusBar/)
+})
+
+test('memory retries transient requests and writes one Raw recovery point only after exhaustion', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/runtime/memory/memoryChat.ts')
+
+  assert.match(runtime, /sendDirectRequestWithRetry\(/)
+  assert.match(runtime, /onRetry\?: \(attempt: number, total: number\) => void/)
+  assert.match(workbench, /onRetry\(attempt, total\)[\s\S]*正在重连 \$\{attempt\}\/\$\{total\}/)
+  assert.match(workbench, /replyCompleted = true[\s\S]*if \(!replyCompleted && isRecoverableDirectTransportFailure\(cause\)\)/)
+  assert.match(workbench, /appendMemoryRound\([\s\S]*继续前请先检查项目现状，避免重复写入或外部操作。/)
+  assert.match(workbench, /if \(runGeneration !== memoryRunGeneration\) return\s*\n\s*const interrupted = await appendMemoryRound[\s\S]*if \(runGeneration !== memoryRunGeneration\) return/)
+  assert.match(workbench, /const aborted = cause instanceof DOMException && cause\.name === 'AbortError'[\s\S]*if \(aborted\) status\.value = '已停止'/)
+  assert.match(workbench, /:contenteditable="!sending"/)
+  assert.match(workbench, /title="添加附件" :disabled="sending"/)
+  assert.match(workbench, /title="移除附件" :disabled="sending"/)
 })
 
 test('memory Desktop keeps always-allow for the current conversation in this App session', () => {

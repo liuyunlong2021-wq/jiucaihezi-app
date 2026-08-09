@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { runDirectChatCompletion } from '../directEngine'
+import { DirectTransportFailure, runDirectChatCompletion, sendDirectRequestWithRetry } from '../directEngine'
 
 function sseResponse(rows: string[]): Response {
   return new Response(rows.map(row => `data: ${row}\n\n`).join(''), {
@@ -20,6 +20,73 @@ function interruptedSseResponse(rows: string[]): Response {
     },
   }), { headers: { 'content-type': 'text/event-stream' } })
 }
+
+test('sendDirectRequestWithRetry retries the current transient request twice', async () => {
+  let requests = 0
+  const waits: number[] = []
+  const retries: number[] = []
+
+  const response = await sendDirectRequestWithRetry(
+    async () => {
+      requests += 1
+      if (requests === 1) throw new Error('HTTP 请求失败: error sending request for url (https://api.example.test)')
+      if (requests === 2) return new Response('', { status: 524 })
+      return new Response('ok')
+    },
+    {
+      wait: async delay => { waits.push(delay) },
+      onRetry: attempt => { retries.push(attempt) },
+    },
+  )
+
+  assert.equal(await response.text(), 'ok')
+  assert.deepEqual(waits, [2000, 4000])
+  assert.deepEqual(retries, [1, 2])
+  assert.equal(requests, 3)
+})
+
+test('sendDirectRequestWithRetry exposes an exhausted network failure as transport failure', async () => {
+  let requests = 0
+
+  await assert.rejects(
+    () => sendDirectRequestWithRetry(async () => {
+      requests += 1
+      throw new Error('HTTP 请求失败: error sending request for url (https://api.example.test)')
+    }, { wait: async () => {} }),
+    DirectTransportFailure,
+  )
+
+  assert.equal(requests, 3)
+})
+
+test('sendDirectRequestWithRetry stops during retry backoff when aborted', async () => {
+  const controller = new AbortController()
+  let requests = 0
+
+  await assert.rejects(
+    () => sendDirectRequestWithRetry(async () => {
+      requests += 1
+      throw new Error('Failed to fetch')
+    }, {
+      signal: controller.signal,
+      onRetry: () => controller.abort(),
+    }),
+    error => error instanceof DOMException && error.name === 'AbortError',
+  )
+
+  assert.equal(requests, 1)
+})
+
+test('sendDirectRequestWithRetry does not retry a client error', async () => {
+  let requests = 0
+  const response = await sendDirectRequestWithRetry(async () => {
+    requests += 1
+    return new Response('', { status: 401 })
+  })
+
+  assert.equal(response.status, 401)
+  assert.equal(requests, 1)
+})
 
 test('runDirectChatCompletion performs a second pass when the model requests a tool', async () => {
   const seen: string[] = []

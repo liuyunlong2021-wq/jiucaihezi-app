@@ -118,6 +118,8 @@ export async function appendMemoryRound(
     createdAt: new Date().toISOString(),
   }
   return mutateConversation(resource, files, current => {
+    const transcript = parseConversationTranscript(resource.path, current)
+    if (transcript?.turns.some(turn => turn.id === userTurn.id)) return current
     const complete = appendConversationTurn(appendConversationTurn(current, userTurn), assistantTurn)
     return title ? renameConversationTranscript(complete, title) : complete
   })
@@ -138,10 +140,11 @@ async function mutateConversation(
 ): Promise<MemoryConversation> {
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
     const current = await files.readText(resource)
-    if (!parseConversationTranscript(resource.path, current.content)) {
-      throw new Error('选择的文件不是有效对话记录')
-    }
-    const result = await files.writeText(resource, update(current.content), current.revision)
+    const transcript = parseConversationTranscript(resource.path, current.content)
+    if (!transcript) throw new Error('选择的文件不是有效对话记录')
+    const content = update(current.content)
+    if (content === current.content) return { resource, transcript }
+    const result = await files.writeText(resource, content, current.revision)
     if (result.status === 'saved') return loadMemoryConversation(resource, files)
     if (result.status === 'missing') throw new Error('对话记录已被删除')
   }
