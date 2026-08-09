@@ -724,3 +724,17 @@
 - 最小修复只重试当前模型请求两次，退避 `2 秒、4 秒`；仅把明确的请求或流中断写入 Markdown/Raw 恢复点。Raw 追加按 `userTurn.id` 幂等，旧 generation 不能更新新项目状态，发送期间锁定输入、附件、引用、Skill 和执行模式。
 - Markdown 恢复点不冒充完整工具 checkpoint：它保存原任务、已有正文和风险提示，继续前必须检查项目现状，避免重复写入或外部操作。客户端取消也不宣称能终止已经进入 Tauri/Rust 或上游的请求。
 - 经验已增量写入 [[学习/AI编程生存手册#34 失败恢复不是只加重试]]，具体合同保留在 [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD#3.6.1 网络中断恢复合同]]。定向 `77/77`、完整前端 focused `1020/1020`、TypeScript、定向 lint 和 `git diff --check` 通过；真实 NewAPI/Cloudflare 三端故障注入未执行。
+
+## [2026-08-09] 运维核对 | Seed Audio 1.0 与现有适配器
+
+- 用户使用火山语音专用 Key 直连 `openspeech.bytedance.com/api/v3/tts/create` 成功，返回约 5.9 秒 MP3；方舟 Key 与语音 Key 不通用。
+- 生产 NewAPI `rc.20` 仍按旧火山 TTS `appid|access_token` 合同，官方仓库没有 `seed-audio-1.0` 原生 HTTP JSON 适配；官方 PR `#4710` 尚未合并且面向 `seed-tts-*` 流式协议。本项暂缓，不修改生产。
+- 核对确认现有两套媒体适配器为 `rh-adapter`（RunningHub 图片/视频/音频）与 `zx-video-adapter`（ZX Grok 固定时长视频）；支付 `jiucai-adapter` 和已迁出的旧 `jina-adapter` 不计入媒体适配器。
+- 新增独立 `seed-audio-adapter/`，只实现已验证的文本生成主链路：OpenAI `input` 转 `text_prompt`，火山语音 Key 转 `X-Api-Key`，Base64 响应解码为原始音频。单元测试、Python 编译与 Compose 解析通过；本机 Docker daemon 未启动，镜像构建及生产部署未执行。
+- NewAPI `rc.22` 起后台认证合同与数据库表发生迁移，当前 Gateway 浏览器 Cookie 登录/一键 Key 链路尚未适配；生产不能直接从 `rc.20` 拉取 `latest(rc.24)`。运维页已记录备份、镜像回滚和最低验收步骤。
+
+## [2026-08-09] 修复 | Seed Audio 适配器上线阻断
+
+- 适配器改为从豆包真实响应的 `data.audio` 读取 Base64 音频；回归测试同步使用嵌套真实响应形状，避免错误的顶层 `audio` Mock 掩盖故障。
+- NewAPI `rc.20` 部署合同改为 OpenAI 渠道 + `http://seed-audio-adapter:8791`；不使用会把 Base URL 当完整请求地址的 Custom Channel。
+- 单元测试 `1/1`、Python 编译、Compose 配置解析和 `git diff --check` 通过；Docker 镜像构建、生产部署及付费闭环尚未执行。
