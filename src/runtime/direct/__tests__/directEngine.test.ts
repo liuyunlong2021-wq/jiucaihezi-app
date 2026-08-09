@@ -501,6 +501,58 @@ test('runDirectChatCompletion continues once after final text streaming is inter
   assert.equal(seen.at(-1), '已经完成前半段。这是续写部分。')
 })
 
+test('runDirectChatCompletion can retain tools during an interrupted memory continuation', async () => {
+  const requests: any[] = []
+  const responses = [
+    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '前半段。' } }] })]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '续写。' }, finish_reason: 'stop' }] }), '[DONE]']),
+  ]
+  const tools = [{ type: 'function', function: { name: 'read' } }]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取资料并回答' }],
+    tools,
+    continueToolsOnInterruption: true,
+    onText: () => {},
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return responses.shift()!
+    },
+  })
+
+  assert.deepEqual(requests[1].tools, tools)
+  assert.doesNotMatch(requests[1].messages.at(-1).content, /不要调用工具/)
+})
+
+test('runDirectChatCompletion executes a tool requested during an interrupted memory continuation', async () => {
+  const requests: any[] = []
+  const executions: string[] = []
+  const responses = [
+    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '先读取资料。' } }] })]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"notes.md"}' } }] } }] }), '[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '资料已读取。' }, finish_reason: 'stop' }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取资料并回答' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    continueToolsOnInterruption: true,
+    onText: () => {},
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return responses.shift()!
+    },
+    executeTool: async call => {
+      executions.push(call.function.name)
+      return { content: '真实资料' }
+    },
+  })
+
+  assert.deepEqual(executions, ['read'])
+  assert.equal(requests.length, 3)
+  assert.equal(result.text, '资料已读取。')
+})
+
 test('runDirectChatCompletion does not prepend earlier tool-round text to a resumed final answer', async () => {
   const responses = [
     sseResponse([

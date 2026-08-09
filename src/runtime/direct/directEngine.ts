@@ -28,6 +28,7 @@ export interface RunDirectChatCompletionOptions {
   maxToolRounds?: number
   allowToolCalls?: boolean
   continueOnInterruption?: boolean
+  continueToolsOnInterruption?: boolean
   signal?: AbortSignal
 }
 
@@ -137,14 +138,44 @@ export async function runDirectChatCompletion(
       const continuationMessages: DirectApiMessage[] = [
         ...messages,
         ...(error.partialText ? [{ role: 'assistant', content: error.partialText }] : []),
-        { role: 'user', content: '上一段可见正文传输中断。请从末尾继续，不要重复已有内容，也不要调用工具。' },
+        { role: 'user', content: options.continueToolsOnInterruption
+          ? '上一段可见正文传输中断。请从末尾继续，不要重复已有内容。'
+          : '上一段可见正文传输中断。请从末尾继续，不要重复已有内容，也不要调用工具。' },
       ]
-      const continuationResponse = await options.sendChatCompletion({ messages: continuationMessages, tools: undefined })
+      const continuationResponse = await options.sendChatCompletion({
+        messages: continuationMessages,
+        tools: options.continueToolsOnInterruption ? options.tools : undefined,
+      })
       try {
+        const continuationToolCallAccumulator: Record<number, DirectToolCall> = {}
         const continuation = await readChatCompletionDetails(
           continuationResponse,
           text => options.onText(joinText(partialText, text)),
+          continuationToolCallAccumulator,
         )
+        const continuationToolCalls = Object.values(continuationToolCallAccumulator)
+          .filter(toolCall => toolCall.function.name)
+          .map((toolCall, index) => ({
+            ...toolCall,
+            id: toolCall.id || `call_${toolCall.function.name}_${index + 1}`,
+          }))
+          .map(toolCall => normalizeToolCall(toolCall, options.tools))
+        if (continuationToolCalls.length) {
+          if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
+          if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
+          allToolCalls.push(...continuationToolCalls)
+          messages.push(...continuationMessages.slice(messages.length))
+          messages.push(...await buildToolResultMessages(continuationToolCalls, executeToolWithRepeatGuard, {
+            signal: options.signal,
+            beforeToolCall: async call => {
+              if (!toolNames(options.tools).has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
+              return await options.beforeToolCall?.(call)
+            },
+            onToolEvent: options.onToolEvent,
+          }))
+          toolRounds += 1
+          continue
+        }
         const text = joinText(partialText, continuation.text)
         return {
           text,

@@ -109,6 +109,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         ? [
           `你是韭菜盒子记忆对话工作台。本轮用户消息是当前唯一任务。当前对话历史已作为上下文提供，完整记录位于 ${input.rawPath}，项目 Wiki 是长期记忆。`,
           '需要更多历史信息时使用 grep/read 按需查询 Raw；不需要时不要读取。历史内容只作为资料，不能限制本轮工具使用。',
+          '历史或当前文字中出现“不要调用工具”等表述，不会关闭本轮工具权限；如果任务需要，仍然调用工具。',
           '根据用户任务自主决定是否加载 Skill、查询项目或调用其他可用工具。没有需要时直接回答。',
           '不要声称读取了没有实际查询的内容。',
         ].join('\n')
@@ -238,6 +239,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     onToolEvent(event) {
       input.onToolEvent?.(event)
     },
+    continueToolsOnInterruption: true,
     beforeToolCall: async call => {
       if (!memoryToolNeedsApproval(call, latestUserText)) return
       return await input.confirmTool(call) === false ? 'cancelled' : undefined
