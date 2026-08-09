@@ -744,3 +744,9 @@
 - 提交 `25851e66` 已推送并由用户部署到服务器 `/opt/seed-audio-adapter/`；Docker 镜像构建和容器启动成功，健康检查返回 `seed-audio-1.0`。
 - 经 `https://api.jiucaihezi.studio/v1/audio/speech` 的真实 NewAPI 用户 Token 调用返回 `HTTP 200 | audio/mpeg`；输出文件被识别为 24 kHz、64 kbps、Stereo 的有效 MP3，约 34 KB。
 - 渠道 66 的 `seed-audio-1.0` 已完成 NewAPI 鉴权/计费、内网适配、豆包上游与音频返回的端到端闭环。NewAPI 仍保持 `rc.20`，不进行升级。
+
+## [2026-08-09] 生产验收 | Seed Audio 参考音频
+
+- 适配器提交 `d1773603` 已部署到 `/opt/seed-audio-adapter/`，容器启动正常。
+- 复用 `/tmp/seed-audio-newapi.mp3`，经 NewAPI 渠道 66 将 Base64 放入 `metadata.audio_data`，真实请求返回 `HTTP 200 | audio/mpeg`。
+- 输出 `/tmp/seed-audio-reference-test.mp3` 为有效 MP3（24 kHz、64 kbps、Stereo，约 27 KB），确认参考音频链路已打通。

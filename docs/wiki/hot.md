@@ -16,6 +16,7 @@
 - 记忆工作台继续保留项目中心与文件树、Raw 对话、快速/记忆模式、完整 Wiki 能力、项目内工具、附件与文档转换、Markdown 阅读编辑、`.canvas` / `.jccanvas` / `.jcscene`、媒体生成、登录/模型/Skill/MCP，以及当前 Desktop、Web、Mobile 各自已经具备的能力。
 - **模型请求中断恢复已实施。** `502/503/504/524`、浏览器网络错误和 Tauri/reqwest `error sending request` 只重试当前模型请求两次，退避 `2 秒、4 秒`；耗尽后仅对明确的请求或流中断写一组 Raw 恢复点。Raw 追加按 `userTurn.id` 幂等，旧 generation 不再覆盖新项目状态，发送期间锁定输入与附件。定向 `77/77`、完整前端 focused `1020/1020`、TypeScript、定向 lint 和差异检查通过；真实 NewAPI/Cloudflare 三端故障注入尚未验收。
 - **媒体与 3D 迁出决定已撤销且从未实施。** 图片、视频、音频、创作画布、3D 白膜、GLB/GLTF 查看和 Desktop 动画导出继续随韭菜盒子保留；短视频工厂未被本计划修改。老电脑适配只优化空闲刷新与按需加载，不降低最终质量、不删除高性能设备能力，见 [[开发/韭菜盒子媒体与3D能力迁出SDD]]。
+- **Seed Audio 1.0 参考音频链路已验收。** 提交 `d1773603` 的独立适配器已部署；复用既有 MP3，经 NewAPI 渠道 66 以 `metadata.audio_data` 请求返回有效 MP3。创作面板素材入口尚未接入。
 - **媒体任务启动竞态已按 TDD 修复。** `initDB()` 并发调用现在共用同一个 Promise，`mediaTaskStore.init()` 等待 SQLite 真正完成后才读取和恢复历史；不再在首次挂载抛出 `SQLite storage is not ready`，也不增加定时重试或第二套任务状态。
 - **App 只随包提供 7 个产品 Skill：** `jc-cha-wiki`、`jc-everything-wiki`、`jc-jian-wiki`、`jc-new-user-guide`、`jc-raw-wiki`、`jc-xiu-wiki`、`skill-creator`。20 个个人写作、视觉、旁白 Skill 已迁入 `/Users/by3/Documents/jiucaihezi-personal-skills`，不再进入 App 索引、推荐指令或新手指南；用户自行安装的 Skill 不受影响。
 - **Jina 网页工具已迁出产品。** App 不再提供 `@联网搜索`、`web_search` 或 `read_url`，也不再携带 `jina-adapter`；原实现完整备份于 `/Users/by3/Documents/jiucaihezi-jina-backup`。Desktop 仍可在用户批准后通过 Terminal 使用本机网络；Web 与 Mobile 不提供替代网页工具。生产服务器上的旧容器和 NewAPI 渠道尚未核验或下线，但新 App 已无调用入口。
