@@ -738,3 +738,9 @@
 - 适配器改为从豆包真实响应的 `data.audio` 读取 Base64 音频；回归测试同步使用嵌套真实响应形状，避免错误的顶层 `audio` Mock 掩盖故障。
 - NewAPI `rc.20` 部署合同改为 OpenAI 渠道 + `http://seed-audio-adapter:8791`；不使用会把 Base URL 当完整请求地址的 Custom Channel。
 - 单元测试 `1/1`、Python 编译、Compose 配置解析和 `git diff --check` 通过；Docker 镜像构建、生产部署及付费闭环尚未执行。
+
+## [2026-08-09] 生产验收 | Seed Audio 1.0 渠道 66
+
+- 提交 `25851e66` 已推送并由用户部署到服务器 `/opt/seed-audio-adapter/`；Docker 镜像构建和容器启动成功，健康检查返回 `seed-audio-1.0`。
+- 经 `https://api.jiucaihezi.studio/v1/audio/speech` 的真实 NewAPI 用户 Token 调用返回 `HTTP 200 | audio/mpeg`；输出文件被识别为 24 kHz、64 kbps、Stereo 的有效 MP3，约 34 KB。
+- 渠道 66 的 `seed-audio-1.0` 已完成 NewAPI 鉴权/计费、内网适配、豆包上游与音频返回的端到端闭环。NewAPI 仍保持 `rc.20`，不进行升级。

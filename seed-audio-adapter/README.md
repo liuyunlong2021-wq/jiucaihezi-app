@@ -33,6 +33,25 @@ The service joins `new-api-new_new-api-network` and does not publish a host port
 
 NewAPI forwards the channel key as `Authorization: Bearer`; the adapter sends it upstream as `X-Api-Key`. Do not put `seed-audio-1.0` in the Ark channel because Ark and Seed Audio credentials and protocols are different.
 
+Reference audio/image fields use the official Seed Audio names. For requests
+through NewAPI `rc.20`, put them inside `metadata` because NewAPI's audio DTO
+drops unknown top-level fields:
+
+```json
+{
+  "model": "seed-audio-1.0",
+  "input": "请按参考音频的音色演唱这段歌词。",
+  "metadata": {
+    "audio_url": "https://example.com/reference.mp3"
+  }
+}
+```
+
+Use `image_url` or `image_data` for one reference image, and `audio_url`,
+`audio_data`, or `speaker` for an audio/voice reference. Use `references` for
+up to three audio reference objects. Image and audio references cannot be
+combined. Base64 data must be raw Base64, not a `data:` URL.
+
 The NewAPI channel test button may use a chat request and is not evidence for this audio-only channel. Verify it through the real endpoint:
 
 ```bash

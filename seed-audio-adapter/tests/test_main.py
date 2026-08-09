@@ -4,7 +4,7 @@ import unittest
 
 import httpx
 
-from src.main import app
+from src.main import MAX_REFERENCE_DATA_CHARS, app
 
 
 class SeedAudioAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -47,6 +47,7 @@ class SeedAudioAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "input": "请自然地说：测试成功。",
                 "voice": "alloy",
                 "response_format": "mp3",
+                "metadata": {"image_url": "https://example.invalid/reference.png"},
             },
         )
 
@@ -62,6 +63,7 @@ class SeedAudioAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "text_prompt": "请自然地说：测试成功。",
                 "audio_config": {"format": "mp3", "sample_rate": 24000},
                 "watermark": {},
+                "image_url": "https://example.invalid/reference.png",
             },
         )
 
@@ -70,6 +72,43 @@ class SeedAudioAdapterTest(unittest.IsolatedAsyncioTestCase):
             json={"model": "seed-audio-1.0", "input": "test"},
         )
         self.assertEqual(invalid.status_code, 401)
+
+        audio = await self.client.post(
+            "/v1/audio/speech",
+            headers={"Authorization": "Bearer speech-key"},
+            json={
+                "model": "seed-audio-1.0",
+                "input": "模仿参考音频的音色。",
+                "metadata": {"audio_url": "https://example.invalid/reference.mp3"},
+            },
+        )
+        self.assertEqual(audio.status_code, 200)
+        self.assertEqual(json.loads(self.upstream_requests[1].read())["audio_url"], "https://example.invalid/reference.mp3")
+
+        conflict = await self.client.post(
+            "/v1/audio/speech",
+            headers={"Authorization": "Bearer speech-key"},
+            json={
+                "model": "seed-audio-1.0",
+                "input": "不能同时使用图片和音频。",
+                "metadata": {
+                    "image_url": "https://example.invalid/reference.png",
+                    "audio_url": "https://example.invalid/reference.mp3",
+                },
+            },
+        )
+        self.assertEqual(conflict.status_code, 400)
+
+        oversized = await self.client.post(
+            "/v1/audio/speech",
+            headers={"Authorization": "Bearer speech-key"},
+            json={
+                "model": "seed-audio-1.0",
+                "input": "参考资源过大。",
+                "metadata": {"image_data": "A" * (MAX_REFERENCE_DATA_CHARS + 1)},
+            },
+        )
+        self.assertEqual(oversized.status_code, 400)
 
 
 if __name__ == "__main__":

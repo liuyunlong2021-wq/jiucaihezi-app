@@ -11,6 +11,11 @@ from fastapi.responses import JSONResponse, Response
 
 UPSTREAM_URL = "https://openspeech.bytedance.com/api/v3/tts/create"
 MODEL = "seed-audio-1.0"
+MAX_PROMPT_CHARS = 3000
+MAX_REFERENCES = 3
+MAX_REFERENCE_BYTES = 10 * 1024 * 1024
+MAX_REFERENCE_DATA_CHARS = 4 * ((MAX_REFERENCE_BYTES + 2) // 3)
+REFERENCE_FIELDS = ("speaker", "audio_data", "audio_url", "image_data", "image_url")
 FORMATS = {
     "mp3": "audio/mpeg",
     "wav": "audio/wav",
@@ -55,12 +60,16 @@ async def create_speech(request: Request):
         return error(400, "Unsupported model", "invalid_model")
 
     text = body.get("input")
-    if not isinstance(text, str) or not text.strip() or len(text) > 2048:
-        return error(400, "input must contain 1-2048 characters", "invalid_input")
+    if not isinstance(text, str) or not text.strip() or len(text) > MAX_PROMPT_CHARS:
+        return error(400, "input must contain 1-3000 characters", "invalid_input")
     audio_format = str(body.get("response_format") or "mp3").lower()
     upstream_format = "ogg_opus" if audio_format == "opus" else audio_format
     if audio_format not in FORMATS:
         return error(400, "response_format must be mp3, wav, pcm, opus, or ogg_opus", "invalid_format")
+
+    seed_payload, reference_error = build_seed_payload(body, text, upstream_format)
+    if reference_error:
+        return error(400, reference_error, "invalid_references")
 
     try:
         upstream = await request.app.state.http.post(
@@ -70,12 +79,7 @@ async def create_speech(request: Request):
                 "X-Api-Key": api_key,
                 "X-Api-Request-Id": str(uuid4()),
             },
-            json={
-                "model": MODEL,
-                "text_prompt": text,
-                "audio_config": {"format": upstream_format, "sample_rate": 24000},
-                "watermark": {},
-            },
+            json=seed_payload,
         )
     except httpx.HTTPError:
         return error(502, "Seed Audio service is unavailable", "upstream_unavailable")
@@ -112,6 +116,45 @@ def bearer_token(request: Request) -> str:
     if not value.lower().startswith("bearer ") or not value[7:].strip():
         return ""
     return value[7:].strip()
+
+
+def build_seed_payload(body: dict, text: str, audio_format: str) -> tuple[dict, str | None]:
+    metadata = body.get("metadata") if isinstance(body.get("metadata"), dict) else {}
+    payload = {
+        "model": MODEL,
+        "text_prompt": text,
+        "audio_config": {"format": audio_format, "sample_rate": 24000},
+        "watermark": {},
+    }
+    for field in ("references", *REFERENCE_FIELDS):
+        value = body.get(field)
+        if value is None:
+            value = metadata.get(field)
+        if value is not None:
+            payload[field] = value
+
+    references = payload.get("references")
+    if references is not None:
+        if not isinstance(references, list) or not 1 <= len(references) <= MAX_REFERENCES:
+            return payload, "references must contain 1-3 objects"
+        if not all(isinstance(item, dict) for item in references):
+            return payload, "each reference must be an object"
+
+    audio_fields = ("speaker", "audio_data", "audio_url")
+    has_audio = any(payload.get(field) for field in audio_fields)
+    has_image = any(payload.get(field) for field in ("image_data", "image_url"))
+    for item in references or []:
+        for field in ("audio_data", "image_data"):
+            if isinstance(item.get(field), str) and len(item[field]) > MAX_REFERENCE_DATA_CHARS:
+                return payload, f"{field} exceeds the 10 MB reference limit"
+        has_audio = has_audio or any(item.get(field) for field in audio_fields)
+        has_image = has_image or any(item.get(field) for field in ("image_data", "image_url"))
+    for field in ("audio_data", "image_data"):
+        if isinstance(payload.get(field), str) and len(payload[field]) > MAX_REFERENCE_DATA_CHARS:
+            return payload, f"{field} exceeds the 10 MB reference limit"
+    if has_audio and has_image:
+        return payload, "image references cannot be combined with audio references"
+    return payload, None
 
 
 def error(status: int, message: str, code: str) -> JSONResponse:
