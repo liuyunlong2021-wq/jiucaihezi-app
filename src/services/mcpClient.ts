@@ -42,12 +42,18 @@ async function normalizeStdioConfig(config: McpServerConfig): Promise<McpServerC
   if (config.transport !== 'stdio' || !config.command) return config
   const command = config.command.replaceAll('\\', '/')
   const isTsx = /(?:^|\/)tsx(?:\.cmd)?$/.test(command) || /\/tsx\/dist\/cli\.mjs$/.test(command)
-  if (!isTsx) return config
+  const isNpx = /(?:^|\/)npx$/.test(command)
+  if (!isTsx && !isNpx) return config
   let node = ''
   try { node = await (await import('@tauri-apps/api/core')).invoke<string>('resolve_mcp_node') } catch { /* web/tests */ }
   if (!node) node = String((globalThis as { process?: { execPath?: string } }).process?.execPath || '')
   if (!node) return config
   const args = [...(config.args || [])]
+  if (isNpx) {
+    if (!/\/bin\/node$/.test(node)) return config
+    const npxCli = node.replace(/\/bin\/node$/, '/lib/node_modules/npm/bin/npx-cli.js')
+    return { ...config, command: node, args: [npxCli, ...args] }
+  }
   if (/\/tsx\/dist\/cli\.mjs$/.test(command)) args.unshift(config.command)
   else args.unshift(command)
   return { ...config, command: node, args }

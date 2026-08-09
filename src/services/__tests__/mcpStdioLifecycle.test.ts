@@ -10,6 +10,8 @@ const sdkClient = readFileSync(join(process.cwd(), 'node_modules/@modelcontextpr
 
 test('stdio MCP uses the node tsx entrypoint and protocol timeouts', () => {
   assert.match(client, /tsx\\\/dist\\\/cli\\\.mjs/)
+  assert.match(client, /const isNpx =/)
+  assert.match(client, /lib\/node_modules\/npm\/bin\/npx-cli\.js/)
   assert.match(client, /timeout: STDIO_TIMEOUT/)
   assert.match(client, /timeout: TOOL_TIMEOUT/)
   assert.match(sdkClient, /method: 'notifications\/initialized'/)

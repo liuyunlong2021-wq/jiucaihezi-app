@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-08-09] 修复 | Playwright 打包版 Node PATH 根因
+
+- `v2.1.16` 打包版的 Playwright 以 `npx` 启动，stderr 返回 `env: node: No such file or directory`；终端开发版能用、桌面包失败的差异来自 LaunchServices 不继承终端 PATH。
+- `mcpClient.ts` 现在把 Unix `npx` 归一为绝对 Node + npm `npx-cli.js`，保留 Node 候选回退；MCP 测试 `11/11`、TypeScript 和绝对 Node 直接执行验证通过。
+- 版本必须先统一为 `2.1.17` 再提交并打 tag；安装新包后才能记录 Playwright 正式发布验收。
+
 ## [2026-08-08] 真实验收 | short-video-factory 本地 stdio MCP
 
 - [[开发/自定义MCP添加SDD]] 记录 Git `10553f10`：Node + tsx 启动归一、stdio 诊断、30 秒连接/列表超时、120 秒工具调用超时，以及失败连接和旧工具缓存清理。

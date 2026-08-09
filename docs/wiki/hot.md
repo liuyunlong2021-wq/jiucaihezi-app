@@ -22,6 +22,7 @@
 - **Tauri 自定义命令权限已闭环。** 开发地址使用 `http://localhost:1420/*`，`allow-app-commands` 与 Rust `generate_handler!` 全量一致；Playwright MCP 与现有文件、Skill、密钥等命令不会再因局部 ACL 出现“点击无反应”。
 - **Playwright MCP 已完成本机点击验收。** 上一轮“下载 Node.js”是把 `Plugin not found` 误判为缺少 `npx`，且开发 URL 与自定义命令 ACL 同时阻断；当前开发版已连接成功。新版本发布后，外部 Desktop 用户仍需本机 Node/npx 和可访问 npm 的网络，干净 Windows/macOS 安装链待真机验收。
 - **short-video-factory 本地 MCP 已在 Desktop 开发版连通。** Git `10553f10` 使 stdio 会话以 Node 启动 tsx、分离 stdout/stderr、记录完整超时诊断，并在失败后销毁旧会话和工具缓存。服务端真实返回 8 个工具；`open_project` 已成功打开 `0807功夫女友` 并返回 `episode-001`。`refresh_production_materials` 与断 pipe 重连仍待真实验收。
+- **Playwright 的打包版 PATH 根因已修复，待 v2.1.17 发布验收。** `v2.1.16` 的 `npx` 通过 `env node` 依赖终端 PATH，桌面 App 找不到 Node；统一 stdio 归一化现在使用绝对 Node 执行 npm `npx-cli.js`。开发测试已通过，正式包必须安装 `v2.1.17` 后再验证。
 - **文字云合同只有两个手动动作：** `上传并覆盖云端`以本地完整可同步文字快照覆盖云端，`下载并覆盖本地`以云端完整可同步文字快照覆盖本地。两者都不合并、不创建冲突副本、不自动双向同步；媒体、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不比较、不传输、不删除。设置页只显示状态，操作只在项目中心。
 - 发布身份不得因分离改变：Desktop `com.jiucaihezi.desktop`、iOS `com.jiucaihezi.mobile`、`jiucaihezi://`、正式 Web <https://jiucaihezi.studio>、应用数据目录、账号及云项目绑定全部保持连续；Android 当前无稳定独立身份，继续暂停。旧 OTA 使用 RSA 签名，与 Tauri 2 minisign 合同不兼容，下一版暂时关闭自动更新，继续通过 GitHub Release/官网下载安装包；生成新 signer 密钥并完成三平台旧版升级验收后再恢复 OTA。
 - **通用附件合同保持现状：** Office/PDF/XLSX/PPTX 保存原件并生成 Markdown 可读副本，再把 Markdown 发送给 NewAPI；原件不被删除，图片、视频、音频继续走原生媒体链路。本轮不改附件逻辑。

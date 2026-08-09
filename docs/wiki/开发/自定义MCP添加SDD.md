@@ -103,3 +103,9 @@ McpManagerPanel 添加表单
 - 连接或调用失败会关闭旧进程、删除旧连接；MCP Store 在 connecting、error、disconnected 时清空工具列表，重新连接必须重新 initialize 与 tools/list，不复用失败会话。
 - 用户在 Desktop 开发版真实添加 `/Users/by3/Documents/short-video-factory` 后，服务端 tools/list 返回 8 个工具：`open_project`、`read_wiki_document`、`refresh_production_materials`、`get_production_status`、`list_missing_materials`、`run_production_stage`、`get_task_status`、`resume_task`。随后真实调用 `open_project` 成功打开 `/Users/by3/Documents/0807功夫女友`，返回项目 ID、项目名称和 `episode-001`。
 - 未验证：`refresh_production_materials` 的真实 tools/call、断 pipe 后重连，以及外部 macOS/Windows 安装包链路；不得把这些写成已通过。
+
+## Playwright 打包版失败与修复（2026-08-09）
+
+- `v2.1.16` 打包版中的 Playwright 连接失败，真实错误为 `command=npx`、`methods=initialize`、`stderr=env: node: No such file or directory`。Studio 找到了 `/opt/homebrew/bin/npx`，但桌面 App 启动时没有终端继承的 Homebrew PATH，npx 的 `#!/usr/bin/env node` 无法找到 Node；子进程在返回 initialize 前退出，不是 MCP 服务端或 Playwright 包协议错误。
+- short-video-factory 能连接是因为它直接使用绝对 Node；本次修复让 Unix `npx` stdio 配置统一归一为绝对 Node + 对应 npm `npx-cli.js`，Node 仍按 `/opt/homebrew/bin/node`、`/usr/local/bin/node`、`process.execPath` 顺序选择，Windows 的 `npx.cmd` 路径分支不变。
+- 回归验证：MCP 相关测试 `11/11`、TypeScript 通过；本机直接执行 `/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/npm/bin/npx-cli.js --version` 成功。必须发布 `v2.1.17` 并安装新包后，才能算打包版 Playwright 修复通过。
