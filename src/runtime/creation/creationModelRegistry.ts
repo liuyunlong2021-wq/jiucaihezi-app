@@ -8,6 +8,7 @@ import type {
   CreationModelListItem,
   CreationModelSpec,
   CreationOutputModality,
+  CreationInputModality,
   CreationResultExtractor,
   CreationRoute,
   CreationSource,
@@ -71,18 +72,19 @@ function baseSpec(input: {
   ratios?: string[]
   resolutions?: string[]
   duration?: CreationModelSpec['capabilities']['duration']
+  inputModalities?: CreationInputModality[]
   contractIssues?: string[]
 }): CreationModelSpec {
   const outputModalities =
     input.outputModalities ||
     (input.task === 'image' ? ['image'] : input.task === 'audio' ? ['audio'] : ['video'])
-  const inputModalities = input.files?.audios
+  const inputModalities = input.inputModalities || (input.files?.audios
     ? (['text', 'image', 'audio'] as const)
     : input.files?.videos
       ? (['text', 'image', 'video'] as const)
       : input.files?.images
         ? (['text', 'image'] as const)
-        : (['text'] as const)
+        : (['text'] as const))
 
   return {
     id: input.id,
@@ -427,6 +429,25 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: [],
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: ['1k', '2k', '4k'],
+  }),
+  baseSpec({
+    id: 'seed-audio-1.0',
+    label: '豆包音频生成1.0',
+    task: 'audio',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'volcengine',
+    apiStyle: 'openai-audio-speech',
+    mode: 'voice-clone',
+    contractStatus: 'verified',
+    price: '1.2元/分钟',
+    endpoint: '/v1/audio/speech',
+    files: { audios: { min: 0, max: 3 } },
+    inputModalities: ['text', 'audio'],
+    fields: promptFields([
+      { key: 'audios', label: '参考音频（最多3段）', kind: 'audio' },
+    ]),
+    notes: ['docs/wiki/运维/服务器运维.md#参考音频适配验收（2026-08-09）'],
   }),
   runninghubStandard({
     id: 'runninghub/api/z-image-turbo',

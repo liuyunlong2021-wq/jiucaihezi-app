@@ -61,3 +61,16 @@ test('buildCurrentCreationParams uses the selected server AI App contract', () =
   assert.equal(params.billingModel, 'rh-custom-image')
   assert.equal(params.prompt, '图片应用')
 })
+
+test('Seed Audio rejects reference files larger than 10 MB', () => {
+  switchTask('audio')
+  switchModel('seed-audio-1.0')
+  clearFiles()
+
+  const oversized = makeFile('oversized.mp3', 'audio/mpeg')
+  Object.defineProperty(oversized, 'size', { value: 10 * 1024 * 1024 + 1 })
+  addFiles([oversized])
+
+  assert.equal(cpState.files.length, 0)
+  clearFiles()
+})

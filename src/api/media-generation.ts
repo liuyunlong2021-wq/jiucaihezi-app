@@ -56,6 +56,7 @@ export interface AudioGenParams {
   makeInstrumental?: boolean | string
   mv?: string
   audioUrl?: string
+  audioUrls?: string[]
   startTime?: string
   endTime?: string
   refText?: string
@@ -510,6 +511,27 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   // ★ 检测上游返回的业务错误（HTTP 200 但实际失败）
   checkUpstreamError(json)
   return json
+}
+
+export async function apiCallBinary(path: string, body: unknown, model?: string): Promise<string> {
+  await ensureConfig()
+  if (!storedApiKey()) throw new Error('请先登录韭菜盒子账号')
+  const { signal, clear } = createTimeoutSignal(300)
+  const res = await safeFetch(`${getApiBase()}${path}`, {
+    method: 'POST',
+    headers: authHeadersFor(model),
+    body: JSON.stringify(body),
+    signal,
+  })
+  clear()
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+  const mime = (res.headers.get('content-type') || 'audio/mpeg').split(';')[0]
+  const bytes = new Uint8Array(await res.arrayBuffer())
+  let binary = ''
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000))
+  }
+  return `data:${mime};base64,${btoa(binary)}`
 }
 
 /**

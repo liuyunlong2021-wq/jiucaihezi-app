@@ -58,6 +58,13 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('file:///Users/by3/result.png'), false)
 })
 
+test('large media data URLs are accepted only for trusted generation results', () => {
+  const largeAudio = `data:audio/mpeg;base64,${'A'.repeat(12 * 1024 * 1024)}`
+
+  assert.equal(isAllowedCreationResultUrl(largeAudio), false)
+  assert.equal(isAllowedCreationResultUrl(largeAudio, true), true)
+})
+
 test('Tauri CSP allows approved creation result CDN hosts used for media caching', () => {
   const tauriConfig = JSON.parse(readFileSync(join(process.cwd(), 'src-tauri/tauri.conf.json'), 'utf8'))
   const csp = String(tauriConfig.app?.security?.csp || '')

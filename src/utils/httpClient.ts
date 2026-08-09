@@ -19,6 +19,7 @@ interface RustHttpResponse {
   status: number
   headers: Record<string, string>
   body: string
+  body_base64?: string
 }
 
 function canUseRustFetch(init?: RequestInit): boolean {
@@ -123,6 +124,7 @@ function pickTimeoutForUrl(url: string): number {
   if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 300  // 图片生成 5 分钟（T8 GPTImage2 实测 ~200s）
   if (/\/v1\/videos\b/.test(url) && !/\/v1\/videos\/[^/]+$/.test(url)) return 60
   if (/\/suno\/submit/.test(url)) return 60
+  if (/\/v1\/audio\/speech\b/.test(url)) return 300
   return 30   // 其余保持原值
 }
 
@@ -146,7 +148,10 @@ async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
   })
 
   const respHeaders = new Headers(result.headers)
-  return new Response(result.body, {
+  const responseBody = result.body_base64
+    ? Uint8Array.from(atob(result.body_base64), char => char.charCodeAt(0))
+    : result.body
+  return new Response(responseBody, {
     status: result.status,
     headers: respHeaders,
   })

@@ -17,6 +17,7 @@ pub struct HttpResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub body: String,
+    pub body_base64: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -223,15 +224,28 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
             headers.insert(key.to_string(), v.to_string());
         }
     }
-    let body = resp
-        .text()
-        .await
-        .map_err(|e| format!("读取响应失败: {}", e))?;
+    let is_audio = headers
+        .get("content-type")
+        .is_some_and(|value| value.to_ascii_lowercase().starts_with("audio/"));
+    let (body, body_base64) = if is_audio {
+        let bytes = resp
+            .bytes()
+            .await
+            .map_err(|e| format!("读取音频响应失败: {}", e))?;
+        (String::new(), Some(general_purpose::STANDARD.encode(bytes)))
+    } else {
+        let body = resp
+            .text()
+            .await
+            .map_err(|e| format!("读取响应失败: {}", e))?;
+        (body, None)
+    };
 
     Ok(HttpResponse {
         status,
         headers,
         body,
+        body_base64,
     })
 }
 
@@ -305,6 +319,7 @@ pub async fn document_markdown_request(
         status,
         headers,
         body,
+        body_base64: None,
     })
 }
 

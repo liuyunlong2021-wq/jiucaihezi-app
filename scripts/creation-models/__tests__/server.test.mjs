@@ -63,6 +63,7 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
     { id: 16, name: 't8', status: 1, baseUrl: 'x', models: ['nano-banana-pro-4k'] },
     { id: 55, name: 'RH-图片', status: 1, baseUrl: 'x', models: ['rh-pro-image', 'rh-gpt2-text'] },
     { id: 56, name: 'RH-视频', status: 3, baseUrl: 'x', models: ['rh-grok-text-video'] },
+    { id: 66, name: 'Seed Audio', status: 1, baseUrl: 'x', models: ['seed-audio-1.0'] },
   ], new Date('2026-05-31T00:00:00Z'))
 
   const byId = Object.fromEntries(models.map(model => [model.id, model]))
@@ -75,6 +76,7 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
   assert.equal(byId['grok-video-3'].reason, 'NewAPI 渠道已自动禁用')
   assert.equal(byId['rh-grok-text-video'].status, 'disabled')
   assert.equal(byId['rh-grok-text-video'].reason, 'NewAPI 渠道已自动禁用')
+  assert.equal(byId['seed-audio-1.0'].status, 'enabled')
 })
 
 test('buildCreationModelAvailability detects GPT Image 2 VIP channels', () => {

@@ -24,6 +24,7 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },
   { id: 'veo-3.1-fast-generate-preview', aliases: ['veo-3.1-fast-generate-preview'] },
   { id: 'nano-banana-4k', aliases: ['nano-banana-4k', 'nano-banana-pro-4k'] },
+  { id: 'seed-audio-1.0', aliases: ['seed-audio-1.0'] },
   { id: 'rh-pro-image', aliases: ['rh-pro-image'] },
   { id: 'rh-image-v2', aliases: ['rh-image-v2'] },
   { id: 'rh-gpt2-official', aliases: ['rh-gpt2-official'] },

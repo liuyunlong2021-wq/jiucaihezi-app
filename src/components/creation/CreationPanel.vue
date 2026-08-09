@@ -88,6 +88,7 @@ import {
   saveCpState,
   getVisibleCreationTasks,
   buildCurrentCreationParams,
+  SEED_AUDIO_MAX_REFERENCE_BYTES,
   aiAppDirectory,
   fetchAiAppDirectory,
   discoverAiAppNodes,
@@ -550,6 +551,9 @@ async function runCreationViaTaskStore() {
     const refVideos = await Promise.all(
       cpState.files.filter(file => file.type.startsWith('video/')).map(fileToDataUrl),
     )
+    const refAudios = await Promise.all(
+      cpState.files.filter(file => file.type.startsWith('audio/')).map(fileToDataUrl),
+    )
     const selected = (app?.editor?.list || []) as any[]
     if (selected.length && canvasStore.canvasPath) {
       const owner = canvasOwner.value || selectedCanvasOwner()
@@ -570,6 +574,7 @@ async function runCreationViaTaskStore() {
       const fileLimits = currentCreationSpec.value?.files
       const selectedImageCount = assets.filter(({ asset }) => asset.kind === 'image').length
       const selectedVideoCount = assets.filter(({ asset }) => asset.kind === 'video').length
+      const selectedAudioCount = assets.filter(({ asset }) => asset.kind === 'audio').length
       if (fileLimits?.images?.max !== undefined && selectedImageCount > fileLimits.images.max) {
         cpState.progressText = `当前模型最多支持 ${fileLimits.images.max} 张图片`
         return
@@ -578,19 +583,24 @@ async function runCreationViaTaskStore() {
         cpState.progressText = `当前模型最多支持 ${fileLimits.videos.max} 个视频，请只选一个`
         return
       }
+      if (fileLimits?.audios?.max !== undefined && selectedAudioCount > fileLimits.audios.max) {
+        cpState.progressText = `当前模型最多支持 ${fileLimits.audios.max} 段音频`
+        return
+      }
       const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
       for (const { asset } of assets) {
         if (!modalities.includes(asset.kind)) continue
-        if (asset.kind === 'audio') continue
         const mediaPath = asset.resource.path
         const url = await getMediaSubmissionUrl(
           isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath,
           owner,
+          asset.kind === 'audio' ? SEED_AUDIO_MAX_REFERENCE_BYTES : undefined,
         )
-        if (asset.kind === 'video') refVideos.push(url)
+        if (asset.kind === 'audio') refAudios.push(url)
+        else if (asset.kind === 'video') refVideos.push(url)
         else refImages.push(url)
       }
-      if (!refImages.length && !refVideos.length) {
+      if (!refImages.length && !refVideos.length && !refAudios.length) {
         cpState.progressText = '当前模型不支持已选素材类型'
         return
       }
@@ -598,7 +608,7 @@ async function runCreationViaTaskStore() {
 
     const submitPlan = buildCreationRunPlan({
       modelId: currentCreationSpec.value?.id || cpState.modelKey,
-      params: buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: [] }),
+      params: buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: refAudios }),
     })
 
     cpState.generating = true
@@ -613,6 +623,7 @@ async function runCreationViaTaskStore() {
         prompt: cpState.prompt,
         referenceImages: refImages,
         referenceVideos: refVideos,
+        audioParams: refAudios.length ? { audioUrls: refAudios } : undefined,
         videoParams: refVideos.length ? { videoUrl: refVideos[0] } : undefined,
         source: 'creation',
         plan: submitPlan,
@@ -748,11 +759,14 @@ const canvasReferenceRunPlan = computed(() => {
   const videos = selectedReferenceAssets.value
     .filter(asset => asset.kind === 'video' && modalities.includes('video'))
     .map(() => 'data:video/mp4;base64,')
-  if (!images.length && !videos.length) return null
+  const audios = selectedReferenceAssets.value
+    .filter(asset => asset.kind === 'audio' && modalities.includes('audio'))
+    .map(() => 'data:audio/mpeg;base64,')
+  if (!images.length && !videos.length && !audios.length) return null
   try {
     return buildCreationRunPlan({
       modelId: spec.id,
-      params: buildCurrentCreationParams({ images, videos, audios: [] }),
+      params: buildCurrentCreationParams({ images, videos, audios }),
     })
   } catch {
     return null
@@ -766,7 +780,8 @@ const rhModeLabel = computed(() => {
 const selectedReferenceSummary = computed(() => {
   const images = selectedReferenceAssets.value.filter(asset => asset.kind === 'image').length
   const videos = selectedReferenceAssets.value.filter(asset => asset.kind === 'video').length
-  return [images ? `${images} 图` : '', videos ? `${videos} 视频` : ''].filter(Boolean).join(' · ')
+  const audios = selectedReferenceAssets.value.filter(asset => asset.kind === 'audio').length
+  return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
 const unsupportedReferenceSummary = computed(() => {
   const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
@@ -776,7 +791,10 @@ const unsupportedReferenceSummary = computed(() => {
   const videos = selectedReferenceAssets.value.filter(
     asset => asset.kind === 'video' && !modalities.includes('video'),
   ).length
-  return [images ? `${images} 图` : '', videos ? `${videos} 视频` : ''].filter(Boolean).join(' · ')
+  const audios = selectedReferenceAssets.value.filter(
+    asset => asset.kind === 'audio' && !modalities.includes('audio'),
+  ).length
+  return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
 function referenceSelectedCanvasMedia() {
   const owner = canvasOwner.value || selectedCanvasOwner()
@@ -922,9 +940,9 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
   }
 }
 
-async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<string> {
+async function getMediaSubmissionUrl(filePath: string, owner: string, maxBytes?: number): Promise<string> {
   if (!isTauriRuntime() && owner && isWebProjectMediaPath(filePath)) {
-    return await projectFileActions.readMediaDataUrl({
+    const url = await projectFileActions.readMediaDataUrl({
       runtime: 'web',
       owner,
       path: filePath,
@@ -932,6 +950,11 @@ async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<s
       isDirectory: false,
       kind: 'media',
     })
+    const encoded = url.startsWith('data:') ? url.slice(url.indexOf(',') + 1) : ''
+    if (maxBytes && encoded.length > 4 * Math.ceil(maxBytes / 3)) {
+      throw new Error('参考音频不能超过 10 MB')
+    }
+    return url
   }
   if (isTauriRuntime()) {
     const projectDir = owner
@@ -940,8 +963,9 @@ async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<s
       const relativePath = mediaPathForStorage(filePath, projectDir)
       const { invoke } = await import('@tauri-apps/api/core')
       const result = await invoke<{ base64: string; truncated: boolean }>('dev_read_file', {
-        input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
+        input: { root: projectDir, relativePath, maxBytes: maxBytes || 20_000_000 },
       })
+      if (maxBytes && result?.truncated) throw new Error('参考音频不能超过 10 MB')
       if (result?.base64 && !result.truncated) {
         const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
         const mime =
@@ -968,7 +992,9 @@ async function getMediaSubmissionUrl(filePath: string, owner: string): Promise<s
                               : 'image/png'
         return `data:${mime};base64,${result.base64}`
       }
-    } catch {}
+    } catch (error) {
+      if (maxBytes) throw error
+    }
   }
   return getMediaRuntimeUrl(filePath, owner)
 }

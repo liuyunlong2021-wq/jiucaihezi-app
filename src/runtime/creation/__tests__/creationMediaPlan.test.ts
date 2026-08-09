@@ -573,6 +573,14 @@ test('panel model labels omit route/channel suffix because channel has its own f
   }
 })
 
+test('Seed Audio creation model uses the Chinese label, minute price, and three audio references', () => {
+  const spec = getCreationModelSpec('seed-audio-1.0')!
+  assert.equal(spec.label, '豆包音频生成1.0')
+  assert.equal(spec.price, '1.2元/分钟')
+  assert.deepEqual(spec.files?.audios, { min: 0, max: 3 })
+  assert.deepEqual(spec.capabilities.inputModalities, ['text', 'audio'])
+})
+
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   const params: Record<string, unknown> = {
     prompt: '测试提示词',

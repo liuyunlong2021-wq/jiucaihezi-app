@@ -93,6 +93,7 @@ export interface AiAppDirectoryEntry {
 const STORAGE_KEY = 'jc_cp_state_v3'
 const DELETED_KEY = 'jc_cp_deleted_v1'
 const MAX_CREATION_FILE_BYTES = 50 * 1024 * 1024
+export const SEED_AUDIO_MAX_REFERENCE_BYTES = 10 * 1024 * 1024
 const MAX_DELETED_MARKERS = 200
 
 function loadSaved(): Partial<CpState> {
@@ -676,7 +677,10 @@ function isAcceptedFileForCurrentModel(file: File): boolean {
 export function addFiles(fileList: FileList | File[]) {
   const max = currentModel.value?.maxFiles || 1
   Array.from(fileList).forEach(f => {
-    if (f.size > MAX_CREATION_FILE_BYTES) return
+    const maxBytes = cpState.modelKey === 'seed-audio-1.0' && f.type.startsWith('audio/')
+      ? SEED_AUDIO_MAX_REFERENCE_BYTES
+      : MAX_CREATION_FILE_BYTES
+    if (f.size > maxBytes) return
     if (cpState.files.length < max && isAcceptedFileForCurrentModel(f)) {
       cpState.files.push(f)
     }

@@ -341,7 +341,9 @@ function normalizeGenericTaskParams(
     video: params.video,
     videoUrl: params.videoUrl,
     audio: params.audio,
+    audios: params.audios,
     audioUrl: params.audioUrl,
+    audioUrls: params.audioUrls,
     title: params.title,
     tags: params.tags,
   })

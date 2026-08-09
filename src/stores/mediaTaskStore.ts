@@ -194,6 +194,13 @@ export interface MediaTaskSettledPayload {
 // ─── Persistence ───
 
 const TASKS_KEY = 'jc_media_tasks_v1'
+const INLINE_MEDIA_DATA_URL = /^data:(?:image|video|audio)\//i
+
+function withoutInlineMedia<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value, (_key, item) =>
+    typeof item === 'string' && INLINE_MEDIA_DATA_URL.test(item) ? '' : item,
+  )) as T
+}
 
 async function loadTasks(): Promise<MediaTask[]> {
   try {
@@ -269,7 +276,7 @@ function toPlanSnapshot(plan: CreationRunPlan): CreationPlanSnapshot {
     assetFlow: plan.assetFlow,
     submitSummary: plan.submitSummary,
     warnings: plan.warnings,
-    normalizedParams: plan.debug.normalizedParams,
+    normalizedParams: withoutInlineMedia(plan.debug.normalizedParams),
   }
 }
 
@@ -484,7 +491,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     const operation = persistenceQueue.then(async () => {
       mutate?.()
       try {
-        const snapshot = JSON.parse(JSON.stringify(tasks.value)) as MediaTask[]
+        const snapshot = withoutInlineMedia(tasks.value)
         await mediaTaskSaver(snapshot)
       } catch (error) {
         rollback?.()
@@ -531,7 +538,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
-    if (!isAllowedCreationResultUrl(url)) throw new Error('媒体结果地址不安全，已阻止缓存')
+    if (!isAllowedCreationResultUrl(url, true)) throw new Error('媒体结果地址不安全，已阻止缓存')
     const canvasOwner = canvasTaskOwner(task)
     if (task.canvasTarget && !canvasOwner) {
       markCanvasWriteUnwritten(task)
@@ -811,6 +818,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     })
     emitSettled(task)
     if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
+    if ((task.assetUri || task.projectPath) && INLINE_MEDIA_DATA_URL.test(task.resultUrl || '')) {
+      task.resultUrl = ''
+    }
     const persisted = await persistTasksSafely(persistenceContext)
     if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
   }
@@ -1018,8 +1028,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       model: params.model,
       modelLabel: params.modelLabel,
       prompt: params.prompt,
-      referenceImages: params.referenceImages || [],
-      referenceVideos: params.referenceVideos || [],
+      referenceImages: withoutInlineMedia(params.referenceImages || []),
+      referenceVideos: withoutInlineMedia(params.referenceVideos || []),
       status: 'pending',
       progress: 0,
       progressText: '排队中...',
@@ -1031,11 +1041,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       sessionId: params.sessionId,
       directory: params.directory,
       memory: params.memory,
-      params: {
+      params: withoutInlineMedia({
         ...(params.imageParams || {}),
         ...(params.videoParams || {}),
         ...(params.audioParams || {}),
-      },
+      }),
       route: params.plan?.route,
       upstreamFamily: params.plan?.upstreamFamily,
       apiStyle: params.plan?.apiStyle,

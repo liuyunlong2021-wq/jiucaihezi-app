@@ -384,7 +384,7 @@ test('mediaTaskStore keeps result URL validation at the media boundary', () => {
   assert.equal(source.includes('validateTaskInputs(params)'), true)
   assert.equal(source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"), true)
   assert.equal(source.includes('function assertSafeResultUrl'), false)
-  assert.equal(source.includes("if (!isAllowedCreationResultUrl(url)) throw new Error('媒体结果地址不安全，已阻止缓存')"), true)
+  assert.equal(source.includes("if (!isAllowedCreationResultUrl(url, true)) throw new Error('媒体结果地址不安全，已阻止缓存')"), true)
   assert.equal(source.includes('const safeMediaUrl = assertSafeResultUrl(mediaUrl)'), false)
   assert.equal(source.includes('const safeResultUrl = assertSafeResultUrl(resultUrl)'), false)
   assert.equal(source.includes('task.resultUrl = resultUrl'), true)
@@ -1304,7 +1304,7 @@ test(
 )
 
 test(
-  'mediaTaskStore writes Base64 creation images locally without HTTP download on Desktop',
+  'mediaTaskStore writes Base64 creation media locally without persisting inline data',
   { concurrency: false },
   async () => {
     const storage = installLocalStorage()
@@ -1318,18 +1318,24 @@ test(
     __resetApiKeyMemoryCacheForTests('session-cloud')
     const store = useMediaTaskStore()
     const resultUrl = 'data:image/png;base64,cG5n'
+    const referenceUrl = 'data:image/png;base64,cmVmZXJlbmNl'
+    const persistedSnapshots: string[] = []
+    __setMediaTaskSaverForTests(async tasks => {
+      persistedSnapshots.push(JSON.stringify(tasks))
+    })
     __setCreationSubmitExecutorForTests(async () => ({ url: resultUrl, type: 'image' }))
 
     try {
       const plan = buildCreationRunPlan({
         modelId: 'gpt-image-2',
-        params: { prompt: 'Base64 图片', ratio: '16:9', resolution: '2k' },
+        params: { prompt: 'Base64 图片', images: [referenceUrl], ratio: '16:9', resolution: '2k' },
       })
       const taskId = await store.submitTask({
         type: 'image',
         model: 'gpt-image-2',
         modelLabel: 'GPT Image 2 · 直连',
         prompt: 'Base64 图片',
+        referenceImages: [referenceUrl],
         source: 'creation',
         plan,
       })
@@ -1338,10 +1344,15 @@ test(
       const task = store.getTask(taskId)
 
       assert.equal(files.downloads.length, 0)
-      assert.equal(task?.resultUrl, resultUrl)
+      assert.equal(task?.resultUrl, '')
       assert.match(task?.assetUri || '', /^\/projects\/base64-image\/jc-media\/images\//)
       assert.equal(task?.assetStatus, 'local')
+      assert.equal(JSON.stringify(task?.params).includes('data:image/'), false)
+      assert.equal(JSON.stringify(task?.planSnapshot).includes('data:image/'), false)
+      assert.equal(JSON.stringify(task?.referenceImages).includes('data:image/'), false)
+      assert.equal(persistedSnapshots.some(snapshot => snapshot.includes('data:image/')), false)
     } finally {
+      __setMediaTaskSaverForTests(null)
       __setCreationSubmitExecutorForTests(null)
       files.restore()
       projectStore.projectDir.value = originalProjectDir

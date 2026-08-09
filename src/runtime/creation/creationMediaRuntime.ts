@@ -1,5 +1,6 @@
 import {
   apiCall,
+  apiCallBinary,
   apiCallMultipart,
   extractMediaText,
   extractMediaUrl,
@@ -88,6 +89,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     makeInstrumental: asOptionalBoolean(params.make_instrumental),
     mv: asOptionalString(params.mv),
     audioUrl: firstString(params, ['audioUrl', 'audio', 'audios', 'audioUrls']),
+    audioUrls: asStringArray(params.audios),
     startTime: asOptionalString(params.start_time),
     endTime: asOptionalString(params.end_time),
     refText: asOptionalString(params.ref_text),
@@ -243,6 +245,20 @@ async function executeDirectAudioRequest(
 ): Promise<MediaResult> {
   onProgress?.(0, '提交中...')
   const params = request.audioParams || {}
+  if (request.plan.apiStyle === 'openai-audio-speech') {
+    const references = (params.audioUrls || (params.audioUrl ? [params.audioUrl] : [])).map(reference =>
+      reference.startsWith('data:')
+        ? { audio_data: reference.replace(/^data:[^,]+,/, '') }
+        : { audio_url: reference },
+    )
+    const url = await apiCallBinary(request.endpoint, {
+      model: request.plan.model,
+      input: params.prompt,
+      response_format: 'mp3',
+      ...(references.length ? { metadata: { references } } : {}),
+    }, request.plan.model)
+    return { url, type: 'audio' }
+  }
   const body = compact({
     model: request.plan.model,
     prompt: params.prompt,

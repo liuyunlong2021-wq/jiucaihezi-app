@@ -582,6 +582,45 @@ test('P5 smoke RH lyrics returns text result through rh-adapter polling', async 
   }
 })
 
+test('Seed Audio submits up to three reference audios and returns synchronous MP3', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.match(String(input), /\/v1\/audio\/speech$/)
+    const body = JSON.parse(String(init?.body))
+    assert.equal(body.model, 'seed-audio-1.0')
+    assert.equal(body.input, '按参考声音生成')
+    assert.deepEqual(body.metadata.references, [
+      { audio_data: 'YQ==' },
+      { audio_data: 'Yg==' },
+      { audio_data: 'Yw==' },
+    ])
+    return new Response(new Uint8Array([0x49, 0x44, 0x33]), {
+      headers: { 'Content-Type': 'audio/mpeg' },
+    })
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'seed-audio-1.0',
+      params: {
+        prompt: '按参考声音生成',
+        audios: [
+          'data:audio/mpeg;base64,YQ==',
+          'data:audio/mpeg;base64,Yg==',
+          'data:audio/mpeg;base64,Yw==',
+        ],
+      },
+    })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.type, 'audio')
+    assert.equal(result.url, 'data:audio/mpeg;base64,SUQz')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 // ── P6: 端点路由专项测试 ──
 
 test('RH 图片模型提交 URL 必须是 /v1/images/generations', () => {

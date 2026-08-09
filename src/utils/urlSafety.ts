@@ -77,18 +77,20 @@ export function isAllowedDownloadUrl(input: string): boolean {
 
 export function isAllowedMediaAttachmentUrl(input: string): boolean {
   const text = String(input || '').trim()
-  if (/^data:(image|video|audio)\//i.test(text)) {
-    if (text.length > MAX_MEDIA_DATA_URL_LENGTH) return false
-    if (/^data:image\/svg\+xml/i.test(text)) return false
-    return /^data:(image|video|audio)\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(text)
-  }
+  if (/^data:(image|video|audio)\//i.test(text)) return isAllowedMediaDataUrl(text)
   const parsed = parseUrl(text)
   return Boolean(parsed && MEDIA_ATTACHMENT_PROTOCOLS.has(parsed.protocol))
 }
 
-export function isAllowedCreationResultUrl(input: string): boolean {
+function isAllowedMediaDataUrl(text: string, allowLarge = false): boolean {
+  if (!allowLarge && text.length > MAX_MEDIA_DATA_URL_LENGTH) return false
+  if (/^data:image\/svg\+xml/i.test(text)) return false
+  return /^data:(image|video|audio)\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(text)
+}
+
+export function isAllowedCreationResultUrl(input: string, allowLargeDataUrl = false): boolean {
   const text = String(input || '').trim()
-  if (/^data:(image|video|audio)\//i.test(text)) return isAllowedMediaAttachmentUrl(text)
+  if (/^data:(image|video|audio)\//i.test(text)) return isAllowedMediaDataUrl(text, allowLargeDataUrl)
   return isSafePublicHttpUrl(text)
 }
 

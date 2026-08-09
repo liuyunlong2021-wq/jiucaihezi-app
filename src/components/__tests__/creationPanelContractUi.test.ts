@@ -104,7 +104,7 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /getMediaSubmissionUrl/)
   assert.match(
     source,
-    /async function getMediaSubmissionUrl\(filePath: string, owner: string\): Promise<string>/,
+    /async function getMediaSubmissionUrl\(filePath: string, owner: string, maxBytes\?: number\): Promise<string>/,
   )
   assert.match(source, /result\.truncated/)
   assert.match(source, /nextCanvasMediaPosition/)
@@ -128,14 +128,14 @@ test('creation panel uses a static video reference node and native preview inste
   assert.doesNotMatch(source, /requestAnimationFrame\(this\.renderTick\)/)
 })
 
-test('creation panel restores audio as a native audio card without submitting it as an image reference', () => {
+test('creation panel restores audio as a native audio card and submits it as an audio reference', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /function createAudioReferenceNode/)
   assert.match(source, /tag = 'canvas-audio-card'/)
   assert.match(source, /asset\?\.kind === 'audio'/)
   assert.match(source, /new Audio\(src\)/)
-  assert.match(source, /if \(asset\.kind === 'audio'\) continue/)
+  assert.match(source, /if \(asset\.kind === 'audio'\) refAudios\.push\(url\)/)
   assert.match(
     source,
     /payload\?\.kind === 'image' \|\| payload\?\.kind === 'video' \|\| payload\?\.kind === 'audio'/,
@@ -207,8 +207,19 @@ test('canvas media nodes are draggable and selected canvas references drive the 
   assert.match(source, /new Image\(\{[\s\S]{0,80}id: layer\.id,[\s\S]{0,80}url,[\s\S]{0,80}editable: true,[\s\S]{0,80}draggable: true/)
   assert.match(source, /function addMediaToCanvas[\s\S]*?canvasTool\('select'\)/)
   assert.match(source, /const canvasReferenceRunPlan = computed/)
-  assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios: \[\] \}\)/)
+  assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios \}\)/)
   assert.match(source, /canvasReferenceRunPlan\.value\?\.mode \|\| currentRunPlan\.value\?\.mode/)
+})
+
+test('selected canvas audio is submitted as a Seed Audio reference', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /const selectedAudioCount = assets\.filter\(\(\{ asset \}\) => asset\.kind === 'audio'\)\.length/)
+  assert.match(source, /if \(asset\.kind === 'audio'\) refAudios\.push\(url\)/)
+  assert.doesNotMatch(source, /if \(asset\.kind === 'audio'\) continue/)
+  assert.match(source, /buildCurrentCreationParams\(\{ images, videos, audios \}\)/)
+  assert.match(source, /audios \? `\$\{audios\} 音频` : ''/)
+  assert.match(source, /catch \(error\) \{\s+if \(maxBytes\) throw error/)
 })
 
 test('canvas text and number markers use Leafer page coordinates', () => {
@@ -423,7 +434,7 @@ test('creation panel resolves Web project media without serializing object URLs'
   )
   assert.match(
     source,
-    /getMediaSubmissionUrl\(\s+isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath,\s+owner,?\s+\)/,
+    /getMediaSubmissionUrl\(\s+isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath,\s+owner,\s+asset\.kind === 'audio' \? SEED_AUDIO_MAX_REFERENCE_BYTES : undefined,?\s+\)/,
   )
   assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, filePath/)
   assert.match(runtime, /projectFileActions\.readMedia\(\{/)
