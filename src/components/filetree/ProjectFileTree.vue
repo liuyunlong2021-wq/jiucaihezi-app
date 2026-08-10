@@ -1402,36 +1402,40 @@ async function uploadCurrentProject() {
 function projectNameFromOwner(owner: string): string {
   return owner.replace(/\/+$/, '').split('/').pop() || owner
 }
-async function localOwnerForCloud(cloudProjectId: string): Promise<{ owner: string; name: string } | null> {
+async function localOwnerForCloud(cloud: SyncProject): Promise<{ owner: string; name: string } | null> {
   const localProjects = isMobile
     ? mobileProjects.value.map(project => ({ owner: project.path, name: project.name }))
     : isDesktop
       ? projectStore.recentProjectDirs.value.map(owner => ({ owner, name: projectNameFromOwner(owner) }))
     : webProjects.value.map(project => ({ owner: project.id, name: project.name }))
+  const availableLocalProjects: typeof localProjects = []
   for (const project of localProjects) {
     try {
-      if (await projectTextSync.cloudProjectIdFor(project.owner) === cloudProjectId) return project
+      const cloudProjectId = await projectTextSync.cloudProjectIdFor(project.owner)
+      availableLocalProjects.push(project)
+      if (cloudProjectId === cloud.id) return project
     } catch {
       // Missing/deleted recent projects are ignored.
     }
   }
-  return null
+  return availableLocalProjects.find(project => project.name === cloud.name) || null
 }
 async function openCloudProject(cloud: SyncProject) {
   if (projectMenuBusy.value) return
+  if (!(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
+    title: '下载并覆盖本地',
+    okLabel: '确认下载并覆盖',
+  }))) return
   projectMenuBusy.value = true
   projectMenuError.value = ''
   try {
-    const existing = await localOwnerForCloud(cloud.id)
+    const existing = await localOwnerForCloud(cloud)
     if (existing) {
-      if (!(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
-        title: '下载并覆盖本地',
-        okLabel: '确认下载并覆盖',
-      }))) return
       if (isDesktop || isMobile) projectStore.selectProject(existing.owner)
       else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
       await projectTextSync.open(existing.owner, existing.name)
-      await projectTextSync.downloadNow()
+      if (await projectTextSync.cloudProjectIdFor(existing.owner) === cloud.id) await projectTextSync.downloadNow()
+      else await projectTextSync.connect(cloud.id)
       showProjectMenu.value = false
       return
     }
@@ -1480,6 +1484,7 @@ async function downloadCurrentProject() {
   projectMenuBusy.value = true
   projectMenuError.value = ''
   try {
+    await projectTextSync.open(projectKey.value, projectStore.projectName.value)
     await projectTextSync.downloadNow()
   } catch (e) {
     projectMenuError.value = e instanceof Error ? e.message : String(e)
