@@ -1,6 +1,9 @@
 use base64::{Engine as _, engine::general_purpose};
 use serde::Serialize;
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use arboard;
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipboardImage {
@@ -14,7 +17,11 @@ pub fn write_clipboard_text(text: String) -> Result<(), String> {
     if text.is_empty() {
         return Ok(());
     }
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    return Err("移动端暂不支持原生剪贴板写入".into());
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("剪贴板不可用: {e}"))?;
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     clipboard
         .set_text(&text)
         .map_err(|e| format!("写入失败: {e}"))?;
@@ -23,7 +30,11 @@ pub fn write_clipboard_text(text: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn read_clipboard_image() -> Result<Option<ClipboardImage>, String> {
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    return Err("移动端暂不支持原生剪贴板图片读取".into());
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("剪贴板不可用: {e}"))?;
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     match clipboard.get_image() {
         Ok(image) => {
             build_clipboard_image(image.width, image.height, image.bytes.as_ref()).map(Some)

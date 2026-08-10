@@ -1925,6 +1925,7 @@ function readDataUrl(file: File): Promise<string> {
             </button>
           </div>
           <input ref="fileInput" type="file" multiple hidden :disabled="sending" @change="selectFiles" />
+          <button class="icon-button mobile-only memory-mobile-creation" title="打开创作面板" @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"><JcIcon name="palette" /></button>
           <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
           <div
             ref="composerRef"
@@ -2210,7 +2211,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-settings-backdrop, .memory-tree-backdrop { position: fixed; z-index: 35; inset: 0; border: 0; background: rgb(0 0 0 / 28%); }
 .mobile-only, .memory-tree-backdrop { display: none; }
 @media (max-width: 760px) {
-  .memory-workbench, .memory-workbench.desktop-runtime { display: block; padding-top: 0; }
+  .memory-workbench, .memory-workbench.desktop-runtime { display: block; height: 100dvh; padding-top: env(safe-area-inset-top, 0); box-sizing: border-box; }
   .memory-main { height: 100%; }
   .memory-tree { position: fixed; z-index: 38; inset: 0; width: auto; transform: translateX(-100%); transition: transform .18s ease; }
   .memory-tree.open { transform: translateX(0); }
@@ -2225,7 +2226,8 @@ function readDataUrl(file: File): Promise<string> {
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }
-  .memory-settings-drawer { inset: 0; width: auto; border-left: 0; }
+  .memory-mobile-creation { display: grid; }
+  .memory-settings-drawer { top: env(safe-area-inset-top, 0); right: 0; bottom: 0; left: 0; width: auto; border-left: 0; }
   .memory-creation { position: fixed; z-index: 45; inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
 }
 </style>

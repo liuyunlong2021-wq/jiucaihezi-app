@@ -2948,6 +2948,13 @@ onBeforeUnmount(() => {
   font-size: calc(var(--font-base) - 1px);
 }
 
+@media (max-width: 760px) {
+  .pft.memory-mode {
+    padding-top: env(safe-area-inset-top, 0);
+    box-sizing: border-box;
+  }
+}
+
 /* ─── 状态 ─── */
 .pft-status {
   padding: 16px;
