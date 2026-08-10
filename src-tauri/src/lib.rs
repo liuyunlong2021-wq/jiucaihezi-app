@@ -1167,7 +1167,7 @@ pub fn run() {
             let mut window_config = app.config().app.windows.first()
                 .ok_or("missing main window config")?
                 .clone();
-            #[cfg(debug_assertions)]
+            #[cfg(dev)]
             {
                 let dev_url = app.config().build.dev_url.clone().unwrap_or_else(|| {
                     "http://localhost:1420".parse().expect("valid desktop dev URL")
