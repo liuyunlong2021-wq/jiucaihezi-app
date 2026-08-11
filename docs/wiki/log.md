@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-08-11] 修复 | Playwright MCP PATH 二次遗漏
+
+- 用户在已安装的 `v2.1.17` 中仍复现 `env: node: No such file or directory`；此前绝对 Node + `npx-cli.js` 只修复第一层启动，npx 后续通过 `env node` 启动 Playwright 时仍受桌面 App PATH 缺失影响。
+- 共享 `mcp_spawn_stdio` 现在将解析后的可执行文件目录置于 Unix 子进程 PATH 最前，覆盖 Playwright 与同类本地 stdio MCP，不为单一服务加补丁。
+- MCP 专项 `5/5`、TypeScript、Rust 编译和 `git diff --check` 通过；空 PATH 失败、补 `/opt/homebrew/bin` 后官方 Playwright MCP `--help` 成功。正式 `v2.1.18` 安装包点击验收待执行。
+
 ## [2026-08-09] 修复 | Playwright 打包版 Node PATH 根因
 
 - `v2.1.16` 打包版的 Playwright 以 `npx` 启动，stderr 返回 `env: node: No such file or directory`；终端开发版能用、桌面包失败的差异来自 LaunchServices 不继承终端 PATH。

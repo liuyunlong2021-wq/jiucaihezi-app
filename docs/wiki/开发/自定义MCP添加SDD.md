@@ -109,3 +109,9 @@ McpManagerPanel 添加表单
 - `v2.1.16` 打包版中的 Playwright 连接失败，真实错误为 `command=npx`、`methods=initialize`、`stderr=env: node: No such file or directory`。Studio 找到了 `/opt/homebrew/bin/npx`，但桌面 App 启动时没有终端继承的 Homebrew PATH，npx 的 `#!/usr/bin/env node` 无法找到 Node；子进程在返回 initialize 前退出，不是 MCP 服务端或 Playwright 包协议错误。
 - short-video-factory 能连接是因为它直接使用绝对 Node；本次修复让 Unix `npx` stdio 配置统一归一为绝对 Node + 对应 npm `npx-cli.js`，Node 仍按 `/opt/homebrew/bin/node`、`/usr/local/bin/node`、`process.execPath` 顺序选择，Windows 的 `npx.cmd` 路径分支不变。
 - 回归验证：MCP 相关测试 `11/11`、TypeScript 通过；本机直接执行 `/opt/homebrew/bin/node /opt/homebrew/lib/node_modules/npm/bin/npx-cli.js --version` 成功。必须发布 `v2.1.17` 并安装新包后，才能算打包版 Playwright 修复通过。
+
+## `v2.1.17` 复现与最终修复（2026-08-11）
+
+- 用户已安装 `v2.1.17`，仍复现 `command=/opt/homebrew/bin/node`、`args=[.../npx-cli.js,"-y","@playwright/mcp@0.0.79"]` 和 `stderr=env: node: No such file or directory`。这证明绝对 Node 只覆盖了第一层启动；`npx` 继续拉起 Playwright 时仍通过 `env node` 查找 PATH。
+- 根修位于共享 `mcp_spawn_stdio`：Unix 子进程的 `PATH` 现在以前台解析后的可执行文件目录开头。因此 Homebrew Node 启动 `npx-cli.js` 后，所有后继脚本都能解析同一个 `node`。它适用于所有本地 stdio MCP，不是某台机器的专用配置。
+- 验证：MCP 专项 `5/5`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过；以空 Homebrew PATH 运行官方 Playwright MCP 失败，补入 `/opt/homebrew/bin` 后 `--help` 成功。未执行新正式安装包的 Desktop 点击验收；必须发布 `v2.1.18` 或更高版本后再验收。

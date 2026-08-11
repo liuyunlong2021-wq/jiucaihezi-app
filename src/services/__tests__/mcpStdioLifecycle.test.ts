@@ -6,6 +6,7 @@ import assert from 'node:assert/strict'
 const client = readFileSync(join(process.cwd(), 'src/services/mcpClient.ts'), 'utf8')
 const transport = readFileSync(join(process.cwd(), 'src/services/mcpStdioTransport.ts'), 'utf8')
 const store = readFileSync(join(process.cwd(), 'src/stores/mcpStore.ts'), 'utf8')
+const rustMcp = readFileSync(join(process.cwd(), 'src-tauri/src/commands/mcp.rs'), 'utf8')
 const sdkClient = readFileSync(join(process.cwd(), 'node_modules/@modelcontextprotocol/sdk/dist/esm/client/index.js'), 'utf8')
 
 test('stdio MCP uses the node tsx entrypoint and protocol timeouts', () => {
@@ -31,4 +32,9 @@ test('failed MCP status cannot retain an old tool list', () => {
 test('MCP tool calls use the tools/call method through the SDK', () => {
   assert.match(client, /conn\.client\.callTool\(/)
   assert.match(client, /timeout: TOOL_TIMEOUT/)
+})
+
+test('stdio MCP inherits the resolved binary directory in PATH', () => {
+  assert.match(rustMcp, /let mut paths = vec!\[bin_dir\.to_path_buf\(\)\]/)
+  assert.match(rustMcp, /cmd\.env\("PATH", path\)/)
 })

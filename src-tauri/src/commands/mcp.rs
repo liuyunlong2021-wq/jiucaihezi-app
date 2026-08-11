@@ -68,6 +68,15 @@ pub async fn mcp_spawn_stdio(
     if let Some(env) = env {
         cmd.envs(env);
     }
+    #[cfg(unix)]
+    if let Some(bin_dir) = resolved_command.parent() {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let mut paths = vec![bin_dir.to_path_buf()];
+        paths.extend(std::env::split_paths(&path));
+        if let Ok(path) = std::env::join_paths(paths) {
+            cmd.env("PATH", path);
+        }
+    }
 
     let mut child = cmd
         .spawn()
