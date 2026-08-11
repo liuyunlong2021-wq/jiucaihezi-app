@@ -137,7 +137,11 @@ export async function runDirectChatCompletion(
       }
       const continuationMessages: DirectApiMessage[] = [
         ...messages,
-        ...(error.partialText ? [{ role: 'assistant', content: error.partialText }] : []),
+        ...((error.partialText || error.reasoning) ? [{
+          role: 'assistant',
+          content: error.partialText || null,
+          ...(error.reasoning ? { [error.reasoning.field]: error.reasoning.value } : {}),
+        }] : []),
         { role: 'user', content: options.continueToolsOnInterruption
           ? '上一段可见正文传输中断。请从末尾继续，不要重复已有内容。'
           : '上一段可见正文传输中断。请从末尾继续，不要重复已有内容，也不要调用工具。' },
@@ -167,6 +171,7 @@ export async function runDirectChatCompletion(
           messages.push(...continuationMessages.slice(messages.length))
           messages.push(...await buildToolResultMessages(continuationToolCalls, executeToolWithRepeatGuard, {
             signal: options.signal,
+            reasoning: continuation.reasoning,
             beforeToolCall: async call => {
               if (!toolNames(options.tools).has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
               return await options.beforeToolCall?.(call)
@@ -215,6 +220,7 @@ export async function runDirectChatCompletion(
     const advertisedToolNames = toolNames(options.tools)
     messages.push(...await buildToolResultMessages(toolCalls, executeToolWithRepeatGuard, {
       signal: options.signal,
+      reasoning: stream.reasoning,
       beforeToolCall: async call => {
         if (!advertisedToolNames.has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
         return await options.beforeToolCall?.(call)

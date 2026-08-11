@@ -1,6 +1,7 @@
 import type {
   DirectApiMessage,
   DirectBeforeToolCall,
+  DirectReasoningReplay,
   DirectToolCall,
   DirectToolExecutionEvent,
   DirectToolExecutionStatus,
@@ -15,6 +16,7 @@ export async function buildToolResultMessages(
     signal?: AbortSignal
     beforeToolCall?: DirectBeforeToolCall
     onToolEvent?: (event: DirectToolExecutionEvent) => void
+    reasoning?: DirectReasoningReplay
   } = {},
 ): Promise<DirectApiMessage[]> {
   const calls = toolCalls.map((toolCall, index) => ({
@@ -25,10 +27,12 @@ export async function buildToolResultMessages(
       arguments: toolCall.function?.arguments || '{}',
     },
   }))
-  const messages: DirectApiMessage[] = [{
+  const assistantMessage: DirectApiMessage = {
     role: 'assistant',
     tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const, function: call.function })),
-  }]
+  }
+  if (options.reasoning) assistantMessage[options.reasoning.field] = options.reasoning.value
+  const messages: DirectApiMessage[] = [assistantMessage]
   const followupMessages: DirectApiMessage[] = []
 
   for (const call of calls) {

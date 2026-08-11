@@ -7,6 +7,11 @@ export interface DirectToolCall {
   }
 }
 
+export interface DirectReasoningReplay {
+  field: 'reasoning_content'
+  value: string
+}
+
 export type DirectApiMessage = Record<string, any>
 
 export interface DirectToolResult {

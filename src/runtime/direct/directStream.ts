@@ -1,4 +1,4 @@
-import type { DirectToolCall } from './directTypes'
+import type { DirectReasoningReplay, DirectToolCall } from './directTypes'
 
 function contentToText(value: unknown): string {
   if (typeof value === 'string') return value
@@ -29,6 +29,7 @@ function isJsonResponse(response: Response): boolean {
 export interface DirectStreamResult {
   text: string
   finishReason?: string
+  reasoning?: DirectReasoningReplay
 }
 
 export function resolveDirectCompletionText(text: string, finishReason: string | undefined, emptyText: string): string {
@@ -42,7 +43,7 @@ export function resolveDirectCompletionText(text: string, finishReason: string |
 }
 
 export class DirectStreamInterruptionError extends Error {
-  constructor(readonly partialText: string, cause: unknown) {
+  constructor(readonly partialText: string, cause: unknown, readonly reasoning?: DirectReasoningReplay) {
     super(cause instanceof Error ? cause.message : String(cause))
     this.name = 'DirectStreamInterruptionError'
   }
@@ -59,7 +60,12 @@ export async function readChatCompletionDetails(
     accumulateToolCalls(choice?.message?.tool_calls, toolCallAccumulator)
     const text = contentToText(getChatCompletionMessageContent(data)).trim()
     if (text) onText(text)
-    return { text, finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined }
+    const reasoningContent = typeof choice?.message?.reasoning_content === 'string' ? choice.message.reasoning_content : ''
+    return {
+      text,
+      finishReason: typeof choice?.finish_reason === 'string' ? choice.finish_reason : undefined,
+      ...(reasoningContent ? { reasoning: { field: 'reasoning_content' as const, value: reasoningContent } } : {}),
+    }
   }
 
   const reader = response.body?.getReader()
@@ -68,6 +74,7 @@ export async function readChatCompletionDetails(
   const decoder = new TextDecoder()
   let buffer = ''
   let accumulated = ''
+  let reasoningContent = ''
   let streamDone = false
   let finishReason: string | undefined
 
@@ -81,6 +88,7 @@ export async function readChatCompletionDetails(
       const choice = parsed?.choices?.[0] || {}
       const delta = choice.delta || {}
       if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason
+      if (typeof delta.reasoning_content === 'string') reasoningContent += delta.reasoning_content
       const contentDelta = String(delta.content || '')
       if (contentDelta) {
         accumulated += contentDelta
@@ -110,12 +118,20 @@ export async function readChatCompletionDetails(
     if (!streamDone && buffer.startsWith('data:')) consumeData(buffer.slice(5).trim())
   } catch (error) {
     if ((error as Error)?.name === 'AbortError') throw error
-    throw new DirectStreamInterruptionError(accumulated.trim(), error)
+    throw new DirectStreamInterruptionError(
+      accumulated.trim(),
+      error,
+      reasoningContent ? { field: 'reasoning_content', value: reasoningContent } : undefined,
+    )
   } finally {
     try { reader.releaseLock() } catch {}
   }
 
-  return { text: accumulated.trim(), finishReason }
+  return {
+    text: accumulated.trim(),
+    finishReason,
+    ...(reasoningContent ? { reasoning: { field: 'reasoning_content' as const, value: reasoningContent } } : {}),
+  }
 }
 
 export async function readChatCompletionResponse(

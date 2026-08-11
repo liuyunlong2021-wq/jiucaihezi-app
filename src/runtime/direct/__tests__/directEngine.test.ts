@@ -101,7 +101,7 @@ test('runDirectChatCompletion performs a second pass when the model requests a t
       sentMessages.push(request.messages)
       if (sentMessages.length === 1) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'wiki_search', arguments: '{"query":"韭菜盒子"}' } }] } }] }),
+          JSON.stringify({ choices: [{ delta: { reasoning_content: '先查资料', tool_calls: [{ index: 0, id: 'call_1', function: { name: 'wiki_search', arguments: '{"query":"韭菜盒子"}' } }] } }] }),
           '[DONE]',
         ])
       }
@@ -117,6 +117,8 @@ test('runDirectChatCompletion performs a second pass when the model requests a t
   assert.equal(sentMessages.length, 2)
   assert.deepEqual(sentMessages[0], [{ role: 'user', content: '查一下韭菜盒子' }])
   assert.equal(sentMessages[1][1].role, 'assistant')
+  assert.equal(sentMessages[1][1].content, undefined)
+  assert.equal(sentMessages[1][1].reasoning_content, '先查资料')
   assert.equal(sentMessages[1][2].role, 'tool')
   assert.equal(sentMessages[1][2].content, '[result:韭菜盒子]')
 })
@@ -504,7 +506,10 @@ test('runDirectChatCompletion continues once after final text streaming is inter
 test('runDirectChatCompletion can retain tools during an interrupted memory continuation', async () => {
   const requests: any[] = []
   const responses = [
-    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '前半段。' } }] })]),
+    interruptedSseResponse([
+      JSON.stringify({ choices: [{ delta: { reasoning_content: '先分析资料' } }] }),
+      JSON.stringify({ choices: [{ delta: { content: '前半段。' } }] }),
+    ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: '续写。' }, finish_reason: 'stop' }] }), '[DONE]']),
   ]
   const tools = [{ type: 'function', function: { name: 'read' } }]
@@ -521,6 +526,7 @@ test('runDirectChatCompletion can retain tools during an interrupted memory cont
   })
 
   assert.deepEqual(requests[1].tools, tools)
+  assert.equal(requests[1].messages[1].reasoning_content, '先分析资料')
   assert.doesNotMatch(requests[1].messages.at(-1).content, /不要调用工具/)
 })
 

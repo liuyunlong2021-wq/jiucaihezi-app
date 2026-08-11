@@ -86,6 +86,22 @@ test('readChatCompletionResponse ignores reasoning deltas and stops on DONE', as
   assert.deepEqual(seen, ['visible answer'])
 })
 
+test('readChatCompletionDetails retains reasoning for protocol replay without exposing it', async () => {
+  const seen: string[] = []
+  const result = await readChatCompletionDetails(
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { reasoning_content: '内部推理' } }] }),
+      JSON.stringify({ choices: [{ delta: { content: '可见回答' } }] }),
+      '[DONE]',
+    ]),
+    value => seen.push(value),
+  )
+
+  assert.equal(result.text, '可见回答')
+  assert.deepEqual(result.reasoning, { field: 'reasoning_content', value: '内部推理' })
+  assert.deepEqual(seen, ['可见回答'])
+})
+
 test('readChatCompletionResponse consumes a final SSE row without a trailing newline', async () => {
   const seen: string[] = []
   const response = new Response(
