@@ -79,7 +79,9 @@ function baseSpec(input: {
     input.outputModalities ||
     (input.task === 'image' ? ['image'] : input.task === 'audio' ? ['audio'] : ['video'])
   const inputModalities = input.inputModalities || (input.files?.audios
-    ? (['text', 'image', 'audio'] as const)
+    ? (input.files?.videos
+      ? (['text', 'image', 'video', 'audio'] as const)
+      : (['text', 'image', 'audio'] as const))
     : input.files?.videos
       ? (['text', 'image', 'video'] as const)
       : input.files?.images
@@ -193,7 +195,7 @@ function directVideo(input: {
   id: string
   model?: string
   label: string
-  price: number
+  price: number | string
   upstreamFamily: CreationUpstreamFamily
   apiStyle?: CreationApiStyle
   contractStatus?: CreationContractStatus
@@ -204,8 +206,10 @@ function directVideo(input: {
   contractIssues?: string[]
   mode?: CreationMode
   fields?: CreationFieldSpec[]
+  ratios?: string[]
+  resolutions?: string[]
   duration?: { min?: number; max?: number; allowedValues?: number[] }
-  files?: { images?: { min?: number; max?: number } }
+  files?: { images?: { min?: number; max?: number }; videos?: { min?: number; max?: number }; audios?: { min?: number; max?: number } }
 }): CreationModelSpec {
   return baseSpec({
     id: input.id,
@@ -243,6 +247,8 @@ function directVideo(input: {
       { key: 'duration', label: '时长', kind: 'number', defaultValue: 6, min: 4, max: 30, step: 1 },
       { key: 'images', label: '参考图', kind: 'images' },
     ]),
+    ratios: input.ratios,
+    resolutions: input.resolutions,
     notes: input.notes,
     aliases: input.aliases,
     duration: input.duration || { min: 4, max: 30 },
@@ -575,6 +581,81 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'broken',
     notes: ['docs/notes/特朗普seedace2.md'],
     contractIssues: ['/api/v3/contents/generations/tasks 返回 404'],
+  }),
+  directVideo({
+    id: 'newapi/kik/doubao-seedance-2',
+    model: 'doubao-seedance-2',
+    label: 'Seedance 2.0',
+    price: '按 Token',
+    upstreamFamily: 'volcengine',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'none',
+    contractStatus: 'verified',
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    resolutions: ['480p', '720p', '1080p', '4k'],
+    files: { images: { min: 0, max: 9 }, videos: { min: 0, max: 1 }, audios: { min: 0, max: 1 } },
+    duration: { min: 4, max: 15 },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', '1080p', '4k']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图片', kind: 'images' },
+      { key: 'video', label: '参考视频', kind: 'video' },
+      { key: 'audio', label: '参考音频', kind: 'audio' },
+    ]),
+    notes: ['KIK Seedance 文档', '按 Token 计费'],
+  }),
+  directVideo({
+    id: 'newapi/kik/doubao-seedance-2-0-fast-260128',
+    model: 'doubao-seedance-2-0-fast-260128',
+    label: 'Seedance 2.0 Fast',
+    price: '按 Token',
+    upstreamFamily: 'volcengine',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'none',
+    contractStatus: 'verified',
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    resolutions: ['480p', '720p'],
+    files: { images: { min: 0, max: 9 }, videos: { min: 0, max: 1 }, audios: { min: 0, max: 1 } },
+    duration: { min: 4, max: 15 },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图片', kind: 'images' },
+      { key: 'video', label: '参考视频', kind: 'video' },
+      { key: 'audio', label: '参考音频', kind: 'audio' },
+    ]),
+    notes: ['KIK Seedance 文档', '按 Token 计费'],
+  }),
+  directVideo({
+    id: 'newapi/kik/doubao-seedance-2-mini',
+    model: 'doubao-seedance-2-mini',
+    label: 'Seedance 2.0 Mini',
+    price: '按 Token',
+    upstreamFamily: 'volcengine',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'none',
+    contractStatus: 'verified',
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    resolutions: ['480p', '720p'],
+    files: { images: { min: 0, max: 9 }, videos: { min: 0, max: 1 }, audios: { min: 0, max: 1 } },
+    duration: { min: 4, max: 15 },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图片', kind: 'images' },
+      { key: 'video', label: '参考视频', kind: 'video' },
+      { key: 'audio', label: '参考音频', kind: 'audio' },
+    ]),
+    notes: ['KIK Seedance 文档', '按 Token 计费'],
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-gpt2-image',
@@ -1357,7 +1438,7 @@ export function displayModelPrice(spec: Pick<CreationModelSpec, 'price' | 'task'
   const raw = String(spec.price).replace(/[¥￥]/g, '')
   if (raw.includes('/')) return raw
   const amount = raw.match(/\d+(?:\.\d+)?/)?.[0]
-  if (!amount) return '费用以实际扣费为准'
+  if (!amount) return raw || '费用以实际扣费为准'
   const unit = spec.task === 'image' ? '张' : spec.task === 'video' || spec.task === 'ai-app' ? '秒' : '次'
   return `${amount}/${unit}`
 }

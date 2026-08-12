@@ -1,0 +1,11 @@
+services:
+  kik-seedance-adapter:
+    build: .
+    networks:
+      - new-api-network
+    restart: unless-stopped
+
+networks:
+  new-api-network:
+    external: true
+    name: new-api-new_new-api-network

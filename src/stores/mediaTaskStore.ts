@@ -931,6 +931,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** 恢复单个任务的轮询 */
   async function _resumePolling(task: MediaTask) {
     if (!task.pollUrl || !task.pollKind) return
+    if (activeTaskIds.value.has(task.id)) return
     activeTaskIds.value.add(task.id)
     task.status = 'running'
     task.progressText = '恢复轮询中...'

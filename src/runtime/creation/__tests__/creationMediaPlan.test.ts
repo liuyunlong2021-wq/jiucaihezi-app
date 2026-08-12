@@ -33,6 +33,9 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'gpt-image-2',
     'gpt-image-2-vip',
     'newapi/trump/seedance-2.0',
+    'newapi/kik/doubao-seedance-2',
+    'newapi/kik/doubao-seedance-2-0-fast-260128',
+    'newapi/kik/doubao-seedance-2-mini',
     'runninghub/api/rh-gpt2-image',
     'runninghub/api/rh-gpt2-text',
     'runninghub/api/z-image-turbo',
@@ -119,6 +122,17 @@ test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
   assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
   assert.equal(getCreationModelSpec('nonexistent-model-id'), undefined)
+})
+
+test('KIK Seedance models expose provider resolutions and multimodal references', () => {
+  const full = getCreationModelSpec('newapi/kik/doubao-seedance-2')!
+  const fast = getCreationModelSpec('newapi/kik/doubao-seedance-2-0-fast-260128')!
+  const mini = getCreationModelSpec('newapi/kik/doubao-seedance-2-mini')!
+  assert.deepEqual(full.capabilities.resolutions, ['480p', '720p', '1080p', '4k'])
+  assert.deepEqual(fast.capabilities.resolutions, ['480p', '720p'])
+  assert.deepEqual(mini.capabilities.resolutions, ['480p', '720p'])
+  assert.deepEqual(full.capabilities.inputModalities, ['text', 'image', 'video', 'audio'])
+  assert.equal(displayModelPrice(mini), '按 Token')
 })
 
 test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
