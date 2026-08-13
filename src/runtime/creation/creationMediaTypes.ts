@@ -1,8 +1,8 @@
 export type CreationTask = 'image' | 'video' | 'audio' | 'model3d' | 'ai-app'
 
-export type CreationSource = 'newapi-direct' | 'runninghub'
+export type CreationSource = 'newapi-direct' | 'runninghub' | 'local-comfy'
 
-export type CreationRoute = 'newapi-direct' | 'runninghub-adapter'
+export type CreationRoute = 'newapi-direct' | 'runninghub-adapter' | 'local-comfy'
 
 export type CreationUpstreamFamily =
   | 'volcengine'

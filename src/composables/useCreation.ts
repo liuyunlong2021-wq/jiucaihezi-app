@@ -152,6 +152,8 @@ function specToCreationModel(spec: CreationModelSpec): CreationModel {
     model: spec.model,
     provider: spec.source === 'runninghub'
       ? spec.task === 'audio' ? 'gateway-audio' : spec.task === 'image' ? 'gateway-image' : 'gateway-video'
+      : spec.source === 'local-comfy'
+        ? 'local-comfy'
       : spec.task === 'audio' ? 'gateway-audio' : spec.task === 'image' ? 'gateway-image' : 'gateway-video',
     endpoint: spec.endpoint,
     webappId: spec.route === 'runninghub-adapter' ? spec.id : undefined,
@@ -168,6 +170,8 @@ function specToCreationModel(spec: CreationModelSpec): CreationModel {
     tasks: [spec.task],
     provider: spec.source === 'runninghub'
       ? spec.task === 'audio' ? 'gateway-suno' : spec.task === 'image' ? 'runninghub-image' : 'runninghub-video'
+      : spec.source === 'local-comfy'
+        ? 'local-comfy'
       : spec.task === 'audio' ? 'gateway-suno' : spec.task === 'image' ? 'gateway-image' : 'gateway-video',
     modelName: spec.model,
     capability,

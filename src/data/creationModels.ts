@@ -15,7 +15,7 @@ export const RH_TASK_LABELS = MEDIA_TASK_LABELS
 export interface CreationModel {
   label: string
   tasks: CreationTask[]
-  provider: 'gateway-image' | 'gateway-video' | 'gateway-suno' | 'runninghub-video' | 'runninghub-audio' | 'runninghub-image'
+  provider: 'gateway-image' | 'gateway-video' | 'gateway-suno' | 'runninghub-video' | 'runninghub-audio' | 'runninghub-image' | 'local-comfy'
   modelName: string
   capability: MediaModelCapability
   sizes?: string[]

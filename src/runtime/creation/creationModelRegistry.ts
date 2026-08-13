@@ -344,6 +344,26 @@ function runninghubStandard(input: {
 
 export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   baseSpec({
+    id: 'local-comfy/z-image-turbo',
+    model: 'z-image-turbo',
+    label: 'Z-Image Turbo · 本机 ComfyUI',
+    task: 'image',
+    source: 'local-comfy',
+    route: 'local-comfy',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    mode: 'text-to-image',
+    contractStatus: 'verified',
+    endpoint: '/prompt',
+    fields: promptFields([
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '1080p']) },
+      { key: 'aspectRatio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '4:3', '3:4', '1:1']) },
+    ]),
+    notes: ['本机 ComfyUI 固定工作流；仅 Desktop 本地执行。'],
+    resolutions: ['720p', '1080p'],
+    ratios: ['16:9', '9:16', '4:3', '3:4', '1:1'],
+  }),
+  baseSpec({
     id: 'gpt-image-2',
     model: 'gpt-image-2',
     label: 'GPT Image 2 · 直连',
@@ -1433,7 +1453,8 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   return '其他模型'
 }
 
-export function displayModelPrice(spec: Pick<CreationModelSpec, 'price' | 'task'>): string {
+export function displayModelPrice(spec: Pick<CreationModelSpec, 'price' | 'task' | 'route'>): string {
+  if (spec.route === 'local-comfy') return '本地模型'
   if (spec.price === undefined) return '费用以实际扣费为准'
   const raw = String(spec.price).replace(/[¥￥]/g, '')
   if (raw.includes('/')) return raw

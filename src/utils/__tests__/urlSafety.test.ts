@@ -50,6 +50,8 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('https://user:password@cdn.example.com/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('https://localhost/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('https://127.0.0.1/result.png'), false)
+  assert.equal(isAllowedCreationResultUrl('http://127.0.0.1:8000/view?filename=result.png&type=output'), true)
+  assert.equal(isAllowedCreationResultUrl('http://127.0.0.1:8000/prompt'), false)
   assert.equal(isAllowedCreationResultUrl('https://192.168.1.8/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('https://[::1]/result.png'), false)
   assert.equal(isAllowedCreationResultUrl('asset://localhost/Users/by3/Library/Application%20Support/jiucaihezi/media-outputs/audio.mp3'), false)

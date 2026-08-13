@@ -13,6 +13,7 @@ import type {
 const SOURCE_LABELS = {
   'newapi-direct': '直连',
   runninghub: 'RunningHub',
+  'local-comfy': '本机 ComfyUI',
 } as const
 
 const UPSTREAM_LABELS = {
@@ -42,6 +43,9 @@ export function validateCreationModelSpec(spec: CreationModelSpec): void {
   if (spec.route === 'newapi-direct' && spec.source !== 'newapi-direct') {
     throw new Error('newapi-direct route requires source newapi-direct')
   }
+  if (spec.route === 'local-comfy' && spec.source !== 'local-comfy') {
+    throw new Error('local-comfy route requires source local-comfy')
+  }
   if (spec.route === 'newapi-direct' && ['rh-standard', 'rh-aiapp'].includes(spec.apiStyle)) {
     throw new Error('newapi-direct route does not allow RH apiStyle')
   }
@@ -66,7 +70,7 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
   const referenceAudioCount = countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls'])
   const effective = resolveEffectiveContract(spec, referenceImageCount)
   const normalizedParams = normalizeParams(spec, params, effective.apiStyle)
-  assertParamShape(effective.apiStyle, normalizedParams)
+  assertParamShape(effective.apiStyle, normalizedParams, spec.route)
   const task = resolvePlanTask(spec, normalizedParams)
   if (spec.task === 'ai-app') {
     effective.endpoint = task === 'image'
@@ -205,6 +209,14 @@ function normalizeOpenAiImageParams(
   spec: CreationModelSpec,
   params: Record<string, unknown>,
 ): Record<string, unknown> {
+  if (spec.route === 'local-comfy') {
+    return compact({
+      model: spec.model,
+      prompt: params.prompt,
+      resolution: params.resolution || '720p',
+      aspectRatio: firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9',
+    })
+  }
   const size =
     typeof params.size === 'string' && params.size !== 'auto'
       ? params.size
@@ -352,8 +364,10 @@ function normalizeGenericTaskParams(
 function assertParamShape(
   apiStyle: CreationApiStyle,
   normalizedParams: Record<string, unknown>,
+  route?: CreationModelSpec['route'],
 ): void {
   if (
+    route !== 'local-comfy' &&
     (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits') &&
     ('aspectRatio' in normalizedParams || 'resolution' in normalizedParams)
   ) {

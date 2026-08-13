@@ -375,6 +375,7 @@ async function openTaskFolder(task: MediaTask) {
 const rhChannelLabel = computed(() => {
   const spec = currentCreationSpec.value
   if (!spec) return '未选择模型'
+  if (spec.source === 'local-comfy') return '本机 ComfyUI'
   if (spec.source === 'newapi-direct') return 'NewAPI 直连'
   return spec.apiStyle === 'rh-aiapp' ? 'RH 工作流' : 'RH 官方 API'
 })

@@ -6,6 +6,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { getLocalOllamaModels } from '@/utils/providerConfig'
+import { probeComfyUi, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import {
@@ -36,6 +37,8 @@ const McpManagerPanel = defineAsyncComponent(() => import('@/components/mcp/McpM
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
+const comfyUiBusy = ref(false)
+const comfyUiStatus = ref<ComfyUiRuntimeStatus | null>(null)
 const logoutBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteError = ref('')
@@ -64,6 +67,7 @@ function setFontSize(value: number) {
 
 onMounted(async () => {
   if (desktopRuntime) installedLocalModelCount.value = getLocalOllamaModels().length
+  if (desktopRuntime) void refreshComfyUi()
   apiKey.value = getApiKey() || await initApiKey()
   await initGatewaySessionToken()
   if (apiKey.value) await agentStore.fetchModels().catch(() => {})
@@ -82,6 +86,18 @@ async function connectOllama() {
     localModelStatus.value = '未连接到 Ollama，请先安装并启动 Ollama。'
   } finally {
     localModelBusy.value = false
+  }
+}
+
+async function refreshComfyUi() {
+  if (comfyUiBusy.value) return
+  comfyUiBusy.value = true
+  try {
+    comfyUiStatus.value = await probeComfyUi()
+  } catch {
+    comfyUiStatus.value = null
+  } finally {
+    comfyUiBusy.value = false
   }
 }
 
@@ -207,6 +223,24 @@ function showSync() {
               {{ localModelBusy ? '连接中' : '连接 Ollama' }}
             </button>
             <button @click="openExternal('https://ollama.com/download/mac')">下载安装</button>
+          </div>
+        </section>
+        <section v-if="desktopRuntime" class="memory-local-model">
+          <div>
+            <strong>本机 ComfyUI</strong>
+            <span>{{ comfyUiStatus ? '已连接' : '未启动' }}</span>
+          </div>
+          <p v-if="comfyUiStatus">
+            {{ comfyUiStatus.version ? `版本 ${comfyUiStatus.version} · ` : '' }}
+            {{ comfyUiStatus.mps ? 'MPS 加速已启用' : '未检测到 MPS 加速' }}
+          </p>
+          <p v-else>请先启动本机 ComfyUI。</p>
+          <div v-if="comfyUiStatus" class="memory-comfy-models">
+            <span :class="{ ready: comfyUiStatus.miniMaxH3 }">{{ comfyUiStatus.miniMaxH3 ? '✓' : '○' }} MiniMax H3</span>
+            <span :class="{ ready: comfyUiStatus.zImageTurbo }">{{ comfyUiStatus.zImageTurbo ? '✓' : '○' }} Z-Image Turbo</span>
+          </div>
+          <div class="memory-local-actions">
+            <button :disabled="comfyUiBusy" @click="refreshComfyUi">{{ comfyUiBusy ? '检测中' : '刷新状态' }}</button>
           </div>
         </section>
       </div>

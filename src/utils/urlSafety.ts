@@ -91,6 +91,7 @@ function isAllowedMediaDataUrl(text: string, allowLarge = false): boolean {
 export function isAllowedCreationResultUrl(input: string, allowLargeDataUrl = false): boolean {
   const text = String(input || '').trim()
   if (/^data:(image|video|audio)\//i.test(text)) return isAllowedMediaDataUrl(text, allowLargeDataUrl)
+  if (/^http:\/\/127\.0\.0\.1:8000\/view\?/i.test(text)) return true
   return isSafePublicHttpUrl(text)
 }
 

@@ -39,7 +39,7 @@ export interface MediaModelCapability {
   label: string
   task: MediaTaskKind
   model: string
-  provider: 'gateway-image' | 'gateway-video' | 'gateway-audio' | 'runninghub-video' | 'runninghub-audio' | 'runninghub-image'
+  provider: 'gateway-image' | 'gateway-video' | 'gateway-audio' | 'runninghub-video' | 'runninghub-audio' | 'runninghub-image' | 'local-comfy'
   enabled?: boolean
   endpoint?: string
   webappId?: string          // RunningHub workflow ID

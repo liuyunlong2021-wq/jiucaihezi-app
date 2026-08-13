@@ -14,9 +14,10 @@ import {
   type VideoGenParams,
 } from '@/api/media-generation'
 import type { CreationRunPlan } from './creationMediaTypes'
+import { getComfyUiApiBase } from '@/utils/comfyUiRuntime'
 
 export interface CreationSubmitRequest {
-  runtime: 'newapi-direct' | 'runninghub-adapter'
+  runtime: 'newapi-direct' | 'runninghub-adapter' | 'local-comfy'
   taskType: 'image' | 'video' | 'audio'
   endpoint: string
   pollKind: CreationRunPlan['pollKind']
@@ -29,7 +30,7 @@ export interface CreationSubmitRequest {
 
 export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmitRequest {
   if (plan.task === 'ai-app') throw new Error('AI 应用缺少服务器注册的输出类型')
-  const runtime = plan.usesRhAdapter ? 'runninghub-adapter' : 'newapi-direct'
+  const runtime = plan.route === 'local-comfy' ? 'local-comfy' : plan.usesRhAdapter ? 'runninghub-adapter' : 'newapi-direct'
   const params = plan.debug.normalizedParams
   const request: CreationSubmitRequest = {
     runtime,
@@ -105,6 +106,7 @@ export async function executeCreationSubmitRequest(
   onProgress?: (elapsed: number, status: string) => void,
   onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
 ): Promise<MediaResult> {
+  if (request.runtime === 'local-comfy') return executeLocalComfyImageRequest(request, onProgress, onSubmitted)
   if (request.runtime === 'newapi-direct') {
     if (request.taskType === 'image') return executeDirectImageRequest(request, onProgress, onSubmitted)
     if (request.taskType === 'video') return executeDirectVideoRequest(request, onProgress, onSubmitted)
@@ -113,6 +115,87 @@ export async function executeCreationSubmitRequest(
   if (request.taskType === 'image') return executeRunningHubImageRequest(request, onProgress, onSubmitted)
   if (request.taskType === 'video') return executeRunningHubVideoRequest(request, onProgress, onSubmitted)
   return executeRunningHubAudioRequest(request, onProgress, onSubmitted)
+}
+
+async function executeLocalComfyImageRequest(
+  request: CreationSubmitRequest,
+  onProgress?: (elapsed: number, status: string) => void,
+  onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
+): Promise<MediaResult> {
+  if (request.taskType !== 'image') throw new Error('本地 Z-Image Turbo 当前只支持图片')
+  const params = request.imageParams || {}
+  const [width, height] = localComfyDimensions(
+    asOptionalString(request.plan.debug.normalizedParams.resolution) || '720p',
+    asOptionalString(request.plan.debug.normalizedParams.aspectRatio) || '16:9',
+  )
+  const clientId = `jiucaihezi-${Date.now().toString(36)}`
+  const prompt = buildLocalZImagePrompt(params.prompt || '', width, height)
+  onProgress?.(0, '提交本机 ComfyUI...')
+  const base = getComfyUiApiBase()
+  const response = await fetch(`${base}/prompt`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, client_id: clientId }),
+  })
+  if (!response.ok) throw new Error(`ComfyUI 提交失败 HTTP ${response.status}`)
+  const submitted = await response.json()
+  const promptId = String(submitted?.prompt_id || '')
+  if (!promptId) throw new Error('ComfyUI 未返回任务 ID')
+  const historyUrl = `${base}/history/${encodeURIComponent(promptId)}`
+  for (let i = 0; i < 600; i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    const historyResponse = await fetch(historyUrl)
+    if (!historyResponse.ok) continue
+    const history = await historyResponse.json()
+    const entry = history?.[promptId]
+    if (entry?.status?.status_str === 'error') throw new Error('ComfyUI 工作流执行失败')
+    const image = firstComfyImage(entry?.outputs)
+    if (!image) {
+      onProgress?.(i, '本机生成中...')
+      continue
+    }
+    const resultUrl = `${base}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder || '')}&type=${encodeURIComponent(image.type || 'output')}`
+    return { url: resultUrl, type: 'image', taskId: promptId, pollKind: 'image' }
+  }
+  throw new Error('本机 ComfyUI 生成超时')
+}
+
+function buildLocalZImagePrompt(prompt: string, width: number, height: number) {
+  return {
+    '12': { class_type: 'CLIPLoader', inputs: { clip_name: 'qwen_3_4b.safetensors', type: 'qwen_image', device: 'default' } },
+    '18': { class_type: 'UNETLoader', inputs: { unet_name: 'z_image_bf16.safetensors', weight_dtype: 'default' } },
+    '14': { class_type: 'LoraLoaderModelOnly', inputs: { model: ['23', 0], lora_name: 'Z-Image-Fun-Lora-Distill-2-Steps-2603-ComfyUI.safetensors', strength_model: 0.45 } },
+    '23': { class_type: 'LoraLoaderModelOnly', inputs: { model: ['18', 0], lora_name: 'Kook_Zimage_瑶光.safetensors', strength_model: 1 } },
+    '11': { class_type: 'VAELoader', inputs: { vae_name: 'Z-image-vae.safetensors' } },
+    '47': { class_type: 'CR Text', inputs: { text: prompt } },
+    '24': { class_type: 'CLIPTextEncode', inputs: { clip: ['12', 0], text: ['47', 0] } },
+    '16': { class_type: 'CLIPTextEncode', inputs: { clip: ['12', 0], text: '泛黄，发绿，模糊，低分辨率，低质量图像，扭曲的肢体，诡异的外观，丑陋，AI感，噪点，网格感，JPEG压缩条纹，异常的肢体，水印，乱码，意义不明的字符，泛蓝' } },
+    '21': { class_type: 'EmptyLatentImage', inputs: { width, height, batch_size: 1 } },
+    '22': { class_type: 'KSampler', inputs: { model: ['14', 0], positive: ['24', 0], negative: ['16', 0], latent_image: ['21', 0], seed: Math.floor(Math.random() * 2 ** 48), steps: 4, cfg: 1, sampler_name: 'dpmpp_2s_ancestral', scheduler: 'simple', denoise: 1 } },
+    '17': { class_type: 'VAEDecode', inputs: { samples: ['22', 0], vae: ['11', 0] } },
+    '46': { class_type: 'SaveImage', inputs: { images: ['17', 0], filename_prefix: 'jiucaihezi_z-image' } },
+  }
+}
+
+function firstComfyImage(outputs: any): { filename: string; subfolder?: string; type?: string } | null {
+  for (const output of Object.values(outputs || {}) as any[]) {
+    const image = Array.isArray(output?.images) ? output.images[0] : null
+    if (image?.filename) return image
+  }
+  return null
+}
+
+function localComfyDimensions(resolution: string, ratio: string): [number, number] {
+  const base = resolution === '1080p' ? 1080 : 720
+  const values: Record<string, [number, number]> = {
+    '16:9': [Math.round(base * 16 / 9), base],
+    '9:16': [base, Math.round(base * 16 / 9)],
+    '4:3': [Math.round(base * 4 / 3), base],
+    '3:4': [base, Math.round(base * 4 / 3)],
+    '1:1': [base, base],
+  }
+  const [width, height] = values[ratio] || values['16:9']
+  return [Math.round(width / 8) * 8, Math.round(height / 8) * 8]
 }
 
 async function executeDirectImageRequest(
