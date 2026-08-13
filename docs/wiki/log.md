@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-08-13] 发布准备 | v2.1.21
+
+- 版本统一为 `2.1.21`：`package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 一致。
+- 上次 Web 发布的 `ELIFECYCLE` 只是 pnpm 对失败子任务的转报；首个真实失败是 `memory-product-separation` 门禁发现两份既有本机 ComfyUI 测试遗漏 focused 清单。已登记 `localComfyRuntime.test.ts` 与 `comfyUiRuntime.test.ts`，完整 `pnpm run build`、Web 产物审计和 `git diff --check` 通过。
+- 本记录时 `main` 尚未推送，Cloudflare Pages 尚未部署，`v2.1.21` tag 及 macOS ARM、macOS Intel、Windows CI 尚未触发；发布结果待真实执行后补充。
+
 ## [2026-08-13] 修复 | 创作画布本地媒体预览与 3D 编辑器收尾
 
 - 新增 [[排障/创作画布本地图片视频预览空白-2026-08-13]]：`asset://` 地址导致图片、视频空框；共享路径恢复为 `dev_read_file -> data:`，用户确认图片预览恢复。

@@ -1,8 +1,10 @@
 # 热缓存
 
-> 更新：2026-08-13 | 阶段：iPhone 云项目下载回归暂停
+> 更新：2026-08-13 | 阶段：v2.1.21 发布准备；iPhone 云项目下载回归暂停
 
 ## 当前结论
+
+- **`v2.1.21` 已完成本地发布准备，尚未对外发布。** 版本已统一到 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json`。上次 Web 发布的 `ELIFECYCLE` 根因是 `memory-product-separation` 门禁发现两份已保留的本机 ComfyUI 测试未登记到 focused 清单；现已登记，完整 `pnpm run build`、Web 产物审计与差异检查通过。`main` push、Cloudflare Pages 部署与 `v2.1.21` tag 的 macOS ARM、macOS Intel、Windows CI 尚未执行，不得写成已发布。
 
 - **创作面板异步保存方法缺失已根治。** `CreationPanel` 尚未完成 `defineExpose` 时，外层曾对临时组件代理强制调用 `flushCanvasSave()`，抛出 `is not a function` 并中断面板生命周期。组件 ref 类型和调用现均允许方法暂时缺席，回归测试禁止不安全调用重新进入；Web 连续开关 10 次、类型检查和 Desktop 构建审计通过，真实 Desktop 安装包点击待发布后验收。见 [[排障/创作面板异步保存方法缺失-2026-08-13]]。
 
