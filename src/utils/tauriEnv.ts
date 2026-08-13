@@ -7,5 +7,7 @@ export function isTauriRuntime(): boolean {
 }
 
 export function isTauriMobileRuntime(): boolean {
-  return isTauriRuntime() && /Android|iPad|iPhone|iPod/i.test(navigator.userAgent)
+  if (!isTauriRuntime()) return false
+  return /Android|iPad|iPhone|iPod/i.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 }

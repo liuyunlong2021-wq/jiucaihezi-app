@@ -1475,23 +1475,6 @@ async function openCloudProject(cloud: SyncProject) {
     projectMenuBusy.value = false
   }
 }
-async function downloadCurrentProject() {
-  if (projectMenuBusy.value) return
-  if (!(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
-    title: '下载并覆盖本地',
-    okLabel: '确认下载并覆盖',
-  }))) return
-  projectMenuBusy.value = true
-  projectMenuError.value = ''
-  try {
-    await projectTextSync.open(projectKey.value, projectStore.projectName.value)
-    await projectTextSync.downloadNow()
-  } catch (e) {
-    projectMenuError.value = e instanceof Error ? e.message : String(e)
-  } finally {
-    projectMenuBusy.value = false
-  }
-}
 async function ctxNewFile() {
   const parentNode = ctxMenu.value.node
   const dirRel = parentNode?.isDir ? parentNode.path : ''
@@ -2411,15 +2394,7 @@ onBeforeUnmount(() => {
           ></progress>
           <span v-if="currentCloudProjectId">只处理文字，媒体和空目录不处理</span>
         </div>
-        <template v-if="currentCloudProjectId">
-          <button :disabled="projectMenuBusy" @click="uploadCurrentProject">
-            <JcIcon name="upload" /><span>{{ projectMenuBusy ? '上传中' : '上传并覆盖云端' }}</span>
-          </button>
-          <button :disabled="projectMenuBusy" @click="downloadCurrentProject">
-            <JcIcon name="download" /><span>{{ projectMenuBusy ? '下载中' : '下载并覆盖本地' }}</span>
-          </button>
-        </template>
-        <button v-else :disabled="projectMenuBusy" @click="uploadCurrentProject">
+        <button :disabled="projectMenuBusy" @click="uploadCurrentProject">
           <JcIcon name="upload" /><span>{{ projectMenuBusy ? '上传中' : '上传并覆盖云端' }}</span>
         </button>
         <div class="pft-ctx-divider"></div>

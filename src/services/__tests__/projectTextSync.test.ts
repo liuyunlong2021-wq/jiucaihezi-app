@@ -10,10 +10,19 @@ interface LocalFile { content: string; revision: number; mimeType: string }
 
 function localFiles(runtime: 'web' | 'desktop') {
   const records = new Map<string, LocalFile>()
+  let hideStateFromRecursiveList = false
   const adapter: ProjectFileAdapter = {
     runtime,
     async list() {
-      return [...records].map(([path, file]) => ({ path, isDirectory: false, size: file.content.length, mimeType: file.mimeType }))
+      return [...records]
+        .filter(([path]) => !hideStateFromRecursiveList || path !== '.raw/.sync/state.json')
+        .map(([path, file]) => ({ path, isDirectory: false, size: file.content.length, mimeType: file.mimeType }))
+    },
+    async listDirectory(_owner, directory) {
+      const prefix = directory ? `${directory}/` : ''
+      return [...records]
+        .filter(([path]) => path.startsWith(prefix) && !path.slice(prefix.length).includes('/'))
+        .map(([path, file]) => ({ path, isDirectory: false, size: file.content.length, mimeType: file.mimeType }))
     },
     async readText(_owner, path) {
       const file = records.get(path)
@@ -47,7 +56,11 @@ function localFiles(runtime: 'web' | 'desktop') {
     },
     async remove(_owner, path) { records.delete(path) },
   }
-  return { records, service: createProjectFileService(adapter) }
+  return {
+    records,
+    service: createProjectFileService(adapter),
+    hideStateFromRecursiveList() { hideStateFromRecursiveList = true },
+  }
 }
 
 function hash(content: string) {
@@ -228,6 +241,22 @@ test('disconnect removes only the current local cloud binding', async () => {
     await sync.disconnect()
     assert.equal(await sync.cloudProjectIdFor('web-owner'), '')
     assert.equal(projectTextSyncStatus.phase, 'disabled')
+  } finally {
+    sync.dispose()
+  }
+})
+
+test('sync state lookup does not depend on the capped recursive project listing', async () => {
+  const cloud = fakeCloud()
+  const local = localFiles('desktop')
+  bind(local)
+  local.hideStateFromRecursiveList()
+  const sync = new ProjectTextSync(local.service, cloud.api)
+  try {
+    assert.equal(await sync.cloudProjectIdFor('desktop-owner'), 'project_12345678')
+    await sync.open('desktop-owner', '共同记忆')
+    await sync.downloadNow()
+    assert.match(local.records.get('.raw/.sync/state.json')?.content || '', /project_12345678/)
   } finally {
     sync.dispose()
   }

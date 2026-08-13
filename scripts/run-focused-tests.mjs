@@ -58,6 +58,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/contextAssembly.test.ts',
   'src/utils/__tests__/providerCapabilityProbe.test.ts',
   'src/utils/__tests__/runtimeCapabilities.test.ts',
+  'src/utils/__tests__/tauriEnv.test.ts',
   'src/utils/__tests__/llmRuntime.test.ts',
   'src/utils/__tests__/confirmAction.test.ts',
   'src/utils/__tests__/confirmUsageGuard.test.ts',

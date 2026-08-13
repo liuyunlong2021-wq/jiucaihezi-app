@@ -69,6 +69,7 @@
           "dev_replace_in_external_file",
           "dev_get_diff",
           "dev_run_command",
+          "dev_check_ffmpeg",
           "dev_export_scene_video",
           "dev_generate_video_thumbnail",
           "pick_project_folder",

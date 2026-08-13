@@ -1,8 +1,22 @@
 # 热缓存
 
-> 更新：2026-08-09 | 阶段：模型请求中断恢复
+> 更新：2026-08-11 | 阶段：iPhone 云项目下载回归暂停
 
 ## 当前结论
+
+- **创作画布图片、视频预览空白已修复。** Desktop `asset://` 地址不能稳定供 Leafer 图片和视频首帧读取，音频因仍走 `data:` 路径而正常；共享 `getMediaRuntimeUrl()` 已恢复 `dev_read_file -> data:`，用户确认图片预览恢复。见 [[排障/创作画布本地图片视频预览空白-2026-08-13]]。
+
+- **3D 编辑器导出诊断与取消选中已补齐。** FFmpeg 可检测，截图/视频保存显示路径或失败原因，视频目标目录为 `.raw/jc-media/视频/`；空白左键、Esc 和捕获开始前都会取消选择，移动箭头不会进入成片。见 [[排障/3D编辑器导出与选中控件-2026-08-13]]。
+
+- **本机 ComfyUI 的 Z-Image Turbo 已完成 Desktop 真实生成验收。** 本机服务使用 `127.0.0.1:8000`，创作面板支持 `720p/1080p` 和五种比例；实现必须复刻已验证 API 工作流，只替换 `CR Text(47)` 的提示词及 `EmptyLatentImage(21)` 的宽高。初版 `8188` 地址、前端 Blob/Base64 保存、手写简化节点图、失联旧开发窗口和低范围随机种子均已成为后续接入的明确禁区。MiniMax H3 与其他工作流尚未接入，见 [[排障/本机ComfyUI模型接入与工作流复刻-2026-08-13]]。
+
+- **RH GPT2.0 的 `global:` 任务回收已修复，GPT Image 2 VIP 已下线。** `4e33901f` 使 URL 安全校验接受编码后的 `/rh/tasks/global%3A...`，但不放宽其它路径或查询；GPT2.0 文生图与图生图仍待真实付费回收复验。GPT Image 2 VIP 的上游渠道失效已确认，不再出现在模型列表，见 [[排障/云端GPT图片与RunningHub任务回收-2026-08-13]]。云端生成成功但没有“放到画布”时，先检查结果是否已下载并写入项目，不把远程结果地址超时误判为画布故障。
+
+- **KIK 视频计费已确认。** NewAPI 成功任务记录 `is_task=true`、`prompt_tokens=0`、`completion_tokens=0`，仍按 `/v1/videos` 任务分支使用输入价格计费；补全价格当前不参与。最终按官方基础价配置，收益由 NewAPI 用户组/会员倍率叠加；错误 404 请求 `quota=0` 不扣费。
+
+- **iPhone `下载并覆盖本地` 当前未解决。** `2.1.17` 开发签名版在真实 iPhone 13 Pro Max 点击云端项目并确认后无可见结果，操作前后四个本地项目的 `.raw/.sync/state.json` 修改时间全部未变化。自动测试、IPA 构建、安装和启动已通过，但不能证明真实下载执行；继续排障已暂停，见 [[排障/iPhone云项目下载覆盖本地无响应-2026-08-10]]。
+
+- **thinking 模型工具续请求已修复 `reasoning_content` 丢失。** Git `d98b72bf` 在共享 direct runtime 内仅临时保留并回传上游 `reasoning_content`，不显示、不写入 Raw Markdown；普通工具循环和流中断续传均覆盖。direct runtime `39/39`、TypeScript 与差异检查通过；截图对应真实 NewAPI 模型的多轮工具调用仍待验收，见 [[排障/thinking模型工具调用reasoning_content中断-2026-08-11]]。
 
 - **新建记忆空间采用 Obsidian 兼容的最小 Wiki 骨架。** generic 只创建 `index.md`、`hot.md`、`log.md` 和 `来源索引.md`，不创建 README、CLAUDE、`方向.md`、业务目录或任何替代性的强制读取页；记忆请求也不自动注入 Wiki 页面。
 - **`jc-everything-wiki` 只做按需结构规划。** 它沿用现有 Wiki 根目录，读取目标与现状，只追问会改变目录设计的问题；先给最小方案，用户确认后创建并复查。`index.md` 只导航顶层分类，目录 `_index.md` 只导航直属子目录。
@@ -40,7 +54,7 @@
 ## 已验证 / 未验证
 
 - `v2.1.9` 已发布：`main` 与 tag 指向 `f302c251`；Web Production 正式域名返回 HTTP 200；GitHub Actions `30904082094` 的 macOS ARM、macOS Intel、Windows x64 和发布清单均成功；生产 `latest.json` 返回 `2.1.9`。
-- 方向性文字覆盖已通过 focused `1438/1446`、TypeScript、Web quick build 和产物审计；真实 Web/Desktop/iPhone 覆盖删除矩阵仍待人工验收。
+- 方向性文字覆盖曾通过 focused `1438/1446`、TypeScript、Web quick build 和产物审计；2026-08-10 真实 iPhone `2.1.17` 下载覆盖回归失败，当前 Mobile 下载链路不得登记为通过。Web/Desktop 覆盖删除矩阵仍待人工验收。
 - Wiki 状态查询已按 append-only 合同改为从 `log.md` 末尾读取最新标题；应用内运行时 `12/12`、Wiki Skill 专项 `18/18`、完整 focused 与 TypeScript 通过，当前状态正确显示 2026-08-04 的最新决策。
 - iOS 仍是已提交审核的 `2.1.7 (2.1.7.1)`，Android 无公开版；桌面三平台发布不等于 App Store 或 Google Play 上架。
 - 单产品化分离已按四组 TDD 实施：模型目录改用 Gateway，创作面板解除 OpenCode owner/session，搜索改用 Raw 对话，Rust 移除 OpenCode Runtime/命令；旧 Studio、OpenCode、四模式、电商、制作、漫剧工作台产品代码与发布物已从主仓迁出。

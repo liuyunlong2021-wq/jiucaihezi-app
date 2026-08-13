@@ -81,6 +81,7 @@ const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
 const recordingScene = ref<Scene3DDocument | null>(null)
 const recordingSceneEditor = ref<{ recordVideo: (signal?: AbortSignal) => Promise<Blob> } | null>(null)
+const sceneVideoStatus = ref('正在检测 FFmpeg…')
 const sceneInstruction = ref('')
 const sceneInstructionSending = ref(false)
 const projectMapReturn = ref<{ resource: Extract<ProjectResourceOpenResult, { type: 'project-map' }>; viewport: { x: number; y: number; zoom: number } } | null>(null)
@@ -335,6 +336,7 @@ const currentModelLabel = computed(() => textModels.value.find(model => model.id
 const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 
 onMounted(async () => {
+  void checkSceneVideoExport()
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
   offToggleTree = onEvent('toggle-file-tree', () => { treeOpen.value = !treeOpen.value })
   offReferenceFile = onEvent('reference-file', payload => {
@@ -1487,14 +1489,25 @@ function saveScene3D(next: Scene3DDocument) {
 async function saveSceneScreenshot(blob: Blob, title: string) {
   const owner = projectOwner.value
   if (!owner) return
-  const existing = new Set((await files.list(owner)).map(item => item.path))
-  const resource = await files.importBinary({
-    owner,
-    path: nextMaterialPath('.raw/jc-media/图片', `${title}.png`, existing),
-    data: new Uint8Array(await blob.arrayBuffer()),
-    mimeType: 'image/png',
-  })
-  status.value = `截图已保存：${resource.path}`
+  try {
+    const existing = new Set((await files.list(owner)).map(item => item.path))
+    const resource = await files.importBinary({
+      owner,
+      path: nextMaterialPath('.raw/jc-media/图片', `${title}.png`, existing),
+      data: new Uint8Array(await blob.arrayBuffer()),
+      mimeType: 'image/png',
+    })
+    sceneVideoStatus.value = `截图已保存：${resource.path}`
+  } catch (cause) { sceneVideoStatus.value = `截图保存失败：${cause instanceof Error ? cause.message : String(cause)}` }
+}
+
+async function checkSceneVideoExport() {
+  if (!desktopOnlyRuntime) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const result = await invoke<{ path: string }>('dev_check_ffmpeg')
+    sceneVideoStatus.value = `FFmpeg 已就绪：${result.path}`
+  } catch (cause) { sceneVideoStatus.value = `视频不可用：${cause instanceof Error ? cause.message : String(cause)}` }
 }
 
 async function saveSceneVideo(blob: Blob, title: string) {
@@ -1510,9 +1523,9 @@ async function saveSceneVideo(blob: Blob, title: string) {
         outputFilename: `${title}.mp4`,
       },
     })
-    status.value = `视频已保存：${result.path}`
+    sceneVideoStatus.value = `视频已保存：${result.path}`
   } catch (cause) {
-    error.value = `3D 手动录制保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+    sceneVideoStatus.value = `视频保存失败：${cause instanceof Error ? cause.message : String(cause)}`
   }
 }
 
@@ -1959,6 +1972,7 @@ function readDataUrl(file: File): Promise<string> {
         <div v-if="previewResource.type === 'scene3d'" class="memory-scene-workspace">
           <Scene3DEditor
             :document="previewResource.document"
+            :video-status="sceneVideoStatus"
             @save="saveScene3D"
             @screenshot="saveSceneScreenshot"
             @video="saveSceneVideo"

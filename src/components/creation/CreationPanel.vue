@@ -932,10 +932,30 @@ async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<stri
     if (!projectDir) return filePath
     const relativePath = mediaPathForStorage(filePath, projectDir)
     const { invoke } = await import('@tauri-apps/api/core')
-    const { convertFileSrc } = await import('@tauri-apps/api/core')
-    return convertFileSrc(
-      filePath.startsWith(`${projectDir}/`) ? filePath : `${projectDir}/${relativePath}`,
-    )
+    const result = await invoke<{ base64: string; truncated: boolean }>('dev_read_file', {
+      input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
+    })
+    if (!result?.base64 || result.truncated) return filePath
+    const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
+    const mime =
+      ext === 'mp4'
+        ? 'video/mp4'
+        : ext === 'webm'
+          ? 'video/webm'
+          : ext === 'mov'
+            ? 'video/quicktime'
+            : ext === 'avi'
+              ? 'video/x-msvideo'
+              : ext === 'mkv'
+                ? 'video/x-matroska'
+                : ext === 'jpg' || ext === 'jpeg'
+                  ? 'image/jpeg'
+                  : ext === 'webp'
+                    ? 'image/webp'
+                    : ext === 'gif'
+                      ? 'image/gif'
+                      : 'image/png'
+    return `data:${mime};base64,${result.base64}`
   } catch {
     return filePath
   }

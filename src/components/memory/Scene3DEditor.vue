@@ -5,10 +5,10 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { STORYBOARDER_BONE_NAMES, evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DCharacter, type Scene3DDocument, type Scene3DFormation, type Scene3DObject } from '@/runtime/memory/scene3d'
+import { STORYBOARDER_BONE_NAMES, evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DCharacter, type Scene3DDocument, type Scene3DFormation, type Scene3DGroup, type Scene3DObject } from '@/runtime/memory/scene3d'
 import { STORYBOARDER_CHARACTER_MODELS, STORYBOARDER_EDITABLE_BONES, STORYBOARDER_HAND_POSES, STORYBOARDER_POSES, handPosePreset, posePreset, resolveStoryboarderModelUrl } from '@/runtime/memory/storyboarderAssets'
 
-const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean }>(), { recordingOnly: false })
+const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean; videoStatus?: string }>(), { recordingOnly: false, videoStatus: '' })
 const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -23,6 +23,7 @@ const currentTime = ref(0)
 const activeBoneName = ref('')
 const characterLoading = ref(0)
 const characterLoadError = ref('')
+const contextMenu = ref({ show: false, x: 0, y: 0 })
 let document = parseScene3DDocument(props.document)
 let scene: THREE.Scene | null = null
 let root: THREE.Group | null = null
@@ -44,6 +45,9 @@ let raycaster: THREE.Raycaster | null = null
 let playStartedAt = 0
 let stepLabel: THREE.Sprite | null = null
 let sceneBuildToken = 0
+const history: Scene3DDocument[] = [structuredClone(document)]
+let historyIndex = 0
+let copiedSelection: { kind: 'object' | 'formation' | 'group'; value: Scene3DObject | Scene3DFormation | Scene3DGroup } | null = null
 const characterTemplates = new Map<string, THREE.Object3D>()
 const characterLoads = new Map<string, Promise<THREE.Object3D | null>>()
 const selectable = new Map<string, THREE.Object3D>()
@@ -56,6 +60,15 @@ const selectedCharacter = computed(() => {
   const item = document.objects.find(item => item.id === selectedId.value)
   return item?.type === 'person' && item.character ? item : null
 })
+const selectedEntry = computed(() => {
+  renderRevision.value
+  if (!selectedId.value) return null
+  return document.objects.find(item => item.id === selectedId.value)
+    || document.formations.find(item => item.id === selectedId.value)
+    || document.groups.find(item => item.id === selectedId.value)
+    || null
+})
+const selectedModelLabel = (model: Scene3DCharacter['model']) => ({ 'adult-male': '成年男性', 'adult-female': '成年女性', 'teen-male': '青少年男性', 'teen-female': '青少年女性', child: '儿童' }[model])
 const poseOptions = computed(() => {
   const preferred = ['stand', 'sit chair', 'crouch inspect', 'walk', 'run', 'point', 'cross arms']
   return preferred.map(name => STORYBOARDER_POSES.find(item => item.name.toLowerCase() === name)).filter((item): item is (typeof STORYBOARDER_POSES)[number] => Boolean(item))
@@ -505,12 +518,42 @@ function updateGrid() {
 
 function attachSelection(id: string) {
   selectedId.value = id
+  contextMenu.value.show = false
   activeBoneName.value = ''
   transform?.detach()
   transform?.setMode('translate')
   const target = selectable.get(id)
   if (target) transform?.attach(target)
 }
+
+function clearSelection() {
+  selectedId.value = ''
+  activeBoneName.value = ''
+  contextMenu.value.show = false
+  transform?.detach()
+}
+
+function updateSelectedLabel(label: string) {
+  const item = selectedEntry.value
+  if (!item || !('label' in item)) return
+  item.label = label.trim().slice(0, 80) || undefined
+  buildScene(); persist()
+}
+
+function updateSelectedColor(color: string) {
+  const item = selectedEntry.value
+  if (!item || !('color' in item)) return
+  item.color = color; buildScene(); persist()
+}
+
+function clearSelectedLabel() { updateSelectedLabel('') }
+
+function openContextMenu(event: MouseEvent) {
+  pick(event as PointerEvent)
+  if (selectedId.value) contextMenu.value = { show: true, x: event.offsetX, y: event.offsetY }
+}
+
+function closeContextMenu() { contextMenu.value.show = false }
 
 function characterNode() {
   const target = selectable.get(selectedId.value)
@@ -585,6 +628,7 @@ function pick(event: PointerEvent) {
   let node: THREE.Object3D | null = hit?.object || null
   while (node && !node.userData.sceneSelection) node = node.parent
   if (node?.userData.sceneSelection) attachSelection(node.userData.sceneSelection.id)
+  else clearSelection()
 }
 
 function persistSelection() {
@@ -617,7 +661,62 @@ function persistCharacterBones() {
   persist()
 }
 
-function persist() { renderRevision.value++; emit('save', structuredClone(document)) }
+function persist(options: { history?: boolean } = {}) {
+  if (options.history !== false) {
+    history.splice(historyIndex + 1)
+    const snapshot = structuredClone(document)
+    if (JSON.stringify(history[history.length - 1]) !== JSON.stringify(snapshot)) history.push(snapshot)
+    historyIndex = history.length - 1
+    if (history.length > 100) { history.shift(); historyIndex-- }
+  }
+  renderRevision.value++; emit('save', structuredClone(document))
+}
+
+function restoreHistory(index: number) {
+  const snapshot = history[index]
+  if (!snapshot) return
+  document = parseScene3DDocument(structuredClone(snapshot))
+  historyIndex = index
+  selectedId.value = ''
+  buildScene(); createCameraControls(); applyAnimation(0); persist({ history: false })
+}
+
+function undo() { if (historyIndex > 0) restoreHistory(historyIndex - 1) }
+function redo() { if (historyIndex < history.length - 1) restoreHistory(historyIndex + 1) }
+
+function copySelection() {
+  const target = selectable.get(selectedId.value)
+  const selection = target?.userData.sceneSelection as { id: string; kind: 'object' | 'formation' | 'group' } | undefined
+  if (!selection) return
+  const value = selection.kind === 'object'
+    ? document.objects.find(item => item.id === selection.id)
+    : selection.kind === 'formation'
+      ? document.formations.find(item => item.id === selection.id)
+      : document.groups.find(item => item.id === selection.id)
+  if (value) copiedSelection = { kind: selection.kind, value: structuredClone(value) }
+}
+
+function pasteSelection() {
+  if (!copiedSelection) return
+  const id = `${copiedSelection.value.id}_copy_${crypto.randomUUID().slice(0, 8)}`
+  if (copiedSelection.kind === 'object') {
+    const value = structuredClone(copiedSelection.value as Scene3DObject); value.id = id; value.position = [value.position[0] + 1, value.position[1], value.position[2]]; document.objects.push(value); selectedId.value = id
+  } else if (copiedSelection.kind === 'formation') {
+    const value = structuredClone(copiedSelection.value as Scene3DFormation); value.id = id; value.position = [value.position[0] + 1, value.position[1], value.position[2]]; document.formations.push(value); selectedId.value = id
+  } else {
+    const value = structuredClone(copiedSelection.value as Scene3DGroup); value.id = id; value.position = [(value.position?.[0] || 0) + 1, value.position?.[1] || 0, value.position?.[2] || 0]; document.groups.push(value); selectedId.value = id
+  }
+  buildScene(); persist()
+}
+
+function handleHistoryKeyboard(event: KeyboardEvent) {
+  if ((event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
+  const modifier = event.metaKey || event.ctrlKey
+  if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
+  if (modifier && event.key.toLowerCase() === 'y') { event.preventDefault(); redo(); return }
+  if (modifier && event.key.toLowerCase() === 'c') { event.preventDefault(); copySelection(); return }
+  if (modifier && event.key.toLowerCase() === 'v') { event.preventDefault(); pasteSelection() }
+}
 
 function saveCamera() {
   const name = `机位 ${document.savedCameras.length + 1}`
@@ -630,8 +729,28 @@ function saveCamera() {
 function useSavedCamera(item: Scene3DCamera) { cameraName.value = item.name || ''; applyCamera(item); persist() }
 function removeSavedCamera(index: number) { document.savedCameras.splice(index, 1); persist() }
 
+function removeSelection() {
+  const target = selectable.get(selectedId.value)
+  const selection = target?.userData.sceneSelection as { id: string; kind: 'object' | 'formation' | 'group' } | undefined
+  if (!selection) return
+  if (selection.kind === 'group') document.groups = document.groups.filter(item => item.id !== selection.id)
+  else if (selection.kind === 'object') document.objects = document.objects.filter(item => item.id !== selection.id)
+  else document.formations = document.formations.filter(item => item.id !== selection.id)
+  if (selection.kind !== 'group') document.groups = document.groups.map(group => ({ ...group, memberIds: group.memberIds.filter(id => id !== selection.id) })).filter(group => group.memberIds.length)
+  document.timeline = document.timeline?.filter(item => item.target !== selection.id)
+  selectedId.value = ''
+  buildScene(); persist()
+}
+
+function removeSelectedWithKeyboard(event: KeyboardEvent) {
+  if (event.key === 'Escape') { clearSelection(); return }
+  if ((event.key !== 'Delete' && event.key !== 'Backspace') || (event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]') || !selectedId.value) return
+  event.preventDefault(); removeSelection()
+}
+
 async function capture() {
   if (!renderer || !canvas.value) return
+  clearSelection()
   renderer.render(scene!, activeCamera())
   const source = renderer.domElement
   const ratio = aspectRatio(currentAspect.value)
@@ -658,12 +777,14 @@ function restoreManualRecordingUi() {
 
 function startManualRecording() {
   if (!canvas.value || manualRecorder) return
+  if (!canvas.value.captureStream) { recordingError.value = '当前系统不支持 3D 画布录制'; return }
   const mimeType = recordingMimeType()
   if (!mimeType) { recordingError.value = '当前系统不支持 3D 画布录制'; return }
   recordingError.value = ''
   manualRecordingFailed = false
   discardManualRecording = false
   manualChunks = []
+  clearSelection()
   transform?.detach()
   if (scene?.getObjectByName('scene-grid')) scene.getObjectByName('scene-grid')!.visible = false
   const recorder = new MediaRecorder(canvas.value.captureStream(30), { mimeType, videoBitsPerSecond: 12_000_000 })
@@ -708,8 +829,10 @@ function render() {
 
 async function recordVideo(signal?: AbortSignal): Promise<Blob> {
   if (!renderer || !canvas.value || !duration.value || !document.timeline?.length) throw new Error('当前场景没有可录制的动画时间线')
+  if (!canvas.value.captureStream) throw new Error('当前系统不支持 3D 画布录制')
   const mimeType = recordingMimeType()
   if (!mimeType) throw new Error('当前系统不支持画布视频录制')
+  clearSelection()
   resize(); currentTime.value = 0; applyAnimation(0); renderer.render(scene!, activeCamera())
   const chunks: Blob[] = []
   const recorder = new MediaRecorder(canvas.value.captureStream(30), { mimeType, videoBitsPerSecond: 12_000_000 })
@@ -745,6 +868,9 @@ onMounted(() => {
   raycaster = new THREE.Raycaster()
   updateLights(); updateGrid(); buildScene(); createCameraControls(); applyAnimation(0)
   canvas.value.addEventListener('pointerup', pick)
+  window.addEventListener('pointerdown', closeContextMenu)
+  window.addEventListener('keydown', removeSelectedWithKeyboard)
+  window.addEventListener('keydown', handleHistoryKeyboard)
   resizeObserver = new ResizeObserver(resize); resizeObserver.observe(canvas.value); render()
 })
 
@@ -756,7 +882,7 @@ onBeforeUnmount(() => {
   discardManualRecording = true
   const recorder = manualRecorder
   if (recorder && recorder.state !== 'inactive') recorder.stop()
-  cancelAnimationFrame(animationFrame); resizeObserver?.disconnect(); canvas.value?.removeEventListener('pointerup', pick)
+  cancelAnimationFrame(animationFrame); resizeObserver?.disconnect(); canvas.value?.removeEventListener('pointerup', pick); window.removeEventListener('pointerdown', closeContextMenu); window.removeEventListener('keydown', removeSelectedWithKeyboard); window.removeEventListener('keydown', handleHistoryKeyboard)
   orbit?.dispose(); transform?.dispose(); renderer?.dispose()
   if (root) disposeObject(root)
   characterTemplates.forEach(template => disposeObject(template, true))
@@ -791,10 +917,16 @@ onBeforeUnmount(() => {
         <button :class="{ active: document.lighting.shadows }" title="开启或关闭阴影" @click="toggleShadows"><JcIcon name="contrast" /></button>
         <span class="scene3d-divider"></span>
         <button title="保存当前机位" @click="saveCamera"><JcIcon name="bookmark-add" /></button>
+        <button title="撤销 Cmd/Ctrl+Z" :disabled="historyIndex < 1" @click="undo"><JcIcon name="undo" /></button>
+        <button title="重做 Cmd/Ctrl+Shift+Z" :disabled="historyIndex >= history.length - 1" @click="redo"><JcIcon name="redo" /></button>
+        <button title="复制选中物体 Cmd/Ctrl+C" :disabled="!selectedId" @click="copySelection"><JcIcon name="content-copy" /></button>
+        <button title="粘贴物体 Cmd/Ctrl+V" :disabled="!copiedSelection" @click="pasteSelection"><JcIcon name="content-paste" /></button>
         <button class="primary" title="截图保存到图片" @click="capture"><JcIcon name="photo-camera" /></button>
+        <button :disabled="!selectedId" title="删除选中物体（Delete）" @click="removeSelection"><JcIcon name="delete" /></button>
         <button v-if="!manualRecording" title="开始手动运镜录制" @click="startManualRecording"><JcIcon name="radio-button-checked" /></button>
         <button v-else class="recording" title="停止并保存录制" @click="stopManualRecording"><JcIcon name="stop" /></button>
         <span v-if="recordingError" class="scene3d-recording-error">{{ recordingError }}</span>
+        <span v-if="videoStatus" class="scene3d-video-status">{{ videoStatus }}</span>
         <template v-if="duration">
           <span class="scene3d-divider"></span>
           <button :title="playing ? '暂停' : '播放'" @click="togglePlayback"><JcIcon :name="playing ? 'pause' : 'play_arrow'" /></button>
@@ -803,7 +935,7 @@ onBeforeUnmount(() => {
         </template>
       </div>
       <div v-if="selectedCharacter" class="scene3d-character-tools">
-        <button v-for="model in STORYBOARDER_CHARACTER_MODELS" :key="model" :class="{ active: selectedCharacter.character?.model === model }" :title="`切换人物：${model}`" @click="setCharacterModel(model)">{{ model }}</button>
+        <button v-for="model in STORYBOARDER_CHARACTER_MODELS" :key="model" :class="{ active: selectedCharacter.character?.model === model }" :title="`切换人物：${selectedModelLabel(model)}`" @click="setCharacterModel(model)">{{ selectedModelLabel(model) }}</button>
         <button title="移动整个人物" @click="attachSelection(selectedCharacter.id)">移动</button>
         <button title="旋转整个人物" @click="rotateCharacter">转向</button>
         <button title="人物缩小" @click="adjustCharacterScale(-0.1)">−</button>
@@ -819,9 +951,20 @@ onBeforeUnmount(() => {
         <span v-if="characterLoading" class="scene3d-character-name">人物加载中…</span>
         <span v-if="characterLoadError" class="scene3d-recording-error">{{ characterLoadError }}</span>
       </div>
+      <div v-if="selectedEntry" class="scene3d-selection-tools">
+        <input v-if="'label' in selectedEntry" :value="selectedEntry.label || ''" aria-label="对象名称" placeholder="对象名称" @change="updateSelectedLabel(($event.target as HTMLInputElement).value)" />
+        <button v-if="'label' in selectedEntry" title="删除显示文字" @click="clearSelectedLabel"><JcIcon name="label-off" /></button>
+        <input v-if="'color' in selectedEntry" type="color" :value="selectedEntry.color || '#e7ece9'" title="对象颜色" aria-label="对象颜色" @input="updateSelectedColor(($event.target as HTMLInputElement).value)" />
+      </div>
     </header>
     <div class="scene3d-stage" :style="{ '--scene-aspect': String(aspectRatio(currentAspect)) }">
-      <canvas ref="canvas" aria-label="3D 白膜场景"></canvas>
+      <canvas ref="canvas" aria-label="3D 白膜场景" @contextmenu.prevent="openContextMenu"></canvas>
+      <div v-if="contextMenu.show" class="scene3d-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @pointerdown.stop>
+        <button @click="copySelection">复制</button>
+        <button :disabled="!copiedSelection" @click="pasteSelection">粘贴</button>
+        <button @click="removeSelection">删除</button>
+        <button v-if="selectedEntry && 'label' in selectedEntry" @click="clearSelectedLabel">删除显示文字</button>
+      </div>
       <div v-if="!recordingOnly" class="scene3d-frame"></div>
       <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
     </div>
@@ -842,10 +985,17 @@ onBeforeUnmount(() => {
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
 .scene3d-tools { display: flex; align-items: center; gap: 3px; }
 .scene3d-character-tools { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; max-width: 58vw; overflow-x: auto; padding-left: 8px; border-left: 1px solid rgba(216, 235, 223, .16); }
+.scene3d-selection-tools { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; padding-left: 8px; border-left: 1px solid rgba(216, 235, 223, .16); }
+.scene3d-selection-tools input:not([type='color']) { width: 120px; height: 28px; padding: 0 6px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; background: rgba(0, 0, 0, .18); color: #e8efeb; }
+.scene3d-selection-tools input[type='color'] { width: 30px; height: 28px; padding: 2px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; background: transparent; }
 .scene3d-character-name { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
 .scene3d-tools button, .scene3d-character-tools button, .scene3d-cameras button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
 .scene3d-tools button.recording { color: #ff8f8f; }
 .scene3d-recording-error { color: #ff9d9d; font-size: 11px; white-space: nowrap; }
+.scene3d-video-status { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
+.scene3d-context-menu { position: absolute; z-index: 5; display: grid; gap: 2px; min-width: 120px; padding: 5px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
+.scene3d-context-menu button { padding: 5px 8px; border: 0; color: #e8efeb; background: transparent; text-align: left; cursor: pointer; }
+.scene3d-context-menu button:hover { background: rgba(222, 243, 229, .14); }
 .scene3d-tools button:hover, .scene3d-tools button.active, .scene3d-character-tools button:hover, .scene3d-character-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
 .scene3d-character-tools button:disabled { opacity: .45; cursor: not-allowed; }
 .scene3d-tools button.primary { background: #86c8a5; color: #122018; }

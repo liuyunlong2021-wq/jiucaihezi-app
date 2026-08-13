@@ -2015,6 +2015,24 @@ pub async fn dev_run_command(input: DevRunCommandInput) -> Result<DevRunCommandO
 }
 
 #[tauri::command]
+pub async fn dev_check_ffmpeg() -> Result<DevFfmpegCheckOutput, String> {
+    #[cfg(windows)]
+    let path = PathBuf::from("ffmpeg");
+    #[cfg(not(windows))]
+    let path = {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+        let lookup = Command::new(shell).args(["-lc", "command -v ffmpeg"]).output().await
+            .map_err(|_| "找不到系统 FFmpeg，请安装后重新打开应用".to_string())?;
+        if !lookup.status.success() { return Err("找不到系统 FFmpeg，请安装后重新打开应用".into()); }
+        PathBuf::from(String::from_utf8_lossy(&lookup.stdout).trim())
+    };
+    let output = Command::new(&path).arg("-version").output().await
+        .map_err(|_| "FFmpeg 无法启动，请检查系统 PATH".to_string())?;
+    if !output.status.success() { return Err("FFmpeg 无法启动，请检查系统 PATH".into()); }
+    Ok(DevFfmpegCheckOutput { path: path.to_string_lossy().into_owned() })
+}
+
+#[tauri::command]
 pub async fn dev_export_scene_video(
     input: DevExportSceneVideoInput,
 ) -> Result<DevExportSceneVideoOutput, String> {

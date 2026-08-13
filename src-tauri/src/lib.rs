@@ -400,6 +400,12 @@ struct DevExportSceneVideoOutput {
     bytes_written: u64,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevFfmpegCheckOutput {
+    path: String,
+}
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SkillMaterialRawFile {
@@ -1412,6 +1418,7 @@ pub fn run() {
             commands::dev::dev_replace_in_external_file,
             commands::dev::dev_get_diff,
             commands::dev::dev_run_command,
+            commands::dev::dev_check_ffmpeg,
             commands::dev::dev_export_scene_video,
             commands::dev::dev_generate_video_thumbnail,
             commands::dev::pick_project_folder,

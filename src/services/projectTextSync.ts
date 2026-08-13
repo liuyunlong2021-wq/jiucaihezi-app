@@ -156,7 +156,7 @@ export class ProjectTextSync {
 
   async cloudProjectIdFor(owner: string): Promise<string> {
     if (!owner) return ''
-    const resource = (await this.files.list(owner)).find(item => item.path === STATE_PATH)
+    const resource = await this.findState(owner)
     if (!resource) return ''
     return parseState((await this.files.readText(resource)).content).cloudProjectId
   }
@@ -169,19 +169,23 @@ export class ProjectTextSync {
     return next
   }
 
-  private async find(path: string): Promise<ProjectResource | undefined> {
-    return (await this.files.list(this.owner)).find(resource => resource.path === path)
+  private async findState(owner = this.owner): Promise<ProjectResource | undefined> {
+    try {
+      return (await this.files.listDirectory(owner, STATE_DIRECTORY)).find(resource => resource.path === STATE_PATH)
+    } catch {
+      return undefined
+    }
   }
 
   private async readState(): Promise<LocalSyncState> {
-    const resource = await this.find(STATE_PATH)
+    const resource = await this.findState()
     if (!resource) return emptyState()
     return parseState((await this.files.readText(resource)).content)
   }
 
   private async persistState(): Promise<void> {
     const content = JSON.stringify(this.state)
-    const existing = await this.find(STATE_PATH)
+    const existing = await this.findState()
     if (!existing) {
       await this.files.createFolder(this.owner, STATE_DIRECTORY).catch(() => {})
       await this.files.createText(this.owner, STATE_PATH, content)
