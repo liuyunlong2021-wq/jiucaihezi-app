@@ -137,7 +137,7 @@ const mediaPlans = ref<Record<string, MediaPlan[]>>({})
 const creationMounted = ref(false)
 const creationOpen = ref(false)
 const creationFocused = ref(false)
-const creationPanelRef = ref<{ flushCanvasSave: () => Promise<void> } | null>(null)
+const creationPanelRef = ref<{ flushCanvasSave?: () => Promise<void> } | null>(null)
 const creationClosing = ref(false)
 const creationWidth = ref(Number(localStorage.getItem('jcMemoryCreationWidth')) || 620)
 const creationResizing = ref(false)
@@ -194,7 +194,7 @@ async function closeCreationHost(): Promise<boolean> {
   if (creationClosing.value) return false
   creationClosing.value = true
   try {
-    await creationPanelRef.value?.flushCanvasSave()
+    await creationPanelRef.value?.flushCanvasSave?.()
     creationOpen.value = false
     creationFocused.value = false
     creationMounted.value = false

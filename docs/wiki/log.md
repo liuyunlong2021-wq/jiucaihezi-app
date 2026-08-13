@@ -809,3 +809,10 @@
 - GPT Image 2 的远程结果 URL 在 Desktop 自动下载写入项目之前就会失效，造成预览/下载拿到 `image not found`，且没有项目路径所以不显示“放到画布”。现强制请求 `b64_json`，复用既有图片字节落盘链路；未落盘的远程结果不再显示预览入口。旧失效链接不能恢复，必须重新生成。
 - 用户确认下线 `Grok Image 4.2 文生图` 和 `Grok Image 4.2 图生图`；两项已从创作注册表删除，旧 RunningHub ID 同时禁止再次执行。`rh-grok-image-video` 保留。
 - focused 测试、TypeScript 与 `git diff --check` 通过；真实 GPT Image 2 新生成结果仍待 Desktop 人工验收。
+
+## [2026-08-13] 修复与沉淀 | 创作面板异步保存方法缺失
+
+- 症状为创作任务后出现 `flushCanvasSave is not a function`，并阻断创作面板打开、收起或项目切换；项目和素材本身未损坏。
+- 根因是异步 `CreationPanel` 的 ref 已存在，但 `defineExpose` 方法尚未就绪；外层只保护 ref、不保护方法，类型又错误声明方法必定存在。
+- 最小修复将 ref 方法标为可选，并使用 `creationPanelRef.value?.flushCanvasSave?.()`；回归测试同时禁止不安全调用重新进入。
+- 相关测试 `92/92`、TypeScript、Desktop quick build 与产物审计通过；Web 连续开关 10 次无页面错误。完整 focused `1030/1031` 的唯一失败是两份既有 ComfyUI 测试未登记；真实 Desktop 安装包点击待发布后验收。详见 [[排障/创作面板异步保存方法缺失-2026-08-13]]。
