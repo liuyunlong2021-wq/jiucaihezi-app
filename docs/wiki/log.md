@@ -803,3 +803,9 @@
 - 后续接入必须先导出并复刻人工验收通过的 API 工作流，只替换明确的用户输入节点。Z-Image 当前映射为 `CR Text(47).text` 和 `EmptyLatentImage(21).width/height`；两个 LoRA、正负提示词、KSampler、VAE 和 SaveImage 保持原工作流。
 - 本轮排障确认：端口不是 `8188`；WebKit Blob/Base64 保存不能作为本机结果通道；单张发糊不等于采样器未连；先比较 `/history` 节点 JSON 并使用相同种子 A/B。旧 Tauri 窗口失去 Vite 服务后不会热更新，必须重启开发版再验收。
 - 详见 [[排障/本机ComfyUI模型接入与工作流复刻-2026-08-13]]；MiniMax H3 和其他本机工作流未接入，不写成已支持。
+
+## [2026-08-13] 修复与模型下线 | GPT Image 2 结果落盘、Grok Image 4.2
+
+- GPT Image 2 的远程结果 URL 在 Desktop 自动下载写入项目之前就会失效，造成预览/下载拿到 `image not found`，且没有项目路径所以不显示“放到画布”。现强制请求 `b64_json`，复用既有图片字节落盘链路；未落盘的远程结果不再显示预览入口。旧失效链接不能恢复，必须重新生成。
+- 用户确认下线 `Grok Image 4.2 文生图` 和 `Grok Image 4.2 图生图`；两项已从创作注册表删除，旧 RunningHub ID 同时禁止再次执行。`rh-grok-image-video` 保留。
+- focused 测试、TypeScript 与 `git diff --check` 通过；真实 GPT Image 2 新生成结果仍待 Desktop 人工验收。

@@ -667,6 +667,8 @@ export function isRemovedMediaModelId(id: string): boolean {
   if (value === 'nano-banana' || value === 'nano-banana-hd') return true
   if (value === 'nano-banana-2k' || value === 'nano-banana-pro-2k') return true
   if (value === 'grok-4.2-image' || value === 'grok-4.1-image') return true
+  if (value === 'runninghub/api/rh-grok-image-text' || value === 'rh-grok-image-text') return true
+  if (value === 'runninghub/api/rh-grok-image-image' || value === 'rh-grok-image-image') return true
   if (value === 'grok-video-3' || value === 'grok-video-3-fast') return true
   if (value.includes('seedance')) {
     if (value.startsWith('rh-seedance2-')) return false

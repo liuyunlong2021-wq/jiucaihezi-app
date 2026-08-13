@@ -67,6 +67,8 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/aiapp/rh-aiapp-director',
     'runninghub/aiapp/rh-aiapp-voice-clone',
     'runninghub/aiapp/rh-aiapp-voice-design',
+    'runninghub/api/rh-grok-image-text',
+    'runninghub/api/rh-grok-image-image',
   ]) {
     assert.equal(ids.has(retiredId), false, retiredId)
   }

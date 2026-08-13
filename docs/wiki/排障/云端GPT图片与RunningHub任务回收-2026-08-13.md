@@ -78,6 +78,22 @@ Git `4e33901f` 仅在 `/rh/tasks/` 的既有白名单校验中，对 `pathname` 
 
 排查顺序：先确认任务 `assetStatus`、`assetRetryCount`、`projectPath/assetUri`，再从 Desktop 后台或服务器探测结果 URL 是否可下载。只有落盘成功后才检查画布归属、当前项目和插入逻辑。
 
+## 四、GPT Image 2 临时 URL 失效与 Grok 图片模型下线
+
+### 根因
+
+用户复测时，`GPT Image 2` 完成后既没有“放到画布”，预览返回 `{"error":"image not found"}`，下载还会打开错误页。该渠道返回的是短生命周期远程 URL；Desktop 尚未下载并写入项目时，链接就已失效。因此任务没有 `projectPath/assetUri`，并非画布渲染或插入失败。
+
+### 最小修复与边界
+
+- `gpt-image-2` 强制请求 `b64_json`，让既有媒体结果落盘链路直接接收图片字节、生成项目内 `data:` 结果，再正常显示“预览 / 放到画布 / 打开文件夹”。已经失效的旧 URL 无法恢复，需重新生成。
+- 对仍需要保存的远程结果，任务卡不再提供预览入口，避免把上游错误 JSON 当图片打开；保存成功后按既有项目路径预览。
+- 按用户决定，`Grok Image 4.2 文生图` 与 `Grok Image 4.2 图生图` 已从创作模型注册表删除，旧 ID `runninghub/api/rh-grok-image-text`、`rh-grok-image-text`、`runninghub/api/rh-grok-image-image`、`rh-grok-image-image` 均标记为下线。`rh-grok-image-video` 不受影响。
+
+### 回归规则
+
+云端图片接入若只返回临时 URL，必须先在生成完成前可靠落盘，或者直接请求可写入的字节数据；不能把临时 URL 当作画布资产。下线模型须同时从可见注册表删除并阻断旧 ID 执行，保留相邻的有效模型回归测试。
+
 ## 验证边界
 
 - 通过：`vue-tsc -b`；仓库内置 focused 定向测试覆盖 URL 安全、模型注册、模型准入、创建计划和媒体任务；`git diff --check`。

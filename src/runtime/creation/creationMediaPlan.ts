@@ -232,7 +232,8 @@ function normalizeOpenAiImageParams(
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    response_format: params.response_format || 'url',
+    // GPT Image 2 的临时下载 URL 会在项目落盘前失效，直接接收图片字节。
+    response_format: spec.id === 'gpt-image-2' ? 'b64_json' : params.response_format || 'url',
   })
 }
 

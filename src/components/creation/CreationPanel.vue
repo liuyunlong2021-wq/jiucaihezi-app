@@ -3851,7 +3851,7 @@ const canSend = computed(
                 <button
                   v-if="
                     task.status === 'success' &&
-                    (task.projectPath || task.assetUri || task.resultUrl)
+                    (task.projectPath || task.assetUri || (task.resultUrl && !canPersistMediaResult(task)))
                   "
                   @click="previewTask(task)"
                 >

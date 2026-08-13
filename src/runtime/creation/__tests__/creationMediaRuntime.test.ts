@@ -48,6 +48,7 @@ test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapte
   assert.equal(request.pollKind, 'newapi-task')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
+  assert.equal(request.imageParams?.responseFormat, 'b64_json')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
   assert.equal((request.imageParams as any)?.resolution, undefined)
 })
@@ -64,7 +65,7 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
     assert.equal(body.get('prompt'), '把手表改成黄色')
     assert.equal(body.get('size'), '2048x1152')
     assert.equal(body.get('image') instanceof Blob, true)
-    return Response.json({ data: [{ url: 'https://webstatic.aiproxy.vip/output/gpt-edit.png' }] })
+    return Response.json({ data: [{ b64_json: 'aGVsbG8=' }] })
   }
 
   try {
@@ -78,7 +79,7 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
       },
     })
     const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
-    assert.equal(result.url, 'https://webstatic.aiproxy.vip/output/gpt-edit.png')
+    assert.equal(result.url, 'data:image/png;base64,aGVsbG8=')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

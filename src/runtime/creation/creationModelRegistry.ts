@@ -856,58 +856,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: ['1:1', '3:4', '4:3', '9:16', '16:9', '2:3', '3:2', 'custom'],
   }),
 
-  // ── 🆕 Grok Image 4.2 系列 (2 个) ──
-  runninghubStandard({
-    id: 'runninghub/api/rh-grok-image-text',
-    model: 'rh-grok-image-text',
-    label: 'Grok Image 4.2 文生图 · RunningHub',
-    task: 'image',
-    mode: 'text-to-image',
-    price: 0.1,
-    contractStatus: 'partial',
-    notes: ['docs/notes/RH-图片模型.md'],
-    fields: promptFields([
-      {
-        key: 'variant',
-        label: '版本',
-        kind: 'select',
-        defaultValue: 'g-4.2',
-        options: options(['g-3', 'g-4', 'g-4.1', 'g-4.2']),
-      },
-      {
-        key: 'aspectRatio',
-        label: '尺寸',
-        kind: 'select',
-        defaultValue: '960x960',
-        options: options(['960x960', '720x1280', '1280x720', '1168x784', '784x1168']),
-      },
-    ]),
-    contractIssues: [
-      '低价渠道，不稳定。aspectRatio 为像素尺寸格式。variant→model 映射在 rh-adapter 完成。',
-    ],
-  }),
-  runninghubStandard({
-    id: 'runninghub/api/rh-grok-image-image',
-    model: 'rh-grok-image-image',
-    label: 'Grok Image 4.2 图生图 · RunningHub',
-    task: 'image',
-    mode: 'image-to-image',
-    price: 0.1,
-    contractStatus: 'partial',
-    notes: ['docs/notes/RH-图片模型.md'],
-    files: { images: { min: 1, max: 1 } },
-    fields: promptFields([
-      {
-        key: 'variant',
-        label: '版本',
-        kind: 'select',
-        defaultValue: 'g-4.2',
-        options: options(['g-3', 'g-4', 'g-4.1', 'g-4.2']),
-      },
-      { key: 'images', label: '参考图', kind: 'images', required: true },
-    ]),
-    contractIssues: ['低价渠道，不稳定。imageUrl + variant→model 映射需验证。'],
-  }),
   runninghubStandard({
     id: 'runninghub/api/rh-video-v31-fast',
     model: 'rh-video-v31-fast',

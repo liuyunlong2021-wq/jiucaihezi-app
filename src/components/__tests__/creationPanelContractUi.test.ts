@@ -819,6 +819,6 @@ test('creation panel lets a remote successful result be saved into its project',
   )
   assert.match(
     source,
-    /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| task\.resultUrl\)\s+"\s+@click="previewTask\(task\)"/,
+    /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| \(task\.resultUrl && !canPersistMediaResult\(task\)\)\)\s+"\s+@click="previewTask\(task\)"/,
   )
 })
