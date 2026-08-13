@@ -96,6 +96,7 @@ test('creation poll url guard only allows known task polling paths', () => {
   assert.equal(isAllowedCreationPollUrl('/v1/videos/video_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/v2/videos/generations/video_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/rh/tasks/rh_task_001'), true)
+  assert.equal(isAllowedCreationPollUrl('/rh/tasks/global%3A2087782571974000642'), true)
   assert.equal(isAllowedCreationPollUrl('/rh/tasks/rh_task_001?ai_app=true'), true)
   assert.equal(isAllowedCreationPollUrl('/suno/fetch/suno_task_001'), true)
   assert.equal(isAllowedCreationPollUrl('/api/user/self'), false)

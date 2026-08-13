@@ -102,7 +102,7 @@ export function isAllowedCreationPollUrl(input: string): boolean {
   try {
     const parsed = new URL(text, 'https://gateway.local')
     if (parsed.origin !== 'https://gateway.local') return false
-    const isRhTaskPoll = /^\/rh\/tasks\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) &&
+    const isRhTaskPoll = /^\/rh\/tasks\/[A-Za-z0-9._:-]+$/.test(decodeURIComponent(parsed.pathname)) &&
       (parsed.search === '' || parsed.search === '?ai_app=true')
     if (isRhTaskPoll) return true
     return /^\/api\/creations\/tasks\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||

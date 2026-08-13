@@ -31,7 +31,6 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
     'gpt-image-2',
-    'gpt-image-2-vip',
     'newapi/trump/seedance-2.0',
     'newapi/kik/doubao-seedance-2',
     'newapi/kik/doubao-seedance-2-0-fast-260128',
@@ -117,7 +116,7 @@ test('every registry model has a valid route contract and can produce a run plan
 
 test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('gpt-image-2')?.model, 'gpt-image-2')
-  assert.equal(getCreationModelSpec('gpt-image-2-vip')?.model, 'gpt-image-2-vip')
+  assert.equal(getCreationModelSpec('gpt-image-2-vip'), undefined)
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
   assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
@@ -133,23 +132,6 @@ test('KIK Seedance models expose provider resolutions and multimodal references'
   assert.deepEqual(mini.capabilities.resolutions, ['480p', '720p'])
   assert.deepEqual(full.capabilities.inputModalities, ['text', 'image', 'video', 'audio'])
   assert.equal(displayModelPrice(mini), '按 Token')
-})
-
-test('GPT Image 2 VIP uses the verified OpenAI image contract', () => {
-  const textOnly = buildCreationRunPlan({
-    modelId: 'gpt-image-2-vip',
-    params: { prompt: '一张产品图', ratio: '1:1', resolution: '2k' },
-  })
-  const withImage = buildCreationRunPlan({
-    modelId: 'gpt-image-2-vip',
-    params: { prompt: '改成产品图', images: ['https://example.com/ref.png'] },
-  })
-
-  assert.equal(textOnly.model, 'gpt-image-2-vip')
-  assert.equal(textOnly.endpoint, '/v1/images/generations')
-  assert.equal(textOnly.pollKind, 'none')
-  assert.equal(withImage.endpoint, '/v1/images/edits')
-  assert.equal(withImage.apiStyle, 'openai-image-edits')
 })
 
 test('GPT Image 2 default uses the registered direct route', () => {
@@ -253,9 +235,8 @@ test('direct GPT Image 2 plan uses OpenAI size and never RH adapter params', () 
   assert.match(plan.submitSummary, /size=2048x1152/)
 })
 
-test('direct GPT Image 2 models show the configured group and VIP prices', () => {
+test('direct GPT Image 2 shows the configured group price', () => {
   assert.equal(getCreationModelSpec('gpt-image-2')?.price, '0.08/次（起）')
-  assert.equal(getCreationModelSpec('gpt-image-2-vip')?.price, '0.20/张')
 })
 
 test('direct GPT Image 2 switches generation and edit contracts by reference image presence', () => {

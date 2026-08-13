@@ -40,7 +40,7 @@ test('media generation API rejects removed and stale model ids before execution'
 
 test('media generation API allows only approved models for each execution kind', () => {
   assert.doesNotThrow(() => assertMediaModelExecutable('gpt-image-2', 'image'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('gpt-image-2-vip', 'image'))
+  assert.throws(() => assertMediaModelExecutable('gpt-image-2-vip', 'image'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('nano-banana-2k', 'image'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-4k', 'image'))
   assert.doesNotThrow(() => assertMediaModelExecutable('nano-banana-pro-4k', 'image'))
