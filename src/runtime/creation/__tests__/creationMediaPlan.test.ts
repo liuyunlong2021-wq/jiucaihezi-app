@@ -34,6 +34,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'gpt-image-2-低质量',
     'gpt-image-2-中质量',
     'gpt-image-2-vip',
+    'gpt-image-2-官方',
     'newapi/trump/seedance-2.0',
     'newapi/kik/doubao-seedance-2',
     'newapi/kik/doubao-seedance-2-0-fast-260128',
@@ -163,6 +164,7 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
     ['gpt-image-2-低质量', ['1k', '2k', '4k'], '0.1/张'],
     ['gpt-image-2-中质量', ['1k', '2k', '4k'], '0.15/张'],
     ['gpt-image-2-vip', ['1k', '2k', '4k'], '0.2/张'],
+    ['gpt-image-2-官方', ['1k', '2k', '4k'], '0.25/张'],
   ]) {
     const route = getCreationModelSpec(modelId)!
     assert.equal(route.model, modelId)

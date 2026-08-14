@@ -14,6 +14,7 @@ PUBLIC_MODELS = {
     "gpt-image-2-低质量",
     "gpt-image-2-中质量",
     "gpt-image-2-vip",
+    "gpt-image-2-官方",
     "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview",
 }
@@ -23,6 +24,7 @@ MODEL_MAP = {
     "gpt-image-2-低质量": "gpt-image-2",
     "gpt-image-2-中质量": "gpt-image-2",
     "gpt-image-2-vip": "gpt-image-2-vip",
+    "gpt-image-2-官方": "gpt-image-2",
     "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
 }

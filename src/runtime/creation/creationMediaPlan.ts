@@ -31,6 +31,7 @@ const GPT_IMAGE_2_ROUTE_MODELS = new Set([
   'gpt-image-2-低质量',
   'gpt-image-2-中质量',
   'gpt-image-2-vip',
+  'gpt-image-2-官方',
 ])
 
 export function validateCreationModelSpec(spec: CreationModelSpec): void {

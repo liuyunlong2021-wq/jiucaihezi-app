@@ -46,6 +46,15 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(completed.json()["status"], "completed")
         self.assertEqual(completed.json()["metadata"]["url"], "data:image/png;base64,aGVsbG8=")
 
+    async def test_maps_official_alias_to_upstream_gpt_image_2(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            json={"model": "gpt-image-2-官方", "prompt": "draw"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2")
+
     async def test_maps_failed_task(self):
         response = await self.client.get("/v1/videos/xiaoyi-task-failed", headers={"Authorization": "Bearer key"})
         self.assertEqual(response.json()["status"], "failed")

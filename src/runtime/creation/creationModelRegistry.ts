@@ -42,6 +42,7 @@ const GPT_IMAGE_2_ROUTES: Array<{
   { id: 'gpt-image-2-低质量', label: 'GPT Image 2 低质量', price: 0.1, resolutions: ['1k', '2k', '4k'] },
   { id: 'gpt-image-2-中质量', label: 'GPT Image 2 中质量', price: 0.15, resolutions: ['1k', '2k', '4k'] },
   { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', price: 0.2, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2-官方', label: 'GPT Image 2 官方', price: 0.25, resolutions: ['1k', '2k', '4k'] },
 ]
 const XIAOYI_GEMINI_FIELDS = promptFields([
   {

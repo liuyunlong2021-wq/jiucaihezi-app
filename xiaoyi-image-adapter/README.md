@@ -22,8 +22,8 @@ Keep the existing quality channels separate. For each Xiaoyi image channel:
 - keep only that channel's explicit model aliases; do not combine all quality tiers into one channel;
 - disable upstream model auto-sync/auto-add for these channels.
 
-The adapter accepts both the six public aliases and NewAPI's mapped canonical `gpt-image-2`, so existing model mappings may remain. The public aliases are:
+The adapter accepts both the seven public aliases and NewAPI's mapped canonical `gpt-image-2`, so existing model mappings may remain. The public aliases are:
 
 ```text
-gpt-image-2-1k,gpt-image-2-低质量,gpt-image-2-中质量,gpt-image-2-vip,gemini-3-pro-image-preview,gemini-3.1-flash-image-preview
+gpt-image-2-1k,gpt-image-2-低质量,gpt-image-2-中质量,gpt-image-2-vip,gpt-image-2-官方,gemini-3-pro-image-preview,gemini-3.1-flash-image-preview
 ```

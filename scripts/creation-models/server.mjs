@@ -20,6 +20,7 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'gpt-image-2-低质量', aliases: ['gpt-image-2-低质量'] },
   { id: 'gpt-image-2-中质量', aliases: ['gpt-image-2-中质量'] },
   { id: 'gpt-image-2-vip', aliases: ['gpt-image-2-vip'] },
+  { id: 'gpt-image-2-官方', aliases: ['gpt-image-2-官方'] },
   { id: 'gemini-3-pro-image-preview', aliases: ['gemini-3-pro-image-preview'] },
   { id: 'gemini-3.1-flash-image-preview', aliases: ['gemini-3.1-flash-image-preview'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },

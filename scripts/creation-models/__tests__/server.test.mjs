@@ -63,6 +63,7 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
     { id: 91, name: 'low', status: 1, baseUrl: 'x', models: ['gpt-image-2-低质量'] },
     { id: 92, name: 'medium', status: 1, baseUrl: 'x', models: ['gpt-image-2-中质量'] },
     { id: 115, name: 'vip', status: 1, baseUrl: 'x', models: ['gpt-image-2-vip'] },
+    { id: 116, name: 'official', status: 1, baseUrl: 'x', models: ['gpt-image-2-官方'] },
     { id: 16, name: 't8', status: 1, baseUrl: 'x', models: ['nano-banana-pro-4k'] },
     { id: 55, name: 'RH-图片', status: 1, baseUrl: 'x', models: ['rh-pro-image', 'rh-gpt2-text'] },
     { id: 56, name: 'RH-视频', status: 3, baseUrl: 'x', models: ['rh-grok-text-video'] },
@@ -75,6 +76,7 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
   assert.equal(byId['gpt-image-2-低质量'].status, 'enabled')
   assert.equal(byId['gpt-image-2-中质量'].status, 'enabled')
   assert.equal(byId['gpt-image-2-vip'].status, 'enabled')
+  assert.equal(byId['gpt-image-2-官方'].status, 'enabled')
   assert.equal(byId['nano-banana-4k'].status, 'enabled')
   assert.equal(byId['rh-pro-image'].status, 'enabled')
   assert.equal(byId['grok-video-3'].status, 'disabled')
@@ -93,6 +95,7 @@ test('buildCreationModelAvailability keeps GPT Image 2 route models isolated', (
   assert.equal(models.find(model => model.id === 'gpt-image-2-1k')?.status, 'disabled')
   assert.equal(models.find(model => model.id === 'gpt-image-2-中质量')?.status, 'disabled')
   assert.equal(models.find(model => model.id === 'gpt-image-2-vip')?.status, 'disabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2-官方')?.status, 'disabled')
 })
 
 test('buildCreationModelAvailability keeps channel 61 RH GPT Image 2 separate from direct GPT Image 2', () => {
