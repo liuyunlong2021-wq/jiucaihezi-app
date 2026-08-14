@@ -16,7 +16,7 @@ function makeFile(name: string, type: string): File {
 
 test('buildCurrentCreationParams keeps creation file objects so plan preview can materialize the same payload as submit', () => {
   switchTask('image')
-  switchModel('gpt-image-2')
+  switchModel('gpt-image-2-中质量')
   clearFiles()
 
   addFiles([makeFile('hero.png', 'image/png')])

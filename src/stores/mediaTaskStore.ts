@@ -558,7 +558,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             : task.type === 'model3d'
               ? ('model3d' as const)
             : ('image' as const)
-      const { blob, mimeType } = await fetchCreationMediaBlob(url, type)
+      const { blob, mimeType } = await fetchCreationMediaBlob(url, type, true)
       const projectPath = webCreationMediaProjectPath({
         type,
         prompt: task.prompt,

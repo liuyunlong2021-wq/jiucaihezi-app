@@ -146,17 +146,16 @@ function normalizeMediaPlan(plan: Record<string, unknown>): MediaPlan {
   const title = requiredText(plan.title, 'title')
   const prompt = requiredText(plan.prompt, 'prompt')
   const kind = plan.kind as MediaPlan['kind']
+  const resolution = optionalText(plan.resolution, 'resolution')
 
   return {
     kind,
     title,
     prompt,
-    modelId: resolveProductDefaultModelId({ kind }),
+    modelId: resolveProductDefaultModelId({ kind, resolution }),
     usesProductDefaultModel: true,
     ...(optionalText(plan.ratio, 'ratio') ? { ratio: optionalText(plan.ratio, 'ratio') } : {}),
-    ...(optionalText(plan.resolution, 'resolution')
-      ? { resolution: optionalText(plan.resolution, 'resolution') }
-      : {}),
+    ...(resolution ? { resolution } : {}),
     ...(plan.duration === undefined ? {} : { duration: numberOrText(plan.duration, 'duration') }),
     ...(plan.referenceIds === undefined
       ? {}
@@ -261,8 +260,8 @@ export function updateMediaPlanParameters(
   return next
 }
 
-export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
-  if (plan.kind === 'image') return 'gpt-image-2'
+export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'resolution' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
+  if (plan.kind === 'image') return plan.resolution && plan.resolution !== '1k' ? 'gpt-image-2-低质量' : 'gpt-image-2-1k'
   if (plan.kind === 'audio') return 'runninghub/api/rh-suno-v55-single'
 
   const imageCount = Math.max(
@@ -359,7 +358,10 @@ function assignDuration(
 function isCreationModelAvailable(modelId: string): boolean {
   const spec = getCreationModelSpec(modelId)
   if (!spec) return false
-  const availability = getMediaModelAvailability(spec.id) || getMediaModelAvailability(spec.model)
+  const availability =
+    getMediaModelAvailability(modelId) ||
+    getMediaModelAvailability(spec.id) ||
+    getMediaModelAvailability(spec.model)
   return availability?.status !== 'disabled'
 }
 

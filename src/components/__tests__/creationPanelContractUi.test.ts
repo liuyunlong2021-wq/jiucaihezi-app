@@ -60,14 +60,13 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
   assert.match(source, /UI\.one\(node(?: as any)?\)/)
   assert.match(source, /canvasRestoring/)
   assert.match(source, /flushQueuedCanvasMedia\(/)
-  assert.match(source, /定位当前画布/)
   assert.match(source, /新建画布/)
   assert.match(source, /placeholder="搜索画布"/)
   assert.match(source, /filteredCanvasFiles/)
   assert.match(source, /selectCanvasRecord\(file\)/)
   assert.match(source, /renameCanvasRecord\(file\)/)
   assert.match(source, /deleteCanvasRecord\(file\)/)
-  assert.match(source, /canvas:locate/)
+  assert.doesNotMatch(source, /canvas:locate|定位当前画布/)
   assert.match(source, /onCanvasPaste/)
   assert.match(source, /addCanvasFiles/)
   assert.doesNotMatch(source, /canvasEditOperation/)
@@ -485,7 +484,10 @@ test('creation panel persists direct Web and Desktop imports before adding them 
   assert.doesNotMatch(addFiles, /Web 端暂不支持直接拖入或粘贴媒体/)
   assert.match(addFiles, /writeProjectMedia/)
   assert.match(addFiles, /isTauriRuntime\(\) \? persisted\.filePath : persisted\.projectPath/)
-  assert.match(source, />添加参考素材</)
+  assert.match(source, /class="cp-add-reference"/)
+  assert.match(source, /aria-label="上传并选为参考素材"/)
+  assert.match(source, /width: 34px/)
+  assert.doesNotMatch(source, />添加参考素材</)
 })
 
 test('creation panel snapshots debounced saves and binds media work to its restore owner', () => {
@@ -756,7 +758,7 @@ test('creation panel releases lifecycle gates only after replacement canvases op
     )?.[0] || ''
   const deleted =
     source.match(
-      /const offCanvasDeleted = onEvent\('canvas:deleted',[\s\S]*?\n}\)\nconst offCanvasLocate/,
+      /const offCanvasDeleted = onEvent\('canvas:deleted',[\s\S]*?\n}\)\nconst offCanvasBeforeTaskWrite/,
     )?.[0] || ''
   const failure =
     source.match(

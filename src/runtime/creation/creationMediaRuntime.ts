@@ -205,6 +205,26 @@ async function executeDirectImageRequest(
 ): Promise<MediaResult> {
   const params = request.imageParams || {}
   const prompt = asString(params.prompt)
+  if (request.plan.apiStyle === 'xiaoyi-image-task') {
+    onProgress?.(0, '提交图片任务...')
+    const images = asStringArray(params.image)
+    const fields: Record<string, string | Blob | Blob[]> = {
+      model: request.plan.model,
+      prompt,
+      seconds: '1',
+      response_format: params.responseFormat || 'url',
+    }
+    if (params.size) fields.size = params.size
+    if (params.resolution) fields.resolution = params.resolution
+    if (images.length) fields.image = await Promise.all(images.map(imageReferenceToBlob))
+    const data = await apiCallMultipart('/v1/videos', fields)
+    const taskId = extractTaskId(data)
+    if (!taskId) throw new Error('图片任务未返回任务 ID')
+    const pollUrl = `/v1/videos/${encodeURIComponent(taskId)}`
+    await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
+    const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
+    return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
+  }
   if (request.plan.apiStyle === 'openai-image-edits') {
     onProgress?.(0, '上传图片中...')
     const images = asStringArray(params.image)

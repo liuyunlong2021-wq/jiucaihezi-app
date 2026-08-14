@@ -822,3 +822,10 @@
 - 根因是异步 `CreationPanel` 的 ref 已存在，但 `defineExpose` 方法尚未就绪；外层只保护 ref、不保护方法，类型又错误声明方法必定存在。
 - 最小修复将 ref 方法标为可选，并使用 `creationPanelRef.value?.flushCanvasSave?.()`；回归测试同时禁止不安全调用重新进入。
 - 相关测试 `92/92`、TypeScript、Desktop quick build 与产物审计通过；Web 连续开关 10 次无页面错误。完整 focused `1030/1031` 的唯一失败是两份既有 ComfyUI 测试未登记；真实 Desktop 安装包点击待发布后验收。详见 [[排障/创作面板异步保存方法缺失-2026-08-13]]。
+
+## [2026-08-14] 发布准备 | v2.1.22 与小易图片异步适配器
+
+- 版本统一为 `2.1.22`：`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 与 `Cargo.lock` 一致。
+- 新增独立 `xiaoyi-image-adapter`，六个 GPT Image 2 / Gemini 图片模型复用 NewAPI `/v1/videos` 异步任务系统，不修改 NewAPI 官方源码。
+- 修复图片任务默认 4 秒计费倍率、NewAPI 模型映射兼容、轮询瞬时错误终态化、旧 `gpt-image-2` 历史计划、Gemini 无效 4K/比例、Web 大 Base64 落盘及上传边界。
+- 适配器 7/7、前端 focused 1037/1037、Rust 396 项、TypeScript、Web 正式构建和产物审计通过；生产容器部署、NewAPI 渠道切换与真实付费生图待执行。详见 [[运维/小易图片异步适配与部署-2026-08-14]]。

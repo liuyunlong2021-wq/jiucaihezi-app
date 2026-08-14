@@ -184,7 +184,7 @@ test('removed media model matcher blocks stale upstream names before capability 
   assert.equal(isRemovedMediaModelId('nano-banana-4k'), false)
   assert.equal(isRemovedMediaModelId('nano-banana-pro-4k'), false)
   assert.equal(isRemovedMediaModelId('gpt-image-2'), false)
-  assert.equal(isRemovedMediaModelId('gpt-image-2-vip'), true)
+  assert.equal(isRemovedMediaModelId('gpt-image-2-vip'), false)
 })
 
 test('runtime model availability can disable an otherwise local enabled model', () => {

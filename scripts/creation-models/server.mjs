@@ -16,11 +16,12 @@ const PSQL_USER = process.env.NEWAPI_PSQL_USER || 'newapi'
 const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
-  { id: 'gpt-image-2', aliases: ['gpt-image-2'] },
+  { id: 'gpt-image-2-1k', aliases: ['gpt-image-2-1k'] },
+  { id: 'gpt-image-2-低质量', aliases: ['gpt-image-2-低质量'] },
+  { id: 'gpt-image-2-中质量', aliases: ['gpt-image-2-中质量'] },
   { id: 'gpt-image-2-vip', aliases: ['gpt-image-2-vip'] },
-  { id: '普gpt-image-2', aliases: ['gpt-image-2'] },
-  { id: '普gemini-3-pro-image-preview', aliases: ['gemini-3-pro-image-preview'] },
-  { id: '普gemini-3.1-flash-image-preview', aliases: ['gemini-3.1-flash-image-preview'] },
+  { id: 'gemini-3-pro-image-preview', aliases: ['gemini-3-pro-image-preview'] },
+  { id: 'gemini-3.1-flash-image-preview', aliases: ['gemini-3.1-flash-image-preview'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },
   { id: 'veo-3.1-fast-generate-preview', aliases: ['veo-3.1-fast-generate-preview'] },
   { id: 'nano-banana-4k', aliases: ['nano-banana-4k', 'nano-banana-pro-4k'] },

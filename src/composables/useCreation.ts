@@ -274,11 +274,12 @@ function normalizeSavedTask(task: unknown): CreationTask {
 
 function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   const key = String(modelKey || '')
+  if (key === 'gpt-image-2' && task === 'image') return 'gpt-image-2-1k'
   const directSpec = getCreationModelSpec(key)
   if (directSpec?.task === task) return directSpec.id
   const migratedSpec = CREATION_MODEL_REGISTRY.find(spec => spec.model === key || spec.aliases?.includes(key))
   if (migratedSpec?.task === task) return migratedSpec.id
-  return getModelsForTask(task)[0] || 'gpt-image-2'
+  return getModelsForTask(task)[0] || 'gpt-image-2-1k'
 }
 
 function normalizeSavedFieldValues(value: unknown): Record<string, string | number | boolean> {
@@ -586,7 +587,7 @@ export function switchTask(task: CreationTask) {
   cpState.task = normalizeSavedTask(task)
   const models = availableModels.value
   if (!models.includes(cpState.modelKey)) {
-    cpState.modelKey = models[0] || 'gpt-image-2'
+    cpState.modelKey = models[0] || 'gpt-image-2-1k'
   }
   syncParams()
   saveCpState()
@@ -708,7 +709,7 @@ export async function refreshCreationModelAvailability(): Promise<void> {
     const availability = await fetchCreationModelAvailability()
     setMediaModelAvailability(availability)
     if (!availableModels.value.includes(cpState.modelKey)) {
-      cpState.modelKey = availableModels.value[0] || 'gpt-image-2'
+      cpState.modelKey = availableModels.value[0] || 'gpt-image-2-1k'
       syncParams()
       saveCpState()
     }

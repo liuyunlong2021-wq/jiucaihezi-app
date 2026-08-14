@@ -37,7 +37,7 @@ test('media plan parser accepts one fenced image plan', () => {
     kind: 'image',
     title: '精华液主图',
     prompt: '白色台面上的精华液产品摄影',
-    modelId: 'gpt-image-2',
+    modelId: 'gpt-image-2-低质量',
     usesProductDefaultModel: true,
     ratio: '1:1',
     resolution: '2k',
@@ -104,7 +104,7 @@ test('model-free plans use the product defaults for images and text-to-video', (
     kind: 'video', title: '品牌短片', prompt: '镜头缓慢推进',
   }) + '\n```')
 
-  assert.equal(image.modelId, 'gpt-image-2')
+  assert.equal(image.modelId, 'gpt-image-2-1k')
   assert.equal(video.modelId, 'runninghub/api/rh-seedance2-text')
 })
 
@@ -262,7 +262,7 @@ test('media plan editor uses compatible registry models and normalizes changed m
   }
 
   const controls = getMediaPlanEditorControls(plan)
-  assert.equal(controls.models.some(model => model.value === 'gpt-image-2'), true)
+  assert.equal(controls.models.some(model => model.value === 'gpt-image-2-低质量'), true)
 
   const updated = updateMediaPlanParameters(plan, {
     ratio: '100:1',

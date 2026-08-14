@@ -2115,10 +2115,6 @@ const offCanvasDeleted = onEvent('canvas:deleted', (payload: any) => {
     }
   })()
 })
-const offCanvasLocate = onEvent('canvas:locate', () =>
-  emitEvent('project-filetree:locate', { path: canvasStore.canvasPath }),
-)
-
 const offCanvasBeforeTaskWrite = onEvent('canvas:before-task-write', async (payload: any) => {
   const target = payload?.target
   const owner = String(payload?.owner || '')
@@ -3206,7 +3202,6 @@ onBeforeUnmount(() => {
   offCanvasOpen()
   offCanvasRenamed()
   offCanvasDeleted()
-  offCanvasLocate()
   offCanvasBeforeTaskWrite()
   offCanvasTaskResult()
   offDesktopProjectDrop()
@@ -3359,9 +3354,6 @@ const canSend = computed(
         <JcIcon name="add" /><span>新建画布</span>
       </button>
       <span class="cp-toolbar-spacer" />
-      <button class="cp-toolbar-link cp-toolbar-icon" title="定位当前画布" @click="emitEvent('canvas:locate')">
-        <JcIcon name="folder-open" />
-      </button>
       <button class="cp-toolbar-link cp-toolbar-icon" @click="openTaskHistory" title="查看生成历史">
         <JcIcon name="history" />
       </button>
@@ -4236,10 +4228,10 @@ const canSend = computed(
           type="button"
           class="cp-add-reference"
           title="上传并选为参考素材"
+          aria-label="上传并选为参考素材"
           @click="canvasImportInput?.click()"
         >
           <JcIcon name="attach-file" />
-          <span>添加参考素材</span>
         </button>
         <div class="cp-prompt-wrap">
           <!-- 模型专属参数 -->
@@ -5207,18 +5199,17 @@ const canSend = computed(
   gap: 8px;
 }
 .cp-add-reference {
-  display: inline-flex;
-  min-height: 42px;
-  align-items: center;
-  gap: 5px;
-  padding: 0 9px;
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  padding: 0;
+  place-items: center;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--paper);
   color: var(--ink2);
   cursor: pointer;
-  font: inherit;
-  font-size: 11px;
 }
 .cp-add-reference:hover { border-color: var(--olive); color: var(--olive-dark); }
 /* ── 参考素材添加行 ── */

@@ -29,9 +29,9 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapter fields', () => {
+test('P3 direct GPT Image 2 runtime uses the Xiaoyi async task contract', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'gpt-image-2',
+    modelId: 'gpt-image-2-中质量',
     params: {
       prompt: '一张产品主图',
       ratio: '16:9',
@@ -44,33 +44,40 @@ test('P3 direct GPT Image 2 runtime uses RunPlan size contract without RH adapte
 
   assert.equal(request.runtime, 'newapi-direct')
   assert.equal(request.taskType, 'image')
-  assert.equal(request.endpoint, '/v1/images/edits')
+  assert.equal(request.endpoint, '/v1/videos')
   assert.equal(request.pollKind, 'newapi-task')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
   assert.equal(request.imageParams?.responseFormat, 'b64_json')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
-  assert.equal((request.imageParams as any)?.resolution, undefined)
+  assert.equal((request.imageParams as any)?.resolution, '2k')
 })
 
-test('direct GPT Image 2 edit submits selected canvas images as multipart files', { concurrency: false }, async () => {
+test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    assert.match(String(input), /\/v1\/images\/edits$/)
-    assert.equal(init?.body instanceof FormData, true)
-    const body = init?.body as FormData
-    assert.equal(body.get('model'), 'gpt-image-2')
-    assert.equal(body.get('prompt'), '把手表改成黄色')
-    assert.equal(body.get('size'), '2048x1152')
-    assert.equal(body.get('image') instanceof Blob, true)
-    return Response.json({ data: [{ b64_json: 'aGVsbG8=' }] })
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      assert.equal(init.body instanceof FormData, true)
+      const body = init.body as FormData
+      assert.equal(body.get('model'), 'gpt-image-2-中质量')
+      assert.equal(body.get('prompt'), '把手表改成黄色')
+      assert.equal(body.get('size'), '2048x1152')
+      assert.equal(body.get('seconds'), '1')
+      assert.equal(body.get('image') instanceof Blob, true)
+      return Response.json({ id: 'task_xiaoyi_gpt', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_xiaoyi_gpt')) {
+      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
   }
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'gpt-image-2',
+      modelId: 'gpt-image-2-中质量',
       params: {
         prompt: '把手表改成黄色',
         ratio: '16:9',
@@ -78,8 +85,42 @@ test('direct GPT Image 2 edit submits selected canvas images as multipart files'
         images: ['data:image/png;base64,aGVsbG8='],
       },
     })
-    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
-    assert.equal(result.url, 'data:image/png;base64,aGVsbG8=')
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://cdn.example.test/gpt.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('Gemini image submits the Xiaoyi async task with its resolution', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = init.body as FormData
+      assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
+      assert.equal(body.get('size'), 'auto')
+      assert.equal(body.get('resolution'), '2k')
+      assert.equal(body.get('seconds'), '1')
+      return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_xiaoyi_gemini')) {
+      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gemini.png' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'gemini-3-pro-image-preview',
+      params: { prompt: '一张产品图', resolution: '2k' },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.type, 'image')
+    assert.equal(result.url, 'https://cdn.example.test/gemini.png')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

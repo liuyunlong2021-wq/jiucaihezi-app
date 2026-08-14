@@ -193,8 +193,9 @@ async function fetchMediaAsDataUrl(
 export async function fetchCreationMediaBlob(
   url: string,
   type: CreationMediaType,
+  allowLargeDataUrl = false,
 ): Promise<{ blob: Blob; mimeType: string }> {
-  if (!isAllowedCreationResultUrl(url)) throw new Error('媒体地址不安全，已阻止缓存')
+  if (!isAllowedCreationResultUrl(url, allowLargeDataUrl)) throw new Error('媒体地址不安全，已阻止缓存')
 
   debugMediaDownloadPath('browser', url)
   const headers = creationResultRequestHeaders(url)

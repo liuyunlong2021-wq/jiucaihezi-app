@@ -70,6 +70,25 @@ test('Web creation media helpers preserve response MIME when building a determin
   }
 })
 
+test('Web creation media accepts large trusted data URLs only when explicitly allowed', { concurrency: false }, async () => {
+  const previousFetch = globalThis.fetch
+  const dataUrl = `data:image/png;base64,${'A'.repeat(12 * 1024 * 1024)}`
+  let calls = 0
+  globalThis.fetch = async () => {
+    calls += 1
+    return new Response(new Blob(['png'], { type: 'image/png' }), { status: 200 })
+  }
+
+  try {
+    await assert.rejects(() => creationMediaCache.fetchCreationMediaBlob(dataUrl, 'image'), /媒体地址不安全/)
+    const result = await creationMediaCache.fetchCreationMediaBlob(dataUrl, 'image', true)
+    assert.equal(result.mimeType, 'image/png')
+    assert.equal(calls, 1)
+  } finally {
+    globalThis.fetch = previousFetch
+  }
+})
+
 test('3D creation results keep their model file extension in the project', () => {
   const path = creationMediaCache.webCreationMediaProjectPath({
     type: 'model3d',

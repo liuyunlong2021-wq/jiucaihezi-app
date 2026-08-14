@@ -59,7 +59,10 @@ test('parseChannelRows reads NewAPI channel rows', () => {
 
 test('buildCreationModelAvailability marks configured status from NewAPI channels', () => {
   const models = buildCreationModelAvailability([
-    { id: 14, name: 'official', status: 1, baseUrl: 'x', models: ['gpt-image-2'] },
+    { id: 88, name: '1k', status: 1, baseUrl: 'x', models: ['gpt-image-2-1k'] },
+    { id: 91, name: 'low', status: 1, baseUrl: 'x', models: ['gpt-image-2-低质量'] },
+    { id: 92, name: 'medium', status: 1, baseUrl: 'x', models: ['gpt-image-2-中质量'] },
+    { id: 115, name: 'vip', status: 1, baseUrl: 'x', models: ['gpt-image-2-vip'] },
     { id: 16, name: 't8', status: 1, baseUrl: 'x', models: ['nano-banana-pro-4k'] },
     { id: 55, name: 'RH-图片', status: 1, baseUrl: 'x', models: ['rh-pro-image', 'rh-gpt2-text'] },
     { id: 56, name: 'RH-视频', status: 3, baseUrl: 'x', models: ['rh-grok-text-video'] },
@@ -68,8 +71,10 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
 
   const byId = Object.fromEntries(models.map(model => [model.id, model]))
 
-  assert.equal(byId['gpt-image-2'].status, 'enabled')
-  assert.equal(byId['gpt-image-2-vip'].status, 'disabled')
+  assert.equal(byId['gpt-image-2-1k'].status, 'enabled')
+  assert.equal(byId['gpt-image-2-低质量'].status, 'enabled')
+  assert.equal(byId['gpt-image-2-中质量'].status, 'enabled')
+  assert.equal(byId['gpt-image-2-vip'].status, 'enabled')
   assert.equal(byId['nano-banana-4k'].status, 'enabled')
   assert.equal(byId['rh-pro-image'].status, 'enabled')
   assert.equal(byId['grok-video-3'].status, 'disabled')
@@ -79,12 +84,15 @@ test('buildCreationModelAvailability marks configured status from NewAPI channel
   assert.equal(byId['seed-audio-1.0'].status, 'enabled')
 })
 
-test('buildCreationModelAvailability detects GPT Image 2 VIP channels', () => {
+test('buildCreationModelAvailability keeps GPT Image 2 route models isolated', () => {
   const models = buildCreationModelAvailability([
-    { id: 91, name: 'vip', status: 1, baseUrl: 'x', models: ['gpt-image-2-vip'] },
+    { id: 91, name: 'low', status: 1, baseUrl: 'x', models: ['gpt-image-2-低质量'] },
   ])
 
-  assert.equal(models.find(model => model.id === 'gpt-image-2-vip')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2-低质量')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2-1k')?.status, 'disabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2-中质量')?.status, 'disabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2-vip')?.status, 'disabled')
 })
 
 test('buildCreationModelAvailability keeps channel 61 RH GPT Image 2 separate from direct GPT Image 2', () => {
@@ -93,7 +101,7 @@ test('buildCreationModelAvailability keeps channel 61 RH GPT Image 2 separate fr
   ])
 
   assert.equal(models.find(model => model.id === 'rh-gpt2-official')?.status, 'enabled')
-  assert.equal(models.find(model => model.id === 'gpt-image-2')?.status, 'disabled')
+  assert.equal(models.find(model => model.id === 'gpt-image-2-1k')?.status, 'disabled')
 })
 
 test('buildCreationModelAvailability detects channel 94 Gemini image models', () => {
@@ -101,8 +109,8 @@ test('buildCreationModelAvailability detects channel 94 Gemini image models', ()
     { id: 94, name: 'Gemini image', status: 1, baseUrl: 'x', models: ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview'] },
   ])
 
-  assert.equal(models.find(model => model.id === '普gemini-3-pro-image-preview')?.status, 'enabled')
-  assert.equal(models.find(model => model.id === '普gemini-3.1-flash-image-preview')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'gemini-3-pro-image-preview')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'gemini-3.1-flash-image-preview')?.status, 'enabled')
 })
 
 test('buildCreationModelAvailability detects channel 82 Veo video models', () => {

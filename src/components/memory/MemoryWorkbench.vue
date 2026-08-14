@@ -167,15 +167,17 @@ let projectMapSaveQueue = Promise.resolve()
 const MEMORY_TREE_WIDTH = 280
 const MEMORY_CHAT_MIN = 420
 const MEMORY_CREATION_MIN = 520
+const MEMORY_CREATION_SPLIT_MIN = MEMORY_CHAT_MIN + MEMORY_CREATION_MIN
 
 function clampCreationWidth(width: number): number {
   const treeWidth = treeOpen.value ? MEMORY_TREE_WIDTH : 0
-  const max = Math.max(MEMORY_CREATION_MIN, window.innerWidth - treeWidth - MEMORY_CHAT_MIN)
-  return Math.max(MEMORY_CREATION_MIN, Math.min(max, width))
+  const available = window.innerWidth - treeWidth
+  const max = Math.min(available - MEMORY_CHAT_MIN, Math.floor(available * 0.5))
+  return Math.max(MEMORY_CREATION_MIN, Math.min(Math.max(MEMORY_CREATION_MIN, max), width))
 }
 
 function prepareCreationLayout() {
-  if (window.innerWidth <= 760) return
+  if (window.innerWidth < MEMORY_CREATION_SPLIT_MIN) return
   if (treeOpen.value && window.innerWidth - MEMORY_TREE_WIDTH < MEMORY_CHAT_MIN + MEMORY_CREATION_MIN)
     treeOpen.value = false
   const available = window.innerWidth - (treeOpen.value ? MEMORY_TREE_WIDTH : 0)
@@ -236,7 +238,7 @@ function stopCreationResize() {
 }
 
 function startCreationResize(event: PointerEvent) {
-  if (creationFocused.value || window.innerWidth <= 760) return
+  if (creationFocused.value || window.innerWidth < MEMORY_CREATION_SPLIT_MIN) return
   creationResizeStartX = event.clientX
   creationResizeStartWidth = creationWidth.value
   creationResizing.value = true
@@ -249,8 +251,8 @@ function startCreationResize(event: PointerEvent) {
 }
 
 function resizeCreationForWindow() {
-  if (creationOpen.value && window.innerWidth > 760)
-    creationWidth.value = clampCreationWidth(creationWidth.value)
+  if (!creationOpen.value) return
+  prepareCreationLayout()
 }
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
@@ -2070,12 +2072,14 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
 .memory-workbench.creation-open { grid-template-columns: 280px minmax(420px, 1fr) var(--memory-creation-width); }
 .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(420px, 1fr) var(--memory-creation-width); }
+.memory-workbench.creation-open .memory-title-drag { min-width: 0; }
+.memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: min(220px, 30%); }
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
 .memory-workbench.desktop-runtime.creation-focused { padding-top: 28px; }
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
 .memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
-.memory-main { position: relative; display: grid; grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -2148,7 +2152,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-scene-card small { color: var(--ink3); font-size: 11px; }
 .memory-scene-card em { flex: 0 0 auto; color: #398362; font-size: 12px; font-style: normal; }
 .memory-message.streaming { opacity: .85; }
-.memory-composer { width: min(860px, calc(100% - 28px)); margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
+.memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
 .memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }
 .memory-mode-segment { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-mode-segment button { height: 24px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--ink3); cursor: pointer; font: inherit; font-size: 12px; }
@@ -2224,6 +2228,15 @@ function readDataUrl(file: File): Promise<string> {
 .memory-settings-drawer > :last-child { height: calc(100% - 52px); }
 .memory-settings-backdrop, .memory-tree-backdrop { position: fixed; z-index: 35; inset: 0; border: 0; background: rgb(0 0 0 / 28%); }
 .mobile-only, .memory-tree-backdrop { display: none; }
+@media (max-width: 939px) {
+  .memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr); }
+  .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
+  .memory-creation { position: fixed; z-index: 45; inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
+  .memory-creation-resizer { display: none; }
+}
+@media (min-width: 761px) and (max-width: 939px) {
+  .memory-workbench.desktop-runtime .memory-creation { top: 28px; height: calc(100dvh - 28px); }
+}
 @media (max-width: 760px) {
   .memory-workbench, .memory-workbench.desktop-runtime { display: block; height: 100dvh; padding-top: env(safe-area-inset-top, 0); box-sizing: border-box; }
   .memory-main { height: 100%; }
@@ -2242,6 +2255,5 @@ function readDataUrl(file: File): Promise<string> {
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }
   .memory-mobile-creation { display: grid; }
   .memory-settings-drawer { top: env(safe-area-inset-top, 0); right: 0; bottom: 0; left: 0; width: auto; border-left: 0; }
-  .memory-creation { position: fixed; z-index: 45; inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
 }
 </style>
