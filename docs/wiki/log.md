@@ -842,4 +842,10 @@
 
 - 此前长时间等待的三参考图任务最终成功，并由 App 保存到项目，确认 App、NewAPI、适配器、小易异步编辑、轮询和项目落盘主链正常。
 - `No available 1K/2K image accounts` 与 `fetch failed` 更新为小易上游间歇性可用性问题，不再表述为对应分辨率永久不可用。
-- 新增 `gpt-image-2-官方` 前端路由、NewAPI 可用性识别和适配器映射，上游真实模型仍为 `gpt-image-2`；单价为 `0.25/张`，该新渠道尚未重部署和真实生成验收。
+- 新增 `gpt-image-2-官方` 前端路由、NewAPI 可用性识别和适配器映射，上游真实模型仍为 `gpt-image-2`；单价为 `0.25/张`，待生产部署与真实生成验收。
+
+## [2026-08-14] 生产验收 | 小易 GPT Image 2 官方渠道
+
+- 生产 `xiaoyi-image-adapter` 已重建，健康检查列出 `gpt-image-2-官方`；`creation-models` 已重启并处于 `active`。
+- App 内 `gpt-image-2-官方` 已真实生成并保存结果，确认前端、NewAPI、适配器、小易异步链路与回收落盘可用。
+- 首次提交的 `model_price_error` 是 NewAPI 管理端尚未配置模型价格；设置 `0.25/张` 后成功。该错误优先检查 NewAPI 价格配置，不归类为上游账号池或适配器故障。
