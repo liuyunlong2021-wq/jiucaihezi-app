@@ -849,3 +849,9 @@
 - 生产 `xiaoyi-image-adapter` 已重建，健康检查列出 `gpt-image-2-官方`；`creation-models` 已重启并处于 `active`。
 - App 内 `gpt-image-2-官方` 已真实生成并保存结果，确认前端、NewAPI、适配器、小易异步链路与回收落盘可用。
 - 首次提交的 `model_price_error` 是 NewAPI 管理端尚未配置模型价格；设置 `0.25/张` 后成功。该错误优先检查 NewAPI 价格配置，不归类为上游账号池或适配器故障。
+
+## [2026-08-14] 修复待部署 | 小易完成态超大载荷
+
+- 生产排查确认：小易上游已完成、适配器查询返回 `completed`，NewAPI `tasks` 中对应渠道任务均为 `SUCCESS`；不是上游轮询卡死。
+- 根因是小易适配器透传 `response_format=b64_json`，使 NewAPI 任务查询携带整张生成图片；Desktop 任务卡不能稳定接收该超大完成响应，仍显示 `processing`。
+- 适配器移除该透传，使用 URL 结果，客户端继续立即下载并写入项目。适配器单测 `8/8` 和前端 focused 测试通过；新版尚未部署，生产验收待一次真实图片任务完成与落盘。

@@ -42,6 +42,7 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requests[0].url.path, "/v1/images/edits/async")
         self.assertEqual(self.requests[0].headers["authorization"], "Bearer secret-key")
         self.assertIn('name="model"\r\n\r\ngpt-image-2\r\n', self.requests[0].content.decode())
+        self.assertNotIn('name="response_format"', self.requests[0].content.decode())
         completed = await self.client.get("/v1/videos/xiaoyi-task-1", headers=headers)
         self.assertEqual(completed.json()["status"], "completed")
         self.assertEqual(completed.json()["metadata"]["url"], "data:image/png;base64,aGVsbG8=")

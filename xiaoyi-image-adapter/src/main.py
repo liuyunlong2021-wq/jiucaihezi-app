@@ -162,8 +162,8 @@ async def request_fields(request: Request) -> tuple[dict[str, str], list[tuple[s
 
 def upstream_payload(model: str, fields: dict[str, str]) -> dict[str, str]:
     payload = {"model": MODEL_MAP[model], "prompt": fields["prompt"]}
-    if fields.get("response_format"):
-        payload["response_format"] = fields["response_format"]
+    # Task polling must carry only a short result URL. Forwarding b64_json
+    # makes every NewAPI status response as large as the generated image.
     if model.startswith("gemini-"):
         if fields.get("size") and fields["size"] != "auto":
             payload["size"] = fields["size"]
