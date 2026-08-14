@@ -203,7 +203,7 @@ test('canvas media nodes are draggable and selected canvas references drive the 
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /new Group\(\{[\s\S]{0,80}id,[\s\S]{0,80}editable: true,[\s\S]{0,80}draggable: true/)
-  assert.match(source, /new Image\(\{[\s\S]{0,80}id: layer\.id,[\s\S]{0,80}url,[\s\S]{0,80}editable: true,[\s\S]{0,80}draggable: true/)
+  assert.match(source, /function createCanvasImageNode\([\s\S]{0,320}new Group\(\{[\s\S]{0,80}id,[\s\S]{0,80}editable: true,[\s\S]{0,80}draggable: true/)
   assert.match(source, /function addMediaToCanvas[\s\S]*?canvasTool\('select'\)/)
   assert.match(source, /const canvasReferenceRunPlan = computed/)
   assert.match(source, /params: buildCurrentCreationParams\(\{ images, videos, audios \}\)/)
@@ -221,13 +221,23 @@ test('selected canvas audio is submitted as a Seed Audio reference', () => {
   assert.match(source, /catch \(error\) \{\s+if \(maxBytes\) throw error/)
 })
 
-test('canvas text and number markers use Leafer page coordinates', () => {
+test('canvas annotations are local to the selected image and export only that image', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /const onTextDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
-  assert.match(source, /x: point\.x,[\s\S]{0,40}y: point\.y/)
-  assert.match(source, /const onNumberDown = \(e: any\) => \{\s+const point = e\.getPagePoint\(\)/)
-  assert.match(source, /x: point\.x - 14,[\s\S]{0,40}y: point\.y - 14/)
+  assert.match(source, /function createCanvasImageNode[\s\S]*?hitChildren: false/)
+  assert.match(source, /const pointInImage = \(event: any\) => \{\s+const point = event\.getLocalPoint\(imageNode\)/)
+  assert.match(source, /new Pen\(\{ id: crypto\.randomUUID\(\), assetId, editable: true \}\)/)
+  assert.match(source, /new Arrow\(\{[\s\S]{0,80}assetId,/)
+  assert.match(source, /new LeaferText\(\{[\s\S]{0,80}assetId,/)
+  assert.match(source, /new Group\(\{[\s\S]{0,80}assetId,/)
+  assert.match(source, /imageNode\.add\(pen\)/)
+  assert.match(source, /imageNode\.add\(drawing\)/)
+  assert.match(source, /imageNode\.add\(text\)/)
+  assert.match(source, /imageNode\.add\(marker\)/)
+  assert.match(source, /function getCanvasImageSubmissionUrl[\s\S]*?hasCanvasImageAnnotations[\s\S]*?const composite = node\.clone\(\)[\s\S]*?composite\.export\('png'/)
+  assert.match(source, /clip: \{ x: 0, y: 0, width: Number\(image\.width\), height: Number\(image\.height\) \}/)
+  assert.match(source, /size: naturalSize/)
+  assert.match(source, /asset\.kind === 'image'\s+\? await getCanvasImageSubmissionUrl\(node, asset\.id, mediaPath, owner\)/)
 })
 
 test('canvas pen offers five visual stroke widths and uses the selected width', () => {

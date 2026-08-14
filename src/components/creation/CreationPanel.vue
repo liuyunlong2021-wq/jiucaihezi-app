@@ -589,14 +589,17 @@ async function runCreationViaTaskStore() {
         return
       }
       const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
-      for (const { asset } of assets) {
+      for (const { node, asset } of assets) {
         if (!modalities.includes(asset.kind)) continue
         const mediaPath = asset.resource.path
-        const url = await getMediaSubmissionUrl(
-          isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath,
-          owner,
-          asset.kind === 'audio' ? SEED_AUDIO_MAX_REFERENCE_BYTES : undefined,
-        )
+        const url =
+          asset.kind === 'image'
+            ? await getCanvasImageSubmissionUrl(node, asset.id, mediaPath, owner)
+            : await getMediaSubmissionUrl(
+                isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath,
+                owner,
+                asset.kind === 'audio' ? SEED_AUDIO_MAX_REFERENCE_BYTES : undefined,
+              )
         if (asset.kind === 'audio') refAudios.push(url)
         else if (asset.kind === 'video') refVideos.push(url)
         else refImages.push(url)
@@ -1020,6 +1023,64 @@ async function getMediaSubmissionUrl(filePath: string, owner: string, maxBytes?:
   return getMediaRuntimeUrl(filePath, owner)
 }
 
+function getCanvasImageContent(node: any): Image | undefined {
+  if (node?.tag === 'Image') return node as Image
+  return node?.children?.find((child: any) => child.name === 'canvas-image') as Image | undefined
+}
+
+function hasCanvasImageAnnotations(node: any, assetId: string): boolean {
+  return Boolean(node?.children?.some((child: any) => child.assetId === assetId))
+}
+
+function getImageSize(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve, reject) => {
+    const image = new window.Image()
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight })
+    image.onerror = () => reject(new Error('无法读取参考图尺寸'))
+    image.src = src
+  })
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result || ''))
+    reader.onerror = () => reject(reader.error || new Error('标注图片导出失败'))
+    reader.readAsDataURL(blob)
+  })
+}
+
+async function getCanvasImageSubmissionUrl(
+  node: any,
+  assetId: string,
+  mediaPath: string,
+  owner: string,
+): Promise<string> {
+  const filePath = isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath
+  const original = await getMediaSubmissionUrl(filePath, owner)
+  const image = getCanvasImageContent(node)
+  if (!image || !hasCanvasImageAnnotations(node, assetId)) return original
+
+  const naturalSize = await getImageSize(original)
+  const composite = node.clone()
+  const compositeImage = getCanvasImageContent(composite)!
+  compositeImage.set({ stroke: '', strokeWidth: 0 })
+  try {
+    const exported = await composite.export('png', {
+      blob: true,
+      clip: { x: 0, y: 0, width: Number(image.width), height: Number(image.height) },
+      size: naturalSize,
+      fill: '#fff',
+    })
+    if (exported.error || !(exported.data instanceof Blob)) {
+      throw exported.error || new Error('标注图片导出失败')
+    }
+    return blobToDataUrl(exported.data)
+  } finally {
+    composite.destroy()
+  }
+}
+
 interface CanvasMediaRequest {
   filePath: string
   kind: CanvasMediaKind
@@ -1168,6 +1229,56 @@ function selectCanvasReferences(nodes: any[]) {
   syncSelectedReferences()
 }
 
+function createCanvasImageNode(id: string, url: string, x: number, y: number, width: number, height: number) {
+  const image = new Image({
+    name: 'canvas-image',
+    url,
+    width,
+    height,
+    stroke: getCanvasFrame(),
+    strokeWidth: 1,
+    cornerRadius: 6,
+  })
+  const group = new Group({
+    id,
+    x,
+    y,
+    editable: true,
+    draggable: true,
+    hitChildren: false,
+  })
+  group.add(image)
+  return group
+}
+
+function selectedCanvasImageNode(): Group | undefined {
+  const selected = (app?.editor?.list || []) as any[]
+  if (selected.length !== 1 || canvasStore.assets[String(selected[0].id)]?.kind !== 'image') return
+  const node = selected[0]
+  if (node.tag === 'Group' && getCanvasImageContent(node)) return node as Group
+  if (node.tag !== 'Image') return
+
+  const group = createCanvasImageNode(
+    String(node.id),
+    String(node.url || ''),
+    Number(node.x || 0),
+    Number(node.y || 0),
+    Number(node.width || 0),
+    Number(node.height || 0),
+  )
+  group.set({
+    rotation: Number(node.rotation || 0),
+    scaleX: Number(node.scaleX || 1),
+    scaleY: Number(node.scaleY || 1),
+    skewX: Number(node.skewX || 0),
+    skewY: Number(node.skewY || 0),
+  })
+  node.remove()
+  app!.tree.add(group)
+  app!.editor?.select(group)
+  return group
+}
+
 function scheduleInitialCanvasFit(canContinue: CanvasLoadGuard = () => true) {
   window.setTimeout(() => {
     if (canContinue()) canvasTool('fit')
@@ -1273,26 +1384,15 @@ async function addMediaToCanvas(
       isCurrentCanvasMediaRequest(request),
     )
   } else {
-    const img = new Image({
-      id: layer.id,
-      url,
-      editable: true,
-      draggable: true,
-      x: layer.x,
-      y: layer.y,
-      width: size.width,
-      height: size.height,
-      stroke: getCanvasFrame(),
-      strokeWidth: 1,
-      cornerRadius: 6,
-    })
+    const imageNode = createCanvasImageNode(layer.id, url, layer.x, layer.y, size.width, size.height)
+    const img = getCanvasImageContent(imageNode)!
     img.once('error', () => {
       releaseCanvasAssetRuntimeUrl(layer.id)
       console.warn('[canvas] image load failed:', url.slice(0, 60))
-      img.remove()
+      imageNode.remove()
     })
-    app.tree.add(img)
-    selectCanvasReferences([img])
+    app.tree.add(imageNode)
+    selectCanvasReferences([imageNode])
   }
   saveCanvasHistory()
   if (shouldFit) scheduleInitialCanvasFit(() => isCurrentCanvasMediaRequest(request))
@@ -1737,11 +1837,15 @@ async function restoreCanvasScene(
     // ponytail: old canvas files omitted these defaults, creating untouchable media nodes after restore.
     if (asset && !(restored as any).locked)
       (restored as any).set({ editable: true, draggable: true })
-    if (asset)
-      (restored as any).url = await getMediaRuntimeUrl(
+    if (asset) {
+      const image = getCanvasImageContent(restored)
+      const url = await getMediaRuntimeUrl(
         isTauriRuntime() ? `${projectDir}/${asset.resource.path}` : asset.resource.path,
         owner,
       )
+      if (image) image.url = url
+      else (restored as any).url = url
+    }
     if (!app || !canContinue()) return
     app.tree.add(restored)
   }
@@ -2711,7 +2815,6 @@ function setCanvasViewportScale(scale: number, focus?: { x: number; y: number })
 
 function arrangeCanvasMedia() {
   if (!app) return
-  // ponytail: annotations have no owning media id, so keep their coordinates instead of guessing a target.
   const media = app.tree.children.filter(child =>
     Boolean(canvasStore.assets[String(child.id)]),
   ) as any[]
@@ -2820,6 +2923,24 @@ function canvasTool(action: string) {
       activeDrawType.value = drawMode.value ? drawType.value : null
       if (!drawMode.value) break
 
+      const imageNode = selectedCanvasImageNode()
+      if (!imageNode) {
+        drawMode.value = false
+        activeDrawType.value = null
+        cpState.progressText = '请先选中一张图片后标注'
+        break
+      }
+      const assetId = String(imageNode.id)
+      const image = getCanvasImageContent(imageNode)!
+      const imageWidth = Number(image.width || 0)
+      const imageHeight = Number(image.height || 0)
+      const pointInImage = (event: any) => {
+        const point = event.getLocalPoint(imageNode)
+        return point.x >= 0 && point.x <= imageWidth && point.y >= 0 && point.y <= imageHeight
+          ? point
+          : undefined
+      }
+
       // 文字用 PointerEvent.DOWN：拖动事件会等待移动阈值，不能用于即时输入。
       app.mode = 'draw'
       const isText = drawType.value === 'text'
@@ -2827,52 +2948,59 @@ function canvasTool(action: string) {
       const isNumber = drawType.value === 'number'
       let drawing: any = null
       let pen: Pen | null = null
+      let startPoint: { x: number; y: number } | undefined
 
       const onStart = (e: any) => {
+        const point = pointInImage(e)
+        if (!point) return
         if (isPen) {
-          const point = e.getPagePoint()
-          pen = new Pen({ id: crypto.randomUUID(), editable: true }).setStyle({
+          pen = new Pen({ id: crypto.randomUUID(), assetId, editable: true }).setStyle({
             stroke: '#333',
             strokeWidth: penWidth.value,
             strokeCap: 'round',
             strokeJoin: 'round',
           })
           pen.moveTo(point.x, point.y)
-          app!.tree.add(pen)
+          imageNode.add(pen)
         } else {
+          startPoint = point
           drawing = new Arrow({
             id: crypto.randomUUID(),
+            assetId,
             editable: true,
             stroke: '#e74c3c',
             strokeWidth: 3,
             endArrow: 'arrow',
             strokeCap: 'round',
           })
-          app!.tree.add(drawing)
+          imageNode.add(drawing)
         }
       }
       const onDrag = (e: any) => {
         if (isPen && pen) {
-          const point = e.getPagePoint()
+          const point = pointInImage(e)
+          if (!point) return
           pen.lineTo(point.x, point.y)
           pen.paint()
           return
         }
-        if (!drawing) return
-        const start = e.getPagePoint()
-        const total = e.getPageTotal()
-        drawing.set({ x: start.x - total.x, y: start.y - total.y })
-        drawing.toPoint = { x: total.x, y: total.y }
+        const point = pointInImage(e)
+        if (!drawing || !startPoint || !point) return
+        drawing.set({ x: startPoint.x, y: startPoint.y })
+        drawing.toPoint = { x: point.x - startPoint.x, y: point.y - startPoint.y }
       }
       const onEnd = () => {
         if (drawing || pen) saveCanvasHistory()
         drawing = null
         pen = null
+        startPoint = undefined
       }
       const onTextDown = (e: any) => {
-        const point = e.getPagePoint()
+        const point = pointInImage(e)
+        if (!point) return
         const text = new LeaferText({
           id: crypto.randomUUID(),
+          assetId,
           x: point.x,
           y: point.y,
           editable: true,
@@ -2881,7 +3009,7 @@ function canvasTool(action: string) {
           text: '',
           padding: [4, 8],
         })
-        app!.tree.add(text)
+        imageNode.add(text)
         saveCanvasHistory()
         app!.mode = 'normal'
         drawMode.value = false
@@ -2897,9 +3025,11 @@ function canvasTool(action: string) {
         })
       }
       const onNumberDown = (e: any) => {
-        const point = e.getPagePoint()
+        const point = pointInImage(e)
+        if (!point) return
         const marker = new Group({
           id: crypto.randomUUID(),
+          assetId,
           x: point.x - 14,
           y: point.y - 14,
           editable: true,
@@ -2919,7 +3049,7 @@ function canvasTool(action: string) {
             verticalAlign: 'middle',
           }),
         )
-        app!.tree.add(marker)
+        imageNode.add(marker)
         saveCanvasHistory()
       }
       const ids = [
