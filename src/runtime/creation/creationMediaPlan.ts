@@ -380,6 +380,7 @@ function normalizeGenericTaskParams(
     audioUrls: params.audioUrls,
     title: params.title,
     tags: params.tags,
+    ...(spec.apiStyle === 'comfy-grok-video' ? { seed: params.seed, skip_error: params.skip_error } : {}),
   })
 }
 

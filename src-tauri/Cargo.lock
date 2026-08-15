@@ -2322,7 +2322,7 @@ dependencies = [
 
 [[package]]
 name = "jiucaihezi-app"
-version = "2.1.23"
+version = "2.1.24"
 dependencies = [
  "arboard",
  "base64 0.22.1",

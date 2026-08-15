@@ -44,6 +44,14 @@ pub struct DocumentMarkdownRequest {
     pub max_chars: usize,
 }
 
+#[derive(Deserialize)]
+pub struct ComfyUploadImageRequest {
+    pub url: String,
+    pub filename: String,
+    pub mime_type: String,
+    pub data_base64: String,
+}
+
 fn is_unified_api_host(url: &str) -> bool {
     tauri::Url::parse(url)
         .ok()
@@ -60,6 +68,15 @@ fn is_document_converter_url(url: &str) -> bool {
         parsed.scheme() == "https"
             && parsed.host_str() == Some("api.jiucaihezi.studio")
             && parsed.path() == "/documents/markdown"
+            && parsed.query().is_none()
+    })
+}
+
+fn is_local_comfy_upload_url(url: &str) -> bool {
+    tauri::Url::parse(url).ok().is_some_and(|parsed| {
+        parsed.scheme() == "http"
+            && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
+            && parsed.path() == "/upload/image"
             && parsed.query().is_none()
     })
 }
@@ -321,6 +338,45 @@ pub async fn document_markdown_request(
         body,
         body_base64: None,
     })
+}
+
+#[tauri::command]
+pub async fn comfy_upload_image(request: ComfyUploadImageRequest) -> Result<HttpResponse, String> {
+    if !is_local_comfy_upload_url(&request.url) {
+        return Err("ComfyUI 上传地址必须是本机 /upload/image".into());
+    }
+    let data = general_purpose::STANDARD
+        .decode(&request.data_base64)
+        .map_err(|_| "参考图数据格式无效".to_string())?;
+    if data.len() > 20 * 1024 * 1024 {
+        return Err("参考图超过 20 MB 上限".into());
+    }
+    let filename = std::path::Path::new(&request.filename)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .filter(|name| !name.is_empty())
+        .unwrap_or("jiucaihezi-reference.png")
+        .to_string();
+    let file = reqwest::multipart::Part::bytes(data)
+        .file_name(filename)
+        .mime_str(&request.mime_type)
+        .map_err(|_| "参考图 MIME 类型无效".to_string())?;
+    let response = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("创建 ComfyUI 上传连接失败: {}", e))?
+        .post(&request.url)
+        .multipart(reqwest::multipart::Form::new().text("overwrite", "true").part("image", file))
+        .send()
+        .await
+        .map_err(|e| format!("ComfyUI 参考图上传失败: {}", e))?;
+    let status = response.status().as_u16();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("读取 ComfyUI 上传结果失败: {}", e))?;
+    Ok(HttpResponse { status, headers: HashMap::new(), body, body_base64: None })
 }
 
 #[tauri::command]

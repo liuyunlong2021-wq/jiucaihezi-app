@@ -3,6 +3,7 @@ use keyring::Entry;
 const KEYCHAIN_SERVICE: &str = "com.jiucaihezi.app";
 const KEYCHAIN_ACCOUNT: &str = "primary-api-key";
 const GATEWAY_SESSION_ACCOUNT: &str = "gateway-session-token";
+const COMFY_WORKFLOW_ACCOUNT: &str = "comfy-workflow-api-key";
 
 /// CLI tools (jc_media.py etc.) 读取 Key 的文件路径
 fn cli_key_file_path() -> std::path::PathBuf {
@@ -41,6 +42,10 @@ fn entry() -> Result<Entry, String> {
 
 fn gateway_session_entry() -> Result<Entry, String> {
     Entry::new(KEYCHAIN_SERVICE, GATEWAY_SESSION_ACCOUNT).map_err(|error| error.to_string())
+}
+
+fn comfy_workflow_entry() -> Result<Entry, String> {
+    Entry::new(KEYCHAIN_SERVICE, COMFY_WORKFLOW_ACCOUNT).map_err(|error| error.to_string())
 }
 
 fn mcp_oauth_entry(server_id: &str) -> Result<Entry, String> {
@@ -155,6 +160,21 @@ pub fn set_gateway_session_token(token: String) -> Result<(), String> {
 #[tauri::command]
 pub fn clear_gateway_session_token() -> Result<(), String> {
     clear_entry_value(gateway_session_entry()?)
+}
+
+#[tauri::command]
+pub fn get_comfy_workflow_api_key() -> Result<Option<String>, String> {
+    get_entry_value(comfy_workflow_entry()?)
+}
+
+#[tauri::command]
+pub fn set_comfy_workflow_api_key(value: String) -> Result<(), String> {
+    set_entry_value(comfy_workflow_entry()?, value, clear_comfy_workflow_api_key)
+}
+
+#[tauri::command]
+pub fn clear_comfy_workflow_api_key() -> Result<(), String> {
+    clear_entry_value(comfy_workflow_entry()?)
 }
 
 #[tauri::command]

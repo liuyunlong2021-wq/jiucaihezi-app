@@ -1,5 +1,10 @@
+import { invoke } from '@tauri-apps/api/core'
+import { isTauriRuntime } from './tauriEnv'
+
 export const COMFY_UI_API_BASE_KEY = 'jcComfyUiApiBase'
 export const DEFAULT_COMFY_UI_API_BASE = 'http://127.0.0.1:8000'
+const COMFY_WORKFLOW_API_KEY_SESSION_KEY = 'jcComfyWorkflowApiKeySession'
+let comfyWorkflowApiKeyMemory = ''
 
 export interface ComfyUiConnectResult {
   connected: boolean
@@ -41,6 +46,29 @@ export function saveComfyUiApiBase(baseUrl: string, storage: ComfyUiStore = loca
   if (!/^https?:\/\//i.test(normalized)) throw new Error('ComfyUI 地址必须以 http:// 或 https:// 开头')
   write(storage, COMFY_UI_API_BASE_KEY, normalized)
   return normalized
+}
+
+export async function getComfyWorkflowApiKey(): Promise<string> {
+  if (comfyWorkflowApiKeyMemory) return comfyWorkflowApiKeyMemory
+  comfyWorkflowApiKeyMemory = String(sessionStorage.getItem(COMFY_WORKFLOW_API_KEY_SESSION_KEY) || '').trim()
+  if (comfyWorkflowApiKeyMemory) return comfyWorkflowApiKeyMemory
+  if (!isTauriRuntime()) return ''
+  comfyWorkflowApiKeyMemory = String(await invoke('get_comfy_workflow_api_key') || '').trim()
+  return comfyWorkflowApiKeyMemory
+}
+
+export async function saveComfyWorkflowApiKey(value: string): Promise<void> {
+  if (!isTauriRuntime()) throw new Error('本机 ComfyUI 仅支持 Desktop')
+  comfyWorkflowApiKeyMemory = value.trim()
+  if (comfyWorkflowApiKeyMemory) sessionStorage.setItem(COMFY_WORKFLOW_API_KEY_SESSION_KEY, comfyWorkflowApiKeyMemory)
+  else sessionStorage.removeItem(COMFY_WORKFLOW_API_KEY_SESSION_KEY)
+  try {
+    await invoke('set_comfy_workflow_api_key', { value: comfyWorkflowApiKeyMemory })
+  } catch (error) {
+    comfyWorkflowApiKeyMemory = ''
+    sessionStorage.removeItem(COMFY_WORKFLOW_API_KEY_SESSION_KEY)
+    throw error
+  }
 }
 
 export async function connectComfyUi(baseUrl = getComfyUiApiBase()): Promise<ComfyUiConnectResult> {

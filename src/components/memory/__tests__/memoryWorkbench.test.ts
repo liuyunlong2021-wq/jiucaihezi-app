@@ -242,7 +242,8 @@ test('memory composer routes pasted images and media plans into the existing cre
   assert.match(workbench, /attachment\.resourcePath === resource\.path/)
   assert.match(workbench, /resourcePath: resource\.path/)
   assert.match(workbench, /v-for="\(plan, planIndex\) in mediaPlans\[turn\.id\]"/)
-  assert.match(workbench, /defineAsyncComponent\(\(\) => import\('@\/components\/creation\/CreationPanel\.vue'\)\)/)
+  assert.match(workbench, /const loadCreationPanel = \(\) => import\('@\/components\/creation\/CreationPanel\.vue'\)/)
+  assert.match(workbench, /const CreationPanel = defineAsyncComponent\(loadCreationPanel\)/)
   assert.match(workbench, /emitEvent\('memory-media-plan-load'/)
   assert.match(workbench, /class="memory-creation"/)
   assert.doesNotMatch(workbench, /import MediaPlanCard/)
@@ -529,6 +530,8 @@ test('memory creation surface reuses resizable columns, host preview, and sticky
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
   assert.match(workbench, /const creationWidth = ref\(/)
+  assert.match(workbench, /async function openCreationHost\(\) \{\s*await loadCreationPanel\(\)[\s\S]*?creationMounted\.value = true[\s\S]*?creationOpen\.value = true/)
+  assert.match(workbench, /async function openMediaPlanInCreation[\s\S]*?await openCreationHost\(\)[\s\S]*?emitEvent\('memory-media-plan-load'/)
   assert.match(workbench, /const MEMORY_CREATION_SPLIT_MIN = MEMORY_CHAT_MIN \+ MEMORY_CREATION_MIN/)
   assert.match(workbench, /const max = Math\.min\(available - MEMORY_CHAT_MIN, Math\.floor\(available \* 0\.5\)\)/)
   assert.match(workbench, /\.memory-composer \{ min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/)

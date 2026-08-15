@@ -26,6 +26,7 @@ export type CreationApiStyle =
   | 'mj-task'
   | 'rh-standard'
   | 'rh-aiapp'
+  | 'comfy-grok-video'
 
 export type CreationMode =
   | 'text-to-image'

@@ -6,7 +6,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { getLocalOllamaModels } from '@/utils/providerConfig'
-import { probeComfyUi, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
+import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import {
@@ -39,6 +39,8 @@ const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
 const comfyUiBusy = ref(false)
 const comfyUiStatus = ref<ComfyUiRuntimeStatus | null>(null)
+const comfyWorkflowApiKey = ref('')
+const comfyWorkflowApiKeySaved = ref(false)
 const logoutBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteError = ref('')
@@ -68,6 +70,7 @@ function setFontSize(value: number) {
 onMounted(async () => {
   if (desktopRuntime) installedLocalModelCount.value = getLocalOllamaModels().length
   if (desktopRuntime) void refreshComfyUi()
+  if (desktopRuntime) comfyWorkflowApiKey.value = await getComfyWorkflowApiKey()
   apiKey.value = getApiKey() || await initApiKey()
   await initGatewaySessionToken()
   if (apiKey.value) await agentStore.fetchModels().catch(() => {})
@@ -87,6 +90,11 @@ async function connectOllama() {
   } finally {
     localModelBusy.value = false
   }
+}
+
+async function saveComfyApiKey() {
+  await saveComfyWorkflowApiKey(comfyWorkflowApiKey.value)
+  comfyWorkflowApiKeySaved.value = true
 }
 
 async function refreshComfyUi() {
@@ -235,12 +243,15 @@ function showSync() {
             {{ comfyUiStatus.mps ? 'MPS 加速已启用' : '未检测到 MPS 加速' }}
           </p>
           <p v-else>请先启动本机 ComfyUI。</p>
-          <div v-if="comfyUiStatus" class="memory-comfy-models">
-            <span :class="{ ready: comfyUiStatus.miniMaxH3 }">{{ comfyUiStatus.miniMaxH3 ? '✓' : '○' }} MiniMax H3</span>
-            <span :class="{ ready: comfyUiStatus.zImageTurbo }">{{ comfyUiStatus.zImageTurbo ? '✓' : '○' }} Z-Image Turbo</span>
-          </div>
           <div class="memory-local-actions">
             <button :disabled="comfyUiBusy" @click="refreshComfyUi">{{ comfyUiBusy ? '检测中' : '刷新状态' }}</button>
+          </div>
+          <label class="memory-comfy-key">
+            <span>API Key</span>
+            <input v-model="comfyWorkflowApiKey" type="password" autocomplete="off" placeholder="用于需要上游凭据的本机工作流" @input="comfyWorkflowApiKeySaved = false" />
+          </label>
+          <div class="memory-local-actions">
+            <button @click="saveComfyApiKey">{{ comfyWorkflowApiKeySaved ? '已保存' : '保存 API Key' }}</button>
           </div>
         </section>
       </div>
@@ -324,6 +335,9 @@ function showSync() {
 .memory-local-actions { display: flex; gap: 8px; }
 .memory-local-actions button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .memory-local-actions button:disabled { opacity: .55; cursor: progress; }
+.memory-comfy-key { display: grid; gap: 6px; color: var(--ink2); font-size: 12px; }
+.memory-comfy-key input { min-width: 0; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; }
+.memory-comfy-key input:focus { outline: 2px solid color-mix(in srgb, var(--olive) 35%, transparent); border-color: var(--olive); }
 .memory-sync { display: grid; gap: 12px; }
 .memory-sync p { margin: 0; color: var(--ink3); line-height: 1.6; }
 .memory-sync > button { min-height: 36px; padding: 0 12px; border: 1px solid var(--olive); border-radius: 6px; background: var(--olive); color: white; cursor: pointer; font: inherit; }

@@ -73,7 +73,8 @@ const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
 const mobileRuntime = isTauriMobileRuntime()
 const desktopOnlyRuntime = desktopRuntime && !mobileRuntime
-const CreationPanel = defineAsyncComponent(() => import('@/components/creation/CreationPanel.vue'))
+const loadCreationPanel = () => import('@/components/creation/CreationPanel.vue')
+const CreationPanel = defineAsyncComponent(loadCreationPanel)
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
@@ -189,10 +190,12 @@ function prepareCreationLayout() {
   creationWidth.value = clampCreationWidth(saved || Math.round(available * 0.33))
 }
 
-function openCreationHost() {
+async function openCreationHost() {
+  await loadCreationPanel()
   prepareCreationLayout()
   creationMounted.value = true
   creationOpen.value = true
+  await nextTick()
 }
 
 async function closeCreationHost(): Promise<boolean> {
@@ -353,7 +356,7 @@ onMounted(async () => {
   })
   offMediaReferenceAdd = onEvent('media-reference:add', payload => void addProjectMediaReferences(payload))
   offSwitchPanel = onEvent('switch-panel', mode => {
-    if (mode === 'creation') openCreationHost()
+    if (mode === 'creation') void openCreationHost()
   })
   const pendingMediaReference = consumeLastEvent('media-reference:add')
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
@@ -515,7 +518,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
   if (resource.type === 'scene3d' && !desktopOnlyRuntime) return
   if (resource.type === 'canvas') {
     emitEvent('canvas:open', { path: resource.resource.path })
-    openCreationHost()
+    await openCreationHost()
     return
   }
   error.value = ''
@@ -1410,8 +1413,7 @@ function mediaPlanResources(plan: MediaPlan): ProjectResource[] {
 async function openMediaPlanInCreation(turnId: string, planIndex: number, plan: MediaPlan) {
   const active = conversation.value
   if (!active) return
-  openCreationHost()
-  await nextTick()
+  await openCreationHost()
   emitEvent('memory-media-plan-load', {
     plan,
     resources: mediaPlanResources(plan),
@@ -1427,8 +1429,7 @@ async function openMediaPlanInCreation(turnId: string, planIndex: number, plan: 
 async function openCreationForCurrentConversation() {
   const active = conversation.value
   if (!active) return
-  openCreationHost()
-  await nextTick()
+  await openCreationHost()
   emitEvent('memory-media-plan-load', {
     origin: {
       key: `direct:${active.transcript.id}`,

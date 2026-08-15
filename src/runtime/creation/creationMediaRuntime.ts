@@ -14,7 +14,7 @@ import {
   type VideoGenParams,
 } from '@/api/media-generation'
 import type { CreationRunPlan } from './creationMediaTypes'
-import { getComfyUiApiBase } from '@/utils/comfyUiRuntime'
+import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
 
 export interface CreationSubmitRequest {
   runtime: 'newapi-direct' | 'runninghub-adapter' | 'local-comfy'
@@ -106,7 +106,7 @@ export async function executeCreationSubmitRequest(
   onProgress?: (elapsed: number, status: string) => void,
   onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
 ): Promise<MediaResult> {
-  if (request.runtime === 'local-comfy') return executeLocalComfyImageRequest(request, onProgress, onSubmitted)
+  if (request.runtime === 'local-comfy') return executeLocalComfyRequest(request, onProgress, onSubmitted)
   if (request.runtime === 'newapi-direct') {
     if (request.taskType === 'image') return executeDirectImageRequest(request, onProgress, onSubmitted)
     if (request.taskType === 'video') return executeDirectVideoRequest(request, onProgress, onSubmitted)
@@ -117,11 +117,12 @@ export async function executeCreationSubmitRequest(
   return executeRunningHubAudioRequest(request, onProgress, onSubmitted)
 }
 
-async function executeLocalComfyImageRequest(
+async function executeLocalComfyRequest(
   request: CreationSubmitRequest,
   onProgress?: (elapsed: number, status: string) => void,
   onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
 ): Promise<MediaResult> {
+  if (request.plan.apiStyle === 'comfy-grok-video') return executeLocalComfyGrokVideoRequest(request, onProgress, onSubmitted)
   if (request.taskType !== 'image') throw new Error('本地 Z-Image Turbo 当前只支持图片')
   const params = request.imageParams || {}
   const [width, height] = localComfyDimensions(
@@ -132,21 +133,21 @@ async function executeLocalComfyImageRequest(
   const prompt = buildLocalZImagePrompt(params.prompt || '', width, height)
   onProgress?.(0, '提交本机 ComfyUI...')
   const base = getComfyUiApiBase()
-  const response = await fetch(`${base}/prompt`, {
+  const response = await localComfyJson(`${base}/prompt`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, client_id: clientId }),
   })
   if (!response.ok) throw new Error(`ComfyUI 提交失败 HTTP ${response.status}`)
-  const submitted = await response.json()
+  const submitted = response.data
   const promptId = String(submitted?.prompt_id || '')
   if (!promptId) throw new Error('ComfyUI 未返回任务 ID')
   const historyUrl = `${base}/history/${encodeURIComponent(promptId)}`
   for (let i = 0; i < 600; i += 1) {
     await new Promise(resolve => setTimeout(resolve, 1000))
-    const historyResponse = await fetch(historyUrl)
-    if (!historyResponse.ok) continue
-    const history = await historyResponse.json()
+    const historyResponse = await localComfyJson(historyUrl).catch(() => null)
+    if (!historyResponse?.ok) continue
+    const history = historyResponse.data
     const entry = history?.[promptId]
     if (entry?.status?.status_str === 'error') throw new Error('ComfyUI 工作流执行失败')
     const image = firstComfyImage(entry?.outputs)
@@ -158,6 +159,109 @@ async function executeLocalComfyImageRequest(
     return { url: resultUrl, type: 'image', taskId: promptId, pollKind: 'image' }
   }
   throw new Error('本机 ComfyUI 生成超时')
+}
+
+const GROK_REFERENCE_NODE_IDS = ['22', '10', '13', '9', '11', '12', '23']
+
+async function executeLocalComfyGrokVideoRequest(
+  request: CreationSubmitRequest,
+  onProgress?: (elapsed: number, status: string) => void,
+  onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
+): Promise<MediaResult> {
+  if (request.taskType !== 'video') throw new Error('Grok 本机工作流只支持视频')
+  const images = asStringArray(request.plan.debug.normalizedParams.images)
+  if (!images.length || images.length > GROK_REFERENCE_NODE_IDS.length) throw new Error('请选择 1 至 7 张参考图')
+  const apiKey = await getComfyWorkflowApiKey()
+  if (!apiKey) throw new Error('请先在设置 → 本机 ComfyUI 填写 API Key')
+  const base = getComfyUiApiBase()
+  const uploadedImages: string[] = []
+  onProgress?.(0, '上传参考图到本机 ComfyUI...')
+  for (const [index, image] of images.entries()) uploadedImages.push(await uploadComfyImage(base, image, index))
+  const prompt = buildLocalGrokVideoPrompt({
+    prompt: asString(request.plan.debug.normalizedParams.prompt),
+    ratio: asOptionalString(request.plan.debug.normalizedParams.ratio) || '16:9',
+    duration: String(request.plan.debug.normalizedParams.duration || 8),
+    resolution: asOptionalString(request.plan.debug.normalizedParams.resolution) || '720P',
+    apiKey,
+    images: uploadedImages,
+  })
+  onProgress?.(0, '提交本机 ComfyUI...')
+  const response = await localComfyJson(`${base}/prompt`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt, client_id: `jiucaihezi-${Date.now().toString(36)}` }),
+  })
+  if (!response.ok) throw new Error(`ComfyUI 提交失败 HTTP ${response.status}`)
+  const submitted = response.data
+  const promptId = String(submitted?.prompt_id || '')
+  if (!promptId) throw new Error('ComfyUI 未返回任务 ID')
+  const historyUrl = `${base}/history/${encodeURIComponent(promptId)}`
+  await onSubmitted?.({ taskId: promptId, pollUrl: historyUrl, pollKind: 'video' })
+  for (let i = 0; i < 1800; i += 1) {
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    const historyResponse = await localComfyJson(historyUrl).catch(() => null)
+    if (!historyResponse?.ok) continue
+    const entry = historyResponse.data?.[promptId]
+    if (entry?.status?.status_str === 'error') throw new Error('ComfyUI 工作流执行失败')
+    const resultUrl = firstComfyVideoUrl(entry?.outputs)
+    if (!resultUrl) { onProgress?.(i, '本机生成中...'); continue }
+    return { url: resultUrl, type: 'video', taskId: promptId, pollUrl: historyUrl, pollKind: 'video' }
+  }
+  throw new Error('本机 ComfyUI 生成超时')
+}
+
+async function uploadComfyImage(base: string, image: string, index: number): Promise<string> {
+  const match = /^data:(image\/[\w.+-]+);base64,(.+)$/s.exec(image)
+  if (!match) throw new Error(`参考图 ${index + 1} 不是可上传的本机图片`)
+  const { invoke } = await import('@tauri-apps/api/core')
+  const response = await invoke<{ status: number; body: string }>('comfy_upload_image', {
+    request: buildComfyUploadRequestData(base, index, match[1], match[2]),
+  })
+  if (response.status < 200 || response.status >= 300) throw new Error(`ComfyUI 参考图上传失败 HTTP ${response.status}`)
+  const uploaded = JSON.parse(response.body)
+  const name = String(uploaded?.name || uploaded?.filename || '').trim()
+  if (!name) throw new Error('ComfyUI 未返回参考图文件名')
+  return uploaded?.subfolder ? `${uploaded.subfolder}/${name}` : name
+}
+
+export function buildComfyUploadRequestData(base: string, index: number, mimeType: string, dataBase64: string) {
+  return {
+    url: `${base}/upload/image`,
+    filename: `jiucaihezi-${Date.now()}-${index + 1}.png`,
+    mime_type: mimeType,
+    data_base64: dataBase64,
+  }
+}
+
+async function localComfyJson(url: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any }> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  const response = await invoke<{ status: number; body: string }>('http_request', {
+    request: {
+      url,
+      method: init.method || 'GET',
+      headers: init.headers || undefined,
+      body: typeof init.body === 'string' ? init.body : undefined,
+      timeout_secs: 120,
+    },
+  })
+  return {
+    ok: response.status >= 200 && response.status < 300,
+    status: response.status,
+    data: response.body ? JSON.parse(response.body) : {},
+  }
+}
+
+export function buildLocalGrokVideoPrompt(input: { prompt: string; ratio: string; duration: string; resolution: string; apiKey: string; images: string[] }) {
+  const workflow: Record<string, any> = {
+    '7': { class_type: 'ComflyGrok3VideoApi30S', inputs: { prompt: ['16', 0], model: 'grok-video-3', ratio: input.ratio, duration: input.duration, resolution: input.resolution, api_key: input.apiKey, seed: Math.floor(Math.random() * 2147483647), skip_error: false } },
+    '16': { class_type: 'CR Prompt Text', inputs: { prompt: input.prompt } },
+    '18': { class_type: 'easy showAnything', inputs: { text: '', anything: ['7', 3] } },
+  }
+  input.images.forEach((image, index) => {
+    const nodeId = GROK_REFERENCE_NODE_IDS[index]
+    workflow[nodeId] = { class_type: 'LoadImage', inputs: { image } }
+    workflow['7'].inputs[`image${index + 1}`] = [nodeId, 0]
+  })
+  return workflow
 }
 
 function buildLocalZImagePrompt(prompt: string, width: number, height: number) {
@@ -183,6 +287,11 @@ function firstComfyImage(outputs: any): { filename: string; subfolder?: string; 
     if (image?.filename) return image
   }
   return null
+}
+
+export function firstComfyVideoUrl(outputs: unknown): string {
+  const text = JSON.stringify(outputs || {})
+  return text.match(/https?:\\?\/\\?\/[^"\\\s]+\.mp4(?:\?[^"\\\s]*)?/i)?.[0]?.replaceAll('\\/', '/') || ''
 }
 
 function localComfyDimensions(resolution: string, ratio: string): [number, number] {
