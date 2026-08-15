@@ -61,12 +61,13 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["status"], "failed")
         self.assertEqual(response.json()["error"]["message"], "upstream failed")
 
-    async def test_gemini_maps_resolution_without_size_auto(self):
-        response = await self.client.post("/v1/videos", headers={"Authorization": "Bearer key"}, json={"model": "gemini-3-pro-image-preview", "prompt": "draw", "size": "auto", "resolution": "2k"})
+    async def test_gemini_maps_resolution_and_aspect_ratio_without_size_auto(self):
+        response = await self.client.post("/v1/videos", headers={"Authorization": "Bearer key"}, json={"model": "gemini-3-pro-image-preview", "prompt": "draw", "size": "auto", "resolution": "4k", "aspectRatio": "16:9"})
         self.assertEqual(response.status_code, 200)
         body = json.loads(self.requests[0].content)
         self.assertEqual(body["model"], "gemini-3-pro-image-preview")
-        self.assertEqual(body["quality"], "2k")
+        self.assertEqual(body["quality"], "4k")
+        self.assertEqual(body["aspectRatio"], "16:9")
         self.assertNotIn("size", body)
 
     async def test_accepts_canonical_gpt_model_for_newapi_mapping(self):
@@ -95,6 +96,15 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         too_many = [("image", (f"{index}.png", b"png", "image/png")) for index in range(9)]
         self.assertEqual((await self.client.post("/v1/videos", headers=headers, data=fields, files=too_many)).status_code, 413)
         self.assertEqual((await self.client.post("/v1/videos", headers=headers, data=fields, files={"image": ("x.txt", b"text", "text/plain")})).status_code, 400)
+
+    async def test_gemini_accepts_ten_images_and_rejects_oversized_images_or_prompts(self):
+        headers = {"Authorization": "Bearer key"}
+        fields = {"model": "gemini-3-pro-image-preview", "prompt": "draw"}
+        images = [("image", (f"{index}.png", b"png", "image/png")) for index in range(10)]
+        self.assertEqual((await self.client.post("/v1/videos", headers=headers, data=fields, files=images)).status_code, 200)
+        too_large = b"x" * (10 * 1024 * 1024 + 1)
+        self.assertEqual((await self.client.post("/v1/videos", headers=headers, data=fields, files={"image": ("large.png", too_large, "image/png")})).status_code, 413)
+        self.assertEqual((await self.client.post("/v1/videos", headers=headers, json={"model": "gemini-3-pro-image-preview", "prompt": "a" * 20_001})).status_code, 400)
 
     async def test_rejects_missing_key_unknown_model_and_prompt(self):
         self.assertEqual((await self.client.post("/v1/videos", json={"model": "gpt-image-2-1k", "prompt": "x"})).status_code, 401)

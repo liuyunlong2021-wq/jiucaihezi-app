@@ -215,6 +215,7 @@ async function executeDirectImageRequest(
       response_format: params.responseFormat || 'url',
     }
     if (params.size) fields.size = params.size
+    if (params.aspectRatio) fields.aspectRatio = params.aspectRatio
     if (params.resolution) fields.resolution = params.resolution
     if (images.length) fields.image = await Promise.all(images.map(imageReferenceToBlob))
     const data = await apiCallMultipart('/v1/videos', fields)

@@ -46,11 +46,18 @@ const GPT_IMAGE_2_ROUTES: Array<{
 ]
 const XIAOYI_GEMINI_FIELDS = promptFields([
   {
+    key: 'ratio',
+    label: '比例',
+    kind: 'select',
+    defaultValue: '1:1',
+    options: options(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']),
+  },
+  {
     key: 'resolution',
     label: '分辨率',
     kind: 'select',
     defaultValue: '2k',
-    options: options(['1k', '2k']),
+    options: options(['1k', '2k', '4k']),
   },
   { key: 'images', label: '参考图', kind: 'images' },
 ])
@@ -164,6 +171,7 @@ function directImage(input: {
   fields?: CreationFieldSpec[]
   ratios?: string[]
   resolutions?: string[]
+  files?: { images?: { min?: number; max?: number } }
 }): CreationModelSpec {
   return baseSpec({
     id: input.id,
@@ -181,7 +189,7 @@ function directImage(input: {
     pollKind: input.pollKind,
     assetFlow: input.assetFlow || 'newapi-upload',
     resultExtractor: input.resultExtractor || 'openai-image',
-    files: { images: { min: 0, max: 8 } },
+    files: input.files || { images: { min: 0, max: 8 } },
     fields:
       input.fields ||
       promptFields([
@@ -503,8 +511,9 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     resultExtractor: 'newapi-task',
     pollKind: 'newapi-task',
     fields: XIAOYI_GEMINI_FIELDS,
-    ratios: [],
-    resolutions: ['1k', '2k'],
+    ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'],
+    resolutions: ['1k', '2k', '4k'],
+    files: { images: { min: 0, max: 10 } },
     contractStatus: 'verified',
     notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
@@ -521,8 +530,9 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     resultExtractor: 'newapi-task',
     pollKind: 'newapi-task',
     fields: XIAOYI_GEMINI_FIELDS,
-    ratios: [],
-    resolutions: ['1k', '2k'],
+    ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'],
+    resolutions: ['1k', '2k', '4k'],
+    files: { images: { min: 0, max: 10 } },
     contractStatus: 'verified',
     notes: ['docs/wiki/运维/模型矩阵.md'],
   }),

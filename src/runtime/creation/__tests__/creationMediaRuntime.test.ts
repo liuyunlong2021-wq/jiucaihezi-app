@@ -103,7 +103,8 @@ test('Gemini image submits the Xiaoyi async task with its resolution', { concurr
       const body = init.body as FormData
       assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
       assert.equal(body.get('size'), 'auto')
-      assert.equal(body.get('resolution'), '2k')
+      assert.equal(body.get('aspectRatio'), '16:9')
+      assert.equal(body.get('resolution'), '4k')
       assert.equal(body.get('seconds'), '1')
       return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
     }
@@ -116,7 +117,7 @@ test('Gemini image submits the Xiaoyi async task with its resolution', { concurr
   try {
     const plan = buildCreationRunPlan({
       modelId: 'gemini-3-pro-image-preview',
-      params: { prompt: '一张产品图', resolution: '2k' },
+      params: { prompt: '一张产品图', ratio: '16:9', resolution: '4k' },
     })
     const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
     assert.equal(result.type, 'image')

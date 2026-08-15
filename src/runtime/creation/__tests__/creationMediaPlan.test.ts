@@ -188,17 +188,22 @@ test('Gemini image models use the Xiaoyi async task contract', () => {
     assert.equal(textOnly.apiStyle, 'xiaoyi-image-task')
     assert.equal(textOnly.pollKind, 'newapi-task')
     assert.equal(textOnly.debug.normalizedParams.size, 'auto')
-    assert.deepEqual(spec?.capabilities.resolutions, ['1k', '2k'])
-    assert.deepEqual(spec?.capabilities.ratios, [])
-    assert.equal(spec?.fields.some(field => field.key === 'ratio'), false)
+    assert.deepEqual(spec?.capabilities.resolutions, ['1k', '2k', '4k'])
+    assert.deepEqual(spec?.capabilities.ratios, ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'])
+    assert.equal(spec?.files?.images?.max, 10)
+    assert.equal(spec?.fields.some(field => field.key === 'ratio'), true)
     assert.equal(withImage.endpoint, '/v1/videos')
     assert.equal(withImage.apiStyle, 'xiaoyi-image-task')
     assert.equal(withImage.assetFlow, 'newapi-upload')
   }
 
   assert.throws(
-    () => buildCreationRunPlan({ modelId: 'gemini-3-pro-image-preview', params: { prompt: '错误分辨率', resolution: '4k' } }),
+    () => buildCreationRunPlan({ modelId: 'gemini-3-pro-image-preview', params: { prompt: '错误分辨率', resolution: '8k' } }),
     /分辨率.*不支持/,
+  )
+  assert.throws(
+    () => buildCreationRunPlan({ modelId: 'gemini-3-pro-image-preview', params: { prompt: 'a'.repeat(20_001) } }),
+    /提示词不能超过 20000 字符/,
   )
 })
 

@@ -247,6 +247,7 @@ function normalizeOpenAiImageParams(
     model: spec.model,
     prompt: params.prompt,
     size,
+    aspectRatio: isXiaoyiGemini ? firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) : undefined,
     resolution: params.resolution,
     image: params.image,
     images: params.images,
@@ -506,6 +507,8 @@ function countReferences(params: Record<string, unknown>, keys: string[]): numbe
 function validatePlanInputs(spec: CreationModelSpec, params: Record<string, unknown>): void {
   validateFileCounts(spec, params)
   validateRequiredFields(spec, params)
+  if (spec.id.startsWith('gemini-') && String(params.prompt || '').length > 20_000)
+    throw new Error('提示词不能超过 20000 字符')
   for (const field of spec.fields) {
     const value = valueForField(params, field.key)
     validateSelectField(field, value)

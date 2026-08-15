@@ -28,9 +28,8 @@ MODEL_MAP = {
     "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
 }
-MAX_IMAGES = 8
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
-MAX_TOTAL_IMAGE_BYTES = 64 * 1024 * 1024
+MAX_UPLOADS = 10
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -60,8 +59,10 @@ async def create_image_task(request: Request):
     model = str(fields.get("model") or "")
     if model not in MODEL_MAP:
         raise HTTPException(400, "Unsupported model")
-    if not str(fields.get("prompt") or "").strip():
+    prompt = str(fields.get("prompt") or "").strip()
+    if not prompt:
         raise HTTPException(400, "prompt is required")
+    validate_gemini_request(model, prompt, images)
     payload = upstream_payload(model, fields)
     try:
         if images:
@@ -137,22 +138,18 @@ async def request_fields(request: Request) -> tuple[dict[str, str], list[tuple[s
     fields: dict[str, str] = {}
     images: list[tuple[str, tuple[str, bytes, str]]] = []
     uploads = [(key, value) for key, value in form.multi_items() if isinstance(value, UploadFile)]
-    total_bytes = 0
     try:
-        if len(uploads) > MAX_IMAGES:
-            raise HTTPException(413, f"At most {MAX_IMAGES} images are allowed")
+        if len(uploads) > MAX_UPLOADS:
+            raise HTTPException(413, f"At most {MAX_UPLOADS} images are allowed")
         for key, value in form.multi_items():
             if not isinstance(value, UploadFile):
                 fields[key] = value
                 continue
             if key != "image" or not (value.content_type or "").startswith("image/"):
                 raise HTTPException(400, "Only image uploads are allowed")
-            content = await value.read(MAX_IMAGE_BYTES + 1)
-            if len(content) > MAX_IMAGE_BYTES:
+            content = await value.read(MAX_UPLOAD_BYTES + 1)
+            if len(content) > MAX_UPLOAD_BYTES:
                 raise HTTPException(413, "Image exceeds the 20 MB limit")
-            total_bytes += len(content)
-            if total_bytes > MAX_TOTAL_IMAGE_BYTES:
-                raise HTTPException(413, "Images exceed the 64 MB total limit")
             images.append(("image", (value.filename or "image.png", content, value.content_type or "image/png")))
     finally:
         for _, upload in uploads:
@@ -167,11 +164,26 @@ def upstream_payload(model: str, fields: dict[str, str]) -> dict[str, str]:
     if model.startswith("gemini-"):
         if fields.get("size") and fields["size"] != "auto":
             payload["size"] = fields["size"]
-        if fields.get("resolution") in {"1k", "2k"}:
+        if fields.get("resolution") in {"1k", "2k", "4k"}:
             payload["quality"] = fields["resolution"]
+        if fields.get("aspectRatio"):
+            payload["aspectRatio"] = fields["aspectRatio"]
     elif fields.get("size"):
         payload["size"] = fields["size"]
     return payload
+
+
+def validate_gemini_request(model: str, prompt: str, images: list[tuple[str, tuple[str, bytes, str]]]) -> None:
+    if not model.startswith("gemini-"):
+        if len(images) > 8:
+            raise HTTPException(413, "At most 8 images are allowed")
+        if sum(len(image[1][1]) for image in images) > 64 * 1024 * 1024:
+            raise HTTPException(413, "Images exceed the 64 MB total limit")
+        return
+    if len(prompt) > 20_000:
+        raise HTTPException(400, "Prompt exceeds the 20000 character limit")
+    if any(len(image[1][1]) > 10 * 1024 * 1024 for image in images):
+        raise HTTPException(413, "Gemini images cannot exceed 10 MB each")
 
 
 def response_json(response: httpx.Response) -> dict:
