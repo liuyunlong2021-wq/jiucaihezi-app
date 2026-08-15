@@ -1,3 +1,6 @@
+import { getModelContextWindow } from '@/data/modelContextWindows'
+import { estimateTokenCount } from 'tokenx'
+
 export interface CreativeContextMessage {
   id: string
   role: string
@@ -17,15 +20,10 @@ const FAILED_ASSISTANT_FINISH_REASONS = new Set([
   'content_filter',
 ])
 
-function textLength(value: unknown): number {
-  if (typeof value === 'string') return value.length
-  if (value == null) return 0
-  if (Array.isArray(value)) return value.reduce((total, item) => total + textLength(item), 0)
-  return String(value).length
-}
-
 function estimateTokens(value: unknown): number {
-  return Math.ceil(textLength(value) / 4)
+  if (typeof value === 'string') return estimateTokenCount(value)
+  if (value == null) return 0
+  return estimateTokenCount(JSON.stringify(value))
 }
 
 /**
@@ -37,7 +35,7 @@ export function buildCreativeContext(input: {
   modelId: string
   contextWindow: number
   reservedTokens: number
-}): { messages: CreativeContextMessage[]; estimatedTokens: number } {
+}): { messages: CreativeContextMessage[]; estimatedTokens: number; omittedMessages: number } {
   const contextWindow = input.contextWindow || getModelContextWindow(input.modelId)
   const budget = Math.max(0, contextWindow - input.reservedTokens)
   const history: CreativeContextMessage[] = []
@@ -47,9 +45,9 @@ export function buildCreativeContext(input: {
       if (history.at(-1)?.role === 'user') history.pop()
       continue
     }
-    if (textLength(message.content) > 0) history.push(message)
+    if (estimateTokens(message.content) > 0) history.push(message)
   }
-  if (!history.length) return { messages: [], estimatedTokens: 0 }
+  if (!history.length) return { messages: [], estimatedTokens: 0, omittedMessages: 0 }
 
   const selected: CreativeContextMessage[] = []
   let used = 0
@@ -74,6 +72,6 @@ export function buildCreativeContext(input: {
   return {
     messages: selected,
     estimatedTokens: used,
+    omittedMessages: history.length - selected.length,
   }
 }
-import { getModelContextWindow } from '@/data/modelContextWindows'

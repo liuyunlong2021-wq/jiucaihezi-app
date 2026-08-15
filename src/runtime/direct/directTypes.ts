@@ -20,7 +20,7 @@ export interface DirectToolResult {
   followupMessages?: DirectApiMessage[]
 }
 
-export type DirectToolExecutor = (call: DirectToolCall) => Promise<DirectToolResult>
+export type DirectToolExecutor = (call: DirectToolCall, signal?: AbortSignal) => Promise<DirectToolResult>
 
 export type DirectToolExecutionStatus = 'succeeded' | 'failed' | 'cancelled'
 

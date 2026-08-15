@@ -19,6 +19,19 @@ const assistant = (id: string, content: string) =>
   ({ id, role: 'assistant', content })
 
 describe('buildDirectMessages', () => {
+  test('历史消息超过 16000 字符时保持完整', () => {
+    const tail = '历史结论必须保留'
+    const result = buildDirectMessages({
+      messages: [user('u1', `${'旧'.repeat(20_000)}${tail}`), assistant('a1', '收到'), user('u2', '继续')],
+      historyLimit: null,
+      visionModel: false,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    assert.ok(result.some(message => message.role === 'user' && String(message.content).includes(tail)))
+  })
+
   test('vision+openai+有图片 → 最后一条 user 是 multimodal', () => {
     const msgs = [user('u1', '你好'), assistant('a1', '你好！'), user('u2', '看图')]
     const result = buildDirectMessages({

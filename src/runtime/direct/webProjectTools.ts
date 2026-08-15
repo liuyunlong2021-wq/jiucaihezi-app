@@ -83,7 +83,8 @@ export function createWebProjectToolExecutor(input: {
     },
   }
 
-  return async (call): Promise<DirectToolResult> => {
+  return async (call, signal): Promise<DirectToolResult> => {
+    signal?.throwIfAborted()
     const args = parseCreativeToolArguments(call)
     const name = call.function.name
 
@@ -202,6 +203,7 @@ export function createWebProjectToolExecutor(input: {
       const blob = await (input.renderImage || renderMemoryArtifactImage)({
         title: String(args.title), content: String(args.content), width: args.width as number | undefined,
       })
+      signal?.throwIfAborted()
       const entry = await input.files.writeBinary(
         requireProject(), `.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`, blob,
         { category: 'image', mimeType: 'image/png', collision: 'keep-both' },
@@ -230,6 +232,7 @@ export function createWebProjectToolExecutor(input: {
 
     if (name === 'export_markdown_slides') {
       const artifact = await createMarkdownSlidesArtifact(String(args.title), String(args.content), String(args.format) as 'html' | 'pdf' | 'pptx')
+      signal?.throwIfAborted()
       const requestedPath = `.raw/jc-media/文档/${artifact.filename}`
       const entry = typeof artifact.data === 'string'
         ? await input.files.write(requireProject(), requestedPath, artifact.data, { collision: 'keep-both' })

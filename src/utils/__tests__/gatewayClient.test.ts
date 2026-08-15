@@ -523,7 +523,7 @@ test('normalizeGatewayTopupOrder keeps pay-url-only orders actionable', () => {
 test('normalizeGatewayModels maps gateway items to product model entries', () => {
   const models = normalizeGatewayModels({
     items: [
-      { id: 'gpt-5.5', name: 'GPT-5.5', channel: 'newapi', taskTypes: ['chat'] },
+      { id: 'gpt-5.5', name: 'GPT-5.5', channel: 'newapi', context_window: 1000000, max_output_tokens: 128000, taskTypes: ['chat'] },
       { id: 'gpt-image-2', name: 'GPT Image', taskTypes: ['image'] },
       { id: 'grok-video-3', name: 'Grok Video', taskTypes: ['video'] },
     ],
@@ -533,6 +533,8 @@ test('normalizeGatewayModels maps gateway items to product model entries', () =>
     ['gpt-5.5', 'GPT-5.5', 'jiucaihezi', 'text'],
     ['gpt-image-2', 'GPT Image', 'jiucaihezi', 'image'],
   ])
+  assert.equal(models[0].contextWindow, 1000000)
+  assert.equal(models[0].maxOutputTokens, 128000)
 })
 
 test('normalizeGatewayModels preserves an explicit tool-call capability', () => {

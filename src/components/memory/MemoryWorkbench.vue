@@ -113,12 +113,14 @@ const pendingUserTurn = ref<ConversationTurn | null>(null)
 const copiedTurnId = ref('')
 const status = ref('')
 const error = ref('')
+const contextNotice = ref('')
 type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
 const pendingMemoryToolApproval = ref<{
   message: string
   resolve: (decision: MemoryToolApprovalDecision) => void
 } | null>(null)
 const memoryToolAlwaysAllowedConversations = new Set<string>()
+const contextNoticeShownConversations = new Set<string>()
 const referencingDocuments = new Set<string>()
 type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed' }
 const runVisible = ref(false)
@@ -149,6 +151,8 @@ let abortController: AbortController | null = null
 let mediaObjectUrl = ''
 let projectGeneration = 0
 let backlinkGeneration = 0
+let resourceOpenGeneration = 0
+let conversationSelectionGeneration = 0
 let sendInFlight = false
 let memoryRunGeneration = 0
 let offOpenResource: (() => void) | null = null
@@ -256,6 +260,7 @@ function resizeCreationForWindow() {
 }
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
+watch(() => conversation.value?.transcript.id, () => { contextNotice.value = '' })
 const projectOwner = computed(() => desktopRuntime
   ? projectStore.projectDir.value
   : projectStore.webProjectId.value)
@@ -423,6 +428,8 @@ function selectModel(modelId: string) {
 
 async function openProject(owner: string) {
   if (sending.value) stop()
+  conversationSelectionGeneration++
+  resourceOpenGeneration++
   if (!await closeCreationHost()) return
   const generation = ++projectGeneration
   opened.value = null
@@ -504,6 +511,7 @@ watch(streamingText, async text => {
 })
 
 async function openResource(resource: ProjectResourceOpenResult) {
+  const generation = ++resourceOpenGeneration
   if (resource.type === 'scene3d' && !desktopOnlyRuntime) return
   if (resource.type === 'canvas') {
     emitEvent('canvas:open', { path: resource.resource.path })
@@ -528,6 +536,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
     executionMode.value = [...resource.transcript.turns].reverse()
       .find(turn => turn.role === 'user' && turn.mode)?.mode || 'memory'
     await nextTick()
+    if (generation !== resourceOpenGeneration) return
     memoryScrollNav.value?.startStickyFollow()
     let previousUserTurnId = ''
     for (const turn of resource.transcript.turns) {
@@ -538,8 +547,10 @@ async function openResource(resource: ProjectResourceOpenResult) {
       if (turn.role !== 'assistant') continue
       try {
         const mediaContext = conversationMediaContext(resource.transcript.turns, previousUserTurnId)
-        mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
+        const plans = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
+        if (generation !== resourceOpenGeneration) return
+        mediaPlans.value[turn.id] = plans
       } catch { /* ordinary assistant reply */ }
       try {
         skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
@@ -555,6 +566,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
   if (resource.type === 'media') {
     try {
       const binary = await files.readBinary(resource.resource)
+      if (generation !== resourceOpenGeneration) return
       const data = new Uint8Array(binary.data.byteLength)
       data.set(binary.data)
       if (resource.mediaKind === 'model3d') {
@@ -567,11 +579,12 @@ async function openResource(resource: ProjectResourceOpenResult) {
         mediaUrl.value = mediaObjectUrl
       }
     } catch {
+      if (generation !== resourceOpenGeneration) return
       mediaUrl.value = ''
       modelData.value = null
     }
   }
-  if (window.innerWidth <= 760) treeOpen.value = false
+  if (generation === resourceOpenGeneration && window.innerWidth <= 760) treeOpen.value = false
 }
 
 function startMarkdownEdit() {
@@ -679,8 +692,11 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 async function selectConversation(item: MemoryConversation) {
+  const generation = ++conversationSelectionGeneration
   if (sending.value) stop()
-  await openResource(await openProjectResource(files, item.resource))
+  const resource = await openProjectResource(files, item.resource)
+  if (generation !== conversationSelectionGeneration) return
+  await openResource(resource)
 }
 
 async function renameConversation(item: MemoryConversation) {
@@ -792,6 +808,7 @@ async function send() {
   if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
   const runGeneration = ++memoryRunGeneration
+  const isCurrentRun = () => runGeneration === memoryRunGeneration
   sending.value = true
   const userTurn: ConversationTurn = {
     id: `turn-${crypto.randomUUID()}`,
@@ -831,13 +848,23 @@ async function send() {
       selectedSkillNames: selectedSkillNames.value,
       recordSceneVideo,
       signal: abortController.signal,
-      onToolEvent: updateRunTool,
+      onToolEvent: event => {
+        if (isCurrentRun()) updateRunTool(event)
+      },
       onRetry(attempt, total) {
+        if (!isCurrentRun()) return
         status.value = `通道超时，正在重连 ${attempt}/${total}`
       },
+      onContextTrimmed() {
+        if (!isCurrentRun()) return
+        if (contextNoticeShownConversations.has(active.transcript.id)) return
+        contextNoticeShownConversations.add(active.transcript.id)
+        contextNotice.value = '较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中，需要时模型可以查询。准备开始新对话前，可将重要结论填充到 Wiki。'
+      },
       confirmTool: async call => {
+        if (!isCurrentRun()) return false
         if (memoryToolAlwaysAllowedConversations.has(active.transcript.id) && call.function.name !== 'delete') return true
-        return await new Promise<boolean>(resolve => {
+        const approved = await new Promise<boolean>(resolve => {
           pendingMemoryToolApproval.value = {
             message: memoryToolApprovalMessage(call),
             resolve: decision => {
@@ -846,8 +873,10 @@ async function send() {
             },
           }
         })
+        return isCurrentRun() && approved
       },
       onText(text) {
+        if (!isCurrentRun()) return
         status.value = '正在整理回答'
         streamingText.value = text
       },
@@ -1901,6 +1930,10 @@ function readDataUrl(file: File): Promise<string> {
             <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
           </div>
         </div>
+        <div v-if="contextNotice" class="memory-context-notice" role="status">
+          <span>{{ contextNotice }}</span>
+          <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
+        </div>
         <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(error) }" aria-live="polite">
           <div class="memory-run-head">
             <JcIcon :name="error ? 'error' : status === '已完成' ? 'check_circle' : status === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !error }" />
@@ -2173,6 +2206,9 @@ function readDataUrl(file: File): Promise<string> {
 .send-button:disabled { opacity: .4; cursor: default; }
 .memory-status { padding: 6px 12px 0; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-status.error { color: var(--danger); }
+.memory-context-notice { display: flex; align-items: flex-start; gap: 8px; margin: 7px 10px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-context-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.memory-context-notice button { display: grid; width: 22px; height: 22px; flex: 0 0 22px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }
 .memory-run-status { margin: 7px 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
 .memory-run-head { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; }
 .memory-run-head strong { overflow-wrap: anywhere; color: var(--ink1); font-weight: 600; }

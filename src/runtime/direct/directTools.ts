@@ -71,7 +71,7 @@ export async function buildToolResultMessages(
     let result: DirectToolResult
     let status: DirectToolExecutionStatus
     try {
-      result = await executeTool(call)
+      result = await executeTool(call, options.signal)
       if (options.signal?.aborted) {
         result = { content: '工具执行已取消。', status: 'cancelled' }
         status = 'cancelled'

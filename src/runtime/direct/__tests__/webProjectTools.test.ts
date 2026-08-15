@@ -125,6 +125,26 @@ test('web memory artifact tools generate real project files and keep same-name o
   )
 })
 
+test('web project tools do not write a rendered artifact after cancellation', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('取消导出')
+  const controller = new AbortController()
+  const execute = createWebProjectToolExecutor({
+    projectId: project.id,
+    files,
+    renderImage: async () => {
+      controller.abort()
+      return new Blob(['PNG'], { type: 'image/png' })
+    },
+  })
+
+  await assert.rejects(
+    () => execute(call('export_markdown_png', { title: '取消', content: '# 取消' }), controller.signal),
+    error => error instanceof DOMException && error.name === 'AbortError',
+  )
+  assert.equal((await files.list(project.id)).some(entry => entry.path.includes('取消.png')), false)
+})
+
 test('web project tools execute the native Wiki runtime without Python or Node', async () => {
   const files = createWebProjectFiles(memoryAdapter())
   const project = await files.createProject('原生 Wiki')

@@ -119,7 +119,7 @@ export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMe
       }
     } else {
       const text = buildHistoryMessageText(msg); if (!text) continue
-      result.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: text.slice(0, 16000) })
+      result.push({ role: msg.role === 'assistant' ? 'assistant' : 'user', content: text })
     }
   }
   return result.length > 1 ? result : [...result, { role: 'user', content: '请继续。' }]

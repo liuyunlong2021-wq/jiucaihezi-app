@@ -142,8 +142,10 @@ export function createDesktopProjectToolExecutor(input: {
     return await invoke('dev_read_external_file', { path, maxBytes: 30_000_000 })
   }
 
-  async function writeGeneratedFile(path: string, data: Blob | Uint8Array | string): Promise<string> {
+  async function writeGeneratedFile(path: string, data: Blob | Uint8Array | string, signal?: AbortSignal): Promise<string> {
+    signal?.throwIfAborted()
     const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data
+    signal?.throwIfAborted()
     const encoded = typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes
     const result = await invoke('save_generated_file', {
       path: `${requireProject().replace(/[\\/]+$/, '')}/${path}`,
@@ -199,7 +201,8 @@ export function createDesktopProjectToolExecutor(input: {
     return { content: linesPage(file.content, args.offset, args.limit) }
   }
 
-  return async (call): Promise<DirectToolResult> => {
+  return async (call, signal): Promise<DirectToolResult> => {
+    signal?.throwIfAborted()
     const args = parseCreativeToolArguments(call)
     const name = call.function.name
 
@@ -352,13 +355,13 @@ export function createDesktopProjectToolExecutor(input: {
       const blob = await (input.renderImage || renderMemoryArtifactImage)({
         title: String(args.title), content: String(args.content), width: args.width as number | undefined,
       })
-      const path = await writeGeneratedFile(`.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`, blob)
+      const path = await writeGeneratedFile(`.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`, blob, signal)
       return { content: `已导出 Markdown 图片: ${path}` }
     }
 
     if (name === 'create_document') {
       const artifact = createDocumentArtifact(String(args.title), String(args.content), String(args.format) as 'docx' | 'md' | 'txt')
-      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data)
+      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data, signal)
       return { content: `已生成文档: ${path}` }
     }
 
@@ -366,13 +369,14 @@ export function createDesktopProjectToolExecutor(input: {
       const path = await writeGeneratedFile(
         `.raw/jc-media/文档/${artifactFilename(String(args.title), 'html')}`,
         createArtifactHtml(String(args.title), String(args.content)),
+        signal,
       )
       return { content: `已生成 HTML: ${path}` }
     }
 
     if (name === 'export_markdown_slides') {
       const artifact = await createMarkdownSlidesArtifact(String(args.title), String(args.content), String(args.format) as 'html' | 'pdf' | 'pptx')
-      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data)
+      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data, signal)
       return { content: `已生成 Markdown 幻灯片: ${path}` }
     }
 
@@ -383,7 +387,7 @@ export function createDesktopProjectToolExecutor(input: {
       const content = serializeScene3DDocument(scene)
       const path = existingPath
         ? (await invoke('dev_write_file', { root: requireProject(), relativePath: existingPath, content }), existingPath)
-        : await writeGeneratedFile(`.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`, content)
+        : await writeGeneratedFile(`.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`, content, signal)
       return { content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}` }
     }
 
@@ -392,6 +396,7 @@ export function createDesktopProjectToolExecutor(input: {
       if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) throw new Error('白膜场景路径无效')
       const scene = parseScene3DDocument(JSON.parse((await readFile(path)).content))
       const next = applyScene3DEdits(scene, args.operations)
+      signal?.throwIfAborted()
       await invoke('dev_write_file', { root: requireProject(), relativePath: path, content: serializeScene3DDocument(next) })
       return { content: `已增量修改 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: next.title, objectCount: next.objects.length, formationCount: next.formations.length })}` }
     }
@@ -401,9 +406,13 @@ export function createDesktopProjectToolExecutor(input: {
       if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) throw new Error('动画场景路径无效')
       if (!input.recordSceneVideo) throw new Error('当前环境不能录制 3D 动画')
       const scene = parseScene3DDocument(JSON.parse((await readFile(path)).content))
+      signal?.throwIfAborted()
       const recording = await input.recordSceneVideo(scene)
+      signal?.throwIfAborted()
+      const data = new Uint8Array(await recording.arrayBuffer())
+      signal?.throwIfAborted()
       const result = await invoke('dev_export_scene_video', {
-        root: requireProject(), dataBase64: uint8ArrayToBase64(new Uint8Array(await recording.arrayBuffer())),
+        root: requireProject(), dataBase64: uint8ArrayToBase64(data),
         mimeType: recording.type, outputFilename: artifactFilename(scene.title, 'mp4'),
       })
       return { content: `已导出 3D 动画 MP4: ${String(result.path || '')}` }

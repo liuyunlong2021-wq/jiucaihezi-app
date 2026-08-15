@@ -101,6 +101,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/todoTools.test.ts',
   'src/utils/__tests__/toolRegistry.test.ts',
   'src/data/__tests__/mediaModelCapabilities.test.ts',
+  'src/data/__tests__/modelContextWindows.test.ts',
   'src/api/__tests__/mediaGenerationModelGuard.test.ts',
   'src/data/__tests__/mediaModelInputValidation.test.ts',
   'src/services/__tests__/apiKeyCallback.test.ts',

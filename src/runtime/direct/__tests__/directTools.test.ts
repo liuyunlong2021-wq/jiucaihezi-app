@@ -60,3 +60,21 @@ test('buildToolResultMessages appends executor followup messages after tool outp
   assert.equal(messages[1].content, 'Image read successfully')
   assert.equal(messages[2].role, 'user')
 })
+
+test('buildToolResultMessages passes the request abort signal into the executor', async () => {
+  const controller = new AbortController()
+  let receivedSignal: AbortSignal | undefined
+
+  await buildToolResultMessages([
+    {
+      id: 'call_read',
+      type: 'function',
+      function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' },
+    },
+  ], async (_call, signal) => {
+    receivedSignal = signal
+    return { content: 'ok' }
+  }, { signal: controller.signal })
+
+  assert.equal(receivedSignal, controller.signal)
+})

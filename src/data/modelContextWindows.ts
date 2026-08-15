@@ -1,111 +1,32 @@
 /**
  * modelContextWindows.ts — 模型上下文窗口大小映射表
  *
- * 用于 Token 水位计显示。当 NewAPI 返回的模型不在表中时，按模型族推断。
+ * 用于 Token 水位计显示。Gateway 未声明能力时，云端统一采用产品默认值。
  * 所有值以 tokens 为单位。
  */
 
-/** 已知模型的精确上下文窗口 */
-const KNOWN_WINDOWS: Record<string, number> = {
-  // ─── Claude ───
-  'claude-opus-4-7': 1_000_000,
-  'claude-opus-4-6': 1_000_000,
-  'claude-opus-4-5': 1_000_000,
-  'claude-sonnet-4-6': 1_000_000,
-  'claude-sonnet-4-5': 1_000_000,
-  'claude-haiku-4-5': 1_000_000,
-  'claude-3.5-sonnet': 200_000,
-  'claude-3.5-haiku': 200_000,
-
-  // ─── GPT ───
-  'gpt-5.5': 1_000_000,
-  'gpt-5.4': 1_000_000,
-  'gpt-5.3': 1_000_000,
-  'gpt-5.2': 1_000_000,
-  'gpt-5.1': 1_000_000,
-  'gpt-5': 1_000_000,
-  'gpt-4o': 128_000,
-  'gpt-4o-mini': 128_000,
-  'gpt-4-turbo': 128_000,
-  'o1': 200_000,
-  'o1-mini': 200_000,
-  'o1-preview': 128_000,
-  'o3-mini': 200_000,
-  'o3': 200_000,
-  'o4-mini': 200_000,
-
-  // ─── Gemini ───
-  'gemini-3.1-pro-preview': 1_000_000,
-  'gemini-3.1-flash-lite-preview': 1_000_000,
-  'gemini-3.0-pro': 1_000_000,
-  'gemini-3.0-flash': 1_000_000,
-  'gemini-2.5-pro': 1_000_000,
-  'gemini-2.5-flash': 1_000_000,
-  'gemini-2.0-flash': 1_000_000,
-
-  // ─── DeepSeek ───
-  'deepseek-v4-pro': 1_000_000,
-  'deepseek-v4-flash': 1_000_000,
-  'deepseek-v3': 128_000,
-  'deepseek-r1': 128_000,
-  'deepseek-chat': 128_000,
-
-  // ─── Qwen ───
-  'qwen3.6-plus': 128_000,
-  'qwen3.6': 128_000,
-  'qwen3.5': 128_000,
-  'qwen3-235b': 128_000,
-  'qwen2.5-72b': 128_000,
-
-  // ─── Grok ───
-  'grok-3': 131_072,
-  'grok-3-mini': 131_072,
-
-  // ─── OpenRouter Free ───
-  'openai/gpt-oss-120b:free': 32_000,
-  'google/gemma-4-31b-it:free': 32_000,
-
-  // ─── 本地 Ollama ─── (默认值，用户可配置)
-  // 本地模型通过 LOCAL_OLLAMA_PROVIDER_ID 标识，默认 32768（32K）
-}
-
-/**
- * 根据模型族前缀推断上下文窗口（未在 KNOWN_WINDOWS 中精确匹配时）
- */
-function inferByFamily(modelId: string): number {
-  const id = modelId.toLowerCase()
-  if (id.includes('claude')) return 200_000
-  if (id.includes('gpt-5')) return 128_000
-  if (id.includes('gpt-4')) return 128_000
-  if (id.includes('o1') || id.includes('o3') || id.includes('o4')) return 200_000
-  if (id.includes('gemini')) return 1_000_000
-  if (id.includes('deepseek')) return 128_000
-  if (id.includes('qwen')) return 128_000
-  if (id.includes('grok')) return 131_072
-  if (id.includes('gemma')) return 32_000
-  if (id.includes('llama')) return 128_000
-  if (id.includes('mistral')) return 128_000
-  if (id.includes('mixtral')) return 32_000
-  // Free/OSS 模型通常较小
-  if (id.includes(':free')) return 32_000
-  return 128_000 // 默认 128K（最常见的窗口大小）
-}
+export const DEFAULT_CLOUD_CONTEXT_WINDOW = 1_000_000
+export const DEFAULT_CLOUD_MAX_OUTPUT_TOKENS = 128_000
+export const DEFAULT_LOCAL_CONTEXT_WINDOW = 32_768
+export const DEFAULT_LOCAL_MAX_OUTPUT_TOKENS = 4_096
 
 /**
  * 获取模型的上下文窗口大小
- * @returns tokens 数，未知模型返回 128K
+ * @returns tokens 数，未知云端模型返回 1M
  */
 export function getModelContextWindow(modelId: string, providerId?: string): number {
-  // 精确匹配
-  if (KNOWN_WINDOWS[modelId]) return KNOWN_WINDOWS[modelId]
+  // 本地运行时保守使用 32K，避免把云端默认能力误用于本机模型。
+  if (providerId === 'local-ollama' || providerId === 'local-mlx') return DEFAULT_LOCAL_CONTEXT_WINDOW
 
-  // 本地模型默认 32768（32K）。OpenCode 文/武模式系统提示词+工具定义约 7-10K tokens，
-  // 低于 32K 会被截断导致模型无法看到工具定义 → 无法调用工具，只能纯文本回复。
-  // 多数现代开源模型（7B+）实际支持 32K-128K，此默认值确保工具可用，后续可按需提高。
-  if (providerId === 'local-ollama' || providerId === 'local-mlx') return 32768
+  if (modelId.toLowerCase().includes(':free')) return 32_000
+  return DEFAULT_CLOUD_CONTEXT_WINDOW
+}
 
-  // 按模型族推断
-  return inferByFamily(modelId)
+/** 单次输出默认上限；真实 Gateway 元数据优先于此兜底值。 */
+export function getModelMaxOutputTokens(modelId: string, providerId?: string): number {
+  if (providerId === 'local-ollama' || providerId === 'local-mlx') return DEFAULT_LOCAL_MAX_OUTPUT_TOKENS
+  if (modelId.toLowerCase().includes(':free')) return 32_000
+  return DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
 }
 
 /**

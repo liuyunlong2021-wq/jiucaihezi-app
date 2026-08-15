@@ -217,6 +217,9 @@ test('memory composer keeps quick and memory execution in one Raw conversation',
   assert.match(runtime, /attachments: memoryMode \? input\.attachments : undefined/)
   assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
   assert.match(runtime, /conversationDocumentSources\(input\.conversationTurns\.filter\(turn => contextualTurnIds\.has\(turn\.id\)\)\)/)
+  assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
+  assert.match(workbench, /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.has\(active\.transcript\.id\)/)
+  assert.match(workbench, /较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中/)
   assert.match(runtime, /historicalDocumentSources\.length[\s\S]*正文和上一轮工具结果没有重复注入[\s\S]*JSON\.stringify\(historicalDocumentSources\)/)
   assert.match(workbench, /mode === 'quick'[\s\S]*attachments\.value = \[\][\s\S]*referencedFiles\.value = \[\][\s\S]*selectedSkillNames\.value = \[\]/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{\s*executionMode\.value = 'memory'/)
@@ -391,7 +394,6 @@ test('memory run status follows real tool start and end events without entering 
   assert.match(runtime, /onToolEvent\?: \(event: DirectToolExecutionEvent\) => void/)
   assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 3)
   assert.doesNotMatch(runtime, /event\.type === 'tool_execution_start'\) input\.onToolEvent/)
-  assert.match(workbench, /onToolEvent: updateRunTool/)
   assert.match(workbench, /event\.type === 'tool_execution_start'[\s\S]*status\.value = `正在\$\{label\}`/)
   assert.match(workbench, /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*正在等待模型继续处理/)
   assert.match(workbench, /v-if="runVisible" class="memory-run-status"/)
@@ -415,6 +417,25 @@ test('memory retries transient requests and writes one Raw recovery point only a
   assert.match(workbench, /:contenteditable="!sending"/)
   assert.match(workbench, /title="添加附件" :disabled="sending"/)
   assert.match(workbench, /title="移除附件" :disabled="sending"/)
+})
+
+test('memory ignores stale streaming callbacks and stale resource loads', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /const isCurrentRun = \(\) => runGeneration === memoryRunGeneration/)
+  assert.match(workbench, /onRetry\(attempt, total\) \{\s*if \(!isCurrentRun\(\)\) return/)
+  assert.match(workbench, /onText\(text\) \{\s*if \(!isCurrentRun\(\)\) return/)
+  assert.match(workbench, /onToolEvent: event => \{\s*if \(isCurrentRun\(\)\) updateRunTool\(event\)/)
+  assert.match(workbench, /let resourceOpenGeneration = 0/)
+  assert.match(workbench, /const generation = \+\+resourceOpenGeneration[\s\S]*if \(generation !== resourceOpenGeneration\) return/)
+  assert.match(workbench, /let conversationSelectionGeneration = 0/)
+})
+
+test('model catalog coalesces concurrent refreshes', () => {
+  const store = source('src/stores/agentStore.ts')
+
+  assert.match(store, /let modelsFetchPromise: Promise<void> \| null = null/)
+  assert.match(store, /modelsFetchPromise \|\|= fetchModelsOnce\(\)\.finally/)
 })
 
 test('memory Desktop keeps always-allow for the current conversation in this App session', () => {

@@ -29,6 +29,8 @@ export interface RunDirectChatCompletionOptions {
   allowToolCalls?: boolean
   continueOnInterruption?: boolean
   continueToolsOnInterruption?: boolean
+  continueOnLength?: boolean
+  maxLengthContinuations?: number
   signal?: AbortSignal
 }
 
@@ -99,9 +101,11 @@ export async function runDirectChatCompletion(
   })
   let toolRounds = 0
   let fallbackText = ''
+  let lengthPrefix = ''
+  let lengthContinuations = 0
   let lastFailedToolSignature = ''
 
-  const executeToolWithRepeatGuard: DirectToolExecutor = async call => {
+  const executeToolWithRepeatGuard: DirectToolExecutor = async (call, signal) => {
     const signature = `${call.function.name}\u0000${call.function.arguments}`
     if (signature === lastFailedToolSignature) {
       return {
@@ -111,7 +115,7 @@ export async function runDirectChatCompletion(
     }
     lastFailedToolSignature = ''
     try {
-      const result = await executeTool(call)
+      const result = await executeTool(call, signal)
       if (result.status === 'failed') lastFailedToolSignature = signature
       return result
     } catch (error) {
@@ -124,22 +128,24 @@ export async function runDirectChatCompletion(
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     const toolCallAccumulator: Record<number, DirectToolCall> = {}
     const response = await options.sendChatCompletion({ messages: [...messages], tools: options.tools })
+    const streamPrefix = lengthPrefix
     let stream
     try {
-      stream = await readChatCompletionDetails(response, options.onText, toolCallAccumulator)
+      stream = await readChatCompletionDetails(response, value => options.onText(joinText(streamPrefix, value)), toolCallAccumulator)
     } catch (error) {
       if (options.continueOnInterruption === false) throw error
       if (!(error instanceof DirectStreamInterruptionError) || options.signal?.aborted || Object.keys(toolCallAccumulator).length) throw error
-      const partialText = error.partialText
+      const partialSegment = error.partialText
+      const partialText = joinText(streamPrefix, partialSegment)
       if (partialText) {
         fallbackText = partialText
         options.onText(partialText)
       }
       const continuationMessages: DirectApiMessage[] = [
         ...messages,
-        ...((error.partialText || error.reasoning) ? [{
+        ...((partialSegment || error.reasoning) ? [{
           role: 'assistant',
-          content: error.partialText || null,
+          content: partialSegment || null,
           ...(error.reasoning ? { [error.reasoning.field]: error.reasoning.value } : {}),
         }] : []),
         { role: 'user', content: options.continueToolsOnInterruption
@@ -168,6 +174,7 @@ export async function runDirectChatCompletion(
           if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
           if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
           allToolCalls.push(...continuationToolCalls)
+          if (streamPrefix) lengthPrefix = partialText
           messages.push(...continuationMessages.slice(messages.length))
           messages.push(...await buildToolResultMessages(continuationToolCalls, executeToolWithRepeatGuard, {
             signal: options.signal,
@@ -206,8 +213,18 @@ export async function runDirectChatCompletion(
       }))
       .map(toolCall => normalizeToolCall(toolCall, options.tools))
     if (!toolCalls.length) {
+      const maxLengthContinuations = Math.max(0, options.maxLengthContinuations ?? 3)
+      if (stream.finishReason === 'length' && options.continueOnLength !== false && lengthContinuations < maxLengthContinuations) {
+        lengthPrefix = joinText(lengthPrefix, text)
+        messages.push(
+          { role: 'assistant', content: text || null, ...(stream.reasoning ? { [stream.reasoning.field]: stream.reasoning.value } : {}) },
+          { role: 'user', content: '上一段回答达到输出上限。请从末尾继续，不要重复已有内容。' },
+        )
+        lengthContinuations += 1
+        continue
+      }
       return {
-        text: text || fallbackText,
+        text: joinText(lengthPrefix, text) || fallbackText,
         toolCalls: allToolCalls,
         usedSecondPass: toolRounds > 0,
         finishReason: stream.finishReason,

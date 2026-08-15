@@ -142,6 +142,45 @@ test('runDirectChatCompletion does not continue an interrupted stream when conti
   assert.equal(requests, 1)
 })
 
+test('runDirectChatCompletion continues a length-limited answer a bounded number of times', async () => {
+  const requests: any[] = []
+  const responses = [
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '前半段。' }, finish_reason: 'length' }] }), '[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '后半段。' }, finish_reason: 'stop' }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写长文' }],
+    onText: () => {},
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return responses.shift()!
+    },
+  })
+
+  assert.equal(result.text, '前半段。后半段。')
+  assert.equal(requests.length, 2)
+  assert.match(requests[1].messages.at(-1).content, /达到输出上限/)
+})
+
+test('runDirectChatCompletion preserves earlier length segments when a continuation stream is interrupted', async () => {
+  const seen: string[] = []
+  const responses = [
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '第一段。' }, finish_reason: 'length' }] }), '[DONE]']),
+    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '第二段。' } }] })]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '第三段。' }, finish_reason: 'stop' }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写完整长文' }],
+    onText: value => seen.push(value),
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(result.text, '第一段。第二段。第三段。')
+  assert.equal(seen.at(-1), '第一段。第二段。第三段。')
+})
+
 test('runDirectChatCompletion reports the normalized tool id used by the tool result', async () => {
   const reportedCalls: string[] = []
   const executedCalls: string[] = []

@@ -204,6 +204,8 @@ export interface GatewayModelEntry {
   label: string
   providerId: 'jiucaihezi'
   capability: 'text' | 'image' | 'video' | 'audio'
+  contextWindow?: number
+  maxOutputTokens?: number
   channel?: string
   taskTypes?: string[]
   toolCall?: boolean
@@ -622,6 +624,8 @@ export function normalizeGatewayModels(payload: any): GatewayModelEntry[] {
         label: String(item?.label || item?.name || item?.displayName || item?.display_name || id),
         providerId: 'jiucaihezi' as const,
         capability,
+        contextWindow: positiveNumber(item?.contextWindow ?? item?.context_window),
+        maxOutputTokens: positiveNumber(item?.maxOutputTokens ?? item?.max_output_tokens),
         channel: item?.channel ? String(item.channel) : undefined,
         taskTypes,
         toolCall: typeof item?.tool_call === 'boolean'
@@ -630,6 +634,11 @@ export function normalizeGatewayModels(payload: any): GatewayModelEntry[] {
       }
     })
     .filter(Boolean) as GatewayModelEntry[]
+}
+
+function positiveNumber(value: unknown): number | undefined {
+  const number = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : undefined
 }
 
 export function normalizeGatewayTopupOrder(input: any): GatewayTopupOrder {

@@ -32,6 +32,8 @@ import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog
 import { buildMediaPlanPolicy } from '@/runtime/workbench/mediaPlan'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
 import { getModelContextWindow } from '@/data/modelContextWindows'
+import { getModelMaxOutputTokens } from '@/data/modelContextWindows'
+import { estimateTokenCount } from 'tokenx'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { safeFetch } from '@/utils/httpClient'
@@ -58,6 +60,7 @@ export interface MemoryChatInput {
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
   onRetry?: (attempt: number, total: number) => void
+  onContextTrimmed?: (omittedMessages: number) => void
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
   recordSceneVideo?: (document: Scene3DDocument, signal?: AbortSignal) => Promise<Blob>
 }
@@ -90,14 +93,17 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const catalog = memoryMode
     ? mergeCreativeSkillCatalog(customSkills, await loadWebSkillCatalog())
     : []
-  const contextWindow = getModelContextWindow(input.modelId, providerId)
+  const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
+  const maxOutputTokens = model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
   const context = buildCreativeContext({
     messages: [...input.conversationTurns, input.userTurn],
     modelId: input.modelId,
     contextWindow,
-    reservedTokens: Math.min(16_384, Math.floor(contextWindow / 4)),
+    // Reserve the model output ceiling plus a small protocol/tool allowance.
+    reservedTokens: maxOutputTokens + 32_768,
   })
   const contextualTurnIds = new Set(context.messages.map(message => message.id))
+  if (memoryMode && context.omittedMessages > 0) input.onContextTrimmed?.(context.omittedMessages)
   const historicalDocumentSources = memoryMode
     ? conversationDocumentSources(input.conversationTurns.filter(turn => contextualTurnIds.has(turn.id)))
     : []
@@ -138,17 +144,19 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   })
   const body = {
     model: config.model,
-    messages,
     temperature: 0.3,
-    max_tokens: 4096,
     stream: true,
     ...buildChatCompletionExtras(config),
   }
   const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
+    const inputTokens = estimateRequestTokens(request.messages, request.tools)
+    const availableOutputTokens = Math.max(1, contextWindow - inputTokens)
+    const requestMaxTokens = Math.min(maxOutputTokens, availableOutputTokens)
     const response = await sendDirectRequestWithRetry(() => sendNewApiRequest(
       {
         ...body,
         messages: request.messages,
+        max_tokens: requestMaxTokens,
         ...(request.tools?.length ? { tools: request.tools } : {}),
       },
       payload => safeFetch(`${config.apiBase}/v1/chat/completions`, {
@@ -195,7 +203,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
 
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   const builtInNames = new Set(catalog.filter(skill => skill.source === 'builtin').map(skill => skill.name))
-  const executeMemoryTool = async (call: DirectToolCall) => {
+  const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
+    signal?.throwIfAborted()
     if (call.function.name === 'skill') {
       const skillName = String(parseArguments(call.function.arguments).name || '')
       const customSkill = !builtInNames.has(skillName) ? customSkillsByName.get(skillName) : null
@@ -204,7 +213,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       }
     }
     assertMemoryProjectMutationProtected(call)
-    const toolResult = await projectTools(call)
+    const toolResult = await projectTools(call, signal)
     if (call.function.name === 'create_3d_scene') {
       for (const marker of parseScene3DResultMarkers(toolResult.content)) sceneResults.set(marker.path, marker)
     }
@@ -266,6 +275,10 @@ function assertMemoryProjectMutationProtected(call: DirectToolCall): void {
       throw new Error('系统骨架及对话、画布记录只能由 App 管理')
     }
   }
+}
+
+function estimateRequestTokens(messages: DirectApiMessage[], tools?: unknown[]): number {
+  return estimateTokenCount(JSON.stringify(messages)) + estimateTokenCount(JSON.stringify(tools || []))
 }
 
 function parseArguments(value: string): Record<string, unknown> {

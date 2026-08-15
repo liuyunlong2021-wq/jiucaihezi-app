@@ -27,6 +27,18 @@ test('builds creative context by capacity without mandatory Wiki injection', () 
 
   assert.deepEqual(result.messages.map(message => message.id), ['u2'])
   assert.ok(result.estimatedTokens <= 150)
+  assert.equal(result.omittedMessages, 2)
+})
+
+test('buildCreativeContext estimates Chinese text with the installed multilingual estimator', () => {
+  const result = buildCreativeContext({
+    messages: [{ id: 'u1', role: 'user', content: '中文'.repeat(1_000) }],
+    modelId: 'claude-sonnet-4-6',
+    contextWindow: 10_000,
+    reservedTokens: 0,
+  })
+
+  assert.ok(result.estimatedTokens > 1_000)
 })
 
 test('buildCreativeContext excludes failed assistant UI errors and their user turns', () => {

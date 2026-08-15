@@ -9,7 +9,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
-import { getModelContextWindow } from '@/data/modelContextWindows'
+import { getModelContextWindow, getModelMaxOutputTokens } from '@/data/modelContextWindows'
 import { parseSkillMd, serializeToSkillMd } from '../types/skill'
 import { gatewayModels } from '@/services/newApiClient'
 import { invoke } from '@tauri-apps/api/core'
@@ -49,6 +49,8 @@ export interface ModelEntry {
   capability?: 'text' | 'image' | 'video' | 'audio'
   /** 模型上下文 token 上限 */
   contextWindow?: number
+  /** 模型单次输出 token 上限 */
+  maxOutputTokens?: number
   toolCall?: boolean
   inputModalities?: ModelInputModality[]
   variants?: string[]
@@ -192,6 +194,7 @@ export const useAgentStore = defineStore('agents', () => {
   const availableModels = ref<ModelEntry[]>(mergeLocalModels(getInitialModels()))
   const modelsFetched = ref(false)
   const modelsFetchError = ref('')
+  let modelsFetchPromise: Promise<void> | null = null
 
   function syncModelProviderStorage(modelId = currentModel.value, explicitProviderId?: string) {
     const model = availableModels.value.find(x => x.id === modelId) || modelId
@@ -250,13 +253,23 @@ export const useAgentStore = defineStore('agents', () => {
           providerId,
           inputModalities: item.input_modalities || item.inputModalities,
         }),
-        contextWindow: getModelContextWindow(id, providerId),
+        contextWindow: typeof item.contextWindow === 'number' && item.contextWindow > 0
+          ? item.contextWindow
+          : getModelContextWindow(id, providerId),
+        maxOutputTokens: typeof item.maxOutputTokens === 'number' && item.maxOutputTokens > 0
+          ? item.maxOutputTokens
+          : getModelMaxOutputTokens(id, providerId),
       }
     }).filter(Boolean) as ModelEntry[]
   }
 
   /** 静默从 Gateway 拉取模型列表，失败时保留现有缓存。 */
-  async function fetchModels() {
+  function fetchModels(): Promise<void> {
+    modelsFetchPromise ||= fetchModelsOnce().finally(() => { modelsFetchPromise = null })
+    return modelsFetchPromise
+  }
+
+  async function fetchModelsOnce() {
     // 网关请求带一次重试（缓解偶发 ERR_CONNECTION_CLOSED）
     async function gatewayWithRetry(): Promise<ModelEntry[] | null> {
       try {
