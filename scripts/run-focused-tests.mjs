@@ -9,6 +9,7 @@ const wave1FocusedTests = [
   'src/components/canvas/__tests__/canvasAssetUrlResolver.test.ts',
   'src/components/mcp/__tests__/mcpManagerPanel.test.ts',
   'src/components/__tests__/creationPanelContractUi.test.ts',
+  'src/components/__tests__/desktopProjectDrop.test.ts',
   'src/components/chat/display/__tests__/streamingTextRenderer.test.ts',
   'src/components/chat/display/__tests__/markdownDisplayPolicy.test.ts',
   'src/components/__tests__/skillSourcesContract.test.ts',

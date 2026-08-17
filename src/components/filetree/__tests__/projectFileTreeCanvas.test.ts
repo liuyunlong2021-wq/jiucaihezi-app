@@ -70,33 +70,22 @@ test('project file tree adds images videos and audio to canvas as selectable med
   assert.match(source, /return resourceForNode\(node\)\.kind === 'media'/)
 })
 
-test('project file tree virtualizes rows and only queues thumbnails for rendered media', () => {
+test('project file tree virtualizes rows and uses file-type icons without thumbnail work', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
   )
-  const load =
-    source.match(
-      /async function loadMediaThumbnail[\s\S]*?\n}\nfunction pumpMediaThumbnailQueue/,
-    )?.[0] || ''
 
   assert.match(source, /import \{ useVirtualizer \} from '@tanstack\/vue-virtual'/)
   assert.match(source, /const fileTreeVirtualizer = useVirtualizer/)
   assert.match(source, /const virtualVisibleNodes = computed/)
   assert.match(source, /fileTreeVirtualizer\.getTotalSize\(\)/)
   assert.match(source, /v-for="\{ row, item \} in virtualVisibleNodes"/)
-  assert.match(source, /resolveProjectVideoThumbnail/)
-  assert.match(source, /class="pft-media-thumb"/)
-  assert.match(source, /const MAX_CONCURRENT_THUMBNAILS = 1/)
-  assert.match(source, /function enqueueMediaThumbnail\(node: TreeNode\)/)
-  assert.match(
-    source,
-    /function enqueueMediaThumbnail\(node: TreeNode\) \{\s+const owner = projectKey\.value/,
-  )
-  assert.match(load, /async function loadMediaThumbnail\(node: TreeNode, owner: string\)/)
-  assert.match(load, /if \(\s*!isDesktop \|\|\s*!owner \|\|\s*!isCanvasMediaFile/)
-  assert.match(load, /resolveProjectVideoThumbnail\(owner, node\.path\)/)
-  assert.match(load, /if \(owner !== projectKey\.value\) return/)
+  assert.match(source, /<JcIcon :name="iconForNode\(item\.node\)" class="pft-icon" \/>/)
+  assert.match(source, /class="pft-name" :title="item\.node\.name"/)
+  assert.doesNotMatch(source, /mediaThumbnail/)
+  assert.doesNotMatch(source, /resolveProjectVideoThumbnail/)
+  assert.doesNotMatch(source, /pft-media-thumb/)
   assert.doesNotMatch(source, /async function webNodeUrl/)
 })
 

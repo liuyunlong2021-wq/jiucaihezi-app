@@ -75,6 +75,17 @@ test('Rust-backed chat streams have no total duration cutoff', () => {
   assert.doesNotMatch(source, /timeout_secs:\s*new URL\(url\)\.pathname === '\/global\/event' \? undefined : 120/)
 })
 
+test('Desktop video submission leaves headroom above the adapter deadline', () => {
+  const source = readFileSync('src/utils/httpClient.ts', 'utf8')
+  const picker = source.match(/function pickTimeoutForUrl[\s\S]*?\n}/)?.[0] || ''
+
+  assert.equal(picker.includes("if (/\\/v1\\/models\\b/.test(url)) return 5"), true)
+  assert.equal(picker.includes("if (/\\/v1\\/images\\/(generations|edits)\\b/.test(url)) return 300"), true)
+  assert.equal(picker.includes("if (/\\/v1\\/videos\\b/.test(url) && !/\\/v1\\/videos\\/[^/]+$/.test(url)) return 150"), true)
+  assert.equal(picker.includes("if (/\\/suno\\/submit/.test(url)) return 60"), true)
+  assert.equal(picker.includes('return 30'), true)
+})
+
 test('Tauri opens external URLs through the official opener plugin', () => {
   const source = readFileSync('src/utils/httpClient.ts', 'utf8')
   assert.match(source, /@tauri-apps\/plugin-opener/)

@@ -39,6 +39,16 @@ test('creation panel counts only tasks with a live runtime execution as generati
   )
 })
 
+test('creation panel scopes an optional media-plan summary to its original prompt', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /let mediaTaskSummary: \{ value: string; prompt: string \} \| null = null/)
+  assert.match(source, /mediaTaskSummary = \{ value: plan\.title, prompt: plan\.prompt \}/)
+  assert.match(source, /mediaTaskSummary\?\.prompt === cpState\.prompt/)
+  assert.match(source, /summary: taskSummary/)
+  assert.doesNotMatch(source, /mediaTaskTitle/)
+})
+
 test('creation prompt grows for typed and programmatically loaded text', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
@@ -490,13 +500,28 @@ test('creation panel consumes project-tree media drops and delegates task previe
 test('creation panel persists direct Web and Desktop imports before adding them to canvas', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const addFiles = source.match(/async function addCanvasFiles[\s\S]*?\n}\n\nfunction onCanvasImport/)?.[0] || ''
+  const desktopImport = source.match(
+    /async function importDesktopCanvasPaths[\s\S]*?\n}\n\nconst offDesktopProjectDrop/,
+  )?.[0] || ''
 
   assert.doesNotMatch(addFiles, /Web 端暂不支持直接拖入或粘贴媒体/)
-  assert.match(addFiles, /writeProjectMedia/)
-  assert.match(addFiles, /isTauriRuntime\(\) \? persisted\.filePath : persisted\.projectPath/)
+  assert.match(addFiles, /projectFileActions\.importMedia/)
+  assert.match(addFiles, /memoryMediaDirectoryFor/)
+  assert.doesNotMatch(addFiles, /writeProjectMedia/)
+  assert.match(source, /function canvasImportBlocked\(\)[\s\S]*?cpState\.progressText/)
+  assert.ok((source.match(/if \(canvasImportBlocked\(\)\)/g) || []).length >= 3)
+  assert.match(desktopImport, /if \(canvasImportBlocked\(\)\) return/)
   assert.match(source, /class="cp-add-reference"/)
   assert.match(source, /aria-label="上传并选为参考素材"/)
   assert.match(source, /width: 34px/)
+  assert.match(
+    source,
+    /class="cp-prompt-wrap"[\s\S]*?class="cp-prompt-entry"[\s\S]*?class="cp-add-reference"/,
+  )
+  assert.match(source, /\.cp-prompt-entry \.cp-add-reference \{[\s\S]*?position: absolute/)
+  assert.match(source, /\.cp-prompt-input \{[\s\S]*?padding-bottom: 38px/)
+  assert.doesNotMatch(source, /\.cp-drag-over/)
+  assert.doesNotMatch(source, /flex: 0 0 34px/)
   assert.doesNotMatch(source, />添加参考素材</)
 })
 
@@ -562,7 +587,7 @@ test('canvas file imports retain their owner only after project persistence', ()
   )
   assert.match(
     addFiles,
-    /await addMediaToCanvas\([\s\S]{0,380}filePath,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
+    /await addMediaToCanvas\([\s\S]{0,380}resource\.path,[\s\S]{0,80}kind,[\s\S]{0,80}'drop',[\s\S]{0,180}captureCanvasMediaRequest\([\s\S]{0,240}ownership[\s\S]{0,80}\)/,
   )
   assert.match(
     addFiles,
@@ -832,5 +857,68 @@ test('creation panel lets a remote successful result be saved into its project',
   assert.match(
     source,
     /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| \(task\.resultUrl && !canPersistMediaResult\(task\)\)\)\s+"\s+@click="previewTask\(task\)"/,
+  )
+})
+
+test('successful, failed and cancelled creation tasks can prefill the panel without resubmitting', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const regenerate = source.match(
+    /function canRegenerateTask[\s\S]*?\n}\n\nfunction regenerateTask[\s\S]*?\n}\n\nasync function retryTaskPersistence/,
+  )?.[0] || ''
+
+  assert.match(regenerate, /task\.source === 'creation'/)
+  assert.match(regenerate, /task\.status === 'success'/)
+  assert.match(regenerate, /task\.status === 'failed'/)
+  assert.match(regenerate, /task\.status === 'cancelled'/)
+  assert.match(regenerate, /Boolean\(task\.planSnapshot\)/)
+  assert.match(regenerate, /switchTask\(plan\.task\)/)
+  assert.match(regenerate, /switchModel\(plan\.modelId\)/)
+  assert.match(regenerate, /cpState\.fieldValues = \{\}/)
+  assert.match(regenerate, /cpState\.prompt = task\.prompt/)
+  assert.match(regenerate, /cpState\.files = \[\]/)
+  assert.match(regenerate, /showTaskHistory\.value = false/)
+  assert.doesNotMatch(regenerate, /submitTask/)
+  assert.match(source, /v-if="canRegenerateTask\(task\)" @click="regenerateTask\(task\)">重新生成<\/button>/)
+})
+
+test('creation history and chat task bubble share and await the media task cancellation entry', () => {
+  const panel = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const bubble = readFileSync(join(root, 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
+
+  assert.match(panel, /async function cancelTask\(task: MediaTask\)[\s\S]*await mediaTaskStore\.cancelTask\(task\.id\)/)
+  assert.match(panel, /v-if="mediaTaskStore\.canCancelTask\(task\.id\)"/)
+  assert.match(panel, /@click="cancelTask\(task\)"[\s\S]{0,120}title="取消任务"/)
+  assert.match(bubble, /async function cancel\(\)[\s\S]*await taskStore\.cancelTask\(props\.taskId\)/)
+  assert.match(bubble, /v-if="taskStore\.canCancelTask\(task\.id\)"/)
+  assert.match(bubble, /title="取消任务"/)
+})
+
+test('chat task bubble renders text success and precise cancellation as separate terminal states', () => {
+  const bubble = readFileSync(join(root, 'src/components/chat/MediaTaskBubble.vue'), 'utf8')
+
+  assert.match(bubble, /task\.type === 'text' && task\.resultText/)
+  assert.match(bubble, /task\.status === 'cancelled'/)
+  assert.match(bubble, /task\.progressText \|\| '已取消'/)
+  assert.doesNotMatch(bubble, /<!-- 已取消 -->\s*<div v-else class="mtb-cancelled">/)
+})
+
+test('remote-only successful tasks can copy a safe result URL without downloading it', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const copy = source.match(
+    /function canCopyTaskResultUrl[\s\S]*?\n}\n\nasync function copyTaskResultUrl[\s\S]*?\n}/,
+  )?.[0] || ''
+
+  assert.match(source, /import \{ isAllowedCreationResultUrl, isSafePublicHttpUrl \} from '@\/utils\/urlSafety'/)
+  assert.match(source, /import \{ writeClipboardText \} from '@\/utils\/clipboard'/)
+  assert.match(copy, /task\.status === 'success'/)
+  assert.match(copy, /!task\.projectPath/)
+  assert.match(copy, /!task\.assetUri/)
+  assert.match(copy, /isSafePublicHttpUrl\(task\.resultUrl\)/)
+  assert.doesNotMatch(copy, /isAllowedCreationResultUrl\(task\.resultUrl\)/)
+  assert.match(copy, /await writeClipboardText\(task\.resultUrl\)/)
+  assert.doesNotMatch(copy, /fetch\(|download|retryMediaPersistence|regenerateTask/)
+  assert.match(
+    source,
+    /v-if="canCopyTaskResultUrl\(task\)" @click="copyTaskResultUrl\(task\)">复制链接<\/button>/,
   )
 })

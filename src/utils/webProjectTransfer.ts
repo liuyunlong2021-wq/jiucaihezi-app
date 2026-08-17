@@ -38,6 +38,11 @@ export interface ImportWebProjectResult extends WriteWebProjectEntriesResult {
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
+async function blobHash(blob: Blob): Promise<string> {
+  const hash = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', await blob.arrayBuffer()))
+  return Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
 function normalizePath(input: string): string {
   const raw = String(input || '').replace(/\\/g, '/')
   if (raw.startsWith('/') || raw.includes('\0')) throw new Error('项目路径无效')
@@ -92,17 +97,35 @@ export async function writeWebProjectEntries(
   for (const sourceEntry of entries) {
     const path = normalizePath(sourceEntry.path)
     const entry = { ...sourceEntry, path }
+    const normalized = path.normalize('NFC').toLocaleLowerCase()
+    const existing = (await files.list(projectId)).find(item =>
+      !item.isDir && item.path.normalize('NFC').toLocaleLowerCase() === normalized,
+    )
+    const collisionPath = existing?.path || path
+    if (existing) {
+      const existingRecord = await files.read(projectId, existing.path)
+      const existingBlob = existingRecord.metadata?.binaryStorage === 'opfs'
+        ? await files.readBinary(projectId, existing.path)
+        : new Blob([existingRecord.content], { type: existingRecord.mimeType || 'text/plain' })
+      const category = entry.kind === 'binary'
+        ? binaryCategory(entry.category, entry.mimeType)
+        : 'text'
+      if (existingRecord.category === category && await blobHash(existingBlob) === await blobHash(entry.blob)) {
+        importedPaths.push(existing.path)
+        continue
+      }
+    }
     const onCollision = options.resolveCollision
       ? async (collisionPath: string) => await options.resolveCollision!({ projectId, path: collisionPath, entry })
       : undefined
     try {
       const written = entry.kind === 'binary'
-        ? await files.writeBinary(projectId, path, entry.blob, {
+        ? await files.writeBinary(projectId, collisionPath, entry.blob, {
           category: binaryCategory(entry.category, entry.mimeType),
           mimeType: entry.mimeType || 'application/octet-stream',
           onCollision,
         })
-        : await files.write(projectId, path, await entry.blob.text(), { onCollision })
+        : await files.write(projectId, collisionPath, await entry.blob.text(), { onCollision })
       importedPaths.push(entryPath(written))
     } catch (error) {
       if (error instanceof WebProjectCollisionCancelledError) {

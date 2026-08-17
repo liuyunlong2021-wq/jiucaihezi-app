@@ -3,8 +3,9 @@ use base64::Engine as _;
 use base64::engine::general_purpose;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::Command as StdCommand;
 use std::sync::{Mutex, OnceLock};
@@ -179,6 +180,29 @@ fn copy_file_new(source: &Path, target: &Path) -> Result<(), String> {
     result
 }
 
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let mut file = std::fs::File::open(path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = file
+            .read(&mut buffer)
+            .map_err(|e| format!("读取文件失败: {}", e))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn normalized_import_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_lowercase()
+}
+
 fn collect_directory_entries(source: &Path) -> Result<Vec<(PathBuf, PathBuf, bool)>, String> {
     let metadata = std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
     if metadata.file_type().is_symlink() {
@@ -249,7 +273,8 @@ pub fn import_external_files(
 ) -> Result<Vec<String>, String> {
     let target_directory = resolve_import_target_directory(root, target_relative)?;
     let mut targets = HashSet::new();
-    let mut planned = Vec::new();
+    let mut planned: Vec<(PathBuf, PathBuf, PathBuf, String)> = Vec::new();
+    let mut imported = Vec::with_capacity(sources.len());
     for source in sources {
         let metadata =
             std::fs::symlink_metadata(source).map_err(|e| format!("读取来源失败: {}", e))?;
@@ -259,26 +284,51 @@ pub fn import_external_files(
         let name = source
             .file_name()
             .ok_or_else(|| "来源文件名无效".to_string())?;
-        let target = target_directory.join(name);
+        let source_hash = sha256_file(source)?;
+        let normalized_name = normalized_import_name(source);
+        let duplicate = std::fs::read_dir(&target_directory)
+            .map_err(|e| format!("读取目标目录失败: {}", e))?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|candidate| {
+                let Ok(metadata) = std::fs::symlink_metadata(candidate) else {
+                    return false;
+                };
+                metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && normalized_import_name(candidate) == normalized_name
+                    && sha256_file(candidate).is_ok_and(|hash| hash == source_hash)
+            });
+        if let Some(target) = duplicate {
+            imported.push(display_relative(root, &target));
+            continue;
+        }
+        if let Some((_, target, relative, _)) = planned.iter().find(|(_, target, _, hash)| {
+            normalized_import_name(target) == normalized_name && hash == &source_hash
+        }) {
+            targets.insert(target.clone());
+            imported.push(display_relative(root, &root.join(relative)));
+            continue;
+        }
+        let preferred = target_directory.join(name);
+        let target = if preferred.exists()
+            || std::fs::symlink_metadata(&preferred).is_ok()
+            || targets.contains(&preferred)
+        {
+            next_available_destination(&target_directory, name, &targets)
+        } else {
+            preferred
+        };
         let relative = target
             .strip_prefix(root)
             .map_err(|_| "目标路径无效".to_string())?
             .to_path_buf();
-        if target.exists()
-            || std::fs::symlink_metadata(&target).is_ok()
-            || !targets.insert(target.clone())
-        {
-            return Err(format!("文件已存在: {}", display_relative(root, &target)));
-        }
-        planned.push((source, target, relative));
+        targets.insert(target.clone());
+        imported.push(display_relative(root, &root.join(&relative)));
+        planned.push((source.clone(), target, relative, source_hash));
     }
-    if planned.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut imported = Vec::with_capacity(planned.len());
-    for (source, target, relative) in planned {
-        copy_file_new(source, &target)?;
-        imported.push(display_relative(root, &root.join(relative)));
+    for (source, target, _, _) in planned {
+        copy_file_new(&source, &target)?;
     }
     Ok(imported)
 }
@@ -1310,6 +1360,16 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
         size: bytes.len(),
         revision: resource_revision(&path)?,
     })
+}
+
+#[tauri::command]
+pub fn dev_hash_project_file(input: DevReadFileInput) -> Result<String, String> {
+    let root = canonical_root(&input.root)?;
+    let path = resolve_existing_path(&root, &input.relative_path)?;
+    if !path.is_file() {
+        return Err("读取路径必须是文件".into());
+    }
+    sha256_file(&path)
 }
 
 #[tauri::command]
@@ -2831,21 +2891,30 @@ mod tests {
     }
 
     #[test]
-    fn importing_files_preserves_bytes_and_refuses_name_collisions() {
+    fn importing_files_deduplicates_equal_content_and_keeps_different_content() {
         let source_dir = tempfile::tempdir().unwrap();
+        let second_source_dir = tempfile::tempdir().unwrap();
         let project = tempfile::tempdir().unwrap();
         let source = source_dir.path().join("track.mp3");
+        let second_source = second_source_dir.path().join("track.mp3");
         std::fs::write(&source, [0, 1, 2, 253, 254, 255]).unwrap();
+        std::fs::write(&second_source, [9, 8, 7]).unwrap();
 
-        import_external_files(project.path(), &[source.clone()], Path::new("jc-media")).unwrap();
+        let first = import_external_files(project.path(), &[source.clone()], Path::new("jc-media")).unwrap();
+        let duplicate = import_external_files(project.path(), &[source], Path::new("jc-media")).unwrap();
+        let different = import_external_files(project.path(), &[second_source], Path::new("jc-media")).unwrap();
+
+        assert_eq!(first, vec!["jc-media/track.mp3"]);
+        assert_eq!(duplicate, first);
+        assert_eq!(different, vec!["jc-media/track (1).mp3"]);
         assert_eq!(
             std::fs::read(project.path().join("jc-media/track.mp3")).unwrap(),
             [0, 1, 2, 253, 254, 255]
         );
-
-        let error =
-            import_external_files(project.path(), &[source], Path::new("jc-media")).unwrap_err();
-        assert_eq!(error, "文件已存在: jc-media/track.mp3");
+        assert_eq!(
+            std::fs::read(project.path().join("jc-media/track (1).mp3")).unwrap(),
+            [9, 8, 7]
+        );
     }
 
     #[test]

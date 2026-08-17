@@ -49,6 +49,7 @@
           "dev_search_text",
           "dev_file_exists",
           "dev_read_file",
+          "dev_hash_project_file",
           "dev_read_external_file",
           "dev_read_many_files",
           "dev_write_file",

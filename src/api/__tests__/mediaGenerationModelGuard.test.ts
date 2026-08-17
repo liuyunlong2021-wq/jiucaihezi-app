@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 import { clearMediaModelAvailability, setMediaModelAvailability } from '../../data/mediaModelCapabilities'
-import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo } from '../media-generation'
+import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo, pollTask } from '../media-generation'
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
@@ -24,6 +24,29 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
     globalThis.setTimeout = previousSetTimeout
   }
 }
+
+test('media task polling stops before another request when cancelled', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let requests = 0
+  globalThis.fetch = async () => {
+    requests += 1
+    return Response.json({ status: 'processing' })
+  }
+  const controller = new AbortController()
+  controller.abort()
+
+  try {
+    await assert.rejects(
+      () => pollTask('/v1/videos/task_cancel', 'video', undefined, 0.01, 10, controller.signal),
+      error => error instanceof Error && error.name === 'AbortError',
+    )
+    assert.equal(requests, 0)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
 
 
 test('media generation API rejects removed and stale model ids before execution', () => {

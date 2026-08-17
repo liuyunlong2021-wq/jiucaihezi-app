@@ -105,6 +105,7 @@ export interface MediaTask {
   type: TaskMediaType
   model: string
   modelLabel: string
+  summary?: string
   prompt: string
   /** 参考图 URL / data URL 列表 */
   referenceImages: string[]
@@ -176,6 +177,24 @@ function isTaskCancelled(task: MediaTask): boolean {
 
 function isTaskSuccessful(task: MediaTask): boolean {
   return task.status === 'success'
+}
+
+function abortTaskExecution<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) return Promise.reject(Object.assign(new Error('任务已取消'), { name: 'AbortError' }))
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = () => reject(Object.assign(new Error('任务已取消'), { name: 'AbortError' }))
+    signal.addEventListener('abort', onAbort, { once: true })
+    promise.then(
+      value => {
+        signal.removeEventListener('abort', onAbort)
+        resolve(value)
+      },
+      error => {
+        signal.removeEventListener('abort', onAbort)
+        reject(error)
+      },
+    )
+  })
 }
 
 export interface MediaTaskSettledPayload {
@@ -416,6 +435,7 @@ interface MediaTaskSubmitParams {
   type: TaskMediaType
   model: string
   modelLabel: string
+  summary?: string
   prompt: string
   referenceImages?: string[]
   referenceVideos?: string[]
@@ -451,6 +471,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   let initPromise: Promise<void> | null = null
   let persistenceQueue = Promise.resolve()
   const canvasWriteReleases = new Map<string, () => void>()
+  const taskAbortControllers = new Map<string, AbortController>()
+  const unsubmittedTaskIds = new Set<string>()
+  const acceptedResultTaskIds = new Set<string>()
 
   function releaseCanvasTaskGate(task: MediaTask): void {
     const release = canvasWriteReleases.get(task.id)
@@ -485,6 +508,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   function isTaskActive(taskId: string): boolean {
     return activeTaskIds.value.has(taskId)
+  }
+
+  function canCancelTask(taskId: string): boolean {
+    const task = tasks.value.find(item => item.id === taskId)
+    return Boolean(
+      task &&
+      (task.status === 'pending' || task.status === 'running') &&
+      !acceptedResultTaskIds.has(taskId),
+    )
   }
 
   function queueTaskPersistence(mutate?: () => void, rollback?: () => void): Promise<void> {
@@ -561,6 +593,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       const { blob, mimeType } = await fetchCreationMediaBlob(url, type, true)
       const projectPath = webCreationMediaProjectPath({
         type,
+        summary: task.summary,
         prompt: task.prompt,
         model: task.modelLabel || task.model,
         taskId: task.id,
@@ -628,7 +661,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           mime: contentType,
           projectDir,
           kind,
+          summary: task.summary,
           prompt: task.prompt || task.modelLabel || '',
+          taskId: task.id,
           sourceUrl: url,
           memory: task.memory,
         })
@@ -771,18 +806,45 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       await persistTasksSafely(`${persistenceContext}-cancelled`)
       return
     }
-    task.resultUrl = resultUrl
-    task.completedAt = Date.now()
+    acceptedResultTaskIds.add(task.id)
     try {
-      await downloadAndPersistMediaAsset(resultUrl, task)
-    } catch (error) {
+      task.resultUrl = resultUrl
+      task.completedAt = Date.now()
+      task.progressText = '结果已生成，正在保存...'
+      try {
+        await downloadAndPersistMediaAsset(resultUrl, task)
+      } catch (error) {
+        if (isTaskCancelled(task)) {
+          markCanvasWriteUnwritten(task)
+          await persistTasksSafely(`${persistenceContext}-cancelled`)
+          return
+        }
+        if (task.source !== 'creation') throw error
+        markWebMediaPersistenceFailure(task, error)
+        emitEvent('media-task-complete', {
+          taskId: task.id,
+          type: task.type,
+          url: resultUrl,
+          source: task.source,
+          chatMessageId: task.chatMessageId,
+          model: task.modelLabel,
+          prompt: task.prompt,
+        })
+        emitSettled(task)
+        await persistTasksSafely(`${persistenceContext}-asset-failed`)
+        return
+      }
+
       if (isTaskCancelled(task)) {
         markCanvasWriteUnwritten(task)
         await persistTasksSafely(`${persistenceContext}-cancelled`)
         return
       }
-      if (task.source !== 'creation') throw error
-      markWebMediaPersistenceFailure(task, error)
+
+      task.status = 'success'
+      task.progress = 100
+      task.progressText = '完成'
+      await writeCanvasResult(task)
       emitEvent('media-task-complete', {
         taskId: task.id,
         type: task.type,
@@ -793,36 +855,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         prompt: task.prompt,
       })
       emitSettled(task)
-      await persistTasksSafely(`${persistenceContext}-asset-failed`)
-      return
+      if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
+      if ((task.assetUri || task.projectPath) && INLINE_MEDIA_DATA_URL.test(task.resultUrl || '')) {
+        task.resultUrl = ''
+      }
+      const persisted = await persistTasksSafely(persistenceContext)
+      if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
+    } finally {
+      acceptedResultTaskIds.delete(task.id)
     }
-
-    if (isTaskCancelled(task)) {
-      markCanvasWriteUnwritten(task)
-      await persistTasksSafely(`${persistenceContext}-cancelled`)
-      return
-    }
-
-    task.status = 'success'
-    task.progress = 100
-    task.progressText = '完成'
-    await writeCanvasResult(task)
-    emitEvent('media-task-complete', {
-      taskId: task.id,
-      type: task.type,
-      url: resultUrl,
-      source: task.source,
-      chatMessageId: task.chatMessageId,
-      model: task.modelLabel,
-      prompt: task.prompt,
-    })
-    emitSettled(task)
-    if (shouldAutoSaveMediaToFileTree(task)) saveMediaToFileTree(task).catch(() => {})
-    if ((task.assetUri || task.projectPath) && INLINE_MEDIA_DATA_URL.test(task.resultUrl || '')) {
-      task.resultUrl = ''
-    }
-    const persisted = await persistTasksSafely(persistenceContext)
-    if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
   }
 
   // ─── Init (恢复持久化任务 + 尝试恢复轮询) ───
@@ -923,6 +964,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     task: MediaTask,
     result: { taskId?: string; pollUrl?: string; pollKind?: 'image' | 'video' | 'audio' | 'text' },
   ): void {
+    if (isTaskCancelled(task)) return
     void markTaskSubmitted(task, result).then(persisted => {
       if (!persisted) markPersistenceWarning(task, '任务已提交，但本地保存失败')
     })
@@ -933,6 +975,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (!task.pollUrl || !task.pollKind) return
     if (activeTaskIds.value.has(task.id)) return
     activeTaskIds.value.add(task.id)
+    const controller = new AbortController()
+    taskAbortControllers.set(task.id, controller)
     task.status = 'running'
     task.progressText = '恢复轮询中...'
 
@@ -947,7 +991,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
 
     try {
-      const mediaUrl = await pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000)
+      const mediaUrl = await abortTaskExecution(
+        pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000, controller.signal),
+        controller.signal,
+      )
       if ((task as MediaTask).status === 'cancelled') {
         markCanvasWriteUnwritten(task)
         return
@@ -1012,6 +1059,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return
     } finally {
       activeTaskIds.value.delete(task.id)
+      if (taskAbortControllers.get(task.id) === controller) taskAbortControllers.delete(task.id)
     }
   }
 
@@ -1028,6 +1076,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       type: params.type,
       model: params.model,
       modelLabel: params.modelLabel,
+      summary: params.summary,
       prompt: params.prompt,
       referenceImages: withoutInlineMedia(params.referenceImages || []),
       referenceVideos: withoutInlineMedia(params.referenceVideos || []),
@@ -1056,12 +1105,18 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
     if (params.plan) task.planSnapshot = toPlanSnapshot(params.plan)
 
-    await queueTaskPersistence(
-      () => tasks.value.unshift(task),
-      () => {
-        tasks.value = tasks.value.filter(item => item.id !== taskId)
-      },
-    )
+    unsubmittedTaskIds.add(taskId)
+    try {
+      await queueTaskPersistence(
+        () => tasks.value.unshift(task),
+        () => {
+          tasks.value = tasks.value.filter(item => item.id !== taskId)
+        },
+      )
+    } catch (error) {
+      unsubmittedTaskIds.delete(taskId)
+      throw error
+    }
 
     // Fire-and-forget: 立刻开始执行
     _executeTask(taskId, params).catch(() => {
@@ -1072,14 +1127,23 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   // ─── 取消任务 ───
-  function cancelTask(taskId: string) {
+  async function cancelTask(taskId: string): Promise<boolean> {
     const t = tasks.value.find(x => x.id === taskId)
-    if (t && (t.status === 'pending' || t.status === 'running')) {
-      t.status = 'cancelled'
-      t.progressText = '已取消'
-      markCanvasWriteUnwritten(t)
-      void persistTasksSafely('cancel-task')
-    }
+    if (!t || !canCancelTask(taskId)) return false
+    const knownUnsubmitted = unsubmittedTaskIds.delete(taskId)
+    t.status = 'cancelled'
+    t.progressText = knownUnsubmitted
+      ? '已取消（未提交）'
+      : t.upstreamTaskId
+        ? '已停止跟踪（上游可能继续生成）'
+        : '已停止等待（上游可能已接收）'
+    t.completedAt = Date.now()
+    taskAbortControllers.get(taskId)?.abort()
+    activeTaskIds.value.delete(taskId)
+    markCanvasWriteUnwritten(t)
+    emitSettled(t)
+    await persistTasksSafely('cancel-task')
+    return true
   }
 
   async function retryMediaPersistence(taskId: string): Promise<boolean> {
@@ -1134,9 +1198,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   // ─── 内部: 执行单个任务 ───
   async function _executeTask(taskId: string, params: Parameters<typeof submitTask>[0]) {
+    unsubmittedTaskIds.delete(taskId)
     const task = tasks.value.find(t => t.id === taskId)
-    if (!task) return
+    if (!task || task.status === 'cancelled') return
 
+    const controller = new AbortController()
+    taskAbortControllers.set(task.id, controller)
     activeTaskIds.value.add(task.id)
     task.status = 'running'
     task.progressText = '生成中...'
@@ -1190,9 +1257,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.upstreamFamily = params.plan!.upstreamFamily
         task.apiStyle = params.plan!.apiStyle
         task.mode = params.plan!.mode
-        result = await creationSubmitExecutor(request, onProgress, submitted => {
-          markTaskSubmittedWithoutBlocking(task, submitted)
-        })
+        result = await abortTaskExecution(
+          creationSubmitExecutor(request, onProgress, submitted => {
+            markTaskSubmittedWithoutBlocking(task, submitted)
+          }, controller.signal),
+          controller.signal,
+        )
         resultUrl = result.url
         markTaskSubmittedWithoutBlocking(task, result)
       } else if (params.type === 'image') {
@@ -1211,6 +1281,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
                 ? params.referenceImages
                 : params.referenceImages?.[0],
             ...(params.imageParams || {}),
+            signal: controller.signal,
             onSubmitted: submitted => {
               markTaskSubmittedWithoutBlocking(task, submitted)
             },
@@ -1230,6 +1301,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
                 ? params.referenceImages
                 : undefined,
             ...(params.videoParams || {}),
+            signal: controller.signal,
             onSubmitted: submitted => {
               markTaskSubmittedWithoutBlocking(task, submitted)
             },
@@ -1248,6 +1320,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             model: params.model,
             prompt: params.prompt,
             ...(params.audioParams || {}),
+            signal: controller.signal,
             onSubmitted: submitted => {
               markTaskSubmittedWithoutBlocking(task, submitted)
             },
@@ -1285,7 +1358,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         return
       }
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
-        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000)
+        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000, controller.signal)
       }
       await completeMediaTask(task, resultUrl, 'execute-success')
       return
@@ -1317,7 +1390,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       await persistTasksSafely('execute-failed')
       return
     } finally {
+      clearInterval(progressTimer)
       activeTaskIds.value.delete(task.id)
+      if (taskAbortControllers.get(task.id) === controller) taskAbortControllers.delete(task.id)
     }
   }
 
@@ -1329,6 +1404,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     hasRunning,
     runningCount,
     isTaskActive,
+    canCancelTask,
     init,
     submitTask,
     cancelTask,

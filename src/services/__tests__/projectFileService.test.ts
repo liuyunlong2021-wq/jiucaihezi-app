@@ -171,6 +171,70 @@ test('binary import creates one project resource and publishes one completed cha
   assert.equal(changes[0].resource.path, resource.path)
 })
 
+test('binary import reuses an identical same-name resource and keeps a different payload', async () => {
+  const files = new Map<string, Uint8Array>()
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() {
+      return [...files].map(([path, data]) => ({ path, isDirectory: false, size: data.byteLength, mimeType: 'audio/mpeg' }))
+    },
+    async readText() { throw new Error('not used') },
+    async readBinary(_owner, path) {
+      const data = files.get(path)
+      if (!data) throw new Error('missing')
+      return { data, size: data.byteLength, mimeType: 'audio/mpeg' }
+    },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+    async importBinary(_owner, path, data, mimeType) {
+      files.set(path, data)
+      return { path, isDirectory: false, size: data.byteLength, mimeType }
+    },
+  }
+  const service = createProjectFileService(adapter)
+  const changes: any[] = []
+  service.onDidChange(change => changes.push(change))
+
+  const first = await service.importBinary({ owner: 'project_1', path: 'jc-media/音频/demo.mp3', data: new Uint8Array([1, 2, 3]), mimeType: 'audio/mpeg' })
+  const duplicate = await service.importBinary({ owner: 'project_1', path: 'jc-media/音频/demo.mp3', data: new Uint8Array([1, 2, 3]), mimeType: 'audio/mpeg' })
+  const different = await service.importBinary({ owner: 'project_1', path: 'jc-media/音频/demo.mp3', data: new Uint8Array([4, 5, 6]), mimeType: 'audio/mpeg' })
+
+  assert.equal(duplicate.path, first.path)
+  assert.equal(different.path, 'jc-media/音频/demo (1).mp3')
+  assert.equal(changes.length, 2)
+})
+
+test('text import hashes text reads instead of the binary adapter path', async () => {
+  const files = new Map<string, string>()
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() {
+      return [...files].map(([path, content]) => ({ path, isDirectory: false, size: new TextEncoder().encode(content).length, mimeType: 'text/markdown' }))
+    },
+    async readText(_owner, path) {
+      const content = files.get(path)
+      if (content == null) throw new Error('missing')
+      return { content, size: content.length, truncated: false, revision: { value: '1', size: content.length } }
+    },
+    async hashFile() { throw new Error('binary hash must not run for text') },
+    async createText(_owner, path, content) {
+      files.set(path, content)
+      return { path, isDirectory: false, size: new TextEncoder().encode(content).length, mimeType: 'text/markdown' }
+    },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  const service = createProjectFileService(adapter)
+
+  const first = await service.importText({ owner: 'project_1', path: 'wiki/demo.md', content: 'same' })
+  const duplicate = await service.importText({ owner: 'project_1', path: 'wiki/demo.md', content: 'same' })
+  const different = await service.importText({ owner: 'project_1', path: 'wiki/demo.md', content: 'different' })
+
+  assert.equal(duplicate.path, first.path)
+  assert.equal(different.path, 'wiki/demo (1).md')
+})
+
 test('resource changes reach a separate consumer service instance', async () => {
   const actions = createProjectFileService(createAdapter())
   const consumer = createProjectFileService(createAdapter())

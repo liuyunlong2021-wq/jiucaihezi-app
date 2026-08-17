@@ -1398,6 +1398,7 @@ pub fn run() {
             commands::dev::dev_search_text,
             commands::dev::dev_file_exists,
             commands::dev::dev_read_file,
+            commands::dev::dev_hash_project_file,
             commands::dev::dev_read_external_file,
             commands::dev::dev_read_many_files,
             commands::dev::dev_write_file,

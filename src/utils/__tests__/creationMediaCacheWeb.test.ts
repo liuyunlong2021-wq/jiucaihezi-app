@@ -3,8 +3,33 @@ import { test } from 'node:test'
 
 import { useProjectStore } from '@/stores/projectStore'
 import * as creationMediaCache from '../creationMediaCache'
+import { buildMediaFilename } from '../mediaFilename'
 import { webProjectFiles } from '../webProjectFiles'
 import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+
+test('creation media filenames use a cleaned semantic prompt and six task characters', () => {
+  assert.equal(
+    buildMediaFilename({
+      summary: ' 雨后旧上海：男主下车 ',
+      prompt: '生成一张完全不同的内容',
+      taskId: 'canvas-task-91c8af',
+      extension: 'png',
+    }),
+    '雨后旧上海_男主下车_91c8af.png',
+  )
+  assert.equal(
+    buildMediaFilename({
+      prompt: '请生成一张 横向16:9，根据参考图，参考图1，简要总结：雨后旧上海车站男主下车',
+      taskId: 'canvas-task-91c8af',
+      extension: 'png',
+    }),
+    '雨后旧上海车站男主下车_91c8af.png',
+  )
+  assert.equal(
+    buildMediaFilename({ model: 'gpt-image-2-官方', taskId: 'task_123456789', extension: '.webp' }),
+    'gpt-image-2-官方_456789.webp',
+  )
+})
 
 test('Web creation media stays usable when active project persistence fails', { concurrency: false }, async () => {
   const projectStore = useProjectStore()
@@ -64,7 +89,7 @@ test('Web creation media helpers preserve response MIME when building a determin
 
     assert.equal(result.mimeType, 'image/webp')
     assert.equal(result.blob.type, 'image/webp')
-    assert.match(path, /^jc-media\/images\/.+_mtask_webp\.webp$/)
+    assert.equal(path, 'jc-media/images/内容类型_优先_skwebp.webp')
   } finally {
     globalThis.fetch = previousFetch
   }
@@ -98,7 +123,7 @@ test('3D creation results keep their model file extension in the project', () =>
     sourceUrl: 'https://example.com/output/character.glb?token=short-lived',
   })
 
-  assert.match(path, /^jc-media\/models\/.+_mtask_3d\.glb$/)
+  assert.equal(path, 'jc-media/models/角色模型_task3d.glb')
 })
 
 test('Web media download authenticates only Jiucaihezi API result URLs', { concurrency: false }, async () => {

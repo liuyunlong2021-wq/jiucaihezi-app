@@ -6,6 +6,7 @@ import { writeMediaAsset, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
 import { useProjectStore } from '@/stores/projectStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { DEFAULT_API_BASE_URL, getApiKey } from '@/services/newApiClient'
+import { buildMediaFilename } from '@/utils/mediaFilename'
 
 interface DownloadBase64Response {
   status: number
@@ -72,17 +73,19 @@ function extensionForMime(type: CreationMediaType, mimeType?: string, sourceUrl?
   }
 }
 
-function webMediaFilename(params: { type: CreationMediaType; prompt?: string; model?: string; taskId?: string; mimeType?: string; sourceUrl?: string }): string {
-  const stem = String(params.prompt || params.model || 'creation')
-    .replace(/[/\\:*?"<>|]/g, '_')
-    .trim()
-    .slice(0, 48) || 'creation'
-  const suffix = String(params.taskId || Date.now().toString(36)).replace(/[^a-z0-9_-]/gi, '').slice(-16)
-  return `${stem}_${suffix}.${extensionForMime(params.type, params.mimeType, params.sourceUrl)}`
+function webMediaFilename(params: { type: CreationMediaType; summary?: string; prompt?: string; model?: string; taskId?: string; mimeType?: string; sourceUrl?: string }): string {
+  return buildMediaFilename({
+    summary: params.summary,
+    prompt: params.prompt,
+    model: params.model,
+    taskId: params.taskId,
+    extension: extensionForMime(params.type, params.mimeType, params.sourceUrl),
+  })
 }
 
 export function webCreationMediaProjectPath(params: {
   type: CreationMediaType
+  summary?: string
   prompt?: string
   model?: string
   taskId?: string
@@ -99,6 +102,7 @@ export function webCreationMediaProjectPath(params: {
 function webRemoteMediaFile(params: {
   url: string
   type: 'image' | 'video' | 'audio'
+  summary?: string
   prompt?: string
   model?: string
   taskId?: string
@@ -212,6 +216,7 @@ export async function fetchCreationMediaBlob(
 export async function cacheCreationMediaResult(params: {
   url: string
   type: 'image' | 'video' | 'audio'
+  summary?: string
   prompt?: string
   model?: string
   taskId?: string
@@ -235,7 +240,10 @@ export async function cacheCreationMediaResult(params: {
           const { filePath } = await writeProjectMedia({
             dataBase64: dl.data_base64, mime: contentType,
             projectDir, kind: params.type,
-            prompt: String(params.prompt || params.model || ''),
+            summary: params.summary,
+            prompt: params.prompt,
+            model: params.model,
+            taskId: params.taskId,
           })
           return {
             ref: filePath,

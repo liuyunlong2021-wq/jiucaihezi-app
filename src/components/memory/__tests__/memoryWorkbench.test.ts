@@ -170,6 +170,12 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
 })
 
+test('memory composer ignores IME Enter fallback key events', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /function handleComposerKeydown\(event: KeyboardEvent\) \{\s*if \(event\.isComposing \|\| event\.keyCode === 229\) return/)
+})
+
 test('memory workbench saves Office attachments as durable project materials', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
@@ -177,9 +183,9 @@ test('memory workbench saves Office attachments as durable project materials', (
 
   assert.match(workbench, /type === 'office' \|\| type === 'pdf'/)
   assert.match(workbench, /processFile\(file, \{ maxTextLength: 20_000_000 \}\)/)
-  assert.match(workbench, /files\.createText\(owner, readablePath, processed\.textContent\)/)
+  assert.match(workbench, /files\.importText\(\{ owner, path: readablePath, content: processed\.textContent \}\)/)
   assert.match(workbench, /readablePath/)
-  assert.match(workbench, /characterCount: processed\.textContent\.length/)
+  assert.match(workbench, /characterCount: readableContent\.length/)
   assert.match(workbench, /!\['image', 'video', 'audio'\]\.includes\(type\)[\s\S]*files\.importBinary/)
   assert.match(workbench, /已保存 · 已解析/)
   assert.doesNotMatch(workbench, /textContent: processed\.textContent/)

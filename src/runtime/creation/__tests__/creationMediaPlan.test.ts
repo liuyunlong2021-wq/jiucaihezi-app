@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   buildCreationRunPlan,
+  sizeFromRatioResolution,
   validateCreationModelSpec,
 } from '../creationMediaPlan'
 import {
@@ -14,6 +15,36 @@ import {
   listCreationModels,
 } from '../creationModelRegistry'
 import type { CreationModelSpec } from '../creationMediaTypes'
+import { detectImageMimeFromBytes } from '@/utils/imageContracts'
+
+test('image size matrix preserves ratio and upstream constraints', () => {
+  const ratios = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
+  const resolutions = ['1k', '2k', '4k']
+
+  assert.equal(sizeFromRatioResolution('16:9', '1k'), '1536x864')
+  assert.equal(sizeFromRatioResolution('16:9', '2k'), '2048x1152')
+  assert.equal(sizeFromRatioResolution('16:9', '4k'), '3840x2160')
+  assert.equal(sizeFromRatioResolution('1:1', '4k'), '2880x2880')
+
+  for (const ratio of ratios) {
+    const [ratioWidth, ratioHeight] = ratio.split(':').map(Number)
+    for (const resolution of resolutions) {
+      const [width, height] = sizeFromRatioResolution(ratio, resolution).split('x').map(Number)
+      assert.equal(width * ratioHeight, height * ratioWidth, `${ratio} ${resolution} must preserve ratio`)
+      assert.equal(width % 16, 0, `${ratio} ${resolution} width must be divisible by 16`)
+      assert.equal(height % 16, 0, `${ratio} ${resolution} height must be divisible by 16`)
+      assert.ok(Math.max(width, height) <= 3840, `${ratio} ${resolution} must stay within the maximum edge`)
+      assert.ok(width * height >= 655_360, `${ratio} ${resolution} must satisfy the minimum pixels`)
+      assert.ok(width * height <= 8_294_400, `${ratio} ${resolution} must satisfy the maximum pixels`)
+    }
+  }
+})
+
+test('image MIME detection covers desktop reference formats', () => {
+  assert.equal(detectImageMimeFromBytes(Uint8Array.from([0xff, 0xd8, 0xff])), 'image/jpeg')
+  assert.equal(detectImageMimeFromBytes(Uint8Array.from([0x42, 0x4d, 0, 0])), 'image/bmp')
+  assert.equal(detectImageMimeFromBytes(Uint8Array.from([0, 0, 0, 0, 0x66, 0x74, 0x79, 0x70, 0x68, 0x65, 0x69, 0x63])), 'image/heic')
+})
 
 test('listCreationModels excludes jina-search and filters by source', () => {
   const all = listCreationModels({ source: 'all' })
@@ -187,7 +218,10 @@ test('Gemini image models use the Xiaoyi async task contract', () => {
     assert.equal(textOnly.endpoint, '/v1/videos')
     assert.equal(textOnly.apiStyle, 'xiaoyi-image-task')
     assert.equal(textOnly.pollKind, 'newapi-task')
-    assert.equal(textOnly.debug.normalizedParams.size, 'auto')
+    assert.equal(textOnly.debug.normalizedParams.size, '2048x2048')
+    const landscape = buildCreationRunPlan({ modelId, params: { prompt: '横向产品图', ratio: '16:9', resolution: '2k' } })
+    assert.equal(landscape.debug.normalizedParams.size, '2048x1152')
+    assert.equal('aspectRatio' in landscape.debug.normalizedParams, false)
     assert.deepEqual(spec?.capabilities.resolutions, ['1k', '2k', '4k'])
     assert.deepEqual(spec?.capabilities.ratios, ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'])
     assert.equal(spec?.files?.images?.max, 10)

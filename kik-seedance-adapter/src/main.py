@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
-from time import time
+import logging
+from time import monotonic, time
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 KIK_BASE_URL = "https://51kik.com/video"
+KIK_TOTAL_TIMEOUT_SECONDS = 120.0
+KIK_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
+logger = logging.getLogger("kik_seedance_adapter")
 MODELS = {
     "doubao-seedance-2",
     "doubao-seedance-2-0-fast-260128",
@@ -17,7 +22,7 @@ MODELS = {
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.http = httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=10.0))
+    app.state.http = httpx.AsyncClient(timeout=KIK_HTTP_TIMEOUT)
     yield
     await app.state.http.aclose()
 
@@ -40,13 +45,16 @@ async def create_video(request: Request):
     key = bearer_token(request)
     body = await json_body(request)
     validate_request(body)
+    started_at = monotonic()
     try:
-        response = await request.app.state.http.post(
-            f"{KIK_BASE_URL}/v1/generations",
-            headers={"Authorization": f"Bearer {key}"},
-            json=kik_payload(body),
-        )
-    except httpx.HTTPError as exc:
+        async with asyncio.timeout(KIK_TOTAL_TIMEOUT_SECONDS):
+            response = await request.app.state.http.post(
+                f"{KIK_BASE_URL}/v1/generations",
+                headers={"Authorization": f"Bearer {key}"},
+                json=kik_payload(body),
+            )
+    except (httpx.HTTPError, TimeoutError) as exc:
+        logger.warning("KIK submit failed exception=%s elapsed=%.3fs", type(exc).__name__, monotonic() - started_at)
         raise HTTPException(502, "KIK video service is unavailable") from exc
     data = response_json(response)
     if not response.is_success:
@@ -62,12 +70,14 @@ async def get_video(task_id: str, request: Request):
     if not task_id or "/" in task_id:
         raise HTTPException(400, "Invalid task ID")
     key = bearer_token(request)
+    started_at = monotonic()
     try:
         response = await request.app.state.http.get(
             f"{KIK_BASE_URL}/v1/tasks/{task_id}",
             headers={"Authorization": f"Bearer {key}"},
         )
     except httpx.HTTPError as exc:
+        logger.warning("KIK poll failed exception=%s elapsed=%.3fs", type(exc).__name__, monotonic() - started_at)
         raise HTTPException(502, "KIK video service is unavailable") from exc
     data = response_json(response)
     if not response.is_success:
@@ -109,9 +119,9 @@ def kik_payload(body: dict) -> dict:
         ("video", ("video", "video_url"), "reference_video"),
         ("audio", ("audio", "audio_url"), "reference_audio"),
     ):
-        value = next((body[source] for source in sources if body.get(source) is not None), None)
+        value = next((body[source] for source in sources if body.get(source)), None)
         if value is None:
-            value = prompt_media.get(target)
+            value = prompt_media.get(target) or None
         if value is not None:
             payload[target] = media_references(value, role)
     options = dict(body.get("upstream_options") or {})
@@ -185,8 +195,14 @@ def task_id_from(data: dict) -> str:
 
 def task_response(task_id: str, data: dict, model: str) -> dict:
     inner = data.get("data") if isinstance(data.get("data"), dict) else data
-    raw_status = str(data.get("task_status") or data.get("status") or inner.get("task_status") or inner.get("status") or "pending").lower()
-    status = {"success": "completed", "succeeded": "completed", "complete": "completed", "pending": "processing", "running": "processing", "cancelled": "failed", "canceled": "failed"}.get(raw_status, raw_status)
+    raw_status = str(data.get("task_status") or data.get("status") or inner.get("task_status") or inner.get("status") or "pending").strip()
+    normalized_status = raw_status.lower()
+    if normalized_status in {"success", "succeeded", "complete", "completed", "done"}:
+        status = "completed"
+    elif normalized_status in {"pending", "running", "processing", "queued", "queueing", "submitting", "in_progress"}:
+        status = "processing"
+    else:
+        status = "failed"
     result = {
         "id": task_id,
         "task_id": task_id,
@@ -203,7 +219,7 @@ def task_response(task_id: str, data: dict, model: str) -> dict:
         result["video_url"] = url
         result["completed_at"] = int(time())
     if status in {"failed", "error"}:
-        result["error"] = data.get("error") or {"code": "TASK_FAILED", "message": str(data.get("message") or "KIK task failed")}
+        result["error"] = data.get("error") or {"code": raw_status or "TASK_FAILED", "message": str(data.get("message") or raw_status or "KIK task failed")}
         result["completed_at"] = int(time())
     return result
 

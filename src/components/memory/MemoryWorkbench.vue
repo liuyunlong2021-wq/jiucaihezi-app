@@ -62,6 +62,7 @@ import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardT
 import { findWikiBacklinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
+import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 
@@ -134,6 +135,7 @@ const memoryScrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const composerRef = ref<HTMLElement | null>(null)
 const mentionPopoverRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
+const composerDropActive = ref(false)
 const mediaUrl = ref('')
 const modelData = ref<ArrayBuffer | null>(null)
 const mediaPlans = ref<Record<string, MediaPlan[]>>({})
@@ -161,6 +163,7 @@ let offToggleTree: (() => void) | null = null
 let offReferenceFile: (() => void) | null = null
 let offMediaReferenceAdd: (() => void) | null = null
 let offSwitchPanel: (() => void) | null = null
+let offDesktopProjectDrop: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 let creationResizeStartX = 0
 let creationResizeStartWidth = 0
@@ -358,6 +361,11 @@ onMounted(async () => {
   offSwitchPanel = onEvent('switch-panel', mode => {
     if (mode === 'creation') void openCreationHost()
   })
+  offDesktopProjectDrop = onEvent('project:desktop-drop', payload => {
+    const drop = payload as { target?: string; paths?: string[]; warnings?: string[] }
+    if (drop.target === 'chat' && Array.isArray(drop.paths))
+      void importDesktopChatPaths(drop.paths, drop.warnings || [])
+  })
   const pendingMediaReference = consumeLastEvent('media-reference:add')
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
   document.addEventListener('pointerdown', closeModelPicker)
@@ -377,6 +385,7 @@ onBeforeUnmount(() => {
   offReferenceFile?.()
   offMediaReferenceAdd?.()
   offSwitchPanel?.()
+  offDesktopProjectDrop?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
@@ -1183,13 +1192,14 @@ function handleComposerInput(event: Event) {
 }
 
 function handleComposerKeydown(event: KeyboardEvent) {
+  if (event.isComposing || event.keyCode === 229) return
   if (mentionOpen.value) {
     if (event.key === 'Escape') {
       event.preventDefault()
       closeMention()
       return
     }
-    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+    if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       const item = mentionFlat.value.find(option => mentionKey(option) === mentionActive.value) || mentionFlat.value[0]
       if (item) void selectMention(item)
@@ -1200,7 +1210,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
       return
     }
   }
-  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return
+  if (event.key !== 'Enter' || event.shiftKey) return
   event.preventDefault()
   void send()
 }
@@ -1293,6 +1303,73 @@ async function selectFiles(event: Event) {
   }
 }
 
+function setComposerDropActive(event: DragEvent, active: boolean) {
+  if (desktopOnlyRuntime || sending.value || !event.dataTransfer?.types.includes('Files')) return
+  event.preventDefault()
+  event.dataTransfer.dropEffect = 'copy'
+  composerDropActive.value = active
+}
+
+async function filesFromDropEntry(entry: FileSystemEntry): Promise<File[]> {
+  if (entry.isFile) {
+    return await new Promise(resolve => (entry as FileSystemFileEntry).file(file => resolve([file]), () => resolve([])))
+  }
+  if (!entry.isDirectory) return []
+  const reader = (entry as FileSystemDirectoryEntry).createReader()
+  const entries: FileSystemEntry[] = []
+  while (true) {
+    const batch = await new Promise<FileSystemEntry[]>(resolve => reader.readEntries(resolve, () => resolve([])))
+    if (!batch.length) break
+    entries.push(...batch)
+  }
+  return (await Promise.all(entries.map(filesFromDropEntry))).flat()
+}
+
+async function filesFromDrop(event: DragEvent): Promise<File[]> {
+  const items = Array.from(event.dataTransfer?.items || [])
+  const entries = items
+    .map(item => (item as DataTransferItem & { webkitGetAsEntry?: () => FileSystemEntry | null }).webkitGetAsEntry?.())
+    .filter((entry): entry is FileSystemEntry => Boolean(entry))
+  if (!entries.length) return Array.from(event.dataTransfer?.files || [])
+  return (await Promise.all(entries.map(filesFromDropEntry))).flat()
+}
+
+async function onComposerDrop(event: DragEvent) {
+  if (desktopOnlyRuntime || sending.value) return
+  composerDropActive.value = false
+  event.preventDefault()
+  event.stopPropagation()
+  try {
+    await addAttachmentFiles(await filesFromDrop(event))
+  } catch (cause) {
+    error.value = `附件处理失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
+async function importDesktopChatPaths(paths: string[], warnings: string[] = []) {
+  const owner = projectOwner.value
+  if (!owner || !memoryReady.value || sending.value) return
+  const groups = new Map<string, string[]>()
+  for (const path of paths) {
+    const target = memoryMediaDirectoryFor(path)
+    groups.set(target, [...(groups.get(target) || []), path])
+  }
+  try {
+    for (const [targetPath, sourcePaths] of groups) {
+      const resources = await fileActions.importDesktopPaths({ owner, paths: sourcePaths, targetPath })
+      const media = resources.filter(resource => resource.kind === 'media')
+      if (media.length) await addProjectMediaReferences({ resources: media })
+      for (const resource of resources.filter(item => item.kind !== 'media')) await addProjectFileReference(resource)
+    }
+    if (warnings.length) status.value = warnings.join('；')
+  } catch (cause) {
+    error.value = [
+      `附件导入失败：${cause instanceof Error ? cause.message : String(cause)}`,
+      ...warnings,
+    ].join('；')
+  }
+}
+
 async function addAttachmentFiles(selected: File[]) {
   executionMode.value = 'memory'
   const owner = projectOwner.value
@@ -1302,13 +1379,13 @@ async function addAttachmentFiles(selected: File[]) {
   const failures: string[] = []
   for (const file of selected) {
     try {
-    const mime = file.type || 'application/octet-stream'
+      const mime = file.type || 'application/octet-stream'
       const type = detectFileType(file)
       if (type === 'office' || type === 'pdf' || type === 'text') {
-        const originalPath = nextOriginalMaterialPath(file.name, existing)
+        const originalPath = nextOriginalMaterialPath(file.name, new Set())
         const textContent = type === 'text' ? await file.text() : ''
         const resource = type === 'text'
-          ? await files.createText(owner, originalPath, textContent)
+          ? await files.importText({ owner, path: originalPath, content: textContent })
           : await files.importBinary({
               owner, path: originalPath, data: new Uint8Array(await file.arrayBuffer()), mimeType: mime,
             })
@@ -1320,24 +1397,33 @@ async function addAttachmentFiles(selected: File[]) {
           })
           continue
         }
-      status.value = `正在解析 ${file.name}`
-        const processed = await processFile(file, { maxTextLength: 20_000_000 })
-        if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
-          throw new Error(processed.truncated
-            ? '文档超过当前安全解析上限，原件已保存'
-            : `${processed.error || '文档转换失败'}，原件已保存，可从 .raw/jc-media/文档 重新引用`)
+        const preferredReadablePath = materialMarkdownPath(resource.path)
+        let readablePath = existing.has(preferredReadablePath) ? preferredReadablePath : ''
+        let readableContent = readablePath
+          ? (await files.readText({ ...resource, path: readablePath, name: readablePath.split('/').pop() || readablePath })).content
+          : ''
+        if (!readablePath) {
+          status.value = `正在解析 ${file.name}`
+          const processed = await processFile(file, { maxTextLength: 20_000_000 })
+          if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
+            throw new Error(processed.truncated
+              ? '文档超过当前安全解析上限，原件已保存'
+              : `${processed.error || '文档转换失败'}，原件已保存，可从 .raw/jc-media/文档 重新引用`)
+          }
+          readablePath = nextMaterialMarkdownPath(resource.path, existing)
+          const readable = await files.importText({ owner, path: readablePath, content: processed.textContent })
+          readablePath = readable.path
+          readableContent = processed.textContent
         }
-        const readablePath = nextMaterialMarkdownPath(resource.path, existing)
-        await files.createText(owner, readablePath, processed.textContent)
         existing.add(readablePath)
         resolved.push({
           id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
-          resourcePath: resource.path, readablePath, characterCount: processed.textContent.length,
+          resourcePath: resource.path, readablePath, characterCount: readableContent.length,
         })
         continue
       }
       if (!['image', 'video', 'audio'].includes(type)) {
-        const originalPath = nextOriginalMaterialPath(file.name, existing)
+        const originalPath = nextOriginalMaterialPath(file.name, new Set())
         const resource = await files.importBinary({
           owner, path: originalPath, data: new Uint8Array(await file.arrayBuffer()), mimeType: mime,
         })
@@ -1353,7 +1439,7 @@ async function addAttachmentFiles(selected: File[]) {
         path: nextMaterialPath(
           `.raw/jc-media/${type === 'image' ? '图片' : type === 'video' ? '视频' : '音频'}`,
           file.name,
-          existing,
+          new Set(),
         ),
         data: new Uint8Array(await file.arrayBuffer()),
         mimeType: mime,
@@ -1368,9 +1454,9 @@ async function addAttachmentFiles(selected: File[]) {
       failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`)
     }
   }
-  const byId = new Map(attachments.value.map(attachment => [attachment.id, attachment]))
-  for (const attachment of resolved) byId.set(attachment.id, attachment)
-  attachments.value = [...byId.values()]
+  const byPath = new Map(attachments.value.map(attachment => [attachment.resourcePath || attachment.id, attachment]))
+  for (const attachment of resolved) byPath.set(attachment.resourcePath || attachment.id, attachment)
+  attachments.value = [...byPath.values()]
   if (failures.length) throw new Error(failures.join('；'))
 }
 
@@ -1957,7 +2043,15 @@ function readDataUrl(file: File): Promise<string> {
           @always="settleMemoryToolApproval('always')"
         />
         <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
-        <div class="memory-input-row">
+        <div
+          class="memory-input-row"
+          data-project-drop-target="chat"
+          :data-project-drop-disabled="sending ? 'true' : undefined"
+          :class="{ 'memory-input-drop-active': composerDropActive }"
+          @dragover.prevent="setComposerDropActive($event, true)"
+          @dragleave.prevent="setComposerDropActive($event, false)"
+          @drop.prevent.stop="onComposerDrop"
+        >
           <div v-show="mentionOpen && !sending" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
             <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>
             <button
@@ -2192,6 +2286,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-mode-segment button { height: 24px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--ink3); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-mode-segment button.active { background: var(--olive); color: white; }
 .memory-input-row { position: relative; display: flex; align-items: flex-end; gap: 8px; padding: 10px; }
+.memory-input-drop-active { border: 1px dashed var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--paper)); }
 .memory-mention-popover { position: absolute; z-index: 60; right: 10px; bottom: calc(100% + 7px); left: 10px; max-height: min(320px, 42vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-mention-popover > button { display: grid; width: 100%; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-mention-popover > button:hover, .memory-mention-popover > button.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }

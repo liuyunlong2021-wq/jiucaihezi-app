@@ -127,6 +127,35 @@ test('transfers a confirmed text overwrite over an existing OPFS binary', async 
   assert.equal(entry.metadata?.binaryStorage, undefined)
 })
 
+test('reuses an identical existing transfer without asking for a collision decision', async () => {
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
+  const project = await files.createProject('重复导入')
+  await files.write(project.id, 'wiki/大纲.md', 'same')
+  let collisions = 0
+
+  const result = await writeWebProjectEntries(files, project.id, [transferEntry('wiki/大纲.md', 'same')], {
+    resolveCollision: async () => {
+      collisions += 1
+      return 'keep-both'
+    },
+  })
+
+  assert.deepEqual(result, { importedPaths: ['wiki/大纲.md'], skippedPaths: [] })
+  assert.equal(collisions, 0)
+  assert.deepEqual((await files.list(project.id)).filter(entry => !entry.isDir).map(entry => entry.path), ['wiki/大纲.md'])
+})
+
+test('normalizes an existing transfer filename before content deduplication', async () => {
+  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
+  const project = await files.createProject('规范化去重')
+  await files.write(project.id, 'wiki/README.md', 'same')
+
+  const result = await writeWebProjectEntries(files, project.id, [transferEntry('wiki/readme.md', 'same')])
+
+  assert.deepEqual(result.importedPaths, ['wiki/README.md'])
+  assert.deepEqual((await files.list(project.id)).filter(entry => !entry.isDir).map(entry => entry.path), ['wiki/README.md'])
+})
+
 for (const [decision, expectedPaths, expectedContent, skippedPaths] of [
   ['overwrite', ['wiki/大纲.md'], 'new', []],
   ['keep-both', ['wiki/大纲 (1).md', 'wiki/大纲.md'], 'old', []],

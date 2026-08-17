@@ -117,7 +117,7 @@ jc-media/
 - Web 项目树已支持单文件/文件夹上传、文件夹结构导入、根目录或文件夹拖放，以及项目切换后的本地刷新；同名写入在项目锁内提供覆盖、保留两份、取消。
 - 项目导出使用浏览器 `showDirectoryPicker({ mode: 'readwrite' })` feature-detect；写入外部目录前处理同名文件，保留两份分配新文件名，写入失败中止 staged writable。
 - 图片、视频、音频在站内文件预览中读取本地项目数据；另存为直接使用本地 Blob。OPFS 读取按 `documents` 元数据恢复 Blob MIME，画布运行时 URL 按 `owner:path:opfsFileId` 缓存，旧版本保留到画布清理，避免覆盖后旧图层失效。
-- Web 文件树不再为 22px 缩略图缓存完整 OPFS data URL，保留媒体类型图标；Desktop 缩略图继续使用其项目 owner。
+- Web 文件树不再为 22px 缩略图缓存完整 OPFS data URL，保留媒体类型图标；Desktop 缩略图继续使用其项目 owner。此为 2026-07-15 实施记录，已由 2026-08-16 的全平台文件树图标合同替代：Desktop、Web、Mobile 均不读取、不生成、不缓存文件树缩略图。
 - 创作任务在提交入口冻结 Web 项目 ID；图片、视频、音频完成后分别写入 `jc-media/images`、`jc-media/videos`、`jc-media/audios`。扩展名按响应 MIME 推导，任务切换项目后不会改写归属。
 - 创作媒体写入成功后只保存项目相对路径，创作面板用同一份 OPFS Blob 站内预览；画布任务也写入该相对路径。任务取消保持取消状态，不会被异步保存改回成功。
 - 媒体下载或 OPFS 写入失败时不把远程 URL 当成项目文件；任务显示“保存到项目失败”，可以不重新生成而直接“重试保存”。

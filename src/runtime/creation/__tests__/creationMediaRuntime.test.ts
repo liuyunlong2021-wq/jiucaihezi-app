@@ -93,7 +93,7 @@ test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { co
   }
 })
 
-test('Gemini image submits the Xiaoyi async task with its resolution', { concurrency: false }, async () => {
+test('Gemini image submits the Xiaoyi async task with its mapped size', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
@@ -102,9 +102,9 @@ test('Gemini image submits the Xiaoyi async task with its resolution', { concurr
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
-      assert.equal(body.get('size'), 'auto')
-      assert.equal(body.get('aspectRatio'), '16:9')
-      assert.equal(body.get('resolution'), '4k')
+      assert.equal(body.get('size'), '3840x2160')
+      assert.equal(body.get('aspectRatio'), null)
+      assert.equal(body.get('resolution'), null)
       assert.equal(body.get('seconds'), '1')
       return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
     }
@@ -124,6 +124,98 @@ test('Gemini image submits the Xiaoyi async task with its resolution', { concurr
     assert.equal(result.url, 'https://cdn.example.test/gemini.png')
   } finally {
     globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('Xiaoyi image upload uses the actual JPEG MIME type', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const jpeg = 'data:image/png;base64,/9j/2Q=='
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = init.body as FormData
+      assert.equal((body.get('image') as Blob).type, 'image/jpeg')
+      return Response.json({ id: 'task_xiaoyi_jpeg', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_xiaoyi_jpeg')) {
+      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'gpt-image-2-中质量',
+      params: { prompt: '修复参考图', ratio: '16:9', resolution: '2k', images: [jpeg] },
+    })
+    await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Type', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
+
+  Object.defineProperty(globalThis, 'window', {
+    configurable: true,
+    value: {
+      __TAURI_INTERNALS__: {
+        async invoke(command: string, args?: { request?: { url?: string } }) {
+          if (command === 'http_download_base64') {
+            return {
+              status: 200,
+              data_base64: '/9j/2Q==',
+              headers: { 'content-type': 'image/png' },
+            }
+          }
+          if (command === 'http_request' && args?.request?.url?.endsWith('/v1/videos/task_xiaoyi_desktop_jpeg')) {
+            return {
+              status: 200,
+              body: JSON.stringify({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } }),
+              headers: { 'content-type': 'application/json' },
+            }
+          }
+          throw new Error(`Unexpected invoke ${command}`)
+        },
+      },
+    },
+  })
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = init.body as FormData
+      assert.equal((body.get('image') as Blob).type, 'image/jpeg')
+      return Response.json({ id: 'task_xiaoyi_desktop_jpeg', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_xiaoyi_desktop_jpeg')) {
+      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'gpt-image-2-中质量',
+      params: {
+        prompt: '修复桌面参考图',
+        ratio: '16:9',
+        resolution: '2k',
+        images: ['https://cdn.example.test/reference-without-extension'],
+      },
+    })
+    await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+  } finally {
+    globalThis.fetch = previousFetch
+    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
+    else delete (globalThis as any).window
     await restoreStorage()
   }
 })

@@ -44,6 +44,7 @@ export function buildMediaPlanSubmission(plan: MediaPlan) {
     type: plan.kind,
     model: spec.model,
     modelLabel: spec.label,
+    summary: plan.title,
     prompt: plan.prompt,
     referenceImages: plan.referenceImages || [],
     referenceVideos: plan.referenceVideos || [],

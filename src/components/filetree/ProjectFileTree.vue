@@ -20,7 +20,6 @@ import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { canvasFilePath } from '@/components/canvas/canvasDocument'
-import { resolveProjectVideoThumbnail } from '@/utils/mediaThumbnail'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
 import { isTextFile } from '@/utils/fileProcessor'
@@ -104,10 +103,6 @@ interface PendingCollision {
   path: string
   resolve: (decision: WebProjectCollisionDecision) => void
 }
-interface ThumbnailRequest {
-  node: TreeNode
-  owner: string
-}
 interface MobileProject {
   path: string
   name: string
@@ -179,14 +174,6 @@ const deletingResourceKeys = new Set<string>()
 let filePreviewObjectUrl = ''
 let filePreviewRequestId = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
-const mediaThumbnails = ref<Record<string, string>>({})
-const failedMediaThumbnails = ref<Record<string, true>>({})
-const loadingMediaThumbnails = new Set<string>()
-const queuedMediaThumbnails = new Set<string>()
-const mediaThumbnailQueue: ThumbnailRequest[] = []
-const MAX_CONCURRENT_THUMBNAILS = 1
-let activeMediaThumbnailLoads = 0
-let thumbnailPumpScheduled = false
 let webProjectChannel: BroadcastChannel | null = null
 let stopDesktopProjectFsHints: UnlistenFn | null = null
 let loadFileTreeRequestId = 0
@@ -553,7 +540,7 @@ const offProjectResourceChanged = onProjectResourceChange(change => {
   }
 })
 
-async function importDesktopDroppedPaths(paths: string[]) {
+async function importDesktopDroppedPaths(paths: string[], warnings: string[] = []) {
   const owner = projectDir.value
   if (!owner) {
     errorMsg.value = '请先选择项目文件夹'
@@ -568,15 +555,19 @@ async function importDesktopDroppedPaths(paths: string[]) {
     for (const [target, sources] of groups) {
       await projectFileActions.importDesktopPaths({ owner, paths: sources, targetPath: target })
     }
+    if (warnings.length) errorMsg.value = warnings.join('；')
   } catch (error) {
-    errorMsg.value = `导入失败: ${error instanceof Error ? error.message : String(error)}`
+    errorMsg.value = [
+      `导入失败: ${error instanceof Error ? error.message : String(error)}`,
+      ...warnings,
+    ].join('；')
   }
 }
 
 const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
-  const drop = payload as { target?: string; paths?: string[] }
+  const drop = payload as { target?: string; paths?: string[]; warnings?: string[] }
   if (drop.target === 'project' && Array.isArray(drop.paths))
-    void importDesktopDroppedPaths(drop.paths)
+    void importDesktopDroppedPaths(drop.paths, drop.warnings || [])
 })
 
 /* ─── 工具函数 ─── */
@@ -1089,87 +1080,6 @@ function previewType(node: TreeNode | null | undefined): FilePreview['type'] | n
   if (AUDIO_EXTS.has(ext)) return 'audio'
   if (ext === 'glb' || ext === 'gltf') return 'model3d'
   return null
-}
-function mediaThumbnailUrl(node: TreeNode) {
-  return mediaThumbnails.value[node.path] || ''
-}
-function mediaThumbnailKey(owner: string, path: string) {
-  return `${owner}:${path}`
-}
-async function loadMediaThumbnail(node: TreeNode, owner: string) {
-  const key = mediaThumbnailKey(owner, node.path)
-  if (
-    !isDesktop ||
-    !owner ||
-    !isCanvasMediaFile(node) ||
-    mediaThumbnails.value[node.path] ||
-    failedMediaThumbnails.value[node.path] ||
-    loadingMediaThumbnails.has(key)
-  )
-    return
-  loadingMediaThumbnails.add(key)
-  try {
-    const ext = node.name.split('.').pop()?.toLowerCase() || ''
-    const thumbnail = VIDEO_EXTS.has(ext)
-      ? await resolveProjectVideoThumbnail(owner, node.path)
-      : (await import('@tauri-apps/api/core')).convertFileSrc(`${owner}/${node.path}`)
-    if (!thumbnail) throw new Error('媒体缩略图为空')
-    if (owner !== projectKey.value) return
-    mediaThumbnails.value = { ...mediaThumbnails.value, [node.path]: thumbnail }
-  } catch {
-    if (owner === projectKey.value)
-      failedMediaThumbnails.value = { ...failedMediaThumbnails.value, [node.path]: true }
-  } finally {
-    loadingMediaThumbnails.delete(key)
-  }
-}
-function pumpMediaThumbnailQueue() {
-  thumbnailPumpScheduled = false
-  while (activeMediaThumbnailLoads < MAX_CONCURRENT_THUMBNAILS && mediaThumbnailQueue.length) {
-    const { node, owner } = mediaThumbnailQueue.shift()!
-    const key = mediaThumbnailKey(owner, node.path)
-    if (
-      owner !== projectKey.value ||
-      mediaThumbnails.value[node.path] ||
-      failedMediaThumbnails.value[node.path]
-    ) {
-      queuedMediaThumbnails.delete(key)
-      continue
-    }
-    activeMediaThumbnailLoads++
-    void loadMediaThumbnail(node, owner).finally(() => {
-      activeMediaThumbnailLoads--
-      queuedMediaThumbnails.delete(key)
-      scheduleMediaThumbnailPump()
-    })
-  }
-}
-function scheduleMediaThumbnailPump() {
-  if (thumbnailPumpScheduled) return
-  thumbnailPumpScheduled = true
-  if ('requestIdleCallback' in window)
-    window.requestIdleCallback(pumpMediaThumbnailQueue, { timeout: 500 })
-  else setTimeout(pumpMediaThumbnailQueue, 200)
-}
-function enqueueMediaThumbnail(node: TreeNode) {
-  const owner = projectKey.value
-  const key = mediaThumbnailKey(owner, node.path)
-  if (
-    !isDesktop ||
-    !owner ||
-    !isCanvasMediaFile(node) ||
-    mediaThumbnails.value[node.path] ||
-    failedMediaThumbnails.value[node.path] ||
-    queuedMediaThumbnails.has(key)
-  )
-    return
-  queuedMediaThumbnails.add(key)
-  mediaThumbnailQueue.push({ node, owner })
-  scheduleMediaThumbnailPump()
-}
-function queueRenderedMediaThumbnail(el: Element | null, node: TreeNode) {
-  if (!el) return
-  enqueueMediaThumbnail(node)
 }
 function emitMediaToCanvas(resource: ProjectResource, kind: 'image' | 'video' | 'audio') {
   emitEvent('canvas:add-media', {
@@ -2166,10 +2076,6 @@ watch(
     closeFilePreview()
     chooseCollision('cancel')
     filterQuery.value = ''
-    mediaThumbnails.value = {}
-    failedMediaThumbnails.value = {}
-    queuedMediaThumbnails.clear()
-    mediaThumbnailQueue.length = 0
     loadFileTree()
     startPolling()
   },
@@ -2337,7 +2243,6 @@ onBeforeUnmount(() => {
               width: '100%',
               transform: `translateY(${row.start}px)`,
             }"
-            :ref="el => queueRenderedMediaThumbnail(el as Element | null, item.node)"
             :data-project-drop-path="
               item.node.isDir ? item.node.path : item.node.path.split('/').slice(0, -1).join('/')
             "
@@ -2364,17 +2269,8 @@ onBeforeUnmount(() => {
               />
             </span>
             <span v-else-if="item.node.isDir" class="pft-arrow pft-arrow-empty"></span>
-            <span v-if="isCanvasMediaFile(item.node)" class="pft-media-thumb">
-              <img
-                v-if="mediaThumbnailUrl(item.node)"
-                :src="mediaThumbnailUrl(item.node)"
-                @error="failedMediaThumbnails[item.node.path] = true"
-              />
-              <JcIcon v-else :name="iconForNode(item.node)" />
-              <i v-if="VIDEO_EXTS.has(item.node.name.split('.').pop()?.toLowerCase() || '')">▶</i>
-            </span>
-            <JcIcon v-else :name="iconForNode(item.node)" class="pft-icon" />
-            <span class="pft-name">{{ item.node.name }}</span>
+            <JcIcon :name="iconForNode(item.node)" class="pft-icon" />
+            <span class="pft-name" :title="item.node.name">{{ item.node.name }}</span>
           </div>
         </div>
       </div>
@@ -3033,40 +2929,6 @@ onBeforeUnmount(() => {
   font-size: 16px;
   flex-shrink: 0;
   color: var(--ink3);
-}
-.pft-media-thumb {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: var(--surface);
-  color: var(--ink3);
-}
-.pft-media-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.pft-media-thumb .mso {
-  font-size: 14px;
-}
-.pft-media-thumb i {
-  position: absolute;
-  right: 1px;
-  bottom: 0;
-  padding: 0 1px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.6);
-  color: #fff;
-  font-size: 8px;
-  font-style: normal;
-  line-height: 10px;
 }
 .pft-name {
   flex: 1;

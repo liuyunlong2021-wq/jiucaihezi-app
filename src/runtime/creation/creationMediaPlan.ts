@@ -1,4 +1,5 @@
 import { getCreationModelSpec } from './creationModelRegistry'
+import { sizeFromRatioResolution } from '@/utils/imageContracts'
 import type {
   CreationApiStyle,
   CreationAssetFlow,
@@ -9,6 +10,8 @@ import type {
   CreationRunPlanInput,
   CreationUpstreamFamily,
 } from './creationMediaTypes'
+
+export { sizeFromRatioResolution } from '@/utils/imageContracts'
 
 const SOURCE_LABELS = {
   'newapi-direct': '直连',
@@ -234,20 +237,16 @@ function normalizeOpenAiImageParams(
       aspectRatio: firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9',
     })
   }
-  const isXiaoyiGemini = spec.id.startsWith('gemini-')
-  const size = isXiaoyiGemini
-    ? String(params.size || 'auto')
-    : typeof params.size === 'string' && params.size !== 'auto'
-      ? params.size
-      : sizeFromRatioResolution(
-          String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'),
-          String(params.resolution || '2k'),
-        )
+  const size = typeof params.size === 'string' && params.size !== 'auto'
+    ? params.size
+    : sizeFromRatioResolution(
+        String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'),
+        String(params.resolution || '2k'),
+      )
   return compact({
     model: spec.model,
     prompt: params.prompt,
     size,
-    aspectRatio: isXiaoyiGemini ? firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) : undefined,
     resolution: params.resolution,
     image: params.image,
     images: params.images,
@@ -399,56 +398,6 @@ function assertParamShape(
   if ((apiStyle === 'rh-standard' || apiStyle === 'rh-aiapp') && 'size' in normalizedParams) {
     throw new Error('RunningHub plan must not contain GPT Image size payload')
   }
-}
-
-export function sizeFromRatioResolution(ratio: string, resolution: string): string {
-  // 对齐 media-generation.ts mapGptImageSize 的完整尺寸表
-  const is4k = resolution === '4k'
-  const is1k = resolution === '1k'
-  const base = is4k ? 3840 : is1k ? 1024 : 2048
-  let w = base,
-    h = base
-  switch (ratio) {
-    case '1:1':
-      return is1k ? '1024x1024' : '2048x2048'
-    case '16:9':
-      return is4k ? '3840x2160' : is1k ? '1536x1024' : '2048x1152'
-    case '9:16':
-      return is4k ? '2160x3840' : is1k ? '1024x1536' : '1152x2048'
-    case '4:3':
-      w = Math.round((base * 4) / 3)
-      h = base
-      break
-    case '3:4':
-      w = base
-      h = Math.round((base * 4) / 3)
-      break
-    case '3:2':
-      w = Math.round((base * 3) / 2)
-      h = base
-      break
-    case '2:3':
-      w = base
-      h = Math.round((base * 3) / 2)
-      break
-    case '5:4':
-      w = Math.round((base * 5) / 4)
-      h = base
-      break
-    case '4:5':
-      w = base
-      h = Math.round((base * 5) / 4)
-      break
-    case '21:9':
-      w = Math.round((base * 21) / 9)
-      h = base
-      break
-    default:
-      const match = ratio.match(/^(\d+)x(\d+)$/)
-      if (match) return `${match[1]}x${match[2]}`
-      return '1024x1024'
-  }
-  return `${w}x${h}`
 }
 
 function buildSubmitSummary(plan: CreationRunPlan): string {

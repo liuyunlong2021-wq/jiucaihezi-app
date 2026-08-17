@@ -107,7 +107,8 @@ import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
 import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
-import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
+import { isAllowedCreationResultUrl, isSafePublicHttpUrl } from '@/utils/urlSafety'
+import { writeClipboardText } from '@/utils/clipboard'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
@@ -132,6 +133,8 @@ import {
 } from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
 import type { ProjectResource } from '@/utils/projectResource'
+import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
+import { nextMaterialPath } from '@/utils/projectMaterials'
 import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import type {
@@ -157,6 +160,7 @@ interface MemoryMediaOrigin {
 }
 
 const memoryMediaOrigin = ref<MemoryMediaOrigin | null>(null)
+let mediaTaskSummary: { value: string; prompt: string } | null = null
 let pendingMemoryPlanResources: ProjectResource[] = []
 
 // ─── 任务状态 ───
@@ -240,6 +244,76 @@ function canPersistMediaResult(task: MediaTask): boolean {
     Boolean(task.resultUrl) &&
     (isTauriRuntime() || Boolean(task.projectId))
   )
+}
+
+function canRegenerateTask(task: MediaTask): boolean {
+  return (
+    task.source === 'creation' &&
+    (task.status === 'success' || task.status === 'failed' || task.status === 'cancelled') &&
+    Boolean(task.planSnapshot)
+  )
+}
+
+function regenerateTask(task: MediaTask) {
+  const plan = task.planSnapshot
+  if (!plan || !canRegenerateTask(task)) return
+  switchTask(plan.task)
+  switchModel(plan.modelId)
+  cpState.fieldValues = {}
+  const params = plan.normalizedParams
+  const scalar = (key: string) => params[key]
+  const ratio = scalar('ratio') ?? scalar('aspectRatio') ?? scalar('aspect_ratio')
+  const resolution = scalar('resolution')
+  const duration = scalar('duration')
+  if (typeof ratio === 'string') setAspect(ratio)
+  if (typeof resolution === 'string') setResolution(resolution)
+  if (typeof duration === 'number') setDuration(duration)
+  for (const [key, stateKey] of Object.entries({
+    title: 'title', tags: 'tags', negative_tags: 'negativeTags', text: 'text', ref_text: 'refText',
+    voice_prompt: 'voicePrompt', language: 'language', start_time: 'startTime', end_time: 'endTime',
+    width: 'width', height: 'height', value: 'value', size: 'size', mv: 'mv',
+  })) {
+    const value = scalar(key)
+    if (value !== undefined) (cpState as unknown as Record<string, unknown>)[stateKey] = value
+  }
+  for (const field of currentCreationSpec.value?.fields || []) {
+    const value = scalar(field.key)
+    if (value !== undefined && ['string', 'number', 'boolean'].includes(typeof value)) {
+      cpState.fieldValues[field.key] = value as string | number | boolean
+    }
+  }
+  mediaTaskSummary = task.summary ? { value: task.summary, prompt: task.prompt } : null
+  cpState.prompt = task.prompt
+  cpState.files = []
+  cancelCanvasSelection()
+  saveCpState()
+  showTaskHistory.value = false
+  const hasReferences = ['images', 'image', 'videos', 'video', 'audios', 'audio'].some(key => {
+    const value = scalar(key)
+    return Array.isArray(value) ? value.length > 0 : Boolean(value)
+  })
+  cpState.progressText = hasReferences
+    ? '参数已回填，请重新选择参考素材后发送'
+    : '参数已回填，可确认后发送'
+}
+
+function canCopyTaskResultUrl(task: MediaTask): boolean {
+  return (
+    task.status === 'success' &&
+    !task.projectPath &&
+    !task.assetUri &&
+    typeof task.resultUrl === 'string' &&
+    isSafePublicHttpUrl(task.resultUrl)
+  )
+}
+
+async function copyTaskResultUrl(task: MediaTask) {
+  if (!canCopyTaskResultUrl(task) || !task.resultUrl) return
+  cpState.progressText = await writeClipboardText(task.resultUrl) ? '链接已复制' : '复制链接失败'
+}
+
+async function cancelTask(task: MediaTask) {
+  await mediaTaskStore.cancelTask(task.id)
 }
 
 async function retryTaskPersistence(task: MediaTask) {
@@ -618,12 +692,16 @@ async function runCreationViaTaskStore() {
     cpState.generating = true
     cpState.progressText = '提交中...'
 
+    const taskSummary = mediaTaskSummary?.prompt === cpState.prompt
+      ? mediaTaskSummary.value
+      : undefined
     try {
       const origin = memoryMediaOrigin.value
       await mediaTaskStore.submitTask({
         type: mediaType,
         model: m.modelName,
         modelLabel: m.label,
+        summary: taskSummary,
         prompt: cpState.prompt,
         referenceImages: refImages,
         referenceVideos: refVideos,
@@ -669,7 +747,10 @@ function loadMemoryMediaPlan(payload: unknown) {
     origin?: MemoryMediaOrigin
   } | null) || {}
   if (data.origin) memoryMediaOrigin.value = data.origin
-  if (!data.plan) return
+  if (!data.plan) {
+    mediaTaskSummary = null
+    return
+  }
   const plan = data.plan
   switchTask(plan.kind)
   switchModel(plan.modelId)
@@ -677,6 +758,7 @@ function loadMemoryMediaPlan(payload: unknown) {
   if (plan.resolution) setResolution(plan.resolution)
   if (plan.duration !== undefined) setDuration(Number(plan.duration))
   cpState.prompt = plan.prompt
+  mediaTaskSummary = { value: plan.title, prompt: plan.prompt }
   saveCpState()
   cancelCanvasSelection()
   pendingMemoryPlanResources = data.resources || []
@@ -1512,8 +1594,14 @@ function restoreCurrentCanvasMedia() {
 
 const offProjectResourceChange = onProjectResourceChange(reconcileCurrentCanvasMedia)
 
+function canvasImportBlocked(): boolean {
+  if (!canvasInteractionBlocked.value) return false
+  cpState.progressText = '画布正在处理，请稍后再试'
+  return true
+}
+
 async function addCanvasFiles(files: Iterable<File>) {
-  if (canvasInteractionBlocked.value) return
+  if (canvasImportBlocked()) return
   const ownership = captureCanvasMediaOwnership()
   const owner = ownership.owner
   if (!owner) {
@@ -1531,27 +1619,22 @@ async function addCanvasFiles(files: Iterable<File>) {
     if (!kind) continue
     if (!isCurrentCanvasMediaRequest(ownership)) return
     try {
-      const base64 = await fileToDataUrl(file)
+      const data = new Uint8Array(await file.arrayBuffer())
       if (!isCurrentCanvasMediaRequest(ownership)) return
-      const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
-      if (!isCurrentCanvasMediaRequest(ownership)) return
-      const persisted = await writeProjectMedia({
-        dataBase64: base64.split(',')[1],
-        mime: file.type,
-        projectDir: owner,
-        kind,
-        prompt: file.name,
-        memory: Boolean(memoryMediaOrigin.value),
+      const resource = await projectFileActions.importMedia({
+        owner,
+        path: nextMaterialPath(memoryMediaDirectoryFor(file.name, file.type), file.name, new Set()),
+        data,
+        mimeType: file.type || 'application/octet-stream',
       })
       if (!isCurrentCanvasMediaRequest(ownership)) return
-      const filePath = isTauriRuntime() ? persisted.filePath : persisted.projectPath
       await addMediaToCanvas(
-        filePath,
+        resource.path,
         kind,
         'drop',
         file.name,
         '',
-        captureCanvasMediaRequest(filePath, kind, 'drop', file.name, '', ownership),
+        captureCanvasMediaRequest(resource.path, kind, 'drop', file.name, '', ownership),
       )
     } catch {
       if (!isCurrentCanvasMediaRequest(ownership)) return
@@ -1562,17 +1645,14 @@ async function addCanvasFiles(files: Iterable<File>) {
 
 function onCanvasImport(event: Event) {
   const input = event.target as HTMLInputElement
-  if (canvasInteractionBlocked.value) {
-    input.value = ''
-    return
-  }
   if (input.files) void addCanvasFiles(input.files)
   input.value = ''
 }
 
 /** 画布拖入处理（模板直接绑定 @drop） */
 async function onCanvasDrop(e: DragEvent) {
-  if (canvasInteractionBlocked.value) return
+  canvasDragOver.value = false
+  if (canvasImportBlocked()) return
   const internal = e.dataTransfer?.getData('application/x-jc-media-reference') || ''
   if (internal) {
     try {
@@ -1593,6 +1673,7 @@ async function onCanvasDrop(e: DragEvent) {
       return
     }
   }
+  if (isTauriRuntime() && e.dataTransfer?.files.length) return
   if (e.dataTransfer?.files.length) await addCanvasFiles(e.dataTransfer.files)
 }
 
@@ -1604,52 +1685,68 @@ function canvasMediaKindForPath(path: string): CanvasMediaKind | null {
   return null
 }
 
-async function importDesktopCanvasPaths(paths: string[]) {
-  if (canvasInteractionBlocked.value) return
+async function importDesktopCanvasPaths(paths: string[], warnings: string[] = []) {
+  if (canvasImportBlocked()) return
   const ownership = captureCanvasMediaOwnership()
   if (!ownership.owner) {
     cpState.progressText = '请先选择项目文件夹'
     return
   }
+  if (!paths.length) {
+    if (warnings.length) cpState.progressText = warnings.join('；')
+    return
+  }
   const accepted = paths.filter(path => canvasMediaKindForPath(path))
   if (!accepted.length) {
-    cpState.progressText = '画布只支持图片、音频和视频文件'
+    cpState.progressText = ['画布只支持图片、音频和视频文件', ...warnings].join('；')
     return
   }
   try {
-    const resources = await projectFileActions.importDesktopPaths({
-      owner: ownership.owner,
-      paths: accepted,
-      targetPath: 'jc-media',
-    })
-    for (const resource of resources) {
-      const kind = canvasMediaKindForPath(resource.path)
-      if (!kind || !isCurrentCanvasMediaRequest(ownership)) return
-      await addMediaToCanvas(
-        resource.path,
-        kind,
-        'drop',
-        resource.name,
-        '',
-        captureCanvasMediaRequest(resource.path, kind, 'drop', resource.name, '', ownership),
-      )
+    const groups = new Map<string, string[]>()
+    for (const path of accepted) {
+      const directory = memoryMediaDirectoryFor(path)
+      groups.set(directory, [...(groups.get(directory) || []), path])
     }
+    for (const [targetPath, sourcePaths] of groups) {
+      const resources = await projectFileActions.importDesktopPaths({
+        owner: ownership.owner,
+        paths: sourcePaths,
+        targetPath,
+      })
+      for (const resource of resources) {
+        const kind = canvasMediaKindForPath(resource.path)
+        if (!kind || !isCurrentCanvasMediaRequest(ownership)) return
+        await addMediaToCanvas(
+          resource.path,
+          kind,
+          'drop',
+          resource.name,
+          '',
+          captureCanvasMediaRequest(resource.path, kind, 'drop', resource.name, '', ownership),
+        )
+      }
+    }
+    const notices = [...warnings]
     if (accepted.length !== paths.length)
-      cpState.progressText = '已导入支持的媒体文件；其他类型未加入画布'
+      notices.unshift('已导入支持的媒体文件；其他类型未加入画布')
+    if (notices.length) cpState.progressText = notices.join('；')
   } catch (error) {
     if (isCurrentCanvasMediaRequest(ownership))
-      cpState.progressText = `导入失败: ${error instanceof Error ? error.message : String(error)}`
+      cpState.progressText = [
+        `导入失败: ${error instanceof Error ? error.message : String(error)}`,
+        ...warnings,
+      ].join('；')
   }
 }
 
 const offDesktopProjectDrop = onEvent('project:desktop-drop', (payload: unknown) => {
-  const drop = payload as { target?: string; paths?: string[] }
+  const drop = payload as { target?: string; paths?: string[]; warnings?: string[] }
   if (drop.target === 'canvas' && Array.isArray(drop.paths))
-    void importDesktopCanvasPaths(drop.paths)
+    void importDesktopCanvasPaths(drop.paths, drop.warnings || [])
 })
 
 function onCanvasPaste(e: ClipboardEvent) {
-  if (canvasInteractionBlocked.value) return
+  if (canvasImportBlocked()) return
   const files = Array.from(e.clipboardData?.files || []).filter(
     file =>
       file.type.startsWith('image/') ||
@@ -3953,6 +4050,7 @@ const canSend = computed(
                 </div>
               </div>
               <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
+              <div v-if="task.status === 'cancelled'" class="cp-task-progress">{{ task.progressText }}</div>
               <div
                 v-if="taskPath(task) && task.status === 'success'"
                 class="cp-task-path"
@@ -3961,9 +4059,19 @@ const canSend = computed(
                 {{ taskPath(task) }}
               </div>
               <div
-                v-if="task.status === 'success' || canPersistMediaResult(task)"
+                v-if="mediaTaskStore.canCancelTask(task.id) || task.status === 'success' || canPersistMediaResult(task) || canRegenerateTask(task)"
                 class="cp-task-actions"
               >
+                <button
+                  v-if="mediaTaskStore.canCancelTask(task.id)"
+                  @click="cancelTask(task)"
+                  title="取消任务"
+                  aria-label="取消任务"
+                >
+                  <JcIcon name="close" />
+                </button>
+                <button v-if="canRegenerateTask(task)" @click="regenerateTask(task)">重新生成</button>
+                <button v-if="canCopyTaskResultUrl(task)" @click="copyTaskResultUrl(task)">复制链接</button>
                 <button
                   v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"
@@ -4354,15 +4462,6 @@ const canSend = computed(
         </button>
       </div>
       <div class="cp-composer-row">
-        <button
-          type="button"
-          class="cp-add-reference"
-          title="上传并选为参考素材"
-          aria-label="上传并选为参考素材"
-          @click="canvasImportInput?.click()"
-        >
-          <JcIcon name="attach-file" />
-        </button>
         <div class="cp-prompt-wrap">
           <!-- 模型专属参数 -->
           <div v-if="showTitleInput" class="cp-suno-row">
@@ -4430,17 +4529,28 @@ const canSend = computed(
               @blur="saveCpState()"
             />
           </div>
-          <textarea
-            v-if="showPromptInput"
-            ref="promptInput"
-            v-model="cpState.prompt"
-            rows="2"
-            :placeholder="promptPlaceholder"
-            @blur="saveCpState()"
-            @input="onCreationPromptInput"
-            @keydown="onCreationPromptKeydown"
-            class="cp-prompt-input"
-          />
+          <div class="cp-prompt-entry">
+            <button
+              type="button"
+              class="cp-add-reference"
+              title="上传并选为参考素材"
+              aria-label="上传并选为参考素材"
+              @click="canvasImportInput?.click()"
+            >
+              <JcIcon name="attach-file" />
+            </button>
+            <textarea
+              v-if="showPromptInput"
+              ref="promptInput"
+              v-model="cpState.prompt"
+              rows="2"
+              :placeholder="promptPlaceholder"
+              @blur="saveCpState()"
+              @input="onCreationPromptInput"
+              @keydown="onCreationPromptKeydown"
+              class="cp-prompt-input"
+            />
+          </div>
         </div>
         <div class="cp-submit">
           <button
@@ -4471,28 +4581,6 @@ const canSend = computed(
   overflow: hidden;
   position: relative;
   background: var(--surface);
-}
-
-/* 拖拽高亮 */
-/* 拖拽高亮 — 仅高亮底部 composer 区域 */
-.cp-drag-over .cp-composer {
-  position: relative;
-}
-.cp-drag-over .cp-composer::after {
-  content: '拖放文件到此处';
-  position: absolute;
-  inset: -4px;
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--olive);
-  background: color-mix(in srgb, var(--olive) 12%, transparent);
-  border: 2px dashed var(--olive);
-  border-radius: 8px;
-  pointer-events: none;
 }
 
 .cp-toolbar {
@@ -5332,7 +5420,6 @@ const canSend = computed(
   display: grid;
   width: 34px;
   height: 34px;
-  flex: 0 0 34px;
   padding: 0;
   place-items: center;
   border: 1px solid var(--line);
@@ -5391,6 +5478,17 @@ const canSend = computed(
 .cp-prompt-wrap:focus-within {
   border-color: var(--olive);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--olive) 16%, transparent);
+}
+.cp-prompt-entry {
+  position: relative;
+  min-width: 0;
+  min-height: 34px;
+}
+.cp-prompt-entry .cp-add-reference {
+  position: absolute;
+  z-index: 1;
+  bottom: 0;
+  left: 0;
 }
 
 .cp-media-slots {
@@ -5641,6 +5739,9 @@ const canSend = computed(
 }
 .cp-prompt-input {
   width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding-bottom: 38px;
   border: none;
   background: none;
   font-size: 13px;

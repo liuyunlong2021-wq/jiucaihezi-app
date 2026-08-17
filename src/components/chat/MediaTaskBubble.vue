@@ -34,6 +34,9 @@ const isSafeResult = computed(() => {
   const t = task.value
   return Boolean(t && (t.projectPath || t.assetUri || t.resultUrl))
 })
+const hasDisplayableResult = computed(() =>
+  isSafeResult.value || Boolean(task.value?.type === 'text' && task.value.resultText),
+)
 const linkCopied = ref(false)
 const projectResource = computed<ProjectResource | undefined>(() => {
   const t = task.value
@@ -55,8 +58,8 @@ const projectResource = computed<ProjectResource | undefined>(() => {
 })
 const displayUrl = computed(() => task.value?.resultUrl || '')
 
-function cancel() {
-  taskStore.cancelTask(props.taskId)
+async function cancel() {
+  await taskStore.cancelTask(props.taskId)
 }
 
 async function retrySave() {
@@ -112,8 +115,8 @@ async function previewResult() {
       <div class="mtb-header">
         <JcIcon name="hourglass_bottom" class="mtb-spin" />
         <span class="mtb-model">{{ task.modelLabel }}</span>
-        <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : task.type === 'model3d' ? '3D 模型' : '音频' }}生成中</span>
-        <button class="mtb-cancel" @click="cancel" title="取消">
+        <span class="mtb-type">{{ task.type === 'image' ? '图片' : task.type === 'video' ? '视频' : task.type === 'model3d' ? '3D 模型' : task.type === 'text' ? '文本' : '音频' }}生成中</span>
+        <button v-if="taskStore.canCancelTask(task.id)" class="mtb-cancel" @click="cancel" title="取消任务" aria-label="取消任务">
           <JcIcon name="close" />
         </button>
       </div>
@@ -124,8 +127,9 @@ async function previewResult() {
     </div>
 
     <!-- 成功 -->
-    <div v-else-if="isSuccess && isSafeResult" class="mtb-result">
-      <img v-if="task.type === 'image' && isAllowedCreationResultUrl(displayUrl)" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
+    <div v-else-if="isSuccess && hasDisplayableResult" class="mtb-result">
+      <div v-if="task.type === 'text' && task.resultText" class="mtb-text-result">{{ task.resultText }}</div>
+      <img v-else-if="task.type === 'image' && isAllowedCreationResultUrl(displayUrl)" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
       <div v-else-if="task.type === 'image'" class="mtb-file-result">
         <JcIcon name="image" />
         <span>{{ projectResource ? '图片已保存到项目' : '图片已生成，等待保存' }}</span>
@@ -150,7 +154,7 @@ async function previewResult() {
         媒体已生成，但保存到项目失败。
         <button type="button" @click="retrySave">重试保存</button>
       </div>
-      <div class="mtb-actions">
+      <div v-if="task.type !== 'text'" class="mtb-actions">
         <button class="mtb-act-btn" @click="downloadCopy" title="下载副本">
           <JcIcon name="download" /> 下载
         </button>
@@ -170,9 +174,14 @@ async function previewResult() {
     </div>
 
     <!-- 已取消 -->
-    <div v-else class="mtb-cancelled">
+    <div v-else-if="task.status === 'cancelled'" class="mtb-cancelled">
       <JcIcon name="cancel" />
-      <span>已取消</span>
+      <span>{{ task.progressText || '已取消' }}</span>
+    </div>
+
+    <div v-else class="mtb-failed">
+      <JcIcon name="error" />
+      <span>任务结果不可用</span>
     </div>
   </div>
 </template>
@@ -260,6 +269,7 @@ async function previewResult() {
   min-height: 48px;
   color: var(--ink2, #888);
 }
+.mtb-text-result { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink); }
 .mtb-saved-path { color: var(--ink3); font-size: 11px; overflow-wrap: anywhere; }
 .mtb-save-warning {
   display: flex;

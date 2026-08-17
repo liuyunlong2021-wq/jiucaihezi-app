@@ -61,14 +61,12 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.json()["status"], "failed")
         self.assertEqual(response.json()["error"]["message"], "upstream failed")
 
-    async def test_gemini_maps_resolution_and_aspect_ratio_without_size_auto(self):
-        response = await self.client.post("/v1/videos", headers={"Authorization": "Bearer key"}, json={"model": "gemini-3-pro-image-preview", "prompt": "draw", "size": "auto", "resolution": "4k", "aspectRatio": "16:9"})
+    async def test_gemini_keeps_mapped_size(self):
+        response = await self.client.post("/v1/videos", headers={"Authorization": "Bearer key"}, json={"model": "gemini-3-pro-image-preview", "prompt": "draw", "size": "2048x1152"})
         self.assertEqual(response.status_code, 200)
         body = json.loads(self.requests[0].content)
         self.assertEqual(body["model"], "gemini-3-pro-image-preview")
-        self.assertEqual(body["quality"], "4k")
-        self.assertEqual(body["aspectRatio"], "16:9")
-        self.assertNotIn("size", body)
+        self.assertEqual(body["size"], "2048x1152")
 
     async def test_accepts_canonical_gpt_model_for_newapi_mapping(self):
         response = await self.client.post(

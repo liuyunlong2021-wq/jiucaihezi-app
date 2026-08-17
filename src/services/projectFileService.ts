@@ -35,6 +35,12 @@ export interface ImportProjectBinaryInput {
   mimeType: string
 }
 
+export interface ImportProjectTextInput {
+  owner: string
+  path: string
+  content: string
+}
+
 export interface ImportProjectExternalFilesInput {
   owner: string
   paths: string[]
@@ -56,6 +62,7 @@ export interface ProjectFileAdapter {
     expectedRevision: ProjectResourceRevision,
   ): Promise<ProjectFileWriteResult>
   readBinary?(owner: string, path: string): Promise<ProjectBinaryRead>
+  hashFile?(owner: string, path: string): Promise<string>
   importBinary?(
     owner: string,
     path: string,
@@ -187,6 +194,7 @@ export interface ProjectFileService {
   ): Promise<ProjectFileWriteResult>
   readBinary(resource: ProjectResource): Promise<ProjectBinaryRead>
   importBinary(input: ImportProjectBinaryInput): Promise<ProjectResource>
+  importText(input: ImportProjectTextInput): Promise<ProjectResource>
   importExternalFiles(input: ImportProjectExternalFilesInput): Promise<ProjectResource[]>
   createText(owner: string, path: string, content: string): Promise<ProjectResource>
   createFolder(owner: string, path: string): Promise<ProjectResource>
@@ -276,6 +284,75 @@ function base64ToBytes(value: string): Uint8Array {
   const data = new Uint8Array(binary.length)
   for (let index = 0; index < binary.length; index += 1) data[index] = binary.charCodeAt(index)
   return data
+}
+
+async function sha256(data: Uint8Array): Promise<string> {
+  const bytes = data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  const hash = new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(hash, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function importPathParts(path: string): { parent: string; name: string; base: string; extension: string } {
+  const slash = path.lastIndexOf('/')
+  const parent = slash < 0 ? '' : path.slice(0, slash)
+  const name = slash < 0 ? path : path.slice(slash + 1)
+  const dot = name.lastIndexOf('.')
+  return {
+    parent,
+    name,
+    base: dot > 0 ? name.slice(0, dot) : name,
+    extension: dot > 0 ? name.slice(dot) : '',
+  }
+}
+
+function normalizedImportName(path: string): string {
+  return importPathParts(path).name.normalize('NFC').toLocaleLowerCase()
+}
+
+function nextAvailableImportPath(path: string, entries: ProjectFileEntry[]): string {
+  const { parent, base, extension } = importPathParts(path)
+  const existing = new Set(entries.map(entry => entry.path.normalize('NFC').toLocaleLowerCase()))
+  if (!existing.has(path.normalize('NFC').toLocaleLowerCase())) return path
+  for (let index = 1; ; index += 1) {
+    const name = `${base} (${index})${extension}`
+    const candidate = parent ? `${parent}/${name}` : name
+    if (!existing.has(candidate.normalize('NFC').toLocaleLowerCase())) return candidate
+  }
+}
+
+async function resolveImportDestination(
+  adapter: ProjectFileAdapter,
+  owner: string,
+  path: string,
+  data: Uint8Array,
+  mimeType: string,
+): Promise<{ duplicate?: ProjectResource; path: string }> {
+  const entries = await adapter.list(owner)
+  const { parent } = importPathParts(path)
+  const kind = classifyProjectResource({ path, mimeType })
+  const candidates = entries.filter(entry => {
+    if (entry.isDirectory ?? entry.isDir ?? false) return false
+    const parts = importPathParts(entry.path)
+    return parts.parent === parent
+      && normalizedImportName(entry.path) === normalizedImportName(path)
+      && classifyProjectResource({ path: entry.path, mimeType: entry.mimeType }) === kind
+  })
+  const textKind = kind === 'document' || kind === 'canvas' || kind === 'project-map'
+  if (candidates.length && (textKind || adapter.hashFile || adapter.readBinary)) {
+    const expected = await sha256(data)
+    for (const entry of candidates) {
+      if (entry.size != null && entry.size !== data.byteLength) continue
+      const actual = textKind
+        ? await sha256(new TextEncoder().encode((await adapter.readText(owner, entry.path)).content))
+        : adapter.hashFile
+          ? await adapter.hashFile(owner, entry.path)
+          : await sha256((await adapter.readBinary!(owner, entry.path)).data)
+      if (actual === expected) {
+        return { duplicate: resourceFromEntry(adapter.runtime, owner, entry), path: entry.path }
+      }
+    }
+  }
+  return { path: nextAvailableImportPath(path, entries) }
 }
 
 async function affectedResources(
@@ -418,15 +495,49 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
     async importBinary(input) {
       return await mutate(input.owner, async () => {
         if (!adapter.importBinary) throw new Error('当前运行时不支持二进制导入')
+        const destination = await resolveImportDestination(
+          adapter,
+          input.owner,
+          normalizePath(input.path),
+          input.data,
+          input.mimeType,
+        )
+        if (destination.duplicate) return destination.duplicate
         const resource = resourceFromEntry(
           adapter.runtime,
           input.owner,
           await adapter.importBinary(
             input.owner,
-            normalizePath(input.path),
+            destination.path,
             input.data,
             input.mimeType,
           ),
+        )
+        const id = transactionId()
+        emitProjectResourceChange({
+          type: 'created',
+          resource,
+          transactionId: id,
+          operationId: id,
+          source: 'local',
+        })
+        return resource
+      })
+    },
+    async importText(input) {
+      return await mutate(input.owner, async () => {
+        const destination = await resolveImportDestination(
+          adapter,
+          input.owner,
+          normalizePath(input.path),
+          new TextEncoder().encode(input.content),
+          'text/plain',
+        )
+        if (destination.duplicate) return destination.duplicate
+        const resource = resourceFromEntry(
+          adapter.runtime,
+          input.owner,
+          await adapter.createText(input.owner, destination.path, input.content),
         )
         const id = transactionId()
         emitProjectResourceChange({
@@ -444,12 +555,15 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
         if (!adapter.importExternalFiles) throw new Error('当前运行时不支持外部文件导入')
         if (!input.paths.length) return []
         const targetPath = normalizeDirectoryPath(input.targetPath)
+        const existing = new Set((await adapter.list(input.owner)).map(entry => entry.path))
         const resources = (
           await adapter.importExternalFiles(input.owner, input.paths, targetPath)
         ).map(entry => resourceFromEntry(adapter.runtime, input.owner, entry))
+        const created = resources.filter(resource => !existing.has(resource.path))
+        if (!created.length) return resources
         const id = transactionId()
         emitCompletedChanges(
-          resources.map(resource => ({
+          created.map(resource => ({
             type: 'created' as const,
             resource,
             transactionId: id,
@@ -780,6 +894,9 @@ export function createRuntimeProjectFileService(): ProjectFileService {
         )
         return { data, size: entry.size, mimeType: entry.mimeType }
       },
+      async hashFile(owner, path) {
+        return await sha256(new Uint8Array(await (await webProjectFiles.readBinary(owner, path)).arrayBuffer()))
+      },
       async importBinary(owner, path, data, mimeType) {
         const bytes = new Uint8Array(data.byteLength)
         bytes.set(data)
@@ -911,6 +1028,12 @@ export function createRuntimeProjectFileService(): ProjectFileService {
       )
       if (result.truncated) throw new Error('二进制文件超过 30 MB，无法安全读取')
       return { data: base64ToBytes(result.base64), size: result.size }
+    },
+    async hashFile(owner, path) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      return await invoke<string>('dev_hash_project_file', {
+        input: { root: owner, relativePath: path },
+      })
     },
     async importBinary(owner, path, data, mimeType) {
       const { invoke } = await import('@tauri-apps/api/core')

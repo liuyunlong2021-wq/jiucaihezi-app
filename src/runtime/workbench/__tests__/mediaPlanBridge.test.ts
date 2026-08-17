@@ -19,6 +19,7 @@ test('media plan bridge materializes an image plan through the existing creation
 
   assert.equal(submission.type, 'image')
   assert.equal(submission.model, 'gpt-image-2-低质量')
+  assert.equal(submission.summary, '精华液主图')
   assert.equal(submission.plan.modelId, 'gpt-image-2-低质量')
   assert.equal(submission.plan.debug.referenceImageCount, 1)
   assert.equal(submission.source, 'creation')

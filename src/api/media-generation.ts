@@ -28,6 +28,7 @@ export interface ImageGenParams {
   outputFormat?: string
   responseFormat?: 'url' | 'b64_json'
   onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
+  signal?: AbortSignal
 }
 
 export interface VideoGenParams {
@@ -45,6 +46,7 @@ export interface VideoGenParams {
   height?: string | number
   value?: string | number
   onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
+  signal?: AbortSignal
 }
 
 export interface AudioGenParams {
@@ -64,6 +66,7 @@ export interface AudioGenParams {
   language?: string
   voicePrompt?: string
   onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
+  signal?: AbortSignal
 }
 
 export interface MediaResult {
@@ -90,6 +93,7 @@ const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CRE
 import { getMediaModel, getMediaModelAvailability, isRemovedMediaModelId } from '@/data/mediaModelCapabilities'
 import { buildGatewayHeaders, DEFAULT_API_BASE_URL } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
+import { sizeFromRatioResolution } from '@/utils/imageContracts'
 import { isAllowedCreationPollUrl } from '@/utils/urlSafety'
 
 let _cachedConfig: { apiKey: string; apiBase: string } | null = null
@@ -155,35 +159,6 @@ export function assertMediaModelExecutable(model: string, kind: 'image' | 'video
   if (!matchesKind) {
     throw new Error(`模型 ${id} 不支持${kind === 'image' ? '图片' : kind === 'video' ? '视频' : '音频'}生成，请重新选择模型。`)
   }
-}
-
-// ---- Size Mapping (V4/V5 verified) ----
-
-function mapGptImageSize(ar: string, res?: string): string {
-  const is4k = res === '4k'
-  const is2k = res === '2k'
-  // 基础短边：1k=1024, 2k=2048, 4k=3840（对标 T8 GPTImage API 标准尺寸）
-  const base = is4k ? 3840 : is2k ? 2048 : 1024
-  let w = base, h = base
-  switch (ar) {
-    // 已有比例 — 保持与旧版完全一致的硬编码尺寸，确保桌面/Web 双端兼容
-    case '1:1':   return (is2k || is4k) ? '2048x2048' : '1024x1024'
-    case '16:9':  return is4k ? '3840x2160' : (is2k ? '2048x1152' : '1536x1024')
-    case '9:16':  return is4k ? '2160x3840' : (is2k ? '1152x2048' : '1024x1536')
-    // 新增比例 — 基于短边计算长边，保持短边一致的视觉密度
-    case '4:3':   w = Math.round(base * 4 / 3); h = base; break
-    case '3:4':   w = base; h = Math.round(base * 4 / 3); break
-    case '3:2':   w = Math.round(base * 3 / 2); h = base; break
-    case '2:3':   w = base; h = Math.round(base * 3 / 2); break
-    case '5:4':   w = Math.round(base * 5 / 4); h = base; break
-    case '4:5':   w = base; h = Math.round(base * 5 / 4); break
-    case '21:9':  w = Math.round(base * 21 / 9); h = base; break
-    default:
-      const match = ar.match(/^(\d+)x(\d+)$/)
-      if (match) return `${match[1]}x${match[2]}`
-      return '1024x1024'
-  }
-  return `${w}x${h}`
 }
 
 function normalizeRhImageResolution(value?: string): string {
@@ -429,7 +404,7 @@ export function isTerminalCreationTaskError(error: unknown): boolean {
   )
 }
 
-export async function uploadCreationAsset(value?: string): Promise<string> {
+export async function uploadCreationAsset(value?: string, externalSignal?: AbortSignal): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
   // 远程素材已经可被模型服务访问，本地 Tauri asset:// 和浏览器 blob: 必须上传。
@@ -437,7 +412,7 @@ export async function uploadCreationAsset(value?: string): Promise<string> {
   await ensureConfig()
   const blob = source.startsWith('data:')
     ? dataUrlToBlob(source)
-    : await fetch(source).then(async response => {
+    : await fetch(source, { signal: externalSignal }).then(async response => {
       if (!response.ok) throw new Error(`读取本地素材失败 (${response.status})`)
       return response.blob()
     })
@@ -445,14 +420,19 @@ export async function uploadCreationAsset(value?: string): Promise<string> {
   formData.append('file', blob, blob.type.startsWith('audio/') ? 'reference.wav' : blob.type.startsWith('video/') ? 'reference.mp4' : 'reference.png')
   const headers = buildGatewayHeaders({})
   delete headers['Content-Type']  // multipart 不设置 Content-Type
-  const { signal, clear } = createTimeoutSignal(120)
-  const res = await safeFetch(`${getApiBase()}/api/creations/uploads`, {
-    method: 'POST',
-    headers,
-    body: formData,
-    signal,
-  })
-  clear()
+  const { signal, clear } = createTimeoutSignal(120, externalSignal)
+  let res: Response
+  try {
+    res = await safeFetch(`${getApiBase()}/api/creations/uploads`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal,
+    })
+  } finally {
+    clear()
+  }
+  throwIfAborted(externalSignal)
   if (!res.ok) {
     const text = await res.text().catch(() => '')
     throw new Error(`素材上传失败 (${res.status}): ${text.slice(0, 200)}`)
@@ -469,14 +449,34 @@ export async function uploadCreationAsset(value?: string): Promise<string> {
 import { safeFetch } from '@/utils/httpClient'
 
 /** 创建带超时的 AbortController（网页版 fallback） */
-function createTimeoutSignal(timeoutSec = 300): { signal?: AbortSignal; clear: () => void } {
-  if (typeof AbortController === 'undefined') return { clear: () => {} }
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutSec * 1000)
-  return { signal: controller.signal, clear: () => clearTimeout(timer) }
+function abortError(): Error {
+  const error = new Error('任务已取消')
+  error.name = 'AbortError'
+  return error
 }
 
-export async function apiCall(path: string, body: any | null, method = 'POST', model?: string): Promise<any> {
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw abortError()
+}
+
+function createTimeoutSignal(timeoutSec = 300, externalSignal?: AbortSignal): { signal?: AbortSignal; clear: () => void } {
+  if (typeof AbortController === 'undefined') return { clear: () => {} }
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  if (externalSignal?.aborted) controller.abort()
+  else externalSignal?.addEventListener('abort', abort, { once: true })
+  const timer = setTimeout(() => controller.abort(), timeoutSec * 1000)
+  return {
+    signal: controller.signal,
+    clear: () => {
+      clearTimeout(timer)
+      externalSignal?.removeEventListener('abort', abort)
+    },
+  }
+}
+
+export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal): Promise<any> {
+  throwIfAborted(externalSignal)
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
@@ -487,10 +487,15 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
   // ★ 使用 safeFetch 而非裸 fetch：Tauri 走 Rust 桥，浏览器走原生（带超时）
-  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 300)
+  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 300, externalSignal)
   if (signal) opts.signal = signal
-  const res = await safeFetch(fullUrl, opts)
-  clear()
+  let res: Response
+  try {
+    res = await safeFetch(fullUrl, opts)
+  } finally {
+    clear()
+  }
+  throwIfAborted(externalSignal)
   console.log('[apiCall] response status:', res.status)
   if (!res.ok) {
     if (res.status === 429) {
@@ -513,17 +518,23 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   return json
 }
 
-export async function apiCallBinary(path: string, body: unknown, model?: string): Promise<string> {
+export async function apiCallBinary(path: string, body: unknown, model?: string, externalSignal?: AbortSignal): Promise<string> {
+  throwIfAborted(externalSignal)
   await ensureConfig()
   if (!storedApiKey()) throw new Error('请先登录韭菜盒子账号')
-  const { signal, clear } = createTimeoutSignal(300)
-  const res = await safeFetch(`${getApiBase()}${path}`, {
-    method: 'POST',
-    headers: authHeadersFor(model),
-    body: JSON.stringify(body),
-    signal,
-  })
-  clear()
+  const { signal, clear } = createTimeoutSignal(300, externalSignal)
+  let res: Response
+  try {
+    res = await safeFetch(`${getApiBase()}${path}`, {
+      method: 'POST',
+      headers: authHeadersFor(model),
+      body: JSON.stringify(body),
+      signal,
+    })
+  } finally {
+    clear()
+  }
+  throwIfAborted(externalSignal)
   if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
   const mime = (res.headers.get('content-type') || 'audio/mpeg').split(';')[0]
   const bytes = new Uint8Array(await res.arrayBuffer())
@@ -599,7 +610,8 @@ function emptyImageResultError(label: string, data: any): Error {
   return new Error(`${label}没有返回可用图片 URL 或 b64_json。响应摘要：${summarizeMediaResponse(data)}`)
 }
 
-export async function apiCallMultipart(path: string, fields: Record<string, string | Blob | Blob[]>): Promise<any> {
+export async function apiCallMultipart(path: string, fields: Record<string, string | Blob | Blob[]>, externalSignal?: AbortSignal): Promise<any> {
+  throwIfAborted(externalSignal)
   await ensureConfig()
   const key = storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
@@ -614,14 +626,19 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   const headers = buildGatewayHeaders({})
   // multipart 不设置 Content-Type，让浏览器自动带 boundary
   delete headers['Content-Type']
-  const { signal, clear } = createTimeoutSignal(300)
-  const res = await safeFetch(`${getApiBase()}${path}`, {
-    method: 'POST',
-    headers,
-    body: formData,
-    signal,
-  })
-  clear()
+  const { signal, clear } = createTimeoutSignal(300, externalSignal)
+  let res: Response
+  try {
+    res = await safeFetch(`${getApiBase()}${path}`, {
+      method: 'POST',
+      headers,
+      body: formData,
+      signal,
+    })
+  } finally {
+    clear()
+  }
+  throwIfAborted(externalSignal)
   if (!res.ok) {
     if (res.status === 503) {
       throw new Error('服务暂时不可用 (503)，请稍后再试')
@@ -660,17 +677,32 @@ export async function pollTask(
   onProgress?: (elapsed: number, status: string) => void,
   maxPollsSec = 600,
   intervalMs = 10000,
+  signal?: AbortSignal,
 ): Promise<string> {
   if (!isAllowedCreationPollUrl(pollPath)) throw new Error('任务轮询地址不安全，已阻止请求')
   const maxPolls = Math.ceil(maxPollsSec / (intervalMs / 1000))
   let consecutive521 = 0
   for (let i = 0; i < maxPolls; i++) {
-    await new Promise(r => setTimeout(r, intervalMs))
+    throwIfAborted(signal)
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(done, intervalMs)
+      const onAbort = () => {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', onAbort)
+        reject(abortError())
+      }
+      function done() {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+    })
     let data: any
     try {
-      data = await apiCall(pollPath, null, 'GET')
+      data = await apiCall(pollPath, null, 'GET', undefined, signal)
       consecutive521 = 0  // 成功请求，重置 521 计数
     } catch (e: any) {
+      if (signal?.aborted) throw abortError()
       if (isTerminalCreationTaskError(e)) throw e
       // 上游偶发 521 时不要立即判失败，继续轮询 3 分钟
       if (e.message?.includes('521')) {
@@ -701,7 +733,7 @@ export async function pollTask(
       if (url) return url
       const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
       if (publicVideoTask) {
-        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET')
+        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET', undefined, signal)
         const detailUrl = extractMediaUrl(detail, 'video')
         if (detailUrl) return detailUrl
       }
@@ -777,7 +809,7 @@ export async function generateImage(
       const imgs = Array.isArray(image) ? image.filter(Boolean) : [image].filter(Boolean) as string[]
       if (imgs.length) rhBody.images = imgs
     }
-    const rhData = await apiCall('/v1/images/generations', rhBody, 'POST', model)
+    const rhData = await apiCall('/v1/images/generations', rhBody, 'POST', model, params.signal)
     const syncUrl = extractMediaUrl(rhData, 'image')
     if (syncUrl) return { url: syncUrl, type: 'image' }
     // 异步：rh-adapter 返回 {task_id, status:"processing"}，轮询走 /rh/tasks/ 直连 adapter
@@ -785,13 +817,13 @@ export async function generateImage(
     if (taskId) {
       const pollUrl = buildRhTaskPollUrl(taskId, rhData)
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
-      const mediaUrl = await pollTask(pollUrl, 'image', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+      const mediaUrl = await pollTask(pollUrl, 'image', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS, params.signal)
       return { url: mediaUrl, type: 'image', taskId, pollUrl, pollKind: 'image' as const }
     }
     throw new Error('RH 图片多次尝试均未获取到结果')
   }
 
-  const size = params.size || mapGptImageSize(aspectRatio || '1:1', resolution)
+  const size = params.size || sizeFromRatioResolution(aspectRatio || '1:1', resolution)
   const responseFormat = params.responseFormat || 'url'
 
   // ── Nano Banana → JSON /v1/images/generations ──
@@ -806,7 +838,7 @@ export async function generateImage(
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) onProgress?.(attempt * 30, image ? `第${attempt + 1}次尝试...` : '重试中...')
       else onProgress?.(0, image ? '上传图片中...' : '提交中')
-      nanoData = await apiCall('/v1/images/generations', body, 'POST', model)
+      nanoData = await apiCall('/v1/images/generations', body, 'POST', model, params.signal)
       const mediaUrl = extractMediaUrl(nanoData, 'image')
       if (mediaUrl) return { url: mediaUrl, type: 'image' }
       console.warn(`[Nano Banana] 第${attempt + 1}次返回空图，重试...`, nanoData)
@@ -828,8 +860,8 @@ export async function generateImage(
       if (item.startsWith('data:')) {
         blobs.push(dataUrlToBlob(item))
       } else {
-        try { const imgRes = await safeFetch(item); blobs.push(await imgRes.blob()) }
-        catch { throw new Error('无法加载参考图片') }
+        try { const imgRes = await safeFetch(item, { signal: params.signal }); blobs.push(await imgRes.blob()) }
+        catch { throwIfAborted(params.signal); throw new Error('无法加载参考图片') }
       }
     }
     fields.image = blobs
@@ -837,7 +869,7 @@ export async function generateImage(
     let lastData: any = null
     for (let attempt = 0; attempt < 3; attempt++) {
       if (attempt > 0) onProgress?.(attempt * 60, `第${attempt + 1}次尝试...`)
-      lastData = await apiCallMultipart('/v1/images/edits', fields)
+      lastData = await apiCallMultipart('/v1/images/edits', fields, params.signal)
       const mediaUrl = extractMediaUrl(lastData, 'image')
       if (mediaUrl) return { url: mediaUrl, type: 'image' }
       console.warn(`[图生图] 第${attempt + 1}次返回空图，重试...`, lastData)
@@ -852,7 +884,7 @@ export async function generateImage(
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) onProgress?.(attempt * 30, `第${attempt + 1}次尝试...`)
     else onProgress?.(0, '提交中')
-    lastGenData = await apiCall('/v1/images/generations', body, 'POST', model)
+    lastGenData = await apiCall('/v1/images/generations', body, 'POST', model, params.signal)
     const mediaUrl = extractMediaUrl(lastGenData, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     console.warn(`[文生图] 第${attempt + 1}次返回空图，重试...`, lastGenData)
@@ -896,14 +928,14 @@ export async function generateVideo(
     if (officialNodeInfoList) rhBody.nodeInfoList = officialNodeInfoList
 
     // RH 视频提交走 /v1/videos 让 NewAPI 计费；轮询按返回 ID 类型分流。
-    const resData = await apiCall('/v1/videos', rhBody, 'POST', model)
+    const resData = await apiCall('/v1/videos', rhBody, 'POST', model, params.signal)
     const syncUrl = extractMediaUrl(resData, 'video')
     if (syncUrl) return { url: syncUrl, type: 'video' }
     const taskId = extractTaskId(resData) || resData?.id
     if (taskId) {
       const pollUrl = buildRhVideoTaskPollUrl(taskId, resData)
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-      const mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+      const mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS, params.signal)
       return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
     }
     throw new Error('RH 视频提交失败')
@@ -921,17 +953,17 @@ export async function generateVideo(
     }
     if (resolution) body.resolution = String(resolution).toLowerCase()
     const safeImages = filterSafeImageUrls(imageUrls, imageUrl).slice(0, 9)
-    const uploadedImages = await Promise.all(safeImages.map(uploadCreationAsset))
+    const uploadedImages = await Promise.all(safeImages.map(image => uploadCreationAsset(image, params.signal)))
     uploadedImages.forEach((url, index) => {
       body[`image_file_${index + 1}`] = url
     })
 
-    const data = await apiCall('/api/seedance/v1/videos', body, 'POST', model)
+    const data = await apiCall('/api/seedance/v1/videos', body, 'POST', model, params.signal)
     let mediaUrl = extractMediaUrl(data, 'video')
     const taskId = extractTaskId(data)
     const pollUrl = taskId ? `/api/seedance/v1/videos/${encodeURIComponent(taskId)}` : undefined
     if (taskId && pollUrl) await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    if (!mediaUrl && pollUrl) mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+    if (!mediaUrl && pollUrl) mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS, params.signal)
     if (!mediaUrl) throw new Error('视频生成失败')
     return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' as const }
   }
@@ -949,7 +981,7 @@ export async function generateVideo(
       const source = safeImages[0]
       const image = source.startsWith('data:')
         ? dataUrlToBlob(source)
-        : await safeFetch(source).then(response => {
+        : await safeFetch(source, { signal: params.signal }).then(response => {
             if (!response.ok) throw new Error('无法加载参考图片')
             return response.blob()
           })
@@ -961,7 +993,7 @@ export async function generateVideo(
         size,
         resolution: veoResolution,
         aspectRatio: ratio,
-      })
+      }, params.signal)
     } else {
       data = await apiCall('/v1/videos', {
         model: upstreamModel,
@@ -969,7 +1001,7 @@ export async function generateVideo(
         duration: veoDuration,
         size,
         metadata: { resolution: veoResolution, aspectRatio: ratio },
-      }, 'POST', model)
+      }, 'POST', model, params.signal)
     }
   } else {
     const body: any = { model: upstreamModel, prompt }
@@ -990,7 +1022,7 @@ export async function generateVideo(
       if (resolution) body.metadata.resolution = String(resolution).toLowerCase()
     }
     const videoPath = isDoubaoVideo ? '/v1/video/generations' : '/v1/videos'
-    data = await apiCall(videoPath, body, 'POST', model)
+    data = await apiCall(videoPath, body, 'POST', model, params.signal)
   }
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
@@ -1000,7 +1032,7 @@ export async function generateVideo(
         ? `/v1/video/generations/${taskId}`
         : `/v1/videos/${taskId}`
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-      mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000)
+      mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, params.signal)
     }
   }
   if (!mediaUrl) throw new Error('视频生成失败')
@@ -1053,7 +1085,7 @@ export async function generateAudio(
       rhBody.prompt = audioParams.prompt
     }
 
-    const submitData = await apiCall('/v1/audio/speech', rhBody, 'POST', model)
+    const submitData = await apiCall('/v1/audio/speech', rhBody, 'POST', model, audioParams.signal)
     const taskId = extractTaskId(submitData) || submitData?.id
     const isLyrics = model === 'rh-suno-lyrics'
     const syncText = isLyrics ? extractMediaText(submitData) : ''
@@ -1064,7 +1096,7 @@ export async function generateAudio(
     const pollUrl = buildRhTaskPollUrl(String(taskId), submitData)
     const pollKind = isLyrics ? 'text' as const : 'audio' as const
     await audioParams.onSubmitted?.({ taskId: String(taskId), pollUrl, pollKind })
-    const result = await pollTask(pollUrl, pollKind, onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS)
+    const result = await pollTask(pollUrl, pollKind, onProgress, 600, CREATION_TASK_POLL_INTERVAL_MS, audioParams.signal)
     if (isLyrics) return { url: '', text: result, type: 'text', taskId: String(taskId), pollUrl, pollKind }
     return { url: result, type: 'audio', taskId: String(taskId), pollUrl, pollKind }
   }
@@ -1078,7 +1110,7 @@ export async function generateAudio(
     negative_tags: audioParams.negativeTags || '',
     generation_type: 'TEXT',
   }
-  const submitData = await apiCall('/suno/submit/music', body, 'POST', model)
+  const submitData = await apiCall('/suno/submit/music', body, 'POST', model, audioParams.signal)
 
   // 提取 task_id — NewAPI 透传的异步任务返回格式
   const taskId = extractTaskId(submitData)
@@ -1088,7 +1120,7 @@ export async function generateAudio(
     if (clips.length === 0) throw new Error('Suno 未返回任务 ID 或 clips')
     const clipId = clips[0]?.id
     if (clipId) {
-      return await pollSunoByClipId(clipId)
+      return await pollSunoByClipId(clipId, audioParams.signal)
     }
     throw new Error('Suno 未返回有效的任务标识')
   }
@@ -1096,15 +1128,17 @@ export async function generateAudio(
   await audioParams.onSubmitted?.({ taskId, pollUrl, pollKind: 'audio' })
 
   // Step 2: 轮询 → NewAPI /suno/fetch/:id
-  const audioUrl = await pollTask(pollUrl, 'audio', onProgress, 600, 5000)
+  const audioUrl = await pollTask(pollUrl, 'audio', onProgress, 600, 5000, audioParams.signal)
   return { url: audioUrl, type: 'audio', taskId, pollUrl, pollKind: 'audio' as const }
 }
 
 /** Fallback: 用 clip ID 直接轮询（兼容旧 API） */
-async function pollSunoByClipId(clipId: string): Promise<MediaResult> {
+async function pollSunoByClipId(clipId: string, signal?: AbortSignal): Promise<MediaResult> {
   for (let i = 0; i < 120; i++) {
+    throwIfAborted(signal)
     await new Promise(r => setTimeout(r, 5000))
-    const data = await apiCall(`/suno/fetch/${clipId}`, null, 'GET')
+    throwIfAborted(signal)
+    const data = await apiCall(`/suno/fetch/${clipId}`, null, 'GET', undefined, signal)
     const url = extractMediaUrl(data, 'audio')
     if (url) return { url, type: 'audio' }
     const items = Array.isArray(data) ? data : data?.data ? [data.data] : [data]

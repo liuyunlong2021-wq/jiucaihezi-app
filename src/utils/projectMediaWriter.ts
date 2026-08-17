@@ -9,17 +9,7 @@
  *
  * Web 端 / 无项目文件夹时不可用，调用方自行 fallback。
  */
-
-const SAFE_FILENAME_RE = /[^a-zA-Z0-9\u4e00-\u9fff\-_]/g
-
-/** 清理文件名中的特殊字符，保留中英文、数字、连字符、下划线 */
-function sanitizeFilename(input: string): string {
-  return input
-    .replace(SAFE_FILENAME_RE, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_|_$/g, '')
-    .slice(0, 60) || 'untitled'
-}
+import { buildMediaFilename } from '@/utils/mediaFilename'
 
 /** MIME → 文件扩展名 */
 function mimeToExt(mime: string, sourceUrl = ''): string {
@@ -35,8 +25,6 @@ function mimeToExt(mime: string, sourceUrl = ''): string {
   const urlExt = sourceUrl.split(/[?#]/, 1)[0]?.match(/\.(glb|gltf|obj|fbx|stl|ply|zip)$/i)?.[0]?.toLowerCase()
   return map[mime] || urlExt || (mime.startsWith('image/') ? '.png' : mime.startsWith('video/') ? '.mp4' : mime.startsWith('audio/') ? '.mp3' : '.bin')
 }
-
-function pad(n: number): string { return String(n).padStart(2, '0') }
 
 export interface WriteProjectMediaResult {
   filePath: string   // 绝对路径，用于 convertFileSrc()
@@ -55,16 +43,21 @@ export async function writeProjectMedia(opts: {
   mime: string
   projectDir: string
   kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  summary?: string
   prompt?: string
+  model?: string
+  taskId?: string
   sourceUrl?: string
   memory?: boolean
 }): Promise<WriteProjectMediaResult> {
   const ext = mimeToExt(opts.mime, opts.sourceUrl)
-  const promptPart = sanitizeFilename(opts.prompt || '')
-  const rand = Math.random().toString(36).slice(2, 5)
-  const now = new Date()
-  const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const filename = promptPart ? `${ts}_${promptPart}_${rand}${ext}` : `${ts}_${rand}${ext}`
+  const filename = buildMediaFilename({
+    summary: opts.summary,
+    prompt: opts.prompt,
+    model: opts.model,
+    taskId: opts.taskId,
+    extension: ext,
+  })
 
   const folderName = opts.memory
     ? opts.kind === 'image' ? '图片' : opts.kind === 'video' ? '视频' : opts.kind === 'audio' ? '音频' : '文档'

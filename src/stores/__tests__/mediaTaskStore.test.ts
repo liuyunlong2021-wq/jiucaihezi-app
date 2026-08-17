@@ -826,7 +826,7 @@ test(
 )
 
 test(
-  'mediaTaskStore keeps a Web creation task cancelled while its binary write is pending',
+  'mediaTaskStore ends cancellation before accepted results enter project persistence',
   { concurrency: false },
   async () => {
     const storage = installLocalStorage()
@@ -875,12 +875,13 @@ test(
       })
 
       await waitFor(() => files.binaryWrites.length === 1)
-      store.cancelTask(taskId)
+      assert.equal(store.canCancelTask(taskId), false)
+      assert.equal(await store.cancelTask(taskId), false)
       files.releaseBinaryWrites()
       await waitFor(() => files.completedBinaryWrites() === 1)
 
-      assert.equal(store.getTask(taskId)?.status, 'cancelled')
-      assert.equal(completionEvents, 0)
+      assert.equal(store.getTask(taskId)?.status, 'success')
+      assert.equal(completionEvents, 1)
     } finally {
       files.releaseBinaryWrites()
       offComplete()
@@ -1985,6 +1986,159 @@ test(
 )
 
 test(
+  'mediaTaskStore aborts a running creation task and ignores its late result',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage()
+    setActivePinia(createPinia())
+    const environment = installWebCreationTestEnvironment()
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const store = useMediaTaskStore()
+    let signal: AbortSignal | undefined
+    let release: (() => void) | undefined
+    const lateResult = new Promise<void>(resolve => {
+      release = resolve
+    })
+
+    __setCreationSubmitExecutorForTests((async (...args: unknown[]) => {
+      signal = args[3] as AbortSignal | undefined
+      await lateResult
+      return { url: 'https://webstatic.aiproxy.vip/output/late.png', type: 'image' }
+    }) as any)
+
+    try {
+      const plan = buildCreationRunPlan({
+        modelId: 'runninghub/api/rh-gpt2-image',
+        params: {
+          prompt: '取消测试',
+          aspectRatio: '16:9',
+          images: ['https://cdn.jiucaihezi.studio/input.png'],
+        },
+      })
+      const taskId = await store.submitTask({
+        type: 'image',
+        model: 'rh-gpt2-image',
+        modelLabel: 'GPT Image 2',
+        prompt: '取消测试',
+        source: 'creation',
+        plan,
+      })
+
+      await new Promise(resolve => setTimeout(resolve, 0))
+      await store.cancelTask(taskId)
+
+      assert.equal(signal?.aborted, true)
+      assert.equal(store.getTask(taskId)?.status, 'cancelled')
+      assert.equal(store.getTask(taskId)?.progressText, '已停止等待（上游可能已接收）')
+      assert.equal(store.isTaskActive(taskId), false)
+
+      release?.()
+      await new Promise(resolve => setTimeout(resolve, 20))
+      assert.equal(store.getTask(taskId)?.status, 'cancelled')
+      assert.equal(store.getTask(taskId)?.resultUrl, undefined)
+    } finally {
+      release?.()
+      __setCreationSubmitExecutorForTests(null)
+      environment.restore()
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore persists a pre-submit cancellation before returning',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage()
+    const environment = installWebCreationTestEnvironment()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const store = useMediaTaskStore()
+    await store.init()
+    let releaseInitialSave: () => void = () => {}
+    let markInitialSaveStarted: () => void = () => {}
+    const initialSaveStarted = new Promise<void>(resolve => { markInitialSaveStarted = resolve })
+    const initialSaveGate = new Promise<void>(resolve => { releaseInitialSave = resolve })
+    const snapshots: string[] = []
+    let saveCalls = 0
+    let submissions = 0
+
+    __setMediaTaskSaverForTests(async tasks => {
+      saveCalls++
+      snapshots.push(JSON.stringify(tasks))
+      if (saveCalls === 1) {
+        markInitialSaveStarted()
+        await initialSaveGate
+      }
+    })
+    __setCreationSubmitExecutorForTests(async () => {
+      submissions++
+      return { url: 'https://webstatic.aiproxy.vip/output/should-not-submit.png', type: 'image' }
+    })
+
+    try {
+      const plan = buildCreationRunPlan({
+        modelId: 'runninghub/api/rh-gpt2-image',
+        params: {
+          prompt: '提交前取消', aspectRatio: '16:9',
+          images: ['https://cdn.jiucaihezi.studio/input.png'],
+        },
+      })
+      const submit = store.submitTask({
+        type: 'image', model: 'rh-gpt2-image', modelLabel: 'GPT Image 2',
+        prompt: '提交前取消', source: 'creation', plan,
+      })
+      await initialSaveStarted
+      const taskId = store.tasks[0]?.id
+      assert.ok(taskId)
+      const cancellation = store.cancelTask(taskId)
+      assert.equal(store.getTask(taskId)?.progressText, '已取消（未提交）')
+      releaseInitialSave()
+
+      assert.equal(await cancellation, true)
+      await submit
+      assert.equal(submissions, 0)
+      assert.equal(store.getTask(taskId)?.status, 'cancelled')
+      assert.match(snapshots.at(-1) || '', /"status":"cancelled"/)
+    } finally {
+      releaseInitialSave()
+      __setCreationSubmitExecutorForTests(null)
+      __setMediaTaskSaverForTests(null)
+      environment.restore()
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore never labels an already submitted pending task as unsubmitted',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage()
+    setActivePinia(createPinia())
+    __setMediaTaskLoaderForTests(async () => [{
+      id: 'mtask_submitted_pending', type: 'image', model: 'rh-gpt2-image', modelLabel: 'GPT Image 2',
+      prompt: '等待恢复', referenceImages: [], status: 'pending', progress: 50,
+      progressText: '轮询暂时失败，重启后将继续恢复', createdAt: Date.now(), source: 'creation',
+      upstreamTaskId: 'upstream-task-1',
+      planSnapshot: { pollKind: 'image' },
+    } as any])
+    __setMediaTaskSaverForTests(async () => {})
+
+    try {
+      const store = useMediaTaskStore()
+      await store.init()
+      assert.equal(await store.cancelTask('mtask_submitted_pending'), true)
+      assert.equal(store.getTask('mtask_submitted_pending')?.progressText, '已停止跟踪（上游可能继续生成）')
+    } finally {
+      __setMediaTaskLoaderForTests(null)
+      __setMediaTaskSaverForTests(null)
+      storage.restore()
+    }
+  },
+)
+
+test(
   'mediaTaskStore keeps accepted upstream poll metadata on the task even if later persistence fails',
   { concurrency: false },
   async () => {
@@ -2470,5 +2624,5 @@ test('MediaTaskBubble stays on the memory-workbench project and media paths', ()
   assert.doesNotMatch(source, /workbenchMode|fetchBlobForExport|sendToGallery|sendAsReference/)
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
   assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
-  assert.equal(source.includes('v-else-if="isSuccess && isSafeResult"'), true)
+  assert.equal(source.includes('v-else-if="isSuccess && hasDisplayableResult"'), true)
 })

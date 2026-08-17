@@ -15,6 +15,7 @@ import {
 } from '@/api/media-generation'
 import type { CreationRunPlan } from './creationMediaTypes'
 import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
+import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
 export interface CreationSubmitRequest {
   runtime: 'newapi-direct' | 'runninghub-adapter' | 'local-comfy'
@@ -26,6 +27,34 @@ export interface CreationSubmitRequest {
   imageParams?: Partial<ImageGenParams>
   videoParams?: Partial<VideoGenParams>
   audioParams?: Partial<AudioGenParams>
+  signal?: AbortSignal
+}
+
+function creationAbortError(): Error {
+  const error = new Error('任务已取消')
+  error.name = 'AbortError'
+  return error
+}
+
+function throwIfCreationAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw creationAbortError()
+}
+
+function waitForCreationPoll(ms: number, signal?: AbortSignal): Promise<void> {
+  throwIfCreationAborted(signal)
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(done, ms)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      reject(creationAbortError())
+    }
+    function done() {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmitRequest {
@@ -105,7 +134,9 @@ export async function executeCreationSubmitRequest(
   request: CreationSubmitRequest,
   onProgress?: (elapsed: number, status: string) => void,
   onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
+  signal?: AbortSignal,
 ): Promise<MediaResult> {
+  if (signal) request = { ...request, signal }
   if (request.runtime === 'local-comfy') return executeLocalComfyRequest(request, onProgress, onSubmitted)
   if (request.runtime === 'newapi-direct') {
     if (request.taskType === 'image') return executeDirectImageRequest(request, onProgress, onSubmitted)
@@ -137,15 +168,15 @@ async function executeLocalComfyRequest(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, client_id: clientId }),
-  })
+  }, request.signal)
   if (!response.ok) throw new Error(`ComfyUI 提交失败 HTTP ${response.status}`)
   const submitted = response.data
   const promptId = String(submitted?.prompt_id || '')
   if (!promptId) throw new Error('ComfyUI 未返回任务 ID')
   const historyUrl = `${base}/history/${encodeURIComponent(promptId)}`
   for (let i = 0; i < 600; i += 1) {
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    const historyResponse = await localComfyJson(historyUrl).catch(() => null)
+    await waitForCreationPoll(1000, request.signal)
+    const historyResponse = await localComfyJson(historyUrl, {}, request.signal).catch(() => null)
     if (!historyResponse?.ok) continue
     const history = historyResponse.data
     const entry = history?.[promptId]
@@ -176,7 +207,7 @@ async function executeLocalComfyGrokVideoRequest(
   const base = getComfyUiApiBase()
   const uploadedImages: string[] = []
   onProgress?.(0, '上传参考图到本机 ComfyUI...')
-  for (const [index, image] of images.entries()) uploadedImages.push(await uploadComfyImage(base, image, index))
+  for (const [index, image] of images.entries()) uploadedImages.push(await uploadComfyImage(base, image, index, request.signal))
   const prompt = buildLocalGrokVideoPrompt({
     prompt: asString(request.plan.debug.normalizedParams.prompt),
     ratio: asOptionalString(request.plan.debug.normalizedParams.ratio) || '16:9',
@@ -189,7 +220,7 @@ async function executeLocalComfyGrokVideoRequest(
   const response = await localComfyJson(`${base}/prompt`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ prompt, client_id: `jiucaihezi-${Date.now().toString(36)}` }),
-  })
+  }, request.signal)
   if (!response.ok) throw new Error(`ComfyUI 提交失败 HTTP ${response.status}`)
   const submitted = response.data
   const promptId = String(submitted?.prompt_id || '')
@@ -197,8 +228,8 @@ async function executeLocalComfyGrokVideoRequest(
   const historyUrl = `${base}/history/${encodeURIComponent(promptId)}`
   await onSubmitted?.({ taskId: promptId, pollUrl: historyUrl, pollKind: 'video' })
   for (let i = 0; i < 1800; i += 1) {
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    const historyResponse = await localComfyJson(historyUrl).catch(() => null)
+    await waitForCreationPoll(1000, request.signal)
+    const historyResponse = await localComfyJson(historyUrl, {}, request.signal).catch(() => null)
     if (!historyResponse?.ok) continue
     const entry = historyResponse.data?.[promptId]
     if (entry?.status?.status_str === 'error') throw new Error('ComfyUI 工作流执行失败')
@@ -209,13 +240,15 @@ async function executeLocalComfyGrokVideoRequest(
   throw new Error('本机 ComfyUI 生成超时')
 }
 
-async function uploadComfyImage(base: string, image: string, index: number): Promise<string> {
+async function uploadComfyImage(base: string, image: string, index: number, signal?: AbortSignal): Promise<string> {
+  throwIfCreationAborted(signal)
   const match = /^data:(image\/[\w.+-]+);base64,(.+)$/s.exec(image)
   if (!match) throw new Error(`参考图 ${index + 1} 不是可上传的本机图片`)
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<{ status: number; body: string }>('comfy_upload_image', {
     request: buildComfyUploadRequestData(base, index, match[1], match[2]),
   })
+  throwIfCreationAborted(signal)
   if (response.status < 200 || response.status >= 300) throw new Error(`ComfyUI 参考图上传失败 HTTP ${response.status}`)
   const uploaded = JSON.parse(response.body)
   const name = String(uploaded?.name || uploaded?.filename || '').trim()
@@ -232,7 +265,8 @@ export function buildComfyUploadRequestData(base: string, index: number, mimeTyp
   }
 }
 
-async function localComfyJson(url: string, init: RequestInit = {}): Promise<{ ok: boolean; status: number; data: any }> {
+async function localComfyJson(url: string, init: RequestInit = {}, signal?: AbortSignal): Promise<{ ok: boolean; status: number; data: any }> {
+  throwIfCreationAborted(signal)
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<{ status: number; body: string }>('http_request', {
     request: {
@@ -243,6 +277,7 @@ async function localComfyJson(url: string, init: RequestInit = {}): Promise<{ ok
       timeout_secs: 120,
     },
   })
+  throwIfCreationAborted(signal)
   return {
     ok: response.status >= 200 && response.status < 300,
     status: response.status,
@@ -324,15 +359,13 @@ async function executeDirectImageRequest(
       response_format: params.responseFormat || 'url',
     }
     if (params.size) fields.size = params.size
-    if (params.aspectRatio) fields.aspectRatio = params.aspectRatio
-    if (params.resolution) fields.resolution = params.resolution
-    if (images.length) fields.image = await Promise.all(images.map(imageReferenceToBlob))
-    const data = await apiCallMultipart('/v1/videos', fields)
+    if (images.length) fields.image = await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal)))
+    const data = await apiCallMultipart('/v1/videos', fields, request.signal)
     const taskId = extractTaskId(data)
     if (!taskId) throw new Error('图片任务未返回任务 ID')
     const pollUrl = `/v1/videos/${encodeURIComponent(taskId)}`
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
-    const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
+    const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000, request.signal)
     return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
   }
   if (request.plan.apiStyle === 'openai-image-edits') {
@@ -343,17 +376,17 @@ async function executeDirectImageRequest(
       model: request.plan.model,
       prompt,
       response_format: params.responseFormat || 'url',
-      image: await Promise.all(images.map(imageReferenceToBlob)),
+      image: await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal))),
     }
     if (params.size) fields.size = params.size
-    const data = await apiCallMultipart(request.endpoint, fields)
+    const data = await apiCallMultipart(request.endpoint, fields, request.signal)
     const mediaUrl = extractMediaUrl(data, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     const taskId = extractTaskId(data)
     if (!taskId || request.pollKind === 'none') throw new Error('图片生成完成但未返回可用结果')
     const pollUrl = `${request.endpoint}/${encodeURIComponent(taskId)}`
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
-    const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
+    const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000, request.signal)
     return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
   }
 
@@ -369,7 +402,7 @@ async function executeDirectImageRequest(
     image: params.image,
     response_format: params.responseFormat || 'url',
   })
-  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
+  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
   const mediaUrl = extractMediaUrl(data, 'image')
   if (mediaUrl) return { url: mediaUrl, type: 'image' }
   const taskId = extractTaskId(data)
@@ -379,39 +412,41 @@ async function executeDirectImageRequest(
     ? `/mj/task/${encodeURIComponent(taskId)}/fetch`
     : `${request.endpoint}/${encodeURIComponent(taskId)}`
   await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
-  const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
+  const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000, request.signal)
   return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
 }
 
-async function imageReferenceToBlob(source: string): Promise<Blob> {
+async function imageReferenceToBlob(source: string, signal?: AbortSignal): Promise<Blob> {
+  throwIfCreationAborted(signal)
   if (source.startsWith('data:')) return dataUrlToBlob(source)
   try {
     const { invoke } = await import('@tauri-apps/api/core')
-    const downloaded = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
+    const downloaded = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
       request: { url: source, timeout_secs: 60 },
     })
+    throwIfCreationAborted(signal)
     if (downloaded.status >= 200 && downloaded.status < 300 && downloaded.data_base64) {
-      return base64ToBlob(downloaded.data_base64, imageMimeType(source))
+      return base64ToBlob(downloaded.data_base64, imageMimeFromHeaders(downloaded.headers))
     }
   } catch {
     // Browser references retain the established fetch fallback below.
   }
-  const response = await fetch(source)
+  const response = await fetch(source, { signal })
   if (!response.ok) throw new Error('无法加载参考图片')
-  return response.blob()
+  const blob = await response.blob()
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  return new Blob([bytes], { type: detectImageMimeFromBytes(bytes) || blob.type || 'application/octet-stream' })
 }
 
-function base64ToBlob(base64: string, type: string): Blob {
+function base64ToBlob(base64: string, type?: string): Blob {
   const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
-  return new Blob([bytes], { type })
+  return new Blob([bytes], { type: detectImageMimeFromBytes(bytes) || type || 'application/octet-stream' })
 }
 
-function imageMimeType(source: string): string {
-  const ext = source.split('?')[0].split('.').pop()?.toLowerCase()
-  if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
-  if (ext === 'webp') return 'image/webp'
-  if (ext === 'gif') return 'image/gif'
-  return 'image/png'
+function imageMimeFromHeaders(headers?: Record<string, string>): string | undefined {
+  const value = headers?.['content-type'] || headers?.['Content-Type']
+  const mime = value?.split(';', 1)[0].trim().toLowerCase()
+  return mime?.startsWith('image/') ? mime : undefined
 }
 
 async function executeDirectVideoRequest(
@@ -427,25 +462,26 @@ async function executeDirectVideoRequest(
       model: request.plan.model,
       prompt: asString(params.prompt),
       onSubmitted,
+      signal: request.signal,
     }, onProgress)
   }
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
   const shouldUploadAssets = request.plan.assetFlow !== 'none'
   const uploadedImages = shouldUploadAssets
-    ? await Promise.all(images.map(uploadCreationAsset))
+    ? await Promise.all(images.map(image => uploadCreationAsset(image, request.signal)))
     : images
   const uploadedVideo = shouldUploadAssets
-    ? await uploadCreationAsset(params.videoUrl)
+    ? await uploadCreationAsset(params.videoUrl, request.signal)
     : params.videoUrl
 
   const body = buildDirectVideoBody({ ...request, videoParams: { ...params, videoUrl: uploadedVideo } }, uploadedImages)
-  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
+  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
   const pollUrl = taskId ? buildVideoPollUrl(request, taskId) : undefined
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000)
+    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal)
   }
   if (!mediaUrl) throw new Error('视频生成失败')
   return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' }
@@ -469,7 +505,7 @@ async function executeDirectAudioRequest(
       input: params.prompt,
       response_format: 'mp3',
       ...(references.length ? { metadata: { references } } : {}),
-    }, request.plan.model)
+    }, request.plan.model, request.signal)
     return { url, type: 'audio' }
   }
   const body = compact({
@@ -482,7 +518,7 @@ async function executeDirectAudioRequest(
     mv: params.mv,
     text: params.text,
   })
-  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
+  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
   const syncText = request.plan.mode === 'lyrics' ? extractMediaText(data) : ''
   if (syncText) return { url: '', text: syncText, type: 'text' }
   const syncUrl = extractMediaUrl(data, 'audio')
@@ -494,7 +530,7 @@ async function executeDirectAudioRequest(
     : `${request.endpoint}/${encodeURIComponent(taskId)}`
   const pollKind = request.plan.mode === 'lyrics' ? 'text' : 'audio'
   await onSubmitted?.({ taskId, pollUrl, pollKind })
-  const result = await pollTask(pollUrl, pollKind, onProgress, 600, 5000)
+  const result = await pollTask(pollUrl, pollKind, onProgress, 600, 5000, request.signal)
   if (pollKind === 'text') return { url: '', text: result, type: 'text', taskId, pollUrl, pollKind }
   return { url: result, type: 'audio', taskId, pollUrl, pollKind }
 }
@@ -567,14 +603,14 @@ async function executeRunningHubImageRequest(
     console.log('[DEBUG RH IMAGE] full body:', JSON.stringify(body).slice(0, 800))
   }
 
-  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model)
+  const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
   const mediaUrl = extractMediaUrl(data, 'image')
   if (mediaUrl) return { url: mediaUrl, type: 'image' }
   const taskId = extractTaskId(data)
   if (!taskId) throw new Error('RunningHub 图片任务未返回任务 ID')
   const pollUrl = buildRunningHubPollUrl(taskId, request.plan.apiStyle === 'rh-aiapp' || isAiAppResponse(data))
   await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
-  const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000)
+  const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000, request.signal)
   return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
 }
 
@@ -634,13 +670,13 @@ async function executeRunningHubVideoRequest(
     if (Object.keys(videoExtra).length) body.extra_fields = videoExtra
   }
 
-  const data = await apiCall(request.endpoint, compact(body), 'POST', request.plan.model)
+  const data = await apiCall(request.endpoint, compact(body), 'POST', request.plan.model, request.signal)
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
   if (!mediaUrl && taskId) {
     const pollUrl = buildRunningHubPollUrl(taskId, request.plan.apiStyle === 'rh-aiapp' || isAiAppResponse(data))
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000)
+    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal)
     return { url: mediaUrl, type: request.plan.task === 'model3d' ? 'model3d' : 'video', taskId, pollUrl, pollKind: 'video' }
   }
   if (!mediaUrl) throw new Error('RunningHub 视频生成失败')
@@ -708,7 +744,7 @@ async function executeRunningHubAudioRequest(
     }))
   }
 
-  const data = await apiCall(request.endpoint, compact(body), 'POST', request.plan.model)
+  const data = await apiCall(request.endpoint, compact(body), 'POST', request.plan.model, request.signal)
   const syncText = request.plan.mode === 'lyrics' ? extractMediaText(data) : ''
   if (syncText) return { url: '', text: syncText, type: 'text' }
   const syncUrl = extractMediaUrl(data, 'audio')
@@ -718,7 +754,7 @@ async function executeRunningHubAudioRequest(
   const pollKind = request.plan.mode === 'lyrics' ? 'text' : 'audio'
   const pollUrl = buildRunningHubPollUrl(taskId, request.plan.apiStyle === 'rh-aiapp' || isAiAppResponse(data))
   await onSubmitted?.({ taskId, pollUrl, pollKind })
-  const result = await pollTask(pollUrl, pollKind, onProgress, 600, 5000)
+  const result = await pollTask(pollUrl, pollKind, onProgress, 600, 5000, request.signal)
   if (pollKind === 'text') return { url: '', text: result, type: 'text', taskId, pollUrl, pollKind }
   return { url: result, type: 'audio', taskId, pollUrl, pollKind }
 }
@@ -868,7 +904,7 @@ function dataUrlToBlob(dataUrl: string): Blob {
   const byteString = atob(parts[1] || '')
   const bytes = new Uint8Array(byteString.length)
   for (let i = 0; i < byteString.length; i++) bytes[i] = byteString.charCodeAt(i)
-  return new Blob([bytes], { type: mime })
+  return new Blob([bytes], { type: detectImageMimeFromBytes(bytes) || mime })
 }
 
 function compact(input: Record<string, unknown>): Record<string, unknown> {
