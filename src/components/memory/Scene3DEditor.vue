@@ -69,6 +69,13 @@ const selectedEntry = computed(() => {
     || null
 })
 const selectedModelLabel = (model: Scene3DCharacter['model']) => ({ 'adult-male': '成年男性', 'adult-female': '成年女性', 'teen-male': '青少年男性', 'teen-female': '青少年女性', child: '儿童' }[model])
+const poseLabel = (name: string) => ({ stand: '站', 'sit chair': '坐', 'crouch inspect': '蹲', walk: '走', run: '跑', point: '指', 'cross arms': '抱臂' }[name.toLowerCase()] || name)
+const handLabel = (name: string) => ({ Relaxed: '放', 'Flat Spread': '张', Point: '指', Peace: '耶', Fist: '拳' }[name] || name)
+const boneLabel = (name: string) => ({
+  Head: '头', Neck: '颈', LeftArm: '左臂', LeftForeArm: '左前', LeftHand: '左手', RightArm: '右臂', RightForeArm: '右前', RightHand: '右手',
+  LeftUpLeg: '左髋', LeftLeg: '左膝', LeftFoot: '左脚', RightUpLeg: '右髋', RightLeg: '右膝', RightFoot: '右脚',
+  LeftHandIndex1: '左指1', LeftHandIndex2: '左指2', LeftHandIndex3: '左指3', RightHandIndex1: '右指1', RightHandIndex2: '右指2', RightHandIndex3: '右指3',
+}[name] || name)
 const poseOptions = computed(() => {
   const preferred = ['stand', 'sit chair', 'crouch inspect', 'walk', 'run', 'point', 'cross arms']
   return preferred.map(name => STORYBOARDER_POSES.find(item => item.name.toLowerCase() === name)).filter((item): item is (typeof STORYBOARDER_POSES)[number] => Boolean(item))
@@ -895,26 +902,33 @@ onBeforeUnmount(() => {
     <header v-if="!recordingOnly" class="scene3d-toolbar">
       <strong>{{ document.title }}</strong>
       <div class="scene3d-tools">
-        <button title="俯拍" @click="setCameraPreset('top')"><JcIcon name="north" /></button>
-        <button title="平视" @click="setCameraPreset('front')"><JcIcon name="straight" /></button>
-        <button title="侧视" @click="setCameraPreset('side')"><JcIcon name="east" /></button>
-        <button title="低机位" @click="setCameraPreset('low')"><JcIcon name="camera" /></button>
-        <button title="恢复默认视角" @click="setCameraPreset('reset')"><JcIcon name="restart-alt" /></button>
+        <button title="俯拍" @click="setCameraPreset('top')">俯</button>
+        <button title="平视" @click="setCameraPreset('front')">平</button>
+        <button title="侧视" @click="setCameraPreset('side')">侧</button>
+        <button title="低机位" @click="setCameraPreset('low')">低</button>
+        <button title="恢复默认视角" @click="setCameraPreset('reset')">复</button>
         <span class="scene3d-divider"></span>
-        <button :class="{ active: document.camera.projection === 'perspective' }" title="透视视图" @click="setProjection('perspective')"><JcIcon name="deployed-code" /></button>
-        <button :class="{ active: document.camera.projection === 'orthographic' }" title="正交视图" @click="setProjection('orthographic')"><JcIcon name="grid-4x4" /></button>
-        <button :class="{ active: document.camera.lens === 'wide' }" title="广角" @click="setLens('wide')">W</button>
-        <button :class="{ active: document.camera.lens === 'standard' }" title="标准镜头" @click="setLens('standard')">S</button>
-        <button :class="{ active: document.camera.lens === 'telephoto' }" title="长焦" @click="setLens('telephoto')">T</button>
+        <button :class="{ active: document.camera.projection === 'perspective' }" title="透视视图" @click="setProjection('perspective')">透</button>
+        <button :class="{ active: document.camera.projection === 'orthographic' }" title="正交视图" @click="setProjection('orthographic')">正</button>
+        <button :class="{ active: document.camera.lens === 'wide' }" title="广角" @click="setLens('wide')">广</button>
+        <button :class="{ active: document.camera.lens === 'standard' }" title="标准镜头" @click="setLens('standard')">标</button>
+        <button :class="{ active: document.camera.lens === 'telephoto' }" title="长焦" @click="setLens('telephoto')">长</button>
         <span class="scene3d-divider"></span>
         <button v-for="aspect in ['16:9', '9:16', '1:1', '4:3', '3:4']" :key="aspect" :class="{ active: currentAspect === aspect }" :title="`${aspect} 画幅`" @click="setAspect(aspect as Scene3DDocument['canvas']['aspect'])">{{ aspect }}</button>
         <span class="scene3d-divider"></span>
         <button :class="{ active: document.canvas.grid }" title="显示或隐藏网格" @click="toggleGrid"><JcIcon name="grid-on" /></button>
         <button :class="{ active: document.canvas.snap }" title="开启或关闭网格吸附" @click="toggleSnap"><JcIcon name="sync" /></button>
         <button :class="{ active: labelsVisible }" title="显示或隐藏标签" @click="toggleLabels"><JcIcon name="label" /></button>
-        <button v-for="direction in ['left', 'right', 'front', 'back', 'top']" :key="direction" :class="{ active: document.lighting.direction === direction }" :title="`${({ left: '左侧', right: '右侧', front: '正面', back: '背面', top: '顶部' } as Record<string, string>)[direction]}来光`" @click="setLighting(direction as Scene3DDocument['lighting']['direction'])"><JcIcon name="light-mode" /></button>
-        <button v-for="intensity in ['low', 'medium', 'high']" :key="intensity" :class="{ active: document.lighting.intensity === intensity }" :title="`${({ low: '低', medium: '中', high: '高' } as Record<string, string>)[intensity]}亮度`" @click="setLightIntensity(intensity as Scene3DDocument['lighting']['intensity'])">{{ intensity[0].toUpperCase() }}</button>
-        <button :class="{ active: document.lighting.shadows }" title="开启或关闭阴影" @click="toggleShadows"><JcIcon name="contrast" /></button>
+        <details class="scene3d-lighting">
+          <summary title="展开光影控制">光影</summary>
+          <div class="scene3d-lighting-menu">
+            <span>来光</span>
+            <button v-for="direction in ['left', 'right', 'front', 'back', 'top']" :key="direction" :class="{ active: document.lighting.direction === direction }" :title="`${({ left: '左侧', right: '右侧', front: '正面', back: '背面', top: '顶部' } as Record<string, string>)[direction]}来光`" @click="setLighting(direction as Scene3DDocument['lighting']['direction'])">{{ ({ left: '左', right: '右', front: '前', back: '后', top: '顶' } as Record<string, string>)[direction] }}</button>
+            <span>亮度</span>
+            <button v-for="intensity in ['low', 'medium', 'high']" :key="intensity" :class="{ active: document.lighting.intensity === intensity }" :title="`${({ low: '低', medium: '中', high: '高' } as Record<string, string>)[intensity]}亮度`" @click="setLightIntensity(intensity as Scene3DDocument['lighting']['intensity'])">{{ ({ low: '低', medium: '中', high: '高' } as Record<string, string>)[intensity] }}</button>
+            <button :class="{ active: document.lighting.shadows }" title="开启或关闭阴影" @click="toggleShadows">阴影</button>
+          </div>
+        </details>
         <span class="scene3d-divider"></span>
         <button title="保存当前机位" @click="saveCamera"><JcIcon name="bookmark-add" /></button>
         <button title="撤销 Cmd/Ctrl+Z" :disabled="historyIndex < 1" @click="undo"><JcIcon name="undo" /></button>
@@ -934,39 +948,63 @@ onBeforeUnmount(() => {
           <span class="scene3d-time">{{ currentTime.toFixed(1) }} / {{ duration.toFixed(1) }}s</span>
         </template>
       </div>
-      <div v-if="selectedCharacter" class="scene3d-character-tools">
-        <button v-for="model in STORYBOARDER_CHARACTER_MODELS" :key="model" :class="{ active: selectedCharacter.character?.model === model }" :title="`切换人物：${selectedModelLabel(model)}`" @click="setCharacterModel(model)">{{ selectedModelLabel(model) }}</button>
-        <button title="移动整个人物" @click="attachSelection(selectedCharacter.id)">移动</button>
-        <button title="旋转整个人物" @click="rotateCharacter">转向</button>
-        <button title="人物缩小" @click="adjustCharacterScale(-0.1)">−</button>
-        <span class="scene3d-character-name">{{ selectedCharacter.character?.scale.toFixed(1) }}x</span>
-        <button title="人物放大" @click="adjustCharacterScale(0.1)">+</button>
-        <span class="scene3d-divider"></span>
-        <button v-for="item in poseOptions" :key="item.id" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`应用姿势：${item.name}`" @click="applyPose(item.id)">{{ item.name }}</button>
-        <span class="scene3d-divider"></span>
-        <button v-for="item in handOptions" :key="`right-${item.id}`" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`右手：${item.name}`" @click="applyHand(item.id, 'right')">右{{ item.name }}</button>
-        <button v-for="item in handOptions" :key="`left-${item.id}`" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`左手：${item.name}`" @click="applyHand(item.id, 'left')">左{{ item.name }}</button>
-        <span class="scene3d-divider"></span>
-        <button v-for="name in STORYBOARDER_EDITABLE_BONES" :key="name" :class="{ active: activeBoneName === name }" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`旋转骨骼：${name}`" @click="attachBone(name)">{{ name }}</button>
-        <span v-if="characterLoading" class="scene3d-character-name">人物加载中…</span>
-        <span v-if="characterLoadError" class="scene3d-recording-error">{{ characterLoadError }}</span>
-      </div>
-      <div v-if="selectedEntry" class="scene3d-selection-tools">
-        <input v-if="'label' in selectedEntry" :value="selectedEntry.label || ''" aria-label="对象名称" placeholder="对象名称" @change="updateSelectedLabel(($event.target as HTMLInputElement).value)" />
-        <button v-if="'label' in selectedEntry" title="删除显示文字" @click="clearSelectedLabel"><JcIcon name="label-off" /></button>
-        <input v-if="'color' in selectedEntry" type="color" :value="selectedEntry.color || '#e7ece9'" title="对象颜色" aria-label="对象颜色" @input="updateSelectedColor(($event.target as HTMLInputElement).value)" />
-      </div>
     </header>
-    <div class="scene3d-stage" :style="{ '--scene-aspect': String(aspectRatio(currentAspect)) }">
-      <canvas ref="canvas" aria-label="3D 白膜场景" @contextmenu.prevent="openContextMenu"></canvas>
-      <div v-if="contextMenu.show" class="scene3d-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @pointerdown.stop>
-        <button @click="copySelection">复制</button>
-        <button :disabled="!copiedSelection" @click="pasteSelection">粘贴</button>
-        <button @click="removeSelection">删除</button>
-        <button v-if="selectedEntry && 'label' in selectedEntry" @click="clearSelectedLabel">删除显示文字</button>
+    <div class="scene3d-workspace">
+      <div class="scene3d-stage" :style="{ '--scene-aspect': String(aspectRatio(currentAspect)) }">
+        <canvas ref="canvas" aria-label="3D 白膜场景" @contextmenu.prevent="openContextMenu"></canvas>
+        <div v-if="contextMenu.show" class="scene3d-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @pointerdown.stop>
+          <button @click="copySelection">复制</button>
+          <button :disabled="!copiedSelection" @click="pasteSelection">粘贴</button>
+          <button @click="removeSelection">删除</button>
+          <button v-if="selectedEntry && 'label' in selectedEntry" @click="clearSelectedLabel">删字</button>
+        </div>
+        <div v-if="!recordingOnly" class="scene3d-frame"></div>
+        <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
       </div>
-      <div v-if="!recordingOnly" class="scene3d-frame"></div>
-      <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
+      <aside v-if="selectedEntry" class="scene3d-inspector" aria-label="对象设置">
+        <section v-if="'label' in selectedEntry" class="scene3d-inspector-section">
+          <h2>对象</h2>
+          <input :value="selectedEntry.label || ''" aria-label="对象名称" placeholder="对象名称" @change="updateSelectedLabel(($event.target as HTMLInputElement).value)" />
+          <button title="删除显示文字" @click="clearSelectedLabel">删字</button>
+          <input v-if="'color' in selectedEntry" type="color" :value="selectedEntry.color || '#e7ece9'" title="对象颜色" aria-label="对象颜色" @input="updateSelectedColor(($event.target as HTMLInputElement).value)" />
+        </section>
+        <template v-if="selectedCharacter">
+          <section class="scene3d-inspector-section">
+            <h2>人物</h2>
+            <select :value="selectedCharacter.character?.model" aria-label="人物模型" @change="setCharacterModel(($event.target as HTMLSelectElement).value as Scene3DCharacter['model'])">
+              <option v-for="model in STORYBOARDER_CHARACTER_MODELS" :key="model" :value="model">{{ selectedModelLabel(model) }}</option>
+            </select>
+            <div class="scene3d-inspector-actions">
+              <button title="移动整个人物" @click="attachSelection(selectedCharacter.id)">移动</button>
+              <button title="旋转整个人物" @click="rotateCharacter">转向</button>
+              <button title="人物缩小" @click="adjustCharacterScale(-0.1)">缩</button>
+              <span>{{ selectedCharacter.character?.scale.toFixed(1) }}x</span>
+              <button title="人物放大" @click="adjustCharacterScale(0.1)">放</button>
+            </div>
+          </section>
+          <section class="scene3d-inspector-section">
+            <h2>姿势</h2>
+            <div class="scene3d-inspector-grid">
+              <button v-for="item in poseOptions" :key="item.id" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`应用姿势：${poseLabel(item.name)}`" @click="applyPose(item.id)">{{ poseLabel(item.name) }}</button>
+            </div>
+          </section>
+          <section class="scene3d-inspector-section">
+            <h2>手势</h2>
+            <div class="scene3d-inspector-grid">
+              <button v-for="item in handOptions" :key="`right-${item.id}`" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`右手：${handLabel(item.name)}`" @click="applyHand(item.id, 'right')">右{{ handLabel(item.name) }}</button>
+              <button v-for="item in handOptions" :key="`left-${item.id}`" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`左手：${handLabel(item.name)}`" @click="applyHand(item.id, 'left')">左{{ handLabel(item.name) }}</button>
+            </div>
+          </section>
+          <details class="scene3d-inspector-section">
+            <summary>关节</summary>
+            <div class="scene3d-inspector-grid">
+              <button v-for="name in STORYBOARDER_EDITABLE_BONES" :key="name" :class="{ active: activeBoneName === name }" :disabled="characterLoading > 0 || Boolean(characterLoadError)" :title="`旋转关节：${boneLabel(name)}`" @click="attachBone(name)">{{ boneLabel(name) }}</button>
+            </div>
+          </details>
+          <p v-if="characterLoading" class="scene3d-character-name">加载中</p>
+          <p v-if="characterLoadError" class="scene3d-recording-error">{{ characterLoadError }}</p>
+        </template>
+      </aside>
     </div>
     <footer v-if="!recordingOnly" class="scene3d-cameras">
       <span>机位</span>
@@ -984,26 +1022,39 @@ onBeforeUnmount(() => {
 .scene3d-toolbar { display: flex; align-items: flex-start; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
 .scene3d-tools { display: flex; align-items: center; gap: 3px; }
-.scene3d-character-tools { display: flex; align-items: center; gap: 3px; flex: 0 0 auto; max-width: 58vw; overflow-x: auto; padding-left: 8px; border-left: 1px solid rgba(216, 235, 223, .16); }
-.scene3d-selection-tools { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; padding-left: 8px; border-left: 1px solid rgba(216, 235, 223, .16); }
-.scene3d-selection-tools input:not([type='color']) { width: 120px; height: 28px; padding: 0 6px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; background: rgba(0, 0, 0, .18); color: #e8efeb; }
-.scene3d-selection-tools input[type='color'] { width: 30px; height: 28px; padding: 2px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; background: transparent; }
 .scene3d-character-name { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
-.scene3d-tools button, .scene3d-character-tools button, .scene3d-cameras button { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.scene3d-tools button, .scene3d-cameras button, .scene3d-lighting summary { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
 .scene3d-tools button.recording { color: #ff8f8f; }
 .scene3d-recording-error { color: #ff9d9d; font-size: 11px; white-space: nowrap; }
 .scene3d-video-status { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
 .scene3d-context-menu { position: absolute; z-index: 5; display: grid; gap: 2px; min-width: 120px; padding: 5px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
 .scene3d-context-menu button { padding: 5px 8px; border: 0; color: #e8efeb; background: transparent; text-align: left; cursor: pointer; }
 .scene3d-context-menu button:hover { background: rgba(222, 243, 229, .14); }
-.scene3d-tools button:hover, .scene3d-tools button.active, .scene3d-character-tools button:hover, .scene3d-character-tools button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
-.scene3d-character-tools button:disabled { opacity: .45; cursor: not-allowed; }
+.scene3d-tools button:hover, .scene3d-tools button.active, .scene3d-lighting[open] summary { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
 .scene3d-tools button.primary { background: #86c8a5; color: #122018; }
 .scene3d-tools .mso { font-size: 18px; }
 .scene3d-time { min-width: 84px; font-size: 11px; color: #b9c8c0; text-align: center; }
 .scene3d-divider { width: 1px; height: 22px; background: rgba(216, 235, 223, .16); margin: 0 3px; }
+.scene3d-lighting { position: relative; }
+.scene3d-lighting summary { display: grid; place-items: center; list-style: none; padding: 0 7px; }
+.scene3d-lighting summary::-webkit-details-marker { display: none; }
+.scene3d-lighting-menu { position: absolute; z-index: 4; top: calc(100% + 6px); left: 0; display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; width: max-content; padding: 8px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
+.scene3d-lighting-menu span { grid-column: 1 / -1; color: #aebcb5; font-size: 11px; }
+.scene3d-lighting-menu button { border-color: rgba(216, 235, 223, .16); }
+.scene3d-workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 260px; }
 .scene3d-stage { position: relative; min-height: 320px; overflow: hidden; }
 .scene3d-stage canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+.scene3d-inspector { overflow-y: auto; padding: 10px; border-left: 1px solid rgba(216, 235, 223, .12); background: #18241f; }
+.scene3d-inspector-section { display: grid; gap: 6px; margin: 0 0 12px; padding: 0 0 12px; border: 0; border-bottom: 1px solid rgba(216, 235, 223, .12); }
+.scene3d-inspector-section h2, .scene3d-inspector-section summary { margin: 0; color: #a9d8b8; font-size: 12px; font-weight: 600; }
+.scene3d-inspector-section summary { cursor: pointer; }
+.scene3d-inspector input:not([type='color']), .scene3d-inspector select { width: 100%; height: 30px; padding: 0 6px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; color: #e8efeb; background: rgba(0, 0, 0, .18); }
+.scene3d-inspector input[type='color'] { width: 30px; height: 30px; padding: 2px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; background: transparent; }
+.scene3d-inspector button { min-width: 30px; height: 30px; border: 1px solid rgba(216, 235, 223, .16); border-radius: 4px; color: #dce8e1; background: transparent; cursor: pointer; font: inherit; font-size: 12px; }
+.scene3d-inspector button:hover, .scene3d-inspector button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
+.scene3d-inspector button:disabled { opacity: .45; cursor: not-allowed; }
+.scene3d-inspector-actions, .scene3d-inspector-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.scene3d-inspector-actions span { color: #a9d8b8; font-size: 11px; text-align: center; }
 .scene3d-frame { position: absolute; inset: 50% auto auto 50%; width: min(86%, calc(72vh * var(--scene-aspect))); aspect-ratio: var(--scene-aspect); transform: translate(-50%, -50%); border: 1px solid rgba(235, 248, 240, .42); pointer-events: none; }
 .scene3d-hint { position: absolute; left: 12px; bottom: 10px; margin: 0; padding: 6px 8px; color: #dce8e1; background: rgba(10, 17, 14, .72); border-radius: 4px; font-size: 12px; pointer-events: none; }
 .scene3d-cameras { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 5px 10px; border-top: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
@@ -1015,5 +1066,5 @@ onBeforeUnmount(() => {
 .scene3d-camera-chip button:first-child { padding: 0 8px; min-width: auto; }
 .scene3d-camera-chip button:last-child { min-width: 24px; width: 24px; }
 .scene3d-camera-chip .mso { font-size: 15px; }
-@media (max-width: 760px) { .scene3d-toolbar { gap: 8px; } .scene3d-stage { min-height: 300px; } .scene3d-frame { width: 90%; } }
+@media (max-width: 760px) { .scene3d-toolbar { gap: 8px; } .scene3d-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) auto; } .scene3d-inspector { max-height: 260px; border-top: 1px solid rgba(216, 235, 223, .12); border-left: 0; } .scene3d-stage { min-height: 300px; } .scene3d-frame { width: 90%; } }
 </style>

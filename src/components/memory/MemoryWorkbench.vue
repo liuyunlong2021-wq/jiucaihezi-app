@@ -1581,12 +1581,21 @@ function sceneCards(turn: ConversationTurn) {
 }
 
 async function openSceneCard(path: string) {
-  const resource = (await files.list(projectOwner.value)).find(item => item.path === path)
-  if (!resource) {
-    error.value = '白膜场景文件不存在，请检查文件树'
+  const owner = projectOwner.value
+  if (!owner) {
+    error.value = '当前没有打开项目，无法打开白膜场景'
     return
   }
-  await previewProjectResource(resource)
+  try {
+    const resource = (await files.searchPaths(owner, path, 20)).find(item => item.path === path)
+    if (!resource) {
+      error.value = '白膜场景文件不存在，请检查文件树'
+      return
+    }
+    await previewProjectResource(resource)
+  } catch (cause) {
+    error.value = `白膜场景打开失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
 }
 
 function saveScene3D(next: Scene3DDocument) {

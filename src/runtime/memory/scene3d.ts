@@ -175,7 +175,7 @@ function quaternion(value: unknown): [number, number, number, number] {
   const result = value as [number, number, number, number]
   const normSquared = result.reduce((sum, item) => sum + item * item, 0)
   if (!Number.isFinite(normSquared) || Math.abs(normSquared - 1) > 0.1) throw new Error('人物骨骼四元数无效')
-  return result
+  return [...result]
 }
 
 function parseCharacter(value: unknown): Scene3DCharacter {

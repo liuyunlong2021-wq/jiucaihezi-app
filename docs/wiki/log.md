@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-08-17] 用户验收 | 创作画布 Base64 泄漏与大文件恢复
+
+- 用户已实际打开修复后的创作画布，确认现在可以正常打开。
+- 与自动测试和 Desktop `Cmd+S` 回归一致：文件保持轻量引用结构，不再因标注图片组内的运行时 Base64 URL 重新膨胀。
+- 本次用户验收仅覆盖该画布的打开回归，不代表几百张图片同时渲染性能已完成跨端验收。详见 [[开发/创作画布Base64泄漏与大文件恢复TDD-2026-08-17]]。
+
 ## [2026-08-17] 修复与沉淀 | 创作任务统一取消与重新生成
 
 - 统一 `mediaTaskStore` 的取消边界：运行时明确区分执行器尚未启动、提交进行中、已取得上游任务 ID，以及结果已被 APP 接收并正在保存到项目的阶段；不把恢复的 `pending` 或缺少任务 ID 的请求误称为“未提交”。
@@ -932,3 +938,15 @@
 - 根因：对话输入框已有 `event.isComposing` 保护，但部分 WebView 的候选回车仅报 `keyCode === 229`；该兼容判断最初在 `@` 候选菜单之后，仍可能截获输入法事件。
 - 修复：将 `isComposing || keyCode === 229` 置于 `handleComposerKeydown()` 入口，统一早于候选菜单和发送分支退出；不新增输入法状态、计时器或第二套键盘处理。
 - 验证：记忆工作台定向 `55/55`、`vue-tsc -b` 和 `git diff --check` 通过。完整 focused 和真实 WebView、Desktop、iPhone/iPad 人工矩阵待后续执行。
+
+## [2026-08-17] 修复与验收 | 3D 编辑器空白与高度为零
+
+- Debug App 原先因错误使用 `#[cfg(dev)]` 可能加载旧 `dist`；改用 `#[cfg(debug_assertions)]` 后确认当前 WebContent 连接 `http://localhost:1420`。
+- 最终根因是场景解析器直接返回人物骨骼的响应式四元数数组，编辑器初始化撤销历史时 `structuredClone()` 抛出 `DataCloneError`，中止 `setup()`；模板变量错误和高度为 0 均为连锁症状。
+- `quaternion()` 现在返回普通新数组，并将响应式人物骨骼加入回归测试。当前 `tauri dev` 画布和编辑器尺寸非 0、错误列表为空，用户确认恢复；Scene3D `13/13`、工作台 `55/55`、TypeScript、Rust 和差异检查通过。
+
+## [2026-08-17] 版本准备 | v2.1.26
+
+- `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 和 `Cargo.lock` 已统一为 `2.1.26`。
+- 完整 focused 门禁、TypeScript 和差异检查通过，其中 Rust 为 `396 passed / 1 ignored`。
+- 本轮只完成版本准备与提交；没有创建 tag、push、构建 Web/APP 或执行发布。

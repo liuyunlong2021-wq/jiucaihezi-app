@@ -301,6 +301,69 @@ test('stores an image path only in the asset map so restore does not request it 
   assert.equal(JSON.stringify(document).includes('base64'), false)
 })
 
+test('does not persist a runtime image URL nested inside an annotated image group', () => {
+  const document = createCanvasDocument({
+    canvasId: 'annotated-image',
+    updatedAt: 1,
+    scene: [{
+      tag: 'Group',
+      id: 'image-one',
+      x: 10,
+      y: 20,
+      children: [
+        { tag: 'Image', name: 'canvas-image', url: 'data:image/png;base64,AAAA' },
+        { tag: 'Text', assetId: 'image-one', text: '1' },
+      ],
+    }],
+    assets: {
+      'image-one': {
+        id: 'image-one',
+        kind: 'image',
+        path: 'jc-media/images/poster.png',
+        source: 'import',
+        createdAt: 1,
+      },
+    },
+  })
+
+  assert.equal('url' in document.scene[0].children![0], false)
+  assert.equal(document.scene[0].children![1].text, '1')
+  assert.equal(document.assets['image-one'].resource.path, 'jc-media/images/poster.png')
+  assert.equal(JSON.stringify(document).includes('base64'), false)
+})
+
+test('keeps hundreds of canvas images as references instead of media bytes', () => {
+  const imageCount = 300
+  const document = createCanvasDocument({
+    canvasId: 'large-reference-board',
+    updatedAt: 1,
+    scene: Array.from({ length: imageCount }, (_, index) => ({
+      tag: 'Group',
+      id: `image-${index}`,
+      children: [{
+        tag: 'Image',
+        name: 'canvas-image',
+        url: `data:image/png;base64,${'A'.repeat(10_000)}`,
+      }],
+    })),
+    assets: Object.fromEntries(Array.from({ length: imageCount }, (_, index) => [
+      `image-${index}`,
+      {
+        id: `image-${index}`,
+        kind: 'image',
+        path: `jc-media/images/reference-${index}.png`,
+        source: 'import',
+        createdAt: 1,
+      },
+    ])),
+  })
+  const persisted = JSON.stringify(document)
+
+  assert.equal(Object.keys(document.assets).length, imageCount)
+  assert.equal(persisted.includes('base64'), false)
+  assert.ok(persisted.length < 200_000)
+})
+
 test('persists audio as a V3 canvas card instead of an image node', () => {
   const document = createCanvasDocument({
     canvasId: 'audio-board',

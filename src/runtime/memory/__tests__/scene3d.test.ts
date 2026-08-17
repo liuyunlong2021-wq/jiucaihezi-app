@@ -29,7 +29,10 @@ test('scene3d rejects unsupported shapes, runaway counts and missing group membe
 })
 
 test('scene3d parser removes nested Vue proxies before the editor receives data', () => {
-  const scene = parseScene3DDocument(reactive({ title: '可打开场景', objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }] }))
+  const scene = parseScene3DDocument(reactive({
+    title: '可打开场景',
+    objects: [{ id: 'person', type: 'person', position: [0, 0, 0], character: { model: 'adult-male', bones: { Head: [0, 0, 0, 1] } } }],
+  }))
   assert.doesNotThrow(() => structuredClone(scene))
 })
 

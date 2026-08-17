@@ -674,14 +674,22 @@ test('3D scene editor releases rebuilt scenes and keeps bone selection stable', 
   assert.match(editor, /disposeObject\(root\)/)
   assert.match(editor, /ignoreScenePick = true[\s\S]{0,300}queueMicrotask\(\(\) => \{ ignoreScenePick = false \}\)/)
   assert.match(editor, /if \(manualRecording\.value \|\| ignoreScenePick \|\|/)
-  assert.match(editor, /\.scene3d-tools button, \.scene3d-character-tools button, \.scene3d-cameras button/)
-  assert.match(editor, /\.scene3d-character-tools button:hover, \.scene3d-character-tools button\.active/)
+  assert.match(editor, /class="scene3d-inspector"/)
+  assert.match(editor, /class="scene3d-lighting"/)
+  assert.match(editor, /'cross arms': '抱臂'/)
+  assert.match(editor, /Peace: '耶'/)
+  assert.match(editor, /<summary>关节<\/summary>/)
+  assert.doesNotMatch(editor, />W<\/button>|>S<\/button>|>T<\/button>/)
 })
 
 test('3D scene preview sends edits with the current path and refreshes after completion', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
+  assert.match(workbench, /if \(resource\.type === 'scene3d' && !desktopOnlyRuntime\) return/)
+  assert.match(workbench, /defineAsyncComponent\(\(\) => import\('\.\/Scene3DEditor\.vue'\)\)/)
   assert.match(workbench, /const sceneInstruction = ref\(''\)/)
+  assert.match(workbench, /files\.searchPaths\(owner, path, 20\)/)
+  assert.match(workbench, /白膜场景打开失败：/)
   assert.match(workbench, /当前打开的 3D 场景路径是：\$\{current\.resource\.path\}/)
   assert.match(workbench, /data-placeholder="直接说怎么修改当前场景"/)
   assert.match(workbench, /await refreshOpenScene\(current\.resource\.path\)/)
@@ -699,6 +707,8 @@ test('Desktop starts the memory workbench without the legacy OpenCode workspace'
   assert.doesNotMatch(vite, /StudioApp|mode === 'studio'/)
   assert.match(desktop, /app\.config\(\)\.build\.dev_url/)
   assert.match(desktop, /"http:\/\/localhost:1420"\.parse\(\)/)
+  assert.match(desktop, /#\[cfg\(debug_assertions\)\][\s\S]{0,300}"http:\/\/localhost:1420"/)
+  assert.doesNotMatch(desktop, /#\[cfg\(dev\)\]/)
   assert.match(desktop, /window_config\.url = tauri::WebviewUrl::External\(dev_url\)/)
 })
 

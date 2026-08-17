@@ -57,14 +57,18 @@ function normalizeNode(
   node: CanvasSceneNode,
   assets: Record<string, CanvasAsset>,
   idFactory: () => string,
+  imageAsset = false,
 ): CanvasSceneNode {
   const id = typeof node.id === 'string' && node.id ? node.id : idFactory()
   const normalized: CanvasSceneNode = { ...node, id }
   const asset = assets[id]
+  const belongsToImageAsset = imageAsset || asset?.kind === 'image'
 
-  if (asset?.kind === 'image') delete normalized.url
+  if (belongsToImageAsset) delete normalized.url
   if (Array.isArray(node.children)) {
-    normalized.children = node.children.map(child => normalizeNode(child, assets, idFactory))
+    normalized.children = node.children.map(child =>
+      normalizeNode(child, assets, idFactory, belongsToImageAsset),
+    )
   }
 
   return normalized

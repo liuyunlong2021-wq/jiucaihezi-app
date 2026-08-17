@@ -1173,7 +1173,8 @@ pub fn run() {
             let mut window_config = app.config().app.windows.first()
                 .ok_or("missing main window config")?
                 .clone();
-            #[cfg(dev)]
+            // Debug App must load Vite; otherwise source edits are invisible behind stale dist assets.
+            #[cfg(debug_assertions)]
             {
                 let dev_url = app.config().build.dev_url.clone().unwrap_or_else(|| {
                     "http://localhost:1420".parse().expect("valid desktop dev URL")
