@@ -3,12 +3,13 @@ import unittest
 
 import httpx
 
-from src.main import app
+from src.main import SEEDANCE_TASKS, app
 
 
 class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.upstream_requests = []
+        SEEDANCE_TASKS.clear()
 
         async def upstream_handler(request: httpx.Request):
             self.upstream_requests.append(request)
@@ -234,6 +235,30 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
             [request.url.path for request in requests],
             ["/v1/videos/task_seedance_1", "/v1/video/generations/task_seedance_1"],
         )
+
+    async def test_known_seedance_task_polls_seedance_endpoint_first(self):
+        requests = []
+
+        async def upstream_handler(request: httpx.Request):
+            requests.append(request)
+            return httpx.Response(200, json={
+                "id": "task_seedance_known",
+                "status": "completed",
+                "video_url": "https://cdn.example/seedance.mp4",
+            })
+
+        await self.upstream.aclose()
+        self.upstream = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+        app.state.http = self.upstream
+        SEEDANCE_TASKS.add("task_seedance_known")
+
+        response = await self.client.get(
+            "/v1/videos/task_seedance_known",
+            headers={"Authorization": "Bearer zx-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual([request.url.path for request in requests], ["/v1/video/generations/task_seedance_known"])
 
     async def test_omni_models_forward_their_native_json_fields(self):
         response = await self.client.post(

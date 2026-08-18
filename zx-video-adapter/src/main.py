@@ -24,6 +24,7 @@ GROK_MODELS = {
 }
 SEEDANCE_MODEL = "doubao-seedance-2-5-260628"
 MODELS = {**GROK_MODELS, SEEDANCE_MODEL: None, "omni-fast": None, "omni-v2v": None}
+SEEDANCE_TASKS: set[str] = set()
 MAX_PROMPT_CHARS = 5000
 SEEDANCE_MAX_PROMPT_CHARS = 20480
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -131,7 +132,9 @@ async def submit_seedance(payload: dict, authorization: str, client: httpx.Async
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
-    return submitted_response(response, SEEDANCE_MODEL)
+    result = submitted_response(response, SEEDANCE_MODEL)
+    SEEDANCE_TASKS.add(result["id"])
+    return result
 
 
 @app.get("/v1/videos/{task_id}/content")
@@ -162,17 +165,23 @@ async def get_video(task_id: str, request: Request):
     authorization = require_authorization(request)
     validate_task_id(task_id)
     try:
-        response = await request.app.state.http.get(
-            f"{BASE_URL}/v1/videos/{task_id}",
-            headers={"Authorization": authorization},
-        )
-        if response.status_code in {400, 404}:
-            seedance_response = await request.app.state.http.get(
+        if task_id in SEEDANCE_TASKS:
+            response = await request.app.state.http.get(
                 f"{BASE_URL}/v1/video/generations/{task_id}",
                 headers={"Authorization": authorization},
             )
-            if seedance_response.is_success:
-                response = seedance_response
+        else:
+            response = await request.app.state.http.get(
+                f"{BASE_URL}/v1/videos/{task_id}",
+                headers={"Authorization": authorization},
+            )
+            if response.status_code in {400, 404}:
+                seedance_response = await request.app.state.http.get(
+                    f"{BASE_URL}/v1/video/generations/{task_id}",
+                    headers={"Authorization": authorization},
+                )
+                if seedance_response.is_success:
+                    response = seedance_response
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
     return normalized_task_response(response, task_id)
