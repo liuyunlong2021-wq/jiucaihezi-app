@@ -3,13 +3,14 @@ import unittest
 
 import httpx
 
-from src.main import SEEDANCE_TASKS, app, normalized_task_response
+from src.main import SEEDANCE_TASKS, TASK_AUTHORIZATIONS, app, normalized_task_response
 
 
 class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.upstream_requests = []
         SEEDANCE_TASKS.clear()
+        TASK_AUTHORIZATIONS.clear()
 
         async def upstream_handler(request: httpx.Request):
             self.upstream_requests.append(request)
@@ -314,6 +315,21 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "video/mp4")
         self.assertEqual(response.content, b"streamed-video")
+
+    async def test_omni_content_reuses_the_creation_channel_key(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer zx-channel-key"},
+            json={"model": "omni-fast", "prompt": "让画面动起来"},
+        )
+        self.assertEqual(response.status_code, 200)
+
+        response = await self.client.get(
+            "/v1/videos/task_zx_1/content",
+            headers={"Authorization": "Bearer app-user-token"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.upstream_requests[-1].headers["Authorization"], "Bearer zx-channel-key")
 
 
     async def test_omni_completion_uses_adapter_content_path(self):

@@ -25,6 +25,7 @@ GROK_MODELS = {
 SEEDANCE_MODEL = "doubao-seedance-2-5-260628"
 MODELS = {**GROK_MODELS, SEEDANCE_MODEL: None, "omni-fast": None, "omni-v2v": None}
 SEEDANCE_TASKS: set[str] = set()
+TASK_AUTHORIZATIONS: dict[str, str] = {}
 MAX_PROMPT_CHARS = 5000
 SEEDANCE_MAX_PROMPT_CHARS = 20480
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -107,7 +108,10 @@ async def create_video(request: Request):
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
-    return submitted_response(response, model)
+    result = submitted_response(response, model)
+    if model in {"omni-fast", "omni-v2v"}:
+        TASK_AUTHORIZATIONS[result["id"]] = authorization
+    return result
 
 
 @app.post("/v1/video/generations")
@@ -139,7 +143,9 @@ async def submit_seedance(payload: dict, authorization: str, client: httpx.Async
 
 @app.get("/v1/videos/{task_id}/content")
 async def get_video_content(task_id: str, request: Request):
-    authorization = require_authorization(request)
+    request_authorization = require_authorization(request)
+    authorization = TASK_AUTHORIZATIONS.get(task_id) or request_authorization
+    logger.info("video content proxy: task=%s stored_key=%s", task_id, task_id in TASK_AUTHORIZATIONS)
     validate_task_id(task_id)
     stream = request.app.state.http.stream(
         "GET",
@@ -184,7 +190,10 @@ async def get_video(task_id: str, request: Request):
                     response = seedance_response
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
-    return normalized_task_response(response, task_id)
+    result = normalized_task_response(response, task_id)
+    if result["model"] in {"omni-fast", "omni-v2v"}:
+        TASK_AUTHORIZATIONS[task_id] = authorization
+    return result
 
 
 @app.get("/v1/video/generations/{task_id}")
