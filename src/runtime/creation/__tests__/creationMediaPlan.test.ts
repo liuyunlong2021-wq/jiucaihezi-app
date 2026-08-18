@@ -370,6 +370,7 @@ test('ZX video registry exposes Grok 0-7 references and the three added models',
   const omniFast = getCreationModelSpec('newapi/zx/omni-fast')
   assert.equal(omniFast?.files?.images?.min, 0)
   assert.equal(omniFast?.endpoint, '/v1/videos')
+  assert.equal(omniFast?.capabilities.assetFlow, 'none')
   assert.equal(displayModelPrice(omniFast!), '1.5/次')
   assert.deepEqual(omniFast?.capabilities.duration?.allowedValues, [10])
 
@@ -377,6 +378,7 @@ test('ZX video registry exposes Grok 0-7 references and the three added models',
   assert.equal(omniV2v?.files?.videos?.min, 1)
   assert.equal(displayModelPrice(omniV2v!), '2/次')
   assert.deepEqual(omniV2v?.capabilities.duration?.allowedValues, [10])
+  assert.equal(omniV2v?.capabilities.assetFlow, 'none')
   assert.throws(() => buildCreationRunPlan({
     modelId: omniV2v!.id,
     params: { prompt: '缺少视频' },

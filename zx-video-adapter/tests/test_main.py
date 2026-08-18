@@ -279,13 +279,25 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
             "/v1/videos",
             headers={"Authorization": "Bearer zx-test-key"},
             json={
+                "model": "omni-fast",
+                "prompt": "让参考图动起来",
+                "images": ["data:image/png;base64,aGVsbG8="],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(self.upstream_requests[1].read())["images"], ["data:image/png;base64,aGVsbG8="])
+
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer zx-test-key"},
+            json={
                 "model": "omni-v2v",
                 "prompt": "保持主体并改变镜头运动",
                 "video_url": "https://cdn.example/input.mp4",
             },
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(json.loads(self.upstream_requests[1].read())["video_url"], "https://cdn.example/input.mp4")
+        self.assertEqual(json.loads(self.upstream_requests[2].read())["video_url"], "https://cdn.example/input.mp4")
 
         response = await self.client.post(
             "/v1/videos",

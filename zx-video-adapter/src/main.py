@@ -263,7 +263,7 @@ def omni_payload(payload: dict, images: list) -> dict:
     model = payload["model"]
     if model not in {"omni-fast", "omni-v2v"}:
         raise HTTPException(status_code=400, detail="Unsupported ZX Omni video model")
-    image_urls = [validate_public_url(str(image)) for image in images]
+    image_urls = [validate_omni_reference(str(image)) for image in images]
     video_url = payload.get("video_url") or payload.get("video") or payload.get("videoUrl")
     if model == "omni-v2v" and not video_url:
         raise HTTPException(status_code=400, detail="omni-v2v requires video_url")
@@ -273,8 +273,22 @@ def omni_payload(payload: dict, images: list) -> dict:
         "aspect_ratio": payload.get("aspect_ratio") or payload.get("ratio") or "16:9",
         "resolution": payload.get("resolution") or "720p",
         "images": image_urls or None,
-        "video_url": validate_public_url(str(video_url)) if video_url else None,
+        "video_url": validate_omni_reference(str(video_url)) if video_url else None,
     })
+
+
+def validate_omni_reference(value: str) -> str:
+    if value.lower().startswith("data:"):
+        match = DATA_URL_RE.match(value)
+        if not match or not match.group("mime").lower().startswith(("image/", "video/")):
+            raise HTTPException(status_code=400, detail="Omni reference data URL is invalid")
+        try:
+            if len(base64.b64decode(match.group("data"), validate=True)) > MAX_IMAGE_BYTES:
+                raise HTTPException(status_code=413, detail="Omni reference is too large")
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(status_code=400, detail="Omni reference data URL is invalid") from exc
+        return value
+    return validate_public_url(value)
 
 
 def seedance_payload(payload: dict) -> dict:
