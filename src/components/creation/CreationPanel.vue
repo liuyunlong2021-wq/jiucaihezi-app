@@ -84,6 +84,8 @@ import {
   setLanguage,
   getModelFieldValue,
   setModelFieldValue,
+  toggleModelFieldValue,
+  isModelFieldOptionSelected,
   refreshCreationModelAvailability,
   saveCpState,
   getVisibleCreationTasks,
@@ -105,7 +107,7 @@ import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
-import { extractVideoFirstFrameThumbnail } from '@/utils/mediaThumbnail'
+import { extractVideoFirstFrameThumbnail, readVideoDuration } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isAllowedCreationResultUrl, isSafePublicHttpUrl } from '@/utils/urlSafety'
 import { writeClipboardText } from '@/utils/clipboard'
@@ -666,13 +668,20 @@ async function runCreationViaTaskStore() {
       for (const { node, asset } of assets) {
         if (!modalities.includes(asset.kind)) continue
         const mediaPath = asset.resource.path
+        const maxBytes = asset.kind === 'image'
+          ? fileLimits?.images?.maxBytes
+          : asset.kind === 'video'
+            ? fileLimits?.videos?.maxBytes
+            : asset.kind === 'audio'
+              ? (fileLimits?.audios?.maxBytes || SEED_AUDIO_MAX_REFERENCE_BYTES)
+              : undefined
         const url =
           asset.kind === 'image'
-            ? await getCanvasImageSubmissionUrl(node, asset.id, mediaPath, owner)
+            ? await getCanvasImageSubmissionUrl(node, asset.id, mediaPath, owner, maxBytes)
             : await getMediaSubmissionUrl(
                 isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath,
                 owner,
-                asset.kind === 'audio' ? SEED_AUDIO_MAX_REFERENCE_BYTES : undefined,
+                maxBytes,
               )
         if (asset.kind === 'audio') refAudios.push(url)
         else if (asset.kind === 'video') refVideos.push(url)
@@ -684,9 +693,22 @@ async function runCreationViaTaskStore() {
       }
     }
 
+    const creationParams = buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: refAudios })
+    if (currentCreationSpec.value?.id === 'runninghub/api/rh-gemini-omni-video-edit') {
+      if (!refVideos[0]) {
+        cpState.progressText = '无法读取输入视频时长'
+        return
+      }
+      try {
+        creationParams.seconds = Math.max(1, Math.ceil(await readVideoDuration(refVideos[0])))
+      } catch {
+        cpState.progressText = '无法读取输入视频时长'
+        return
+      }
+    }
     const submitPlan = buildCreationRunPlan({
       modelId: currentCreationSpec.value?.id || cpState.modelKey,
-      params: buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: refAudios }),
+      params: creationParams,
     })
 
     cpState.generating = true
@@ -1058,7 +1080,7 @@ async function getMediaSubmissionUrl(filePath: string, owner: string, maxBytes?:
     })
     const encoded = url.startsWith('data:') ? url.slice(url.indexOf(',') + 1) : ''
     if (maxBytes && encoded.length > 4 * Math.ceil(maxBytes / 3)) {
-      throw new Error('参考音频不能超过 10 MB')
+      throw new Error(`参考媒体不能超过 ${Math.round(maxBytes / 1024 / 1024)} MB`)
     }
     return url
   }
@@ -1071,7 +1093,7 @@ async function getMediaSubmissionUrl(filePath: string, owner: string, maxBytes?:
       const result = await invoke<{ base64: string; truncated: boolean }>('dev_read_file', {
         input: { root: projectDir, relativePath, maxBytes: maxBytes || 20_000_000 },
       })
-      if (maxBytes && result?.truncated) throw new Error('参考音频不能超过 10 MB')
+      if (maxBytes && result?.truncated) throw new Error(`参考媒体不能超过 ${Math.round(maxBytes / 1024 / 1024)} MB`)
       if (result?.base64 && !result.truncated) {
         const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
         const mime =
@@ -1137,9 +1159,10 @@ async function getCanvasImageSubmissionUrl(
   assetId: string,
   mediaPath: string,
   owner: string,
+  maxBytes?: number,
 ): Promise<string> {
   const filePath = isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath
-  const original = await getMediaSubmissionUrl(filePath, owner)
+  const original = await getMediaSubmissionUrl(filePath, owner, maxBytes)
   const image = getCanvasImageContent(node)
   if (!image || !hasCanvasImageAnnotations(node, assetId)) return original
 
@@ -1156,6 +1179,9 @@ async function getCanvasImageSubmissionUrl(
     })
     if (exported.error || !(exported.data instanceof Blob)) {
       throw exported.error || new Error('标注图片导出失败')
+    }
+    if (maxBytes && exported.data.size > maxBytes) {
+      throw new Error(`参考媒体不能超过 ${Math.round(maxBytes / 1024 / 1024)} MB`)
     }
     return blobToDataUrl(exported.data)
   } finally {
@@ -4380,6 +4406,17 @@ const canSend = computed(
               {{ option.label }}
             </button>
           </div>
+          <div v-else-if="field.kind === 'multiselect'" class="cp-btn-group">
+            <button
+              v-for="option in field.options || []"
+              :key="String(option.value)"
+              class="cp-param-btn"
+              :class="{ active: isModelFieldOptionSelected(field, String(option.value)) }"
+              @click="toggleModelFieldValue(field, String(option.value))"
+            >
+              {{ option.label }}
+            </button>
+          </div>
           <input
             v-else-if="field.kind === 'number'"
             class="cp-mini-input wide"
@@ -4401,6 +4438,7 @@ const canSend = computed(
           <input
             v-else
             class="cp-suno-input cp-generic-input"
+            :maxlength="field.maxLength"
             :value="
               cpState.fieldValues[field.key] !== undefined
                 ? String(cpState.fieldValues[field.key])
@@ -4576,8 +4614,10 @@ const canSend = computed(
   display: flex;
   flex-direction: column;
   width: 100%;
+  min-width: 0;
   height: 100%;
   min-height: 0;
+  box-sizing: border-box;
   overflow: hidden;
   position: relative;
   background: var(--surface);
@@ -4716,6 +4756,12 @@ const canSend = computed(
   border: 1px solid var(--olive);
   font-size: 12px;
   color: var(--olive-dark);
+}
+.cp-canvas-progress > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cp-canvas-progress .cp-generation-progress {
   flex: 1;
@@ -5211,6 +5257,9 @@ const canSend = computed(
 
 .cp-params {
   display: flex;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   gap: 6px;
   padding: 8px 12px;
   border-top: 1px solid var(--line);
@@ -5221,6 +5270,9 @@ const canSend = computed(
 }
 .cp-island {
   position: relative;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 6px 10px;
   border-radius: 8px;
   border: 1px solid var(--line);
@@ -5317,11 +5369,13 @@ const canSend = computed(
 }
 .cp-dur-row {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
 }
 .cp-dur-slider {
   flex: 1;
+  min-width: 0;
   accent-color: var(--olive);
 }
 .cp-dur-val {
@@ -5372,6 +5426,9 @@ const canSend = computed(
 .cp-composer {
   position: relative;
   display: flex;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   flex-direction: column;
   gap: 6px;
   padding: 10px 12px 12px;
@@ -5413,6 +5470,8 @@ const canSend = computed(
 .cp-reference-empty { padding: 8px; color: var(--ink3); font-size: 12px; }
 .cp-composer-row {
   display: flex;
+  width: 100%;
+  min-width: 0;
   align-items: flex-end;
   gap: 8px;
 }
@@ -5756,7 +5815,7 @@ const canSend = computed(
   field-sizing: content;
 }
 .cp-submit {
-  flex-shrink: 0;
+  flex: 0 0 40px;
 }
 .cp-send-btn {
   width: 40px;

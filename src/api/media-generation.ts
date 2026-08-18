@@ -37,10 +37,13 @@ export interface VideoGenParams {
   aspectRatio?: string
   resolution?: string
   duration?: string | number
+  seconds?: string | number
   imageUrl?: string
   imageUrls?: string[]    // 多图（Grok 最多7张，prompt 中用 @img1 @img2...）
   videoUrl?: string
+  videoUrls?: string[]
   audioUrl?: string
+  audioUrls?: string[]
   text?: string
   width?: string | number
   height?: string | number

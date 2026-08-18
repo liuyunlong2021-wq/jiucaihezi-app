@@ -1,8 +1,12 @@
 # 热缓存
 
-> 更新：2026-08-17 | 阶段：v2.1.26 待发布；3D 白模编辑器空白已完成开发窗口验收
+> 更新：2026-08-18 | 阶段：v2.1.26 待发布；ZX 视频适配器多模型升级已本地完成
 
 ## 当前结论
+
+- **ZX 视频适配器六模型合同已本地完成。** 三个 `grok-1.5-video-*` 固定时长别名统一支持 `0~7` 张参考图，0 张发送文生视频 JSON，1~7 张全部转成重复的 multipart `input_reference`；新增 `doubao-seedance-2-5-260628`、`omni-fast`、`omni-v2v`。Seedance 独立走 `/v1/video/generations` 与带 `role` 的 `metadata.content`，Omni 走 `/v1/videos` JSON；视频 `/content` 已改为流式代理，避免并发下载时缓冲完整 MP4。适配器 `7/7`、25 并发内容代理冒烟、创作计划与运行时定向测试、TypeScript 和差异检查通过；未部署，未用真实 ZX Key 验证。上游页面当前只明确列出 `omni-fast`，另外两个新增别名保持部分验证状态。见 [[开发/ZX视频适配器多模型升级TDD-2026-08-18]]。
+
+- **RunningHub Grok Video 低价渠道新合同已本地完成。** 文生和图生均为 `6-15秒`、UI `0.25元/秒`；图生支持 `1-7` 张参考图且单图 `10 MB`。前端和 RH adapter 共享边界都会阻止第 8 张图与 16 秒请求，endpoint、上传和轮询未变。focused `1081/1081`、RH 聚焦 `40/40`、TypeScript 通过；部署、真实渠道和账单验收待执行。见 [[开发/RunningHub Grok Video低价渠道合同变更TDD-2026-08-17]]。
 
 - **3D 白模编辑器空白与高度为 0 已完成真实开发窗口验收。** Debug App 先修正为加载 Vite；最终根因是人物骨骼四元数仍保留 Vue Proxy，初始化撤销历史的 `structuredClone()` 抛出 `DataCloneError` 并中止 `setup()`。共享解析器现在返回新数组，用户已确认恢复；Scene3D `13/13`、工作台 `55/55`、TypeScript、Rust 和差异检查通过。见 [[排障/3D编辑器空白与高度为零-2026-08-17]]。
 
@@ -72,6 +76,8 @@
 - **`v2.1.13` 发布链路修复（2026-08-07）：** 下载页读取 `/updates/latest.json`，不读取 GitHub Latest Release；桌面发布工作流已将 GitHub Release 预创建、三平台资产上传、官网下载清单三者解耦。OTA 签名仍停用，但官网下载清单不再依赖 OTA。v2.1.13 正常 tag 发布将完整验证“创建 Release → 三平台成功 → 自动发布官网下载清单”。
 
 ## 已验证 / 未验证
+
+- **RH Seedance 2.5 双模型已完成本地接入。** NewAPI 模型名为 `rh-seedance25-no-video-ref`（输入 `$80/1M`）和 `rh-seedance25-with-video-ref`（输入 `$50/1M`）；两者固定 `native1080p`，有参考视频形态要求 `1-10` 个视频。Seedance 2.0、Fast、Mini 三套共 9 个旧 RH 模型已退出可选目录。RH `41/41`、focused `1087/1087`、TypeScript 和差异检查通过；服务器部署、生产并发与真实账单待验收。见 [[开发/RH Seedance 2.5双模型接入与旧模型退役TDD-2026-08-18]]。
 
 - `v2.1.9` 已发布：`main` 与 tag 指向 `f302c251`；Web Production 正式域名返回 HTTP 200；GitHub Actions `30904082094` 的 macOS ARM、macOS Intel、Windows x64 和发布清单均成功；生产 `latest.json` 返回 `2.1.9`。
 - 方向性文字覆盖曾通过 focused `1438/1446`、TypeScript、Web quick build 和产物审计；2026-08-10 真实 iPhone `2.1.17` 下载覆盖回归失败，当前 Mobile 下载链路不得登记为通过。Web/Desktop 覆盖删除矩阵仍待人工验收。

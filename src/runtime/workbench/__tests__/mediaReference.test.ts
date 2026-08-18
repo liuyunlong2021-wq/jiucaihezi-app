@@ -106,7 +106,7 @@ test('a default video plan switches to Seedance image-to-video after one image r
 
   const materialized = materializeMediaPlanReferences(plan, snapshot)
 
-  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance2-image')
+  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
 })
 
 test('a default video plan switches to Seedance multimodal for multiple references', () => {
@@ -122,7 +122,7 @@ test('a default video plan switches to Seedance multimodal for multiple referenc
 
   const materialized = materializeMediaPlanReferences(plan, snapshot)
 
-  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance2')
+  assert.equal(materialized.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
 })
 
 test('recent task references are limited to the current session and project', () => {

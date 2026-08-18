@@ -386,8 +386,56 @@ function handleHealth(request) {
   return jsonResponse({
     success: true,
     service: 'jiucaihezi-studio-login-gateway',
-    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'auth.delete', 'sync.text']
+    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'auth.delete', 'sync.text', 'media.upload']
   }, 200, request);
+}
+
+const CREATION_MEDIA_TTL_SECONDS = 15 * 60;
+const CREATION_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
+
+function requireMediaUploadAuth(request) {
+  if (!request.headers.get('Authorization') && !request.headers.get('X-API-Key')) {
+    throw unauthorized('请先登录');
+  }
+}
+
+function creationMediaKey(token) {
+  return `creation-media:${token}`;
+}
+
+async function handleCreationMediaUpload(request, env) {
+  requireMediaUploadAuth(request);
+  if (!env.PLUGIN_KV || typeof env.PLUGIN_KV.put !== 'function') {
+    throw new Error('临时媒体存储尚未配置');
+  }
+  const form = await request.formData();
+  const file = form.get('file');
+  if (!(file instanceof File) || !file.size) throw badRequest('缺少媒体文件');
+  if (file.size > CREATION_MEDIA_MAX_BYTES) throw badRequest('媒体文件不能超过 20 MB');
+  if (!/^(image|video|audio)\//.test(file.type)) throw badRequest('仅支持图片、视频或音频文件');
+
+  const token = crypto.randomUUID().replaceAll('-', '');
+  await env.PLUGIN_KV.put(creationMediaKey(token), await file.arrayBuffer(), {
+    expirationTtl: CREATION_MEDIA_TTL_SECONDS,
+    metadata: { contentType: file.type }
+  });
+  const url = new URL(`/media/creation/${token}`, request.url).href;
+  return jsonResponse({ url }, 200, request);
+}
+
+async function handleCreationMediaRead(request, env, token) {
+  if (!/^[a-f0-9]{32}$/i.test(token) || !env.PLUGIN_KV) return notFound(request);
+  const result = await env.PLUGIN_KV.getWithMetadata(creationMediaKey(token), { type: 'arrayBuffer' });
+  if (!result || !result.value) return notFound(request);
+  return new Response(result.value, {
+    status: 200,
+    headers: {
+      'Content-Type': result.metadata?.contentType || 'application/octet-stream',
+      'Cache-Control': `public, max-age=${CREATION_MEDIA_TTL_SECONDS}, immutable`,
+      'X-Content-Type-Options': 'nosniff',
+      'Access-Control-Allow-Origin': '*'
+    }
+  });
 }
 
 const LANDING_ASSETS = new Set([
@@ -477,6 +525,9 @@ export default {
       if (url.pathname === '/') return Response.redirect('https://api.jiucaihezi.studio/sign-in', 302);
       if (ROOT_ICON_REDIRECTS.has(url.pathname)) return await handleRootIcon(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/health') return handleHealth(request);
+      if (request.method === 'POST' && url.pathname === '/api/creations/uploads') return await handleCreationMediaUpload(request, env);
+      const creationMedia = url.pathname.match(/^\/media\/creation\/([a-f0-9]{32})$/i);
+      if (request.method === 'GET' && creationMedia) return await handleCreationMediaRead(request, env, creationMedia[1]);
       if (url.pathname.startsWith('/landing/')) return await handleLandingAsset(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/start') return await handleDesktopAuthStart(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/callback') return await handleDesktopAuthCallback(request, env);

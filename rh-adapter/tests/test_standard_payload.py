@@ -104,6 +104,136 @@ async def test_standard_payload_rejects_values_outside_official_options():
 
 
 @pytest.mark.asyncio
+async def test_gemini_omni_locks_fixed_duration_and_resolution():
+    client = FakeClient()
+    payload = await build_standard_payload(
+        client,
+        "rh_key",
+        "gemini-omni-flash/text-to-video",
+        {"prompt": "move", "aspectRatio": "16:9"},
+    )
+    assert payload["duration"] == "10"
+    assert payload["resolution"] == "1080p"
+
+    with pytest.raises(RHError, match="fixed value: 10"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "gemini-omni-flash/image-to-video",
+            {"prompt": "move", "images": ["https://example.com/1.png"], "duration": 8},
+        )
+
+    with pytest.raises(RHError, match="fixed value: 1080p"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "gemini-omni-flash/video-edit",
+            {"prompt": "edit", "video": "https://example.com/input.mp4", "resolution": "720p"},
+        )
+
+
+@pytest.mark.asyncio
+async def test_gemini_omni_rejects_two_reference_images():
+    client = FakeClient()
+
+    with pytest.raises(RHError, match="imageUrls.*1 or 3"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "gemini-omni-flash/image-to-video",
+            {
+                "prompt": "move",
+                "images": ["https://example.com/1.png", "https://example.com/2.png"],
+                "duration": 10,
+                "resolution": "1080p",
+                "aspectRatio": "16:9",
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_gemini_omni_video_edit_uses_official_fields_only():
+    client = FakeClient()
+    payload = await build_standard_payload(
+        client,
+        "rh_key",
+        "gemini-omni-flash/video-edit",
+        {
+            "prompt": "follow the motion",
+            "images": ["https://example.com/ref.png"],
+            "video": "https://example.com/input.mp4",
+            "resolution": "1080p",
+            "aspectRatio": "9:16",
+            "seconds": 8,
+        },
+    )
+
+    assert payload == {
+        "prompt": "follow the motion",
+        "imageUrls": ["https://example.com/ref.png"],
+        "resolution": "1080p",
+        "aspectRatio": "9:16",
+        "videoUrl": "https://example.com/input.mp4",
+    }
+
+
+@pytest.mark.asyncio
+async def test_seedance_25_uses_native1080p_and_video_urls():
+    client = FakeClient()
+    payload = await build_standard_payload(
+        client,
+        "rh_key",
+        "bytedance/seedance-2.5-global-token/multimodal-video",
+        {
+            "prompt": "camera push in",
+            "resolution": "native1080p",
+            "duration": 8,
+            "videos": ["https://example.com/reference.mp4"],
+        },
+    )
+
+    assert payload["prompt"] == "camera push in"
+    assert payload["resolution"] == "native1080p"
+    assert payload["duration"] == "8"
+    assert payload["videoUrls"] == ["https://example.com/reference.mp4"]
+    assert "video" not in payload
+
+
+@pytest.mark.asyncio
+async def test_gemini_omni_rejects_data_url_over_official_10mb_limit():
+    client = FakeClient()
+    oversized = "data:image/png;base64," + ("A" * (15 * 1024 * 1024))
+    with pytest.raises(RHError, match="maximum size 10MB"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "gemini-omni-flash/image-to-video",
+            {"prompt": "move", "images": [oversized]},
+        )
+
+
+@pytest.mark.asyncio
+async def test_grok_low_price_video_rejects_duration_above_15_and_more_than_7_images():
+    client = FakeClient()
+
+    with pytest.raises(RHError, match="duration.*maximum 15"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "rhart-video-g/text-to-video",
+            {"prompt": "move", "duration": 16},
+        )
+
+    with pytest.raises(RHError, match="imageUrls.*maximum 7"):
+        await build_standard_payload(
+            client,
+            "rh_key",
+            "rhart-video-g/image-to-video",
+            {"prompt": "move", "images": [f"https://example.com/{i}.png" for i in range(8)]},
+        )
+
+
+@pytest.mark.asyncio
 async def test_z_image_turbo_payload_uses_official_lora_fields():
     client = FakeClient()
 

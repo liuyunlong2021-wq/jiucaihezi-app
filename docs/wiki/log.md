@@ -1,5 +1,19 @@
 # Wiki 操作日志
 
+## [2026-08-18] 实施与沉淀 | RunningHub Grok Video 低价渠道合同变更
+
+- 新建 [[开发/RunningHub Grok Video低价渠道合同变更TDD-2026-08-17]]，同步文生与图生两个低价渠道模型：时长 `6-15秒`，UI `0.25元/秒`。
+- 图生视频改为 `1-7` 张参考图、单图 `10 MB`；前端 RunPlan 与 RH 标准 payload 均会拒绝越界数量和 `duration=16`。
+- 根因是旧注册仍为 `6-30秒/最多3图/0.08元每秒`，且 RH capability 的数值 `min/max` 过去没有在共享 payload 构造器执行；现已补通用数值范围校验，不改变 endpoint、上传和轮询。
+- 验证：前端 focused `1081/1081`、RH 聚焦 `40/40`、TypeScript、JSON 解析和差异检查通过；未部署，未执行真实 RH/NewAPI 账单或生成验收。
+
+## [2026-08-17] 方案确认 | Gemini Omni RH 三模型接入 TDD
+
+- 建立 [[开发/Gemini Omni RH三模型接入TDD-2026-08-17]]，复用现有 RH 标准 API、上传和轮询链路，不新建适配器或计费服务。
+- 文生和图生视频固定 `1080p/10秒`，UI 显示 `2.5元/次`；视频编辑固定 `1080p`，UI 显示 `0.4元/秒`。
+- 视频编辑必须按输入视频真实媒体时长向上取整计费；无法读取时长时阻止付费提交，不使用 NewAPI 默认秒数。
+- 已完成最小实现与自动化验收：前端完整 focused 1080 passed、RH 适配器映射/payload/站点路由 39 passed、`vue-tsc -b` 与 `git diff --check` 通过；未部署、未进行 RH/NewAPI 真实账单验收。
+
 ## [2026-08-17] 用户验收 | 创作画布 Base64 泄漏与大文件恢复
 
 - 用户已实际打开修复后的创作画布，确认现在可以正常打开。
@@ -950,3 +964,17 @@
 - `package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 和 `Cargo.lock` 已统一为 `2.1.26`。
 - 完整 focused 门禁、TypeScript 和差异检查通过，其中 Rust 为 `396 passed / 1 ignored`。
 - 本轮只完成版本准备与提交；没有创建 tag、push、构建 Web/APP 或执行发布。
+
+## [2026-08-18] 实施完成 | ZX 视频适配器六模型合同
+
+- 三个 `grok-1.5-video-6s/10s/15s` 固定时长别名统一改为 `0~7` 张参考图：0 张发送 JSON，1~7 张全部转为重复的 multipart `input_reference`，第 8 张在适配器和创作计划边界拒绝。
+- 同一适配器新增 `doubao-seedance-2-5-260628`、`omni-fast`、`omni-v2v`；Seedance 使用独立 `/v1/video/generations` 和 `metadata.content`，Omni 使用 `/v1/videos` JSON。
+- 视频 `/content` 已改为流式代理并在响应结束后关闭上游流，避免并发下载时把完整 MP4 缓冲进适配器内存；图片上传链路保持不变。
+- 适配器 `7/7`、25 并发内容代理冒烟、创作计划与运行时定向测试、TypeScript、Python 编译和差异检查通过。未部署，未用真实 ZX Key 提交或核对账单；上游网页未列出的 Seedance 2.5 与 Omni V2V 别名保持部分验证状态。详见 [[开发/ZX视频适配器多模型升级TDD-2026-08-18]]。
+
+## [2026-08-18] 实施完成 | RH Seedance 2.5 双模型与旧模型退役
+
+- 新增 `rh-seedance25-no-video-ref` 与 `rh-seedance25-with-video-ref`，统一固定 `native1080p`；后者强制 `1-10` 个参考视频。
+- UI / NewAPI 输入价格分别为 `80/百万TOKEN` 与 `50/百万TOKEN`；后台按 Token 模式只填写输入价格。
+- Seedance 2.0、Fast、Mini 三套共 9 个旧 RH 模型退出可选目录并禁止新执行，历史规格和映射保留用于读取旧任务。
+- RH 适配器 `41 passed`、focused `1087 passed`、TypeScript 和差异检查通过；未部署，未进行真实生产生成、压力并发或账单验收。详见 [[开发/RH Seedance 2.5双模型接入与旧模型退役TDD-2026-08-18]]。

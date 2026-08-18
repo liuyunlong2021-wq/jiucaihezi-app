@@ -70,8 +70,10 @@ test('media generation API allows only approved models for each execution kind',
   assert.throws(() => assertMediaModelExecutable('grok-video-3', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-grok-text-video', 'video'))
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-grok-image-video', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-mini', 'video'))
-  assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance2-fast', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance25-no-video-ref', 'video'))
+  assert.doesNotThrow(() => assertMediaModelExecutable('rh-seedance25-with-video-ref', 'video'))
+  assert.throws(() => assertMediaModelExecutable('rh-seedance2-mini', 'video'), /不可用|重新选择/)
+  assert.throws(() => assertMediaModelExecutable('rh-seedance2-fast', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('seedance-2.0', 'video'), /不可用|重新选择/)
   assert.throws(() => assertMediaModelExecutable('seedance-2.0-fast', 'video'), /不可用|重新选择/)
   assert.doesNotThrow(() => assertMediaModelExecutable('rh-video-v31-fast', 'video'))
@@ -265,9 +267,9 @@ test('new RunningHub models submit through NewAPI and use their registered polli
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       submittedModels.push(body.model)
-      assert.ok(['rh-seedance2-mini', 'rh-seedance2-fast', 'rh-seedance2'].includes(body.model))
+      assert.ok(['rh-seedance25-no-video-ref', 'rh-seedance25-with-video-ref'].includes(body.model))
       assert.equal(body.ratio, 'adaptive')
-      assert.equal(body.aspect_ratio, undefined)
+      assert.equal(body.aspect_ratio, 'adaptive')
       return Response.json({ task_id: `${body.model}_task`, status: 'processing' })
     }
     const match = url.match(/\/rh\/tasks\/([^/?]+)$/)
@@ -291,21 +293,21 @@ test('new RunningHub models submit through NewAPI and use their registered polli
     }))
     assert.equal(image.pollUrl, '/rh/tasks/rh_image_v2_task')
 
-    for (const model of ['rh-seedance2-mini', 'rh-seedance2-fast']) {
+    for (const model of ['rh-seedance25-no-video-ref', 'rh-seedance25-with-video-ref']) {
       const video = await withImmediateTimers(() => generateVideo({
         model,
         prompt: 'video',
         aspectRatio: 'adaptive',
         onSubmitted: payload => submitted.push(payload),
       }))
-      assert.equal(video.pollUrl, `/v1/videos/${model}_task`)
+      assert.equal(video.pollUrl, `/rh/tasks/${model}_task`)
     }
 
-    assert.deepEqual(submittedModels, ['rh-image-v2', 'rh-seedance2-mini', 'rh-seedance2-fast'])
+    assert.deepEqual(submittedModels, ['rh-image-v2', 'rh-seedance25-no-video-ref', 'rh-seedance25-with-video-ref'])
     assert.deepEqual(submitted.map(item => item.pollUrl), [
       '/rh/tasks/rh_image_v2_task',
-      '/v1/videos/rh-seedance2-mini_task',
-      '/v1/videos/rh-seedance2-fast_task',
+      '/rh/tasks/rh-seedance25-no-video-ref_task',
+      '/rh/tasks/rh-seedance25-with-video-ref_task',
     ])
   } finally {
     globalThis.fetch = previousFetch

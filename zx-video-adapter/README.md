@@ -1,14 +1,19 @@
-# ZX Grok Video Adapter
+# ZX Video Adapter
 
-独立的 ZX Grok 固定时长视频协议适配器。它位于 NewAPI 和 `img-api.zxcode.vip` 之间，不修改 NewAPI 源码，也不复用只服务 RunningHub 的 `rh-adapter`。
+独立的 ZX 视频协议适配器。它位于 NewAPI 和 `img-api.zxcode.vip` 之间，不修改 NewAPI 源码，也不复用只服务 RunningHub 的 `rh-adapter`。
 
 ## 支持模型
 
 - `grok-1.5-video-6s`
 - `grok-1.5-video-10s`
 - `grok-1.5-video-15s`
+- `doubao-seedance-2-5-260628`
+- `omni-fast`
+- `omni-v2v`
 
-无参考图时，适配器按 ZX 文生视频合同发送 JSON；有参考图时，将 `image`/`images`/`reference_images` 或直接 multipart 统一转换为 `input_reference` 文件。模型名决定时长，不发送 `seconds`。
+Grok 支持 0~7 张参考图：无图时发送 JSON，有图时将 `image`/`images`/`reference_images` 或直接 multipart 统一转换为重复的 `input_reference` 文件字段。模型名决定时长，不发送 `seconds`。
+
+Omni 走 `/v1/videos` JSON 合同；Seedance 走 `/v1/video/generations`，适配器将素材 URL 转为带 `role` 的 `metadata.content`。
 
 ## 本地验证
 

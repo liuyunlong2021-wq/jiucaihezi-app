@@ -65,7 +65,7 @@ export interface CpState {
   size: string
   res: string
   dur: number
-  fieldValues: Record<string, string | number | boolean>
+  fieldValues: Record<string, string | number | boolean | string[]>
   files: File[]
   generating: boolean
   runningTasks: number
@@ -122,6 +122,7 @@ function creationFieldToMediaField(field: CreationFieldSpec): MediaModelField {
     min: field.min,
     max: field.max,
     step: field.step,
+    maxLength: field.maxLength,
   }
 }
 
@@ -282,11 +283,12 @@ function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   return getModelsForTask(task)[0] || 'gpt-image-2-1k'
 }
 
-function normalizeSavedFieldValues(value: unknown): Record<string, string | number | boolean> {
+function normalizeSavedFieldValues(value: unknown): Record<string, string | number | boolean | string[]> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const output: Record<string, string | number | boolean> = {}
+  const output: Record<string, string | number | boolean | string[]> = {}
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') output[key] = raw
+    else if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) output[key] = raw
   }
   return output
 }
@@ -459,7 +461,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     aspectRatio: cpState.ar,
     aspect_ratio: cpState.ar,
     resolution: cpState.res,
-    duration: cpState.dur,
+    duration: currentCreationSpec.value?.mode === 'video-edit' ? undefined : cpState.dur,
     size: cpState.size,
     response_format: 'url',
     mv: cpState.mv,
@@ -643,18 +645,29 @@ export function setResolution(res: string) {
 export function setDuration(dur: number) { cpState.dur = dur; saveCpState() }
 export function setMv(mv: string) { cpState.mv = mv; saveCpState() }
 export function setLanguage(language: string) { cpState.language = language; saveCpState() }
-export function getModelFieldValue(field: CreationFieldSpec): string | number | boolean {
+export function getModelFieldValue(field: CreationFieldSpec): string | number | boolean | string[] {
   const value = cpState.fieldValues[field.key]
   if (isFieldValuePresent(value)) return value
-  if (isFieldValuePresent(field.defaultValue)) return field.defaultValue as string | number | boolean
+  if (isFieldValuePresent(field.defaultValue)) return field.defaultValue as string | number | boolean | string[]
   if (field.kind === 'number') return field.min ?? 0
   if (field.kind === 'boolean') return false
   return ''
 }
 
-export function setModelFieldValue(field: CreationFieldSpec, value: string | number | boolean) {
+export function setModelFieldValue(field: CreationFieldSpec, value: string | number | boolean | string[]) {
   cpState.fieldValues[field.key] = value
   saveCpState()
+}
+
+export function toggleModelFieldValue(field: CreationFieldSpec, value: string) {
+  const selected = getModelFieldValue(field)
+  const values = Array.isArray(selected) ? selected : []
+  setModelFieldValue(field, values.includes(value) ? values.filter(item => item !== value) : [...values, value])
+}
+
+export function isModelFieldOptionSelected(field: CreationFieldSpec, value: string): boolean {
+  const selected = getModelFieldValue(field)
+  return Array.isArray(selected) && selected.includes(value)
 }
 
 // ─── 文件处理 ───
@@ -682,9 +695,11 @@ function isAcceptedFileForCurrentModel(file: File): boolean {
 export function addFiles(fileList: FileList | File[]) {
   const max = currentModel.value?.maxFiles || 1
   Array.from(fileList).forEach(f => {
-    const maxBytes = cpState.modelKey === 'seed-audio-1.0' && f.type.startsWith('audio/')
+    const mediaKind = f.type.startsWith('image/') ? 'images' : f.type.startsWith('video/') ? 'videos' : f.type.startsWith('audio/') ? 'audios' : undefined
+    const contractMaxBytes = mediaKind ? currentCreationSpec.value?.files?.[mediaKind]?.maxBytes : undefined
+    const maxBytes = contractMaxBytes || (cpState.modelKey === 'seed-audio-1.0' && f.type.startsWith('audio/')
       ? SEED_AUDIO_MAX_REFERENCE_BYTES
-      : MAX_CREATION_FILE_BYTES
+      : MAX_CREATION_FILE_BYTES)
     if (f.size > maxBytes) return
     if (cpState.files.length < max && isAcceptedFileForCurrentModel(f)) {
       cpState.files.push(f)

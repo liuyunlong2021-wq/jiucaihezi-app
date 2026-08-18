@@ -155,6 +155,14 @@ test('creation panel restores audio as a native audio card and submits it as an 
   assert.match(source, /accept="image\/\*,video\/\*,audio\/\*"/)
 })
 
+test('creation panel keeps duration and send controls inside narrow widths', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /\.cp\s*\{[\s\S]{0,180}box-sizing:\s*border-box/)
+  assert.match(source, /\.cp-island\s*\{[\s\S]{0,180}box-sizing:\s*border-box/)
+  assert.match(source, /\.cp-composer-row\s*\{[\s\S]{0,180}min-width:\s*0/)
+})
+
 test('creation panel restores the canvas once after applying every media change in a resource batch', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const reconcile =
@@ -247,7 +255,8 @@ test('canvas annotations are local to the selected image and export only that im
   assert.match(source, /function getCanvasImageSubmissionUrl[\s\S]*?hasCanvasImageAnnotations[\s\S]*?const composite = node\.clone\(\)[\s\S]*?composite\.export\('png'/)
   assert.match(source, /clip: \{ x: 0, y: 0, width: Number\(image\.width\), height: Number\(image\.height\) \}/)
   assert.match(source, /size: naturalSize/)
-  assert.match(source, /asset\.kind === 'image'\s+\? await getCanvasImageSubmissionUrl\(node, asset\.id, mediaPath, owner\)/)
+  assert.match(source, /asset\.kind === 'image'\s+\? await getCanvasImageSubmissionUrl\(node, asset\.id, mediaPath, owner, maxBytes\)/)
+  assert.match(source, /if \(maxBytes \&\& exported\.data\.size > maxBytes\)/)
 })
 
 test('canvas pen offers five visual stroke widths and uses the selected width', () => {
@@ -453,7 +462,11 @@ test('creation panel resolves Web project media without serializing object URLs'
   )
   assert.match(
     source,
-    /getMediaSubmissionUrl\(\s+isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath,\s+owner,\s+asset\.kind === 'audio' \? SEED_AUDIO_MAX_REFERENCE_BYTES : undefined,?\s+\)/,
+    /const maxBytes = asset\.kind === 'image'[\s\S]*?fileLimits\?\.images\?\.maxBytes[\s\S]*?asset\.kind === 'video'[\s\S]*?fileLimits\?\.videos\?\.maxBytes[\s\S]*?asset\.kind === 'audio'[\s\S]*?SEED_AUDIO_MAX_REFERENCE_BYTES/,
+  )
+  assert.match(
+    source,
+    /getMediaSubmissionUrl\(\s+isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath,\s+owner,\s+maxBytes,?\s+\)/,
   )
   assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, filePath/)
   assert.match(runtime, /projectFileActions\.readMedia\(\{/)

@@ -48,6 +48,11 @@ def test_image_models():
 
 def test_video_models():
     assert is_video_model("rh-video-v31-fast")
+    assert is_video_model("rh-gemini-omni-text-video")
+    assert is_video_model("rh-gemini-omni-image-video")
+    assert is_video_model("rh-gemini-omni-video-edit")
+    assert is_video_model("rh-seedance25-no-video-ref")
+    assert is_video_model("rh-seedance25-with-video-ref")
     assert not is_video_model("rh-pro-image")
 
 
@@ -114,6 +119,12 @@ def test_get_output_type():
 def test_video_models_have_fallback():
     """Video models with text endpoint should have image-to-video fallback."""
     assert "fallback_endpoint" in MODEL_MAP["rh-video-v31-fast"]
+
+
+def test_gemini_omni_models_use_separate_official_endpoints():
+    assert get_rh_endpoint("rh-gemini-omni-text-video") == "gemini-omni-flash/text-to-video"
+    assert get_rh_endpoint("rh-gemini-omni-image-video", has_image=True) == "gemini-omni-flash/image-to-video"
+    assert get_rh_endpoint("rh-gemini-omni-video-edit", has_image=True) == "gemini-omni-flash/video-edit"
 
 
 def test_image_models_have_fallback():

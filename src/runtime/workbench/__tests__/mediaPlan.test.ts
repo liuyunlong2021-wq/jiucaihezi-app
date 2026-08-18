@@ -105,7 +105,7 @@ test('model-free plans use the product defaults for images and text-to-video', (
   }) + '\n```')
 
   assert.equal(image.modelId, 'gpt-image-2-1k')
-  assert.equal(video.modelId, 'runninghub/api/rh-seedance2-text')
+  assert.equal(video.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
 })
 
 test('a model-selected Fast video is normalized to the standard Seedance default before user adjustment', () => {
@@ -114,7 +114,7 @@ test('a model-selected Fast video is normalized to the standard Seedance default
     modelId: 'runninghub/api/rh-seedance2-fast-text',
   }) + '\n```')
 
-  assert.equal(plan.modelId, 'runninghub/api/rh-seedance2-text')
+  assert.equal(plan.modelId, 'runninghub/api/rh-seedance25-no-video-ref')
   assert.equal(plan.usesProductDefaultModel, true)
 })
 
@@ -125,8 +125,8 @@ test('media plan display is rewritten to the application-selected model', () => 
   }) + '\n```'
 
   assert.match(
-    replaceMediaPlanModelId(content, 'runninghub/api/rh-seedance2-text'),
-    /"modelId": "runninghub\/api\/rh-seedance2-text"/,
+    replaceMediaPlanModelId(content, 'runninghub/api/rh-seedance25-no-video-ref'),
+    /"modelId": "runninghub\/api\/rh-seedance25-no-video-ref"/,
   )
 })
 

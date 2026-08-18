@@ -78,12 +78,14 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/api/rh-video-v31-fast',
     'runninghub/api/rh-grok-text-video',
     'runninghub/api/rh-grok-image-video',
+    'runninghub/api/rh-gemini-omni-text-video',
+    'runninghub/api/rh-gemini-omni-image-video',
+    'runninghub/api/rh-gemini-omni-video-edit',
+    'runninghub/api/rh-seedance25-no-video-ref',
+    'runninghub/api/rh-seedance25-with-video-ref',
     'newapi/zx/grok-1.5-video-6s',
     'newapi/zx/grok-1.5-video-10s',
     'newapi/zx/grok-1.5-video-15s',
-    'runninghub/api/rh-seedance2-mini',
-    'runninghub/api/rh-seedance2-fast',
-    'runninghub/api/rh-seedance2',
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
@@ -95,6 +97,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   for (const id of requiredIds) {
     assert.equal(ids.has(id), true, id)
   }
+  const visibleIds = new Set(listCreationModels().map(model => model.id))
   for (const retiredId of [
     'newapi/volcengine/doubao-seedance-2-0-260128',
     'runninghub/aiapp/rh-aiapp-fast-digital-human',
@@ -104,8 +107,17 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'runninghub/aiapp/rh-aiapp-voice-design',
     'runninghub/api/rh-grok-image-text',
     'runninghub/api/rh-grok-image-image',
+    'runninghub/api/rh-seedance2-mini',
+    'runninghub/api/rh-seedance2-fast',
+    'runninghub/api/rh-seedance2',
+    'runninghub/api/rh-seedance2-mini-text',
+    'runninghub/api/rh-seedance2-fast-text',
+    'runninghub/api/rh-seedance2-text',
+    'runninghub/api/rh-seedance2-mini-image',
+    'runninghub/api/rh-seedance2-fast-image',
+    'runninghub/api/rh-seedance2-image',
   ]) {
-    assert.equal(ids.has(retiredId), false, retiredId)
+    assert.equal(visibleIds.has(retiredId), false, retiredId)
   }
 })
 
@@ -272,7 +284,7 @@ test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
   }
 })
 
-test('ZX Grok fixed-duration aliases support text and single-image video', () => {
+test('ZX Grok fixed-duration aliases support text and reference-image video', () => {
   for (const seconds of [6, 10, 15] as const) {
     const modelId = `newapi/zx/grok-1.5-video-${seconds}s`
     const textOnly = buildCreationRunPlan({ modelId, params: { prompt: '一个大西瓜超人救火', duration: seconds } })
@@ -285,7 +297,9 @@ test('ZX Grok fixed-duration aliases support text and single-image video', () =>
     assert.equal(textOnly.endpoint, '/v1/videos')
     assert.equal(textOnly.pollKind, 'newapi-task')
     assert.equal(textOnly.usesRhAdapter, false)
+    assert.equal(textOnly.assetFlow, 'none')
     assert.equal(textOnly.mode, 'text-to-video')
+    assert.equal(withImage.assetFlow, 'none')
     assert.equal(withImage.mode, 'image-to-video')
     assert.equal(withImage.debug.referenceImageCount, 1)
   }
@@ -316,6 +330,67 @@ test('direct GPT Image 2 plan uses the Xiaoyi async task fields', () => {
 
 test('direct GPT Image 2 shows the configured group price', () => {
   assert.equal(getCreationModelSpec('gpt-image-2-中质量')?.price, 0.15)
+})
+
+test('ZX video registry exposes Grok 0-7 references and the three added models', () => {
+  for (const seconds of [6, 10, 15]) {
+    const spec = getCreationModelSpec(`newapi/zx/grok-1.5-video-${seconds}s`)
+    assert.equal(spec?.files?.images?.min, 0)
+    assert.equal(spec?.files?.images?.max, 7)
+    assert.throws(() => buildCreationRunPlan({
+      modelId: spec!.id,
+      params: { prompt: '超过上限', images: Array.from({ length: 8 }, (_, i) => `https://example.com/${i}.jpg`) },
+    }), /最多支持 7/)
+  }
+
+  const seedance = getCreationModelSpec('newapi/zx/doubao-seedance-2-5-260628')
+  assert.equal(seedance?.endpoint, '/v1/video/generations')
+  assert.deepEqual(seedance?.capabilities.duration?.allowedValues, [-1, ...Array.from({ length: 27 }, (_, i) => i + 4)])
+  assert.deepEqual(seedance?.capabilities.resolutions, ['480p', '720p', 'native1080p', '1080p', '2k', '4k'])
+  assert.deepEqual(seedance?.capabilities.ratios, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
+  assert.equal(seedance?.files?.images?.max, 30)
+  assert.equal(seedance?.files?.videos?.max, 10)
+  assert.equal(seedance?.files?.audios?.max, 10)
+  assert.equal(seedance?.files?.images?.maxBytes, 50 * 1024 * 1024)
+  assert.equal(seedance?.fields.find(field => field.key === 'conversionSlots')?.kind, 'multiselect')
+
+  const seedancePlan = buildCreationRunPlan({
+    modelId: seedance!.id,
+    params: {
+      prompt: '全模态参考生成', duration: -1, ratio: 'adaptive', resolution: '4k',
+      conversionSlots: ['image1', 'video1'], returnLastFrame: true, realPersonMode: true,
+      bitrateMode: 'high', generateAudio: false, seed: 42, outputFormat: 'mov',
+      omniReferenceTaskType: 'edit', webhookUrl: 'https://example.com/hook',
+    },
+  })
+  assert.deepEqual(seedancePlan.debug.normalizedParams.conversionSlots, ['image1', 'video1'])
+  assert.equal(seedancePlan.debug.normalizedParams.outputFormat, 'mov')
+
+  const omniFast = getCreationModelSpec('newapi/zx/omni-fast')
+  assert.equal(omniFast?.files?.images?.min, 0)
+  assert.equal(omniFast?.endpoint, '/v1/videos')
+  assert.equal(displayModelPrice(omniFast!), '1.5/次')
+  assert.deepEqual(omniFast?.capabilities.duration?.allowedValues, [10])
+
+  const omniV2v = getCreationModelSpec('newapi/zx/omni-v2v')
+  assert.equal(omniV2v?.files?.videos?.min, 1)
+  assert.equal(displayModelPrice(omniV2v!), '2/次')
+  assert.deepEqual(omniV2v?.capabilities.duration?.allowedValues, [10])
+  assert.throws(() => buildCreationRunPlan({
+    modelId: omniV2v!.id,
+    params: { prompt: '缺少视频' },
+  }), /视频至少需要 1 个/)
+})
+
+test('RunningHub Omni text and image models stay fixed at 10 seconds', () => {
+  for (const id of [
+    'runninghub/api/rh-gemini-omni-text-video',
+    'runninghub/api/rh-gemini-omni-image-video',
+  ]) {
+    const spec = getCreationModelSpec(id)
+    assert.deepEqual(spec?.capabilities.duration?.allowedValues, [10])
+    assert.deepEqual(spec?.fields.find(field => field.key === 'duration')?.options?.map(option => option.value), [10])
+  }
 })
 
 test('direct GPT Image 2 uses one Xiaoyi async contract with and without a reference image', () => {
@@ -558,6 +633,75 @@ test('RunPlan blocks invalid required fields, file counts, select options and nu
   )
 })
 
+test('Gemini Omni models lock fixed parameters, media counts, prices, and billing seconds', () => {
+  const text = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-gemini-omni-text-video',
+    params: { prompt: 'city at night', ratio: '16:9' },
+  })
+  const image = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-gemini-omni-image-video',
+    params: { prompt: 'move', ratio: '9:16', images: ['one.png'] },
+  })
+  const edit = buildCreationRunPlan({
+    modelId: 'runninghub/api/rh-gemini-omni-video-edit',
+    params: { prompt: 'follow motion', ratio: '16:9', videos: ['input.mp4'], seconds: 8 },
+  })
+
+  assert.equal(text.debug.normalizedParams.resolution, '1080p')
+  assert.equal(text.debug.normalizedParams.duration, 10)
+  assert.equal(image.debug.normalizedParams.resolution, '1080p')
+  assert.equal(image.debug.normalizedParams.duration, 10)
+  assert.equal(edit.debug.normalizedParams.resolution, '1080p')
+  assert.equal(edit.debug.normalizedParams.duration, undefined)
+  assert.equal(edit.debug.normalizedParams.seconds, 8)
+  assert.equal(displayModelPrice(getCreationModelSpec(text.modelId)!), '2.5/次')
+  assert.equal(displayModelPrice(getCreationModelSpec(image.modelId)!), '2.5/次')
+  assert.equal(displayModelPrice(getCreationModelSpec(edit.modelId)!), '0.4/秒')
+
+  assert.throws(() => buildCreationRunPlan({
+    modelId: text.modelId,
+    params: { prompt: 'wrong', resolution: '720p', duration: 8 },
+  }), /分辨率.*不支持|时长.*不支持/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: image.modelId,
+    params: { prompt: 'two images', images: ['one.png', 'two.png'] },
+  }), /参考图仅支持 1 或 3 个/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: edit.modelId,
+    params: { prompt: 'missing duration', videos: ['input.mp4'] },
+  }), /无法读取输入视频时长/)
+})
+
+test('RH Seedance 2.5 models lock native1080p and token prices', () => {
+  const text = getCreationModelSpec('runninghub/api/rh-seedance25-no-video-ref')!
+  const video = getCreationModelSpec('runninghub/api/rh-seedance25-with-video-ref')!
+  const textPlan = buildCreationRunPlan({ modelId: text.id, params: { prompt: 'text', duration: 5 } })
+  const videoPlan = buildCreationRunPlan({ modelId: video.id, params: { prompt: 'reference', duration: 5, videos: ['input.mp4'] } })
+
+  assert.deepEqual(text.capabilities.resolutions, ['native1080p'])
+  assert.deepEqual(video.capabilities.resolutions, ['native1080p'])
+  assert.deepEqual(text.files?.videos, undefined)
+  assert.deepEqual(video.files?.videos, { min: 1, max: 10, maxBytes: 50 * 1024 * 1024 })
+  assert.equal(displayModelPrice(text), '80/百万TOKEN')
+  assert.equal(displayModelPrice(video), '50/百万TOKEN')
+  assert.equal(textPlan.debug.normalizedParams.resolution, 'native1080p')
+  assert.equal(videoPlan.debug.normalizedParams.resolution, 'native1080p')
+  assert.throws(() => buildCreationRunPlan({ modelId: video.id, params: { prompt: 'missing video', duration: 5 } }), /视频至少需要 1 个/)
+})
+
+test('RunningHub Grok low-price video follows the updated 6-15s, 7-image, 0.25-per-second contract', () => {
+  const text = getCreationModelSpec('runninghub/api/rh-grok-text-video')!
+  const image = getCreationModelSpec('runninghub/api/rh-grok-image-video')!
+
+  assert.deepEqual(text.capabilities.duration, { min: 6, max: 15 })
+  assert.deepEqual(image.capabilities.duration, { min: 6, max: 15 })
+  assert.deepEqual(image.files?.images, { min: 1, max: 7, maxBytes: 10 * 1024 * 1024 })
+  assert.equal(displayModelPrice(text), '0.25/秒')
+  assert.equal(displayModelPrice(image), '0.25/秒')
+  assert.throws(() => buildCreationRunPlan({ modelId: text.id, params: { prompt: 'too long', duration: 16 } }), /时长不能大于 15/)
+  assert.throws(() => buildCreationRunPlan({ modelId: image.id, params: { prompt: 'too many', duration: 15, images: Array.from({ length: 8 }, (_, i) => `img-${i}.png`) } }), /参考图最多支持 7 个/)
+})
+
 test('WorldRouter Trump Seedance uses native async task endpoint (broken — check spec directly)', () => {
   // 该模型当前标记为 broken，不能通过 buildCreationRunPlan 构建 plan
   // 直接检查 spec 的 endpoint 和 apiStyle
@@ -672,6 +816,7 @@ function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   if (spec.files?.images?.min) params.images = Array.from({ length: spec.files.images.min }, (_, index) => `image-${index}.png`)
   if (spec.files?.videos?.min) params.videos = Array.from({ length: spec.files.videos.min }, (_, index) => `video-${index}.mp4`)
   if (spec.files?.audios?.min) params.audios = Array.from({ length: spec.files.audios.min }, (_, index) => `audio-${index}.mp3`)
+  if (spec.id === 'runninghub/api/rh-gemini-omni-video-edit') params.seconds = 1
   for (const field of spec.fields) {
     if (field.required && params[field.key] === undefined) {
       if (field.kind === 'image' && !params.images) params[field.key] = 'image.png'

@@ -57,7 +57,15 @@ test('media models are grouped by user-visible task with explicit model selectio
   for (const modelId of ['gpt-image-2', '普gemini-3-pro-image-preview', '普gemini-3.1-flash-image-preview', 'nano-banana-4k', 'rh-pro-image', 'rh-gpt2-image']) {
     assert.equal(image.includes(modelId), true, modelId)
   }
-  for (const modelId of ['rh-video-v31-fast', 'rh-seedance2-mini', 'rh-seedance2-fast', 'rh-grok-text-video']) {
+  for (const modelId of [
+    'rh-video-v31-fast',
+    'rh-seedance25-no-video-ref',
+    'rh-seedance25-with-video-ref',
+    'rh-grok-text-video',
+    'rh-gemini-omni-text-video',
+    'rh-gemini-omni-image-video',
+    'rh-gemini-omni-video-edit',
+  ]) {
     assert.equal(video.includes(modelId), true, modelId)
   }
   assert.equal(video.includes('veo-3.1-generate-preview'), true)
@@ -94,6 +102,9 @@ test('creation model projection keeps V3.1 Fast on official duration and ratio o
   assert.equal(RH_CREATION_MODELS['rh-video-v31-fast']?.defDur, 8)
   assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.ar, ['16:9', '9:16'])
   assert.deepEqual(RH_CREATION_MODELS['rh-video-v31-fast']?.res, ['720p', '1080p', '4k'])
+  assert.deepEqual(RH_CREATION_MODELS['rh-gemini-omni-text-video']?.dur, [10])
+  assert.deepEqual(RH_CREATION_MODELS['rh-gemini-omni-image-video']?.dur, [10])
+  assert.deepEqual(RH_CREATION_MODELS['rh-gemini-omni-video-edit']?.dur, [])
 })
 
 test('WorldRouter Seedance uses official adaptive ratio defaults and fast-safe resolutions', () => {
@@ -166,8 +177,8 @@ test('removed media model matcher blocks stale upstream names before capability 
   assert.equal(isRemovedMediaModelId('seedance-2.0'), false)
   assert.equal(isRemovedMediaModelId('seedance-2.0-fast'), false)
   assert.equal(isRemovedMediaModelId('doubao-seedance-1-0-pro-250528'), true)
-  assert.equal(isRemovedMediaModelId('rh-seedance2-mini'), false)
-  assert.equal(isRemovedMediaModelId('rh-seedance2-fast'), false)
+  assert.equal(isRemovedMediaModelId('rh-seedance2-mini'), true)
+  assert.equal(isRemovedMediaModelId('rh-seedance2-fast'), true)
   assert.equal(isRemovedMediaModelId('rh-seedance2'), true)
   assert.equal(isRemovedMediaModelId('seedance-2-0'), false)
   assert.equal(isRemovedMediaModelId('seedance-2-0-pro'), false)

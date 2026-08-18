@@ -566,7 +566,6 @@ test('normalizeGatewayModels infers RH and AI application capabilities without t
 
   assert.deepEqual(models.map(item => [item.id, item.capability]), [
     ['rh-gpt2-text', 'image'],
-    ['rh-seedance2-mini', 'video'],
     ['rh-grok-image-video', 'video'],
     ['rh-aiapp-fast-digital-human', 'text'],
     ['rh-suno-v55-single', 'audio'],

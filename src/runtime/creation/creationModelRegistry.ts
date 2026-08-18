@@ -87,6 +87,7 @@ function baseSpec(input: {
   apiStyle: CreationApiStyle
   mode: CreationMode
   contractStatus?: CreationContractStatus
+  hidden?: boolean
   price?: number | string
   endpoint: string
   pollKind?: NonNullable<CreationModelSpec['poll']>['kind']
@@ -129,6 +130,7 @@ function baseSpec(input: {
     apiStyle: input.apiStyle,
     mode: input.mode,
     contractStatus: input.contractStatus || 'verified',
+    hidden: input.hidden,
     price: input.price,
     endpoint: input.endpoint,
     poll: { kind: input.pollKind || 'none' },
@@ -165,6 +167,7 @@ function directImage(input: {
   assetFlow?: CreationAssetFlow
   resultExtractor?: CreationResultExtractor
   contractStatus?: CreationContractStatus
+  hidden?: boolean
   notes: string[]
   aliases?: string[]
   contractIssues?: string[]
@@ -184,6 +187,7 @@ function directImage(input: {
     apiStyle: input.apiStyle || 'openai-image-edits',
     mode: input.mode || 'image-to-image',
     contractStatus: input.contractStatus,
+    hidden: input.hidden,
     price: input.price,
     endpoint: input.endpoint || '/v1/images/edits',
     pollKind: input.pollKind,
@@ -232,6 +236,7 @@ function directVideo(input: {
   upstreamFamily: CreationUpstreamFamily
   apiStyle?: CreationApiStyle
   contractStatus?: CreationContractStatus
+  hidden?: boolean
   endpoint?: string
   assetFlow?: CreationAssetFlow
   notes: string[]
@@ -242,7 +247,7 @@ function directVideo(input: {
   ratios?: string[]
   resolutions?: string[]
   duration?: { min?: number; max?: number; allowedValues?: number[] }
-  files?: { images?: { min?: number; max?: number }; videos?: { min?: number; max?: number }; audios?: { min?: number; max?: number } }
+  files?: CreationModelSpec['files']
 }): CreationModelSpec {
   return baseSpec({
     id: input.id,
@@ -255,6 +260,7 @@ function directVideo(input: {
     apiStyle: input.apiStyle || 'newapi-task',
     mode: input.mode || 'image-to-video',
     contractStatus: input.contractStatus || 'partial',
+    hidden: input.hidden,
     price: input.price,
     endpoint: input.endpoint || '/v1/videos',
     pollKind: input.apiStyle === 'seedance-task' ? 'seedance-task' : 'newapi-task',
@@ -297,9 +303,10 @@ function runninghubStandard(input: {
   label: string
   task: CreationTask
   mode: CreationMode
-  price?: number
+  price?: number | string
   apiStyle?: CreationApiStyle
   contractStatus?: CreationContractStatus
+  hidden?: boolean
   endpoint?: string
   webappId?: string
   notes: string[]
@@ -346,6 +353,7 @@ function runninghubStandard(input: {
     apiStyle: input.apiStyle || 'rh-standard',
     mode: input.mode,
     contractStatus: input.contractStatus,
+    hidden: input.hidden,
     price: input.price,
     endpoint:
       input.endpoint ||
@@ -937,14 +945,51 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     aliases: ['全能视频V3.1-Fast'],
   }),
   runninghubStandard({
+    id: 'runninghub/api/rh-gemini-omni-text-video', model: 'rh-gemini-omni-text-video',
+    label: '全能视频 Omni Flash 文生视频 · RunningHub', task: 'video', mode: 'text-to-video', price: '2.5元/次',
+    notes: ['docs/wiki/运维/Geminiomini.md'], ratios: ['16:9', '9:16'], resolutions: ['1080p'], duration: { allowedValues: [10] },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 10, options: options([10]) },
+    ]),
+  }),
+  runninghubStandard({
+    id: 'runninghub/api/rh-gemini-omni-image-video', model: 'rh-gemini-omni-image-video',
+    label: '全能视频 Omni Flash 图生视频 · RunningHub', task: 'video', mode: 'image-to-video', price: '2.5元/次',
+    notes: ['docs/wiki/运维/Geminiomini.md'], ratios: ['16:9', '9:16'], resolutions: ['1080p'], duration: { allowedValues: [10] },
+    files: { images: { min: 1, max: 3, allowedCounts: [1, 3], maxBytes: 10 * 1024 * 1024 } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 10, options: options([10]) },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+    ]),
+  }),
+  runninghubStandard({
+    id: 'runninghub/api/rh-gemini-omni-video-edit', model: 'rh-gemini-omni-video-edit',
+    label: '全能视频 Omni Flash 视频编辑 · RunningHub', task: 'video', mode: 'video-edit', price: '0.4元/秒',
+    notes: ['docs/wiki/运维/Geminiomini.md'], ratios: ['16:9', '9:16'], resolutions: ['1080p'],
+    files: {
+      images: { min: 0, max: 3, allowedCounts: [1, 3], maxBytes: 10 * 1024 * 1024 },
+      videos: { min: 1, max: 1, maxBytes: 10 * 1024 * 1024 },
+    },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p']) },
+      { key: 'images', label: '参考图', kind: 'images' },
+      { key: 'videos', label: '输入视频', kind: 'video', required: true },
+    ]),
+  }),
+  runninghubStandard({
     id: 'runninghub/api/rh-grok-text-video',
     model: 'rh-grok-text-video',
     label: 'Grok Video 文生视频 · RunningHub',
     task: 'video',
     mode: 'text-to-video',
-    price: 0.08,
-    notes: ['docs/notes/runninghub-grok-video-3文档.md'],
-    duration: { min: 6, max: 30 },
+    price: 0.25,
+    notes: ['docs/wiki/归档/模型文档/runninghub-grok-video低价渠道版-v1.5.md'],
+    duration: { min: 6, max: 15 },
     aliases: ['Grok Video 文生视频'],
   }),
   runninghubStandard({
@@ -953,10 +998,10 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Grok Video 图生视频 · RunningHub',
     task: 'video',
     mode: 'image-to-video',
-    price: 0.08,
-    notes: ['docs/notes/runninghub-grok-video-3文档.md'],
-    files: { images: { min: 1, max: 3 } },
-    duration: { min: 6, max: 30 },
+    price: 0.25,
+    notes: ['docs/wiki/归档/模型文档/runninghub-grok-video低价渠道版-v1.5.md'],
+    files: { images: { min: 1, max: 7, maxBytes: 10 * 1024 * 1024 } },
+    duration: { min: 6, max: 15 },
   }),
   ...([6, 10, 15] as const).map(seconds => baseSpec({
     id: `newapi/zx/grok-1.5-video-${seconds}s`,
@@ -971,10 +1016,10 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: seconds === 15 ? 'degraded' : 'verified',
     endpoint: '/v1/videos',
     pollKind: 'newapi-task',
-    assetFlow: 'newapi-upload',
+    assetFlow: 'none',
     resultExtractor: 'newapi-task',
     duration: { allowedValues: [seconds] },
-    files: { images: { min: 0, max: 1 } },
+    files: { images: { min: 0, max: 7 } },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
@@ -983,11 +1028,93 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['docs/wiki/开发/ZX-Grok视频独立适配器SDD.md'],
     contractIssues: seconds === 15 ? ['ZX 15 秒任务偶发上游失败，失败后可重试。'] : undefined,
   })),
+  directVideo({
+    id: 'newapi/zx/doubao-seedance-2-5-260628',
+    model: 'doubao-seedance-2-5-260628',
+    label: 'Seedance 2.5 · ZX',
+    price: 'ZX 按秒计费',
+    upstreamFamily: 'zx',
+    apiStyle: 'seedance-task',
+    endpoint: '/v1/video/generations',
+    assetFlow: 'newapi-upload',
+    mode: 'text-to-video',
+    contractStatus: 'partial',
+    files: {
+      images: { min: 0, max: 30, maxBytes: 50 * 1024 * 1024 },
+      videos: { min: 0, max: 10, maxBytes: 50 * 1024 * 1024 },
+      audios: { min: 0, max: 10, maxBytes: 50 * 1024 * 1024 },
+    },
+    duration: { allowedValues: [-1, ...Array.from({ length: 27 }, (_, i) => i + 4)] },
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    resolutions: ['480p', '720p', 'native1080p', '1080p', '2k', '4k'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 20480 },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', 'native1080p', '1080p', '2k', '4k']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 5, options: options([-1, ...Array.from({ length: 27 }, (_, i) => i + 4)]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+      { key: 'videos', label: '参考视频', kind: 'video' },
+      { key: 'audios', label: '参考音频', kind: 'audio' },
+      { key: 'conversionSlots', label: '真人素材槽位', kind: 'multiselect', options: options(['all', ...Array.from({ length: 30 }, (_, i) => `image${i + 1}`), ...Array.from({ length: 10 }, (_, i) => `video${i + 1}`)]) },
+      { key: 'returnLastFrame', label: '返回尾帧', kind: 'boolean', defaultValue: false },
+      { key: 'realPersonMode', label: '真人模式', kind: 'boolean', defaultValue: false },
+      { key: 'bitrateMode', label: '码率', kind: 'select', defaultValue: 'standard', options: options(['standard', 'high']) },
+      { key: 'generateAudio', label: '生成音频', kind: 'boolean', defaultValue: false },
+      { key: 'seed', label: '随机种子', kind: 'number', defaultValue: -1, min: -1, max: 2147483647, step: 1 },
+      { key: 'outputFormat', label: '输出格式', kind: 'select', defaultValue: 'mp4', options: options(['mp4', 'mov']) },
+      { key: 'omniReferenceTaskType', label: '任务类型', kind: 'select', defaultValue: 'auto', options: options(['auto', 'reference', 'edit', 'extend']) },
+      { key: 'webhookUrl', label: 'Webhook', kind: 'text' },
+    ],
+    notes: ['docs/wiki/开发/ZX视频适配器多模型升级TDD-2026-08-18.md'],
+    contractIssues: ['上游文档未列出该别名，需用 ZX Key 完成真实提交与轮询验证。'],
+  }),
+  directVideo({
+    id: 'newapi/zx/omni-fast',
+    model: 'omni-fast',
+    label: 'Omni Fast · ZX',
+    price: '1.5元/次',
+    upstreamFamily: 'zx',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    files: { images: { min: 0, max: 1 } },
+    duration: { allowedValues: [10] },
+    ratios: ['16:9', '9:16'],
+    resolutions: ['720p'],
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 10, options: options([10]) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    notes: ['docs/wiki/开发/ZX视频适配器多模型升级TDD-2026-08-18.md'],
+  }),
+  directVideo({
+    id: 'newapi/zx/omni-v2v',
+    model: 'omni-v2v',
+    label: 'Omni V2V · ZX',
+    price: '2元/次',
+    upstreamFamily: 'zx',
+    mode: 'video-edit',
+    contractStatus: 'partial',
+    files: { videos: { min: 1, max: 1 } },
+    duration: { allowedValues: [10] },
+    ratios: ['16:9', '9:16'],
+    resolutions: ['720p'],
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 10, options: options([10]) },
+      { key: 'videos', label: '输入视频', kind: 'video', required: true },
+    ]),
+    notes: ['docs/wiki/开发/ZX视频适配器多模型升级TDD-2026-08-18.md'],
+    contractIssues: ['上游文档当前只列出 omni-fast；omni-v2v 的 video_url 合同需用 ZX Key 实测。'],
+  }),
   // ── Seedance 2.0 多模态 (3 个，最低计费时长使成本更高) ──
   runninghubStandard({
     id: 'runninghub/api/rh-seedance2-mini',
     model: 'rh-seedance2-mini',
     label: 'Seedance 2.0 Mini 多模态 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'workflow',
     price: 1.2,
@@ -1000,6 +1127,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-fast',
     model: 'rh-seedance2-fast',
     label: 'Seedance 2.0 Fast 多模态 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'workflow',
     price: 2.0,
@@ -1012,6 +1140,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2',
     model: 'rh-seedance2',
     label: 'Seedance 2.0 多模态 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'workflow',
     price: 2.3,
@@ -1025,6 +1154,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-mini-text',
     model: 'rh-seedance2-mini-text',
     label: 'Seedance 2.0 Mini 文生视频 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'text-to-video',
     price: 0.8,
@@ -1036,6 +1166,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-fast-text',
     model: 'rh-seedance2-fast-text',
     label: 'Seedance 2.0 Fast 文生视频 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'text-to-video',
     price: 1.3,
@@ -1047,6 +1178,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-text',
     model: 'rh-seedance2-text',
     label: 'Seedance 2.0 文生视频 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'text-to-video',
     price: 1.5,
@@ -1059,6 +1191,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-mini-image',
     model: 'rh-seedance2-mini-image',
     label: 'Seedance 2.0 Mini 图生视频 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'image-to-video',
     price: 0.8,
@@ -1071,6 +1204,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-fast-image',
     model: 'rh-seedance2-fast-image',
     label: 'Seedance 2.0 Fast 图生视频 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'image-to-video',
     price: 1.3,
@@ -1083,6 +1217,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'runninghub/api/rh-seedance2-image',
     model: 'rh-seedance2-image',
     label: 'Seedance 2.0 图生视频 · RunningHub',
+    hidden: true,
     task: 'video',
     mode: 'image-to-video',
     price: 1.5,
@@ -1090,6 +1225,49 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     files: { images: { min: 1, max: 1 } },
     duration: { min: 4, max: 15 },
     resolutions: ['720p'],
+  }),
+  runninghubStandard({
+    id: 'runninghub/api/rh-seedance25-no-video-ref',
+    model: 'rh-seedance25-no-video-ref',
+    label: 'Seedance 2.5 无参考视频 · RunningHub',
+    task: 'video',
+    mode: 'workflow',
+    price: '80/百万TOKEN',
+    webappId: 'bytedance/seedance-2.5-global-token/multimodal-video',
+    notes: ['docs/wiki/运维/RH-seedace25.md'],
+    files: { images: { min: 0, max: 30, maxBytes: 50 * 1024 * 1024 }, audios: { min: 0, max: 10, maxBytes: 50 * 1024 * 1024 } },
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    resolutions: ['native1080p'],
+    duration: { min: 4, max: 30 },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: 'native1080p', options: options(['native1080p']) },
+      { key: 'duration', label: '时长', kind: 'number', defaultValue: 5, min: 4, max: 30, step: 1 },
+      { key: 'images', label: '参考图片', kind: 'images' },
+      { key: 'audios', label: '参考音频', kind: 'audio' },
+    ]),
+  }),
+  runninghubStandard({
+    id: 'runninghub/api/rh-seedance25-with-video-ref',
+    model: 'rh-seedance25-with-video-ref',
+    label: 'Seedance 2.5 有参考视频 · RunningHub',
+    task: 'video',
+    mode: 'workflow',
+    price: '50/百万TOKEN',
+    webappId: 'bytedance/seedance-2.5-global-token/multimodal-video',
+    notes: ['docs/wiki/运维/RH-seedace25.md'],
+    files: { images: { min: 0, max: 30, maxBytes: 50 * 1024 * 1024 }, videos: { min: 1, max: 10, maxBytes: 50 * 1024 * 1024 }, audios: { min: 0, max: 10, maxBytes: 50 * 1024 * 1024 } },
+    ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'],
+    resolutions: ['native1080p'],
+    duration: { min: 4, max: 30 },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: 'native1080p', options: options(['native1080p']) },
+      { key: 'duration', label: '时长', kind: 'number', defaultValue: 5, min: 4, max: 30, step: 1 },
+      { key: 'images', label: '参考图片', kind: 'images' },
+      { key: 'videos', label: '参考视频', kind: 'video', required: true },
+      { key: 'audios', label: '参考音频', kind: 'audio' },
+    ]),
   }),
 
   // ── 🆕 Sora2 视频系列 (4 个) ──
@@ -1345,7 +1523,7 @@ export function listCreationModels(filter: ListCreationModelsFilter = {}): Creat
   return CREATION_MODEL_REGISTRY.filter(spec => !filter.task || spec.task === filter.task)
     .filter(spec => !filter.mode || spec.mode === filter.mode)
     .filter(spec => !filter.source || filter.source === 'all' || spec.source === filter.source)
-    .filter(spec => filter.includeDisabled || spec.contractStatus !== 'broken')
+    .filter(spec => filter.includeDisabled || (spec.contractStatus !== 'broken' && !spec.hidden))
     .filter(spec => !RH_ONLY_MODE || spec.source === 'runninghub')
     .map(spec => ({
       id: spec.id,
@@ -1425,7 +1603,7 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
 export function displayModelPrice(spec: Pick<CreationModelSpec, 'price' | 'task' | 'route'>): string {
   if (spec.route === 'local-comfy') return '本地模型'
   if (spec.price === undefined) return '费用以实际扣费为准'
-  const raw = String(spec.price).replace(/[¥￥]/g, '')
+  const raw = String(spec.price).replace(/[¥￥元]/g, '')
   if (raw.includes('/')) return raw
   const amount = raw.match(/\d+(?:\.\d+)?/)?.[0]
   if (!amount) return raw || '费用以实际扣费为准'

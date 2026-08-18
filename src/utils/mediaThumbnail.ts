@@ -175,6 +175,24 @@ function waitForVideoEvent(video: HTMLVideoElement, eventName: string, timeoutMs
   })
 }
 
+export async function readVideoDuration(url: string, timeoutMs = 8000): Promise<number> {
+  if (typeof document === 'undefined' || typeof window === 'undefined' || !url) throw new Error('无法读取输入视频时长')
+  const video = document.createElement('video')
+  video.preload = 'metadata'
+  video.muted = true
+  video.src = url
+  try {
+    await waitForVideoEvent(video, 'loadedmetadata', timeoutMs)
+    if (!Number.isFinite(video.duration) || video.duration <= 0) throw new Error('无法读取输入视频时长')
+    return video.duration
+  } catch {
+    throw new Error('无法读取输入视频时长')
+  } finally {
+    video.removeAttribute('src')
+    video.load()
+  }
+}
+
 function scaleToFit(width: number, height: number, maxWidth: number): { width: number; height: number } {
   if (!width || !height) return { width: maxWidth, height: Math.round(maxWidth * 9 / 16) }
   if (width <= maxWidth) return { width, height }

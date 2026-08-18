@@ -328,9 +328,15 @@ function normalizeRunningHubParams(
   }
   if (spec.task === 'image' || spec.task === 'video') {
     base.aspectRatio = firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9'
-    base.resolution = params.resolution || (spec.task === 'image' ? '1k' : '720p')
+    const resolutionField = spec.fields.find(field => field.key === 'resolution')
+    base.resolution = params.resolution || resolutionField?.defaultValue || (spec.task === 'image' ? '1k' : '720p')
   }
-  if (spec.task === 'video') base.duration = params.duration
+  if (spec.task === 'video') {
+    const durationField = spec.fields.find(field => field.key === 'duration')
+    if (durationField) base.duration = params.duration ?? durationField.defaultValue
+    else if (params.duration !== undefined && spec.mode !== 'video-edit') base.duration = params.duration
+    if (params.seconds !== undefined) base.seconds = params.seconds
+  }
 
   // ★ Phase 1a: 从 spec.fields 自动透传新字段，同时过滤不属于当前模型的残留参数
   const specFieldKeys = new Set((spec.fields || []).map(f => f.key))
@@ -360,7 +366,7 @@ function normalizeGenericTaskParams(
   spec: CreationModelSpec,
   params: Record<string, unknown>,
 ): Record<string, unknown> {
-  return compact({
+  const normalized = compact({
     model: spec.model,
     prompt: params.prompt,
     ratio: params.ratio || params.aspectRatio,
@@ -381,6 +387,11 @@ function normalizeGenericTaskParams(
     tags: params.tags,
     ...(spec.apiStyle === 'comfy-grok-video' ? { seed: params.seed, skip_error: params.skip_error } : {}),
   })
+  for (const field of spec.fields) {
+    const value = params[field.key] ?? field.defaultValue
+    if (!(field.key in normalized) && value !== undefined) normalized[field.key] = value
+  }
+  return normalized
 }
 
 function assertParamShape(
@@ -463,8 +474,14 @@ function validatePlanInputs(spec: CreationModelSpec, params: Record<string, unkn
     const value = valueForField(params, field.key)
     validateSelectField(field, value)
     validateNumberField(field, value)
+    if (field.maxLength !== undefined && typeof value === 'string' && value.length > field.maxLength) {
+      throw new Error(`${field.label}不能超过 ${field.maxLength} 字符`)
+    }
   }
   validateDurationCapability(spec, params)
+  if (spec.id === 'runninghub/api/rh-gemini-omni-video-edit' && (!Number.isFinite(Number(params.seconds)) || Number(params.seconds) < 1)) {
+    throw new Error('无法读取输入视频时长')
+  }
 }
 
 function validateRequiredFields(spec: CreationModelSpec, params: Record<string, unknown>): void {
@@ -502,12 +519,16 @@ function validateFileCounts(spec: CreationModelSpec, params: Record<string, unkn
     if (check.limit.max !== undefined && check.count > check.limit.max) {
       throw new Error(`${check.label}最多支持 ${check.limit.max} 个`)
     }
+    if (check.limit.allowedCounts && check.count > 0 && !check.limit.allowedCounts.includes(check.count)) {
+      throw new Error(`${check.label}仅支持 ${check.limit.allowedCounts.join(' 或 ')} 个`)
+    }
   }
 }
 
 function validateSelectField(field: CreationModelSpec['fields'][number], value: unknown): void {
   if (!field.options?.length || isBlank(value)) return
-  const allowed = field.options.some(option => String(option.value) === String(value))
+  const values = Array.isArray(value) ? value : [value]
+  const allowed = values.every(item => field.options!.some(option => String(option.value) === String(item)))
   if (!allowed) throw new Error(`${field.label}不支持：${String(value)}`)
 }
 

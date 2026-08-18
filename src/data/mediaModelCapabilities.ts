@@ -10,6 +10,7 @@ export type MediaFieldKind =
   | 'text'
   | 'textarea'
   | 'select'
+  | 'multiselect'
   | 'number'
   | 'boolean'
   | 'image'
@@ -27,11 +28,12 @@ export interface MediaModelField {
   label: string
   kind: MediaFieldKind
   required?: boolean
-  defaultValue?: string | number | boolean
+  defaultValue?: string | number | boolean | string[]
   options?: MediaFieldOption[]
   min?: number
   max?: number
   step?: number
+  maxLength?: number
 }
 
 export interface MediaModelCapability {
@@ -321,119 +323,31 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     fields: rhOfficialFields('rhart-video-v3.1-fast/text-to-video', 'rhart-video-v3.1-fast/image-to-video'),
   },
   {
-    id: 'rh-seedance2-mini',
-    label: 'Seedance 2.0 Mini 多模态',
+    id: 'rh-seedance25-no-video-ref',
+    label: 'Seedance 2.5 无参考视频',
     task: 'video',
-    model: 'rh-seedance2-mini',
+    model: 'rh-seedance25-no-video-ref',
     provider: 'gateway-video',
+    webappId: 'bytedance/seedance-2.5-global-token/multimodal-video',
+    acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+    ],
+  },
+  {
+    id: 'rh-seedance25-with-video-ref',
+    label: 'Seedance 2.5 有参考视频',
+    task: 'video',
+    model: 'rh-seedance25-with-video-ref',
+    provider: 'gateway-video',
+    webappId: 'bytedance/seedance-2.5-global-token/multimodal-video',
     maxFiles: 10,
     acceptedFiles: ['image', 'video', 'audio'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'images', label: '参考图片', kind: 'images', required: false },
-      { key: 'video', label: '参考视频', kind: 'video', required: false },
-      { key: 'audio', label: '参考音频', kind: 'audio', required: false },
-    ],
-  },
-  {
-    id: 'rh-seedance2-fast',
-    label: 'Seedance 2.0 Fast 多模态',
-    task: 'video',
-    model: 'rh-seedance2-fast',
-    provider: 'gateway-video',
-    maxFiles: 10,
-    acceptedFiles: ['image', 'video', 'audio'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'images', label: '参考图片', kind: 'images', required: false },
-      { key: 'video', label: '参考视频', kind: 'video', required: false },
-      { key: 'audio', label: '参考音频', kind: 'audio', required: false },
-    ],
-  },
-  {
-    id: 'rh-seedance2',
-    label: 'Seedance 2.0 多模态',
-    task: 'video',
-    model: 'rh-seedance2',
-    provider: 'gateway-video',
-    maxFiles: 10,
-    acceptedFiles: ['image', 'video', 'audio'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'images', label: '参考图片', kind: 'images', required: false },
-      { key: 'video', label: '参考视频', kind: 'video', required: false },
-      { key: 'audio', label: '参考音频', kind: 'audio', required: false },
-    ],
-  },
-  // ── Seedance 2.0 文生视频 ──
-  {
-    id: 'rh-seedance2-mini-text',
-    label: 'Seedance 2.0 Mini 文生视频',
-    task: 'video',
-    model: 'rh-seedance2-mini-text',
-    provider: 'gateway-video',
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-    ],
-  },
-  {
-    id: 'rh-seedance2-fast-text',
-    label: 'Seedance 2.0 Fast 文生视频',
-    task: 'video',
-    model: 'rh-seedance2-fast-text',
-    provider: 'gateway-video',
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-    ],
-  },
-  {
-    id: 'rh-seedance2-text',
-    label: 'Seedance 2.0 文生视频',
-    task: 'video',
-    model: 'rh-seedance2-text',
-    provider: 'gateway-video',
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-    ],
-  },
-  // ── Seedance 2.0 图生视频 ──
-  {
-    id: 'rh-seedance2-mini-image',
-    label: 'Seedance 2.0 Mini 图生视频',
-    task: 'video',
-    model: 'rh-seedance2-mini-image',
-    provider: 'gateway-video',
-    maxFiles: 1,
-    acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: false },
-      { key: 'images', label: '参考图片', kind: 'images', required: true },
-    ],
-  },
-  {
-    id: 'rh-seedance2-fast-image',
-    label: 'Seedance 2.0 Fast 图生视频',
-    task: 'video',
-    model: 'rh-seedance2-fast-image',
-    provider: 'gateway-video',
-    maxFiles: 1,
-    acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: false },
-      { key: 'images', label: '参考图片', kind: 'images', required: true },
-    ],
-  },
-  {
-    id: 'rh-seedance2-image',
-    label: 'Seedance 2.0 图生视频',
-    task: 'video',
-    model: 'rh-seedance2-image',
-    provider: 'gateway-video',
-    maxFiles: 1,
-    acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: false },
-      { key: 'images', label: '参考图片', kind: 'images', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'adaptive', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9']) },
+      { key: 'video', label: '参考视频', kind: 'video', required: true },
     ],
   },
   // ── Sora2 文生视频 ──
@@ -511,6 +425,38 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     maxFiles: rhOfficialMaxFiles('rhart-video-g/image-to-video'),
     acceptedFiles: ['image'],
     fields: rhOfficialFields('rhart-video-g/image-to-video'),
+  },
+  {
+    id: 'rh-gemini-omni-text-video', label: '全能视频 Omni Flash 文生视频', task: 'video', model: 'rh-gemini-omni-text-video',
+    provider: 'gateway-video', webappId: 'gemini-omni-flash/text-to-video', acceptedFiles: [],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 10, options: options([10]) },
+    ],
+  },
+  {
+    id: 'rh-gemini-omni-image-video', label: '全能视频 Omni Flash 图生视频', task: 'video', model: 'rh-gemini-omni-image-video',
+    provider: 'gateway-video', webappId: 'gemini-omni-flash/image-to-video', maxFiles: 3, acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p']) },
+      { key: 'duration', label: '时长', kind: 'select', defaultValue: 10, options: options([10]) },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+    ],
+  },
+  {
+    id: 'rh-gemini-omni-video-edit', label: '全能视频 Omni Flash 视频编辑', task: 'video', model: 'rh-gemini-omni-video-edit',
+    provider: 'gateway-video', webappId: 'gemini-omni-flash/video-edit', maxFiles: 4, acceptedFiles: ['image', 'video'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1080p', options: options(['1080p']) },
+      { key: 'images', label: '参考图', kind: 'images' },
+      { key: 'videos', label: '输入视频', kind: 'video', required: true },
+    ],
   },
 
   // 普 prefixed models for general users (group=1 / 普 channel)
@@ -670,7 +616,8 @@ export function isRemovedMediaModelId(id: string): boolean {
   if (value === 'runninghub/api/rh-grok-image-image' || value === 'rh-grok-image-image') return true
   if (value === 'grok-video-3' || value === 'grok-video-3-fast') return true
   if (value.includes('seedance')) {
-    if (value.startsWith('rh-seedance2-')) return false
+    if (value.startsWith('rh-seedance25-')) return false
+    if (value.startsWith('rh-seedance2-')) return true
     if (value.startsWith('普seedance')) return false
     if (value === 'seedance-2.0' || value === 'seedance-2.0-fast') return false
     return value !== 'seedance-2-0' && value !== 'seedance-2-0-pro'

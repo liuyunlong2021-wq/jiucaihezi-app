@@ -32,6 +32,8 @@ Studio text sync -> /sync/* -> SYNC_DB
 - `POST /sync/projects/:id/files`: pushes 1-100 idempotent, revision-checked text mutations.
 - `POST /sync/projects/:id/delete` and `/restore`: toggles the project tombstone.
 - `GET /health`: health check.
+- `POST /api/creations/uploads`: stores a short-lived local media reference in the existing KV and returns a public HTTPS URL for video providers that require URL-based references.
+- `GET /media/creation/:token`: serves those references until their 15-minute expiry.
 
 Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `jc_session` cookie or `X-JC-Session`; the client cannot submit its own user ID.
 
@@ -39,7 +41,7 @@ Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `j
 
 - Does not proxy `/v1/chat/completions`.
 - Does not proxy `/api/chat/completions`.
-- Does not handle membership, billing, recharge, check-in, invite, usage logs, media generation, or adapters.
+- Does not handle membership, billing, recharge, check-in, invite, usage logs, media generation, or adapters. Temporary creation media is limited to 20 MB and expires automatically.
 
 ## Routes
 

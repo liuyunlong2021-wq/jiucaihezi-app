@@ -11,18 +11,19 @@ from PIL import Image
 
 
 API_BASE = "https://api.jiucaihezi.studio/v1"
+LLM_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "claude-opus-5", "grok-4.6", "gpt-5.6-sol", "gemini-3.7-flash"]
 GPT_MODELS = ["gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-vip", "gpt-image-2-官方"]
 GPT_RATIOS = ["1:1", "2:3", "3:2", "4:5", "5:4", "4:3", "3:4", "16:9", "9:16", "21:9"]
+GEMINI_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"]
 GPT_RESOLUTIONS = {"gpt-image-2-1k": ["1k"], **{model: ["1k", "2k", "4k"] for model in GPT_MODELS[1:]}}
 GEMINI_MODELS = ["gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview"]
 ALL_MODELS = [*GPT_MODELS, *GEMINI_MODELS]
+GEMINI_RESOLUTIONS = ["1k", "2k", "4k"]
+PROMPT_MAX_LENGTH = 20_000
 
 
 def gpt_sizes(resolutions):
     return [f"{resolution} | {ratio}" for resolution in resolutions for ratio in GPT_RATIOS]
-
-
-MODEL_SIZES = {**{model: gpt_sizes(resolutions) for model, resolutions in GPT_RESOLUTIONS.items()}, **{model: ["1k", "2k"] for model in GEMINI_MODELS}}
 
 
 def key(value):
@@ -89,25 +90,74 @@ class JiucaiheziImageTask:
 
 
 def references(kwargs):
-    return [kwargs[f"image{i}"] for i in range(1, 9) if kwargs.get(f"image{i}") is not None]
+    return [kwargs[f"image{i}"] for i in range(1, 11) if kwargs.get(f"image{i}") is not None]
 
 
 class JiucaiheziImage(JiucaiheziImageTask):
     @classmethod
     def INPUT_TYPES(cls):
-        return {"required": {"api_key": ("STRING", {"default": "", "password": True}), "model": (ALL_MODELS,), "prompt": ("STRING", {"multiline": True}), "resolution": (["1k", "2k", "4k"],), "ratio": (GPT_RATIOS,)}, "optional": {f"image{i}": ("IMAGE",) for i in range(1, 9)}}
+        return {"required": {"api_key": ("STRING", {"default": "", "password": True}), "model": (ALL_MODELS,), "prompt": ("STRING", {"multiline": True, "max_length": PROMPT_MAX_LENGTH}), "resolution": (["1k", "2k", "4k"],), "ratio": (GPT_RATIOS,)}, "optional": {f"image{i}": ("IMAGE",) for i in range(1, 11)}}
 
     FUNCTION = "generate"
 
     def generate(self, api_key, model, prompt, resolution, ratio, **kwargs):
+        if len(prompt) > PROMPT_MAX_LENGTH:
+            raise RuntimeError(f"提示词不能超过 {PROMPT_MAX_LENGTH} 字符")
         if model in GPT_MODELS:
             if resolution not in GPT_RESOLUTIONS[model]:
                 raise RuntimeError(f"{model} 只支持 {'/'.join(GPT_RESOLUTIONS[model])}")
             return self.submit(api_key, model, prompt, resolution, size_for(ratio, resolution), references(kwargs))
-        if resolution not in {"1k", "2k"}:
-            raise RuntimeError(f"{model} 只支持 1k/2k")
-        return self.submit(api_key, model, prompt, resolution, "auto", references(kwargs))
+        if resolution not in GEMINI_RESOLUTIONS:
+            raise RuntimeError(f"{model} 只支持 {'/'.join(GEMINI_RESOLUTIONS)}")
+        return self.submit(api_key, model, prompt, resolution, size_for(ratio, resolution), references(kwargs))
 
 
-NODE_CLASS_MAPPINGS = {"JiucaiheziImage": JiucaiheziImage}
-NODE_DISPLAY_NAME_MAPPINGS = {"JiucaiheziImage": "韭菜盒子 图片生成"}
+def llm_content(payload):
+    choices = payload.get("choices") if isinstance(payload, dict) else None
+    if not choices: return ""
+    message = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+    content = message.get("content", "")
+    if isinstance(content, str): return content
+    if isinstance(content, list):
+        return "".join(str(part.get("text", "")) for part in content if isinstance(part, dict))
+    return str(content)
+
+
+class JiucaiheziLLM:
+    CATEGORY = "Jiucaihezi"
+    RETURN_TYPES = ("STRING", "STRING")
+    RETURN_NAMES = ("response", "raw_response")
+    FUNCTION = "generate"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "api_baseurl": ("STRING", {"default": API_BASE}),
+            "api_key": ("STRING", {"default": "", "password": True}),
+            "model": (LLM_MODELS,),
+            "custom_model": ("STRING", {"default": "", "dynamicPrompts": False}),
+            "role": ("STRING", {"default": "You are a helpful assistant", "multiline": True}),
+            "prompt": ("STRING", {"default": "", "multiline": True}),
+            "temperature": ("FLOAT", {"default": 0.6, "min": 0.0, "max": 2.0, "step": 0.05}),
+            "seed": ("INT", {"default": 100, "min": -1, "max": 2147483647}),
+            "skip_error": ("BOOLEAN", {"default": False}),
+        }}
+
+    def generate(self, api_baseurl, api_key, model, custom_model, role, prompt, temperature, seed, skip_error):
+        token = key(api_key); selected_model = key(custom_model) or key(model); base = key(api_baseurl).rstrip("/")
+        if not token: raise RuntimeError("请填入韭菜盒子 API Key。")
+        if not base: raise RuntimeError("请填入 API Base URL。")
+        if not selected_model: raise RuntimeError("请选择或输入模型。")
+        payload = {"model": selected_model, "messages": [{"role": "system", "content": role}, {"role": "user", "content": prompt}], "temperature": float(temperature)}
+        if int(seed) >= 0: payload["seed"] = int(seed)
+        try:
+            response = requests.post(f"{base}/chat/completions", headers={"Authorization": f"Bearer {token}", "x-api-key": token, "Content-Type": "application/json"}, json=payload, timeout=300)
+            response.raise_for_status(); raw = response.json(); text = llm_content(raw)
+            return text, json.dumps(raw, ensure_ascii=False)
+        except Exception as exc:
+            if skip_error: return "", json.dumps({"error": str(exc)}, ensure_ascii=False)
+            raise RuntimeError(f"LLM 请求失败：{exc}") from exc
+
+
+NODE_CLASS_MAPPINGS = {"JiucaiheziImage": JiucaiheziImage, "JiucaiheziLLM": JiucaiheziLLM}
+NODE_DISPLAY_NAME_MAPPINGS = {"JiucaiheziImage": "韭菜盒子 图片生成", "JiucaiheziLLM": "韭菜盒子 LLM"}

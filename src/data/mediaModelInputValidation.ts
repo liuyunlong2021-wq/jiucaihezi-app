@@ -86,7 +86,8 @@ function validateMediaLimits(params: MediaModelInputValidationParams, model: Non
 
 function validateSelectField(field: MediaModelField, value: unknown): void {
   if (!field.options?.length || isBlank(value)) return
-  const allowed = field.options.some(option => String(option.value) === String(value))
+  const values = Array.isArray(value) ? value : [value]
+  const allowed = values.every(item => field.options!.some(option => String(option.value) === String(item)))
   if (!allowed) throw new Error(`${field.label}超出模型可选范围：${String(value)}`)
 }
 
@@ -110,6 +111,9 @@ function validateFieldCapabilities(params: MediaModelInputValidationParams, mode
     const value = valueForField(params, field)
     validateSelectField(field, value)
     validateNumberField(field, value)
+    if (field.maxLength !== undefined && typeof value === 'string' && value.length > field.maxLength) {
+      throw new Error(`${field.label}不能超过 ${field.maxLength} 字符`)
+    }
   }
 }
 

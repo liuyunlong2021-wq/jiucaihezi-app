@@ -781,6 +781,125 @@ test('RH 视频模型提交 URL 必须是 /v1/videos', () => {
   assert.equal(request.endpoint, '/v1/videos')
 })
 
+test('Gemini Omni video edit sends billing seconds to NewAPI without RH duration', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'rh-gemini-omni-video-edit')
+      assert.equal(body.seconds, 8)
+      assert.equal(body.duration, undefined)
+      assert.equal(body.resolution, '1080p')
+      return Response.json({ task_id: 'omni_edit_001', status: 'processing' })
+    }
+    if (url.endsWith('/rh/tasks/omni_edit_001')) {
+      return Response.json({ task_id: 'omni_edit_001', status: 'success', url: 'https://example.com/output.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/api/rh-gemini-omni-video-edit',
+      params: {
+        prompt: 'follow motion',
+        ratio: '16:9',
+        videos: ['https://example.com/input.mp4'],
+        duration: 5,
+        seconds: 8,
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://example.com/output.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('ZX Seedance submits every documented parameter and media reference', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/video/generations')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.deepEqual(body, {
+        model: 'doubao-seedance-2-5-260628', prompt: '全模态参考生成', duration: -1,
+        ratio: 'adaptive', aspect_ratio: 'adaptive', resolution: '4k',
+        images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        video_urls: ['https://example.com/1.mp4', 'https://example.com/2.mp4'],
+        audio_urls: ['https://example.com/1.mp3', 'https://example.com/2.mp3'],
+        conversion_slots: ['image1', 'video1'], return_last_frame: true, real_person_mode: true,
+        bitrate_mode: 'high', generate_audio: false, seed: 42, output_format: 'mov',
+        omni_reference_task_type: 'edit', webhook_url: 'https://example.com/hook',
+      })
+      return Response.json({ task_id: 'seedance_25_001', status: 'processing' })
+    }
+    if (url.endsWith('/v1/video/generations/seedance_25_001')) {
+      return Response.json({ status: 'completed', video_url: 'https://example.com/output.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/zx/doubao-seedance-2-5-260628',
+      params: {
+        prompt: '全模态参考生成', duration: -1, ratio: 'adaptive', resolution: '4k',
+        images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        videos: ['https://example.com/1.mp4', 'https://example.com/2.mp4'],
+        audios: ['https://example.com/1.mp3', 'https://example.com/2.mp3'],
+        conversionSlots: ['image1', 'video1'], returnLastFrame: true, realPersonMode: true,
+        bitrateMode: 'high', generateAudio: false, seed: 42, outputFormat: 'mov',
+        omniReferenceTaskType: 'edit', webhookUrl: 'https://example.com/hook',
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://example.com/output.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('ZX Grok sends local reference data directly without the deleted upload route', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const image = 'data:image/png;base64,aGVsbG8='
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    assert.equal(url.endsWith('/api/creations/uploads'), false)
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'grok-1.5-video-10s')
+      assert.equal(body.image, image)
+      return Response.json({ task_id: 'zx_grok_10_001', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/zx_grok_10_001')) {
+      return Response.json({ status: 'completed', video_url: 'https://example.com/grok.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/zx/grok-1.5-video-10s',
+      params: { prompt: '让人物移动', images: [image], duration: 10 },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://example.com/grok.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('RH 音频模型提交 URL 必须是 /v1/audio/speech', () => {
   const plan = buildCreationRunPlan({
     modelId: 'runninghub/api/rh-suno-v55-single',

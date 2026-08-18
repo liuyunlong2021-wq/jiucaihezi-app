@@ -275,9 +275,8 @@ export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'res
   if (plan.kind === 'model3d') {
     return imageCount > 0 ? 'runninghub/api/rh-3d-image' : 'runninghub/api/rh-3d-text'
   }
-  if (videoCount > 0 || imageCount > 1) return 'runninghub/api/rh-seedance2'
-  if (imageCount === 1) return 'runninghub/api/rh-seedance2-image'
-  return 'runninghub/api/rh-seedance2-text'
+  if (videoCount > 0) return 'runninghub/api/rh-seedance25-with-video-ref'
+  return 'runninghub/api/rh-seedance25-no-video-ref'
 }
 
 function acceptsFileCount(

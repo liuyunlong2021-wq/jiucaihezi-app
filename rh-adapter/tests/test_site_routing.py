@@ -45,6 +45,11 @@ def test_model_mapping_routes_selected_overseas_models_to_global():
         "rh-suno-v55-single",
         "rh-suno-v55-custom",
         "rh-suno-lyrics",
+        "rh-gemini-omni-text-video",
+        "rh-gemini-omni-image-video",
+        "rh-gemini-omni-video-edit",
+        "rh-seedance25-no-video-ref",
+        "rh-seedance25-with-video-ref",
     }
     assert {model for model in MODEL_MAP if get_rh_site(model) == "global"} == global_models
     assert get_rh_site("rh-3d-text") == "cn"

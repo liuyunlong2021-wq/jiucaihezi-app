@@ -68,13 +68,14 @@ export interface CreationFieldOption {
 export interface CreationFieldSpec {
   key: string
   label: string
-  kind: 'prompt' | 'text' | 'textarea' | 'select' | 'number' | 'boolean' | 'image' | 'images' | 'video' | 'audio'
+  kind: 'prompt' | 'text' | 'textarea' | 'select' | 'multiselect' | 'number' | 'boolean' | 'image' | 'images' | 'video' | 'audio'
   required?: boolean
-  defaultValue?: string | number | boolean
+  defaultValue?: string | number | boolean | string[]
   options?: CreationFieldOption[]
   min?: number
   max?: number
   step?: number
+  maxLength?: number
 }
 
 export interface CreationModelSpec {
@@ -88,6 +89,7 @@ export interface CreationModelSpec {
   apiStyle: CreationApiStyle
   mode: CreationMode
   contractStatus: CreationContractStatus
+  hidden?: boolean
   price?: number | string
   endpoint: string
   poll?: {
@@ -95,9 +97,9 @@ export interface CreationModelSpec {
     pathTemplate?: string
   }
   files?: {
-    images?: { min?: number; max?: number }
-    videos?: { min?: number; max?: number }
-    audios?: { min?: number; max?: number }
+    images?: { min?: number; max?: number; allowedCounts?: number[]; maxBytes?: number }
+    videos?: { min?: number; max?: number; allowedCounts?: number[]; maxBytes?: number }
+    audios?: { min?: number; max?: number; allowedCounts?: number[]; maxBytes?: number }
   }
   capabilities: {
     officialAbilityTypes: string[]

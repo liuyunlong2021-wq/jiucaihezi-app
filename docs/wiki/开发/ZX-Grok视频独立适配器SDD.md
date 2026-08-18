@@ -10,7 +10,7 @@ ZX 三个固定时长名称是计费别名，均源自 `grok-imagine-video-1.5`�
 
 - `POST /v1/videos`
 - 无参考图时使用 JSON 文生视频，发送 `model`、`prompt`、`resolution=720p`
-- 有参考图时使用 multipart 图生视频，发送 `model`、`prompt`、`size=1280x720`、`input_reference` 文件
+- 有 1~7 张参考图时使用 multipart 参考图视频，发送 `model`、`prompt`、`size=1280x720` 和重复的 `input_reference` 文件字段
 - 不发送 `seconds`
 - 查询 `GET /v1/videos/{task_id}`
 - 完成后读取 `video_url`，不调用 `/content`
@@ -36,7 +36,7 @@ APP / Web
 
 1. 接收 NewAPI 转发的标准视频 JSON。
 2. 校验固定模型名、提示词和 `size`。
-3. 无参考图时发送 JSON；有参考图时将 URL 或 data URL 下载/解码为 multipart 的 `input_reference` 文件。
+3. 无参考图时发送 JSON；有 1~7 张参考图时将 URL 或 data URL 下载/解码为重复的 multipart `input_reference` 文件字段。
 4. 不发送 `seconds`，模型名决定 6/10/15 秒。
 5. 保存并透传 ZX 上游任务 ID。
 6. 查询 ZX 状态并映射为 `processing`、`in_progress`、`completed`、`failed`。
@@ -64,7 +64,7 @@ APP / Web
 }
 ```
 
-没有参考图时按文生视频 JSON 提交；有参考图时兼容现有客户端的 `image`、`images` 或 `reference_images` 输入，最终只取一张并转成 ZX 的 `input_reference` 文件字段。请求忽略 `seconds`，固定时长由模型名决定。
+没有参考图时按文生视频 JSON 提交；有参考图时兼容现有客户端的 `image`、`images` 或 `reference_images` 输入，最多 7 张并全部转成重复的 ZX `input_reference` 文件字段。请求忽略 `seconds`，固定时长由模型名决定。该合同由 [[ZX视频适配器多模型升级TDD-2026-08-18]] 更新。
 
 ## 5. 任务与结果
 

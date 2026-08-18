@@ -98,10 +98,13 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
       resolution: asOptionalString(params.resolution),
       duration: asOptionalNumber(params.duration),
+      seconds: asOptionalNumber(params.seconds),
       imageUrl: images[0],
       imageUrls: images.length > 1 ? images : undefined,
       videoUrl: videos[0],
+      videoUrls: videos.length ? videos : undefined,
       audioUrl: audios[0],
+      audioUrls: audios.length ? audios : undefined,
       text: asOptionalString(params.text),
       width: asOptionalNumber(params.width),
       height: asOptionalNumber(params.height),
@@ -470,11 +473,16 @@ async function executeDirectVideoRequest(
   const uploadedImages = shouldUploadAssets
     ? await Promise.all(images.map(image => uploadCreationAsset(image, request.signal)))
     : images
-  const uploadedVideo = shouldUploadAssets
-    ? await uploadCreationAsset(params.videoUrl, request.signal)
-    : params.videoUrl
+  const videos = params.videoUrls?.length ? params.videoUrls : (params.videoUrl ? [params.videoUrl] : [])
+  const audios = params.audioUrls?.length ? params.audioUrls : (params.audioUrl ? [params.audioUrl] : [])
+  const uploadedVideos = shouldUploadAssets
+    ? await Promise.all(videos.map(video => uploadCreationAsset(video, request.signal)))
+    : videos
+  const uploadedAudios = shouldUploadAssets
+    ? await Promise.all(audios.map(audio => uploadCreationAsset(audio, request.signal)))
+    : audios
 
-  const body = buildDirectVideoBody({ ...request, videoParams: { ...params, videoUrl: uploadedVideo } }, uploadedImages)
+  const body = buildDirectVideoBody(request, uploadedImages, uploadedVideos, uploadedAudios)
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
@@ -649,6 +657,7 @@ async function executeRunningHubVideoRequest(
       ratio: aspectRatio,
       resolution: asOptionalString(params.resolution),
       duration: params.duration === undefined ? undefined : String(params.duration),
+      seconds: params.seconds === undefined ? undefined : Math.max(1, Math.ceil(Number(params.seconds))),
       images: images.length ? images : undefined,
       video: asOptionalString(video),
       audio: asOptionalString(params.audioUrl),
@@ -659,7 +668,7 @@ async function executeRunningHubVideoRequest(
     }))
 
     // ★ Phase 1b: 动态 extra_fields（与 image runtime 一致）
-    const videoTopKeys = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','video','audio','text','width','height','value','resolution','duration','extra_fields'])
+    const videoTopKeys = new Set(['model','prompt','aspectRatio','aspect_ratio','ratio','images','video','audio','text','width','height','value','resolution','duration','seconds','extra_fields'])
     const videoExtra: Record<string, unknown> = {}
     const vNorm = request.plan.debug?.normalizedParams || {}
     for (const [k, v] of Object.entries(vNorm)) {
@@ -668,6 +677,7 @@ async function executeRunningHubVideoRequest(
       }
     }
     if (Object.keys(videoExtra).length) body.extra_fields = videoExtra
+    if (params.seconds !== undefined) body.seconds = Math.max(1, Math.ceil(Number(params.seconds)))
   }
 
   const data = await apiCall(request.endpoint, compact(body), 'POST', request.plan.model, request.signal)
@@ -759,9 +769,15 @@ async function executeRunningHubAudioRequest(
   return { url: result, type: 'audio', taskId, pollUrl, pollKind }
 }
 
-function buildDirectVideoBody(request: CreationSubmitRequest, uploadedImages: string[]): Record<string, unknown> {
+function buildDirectVideoBody(
+  request: CreationSubmitRequest,
+  uploadedImages: string[],
+  uploadedVideos: string[],
+  uploadedAudios: string[],
+): Record<string, unknown> {
   const params = request.videoParams || {}
   if (request.plan.apiStyle === 'seedance-task') {
+    const normalized = request.plan.debug.normalizedParams
     const body: Record<string, unknown> = compact({
       model: request.plan.model,
       prompt: params.prompt,
@@ -769,7 +785,17 @@ function buildDirectVideoBody(request: CreationSubmitRequest, uploadedImages: st
       ratio: params.aspectRatio,
       aspect_ratio: params.aspectRatio,
       resolution: asOptionalString(params.resolution)?.toLowerCase(),
-      generate_audio: true,
+      video_urls: uploadedVideos.length ? uploadedVideos : undefined,
+      audio_urls: uploadedAudios.length ? uploadedAudios : undefined,
+      conversion_slots: normalized.conversionSlots,
+      return_last_frame: normalized.returnLastFrame,
+      real_person_mode: normalized.realPersonMode,
+      bitrate_mode: normalized.bitrateMode,
+      generate_audio: normalized.generateAudio,
+      seed: normalized.seed,
+      output_format: normalized.outputFormat,
+      omni_reference_task_type: normalized.omniReferenceTaskType,
+      webhook_url: normalized.webhookUrl,
     })
     if (request.plan.endpoint === '/api/seedance/v1/videos') {
       uploadedImages.forEach((url, index) => {
@@ -791,8 +817,8 @@ function buildDirectVideoBody(request: CreationSubmitRequest, uploadedImages: st
     image: uploadedImages.length === 1 ? uploadedImages[0] : undefined,
     imageUrl: uploadedImages[0],
     imageUrls: uploadedImages.length > 1 ? uploadedImages : undefined,
-    video_url: params.videoUrl,
-    audio_url: params.audioUrl,
+    video_url: uploadedVideos[0],
+    audio_url: uploadedAudios[0],
     text: params.text,
     width: params.width,
     height: params.height,

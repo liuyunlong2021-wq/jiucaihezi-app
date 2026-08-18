@@ -90,6 +90,24 @@ IMAGE_MODELS: dict[str, dict] = {
 # ── Video models ──
 
 VIDEO_MODELS: dict[str, dict] = {
+    "rh-gemini-omni-text-video": {
+        "endpoint": "gemini-omni-flash/text-to-video",
+        "label": "全能视频 Omni Flash 文生视频",
+        "output_type": "video",
+        "site": "global",
+    },
+    "rh-gemini-omni-image-video": {
+        "endpoint": "gemini-omni-flash/image-to-video",
+        "label": "全能视频 Omni Flash 图生视频",
+        "output_type": "video",
+        "site": "global",
+    },
+    "rh-gemini-omni-video-edit": {
+        "endpoint": "gemini-omni-flash/video-edit",
+        "label": "全能视频 Omni Flash 视频编辑",
+        "output_type": "video",
+        "site": "global",
+    },
     "rh-3d-text": {
         "endpoint": "hunyuan3d-v3.1/text-to-3d",
         "label": "混元 3D v3.1 文生 3D",
@@ -188,6 +206,18 @@ VIDEO_MODELS: dict[str, dict] = {
         "endpoint": "rhart-video/sparkvideo-2.0-mini/image-to-video",
         "label": "Seedance 2.0 Mini 图生视频",
         "output_type": "video",
+    },
+    "rh-seedance25-no-video-ref": {
+        "endpoint": "bytedance/seedance-2.5-global-token/multimodal-video",
+        "label": "Seedance 2.5 无参考视频",
+        "output_type": "video",
+        "site": "global",
+    },
+    "rh-seedance25-with-video-ref": {
+        "endpoint": "bytedance/seedance-2.5-global-token/multimodal-video",
+        "label": "Seedance 2.5 有参考视频",
+        "output_type": "video",
+        "site": "global",
     },
     # ── LTX 2.3 ──
     "rh-ltx23-text-video": {
