@@ -829,7 +829,7 @@ test('ZX Seedance submits every documented parameter and media reference', async
     if (url.endsWith('/v1/video/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.deepEqual(body, {
-        model: 'doubao-seedance-2-5-260628', prompt: '全模态参考生成', duration: -1,
+        model: 'doubao-seedance-2-5-260628', prompt: '全模态参考生成', duration: 5,
         ratio: 'adaptive', aspect_ratio: 'adaptive', resolution: '4k',
         images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
         video_urls: ['https://example.com/1.mp4', 'https://example.com/2.mp4'],
@@ -850,7 +850,7 @@ test('ZX Seedance submits every documented parameter and media reference', async
     const plan = buildCreationRunPlan({
       modelId: 'newapi/zx/doubao-seedance-2-5-260628',
       params: {
-        prompt: '全模态参考生成', duration: -1, ratio: 'adaptive', resolution: '4k',
+        prompt: '全模态参考生成', duration: 5, ratio: 'adaptive', resolution: '4k',
         images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
         videos: ['https://example.com/1.mp4', 'https://example.com/2.mp4'],
         audios: ['https://example.com/1.mp3', 'https://example.com/2.mp3'],

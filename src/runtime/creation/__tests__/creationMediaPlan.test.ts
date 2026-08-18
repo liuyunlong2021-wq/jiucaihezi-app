@@ -345,19 +345,20 @@ test('ZX video registry exposes Grok 0-7 references and the three added models',
 
   const seedance = getCreationModelSpec('newapi/zx/doubao-seedance-2-5-260628')
   assert.equal(seedance?.endpoint, '/v1/video/generations')
-  assert.deepEqual(seedance?.capabilities.duration?.allowedValues, [-1, ...Array.from({ length: 27 }, (_, i) => i + 4)])
+  assert.deepEqual(seedance?.capabilities.duration?.allowedValues, Array.from({ length: 27 }, (_, i) => i + 4))
   assert.deepEqual(seedance?.capabilities.resolutions, ['480p', '720p', 'native1080p', '1080p', '2k', '4k'])
   assert.deepEqual(seedance?.capabilities.ratios, ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16', '21:9'])
   assert.equal(seedance?.files?.images?.max, 30)
   assert.equal(seedance?.files?.videos?.max, 10)
   assert.equal(seedance?.files?.audios?.max, 10)
   assert.equal(seedance?.files?.images?.maxBytes, 50 * 1024 * 1024)
+  assert.equal(seedance?.capabilities.assetFlow, 'none')
   assert.equal(seedance?.fields.find(field => field.key === 'conversionSlots')?.kind, 'multiselect')
 
   const seedancePlan = buildCreationRunPlan({
     modelId: seedance!.id,
     params: {
-      prompt: '全模态参考生成', duration: -1, ratio: 'adaptive', resolution: '4k',
+      prompt: '全模态参考生成', duration: 5, ratio: 'adaptive', resolution: '4k',
       conversionSlots: ['image1', 'video1'], returnLastFrame: true, realPersonMode: true,
       bitrateMode: 'high', generateAudio: false, seed: 42, outputFormat: 'mov',
       omniReferenceTaskType: 'edit', webhookUrl: 'https://example.com/hook',
@@ -672,7 +673,7 @@ test('Gemini Omni models lock fixed parameters, media counts, prices, and billin
   }), /无法读取输入视频时长/)
 })
 
-test('RH Seedance 2.5 models lock native1080p and token prices', () => {
+test('RH Seedance 2.5 models lock native1080p and display per-second prices', () => {
   const text = getCreationModelSpec('runninghub/api/rh-seedance25-no-video-ref')!
   const video = getCreationModelSpec('runninghub/api/rh-seedance25-with-video-ref')!
   const textPlan = buildCreationRunPlan({ modelId: text.id, params: { prompt: 'text', duration: 5 } })
@@ -682,8 +683,8 @@ test('RH Seedance 2.5 models lock native1080p and token prices', () => {
   assert.deepEqual(video.capabilities.resolutions, ['native1080p'])
   assert.deepEqual(text.files?.videos, undefined)
   assert.deepEqual(video.files?.videos, { min: 1, max: 10, maxBytes: 50 * 1024 * 1024 })
-  assert.equal(displayModelPrice(text), '80/百万TOKEN')
-  assert.equal(displayModelPrice(video), '50/百万TOKEN')
+  assert.equal(displayModelPrice(text), '4/秒')
+  assert.equal(displayModelPrice(video), '3.5/秒')
   assert.equal(textPlan.debug.normalizedParams.resolution, 'native1080p')
   assert.equal(videoPlan.debug.normalizedParams.resolution, 'native1080p')
   assert.throws(() => buildCreationRunPlan({ modelId: video.id, params: { prompt: 'missing video', duration: 5 } }), /视频至少需要 1 个/)

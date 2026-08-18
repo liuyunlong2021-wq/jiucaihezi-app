@@ -22,7 +22,8 @@ GROK_MODELS = {
     "grok-1.5-video-10s": 10,
     "grok-1.5-video-15s": 15,
 }
-MODELS = {**GROK_MODELS, "doubao-seedance-2-5-260628": None, "omni-fast": None, "omni-v2v": None}
+SEEDANCE_MODEL = "doubao-seedance-2-5-260628"
+MODELS = {**GROK_MODELS, SEEDANCE_MODEL: None, "omni-fast": None, "omni-v2v": None}
 MAX_PROMPT_CHARS = 5000
 SEEDANCE_MAX_PROMPT_CHARS = 20480
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
@@ -73,6 +74,8 @@ async def create_video(request: Request):
     prompt = payload.get("prompt")
     validate_common(model, prompt)
 
+    if model == SEEDANCE_MODEL:
+        return await submit_seedance(payload, authorization, request.app.state.http)
     if model in GROK_MODELS:
         size = payload.get("size") or "1280x720"
         if size != "1280x720":
@@ -113,18 +116,22 @@ async def create_seedance_video(request: Request):
     model = payload.get("model")
     prompt = payload.get("prompt")
     validate_common(model, prompt)
-    if model != "doubao-seedance-2-5-260628":
+    if model != SEEDANCE_MODEL:
         raise HTTPException(status_code=400, detail="Unsupported ZX Seedance video model")
+    return await submit_seedance(payload, authorization, request.app.state.http)
+
+
+async def submit_seedance(payload: dict, authorization: str, client: httpx.AsyncClient) -> dict:
     body = seedance_payload(payload)
     try:
-        response = await request.app.state.http.post(
+        response = await client.post(
             f"{BASE_URL}/v1/video/generations",
             headers={"Authorization": authorization},
             json=body,
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
-    return submitted_response(response, model)
+    return submitted_response(response, SEEDANCE_MODEL)
 
 
 @app.get("/v1/videos/{task_id}/content")
@@ -159,6 +166,13 @@ async def get_video(task_id: str, request: Request):
             f"{BASE_URL}/v1/videos/{task_id}",
             headers={"Authorization": authorization},
         )
+        if response.status_code in {400, 404}:
+            seedance_response = await request.app.state.http.get(
+                f"{BASE_URL}/v1/video/generations/{task_id}",
+                headers={"Authorization": authorization},
+            )
+            if seedance_response.is_success:
+                response = seedance_response
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
     return normalized_task_response(response, task_id)
@@ -231,7 +245,7 @@ def references(payload: dict) -> list:
 def validate_common(model, prompt):
     if model not in MODELS:
         raise HTTPException(status_code=400, detail="Unsupported ZX video model")
-    max_chars = SEEDANCE_MAX_PROMPT_CHARS if model == "doubao-seedance-2-5-260628" else MAX_PROMPT_CHARS
+    max_chars = SEEDANCE_MAX_PROMPT_CHARS if model == SEEDANCE_MODEL else MAX_PROMPT_CHARS
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > max_chars:
         raise HTTPException(status_code=400, detail="Prompt is required and too long")
 
@@ -290,7 +304,7 @@ def seedance_payload(payload: dict) -> dict:
     return compact({
         "model": payload["model"],
         "prompt": payload["prompt"],
-        "seconds": str(duration_number),
+        "seconds": None if duration_number == -1 else str(duration_number),
         "metadata": metadata,
         "webhook_url": payload.get("webhook_url"),
     })

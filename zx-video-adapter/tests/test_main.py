@@ -189,6 +189,52 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 200)
 
+    async def test_seedance_accepts_newapi_video_route_and_omits_auto_seconds(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer zx-test-key"},
+            json={
+                "model": "doubao-seedance-2-5-260628",
+                "prompt": "自动决定时长",
+                "duration": -1,
+                "resolution": "1080p",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        request = self.upstream_requests[0]
+        self.assertEqual(request.url.path, "/v1/video/generations")
+        self.assertNotIn("seconds", json.loads(request.read()))
+
+    async def test_video_poll_falls_back_to_seedance_endpoint(self):
+        requests = []
+
+        async def upstream_handler(request: httpx.Request):
+            requests.append(request)
+            if request.url.path == "/v1/videos/task_seedance_1":
+                return httpx.Response(400, json={"detail": "Unsupported ZX Grok video model"})
+            return httpx.Response(200, json={
+                "id": "task_seedance_1",
+                "status": "completed",
+                "video_url": "https://cdn.example/seedance.mp4",
+            })
+
+        await self.upstream.aclose()
+        self.upstream = httpx.AsyncClient(transport=httpx.MockTransport(upstream_handler))
+        app.state.http = self.upstream
+
+        response = await self.client.get(
+            "/v1/videos/task_seedance_1",
+            headers={"Authorization": "Bearer zx-test-key"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["video_url"], "https://cdn.example/seedance.mp4")
+        self.assertEqual(
+            [request.url.path for request in requests],
+            ["/v1/videos/task_seedance_1", "/v1/video/generations/task_seedance_1"],
+        )
+
     async def test_omni_models_forward_their_native_json_fields(self):
         response = await self.client.post(
             "/v1/videos",
