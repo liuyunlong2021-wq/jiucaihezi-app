@@ -978,3 +978,16 @@
 - UI / NewAPI 输入价格分别为 `80/百万TOKEN` 与 `50/百万TOKEN`；后台按 Token 模式只填写输入价格。
 - Seedance 2.0、Fast、Mini 三套共 9 个旧 RH 模型退出可选目录并禁止新执行，历史规格和映射保留用于读取旧任务。
 - RH 适配器 `41 passed`、focused `1087 passed`、TypeScript 和差异检查通过；未部署，未进行真实生产生成、压力并发或账单验收。详见 [[开发/RH Seedance 2.5双模型接入与旧模型退役TDD-2026-08-18]]。
+
+## [2026-08-18] 路由确认与修复 | ZX Veo、Grok、Omni
+
+- Veo 3.1/Fast 与 Grok 6s/10s/15s 均由 NewAPI 直连 ZX；用户截图确认 Grok 渠道 Base URL 为 `https://img-api.zxcode.vip`。只有 `omni-fast`、`omni-v2v` 和 ZX Seedance 2.5 由 NewAPI 转入独立 `zx-video-adapter`。APP 的 `newapi-direct` 标记只描述 APP 到 NewAPI，不描述 NewAPI 后端是否经过适配器。
+- RH 三个 Gemini Omni 和 RH Grok 继续只走 `rh-adapter`；本轮未把任何 RH 模型加入 ZX 适配器。
+- Omni 下载失败的根因是官方 `/content` 必须使用创建任务时的 ZX Key，不能使用 APP 用户 Token。提交 `260803e3` 增加任务 ID到 ZX 渠道 Key的进程内映射，并保持下载入口本身仍需鉴权；适配器 `12/12` 回归通过。
+- 用户已真实确认 Veo 直连生成成功、ZX Grok 6 秒生成并落盘、Omni Fast 生成完成；Omni 最终 MP4保存仍需部署 `260803e3` 后复验，当前不得登记为下载成功。
+
+## [2026-08-19] Wiki 更正 | ZX Grok 生产路由
+
+- 根据用户提供的 NewAPI 后台截图，更正此前将 Grok 6s/10s/15s 写成走 `zx-video-adapter` 的错误：三个模型当前生产渠道均直连 `https://img-api.zxcode.vip`。
+- Grok 适配器代码与历史 SDD继续保留为历史实现和备用能力；现行路由不据代码是否存在判断，只以 NewAPI 渠道 Base URL为准。
+- Omni Fast/V2V 与 ZX Seedance 2.5 的独立适配器安排不变；RH 三个 Gemini Omni 与 RH Grok 的渠道边界不变。

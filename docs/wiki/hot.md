@@ -1,10 +1,10 @@
 # 热缓存
 
-> 更新：2026-08-18 | 阶段：v2.1.26 待发布；ZX 视频适配器多模型升级已本地完成
+> 更新：2026-08-18 | 阶段：v2.1.26 待发布；ZX 视频路由与 Omni 下载 Key修复待生产复验
 
 ## 当前结论
 
-- **ZX 视频适配器六模型合同已本地完成。** 三个 `grok-1.5-video-*` 固定时长别名统一支持 `0~7` 张参考图，0 张发送文生视频 JSON，1~7 张全部转成重复的 multipart `input_reference`；新增 `doubao-seedance-2-5-260628`、`omni-fast`、`omni-v2v`。Seedance 独立走 `/v1/video/generations` 与带 `role` 的 `metadata.content`，Omni 走 `/v1/videos` JSON；视频 `/content` 已改为流式代理，避免并发下载时缓冲完整 MP4。适配器 `7/7`、25 并发内容代理冒烟、创作计划与运行时定向测试、TypeScript 和差异检查通过；未部署，未用真实 ZX Key 验证。上游页面当前只明确列出 `omni-fast`，另外两个新增别名保持部分验证状态。见 [[开发/ZX视频适配器多模型升级TDD-2026-08-18]]。
+- **ZX 视频路由已按生产配置更正。** Veo 3.1/Fast 与 Grok 6s/10s/15s 的 NewAPI 渠道均直连 ZX；用户截图确认 Grok 渠道 Base URL 为 `https://img-api.zxcode.vip`。只有 `omni-fast`、`omni-v2v` 和 ZX Seedance 2.5 进入独立 `zx-video-adapter`。仓库保留 Grok 适配代码仅作历史实现与备用能力，不代表生产正在使用。Omni 创建时按任务保存 ZX 渠道 Key，下载 `/content` 时使用该 Key流式请求官方 MP4；适配器 `12/12`、focused `1088/1088`、TypeScript 和差异检查通过。用户已确认 Veo 直连成功、Grok 6 秒直连生成落盘和 Omni Fast 生成完成；提交 `260803e3` 的 Omni 下载 Key修复尚待生产复验。RH 三个 Gemini Omni 与 RH Grok 均不进入 ZX 适配器。见 [[开发/ZX视频适配器多模型升级TDD-2026-08-18]]。
 
 - **RunningHub Grok Video 低价渠道新合同已本地完成。** 文生和图生均为 `6-15秒`、UI `0.25元/秒`；图生支持 `1-7` 张参考图且单图 `10 MB`。前端和 RH adapter 共享边界都会阻止第 8 张图与 16 秒请求，endpoint、上传和轮询未变。focused `1081/1081`、RH 聚焦 `40/40`、TypeScript 通过；部署、真实渠道和账单验收待执行。见 [[开发/RunningHub Grok Video低价渠道合同变更TDD-2026-08-17]]。
 
