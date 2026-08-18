@@ -196,6 +196,7 @@ async def test_seedance_25_uses_native1080p_and_video_urls():
     assert payload["resolution"] == "native1080p"
     assert payload["duration"] == "8"
     assert payload["videoUrls"] == ["https://example.com/reference.mp4"]
+    assert payload["realPersonMode"] is True
     assert "video" not in payload
 
 

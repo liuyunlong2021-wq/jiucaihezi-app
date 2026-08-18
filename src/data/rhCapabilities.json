@@ -21706,7 +21706,8 @@
         {"key": "imageUrls", "type": "IMAGE", "required": false, "multiple": true, "maxCount": 30, "maxSizeMB": 50},
         {"key": "videoUrls", "type": "VIDEO", "required": false, "multiple": true, "maxCount": 10, "maxSizeMB": 50},
         {"key": "audioUrls", "type": "AUDIO", "required": false, "multiple": true, "maxCount": 10, "maxSizeMB": 50},
-        {"key": "ratio", "type": "LIST", "required": false, "options": ["adaptive","16:9","4:3","1:1","3:4","9:16","21:9"], "default": "adaptive"}
+        {"key": "ratio", "type": "LIST", "required": false, "options": ["adaptive","16:9","4:3","1:1","3:4","9:16","21:9"], "default": "adaptive"},
+        {"key": "realPersonMode", "type": "BOOLEAN", "required": false, "default": true}
       ]
     },
     {
