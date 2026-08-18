@@ -144,9 +144,14 @@ test('Web media download authenticates only Jiucaihezi API result URLs', { concu
       'https://api.jiucaihezi.studio/v1/videos/task_veo/content',
       'video',
     )
+    await creationMediaCache.fetchCreationMediaBlob(
+      'https://tian-shu.net/v1/videos/task_omni/content',
+      'video',
+    )
     await creationMediaCache.fetchCreationMediaBlob('https://cdn.example.com/video.mp4', 'video')
     assert.deepEqual(calls, [
       { url: 'https://api.jiucaihezi.studio/v1/videos/task_veo/content', authorization: 'Bearer media-token' },
+      { url: 'https://tian-shu.net/v1/videos/task_omni/content', authorization: 'Bearer media-token' },
       { url: 'https://cdn.example.com/video.mp4', authorization: undefined },
     ])
   } finally {
@@ -167,6 +172,12 @@ test('Desktop media download headers authenticate only Jiucaihezi API result URL
     assert.equal(
       creationMediaCache.creationResultRequestHeaders('https://cdn.example.com/video.mp4'),
       undefined,
+    )
+    assert.deepEqual(
+      creationMediaCache.creationResultRequestHeaders(
+        'https://tian-shu.net/v1/videos/task_omni/content',
+      ),
+      { Authorization: 'Bearer desktop-media-token' },
     )
   } finally {
     __resetApiKeyMemoryCacheForTests()

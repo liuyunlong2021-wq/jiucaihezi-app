@@ -384,7 +384,7 @@ test('mediaTaskStore keeps result URL validation at the media boundary', () => {
   assert.equal(source.includes('validateTaskInputs(params)'), true)
   assert.equal(source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"), true)
   assert.equal(source.includes('function assertSafeResultUrl'), false)
-  assert.equal(source.includes("if (!isAllowedCreationResultUrl(url, true)) throw new Error('媒体结果地址不安全，已阻止缓存')"), true)
+  assert.equal(source.includes("if (!isAllowedCreationResultUrl(downloadUrl, true)) throw new Error('媒体结果地址不安全，已阻止缓存')"), true)
   assert.equal(source.includes('const safeMediaUrl = assertSafeResultUrl(mediaUrl)'), false)
   assert.equal(source.includes('const safeResultUrl = assertSafeResultUrl(resultUrl)'), false)
   assert.equal(source.includes('task.resultUrl = resultUrl'), true)

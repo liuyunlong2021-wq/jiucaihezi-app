@@ -672,6 +672,11 @@ function dataUrlToBlob(dataUrl: string): Blob {
   return new Blob([bytes], { type: mime })
 }
 
+function newApiVideoContentUrl(pollPath: string): string | null {
+  const match = /^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/.exec(pollPath)
+  return match ? `${getApiBase()}/v1/videos/${encodeURIComponent(match[1])}/content` : null
+}
+
 // ---- Unified Task Poller (exported for task recovery) ----
 
 export async function pollTask(
@@ -732,8 +737,12 @@ export async function pollTask(
         if (text) return text
         console.warn('[pollTask] 状态完成但未提取到文本:', JSON.stringify(data).slice(0, 300))
       }
+      const newApiVideoUrl = kind === 'video' ? newApiVideoContentUrl(pollPath) : null
+      if (newApiVideoUrl) return newApiVideoUrl
       const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
-      if (url) return url
+      if (url) {
+        return url.startsWith('/v1/videos/') ? `${getApiBase()}${url}` : url
+      }
       const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
       if (publicVideoTask) {
         const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET', undefined, signal)

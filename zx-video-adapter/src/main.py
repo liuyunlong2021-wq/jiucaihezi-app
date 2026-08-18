@@ -384,6 +384,8 @@ def normalized_task_response(response: httpx.Response, task_id: str) -> dict:
             video_url = body["content"].get("video_url")
         if not video_url:
             raise HTTPException(status_code=502, detail="ZX completed without video_url")
+        if result["model"] in {"omni-fast", "omni-v2v"}:
+            video_url = f"/v1/videos/{task_id}/content"
         result["video_url"] = video_url
         result["completed_at"] = body.get("completed_at", int(time()))
     elif status == "failed":

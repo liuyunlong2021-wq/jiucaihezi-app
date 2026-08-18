@@ -48,6 +48,23 @@ test('media task polling stops before another request when cancelled', { concurr
   }
 })
 
+test('NewAPI video polling uses the authenticated content endpoint instead of upstream metadata URL', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({
+    status: 'completed',
+    metadata: { url: 'https://tian-shu.net/v1/videos/task_omni_001/content' },
+  })
+
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_omni_001', 'video', undefined, 1, 10))
+    assert.equal(result, 'https://api.jiucaihezi.studio/v1/videos/task_omni_001/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 
 test('media generation API rejects removed and stale model ids before execution', () => {
   for (const id of ['nano-banana', 'nano-banana-hd', 'grok-4.2-image', 'grok-4.1-image']) {

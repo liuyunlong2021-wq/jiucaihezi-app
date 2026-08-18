@@ -3,7 +3,7 @@ import unittest
 
 import httpx
 
-from src.main import SEEDANCE_TASKS, app
+from src.main import SEEDANCE_TASKS, app, normalized_task_response
 
 
 class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -314,6 +314,19 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.headers["content-type"], "video/mp4")
         self.assertEqual(response.content, b"streamed-video")
+
+
+    async def test_omni_completion_uses_adapter_content_path(self):
+        result = normalized_task_response(httpx.Response(
+            200,
+            json={
+                "id": "task_omni_1",
+                "model": "omni-fast",
+                "status": "completed",
+                "video_url": "https://tian-shu.net/v1/videos/task_omni_1/content",
+            },
+        ), "task_omni_1")
+        self.assertEqual(result["video_url"], "/v1/videos/task_omni_1/content")
 
 
 if __name__ == "__main__":

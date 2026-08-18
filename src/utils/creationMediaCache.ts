@@ -5,8 +5,13 @@ import { CREATION_GALLERY_SOURCE } from '@/utils/fileEntryFilters'
 import { writeMediaAsset, MEDIA_REF_PREFIX } from '@/utils/mediaFileWriter'
 import { useProjectStore } from '@/stores/projectStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
-import { DEFAULT_API_BASE_URL, getApiKey } from '@/services/newApiClient'
+import { getApiKey } from '@/services/newApiClient'
 import { buildMediaFilename } from '@/utils/mediaFilename'
+
+const NEW_API_VIDEO_RESULT_HOSTS = new Set([
+  'api.jiucaihezi.studio',
+  'tian-shu.net',
+])
 
 interface DownloadBase64Response {
   status: number
@@ -140,7 +145,15 @@ function normalizeContentType(headers: Record<string, string>, fallback: string)
 }
 
 export function creationResultRequestHeaders(url: string): Record<string, string> | undefined {
-  const apiKey = new URL(url).origin === new URL(DEFAULT_API_BASE_URL).origin ? getApiKey() : ''
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return undefined
+  }
+  const isNewApiVideoResult = NEW_API_VIDEO_RESULT_HOSTS.has(parsed.hostname.toLowerCase()) &&
+    /^\/v1\/videos\/[^/]+\/content$/.test(parsed.pathname)
+  const apiKey = isNewApiVideoResult ? getApiKey() : ''
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
 }
 

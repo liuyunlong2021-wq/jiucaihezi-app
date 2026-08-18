@@ -33,7 +33,7 @@ import { writeProjectMedia } from '@/utils/projectMediaWriter'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { useProjectStore } from '@/stores/projectStore'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
-import { getApiKey, initApiKey } from '@/services/newApiClient'
+import { DEFAULT_API_BASE_URL, getApiKey, initApiKey } from '@/services/newApiClient'
 import { useFileStore } from '@/composables/useFileStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { createProjectFileActions } from '@/services/projectFileActions'
@@ -52,6 +52,18 @@ import type { CanvasTaskTarget } from '@/types/canvas'
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
 export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text'
 export type TaskSource = 'chat' | 'creation'
+
+function normalizeNewApiVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId'>): string {
+  if (task.type !== 'video' || !task.upstreamTaskId) return url
+  try {
+    const parsed = new URL(url)
+    if (!/^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(parsed.pathname)) return url
+    return `${DEFAULT_API_BASE_URL}/v1/videos/${encodeURIComponent(task.upstreamTaskId)}/content`
+  } catch {
+    return url
+  }
+}
+
 export type CreationErrorCategory =
   | 'plan-validation'
   | 'upload'
@@ -570,7 +582,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
-    if (!isAllowedCreationResultUrl(url, true)) throw new Error('媒体结果地址不安全，已阻止缓存')
+    const downloadUrl = normalizeNewApiVideoResultUrl(url, task)
+    task.resultUrl = downloadUrl
+    if (!isAllowedCreationResultUrl(downloadUrl, true)) throw new Error('媒体结果地址不安全，已阻止缓存')
     const canvasOwner = canvasTaskOwner(task)
     if (task.canvasTarget && !canvasOwner) {
       markCanvasWriteUnwritten(task)
@@ -590,7 +604,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
             : task.type === 'model3d'
               ? ('model3d' as const)
             : ('image' as const)
-      const { blob, mimeType } = await fetchCreationMediaBlob(url, type, true)
+      const { blob, mimeType } = await fetchCreationMediaBlob(downloadUrl, type, true)
       const projectPath = webCreationMediaProjectPath({
         type,
         summary: task.summary,
@@ -598,7 +612,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         model: task.modelLabel || task.model,
         taskId: task.id,
         mimeType,
-        sourceUrl: url,
+        sourceUrl: downloadUrl,
         memory: task.memory,
       })
       await createProjectFileActions(createRuntimeProjectFileService()).importMedia({
@@ -615,8 +629,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
 
     try {
-      console.log('[JC] 开始下载创作结果:', url.substring(0, 80))
-      const dataUri = /^data:([^;,]+);base64,(.+)$/i.exec(url)
+      console.log('[JC] 开始下载创作结果:', downloadUrl.substring(0, 80))
+      const dataUri = /^data:([^;,]+);base64,(.+)$/i.exec(downloadUrl)
       let dataBase64 = dataUri?.[2] || ''
       let contentType = dataUri?.[1] || ''
       if (!dataUri) {
@@ -627,7 +641,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           data_base64: string
           headers?: Record<string, string>
         }>('http_download_base64', {
-          request: { url, headers: creationResultRequestHeaders(url), timeout_secs: 120 },
+          request: { url: downloadUrl, headers: creationResultRequestHeaders(downloadUrl), timeout_secs: 120 },
         })
         if (dl.status < 200 || dl.status >= 300) {
           console.warn('[JC] 创作结果下载失败 HTTP', dl.status)
@@ -664,7 +678,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           summary: task.summary,
           prompt: task.prompt || task.modelLabel || '',
           taskId: task.id,
-          sourceUrl: url,
+          sourceUrl: downloadUrl,
           memory: task.memory,
         })
         task.assetUri = filePath
@@ -685,7 +699,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         source: 'creation',
         data: dataUrl,
         sourceId: task.id,
-        sourceUrl: url,
+        sourceUrl: downloadUrl,
         name: (task.prompt || task.modelLabel || '未命名').substring(0, 50),
       })
       task.assetUri = `jc-media://${result.assetId}`

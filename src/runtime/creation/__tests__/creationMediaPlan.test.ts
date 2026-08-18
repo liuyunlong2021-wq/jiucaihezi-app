@@ -335,6 +335,7 @@ test('direct GPT Image 2 shows the configured group price', () => {
 test('ZX video registry exposes Grok 0-7 references and the three added models', () => {
   for (const seconds of [6, 10, 15]) {
     const spec = getCreationModelSpec(`newapi/zx/grok-1.5-video-${seconds}s`)
+    assert.equal(displayModelPrice(spec!), '0.2/秒')
     assert.equal(spec?.files?.images?.min, 0)
     assert.equal(spec?.files?.images?.max, 7)
     assert.throws(() => buildCreationRunPlan({
@@ -371,12 +372,12 @@ test('ZX video registry exposes Grok 0-7 references and the three added models',
   assert.equal(omniFast?.files?.images?.min, 0)
   assert.equal(omniFast?.endpoint, '/v1/videos')
   assert.equal(omniFast?.capabilities.assetFlow, 'none')
-  assert.equal(displayModelPrice(omniFast!), '1.5/次')
+  assert.equal(displayModelPrice(omniFast!), '0.18/秒')
   assert.deepEqual(omniFast?.capabilities.duration?.allowedValues, [10])
 
   const omniV2v = getCreationModelSpec('newapi/zx/omni-v2v')
   assert.equal(omniV2v?.files?.videos?.min, 1)
-  assert.equal(displayModelPrice(omniV2v!), '2/次')
+  assert.equal(displayModelPrice(omniV2v!), '0.2/秒')
   assert.deepEqual(omniV2v?.capabilities.duration?.allowedValues, [10])
   assert.equal(omniV2v?.capabilities.assetFlow, 'none')
   assert.throws(() => buildCreationRunPlan({
