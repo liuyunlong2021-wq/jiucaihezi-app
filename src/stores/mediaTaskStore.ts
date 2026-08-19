@@ -53,14 +53,30 @@ export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancell
 export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text'
 export type TaskSource = 'chat' | 'creation'
 
-function normalizeNewApiVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId'>): string {
-  if (task.type !== 'video' || !task.upstreamTaskId) return url
+function isOmniTask(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
+  const values = [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
+    .map(value => String(value || '').trim().toLowerCase())
+  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v'))
+}
+
+function normalizeOmniVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {
+  if (task.type !== 'video' || !task.upstreamTaskId || !isOmniTask(task)) return url
   try {
-    const parsed = new URL(url)
-    if (!/^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(parsed.pathname)) return url
+    const parsed = new URL(url, DEFAULT_API_BASE_URL)
+    const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
+    if (!/^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(pathname)) return url
     return `${DEFAULT_API_BASE_URL}/v1/videos/${encodeURIComponent(task.upstreamTaskId)}/content`
   } catch {
     return url
+  }
+}
+
+function isContentResultUrl(url: string): boolean {
+  try {
+    const pathname = new URL(url, DEFAULT_API_BASE_URL).pathname.replace(/^\/__jc_api(?=\/)/, '')
+    return /^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(pathname)
+  } catch {
+    return false
   }
 }
 
@@ -582,7 +598,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
-    const downloadUrl = normalizeNewApiVideoResultUrl(url, task)
+    const downloadUrl = normalizeOmniVideoResultUrl(url, task)
     task.resultUrl = downloadUrl
     if (!isAllowedCreationResultUrl(downloadUrl, true)) throw new Error('媒体结果地址不安全，已阻止缓存')
     const canvasOwner = canvasTaskOwner(task)
@@ -1006,7 +1022,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     try {
       const mediaUrl = await abortTaskExecution(
-        pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000, controller.signal),
+        pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000, controller.signal, isOmniTask(task)),
         controller.signal,
       )
       if ((task as MediaTask).status === 'cancelled') {
@@ -1177,6 +1193,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       resultUrl = task.resultUrl.trim()
     } catch {
       return false
+    }
+
+    // 历史任务可能保存了错误的全局 /content 地址；非 Omni 重新读取原始结果。
+    if (isContentResultUrl(resultUrl) && !isOmniTask(task) && task.pollUrl && task.pollKind) {
+      resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, 600, 10000, undefined, false)
     }
 
     task.status = 'running'

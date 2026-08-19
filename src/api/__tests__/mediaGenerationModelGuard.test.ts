@@ -48,7 +48,7 @@ test('media task polling stops before another request when cancelled', { concurr
   }
 })
 
-test('NewAPI video polling uses the authenticated content endpoint instead of upstream metadata URL', { concurrency: false }, async () => {
+test('Omni video polling uses the authenticated content endpoint instead of upstream metadata URL', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   globalThis.fetch = async () => Response.json({
@@ -57,8 +57,25 @@ test('NewAPI video polling uses the authenticated content endpoint instead of up
   })
 
   try {
-    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_omni_001', 'video', undefined, 1, 10))
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_omni_001', 'video', undefined, 1, 10, undefined, true))
     assert.equal(result, 'https://api.jiucaihezi.studio/v1/videos/task_omni_001/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('non-Omni NewAPI video polling keeps the original result extraction path', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({
+    status: 'completed',
+    video_url: 'https://cdn.example.com/grok.mp4',
+  })
+
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_grok_001', 'video', undefined, 1, 10))
+    assert.equal(result, 'https://cdn.example.com/grok.mp4')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

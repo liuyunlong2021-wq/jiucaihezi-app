@@ -489,7 +489,8 @@ async function executeDirectVideoRequest(
   const pollUrl = taskId ? buildVideoPollUrl(request, taskId) : undefined
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal)
+    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v'
+    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal, useContentEndpoint)
   }
   if (!mediaUrl) throw new Error('视频生成失败')
   return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' }

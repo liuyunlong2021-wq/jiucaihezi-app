@@ -677,6 +677,11 @@ function newApiVideoContentUrl(pollPath: string): string | null {
   return match ? `${getApiBase()}/v1/videos/${encodeURIComponent(match[1])}/content` : null
 }
 
+function isOmniModel(model: unknown): boolean {
+  const value = String(model || '').trim().toLowerCase()
+  return value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v')
+}
+
 // ---- Unified Task Poller (exported for task recovery) ----
 
 export async function pollTask(
@@ -686,6 +691,7 @@ export async function pollTask(
   maxPollsSec = 600,
   intervalMs = 10000,
   signal?: AbortSignal,
+  useContentEndpoint = false,
 ): Promise<string> {
   if (!isAllowedCreationPollUrl(pollPath)) throw new Error('任务轮询地址不安全，已阻止请求')
   const maxPolls = Math.ceil(maxPollsSec / (intervalMs / 1000))
@@ -737,7 +743,7 @@ export async function pollTask(
         if (text) return text
         console.warn('[pollTask] 状态完成但未提取到文本:', JSON.stringify(data).slice(0, 300))
       }
-      const newApiVideoUrl = kind === 'video' ? newApiVideoContentUrl(pollPath) : null
+      const newApiVideoUrl = kind === 'video' && useContentEndpoint ? newApiVideoContentUrl(pollPath) : null
       if (newApiVideoUrl) return newApiVideoUrl
       const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
       if (url) {
@@ -1044,7 +1050,7 @@ export async function generateVideo(
         ? `/v1/video/generations/${taskId}`
         : `/v1/videos/${taskId}`
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-      mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, params.signal)
+      mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, params.signal, isOmniModel(model))
     }
   }
   if (!mediaUrl) throw new Error('视频生成失败')

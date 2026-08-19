@@ -147,12 +147,13 @@ function normalizeContentType(headers: Record<string, string>, fallback: string)
 export function creationResultRequestHeaders(url: string): Record<string, string> | undefined {
   let parsed: URL
   try {
-    parsed = new URL(url)
+    parsed = new URL(url, 'https://api.jiucaihezi.studio')
   } catch {
     return undefined
   }
+  const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
   const isNewApiVideoResult = NEW_API_VIDEO_RESULT_HOSTS.has(parsed.hostname.toLowerCase()) &&
-    /^\/v1\/videos\/[^/]+\/content$/.test(parsed.pathname)
+    /^\/v1\/videos\/[^/]+\/content$/.test(pathname)
   const apiKey = isNewApiVideoResult ? getApiKey() : ''
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
 }
