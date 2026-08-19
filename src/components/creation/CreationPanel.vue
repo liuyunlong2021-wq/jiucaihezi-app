@@ -116,6 +116,10 @@ import type { MediaTask } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { CanvasAssetUrlResolver } from '@/components/canvas/canvasAssetUrlResolver'
+import {
+  canvasAnnotationPoint,
+  canvasMediaPosition,
+} from '@/components/canvas/canvasCoordinates'
 import { unreferencedCanvasAssetIds } from '@/components/canvas/canvasDocument'
 import {
   createCanvasFile,
@@ -841,7 +845,6 @@ const canvasPickerOpen = ref(false)
 const canvasPickerRef = ref<HTMLElement>()
 const canvasFiles = ref<CanvasFile[]>([])
 const canvasSearch = ref('')
-const videoPreview = ref<{ src: string; name: string; filePath: string } | null>(null)
 const showTaskHistory = ref(false)
 const drawMode = ref(false)
 const drawType = ref<'arrow' | 'text' | 'pen' | 'number'>('arrow')
@@ -1204,9 +1207,7 @@ type CanvasMediaOwnership = Pick<CanvasMediaRequest, 'owner' | 'loadToken'>
 const CANVAS_MEDIA_WIDTH = 320
 const CANVAS_MEDIA_HEIGHT = 352
 const CANVAS_MEDIA_GAP = 24
-const CANVAS_MEDIA_START = 32
 const VIDEO_CAPTION_HEIGHT = 28
-const VIDEO_PLAY_SIZE = 48
 let canvasRestoring = false
 const canvasInteractionBlocked = ref(false)
 const queuedCanvasMedia: CanvasMediaRequest[] = []
@@ -1309,19 +1310,6 @@ function isCurrentCanvasMediaRequest(request: CanvasMediaOwnership): boolean {
     request.owner === canvasMediaOwner() &&
     request.owner === selectedCanvasOwner()
   )
-}
-
-function nextCanvasMediaPosition() {
-  const media =
-    app?.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)])) || []
-  if (media.length) {
-    const maxRight = Math.max(
-      ...media.map(node => Number(node.x || 0) + Number(node.width || CANVAS_MEDIA_WIDTH)),
-    )
-    const minTop = Math.min(...media.map(node => Number(node.y || 0)))
-    return { x: maxRight + CANVAS_MEDIA_GAP, y: minTop }
-  }
-  return { x: CANVAS_MEDIA_START, y: CANVAS_MEDIA_START }
 }
 
 function syncSelectedReferences() {
@@ -1451,10 +1439,28 @@ async function addMediaToCanvas(
   if (!app) return
   // ponytail: a new asset should be immediately movable, not captured by the last drawing tool.
   canvasTool('select')
-  const shouldFit = !app.tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
+  const tree = app.tree
+  const shouldFit = !tree.children.some(child => Boolean(canvasStore.assets[String(child.id)]))
+  const selected = app.editor?.list
+    .filter(node => Boolean(canvasStore.assets[String((node as any).id)]))
+    .map((node: any) => {
+      const bounds = node.getBounds?.('box', tree)
+      return {
+        x: Number(bounds?.x ?? node.x ?? 0),
+        y: Number(bounds?.y ?? node.y ?? 0),
+        width: Number(bounds?.width ?? node.width ?? CANVAS_MEDIA_WIDTH),
+        height: Number(bounds?.height ?? node.height ?? CANVAS_MEDIA_HEIGHT),
+      }
+    }) || []
+  const viewport = {
+    width: app.width || canvasContainer.value?.clientWidth || 800,
+    height: app.height || canvasContainer.value?.clientHeight || 600,
+    x: Number(app.zoomLayer.x || 0),
+    y: Number(app.zoomLayer.y || 0),
+    scale: Number(app.zoomLayer.scale || 1),
+  }
   const owner = request.owner
   const path = isTauriRuntime() && owner ? mediaPathForStorage(filePath, owner) : filePath
-  const position = nextCanvasMediaPosition()
   const url = kind === 'image' ? await getMediaRuntimeUrl(filePath, owner) : ''
   if (!isCurrentCanvasMediaRequest(request)) return
   const size =
@@ -1465,6 +1471,12 @@ async function addMediaToCanvas(
         : { width: CANVAS_MEDIA_WIDTH, height: 96 }
   if (!isCurrentCanvasMediaRequest(request)) return
   if (!app) return
+  const position = canvasMediaPosition({
+    selected,
+    viewport,
+    media: size,
+    gap: CANVAS_MEDIA_GAP,
+  })
   const layer = canvasStore.addLayer({
     path,
     kind,
@@ -2481,8 +2493,6 @@ function createVideoReferenceNode(
   const width = Number(saved?.width || 320)
   const height = Number(saved?.height || 180 + VIDEO_CAPTION_HEIGHT)
   const mediaHeight = height - VIDEO_CAPTION_HEIGHT
-  const playX = (width - VIDEO_PLAY_SIZE) / 2
-  const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
   const card = new Group({
     id,
     editable: true,
@@ -2508,23 +2518,6 @@ function createVideoReferenceNode(
       stroke: getCanvasFrame(),
       strokeWidth: 1,
       cornerRadius: 6,
-    }),
-    new Rect({
-      name: 'video-play-button',
-      x: playX,
-      y: playY,
-      width: VIDEO_PLAY_SIZE,
-      height: VIDEO_PLAY_SIZE,
-      fill: 'rgba(0,0,0,0.5)',
-      cornerRadius: VIDEO_PLAY_SIZE / 2,
-    }),
-    new LeaferText({
-      name: 'video-play',
-      x: playX + 13,
-      y: playY + 8,
-      text: '▶',
-      fill: '#fff',
-      fontSize: 24,
     }),
     new LeaferText({
       name: 'video-label',
@@ -2746,21 +2739,10 @@ async function hydrateAudioReferenceNode(
 
 function setVideoReferenceLayout(card: Group, width: number, mediaHeight: number) {
   const height = mediaHeight + VIDEO_CAPTION_HEIGHT
-  const playX = (width - VIDEO_PLAY_SIZE) / 2
-  const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
   card.set({ width, height })
   for (const item of card.children as any[]) {
     if (item.name === 'video-frame') item.set({ width, height: mediaHeight })
     else if (item.name === 'video-poster') item.set({ x: 0, y: 0, width, height: mediaHeight })
-    else if (item.name === 'video-play-button')
-      item.set({
-        x: playX,
-        y: playY,
-        width: VIDEO_PLAY_SIZE,
-        height: VIDEO_PLAY_SIZE,
-        cornerRadius: VIDEO_PLAY_SIZE / 2,
-      })
-    else if (item.name === 'video-play') item.set({ x: playX + 13, y: playY + 8 })
     else if (item.name === 'video-label') item.set({ x: 0, y: mediaHeight + 8, width })
   }
 }
@@ -2781,28 +2763,6 @@ async function hydrateVideoReferenceNode(
   canContinue: CanvasLoadGuard = () => true,
 ) {
   if (!canContinue()) return
-  card.on_(PointerEvent.TAP, (event: any) => {
-    const point = event.getLocalPoint(card)
-    const frame = card.children.find(child => child.name === 'video-frame') as any
-    const cardWidth = Number(card.width || 320)
-    const mediaHeight = Number(
-      frame?.height || Number(card.height || 180 + VIDEO_CAPTION_HEIGHT) - VIDEO_CAPTION_HEIGHT,
-    )
-    const playX = (cardWidth - VIDEO_PLAY_SIZE) / 2
-    const playY = (mediaHeight - VIDEO_PLAY_SIZE) / 2
-    if (
-      point.x >= playX &&
-      point.x <= playX + VIDEO_PLAY_SIZE &&
-      point.y >= playY &&
-      point.y <= playY + VIDEO_PLAY_SIZE
-    ) {
-      event.stop?.()
-      void openVideoPreview(filePath, mediaDisplayName(filePath), owner)
-    }
-  })
-  card.on_(PointerEvent.DOUBLE_TAP, () => {
-    void openVideoPreview(filePath, mediaDisplayName(filePath), owner)
-  })
   try {
     const dataUrl = await getMediaRuntimeUrl(filePath, owner)
     if (!canContinue()) return
@@ -2833,25 +2793,6 @@ async function hydrateVideoReferenceNode(
     }
     scheduleCanvasSave()
   } catch {}
-}
-
-async function openVideoPreview(filePath: string, name: string, owner = canvasOwner.value) {
-  videoPreview.value = { src: await getMediaDisplayUrl(filePath, owner), name, filePath }
-}
-
-function closeVideoPreview() {
-  videoPreview.value = null
-}
-
-async function handleVideoPreviewError() {
-  const preview = videoPreview.value
-  if (!preview || !isTauriRuntime()) return
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('open_in_shell', { path: preview.filePath })
-  } finally {
-    closeVideoPreview()
-  }
 }
 
 function runCanvasMore(action: string) {
@@ -3053,7 +2994,7 @@ function canvasTool(action: string) {
         const candidates = selectedImage ? [selectedImage] : imageNodes()
         for (const node of candidates) {
           const image = getCanvasImageContent(node)!
-          const point = event.getLocalPoint(node)
+          const point = canvasAnnotationPoint(event, node)
           if (point.x >= 0 && point.x <= Number(image.width || 0) && point.y >= 0 && point.y <= Number(image.height || 0)) {
             return { node, point, assetId: String(node.id) }
           }
@@ -3063,7 +3004,7 @@ function canvasTool(action: string) {
       const imageAtEventForNode = (event: any, node: any) => {
         const image = getCanvasImageContent(node)
         if (!image) return undefined
-        const point = event.getLocalPoint(node)
+        const point = canvasAnnotationPoint(event, node)
         return point.x >= 0 && point.x <= Number(image.width || 0) && point.y >= 0 && point.y <= Number(image.height || 0)
           ? point
           : undefined
@@ -4024,23 +3965,6 @@ const canSend = computed(
         </div>
       </Teleport>
     </div>
-    <Teleport to="body">
-      <div v-if="videoPreview" class="cp-video-preview" @click.self="closeVideoPreview">
-        <div class="cp-video-preview-dialog">
-          <div>
-            <span>{{ videoPreview.name }}</span
-            ><button title="关闭" @click="closeVideoPreview"><JcIcon name="close" /></button>
-          </div>
-          <video
-            :src="videoPreview.src"
-            controls
-            autoplay
-            playsinline
-            @error="handleVideoPreviewError"
-          />
-        </div>
-      </div>
-    </Teleport>
     <MediaViewer
       v-if="taskPreview"
       :show="true"
@@ -4892,45 +4816,6 @@ const canSend = computed(
 }
 .cp-flip-horizontal {
   transform: scaleX(-1);
-}
-.cp-video-preview {
-  position: fixed;
-  inset: 0;
-  z-index: 10001;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.48);
-}
-.cp-video-preview-dialog {
-  width: min(880px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  background: var(--paper);
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  overflow: hidden;
-}
-.cp-video-preview-dialog > div {
-  height: 40px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 10px;
-  color: var(--ink1);
-  font-size: 13px;
-}
-.cp-video-preview-dialog button {
-  width: 28px;
-  height: 28px;
-  border: 0;
-  background: transparent;
-  color: var(--ink2);
-  cursor: pointer;
-}
-.cp-video-preview-dialog video {
-  display: block;
-  width: 100%;
-  max-height: calc(100vh - 88px);
-  background: #000;
 }
 /* ─── 右键菜单 ─── */
 .cp-ctx-menu {

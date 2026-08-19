@@ -36,7 +36,6 @@ test('shared canvas creation creates a project resource and publishes one event'
   assert.equal(changes.length, 1)
   assert.equal(changes[0].type, 'created')
 })
-
 test('shared canvas creation accepts an explicit safe project path', async () => {
   const files = new Map<string, string>()
   const adapter: ProjectFileAdapter = {
@@ -61,6 +60,277 @@ test('shared canvas creation accepts an explicit safe project path', async () =>
 
   assert.equal(result.resource.path, 'jc-canvas/custom.jccanvas')
   assert.equal(JSON.parse(files.get(result.resource.path)!).canvasId, 'custom')
+})
+
+test('oversized Base64 canvas is backed up and repaired without raising the normal read limit', async () => {
+  const raw = JSON.stringify({
+    version: 3,
+    canvasId: 'recovered',
+    updatedAt: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    scene: [
+      {
+        tag: 'Group',
+        id: 'image-one',
+        x: 10,
+        y: 20,
+        children: [
+          { tag: 'Image', name: 'canvas-image', url: `data:image/png;base64,${'A'.repeat(200)}` },
+          { tag: 'Text', assetId: 'image-one', text: '1' },
+        ],
+      },
+    ],
+    assets: {
+      'image-one': {
+        id: 'image-one',
+        kind: 'image',
+        resource: { path: 'jc-media/images/one.png' },
+        source: 'import',
+        createdAt: 1,
+      },
+    },
+  })
+  const path = 'jc-canvas/large.jccanvas'
+  const files = new Map([[path, raw]])
+  const readLimits: Array<number | undefined> = []
+  const adapter: ProjectFileAdapter = {
+    runtime: 'desktop',
+    async list() {
+      return [{ path, isDirectory: false, size: raw.length, mimeType: 'application/json' }]
+    },
+    async readText(_owner, requestedPath, maxBytes) {
+      readLimits.push(maxBytes)
+      const content = files.get(requestedPath)
+      if (content === undefined) throw new Error('missing')
+      return {
+        content: maxBytes === 30_000_000 ? '' : content,
+        size: content.length,
+        truncated: maxBytes === 30_000_000,
+        revision: { value: 'r1', size: content.length },
+      }
+    },
+    async writeText(_owner, requestedPath, content) {
+      files.set(requestedPath, content)
+      return { status: 'saved', revision: { value: 'r2', size: content.length } }
+    },
+    async createText(_owner, requestedPath, content) {
+      files.set(requestedPath, content)
+      return {
+        path: requestedPath,
+        isDirectory: false,
+        size: content.length,
+        mimeType: 'application/json',
+      }
+    },
+    async rename() {
+      throw new Error('not used')
+    },
+    async remove() {
+      throw new Error('not used')
+    },
+  }
+  const actions = createProjectFileActions(createProjectFileService(adapter))
+  const [resource] = await actions.listCanvases('/project')
+
+  const result = await actions.openCanvas(resource)
+  const repaired = files.get(path) || ''
+  const backup = [...files].find(([name]) => name.startsWith(`${path}.base64-leak-backup-`))
+
+  assert.deepEqual(readLimits, [30_000_000, 200_000_000])
+  assert.equal(backup?.[1], raw)
+  assert.equal(repaired.includes('base64'), false)
+  assert.equal(result.document.scene[0].children?.[1].text, '1')
+  assert.equal(result.document.assets['image-one'].resource.path, 'jc-media/images/one.png')
+})
+
+function oversizedCanvasAdapter(
+  options: {
+    runtime?: 'desktop' | 'web'
+    recoveryContent?: string
+    recoveryTruncated?: boolean
+    backupError?: Error
+    writeStatus?: 'saved' | 'conflict'
+  } = {},
+) {
+  const path = 'jc-canvas/recovery.jccanvas'
+  const valid = JSON.stringify({
+    version: 3,
+    canvasId: 'recovery',
+    updatedAt: 1,
+    viewport: { x: 0, y: 0, zoom: 1 },
+    scene: [{ tag: 'Image', id: 'image-one', url: 'data:image/png;base64,AAAA' }],
+    assets: {
+      'image-one': {
+        id: 'image-one',
+        kind: 'image',
+        resource: { path: 'jc-media/images/one.png' },
+        source: 'import',
+        createdAt: 1,
+      },
+    },
+  })
+  const reads: Array<number | undefined> = []
+  let backupCreated = false
+  let writeCalled = false
+  const adapter: ProjectFileAdapter = {
+    runtime: options.runtime || 'desktop',
+    async list() {
+      return [{ path, isDirectory: false, size: valid.length, mimeType: 'application/json' }]
+    },
+    async readText(_owner, _path, maxBytes) {
+      reads.push(maxBytes)
+      if (maxBytes === 30_000_000)
+        return {
+          content: '',
+          size: valid.length,
+          truncated: true,
+          revision: { value: 'r1', size: valid.length },
+        }
+      const content = options.recoveryContent ?? valid
+      return {
+        content,
+        size: content.length,
+        truncated: options.recoveryTruncated || false,
+        revision: { value: 'r1', size: content.length },
+      }
+    },
+    async writeText(_owner, _path, content) {
+      writeCalled = true
+      const status = options.writeStatus || 'saved'
+      return status === 'saved'
+        ? { status, revision: { value: 'r2', size: content.length } }
+        : {
+            status,
+            current: {
+              content: valid,
+              size: valid.length,
+              truncated: false,
+              revision: { value: 'r2', size: valid.length },
+            },
+          }
+    },
+    async createText(_owner, requestedPath, content) {
+      if (options.backupError) throw options.backupError
+      backupCreated = true
+      return {
+        path: requestedPath,
+        isDirectory: false,
+        size: content.length,
+        mimeType: 'application/json',
+      }
+    },
+    async rename() {
+      throw new Error('not used')
+    },
+    async remove() {
+      throw new Error('not used')
+    },
+  }
+  return {
+    actions: createProjectFileActions(createProjectFileService(adapter)),
+    reads,
+    backupCreated: () => backupCreated,
+    writeCalled: () => writeCalled,
+  }
+}
+
+test('Web refuses an oversized canvas without a second unbounded read', async () => {
+  const fixture = oversizedCanvasAdapter({ runtime: 'web' })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /超过 30 MB/)
+
+  assert.deepEqual(fixture.reads, [30_000_000])
+  assert.equal(fixture.backupCreated(), false)
+  assert.equal(fixture.writeCalled(), false)
+})
+
+test('oversized canvas recovery refuses a read still truncated at 200 MB', async () => {
+  const fixture = oversizedCanvasAdapter({ recoveryTruncated: true })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /无法安全读取/)
+
+  assert.equal(fixture.backupCreated(), false)
+  assert.equal(fixture.writeCalled(), false)
+})
+
+test('oversized canvas recovery refuses invalid JSON before backup', async () => {
+  const fixture = oversizedCanvasAdapter({ recoveryContent: '{"url":"data:image/png;base64,AAAA"' })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /画布文件格式无效/)
+
+  assert.equal(fixture.backupCreated(), false)
+  assert.equal(fixture.writeCalled(), false)
+})
+
+test('oversized canvas recovery refuses content that normalization cannot remove', async () => {
+  const fixture = oversizedCanvasAdapter({
+    recoveryContent: JSON.stringify({
+      version: 3,
+      canvasId: 'unsafe',
+      updatedAt: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      scene: [{ tag: 'Text', id: 'note', text: 'data:image/png;base64,AAAA' }],
+      assets: {},
+    }),
+  })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /无法安全修复/)
+
+  assert.equal(fixture.backupCreated(), false)
+  assert.equal(fixture.writeCalled(), false)
+})
+
+test('oversized canvas recovery refuses a normalized document still at least 30 MB', async () => {
+  const fixture = oversizedCanvasAdapter({
+    recoveryContent: JSON.stringify({
+      version: 3,
+      canvasId: 'still-large',
+      updatedAt: 1,
+      viewport: { x: 0, y: 0, zoom: 1 },
+      scene: [
+        { tag: 'Image', id: 'image-one', url: 'data:image/png;base64,AAAA' },
+        { tag: 'Text', id: 'large-note', text: 'x'.repeat(30_000_000) },
+      ],
+      assets: {
+        'image-one': {
+          id: 'image-one',
+          kind: 'image',
+          resource: { path: 'jc-media/images/one.png' },
+          source: 'import',
+          createdAt: 1,
+        },
+      },
+    }),
+  })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /无法安全修复/)
+
+  assert.equal(fixture.backupCreated(), false)
+  assert.equal(fixture.writeCalled(), false)
+})
+
+test('oversized canvas recovery never rewrites when backup creation fails', async () => {
+  const fixture = oversizedCanvasAdapter({ backupError: new Error('disk full') })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /disk full/)
+
+  assert.equal(fixture.writeCalled(), false)
+})
+
+test('oversized canvas recovery preserves the backup and reports a write conflict', async () => {
+  const fixture = oversizedCanvasAdapter({ writeStatus: 'conflict' })
+  const [resource] = await fixture.actions.listCanvases('/project')
+
+  await assert.rejects(() => fixture.actions.openCanvas(resource), /外部修改/)
+
+  assert.equal(fixture.backupCreated(), true)
+  assert.equal(fixture.writeCalled(), true)
 })
 
 test('shared media import creates a media resource under the project media directory', async () => {

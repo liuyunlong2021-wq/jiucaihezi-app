@@ -95,7 +95,7 @@ test('creation panel refreshes the live Leafer renderer when the theme changes',
   assert.doesNotMatch(source, /app as any\)\.config\.fill/)
 })
 
-test('creation panel uses a static video reference node and native preview instead of a canvas player', () => {
+test('creation panel uses a static video reference node without a fake canvas play control', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /moveLayer/)
@@ -104,11 +104,9 @@ test('creation panel uses a static video reference node and native preview inste
   assert.match(source, /showCanvasMore/)
   assert.match(source, /extractVideoFirstFrameThumbnail/)
   assert.match(source, /PointerEvent\.TAP/)
-  assert.match(source, /getLocalPoint\(card\)/)
-  assert.match(source, /handleVideoPreviewError/)
-  assert.match(source, /open_in_shell/)
+  assert.doesNotMatch(source, /video-play-button/)
+  assert.doesNotMatch(source, /videoPreview/)
   assert.match(source, /createVideoReferenceNode/)
-  assert.match(source, /openVideoPreview/)
   assert.match(source, /stripRuntimeVideoPoster/)
   assert.match(source, /getMediaSubmissionUrl/)
   assert.match(
@@ -116,7 +114,7 @@ test('creation panel uses a static video reference node and native preview inste
     /async function getMediaSubmissionUrl\(filePath: string, owner: string, maxBytes\?: number\): Promise<string>/,
   )
   assert.match(source, /result\.truncated/)
-  assert.match(source, /nextCanvasMediaPosition/)
+  assert.match(source, /canvasMediaPosition/)
   assert.match(source, /fitCanvasImageSize/)
   assert.match(source, /selectCanvasReferences/)
   assert.match(source, /EditorEvent\.AFTER_SELECT/)
@@ -228,6 +226,19 @@ test('canvas media nodes are draggable and selected canvas references drive the 
   assert.match(source, /canvasReferenceRunPlan\.value\?\.mode \|\| currentRunPlan\.value\?\.mode/)
 })
 
+test('new canvas media snapshots tree-relative placement and keeps video as a static reference', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const addMedia =
+    source.match(/async function addMediaToCanvas[\s\S]*?\n}\n\nasync function flushQueuedCanvasMedia/)?.[0] || ''
+
+  assert.match(addMedia, /const tree = app\.tree[\s\S]*?node\.getBounds\?\.\('box', tree\)/)
+  assert.ok(addMedia.indexOf("getBounds?.('box', tree)") < addMedia.indexOf('await getMediaRuntimeUrl'))
+  assert.ok(addMedia.indexOf('zoomLayer.scale') < addMedia.indexOf('await getMediaRuntimeUrl'))
+  assert.match(addMedia, /const position = canvasMediaPosition\(\{[\s\S]*?selected,[\s\S]*?viewport/)
+  assert.doesNotMatch(source, /function nextCanvasMediaPosition/)
+  assert.doesNotMatch(source, /video-play-button|openCanvasVideoAtEvent/)
+})
+
 test('selected canvas audio is submitted as a Seed Audio reference', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
@@ -243,7 +254,8 @@ test('canvas annotations are local to the selected image and export only that im
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /function createCanvasImageNode[\s\S]*?hitChildren: false/)
-  assert.match(source, /const imageAtEvent = \(event: any\)[\s\S]*?event\.getLocalPoint\(node\)/)
+  assert.match(source, /import \{[\s\S]*?canvasAnnotationPoint,[\s\S]*?\} from '@\/components\/canvas\/canvasCoordinates'/)
+  assert.doesNotMatch(source, /event\.getLocalPoint\(node\)/)
   assert.match(source, /new Pen\(\{ id: crypto\.randomUUID\(\), assetId: target\.assetId, editable: true \}\)/)
   assert.match(source, /new Arrow\(\{[\s\S]{0,100}assetId: target\.assetId,/)
   assert.match(source, /new LeaferText\(\{[\s\S]{0,100}assetId: target\.assetId,/)
@@ -334,20 +346,6 @@ test('canvas text annotation saves when the inner editor closes', () => {
 
   assert.match(source, /InnerEditorEvent\.CLOSE, scheduleCanvasSave/)
   assert.match(source, /app\?\.editor\?\.openInnerEditor\(text, true\)/)
-})
-
-test('new canvas media is placed beside the existing media bounds', () => {
-  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
-
-  assert.match(
-    source,
-    /const media =[\s\S]{0,80}app\?\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\) \|\| \[\]/,
-  )
-  assert.match(
-    source,
-    /const maxRight = Math\.max\(\s+\.\.\.media\.map\(node => Number\(node\.x \|\| 0\) \+ Number\(node\.width \|\| CANVAS_MEDIA_WIDTH\)\),?\s+\)/,
-  )
-  assert.match(source, /x: maxRight \+ CANVAS_MEDIA_GAP/)
 })
 
 test('canvas restore skips Leafer runtime nodes and supports Ctrl+S persistence', () => {

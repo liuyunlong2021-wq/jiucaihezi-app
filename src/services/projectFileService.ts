@@ -186,7 +186,7 @@ export interface ProjectFileService {
   list(owner: string): Promise<ProjectResource[]>
   listDirectory(owner: string, path: string): Promise<ProjectResource[]>
   searchPaths(owner: string, query: string, limit: number): Promise<ProjectResource[]>
-  readText(resource: ProjectResource): Promise<ProjectTextRead>
+  readText(resource: ProjectResource, maxBytes?: number): Promise<ProjectTextRead>
   writeText(
     resource: ProjectResource,
     content: string,
@@ -458,11 +458,11 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
             .slice(0, limit)
       return entries.map(entry => resourceFromEntry(adapter.runtime, owner, entry))
     },
-    async readText(resource) {
+    async readText(resource, maxBytes) {
       return await adapter.readText(
         resource.owner,
         resource.path,
-        resource.kind === 'canvas' ? 30_000_000 : undefined,
+        maxBytes ?? (resource.kind === 'canvas' ? 30_000_000 : undefined),
       )
     },
     async writeText(resource, content, expectedRevision) {

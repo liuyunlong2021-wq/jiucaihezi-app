@@ -58,6 +58,42 @@ function parseCanvasRead(resource: ProjectResource, read: ProjectTextRead): Proj
   return { resource, document: parseCanvasDocument(read.content), revision: read.revision }
 }
 
+const CANVAS_MAX_BYTES = 30_000_000
+const CANVAS_RECOVERY_MAX_BYTES = 200_000_000
+
+async function recoverOversizedCanvas(
+  projectFiles: ProjectFileService,
+  resource: ProjectResource,
+): Promise<ProjectCanvasOpenResult> {
+  const read = await projectFiles.readText(resource, CANVAS_RECOVERY_MAX_BYTES)
+  if (read.truncated || !read.content.includes('data:image')) {
+    throw new Error('画布文件超过 30 MB，无法安全读取')
+  }
+  const document = parseCanvasDocument(read.content)
+  const content = JSON.stringify(document)
+  if (
+    new TextEncoder().encode(content).byteLength >= CANVAS_MAX_BYTES ||
+    content.includes('data:image')
+  ) {
+    throw new Error('画布文件超过 30 MB，无法安全修复')
+  }
+
+  const stamp = new Date().toISOString().replace(/\D/g, '').slice(0, 14)
+  await projectFiles.createText(
+    resource.owner,
+    `${resource.path}.base64-leak-backup-${stamp}`,
+    read.content,
+  )
+  const saved = await projectFiles.writeText(resource, content, read.revision)
+  if (saved.status !== 'saved') throw new Error('画布文件已被外部修改，未执行自动修复')
+  return parseCanvasRead(resource, {
+    content,
+    size: new TextEncoder().encode(content).byteLength,
+    truncated: false,
+    revision: saved.revision,
+  })
+}
+
 function binaryDataUrl(data: Uint8Array, mimeType?: string): string {
   let binary = ''
   for (let offset = 0; offset < data.length; offset += 0x8000) binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000))
@@ -130,7 +166,10 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
     },
     async openCanvas(resource: ProjectResource): Promise<ProjectCanvasOpenResult> {
       requireCanvasResource(resource)
-      return parseCanvasRead(resource, await projectFiles.readText(resource))
+      const read = await projectFiles.readText(resource)
+      return read.truncated && resource.runtime === 'desktop'
+        ? recoverOversizedCanvas(projectFiles, resource)
+        : parseCanvasRead(resource, read)
     },
     async saveCanvas(input: SaveProjectCanvasInput): Promise<ProjectFileWriteResult> {
       requireCanvasResource(input.resource)
