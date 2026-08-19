@@ -160,7 +160,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'veo-3.1-generate-preview',
     provider: 'gateway-video',
-    maxFiles: 1,
+    maxFiles: 3,
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
@@ -176,7 +176,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'veo-3.1-fast-generate-preview',
     provider: 'gateway-video',
-    maxFiles: 1,
+    maxFiles: 3,
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },

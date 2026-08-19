@@ -281,7 +281,33 @@ test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
     assert.equal(textOnly.mode, 'text-to-video')
     assert.equal(withImage.mode, 'image-to-video')
     assert.equal(withImage.debug.referenceImageCount, 1)
+    assert.equal(spec?.files?.images?.max, 3)
+    const withThreeImages = buildCreationRunPlan({
+      modelId,
+      params: {
+        prompt: '让产品动起来',
+        duration: 4,
+        resolution: '720p',
+        ratio: '16:9',
+        images: ['https://example.com/ref-1.jpg', 'https://example.com/ref-2.jpg', 'https://example.com/ref-3.jpg'],
+      },
+    })
+    assert.equal(withThreeImages.debug.referenceImageCount, 3)
+    assert.throws(
+      () => buildCreationRunPlan({
+        modelId,
+        params: {
+          prompt: '超过上游限制',
+          duration: 4,
+          resolution: '720p',
+          ratio: '16:9',
+          images: Array.from({ length: 4 }, (_, index) => `https://example.com/ref-${index}.jpg`),
+        },
+      }),
+      /参考图最多支持 3 个/,
+    )
   }
+  assert.equal(getCreationModelSpec('runninghub/api/rh-video-v31-fast')?.files?.images?.max, 3)
 })
 
 test('ZX Grok fixed-duration aliases support text and reference-image video', () => {

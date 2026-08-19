@@ -578,7 +578,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     apiStyle: 'openai-videos',
     mode: 'text-to-video',
     contractStatus: 'verified',
-    files: { images: { min: 0, max: 1 } },
+    files: { images: { min: 0, max: 3 } },
     duration: { allowedValues: [4, 6, 8] },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
@@ -597,7 +597,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     apiStyle: 'openai-videos',
     mode: 'text-to-video',
     contractStatus: 'verified',
-    files: { images: { min: 0, max: 1 } },
+    files: { images: { min: 0, max: 3 } },
     duration: { allowedValues: [4, 6, 8] },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
