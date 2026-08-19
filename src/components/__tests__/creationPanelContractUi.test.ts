@@ -243,20 +243,32 @@ test('canvas annotations are local to the selected image and export only that im
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /function createCanvasImageNode[\s\S]*?hitChildren: false/)
-  assert.match(source, /const pointInImage = \(event: any\) => \{\s+const point = event\.getLocalPoint\(imageNode\)/)
-  assert.match(source, /new Pen\(\{ id: crypto\.randomUUID\(\), assetId, editable: true \}\)/)
-  assert.match(source, /new Arrow\(\{[\s\S]{0,80}assetId,/)
-  assert.match(source, /new LeaferText\(\{[\s\S]{0,80}assetId,/)
-  assert.match(source, /new Group\(\{[\s\S]{0,80}assetId,/)
-  assert.match(source, /imageNode\.add\(pen\)/)
-  assert.match(source, /imageNode\.add\(drawing\)/)
-  assert.match(source, /imageNode\.add\(text\)/)
-  assert.match(source, /imageNode\.add\(marker\)/)
+  assert.match(source, /const imageAtEvent = \(event: any\)[\s\S]*?event\.getLocalPoint\(node\)/)
+  assert.match(source, /new Pen\(\{ id: crypto\.randomUUID\(\), assetId: target\.assetId, editable: true \}\)/)
+  assert.match(source, /new Arrow\(\{[\s\S]{0,100}assetId: target\.assetId,/)
+  assert.match(source, /new LeaferText\(\{[\s\S]{0,100}assetId: target\.assetId,/)
+  assert.match(source, /new Group\(\{[\s\S]{0,100}assetId: target\.assetId,/)
+  assert.match(source, /drawingImage\.add\(pen\)/)
+  assert.match(source, /drawingImage\.add\(drawing\)/)
+  assert.match(source, /target\.node\.add\(text\)/)
+  assert.match(source, /target\.node\.add\(marker\)/)
   assert.match(source, /function getCanvasImageSubmissionUrl[\s\S]*?hasCanvasImageAnnotations[\s\S]*?const composite = node\.clone\(\)[\s\S]*?composite\.export\('png'/)
   assert.match(source, /clip: \{ x: 0, y: 0, width: Number\(image\.width\), height: Number\(image\.height\) \}/)
   assert.match(source, /size: naturalSize/)
   assert.match(source, /asset\.kind === 'image'\s+\? await getCanvasImageSubmissionUrl\(node, asset\.id, mediaPath, owner, maxBytes\)/)
   assert.match(source, /if \(maxBytes \&\& exported\.data\.size > maxBytes\)/)
+  assert.match(source, /const imageAtEvent = \(event: any\)/)
+  assert.match(source, /const imageAtEventForNode = \(event: any, node: any\)/)
+  assert.doesNotMatch(source, /请先选中一张图片后标注/)
+})
+
+test('canvas references use horizontal order only', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const selection = source.match(/const assets = selected[\s\S]*?\.sort\(([\s\S]*?)\n        \)/)?.[1] || ''
+
+  assert.match(selection, /visualLeft\(a\.node\) - visualLeft\(b\.node\)/)
+  assert.doesNotMatch(selection, /node\.y/)
+  assert.match(source, /const visualLeft = \(node: any\)[\s\S]*?node\.getBounds\?\.\('world'\)/)
 })
 
 test('canvas pen offers five visual stroke widths and uses the selected width', () => {
@@ -292,18 +304,36 @@ test('canvas viewport tools keep the viewport center stable', () => {
   assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
 })
 
-test('canvas fit arranges media into a centered grid before framing it', () => {
+test('canvas fit arranges media into one centered horizontal row before framing it', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /function arrangeCanvasMedia\(\)/)
   assert.match(source, /filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
-  assert.match(source, /const columns = Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
+  assert.match(source, /const totalWidth = media\.reduce/)
+  assert.match(source, /nextX \+= width \+ gap/)
+  assert.doesNotMatch(source, /const columns = Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
   assert.match(source, /canvasStore\.updateLayerPosition\(String\(node\.id\), node\.x, node\.y\)/)
   assert.match(
     source,
     /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/,
   )
   assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+})
+
+test('canvas fit keeps every media item in one horizontal row', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const arrange = source.match(/function arrangeCanvasMedia\(\)[\s\S]*?\n}\n\nfunction fitCanvasViewport/)?.[0] || ''
+
+  assert.match(arrange, /const totalWidth = media\.reduce/)
+  assert.match(arrange, /nextX \+= width \+ gap/)
+  assert.doesNotMatch(arrange, /Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
+})
+
+test('canvas text annotation saves when the inner editor closes', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /InnerEditorEvent\.CLOSE, scheduleCanvasSave/)
+  assert.match(source, /app\?\.editor\?\.openInnerEditor\(text, true\)/)
 })
 
 test('new canvas media is placed beside the existing media bounds', () => {

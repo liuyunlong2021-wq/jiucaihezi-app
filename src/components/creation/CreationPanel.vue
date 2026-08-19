@@ -19,7 +19,7 @@ import {
   UI,
 } from 'leafer-ui'
 import { Arrow } from '@leafer-in/arrow'
-import { EditorEvent } from '@leafer-in/editor'
+import { EditorEvent, InnerEditorEvent } from '@leafer-in/editor'
 import '@leafer-in/viewport'
 import '@leafer-in/resize'
 import '@leafer-in/arrow'
@@ -638,15 +638,17 @@ async function runCreationViaTaskStore() {
         cpState.progressText = isTauriRuntime() ? '请先选择项目文件夹' : '请先选择 Web 项目'
         return
       }
+      const visualLeft = (node: any) => {
+        const bounds = node.getBounds?.('world') || node.getBounds?.()
+        return Number(bounds?.x ?? node.x ?? 0)
+      }
       const assets = selected
         .map(node => ({ node, asset: canvasStore.assets[String(node.id)] }))
         .filter((entry): entry is { node: any; asset: NonNullable<typeof entry.asset> } =>
           Boolean(entry.asset),
         )
         .sort(
-          (a, b) =>
-            Number(a.node.y || 0) - Number(b.node.y || 0) ||
-            Number(a.node.x || 0) - Number(b.node.x || 0),
+          (a, b) => visualLeft(a.node) - visualLeft(b.node),
         )
       const fileLimits = currentCreationSpec.value?.files
       const selectedImageCount = assets.filter(({ asset }) => asset.kind === 'image').length
@@ -2944,20 +2946,16 @@ function arrangeCanvasMedia() {
   if (!media.length) return
 
   const gap = 32
-  const columns = Math.ceil(Math.sqrt(media.length))
-  const rows = Math.ceil(media.length / columns)
-  const cellWidth = Math.max(...media.map(node => Number(node.width || CANVAS_MEDIA_WIDTH)))
   const cellHeight = Math.max(...media.map(node => Number(node.height || CANVAS_MEDIA_HEIGHT)))
-  const totalHeight = rows * cellHeight + (rows - 1) * gap
-  const startY = -totalHeight / 2
+  const totalWidth = media.reduce((sum, node) => sum + Number(node.width || CANVAS_MEDIA_WIDTH), 0) + (media.length - 1) * gap
+  let nextX = -totalWidth / 2
 
   media.forEach((node, index) => {
-    const column = index % columns
-    const row = Math.floor(index / columns)
-    const itemsInRow = Math.min(columns, media.length - row * columns)
-    const rowWidth = itemsInRow * cellWidth + (itemsInRow - 1) * gap
-    node.x = -rowWidth / 2 + column * (cellWidth + gap) + (cellWidth - Number(node.width || 0)) / 2
-    node.y = startY + row * (cellHeight + gap) + (cellHeight - Number(node.height || 0)) / 2
+    const width = Number(node.width || CANVAS_MEDIA_WIDTH)
+    const height = Number(node.height || CANVAS_MEDIA_HEIGHT)
+    node.x = nextX
+    node.y = (cellHeight - height) / 2
+    nextX += width + gap
     canvasStore.updateLayerPosition(String(node.id), node.x, node.y)
   })
   saveCanvasHistory()
@@ -3046,20 +3044,27 @@ function canvasTool(action: string) {
       activeDrawType.value = drawMode.value ? drawType.value : null
       if (!drawMode.value) break
 
-      const imageNode = selectedCanvasImageNode()
-      if (!imageNode) {
-        drawMode.value = false
-        activeDrawType.value = null
-        cpState.progressText = '请先选中一张图片后标注'
-        break
+      const selectedImage = selectedCanvasImageNode()
+      const imageNodes = () =>
+        app!.tree.children.filter(node =>
+          canvasStore.assets[String(node.id)]?.kind === 'image' && Boolean(getCanvasImageContent(node)),
+        ) as any[]
+      const imageAtEvent = (event: any) => {
+        const candidates = selectedImage ? [selectedImage] : imageNodes()
+        for (const node of candidates) {
+          const image = getCanvasImageContent(node)!
+          const point = event.getLocalPoint(node)
+          if (point.x >= 0 && point.x <= Number(image.width || 0) && point.y >= 0 && point.y <= Number(image.height || 0)) {
+            return { node, point, assetId: String(node.id) }
+          }
+        }
+        return undefined
       }
-      const assetId = String(imageNode.id)
-      const image = getCanvasImageContent(imageNode)!
-      const imageWidth = Number(image.width || 0)
-      const imageHeight = Number(image.height || 0)
-      const pointInImage = (event: any) => {
-        const point = event.getLocalPoint(imageNode)
-        return point.x >= 0 && point.x <= imageWidth && point.y >= 0 && point.y <= imageHeight
+      const imageAtEventForNode = (event: any, node: any) => {
+        const image = getCanvasImageContent(node)
+        if (!image) return undefined
+        const point = event.getLocalPoint(node)
+        return point.x >= 0 && point.x <= Number(image.width || 0) && point.y >= 0 && point.y <= Number(image.height || 0)
           ? point
           : undefined
       }
@@ -3071,43 +3076,45 @@ function canvasTool(action: string) {
       const isNumber = drawType.value === 'number'
       let drawing: any = null
       let pen: Pen | null = null
+      let drawingImage: any = null
       let startPoint: { x: number; y: number } | undefined
 
       const onStart = (e: any) => {
-        const point = pointInImage(e)
-        if (!point) return
+        const target = imageAtEvent(e)
+        if (!target) return
+        drawingImage = target.node
         if (isPen) {
-          pen = new Pen({ id: crypto.randomUUID(), assetId, editable: true }).setStyle({
+          pen = new Pen({ id: crypto.randomUUID(), assetId: target.assetId, editable: true }).setStyle({
             stroke: '#333',
             strokeWidth: penWidth.value,
             strokeCap: 'round',
             strokeJoin: 'round',
           })
-          pen.moveTo(point.x, point.y)
-          imageNode.add(pen)
+          pen.moveTo(target.point.x, target.point.y)
+          drawingImage.add(pen)
         } else {
-          startPoint = point
+          startPoint = target.point
           drawing = new Arrow({
             id: crypto.randomUUID(),
-            assetId,
+            assetId: target.assetId,
             editable: true,
             stroke: '#e74c3c',
             strokeWidth: 3,
             endArrow: 'arrow',
             strokeCap: 'round',
           })
-          imageNode.add(drawing)
+          drawingImage.add(drawing)
         }
       }
       const onDrag = (e: any) => {
         if (isPen && pen) {
-          const point = pointInImage(e)
-          if (!point) return
-          pen.lineTo(point.x, point.y)
+          const target = drawingImage ? imageAtEventForNode(e, drawingImage) : undefined
+          if (!target) return
+          pen.lineTo(target.x, target.y)
           pen.paint()
           return
         }
-        const point = pointInImage(e)
+        const point = drawingImage ? imageAtEventForNode(e, drawingImage) : undefined
         if (!drawing || !startPoint || !point) return
         drawing.set({ x: startPoint.x, y: startPoint.y })
         drawing.toPoint = { x: point.x - startPoint.x, y: point.y - startPoint.y }
@@ -3116,24 +3123,24 @@ function canvasTool(action: string) {
         if (drawing || pen) saveCanvasHistory()
         drawing = null
         pen = null
+        drawingImage = null
         startPoint = undefined
       }
       const onTextDown = (e: any) => {
-        const point = pointInImage(e)
-        if (!point) return
+        const target = imageAtEvent(e)
+        if (!target) return
         const text = new LeaferText({
           id: crypto.randomUUID(),
-          assetId,
-          x: point.x,
-          y: point.y,
+          assetId: target.assetId,
+          x: target.point.x,
+          y: target.point.y,
           editable: true,
           fill: '#333',
           fontSize: 18,
           text: '',
           padding: [4, 8],
         })
-        imageNode.add(text)
-        saveCanvasHistory()
+        target.node.add(text)
         app!.mode = 'normal'
         drawMode.value = false
         activeDrawType.value = null
@@ -3148,13 +3155,13 @@ function canvasTool(action: string) {
         })
       }
       const onNumberDown = (e: any) => {
-        const point = pointInImage(e)
-        if (!point) return
+        const target = imageAtEvent(e)
+        if (!target) return
         const marker = new Group({
           id: crypto.randomUUID(),
-          assetId,
-          x: point.x - 14,
-          y: point.y - 14,
+          assetId: target.assetId,
+          x: target.point.x - 14,
+          y: target.point.y - 14,
           editable: true,
           hitChildren: false,
           name: 'number-marker',
@@ -3172,7 +3179,7 @@ function canvasTool(action: string) {
             verticalAlign: 'middle',
           }),
         )
-        imageNode.add(marker)
+        target.node.add(marker)
         saveCanvasHistory()
       }
       const ids = [
@@ -3437,6 +3444,10 @@ onMounted(() => {
   const selectionId = app.editor?.on_(EditorEvent.AFTER_SELECT, syncSelectedReferences)
   canvasCleanups.push(() => {
     if (selectionId) app?.editor?.off_(selectionId)
+  })
+  const innerEditorCloseId = app.editor?.on_(InnerEditorEvent.CLOSE, scheduleCanvasSave)
+  canvasCleanups.push(() => {
+    if (innerEditorCloseId) app?.editor?.off_(innerEditorCloseId)
   })
   canvasCleanups.push(() => {
     if (saveTimer) clearTimeout(saveTimer)
