@@ -5,6 +5,7 @@ import { buildCreationRunPlan } from './creationMediaPlan'
 import { getCreationModelSpec, listCreationPanelModels } from './creationModelRegistry'
 import { useMediaTaskStore, type MediaTask, type TaskMediaType } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
 interface BridgeEvent {
@@ -71,6 +72,46 @@ function optionalAbsoluteDirectory(params: Record<string, unknown>): string | un
   return value
 }
 
+function isAbsolutePath(value: string): boolean {
+  return /^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\/])/.test(value)
+}
+
+function imageMimeForPath(path: string, bytes: Uint8Array): string {
+  const detected = detectImageMimeFromBytes(bytes)
+  if (detected) return detected
+  const extension = path.split(/[\\/.]/).pop()?.toLowerCase()
+  return extension === 'jpg' || extension === 'jpeg'
+    ? 'image/jpeg'
+    : extension === 'webp'
+      ? 'image/webp'
+      : extension === 'gif'
+        ? 'image/gif'
+        : 'image/png'
+}
+
+async function resolveReferenceImages(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+  if (!isTauriRuntime()) return params
+  const keys = ['images', 'image', 'imageUrl', 'imageUrls']
+  const output = { ...params }
+  for (const key of keys) {
+    const value = params[key]
+    const values = Array.isArray(value) ? value : value === undefined ? [] : [value]
+    if (!values.length) continue
+    const resolved = await Promise.all(values.map(async item => {
+      const reference = String(item || '').trim()
+      if (!isAbsolutePath(reference) || reference.startsWith('data:') || /^https?:\/\//i.test(reference)) return item
+      const file = await invoke<{ base64: string; truncated: boolean }>('dev_read_external_file', {
+        input: { path: reference, maxBytes: 50_000_000 },
+      })
+      if (!file?.base64 || file.truncated) throw new Error(`参考图不可读取或超过 50 MB：${reference}`)
+      const bytes = Uint8Array.from(atob(file.base64), char => char.charCodeAt(0))
+      return `data:${imageMimeForPath(reference, bytes)};base64,${file.base64}`
+    }))
+    output[key] = Array.isArray(value) ? resolved : resolved[0]
+  }
+  return output
+}
+
 function mediaTypeFor(modelId: string): TaskMediaType {
   const output = getCreationModelSpec(modelId)?.capabilities.outputModalities[0]
   return output === 'video' || output === 'audio' || output === 'model3d' || output === 'text'
@@ -132,14 +173,15 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
     const rawParams = params.params && typeof params.params === 'object' && !Array.isArray(params.params)
       ? params.params as Record<string, unknown>
       : {}
-    const plan = buildCreationRunPlan({ modelId, params: rawParams })
+    const resolvedParams = await resolveReferenceImages(rawParams)
+    const plan = buildCreationRunPlan({ modelId, params: resolvedParams })
     const taskId = await store.submitTask({
       type: mediaTypeFor(modelId),
       model: plan.model,
       modelLabel: plan.label,
-      prompt: requireString(rawParams, 'prompt'),
-      referenceImages: Array.isArray(rawParams.images) ? rawParams.images.map(String) : [],
-      referenceVideos: Array.isArray(rawParams.videos) ? rawParams.videos.map(String) : [],
+      prompt: requireString(resolvedParams, 'prompt'),
+      referenceImages: Array.isArray(resolvedParams.images) ? resolvedParams.images.map(String) : [],
+      referenceVideos: Array.isArray(resolvedParams.videos) ? resolvedParams.videos.map(String) : [],
       source: 'creation',
       directory: directory || (isTauriRuntime() ? context.project.owner : undefined),
       memory: true,
@@ -165,4 +207,4 @@ export async function registerCreationMcpBridge(): Promise<() => void> {
   })
 }
 
-export const __creationMcpBridgeForTests = { currentContext, handleBridgeRequest, submissions }
+export const __creationMcpBridgeForTests = { currentContext, handleBridgeRequest, submissions, resolveReferenceImages }

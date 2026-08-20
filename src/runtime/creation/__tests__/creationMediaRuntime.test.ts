@@ -15,6 +15,9 @@ test('creation MCP submissions opt into project media persistence', () => {
   assert.match(source, /memory: true/)
   assert.match(source, /optionalAbsoluteDirectory\(params\)/)
   assert.match(source, /directory \|\| \(isTauriRuntime\(\) \? context\.project\.owner : undefined\)/)
+  assert.match(source, /resolveReferenceImages\(rawParams\)/)
+  assert.match(source, /dev_read_external_file/)
+  assert.match(source, /参考图不可读取或超过 50 MB/)
   assert.match(readFileSync('src/stores/mediaTaskStore.ts', 'utf8'), /task\.directory \|\| canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
 })
 

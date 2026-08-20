@@ -24,6 +24,7 @@ test('creation MCP exposes the fixed tool contract and forwards structured calls
   ])
   assert.equal(tools.tools.find(tool => tool.name === 'submit_creation_task').annotations.idempotentHint, true)
   assert.equal(tools.tools.find(tool => tool.name === 'submit_creation_task').annotations.readOnlyHint, false)
+  assert.match(tools.tools.find(tool => tool.name === 'submit_creation_task').description, /本机绝对路径/)
   assert.equal(tools.tools.find(tool => tool.name === 'submit_creation_task').inputSchema.properties.directory.type, 'string')
   const result = await client.callTool({ name: 'get_creation_context', arguments: {} })
   assert.deepEqual(result.structuredContent, { result: { ready: true } })

@@ -78,7 +78,7 @@ export function createCreationMcpServer(callBridge: InvokeBridge = invokeBridge)
     offset: z.number().int().min(0).default(0),
     limit: z.number().int().min(1).max(100).default(20),
   }).strict(), readOnly)
-  register('submit_creation_task', '提交韭菜盒子创作任务', '付费操作。使用模型表中的 modelId 和 params 提交图片、视频或音频任务；同一 requestId 幂等。可传 directory 指定本机绝对目录，避免写入当前项目。', z.object({
+  register('submit_creation_task', '提交韭菜盒子创作任务', '付费操作。使用模型表中的 modelId 和 params 提交图片、视频或音频任务；同一 requestId 幂等。参考图可传本机绝对路径、data URL 或 HTTPS URL，数量和大小由韭菜盒子模型表校验；可传 directory 指定输出目录。', z.object({
     requestId: z.string().min(8).max(120),
     contextVersion: z.string().min(1).max(1000),
     modelId: z.string().min(1).max(200),
