@@ -1212,6 +1212,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     return Boolean(task.projectPath || task.assetUri)
   }
 
+  async function addTaskResultToCanvas(taskId: string, target: CanvasTaskTarget): Promise<boolean> {
+    const task = tasks.value.find(item => item.id === taskId)
+    if (!task || task.source !== 'creation' || task.status !== 'success' || task.type === 'model3d')
+      return false
+    task.canvasTarget = target
+    task.canvasWriteStatus = 'pending'
+    await writeCanvasResult(task)
+    await persistTasksSafely('add-task-result-to-canvas')
+    return tasks.value.find(item => item.id === taskId)?.canvasWriteStatus === 'written'
+  }
+
   // ─── 清除已完成/失败的任务 ───
   function clearFinished() {
     tasks.value = tasks.value.filter(
@@ -1444,6 +1455,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     submitTask,
     cancelTask,
     retryMediaPersistence,
+    addTaskResultToCanvas,
     clearFinished,
     deleteTask,
     getTask,

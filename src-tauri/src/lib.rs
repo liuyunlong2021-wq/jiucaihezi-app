@@ -1091,6 +1091,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(ConversionJobs::default())
+        .manage(commands::creation_mcp::CreationMcpState::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -1168,6 +1169,11 @@ pub fn run() {
             std::fs::create_dir_all(&app_data).ok();
             // 创建 vault 子目录
             std::fs::create_dir_all(app_data.join("vault")).ok();
+
+            #[cfg(not(mobile))]
+            if let Err(error) = commands::creation_mcp::start(app.handle().clone()) {
+                eprintln!("[creation-mcp] bridge disabled: {error}");
+            }
 
             // ★ 手动建窗以挂载 on_navigation 拦截 NewAPI 登录回调
             let mut window_config = app.config().app.windows.first()
@@ -1387,6 +1393,7 @@ pub fn run() {
             commands::mcp::mcp_write_stdin,
             commands::mcp::mcp_kill_stdio,
             commands::mcp::resolve_mcp_node,
+            commands::creation_mcp::creation_mcp_complete,
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,
@@ -1514,5 +1521,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_, _| {});
+    app.run(|_, event| {
+        if matches!(event, tauri::RunEvent::Exit { .. }) {
+            commands::creation_mcp::remove_discovery();
+        }
+    });
 }

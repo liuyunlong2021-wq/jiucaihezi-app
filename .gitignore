@@ -4,6 +4,7 @@ rh-adapter/.venv/
 
 # Build
 dist/
+scripts/jiucaihezi-creation-mcp/dist/
 dist-desktop/
 src-tauri/target/
 gateway/.wrangler/

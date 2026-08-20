@@ -149,6 +149,9 @@ importers:
       vue:
         specifier: ^3.5.32
         version: 3.5.40(typescript@6.0.3)
+      zod:
+        specifier: 4.4.3
+        version: 4.4.3
     devDependencies:
       '@iconify-json/material-symbols':
         specifier: ^1.2.79

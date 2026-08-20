@@ -5,6 +5,7 @@ import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { patchFetch } from '@/utils/httpClient'
 import { registerMcpStore } from '@/runtime/tools/mcpBridge'
+import { registerCreationMcpBridge } from '@/runtime/creation/creationMcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
@@ -181,6 +182,7 @@ function mountApp() {
     registerMcpStore(useMcpStore)
     app.component('JcIcon', JcIcon)
     app.mount('#app')
+    void registerCreationMcpBridge().catch(err => bootLog('warn', `创作 MCP 桥接启动失败: ${err}`))
     ;(window as any).__JC_APP_MOUNTED__ = true
     hideSplashScreen()
   } catch (err) {

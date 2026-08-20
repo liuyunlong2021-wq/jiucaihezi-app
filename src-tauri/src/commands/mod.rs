@@ -1,4 +1,5 @@
 pub mod clipboard;
+pub mod creation_mcp;
 pub mod dev;
 pub mod greet;
 pub mod http;
