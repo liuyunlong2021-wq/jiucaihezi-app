@@ -55,6 +55,17 @@ test('predefined local MCP connects directly and explains a missing Node runtime
   assert.match(source, /openExternal\('https:\/\/nodejs\.org\/zh-cn\/download'\)/)
 })
 
+test('Jiucaihezi creation MCP resolves a per-install stdio path', () => {
+  assert.match(catalogSource, /id: 'jiucaihezi-creation'/)
+  assert.match(source, /entry\.id === 'jiucaihezi-creation'/)
+  assert.match(
+    source,
+    /invoke<\{ command: string; args: string\[\]; cwd\?: string \}>\('resolve_creation_mcp'\)/,
+  )
+  assert.match(tauriLibSource, /commands::creation_mcp::resolve_creation_mcp/)
+  assert.match(appPermissionSource, /"resolve_creation_mcp"/)
+})
+
 test('Windows resolves and launches the npx command shim', () => {
   assert.match(toolCommandSource, /npx\.cmd/)
   assert.match(toolCommandSource, /ProgramFiles/)

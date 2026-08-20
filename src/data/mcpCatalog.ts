@@ -25,6 +25,18 @@ export interface BuiltinMcpCatalogEntry {
 
 export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
   {
+    id: 'jiucaihezi-creation',
+    name: '韭菜盒子创作',
+    icon: 'auto_awesome',
+    category: '创作',
+    transport: 'stdio',
+    description: '把韭菜盒子的创作模型、任务、历史、项目落盘和画布能力提供给 Codex。',
+    tasks: ['生成图片', '生成视频和音频', '读取创作历史', '放入项目画布'],
+    auth: 'none',
+    risk: 'medium',
+    installHint: '桌面版一键解析当前安装目录和 Node.js 路径；不需要在 MCP 中填写 API Key。',
+  },
+  {
     id: 'github',
     name: 'GitHub',
     icon: 'code',

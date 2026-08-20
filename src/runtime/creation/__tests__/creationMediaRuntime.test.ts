@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
@@ -8,6 +9,11 @@ import {
   executeCreationSubmitRequest,
 } from '../creationMediaRuntime'
 import { getCreationModelSpec } from '../creationModelRegistry'
+
+test('creation MCP submissions opt into project media persistence', () => {
+  const source = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
+  assert.match(source, /memory: true/)
+})
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')

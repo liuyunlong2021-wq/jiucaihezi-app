@@ -8,7 +8,7 @@
     "typecheck": "vue-tsc -b",
     "build": "node scripts/build-skills-index.mjs && pnpm run test:focused && node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-web-dist.mjs && pnpm run audit:web-dist",
     "build:desktop": "pnpm run test:focused && node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-desktop-dist.mjs && pnpm run audit:desktop-dist",
-    "build:desktop:quick": "node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-desktop-dist.mjs && pnpm run audit:desktop-dist",
+    "build:desktop:quick": "pnpm run build:creation-mcp && node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-desktop-dist.mjs && pnpm run audit:desktop-dist",
     "build:ios:quick": "pnpm run build:desktop:quick && node scripts/apply-ios-branding.mjs",
     "build:quick": "node scripts/build-skills-index.mjs && node scripts/bundle-icons.mjs && vue-tsc -b && vite build && node scripts/prune-web-dist.mjs && pnpm run audit:web-dist",
     "audit:desktop-dist": "node scripts/audit-desktop-dist.mjs",

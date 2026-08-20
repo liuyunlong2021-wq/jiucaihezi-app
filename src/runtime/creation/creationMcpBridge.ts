@@ -131,6 +131,7 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
       referenceVideos: Array.isArray(rawParams.videos) ? rawParams.videos.map(String) : [],
       source: 'creation',
       directory: isTauriRuntime() ? context.project.owner : undefined,
+      memory: true,
       plan,
     })
     submissions.set(requestId, taskId)

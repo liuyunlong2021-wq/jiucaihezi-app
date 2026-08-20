@@ -225,7 +225,23 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   }
 
   let config: Omit<McpServerConfig, 'status' | 'error' | 'enabled'>
-  if (entry.auth === 'oauth') {
+  if (entry.id === 'jiucaihezi-creation') {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const launch = await invoke<{ command: string; args: string[]; cwd?: string }>('resolve_creation_mcp')
+      config = {
+        id: entry.id,
+        name: entry.name,
+        transport: 'stdio',
+        command: launch.command,
+        args: launch.args,
+        cwd: launch.cwd,
+      }
+    } catch (error) {
+      message.value = `无法解析韭菜盒子创作 MCP：${error instanceof Error ? error.message : String(error)}`
+      return
+    }
+  } else if (entry.auth === 'oauth') {
     if (!entry.url || !entry.oauthClientId) {
       message.value = `${entry.name} 的 OAuth Client ID 尚未配置。`
       return

@@ -27,6 +27,14 @@ pub struct CreationMcpState {
     pending: Mutex<HashMap<String, mpsc::Sender<Result<Value, String>>>>,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreationMcpLaunchConfig {
+    pub command: String,
+    pub args: Vec<String>,
+    pub cwd: Option<String>,
+}
+
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BridgeRequest {
@@ -65,6 +73,33 @@ pub fn creation_mcp_complete(
     sender
         .send(error.map_or_else(|| Ok(result.unwrap_or(Value::Null)), Err))
         .map_err(|_| "MCP bridge response receiver closed".to_string())
+}
+
+#[tauri::command]
+pub fn resolve_creation_mcp(app: AppHandle) -> Result<CreationMcpLaunchConfig, String> {
+    let node = crate::commands::mcp::resolve_mcp_node()?;
+    let relative = PathBuf::from("creation-mcp").join("index.mjs");
+    let resource_entry = app
+        .path()
+        .resource_dir()
+        .ok()
+        .map(|dir| dir.join(&relative));
+    let (entry, cwd) = if let Some(path) = resource_entry.filter(|path| path.exists()) {
+        (path, None)
+    } else {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = root.join("..");
+        let path = repo_root.join("scripts/jiucaihezi-creation-mcp/dist/index.mjs");
+        if !path.exists() {
+            return Err("韭菜盒子创作 MCP 尚未构建，请先运行 build:creation-mcp".to_string());
+        }
+        (path, Some(repo_root.to_string_lossy().into_owned()))
+    };
+    Ok(CreationMcpLaunchConfig {
+        command: node,
+        args: vec![entry.to_string_lossy().into_owned()],
+        cwd,
+    })
 }
 
 pub fn start(app: AppHandle) -> Result<PathBuf, String> {

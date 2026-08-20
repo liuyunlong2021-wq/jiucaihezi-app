@@ -47,6 +47,7 @@
     "externalBin": [],
     "resources": {
       "../public/skills": "skills",
+      "../scripts/jiucaihezi-creation-mcp/dist": "creation-mcp",
       "resources/storyboarder": "storyboarder"
     },
     "icon": [
