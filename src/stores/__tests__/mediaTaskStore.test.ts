@@ -418,7 +418,7 @@ test('mediaTaskStore uses the immutable canvas target owner for Desktop result p
     source,
     /if \(task\.canvasTarget && !canvasOwner\) \{\s+markCanvasWriteUnwritten\(task\)\s+return/,
   )
-  assert.match(source, /const projectDir = canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
+  assert.match(source, /const projectDir = task\.directory \|\| canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
   assert.match(source, /writeProjectMedia\(\{[\s\S]*?projectDir,/)
   assert.match(source, /const webRuntime = !isTauriRuntime\(\)/)
   assert.match(source, /String\(task\.projectId \|\| ''\)/)

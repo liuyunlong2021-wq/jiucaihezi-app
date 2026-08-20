@@ -78,11 +78,12 @@ export function createCreationMcpServer(callBridge: InvokeBridge = invokeBridge)
     offset: z.number().int().min(0).default(0),
     limit: z.number().int().min(1).max(100).default(20),
   }).strict(), readOnly)
-  register('submit_creation_task', '提交韭菜盒子创作任务', '付费操作。使用模型表中的 modelId 和 params 提交图片、视频或音频任务；同一 requestId 幂等。', z.object({
+  register('submit_creation_task', '提交韭菜盒子创作任务', '付费操作。使用模型表中的 modelId 和 params 提交图片、视频或音频任务；同一 requestId 幂等。可传 directory 指定本机绝对目录，避免写入当前项目。', z.object({
     requestId: z.string().min(8).max(120),
     contextVersion: z.string().min(1).max(1000),
     modelId: z.string().min(1).max(200),
     params: z.record(z.string(), z.unknown()),
+    directory: z.string().min(1).max(4000).optional(),
   }).strict(), { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true })
   register('cancel_creation_task', '取消韭菜盒子创作任务', '停止跟踪仍在执行的任务；上游可能已接收请求。', z.object({ taskId: z.string().min(1).max(120) }).strict(), {
     readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true,

@@ -13,6 +13,9 @@ import { getCreationModelSpec } from '../creationModelRegistry'
 test('creation MCP submissions opt into project media persistence', () => {
   const source = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
   assert.match(source, /memory: true/)
+  assert.match(source, /optionalAbsoluteDirectory\(params\)/)
+  assert.match(source, /directory \|\| \(isTauriRuntime\(\) \? context\.project\.owner : undefined\)/)
+  assert.match(readFileSync('src/stores/mediaTaskStore.ts', 'utf8'), /task\.directory \|\| canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
 })
 
 async function installGatewaySession() {

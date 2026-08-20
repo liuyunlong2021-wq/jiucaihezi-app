@@ -61,6 +61,16 @@ function requireString(params: Record<string, unknown>, key: string, max = 20_00
   return value
 }
 
+function optionalAbsoluteDirectory(params: Record<string, unknown>): string | undefined {
+  const raw = params.directory
+  if (raw === undefined || raw === null || String(raw).trim() === '') return undefined
+  const value = String(raw).trim()
+  if (value.length > 4000) throw new Error('directory 超过 4000 字符')
+  if (value.includes('\0')) throw new Error('directory 不能包含 NUL 字符')
+  if (!/^(?:\/|[A-Za-z]:[\\/]|\\\\[^\\/])/.test(value)) throw new Error('directory 必须是本机绝对目录路径')
+  return value
+}
+
 function mediaTypeFor(modelId: string): TaskMediaType {
   const output = getCreationModelSpec(modelId)?.capabilities.outputModalities[0]
   return output === 'video' || output === 'audio' || output === 'model3d' || output === 'text'
@@ -113,7 +123,8 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
   if (operation === 'submit_creation_task') {
     const context = currentContext()
     if (params.contextVersion !== context.contextVersion) throw new Error('项目或画布已切换，请重新获取创作上下文')
-    if (!context.project.owner) throw new Error('请先在韭菜盒子中选择项目')
+    const directory = optionalAbsoluteDirectory(params)
+    if (!context.project.owner && !directory) throw new Error('请先在韭菜盒子中选择项目，或传入 directory')
     const requestId = requireString(params, 'requestId', 120)
     const existing = submissions.get(requestId)
     if (existing) return { taskId: existing, duplicate: true }
@@ -130,7 +141,7 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
       referenceImages: Array.isArray(rawParams.images) ? rawParams.images.map(String) : [],
       referenceVideos: Array.isArray(rawParams.videos) ? rawParams.videos.map(String) : [],
       source: 'creation',
-      directory: isTauriRuntime() ? context.project.owner : undefined,
+      directory: directory || (isTauriRuntime() ? context.project.owner : undefined),
       memory: true,
       plan,
     })

@@ -674,7 +674,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
 
       // ★ 桌面端有项目文件夹 → 直写到项目文件夹
-      const projectDir = canvasOwner || useProjectStore().projectDir.value
+      const projectDir = task.directory || canvasOwner || useProjectStore().projectDir.value
       if (projectDir) {
         const kind =
           task.type === 'video'
