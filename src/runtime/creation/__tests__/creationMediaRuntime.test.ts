@@ -879,6 +879,48 @@ test('ZX Seedance submits every documented parameter and media reference', async
   }
 })
 
+test('KIK uploads local video and audio before submitting them to NewAPI', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const uploaded: string[] = []
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/api/creations/uploads')) {
+      const file = (init?.body as FormData).get('file') as Blob
+      uploaded.push(file.type)
+      return Response.json({ url: `https://cdn.example.test/reference.${file.type.startsWith('video/') ? 'mp4' : 'mp3'}` })
+    }
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.video_url, 'https://cdn.example.test/reference.mp4')
+      assert.equal(body.audio_url, 'https://cdn.example.test/reference.mp3')
+      assert.equal(JSON.stringify(body).includes('data:'), false)
+      return Response.json({ id: 'task_kik', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_kik')) {
+      return Response.json({ status: 'completed', video_url: 'https://example.com/output.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/kik/doubao-seedance-2',
+      params: {
+        prompt: '全模态参考生成', duration: 5,
+        videos: ['data:video/mp4;base64,YQ=='], audios: ['data:audio/mpeg;base64,Yg=='],
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.deepEqual(uploaded.sort(), ['audio/mpeg', 'video/mp4'])
+    assert.equal(result.url, 'https://example.com/output.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('ZX Grok sends local reference data directly without the deleted upload route', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

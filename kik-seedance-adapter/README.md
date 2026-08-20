@@ -1,6 +1,13 @@
 # KIK Seedance Adapter
 
-Minimal async-video adapter for KIK Seedance 2.0. New API retains authentication, billing, and the KIK key; this service only translates `/v1/videos` to KIK's `/video/v1/generations` and task polling endpoint.
+Minimal async-video adapter for KIK Seedance 2.0. New API retains authentication, billing, and the KIK key; this service translates `/v1/videos` to KIK's official Volcengine-compatible task API:
+
+```text
+POST https://51kik.com/providers/volcengine/api/v3/contents/generations/tasks
+GET  https://51kik.com/providers/volcengine/api/v3/contents/generations/tasks/:id
+```
+
+Text, image, video, and audio references are converted to the official `content[]` format. Audio requires an image or video reference.
 
 ## Test
 

@@ -181,6 +181,33 @@ test('KIK Seedance models expose provider resolutions and multimodal references'
   assert.deepEqual(mini.capabilities.resolutions, ['480p', '720p'])
   assert.deepEqual(full.capabilities.inputModalities, ['text', 'image', 'video', 'audio'])
   assert.equal(displayModelPrice(mini), '按 Token')
+  for (const spec of [full, fast, mini]) {
+    assert.equal(spec.capabilities.assetFlow, 'newapi-upload')
+    assert.equal(spec.files?.images?.maxBytes, 30 * 1024 * 1024)
+    assert.equal(spec.files?.videos?.maxBytes, 200 * 1024 * 1024)
+    assert.equal(spec.files?.audios?.maxBytes, 15 * 1024 * 1024)
+  }
+
+  for (const modelId of [full.id, fast.id, mini.id]) {
+    assert.throws(() => buildCreationRunPlan({
+      modelId,
+      params: { prompt: 'test', duration: 5, audios: ['data:audio/mpeg;base64,YQ=='] },
+    }), /参考音频必须同时搭配参考图片或视频/)
+    assert.doesNotThrow(() => buildCreationRunPlan({
+      modelId,
+      params: {
+        prompt: 'test', duration: 5,
+        images: ['data:image/png;base64,YQ=='], audios: ['data:audio/mpeg;base64,Yg=='],
+      },
+    }))
+    assert.doesNotThrow(() => buildCreationRunPlan({
+      modelId,
+      params: {
+        prompt: 'test', duration: 5,
+        videos: ['data:video/mp4;base64,YQ=='], audios: ['data:audio/mpeg;base64,Yg=='],
+      },
+    }))
+  }
 })
 
 test('GPT Image 2 routes send exact model names and expose only their supported resolutions', () => {

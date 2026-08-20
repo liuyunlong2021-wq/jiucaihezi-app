@@ -378,6 +378,7 @@ function normalizeGenericTaskParams(
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
     video: params.video,
+    videos: params.videos,
     videoUrl: params.videoUrl,
     audio: params.audio,
     audios: params.audios,
@@ -468,6 +469,12 @@ function countReferences(params: Record<string, unknown>, keys: string[]): numbe
 function validatePlanInputs(spec: CreationModelSpec, params: Record<string, unknown>): void {
   validateFileCounts(spec, params)
   validateRequiredFields(spec, params)
+  if (
+    spec.id.startsWith('newapi/kik/') &&
+    countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls']) > 0 &&
+    countReferences(params, ['images', 'image', 'imageUrl', 'imageUrls']) === 0 &&
+    countReferences(params, ['videos', 'video', 'videoUrl', 'videoUrls']) === 0
+  ) throw new Error('参考音频必须同时搭配参考图片或视频')
   if (spec.id.startsWith('gemini-') && String(params.prompt || '').length > 20_000)
     throw new Error('提示词不能超过 20000 字符')
   for (const field of spec.fields) {

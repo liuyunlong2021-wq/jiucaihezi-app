@@ -4,12 +4,14 @@ import asyncio
 from contextlib import asynccontextmanager
 import logging
 from time import monotonic, time
+from urllib.parse import urlsplit
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-KIK_BASE_URL = "https://51kik.com/video"
+KIK_BASE_URL = "https://51kik.com/providers/volcengine"
+KIK_TASKS_PATH = "/api/v3/contents/generations/tasks"
 KIK_TOTAL_TIMEOUT_SECONDS = 120.0
 KIK_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 logger = logging.getLogger("kik_seedance_adapter")
@@ -44,14 +46,14 @@ async def models():
 async def create_video(request: Request):
     key = bearer_token(request)
     body = await json_body(request)
-    validate_request(body)
+    payload = kik_payload(body)
     started_at = monotonic()
     try:
         async with asyncio.timeout(KIK_TOTAL_TIMEOUT_SECONDS):
             response = await request.app.state.http.post(
-                f"{KIK_BASE_URL}/v1/generations",
+                f"{KIK_BASE_URL}{KIK_TASKS_PATH}",
                 headers={"Authorization": f"Bearer {key}"},
-                json=kik_payload(body),
+                json=payload,
             )
     except (httpx.HTTPError, TimeoutError) as exc:
         logger.warning("KIK submit failed exception=%s elapsed=%.3fs", type(exc).__name__, monotonic() - started_at)
@@ -73,7 +75,7 @@ async def get_video(task_id: str, request: Request):
     started_at = monotonic()
     try:
         response = await request.app.state.http.get(
-            f"{KIK_BASE_URL}/v1/tasks/{task_id}",
+            f"{KIK_BASE_URL}{KIK_TASKS_PATH}/{task_id}",
             headers={"Authorization": f"Bearer {key}"},
         )
     except httpx.HTTPError as exc:
@@ -108,30 +110,35 @@ def validate_request(body: dict) -> None:
     prompt = prompt_text(body.get("prompt"))
     if not prompt:
         raise HTTPException(400, "prompt is required")
+    duration = body.get("duration")
+    if duration is not None and (isinstance(duration, bool) or not isinstance(duration, int) or not 4 <= duration <= 15):
+        raise HTTPException(400, "duration must be an integer from 4 to 15")
 
 
 def kik_payload(body: dict) -> dict:
-    payload = {key: body[key] for key in ("model", "ratio", "resolution") if body.get(key) is not None}
-    payload["prompt"] = prompt_text(body.get("prompt"))
+    validate_request(body)
+    content = [{"type": "text", "text": prompt_text(body.get("prompt"))}]
     prompt_media = prompt_references(body.get("prompt"))
-    for target, sources, role in (
-        ("image", ("image", "images"), "reference_image"),
-        ("video", ("video", "video_url"), "reference_video"),
-        ("audio", ("audio", "audio_url"), "reference_audio"),
+    media_counts = {}
+    for kind, sources, maximum in (
+        ("image", ("image", "images"), 9),
+        ("video", ("video", "video_url"), 1),
+        ("audio", ("audio", "audio_url"), 1),
     ):
         value = next((body[source] for source in sources if body.get(source)), None)
         if value is None:
-            value = prompt_media.get(target) or None
-        if value is not None:
-            payload[target] = media_references(value, role)
-    options = dict(body.get("upstream_options") or {})
-    if body.get("duration") is not None:
-        try:
-            options["duration"] = float(body["duration"])
-        except (TypeError, ValueError) as exc:
-            raise HTTPException(400, "duration must be a number") from exc
-    if options:
-        payload["upstream_options"] = options
+            value = prompt_media[kind] or None
+        items = media_content(value, kind) if value is not None else []
+        if len(items) > maximum:
+            raise HTTPException(400, f"{kind} supports at most {maximum} reference(s)")
+        media_counts[kind] = len(items)
+        content.extend(items)
+    if media_counts["audio"] and not (media_counts["image"] or media_counts["video"]):
+        raise HTTPException(400, "audio requires an image or video reference")
+    payload = {"model": body["model"], "content": content}
+    for key in ("ratio", "resolution", "duration"):
+        if body.get(key) is not None:
+            payload[key] = body[key]
     return payload
 
 
@@ -144,8 +151,8 @@ def prompt_text(value: object) -> str:
     return ""
 
 
-def prompt_references(value: object) -> dict[str, list[dict[str, str]]]:
-    result: dict[str, list[dict[str, str]]] = {"image": [], "video": [], "audio": []}
+def prompt_references(value: object) -> dict[str, list[object]]:
+    result: dict[str, list[object]] = {"image": [], "video": [], "audio": []}
     if not isinstance(value, list):
         return result
     for item in value:
@@ -154,28 +161,46 @@ def prompt_references(value: object) -> dict[str, list[dict[str, str]]]:
         kind = {"image_url": "image", "video_url": "video", "audio_url": "audio"}.get(str(item.get("type") or ""))
         if not kind:
             continue
-        raw = item.get(item.get("type"))
-        url = raw.get("url") if isinstance(raw, dict) else raw
-        if isinstance(url, str) and url.strip():
-            result[kind].append({"type": {"image": "reference_image", "video": "reference_video", "audio": "reference_audio"}[kind], "url": url.strip()})
+        result[kind].append(item)
     return result
 
 
-def media_references(value: object, default_role: str) -> object:
+def media_content(value: object, kind: str) -> list[dict[str, object]]:
     values = value if isinstance(value, list) else [value]
-    result = []
+    result: list[dict[str, object]] = []
+    content_type = f"{kind}_url"
+    default_role = {"image": "reference_image", "video": "reference_video", "audio": "reference_audio"}[kind]
+    allowed_roles = {
+        "image": {"first_frame", "last_frame", "reference_image"},
+        "video": {"reference_video"},
+        "audio": {"reference_audio"},
+    }[kind]
     for item in values:
+        role = default_role
         if isinstance(item, str) and item.strip():
-            result.append({"type": default_role, "url": item.strip()})
+            url = item.strip()
         elif isinstance(item, dict):
-            url = item.get("url") or item.get("image_url") or item.get("video_url") or item.get("audio_url")
+            explicit_role = item.get("role") or item.get("type")
+            if explicit_role and explicit_role != content_type:
+                role = str(explicit_role)
+            if role not in allowed_roles:
+                raise HTTPException(400, f"Invalid {kind} role")
+            url = item.get("url") or item.get(content_type)
             if isinstance(url, dict):
                 url = url.get("url")
-            if isinstance(url, str) and url.strip():
-                result.append({"type": str(item.get("type") or default_role), "url": url.strip()})
-    if not result:
-        raise HTTPException(400, f"{default_role} must contain a valid URL")
-    return result[0] if len(result) == 1 else result
+        else:
+            url = None
+        if not isinstance(url, str) or not valid_media_url(url.strip(), kind):
+            raise HTTPException(400, f"{kind} must contain a valid URL")
+        result.append({"type": content_type, content_type: {"url": url.strip()}, "role": role})
+    return result
+
+
+def valid_media_url(value: str, kind: str) -> bool:
+    parsed = urlsplit(value)
+    if parsed.scheme in {"http", "https", "asset"}:
+        return bool(parsed.netloc)
+    return kind == "image" and value.startswith("data:image/") and "," in value
 
 
 def response_json(response: httpx.Response) -> dict:
@@ -225,19 +250,14 @@ def task_response(task_id: str, data: dict, model: str) -> dict:
 
 
 def video_url(data: dict) -> str:
-    for source in (data, data.get("data")):
-        if not isinstance(source, dict):
-            continue
-        if isinstance(source.get("url"), str):
-            return source["url"]
-        items = source.get("data")
-        if isinstance(items, list) and items and isinstance(items[0], dict) and isinstance(items[0].get("url"), str):
-            return items[0]["url"]
-    return ""
+    content = data.get("content")
+    return content.get("video_url", "") if isinstance(content, dict) and isinstance(content.get("video_url"), str) else ""
 
 
 def upstream_error(response: httpx.Response, data: dict) -> HTTPException:
     detail = data.get("error") or data.get("message") or f"KIK request failed ({response.status_code})"
+    if isinstance(detail, dict):
+        detail = detail.get("message") or detail.get("code") or f"KIK request failed ({response.status_code})"
     return HTTPException(response.status_code if response.status_code >= 400 else 502, str(detail))
 
 
