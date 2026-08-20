@@ -1012,6 +1012,14 @@
 - 任务必须进入创作面板同一历史，并复用现有模型目录、参数校验、同步/异步处理、取消、恢复、项目落盘和显式画布动作；API Key 继续只由韭菜盒子管理。
 - 当前只完成 TDD；MCP Server、本机桥接、自动测试、真实付费生成、Codex 媒体显示、正式安装包和跨平台验收均未执行。
 
+## [2026-08-20] 实施完成 | Codex 创作 MCP 图片、参考图与输出目录
+
+- 已实现 `jiucaihezi-creation` stdio MCP、Desktop 回环鉴权桥接和设置页一键动态配置；入口路径、Node 路径按当前安装环境解析，不写死用户目录。
+- MCP 任务复用韭菜盒子现有模型注册表、`buildCreationRunPlan()`、`mediaTaskStore`、创作历史、项目落盘和显式画布动作；API Key 仍只由韭菜盒子管理。
+- `submit_creation_task` 支持本机绝对参考图路径、data URL、HTTPS URL，以及可选 `directory` 输出目录。Desktop 会把本机图片读取为 data URL；参考图数量/大小和参数限制继续由现有模型表校验，不在 MCP 复制静态上限。
+- 用户已真实确认 Codex 调用韭菜盒子生成图片并成功保存；MCP schema/build、TypeScript、完整 focused `1104/1104` 和差异检查通过。
+- 正式安装包、Windows/Intel Mac 真机、多参考图付费矩阵、视频/音频内嵌播放和跨重启任务恢复仍未验证。
+
 ## [2026-08-20] 生产修复与验收 | 迅虎支付跳转 404
 
 - 确认 `jiucai-adapter` 自 2026-06-09 持续运行且零重启，容器内 `/submit.php` 正常返回迅虎收银台跳转；故障不是支付容器或 NewAPI。
