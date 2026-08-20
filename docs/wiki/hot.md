@@ -4,6 +4,8 @@
 
 ## 当前结论
 
+- **迅虎支付 404 已完成生产修复与真实验收。** `jiucai-adapter` 和支付预览服务均未重启；故障在 Nginx 2026-08-20 06:09 重启后暴露：旧 `/xunhu/` 的 `rewrite +` 无尾斜杠 `proxy_pass` 没有可靠剥离前缀，容器收到不存在的 `/xunhu/submit.php`。现改为带尾斜杠的 `proxy_pass http://127.0.0.1:8081/;` 并 reload，公网探测返回 `200`，用户确认真实支付恢复。Nginx 备份不得留在 `sites-enabled`。见 [[运维/服务器运维#迅虎支付 `/xunhu/submit.php` 在 Nginx 重启后 404（2026-08-20）]]。
+
 - **`v2.1.30` 收口多对话主线写入规则与创作画布热修。** 同一仓库同一时间只允许一个写入负责人；新对话必须从最新已提交的 `main` 开始并先核对目录、分支、最新提交和未提交改动。画布已修正标注 inner 坐标、超大 Base64 污染恢复和媒体落点；无法稳定命中的画布视频播放入口按用户决定删除，视频仍保留静态首帧、选择、拖动和提交引用。Grok 下载已由用户确认正常；Veo 上游稳定性、iPhone 下载覆盖本地和正式跨端安装包验收仍未完成。见 [[开发/v2.1.30整合与创作画布热修TDD-2026-08-19]]、[[学习/AI编程生存手册#35 同一仓库不能由多个对话同时写主线]]。
 
 - **ZX 视频路由已按生产配置更正。** Veo 3.1/Fast 与 Grok 6s/10s/15s 的 NewAPI 渠道均直连 ZX；用户截图确认 Grok 渠道 Base URL 为 `https://img-api.zxcode.vip`。只有 `omni-fast`、`omni-v2v` 和 ZX Seedance 2.5 进入独立 `zx-video-adapter`。仓库保留 Grok 适配代码仅作历史实现与备用能力，不代表生产正在使用。Omni 创建时按任务保存 ZX 渠道 Key，下载 `/content` 时使用该 Key流式请求官方 MP4；适配器 `12/12`、focused `1088/1088`、TypeScript 和差异检查通过。用户已确认 Veo 直连成功、Grok 6 秒直连生成落盘和 Omni Fast 生成完成；提交 `260803e3` 的 Omni 下载 Key修复尚待生产复验。RH 三个 Gemini Omni 与 RH Grok 均不进入 ZX 适配器。见 [[开发/ZX视频适配器多模型升级TDD-2026-08-18]]。
