@@ -37,6 +37,8 @@ jobs:
       - run: pnpm install
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
+      - name: Build bundled Creation MCP
+        run: pnpm run build:creation-mcp
       - name: Frontend build (skip tests)
         env:
           VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
@@ -170,6 +172,8 @@ jobs:
 
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
+      - name: Build bundled Creation MCP
+        run: pnpm run build:creation-mcp
 
       - name: Install Rust x86_64 target
         run: rustup target add x86_64-apple-darwin
@@ -293,6 +297,8 @@ jobs:
       - run: pnpm install
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
+      - name: Build bundled Creation MCP
+        run: pnpm run build:creation-mcp
       - name: Frontend build (skip tests)
         env:
           VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}

@@ -45,6 +45,19 @@ test('desktop release creation and public download manifest are independent from
   assert.match(downloadJob, /\/opt\/updates\/latest\.json/)
 })
 
+test('every desktop release job builds the bundled Creation MCP before Tauri', () => {
+  for (const [job, nextJob] of [
+    ['macos-arm', 'macos-intel'],
+    ['macos-intel', 'windows'],
+    ['windows', 'publish-download-manifest'],
+  ]) {
+    const body = workflow.match(new RegExp(`\\n  ${job}:[\\s\\S]*?(?=\\n  ${nextJob}:)`))?.[0]
+    assert.ok(body, job)
+    assert.match(body, /pnpm run build:creation-mcp/, job)
+    assert.ok(body.indexOf('pnpm run build:creation-mcp') < body.indexOf('pnpm tauri'), job)
+  }
+})
+
 test('Storyboarder assets are fetchable and included in the Windows portable zip', () => {
   const csp = tauriConfig.app.security.csp
   const connectSrc = csp.match(/connect-src ([^;]+)/)?.[1] || ''
