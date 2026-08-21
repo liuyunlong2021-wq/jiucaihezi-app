@@ -337,6 +337,40 @@ test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
   assert.equal(getCreationModelSpec('runninghub/api/rh-video-v31-fast')?.files?.images?.max, 3)
 })
 
+test('Xiaoyi MiniMax H3 models expose their confirmed video contract', () => {
+  for (const [modelId, price, resolution] of [
+    ['newapi/xiaoyi/MiniMaxH3-2k-pro-sec', 0.16, '2k'],
+    ['newapi/xiaoyi/MiniMaxH3-2k-sec', 0.14, '2k'],
+    ['newapi/xiaoyi/MiniMaxH3-720p-sec', 0.12, '720p'],
+  ] as const) {
+    const spec = getCreationModelSpec(modelId)!
+    const plan = buildCreationRunPlan({
+      modelId,
+      params: {
+        prompt: '让角色向前行走',
+        duration: 8,
+        ratio: '16:9',
+        resolution,
+        images: ['https://example.com/character.png'],
+        videos: ['https://example.com/motion.mp4'],
+        audios: ['https://example.com/voice.mp3'],
+      },
+    })
+
+    assert.equal(spec.price, price)
+    assert.equal(plan.model, modelId.split('/').at(-1))
+    assert.equal(plan.endpoint, '/v1/videos')
+    assert.equal(plan.apiStyle, 'newapi-task')
+    assert.equal(plan.pollKind, 'newapi-task')
+    assert.deepEqual(spec.capabilities.duration, { min: 5, max: 15 })
+    assert.deepEqual(spec.capabilities.ratios, ['16:9', '9:16', '1:1'])
+    assert.deepEqual(spec.capabilities.resolutions, [resolution])
+    assert.equal(spec.files?.images?.max, 9)
+    assert.equal(spec.files?.videos?.max, 3)
+    assert.equal(spec.files?.audios?.max, 3)
+  }
+})
+
 test('ZX Grok fixed-duration aliases support text and reference-image video', () => {
   for (const seconds of [6, 10, 15] as const) {
     const modelId = `newapi/zx/grok-1.5-video-${seconds}s`

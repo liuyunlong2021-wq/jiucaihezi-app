@@ -116,6 +116,16 @@ test('buildCreationModelAvailability detects channel 94 Gemini image models', ()
   assert.equal(models.find(model => model.id === 'gemini-3.1-flash-image-preview')?.status, 'enabled')
 })
 
+test('buildCreationModelAvailability tracks Xiaoyi MiniMax H3 channels', () => {
+  const models = buildCreationModelAvailability([
+    { id: 120, name: 'Xiaoyi H3', status: 1, baseUrl: 'x', models: ['MiniMaxH3-2k-pro-sec', 'MiniMaxH3-2k-sec'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'newapi/xiaoyi/MiniMaxH3-2k-pro-sec')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'newapi/xiaoyi/MiniMaxH3-2k-sec')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'newapi/xiaoyi/MiniMaxH3-720p-sec')?.status, 'disabled')
+})
+
 test('buildCreationModelAvailability detects channel 82 Veo video models', () => {
   const models = buildCreationModelAvailability([
     { id: 82, name: 'Veo', status: 1, baseUrl: 'x', models: ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview'] },

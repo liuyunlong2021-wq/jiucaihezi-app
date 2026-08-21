@@ -53,14 +53,14 @@ export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancell
 export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text'
 export type TaskSource = 'chat' | 'creation'
 
-function isOmniTask(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
+function usesAuthenticatedVideoContent(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
   const values = [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
     .map(value => String(value || '').trim().toLowerCase())
-  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v'))
+  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v') || value.includes('minimaxh3-'))
 }
 
-function normalizeOmniVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {
-  if (task.type !== 'video' || !task.upstreamTaskId || !isOmniTask(task)) return url
+function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {
+  if (task.type !== 'video' || !task.upstreamTaskId || !usesAuthenticatedVideoContent(task)) return url
   try {
     const parsed = new URL(url, DEFAULT_API_BASE_URL)
     const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
@@ -598,7 +598,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
-    const downloadUrl = normalizeOmniVideoResultUrl(url, task)
+    const downloadUrl = normalizeAuthenticatedVideoResultUrl(url, task)
     task.resultUrl = downloadUrl
     if (!isAllowedCreationResultUrl(downloadUrl, true)) throw new Error('媒体结果地址不安全，已阻止缓存')
     const canvasOwner = canvasTaskOwner(task)
@@ -1022,7 +1022,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     try {
       const mediaUrl = await abortTaskExecution(
-        pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000, controller.signal, isOmniTask(task)),
+        pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000, controller.signal, usesAuthenticatedVideoContent(task)),
         controller.signal,
       )
       if ((task as MediaTask).status === 'cancelled') {
@@ -1195,8 +1195,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return false
     }
 
-    // 历史任务可能保存了错误的全局 /content 地址；非 Omni 重新读取原始结果。
-    if (isContentResultUrl(resultUrl) && !isOmniTask(task) && task.pollUrl && task.pollKind) {
+    // 历史任务可能保存了错误的全局 /content 地址；无需鉴权内容端点的模型重新读取原始结果。
+    if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
       resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, 600, 10000, undefined, false)
     }
 

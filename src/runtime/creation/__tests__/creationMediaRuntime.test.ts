@@ -832,6 +832,50 @@ test('Gemini Omni video edit sends billing seconds to NewAPI without RH duration
   }
 })
 
+test('Xiaoyi MiniMax H3 submits duration, ratio and all reference types', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      assert.deepEqual(JSON.parse(String(init.body)), {
+        model: 'MiniMaxH3-2k-sec', prompt: '全模态参考生成', duration: 8, seconds: 8,
+        ratio: '9:16', aspect_ratio: '9:16', resolution: '2k',
+        images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        imageUrl: 'https://example.com/1.jpg',
+        imageUrls: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        video_url: 'https://example.com/1.mp4',
+        video_urls: ['https://example.com/1.mp4', 'https://example.com/2.mp4'],
+        audio_url: 'https://example.com/1.mp3',
+        audio_urls: ['https://example.com/1.mp3', 'https://example.com/2.mp3'],
+      })
+      return Response.json({ id: 'task_minimax_001', status: 'queued' })
+    }
+    if (url.endsWith('/v1/videos/task_minimax_001')) {
+      return Response.json({ id: 'task_minimax_001', status: 'completed', progress: 100 })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/xiaoyi/MiniMaxH3-2k-sec',
+      params: {
+        prompt: '全模态参考生成', duration: 8, ratio: '9:16', resolution: '2k',
+        images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
+        videos: ['https://example.com/1.mp4', 'https://example.com/2.mp4'],
+        audios: ['https://example.com/1.mp3', 'https://example.com/2.mp3'],
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.match(result.url, /\/v1\/videos\/task_minimax_001\/content$/)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('ZX Seedance submits every documented parameter and media reference', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

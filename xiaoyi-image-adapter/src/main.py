@@ -5,10 +5,16 @@ from time import time
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.background import BackgroundTask
 from starlette.datastructures import UploadFile
 
-XIAOYI_BASE_URL = "https://image.xiaoyiapi.xyz"
+XIAOYI_BASE_URL = "https://image.xiaoyiapi.xyz/v1"
+VIDEO_MODELS = {
+    "MiniMaxH3-2k-pro-sec": "2k",
+    "MiniMaxH3-2k-sec": "2k",
+    "MiniMaxH3-720p-sec": "720p",
+}
 PUBLIC_MODELS = {
     "gpt-image-2-1k",
     "gpt-image-2-低质量",
@@ -17,6 +23,7 @@ PUBLIC_MODELS = {
     "gpt-image-2-官方",
     "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview",
+    *VIDEO_MODELS,
 }
 MODEL_MAP = {
     "gpt-image-2": "gpt-image-2",
@@ -55,7 +62,14 @@ async def models():
 @app.post("/v1/videos")
 async def create_image_task(request: Request):
     key = bearer_token(request)
-    fields, images = await request_fields(request)
+    if request.headers.get("content-type", "").startswith("application/json"):
+        body = await json_body(request)
+        if body.get("model") in VIDEO_MODELS:
+            return await create_video_task(body, key, request.app.state.http)
+        fields = {name: str(value) for name, value in body.items() if value is not None}
+        images = []
+    else:
+        fields, images = await request_fields(request)
     model = str(fields.get("model") or "")
     if model not in MODEL_MAP:
         raise HTTPException(400, "Unsupported model")
@@ -67,12 +81,12 @@ async def create_image_task(request: Request):
     try:
         if images:
             response = await request.app.state.http.post(
-                f"{XIAOYI_BASE_URL}/v1/images/edits/async",
+                f"{XIAOYI_BASE_URL}/images/edits/async",
                 headers={"Authorization": f"Bearer {key}"}, data=payload, files=images,
             )
         else:
             response = await request.app.state.http.post(
-                f"{XIAOYI_BASE_URL}/v1/images/generations/async",
+                f"{XIAOYI_BASE_URL}/images/generations/async",
                 headers={"Authorization": f"Bearer {key}"}, json=payload,
             )
     except httpx.HTTPError as exc:
@@ -92,9 +106,9 @@ async def get_image_task(task_id: str, request: Request):
         raise HTTPException(400, "Invalid task ID")
     key = bearer_token(request)
     try:
-        response = await request.app.state.http.get(
-            f"{XIAOYI_BASE_URL}/v1/images/tasks/{task_id}", headers={"Authorization": f"Bearer {key}"},
-        )
+        response = await request.app.state.http.get(f"{XIAOYI_BASE_URL}/images/tasks/{task_id}", headers={"Authorization": f"Bearer {key}"})
+        if response.status_code == 404:
+            response = await request.app.state.http.get(f"{XIAOYI_BASE_URL}/videos/{task_id}", headers={"Authorization": f"Bearer {key}"})
     except httpx.HTTPError:
         return task_response(task_id, "processing", "")
     if response.status_code == 429 or response.status_code >= 500:
@@ -102,6 +116,10 @@ async def get_image_task(task_id: str, request: Request):
     data = response_json(response)
     if not response.is_success:
         raise upstream_error(response, data)
+    if str(data.get("status") or "").lower() in {"queued", "in_progress", "completed"}:
+        if str(data.get("status")).lower() == "completed":
+            data["metadata"] = {"url": f"/v1/videos/{task_id}/content"}
+        return data
     raw_status = str(data.get("status") or "running").lower()
     status = {"success": "completed", "failed": "failed"}.get(raw_status, "processing")
     result = task_response(task_id, status, str(data.get("model") or ""))
@@ -115,6 +133,92 @@ async def get_image_task(task_id: str, request: Request):
         result["error"] = error_from(data)
         result["completed_at"] = int(time())
     return result
+
+
+@app.get("/v1/videos/{task_id}/content")
+async def get_video_content(task_id: str, request: Request):
+    if not task_id or "/" in task_id:
+        raise HTTPException(400, "Invalid task ID")
+    key = bearer_token(request)
+    stream = request.app.state.http.stream("GET", f"{XIAOYI_BASE_URL}/videos/{task_id}/content", headers={"Authorization": f"Bearer {key}"})
+    try:
+        response = await stream.__aenter__()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Xiaoyi video service is unavailable") from exc
+    if not response.is_success:
+        await stream.__aexit__(None, None, None)
+        raise HTTPException(response.status_code, "Xiaoyi video download failed")
+    return StreamingResponse(
+        response.aiter_bytes(),
+        media_type=response.headers.get("content-type", "video/mp4"),
+        background=BackgroundTask(stream.__aexit__, None, None, None),
+    )
+
+
+async def create_video_task(body: dict, key: str, client: httpx.AsyncClient) -> dict:
+    payload = video_payload(body)
+    try:
+        response = await client.post(f"{XIAOYI_BASE_URL}/videos", headers={"Authorization": f"Bearer {key}"}, json=payload)
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Xiaoyi video service is unavailable") from exc
+    data = response_json(response)
+    if not response.is_success:
+        raise upstream_error(response, data)
+    task_id = task_id_from(data)
+    if not task_id:
+        raise HTTPException(502, "Xiaoyi response did not include a task ID")
+    return data
+
+
+async def json_body(request: Request) -> dict:
+    try:
+        body = await request.json()
+    except Exception as exc:
+        raise HTTPException(400, "Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(400, "JSON object required")
+    return body
+
+
+def video_payload(body: dict) -> dict:
+    model = str(body.get("model") or "")
+    prompt = str(body.get("prompt") or "").strip()
+    if model not in VIDEO_MODELS:
+        raise HTTPException(400, "Unsupported model")
+    if not prompt:
+        raise HTTPException(400, "prompt is required")
+    duration = body.get("duration", body.get("seconds", 5))
+    if isinstance(duration, bool) or not isinstance(duration, (int, str)) or not str(duration).isdigit() or not 5 <= int(duration) <= 15:
+        raise HTTPException(400, "duration must be from 5 to 15 seconds")
+    ratio = str(body.get("aspect_ratio") or body.get("ratio") or "16:9")
+    if ratio not in {"16:9", "9:16", "1:1"}:
+        raise HTTPException(400, "Unsupported aspect ratio")
+    resolution = str(body.get("resolution") or VIDEO_MODELS[model]).lower()
+    if resolution != VIDEO_MODELS[model]:
+        raise HTTPException(400, "Unsupported resolution")
+    references = []
+    for kind, keys, maximum in (
+        ("image", ("images", "image_urls", "image"), 9),
+        ("video", ("video_urls", "videos", "video_url"), 3),
+        ("audio", ("audio_urls", "audios", "audio_url"), 3),
+    ):
+        value = next((body[key] for key in keys if body.get(key)), [])
+        values = value if isinstance(value, list) else [value]
+        if len(values) > maximum:
+            raise HTTPException(400, f"{kind} supports at most {maximum} references")
+        for item in values:
+            url = item.get("url") if isinstance(item, dict) else item
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise HTTPException(400, f"{kind} reference must be an HTTPS URL")
+            content_type = f"{kind}_url"
+            references.append({"type": content_type, content_type: {"url": url}, "role": f"reference_{kind}"})
+    return {
+        "model": model,
+        "seconds": str(duration),
+        "aspect_ratio": ratio,
+        "resolution": resolution,
+        "content": [{"type": "text", "text": prompt}, *references],
+    }
 
 
 def bearer_token(request: Request) -> str:
@@ -158,11 +262,9 @@ async def request_fields(request: Request) -> tuple[dict[str, str], list[tuple[s
 
 
 def upstream_payload(model: str, fields: dict[str, str]) -> dict[str, str]:
-    payload = {"model": MODEL_MAP[model], "prompt": fields["prompt"]}
+    payload = {"model": MODEL_MAP[model], "prompt": fields["prompt"], "response_format": "url"}
     if fields.get("size") and fields["size"] != "auto":
         payload["size"] = fields["size"]
-    # response_format is intentionally omitted so polling carries a short URL,
-    # not the complete b64_json image in every NewAPI status response.
     return payload
 
 

@@ -489,7 +489,7 @@ async function executeDirectVideoRequest(
   const pollUrl = taskId ? buildVideoPollUrl(request, taskId) : undefined
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v'
+    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v' || request.plan.model.startsWith('MiniMaxH3-')
     mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal, useContentEndpoint)
   }
   if (!mediaUrl) throw new Error('视频生成失败')
@@ -814,12 +814,15 @@ function buildDirectVideoBody(
     aspect_ratio: params.aspectRatio,
     resolution: params.resolution,
     duration: params.duration,
+    seconds: request.plan.model.startsWith('MiniMaxH3-') ? params.duration : undefined,
     images: uploadedImages.length > 1 ? uploadedImages : undefined,
     image: uploadedImages.length === 1 ? uploadedImages[0] : undefined,
     imageUrl: uploadedImages[0],
     imageUrls: uploadedImages.length > 1 ? uploadedImages : undefined,
     video_url: uploadedVideos[0],
+    video_urls: uploadedVideos.length > 1 ? uploadedVideos : undefined,
     audio_url: uploadedAudios[0],
+    audio_urls: uploadedAudios.length > 1 ? uploadedAudios : undefined,
     text: params.text,
     width: params.width,
     height: params.height,

@@ -61,6 +61,12 @@ const XIAOYI_GEMINI_FIELDS = promptFields([
   },
   { key: 'images', label: '参考图', kind: 'images' },
 ])
+
+const XIAOYI_MINIMAX_H3_MODELS = [
+  { model: 'MiniMaxH3-2k-pro-sec', label: 'MiniMax H3 2K Pro', price: 0.16, resolution: '2k' },
+  { model: 'MiniMaxH3-2k-sec', label: 'MiniMax H3 2K', price: 0.14, resolution: '2k' },
+  { model: 'MiniMaxH3-720p-sec', label: 'MiniMax H3 720P', price: 0.12, resolution: '720p' },
+] as const
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
@@ -568,6 +574,32 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'verified',
     notes: ['docs/wiki/运维/模型矩阵.md'],
   }),
+
+  ...XIAOYI_MINIMAX_H3_MODELS.map(({ model, label, price, resolution }) => directVideo({
+    id: `newapi/xiaoyi/${model}`,
+    model,
+    label,
+    price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    contractStatus: 'verified',
+    ratios: ['16:9', '9:16', '1:1'],
+    resolutions: [resolution],
+    duration: { min: 5, max: 15 },
+    files: { images: { min: 0, max: 9 }, videos: { min: 0, max: 3 }, audios: { min: 0, max: 3 } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: resolution, options: options([resolution]) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 5, max: 15, step: 1 },
+      { key: 'images', label: '参考图片', kind: 'images' },
+      { key: 'videos', label: '参考视频', kind: 'video' },
+      { key: 'audios', label: '参考音频', kind: 'audio' },
+    ]),
+    notes: ['https://docs.comfy.org/zh/tutorials/video/minimax/minimax-h3'],
+  })),
 
   directVideo({
     id: 'newapi/zx/veo-3.1-generate-preview',

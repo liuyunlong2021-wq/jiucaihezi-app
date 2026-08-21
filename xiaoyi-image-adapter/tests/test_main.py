@@ -12,6 +12,14 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         async def upstream(request: httpx.Request):
             self.requests.append(request)
+            if request.method == "POST" and request.url.path == "/v1/videos":
+                return httpx.Response(200, json={"id": "video-task-1", "status": "queued"})
+            if request.method == "GET" and request.url.path == "/v1/videos/video-task-1":
+                return httpx.Response(200, json={"id": "video-task-1", "status": "completed", "progress": 100})
+            if request.method == "GET" and request.url.path == "/v1/videos/video-task-1/content":
+                return httpx.Response(200, content=b"video", headers={"content-type": "video/mp4"})
+            if request.method == "GET" and request.url.path == "/v1/images/tasks/video-task-1":
+                return httpx.Response(404, json={"error": "not found"})
             if request.url.path.endswith("/async"):
                 return httpx.Response(200, json={"task_id": "xiaoyi-task-1", "status": "running"})
             if request.url.path.endswith("/xiaoyi-task-running"):
@@ -42,10 +50,11 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requests[0].url.path, "/v1/images/edits/async")
         self.assertEqual(self.requests[0].headers["authorization"], "Bearer secret-key")
         self.assertIn('name="model"\r\n\r\ngpt-image-2\r\n', self.requests[0].content.decode())
-        self.assertNotIn('name="response_format"', self.requests[0].content.decode())
+        self.assertIn('name="response_format"\r\n\r\nurl\r\n', self.requests[0].content.decode())
         completed = await self.client.get("/v1/videos/xiaoyi-task-1", headers=headers)
         self.assertEqual(completed.json()["status"], "completed")
         self.assertEqual(completed.json()["metadata"]["url"], "data:image/png;base64,aGVsbG8=")
+        self.assertFalse(any(request.url.path == "/v1/videos/xiaoyi-task-1" for request in self.requests))
 
     async def test_maps_official_alias_to_upstream_gpt_image_2(self):
         response = await self.client.post(
@@ -55,6 +64,50 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2")
+
+    async def test_minimax_h3_models_use_xiaoyi_video_contract(self):
+        headers = {"Authorization": "Bearer key"}
+        for model in ["MiniMaxH3-2k-pro-sec", "MiniMaxH3-2k-sec", "MiniMaxH3-720p-sec"]:
+            response = await self.client.post("/v1/videos", headers=headers, json={
+                "model": model,
+                "prompt": "让角色向前行走",
+                "duration": 8,
+                "aspect_ratio": "16:9",
+                "resolution": "2k" if "2k" in model else "720p",
+                "images": ["https://example.test/character.png"],
+                "video_urls": ["https://example.test/motion.mp4"],
+                "audio_urls": ["https://example.test/voice.mp3"],
+            })
+            self.assertEqual(response.status_code, 200)
+
+        body = json.loads(self.requests[0].content)
+        self.assertEqual(self.requests[0].url.path, "/v1/videos")
+        self.assertEqual(body["seconds"], "8")
+        self.assertEqual(body["aspect_ratio"], "16:9")
+        self.assertEqual(body["resolution"], "2k")
+        self.assertEqual([item["type"] for item in body["content"]], ["text", "image_url", "video_url", "audio_url"])
+
+        completed = await self.client.get("/v1/videos/video-task-1", headers=headers)
+        self.assertEqual(completed.json()["status"], "completed")
+        self.assertEqual(completed.json()["metadata"]["url"], "/v1/videos/video-task-1/content")
+        content = await self.client.get("/v1/videos/video-task-1/content", headers=headers)
+        self.assertEqual(content.content, b"video")
+        self.assertEqual(content.headers["content-type"], "video/mp4")
+
+    async def test_minimax_h3_rejects_invalid_duration_ratio_resolution_or_references(self):
+        headers = {"Authorization": "Bearer key"}
+        base = {"model": "MiniMaxH3-2k-sec", "prompt": "test"}
+        cases = [
+            {**base, "duration": 4},
+            {**base, "duration": 16},
+            {**base, "aspect_ratio": "2:3"},
+            {**base, "resolution": "720p"},
+            {**base, "images": ["https://example.test/ref.png"] * 10},
+            {**base, "video_urls": ["https://example.test/ref.mp4"] * 4},
+            {**base, "audio_urls": ["https://example.test/ref.mp3"] * 4},
+        ]
+        for body in cases:
+            self.assertEqual((await self.client.post("/v1/videos", headers=headers, json=body)).status_code, 400, body)
 
     async def test_maps_failed_task(self):
         response = await self.client.get("/v1/videos/xiaoyi-task-failed", headers={"Authorization": "Bearer key"})
