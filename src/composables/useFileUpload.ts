@@ -208,11 +208,13 @@ async function processOfficeFile(result: ProcessedFile, maxTextLength: number, o
     result.error = undefined
   } else {
     result.textContent = ''
-    result.error = converted.message || converted.error || (
+    result.error = converted.errorCode === 'ocr_required'
+      ? '这是扫描版或图片型 PDF，没有可提取的文字层，需要 OCR。'
+      : converted.message || converted.error || (
       result.type === 'pdf'
         ? 'PDF 没有可提取的文字层，可能是扫描版/图片型 PDF，需要 OCR'
         : '文档没有提取到有效正文'
-    )
+      )
     throw new Error(result.error)
   }
 

@@ -79,3 +79,11 @@ test('AnyDoc dependency and persisted metadata version stay in sync', () => {
   assert.match(cargo, /anydoc = "=0\.2\.3"/)
   assert.match(source, /ANYDOC_CONVERTER_VERSION = '0\.2\.3'/)
 })
+
+test('OCR-required Desktop errors use an explicit scanned-PDF message', () => {
+  const source = readFileSync(join(process.cwd(), 'src/composables/useFileUpload.ts'), 'utf8')
+
+  assert.match(source, /converted\.errorCode === 'ocr_required'/)
+  assert.match(source, /扫描版或图片型 PDF，没有可提取的文字层，需要 OCR/)
+  assert.doesNotMatch(source, /ocr_required[\s\S]{0,300}文件损坏/)
+})
