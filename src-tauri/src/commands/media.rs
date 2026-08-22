@@ -1,15 +1,22 @@
 use crate::commands::tools::{
-    local_tools_python_path, resolve_app_media_binary, resolve_local_binary, resolve_local_python,
+    local_tools_python_path, resolve_app_media_binary, resolve_local_python,
 };
 use crate::*;
 use base64::{Engine as _, engine::general_purpose};
+use sha2::{Digest, Sha256};
 use std::env;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::{Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 use tokio::time::timeout;
+
+const MAX_DOCUMENT_BYTES: usize = 100 * 1024 * 1024;
+const ANYDOC_CONVERTER_VERSION: &str = "0.2.3";
+const DOCUMENT_OUTPUT_SCHEMA_VERSION: u8 = 1;
+static DOCUMENT_PARSE_PERMITS: Semaphore = Semaphore::const_new(2);
 
 pub fn app_media_dir(app: &tauri::AppHandle, name: &str) -> Result<PathBuf, String> {
     let dir = app
@@ -151,83 +158,6 @@ pub fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
     (content.chars().take(max).collect(), true)
 }
 
-pub async fn count_pdf_pages(source: &Path) -> Option<usize> {
-    if source
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.eq_ignore_ascii_case("pdf"))
-        != Some(true)
-    {
-        return None;
-    }
-    let mut command = Command::new(resolve_local_python());
-    if let Some(python_path) = local_tools_python_path() {
-        command.env("PYTHONPATH", python_path.to_string_lossy().to_string());
-    }
-    command
-        .env("PYTHONNOUSERSITE", "1")
-        .env_remove("PYTHONHOME")
-        .current_dir(env::temp_dir())
-        .arg("-c")
-        .arg(
-            r#"
-import sys
-
-source = sys.argv[1]
-
-try:
-    from pypdf import PdfReader
-    print(len(PdfReader(source).pages))
-    sys.exit(0)
-except Exception:
-    pass
-
-try:
-    import pypdfium2 as pdfium
-    print(len(pdfium.PdfDocument(source)))
-    sys.exit(0)
-except Exception:
-    sys.exit(1)
-"#,
-        )
-        .arg(source)
-        .kill_on_drop(true);
-    let output = match timeout(Duration::from_secs(10), command.output()).await {
-        Ok(Ok(output)) => output,
-        _ => return None,
-    };
-    if !output.status.success() {
-        return None;
-    }
-    String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse::<usize>()
-        .ok()
-}
-
-pub fn is_meaningful_markitdown_output(
-    content: &str,
-    source: &Path,
-    pdf_page_count: Option<usize>,
-) -> bool {
-    if !is_successful_markdown_content(content) {
-        return false;
-    }
-    if !is_pdf_path(source) {
-        return true;
-    }
-    let page_count = pdf_page_count.unwrap_or(1).max(1);
-    let text_chars = meaningful_text_char_count(content);
-    let min_chars = if page_count >= 30 {
-        1_000
-    } else if page_count >= 10 {
-        350
-    } else {
-        20
-    };
-    text_chars >= min_chars
-}
-
 pub fn python_command_with_local_tools() -> Command {
     let mut command = Command::new(resolve_local_python());
     if let Some(python_path) = local_tools_python_path() {
@@ -238,14 +168,6 @@ pub fn python_command_with_local_tools() -> Command {
         .env_remove("PYTHONHOME")
         .current_dir(env::temp_dir());
     command
-}
-
-pub fn is_pdf_path(source: &Path) -> bool {
-    source
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(|value| value.eq_ignore_ascii_case("pdf"))
-        .unwrap_or(false)
 }
 
 pub fn is_image_path(source: &Path) -> bool {
@@ -261,6 +183,115 @@ pub fn is_image_path(source: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn document_parse_error(code: &str, message: impl Into<String>) -> DocumentParseError {
+    DocumentParseError {
+        code: code.into(),
+        message: message.into(),
+    }
+}
+
+fn decorate_document_markdown(bytes: &[u8], content: &str) -> String {
+    let metadata = serde_json::json!({
+        "sourceSha256": format!("{:x}", Sha256::digest(bytes)),
+        "converterId": "anydoc",
+        "converterVersion": ANYDOC_CONVERTER_VERSION,
+        "outputSchemaVersion": DOCUMENT_OUTPUT_SCHEMA_VERSION,
+        "contentSha256": format!("{:x}", Sha256::digest(content.as_bytes())),
+    });
+    format!(
+        "<!-- jc-document-conversion {} -->\n\n{}",
+        metadata, content
+    )
+}
+
+fn document_markdown_body(content: &str) -> &str {
+    content
+        .strip_prefix("<!-- jc-document-conversion ")
+        .and_then(|value| value.split_once(" -->\n\n"))
+        .map(|(_, body)| body)
+        .unwrap_or(content)
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn map_anydoc_error(error: anydoc::ConvertError, is_pdf: bool) -> DocumentParseError {
+    use anydoc::ConvertError;
+
+    match error {
+        ConvertError::Unsupported(detail)
+            if is_pdf && detail.to_ascii_lowercase().contains("ocr") =>
+        {
+            document_parse_error(
+                "ocr_required",
+                "PDF 没有可提取的文字层；扫描版或图片型 PDF 需要先进行 OCR。",
+            )
+        }
+        ConvertError::Unsupported(_) => {
+            document_parse_error("unsupported", "不支持该文档格式或文件没有可提取内容。")
+        }
+        ConvertError::Malformed { .. } => {
+            document_parse_error("malformed", "文档结构损坏，无法读取有效内容。")
+        }
+        ConvertError::Encrypted => {
+            document_parse_error("encrypted", "文档已加密或受密码保护，无法读取。")
+        }
+        ConvertError::ResourceLimit { .. } => {
+            document_parse_error("resource_limit", "文档超过本地安全解析上限。")
+        }
+        ConvertError::MissingPart { .. } => {
+            document_parse_error("missing_part", "文档缺少必要内容，无法完整读取。")
+        }
+        ConvertError::Io(_) => document_parse_error("internal", "读取本地文档失败。"),
+        _ => document_parse_error("internal", "AnyDoc 本地解析失败。"),
+    }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn parse_document_markdown(bytes: &[u8], filename: &str) -> Result<String, DocumentParseError> {
+    if bytes.len() > MAX_DOCUMENT_BYTES {
+        return Err(document_parse_error(
+            "resource_limit",
+            "文档超过本地 100 MB 安全解析上限。",
+        ));
+    }
+
+    let detected = anydoc::Format::from_bytes(bytes);
+    let named = Path::new(filename)
+        .extension()
+        .and_then(|value| value.to_str())
+        .and_then(anydoc::Format::from_extension);
+    let format = detected.or(named);
+    let is_pdf = format == Some(anydoc::Format::Pdf);
+    let content = anydoc::to_markdown_bytes(bytes, format)
+        .map_err(|error| map_anydoc_error(error, is_pdf))?;
+    if !is_successful_markdown_content(&content) {
+        return Err(document_parse_error(
+            if is_pdf { "ocr_required" } else { "malformed" },
+            if is_pdf {
+                "PDF 没有可提取的文字层；扫描版或图片型 PDF 需要先进行 OCR。"
+            } else {
+                "文档没有提取到有效正文。"
+            },
+        ));
+    }
+    Ok(decorate_document_markdown(bytes, &content))
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub(crate) fn parse_document_bytes(
+    bytes: &[u8],
+    filename: &str,
+    max_chars: usize,
+) -> Result<MarkdownConversion, DocumentParseError> {
+    let content = parse_document_markdown(bytes, filename)?;
+    let (content, truncated) = truncate_markdown(content, max_chars);
+    Ok(MarkdownConversion {
+        content,
+        engine: "anydoc".into(),
+        truncated,
+        message: "已使用内置 AnyDoc 生成 Markdown。".into(),
+    })
+}
+
 pub fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {}", e))?;
@@ -268,30 +299,40 @@ pub fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
     std::fs::write(path, content).map_err(|e| format!("写入文件失败: {}", e))
 }
 
-pub async fn run_markitdown(
-    source: &Path,
-    output_path: &Path,
-) -> Result<(String, String, String), String> {
-    let output = timeout(
-        Duration::from_secs(90),
-        Command::new(resolve_local_binary("markitdown"))
-            .arg(source)
-            .arg("-o")
-            .arg(output_path)
-            .kill_on_drop(true)
-            .output(),
-    )
-    .await
-    .map_err(|_| "MarkItDown 执行超时（90 秒），请先转成 Markdown/TXT 后再导入。".to_string())?
-    .map_err(|e| format!("未检测到 MarkItDown，请先安装：pipx install markitdown 或 pip install markitdown。启动失败: {}", e))?;
-    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-    if !output.status.success() {
-        return Err(format!("MarkItDown 转换失败: {}", stderr.trim()));
+pub(crate) fn validate_document_project_paths(
+    source_path: &Path,
+    output_dir: &Path,
+) -> Result<(PathBuf, PathBuf), String> {
+    let source = std::fs::canonicalize(source_path).map_err(|_| "源文件不可访问。".to_string())?;
+    if !source.is_file() {
+        return Err("源文件不是有效文件。".into());
     }
-    let content = std::fs::read_to_string(output_path)
-        .map_err(|e| format!("读取 MarkItDown 输出失败: {}", e))?;
-    Ok((content, stdout, stderr))
+    let output =
+        std::fs::canonicalize(output_dir).map_err(|_| "文档输出目录不可访问。".to_string())?;
+    let is_document_material_dir = output.file_name().and_then(|v| v.to_str()) == Some("文档")
+        && output
+            .parent()
+            .and_then(|v| v.file_name())
+            .and_then(|v| v.to_str())
+            == Some("jc-media")
+        && output
+            .parent()
+            .and_then(|v| v.parent())
+            .and_then(|v| v.file_name())
+            .and_then(|v| v.to_str())
+            == Some(".raw");
+    if !is_document_material_dir {
+        return Err("文档输出目录必须位于项目的 .raw/jc-media/文档 目录。".into());
+    }
+    let project_root = output
+        .parent()
+        .and_then(|v| v.parent())
+        .and_then(|v| v.parent())
+        .ok_or_else(|| "无法确定项目根目录。".to_string())?;
+    if !source.starts_with(project_root) {
+        return Err("源文件必须位于当前项目目录内。".into());
+    }
+    Ok((source, output))
 }
 
 pub fn normalize_output_format(value: Option<&str>) -> String {
@@ -900,68 +941,65 @@ pub fn media_cache_file(
     })
 }
 
-pub async fn convert_pdf_to_markdown(
-    source_path: &Path,
-    output_path: &Path,
-    max_chars: usize,
-) -> Result<MarkdownConversion, String> {
-    let page_count = count_pdf_pages(source_path).await;
-    match run_markitdown(source_path, output_path).await {
-        Ok((content, _stdout, _stderr))
-            if is_meaningful_markitdown_output(&content, source_path, page_count) =>
-        {
-            let (content, truncated) = truncate_markdown(content, max_chars);
-            Ok(MarkdownConversion {
-                content,
-                engine: "markitdown".into(),
-                truncated,
-                message: "已使用本地转换生成 Markdown。".into(),
-            })
-        }
-        Ok(_) => {
-            let _ = std::fs::remove_file(output_path);
-            Err("PDF 没有可提取的有效文字；扫描版或图片型 PDF 需要先进行 OCR。".into())
-        }
-        Err(err) => {
-            let _ = std::fs::remove_file(output_path);
-            Err(err)
-        }
-    }
-}
-
 pub async fn convert_source_to_markdown(
     source_path: &Path,
     output_path: &Path,
     max_chars: usize,
-) -> Result<MarkdownConversion, String> {
-    if is_pdf_path(source_path) {
-        return convert_pdf_to_markdown(source_path, output_path, max_chars).await;
-    }
-
+) -> Result<MarkdownConversion, DocumentParseError> {
     if is_image_path(source_path) {
-        return Err("图片不是可转换文档；请先使用 OCR 工具生成文字文件后再导入。".into());
+        return Err(document_parse_error(
+            "unsupported",
+            "图片不是可转换文档；请先使用 OCR 工具生成文字文件后再导入。",
+        ));
     }
 
-    match run_markitdown(source_path, output_path).await {
-        Ok((content, _stdout, _stderr)) => {
-            if is_meaningful_markitdown_output(&content, source_path, None) {
-                let (content, truncated) = truncate_markdown(content, max_chars);
-                Ok(MarkdownConversion {
-                    content,
-                    engine: "markitdown".into(),
-                    truncated,
-                    message: "已使用本地转换生成 Markdown。".into(),
-                })
-            } else {
-                let _ = std::fs::remove_file(output_path);
-                Err("本地转换没有提取到有效正文。".into())
-            }
-        }
-        Err(err) => {
-            let _ = std::fs::remove_file(output_path);
-            Err(err)
-        }
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    {
+        let permit = DOCUMENT_PARSE_PERMITS
+            .acquire()
+            .await
+            .map_err(|_| document_parse_error("internal", "AnyDoc 本地解析不可用。"))?;
+        let source_path = source_path.to_path_buf();
+        let filename = source_path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("document")
+            .to_string();
+        let conversion = timeout(
+            Duration::from_secs(90),
+            tokio::task::spawn_blocking(move || {
+                // ponytail: a timed-out blocking parse keeps its permit until it exits; use a
+                // helper process only if hard cancellation becomes a measured requirement.
+                let _permit = permit;
+                let bytes = std::fs::read(source_path)
+                    .map_err(|_| document_parse_error("internal", "读取本地文档失败。"))?;
+                let markdown = parse_document_markdown(&bytes, &filename)?;
+                let (content, truncated) = truncate_markdown(markdown.clone(), max_chars);
+                Ok::<_, DocumentParseError>((
+                    markdown,
+                    MarkdownConversion {
+                        content,
+                        engine: "anydoc".into(),
+                        truncated,
+                        message: "已使用内置 AnyDoc 生成 Markdown。".into(),
+                    },
+                ))
+            }),
+        )
+        .await
+        .map_err(|_| document_parse_error("internal", "AnyDoc 本地解析超时。"))?
+        .map_err(|_| document_parse_error("internal", "AnyDoc 本地解析异常。"))??;
+        let (markdown, conversion) = conversion;
+        write_text_file(output_path, &markdown)
+            .map_err(|message| document_parse_error("internal", message))?;
+        return Ok(conversion);
     }
+
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    Err(document_parse_error(
+        "unsupported",
+        "移动端请使用云端文档转换。",
+    ))
 }
 
 pub fn markdown_success_output(
@@ -986,6 +1024,7 @@ pub fn markdown_success_output(
         truncated: conversion.truncated,
         message: conversion.message,
         error: None,
+        error_code: None,
     }
 }
 
@@ -994,7 +1033,7 @@ pub fn markdown_error_output(
     source_path: &Path,
     output_path: &Path,
     fallback_filename: &str,
-    message: String,
+    error: DocumentParseError,
 ) -> DocumentToMarkdownFileOutput {
     DocumentToMarkdownFileOutput {
         status: "error".into(),
@@ -1009,8 +1048,9 @@ pub fn markdown_error_output(
         source_path: source_path.to_string_lossy().to_string(),
         output_path: output_path.to_string_lossy().to_string(),
         truncated: false,
-        message: message.clone(),
-        error: Some(message),
+        message: error.message.clone(),
+        error: Some(error.message),
+        error_code: Some(error.code),
     }
 }
 
@@ -1036,7 +1076,8 @@ pub fn finalize_markdown_conversion_output(
 
     let markdown =
         std::fs::read_to_string(markdown_path).unwrap_or_else(|_| conversion.content.clone());
-    let output_content = convert_markdown_for_output(output_format, &markdown)?;
+    let output_content =
+        convert_markdown_for_output(output_format, document_markdown_body(&markdown))?;
     write_text_file(final_path, &output_content)?;
     let _ = std::fs::remove_file(markdown_path);
     let (content, truncated) = truncate_markdown(output_content, max_chars);
@@ -1074,13 +1115,30 @@ pub async fn document_to_markdown_file(
     let max_chars = input.max_chars.unwrap_or(20_000_000);
 
     let payload = strip_data_url_prefix(input.data_base64.trim());
+    if payload.len() > (MAX_DOCUMENT_BYTES * 4 / 3) + 4 {
+        return Ok(markdown_error_output(
+            input.filename,
+            &source_path,
+            &output_path,
+            &output_filename,
+            document_parse_error("resource_limit", "文档超过本地 100 MB 安全解析上限。"),
+        ));
+    }
     let bytes = general_purpose::STANDARD
         .decode(payload)
         .map_err(|e| format!("文档数据解码失败: {}", e))?;
+    if bytes.len() > MAX_DOCUMENT_BYTES {
+        return Ok(markdown_error_output(
+            input.filename,
+            &source_path,
+            &output_path,
+            &output_filename,
+            document_parse_error("resource_limit", "文档超过本地 100 MB 安全解析上限。"),
+        ));
+    }
     std::fs::write(&source_path, &bytes).map_err(|e| format!("缓存待转换文档失败: {}", e))?;
 
-    match convert_source_to_markdown(&source_path, &markdown_output_path, max_chars).await
-    {
+    match convert_source_to_markdown(&source_path, &markdown_output_path, max_chars).await {
         Ok(conversion) => finalize_markdown_conversion_output(
             input.filename,
             &source_path,
@@ -1124,7 +1182,7 @@ pub async fn document_path_to_markdown_file(
         .map(PathBuf::from)
         .or_else(|| source_path.parent().map(|path| path.to_path_buf()))
         .ok_or_else(|| "无法确定输出目录。".to_string())?;
-    std::fs::create_dir_all(&output_dir).map_err(|e| format!("创建输出目录失败: {}", e))?;
+    let (source_path, output_dir) = validate_document_project_paths(&source_path, &output_dir)?;
     let output_format = normalize_output_format(input.output_format.as_deref());
     let output_filename = converted_output_filename(&source_name, &output_format);
     let output_path = available_output_path(&output_dir, &output_filename);
@@ -1137,8 +1195,21 @@ pub async fn document_path_to_markdown_file(
     };
     let max_chars = input.max_chars.unwrap_or(500_000);
 
-    match convert_source_to_markdown(&source_path, &markdown_output_path, max_chars).await
+    if std::fs::metadata(&source_path)
+        .map_err(|_| "源文件不可访问。".to_string())?
+        .len()
+        > MAX_DOCUMENT_BYTES as u64
     {
+        return Ok(markdown_error_output(
+            source_name.clone(),
+            &source_path,
+            &output_path,
+            &output_filename,
+            document_parse_error("resource_limit", "文档超过本地 100 MB 安全解析上限。"),
+        ));
+    }
+
+    match convert_source_to_markdown(&source_path, &markdown_output_path, max_chars).await {
         Ok(conversion) => finalize_markdown_conversion_output(
             source_name,
             &source_path,

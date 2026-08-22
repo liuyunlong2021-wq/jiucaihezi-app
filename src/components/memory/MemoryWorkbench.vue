@@ -62,6 +62,7 @@ import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardT
 import { findWikiBacklinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
 import { highlightCode } from '@/utils/highlight'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
+import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
@@ -1075,6 +1076,13 @@ async function addProjectFileReference(resource: ProjectResource) {
       let content = ''
       if (readablePath) {
         content = (await files.readText(listed.find(item => item.path === readablePath)!)).content
+        if (resource.runtime === 'desktop') {
+          const reuse = await classifyDocumentMarkdownReuse(content, await files.hashFile(resource))
+          if (reuse === 'stale') {
+            readablePath = ''
+            content = ''
+          }
+        }
       } else {
         let localError = ''
         if (resource.runtime === 'desktop') {
@@ -1402,6 +1410,13 @@ async function addAttachmentFiles(selected: File[]) {
         let readableContent = readablePath
           ? (await files.readText({ ...resource, path: readablePath, name: readablePath.split('/').pop() || readablePath })).content
           : ''
+        if (readablePath && resource.runtime === 'desktop') {
+          const reuse = await classifyDocumentMarkdownReuse(readableContent, await files.hashFile(resource))
+          if (reuse === 'stale') {
+            readablePath = ''
+            readableContent = ''
+          }
+        }
         if (!readablePath) {
           status.value = `正在解析 ${file.name}`
           const processed = await processFile(file, { maxTextLength: 20_000_000 })

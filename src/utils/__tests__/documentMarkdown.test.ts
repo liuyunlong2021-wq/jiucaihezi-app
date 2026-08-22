@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 
 import {
+  classifyDocumentMarkdownReuse,
   isMeaningfulMarkdownContent,
   normalizeMarkdownOutputFilename,
 } from '../documentMarkdown'
@@ -37,10 +38,11 @@ test('Tauri document cloud fallback uses the native request while Mac keeps loca
   assert.doesNotMatch(source, /rapidocr|shouldRetryWithOcr/)
 })
 
-test('Desktop falls back to the existing cloud converter when local MarkItDown is unavailable', () => {
+test('Desktop only falls back to cloud for an internal local parser failure', () => {
   const source = readFileSync(join(process.cwd(), 'src/utils/documentMarkdown.ts'), 'utf8')
 
-  assert.match(source, /localResult\.status === 'success'[\s\S]*convertWebDocumentToMarkdown\(input, maxChars, outputFilename\)/)
+  assert.match(source, /localResult\.errorCode === 'internal'[\s\S]*convertWebDocumentToMarkdown\(input, maxChars, outputFilename\)/)
+  assert.match(source, /: localResult/)
   assert.match(source, /catch \(err\) \{\s*return convertWebDocumentToMarkdown\(input, maxChars, outputFilename\)/)
 })
 
@@ -49,4 +51,31 @@ test('Web document conversion rejects an HTML fallback even when it has HTTP 200
 
   assert.match(source, /content-type/)
   assert.match(source, /文档转换服务未部署或路由错误/)
+})
+
+test('AnyDoc metadata reuses only an unchanged current-version conversion', async () => {
+  const content = '# 正文\n'
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
+  const contentSha256 = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
+  const metadata = JSON.stringify({
+    sourceSha256: 'source-hash',
+    converterId: 'anydoc',
+    converterVersion: '0.2.3',
+    outputSchemaVersion: 1,
+    contentSha256,
+  })
+  const markdown = `<!-- jc-document-conversion ${metadata} -->\n\n${content}`
+
+  assert.equal(await classifyDocumentMarkdownReuse(markdown, 'source-hash'), 'reusable')
+  assert.equal(await classifyDocumentMarkdownReuse(markdown, 'different-source'), 'stale')
+  assert.equal(await classifyDocumentMarkdownReuse(`${markdown}用户修改`, 'source-hash'), 'edited')
+  assert.equal(await classifyDocumentMarkdownReuse(content, 'source-hash'), 'stale')
+})
+
+test('AnyDoc dependency and persisted metadata version stay in sync', () => {
+  const cargo = readFileSync(join(process.cwd(), 'src-tauri/Cargo.toml'), 'utf8')
+  const source = readFileSync(join(process.cwd(), 'src/utils/documentMarkdown.ts'), 'utf8')
+
+  assert.match(cargo, /anydoc = "=0\.2\.3"/)
+  assert.match(source, /ANYDOC_CONVERTER_VERSION = '0\.2\.3'/)
 })

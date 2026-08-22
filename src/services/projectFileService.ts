@@ -193,6 +193,7 @@ export interface ProjectFileService {
     expectedRevision: ProjectResourceRevision,
   ): Promise<ProjectFileWriteResult>
   readBinary(resource: ProjectResource): Promise<ProjectBinaryRead>
+  hashFile(resource: ProjectResource): Promise<string>
   importBinary(input: ImportProjectBinaryInput): Promise<ProjectResource>
   importText(input: ImportProjectTextInput): Promise<ProjectResource>
   importExternalFiles(input: ImportProjectExternalFilesInput): Promise<ProjectResource[]>
@@ -491,6 +492,10 @@ export function createProjectFileService(adapter: ProjectFileAdapter): ProjectFi
     async readBinary(resource) {
       if (!adapter.readBinary) throw new Error('当前运行时不支持二进制读取')
       return await adapter.readBinary(resource.owner, resource.path)
+    },
+    async hashFile(resource) {
+      if (adapter.hashFile) return await adapter.hashFile(resource.owner, resource.path)
+      return await sha256((await this.readBinary(resource)).data)
     },
     async importBinary(input) {
       return await mutate(input.owner, async () => {

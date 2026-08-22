@@ -511,12 +511,20 @@ struct DocumentToMarkdownFileOutput {
     truncated: bool,
     message: String,
     error: Option<String>,
+    error_code: Option<String>,
 }
 
+#[derive(Debug)]
 struct MarkdownConversion {
     content: String,
     engine: String,
     truncated: bool,
+    message: String,
+}
+
+#[derive(Debug)]
+struct DocumentParseError {
+    code: String,
     message: String,
 }
 
@@ -588,7 +596,8 @@ mod tests {
     };
     use crate::commands::media::{
         convert_markdown_for_output, find_transcript_output, is_meaningful_markdown,
-        is_successful_markdown_content, validate_selected_media_path,
+        is_successful_markdown_content, map_anydoc_error, parse_document_bytes,
+        validate_document_project_paths, validate_selected_media_path,
     };
     use crate::commands::skill_material::{
         build_skill_material_command, collect_skill_material_raw_files,
@@ -890,6 +899,104 @@ mod tests {
 "#;
 
         assert!(is_successful_markdown_content(content));
+    }
+
+    #[test]
+    fn anydoc_detects_document_content_before_the_filename_extension() {
+        let rtf = br#"{\rtf1\ansi\deff0 {\fonttbl {\f0 Arial;}}\f0\fs24 AnyDoc desktop test}"#;
+
+        let conversion = parse_document_bytes(rtf, "mislabeled.bin", 20_000)
+            .expect("RTF content should convert regardless of extension");
+
+        assert_eq!(conversion.engine, "anydoc");
+        assert!(
+            conversion
+                .content
+                .starts_with("<!-- jc-document-conversion ")
+        );
+        assert!(
+            conversion
+                .content
+                .contains("\"converterVersion\":\"0.2.3\"")
+        );
+        assert!(conversion.content.contains("AnyDoc desktop test"));
+        assert!(!conversion.truncated);
+    }
+
+    #[test]
+    fn anydoc_distinguishes_scanned_pdf_from_unknown_input() {
+        let scanned = map_anydoc_error(
+            anydoc::ConvertError::Unsupported(
+                "PDF has no extractable text (Scan, 1 pages): OCR is required".into(),
+            ),
+            true,
+        );
+        let unknown = parse_document_bytes(b"not a document", "demo.bin", 20_000)
+            .expect_err("unknown bytes should be unsupported");
+
+        assert_eq!(scanned.code, "ocr_required");
+        assert_eq!(unknown.code, "unsupported");
+    }
+
+    #[tokio::test]
+    async fn anydoc_keeps_the_complete_markdown_file_when_the_response_is_truncated() {
+        let root = temp_test_dir("anydoc_full_output");
+        let source = root.join("source.rtf");
+        let output = root.join("source.md");
+        std::fs::write(
+            &source,
+            br#"{\rtf1\ansi This content must remain complete in the project Markdown file.}"#,
+        )
+        .expect("write RTF fixture");
+
+        let conversion = crate::commands::media::convert_source_to_markdown(&source, &output, 8)
+            .await
+            .expect("convert RTF");
+
+        assert!(conversion.truncated);
+        assert_eq!(conversion.content.chars().count(), 8);
+        assert!(
+            std::fs::read_to_string(output)
+                .expect("read Markdown output")
+                .contains("remain complete")
+        );
+    }
+
+    #[test]
+    fn document_path_conversion_stays_inside_the_project_material_directory() {
+        let project = temp_test_dir("anydoc_project_paths");
+        let material_dir = project.join(".raw/jc-media/文档");
+        std::fs::create_dir_all(&material_dir).expect("create material directory");
+        let source = material_dir.join("source.rtf");
+        std::fs::write(&source, br#"{\rtf1\ansi project document}"#).expect("write source");
+        let outside = temp_test_dir("anydoc_outside_paths").join("outside.rtf");
+        std::fs::write(&outside, br#"{\rtf1\ansi outside document}"#).expect("write outside");
+
+        assert!(validate_document_project_paths(&source, &material_dir).is_ok());
+        assert!(validate_document_project_paths(&outside, &material_dir).is_err());
+        assert!(validate_document_project_paths(&source, &project).is_err());
+    }
+
+    #[test]
+    fn anydoc_converts_repository_docx_and_text_pdf_samples() {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        for relative in [
+            "docs/wiki/归档/handover/新手教程&Mac APP下载.docx",
+            "docs/wiki/运维/KIK.pdf",
+        ] {
+            let path = repository.join(relative);
+            let bytes = std::fs::read(&path).expect("read repository document sample");
+            let conversion = parse_document_bytes(
+                &bytes,
+                path.file_name().and_then(|value| value.to_str()).unwrap(),
+                20_000_000,
+            )
+            .expect("convert repository document sample");
+
+            assert_eq!(conversion.engine, "anydoc");
+            assert!(is_meaningful_markdown(&conversion.content));
+            assert!(!conversion.truncated);
+        }
     }
 
     #[test]

@@ -13,12 +13,46 @@ export interface DocumentToMarkdownResult {
   source: string
   filename: string
   content: string
-  engine: 'text' | 'markitdown' | 'attachment_text' | 'unsupported'
+  engine: 'text' | 'anydoc' | 'markitdown' | 'attachment_text' | 'unsupported'
   sourcePath?: string
   outputPath?: string
   truncated: boolean
   message: string
   error?: string
+  errorCode?: string
+}
+
+export type DocumentMarkdownReuse = 'reusable' | 'edited' | 'stale'
+
+const ANYDOC_CONVERTER_VERSION = '0.2.3'
+const DOCUMENT_OUTPUT_SCHEMA_VERSION = 1
+const DOCUMENT_METADATA_PATTERN = /^<!-- jc-document-conversion (\{[^\n]+\}) -->\n\n/
+
+async function sha256Text(value: string): Promise<string> {
+  const bytes = new TextEncoder().encode(value)
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('')
+}
+
+export async function classifyDocumentMarkdownReuse(
+  markdown: string,
+  sourceSha256: string,
+): Promise<DocumentMarkdownReuse> {
+  const match = String(markdown || '').match(DOCUMENT_METADATA_PATTERN)
+  if (!match) return 'stale'
+  try {
+    const metadata = JSON.parse(match[1]) as Record<string, unknown>
+    const content = markdown.slice(match[0].length)
+    if (metadata.contentSha256 !== await sha256Text(content)) return 'edited'
+    return metadata.sourceSha256 === sourceSha256
+      && metadata.converterId === 'anydoc'
+      && metadata.converterVersion === ANYDOC_CONVERTER_VERSION
+      && metadata.outputSchemaVersion === DOCUMENT_OUTPUT_SCHEMA_VERSION
+      ? 'reusable'
+      : 'stale'
+  } catch {
+    return 'stale'
+  }
 }
 
 export function normalizeMarkdownOutputFilename(filename: string): string {
@@ -143,6 +177,7 @@ async function convertWebDocumentToMarkdown(
       truncated: false,
       message: (error as Error).message || '云端文档转换失败。',
       error: 'REMOTE_CONVERSION_FAILED',
+      errorCode: 'remote_failed',
     }
   }
 }
@@ -197,12 +232,13 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
       source: string
       filename: string
       content: string
-      engine: 'markitdown' | 'unsupported'
+      engine: 'anydoc' | 'markitdown' | 'unsupported'
       sourcePath?: string
       outputPath?: string
       truncated?: boolean
       message?: string
       error?: string
+      errorCode?: string
     }
 
     const localResult: DocumentToMarkdownResult = {
@@ -216,10 +252,12 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
       truncated: Boolean(result.truncated),
       message: result.message || (result.status === 'success' ? '转换完成。' : '转换失败。'),
       error: result.error,
+      errorCode: result.errorCode,
     }
-    return localResult.status === 'success'
-      ? localResult
-      : convertWebDocumentToMarkdown(input, maxChars, outputFilename)
+    if (localResult.status === 'success') return localResult
+    return localResult.errorCode === 'internal'
+      ? convertWebDocumentToMarkdown(input, maxChars, outputFilename)
+      : localResult
   } catch (err) {
     return convertWebDocumentToMarkdown(input, maxChars, outputFilename)
   }
