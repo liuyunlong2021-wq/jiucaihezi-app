@@ -1030,5 +1030,5 @@
 
 - Desktop 的文档导入统一由 Tauri 内置 AnyDoc `0.2.3` 解析并生成 Markdown 可读副本；保留原件、项目相对路径、SHA-256 去重和现有模型读取合同，用户上传操作不变。
 - 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 转换成功。复杂 104 页 PDF 为图片型扫描件，无文字层；当前明确提示需要 OCR，不再误报文件损坏，原件继续保留。
-- Desktop 成功转换链路不调用 MarkItDown。Web/Mobile 仍走现有 `/documents/markdown` 云端 MarkItDown 服务；云端 AnyDoc staging、生产切换和 OCR 能力均暂缓，未部署服务器。
+- Desktop 本地 AnyDoc 链路不调用 MarkItDown；仅 `internal`/不可用错误可回退云端。Web/Mobile 仍走现有 `/documents/markdown` 云端 MarkItDown 服务；云端 AnyDoc staging、生产切换和 OCR 能力均暂缓，未部署服务器。
 - 自动验证：前端 focused `1111/1111`、Rust AnyDoc `4 passed`、TypeScript、Rust 格式与差异检查通过；macOS ARM `.app` 签名和 DMG 完整性校验通过。Intel Mac 与 Windows x64 真机仍待后续发布门禁。详见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]。

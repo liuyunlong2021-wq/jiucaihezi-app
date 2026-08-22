@@ -1,7 +1,7 @@
 # 通用记忆工作台 AnyDoc 内置格式转换升级 TDD
 
-> 日期：2026-08-22  
-> 分支：`0822anydoc`  
+> 日期：2026-08-22
+> 分支：`0822anydoc`
 > 状态：阶段 B Desktop AnyDoc 已完成并通过用户验收；阶段 C/D 云端归一暂缓
 
 ## 1. 背景与根因
@@ -131,7 +131,7 @@ AnyDoc 只负责“文档导入解析”；现有 artifact 工具继续负责“
 - Desktop：AnyDoc 随 Tauri 原生二进制编译，目标是 macOS ARM、macOS Intel、Windows x64 均可离线使用。
 - Web/Mobile：第一阶段继续云端转换；不承诺离线 AnyDoc。未来若采用 WASM，必须 Worker 化并通过包体和设备验收。
 - “Desktop 内置”验收必须同时证明：本机无 Python、MarkItDown、LibreOffice 时，成功样本仍可离线转换；否则只能称为实验集成。
-- 当前 Desktop 已集成 AnyDoc 并已通过用户验收；Desktop 成功转换不依赖本机 Python、MarkItDown 或 LibreOffice。Web/Mobile 仍走现有云端 MarkItDown；桌面 AnyDoc 失败时仅按错误矩阵对内部错误尝试云端回退。
+- 当前 Desktop 已集成 AnyDoc 并已通过用户验收；Desktop 本地转换不依赖本机 Python、MarkItDown 或 LibreOffice。Web/Mobile 仍走现有云端 MarkItDown；桌面 AnyDoc 失败时仅按错误矩阵对内部错误尝试云端回退。
 
 ## 8. 回滚与风险
 
@@ -148,7 +148,7 @@ AnyDoc 只负责“文档导入解析”；现有 artifact 工具继续负责“
 ## 10. 当前实现与边界（2026-08-22）
 
 - Desktop `document_to_markdown_file`、`document_path_to_markdown_file` 和源文件转 Markdown 共用 Rust AnyDoc `0.2.3`；结果记录 `sourceSha256`、转换器版本和输出规范版本。
-- Desktop 成功路径不调用 MarkItDown。仓库中仍保留旧 Python/MarkItDown 解析辅助代码和兼容类型字段，供历史工具或云端合同兼容；它们不是当前 Desktop 文档转换的执行引擎。
+- Desktop 本地 AnyDoc 路径不调用 MarkItDown。仓库中仍保留旧 Python/MarkItDown 解析辅助代码和兼容类型字段，供历史工具或云端合同兼容；它们不是当前 Desktop 本地文档转换的执行引擎。AnyDoc 仅在 `internal`/不可用错误时可按既有合同回退到云端 MarkItDown。
 - Web/Mobile 继续调用现有 `/documents/markdown` 云端接口，当前云端解析器仍是 MarkItDown。云端 AnyDoc 部署、staging 和生产切换全部暂缓。
 - 用户操作没有变化：上传文档后自动转换并进入对话；转换成功继续读取，扫描版/图片型 PDF 明确提示需要 OCR，原件保留。
 - 本轮交付包：`src-tauri/target/release/bundle/dmg/韭菜盒子_2.1.33_aarch64.dmg`；`hdiutil verify` 通过，SHA-256 为 `4c58ea80196c74b069e173053c5bcab9996f6be10668d2a55d81b5614bb0e57a`。

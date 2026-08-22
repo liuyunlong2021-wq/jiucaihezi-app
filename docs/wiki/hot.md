@@ -4,7 +4,7 @@
 
 ## 当前结论
 
-- **Desktop 文档转换已切换为内置 AnyDoc `0.2.3` 并通过用户验收。** 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 成功；图片型 104 页 PDF 被正确识别为无文字层并提示需要 OCR，原件保留。Desktop 成功路径不调用 MarkItDown，也不要求本机 Python 或 LibreOffice；Web/Mobile 仍使用现有云端 MarkItDown。云端 AnyDoc staging 和生产切换按用户决定暂缓。见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]。
+- **Desktop 文档转换已切换为内置 AnyDoc `0.2.3` 并通过用户验收。** 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 成功；图片型 104 页 PDF 被正确识别为无文字层并提示需要 OCR，原件保留。Desktop 本地 AnyDoc 路径不调用 MarkItDown，也不要求本机 Python 或 LibreOffice；仅 `internal`/不可用错误可回退现有云端 MarkItDown，Web/Mobile 也仍使用该云端服务。云端 AnyDoc staging 和生产切换按用户决定暂缓。见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]。
 
 - **迅虎支付 404 已完成生产修复与真实验收。** `jiucai-adapter` 和支付预览服务均未重启；故障在 Nginx 2026-08-20 06:09 重启后暴露：旧 `/xunhu/` 的 `rewrite +` 无尾斜杠 `proxy_pass` 没有可靠剥离前缀，容器收到不存在的 `/xunhu/submit.php`。现改为带尾斜杠的 `proxy_pass http://127.0.0.1:8081/;` 并 reload，公网探测返回 `200`，用户确认真实支付恢复。Nginx 备份不得留在 `sites-enabled`。见 [[运维/服务器运维#迅虎支付 `/xunhu/submit.php` 在 Nginx 重启后 404（2026-08-20）]]。
 
