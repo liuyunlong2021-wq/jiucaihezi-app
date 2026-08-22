@@ -1025,3 +1025,10 @@
 - 确认 `jiucai-adapter` 自 2026-06-09 持续运行且零重启，容器内 `/submit.php` 正常返回迅虎收银台跳转；故障不是支付容器或 NewAPI。
 - Nginx 于 2026-08-20 06:09 重启后，旧 `/xunhu/` 的 `rewrite +` 无尾斜杠 `proxy_pass` 未可靠剥离前缀；改成 `proxy_pass http://127.0.0.1:8081/;` 后 reload。
 - 公网探测恢复 `200`，用户确认真实支付正常。首次备份误放 `sites-enabled` 曾导致重复监听、配置检查失败；已移到 `/etc/nginx/backups/`。回环探测仍为 `404`，不登记为已通过。见 [[运维/服务器运维#迅虎支付 `/xunhu/submit.php` 在 Nginx 重启后 404（2026-08-20）]]。
+
+## [2026-08-22] 实施与用户验收 | Desktop AnyDoc 内置格式转换
+
+- Desktop 的文档导入统一由 Tauri 内置 AnyDoc `0.2.3` 解析并生成 Markdown 可读副本；保留原件、项目相对路径、SHA-256 去重和现有模型读取合同，用户上传操作不变。
+- 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 转换成功。复杂 104 页 PDF 为图片型扫描件，无文字层；当前明确提示需要 OCR，不再误报文件损坏，原件继续保留。
+- Desktop 成功转换链路不调用 MarkItDown。Web/Mobile 仍走现有 `/documents/markdown` 云端 MarkItDown 服务；云端 AnyDoc staging、生产切换和 OCR 能力均暂缓，未部署服务器。
+- 自动验证：前端 focused `1111/1111`、Rust AnyDoc `4 passed`、TypeScript、Rust 格式与差异检查通过；macOS ARM `.app` 签名和 DMG 完整性校验通过。Intel Mac 与 Windows x64 真机仍待后续发布门禁。详见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]。

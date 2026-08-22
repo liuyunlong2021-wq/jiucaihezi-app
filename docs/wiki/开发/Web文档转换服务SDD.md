@@ -6,7 +6,7 @@
 
 ## 目标
 
-让 Web 创模式能上传 `DOC/DOCX/PDF/XLS/XLSX/PPT/PPTX/ODT/ODS/ODP/RTF`。文件先转换为 Markdown，再沿用现有 `files: [{ name, content }]` 聊天链路送给模型。桌面端继续使用本机 MarkItDown，行为不变。
+让 Web 创模式能上传 `DOC/DOCX/PDF/XLS/XLSX/PPT/PPTX/ODT/ODS/ODP/RTF`。文件先转换为 Markdown，再沿用现有 `files: [{ name, content }]` 聊天链路送给模型。本页记录的是现有云端 MarkItDown 合同；Desktop 文档转换已由 2026-08-22 的 AnyDoc TDD 接管，云端归一暂缓。
 
 ## 不做什么
 
