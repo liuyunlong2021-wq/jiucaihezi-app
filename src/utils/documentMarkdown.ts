@@ -13,7 +13,7 @@ export interface DocumentToMarkdownResult {
   source: string
   filename: string
   content: string
-  engine: 'text' | 'markitdown' | 'rapidocr_chunked' | 'rapidocr_image' | 'attachment_text' | 'unsupported'
+  engine: 'text' | 'markitdown' | 'attachment_text' | 'unsupported'
   sourcePath?: string
   outputPath?: string
   truncated: boolean
@@ -40,13 +40,6 @@ export function isMeaningfulMarkdownContent(markdown: string): boolean {
     .replace(/[-_*`>[\]().,，。:：;；\s]/g, '')
     .trim()
   return /[\p{L}\p{N}]/u.test(cleaned) && cleaned.length >= 2
-}
-
-export function shouldRetryWithOcr(file: File | { name: string; type?: string }, result: DocumentToMarkdownResult): boolean {
-  const isPdf = String(file.type || '').includes('pdf') || /\.pdf$/i.test(file.name)
-  if (!isPdf || result.status !== 'error') return false
-  const message = `${result.message || ''}\n${result.error || ''}`
-  return /扫描版|图片型|没有提取到有效正文|MarkItDown 没有提取到有效正文|EMPTY_TEXT/i.test(message)
 }
 
 function truncateContent(content: string, maxChars: number): { content: string; truncated: boolean } {
@@ -204,7 +197,7 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
       source: string
       filename: string
       content: string
-      engine: 'markitdown' | 'rapidocr_chunked' | 'rapidocr_image' | 'unsupported'
+      engine: 'markitdown' | 'unsupported'
       sourcePath?: string
       outputPath?: string
       truncated?: boolean

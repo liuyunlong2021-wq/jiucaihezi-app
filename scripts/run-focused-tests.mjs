@@ -148,7 +148,6 @@ const legacyOrSupersededTests = [
   'src/utils/__tests__/chatToolPolicy.test.ts',
   'src/utils/__tests__/devProjectTools.test.ts',
   'src/utils/__tests__/fileTreeView.test.ts',
-  'src/utils/__tests__/formatConverter.test.ts',
   'src/utils/__tests__/longFormPolicy.test.ts',
   'src/utils/__tests__/materialSymbolsCoverage.test.ts',
   'src/utils/__tests__/mediaDisplayResolver.test.ts',

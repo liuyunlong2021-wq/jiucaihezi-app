@@ -8,7 +8,6 @@ use std::env;
 #[allow(unused_imports)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::Command as StdCommand;
 use std::time::Instant;
 use tauri::{Manager, WebviewWindowBuilder, webview::NewWindowResponse};
 use tokio::process::Command;
@@ -311,11 +310,8 @@ struct DocumentToMarkdownFileInput {
     #[allow(dead_code)]
     mime_type: Option<String>,
     data_base64: String,
-    conversion_mode: Option<String>,
     output_format: Option<String>,
-    timeout_seconds: Option<u64>,
     max_chars: Option<usize>,
-    job_id: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -323,17 +319,8 @@ struct DocumentToMarkdownFileInput {
 struct DocumentPathToMarkdownInput {
     source_path: String,
     output_dir: Option<String>,
-    conversion_mode: Option<String>,
     output_format: Option<String>,
-    timeout_seconds: Option<u64>,
     max_chars: Option<usize>,
-    job_id: Option<String>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct CancelMarkdownConversionInput {
-    job_id: String,
 }
 
 #[derive(Serialize)]
@@ -533,24 +520,6 @@ struct MarkdownConversion {
     message: String,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MarkdownConversionMode {
-    Auto,
-    Fast,
-    Ocr,
-}
-
-#[derive(Serialize, Clone)]
-#[serde(rename_all = "camelCase")]
-struct FormatConverterProgress {
-    job_id: Option<String>,
-    source_path: String,
-    completed_pages: usize,
-    total_pages: usize,
-    progress: u8,
-    message: String,
-}
-
 #[derive(Default)]
 struct MediaCaptureJobs {
     cancelled: Mutex<HashSet<String>>,
@@ -589,7 +558,7 @@ fn sanitize_media_process_error(detail: &str, fallback: &str) -> String {
     }
     let first_line = v.lines().next().unwrap_or(fallback);
     let lower = first_line.to_ascii_lowercase();
-    let exposes_internal_tool = ["ffmpeg", "whisper", "rapidocr", "yt-dlp"]
+    let exposes_internal_tool = ["ffmpeg", "whisper", "yt-dlp"]
         .iter()
         .any(|name| lower.contains(name));
     let exposes_private_path = first_line.contains("/Users/")
@@ -599,51 +568,6 @@ fn sanitize_media_process_error(detail: &str, fallback: &str) -> String {
         return fallback.into();
     }
     first_line.chars().take(200).collect()
-}
-
-#[derive(Default)]
-struct ConversionJobs {
-    cancelled: Mutex<HashSet<String>>,
-    pids: Mutex<HashMap<String, u32>>,
-}
-
-impl ConversionJobs {
-    async fn is_cancelled(&self, job_id: Option<&str>) -> bool {
-        let Some(job_id) = job_id else {
-            return false;
-        };
-        self.cancelled.lock().await.contains(job_id)
-    }
-
-    async fn register_pid(&self, job_id: Option<&str>, pid: Option<u32>) {
-        if let (Some(job_id), Some(pid)) = (job_id, pid) {
-            self.pids.lock().await.insert(job_id.to_string(), pid);
-        }
-    }
-
-    async fn clear_pid(&self, job_id: Option<&str>) {
-        if let Some(job_id) = job_id {
-            self.pids.lock().await.remove(job_id);
-        }
-    }
-
-    async fn finish_job(&self, job_id: Option<&str>) {
-        if let Some(job_id) = job_id {
-            self.pids.lock().await.remove(job_id);
-            self.cancelled.lock().await.remove(job_id);
-        }
-    }
-
-    async fn cancel_job(&self, job_id: &str) {
-        self.cancelled.lock().await.insert(job_id.to_string());
-        let pid = self.pids.lock().await.get(job_id).copied();
-        if let Some(pid) = pid {
-            let _ = StdCommand::new("kill")
-                .arg("-TERM")
-                .arg(pid.to_string())
-                .output();
-        }
-    }
 }
 
 fn split_command(command: &str) -> Result<(String, Vec<String>), String> {
@@ -1090,7 +1014,6 @@ pub fn run() {
     }
 
     let app = tauri::Builder::default()
-        .manage(ConversionJobs::default())
         .manage(commands::creation_mcp::CreationMcpState::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1444,7 +1367,6 @@ pub fn run() {
             commands::media::media_cache_file,
             commands::media::document_to_markdown_file,
             commands::media::document_path_to_markdown_file,
-            commands::media::cancel_markdown_conversion,
             commands::media::media_select_file,
             commands::media::media_inspect_file,
             commands::media::media_process_file,

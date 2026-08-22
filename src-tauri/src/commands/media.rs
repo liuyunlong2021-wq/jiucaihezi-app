@@ -138,58 +138,9 @@ pub fn is_meaningful_markdown(content: &str) -> bool {
     meaningful_text_char_count(content) >= 2
 }
 
-pub fn has_meaningful_text_outside_conversion_markers(content: &str) -> bool {
-    let mut cleaned = String::with_capacity(content.len());
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
-        }
-        if trimmed.starts_with("<!--") && trimmed.ends_with("-->") {
-            continue;
-        }
-        if trimmed.starts_with('#') {
-            continue;
-        }
-        if trimmed.starts_with("- 来源文件：")
-            || trimmed.starts_with("- 总页数：")
-            || trimmed.starts_with("- 已处理页数：")
-            || trimmed.starts_with("- OCR 失败页数：")
-            || trimmed.starts_with("- 状态：")
-        {
-            continue;
-        }
-        if trimmed.starts_with("- 第 ")
-            && (trimmed.contains("RapidOCR")
-                || trimmed.contains("OCR")
-                || trimmed.contains("没有识别到有效正文"))
-        {
-            continue;
-        }
-        if trimmed.starts_with('>')
-            && (trimmed.contains("本页 OCR 未成功")
-                || trimmed.contains("本页未识别到文字")
-                || trimmed.contains("OCR 识别失败")
-                || trimmed.contains("来源："))
-        {
-            continue;
-        }
-        for ch in trimmed.chars() {
-            if ch.is_alphanumeric() {
-                cleaned.push(ch);
-            }
-        }
-    }
-    cleaned.chars().count() >= 2
-}
-
-pub fn is_internal_conversion_failure_markdown(_content: &str) -> bool {
-    false
-}
-
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn is_successful_markdown_content(content: &str) -> bool {
-    is_meaningful_markdown(content) && !is_internal_conversion_failure_markdown(content)
+    is_meaningful_markdown(content)
 }
 
 pub fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
@@ -198,14 +149,6 @@ pub fn truncate_markdown(content: String, max_chars: usize) -> (String, bool) {
         return (content, false);
     }
     (content.chars().take(max).collect(), true)
-}
-
-pub fn loose_cache_key(value: &str) -> String {
-    value
-        .chars()
-        .filter(|ch| ch.is_alphanumeric())
-        .flat_map(|ch| ch.to_lowercase())
-        .collect()
 }
 
 pub async fn count_pdf_pages(source: &Path) -> Option<usize> {
@@ -262,94 +205,10 @@ except Exception:
         .ok()
 }
 
-#[derive(Debug, Clone, Copy)]
-struct PdfTextProbe {
-    page_count: usize,
-    sampled_pages: usize,
-    text_pages: usize,
-    text_chars: usize,
-}
-
-pub async fn probe_pdf_text_layer(source: &Path) -> Option<PdfTextProbe> {
-    if !is_pdf_path(source) {
-        return None;
-    }
-
-    let mut command = python_command_with_local_tools();
-    command
-        .arg("-c")
-        .arg(r#"
-import json
-import re
-import sys
-
-source = sys.argv[1]
-
-try:
-    from pypdf import PdfReader
-    reader = PdfReader(source)
-    total = len(reader.pages)
-    if total <= 0:
-        print(json.dumps({"page_count": 0, "sampled_pages": 0, "text_pages": 0, "text_chars": 0}))
-        sys.exit(0)
-
-    sample_count = min(total, 12)
-    if sample_count == 1:
-        indices = [0]
-    else:
-        indices = sorted(set(round(i * (total - 1) / (sample_count - 1)) for i in range(sample_count)))
-
-    text_pages = 0
-    text_chars = 0
-    for index in indices:
-        try:
-            text = reader.pages[index].extract_text() or ""
-        except Exception:
-            text = ""
-        cleaned = re.sub(r"\s+", "", text)
-        count = len(cleaned)
-        text_chars += count
-        if count >= 80:
-            text_pages += 1
-
-    print(json.dumps({
-        "page_count": total,
-        "sampled_pages": len(indices),
-        "text_pages": text_pages,
-        "text_chars": text_chars,
-    }, ensure_ascii=False))
-except Exception:
-    sys.exit(1)
-"#)
-        .arg(source)
-        .kill_on_drop(true);
-
-    let output = match timeout(Duration::from_secs(20), command.output()).await {
-        Ok(Ok(output)) if output.status.success() => output,
-        _ => return None,
-    };
-    let value: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
-    Some(PdfTextProbe {
-        page_count: value.get("page_count")?.as_u64()? as usize,
-        sampled_pages: value.get("sampled_pages")?.as_u64()? as usize,
-        text_pages: value.get("text_pages")?.as_u64()? as usize,
-        text_chars: value.get("text_chars")?.as_u64()? as usize,
-    })
-}
-
-pub fn pdf_probe_has_text_layer(probe: &PdfTextProbe) -> bool {
-    if probe.page_count == 0 || probe.sampled_pages == 0 {
-        return false;
-    }
-    let enough_pages = probe.text_pages >= 2 || probe.text_pages * 2 >= probe.sampled_pages;
-    let enough_chars = probe.text_chars >= 400 || probe.text_chars >= probe.sampled_pages * 120;
-    enough_pages && enough_chars
-}
-
 pub fn is_meaningful_markitdown_output(
     content: &str,
     source: &Path,
-    pdf_probe: Option<&PdfTextProbe>,
+    pdf_page_count: Option<usize>,
 ) -> bool {
     if !is_successful_markdown_content(content) {
         return false;
@@ -357,7 +216,7 @@ pub fn is_meaningful_markitdown_output(
     if !is_pdf_path(source) {
         return true;
     }
-    let page_count = pdf_probe.map(|probe| probe.page_count).unwrap_or(1).max(1);
+    let page_count = pdf_page_count.unwrap_or(1).max(1);
     let text_chars = meaningful_text_char_count(content);
     let min_chars = if page_count >= 30 {
         1_000
@@ -402,95 +261,11 @@ pub fn is_image_path(source: &Path) -> bool {
         .unwrap_or(false)
 }
 
-pub fn source_cache_key(source: &Path) -> String {
-    let stem = source
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("document");
-    let metadata = std::fs::metadata(source).ok();
-    let len = metadata.as_ref().map(|value| value.len()).unwrap_or(0);
-    let modified = metadata
-        .and_then(|value| value.modified().ok())
-        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-        .map(|value| value.as_secs())
-        .unwrap_or(0);
-    format!("{}_{}_{}", loose_cache_key(stem), len, modified)
-}
-
-pub fn chunk_markdown_cache_path(
-    cache_dir: &Path,
-    source: &Path,
-    start_page: usize,
-    end_page: usize,
-) -> PathBuf {
-    cache_dir
-        .join("document-markdown-chunks")
-        .join(source_cache_key(source))
-        .join(format!("p{:04}-p{:04}.md", start_page, end_page))
-}
-
-pub fn read_meaningful_cached_chunk(path: &Path) -> Option<String> {
-    let content = std::fs::read_to_string(path).ok()?;
-    if content.contains("本页 OCR 未成功")
-        || content.contains("本页未识别到文字")
-        || content.contains("OCR 失败")
-        || content.contains("RapidOCR 本地引擎不可用")
-    {
-        return None;
-    }
-    if is_successful_markdown_content(&content) {
-        Some(content)
-    } else {
-        None
-    }
-}
-
 pub fn write_text_file(path: &Path, content: &str) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建输出目录失败: {}", e))?;
     }
     std::fs::write(path, content).map_err(|e| format!("写入文件失败: {}", e))
-}
-
-pub fn emit_format_progress(
-    app: &tauri::AppHandle,
-    job_id: Option<&str>,
-    source: &Path,
-    completed_pages: usize,
-    total_pages: usize,
-    message: String,
-) {
-    let progress = if total_pages == 0 {
-        0
-    } else {
-        ((completed_pages as f64 / total_pages as f64) * 100.0)
-            .round()
-            .clamp(0.0, 100.0) as u8
-    };
-    let _ = app.emit(
-        "format-converter-progress",
-        FormatConverterProgress {
-            job_id: job_id.map(|value| value.to_string()),
-            source_path: source.to_string_lossy().to_string(),
-            completed_pages,
-            total_pages,
-            progress,
-            message,
-        },
-    );
-}
-
-pub fn placeholder_page_markdown(source_name: &str, page: usize, error: &str) -> String {
-    [
-        format!("<!-- source-page: {} -->", page),
-        format!("## 第 {} 页", page),
-        String::new(),
-        format!("> 本页 OCR 未成功，已保留占位。原因：{}", error),
-        String::new(),
-        format!("> 来源：{}", source_name),
-        String::new(),
-    ]
-    .join("\n")
 }
 
 pub async fn run_markitdown(
@@ -517,14 +292,6 @@ pub async fn run_markitdown(
     let content = std::fs::read_to_string(output_path)
         .map_err(|e| format!("读取 MarkItDown 输出失败: {}", e))?;
     Ok((content, stdout, stderr))
-}
-
-pub fn parse_markdown_conversion_mode(value: Option<&str>) -> MarkdownConversionMode {
-    match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
-        "fast" | "markitdown" => MarkdownConversionMode::Fast,
-        "ocr" | "rapidocr" => MarkdownConversionMode::Ocr,
-        _ => MarkdownConversionMode::Auto,
-    }
 }
 
 pub fn normalize_output_format(value: Option<&str>) -> String {
@@ -1134,141 +901,45 @@ pub fn media_cache_file(
 }
 
 pub async fn convert_pdf_to_markdown(
-    app: &tauri::AppHandle,
-    _jobs: &ConversionJobs,
-    job_id: Option<&str>,
     source_path: &Path,
     output_path: &Path,
     max_chars: usize,
-    mode: MarkdownConversionMode,
-    _timeout_seconds: Option<u64>,
 ) -> Result<MarkdownConversion, String> {
-    if mode == MarkdownConversionMode::Ocr {
-        return Err(
-            "OCR 模式已移除。请使用带文字层的 PDF，或先通过第三方 OCR 工具生成文字文件。".into(),
-        );
-    }
-
-    emit_format_progress(app, job_id, source_path, 0, 0, "正在判断文档类型".into());
-    let probe = probe_pdf_text_layer(source_path).await;
-    let mut markitdown_error: Option<String> = None;
-    let mut markitdown_attempted = false;
-
-    if mode == MarkdownConversionMode::Fast
-        || probe
-            .as_ref()
-            .map(pdf_probe_has_text_layer)
-            .unwrap_or(false)
-    {
-        markitdown_attempted = true;
-        let message = if mode == MarkdownConversionMode::Fast {
-            "快速转换中"
-        } else {
-            "检测到文字层，快速转换中"
-        };
-        emit_format_progress(app, job_id, source_path, 0, 0, message.into());
-        match run_markitdown(source_path, output_path).await {
-            Ok((content, _stdout, _stderr)) => {
-                if is_meaningful_markitdown_output(&content, source_path, probe.as_ref()) {
-                    let (content, truncated) = truncate_markdown(content, max_chars);
-                    return Ok(MarkdownConversion {
-                        content,
-                        engine: "markitdown".into(),
-                        truncated,
-                        message: "已使用本地快速转换生成 Markdown。".into(),
-                    });
-                }
-                let _ = std::fs::remove_file(output_path);
-                markitdown_error = Some("PDF 文字层不完整，本地快速转换没有得到足够正文。".into());
-            }
-            Err(err) => {
-                let _ = std::fs::remove_file(output_path);
-                markitdown_error = Some(err);
-            }
+    let page_count = count_pdf_pages(source_path).await;
+    match run_markitdown(source_path, output_path).await {
+        Ok((content, _stdout, _stderr))
+            if is_meaningful_markitdown_output(&content, source_path, page_count) =>
+        {
+            let (content, truncated) = truncate_markdown(content, max_chars);
+            Ok(MarkdownConversion {
+                content,
+                engine: "markitdown".into(),
+                truncated,
+                message: "已使用本地转换生成 Markdown。".into(),
+            })
+        }
+        Ok(_) => {
+            let _ = std::fs::remove_file(output_path);
+            Err("PDF 没有可提取的有效文字；扫描版或图片型 PDF 需要先进行 OCR。".into())
+        }
+        Err(err) => {
+            let _ = std::fs::remove_file(output_path);
+            Err(err)
         }
     }
-
-    if mode == MarkdownConversionMode::Fast {
-        return Err(markitdown_error
-            .unwrap_or_else(|| "快速模式没有提取到有效正文，请切换 OCR 模式。".into()));
-    }
-
-    let page_count = match probe
-        .map(|value| value.page_count)
-        .filter(|value| *value > 0)
-    {
-        Some(value) => Some(value),
-        None => count_pdf_pages(source_path).await,
-    };
-
-    if let Some(page_count) = page_count {
-        emit_format_progress(
-            app,
-            job_id,
-            source_path,
-            0,
-            page_count,
-            "未检测到有效文字层，进入分段 OCR".into(),
-        );
-        return Err("OCR 已移除。请使用快速模式。".into());
-    }
-
-    if !markitdown_attempted {
-        match run_markitdown(source_path, output_path).await {
-            Ok((content, _stdout, _stderr)) => {
-                if is_meaningful_markitdown_output(&content, source_path, probe.as_ref()) {
-                    let (content, truncated) = truncate_markdown(content, max_chars);
-                    return Ok(MarkdownConversion {
-                        content,
-                        engine: "markitdown".into(),
-                        truncated,
-                        message: "已使用本地快速转换生成 Markdown。".into(),
-                    });
-                }
-                let _ = std::fs::remove_file(output_path);
-                markitdown_error =
-                    Some("PDF 页数读取失败，且本地快速转换没有得到有效正文。".into());
-            }
-            Err(err) => {
-                let _ = std::fs::remove_file(output_path);
-                markitdown_error = Some(err);
-            }
-        }
-    }
-
-    Err(markitdown_error.unwrap_or_else(|| "PDF 页数读取失败，无法执行分段 OCR。".into()))
 }
 
 pub async fn convert_source_to_markdown(
-    app: &tauri::AppHandle,
-    jobs: &ConversionJobs,
-    job_id: Option<&str>,
     source_path: &Path,
     output_path: &Path,
     max_chars: usize,
-    mode: MarkdownConversionMode,
-    timeout_seconds: Option<u64>,
 ) -> Result<MarkdownConversion, String> {
     if is_pdf_path(source_path) {
-        return convert_pdf_to_markdown(
-            app,
-            jobs,
-            job_id,
-            source_path,
-            output_path,
-            max_chars,
-            mode,
-            timeout_seconds,
-        )
-        .await;
+        return convert_pdf_to_markdown(source_path, output_path, max_chars).await;
     }
 
     if is_image_path(source_path) {
-        return Err("图片 OCR 已移除。请先通过第三方 OCR 工具生成文字文件后再导入。".into());
-    }
-
-    if mode == MarkdownConversionMode::Ocr {
-        return Err("OCR 模式已移除。请使用快速模式。".into());
+        return Err("图片不是可转换文档；请先使用 OCR 工具生成文字文件后再导入。".into());
     }
 
     match run_markitdown(source_path, output_path).await {
@@ -1279,11 +950,11 @@ pub async fn convert_source_to_markdown(
                     content,
                     engine: "markitdown".into(),
                     truncated,
-                    message: "已使用本地快速转换生成 Markdown。".into(),
+                    message: "已使用本地转换生成 Markdown。".into(),
                 })
             } else {
                 let _ = std::fs::remove_file(output_path);
-                Err("本地快速转换没有提取到有效正文。".into())
+                Err("本地转换没有提取到有效正文。".into())
             }
         }
         Err(err) => {
@@ -1385,14 +1056,8 @@ pub fn finalize_markdown_conversion_output(
 #[tauri::command]
 pub async fn document_to_markdown_file(
     app: tauri::AppHandle,
-    jobs: State<'_, ConversionJobs>,
     input: DocumentToMarkdownFileInput,
 ) -> Result<DocumentToMarkdownFileOutput, String> {
-    let job_id = input
-        .job_id
-        .clone()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
     let source_dir = app_media_dir(&app, "document-markdown-inputs")?;
     let output_dir = app_media_dir(&app, "document-markdown-outputs")?;
     let source_filename = unique_media_filename(&input.filename);
@@ -1407,8 +1072,6 @@ pub async fn document_to_markdown_file(
         output_dir.join(unique_media_filename(&markdown_output_filename))
     };
     let max_chars = input.max_chars.unwrap_or(20_000_000);
-    let mode = parse_markdown_conversion_mode(input.conversion_mode.as_deref());
-    let timeout_seconds = input.timeout_seconds;
 
     let payload = strip_data_url_prefix(input.data_base64.trim());
     let bytes = general_purpose::STANDARD
@@ -1416,17 +1079,7 @@ pub async fn document_to_markdown_file(
         .map_err(|e| format!("文档数据解码失败: {}", e))?;
     std::fs::write(&source_path, &bytes).map_err(|e| format!("缓存待转换文档失败: {}", e))?;
 
-    let result = match convert_source_to_markdown(
-        &app,
-        &jobs,
-        job_id.as_deref(),
-        &source_path,
-        &markdown_output_path,
-        max_chars,
-        mode,
-        timeout_seconds,
-    )
-    .await
+    match convert_source_to_markdown(&source_path, &markdown_output_path, max_chars).await
     {
         Ok(conversion) => finalize_markdown_conversion_output(
             input.filename,
@@ -1446,22 +1099,14 @@ pub async fn document_to_markdown_file(
             &output_filename,
             err,
         )),
-    };
-    jobs.finish_job(job_id.as_deref()).await;
-    result
+    }
 }
 
 #[tauri::command]
 pub async fn document_path_to_markdown_file(
     app: tauri::AppHandle,
-    jobs: State<'_, ConversionJobs>,
     input: DocumentPathToMarkdownInput,
 ) -> Result<DocumentToMarkdownFileOutput, String> {
-    let job_id = input
-        .job_id
-        .clone()
-        .map(|value| value.trim().to_string())
-        .filter(|value| !value.is_empty());
     let source_path = PathBuf::from(input.source_path.trim());
     if !source_path.exists() || !source_path.is_file() {
         return Err("源文件不存在或不是有效文件。".into());
@@ -1491,20 +1136,8 @@ pub async fn document_path_to_markdown_file(
         cache_dir.join(unique_media_filename(&markdown_output_filename))
     };
     let max_chars = input.max_chars.unwrap_or(500_000);
-    let mode = parse_markdown_conversion_mode(input.conversion_mode.as_deref());
-    let timeout_seconds = input.timeout_seconds;
 
-    let result = match convert_source_to_markdown(
-        &app,
-        &jobs,
-        job_id.as_deref(),
-        &source_path,
-        &markdown_output_path,
-        max_chars,
-        mode,
-        timeout_seconds,
-    )
-    .await
+    match convert_source_to_markdown(&source_path, &markdown_output_path, max_chars).await
     {
         Ok(conversion) => finalize_markdown_conversion_output(
             source_name,
@@ -1524,21 +1157,7 @@ pub async fn document_path_to_markdown_file(
             &output_filename,
             err,
         )),
-    };
-    jobs.finish_job(job_id.as_deref()).await;
-    result
-}
-
-#[tauri::command]
-pub async fn cancel_markdown_conversion(
-    jobs: State<'_, ConversionJobs>,
-    input: CancelMarkdownConversionInput,
-) -> Result<(), String> {
-    let job_id = input.job_id.trim();
-    if !job_id.is_empty() {
-        jobs.cancel_job(job_id).await;
     }
-    Ok(())
 }
 
 #[tauri::command]
