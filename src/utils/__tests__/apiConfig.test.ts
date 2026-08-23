@@ -248,6 +248,23 @@ test('resolveApiConfig still routes local Ollama when local provider is explicit
   })
 })
 
+test('resolveApiConfig routes local MLX through its OpenAI-compatible loopback service without cloud credentials', async () => {
+  await withAsyncLocalStorage({
+    jcModel: '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit',
+    jcModelProviderId: 'local-mlx',
+    jcLocalMlxApiBase: 'http://127.0.0.1:8081',
+  }, async () => {
+    const config = await resolveApiConfig({
+      modelId: '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit',
+      modelProviderId: 'local-mlx',
+    })
+
+    assert.equal(config.providerId, 'local-mlx')
+    assert.equal(config.apiBase, 'http://127.0.0.1:8081')
+    assert.equal(config.model, '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit')
+  })
+})
+
 test('resolveApiConfig rejects unsupported custom providers instead of using the default provider K', async () => {
   await withAsyncLocalStorage({
     jcApiKey: 'sk-default-provider-12345678901234567890',

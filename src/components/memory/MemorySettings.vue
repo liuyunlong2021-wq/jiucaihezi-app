@@ -5,7 +5,8 @@ import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { getLocalOllamaModels } from '@/utils/providerConfig'
+import { connectLocalMlx } from '@/utils/localMlxRuntime'
+import { getLocalMlxApiBase, getLocalMlxModels, getLocalOllamaModels } from '@/utils/providerConfig'
 import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
@@ -37,6 +38,10 @@ const McpManagerPanel = defineAsyncComponent(() => import('@/components/mcp/McpM
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
+const localMlxApiBase = ref(getLocalMlxApiBase())
+const localMlxBusy = ref(false)
+const localMlxStatus = ref('')
+const installedLocalMlxModelCount = ref(0)
 const comfyUiBusy = ref(false)
 const comfyUiStatus = ref<ComfyUiRuntimeStatus | null>(null)
 const comfyWorkflowApiKey = ref('')
@@ -68,7 +73,10 @@ function setFontSize(value: number) {
 }
 
 onMounted(async () => {
-  if (desktopRuntime) installedLocalModelCount.value = getLocalOllamaModels().length
+  if (desktopRuntime) {
+    installedLocalModelCount.value = getLocalOllamaModels().length
+    installedLocalMlxModelCount.value = getLocalMlxModels().length
+  }
   if (desktopRuntime) void refreshComfyUi()
   if (desktopRuntime) comfyWorkflowApiKey.value = await getComfyWorkflowApiKey()
   apiKey.value = getApiKey() || await initApiKey()
@@ -89,6 +97,22 @@ async function connectOllama() {
     localModelStatus.value = '未连接到 Ollama，请先安装并启动 Ollama。'
   } finally {
     localModelBusy.value = false
+  }
+}
+
+async function connectMlx() {
+  if (localMlxBusy.value) return
+  localMlxBusy.value = true
+  localMlxStatus.value = '正在连接 MLX...'
+  try {
+    const result = await connectLocalMlx(localMlxApiBase.value)
+    installedLocalMlxModelCount.value = result.models.length
+    agentStore.refreshLocalModels()
+    localMlxStatus.value = result.message
+  } catch (error) {
+    localMlxStatus.value = error instanceof Error ? error.message : '未连接到 MLX 服务。'
+  } finally {
+    localMlxBusy.value = false
   }
 }
 
@@ -231,6 +255,20 @@ function showSync() {
               {{ localModelBusy ? '连接中' : '连接 Ollama' }}
             </button>
             <button @click="openExternal('https://ollama.com/download/mac')">下载安装</button>
+          </div>
+        </section>
+        <section v-if="desktopRuntime" class="memory-local-model">
+          <div>
+            <strong>本机 MLX</strong>
+            <span>{{ installedLocalMlxModelCount ? `已识别 ${installedLocalMlxModelCount} 个模型` : '未连接' }}</span>
+          </div>
+          <p v-if="localMlxStatus">{{ localMlxStatus }}</p>
+          <label class="memory-comfy-key">
+            <span>服务地址</span>
+            <input v-model="localMlxApiBase" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:8081" />
+          </label>
+          <div class="memory-local-actions">
+            <button :disabled="localMlxBusy" @click="connectMlx">{{ localMlxBusy ? '连接中' : '连接 MLX' }}</button>
           </div>
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">

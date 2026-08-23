@@ -312,8 +312,8 @@ test('memory topbar uses a grouped model popover and a text-only new conversatio
   assert.doesNotMatch(workbench, /runninghub: 'RunningHub'/)
   assert.match(workbench, /class="memory-model-menu" role="listbox"/)
   assert.match(workbench, /\.memory-model-menu \{[\s\S]*left: 0;/)
-  assert.match(workbench, /role="option" :aria-selected="model\.id === agentStore\.currentModel"/)
-  assert.match(workbench, /agentStore\.setModel\(modelId\)/)
+  assert.match(workbench, /role="option" :aria-selected="isSelectedModel\(model\)"/)
+  assert.match(workbench, /agentStore\.setModel\(model\.id, model\.providerId\)/)
 })
 
 test('memory message copy stays compact and copies the original markdown', () => {
@@ -832,9 +832,17 @@ test('Windows startup does not infer WebView2 availability from the browser user
 test('memory settings expose the existing Desktop local model runtime', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
+  const mlxRuntime = source('src/utils/localMlxRuntime.ts')
+  const store = source('src/stores/agentStore.ts')
 
   assert.match(settings, /connectLocalOllama/)
   assert.match(settings, /getLocalOllamaModels/)
+  assert.match(settings, /connectLocalMlx/)
+  assert.match(settings, /v-model="localMlxApiBase"/)
+  assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:8081"/)
+  assert.match(settings, /本机 MLX/)
+  assert.match(mlxRuntime, /fetcher: typeof fetch = safeFetch/)
+  assert.match(store, /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/)
   assert.match(settings, /agentStore\.refreshLocalModels\(\)/)
   assert.match(settings, /v-if="desktopRuntime" class="memory-local-model"/)
   assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'skills' \}"/)

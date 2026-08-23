@@ -73,6 +73,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/localCapabilities.test.ts',
   'src/utils/__tests__/localToolsPreference.test.ts',
   'src/utils/__tests__/comfyUiRuntime.test.ts',
+  'src/utils/__tests__/localMlxRuntime.test.ts',
   'src/utils/__tests__/providerConfig.test.ts',
   'src/utils/__tests__/directMessageBuilder.test.ts',
   'src/utils/__tests__/modelSelection.test.ts',

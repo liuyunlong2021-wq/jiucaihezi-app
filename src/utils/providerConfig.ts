@@ -3,11 +3,11 @@ export const DEFAULT_PROVIDER_HOST = 'https://api.jiucaihezi.studio'
 export const LOCAL_WEB_API_PROXY_BASE = '/__jc_api'
 export const DEFAULT_PROVIDER_NAME = '韭菜盒子'
 export const LOCAL_MLX_PROVIDER_ID = 'local-mlx'
-export const LOCAL_MLX_PROVIDER_HOST = 'internal://local-mlx'
-export const LOCAL_MLX_PROVIDER_NAME = '本地模型'
-export const LOCAL_MLX_API_BASE = 'http://127.0.0.1:17880'
+export const LOCAL_MLX_PROVIDER_HOST = 'http://127.0.0.1:8081'
+export const LOCAL_MLX_PROVIDER_NAME = 'MLX'
+export const LOCAL_MLX_API_BASE = LOCAL_MLX_PROVIDER_HOST
+export const LOCAL_MLX_API_BASE_KEY = 'jcLocalMlxApiBase'
 export const LOCAL_MLX_MODELS_KEY = 'jcLocalMlxModels'
-export const LOCAL_MLX_HIDDEN_MODELS_KEY = 'jcLocalMlxHiddenModels'
 export const LOCAL_OLLAMA_PROVIDER_ID = 'local-ollama'
 export const LOCAL_OLLAMA_PROVIDER_HOST = 'http://127.0.0.1:11434'
 export const LOCAL_OLLAMA_PROVIDER_NAME = 'Ollama'
@@ -50,45 +50,6 @@ export function saveCustomProviders(providers: CustomProviderConfig[], store: Ke
   writeStore(store, CUSTOM_PROVIDERS_KEY, JSON.stringify(providers))
 }
 
-export interface LocalMlxModelDefinition {
-  id: string
-  label: string
-  repo: string
-  oneLineDesc: string
-  sizeHint: string
-  downloadBytesHint?: number
-}
-
-export const LOCAL_MLX_MODEL_CATALOG: LocalMlxModelDefinition[] = [
-  {
-    id: 'local-mlx/jiucai-local',
-    label: '韭菜盒子本地模型',
-    repo: 'mlx-community/gemma-4-e4b-it-OptiQ-4bit',
-    oneLineDesc: '轻量稳定，适合离线聊天、隐私问答和基础资料整理。',
-    sizeHint: '约 5-7GB',
-    downloadBytesHint: 6 * 1024 * 1024 * 1024,
-  },
-]
-
-export const DEFAULT_LOCAL_MLX_MODEL_ID = 'local-mlx/jiucai-local'
-
-export function getLocalMlxModelDefinition(modelId: string | null | undefined): LocalMlxModelDefinition | undefined {
-  return LOCAL_MLX_MODEL_CATALOG.find(model => model.id === modelId)
-}
-
-export function getLocalMlxModelRepo(modelId: string | null | undefined): string {
-  return getLocalMlxModelDefinition(modelId)?.repo || getLocalMlxModelDefinition(DEFAULT_LOCAL_MLX_MODEL_ID)!.repo
-}
-
-export function getLocalMlxModelLabel(modelId: string | null | undefined): string {
-  return getLocalMlxModelDefinition(modelId)?.label || getLocalMlxModelDefinition(DEFAULT_LOCAL_MLX_MODEL_ID)!.label
-}
-
-export function resolveLocalMlxModelId(modelId: string | null | undefined): string {
-  const current = String(modelId || '').trim()
-  return getLocalMlxModelDefinition(current)?.id || DEFAULT_LOCAL_MLX_MODEL_ID
-}
-
 export type ProviderType = 'new-api' | 'local-mlx' | 'local-ollama'
 
 export interface JcModelRef {
@@ -107,7 +68,7 @@ export interface JcProvider {
   models: JcModelRef[]
 }
 
-type KeyValueStore = Pick<Storage, 'getItem' | 'setItem'> | Map<string, string>
+export type KeyValueStore = Pick<Storage, 'getItem' | 'setItem'> | Map<string, string>
 
 function readStore(store: KeyValueStore, key: string): string | null {
   if (store instanceof Map) return store.get(key) || null
@@ -131,31 +92,38 @@ function getStorage(): Storage | Map<string, string> {
   return new Map<string, string>()
 }
 
-export function getHiddenLocalMlxModelIds(store: KeyValueStore = getStorage()): string[] {
-  const raw = readStore(store, LOCAL_MLX_HIDDEN_MODELS_KEY)
-  if (!raw) return []
+export function normalizeLocalMlxApiBase(value: string): string {
+  const raw = String(value || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '')
+  let url: URL
   try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed.map(item => String(item || '')).filter(id => Boolean(id) && getLocalMlxModelDefinition(id))
-  } catch (_) {
-    return []
+    url = new URL(raw)
+  } catch {
+    throw new Error('MLX 地址无效')
+  }
+  if (url.protocol !== 'http:'
+    || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname)
+    || url.username
+    || url.password
+    || (url.pathname && url.pathname !== '/')
+    || url.search
+    || url.hash) {
+    throw new Error('MLX 首版仅支持本机回环地址')
+  }
+  return url.origin
+}
+
+export function getLocalMlxApiBase(store: KeyValueStore = getStorage()): string {
+  try {
+    return normalizeLocalMlxApiBase(readStore(store, LOCAL_MLX_API_BASE_KEY) || LOCAL_MLX_API_BASE)
+  } catch {
+    return LOCAL_MLX_API_BASE
   }
 }
 
-export function isLocalMlxModelHidden(modelId: string, store: KeyValueStore = getStorage()): boolean {
-  return getHiddenLocalMlxModelIds(store).includes(modelId)
-}
-
-export function hideLocalMlxModel(modelId: string, store: KeyValueStore = getStorage()): void {
-  if (!getLocalMlxModelDefinition(modelId)) return
-  const next = Array.from(new Set([...getHiddenLocalMlxModelIds(store), modelId]))
-  writeStore(store, LOCAL_MLX_HIDDEN_MODELS_KEY, JSON.stringify(next))
-}
-
-export function unhideLocalMlxModel(modelId: string, store: KeyValueStore = getStorage()): void {
-  const next = getHiddenLocalMlxModelIds(store).filter(id => id !== modelId)
-  writeStore(store, LOCAL_MLX_HIDDEN_MODELS_KEY, JSON.stringify(next))
+export function saveLocalMlxApiBase(value: string, store: KeyValueStore = getStorage()): string {
+  const normalized = normalizeLocalMlxApiBase(value)
+  writeStore(store, LOCAL_MLX_API_BASE_KEY, normalized)
+  return normalized
 }
 
 export function normalizeApiHost(host = DEFAULT_PROVIDER_HOST): string {
@@ -255,7 +223,7 @@ function sanitizeLocalMlxProvider(provider: Partial<JcProvider> | null | undefin
     name: provider?.name || LOCAL_MLX_PROVIDER_NAME,
     type: 'local-mlx',
     apiKey: '',
-    apiHost: LOCAL_MLX_PROVIDER_HOST,
+    apiHost: provider?.apiHost || LOCAL_MLX_PROVIDER_HOST,
     enabled: provider?.enabled !== false,
     models: Array.isArray(provider?.models)
       ? provider.models.map(model => ({
@@ -267,9 +235,10 @@ function sanitizeLocalMlxProvider(provider: Partial<JcProvider> | null | undefin
   }
 }
 
-export function createLocalMlxProvider(models: JcModelRef[] = []): JcProvider {
+export function createLocalMlxProvider(models: JcModelRef[] = [], apiHost = LOCAL_MLX_PROVIDER_HOST): JcProvider {
   return sanitizeLocalMlxProvider({
     models,
+    apiHost,
     enabled: models.length > 0,
   })
 }
@@ -281,9 +250,8 @@ export function createLocalOllamaProvider(models: JcModelRef[] = []): JcProvider
   })
 }
 
-// ponytail: isLocalMlxProviderId removed (SDD Phase 0.1)
-export function isLocalMlxProviderId(_providerId: string | null | undefined): boolean {
-  return false // ponytail: MLX removed, always returns false
+export function isLocalMlxProviderId(providerId: string | null | undefined): boolean {
+  return providerId === LOCAL_MLX_PROVIDER_ID
 }
 
 export function isLocalOllamaProviderId(providerId: string | null | undefined): boolean {
@@ -291,7 +259,7 @@ export function isLocalOllamaProviderId(providerId: string | null | undefined): 
 }
 
 export function isLocalModelProviderId(providerId: string | null | undefined): boolean {
-  return providerId === LOCAL_OLLAMA_PROVIDER_ID
+  return providerId === LOCAL_MLX_PROVIDER_ID || providerId === LOCAL_OLLAMA_PROVIDER_ID
 }
 
 // ─── 视觉模型检测 ───
@@ -357,9 +325,11 @@ export function saveLocalOllamaModels(models: JcModelRef[], store: KeyValueStore
 
   const providers = loadProvidersFromStorage(store)
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
+  const mlxProvider = providers.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID)
   const ollamaProvider = createLocalOllamaProvider(sanitized)
   saveProvidersToStorage([
     defaultProvider,
+    ...(mlxProvider ? [mlxProvider] : []),
     ...(sanitized.length > 0 ? [ollamaProvider] : []),
   ], store)
   return sanitized
@@ -371,64 +341,39 @@ export function getLocalMlxModels(store: KeyValueStore = getStorage()): JcModelR
   try {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    const hiddenIds = new Set(getHiddenLocalMlxModelIds(store))
     return parsed
       .map((model: Partial<JcModelRef>) => ({
         id: String(model?.id || '').trim(),
-        label: model?.label ? String(model.label) : getLocalMlxModelLabel(model?.id),
+        label: model?.label ? String(model.label) : String(model?.id || '').trim(),
         providerId: LOCAL_MLX_PROVIDER_ID,
       }))
-      .filter(model => model.id && getLocalMlxModelDefinition(model.id) && !hiddenIds.has(model.id))
+      .filter(model => model.id)
   } catch (_) {
     return []
   }
 }
 
 export function saveLocalMlxModels(models: JcModelRef[], store: KeyValueStore = getStorage()): JcModelRef[] {
-  const hiddenIds = new Set(getHiddenLocalMlxModelIds(store))
   const sanitized = models
     .map(model => ({
       id: String(model.id || '').trim(),
-      label: model.label || getLocalMlxModelLabel(model.id),
+      label: model.label || String(model.id || '').trim(),
       providerId: LOCAL_MLX_PROVIDER_ID,
     }))
-    .filter(model => model.id && getLocalMlxModelDefinition(model.id) && !hiddenIds.has(model.id))
+    .filter(model => model.id)
 
   writeStore(store, LOCAL_MLX_MODELS_KEY, JSON.stringify(sanitized))
 
   const providers = loadProvidersFromStorage(store)
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
-  const localProvider = createLocalMlxProvider(sanitized)
-  saveProvidersToStorage(sanitized.length > 0 ? [defaultProvider, localProvider] : [defaultProvider], store)
-  return sanitized
-}
-
-export function registerLocalMlxModel(modelId: string, store: KeyValueStore = getStorage()): JcModelRef[] {
-  const modelDef = getLocalMlxModelDefinition(modelId)
-  if (!modelDef) return getLocalMlxModels(store)
-  unhideLocalMlxModel(modelDef.id, store)
-  const existing = getLocalMlxModels(store)
-  return saveLocalMlxModels([
-    ...existing.filter(model => model.id !== modelDef.id),
-    {
-      id: modelDef.id,
-      label: modelDef.label,
-      providerId: LOCAL_MLX_PROVIDER_ID,
-    },
+  const ollamaProvider = providers.find(provider => provider.id === LOCAL_OLLAMA_PROVIDER_ID)
+  const localProvider = createLocalMlxProvider(sanitized, getLocalMlxApiBase(store))
+  saveProvidersToStorage([
+    defaultProvider,
+    ...(sanitized.length > 0 ? [localProvider] : []),
+    ...(ollamaProvider ? [ollamaProvider] : []),
   ], store)
-}
-
-export function unregisterLocalMlxModel(modelId: string, store: KeyValueStore = getStorage()): JcModelRef[] {
-  hideLocalMlxModel(modelId, store)
-  return saveLocalMlxModels(getLocalMlxModels(store).filter(model => model.id !== modelId), store)
-}
-
-export function registerDefaultLocalMlxModel(store: KeyValueStore = getStorage()): JcModelRef[] {
-  return registerLocalMlxModel(DEFAULT_LOCAL_MLX_MODEL_ID, store)
-}
-
-export function clearLocalMlxModels(store: KeyValueStore = getStorage()): void {
-  saveLocalMlxModels([], store)
+  return sanitized
 }
 
 export function getModelProviderId(model: JcModelRef | string | null | undefined): string {
@@ -441,7 +386,7 @@ export function resolveModelProviderId(model: JcModelRef | string | null | undef
   if (!model) return DEFAULT_PROVIDER_ID
   const modelId = typeof model === 'string' ? model : model.id
   if (getLocalOllamaModels().some(item => item.id === modelId)) return LOCAL_OLLAMA_PROVIDER_ID
-  if (getLocalMlxModelDefinition(modelId)) return LOCAL_MLX_PROVIDER_ID
+  if (getLocalMlxModels().some(item => item.id === modelId)) return LOCAL_MLX_PROVIDER_ID
   if (typeof model === 'string') return DEFAULT_PROVIDER_ID
   return getModelProviderId(model)
 }
@@ -452,7 +397,7 @@ export function loadProvidersFromStorage(store: KeyValueStore = getStorage()): J
   const localModels = getLocalMlxModels(store)
   const ollamaModels = getLocalOllamaModels(store)
   const maybeLocalProvider = [
-    ...(localModels.length > 0 ? [createLocalMlxProvider(localModels)] : []),
+    ...(localModels.length > 0 ? [createLocalMlxProvider(localModels, getLocalMlxApiBase(store))] : []),
     ...(ollamaModels.length > 0 ? [createLocalOllamaProvider(ollamaModels)] : []),
   ]
 
@@ -546,7 +491,7 @@ export function updateDefaultProviderModels(
   const ollamaModels = getLocalOllamaModels(store)
   const providers = [
     provider,
-    ...(localModels.length > 0 ? [createLocalMlxProvider(localModels)] : []),
+    ...(localModels.length > 0 ? [createLocalMlxProvider(localModels, getLocalMlxApiBase(store))] : []),
     ...(ollamaModels.length > 0 ? [createLocalOllamaProvider(ollamaModels)] : []),
   ]
   saveProvidersToStorage(providers, store)

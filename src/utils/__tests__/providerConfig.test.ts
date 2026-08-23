@@ -4,8 +4,6 @@ import { test } from 'node:test'
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
-  DEFAULT_LOCAL_MLX_MODEL_ID,
-  LOCAL_MLX_API_BASE,
   LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_PROVIDER_ID,
   getModelProviderId,
@@ -14,9 +12,8 @@ import {
   loadProvidersFromStorage,
   normalizeApiHost,
   resolveWebApiBaseUrl,
-  registerDefaultLocalMlxModel,
   resolveModelProviderId,
-  resolveLocalMlxModelId,
+  saveLocalMlxModels,
   saveLocalOllamaModels,
   updateDefaultProviderModels,
 } from '../providerConfig'
@@ -41,17 +38,6 @@ test('resolveWebApiBaseUrl keeps production web builds on the public API host', 
 test('getModelProviderId resolves hidden default provider from model metadata', () => {
   assert.equal(getModelProviderId({ id: 'claude-sonnet-4-6' }), DEFAULT_PROVIDER_ID)
   assert.equal(getModelProviderId({ id: 'gpt-5.5', providerId: 'custom' }), 'custom')
-})
-
-test('resolveModelProviderId recognizes catalog local model ids even before they are in the visible list', () => {
-  assert.equal(resolveModelProviderId(DEFAULT_LOCAL_MLX_MODEL_ID), LOCAL_MLX_PROVIDER_ID)
-  assert.equal(resolveModelProviderId('claude-sonnet-4-6'), DEFAULT_PROVIDER_ID)
-})
-
-test('resolveLocalMlxModelId falls back from stale cloud model ids to the default local model', () => {
-  assert.equal(resolveLocalMlxModelId('claude-sonnet-4-6'), DEFAULT_LOCAL_MLX_MODEL_ID)
-  assert.equal(resolveLocalMlxModelId(DEFAULT_LOCAL_MLX_MODEL_ID), DEFAULT_LOCAL_MLX_MODEL_ID)
-  assert.equal(LOCAL_MLX_API_BASE, 'http://127.0.0.1:17880')
 })
 
 test('loadProvidersFromStorage ignores legacy API key and keeps Gateway provider keyless', () => {
@@ -91,11 +77,10 @@ test('updateDefaultProviderModels persists model ownership without exposing host
   ])
 })
 
-test('registerDefaultLocalMlxModel adds a local provider without replacing cloud provider', () => {
+test('saveLocalMlxModels adds dynamic MLX models without replacing cloud provider', () => {
   const store = new Map<string, string>()
-  store.set('jcApiKey', 'sk-cloud')
 
-  registerDefaultLocalMlxModel(store)
+  saveLocalMlxModels([{ id: '/Users/test/MLX/model/6-bit', label: 'model/6-bit' }], store)
   const providers = loadProvidersFromStorage(store)
 
   assert.equal(providers.length, 2)
@@ -103,23 +88,26 @@ test('registerDefaultLocalMlxModel adds a local provider without replacing cloud
   assert.equal(providers[0].apiKey, '')
   assert.equal(providers[1].id, LOCAL_MLX_PROVIDER_ID)
   assert.equal(providers[1].apiKey, '')
-  assert.equal(providers[1].models[0].id, DEFAULT_LOCAL_MLX_MODEL_ID)
+  assert.equal(providers[1].models[0].id, '/Users/test/MLX/model/6-bit')
   assert.equal(providers[1].models[0].providerId, LOCAL_MLX_PROVIDER_ID)
   assert.deepEqual(getLocalMlxModels(store), providers[1].models)
+  assert.equal(resolveModelProviderId(providers[1].models[0]), LOCAL_MLX_PROVIDER_ID)
 })
 
-test('updateDefaultProviderModels preserves registered local mlx provider', () => {
+test('updating cloud models preserves dynamic MLX and Ollama providers', () => {
   const store = new Map<string, string>()
-  registerDefaultLocalMlxModel(store)
+  saveLocalMlxModels([{ id: 'mlx-model' }], store)
+  saveLocalOllamaModels([{ id: 'qwen3:8b' }], store)
 
   const providers = updateDefaultProviderModels([
     { id: 'gpt-5.5', label: 'GPT-5.5' },
   ], store)
 
-  assert.equal(providers.length, 2)
+  assert.equal(providers.length, 3)
   assert.equal(providers[0].id, DEFAULT_PROVIDER_ID)
   assert.equal(providers[1].id, LOCAL_MLX_PROVIDER_ID)
-  assert.equal(providers[1].models[0].id, DEFAULT_LOCAL_MLX_MODEL_ID)
+  assert.equal(providers[1].models[0].id, 'mlx-model')
+  assert.equal(providers[2].id, LOCAL_OLLAMA_PROVIDER_ID)
 })
 
 test('saveLocalOllamaModels adds an Ollama provider without replacing cloud provider', () => {

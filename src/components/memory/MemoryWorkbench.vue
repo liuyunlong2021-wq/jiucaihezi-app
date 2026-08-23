@@ -339,14 +339,14 @@ const textModels = computed(() => agentStore.textModels.filter(model => !isInter
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof textModels.value>()
   for (const model of textModels.value) {
-    const key = modelGroupKey(model.id)
+    const key = modelGroupKey(model)
     const group = groups.get(key) || []
     group.push(model)
     groups.set(key, group)
   }
   return [...groups.entries()].map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
-const currentModelLabel = computed(() => textModels.value.find(model => model.id === agentStore.currentModel)?.label || agentStore.currentModel || '登录后加载模型')
+const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
 const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 
 onMounted(async () => {
@@ -399,8 +399,9 @@ onBeforeUnmount(() => {
   releaseMediaUrl()
 })
 
-function modelGroupKey(modelId: string): string {
-  const id = modelId.toLowerCase()
+function modelGroupKey(model: { id: string; providerId?: string }): string {
+  if (model.providerId === 'local-mlx' || model.providerId === 'local-ollama') return 'local'
+  const id = model.id.toLowerCase()
   if (id.includes('claude') || id.includes('anthropic')) return 'anthropic'
   if (id.includes('gpt') || id.includes('openai')) return 'openai'
   if (id.includes('gemini') || id.includes('gemma') || id.includes('google')) return 'google'
@@ -434,8 +435,19 @@ function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && previewResource.value) closePreview()
 }
 
-function selectModel(modelId: string) {
-  agentStore.setModel(modelId)
+function selectedModel() {
+  const providerId = localStorage.getItem('jcModelProviderId') || ''
+  return textModels.value.find(model => model.id === agentStore.currentModel && (model.providerId || 'jiucaihezi') === providerId)
+    || textModels.value.find(model => model.id === agentStore.currentModel)
+}
+
+function isSelectedModel(model: { id: string; providerId?: string }): boolean {
+  return model.id === agentStore.currentModel
+    && (model.providerId || 'jiucaihezi') === (localStorage.getItem('jcModelProviderId') || 'jiucaihezi')
+}
+
+function selectModel(model: { id: string; providerId?: string }) {
+  agentStore.setModel(model.id, model.providerId)
   modelPickerOpen.value = false
 }
 
@@ -1887,7 +1899,7 @@ function readDataUrl(file: File): Promise<string> {
             <div v-if="modelPickerOpen" class="memory-model-menu" role="listbox">
               <section v-for="group in modelGroups" :key="group.key" class="memory-model-group">
                 <h3>{{ group.label }}</h3>
-                <button v-for="model in group.models" :key="model.id" type="button" role="option" :aria-selected="model.id === agentStore.currentModel" :class="{ selected: model.id === agentStore.currentModel }" @click="selectModel(model.id)">{{ model.label }}</button>
+                <button v-for="model in group.models" :key="`${model.providerId || 'jiucaihezi'}:${model.id}`" type="button" role="option" :aria-selected="isSelectedModel(model)" :class="{ selected: isSelectedModel(model) }" @click="selectModel(model)">{{ model.label }}</button>
               </section>
               <p v-if="!textModels.length" class="memory-model-empty">登录后加载模型</p>
             </div>

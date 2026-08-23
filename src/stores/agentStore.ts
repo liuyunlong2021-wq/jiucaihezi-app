@@ -16,8 +16,10 @@ import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import type { SkillWithLinks } from '@/types/skillsManage'
 import {
+  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
+  getLocalMlxModels,
   getLocalOllamaModels,
   getCustomProviders,
   resolveModelProviderId,
@@ -78,10 +80,10 @@ const DEFAULT_MODELS: ModelEntry[] = [
 ]
 
 function loadLocalModelEntries(): ModelEntry[] {
-  return getLocalOllamaModels().map(model => ({
+  return [...getLocalMlxModels(), ...getLocalOllamaModels()].map(model => ({
     id: model.id,
     label: model.label || model.id,
-    providerId: LOCAL_OLLAMA_PROVIDER_ID,
+    providerId: model.providerId,
     capability: 'text' as const,
   }))
 }
@@ -101,7 +103,7 @@ function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
   const localModels = loadLocalModelEntries()
   const customModels = loadCustomProviderEntries()
   const allLocal = [...localModels, ...customModels]
-  const localProviderIds = new Set([LOCAL_OLLAMA_PROVIDER_ID])
+  const localProviderIds = new Set([LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID])
   // 也排除自定义 provider 的旧条目
   const customProviderIds = new Set(customModels.map(m => m.providerId!))
   if (allLocal.length === 0) {
@@ -109,9 +111,10 @@ function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
   }
 
   const next = models.filter(model => !localProviderIds.has(model.providerId || '') && !customProviderIds.has(model.providerId || ''))
-  const seen = new Set(next.map(model => model.id))
+  const seen = new Set(next.map(model => `${model.providerId || ''}\0${model.id}`))
   for (const model of allLocal) {
-    if (!seen.has(model.id)) next.push(model)
+    const key = `${model.providerId || ''}\0${model.id}`
+    if (!seen.has(key)) next.push(model)
   }
   return next
 }
@@ -197,12 +200,15 @@ export const useAgentStore = defineStore('agents', () => {
   let modelsFetchPromise: Promise<void> | null = null
 
   function syncModelProviderStorage(modelId = currentModel.value, explicitProviderId?: string) {
-    const model = availableModels.value.find(x => x.id === modelId) || modelId
+    const storedProviderId = localStorage.getItem('jcModelProviderId') || ''
+    const model = availableModels.value.find(x => x.id === modelId && x.providerId === (explicitProviderId || storedProviderId))
+      || availableModels.value.find(x => x.id === modelId)
+      || modelId
     const providerId = explicitProviderId || resolveModelProviderId(model)
     localStorage.setItem('jcModelProviderId', providerId)
     if (providerId === LOCAL_OLLAMA_PROVIDER_ID) {
       localStorage.setItem('jcLocalOllamaApiBase', LOCAL_OLLAMA_API_BASE)
-    } else {
+    } else if (providerId !== LOCAL_MLX_PROVIDER_ID) {
       localStorage.setItem('jcApiBase', 'https://api.jiucaihezi.studio')
     }
     return providerId

@@ -1032,3 +1032,9 @@
 - 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 转换成功。复杂 104 页 PDF 为图片型扫描件，无文字层；当前明确提示需要 OCR，不再误报文件损坏，原件继续保留。
 - Desktop 本地 AnyDoc 链路不调用 MarkItDown；仅 `internal`/不可用错误可回退云端。Web/Mobile 仍走现有 `/documents/markdown` 云端 MarkItDown 服务；云端 AnyDoc staging、生产切换和 OCR 能力均暂缓，未部署服务器。
 - 自动验证：前端 focused `1111/1111`、Rust AnyDoc `4 passed`、TypeScript、Rust 格式与差异检查通过；macOS ARM `.app` 签名和 DMG 完整性校验通过。Intel Mac 与 Windows x64 真机仍待后续发布门禁。详见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]。
+
+## [2026-08-23] Wiki 沉淀 | 本机 MLX 最小连接入口
+
+- 用户确认本机 MLX 不做下载器、安装助手、模型目录管理或进程管理；用户自行下载模型并启动兼容服务，韭菜盒子只提供服务地址、连接和模型自动识别入口。
+- Desktop 默认地址统一为 `http://127.0.0.1:8081`，连接请求 `/v1/models`，模型以独立 `local-mlx` Provider 保存并与 Ollama/云端模型共存；只接受本机回环地址，Web/Mobile 不显示入口。
+- 首次使用流程固定为“外部启动服务 -> 设置填写/确认地址 -> 连接 MLX -> 顶部选择模型 -> 快速模式先验证，记忆模式再使用 Wiki/项目工具”。详见 [[开发/通用记忆工作台本机MLX兼容服务接入TDD-2026-08-21#10. 最终界面合同与首次使用流程（2026-08-23）]]。

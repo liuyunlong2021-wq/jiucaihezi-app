@@ -22,9 +22,12 @@ export interface ResolveApiConfigOptions {
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
+  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
   decodeApiKey,
+  getLocalMlxApiBase,
+  isLocalMlxProviderId,
   isLocalOllamaProviderId,
   normalizeApiHost,
   resolveWebApiBaseUrl,
@@ -33,7 +36,6 @@ import {
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
 import { DEFAULT_TEXT_MODEL } from './modelSelection'
-// ponytail: MLX 本地模型已删除（SDD Phase 0.1），ensureLocalMlxServer 已移除
 import { getApiKey, initApiKey } from '../services/newApiClient'
 
 const DEFAULT_MODEL = DEFAULT_TEXT_MODEL
@@ -52,6 +54,9 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
 
   if (!options.forceCloud && isLocalOllamaProviderId(selectedProviderId)) {
     return resolveLocalOllamaApiConfig(config.model)
+  }
+  if (!options.forceCloud && isLocalMlxProviderId(selectedProviderId)) {
+    return resolveLocalMlxApiConfig(config.model)
   }
 
   if (selectedProviderId && selectedProviderId !== DEFAULT_PROVIDER_ID) {
@@ -111,6 +116,17 @@ export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiC
   }
 }
 
+export function resolveLocalMlxApiConfig(modelId: string): ApiConfig {
+  const model = String(modelId || '').trim()
+  if (!model || model === DEFAULT_MODEL) throw new Error('请先在设置中连接 MLX 并选择本地模型。')
+  return {
+    providerId: LOCAL_MLX_PROVIDER_ID,
+    apiKey: 'local',
+    apiBase: getLocalMlxApiBase(),
+    model,
+  }
+}
+
 /**
  * 构建请求头
  */
@@ -130,7 +146,6 @@ export function buildHeaders(config: ApiConfig): Record<string, string> {
 }
 
 export function buildChatCompletionExtras(_config: ApiConfig): Record<string, unknown> {
-  // ponytail: MLX extras 已删除（SDD Phase 0.1）
   return {}
 }
 

@@ -70,7 +70,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   if (input.userTurn.role !== 'user') throw new Error('请先输入消息')
 
   const agentStore = useAgentStore()
-  const model = agentStore.availableModels.find(entry => entry.id === input.modelId)
+  const selectedProviderId = localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
+  const model = agentStore.availableModels.find(entry => entry.id === input.modelId && (entry.providerId || 'jiucaihezi') === selectedProviderId)
+    || agentStore.availableModels.find(entry => entry.id === input.modelId)
   const memoryMode = input.mode !== 'quick'
   const latestUserTurn = input.userTurn
   const documentSources = memoryMode ? (latestUserTurn?.attachments || [])
@@ -83,7 +85,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   if (agentStore.modelsFetched && model?.toolCall === false) {
     throw new Error('当前模型不支持工具调用，请选择支持工具调用的模型')
   }
-  const providerId = model?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
+  const providerId = model?.providerId || selectedProviderId
   const config = await resolveApiConfig({
     modelId: input.modelId,
     modelProviderId: providerId,
