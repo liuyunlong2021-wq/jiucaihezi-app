@@ -51,6 +51,8 @@ Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `j
 api.jiucaihezi.studio/auth/*
 api.jiucaihezi.studio/health
 api.jiucaihezi.studio/sync/*
+api.jiucaihezi.studio/api/creations/uploads
+api.jiucaihezi.studio/media/creation/*
 ```
 
 Do not bind chat completion routes to this Worker.

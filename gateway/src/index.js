@@ -1,5 +1,5 @@
 import { corsHeaders, handleOptions } from './cors.js';
-import { badRequest, unauthorized } from './errors.js';
+import { badRequest, unauthorized, upstreamError } from './errors.js';
 import { errorResponse, jsonResponse, notFound, readJson } from './http.js';
 import {
   createDesktopManagedTokenKeyFromBrowserCookie,
@@ -9,7 +9,9 @@ import {
   destroySession,
   expiredSessionCookie,
   ensureLegacyManagedTokenKey,
+  extractManualApiKey,
   getSessionUser,
+  legacyApiBase,
   loginWithWebAccount,
   publicUser,
   sessionCookie
@@ -392,11 +394,26 @@ function handleHealth(request) {
 
 const CREATION_MEDIA_TTL_SECONDS = 15 * 60;
 const CREATION_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
+const CREATION_MEDIA_AUTH_TIMEOUT_MS = 5_000;
 
-function requireMediaUploadAuth(request) {
-  if (!request.headers.get('Authorization') && !request.headers.get('X-API-Key')) {
-    throw unauthorized('请先登录');
+async function requireMediaUploadAuth(request, env) {
+  const sessionUser = await getSessionUser(request, env);
+  if (sessionUser) return;
+
+  const token = extractManualApiKey(request);
+  if (!token) throw unauthorized('请先登录');
+
+  let response;
+  try {
+    response = await fetch(`${legacyApiBase(env)}/v1/models`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'x-api-key': token },
+      signal: AbortSignal.timeout(CREATION_MEDIA_AUTH_TIMEOUT_MS)
+    });
+  } catch {
+    throw upstreamError('登录校验服务暂时不可用');
   }
+  if (!response.ok) throw unauthorized('请先登录');
 }
 
 function creationMediaKey(token) {
@@ -404,7 +421,7 @@ function creationMediaKey(token) {
 }
 
 async function handleCreationMediaUpload(request, env) {
-  requireMediaUploadAuth(request);
+  await requireMediaUploadAuth(request, env);
   if (!env.PLUGIN_KV || typeof env.PLUGIN_KV.put !== 'function') {
     throw new Error('临时媒体存储尚未配置');
   }

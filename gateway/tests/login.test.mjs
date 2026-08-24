@@ -29,7 +29,7 @@ async function readJson(response) {
   return response.json();
 }
 
-test('health exposes only auth broker capabilities', async () => {
+test('health exposes auth broker and media capabilities', async () => {
   const response = await gateway.fetch(request('/health'), createEnv());
   const payload = await readJson(response);
   assert.equal(response.status, 200);
@@ -39,7 +39,8 @@ test('health exposes only auth broker capabilities', async () => {
     'auth.session',
     'auth.logout',
     'auth.delete',
-    'sync.text'
+    'sync.text',
+    'media.upload'
   ]);
 });
 
@@ -334,6 +335,76 @@ test('landing image and logo paths redirect to static hosting', async () => {
   assert.equal(screenshot.headers.get('Location'), 'https://static.example.com/landing/IMG_5114.JPG');
 });
 
+test('creation media upload rejects missing and invalid credentials before writing KV', async () => {
+  const env = createEnv();
+  const file = new File(['image'], 'reference.png', { type: 'image/png' });
+  const body = () => { const form = new FormData(); form.append('file', file); return form; };
+
+  const missing = await gateway.fetch(request('/api/creations/uploads', { method: 'POST', body: body() }), env);
+  assert.equal(missing.status, 401);
+  assert.equal(env.PLUGIN_KV.map.size, 0);
+
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
+  try {
+    const invalid = await gateway.fetch(request('/api/creations/uploads', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer sk-invalid-1234567890' },
+      body: body()
+    }), env);
+    assert.equal(invalid.status, 401);
+    assert.equal(env.PLUGIN_KV.map.size, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('creation media upload accepts a NewAPI key only after upstream validation', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    assert.equal(String(url), 'https://newapi.example.com/v1/models');
+    assert.equal(init.headers.Authorization, 'Bearer sk-valid-1234567890');
+    assert.equal(init.headers['x-api-key'], 'sk-valid-1234567890');
+    assert.ok(init.signal instanceof AbortSignal);
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const form = new FormData();
+    form.append('file', new File(['image'], 'reference.png', { type: 'image/png' }));
+    const response = await gateway.fetch(request('/api/creations/uploads', {
+      method: 'POST',
+      headers: { 'x-api-key': 'sk-valid-1234567890' },
+      body: form
+    }), env);
+    const payload = await readJson(response);
+    assert.equal(response.status, 200);
+    assert.match(payload.url, /\/media\/creation\/[a-f0-9]{32}$/);
+    assert.equal(env.PLUGIN_KV.map.size, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('creation media upload returns 502 when upstream credential validation is unavailable', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('upstream unavailable'); };
+  try {
+    const form = new FormData();
+    form.append('file', new File(['image'], 'reference.png', { type: 'image/png' }));
+    const response = await gateway.fetch(request('/api/creations/uploads', {
+      method: 'POST',
+      headers: { 'x-api-key': 'sk-valid-1234567890' },
+      body: form
+    }), env);
+    assert.equal(response.status, 502);
+    assert.equal(env.PLUGIN_KV.map.size, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('browser tab icons redirect to the shared landing logo', async () => {
   const env = createEnv();
   const favicon = await gateway.fetch(request('/favicon.ico', { method: 'HEAD' }), env);
@@ -350,7 +421,7 @@ test('browser tab icons redirect to the shared landing logo', async () => {
 
 test('unrelated old gateway routes are removed', async () => {
   const env = createEnv();
-  for (const path of ['/api/models', '/api/me/membership/subscribe', '/api/billing', '/api/creations/uploads', '/api/market']) {
+  for (const path of ['/api/models', '/api/me/membership/subscribe', '/api/billing', '/api/market']) {
     const response = await gateway.fetch(request(path, { method: 'POST' }), env);
     const payload = await readJson(response);
     assert.equal(response.status, 404);
