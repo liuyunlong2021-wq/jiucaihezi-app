@@ -62,14 +62,14 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(completed.json()["metadata"]["url"], "data:image/png;base64,aGVsbG8=")
         self.assertFalse(any(request.url.path == "/v1/videos/xiaoyi-task-1" for request in self.requests))
 
-    async def test_maps_official_alias_to_upstream_gpt_image_2(self):
+    async def test_maps_official_alias_to_upstream_gpt_image_2_svip(self):
         response = await self.client.post(
             "/v1/videos",
             headers={"Authorization": "Bearer key"},
             json={"model": "gpt-image-2-官方", "prompt": "draw"},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2")
+        self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2-svip")
 
     async def test_minimax_h3_models_use_xiaoyi_video_contract(self):
         headers = {"Authorization": "Bearer key"}
@@ -107,19 +107,10 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             {item["id"] for item in response.json()["data"]},
-            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-vip", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
+            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
         )
         upstream = next(request for request in self.requests if request.method == "GET" and request.url.path == "/v1/models")
         self.assertEqual(upstream.headers["authorization"], "Bearer visible-key")
-
-    async def test_maps_legacy_vip_alias_to_current_svip_model(self):
-        response = await self.client.post(
-            "/v1/videos",
-            headers={"Authorization": "Bearer key"},
-            json={"model": "gpt-image-2-vip", "prompt": "draw"},
-        )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2-svip")
 
     async def test_minimax_h3_rejects_invalid_duration_ratio_resolution_or_references(self):
         headers = {"Authorization": "Bearer key"}
