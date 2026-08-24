@@ -131,6 +131,7 @@ const runElapsed = ref(0)
 const runSteps = ref<MemoryRunStep[]>([])
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
+const viewportWidth = ref(window.innerWidth)
 const messagesEl = ref<HTMLElement | null>(null)
 const memoryScrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
 const composerRef = ref<HTMLElement | null>(null)
@@ -145,8 +146,13 @@ const creationOpen = ref(false)
 const creationFocused = ref(false)
 const creationPanelRef = ref<{ flushCanvasSave?: () => Promise<void> } | null>(null)
 const creationClosing = ref(false)
-const creationWidth = ref(Number(localStorage.getItem('jcMemoryCreationWidth')) || 620)
-const creationResizing = ref(false)
+const MEMORY_CHAT_DEFAULT = 360
+const MEMORY_CHAT_FULL_MIN = 220
+const MEMORY_CHAT_COMPACT = 56
+const chatDockMode = ref<'expanded' | 'compact'>('expanded')
+const storedChatWidth = Number(localStorage.getItem('jcMemoryChatWidth'))
+const chatDockWidth = ref(Number.isFinite(storedChatWidth) && storedChatWidth >= MEMORY_CHAT_FULL_MIN ? storedChatWidth : MEMORY_CHAT_DEFAULT)
+const chatDockResizing = ref(false)
 const skillInstallPlans = ref<Record<string, SkillInstallPlan>>({})
 const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installed' | 'failed'>>({})
 const skillInstallErrors = ref<Record<string, string>>({})
@@ -166,37 +172,74 @@ let offMediaReferenceAdd: (() => void) | null = null
 let offSwitchPanel: (() => void) | null = null
 let offDesktopProjectDrop: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
-let creationResizeStartX = 0
-let creationResizeStartWidth = 0
-let creationResizeFrame = 0
+let creationClosePromise: Promise<boolean> | null = null
+let chatResizeStartX = 0
+let chatResizeStartWidth = 0
 let runTimer: ReturnType<typeof setInterval> | null = null
 let sceneSaveQueue = Promise.resolve()
 let projectMapSaveQueue = Promise.resolve()
 
 const MEMORY_TREE_WIDTH = 280
-const MEMORY_CHAT_MIN = 420
 const MEMORY_CREATION_MIN = 520
-const MEMORY_CREATION_SPLIT_MIN = MEMORY_CHAT_MIN + MEMORY_CREATION_MIN
 
-function clampCreationWidth(width: number): number {
+function clampChatDockWidth(width: number): number {
   const treeWidth = treeOpen.value ? MEMORY_TREE_WIDTH : 0
-  const available = window.innerWidth - treeWidth
-  const max = Math.min(available - MEMORY_CHAT_MIN, Math.floor(available * 0.5))
-  return Math.max(MEMORY_CREATION_MIN, Math.min(Math.max(MEMORY_CREATION_MIN, max), width))
+  return Math.max(MEMORY_CHAT_FULL_MIN, Math.min(window.innerWidth - treeWidth - MEMORY_CREATION_MIN, width))
 }
 
-function prepareCreationLayout() {
-  if (window.innerWidth < MEMORY_CREATION_SPLIT_MIN) return
-  if (treeOpen.value && window.innerWidth - MEMORY_TREE_WIDTH < MEMORY_CHAT_MIN + MEMORY_CREATION_MIN)
+function setChatDockWidth(width: number) {
+  if (width < MEMORY_CHAT_FULL_MIN) {
+    chatDockMode.value = 'compact'
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+    return
+  }
+  chatDockMode.value = 'expanded'
+  chatDockWidth.value = clampChatDockWidth(width)
+}
+
+function moveChatDockResize(event: PointerEvent) {
+  if (!chatDockResizing.value) return
+  setChatDockWidth(chatResizeStartWidth + chatResizeStartX - event.clientX)
+}
+
+function stopChatDockResize() {
+  if (!chatDockResizing.value) return
+  chatDockResizing.value = false
+  window.removeEventListener('pointermove', moveChatDockResize)
+  window.removeEventListener('pointerup', stopChatDockResize)
+  window.removeEventListener('pointercancel', stopChatDockResize)
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  localStorage.setItem('jcMemoryChatWidth', String(Math.round(chatDockWidth.value)))
+}
+
+function startChatDockResize(event: PointerEvent) {
+  if (chatDockResizing.value || window.innerWidth < 940 || creationFocused.value) return
+  chatResizeStartX = event.clientX
+  chatResizeStartWidth = chatDockWidth.value
+  chatDockResizing.value = true
+  window.addEventListener('pointermove', moveChatDockResize)
+  window.addEventListener('pointerup', stopChatDockResize)
+  window.addEventListener('pointercancel', stopChatDockResize)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function expandChatDock() {
+  chatDockMode.value = 'expanded'
+  chatDockWidth.value = clampChatDockWidth(chatDockWidth.value || MEMORY_CHAT_DEFAULT)
+}
+
+function prepareDockLayout() {
+  if (window.innerWidth < 940) return
+  if (treeOpen.value && window.innerWidth - MEMORY_TREE_WIDTH < MEMORY_CHAT_FULL_MIN + MEMORY_CREATION_MIN)
     treeOpen.value = false
-  const available = window.innerWidth - (treeOpen.value ? MEMORY_TREE_WIDTH : 0)
-  const saved = Number(localStorage.getItem('jcMemoryCreationWidth'))
-  creationWidth.value = clampCreationWidth(saved || Math.round(available * 0.33))
 }
 
 async function openCreationHost() {
   await loadCreationPanel()
-  prepareCreationLayout()
+  if (previewResource.value) closePreview()
+  prepareDockLayout()
   creationMounted.value = true
   creationOpen.value = true
   await nextTick()
@@ -204,66 +247,30 @@ async function openCreationHost() {
 
 async function closeCreationHost(): Promise<boolean> {
   if (!creationMounted.value) return true
-  if (creationClosing.value) return false
+  if (creationClosePromise) return creationClosePromise
   creationClosing.value = true
-  try {
-    await creationPanelRef.value?.flushCanvasSave?.()
-    creationOpen.value = false
-    creationFocused.value = false
-    creationMounted.value = false
-    return true
-  } catch (cause) {
-    error.value = `创作画布保存失败：${cause instanceof Error ? cause.message : String(cause)}`
-    return false
-  } finally {
-    creationClosing.value = false
-  }
-}
-
-function resizeCreationPanel(clientX: number) {
-  creationWidth.value = clampCreationWidth(
-    creationResizeStartWidth - (clientX - creationResizeStartX),
-  )
-}
-
-function moveCreationResize(event: PointerEvent) {
-  if (!creationResizing.value) return
-  if (creationResizeFrame) cancelAnimationFrame(creationResizeFrame)
-  creationResizeFrame = requestAnimationFrame(() => {
-    resizeCreationPanel(event.clientX)
-    creationResizeFrame = 0
-  })
-}
-
-function stopCreationResize() {
-  if (!creationResizing.value) return
-  creationResizing.value = false
-  window.removeEventListener('pointermove', moveCreationResize)
-  window.removeEventListener('pointerup', stopCreationResize)
-  window.removeEventListener('pointercancel', stopCreationResize)
-  document.body.style.cursor = ''
-  document.body.style.userSelect = ''
-  if (creationResizeFrame) cancelAnimationFrame(creationResizeFrame)
-  creationResizeFrame = 0
-  localStorage.setItem('jcMemoryCreationWidth', String(Math.round(creationWidth.value)))
-}
-
-function startCreationResize(event: PointerEvent) {
-  if (creationFocused.value || window.innerWidth < MEMORY_CREATION_SPLIT_MIN) return
-  creationResizeStartX = event.clientX
-  creationResizeStartWidth = creationWidth.value
-  creationResizing.value = true
-  ;(event.currentTarget as HTMLElement | null)?.setPointerCapture?.(event.pointerId)
-  window.addEventListener('pointermove', moveCreationResize)
-  window.addEventListener('pointerup', stopCreationResize)
-  window.addEventListener('pointercancel', stopCreationResize)
-  document.body.style.cursor = 'col-resize'
-  document.body.style.userSelect = 'none'
+  creationClosePromise = (async () => {
+    try {
+      await creationPanelRef.value?.flushCanvasSave?.()
+      creationOpen.value = false
+      creationFocused.value = false
+      creationMounted.value = false
+      return true
+    } catch (cause) {
+      error.value = `创作画布保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+      return false
+    } finally {
+      creationClosing.value = false
+      creationClosePromise = null
+    }
+  })()
+  return creationClosePromise
 }
 
 function resizeCreationForWindow() {
-  if (!creationOpen.value) return
-  prepareCreationLayout()
+  viewportWidth.value = window.innerWidth
+  if (previewResource.value || creationOpen.value) prepareDockLayout()
+  if (chatDockMode.value === 'expanded') chatDockWidth.value = clampChatDockWidth(chatDockWidth.value)
 }
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
@@ -372,6 +379,7 @@ onMounted(async () => {
   document.addEventListener('pointerdown', closeModelPicker)
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('resize', resizeCreationForWindow)
+  resizeCreationForWindow()
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
   await Promise.all([
     refreshSkills().catch(() => {}),
@@ -390,7 +398,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
-  stopCreationResize()
+  stopChatDockResize()
   stopProjectWatch?.()
   stopRunTimer()
   projectGeneration++
@@ -552,6 +560,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
   editingMarkdown.value = false
   markdownSaveError.value = ''
   if (resource.type === 'conversation') {
+    if (creationMounted.value && !(await closeCreationHost())) return
     backlinks.value = []
     closePreview()
     opened.value = resource
@@ -583,6 +592,9 @@ async function openResource(resource: ProjectResourceOpenResult) {
       } catch { /* ordinary assistant reply */ }
     }
   } else {
+    if (creationMounted.value && !(await closeCreationHost())) return
+    if (generation !== resourceOpenGeneration) return
+    prepareDockLayout()
     releaseMediaUrl()
     previewResource.value = resource
     if (resource.type === 'editor') void loadBacklinks(resource.resource)
@@ -1835,10 +1847,13 @@ function readDataUrl(file: File): Promise<string> {
       'tree-closed': !treeOpen,
       'desktop-runtime': desktopRuntime,
       'creation-open': creationOpen,
+      'preview-open': Boolean(previewResource),
       'creation-focused': creationFocused,
-      'creation-resizing': creationResizing,
+      'chat-dock-compact': chatDockMode === 'compact',
+      'chat-dock-narrow': viewportWidth >= 940 && (previewResource || creationOpen) && chatDockMode === 'expanded' && chatDockWidth < 560,
+      'chat-dock-resizing': chatDockResizing,
     }"
-    :style="{ '--memory-creation-width': `${creationWidth}px` }"
+    :style="{ '--memory-chat-width': `${chatDockMode === 'compact' ? MEMORY_CHAT_COMPACT : chatDockWidth}px` }"
     data-tauri-drag-region
   >
     <aside class="memory-tree" :class="{ open: treeOpen }">
@@ -1846,7 +1861,13 @@ function readDataUrl(file: File): Promise<string> {
     </aside>
     <button v-if="treeOpen" class="memory-tree-backdrop" aria-label="关闭文件树" @click="treeOpen = false"></button>
 
-    <main class="memory-main">
+    <main class="memory-main memory-chat-dock">
+      <div v-if="previewResource || creationOpen" class="memory-chat-dock-resizer" title="拖动调整对话宽度" @pointerdown.prevent="startChatDockResize" />
+      <div v-if="chatDockMode === 'compact'" class="memory-chat-compact-bar">
+        <button class="icon-button" title="展开对话" aria-label="展开对话" @click="expandChatDock"><JcIcon name="chevron-left" /></button>
+        <JcIcon v-if="sending" name="sync" class="spinning" />
+        <JcIcon v-else-if="error" name="error" />
+      </div>
       <header class="memory-topbar">
         <button v-if="!treeOpen" class="icon-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
         <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
@@ -1856,8 +1877,9 @@ function readDataUrl(file: File): Promise<string> {
             :aria-expanded="conversationPickerOpen"
             @click="conversationPickerOpen = !conversationPickerOpen"
           >
+            <JcIcon name="history" class="memory-conversation-icon" />
             <span>{{ conversation?.transcript.title || '选择对话' }}</span>
-            <JcIcon :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
+            <JcIcon class="memory-picker-chevron" :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
           </button>
           <div v-if="conversationPickerOpen" class="memory-conversation-menu">
             <input v-model="conversationSearch" type="search" placeholder="搜索对话" aria-label="搜索对话" />
@@ -1882,6 +1904,7 @@ function readDataUrl(file: File): Promise<string> {
           :disabled="sending || projectActionPending"
           @click="startNewConversation"
         >
+          <JcIcon name="add" class="memory-new-conversation-icon" />
           <span>新建对话</span>
         </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
@@ -1894,7 +1917,7 @@ function readDataUrl(file: File): Promise<string> {
           ><JcIcon name="palette" /></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
-              <span>{{ currentModelLabel }}</span><JcIcon :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
+              <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
             </button>
             <div v-if="modelPickerOpen" class="memory-model-menu" role="listbox">
               <section v-for="group in modelGroups" :key="group.key" class="memory-model-group">
@@ -2119,8 +2142,9 @@ function readDataUrl(file: File): Promise<string> {
           <button v-else class="send-button" title="发送" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
         </div>
       </footer>
+    </main>
 
-      <section v-if="previewResource" class="memory-preview">
+    <section v-if="previewResource" class="memory-preview">
         <header class="memory-preview-header">
           <button class="memory-preview-back" @click="returnFromPreview"><JcIcon name="arrow-back" /><span>{{ projectMapReturn ? '返回项目地图' : '返回对话' }}</span></button>
           <strong>{{ previewResource.resource.name }}</strong>
@@ -2188,16 +2212,9 @@ function readDataUrl(file: File): Promise<string> {
           <p v-else>该媒体文件暂时无法在浏览器中预览。</p>
         </div>
         <div v-else class="memory-empty-state">该文件不支持直接预览，请从文件树菜单导出。</div>
-      </section>
-    </main>
+    </section>
 
     <aside v-if="creationMounted" class="memory-creation">
-      <div
-        v-if="!creationFocused"
-        class="memory-creation-resizer"
-        title="拖动调整创作面板宽度"
-        @pointerdown.prevent="startCreationResize"
-      />
       <CreationPanel ref="creationPanelRef" @preview-resource="previewProjectResource">
         <template #toolbar-actions>
           <button
@@ -2234,8 +2251,24 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench.desktop-runtime { padding-top: 28px; box-sizing: border-box; }
 .memory-scene-recorder { position: fixed; top: 0; left: -10000px; width: 640px; height: 640px; pointer-events: none; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
-.memory-workbench.creation-open { grid-template-columns: 280px minmax(420px, 1fr) var(--memory-creation-width); }
-.memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(420px, 1fr) var(--memory-creation-width); }
+.memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.preview-open { grid-template-columns: 280px minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.preview-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.preview-open .memory-main { grid-column: 3; }
+.memory-workbench.preview-open .memory-preview { grid-column: 2; grid-row: 1; }
+.memory-workbench.creation-open .memory-main { grid-column: 3; }
+.memory-workbench.creation-open .memory-creation { grid-column: 2; grid-row: 1; }
+.memory-chat-dock { min-width: 0; }
+.memory-conversation-icon, .memory-new-conversation-icon, .memory-model-icon { display: none; }
+.memory-workbench.chat-dock-narrow .memory-topbar { gap: 4px; padding: 0 6px; }
+.memory-workbench.chat-dock-narrow .memory-conversation-trigger, .memory-workbench.chat-dock-narrow .new-conversation-button, .memory-workbench.chat-dock-narrow .memory-model-trigger { width: 34px; padding: 0; justify-content: center; }
+.memory-workbench.chat-dock-narrow .memory-conversation-trigger > span, .memory-workbench.chat-dock-narrow .new-conversation-button > span, .memory-workbench.chat-dock-narrow .memory-model-trigger > span, .memory-workbench.chat-dock-narrow .memory-picker-chevron { display: none; }
+.memory-workbench.chat-dock-narrow .memory-conversation-icon, .memory-workbench.chat-dock-narrow .memory-new-conversation-icon, .memory-workbench.chat-dock-narrow .memory-model-icon { display: inline; }
+.memory-chat-compact-bar { position: absolute; z-index: 30; inset: 0; display: grid; align-content: start; justify-items: center; gap: 10px; padding-top: 10px; background: var(--paper); }
+.memory-chat-compact-bar .icon-button { width: 34px; }
+.memory-workbench.chat-dock-compact .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
+.memory-workbench.chat-dock-resizing > * { transition: none !important; }
 .memory-workbench.creation-open .memory-title-drag { min-width: 0; }
 .memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: min(220px, 30%); }
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
@@ -2360,19 +2393,18 @@ function readDataUrl(file: File): Promise<string> {
 .memory-attachment-copy small { overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-chip button { border: 0; background: transparent; color: inherit; cursor: pointer; }
-.memory-document { min-height: 0; height: 100%; overflow-y: scroll; overflow-x: auto; overscroll-behavior: contain; scrollbar-gutter: stable; box-sizing: border-box; padding: 28px max(24px, calc((100% - 900px) / 2)); }
+.memory-document { min-height: 0; height: 100%; overflow-y: scroll; overflow-x: auto; overscroll-behavior: contain; scrollbar-gutter: stable; box-sizing: border-box; container-type: inline-size; padding: 28px max(24px, calc((100% - 900px) / 2)); }
 .memory-document, .memory-model-menu { scrollbar-color: color-mix(in srgb, var(--ink3) 48%, transparent) transparent; scrollbar-width: thin; }
 .memory-document::-webkit-scrollbar, .memory-model-menu::-webkit-scrollbar { width: 10px; }
 .memory-document::-webkit-scrollbar-thumb, .memory-model-menu::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 48%, transparent); background-clip: content-box; }
 .memory-media { display: grid; min-height: 0; padding: 20px; place-items: center; overflow: auto; }
 .memory-media img, .memory-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .memory-media audio { width: min(620px, 100%); }
-.memory-preview { position: absolute; z-index: 20; inset: var(--memory-header-height) 0 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); min-height: 0; background: var(--paper); }
+.memory-preview { position: relative; z-index: 20; min-height: 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); background: var(--paper); }
+.memory-chat-dock-resizer { position: absolute; z-index: 30; top: 0; bottom: 0; left: -7px; width: 14px; cursor: col-resize; touch-action: none; }
+.memory-chat-dock-resizer::after { position: absolute; inset: 0 auto 0 7px; width: 1px; background: var(--line); content: ''; transition: background .12s, box-shadow .12s; }
+.memory-chat-dock-resizer:hover::after, .memory-workbench.chat-dock-resizing .memory-chat-dock-resizer::after { background: var(--olive); box-shadow: 0 0 0 2px color-mix(in srgb, var(--olive) 12%, transparent); }
 .memory-creation { position: relative; min-width: 0; min-height: 0; overflow: hidden; border-left: 1px solid var(--line); background: var(--surface); }
-.memory-creation-resizer { position: absolute; z-index: 30; top: 0; bottom: 0; left: 0; width: 14px; cursor: col-resize; touch-action: none; }
-.memory-creation-resizer::after { position: absolute; top: 0; bottom: 0; left: 0; width: 1px; background: transparent; content: ''; transition: background .12s, box-shadow .12s; }
-.memory-creation-resizer:hover::after, .memory-workbench.creation-resizing .memory-creation-resizer::after { background: var(--olive); box-shadow: 0 0 0 2px color-mix(in srgb, var(--olive) 12%, transparent); }
-.memory-workbench.creation-resizing > * { transition: none !important; }
 .memory-creation-action { display: grid; width: 28px; height: 28px; flex: 0 0 28px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; }
 .memory-creation-action:hover { border-color: var(--olive); color: var(--olive-dark); }
 .memory-workbench.creation-focused .memory-creation { width: 100vw; height: 100dvh; border-left: 0; }
@@ -2390,17 +2422,25 @@ function readDataUrl(file: File): Promise<string> {
 .memory-onboarding button { min-height: 38px; padding: 0 16px; border: 1px solid var(--olive); border-radius: 6px; background: var(--olive); color: white; cursor: pointer; font: inherit; }
 .memory-onboarding button:disabled { opacity: .45; cursor: default; }
 .memory-onboarding .memory-onboarding-error { color: var(--danger); }
-.memory-settings-drawer { position: fixed; z-index: 40; inset: 0 0 0 auto; width: min(440px, 92vw); transform: translateX(100%); border-left: 1px solid var(--line); background: var(--paper); transition: transform .18s ease; }
+.memory-settings-drawer { position: fixed; z-index: 60; inset: 0 0 0 auto; width: min(440px, 92vw); transform: translateX(100%); border-left: 1px solid var(--line); background: var(--paper); transition: transform .18s ease; }
 .memory-settings-drawer.open { transform: translateX(0); }
 .memory-settings-drawer > header { display: flex; height: 52px; align-items: center; justify-content: space-between; padding: 0 12px 0 16px; border-bottom: 1px solid var(--line); }
 .memory-settings-drawer > :last-child { height: calc(100% - 52px); }
-.memory-settings-backdrop, .memory-tree-backdrop { position: fixed; z-index: 35; inset: 0; border: 0; background: rgb(0 0 0 / 28%); }
+.memory-settings-backdrop, .memory-tree-backdrop { position: fixed; inset: 0; border: 0; background: rgb(0 0 0 / 28%); }
+.memory-settings-backdrop { z-index: 55; }
+.memory-tree-backdrop { z-index: 35; }
 .mobile-only, .memory-tree-backdrop { display: none; }
 @media (max-width: 939px) {
+  .memory-workbench.chat-dock-compact .memory-main > :not(.memory-chat-compact-bar) { visibility: visible; }
+  .memory-workbench.chat-dock-compact .memory-chat-compact-bar { display: none; }
   .memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr); }
   .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
+  .memory-workbench.creation-open .memory-main { grid-column: auto; }
+  .memory-workbench.creation-open .memory-creation { grid-column: auto; }
+  .memory-workbench.preview-open { display: block; }
+  .memory-workbench.preview-open .memory-main { grid-column: auto; }
+  .memory-workbench.preview-open .memory-preview { position: fixed; z-index: 45; inset: 0; }
   .memory-creation { position: fixed; z-index: 45; inset: 0; width: 100vw; height: 100dvh; border-left: 0; }
-  .memory-creation-resizer { display: none; }
 }
 @media (min-width: 761px) and (max-width: 939px) {
   .memory-workbench.desktop-runtime .memory-creation { top: 28px; height: calc(100dvh - 28px); }

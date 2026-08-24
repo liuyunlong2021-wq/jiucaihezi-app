@@ -8,6 +8,38 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
 
+test('memory right chat dock separates preview layout and collapses to a compact rail', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const markdown = source('src/components/memory/MemoryMarkdown.vue')
+
+  assert.match(workbench, /class="memory-main memory-chat-dock"/)
+  assert.doesNotMatch(workbench, /<Teleport to="\.memory-workbench">/)
+  assert.match(workbench, /const MEMORY_CHAT_DEFAULT = 360/)
+  assert.match(workbench, /const MEMORY_CHAT_FULL_MIN = 220/)
+  assert.match(workbench, /const MEMORY_CHAT_COMPACT = 56/)
+  assert.match(workbench, /chatDockMode.*expanded.*compact|chatDockMode.*compact.*expanded/)
+  assert.doesNotMatch(workbench, /minmax\(420px, 1fr\)/)
+  assert.match(workbench, /\.memory-preview[^}]*position: relative|\.memory-preview[^}]*position: static/)
+  assert.match(workbench, /if \(previewResource\.value\) closePreview\(\)/)
+  assert.match(workbench, /creationMounted\.value && !\(await closeCreationHost\(\)\)/)
+  assert.match(workbench, /if \(creationClosePromise\) return creationClosePromise/)
+  assert.match(workbench, /if \(generation !== resourceOpenGeneration\) return\s*prepareDockLayout\(\)/)
+  assert.match(workbench, /function prepareDockLayout\(\) \{\s*if \(window\.innerWidth < 940\) return/)
+  assert.match(workbench, /\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\) var\(--memory-chat-width\); \}/)
+  assert.doesNotMatch(workbench, /jcMemoryCreationWidth|startCreationResize|memory-creation-resizer/)
+  assert.match(workbench, /'chat-dock-narrow': viewportWidth >= 940[\s\S]*chatDockWidth < 560/)
+  assert.match(workbench, /viewportWidth\.value = window\.innerWidth/)
+  assert.match(workbench, /class="memory-new-conversation-icon"/)
+  assert.match(workbench, /class="memory-model-icon"/)
+  assert.match(workbench, /\.memory-chat-dock-resizer::after/)
+  assert.match(workbench, /\.memory-document \{[^}]*container-type: inline-size;/)
+  assert.match(markdown, /@container \(max-width: 700px\)/)
+  assert.match(markdown, /'outline-collapsed': !outlineOpen/)
+  assert.match(markdown, /\.memory-markdown-renderer\.with-outline\.outline-collapsed\{grid-template-columns:minmax\(0,1fr\);gap:0\}/)
+  assert.match(markdown, /\.outline-collapsed \.memory-document-outline\{position:absolute;/)
+  assert.match(markdown, /<JcIcon v-else name="view-list" \/>/)
+})
+
 test('memory file tree groups project identity above its three file actions', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const toolbar = tree.match(/<header class="pft-head">([\s\S]*?)<\/header>/)?.[1] || ''
@@ -129,7 +161,7 @@ test('memory workbench keeps project identity in the file tree and a native drag
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
   assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region/)
-  assert.match(workbench, /class="memory-workbench"[^>]*data-tauri-drag-region/)
+  assert.match(workbench, /class="memory-workbench"[\s\S]*?data-tauri-drag-region/)
   assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region><\/div>/)
   assert.doesNotMatch(workbench, /memory-brand-logo/)
   assert.match(tree, /class="pft-brand-logo" src="\/logo\.svg"/)
@@ -298,12 +330,12 @@ test('memory composer does not expose removed Jina web tools', () => {
   assert.doesNotMatch(runtime, /webSearchEnabled|WEB_SEARCH_TOOL_DEFINITION|READ_URL_TOOL_DEFINITION|web_search|read_url|Jina/)
 })
 
-test('memory topbar uses a grouped model popover and a text-only new conversation action', () => {
+test('memory topbar uses a grouped model popover and an adaptive new conversation action', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /class="new-conversation-button"[\s\S]*<span>新建对话<\/span>/)
   assert.match(workbench, /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/)
-  assert.doesNotMatch(workbench, /new-conversation-button[\s\S]{0,180}<JcIcon/)
+  assert.match(workbench, /<JcIcon name="add" class="memory-new-conversation-icon" \/>/)
   assert.doesNotMatch(workbench, /<select v-model="agentStore\.currentModel"/)
   assert.match(workbench, /const modelGroups = computed/)
   assert.match(workbench, /Claude[\s\S]*GPT \/ OpenAI[\s\S]*Gemini \/ Google/)
@@ -530,20 +562,16 @@ test('memory file actions use the supported DOM prompt and headers share one bas
   assert.match(workbench, /grid-template-rows: var\(--memory-header-height\)/)
 })
 
-test('memory creation surface reuses resizable columns, host preview, and sticky scrolling', () => {
+test('memory creation surface reuses the chat dock resize, host preview, and sticky scrolling', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const creation = source('src/components/creation/CreationPanel.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
-  assert.match(workbench, /const creationWidth = ref\(/)
-  assert.match(workbench, /async function openCreationHost\(\) \{\s*await loadCreationPanel\(\)[\s\S]*?creationMounted\.value = true[\s\S]*?creationOpen\.value = true/)
+  assert.match(workbench, /async function openCreationHost\(\) \{[\s\S]*?await loadCreationPanel\(\)[\s\S]*?creationMounted\.value = true[\s\S]*?creationOpen\.value = true/)
   assert.match(workbench, /async function openMediaPlanInCreation[\s\S]*?await openCreationHost\(\)[\s\S]*?emitEvent\('memory-media-plan-load'/)
-  assert.match(workbench, /const MEMORY_CREATION_SPLIT_MIN = MEMORY_CHAT_MIN \+ MEMORY_CREATION_MIN/)
-  assert.match(workbench, /const max = Math\.min\(available - MEMORY_CHAT_MIN, Math\.floor\(available \* 0\.5\)\)/)
   assert.match(workbench, /\.memory-composer \{ min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/)
   assert.match(workbench, /\.memory-main \{ position: relative; display: grid; grid-template-columns: minmax\(0, 1fr\);/)
-  assert.match(workbench, /localStorage\.setItem\('jcMemoryCreationWidth'/)
-  assert.match(workbench, /@pointerdown\.prevent="startCreationResize"/)
+  assert.match(workbench, /@pointerdown\.prevent="startChatDockResize"/)
   assert.match(workbench, /<ChatScrollNav/)
   assert.doesNotMatch(workbench, /preview-surface/)
   assert.match(workbench, /@preview-resource="previewProjectResource"/)
@@ -558,7 +586,7 @@ test('memory creation surface reuses resizable columns, host preview, and sticky
   assert.doesNotMatch(workbench, /v-show="creationOpen"/)
   assert.match(workbench, /@click="closeCreationHost"/)
   assert.match(workbench, /\.memory-workbench\.creation-open \.memory-title-drag \{ min-width: 0; \}/)
-  assert.match(workbench, /function resizeCreationForWindow\(\) \{\s*if \(!creationOpen\.value\) return\s*prepareCreationLayout\(\)\s*\}/)
+  assert.match(workbench, /function resizeCreationForWindow\(\) \{[\s\S]*?prepareDockLayout\(\)[\s\S]*?clampChatDockWidth\(chatDockWidth\.value\)\s*\}/)
   assert.match(workbench, /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/)
   assert.match(workbench, /desktopOnlyRuntime && turn\.role === 'assistant'/)
   assert.match(tree, /\(isDesktop && !isMobile\) \|\| !path\.toLowerCase\(\)\.endsWith\('\.jcscene'\)/)
@@ -757,7 +785,7 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /files\.planBatch\(\{ kind: 'delete', resources: \[item\.resource\] \}\)/)
   assert.match(workbench, /files\.executeBatch\(plan\)/)
   assert.match(workbench, /const previewResource = ref<ProjectResourceOpenResult \| null>\(null\)/)
-  assert.match(workbench, /else \{\s*releaseMediaUrl\(\)\s*previewResource\.value = resource/)
+  assert.match(workbench, /releaseMediaUrl\(\)\s*previewResource\.value = resource/)
   assert.match(workbench, /projectMapReturn \? '返回项目地图' : '返回对话'/)
   assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
   assert.match(workbench, /resource\.type === 'canvas'[\s\S]{0,160}openCreationHost\(\)/)
