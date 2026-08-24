@@ -17,6 +17,7 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             if request.method == "GET" and request.url.path == "/v1/models":
                 return httpx.Response(200, json={"object": "list", "data": [
                     {"id": "gpt-image-2", "object": "model"},
+                    {"id": "gpt-image-2-svip", "object": "model"},
                     {"id": "MiniMaxH3-2k-sec", "object": "model"},
                 ]})
             if request.method == "GET" and request.url.path == "/v1/videos/video-task-1":
@@ -106,10 +107,19 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             {item["id"] for item in response.json()["data"]},
-            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
+            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-vip", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
         )
         upstream = next(request for request in self.requests if request.method == "GET" and request.url.path == "/v1/models")
         self.assertEqual(upstream.headers["authorization"], "Bearer visible-key")
+
+    async def test_maps_legacy_vip_alias_to_current_svip_model(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            json={"model": "gpt-image-2-vip", "prompt": "draw"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2-svip")
 
     async def test_minimax_h3_rejects_invalid_duration_ratio_resolution_or_references(self):
         headers = {"Authorization": "Bearer key"}
