@@ -585,7 +585,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     mode: 'text-to-video',
     endpoint: '/v1/videos',
     assetFlow: 'newapi-upload',
-    contractStatus: 'verified',
+    contractStatus: 'partial',
     ratios: ['16:9', '9:16', '1:1'],
     resolutions: [resolution],
     duration: { min: 5, max: 15 },

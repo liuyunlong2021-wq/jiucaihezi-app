@@ -55,8 +55,28 @@ async def health():
 
 
 @app.get("/v1/models")
-async def models():
-    return {"object": "list", "data": [{"id": model, "object": "model", "owned_by": "xiaoyi"} for model in sorted(PUBLIC_MODELS)]}
+async def models(request: Request):
+    key = bearer_token(request)
+    try:
+        response = await request.app.state.http.get(
+            f"{XIAOYI_BASE_URL}/models",
+            headers={"Authorization": f"Bearer {key}"},
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Xiaoyi model service is unavailable") from exc
+    data = response_json(response)
+    if not response.is_success:
+        raise upstream_error(response, data)
+    items = data.get("data")
+    if not isinstance(items, list):
+        raise HTTPException(502, "Xiaoyi model response did not include a model list")
+    visible = {
+        str(item.get("id"))
+        for item in items
+        if isinstance(item, dict) and item.get("id")
+    }
+    models = [model for model in sorted(PUBLIC_MODELS) if MODEL_MAP.get(model, model) in visible]
+    return {"object": "list", "data": [{"id": model, "object": "model", "owned_by": "xiaoyi"} for model in models]}
 
 
 @app.post("/v1/videos")

@@ -337,7 +337,7 @@ test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
   assert.equal(getCreationModelSpec('runninghub/api/rh-video-v31-fast')?.files?.images?.max, 3)
 })
 
-test('Xiaoyi MiniMax H3 models expose their confirmed video contract', () => {
+test('Xiaoyi MiniMax H3 models remain partial until production verification', () => {
   for (const [modelId, price, resolution] of [
     ['newapi/xiaoyi/MiniMaxH3-2k-pro-sec', 0.16, '2k'],
     ['newapi/xiaoyi/MiniMaxH3-2k-sec', 0.14, '2k'],
@@ -358,6 +358,7 @@ test('Xiaoyi MiniMax H3 models expose their confirmed video contract', () => {
     })
 
     assert.equal(spec.price, price)
+    assert.equal(spec.contractStatus, 'partial')
     assert.equal(plan.model, modelId.split('/').at(-1))
     assert.equal(plan.endpoint, '/v1/videos')
     assert.equal(plan.apiStyle, 'newapi-task')

@@ -14,6 +14,11 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.requests.append(request)
             if request.method == "POST" and request.url.path == "/v1/videos":
                 return httpx.Response(200, json={"id": "video-task-1", "status": "queued"})
+            if request.method == "GET" and request.url.path == "/v1/models":
+                return httpx.Response(200, json={"object": "list", "data": [
+                    {"id": "gpt-image-2", "object": "model"},
+                    {"id": "MiniMaxH3-2k-sec", "object": "model"},
+                ]})
             if request.method == "GET" and request.url.path == "/v1/videos/video-task-1":
                 return httpx.Response(200, json={"id": "video-task-1", "status": "completed", "progress": 100})
             if request.method == "GET" and request.url.path == "/v1/videos/video-task-1/content":
@@ -71,7 +76,7 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             response = await self.client.post("/v1/videos", headers=headers, json={
                 "model": model,
                 "prompt": "让角色向前行走",
-                "duration": 8,
+                "seconds": "8",
                 "aspect_ratio": "16:9",
                 "resolution": "2k" if "2k" in model else "720p",
                 "images": ["https://example.test/character.png"],
@@ -93,6 +98,18 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         content = await self.client.get("/v1/videos/video-task-1/content", headers=headers)
         self.assertEqual(content.content, b"video")
         self.assertEqual(content.headers["content-type"], "video/mp4")
+
+    async def test_models_require_token_and_only_expose_upstream_visible_models(self):
+        self.assertEqual((await self.client.get("/v1/models")).status_code, 401)
+
+        response = await self.client.get("/v1/models", headers={"Authorization": "Bearer visible-key"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            {item["id"] for item in response.json()["data"]},
+            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
+        )
+        upstream = next(request for request in self.requests if request.method == "GET" and request.url.path == "/v1/models")
+        self.assertEqual(upstream.headers["authorization"], "Bearer visible-key")
 
     async def test_minimax_h3_rejects_invalid_duration_ratio_resolution_or_references(self):
         headers = {"Authorization": "Bearer key"}

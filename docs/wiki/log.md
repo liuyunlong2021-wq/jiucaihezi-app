@@ -1046,3 +1046,10 @@
 - 创作与资源预览切换复用同一个画布关闭 Promise；设置保持悬浮抽屉，层级高于 Dock；`940px` 以下继续使用既有全屏/移动布局。
 - 文档大纲折叠后退出 Grid 列，正文恢复单列全宽，仅保留紧凑展开入口。
 - 用户已完成 Desktop 多尺寸布局实测；定向测试 `56/56`、TypeScript、`build:quick`、Web 产物审计和差异检查通过。真实触控拖拽及移动端人工验收仍待执行。详见 [[开发/通用记忆工作台右侧对话Dock布局TDD-2026-08-23]]。
+
+## [2026-08-24] 修复与 Wiki 沉淀 | MiniMax H3 视频请求合同
+
+- `invalid_json` 根因是 App 向 NewAPI 同时发送数字 `duration` 和数字 `seconds`，而 NewAPI 的 `seconds` 入站字段要求字符串；请求因此在到达小易适配器前失败。
+- 三个 MiniMax H3 模型现只发送字符串 `seconds`，不再重复发送 `duration`；其他视频模型请求保持原合同。
+- 小易适配器 `/v1/models` 现要求 Bearer Token，使用同一 Token 查询上游并只返回实际可见模型对应的公开别名；适配器测试同步改为真实 `"seconds": "8"` 入站。
+- 三个模型在生产验收前保持 `partial`。适配器 `12/12`、Runtime `29/29`、完整 focused、Rust `402 passed / 1 ignored`、TypeScript 和差异检查通过；未部署，未执行真实付费生成、MP4 落盘或扣费核对。详见 [[开发/MiniMaxH3视频seconds类型修复TDD-2026-08-24]]。

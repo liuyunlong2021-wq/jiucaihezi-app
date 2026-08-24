@@ -832,7 +832,7 @@ test('Gemini Omni video edit sends billing seconds to NewAPI without RH duration
   }
 })
 
-test('Xiaoyi MiniMax H3 submits duration, ratio and all reference types', { concurrency: false }, async () => {
+test('Xiaoyi MiniMax H3 submits string seconds without duplicate duration', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
@@ -840,7 +840,7 @@ test('Xiaoyi MiniMax H3 submits duration, ratio and all reference types', { conc
     const url = String(input)
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       assert.deepEqual(JSON.parse(String(init.body)), {
-        model: 'MiniMaxH3-2k-sec', prompt: '全模态参考生成', duration: 8, seconds: 8,
+        model: 'MiniMaxH3-2k-sec', prompt: '全模态参考生成', seconds: '8',
         ratio: '9:16', aspect_ratio: '9:16', resolution: '2k',
         images: ['https://example.com/1.jpg', 'https://example.com/2.jpg'],
         imageUrl: 'https://example.com/1.jpg',

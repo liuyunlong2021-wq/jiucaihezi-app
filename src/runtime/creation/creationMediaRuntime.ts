@@ -807,14 +807,15 @@ function buildDirectVideoBody(
     }
     return body
   }
+  const isMiniMaxH3 = request.plan.model.startsWith('MiniMaxH3-')
   return compact({
     model: request.plan.model,
     prompt: params.prompt,
     ratio: params.aspectRatio,
     aspect_ratio: params.aspectRatio,
     resolution: params.resolution,
-    duration: params.duration,
-    seconds: request.plan.model.startsWith('MiniMaxH3-') ? params.duration : undefined,
+    duration: isMiniMaxH3 ? undefined : params.duration,
+    seconds: isMiniMaxH3 && params.duration !== undefined ? String(params.duration) : undefined,
     images: uploadedImages.length > 1 ? uploadedImages : undefined,
     image: uploadedImages.length === 1 ? uploadedImages[0] : undefined,
     imageUrl: uploadedImages[0],
