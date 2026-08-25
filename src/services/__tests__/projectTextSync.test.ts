@@ -262,6 +262,29 @@ test('sync state lookup does not depend on the capped recursive project listing'
   }
 })
 
+test('download emits a safe operation trace through pull and write completion', async () => {
+  const cloud = fakeCloud()
+  const local = localFiles('desktop')
+  cloud.seed('wiki/trace.md', '云端内容')
+  bind(local)
+  const events: string[] = []
+  const sync = new ProjectTextSync(local.service, cloud.api, event => events.push(`${event.operationId}:${event.step}:${event.fileCount || 0}`))
+  try {
+    await sync.open('desktop-owner', '共同记忆', 'op_trace')
+    await sync.connect('project_12345678', 'op_trace')
+    assert.deepEqual(events, [
+      'op_trace:open-start:0',
+      'op_trace:open-ready:0',
+      'op_trace:connect-start:0',
+      'op_trace:pull-start:0',
+      'op_trace:pull-complete:1',
+      'op_trace:success:1',
+    ])
+  } finally {
+    sync.dispose()
+  }
+})
+
 test('sync path contract excludes queue state, media, credentials and binary files', () => {
   assert.equal(isSyncableTextPath('.raw/对话记录/今天.md'), true)
   assert.equal(isSyncableTextPath('.raw/jc-media/文档/资料.md'), true)

@@ -589,6 +589,7 @@ fn split_command(command: &str) -> Result<(String, Vec<String>), String> {
     return Ok(("sh".into(), vec!["-lc".into(), value.into()]));
 }
 
+#[cfg(all(test, not(any(target_os = "ios", target_os = "android"))))]
 mod tests {
     use super::*;
     use crate::commands::http::{
@@ -1210,7 +1211,7 @@ pub fn run() {
                 .ok_or("missing main window config")?
                 .clone();
             // Debug App must load Vite; otherwise source edits are invisible behind stale dist assets.
-            #[cfg(debug_assertions)]
+            #[cfg(all(debug_assertions, not(mobile)))]
             {
                 let dev_url = app.config().build.dev_url.clone().unwrap_or_else(|| {
                     "http://localhost:1420".parse().expect("valid desktop dev URL")

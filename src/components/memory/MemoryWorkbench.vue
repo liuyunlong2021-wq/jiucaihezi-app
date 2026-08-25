@@ -2127,7 +2127,6 @@ function readDataUrl(file: File): Promise<string> {
             </button>
           </div>
           <input ref="fileInput" type="file" multiple hidden :disabled="sending" @change="selectFiles" />
-          <button class="icon-button mobile-only memory-mobile-creation" title="打开创作面板" @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"><JcIcon name="palette" /></button>
           <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
           <div
             ref="composerRef"
@@ -2429,7 +2428,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-settings-backdrop, .memory-tree-backdrop { position: fixed; inset: 0; border: 0; background: rgb(0 0 0 / 28%); }
 .memory-settings-backdrop { z-index: 55; }
 .memory-tree-backdrop { z-index: 35; }
-.mobile-only, .memory-tree-backdrop { display: none; }
+.memory-tree-backdrop { display: none; }
 @media (max-width: 939px) {
   .memory-workbench.chat-dock-compact .memory-main > :not(.memory-chat-compact-bar) { visibility: visible; }
   .memory-workbench.chat-dock-compact .memory-chat-compact-bar { display: none; }
@@ -2450,7 +2449,7 @@ function readDataUrl(file: File): Promise<string> {
   .memory-main { height: 100%; }
   .memory-tree { position: fixed; z-index: 38; inset: 0; width: auto; transform: translateX(-100%); transition: transform .18s ease; }
   .memory-tree.open { transform: translateX(0); }
-  .memory-tree-backdrop, .mobile-only { display: grid; }
+  .memory-tree-backdrop { display: grid; }
   .memory-topbar { gap: 4px; padding: 0 8px; }
   .memory-title-drag { display: none; }
   .memory-topbar-actions { gap: 4px; }
@@ -2461,7 +2460,7 @@ function readDataUrl(file: File): Promise<string> {
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }
-  .memory-mobile-creation { display: grid; }
   .memory-settings-drawer { top: env(safe-area-inset-top, 0); right: 0; bottom: 0; left: 0; width: auto; border-left: 0; }
+  .memory-workbench.creation-open .memory-creation { inset: env(safe-area-inset-top, 0) 0 0; height: auto; }
 }
 </style>

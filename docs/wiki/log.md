@@ -1053,3 +1053,11 @@
 - 三个 MiniMax H3 模型现只发送字符串 `seconds`，不再重复发送 `duration`；其他视频模型请求保持原合同。
 - 小易适配器 `/v1/models` 现要求 Bearer Token，使用同一 Token 查询上游并只返回实际可见模型对应的公开别名；适配器测试同步改为真实 `"seconds": "8"` 入站。
 - 三个模型在生产验收前保持 `partial`。适配器 `12/12`、Runtime `29/29`、完整 focused、Rust `402 passed / 1 ignored`、TypeScript 和差异检查通过；未部署，未执行真实付费生成、MP4 落盘或扣费核对。详见 [[开发/MiniMaxH3视频seconds类型修复TDD-2026-08-24]]。
+
+## [2026-08-25] TDD 建立 | iPhone TestFlight 外部测试
+
+- 用户确认继续基于当前 `main / v2.1.34` 开发 iPhone App，不正式上架 App Store，使用 TestFlight 外部测试让其他用户安装和更新。
+- 新建 [[开发/通用记忆工作台iPhone TestFlight外部测试TDD-2026-08-25]]；顺序固定为“云下载真机可观测 RED -> 根因回归测试 -> 共享根因修复 -> Mobile 真机矩阵 -> TestFlight 内部安装 -> Beta App Review -> 定向外测 -> 公开链接”。
+- 继续使用 `com.jiucaihezi.mobile`、Apple Team `RXD4L9387J` 和现有 App Store Connect App；不新建 Mobile App，不恢复自动双向同步，不使用 Ad Hoc 或 Enterprise 绕过 TestFlight。
+- 已加入云下载操作追踪和回归合同；iOS Debug 仅桌面加载 Vite，创作面板遵守顶部安全区并保留唯一返回对话入口。`1115` 个 focused 测试、iOS Rust target 检查、Debug IPA 构建、真机覆盖安装和启动完成，用户确认可返回对话。
+- 未执行云下载真机文件落盘验证；未上传 `2.1.34` 到 App Store Connect，未完成 TestFlight 内部安装、Beta App Review 或外部公开链接。

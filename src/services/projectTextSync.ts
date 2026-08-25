@@ -25,6 +25,19 @@ interface TextSyncApi {
   pushFiles(projectId: string, deviceId: string, mutations: SyncMutation[]): Promise<Array<{ mutation_id: string; path: string; revision: number; duplicate: boolean }>>
 }
 
+export interface ProjectTextSyncTraceEvent {
+  operationId: string
+  step: string
+  fileCount?: number
+  error?: string
+}
+
+export type ProjectTextSyncTrace = (event: ProjectTextSyncTraceEvent) => void
+
+const defaultTrace: ProjectTextSyncTrace = event => {
+  if (typeof window !== 'undefined') console.info('[JC][cloud-sync]', event)
+}
+
 export const projectTextSyncStatus = reactive({
   owner: '',
   cloudProjectId: '',
@@ -98,18 +111,23 @@ export class ProjectTextSync {
   private projectName = ''
   private state = emptyState()
   private task: Promise<unknown> = Promise.resolve()
+  private operationId = ''
 
   constructor(
     private readonly files: ProjectFileService = createRuntimeProjectFileService(),
     private readonly api: TextSyncApi = textSyncClient,
+    private readonly trace: ProjectTextSyncTrace = defaultTrace,
   ) {}
 
-  async open(owner: string, name: string): Promise<void> {
+  async open(owner: string, name: string, operationId = ''): Promise<void> {
+    this.operationId = operationId
+    this.traceStep('open-start')
     await this.enqueue(async () => {
       this.owner = owner
       this.projectName = name
       this.state = owner ? await this.readState() : emptyState()
       this.updateStatus(owner ? (this.state.cloudProjectId ? 'idle' : 'disabled') : 'idle')
+      this.traceStep('open-ready')
     })
   }
 
@@ -125,7 +143,9 @@ export class ProjectTextSync {
     })
   }
 
-  async connect(cloudProjectId: string): Promise<void> {
+  async connect(cloudProjectId: string, operationId = ''): Promise<void> {
+    this.operationId = operationId
+    this.traceStep('connect-start')
     await this.enqueue(async () => {
       if (!this.owner) throw new Error('请先选择本地项目')
       this.state = { ...emptyState(), cloudProjectId }
@@ -134,7 +154,9 @@ export class ProjectTextSync {
     })
   }
 
-  async downloadNow(): Promise<void> {
+  async downloadNow(operationId = ''): Promise<void> {
+    this.operationId = operationId
+    this.traceStep('download-start')
     await this.enqueue(async () => {
       if (!this.state.cloudProjectId) throw new Error('当前项目尚未连接云端')
       await this.downloadSnapshot()
@@ -274,11 +296,13 @@ export class ProjectTextSync {
 
   private async downloadSnapshot(): Promise<void> {
     this.updateStatus('syncing', '正在下载文字...')
+    this.traceStep('pull-start')
     try {
       const [local, remote] = await Promise.all([this.readLocalSnapshot(), this.readRemoteSnapshot()])
       const active = new Set<string>()
       const remoteActive = [...remote.files].filter(([, file]) => file.deleted_at == null)
       const total = remoteActive.length
+      this.traceStep('pull-complete', total)
       let downloaded = 0
       let deleted = 0
       for (const [path, file] of remoteActive) {
@@ -309,10 +333,22 @@ export class ProjectTextSync {
       await this.persistState()
       projectTextSyncStatus.lastSyncedAt = Date.now()
       this.updateStatus('synced', `已下载并覆盖本地（${downloaded} 个文字文件，删除 ${deleted} 个）`)
+      this.traceStep('success', downloaded)
     } catch (error) {
+      this.traceStep('failure', undefined, error)
       this.setFailure(error)
       throw error
     }
+  }
+
+  private traceStep(step: string, fileCount?: number, error?: unknown): void {
+    if (!this.operationId) return
+    this.trace({
+      operationId: this.operationId,
+      step,
+      ...(fileCount === undefined ? {} : { fileCount }),
+      ...(error === undefined ? {} : { error: error instanceof TextSyncError ? error.code : error instanceof Error ? error.name : 'unknown' }),
+    })
   }
 
   private updateProgress(message: string, current: number, total: number): void {

@@ -1338,14 +1338,23 @@ async function openCloudProject(cloud: SyncProject) {
   }))) return
   projectMenuBusy.value = true
   projectMenuError.value = ''
+  const operationId = `cloud_download_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`
+  const trace = (step: string, error?: unknown) => console.info('[JC][cloud-sync]', {
+    operationId,
+    step,
+    ...(error === undefined ? {} : { error: error instanceof Error ? error.name : 'unknown' }),
+  })
+  trace('cloud-click-confirmed')
   try {
     const existing = await localOwnerForCloud(cloud)
+    trace(existing ? 'local-project-found' : 'local-project-missing')
     if (existing) {
       if (isDesktop || isMobile) projectStore.selectProject(existing.owner)
       else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
-      await projectTextSync.open(existing.owner, existing.name)
-      if (await projectTextSync.cloudProjectIdFor(existing.owner) === cloud.id) await projectTextSync.downloadNow()
-      else await projectTextSync.connect(cloud.id)
+      await projectTextSync.open(existing.owner, existing.name, operationId)
+      if (await projectTextSync.cloudProjectIdFor(existing.owner) === cloud.id) await projectTextSync.downloadNow(operationId)
+      else await projectTextSync.connect(cloud.id, operationId)
+      trace('local-project-complete')
       showProjectMenu.value = false
       return
     }
@@ -1353,9 +1362,10 @@ async function openCloudProject(cloud: SyncProject) {
     if (isMobile) {
       const project = await createMobileProject(cloud.name, false)
       if (!project) return
-      await projectTextSync.open(project.path, project.name)
-      await projectTextSync.connect(cloud.id)
+      await projectTextSync.open(project.path, project.name, operationId)
+      await projectTextSync.connect(cloud.id, operationId)
       projectStore.selectProject(project.path)
+      trace('mobile-project-complete')
       showProjectMenu.value = false
       return
     }
@@ -1380,6 +1390,7 @@ async function openCloudProject(cloud: SyncProject) {
     await projectTextSync.connect(cloud.id)
     showProjectMenu.value = false
   } catch (e) {
+    trace('failure', e)
     projectMenuError.value = e instanceof Error ? e.message : String(e)
   } finally {
     projectMenuBusy.value = false
