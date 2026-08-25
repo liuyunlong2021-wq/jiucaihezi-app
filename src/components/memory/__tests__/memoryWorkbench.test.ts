@@ -92,6 +92,7 @@ test('memory project entry unifies local and cloud projects while settings only 
   assert.match(settings, /gatewayLogout\(\)/)
   assert.match(workbench, /\.memory-tree \{[^}]*inset: 0;[^}]*width: auto;/)
   assert.match(workbench, /\.memory-settings-drawer \{[^}]*top: env\(safe-area-inset-top, 0\);[^}]*right: 0;[^}]*bottom: 0;[^}]*left: 0;[^}]*width: auto;/)
+  assert.match(workbench, /\.memory-workbench\.preview-open \.memory-preview \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;/)
   assert.match(workbench, /\.memory-workbench\.creation-open \.memory-creation \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;[^}]*height: auto;/)
   assert.match(tree, /progressCurrent[\s\S]*只处理文字，媒体和空目录不处理/)
   assert.match(settings, /progressCurrent[\s\S]*只处理文字，媒体和空目录不处理/)

@@ -2461,6 +2461,7 @@ function readDataUrl(file: File): Promise<string> {
   .memory-message.user { margin-left: 12%; }
   .memory-composer { width: calc(100% - 16px); margin-bottom: 8px; }
   .memory-settings-drawer { top: env(safe-area-inset-top, 0); right: 0; bottom: 0; left: 0; width: auto; border-left: 0; }
+  .memory-workbench.preview-open .memory-preview { inset: env(safe-area-inset-top, 0) 0 0; }
   .memory-workbench.creation-open .memory-creation { inset: env(safe-area-inset-top, 0) 0 0; height: auto; }
 }
 </style>
