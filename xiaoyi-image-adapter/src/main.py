@@ -109,23 +109,6 @@ async def create_image_task(request: Request):
     if not prompt:
         raise HTTPException(400, "prompt is required")
     validate_gemini_request(model, prompt, images)
-    if model in GROK_IMAGE_MODELS:
-        payload = upstream_payload(model, fields)
-        payload["response_format"] = fields.get("response_format") or "url"
-        try:
-            response = await request.app.state.http.post(
-                f"{XIAOYI_BASE_URL}/images/edits" if images else f"{XIAOYI_BASE_URL}/images/generations",
-                headers={"Authorization": f"Bearer {key}"},
-                data=payload if images else None,
-                json=None if images else payload,
-                files=images or None,
-            )
-        except httpx.HTTPError as exc:
-            raise HTTPException(502, "Xiaoyi image service is unavailable") from exc
-        data = response_json(response)
-        if not response.is_success:
-            raise upstream_error(response, data)
-        return data
     payload = upstream_payload(model, fields)
     try:
         if images:
@@ -253,12 +236,11 @@ def video_payload(body: dict) -> dict:
             raise HTTPException(400, "Grok video seconds must be 6 or 10")
         ratio = str(body.get("aspect_ratio") or body.get("ratio") or "16:9")
         resolution = str(body.get("resolution") or "720p").lower()
-        if ratio not in {"16:9", "9:16"} or resolution not in {"480p", "720p", "1k"}:
+        if ratio not in {"16:9", "9:16"} or resolution not in {"480p", "720p", "1080p"}:
             raise HTTPException(400, "Unsupported Grok video parameters")
-        if not body.get("image"):
-            raise HTTPException(400, "reference image is required")
         payload = {"model": model, "prompt": prompt, "seconds": str(duration), "aspect_ratio": ratio, "resolution": resolution}
-        payload["image"] = str(body["image"])
+        if body.get("image"):
+            payload["image"] = str(body["image"])
         return payload
     duration = body.get("duration", body.get("seconds", 5))
     minimum, maximum = VIDEO_DURATION_RANGES.get(model, (5, 15))
@@ -363,7 +345,7 @@ def upstream_payload(model: str, fields: dict[str, str]) -> dict[str, str]:
     payload = {"model": MODEL_MAP[model], "prompt": fields["prompt"], "response_format": "url"}
     if fields.get("size") and fields["size"] != "auto":
         payload["size"] = fields["size"]
-    for key in ("n", "aspect_ratio"):
+    for key in ("n", "aspect_ratio", "quality"):
         if fields.get(key):
             payload[key] = fields[key]
     return payload

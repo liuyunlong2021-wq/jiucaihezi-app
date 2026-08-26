@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+import {
+  __resetApiKeyMemoryCacheForTests,
+  __resetGatewaySessionMemoryCacheForTests,
+} from '@/services/newApiClient'
 import { buildCreationRunPlan } from '../creationMediaPlan'
 import {
   buildCreationSubmitRequest,
@@ -23,8 +26,10 @@ test('creation MCP submissions opt into project media persistence', () => {
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
+  __resetGatewaySessionMemoryCacheForTests('gateway-session-cloud')
   return async () => {
     __resetApiKeyMemoryCacheForTests('')
+    __resetGatewaySessionMemoryCacheForTests('')
   }
 }
 
@@ -105,7 +110,7 @@ test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { co
   }
 })
 
-test('Gemini image submits the Xiaoyi async task with its mapped size', { concurrency: false }, async () => {
+test('Gemini image maps panel ratio and resolution to Xiaoyi aspect_ratio and quality', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
@@ -114,8 +119,9 @@ test('Gemini image submits the Xiaoyi async task with its mapped size', { concur
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
-      assert.equal(body.get('size'), '3840x2160')
-      assert.equal(body.get('aspectRatio'), null)
+      assert.equal(body.get('size'), null)
+      assert.equal(body.get('aspect_ratio'), '16:9')
+      assert.equal(body.get('quality'), '4k')
       assert.equal(body.get('resolution'), null)
       assert.equal(body.get('seconds'), '1')
       return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
@@ -964,6 +970,7 @@ test('KIK uploads local video and audio before submitting them to NewAPI', { con
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith('/api/creations/uploads')) {
+      assert.equal(new Headers(init?.headers).get('X-JC-Session'), 'gateway-session-cloud')
       const file = (init?.body as FormData).get('file') as Blob
       uploaded.push(file.type)
       return Response.json({ url: `https://cdn.example.test/reference.${file.type.startsWith('video/') ? 'mp4' : 'mp3'}` })

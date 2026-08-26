@@ -618,14 +618,14 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     assetFlow: 'newapi-upload',
     contractStatus: 'verified',
     ratios: ['16:9', '9:16'],
-    resolutions: ['480p', '720p', '1k'],
+    resolutions: ['480p', '720p', '1080p'],
     duration: { allowedValues: [6, 10] },
-    files: { images: { min: 1, max: 1 } },
+    files: { images: { min: 0, max: 1 } },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', '1k']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p', '1080p']) },
       { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 6, options: options([6, 10]) },
-      { key: 'images', label: '参考图', kind: 'images', required: true },
+      { key: 'images', label: '参考图', kind: 'images' },
     ]),
     notes: ['https://xiaoyiapi.xyz/docs/api/grok-videos/'],
   }),
@@ -734,6 +734,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/trump/seedance-2.0',
+    hidden: true,
     model: 'seedance-2.0',
     label: 'Seedance 2.0 · 特朗普/WorldRouter',
     price: 1,
@@ -746,6 +747,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/trump/seedance-2.0-fast',
+    hidden: true,
     model: 'seedance-2.0-fast',
     label: 'Seedance 2.0 Fast · 特朗普/WorldRouter',
     price: 1,
@@ -758,6 +760,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/kik/doubao-seedance-2',
+    hidden: true,
     model: 'doubao-seedance-2',
     label: 'Seedance 2.0',
     price: '按 Token',
@@ -787,6 +790,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/kik/doubao-seedance-2-0-fast-260128',
+    hidden: true,
     model: 'doubao-seedance-2-0-fast-260128',
     label: 'Seedance 2.0 Fast',
     price: '按 Token',
@@ -816,6 +820,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/kik/doubao-seedance-2-mini',
+    hidden: true,
     model: 'doubao-seedance-2-mini',
     label: 'Seedance 2.0 Mini',
     price: '按 Token',
@@ -1083,6 +1088,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-gemini-omni-text-video', model: 'rh-gemini-omni-text-video',
+    hidden: true,
     label: '全能视频 Omni Flash 文生视频 · RunningHub', task: 'video', mode: 'text-to-video', price: '2.5元/次',
     notes: ['docs/wiki/运维/Geminiomini.md'], ratios: ['16:9', '9:16'], resolutions: ['1080p'], duration: { allowedValues: [10] },
     fields: promptFields([
@@ -1093,6 +1099,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-gemini-omni-image-video', model: 'rh-gemini-omni-image-video',
+    hidden: true,
     label: '全能视频 Omni Flash 图生视频 · RunningHub', task: 'video', mode: 'image-to-video', price: '2.5元/次',
     notes: ['docs/wiki/运维/Geminiomini.md'], ratios: ['16:9', '9:16'], resolutions: ['1080p'], duration: { allowedValues: [10] },
     files: { images: { min: 1, max: 3, allowedCounts: [1, 3], maxBytes: 10 * 1024 * 1024 } },
@@ -1105,6 +1112,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-gemini-omni-video-edit', model: 'rh-gemini-omni-video-edit',
+    hidden: true,
     label: '全能视频 Omni Flash 视频编辑 · RunningHub', task: 'video', mode: 'video-edit', price: '0.4元/秒',
     notes: ['docs/wiki/运维/Geminiomini.md'], ratios: ['16:9', '9:16'], resolutions: ['1080p'],
     files: {
@@ -1142,6 +1150,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   ...([6, 10, 15] as const).map(seconds => baseSpec({
     id: `newapi/zx/grok-1.5-video-${seconds}s`,
+    hidden: true,
     model: `grok-1.5-video-${seconds}s`,
     label: `Grok 1.5 Video ${seconds}s · ZX`,
     task: 'video',
@@ -1168,6 +1177,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   })),
   directVideo({
     id: 'newapi/zx/doubao-seedance-2-5-260628',
+    hidden: true,
     model: 'doubao-seedance-2-5-260628',
     label: 'Seedance 2.5 · ZX',
     price: 'ZX 按秒计费',
@@ -1208,6 +1218,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/zx/omni-fast',
+    hidden: true,
     model: 'omni-fast',
     label: 'Omni Fast · ZX',
     price: 0.18,
@@ -1229,6 +1240,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/zx/omni-v2v',
+    hidden: true,
     model: 'omni-v2v',
     label: 'Omni V2V · ZX',
     price: 0.2,
@@ -1368,6 +1380,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-seedance25-no-video-ref',
+    hidden: true,
     model: 'rh-seedance25-no-video-ref',
     label: 'Seedance 2.5 无参考视频 · RunningHub',
     task: 'video',
@@ -1389,6 +1402,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-seedance25-with-video-ref',
+    hidden: true,
     model: 'rh-seedance25-with-video-ref',
     label: 'Seedance 2.5 有参考视频 · RunningHub',
     task: 'video',
@@ -1413,6 +1427,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── 🆕 Sora2 视频系列 (4 个) ──
   runninghubStandard({
     id: 'runninghub/api/rh-sora2-text',
+    hidden: true,
     model: 'rh-sora2-text',
     label: 'Sora2 文生视频',
     task: 'video',
@@ -1440,6 +1455,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-sora2-image',
+    hidden: true,
     model: 'rh-sora2-image',
     label: 'Sora2 图生视频',
     task: 'video',
@@ -1468,6 +1484,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-sora2-character',
+    hidden: true,
     model: 'rh-sora2-character',
     label: 'Sora2 角色上传',
     task: 'video',
@@ -1481,6 +1498,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── 🆕 LTX 2.3 视频系列 (2 个) ──
   runninghubStandard({
     id: 'runninghub/api/rh-ltx23-text-video',
+    hidden: true,
     model: 'rh-ltx23-text-video',
     label: 'LTX 2.3 文生视频 · RunningHub',
     task: 'video',
@@ -1519,6 +1537,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-ltx23-image-video',
+    hidden: true,
     model: 'rh-ltx23-image-video',
     label: 'LTX 2.3 图生视频 · RunningHub',
     task: 'video',

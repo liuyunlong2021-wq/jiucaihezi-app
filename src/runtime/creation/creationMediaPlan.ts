@@ -247,6 +247,9 @@ function normalizeOpenAiImageParams(
     model: spec.model,
     prompt: params.prompt,
     size,
+    aspect_ratio: spec.model.startsWith('gemini-')
+      ? firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'
+      : undefined,
     resolution: params.resolution,
     image: params.image,
     images: params.images,

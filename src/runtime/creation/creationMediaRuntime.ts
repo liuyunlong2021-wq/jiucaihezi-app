@@ -361,8 +361,9 @@ async function executeDirectImageRequest(
       seconds: '1',
       response_format: request.plan.model === 'grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
     }
-    if (request.plan.model === 'grok-imagine-image-2.0') {
-      if (params.size) fields.size = params.size
+    if (request.plan.model.startsWith('gemini-')) {
+      if (params.aspectRatio) fields.aspect_ratio = params.aspectRatio
+      if (params.resolution) fields.quality = params.resolution.toLowerCase()
     } else if (params.size) {
       fields.size = params.size
     }

@@ -377,6 +377,21 @@ test('Xiaoyi Kling and Seedance 2.5 display per-second prices', () => {
   assert.equal(displayModelPrice(getCreationModelSpec('newapi/xiaoyi/seedance2.5')!), '1/秒')
 })
 
+test('unstable or retired video models stay out of the creation panel', () => {
+  const retiredIds = [
+    'newapi/zx/grok-1.5-video-6s', 'newapi/zx/grok-1.5-video-10s', 'newapi/zx/grok-1.5-video-15s',
+    'newapi/zx/doubao-seedance-2-5-260628', 'runninghub/api/rh-seedance25-no-video-ref', 'runninghub/api/rh-seedance25-with-video-ref',
+    'runninghub/api/rh-sora2-text', 'runninghub/api/rh-sora2-image', 'runninghub/api/rh-sora2-character',
+    'runninghub/api/rh-ltx23-text-video', 'runninghub/api/rh-ltx23-image-video',
+    'runninghub/api/rh-gemini-omni-text-video', 'runninghub/api/rh-gemini-omni-image-video', 'runninghub/api/rh-gemini-omni-video-edit',
+    'newapi/zx/omni-fast', 'newapi/zx/omni-v2v',
+    'newapi/trump/seedance-2.0', 'newapi/trump/seedance-2.0-fast',
+    'newapi/kik/doubao-seedance-2', 'newapi/kik/doubao-seedance-2-0-fast-260128', 'newapi/kik/doubao-seedance-2-mini',
+  ]
+  const visibleIds = new Set(listCreationModels().map(model => model.id))
+  for (const id of retiredIds) assert.equal(visibleIds.has(id), false, id)
+})
+
 test('Xiaoyi Grok and Kling expose only their supported creation fields', () => {
   const image = getCreationModelSpec('newapi/xiaoyi/grok-imagine-image-2.0')!
   const video = getCreationModelSpec('newapi/xiaoyi/grok-imagine-video-1.5')!
@@ -384,18 +399,15 @@ test('Xiaoyi Grok and Kling expose only their supported creation fields', () => 
 
   assert.deepEqual(image.capabilities.resolutions, ['1k', '2k', '4k'])
   assert.equal(image.fields.some(field => field.key === 'responseFormat'), false)
-  assert.deepEqual(video.capabilities.resolutions, ['480p', '720p', '1k'])
-  assert.equal(video.files?.images?.min, 1)
-  assert.equal(video.fields.find(field => field.key === 'images')?.required, true)
+  assert.deepEqual(video.capabilities.resolutions, ['480p', '720p', '1080p'])
+  assert.equal(video.files?.images?.min, 0)
+  assert.notEqual(video.fields.find(field => field.key === 'images')?.required, true)
   assert.deepEqual(kling.capabilities.resolutions, ['720p', '1080p', '4k'])
 
-  assert.throws(
-    () => buildCreationRunPlan({
-      modelId: video.id,
-      params: { prompt: '让人物挥手', ratio: '16:9', resolution: '720p', duration: 6 },
-    }),
-    /参考图.*至少需要 1/,
-  )
+  assert.equal(buildCreationRunPlan({
+    modelId: video.id,
+    params: { prompt: '让人物挥手', ratio: '16:9', resolution: '1080p', duration: 6 },
+  }).mode, 'text-to-video')
 })
 
 test('ZX Grok fixed-duration aliases support text and reference-image video', () => {

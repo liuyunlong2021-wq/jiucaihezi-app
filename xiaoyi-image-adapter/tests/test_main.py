@@ -76,15 +76,36 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2-svip")
 
-    async def test_grok_image_2_uses_official_sync_generation_contract(self):
+    async def test_gemini_forwards_xiaoyi_aspect_ratio_and_quality(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            data={
+                "model": "gemini-3-pro-image-preview",
+                "prompt": "wide room",
+                "aspect_ratio": "16:9",
+                "quality": "2k",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        request = next(item for item in self.requests if item.url.path == "/v1/images/generations/async")
+        self.assertEqual(json.loads(request.content), {
+            "model": "gemini-3-pro-image-preview",
+            "prompt": "wide room",
+            "response_format": "url",
+            "aspect_ratio": "16:9",
+            "quality": "2k",
+        })
+
+    async def test_grok_image_2_uses_official_async_generation_contract(self):
         response = await self.client.post(
             "/v1/videos",
             headers={"Authorization": "Bearer key"},
             json={"model": "grok-imagine-image-2.0", "prompt": "blue cup", "size": "1024x1024", "response_format": "url"},
         )
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["data"][0]["url"], "https://assets.example.test/grok.png")
-        request = next(item for item in self.requests if item.url.path == "/v1/images/generations")
+        self.assertEqual(response.json()["status"], "processing")
+        request = next(item for item in self.requests if item.url.path == "/v1/images/generations/async")
         self.assertEqual(json.loads(request.content), {
             "model": "grok-imagine-image-2.0", "prompt": "blue cup", "response_format": "url", "size": "1024x1024",
         })
@@ -92,10 +113,10 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
     def test_grok_video_uses_official_string_seconds_contract(self):
         self.assertEqual(video_payload({
             "model": "grok-imagine-video-1.5", "prompt": "a wave", "seconds": 10,
-            "aspect_ratio": "16:9", "resolution": "1k", "image": "https://assets.example.test/ref.png",
+            "aspect_ratio": "16:9", "resolution": "1080p",
         }), {
             "model": "grok-imagine-video-1.5", "prompt": "a wave", "seconds": "10",
-            "aspect_ratio": "16:9", "resolution": "1k", "image": "https://assets.example.test/ref.png",
+            "aspect_ratio": "16:9", "resolution": "1080p",
         })
 
     def test_new_xiaoyi_video_aliases_use_official_models_and_ranges(self):
@@ -120,13 +141,12 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             "model": "seedance2.5", "prompt": "test", "seconds": 4, "video_urls": refs,
         })["content"]), 11)
 
-    def test_grok_video_requires_image_and_accepts_1k(self):
-        with self.assertRaisesRegex(Exception, "reference image is required"):
-            video_payload({"model": "grok-imagine-video-1.5", "prompt": "a wave", "resolution": "720p"})
+    def test_grok_video_supports_text_only_and_accepts_1080p(self):
+        self.assertNotIn("image", video_payload({"model": "grok-imagine-video-1.5", "prompt": "a wave", "resolution": "720p"}))
         self.assertEqual(video_payload({
-            "model": "grok-imagine-video-1.5", "prompt": "a wave", "resolution": "1k",
+            "model": "grok-imagine-video-1.5", "prompt": "a wave", "resolution": "1080p",
             "image": "https://assets.example.test/ref.png",
-        })["resolution"], "1k")
+        })["resolution"], "1080p")
 
     async def test_minimax_h3_models_use_xiaoyi_video_contract(self):
         headers = {"Authorization": "Bearer key"}

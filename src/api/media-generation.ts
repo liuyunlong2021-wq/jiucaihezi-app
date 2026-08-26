@@ -94,7 +94,12 @@ const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CRE
 
 // BUG-11 修复: 统一使用 resolveApiConfig，不再独立读 localStorage
 import { getMediaModel, getMediaModelAvailability, isRemovedMediaModelId } from '@/data/mediaModelCapabilities'
-import { buildGatewayHeaders, DEFAULT_API_BASE_URL } from '@/services/newApiClient'
+import {
+  buildGatewayHeaders,
+  DEFAULT_API_BASE_URL,
+  getGatewaySessionToken,
+  initGatewaySessionToken,
+} from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
 import { sizeFromRatioResolution } from '@/utils/imageContracts'
 import { isAllowedCreationPollUrl } from '@/utils/urlSafety'
@@ -422,6 +427,8 @@ export async function uploadCreationAsset(value?: string, externalSignal?: Abort
   const formData = new FormData()
   formData.append('file', blob, blob.type.startsWith('audio/') ? 'reference.wav' : blob.type.startsWith('video/') ? 'reference.mp4' : 'reference.png')
   const headers = buildGatewayHeaders({})
+  const gatewaySession = getGatewaySessionToken() || await initGatewaySessionToken()
+  if (gatewaySession) headers['X-JC-Session'] = gatewaySession
   delete headers['Content-Type']  // multipart 不设置 Content-Type
   const { signal, clear } = createTimeoutSignal(120, externalSignal)
   let res: Response
