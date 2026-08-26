@@ -4,7 +4,6 @@ import { test } from 'node:test'
 
 import {
   __resetApiKeyMemoryCacheForTests,
-  __resetGatewaySessionMemoryCacheForTests,
 } from '@/services/newApiClient'
 import { buildCreationRunPlan } from '../creationMediaPlan'
 import {
@@ -26,10 +25,8 @@ test('creation MCP submissions opt into project media persistence', () => {
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
-  __resetGatewaySessionMemoryCacheForTests('gateway-session-cloud')
   return async () => {
     __resetApiKeyMemoryCacheForTests('')
-    __resetGatewaySessionMemoryCacheForTests('')
   }
 }
 
@@ -970,7 +967,8 @@ test('KIK uploads local video and audio before submitting them to NewAPI', { con
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url.endsWith('/api/creations/uploads')) {
-      assert.equal(new Headers(init?.headers).get('X-JC-Session'), 'gateway-session-cloud')
+      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer session-cloud')
+      assert.equal(new Headers(init?.headers).get('X-JC-Session'), null)
       const file = (init?.body as FormData).get('file') as Blob
       uploaded.push(file.type)
       return Response.json({ url: `https://cdn.example.test/reference.${file.type.startsWith('video/') ? 'mp4' : 'mp3'}` })
