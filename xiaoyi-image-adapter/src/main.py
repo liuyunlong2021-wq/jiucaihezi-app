@@ -14,7 +14,16 @@ VIDEO_MODELS = {
     "MiniMaxH3-2k-pro-sec": "2k",
     "MiniMaxH3-2k-sec": "2k",
     "MiniMaxH3-720p-sec": "720p",
+    "grok-imagine-video-1.5": "720p",
+    "kling-video-v3": "720p",
+    "seedance2.5": "720p",
 }
+VIDEO_DURATION_RANGES = {
+    "kling-video-v3": (3, 15),
+    "seedance2.5": (4, 30),
+}
+VIDEO_ALLOWED_RESOLUTIONS = {"kling-video-v3": {"720p", "1080p", "4k"}}
+GROK_IMAGE_MODELS = {"grok-imagine-image-2.0"}
 PUBLIC_MODELS = {
     "gpt-image-2-1k",
     "gpt-image-2-低质量",
@@ -23,6 +32,7 @@ PUBLIC_MODELS = {
     "gpt-image-2-官方",
     "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview",
+    *GROK_IMAGE_MODELS,
     *VIDEO_MODELS,
 }
 MODEL_MAP = {
@@ -34,6 +44,8 @@ MODEL_MAP = {
     "gpt-image-2-官方": "gpt-image-2-svip",
     "gemini-3-pro-image-preview": "gemini-3-pro-image-preview",
     "gemini-3.1-flash-image-preview": "gemini-3.1-flash-image-preview",
+    "grok-imagine-image-2.0": "grok-imagine-image-2.0",
+    "seedance2.5": "video-ds-2.5",
 }
 MAX_UPLOADS = 10
 MAX_UPLOAD_BYTES = 20 * 1024 * 1024
@@ -97,6 +109,23 @@ async def create_image_task(request: Request):
     if not prompt:
         raise HTTPException(400, "prompt is required")
     validate_gemini_request(model, prompt, images)
+    if model in GROK_IMAGE_MODELS:
+        payload = upstream_payload(model, fields)
+        payload["response_format"] = fields.get("response_format") or "url"
+        try:
+            response = await request.app.state.http.post(
+                f"{XIAOYI_BASE_URL}/images/edits" if images else f"{XIAOYI_BASE_URL}/images/generations",
+                headers={"Authorization": f"Bearer {key}"},
+                data=payload if images else None,
+                json=None if images else payload,
+                files=images or None,
+            )
+        except httpx.HTTPError as exc:
+            raise HTTPException(502, "Xiaoyi image service is unavailable") from exc
+        data = response_json(response)
+        if not response.is_success:
+            raise upstream_error(response, data)
+        return data
     payload = upstream_payload(model, fields)
     try:
         if images:
@@ -137,8 +166,6 @@ async def get_image_task(task_id: str, request: Request):
     if not response.is_success:
         raise upstream_error(response, data)
     if str(data.get("status") or "").lower() in {"queued", "in_progress", "completed"}:
-        if str(data.get("status")).lower() == "completed":
-            data["metadata"] = {"url": f"/v1/videos/{task_id}/content"}
         return data
     raw_status = str(data.get("status") or "running").lower()
     status = {"success": "completed", "failed": "failed"}.get(raw_status, "processing")
@@ -177,6 +204,17 @@ async def get_video_content(task_id: str, request: Request):
 
 async def create_video_task(body: dict, key: str, client: httpx.AsyncClient) -> dict:
     payload = video_payload(body)
+    if body.get("model") in {"grok-imagine-video-1.5", "kling-video-v3", "seedance2.5"}:
+        if body.get("model") == "grok-imagine-video-1.5" and payload.get("image"):
+            payload["image"] = await upload_video_asset(payload["image"], body["model"], "image", key, client)
+        for item in payload.get("content", []):
+            if not isinstance(item, dict):
+                continue
+            kind = str(item.get("type") or "").removesuffix("_url")
+            field = item.get(f"{kind}_url")
+            url = field.get("url") if isinstance(field, dict) else None
+            if isinstance(url, str):
+                item[f"{kind}_url"]["url"] = await upload_video_asset(url, body["model"], kind, key, client)
     try:
         response = await client.post(f"{XIAOYI_BASE_URL}/videos", headers={"Authorization": f"Bearer {key}"}, json=payload)
     except httpx.HTTPError as exc:
@@ -207,18 +245,32 @@ def video_payload(body: dict) -> dict:
         raise HTTPException(400, "Unsupported model")
     if not prompt:
         raise HTTPException(400, "prompt is required")
+    if model == "grok-imagine-video-1.5":
+        duration = body.get("seconds", body.get("duration", 6))
+        if str(duration) not in {"6", "10"}:
+            raise HTTPException(400, "Grok video seconds must be 6 or 10")
+        ratio = str(body.get("aspect_ratio") or body.get("ratio") or "16:9")
+        resolution = str(body.get("resolution") or "720p").lower()
+        if ratio not in {"16:9", "9:16"} or resolution not in {"480p", "720p", "1080p"}:
+            raise HTTPException(400, "Unsupported Grok video parameters")
+        payload = {"model": model, "prompt": prompt, "seconds": str(duration), "aspect_ratio": ratio, "resolution": resolution}
+        if body.get("image"):
+            payload["image"] = str(body["image"])
+        return payload
     duration = body.get("duration", body.get("seconds", 5))
-    if isinstance(duration, bool) or not isinstance(duration, (int, str)) or not str(duration).isdigit() or not 5 <= int(duration) <= 15:
+    minimum, maximum = VIDEO_DURATION_RANGES.get(model, (5, 15))
+    if isinstance(duration, bool) or not isinstance(duration, (int, str)) or not str(duration).isdigit() or not minimum <= int(duration) <= maximum:
         raise HTTPException(400, "duration must be from 5 to 15 seconds")
     ratio = str(body.get("aspect_ratio") or body.get("ratio") or "16:9")
     if ratio not in {"16:9", "9:16", "1:1"}:
         raise HTTPException(400, "Unsupported aspect ratio")
     resolution = str(body.get("resolution") or VIDEO_MODELS[model]).lower()
-    if resolution != VIDEO_MODELS[model]:
+    if resolution not in VIDEO_ALLOWED_RESOLUTIONS.get(model, {VIDEO_MODELS[model]}):
         raise HTTPException(400, "Unsupported resolution")
     references = []
+    image_max = 7 if model == "kling-video-v3" else 30 if model == "seedance2.5" else 9
     for kind, keys, maximum in (
-        ("image", ("images", "image_urls", "image"), 9),
+        ("image", ("images", "image_urls", "image"), image_max),
         ("video", ("video_urls", "videos", "video_url"), 3),
         ("audio", ("audio_urls", "audios", "audio_url"), 3),
     ):
@@ -233,12 +285,33 @@ def video_payload(body: dict) -> dict:
             content_type = f"{kind}_url"
             references.append({"type": content_type, content_type: {"url": url}, "role": f"reference_{kind}"})
     return {
-        "model": model,
+        "model": MODEL_MAP.get(model, model),
         "seconds": str(duration),
         "aspect_ratio": ratio,
         "resolution": resolution,
         "content": [{"type": "text", "text": prompt}, *references],
     }
+
+
+async def upload_video_asset(url: str, model: str, kind: str, key: str, client: httpx.AsyncClient) -> str:
+    try:
+        source = await client.get(url)
+        source.raise_for_status()
+        response = await client.post(
+            f"{XIAOYI_BASE_URL}/video-assets",
+            headers={"Authorization": f"Bearer {key}"},
+            data={"model": MODEL_MAP.get(model, model), "kind": kind},
+            files={"file": (f"reference.{ {'image': 'png', 'video': 'mp4', 'audio': 'mp3'}.get(kind, 'bin') }", source.content, source.headers.get("content-type", "application/octet-stream"))},
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Xiaoyi video asset upload failed") from exc
+    data = response_json(response)
+    if not response.is_success:
+        raise upstream_error(response, data)
+    url = data.get("data", {}).get("url") if isinstance(data.get("data"), dict) else ""
+    if not isinstance(url, str) or not url:
+        raise HTTPException(502, "Xiaoyi video asset upload did not return a URL")
+    return url
 
 
 def bearer_token(request: Request) -> str:
@@ -285,6 +358,9 @@ def upstream_payload(model: str, fields: dict[str, str]) -> dict[str, str]:
     payload = {"model": MODEL_MAP[model], "prompt": fields["prompt"], "response_format": "url"}
     if fields.get("size") and fields["size"] != "auto":
         payload["size"] = fields["size"]
+    for key in ("n", "aspect_ratio"):
+        if fields.get(key):
+            payload[key] = fields[key]
     return payload
 
 

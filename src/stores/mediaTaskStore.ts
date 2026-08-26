@@ -56,7 +56,7 @@ export type TaskSource = 'chat' | 'creation'
 function usesAuthenticatedVideoContent(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
   const values = [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
     .map(value => String(value || '').trim().toLowerCase())
-  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v') || value.includes('minimaxh3-'))
+  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v'))
 }
 
 function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {

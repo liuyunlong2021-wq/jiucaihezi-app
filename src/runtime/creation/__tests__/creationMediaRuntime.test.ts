@@ -853,7 +853,10 @@ test('Xiaoyi MiniMax H3 submits string seconds without duplicate duration', { co
       return Response.json({ id: 'task_minimax_001', status: 'queued' })
     }
     if (url.endsWith('/v1/videos/task_minimax_001')) {
-      return Response.json({ id: 'task_minimax_001', status: 'completed', progress: 100 })
+      return Response.json({
+        id: 'task_minimax_001', status: 'completed', progress: 100,
+        metadata: { url: 'https://relay.xiaoyiapi.xyz/v1/videos/public/minimax-result.mp4' },
+      })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -869,7 +872,7 @@ test('Xiaoyi MiniMax H3 submits string seconds without duplicate duration', { co
       },
     })
     const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
-    assert.match(result.url, /\/v1\/videos\/task_minimax_001\/content$/)
+    assert.equal(result.url, 'https://relay.xiaoyiapi.xyz/v1/videos/public/minimax-result.mp4')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

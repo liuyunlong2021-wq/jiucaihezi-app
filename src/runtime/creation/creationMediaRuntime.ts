@@ -361,9 +361,15 @@ async function executeDirectImageRequest(
       seconds: '1',
       response_format: params.responseFormat || 'url',
     }
-    if (params.size) fields.size = params.size
+    if (request.plan.model === 'grok-imagine-image-2.0') {
+      if (params.aspectRatio) fields.aspect_ratio = params.aspectRatio
+    } else if (params.size) {
+      fields.size = params.size
+    }
     if (images.length) fields.image = await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal)))
     const data = await apiCallMultipart('/v1/videos', fields, request.signal)
+    const directUrl = extractMediaUrl(data, 'image')
+    if (directUrl) return { url: directUrl, type: 'image' }
     const taskId = extractTaskId(data)
     if (!taskId) throw new Error('图片任务未返回任务 ID')
     const pollUrl = `/v1/videos/${encodeURIComponent(taskId)}`
@@ -489,7 +495,7 @@ async function executeDirectVideoRequest(
   const pollUrl = taskId ? buildVideoPollUrl(request, taskId) : undefined
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v' || request.plan.model.startsWith('MiniMaxH3-')
+    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v'
     mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal, useContentEndpoint)
   }
   if (!mediaUrl) throw new Error('视频生成失败')
@@ -808,14 +814,15 @@ function buildDirectVideoBody(
     return body
   }
   const isMiniMaxH3 = request.plan.model.startsWith('MiniMaxH3-')
+  const isGrokImagineVideo = request.plan.model === 'grok-imagine-video-1.5'
   return compact({
     model: request.plan.model,
     prompt: params.prompt,
     ratio: params.aspectRatio,
     aspect_ratio: params.aspectRatio,
     resolution: params.resolution,
-    duration: isMiniMaxH3 ? undefined : params.duration,
-    seconds: isMiniMaxH3 && params.duration !== undefined ? String(params.duration) : undefined,
+    duration: isMiniMaxH3 || isGrokImagineVideo ? undefined : params.duration,
+    seconds: (isMiniMaxH3 || isGrokImagineVideo) && params.duration !== undefined ? String(params.duration) : undefined,
     images: uploadedImages.length > 1 ? uploadedImages : undefined,
     image: uploadedImages.length === 1 ? uploadedImages[0] : undefined,
     imageUrl: uploadedImages[0],

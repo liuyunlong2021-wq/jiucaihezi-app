@@ -3,7 +3,7 @@ import unittest
 
 import httpx
 
-from src.main import app
+from src.main import app, video_payload
 
 
 class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -14,6 +14,8 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             self.requests.append(request)
             if request.method == "POST" and request.url.path == "/v1/videos":
                 return httpx.Response(200, json={"id": "video-task-1", "status": "queued"})
+            if request.method == "POST" and request.url.path == "/v1/images/generations":
+                return httpx.Response(200, json={"created": 1785180000, "data": [{"url": "https://assets.example.test/grok.png"}]})
             if request.method == "GET" and request.url.path == "/v1/models":
                 return httpx.Response(200, json={"object": "list", "data": [
                     {"id": "gpt-image-2", "object": "model"},
@@ -21,7 +23,10 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
                     {"id": "MiniMaxH3-2k-sec", "object": "model"},
                 ]})
             if request.method == "GET" and request.url.path == "/v1/videos/video-task-1":
-                return httpx.Response(200, json={"id": "video-task-1", "status": "completed", "progress": 100})
+                return httpx.Response(200, json={
+                    "id": "video-task-1", "status": "completed", "progress": 100,
+                    "metadata": {"url": "https://relay.xiaoyiapi.xyz/v1/videos/public/video-task-1.mp4"},
+                })
             if request.method == "GET" and request.url.path == "/v1/videos/video-task-1/content":
                 return httpx.Response(200, content=b"video", headers={"content-type": "video/mp4"})
             if request.method == "GET" and request.url.path == "/v1/images/tasks/video-task-1":
@@ -71,6 +76,38 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2-svip")
 
+    async def test_grok_image_2_uses_official_sync_generation_contract(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            json={"model": "grok-imagine-image-2.0", "prompt": "blue cup", "size": "1024x1024", "response_format": "url"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["data"][0]["url"], "https://assets.example.test/grok.png")
+        request = next(item for item in self.requests if item.url.path == "/v1/images/generations")
+        self.assertEqual(json.loads(request.content), {
+            "model": "grok-imagine-image-2.0", "prompt": "blue cup", "response_format": "url", "size": "1024x1024",
+        })
+
+    def test_grok_video_uses_official_string_seconds_contract(self):
+        self.assertEqual(video_payload({
+            "model": "grok-imagine-video-1.5", "prompt": "a wave", "seconds": 10,
+            "aspect_ratio": "16:9", "resolution": "1080p", "image": "https://assets.example.test/ref.png",
+        }), {
+            "model": "grok-imagine-video-1.5", "prompt": "a wave", "seconds": "10",
+            "aspect_ratio": "16:9", "resolution": "1080p", "image": "https://assets.example.test/ref.png",
+        })
+
+    def test_new_xiaoyi_video_aliases_use_official_models_and_ranges(self):
+        self.assertEqual(video_payload({
+            "model": "seedance2.5", "prompt": "a wave", "seconds": 30,
+            "aspect_ratio": "16:9", "resolution": "720p",
+        })["model"], "video-ds-2.5")
+        self.assertEqual(video_payload({
+            "model": "kling-video-v3", "prompt": "a wave", "seconds": 15,
+            "aspect_ratio": "16:9", "resolution": "1080p",
+        })["resolution"], "1080p")
+
     async def test_minimax_h3_models_use_xiaoyi_video_contract(self):
         headers = {"Authorization": "Bearer key"}
         for model in ["MiniMaxH3-2k-pro-sec", "MiniMaxH3-2k-sec", "MiniMaxH3-720p-sec"]:
@@ -95,7 +132,7 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         completed = await self.client.get("/v1/videos/video-task-1", headers=headers)
         self.assertEqual(completed.json()["status"], "completed")
-        self.assertEqual(completed.json()["metadata"]["url"], "/v1/videos/video-task-1/content")
+        self.assertEqual(completed.json()["metadata"]["url"], "https://relay.xiaoyiapi.xyz/v1/videos/public/video-task-1.mp4")
         content = await self.client.get("/v1/videos/video-task-1/content", headers=headers)
         self.assertEqual(content.content, b"video")
         self.assertEqual(content.headers["content-type"], "video/mp4")
