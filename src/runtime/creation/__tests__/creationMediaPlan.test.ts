@@ -372,6 +372,32 @@ test('Xiaoyi MiniMax H3 models remain partial until production verification', ()
   }
 })
 
+test('Xiaoyi Kling and Seedance 2.5 display per-second prices', () => {
+  assert.equal(displayModelPrice(getCreationModelSpec('newapi/xiaoyi/kling-video-v3')!), '0.3/秒')
+  assert.equal(displayModelPrice(getCreationModelSpec('newapi/xiaoyi/seedance2.5')!), '1/秒')
+})
+
+test('Xiaoyi Grok and Kling expose only their supported creation fields', () => {
+  const image = getCreationModelSpec('newapi/xiaoyi/grok-imagine-image-2.0')!
+  const video = getCreationModelSpec('newapi/xiaoyi/grok-imagine-video-1.5')!
+  const kling = getCreationModelSpec('newapi/xiaoyi/kling-video-v3')!
+
+  assert.deepEqual(image.capabilities.resolutions, ['1k', '2k', '4k'])
+  assert.equal(image.fields.some(field => field.key === 'responseFormat'), false)
+  assert.deepEqual(video.capabilities.resolutions, ['480p', '720p', '1k'])
+  assert.equal(video.files?.images?.min, 1)
+  assert.equal(video.fields.find(field => field.key === 'images')?.required, true)
+  assert.deepEqual(kling.capabilities.resolutions, ['720p', '1080p', '4k'])
+
+  assert.throws(
+    () => buildCreationRunPlan({
+      modelId: video.id,
+      params: { prompt: '让人物挥手', ratio: '16:9', resolution: '720p', duration: 6 },
+    }),
+    /参考图.*至少需要 1/,
+  )
+})
+
 test('ZX Grok fixed-duration aliases support text and reference-image video', () => {
   for (const seconds of [6, 10, 15] as const) {
     const modelId = `newapi/zx/grok-1.5-video-${seconds}s`

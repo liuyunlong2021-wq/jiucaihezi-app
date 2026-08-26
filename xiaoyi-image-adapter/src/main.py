@@ -240,7 +240,9 @@ async def json_body(request: Request) -> dict:
 
 def video_payload(body: dict) -> dict:
     model = str(body.get("model") or "")
-    prompt = str(body.get("prompt") or "").strip()
+    content = body.get("content") if isinstance(body.get("content"), list) else []
+    content_prompt = next((str(item.get("text") or "").strip() for item in content if isinstance(item, dict) and item.get("type") == "text" and str(item.get("text") or "").strip()), "")
+    prompt = str(body.get("prompt") or "").strip() or content_prompt
     if model not in VIDEO_MODELS:
         raise HTTPException(400, "Unsupported model")
     if not prompt:
@@ -251,11 +253,12 @@ def video_payload(body: dict) -> dict:
             raise HTTPException(400, "Grok video seconds must be 6 or 10")
         ratio = str(body.get("aspect_ratio") or body.get("ratio") or "16:9")
         resolution = str(body.get("resolution") or "720p").lower()
-        if ratio not in {"16:9", "9:16"} or resolution not in {"480p", "720p", "1080p"}:
+        if ratio not in {"16:9", "9:16"} or resolution not in {"480p", "720p", "1k"}:
             raise HTTPException(400, "Unsupported Grok video parameters")
+        if not body.get("image"):
+            raise HTTPException(400, "reference image is required")
         payload = {"model": model, "prompt": prompt, "seconds": str(duration), "aspect_ratio": ratio, "resolution": resolution}
-        if body.get("image"):
-            payload["image"] = str(body["image"])
+        payload["image"] = str(body["image"])
         return payload
     duration = body.get("duration", body.get("seconds", 5))
     minimum, maximum = VIDEO_DURATION_RANGES.get(model, (5, 15))
@@ -269,10 +272,11 @@ def video_payload(body: dict) -> dict:
         raise HTTPException(400, "Unsupported resolution")
     references = []
     image_max = 7 if model == "kling-video-v3" else 30 if model == "seedance2.5" else 9
+    media_max = 10 if model == "seedance2.5" else 3
     for kind, keys, maximum in (
         ("image", ("images", "image_urls", "image"), image_max),
-        ("video", ("video_urls", "videos", "video_url"), 3),
-        ("audio", ("audio_urls", "audios", "audio_url"), 3),
+        ("video", ("video_urls", "videos", "video_url"), media_max),
+        ("audio", ("audio_urls", "audios", "audio_url"), media_max),
     ):
         value = next((body[key] for key in keys if body.get(key)), [])
         values = value if isinstance(value, list) else [value]
@@ -286,6 +290,7 @@ def video_payload(body: dict) -> dict:
             references.append({"type": content_type, content_type: {"url": url}, "role": f"reference_{kind}"})
     return {
         "model": MODEL_MAP.get(model, model),
+        "prompt": prompt,
         "seconds": str(duration),
         "aspect_ratio": ratio,
         "resolution": resolution,

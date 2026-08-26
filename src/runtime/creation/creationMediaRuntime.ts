@@ -359,10 +359,10 @@ async function executeDirectImageRequest(
       model: request.plan.model,
       prompt,
       seconds: '1',
-      response_format: params.responseFormat || 'url',
+      response_format: request.plan.model === 'grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
     }
     if (request.plan.model === 'grok-imagine-image-2.0') {
-      if (params.aspectRatio) fields.aspect_ratio = params.aspectRatio
+      if (params.size) fields.size = params.size
     } else if (params.size) {
       fields.size = params.size
     }

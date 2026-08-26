@@ -92,10 +92,10 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
     def test_grok_video_uses_official_string_seconds_contract(self):
         self.assertEqual(video_payload({
             "model": "grok-imagine-video-1.5", "prompt": "a wave", "seconds": 10,
-            "aspect_ratio": "16:9", "resolution": "1080p", "image": "https://assets.example.test/ref.png",
+            "aspect_ratio": "16:9", "resolution": "1k", "image": "https://assets.example.test/ref.png",
         }), {
             "model": "grok-imagine-video-1.5", "prompt": "a wave", "seconds": "10",
-            "aspect_ratio": "16:9", "resolution": "1080p", "image": "https://assets.example.test/ref.png",
+            "aspect_ratio": "16:9", "resolution": "1k", "image": "https://assets.example.test/ref.png",
         })
 
     def test_new_xiaoyi_video_aliases_use_official_models_and_ranges(self):
@@ -107,6 +107,26 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             "model": "kling-video-v3", "prompt": "a wave", "seconds": 15,
             "aspect_ratio": "16:9", "resolution": "1080p",
         })["resolution"], "1080p")
+
+    def test_video_prompt_falls_back_to_official_content_text(self):
+        payload = video_payload({
+            "model": "seedance2.5", "seconds": 4, "resolution": "720p",
+            "content": [{"type": "text", "text": "a woman waves"}],
+        })
+        self.assertEqual(payload["prompt"], "a woman waves")
+        self.assertEqual(payload["content"][0], {"type": "text", "text": "a woman waves"})
+        refs = [f"https://assets.example.test/{index}.mp4" for index in range(10)]
+        self.assertEqual(len(video_payload({
+            "model": "seedance2.5", "prompt": "test", "seconds": 4, "video_urls": refs,
+        })["content"]), 11)
+
+    def test_grok_video_requires_image_and_accepts_1k(self):
+        with self.assertRaisesRegex(Exception, "reference image is required"):
+            video_payload({"model": "grok-imagine-video-1.5", "prompt": "a wave", "resolution": "720p"})
+        self.assertEqual(video_payload({
+            "model": "grok-imagine-video-1.5", "prompt": "a wave", "resolution": "1k",
+            "image": "https://assets.example.test/ref.png",
+        })["resolution"], "1k")
 
     async def test_minimax_h3_models_use_xiaoyi_video_contract(self):
         headers = {"Authorization": "Bearer key"}
