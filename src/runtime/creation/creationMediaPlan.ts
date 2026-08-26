@@ -237,7 +237,10 @@ function normalizeOpenAiImageParams(
       aspectRatio: firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9',
     })
   }
-  const size = typeof params.size === 'string' && params.size !== 'auto'
+  const isGemini = spec.model.startsWith('gemini-')
+  const size = isGemini
+    ? undefined
+    : typeof params.size === 'string' && params.size !== 'auto'
     ? params.size
     : sizeFromRatioResolution(
         String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'),
@@ -247,7 +250,7 @@ function normalizeOpenAiImageParams(
     model: spec.model,
     prompt: params.prompt,
     size,
-    aspect_ratio: spec.model.startsWith('gemini-')
+    aspect_ratio: isGemini
       ? firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'
       : undefined,
     resolution: params.resolution,

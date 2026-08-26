@@ -173,6 +173,31 @@ test('Grok Image 2 submits a mapped size and always requests a URL', { concurren
   }
 })
 
+test('Grok Image 2 uses image[] for multiple reference images', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = init.body as FormData
+      assert.equal(body.getAll('image[]').length, 2)
+      assert.equal(body.getAll('image').length, 0)
+      return Response.json({ data: [{ url: 'https://cdn.example.test/grok.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/xiaoyi/grok-imagine-image-2.0',
+      params: { prompt: '合成', images: ['data:image/png;base64,AA==', 'data:image/png;base64,AA=='] },
+    })
+    await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Xiaoyi image upload uses the actual JPEG MIME type', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

@@ -624,7 +624,8 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   const formData = new FormData()
   for (const [k, v] of Object.entries(fields)) {
     if (Array.isArray(v)) {
-      v.forEach((item, index) => formData.append(k, item, `image_${index + 1}.png`))
+      const field = k === 'image' ? 'image[]' : k
+      v.forEach((item, index) => formData.append(field, item, `image_${index + 1}.png`))
     } else if (v instanceof Blob) formData.append(k, v, 'image.png')
     else formData.append(k, v)
   }

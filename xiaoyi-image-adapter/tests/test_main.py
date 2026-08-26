@@ -97,6 +97,23 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
             "quality": "2k",
         })
 
+    async def test_grok_image_edit_uses_official_image_array_field(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            files=[
+                ("image[]", ("subject.png", b"subject", "image/png")),
+                ("image[]", ("style.png", b"style", "image/png")),
+            ],
+            data={"model": "grok-imagine-image-2.0", "prompt": "combine"},
+        )
+        self.assertEqual(response.status_code, 200)
+        request = next(item for item in self.requests if item.url.path == "/v1/images/edits/async")
+        body = request.content.decode()
+        self.assertIn('name="image"', body)
+        self.assertGreaterEqual(body.count('filename="subject.png"'), 1)
+        self.assertGreaterEqual(body.count('filename="style.png"'), 1)
+
     async def test_grok_image_2_uses_official_async_generation_contract(self):
         response = await self.client.post(
             "/v1/videos",

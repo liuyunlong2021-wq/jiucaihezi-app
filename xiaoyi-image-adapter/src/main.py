@@ -329,7 +329,7 @@ async def request_fields(request: Request) -> tuple[dict[str, str], list[tuple[s
             if not isinstance(value, UploadFile):
                 fields[key] = value
                 continue
-            if key != "image" or not (value.content_type or "").startswith("image/"):
+            if key not in {"image", "image[]"} or not (value.content_type or "").startswith("image/"):
                 raise HTTPException(400, "Only image uploads are allowed")
             content = await value.read(MAX_UPLOAD_BYTES + 1)
             if len(content) > MAX_UPLOAD_BYTES:
