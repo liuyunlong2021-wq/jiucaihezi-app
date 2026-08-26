@@ -34,8 +34,9 @@ class ChaWikiPrecisionTests(unittest.TestCase):
             self.assertIn(broad_term, description)
 
     def test_retrieval_reads_sources_without_fixed_pages_or_modes(self) -> None:
-        for term in ("1-3", "短词", "分别检索", "读取原页面", "一层", "查到足够证据就停止", "真实 Wiki 页面"):
+        for term in ("1-3", "短词", "一次提交", "同一工具轮", "读取原页面", "一层", "查到足够证据就停止", "真实 Wiki 页面"):
             self.assertIn(term, self.text)
+        self.assertNotIn("分别检索", self.text)
         for old_term in ("Quick", "Standard", "Deep", "hot.md、CLAUDE.md", "架构/", "结论、证据、风险、下一步"):
             self.assertNotIn(old_term, self.text)
 

@@ -1061,3 +1061,17 @@
 - 继续使用 `com.jiucaihezi.mobile`、Apple Team `RXD4L9387J` 和现有 App Store Connect App；不新建 Mobile App，不恢复自动双向同步，不使用 Ad Hoc 或 Enterprise 绕过 TestFlight。
 - 已加入云下载操作追踪和回归合同；iOS Debug 仅桌面加载 Vite，创作面板遵守顶部安全区并保留唯一返回对话入口。`1115` 个 focused 测试、iOS Rust target 检查、Debug IPA 构建、真机覆盖安装和启动完成，用户确认可返回对话。
 - 未执行云下载真机文件落盘验证；未上传 `2.1.34` 到 App Store Connect，未完成 TestFlight 内部安装、Beta App Review 或外部公开链接。
+
+## [2026-08-26] TDD 建立 | Wiki 任务执行提速
+
+- 用户确认后续按“一次多词 Wiki 扫描、同轮只读工具并行、写操作串行屏障、最小耗时记录”的最小路线执行，新建 [[开发/通用记忆工作台Wiki任务执行提速TDD-2026-08-26]]。
+- 根因固定为开放式模型工具循环放大模型往返，不是“简单 Agent 必然比编程 Agent 快”或模型权重差异。
+- 不先引入 RAG、向量库、新索引服务、Responses API 或 WebSocket；不全局将 `64` 轮上限改为 `12`，避免削弱媒体、3D、MCP 和 Terminal 长任务。
+- 当前只完成 TDD 与 Wiki 登记；运行时代码、红灯、自动验证和三次同模型真实前向均未执行。
+
+## [2026-08-26] 实施完成 | Wiki 批量检索、只读并行与耗时观测
+
+- Wiki 搜索增加一次 `1-3` 词扫描，连续项目内只读工具按段并行；写入、Terminal、MCP、项目外读取和其他操作默认串行，工具消息仍按模型原始顺序回填，取消不进入后续写入。
+- Direct Runtime 记录真实 HTTP 请求次数、逐请求耗时、工具轮数、工具耗时和总耗时，不记录正文或参数；工作台运行步骤显示工具耗时。Cha Skill 改为一次提交初始短词及同轮读取独立证据页。
+- 红灯已在旧实现确认；定向 `158/158`、Cha Skill `7/7`、完整 Node focused `1129/1129`、Rust `402 passed / 1 ignored`、TypeScript、定向 lint 和差异检查通过。
+- 当前项目三词本地基准读取 `363 -> 121` 次，中位 `48.66 ms -> 24.27 ms`，约 `2.0x`。当前正式 App 为旧版 `2.1.33`；新构建上的三次 `gpt-5.6-sol` / `jiucaihezi` 真实前向未执行，不登记为端到端性能验收通过。

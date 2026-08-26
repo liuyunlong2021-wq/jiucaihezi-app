@@ -5,6 +5,8 @@ import type {
   DirectToolCall,
   DirectToolExecutionEvent,
   DirectToolExecutor,
+  DirectToolNeedsApproval,
+  DirectRunMetrics,
 } from './directTypes'
 import { DirectStreamInterruptionError, readChatCompletionDetails } from './directStream'
 import { buildToolResultMessages } from './directTools'
@@ -23,7 +25,11 @@ export interface RunDirectChatCompletionOptions {
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
   beforeToolCall?: DirectBeforeToolCall
-  sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
+  toolNeedsApproval?: DirectToolNeedsApproval
+  sendChatCompletion: (
+    request: DirectChatCompletionRequest,
+    onRequestComplete?: (durationMs: number) => void,
+  ) => Promise<Response>
   executeTool?: DirectToolExecutor
   maxToolRounds?: number
   allowToolCalls?: boolean
@@ -39,6 +45,7 @@ export interface RunDirectChatCompletionResult {
   toolCalls: DirectToolCall[]
   usedSecondPass: boolean
   finishReason?: string
+  metrics: DirectRunMetrics
 }
 
 const DIRECT_REQUEST_RETRY_DELAYS = [2000, 4000]
@@ -69,10 +76,12 @@ export async function sendDirectRequestWithRetry(
   options: {
     signal?: AbortSignal
     onRetry?: (attempt: number, total: number) => void
+    onRequestComplete?: (durationMs: number) => void
     wait?: (delay: number) => Promise<void>
   } = {},
 ): Promise<Response> {
   for (let attempt = 0; attempt <= DIRECT_REQUEST_RETRY_DELAYS.length; attempt += 1) {
+    const startedAt = performance.now()
     try {
       const response = await send()
       if (!isRetryableDirectResponseStatus(response.status) || attempt === DIRECT_REQUEST_RETRY_DELAYS.length) return response
@@ -81,6 +90,8 @@ export async function sendDirectRequestWithRetry(
       if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       if (!isRetryableDirectRequestFailure(error)) throw error
       if (attempt === DIRECT_REQUEST_RETRY_DELAYS.length) throw new DirectTransportFailure(error)
+    } finally {
+      options.onRequestComplete?.(Math.max(0, Math.round(performance.now() - startedAt)))
     }
 
     options.onRetry?.(attempt + 1, DIRECT_REQUEST_RETRY_DELAYS.length)
@@ -93,6 +104,7 @@ export async function sendDirectRequestWithRetry(
 export async function runDirectChatCompletion(
   options: RunDirectChatCompletionOptions,
 ): Promise<RunDirectChatCompletionResult> {
+  const startedAt = performance.now()
   const messages = [...options.messages]
   const allToolCalls: DirectToolCall[] = []
   const maxToolRounds = Math.max(1, options.maxToolRounds || 64)
@@ -104,35 +116,94 @@ export async function runDirectChatCompletion(
   let lengthPrefix = ''
   let lengthContinuations = 0
   let lastFailedToolSignature = ''
+  let roundToolOutcomes: Array<{ signature: string; failed: boolean }> = []
+  const modelRequestDurationMs: number[] = []
+
+  const sendChatCompletion = async (request: DirectChatCompletionRequest) => {
+    const requestStartedAt = performance.now()
+    const recordedRequests = modelRequestDurationMs.length
+    let response: Response
+    try {
+      response = await options.sendChatCompletion(request, durationMs => modelRequestDurationMs.push(durationMs))
+    } catch (error) {
+      if (modelRequestDurationMs.length === recordedRequests) {
+        modelRequestDurationMs.push(Math.max(0, Math.round(performance.now() - requestStartedAt)))
+      }
+      throw error
+    }
+    if (modelRequestDurationMs.length === recordedRequests) {
+      modelRequestDurationMs.push(Math.max(0, Math.round(performance.now() - requestStartedAt)))
+    }
+    const finalRequestIndex = modelRequestDurationMs.length - 1
+    const responseStartedAt = performance.now()
+    let timingCompleted = false
+    return {
+      response,
+      completeTiming() {
+        if (timingCompleted) return
+        timingCompleted = true
+        modelRequestDurationMs[finalRequestIndex] += Math.max(0, Math.round(performance.now() - responseStartedAt))
+      },
+    }
+  }
+  const completed = (result: Omit<RunDirectChatCompletionResult, 'metrics'>): RunDirectChatCompletionResult => ({
+    ...result,
+    metrics: {
+      modelRequests: modelRequestDurationMs.length,
+      modelRequestDurationMs,
+      toolRounds,
+      totalDurationMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    },
+  })
 
   const executeToolWithRepeatGuard: DirectToolExecutor = async (call, signal) => {
     const signature = `${call.function.name}\u0000${call.function.arguments}`
+    const outcomeIndex = roundToolOutcomes.push({ signature, failed: false }) - 1
     if (signature === lastFailedToolSignature) {
+      roundToolOutcomes[outcomeIndex]!.failed = true
       return {
         content: '这个工具调用刚刚失败。请根据真实错误换一种方法，不要原样重复。',
         status: 'failed',
       }
     }
-    lastFailedToolSignature = ''
     try {
       const result = await executeTool(call, signal)
-      if (result.status === 'failed') lastFailedToolSignature = signature
+      roundToolOutcomes[outcomeIndex]!.failed = result.status === 'failed'
       return result
     } catch (error) {
-      lastFailedToolSignature = signature
+      roundToolOutcomes[outcomeIndex]!.failed = true
       throw error
     }
+  }
+
+  const buildToolMessages = async (calls: DirectToolCall[], reasoning?: Parameters<typeof buildToolResultMessages>[2]['reasoning']) => {
+    roundToolOutcomes = []
+    const advertisedToolNames = toolNames(options.tools)
+    const result = await buildToolResultMessages(calls, executeToolWithRepeatGuard, {
+      signal: options.signal,
+      reasoning,
+      toolNeedsApproval: options.toolNeedsApproval || (() => Boolean(options.beforeToolCall)),
+      beforeToolCall: async call => {
+        if (!advertisedToolNames.has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
+        return await options.beforeToolCall?.(call)
+      },
+      onToolEvent: options.onToolEvent,
+    })
+    lastFailedToolSignature = ''
+    for (const outcome of roundToolOutcomes) lastFailedToolSignature = outcome.failed ? outcome.signature : ''
+    return result
   }
 
   while (true) {
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     const toolCallAccumulator: Record<number, DirectToolCall> = {}
-    const response = await options.sendChatCompletion({ messages: [...messages], tools: options.tools })
+    const request = await sendChatCompletion({ messages: [...messages], tools: options.tools })
     const streamPrefix = lengthPrefix
     let stream
     try {
-      stream = await readChatCompletionDetails(response, value => options.onText(joinText(streamPrefix, value)), toolCallAccumulator)
+      stream = await readChatCompletionDetails(request.response, value => options.onText(joinText(streamPrefix, value)), toolCallAccumulator)
     } catch (error) {
+      request.completeTiming()
       if (options.continueOnInterruption === false) throw error
       if (!(error instanceof DirectStreamInterruptionError) || options.signal?.aborted || Object.keys(toolCallAccumulator).length) throw error
       const partialSegment = error.partialText
@@ -152,14 +223,14 @@ export async function runDirectChatCompletion(
           ? '上一段可见正文传输中断。请从末尾继续，不要重复已有内容。'
           : '上一段可见正文传输中断。请从末尾继续，不要重复已有内容，也不要调用工具。' },
       ]
-      const continuationResponse = await options.sendChatCompletion({
+      const continuationRequest = await sendChatCompletion({
         messages: continuationMessages,
         tools: options.continueToolsOnInterruption ? options.tools : undefined,
       })
       try {
         const continuationToolCallAccumulator: Record<number, DirectToolCall> = {}
         const continuation = await readChatCompletionDetails(
-          continuationResponse,
+          continuationRequest.response,
           text => options.onText(joinText(partialText, text)),
           continuationToolCallAccumulator,
         )
@@ -176,32 +247,28 @@ export async function runDirectChatCompletion(
           allToolCalls.push(...continuationToolCalls)
           if (streamPrefix) lengthPrefix = partialText
           messages.push(...continuationMessages.slice(messages.length))
-          messages.push(...await buildToolResultMessages(continuationToolCalls, executeToolWithRepeatGuard, {
-            signal: options.signal,
-            reasoning: continuation.reasoning,
-            beforeToolCall: async call => {
-              if (!toolNames(options.tools).has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
-              return await options.beforeToolCall?.(call)
-            },
-            onToolEvent: options.onToolEvent,
-          }))
+          messages.push(...await buildToolMessages(continuationToolCalls, continuation.reasoning))
           toolRounds += 1
           continue
         }
         const text = joinText(partialText, continuation.text)
-        return {
+        return completed({
           text,
           toolCalls: allToolCalls,
           usedSecondPass: toolRounds > 0,
           finishReason: continuation.finishReason,
-        }
+        })
       } catch (continuationError) {
         if (continuationError instanceof DirectStreamInterruptionError) {
           const text = joinText(partialText, continuationError.partialText)
           if (text) options.onText(text)
         }
         throw continuationError
+      } finally {
+        continuationRequest.completeTiming()
       }
+    } finally {
+      request.completeTiming()
     }
     const text = stream.text
     if (text) fallbackText = text
@@ -223,27 +290,18 @@ export async function runDirectChatCompletion(
         lengthContinuations += 1
         continue
       }
-      return {
+      return completed({
         text: joinText(lengthPrefix, text) || fallbackText,
         toolCalls: allToolCalls,
         usedSecondPass: toolRounds > 0,
         finishReason: stream.finishReason,
-      }
+      })
     }
 
     if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
-    const advertisedToolNames = toolNames(options.tools)
-    messages.push(...await buildToolResultMessages(toolCalls, executeToolWithRepeatGuard, {
-      signal: options.signal,
-      reasoning: stream.reasoning,
-      beforeToolCall: async call => {
-        if (!advertisedToolNames.has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
-        return await options.beforeToolCall?.(call)
-      },
-      onToolEvent: options.onToolEvent,
-    }))
+    messages.push(...await buildToolMessages(toolCalls, stream.reasoning))
     toolRounds += 1
   }
 }

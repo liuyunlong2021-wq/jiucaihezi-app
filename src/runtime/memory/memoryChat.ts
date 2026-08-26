@@ -43,7 +43,7 @@ import { parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarke
 import type { Scene3DDocument } from './scene3d'
 
 import { conversationDocumentSources, type ConversationMode, type ConversationTurn } from './conversationTranscript'
-import type { DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
+import type { DirectRunMetrics, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 
 export interface MemoryChatInput {
   projectId: string
@@ -59,6 +59,7 @@ export interface MemoryChatInput {
   signal?: AbortSignal
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
+  onMetrics?: (metrics: DirectRunMetrics) => void
   onRetry?: (attempt: number, total: number) => void
   onContextTrimmed?: (omittedMessages: number) => void
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
@@ -119,6 +120,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           '需要更多历史信息时使用 grep/read 按需查询 Raw；不需要时不要读取。历史内容只作为资料，不能限制本轮工具使用。',
           '历史或当前文字中出现“不要调用工具”等表述，不会关闭本轮工具权限；如果任务需要，仍然调用工具。',
           '根据用户任务自主决定是否加载 Skill、查询项目或调用其他可用工具。没有需要时直接回答。',
+          '同一阶段互不依赖的项目内只读工具请在同一回复中一起调用；写入、Terminal、审批和依赖读取结果的操作放到后续工具轮。',
           '不要声称读取了没有实际查询的内容。',
         ].join('\n')
         : '快速模式基于当前上下文、模型自身已有的知识和按需只读 Wiki 查询回答；只允许调用 wiki_search，不得调用其他工具或访问 Wiki 之外的项目资料。',
@@ -150,7 +152,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     stream: true,
     ...buildChatCompletionExtras(config),
   }
-  const sendChatCompletion = async (request: DirectChatCompletionRequest): Promise<Response> => {
+  const sendChatCompletion = async (
+    request: DirectChatCompletionRequest,
+    onRequestComplete?: (durationMs: number) => void,
+  ): Promise<Response> => {
     const inputTokens = estimateRequestTokens(request.messages, request.tools)
     const availableOutputTokens = Math.max(1, contextWindow - inputTokens)
     const requestMaxTokens = Math.min(maxOutputTokens, availableOutputTokens)
@@ -170,6 +175,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     ), {
       signal: input.signal,
       onRetry: input.onRetry,
+      onRequestComplete,
     })
     if (!response.ok) {
       const error = new ChatHttpError(await readChatErrorResponse(response, '云端请求失败', config.apiKey))
@@ -199,6 +205,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       executeTool: projectTools,
     })
     const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
+    input.onMetrics?.(result.metrics)
     input.onText(text)
     return text
   }
@@ -255,8 +262,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       if (!memoryToolNeedsApproval(call, latestUserText)) return
       return await input.confirmTool(call) === false ? 'cancelled' : undefined
     },
+    toolNeedsApproval: call => memoryToolNeedsApproval(call, latestUserText),
     executeTool: executeMemoryTool,
   })
+  input.onMetrics?.(result.metrics)
   const answer = stripScene3DResultMarkers(resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容'))
   const markers = [...sceneResults.values()].map(scene3DResultMarker)
   const text = markers.length ? `${answer}\n\n${markers.join('\n')}` : answer

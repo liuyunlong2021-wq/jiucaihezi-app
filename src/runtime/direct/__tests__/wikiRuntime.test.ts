@@ -169,6 +169,38 @@ test('search prioritizes current entry pages and excludes log and archive by def
   assert.doesNotMatch(output, /旧方案/)
 })
 
+test('search accepts one to three terms and scans each Wiki file only once', async () => {
+  const project = developmentWiki({
+    'docs/wiki/开发/工具循环.md': '# 工具循环\n\nCodex 支持并行读取。\n\n写入合同必须串行。\n',
+  })
+  const reads = new Map<string, number>()
+  const read = project.workspace.read.bind(project.workspace)
+  project.workspace.read = async path => {
+    reads.set(path, (reads.get(path) || 0) + 1)
+    return await read(path)
+  }
+
+  const output = await executeWikiAction(project.workspace, {
+    action: 'search', query: ['Codex', '并行读取', '写入合同'],
+  })
+
+  for (const query of ['Codex', '并行读取', '写入合同']) assert.match(output, new RegExp(`查询：${query}`))
+  assert.match(output, /开发\/工具循环\.md:3/)
+  assert.match(output, /开发\/工具循环\.md:5/)
+  assert.equal(reads.get('docs/wiki/开发/工具循环.md'), 1)
+})
+
+test('search rejects invalid multi-term queries without weakening the string contract', async () => {
+  const { workspace } = developmentWiki()
+  assert.match(await executeWikiAction(workspace, { action: 'search', query: '稳定结论' }), /查询：稳定结论/)
+  for (const query of [[], [''], ['一', '二', '三', '四'], ['一', 2]]) {
+    await assert.rejects(
+      () => executeWikiAction(workspace, { action: 'search', query } as any),
+      /1-3|关键词|字符串/,
+    )
+  }
+})
+
 test('status reports development category counts and latest operation', async () => {
   const { workspace } = developmentWiki({
     'docs/wiki/log.md': '# Log\n\n## [2026-07-22] 更早操作\n\n## [2026-08-04] 最近操作\n',

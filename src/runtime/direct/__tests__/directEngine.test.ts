@@ -25,6 +25,7 @@ test('sendDirectRequestWithRetry retries the current transient request twice', a
   let requests = 0
   const waits: number[] = []
   const retries: number[] = []
+  const durations: number[] = []
 
   const response = await sendDirectRequestWithRetry(
     async () => {
@@ -36,6 +37,7 @@ test('sendDirectRequestWithRetry retries the current transient request twice', a
     {
       wait: async delay => { waits.push(delay) },
       onRetry: attempt => { retries.push(attempt) },
+      onRequestComplete: duration => { durations.push(duration) },
     },
   )
 
@@ -43,6 +45,8 @@ test('sendDirectRequestWithRetry retries the current transient request twice', a
   assert.deepEqual(waits, [2000, 4000])
   assert.deepEqual(retries, [1, 2])
   assert.equal(requests, 3)
+  assert.equal(durations.length, 3)
+  assert.equal(durations.every(duration => duration >= 0), true)
 })
 
 test('sendDirectRequestWithRetry exposes an exhausted network failure as transport failure', async () => {
@@ -238,6 +242,48 @@ test('runDirectChatCompletion emits start then successful end for a tool call', 
   ])
 })
 
+test('runDirectChatCompletion returns request, tool-round, and duration metrics without payloads', async () => {
+  const responses = [
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"secret.md"}' } }] } }] }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '敏感正文' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    executeTool: async () => ({ content: '文件正文' }),
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(result.metrics.modelRequests, 2)
+  assert.equal(result.metrics.toolRounds, 1)
+  assert.equal(result.metrics.modelRequestDurationMs.length, 2)
+  assert.equal(result.metrics.modelRequestDurationMs.every(duration => duration >= 0), true)
+  assert.equal(result.metrics.totalDurationMs >= 0, true)
+  assert.doesNotMatch(JSON.stringify(result.metrics), /敏感正文|secret\.md|文件正文/)
+})
+
+test('runDirectChatCompletion counts retry attempts as separate model requests', async () => {
+  let attempts = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '继续' }],
+    onText: () => {},
+    sendChatCompletion: async (_request, onRequestComplete) => await sendDirectRequestWithRetry(async () => {
+      attempts += 1
+      if (attempts < 3) return new Response('', { status: 503 })
+      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]'])
+    }, { wait: async () => {}, onRequestComplete }),
+  })
+
+  assert.equal(result.metrics.modelRequests, 3)
+  assert.equal(result.metrics.modelRequestDurationMs.length, 3)
+  assert.equal(result.metrics.toolRounds, 0)
+})
+
 test('runDirectChatCompletion rejects a tool that was not advertised in the request', async () => {
   let executions = 0
   const sentMessages: any[][] = []
@@ -292,7 +338,7 @@ test('runDirectChatCompletion ends a rejected tool without executing it', async 
   ])
 })
 
-test('runDirectChatCompletion ends approval errors and tool failures in source order', async () => {
+test('runDirectChatCompletion starts parallel failures in source order and keeps tool messages ordered', async () => {
   const events: Array<{ type: string; call: { id: string }; status?: string }> = []
   const sentMessages: any[][] = []
   const responses = [
@@ -314,6 +360,7 @@ test('runDirectChatCompletion ends approval errors and tool failures in source o
     beforeToolCall: async call => {
       if (call.function.name === 'read') throw new Error('审批服务不可用')
     },
+    toolNeedsApproval: () => false,
     executeTool: async () => { throw new Error('glob unavailable') },
     sendChatCompletion: async request => {
       sentMessages.push(request.messages)
@@ -321,11 +368,10 @@ test('runDirectChatCompletion ends approval errors and tool failures in source o
     },
   })
 
-  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
-    ['tool_execution_start', 'call_read', undefined],
-    ['tool_execution_end', 'call_read', 'failed'],
-    ['tool_execution_start', 'call_glob', undefined],
-    ['tool_execution_end', 'call_glob', 'failed'],
+  assert.deepEqual(events.filter(event => event.type === 'tool_execution_start').map(event => event.call.id), ['call_read', 'call_glob'])
+  assert.deepEqual(events.filter(event => event.type === 'tool_execution_end').map(event => [event.call.id, event.status]).sort(), [
+    ['call_glob', 'failed'],
+    ['call_read', 'failed'],
   ])
   assert.deepEqual(sentMessages[1].slice(-2).map(message => message.tool_call_id), ['call_read', 'call_glob'])
 })
@@ -516,6 +562,64 @@ test('runDirectChatCompletion does not execute an immediately repeated failed to
   })
 
   assert.equal(executions, 1)
+})
+
+test('runDirectChatCompletion commits repeat protection in source order after parallel completion', async () => {
+  let releaseFirst!: () => void
+  const firstReleased = new Promise<void>(resolve => { releaseFirst = resolve })
+  let firstExecutions = 0
+  const responses = [
+    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [
+      { index: 0, id: 'call_first_1', function: { name: 'read', arguments: '{"path":"missing.md"}' } },
+      { index: 1, id: 'call_second', function: { name: 'glob', arguments: '{"pattern":"*.md"}' } },
+    ] } }] }), '[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [
+      { index: 0, id: 'call_first_2', function: { name: 'read', arguments: '{"path":"missing.md"}' } },
+    ] } }] }), '[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取文件' }],
+    tools: [
+      { type: 'function', function: { name: 'read' } },
+      { type: 'function', function: { name: 'glob' } },
+    ],
+    onText: () => {},
+    executeTool: async call => {
+      if (call.function.name === 'glob') {
+        releaseFirst()
+        return { content: 'ok' }
+      }
+      firstExecutions += 1
+      if (call.id === 'call_first_1') {
+        await firstReleased
+        return { content: 'missing', status: 'failed' }
+      }
+      return { content: 'ok' }
+    },
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(firstExecutions, 2)
+})
+
+test('runDirectChatCompletion includes streamed response time in model duration', async () => {
+  const encoder = new TextEncoder()
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '回答' }],
+    onText: () => {},
+    sendChatCompletion: async () => new Response(new ReadableStream({
+      async start(controller) {
+        await new Promise(resolve => setTimeout(resolve, 25))
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '完成' } }] })}\n\ndata: [DONE]\n\n`))
+        controller.close()
+      },
+    }), { headers: { 'content-type': 'text/event-stream' } }),
+  })
+
+  assert.equal(result.metrics.modelRequestDurationMs.length, 1)
+  assert.equal(result.metrics.modelRequestDurationMs[0] >= 15, true)
 })
 
 test('runDirectChatCompletion continues once after final text streaming is interrupted without rerunning tools', async () => {

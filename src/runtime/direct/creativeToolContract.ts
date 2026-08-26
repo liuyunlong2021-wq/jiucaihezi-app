@@ -19,9 +19,16 @@ function tool(name: string, description: string, properties: Record<string, unkn
 
 const pathProperty = { type: 'string', description: 'Path relative to the current project, or an absolute path after the user approves this task' }
 const vectorProperty = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
+const wikiQueryProperty = {
+  anyOf: [
+    { type: 'string' },
+    { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 3 },
+  ],
+  description: 'One search term or 1-3 search terms scanned together in the current project Wiki',
+}
 
 export const WIKI_SEARCH_TOOL_DEFINITION = tool('wiki_search', 'Search the current project Wiki read-only. Use it only when the answer depends on project facts.', {
-  query: { type: 'string', description: 'Search terms for the current project Wiki' },
+  query: wikiQueryProperty,
   scope: { type: 'string', enum: ['active', 'all'], description: 'active excludes archived knowledge; all includes it' },
   limit: { type: 'integer', minimum: 1, maximum: 1000 },
 }, ['query'])
@@ -33,7 +40,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool('wiki', 'Run deterministic project Wiki operations without Python or Node. Use Wiki Skills for judgment and this tool for inspection, structure, search, validation, audit, closeout preview, and confirmed mechanical repairs.', {
     action: { type: 'string', enum: ['inspect', 'scaffold', 'search', 'status', 'graph', 'validate', 'audit', 'evidence', 'closeout', 'replace', 'extend'] },
     type: { type: 'string', enum: ['dev_project', 'novel', 'manju', 'short_story', 'film', 'tv_series', 'advertisement', 'generic'] },
-    query: { type: 'string' },
+    query: wikiQueryProperty,
     scope: { type: 'string', enum: ['active', 'all'] },
     limit: { type: 'integer', minimum: 1, maximum: 1000 },
     depth: { type: 'integer', minimum: 1, maximum: 2, description: 'Relationship graph depth from confirmed seed pages' },
@@ -202,13 +209,13 @@ export function buildMemoryDesktopToolDefinitions() {
   ]
 }
 
-type ToolFieldType = 'string' | 'boolean' | 'integer' | 'stringArray' | 'json'
+type ToolFieldType = 'string' | 'boolean' | 'integer' | 'stringArray' | 'stringOrStringArray' | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
-  wiki_search: { query: 'string', scope: 'string', limit: 'integer' },
+  wiki_search: { query: 'stringOrStringArray', scope: 'string', limit: 'integer' },
   skill: { name: 'string' },
   wiki: {
-    action: 'string', type: 'string', query: 'string', scope: 'string', limit: 'integer', depth: 'integer',
+    action: 'string', type: 'string', query: 'stringOrStringArray', scope: 'string', limit: 'integer', depth: 'integer',
     evidencePaths: 'stringArray', path: 'string', oldText: 'string', newText: 'string',
     replaceAll: 'boolean', category: 'string', description: 'string', reason: 'string', basis: 'string', apply: 'boolean',
   },
@@ -244,6 +251,8 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     if (!expected) throw new Error(`工具参数不支持: ${key}`)
     const invalid = expected === 'json'
       ? false
+      : expected === 'stringOrStringArray'
+        ? typeof item !== 'string' && (!Array.isArray(item) || item.some(value => typeof value !== 'string'))
       : expected === 'integer'
       ? !Number.isInteger(item)
       : expected === 'stringArray'

@@ -31,8 +31,18 @@ export type DirectToolExecutionEvent =
       call: DirectToolCall
       result: DirectToolResult
       status: DirectToolExecutionStatus
+      durationMs: number
     }
 
 export type DirectBeforeToolCall = (
   call: DirectToolCall,
 ) => Promise<'cancelled' | void> | 'cancelled' | void
+
+export type DirectToolNeedsApproval = (call: DirectToolCall) => boolean
+
+export interface DirectRunMetrics {
+  modelRequests: number
+  modelRequestDurationMs: number[]
+  toolRounds: number
+  totalDurationMs: number
+}

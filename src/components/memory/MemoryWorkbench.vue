@@ -24,7 +24,7 @@ import {
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
-import type { DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
+import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
 import {
   parseMediaPlans,
@@ -125,10 +125,11 @@ const pendingMemoryToolApproval = ref<{
 const memoryToolAlwaysAllowedConversations = new Set<string>()
 const contextNoticeShownConversations = new Set<string>()
 const referencingDocuments = new Set<string>()
-type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed' }
+type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed'; durationMs?: number }
 const runVisible = ref(false)
 const runElapsed = ref(0)
 const runSteps = ref<MemoryRunStep[]>([])
+const runMetrics = ref<DirectRunMetrics | null>(null)
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
 const viewportWidth = ref(window.innerWidth)
@@ -888,6 +889,9 @@ async function send() {
       onToolEvent: event => {
         if (isCurrentRun()) updateRunTool(event)
       },
+      onMetrics(metrics) {
+        if (isCurrentRun()) runMetrics.value = metrics
+      },
       onRetry(attempt, total) {
         if (!isCurrentRun()) return
         status.value = `通道超时，正在重连 ${attempt}/${total}`
@@ -1017,6 +1021,7 @@ function beginRunStatus() {
   runVisible.value = true
   runElapsed.value = 0
   runSteps.value = []
+  runMetrics.value = null
   const startedAt = Date.now()
   runTimer = setInterval(() => { runElapsed.value = Math.floor((Date.now() - startedAt) / 1000) }, 1000)
 }
@@ -1034,8 +1039,12 @@ function updateRunTool(event: DirectToolExecutionEvent) {
     return
   }
   const step = runSteps.value.find(item => item.id === event.call.id)
-  if (step) step.state = event.status === 'succeeded' ? 'done' : 'failed'
-  status.value = '正在等待模型继续处理'
+  if (step) {
+    step.state = event.status === 'succeeded' ? 'done' : 'failed'
+    step.durationMs = event.durationMs
+  }
+  const running = runSteps.value.find(item => item.state === 'running')
+  status.value = running ? `正在${running.label}` : '正在等待模型继续处理'
 }
 
 function memoryToolLabel(name: string): string {
@@ -1063,6 +1072,15 @@ function memoryToolLabel(name: string): string {
 function formatRunElapsed(seconds: number): string {
   const minutes = Math.floor(seconds / 60)
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+function formatToolDuration(durationMs: number): string {
+  return durationMs < 1000 ? `${durationMs} ms` : `${(durationMs / 1000).toFixed(1)} 秒`
+}
+
+function formatRunMetrics(metrics: DirectRunMetrics): string {
+  const modelDuration = metrics.modelRequestDurationMs.reduce((total, duration) => total + duration, 0)
+  return `模型 ${metrics.modelRequests} 次 / ${formatToolDuration(modelDuration)} · 工具 ${metrics.toolRounds} 轮 · 总计 ${formatToolDuration(metrics.totalDurationMs)}`
 }
 
 async function addReferencedFile(payload: unknown) {
@@ -2090,8 +2108,10 @@ function readDataUrl(file: File): Promise<string> {
             <div v-for="step in visibleRunSteps" :key="step.id" :class="step.state">
               <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
               <span>{{ step.label }}</span>
+              <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
             </div>
           </div>
+          <small v-if="runMetrics" class="memory-run-metrics">{{ formatRunMetrics(runMetrics) }}</small>
           <small v-if="error">{{ error }}</small>
         </div>
         <ToolApprovalStrip
@@ -2380,7 +2400,9 @@ function readDataUrl(file: File): Promise<string> {
 .memory-run-status .mso { font-size: 15px; }
 .memory-run-status .spinning { animation: memory-run-spin .9s linear infinite; }
 .memory-run-steps { display: grid; gap: 4px; margin: 7px 0 0 24px; }
-.memory-run-steps > div { display: grid; grid-template-columns: 17px minmax(0, 1fr); align-items: center; gap: 4px; color: var(--ink3); }
+.memory-run-steps > div { display: grid; grid-template-columns: 17px minmax(0, 1fr) auto; align-items: center; gap: 4px; color: var(--ink3); }
+.memory-run-steps em { font-style: normal; font-variant-numeric: tabular-nums; }
+.memory-run-metrics { color: var(--ink3); font-variant-numeric: tabular-nums; }
 .memory-run-steps > div.running { color: var(--ink1); }
 .memory-run-steps > div.failed, .memory-run-status.error, .memory-run-status.error strong { color: var(--danger); }
 .memory-run-status small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }

@@ -6,6 +6,7 @@ import type {
   DirectToolExecutionEvent,
   DirectToolExecutionStatus,
   DirectToolExecutor,
+  DirectToolNeedsApproval,
   DirectToolResult,
 } from './directTypes'
 
@@ -15,6 +16,7 @@ export async function buildToolResultMessages(
   options: {
     signal?: AbortSignal
     beforeToolCall?: DirectBeforeToolCall
+    toolNeedsApproval?: DirectToolNeedsApproval
     onToolEvent?: (event: DirectToolExecutionEvent) => void
     reasoning?: DirectReasoningReplay
   } = {},
@@ -35,10 +37,11 @@ export async function buildToolResultMessages(
   const messages: DirectApiMessage[] = [assistantMessage]
   const followupMessages: DirectApiMessage[] = []
 
-  for (const call of calls) {
+  const execute = async (call: DirectToolCall): Promise<{ message: DirectApiMessage; followups: DirectApiMessage[] }> => {
+    let startedAt: number | undefined
     options.onToolEvent?.({ type: 'tool_execution_start', call })
     if (options.signal?.aborted) {
-      emitEnd(options.onToolEvent, call, { content: '工具执行已取消。', status: 'cancelled' }, 'cancelled')
+      emitEnd(options.onToolEvent, call, { content: '工具执行已取消。', status: 'cancelled' }, 'cancelled', startedAt)
       throw new DOMException('Aborted', 'AbortError')
     }
 
@@ -50,24 +53,19 @@ export async function buildToolResultMessages(
         content: `Tool error: ${error instanceof Error ? error.message : String(error)}`,
         status: 'failed',
       } satisfies DirectToolResult
-      emitEnd(options.onToolEvent, call, result, 'failed')
-      messages.push({
-        role: 'tool',
-        tool_call_id: call.id,
-        content: `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`,
-      })
-      continue
+      emitEnd(options.onToolEvent, call, result, 'failed', startedAt)
+      return { message: toolMessage(call, result), followups: [] }
     }
     if (decision === 'cancelled') {
       const result = {
         content: '用户拒绝了本次工具操作，未执行。请换一种方法继续。',
         status: 'cancelled',
       } satisfies DirectToolResult
-      emitEnd(options.onToolEvent, call, result, 'cancelled')
-      messages.push({ role: 'tool', tool_call_id: call.id, content: result.content })
-      continue
+      emitEnd(options.onToolEvent, call, result, 'cancelled', startedAt)
+      return { message: toolMessage(call, result), followups: [] }
     }
 
+    startedAt = performance.now()
     let result: DirectToolResult
     let status: DirectToolExecutionStatus
     try {
@@ -91,18 +89,30 @@ export async function buildToolResultMessages(
       }
     }
 
-    emitEnd(options.onToolEvent, call, result, status)
+    emitEnd(options.onToolEvent, call, result, status, startedAt)
     if (status === 'cancelled' && options.signal?.aborted) {
       throw new DOMException('Aborted', 'AbortError')
     }
-    messages.push({
-      role: 'tool',
-      tool_call_id: call.id,
-      content: result.status === 'failed'
-        ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
-        : result.content,
-    })
-    if (result.followupMessages?.length) followupMessages.push(...result.followupMessages)
+    return { message: toolMessage(call, result), followups: result.followupMessages || [] }
+  }
+
+  for (let index = 0; index < calls.length;) {
+    const end = canRunInParallel(calls[index]!, options)
+      ? calls.findIndex((call, next) => next > index && !canRunInParallel(call, options))
+      : index + 1
+    const segmentEnd = end < 0 ? calls.length : end
+    const segment = calls.slice(index, segmentEnd)
+    const results = segment.length === 1
+      ? [await execute(segment[0]!)]
+      : (await Promise.allSettled(segment.map(execute))).map(result => {
+          if (result.status === 'rejected') throw result.reason
+          return result.value
+        })
+    for (const result of results) {
+      messages.push(result.message)
+      followupMessages.push(...result.followups)
+    }
+    index = segmentEnd
   }
 
   return [...messages, ...followupMessages]
@@ -113,6 +123,57 @@ function emitEnd(
   call: DirectToolCall,
   result: DirectToolResult,
   status: DirectToolExecutionStatus,
+  startedAt?: number,
 ) {
-  onToolEvent?.({ type: 'tool_execution_end', call, result, status })
+  onToolEvent?.({
+    type: 'tool_execution_end',
+    call,
+    result,
+    status,
+    durationMs: startedAt === undefined ? 0 : Math.max(0, Math.round(performance.now() - startedAt)),
+  })
+}
+
+function toolMessage(call: DirectToolCall, result: DirectToolResult): DirectApiMessage {
+  return {
+    role: 'tool',
+    tool_call_id: call.id,
+    content: result.status === 'failed'
+      ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
+      : result.content,
+  }
+}
+
+function isParallelRead(call: DirectToolCall): boolean {
+  const name = call.function.name
+  if (name === 'wiki_search') return true
+  if (name === 'wiki') {
+    try {
+      const action = String(JSON.parse(call.function.arguments || '{}').action || '')
+      return ['inspect', 'search', 'status', 'validate', 'audit', 'evidence'].includes(action)
+    } catch {
+      return false
+    }
+  }
+  if (!['read', 'glob', 'grep'].includes(name)) return false
+  try {
+    const path = JSON.parse(call.function.arguments || '{}').path
+    return typeof path !== 'string' || !/^(?:\/|[A-Za-z]:[\\/]|\\\\)/.test(path)
+  } catch {
+    return false
+  }
+}
+
+function canRunInParallel(
+  call: DirectToolCall,
+  options: { beforeToolCall?: DirectBeforeToolCall; toolNeedsApproval?: DirectToolNeedsApproval },
+): boolean {
+  if (!isParallelRead(call)) return false
+  if (!options.beforeToolCall) return true
+  if (!options.toolNeedsApproval) return false
+  try {
+    return !options.toolNeedsApproval(call)
+  } catch {
+    return false
+  }
 }

@@ -31,7 +31,7 @@ export type WikiAction =
 export interface WikiActionInput {
   action: WikiAction
   type?: WikiProjectType
-  query?: string
+  query?: string | string[]
   scope?: 'active' | 'all'
   limit?: number
   depth?: number
@@ -201,34 +201,50 @@ async function scaffold(workspace: WikiWorkspace, state: Snapshot, type: WikiPro
 async function searchWiki(workspace: WikiWorkspace, state: Snapshot, input: WikiActionInput): Promise<string> {
   const wiki = findWiki(state)
   if (!wiki) throw new Error('未找到 docs/wiki/ 或 wiki/')
-  const query = String(input.query || '').trim()
-  if (!query) throw new Error('Wiki 搜索关键词不能为空')
+  const queries = wikiQueries(input.query)
   const scope = input.scope === 'all' ? 'all' : 'active'
-  const results: Array<{ score: number; relative: string; matches: Array<[number, string]> }> = []
+  const results = queries.map(() => [] as Array<{ score: number; relative: string; matches: Array<[number, string]> }>)
   for (const path of wikiMarkdownFiles(state, wiki)) {
     const relative = relativeToWiki(wiki, path)
     const name = relative.split('/').at(-1)
     if (name === 'index.md' || name === 'log.md' || (scope === 'active' && relative.startsWith('归档/'))) continue
-    const matches: Array<[number, string]> = []
-    for (const [index, line] of (await workspace.read(path)).split(/\r?\n/).entries()) {
-      if (line.toLowerCase().includes(query.toLowerCase())) matches.push([index + 1, line.trim().slice(0, 120)])
-    }
-    if (matches.length) {
-      const titleBonus = String(name).toLowerCase().includes(query.toLowerCase()) ? 50 : 0
-      results.push({ score: pagePriority(relative) + titleBonus + matches.length, relative, matches })
+    const lines = (await workspace.read(path)).split(/\r?\n/)
+    for (const [queryIndex, query] of queries.entries()) {
+      const normalizedQuery = query.toLowerCase()
+      const matches: Array<[number, string]> = []
+      for (const [lineIndex, line] of lines.entries()) {
+        if (line.toLowerCase().includes(normalizedQuery)) matches.push([lineIndex + 1, line.trim().slice(0, 120)])
+      }
+      if (matches.length) {
+        const titleBonus = String(name).toLowerCase().includes(normalizedQuery) ? 50 : 0
+        results[queryIndex]!.push({ score: pagePriority(relative) + titleBonus + matches.length, relative, matches })
+      }
     }
   }
   const limit = Math.max(1, Math.min(Number(input.limit) || 20, 1000))
-  const lines = [`查询：${query}`, `范围：${scope === 'active' ? '现行知识（默认排除 归档/ 与 log.md）' : '全部知识（包含归档）'}`, '[证据候选]']
-  for (const result of results.sort((a, b) => b.score - a.score || a.relative.localeCompare(b.relative))) {
-    for (const [line, text] of result.matches.slice(0, 3)) {
+  return queries.map((query, queryIndex) => {
+    const lines = [`查询：${query}`, `范围：${scope === 'active' ? '现行知识（默认排除 归档/ 与 log.md）' : '全部知识（包含归档）'}`, '[证据候选]']
+    for (const result of results[queryIndex]!.sort((a, b) => b.score - a.score || a.relative.localeCompare(b.relative))) {
+      for (const [line, text] of result.matches.slice(0, 3)) {
+        if (lines.length - 3 >= limit) break
+        lines.push(`${result.relative}:${line}: ${text}`)
+      }
       if (lines.length - 3 >= limit) break
-      lines.push(`${result.relative}:${line}: ${text}`)
     }
-    if (lines.length - 3 >= limit) break
-  }
-  if (lines.length === 3) lines.push('未找到匹配内容。')
-  return lines.join('\n')
+    if (lines.length === 3) lines.push('未找到匹配内容。')
+    return lines.join('\n')
+  }).join('\n\n')
+}
+
+function wikiQueries(value: WikiActionInput['query']): string[] {
+  const queries = Array.isArray(value) ? value : [value]
+  if (queries.length < 1 || queries.length > 3) throw new Error('Wiki 搜索只接受 1-3 个关键词')
+  return queries.map(query => {
+    if (typeof query !== 'string') throw new Error('Wiki 搜索关键词必须是字符串')
+    const normalized = query.trim()
+    if (!normalized) throw new Error('Wiki 搜索关键词不能为空')
+    return normalized
+  })
 }
 
 async function status(workspace: WikiWorkspace, state: Snapshot): Promise<string> {
