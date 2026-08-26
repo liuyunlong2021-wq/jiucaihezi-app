@@ -98,6 +98,22 @@ export function appendConversationTurn(content: string, turn: ConversationTurn):
   return `${content.replace(/\s+$/, '')}\n\n${block}\n`
 }
 
+export function replaceConversationTurnAndTruncate(
+  content: string,
+  turnId: string,
+  replacement: ConversationTurn,
+  assistant: ConversationTurn,
+): string {
+  const transcript = parseConversationTranscript(CONVERSATION_DIRECTORY + '/edit.md', content)
+  if (!transcript) throw new Error('对话 Raw 缺少有效会话内容')
+  const index = transcript.turns.findIndex(turn => turn.id === turnId)
+  if (index < 0 || transcript.turns[index]?.role !== 'user') throw new Error('只能编辑用户消息')
+  if (replacement.role !== 'user' || assistant.role !== 'assistant') throw new Error('编辑轮次角色不正确')
+  let next = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt)
+  for (const turn of [...transcript.turns.slice(0, index), replacement, assistant]) next = appendConversationTurn(next, turn)
+  return next
+}
+
 export function mergeConversationTranscriptContents(path: string, remote: string, local: string): string | null {
   const remoteTranscript = parseConversationTranscript(path, remote)
   const localTranscript = parseConversationTranscript(path, local)

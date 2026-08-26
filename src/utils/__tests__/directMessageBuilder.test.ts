@@ -153,6 +153,44 @@ describe('buildDirectMessages', () => {
     assert.match(result.at(-1)?.content as string, new RegExp(tail))
   })
 
+  test('有可读路径的长文档只发送定位信息，不内联转换正文', () => {
+    const sentinel = '不应进入首次模型请求的附件正文'
+    const result = buildDirectMessages({
+      messages: [user('u1', '根据附件更新规则')],
+      attachments: [{
+        id: 'word', name: '长篇.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        size: 75_000, kind: 'file', value: '', textContent: sentinel.repeat(5_000),
+        readablePath: '.raw/jc-media/文档/长篇.docx.md',
+      }],
+      visionModel: true,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    const body = JSON.stringify(result)
+    assert.match(body, /长篇\.docx\.md/)
+    assert.doesNotMatch(body, new RegExp(sentinel))
+  })
+
+  test('短期历史只保留附件路径，不恢复附件正文', () => {
+    const sentinel = '历史附件正文不应恢复'
+    const result = buildDirectMessages({
+      messages: [
+        { ...user('u1', '检查附件'), attachments: [{ name: '规则.md', readablePath: '资料/规则.md', textContent: sentinel }] },
+        assistant('a1', '已检查'),
+        user('u2', '再核对一次'),
+      ],
+      historyLimit: null,
+      visionModel: false,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+
+    const body = JSON.stringify(result)
+    assert.match(body, /资料\/规则\.md/)
+    assert.doesNotMatch(body, new RegExp(sentinel))
+  })
+
   test('原生附件按 NewAPI 官方媒体类型构造内容 parts', () => {
     const result = buildDirectMessages({
       messages: [user('u1', '分析附件')],

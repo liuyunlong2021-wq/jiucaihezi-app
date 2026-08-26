@@ -1,8 +1,14 @@
 # 热缓存
 
-> 更新：2026-08-26 | 阶段：Wiki 任务执行提速已实施并通过自动门禁，待新构建三次真实模型前向验收
+> 更新：2026-08-26 | 阶段：原生 Wiki TDD 已写，待按顺序先实施 TDD 一
 
 ## 当前结论
+
+- **原生 Wiki 能力与五 Wiki Skill 退役已实施。** 查询、规划、填充、巡检、修正复用现有 `wikiRuntime`，不再加载五个 Wiki Skill；新记忆空间有短 `wiki/index.md` 入口，百万字创作通过入口、搜索和链接按需取回相关事实，不新增 RAG、向量库、摘要 Store 或“创作资料包”。五个 Skill 已从 App catalog 和发行树移除，用户安装副本与 legacy 备份保留。见 [[开发/通用记忆工作台原生Wiki能力与五Skill退役TDD-2026-08-26]]。
+
+- **口令激活无记忆任务运行时正在分段实施。** 产品仍只有一个统一对话入口，能力按当前口令激活；普通 Wiki/文件任务已有 `3` 次模型请求硬上限，Terminal/MCP 任务已有 `5` 次上限，记忆模式已启用滚动工作集，`write/edit` 成功后直接收尾，工具按口令最小挂载，Raw 支持本轮精确只读授权。真实模型验收仍待实施。见 [[开发/通用记忆工作台轻上下文任务运行时TDD-2026-08-26]]。
+
+- **附件“添加到规范范围”路由误判已修复。** 旧路由只识别“写入/更新/修改”等词，未把已附加文档的“添加/加入/合并/补充/沉淀”识别为写入意图，导致模型请求为 `工具 0 轮`。现在附件存在且出现这些写入动词时开放 `read/glob/grep/write/edit/mkdir`，单纯查看附件不开放写工具。路由回归测试已通过。
 
 - **Wiki 任务执行提速已实施，真实模型性能验收未完成。** 已实现一次 `1-3` 词 Wiki 扫描、项目内连续只读工具并行、写入/Terminal/MCP/项目外操作串行屏障、顺序回填、取消收口、真实 HTTP 请求计数和工具耗时显示；Cha Skill 同步改为一次提交初始短词与同轮读取。完整 Node focused `1129/1129`、Rust `402 passed / 1 ignored`、Cha Skill `7/7`、TypeScript、定向 lint 与差异检查通过。本地三词检索读取从 `363` 次降到 `121` 次，中位 `48.66 ms -> 24.27 ms`，约 `2.0x`；这不是模型端到端成绩。当前正式 App 仍为旧版 `2.1.33`，新构建上的三次 `gpt-5.6-sol` / `jiucaihezi` 前向仍待执行。见 [[开发/通用记忆工作台Wiki任务执行提速TDD-2026-08-26]]。
 
@@ -58,11 +64,7 @@
 - **thinking 模型工具续请求已修复 `reasoning_content` 丢失。** Git `d98b72bf` 在共享 direct runtime 内仅临时保留并回传上游 `reasoning_content`，不显示、不写入 Raw Markdown；普通工具循环和流中断续传均覆盖。direct runtime `39/39`、TypeScript 与差异检查通过；截图对应真实 NewAPI 模型的多轮工具调用仍待验收，见 [[排障/thinking模型工具调用reasoning_content中断-2026-08-11]]。
 
 - **新建记忆空间采用 Obsidian 兼容的最小 Wiki 骨架。** generic 只创建 `index.md`、`hot.md`、`log.md` 和 `来源索引.md`，不创建 README、CLAUDE、`方向.md`、业务目录或任何替代性的强制读取页；记忆请求也不自动注入 Wiki 页面。
-- **`jc-everything-wiki` 只做按需结构规划。** 它沿用现有 Wiki 根目录，读取目标与现状，只追问会改变目录设计的问题；先给最小方案，用户确认后创建并复查。`index.md` 只导航顶层分类，目录 `_index.md` 只导航直属子目录。
-- **`jc-raw-wiki` 已收缩为精准沉淀。** 它只把用户明确指定范围内的确认信息增量写入现有 Wiki 并登记来源；旧包已备份，项目类型模板、全 Raw 扫描和开发收尾脚本不再随 App 分发。关系图、标准 `.canvas` 和统计归 `jc-cha-wiki`，`.base` 等 App 支持后再做。
-- **`jc-cha-wiki` 已收缩为精准检索。** 它用少量短词多轮召回、读取命中原页并带来源回答；重复 Reference 与 Python 查询器已移出产品包。关系图只在显式请求时生成有种子范围的局部、可点击 `.canvas`，禁止全库铺图和静默覆盖现有布局；本阶段不建设 RAG 或 Bases。
-- **`jc-jian-wiki` 已收缩为精准只读巡检。** 机械检查复用原生 `wiki audit`，区分导航断链、同名歧义、普通未解析链接、孤儿候选和历史卫生；语义一致性只检查用户指定主题。旧个人创作规则、Reference、Python/Node 扫描器和目录数量启发式已移出产品包。
-- **`jc-xiu-wiki` 精准修正已实施。** 只修已有 Wiki 中答案唯一的单文件错误；`replace` 强制 Markdown 路径，默认单命中，多命中须显式 `replaceAll`，先预览后批准，写后重读验证；结构扩展归 Everything，新事实归 Raw，复检归 Jian。
+- **五类 Wiki 操作已内化。** 查询、规划、填充、巡检、修正统一复用原生 `wikiRuntime` 的入口、证据、预览、审批和写后复查；五个旧 Wiki Skill 不再随 App 分发。关系图仍只在显式请求时生成局部 `.canvas`，不建设 RAG 或 Bases。
 - **Raw、Cha、Jian 已共用一份证据合同。** 重要结论按“Wiki 章节 -> 来源角色 -> 原始来源 -> 已处理范围 -> 写入时 SHA-256 -> 记录时间”登记；Cha 回答时展示已登记来路，Jian 只读检查来源一致、变化、丢失、无法验证或登记不完整。来源变化只代表待复查，不自动判错或改写 Wiki。
 
 - **唯一产品边界：保留记忆工作台现在拥有的全部功能；记忆工作台现在没有的功能全部迁出。** OpenCode、旧 Studio、文/武/道/创、电商、漫剧、制作工作台均属迁出范围。共享代码只要仍被记忆工作台直接或间接依赖，就必须保留，不能按目录名删除。唯一实施合同见 [[开发/通用记忆工作台单产品化分离SDD]]。
@@ -75,7 +77,7 @@
 - **Seed Audio 1.0 已完成生产与创作面板验收。** 提交 `d1773603` 的独立适配器已部署；NewAPI 渠道 66 的文本、参考音频和创作面板画布音频均已真实返回有效 MP3。创作面板显示 `豆包音频生成1.0 · 1.2元/分钟`，最多支持 3 段参考音频；NewAPI 按 Token 计费配置为普通输入/补全/音频输入 `1`、音频输出 `1000`（美元/1M Token），前端 UI 不变。
 - **媒体任务启动竞态已按 TDD 修复。** `initDB()` 并发调用现在共用同一个 Promise，`mediaTaskStore.init()` 等待 SQLite 真正完成后才读取和恢复历史；不再在首次挂载抛出 `SQLite storage is not ready`，也不增加定时重试或第二套任务状态。
 - **项目文件树以流畅性优先。** 不再为图片、视频或音频生成缩略图、读取媒体或保留 Blob URL；统一显示类型图标并保留点击预览。后续生成媒体以“任务摘要、清理后提示词、模型名、任务 ID”顺序命名，旧文件不改名。
-- **App 只随包提供 7 个产品 Skill：** `jc-cha-wiki`、`jc-everything-wiki`、`jc-jian-wiki`、`jc-new-user-guide`、`jc-raw-wiki`、`jc-xiu-wiki`、`skill-creator`。20 个个人写作、视觉、旁白 Skill 已迁入 `/Users/by3/Documents/jiucaihezi-personal-skills`，不再进入 App 索引、推荐指令或新手指南；用户自行安装的 Skill 不受影响。
+- **App 只随包提供 2 个产品 Skill：** `jc-new-user-guide` 和 `skill-creator`。20 个个人写作、视觉、旁白 Skill 已迁入 `/Users/by3/Documents/jiucaihezi-personal-skills`，用户自行安装的 Skill 不受影响。
 - **Jina 网页工具已迁出产品。** App 不再提供 `@联网搜索`、`web_search` 或 `read_url`，也不再携带 `jina-adapter`；原实现完整备份于 `/Users/by3/Documents/jiucaihezi-jina-backup`。Desktop 仍可在用户批准后通过 Terminal 使用本机网络；Web 与 Mobile 不提供替代网页工具。生产服务器上的旧容器和 NewAPI 渠道尚未核验或下线，但新 App 已无调用入口。
 - **Desktop 增加官方 Playwright MCP。** 设置里的内置卡片使用固定版本 `@playwright/mcp@0.0.79`，复用现有 stdio MCP 和统一工具桥接；App 不打包 Node、Playwright 或 Chromium。缺少 Node 时提供官方下载和重新连接，Windows 额外识别并正确启动 `npx.cmd`。该扩展拥有浏览、页面操作、上传下载和脚本执行等高权限，只有用户主动连接后才启用；Web 与 Mobile 不支持本地 stdio。
 - **Tauri 自定义命令权限已闭环。** 开发地址使用 `http://localhost:1420/*`，`allow-app-commands` 与 Rust `generate_handler!` 全量一致；Playwright MCP 与现有文件、Skill、密钥等命令不会再因局部 ACL 出现“点击无反应”。
@@ -108,6 +110,6 @@
 
 ## 下一步
 
-- 用包含本轮代码的新构建和脱敏固定项目，按 [[开发/通用记忆工作台Wiki任务执行提速TDD-2026-08-26#11. 真实模型前向验收]] 连续执行三次 `gpt-5.6-sol` / `jiucaihezi` 前向；完成前不登记为真实模型性能验收通过。
+- 先按 [[开发/通用记忆工作台原生Wiki能力与五Skill退役TDD-2026-08-26#9. 最小实施顺序]] 完成 TDD 一的入口、原生命令、行为等价与退役门禁；再实施 [[开发/通用记忆工作台轻上下文任务运行时TDD-2026-08-26]]，最后执行固定真实模型矩阵。完成前不登记为已实施或真实模型性能验收通过。
 - 按 [[开发/通用记忆工作台RawChaJian证据链与可信检索TDD]] 执行五类独立模型前向验收；只有真实关键词检索持续漏召回时，才另写 TDD 评估全文检索或 BM25。提交、推送和发布须另行明确授权。
 - 任何 3D 或媒体性能改造另写独立 TDD；先测真实空闲 CPU/GPU 和旧设备表现，再只优化非活动资源，不复用已撤销的迁出计划。

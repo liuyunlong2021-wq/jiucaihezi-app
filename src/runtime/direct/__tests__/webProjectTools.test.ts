@@ -79,6 +79,20 @@ test('web project tool definitions exclude Desktop-only 3D and custom MCP tools'
   )
 })
 
+test('web project tools hide Raw conversations from model file operations', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('隔离对话')
+  await files.createFolder(project.id, '.raw/对话记录')
+  await files.write(project.id, '.raw/对话记录/旧任务.md', '旧对话秘密')
+  await files.write(project.id, 'wiki/公开.md', '公开事实')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+
+  await assert.rejects(() => execute(call('read', { path: '.raw/对话记录/旧任务.md' })), /对话记录/)
+  assert.doesNotMatch((await execute(call('read', { path: '.raw' }))).content, /对话记录/)
+  assert.doesNotMatch((await execute(call('glob', { pattern: '**/*.md' }))).content, /旧任务/)
+  assert.doesNotMatch((await execute(call('grep', { pattern: '旧对话秘密' }))).content, /旧任务/)
+})
+
 test('web memory artifact tools generate real project files and keep same-name outputs', async () => {
   const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
   const project = await files.createProject('作品工具')

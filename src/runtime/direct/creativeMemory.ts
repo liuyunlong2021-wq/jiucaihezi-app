@@ -7,8 +7,12 @@ export interface CreativeContextMessage {
   content: unknown
   files?: Array<{ name: string; content: string }>
   images?: string[]
+  attachments?: Array<{ name: string; readablePath?: string; textContent?: string }>
   finishReason?: string
 }
+
+const MAX_HISTORY_ROUNDS = 3
+const MAX_HISTORY_TOKENS = 12_000
 
 const FAILED_ASSISTANT_FINISH_REASONS = new Set([
   'network_error',
@@ -24,6 +28,15 @@ function estimateTokens(value: unknown): number {
   if (typeof value === 'string') return estimateTokenCount(value)
   if (value == null) return 0
   return estimateTokenCount(JSON.stringify(value))
+}
+
+function estimateMessageTokens(message: CreativeContextMessage): number {
+  return estimateTokens({
+    content: message.content,
+    files: message.files,
+    images: message.images,
+    attachments: message.attachments,
+  })
 }
 
 /**
@@ -45,7 +58,7 @@ export function buildCreativeContext(input: {
       if (history.at(-1)?.role === 'user') history.pop()
       continue
     }
-    if (estimateTokens(message.content) > 0) history.push(message)
+    if (estimateMessageTokens(message) > 0) history.push(message)
   }
   if (!history.length) return { messages: [], estimatedTokens: 0, omittedMessages: 0 }
 
@@ -53,19 +66,24 @@ export function buildCreativeContext(input: {
   let used = 0
   let index = history.length - 1
   const latest = history[index]
-  const latestTokens = estimateTokens(latest.content)
+  const latestTokens = estimateMessageTokens(latest)
   selected.unshift(latest)
   used += latestTokens
   index -= 1
 
-  while (index >= 1) {
+  const historyBudget = Math.min(MAX_HISTORY_TOKENS, Math.max(0, budget - latestTokens))
+  let historyTokens = 0
+  let historyRounds = 0
+  while (index >= 1 && historyRounds < MAX_HISTORY_ROUNDS) {
     const assistant = history[index]
     const user = history[index - 1]
     if (assistant.role !== 'assistant' || user.role !== 'user') break
-    const pairTokens = estimateTokens(user.content) + estimateTokens(assistant.content)
-    if (used + pairTokens > budget) break
+    const pairTokens = estimateMessageTokens(user) + estimateMessageTokens(assistant)
+    if (historyTokens + pairTokens > historyBudget) break
     selected.unshift(user, assistant)
     used += pairTokens
+    historyTokens += pairTokens
+    historyRounds += 1
     index -= 2
   }
 

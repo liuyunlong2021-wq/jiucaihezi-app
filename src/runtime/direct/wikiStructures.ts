@@ -118,7 +118,7 @@ export const WIKI_STRUCTURES: Record<WikiProjectType, WikiStructure> = {
 }
 
 export const WIKI_TEMPLATES = {
-  index: '# 全库目录\n\n',
+  index: '# 项目入口\n\n## 怎么使用\n\n- 查询当前状态：先读 [[hot]]。\n- 执行具体任务：按下方导航读取相关规则与资料；只追踪会改变答案的链接。\n\n## 导航\n\n- [[来源索引]]\n',
   direction: '# 知识库说明\n\n- 来源：用户指定内容\n- 范围：待补充\n',
   log: '# Wiki Log\n\n',
   hot: '# 热缓存\n\n> 当前最需要优先读取的结论与入口。\n',

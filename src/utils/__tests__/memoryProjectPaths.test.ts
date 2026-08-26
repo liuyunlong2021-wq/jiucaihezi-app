@@ -2,12 +2,25 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  isMemoryConversationPath,
   isMemoryMediaFilePath,
   isMemoryProjectHiddenPath,
   isMemoryProjectMutationBlocked,
   MEMORY_PROJECT_SKELETON_DIRECTORIES,
   memoryMediaDirectoryFor,
 } from '../memoryProjectPaths'
+
+test('memory conversation paths match relative, absolute, and Windows paths only', () => {
+  for (const path of [
+    '.raw/对话记录/a.md',
+    '/Users/test/project/.raw/对话记录/a.md',
+    'C:\\Users\\test\\project\\.raw\\对话记录\\a.md',
+  ]) assert.equal(isMemoryConversationPath(path), true, path)
+
+  for (const path of ['.raw/jc-media/文档/a.md', '.raw/对话记录副本/a.md']) {
+    assert.equal(isMemoryConversationPath(path), false, path)
+  }
+})
 
 test('memory project paths keep one protected skeleton and four media categories', () => {
   assert.deepEqual(MEMORY_PROJECT_SKELETON_DIRECTORIES, [

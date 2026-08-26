@@ -89,7 +89,7 @@ test('scaffold keeps the film structure distinct from novel-only categories', as
   assert.equal(entries.has('wiki/世界/设定/历史与时代.md'), false)
 })
 
-test('generic scaffold creates only the app lifecycle files without a mandatory-read note', async () => {
+test('generic scaffold creates a concise mandatory-read entry without speculative pages', async () => {
   const { entries, workspace } = memoryWiki()
 
   await executeWikiAction(workspace, { action: 'scaffold', type: 'generic' })
@@ -102,6 +102,10 @@ test('generic scaffold creates only the app lifecycle files without a mandatory-
   assert.match(String(entries.get('wiki/来源索引.md')), /## 证据记录/)
   assert.match(String(entries.get('wiki/来源索引.md')), /\| Wiki 位置 \| 来源角色 \| 原始来源 \| 已处理范围 \| 写入时指纹 \| 记录时间 \|/)
   assert.doesNotMatch(String(entries.get('wiki/来源索引.md')), /待补充|conversation-id/)
+  assert.match(String(entries.get('wiki/index.md')), /# 项目入口/)
+  assert.match(String(entries.get('wiki/index.md')), /查询当前状态：先读 \[\[hot\]\]/)
+  assert.match(String(entries.get('wiki/index.md')), /\[\[来源索引\]\]/)
+  assert.ok(new TextEncoder().encode(String(entries.get('wiki/index.md'))).byteLength <= 4096)
 })
 
 test('evidence returns full content fingerprints without echoing content or writing files', async () => {

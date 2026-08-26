@@ -740,6 +740,132 @@ test('runDirectChatCompletion stops a runaway tool loop', async () => {
   }), /工具调用超过 2 轮/)
 })
 
+test('runDirectChatCompletion enforces a hard model request limit', async () => {
+  let requests = 0
+  await assert.rejects(() => runDirectChatCompletion({
+    messages: [{ role: 'user', content: '有限循环' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    maxToolRounds: 10,
+    maxModelRequests: 3,
+    allowedToolNamesAtModelRequestLimit: ['read'],
+    onText: () => {},
+    executeTool: async () => ({ content: 'ok' }),
+    sendChatCompletion: async () => {
+      requests += 1
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_read_${requests}`, function: { name: 'read', arguments: '{"path":"a"}' } }] } }] }),
+        '[DONE]',
+      ])
+    },
+  }), /模型请求超过 3 次/)
+  assert.equal(requests, 3)
+})
+
+test('runDirectChatCompletion stops after a successful terminal tool', async () => {
+  let requests = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写入' }],
+    tools: [{ type: 'function', function: { name: 'write' } }],
+    stopAfterSuccessfulToolNames: ['write'],
+    onText: () => {},
+    executeTool: async () => ({ content: '已写入 wiki/结果.md', status: 'succeeded' }),
+    sendChatCompletion: async () => {
+      requests += 1
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/结果.md","content":"ok"}' } }] } }] }),
+        '[DONE]',
+      ])
+    },
+  })
+  assert.equal(requests, 1)
+  assert.equal(result.text, '已写入 wiki/结果.md')
+})
+
+test('runDirectChatCompletion rejects non-write tools at the request limit', async () => {
+  await assert.rejects(() => runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    maxModelRequests: 1,
+    allowedToolNamesAtModelRequestLimit: ['write', 'edit'],
+    onText: () => {},
+    executeTool: async () => ({ content: 'unexpected' }),
+    sendChatCompletion: async () => sseResponse([
+      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"a"}' } }] } }] }),
+      '[DONE]',
+    ]),
+}), /只允许最终回答或指定写入工具/)
+})
+
+test('runDirectChatCompletion finalizes a read-only MCP task after the tool budget', async () => {
+  let requests = 0
+  const requestTools: unknown[] = []
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '查找开源项目' }],
+    tools: [{ type: 'function', function: { name: 'mcp__github__search' } }],
+    maxModelRequests: 2,
+    maxToolRounds: 2,
+    finalizeAtModelRequestLimit: true,
+    onText: () => {},
+    executeTool: async () => ({ content: '项目结果' }),
+    sendChatCompletion: async request => {
+      requests += 1
+      requestTools.push(request.tools)
+      if (requests < 3) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${requests}`, function: { name: 'mcp__github__search', arguments: '{}' } }] } }] }),
+          '[DONE]',
+        ])
+      }
+      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '已找到项目' } }] }), '[DONE]'])
+    },
+  })
+
+  assert.equal(result.text, '已找到项目')
+  assert.equal(requests, 3)
+  assert.equal(requestTools[2], undefined)
+})
+
+test('runDirectChatCompletion compacts prior tool rounds when enabled', async () => {
+  const requests: any[][] = []
+  let round = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'system', content: '合同' }, { role: 'user', content: '任务' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    maxModelRequests: 3,
+    compactToolHistory: true,
+    onText: () => {},
+    executeTool: async call => ({ content: `结果 ${call.function.arguments}` }),
+    sendChatCompletion: async request => {
+      requests.push(request.messages)
+      round += 1
+      if (round < 3) return sseResponse([
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${round}`, function: { name: 'read', arguments: `{\"path\":\"${round}\"}` } }] } }] }),
+        '[DONE]',
+      ])
+      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]'])
+    },
+  })
+  assert.equal(result.text, '完成')
+  assert.equal(requests.length, 3)
+  assert.equal(requests[2].filter(message => message.role === 'tool').length, 1)
+  assert.equal(JSON.stringify(requests[2]).includes('"path":"1"'), false)
+})
+
+test('runDirectChatCompletion does not spend logical request budget on HTTP retry callbacks', async () => {
+  let calls = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '重试后回答' }],
+    maxModelRequests: 1,
+    onText: () => {},
+    sendChatCompletion: async () => {
+      calls += 1
+      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]'])
+    },
+  })
+  assert.equal(result.text, '完成')
+  assert.equal(calls, 1)
+})
+
 test('runDirectChatCompletion stops remaining tools when the run is aborted', async () => {
   const controller = new AbortController()
   const executed: string[] = []

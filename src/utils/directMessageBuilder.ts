@@ -1,6 +1,7 @@
 import { normalizeNewApiAttachment } from '@/runtime/direct/newApiAttachments'
 
 export interface DirectMessageFile { name: string; content: string }
+type DirectAttachmentLocator = { name: string; readablePath?: string; textContent?: string }
 export type DirectAttachmentKind = 'image' | 'video' | 'audio' | 'file'
 export interface ResolvedDirectAttachment {
   id: string
@@ -25,7 +26,7 @@ type DirectAttachmentPart = DirectImagePart | DirectVideoPart | DirectAudioPart 
 export type DirectApiMessageContent = string | Array<DirectTextPart | DirectAttachmentPart>
 export interface DirectApiMessage { role: 'system' | 'user' | 'assistant'; content: DirectApiMessageContent }
 export interface BuildDirectMessagesInput {
-  messages: Array<{ id: string; role: string; content: unknown; files?: Array<{ name: string; content: string }>; images?: string[] }>
+  messages: Array<{ id: string; role: string; content: unknown; files?: Array<{ name: string; content: string }>; images?: string[]; attachments?: DirectAttachmentLocator[] }>
   systemPrompt?: string; skillSystemPrompt?: string; images?: string[]; files?: DirectMessageFile[]
   attachments?: ResolvedDirectAttachment[]
   /** Undefined preserves the legacy 24-message fallback; null means the caller already applied a capacity policy. */
@@ -51,7 +52,7 @@ function buildSystemPrompt(args: BuildDirectMessagesInput): string {
 function buildHistoryMessageText(msg: BuildDirectMessagesInput['messages'][0]): string | null {
   if (msg.role === 'system') return null
   let text = chatContentToText(msg.content)
-  if (msg.role === 'user') text = appendFiles(text, msg.files)
+  if (msg.role === 'user') text = appendFiles(text, [...(msg.files || []), ...attachmentTextFiles(msg.attachments)])
   return text || null
 }
 function dataUrlPayload(value: string): string {
@@ -84,8 +85,12 @@ function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: stri
   }
   return parts
 }
-function attachmentTextFiles(attachments?: ResolvedDirectAttachment[]): DirectMessageFile[] {
+function attachmentTextFiles(attachments?: DirectAttachmentLocator[]): DirectMessageFile[] {
   return (attachments || []).flatMap(attachment => {
+    const readablePath = String(attachment.readablePath || '').trim()
+    if (readablePath) {
+      return [{ name: attachment.name, content: `项目可读路径: ${readablePath}\n请使用 read/grep 按需读取；需要全文时分页读取到 eof=true。` }]
+    }
     const content = String(attachment.textContent || '').trim()
     return content ? [{ name: attachment.name, content }] : []
   })

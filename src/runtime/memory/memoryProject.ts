@@ -16,6 +16,7 @@ import {
   appendConversationTurn,
   createConversationTranscript,
   parseConversationTranscript,
+  replaceConversationTurnAndTruncate,
   remapConversationAttachmentPaths,
   renameConversationTranscript,
   type ConversationTranscript,
@@ -122,6 +123,23 @@ export async function appendMemoryRound(
     if (transcript?.turns.some(turn => turn.id === userTurn.id)) return current
     const complete = appendConversationTurn(appendConversationTurn(current, userTurn), assistantTurn)
     return title ? renameConversationTranscript(complete, title) : complete
+  })
+}
+
+export async function replaceMemoryRound(
+  resource: ProjectResource,
+  targetTurnId: string,
+  userTurn: ConversationTurn,
+  assistantContent: string,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+  title?: string,
+): Promise<MemoryConversation> {
+  const assistantTurn: ConversationTurn = {
+    id: uniqueId('turn'), role: 'assistant', content: String(assistantContent || '').trim(), createdAt: new Date().toISOString(),
+  }
+  return mutateConversation(resource, files, current => {
+    const next = replaceConversationTurnAndTruncate(current, targetTurnId, userTurn, assistantTurn)
+    return title ? renameConversationTranscript(next, title) : next
   })
 }
 

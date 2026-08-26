@@ -133,27 +133,16 @@ test('current product instructions and packaged Wiki templates use the memory co
     ['README.md', /OpenCode 项目协作|100% 复刻官方 OpenCode/],
     ['AGENTS.md', /OpenCode 有的照抄/],
     ['docs/jiucaihezi-app.code-workspace', /MYnewapi|my-opencode/],
-    ['public/skills/jc-everything-wiki/SKILL.md', /Studio 创模式|Studio 文\/武模式|OpenCode|ses_<会话ID>/],
-    ['public/skills/jc-raw-wiki/SKILL.md', /Studio 创模式|Studio 文\/武模式|OpenCode|ses_<会话ID>/],
     ['docs/wiki/开发/通用记忆工作台单产品化分离SDD.md', /`src\/components\/editor\/` \| `editorSessionStore\.ts` 当前/],
     ['docs/wiki/开发/文件系统/索引.md', /src\/components\/editor\/(?:editorSessionStore\.ts|EditorPanel\.vue)/],
   ].filter(([path, pattern]) => pattern.test(source(path))).map(([path]) => path)
 
   assert.deepEqual(blockers, [])
-  assert.equal(existsSync('public/skills/jc-everything-wiki/scripts'), false)
-  assert.equal(existsSync('public/skills/jc-everything-wiki/references'), false)
-  assert.equal(existsSync('public/skills/jc-raw-wiki/scripts'), false)
-  assert.equal(existsSync('public/skills/jc-raw-wiki/references'), false)
 })
 
-test('App bundles only the seven product Skills', () => {
+test('App bundles only the remaining product Skills', () => {
   const expected = [
-    'jc-cha-wiki',
-    'jc-everything-wiki',
-    'jc-jian-wiki',
     'jc-new-user-guide',
-    'jc-raw-wiki',
-    'jc-xiu-wiki',
     'skill-creator',
   ]
   const directories = readdirSync('public/skills', { withFileTypes: true })

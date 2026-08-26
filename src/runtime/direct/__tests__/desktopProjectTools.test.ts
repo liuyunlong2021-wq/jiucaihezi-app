@@ -19,12 +19,16 @@ function fixtureInvoke(command: string, payload: any): Promise<any> {
     return Promise.resolve([
       { path: 'wiki', isDir: true },
       { path: 'wiki/hot.md', isDir: false, size: 14 },
+      { path: '.raw', isDir: true },
+      { path: '.raw/对话记录', isDir: true },
+      { path: '.raw/对话记录/旧任务.md', isDir: false, size: 12 },
       { path: 'media/ref.png', isDir: false, size: 3 },
       { path: 'media/clip.mp4', isDir: false, size: 5 },
     ])
   }
   if (command === 'dev_read_file') {
     if (path === 'wiki/hot.md') return Promise.resolve({ path, content: '# 热缓存\n林风', base64: 'IyDng63nvpHlrZgK5p6X6aOO', size: 14, truncated: false })
+    if (path === '.raw/对话记录/旧任务.md') return Promise.resolve({ path, content: '旧对话秘密', base64: '', size: 12, truncated: false })
     if (path === 'media/ref.png') return Promise.resolve({ path, content: '', base64: 'aW1n', size: 3, truncated: false })
     if (path === 'media/clip.mp4') return Promise.resolve({ path, content: '', base64: 'dmlkZW8=', size: 5, truncated: false })
     throw new Error(`file not found: ${path}`)
@@ -296,6 +300,15 @@ test('desktop project tools use relative Tauri IPC with Web-compatible output', 
   assert.match((await execute(call('delete', { path: '资料/会议/纪要.md' }))).content, /废纸篓/)
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
   await assert.rejects(() => execute(call('read', { path: 'missing.md' })), /file not found/)
+})
+
+test('desktop project tools hide Raw conversations from model file operations', async () => {
+  const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
+
+  await assert.rejects(() => execute(call('read', { path: '.raw/对话记录/旧任务.md' })), /对话记录/)
+  assert.doesNotMatch((await execute(call('read', { path: '.raw' }))).content, /对话记录/)
+  assert.doesNotMatch((await execute(call('glob', { pattern: '**/*.md' }))).content, /旧任务/)
+  assert.doesNotMatch((await execute(call('grep', { pattern: '旧对话秘密' }))).content, /旧任务/)
 })
 
 test('desktop project tools return MCP bridge connection errors to the model', async () => {

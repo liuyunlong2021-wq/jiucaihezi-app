@@ -20,6 +20,7 @@ import {
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
 import { applyScene3DEdits, createScene3DDocument, parseScene3DDocument, scene3DResultMarker, serializeScene3DDocument, type Scene3DDocument } from '@/runtime/memory/scene3d'
+import { isAuthorizedMemoryConversationPath, isMemoryConversationPath } from '@/utils/memoryProjectPaths'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
 type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
@@ -103,6 +104,7 @@ function joinToolPath(prefix: string, pattern: string): string {
 
 export function createDesktopProjectToolExecutor(input: {
   projectDir: string
+  authorizedRawPaths?: string[]
   invoke?: Invoke
   fetcher?: typeof fetch
   loadSkill?: LocalSkillLoader
@@ -127,7 +129,8 @@ export function createDesktopProjectToolExecutor(input: {
   }
 
   async function listFiles(): Promise<DesktopFileEntry[]> {
-    return await invoke('dev_list_files', { root: requireProject(), maxEntries: 1000 })
+    return (await invoke('dev_list_files', { root: requireProject(), maxEntries: 1000 }))
+      .filter((entry: DesktopFileEntry) => !isMemoryConversationPath(entry.path))
   }
 
   async function readFile(path: string): Promise<DesktopReadFile> {
@@ -241,6 +244,7 @@ export function createDesktopProjectToolExecutor(input: {
         throw new Error(`Skill 资源路径不匹配。请使用加载结果中的完整路径。可读取：${resources.join(', ') || '无'}`)
       }
       if (isAbsolutePath(rawPath)) {
+        if (isMemoryConversationPath(rawPath) && !isAuthorizedMemoryConversationPath(rawPath, input.authorizedRawPaths)) throw new Error('模型不能读取 Raw 对话记录')
         const entries = await listExternalFiles(rawPath)
         const matching = entries.find(entry => entry.path === rawPath)
         if (entries.length === 1 && !entries[0]!.isDir) {
@@ -256,6 +260,7 @@ export function createDesktopProjectToolExecutor(input: {
         return renderReadFile(rawPath, await readExternalFile(rawPath), args)
       }
       const path = normalizeCreativeProjectPath(rawPath, true)
+      if (isMemoryConversationPath(path) && !isAuthorizedMemoryConversationPath(path, input.authorizedRawPaths)) throw new Error('模型不能读取 Raw 对话记录')
       const entries = await listFiles()
       const matching = entries.find(entry => entry.path === path)
       if (!path || matching?.isDir) {
@@ -271,8 +276,10 @@ export function createDesktopProjectToolExecutor(input: {
       const rawPrefix = String(args.path || '')
       const isExternal = isAbsolutePath(rawPrefix)
       const prefix = isExternal ? rawPrefix : normalizeCreativeProjectPath(rawPrefix, true)
+      if (isMemoryConversationPath(prefix)) throw new Error('模型不能搜索 Raw 对话记录')
       const pattern = joinToolPath(prefix, String(args.pattern))
-      const entries = await (isExternal ? listExternalFiles(prefix) : listFiles())
+      const entries = (await (isExternal ? listExternalFiles(prefix) : listFiles()))
+        .filter(entry => !isMemoryConversationPath(entry.path))
       const result = isExternal
         ? (() => {
             const rootPath = entries.find(entry => entry.isDir)?.path || prefix
@@ -289,10 +296,12 @@ export function createDesktopProjectToolExecutor(input: {
       const rawPrefix = String(args.path || '')
       const isExternal = isAbsolutePath(rawPrefix)
       const prefix = isExternal ? rawPrefix : normalizeCreativeProjectPath(rawPrefix, true)
+      if (isMemoryConversationPath(prefix)) throw new Error('模型不能搜索 Raw 对话记录')
       const include = String(args.include || '').replace(/^\*+/, '')
       const limit = boundedInteger(args.limit, 1000)
       const matches: Array<{ path: string; line: number; text: string }> = []
-      const entries = await (isExternal ? listExternalFiles(prefix) : listFiles())
+      const entries = (await (isExternal ? listExternalFiles(prefix) : listFiles()))
+        .filter(entry => !isMemoryConversationPath(entry.path))
       const externalRoot = isExternal ? entries.find(entry => entry.isDir)?.path || prefix : ''
       for (const entry of entries) {
         const inPrefix = isExternal

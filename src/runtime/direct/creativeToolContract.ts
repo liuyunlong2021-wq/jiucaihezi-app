@@ -37,7 +37,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool('skill', 'Load a specialized Skill from the available skills list.', {
     name: { type: 'string', description: 'Exact Skill name from the available skills list' },
   }, ['name']),
-  tool('wiki', 'Run deterministic project Wiki operations without Python or Node. Use Wiki Skills for judgment and this tool for inspection, structure, search, validation, audit, closeout preview, and confirmed mechanical repairs.', {
+  tool('wiki', 'Run native deterministic project Wiki operations without Python, Node, or Wiki Skill loading. Use the current Wiki entry and the command contract for inspection, structure, search, validation, audit, closeout preview, and confirmed mechanical repairs.', {
     action: { type: 'string', enum: ['inspect', 'scaffold', 'search', 'status', 'graph', 'validate', 'audit', 'evidence', 'closeout', 'replace', 'extend'] },
     type: { type: 'string', enum: ['dev_project', 'novel', 'manju', 'short_story', 'film', 'tv_series', 'advertisement', 'generic'] },
     query: wikiQueryProperty,

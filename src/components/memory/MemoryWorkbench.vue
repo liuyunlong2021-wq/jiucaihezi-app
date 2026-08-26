@@ -21,6 +21,7 @@ import {
   initializeMemoryProject,
   inspectMemoryProject,
   renameMemoryConversation,
+  replaceMemoryRound,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
 import { runMemoryChat } from '@/runtime/memory/memoryChat'
@@ -101,6 +102,9 @@ const conversationPickerOpen = ref(false)
 const conversationSearch = ref('')
 const conversationPickerRef = ref<HTMLElement | null>(null)
 const input = ref('')
+const editingTurnId = ref('')
+const commandMenuOpen = ref(false)
+const commandMenuRef = ref<HTMLElement | null>(null)
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
@@ -325,7 +329,12 @@ const {
   filterKeys: ['display', 'description'],
   noInitialSelection: true,
 })
-const conversationTurns = computed(() => conversation.value?.transcript.turns || [])
+const conversationTurns = computed(() => {
+  const turns = conversation.value?.transcript.turns || []
+  if (!editingTurnId.value) return turns
+  const index = turns.findIndex(turn => turn.id === editingTurnId.value)
+  return index >= 0 ? turns.slice(0, index) : turns
+})
 const timelineTurns = computed<ConversationTurn[]>(() => {
   const turns = pendingUserTurn.value ? [...conversationTurns.value, pendingUserTurn.value] : conversationTurns.value
   if (!sending.value || !streamingText.value) return turns
@@ -356,6 +365,26 @@ const modelGroups = computed(() => {
 })
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
 const visibleRunSteps = computed(() => runSteps.value.slice(-5))
+const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
+const commonCommands = [
+  { id: 'wiki-search', label: '查询 Wiki', icon: 'search', prompt: '查询 Wiki 中与【主题】有关的内容，先读取入口，再根据目录和链接查找相关页面。' },
+  { id: 'wiki-write', label: '写入 Wiki', icon: 'save', prompt: '请将【内容】整理后写入 Wiki 的【目标文件或文件夹】。先读取入口和目标文件，确认结构后再写入，避免重复和冲突。' },
+  { id: 'wiki-create', label: '根据 Wiki 创作', icon: 'auto_stories', prompt: '请先读取 Wiki 中与【项目、角色、场景或大纲】有关的资料，再继续创作【内容】。遵守 Wiki 中已有的设定、格式和时间线。' },
+  { id: 'read-file', label: '读取文件', icon: 'description', prompt: '读取【文件路径】并总结重点。' },
+  { id: 'edit-file', label: '修改文件', icon: 'edit', prompt: '读取【文件路径】，将【修改要求】合并进去，保留原有结构。' },
+  { id: 'create-file', label: '创建文件', icon: 'note-add', prompt: '根据【要求】创建文件，保存到【目标文件夹】。' },
+  { id: 'asset-prompt', label: '生成资产', icon: 'palette', prompt: '根据 Wiki 和当前项目设定，生成【角色、场景、道具、视频或音频】提示词。' },
+  { id: 'wiki-continuity', label: '续写小说/剧本', icon: 'auto_stories', prompt: '根据 wiki/index.md 创作下一集【内容】。遵守入口指向的规范、状态、大纲和相关资料；按需读取，不要读取整部小说。' },
+  { id: 'wiki-setup', label: '配置 Wiki 创作入口', icon: 'account-tree', prompt: '请配置并更新 wiki/index.md：为创作任务增加明确路由，指向创作规范、当前进度、剧情总纲、当前分卷或分集大纲、上一章或上一集结尾，以及相关角色、场景、道具和伏笔页面。不存在的页面跳过；相关页面按需读取；不要读取整部小说。先预览，确认后执行。' },
+  { id: 'folder', label: '查看文件夹', icon: 'folder-open', prompt: '查看【文件夹路径】中的文件和目录。' },
+  { id: 'wiki-audit', label: '检查 Wiki', icon: 'checklist', prompt: '检查 Wiki 的入口、目录、页面链接和重复内容，先给出问题清单，不要直接修改。' },
+  { id: 'document', label: '创建文档', icon: 'article', prompt: '根据【要求】创建【Word、Markdown、文本或 HTML】文档，保存到【目标文件夹】。' },
+  { id: 'scene-3d', label: '创建 3D 场景', icon: 'view-in-ar', prompt: '根据【空间、人物和镜头要求】创建一个可编辑的 3D 场景。' },
+  { id: 'media', label: '生成媒体', icon: 'image', prompt: '根据 Wiki 和当前项目设定，生成【图片、视频、配音、音乐或音效】。' },
+  { id: 'mcp', label: '调用 MCP', icon: 'extension', prompt: '使用合适的 MCP 工具完成【任务】；执行前说明将要做什么。' },
+]
+const primaryCommands = commonCommands.slice(0, 7)
+const moreCommands = commonCommands.slice(7)
 
 onMounted(async () => {
   void checkSceneVideoExport()
@@ -438,6 +467,7 @@ function closeModelPicker(event: PointerEvent) {
   if (mentionOpen.value
     && !composerRef.value?.contains(event.target as Node)
     && !mentionPopoverRef.value?.contains(event.target as Node)) closeMention()
+  if (commandMenuOpen.value && !commandMenuRef.value?.contains(event.target as Node)) commandMenuOpen.value = false
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
@@ -568,8 +598,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     conversationPickerOpen.value = false
     conversationSearch.value = ''
-    executionMode.value = [...resource.transcript.turns].reverse()
-      .find(turn => turn.role === 'user' && turn.mode)?.mode || 'memory'
+    executionMode.value = 'memory'
     await nextTick()
     if (generation !== resourceOpenGeneration) return
     memoryScrollNav.value?.startStickyFollow()
@@ -729,6 +758,67 @@ async function copyTurn(turn: ConversationTurn) {
   }, 1500)
 }
 
+function insertCommand(command: { prompt: string }) {
+  commandMenuOpen.value = false
+  input.value = command.prompt
+  setEditorText(composerRef.value, input.value)
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
+}
+
+function suggestWikiWrite() {
+  insertCommand({ prompt: '请将上一条回答中适合长期保留的内容整理后写入 Wiki。先读取 Wiki 入口和目标文件，确认结构后再写入，避免重复和冲突。' })
+}
+
+function shouldSuggestWikiWrite(turn: ConversationTurn): boolean {
+  return turn.role === 'assistant'
+    && turn.id !== 'streaming-assistant'
+    && turn.id === latestAssistantTurnId.value
+    && !/^(?:Edited file successfully|已写入|已更新|已创建)/i.test(turn.content.trim())
+}
+
+async function editTurn(turn: ConversationTurn) {
+  if (turn.role !== 'user' || sending.value) return
+  editingTurnId.value = turn.id
+  input.value = turn.content
+  executionMode.value = turn.mode || 'memory'
+  attachments.value = []
+  referencedFiles.value = []
+  selectedSkillNames.value = []
+  try {
+    for (const attachment of turn.attachments || []) {
+      const path = attachment.projectPath || attachment.readablePath
+      if (!path) continue
+      const resource: ProjectResource = {
+        runtime: desktopRuntime ? 'desktop' : 'web', owner: projectOwner.value, path,
+        name: attachment.name, isDirectory: false, kind: attachment.kind === 'file' ? 'document' : 'media', mimeType: attachment.mime,
+        size: attachment.size,
+      }
+      if (attachment.kind === 'image' || attachment.kind === 'video' || attachment.kind === 'audio') await addProjectMediaReferences({ resources: [resource] })
+      else await addProjectFileReference(resource)
+    }
+  } catch (cause) {
+    error.value = `编辑附件恢复失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+  setEditorText(composerRef.value, input.value)
+  await nextTick()
+  resizeComposer()
+  composerRef.value?.focus()
+}
+
+function cancelEdit() {
+  editingTurnId.value = ''
+  input.value = ''
+  attachments.value = []
+  referencedFiles.value = []
+  selectedSkillNames.value = []
+  setEditorText(composerRef.value, '')
+  resizeComposer()
+  composerRef.value?.focus()
+}
+
 async function selectConversation(item: MemoryConversation) {
   const generation = ++conversationSelectionGeneration
   if (sending.value) stop()
@@ -842,9 +932,17 @@ async function send() {
   const active = conversation.value
   const message = input.value.trim()
   const pendingAttachments = attachments.value.slice()
-  const pendingMode = executionMode.value
+  const pendingMode: ConversationMode = 'memory'
   if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
+  const editTargetId = editingTurnId.value
+  const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
+  if (editTargetId && editIndex < 0) {
+    editingTurnId.value = ''
+    sendInFlight = false
+    return
+  }
+  const baseTurns = editIndex >= 0 ? active.transcript.turns.slice(0, editIndex) : active.transcript.turns
   const runGeneration = ++memoryRunGeneration
   const isCurrentRun = () => runGeneration === memoryRunGeneration
   sending.value = true
@@ -856,7 +954,7 @@ async function send() {
     attachments: attachmentMetadata(pendingAttachments),
     mode: pendingMode,
   }
-  const title = !active.transcript.turns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
+  const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
     : undefined
   pendingUserTurn.value = userTurn
@@ -869,15 +967,14 @@ async function send() {
   let replyCompleted = false
   try {
     const mediaContext = conversationMediaContext(
-      [...active.transcript.turns, userTurn],
+      [...baseTurns, userTurn],
       userTurn.id,
       pendingAttachments,
     )
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
-      conversationTurns: active.transcript.turns,
+      conversationTurns: editTargetId ? baseTurns : active.transcript.turns,
       userTurn,
-      rawPath: active.resource.path,
       modelId: agentStore.currentModel,
       mode: pendingMode,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
@@ -900,7 +997,7 @@ async function send() {
         if (!isCurrentRun()) return
         if (contextNoticeShownConversations.has(active.transcript.id)) return
         contextNoticeShownConversations.add(active.transcript.id)
-        contextNotice.value = '较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中，需要时模型可以查询。准备开始新对话前，可将重要结论填充到 Wiki。'
+        contextNotice.value = '较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。需要长期保留的结论请写入 Wiki。'
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false
@@ -924,7 +1021,9 @@ async function send() {
     })
     replyCompleted = true
     if (runGeneration !== memoryRunGeneration) return
-    const complete = await appendMemoryRound(active.resource, userTurn, reply, files, title)
+    const complete = editTargetId
+      ? await replaceMemoryRound(active.resource, editTargetId, userTurn, reply, files, title)
+      : await appendMemoryRound(active.resource, userTurn, reply, files, title)
     if (runGeneration !== memoryRunGeneration) return
     if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
     const completeResource = await openProjectResource(files, complete.resource)
@@ -947,6 +1046,7 @@ async function send() {
     attachments.value = []
     referencedFiles.value = []
     selectedSkillNames.value = []
+    editingTurnId.value = ''
     input.value = ''
     setEditorText(composerRef.value, '')
     streamingText.value = ''
@@ -1289,15 +1389,6 @@ async function selectMention(option: MemoryMentionOption) {
   } finally {
     closeMention()
     composerRef.value?.focus()
-  }
-}
-
-function selectExecutionMode(mode: ConversationMode) {
-  executionMode.value = mode
-  if (mode === 'quick') {
-    attachments.value = []
-    referencedFiles.value = []
-    selectedSkillNames.value = []
   }
 }
 
@@ -1974,7 +2065,7 @@ function readDataUrl(file: File): Promise<string> {
             :streaming="turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
           />
-          <button
+  <button
             v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
             class="memory-message-copy"
             type="button"
@@ -1982,6 +2073,22 @@ function readDataUrl(file: File): Promise<string> {
             :aria-label="copiedTurnId === turn.id ? '已复制' : '复制消息'"
             @click="copyTurn(turn)"
           ><JcIcon :name="copiedTurnId === turn.id ? 'check' : 'content-copy'" /></button>
+          <button
+            v-if="turn.role === 'user' && turn.id !== 'streaming-assistant'"
+            class="memory-message-edit"
+            type="button"
+            title="编辑并重新发送"
+            aria-label="编辑并重新发送"
+            :disabled="sending"
+            @click="editTurn(turn)"
+          ><JcIcon name="edit" /></button>
+          <button
+            v-if="shouldSuggestWikiWrite(turn)"
+            class="memory-wiki-suggest"
+            type="button"
+            title="把这条回答整理后写入 Wiki"
+            @click="suggestWikiWrite"
+          ><JcIcon name="save" /><span>写入 Wiki</span></button>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
               type="button"
@@ -2052,21 +2159,19 @@ function readDataUrl(file: File): Promise<string> {
 
       <footer v-if="conversation" class="memory-composer">
         <div class="memory-composer-tools">
-          <div class="memory-mode-segment" role="group" aria-label="回答方式">
-            <button
-              type="button"
-              :disabled="sending"
-              :class="{ active: executionMode === 'quick' }"
-              title="直接回答，不使用 Skill 和项目工具"
-              @click="selectExecutionMode('quick')"
-            >快速</button>
-            <button
-              type="button"
-              :disabled="sending"
-              :class="{ active: executionMode === 'memory' }"
-              title="按需使用 Skill 和项目工具"
-              @click="selectExecutionMode('memory')"
-            >记忆</button>
+          <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
+          <div class="memory-command-strip" aria-label="常用指令">
+            <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :title="command.prompt" @click="insertCommand(command)">
+              <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
+            </button>
+          </div>
+          <div ref="commandMenuRef" class="memory-command-more">
+            <button type="button" :disabled="sending" :aria-expanded="commandMenuOpen" title="更多常用指令" @click="commandMenuOpen = !commandMenuOpen"><JcIcon name="more-horiz" /><span>更多</span></button>
+            <div v-if="commandMenuOpen" class="memory-command-menu" role="menu">
+              <button v-for="command in moreCommands" :key="command.id" type="button" role="menuitem" @click="insertCommand(command)">
+                <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
+              </button>
+            </div>
           </div>
         </div>
         <div v-if="attachments.length" class="memory-attachments">
@@ -2158,7 +2263,7 @@ function readDataUrl(file: File): Promise<string> {
             @paste="handleComposerPaste"
           />
           <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
-          <button v-else class="send-button" title="发送" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
+          <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
         </div>
       </footer>
     </main>
@@ -2355,6 +2460,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
 .memory-message-copy { position: absolute; top: 0; right: 0; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
+.memory-message-edit { position: absolute; top: 0; right: 32px; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
+.memory-wiki-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-wiki-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
 .memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-media-plan-link:hover { border-color: var(--olive); }
 .memory-media-plan-link .mso { color: var(--olive); }
@@ -2370,9 +2479,17 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message.streaming { opacity: .85; }
 .memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
 .memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }
-.memory-mode-segment { display: flex; padding: 2px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
-.memory-mode-segment button { height: 24px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: var(--ink3); cursor: pointer; font: inherit; font-size: 12px; }
-.memory-mode-segment button.active { background: var(--olive); color: white; }
+.memory-editing-cancel { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-editing-cancel:hover { background: var(--surface-alt); color: var(--ink); }
+.memory-command-strip { display: flex; min-width: 0; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.memory-command-strip::-webkit-scrollbar { display: none; }
+.memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.memory-command-strip > button:hover, .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
+.memory-command-strip button:disabled { cursor: default; opacity: .45; }
+.memory-command-more { position: relative; flex: 0 0 auto; }
+.memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
+.memory-command-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
+.memory-command-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
 .memory-input-row { position: relative; display: flex; align-items: flex-end; gap: 8px; padding: 10px; }
 .memory-input-drop-active { border: 1px dashed var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--paper)); }
 .memory-mention-popover { position: absolute; z-index: 60; right: 10px; bottom: calc(100% + 7px); left: 10px; max-height: min(320px, 42vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }

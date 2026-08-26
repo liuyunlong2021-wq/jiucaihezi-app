@@ -76,3 +76,36 @@ test('buildCreativeContext keeps ordinary stop and length assistant turns', () =
 
   assert.deepEqual(result.messages.map(message => message.id), ['u-stop', 'a-stop', 'u-length', 'a-length', 'u-latest'])
 })
+
+test('buildCreativeContext keeps only the last three complete rounds', () => {
+  const messages = Array.from({ length: 5 }, (_, index) => [
+    { id: `u${index + 1}`, role: 'user', content: `问题 ${index + 1}` },
+    { id: `a${index + 1}`, role: 'assistant', content: `回答 ${index + 1}` },
+  ]).flat()
+  const result = buildCreativeContext({
+    messages: [...messages, { id: 'u-latest', role: 'user', content: '继续修改' }],
+    modelId: 'gpt-5.6-terra',
+    contextWindow: 100_000,
+    reservedTokens: 0,
+  })
+
+  assert.deepEqual(result.messages.map(message => message.id), [
+    'u3', 'a3', 'u4', 'a4', 'u5', 'a5', 'u-latest',
+  ])
+})
+
+test('buildCreativeContext caps completed-round history at 12K tokens', () => {
+  const result = buildCreativeContext({
+    messages: [
+      { id: 'u1', role: 'user', content: '旧问题'.repeat(10_000) },
+      { id: 'a1', role: 'assistant', content: '旧回答'.repeat(10_000) },
+      { id: 'u-latest', role: 'user', content: '当前问题' },
+    ],
+    modelId: 'gpt-5.6-terra',
+    contextWindow: 100_000,
+    reservedTokens: 0,
+  })
+
+  assert.deepEqual(result.messages.map(message => message.id), ['u-latest'])
+  assert.equal(result.omittedMessages, 2)
+})

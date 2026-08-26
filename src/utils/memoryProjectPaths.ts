@@ -40,6 +40,18 @@ function isSameOrChild(path: string, directory: string): boolean {
   return path === directory || path.startsWith(`${directory}/`)
 }
 
+export function isMemoryConversationPath(path: string): boolean {
+  const normalized = normalizedPath(path)
+  return isSameOrChild(normalized, MEMORY_CONVERSATION_DIRECTORY)
+    || normalized.includes(`/${MEMORY_CONVERSATION_DIRECTORY}/`)
+    || normalized.endsWith(`/${MEMORY_CONVERSATION_DIRECTORY}`)
+}
+
+export function isAuthorizedMemoryConversationPath(path: string, authorizedPaths: string[] = []): boolean {
+  const normalized = normalizedPath(path)
+  return isMemoryConversationPath(normalized) && authorizedPaths.some(candidate => normalizedPath(candidate) === normalized)
+}
+
 export function memoryMediaDirectoryFor(path: string, mimeType = ''): string {
   const normalized = normalizedPath(path).toLowerCase()
   const mime = String(mimeType || '').toLowerCase()

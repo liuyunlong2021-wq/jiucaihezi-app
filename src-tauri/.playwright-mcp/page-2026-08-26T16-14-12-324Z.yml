@@ -1,0 +1,589 @@
+- generic [ref=f5e2]:
+  - generic [ref=f5e3]:
+    - link "Skip to content" [ref=f5e4] [cursor=pointer]:
+      - /url: "#start-of-content"
+    - banner [ref=f5e9]:
+      - heading "Navigation Menu" [level=2] [ref=f5e10]
+      - generic [ref=f5e11]:
+        - link "Homepage" [ref=f5e13] [cursor=pointer]:
+          - /url: /
+        - generic [ref=f5e16]:
+          - navigation "Global" [ref=f5e17]:
+            - list [ref=f5e18]:
+              - listitem [ref=f5e19]:
+                - button "Platform" [ref=f5e21] [cursor=pointer]
+              - listitem [ref=f5e24]:
+                - button "Solutions" [ref=f5e26] [cursor=pointer]
+              - listitem [ref=f5e29]:
+                - button "Resources" [ref=f5e31] [cursor=pointer]
+              - listitem [ref=f5e34]:
+                - button "Open Source" [ref=f5e36] [cursor=pointer]
+              - listitem [ref=f5e39]:
+                - button "Enterprise" [ref=f5e41] [cursor=pointer]
+              - listitem [ref=f5e44]:
+                - link "Pricing" [ref=f5e45] [cursor=pointer]:
+                  - /url: https://github.com/pricing
+          - generic [ref=f5e46]:
+            - button "Search or jump to, type / to search" [ref=f5e48] [cursor=pointer]
+            - link "Sign in" [ref=f5e55] [cursor=pointer]:
+              - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+            - link "Sign up" [ref=f5e58] [cursor=pointer]:
+              - /url: /signup?ref_cta=Sign+up&ref_loc=header+logged+out&ref_page=%2Fsearch&source=header
+            - button "Appearance settings" [ref=f5e61] [cursor=pointer]
+  - main [ref=f5e67]:
+    - generic [ref=f5e70]:
+      - heading "repositories Search Results · video depth estimation" [level=1] [ref=f5e71]
+      - generic [ref=f5e74]:
+        - generic [ref=f5e75]:
+          - region [ref=f5e76]:
+            - heading "Filter by" [level=2] [ref=f5e77]
+            - list "Filter by" [ref=f5e82]:
+              - listitem [ref=f5e83]:
+                - list [ref=f5e84]:
+                  - listitem [ref=f5e85]:
+                    - link "Code (...) results" [ref=f5e86] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation&type=code
+                      - generic [ref=f5e87]:
+                        - generic [ref=f5e88]: Code
+                        - generic:
+                          - generic: ...
+                          - generic: (...)
+                          - generic: results
+                  - listitem [ref=f5e89]:
+                    - link "Repositories (199) results" [ref=f5e90] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation&type=repositories
+                      - generic [ref=f5e91]:
+                        - generic [ref=f5e92]: Repositories
+                        - generic:
+                          - generic: "199"
+                          - generic: (199)
+                          - generic: results
+                  - listitem [ref=f5e93]:
+                    - link "Issues (8.1k) results" [ref=f5e94] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation&type=issues
+                      - generic [ref=f5e95]:
+                        - generic [ref=f5e96]: Issues
+                        - generic:
+                          - generic: 8.1k
+                          - generic: (8.1k)
+                          - generic: results
+                  - listitem [ref=f5e97]:
+                    - link "Pull requests (7.8k) results" [ref=f5e98] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation&type=pullrequests
+                      - generic [ref=f5e99]:
+                        - generic [ref=f5e100]: Pull requests
+                        - generic:
+                          - generic: 7.8k
+                          - generic: (7.8k)
+                          - generic: results
+                  - listitem [ref=f5e101]:
+                    - link "Discussions (205) results" [ref=f5e102] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation&type=discussions
+                      - generic [ref=f5e103]:
+                        - generic [ref=f5e104]: Discussions
+                        - generic:
+                          - generic: "205"
+                          - generic: (205)
+                          - generic: results
+                  - listitem [ref=f5e105]:
+                    - link "Users (0) results" [ref=f5e106] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation&type=users
+                      - generic [ref=f5e107]:
+                        - generic [ref=f5e108]: Users
+                        - generic:
+                          - generic: "0"
+                          - generic: (0)
+                          - generic: results
+                  - listitem [ref=f5e109]:
+                    - button "More" [ref=f5e110] [cursor=pointer]
+              - listitem [ref=f5e113]
+              - listitem [ref=f5e114]:
+                - heading "Languages" [level=3] [ref=f5e116]
+                - list "Languages" [ref=f5e117]:
+                  - listitem [ref=f5e118]:
+                    - link "Python" [ref=f5e119] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3APython&type=repositories
+                      - generic "Python" [ref=f5e123]
+                  - listitem [ref=f5e124]:
+                    - link "Jupyter Notebook" [ref=f5e125] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3AJupyter+Notebook&type=repositories
+                      - generic "Jupyter Notebook" [ref=f5e129]
+                  - listitem [ref=f5e130]:
+                    - link "C++" [ref=f5e131] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3AC%2B%2B&type=repositories
+                      - generic "C++" [ref=f5e135]
+                  - listitem [ref=f5e136]:
+                    - link "HTML" [ref=f5e137] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3AHTML&type=repositories
+                      - generic "HTML" [ref=f5e141]
+                  - listitem [ref=f5e142]:
+                    - link "JavaScript" [ref=f5e143] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3AJavaScript&type=repositories
+                      - generic "JavaScript" [ref=f5e147]
+                  - listitem [ref=f5e148]:
+                    - link "TypeScript" [ref=f5e149] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3ATypeScript&type=repositories
+                      - generic "TypeScript" [ref=f5e153]
+                  - listitem [ref=f5e154]:
+                    - link "CSS" [ref=f5e155] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3ACSS&type=repositories
+                      - generic "CSS" [ref=f5e159]
+                  - listitem [ref=f5e160]:
+                    - link "MATLAB" [ref=f5e161] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3AMATLAB&type=repositories
+                      - generic "MATLAB" [ref=f5e165]
+                  - listitem [ref=f5e166]:
+                    - link "PureBasic" [ref=f5e167] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3APureBasic&type=repositories
+                      - generic "PureBasic" [ref=f5e171]
+                  - listitem [ref=f5e172]:
+                    - link "Shell" [ref=f5e173] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+language%3AShell&type=repositories
+                      - generic "Shell" [ref=f5e177]
+                  - listitem [ref=f5e178]:
+                    - button "More languages..." [ref=f5e179] [cursor=pointer]:
+                      - generic "More languages..." [ref=f5e182]
+                  - listitem [ref=f5e183]
+              - listitem [ref=f5e184]:
+                - heading "Advanced" [level=3] [ref=f5e186]
+                - list "Advanced" [ref=f5e187]:
+                  - listitem [ref=f5e188]:
+                    - button "Owner" [ref=f5e189] [cursor=pointer]:
+                      - generic "Owner" [ref=f5e193]
+                  - listitem [ref=f5e194]:
+                    - button "Size" [ref=f5e195] [cursor=pointer]:
+                      - generic "Size" [ref=f5e199]
+                  - listitem [ref=f5e200]:
+                    - button "Number of followers" [ref=f5e201] [cursor=pointer]:
+                      - generic "Number of followers" [ref=f5e205]
+                  - listitem [ref=f5e206]:
+                    - button "Number of forks" [ref=f5e207] [cursor=pointer]:
+                      - generic "Number of forks" [ref=f5e211]
+                  - listitem [ref=f5e212]:
+                    - button "Number of stars" [ref=f5e213] [cursor=pointer]:
+                      - generic "Number of stars" [ref=f5e217]
+                  - listitem [ref=f5e218]:
+                    - button "Date created" [ref=f5e219] [cursor=pointer]:
+                      - generic "Date created" [ref=f5e223]
+                  - listitem [ref=f5e224]:
+                    - button "Date pushed" [ref=f5e225] [cursor=pointer]:
+                      - generic "Date pushed" [ref=f5e229]
+                  - listitem [ref=f5e230]:
+                    - button "Topic" [ref=f5e231] [cursor=pointer]:
+                      - generic "Topic" [ref=f5e235]
+                  - listitem [ref=f5e236]:
+                    - button "License" [ref=f5e237] [cursor=pointer]:
+                      - generic "License" [ref=f5e241]
+                  - listitem [ref=f5e242]:
+                    - button "Archived" [ref=f5e243] [cursor=pointer]:
+                      - generic "Archived" [ref=f5e247]
+                  - listitem [ref=f5e248]:
+                    - link "Public" [ref=f5e249] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+is%3Apublic&type=repositories
+                      - generic "Public" [ref=f5e253]
+                  - listitem [ref=f5e254]:
+                    - link "Private" [ref=f5e255] [cursor=pointer]:
+                      - /url: https://github.com/search?q=video+depth+estimation+is%3Aprivate&type=repositories
+                      - generic "Private" [ref=f5e259]
+              - listitem [ref=f5e260]
+              - listitem [ref=f5e261]:
+                - link "Advanced search" [ref=f5e262] [cursor=pointer]:
+                  - /url: /search/advanced
+          - slider "Draggable pane splitter" [ref=f5e266]
+        - generic [ref=f5e269]:
+          - generic [ref=f5e270]:
+            - generic [ref=f5e272]:
+              - generic [ref=f5e273]:
+                - generic [ref=f5e274]:
+                  - generic [ref=f5e275]: 199 results
+                  - generic [ref=f5e276]: (161 ms)
+                - heading "199 results" [active] [level=2] [ref=f5e277]
+              - generic [ref=f5e278]:
+                - 'button "Sort by: Best match" [ref=f5e280] [cursor=pointer]'
+                - button "Open column options" [ref=f5e284] [cursor=pointer]
+            - generic [ref=f5e289]:
+              - generic [ref=f5e291]:
+                - generic [ref=f5e292]:
+                  - heading "DepthAnything/Video-Depth-Anything" [level=3] [ref=f5e293]:
+                    - link [ref=f5e297] [cursor=pointer]:
+                      - /url: /DepthAnything/Video-Depth-Anything
+                      - generic [ref=f5e298]:
+                        - text: DepthAnything/
+                        - emphasis [ref=f5e299]: Video
+                        - text: "-"
+                        - emphasis [ref=f5e300]: Depth
+                        - text: "-Anything"
+                  - generic [ref=f5e302]:
+                    - text: "[CVPR 2025 Highlight]"
+                    - emphasis [ref=f5e303]: Video
+                    - emphasis [ref=f5e304]: Depth
+                    - text: "Anything: Consistent"
+                    - emphasis [ref=f5e305]: Depth
+                    - emphasis [ref=f5e306]: Estimation
+                    - text: for Super-Long
+                    - emphasis [ref=f5e307]: Videos
+                  - generic [ref=f5e308]:
+                    - link "transformer" [ref=f5e310] [cursor=pointer]:
+                      - /url: /topics/transformer
+                    - link "depth-estimation" [ref=f5e312] [cursor=pointer]:
+                      - /url: /topics/depth-estimation
+                    - link "monocular-depth-estimation" [ref=f5e314] [cursor=pointer]:
+                      - /url: /topics/monocular-depth-estimation
+                    - link "video-depth" [ref=f5e316] [cursor=pointer]:
+                      - /url: /topics/video-depth
+                  - list [ref=f5e317]:
+                    - listitem [ref=f5e318]:
+                      - generic "Python language" [ref=f5e321]: Python
+                    - generic [ref=f5e322]: ·
+                    - listitem [ref=f5e323]:
+                      - link "2087 stars" [ref=f5e324] [cursor=pointer]:
+                        - /url: /DepthAnything/Video-Depth-Anything/stargazers
+                        - generic [ref=f5e327]: 2.1k
+                    - generic [ref=f5e328]: ·
+                    - listitem [ref=f5e329]:
+                      - generic [ref=f5e330]:
+                        - text: Updated
+                        - generic "2025年10月7日 GMT+8 14:00" [ref=f5e331]: on 2025年10月7日
+                - link "Star" [ref=f5e334] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e338]:
+                - generic [ref=f5e339]:
+                  - heading "tinghuiz/SfMLearner" [level=3] [ref=f5e340]:
+                    - link "tinghuiz/SfMLearner" [ref=f5e344] [cursor=pointer]:
+                      - /url: /tinghuiz/SfMLearner
+                  - generic [ref=f5e346]:
+                    - text: An unsupervised learning framework for
+                    - emphasis [ref=f5e347]: depth
+                    - text: and ego-motion
+                    - emphasis [ref=f5e348]: estimation
+                    - text: from monocular
+                    - emphasis [ref=f5e349]: videos
+                  - generic [ref=f5e350]:
+                    - link "deep-learning" [ref=f5e352] [cursor=pointer]:
+                      - /url: /topics/deep-learning
+                    - link "unsupervised-learning" [ref=f5e354] [cursor=pointer]:
+                      - /url: /topics/unsupervised-learning
+                    - link "visual-odometry" [ref=f5e356] [cursor=pointer]:
+                      - /url: /topics/visual-odometry
+                    - link "depth-prediction" [ref=f5e358] [cursor=pointer]:
+                      - /url: /topics/depth-prediction
+                    - link "self-supervised-learning" [ref=f5e360] [cursor=pointer]:
+                      - /url: /topics/self-supervised-learning
+                  - list [ref=f5e361]:
+                    - listitem [ref=f5e362]:
+                      - generic "Jupyter Notebook language" [ref=f5e365]: Jupyter Notebook
+                    - generic [ref=f5e366]: ·
+                    - listitem [ref=f5e367]:
+                      - link "2017 stars" [ref=f5e368] [cursor=pointer]:
+                        - /url: /tinghuiz/SfMLearner/stargazers
+                        - generic [ref=f5e371]: 2k
+                    - generic [ref=f5e372]: ·
+                    - listitem [ref=f5e373]:
+                      - generic [ref=f5e374]:
+                        - text: Updated
+                        - generic "2021年10月26日 GMT+8 13:58" [ref=f5e375]: on 2021年10月26日
+                - link "Star" [ref=f5e378] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e382]:
+                - generic [ref=f5e383]:
+                  - heading "facebookresearch/robust_cvd Public archive" [level=3] [ref=f5e384]:
+                    - generic [ref=f5e385]:
+                      - link "facebookresearch/robust_cvd" [ref=f5e388] [cursor=pointer]:
+                        - /url: /facebookresearch/robust_cvd
+                      - generic [ref=f5e389]: Public archive
+                  - generic [ref=f5e391]:
+                    - text: Robust Consistent
+                    - emphasis [ref=f5e392]: Video
+                    - emphasis [ref=f5e393]: Depth
+                    - emphasis [ref=f5e394]: Estimation
+                  - list [ref=f5e395]:
+                    - listitem [ref=f5e396]:
+                      - generic "C++ language" [ref=f5e399]: C++
+                    - generic [ref=f5e400]: ·
+                    - listitem [ref=f5e401]:
+                      - link "309 stars" [ref=f5e402] [cursor=pointer]:
+                        - /url: /facebookresearch/robust_cvd/stargazers
+                        - generic [ref=f5e405]: "309"
+                    - generic [ref=f5e406]: ·
+                    - listitem [ref=f5e407]:
+                      - generic [ref=f5e408]:
+                        - text: Updated
+                        - generic "2021年6月26日 GMT+8 13:16" [ref=f5e409]: on 2021年6月26日
+                - link "Star" [ref=f5e412] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e416]:
+                - generic [ref=f5e417]:
+                  - heading "EnVision-Research/DVD" [level=3] [ref=f5e418]:
+                    - link "EnVision-Research/DVD" [ref=f5e422] [cursor=pointer]:
+                      - /url: /EnVision-Research/DVD
+                  - generic [ref=f5e424]:
+                    - text: "DVD: Deterministic"
+                    - emphasis [ref=f5e425]: Video
+                    - emphasis [ref=f5e426]: Depth
+                    - emphasis [ref=f5e427]: Estimation
+                    - text: with Generative Priors
+                  - list [ref=f5e428]:
+                    - listitem [ref=f5e429]:
+                      - generic "Python language" [ref=f5e432]: Python
+                    - generic [ref=f5e433]: ·
+                    - listitem [ref=f5e434]:
+                      - link "349 stars" [ref=f5e435] [cursor=pointer]:
+                        - /url: /EnVision-Research/DVD/stargazers
+                        - generic [ref=f5e438]: "349"
+                    - generic [ref=f5e439]: ·
+                    - listitem [ref=f5e440]:
+                      - generic [ref=f5e441]:
+                        - text: Updated
+                        - generic "2026年6月17日 GMT+8 20:36" [ref=f5e442]: on 6月17日
+                - link "Star" [ref=f5e445] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e449]:
+                - generic [ref=f5e450]:
+                  - heading "Eyeline-Labs/FlashDepth" [level=3] [ref=f5e451]:
+                    - link [ref=f5e455] [cursor=pointer]:
+                      - /url: /Eyeline-Labs/FlashDepth
+                      - generic [ref=f5e456]:
+                        - text: Eyeline-Labs/Flash
+                        - emphasis [ref=f5e457]: Depth
+                  - generic [ref=f5e459]:
+                    - text: "The official implementation of ICCV'25 paper \"FlashDepth: Real-time Streaming"
+                    - emphasis [ref=f5e460]: Video
+                    - emphasis [ref=f5e461]: Depth
+                    - emphasis [ref=f5e462]: Estimation
+                    - text: at 2K Resolution"
+                  - list [ref=f5e463]:
+                    - listitem [ref=f5e464]:
+                      - generic "Python language" [ref=f5e467]: Python
+                    - generic [ref=f5e468]: ·
+                    - listitem [ref=f5e469]:
+                      - link "396 stars" [ref=f5e470] [cursor=pointer]:
+                        - /url: /Eyeline-Labs/FlashDepth/stargazers
+                        - generic [ref=f5e473]: "396"
+                    - generic [ref=f5e474]: ·
+                    - listitem [ref=f5e475]:
+                      - generic [ref=f5e476]:
+                        - text: Updated
+                        - generic "2025年9月8日 GMT+8 01:04" [ref=f5e477]: on 2025年9月8日
+                - link "Star" [ref=f5e480] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e484]:
+                - generic [ref=f5e485]:
+                  - heading "AIVFI/Video-Depth-Estimation-Rankings-and-Stereo-Video-Conversion-Rankings" [level=3] [ref=f5e486]:
+                    - link [ref=f5e490] [cursor=pointer]:
+                      - /url: /AIVFI/Video-Depth-Estimation-Rankings-and-Stereo-Video-Conversion-Rankings
+                      - generic [ref=f5e491]:
+                        - text: AIVFI/
+                        - emphasis [ref=f5e492]: Video
+                        - text: "-"
+                        - emphasis [ref=f5e493]: Depth
+                        - text: "-"
+                        - emphasis [ref=f5e494]: Estimation
+                        - text: "-Rankings-and-Stereo-"
+                        - emphasis [ref=f5e495]: Video
+                        - text: "-Conversion-Rankings"
+                  - generic [ref=f5e497]:
+                    - text: Researchers, we look forward to models based on MiniMax H3. ChronoDepth
+                    - emphasis [ref=f5e498]: Depth
+                    - text: Any
+                    - emphasis [ref=f5e499]: Video
+                    - emphasis [ref=f5e500]: Depth
+                    - text: Anything
+                    - emphasis [ref=f5e501]: Depth
+                    - text: Pro DepthCrafter DreamStereo…
+                  - generic [ref=f5e502]:
+                    - link "machine-learning" [ref=f5e504] [cursor=pointer]:
+                      - /url: /topics/machine-learning
+                    - link "awesome" [ref=f5e506] [cursor=pointer]:
+                      - /url: /topics/awesome
+                    - link "computer-vision" [ref=f5e508] [cursor=pointer]:
+                      - /url: /topics/computer-vision
+                    - link "deep-learning" [ref=f5e510] [cursor=pointer]:
+                      - /url: /topics/deep-learning
+                    - link "video-processing" [ref=f5e512] [cursor=pointer]:
+                      - /url: /topics/video-processing
+                  - list [ref=f5e513]:
+                    - listitem [ref=f5e514]:
+                      - link "259 stars" [ref=f5e515] [cursor=pointer]:
+                        - /url: /AIVFI/Video-Depth-Estimation-Rankings-and-Stereo-Video-Conversion-Rankings/stargazers
+                        - generic [ref=f5e518]: "259"
+                    - generic [ref=f5e519]: ·
+                    - listitem [ref=f5e520]:
+                      - generic [ref=f5e521]:
+                        - text: Updated
+                        - generic "2026年8月20日 GMT+8 23:35" [ref=f5e522]: 6 days ago
+                - link "Star" [ref=f5e525] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e529]:
+                - generic [ref=f5e530]:
+                  - heading "jiah-cloud/Align3R" [level=3] [ref=f5e531]:
+                    - link "jiah-cloud/Align3R" [ref=f5e535] [cursor=pointer]:
+                      - /url: /jiah-cloud/Align3R
+                  - generic [ref=f5e537]:
+                    - text: "[CVPR 2025 Highlight] Align3R: Aligned Monocular"
+                    - emphasis [ref=f5e538]: Depth
+                    - emphasis [ref=f5e539]: Estimation
+                    - text: for Dynamic
+                    - emphasis [ref=f5e540]: Videos
+                  - generic [ref=f5e541]:
+                    - link "3d-reconstruction" [ref=f5e543] [cursor=pointer]:
+                      - /url: /topics/3d-reconstruction
+                    - link "pose-estimation" [ref=f5e545] [cursor=pointer]:
+                      - /url: /topics/pose-estimation
+                    - link "depth-estimation" [ref=f5e547] [cursor=pointer]:
+                      - /url: /topics/depth-estimation
+                    - link "point-cloud-reconstruction" [ref=f5e549] [cursor=pointer]:
+                      - /url: /topics/point-cloud-reconstruction
+                    - link "video-depth" [ref=f5e551] [cursor=pointer]:
+                      - /url: /topics/video-depth
+                  - list [ref=f5e552]:
+                    - listitem [ref=f5e553]:
+                      - generic "Python language" [ref=f5e556]: Python
+                    - generic [ref=f5e557]: ·
+                    - listitem [ref=f5e558]:
+                      - link "461 stars" [ref=f5e559] [cursor=pointer]:
+                        - /url: /jiah-cloud/Align3R/stargazers
+                        - generic [ref=f5e562]: "461"
+                    - generic [ref=f5e563]: ·
+                    - listitem [ref=f5e564]:
+                      - generic [ref=f5e565]:
+                        - text: Updated
+                        - generic "2025年4月4日 GMT+8 09:53" [ref=f5e566]: on 2025年4月4日
+                - link "Star" [ref=f5e569] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e573]:
+                - generic [ref=f5e574]:
+                  - heading "RaymondWang987/NVDS" [level=3] [ref=f5e575]:
+                    - link "RaymondWang987/NVDS" [ref=f5e579] [cursor=pointer]:
+                      - /url: /RaymondWang987/NVDS
+                  - generic [ref=f5e581]:
+                    - text: ICCV 2023 "Neural
+                    - emphasis [ref=f5e582]: Video
+                    - emphasis [ref=f5e583]: Depth
+                    - text: "Stabilizer\" (NVDS) & TPAMI 2024 \"NVDS+: Towards Efficient and Versatile Neural Stabilizer for"
+                    - emphasis [ref=f5e584]: Video
+                    - emphasis [ref=f5e585]: Depth
+                    - emphasis [ref=f5e586]: E…
+                  - list [ref=f5e587]:
+                    - listitem [ref=f5e588]:
+                      - generic "Python language" [ref=f5e591]: Python
+                    - generic [ref=f5e592]: ·
+                    - listitem [ref=f5e593]:
+                      - link "528 stars" [ref=f5e594] [cursor=pointer]:
+                        - /url: /RaymondWang987/NVDS/stargazers
+                        - generic [ref=f5e597]: "528"
+                    - generic [ref=f5e598]: ·
+                    - listitem [ref=f5e599]:
+                      - generic [ref=f5e600]:
+                        - text: Updated
+                        - generic "2024年10月18日 GMT+8 14:06" [ref=f5e601]: on 2024年10月18日
+                - link "Star" [ref=f5e604] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e608]:
+                - generic [ref=f5e609]:
+                  - heading "CapsuleEndoscope/EndoSLAM" [level=3] [ref=f5e610]:
+                    - link "CapsuleEndoscope/EndoSLAM" [ref=f5e614] [cursor=pointer]:
+                      - /url: /CapsuleEndoscope/EndoSLAM
+                  - generic [ref=f5e616]:
+                    - text: EndoSLAM Dataset and an Unsupervised Monocular Visual Odometry and
+                    - emphasis [ref=f5e617]: Depth
+                    - emphasis [ref=f5e618]: Estimation
+                    - text: Approach for Endoscopic
+                    - emphasis [ref=f5e619]: Videos
+                    - text: ": Endo-SfMLearner"
+                  - generic [ref=f5e620]:
+                    - link "pose-estimation" [ref=f5e622] [cursor=pointer]:
+                      - /url: /topics/pose-estimation
+                    - link "visual-odometry" [ref=f5e624] [cursor=pointer]:
+                      - /url: /topics/visual-odometry
+                    - link "monocular-depth-estimation" [ref=f5e626] [cursor=pointer]:
+                      - /url: /topics/monocular-depth-estimation
+                    - link "capsule-endoscopy" [ref=f5e628] [cursor=pointer]:
+                      - /url: /topics/capsule-endoscopy
+                    - link "slam-dataset" [ref=f5e630] [cursor=pointer]:
+                      - /url: /topics/slam-dataset
+                  - list [ref=f5e631]:
+                    - listitem [ref=f5e632]:
+                      - generic "Python language" [ref=f5e635]: Python
+                    - generic [ref=f5e636]: ·
+                    - listitem [ref=f5e637]:
+                      - link "308 stars" [ref=f5e638] [cursor=pointer]:
+                        - /url: /CapsuleEndoscope/EndoSLAM/stargazers
+                        - generic [ref=f5e641]: "308"
+                    - generic [ref=f5e642]: ·
+                    - listitem [ref=f5e643]:
+                      - generic [ref=f5e644]:
+                        - text: Updated
+                        - generic "2022年6月21日 GMT+8 22:36" [ref=f5e645]: on 2022年6月21日
+                - link "Star" [ref=f5e648] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+              - generic [ref=f5e652]:
+                - generic [ref=f5e653]:
+                  - heading "NVlabs/neuralrgbd" [level=3] [ref=f5e654]:
+                    - link "NVlabs/neuralrgbd" [ref=f5e658] [cursor=pointer]:
+                      - /url: /NVlabs/neuralrgbd
+                  - generic [ref=f5e660]:
+                    - text: "Neural RGB→D Sensing: Per-pixel"
+                    - emphasis [ref=f5e661]: depth
+                    - text: and its uncertainty
+                    - emphasis [ref=f5e662]: estimation
+                    - text: from a monocular RGB
+                    - emphasis [ref=f5e663]: video
+                  - list [ref=f5e664]:
+                    - listitem [ref=f5e665]:
+                      - generic "Python language" [ref=f5e668]: Python
+                    - generic [ref=f5e669]: ·
+                    - listitem [ref=f5e670]:
+                      - link "299 stars" [ref=f5e671] [cursor=pointer]:
+                        - /url: /NVlabs/neuralrgbd/stargazers
+                        - generic [ref=f5e674]: "299"
+                    - generic [ref=f5e675]: ·
+                    - listitem [ref=f5e676]:
+                      - generic [ref=f5e677]:
+                        - text: Updated
+                        - generic "2019年8月18日 GMT+8 22:34" [ref=f5e678]: on 2019年8月18日
+                - link "Star" [ref=f5e681] [cursor=pointer]:
+                  - /url: /login?return_to=https%3A%2F%2Fgithub.com%2Fsearch%3Fq%3Dvideo%2Bdepth%2Bestimation%26type%3Drepositories
+            - navigation "Pagination" [ref=f5e686]:
+              - generic [ref=f5e687]:
+                - generic [ref=f5e688]: Previous
+                - link "Page 1" [ref=f5e691] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=1
+                  - text: "1"
+                - link "Page 2" [ref=f5e692] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=2
+                  - text: "2"
+                - link "Page 3" [ref=f5e693] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=3
+                  - text: "3"
+                - link "Page 4" [ref=f5e694] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=4
+                  - text: "4"
+                - link "Page 5" [ref=f5e695] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=5
+                  - text: "5"
+                - link "Page 6" [ref=f5e696] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=6
+                  - text: "6"
+                - link "Page 7..." [ref=f5e697] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=7
+                  - text: "7"
+                - text: …
+                - link "Page 20" [ref=f5e698] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=20
+                  - text: "20"
+                - link "Next Page" [ref=f5e699] [cursor=pointer]:
+                  - /url: https://github.com/search?q=video+depth+estimation&type=repositories&p=2
+                  - text: Next
+          - generic [ref=f5e703]:
+            - generic [ref=f5e704]:
+              - img "Package icon" [ref=f5e706]
+              - heading "Sponsor open source projects you depend on" [level=2] [ref=f5e707]
+              - generic [ref=f5e708]: Contributors are working behind the scenes to make open source better for everyone—give them the help and recognition they deserve.
+              - link "Explore sponsorable projects" [ref=f5e709] [cursor=pointer]:
+                - /url: https://github.com/sponsors/explore
+            - generic [ref=f5e712]:
+              - generic [ref=f5e713]: ProTip!
+              - generic [ref=f5e716]:
+                - text: Press the
+                - generic [ref=f5e717]: /
+                - text: key to activate the search input again and adjust your query.

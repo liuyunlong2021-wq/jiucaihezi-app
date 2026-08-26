@@ -9,6 +9,7 @@ import {
   parseConversationTranscript,
   remapConversationAttachmentPaths,
   renameConversationTranscript,
+  replaceConversationTurnAndTruncate,
 } from '../conversationTranscript'
 
 test('conversation document sources keep only unique readable document locators', () => {
@@ -78,6 +79,19 @@ test('conversation transcript keeps a project attachment locator without embeddi
     projectPath: '.raw/jc-media/图片/logo.png',
   }])
   assert.doesNotMatch(withAttachment, /data:image|base64/)
+})
+
+test('editing a user turn replaces it and truncates later context', () => {
+  let content = createConversationTranscript('chat_edit', '编辑测试')
+  content = appendConversationTurn(content, { id: 'u1', role: 'user', content: '旧问题', createdAt: '2026-08-26T00:00:00.000Z' })
+  content = appendConversationTurn(content, { id: 'a1', role: 'assistant', content: '旧回答', createdAt: '2026-08-26T00:00:01.000Z' })
+  content = appendConversationTurn(content, { id: 'u2', role: 'user', content: '后续问题', createdAt: '2026-08-26T00:00:02.000Z' })
+  const next = replaceConversationTurnAndTruncate(content, 'u1', {
+    id: 'u1-new', role: 'user', content: '新问题', createdAt: '2026-08-26T00:01:00.000Z',
+  }, {
+    id: 'a2', role: 'assistant', content: '新回答', createdAt: '2026-08-26T00:01:01.000Z',
+  })
+  assert.deepEqual(parseConversationTranscript('.raw/对话记录/chat_edit.md', next)?.turns.map(turn => turn.content), ['新问题', '新回答'])
 })
 
 test('conversation transcript keeps document source and readable locators without embedding text', () => {

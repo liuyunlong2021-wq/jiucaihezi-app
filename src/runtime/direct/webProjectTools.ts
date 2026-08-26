@@ -19,6 +19,7 @@ import {
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
+import { isAuthorizedMemoryConversationPath, isMemoryConversationPath } from '@/utils/memoryProjectPaths'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
@@ -43,6 +44,7 @@ export function createWebProjectToolExecutor(input: {
   files: WebProjectFiles
   fetcher?: typeof fetch
   renderImage?: MemoryImageRenderer
+  authorizedRawPaths?: string[]
 }): DirectToolExecutor {
   const fetcher = input.fetcher || fetch
   const skills = createCreativeSkillSession(fetcher)
@@ -109,18 +111,20 @@ export function createWebProjectToolExecutor(input: {
         const offset = boundedInteger(args.offset, 1)
         const limit = boundedInteger(args.limit, 200)
         const children = (await input.files.list(requireProject()))
-          .filter(item => !item.path.includes('/'))
+          .filter(item => !item.path.includes('/') && !isMemoryConversationPath(item.path))
           .slice(offset - 1, offset - 1 + limit)
         return { content: children.map(item => `${item.isDir ? 'dir' : 'file'}\t${item.path}`).join('\n') || 'Directory is empty' }
       }
 
+      if (isMemoryConversationPath(rawPath) && !isAuthorizedMemoryConversationPath(rawPath, input.authorizedRawPaths)) throw new Error('模型不能读取 Raw 对话记录')
       const entry = await input.files.read(requireProject(), rawPath)
       if (entry.mimeType === 'folder') {
         const prefix = String(entry.metadata?.relativePath || '')
         const offset = boundedInteger(args.offset, 1)
         const limit = boundedInteger(args.limit, 200)
         const children = (await input.files.list(input.projectId))
-          .filter(item => item.path.startsWith(`${prefix}/`) && !item.path.slice(prefix.length + 1).includes('/'))
+          .filter(item => !isMemoryConversationPath(item.path)
+            && item.path.startsWith(`${prefix}/`) && !item.path.slice(prefix.length + 1).includes('/'))
           .slice(offset - 1, offset - 1 + limit)
         return { content: children.map(item => `${item.isDir ? 'dir' : 'file'}\t${item.path}`).join('\n') || 'Directory is empty' }
       }
@@ -154,16 +158,21 @@ export function createWebProjectToolExecutor(input: {
 
     if (name === 'glob') {
       const prefix = String(args.path || '').replace(/^\/+|\/+$/g, '')
+      if (isMemoryConversationPath(prefix)) throw new Error('模型不能搜索 Raw 对话记录')
       const pattern = prefix ? `${prefix}/${String(args.pattern || '')}` : String(args.pattern || '')
-      const result = (await input.files.glob(requireProject(), pattern)).slice(0, boundedInteger(args.limit, 200))
+      const result = (await input.files.glob(requireProject(), pattern))
+        .filter(item => !isMemoryConversationPath(item.path))
+        .slice(0, boundedInteger(args.limit, 200))
       return { content: result.map(item => item.path).join('\n') || 'No files found' }
     }
 
     if (name === 'grep') {
       const prefix = String(args.path || '').replace(/^\/+|\/+$/g, '')
+      if (isMemoryConversationPath(prefix)) throw new Error('模型不能搜索 Raw 对话记录')
       const include = String(args.include || '').replace(/^\*+/, '')
       const result = (await input.files.grep(requireProject(), String(args.pattern || ''), boundedInteger(args.limit, 1000)))
-        .filter(item => (!prefix || item.path === prefix || item.path.startsWith(`${prefix}/`)) && (!include || item.path.endsWith(include)))
+        .filter(item => !isMemoryConversationPath(item.path)
+          && (!prefix || item.path === prefix || item.path.startsWith(`${prefix}/`)) && (!include || item.path.endsWith(include)))
       if (!result.length) return { content: 'No files found' }
       return { content: ['Found ' + result.length + ' matches', ...result.map(item => `${item.path}: Line ${item.line}: ${item.text}`)].join('\n') }
     }
