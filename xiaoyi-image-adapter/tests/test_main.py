@@ -76,6 +76,15 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2-svip")
 
+    async def test_maps_vip_alias_to_shared_upstream_gpt_image_2(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            json={"model": "gpt-image-2-vip", "prompt": "draw"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2")
+
     async def test_gemini_forwards_xiaoyi_aspect_ratio_and_quality(self):
         response = await self.client.post(
             "/v1/videos",
@@ -201,7 +210,7 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(
             {item["id"] for item in response.json()["data"]},
-            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
+            {"gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-vip", "gpt-image-2-官方", "MiniMaxH3-2k-sec"},
         )
         upstream = next(request for request in self.requests if request.method == "GET" and request.url.path == "/v1/models")
         self.assertEqual(upstream.headers["authorization"], "Bearer visible-key")

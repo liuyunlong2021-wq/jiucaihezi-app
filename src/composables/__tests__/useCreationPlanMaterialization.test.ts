@@ -6,7 +6,9 @@ import {
   buildCurrentCreationParams,
   clearFiles,
   cpState,
+  currentRunPlan,
   genericModelFields,
+  setResolution,
   switchModel,
   switchTask,
 } from '../useCreation'
@@ -14,6 +16,20 @@ import {
 function makeFile(name: string, type: string): File {
   return new File(['fixture'], name, { type })
 }
+
+test('switching from a 2K GPT route to the 1K route discards the stale derived size', () => {
+  switchTask('image')
+  switchModel('gpt-image-2-中质量')
+  cpState.prompt = '一张方形图片'
+  cpState.ar = '1:1'
+  setResolution('2k')
+  assert.equal(cpState.size, '2048x2048')
+
+  switchModel('gpt-image-2-1k')
+
+  assert.equal(buildCurrentCreationParams().size, undefined)
+  assert.equal(currentRunPlan.value?.debug.normalizedParams.size, '1024x1024')
+})
 
 test('buildCurrentCreationParams keeps creation file objects so plan preview can materialize the same payload as submit', () => {
   switchTask('image')

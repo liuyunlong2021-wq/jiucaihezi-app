@@ -240,6 +240,7 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
     assert.equal(route.model, modelId)
     assert.deepEqual(route.capabilities.resolutions, resolutions)
     assert.equal(displayModelPrice(route), price)
+    assert.equal(route.fields.some(field => field.key === 'response_format'), false)
   }
 })
 
@@ -257,10 +258,10 @@ test('Gemini image models use the Xiaoyi async task contract', () => {
     assert.equal(textOnly.endpoint, '/v1/videos')
     assert.equal(textOnly.apiStyle, 'xiaoyi-image-task')
     assert.equal(textOnly.pollKind, 'newapi-task')
-    assert.equal(textOnly.debug.normalizedParams.size, undefined)
+    assert.equal(textOnly.debug.normalizedParams.size, '2048x2048')
     const landscape = buildCreationRunPlan({ modelId, params: { prompt: '横向产品图', ratio: '16:9', resolution: '2k' } })
-    assert.equal(landscape.debug.normalizedParams.size, undefined)
-    assert.equal(landscape.debug.normalizedParams.aspect_ratio, '16:9')
+    assert.equal(landscape.debug.normalizedParams.size, '2048x1152')
+    assert.equal('aspect_ratio' in landscape.debug.normalizedParams, false)
     assert.deepEqual(spec?.capabilities.resolutions, ['1k', '2k', '4k'])
     assert.deepEqual(spec?.capabilities.ratios, ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'])
     assert.equal(spec?.files?.images?.max, 10)

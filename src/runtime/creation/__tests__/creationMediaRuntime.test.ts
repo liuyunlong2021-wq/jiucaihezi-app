@@ -62,7 +62,7 @@ test('P3 direct GPT Image 2 runtime uses the Xiaoyi async task contract', () => 
   assert.equal(request.pollKind, 'newapi-task')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
-  assert.equal(request.imageParams?.responseFormat, 'b64_json')
+  assert.equal(request.imageParams?.responseFormat, 'url')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
   assert.equal((request.imageParams as any)?.resolution, '2k')
 })
@@ -80,7 +80,7 @@ test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { co
       assert.equal(body.get('prompt'), '把手表改成黄色')
       assert.equal(body.get('size'), '2048x1152')
       assert.equal(body.get('seconds'), '1')
-      assert.equal(body.get('image') instanceof Blob, true)
+      assert.equal(body.get('image[]') instanceof Blob, true)
       return Response.json({ id: 'task_xiaoyi_gpt', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/task_xiaoyi_gpt')) {
@@ -107,7 +107,7 @@ test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { co
   }
 })
 
-test('Gemini image maps panel ratio and resolution to Xiaoyi aspect_ratio and quality', { concurrency: false }, async () => {
+test('Gemini image maps panel ratio and resolution to the verified Xiaoyi size field', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
@@ -116,9 +116,9 @@ test('Gemini image maps panel ratio and resolution to Xiaoyi aspect_ratio and qu
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
-      assert.equal(body.get('size'), null)
-      assert.equal(body.get('aspect_ratio'), '16:9')
-      assert.equal(body.get('quality'), '4k')
+      assert.equal(body.get('size'), '3840x2160')
+      assert.equal(body.get('aspect_ratio'), null)
+      assert.equal(body.get('quality'), null)
       assert.equal(body.get('resolution'), null)
       assert.equal(body.get('seconds'), '1')
       return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
@@ -207,7 +207,7 @@ test('Xiaoyi image upload uses the actual JPEG MIME type', { concurrency: false 
     const url = String(input)
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = init.body as FormData
-      assert.equal((body.get('image') as Blob).type, 'image/jpeg')
+      assert.equal((body.get('image[]') as Blob).type, 'image/jpeg')
       return Response.json({ id: 'task_xiaoyi_jpeg', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/task_xiaoyi_jpeg')) {
@@ -262,7 +262,7 @@ test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Ty
     const url = String(input)
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = init.body as FormData
-      assert.equal((body.get('image') as Blob).type, 'image/jpeg')
+      assert.equal((body.get('image[]') as Blob).type, 'image/jpeg')
       return Response.json({ id: 'task_xiaoyi_desktop_jpeg', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/task_xiaoyi_desktop_jpeg')) {

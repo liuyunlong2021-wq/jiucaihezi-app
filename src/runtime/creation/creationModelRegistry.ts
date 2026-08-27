@@ -469,13 +469,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         options: options(route.resolutions),
       },
       { key: 'image', label: '参考图', kind: 'images' },
-      {
-        key: 'response_format',
-        label: '返回格式',
-        kind: 'select',
-        defaultValue: 'url',
-        options: options(['url', 'b64_json']),
-      },
     ],
     notes: ['docs/wiki/运维/模型矩阵.md'],
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],

@@ -29,14 +29,6 @@ const UPSTREAM_LABELS = {
   unknown: '未知上游',
 } as const satisfies Record<CreationUpstreamFamily, string>
 
-const GPT_IMAGE_2_ROUTE_MODELS = new Set([
-  'gpt-image-2-1k',
-  'gpt-image-2-低质量',
-  'gpt-image-2-中质量',
-  'gpt-image-2-vip',
-  'gpt-image-2-官方',
-])
-
 export function validateCreationModelSpec(spec: CreationModelSpec): void {
   if (spec.contractStatus === 'broken') {
     const reason = spec.contractIssues?.[0] || '上游渠道不可用'
@@ -237,10 +229,7 @@ function normalizeOpenAiImageParams(
       aspectRatio: firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9',
     })
   }
-  const isGemini = spec.model.startsWith('gemini-')
-  const size = isGemini
-    ? undefined
-    : typeof params.size === 'string' && params.size !== 'auto'
+  const size = typeof params.size === 'string' && params.size !== 'auto'
     ? params.size
     : sizeFromRatioResolution(
         String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'),
@@ -250,16 +239,12 @@ function normalizeOpenAiImageParams(
     model: spec.model,
     prompt: params.prompt,
     size,
-    aspect_ratio: isGemini
-      ? firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'
-      : undefined,
     resolution: params.resolution,
     image: params.image,
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    // GPT Image 2 的临时下载 URL 会在项目落盘前失效，直接接收图片字节。
-    response_format: GPT_IMAGE_2_ROUTE_MODELS.has(spec.id) ? 'b64_json' : params.response_format || 'url',
+    response_format: spec.apiStyle === 'xiaoyi-image-task' ? 'url' : params.response_format || 'url',
   })
 }
 

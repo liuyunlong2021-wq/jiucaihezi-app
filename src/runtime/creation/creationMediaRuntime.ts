@@ -361,12 +361,7 @@ async function executeDirectImageRequest(
       seconds: '1',
       response_format: request.plan.model === 'grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
     }
-    if (request.plan.model.startsWith('gemini-')) {
-      if (params.aspectRatio) fields.aspect_ratio = params.aspectRatio
-      if (params.resolution) fields.quality = params.resolution.toLowerCase()
-    } else if (params.size) {
-      fields.size = params.size
-    }
+    if (params.size) fields.size = params.size
     if (images.length) fields.image = await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal)))
     const data = await apiCallMultipart('/v1/videos', fields, request.signal)
     const directUrl = extractMediaUrl(data, 'image')
