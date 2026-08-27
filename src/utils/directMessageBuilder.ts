@@ -1,6 +1,7 @@
 import { normalizeNewApiAttachment } from '@/runtime/direct/newApiAttachments'
 
 export interface DirectMessageFile { name: string; content: string }
+export const MAX_INLINE_ATTACHMENT_CHARS = 60_000
 type DirectAttachmentLocator = { name: string; readablePath?: string; textContent?: string }
 export type DirectAttachmentKind = 'image' | 'video' | 'audio' | 'file'
 export interface ResolvedDirectAttachment {
@@ -85,13 +86,16 @@ function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: stri
   }
   return parts
 }
-function attachmentTextFiles(attachments?: DirectAttachmentLocator[]): DirectMessageFile[] {
+function attachmentTextFiles(attachments?: DirectAttachmentLocator[], inlineText = false): DirectMessageFile[] {
   return (attachments || []).flatMap(attachment => {
+    const content = String(attachment.textContent || '').trim()
+    if (inlineText && content && content.length <= MAX_INLINE_ATTACHMENT_CHARS) {
+      return [{ name: attachment.name, content }]
+    }
     const readablePath = String(attachment.readablePath || '').trim()
     if (readablePath) {
       return [{ name: attachment.name, content: `项目可读路径: ${readablePath}\n请使用 read/grep 按需读取；需要全文时分页读取到 eof=true。` }]
     }
-    const content = String(attachment.textContent || '').trim()
     return content ? [{ name: attachment.name, content }] : []
   })
 }
@@ -109,7 +113,7 @@ export function buildDirectMessages(args: BuildDirectMessagesInput): DirectApiMe
     const msg = history[i]; const isLast = i === lastIdx
     if (isLast && msg.role === 'user') {
       let text = chatContentToText(msg.content)
-      text = appendFiles(text, [...(args.files ?? msg.files ?? []), ...attachmentTextFiles(args.attachments)])
+      text = appendFiles(text, [...(args.files ?? msg.files ?? []), ...attachmentTextFiles(args.attachments, true)])
       const images = args.images ?? msg.images ?? []
       const hasImages = images.length > 0
       const attachmentParts = args.apiFormat === 'openai' ? buildOpenAiAttachmentParts(args, images) : []

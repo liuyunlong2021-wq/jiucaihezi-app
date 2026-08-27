@@ -3,15 +3,49 @@ import { test } from 'node:test'
 
 import { selectMemoryTools } from '../memoryChat'
 
-const tools = ['skill', 'wiki_search', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'terminal', 'create_document', 'create_3d_scene', 'mcp__demo__run']
-  .map(name => ({ function: { name } }))
+const tools = [
+  'skill',
+  'wiki_context',
+  'wiki_search',
+  'wiki',
+  'read',
+  'glob',
+  'grep',
+  'write',
+  'edit',
+  'mkdir',
+  'terminal',
+  'create_document',
+  'create_3d_scene',
+  'mcp__demo__run',
+].map(name => ({ function: { name } }))
 
 test('Wiki query exposes only native Wiki read tools', () => {
-  assert.deepEqual(selectMemoryTools('查询 Wiki 中的角色设定', tools).map(tool => tool.function.name), ['wiki_search', 'wiki', 'read', 'glob', 'grep'])
+  assert.deepEqual(
+    selectMemoryTools('查询 Wiki 中的角色设定', tools).map(tool => tool.function.name),
+    ['wiki_context'],
+  )
 })
 
 test('Wiki writing exposes read and write tools without media or terminal', () => {
-  assert.deepEqual(selectMemoryTools('根据 Wiki 设定写入小说第三章文件', tools).map(tool => tool.function.name), ['wiki_search', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir'])
+  assert.deepEqual(
+    selectMemoryTools('根据 Wiki 设定写入小说第三章文件', tools).map(tool => tool.function.name),
+    ['wiki_context', 'read', 'write', 'edit', 'mkdir'],
+  )
+})
+
+test('creating a Wiki from an inline document exposes one native Wiki batch tool', () => {
+  assert.deepEqual(
+    selectMemoryTools('根据文档内容创建Wiki', tools, [], true).map(tool => tool.function.name),
+    ['wiki'],
+  )
+})
+
+test('creating a Wiki from a long document adds only the required read tool', () => {
+  assert.deepEqual(
+    selectMemoryTools('根据文档内容创建Wiki', tools, [], true, true).map(tool => tool.function.name),
+    ['wiki', 'read'],
+  )
 })
 
 test('ordinary conversation exposes no project tools', () => {
@@ -19,9 +53,24 @@ test('ordinary conversation exposes no project tools', () => {
 })
 
 test('explicit MCP keeps only the selected MCP tools', () => {
-  assert.deepEqual(selectMemoryTools('调用 MCP 查询数据', tools).map(tool => tool.function.name), ['mcp__demo__run'])
+  assert.deepEqual(
+    selectMemoryTools('调用 MCP 查询数据', tools).map(tool => tool.function.name),
+    ['mcp__demo__run'],
+  )
 })
 
 test('attached document plus an add-to-scope instruction exposes write tools', () => {
-  assert.deepEqual(selectMemoryTools('查看文档，然后把这个规则合理的添加到规范范围', tools, [], true).map(tool => tool.function.name), ['read', 'glob', 'grep', 'write', 'edit', 'mkdir'])
+  assert.deepEqual(
+    selectMemoryTools('查看文档，然后把这个规则合理的添加到规范范围', tools, [], true).map(
+      tool => tool.function.name,
+    ),
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir'],
+  )
+})
+
+test('attached document that needs reading exposes read without keyword guessing', () => {
+  assert.deepEqual(
+    selectMemoryTools('修改下面的提示词', tools, [], false, true).map(tool => tool.function.name),
+    ['read'],
+  )
 })

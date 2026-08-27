@@ -6,6 +6,7 @@ import {
   buildCreativeToolDefinitions,
   buildMemoryDesktopToolDefinitions,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
+  parseCreativeToolArguments,
 } from '../creativeToolContract'
 import { createDesktopProjectToolExecutor } from '../desktopProjectTools'
 
@@ -76,6 +77,16 @@ test('wiki tool contract exposes evidence, scoped replace, and no bare link acti
   assert.deepEqual(properties.action.enum, ['inspect', 'scaffold', 'search', 'status', 'graph', 'validate', 'audit', 'evidence', 'closeout', 'replace', 'extend'])
   assert.equal(properties.replaceAll.type, 'boolean')
   assert.equal(properties.target, undefined)
+})
+
+test('wiki scaffold accepts a structured batch plan', () => {
+  assert.deepEqual(
+    parseCreativeToolArguments(call('wiki', {
+      action: 'scaffold',
+      plan: { directories: ['角色'], files: [{ path: '角色/主角.md', content: '# 主角\n' }] },
+    })),
+    { action: 'scaffold', plan: { directories: ['角色'], files: [{ path: '角色/主角.md', content: '# 主角\n' }] } },
+  )
 })
 
 test('3D scene tool schema requires a valid nested Storyboarder character', () => {
@@ -413,6 +424,25 @@ test('desktop project tools use external IPC for absolute file paths', async () 
   assert.ok(calls.some(call => call.command === 'dev_list_external_files'))
   assert.ok(calls.some(call => call.command === 'dev_write_external_file' && call.payload.input.path === '/tmp/output/result.txt'))
   assert.ok(calls.some(call => call.command === 'dev_replace_in_external_file' && call.payload.input.path === '/tmp/notes.txt'))
+})
+
+test('desktop project tools treat current-project absolute paths as project paths', async () => {
+  const calls: Array<{ command: string; payload: any }> = []
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    invoke: async (command, payload) => {
+      calls.push({ command, payload })
+      return fixtureInvoke(command, payload)
+    },
+  })
+
+  assert.match((await execute(call('read', { path: '/fixture/wiki/hot.md' }))).content, /林风/)
+  await execute(call('mkdir', { path: '/fixture/wiki/工作进度' }))
+  await execute(call('write', { path: '/fixture/wiki/工作进度/2026-08-27.md', content: '完成' }))
+
+  assert.ok(calls.some(item => item.command === 'dev_create_dir' && item.payload.input.relativePath === 'wiki/工作进度'))
+  assert.ok(calls.some(item => item.command === 'dev_write_file' && item.payload.input.relativePath === 'wiki/工作进度/2026-08-27.md'))
+  assert.equal(calls.some(item => item.command.includes('external')), false)
 })
 
 test('desktop project tools keep malformed local Skill paths out of the project reader', async () => {

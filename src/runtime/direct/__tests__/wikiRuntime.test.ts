@@ -2,9 +2,13 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
-import { executeWikiAction, type WikiWorkspace } from '../wikiRuntime'
+import { buildWikiContext, executeWikiAction, type WikiWorkspace } from '../wikiRuntime'
+import { WIKI_TEMPLATES } from '../wikiStructures'
 
-function memoryWiki(initial: Record<string, string | null> = {}, git?: { status: string; diff: string }) {
+function memoryWiki(
+  initial: Record<string, string | null> = {},
+  git?: { status: string; diff: string },
+) {
   const entries = new Map(Object.entries(initial))
   const workspace: WikiWorkspace = {
     async list() {
@@ -26,14 +30,20 @@ function memoryWiki(initial: Record<string, string | null> = {}, git?: { status:
       if (typeof content !== 'string') throw new Error(`文件不存在: ${path}`)
       return createHash('sha256').update(content).digest('hex')
     },
-    ...(git ? { async gitEvidence() { return git } } : {}),
+    ...(git
+      ? {
+          async gitEvidence() {
+            return git
+          },
+        }
+      : {}),
   }
   return { entries, workspace }
 }
 
 function developmentWiki(extra: Record<string, string | null> = {}) {
   return memoryWiki({
-    'docs': null,
+    docs: null,
     'docs/wiki': null,
     'docs/wiki/CLAUDE.md': '# Wiki\n',
     'docs/wiki/hot.md': '# Hot\n\n[[开发/事实]]\n',
@@ -64,7 +74,7 @@ test('inspect locates the one existing Wiki and reports Raw without creating it'
 
 test('scaffold fills a development Wiki without overwriting content or creating .raw', async () => {
   const { entries, workspace } = memoryWiki({
-    'docs': null,
+    docs: null,
     'docs/wiki': null,
     'docs/wiki/hot.md': '# 用户已有热缓存\n',
   })
@@ -75,7 +85,10 @@ test('scaffold fills a development Wiki without overwriting content or creating 
   assert.equal(entries.get('docs/wiki/hot.md'), '# 用户已有热缓存\n')
   assert.equal(typeof entries.get('docs/wiki/CLAUDE.md'), 'string')
   assert.equal(entries.has('docs/wiki/巡检报告'), true)
-  assert.equal([...entries.keys()].some(path => path === '.raw' || path.startsWith('.raw/')), false)
+  assert.equal(
+    [...entries.keys()].some(path => path === '.raw' || path.startsWith('.raw/')),
+    false,
+  )
 })
 
 test('scaffold keeps the film structure distinct from novel-only categories', async () => {
@@ -95,12 +108,17 @@ test('generic scaffold creates a concise mandatory-read entry without speculativ
   await executeWikiAction(workspace, { action: 'scaffold', type: 'generic' })
   await executeWikiAction(workspace, { action: 'validate', type: 'generic' })
 
-  assert.deepEqual(
-    [...entries.keys()].filter(path => path.startsWith('wiki/')).sort(),
-    ['wiki/hot.md', 'wiki/index.md', 'wiki/log.md', 'wiki/来源索引.md'],
-  )
+  assert.deepEqual([...entries.keys()].filter(path => path.startsWith('wiki/')).sort(), [
+    'wiki/hot.md',
+    'wiki/index.md',
+    'wiki/log.md',
+    'wiki/来源索引.md',
+  ])
   assert.match(String(entries.get('wiki/来源索引.md')), /## 证据记录/)
-  assert.match(String(entries.get('wiki/来源索引.md')), /\| Wiki 位置 \| 来源角色 \| 原始来源 \| 已处理范围 \| 写入时指纹 \| 记录时间 \|/)
+  assert.match(
+    String(entries.get('wiki/来源索引.md')),
+    /\| Wiki 位置 \| 来源角色 \| 原始来源 \| 已处理范围 \| 写入时指纹 \| 记录时间 \|/,
+  )
   assert.doesNotMatch(String(entries.get('wiki/来源索引.md')), /待补充|conversation-id/)
   assert.match(String(entries.get('wiki/index.md')), /# 项目入口/)
   assert.match(String(entries.get('wiki/index.md')), /查询当前状态：先读 \[\[hot\]\]/)
@@ -108,9 +126,56 @@ test('generic scaffold creates a concise mandatory-read entry without speculativ
   assert.ok(new TextEncoder().encode(String(entries.get('wiki/index.md'))).byteLength <= 4096)
 })
 
+test('scaffold applies one structured Wiki plan without overwriting existing user files', async () => {
+  const { entries, workspace } = memoryWiki({
+    wiki: null,
+    'wiki/index.md': WIKI_TEMPLATES.index,
+    'wiki/规范': null,
+    'wiki/规范/已有规范.md': '# 用户内容\n',
+  })
+
+  const output = await executeWikiAction(workspace, {
+    action: 'scaffold',
+    type: 'generic',
+    plan: {
+      directories: ['故事', '角色', '规范'],
+      files: [
+        { path: 'index.md', content: '# MV Wiki\n\n[[规范/MV生成规范]]\n' },
+        { path: '规范/MV生成规范.md', content: '# MV生成规范\n\n固定规则。\n' },
+        { path: '规范/已有规范.md', content: '# 不应覆盖\n' },
+      ],
+    },
+  })
+
+  assert.match(output, /planned-created: 2/)
+  assert.match(output, /planned-skipped: 1/)
+  assert.equal(entries.get('wiki/index.md'), '# MV Wiki\n\n[[规范/MV生成规范]]\n')
+  assert.equal(entries.get('wiki/规范/MV生成规范.md'), '# MV生成规范\n\n固定规则。\n')
+  assert.equal(entries.get('wiki/规范/已有规范.md'), '# 用户内容\n')
+  assert.equal(entries.has('wiki/故事'), true)
+  assert.equal(entries.has('wiki/角色'), true)
+  assert.equal(entries.has('wiki/hot.md'), true)
+})
+
+test('structured scaffold rejects the whole plan before writing an escaping path', async () => {
+  const { entries, workspace } = memoryWiki()
+
+  await assert.rejects(
+    () => executeWikiAction(workspace, {
+      action: 'scaffold',
+      plan: {
+        directories: ['规范'],
+        files: [{ path: '../项目外.md', content: '# 禁止\n' }],
+      },
+    }),
+    /不能越过项目根目录/,
+  )
+  assert.equal(entries.size, 0)
+})
+
 test('evidence returns full content fingerprints without echoing content or writing files', async () => {
   const project = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n',
     '资料/制度.md': '不得出现在工具输出中的制度正文',
   })
@@ -122,15 +187,28 @@ test('evidence returns full content fingerprints without echoing content or writ
   })
 
   assert.match(output, /\[来源证据\]/)
-  assert.match(output, new RegExp(`资料/制度\\.md sha256:${createHash('sha256').update('不得出现在工具输出中的制度正文').digest('hex')}`))
+  assert.match(
+    output,
+    new RegExp(
+      `资料/制度\\.md sha256:${createHash('sha256').update('不得出现在工具输出中的制度正文').digest('hex')}`,
+    ),
+  )
   assert.doesNotMatch(output, /制度正文/)
   assert.deepEqual(project.entries, before)
 })
 
 test('evidence rejects unsafe, missing, directory, and external sources', async () => {
-  const { workspace } = memoryWiki({ '资料': null, '资料/制度.md': '制度' })
+  const { workspace } = memoryWiki({ 资料: null, '资料/制度.md': '制度' })
 
-  for (const path of ['', '资料', '不存在.md', '../越界.md', '/tmp/外部.md', 'C:\\外部.md', 'https://example.com/rule']) {
+  for (const path of [
+    '',
+    '资料',
+    '不存在.md',
+    '../越界.md',
+    '/tmp/外部.md',
+    'C:\\外部.md',
+    'https://example.com/rule',
+  ]) {
     await assert.rejects(
       () => executeWikiAction(workspace, { action: 'evidence' as any, evidencePaths: [path] }),
       /来源证据|项目内|文件|路径|URL|空/,
@@ -140,7 +218,7 @@ test('evidence rejects unsafe, missing, directory, and external sources', async 
 
 test('nested category extension updates its parent index instead of flattening navigation', async () => {
   const { entries, workspace } = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n\n- [[角色/_index|角色]]\n',
     'wiki/角色': null,
     'wiki/角色/_index.md': '# 角色\n\n> 人物资料。\n',
@@ -185,10 +263,12 @@ test('search accepts one to three terms and scans each Wiki file only once', asy
   }
 
   const output = await executeWikiAction(project.workspace, {
-    action: 'search', query: ['Codex', '并行读取', '写入合同'],
+    action: 'search',
+    query: ['Codex', '并行读取', '写入合同'],
   })
 
-  for (const query of ['Codex', '并行读取', '写入合同']) assert.match(output, new RegExp(`查询：${query}`))
+  for (const query of ['Codex', '并行读取', '写入合同'])
+    assert.match(output, new RegExp(`查询：${query}`))
   assert.match(output, /开发\/工具循环\.md:3/)
   assert.match(output, /开发\/工具循环\.md:5/)
   assert.equal(reads.get('docs/wiki/开发/工具循环.md'), 1)
@@ -196,13 +276,41 @@ test('search accepts one to three terms and scans each Wiki file only once', asy
 
 test('search rejects invalid multi-term queries without weakening the string contract', async () => {
   const { workspace } = developmentWiki()
-  assert.match(await executeWikiAction(workspace, { action: 'search', query: '稳定结论' }), /查询：稳定结论/)
+  assert.match(
+    await executeWikiAction(workspace, { action: 'search', query: '稳定结论' }),
+    /查询：稳定结论/,
+  )
   for (const query of [[], [''], ['一', '二', '三', '四'], ['一', 2]]) {
     await assert.rejects(
       () => executeWikiAction(workspace, { action: 'search', query } as any),
       /1-3|关键词|字符串/,
     )
   }
+})
+
+test('wiki context reads the entry first and returns continuity sources with coverage', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md':
+      '# 入口\n\n- [[创作规范/写作规范]]\n- [[状态/当前进度]]\n- [[剧情/总纲]]\n- [[角色/林风]]\n',
+    'wiki/创作规范': null,
+    'wiki/创作规范/写作规范.md': '# 写作规范\n保持第三人称。',
+    'wiki/状态': null,
+    'wiki/状态/当前进度.md': '# 当前进度\n下一集写决战。',
+    'wiki/剧情': null,
+    'wiki/剧情/总纲.md': '# 总纲\n林风必须完成决战。',
+    'wiki/角色': null,
+    'wiki/角色/林风.md': '# 林风\n主角。',
+  })
+  const context = await buildWikiContext(project.workspace, {
+    question: '继续写下一集',
+    mode: 'continuity',
+  })
+  assert.equal(context.entry.path, 'index.md')
+  assert.ok(context.sources.some(source => source.path === '状态/当前进度.md'))
+  assert.ok(context.sources.some(source => source.path === '剧情/总纲.md'))
+  assert.equal(context.coverage, 'partial')
+  assert.ok(context.missingRoutes.includes('上一集'))
 })
 
 test('status reports development category counts and latest operation', async () => {
@@ -219,15 +327,16 @@ test('status reports development category counts and latest operation', async ()
 test('graph requires confirmed seed pages and does not generate a full Wiki graph', async () => {
   const { entries, workspace } = developmentWiki()
 
+  await assert.rejects(() => executeWikiAction(workspace, { action: 'graph' }), /种子页面/)
   await assert.rejects(
-    () => executeWikiAction(workspace, { action: 'graph' }),
-    /种子页面/,
-  )
-  await assert.rejects(
-    () => executeWikiAction(workspace, { action: 'graph', evidencePaths: ['开发/事实.md'], depth: 3 }),
+    () =>
+      executeWikiAction(workspace, { action: 'graph', evidencePaths: ['开发/事实.md'], depth: 3 }),
     /depth 仅支持 1 或 2/,
   )
-  assert.equal([...entries.keys()].some(path => path.endsWith('.canvas')), false)
+  assert.equal(
+    [...entries.keys()].some(path => path.endsWith('.canvas')),
+    false,
+  )
 })
 
 test('graph writes a scoped Canvas with clickable file nodes and real Markdown links', async () => {
@@ -246,8 +355,15 @@ test('graph writes a scoped Canvas with clickable file nodes and real Markdown l
   const files = canvas.nodes.map((node: { type: string; file?: string }) => node.file).sort()
 
   assert.match(output, /甲-关系图\.canvas/)
-  assert.deepEqual(files, ['docs/wiki/开发/乙.md', 'docs/wiki/开发/事实.md', 'docs/wiki/开发/甲.md'])
-  assert.equal(canvas.nodes.every((node: { type: string }) => node.type === 'file'), true)
+  assert.deepEqual(files, [
+    'docs/wiki/开发/乙.md',
+    'docs/wiki/开发/事实.md',
+    'docs/wiki/开发/甲.md',
+  ])
+  assert.equal(
+    canvas.nodes.every((node: { type: string }) => node.type === 'file'),
+    true,
+  )
   assert.equal(canvas.edges.length, 2)
   assert.equal(JSON.stringify(canvas).includes('不存在'), false)
   assert.equal(JSON.stringify(canvas).includes('无关'), false)
@@ -263,7 +379,7 @@ test('graph previews existing Canvas updates and preserves unrelated nodes and l
     edges: [],
   })
   const project = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/A.md': '# A\n\n[[B]]\n',
     'wiki/B.md': '# B\n',
     'wiki/手工.md': '# 手工\n',
@@ -271,18 +387,26 @@ test('graph previews existing Canvas updates and preserves unrelated nodes and l
   })
 
   const preview = await executeWikiAction(project.workspace, {
-    action: 'graph', evidencePaths: ['A.md'], path: 'A-关系图.canvas',
+    action: 'graph',
+    evidencePaths: ['A.md'],
+    path: 'A-关系图.canvas',
   })
   assert.match(preview, /预览（未写盘/)
   assert.equal(project.entries.get('wiki/A-关系图.canvas'), existing)
 
   await executeWikiAction(project.workspace, {
-    action: 'graph', evidencePaths: ['A.md'], path: 'A-关系图.canvas', apply: true,
+    action: 'graph',
+    evidencePaths: ['A.md'],
+    path: 'A-关系图.canvas',
+    apply: true,
   })
   const canvas = JSON.parse(String(project.entries.get('wiki/A-关系图.canvas')))
   assert.equal(canvas.nodes.find((node: { id: string }) => node.id === 'a').x, 700)
   assert.equal(canvas.nodes.find((node: { id: string }) => node.id === 'manual').x, 900)
-  assert.equal(canvas.nodes.some((node: { file?: string }) => node.file === 'wiki/B.md'), true)
+  assert.equal(
+    canvas.nodes.some((node: { file?: string }) => node.file === 'wiki/B.md'),
+    true,
+  )
 })
 
 test('validate checks required development entries and stable entry links', async () => {
@@ -308,7 +432,10 @@ test('audit resolves exact and unique links but reports duplicate basename ambig
     'docs/wiki/开发/链接.md': '# 链接\n\n[[开发/A/同名]] [[唯一]] [[同名]]\n',
   })
 
-  const output = await executeWikiAction(workspace, { action: 'audit', evidencePaths: ['开发/链接.md'] })
+  const output = await executeWikiAction(workspace, {
+    action: 'audit',
+    evidencePaths: ['开发/链接.md'],
+  })
 
   assert.match(output, /歧义链接.*\[\[同名\]\]/)
   assert.doesNotMatch(output, /\[\[开发\/A\/同名\]\].*不存在/)
@@ -319,7 +446,8 @@ test('audit separates navigation risks, candidates, and historical hygiene', asy
   const { entries, workspace } = developmentWiki({
     'docs/wiki/hot.md': '# Hot\n\n[[导航缺失]]\n',
     'docs/wiki/log.md': '# Log\n\n[[日志缺失]]\n',
-    'docs/wiki/开发/风险.md': '# 风险\n\n[[普通缺失]]\n`[[代码假链接]]`\n<!-- [[注释假链接]] -->\n\\[[转义假链接]]\n',
+    'docs/wiki/开发/风险.md':
+      '# 风险\n\n[[普通缺失]]\n`[[代码假链接]]`\n<!-- [[注释假链接]] -->\n\\[[转义假链接]]\n',
     'docs/wiki/开发/孤儿.md': '# 孤儿\n',
     'docs/wiki/归档/旧页.md': '# 旧页\n\n[[归档缺失]]\n',
     'docs/wiki/开发/旧结论.md': '# 旧结论\n\n状态：已替代\n\n[[历史缺失]]\n',
@@ -334,7 +462,8 @@ test('audit separates navigation risks, candidates, and historical hygiene', asy
   assert.match(output, /\[历史卫生\][\s\S]*日志缺失/)
   assert.match(output, /\[历史卫生\][\s\S]*归档缺失/)
   assert.match(output, /\[历史卫生\][\s\S]*历史缺失/)
-  for (const pseudo of ['代码假链接', '注释假链接', '转义假链接']) assert.doesNotMatch(output, new RegExp(pseudo))
+  for (const pseudo of ['代码假链接', '注释假链接', '转义假链接'])
+    assert.doesNotMatch(output, new RegExp(pseudo))
   assert.deepEqual(entries, before)
 })
 
@@ -343,10 +472,14 @@ test('audit evidencePaths restrict source scanning and directory size is not an 
     'docs/wiki/开发/范围内.md': '# 范围内\n\n[[范围内缺失]]\n',
     'docs/wiki/开发/范围外.md': '# 范围外\n\n[[范围外缺失]]\n',
   }
-  for (let index = 0; index < 10; index += 1) extra[`docs/wiki/开发/大目录/${index}.md`] = `# ${index}\n`
+  for (let index = 0; index < 10; index += 1)
+    extra[`docs/wiki/开发/大目录/${index}.md`] = `# ${index}\n`
   const { workspace } = developmentWiki(extra)
 
-  const output = await executeWikiAction(workspace, { action: 'audit', evidencePaths: ['开发/范围内.md'] })
+  const output = await executeWikiAction(workspace, {
+    action: 'audit',
+    evidencePaths: ['开发/范围内.md'],
+  })
 
   assert.match(output, /范围内缺失/)
   assert.doesNotMatch(output, /范围外缺失/)
@@ -370,7 +503,7 @@ test('audit reports current, changed, missing, unverifiable, and incomplete evid
 | [[制度/当前#不存在章节]] | 对话 | \`资料/当前.md\` | 全文 | \`sha256:${current}\` | 2026-08-05T22:00:00+08:00 |
 `
   const project = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n',
     'wiki/hot.md': '# 热缓存\n',
     'wiki/log.md': '# Wiki Log\n',
@@ -401,7 +534,7 @@ test('audit reports current, changed, missing, unverifiable, and incomplete evid
 test('audit reports an unsafe Wiki location as incomplete and continues with valid records', async () => {
   const hash = createHash('sha256').update('当前制度').digest('hex')
   const { workspace } = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n',
     'wiki/hot.md': '# 热缓存\n',
     'wiki/log.md': '# Wiki Log\n',
@@ -429,7 +562,7 @@ test('audit rejects a Wiki page as its own original source', async () => {
   const page = '# 当前\n\n## 期限\n三十天。\n'
   const hash = createHash('sha256').update(page).digest('hex')
   const { workspace } = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n',
     'wiki/hot.md': '# 热缓存\n',
     'wiki/log.md': '# Wiki Log\n',
@@ -455,7 +588,7 @@ test('audit resolves a unique Obsidian short link in an evidence record', async 
   const source = '当前制度'
   const hash = createHash('sha256').update(source).digest('hex')
   const { workspace } = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n',
     'wiki/hot.md': '# 热缓存\n',
     'wiki/log.md': '# Wiki Log\n',
@@ -481,7 +614,7 @@ test('audit resolves a unique Obsidian short link in an evidence record', async 
 test('audit scopes evidence records to the requested Wiki page', async () => {
   const hash = createHash('sha256').update('已变化').digest('hex')
   const { workspace } = memoryWiki({
-    'wiki': null,
+    wiki: null,
     'wiki/index.md': '# 全库目录\n',
     'wiki/hot.md': '# 热缓存\n',
     'wiki/log.md': '# Wiki Log\n',
@@ -501,7 +634,10 @@ test('audit scopes evidence records to the requested Wiki page', async () => {
     '资料/乙.md': '当前',
   })
 
-  const output = await executeWikiAction(workspace, { action: 'audit', evidencePaths: ['制度/甲.md'] })
+  const output = await executeWikiAction(workspace, {
+    action: 'audit',
+    evidencePaths: ['制度/甲.md'],
+  })
 
   assert.match(output, /制度\/甲#期限/)
   assert.doesNotMatch(output, /制度\/乙#期限/)
@@ -527,13 +663,24 @@ test('replace is dry-run by default and writes only after apply', async () => {
   const project = developmentWiki({ 'docs/wiki/开发/名称.md': '# 名称\n\n旧名\n' })
 
   const preview = await executeWikiAction(project.workspace, {
-    action: 'replace', path: '开发/名称.md', oldText: '旧名', newText: '新名', reason: '统一名称', basis: '用户确认',
+    action: 'replace',
+    path: '开发/名称.md',
+    oldText: '旧名',
+    newText: '新名',
+    reason: '统一名称',
+    basis: '用户确认',
   })
   assert.match(preview, /预览（未写盘/)
   assert.equal(project.entries.get('docs/wiki/开发/名称.md'), '# 名称\n\n旧名\n')
 
   const applied = await executeWikiAction(project.workspace, {
-    action: 'replace', path: '开发/名称.md', oldText: '旧名', newText: '新名', reason: '统一名称', basis: '用户确认', apply: true,
+    action: 'replace',
+    path: '开发/名称.md',
+    oldText: '旧名',
+    newText: '新名',
+    reason: '统一名称',
+    basis: '用户确认',
+    apply: true,
   })
   assert.match(applied, /\[修复回执\]/)
   assert.match(applied, /验证：内容一致=是，新值存在=是，旧值剩余=0/)
@@ -547,9 +694,14 @@ test('replace requires one explicit Wiki Markdown path', async () => {
   })
 
   await assert.rejects(
-    () => executeWikiAction(project.workspace, {
-      action: 'replace', oldText: '旧名', newText: '新名', reason: '统一名称', basis: '用户确认',
-    }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'replace',
+        oldText: '旧名',
+        newText: '新名',
+        reason: '统一名称',
+        basis: '用户确认',
+      }),
     /必须提供目标 Markdown 文件路径/,
   )
   assert.match(String(project.entries.get('docs/wiki/开发/名称.md')), /旧名/)
@@ -560,32 +712,57 @@ test('replace requires a reason and traceable basis', async () => {
   const project = developmentWiki({ 'docs/wiki/开发/名称.md': '# 名称\n\n旧名\n' })
 
   await assert.rejects(
-    () => executeWikiAction(project.workspace, {
-      action: 'replace', path: '开发/名称.md', oldText: '旧名', newText: '新名', basis: '用户确认',
-    }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'replace',
+        path: '开发/名称.md',
+        oldText: '旧名',
+        newText: '新名',
+        basis: '用户确认',
+      }),
     /reason 和 basis/,
   )
   await assert.rejects(
-    () => executeWikiAction(project.workspace, {
-      action: 'replace', path: '开发/名称.md', oldText: '旧名', newText: '新名', reason: '统一名称',
-    }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'replace',
+        path: '开发/名称.md',
+        oldText: '旧名',
+        newText: '新名',
+        reason: '统一名称',
+      }),
     /reason 和 basis/,
   )
 })
 
 test('replace rejects outside-Wiki and non-Markdown targets', async () => {
-  const project = developmentWiki({ 'docs/other.txt': '旧名\n', 'docs/wiki/开发/资料.canvas': '{}\n' })
+  const project = developmentWiki({
+    'docs/other.txt': '旧名\n',
+    'docs/wiki/开发/资料.canvas': '{}\n',
+  })
 
   await assert.rejects(
-    () => executeWikiAction(project.workspace, {
-      action: 'replace', path: '../other.txt', oldText: '旧名', newText: '新名', reason: '修正', basis: '用户确认',
-    }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'replace',
+        path: '../other.txt',
+        oldText: '旧名',
+        newText: '新名',
+        reason: '修正',
+        basis: '用户确认',
+      }),
     /当前 Wiki 内的 Markdown 文件/,
   )
   await assert.rejects(
-    () => executeWikiAction(project.workspace, {
-      action: 'replace', path: '开发/资料.canvas', oldText: '{}', newText: '{"ok":true}', reason: '修正', basis: '用户确认',
-    }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'replace',
+        path: '开发/资料.canvas',
+        oldText: '{}',
+        newText: '{"ok":true}',
+        reason: '修正',
+        basis: '用户确认',
+      }),
     /当前 Wiki 内的 Markdown 文件/,
   )
 })
@@ -594,20 +771,39 @@ test('replace previews line evidence and rejects multiple matches unless replace
   const project = developmentWiki({ 'docs/wiki/开发/重复.md': '# 重复\n\n旧名\n\n旧名\n' })
 
   const preview = await executeWikiAction(project.workspace, {
-    action: 'replace', path: '开发/重复.md', oldText: '旧名', newText: '新名', reason: '统一名称', basis: '用户确认',
+    action: 'replace',
+    path: '开发/重复.md',
+    oldText: '旧名',
+    newText: '新名',
+    reason: '统一名称',
+    basis: '用户确认',
   })
   assert.match(preview, /重复\.md/)
   assert.match(preview, /命中行：3、5/)
   assert.match(preview, /命中 2 处/)
   assert.match(String(project.entries.get('docs/wiki/开发/重复.md')), /旧名.*旧名/s)
   await assert.rejects(
-    () => executeWikiAction(project.workspace, {
-      action: 'replace', path: '开发/重复.md', oldText: '旧名', newText: '新名', reason: '统一名称', basis: '用户确认', apply: true,
-    }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'replace',
+        path: '开发/重复.md',
+        oldText: '旧名',
+        newText: '新名',
+        reason: '统一名称',
+        basis: '用户确认',
+        apply: true,
+      }),
     /多处命中.*replaceAll/s,
   )
   await executeWikiAction(project.workspace, {
-    action: 'replace', path: '开发/重复.md', oldText: '旧名', newText: '新名', reason: '统一名称', basis: '用户确认', replaceAll: true, apply: true,
+    action: 'replace',
+    path: '开发/重复.md',
+    oldText: '旧名',
+    newText: '新名',
+    reason: '统一名称',
+    basis: '用户确认',
+    replaceAll: true,
+    apply: true,
   })
   assert.doesNotMatch(String(project.entries.get('docs/wiki/开发/重复.md')), /旧名/)
 })
@@ -616,11 +812,25 @@ test('extend remains available for Everything but link is no longer a Wiki actio
   const project = developmentWiki()
 
   await assert.rejects(
-    () => executeWikiAction(project.workspace, { action: 'link' as never, path: '开发/事实.md', reason: '补回链', basis: '巡检' }),
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'link' as never,
+        path: '开发/事实.md',
+        reason: '补回链',
+        basis: '巡检',
+      }),
     /不支持的 Wiki action/,
   )
-  assert.match(await executeWikiAction(project.workspace, {
-    action: 'extend', category: '产品', description: '产品事实', reason: '扩展', basis: '用户确认', apply: true,
-  }), /\[修复回执\]/)
+  assert.match(
+    await executeWikiAction(project.workspace, {
+      action: 'extend',
+      category: '产品',
+      description: '产品事实',
+      reason: '扩展',
+      basis: '用户确认',
+      apply: true,
+    }),
+    /\[修复回执\]/,
+  )
   assert.equal(project.entries.get('docs/wiki/产品/_index.md'), '# 产品\n\n> 产品事实\n')
 })

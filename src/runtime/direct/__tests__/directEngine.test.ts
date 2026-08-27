@@ -781,6 +781,29 @@ test('runDirectChatCompletion stops after a successful terminal tool', async () 
   assert.equal(result.text, '已写入 wiki/结果.md')
 })
 
+test('runDirectChatCompletion stops after a matching successful batch tool call', async () => {
+  let requests = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '创建 Wiki' }],
+    tools: [{ type: 'function', function: { name: 'wiki' } }],
+    stopAfterSuccessfulToolCall: call => {
+      const args = JSON.parse(call.function.arguments)
+      return call.function.name === 'wiki' && args.action === 'scaffold' && Boolean(args.plan)
+    },
+    onText: () => {},
+    executeTool: async () => ({ content: 'created-or-completed: wiki', status: 'succeeded' }),
+    sendChatCompletion: async () => {
+      requests += 1
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_wiki', function: { name: 'wiki', arguments: '{"action":"scaffold","plan":{"directories":[],"files":[]}}' } }] } }] }),
+        '[DONE]',
+      ])
+    },
+  })
+  assert.equal(requests, 1)
+  assert.equal(result.text, 'created-or-completed: wiki')
+})
+
 test('runDirectChatCompletion rejects non-write tools at the request limit', async () => {
   await assert.rejects(() => runDirectChatCompletion({
     messages: [{ role: 'user', content: '读取' }],
@@ -831,14 +854,14 @@ test('runDirectChatCompletion compacts prior tool rounds when enabled', async ()
   const result = await runDirectChatCompletion({
     messages: [{ role: 'system', content: '合同' }, { role: 'user', content: '任务' }],
     tools: [{ type: 'function', function: { name: 'read' } }],
-    maxModelRequests: 3,
+    maxModelRequests: 4,
     compactToolHistory: true,
     onText: () => {},
     executeTool: async call => ({ content: `结果 ${call.function.arguments}` }),
     sendChatCompletion: async request => {
       requests.push(request.messages)
       round += 1
-      if (round < 3) return sseResponse([
+      if (round < 4) return sseResponse([
         JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${round}`, function: { name: 'read', arguments: `{\"path\":\"${round}\"}` } }] } }] }),
         '[DONE]',
       ])
@@ -846,9 +869,12 @@ test('runDirectChatCompletion compacts prior tool rounds when enabled', async ()
     },
   })
   assert.equal(result.text, '完成')
-  assert.equal(requests.length, 3)
-  assert.equal(requests[2].filter(message => message.role === 'tool').length, 1)
-  assert.equal(JSON.stringify(requests[2]).includes('"path":"1"'), false)
+  assert.equal(requests.length, 4)
+  const toolPaths = (messages: any[]) => messages.flatMap(message => message.tool_calls || [])
+    .map(call => JSON.parse(call.function.arguments).path)
+  assert.equal(requests[2].filter(message => message.role === 'tool').length, 2)
+  assert.deepEqual(toolPaths(requests[2]), ['1', '2'])
+  assert.deepEqual(toolPaths(requests[3]), ['2', '3'])
 })
 
 test('runDirectChatCompletion does not spend logical request budget on HTTP retry callbacks', async () => {

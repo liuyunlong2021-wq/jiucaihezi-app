@@ -1,5 +1,6 @@
 import type { DirectToolCall } from '@/runtime/direct/directTypes'
 import { isMcpToolReadOnly } from '@/runtime/tools/mcpBridge'
+import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
 
 function argumentsOf(call: DirectToolCall): Record<string, unknown> {
   try {
@@ -27,10 +28,12 @@ function isPathExplicitlyMentioned(text: string, path: string): boolean {
   return false
 }
 
-export function memoryToolNeedsApproval(call: DirectToolCall, currentUserText: string): boolean {
+export function memoryToolNeedsApproval(call: DirectToolCall, currentUserText: string, projectRoot = ''): boolean {
   const name = call.function.name
   const args = argumentsOf(call)
-  const paths = [args.path, args.workdir].filter((value): value is string => typeof value === 'string' && isAbsolutePath(value))
+  const paths = [args.path, args.workdir].filter((value): value is string => typeof value === 'string'
+    && isAbsolutePath(value)
+    && resolveCreativeProjectPath(value, projectRoot, true).external)
   for (const path of paths) {
     if (!isPathExplicitlyMentioned(currentUserText, path)) throw new Error(`项目外路径必须由用户在本轮明确提供: ${path}`)
   }

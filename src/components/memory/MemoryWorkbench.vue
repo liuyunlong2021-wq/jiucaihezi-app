@@ -50,7 +50,7 @@ import {
 import { getCursorPosition, getPlainText, setEditorText } from '@/composables/useContentEditable'
 import { detectFileType, processFile } from '@/composables/useFileUpload'
 import { useFilteredList } from '@/composables/useFilteredList'
-import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
+import { MAX_INLINE_ATTACHMENT_CHARS, type DirectMessageFile, type ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { SkillConfig } from '@/types/skill'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
@@ -105,6 +105,12 @@ const input = ref('')
 const editingTurnId = ref('')
 const commandMenuOpen = ref(false)
 const commandMenuRef = ref<HTMLElement | null>(null)
+const wikiWriteOpen = ref(false)
+const wikiWriteTargets = ref<ProjectResource[]>([])
+const wikiWriteSelected = ref<ProjectResource | null>(null)
+const wikiWriteSource = ref('')
+const wikiWriteRoot = ref('')
+const wikiWritePending = ref(false)
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
@@ -367,9 +373,9 @@ const currentModelLabel = computed(() => selectedModel()?.label || agentStore.cu
 const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
 const commonCommands = [
-  { id: 'wiki-search', label: '查询 Wiki', icon: 'search', prompt: '查询 Wiki 中与【主题】有关的内容，先读取入口，再根据目录和链接查找相关页面。' },
-  { id: 'wiki-write', label: '写入 Wiki', icon: 'save', prompt: '请将【内容】整理后写入 Wiki 的【目标文件或文件夹】。先读取入口和目标文件，确认结构后再写入，避免重复和冲突。' },
-  { id: 'wiki-create', label: '根据 Wiki 创作', icon: 'auto_stories', prompt: '请先读取 Wiki 中与【项目、角色、场景或大纲】有关的资料，再继续创作【内容】。遵守 Wiki 中已有的设定、格式和时间线。' },
+  { id: 'wiki-search', label: '查询 Wiki', icon: 'search', prompt: '@Wiki 查询【主题】。先读取入口，再根据目录和链接查找相关页面。' },
+  { id: 'wiki-write', label: '写入 Wiki', icon: 'save', prompt: '@Wiki 写入【内容】到【目标文件或文件夹】。先读取入口和目标文件，确认结构后再写入，避免重复和冲突。' },
+  { id: 'wiki-create', label: '根据 Wiki 创作', icon: 'auto_stories', prompt: '@Wiki 根据【项目、角色、场景或大纲】资料创作【内容】。遵守 Wiki 中已有的设定、格式和时间线。' },
   { id: 'read-file', label: '读取文件', icon: 'description', prompt: '读取【文件路径】并总结重点。' },
   { id: 'edit-file', label: '修改文件', icon: 'edit', prompt: '读取【文件路径】，将【修改要求】合并进去，保留原有结构。' },
   { id: 'create-file', label: '创建文件', icon: 'note-add', prompt: '根据【要求】创建文件，保存到【目标文件夹】。' },
@@ -381,7 +387,7 @@ const commonCommands = [
   { id: 'document', label: '创建文档', icon: 'article', prompt: '根据【要求】创建【Word、Markdown、文本或 HTML】文档，保存到【目标文件夹】。' },
   { id: 'scene-3d', label: '创建 3D 场景', icon: 'view-in-ar', prompt: '根据【空间、人物和镜头要求】创建一个可编辑的 3D 场景。' },
   { id: 'media', label: '生成媒体', icon: 'image', prompt: '根据 Wiki 和当前项目设定，生成【图片、视频、配音、音乐或音效】。' },
-  { id: 'mcp', label: '调用 MCP', icon: 'extension', prompt: '使用合适的 MCP 工具完成【任务】；执行前说明将要做什么。' },
+  { id: 'mcp', label: '调用 MCP', icon: 'extension', prompt: '@MCP 使用合适的 MCP 工具完成【任务】；执行前说明将要做什么。' },
 ]
 const primaryCommands = commonCommands.slice(0, 7)
 const moreCommands = commonCommands.slice(7)
@@ -768,8 +774,81 @@ function insertCommand(command: { prompt: string }) {
   })
 }
 
-function suggestWikiWrite() {
-  insertCommand({ prompt: '请将上一条回答中适合长期保留的内容整理后写入 Wiki。先读取 Wiki 入口和目标文件，确认结构后再写入，避免重复和冲突。' })
+function wikiWritePathAllowed(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`)
+}
+
+function wikiWriteTargetName(resource: ProjectResource): string {
+  const depth = Math.max(0, resource.path.split('/').length - wikiWriteRoot.value.split('/').length - 1)
+  return `${'  '.repeat(depth)}${resource.isDirectory ? '目录 · ' : '文件 · '}${resource.name}`
+}
+
+async function suggestWikiWrite(turn: ConversationTurn) {
+  const owner = projectOwner.value
+  const source = displayTurnContent(turn).trim()
+  if (!owner || !source) return
+  try {
+    const resources = await files.list(owner)
+    const root = ['wiki', 'docs/wiki'].find(candidate => resources.some(resource =>
+      resource.path === candidate || resource.path.startsWith(`${candidate}/`))) || ''
+    if (!root) throw new Error('当前项目没有 Wiki 文件夹')
+    wikiWriteRoot.value = root
+    wikiWriteTargets.value = resources
+      .filter(resource => wikiWritePathAllowed(resource.path, root)
+        && (resource.isDirectory || /\.md$/i.test(resource.path)))
+      .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.path.localeCompare(b.path, 'zh-CN'))
+    wikiWriteSelected.value = null
+    wikiWriteSource.value = source
+    wikiWriteOpen.value = true
+  } catch (cause) {
+    error.value = `打开 Wiki 写入目标失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
+function closeWikiWrite() {
+  if (wikiWritePending.value) return
+  wikiWriteOpen.value = false
+  wikiWriteSelected.value = null
+  wikiWriteSource.value = ''
+}
+
+async function commitWikiWrite() {
+  const target = wikiWriteSelected.value
+  const owner = projectOwner.value
+  const root = wikiWriteRoot.value
+  const source = wikiWriteSource.value.trim()
+  if (!target || !owner || !source || !wikiWritePathAllowed(target.path, root) || wikiWritePending.value) return
+  wikiWritePending.value = true
+  error.value = ''
+  try {
+    let savedPath = target.path
+    if (target.isDirectory) {
+      const filename = (await safePrompt('新建 Markdown 文件名', '新笔记.md', { forceDom: desktopRuntime }))?.trim()
+      if (!filename) return
+      if (!/\.md$/i.test(filename) || /[\\/\0]/.test(filename) || filename === '.' || filename === '..') {
+        throw new Error('文件名必须是合法的 Markdown 文件名')
+      }
+      savedPath = `${target.path}/${filename}`
+      await files.createText(owner, savedPath, `${source}\n`)
+    } else {
+      const current = await files.readText(target)
+      const existing = current.content.trimEnd()
+      const content = existing ? `${existing}\n\n---\n\n${source}\n` : `${source}\n`
+      const result = await files.writeText(target, content, current.revision)
+      if (result.status === 'conflict') throw new Error('目标文件已被其他位置修改，请重新打开后再写入')
+      if (result.status !== 'saved') throw new Error('目标文件不存在')
+    }
+    wikiWriteOpen.value = false
+    wikiWriteSelected.value = null
+    wikiWriteSource.value = ''
+    status.value = `已写入 Wiki：${savedPath}`
+    const resource = (await files.list(owner)).find(item => item.path === savedPath)
+    if (resource) await openWikiResource(resource)
+  } catch (cause) {
+    error.value = `写入 Wiki 失败：${cause instanceof Error ? cause.message : String(cause)}`
+  } finally {
+    wikiWritePending.value = false
+  }
 }
 
 function shouldSuggestWikiWrite(turn: ConversationTurn): boolean {
@@ -1261,7 +1340,9 @@ async function addProjectFileReference(resource: ProjectResource) {
       if (!attachments.value.some(item => item.readablePath === readablePath)) attachments.value.push({
         id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'application/octet-stream',
         size: resource.size || 0, kind: 'file', value: '', resourcePath: resource.path,
-        readablePath, characterCount: content.length,
+        readablePath,
+        ...(content.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent: content } : {}),
+        characterCount: content.length,
       })
     } finally {
       referencingDocuments.delete(referenceKey)
@@ -1272,6 +1353,7 @@ async function addProjectFileReference(resource: ProjectResource) {
   if (!attachments.value.some(item => item.resourcePath === resource.path)) attachments.value.push({
     id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'text/plain', size: text.size,
     kind: 'file', value: '', resourcePath: resource.path, readablePath: resource.path,
+    ...(text.content.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent: text.content } : {}),
     characterCount: text.content.length,
   })
 }
@@ -1534,7 +1616,9 @@ async function addAttachmentFiles(selected: File[]) {
         if (type === 'text') {
           resolved.push({
             id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
-            resourcePath: resource.path, readablePath: resource.path, characterCount: textContent.length,
+            resourcePath: resource.path, readablePath: resource.path,
+            ...(textContent.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent } : {}),
+            characterCount: textContent.length,
           })
           continue
         }
@@ -1566,7 +1650,9 @@ async function addAttachmentFiles(selected: File[]) {
         existing.add(readablePath)
         resolved.push({
           id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
-          resourcePath: resource.path, readablePath, characterCount: readableContent.length,
+          resourcePath: resource.path, readablePath,
+          ...(readableContent.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent: readableContent } : {}),
+          characterCount: readableContent.length,
         })
         continue
       }
@@ -2087,7 +2173,7 @@ function readDataUrl(file: File): Promise<string> {
             class="memory-wiki-suggest"
             type="button"
             title="把这条回答整理后写入 Wiki"
-            @click="suggestWikiWrite"
+            @click="suggestWikiWrite(turn)"
           ><JcIcon name="save" /><span>写入 Wiki</span></button>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
@@ -2364,6 +2450,34 @@ function readDataUrl(file: File): Promise<string> {
         @synced="refreshProjectView()"
       />
     </aside>
+    <Teleport to="body">
+      <div v-if="wikiWriteOpen" class="memory-wiki-write-backdrop" @click.self="closeWikiWrite">
+        <section class="memory-wiki-write-dialog" role="dialog" aria-modal="true" aria-label="选择 Wiki 写入位置">
+          <header>
+            <strong>选择 Wiki 写入位置</strong>
+            <button class="icon-button" type="button" title="关闭" aria-label="关闭" :disabled="wikiWritePending" @click="closeWikiWrite"><JcIcon name="close" /></button>
+          </header>
+          <p class="memory-wiki-write-hint">选择 Markdown 文件追加，或选择文件夹新建文件。</p>
+          <div class="memory-wiki-write-list">
+            <button
+              v-for="resource in wikiWriteTargets"
+              :key="resource.path"
+              type="button"
+              class="memory-wiki-write-target"
+              :class="{ selected: wikiWriteSelected?.path === resource.path }"
+              @click="wikiWriteSelected = resource"
+            >{{ wikiWriteTargetName(resource) }}</button>
+            <p v-if="!wikiWriteTargets.length" class="memory-model-empty">没有可写入的 Markdown 文件或文件夹</p>
+          </div>
+          <footer>
+            <button type="button" class="memory-editing-cancel" :disabled="wikiWritePending" @click="closeWikiWrite">取消</button>
+            <button type="button" class="send-button memory-wiki-write-submit" :disabled="!wikiWriteSelected || wikiWritePending" title="确认写入" @click="commitWikiWrite">
+              <JcIcon :name="wikiWritePending ? 'sync' : 'save'" :class="{ spinning: wikiWritePending }" />
+            </button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
     <div v-if="recordingScene" class="memory-scene-recorder" aria-hidden="true">
       <Scene3DEditor ref="recordingSceneEditor" :document="recordingScene" recording-only />
     </div>
@@ -2464,6 +2578,15 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-wiki-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-wiki-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
+.memory-wiki-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
+.memory-wiki-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
+.memory-wiki-write-dialog > header, .memory-wiki-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.memory-wiki-write-dialog > footer { justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); border-bottom: 0; }
+.memory-wiki-write-hint { margin: 0; padding: 10px 12px 6px; color: var(--ink3); font-size: 12px; }
+.memory-wiki-write-list { max-height: min(480px, 58vh); overflow-y: auto; padding: 4px 8px 10px; }
+.memory-wiki-write-target { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 13px; text-align: left; white-space: pre; }
+.memory-wiki-write-target:hover, .memory-wiki-write-target.selected { background: color-mix(in srgb, var(--olive) 14%, transparent); color: var(--olive); }
+.memory-wiki-write-submit { border-color: var(--olive); background: var(--olive); color: white; }
 .memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-media-plan-link:hover { border-color: var(--olive); }
 .memory-media-plan-link .mso { color: var(--olive); }

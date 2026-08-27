@@ -19,14 +19,29 @@ test('memory right chat dock separates preview layout and collapses to a compact
   assert.match(workbench, /const MEMORY_CHAT_COMPACT = 56/)
   assert.match(workbench, /chatDockMode.*expanded.*compact|chatDockMode.*compact.*expanded/)
   assert.doesNotMatch(workbench, /minmax\(420px, 1fr\)/)
-  assert.match(workbench, /\.memory-preview[^}]*position: relative|\.memory-preview[^}]*position: static/)
+  assert.match(
+    workbench,
+    /\.memory-preview[^}]*position: relative|\.memory-preview[^}]*position: static/,
+  )
   assert.match(workbench, /if \(previewResource\.value\) closePreview\(\)/)
   assert.match(workbench, /creationMounted\.value && !\(await closeCreationHost\(\)\)/)
   assert.match(workbench, /if \(creationClosePromise\) return creationClosePromise/)
-  assert.match(workbench, /if \(generation !== resourceOpenGeneration\) return\s*prepareDockLayout\(\)/)
-  assert.match(workbench, /function prepareDockLayout\(\) \{\s*if \(window\.innerWidth < 940\) return/)
-  assert.match(workbench, /\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\) var\(--memory-chat-width\); \}/)
-  assert.doesNotMatch(workbench, /jcMemoryCreationWidth|startCreationResize|memory-creation-resizer/)
+  assert.match(
+    workbench,
+    /if \(generation !== resourceOpenGeneration\) return\s*prepareDockLayout\(\)/,
+  )
+  assert.match(
+    workbench,
+    /function prepareDockLayout\(\) \{\s*if \(window\.innerWidth < 940\) return/,
+  )
+  assert.match(
+    workbench,
+    /\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\) var\(--memory-chat-width\); \}/,
+  )
+  assert.doesNotMatch(
+    workbench,
+    /jcMemoryCreationWidth|startCreationResize|memory-creation-resizer/,
+  )
   assert.match(workbench, /'chat-dock-narrow': viewportWidth >= 940[\s\S]*chatDockWidth < 560/)
   assert.match(workbench, /viewportWidth\.value = window\.innerWidth/)
   assert.match(workbench, /class="memory-new-conversation-icon"/)
@@ -37,7 +52,10 @@ test('memory right chat dock separates preview layout and collapses to a compact
   assert.match(workbench, /\.memory-document \{[^}]*container-type: inline-size;/)
   assert.match(markdown, /@container \(max-width: 700px\)/)
   assert.match(markdown, /'outline-collapsed': !outlineOpen/)
-  assert.match(markdown, /\.memory-markdown-renderer\.with-outline\.outline-collapsed\{grid-template-columns:minmax\(0,1fr\);gap:0\}/)
+  assert.match(
+    markdown,
+    /\.memory-markdown-renderer\.with-outline\.outline-collapsed\{grid-template-columns:minmax\(0,1fr\);gap:0\}/,
+  )
   assert.match(markdown, /\.outline-collapsed \.memory-document-outline\{position:absolute;/)
   assert.match(markdown, /<JcIcon v-else name="view-list" \/>/)
 })
@@ -46,12 +64,15 @@ test('memory file tree groups project identity above its three file actions', ()
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const toolbar = tree.match(/<header class="pft-head">([\s\S]*?)<\/header>/)?.[1] || ''
 
-  assert.deepEqual(Array.from(toolbar.matchAll(/title="([^"]+)"/g), match => match[1]), [
-    '`切换项目：${projectStore.projectName.value}`',
-    '隐藏文件树',
-  ])
+  assert.deepEqual(
+    Array.from(toolbar.matchAll(/title="([^"]+)"/g), match => match[1]),
+    ['`切换项目：${projectStore.projectName.value}`', '隐藏文件树'],
+  )
   assert.match(toolbar, /:title="`切换项目：\$\{projectStore\.projectName\.value\}`"/)
-  assert.match(tree, /<\/header>\s*<div class="pft-actions pft-memory-actions">[\s\S]*title="新建文件"[\s\S]*title="新建文件夹"[\s\S]*title="刷新"/)
+  assert.match(
+    tree,
+    /<\/header>\s*<div class="pft-actions pft-memory-actions">[\s\S]*title="新建文件"[\s\S]*title="新建文件夹"[\s\S]*title="刷新"/,
+  )
   assert.doesNotMatch(toolbar, /新建对话|上传|导入|导出/)
   assert.doesNotMatch(tree, /async function selectWebProject[\s\S]*initializeMemoryProject/)
 })
@@ -74,31 +95,67 @@ test('memory project entry unifies local and cloud projects while settings only 
   assert.match(tree, /projectTextSync\.cloudProjectIdFor\(project\.owner\)/)
   assert.match(tree, /project\.name === cloud\.name/)
   assert.match(tree, /@click="openCloudProject\(project\)"/)
-  assert.match(tree, /async function openCloudProject\(cloud: SyncProject\)[\s\S]*confirmAction\([\s\S]*localOwnerForCloud\(cloud\)/)
+  assert.match(
+    tree,
+    /async function openCloudProject\(cloud: SyncProject\)[\s\S]*confirmAction\([\s\S]*localOwnerForCloud\(cloud\)/,
+  )
   assert.doesNotMatch(tree, /downloadCurrentProject/)
-  assert.match(tree, /webProjectFiles\.createProject\(cloud\.name\)[\s\S]*projectTextSync\.connect\(cloud\.id\)/)
-  assert.match(tree, /projectFiles\.list\(dir\)[\s\S]*空文件夹[\s\S]*projectTextSync\.connect\(cloud\.id\)/)
-  assert.match(tree, /v-if="isDesktop && !isMobile"[\s\S]*打开本地文件夹[\s\S]*v-else-if="isMobile"[\s\S]*新建项目/)
-  assert.match(tree, /createMobileProject\(cloud\.name, false\)[\s\S]*projectTextSync\.connect\(cloud\.id(?:, operationId)?\)[\s\S]*projectStore\.selectProject\(project\.path\)/)
-  assert.match(tree, /mobileProjects\.value\.find\(project => project\.name === projectStore\.projectName\.value\)[\s\S]*projectStore\.selectProject\(current\.path\)/)
-  assert.match(tree, /onMounted\(async \(\) => \{[\s\S]*if \(isMobile\) await refreshMobileProjects\(\)/)
+  assert.match(
+    tree,
+    /webProjectFiles\.createProject\(cloud\.name\)[\s\S]*projectTextSync\.connect\(cloud\.id\)/,
+  )
+  assert.match(
+    tree,
+    /projectFiles\.list\(dir\)[\s\S]*空文件夹[\s\S]*projectTextSync\.connect\(cloud\.id\)/,
+  )
+  assert.match(
+    tree,
+    /v-if="isDesktop && !isMobile"[\s\S]*打开本地文件夹[\s\S]*v-else-if="isMobile"[\s\S]*新建项目/,
+  )
+  assert.match(
+    tree,
+    /createMobileProject\(cloud\.name, false\)[\s\S]*projectTextSync\.connect\(cloud\.id(?:, operationId)?\)[\s\S]*projectStore\.selectProject\(project\.path\)/,
+  )
+  assert.match(
+    tree,
+    /mobileProjects\.value\.find\(project => project\.name === projectStore\.projectName\.value\)[\s\S]*projectStore\.selectProject\(current\.path\)/,
+  )
+  assert.match(
+    tree,
+    /onMounted\(async \(\) => \{[\s\S]*if \(isMobile\) await refreshMobileProjects\(\)/,
+  )
   assert.doesNotMatch(settings, /立即同步|projectTextSync\.syncNow/)
   assert.doesNotMatch(settings, /上传并覆盖云端|下载并覆盖本地/)
   assert.match(settings, /请在项目中心选择上传或下载/)
-  assert.match(settings, /mobileRuntime = isTauriMobileRuntime\(\)[\s\S]*isTauriRuntime\(\) && !mobileRuntime/)
+  assert.match(
+    settings,
+    /mobileRuntime = isTauriMobileRuntime\(\)[\s\S]*isTauriRuntime\(\) && !mobileRuntime/,
+  )
   assert.match(settings, /:logged-in="gatewaySessionAuthenticated"/)
   assert.match(settings, /:open-url="openExternal"/)
   assert.match(settings, /mobileRuntime && gatewaySessionAuthenticated[\s\S]*退出登录/)
   assert.match(settings, /gatewayLogout\(\)/)
   assert.match(workbench, /\.memory-tree \{[^}]*inset: 0;[^}]*width: auto;/)
-  assert.match(workbench, /\.memory-settings-drawer \{[^}]*top: env\(safe-area-inset-top, 0\);[^}]*right: 0;[^}]*bottom: 0;[^}]*left: 0;[^}]*width: auto;/)
-  assert.match(workbench, /\.memory-workbench\.preview-open \.memory-preview \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;/)
-  assert.match(workbench, /\.memory-workbench\.creation-open \.memory-creation \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;[^}]*height: auto;/)
+  assert.match(
+    workbench,
+    /\.memory-settings-drawer \{[^}]*top: env\(safe-area-inset-top, 0\);[^}]*right: 0;[^}]*bottom: 0;[^}]*left: 0;[^}]*width: auto;/,
+  )
+  assert.match(
+    workbench,
+    /\.memory-workbench\.preview-open \.memory-preview \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;/,
+  )
+  assert.match(
+    workbench,
+    /\.memory-workbench\.creation-open \.memory-creation \{[^}]*inset: env\(safe-area-inset-top, 0\) 0 0;[^}]*height: auto;/,
+  )
   assert.match(tree, /progressCurrent[\s\S]*只处理文字，媒体和空目录不处理/)
   assert.match(settings, /progressCurrent[\s\S]*只处理文字，媒体和空目录不处理/)
   assert.match(settings, /重新登录一次账号/)
   assert.match(main, /await initApiKey\(\)[\s\S]*await initGatewaySessionToken\(\)/)
-  assert.doesNotMatch(settings, /selectedCloudProjectId|projectTextSync\.connect|projectTextSync\.enable/)
+  assert.doesNotMatch(
+    settings,
+    /selectedCloudProjectId|projectTextSync\.connect|projectTextSync\.enable/,
+  )
 })
 
 test('iPhone account settings reuse login while hiding commercial and key controls only on mobile', () => {
@@ -125,17 +182,37 @@ test('memory space and conversations are created only by their explicit actions'
   const paths = source('src/utils/memoryProjectPaths.ts')
 
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
-  assert.match(workbench, /async function createMemorySpace\(\)[\s\S]*initializeMemoryProject\(owner, files\)/)
-  assert.match(workbench, /async function startNewConversation\(\)[\s\S]*createMemoryConversation\(owner, '新对话', files\)/)
+  assert.match(
+    workbench,
+    /async function createMemorySpace\(\)[\s\S]*initializeMemoryProject\(owner, files\)/,
+  )
+  assert.match(
+    workbench,
+    /async function startNewConversation\(\)[\s\S]*createMemoryConversation\(owner, '新对话', files\)/,
+  )
   assert.match(workbench, /'新建记忆空间'/)
   assert.match(workbench, /<span>新建对话<\/span>/)
   assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
-  for (const path of ['.raw', '.raw/jc-media', '文档', '图片', '视频', '音频', '对话记录', '.sync', 'jc-canvas', 'wiki']) {
+  for (const path of [
+    '.raw',
+    '.raw/jc-media',
+    '文档',
+    '图片',
+    '视频',
+    '音频',
+    '对话记录',
+    '.sync',
+    'jc-canvas',
+    'wiki',
+  ]) {
     assert.match(paths, new RegExp(path.replace('.', '\\.')))
   }
   assert.match(project, /MEMORY_PROJECT_SKELETON_DIRECTORIES/)
   assert.match(project, /migrateLegacyMemoryMaterials[\s\S]*kind: 'move'[\s\S]*'keep-both'/)
-  assert.match(project, /appendMemoryRound[\s\S]*return mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/)
+  assert.match(
+    project,
+    /appendMemoryRound[\s\S]*return mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/,
+  )
 })
 
 test('memory file tree and model tools share the hidden and protected project contract', () => {
@@ -146,8 +223,8 @@ test('memory file tree and model tools share the hidden and protected project co
   assert.match(tree, /isMemoryProjectMutationBlocked\(path\)/)
   assert.match(tree, /uploadPathForFile\(file, memoryMediaDirectoryFor\(file\.name, file\.type\)\)/)
   assert.doesNotMatch(tree, /ctxUploadDirectory|dev_import_project_folder/)
-  assert.match(runtime, /assertMemoryProjectMutationProtected\(call\)/)
-  assert.match(runtime, /isMemoryProjectMutationBlocked\(String\(value\), operation\)/)
+  assert.match(runtime, /assertMemoryProjectMutationProtected\(call, input\.projectId\)/)
+  assert.match(runtime, /isMemoryProjectMutationBlocked\(path, operation\)/)
 })
 
 test('mobile conversation deletion confirms permanent removal', () => {
@@ -169,7 +246,10 @@ test('memory workbench keeps project identity in the file tree and a native drag
   assert.match(workbench, /class="memory-title-drag" data-tauri-drag-region><\/div>/)
   assert.doesNotMatch(workbench, /memory-brand-logo/)
   assert.match(tree, /class="pft-brand-logo" src="\/logo\.svg"/)
-  assert.match(tree, /class="pft-project-name pft-project-trigger"[\s\S]*projectStore\.projectName\.value/)
+  assert.match(
+    tree,
+    /class="pft-project-name pft-project-trigger"[\s\S]*projectStore\.projectName\.value/,
+  )
 })
 
 test('memory messages expose one copy action and project GLB files use the shared 3D viewer', () => {
@@ -180,8 +260,14 @@ test('memory messages expose one copy action and project GLB files use the share
   assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
   assert.match(workbench, /class="memory-message-copy"/)
   assert.match(workbench, /copiedTurnId === turn\.id \? 'check' : 'content-copy'/)
-  assert.match(workbench, /<Model3DViewer[^>]*previewResource\.mediaKind === 'model3d' && modelData[^>]*:data="modelData"/)
-  assert.match(workbench, /if \(resource\.mediaKind === 'model3d'\) \{\s+modelData\.value = data\.buffer/)
+  assert.match(
+    workbench,
+    /<Model3DViewer[^>]*previewResource\.mediaKind === 'model3d' && modelData[^>]*:data="modelData"/,
+  )
+  assert.match(
+    workbench,
+    /if \(resource\.mediaKind === 'model3d'\) \{\s+modelData\.value = data\.buffer/,
+  )
   assert.match(mediaViewer, /<Model3DViewer[^>]*type === 'model3d'/)
   assert.match(viewer, /GLTFLoader/)
   assert.match(viewer, /OrbitControls/)
@@ -199,7 +285,10 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(tree, /emitEvent\('reference-file', \{ resource: resourceForNode\(node\) \}\)/)
   assert.doesNotMatch(tree, /emitEvent\('reference-file', \{ name:/)
   assert.match(workbench, /:contenteditable="!sending"/)
-  assert.match(workbench, /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/)
+  assert.match(
+    workbench,
+    /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/,
+  )
   assert.match(workbench, /function resizeComposer\(\)/)
   assert.match(workbench, /<textarea[\s\S]*v-model="markdownDraft"/)
   assert.match(workbench, /files: referencedFiles\.value/)
@@ -209,7 +298,10 @@ test('memory workbench accepts text references and uses the adaptive main compos
 test('memory composer ignores IME Enter fallback key events', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /function handleComposerKeydown\(event: KeyboardEvent\) \{\s*if \(event\.isComposing \|\| event\.keyCode === 229\) return/)
+  assert.match(
+    workbench,
+    /function handleComposerKeydown\(event: KeyboardEvent\) \{\s*if \(event\.isComposing \|\| event\.keyCode === 229\) return/,
+  )
 })
 
 test('memory workbench saves Office attachments as durable project materials', () => {
@@ -219,12 +311,18 @@ test('memory workbench saves Office attachments as durable project materials', (
 
   assert.match(workbench, /type === 'office' \|\| type === 'pdf'/)
   assert.match(workbench, /processFile\(file, \{ maxTextLength: 20_000_000 \}\)/)
-  assert.match(workbench, /files\.importText\(\{ owner, path: readablePath, content: processed\.textContent \}\)/)
+  assert.match(
+    workbench,
+    /files\.importText\(\{ owner, path: readablePath, content: processed\.textContent \}\)/,
+  )
   assert.match(workbench, /readablePath/)
   assert.match(workbench, /characterCount: readableContent\.length/)
-  assert.match(workbench, /!\['image', 'video', 'audio'\]\.includes\(type\)[\s\S]*files\.importBinary/)
+  assert.match(
+    workbench,
+    /!\['image', 'video', 'audio'\]\.includes\(type\)[\s\S]*files\.importBinary/,
+  )
   assert.match(workbench, /已保存 · 已解析/)
-  assert.doesNotMatch(workbench, /textContent: processed\.textContent/)
+  assert.match(workbench, /textContent: readableContent/)
   assert.match(workbench, /value: ''/)
   assert.match(workbench, /resource\.runtime === 'desktop'/)
   assert.match(workbench, /document_path_to_markdown_file/)
@@ -238,7 +336,10 @@ test('memory workbench saves Office attachments as durable project materials', (
   assert.match(workbench, /\.raw\/jc-media\/文档/)
   assert.doesNotMatch(workbench, /jc-materials/)
   assert.doesNotMatch(tree, /memoryMaterialDisplayName/)
-  assert.match(tree, /while \(parts\.length\)[\s\S]*findLoadedDirectory\(parts\.join\('\/'\)\)[\s\S]*parts\.pop\(\)/)
+  assert.match(
+    tree,
+    /while \(parts\.length\)[\s\S]*findLoadedDirectory\(parts\.join\('\/'\)\)[\s\S]*parts\.pop\(\)/,
+  )
   assert.doesNotMatch(runtime, /只写了尚未执行的脚本不算完成/)
 })
 
@@ -256,25 +357,51 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(workbench, /根据 wiki\/index\.md 创作下一集/)
   assert.match(workbench, /label: '配置 Wiki 创作入口'/)
   assert.match(workbench, /label: '生成资产'/)
+  assert.match(workbench, /prompt: '@Wiki 查询/)
+  assert.match(workbench, /prompt: '@Wiki 写入/)
+  assert.match(workbench, /prompt: '@MCP 使用/)
   assert.match(workbench, /class="memory-command-more"/)
   assert.match(workbench, /function insertCommand\(command/)
-  assert.match(workbench, /suggestWikiWrite/)
+  assert.match(workbench, /async function suggestWikiWrite\(turn: ConversationTurn\)/)
+  assert.match(workbench, /@click="suggestWikiWrite\(turn\)"/)
+  assert.match(workbench, /memory-wiki-write-dialog/)
+  assert.match(workbench, /files\.writeText\(target, content, current\.revision\)/)
+  assert.match(workbench, /files\.createText\(owner, savedPath, /)
+  assert.doesNotMatch(workbench, /function suggestWikiWrite\(\)[\s\S]*insertCommand/)
   assert.match(workbench, /appendMemoryRound\(active\.resource, userTurn, reply, files, title\)/)
-  assert.match(workbench, /conversationTurns: editTargetId \? baseTurns : active\.transcript\.turns/)
+  assert.match(
+    workbench,
+    /conversationTurns: editTargetId \? baseTurns : active\.transcript\.turns/,
+  )
   assert.match(runtime, /messages: \[\.\.\.input\.conversationTurns, input\.userTurn\]/)
-  assert.doesNotMatch(runtime, /rawPath: string|input\.rawPath|conversationDocumentSources|historicalDocumentSources/)
+  assert.doesNotMatch(
+    runtime,
+    /rawPath: string|input\.rawPath|conversationDocumentSources|historicalDocumentSources/,
+  )
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
-  assert.match(runtime, /if \(!memoryMode\)[\s\S]*tools: \[WIKI_SEARCH_TOOL_DEFINITION\][\s\S]*executeTool: projectTools/)
+  assert.match(
+    runtime,
+    /if \(!memoryMode\)[\s\S]*tools: \[WIKI_SEARCH_TOOL_DEFINITION\][\s\S]*executeTool: projectTools/,
+  )
   assert.match(runtime, /finalizeAtModelRequestLimit: hasExtendedTool/)
   assert.match(workbench, /wiki_search: '搜索 Wiki'/)
   assert.doesNotMatch(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS|快速模式只能读取/)
   assert.match(runtime, /attachments: memoryMode \? input\.attachments : undefined/)
   assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
   assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
-  assert.match(workbench, /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.has\(active\.transcript\.id\)/)
-  assert.match(workbench, /较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。[\s\S]*长期保留的结论请写入 Wiki/)
+  assert.match(
+    workbench,
+    /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.has\(active\.transcript\.id\)/,
+  )
+  assert.match(
+    workbench,
+    /较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。[\s\S]*长期保留的结论请写入 Wiki/,
+  )
   assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
-  assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{\s*executionMode\.value = 'memory'/)
+  assert.match(
+    workbench,
+    /async function addAttachmentFiles\(selected: File\[\]\) \{\s*executionMode\.value = 'memory'/,
+  )
 })
 
 test('memory composer routes pasted images and media plans into the existing creation panel', () => {
@@ -288,19 +415,31 @@ test('memory composer routes pasted images and media plans into the existing cre
   assert.match(workbench, /conversationMediaContext/)
   assert.match(workbench, /refreshMediaPlanReferenceValues/)
   assert.match(workbench, /buildMediaReferencePolicy\(mediaContext\)/)
-  assert.match(workbench, /parseMediaPlans\(turn\.content\)\s*\.map\(plan => resolveMediaPlanReferences\(plan, mediaContext\)\)/)
-  assert.match(workbench, /onEvent\('media-reference:add', payload => void addProjectMediaReferences\(payload\)\)/)
+  assert.match(
+    workbench,
+    /parseMediaPlans\(turn\.content\)\s*\.map\(plan => resolveMediaPlanReferences\(plan, mediaContext\)\)/,
+  )
+  assert.match(
+    workbench,
+    /onEvent\('media-reference:add', payload => void addProjectMediaReferences\(payload\)\)/,
+  )
   assert.match(workbench, /fileActions\.readMedia\(resource\)/)
   assert.match(workbench, /attachment\.resourcePath === resource\.path/)
   assert.match(workbench, /resourcePath: resource\.path/)
   assert.match(workbench, /v-for="\(plan, planIndex\) in mediaPlans\[turn\.id\]"/)
-  assert.match(workbench, /const loadCreationPanel = \(\) => import\('@\/components\/creation\/CreationPanel\.vue'\)/)
+  assert.match(
+    workbench,
+    /const loadCreationPanel = \(\) => import\('@\/components\/creation\/CreationPanel\.vue'\)/,
+  )
   assert.match(workbench, /const CreationPanel = defineAsyncComponent\(loadCreationPanel\)/)
   assert.match(workbench, /emitEvent\('memory-media-plan-load'/)
   assert.match(workbench, /class="memory-creation"/)
   assert.doesNotMatch(workbench, /import MediaPlanCard/)
   assert.doesNotMatch(workbench, /<MediaPlanCard/)
-  assert.match(workbench, /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/)
+  assert.match(
+    workbench,
+    /mediaPlans\.value\[turn\.id\]\?\.length \? stripMediaPlanBlocks\(content\) : content/,
+  )
 })
 
 test('memory composer reads the native clipboard only for an empty Desktop image paste', () => {
@@ -320,7 +459,10 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(workbench, /files\.searchPaths\(owner, query\.trim\(\), 40\)/)
   assert.match(workbench, /const selectedSkillNames = ref<string\[\]>\(\[\]\)/)
   assert.match(workbench, /getCursorPosition\(editor\)/)
-  assert.match(workbench, /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/)
+  assert.match(
+    workbench,
+    /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/,
+  )
   assert.match(workbench, /v-show="mentionOpen && !sending"/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
@@ -341,19 +483,28 @@ test('memory composer does not expose removed Jina web tools', () => {
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
   assert.doesNotMatch(workbench, /webSearchEnabled|type: 'search'|web_search|read_url/)
-  assert.doesNotMatch(runtime, /webSearchEnabled|WEB_SEARCH_TOOL_DEFINITION|READ_URL_TOOL_DEFINITION|web_search|read_url|Jina/)
+  assert.doesNotMatch(
+    runtime,
+    /webSearchEnabled|WEB_SEARCH_TOOL_DEFINITION|READ_URL_TOOL_DEFINITION|web_search|read_url|Jina/,
+  )
 })
 
 test('memory topbar uses a grouped model popover and an adaptive new conversation action', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /class="new-conversation-button"[\s\S]*<span>新建对话<\/span>/)
-  assert.match(workbench, /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/)
+  assert.match(
+    workbench,
+    /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/,
+  )
   assert.match(workbench, /<JcIcon name="add" class="memory-new-conversation-icon" \/>/)
   assert.doesNotMatch(workbench, /<select v-model="agentStore\.currentModel"/)
   assert.match(workbench, /const modelGroups = computed/)
   assert.match(workbench, /Claude[\s\S]*GPT \/ OpenAI[\s\S]*Gemini \/ Google/)
-  assert.match(workbench, /agentStore\.textModels\.filter\(model => !isInternalMediaModel\(model\.id\)\)/)
+  assert.match(
+    workbench,
+    /agentStore\.textModels\.filter\(model => !isInternalMediaModel\(model\.id\)\)/,
+  )
   assert.match(workbench, /id === 'jina-search' \|\| id === 'jina-reader'/)
   assert.doesNotMatch(workbench, /runninghub: 'RunningHub'/)
   assert.match(workbench, /class="memory-model-menu" role="listbox"/)
@@ -366,7 +517,10 @@ test('memory message copy stays compact and copies the original markdown', () =>
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
-  assert.match(workbench, /\.memory-message-copy \{ position: absolute; top: 0; right: 0;[\s\S]*width: 26px; height: 26px;/)
+  assert.match(
+    workbench,
+    /\.memory-message-copy \{ position: absolute; top: 0; right: 0;[\s\S]*width: 26px; height: 26px;/,
+  )
 })
 
 test('markdown editor keeps pre and textarea under the shared stylesheet', () => {
@@ -374,7 +528,10 @@ test('markdown editor keeps pre and textarea under the shared stylesheet', () =>
   const markdownCss = source('src/styles/markdown.css')
 
   assert.doesNotMatch(workbench, /\.memory-document pre\s*\{/)
-  assert.match(markdownCss, /\.memory-markdown-editor pre,\s*\n\.memory-markdown-editor textarea\s*\{[\s\S]*font: \.92em\/1\.6/)
+  assert.match(
+    markdownCss,
+    /\.memory-markdown-editor pre,\s*\n\.memory-markdown-editor textarea\s*\{[\s\S]*font: \.92em\/1\.6/,
+  )
   assert.match(markdownCss, /\.memory-markdown-editor pre \* \{ font: inherit; \}/)
   assert.match(markdownCss, /\.memory-markdown-editor textarea \{[\s\S]*border: 0;/)
 })
@@ -384,8 +541,14 @@ test('memory document and file tree keep independent visible scrolling', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
   assert.match(workbench, /\.memory-tree \{[\s\S]*min-height: 0;[\s\S]*overflow: hidden;/)
-  assert.match(workbench, /\.memory-document \{[\s\S]*height: 100%;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/)
-  assert.match(tree, /\.pft-list \{[\s\S]*min-height: 0;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/)
+  assert.match(
+    workbench,
+    /\.memory-document \{[\s\S]*height: 100%;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/,
+  )
+  assert.match(
+    tree,
+    /\.pft-list \{[\s\S]*min-height: 0;[\s\S]*overflow-y: scroll;[\s\S]*scrollbar-gutter: stable;/,
+  )
 })
 
 test('memory media results stay project-first, downloadable, locatable and theme-aware', () => {
@@ -406,7 +569,10 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.doesNotMatch(bubble, /<video|<audio|preload="metadata"/)
   assert.match(bubble, /class="mtb-media-preview"/)
   assert.match(bubble, /await revealInTree\(\)/)
-  assert.doesNotMatch(bubble, /watch\(projectResource|projectMediaUrl|URL\.createObjectURL|URL\.revokeObjectURL/)
+  assert.doesNotMatch(
+    bubble,
+    /watch\(projectResource|projectMediaUrl|URL\.createObjectURL|URL\.revokeObjectURL/,
+  )
   assert.match(bubble, /async function downloadCopy\(\)[\s\S]*readBinary\(resource\)/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
@@ -429,15 +595,27 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /v-for="turn in timelineTurns"/)
   assert.match(workbench, /:streaming="turn\.id === 'streaming-assistant'"/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
-  assert.match(workbench, /const complete = editTargetId[\s\S]*appendMemoryRound\(active\.resource, userTurn, reply, files, title\)[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/)
+  assert.match(
+    workbench,
+    /const complete = editTargetId[\s\S]*appendMemoryRound\(active\.resource, userTurn, reply, files, title\)[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/,
+  )
   assert.match(workbench, /pendingUserTurn\.value = userTurn/)
-  assert.match(workbench, /executionMode\.value =[\s\S]*await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
+  assert.match(
+    workbench,
+    /executionMode\.value =[\s\S]*await nextTick\(\)[\s\S]*startStickyFollow\(\)/,
+  )
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
   assert.match(workbench, /\.memory-message \{[^}]*content-visibility: auto;/)
   assert.doesNotMatch(workbench, /\.memory-message \{[^}]*contain-intrinsic-size/)
   assert.match(scrollNav, /querySelectorAll\('\.msg, \.memory-message'\)/)
-  assert.doesNotMatch(workbench, /useVirtualizer|estimateSize|measureElement|getTotalSize|translateY\(/)
-  assert.doesNotMatch(workbench, /\.memory-message-list > \.memory-message \{[^}]*position: absolute/)
+  assert.doesNotMatch(
+    workbench,
+    /useVirtualizer|estimateSize|measureElement|getTotalSize|translateY\(/,
+  )
+  assert.doesNotMatch(
+    workbench,
+    /\.memory-message-list > \.memory-message \{[^}]*position: absolute/,
+  )
 })
 
 test('memory run status follows real tool start and end events without entering Raw', () => {
@@ -447,8 +625,14 @@ test('memory run status follows real tool start and end events without entering 
   assert.match(runtime, /onToolEvent\?: \(event: DirectToolExecutionEvent\) => void/)
   assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 3)
   assert.doesNotMatch(runtime, /event\.type === 'tool_execution_start'\) input\.onToolEvent/)
-  assert.match(workbench, /event\.type === 'tool_execution_start'[\s\S]*status\.value = `正在\$\{label\}`/)
-  assert.match(workbench, /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*runSteps\.value\.find\(item => item\.state === 'running'\)[\s\S]*正在等待模型继续处理/)
+  assert.match(
+    workbench,
+    /event\.type === 'tool_execution_start'[\s\S]*status\.value = `正在\$\{label\}`/,
+  )
+  assert.match(
+    workbench,
+    /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*runSteps\.value\.find\(item => item\.state === 'running'\)[\s\S]*正在等待模型继续处理/,
+  )
   assert.match(workbench, /v-if="runVisible" class="memory-run-status"/)
   assert.match(workbench, /v-for="step in visibleRunSteps"/)
   assert.match(workbench, /\(sending \|\| error\) && visibleRunSteps\.length/)
@@ -465,10 +649,22 @@ test('memory retries transient requests and writes one Raw recovery point only a
   assert.match(runtime, /sendDirectRequestWithRetry\(/)
   assert.match(runtime, /onRetry\?: \(attempt: number, total: number\) => void/)
   assert.match(workbench, /onRetry\(attempt, total\)[\s\S]*正在重连 \$\{attempt\}\/\$\{total\}/)
-  assert.match(workbench, /replyCompleted = true[\s\S]*if \(!replyCompleted && isRecoverableDirectTransportFailure\(cause\)\)/)
-  assert.match(workbench, /appendMemoryRound\([\s\S]*继续前请先检查项目现状，避免重复写入或外部操作。/)
-  assert.match(workbench, /if \(runGeneration !== memoryRunGeneration\) return\s*\n\s*const interrupted = await appendMemoryRound[\s\S]*if \(runGeneration !== memoryRunGeneration\) return/)
-  assert.match(workbench, /const aborted = cause instanceof DOMException && cause\.name === 'AbortError'[\s\S]*if \(aborted\) status\.value = '已停止'/)
+  assert.match(
+    workbench,
+    /replyCompleted = true[\s\S]*if \(!replyCompleted && isRecoverableDirectTransportFailure\(cause\)\)/,
+  )
+  assert.match(
+    workbench,
+    /appendMemoryRound\([\s\S]*继续前请先检查项目现状，避免重复写入或外部操作。/,
+  )
+  assert.match(
+    workbench,
+    /if \(runGeneration !== memoryRunGeneration\) return\s*\n\s*const interrupted = await appendMemoryRound[\s\S]*if \(runGeneration !== memoryRunGeneration\) return/,
+  )
+  assert.match(
+    workbench,
+    /const aborted = cause instanceof DOMException && cause\.name === 'AbortError'[\s\S]*if \(aborted\) status\.value = '已停止'/,
+  )
   assert.match(workbench, /:contenteditable="!sending"/)
   assert.match(workbench, /title="添加附件" :disabled="sending"/)
   assert.match(workbench, /title="移除附件" :disabled="sending"/)
@@ -480,9 +676,15 @@ test('memory ignores stale streaming callbacks and stale resource loads', () => 
   assert.match(workbench, /const isCurrentRun = \(\) => runGeneration === memoryRunGeneration/)
   assert.match(workbench, /onRetry\(attempt, total\) \{\s*if \(!isCurrentRun\(\)\) return/)
   assert.match(workbench, /onText\(text\) \{\s*if \(!isCurrentRun\(\)\) return/)
-  assert.match(workbench, /onToolEvent: event => \{\s*if \(isCurrentRun\(\)\) updateRunTool\(event\)/)
+  assert.match(
+    workbench,
+    /onToolEvent: event => \{\s*if \(isCurrentRun\(\)\) updateRunTool\(event\)/,
+  )
   assert.match(workbench, /let resourceOpenGeneration = 0/)
-  assert.match(workbench, /const generation = \+\+resourceOpenGeneration[\s\S]*if \(generation !== resourceOpenGeneration\) return/)
+  assert.match(
+    workbench,
+    /const generation = \+\+resourceOpenGeneration[\s\S]*if \(generation !== resourceOpenGeneration\) return/,
+  )
   assert.match(workbench, /let conversationSelectionGeneration = 0/)
 })
 
@@ -522,7 +724,10 @@ test('memory settings show the build version at the bottom', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
 
   assert.match(settings, /const appVersion = __APP_VERSION__/)
-  assert.match(settings, /<footer class="memory-settings-version">版本 \{\{ appVersion \}\}<\/footer>/)
+  assert.match(
+    settings,
+    /<footer class="memory-settings-version">版本 \{\{ appVersion \}\}<\/footer>/,
+  )
 })
 
 test('memory media execution stays in the creation panel while settled results return to chat', () => {
@@ -583,16 +788,31 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   const creation = source('src/components/creation/CreationPanel.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
-  assert.match(workbench, /async function openCreationHost\(\) \{[\s\S]*?await loadCreationPanel\(\)[\s\S]*?creationMounted\.value = true[\s\S]*?creationOpen\.value = true/)
-  assert.match(workbench, /async function openMediaPlanInCreation[\s\S]*?await openCreationHost\(\)[\s\S]*?emitEvent\('memory-media-plan-load'/)
-  assert.match(workbench, /\.memory-composer \{ min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/)
-  assert.match(workbench, /\.memory-main \{ position: relative; display: grid; grid-template-columns: minmax\(0, 1fr\);/)
+  assert.match(
+    workbench,
+    /async function openCreationHost\(\) \{[\s\S]*?await loadCreationPanel\(\)[\s\S]*?creationMounted\.value = true[\s\S]*?creationOpen\.value = true/,
+  )
+  assert.match(
+    workbench,
+    /async function openMediaPlanInCreation[\s\S]*?await openCreationHost\(\)[\s\S]*?emitEvent\('memory-media-plan-load'/,
+  )
+  assert.match(
+    workbench,
+    /\.memory-composer \{ min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/,
+  )
+  assert.match(
+    workbench,
+    /\.memory-main \{ position: relative; display: grid; grid-template-columns: minmax\(0, 1fr\);/,
+  )
   assert.match(workbench, /@pointerdown\.prevent="startChatDockResize"/)
   assert.match(workbench, /<ChatScrollNav/)
   assert.doesNotMatch(workbench, /preview-surface/)
   assert.match(workbench, /@preview-resource="previewProjectResource"/)
   assert.match(workbench, /#toolbar-actions/)
-  assert.match(workbench, /:title="creationFocused \? '\u9000\u51fa\u4e13\u6ce8\u521b\u4f5c' : '\u4e13\u6ce8\u521b\u4f5c'"/)
+  assert.match(
+    workbench,
+    /:title="creationFocused \? '\u9000\u51fa\u4e13\u6ce8\u521b\u4f5c' : '\u4e13\u6ce8\u521b\u4f5c'"/,
+  )
   assert.match(workbench, /title="\u6536\u8d77\u521b\u4f5c\u9762\u677f"/)
   assert.match(creation, /defineExpose\(\{ flushCanvasSave: \(\) => flushCanvasSave\(true\) \}\)/)
   assert.match(workbench, /ref<\{ flushCanvasSave\?: \(\) => Promise<void> \} \| null>/)
@@ -601,11 +821,23 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   assert.match(workbench, /creationMounted\.value = false/)
   assert.doesNotMatch(workbench, /v-show="creationOpen"/)
   assert.match(workbench, /@click="closeCreationHost"/)
-  assert.match(workbench, /\.memory-workbench\.creation-open \.memory-title-drag \{ min-width: 0; \}/)
-  assert.match(workbench, /function resizeCreationForWindow\(\) \{[\s\S]*?prepareDockLayout\(\)[\s\S]*?clampChatDockWidth\(chatDockWidth\.value\)\s*\}/)
-  assert.match(workbench, /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/)
+  assert.match(
+    workbench,
+    /\.memory-workbench\.creation-open \.memory-title-drag \{ min-width: 0; \}/,
+  )
+  assert.match(
+    workbench,
+    /function resizeCreationForWindow\(\) \{[\s\S]*?prepareDockLayout\(\)[\s\S]*?clampChatDockWidth\(chatDockWidth\.value\)\s*\}/,
+  )
+  assert.match(
+    workbench,
+    /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/,
+  )
   assert.match(workbench, /desktopOnlyRuntime && turn\.role === 'assistant'/)
-  assert.match(tree, /\(isDesktop && !isMobile\) \|\| !path\.toLowerCase\(\)\.endsWith\('\.jcscene'\)/)
+  assert.match(
+    tree,
+    /\(isDesktop && !isMobile\) \|\| !path\.toLowerCase\(\)\.endsWith\('\.jcscene'\)/,
+  )
   assert.match(creation, /<slot name="toolbar-actions"/)
   assert.match(creation, />\u63d0\u793a\u8bcd\u53c2\u8003</)
   assert.doesNotMatch(creation, /title="\u65b0\u5efa\u9879\u76ee\u6587\u6863"/)
@@ -622,11 +854,20 @@ test('single-product UI contains no dormant Studio mode switches or editor sessi
   assert.doesNotMatch(workbench, /\smemory-mode(?:\s|\/?>)|preview-surface|workbench-mode/)
   assert.doesNotMatch(tree, /memoryMode|open-in-editor|editor-file-changed|project:new-document/)
   assert.doesNotMatch(creation, /previewSurface/)
-  assert.doesNotMatch(bubble, /workbenchMode|sendToGallery|sendAsReference|send-to-gallery|import-to-creation/)
+  assert.doesNotMatch(
+    bubble,
+    /workbenchMode|sendToGallery|sendAsReference|send-to-gallery|import-to-creation/,
+  )
   assert.doesNotMatch(scroll, /messages\?:/)
   assert.doesNotMatch(attachments, /shouldClearCreativeAttachments/)
-  assert.equal(existsSync(join(process.cwd(), 'src/components/editor/editorSessionStore.ts')), false)
-  assert.equal(existsSync(join(process.cwd(), 'src/components/editor/__tests__/editorSessionStore.test.ts')), false)
+  assert.equal(
+    existsSync(join(process.cwd(), 'src/components/editor/editorSessionStore.ts')),
+    false,
+  )
+  assert.equal(
+    existsSync(join(process.cwd(), 'src/components/editor/__tests__/editorSessionStore.test.ts')),
+    false,
+  )
   assert.equal(existsSync(join(process.cwd(), 'src/types/mention.ts')), false)
 })
 
@@ -647,8 +888,14 @@ test('memory tree toggle collapses the desktop file tree and exposes reopen cont
 
   assert.match(workbench, /'tree-closed': !treeOpen/)
   assert.match(workbench, /v-if="!treeOpen" class="icon-button" title="打开文件树"/)
-  assert.match(workbench, /\.memory-workbench\.tree-closed \{ grid-template-columns: 0 minmax\(0, 1fr\); \}/)
-  assert.match(workbench, /\.memory-workbench\.tree-closed \.memory-tree \{ overflow: hidden; border-right: 0; \}/)
+  assert.match(
+    workbench,
+    /\.memory-workbench\.tree-closed \{ grid-template-columns: 0 minmax\(0, 1fr\); \}/,
+  )
+  assert.match(
+    workbench,
+    /\.memory-workbench\.tree-closed \.memory-tree \{ overflow: hidden; border-right: 0; \}/,
+  )
 })
 
 test('3D scene editor clones plain scene data instead of Vue proxies', () => {
@@ -697,7 +944,10 @@ test('3D scene editor safely switches and loads Storyboarder characters', () => 
   const editor = source('src/components/memory/Scene3DEditor.vue')
   const assets = source('src/runtime/memory/storyboarderAssets.ts')
 
-  assert.match(editor, /function setCharacterModel[\s\S]{0,300}delete item\.character\.bones[\s\S]{0,200}buildScene\(\)/)
+  assert.match(
+    editor,
+    /function setCharacterModel[\s\S]{0,300}delete item\.character\.bones[\s\S]{0,200}buildScene\(\)/,
+  )
   assert.match(editor, /const characterLoading = ref\(0\)/)
   assert.match(editor, /const characterLoadError = ref\(''\)/)
   assert.match(editor, /characterLoading\.value\+\+/)
@@ -705,7 +955,10 @@ test('3D scene editor safely switches and loads Storyboarder characters', () => 
   assert.match(editor, /v-if="characterLoadError"[^>]*>\{\{ characterLoadError \}\}/)
   assert.match(editor, /:disabled="characterLoading > 0 \|\| Boolean\(characterLoadError\)"/)
   assert.match(editor, /cloneSkeleton\(template\)/)
-  assert.match(editor, /const node = makePrimitive\(item\)[\s\S]{0,900}hydrateCharacter\(node, item, token\)/)
+  assert.match(
+    editor,
+    /const node = makePrimitive\(item\)[\s\S]{0,900}hydrateCharacter\(node, item, token\)/,
+  )
   assert.match(assets, /import poses from '@\/assets\/storyboarder\/poses\.json'/)
   assert.match(assets, /import handPoses from '@\/assets\/storyboarder\/hand-poses\.json'/)
 })
@@ -716,7 +969,10 @@ test('3D scene editor releases rebuilt scenes and keeps bone selection stable', 
   assert.match(editor, /if \(root\) \{ scene\.remove\(root\); disposeObject\(root\) \}/)
   assert.match(editor, /storyboarderSharedResource/)
   assert.match(editor, /disposeObject\(root\)/)
-  assert.match(editor, /ignoreScenePick = true[\s\S]{0,300}queueMicrotask\(\(\) => \{ ignoreScenePick = false \}\)/)
+  assert.match(
+    editor,
+    /ignoreScenePick = true[\s\S]{0,300}queueMicrotask\(\(\) => \{ ignoreScenePick = false \}\)/,
+  )
   assert.match(editor, /if \(manualRecording\.value \|\| ignoreScenePick \|\|/)
   assert.match(editor, /class="scene3d-inspector"/)
   assert.match(editor, /class="scene3d-lighting"/)
@@ -751,7 +1007,10 @@ test('Desktop starts the memory workbench without the legacy OpenCode workspace'
   assert.doesNotMatch(vite, /StudioApp|mode === 'studio'/)
   assert.match(desktop, /app\.config\(\)\.build\.dev_url/)
   assert.match(desktop, /"http:\/\/localhost:1420"\.parse\(\)/)
-  assert.match(desktop, /#\[cfg\(all\(debug_assertions, not\(mobile\)\)\)\][\s\S]{0,300}"http:\/\/localhost:1420"/)
+  assert.match(
+    desktop,
+    /#\[cfg\(all\(debug_assertions, not\(mobile\)\)\)\][\s\S]{0,300}"http:\/\/localhost:1420"/,
+  )
   assert.doesNotMatch(desktop, /#\[cfg\(dev\)\]/)
   assert.match(desktop, /window_config\.url = tauri::WebviewUrl::External\(dev_url\)/)
 })
@@ -759,11 +1018,23 @@ test('Desktop starts the memory workbench without the legacy OpenCode workspace'
 test('memory workbench follows the current project owner on both runtimes', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /const projectOwner = computed\(\(\) => desktopRuntime[\s\S]*projectStore\.projectDir\.value[\s\S]*projectStore\.webProjectId\.value/)
-  assert.match(workbench, /watch\(projectOwner, owner => void openProject\(owner\), \{ immediate: true \}\)/)
+  assert.match(
+    workbench,
+    /const projectOwner = computed\(\(\) => desktopRuntime[\s\S]*projectStore\.projectDir\.value[\s\S]*projectStore\.webProjectId\.value/,
+  )
+  assert.match(
+    workbench,
+    /watch\(projectOwner, owner => void openProject\(owner\), \{ immediate: true \}\)/,
+  )
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
-  assert.match(workbench, /memoryReady\.value = state\.initialized[\s\S]*void projectTextSync\.open/)
-  assert.match(workbench, /initializeMemoryProject\(owner, files\)[\s\S]*memoryReady\.value = true[\s\S]*void projectTextSync\.open/)
+  assert.match(
+    workbench,
+    /memoryReady\.value = state\.initialized[\s\S]*void projectTextSync\.open/,
+  )
+  assert.match(
+    workbench,
+    /initializeMemoryProject\(owner, files\)[\s\S]*memoryReady\.value = true[\s\S]*void projectTextSync\.open/,
+  )
   assert.doesNotMatch(workbench, /syncOnFocus|addEventListener\('focus'/)
   assert.doesNotMatch(workbench, /projectTextSync\.open\([\s\S]{0,180}projectTextSync\.enable\(\)/)
 })
@@ -772,14 +1043,20 @@ test('memory text models default to tools unless the gateway explicitly disables
   const store = source('src/stores/agentStore.ts')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(store, /toolCall: capability === 'text' && item\.tool_call !== false && item\.toolCall !== false/)
+  assert.match(
+    store,
+    /toolCall: capability === 'text' && item\.tool_call !== false && item\.toolCall !== false/,
+  )
   assert.match(runtime, /agentStore\.modelsFetched && model\?\.toolCall === false/)
 })
 
 test('memory file actions stay inside the memory resource route on Desktop', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
-  assert.match(tree, /const result = await openProjectResource\(projectFiles, resource\)\s*emitEvent\('memory:open-resource', result\)/)
+  assert.match(
+    tree,
+    /const result = await openProjectResource\(projectFiles, resource\)\s*emitEvent\('memory:open-resource', result\)/,
+  )
   assert.match(tree, /createText\(projectKey\.value, relPath, ''\)[\s\S]*memory:open-resource/)
   assert.match(tree, /v-if="isDesktop"[\s\S]*用系统默认应用打开/)
 })
@@ -805,7 +1082,10 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /projectMapReturn \? '返回项目地图' : '返回对话'/)
   assert.match(workbench, /event\.key === 'Escape' && previewResource\.value/)
   assert.match(workbench, /resource\.type === 'canvas'[\s\S]{0,160}openCreationHost\(\)/)
-  assert.doesNotMatch(workbench, /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/)
+  assert.doesNotMatch(
+    workbench,
+    /previewResource\.value = resource[\s\S]{0,100}opened\.value = resource/,
+  )
 })
 
 test('global search opens current Raw conversations through the memory resource route', () => {
@@ -815,7 +1095,10 @@ test('global search opens current Raw conversations through the memory resource 
   assert.match(search, /openProjectResource\(files, item\.resource\)/)
   assert.match(search, /emitEvent\('memory:open-resource', resource\)/)
   assert.match(search, /\(e\.metaKey \|\| e\.ctrlKey\) && e\.key === 'k'/)
-  assert.doesNotMatch(search, /useSessionStore|projectSessions|switchSession|emitEvent\('switch-panel', 'chat'\)/)
+  assert.doesNotMatch(
+    search,
+    /useSessionStore|projectSessions|switchSession|emitEvent\('switch-panel', 'chat'\)/,
+  )
 })
 
 test('memory files and conversation turns use the shared safe Markdown renderer', () => {
@@ -859,7 +1142,10 @@ test('memory Markdown editing keeps source text and protects revision conflicts'
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /const markdownDraft = ref\(''\)/)
-  assert.match(workbench, /files\.writeText\(current\.resource, markdownDraft\.value, current\.text\.revision\)/)
+  assert.match(
+    workbench,
+    /files\.writeText\(current\.resource, markdownDraft\.value, current\.text\.revision\)/,
+  )
   assert.match(workbench, /result\.status === 'conflict'/)
   assert.match(workbench, /当前草稿已保留/)
   assert.match(workbench, /v-model="markdownDraft"/)
@@ -886,12 +1172,18 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:8081"/)
   assert.match(settings, /本机 MLX/)
   assert.match(mlxRuntime, /fetcher: typeof fetch = safeFetch/)
-  assert.match(store, /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/)
+  assert.match(
+    store,
+    /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/,
+  )
   assert.match(settings, /agentStore\.refreshLocalModels\(\)/)
   assert.match(settings, /v-if="desktopRuntime" class="memory-local-model"/)
   assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'skills' \}"/)
   assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'mcp' \}"/)
-  assert.match(runtime, /recordSceneVideo: input\.recordSceneVideo \? document => input\.recordSceneVideo!\(document, input\.signal\) : undefined/)
+  assert.match(
+    runtime,
+    /recordSceneVideo: input\.recordSceneVideo \? document => input\.recordSceneVideo!\(document, input\.signal\) : undefined/,
+  )
   assert.match(runtime, /platform: isTauriRuntime\(\) \? 'desktop' : 'web'/)
   assert.doesNotMatch(runtime, /forceCloud: true/)
 })

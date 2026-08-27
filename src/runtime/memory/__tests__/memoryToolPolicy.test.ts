@@ -45,6 +45,17 @@ test('memory tools require explicit current-turn paths before external access', 
   )
 })
 
+test('current-project absolute paths do not require external authorization', () => {
+  assert.equal(
+    memoryToolNeedsApproval(
+      call('write', { path: '/Users/by3/Documents/project/wiki/工作进度/2026-08-27.md', content: 'x' }),
+      '写入 /Users/by3/Documents/project/wiki/工作进度',
+      '/Users/by3/Documents/project',
+    ),
+    false,
+  )
+})
+
 test('memory wiki previews auto-run but writing actions require approval', () => {
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'inspect' }), '检查 Wiki'), false)
   assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'evidence', evidencePaths: ['资料/制度.md'] }), '核对来源'), false)

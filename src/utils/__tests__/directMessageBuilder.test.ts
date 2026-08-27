@@ -172,6 +172,22 @@ describe('buildDirectMessages', () => {
     assert.doesNotMatch(body, new RegExp(sentinel))
   })
 
+  test('短文本附件优先内联正文，即使同时有可读路径', () => {
+    const result = buildDirectMessages({
+      messages: [user('u1', '修改下面的提示词')],
+      attachments: [{
+        id: 'markdown', name: '关羽提示词.md', mime: 'text/markdown', size: 64, kind: 'file', value: '',
+        readablePath: '文档/关羽提示词.md', textContent: '角色：关羽\n要求：自然、清晰。',
+      }],
+      visionModel: false,
+      apiFormat: 'openai',
+      platform: 'desktop',
+    })
+    const body = String(result.at(-1)?.content)
+    assert.match(body, /角色：关羽/)
+    assert.doesNotMatch(body, /项目可读路径/)
+  })
+
   test('短期历史只保留附件路径，不恢复附件正文', () => {
     const sentinel = '历史附件正文不应恢复'
     const result = buildDirectMessages({

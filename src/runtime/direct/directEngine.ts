@@ -36,6 +36,7 @@ export interface RunDirectChatCompletionOptions {
   allowedToolNamesAtModelRequestLimit?: string[]
   finalizeAtModelRequestLimit?: boolean
   stopAfterSuccessfulToolNames?: string[]
+  stopAfterSuccessfulToolCall?: (call: DirectToolCall) => boolean
   compactToolHistory?: boolean
   allowToolCalls?: boolean
   continueOnInterruption?: boolean
@@ -126,6 +127,7 @@ export async function runDirectChatCompletion(
   let successfulTerminalToolContent = ''
   let finalResponseUsed = false
   let roundToolOutcomes: Array<{ signature: string; failed: boolean }> = []
+  const compactToolRounds: DirectApiMessage[][] = []
   const modelRequestDurationMs: number[] = []
   let logicalModelRequests = 0
 
@@ -188,7 +190,11 @@ export async function runDirectChatCompletion(
     try {
       const result = await executeTool(call, signal)
       roundToolOutcomes[outcomeIndex]!.failed = result.status === 'failed'
-      if (result.status !== 'failed' && (options.stopAfterSuccessfulToolNames || []).includes(call.function.name)) {
+      if (
+        result.status !== 'failed' &&
+        ((options.stopAfterSuccessfulToolNames || []).includes(call.function.name) ||
+          options.stopAfterSuccessfulToolCall?.(call))
+      ) {
         successfulTerminalToolContent = result.content
       }
       return result
@@ -214,6 +220,13 @@ export async function runDirectChatCompletion(
     lastFailedToolSignature = ''
     for (const outcome of roundToolOutcomes) lastFailedToolSignature = outcome.failed ? outcome.signature : ''
     return result
+  }
+
+  const appendToolMessages = (next: DirectApiMessage[]) => {
+    if (!options.compactToolHistory) return [...messages, ...next]
+    compactToolRounds.push(next)
+    if (compactToolRounds.length > 2) compactToolRounds.shift()
+    return [...baseMessages, ...compactToolRounds.flat()]
   }
 
   const finalizeWithoutTools = async (finalMessages: DirectApiMessage[]): Promise<RunDirectChatCompletionResult> => {
@@ -295,7 +308,7 @@ export async function runDirectChatCompletion(
           if (streamPrefix) lengthPrefix = partialText
           messages.push(...continuationMessages.slice(messages.length))
           const continuationToolMessages = await buildToolMessages(continuationToolCalls, continuation.reasoning)
-          messages = options.compactToolHistory ? [...baseMessages, ...continuationToolMessages] : [...messages, ...continuationToolMessages]
+          messages = appendToolMessages(continuationToolMessages)
           toolRounds += 1
           if (successfulTerminalToolContent) return completed({ text: successfulTerminalToolContent, toolCalls: allToolCalls, usedSecondPass: true, finishReason: 'tool_complete' })
           continue
@@ -355,7 +368,7 @@ export async function runDirectChatCompletion(
     if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
     allToolCalls.push(...toolCalls)
     const toolMessages = await buildToolMessages(toolCalls, stream.reasoning)
-    messages = options.compactToolHistory ? [...baseMessages, ...toolMessages] : [...messages, ...toolMessages]
+    messages = appendToolMessages(toolMessages)
     toolRounds += 1
     if (successfulTerminalToolContent) return completed({ text: successfulTerminalToolContent, toolCalls: allToolCalls, usedSecondPass: true, finishReason: 'tool_complete' })
   }

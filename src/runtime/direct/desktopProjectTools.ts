@@ -6,7 +6,9 @@ import {
   linesPage,
   normalizeCreativeProjectPath,
   parseCreativeToolArguments,
+  resolveCreativeProjectPath,
   WIKI_SEARCH_TOOL_DEFINITION,
+  WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
 import { executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
@@ -19,11 +21,27 @@ import {
   renderMemoryArtifactImage,
   type MemoryImageRenderer,
 } from '@/runtime/memory/memoryArtifactTools'
-import { applyScene3DEdits, createScene3DDocument, parseScene3DDocument, scene3DResultMarker, serializeScene3DDocument, type Scene3DDocument } from '@/runtime/memory/scene3d'
-import { isAuthorizedMemoryConversationPath, isMemoryConversationPath } from '@/utils/memoryProjectPaths'
+import {
+  applyScene3DEdits,
+  createScene3DDocument,
+  parseScene3DDocument,
+  scene3DResultMarker,
+  serializeScene3DDocument,
+  type Scene3DDocument,
+} from '@/runtime/memory/scene3d'
+import {
+  isAuthorizedMemoryConversationPath,
+  isMemoryConversationPath,
+} from '@/utils/memoryProjectPaths'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
-type DesktopReadFile = { path: string; content: string; base64: string; size: number; truncated: boolean }
+type DesktopReadFile = {
+  path: string
+  content: string
+  base64: string
+  size: number
+  truncated: boolean
+}
 type Invoke = (command: string, payload: { input: Record<string, unknown> }) => Promise<any>
 type TerminalAttachment = { name: string; inputPath: string }
 export interface LocalCreativeSkill {
@@ -44,9 +62,10 @@ function resolveTerminalAttachments(command: string, attachments: TerminalAttach
 
 function redactTerminalOutput(output: string, attachments: TerminalAttachment[]): string {
   return attachments.reduce(
-    (value, attachment) => attachment.inputPath
-      ? value.split(attachment.inputPath).join(`{{attachment:${attachment.name}}}`)
-      : value,
+    (value, attachment) =>
+      attachment.inputPath
+        ? value.split(attachment.inputPath).join(`{{attachment:${attachment.name}}}`)
+        : value,
     output,
   )
 }
@@ -91,7 +110,9 @@ function isTextPath(path: string): boolean {
 
 function listDirectory(entries: DesktopFileEntry[], path: string): DesktopFileEntry[] {
   const prefix = path ? `${path}/` : ''
-  return entries.filter(entry => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'))
+  return entries.filter(
+    entry => entry.path.startsWith(prefix) && !entry.path.slice(prefix.length).includes('/'),
+  )
 }
 
 function isAbsolutePath(path: string): boolean {
@@ -129,12 +150,17 @@ export function createDesktopProjectToolExecutor(input: {
   }
 
   async function listFiles(): Promise<DesktopFileEntry[]> {
-    return (await invoke('dev_list_files', { root: requireProject(), maxEntries: 1000 }))
-      .filter((entry: DesktopFileEntry) => !isMemoryConversationPath(entry.path))
+    return (await invoke('dev_list_files', { root: requireProject(), maxEntries: 1000 })).filter(
+      (entry: DesktopFileEntry) => !isMemoryConversationPath(entry.path),
+    )
   }
 
   async function readFile(path: string): Promise<DesktopReadFile> {
-    return await invoke('dev_read_file', { root: requireProject(), relativePath: path, maxBytes: 30_000_000 })
+    return await invoke('dev_read_file', {
+      root: requireProject(),
+      relativePath: path,
+      maxBytes: 30_000_000,
+    })
   }
 
   async function listExternalFiles(path: string): Promise<DesktopFileEntry[]> {
@@ -145,7 +171,11 @@ export function createDesktopProjectToolExecutor(input: {
     return await invoke('dev_read_external_file', { path, maxBytes: 30_000_000 })
   }
 
-  async function writeGeneratedFile(path: string, data: Blob | Uint8Array | string, signal?: AbortSignal): Promise<string> {
+  async function writeGeneratedFile(
+    path: string,
+    data: Blob | Uint8Array | string,
+    signal?: AbortSignal,
+  ): Promise<string> {
     signal?.throwIfAborted()
     const bytes = data instanceof Blob ? new Uint8Array(await data.arrayBuffer()) : data
     signal?.throwIfAborted()
@@ -180,26 +210,54 @@ export function createDesktopProjectToolExecutor(input: {
     },
     async gitEvidence() {
       const status = await invoke('dev_run_command', {
-        root: requireProject(), command: 'git status --short', workdir: '.', timeoutSeconds: 30,
+        root: requireProject(),
+        command: 'git status --short',
+        workdir: '.',
+        timeoutSeconds: 30,
       })
       const diff = await invoke('dev_run_command', {
-        root: requireProject(), command: 'git diff --no-ext-diff --binary HEAD', workdir: '.', timeoutSeconds: 30,
+        root: requireProject(),
+        command: 'git diff --no-ext-diff --binary HEAD',
+        workdir: '.',
+        timeoutSeconds: 30,
       })
-      if (Number(status.exitCode ?? status.exit_code) !== 0 || Number(diff.exitCode ?? diff.exit_code) !== 0) return null
+      if (
+        Number(status.exitCode ?? status.exit_code) !== 0 ||
+        Number(diff.exitCode ?? diff.exit_code) !== 0
+      )
+        return null
       return { status: String(status.stdout || ''), diff: String(diff.stdout || '') }
     },
   }
 
-  function renderReadFile(path: string, file: DesktopReadFile, args: Record<string, unknown>): DirectToolResult {
+  function renderReadFile(
+    path: string,
+    file: DesktopReadFile,
+    args: Record<string, unknown>,
+  ): DirectToolResult {
     const mime = mimeForPath(path)
     if (mime.startsWith('image/')) {
       return {
         content: `Image read successfully: ${path}`,
-        followupMessages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:${mime};base64,${file.base64}` } }] }],
+        followupMessages: [
+          {
+            role: 'user',
+            content: [
+              { type: 'image_url', image_url: { url: `data:${mime};base64,${file.base64}` } },
+            ],
+          },
+        ],
       }
     }
     if (!isTextPath(path)) {
-      return { content: [`Binary ${mime.split('/')[0]} file: ${path}`, `MIME: ${mime}`, `Size: ${file.size} bytes`, `Path: ${path}`].join('\n') }
+      return {
+        content: [
+          `Binary ${mime.split('/')[0]} file: ${path}`,
+          `MIME: ${mime}`,
+          `Size: ${file.size} bytes`,
+          `Path: ${path}`,
+        ].join('\n'),
+      }
     }
     return { content: linesPage(file.content, args.offset, args.limit) }
   }
@@ -225,7 +283,15 @@ export function createDesktopProjectToolExecutor(input: {
     }
 
     if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {
-      return { content: await executeWikiAction(wikiWorkspace, { ...args, action: 'search' } as any) }
+      return {
+        content: await executeWikiAction(wikiWorkspace, { ...args, action: 'search' } as any),
+      }
+    }
+
+    if (name === WIKI_CONTEXT_TOOL_DEFINITION.function.name) {
+      return {
+        content: await executeWikiAction(wikiWorkspace, { ...args, action: 'context' } as any),
+      }
     }
 
     if (name === 'read') {
@@ -241,10 +307,17 @@ export function createDesktopProjectToolExecutor(input: {
       }
       if (rawPath.startsWith('skill://local/')) {
         const resources = [...localSkills.values()].flatMap(skill => skill.resources)
-        throw new Error(`Skill 资源路径不匹配。请使用加载结果中的完整路径。可读取：${resources.join(', ') || '无'}`)
+        throw new Error(
+          `Skill 资源路径不匹配。请使用加载结果中的完整路径。可读取：${resources.join(', ') || '无'}`,
+        )
       }
-      if (isAbsolutePath(rawPath)) {
-        if (isMemoryConversationPath(rawPath) && !isAuthorizedMemoryConversationPath(rawPath, input.authorizedRawPaths)) throw new Error('模型不能读取 Raw 对话记录')
+      const resolved = resolveCreativeProjectPath(rawPath, requireProject(), true)
+      if (resolved.external) {
+        if (
+          isMemoryConversationPath(rawPath) &&
+          !isAuthorizedMemoryConversationPath(rawPath, input.authorizedRawPaths)
+        )
+          throw new Error('模型不能读取 Raw 对话记录')
         const entries = await listExternalFiles(rawPath)
         const matching = entries.find(entry => entry.path === rawPath)
         if (entries.length === 1 && !entries[0]!.isDir) {
@@ -255,59 +328,94 @@ export function createDesktopProjectToolExecutor(input: {
           const limit = boundedInteger(args.limit, 200)
           const directory = matching?.path || entries.find(entry => entry.isDir)?.path || rawPath
           const children = listDirectory(entries, directory).slice(offset - 1, offset - 1 + limit)
-          return { content: children.map(entry => `${entry.isDir ? 'dir' : 'file'}\t${entry.path}`).join('\n') || 'Directory is empty' }
+          return {
+            content:
+              children.map(entry => `${entry.isDir ? 'dir' : 'file'}\t${entry.path}`).join('\n') ||
+              'Directory is empty',
+          }
         }
         return renderReadFile(rawPath, await readExternalFile(rawPath), args)
       }
-      const path = normalizeCreativeProjectPath(rawPath, true)
-      if (isMemoryConversationPath(path) && !isAuthorizedMemoryConversationPath(path, input.authorizedRawPaths)) throw new Error('模型不能读取 Raw 对话记录')
+      const path = resolved.path
+      if (
+        isMemoryConversationPath(path) &&
+        !isAuthorizedMemoryConversationPath(path, input.authorizedRawPaths)
+      )
+        throw new Error('模型不能读取 Raw 对话记录')
       const entries = await listFiles()
       const matching = entries.find(entry => entry.path === path)
       if (!path || matching?.isDir) {
         const offset = boundedInteger(args.offset, 1)
         const limit = boundedInteger(args.limit, 200)
         const children = listDirectory(entries, path).slice(offset - 1, offset - 1 + limit)
-        return { content: children.map(entry => `${entry.isDir ? 'dir' : 'file'}\t${entry.path}`).join('\n') || 'Directory is empty' }
+        return {
+          content:
+            children.map(entry => `${entry.isDir ? 'dir' : 'file'}\t${entry.path}`).join('\n') ||
+            'Directory is empty',
+        }
       }
       return renderReadFile(path, await readFile(path), args)
     }
 
     if (name === 'glob') {
       const rawPrefix = String(args.path || '')
-      const isExternal = isAbsolutePath(rawPrefix)
-      const prefix = isExternal ? rawPrefix : normalizeCreativeProjectPath(rawPrefix, true)
+      const resolved = resolveCreativeProjectPath(rawPrefix, requireProject(), true)
+      const isExternal = resolved.external
+      const prefix = resolved.path
       if (isMemoryConversationPath(prefix)) throw new Error('模型不能搜索 Raw 对话记录')
       const pattern = joinToolPath(prefix, String(args.pattern))
-      const entries = (await (isExternal ? listExternalFiles(prefix) : listFiles()))
-        .filter(entry => !isMemoryConversationPath(entry.path))
+      const entries = (await (isExternal ? listExternalFiles(prefix) : listFiles())).filter(
+        entry => !isMemoryConversationPath(entry.path),
+      )
       const result = isExternal
         ? (() => {
             const rootPath = entries.find(entry => entry.isDir)?.path || prefix
             const matcher = globMatcher(String(args.pattern))
-            return entries.filter(entry => entry.path !== rootPath && matcher.test(entry.path.slice(rootPath.length + 1)))
+            return entries.filter(
+              entry =>
+                entry.path !== rootPath && matcher.test(entry.path.slice(rootPath.length + 1)),
+            )
           })()
         : entries.filter(entry => globMatcher(pattern).test(entry.path))
-      return { content: result.slice(0, boundedInteger(args.limit, 200)).map(entry => entry.path).join('\n') || 'No files found' }
+      return {
+        content:
+          result
+            .slice(0, boundedInteger(args.limit, 200))
+            .map(entry => entry.path)
+            .join('\n') || 'No files found',
+      }
     }
 
     if (name === 'grep') {
       let matcher: RegExp
-      try { matcher = new RegExp(String(args.pattern), 'u') } catch { throw new Error('搜索表达式无效') }
+      try {
+        matcher = new RegExp(String(args.pattern), 'u')
+      } catch {
+        throw new Error('搜索表达式无效')
+      }
       const rawPrefix = String(args.path || '')
-      const isExternal = isAbsolutePath(rawPrefix)
-      const prefix = isExternal ? rawPrefix : normalizeCreativeProjectPath(rawPrefix, true)
+      const resolved = resolveCreativeProjectPath(rawPrefix, requireProject(), true)
+      const isExternal = resolved.external
+      const prefix = resolved.path
       if (isMemoryConversationPath(prefix)) throw new Error('模型不能搜索 Raw 对话记录')
       const include = String(args.include || '').replace(/^\*+/, '')
       const limit = boundedInteger(args.limit, 1000)
       const matches: Array<{ path: string; line: number; text: string }> = []
-      const entries = (await (isExternal ? listExternalFiles(prefix) : listFiles()))
-        .filter(entry => !isMemoryConversationPath(entry.path))
+      const entries = (await (isExternal ? listExternalFiles(prefix) : listFiles())).filter(
+        entry => !isMemoryConversationPath(entry.path),
+      )
       const externalRoot = isExternal ? entries.find(entry => entry.isDir)?.path || prefix : ''
       for (const entry of entries) {
         const inPrefix = isExternal
           ? entry.path === externalRoot || entry.path.startsWith(`${externalRoot}/`)
           : !prefix || entry.path === prefix || entry.path.startsWith(`${prefix}/`)
-        if (entry.isDir || !isTextPath(entry.path) || !inPrefix || (include && !entry.path.endsWith(include))) continue
+        if (
+          entry.isDir ||
+          !isTextPath(entry.path) ||
+          !inPrefix ||
+          (include && !entry.path.endsWith(include))
+        )
+          continue
         const file = await (isExternal ? readExternalFile(entry.path) : readFile(entry.path))
         for (const [index, line] of file.content.split(/\r?\n/).entries()) {
           matcher.lastIndex = 0
@@ -316,61 +424,110 @@ export function createDesktopProjectToolExecutor(input: {
         }
         if (matches.length >= limit) break
       }
-      return { content: matches.length ? ['Found ' + matches.length + ' matches', ...matches.map(match => `${match.path}: Line ${match.line}: ${match.text}`)].join('\n') : 'No files found' }
+      return {
+        content: matches.length
+          ? [
+              'Found ' + matches.length + ' matches',
+              ...matches.map(match => `${match.path}: Line ${match.line}: ${match.text}`),
+            ].join('\n')
+          : 'No files found',
+      }
     }
 
     if (name === 'write') {
       const rawPath = String(args.path)
-      const external = isAbsolutePath(rawPath)
-      const path = external ? rawPath : normalizeCreativeProjectPath(rawPath)
-      const file = await invoke(external ? 'dev_write_external_file' : 'dev_write_file', external
-        ? { path, content: String(args.content) }
-        : { root: requireProject(), relativePath: path, content: String(args.content) })
+      const { path, external } = resolveCreativeProjectPath(rawPath, requireProject())
+      const file = await invoke(
+        external ? 'dev_write_external_file' : 'dev_write_file',
+        external
+          ? { path, content: String(args.content) }
+          : { root: requireProject(), relativePath: path, content: String(args.content) },
+      )
       return { content: `Wrote file successfully: ${String(file.path || path)}` }
     }
 
     if (name === 'edit') {
       const rawPath = String(args.path)
-      const external = isAbsolutePath(rawPath)
-      const path = external ? rawPath : normalizeCreativeProjectPath(rawPath)
-      const result = await invoke(external ? 'dev_replace_in_external_file' : 'dev_replace_in_file', external
-        ? { path, oldText: String(args.oldString), newText: String(args.newString), replaceAll: args.replaceAll === true }
-        : { root: requireProject(), relativePath: path, oldText: String(args.oldString), newText: String(args.newString), replaceAll: args.replaceAll === true })
-      return { content: `Edited file successfully: ${path}\nReplacements: ${Number(result.replacements || 0)}` }
+      const { path, external } = resolveCreativeProjectPath(rawPath, requireProject())
+      const result = await invoke(
+        external ? 'dev_replace_in_external_file' : 'dev_replace_in_file',
+        external
+          ? {
+              path,
+              oldText: String(args.oldString),
+              newText: String(args.newString),
+              replaceAll: args.replaceAll === true,
+            }
+          : {
+              root: requireProject(),
+              relativePath: path,
+              oldText: String(args.oldString),
+              newText: String(args.newString),
+              replaceAll: args.replaceAll === true,
+            },
+      )
+      return {
+        content: `Edited file successfully: ${path}\nReplacements: ${Number(result.replacements || 0)}`,
+      }
     }
 
     if (name === 'mkdir') {
-      const path = normalizeCreativeProjectPath(String(args.path))
+      const { path, external } = resolveCreativeProjectPath(String(args.path), requireProject())
+      if (external) throw new Error('文件夹必须位于当前项目内')
       await invoke('dev_create_dir', { root: requireProject(), relativePath: path, content: '' })
       return { content: `已创建文件夹: ${path}` }
     }
 
     if (name === 'move') {
-      const path = normalizeCreativeProjectPath(String(args.path))
-      const destination = normalizeCreativeProjectPath(String(args.destination))
+      const source = resolveCreativeProjectPath(String(args.path), requireProject())
+      const target = resolveCreativeProjectPath(String(args.destination), requireProject())
+      if (source.external || target.external) throw new Error('移动路径必须位于当前项目内')
+      const path = source.path
+      const destination = target.path
       const moved = await invoke('dev_rename_file', {
-        root: requireProject(), oldRelativePath: path, newRelativePath: destination,
+        root: requireProject(),
+        oldRelativePath: path,
+        newRelativePath: destination,
       })
       return { content: `已移动: ${path} -> ${String(moved || destination)}` }
     }
 
     if (name === 'delete') {
-      const path = normalizeCreativeProjectPath(String(args.path))
+      const resolved = resolveCreativeProjectPath(String(args.path), requireProject())
+      if (resolved.external) throw new Error('删除路径必须位于当前项目内')
+      const path = resolved.path
       const result = await invoke('dev_delete_file', { root: requireProject(), relativePath: path })
-      return { content: result.status === 'missing' ? `文件不存在，未删除: ${path}` : `已移入废纸篓: ${path}` }
+      return {
+        content:
+          result.status === 'missing' ? `文件不存在，未删除: ${path}` : `已移入废纸篓: ${path}`,
+      }
     }
 
     if (name === 'export_markdown_png') {
       const blob = await (input.renderImage || renderMemoryArtifactImage)({
-        title: String(args.title), content: String(args.content), width: args.width as number | undefined,
+        title: String(args.title),
+        content: String(args.content),
+        width: args.width as number | undefined,
       })
-      const path = await writeGeneratedFile(`.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`, blob, signal)
+      const path = await writeGeneratedFile(
+        `.raw/jc-media/图片/${artifactFilename(String(args.title), 'png')}`,
+        blob,
+        signal,
+      )
       return { content: `已导出 Markdown 图片: ${path}` }
     }
 
     if (name === 'create_document') {
-      const artifact = createDocumentArtifact(String(args.title), String(args.content), String(args.format) as 'docx' | 'md' | 'txt')
-      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data, signal)
+      const artifact = createDocumentArtifact(
+        String(args.title),
+        String(args.content),
+        String(args.format) as 'docx' | 'md' | 'txt',
+      )
+      const path = await writeGeneratedFile(
+        `.raw/jc-media/文档/${artifact.filename}`,
+        artifact.data,
+        signal,
+      )
       return { content: `已生成文档: ${path}` }
     }
 
@@ -384,35 +541,63 @@ export function createDesktopProjectToolExecutor(input: {
     }
 
     if (name === 'export_markdown_slides') {
-      const artifact = await createMarkdownSlidesArtifact(String(args.title), String(args.content), String(args.format) as 'html' | 'pdf' | 'pptx')
-      const path = await writeGeneratedFile(`.raw/jc-media/文档/${artifact.filename}`, artifact.data, signal)
+      const artifact = await createMarkdownSlidesArtifact(
+        String(args.title),
+        String(args.content),
+        String(args.format) as 'html' | 'pdf' | 'pptx',
+      )
+      const path = await writeGeneratedFile(
+        `.raw/jc-media/文档/${artifact.filename}`,
+        artifact.data,
+        signal,
+      )
       return { content: `已生成 Markdown 幻灯片: ${path}` }
     }
 
     if (name === 'create_3d_scene') {
       const scene = createScene3DDocument(args)
       const existingPath = String(args.existingPath || '')
-      if (existingPath && !/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(existingPath)) throw new Error('已有白膜场景路径无效')
+      if (existingPath && !/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(existingPath))
+        throw new Error('已有白膜场景路径无效')
       const content = serializeScene3DDocument(scene)
       const path = existingPath
-        ? (await invoke('dev_write_file', { root: requireProject(), relativePath: existingPath, content }), existingPath)
-        : await writeGeneratedFile(`.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`, content, signal)
-      return { content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}` }
+        ? (await invoke('dev_write_file', {
+            root: requireProject(),
+            relativePath: existingPath,
+            content,
+          }),
+          existingPath)
+        : await writeGeneratedFile(
+            `.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`,
+            content,
+            signal,
+          )
+      return {
+        content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}`,
+      }
     }
 
     if (name === 'edit_3d_scene') {
       const path = normalizeCreativeProjectPath(String(args.path))
-      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) throw new Error('白膜场景路径无效')
+      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path))
+        throw new Error('白膜场景路径无效')
       const scene = parseScene3DDocument(JSON.parse((await readFile(path)).content))
       const next = applyScene3DEdits(scene, args.operations)
       signal?.throwIfAborted()
-      await invoke('dev_write_file', { root: requireProject(), relativePath: path, content: serializeScene3DDocument(next) })
-      return { content: `已增量修改 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: next.title, objectCount: next.objects.length, formationCount: next.formations.length })}` }
+      await invoke('dev_write_file', {
+        root: requireProject(),
+        relativePath: path,
+        content: serializeScene3DDocument(next),
+      })
+      return {
+        content: `已增量修改 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: next.title, objectCount: next.objects.length, formationCount: next.formations.length })}`,
+      }
     }
 
     if (name === 'export_3d_scene_video') {
       const path = normalizeCreativeProjectPath(String(args.path))
-      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) throw new Error('动画场景路径无效')
+      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path))
+        throw new Error('动画场景路径无效')
       if (!input.recordSceneVideo) throw new Error('当前环境不能录制 3D 动画')
       const scene = parseScene3DDocument(JSON.parse((await readFile(path)).content))
       signal?.throwIfAborted()
@@ -421,8 +606,10 @@ export function createDesktopProjectToolExecutor(input: {
       const data = new Uint8Array(await recording.arrayBuffer())
       signal?.throwIfAborted()
       const result = await invoke('dev_export_scene_video', {
-        root: requireProject(), dataBase64: uint8ArrayToBase64(data),
-        mimeType: recording.type, outputFilename: artifactFilename(scene.title, 'mp4'),
+        root: requireProject(),
+        dataBase64: uint8ArrayToBase64(data),
+        mimeType: recording.type,
+        outputFilename: artifactFilename(scene.title, 'mp4'),
       })
       return { content: `已导出 3D 动画 MP4: ${String(result.path || '')}` }
     }
@@ -431,14 +618,17 @@ export function createDesktopProjectToolExecutor(input: {
       const command = String(args.command || '').trim()
       if (command && command === lastFailedTerminalCommand) {
         return {
-          content: '这条命令刚刚失败。不要原样重复失败命令；请根据上次输出改用替代命令、Skill 降级方案，或安装缺失依赖后验证再重试。',
+          content:
+            '这条命令刚刚失败。不要原样重复失败命令；请根据上次输出改用替代命令、Skill 降级方案，或安装缺失依赖后验证再重试。',
           status: 'failed',
         }
       }
       const resolvedCommand = resolveTerminalAttachments(command, input.attachments || [])
       const rawWorkdir = String(args.workdir || '')
       const externalWorkdir = isAbsolutePath(rawWorkdir) ? rawWorkdir : undefined
-      const workdir = externalWorkdir ? undefined : normalizeCreativeProjectPath(rawWorkdir, true) || '.'
+      const workdir = externalWorkdir
+        ? undefined
+        : normalizeCreativeProjectPath(rawWorkdir, true) || '.'
       const result = await invoke('dev_run_command', {
         root: requireProject(),
         command: resolvedCommand,
@@ -447,18 +637,29 @@ export function createDesktopProjectToolExecutor(input: {
         timeoutSeconds: boundedInteger(args.timeoutSeconds, 120, 900),
       })
       const exitCode = result.exitCode ?? result.exit_code ?? 'unknown'
-      const stdout = redactTerminalOutput(String(result.stdout || '').trim(), input.attachments || [])
-      const stderr = redactTerminalOutput(String(result.stderr || '').trim(), input.attachments || [])
+      const stdout = redactTerminalOutput(
+        String(result.stdout || '').trim(),
+        input.attachments || [],
+      )
+      const stderr = redactTerminalOutput(
+        String(result.stderr || '').trim(),
+        input.attachments || [],
+      )
       const duration = Number(result.durationMs ?? result.duration_ms ?? 0)
       const succeeded = Number(exitCode) === 0
       lastFailedTerminalCommand = succeeded ? '' : command
-      return { content: [
-        `Command: ${command}`,
-        `Exit code: ${exitCode}`,
-        `Duration: ${duration}ms`,
-        stdout && `stdout:\n${stdout}`,
-        stderr && `stderr:\n${stderr}`,
-      ].filter(Boolean).join('\n'), status: succeeded ? 'succeeded' : 'failed' }
+      return {
+        content: [
+          `Command: ${command}`,
+          `Exit code: ${exitCode}`,
+          `Duration: ${duration}ms`,
+          stdout && `stdout:\n${stdout}`,
+          stderr && `stderr:\n${stderr}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+        status: succeeded ? 'succeeded' : 'failed',
+      }
     }
 
     if (isMcpToolName(name)) {
