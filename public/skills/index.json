@@ -64,5 +64,16 @@
       "scripts/run_loop.py",
       "scripts/utils.py"
     ]
+  },
+  {
+    "id": "wiki-creator",
+    "name": "wiki-creator",
+    "description": "Use when a user wants to create, initialize, restructure, or take over a local Markdown Wiki from documents or an existing folder. Design a short wiki/index.md, only the necessary section indexes and confirmed initial pages, then submit one WikiCreatePlan for native validation and confirmed batch writing. Do not use for ordinary Wiki queries, routine edits, or creative writing.",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/wiki-architecture.md"
+    ]
   }
 ]
