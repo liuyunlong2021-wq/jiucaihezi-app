@@ -16,6 +16,14 @@ export function createWikiAgentState(input: Pick<WikiAgentState, 'runId' | 'wiki
   return { ...input, evidencePaths: [], retrievalSignatures: [], failedSignatures: [] }
 }
 
+export function recordWikiRetrieval(state: WikiAgentState, signature: string, paths: string[]): boolean {
+  if (state.retrievalSignatures.includes(signature)) return false
+  state.retrievalSignatures.push(signature)
+  const before = state.evidencePaths.length
+  state.evidencePaths.push(...paths.filter(path => !state.evidencePaths.includes(path)))
+  return state.evidencePaths.length > before
+}
+
 export const WIKI_AGENT_POLICY = `
 Wiki 是显式激活的外部 Markdown 事实源。
 Skill 负责当前任务的方法、格式和质量规则；Wiki Agent 只负责按计划提供事实，并执行经过校验的 Wiki 变更计划。

@@ -13,7 +13,7 @@ import type {
 } from '@/runtime/direct/directTypes'
 import { resolveDirectCompletionText, runDirectChatCompletion, type DirectChatCompletionRequest } from '@/runtime/direct/directEngine'
 import { validateTaskEnvelope, type TaskEnvelope } from '@/runtime/agent/taskProtocol'
-import { createWikiAgentState } from './wikiAgent'
+import { createWikiAgentState, recordWikiRetrieval } from './wikiAgent'
 
 const WIKI_AGENT = [{ id: 'wiki', readKinds: ['context'], actionKinds: ['apply'] }] as const
 
@@ -84,8 +84,7 @@ export async function runWikiTwoPhase(input: {
   const executeReadPaths = async (paths: string[]) => {
     if (!paths.length) return
     const signature = JSON.stringify([...paths].sort())
-    if (state.retrievalSignatures.includes(signature)) throw new Error('相同 Wiki 读取计划已执行，拒绝重复读取')
-    state.retrievalSignatures.push(signature)
+    if (!recordWikiRetrieval(state, signature, paths)) throw new Error('相同 Wiki 读取计划已执行，拒绝重复读取')
     validateTaskEnvelope({
       version: 1,
       runId: input.runId || 'wiki-run',
@@ -106,7 +105,6 @@ export async function runWikiTwoPhase(input: {
     const result = await input.executeWiki(readCall, input.signal)
     if (result.status !== 'succeeded') throw new Error(result.content || 'Wiki 读取未完成')
     sources = [sources, result.content].filter(Boolean).join('\n\n')
-    state.evidencePaths.push(...paths.filter(path => !state.evidencePaths.includes(path)))
   }
   await executeReadPaths(readPaths)
 
@@ -203,8 +201,14 @@ function validateDeclaredIndexChanges(changePlan: WikiSynthesisAndChangePlan['ch
   if (!changePlan) return
   const declared = changePlan.indexChanges
   for (const operation of changePlan.operations) {
+    const expectedDirectory = operation.kind === 'move'
+      ? operation.destination.split('/').slice(0, -1).join('/') || '.'
+      : operation.path.split('/').slice(0, -1).join('/') || '.'
+    const directoryMatches = (item: { directory: string; path: string }) => item.directory === expectedDirectory
     if (operation.kind === 'create' && !declared.some(item => item.action === 'add' && item.path === operation.path))
       throw new Error(`Wiki 计划缺少新增页面的 indexChanges: ${operation.path}`)
+    if ((operation.kind === 'create' || operation.kind === 'move') && !declared.some(directoryMatches))
+      throw new Error(`Wiki 计划的 indexChanges.directory 与目标目录不一致: ${operation.path}`)
     if (operation.kind === 'trash' && !declared.some(item => item.action === 'remove' && item.path === operation.path))
       throw new Error(`Wiki 计划缺少移除页面的 indexChanges: ${operation.path}`)
     if (operation.kind === 'move' && operation.path.endsWith('.md')) {

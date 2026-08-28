@@ -319,6 +319,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         const signature = JSON.stringify({
           query: args.query,
           scope: args.scope || 'active',
+          entryPath: args.entryPath || '',
+          maxPages: args.maxPages || 0,
+          maxTokens: args.maxTokens || 0,
         })
         if (wikiSearchSignatures.has(signature))
           throw new Error('相同 Wiki 搜索已执行，拒绝重复检索')
