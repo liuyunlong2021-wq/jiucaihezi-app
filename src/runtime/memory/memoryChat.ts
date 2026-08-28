@@ -24,6 +24,7 @@ import {
   type DirectChatCompletionRequest,
 } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
+import type { DirectToolExecutor, DirectToolResult } from '@/runtime/direct/directTypes'
 import {
   buildMemoryWebProjectToolDefinitions,
   createWebProjectToolExecutor,
@@ -43,6 +44,10 @@ import { getModelContextWindow } from '@/data/modelContextWindows'
 import { getModelMaxOutputTokens } from '@/data/modelContextWindows'
 import { estimateTokenCount } from 'tokenx'
 import { webProjectFiles } from '@/utils/webProjectFiles'
+
+export function normalizeMemoryToolResult(result: DirectToolResult): DirectToolResult {
+  return { ...result, status: result.status ?? 'succeeded' }
+}
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { safeFetch } from '@/utils/httpClient'
 import { supportsVision } from '@/utils/providerConfig'
@@ -78,12 +83,20 @@ export interface MemoryChatInput {
   signal?: AbortSignal
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
+  onProgramStatus?: (status: MemoryProgramStatus) => void
   onMetrics?: (metrics: DirectRunMetrics) => void
   onRetry?: (attempt: number, total: number) => void
   onContextTrimmed?: (omittedMessages: number) => void
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
   recordSceneVideo?: (document: Scene3DDocument, signal?: AbortSignal) => Promise<Blob>
   authorizedRawPaths?: string[]
+}
+
+export interface MemoryProgramStatus {
+  kind: 'wiki'
+  status: 'succeeded' | 'failed' | 'cancelled'
+  paths: string[]
+  reason?: string
 }
 
 export function hasExplicitMemoryCapability(
@@ -292,7 +305,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return text
   }
 
-  const projectTools = isTauriRuntime()
+  const rawProjectTools = isTauriRuntime()
     ? createDesktopProjectToolExecutor({
         projectDir: input.projectId,
         authorizedRawPaths: input.authorizedRawPaths,
@@ -305,6 +318,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         files: webProjectFiles,
         authorizedRawPaths: input.authorizedRawPaths,
       })
+  const projectTools: DirectToolExecutor = async (call, signal) =>
+    normalizeMemoryToolResult(await rawProjectTools(call, signal))
 
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   const builtInNames = new Set(
@@ -400,9 +415,22 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       type: 'function',
       function: { name: 'wiki_context', arguments: JSON.stringify({ action: 'entry' }) },
     }
-    const entryResult = await projectTools(entryCall, input.signal)
-    if (entryResult.status !== 'succeeded')
-      throw new Error(entryResult.content || 'Wiki 入口读取未完成')
+    let entryResult: Awaited<ReturnType<DirectToolExecutor>>
+    try {
+      entryResult = await projectTools(entryCall, input.signal)
+    } catch (error) {
+      entryResult = {
+        content: JSON.stringify({
+          action: 'entry',
+          root: 'wiki',
+          sources: [],
+          coverage: 'none',
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        status: 'failed',
+      }
+    }
+    if (entryResult.status === 'cancelled') throw new DOMException('Aborted', 'AbortError')
     const phaseResult = await runWikiTwoPhase({
       runId: `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       messages,
@@ -443,9 +471,26 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       },
     })
     input.onMetrics?.(phaseResult.metrics)
-    const text = phaseResult.applyResult
-      ? `${phaseResult.text}\n\n${phaseResult.applyResult}`
-      : phaseResult.text
+    if (phaseResult.plan.changePlan) {
+      const applyResult = phaseResult.applyResult || ''
+      const status = /^status:\s*(succeeded|failed|cancelled)$/mu.exec(applyResult)?.[1]
+      const plannedPaths = phaseResult.plan.changePlan.operations.flatMap(operation =>
+        operation.kind === 'move'
+          ? [`${operation.path} -> ${operation.destination}`]
+          : [operation.path],
+      )
+      const writtenPaths = [...applyResult.matchAll(/^-\s+(.+?)\s+sha256:/gmu)].map(match =>
+        match[1]!.trim(),
+      )
+      const paths = [...new Set([...plannedPaths, ...writtenPaths])]
+      input.onProgramStatus?.({
+        kind: 'wiki',
+        status: status === 'succeeded' || status === 'cancelled' ? status : 'failed',
+        paths,
+        reason: /^reason:\s*(.+)$/mu.exec(applyResult)?.[1],
+      })
+    }
+    const text = phaseResult.text
     input.onText(text)
     return text
   }

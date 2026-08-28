@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { hasExplicitMemoryCapability, selectMemoryTools } from '../memoryChat'
+import {
+  hasExplicitMemoryCapability,
+  normalizeMemoryToolResult,
+  selectMemoryTools,
+} from '../memoryChat'
 
 const tools = [
   'skill',
@@ -24,6 +28,15 @@ test('Wiki exposes the complete native Wiki tool set', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], true).map(tool => tool.function.name),
     ['wiki_context', 'wiki'],
+  )
+})
+
+test('project tool results default to success without masking explicit failures', () => {
+  assert.equal(normalizeMemoryToolResult({ content: 'ok' }).status, 'succeeded')
+  assert.equal(normalizeMemoryToolResult({ content: 'failed', status: 'failed' }).status, 'failed')
+  assert.equal(
+    normalizeMemoryToolResult({ content: 'cancelled', status: 'cancelled' }).status,
+    'cancelled',
   )
 })
 
@@ -66,25 +79,31 @@ test('a selected capability connects the task explicitly', () => {
 })
 
 test('selecting a concrete Skill does not expose a generic Skill loader', () => {
-  assert.deepEqual(selectMemoryTools(tools, ['jc-film-style']).map(tool => tool.function.name), [])
+  assert.deepEqual(
+    selectMemoryTools(tools, ['jc-film-style']).map(tool => tool.function.name),
+    [],
+  )
 })
 
 test('explicit MCP keeps only the selected MCP tools', () => {
   assert.deepEqual(
-    selectMemoryTools(tools, [], false, false, false, ['mcp__demo__run']).map(tool => tool.function.name),
+    selectMemoryTools(tools, [], false, false, false, ['mcp__demo__run']).map(
+      tool => tool.function.name,
+    ),
     ['mcp__demo__run'],
   )
 })
 
 test('MCP selection without a concrete tool exposes nothing', () => {
-  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, []).map(tool => tool.function.name), [])
+  assert.deepEqual(
+    selectMemoryTools(tools, [], false, false, false, []).map(tool => tool.function.name),
+    [],
+  )
 })
 
 test('attached document plus an add-to-scope instruction exposes write tools', () => {
   assert.deepEqual(
-    selectMemoryTools(tools, [], false, true).map(
-      tool => tool.function.name,
-    ),
+    selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),
     ['read'],
   )
 })

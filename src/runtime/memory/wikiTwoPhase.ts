@@ -3,6 +3,7 @@ import {
   parseWikiSynthesisAndChangePlan,
   WIKI_READ_PLAN_SYSTEM_PROMPT,
   WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT,
+  type WikiReadPlan,
   type WikiSynthesisAndChangePlan,
 } from './wikiPlans'
 import type {
@@ -11,7 +12,11 @@ import type {
   DirectToolCall,
   DirectToolExecutor,
 } from '@/runtime/direct/directTypes'
-import { resolveDirectCompletionText, runDirectChatCompletion, type DirectChatCompletionRequest } from '@/runtime/direct/directEngine'
+import {
+  resolveDirectCompletionText,
+  runDirectChatCompletion,
+  type DirectChatCompletionRequest,
+} from '@/runtime/direct/directEngine'
 import { validateTaskEnvelope, type TaskEnvelope } from '@/runtime/agent/taskProtocol'
 import { createWikiAgentState, recordWikiRetrieval } from './wikiAgent'
 
@@ -72,28 +77,46 @@ export async function runWikiTwoPhase(input: {
     messages: [
       ...input.messages,
       { role: 'system', content: WIKI_READ_PLAN_SYSTEM_PROMPT },
-      { role: 'user', content: `当前任务：${input.task}\nWiki 根入口实际内容：\n${input.entryResult}` },
+      {
+        role: 'user',
+        content: `当前任务：${input.task}\nWiki 根入口实际内容：\n${input.entryResult}`,
+      },
     ],
     sendChatCompletion: input.sendChatCompletion,
     signal: input.signal,
   })
-  let readPlan = parseWikiReadPlan(readRequest.text)
+  let readPlan: WikiReadPlan
+  try {
+    readPlan = parseWikiReadPlan(readRequest.text)
+  } catch (error) {
+    readPlan = {
+      paths: [],
+      missing: [`ReadPlan 无法解析：${error instanceof Error ? error.message : String(error)}`],
+      sufficient: true,
+    }
+  }
   let readMetrics = readRequest.metrics
   let readPaths = [...new Set(readPlan.paths.map(item => item.path))]
   let sources = input.entryResult
   const executeReadPaths = async (paths: string[]) => {
     if (!paths.length) return
     const signature = JSON.stringify([...paths].sort())
-    if (!recordWikiRetrieval(state, signature, paths)) throw new Error('相同 Wiki 读取计划已执行，拒绝重复读取')
-    validateTaskEnvelope({
-      version: 1,
-      runId: input.runId || 'wiki-run',
-      source: 'program',
-      status: 'needs_observation',
-      capabilities: ['wiki'],
-      reads: [{ id: 'wiki_read_plan', agent: 'wiki', kind: 'context', arguments: { paths } }],
-      actions: [],
-    }, WIKI_AGENT, ['wiki'], 'program')
+    if (!recordWikiRetrieval(state, signature, paths))
+      throw new Error('相同 Wiki 读取计划已执行，拒绝重复读取')
+    validateTaskEnvelope(
+      {
+        version: 1,
+        runId: input.runId || 'wiki-run',
+        source: 'program',
+        status: 'needs_observation',
+        capabilities: ['wiki'],
+        reads: [{ id: 'wiki_read_plan', agent: 'wiki', kind: 'context', arguments: { paths } }],
+        actions: [],
+      },
+      WIKI_AGENT,
+      ['wiki'],
+      'program',
+    )
     const readCall: DirectToolCall = {
       id: 'wiki_read_plan',
       type: 'function',
@@ -102,47 +125,26 @@ export async function runWikiTwoPhase(input: {
         arguments: JSON.stringify({ action: 'read', paths }),
       },
     }
-    const result = await input.executeWiki(readCall, input.signal)
-    if (result.status !== 'succeeded') throw new Error(result.content || 'Wiki 读取未完成')
-    sources = [sources, result.content].filter(Boolean).join('\n\n')
+    try {
+      const result = await input.executeWiki(readCall, input.signal)
+      sources = [
+        sources,
+        result.status && result.status !== 'succeeded'
+          ? `[Wiki 读取${result.status === 'cancelled' ? '已取消' : '失败'}]\n${result.content || '无详细信息'}`
+          : result.content,
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    } catch (error) {
+      sources = [
+        sources,
+        `[Wiki 读取失败]\n${error instanceof Error ? error.message : String(error)}`,
+      ]
+        .filter(Boolean)
+        .join('\n\n')
+    }
   }
   await executeReadPaths(readPaths)
-
-  if (!readPlan.sufficient) {
-    const supplement = await requestJson({
-      messages: [
-        ...input.messages,
-        { role: 'system', content: WIKI_READ_PLAN_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: `当前任务：${input.task}\n首次 ReadPlan：${JSON.stringify(readPlan)}\n已读取入口和资料：\n${sources}\n请只补充首次计划遗漏且确实必要的页面；若仍不足，保留 missing 并将 sufficient 设为 false。`,
-        },
-      ],
-      sendChatCompletion: input.sendChatCompletion,
-      signal: input.signal,
-    })
-    readMetrics = sumMetrics(readMetrics, supplement.metrics)
-    const supplementPlan = parseWikiReadPlan(supplement.text)
-    const additionalPaths = supplementPlan.paths
-      .map(item => item.path)
-      .filter(path => !readPaths.includes(path))
-    await executeReadPaths(additionalPaths)
-    readPaths = [...new Set([...readPaths, ...additionalPaths])]
-    const unresolvedMissing = readPlan.missing.filter(missing => {
-      const needle = missing.toLowerCase().replace(/\\/g, '/')
-      return !additionalPaths.some(path => {
-        const normalized = path.toLowerCase().replace(/\\/g, '/')
-        const missingName = needle.split('/').at(-1) || needle
-        return normalized === needle || normalized.endsWith(`/${needle}`) || normalized.includes(missingName)
-      })
-    })
-    readPlan = {
-      paths: [...readPlan.paths, ...supplementPlan.paths.filter(item => additionalPaths.includes(item.path))],
-      missing: [...new Set([...unresolvedMissing, ...supplementPlan.missing])],
-      sufficient: supplementPlan.sufficient && additionalPaths.length > 0 && unresolvedMissing.length === 0,
-    }
-    if (!readPlan.sufficient) throw new Error(`Wiki 资料不足：${readPlan.missing.join('、') || '缺少必要页面'}`)
-  }
 
   const synthesisRequest = await requestJson({
     messages: [
@@ -156,66 +158,100 @@ export async function runWikiTwoPhase(input: {
     sendChatCompletion: input.sendChatCompletion,
     signal: input.signal,
   })
-  const plan = parseWikiSynthesisAndChangePlan(synthesisRequest.text)
+  let plan: WikiSynthesisAndChangePlan
+  try {
+    plan = parseWikiSynthesisAndChangePlan(synthesisRequest.text)
+  } catch {
+    return {
+      text: synthesisRequest.text,
+      plan: { answer: synthesisRequest.text, changePlan: null },
+      metrics: sumMetrics(readMetrics, synthesisRequest.metrics),
+      readPaths,
+    }
+  }
   const metrics = sumMetrics(readMetrics, synthesisRequest.metrics)
   if (!plan.changePlan) return { text: plan.answer, plan, metrics, readPaths }
-  validateDeclaredIndexChanges(plan.changePlan)
+  const changePlan = {
+    ...plan.changePlan,
+    reason: plan.changePlan.reason || input.task,
+    basis: plan.changePlan.basis.length ? plan.changePlan.basis : readPaths,
+  }
+  plan.changePlan = changePlan
+  const executionPlan = {
+    reason: changePlan.reason,
+    basis: changePlan.basis,
+    operations: changePlan.operations,
+  }
 
   const applyCall: DirectToolCall = {
     id: 'wiki_change_plan',
     type: 'function',
     function: {
       name: 'wiki',
-      arguments: JSON.stringify({ action: 'apply', ...plan.changePlan }),
+      arguments: JSON.stringify({ action: 'apply', ...executionPlan }),
     },
   }
-  state.pendingPlan = { action: 'apply', ...plan.changePlan }
-  validateTaskEnvelope({
-    version: 1,
-    runId: input.runId || 'wiki-run',
-    source: 'program',
-    status: 'ready_to_execute',
-    capabilities: ['wiki'],
-    reads: [],
-    actions: [{ id: 'wiki_change_plan', agent: 'wiki', kind: 'apply', arguments: plan.changePlan }],
-  }, WIKI_AGENT, ['wiki'], 'program')
-  const applied = await input.executeWiki(applyCall, input.signal)
-  if (applied.status !== 'succeeded') throw new Error(applied.content || 'Wiki 写入未完成')
-  state.applyResult = applied.content
-  const envelope = validateTaskEnvelope({
-    version: 1,
-    runId: input.runId || 'wiki-run',
-    source: 'program',
-    status: 'complete',
-    capabilities: ['wiki'],
-    reads: [],
-    actions: [{ id: 'wiki_change_plan', agent: 'wiki', kind: 'apply', arguments: plan.changePlan }],
-    observations: [{ id: 'wiki_change_observation', actionId: 'wiki_change_plan', agent: 'wiki', ok: true, result: applied.content }],
-    answer: plan.answer,
-    receipt: { ok: true, completedActionIds: ['wiki_change_plan'], failedActionIds: [] },
-  }, WIKI_AGENT, ['wiki'], 'program')
-  return { text: plan.answer, plan, metrics, readPaths, applyResult: applied.content, envelope }
-}
-
-function validateDeclaredIndexChanges(changePlan: WikiSynthesisAndChangePlan['changePlan']): void {
-  if (!changePlan) return
-  const declared = changePlan.indexChanges
-  for (const operation of changePlan.operations) {
-    const expectedDirectory = operation.kind === 'move'
-      ? operation.destination.split('/').slice(0, -1).join('/') || '.'
-      : operation.path.split('/').slice(0, -1).join('/') || '.'
-    const directoryMatches = (item: { directory: string; path: string }) => item.directory === expectedDirectory
-    if (operation.kind === 'create' && !declared.some(item => item.action === 'add' && item.path === operation.path))
-      throw new Error(`Wiki 计划缺少新增页面的 indexChanges: ${operation.path}`)
-    if ((operation.kind === 'create' || operation.kind === 'move') && !declared.some(directoryMatches))
-      throw new Error(`Wiki 计划的 indexChanges.directory 与目标目录不一致: ${operation.path}`)
-    if (operation.kind === 'trash' && !declared.some(item => item.action === 'remove' && item.path === operation.path))
-      throw new Error(`Wiki 计划缺少移除页面的 indexChanges: ${operation.path}`)
-    if (operation.kind === 'move' && operation.path.endsWith('.md')) {
-      if (!declared.some(item => item.action === 'remove' && item.path === operation.path))
-        throw new Error(`Wiki 计划缺少移动源页面的 indexChanges: ${operation.path}`)
-      if (!declared.some(item => item.action === 'add' && item.path === operation.destination))
-        throw new Error(`Wiki 计划缺少移动目标页面的 indexChanges: ${operation.destination}`)
+  state.pendingPlan = { action: 'apply', ...executionPlan }
+  validateTaskEnvelope(
+    {
+      version: 1,
+      runId: input.runId || 'wiki-run',
+      source: 'program',
+      status: 'ready_to_execute',
+      capabilities: ['wiki'],
+      reads: [],
+      actions: [{ id: 'wiki_change_plan', agent: 'wiki', kind: 'apply', arguments: executionPlan }],
+    },
+    WIKI_AGENT,
+    ['wiki'],
+    'program',
+  )
+  let applied: Awaited<ReturnType<DirectToolExecutor>>
+  try {
+    applied = await input.executeWiki(applyCall, input.signal)
+  } catch (error) {
+    return {
+      text: plan.answer,
+      plan,
+      metrics,
+      readPaths,
+      applyResult: `status: failed\nreason: ${error instanceof Error ? error.message : String(error)}`,
     }
   }
+  if (applied.status !== 'succeeded') {
+    return {
+      text: plan.answer,
+      plan,
+      metrics,
+      readPaths,
+      applyResult: `status: ${applied.status || 'failed'}\nreason: ${applied.content || 'Wiki 写入未完成'}`,
+    }
+  }
+  state.applyResult = applied.content
+  const envelope = validateTaskEnvelope(
+    {
+      version: 1,
+      runId: input.runId || 'wiki-run',
+      source: 'program',
+      status: 'complete',
+      capabilities: ['wiki'],
+      reads: [],
+      actions: [{ id: 'wiki_change_plan', agent: 'wiki', kind: 'apply', arguments: executionPlan }],
+      observations: [
+        {
+          id: 'wiki_change_observation',
+          actionId: 'wiki_change_plan',
+          agent: 'wiki',
+          ok: true,
+          result: applied.content,
+        },
+      ],
+      answer: plan.answer,
+      receipt: { ok: true, completedActionIds: ['wiki_change_plan'], failedActionIds: [] },
+    },
+    WIKI_AGENT,
+    ['wiki'],
+    'program',
+  )
+  return { text: plan.answer, plan, metrics, readPaths, applyResult: applied.content, envelope }
 }

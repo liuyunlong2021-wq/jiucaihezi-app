@@ -363,6 +363,10 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
     /conversationTurns: editTargetId \? baseTurns : active\.transcript\.turns/,
   )
   assert.match(runtime, /messages: \[\.\.\.input\.conversationTurns, input\.userTurn\]/)
+  assert.match(runtime, /onProgramStatus\?: \(status: MemoryProgramStatus\) => void/)
+  assert.match(workbench, /programStatuses = ref<Record<string, MemoryProgramStatus>>/)
+  assert.match(workbench, /class="memory-program-status"/)
+  assert.match(workbench, /索引、双链、日志已同步并验证/)
   assert.doesNotMatch(
     runtime,
     /rawPath: string|input\.rawPath|conversationDocumentSources|historicalDocumentSources/,

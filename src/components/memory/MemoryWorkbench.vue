@@ -26,7 +26,7 @@ import {
   replaceMemoryRound,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
-import { runMemoryChat } from '@/runtime/memory/memoryChat'
+import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
 import {
@@ -162,6 +162,8 @@ const runVisible = ref(false)
 const runElapsed = ref(0)
 const runSteps = ref<MemoryRunStep[]>([])
 const runMetrics = ref<DirectRunMetrics | null>(null)
+const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
+const pendingProgramStatus = ref<MemoryProgramStatus | null>(null)
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
 const viewportWidth = ref(window.innerWidth)
@@ -411,6 +413,13 @@ const modelGroups = computed(() => {
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
 const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
+function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
+  return programStatuses.value[turnId]
+}
+
+function programStatusTitle(programStatus: MemoryProgramStatus): string {
+  return programStatus.status === 'succeeded' ? 'Wiki 已写入' : programStatus.status === 'cancelled' ? 'Wiki 写入已取消' : 'Wiki 写入失败'
+}
 const toolCommands = [
   { id: 'wiki', label: '@Wiki', icon: 'menu_book', description: '读取当前项目 Wiki' },
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '加载指定 Skill' },
@@ -1090,6 +1099,7 @@ async function send() {
   const runGeneration = ++memoryRunGeneration
   const isCurrentRun = () => runGeneration === memoryRunGeneration
   sending.value = true
+  pendingProgramStatus.value = null
   const userTurn: ConversationTurn = {
     id: `turn-${crypto.randomUUID()}`,
     role: 'user',
@@ -1135,6 +1145,9 @@ async function send() {
       signal: abortController.signal,
       onToolEvent: event => {
         if (isCurrentRun()) updateRunTool(event)
+      },
+      onProgramStatus: programStatus => {
+        if (isCurrentRun()) pendingProgramStatus.value = programStatus
       },
       onMetrics(metrics) {
         if (isCurrentRun()) runMetrics.value = metrics
@@ -1182,6 +1195,7 @@ async function send() {
     streamingText.value = ''
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
+      if (pendingProgramStatus.value) programStatuses.value[turn.id] = pendingProgramStatus.value
       try {
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
@@ -2228,7 +2242,23 @@ function readDataUrl(file: File): Promise<string> {
             :streaming="turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
           />
-  <button
+          <div
+            v-if="programStatusFor(turn.id)"
+            class="memory-program-status"
+            :class="programStatusFor(turn.id)?.status"
+            role="status"
+          >
+            <div class="memory-program-status-head">
+              <JcIcon :name="programStatusFor(turn.id)?.status === 'succeeded' ? 'check_circle' : programStatusFor(turn.id)?.status === 'cancelled' ? 'stop' : 'error'" />
+              <strong>{{ programStatusTitle(programStatusFor(turn.id)!) }}</strong>
+            </div>
+            <div v-if="programStatusFor(turn.id)?.paths.length" class="memory-program-status-paths">
+              <span v-for="path in programStatusFor(turn.id)?.paths" :key="path">{{ path }}</span>
+            </div>
+            <small v-if="programStatusFor(turn.id)?.status === 'succeeded'">索引、双链、日志已同步并验证</small>
+            <small v-else-if="programStatusFor(turn.id)?.reason">{{ programStatusFor(turn.id)?.reason }}</small>
+          </div>
+          <button
             v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
             class="memory-message-copy"
             type="button"
@@ -2639,6 +2669,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
 .memory-message-text { overflow-wrap: anywhere; }
+.memory-program-status { display: grid; gap: 5px; margin-top: 9px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-program-status.failed, .memory-program-status.cancelled { border-color: color-mix(in srgb, var(--danger) 34%, var(--line)); background: color-mix(in srgb, var(--danger) 6%, var(--paper)); }
+.memory-program-status-head { display: flex; align-items: center; gap: 6px; color: var(--olive); }
+.memory-program-status.failed .memory-program-status-head, .memory-program-status.cancelled .memory-program-status-head { color: var(--danger); }
+.memory-program-status-head strong { font-weight: 600; }
+.memory-program-status-paths { display: grid; gap: 2px; color: var(--ink1); overflow-wrap: anywhere; }
+.memory-program-status small { color: var(--ink3); overflow-wrap: anywhere; }
 .memory-backlinks { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--line); }
 .memory-backlinks h2 { margin: 0 0 8px; font-size: 14px; }
 .memory-backlinks button { display: block; width: 100%; padding: 7px 0; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; text-align: left; }
