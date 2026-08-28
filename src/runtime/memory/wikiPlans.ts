@@ -9,6 +9,7 @@ export interface WikiReadPlan {
   paths: WikiReadPlanItem[]
   missing: string[]
   sufficient: boolean
+  status?: 'need_more' | 'complete'
 }
 
 export interface WikiIndexChange {
@@ -35,13 +36,14 @@ export const WIKI_READ_PLAN_SYSTEM_PROMPT = [
   '根据当前任务和 Wiki 根入口，选择完成任务所必需的最少 Markdown 页面。',
   '已选 Skill（如果有）只提供方法、格式和质量规则；不要把 Skill 规则当作 Wiki 事实，也不要要求 Wiki 采用某种领域结构。',
   '优先使用入口声明的直属路径；不得凭常识猜路径，不得请求整个目录或全库。',
-  '路径必须唯一；paths 可以为空。Wiki 为空、缺页或读取失败都不是终止条件，模型必须基于收到的真实上下文继续给出结果。',
-  '输出格式：{"paths":[{"path":"相对路径.md","reason":"简短原因"}],"missing":[],"sufficient":true}',
+  '路径必须唯一；paths 可以为空。若当前资料还不足，返回 sufficient:false 并选择下一层索引或叶文件；若已足够或没有可读路径，返回 sufficient:true。Wiki 为空、缺页或读取失败都不是终止条件，模型必须基于收到的真实上下文继续给出结果。',
+  '输出格式：{"paths":[{"path":"相对路径.md","reason":"简短原因"}],"missing":[],"status":"need_more"或"complete"}',
 ].join('\n')
 
 export const WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT = [
   '你是 WikiSynthesisAndChangePlan 规划器。只输出合法 JSON，不要 Markdown 或解释。',
   '只能依据实际读取的 Wiki 内容、用户任务和已选 Skill/MCP 结果回答，不得补造项目事实。',
+  '如果资料中出现“目录包含文件但缺少 index.md”或“路径未授权”警告，必须在回答中明确告知用户本次未读取未索引内容。',
   '已选 Skill（如果有）负责本任务的方法、格式和质量规则；Wiki 只负责事实、页面组织和确定性落盘。Skill 规则不是 Wiki 事实。',
   '只读任务将 changePlan 设为 null；需要写入时只描述实际变更，不要输出 indexChanges、双链、日志或目录维护计划，这些由程序根据变更自动完成。',
   '每个变更使用最小格式：{"kind":"create|replace|append|move|trash","path":"相对路径.md", ...}。create 需要 title/content；replace 需要 oldText/newText；append 需要 content/idempotencyKey；move 需要 destination。',
@@ -51,7 +53,7 @@ export const WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT = [
 export const WIKI_READ_PLAN_SCHEMA = {
   type: 'object',
   additionalProperties: false,
-  required: ['paths', 'missing', 'sufficient'],
+  required: ['paths', 'missing'],
   properties: {
     paths: {
       type: 'array',
@@ -66,6 +68,7 @@ export const WIKI_READ_PLAN_SCHEMA = {
     },
     missing: { type: 'array', maxItems: 12, items: { type: 'string' } },
     sufficient: { type: 'boolean' },
+    status: { enum: ['need_more', 'complete'] },
   },
 } as const
 
@@ -135,7 +138,11 @@ export function parseWikiReadPlan(input: string): WikiReadPlan {
   const value = parseJsonObject(input, 'WikiReadPlan')
   if (!Array.isArray(value.paths) || value.paths.length > 12)
     throw new Error('ReadPlan paths 最多 12 项')
-  if (typeof value.sufficient !== 'boolean') throw new Error('ReadPlan sufficient 必须是布尔值')
+  if (typeof value.sufficient !== 'boolean' && value.status !== 'need_more' && value.status !== 'complete')
+    throw new Error('ReadPlan sufficient/status 无效')
+  const status = value.status === 'need_more' || value.status === 'complete'
+    ? value.status
+    : value.sufficient ? 'complete' : 'need_more'
   const missing = stringArray(value.missing, 'ReadPlan missing', 12)
   const seen = new Set<string>()
   const paths = value.paths.map((item, index) => {
@@ -147,7 +154,7 @@ export function parseWikiReadPlan(input: string): WikiReadPlan {
     seen.add(path)
     return { path, reason: text(row.reason, `ReadPlan paths[${index}].reason`) }
   })
-  return { paths, missing, sufficient: value.sufficient }
+  return { paths, missing, sufficient: status === 'complete', status }
 }
 
 function parseOperations(value: unknown): WikiOperation[] {

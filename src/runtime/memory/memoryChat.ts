@@ -482,7 +482,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       const writtenPaths = [...applyResult.matchAll(/^-\s+(.+?)\s+sha256:/gmu)].map(match =>
         match[1]!.trim(),
       )
-      const paths = [...new Set([...plannedPaths, ...writtenPaths])]
+      const paths = [...new Set([...plannedPaths, ...writtenPaths])].map(path =>
+        path.replace(/^wiki\//, ''),
+      )
       input.onProgramStatus?.({
         kind: 'wiki',
         status: status === 'succeeded' || status === 'cancelled' ? status : 'failed',

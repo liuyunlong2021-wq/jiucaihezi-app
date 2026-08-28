@@ -627,15 +627,29 @@ export async function buildWikiContext(
     const maxPages = Math.max(1, Math.min(input.maxPages || 12, 12))
     if (requested.length > maxPages) throw new Error(`Wiki 单次最多读取 ${maxPages} 个页面`)
     const paths = requested.map(path => resolveWikiFile(state, wiki, path))
-    const contents = await Promise.all(
+    const contents = await Promise.allSettled(
       paths.map(async path => ({
         path,
+        ...(path.endsWith('/index.md') && !state.files.has(path)
+          ? (() => {
+              const directory = path.slice(0, -'/index.md'.length)
+              if ([...state.files].some(file => file.startsWith(`${directory}/`)))
+                throw new Error(`目录包含文件但缺少 index.md：${relativeToWiki(wiki, directory)}`)
+              throw new Error(`Wiki 页面不存在：${relativeToWiki(wiki, path)}`)
+            })()
+          : {}),
         content: await workspace.read(path),
         fingerprint: await workspace.fingerprint(path),
       })),
     )
     let remainingChars = Math.max(1000, input.maxTokens || 24_000) * 4
-    for (const item of contents) {
+    for (const [index, settled] of contents.entries()) {
+      if (settled.status === 'rejected') {
+        const path = relativeToWiki(wiki, paths[index]!)
+        base.missingRoutes.push(`${path}: ${settled.reason instanceof Error ? settled.reason.message : String(settled.reason)}`)
+        continue
+      }
+      const item = settled.value
       const content = item.content.slice(0, remainingChars)
       remainingChars -= content.length
       base.sources.push({
@@ -649,7 +663,9 @@ export async function buildWikiContext(
       if (remainingChars <= 0) break
     }
     base.omittedPaths = paths.slice(base.sources.length).map(path => relativeToWiki(wiki, path))
-    base.coverage = base.omittedPaths.length ? 'partial' : 'complete'
+    base.coverage = base.missingRoutes.length || base.omittedPaths.length
+      ? base.sources.length ? 'partial' : 'none'
+      : 'complete'
     return base
   }
 

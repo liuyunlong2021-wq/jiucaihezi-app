@@ -390,6 +390,37 @@ test('wiki context reads only explicit paths and never scans unrelated page bodi
   assert.equal(reads.has('wiki/正文/百万字.md'), false)
 })
 
+test('wiki context keeps valid pages when another requested path is missing', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n',
+    'wiki/角色': null,
+    'wiki/角色/张飞.md': '# 张飞\n提示词。',
+  })
+  const context = await buildWikiContext(project.workspace, {
+    action: 'read',
+    paths: ['角色/张飞.md', '角色/角色设计规范.md'],
+  })
+  assert.deepEqual(context.sources.map(source => source.path), ['角色/张飞.md'])
+  assert.equal(context.coverage, 'partial')
+  assert.match(context.missingRoutes[0] || '', /角色\/角色设计规范\.md/u)
+})
+
+test('wiki context reports a non-empty directory that has no index', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n',
+    'wiki/角色': null,
+    'wiki/角色/张飞.md': '# 张飞\n提示词。',
+  })
+  const context = await buildWikiContext(project.workspace, {
+    action: 'read',
+    paths: ['角色/index.md', '角色/张飞.md'],
+  })
+  assert.ok(context.sources.some(source => source.path === '角色/张飞.md'))
+  assert.match(context.missingRoutes[0] || '', /目录包含文件但缺少 index\.md/u)
+})
+
 test('wiki context tree lists paths and fingerprints without reading page bodies', async () => {
   const project = memoryWiki({
     wiki: null,

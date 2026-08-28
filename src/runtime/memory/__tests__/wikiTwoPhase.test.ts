@@ -56,8 +56,114 @@ test('Wiki two-phase flow reads the plan then submits one change plan', async ()
   assert.deepEqual(result.readPaths, ['剧情/总纲.md'])
   assert.equal(result.text, '新一集正文')
   assert.equal(calls.length, 2)
+  assert.equal(result.metrics.toolRounds, 2)
   assert.match(calls[1]!, /"action":"apply"/)
   assert.doesNotMatch(calls[1]!, /indexChanges/)
+})
+
+test('Wiki Agent follows nested indexes until the leaf content is available', async () => {
+  const requests: any[] = []
+  const readPaths: string[] = []
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '重写张飞的生图提示词' }],
+    task: '重写张飞的生图提示词',
+    entryResult: '角色 -> 角色/index.md',
+    sendChatCompletion: async request => {
+      requests.push(request)
+      if (requests.length === 1)
+        return response({
+          paths: [{ path: '角色/index.md', reason: '定位角色资料' }],
+          missing: [],
+          sufficient: false,
+        })
+      if (requests.length === 2)
+        return response({
+          paths: [{ path: '角色/生图提示词/index.md', reason: '定位提示词分区' }],
+          missing: [],
+          sufficient: false,
+        })
+      if (requests.length === 3)
+        return response({
+          paths: [{ path: '角色/生图提示词/张飞.md', reason: '读取张飞原提示词' }],
+          missing: [],
+          sufficient: true,
+        })
+      return response({ answer: '重写后的张飞提示词', changePlan: null })
+    },
+    executeWiki: async call => {
+      const args = JSON.parse(call.function.arguments) as { paths?: string[] }
+      if (Array.isArray(args.paths)) readPaths.push(...args.paths)
+      return { content: `读取结果: ${args.paths?.join(',') || ''}`, status: 'succeeded' }
+    },
+  })
+
+  assert.equal(requests.length, 4)
+  assert.deepEqual(readPaths, [
+    '角色/index.md',
+    '角色/生图提示词/index.md',
+    '角色/生图提示词/张飞.md',
+  ])
+  assert.deepEqual(result.readPaths, readPaths)
+  assert.equal(result.text, '重写后的张飞提示词')
+})
+
+test('Wiki Agent rejects a path that is not linked by the current index', async () => {
+  const calls: string[] = []
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '查询角色' }],
+    task: '查询角色',
+    entryResult: JSON.stringify({ entry: { path: 'index.md', content: '[[角色/index]]' } }),
+    sendChatCompletion: async request =>
+      request.messages.some(message => String(message.content).includes('WikiSynthesis'))
+        ? response({ answer: '基于已索引资料回答', changePlan: null })
+        : response({ paths: [{ path: '秘密.md', reason: '猜测路径' }], missing: [], status: 'need_more' }),
+    executeWiki: async call => {
+      calls.push(call.function.arguments)
+      return { content: '{}', status: 'succeeded' }
+    },
+  })
+  assert.equal(calls.length, 0)
+  assert.match(result.text, /基于已索引资料回答/)
+})
+
+test('Wiki Agent accepts status complete without the legacy sufficient field', async () => {
+  let requests = 0
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '查询' }],
+    task: '查询',
+    entryResult: '{}',
+    sendChatCompletion: async () => {
+      requests += 1
+      return requests === 1
+        ? response({ paths: [], missing: [], status: 'complete' })
+        : response({ answer: '完成', changePlan: null })
+    },
+    executeWiki: async () => ({ content: '{}', status: 'succeeded' }),
+  })
+  assert.equal(requests, 2)
+  assert.equal(result.text, '完成')
+})
+
+test('Wiki Agent never applies a write plan after the read guard is reached', async () => {
+  let requests = 0
+  const calls: string[] = []
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '写入 Wiki' }],
+    task: '写入 Wiki',
+    entryResult: '{}',
+    sendChatCompletion: async () => {
+      requests += 1
+      if (requests <= 12)
+        return response({ paths: [{ path: `第${requests}层.md`, reason: '继续读取' }], missing: [], status: 'need_more' })
+      return response({ answer: '基于部分资料的回答', changePlan: { reason: '写入', basis: [], operations: [{ kind: 'create', path: '结果.md', title: '结果', content: '内容' }] } })
+    },
+    executeWiki: async call => {
+      calls.push(call.function.name)
+      return { content: '{}', status: 'succeeded' }
+    },
+  })
+  assert.equal(calls.includes('wiki'), false)
+  assert.match(result.text, /资料尚未读取完整/)
 })
 
 test('Wiki two-phase keeps the model answer when a read is cancelled', async () => {
@@ -122,7 +228,7 @@ test('Wiki two-phase returns an answer without supplementary reads when evidence
 
   assert.equal(requests.length, 2)
   assert.deepEqual(readCalls, [])
-  assert.equal(result.text, '已总结')
+  assert.match(result.text, /^已总结\n\n> Wiki 资料尚未读取完整/u)
 })
 
 test('Wiki two-phase derives index maintenance when the model omits index declarations', async () => {
