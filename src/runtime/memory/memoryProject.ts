@@ -3,7 +3,11 @@ import {
   flattenProjectResourceChange,
   type ProjectFileService,
 } from '@/services/projectFileService'
-import { executeWikiAction, type WikiWorkspace } from '@/runtime/direct/wikiRuntime'
+import {
+  executeWikiAction,
+  type WikiOperation,
+  type WikiWorkspace,
+} from '@/runtime/direct/wikiRuntime'
 import type { ProjectResource } from '@/utils/projectResource'
 import {
   MEMORY_MEDIA_DIRECTORIES,
@@ -56,7 +60,7 @@ export async function initializeMemoryProject(
   owner: string,
   files: ProjectFileService = createRuntimeProjectFileService(),
 ): Promise<void> {
-  await executeWikiAction(wikiWorkspace(owner, files), { action: 'scaffold', type: 'generic' })
+  await executeWikiAction(projectWikiWorkspace(owner, files), { action: 'scaffold', type: 'generic' })
   await ensureMemoryDirectories(owner, files)
   await migrateLegacyMemoryMaterials(owner, files)
 }
@@ -169,7 +173,20 @@ async function mutateConversation(
   throw new Error('对话记录正在其他窗口更新，请重试')
 }
 
-function wikiWorkspace(owner: string, files: ProjectFileService): WikiWorkspace {
+export async function applyMemoryWikiWrite(
+  owner: string,
+  operation: Extract<WikiOperation, { kind: 'create' | 'append' }>,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+): Promise<void> {
+  await executeWikiAction(projectWikiWorkspace(owner, files), {
+    action: 'apply',
+    operations: [operation],
+    reason: '用户确认将模型回复写入 Wiki',
+    basis: ['用户点击“写入 Wiki”并选择目标'],
+  })
+}
+
+function projectWikiWorkspace(owner: string, files: ProjectFileService): WikiWorkspace {
   return {
     async list() {
       return (await files.list(owner)).map(resource => ({
@@ -181,8 +198,8 @@ function wikiWorkspace(owner: string, files: ProjectFileService): WikiWorkspace 
       const resource = await findResource(owner, path, files)
       return (await files.readText(resource)).content
     },
-    async fingerprint() {
-      throw new Error('初始化过程不支持来源指纹')
+    async fingerprint(path) {
+      return await files.hashFile(await findResource(owner, path, files))
     },
     async write(path, content) {
       const existing = (await files.list(owner)).find(resource => resource.path === path)
@@ -196,6 +213,11 @@ function wikiWorkspace(owner: string, files: ProjectFileService): WikiWorkspace 
     },
     async createDirectory(path) {
       await files.createFolder(owner, path)
+    },
+    async remove(path) {
+      const resource = (await files.list(owner)).find(item => item.path === path)
+      if (!resource) throw new Error(`路径不存在: ${path}`)
+      await files.remove(resource)
     },
   }
 }

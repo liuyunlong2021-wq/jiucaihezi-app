@@ -53,17 +53,17 @@ export const WIKI_SEARCH_TOOL_DEFINITION = tool(
 
 export const WIKI_CONTEXT_TOOL_DEFINITION = tool(
   'wiki_context',
-  'Build one deterministic Wiki context from the entry page and related pages. Use for Wiki questions and continuity writing.',
+  'Read the current project Wiki progressively. Start with entry or tree, then read only explicit paths or run a precise search/link query.',
   {
-    question: { type: 'string', description: 'The user task to answer from Wiki facts' },
-    mode: { type: 'string', enum: ['query', 'continuity'] },
+    action: { type: 'string', enum: ['entry', 'tree', 'read', 'search', 'links'] },
     scope: { type: 'string', enum: ['active', 'all'] },
     entryPath: { type: 'string' },
-    hints: { type: 'array', items: { type: 'string' }, maxItems: 12 },
-    maxPages: { type: 'integer', minimum: 1, maximum: 20 },
+    paths: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 12 },
+    query: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 3 },
+    maxPages: { type: 'integer', minimum: 1, maximum: 12 },
     maxTokens: { type: 'integer', minimum: 1000, maximum: 50000 },
   },
-  ['question'],
+  ['action'],
 )
 
 export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
@@ -82,19 +82,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
     {
       action: {
         type: 'string',
-        enum: [
-          'inspect',
-          'scaffold',
-          'search',
-          'status',
-          'graph',
-          'validate',
-          'audit',
-          'evidence',
-          'closeout',
-          'replace',
-          'extend',
-        ],
+        enum: ['apply', 'scaffold', 'status', 'graph', 'validate', 'audit'],
       },
       type: {
         type: 'string',
@@ -155,8 +143,53 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
       description: { type: 'string' },
       reason: { type: 'string', description: 'Confirmed problem being repaired' },
       basis: {
+        anyOf: [
+          { type: 'string' },
+          { type: 'array', items: { type: 'string' }, minItems: 1 },
+        ],
+        description: 'User decisions, sources, or inspection items supporting the change',
+      },
+      confirmedPlanId: {
         type: 'string',
-        description: 'User decision, source, or inspection item proving the repair',
+        description: 'Required for move or trash after the user confirms the complete preview',
+      },
+      operations: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 200,
+        items: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string', enum: ['mkdir', 'create', 'replace', 'append', 'move', 'trash'] },
+            path: { type: 'string' },
+            destination: { type: 'string' },
+            purpose: { type: 'string' },
+            content: { type: 'string' },
+            title: { type: 'string' },
+            summary: { type: 'string' },
+            oldText: { type: 'string' },
+            newText: { type: 'string' },
+            replaceAll: { type: 'boolean' },
+            idempotencyKey: { type: 'string' },
+          },
+          required: ['kind', 'path'],
+          additionalProperties: false,
+        },
+      },
+      sources: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            wikiPath: { type: 'string' },
+            wikiSection: { type: 'string' },
+            sourceRole: { type: 'string' },
+            sourcePath: { type: 'string' },
+            processedScope: { type: 'string' },
+          },
+          required: ['wikiPath', 'sourceRole', 'sourcePath', 'processedScope'],
+          additionalProperties: false,
+        },
       },
       apply: {
         type: 'boolean',
@@ -613,11 +646,11 @@ type ToolFieldType =
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   wiki_search: { query: 'stringOrStringArray', scope: 'string', limit: 'integer' },
   wiki_context: {
-    question: 'string',
-    mode: 'string',
+    action: 'string',
     scope: 'string',
     entryPath: 'string',
-    hints: 'stringArray',
+    paths: 'stringArray',
+    query: 'stringArray',
     maxPages: 'integer',
     maxTokens: 'integer',
   },
@@ -638,8 +671,11 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
     category: 'string',
     description: 'string',
     reason: 'string',
-    basis: 'string',
+    basis: 'stringOrStringArray',
     apply: 'boolean',
+    confirmedPlanId: 'string',
+    operations: 'json',
+    sources: 'json',
   },
   read: { path: 'string', offset: 'integer', limit: 'integer' },
   glob: { pattern: 'string', path: 'string', limit: 'integer' },

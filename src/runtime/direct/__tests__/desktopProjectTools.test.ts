@@ -63,7 +63,7 @@ function fixtureInvoke(command: string, payload: any): Promise<any> {
 test('creative tool contract exposes the project tools and Desktop terminal', () => {
   assert.deepEqual(
     CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
-    ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
+    ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
   )
   const terminal = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'terminal')
   assert.match(terminal?.function.description || '', /explicitly lists that exact token/)
@@ -74,7 +74,8 @@ test('wiki tool contract exposes evidence, scoped replace, and no bare link acti
   const wiki = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'wiki')!
   const properties = wiki.function.parameters.properties as Record<string, any>
 
-  assert.deepEqual(properties.action.enum, ['inspect', 'scaffold', 'search', 'status', 'graph', 'validate', 'audit', 'evidence', 'closeout', 'replace', 'extend'])
+  assert.deepEqual(properties.action.enum, ['apply', 'scaffold', 'status', 'graph', 'validate', 'audit'])
+  assert.equal(properties.operations.type, 'array')
   assert.equal(properties.replaceAll.type, 'boolean')
   assert.equal(properties.target, undefined)
 })
@@ -170,11 +171,11 @@ test('creative tool definitions append connected MCP tools without changing core
   try {
     assert.deepEqual(
       buildCreativeToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
+      ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs__lookup'],
+      ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs__lookup'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,

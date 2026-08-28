@@ -1,10 +1,14 @@
 # 热缓存
 
-> 更新：2026-08-27 | 阶段：Skill-first 能力内核 TDD 已写，待实施
+> 更新：2026-08-28 | 阶段：显式能力 Agent 总合同已定稿，按阶段实施
 
 ## 当前结论
 
+- **`@Wiki` 改为索引优先的两阶段计划流水线，TDD 待实施。** 第一阶段模型只输出结构化 `ReadPlan`，程序按清单并发读取；第二阶段模型输出回答和 `WikiSynthesisAndChangePlan`，程序统一执行正文、入口、双链、来源和日志事务。根目录及每个 Wiki 内容子目录都必须有 `index.md`；受影响目录由程序自动补齐并强制验证，日常写入不依赖 `wiki-creator` Skill。正常任务最多两次模型请求，资料不足最多一次补读，不再以固定循环数判定完成。见 [[开发/通用记忆工作台Wiki索引优先两阶段计划与入口维护TDD-2026-08-28]]。
+
 - **默认产品收敛为 Skill-first 能力内核，TDD 待实施。** Skill 是方法树，Wiki 是事实树；模型在同一次资料选择中返回 Skill References 和 Wiki 文件，程序并发读取后生成最终结果。明确路径任务默认一次模型请求，双树渐进任务默认两次；只有 MCP 等依赖性操作才进入最多 6 轮的受限循环。新 `wiki-creator` 将从旧 `jc-everything-wiki` 最小重写，只输出 `wiki/index.md + 分区入口` 的 `WikiCreatePlan`，不恢复五个 Wiki Skill，不管理 Raw，不建工作流 DSL。见 [[开发/通用记忆工作台非Agent固定任务流重构TDD-2026-08-27]]。
+
+- **显式能力 Agent 与统一任务协议已完成阶段 1，阶段 2 协议核心和阶段 3 Wiki 适配。** 无 `@` 只发送当前消息；共享 `TaskEnvelope` 已提供能力白名单、schema 校验、依赖排序和真实回执字段，并已用于 Wiki 两阶段的读写计划校验；Skill 预加载不再开放通用加载器，MCP 只暴露用户选中的具体工具，取消/失败不会伪报成功。通用 File、Terminal、MCP、Media/3D Agent 和多 Agent 调度仍按 TDD 阶段 4-8 待实施。不恢复 64 轮循环、全局自主规划或隐式扩权。见 [[开发/通用记忆工作台显式能力Agent与统一任务协议TDD-2026-08-28]]。
 
 - **原生 Wiki 能力与五 Wiki Skill 退役已实施。** 查询、规划、填充、巡检、修正复用现有 `wikiRuntime`，不再加载五个 Wiki Skill；新记忆空间有短 `wiki/index.md` 入口，百万字创作通过入口、搜索和链接按需取回相关事实，不新增 RAG、向量库、摘要 Store 或“创作资料包”。五个 Skill 已从 App catalog 和发行树移除，用户安装副本与 legacy 备份保留。见 [[开发/通用记忆工作台原生Wiki能力与五Skill退役TDD-2026-08-26]]。
 

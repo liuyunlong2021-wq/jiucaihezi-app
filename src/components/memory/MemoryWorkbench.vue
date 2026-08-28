@@ -8,6 +8,7 @@ import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import MemorySettings from './MemorySettings.vue'
 import MemoryMarkdown from './MemoryMarkdown.vue'
 import { useAgentStore } from '@/stores/agentStore'
+import { useMcpStore } from '@/stores/mcpStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
@@ -17,6 +18,7 @@ import type { ProjectResourceOpenResult } from '@/services/projectExplorerServic
 import { openProjectResource } from '@/services/projectExplorerService'
 import {
   appendMemoryRound,
+  applyMemoryWikiWrite,
   createMemoryConversation,
   initializeMemoryProject,
   inspectMemoryProject,
@@ -103,17 +105,37 @@ const conversationSearch = ref('')
 const conversationPickerRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const editingTurnId = ref('')
-const commandMenuOpen = ref(false)
-const commandMenuRef = ref<HTMLElement | null>(null)
 const wikiWriteOpen = ref(false)
 const wikiWriteTargets = ref<ProjectResource[]>([])
 const wikiWriteSelected = ref<ProjectResource | null>(null)
 const wikiWriteSource = ref('')
+const wikiWriteTurnId = ref('')
 const wikiWriteRoot = ref('')
 const wikiWritePending = ref(false)
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
+const fileToolsSelected = ref(false)
+const selectedMcpToolNames = ref<string[]>([])
+const mcpStore = useMcpStore()
+const mediaSelected = ref(false)
+const scene3dSelected = ref(false)
+const terminalSelected = ref(false)
+const selectedToolChips = computed(() => [
+  { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
+  { id: 'mcp', label: '@MCP', icon: 'extension', selected: selectedMcpToolNames.value.length > 0 },
+  { id: 'media', label: '@媒体', icon: 'image', selected: mediaSelected.value },
+  { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
+  { id: 'terminal', label: '@Terminal', icon: 'terminal', selected: terminalSelected.value },
+].filter(tool => tool.selected))
+function clearToolSelections() {
+  wikiSelected.value = false
+  fileToolsSelected.value = false
+  selectedMcpToolNames.value = []
+  mediaSelected.value = false
+  scene3dSelected.value = false
+  terminalSelected.value = false
+}
 const mentionOpen = ref(false)
 const executionMode = ref<ConversationMode>('memory')
 const modelPickerOpen = ref(false)
@@ -290,10 +312,22 @@ const projectOwner = computed(() => desktopRuntime
   ? projectStore.projectDir.value
   : projectStore.webProjectId.value)
 type MemoryMentionOption =
+  | { type: 'tool'; id: string; display: string; description: string; icon: string }
   | { type: 'file'; display: string; description: string; resource: ProjectResource }
   | { type: 'skill'; display: string; description: string; name: string }
 
+const wikiSelected = ref(false)
+
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
+  const toolOptions: MemoryMentionOption[] = [
+    { type: 'tool', id: 'wiki', display: 'Wiki', description: '读取当前项目 Wiki', icon: 'menu_book' },
+    { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
+    { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
+    { type: 'tool', id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' },
+    { type: 'tool', id: 'media', display: '媒体', description: '生成图片、视频和音频', icon: 'image' },
+    { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
+    { type: 'tool', id: 'terminal', display: 'Terminal', description: '执行终端命令', icon: 'terminal' },
+  ]
   const skills = agentStore.getCustomSkills()
     .filter(skill => skill.enabled !== false)
     .map(skill => ({
@@ -317,9 +351,14 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       description: resource.kind === 'media' ? '项目媒体' : '项目文件',
       resource,
     }))
-  return query.trim() ? [...skills, ...projectOptions] : [...skills.slice(0, 5), ...projectOptions]
+  const mcpTools: MemoryMentionOption[] = (mcpStore.allMcpTools || []).map(tool => ({
+    type: 'tool', id: tool.name, display: tool.name, description: tool.description || '调用此 MCP 工具', icon: 'extension',
+  }))
+  return query.trim() ? [...toolOptions, ...skills, ...mcpTools, ...projectOptions] : [...toolOptions, ...skills.slice(0, 5), ...mcpTools, ...projectOptions]
 }
-const mentionKey = (item: MemoryMentionOption) => item.type === 'skill'
+const mentionKey = (item: MemoryMentionOption) => item.type === 'tool'
+  ? `tool:${item.id}`
+  : item.type === 'skill'
   ? `skill:${item.name}`
   : `file:${item.resource.path}`
 const {
@@ -372,25 +411,16 @@ const modelGroups = computed(() => {
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
 const visibleRunSteps = computed(() => runSteps.value.slice(-5))
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
-const commonCommands = [
-  { id: 'wiki-search', label: '查询 Wiki', icon: 'search', prompt: '@Wiki 查询【主题】。先读取入口，再根据目录和链接查找相关页面。' },
-  { id: 'wiki-write', label: '写入 Wiki', icon: 'save', prompt: '@Wiki 写入【内容】到【目标文件或文件夹】。先读取入口和目标文件，确认结构后再写入，避免重复和冲突。' },
-  { id: 'wiki-create', label: '根据 Wiki 创作', icon: 'auto_stories', prompt: '@Wiki 根据【项目、角色、场景或大纲】资料创作【内容】。遵守 Wiki 中已有的设定、格式和时间线。' },
-  { id: 'read-file', label: '读取文件', icon: 'description', prompt: '读取【文件路径】并总结重点。' },
-  { id: 'edit-file', label: '修改文件', icon: 'edit', prompt: '读取【文件路径】，将【修改要求】合并进去，保留原有结构。' },
-  { id: 'create-file', label: '创建文件', icon: 'note-add', prompt: '根据【要求】创建文件，保存到【目标文件夹】。' },
-  { id: 'asset-prompt', label: '生成资产', icon: 'palette', prompt: '根据 Wiki 和当前项目设定，生成【角色、场景、道具、视频或音频】提示词。' },
-  { id: 'wiki-continuity', label: '续写小说/剧本', icon: 'auto_stories', prompt: '根据 wiki/index.md 创作下一集【内容】。遵守入口指向的规范、状态、大纲和相关资料；按需读取，不要读取整部小说。' },
-  { id: 'wiki-setup', label: '配置 Wiki 创作入口', icon: 'account-tree', prompt: '请配置并更新 wiki/index.md：为创作任务增加明确路由，指向创作规范、当前进度、剧情总纲、当前分卷或分集大纲、上一章或上一集结尾，以及相关角色、场景、道具和伏笔页面。不存在的页面跳过；相关页面按需读取；不要读取整部小说。先预览，确认后执行。' },
-  { id: 'folder', label: '查看文件夹', icon: 'folder-open', prompt: '查看【文件夹路径】中的文件和目录。' },
-  { id: 'wiki-audit', label: '检查 Wiki', icon: 'checklist', prompt: '检查 Wiki 的入口、目录、页面链接和重复内容，先给出问题清单，不要直接修改。' },
-  { id: 'document', label: '创建文档', icon: 'article', prompt: '根据【要求】创建【Word、Markdown、文本或 HTML】文档，保存到【目标文件夹】。' },
-  { id: 'scene-3d', label: '创建 3D 场景', icon: 'view-in-ar', prompt: '根据【空间、人物和镜头要求】创建一个可编辑的 3D 场景。' },
-  { id: 'media', label: '生成媒体', icon: 'image', prompt: '根据 Wiki 和当前项目设定，生成【图片、视频、配音、音乐或音效】。' },
-  { id: 'mcp', label: '调用 MCP', icon: 'extension', prompt: '@MCP 使用合适的 MCP 工具完成【任务】；执行前说明将要做什么。' },
+const toolCommands = [
+  { id: 'wiki', label: '@Wiki', icon: 'menu_book', description: '读取当前项目 Wiki' },
+  { id: 'skill', label: '@Skill', icon: 'psychology', description: '加载指定 Skill' },
+  { id: 'file', label: '@文件', icon: 'description', description: '读取、写入和管理文件' },
+  { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
+  { id: 'media', label: '@媒体', icon: 'image', description: '生成图片、视频和音频' },
+  { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
+  { id: 'terminal', label: '@Terminal', icon: 'terminal', description: '执行终端命令' },
 ]
-const primaryCommands = commonCommands.slice(0, 7)
-const moreCommands = commonCommands.slice(7)
+const primaryCommands = toolCommands
 
 onMounted(async () => {
   void checkSceneVideoExport()
@@ -473,7 +503,6 @@ function closeModelPicker(event: PointerEvent) {
   if (mentionOpen.value
     && !composerRef.value?.contains(event.target as Node)
     && !mentionPopoverRef.value?.contains(event.target as Node)) closeMention()
-  if (commandMenuOpen.value && !commandMenuRef.value?.contains(event.target as Node)) commandMenuOpen.value = false
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
@@ -764,14 +793,40 @@ async function copyTurn(turn: ConversationTurn) {
   }, 1500)
 }
 
-function insertCommand(command: { prompt: string }) {
-  commandMenuOpen.value = false
-  input.value = command.prompt
-  setEditorText(composerRef.value, input.value)
+function insertCommand(command: { id: string; label: string }) {
+  if (command.id === 'wiki') wikiSelected.value = true
+  if (command.id === 'file') fileToolsSelected.value = true
+  if (command.id === 'media') mediaSelected.value = true
+  if (command.id === 'scene3d') scene3dSelected.value = true
+  if (command.id === 'terminal') terminalSelected.value = true
+  if (command.id === 'skill') {
+    mentionOpen.value = true
+    mentionOnInput('')
+  }
+  if (command.id === 'mcp') {
+    mentionOpen.value = true
+    mentionOnInput('mcp__')
+  }
   void nextTick(() => {
     resizeComposer()
     composerRef.value?.focus()
   })
+}
+
+function enableTool(id: string) {
+  if (id === 'wiki') wikiSelected.value = true
+  if (id === 'file') fileToolsSelected.value = true
+  if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
+  if (id === 'media') mediaSelected.value = true
+  if (id === 'scene3d') scene3dSelected.value = true
+  if (id === 'terminal') terminalSelected.value = true
+}
+
+function disableTool(id: string) {
+  if (id === 'file') fileToolsSelected.value = false
+  if (id === 'media') mediaSelected.value = false
+  if (id === 'scene3d') scene3dSelected.value = false
+  if (id === 'terminal') terminalSelected.value = false
 }
 
 function wikiWritePathAllowed(path: string, root: string): boolean {
@@ -799,6 +854,7 @@ async function suggestWikiWrite(turn: ConversationTurn) {
       .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.path.localeCompare(b.path, 'zh-CN'))
     wikiWriteSelected.value = null
     wikiWriteSource.value = source
+    wikiWriteTurnId.value = turn.id
     wikiWriteOpen.value = true
   } catch (cause) {
     error.value = `打开 Wiki 写入目标失败：${cause instanceof Error ? cause.message : String(cause)}`
@@ -810,6 +866,7 @@ function closeWikiWrite() {
   wikiWriteOpen.value = false
   wikiWriteSelected.value = null
   wikiWriteSource.value = ''
+  wikiWriteTurnId.value = ''
 }
 
 async function commitWikiWrite() {
@@ -829,18 +886,24 @@ async function commitWikiWrite() {
         throw new Error('文件名必须是合法的 Markdown 文件名')
       }
       savedPath = `${target.path}/${filename}`
-      await files.createText(owner, savedPath, `${source}\n`)
+      await applyMemoryWikiWrite(owner, {
+        kind: 'create',
+        path: savedPath,
+        content: `${source}\n`,
+        title: filename.replace(/\.md$/i, ''),
+      }, files)
     } else {
-      const current = await files.readText(target)
-      const existing = current.content.trimEnd()
-      const content = existing ? `${existing}\n\n---\n\n${source}\n` : `${source}\n`
-      const result = await files.writeText(target, content, current.revision)
-      if (result.status === 'conflict') throw new Error('目标文件已被其他位置修改，请重新打开后再写入')
-      if (result.status !== 'saved') throw new Error('目标文件不存在')
+      await applyMemoryWikiWrite(owner, {
+        kind: 'append',
+        path: target.path,
+        content: source,
+        idempotencyKey: wikiWriteTurnId.value || `manual-${Date.now()}`,
+      }, files)
     }
     wikiWriteOpen.value = false
     wikiWriteSelected.value = null
     wikiWriteSource.value = ''
+    wikiWriteTurnId.value = ''
     status.value = `已写入 Wiki：${savedPath}`
     const resource = (await files.list(owner)).find(item => item.path === savedPath)
     if (resource) await openWikiResource(resource)
@@ -866,6 +929,7 @@ async function editTurn(turn: ConversationTurn) {
   attachments.value = []
   referencedFiles.value = []
   selectedSkillNames.value = []
+  clearToolSelections()
   try {
     for (const attachment of turn.attachments || []) {
       const path = attachment.projectPath || attachment.readablePath
@@ -893,6 +957,7 @@ function cancelEdit() {
   attachments.value = []
   referencedFiles.value = []
   selectedSkillNames.value = []
+  clearToolSelections()
   setEditorText(composerRef.value, '')
   resizeComposer()
   composerRef.value?.focus()
@@ -1012,7 +1077,7 @@ async function send() {
   const message = input.value.trim()
   const pendingAttachments = attachments.value.slice()
   const pendingMode: ConversationMode = 'memory'
-  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
+  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length && !wikiSelected.value) || sending.value || sendInFlight) return
   sendInFlight = true
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
@@ -1060,6 +1125,12 @@ async function send() {
       attachments: pendingAttachments,
       files: referencedFiles.value,
       selectedSkillNames: selectedSkillNames.value,
+      wikiSelected: wikiSelected.value,
+      fileToolsSelected: fileToolsSelected.value,
+      selectedMcpToolNames: selectedMcpToolNames.value,
+      mediaSelected: mediaSelected.value,
+      scene3dSelected: scene3dSelected.value,
+      terminalSelected: terminalSelected.value,
       recordSceneVideo,
       signal: abortController.signal,
       onToolEvent: event => {
@@ -1125,6 +1196,7 @@ async function send() {
     attachments.value = []
     referencedFiles.value = []
     selectedSkillNames.value = []
+    clearToolSelections()
     editingTurnId.value = ''
     input.value = ''
     setEditorText(composerRef.value, '')
@@ -1153,6 +1225,7 @@ async function send() {
           attachments.value = []
           referencedFiles.value = []
           selectedSkillNames.value = []
+          clearToolSelections()
           input.value = ''
           setEditorText(composerRef.value, '')
           streamingText.value = ''
@@ -1455,7 +1528,11 @@ function closeMention() {
 async function selectMention(option: MemoryMentionOption) {
   try {
     executionMode.value = 'memory'
-    if (option.type === 'skill') {
+    if (option.type === 'tool') {
+      if (option.id.startsWith('mcp__')) {
+        if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
+      } else enableTool(option.id)
+    } else if (option.type === 'skill') {
       if (!selectedSkillNames.value.includes(option.name)) selectedSkillNames.value.push(option.name)
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
@@ -2247,17 +2324,24 @@ function readDataUrl(file: File): Promise<string> {
         <div class="memory-composer-tools">
           <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
           <div class="memory-command-strip" aria-label="常用指令">
-            <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :title="command.prompt" @click="insertCommand(command)">
+            <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" :data-tooltip="command.description" @click="insertCommand(command)">
               <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
             </button>
           </div>
-          <div ref="commandMenuRef" class="memory-command-more">
-            <button type="button" :disabled="sending" :aria-expanded="commandMenuOpen" title="更多常用指令" @click="commandMenuOpen = !commandMenuOpen"><JcIcon name="more-horiz" /><span>更多</span></button>
-            <div v-if="commandMenuOpen" class="memory-command-menu" role="menu">
-              <button v-for="command in moreCommands" :key="command.id" type="button" role="menuitem" @click="insertCommand(command)">
-                <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
-              </button>
-            </div>
+        </div>
+        <div v-if="selectedSkillNames.length || wikiSelected || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
+          <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
+            <JcIcon name="psychology" />
+            <span class="memory-attachment-name" :title="name">{{ name }}</span>
+            <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+          </div>
+          <div v-if="wikiSelected" class="memory-attachment-chip">
+            <JcIcon name="menu_book" /><span class="memory-attachment-name">@Wiki</span>
+            <button title="移除 Wiki" :disabled="sending" @click="wikiSelected = false">×</button>
+          </div>
+          <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
+            <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
+            <button :title="`移除${tool.label}`" :disabled="sending" @click="disableTool(tool.id)">×</button>
           </div>
         </div>
         <div v-if="attachments.length" class="memory-attachments">
@@ -2276,13 +2360,6 @@ function readDataUrl(file: File): Promise<string> {
             <JcIcon name="attach-file" />
             <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
             <button title="移除引用" :disabled="sending" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
-          </div>
-        </div>
-        <div v-if="selectedSkillNames.length" class="memory-attachments memory-references">
-          <div v-for="name in selectedSkillNames" :key="name" class="memory-attachment-chip">
-            <JcIcon name="psychology" />
-            <span class="memory-attachment-name" :title="name">Skill · {{ name }}</span>
-            <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
           </div>
         </div>
         <div v-if="contextNotice" class="memory-context-notice" role="status">
@@ -2332,9 +2409,9 @@ function readDataUrl(file: File): Promise<string> {
               @click="selectMention(item)"
               @pointermove="setMentionActive(mentionKey(item))"
             >
-              <JcIcon :name="item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
+              <JcIcon :name="item.type === 'tool' ? item.icon : item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
               <span class="memory-mention-name">{{ item.display }}</span>
-              <span class="memory-mention-kind">{{ item.type === 'skill' ? 'Skill' : item.description }}</span>
+              <span class="memory-mention-kind">{{ item.type === 'tool' ? '工具' : item.type === 'skill' ? 'Skill' : item.description }}</span>
             </button>
           </div>
           <input ref="fileInput" type="file" multiple hidden :disabled="sending" @change="selectFiles" />
@@ -2349,7 +2426,7 @@ function readDataUrl(file: File): Promise<string> {
             @paste="handleComposerPaste"
           />
           <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
-          <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
+          <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length && !wikiSelected" @click="send"><JcIcon name="arrow-upward" /></button>
         </div>
       </footer>
     </main>
@@ -2602,11 +2679,17 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message.streaming { opacity: .85; }
 .memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
 .memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }
+.memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 7px 10px 0; scrollbar-width: none; }
+.memory-selected-tools::-webkit-scrollbar { display: none; }
+.memory-selected-tools .memory-attachment-chip { flex: 0 0 auto; }
 .memory-editing-cancel { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-editing-cancel:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-command-strip { display: flex; min-width: 0; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.memory-command-strip { display: flex; min-width: 0; align-items: center; gap: 4px; overflow: visible; scrollbar-width: none; }
 .memory-command-strip::-webkit-scrollbar { display: none; }
 .memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.memory-command-strip > button { position: relative; }
+.memory-command-strip > button::after { position: absolute; z-index: 5; left: 50%; bottom: calc(100% + 7px); padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); content: attr(data-tooltip); opacity: 0; pointer-events: none; transform: translate(-50%, 3px); transition: opacity .12s ease, transform .12s ease; white-space: nowrap; }
+.memory-command-strip > button:hover::after, .memory-command-strip > button:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
 .memory-command-strip > button:hover, .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 .memory-command-strip button:disabled { cursor: default; opacity: .45; }
 .memory-command-more { position: relative; flex: 0 0 auto; }

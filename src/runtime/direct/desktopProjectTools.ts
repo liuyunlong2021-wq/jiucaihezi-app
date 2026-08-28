@@ -11,7 +11,7 @@ import {
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
-import { executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
+import { buildWikiContext, executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import {
   artifactFilename,
@@ -208,6 +208,16 @@ export function createDesktopProjectToolExecutor(input: {
     async createDirectory(path) {
       await invoke('dev_create_dir', { root: requireProject(), relativePath: path })
     },
+    async move(path, destination) {
+      await invoke('dev_rename_file', {
+        root: requireProject(),
+        oldRelativePath: path,
+        newRelativePath: destination,
+      })
+    },
+    async remove(path) {
+      await invoke('dev_delete_file', { root: requireProject(), relativePath: path })
+    },
     async gitEvidence() {
       const status = await invoke('dev_run_command', {
         root: requireProject(),
@@ -290,7 +300,7 @@ export function createDesktopProjectToolExecutor(input: {
 
     if (name === WIKI_CONTEXT_TOOL_DEFINITION.function.name) {
       return {
-        content: await executeWikiAction(wikiWorkspace, { ...args, action: 'context' } as any),
+        content: JSON.stringify(await buildWikiContext(wikiWorkspace, args as any), null, 2),
       }
     }
 

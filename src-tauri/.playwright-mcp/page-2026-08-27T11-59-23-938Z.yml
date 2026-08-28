@@ -1,0 +1,21 @@
+- generic [ref=f13e2]:
+  - heading "Too many requests" [level=1] [ref=f13e3]
+  - paragraph [ref=f13e4]:
+    - text: You have exceeded a secondary rate limit. Please wait a few minutes before you try again; in some cases this may take up to an hour.
+    - link "Signing in" [ref=f13e5] [cursor=pointer]:
+      - /url: /login
+    - text: may provide a higher rate limit if you are not already signed in. For more on scraping GitHub and how it may affect your rights, please review our
+    - link "Terms of Service" [ref=f13e6] [cursor=pointer]:
+      - /url: https://docs.github.com/en/site-policy/github-terms/github-terms-of-service
+    - text: .
+  - generic [ref=f13e7]:
+    - link "Contact Support" [ref=f13e8] [cursor=pointer]:
+      - /url: https://support.github.com/contact
+    - text: —
+    - link "GitHub Status" [ref=f13e9] [cursor=pointer]:
+      - /url: https://githubstatus.com
+    - text: —
+    - link "@githubstatus" [ref=f13e10] [cursor=pointer]:
+      - /url: https://x.com/githubstatus
+  - link [ref=f13e11] [cursor=pointer]:
+    - /url: /

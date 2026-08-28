@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { selectMemoryTools } from '../memoryChat'
+import { hasExplicitMemoryCapability, selectMemoryTools } from '../memoryChat'
 
 const tools = [
   'skill',
@@ -20,57 +20,78 @@ const tools = [
   'mcp__demo__run',
 ].map(name => ({ function: { name } }))
 
-test('Wiki query exposes only native Wiki read tools', () => {
+test('Wiki exposes the complete native Wiki tool set', () => {
   assert.deepEqual(
-    selectMemoryTools('查询 Wiki 中的角色设定', tools).map(tool => tool.function.name),
-    ['wiki_context'],
+    selectMemoryTools(tools, [], true).map(tool => tool.function.name),
+    ['wiki_context', 'wiki'],
   )
 })
 
-test('Wiki writing exposes read and write tools without media or terminal', () => {
+test('Wiki writing keeps generic file, media, and terminal tools closed', () => {
   assert.deepEqual(
-    selectMemoryTools('根据 Wiki 设定写入小说第三章文件', tools).map(tool => tool.function.name),
-    ['wiki_context', 'read', 'write', 'edit', 'mkdir'],
+    selectMemoryTools(tools, [], true).map(tool => tool.function.name),
+    ['wiki_context', 'wiki'],
   )
 })
 
 test('creating a Wiki from an inline document exposes one native Wiki batch tool', () => {
   assert.deepEqual(
-    selectMemoryTools('根据文档内容创建Wiki', tools, [], true).map(tool => tool.function.name),
-    ['wiki'],
+    selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),
+    ['read'],
   )
 })
 
 test('creating a Wiki from a long document adds only the required read tool', () => {
   assert.deepEqual(
-    selectMemoryTools('根据文档内容创建Wiki', tools, [], true, true).map(tool => tool.function.name),
-    ['wiki', 'read'],
+    selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),
+    ['read'],
   )
 })
 
 test('ordinary conversation exposes no project tools', () => {
-  assert.deepEqual(selectMemoryTools('请帮我想一个故事开头', tools), [])
+  assert.deepEqual(selectMemoryTools(tools), [])
+})
+
+test('ordinary conversation has no explicit capability connection', () => {
+  assert.equal(hasExplicitMemoryCapability({}), false)
+})
+
+test('an attached document does not activate history or project capabilities', () => {
+  assert.equal(hasExplicitMemoryCapability({ attachments: [{ kind: 'file' } as any] }), false)
+})
+
+test('a selected capability connects the task explicitly', () => {
+  assert.equal(hasExplicitMemoryCapability({ wikiSelected: true }), true)
+  assert.equal(hasExplicitMemoryCapability({ selectedSkillNames: ['jc-film-style'] }), true)
+})
+
+test('selecting a concrete Skill does not expose a generic Skill loader', () => {
+  assert.deepEqual(selectMemoryTools(tools, ['jc-film-style']).map(tool => tool.function.name), [])
 })
 
 test('explicit MCP keeps only the selected MCP tools', () => {
   assert.deepEqual(
-    selectMemoryTools('调用 MCP 查询数据', tools).map(tool => tool.function.name),
+    selectMemoryTools(tools, [], false, false, false, ['mcp__demo__run']).map(tool => tool.function.name),
     ['mcp__demo__run'],
   )
 })
 
+test('MCP selection without a concrete tool exposes nothing', () => {
+  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, []).map(tool => tool.function.name), [])
+})
+
 test('attached document plus an add-to-scope instruction exposes write tools', () => {
   assert.deepEqual(
-    selectMemoryTools('查看文档，然后把这个规则合理的添加到规范范围', tools, [], true).map(
+    selectMemoryTools(tools, [], false, true).map(
       tool => tool.function.name,
     ),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir'],
+    ['read'],
   )
 })
 
 test('attached document that needs reading exposes read without keyword guessing', () => {
   assert.deepEqual(
-    selectMemoryTools('修改下面的提示词', tools, [], false, true).map(tool => tool.function.name),
+    selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),
     ['read'],
   )
 })

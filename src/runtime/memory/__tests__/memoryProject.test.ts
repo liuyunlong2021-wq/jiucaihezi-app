@@ -15,8 +15,8 @@ import { appendMemoryRound, initializeMemoryProject } from '../memoryProject'
 
 const memoryProjectSource = readFileSync(join(process.cwd(), 'src/runtime/memory/memoryProject.ts'), 'utf8')
 
-test('memory project initialization does not implement a lossy evidence fingerprint path', () => {
-  assert.match(memoryProjectSource, /async fingerprint\(\) \{[\s\S]*初始化过程不支持来源指纹/)
+test('memory Wiki writes use the file service hash instead of hashing truncated text', () => {
+  assert.match(memoryProjectSource, /async fingerprint\(path\) \{[\s\S]{0,200}files\.hashFile/)
   assert.doesNotMatch(memoryProjectSource, /async fingerprint\([^)]*\) \{[\s\S]{0,300}readText/)
 })
 

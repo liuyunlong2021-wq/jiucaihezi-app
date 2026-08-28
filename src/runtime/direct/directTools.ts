@@ -31,17 +31,29 @@ export async function buildToolResultMessages(
   }))
   const assistantMessage: DirectApiMessage = {
     role: 'assistant',
-    tool_calls: calls.map(call => ({ id: call.id, type: 'function' as const, function: call.function })),
+    tool_calls: calls.map(call => ({
+      id: call.id,
+      type: 'function' as const,
+      function: call.function,
+    })),
   }
   if (options.reasoning) assistantMessage[options.reasoning.field] = options.reasoning.value
   const messages: DirectApiMessage[] = [assistantMessage]
   const followupMessages: DirectApiMessage[] = []
 
-  const execute = async (call: DirectToolCall): Promise<{ message: DirectApiMessage; followups: DirectApiMessage[] }> => {
+  const execute = async (
+    call: DirectToolCall,
+  ): Promise<{ message: DirectApiMessage; followups: DirectApiMessage[] }> => {
     let startedAt: number | undefined
     options.onToolEvent?.({ type: 'tool_execution_start', call })
     if (options.signal?.aborted) {
-      emitEnd(options.onToolEvent, call, { content: '工具执行已取消。', status: 'cancelled' }, 'cancelled', startedAt)
+      emitEnd(
+        options.onToolEvent,
+        call,
+        { content: '工具执行已取消。', status: 'cancelled' },
+        'cancelled',
+        startedAt,
+      )
       throw new DOMException('Aborted', 'AbortError')
     }
 
@@ -96,18 +108,19 @@ export async function buildToolResultMessages(
     return { message: toolMessage(call, result), followups: result.followupMessages || [] }
   }
 
-  for (let index = 0; index < calls.length;) {
+  for (let index = 0; index < calls.length; ) {
     const end = canRunInParallel(calls[index]!, options)
       ? calls.findIndex((call, next) => next > index && !canRunInParallel(call, options))
       : index + 1
     const segmentEnd = end < 0 ? calls.length : end
     const segment = calls.slice(index, segmentEnd)
-    const results = segment.length === 1
-      ? [await execute(segment[0]!)]
-      : (await Promise.allSettled(segment.map(execute))).map(result => {
-          if (result.status === 'rejected') throw result.reason
-          return result.value
-        })
+    const results =
+      segment.length === 1
+        ? [await execute(segment[0]!)]
+        : (await Promise.allSettled(segment.map(execute))).map(result => {
+            if (result.status === 'rejected') throw result.reason
+            return result.value
+          })
     for (const result of results) {
       messages.push(result.message)
       followupMessages.push(...result.followups)
@@ -130,7 +143,8 @@ function emitEnd(
     call,
     result,
     status,
-    durationMs: startedAt === undefined ? 0 : Math.max(0, Math.round(performance.now() - startedAt)),
+    durationMs:
+      startedAt === undefined ? 0 : Math.max(0, Math.round(performance.now() - startedAt)),
   })
 }
 
@@ -138,15 +152,15 @@ function toolMessage(call: DirectToolCall, result: DirectToolResult): DirectApiM
   return {
     role: 'tool',
     tool_call_id: call.id,
-    content: result.status === 'failed'
-      ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
-      : result.content,
+    content:
+      result.status === 'failed'
+        ? `${result.content}\n\n工具失败。请查看真实输出，改用替代工具或命令、Skill 的降级方案，或安装并验证缺失依赖；不要原样重复失败命令。`
+        : result.content,
   }
 }
 
 function isParallelRead(call: DirectToolCall): boolean {
   const name = call.function.name
-  if (name === 'wiki_search') return true
   if (name === 'wiki') {
     try {
       const action = String(JSON.parse(call.function.arguments || '{}').action || '')

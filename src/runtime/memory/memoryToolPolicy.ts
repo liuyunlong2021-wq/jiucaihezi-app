@@ -40,6 +40,11 @@ export function memoryToolNeedsApproval(call: DirectToolCall, currentUserText: s
   if (name === 'terminal' || name === 'delete' || name === 'export_3d_scene_video') return true
   if (name === 'wiki') {
     const action = String(args.action || '')
+    if (action === 'apply' && Array.isArray(args.operations)) {
+      const operations = args.operations as Array<Record<string, unknown>>
+      if (operations.some(operation => operation.kind === 'move' || operation.kind === 'trash')) return true
+      if (operations.some(operation => operation.kind === 'replace' && operation.replaceAll === true)) return true
+    }
     return action === 'scaffold' || action === 'graph'
       || (args.apply === true && ['replace', 'extend'].includes(action))
   }

@@ -25,6 +25,21 @@ function memoryWiki(
     async createDirectory(path) {
       entries.set(path, null)
     },
+    async move(path, destination) {
+      if (!entries.has(path)) throw new Error(`路径不存在: ${path}`)
+      if (entries.has(destination)) throw new Error(`目标已存在: ${destination}`)
+      const affected = [...entries].filter(
+        ([candidate]) => candidate === path || candidate.startsWith(`${path}/`),
+      )
+      for (const [candidate, content] of affected) {
+        entries.delete(candidate)
+        entries.set(`${destination}${candidate.slice(path.length)}`, content)
+      }
+    },
+    async remove(path) {
+      for (const candidate of [...entries.keys()])
+        if (candidate === path || candidate.startsWith(`${path}/`)) entries.delete(candidate)
+    },
     async fingerprint(path: string) {
       const content = entries.get(path)
       if (typeof content !== 'string') throw new Error(`文件不存在: ${path}`)
@@ -154,20 +169,21 @@ test('scaffold applies one structured Wiki plan without overwriting existing use
   assert.equal(entries.get('wiki/规范/已有规范.md'), '# 用户内容\n')
   assert.equal(entries.has('wiki/故事'), true)
   assert.equal(entries.has('wiki/角色'), true)
-  assert.equal(entries.has('wiki/hot.md'), true)
+  assert.equal(entries.has('wiki/hot.md'), false)
 })
 
 test('structured scaffold rejects the whole plan before writing an escaping path', async () => {
   const { entries, workspace } = memoryWiki()
 
   await assert.rejects(
-    () => executeWikiAction(workspace, {
-      action: 'scaffold',
-      plan: {
-        directories: ['规范'],
-        files: [{ path: '../项目外.md', content: '# 禁止\n' }],
-      },
-    }),
+    () =>
+      executeWikiAction(workspace, {
+        action: 'scaffold',
+        plan: {
+          directories: ['规范'],
+          files: [{ path: '../项目外.md', content: '# 禁止\n' }],
+        },
+      }),
     /不能越过项目根目录/,
   )
   assert.equal(entries.size, 0)
@@ -233,7 +249,7 @@ test('nested category extension updates its parent index instead of flattening n
     apply: true,
   })
 
-  assert.match(String(entries.get('wiki/角色/_index.md')), /\[\[角色\/主角\/_index\|主角\]\]/)
+  assert.match(String(entries.get('wiki/角色/index.md')), /\[\[角色\/主角\/index\|主角\]\]/)
   assert.doesNotMatch(String(entries.get('wiki/index.md')), /角色\/主角/)
 })
 
@@ -274,6 +290,39 @@ test('search accepts one to three terms and scans each Wiki file only once', asy
   assert.equal(reads.get('docs/wiki/开发/工具循环.md'), 1)
 })
 
+test('context search follows matching index routes and bounds page reads', async () => {
+  const pages = Object.fromEntries(
+    Array.from({ length: 20 }, (_, index) => [`wiki/无关/${index}.md`, `无关正文 ${index}`]),
+  )
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n\n- [[角色/index|角色]]\n',
+    'wiki/角色': null,
+    'wiki/角色/index.md': '# 角色\n\n- [[角色/林风]]\n',
+    'wiki/角色/林风.md': '# 林风\n\n主角。',
+    ...pages,
+  })
+  const reads = new Set<string>()
+  const read = project.workspace.read.bind(project.workspace)
+  project.workspace.read = async path => {
+    reads.add(path)
+    return await read(path)
+  }
+
+  const result = await buildWikiContext(project.workspace, {
+    action: 'search',
+    query: ['林风'],
+    maxPages: 1,
+  })
+
+  assert.deepEqual(
+    result.searchResults?.map(item => item.path),
+    ['角色/林风.md'],
+  )
+  assert.equal(reads.has('wiki/无关/0.md'), false)
+  assert.equal(reads.has('wiki/角色/林风.md'), true)
+})
+
 test('search rejects invalid multi-term queries without weakening the string contract', async () => {
   const { workspace } = developmentWiki()
   assert.match(
@@ -288,7 +337,7 @@ test('search rejects invalid multi-term queries without weakening the string con
   }
 })
 
-test('wiki context reads the entry first and returns continuity sources with coverage', async () => {
+test('wiki context reads the entry before the model selects continuity sources', async () => {
   const project = memoryWiki({
     wiki: null,
     'wiki/index.md':
@@ -302,15 +351,223 @@ test('wiki context reads the entry first and returns continuity sources with cov
     'wiki/角色': null,
     'wiki/角色/林风.md': '# 林风\n主角。',
   })
+  const entry = await buildWikiContext(project.workspace, { action: 'entry' })
   const context = await buildWikiContext(project.workspace, {
-    question: '继续写下一集',
-    mode: 'continuity',
+    action: 'read',
+    paths: ['状态/当前进度.md', '剧情/总纲.md'],
   })
-  assert.equal(context.entry.path, 'index.md')
+  assert.equal(entry.entry?.path, 'index.md')
   assert.ok(context.sources.some(source => source.path === '状态/当前进度.md'))
   assert.ok(context.sources.some(source => source.path === '剧情/总纲.md'))
-  assert.equal(context.coverage, 'partial')
-  assert.ok(context.missingRoutes.includes('上一集'))
+  assert.equal(context.coverage, 'complete')
+})
+
+test('wiki context reads only explicit paths and never scans unrelated page bodies', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n\n[[角色/林风]]\n',
+    'wiki/角色': null,
+    'wiki/角色/林风.md': '# 林风\n\n主角。',
+    'wiki/正文': null,
+    'wiki/正文/百万字.md': '不应读取'.repeat(100_000),
+  })
+  const reads = new Map<string, number>()
+  const read = project.workspace.read.bind(project.workspace)
+  project.workspace.read = async path => {
+    reads.set(path, (reads.get(path) || 0) + 1)
+    return await read(path)
+  }
+
+  const context = await buildWikiContext(project.workspace, {
+    action: 'read',
+    paths: ['角色/林风.md'],
+  })
+
+  assert.deepEqual(
+    context.sources.map(source => source.path),
+    ['角色/林风.md'],
+  )
+  assert.equal(reads.has('wiki/正文/百万字.md'), false)
+})
+
+test('wiki context tree lists paths and fingerprints without reading page bodies', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n',
+    'wiki/角色': null,
+    'wiki/角色/林风.md': '# 林风\n',
+  })
+  let reads = 0
+  const read = project.workspace.read.bind(project.workspace)
+  project.workspace.read = async path => {
+    reads += 1
+    return await read(path)
+  }
+
+  const context = await buildWikiContext(project.workspace, { action: 'tree' })
+
+  assert.ok(context.tree?.some(entry => entry.path === '角色/林风.md'))
+  assert.equal(reads, 0)
+})
+
+test('wiki apply creates a page and deterministically maintains navigation and log', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n\n- [[状态/_index|状态]]\n',
+    'wiki/状态': null,
+    'wiki/状态/_index.md': '# 状态\n',
+    'wiki/log.md': '# Log\n',
+  })
+
+  const output = await executeWikiAction(project.workspace, {
+    action: 'apply',
+    reason: '记录当前工作',
+    basis: ['用户要求'],
+    operations: [
+      {
+        kind: 'create',
+        path: '状态/工作进度.md',
+        title: '工作进度',
+        content: '# 工作进度\n\n已完成。',
+      },
+    ],
+  })
+
+  assert.match(output, /succeeded/)
+  assert.equal(project.entries.get('wiki/状态/工作进度.md'), '# 工作进度\n\n已完成。')
+  assert.match(
+    String(project.entries.get('wiki/状态/index.md')),
+    /\[\[状态\/工作进度\|工作进度\]\]/,
+  )
+  assert.match(String(project.entries.get('wiki/index.md')), /\[\[状态\/index\|状态\]\]/)
+  assert.match(String(project.entries.get('wiki/log.md')), /记录当前工作/)
+})
+
+test('wiki apply does not read unrelated page bodies for a local create', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n',
+    'wiki/log.md': '# Log\n',
+    'wiki/无关.md': '巨大正文，不应在普通写入中读取。',
+  })
+  const reads = new Set<string>()
+  const read = project.workspace.read.bind(project.workspace)
+  project.workspace.read = async path => {
+    reads.add(path)
+    return await read(path)
+  }
+
+  await executeWikiAction(project.workspace, {
+    action: 'apply',
+    reason: '新增页面',
+    basis: ['用户当前任务'],
+    operations: [{ kind: 'create', path: '新页面.md', title: '新页面', content: '# 新页面\n' }],
+  })
+
+  assert.equal(reads.has('wiki/无关.md'), false)
+})
+
+test('wiki apply moves a page and rewrites navigation and precise live links', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n\n- [[角色/_index|角色]]\n- [[人物/_index|人物]]\n',
+    'wiki/角色': null,
+    'wiki/角色/_index.md': '# 角色\n\n- [[角色/林风|林风]]\n',
+    'wiki/角色/林风.md': '# 林风\n',
+    'wiki/人物': null,
+    'wiki/人物/_index.md': '# 人物\n',
+    'wiki/剧情.md': '# 剧情\n\n[[角色/林风]]\n`[[角色/林风]]`\n',
+  })
+
+  await executeWikiAction(project.workspace, {
+    action: 'apply',
+    reason: '整理人物分类',
+    basis: ['用户要求'],
+    operations: [{ kind: 'move', path: '角色/林风.md', destination: '人物/林风.md' }],
+    confirmedPlanId: 'plan:{"reason":"整理人物分类","basis":["用户要求"],"operations":[{"kind":"move","path":"角色/林风.md","destination":"人物/林风.md"}]}',
+  })
+
+  assert.equal(project.entries.has('wiki/角色/林风.md'), false)
+  assert.equal(project.entries.has('wiki/人物/林风.md'), true)
+  assert.doesNotMatch(String(project.entries.get('wiki/角色/index.md')), /角色\/林风/)
+  assert.match(String(project.entries.get('wiki/人物/index.md')), /人物\/林风/)
+  assert.match(String(project.entries.get('wiki/剧情.md')), /^\[\[人物\/林风\]\]$/m)
+  assert.match(String(project.entries.get('wiki/剧情.md')), /`\[\[角色\/林风\]\]`/)
+})
+
+test('wiki apply rejects trash with unresolved live backlinks', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n',
+    'wiki/废弃.md': '# 废弃\n',
+    'wiki/引用.md': '# 引用\n\n[[废弃]]\n',
+  })
+
+  await assert.rejects(
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'apply',
+        reason: '回收废弃页面',
+        basis: ['用户要求'],
+        operations: [{ kind: 'trash', path: '废弃.md' }],
+        confirmedPlanId: 'plan:{"reason":"回收废弃页面","basis":["用户要求"],"operations":[{"kind":"trash","path":"废弃.md"}]}',
+      }),
+    /仍有现行入链.*引用\.md/,
+  )
+  assert.equal(project.entries.has('wiki/废弃.md'), true)
+})
+
+test('wiki apply rolls back all changes when a derived write fails', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n\n- [[状态/_index|状态]]\n',
+    'wiki/状态': null,
+    'wiki/状态/_index.md': '# 状态\n',
+  })
+  const write = project.workspace.write.bind(project.workspace)
+  project.workspace.write = async (path, content) => {
+    if (path === 'wiki/状态/index.md') throw new Error('模拟导航写入失败')
+    await write(path, content)
+  }
+
+  await assert.rejects(
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'apply',
+        reason: '记录进度',
+        basis: ['用户要求'],
+        operations: [
+          { kind: 'create', path: '状态/工作进度.md', title: '工作进度', content: '# 工作进度\n' },
+        ],
+      }),
+    /模拟导航写入失败/,
+  )
+  assert.equal(project.entries.has('wiki/状态/工作进度.md'), false)
+  assert.equal(project.entries.get('wiki/状态/_index.md'), '# 状态\n')
+  assert.equal(project.entries.has('wiki/状态/index.md'), false)
+})
+
+test('wiki apply creates index.md for every new content directory', async () => {
+  const project = memoryWiki({ wiki: null, 'wiki/index.md': '# 入口\n' })
+
+  await executeWikiAction(project.workspace, {
+    action: 'apply',
+    reason: '创建分集目录',
+    basis: ['用户要求'],
+    operations: [
+      { kind: 'mkdir', path: '剧情/分集', purpose: '逐集正文' },
+      { kind: 'create', path: '剧情/分集/第1集.md', title: '第1集', content: '# 第1集\n' },
+    ],
+  })
+
+  assert.equal(project.entries.has('wiki/剧情/index.md'), true)
+  assert.equal(project.entries.has('wiki/剧情/分集/index.md'), true)
+  assert.match(String(project.entries.get('wiki/index.md')), /\[\[剧情\/index\|剧情\]\]/)
+  assert.match(String(project.entries.get('wiki/剧情/index.md')), /\[\[剧情\/分集\/index\|分集\]\]/)
+  assert.match(
+    String(project.entries.get('wiki/剧情/分集/index.md')),
+    /\[\[剧情\/分集\/第1集\|第1集\]\]/,
+  )
 })
 
 test('status reports development category counts and latest operation', async () => {
@@ -414,11 +671,19 @@ test('validate checks required development entries and stable entry links', asyn
   assert.match(await executeWikiAction(workspace, { action: 'validate' }), /验证通过/)
 
   const broken = developmentWiki({
-    'docs/wiki/hot.md': '# Hot\n\n[[开发/不存在]]\n',
+    'docs/wiki/CLAUDE.md': '# Wiki\n\n[[开发/不存在]]\n',
   })
   await assert.rejects(
     () => executeWikiAction(broken.workspace, { action: 'validate' }),
     /稳定入口存在断链.*不存在/s,
+  )
+
+  const brokenPartition = developmentWiki({
+    'docs/wiki/开发/index.md': '# 开发\n\n[[开发/不存在]]\n',
+  })
+  await assert.rejects(
+    () => executeWikiAction(brokenPartition.workspace, { action: 'validate' }),
+    /开发\/index\.md.*不存在/s,
   )
 })
 
@@ -832,5 +1097,5 @@ test('extend remains available for Everything but link is no longer a Wiki actio
     }),
     /\[修复回执\]/,
   )
-  assert.equal(project.entries.get('docs/wiki/产品/_index.md'), '# 产品\n\n> 产品事实\n')
+  assert.equal(project.entries.get('docs/wiki/产品/index.md'), '# 产品\n\n> 产品事实\n')
 })

@@ -11,7 +11,7 @@ import {
   WIKI_SEARCH_TOOL_DEFINITION,
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
-import { executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
+import { buildWikiContext, executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
 import {
   artifactFilename,
   createArtifactHtml,
@@ -94,6 +94,12 @@ export function createWebProjectToolExecutor(input: {
     async createDirectory(path) {
       await input.files.createFolder(requireProject(), path)
     },
+    async move(path, destination) {
+      await input.files.rename(requireProject(), path, destination)
+    },
+    async remove(path) {
+      await input.files.remove(requireProject(), path)
+    },
   }
 
   return async (call, signal): Promise<DirectToolResult> => {
@@ -117,7 +123,7 @@ export function createWebProjectToolExecutor(input: {
 
     if (name === WIKI_CONTEXT_TOOL_DEFINITION.function.name) {
       return {
-        content: await executeWikiAction(wikiWorkspace, { ...args, action: 'context' } as any),
+        content: JSON.stringify(await buildWikiContext(wikiWorkspace, args as any), null, 2),
       }
     }
 

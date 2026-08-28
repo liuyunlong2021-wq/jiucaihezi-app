@@ -292,7 +292,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(workbench, /function resizeComposer\(\)/)
   assert.match(workbench, /<textarea[\s\S]*v-model="markdownDraft"/)
   assert.match(workbench, /files: referencedFiles\.value/)
-  assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
+  assert.match(runtime, /files: memoryMode \? input\.files : \(input\.files\?\.length \? input\.files : undefined\)/)
 })
 
 test('memory composer ignores IME Enter fallback key events', () => {
@@ -349,25 +349,14 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
 
   assert.match(workbench, /executionMode = ref<ConversationMode>\('memory'\)/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速<|>记忆</)
-  assert.match(workbench, /const commonCommands = \[/)
-  assert.match(workbench, /label: '查询 Wiki'/)
-  assert.match(workbench, /label: '写入 Wiki'/)
-  assert.match(workbench, /label: '根据 Wiki 创作'/)
-  assert.match(workbench, /label: '续写小说\/剧本'/)
-  assert.match(workbench, /根据 wiki\/index\.md 创作下一集/)
-  assert.match(workbench, /label: '配置 Wiki 创作入口'/)
-  assert.match(workbench, /label: '生成资产'/)
-  assert.match(workbench, /prompt: '@Wiki 查询/)
-  assert.match(workbench, /prompt: '@Wiki 写入/)
-  assert.match(workbench, /prompt: '@MCP 使用/)
-  assert.match(workbench, /class="memory-command-more"/)
+  assert.match(workbench, /const toolCommands = \[/)
+  for (const label of ['@Wiki', '@Skill', '@文件', '@3D', '@媒体', '@MCP', '@Terminal']) assert.match(workbench, new RegExp(`label: '${label}'`))
+  assert.doesNotMatch(workbench, /@Skill \+ @Wiki|@Skill \+ @MCP/)
+  assert.doesNotMatch(workbench, /const commonCommands = \[/)
   assert.match(workbench, /function insertCommand\(command/)
-  assert.match(workbench, /async function suggestWikiWrite\(turn: ConversationTurn\)/)
-  assert.match(workbench, /@click="suggestWikiWrite\(turn\)"/)
-  assert.match(workbench, /memory-wiki-write-dialog/)
-  assert.match(workbench, /files\.writeText\(target, content, current\.revision\)/)
-  assert.match(workbench, /files\.createText\(owner, savedPath, /)
-  assert.doesNotMatch(workbench, /function suggestWikiWrite\(\)[\s\S]*insertCommand/)
+  assert.match(workbench, /fileToolsSelected = ref\(false\)/)
+  assert.match(workbench, /selectedMcpToolNames = ref<string\[\]>\(\[\]\)/)
+  assert.match(workbench, /scene3dSelected = ref\(false\)/)
   assert.match(workbench, /appendMemoryRound\(active\.resource, userTurn, reply, files, title\)/)
   assert.match(
     workbench,
@@ -379,15 +368,12 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
     /rawPath: string|input\.rawPath|conversationDocumentSources|historicalDocumentSources/,
   )
   assert.match(runtime, /const memoryMode = input\.mode !== 'quick'/)
-  assert.match(
-    runtime,
-    /if \(!memoryMode\)[\s\S]*tools: \[WIKI_SEARCH_TOOL_DEFINITION\][\s\S]*executeTool: projectTools/,
-  )
-  assert.match(runtime, /finalizeAtModelRequestLimit: hasExtendedTool/)
-  assert.match(workbench, /wiki_search: '搜索 Wiki'/)
+  assert.doesNotMatch(runtime, /tools: \[WIKI_CONTEXT_TOOL_DEFINITION\]/)
+  assert.match(runtime, /finalizeAtModelRequestLimit:[\s\S]*!input\.wikiSelected/)
+  assert.doesNotMatch(runtime, /WIKI_SEARCH_TOOL_DEFINITION/)
   assert.doesNotMatch(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS|快速模式只能读取/)
-  assert.match(runtime, /attachments: memoryMode \? input\.attachments : undefined/)
-  assert.match(runtime, /files: memoryMode \? input\.files : undefined/)
+  assert.match(runtime, /attachments: memoryMode \? input\.attachments : \(input\.attachments\?\.length \? input\.attachments : undefined\)/)
+  assert.match(runtime, /files: memoryMode \? input\.files : \(input\.files\?\.length \? input\.files : undefined\)/)
   assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
   assert.match(
     workbench,
@@ -450,7 +436,7 @@ test('memory composer reads the native clipboard only for an empty Desktop image
   assert.equal(shouldReadNativeClipboardImage(0, '', true, true), false)
 })
 
-test('memory mode keeps automatic discovery and lets @ explicitly load an installed Skill', () => {
+test('memory mode keeps explicit Skill and Wiki connections', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
@@ -467,8 +453,10 @@ test('memory mode keeps automatic discovery and lets @ explicitly load an instal
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
   assert.match(workbench, /selectedSkillNames: selectedSkillNames\.value/)
-  assert.match(runtime, /mergeCreativeSkillCatalog\(customSkills, await loadWebSkillCatalog\(\)\)/)
-  assert.match(runtime, /根据用户任务自主决定是否加载 Skill/)
+  assert.match(workbench, /const wikiSelected = ref\(false\)/)
+  assert.match(workbench, /wikiSelected: wikiSelected\.value/)
+  assert.match(runtime, /selectMemoryTools\(\n\s*allMemoryToolDefinitions/)
+  assert.doesNotMatch(runtime, /const explicitWiki =/)
   assert.doesNotMatch(runtime, /REQUIRED_SKILL|loadedRequiredSkill|queriedWiki|每次回复必须先调用/)
   assert.match(runtime, /if \(customSkill\?\.skillContent\.trim\(\)\)/)
   assert.match(runtime, /buildToolResultMessages\(/)
@@ -623,7 +611,7 @@ test('memory run status follows real tool start and end events without entering 
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
   assert.match(runtime, /onToolEvent\?: \(event: DirectToolExecutionEvent\) => void/)
-  assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 3)
+  assert.equal((runtime.match(/input\.onToolEvent\?\.\(event\)/g) || []).length, 2)
   assert.doesNotMatch(runtime, /event\.type === 'tool_execution_start'\) input\.onToolEvent/)
   assert.match(
     workbench,
@@ -1047,7 +1035,7 @@ test('memory text models default to tools unless the gateway explicitly disables
     store,
     /toolCall: capability === 'text' && item\.tool_call !== false && item\.toolCall !== false/,
   )
-  assert.match(runtime, /agentStore\.modelsFetched && model\?\.toolCall === false/)
+  assert.match(runtime, /explicitCapabilitySelected && agentStore\.modelsFetched && model\?\.toolCall === false/)
 })
 
 test('memory file actions stay inside the memory resource route on Desktop', () => {
@@ -1182,7 +1170,7 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'mcp' \}"/)
   assert.match(
     runtime,
-    /recordSceneVideo: input\.recordSceneVideo \? document => input\.recordSceneVideo!\(document, input\.signal\) : undefined/,
+    /recordSceneVideo: input\.recordSceneVideo[\s\S]{0,120}document => input\.recordSceneVideo!\(document, input\.signal\)[\s\S]{0,40}: undefined/,
   )
   assert.match(runtime, /platform: isTauriRuntime\(\) \? 'desktop' : 'web'/)
   assert.doesNotMatch(runtime, /forceCloud: true/)

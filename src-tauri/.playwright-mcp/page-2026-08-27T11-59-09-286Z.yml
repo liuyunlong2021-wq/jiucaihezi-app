@@ -1,0 +1,292 @@
+- generic [active] [ref=f8e1]:
+  - generic:
+    - generic:
+      - link "跳到主要内容" [ref=f8e2] [cursor=pointer]
+      - link "无障碍功能帮助" [ref=f8e3] [cursor=pointer]:
+        - /url: https://support.google.com/websearch/answer/181196?hl=zh-CN
+  - generic [ref=f8e8]:
+    - search [ref=f8e9]:
+      - generic [ref=f8e11]:
+        - link "Google 首页" [ref=f8e13] [cursor=pointer]:
+          - /url: https://www.google.com.hk/webhp?hl=zh-CN&sa=X&ved=0ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQPAgI
+        - generic [ref=f8e21]:
+          - generic [ref=f8e22]:
+            - combobox "搜索" [ref=f8e25]: site:github.com open source AI workflow automation Langflow Flowise n8n Dify site:github.com open source AI workflow automation Langflow Flowise n8n Dify
+            - generic [ref=f8e26]:
+              - button "清除" [ref=f8e28] [cursor=pointer]
+              - generic [ref=f8e33]:
+                - button "按语音搜索" [ref=f8e34] [cursor=pointer]
+                - button "按图搜索" [ref=f8e37] [cursor=pointer]
+          - button "搜索" [ref=f8e40] [cursor=pointer]
+    - generic [ref=f8e45]:
+      - button "设置" [ref=f8e47] [cursor=pointer]
+      - button "分享" [ref=f8e53] [cursor=pointer]
+      - generic [ref=f8e59]:
+        - button "Google 应用" [ref=f8e61] [cursor=pointer]
+        - link "登录" [ref=f8e66] [cursor=pointer]:
+          - /url: https://accounts.google.com/ServiceLogin?hl=zh-CN&passive=true&continue=https://www.google.com.hk/search%3Fq%3Dsite%253Agithub.com%2Bopen%2Bsource%2BAI%2Bworkflow%2Bautomation%2BLangflow%2BFlowise%2Bn8n%2BDify&ec=futura_srp_og_si_72236_p
+  - generic [ref=f8e68]:
+    - navigation [ref=f8e74]:
+      - generic [ref=f8e80]:
+        - list [ref=f8e81]:
+          - listitem [ref=f8e82]:
+            - link "全部" [disabled] [ref=f8e83]
+          - listitem [ref=f8e86]:
+            - link "视频" [ref=f8e87] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=7&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhhI8K7uQ8hdQ33-0c2DcAb9lPoaLKc1lmjISzLKWTxCq82uaEoYSmEFcTmG1Obz0vR12tMPHpkr5mUp6fV9Mur7pDBHRxiHh1r8GG4d4MNv2AoJm50swee7yVJkIGYcXujveNty8iJ363AOh9DxbQIXWJWRA&q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&sa=X&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQtKgLegQIFRAB
+          - listitem [ref=f8e90]:
+            - link "短视频" [ref=f8e91] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=39&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhhI8K7uQ8hdQ33-0c2DcAb9lPoaLKc1lmjISzLKWTxCq82uaEoYSmEFcTmG1Obz0vR12tMPHpkr5mUp6fV9Mur7pDBHRxiHh1r8GG4d4MNv2AoJm50swee7yVJkIGYcXujveNty8iJ363AOh9DxbQIXWJWRA&q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&sa=X&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQs6gLegQIFhAB
+          - listitem [ref=f8e94]:
+            - link "图片" [ref=f8e95] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=2&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhhI8K7uQ8hdQ33-0c2DcAb9lPoaLKc1lmjISzLKWTxCq82uaEoYSmEFcTmG1Obz0vR12tMPHpkr5mUp6fV9Mur7pDBHRxiHh1r8GG4d4MNv2AoJm50swee7yVJkIGYcXujveNty8iJ363AOh9DxbQIXWJWRA&q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&sa=X&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQtKgLegQIFxAB
+          - listitem [ref=f8e98]:
+            - link "新闻" [ref=f8e99] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&tbm=nws&source=lnms&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhhI8K7uQ8hdQ33-0c2DcAb9lPoaLKc1lmjISzLKWTxCq82uaEoYSmEFcTmG1Obz0vR12tMPHpkr5mUp6fV9Mur7pDBHRxiHh1r8GG4d4MNv2AoJm50swee7yVJkIGYcXujveNty8iJ363AOh9DxbQIXWJWRA&sa=X&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ0pQJegQIGRAB
+          - listitem [ref=f8e102]:
+            - link "网页" [ref=f8e103] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=web&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhhI8K7uQ8hdQ33-0c2DcAb9lPoaLKc1lmjISzLKWTxCq82uaEoYSmEFcTmG1Obz0vR12tMPHpkr5mUp6fV9Mur7pDBHRxiHh1r8GG4d4MNv2AoJm50swee7yVJkIGYcXujveNty8iJ363AOh9DxbQIXWJWRA&q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&sa=X&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQs6gLegQIGBAB
+          - listitem [ref=f8e106]:
+            - link "图书" [ref=f8e107] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&udm=36&source=lnms&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhhI8K7uQ8hdQ33-0c2DcAb9lPoaLKc1lmjISzLKWTxCq82uaEoYSmEFcTmG1Obz0vR12tMPHpkr5mUp6fV9Mur7pDBHRxiHh1r8GG4d4MNv2AoJm50swee7yVJkIGYcXujveNty8iJ363AOh9DxbQIXWJWRA&sa=X&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ0pQJegQIGhAB
+          - listitem [ref=f8e110]:
+            - button [ref=f8e111] [cursor=pointer]:
+              - generic "更多过滤条件" [ref=f8e112]: 更多
+        - button "工具" [ref=f8e119] [cursor=pointer]
+    - heading "搜索结果" [level=1] [ref=f8e126]
+    - main [ref=f8e132]:
+      - generic [ref=f8e136]:
+        - generic [ref=f8e139]:
+          - heading "Web results" [level=2] [ref=f8e140]
+          - generic [ref=f8e141]:
+            - generic [ref=f8e144]:
+              - link "A curated list of awesome open source AI workflow. GitHub https://github.com › nndeploy › awesome-ai..." [ref=f8e146] [cursor=pointer]:
+                - /url: /goto?url=CAESZwHrOzAV_r-3G-KcFr8d8HHvcevgnoKbYv6hE0gxBZow--RQrHwtKUVTRO1qpGyslXIkXsZdUcdOCcuikleKez6fpr1VMKej6Os5KhPmd67Yn7KnUYeF1JspDRZx9GBnfAtKMyg1aXg
+                - heading "A curated list of awesome open source AI workflow." [level=3] [ref=f8e147]
+                - generic [ref=f8e153]:
+                  - generic [ref=f8e154]: GitHub
+                  - generic [ref=f8e156]: https://github.com › nndeploy › awesome-ai...
+              - generic [ref=f8e158]:
+                - generic [ref=f8e159]: ·
+                - link "翻译此页" [ref=f8e160] [cursor=pointer]:
+                  - /url: https://github.com/nndeploy/awesome-ai-workflow
+              - button "关于这条结果的详细信息" [ref=f8e165] [cursor=pointer]
+            - generic [ref=f8e172]:
+              - text: DifyAIA -
+              - emphasis [ref=f8e173]: AI
+              - text: application DSL workflows created based on
+              - emphasis [ref=f8e174]: Dify
+              - text: . You can get them for free, whether for personal needs or learning purposes, it will
+              - emphasis [ref=f8e175]: open
+              - text: up an ...
+        - generic [ref=f8e179]:
+          - generic [ref=f8e182]:
+            - link "migrate-to-heym.md GitHub https://github.com › content › getting-started" [ref=f8e184] [cursor=pointer]:
+              - /url: /goto?url=CAESngEB6zswFfbvRhXNx1cTShy8I1vyUN5dlAg0Mb_b0dnou9msp2jeXymty7K8EpxJXxW4FqCiEpFzqlwWU27ndmw46DK3UK80ZQfsWoOF0Ili7UbUY9O364G78SqZJ-13DhYN5PAkfFIzDNys6qy4hIUIXdVeWS3iUHSYuqYx_r0ii7HyUO7eSbtKkb5NWNja61YhpxPYp_T8Benu3Fq7Lg
+              - heading "migrate-to-heym.md" [level=3] [ref=f8e185]
+              - generic [ref=f8e191]:
+                - generic [ref=f8e192]: GitHub
+                - generic [ref=f8e194]: https://github.com › content › getting-started
+            - generic [ref=f8e196]:
+              - generic [ref=f8e197]: ·
+              - link "翻译此页" [ref=f8e198] [cursor=pointer]:
+                - /url: https://github.com/heymrun/heym/blob/main/frontend/src/docs/content/getting-started/migrate-to-heym.md
+            - button "关于这条结果的详细信息" [ref=f8e203] [cursor=pointer]
+          - generic [ref=f8e210]:
+            - text: AI Convert turns them into Heym workflows for you.
+            - emphasis [ref=f8e211]: Paste a workflow from n8n, Flowise, Dify, Langflow
+            - text: ", sim.ai, or Activepieces — or just describe what you ..."
+        - generic [ref=f8e215]:
+          - generic [ref=f8e218]:
+            - 'link "rahulsinghai/adaptive-rag: A production-style, local-first ** ... GitHub https://github.com › rahulsinghai › adaptive-..." [ref=f8e220] [cursor=pointer]':
+              - /url: /goto?url=CAESZAHrOzAVYpAB5zI1EVf6GvyLR5daSS0uckOnGDut4-9HqdQdgcHSn9UuT1kwcIegEXJ_XiLch8MQQg7bl9sP9ipaP0SU2_-kpI77TX6ly4jyXZOEJ0mrXVW5qrhSOO9e1lXf1Kk
+              - 'heading "rahulsinghai/adaptive-rag: A production-style, local-first ** ..." [level=3] [ref=f8e221]'
+              - generic [ref=f8e227]:
+                - generic [ref=f8e228]: GitHub
+                - generic [ref=f8e230]: https://github.com › rahulsinghai › adaptive-...
+            - generic [ref=f8e232]:
+              - generic [ref=f8e233]: ·
+              - link "翻译此页" [ref=f8e234] [cursor=pointer]:
+                - /url: https://github.com/rahulsinghai/adaptive-rag
+            - button "关于这条结果的详细信息" [ref=f8e239] [cursor=pointer]
+          - generic [ref=f8e246]:
+            - emphasis [ref=f8e247]: GUI tools for building AI workflows or automation pipelines
+            - text: using drag-and-drop nodes. n8n, Langflow, Flowise, Dify, Drag-and-drop pipelines, connectors to APIs ...
+        - generic [ref=f8e251]:
+          - generic [ref=f8e254]:
+            - link "Awesome Regolo.AI GitHub https://github.com › regolo-ai › awesome-re..." [ref=f8e256] [cursor=pointer]:
+              - /url: /goto?url=CAESZgHrOzAVHVm-ssHnlomB__uznPQAZ2vCBuK2VCc6iP3UarzQrZgBz9MEu_mtzfSiCyvwuj8u_jlg4Ks-oOTA8RoJfc-0rF6HHpyi6swlje4zmKSBulJnhgkQiPp10Anzb8ywHa6AMA
+              - heading "Awesome Regolo.AI" [level=3] [ref=f8e257]
+              - generic [ref=f8e263]:
+                - generic [ref=f8e264]: GitHub
+                - generic [ref=f8e266]: https://github.com › regolo-ai › awesome-re...
+            - generic [ref=f8e268]:
+              - generic [ref=f8e269]: ·
+              - link "翻译此页" [ref=f8e270] [cursor=pointer]:
+                - /url: https://github.com/regolo-ai/awesome-regolo-ai
+            - button "关于这条结果的详细信息" [ref=f8e275] [cursor=pointer]
+          - generic [ref=f8e282]:
+            - text: n8n – AI email summarizer -
+            - emphasis [ref=f8e283]: Flexible AI workflow automation
+            - text: ; n8n – Boost your workflows - Flexible AI workflow automation; OpenAI Agents SDK - Use OpenAI's ...
+        - generic [ref=f8e287]:
+          - generic [ref=f8e290]:
+            - link "potpie-ai/AI-COSS - Agentic Open Source Companies List GitHub https://github.com › potpie-ai › AI-COSS" [ref=f8e292] [cursor=pointer]:
+              - /url: /goto?url=CAESXAHrOzAVfESAlafuQzX7IGazrshbuG3hkK_jWmU59NM3SzV5qnyv4WGIcp0O_4anwwBEzzwKw3IItmracfW2D4ePbj7S1P6gzHagg9dwJAUnKShHFQKat35k-V2G
+              - heading "potpie-ai/AI-COSS - Agentic Open Source Companies List" [level=3] [ref=f8e293]
+              - generic [ref=f8e299]:
+                - generic [ref=f8e300]: GitHub
+                - generic [ref=f8e302]: https://github.com › potpie-ai › AI-COSS
+            - generic [ref=f8e304]:
+              - generic [ref=f8e305]: ·
+              - link "翻译此页" [ref=f8e306] [cursor=pointer]:
+                - /url: https://github.com/potpie-ai/AI-COSS
+            - button "关于这条结果的详细信息" [ref=f8e311] [cursor=pointer]
+          - generic [ref=f8e318]:
+            - text: A versatile
+            - emphasis [ref=f8e319]: workflow automation
+            - text: platform to create, organize, and execute
+            - emphasis [ref=f8e320]: AI
+            - text: workflows, from a single LLM to complex
+            - emphasis [ref=f8e321]: AI
+            - text: "-driven workflows. Composio, ComposioHQ/ ..."
+        - generic [ref=f8e325]:
+          - generic [ref=f8e328]:
+            - link "Awesome Workflow Automation Software, Tools & Apps GitHub https://github.com › dariubs › awesome-wor..." [ref=f8e330] [cursor=pointer]:
+              - /url: /goto?url=CAESbgHrOzAV32pxlovjDiZRV8GcGM1KNuKoagnbQPSgMhFJ6Y1cFbuuC3-OZmbNCvHrxi6WHAo_BJD-FQum-hipoTBdIxkfK334nLKxOVsQ4SuHg5Ty4r1Js4S_WPD9SF4eL-NQMnNdO2qciheY3Ska
+              - heading "Awesome Workflow Automation Software, Tools & Apps" [level=3] [ref=f8e331]
+              - generic [ref=f8e337]:
+                - generic [ref=f8e338]: GitHub
+                - generic [ref=f8e340]: https://github.com › dariubs › awesome-wor...
+            - generic [ref=f8e342]:
+              - generic [ref=f8e343]: ·
+              - link "翻译此页" [ref=f8e344] [cursor=pointer]:
+                - /url: https://github.com/dariubs/awesome-workflow-automation
+            - button "关于这条结果的详细信息" [ref=f8e349] [cursor=pointer]
+          - generic [ref=f8e356]:
+            - emphasis [ref=f8e357]: Dify
+            - text: ⭐ 58K+ stars —
+            - emphasis [ref=f8e358]: Open
+            - text: "-"
+            - emphasis [ref=f8e359]: source
+            - text: LLM app platform.
+            - emphasis [ref=f8e360]: Workflow
+            - text: builder, RAG, knowledge base management, code nodes, agent mode. Enterprise edition with SOC2 ...
+        - generic [ref=f8e364]:
+          - generic [ref=f8e367]:
+            - link "dify · GitHub Topics GitHub https://github.com › topics › dify" [ref=f8e369] [cursor=pointer]:
+              - /url: /goto?url=CAESVgHrOzAV_aWypsSmF6jNq4ggcn9RF91GP-FkuCupjBM5pQ4AvGNAEJrlqPyy2aw-YKW_RmfvXYKi45WVjlZVNck6WXCdXmcow26MNxH-1iTyKNpzUr31
+              - heading "dify · GitHub Topics" [level=3] [ref=f8e370]
+              - generic [ref=f8e376]:
+                - generic [ref=f8e377]: GitHub
+                - generic [ref=f8e379]: https://github.com › topics › dify
+            - generic [ref=f8e381]:
+              - generic [ref=f8e382]: ·
+              - link "翻译此页" [ref=f8e383] [cursor=pointer]:
+                - /url: https://github.com/topics/dify
+            - button "关于这条结果的详细信息" [ref=f8e388] [cursor=pointer]
+          - generic [ref=f8e395]:
+            - emphasis [ref=f8e396]: Self-hosted AI automation platform
+            - text: . Deploy n8n, Ollama, Flowise, RAG, Supabase & 30+ tools with one command. Auto HTTPS. Free Zapier/Make alternative. docker ...
+        - generic [ref=f8e400]:
+          - generic [ref=f8e403]:
+            - link "langflow-for-qa-tutorial.md GitHub https://gist.github.com › PramodDutta" [ref=f8e405] [cursor=pointer]:
+              - /url: /goto?url=CAESfAHrOzAV7pFCbhwRplJCkgydrEYUb0PbwxBhLa6hkyFe0i8oKLH0x7H8tJglabdbJv_Otp6KITCWKnGgjAD4ME-tQhkGMHG_IknKEzP38BWHH7nDP6J_eRJJ8d83U5fCucC5WsNuq6KIghOMGLvW7_drZ3tHUQdVvMwP7Jg
+              - heading "langflow-for-qa-tutorial.md" [level=3] [ref=f8e406]
+              - generic [ref=f8e412]:
+                - generic [ref=f8e413]: GitHub
+                - generic [ref=f8e415]: https://gist.github.com › PramodDutta
+            - generic [ref=f8e417]:
+              - generic [ref=f8e418]: ·
+              - link "翻译此页" [ref=f8e419] [cursor=pointer]:
+                - /url: https://gist.github.com/PramodDutta/ba2d6455ca4d8f7177c4569b4d84d8c2
+            - button "关于这条结果的详细信息" [ref=f8e424] [cursor=pointer]
+          - generic [ref=f8e431]:
+            - text: Think of
+            - emphasis [ref=f8e432]: LangFlow
+            - text: as the Postman for
+            - emphasis [ref=f8e433]: AI
+            - text: agents. Just like Postman lets you visually build, test, and chain API requests without writing curl commands, ...
+        - generic [ref=f8e437]:
+          - generic [ref=f8e440]:
+            - link "openafw/ai-agent-discovery GitHub https://github.com › openafw › ai-agent-disc..." [ref=f8e442] [cursor=pointer]:
+              - /url: /goto?url=CAESZQHrOzAVRi_8_kc3rtek1V5Buv2zpe_dJnmedYGfMZZaS18K0hNtQ-pHnVZiOeLw0gMHO5K6k4qI4bVeVGYSffh9unT_s8ZLWnhv4LWx4jmI28KmTXuJUk-v8gcDCYAx9u0PBJLw
+              - heading "openafw/ai-agent-discovery" [level=3] [ref=f8e443]
+              - generic [ref=f8e449]:
+                - generic [ref=f8e450]: GitHub
+                - generic [ref=f8e452]: https://github.com › openafw › ai-agent-disc...
+            - generic [ref=f8e454]:
+              - generic [ref=f8e455]: ·
+              - link "翻译此页" [ref=f8e456] [cursor=pointer]:
+                - /url: https://github.com/openafw/ai-agent-discovery
+            - button "关于这条结果的详细信息" [ref=f8e461] [cursor=pointer]
+          - generic [ref=f8e468]:
+            - emphasis [ref=f8e469]: An open-source enterprise tool by OpenGuardrails
+            - text: for discovering AI agents running within your organization. As AI agent adoption explodes across ...
+        - generic [ref=f8e473]:
+          - generic [ref=f8e476]:
+            - link "Shubham Dusane shubhamdusane GitHub https://github.com › shubhamdusane" [ref=f8e478] [cursor=pointer]:
+              - /url: /goto?url=CAESWAHrOzAVN2KzOvgp2f_E9AIKl8ljrear25z6XiXHdBRFOUHrYAO-ZfSYpzCLts4OCtaANp4JcQPZNPjyxfyBOBIOQRgJoXRr_4JqYNboGpb8Hwu9jxxDhoc
+              - heading "Shubham Dusane shubhamdusane" [level=3] [ref=f8e479]
+              - generic [ref=f8e485]:
+                - generic [ref=f8e486]: GitHub
+                - generic [ref=f8e488]: https://github.com › shubhamdusane
+            - generic [ref=f8e490]:
+              - generic [ref=f8e491]: ·
+              - link "翻译此页" [ref=f8e492] [cursor=pointer]:
+                - /url: https://github.com/shubhamdusane
+            - button "关于这条结果的详细信息" [ref=f8e497] [cursor=pointer]
+          - generic [ref=f8e504]:
+            - emphasis [ref=f8e505]: Built to replace manual operational workflows with autonomous AI execution
+            - text: . Handles real failure modes, retry logic, memory drift, tool call failures. Not a ...
+      - navigation [ref=f8e508]:
+        - heading "网页导航" [level=1] [ref=f8e509]
+        - text: "1"
+        - link "Page 2" [ref=f8e512] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=10&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAE
+          - text: "2"
+        - link "Page 3" [ref=f8e514] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=20&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAG
+          - text: "3"
+        - link "Page 4" [ref=f8e516] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=30&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAI
+          - text: "4"
+        - link "Page 5" [ref=f8e518] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=40&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAK
+          - text: "5"
+        - link "Page 6" [ref=f8e520] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=50&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAM
+          - text: "6"
+        - link "Page 7" [ref=f8e522] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=60&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAO
+          - text: "7"
+        - link "Page 8" [ref=f8e524] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=70&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAQ
+          - text: "8"
+        - link "Page 9" [ref=f8e526] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=80&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8tMDegQILRAS
+          - text: "9"
+        - heading [level=2] [ref=f8e528]:
+          - link "下一页" [ref=f8e529] [cursor=pointer]:
+            - /url: /search?q=site:github.com+open+source+AI+workflow+automation+Langflow+Flowise+n8n+Dify&newwindow=1&sca_esv=a4ac375be92b09b0&ei=jCaQavnOGoyMjuMP2NiziQE&start=10&sa=N&sstk=AS6-VmIKanqFFdDn-QG1e3LlIA6wNZwp67WK8q4VIPfCr1jPFeIPV7cBCtY1cTWVR1lT77ix7eyVDuKQIoir56BgPhKFKHDWII5WXQ&ved=2ahUKEwj5xNGB4cCWAxUMhmMGHVjsLBEQ8NMDegQILRAU
+      - navigation
+    - contentinfo [ref=f8e532]:
+      - heading "页脚链接" [level=1] [ref=f8e533]
+      - generic [ref=f8e537]:
+        - generic [ref=f8e541]:
+          - button "成都市 中国四川省 - 根据您的活动记录" [ref=f8e543] [cursor=pointer]:
+            - generic [ref=f8e544]: 成都市 中国四川省
+            - generic [ref=f8e546]:
+              - text: "-"
+              - generic [ref=f8e547]: 根据您的活动记录
+          - text: "-"
+          - button "更新位置信息" [ref=f8e549] [cursor=pointer]
+        - generic [ref=f8e552]:
+          - link "帮助" [ref=f8e553] [cursor=pointer]:
+            - /url: https://support.google.com/websearch/?p=ws_results_help&hl=zh-CN&fg=1
+          - link "发送反馈" [ref=f8e554] [cursor=pointer]:
+            - /url: "#"
+          - link "隐私权" [ref=f8e555] [cursor=pointer]:
+            - /url: https://policies.google.com/privacy?hl=zh-CN&fg=1
+          - link "条款" [ref=f8e556] [cursor=pointer]:
+            - /url: https://policies.google.com/terms?hl=zh-CN&fg=1

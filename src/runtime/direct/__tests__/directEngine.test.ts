@@ -447,6 +447,35 @@ test('runDirectChatCompletion keeps the first-pass text when there are no tool c
   assert.deepEqual(result.toolCalls, [])
 })
 
+test('runDirectChatCompletion can reject a premature final answer and continue', async () => {
+  let requests = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写入 Wiki' }],
+    tools: [{ type: 'function', function: { name: 'wiki' } }],
+    maxModelRequests: 3,
+    onText: () => {},
+    rejectFinalResponse: (_text, calls) => calls.length ? null : '必须先提交 Wiki',
+    executeTool: async () => ({ content: 'status: succeeded' }),
+    sendChatCompletion: async () => {
+      requests += 1
+      if (requests === 1) return sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: '我已经完成。' } }] }),
+        '[DONE]',
+      ])
+      if (requests === 2) return sseResponse([
+        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_wiki', function: { name: 'wiki', arguments: '{"action":"apply"}' } }] } }] }),
+        '[DONE]',
+      ])
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: 'Wiki 已写入。' } }] }),
+        '[DONE]',
+      ])
+    },
+  })
+  assert.equal(result.text, 'Wiki 已写入。')
+  assert.equal(requests, 3)
+})
+
 test('runDirectChatCompletion tells the next model pass to repair a failed terminal call', async () => {
   const sentMessages: any[][] = []
   const responses = [
@@ -802,6 +831,43 @@ test('runDirectChatCompletion stops after a matching successful batch tool call'
   })
   assert.equal(requests, 1)
   assert.equal(result.text, 'created-or-completed: wiki')
+})
+
+test('runDirectChatCompletion finalizes after a Wiki tool uses the last request', async () => {
+  let requests = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '更新 Wiki 入口' }],
+    tools: [
+      { type: 'function', function: { name: 'wiki' } },
+      { type: 'function', function: { name: 'wiki_context' } },
+    ],
+    maxModelRequests: 2,
+    finalizeAtModelRequestLimit: true,
+    allowedToolNamesAtModelRequestLimit: ['wiki', 'wiki_context'],
+    onText: () => {},
+    executeTool: async call => ({ content: `${call.function.name} 已执行`, status: 'succeeded' }),
+    sendChatCompletion: async request => {
+      requests += 1
+      if (requests === 1) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_context', function: { name: 'wiki_context', arguments: '{}' } }] } }] }),
+          '[DONE]',
+        ])
+      }
+      if (request.tools) {
+        return sseResponse([
+          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_wiki', function: { name: 'wiki', arguments: '{"action":"replace","apply":true}' } }] } }] }),
+          '[DONE]',
+        ])
+      }
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: 'Wiki 已更新' } }] }),
+        '[DONE]',
+      ])
+    },
+  })
+  assert.equal(result.text, 'Wiki 已更新')
+  assert.equal(requests, 3)
 })
 
 test('runDirectChatCompletion rejects non-write tools at the request limit', async () => {

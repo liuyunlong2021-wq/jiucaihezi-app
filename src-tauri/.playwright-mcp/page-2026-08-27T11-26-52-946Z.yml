@@ -1,0 +1,291 @@
+- generic [active] [ref=f3e1]:
+  - generic:
+    - generic:
+      - link "跳到主要内容" [ref=f3e2] [cursor=pointer]
+      - link "无障碍功能帮助" [ref=f3e3] [cursor=pointer]:
+        - /url: https://support.google.com/websearch/answer/181196?hl=zh-CN
+  - generic [ref=f3e8]:
+    - search [ref=f3e9]:
+      - generic [ref=f3e11]:
+        - link "Google 首页" [ref=f3e13] [cursor=pointer]:
+          - /url: https://www.google.com.hk/webhp?hl=zh-CN&sa=X&ved=0ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQPAgI
+        - generic [ref=f3e21]:
+          - generic [ref=f3e22]:
+            - combobox "搜索" [ref=f3e25]: site:github.com open source self-hosted AI knowledge base RAG site:github.com open source self-hosted AI knowledge base RAG
+            - generic [ref=f3e26]:
+              - button "清除" [ref=f3e28] [cursor=pointer]
+              - generic [ref=f3e33]:
+                - button "按语音搜索" [ref=f3e34] [cursor=pointer]
+                - button "按图搜索" [ref=f3e37] [cursor=pointer]
+          - button "搜索" [ref=f3e40] [cursor=pointer]
+    - generic [ref=f3e45]:
+      - button "设置" [ref=f3e47] [cursor=pointer]
+      - button "分享" [ref=f3e53] [cursor=pointer]
+      - generic [ref=f3e59]:
+        - button "Google 应用" [ref=f3e61] [cursor=pointer]
+        - link "登录" [ref=f3e66] [cursor=pointer]:
+          - /url: https://accounts.google.com/ServiceLogin?hl=zh-CN&passive=true&continue=https://www.google.com.hk/search%3Fq%3Dsite%253Agithub.com%2Bopen%2Bsource%2Bself-hosted%2BAI%2Bknowledge%2Bbase%2BRAG%26sei%3D-h6QaunpMsDBjuMP8vzRuAY&ec=futura_srp_og_si_72236_p
+  - generic [ref=f3e68]:
+    - navigation [ref=f3e74]:
+      - generic [ref=f3e80]:
+        - list [ref=f3e81]:
+          - listitem [ref=f3e82]:
+            - link "全部" [disabled] [ref=f3e83]
+          - listitem [ref=f3e86]:
+            - link "视频" [ref=f3e87] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=7&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhsRSmp6-hFETunnF8nx8jMaSEDa4yfRi0-C_1y8rWAUUsf15wA9vj4Vid7BH7SRh8xEpZbw4gBIXqph6m3V8kUyNmKELzFAEO-QAl78SBin44AJpXQx6FZDrdRVj2gufc6wK_R0lHml53RtQViCJ_vj5tOpR&q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&sa=X&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQtKgLegQIFhAB
+          - listitem [ref=f3e90]:
+            - link "图片" [ref=f3e91] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=2&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhsRSmp6-hFETunnF8nx8jMaSEDa4yfRi0-C_1y8rWAUUsf15wA9vj4Vid7BH7SRh8xEpZbw4gBIXqph6m3V8kUyNmKELzFAEO-QAl78SBin44AJpXQx6FZDrdRVj2gufc6wK_R0lHml53RtQViCJ_vj5tOpR&q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&sa=X&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQtKgLegQIFRAB
+          - listitem [ref=f3e94]:
+            - link "短视频" [ref=f3e95] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=39&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhsRSmp6-hFETunnF8nx8jMaSEDa4yfRi0-C_1y8rWAUUsf15wA9vj4Vid7BH7SRh8xEpZbw4gBIXqph6m3V8kUyNmKELzFAEO-QAl78SBin44AJpXQx6FZDrdRVj2gufc6wK_R0lHml53RtQViCJ_vj5tOpR&q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&sa=X&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQs6gLegQIFBAB
+          - listitem [ref=f3e98]:
+            - link "新闻" [ref=f3e99] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&tbm=nws&source=lnms&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhsRSmp6-hFETunnF8nx8jMaSEDa4yfRi0-C_1y8rWAUUsf15wA9vj4Vid7BH7SRh8xEpZbw4gBIXqph6m3V8kUyNmKELzFAEO-QAl78SBin44AJpXQx6FZDrdRVj2gufc6wK_R0lHml53RtQViCJ_vj5tOpR&sa=X&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ0pQJegQIExAB
+          - listitem [ref=f3e102]:
+            - link "图书" [ref=f3e103] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&udm=36&source=lnms&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhsRSmp6-hFETunnF8nx8jMaSEDa4yfRi0-C_1y8rWAUUsf15wA9vj4Vid7BH7SRh8xEpZbw4gBIXqph6m3V8kUyNmKELzFAEO-QAl78SBin44AJpXQx6FZDrdRVj2gufc6wK_R0lHml53RtQViCJ_vj5tOpR&sa=X&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ0pQJegQIEhAB
+          - listitem [ref=f3e106]:
+            - link "网页" [ref=f3e107] [cursor=pointer]:
+              - /url: /search?newwindow=1&sca_esv=a4ac375be92b09b0&udm=web&fbs=ABfTbFUhNGvvPEUFOvrsPMHwBXgO5pJ2ROERAFrb15qpZFNMhsRSmp6-hFETunnF8nx8jMaSEDa4yfRi0-C_1y8rWAUUsf15wA9vj4Vid7BH7SRh8xEpZbw4gBIXqph6m3V8kUyNmKELzFAEO-QAl78SBin44AJpXQx6FZDrdRVj2gufc6wK_R0lHml53RtQViCJ_vj5tOpR&q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&sa=X&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQs6gLegQIERAB
+          - listitem [ref=f3e110]:
+            - button [ref=f3e111] [cursor=pointer]:
+              - generic "更多过滤条件" [ref=f3e112]: 更多
+        - button "工具" [ref=f3e119] [cursor=pointer]
+    - heading "搜索结果" [level=1] [ref=f3e126]
+    - main [ref=f3e132]:
+      - generic [ref=f3e136]:
+        - generic [ref=f3e139]:
+          - heading "Web results" [level=2] [ref=f3e140]
+          - generic [ref=f3e141]:
+            - generic [ref=f3e144]:
+              - 'link "Inquisitive: A personal self-hosted knowledge base with ... GitHub https://github.com › kanishka-linux › inquisi..." [ref=f3e146] [cursor=pointer]':
+                - /url: /goto?url=CAESZQHrOzAVx4AvNCzpr1gFA-1KJTqjzVM8CrIozLrKyON1mGriuGyHPxDvZo22jD2tIrHwgjdLIUnr3fwAZSfGwXxCkFv10AM9zjrLejT-Lhh-dTFGhPWQx5pFjuSa1qWShZ_If9Dg
+                - 'heading "Inquisitive: A personal self-hosted knowledge base with ..." [level=3] [ref=f3e147]'
+                - generic [ref=f3e153]:
+                  - generic [ref=f3e154]: GitHub
+                  - generic [ref=f3e156]: https://github.com › kanishka-linux › inquisi...
+              - generic [ref=f3e158]:
+                - generic [ref=f3e159]: ·
+                - link "翻译此页" [ref=f3e160] [cursor=pointer]:
+                  - /url: https://translate.google.com/translate?u=https://github.com/kanishka-linux/inquisitive&hl=zh-CN&sl=en&tl=zh-CN&client=search
+              - button "关于这条结果的详细信息" [ref=f3e165] [cursor=pointer]
+            - generic [ref=f3e172]:
+              - text: Inquisitive is a fully
+              - emphasis [ref=f3e173]: self-hosted LLM/RAG based application
+              - text: that allows you to create your own personal knowledge base which you can easily search and organize ...
+        - generic [ref=f3e177]:
+          - generic [ref=f3e180]:
+            - link "RAGFlow is a leading open-source Retrieval-Augmented ... GitHub https://github.com › infiniflow › ragflow" [ref=f3e182] [cursor=pointer]:
+              - /url: /goto?url=CAESXQHrOzAVjUbuO1TyBLWn9SXUvxoqWtttEdyMF-QuaoOPSrE_5Rgm9_riInajLGq4mAc59bWwSvwp2qyiozyfli8sllO5Bqrct5_yQO8mWuThG3xhMj_w0ffDRb5sOg
+              - heading "RAGFlow is a leading open-source Retrieval-Augmented ..." [level=3] [ref=f3e183]
+              - generic [ref=f3e189]:
+                - generic [ref=f3e190]: GitHub
+                - generic [ref=f3e192]: https://github.com › infiniflow › ragflow
+            - generic [ref=f3e194]:
+              - generic [ref=f3e195]: ·
+              - link "翻译此页" [ref=f3e196] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/infiniflow/ragflow&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e201] [cursor=pointer]
+          - generic [ref=f3e208]:
+            - text: RAGFlow is a leading
+            - emphasis [ref=f3e209]: open
+            - text: "-"
+            - emphasis [ref=f3e210]: source
+            - text: Retrieval-Augmented Generation (
+            - emphasis [ref=f3e211]: RAG
+            - text: ) engine that fuses cutting-edge
+            - emphasis [ref=f3e212]: RAG
+            - text: with Agent capabilities to create a superior ...
+        - generic [ref=f3e216]:
+          - generic [ref=f3e219]:
+            - link "2dogsandanerd/Knowledge-Base-Self-Hosting-Kit ... GitHub https://github.com › Knowledge-Base-Self-H..." [ref=f3e221] [cursor=pointer]:
+              - /url: /goto?url=CAESeAHrOzAV0aCtVxX36KRdaCjVVtwjVhU_aoXrL4kkHQBBVG7HB6hzD6HRUxkptoJGrjPjfw0kY770Omc9ItIFxsisMb-3EkaCX2VZrtFCznTQvirLdfM4414tKabs2z3U7p4j-h1zAX4HrIqhcVt-TByIEFMlPv_5lA
+              - heading "2dogsandanerd/Knowledge-Base-Self-Hosting-Kit ..." [level=3] [ref=f3e222]
+              - generic [ref=f3e228]:
+                - generic [ref=f3e229]: GitHub
+                - generic [ref=f3e231]: https://github.com › Knowledge-Base-Self-H...
+            - generic [ref=f3e233]:
+              - generic [ref=f3e234]: ·
+              - link "翻译此页" [ref=f3e235] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/2dogsandanerd/Knowledge-Base-Self-Hosting-Kit&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e240] [cursor=pointer]
+          - generic [ref=f3e247]:
+            - text: A production-ready,
+            - emphasis [ref=f3e248]: self-hosted RAG memory layer
+            - text: that pairs with local LLMs, chains, and autonomous agents. ChromaDB + Docling powers ingestion of everything ...
+        - generic [ref=f3e252]:
+          - generic [ref=f3e255]:
+            - link "volcengine/OpenViking - The Context Database for AI Agents GitHub https://github.com › volcengine › OpenViking" [ref=f3e257] [cursor=pointer]:
+              - /url: /goto?url=CAESYAHrOzAVOF9XcsaAijHWslfPvE8avzPpVcrb-mOWxSlgUZOgy8tdmfbS-AevWndpDQC79xZd8uP9hO8W_m6daUIVOBZ9qgZi8MDRmLWj_1kmILovMQsxpfmMg2BDaCgT4g
+              - heading "volcengine/OpenViking - The Context Database for AI Agents" [level=3] [ref=f3e258]
+              - generic [ref=f3e264]:
+                - generic [ref=f3e265]: GitHub
+                - generic [ref=f3e267]: https://github.com › volcengine › OpenViking
+            - generic [ref=f3e269]:
+              - generic [ref=f3e270]: ·
+              - link "翻译此页" [ref=f3e271] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/volcengine/OpenViking&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e276] [cursor=pointer]
+          - generic [ref=f3e282]:
+            - generic [ref=f3e283]: 11小时前 —
+            - generic [ref=f3e284]:
+              - emphasis [ref=f3e285]: OpenViking is an open-source context database for AI agents
+              - text: . It stores memories, resources, and skills as one virtual filesystem under the ...
+        - generic [ref=f3e289]:
+          - generic [ref=f3e292]:
+            - link "GitHub - HKUDS/RAG-Anything GitHub https://github.com › hkuds › rag-anything" [ref=f3e294] [cursor=pointer]:
+              - /url: /goto?url=CAESXQHrOzAVp6j8JykAjIiRrCpQqHw3GcC4POU7csd47zNZw7Ek7CW2PwVhShWdsJDObQLYbKmNwwfGHmhl4eryUTUkLgRy-T2l2XgQJT5WZPV9HSrsPTCp96K24Ki_8A
+              - heading "GitHub - HKUDS/RAG-Anything" [level=3] [ref=f3e295]
+              - generic [ref=f3e301]:
+                - generic [ref=f3e302]: GitHub
+                - generic [ref=f3e304]: https://github.com › hkuds › rag-anything
+            - generic [ref=f3e306]:
+              - generic [ref=f3e307]: ·
+              - link "翻译此页" [ref=f3e308] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/hkuds/rag-anything&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e313] [cursor=pointer]
+          - generic [ref=f3e320]:
+            - text: Unlike conventional
+            - emphasis [ref=f3e321]: RAG
+            - text: approaches that struggle with non-textual elements, our all-in-one system delivers comprehensive multimodal retrieval capabilities.
+        - generic [ref=f3e325]:
+          - generic [ref=f3e328]:
+            - 'link "joungminsung/OpenDocuments: Self-hosted RAG platform ... GitHub https://github.com › joungminsung › opend..." [ref=f3e330] [cursor=pointer]':
+              - /url: /goto?url=CAESZQHrOzAVkR-XfKuschVLNZdcXAr0I0V4CfeE80aXfz1vvsGDFXBcb6-LfQob6__4uz21hhP_9oIreW-7SjSDy7VPz7P5JA0FoG3NSb8XF9lYNUrRsu-72GG4fANZqXv8rhjSTZjJ
+              - 'heading "joungminsung/OpenDocuments: Self-hosted RAG platform ..." [level=3] [ref=f3e331]'
+              - generic [ref=f3e337]:
+                - generic [ref=f3e338]: GitHub
+                - generic [ref=f3e340]: https://github.com › joungminsung › opend...
+            - generic [ref=f3e342]:
+              - generic [ref=f3e343]: ·
+              - link "翻译此页" [ref=f3e344] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/joungminsung/opendocuments&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e349] [cursor=pointer]
+          - generic [ref=f3e356]:
+            - text: OpenDocuments is an open source,
+            - emphasis [ref=f3e357]: self-hosted RAG
+            - text: (Retrieval-Augmented Generation) platform that turns scattered company documents into an AI-searchable ...
+        - generic [ref=f3e361]:
+          - generic [ref=f3e364]:
+            - 'link "the-open-agent/openagent: ⚡️next-generation personal AI ... GitHub https://github.com › the-open-agent › opena..." [ref=f3e366] [cursor=pointer]':
+              - /url: /goto?url=CAESYwHrOzAVFPjxWIBTLb2MUbhtKejOWZbJcQ0mURQM6eVKOvPk6hxpSsjolY1DoNGCf6pZrWeyM_LwKKB5OtRCz9w6wDeNV6CbtVUdOf4H-Lr05iP8qCg7Mw9BSFTsRbJTbm_Tng
+              - 'heading "the-open-agent/openagent: ⚡️next-generation personal AI ..." [level=3] [ref=f3e367]'
+              - generic [ref=f3e373]:
+                - generic [ref=f3e374]: GitHub
+                - generic [ref=f3e376]: https://github.com › the-open-agent › opena...
+            - generic [ref=f3e378]:
+              - generic [ref=f3e379]: ·
+              - link "翻译此页" [ref=f3e380] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/the-open-agent/openagent&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e385] [cursor=pointer]
+          - generic [ref=f3e392]:
+            - text: OpenAgent is an open-
+            - emphasis [ref=f3e393]: source personal AI assistant
+            - text: that brings together powerful LLMs, your own knowledge base, and autonomous agent loops — all in one ...
+        - generic [ref=f3e397]:
+          - generic [ref=f3e400]:
+            - 'link "shivama205/DocBrain: Self-hosted RAG framework ... GitHub https://github.com › shivama205 › DocBrain" [ref=f3e402] [cursor=pointer]':
+              - /url: /goto?url=CAESXgHrOzAV77ouDk24QpWX4ZftjQUgoYMrlfNF9a6D2SgbQ3YaeV2zB2EAB1uwT2PfWeNP2QN3kNCkP1r56jSVXu36hJhbFY4W1VfayIYP0bGi9ymPD_fSbYKmZtmqRsE
+              - 'heading "shivama205/DocBrain: Self-hosted RAG framework ..." [level=3] [ref=f3e403]'
+              - generic [ref=f3e409]:
+                - generic [ref=f3e410]: GitHub
+                - generic [ref=f3e412]: https://github.com › shivama205 › DocBrain
+            - generic [ref=f3e414]:
+              - generic [ref=f3e415]: ·
+              - link "翻译此页" [ref=f3e416] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/shivama205/DocBrain&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e421] [cursor=pointer]
+          - generic [ref=f3e428]:
+            - emphasis [ref=f3e429]: Self-hosted RAG
+            - text: for teams that can't send data to third-party APIs. Built-in RBAC, multi-LLM support, and natural language queries over your tabular data. CI ...
+        - generic [ref=f3e433]:
+          - generic [ref=f3e436]:
+            - link "Tiledesk GitHub https://github.com › tiledesk" [ref=f3e438] [cursor=pointer]:
+              - /url: /goto?url=CAESUwHrOzAVUOqoWGVwj9Hx4R6jHtH_LPqoIIn-Qf9NRXhEa3VxUqbQjA-FX3Q9h5Ev-bMrSqHsOxqN1ksWfAiMvl-DImoME_bl-hAU4o5-7izBsbED
+              - heading "Tiledesk" [level=3] [ref=f3e439]
+              - generic [ref=f3e445]:
+                - generic [ref=f3e446]: GitHub
+                - generic [ref=f3e448]: https://github.com › tiledesk
+            - generic [ref=f3e450]:
+              - generic [ref=f3e451]: ·
+              - link "翻译此页" [ref=f3e452] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/tiledesk&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e457] [cursor=pointer]
+          - generic [ref=f3e464]:
+            - emphasis [ref=f3e465]: Tiledesk
+            - text: is a multi-tenant open-source platform to automate your company with Agentic-AI applications on a SAAS model. Tiledesk offers all you need to build ...
+        - generic [ref=f3e469]:
+          - generic [ref=f3e472]:
+            - link "knowledge-base · GitHub Topics GitHub https://github.com › topics › knowledge-base" [ref=f3e474] [cursor=pointer]:
+              - /url: /goto?url=CAESYAHrOzAVpFm_6wXxVrXAtNPHa1PdVWLec0KcDI1i0Ln_stiACYk3OJx_aGxezUvMAGPXXDe_rAc2ud7p1ClpVjsQkabP5naYV_RkfU9Q73Rwdic9X2h-_nPThGNXmuaNAQ
+              - heading "knowledge-base · GitHub Topics" [level=3] [ref=f3e475]
+              - generic [ref=f3e481]:
+                - generic [ref=f3e482]: GitHub
+                - generic [ref=f3e484]: https://github.com › topics › knowledge-base
+            - generic [ref=f3e486]:
+              - generic [ref=f3e487]: ·
+              - link "翻译此页" [ref=f3e488] [cursor=pointer]:
+                - /url: https://translate.google.com/translate?u=https://github.com/topics/knowledge-base&hl=zh-CN&sl=en&tl=zh-CN&client=search
+            - button "关于这条结果的详细信息" [ref=f3e493] [cursor=pointer]
+          - generic [ref=f3e500]:
+            - text: Memory layer for
+            - emphasis [ref=f3e501]: AI
+            - text: Agents. Replace complex
+            - emphasis [ref=f3e502]: RAG
+            - text: pipelines with a serverless, single-file memory layer. Give your agents instant retrieval and long-term memory.
+      - navigation [ref=f3e505]:
+        - heading "网页导航" [level=1] [ref=f3e506]
+        - text: "1"
+        - link "Page 2" [ref=f3e509] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=10&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAE
+          - text: "2"
+        - link "Page 3" [ref=f3e511] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=20&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAG
+          - text: "3"
+        - link "Page 4" [ref=f3e513] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=30&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAI
+          - text: "4"
+        - link "Page 5" [ref=f3e515] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=40&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAK
+          - text: "5"
+        - link "Page 6" [ref=f3e517] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=50&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAM
+          - text: "6"
+        - link "Page 7" [ref=f3e519] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=60&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAO
+          - text: "7"
+        - link "Page 8" [ref=f3e521] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=70&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAQ
+          - text: "8"
+        - link "Page 9" [ref=f3e523] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=80&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAS
+          - text: "9"
+        - link "Page 10" [ref=f3e525] [cursor=pointer]:
+          - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=90&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8tMDegQILBAU
+          - text: "10"
+        - heading [level=2] [ref=f3e527]:
+          - link "下一页" [ref=f3e528] [cursor=pointer]:
+            - /url: /search?q=site:github.com+open+source+self-hosted+AI+knowledge+base+RAG&newwindow=1&sca_esv=a4ac375be92b09b0&ei=-x6QasfJC46q4-EPtNXFoA0&start=10&sa=N&sstk=AS6-VmJC7hfyahLX2kTM3NaWLRF9p72E9u0tujeGXRxgJLL1iQQcpJ80g04e9xiyE97TFYRMvFT4Cmmx7d4-E6GHQlnf18c09wAXXA&ved=2ahUKEwiHs_Hl2cCWAxUO1TgGHbRqEdQQ8NMDegQILBAW
+      - navigation
+    - contentinfo [ref=f3e531]:
+      - heading "页脚链接" [level=1] [ref=f3e532]
+      - generic [ref=f3e536]:
+        - generic [ref=f3e540]:
+          - button "成都市 中国四川省 - 是根据您的 IP 地址推断出来的" [ref=f3e542] [cursor=pointer]:
+            - generic [ref=f3e543]: 成都市 中国四川省
+            - generic [ref=f3e545]:
+              - text: "-"
+              - generic [ref=f3e546]: 是根据您的 IP 地址推断出来的
+          - text: "-"
+          - button "更新位置信息" [ref=f3e548] [cursor=pointer]
+        - generic [ref=f3e551]:
+          - link "帮助" [ref=f3e552] [cursor=pointer]:
+            - /url: https://support.google.com/websearch/?p=ws_results_help&hl=zh-CN&fg=1
+          - link "发送反馈" [ref=f3e553] [cursor=pointer]:
+            - /url: "#"
+          - link "隐私权" [ref=f3e554] [cursor=pointer]:
+            - /url: https://policies.google.com/privacy?hl=zh-CN&fg=1
+          - link "条款" [ref=f3e555] [cursor=pointer]:
+            - /url: https://policies.google.com/terms?hl=zh-CN&fg=1
