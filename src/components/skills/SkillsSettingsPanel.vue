@@ -13,6 +13,7 @@ import {
   type ScanDirectoryFilterMode,
 } from '@/utils/skillsSettingsViewModel'
 import { confirmAction } from '@/utils/confirmAction'
+import { loadWebSkillCatalog, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
 
 const store = useSkillsManageStore()
 const {
@@ -32,6 +33,7 @@ const showDirectoryDialog = ref(false)
 const platformDialogTarget = ref<AgentWithStatus | null | undefined>(undefined)
 const githubPatInput = ref('')
 const aiDraft = ref<AiSettings>({ provider: '', apiKey: '', model: '', apiUrl: '' })
+const bundledSkills = ref<WebSkillCatalogEntry[]>([])
 
 const filteredDirectories = computed(() =>
   filterScanDirectories(scanDirectories.value, {
@@ -49,7 +51,10 @@ async function load() {
       store.loadGitHubPat(),
       store.loadAiSettings(),
       store.loadDatabasePath(),
-    ])
+      loadWebSkillCatalog().catch(() => []),
+    ]).then(([, , , , , catalog]) => {
+      bundledSkills.value = catalog || []
+    })
     githubPatInput.value = githubPat.value
     aiDraft.value = { ...aiSettings.value }
   } catch {
@@ -211,6 +216,27 @@ onMounted(() => {
             </div>
           </article>
           <div v-if="filteredDirectories.length === 0" class="state">暂无匹配 scan directory</div>
+        </div>
+      </section>
+
+      <section class="panel wide">
+        <header>
+          <div>
+            <h4>韭菜盒子内置 Skill</h4>
+            <p>来自应用内置的 public/skills，只读展示，可在对话中用 @ 选择。</p>
+          </div>
+          <span class="pill">{{ bundledSkills.length }} 个</span>
+        </header>
+        <div class="rows">
+          <article v-for="skill in bundledSkills" :key="skill.id" class="row compact">
+            <div>
+              <strong>{{ skill.name }}</strong>
+              <small>{{ skill.description || '暂无描述' }}</small>
+              <small>public/skills/{{ skill.id }}/SKILL.md</small>
+            </div>
+            <span class="pill">内置</span>
+          </article>
+          <div v-if="bundledSkills.length === 0" class="state">暂无可用的内置 Skill</div>
         </div>
       </section>
 

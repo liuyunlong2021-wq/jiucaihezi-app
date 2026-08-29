@@ -69,6 +69,7 @@ import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
+import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -330,14 +331,29 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
     { type: 'tool', id: 'terminal', display: 'Terminal', description: '执行终端命令', icon: 'terminal' },
   ]
-  const skills = agentStore.getCustomSkills()
-    .filter(skill => skill.enabled !== false)
-    .map(skill => ({
+  const bundledSkills = await loadWebSkillCatalog().catch(() => [])
+  const skillOptions = [
+    ...bundledSkills.map(skill => ({
       type: 'skill' as const,
       display: skill.name,
-      description: skill.description,
+      description: skill.description || '韭菜盒子内置 Skill',
       name: skill.name,
-    }))
+    })),
+    ...agentStore.getCustomSkills()
+      .filter(skill => skill.enabled !== false)
+      .map(skill => ({
+        type: 'skill' as const,
+        display: skill.name,
+        description: skill.description,
+        name: skill.name,
+      })),
+  ]
+  const seenSkillNames = new Set<string>()
+  const skills = skillOptions.filter(skill => {
+    if (seenSkillNames.has(skill.name)) return false
+    seenSkillNames.add(skill.name)
+    return true
+  })
   const owner = projectOwner.value
   const resources = !owner ? [] : await (query.trim()
     ? files.searchPaths(owner, query.trim(), 40)

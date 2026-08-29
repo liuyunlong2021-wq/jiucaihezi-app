@@ -6,13 +6,21 @@ const memoryWorkbench = readFileSync('src/components/memory/MemoryWorkbench.vue'
 const centralPanel = readFileSync('src/components/skills/CentralSkillsPanel.vue', 'utf8')
 const webPanel = readFileSync('src/components/skills/WebSkillPanel.vue', 'utf8')
 const builtInList = readFileSync('src/components/skills/BuiltInSkillList.vue', 'utf8')
+const settingsPanel = readFileSync('src/components/skills/SkillsSettingsPanel.vue', 'utf8')
 const scanner = readFileSync('src-tauri/src/skills/scanner.rs', 'utf8')
 const skillsDb = readFileSync('src-tauri/src/skills/db.rs', 'utf8')
 
 test('memory workbench reads installed Skills from the shared store', () => {
   assert.match(memoryWorkbench, /agentStore\.getCustomSkills\(\)/)
   assert.match(memoryWorkbench, /agentStore\.refreshSkills\(\)/)
+  assert.match(memoryWorkbench, /loadWebSkillCatalog\(\)/)
   assert.doesNotMatch(memoryWorkbench, /openCodeSkills|mergeCreativeSkillCatalog/)
+})
+
+test('settings exposes the bundled public Skills without copying them into central storage', () => {
+  assert.match(settingsPanel, /loadWebSkillCatalog\(\)/)
+  assert.match(settingsPanel, /public\/skills\/\{\{ skill\.id \}\}\/SKILL\.md/)
+  assert.match(settingsPanel, /韭菜盒子内置 Skill/)
 })
 
 test('Desktop keeps the bundled list while Web exposes only user-installed Skills', () => {
