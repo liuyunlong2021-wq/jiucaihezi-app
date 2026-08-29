@@ -13,6 +13,7 @@ from src.models.mapping import (
     is_audio_model,
     is_ai_app_model,
     normalize_custom_ai_app_models,
+    get_ai_app_directory,
 )
 from src.models.capabilities import get_official_capability
 
@@ -70,6 +71,17 @@ def test_ai_app_detection():
     assert is_ai_app_model("rh-aiapp-voice-clone")
     assert not is_ai_app_model("rh-pro-image")  # Has direct endpoint
     assert not is_ai_app_model("rh-seedance2-text-video")
+
+
+def test_minimax_h3_ai_apps_share_generic_billing_model():
+    expected = {
+        "2093604127250149377", "2093571735550521345", "2093579373894000642",
+        "2093654136997900290", "2093651661213491202", "2093662476146667522",
+    }
+    directory = {entry["webappId"]: entry for entry in get_ai_app_directory()}
+    for webapp_id in expected:
+        assert directory[webapp_id]["billingModel"] == "rh-aiapp"
+        assert directory[webapp_id]["outputType"] == "video"
 
 
 def test_get_rh_endpoint_text_to_image():
