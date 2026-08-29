@@ -77,6 +77,7 @@ def test_minimax_h3_ai_apps_share_generic_billing_model():
     expected = {
         "2093604127250149377", "2093571735550521345", "2093579373894000642",
         "2093654136997900290", "2093651661213491202", "2093662476146667522",
+        "2093706819385516034",
     }
     directory = {entry["webappId"]: entry for entry in get_ai_app_directory()}
     for webapp_id in expected:

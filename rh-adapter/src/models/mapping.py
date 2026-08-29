@@ -438,6 +438,7 @@ def get_ai_app_directory() -> list[dict[str, str]]:
             ("2093654136997900290", "Minimax-h3 多参双图"),
             ("2093651661213491202", "Minimax-h3 多参-4图"),
             ("2093662476146667522", "Minimax-h3 多参3图"),
+            ("2093706819385516034", "Minimax-h3多参5图"),
         )
     )
     return apps
