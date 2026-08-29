@@ -1082,3 +1082,8 @@
 - Direct Runtime 记录真实 HTTP 请求次数、逐请求耗时、工具轮数、工具耗时和总耗时，不记录正文或参数；工作台运行步骤显示工具耗时。Cha Skill 改为一次提交初始短词及同轮读取独立证据页。
 - 红灯已在旧实现确认；定向 `158/158`、Cha Skill `7/7`、完整 Node focused `1129/1129`、Rust `402 passed / 1 ignored`、TypeScript、定向 lint 和差异检查通过。
 - 当前项目三词本地基准读取 `363 -> 121` 次，中位 `48.66 ms -> 24.27 ms`，约 `2.0x`。当前正式 App 为旧版 `2.1.33`；新构建上的三次 `gpt-5.6-sol` / `jiucaihezi` 真实前向未执行，不登记为端到端性能验收通过。
+## [2026-08-29] 生产验收 | RH AI App 统一模型注册与部署
+
+- 6 个 Minimax-h3 RunningHub AI App 通过 `rh-aiapp` 通用模型接入，不新增独立模型名或渠道 ID。
+- 服务器部署固定为 `/opt/jiucai-repo` 拉取 `main`、稀疏检出 `rh-adapter`、复制到 `/opt/rh-adapter`，再执行 `docker compose up -d --force-recreate --build rh-adapter`；`.env` 的 `RH_AI_APP_WHITELIST` 必须包含新 `webappId`。
+- 首次部署因在 `/opt/rh-adapter` 执行 `cp rh-adapter/*` 而失败，修正复制目录和白名单后，容器内映射、公网 `app-directory`（11 项）及创作面板显示均已确认。

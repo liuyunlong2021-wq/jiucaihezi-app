@@ -107,6 +107,8 @@
 
 ## 已验证 / 未验证
 
+- **RH AI App 新增流程已完成真实验收（2026-08-29）。** 6 个 Minimax-h3 `webappId` 已加入 `rh-aiapp` 通用目录；服务器必须从 `/opt/jiucai-repo` 复制 `rh-adapter` 后执行 `docker compose up -d --force-recreate --build`，并将 ID 加入 `RH_AI_APP_WHITELIST`。公网 `app-directory` 已返回 11 项，创作面板已显示 6 个新应用。详见 [[运维/模型注册]]。
+
 - **RH Seedance 2.5 双模型已完成本地接入。** NewAPI 模型名为 `rh-seedance25-no-video-ref`（输入 `$80/1M`）和 `rh-seedance25-with-video-ref`（输入 `$50/1M`）；两者固定 `native1080p`，有参考视频形态要求 `1-10` 个视频。Seedance 2.0、Fast、Mini 三套共 9 个旧 RH 模型已退出可选目录。RH `41/41`、focused `1087/1087`、TypeScript 和差异检查通过；服务器部署、生产并发与真实账单待验收。见 [[开发/RH Seedance 2.5双模型接入与旧模型退役TDD-2026-08-18]]。
 
 - `v2.1.9` 已发布：`main` 与 tag 指向 `f302c251`；Web Production 正式域名返回 HTTP 200；GitHub Actions `30904082094` 的 macOS ARM、macOS Intel、Windows x64 和发布清单均成功；生产 `latest.json` 返回 `2.1.9`。
