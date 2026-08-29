@@ -414,7 +414,7 @@ def get_rh_site(model: str) -> str:
 
 
 def get_ai_app_directory() -> list[dict[str, str]]:
-    return [
+    apps = [
         {
             "webappId": str(entry["webapp_id"]),
             "label": str(entry.get("label") or model_id),
@@ -424,6 +424,23 @@ def get_ai_app_directory() -> list[dict[str, str]]:
         for model_id, entry in MODEL_MAP.items()
         if entry.get("endpoint") is None and entry.get("webapp_id")
     ]
+    apps.extend(
+        {
+            "webappId": webapp_id,
+            "label": label,
+            "outputType": "video",
+            "billingModel": "rh-aiapp",
+        }
+        for webapp_id, label in (
+            ("2093604127250149377", "Minimax-h3 文生视频"),
+            ("2093571735550521345", "Minimax-h3 首帧图生视频"),
+            ("2093579373894000642", "Minimax-h3 首尾帧"),
+            ("2093654136997900290", "Minimax-h3 多参双图"),
+            ("2093651661213491202", "Minimax-h3 多参-4图"),
+            ("2093662476146667522", "Minimax-h3 多参3图"),
+        )
+    )
+    return apps
 
 
 def get_ai_app_registration(webapp_id: str) -> dict[str, str] | None:

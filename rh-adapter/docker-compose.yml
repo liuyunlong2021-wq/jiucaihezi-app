@@ -10,5 +10,6 @@ services:
       - RUNNINGHUB_API_KEY=${RUNNINGHUB_API_KEY}
       - RUNNINGHUB_GLOBAL_API_KEY=${RUNNINGHUB_GLOBAL_API_KEY:-}
       - RH_CUSTOM_AI_APPS=${RH_CUSTOM_AI_APPS:-}
+      - RH_AI_APP_WHITELIST=${RH_AI_APP_WHITELIST:-}
       - LOG_LEVEL=debug
     restart: unless-stopped
