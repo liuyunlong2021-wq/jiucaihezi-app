@@ -830,6 +830,11 @@ export async function fetchAiAppDirectory(): Promise<AiAppDirectoryEntry[]> {
 export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
   const mediaTypes = ['IMAGE', 'VIDEO', 'AUDIO']
   const isMedia = mediaTypes.includes(node.fieldType)
+  const fieldName = String(node.fieldName || '').toLowerCase()
+  const isRatio = ['ratio', 'aspect_ratio', 'aspectratio'].includes(fieldName)
+  const options = node.options?.length
+    ? node.options
+    : isRatio ? ['16:9', '9:16'] : undefined
   const kind: CreationFieldSpec['kind'] =
     isMedia ? (node.fieldType.toLowerCase() as 'image' | 'video' | 'audio')
       : node.fieldType === 'LIST' ? 'select'
@@ -842,7 +847,7 @@ export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
     kind,
     // ponytail: 媒体字段清空默认值（hash 对用户无意义，需要用户提供本地路径或画布引用）
     defaultValue: isMedia ? '' : node.fieldValue,
-    options: node.options?.map((o: any) => ({ label: String(o), value: o })),
+    options: options?.map((o: any) => ({ label: String(o), value: o })),
     required: false,
   }
 }

@@ -1,11 +1,20 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { addFiles, clearFiles, cpState, switchModel, switchTask } from '../useCreation'
+import { addFiles, aiAppNodeToField, clearFiles, cpState, switchModel, switchTask } from '../useCreation'
 
 function makeFile(name: string, type: string): File {
   return new File(['fixture'], name, { type })
 }
+
+test('AI App ratio nodes without upstream options still expose standard video ratios', () => {
+  const field = aiAppNodeToField({
+    nodeId: '1', nodeName: 'Minimax-h3', fieldName: 'aspect_ratio',
+    fieldValue: '16:9', fieldType: 'LIST', description: '比例',
+  })
+  assert.deepEqual(field.options?.map(option => option.value), ['16:9', '9:16'])
+  assert.equal(field.defaultValue, '16:9')
+})
 
 test('addFiles only accepts file MIME groups supported by the selected model', () => {
   switchTask('video')
