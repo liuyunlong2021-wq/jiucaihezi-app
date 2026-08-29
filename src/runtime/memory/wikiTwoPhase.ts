@@ -47,52 +47,6 @@ const EMPTY_METRICS: DirectRunMetrics = {
   totalDurationMs: 0,
 }
 
-function normalizeWikiPath(path: string): string {
-  return path
-    .replace(/^[`./]+/, '')
-    .replace(/^wiki\//, '')
-    .replace(/\\/g, '/')
-}
-
-function explicitTaskPaths(task: string): Set<string> {
-  return new Set(
-    [...task.matchAll(/(?:wiki\/)?[\p{L}\p{N}_-]+(?:\/[\p{L}\p{N}_.-]+)*\.md/gu)].map(match =>
-      normalizeWikiPath(match[0]!),
-    ),
-  )
-}
-
-function indexedPaths(sourceText: string): Set<string> | null {
-  const paths = new Set<string>()
-  let parsed = 0
-  for (const chunk of sourceText.split(/\n\n(?=\{)/u)) {
-    let value: any
-    try {
-      value = JSON.parse(chunk)
-    } catch {
-      continue
-    }
-    const entries = [value?.entry, ...(Array.isArray(value?.sources) ? value.sources : [])].filter(
-      item => item && typeof item === 'object',
-    )
-    for (const entry of entries) {
-      parsed += 1
-      const sourcePath = normalizeWikiPath(String(entry.path || ''))
-      const base = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : ''
-      const content = String(entry.content || '')
-      for (const match of content.matchAll(/\[\[([^\]|#]+)|\]\(([^)#]+)(?:#[^)]*)?\)/g)) {
-        const raw = String(match[1] || match[2] || '').trim()
-        if (!raw || raw.startsWith('http')) continue
-        const target = normalizeWikiPath(raw)
-        const resolved = target.includes('/') ? target : `${base}/${target}`.replace(/^\//, '')
-        paths.add(resolved.endsWith('.md') ? resolved : `${resolved}.md`)
-        if (!resolved.endsWith('/index.md')) paths.add(`${resolved.replace(/\.md$/i, '')}/index.md`)
-      }
-    }
-  }
-  return parsed && paths.size ? paths : null
-}
-
 async function requestJson(input: {
   messages: DirectApiMessage[]
   sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
@@ -127,7 +81,6 @@ export async function runWikiTwoPhase(input: {
     requiresMutation: /(?:写入|创建|更新|填充|移动|整理|删除|修正)/u.test(input.task),
   })
   let sources = input.entryResult
-  let latestObservation = input.entryResult
   let readPlan: WikiReadPlan = { paths: [], missing: [], sufficient: false }
   let readMetrics: DirectRunMetrics = EMPTY_METRICS
   const readPaths: string[] = []
@@ -138,8 +91,10 @@ export async function runWikiTwoPhase(input: {
   const executeReadPaths = async (paths: string[]) => {
     if (!paths.length) return
     const signature = JSON.stringify([...paths].sort())
-    if (!recordWikiRetrieval(state, signature, paths))
-      throw new Error('相同 Wiki 读取计划已执行，拒绝重复读取')
+    if (!recordWikiRetrieval(state, signature, paths)) {
+      sources = `${sources}\n\n[Wiki 页面已经读取]\n${paths.join('、')}`
+      return
+    }
     validateTaskEnvelope(
       {
         version: 1,
@@ -165,7 +120,6 @@ export async function runWikiTwoPhase(input: {
     try {
       wikiToolRounds += 1
       const result = await input.executeWiki(readCall, input.signal)
-      latestObservation = result.content || ''
       try {
         const payload = JSON.parse(result.content || '{}') as { missingRoutes?: unknown }
         if (Array.isArray(payload.missingRoutes))
@@ -216,24 +170,13 @@ export async function runWikiTwoPhase(input: {
       }
       readStopReason = 'failed'
     }
-    let nextPaths = [...new Set(readPlan.paths.map(item => item.path))].filter(
-      path => !readPaths.includes(path),
-    )
-    const authorized = indexedPaths(latestObservation)
-    if (authorized) {
-      const explicit = explicitTaskPaths(input.task)
-      const unauthorized = nextPaths.filter(path => !authorized.has(path) && !explicit.has(path))
-      if (unauthorized.length) {
-        const warning = `未读取未被索引授权的路径：${unauthorized.join('、')}`
-        readPlan.missing.push(warning)
-        warnings.push(warning)
-        sources = `${sources}\n\n[Wiki 索引缺失或路径未授权]\n${unauthorized.join('、')}`
-        nextPaths = nextPaths.filter(path => !unauthorized.includes(path))
-        readPlan.sufficient = true
-        readPlan.status = 'complete'
-        readStopReason = 'failed'
-      }
-    }
+    const requestedPaths = [...new Set(readPlan.paths.map(item => item.path))]
+    const repeatedPaths = requestedPaths.filter(path => readPaths.includes(path))
+    let nextPaths = requestedPaths.filter(path => !readPaths.includes(path))
+    if (repeatedPaths.length)
+      sources = `${sources}\n\n[Wiki 页面已经读取]\n${repeatedPaths.join('、')}`
+    if (!nextPaths.length && !readPlan.sufficient && (repeatedPaths.length || readPlan.paths.length))
+      continue
     readPaths.push(...nextPaths)
     if (nextPaths.length) {
       try {
@@ -258,7 +201,7 @@ export async function runWikiTwoPhase(input: {
       { role: 'system', content: WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT },
       {
         role: 'user',
-        content: `当前任务：${input.task}\nReadPlan：${JSON.stringify(readPlan)}\n实际 Wiki 资料：\n${sources}${readIncomplete ? `\n\n[Wiki 读取未完成：${readStopReason}，不得生成或执行写入计划]` : ''}`,
+        content: `当前任务：${input.task}\nReadPlan：${JSON.stringify(readPlan)}\n实际 Wiki 资料：\n${sources}${readIncomplete ? `\n\n[Wiki 读取未完成：${readStopReason}。请基于现有真实资料完成任务，资料不足时如实说明。]` : ''}`,
       },
     ],
     sendChatCompletion: input.sendChatCompletion,
@@ -277,7 +220,6 @@ export async function runWikiTwoPhase(input: {
   }
   if (readIncomplete) {
     plan.answer = `${plan.answer}\n\n> Wiki 资料尚未读取完整（${readStopReason}），以上回答仅基于已读取内容。`
-    plan.changePlan = null
   }
   if (warnings.length) plan.answer = `${plan.answer}\n\n> Wiki 提示：${[...new Set(warnings)].join('；')}`
   const metrics = {

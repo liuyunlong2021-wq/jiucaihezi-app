@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  buildSelectedSkillPrompt,
   hasExplicitMemoryCapability,
   normalizeMemoryToolResult,
   selectMemoryTools,
 } from '../memoryChat'
+import type { SkillConfig } from '@/types/skill'
 
 const tools = [
   'skill',
@@ -78,11 +80,32 @@ test('a selected capability connects the task explicitly', () => {
   assert.equal(hasExplicitMemoryCapability({ selectedSkillNames: ['jc-film-style'] }), true)
 })
 
-test('selecting a concrete Skill does not expose a generic Skill loader', () => {
+test('selecting a concrete Skill exposes all currently available product tools', () => {
   assert.deepEqual(
     selectMemoryTools(tools, ['jc-film-style']).map(tool => tool.function.name),
-    [],
+    tools.map(tool => tool.function.name).filter(name => name !== 'skill'),
   )
+})
+
+test('a selected Skill cannot load another Skill implicitly', () => {
+  assert.equal(
+    selectMemoryTools(tools, ['jc-film-style']).some(tool => tool.function.name === 'skill'),
+    false,
+  )
+})
+
+test('selected Skill rules are injected as a mandatory contract', async () => {
+  const skill = {
+    id: 'writer',
+    name: 'writer',
+    skillContent: '# 必须遵守\n输出三段正文',
+    assetIndex: [{ path: 'references/style.md' }],
+  } as SkillConfig
+  const prompt = await buildSelectedSkillPrompt(['writer'], new Map([['writer', skill]]))
+  assert.match(prompt, /本轮必须遵守的执行合同/)
+  assert.match(prompt, /# 必须遵守/)
+  assert.match(prompt, /references\/style\.md/)
+  assert.match(prompt, /skill:\/\/local\/writer/)
 })
 
 test('explicit MCP keeps only the selected MCP tools', () => {

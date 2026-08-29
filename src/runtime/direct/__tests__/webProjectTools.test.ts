@@ -64,18 +64,18 @@ function call(name: string, args: Record<string, unknown>) {
 test('web project tools use OpenCode-compatible names', () => {
   assert.deepEqual(
     WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
-    ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
+    ['wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
   )
 })
 
 test('web project tool definitions exclude Desktop-only 3D and custom MCP tools', () => {
   assert.deepEqual(
     buildWebProjectToolDefinitions().map(tool => tool.function.name),
-    ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
+    ['wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
   )
   assert.deepEqual(
     buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-    ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
+    ['wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
   )
 })
 

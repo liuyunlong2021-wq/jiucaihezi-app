@@ -13,14 +13,11 @@ export interface ConversationAttachment {
   characterCount?: number
 }
 
-export type ConversationMode = 'quick' | 'memory'
-
 export interface ConversationTurn {
   id: string
   role: 'user' | 'assistant'
   content: string
   createdAt: string
-  mode?: ConversationMode
   attachments?: ConversationAttachment[]
 }
 
@@ -44,7 +41,8 @@ export function conversationDocumentSources(turns: ConversationTurn[]): Array<{ 
 }
 
 const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"\s*-->/
-const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(quick|memory)")?(?:\s+attachments="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
+// Keep accepting the removed mode attribute so existing Raw conversations remain readable.
+const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(?:quick|memory)")?(?:\s+attachments="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
 
 export function isConversationPath(path: string): boolean {
   return String(path || '').replace(/^\/+/, '').startsWith(`${CONVERSATION_DIRECTORY}/`)
@@ -65,9 +63,8 @@ export function parseConversationTranscript(path: string, content: string): Conv
       id: match[1],
       role: match[2] as ConversationTurn['role'],
       createdAt: match[3],
-      mode: match[4] as ConversationMode | undefined,
-      content: match[6],
-      attachments: parseAttachments(match[5]),
+      content: match[5],
+      attachments: parseAttachments(match[4]),
     }
     const previous = turns.at(-1)
     // ponytail: normalize the old click+Enter race without rewriting the user's Raw file.
@@ -78,7 +75,7 @@ export function parseConversationTranscript(path: string, content: string): Conv
 }
 
 function isAccidentalDuplicate(previous: ConversationTurn, current: ConversationTurn): boolean {
-  if (previous.role !== 'user' || current.role !== 'user' || previous.content !== current.content || previous.mode !== current.mode) return false
+  if (previous.role !== 'user' || current.role !== 'user' || previous.content !== current.content) return false
   const previousAt = Date.parse(previous.createdAt)
   const currentAt = Date.parse(current.createdAt)
   return Number.isFinite(previousAt) && Number.isFinite(currentAt) && currentAt >= previousAt && currentAt - previousAt <= 5000
@@ -89,7 +86,7 @@ export function appendConversationTurn(content: string, turn: ConversationTurn):
   if (!turn.id || !turn.content.trim()) throw new Error('对话 turn 不完整')
   const heading = turn.role === 'user' ? '用户' : '助手'
   const block = [
-    `<!-- jc:turn id="${attribute(turn.id)}" role="${turn.role}" created-at="${attribute(turn.createdAt)}"${turn.mode ? ` mode="${turn.mode}"` : ''}${serializeAttachments(turn.attachments)} -->`,
+    `<!-- jc:turn id="${attribute(turn.id)}" role="${turn.role}" created-at="${attribute(turn.createdAt)}"${serializeAttachments(turn.attachments)} -->`,
     `## ${heading}`,
     '',
     turn.content.replace(/\s+$/, ''),

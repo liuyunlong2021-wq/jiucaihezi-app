@@ -11,6 +11,7 @@ import {
 test('generic Wiki plans treat Skill as method rules, not a domain schema', () => {
   assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /Skill.*方法.*格式.*质量规则/)
   assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /不要.*Wiki.*事实/)
+  assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /已选 Skill 或用户明确给出的 Wiki 根内路径属于直接读取授权/)
   assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /Wiki 只负责事实、页面组织和确定性落盘/)
   assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /Skill 规则不是 Wiki 事实/)
   assert.doesNotMatch(WIKI_READ_PLAN_SYSTEM_PROMPT, /角色|场景|道具|伏笔|分集/)
@@ -29,6 +30,7 @@ test('ReadPlan accepts a bounded unique list and rejects duplicate or unsafe pat
       paths: [{ path: '剧情/总纲.md', reason: '确定目标' }],
       missing: [],
       sufficient: true,
+      status: 'complete',
     },
   )
   assert.throws(

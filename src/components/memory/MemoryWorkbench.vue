@@ -58,7 +58,7 @@ import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
-import type { ConversationAttachment, ConversationMode, ConversationTurn } from '@/runtime/memory/conversationTranscript'
+import type { ConversationAttachment, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
@@ -138,7 +138,6 @@ function clearToolSelections() {
   terminalSelected.value = false
 }
 const mentionOpen = ref(false)
-const executionMode = ref<ConversationMode>('memory')
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const sending = ref(false)
@@ -658,7 +657,6 @@ async function openResource(resource: ProjectResourceOpenResult) {
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     conversationPickerOpen.value = false
     conversationSearch.value = ''
-    executionMode.value = 'memory'
     await nextTick()
     if (generation !== resourceOpenGeneration) return
     memoryScrollNav.value?.startStickyFollow()
@@ -950,7 +948,6 @@ async function editTurn(turn: ConversationTurn) {
   if (turn.role !== 'user' || sending.value) return
   editingTurnId.value = turn.id
   input.value = turn.content
-  executionMode.value = turn.mode || 'memory'
   attachments.value = []
   referencedFiles.value = []
   selectedSkillNames.value = []
@@ -1101,7 +1098,6 @@ async function send() {
   const active = conversation.value
   const message = input.value.trim()
   const pendingAttachments = attachments.value.slice()
-  const pendingMode: ConversationMode = 'memory'
   if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length && !wikiSelected.value) || sending.value || sendInFlight) return
   sendInFlight = true
   const editTargetId = editingTurnId.value
@@ -1122,7 +1118,6 @@ async function send() {
     content: message || '请查看以下附件。',
     createdAt: new Date().toISOString(),
     attachments: attachmentMetadata(pendingAttachments),
-    mode: pendingMode,
   }
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
@@ -1146,7 +1141,6 @@ async function send() {
       conversationTurns: editTargetId ? baseTurns : active.transcript.turns,
       userTurn,
       modelId: agentStore.currentModel,
-      mode: pendingMode,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
       attachments: pendingAttachments,
       files: referencedFiles.value,
@@ -1366,7 +1360,6 @@ function formatRunMetrics(metrics: DirectRunMetrics): string {
 }
 
 async function addReferencedFile(payload: unknown) {
-  executionMode.value = 'memory'
   const reference = payload as { resource?: ProjectResource } | null
   if (reference?.resource) {
     await addProjectFileReference(reference.resource)
@@ -1383,7 +1376,6 @@ function isOfficeResource(resource: Pick<ProjectResource, 'name' | 'mimeType'>):
 }
 
 async function addProjectFileReference(resource: ProjectResource) {
-  executionMode.value = 'memory'
   if (isOfficeResource(resource)) {
     const referenceKey = `${resource.runtime}:${resource.owner}:${resource.path}`
     if (referencingDocuments.has(referenceKey)
@@ -1462,7 +1454,6 @@ async function addProjectFileReference(resource: ProjectResource) {
 }
 
 async function addProjectMediaReferences(payload: unknown) {
-  executionMode.value = 'memory'
   const resources = (payload as { resources?: ProjectResource[] } | null)?.resources || []
   for (const resource of resources) {
     if (resource.isDirectory || resource.kind !== 'media'
@@ -1557,7 +1548,6 @@ function closeMention() {
 
 async function selectMention(option: MemoryMentionOption) {
   try {
-    executionMode.value = 'memory'
     if (option.type === 'tool') {
       if (option.id.startsWith('mcp__')) {
         if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
@@ -1701,7 +1691,6 @@ async function importDesktopChatPaths(paths: string[], warnings: string[] = []) 
 }
 
 async function addAttachmentFiles(selected: File[]) {
-  executionMode.value = 'memory'
   const owner = projectOwner.value
   if (!owner || !memoryReady.value) throw new Error('请先创建记忆空间')
   const existing = new Set((await files.list(owner)).map(resource => resource.path))

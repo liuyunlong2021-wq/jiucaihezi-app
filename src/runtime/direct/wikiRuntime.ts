@@ -1465,6 +1465,26 @@ function appendUniqueLine(content: string, line: string): string {
   return `${content.replace(/\s*$/, '')}\n\n${line}\n`
 }
 
+function isNavigationPath(path: string): boolean {
+  return /(?:^|\/)\.?_?index\.md$/i.test(normalizePath(path))
+}
+
+function dedupeNavigationLinks(content: string): string {
+  const seen = new Set<string>()
+  return content
+    .split(/\r?\n/)
+    .filter(line => {
+      if (!/^\s*[-*+]\s+/.test(line)) return true
+      const links = extractWikiLinks(line)
+      if (links.length !== 1) return true
+      const key = normalizedLinkTarget(links[0]!).replace(/\/_?index$/i, '/index')
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+    .join('\n')
+}
+
 function removeWikiLink(content: string, target: string): string {
   const normalized = normalizedLinkTarget(target)
   return content
@@ -1550,16 +1570,23 @@ async function applyWiki(
     (value): value is string => Boolean(value?.trim()),
   )
   if (!input.reason?.trim() || !basis.length) throw new Error('Wiki apply 必须提供 reason 和 basis')
-  const operations = input.operations || []
-  if (!operations.length) throw new Error('Wiki apply 必须提供 operations')
-  if (operations.length > 200) throw new Error('单次 Wiki apply 最多 200 个操作')
+  const requestedOperations = input.operations || []
+  if (!requestedOperations.length) throw new Error('Wiki apply 必须提供 operations')
+  if (requestedOperations.length > 200) throw new Error('单次 Wiki apply 最多 200 个操作')
+  const operations = requestedOperations.filter(
+    operation => !(isNavigationPath(operation.path) && ['replace', 'append'].includes(operation.kind)),
+  )
   if (
     operations.some(operation => ['move', 'trash'].includes(operation.kind)) &&
     !input.confirmedPlanId
   )
     throw new Error('移动、重命名或回收必须先确认完整预览')
   if (operations.some(operation => ['move', 'trash'].includes(operation.kind))) {
-    const expectedPlanId = wikiPlanConfirmationId({ reason: input.reason, basis, operations })
+    const expectedPlanId = wikiPlanConfirmationId({
+      reason: input.reason,
+      basis,
+      operations: requestedOperations,
+    })
     if (input.confirmedPlanId !== expectedPlanId) throw new Error('Wiki 确认计划已变化，请重新预览并确认')
   }
   if (!workspace.remove) throw new Error('当前平台不支持 Wiki 事务恢复')
@@ -1745,6 +1772,9 @@ async function applyWiki(
         appendUniqueLine(files.get(nav)!, `- [[${pageLink(wiki, item.path)}|${item.title}]]`),
       )
   }
+
+  for (const [path, content] of files)
+    if (isNavigationPath(path)) files.set(path, dedupeNavigationLinks(content))
 
   let sourceRegistration = input.sources?.length ? 'skipped (来源索引.md 未配置)' : 'not-requested'
   if (input.sources?.length && files.has(`${wiki}/来源索引.md`)) {

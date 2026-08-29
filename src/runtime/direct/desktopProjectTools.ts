@@ -129,6 +129,7 @@ export function createDesktopProjectToolExecutor(input: {
   invoke?: Invoke
   fetcher?: typeof fetch
   loadSkill?: LocalSkillLoader
+  preloadSkills?: string[]
   attachments?: TerminalAttachment[]
   renderImage?: MemoryImageRenderer
   recordSceneVideo?: (document: Scene3DDocument) => Promise<Blob>
@@ -136,6 +137,20 @@ export function createDesktopProjectToolExecutor(input: {
   const root = String(input.projectDir || '').trim()
   const skills = createCreativeSkillSession(input.fetcher)
   const localSkills = new Map<string, LocalCreativeSkill>()
+  let preloadPromise: Promise<void> | null = null
+  const ensurePreloadedSkills = () => {
+    preloadPromise ||= Promise.all(
+      (input.preloadSkills || []).map(async name => {
+        if (input.loadSkill) {
+          const skill = await input.loadSkill(name)
+          if (skill?.content.trim()) localSkills.set(localSkillBase(name), skill)
+          if (skill) return
+        }
+        await skills.load(name)
+      }),
+    ).then(() => undefined)
+    return preloadPromise
+  }
   let lastFailedTerminalCommand = ''
 
   async function invoke(command: string, payload: Record<string, unknown>) {
@@ -276,6 +291,8 @@ export function createDesktopProjectToolExecutor(input: {
     signal?.throwIfAborted()
     const args = parseCreativeToolArguments(call)
     const name = call.function.name
+
+    if (name === 'read') await ensurePreloadedSkills()
 
     if (name === 'skill') {
       const skillName = String(args.name)

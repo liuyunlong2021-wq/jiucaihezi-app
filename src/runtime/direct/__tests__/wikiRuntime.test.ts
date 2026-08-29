@@ -474,6 +474,35 @@ test('wiki apply creates a page and deterministically maintains navigation and l
   assert.match(String(project.entries.get('wiki/log.md')), /记录当前工作/)
 })
 
+test('wiki apply ignores model index edits and repairs duplicate navigation', async () => {
+  const project = memoryWiki({
+    wiki: null,
+    'wiki/index.md': '# 入口\n\n- [[工作进度/index|工作进度]]\n- [[工作进度/index|工作进度]]\n',
+    'wiki/工作进度': null,
+    'wiki/工作进度/index.md': '# 工作进度\n',
+  })
+
+  const output = await executeWikiAction(project.workspace, {
+    action: 'apply',
+    reason: '增加工作进度',
+    basis: ['用户要求'],
+    operations: [
+      { kind: 'create', path: '工作进度/8月29日.md', title: '8月29日', content: '# 8月29日\n' },
+      {
+        kind: 'replace',
+        path: 'index.md',
+        oldText: '- [[工作进度/index|工作进度]]\n- [[工作进度/index|工作进度]]',
+        newText: '- [[工作进度/index|工作进度]]',
+      },
+    ],
+  })
+
+  assert.match(output, /status: succeeded/)
+  assert.equal(project.entries.has('wiki/工作进度/8月29日.md'), true)
+  assert.equal(String(project.entries.get('wiki/index.md')).match(/\[\[工作进度\/index\|工作进度\]\]/g)?.length, 1)
+  assert.match(String(project.entries.get('wiki/工作进度/index.md')), /工作进度\/8月29日/)
+})
+
 test('wiki apply does not read unrelated page bodies for a local create', async () => {
   const project = memoryWiki({
     wiki: null,

@@ -130,19 +130,22 @@ test('conversation transcript preserves safe text sources and rejects Raw or bin
   assert.equal(attachments?.[2]?.readablePath, undefined)
 })
 
-test('conversation transcript records the execution mode on user turns', () => {
+test('conversation transcript keeps one mode and reads legacy mode attributes', () => {
   const empty = createConversationTranscript('chat_mode')
   const content = appendConversationTurn(empty, {
-    id: 'turn_quick',
+    id: 'turn_memory',
     role: 'user',
     content: '直接回答',
     createdAt: '2026-07-24T10:01:00.000Z',
-    mode: 'quick',
   })
-  const parsed = parseConversationTranscript('.raw/对话记录/chat_mode.md', content)
+  const legacy = content.replace(
+    'created-at="2026-07-24T10:01:00.000Z"',
+    'created-at="2026-07-24T10:01:00.000Z" mode="quick"',
+  )
+  const parsed = parseConversationTranscript('.raw/对话记录/chat_mode.md', legacy)
 
-  assert.equal(parsed?.turns[0]?.mode, 'quick')
-  assert.match(content, /mode="quick"/)
+  assert.equal(parsed?.turns[0]?.content, '直接回答')
+  assert.doesNotMatch(content, /mode=/)
 })
 
 test('conversation transcript hides only the legacy rapid duplicate user turns', () => {

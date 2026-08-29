@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { DirectTransportFailure, runDirectChatCompletion, sendDirectRequestWithRetry } from '../directEngine'
+import {
+  DirectTransportFailure,
+  runDirectChatCompletion,
+  sendDirectRequestWithRetry,
+} from '../directEngine'
 
 function sseResponse(rows: string[]): Response {
   return new Response(rows.map(row => `data: ${row}\n\n`).join(''), {
@@ -12,13 +16,17 @@ function sseResponse(rows: string[]): Response {
 function interruptedSseResponse(rows: string[]): Response {
   const encoder = new TextEncoder()
   let reads = 0
-  return new Response(new ReadableStream<Uint8Array>({
-    pull(controller) {
-      reads += 1
-      if (reads === 1) controller.enqueue(encoder.encode(rows.map(row => `data: ${row}\n\n`).join('')))
-      else controller.error(new Error('stream body interrupted'))
-    },
-  }), { headers: { 'content-type': 'text/event-stream' } })
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      pull(controller) {
+        reads += 1
+        if (reads === 1)
+          controller.enqueue(encoder.encode(rows.map(row => `data: ${row}\n\n`).join('')))
+        else controller.error(new Error('stream body interrupted'))
+      },
+    }),
+    { headers: { 'content-type': 'text/event-stream' } },
+  )
 }
 
 test('sendDirectRequestWithRetry retries the current transient request twice', async () => {
@@ -30,14 +38,21 @@ test('sendDirectRequestWithRetry retries the current transient request twice', a
   const response = await sendDirectRequestWithRetry(
     async () => {
       requests += 1
-      if (requests === 1) throw new Error('HTTP 请求失败: error sending request for url (https://api.example.test)')
+      if (requests === 1)
+        throw new Error('HTTP 请求失败: error sending request for url (https://api.example.test)')
       if (requests === 2) return new Response('', { status: 524 })
       return new Response('ok')
     },
     {
-      wait: async delay => { waits.push(delay) },
-      onRetry: attempt => { retries.push(attempt) },
-      onRequestComplete: duration => { durations.push(duration) },
+      wait: async delay => {
+        waits.push(delay)
+      },
+      onRetry: attempt => {
+        retries.push(attempt)
+      },
+      onRequestComplete: duration => {
+        durations.push(duration)
+      },
     },
   )
 
@@ -46,17 +61,24 @@ test('sendDirectRequestWithRetry retries the current transient request twice', a
   assert.deepEqual(retries, [1, 2])
   assert.equal(requests, 3)
   assert.equal(durations.length, 3)
-  assert.equal(durations.every(duration => duration >= 0), true)
+  assert.equal(
+    durations.every(duration => duration >= 0),
+    true,
+  )
 })
 
 test('sendDirectRequestWithRetry exposes an exhausted network failure as transport failure', async () => {
   let requests = 0
 
   await assert.rejects(
-    () => sendDirectRequestWithRetry(async () => {
-      requests += 1
-      throw new Error('HTTP 请求失败: error sending request for url (https://api.example.test)')
-    }, { wait: async () => {} }),
+    () =>
+      sendDirectRequestWithRetry(
+        async () => {
+          requests += 1
+          throw new Error('HTTP 请求失败: error sending request for url (https://api.example.test)')
+        },
+        { wait: async () => {} },
+      ),
     DirectTransportFailure,
   )
 
@@ -68,13 +90,17 @@ test('sendDirectRequestWithRetry stops during retry backoff when aborted', async
   let requests = 0
 
   await assert.rejects(
-    () => sendDirectRequestWithRetry(async () => {
-      requests += 1
-      throw new Error('Failed to fetch')
-    }, {
-      signal: controller.signal,
-      onRetry: () => controller.abort(),
-    }),
+    () =>
+      sendDirectRequestWithRetry(
+        async () => {
+          requests += 1
+          throw new Error('Failed to fetch')
+        },
+        {
+          signal: controller.signal,
+          onRetry: () => controller.abort(),
+        },
+      ),
     error => error instanceof DOMException && error.name === 'AbortError',
   )
 
@@ -100,12 +126,29 @@ test('runDirectChatCompletion performs a second pass when the model requests a t
     messages: [{ role: 'user', content: '查一下韭菜盒子' }],
     tools: [{ type: 'function', function: { name: 'wiki_search' } }],
     onText: value => seen.push(value),
-    executeTool: async call => ({ content: `[result:${JSON.parse(call.function.arguments).query}]` }),
+    executeTool: async call => ({
+      content: `[result:${JSON.parse(call.function.arguments).query}]`,
+    }),
     sendChatCompletion: async request => {
       sentMessages.push(request.messages)
       if (sentMessages.length === 1) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { reasoning_content: '先查资料', tool_calls: [{ index: 0, id: 'call_1', function: { name: 'wiki_search', arguments: '{"query":"韭菜盒子"}' } }] } }] }),
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  reasoning_content: '先查资料',
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_1',
+                      function: { name: 'wiki_search', arguments: '{"query":"韭菜盒子"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
           '[DONE]',
         ])
       }
@@ -131,15 +174,18 @@ test('runDirectChatCompletion does not continue an interrupted stream when conti
   let requests = 0
 
   await assert.rejects(
-    () => runDirectChatCompletion({
-      messages: [{ role: 'user', content: '你好' }],
-      onText: () => {},
-      continueOnInterruption: false,
-      sendChatCompletion: async () => {
-        requests += 1
-        return interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '部分回复' } }] })])
-      },
-    }),
+    () =>
+      runDirectChatCompletion({
+        messages: [{ role: 'user', content: '你好' }],
+        onText: () => {},
+        continueOnInterruption: false,
+        sendChatCompletion: async () => {
+          requests += 1
+          return interruptedSseResponse([
+            JSON.stringify({ choices: [{ delta: { content: '部分回复' } }] }),
+          ])
+        },
+      }),
     /stream body interrupted/,
   )
 
@@ -149,8 +195,14 @@ test('runDirectChatCompletion does not continue an interrupted stream when conti
 test('runDirectChatCompletion continues a length-limited answer a bounded number of times', async () => {
   const requests: any[] = []
   const responses = [
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '前半段。' }, finish_reason: 'length' }] }), '[DONE]']),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '后半段。' }, finish_reason: 'stop' }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '前半段。' }, finish_reason: 'length' }] }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '后半段。' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]),
   ]
 
   const result = await runDirectChatCompletion({
@@ -170,9 +222,15 @@ test('runDirectChatCompletion continues a length-limited answer a bounded number
 test('runDirectChatCompletion preserves earlier length segments when a continuation stream is interrupted', async () => {
   const seen: string[] = []
   const responses = [
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '第一段。' }, finish_reason: 'length' }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '第一段。' }, finish_reason: 'length' }] }),
+      '[DONE]',
+    ]),
     interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '第二段。' } }] })]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '第三段。' }, finish_reason: 'stop' }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '第三段。' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]),
   ]
 
   const result = await runDirectChatCompletion({
@@ -190,13 +248,20 @@ test('runDirectChatCompletion reports the normalized tool id used by the tool re
   const executedCalls: string[] = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, function: { name: 'skill', arguments: '{"name":"writer"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                { index: 0, function: { name: 'skill', arguments: '{"name":"writer"}' } },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
-    sseResponse([
-      JSON.stringify({ choices: [{ delta: { content: 'Skill 已加载' } }] }),
-      '[DONE]',
-    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: 'Skill 已加载' } }] }), '[DONE]']),
   ]
 
   await runDirectChatCompletion({
@@ -221,7 +286,21 @@ test('runDirectChatCompletion emits start then successful end for a tool call', 
   const events: Array<{ type: string; call: { id: string }; status?: string }> = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"idea.md"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_read',
+                  function: { name: 'read', arguments: '{"path":"idea.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: '读取完成' } }] }), '[DONE]']),
@@ -236,16 +315,33 @@ test('runDirectChatCompletion emits start then successful end for a tool call', 
     sendChatCompletion: async () => responses.shift()!,
   })
 
-  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
-    ['tool_execution_start', 'call_read', undefined],
-    ['tool_execution_end', 'call_read', 'succeeded'],
-  ])
+  assert.deepEqual(
+    events.map(event => [event.type, event.call.id, event.status]),
+    [
+      ['tool_execution_start', 'call_read', undefined],
+      ['tool_execution_end', 'call_read', 'succeeded'],
+    ],
+  )
 })
 
 test('runDirectChatCompletion returns request, tool-round, and duration metrics without payloads', async () => {
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"secret.md"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_read',
+                  function: { name: 'read', arguments: '{"path":"secret.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]']),
@@ -262,7 +358,10 @@ test('runDirectChatCompletion returns request, tool-round, and duration metrics 
   assert.equal(result.metrics.modelRequests, 2)
   assert.equal(result.metrics.toolRounds, 1)
   assert.equal(result.metrics.modelRequestDurationMs.length, 2)
-  assert.equal(result.metrics.modelRequestDurationMs.every(duration => duration >= 0), true)
+  assert.equal(
+    result.metrics.modelRequestDurationMs.every(duration => duration >= 0),
+    true,
+  )
   assert.equal(result.metrics.totalDurationMs >= 0, true)
   assert.doesNotMatch(JSON.stringify(result.metrics), /敏感正文|secret\.md|文件正文/)
 })
@@ -272,11 +371,18 @@ test('runDirectChatCompletion counts retry attempts as separate model requests',
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '继续' }],
     onText: () => {},
-    sendChatCompletion: async (_request, onRequestComplete) => await sendDirectRequestWithRetry(async () => {
-      attempts += 1
-      if (attempts < 3) return new Response('', { status: 503 })
-      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]'])
-    }, { wait: async () => {}, onRequestComplete }),
+    sendChatCompletion: async (_request, onRequestComplete) =>
+      await sendDirectRequestWithRetry(
+        async () => {
+          attempts += 1
+          if (attempts < 3) return new Response('', { status: 503 })
+          return sseResponse([
+            JSON.stringify({ choices: [{ delta: { content: '完成' } }] }),
+            '[DONE]',
+          ])
+        },
+        { wait: async () => {}, onRequestComplete },
+      ),
   })
 
   assert.equal(result.metrics.modelRequests, 3)
@@ -289,7 +395,21 @@ test('runDirectChatCompletion rejects a tool that was not advertised in the requ
   const sentMessages: any[][] = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_delete', function: { name: 'delete', arguments: '{"path":"note.md"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_delete',
+                  function: { name: 'delete', arguments: '{"path":"note.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: '未执行删除。' } }] }), '[DONE]']),
@@ -299,8 +419,14 @@ test('runDirectChatCompletion rejects a tool that was not advertised in the requ
     messages: [{ role: 'user', content: '查看文件' }],
     tools: [{ type: 'function', function: { name: 'read' } }],
     onText: () => {},
-    executeTool: async () => { executions += 1; return { content: '不应执行' } },
-    sendChatCompletion: async request => { sentMessages.push(request.messages); return responses.shift()! },
+    executeTool: async () => {
+      executions += 1
+      return { content: '不应执行' }
+    },
+    sendChatCompletion: async request => {
+      sentMessages.push(request.messages)
+      return responses.shift()!
+    },
   })
 
   assert.equal(executions, 0)
@@ -312,10 +438,27 @@ test('runDirectChatCompletion ends a rejected tool without executing it', async 
   let executions = 0
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"draft.md","content":"正文"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_write',
+                  function: { name: 'write', arguments: '{"path":"draft.md","content":"正文"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '已改用不写文件的方式。' } }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '已改用不写文件的方式。' } }] }),
+      '[DONE]',
+    ]),
   ]
 
   await runDirectChatCompletion({
@@ -332,10 +475,13 @@ test('runDirectChatCompletion ends a rejected tool without executing it', async 
   })
 
   assert.equal(executions, 0)
-  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
-    ['tool_execution_start', 'call_write', undefined],
-    ['tool_execution_end', 'call_write', 'cancelled'],
-  ])
+  assert.deepEqual(
+    events.map(event => [event.type, event.call.id, event.status]),
+    [
+      ['tool_execution_start', 'call_write', undefined],
+      ['tool_execution_end', 'call_write', 'cancelled'],
+    ],
+  )
 })
 
 test('runDirectChatCompletion starts parallel failures in source order and keeps tool messages ordered', async () => {
@@ -343,13 +489,32 @@ test('runDirectChatCompletion starts parallel failures in source order and keeps
   const sentMessages: any[][] = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [
-        { index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"missing.md"}' } },
-        { index: 1, id: 'call_glob', function: { name: 'glob', arguments: '{"pattern":"*.md"}' } },
-      ] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_read',
+                  function: { name: 'read', arguments: '{"path":"missing.md"}' },
+                },
+                {
+                  index: 1,
+                  id: 'call_glob',
+                  function: { name: 'glob', arguments: '{"pattern":"*.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '两个工具都失败了。' } }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '两个工具都失败了。' } }] }),
+      '[DONE]',
+    ]),
   ]
 
   await runDirectChatCompletion({
@@ -361,19 +526,33 @@ test('runDirectChatCompletion starts parallel failures in source order and keeps
       if (call.function.name === 'read') throw new Error('审批服务不可用')
     },
     toolNeedsApproval: () => false,
-    executeTool: async () => { throw new Error('glob unavailable') },
+    executeTool: async () => {
+      throw new Error('glob unavailable')
+    },
     sendChatCompletion: async request => {
       sentMessages.push(request.messages)
       return responses.shift()!
     },
   })
 
-  assert.deepEqual(events.filter(event => event.type === 'tool_execution_start').map(event => event.call.id), ['call_read', 'call_glob'])
-  assert.deepEqual(events.filter(event => event.type === 'tool_execution_end').map(event => [event.call.id, event.status]).sort(), [
-    ['call_glob', 'failed'],
-    ['call_read', 'failed'],
-  ])
-  assert.deepEqual(sentMessages[1].slice(-2).map(message => message.tool_call_id), ['call_read', 'call_glob'])
+  assert.deepEqual(
+    events.filter(event => event.type === 'tool_execution_start').map(event => event.call.id),
+    ['call_read', 'call_glob'],
+  )
+  assert.deepEqual(
+    events
+      .filter(event => event.type === 'tool_execution_end')
+      .map(event => [event.call.id, event.status])
+      .sort(),
+    [
+      ['call_glob', 'failed'],
+      ['call_read', 'failed'],
+    ],
+  )
+  assert.deepEqual(
+    sentMessages[1].slice(-2).map(message => message.tool_call_id),
+    ['call_read', 'call_glob'],
+  )
 })
 
 test('runDirectChatCompletion repairs an available_skills-prefixed skill call', async () => {
@@ -381,13 +560,24 @@ test('runDirectChatCompletion repairs an available_skills-prefixed skill call', 
   const executedCalls: Array<{ name: string; arguments: string }> = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_skill', function: { name: 'available_skills:user-example', arguments: '{}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_skill',
+                  function: { name: 'available_skills:user-example', arguments: '{}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
-    sseResponse([
-      JSON.stringify({ choices: [{ delta: { content: 'Skill 已加载' } }] }),
-      '[DONE]',
-    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: 'Skill 已加载' } }] }), '[DONE]']),
   ]
 
   await runDirectChatCompletion({
@@ -413,7 +603,21 @@ test('runDirectChatCompletion leaves a prefixed call with non-empty arguments un
   const seen: string[] = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_bad', function: { name: 'available_skills:writer', arguments: '{"unexpected":true}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_bad',
+                  function: { name: 'available_skills:writer', arguments: '{"unexpected":true}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: 'done' } }] }), '[DONE]']),
@@ -437,10 +641,8 @@ test('runDirectChatCompletion keeps the first-pass text when there are no tool c
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '你好' }],
     onText: () => {},
-    sendChatCompletion: async () => sseResponse([
-      JSON.stringify({ choices: [{ delta: { content: '你好呀' } }] }),
-      '[DONE]',
-    ]),
+    sendChatCompletion: async () =>
+      sseResponse([JSON.stringify({ choices: [{ delta: { content: '你好呀' } }] }), '[DONE]']),
   })
 
   assert.equal(result.text, '你好呀')
@@ -454,18 +656,34 @@ test('runDirectChatCompletion can reject a premature final answer and continue',
     tools: [{ type: 'function', function: { name: 'wiki' } }],
     maxModelRequests: 3,
     onText: () => {},
-    rejectFinalResponse: (_text, calls) => calls.length ? null : '必须先提交 Wiki',
+    rejectFinalResponse: (_text, calls) => (calls.length ? null : '必须先提交 Wiki'),
     executeTool: async () => ({ content: 'status: succeeded' }),
     sendChatCompletion: async () => {
       requests += 1
-      if (requests === 1) return sseResponse([
-        JSON.stringify({ choices: [{ delta: { content: '我已经完成。' } }] }),
-        '[DONE]',
-      ])
-      if (requests === 2) return sseResponse([
-        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_wiki', function: { name: 'wiki', arguments: '{"action":"apply"}' } }] } }] }),
-        '[DONE]',
-      ])
+      if (requests === 1)
+        return sseResponse([
+          JSON.stringify({ choices: [{ delta: { content: '我已经完成。' } }] }),
+          '[DONE]',
+        ])
+      if (requests === 2)
+        return sseResponse([
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_wiki',
+                      function: { name: 'wiki', arguments: '{"action":"apply"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          '[DONE]',
+        ])
       return sseResponse([
         JSON.stringify({ choices: [{ delta: { content: 'Wiki 已写入。' } }] }),
         '[DONE]',
@@ -480,7 +698,21 @@ test('runDirectChatCompletion tells the next model pass to repair a failed termi
   const sentMessages: any[][] = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_terminal', function: { name: 'terminal', arguments: '{"command":"extract-frame"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_terminal',
+                  function: { name: 'terminal', arguments: '{"command":"extract-frame"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([
@@ -493,7 +725,10 @@ test('runDirectChatCompletion tells the next model pass to repair a failed termi
     messages: [{ role: 'user', content: '分析视频' }],
     tools: [{ type: 'function', function: { name: 'terminal' } }],
     onText: () => {},
-    executeTool: async () => ({ content: 'Command: extract-frame\nExit code: 8\nstderr:\nfeature unavailable', status: 'failed' }),
+    executeTool: async () => ({
+      content: 'Command: extract-frame\nExit code: 8\nstderr:\nfeature unavailable',
+      status: 'failed',
+    }),
     sendChatCompletion: async request => {
       sentMessages.push(request.messages)
       return responses.shift()!
@@ -508,15 +743,60 @@ test('runDirectChatCompletion continues through multiple tool rounds', async () 
   const executed: string[] = []
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_skill', function: { name: 'skill', arguments: '{"name":"writer"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_skill',
+                  function: { name: 'skill', arguments: '{"name":"writer"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_read',
+                  function: { name: 'read', arguments: '{"path":"wiki/hot.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/剧本/第1集.md","content":"正文"}' } }] } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_write',
+                  function: {
+                    name: 'write',
+                    arguments: '{"path":"wiki/剧本/第1集.md","content":"正文"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: '第一集已保存' } }] }), '[DONE]']),
@@ -559,11 +839,28 @@ test('runDirectChatCompletion allows a normal task to use more than twelve tool 
       requests += 1
       if (requests <= 13) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${requests}`, function: { name: 'read', arguments: `{"path":"frame_${requests}.jpg"}` } }] } }] }),
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_${requests}`,
+                      function: { name: 'read', arguments: `{"path":"frame_${requests}.jpg"}` },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
           '[DONE]',
         ])
       }
-      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '分析完成' } }] }), '[DONE]'])
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: '分析完成' } }] }),
+        '[DONE]',
+      ])
     },
   })
 
@@ -574,9 +871,46 @@ test('runDirectChatCompletion allows a normal task to use more than twelve tool 
 test('runDirectChatCompletion does not execute an immediately repeated failed tool call', async () => {
   let executions = 0
   const responses = [
-    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1', function: { name: 'read', arguments: '{"path":"missing.jpg"}' } }] } }] }), '[DONE]']),
-    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_2', function: { name: 'read', arguments: '{"path":"missing.jpg"}' } }] } }] }), '[DONE]']),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '我会换一种办法。' } }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_1',
+                  function: { name: 'read', arguments: '{"path":"missing.jpg"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_2',
+                  function: { name: 'read', arguments: '{"path":"missing.jpg"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '我会换一种办法。' } }] }),
+      '[DONE]',
+    ]),
   ]
 
   await runDirectChatCompletion({
@@ -595,16 +929,52 @@ test('runDirectChatCompletion does not execute an immediately repeated failed to
 
 test('runDirectChatCompletion commits repeat protection in source order after parallel completion', async () => {
   let releaseFirst!: () => void
-  const firstReleased = new Promise<void>(resolve => { releaseFirst = resolve })
+  const firstReleased = new Promise<void>(resolve => {
+    releaseFirst = resolve
+  })
   let firstExecutions = 0
   const responses = [
-    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [
-      { index: 0, id: 'call_first_1', function: { name: 'read', arguments: '{"path":"missing.md"}' } },
-      { index: 1, id: 'call_second', function: { name: 'glob', arguments: '{"pattern":"*.md"}' } },
-    ] } }] }), '[DONE]']),
-    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [
-      { index: 0, id: 'call_first_2', function: { name: 'read', arguments: '{"path":"missing.md"}' } },
-    ] } }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_first_1',
+                  function: { name: 'read', arguments: '{"path":"missing.md"}' },
+                },
+                {
+                  index: 1,
+                  id: 'call_second',
+                  function: { name: 'glob', arguments: '{"pattern":"*.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_first_2',
+                  function: { name: 'read', arguments: '{"path":"missing.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
     sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]']),
   ]
 
@@ -638,13 +1008,21 @@ test('runDirectChatCompletion includes streamed response time in model duration'
   const result = await runDirectChatCompletion({
     messages: [{ role: 'user', content: '回答' }],
     onText: () => {},
-    sendChatCompletion: async () => new Response(new ReadableStream({
-      async start(controller) {
-        await new Promise(resolve => setTimeout(resolve, 25))
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: '完成' } }] })}\n\ndata: [DONE]\n\n`))
-        controller.close()
-      },
-    }), { headers: { 'content-type': 'text/event-stream' } }),
+    sendChatCompletion: async () =>
+      new Response(
+        new ReadableStream({
+          async start(controller) {
+            await new Promise(resolve => setTimeout(resolve, 25))
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ choices: [{ delta: { content: '完成' } }] })}\n\ndata: [DONE]\n\n`,
+              ),
+            )
+            controller.close()
+          },
+        }),
+        { headers: { 'content-type': 'text/event-stream' } },
+      ),
   })
 
   assert.equal(result.metrics.modelRequestDurationMs.length, 1)
@@ -655,8 +1033,15 @@ test('runDirectChatCompletion continues once after final text streaming is inter
   const requests: any[] = []
   const seen: string[] = []
   const responses = [
-    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '已经完成前半段。' } }] })]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '这是续写部分。' }, finish_reason: 'stop' }] }), '[DONE]']),
+    interruptedSseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '已经完成前半段。' } }] }),
+    ]),
+    sseResponse([
+      JSON.stringify({
+        choices: [{ delta: { content: '这是续写部分。' }, finish_reason: 'stop' }],
+      }),
+      '[DONE]',
+    ]),
   ]
 
   const result = await runDirectChatCompletion({
@@ -682,7 +1067,10 @@ test('runDirectChatCompletion can retain tools during an interrupted memory cont
       JSON.stringify({ choices: [{ delta: { reasoning_content: '先分析资料' } }] }),
       JSON.stringify({ choices: [{ delta: { content: '前半段。' } }] }),
     ]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '续写。' }, finish_reason: 'stop' }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '续写。' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]),
   ]
   const tools = [{ type: 'function', function: { name: 'read' } }]
 
@@ -707,8 +1095,28 @@ test('runDirectChatCompletion executes a tool requested during an interrupted me
   const executions: string[] = []
   const responses = [
     interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '先读取资料。' } }] })]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"notes.md"}' } }] } }] }), '[DONE]']),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '资料已读取。' }, finish_reason: 'stop' }] }), '[DONE]']),
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_read',
+                  function: { name: 'read', arguments: '{"path":"notes.md"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '资料已读取。' }, finish_reason: 'stop' }] }),
+      '[DONE]',
+    ]),
   ]
 
   const result = await runDirectChatCompletion({
@@ -734,14 +1142,33 @@ test('runDirectChatCompletion executes a tool requested during an interrupted me
 test('runDirectChatCompletion does not prepend earlier tool-round text to a resumed final answer', async () => {
   const responses = [
     sseResponse([
-      JSON.stringify({ choices: [{ delta: {
-        content: '正在读取素材。',
-        tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"frame.jpg"}' } }],
-      } }] }),
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              content: '正在读取素材。',
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_read',
+                  function: { name: 'read', arguments: '{"path":"frame.jpg"}' },
+                },
+              ],
+            },
+          },
+        ],
+      }),
       '[DONE]',
     ]),
-    interruptedSseResponse([JSON.stringify({ choices: [{ delta: { content: '正式正文前半段。' } }] })]),
-    sseResponse([JSON.stringify({ choices: [{ delta: { content: '正式正文续写。' }, finish_reason: 'stop' }] }), '[DONE]']),
+    interruptedSseResponse([
+      JSON.stringify({ choices: [{ delta: { content: '正式正文前半段。' } }] }),
+    ]),
+    sseResponse([
+      JSON.stringify({
+        choices: [{ delta: { content: '正式正文续写。' }, finish_reason: 'stop' }],
+      }),
+      '[DONE]',
+    ]),
   ]
 
   const result = await runDirectChatCompletion({
@@ -756,37 +1183,116 @@ test('runDirectChatCompletion does not prepend earlier tool-round text to a resu
 })
 
 test('runDirectChatCompletion stops a runaway tool loop', async () => {
-  await assert.rejects(() => runDirectChatCompletion({
-    messages: [{ role: 'user', content: '循环' }],
+  await assert.rejects(
+    () =>
+      runDirectChatCompletion({
+        messages: [{ role: 'user', content: '循环' }],
+        tools: [{ type: 'function', function: { name: 'read' } }],
+        maxToolRounds: 2,
+        onText: () => {},
+        executeTool: async () => ({ content: 'ok' }),
+        sendChatCompletion: async () =>
+          sseResponse([
+            JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'call_read',
+                        function: { name: 'read', arguments: '{"path":"a"}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            '[DONE]',
+          ]),
+      }),
+    /工具调用超过 2 轮/,
+  )
+})
+
+test('runDirectChatCompletion finalizes with the accumulated result at the tool safety limit', async () => {
+  let requests = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '完成分步任务' }],
     tools: [{ type: 'function', function: { name: 'read' } }],
-    maxToolRounds: 2,
+    maxToolRounds: 1,
+    finalizeAtToolRoundLimit: true,
     onText: () => {},
-    executeTool: async () => ({ content: 'ok' }),
-    sendChatCompletion: async () => sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"a"}' } }] } }] }),
-      '[DONE]',
-    ]),
-  }), /工具调用超过 2 轮/)
+    executeTool: async () => ({ content: '第一步真实结果', status: 'succeeded' }),
+    sendChatCompletion: async request => {
+      requests += 1
+      if (requests < 3) {
+        return sseResponse([
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_read_${requests}`,
+                      function: { name: 'read', arguments: '{"path":"a"}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          '[DONE]',
+        ])
+      }
+      assert.equal(request.tools, undefined)
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: '已基于真实结果完成。' } }] }),
+        '[DONE]',
+      ])
+    },
+  })
+  assert.equal(result.text, '已基于真实结果完成。')
+  assert.equal(requests, 3)
 })
 
 test('runDirectChatCompletion enforces a hard model request limit', async () => {
   let requests = 0
-  await assert.rejects(() => runDirectChatCompletion({
-    messages: [{ role: 'user', content: '有限循环' }],
-    tools: [{ type: 'function', function: { name: 'read' } }],
-    maxToolRounds: 10,
-    maxModelRequests: 3,
-    allowedToolNamesAtModelRequestLimit: ['read'],
-    onText: () => {},
-    executeTool: async () => ({ content: 'ok' }),
-    sendChatCompletion: async () => {
-      requests += 1
-      return sseResponse([
-        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_read_${requests}`, function: { name: 'read', arguments: '{"path":"a"}' } }] } }] }),
-        '[DONE]',
-      ])
-    },
-  }), /模型请求超过 3 次/)
+  await assert.rejects(
+    () =>
+      runDirectChatCompletion({
+        messages: [{ role: 'user', content: '有限循环' }],
+        tools: [{ type: 'function', function: { name: 'read' } }],
+        maxToolRounds: 10,
+        maxModelRequests: 3,
+        allowedToolNamesAtModelRequestLimit: ['read'],
+        onText: () => {},
+        executeTool: async () => ({ content: 'ok' }),
+        sendChatCompletion: async () => {
+          requests += 1
+          return sseResponse([
+            JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: `call_read_${requests}`,
+                        function: { name: 'read', arguments: '{"path":"a"}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            '[DONE]',
+          ])
+        },
+      }),
+    /模型请求超过 3 次/,
+  )
   assert.equal(requests, 3)
 })
 
@@ -801,7 +1307,24 @@ test('runDirectChatCompletion stops after a successful terminal tool', async () 
     sendChatCompletion: async () => {
       requests += 1
       return sseResponse([
-        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/结果.md","content":"ok"}' } }] } }] }),
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write',
+                    function: {
+                      name: 'write',
+                      arguments: '{"path":"wiki/结果.md","content":"ok"}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
         '[DONE]',
       ])
     },
@@ -824,7 +1347,24 @@ test('runDirectChatCompletion stops after a matching successful batch tool call'
     sendChatCompletion: async () => {
       requests += 1
       return sseResponse([
-        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_wiki', function: { name: 'wiki', arguments: '{"action":"scaffold","plan":{"directories":[],"files":[]}}' } }] } }] }),
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_wiki',
+                    function: {
+                      name: 'wiki',
+                      arguments: '{"action":"scaffold","plan":{"directories":[],"files":[]}}',
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
         '[DONE]',
       ])
     },
@@ -850,13 +1390,41 @@ test('runDirectChatCompletion finalizes after a Wiki tool uses the last request'
       requests += 1
       if (requests === 1) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_context', function: { name: 'wiki_context', arguments: '{}' } }] } }] }),
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_context',
+                      function: { name: 'wiki_context', arguments: '{}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
           '[DONE]',
         ])
       }
       if (request.tools) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_wiki', function: { name: 'wiki', arguments: '{"action":"replace","apply":true}' } }] } }] }),
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: 'call_wiki',
+                      function: { name: 'wiki', arguments: '{"action":"replace","apply":true}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
           '[DONE]',
         ])
       }
@@ -871,18 +1439,37 @@ test('runDirectChatCompletion finalizes after a Wiki tool uses the last request'
 })
 
 test('runDirectChatCompletion rejects non-write tools at the request limit', async () => {
-  await assert.rejects(() => runDirectChatCompletion({
-    messages: [{ role: 'user', content: '读取' }],
-    tools: [{ type: 'function', function: { name: 'read' } }],
-    maxModelRequests: 1,
-    allowedToolNamesAtModelRequestLimit: ['write', 'edit'],
-    onText: () => {},
-    executeTool: async () => ({ content: 'unexpected' }),
-    sendChatCompletion: async () => sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"a"}' } }] } }] }),
-      '[DONE]',
-    ]),
-}), /只允许最终回答或指定写入工具/)
+  await assert.rejects(
+    () =>
+      runDirectChatCompletion({
+        messages: [{ role: 'user', content: '读取' }],
+        tools: [{ type: 'function', function: { name: 'read' } }],
+        maxModelRequests: 1,
+        allowedToolNamesAtModelRequestLimit: ['write', 'edit'],
+        onText: () => {},
+        executeTool: async () => ({ content: 'unexpected' }),
+        sendChatCompletion: async () =>
+          sseResponse([
+            JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: 'call_read',
+                        function: { name: 'read', arguments: '{"path":"a"}' },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            '[DONE]',
+          ]),
+      }),
+    /只允许最终回答或指定写入工具/,
+  )
 })
 
 test('runDirectChatCompletion finalizes a read-only MCP task after the tool budget', async () => {
@@ -901,11 +1488,28 @@ test('runDirectChatCompletion finalizes a read-only MCP task after the tool budg
       requestTools.push(request.tools)
       if (requests < 3) {
         return sseResponse([
-          JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${requests}`, function: { name: 'mcp__github__search', arguments: '{}' } }] } }] }),
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_${requests}`,
+                      function: { name: 'mcp__github__search', arguments: '{}' },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
           '[DONE]',
         ])
       }
-      return sseResponse([JSON.stringify({ choices: [{ delta: { content: '已找到项目' } }] }), '[DONE]'])
+      return sseResponse([
+        JSON.stringify({ choices: [{ delta: { content: '已找到项目' } }] }),
+        '[DONE]',
+      ])
     },
   })
 
@@ -918,7 +1522,10 @@ test('runDirectChatCompletion compacts prior tool rounds when enabled', async ()
   const requests: any[][] = []
   let round = 0
   const result = await runDirectChatCompletion({
-    messages: [{ role: 'system', content: '合同' }, { role: 'user', content: '任务' }],
+    messages: [
+      { role: 'system', content: '合同' },
+      { role: 'user', content: '任务' },
+    ],
     tools: [{ type: 'function', function: { name: 'read' } }],
     maxModelRequests: 4,
     compactToolHistory: true,
@@ -927,17 +1534,34 @@ test('runDirectChatCompletion compacts prior tool rounds when enabled', async ()
     sendChatCompletion: async request => {
       requests.push(request.messages)
       round += 1
-      if (round < 4) return sseResponse([
-        JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: `call_${round}`, function: { name: 'read', arguments: `{\"path\":\"${round}\"}` } }] } }] }),
-        '[DONE]',
-      ])
+      if (round < 4)
+        return sseResponse([
+          JSON.stringify({
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: `call_${round}`,
+                      function: { name: 'read', arguments: `{\"path\":\"${round}\"}` },
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          '[DONE]',
+        ])
       return sseResponse([JSON.stringify({ choices: [{ delta: { content: '完成' } }] }), '[DONE]'])
     },
   })
   assert.equal(result.text, '完成')
   assert.equal(requests.length, 4)
-  const toolPaths = (messages: any[]) => messages.flatMap(message => message.tool_calls || [])
-    .map(call => JSON.parse(call.function.arguments).path)
+  const toolPaths = (messages: any[]) =>
+    messages
+      .flatMap(message => message.tool_calls || [])
+      .map(call => JSON.parse(call.function.arguments).path)
   assert.equal(requests[2].filter(message => message.role === 'tool').length, 2)
   assert.deepEqual(toolPaths(requests[2]), ['1', '2'])
   assert.deepEqual(toolPaths(requests[3]), ['2', '3'])
@@ -963,29 +1587,52 @@ test('runDirectChatCompletion stops remaining tools when the run is aborted', as
   const executed: string[] = []
   const events: Array<{ type: string; call: { id: string }; status?: string }> = []
 
-  await assert.rejects(() => runDirectChatCompletion({
-    messages: [{ role: 'user', content: '先读 Skill 再写文件' }],
-    tools: [{ type: 'function', function: { name: 'skill' } }],
-    onText: () => {},
-    onToolEvent: event => events.push(event),
-    signal: controller.signal,
-    executeTool: async call => {
-      executed.push(call.function.name)
-      if (call.function.name === 'skill') controller.abort()
-      return { content: 'ok' }
-    },
-    sendChatCompletion: async () => sseResponse([
-      JSON.stringify({ choices: [{ delta: { tool_calls: [
-        { index: 0, id: 'call_skill', function: { name: 'skill', arguments: '{}' } },
-        { index: 1, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/hot.md","content":"x"}' } },
-      ] } }] }),
-      '[DONE]',
-    ]),
-  }), error => error instanceof DOMException && error.name === 'AbortError')
+  await assert.rejects(
+    () =>
+      runDirectChatCompletion({
+        messages: [{ role: 'user', content: '先读 Skill 再写文件' }],
+        tools: [{ type: 'function', function: { name: 'skill' } }],
+        onText: () => {},
+        onToolEvent: event => events.push(event),
+        signal: controller.signal,
+        executeTool: async call => {
+          executed.push(call.function.name)
+          if (call.function.name === 'skill') controller.abort()
+          return { content: 'ok' }
+        },
+        sendChatCompletion: async () =>
+          sseResponse([
+            JSON.stringify({
+              choices: [
+                {
+                  delta: {
+                    tool_calls: [
+                      { index: 0, id: 'call_skill', function: { name: 'skill', arguments: '{}' } },
+                      {
+                        index: 1,
+                        id: 'call_write',
+                        function: {
+                          name: 'write',
+                          arguments: '{"path":"wiki/hot.md","content":"x"}',
+                        },
+                      },
+                    ],
+                  },
+                },
+              ],
+            }),
+            '[DONE]',
+          ]),
+      }),
+    error => error instanceof DOMException && error.name === 'AbortError',
+  )
 
   assert.deepEqual(executed, ['skill'])
-  assert.deepEqual(events.map(event => [event.type, event.call.id, event.status]), [
-    ['tool_execution_start', 'call_skill', undefined],
-    ['tool_execution_end', 'call_skill', 'cancelled'],
-  ])
+  assert.deepEqual(
+    events.map(event => [event.type, event.call.id, event.status]),
+    [
+      ['tool_execution_start', 'call_skill', undefined],
+      ['tool_execution_end', 'call_skill', 'cancelled'],
+    ],
+  )
 })

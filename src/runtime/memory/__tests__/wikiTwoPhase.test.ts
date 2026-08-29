@@ -107,22 +107,29 @@ test('Wiki Agent follows nested indexes until the leaf content is available', as
   assert.equal(result.text, '重写后的张飞提示词')
 })
 
-test('Wiki Agent rejects a path that is not linked by the current index', async () => {
+test('Wiki Agent reads the path requested by the model within the Wiki root', async () => {
   const calls: string[] = []
+  let requests = 0
   const result = await runWikiTwoPhase({
     messages: [{ role: 'user', content: '查询角色' }],
     task: '查询角色',
     entryResult: JSON.stringify({ entry: { path: 'index.md', content: '[[角色/index]]' } }),
-    sendChatCompletion: async request =>
-      request.messages.some(message => String(message.content).includes('WikiSynthesis'))
-        ? response({ answer: '基于已索引资料回答', changePlan: null })
-        : response({ paths: [{ path: '秘密.md', reason: '猜测路径' }], missing: [], status: 'need_more' }),
+    sendChatCompletion: async () => {
+      requests += 1
+      if (requests === 1)
+        return response({ paths: [{ path: '秘密.md', reason: '猜测路径' }], missing: [], status: 'need_more' })
+      if (requests === 2)
+        return response({ paths: [{ path: '角色/index.md', reason: '读取已授权入口' }], missing: [], status: 'complete' })
+      return response({ answer: '基于已索引资料回答', changePlan: null })
+    },
     executeWiki: async call => {
       calls.push(call.function.arguments)
       return { content: '{}', status: 'succeeded' }
     },
   })
-  assert.equal(calls.length, 0)
+  assert.equal(calls.length, 2)
+  assert.match(calls[0]!, /秘密\.md/)
+  assert.match(calls[1]!, /角色\/index\.md/)
   assert.match(result.text, /基于已索引资料回答/)
 })
 
@@ -144,7 +151,7 @@ test('Wiki Agent accepts status complete without the legacy sufficient field', a
   assert.equal(result.text, '完成')
 })
 
-test('Wiki Agent never applies a write plan after the read guard is reached', async () => {
+test('Wiki Agent still applies a valid write plan after the read guard is reached', async () => {
   let requests = 0
   const calls: string[] = []
   const result = await runWikiTwoPhase({
@@ -162,8 +169,42 @@ test('Wiki Agent never applies a write plan after the read guard is reached', as
       return { content: '{}', status: 'succeeded' }
     },
   })
-  assert.equal(calls.includes('wiki'), false)
+  assert.equal(calls.includes('wiki'), true)
+  assert.equal(result.applyResult, '{}')
   assert.match(result.text, /资料尚未读取完整/)
+})
+
+test('Wiki Agent can create content when the Wiki entry is empty', async () => {
+  let requests = 0
+  const calls: string[] = []
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '创建角色/关羽.md' }],
+    task: '创建角色/关羽.md',
+    entryResult: '{"entry":{"path":"index.md","content":""}}',
+    sendChatCompletion: async () => {
+      requests += 1
+      return requests === 1
+        ? response({ paths: [], missing: [], status: 'complete' })
+        : response({
+            answer: '已生成关羽角色资料',
+            changePlan: {
+              reason: '创建关羽角色资料',
+              basis: [],
+              operations: [
+                { kind: 'create', path: '角色/关羽.md', title: '关羽', content: '# 关羽\n' },
+              ],
+            },
+          })
+    },
+    executeWiki: async call => {
+      calls.push(call.function.name)
+      return { content: 'status: succeeded', status: 'succeeded' }
+    },
+  })
+
+  assert.deepEqual(calls, ['wiki'])
+  assert.equal(result.text, '已生成关羽角色资料')
+  assert.equal(result.applyResult, 'status: succeeded')
 })
 
 test('Wiki two-phase keeps the model answer when a read is cancelled', async () => {

@@ -33,12 +33,10 @@ export interface RunDirectChatCompletionOptions {
   executeTool?: DirectToolExecutor
   maxToolRounds?: number
   maxModelRequests?: number
-  resolveTools?: (context: {
-    modelRequests: number
-    toolRounds: number
-  }) => unknown[] | undefined
+  resolveTools?: (context: { modelRequests: number; toolRounds: number }) => unknown[] | undefined
   allowedToolNamesAtModelRequestLimit?: string[]
   finalizeAtModelRequestLimit?: boolean
+  finalizeAtToolRoundLimit?: boolean
   rejectFinalResponse?: (text: string, toolCalls: DirectToolCall[]) => string | null
   stopAfterSuccessfulToolNames?: string[]
   stopAfterSuccessfulToolCall?: (call: DirectToolCall) => boolean
@@ -75,7 +73,9 @@ export function isRetryableDirectResponseStatus(status: number): boolean {
 
 export function isRetryableDirectRequestFailure(error: unknown): boolean {
   const message = String((error as Error)?.message || error || '').toLowerCase()
-  return /\b(?:502|503|504|524)\b|network|fetch|load failed|connection|socket|timeout|timed out|error sending request|dns|econn/.test(message)
+  return /\b(?:502|503|504|524)\b|network|fetch|load failed|connection|socket|timeout|timed out|error sending request|dns|econn/.test(
+    message,
+  )
 }
 
 export function isRecoverableDirectTransportFailure(error: unknown): boolean {
@@ -95,7 +95,11 @@ export async function sendDirectRequestWithRetry(
     const startedAt = performance.now()
     try {
       const response = await send()
-      if (!isRetryableDirectResponseStatus(response.status) || attempt === DIRECT_REQUEST_RETRY_DELAYS.length) return response
+      if (
+        !isRetryableDirectResponseStatus(response.status) ||
+        attempt === DIRECT_REQUEST_RETRY_DELAYS.length
+      )
+        return response
       await response.body?.cancel().catch(() => {})
     } catch (error) {
       if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
@@ -120,10 +124,13 @@ export async function runDirectChatCompletion(
   const baseMessages = [...options.messages]
   const allToolCalls: DirectToolCall[] = []
   const maxToolRounds = Math.max(1, options.maxToolRounds || 64)
-  const maxModelRequests = options.maxModelRequests == null ? Infinity : Math.max(1, options.maxModelRequests)
-  const executeTool: DirectToolExecutor = options.executeTool || (async call => {
-    throw new Error(`Unsupported tool: ${call.function.name}`)
-  })
+  const maxModelRequests =
+    options.maxModelRequests == null ? Infinity : Math.max(1, options.maxModelRequests)
+  const executeTool: DirectToolExecutor =
+    options.executeTool ||
+    (async call => {
+      throw new Error(`Unsupported tool: ${call.function.name}`)
+    })
   let toolRounds = 0
   let fallbackText = ''
   let lengthPrefix = ''
@@ -151,7 +158,9 @@ export async function runDirectChatCompletion(
     const recordedRequests = modelRequestDurationMs.length
     let response: Response
     try {
-      response = await options.sendChatCompletion(request, durationMs => modelRequestDurationMs.push(durationMs))
+      response = await options.sendChatCompletion(request, durationMs =>
+        modelRequestDurationMs.push(durationMs),
+      )
     } catch (error) {
       if (modelRequestDurationMs.length === recordedRequests) {
         modelRequestDurationMs.push(Math.max(0, Math.round(performance.now() - requestStartedAt)))
@@ -169,11 +178,16 @@ export async function runDirectChatCompletion(
       completeTiming() {
         if (timingCompleted) return
         timingCompleted = true
-        modelRequestDurationMs[finalRequestIndex] += Math.max(0, Math.round(performance.now() - responseStartedAt))
+        modelRequestDurationMs[finalRequestIndex] += Math.max(
+          0,
+          Math.round(performance.now() - responseStartedAt),
+        )
       },
     }
   }
-  const completed = (result: Omit<RunDirectChatCompletionResult, 'metrics'>): RunDirectChatCompletionResult => ({
+  const completed = (
+    result: Omit<RunDirectChatCompletionResult, 'metrics'>,
+  ): RunDirectChatCompletionResult => ({
     ...result,
     metrics: {
       modelRequests: modelRequestDurationMs.length,
@@ -222,13 +236,15 @@ export async function runDirectChatCompletion(
       reasoning,
       toolNeedsApproval: options.toolNeedsApproval || (() => Boolean(options.beforeToolCall)),
       beforeToolCall: async call => {
-        if (!advertisedToolNames.has(call.function.name)) throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
+        if (!advertisedToolNames.has(call.function.name))
+          throw new Error(`工具未在当前请求中开放: ${call.function.name}`)
         return await options.beforeToolCall?.(call)
       },
       onToolEvent: options.onToolEvent,
     })
     lastFailedToolSignature = ''
-    for (const outcome of roundToolOutcomes) lastFailedToolSignature = outcome.failed ? outcome.signature : ''
+    for (const outcome of roundToolOutcomes)
+      lastFailedToolSignature = outcome.failed ? outcome.signature : ''
     return result
   }
 
@@ -239,16 +255,28 @@ export async function runDirectChatCompletion(
     return [...baseMessages, ...compactToolRounds.flat()]
   }
 
-  const finalizeWithoutTools = async (finalMessages: DirectApiMessage[]): Promise<RunDirectChatCompletionResult> => {
-    const finalRequest = await sendChatCompletion({
-      messages: [
-        ...finalMessages,
-        { role: 'user', content: '工具调用预算已用尽。请只根据已经返回的工具结果直接给出最终回答，不要再调用工具；如果证据不足，请明确说明。' },
-      ],
-      tools: undefined,
-    }, undefined, true)
+  const finalizeWithoutTools = async (
+    finalMessages: DirectApiMessage[],
+  ): Promise<RunDirectChatCompletionResult> => {
+    const finalRequest = await sendChatCompletion(
+      {
+        messages: [
+          ...finalMessages,
+          {
+            role: 'user',
+            content:
+              '工具调用预算已用尽。请只根据已经返回的工具结果直接给出最终回答，不要再调用工具；如果证据不足，请明确说明。',
+          },
+        ],
+        tools: undefined,
+      },
+      undefined,
+      true,
+    )
     try {
-      const final = await readChatCompletionDetails(finalRequest.response, value => options.onText(value))
+      const final = await readChatCompletionDetails(finalRequest.response, value =>
+        options.onText(value),
+      )
       return completed({
         text: final.text || fallbackText,
         toolCalls: allToolCalls,
@@ -263,19 +291,29 @@ export async function runDirectChatCompletion(
   while (true) {
     if (options.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
     const toolCallAccumulator: Record<number, DirectToolCall> = {}
-    currentTools = options.resolveTools?.({
-      modelRequests: logicalModelRequests,
-      toolRounds,
-    }) ?? options.tools
+    currentTools =
+      options.resolveTools?.({
+        modelRequests: logicalModelRequests,
+        toolRounds,
+      }) ?? options.tools
     const request = await sendChatCompletion({ messages: [...messages], tools: currentTools })
     const streamPrefix = lengthPrefix
     let stream
     try {
-      stream = await readChatCompletionDetails(request.response, value => options.onText(joinText(streamPrefix, value)), toolCallAccumulator)
+      stream = await readChatCompletionDetails(
+        request.response,
+        value => options.onText(joinText(streamPrefix, value)),
+        toolCallAccumulator,
+      )
     } catch (error) {
       request.completeTiming()
       if (options.continueOnInterruption === false) throw error
-      if (!(error instanceof DirectStreamInterruptionError) || options.signal?.aborted || Object.keys(toolCallAccumulator).length) throw error
+      if (
+        !(error instanceof DirectStreamInterruptionError) ||
+        options.signal?.aborted ||
+        Object.keys(toolCallAccumulator).length
+      )
+        throw error
       const partialSegment = error.partialText
       const partialText = joinText(streamPrefix, partialSegment)
       if (partialText) {
@@ -284,14 +322,21 @@ export async function runDirectChatCompletion(
       }
       const continuationMessages: DirectApiMessage[] = [
         ...messages,
-        ...((partialSegment || error.reasoning) ? [{
-          role: 'assistant',
-          content: partialSegment || null,
-          ...(error.reasoning ? { [error.reasoning.field]: error.reasoning.value } : {}),
-        }] : []),
-        { role: 'user', content: options.continueToolsOnInterruption
-          ? '上一段可见正文传输中断。请从末尾继续，不要重复已有内容。'
-          : '上一段可见正文传输中断。请从末尾继续，不要重复已有内容，也不要调用工具。' },
+        ...(partialSegment || error.reasoning
+          ? [
+              {
+                role: 'assistant',
+                content: partialSegment || null,
+                ...(error.reasoning ? { [error.reasoning.field]: error.reasoning.value } : {}),
+              },
+            ]
+          : []),
+        {
+          role: 'user',
+          content: options.continueToolsOnInterruption
+            ? '上一段可见正文传输中断。请从末尾继续，不要重复已有内容。'
+            : '上一段可见正文传输中断。请从末尾继续，不要重复已有内容，也不要调用工具。',
+        },
       ]
       const continuationRequest = await sendChatCompletion({
         messages: continuationMessages,
@@ -311,20 +356,39 @@ export async function runDirectChatCompletion(
             id: toolCall.id || `call_${toolCall.function.name}_${index + 1}`,
           }))
           .map(toolCall => normalizeToolCall(toolCall, currentTools))
-          if (continuationToolCalls.length) {
-            if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
-          if (logicalModelRequests >= maxModelRequests && continuationToolCalls.some(call => !(options.allowedToolNamesAtModelRequestLimit || []).includes(call.function.name))) {
+        if (continuationToolCalls.length) {
+          if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
+          if (
+            logicalModelRequests >= maxModelRequests &&
+            continuationToolCalls.some(
+              call =>
+                !(options.allowedToolNamesAtModelRequestLimit || []).includes(call.function.name),
+            )
+          ) {
             if (options.finalizeAtModelRequestLimit) return finalizeWithoutTools(messages)
             throw new Error(`达到模型请求上限后只允许最终回答或指定写入工具`)
           }
-          if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
+          if (toolRounds >= maxToolRounds) {
+            if (options.finalizeAtToolRoundLimit) return finalizeWithoutTools(messages)
+            throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
+          }
           allToolCalls.push(...continuationToolCalls)
           if (streamPrefix) lengthPrefix = partialText
           messages.push(...continuationMessages.slice(messages.length))
-          const continuationToolMessages = await buildToolMessages(continuationToolCalls, continuation.reasoning, currentTools)
+          const continuationToolMessages = await buildToolMessages(
+            continuationToolCalls,
+            continuation.reasoning,
+            currentTools,
+          )
           messages = appendToolMessages(continuationToolMessages)
           toolRounds += 1
-          if (successfulTerminalToolContent) return completed({ text: successfulTerminalToolContent, toolCalls: allToolCalls, usedSecondPass: true, finishReason: 'tool_complete' })
+          if (successfulTerminalToolContent)
+            return completed({
+              text: successfulTerminalToolContent,
+              toolCalls: allToolCalls,
+              usedSecondPass: true,
+              finishReason: 'tool_complete',
+            })
           continue
         }
         const text = joinText(partialText, continuation.text)
@@ -366,10 +430,18 @@ export async function runDirectChatCompletion(
       .map(toolCall => normalizeToolCall(toolCall, currentTools))
     if (!toolCalls.length) {
       const maxLengthContinuations = Math.max(0, options.maxLengthContinuations ?? 3)
-      if (stream.finishReason === 'length' && options.continueOnLength !== false && lengthContinuations < maxLengthContinuations) {
+      if (
+        stream.finishReason === 'length' &&
+        options.continueOnLength !== false &&
+        lengthContinuations < maxLengthContinuations
+      ) {
         lengthPrefix = joinText(lengthPrefix, text)
         messages.push(
-          { role: 'assistant', content: text || null, ...(stream.reasoning ? { [stream.reasoning.field]: stream.reasoning.value } : {}) },
+          {
+            role: 'assistant',
+            content: text || null,
+            ...(stream.reasoning ? { [stream.reasoning.field]: stream.reasoning.value } : {}),
+          },
           { role: 'user', content: '上一段回答达到输出上限。请从末尾继续，不要重复已有内容。' },
         )
         lengthContinuations += 1
@@ -379,7 +451,11 @@ export async function runDirectChatCompletion(
       const rejection = options.rejectFinalResponse?.(finalText, allToolCalls)
       if (rejection) {
         messages.push(
-          { role: 'assistant', content: text || null, ...(stream.reasoning ? { [stream.reasoning.field]: stream.reasoning.value } : {}) },
+          {
+            role: 'assistant',
+            content: text || null,
+            ...(stream.reasoning ? { [stream.reasoning.field]: stream.reasoning.value } : {}),
+          },
           { role: 'user', content: rejection },
         )
         lengthPrefix = ''
@@ -394,16 +470,30 @@ export async function runDirectChatCompletion(
     }
 
     if (options.allowToolCalls === false) throw new Error('此请求不允许工具调用')
-    if (logicalModelRequests >= maxModelRequests && toolCalls.some(call => !(options.allowedToolNamesAtModelRequestLimit || []).includes(call.function.name))) {
+    if (
+      logicalModelRequests >= maxModelRequests &&
+      toolCalls.some(
+        call => !(options.allowedToolNamesAtModelRequestLimit || []).includes(call.function.name),
+      )
+    ) {
       if (options.finalizeAtModelRequestLimit) return finalizeWithoutTools(messages)
       throw new Error('达到模型请求上限后只允许最终回答或指定写入工具')
     }
-    if (toolRounds >= maxToolRounds) throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
+    if (toolRounds >= maxToolRounds) {
+      if (options.finalizeAtToolRoundLimit) return finalizeWithoutTools(messages)
+      throw new Error(`工具调用超过 ${maxToolRounds} 轮，已停止`)
+    }
     allToolCalls.push(...toolCalls)
     const toolMessages = await buildToolMessages(toolCalls, stream.reasoning, currentTools)
     messages = appendToolMessages(toolMessages)
     toolRounds += 1
-    if (successfulTerminalToolContent) return completed({ text: successfulTerminalToolContent, toolCalls: allToolCalls, usedSecondPass: true, finishReason: 'tool_complete' })
+    if (successfulTerminalToolContent)
+      return completed({
+        text: successfulTerminalToolContent,
+        toolCalls: allToolCalls,
+        usedSecondPass: true,
+        finishReason: 'tool_complete',
+      })
     if (logicalModelRequests >= maxModelRequests && options.finalizeAtModelRequestLimit) {
       return finalizeWithoutTools(messages)
     }
@@ -411,13 +501,15 @@ export async function runDirectChatCompletion(
 }
 
 function toolNames(tools: unknown[] | undefined): Set<string> {
-  return new Set((tools || []).flatMap(tool => {
-    if (!tool || typeof tool !== 'object') return []
-    const definition = (tool as { function?: unknown }).function
-    if (!definition || typeof definition !== 'object') return []
-    const name = (definition as { name?: unknown }).name
-    return typeof name === 'string' ? [name] : []
-  }))
+  return new Set(
+    (tools || []).flatMap(tool => {
+      if (!tool || typeof tool !== 'object') return []
+      const definition = (tool as { function?: unknown }).function
+      if (!definition || typeof definition !== 'object') return []
+      const name = (definition as { name?: unknown }).name
+      return typeof name === 'string' ? [name] : []
+    }),
+  )
 }
 
 function normalizeToolCall(call: DirectToolCall, tools: unknown[] | undefined): DirectToolCall {
@@ -429,7 +521,11 @@ function normalizeToolCall(call: DirectToolCall, tools: unknown[] | undefined): 
   const skillAdvertised = tools?.some(tool => {
     if (!tool || typeof tool !== 'object') return false
     const definition = (tool as { function?: unknown }).function
-    return Boolean(definition && typeof definition === 'object' && (definition as { name?: unknown }).name === 'skill')
+    return Boolean(
+      definition &&
+      typeof definition === 'object' &&
+      (definition as { name?: unknown }).name === 'skill',
+    )
   })
   if (!skillAdvertised || !skillName || (argumentsText && argumentsText !== '{}')) return call
   return {

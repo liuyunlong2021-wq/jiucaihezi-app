@@ -9,8 +9,7 @@ description: Use when a user asks how to use Jiucaihezi's Memory Workbench (韭�
 
 - 当前产品只有通用记忆工作台：项目、对话、Wiki、普通文件和附件。
 - 点击“新建记忆空间”只创建 `wiki/index.md`、`hot.md`、`log.md` 和 `来源索引.md`；不预建业务目录，也没有每轮自动读取的 Wiki 文件。
-- 快速模式使用当前对话上下文和模型已有知识，只提供只读 `wiki_search`。
-- 记忆模式使用同一对话上下文，并按当前平台提供候选工具；模型决定是否调用。
+- 工作台使用同一对话上下文，并按当前平台提供用户明确选择的候选工具；模型决定是否调用。
 - DOCX、PDF、XLSX、PPTX 上传后保留原件并生成 Markdown 可读副本，模型读取 Markdown；原件不会被替换。
 - `上传并覆盖云端` 用本地文字快照覆盖云端，`下载并覆盖本地` 用云端文字快照覆盖本地；两者都不合并、不产生冲突副本。
 - 同步只处理允许的文字资料；媒体二进制、原始附件、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不参与同步。

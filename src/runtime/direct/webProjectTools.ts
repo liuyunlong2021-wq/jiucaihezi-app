@@ -29,7 +29,7 @@ type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
 
 // `terminal` is Desktop-only; never advertise an unavailable tool to Web models.
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS.filter(
-  tool => tool.function.name !== 'terminal',
+  tool => !['terminal', 'skill'].includes(tool.function.name),
 )
 
 export function buildWebProjectToolDefinitions() {
@@ -50,9 +50,17 @@ export function createWebProjectToolExecutor(input: {
   fetcher?: typeof fetch
   renderImage?: MemoryImageRenderer
   authorizedRawPaths?: string[]
+  preloadSkills?: string[]
 }): DirectToolExecutor {
   const fetcher = input.fetcher || fetch
   const skills = createCreativeSkillSession(fetcher)
+  let preloadPromise: Promise<void> | null = null
+  const ensurePreloadedSkills = () => {
+    preloadPromise ||= Promise.all((input.preloadSkills || []).map(name => skills.load(name))).then(
+      () => undefined,
+    )
+    return preloadPromise
+  }
 
   function requireProject(): string {
     if (!input.projectId) throw new Error('请先在第二列创建或选择项目')
@@ -107,8 +115,10 @@ export function createWebProjectToolExecutor(input: {
     const args = parseCreativeToolArguments(call)
     const name = call.function.name
 
+    if (name === 'read') await ensurePreloadedSkills()
+
     if (name === 'skill') {
-      return { content: await skills.load(String(args.name)) }
+      throw new Error('Web 端不支持动态 Skill 工具，请在本轮直接选择具体 Skill')
     }
 
     if (name === 'wiki') {
@@ -131,7 +141,6 @@ export function createWebProjectToolExecutor(input: {
       const rawPath = String(args.path || '')
       const resource = await skills.read(rawPath)
       if (resource !== null) return { content: linesPage(resource, args.offset, args.limit) }
-
       if (rawPath === '.' || rawPath === '') {
         const offset = boundedInteger(args.offset, 1)
         const limit = boundedInteger(args.limit, 200)
