@@ -10,10 +10,10 @@ function makeFile(name: string, type: string): File {
 test('AI App ratio nodes without upstream options still expose standard video ratios', () => {
   const field = aiAppNodeToField({
     nodeId: '1', nodeName: 'Minimax-h3', fieldName: 'aspect_ratio',
-    fieldValue: '16:9', fieldType: 'LIST', description: '比例',
+    fieldValue: '16:9 (Widescreen)', fieldType: 'LIST', description: '比例',
   })
-  assert.deepEqual(field.options?.map(option => option.value), ['16:9', '9:16'])
-  assert.equal(field.defaultValue, '16:9')
+  assert.deepEqual(field.options?.map(option => option.value), ['16:9 (Widescreen)', '9:16 (Portrait Widescreen)'])
+  assert.equal(field.defaultValue, '16:9 (Widescreen)')
 })
 
 test('addFiles only accepts file MIME groups supported by the selected model', () => {

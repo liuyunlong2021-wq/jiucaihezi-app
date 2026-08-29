@@ -834,7 +834,7 @@ export function aiAppNodeToField(node: AiAppNode): CreationFieldSpec {
   const isRatio = ['ratio', 'aspect_ratio', 'aspectratio'].includes(fieldName)
   const options = node.options?.length
     ? node.options
-    : isRatio ? ['16:9', '9:16'] : undefined
+    : isRatio ? ['16:9 (Widescreen)', '9:16 (Portrait Widescreen)'] : undefined
   const kind: CreationFieldSpec['kind'] =
     isMedia ? (node.fieldType.toLowerCase() as 'image' | 'video' | 'audio')
       : node.fieldType === 'LIST' ? 'select'
