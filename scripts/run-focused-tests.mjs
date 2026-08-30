@@ -26,6 +26,7 @@ const wave1FocusedTests = [
   'src/runtime/direct/__tests__/webProjectTools.test.ts',
   'src/runtime/direct/__tests__/desktopProjectTools.test.ts',
   'src/runtime/direct/__tests__/creativeSkillCatalog.test.ts',
+  'src/runtime/direct/__tests__/toolSearch.test.ts',
   'src/runtime/direct/__tests__/wikiRuntime.test.ts',
   'src/runtime/direct/__tests__/nativeWikiParity.test.ts',
   'src/components/memory/__tests__/memoryWorkbench.test.ts',
