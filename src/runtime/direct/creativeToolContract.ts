@@ -1,5 +1,9 @@
 import type { DirectToolCall } from './directTypes'
-import { getMcpBridgeToolDefinitions, isMcpToolName } from '@/runtime/tools/mcpBridge'
+import {
+  getMcpBridgeToolDefinitions,
+  getMcpServerBridgeToolDefinitions,
+  isMcpToolName,
+} from '@/runtime/tools/mcpBridge'
 import {
   loadWebSkillByName,
   readWebSkillResource,
@@ -649,7 +653,7 @@ export function buildCreativeToolDefinitions() {
 
 export function buildMemoryDesktopToolDefinitions() {
   const coreToolNames = MEMORY_DESKTOP_TOOL_DEFINITIONS.map(tool => tool.function.name)
-  return [...MEMORY_DESKTOP_TOOL_DEFINITIONS, ...getMcpBridgeToolDefinitions({ coreToolNames })]
+  return [...MEMORY_DESKTOP_TOOL_DEFINITIONS, ...getMcpServerBridgeToolDefinitions({ coreToolNames })]
 }
 
 type ToolFieldType =

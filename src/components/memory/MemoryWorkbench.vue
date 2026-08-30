@@ -368,8 +368,13 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       description: resource.kind === 'media' ? '项目媒体' : '项目文件',
       resource,
     }))
-  const mcpTools: MemoryMentionOption[] = (mcpStore.allMcpTools || []).map(tool => ({
-    type: 'tool', id: tool.name, display: tool.name, description: tool.description || '调用此 MCP 工具', icon: 'extension',
+  const mcpByServer = new Map<string, number>()
+  for (const tool of mcpStore.allMcpTools || []) {
+    mcpByServer.set(tool.serverId, (mcpByServer.get(tool.serverId) || 0) + 1)
+  }
+  const mcpTools: MemoryMentionOption[] = [...mcpByServer.entries()].map(([serverId, count]) => ({
+    type: 'tool', id: `mcp__${serverId}`, display: `MCP · ${serverId}`,
+    description: `整体工具（${count} 个 operation）`, icon: 'extension',
   }))
   return query.trim() ? [...toolOptions, ...skills, ...mcpTools, ...projectOptions] : [...toolOptions, ...skills.slice(0, 5), ...mcpTools, ...projectOptions]
 }

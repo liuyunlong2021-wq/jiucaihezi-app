@@ -65,7 +65,7 @@ Agent。OpenClaw 只作为成熟约束的参考来源；每项借鉴都必须落
 - 其他 Wiki 文件工具、MCP、媒体、3D、Terminal 进入目录。
 - 流程为 `tool_search -> tool_describe -> tool_call`。
 - 未注册、未授权、参数不合法的调用不执行，并返回真实 Observation。
-- MCP 在授权层按服务器管理，在调用层保留具体 operation schema。
+- MCP 在授权层按服务器管理，每个服务器对模型只暴露一个聚合工具；具体 operation schema 仅作为聚合工具的参数约束，由程序分发执行。
 
 验收：搜索结果只能绑定当前运行中的工具实例；跨会话或伪造工具 ID 不可调用。
 

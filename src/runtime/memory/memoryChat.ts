@@ -180,7 +180,12 @@ export function selectMemoryTools(
   if (fileToolsSelected)
     for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir']) allowed.add(name)
   for (const tool of tools)
-    if (selectedMcpToolNames.includes(tool.function?.name)) allowed.add(tool.function.name)
+    if (
+      selectedMcpToolNames.some(
+        name => name === tool.function?.name || name.startsWith(`${tool.function?.name}__`),
+      )
+    )
+      allowed.add(tool.function.name)
   if (mediaSelected)
     for (const name of [
       'create_document',

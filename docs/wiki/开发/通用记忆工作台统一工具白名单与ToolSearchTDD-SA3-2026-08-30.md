@@ -3,7 +3,7 @@
 > 日期：2026-08-30  
 > 分支：`codex/0830-skill-first-agent`  
 > 前置：SA2 `8fc32d4c`  
-> 状态：T1/T2 已实施；T3 待执行
+> 状态：T1/T2/T3 代码已实施；真实矩阵待执行
 
 ## 目标
 
@@ -15,7 +15,7 @@
 2. 搜索按工具名和描述匹配，返回稳定顺序、有限数量的 `{name, description}` 摘要。
 3. 精确描述只返回目录中存在且已授权的完整 schema；未知名称返回空结果，不执行调用。
 4. `tool_search` 和 `tool_describe` 本身不产生项目副作用，不绕过 `beforeToolCall`、审批和参数校验。
-5. MCP 仍按已连接服务器和当前暴露工具授权；搜索不能扩大 MCP 权限。
+5. MCP 按已连接服务器授权，每个服务器只暴露一个聚合工具；服务器内部 operation 只作为该聚合工具的参数 schema，搜索不能扩大 MCP 权限。
 
 ## TDD 顺序
 
@@ -40,10 +40,12 @@
 
 ### SA3-T3：MCP 与三端矩阵
 
-- MCP 搜索结果只包含当前连接且已选择的服务器工具。
+- MCP 搜索结果每个服务器只出现一次，返回当前连接且已选择服务器的聚合工具；聚合调用仍由程序校验并分发到具体 operation。
 - Web、Desktop、Mobile 不广告不可用工具；执行失败、未连接和未授权结果可见。
 
 验证：MCP bridge、Web/Desktop 工具定义测试和真实模型矩阵。
+
+实施记录（2026-08-30）：MCP 在记忆工作台按服务器聚合为单个 `mcp__<serverId>` 工具；`operation` 枚举和各 operation schema 作为该工具描述的一部分，执行时由程序分发到原有 MCP bridge。输入框 `@MCP` 菜单也按服务器显示一个整体入口。自动回归 `1227/1227`、`vue-tsc -b`、`git diff --check` 通过；Desktop/Web/Mobile 真实矩阵待用户验收。
 
 ## 完成标准
 
