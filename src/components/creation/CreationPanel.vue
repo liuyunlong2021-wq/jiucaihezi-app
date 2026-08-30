@@ -534,6 +534,8 @@ async function handleDiscoverAiApp() {
     cpState.aiAppOutputType = app.outputType
     cpState.aiAppBillingModel = app.billingModel
     cpState.aiAppFields = fields
+    const promptField = fields.find(isAiAppPromptField)
+    if (promptField) cpState.prompt = String(getModelFieldValue(promptField) || '')
     saveCpState()
   } catch (e: any) {
     cpState.progressText = `发现节点失败: ${e.message || e}`
@@ -549,6 +551,15 @@ function isAiAppMediaField(field: { kind: string; key: string }): boolean {
   // 只处理 AI 应用动态发现的媒体字段（key 格式为 "nodeId:fieldName"）
   return MEDIA_FIELD_KINDS.has(field.kind) && field.key.includes(':')
 }
+
+function isAiAppPromptField(field: { kind: string; key: string; label?: string }): boolean {
+  // ponytail: 7 个 Minimax H3 应用共用 141 提示词节点，保持其它动态文本字段不变
+  return field.kind === 'text' && field.label === '提示词' && field.key.startsWith('141:')
+}
+
+const aiAppPromptField = computed(() =>
+  cpState.task === 'ai-app' ? cpState.aiAppFields.find(isAiAppPromptField) : undefined,
+)
 
 async function pickAiAppMediaFile(field: CreationFieldSpec) {
   try {
@@ -3452,6 +3463,8 @@ async function updateCreationMention() {
 
 function onCreationPromptInput(event: Event) {
   resizePromptInput(event.currentTarget as HTMLTextAreaElement)
+  const promptField = aiAppPromptField.value
+  if (promptField) setModelFieldValue(promptField, cpState.prompt)
   void updateCreationMention()
 }
 
@@ -4324,6 +4337,7 @@ const canSend = computed(
         <div
           v-if="
             !isAiAppMediaField(field) &&
+            !isAiAppPromptField(field) &&
             ((field.key !== 'customWidth' && field.key !== 'customHight') ||
               cpState.ar === 'custom')
           "
@@ -4513,7 +4527,7 @@ const canSend = computed(
               <JcIcon name="attach-file" />
             </button>
             <textarea
-              v-if="showPromptInput"
+              v-if="showPromptInput || aiAppPromptField"
               ref="promptInput"
               v-model="cpState.prompt"
               rows="2"

@@ -58,6 +58,15 @@ test('creation prompt grows for typed and programmatically loaded text', () => {
   assert.match(source, /nextTick\(\(\) => resizePromptInput\(\)\)/)
 })
 
+test('RH app node 141 prompt is rendered in the composer', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /field\.kind === 'text' && field\.label === '提示词' && field\.key\.startsWith\('141:'\)/)
+  assert.match(source, /!isAiAppPromptField\(field\)/)
+  assert.match(source, /v-if="showPromptInput \|\| aiAppPromptField"/)
+  assert.match(source, /setModelFieldValue\(promptField, cpState\.prompt\)/)
+})
+
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
