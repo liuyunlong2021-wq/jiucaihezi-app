@@ -156,11 +156,11 @@ test('buildToolResultMessages reports non-negative duration for success, failure
   assert.equal(ended.every(event => Number.isFinite(event.durationMs) && event.durationMs >= 0), true)
 })
 
-test('buildToolResultMessages stops before a write when a parallel read segment is aborted', async () => {
+test('buildToolResultMessages pairs cancelled calls and stops before a write after an aborted read segment', async () => {
   const controller = new AbortController()
   const executed: string[] = []
 
-  await assert.rejects(() => buildToolResultMessages([
+  const messages = await buildToolResultMessages([
     call('call_read_a', 'read', { path: 'wiki/a.md' }),
     call('call_read_b', 'read', { path: 'wiki/b.md' }),
     call('call_write', 'write', { path: 'wiki/c.md', content: 'c' }),
@@ -169,9 +169,13 @@ test('buildToolResultMessages stops before a write when a parallel read segment 
     assert.equal(signal, controller.signal)
     if (toolCall.id === 'call_read_a') controller.abort()
     return { content: 'ok' }
-  }, { signal: controller.signal }), error => error instanceof DOMException && error.name === 'AbortError')
+  }, { signal: controller.signal })
 
   assert.equal(executed.includes('call_write'), false)
+  assert.deepEqual(messages.slice(1).map(message => message.tool_call_id), [
+    'call_read_a', 'call_read_b', 'call_write',
+  ])
+  assert.equal(messages[3].content, '工具执行已取消。')
 })
 
 test('buildToolResultMessages does not parallelize project-external reads', async () => {
