@@ -1274,6 +1274,8 @@ async function send() {
 }
 
 function stop() {
+  status.value = '已停止'
+  stopRunTimer()
   memoryRunGeneration++
   settleMemoryToolApproval('reject')
   abortController?.abort()

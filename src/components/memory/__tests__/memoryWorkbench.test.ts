@@ -660,6 +660,15 @@ test('memory retries transient requests and writes one Raw recovery point only a
   assert.match(workbench, /title="移除附件" :disabled="sending"/)
 })
 
+test('memory cancellation settles the visible run before invalidating stale callbacks', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(
+    workbench,
+    /function stop\(\) \{\s*status\.value = '已停止'\s*stopRunTimer\(\)\s*memoryRunGeneration\+\+[\s\S]*abortController\?\.abort\(\)/,
+  )
+})
+
 test('memory ignores stale streaming callbacks and stale resource loads', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
