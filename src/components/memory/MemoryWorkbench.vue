@@ -393,7 +393,7 @@ const {
 } = useFilteredList<MemoryMentionOption>({
   items: mentionItems,
   key: mentionKey,
-  filterKeys: ['display', 'description'],
+  filterKeys: ['id', 'display', 'description'],
   noInitialSelection: true,
 })
 const conversationTurns = computed(() => {

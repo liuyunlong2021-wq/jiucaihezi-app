@@ -1180,3 +1180,10 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   assert.match(runtime, /platform: isTauriRuntime\(\) \? 'desktop' : 'web'/)
   assert.doesNotMatch(runtime, /forceCloud: true/)
 })
+
+test('aggregate MCP mentions remain searchable by their internal tool prefix', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /filterKeys: \['id', 'display', 'description'\]/)
+  assert.match(workbench, /mentionOnInput\('mcp__'\)/)
+})
