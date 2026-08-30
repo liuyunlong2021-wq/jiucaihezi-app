@@ -3,7 +3,7 @@
 > 日期：2026-08-30  
 > 分支：`codex/0830-skill-first-agent`  
 > 前置：SA1 `0a3e2ad5`  
-> 状态：T1 已实施；T2/T3 待执行
+> 状态：已实施，自动验证通过
 
 ## 目标
 
@@ -49,12 +49,16 @@
 
 验证：`desktopProjectTools`、Web Skill resolver 定向测试。
 
+实施记录（2026-08-30）：Web `readWebSkillResource` 拒绝绝对路径、Windows 盘符、空路径、`.` 和 `..` 穿越；现有 Desktop/Web Skill 读取继续只接受已声明资源。
+
 ### SA2-T3：失败可见性与回归
 
 - Skill 目录加载失败、正文加载失败、资源加载失败均能到达模型或用户可见错误路径。
 - 选中 Skill 时不再注册 `skill` 工具；无 Skill 时保持普通对话行为。
 
 验证：聚焦测试、类型检查、`git diff --check`。
+
+实施记录（2026-08-30）：`buildSelectedSkillPrompt` 保留 Skill 正文加载失败的真实错误；新增失败可见性测试。聚焦测试 `1220/1220`、`vue-tsc -b`、`git diff --check` 均通过。
 
 ## 完成标准
 

@@ -586,6 +586,7 @@ export function selectedSkillNamesForInput(
 export async function buildSelectedSkillPrompt(
   names: string[],
   localSkills: Map<string, SkillConfig>,
+  loadSkill: typeof loadWebSkillByName = loadWebSkillByName,
 ): Promise<string> {
   if (!names.length) return ''
   const blocks = await Promise.all(
@@ -611,7 +612,7 @@ export async function buildSelectedSkillPrompt(
         ].join('\n')
       }
       try {
-        const skill = await loadWebSkillByName(name)
+        const skill = await loadSkill(name)
         return [
           `<selected_skill name="${skill.name}">`,
           '来源：产品 Skill 包。以下是完整 SKILL.md，属于本轮强制执行合同。',

@@ -116,6 +116,14 @@ test('selected Skill rules are injected as a mandatory contract', async () => {
   assert.match(prompt, /skill:\/\/local\/writer/)
 })
 
+test('selected Skill load failures remain visible to the model contract', async () => {
+  const prompt = await buildSelectedSkillPrompt(['missing-skill'], new Map(), async () => {
+    throw new Error('测试加载失败')
+  })
+  assert.match(prompt, /Skill 规则加载失败/)
+  assert.match(prompt, /测试加载失败/)
+})
+
 test('Skill binding normalizes names and rejects non-concrete selections', () => {
   assert.deepEqual(
     selectedSkillNamesForInput({ selectedSkillNames: [' writer ', 'writer'] }),
