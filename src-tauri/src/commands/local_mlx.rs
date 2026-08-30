@@ -1,6 +1,8 @@
 use crate::commands::tools::resolve_local_binary;
+use std::env;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
+use tokio::io::AsyncReadExt;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
@@ -30,6 +32,16 @@ fn find_mlx_server(model_path: &str) -> Option<PathBuf> {
     for ancestor in model.ancestors().take(6) {
         for env_dir in [".venv", "venv"] {
             let candidate = ancestor.join(env_dir).join("bin/mlx_lm.server");
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    if let Some(home) = env::var_os("HOME") {
+        for candidate in [
+            PathBuf::from(&home).join(".jiucaihezi/local-mlx/venv/bin/mlx_lm.server"),
+            PathBuf::from(&home).join("MLX/.venv/bin/mlx_lm.server"),
+        ] {
             if candidate.is_file() {
                 return Some(candidate);
             }
@@ -76,7 +88,7 @@ pub async fn start_mlx_service(model_path: String, api_base: String) -> Result<S
             .args(["--model", model_path, "--host", &host, "--port", &port.to_string()])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
             .kill_on_drop(true)
             .spawn()
             .map_err(|error| format!("无法启动 MLX 服务: {error}"))?;
@@ -92,8 +104,17 @@ pub async fn start_mlx_service(model_path: String, api_base: String) -> Result<S
                 let mut process = MLX_PROCESS.lock().await;
                 if let Some(child) = process.as_mut() {
                     if child.try_wait().ok().flatten().is_some() {
-                        *process = None;
-                        return Err("MLX 服务启动后立即退出，请检查模型路径和依赖".to_string());
+                        let mut exited = process.take().expect("MLX child exists");
+                        let mut stderr = String::new();
+                        if let Some(mut pipe) = exited.stderr.take() {
+                            let _ = pipe.read_to_string(&mut stderr).await;
+                        }
+                        let detail = stderr.trim();
+                        return Err(if detail.is_empty() {
+                            "MLX 服务启动后立即退出，请检查模型路径和依赖".to_string()
+                        } else {
+                            format!("MLX 服务启动失败：{detail}")
+                        });
                     }
                 }
             }

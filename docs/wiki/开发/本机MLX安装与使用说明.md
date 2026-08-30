@@ -32,7 +32,8 @@ pip install -U pip mlx-lm
 
 ## 常见问题
 
-- 显示“找不到 mlx_lm.server”：确认虚拟环境已安装 `mlx-lm`，并把模型放在该虚拟环境目录附近（App 会自动寻找 `.venv/bin/mlx_lm.server`）。
+- 显示“找不到 mlx_lm.server”：确认虚拟环境已安装 `mlx-lm`。App 会自动寻找模型目录附近的 `.venv/bin/mlx_lm.server`，也会检查 `~/.jiucaihezi/local-mlx/venv/bin/mlx_lm.server`。
+- 模型路径应是 `mlx-lm` 支持的文本生成模型目录或仓库 ID；PDF/VLM 模型不能用当前 `mlx_lm.server` 启动。
 - 显示“模型路径不能为空”：首次使用必须填写本地模型目录或 Hugging Face 模型 ID。
 - 显示“服务未就绪”：模型首次加载需要时间；检查内存是否足够，并确认没有其他程序占用配置的端口。
 - MLX 服务运行时会占用较多统一内存。建议先使用 4-bit 或 6-bit 模型，并为 macOS 和 KV Cache 留出空间。
