@@ -3,7 +3,7 @@
 > 日期：2026-08-30  
 > 分支：`codex/0830-skill-first-agent`  
 > 前置：SA1 `0a3e2ad5`  
-> 状态：测试设计冻结，尚未实施
+> 状态：T1 已实施；T2/T3 待执行
 
 ## 目标
 
@@ -38,6 +38,8 @@
 - 重复选择同一 Skill 只产生一个绑定段。
 
 验证：`memoryToolRouting`、`skillContentResolver` 定向测试。
+
+实施记录（2026-08-30）：`selectedSkillNamesForInput` 统一去空白、去重，并拒绝空名称与通用 `Skill` 标签；具体 Skill 仍由现有目录和本地 Skill 映射解析。新增回归测试，聚焦测试 `1218/1218` 通过。
 
 ### SA2-T2：完整正文与资源边界
 
