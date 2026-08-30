@@ -3,7 +3,7 @@
 > 日期：2026-08-30  
 > 分支：`codex/0830-skill-first-agent`  
 > 前置：SA1、SA2、SA3  
-> 状态：SA4-T1 已实施，SA4-T2 待执行
+> 状态：SA4-T1 已实施，SA4-T2 已实施，兼容清理待真实验收
 
 ## 目标
 
@@ -49,6 +49,13 @@ Agent 用户模式。底层文件工具继续保留。
 - 已取消的尾部调用不进入执行器、不触发工具启动事件；外层循环下一检查点收口。
 - 定向回归：`directTools` 与 `directEngine` 共 `51/51` 通过；`vue-tsc -b` 通过。
 - 未提前删除 `runWikiTwoPhase`、`wikiPlans` 或文件工具，等待 SA4-T2 统一路由回归。
+
+## SA4-T2 实施记录（2026-08-30）
+
+- `runMemoryChat` 的 Wiki-only 与 Skill 组合统一进入 `runDirectChatCompletion`。
+- Wiki 根入口仍由程序预读；后续 Wiki 工具遵循 `tool_search -> tool_describe -> tool_call`。
+- Wiki `apply` 在统一执行器中继续产生程序写入状态回执。
+- `runWikiTwoPhase`、`wikiPlans` 暂保留为历史回归依据，待真实矩阵通过后清理。
 
 ## 验收门禁
 

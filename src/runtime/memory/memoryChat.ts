@@ -42,7 +42,6 @@ import {
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from '@/runtime/direct/creativeToolContract'
 import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
-import { wikiPlanConfirmationId } from '@/runtime/direct/wikiRuntime'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
 import { buildMediaPlanPolicy } from '@/runtime/workbench/mediaPlan'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
@@ -60,7 +59,6 @@ import { safeFetch } from '@/utils/httpClient'
 import { supportsVision } from '@/utils/providerConfig'
 import { memoryToolNeedsApproval } from './memoryToolPolicy'
 import { WIKI_AGENT_POLICY } from './wikiAgent'
-import { runWikiTwoPhase } from './wikiTwoPhase'
 import {
   parseScene3DResultMarkers,
   scene3DResultMarker,
@@ -128,29 +126,6 @@ export function hasExplicitMemoryCapability(
     input.mediaSelected ||
     input.scene3dSelected ||
     input.terminalSelected,
-  )
-}
-
-export function shouldUseWikiTwoPhase(
-  input: Pick<
-    MemoryChatInput,
-    | 'selectedSkillNames'
-    | 'wikiSelected'
-    | 'fileToolsSelected'
-    | 'selectedMcpToolNames'
-    | 'mediaSelected'
-    | 'scene3dSelected'
-    | 'terminalSelected'
-  >,
-): boolean {
-  return Boolean(
-    input.wikiSelected &&
-      !input.selectedSkillNames?.length &&
-      !input.fileToolsSelected &&
-      !input.selectedMcpToolNames?.length &&
-      !input.mediaSelected &&
-      !input.scene3dSelected &&
-      !input.terminalSelected,
   )
 }
 
@@ -461,6 +436,24 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     }
     assertMemoryProjectMutationProtected(call, input.projectId)
     const toolResult = await projectTools(call, signal)
+    if (call.function.name === 'wiki') {
+      const args = parseArguments(call.function.arguments)
+      if (args.action === 'apply' && Array.isArray(args.operations)) {
+        const paths = args.operations.flatMap(operation => {
+          if (!operation || typeof operation !== 'object') return []
+          const row = operation as Record<string, unknown>
+          const path = typeof row.path === 'string' ? row.path : ''
+          const destination = typeof row.destination === 'string' ? row.destination : ''
+          return row.kind === 'move' && destination ? [`${path} -> ${destination}`] : [path]
+        }).filter(Boolean).map(path => path.replace(/^wiki\//, ''))
+        input.onProgramStatus?.({
+          kind: 'wiki',
+          status: toolResult.status === 'cancelled' ? 'cancelled' : toolResult.status === 'succeeded' ? 'succeeded' : 'failed',
+          paths: [...new Set(paths)],
+          reason: toolResult.status === 'succeeded' ? undefined : toolResult.content,
+        })
+      }
+    }
     if (call.function.name === 'create_3d_scene') {
       for (const marker of parseScene3DResultMarkers(toolResult.content))
         sceneResults.set(marker.path, marker)
@@ -471,7 +464,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const allMemoryToolDefinitions = desktopRuntime
     ? buildMemoryDesktopToolDefinitions()
     : buildMemoryWebProjectToolDefinitions()
-  const wikiOnlyTask = shouldUseWikiTwoPhase(input)
   const selectedMemoryToolDefinitions = selectMemoryTools(
     allMemoryToolDefinitions,
     selectedSkillNames,
@@ -488,86 +480,15 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     Boolean(input.scene3dSelected),
     Boolean(input.terminalSelected),
   )
-  const memoryToolDefinitions = wikiOnlyTask || !explicitCapabilitySelected
-    ? selectedMemoryToolDefinitions
-    : resolveMemoryToolSearchDefinitions(selectedMemoryToolDefinitions, describedToolNames)
+  const memoryToolDefinitions = resolveMemoryToolSearchDefinitions(
+    selectedMemoryToolDefinitions,
+    describedToolNames,
+  )
   authorizedToolDefinitions = selectedMemoryToolDefinitions
-  if (wikiOnlyTask) {
-    const entryResult = wikiEntryResult || {
-      content: JSON.stringify({ action: 'entry', root: 'wiki', sources: [], coverage: 'none' }),
-      status: 'failed' as const,
-    }
-    const phaseResult = await runWikiTwoPhase({
-      runId: `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-      messages,
-      task: latestUserText,
-      entryResult: entryResult.content,
-      sendChatCompletion,
-      signal: input.signal,
-      executeWiki: async call => {
-        if (
-          call.function.name === 'wiki' &&
-          memoryToolNeedsApproval(call, latestUserText, input.projectId)
-        ) {
-          const approvalArgs = parseArguments(call.function.arguments)
-          if (approvalArgs.action === 'apply' && Array.isArray(approvalArgs.operations)) {
-            call = {
-              ...call,
-              function: {
-                ...call.function,
-                arguments: JSON.stringify({
-                  ...approvalArgs,
-                  confirmedPlanId: wikiPlanConfirmationId(approvalArgs as never),
-                }),
-              },
-            }
-          }
-          if (!(await input.confirmTool(call)))
-            return { content: '操作已取消', status: 'cancelled' }
-        }
-        const result = await projectTools(call, input.signal)
-        input.onToolEvent?.({
-          type: 'tool_execution_end',
-          call,
-          result,
-          status: result.status || 'succeeded',
-          durationMs: 0,
-        })
-        return result
-      },
-    })
-    input.onMetrics?.(phaseResult.metrics)
-    if (phaseResult.plan.changePlan) {
-      const applyResult = phaseResult.applyResult || ''
-      const status = /^status:\s*(succeeded|failed|cancelled)$/mu.exec(applyResult)?.[1]
-      const plannedPaths = phaseResult.plan.changePlan.operations.flatMap(operation =>
-        operation.kind === 'move'
-          ? [`${operation.path} -> ${operation.destination}`]
-          : [operation.path],
-      )
-      const writtenPaths = [...applyResult.matchAll(/^-\s+(.+?)\s+sha256:/gmu)].map(match =>
-        match[1]!.trim(),
-      )
-      const paths = [...new Set([...plannedPaths, ...writtenPaths])].map(path =>
-        path.replace(/^wiki\//, ''),
-      )
-      input.onProgramStatus?.({
-        kind: 'wiki',
-        status: status === 'succeeded' || status === 'cancelled' ? status : 'failed',
-        paths,
-        reason: /^reason:\s*(.+)$/mu.exec(applyResult)?.[1],
-      })
-    }
-    const text = phaseResult.text
-    input.onText(text)
-    return text
-  }
   const result = await runDirectChatCompletion({
     messages,
     tools: memoryToolDefinitions,
-    resolveTools: wikiOnlyTask
-      ? undefined
-      : () => resolveMemoryToolSearchDefinitions(selectedMemoryToolDefinitions, describedToolNames),
+    resolveTools: () => resolveMemoryToolSearchDefinitions(selectedMemoryToolDefinitions, describedToolNames),
     sendChatCompletion,
     signal: input.signal,
     onText: input.onText,
