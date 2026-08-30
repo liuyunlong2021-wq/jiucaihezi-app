@@ -5,8 +5,8 @@ import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { connectLocalMlx } from '@/utils/localMlxRuntime'
-import { getLocalMlxApiBase, getLocalMlxModels, getLocalOllamaModels } from '@/utils/providerConfig'
+import { connectLocalMlx, startLocalMlx } from '@/utils/localMlxRuntime'
+import { getLocalMlxApiBase, getLocalMlxModelPath, getLocalMlxModels, getLocalOllamaModels, saveLocalMlxModelPath } from '@/utils/providerConfig'
 import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
@@ -39,6 +39,7 @@ const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
 const localMlxApiBase = ref(getLocalMlxApiBase())
+const localMlxModelPath = ref(getLocalMlxModelPath())
 const localMlxBusy = ref(false)
 const localMlxStatus = ref('')
 const installedLocalMlxModelCount = ref(0)
@@ -111,6 +112,25 @@ async function connectMlx() {
     localMlxStatus.value = result.message
   } catch (error) {
     localMlxStatus.value = error instanceof Error ? error.message : '未连接到 MLX 服务。'
+  } finally {
+    localMlxBusy.value = false
+  }
+}
+
+async function startAndConnectMlx() {
+  if (localMlxBusy.value) return
+  localMlxBusy.value = true
+  localMlxStatus.value = '正在启动 MLX...'
+  try {
+    const modelPath = localMlxModelPath.value.trim()
+    saveLocalMlxModelPath(modelPath)
+    await startLocalMlx(modelPath, localMlxApiBase.value)
+    const result = await connectLocalMlx(localMlxApiBase.value)
+    installedLocalMlxModelCount.value = result.models.length
+    agentStore.refreshLocalModels()
+    localMlxStatus.value = result.message
+  } catch (error) {
+    localMlxStatus.value = error instanceof Error ? error.message : '未能启动 MLX 服务。'
   } finally {
     localMlxBusy.value = false
   }
@@ -267,8 +287,13 @@ function showSync() {
             <span>服务地址</span>
             <input v-model="localMlxApiBase" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:8081" />
           </label>
+          <label class="memory-comfy-key">
+            <span>模型路径或仓库 ID</span>
+            <input v-model="localMlxModelPath" type="text" autocomplete="off" placeholder="例如 /Users/你的用户名/MLX/Qwen-4bit" />
+          </label>
           <div class="memory-local-actions">
-            <button :disabled="localMlxBusy" @click="connectMlx">{{ localMlxBusy ? '连接中' : '连接 MLX' }}</button>
+            <button :disabled="localMlxBusy" @click="startAndConnectMlx">{{ localMlxBusy ? '启动中' : '启动并连接' }}</button>
+            <button :disabled="localMlxBusy" @click="connectMlx">仅连接</button>
           </div>
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">

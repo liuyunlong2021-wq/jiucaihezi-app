@@ -8,6 +8,7 @@ export const LOCAL_MLX_PROVIDER_NAME = 'MLX'
 export const LOCAL_MLX_API_BASE = LOCAL_MLX_PROVIDER_HOST
 export const LOCAL_MLX_API_BASE_KEY = 'jcLocalMlxApiBase'
 export const LOCAL_MLX_MODELS_KEY = 'jcLocalMlxModels'
+export const LOCAL_MLX_MODEL_PATH_KEY = 'jcLocalMlxModelPath'
 export const LOCAL_OLLAMA_PROVIDER_ID = 'local-ollama'
 export const LOCAL_OLLAMA_PROVIDER_HOST = 'http://127.0.0.1:11434'
 export const LOCAL_OLLAMA_PROVIDER_NAME = 'Ollama'
@@ -124,6 +125,16 @@ export function saveLocalMlxApiBase(value: string, store: KeyValueStore = getSto
   const normalized = normalizeLocalMlxApiBase(value)
   writeStore(store, LOCAL_MLX_API_BASE_KEY, normalized)
   return normalized
+}
+
+export function getLocalMlxModelPath(store: KeyValueStore = getStorage()): string {
+  return readStore(store, LOCAL_MLX_MODEL_PATH_KEY) || getLocalMlxModels(store)[0]?.id || ''
+}
+
+export function saveLocalMlxModelPath(value: string, store: KeyValueStore = getStorage()): string {
+  const path = String(value || '').trim()
+  writeStore(store, LOCAL_MLX_MODEL_PATH_KEY, path)
+  return path
 }
 
 export function normalizeApiHost(host = DEFAULT_PROVIDER_HOST): string {

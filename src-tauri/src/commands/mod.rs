@@ -4,6 +4,7 @@ pub mod dev;
 pub mod greet;
 pub mod http;
 pub mod mcp;
+pub mod local_mlx;
 pub mod media;
 pub mod plugin;
 pub mod session;

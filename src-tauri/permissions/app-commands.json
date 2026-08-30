@@ -37,6 +37,7 @@
           "mcp_write_stdin",
           "mcp_kill_stdio",
           "resolve_mcp_node",
+          "start_mlx_service",
           "creation_mcp_complete",
           "resolve_creation_mcp",
           "save_generated_file",
