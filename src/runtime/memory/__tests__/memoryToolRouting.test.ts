@@ -6,6 +6,7 @@ import {
   hasExplicitMemoryCapability,
   normalizeMemoryToolResult,
   selectMemoryTools,
+  selectedSkillNamesForInput,
   shouldUseWikiTwoPhase,
 } from '../memoryChat'
 import type { SkillConfig } from '@/types/skill'
@@ -113,6 +114,15 @@ test('selected Skill rules are injected as a mandatory contract', async () => {
   assert.match(prompt, /# 必须遵守/)
   assert.match(prompt, /references\/style\.md/)
   assert.match(prompt, /skill:\/\/local\/writer/)
+})
+
+test('Skill binding normalizes names and rejects non-concrete selections', () => {
+  assert.deepEqual(
+    selectedSkillNamesForInput({ selectedSkillNames: [' writer ', 'writer'] }),
+    ['writer'],
+  )
+  assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: [''] }), /名称不能为空/)
+  assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: ['Skill'] }), /具体 Skill/)
 })
 
 test('explicit MCP keeps only the selected MCP tools', () => {

@@ -572,8 +572,15 @@ function parseArguments(value: string): Record<string, unknown> {
   }
 }
 
-function selectedSkillNamesForInput(input: Pick<MemoryChatInput, 'selectedSkillNames'>): string[] {
-  return [...new Set(input.selectedSkillNames || [])]
+export function selectedSkillNamesForInput(
+  input: Pick<MemoryChatInput, 'selectedSkillNames'>,
+): string[] {
+  const names = [...new Set((input.selectedSkillNames || []).map(name => String(name).trim()))]
+  if (names.some(name => !name)) throw new Error('Skill 名称不能为空')
+  if (names.some(name => name.toLowerCase() === 'skill')) {
+    throw new Error('必须选择具体 Skill，不能只选择通用 Skill 标签')
+  }
+  return names
 }
 
 export async function buildSelectedSkillPrompt(
