@@ -167,6 +167,14 @@ test('tool search exposes only core tools until an exact authorized tool is desc
   )
 })
 
+test('explicit Wiki exposes native Wiki actions in the first model request', () => {
+  assert.deepEqual(
+    resolveMemoryToolSearchDefinitions(tools, new Set(), new Set(['wiki_context', 'wiki']))
+      .map(tool => tool.function.name),
+    ['wiki_context', 'wiki', 'tool_search', 'tool_describe'],
+  )
+})
+
 test('attached document plus an add-to-scope instruction exposes write tools', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),

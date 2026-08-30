@@ -177,12 +177,11 @@ export function selectMemoryTools(
 export function resolveMemoryToolSearchDefinitions(
   authorizedTools: any[],
   describedToolNames: ReadonlySet<string>,
+  directlyExposedToolNames: ReadonlySet<string> = new Set(['wiki_context']),
 ): any[] {
   const exposed = new Set<string>()
   return [
-    ...authorizedTools.filter(
-      tool => tool.function?.name === WIKI_CONTEXT_TOOL_DEFINITION.function.name,
-    ),
+    ...authorizedTools.filter(tool => directlyExposedToolNames.has(tool.function?.name)),
     TOOL_SEARCH_TOOL_DEFINITION,
     TOOL_DESCRIBE_TOOL_DEFINITION,
     ...authorizedTools.filter(tool => describedToolNames.has(tool.function?.name)),
@@ -483,12 +482,17 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const memoryToolDefinitions = resolveMemoryToolSearchDefinitions(
     selectedMemoryToolDefinitions,
     describedToolNames,
+    input.wikiSelected ? new Set(['wiki_context', 'wiki']) : undefined,
   )
   authorizedToolDefinitions = selectedMemoryToolDefinitions
   const result = await runDirectChatCompletion({
     messages,
     tools: memoryToolDefinitions,
-    resolveTools: () => resolveMemoryToolSearchDefinitions(selectedMemoryToolDefinitions, describedToolNames),
+    resolveTools: () => resolveMemoryToolSearchDefinitions(
+      selectedMemoryToolDefinitions,
+      describedToolNames,
+      input.wikiSelected ? new Set(['wiki_context', 'wiki']) : undefined,
+    ),
     sendChatCompletion,
     signal: input.signal,
     onText: input.onText,
