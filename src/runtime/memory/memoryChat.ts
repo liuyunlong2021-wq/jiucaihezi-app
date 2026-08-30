@@ -127,6 +127,29 @@ export function hasExplicitMemoryCapability(
   )
 }
 
+export function shouldUseWikiTwoPhase(
+  input: Pick<
+    MemoryChatInput,
+    | 'selectedSkillNames'
+    | 'wikiSelected'
+    | 'fileToolsSelected'
+    | 'selectedMcpToolNames'
+    | 'mediaSelected'
+    | 'scene3dSelected'
+    | 'terminalSelected'
+  >,
+): boolean {
+  return Boolean(
+    input.wikiSelected &&
+      !input.selectedSkillNames?.length &&
+      !input.fileToolsSelected &&
+      !input.selectedMcpToolNames?.length &&
+      !input.mediaSelected &&
+      !input.scene3dSelected &&
+      !input.terminalSelected,
+  )
+}
+
 export function selectMemoryTools(
   tools: any[],
   selectedSkillNames: string[] = [],
@@ -211,6 +234,48 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
   const maxOutputTokens =
     model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
+  const localSkillLoader = desktopRuntime ? createLocalSkillLoader(customSkillsByName) : undefined
+  const rawProjectTools = isTauriRuntime()
+    ? createDesktopProjectToolExecutor({
+        projectDir: input.projectId,
+        authorizedRawPaths: input.authorizedRawPaths,
+        loadSkill: localSkillLoader,
+        preloadSkills: selectedSkillNames,
+        recordSceneVideo: input.recordSceneVideo
+          ? document => input.recordSceneVideo!(document, input.signal)
+          : undefined,
+      })
+    : createWebProjectToolExecutor({
+        projectId: input.projectId,
+        files: webProjectFiles,
+        authorizedRawPaths: input.authorizedRawPaths,
+        preloadSkills: selectedSkillNames.filter(name => !customSkillsByName.has(name)),
+      })
+  const projectTools: DirectToolExecutor = async (call, signal) =>
+    normalizeMemoryToolResult(await rawProjectTools(call, signal))
+  let wikiEntryResult: DirectToolResult | undefined
+  if (input.wikiSelected) {
+    const entryCall: DirectToolCall = {
+      id: 'wiki_entry_preflight',
+      type: 'function',
+      function: { name: 'wiki_context', arguments: JSON.stringify({ action: 'entry' }) },
+    }
+    try {
+      wikiEntryResult = await projectTools(entryCall, input.signal)
+    } catch (error) {
+      wikiEntryResult = {
+        content: JSON.stringify({
+          action: 'entry',
+          root: 'wiki',
+          sources: [],
+          coverage: 'none',
+          error: error instanceof Error ? error.message : String(error),
+        }),
+        status: 'failed',
+      }
+    }
+    if (wikiEntryResult.status === 'cancelled') throw new DOMException('Aborted', 'AbortError')
+  }
   const context = explicitCapabilitySelected
     ? buildCreativeContext({
         messages: [...input.conversationTurns, input.userTurn],
@@ -245,6 +310,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
             '不要声称读取了没有实际查询的内容。',
             WIKI_AGENT_POLICY,
           ].join('\n'),
+      wikiEntryResult?.content
+        ? `本轮 Wiki 根入口已由程序预读，以下内容是事实上下文；需要更深信息时再调用 wiki_context。\n< wiki_entry >\n${wikiEntryResult.content}\n</ wiki_entry >`
+        : '',
     ]
       .filter(Boolean)
       .join('\n\n'),
@@ -325,26 +393,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return text
   }
 
-  const localSkillLoader = desktopRuntime ? createLocalSkillLoader(customSkillsByName) : undefined
-  const rawProjectTools = isTauriRuntime()
-    ? createDesktopProjectToolExecutor({
-        projectDir: input.projectId,
-        authorizedRawPaths: input.authorizedRawPaths,
-        loadSkill: localSkillLoader,
-        preloadSkills: selectedSkillNames,
-        recordSceneVideo: input.recordSceneVideo
-          ? document => input.recordSceneVideo!(document, input.signal)
-          : undefined,
-      })
-    : createWebProjectToolExecutor({
-        projectId: input.projectId,
-        files: webProjectFiles,
-        authorizedRawPaths: input.authorizedRawPaths,
-        preloadSkills: selectedSkillNames.filter(name => !customSkillsByName.has(name)),
-      })
-  const projectTools: DirectToolExecutor = async (call, signal) =>
-    normalizeMemoryToolResult(await rawProjectTools(call, signal))
-
   const wikiSearchSignatures = new Set<string>()
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
@@ -391,36 +439,12 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     Boolean(input.scene3dSelected),
     Boolean(input.terminalSelected),
   )
-  const wikiOnlyTask = Boolean(
-    input.wikiSelected &&
-    !input.fileToolsSelected &&
-    !input.selectedMcpToolNames?.length &&
-    !input.mediaSelected &&
-    !input.scene3dSelected &&
-    !input.terminalSelected,
-  )
+  const wikiOnlyTask = shouldUseWikiTwoPhase(input)
   if (wikiOnlyTask) {
-    const entryCall: DirectToolCall = {
-      id: 'wiki_entry_preflight',
-      type: 'function',
-      function: { name: 'wiki_context', arguments: JSON.stringify({ action: 'entry' }) },
+    const entryResult = wikiEntryResult || {
+      content: JSON.stringify({ action: 'entry', root: 'wiki', sources: [], coverage: 'none' }),
+      status: 'failed' as const,
     }
-    let entryResult: Awaited<ReturnType<DirectToolExecutor>>
-    try {
-      entryResult = await projectTools(entryCall, input.signal)
-    } catch (error) {
-      entryResult = {
-        content: JSON.stringify({
-          action: 'entry',
-          root: 'wiki',
-          sources: [],
-          coverage: 'none',
-          error: error instanceof Error ? error.message : String(error),
-        }),
-        status: 'failed',
-      }
-    }
-    if (entryResult.status === 'cancelled') throw new DOMException('Aborted', 'AbortError')
     const phaseResult = await runWikiTwoPhase({
       runId: `wiki-${Date.now()}-${Math.random().toString(36).slice(2)}`,
       messages,

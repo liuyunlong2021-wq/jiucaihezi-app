@@ -6,6 +6,7 @@ import {
   hasExplicitMemoryCapability,
   normalizeMemoryToolResult,
   selectMemoryTools,
+  shouldUseWikiTwoPhase,
 } from '../memoryChat'
 import type { SkillConfig } from '@/types/skill'
 
@@ -78,6 +79,12 @@ test('an attached document does not activate history or project capabilities', (
 test('a selected capability connects the task explicitly', () => {
   assert.equal(hasExplicitMemoryCapability({ wikiSelected: true }), true)
   assert.equal(hasExplicitMemoryCapability({ selectedSkillNames: ['jc-film-style'] }), true)
+})
+
+test('Wiki-only uses the Wiki protocol, but Skill plus Wiki uses the unified loop', () => {
+  assert.equal(shouldUseWikiTwoPhase({ wikiSelected: true }), true)
+  assert.equal(shouldUseWikiTwoPhase({ wikiSelected: true, selectedSkillNames: ['writer'] }), false)
+  assert.equal(shouldUseWikiTwoPhase({ wikiSelected: true, mediaSelected: true }), false)
 })
 
 test('selecting a concrete Skill exposes all currently available product tools', () => {
