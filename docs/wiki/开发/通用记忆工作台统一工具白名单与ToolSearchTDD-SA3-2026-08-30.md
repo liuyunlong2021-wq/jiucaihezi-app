@@ -3,7 +3,7 @@
 > 日期：2026-08-30  
 > 分支：`codex/0830-skill-first-agent`  
 > 前置：SA2 `8fc32d4c`  
-> 状态：T1 已实施；循环接入待执行
+> 状态：T1/T2 已实施；T3 待执行
 
 ## 目标
 
@@ -35,6 +35,8 @@
 - 后续调用必须经过当前白名单、审批和现有执行器；跨会话或伪造名称被拒绝并返回 Observation。
 
 验证：`directEngine` 与 `memoryToolRouting` 回归，四种 SA1 组合保持通过。
+
+实施记录（2026-08-30）：显式能力任务首轮只开放 `wiki_context`（若已授权）以及 `tool_search`、`tool_describe`；模型通过精确描述后，该工具 schema 才进入下一轮。所有执行继续经过现有白名单、审批和执行器。聚焦回归 `1224/1224`、`vue-tsc -b`、`git diff --check` 均通过。
 
 ### SA3-T3：MCP 与三端矩阵
 

@@ -5,11 +5,16 @@ import {
   buildSelectedSkillPrompt,
   hasExplicitMemoryCapability,
   normalizeMemoryToolResult,
+  resolveMemoryToolSearchDefinitions,
   selectMemoryTools,
   selectedSkillNamesForInput,
   shouldUseWikiTwoPhase,
 } from '../memoryChat'
 import type { SkillConfig } from '@/types/skill'
+import {
+  TOOL_DESCRIBE_TOOL_DEFINITION,
+  TOOL_SEARCH_TOOL_DEFINITION,
+} from '@/runtime/direct/creativeToolContract'
 
 const tools = [
   'skill',
@@ -146,6 +151,26 @@ test('MCP selection without a concrete tool exposes nothing', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, false, false, []).map(tool => tool.function.name),
     [],
+  )
+})
+
+test('tool search and describe definitions are read-only and explicit', () => {
+  assert.equal(TOOL_SEARCH_TOOL_DEFINITION.function.name, 'tool_search')
+  assert.equal(TOOL_DESCRIBE_TOOL_DEFINITION.function.name, 'tool_describe')
+  assert.deepEqual(TOOL_SEARCH_TOOL_DEFINITION.function.parameters.required, [])
+  assert.deepEqual(TOOL_DESCRIBE_TOOL_DEFINITION.function.parameters.required, ['name'])
+})
+
+test('tool search exposes only core tools until an exact authorized tool is described', () => {
+  assert.deepEqual(
+    resolveMemoryToolSearchDefinitions(tools, new Set()).map(tool => tool.function.name),
+    ['wiki_context', 'tool_search', 'tool_describe'],
+  )
+  assert.deepEqual(
+    resolveMemoryToolSearchDefinitions(tools, new Set(['terminal', 'forged'])).map(
+      tool => tool.function.name,
+    ),
+    ['wiki_context', 'tool_search', 'tool_describe', 'terminal'],
   )
 })
 

@@ -36,6 +36,9 @@ import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjec
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
 import {
   buildMemoryDesktopToolDefinitions,
+  parseCreativeToolArguments,
+  TOOL_DESCRIBE_TOOL_DEFINITION,
+  TOOL_SEARCH_TOOL_DEFINITION,
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from '@/runtime/direct/creativeToolContract'
 import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
@@ -68,6 +71,7 @@ import type { Scene3DDocument } from './scene3d'
 import type { ConversationTurn } from './conversationTranscript'
 import type { DirectRunMetrics, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { serializeToSkillMd, type SkillConfig } from '@/types/skill'
+import { describeToolDefinition, searchToolDefinitions } from '@/runtime/direct/toolSearch'
 
 export interface MemoryChatInput {
   projectId: string
@@ -190,6 +194,26 @@ export function selectMemoryTools(
   return tools.filter(tool => allowed.has(tool.function?.name))
 }
 
+export function resolveMemoryToolSearchDefinitions(
+  authorizedTools: any[],
+  describedToolNames: ReadonlySet<string>,
+): any[] {
+  const exposed = new Set<string>()
+  return [
+    ...authorizedTools.filter(
+      tool => tool.function?.name === WIKI_CONTEXT_TOOL_DEFINITION.function.name,
+    ),
+    TOOL_SEARCH_TOOL_DEFINITION,
+    TOOL_DESCRIBE_TOOL_DEFINITION,
+    ...authorizedTools.filter(tool => describedToolNames.has(tool.function?.name)),
+  ].filter(tool => {
+    const name = tool.function?.name
+    if (!name || exposed.has(name)) return false
+    exposed.add(name)
+    return true
+  })
+}
+
 export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   if (!input.projectId) throw new Error('请先创建或选择项目')
   if (input.userTurn.role !== 'user') throw new Error('请先输入消息')
@@ -304,6 +328,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
               ? '用户已选具体 Skill，程序已经加载其完整规则；必须遵守该 Skill，不得再次决定是否加载、跳过或替换它。'
               : '根据用户任务自主决定是否加载 Skill、查询项目或调用其他可用工具。没有需要时直接回答。',
             '同一阶段互不依赖的项目内只读工具请在同一回复中一起调用；写入、Terminal、审批和依赖读取结果的操作放到后续工具轮。',
+            '需要未直接展示的能力时，先用 tool_search 搜索当前白名单，再用 tool_describe 获取精确 schema；只有描述成功的工具才会在下一轮开放。',
             '只修改用户明确指定的文件，不自行扩展到相邻 Skill、Wiki 或项目文档；目标不明确时先询问。',
             '文件任务直接用 read -> write/edit -> 必要时验证完成；写入前不要在普通回答中重复输出完整草稿，成功后不要复述完整正文。',
             '写入目标尚不存在时，不要反复 read/glob 该目标；检查最近的已有父目录后，直接 mkdir/write 创建。用户给出当前项目绝对路径时按项目内路径处理。',
@@ -394,8 +419,26 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
 
   const wikiSearchSignatures = new Set<string>()
+  let authorizedToolDefinitions: any[] = []
+  const describedToolNames = new Set<string>()
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
+    if (call.function.name === 'tool_search') {
+      const args = parseCreativeToolArguments(call)
+      return {
+        content: JSON.stringify(
+          searchToolDefinitions(authorizedToolDefinitions, String(args.query || ''), Number(args.limit)),
+        ),
+      }
+    }
+    if (call.function.name === 'tool_describe') {
+      const args = parseCreativeToolArguments(call)
+      const definition = describeToolDefinition(authorizedToolDefinitions, String(args.name || ''))
+      if (definition) describedToolNames.add(String(args.name))
+      return definition
+        ? { content: JSON.stringify(definition) }
+        : { content: `工具未在当前白名单中：${String(args.name || '')}`, status: 'failed' as const }
+    }
     if (call.function.name === 'wiki_context') {
       const args = parseArguments(call.function.arguments)
       if (args.action === 'search') {
@@ -423,7 +466,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const allMemoryToolDefinitions = desktopRuntime
     ? buildMemoryDesktopToolDefinitions()
     : buildMemoryWebProjectToolDefinitions()
-  const memoryToolDefinitions = selectMemoryTools(
+  const wikiOnlyTask = shouldUseWikiTwoPhase(input)
+  const selectedMemoryToolDefinitions = selectMemoryTools(
     allMemoryToolDefinitions,
     selectedSkillNames,
     Boolean(input.wikiSelected),
@@ -439,7 +483,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     Boolean(input.scene3dSelected),
     Boolean(input.terminalSelected),
   )
-  const wikiOnlyTask = shouldUseWikiTwoPhase(input)
+  const memoryToolDefinitions = wikiOnlyTask || !explicitCapabilitySelected
+    ? selectedMemoryToolDefinitions
+    : resolveMemoryToolSearchDefinitions(selectedMemoryToolDefinitions, describedToolNames)
+  authorizedToolDefinitions = selectedMemoryToolDefinitions
   if (wikiOnlyTask) {
     const entryResult = wikiEntryResult || {
       content: JSON.stringify({ action: 'entry', root: 'wiki', sources: [], coverage: 'none' }),
@@ -513,6 +560,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const result = await runDirectChatCompletion({
     messages,
     tools: memoryToolDefinitions,
+    resolveTools: wikiOnlyTask
+      ? undefined
+      : () => resolveMemoryToolSearchDefinitions(selectedMemoryToolDefinitions, describedToolNames),
     sendChatCompletion,
     signal: input.signal,
     onText: input.onText,

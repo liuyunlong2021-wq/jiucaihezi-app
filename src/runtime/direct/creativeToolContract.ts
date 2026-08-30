@@ -66,6 +66,23 @@ export const WIKI_CONTEXT_TOOL_DEFINITION = tool(
   ['action'],
 )
 
+export const TOOL_SEARCH_TOOL_DEFINITION = tool(
+  'tool_search',
+  'Search currently authorized tools by name or description. Read-only; does not execute a tool.',
+  {
+    query: { type: 'string', description: 'Optional name or description search text' },
+    limit: { type: 'integer', minimum: 1, maximum: 50 },
+  },
+  [],
+)
+
+export const TOOL_DESCRIBE_TOOL_DEFINITION = tool(
+  'tool_describe',
+  'Return the exact schema for one currently authorized tool. Read-only; does not execute a tool.',
+  { name: { type: 'string', description: 'Exact tool name returned by tool_search' } },
+  ['name'],
+)
+
 export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool(
     'skill',
@@ -644,6 +661,8 @@ type ToolFieldType =
   | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
+  tool_search: { query: 'string', limit: 'integer' },
+  tool_describe: { name: 'string' },
   wiki_search: { query: 'stringOrStringArray', scope: 'string', limit: 'integer' },
   wiki_context: {
     action: 'string',
@@ -739,6 +758,8 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     }
   }
   const definition = [
+    TOOL_SEARCH_TOOL_DEFINITION,
+    TOOL_DESCRIBE_TOOL_DEFINITION,
     WIKI_SEARCH_TOOL_DEFINITION,
     ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
