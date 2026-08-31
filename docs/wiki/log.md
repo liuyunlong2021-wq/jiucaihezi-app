@@ -6,6 +6,12 @@
 - 确认 `0829-rhapp-prompt-141` 已合并到本地 `main`；当前 WikiAgent 工作区和 Skill-first 工作区仍分别保留未提交收尾改动，避免在合并前丢失用户已验收的界面与对话行为。
 - 本轮只记录现状和边界，不把未执行的真实模型、安装包、跨平台或生产发布验收写成通过。
 
+## [2026-08-31] 收尾完成 | Skill-first 与 WikiAgent 合并主线
+
+- `0829-WikiAgent` 提交 `49b515fc`、Skill-first 提交 `bcaa9163` 已合并到 `main`，合并提交 `1c83690e`；冲突文件保留 WikiAgent 白名单/渐进读取并接入 Skill-first Tool Search。
+- 合并后 Node focused `1243/1243`、Rust `403 passed / 1 ignored`、`vue-tsc -b`、`git diff --check` 全部通过。
+- 已删除已合并临时分支 `0829-WikiAgent`、`0829-rhapp-prompt-141`、`codex/0830-skill-first-agent`；OpenClaw 参考分支保留。真实模型、安装包、跨平台和生产发布验收未被自动测试替代。
+
 ## [2026-08-28] 实施完成 | Wiki Agent 结果优先与独立状态卡
 
 - Wiki Agent 收敛为最小两阶段：一次最小 ReadPlan、一次回答与可选 ChangePlan；不再因资料不足自动补读或阻断回答，`paths` 可为空。

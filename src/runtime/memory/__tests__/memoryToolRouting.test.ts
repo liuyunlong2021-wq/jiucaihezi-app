@@ -7,9 +7,15 @@ import {
   isWikiAgentMcpToolAllowed,
   memoryProgramKind,
   normalizeMemoryToolResult,
+  resolveMemoryToolSearchDefinitions,
   selectMemoryTools,
+  selectedSkillNamesForInput,
 } from '../memoryChat'
 import type { SkillConfig } from '@/types/skill'
+import {
+  TOOL_DESCRIBE_TOOL_DEFINITION,
+  TOOL_SEARCH_TOOL_DEFINITION,
+} from '@/runtime/direct/creativeToolContract'
 
 const tools = [
   'skill',
@@ -95,6 +101,7 @@ test('an attached document does not activate history or project capabilities', (
 test('a selected capability connects the task explicitly', () => {
   assert.equal(hasExplicitMemoryCapability({ wikiSelected: true }), true)
   assert.equal(hasExplicitMemoryCapability({ selectedSkillNames: ['jc-film-style'] }), true)
+  assert.equal(hasExplicitMemoryCapability({ avSelected: true }), true)
 })
 
 test('selecting a concrete Skill does not expose unrelated tools', () => {
@@ -123,6 +130,23 @@ test('selected Skill rules are injected as a mandatory contract', async () => {
   assert.match(prompt, /# 必须遵守/)
   assert.match(prompt, /references\/style\.md/)
   assert.match(prompt, /skill:\/\/local\/writer/)
+})
+
+test('selected Skill load failures remain visible to the model contract', async () => {
+  const prompt = await buildSelectedSkillPrompt(['missing-skill'], new Map(), async () => {
+    throw new Error('测试加载失败')
+  })
+  assert.match(prompt, /Skill 规则加载失败/)
+  assert.match(prompt, /测试加载失败/)
+})
+
+test('Skill binding normalizes names and rejects non-concrete selections', () => {
+  assert.deepEqual(
+    selectedSkillNamesForInput({ selectedSkillNames: [' writer ', 'writer'] }),
+    ['writer'],
+  )
+  assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: [''] }), /名称不能为空/)
+  assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: ['Skill'] }), /具体 Skill/)
 })
 
 test('Wiki plus Skill keeps the Wiki route without opening unrelated tools', () => {
@@ -178,6 +202,19 @@ test('MCP selection without a concrete tool exposes nothing', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, false, false, []).map(tool => tool.function.name),
     [],
+  )
+})
+
+test('tool search exposes only core tools until an authorized tool is described', () => {
+  assert.equal(TOOL_SEARCH_TOOL_DEFINITION.function.name, 'tool_search')
+  assert.equal(TOOL_DESCRIBE_TOOL_DEFINITION.function.name, 'tool_describe')
+  assert.deepEqual(
+    resolveMemoryToolSearchDefinitions(tools, new Set()).map(tool => tool.function.name),
+    ['wiki_context', 'tool_search', 'tool_describe'],
+  )
+  assert.deepEqual(
+    resolveMemoryToolSearchDefinitions(tools, new Set(['terminal'])).map(tool => tool.function.name),
+    ['wiki_context', 'tool_search', 'tool_describe', 'terminal'],
   )
 })
 

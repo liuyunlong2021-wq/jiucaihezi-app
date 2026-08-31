@@ -677,13 +677,19 @@ function parseArguments(value: string): Record<string, unknown> {
   }
 }
 
-function selectedSkillNamesForInput(input: Pick<MemoryChatInput, 'selectedSkillNames'>): string[] {
-  return [...new Set(input.selectedSkillNames || [])]
+export function selectedSkillNamesForInput(input: Pick<MemoryChatInput, 'selectedSkillNames'>): string[] {
+  const names = [...new Set((input.selectedSkillNames || []).map(name => String(name).trim()))]
+  if (names.some(name => !name)) throw new Error('Skill 名称不能为空')
+  if (names.some(name => name.toLowerCase() === 'skill')) {
+    throw new Error('必须选择具体 Skill，不能只选择通用 Skill 标签')
+  }
+  return names
 }
 
 export async function buildSelectedSkillPrompt(
   names: string[],
   localSkills: Map<string, SkillConfig>,
+  loadSkill: typeof loadWebSkillByName = loadWebSkillByName,
 ): Promise<string> {
   if (!names.length) return ''
   const blocks = await Promise.all(
@@ -709,7 +715,7 @@ export async function buildSelectedSkillPrompt(
         ].join('\n')
       }
       try {
-        const skill = await loadWebSkillByName(name)
+        const skill = await loadSkill(name)
         return [
           `<selected_skill name="${skill.name}">`,
           '来源：产品 Skill 包。以下是完整 SKILL.md，属于本轮强制执行合同。',

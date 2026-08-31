@@ -2,9 +2,10 @@
 
 ## [2026-08-31] Agent 收尾状态
 
-- 当前开发分支为 `0829-WikiAgent`，`main` 仍指向 `dec36620`；本轮 WikiAgent 改动尚未提交。
-- `0829-rhapp-prompt-141` 的 RH 提示词框修复已合并到 `main`；Skill-first 分支 `codex/0830-skill-first-agent` 仍待提交剩余改动并合并。
-- 收尾目标是将唯一 Agent 的 Skill-first、Wiki 渐进读取、工具白名单、取消和界面收尾统一进入 `main`，然后再删除已合并临时分支。
+- 当前开发分支为 `main`，合并提交为 `1c83690e`；WikiAgent 与 Skill-first 收尾已统一进入主线。
+- `0829-rhapp-prompt-141` 的 RH 提示词框修复、最近对话恢复、底部操作、三行输入、`@图文`/`@影音`、历史图片缩略图、MLX 启动连接、Tool Search 和 Agent Loop 均已进入主线。
+- 已删除 `0829-WikiAgent`、`0829-rhapp-prompt-141`、`codex/0830-skill-first-agent` 临时分支；`codex/0830-openclaw-agent-core` 作为参考工作区保留。
+- 合并后 Node focused `1243/1243`、Rust `403 passed / 1 ignored`、`vue-tsc -b` 和 `git diff --check` 通过；真实模型、安装包、跨平台和生产发布仍需单独验收。
 - 自动测试通过不等于真实模型、安装包、跨平台和生产发布验收；这些边界继续按各 TDD 记录。
 
 > 更新：2026-08-29 | 阶段：显式能力 Agent 总合同已定稿，按阶段实施
