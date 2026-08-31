@@ -60,6 +60,14 @@ test('memory right chat dock separates preview layout and collapses to a compact
   assert.match(markdown, /<JcIcon v-else name="view-list" \/>/)
 })
 
+test('memory composer keeps long Chinese input inside the available width', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /\.memory-input-row \{[^}]*min-width: 0;/)
+  assert.match(workbench, /\.memory-input-area \{[^}]*min-width: 0;/)
+  assert.match(workbench, /\.memory-composer-editable \{[^}]*white-space: pre-wrap;/)
+  assert.match(workbench, /\.memory-composer-editable \{[^}]*word-break: break-word;/)
+})
+
 test('memory file tree groups project identity above its three file actions', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const toolbar = tree.match(/<header class="pft-head">([\s\S]*?)<\/header>/)?.[1] || ''
@@ -290,7 +298,7 @@ test('memory opens the latest conversation and keeps message actions at the bott
 
 test('memory composer starts at a three-line input height', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /\.memory-input-area \{ display: flex; min-height: 76px;/)
+  assert.match(workbench, /\.memory-input-area \{[^}]*min-height: 76px;/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
@@ -1196,7 +1204,7 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   assert.match(settings, /v-model="localMlxApiBase"/)
   assert.match(settings, /v-model="localMlxModelPath"/)
   assert.match(settings, /启动并连接/)
-  assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:8081"/)
+  assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:9523"/)
   assert.match(settings, /本机 MLX/)
   assert.match(mlxRuntime, /fetcher: typeof fetch = safeFetch/)
   assert.match(

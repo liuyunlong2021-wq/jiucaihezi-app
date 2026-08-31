@@ -166,6 +166,16 @@ test('web project tools execute the native Wiki runtime without Python or Node',
 
   assert.match((await execute(call('wiki', { action: 'scaffold', type: 'dev_project' }))).content, /created-or-completed: docs\/wiki/)
   assert.match((await execute(call('wiki', { action: 'inspect' }))).content, /path: docs\/wiki/)
+  const applied = await execute(
+    call('wiki', {
+      action: 'apply',
+      reason: '回执测试',
+      basis: ['测试'],
+      operations: [{ kind: 'create', path: '测试/回执.md', title: '回执', content: '# 回执\n' }],
+    }),
+  )
+  assert.equal(applied.status, 'succeeded')
+  assert.equal((applied.details as { status?: string } | undefined)?.status, 'succeeded')
   assert.match((await execute(call('wiki_search', { query: 'Hot' }))).content, /CLAUDE\.md/)
   await assert.rejects(() => execute(call('wiki_search', { query: 'Hot', action: 'replace' })), /工具参数不支持/)
   assert.equal((await files.list(project.id)).some(entry => entry.path === '.raw' || entry.path.startsWith('.raw/')), false)

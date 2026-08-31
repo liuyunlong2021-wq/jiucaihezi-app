@@ -7,6 +7,8 @@ export interface WikiWorkspaceEntry {
 }
 
 export interface WikiWorkspace {
+  /** Absolute project root when the platform can authorize absolute inputs. */
+  rootPath?: string
   list(): Promise<WikiWorkspaceEntry[]>
   read(path: string): Promise<string>
   fingerprint(path: string): Promise<string>
@@ -110,6 +112,29 @@ export interface WikiSourceRecord {
   processedScope: string
 }
 
+export interface WikiOperationReceipt {
+  actionId: string
+  kind: WikiOperation['kind']
+  requestedPath: string
+  canonicalPath: string | null
+  requestedDestination?: string
+  canonicalDestination?: string | null
+  status: 'succeeded' | 'failed' | 'cancelled'
+  changed: boolean
+  verified: boolean
+}
+
+export interface WikiReceipt {
+  status: 'succeeded' | 'failed' | 'cancelled' | 'partial'
+  action: WikiAction
+  planId?: string
+  operations: WikiOperationReceipt[]
+  changedPaths: string[]
+  verifiedPaths: string[]
+  rollback: { attempted: boolean; succeeded: boolean | null }
+  error?: { code?: string; message: string }
+}
+
 export function wikiPlanConfirmationId(input: Pick<WikiActionInput, 'reason' | 'basis' | 'operations'>): string {
   const basis = Array.isArray(input.basis) ? input.basis : [input.basis]
   return `plan:${JSON.stringify({
@@ -129,23 +154,100 @@ interface Snapshot {
   paths: Set<string>
   dirs: Set<string>
   files: Set<string>
+  rootPath?: string
+}
+
+export type WikiPathErrorCode =
+  | 'PATH_INVALID'
+  | 'PATH_OUTSIDE_ROOT'
+  | 'PATH_NOT_FOUND'
+  | 'PATH_IS_DIRECTORY'
+  | 'PATH_EXPECTED_FILE'
+  | 'PATH_SYMLINK_ESCAPE'
+
+export class WikiPathError extends Error {
+  readonly code: WikiPathErrorCode
+  readonly requestedPath: string
+  readonly canonicalPath: string | null
+  readonly retryable: boolean
+
+  constructor(
+    code: WikiPathErrorCode,
+    message: string,
+    requestedPath: string,
+    canonicalPath: string | null = null,
+    retryable = false,
+  ) {
+    super(message)
+    this.name = 'WikiPathError'
+    this.code = code
+    this.requestedPath = requestedPath
+    this.canonicalPath = canonicalPath
+    this.retryable = retryable
+  }
 }
 
 function normalizePath(input: string, allowRoot = false): string {
   const raw = String(input || '').replace(/\\/g, '/')
-  if (
-    raw.startsWith('/') ||
-    /^[A-Za-z]:\//.test(raw) ||
-    /^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ||
-    raw.includes('\0')
-  ) {
-    throw new Error('Wiki 路径必须位于当前项目内')
+  if (raw.includes('\0'))
+    throw new WikiPathError('PATH_INVALID', 'Wiki 路径格式无效', String(input))
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw))
+    throw new WikiPathError('PATH_INVALID', 'Wiki 路径格式无效', String(input))
+  if (raw.startsWith('/') || /^[A-Za-z]:\//.test(raw)) {
+    throw new WikiPathError('PATH_OUTSIDE_ROOT', 'Wiki 路径必须位于当前项目内', String(input))
   }
-  const parts = raw.split('/').filter(part => part && part !== '.')
-  if (parts.some(part => part === '..')) throw new Error('Wiki 路径不能越过项目根目录')
+  const parts: string[] = []
+  for (const part of raw.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') {
+      if (!parts.length)
+        throw new WikiPathError('PATH_OUTSIDE_ROOT', 'Wiki 路径不能越过项目根目录', String(input))
+      parts.pop()
+      continue
+    }
+    parts.push(part)
+  }
   const path = parts.join('/')
-  if (!path && !allowRoot) throw new Error('Wiki 路径不能为空')
+  if (!path && !allowRoot)
+    throw new WikiPathError('PATH_INVALID', 'Wiki 路径不能为空', String(input))
   return path
+}
+
+function absoluteSegments(input: string): string[] {
+  return String(input || '')
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+}
+
+/** Resolve one user path to the project-relative Wiki identity. */
+export function resolveWikiCanonicalPath(
+  rawPath: string,
+  wiki: string,
+  rootPath?: string,
+  allowRoot = false,
+): string {
+  const requested = String(rawPath ?? '')
+  const raw = requested.replace(/\\/g, '/')
+  if (raw.includes('\0') || /^[a-z][a-z0-9+.-]*:\/\//i.test(raw))
+    throw new WikiPathError('PATH_INVALID', 'Wiki 路径格式无效', requested)
+  const absolute = raw.startsWith('/') || /^[A-Za-z]:\//.test(raw)
+  if (absolute) {
+    if (!rootPath)
+      throw new WikiPathError('PATH_OUTSIDE_ROOT', '绝对路径未位于已授权项目根目录内', requested)
+    const root = absoluteSegments(rootPath)
+    const target = absoluteSegments(raw)
+    const inside = root.every((part, index) => target[index] === part)
+    if (!inside)
+      throw new WikiPathError('PATH_OUTSIDE_ROOT', '绝对路径未位于已授权项目根目录内', requested)
+    const relative = target.slice(root.length).join('/')
+    const canonical = normalizePath(relative, allowRoot)
+    if (canonical !== wiki && !canonical.startsWith(`${wiki}/`))
+      throw new WikiPathError('PATH_OUTSIDE_ROOT', `Wiki 路径必须位于 ${wiki}/`, requested)
+    return canonical
+  }
+  const path = normalizePath(raw, allowRoot)
+  return path === wiki || path.startsWith(`${wiki}/`) ? path : joinPath(wiki, path)
 }
 
 function joinPath(...parts: string[]): string {
@@ -158,7 +260,7 @@ async function snapshot(workspace: WikiWorkspace): Promise<Snapshot> {
   const files = new Set(
     entries.filter(entry => !entry.isDir).map(entry => normalizePath(entry.path)),
   )
-  return { entries, dirs, files, paths: new Set([...dirs, ...files]) }
+  return { entries, dirs, files, paths: new Set([...dirs, ...files]), rootPath: workspace.rootPath }
 }
 
 function hasTree(state: Snapshot, path: string): boolean {
@@ -490,11 +592,10 @@ function contextTitle(path: string): string {
 
 function wikiEntryPath(state: Snapshot, wiki: string, requested?: string): string {
   const path = requested
-    ? resolveWikiFile(state, wiki, requested)
+    ? resolveWikiReadFile(state, wiki, requested)
     : state.files.has(`${wiki}/index.md`)
       ? `${wiki}/index.md`
       : `${wiki}/CLAUDE.md`
-  if (!state.files.has(path)) throw new Error(`Wiki 入口不存在: ${path}`)
   return path
 }
 
@@ -634,8 +735,18 @@ export async function buildWikiContext(
           ? (() => {
               const directory = path.slice(0, -'/index.md'.length)
               if ([...state.files].some(file => file.startsWith(`${directory}/`)))
-                throw new Error(`目录包含文件但缺少 index.md：${relativeToWiki(wiki, directory)}`)
-              throw new Error(`Wiki 页面不存在：${relativeToWiki(wiki, path)}`)
+                throw new WikiPathError(
+                  'PATH_NOT_FOUND',
+                  `目录包含文件但缺少 index.md：${relativeToWiki(wiki, directory)}`,
+                  path,
+                  path,
+                  true,
+                )
+              throw new WikiPathError('PATH_NOT_FOUND', `Wiki 页面不存在: ${path}`, path, path, true)
+            })()
+          : state.dirs.has(path)
+          ? (() => {
+              throw new WikiPathError('PATH_IS_DIRECTORY', `Wiki 路径是目录，不是文件: ${path}`, path, path)
             })()
           : {}),
         content: await workspace.read(path),
@@ -722,7 +833,7 @@ export async function buildWikiContext(
   const requested = [...new Set(input.paths || [])]
   if (!requested.length) throw new Error('Wiki 链接读取必须提供 paths')
   const aliases = wikiPageAliases(state, wiki)
-  const sourcePaths = requested.map(path => resolveWikiFile(state, wiki, path))
+  const sourcePaths = requested.map(path => resolveWikiReadFile(state, wiki, path))
   const pageContents = new Map<string, string>()
   const indexed = await indexedWikiCandidates(workspace, state, wiki, [])
   for (const path of new Set([...sourcePaths, ...indexed.navigation]))
@@ -1325,8 +1436,14 @@ function requireRepairBasis(input: WikiActionInput) {
 }
 
 function resolveWikiFile(state: Snapshot, wiki: string, rawPath: string): string {
-  const path = normalizePath(rawPath)
-  return path.startsWith(`${wiki}/`) ? path : joinPath(wiki, path)
+  return resolveWikiCanonicalPath(rawPath, wiki, state.rootPath)
+}
+
+function resolveWikiReadFile(state: Snapshot, wiki: string, rawPath: string): string {
+  const path = resolveWikiFile(state, wiki, rawPath)
+  if (state.dirs.has(path))
+    throw new WikiPathError('PATH_IS_DIRECTORY', `Wiki 路径是目录，不是文件: ${rawPath}`, rawPath, path)
+  return path
 }
 
 async function replace(
@@ -1343,7 +1460,7 @@ async function replace(
   if (!String(input.path || '').trim()) throw new Error('Wiki 修正必须提供目标 Markdown 文件路径')
   let target: string
   try {
-    target = resolveWikiFile(state, wiki, input.path!)
+    target = resolveWikiReadFile(state, wiki, input.path!)
   } catch {
     throw new Error('修正目标必须是当前 Wiki 内的 Markdown 文件')
   }
@@ -1449,11 +1566,19 @@ async function extend(
   ].join('\n')
 }
 
-function resolveWikiTarget(wiki: string, rawPath: string): string {
-  const path = normalizePath(rawPath)
-  if (path === wiki || path.startsWith(`${wiki}/`)) return path
-  if (/^(?:docs\/wiki|wiki)(?:\/|$)/.test(path)) throw new Error(`Wiki 路径必须位于 ${wiki}/`)
-  return joinPath(wiki, path)
+function resolveWikiTarget(wiki: string, rawPath: string, rootPath?: string): string {
+  return resolveWikiCanonicalPath(rawPath, wiki, rootPath, true)
+}
+
+function canonicalizeWikiOperation(
+  operation: WikiOperation,
+  wiki: string,
+  rootPath?: string,
+): WikiOperation {
+  const path = resolveWikiTarget(wiki, operation.path, rootPath)
+  if (operation.kind === 'move')
+    return { ...operation, path, destination: resolveWikiTarget(wiki, operation.destination, rootPath) }
+  return { ...operation, path }
 }
 
 function pageLink(wiki: string, path: string): string {
@@ -1573,21 +1698,31 @@ async function applyWiki(
   const requestedOperations = input.operations || []
   if (!requestedOperations.length) throw new Error('Wiki apply 必须提供 operations')
   if (requestedOperations.length > 200) throw new Error('单次 Wiki apply 最多 200 个操作')
-  const operations = requestedOperations.filter(
+  const canonicalRequestedOperations = requestedOperations.map(operation =>
+    canonicalizeWikiOperation(operation, wiki, state.rootPath),
+  )
+  const operations = canonicalRequestedOperations.filter(
     operation => !(isNavigationPath(operation.path) && ['replace', 'append'].includes(operation.kind)),
   )
+  const canonicalOperations = operations
+  const canonicalPlanId = wikiPlanConfirmationId({
+    reason: input.reason,
+    basis,
+    operations: canonicalOperations,
+  })
   if (
     operations.some(operation => ['move', 'trash'].includes(operation.kind)) &&
     !input.confirmedPlanId
   )
     throw new Error('移动、重命名或回收必须先确认完整预览')
   if (operations.some(operation => ['move', 'trash'].includes(operation.kind))) {
-    const expectedPlanId = wikiPlanConfirmationId({
+    const legacyPlanId = wikiPlanConfirmationId({
       reason: input.reason,
       basis,
       operations: requestedOperations,
     })
-    if (input.confirmedPlanId !== expectedPlanId) throw new Error('Wiki 确认计划已变化，请重新预览并确认')
+    if (input.confirmedPlanId !== canonicalPlanId && input.confirmedPlanId !== legacyPlanId)
+      throw new Error('Wiki 确认计划已变化，请重新预览并确认')
   }
   if (!workspace.remove) throw new Error('当前平台不支持 Wiki 事务恢复')
 
@@ -1603,8 +1738,12 @@ async function applyWiki(
             /(?:^|\/)(?:_?index|CLAUDE|hot|log|来源索引)\.md$/.test(path),
           ),
           ...operations
-            .filter(operation => operation.kind === 'replace' || operation.kind === 'append')
-            .map(operation => resolveWikiTarget(wiki, operation.path)),
+            .flatMap(operation => [
+              resolveWikiTarget(wiki, operation.path, state.rootPath),
+              ...(operation.kind === 'move'
+                ? [resolveWikiTarget(wiki, operation.destination, state.rootPath)]
+                : []),
+            ]),
         ]),
       ].filter(path => state.files.has(path))
   const loadedFiles = await Promise.all(
@@ -1641,7 +1780,7 @@ async function applyWiki(
   }
 
   for (const operation of operations) {
-    const path = resolveWikiTarget(wiki, operation.path)
+    const path = resolveWikiTarget(wiki, operation.path, state.rootPath)
     if (operation.kind === 'mkdir') {
       if (files.has(path)) throw new Error(`目录路径与文件冲突: ${path}`)
       ensureVirtualParents(`${path}/child`)
@@ -1694,7 +1833,7 @@ async function applyWiki(
       throw new Error(`Wiki 路径不存在: ${path}`)
     if (operation.kind === 'move') {
       if (!workspace.move) throw new Error('当前平台不支持 Wiki 移动')
-      const destination = resolveWikiTarget(wiki, operation.destination)
+      const destination = resolveWikiTarget(wiki, operation.destination, state.rootPath)
       if (state.paths.has(destination) || files.has(destination) || dirs.has(destination))
         throw new Error(`移动目标已存在: ${destination}`)
       if (destination.startsWith(`${path}/`)) throw new Error('不能把目录移动到自身内部')
@@ -1781,7 +1920,7 @@ async function applyWiki(
     let sourceIndex = files.get(`${wiki}/来源索引.md`)!
     const now = new Date().toISOString()
     for (const source of input.sources) {
-      const resolvedWikiPath = resolveWikiTarget(wiki, source.wikiPath)
+      const resolvedWikiPath = resolveWikiTarget(wiki, source.wikiPath, state.rootPath)
       if (!files.has(resolvedWikiPath)) throw new Error(`来源登记目标不存在: ${source.wikiPath}`)
       const wikiPath =
         pageLink(wiki, resolvedWikiPath) + (source.wikiSection ? `#${source.wikiSection}` : '')
@@ -1885,6 +2024,7 @@ async function applyWiki(
 
   return [
     'status: succeeded',
+    `plan-id: ${canonicalPlanId}`,
     `reason: ${input.reason.trim()}`,
     `operations: ${operations.length}`,
     `written: ${written.length}`,
@@ -1943,5 +2083,113 @@ export async function executeWikiAction(
       return await applyWiki(workspace, state, input)
     default:
       throw new Error(`不支持的 Wiki action: ${String(input.action)}`)
+  }
+}
+
+/** Execute a Wiki action while preserving a program-owned structured receipt. */
+export async function executeWikiActionWithReceipt(
+  workspace: WikiWorkspace,
+  input: WikiActionInput,
+  signal?: AbortSignal,
+): Promise<{
+  content: string
+  status: 'succeeded' | 'failed' | 'cancelled'
+  receipt: WikiReceipt
+}> {
+  const receipt: WikiReceipt = {
+    status: 'succeeded',
+    action: input.action,
+    operations: [],
+    changedPaths: [],
+    verifiedPaths: [],
+    rollback: { attempted: false, succeeded: null },
+  }
+  try {
+    signal?.throwIfAborted()
+    const state = await snapshot(workspace)
+    const wiki = findWiki(state)
+    if (wiki && input.action === 'apply' && input.operations?.length) {
+      receipt.operations = input.operations.map((operation, index) => {
+        try {
+          const canonical = canonicalizeWikiOperation(operation, wiki, state.rootPath)
+          return {
+            actionId: `action-${index + 1}`,
+            kind: operation.kind,
+            requestedPath: operation.path,
+            canonicalPath: canonical.path,
+            ...(canonical.kind === 'move'
+              ? {
+                  requestedDestination: (operation as Extract<WikiOperation, { kind: 'move' }>).destination,
+                  canonicalDestination: canonical.destination,
+                }
+              : {}),
+            status: 'succeeded' as const,
+            changed: true,
+            verified: false,
+          }
+        } catch {
+          return {
+            actionId: `action-${index + 1}`,
+            kind: operation.kind,
+            requestedPath: operation.path,
+            canonicalPath: null,
+            ...(operation.kind === 'move'
+              ? { requestedDestination: operation.destination, canonicalDestination: null }
+              : {}),
+            status: 'failed' as const,
+            changed: false,
+            verified: false,
+          }
+        }
+      })
+      receipt.planId = wikiPlanConfirmationId({
+        reason: input.reason,
+        basis: input.basis,
+        operations: receipt.operations
+          .filter(item => item.canonicalPath)
+          .map(item => {
+            const operation = input.operations![Number(item.actionId.slice(7)) - 1]!
+            return canonicalizeWikiOperation(operation, wiki, state.rootPath)
+          }),
+      })
+    }
+    const content = await executeWikiAction(workspace, input)
+    signal?.throwIfAborted()
+    const status = /^status:\s*(succeeded|failed|cancelled)$/mu.exec(content)?.[1] as
+      | 'succeeded'
+      | 'failed'
+      | 'cancelled'
+      | undefined
+    receipt.status = status || 'succeeded'
+    receipt.planId ||= /^plan-id:\s*(.+)$/mu.exec(content)?.[1]
+    receipt.changedPaths = [...content.matchAll(/^[-*]\s+(\S+)\s+sha256:/gmu)].map(
+      match => match[1]!,
+    )
+    receipt.verifiedPaths = receipt.changedPaths
+    for (const operation of receipt.operations) {
+      operation.status = receipt.status === 'succeeded' ? 'succeeded' : receipt.status
+      operation.verified = receipt.status === 'succeeded'
+    }
+    receipt.rollback = { attempted: false, succeeded: null }
+    return { content, status: receipt.status, receipt }
+  } catch (error) {
+    const cancelled = error instanceof DOMException && error.name === 'AbortError'
+    receipt.status = cancelled ? 'cancelled' : 'failed'
+    receipt.rollback =
+      input.action === 'apply' ? { attempted: true, succeeded: null } : { attempted: false, succeeded: null }
+    receipt.error = {
+      code: error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined,
+      message: error instanceof Error ? error.message : String(error),
+    }
+    for (const operation of receipt.operations) {
+      operation.status = receipt.status === 'cancelled' ? 'cancelled' : 'failed'
+      operation.changed = false
+      operation.verified = false
+    }
+    return {
+      content: `Tool error: ${receipt.error.message}`,
+      status: receipt.status,
+      receipt,
+    }
   }
 }

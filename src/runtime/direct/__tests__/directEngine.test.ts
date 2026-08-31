@@ -1000,7 +1000,7 @@ test('runDirectChatCompletion commits repeat protection in source order after pa
     sendChatCompletion: async () => responses.shift()!,
   })
 
-  assert.equal(firstExecutions, 2)
+  assert.equal(firstExecutions, 1)
 })
 
 test('runDirectChatCompletion includes streamed response time in model duration', async () => {

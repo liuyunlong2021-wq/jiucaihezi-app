@@ -1322,7 +1322,16 @@ function memoryToolApprovalMessage(call: DirectToolCall): string {
   if (call.function.name === 'terminal') return String(args.reason || '').split(/[。；;\n]/)[0]?.trim().slice(0, 24) || '执行本机命令'
   if (call.function.name === 'export_3d_scene_video') return '调用本机 FFmpeg 导出 MP4'
   if (call.function.name === 'delete') return `删除项目资源：${String(args.path || '')}`
-  if (call.function.name === 'wiki') return '修改项目 Wiki'
+  if (call.function.name === 'wiki') {
+    try {
+      const operations = Array.isArray(args.operations) ? args.operations as Array<Record<string, unknown>> : []
+      if (operations.some(operation => operation.kind === 'replace' && operation.replaceAll === true)) {
+        const path = String(operations.find(operation => operation.kind === 'replace' && operation.replaceAll === true)?.path || '')
+        return `确认将 Wiki 文件中的所有匹配项替换：${path}`
+      }
+    } catch { /* malformed arguments are reported by the tool */ }
+    return '修改项目 Wiki'
+  }
   if (call.function.name === 'write' || call.function.name === 'edit') return `修改项目外文件：${String(args.path || '')}`
   return '允许扩展工具继续操作'
 }
@@ -2849,8 +2858,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
 .memory-command-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
 .memory-command-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
-.memory-input-row { position: relative; display: grid; gap: 8px; padding: 10px; }
-.memory-input-area { display: flex; min-height: 76px; align-items: flex-start; padding: 7px 4px 0; }
+.memory-input-row { position: relative; display: grid; min-width: 0; gap: 8px; padding: 10px; }
+.memory-input-area { display: flex; min-width: 0; min-height: 76px; align-items: flex-start; padding: 7px 4px 0; }
 .memory-action-row { display: flex; min-width: 0; align-items: center; gap: 4px; }
 .memory-action-spacer { min-width: 8px; flex: 1; }
 .memory-input-drop-active { border: 1px dashed var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--paper)); }
@@ -2860,7 +2869,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-mention-kind, .memory-mention-empty { color: var(--ink3); font-size: 11px; }
 .memory-mention-empty { padding: 9px; }
-.memory-composer-editable { width: 100%; min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; overflow-wrap: anywhere; }
+.memory-composer-editable { width: 100%; min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .memory-composer-editable:empty::before { color: var(--ink3); content: attr(data-placeholder); pointer-events: none; }
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }

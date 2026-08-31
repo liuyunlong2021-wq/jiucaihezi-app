@@ -11,7 +11,13 @@ import {
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
-import { buildWikiContext, executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
+import {
+  buildWikiContext,
+  executeWikiAction,
+  executeWikiActionWithReceipt,
+  sha256Hex,
+  type WikiWorkspace,
+} from './wikiRuntime'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import {
   artifactFilename,
@@ -206,6 +212,7 @@ export function createDesktopProjectToolExecutor(input: {
   }
 
   const wikiWorkspace: WikiWorkspace = {
+    rootPath: root,
     async list() {
       return (await listFiles()).map(entry => ({ path: entry.path, isDir: entry.isDir }))
     },
@@ -306,7 +313,9 @@ export function createDesktopProjectToolExecutor(input: {
     }
 
     if (name === 'wiki') {
-      return { content: await executeWikiAction(wikiWorkspace, args as any) }
+      if (args.action !== 'apply') return { content: await executeWikiAction(wikiWorkspace, args as any) }
+      const result = await executeWikiActionWithReceipt(wikiWorkspace, args as any, signal)
+      return { content: result.content, status: result.status, details: result.receipt as unknown as Record<string, unknown> }
     }
 
     if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {

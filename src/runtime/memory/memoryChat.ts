@@ -548,10 +548,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       },
     })
     input.onMetrics?.(phaseResult.metrics)
-    if (phaseResult.plan.changePlan) {
+    if (phaseResult.plan.changePlan || phaseResult.applyResult) {
       const applyResult = phaseResult.applyResult || ''
       const status = /^status:\s*(succeeded|failed|cancelled)$/mu.exec(applyResult)?.[1]
-      const plannedPaths = phaseResult.plan.changePlan.operations.flatMap(operation =>
+      const plannedPaths = (phaseResult.plan.changePlan?.operations || []).flatMap(operation =>
         operation.kind === 'move'
           ? [`${operation.path} -> ${operation.destination}`]
           : [operation.path],

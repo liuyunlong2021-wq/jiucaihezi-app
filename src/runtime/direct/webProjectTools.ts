@@ -11,7 +11,13 @@ import {
   WIKI_SEARCH_TOOL_DEFINITION,
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
-import { buildWikiContext, executeWikiAction, sha256Hex, type WikiWorkspace } from './wikiRuntime'
+import {
+  buildWikiContext,
+  executeWikiAction,
+  executeWikiActionWithReceipt,
+  sha256Hex,
+  type WikiWorkspace,
+} from './wikiRuntime'
 import {
   artifactFilename,
   createArtifactHtml,
@@ -122,7 +128,9 @@ export function createWebProjectToolExecutor(input: {
     }
 
     if (name === 'wiki') {
-      return { content: await executeWikiAction(wikiWorkspace, args as any) }
+      if (args.action !== 'apply') return { content: await executeWikiAction(wikiWorkspace, args as any) }
+      const result = await executeWikiActionWithReceipt(wikiWorkspace, args as any, signal)
+      return { content: result.content, status: result.status, details: result.receipt as unknown as Record<string, unknown> }
     }
 
     if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {

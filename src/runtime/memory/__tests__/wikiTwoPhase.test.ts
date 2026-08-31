@@ -98,6 +98,93 @@ test('Wiki plus Skill can finish from the root index in one model request', asyn
   assert.deepEqual(result.plan.changePlan?.basis, [])
 })
 
+test('Wiki retries an existing-page write as a precise edit', async () => {
+  let modelRequests = 0
+  let applyCalls = 0
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '把关羽改成关小羽并写回 Wiki' }],
+    task: '把关羽改成关小羽并写回 Wiki',
+    entryResult: '{"entry":{"path":"index.md","content":"角色 -> 角色/index.md"}}',
+    sendChatCompletion: async () => {
+      modelRequests += 1
+      return modelRequests === 1
+        ? response({ answer: '已完成', actions: [{ kind: 'write', path: '角色/关羽.md', content: '# 关小羽\n' }] })
+        : response({
+            answer: '已完成',
+            actions: [{ kind: 'edit', path: '角色/关羽.md', oldText: '关羽', newText: '关小羽' }],
+          })
+    },
+    executeWiki: async () => {
+      applyCalls += 1
+      return applyCalls === 1
+        ? { content: 'Tool error: Wiki 页面已存在: wiki/角色/关羽.md', status: 'failed' }
+        : { content: 'status: succeeded', status: 'succeeded' }
+    },
+  })
+  assert.equal(modelRequests, 2)
+  assert.equal(applyCalls, 2)
+  assert.equal(result.applyResult, 'status: succeeded')
+  assert.equal(result.plan.changePlan?.operations[0]?.kind, 'replace')
+})
+
+test('Wiki never reports model-declared success when the change plan cannot be parsed', async () => {
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '修改 Wiki' }],
+    task: '修改 Wiki',
+    entryResult: '{}',
+    sendChatCompletion: async () => response({
+      answer: '已成功修改 Wiki',
+      actions: [{ operation: 'edit', path: '页面.md', oldText: '旧', newText: '新' }],
+    }),
+    executeWiki: async () => {
+      throw new Error('不应执行')
+    },
+  })
+  assert.doesNotMatch(result.text, /已成功修改/)
+  assert.match(result.text, /未执行/)
+  assert.match(result.applyResult || '', /status: failed/)
+})
+
+test('Wiki never reports success when apply rejects a multi-match edit', async () => {
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '把关羽改成关小羽' }],
+    task: '把关羽改成关小羽',
+    entryResult: '{}',
+    sendChatCompletion: async () => response({
+      answer: '已将全部改为关小羽',
+      actions: [{ type: 'edit', path: '角色/关羽.md', oldText: '关羽', newText: '关小羽' }],
+    }),
+    executeWiki: async () => ({
+      content: 'Tool error: 目标文件多处命中（6 处），需要确认 replaceAll',
+      status: 'failed',
+    }),
+  })
+  assert.doesNotMatch(result.text, /已将全部改为/)
+  assert.match(result.text, /Wiki 写入未执行/)
+})
+
+test('Wiki upgrades one multi-match edit to replaceAll for the existing approval gate', async () => {
+  const calls: any[] = []
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '把关羽改成关小羽' }],
+    task: '把关羽改成关小羽',
+    entryResult: '{}',
+    sendChatCompletion: async () => response({
+      answer: '已完成',
+      actions: [{ type: 'edit', path: '角色/关羽.md', oldText: '关羽', newText: '关小羽' }],
+    }),
+    executeWiki: async call => {
+      calls.push(JSON.parse(call.function.arguments))
+      return calls.length === 1
+        ? { content: 'Tool error: 目标文件多处命中（6 处），需要确认 replaceAll', status: 'failed' }
+        : { content: 'status: succeeded', status: 'succeeded' }
+    },
+  })
+  assert.equal(calls.length, 2)
+  assert.equal(calls[1].operations[0].replaceAll, true)
+  assert.equal(result.applyResult, 'status: succeeded')
+})
+
 test('Wiki structured step retries once when a local model returns reasoning without visible content', async () => {
   let requests = 0
   const result = await runWikiTwoPhase({
@@ -298,7 +385,7 @@ test('Wiki two-phase keeps the model answer when a read is cancelled', async () 
   assert.equal(result.text, '结果')
 })
 
-test('Wiki two-phase keeps the model answer when a write fails', async () => {
+test('Wiki two-phase reports the write failure instead of the model success claim', async () => {
   let requests = 0
   const result = await runWikiTwoPhase({
     messages: [{ role: 'user', content: '写入 Wiki' }],
@@ -319,7 +406,7 @@ test('Wiki two-phase keeps the model answer when a write fails', async () => {
       throw new Error('写入失败')
     },
   })
-  assert.equal(result.text, '这是给用户的正文')
+  assert.match(result.text, /Wiki 写入未执行：写入失败/)
   assert.match(result.applyResult || '', /status: failed/)
 })
 

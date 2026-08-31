@@ -135,7 +135,7 @@ export async function runDirectChatCompletion(
   let fallbackText = ''
   let lengthPrefix = ''
   let lengthContinuations = 0
-  let lastFailedToolSignature = ''
+  let lastFailedToolSignatures = new Set<string>()
   let successfulTerminalToolContent = ''
   let finalResponseUsed = false
   let roundToolOutcomes: Array<{ signature: string; failed: boolean }> = []
@@ -200,7 +200,7 @@ export async function runDirectChatCompletion(
   const executeToolWithRepeatGuard: DirectToolExecutor = async (call, signal) => {
     const signature = `${call.function.name}\u0000${call.function.arguments}`
     const outcomeIndex = roundToolOutcomes.push({ signature, failed: false }) - 1
-    if (signature === lastFailedToolSignature) {
+    if (lastFailedToolSignatures.has(signature)) {
       roundToolOutcomes[outcomeIndex]!.failed = true
       return {
         content: '这个工具调用刚刚失败。请根据真实错误换一种方法，不要原样重复。',
@@ -242,9 +242,9 @@ export async function runDirectChatCompletion(
       },
       onToolEvent: options.onToolEvent,
     })
-    lastFailedToolSignature = ''
-    for (const outcome of roundToolOutcomes)
-      lastFailedToolSignature = outcome.failed ? outcome.signature : ''
+    lastFailedToolSignatures = new Set(
+      roundToolOutcomes.filter(outcome => outcome.failed).map(outcome => outcome.signature),
+    )
     return result
   }
 

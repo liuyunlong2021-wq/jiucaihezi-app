@@ -17,6 +17,8 @@ export type DirectApiMessage = Record<string, any>
 export interface DirectToolResult {
   content: string
   status?: 'succeeded' | 'failed' | 'cancelled'
+  /** Program-owned structured receipt; model text is never used as status. */
+  details?: Record<string, unknown>
   followupMessages?: DirectApiMessage[]
 }
 

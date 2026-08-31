@@ -2,7 +2,14 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
-import { buildWikiContext, executeWikiAction, type WikiWorkspace } from '../wikiRuntime'
+import {
+  buildWikiContext,
+  executeWikiAction,
+  executeWikiActionWithReceipt,
+  resolveWikiCanonicalPath,
+  WikiPathError,
+  type WikiWorkspace,
+} from '../wikiRuntime'
 import { WIKI_TEMPLATES } from '../wikiStructures'
 
 function memoryWiki(
@@ -75,6 +82,60 @@ function developmentWiki(extra: Record<string, string | null> = {}) {
     ...extra,
   })
 }
+
+test('T1 canonical resolver accepts relative and authorized absolute Wiki paths', () => {
+  assert.equal(resolveWikiCanonicalPath('角色/../场景/赤壁.md', 'wiki'), 'wiki/场景/赤壁.md')
+  assert.equal(
+    resolveWikiCanonicalPath('/项目/wiki/角色/关羽.md', 'wiki', '/项目'),
+    'wiki/角色/关羽.md',
+  )
+  assert.throws(
+    () => resolveWikiCanonicalPath('/其他项目/wiki/关羽.md', 'wiki', '/项目'),
+    (error: unknown) => error instanceof WikiPathError && error.code === 'PATH_OUTSIDE_ROOT',
+  )
+  assert.throws(
+    () => resolveWikiCanonicalPath('../../关羽.md', 'wiki'),
+    (error: unknown) => error instanceof WikiPathError && error.code === 'PATH_OUTSIDE_ROOT',
+  )
+})
+
+test('T1 resolver does not guess extensions or semantic aliases', () => {
+  assert.equal(resolveWikiCanonicalPath('关羽', 'wiki'), 'wiki/关羽')
+  assert.equal(resolveWikiCanonicalPath('0825', 'wiki'), 'wiki/0825')
+  assert.throws(
+    () => resolveWikiCanonicalPath('https://example.com/wiki.md', 'wiki'),
+    (error: unknown) => error instanceof WikiPathError && error.code === 'PATH_INVALID',
+  )
+  assert.throws(
+    () => resolveWikiCanonicalPath('角色/关羽.md\0.tmp', 'wiki'),
+    (error: unknown) => error instanceof WikiPathError && error.code === 'PATH_INVALID',
+  )
+})
+
+test('T1 Wiki context resolves an authorized absolute path through the workspace root', async () => {
+  const project = memoryWiki({
+    'wiki/index.md': '# 入口\n',
+    'wiki/角色.md': '# 角色\n',
+  })
+  project.workspace.rootPath = '/项目'
+  const context = await buildWikiContext(project.workspace, {
+    action: 'read',
+    paths: ['/项目/wiki/角色.md'],
+  })
+  assert.equal(context.sources[0]?.path, '角色.md')
+})
+
+test('T1 exact Wiki reads do not depend on bounded directory listings', async () => {
+  const project = memoryWiki({ 'wiki/index.md': '# 入口\n', 'wiki/抖音运营/作品/关羽提示词.md': '# 关羽\n' })
+  const listed = project.workspace.list
+  project.workspace.list = async () => (await listed()).filter(entry => entry.path !== 'wiki/抖音运营/作品/关羽提示词.md')
+  const context = await buildWikiContext(project.workspace, {
+    action: 'read',
+    paths: ['wiki/抖音运营/作品/关羽提示词.md'],
+  })
+  assert.equal(context.sources[0]?.path, '抖音运营/作品/关羽提示词.md')
+  assert.equal(context.coverage, 'complete')
+})
 
 test('inspect locates the one existing Wiki and reports Raw without creating it', async () => {
   const { entries, workspace } = developmentWiki({ '.raw': null })
@@ -472,6 +533,93 @@ test('wiki apply creates a page and deterministically maintains navigation and l
   )
   assert.match(String(project.entries.get('wiki/index.md')), /\[\[状态\/index\|状态\]\]/)
   assert.match(String(project.entries.get('wiki/log.md')), /记录当前工作/)
+})
+
+test('T2 canonical plan id is identical for relative and authorized absolute paths', async () => {
+  const makeProject = () => {
+    const project = memoryWiki({ wiki: null, 'wiki/index.md': '# 入口\n' })
+    project.workspace.rootPath = '/项目'
+    return project
+  }
+  const relative = makeProject()
+  const absolute = makeProject()
+  const relativeOutput = await executeWikiAction(relative.workspace, {
+    action: 'apply',
+    reason: '新增角色',
+    basis: ['用户要求'],
+    operations: [{ kind: 'create', path: '角色/甲.md', title: '甲', content: '# 甲\n' }],
+  })
+  const absoluteOutput = await executeWikiAction(absolute.workspace, {
+    action: 'apply',
+    reason: '新增角色',
+    basis: ['用户要求'],
+    operations: [{ kind: 'create', path: '/项目/wiki/角色/甲.md', title: '甲', content: '# 甲\n' }],
+  })
+  assert.equal(relativeOutput.match(/plan-id: .+/)?.[0], absoluteOutput.match(/plan-id: .+/)?.[0])
+})
+
+test('T2 invalid operation is rejected before any Wiki write', async () => {
+  const project = memoryWiki({ wiki: null, 'wiki/index.md': '# 入口\n' })
+  project.workspace.rootPath = '/项目'
+  const before = new Map(project.entries)
+  await assert.rejects(
+    () =>
+      executeWikiAction(project.workspace, {
+        action: 'apply',
+        reason: '批量新增',
+        basis: ['用户要求'],
+        operations: [
+          { kind: 'create', path: '角色/甲.md', title: '甲', content: '# 甲\n' },
+          { kind: 'create', path: '/其他项目/wiki/乙.md', title: '乙', content: '# 乙\n' },
+        ],
+      }),
+    /授权项目根目录|项目内/u,
+  )
+  assert.deepEqual(project.entries, before)
+})
+
+test('T3 Wiki apply returns a program-owned success receipt', async () => {
+  const project = memoryWiki({ wiki: null, 'wiki/index.md': '# 入口\n' })
+  const result = await executeWikiActionWithReceipt(project.workspace, {
+    action: 'apply',
+    reason: '新增页面',
+    basis: ['用户要求'],
+    operations: [{ kind: 'create', path: '角色/甲.md', title: '甲', content: '# 甲\n' }],
+  })
+  assert.equal(result.status, 'succeeded')
+  assert.equal(result.receipt.status, 'succeeded')
+  assert.match(result.receipt.planId || '', /^plan:/)
+  assert.ok(result.receipt.changedPaths.includes('wiki/角色/甲.md'))
+  assert.ok(result.receipt.verifiedPaths.includes('wiki/角色/甲.md'))
+  assert.equal(result.receipt.operations[0]?.verified, true)
+})
+
+test('T3 Wiki apply failure returns a failure receipt and preserves zero-write precheck', async () => {
+  const project = memoryWiki({ wiki: null, 'wiki/index.md': '# 入口\n', 'wiki/角色.md': '# 已有\n' })
+  const before = new Map(project.entries)
+  const result = await executeWikiActionWithReceipt(project.workspace, {
+    action: 'apply',
+    reason: '重复创建',
+    basis: ['用户要求'],
+    operations: [{ kind: 'create', path: '角色.md', title: '角色', content: '# 新\n' }],
+  })
+  assert.equal(result.status, 'failed')
+  assert.equal(result.receipt.status, 'failed')
+  assert.match(result.receipt.error?.message || '', /已存在/u)
+  assert.deepEqual(project.entries, before)
+})
+
+test('T3 cancelled Wiki action returns a cancelled receipt', async () => {
+  const project = memoryWiki({ wiki: null, 'wiki/index.md': '# 入口\n' })
+  const controller = new AbortController()
+  controller.abort()
+  const result = await executeWikiActionWithReceipt(
+    project.workspace,
+    { action: 'apply', reason: '取消', basis: ['用户取消'], operations: [{ kind: 'create', path: '取消.md', title: '取消', content: '# 取消\n' }] },
+    controller.signal,
+  )
+  assert.equal(result.status, 'cancelled')
+  assert.equal(result.receipt.status, 'cancelled')
 })
 
 test('wiki apply ignores model index edits and repairs duplicate navigation', async () => {

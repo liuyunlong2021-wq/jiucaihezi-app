@@ -39,7 +39,7 @@ export const WIKI_READ_PLAN_SYSTEM_PROMPT = [
   '你正在按用户已选 Skill 完成任务。只输出一个最小 JSON 对象，不要 Markdown、思考过程或解释。',
   '当前输入已经包含任务、必要对话、完整 Skill、Wiki 根 index 和已读取的真实资料。Skill 是业务规则核心，Wiki 只提供事实。',
   '如果还缺 Wiki 资料，只输出 {"paths":["直属路径.md"]}；程序会读取后再次交给你。',
-  '如果现有资料已经足够，直接完成任务并输出 {"answer":"给用户的最终结果","actions":[]}。需要修改 Wiki 时，actions 只写最小语义动作，例如 {"kind":"write","path":"日记/2026/0830.md","content":"正文"}。',
+  '如果现有资料已经足够，直接完成任务并输出 {"answer":"给用户的最终结果","actions":[]}。需要修改已有 Wiki 页面时，必须输出最小 edit 动作并逐字提供 oldText/newText，例如 {"kind":"edit","path":"目录/页面.md","oldText":"旧名称","newText":"新名称"}；只有目标页面确定不存在时才使用 write/create。',
   '程序负责把 actions 补成完整事务，维护 title、reason、basis、幂等键、索引、双链、来源、日志、验证和 Receipt；不要输出这些程序字段。',
   '默认每轮只选择当前已读 index.md 声明的直属路径；但已选 Skill 或用户明确给出的 Wiki 根内路径属于直接读取授权，可以直接读取，不受 index 链接层级限制。不得请求整个目录或全库，路径越过 Wiki 根目录必须拒绝。',
   '程序会如实返回页面内容、空内容、不存在、读取失败或缺少 index.md；这些都是观察结果，不是任务失败。',
@@ -55,7 +55,7 @@ export const WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT = [
   'Wiki 为空、资料缺失、读取失败或达到读取熔断都不能阻止回答；需要写入时仍按用户任务输出合法 changePlan，不要根据资料覆盖率自行取消操作。',
   '输出 {"answer":"给用户的最终结果","actions":[]}；需要写入时 actions 只描述实际变更，不要输出 changePlan、reason、basis、indexChanges、双链、日志或目录维护计划，这些由程序自动补齐。',
   '不要对任何 index.md 或 _index.md 提交 replace、append、move 或 trash；入口导航、重复链接、双链、日志和来源由程序自动维护。',
-  '每个动作使用最小格式：write 需要 path/content；edit 需要 path/oldText/newText；append 需要 path/content；move 需要 path/destination；delete 需要 path。',
+  '每个动作使用最小格式：write 只用于新页面并需要 path/content；已有页面一律使用 edit 并提供 path/oldText/newText；append 需要 path/content；move 需要 path/destination；delete 需要 path。程序会拒绝用 write/create 覆盖已有页面。',
 ].join('\n')
 
 export const WIKI_READ_PLAN_SCHEMA = {
@@ -168,7 +168,7 @@ function parseOperations(value: unknown): WikiOperation[] {
     if (!item || typeof item !== 'object' || Array.isArray(item))
       throw new Error(`operations[${index}] 无效`)
     const row = item as Record<string, unknown>
-    const requestedKind = row.kind || row.action
+    const requestedKind = row.kind || row.action || row.type
     const inferredKind =
       requestedKind === 'write'
         ? row.oldText || row.oldString

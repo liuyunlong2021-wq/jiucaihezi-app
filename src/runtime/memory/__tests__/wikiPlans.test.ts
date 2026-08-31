@@ -58,6 +58,15 @@ test('synthesis protocol treats the previous assistant answer as Wiki input when
   assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /必须直接整理该正文并输出可执行 changePlan/)
 })
 
+test('synthesis protocol accepts type as the edit operation field', () => {
+  const parsed = parseWikiSynthesisAndChangePlan(JSON.stringify({
+    answer: '已读取并更新 Wiki 页面',
+    actions: [{ type: 'edit', path: '角色/页面.md', oldText: '旧名称', newText: '新名称' }],
+  }))
+  assert.equal(parsed.changePlan?.operations[0]?.kind, 'replace')
+  assert.equal(parsed.changePlan?.operations[0]?.path, '角色/页面.md')
+})
+
 test('ReadPlan accepts a bounded unique list and rejects duplicate or unsafe paths', () => {
   assert.deepEqual(
     parseWikiReadPlan(

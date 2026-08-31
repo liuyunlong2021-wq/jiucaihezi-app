@@ -3,8 +3,11 @@ export const DEFAULT_PROVIDER_HOST = 'https://api.jiucaihezi.studio'
 export const LOCAL_WEB_API_PROXY_BASE = '/__jc_api'
 export const DEFAULT_PROVIDER_NAME = '韭菜盒子'
 export const LOCAL_MLX_PROVIDER_ID = 'local-mlx'
-export const LOCAL_MLX_PROVIDER_HOST = 'http://127.0.0.1:8081'
+export const LOCAL_MLX_PROVIDER_HOST = 'http://127.0.0.1:9523'
+const LEGACY_LOCAL_MLX_PROVIDER_HOST = 'http://127.0.0.1:8081'
 export const LOCAL_MLX_PROVIDER_NAME = 'MLX'
+export const LOCAL_MLX_DEFAULT_MODEL = 'Qwen3.8-27B-Uncensored-MLX'
+export const LOCAL_MLX_MODEL_HUGGINGFACE_URL = 'https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-MLX'
 export const LOCAL_MLX_API_BASE = LOCAL_MLX_PROVIDER_HOST
 export const LOCAL_MLX_API_BASE_KEY = 'jcLocalMlxApiBase'
 export const LOCAL_MLX_MODELS_KEY = 'jcLocalMlxModels'
@@ -115,7 +118,9 @@ export function normalizeLocalMlxApiBase(value: string): string {
 
 export function getLocalMlxApiBase(store: KeyValueStore = getStorage()): string {
   try {
-    return normalizeLocalMlxApiBase(readStore(store, LOCAL_MLX_API_BASE_KEY) || LOCAL_MLX_API_BASE)
+    const saved = readStore(store, LOCAL_MLX_API_BASE_KEY)
+    if (saved === LEGACY_LOCAL_MLX_PROVIDER_HOST) return LOCAL_MLX_API_BASE
+    return normalizeLocalMlxApiBase(saved || LOCAL_MLX_API_BASE)
   } catch {
     return LOCAL_MLX_API_BASE
   }

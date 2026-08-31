@@ -252,7 +252,7 @@ test('resolveApiConfig routes local MLX through its OpenAI-compatible loopback s
   await withAsyncLocalStorage({
     jcModel: '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit',
     jcModelProviderId: 'local-mlx',
-    jcLocalMlxApiBase: 'http://127.0.0.1:8081',
+    jcLocalMlxApiBase: 'http://127.0.0.1:9523',
   }, async () => {
     const config = await resolveApiConfig({
       modelId: '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit',
@@ -260,7 +260,7 @@ test('resolveApiConfig routes local MLX through its OpenAI-compatible loopback s
     })
 
     assert.equal(config.providerId, 'local-mlx')
-    assert.equal(config.apiBase, 'http://127.0.0.1:8081')
+    assert.equal(config.apiBase, 'http://127.0.0.1:9523')
     assert.equal(config.model, '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit')
   })
 })

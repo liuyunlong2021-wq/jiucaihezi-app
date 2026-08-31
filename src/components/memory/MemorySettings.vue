@@ -6,7 +6,7 @@ import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { connectLocalMlx, startLocalMlx } from '@/utils/localMlxRuntime'
-import { getLocalMlxApiBase, getLocalMlxModelPath, getLocalMlxModels, getLocalOllamaModels, saveLocalMlxModelPath } from '@/utils/providerConfig'
+import { getLocalMlxApiBase, getLocalMlxModelPath, getLocalMlxModels, getLocalOllamaModels, saveLocalMlxModelPath, LOCAL_MLX_DEFAULT_MODEL, LOCAL_MLX_MODEL_HUGGINGFACE_URL, LOCAL_MLX_PROVIDER_ID } from '@/utils/providerConfig'
 import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
@@ -39,7 +39,8 @@ const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
 const localMlxApiBase = ref(getLocalMlxApiBase())
-const localMlxModelPath = ref(getLocalMlxModelPath())
+const savedMlxPath = getLocalMlxModelPath()
+const localMlxModelPath = ref(savedMlxPath && !/qwen3-tts/i.test(savedMlxPath) ? savedMlxPath : LOCAL_MLX_DEFAULT_MODEL)
 const localMlxBusy = ref(false)
 const localMlxStatus = ref('')
 const installedLocalMlxModelCount = ref(0)
@@ -109,6 +110,7 @@ async function connectMlx() {
     const result = await connectLocalMlx(localMlxApiBase.value)
     installedLocalMlxModelCount.value = result.models.length
     agentStore.refreshLocalModels()
+    agentStore.setModel(result.model.id, LOCAL_MLX_PROVIDER_ID)
     localMlxStatus.value = result.message
   } catch (error) {
     localMlxStatus.value = error instanceof Error ? error.message : '未连接到 MLX 服务。'
@@ -123,11 +125,13 @@ async function startAndConnectMlx() {
   localMlxStatus.value = '正在启动 MLX...'
   try {
     const modelPath = localMlxModelPath.value.trim()
+    const launchPath = modelPath === LOCAL_MLX_DEFAULT_MODEL ? '' : modelPath
     saveLocalMlxModelPath(modelPath)
-    await startLocalMlx(modelPath, localMlxApiBase.value)
+    await startLocalMlx(launchPath, localMlxApiBase.value)
     const result = await connectLocalMlx(localMlxApiBase.value)
     installedLocalMlxModelCount.value = result.models.length
     agentStore.refreshLocalModels()
+    agentStore.setModel(result.model.id, LOCAL_MLX_PROVIDER_ID)
     localMlxStatus.value = result.message
   } catch (error) {
     localMlxStatus.value = error instanceof Error ? error.message : '未能启动 MLX 服务。'
@@ -285,15 +289,16 @@ function showSync() {
           <p v-if="localMlxStatus">{{ localMlxStatus }}</p>
           <label class="memory-comfy-key">
             <span>服务地址</span>
-            <input v-model="localMlxApiBase" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:8081" />
+            <input v-model="localMlxApiBase" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:9523" />
           </label>
           <label class="memory-comfy-key">
-            <span>模型路径或仓库 ID</span>
-            <input v-model="localMlxModelPath" type="text" autocomplete="off" placeholder="例如 /Users/你的用户名/MLX/Qwen-4bit" />
+            <span>模型路径或仓库 ID（可留空，默认 {{ LOCAL_MLX_DEFAULT_MODEL }}）</span>
+            <input v-model="localMlxModelPath" type="text" autocomplete="off" :placeholder="LOCAL_MLX_DEFAULT_MODEL" />
           </label>
           <div class="memory-local-actions">
             <button :disabled="localMlxBusy" @click="startAndConnectMlx">{{ localMlxBusy ? '启动中' : '启动并连接' }}</button>
             <button :disabled="localMlxBusy" @click="connectMlx">仅连接</button>
+            <button :disabled="localMlxBusy" @click="openExternal(LOCAL_MLX_MODEL_HUGGINGFACE_URL)">安装模型</button>
           </div>
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">

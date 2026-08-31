@@ -240,12 +240,14 @@ export async function runWikiTwoPhase(input: {
     synthesisMetrics = synthesisRequest.metrics
     try {
       plan = parseWikiSynthesisAndChangePlan(synthesisRequest.text)
-    } catch {
+    } catch (error) {
+      const failure = `Wiki 写入未执行：模型返回的修改计划无法解析（${error instanceof Error ? error.message : String(error)}）。`
       return {
-        text: [synthesisRequest.text, ...warnings].filter(Boolean).join('\n\n'),
-        plan: { answer: synthesisRequest.text, changePlan: null },
+        text: [failure, ...warnings].filter(Boolean).join('\n\n'),
+        plan: { answer: failure, changePlan: null },
         metrics: { ...sumMetrics(readMetrics, synthesisMetrics), toolRounds: wikiToolRounds },
         readPaths,
+        applyResult: `status: failed\nreason: ${failure}`,
       }
     }
   }
@@ -264,7 +266,7 @@ export async function runWikiTwoPhase(input: {
     basis: plan.changePlan.basis.length ? plan.changePlan.basis : readPaths,
   }
   plan.changePlan = changePlan
-  const executionPlan = {
+  let executionPlan = {
     reason: changePlan.reason,
     basis: changePlan.basis,
     operations: changePlan.operations,
@@ -299,23 +301,90 @@ export async function runWikiTwoPhase(input: {
     metrics.toolRounds += 1
     applied = await input.executeWiki(applyCall, input.signal)
   } catch (error) {
-    return {
-      text: plan.answer,
-      plan,
-      metrics,
-      readPaths,
-      applyResult: `status: failed\nreason: ${error instanceof Error ? error.message : String(error)}`,
+    applied = {
+      content: error instanceof Error ? error.message : String(error),
+      status: 'failed',
     }
+  }
+  // Models sometimes describe an edit as create/write. Give them one bounded
+  // correction round; the program still refuses unsafe overwrites.
+  if (applied.status !== 'succeeded' && /页面已存在|已存在/u.test(applied.content || '') && plan.changePlan) {
+    const correction = await requestJson({
+      messages: [
+        ...input.messages,
+        { role: 'system', content: WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `${taskContext}\n实际 Wiki 资料：\n${sources}\n上一次写入计划被程序拒绝：目标页面已存在，不能使用 write/create 覆盖。请将已有页面的修改改为 edit，逐字提供 oldText 和 newText；只输出最小 JSON。`,
+        },
+      ],
+      sendChatCompletion: input.sendChatCompletion,
+      signal: input.signal,
+    })
+    synthesisMetrics = sumMetrics(synthesisMetrics, correction.metrics)
+    try {
+      const corrected = parseWikiSynthesisAndChangePlan(correction.text)
+      if (corrected.changePlan) {
+        plan = corrected
+        const correctedPlan = {
+          ...corrected.changePlan,
+          reason: corrected.changePlan.reason || input.task,
+          basis: corrected.changePlan.basis.length ? corrected.changePlan.basis : readPaths,
+        }
+        plan.changePlan = correctedPlan
+        executionPlan = {
+          reason: correctedPlan.reason,
+          basis: correctedPlan.basis,
+          operations: correctedPlan.operations,
+        }
+        state.pendingPlan = { action: 'apply', ...executionPlan }
+        applyCall.function.arguments = JSON.stringify({
+          action: 'apply',
+          reason: correctedPlan.reason,
+          basis: correctedPlan.basis,
+          operations: correctedPlan.operations,
+        })
+        wikiToolRounds += 1
+        metrics.toolRounds += 1
+        applied = await input.executeWiki(applyCall, input.signal)
+      }
+    } catch {
+      // Keep the original failure receipt below when correction is malformed.
+    }
+  }
+  const replaceOperations = executionPlan.operations.filter(operation => operation.kind === 'replace')
+  if (
+    applied.status !== 'succeeded' &&
+    /多处命中.*replaceAll/u.test(applied.content || '') &&
+    executionPlan.operations.length === 1 &&
+    replaceOperations.length === 1 &&
+    replaceOperations[0]!.replaceAll !== true
+  ) {
+    executionPlan = {
+      ...executionPlan,
+      operations: [{ ...replaceOperations[0]!, replaceAll: true }],
+    }
+    plan.changePlan = { ...plan.changePlan!, operations: executionPlan.operations }
+    state.pendingPlan = { action: 'apply', ...executionPlan }
+    applyCall.function.arguments = JSON.stringify({ action: 'apply', ...executionPlan })
+    wikiToolRounds += 1
+    metrics.toolRounds += 1
+    applied = await input.executeWiki(applyCall, input.signal)
   }
   if (applied.status !== 'succeeded') {
+    const cancelled = applied.status === 'cancelled'
+    const failure = cancelled
+      ? 'Wiki 写入已取消。'
+      : `Wiki 写入未执行：${applied.content || 'Wiki 写入未完成'}`
     return {
-      text: plan.answer,
-      plan,
-      metrics,
+      text: failure,
+      plan: { ...plan, answer: failure },
+      metrics: { ...sumMetrics(readMetrics, synthesisMetrics), toolRounds: wikiToolRounds },
       readPaths,
-      applyResult: `status: ${applied.status || 'failed'}\nreason: ${applied.content || 'Wiki 写入未完成'}`,
+      applyResult: `status: ${cancelled ? 'cancelled' : 'failed'}\nreason: ${failure}`,
     }
   }
+  const finalMetrics = { ...sumMetrics(readMetrics, synthesisMetrics), toolRounds: wikiToolRounds }
   state.applyResult = applied.content
   const envelope = validateTaskEnvelope(
     {
@@ -342,5 +411,5 @@ export async function runWikiTwoPhase(input: {
     ['wiki'],
     'program',
   )
-  return { text: plan.answer, plan, metrics, readPaths, applyResult: applied.content, envelope }
+  return { text: plan.answer, plan, metrics: finalMetrics, readPaths, applyResult: applied.content, envelope }
 }
