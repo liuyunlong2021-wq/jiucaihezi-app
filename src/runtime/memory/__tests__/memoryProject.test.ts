@@ -11,7 +11,7 @@ import {
   parseConversationTranscript,
   type ConversationTurn,
 } from '../conversationTranscript'
-import { appendMemoryRound, initializeMemoryProject } from '../memoryProject'
+import { appendMemoryRound, initializeMemoryProject, listMemoryConversations } from '../memoryProject'
 
 const memoryProjectSource = readFileSync(join(process.cwd(), 'src/runtime/memory/memoryProject.ts'), 'utf8')
 
@@ -93,4 +93,29 @@ test('appendMemoryRound is idempotent for the same user turn', async () => {
     ['user', '继续任务'],
     ['assistant', '已完成'],
   ])
+})
+
+test('listMemoryConversations orders by latest activity', async () => {
+  const oldPath = `${CONVERSATION_DIRECTORY}/old.md`
+  const recentPath = `${CONVERSATION_DIRECTORY}/recent.md`
+  const oldContent = createConversationTranscript('old', '旧对话', '2026-08-01T00:00:00.000Z')
+  const recentContent = createConversationTranscript('recent', '新对话', '2026-08-02T00:00:00.000Z')
+  const entries: ProjectFileEntry[] = [
+    { path: oldPath, isDirectory: false, content: oldContent, updatedAt: Date.parse('2026-08-30T00:00:00.000Z') },
+    { path: recentPath, isDirectory: false, content: recentContent, updatedAt: Date.parse('2026-08-03T00:00:00.000Z') },
+  ]
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return entries },
+    async readText(_owner, path) {
+      const entry = entries.find(item => item.path === path)
+      if (!entry) throw new Error('missing')
+      return { content: String(entry.content || ''), size: String(entry.content || '').length, truncated: false, revision: { value: path, size: String(entry.content || '').length } }
+    },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  const conversations = await listMemoryConversations('project', createProjectFileService(adapter))
+  assert.deepEqual(conversations.map(item => item.resource.path), [recentPath, oldPath])
 })

@@ -97,8 +97,16 @@ export async function readWebSkillResource(
   fetcher: typeof fetch = fetch,
 ): Promise<string> {
   const base = String(baseDirectory || '').replace(/\/+$/, '')
-  const path = String(relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '')
-  if (!base.startsWith('/skills/') || !path || path.split('/').some(part => part === '..')) {
+  const rawPath = String(relativePath || '').replace(/\\/g, '/')
+  const path = rawPath.replace(/^\/+/, '')
+  if (
+    !base.startsWith('/skills/') ||
+    !path ||
+    rawPath.startsWith('/') ||
+    /^[A-Za-z]:\//.test(rawPath) ||
+    rawPath.includes('\0') ||
+    path.split('/').some(part => !part || part === '..' || part === '.')
+  ) {
     throw new Error('Skill 资源路径无效')
   }
   const url = `${base}/${path.split('/').map(encodeURIComponent).join('/')}`

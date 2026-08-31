@@ -1424,6 +1424,7 @@ pub fn run() {
             commands::mcp::mcp_write_stdin,
             commands::mcp::mcp_kill_stdio,
             commands::mcp::resolve_mcp_node,
+            commands::local_mlx::start_mlx_service,
             commands::creation_mcp::creation_mcp_complete,
             commands::creation_mcp::resolve_creation_mcp,
             commands::greet::save_generated_file,
@@ -1555,6 +1556,7 @@ pub fn run() {
     app.run(|_, event| {
         if matches!(event, tauri::RunEvent::Exit { .. }) {
             commands::creation_mcp::remove_discovery();
+            commands::local_mlx::stop_mlx_service();
         }
     });
 }

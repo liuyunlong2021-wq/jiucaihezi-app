@@ -2,11 +2,14 @@ import {
   LOCAL_MLX_PROVIDER_ID,
   normalizeLocalMlxApiBase,
   saveLocalMlxApiBase,
+  saveLocalMlxModelPath,
   saveLocalMlxModels,
   type JcModelRef,
   type KeyValueStore,
 } from './providerConfig'
 import { safeFetch } from './httpClient'
+import { getLocalMlxModelPath } from './providerConfig'
+import { invoke } from '@tauri-apps/api/core'
 
 export { normalizeLocalMlxApiBase } from './providerConfig'
 
@@ -36,5 +39,10 @@ export async function connectLocalMlx(
   if (!models.length) throw new Error('MLX 服务没有可用模型')
   saveLocalMlxApiBase(apiBase, store)
   saveLocalMlxModels(models, store)
+  if (!getLocalMlxModelPath(store)) saveLocalMlxModelPath(models[0]!.id, store)
   return { models, message: `已连接 MLX，识别到 ${models.length} 个本地模型。` }
+}
+
+export async function startLocalMlx(modelPath: string, apiBase: string): Promise<string> {
+  return await invoke<string>('start_mlx_service', { modelPath, apiBase })
 }

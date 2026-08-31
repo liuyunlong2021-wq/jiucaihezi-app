@@ -7,6 +7,7 @@ import {
   buildWebSkillCatalogPrompt,
   loadWebSkillByName,
   loadWebSkillCatalog,
+  readWebSkillResource,
 } from '../skillContentResolver'
 
 const catalog = [{
@@ -71,6 +72,21 @@ test('web skill loader preserves nested package path segments', async () => {
   const skill = await loadWebSkillByName('JC-manju-fengge', fetcher as typeof fetch)
   assert.equal(skill.baseDirectory, '/skills/JC-manju-skills/JC-manju-fengge')
   assert.match(skill.content, /# 风格/)
+})
+
+test('web skill resource reader rejects absolute, empty, and traversal paths', async () => {
+  let fetchCount = 0
+  const fetcher = async () => {
+    fetchCount += 1
+    return new Response('should not be fetched')
+  }
+  for (const path of ['/references/rule.md', 'C:/secret.md', '', '../secret.md', 'references/../secret.md']) {
+    await assert.rejects(
+      () => readWebSkillResource('/skills/test', path, fetcher as typeof fetch),
+      /资源路径无效/,
+    )
+  }
+  assert.equal(fetchCount, 0)
 })
 
 test('generated Web Skill catalog contains only packages with a standard SKILL.md entry', () => {

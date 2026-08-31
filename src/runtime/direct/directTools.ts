@@ -40,6 +40,8 @@ export async function buildToolResultMessages(
   if (options.reasoning) assistantMessage[options.reasoning.field] = options.reasoning.value
   const messages: DirectApiMessage[] = [assistantMessage]
   const followupMessages: DirectApiMessage[] = []
+  const cancelledMessage = (call: DirectToolCall): DirectApiMessage =>
+    toolMessage(call, { content: '工具执行已取消。', status: 'cancelled' })
 
   const execute = async (
     call: DirectToolCall,
@@ -47,14 +49,15 @@ export async function buildToolResultMessages(
     let startedAt: number | undefined
     options.onToolEvent?.({ type: 'tool_execution_start', call })
     if (options.signal?.aborted) {
+      const result = { content: '工具执行已取消。', status: 'cancelled' as const }
       emitEnd(
         options.onToolEvent,
         call,
-        { content: '工具执行已取消。', status: 'cancelled' },
+        result,
         'cancelled',
         startedAt,
       )
-      throw new DOMException('Aborted', 'AbortError')
+      return { message: toolMessage(call, result), followups: [] }
     }
 
     let decision: 'cancelled' | void
@@ -102,13 +105,14 @@ export async function buildToolResultMessages(
     }
 
     emitEnd(options.onToolEvent, call, result, status, startedAt)
-    if (status === 'cancelled' && options.signal?.aborted) {
-      throw new DOMException('Aborted', 'AbortError')
-    }
     return { message: toolMessage(call, result), followups: result.followupMessages || [] }
   }
 
   for (let index = 0; index < calls.length; ) {
+    if (options.signal?.aborted) {
+      messages.push(...calls.slice(index).map(cancelledMessage))
+      break
+    }
     const end = canRunInParallel(calls[index]!, options)
       ? calls.findIndex((call, next) => next > index && !canRunInParallel(call, options))
       : index + 1

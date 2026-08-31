@@ -276,6 +276,23 @@ test('memory messages expose one copy action and project GLB files use the share
   assert.match(viewer, /\.model-viewer \{ width: 100%; max-width: 100%; height: 68vh;/)
 })
 
+test('memory opens the latest conversation and keeps message actions at the bottom', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const project = source('src/runtime/memory/memoryProject.ts')
+  assert.match(workbench, /const latest = state\.conversations\.at\(-1\)/)
+  assert.match(project, /conversationActivityTime\(left\) - conversationActivityTime\(right\)/)
+  assert.match(workbench, /class="memory-message-actions"/)
+  assert.match(workbench, /\.memory-message-actions \{ display: flex; align-items: center; justify-content: flex-end;/)
+  assert.match(workbench, /loadConversationAttachmentPreviews\(resource, generation\)/)
+  assert.match(workbench, /createImageBitmap\(new Blob\(\[data\.buffer\]/)
+  assert.match(workbench, /URL\.revokeObjectURL\(url\)/)
+})
+
+test('memory composer starts at a three-line input height', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /\.memory-input-area \{ display: flex; min-height: 76px;/)
+})
+
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
@@ -350,7 +367,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速<|>记忆</)
   assert.match(workbench, /const toolCommands = \[/)
-  for (const label of ['@Wiki', '@Skill', '@文件', '@3D', '@媒体', '@MCP', '@Terminal'])
+  for (const label of ['@Wiki', '@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP', '@Terminal'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
   assert.doesNotMatch(workbench, /@Skill \+ @Wiki|@Skill \+ @MCP/)
   assert.doesNotMatch(workbench, /const commonCommands = \[/)
@@ -517,7 +534,7 @@ test('memory message copy stays compact and copies the original markdown', () =>
   assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
   assert.match(
     workbench,
-    /\.memory-message-copy \{ position: absolute; top: 0; right: 0;[\s\S]*width: 26px; height: 26px;/,
+    /\.memory-message-copy \{ display: flex; width: 26px; height: 26px;/,
   )
 })
 
@@ -663,6 +680,15 @@ test('memory retries transient requests and writes one Raw recovery point only a
   assert.match(workbench, /:contenteditable="!sending"/)
   assert.match(workbench, /title="添加附件" :disabled="sending"/)
   assert.match(workbench, /title="移除附件" :disabled="sending"/)
+})
+
+test('memory cancellation settles the visible run before invalidating stale callbacks', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(
+    workbench,
+    /function stop\(\) \{\s*status\.value = '已停止'\s*stopRunTimer\(\)\s*memoryRunGeneration\+\+[\s\S]*abortController\?\.abort\(\)/,
+  )
 })
 
 test('memory ignores stale streaming callbacks and stale resource loads', () => {
@@ -1166,7 +1192,10 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   assert.match(settings, /connectLocalOllama/)
   assert.match(settings, /getLocalOllamaModels/)
   assert.match(settings, /connectLocalMlx/)
+  assert.match(settings, /startLocalMlx/)
   assert.match(settings, /v-model="localMlxApiBase"/)
+  assert.match(settings, /v-model="localMlxModelPath"/)
+  assert.match(settings, /启动并连接/)
   assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:8081"/)
   assert.match(settings, /本机 MLX/)
   assert.match(mlxRuntime, /fetcher: typeof fetch = safeFetch/)
@@ -1184,4 +1213,11 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   )
   assert.match(runtime, /platform: isTauriRuntime\(\) \? 'desktop' : 'web'/)
   assert.doesNotMatch(runtime, /forceCloud: true/)
+})
+
+test('aggregate MCP mentions remain searchable by their internal tool prefix', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /filterKeys: \['id', 'display', 'description'\]/)
+  assert.match(workbench, /mentionOnInput\('mcp__'\)/)
 })

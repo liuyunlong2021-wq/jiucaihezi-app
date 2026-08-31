@@ -36,6 +36,9 @@ import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjec
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
 import {
   buildMemoryDesktopToolDefinitions,
+  parseCreativeToolArguments,
+  TOOL_DESCRIBE_TOOL_DEFINITION,
+  TOOL_SEARCH_TOOL_DEFINITION,
   WIKI_CONTEXT_TOOL_DEFINITION,
 } from '@/runtime/direct/creativeToolContract'
 import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
@@ -68,6 +71,7 @@ import type { Scene3DDocument } from './scene3d'
 import type { ConversationTurn } from './conversationTranscript'
 import type { DirectRunMetrics, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { serializeToSkillMd, type SkillConfig } from '@/types/skill'
+import { describeToolDefinition, searchToolDefinitions } from '@/runtime/direct/toolSearch'
 
 export interface MemoryChatInput {
   projectId: string
@@ -82,6 +86,7 @@ export interface MemoryChatInput {
   fileToolsSelected?: boolean
   selectedMcpToolNames?: string[]
   mediaSelected?: boolean
+  avSelected?: boolean
   scene3dSelected?: boolean
   terminalSelected?: boolean
   signal?: AbortSignal
@@ -119,6 +124,7 @@ export function hasExplicitMemoryCapability(
     | 'fileToolsSelected'
     | 'selectedMcpToolNames'
     | 'mediaSelected'
+    | 'avSelected'
     | 'scene3dSelected'
     | 'terminalSelected'
     | 'attachments'
@@ -130,6 +136,7 @@ export function hasExplicitMemoryCapability(
     input.fileToolsSelected ||
     input.selectedMcpToolNames?.length ||
     input.mediaSelected ||
+    input.avSelected ||
     input.scene3dSelected ||
     input.terminalSelected,
   )
@@ -174,6 +181,25 @@ export function selectMemoryTools(
       allowed.add(name)
   if (terminalSelected) allowed.add('terminal')
   return tools.filter(tool => allowed.has(tool.function?.name))
+}
+
+export function resolveMemoryToolSearchDefinitions(
+  authorizedTools: any[],
+  describedToolNames: ReadonlySet<string>,
+  directlyExposedToolNames: ReadonlySet<string> = new Set(['wiki_context']),
+): any[] {
+  const exposed = new Set<string>()
+  return [
+    ...authorizedTools.filter(tool => directlyExposedToolNames.has(tool.function?.name)),
+    TOOL_SEARCH_TOOL_DEFINITION,
+    TOOL_DESCRIBE_TOOL_DEFINITION,
+    ...authorizedTools.filter(tool => describedToolNames.has(tool.function?.name)),
+  ].filter(tool => {
+    const name = tool.function?.name
+    if (!name || exposed.has(name)) return false
+    exposed.add(name)
+    return true
+  })
 }
 
 export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
@@ -260,6 +286,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
               ? '用户已选具体 Skill，程序已经加载其完整规则；必须遵守该 Skill，不得再次决定是否加载、跳过或替换它。'
               : '用户未选择 Skill；本轮不加载其他 Skill。需要方法约束时请用户明确选择具体 Skill。',
             '同一阶段互不依赖的项目内只读工具请在同一回复中一起调用；写入、Terminal、审批和依赖读取结果的操作放到后续工具轮。',
+            '需要未直接展示的能力时，先用 tool_search 搜索当前白名单，再用 tool_describe 获取精确 schema；只有描述成功的工具才会在下一轮开放。',
             '只修改用户明确指定的文件，不自行扩展到相邻 Skill、Wiki 或项目文档；目标不明确时先询问。',
             '文件任务直接用 read -> write/edit -> 必要时验证完成；写入前不要在普通回答中重复输出完整草稿，成功后不要复述完整正文。',
             '写入目标尚不存在时，不要反复 read/glob 该目标；检查最近的已有父目录后，直接 mkdir/write 创建。用户给出当前项目绝对路径时按项目内路径处理。',
@@ -369,6 +396,27 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const wikiSearchSignatures = new Set<string>()
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
+    if (call.function.name === 'tool_search') {
+      const args = parseCreativeToolArguments(call)
+      return {
+        content: JSON.stringify(
+          searchToolDefinitions(
+            authorizedMemoryToolDefinitions,
+            String(args.query || ''),
+            Number(args.limit),
+          ),
+        ),
+      }
+    }
+    if (call.function.name === 'tool_describe') {
+      const args = parseCreativeToolArguments(call)
+      const name = String(args.name || '')
+      const definition = describeToolDefinition(authorizedMemoryToolDefinitions, name)
+      if (definition) describedToolNames.add(name)
+      return definition
+        ? { content: JSON.stringify(definition) }
+        : { content: `工具未在当前白名单中：${name}`, status: 'failed' as const }
+    }
     if (!allowedMemoryToolNames.has(call.function.name)) {
       return {
         content: JSON.stringify({
@@ -408,7 +456,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     : buildMemoryWebProjectToolDefinitions()
   const memoryToolDefinitions = selectMemoryTools(
     allMemoryToolDefinitions,
-    selectedSkillNames,
+    [],
     Boolean(input.wikiSelected),
     Boolean(
       input.attachments?.some(
@@ -418,12 +466,24 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     ),
     Boolean(input.fileToolsSelected),
     input.selectedMcpToolNames || [],
-    Boolean(input.mediaSelected),
+    Boolean(input.mediaSelected || input.avSelected),
     Boolean(input.scene3dSelected),
     Boolean(input.terminalSelected),
   )
+  const authorizedMemoryToolDefinitions = selectedSkillNames.length
+    ? allMemoryToolDefinitions
+    : memoryToolDefinitions
   const allowedMemoryToolNames = new Set(
-    memoryToolDefinitions.map(tool => String(tool.function?.name || '')),
+    authorizedMemoryToolDefinitions.map(tool => String(tool.function?.name || '')),
+  )
+  const describedToolNames = new Set<string>()
+  const directlyExposedToolNames = wikiProtocolTask
+    ? new Set(['wiki_context', 'wiki'])
+    : new Set(memoryToolDefinitions.map(tool => String(tool.function?.name || '')))
+  const resolveTools = () => resolveMemoryToolSearchDefinitions(
+    authorizedMemoryToolDefinitions,
+    describedToolNames,
+    directlyExposedToolNames,
   )
   const wikiOnlyTask = wikiProtocolTask
   if (wikiOnlyTask) {
@@ -516,7 +576,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   let aggregatedProgramStatus: MemoryProgramStatus | null = null
   const result = await runDirectChatCompletion({
     messages,
-    tools: memoryToolDefinitions,
+    tools: resolveTools(),
+    resolveTools,
     sendChatCompletion,
     signal: input.signal,
     onText: input.onText,

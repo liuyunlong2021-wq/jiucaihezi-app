@@ -83,7 +83,18 @@ export async function listMemoryConversations(
     }))
   return conversations
     .filter((value): value is MemoryConversation => Boolean(value))
-    .sort((left, right) => left.transcript.createdAt.localeCompare(right.transcript.createdAt))
+    .sort((left, right) => conversationActivityTime(left) - conversationActivityTime(right))
+}
+
+function conversationActivityTime(conversation: MemoryConversation): number {
+  const turnTime = conversation.transcript.turns
+    .map(turn => Date.parse(turn.createdAt))
+    .filter(Number.isFinite)
+    .at(-1)
+  return conversation.resource.updatedAt
+    || turnTime
+    || Date.parse(conversation.transcript.createdAt)
+    || 0
 }
 
 export async function createMemoryConversation(
