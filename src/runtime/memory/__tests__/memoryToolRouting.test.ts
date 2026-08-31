@@ -84,6 +84,7 @@ test('an attached document does not activate history or project capabilities', (
 test('a selected capability connects the task explicitly', () => {
   assert.equal(hasExplicitMemoryCapability({ wikiSelected: true }), true)
   assert.equal(hasExplicitMemoryCapability({ selectedSkillNames: ['jc-film-style'] }), true)
+  assert.equal(hasExplicitMemoryCapability({ avSelected: true }), true)
 })
 
 test('selecting a concrete Skill exposes all currently available product tools', () => {

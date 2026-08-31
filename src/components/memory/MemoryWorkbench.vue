@@ -120,12 +120,14 @@ const fileToolsSelected = ref(false)
 const selectedMcpToolNames = ref<string[]>([])
 const mcpStore = useMcpStore()
 const mediaSelected = ref(false)
+const avSelected = ref(false)
 const scene3dSelected = ref(false)
 const terminalSelected = ref(false)
 const selectedToolChips = computed(() => [
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
   { id: 'mcp', label: '@MCP', icon: 'extension', selected: selectedMcpToolNames.value.length > 0 },
-  { id: 'media', label: '@媒体', icon: 'image', selected: mediaSelected.value },
+  { id: 'media', label: '@图文', icon: 'image', selected: mediaSelected.value },
+  { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
   { id: 'terminal', label: '@Terminal', icon: 'terminal', selected: terminalSelected.value },
 ].filter(tool => tool.selected))
@@ -134,6 +136,7 @@ function clearToolSelections() {
   fileToolsSelected.value = false
   selectedMcpToolNames.value = []
   mediaSelected.value = false
+  avSelected.value = false
   scene3dSelected.value = false
   terminalSelected.value = false
 }
@@ -326,7 +329,8 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
     { type: 'tool', id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' },
-    { type: 'tool', id: 'media', display: '媒体', description: '生成图片、视频和音频', icon: 'image' },
+    { type: 'tool', id: 'media', display: '图文', description: '创建文档、网页、图片和幻灯片', icon: 'image' },
+    { type: 'tool', id: 'av', display: '影音', description: '生成图片、视频和音频', icon: 'movie' },
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
     { type: 'tool', id: 'terminal', display: 'Terminal', description: '执行终端命令', icon: 'terminal' },
   ]
@@ -445,7 +449,8 @@ const toolCommands = [
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '加载指定 Skill' },
   { id: 'file', label: '@文件', icon: 'description', description: '读取、写入和管理文件' },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
-  { id: 'media', label: '@媒体', icon: 'image', description: '生成图片、视频和音频' },
+  { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
+  { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
   { id: 'terminal', label: '@Terminal', icon: 'terminal', description: '执行终端命令' },
 ]
@@ -499,6 +504,7 @@ onBeforeUnmount(() => {
   projectGeneration++
   settleMemoryToolApproval('reject')
   abortController?.abort()
+  releaseConversationPreviewUrls()
   releaseMediaUrl()
 })
 
@@ -571,8 +577,8 @@ async function openProject(owner: string) {
     if (generation !== projectGeneration) return
     memoryReady.value = state.initialized
     conversations.value = state.conversations
-    const first = state.conversations[0]
-    if (first) await openResource(await openProjectResource(files, first.resource))
+    const latest = state.conversations.at(-1)
+    if (latest) await openResource(await openProjectResource(files, latest.resource))
     void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {
     if (generation !== projectGeneration) return
@@ -646,6 +652,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
     await openCreationHost()
     return
   }
+  releaseConversationPreviewUrls()
   error.value = ''
   if (!sending.value) {
     status.value = ''
@@ -684,6 +691,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
         skillInstallStatus.value[turn.id] ||= 'ready'
       } catch { /* ordinary assistant reply */ }
     }
+    void loadConversationAttachmentPreviews(resource, generation)
   } else {
     if (creationMounted.value && !(await closeCreationHost())) return
     if (generation !== resourceOpenGeneration) return
@@ -825,6 +833,7 @@ function insertCommand(command: { id: string; label: string }) {
   if (command.id === 'wiki') wikiSelected.value = true
   if (command.id === 'file') fileToolsSelected.value = true
   if (command.id === 'media') mediaSelected.value = true
+  if (command.id === 'av') avSelected.value = true
   if (command.id === 'scene3d') scene3dSelected.value = true
   if (command.id === 'terminal') terminalSelected.value = true
   if (command.id === 'skill') {
@@ -846,6 +855,7 @@ function enableTool(id: string) {
   if (id === 'file') fileToolsSelected.value = true
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
   if (id === 'media') mediaSelected.value = true
+  if (id === 'av') avSelected.value = true
   if (id === 'scene3d') scene3dSelected.value = true
   if (id === 'terminal') terminalSelected.value = true
 }
@@ -853,6 +863,7 @@ function enableTool(id: string) {
 function disableTool(id: string) {
   if (id === 'file') fileToolsSelected.value = false
   if (id === 'media') mediaSelected.value = false
+  if (id === 'av') avSelected.value = false
   if (id === 'scene3d') scene3dSelected.value = false
   if (id === 'terminal') terminalSelected.value = false
 }
@@ -1154,6 +1165,7 @@ async function send() {
       fileToolsSelected: fileToolsSelected.value,
       selectedMcpToolNames: selectedMcpToolNames.value,
       mediaSelected: mediaSelected.value,
+      avSelected: avSelected.value,
       scene3dSelected: scene3dSelected.value,
       terminalSelected: terminalSelected.value,
       recordSceneVideo,
@@ -2046,6 +2058,61 @@ function turnAttachments(turn: ConversationTurn): Array<ConversationAttachment &
   return (turn.attachments || []).map(attachment => ({ ...attachment, value: previews.get(attachment.id) }))
 }
 
+const conversationPreviewUrls = new Set<string>()
+
+async function loadConversationAttachmentPreviews(
+  resource: Extract<ProjectResourceOpenResult, { type: 'conversation' }>,
+  generation: number,
+) {
+  const candidates = resource.transcript.turns.flatMap(turn => (turn.role === 'user' ? (turn.attachments || []).map(attachment => ({ turnId: turn.id, attachment })) : []))
+    .filter(item => item.attachment.kind === 'image' && item.attachment.projectPath)
+  const previews: Array<{ turnId: string; attachment: ResolvedDirectAttachment }> = []
+  for (const { turnId, attachment } of candidates) {
+    if (generation !== resourceOpenGeneration) return
+    try {
+      const binary = await fileActions.readMedia(attachmentResource(resource.resource.owner, attachment))
+      const data = new Uint8Array(binary.data.byteLength)
+      data.set(binary.data)
+      const bitmap = await createImageBitmap(new Blob([data.buffer], { type: binary.mimeType || attachment.mime }))
+      const scale = Math.min(1, 160 / Math.max(bitmap.width, bitmap.height))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+      bitmap.close()
+      const thumbnail = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.78))
+      if (!thumbnail) continue
+      const value = URL.createObjectURL(thumbnail)
+      if (generation !== resourceOpenGeneration) {
+        URL.revokeObjectURL(value)
+        return
+      }
+      conversationPreviewUrls.add(value)
+      previews.push({
+        turnId,
+        attachment: {
+          id: attachment.id,
+          name: attachment.name,
+          mime: attachment.mime,
+          size: attachment.size,
+          kind: attachment.kind,
+          value,
+          resourcePath: attachment.projectPath,
+          readablePath: attachment.readablePath,
+          characterCount: attachment.characterCount,
+        },
+      })
+    } catch { /* missing or unsupported image */ }
+  }
+  if (generation !== resourceOpenGeneration) return
+  const next = { ...transientAttachments.value }
+  for (const preview of previews) {
+    const current = next[preview.turnId] || []
+    if (!current.some(item => item.id === preview.attachment.id)) next[preview.turnId] = [...current, preview.attachment]
+  }
+  transientAttachments.value = next
+}
+
 function conversationMediaContext(
   turns: ConversationTurn[],
   explicitTurnId = '',
@@ -2126,6 +2193,19 @@ function releaseMediaUrl() {
   mediaObjectUrl = ''
   mediaUrl.value = ''
   modelData.value = null
+}
+
+function releaseConversationPreviewUrls() {
+  const generated = new Set(conversationPreviewUrls)
+  for (const url of generated) URL.revokeObjectURL(url)
+  conversationPreviewUrls.clear()
+  const next = { ...transientAttachments.value }
+  for (const [turnId, values] of Object.entries(next)) {
+    const kept = values.filter(value => !generated.has(value.value))
+    if (kept.length) next[turnId] = kept
+    else delete next[turnId]
+  }
+  transientAttachments.value = next
 }
 
 function readDataUrl(file: File): Promise<string> {
@@ -2270,30 +2350,35 @@ function readDataUrl(file: File): Promise<string> {
             <small v-if="programStatusFor(turn.id)?.status === 'succeeded'">索引、双链、日志已同步并验证</small>
             <small v-else-if="programStatusFor(turn.id)?.reason">{{ programStatusFor(turn.id)?.reason }}</small>
           </div>
-          <button
-            v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
-            class="memory-message-copy"
-            type="button"
-            :title="copiedTurnId === turn.id ? '已复制' : '复制'"
-            :aria-label="copiedTurnId === turn.id ? '已复制' : '复制消息'"
-            @click="copyTurn(turn)"
-          ><JcIcon :name="copiedTurnId === turn.id ? 'check' : 'content-copy'" /></button>
-          <button
-            v-if="turn.role === 'user' && turn.id !== 'streaming-assistant'"
-            class="memory-message-edit"
-            type="button"
-            title="编辑并重新发送"
-            aria-label="编辑并重新发送"
-            :disabled="sending"
-            @click="editTurn(turn)"
-          ><JcIcon name="edit" /></button>
-          <button
-            v-if="shouldSuggestWikiWrite(turn)"
-            class="memory-wiki-suggest"
-            type="button"
-            title="把这条回答整理后写入 Wiki"
-            @click="suggestWikiWrite(turn)"
-          ><JcIcon name="save" /><span>写入 Wiki</span></button>
+          <div
+            v-if="(turn.id !== 'streaming-assistant' && displayTurnContent(turn)) || turn.role === 'user' || shouldSuggestWikiWrite(turn)"
+            class="memory-message-actions"
+          >
+            <button
+              v-if="turn.role === 'user' && turn.id !== 'streaming-assistant'"
+              class="memory-message-edit"
+              type="button"
+              title="编辑并重新发送"
+              aria-label="编辑并重新发送"
+              :disabled="sending"
+              @click="editTurn(turn)"
+            ><JcIcon name="edit" /></button>
+            <button
+              v-if="turn.id !== 'streaming-assistant' && displayTurnContent(turn)"
+              class="memory-message-copy"
+              type="button"
+              :title="copiedTurnId === turn.id ? '已复制' : '复制'"
+              :aria-label="copiedTurnId === turn.id ? '已复制' : '复制消息'"
+              @click="copyTurn(turn)"
+            ><JcIcon :name="copiedTurnId === turn.id ? 'check' : 'content-copy'" /></button>
+            <button
+              v-if="shouldSuggestWikiWrite(turn)"
+              class="memory-wiki-suggest"
+              type="button"
+              title="把这条回答整理后写入 Wiki"
+              @click="suggestWikiWrite(turn)"
+            ><JcIcon name="save" /><span>写入 Wiki</span></button>
+          </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
               type="button"
@@ -2363,14 +2448,6 @@ function readDataUrl(file: File): Promise<string> {
       />
 
       <footer v-if="conversation" class="memory-composer">
-        <div class="memory-composer-tools">
-          <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
-          <div class="memory-command-strip" aria-label="常用指令">
-            <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" :data-tooltip="command.description" @click="insertCommand(command)">
-              <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
-            </button>
-          </div>
-        </div>
         <div v-if="selectedSkillNames.length || wikiSelected || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
@@ -2457,18 +2534,29 @@ function readDataUrl(file: File): Promise<string> {
             </button>
           </div>
           <input ref="fileInput" type="file" multiple hidden :disabled="sending" @change="selectFiles" />
-          <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
-          <div
-            ref="composerRef"
-            class="memory-composer-editable"
-            :contenteditable="!sending"
-            data-placeholder="输入消息"
-            @input="handleComposerInput"
-            @keydown="handleComposerKeydown"
-            @paste="handleComposerPaste"
-          />
-          <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
-          <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length && !wikiSelected" @click="send"><JcIcon name="arrow-upward" /></button>
+          <div class="memory-input-area">
+            <div
+              ref="composerRef"
+              class="memory-composer-editable"
+              :contenteditable="!sending"
+              data-placeholder="输入消息"
+              @input="handleComposerInput"
+              @keydown="handleComposerKeydown"
+              @paste="handleComposerPaste"
+            />
+          </div>
+          <div class="memory-action-row">
+            <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
+            <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
+            <div class="memory-command-strip" aria-label="常用指令">
+              <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" :data-tooltip="command.description" @click="insertCommand(command)">
+                <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
+              </button>
+            </div>
+            <span class="memory-action-spacer" aria-hidden="true"></span>
+            <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
+            <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length && !wikiSelected" @click="send"><JcIcon name="arrow-upward" /></button>
+          </div>
         </div>
       </footer>
     </main>
@@ -2672,8 +2760,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .memory-messages::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--olive-dark) 78%, transparent); background-clip: content-box; }
 .memory-message-list { width: 100%; }
-.memory-message { position: relative; margin-bottom: 24px; padding-right: 30px; content-visibility: auto; }
-.memory-message.user { margin-left: min(18%, 130px); padding: 12px 42px 12px 14px; border-radius: 8px; background: var(--surface); }
+.memory-message { margin-bottom: 24px; content-visibility: auto; }
+.memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border-radius: 8px; background: var(--surface); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .memory-message-attachment { display: flex; width: min(220px, 100%); height: 48px; align-items: center; gap: 8px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); overflow: hidden; color: var(--ink3); }
@@ -2698,11 +2786,12 @@ function readDataUrl(file: File): Promise<string> {
 .memory-scene-composer button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 6px; background: var(--olive); color: white; cursor: pointer; }
 .memory-scene-composer button:disabled { cursor: default; opacity: .45; }
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
-.memory-message-copy { position: absolute; top: 0; right: 0; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.memory-message-copy { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-message-edit { position: absolute; top: 0; right: 32px; display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-edit { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-wiki-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 8px; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-wiki-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-wiki-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
 .memory-wiki-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
 .memory-wiki-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
@@ -2727,13 +2816,12 @@ function readDataUrl(file: File): Promise<string> {
 .memory-scene-card em { flex: 0 0 auto; color: #398362; font-size: 12px; font-style: normal; }
 .memory-message.streaming { opacity: .85; }
 .memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
-.memory-composer-tools { position: relative; display: flex; align-items: center; gap: 6px; padding: 7px 10px 0; }
 .memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 7px 10px 0; scrollbar-width: none; }
 .memory-selected-tools::-webkit-scrollbar { display: none; }
 .memory-selected-tools .memory-attachment-chip { flex: 0 0 auto; }
 .memory-editing-cancel { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-editing-cancel:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-command-strip { display: flex; min-width: 0; align-items: center; gap: 4px; overflow: visible; scrollbar-width: none; }
+.memory-command-strip { display: flex; min-width: 0; max-width: calc(100% - 80px); flex: 0 1 auto; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .memory-command-strip::-webkit-scrollbar { display: none; }
 .memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
 .memory-command-strip > button { position: relative; }
@@ -2745,7 +2833,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
 .memory-command-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
 .memory-command-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
-.memory-input-row { position: relative; display: flex; align-items: flex-end; gap: 8px; padding: 10px; }
+.memory-input-row { position: relative; display: grid; gap: 8px; padding: 10px; }
+.memory-input-area { display: flex; min-height: 76px; align-items: flex-start; padding: 7px 4px 0; }
+.memory-action-row { display: flex; min-width: 0; align-items: center; gap: 4px; }
+.memory-action-spacer { min-width: 8px; flex: 1; }
 .memory-input-drop-active { border: 1px dashed var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--paper)); }
 .memory-mention-popover { position: absolute; z-index: 60; right: 10px; bottom: calc(100% + 7px); left: 10px; max-height: min(320px, 42vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-mention-popover > button { display: grid; width: 100%; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
@@ -2753,7 +2844,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-mention-kind, .memory-mention-empty { color: var(--ink3); font-size: 11px; }
 .memory-mention-empty { padding: 9px; }
-.memory-composer-editable { min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; overflow-wrap: anywhere; }
+.memory-composer-editable { width: 100%; min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; overflow-wrap: anywhere; }
 .memory-composer-editable:empty::before { color: var(--ink3); content: attr(data-placeholder); pointer-events: none; }
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }

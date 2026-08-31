@@ -276,6 +276,23 @@ test('memory messages expose one copy action and project GLB files use the share
   assert.match(viewer, /\.model-viewer \{ width: 100%; max-width: 100%; height: 68vh;/)
 })
 
+test('memory opens the latest conversation and keeps message actions at the bottom', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const project = source('src/runtime/memory/memoryProject.ts')
+  assert.match(workbench, /const latest = state\.conversations\.at\(-1\)/)
+  assert.match(project, /conversationActivityTime\(left\) - conversationActivityTime\(right\)/)
+  assert.match(workbench, /class="memory-message-actions"/)
+  assert.match(workbench, /\.memory-message-actions \{ display: flex; align-items: center; justify-content: flex-end;/)
+  assert.match(workbench, /loadConversationAttachmentPreviews\(resource, generation\)/)
+  assert.match(workbench, /createImageBitmap\(new Blob\(\[data\.buffer\]/)
+  assert.match(workbench, /URL\.revokeObjectURL\(url\)/)
+})
+
+test('memory composer starts at a three-line input height', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /\.memory-input-area \{ display: flex; min-height: 76px;/)
+})
+
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
@@ -350,7 +367,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速<|>记忆</)
   assert.match(workbench, /const toolCommands = \[/)
-  for (const label of ['@Wiki', '@Skill', '@文件', '@3D', '@媒体', '@MCP', '@Terminal'])
+  for (const label of ['@Wiki', '@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP', '@Terminal'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
   assert.doesNotMatch(workbench, /@Skill \+ @Wiki|@Skill \+ @MCP/)
   assert.doesNotMatch(workbench, /const commonCommands = \[/)
@@ -512,7 +529,7 @@ test('memory message copy stays compact and copies the original markdown', () =>
   assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
   assert.match(
     workbench,
-    /\.memory-message-copy \{ position: absolute; top: 0; right: 0;[\s\S]*width: 26px; height: 26px;/,
+    /\.memory-message-copy \{ display: flex; width: 26px; height: 26px;/,
   )
 })
 

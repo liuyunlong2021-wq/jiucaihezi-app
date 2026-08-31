@@ -84,6 +84,7 @@ export interface MemoryChatInput {
   fileToolsSelected?: boolean
   selectedMcpToolNames?: string[]
   mediaSelected?: boolean
+  avSelected?: boolean
   scene3dSelected?: boolean
   terminalSelected?: boolean
   signal?: AbortSignal
@@ -113,6 +114,7 @@ export function hasExplicitMemoryCapability(
     | 'fileToolsSelected'
     | 'selectedMcpToolNames'
     | 'mediaSelected'
+    | 'avSelected'
     | 'scene3dSelected'
     | 'terminalSelected'
     | 'attachments'
@@ -124,6 +126,7 @@ export function hasExplicitMemoryCapability(
     input.fileToolsSelected ||
     input.selectedMcpToolNames?.length ||
     input.mediaSelected ||
+    input.avSelected ||
     input.scene3dSelected ||
     input.terminalSelected,
   )
