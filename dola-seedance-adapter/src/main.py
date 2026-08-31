@@ -12,7 +12,6 @@ MODEL = "dola-seedance2.5"
 MAX_PROMPT = 3000
 MAX_IMAGES = 30
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
-MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 @asynccontextmanager
@@ -54,7 +53,6 @@ async def create_video(request: Request):
     if len(images) > MAX_IMAGES:
         raise HTTPException(400, "Dola Seedance supports at most 30 images")
     files = []
-    total_bytes = 0
     for index, url in enumerate(images, 1):
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
             raise HTTPException(400, "Reference images must be URLs")
@@ -68,9 +66,6 @@ async def create_video(request: Request):
             raise HTTPException(400, "Only JPG, JPEG and PNG images are supported")
         if len(response.content) > MAX_IMAGE_BYTES:
             raise HTTPException(413, "Reference image exceeds 20 MiB")
-        total_bytes += len(response.content)
-        if total_bytes > MAX_TOTAL_IMAGE_BYTES:
-            raise HTTPException(413, "Reference images exceed 20 MiB total")
         extension = "png" if content_type == "image/png" else "jpg"
         files.append(("images[]", (f"reference-{index}.{extension}", response.content, content_type)))
     form = {"prompt": prompt, "ratio": ratio, "seconds": "30"}
