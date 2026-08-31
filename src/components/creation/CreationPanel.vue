@@ -888,9 +888,11 @@ const canvasReferenceRunPlan = computed(() => {
     .map(() => 'data:audio/mpeg;base64,')
   if (!images.length && !videos.length && !audios.length) return null
   try {
+    const params = buildCurrentCreationParams({ images, videos, audios })
+    if (!String(params.prompt || '').trim()) params.prompt = '参考素材'
     return buildCreationRunPlan({
       modelId: spec.id,
-      params: buildCurrentCreationParams({ images, videos, audios }),
+      params,
     })
   } catch {
     return null
@@ -4225,7 +4227,8 @@ const canSend = computed(
       <!-- 分辨率 (grok) -->
       <div v-if="resolutionOptions.length" class="cp-island">
         <div class="cp-island-label">分辨率</div>
-        <div class="cp-btn-group">
+        <div v-if="resolutionOptions.length === 1" class="cp-island-val">{{ resolutionOptions[0] }}</div>
+        <div v-else class="cp-btn-group">
           <button
             v-for="r in resolutionOptions"
             :key="r"

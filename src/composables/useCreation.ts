@@ -645,6 +645,10 @@ export function setResolution(res: string) {
 export function setDuration(dur: number) { cpState.dur = dur; saveCpState() }
 export function setMv(mv: string) { cpState.mv = mv; saveCpState() }
 export function setLanguage(language: string) { cpState.language = language; saveCpState() }
+
+// Normalize persisted values before computed run plans validate them.
+syncParams()
+
 export function getModelFieldValue(field: CreationFieldSpec): string | number | boolean | string[] {
   const value = cpState.fieldValues[field.key]
   if (isFieldValuePresent(value)) return value

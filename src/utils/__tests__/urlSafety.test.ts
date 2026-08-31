@@ -42,6 +42,7 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('https://cdn.jiucaihezi.studio/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://api.jiucaihezi.studio/api/creations/files/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/output/result.mp4'), true)
+  assert.equal(isAllowedCreationResultUrl('https://example.dola.com/path/video.mp4'), true)
   assert.equal(isAllowedCreationResultUrl('https://cdn.sd2.mengfactory.cn/sd2/result-assets/result.mp4'), true)
   assert.equal(isAllowedCreationResultUrl('https://webstatic.aiproxy.vip/output/result.png'), true)
   assert.equal(isAllowedCreationResultUrl('https://vip.edu888.top/media/siphonlab-media/images/outputs/result.png'), true)

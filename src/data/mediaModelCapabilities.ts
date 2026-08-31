@@ -367,14 +367,14 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     task: 'video',
     model: 'dola-seedance2.5',
     provider: 'gateway-video',
-    maxFiles: 9,
+    maxFiles: 30,
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 3000 },
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '3:4', '4:3', '21:9']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
       { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
-      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
     ],
   },
   // ── Sora2 图生视频 ──

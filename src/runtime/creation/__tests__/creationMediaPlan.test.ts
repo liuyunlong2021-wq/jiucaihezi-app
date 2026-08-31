@@ -163,6 +163,28 @@ test('every registry model has a valid route contract and can produce a run plan
   }
 })
 
+test('Dola Seedance 2.5 switches to image-to-video with four references and stays fixed at 720p', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'newapi/dola/seedance2.5',
+    params: {
+      prompt: '让参考图中的主体自然运动',
+      images: ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg', 'https://example.com/4.jpg'],
+      ratio: '16:9',
+      resolution: '720p',
+      duration: 30,
+    },
+  })
+
+  assert.equal(plan.mode, 'image-to-video')
+  assert.equal(plan.debug.referenceImageCount, 4)
+  assert.equal(plan.debug.normalizedParams.resolution, '720p')
+  assert.equal(plan.debug.normalizedParams.duration, 30)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/dola/seedance2.5',
+    params: { prompt: '超出参考图上限', images: Array.from({ length: 31 }, (_, i) => `https://example.com/${i}.jpg`) },
+  }), /参考图最多支持 30 个/)
+})
+
 test('model lookup prefers exact ids and resolves aliases', () => {
   assert.equal(getCreationModelSpec('gpt-image-2-中质量')?.model, 'gpt-image-2-中质量')
   assert.equal(getCreationModelSpec('gpt-image-2')?.id, 'gpt-image-2-低质量')

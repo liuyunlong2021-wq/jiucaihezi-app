@@ -104,6 +104,11 @@ async def get_video(task_id: str, request: Request):
         raise HTTPException(502, payload.get("message", "Dola query failed"))
     task = payload.get("task") or {}
     status = str(task.get("status") or "processing")
+    code = str(payload.get("code") or "")
+    if code not in {"0", "1"}:
+        raise HTTPException(502, payload.get("message", "Invalid Dola response code"))
+    if (status == "succeeded") != (code == "1"):
+        raise HTTPException(502, payload.get("message", "Inconsistent Dola task response"))
     result = {"id": task_id, "task_id": task_id, "object": "video", "model": MODEL, "status": "completed" if status == "succeeded" else status, "progress": 100 if status == "succeeded" else 0}
     if status == "succeeded": result["video_url"] = task.get("url")
     if status == "failed": result["error"] = task.get("error") or "Dola task failed"
