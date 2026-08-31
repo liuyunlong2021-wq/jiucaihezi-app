@@ -888,6 +888,15 @@ test('creation panel delegates persisted previews to the host and keeps failed-s
   assert.doesNotMatch(source, /taskPreviewObjectUrl/)
 })
 
+test('remote preview downloads fetch bytes and force a typed filename', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /fetchCreationMediaBlob\(preview\.url, preview\.type, true\)/)
+  assert.match(source, /link\.download = preview\.filename/)
+  assert.match(source, /buildMediaFilename\(/)
+  assert.match(source, /extension: type === 'video' \? 'mp4'/)
+})
+
 test('creation panel lets a remote successful result be saved into its project', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const retry =

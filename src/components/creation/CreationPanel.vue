@@ -143,6 +143,8 @@ import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { nextMaterialPath } from '@/utils/projectMaterials'
 import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
+import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
+import { buildMediaFilename } from '@/utils/mediaFilename'
 import type {
   CanvasDocumentV3,
   CanvasMediaKind,
@@ -365,13 +367,25 @@ function closeTaskPreview() {
   taskPreview.value = null
 }
 
-function downloadTaskPreview() {
+async function downloadTaskPreview() {
   const preview = taskPreview.value
   if (!preview) return
-  const link = document.createElement('a')
-  link.href = preview.url
-  link.download = preview.filename
-  link.click()
+  try {
+    const { blob } = await fetchCreationMediaBlob(preview.url, preview.type, true)
+    const objectUrl = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectUrl
+    link.download = preview.filename
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000)
+  } catch {
+    const link = document.createElement('a')
+    link.href = preview.url
+    link.download = preview.filename
+    link.click()
+  }
 }
 
 async function previewTask(task: MediaTask) {
@@ -382,19 +396,26 @@ async function previewTask(task: MediaTask) {
     return
   }
   if (task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
-    taskPreview.value = {
-      url: task.resultUrl,
-      type:
-        task.type === 'video'
-          ? 'video'
-          : task.type === 'audio'
-            ? 'audio'
+    const type =
+      task.type === 'video'
+        ? 'video'
+        : task.type === 'audio'
+          ? 'audio'
             : task.type === 'model3d'
               ? 'model3d'
-              : 'image',
+              : 'image'
+    taskPreview.value = {
+      url: task.resultUrl,
+      type,
       model: task.modelLabel || task.model,
       sourceUrl: task.resultUrl,
-      filename: taskPath(task).split('/').pop() || 'creation',
+      filename: buildMediaFilename({
+        summary: task.summary,
+        prompt: task.prompt,
+        model: task.modelLabel || task.model,
+        taskId: task.id,
+        extension: type === 'video' ? 'mp4' : type === 'audio' ? 'mp3' : type === 'model3d' ? 'glb' : 'png',
+      }),
     }
     return
   }
