@@ -54,11 +54,6 @@ Dola 视频生成成功后，创作面板应与其他已落盘的视频一致：
 - 继续使用 `webCreationMediaProjectPath()` / `writeProjectMedia()` 生成安全文件名和 `.mp4` 扩展名。
 - 不新增 Dola 专用前端下载按钮、独立缓存表、远程存储或第二套任务状态。
 
-### 3.4 NewAPI 端口合同
-
-- 适配器容器监听标准 HTTP `80` 端口；NewAPI 渠道 URL 使用 `http://dola-seedance-adapter`，不再使用被安全策略拦截的 `:8789`。
-- 模型名 `dola-seedance2.5`、价格 `0.2/秒`、固定 `720p` 和 `30` 秒不变。
-
 ## 4. TDD 验收设计
 
 ### 4.1 适配器内容代理
@@ -141,7 +136,7 @@ Dola 视频生成成功后，创作面板应与其他已落盘的视频一致：
 | `src/stores/__tests__/mediaTaskStore.test.ts` | 同源下载认证、落盘和重试合同 |
 | `src/components/__tests__/creationPanelContractUi.test.ts` | 本地/远程卡片动作与 `.mp4` 文件名合同 |
 
-不修改已确认的 Dola 上传数量和单张大小规则，不修改 NewAPI 价格、模型名或其他模型适配器；仅将 Dola 渠道 URL 从带 `:8789` 的容器地址切换为标准端口地址 `http://dola-seedance-adapter`，以满足 NewAPI 出站端口白名单。
+不修改已确认的 Dola 上传数量和单张大小规则，不修改 NewAPI 价格、渠道 URL、模型名或其他模型适配器。
 
 ## 7. 禁入边界
 
