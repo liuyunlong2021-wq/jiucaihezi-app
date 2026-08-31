@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  parseWikiAgentStep,
   parseWikiReadPlan,
   parseWikiSynthesisAndChangePlan,
   WIKI_READ_PLAN_SYSTEM_PROMPT,
@@ -9,12 +10,52 @@ import {
 } from '../wikiPlans'
 
 test('generic Wiki plans treat Skill as method rules, not a domain schema', () => {
-  assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /Skill.*方法.*格式.*质量规则/)
-  assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /不要.*Wiki.*事实/)
+  assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /Skill 是业务规则核心，Wiki 只提供事实/)
+  assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /任务、必要对话、完整 Skill、Wiki 根 index/)
   assert.match(WIKI_READ_PLAN_SYSTEM_PROMPT, /已选 Skill 或用户明确给出的 Wiki 根内路径属于直接读取授权/)
   assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /Wiki 只负责事实、页面组织和确定性落盘/)
   assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /Skill 规则不是 Wiki 事实/)
   assert.doesNotMatch(WIKI_READ_PLAN_SYSTEM_PROMPT, /角色|场景|道具|伏笔|分集/)
+})
+
+test('Wiki Agent accepts the minimal Skill-led step protocol', () => {
+  assert.deepEqual(parseWikiAgentStep('{"paths":["日记/index.md"]}'), {
+    kind: 'read',
+    plan: {
+      paths: [{ path: '日记/index.md', reason: '完成任务所需资料' }],
+      missing: [],
+      sufficient: false,
+      status: 'need_more',
+    },
+  })
+  assert.deepEqual(
+    parseWikiAgentStep(JSON.stringify({
+      answer: '已完成',
+      actions: [{ kind: 'write', path: '日记/2026/0830.md', content: '正文' }],
+    })),
+    {
+      kind: 'final',
+      plan: {
+        answer: '已完成',
+        changePlan: {
+          reason: '',
+          basis: [],
+          operations: [{
+            kind: 'create',
+            path: '日记/2026/0830.md',
+            content: '正文',
+            title: '0830',
+          }],
+          indexChanges: [],
+        },
+      },
+    },
+  )
+})
+
+test('synthesis protocol treats the previous assistant answer as Wiki input when requested', () => {
+  assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /最近一条 assistant 消息就是待整理正文/)
+  assert.match(WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT, /必须直接整理该正文并输出可执行 changePlan/)
 })
 
 test('ReadPlan accepts a bounded unique list and rejects duplicate or unsafe paths', () => {

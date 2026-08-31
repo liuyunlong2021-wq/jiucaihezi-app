@@ -368,6 +368,8 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(workbench, /programStatuses = ref<Record<string, MemoryProgramStatus>>/)
   assert.match(workbench, /class="memory-program-status"/)
   assert.match(workbench, /索引、双链、日志已同步并验证/)
+  assert.match(workbench, /程序已返回真实执行回执/)
+  assert.match(workbench, /programStatus\.kind/)
   assert.doesNotMatch(
     runtime,
     /rawPath: string|input\.rawPath|conversationDocumentSources|historicalDocumentSources/,
@@ -383,6 +385,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(runtime, /attachments: input\.attachments/)
   assert.match(runtime, /files: input\.files/)
   assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
+  assert.match(runtime, /reservedTokens: maxOutputTokens \+ Math\.min\(32_768, Math\.max\(2_048, Math\.floor\(contextWindow \* 0\.1\)\)\)/)
   assert.match(
     workbench,
     /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.has\(active\.transcript\.id\)/,
@@ -466,6 +469,8 @@ test('memory mode keeps explicit Skill and Wiki connections', () => {
   assert.doesNotMatch(runtime, /customSkill\?\.skillContent\.trim\(\)/)
   assert.doesNotMatch(runtime, /selectedSkillNames\.map\(\(name, index\)/)
   assert.match(runtime, /buildSelectedSkillPrompt\(/)
+  assert.match(runtime, /wikiProtocolTask[\s\S]*只返回所需 paths[\s\S]*answer \+ 最小 actions/)
+  assert.match(runtime, /不要直接调用 wiki_context、wiki 或自行拼装事务字段/)
   assert.match(runtime, /selectedSkillPrompt \|\| buildWebSkillCatalogPrompt\(catalog\)/)
   assert.match(runtime, /buildMemoryDesktopToolDefinitions\(\)/)
   assert.match(runtime, /buildMemoryWebProjectToolDefinitions\(\)/)

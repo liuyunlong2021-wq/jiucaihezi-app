@@ -1,5 +1,12 @@
 # 热缓存
 
+## [2026-08-31] Agent 收尾状态
+
+- 当前开发分支为 `0829-WikiAgent`，`main` 仍指向 `dec36620`；本轮 WikiAgent 改动尚未提交。
+- `0829-rhapp-prompt-141` 的 RH 提示词框修复已合并到 `main`；Skill-first 分支 `codex/0830-skill-first-agent` 仍待提交剩余改动并合并。
+- 收尾目标是将唯一 Agent 的 Skill-first、Wiki 渐进读取、工具白名单、取消和界面收尾统一进入 `main`，然后再删除已合并临时分支。
+- 自动测试通过不等于真实模型、安装包、跨平台和生产发布验收；这些边界继续按各 TDD 记录。
+
 > 更新：2026-08-29 | 阶段：显式能力 Agent 总合同已定稿，按阶段实施
 
 ## Wiki Agent 当前执行规则

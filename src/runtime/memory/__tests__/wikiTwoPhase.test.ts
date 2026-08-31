@@ -14,6 +14,13 @@ function response(value: unknown): Response {
   )
 }
 
+function responseText(value: string): Response {
+  return new Response(
+    [`data: ${JSON.stringify({ choices: [{ delta: { content: value } }] })}`, 'data: [DONE]', ''].join('\n\n'),
+    { headers: { 'content-type': 'text/event-stream' } },
+  )
+}
+
 test('Wiki two-phase flow reads the plan then submits one change plan', async () => {
   const requests: any[] = []
   const calls: string[] = []
@@ -59,6 +66,75 @@ test('Wiki two-phase flow reads the plan then submits one change plan', async ()
   assert.equal(result.metrics.toolRounds, 2)
   assert.match(calls[1]!, /"action":"apply"/)
   assert.doesNotMatch(calls[1]!, /indexChanges/)
+})
+
+test('Wiki plus Skill can finish from the root index in one model request', async () => {
+  const requests: any[] = []
+  const calls: string[] = []
+  const result = await runWikiTwoPhase({
+    messages: [
+      { role: 'system', content: '<selected_skill>场景提示词规则</selected_skill>' },
+      { role: 'user', content: '按 Skill 写入日记' },
+    ],
+    task: '按 Skill 写入日记/2026/0830.md',
+    entryResult: '{"entry":{"path":"index.md","content":"日记 -> 日记/index.md"}}',
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return response({
+        answer: '已按 Skill 完成',
+        actions: [{ kind: 'write', path: '日记/2026/0830.md', content: '场景提示词正文' }],
+      })
+    },
+    executeWiki: async call => {
+      calls.push(call.function.name)
+      return { content: 'status: succeeded', status: 'succeeded' }
+    },
+  })
+
+  assert.equal(requests.length, 1)
+  assert.deepEqual(calls, ['wiki'])
+  assert.equal(result.text, '已按 Skill 完成')
+  assert.equal(result.plan.changePlan?.reason, '按 Skill 写入日记/2026/0830.md')
+  assert.deepEqual(result.plan.changePlan?.basis, [])
+})
+
+test('Wiki structured step retries once when a local model returns reasoning without visible content', async () => {
+  let requests = 0
+  const result = await runWikiTwoPhase({
+    messages: [{ role: 'user', content: '完成任务' }],
+    task: '完成任务',
+    entryResult: '{}',
+    sendChatCompletion: async () => {
+      requests += 1
+      return requests === 1
+        ? responseText('')
+        : response({ answer: '修复后结果', actions: [] })
+    },
+    executeWiki: async () => ({ content: '{}', status: 'succeeded' }),
+  })
+  assert.equal(requests, 2)
+  assert.equal(result.text, '修复后结果')
+})
+
+test('Wiki task referencing the previous answer labels it as the write source', async () => {
+  const requests: any[] = []
+  await runWikiTwoPhase({
+    messages: [
+      { role: 'user', content: '先回答一个问题' },
+      { role: 'assistant', content: '这是上一条回答正文' },
+    ],
+    task: '把上面的输出填入 Wiki',
+    entryResult: '{}',
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return requests.length === 1
+        ? response({ paths: [], missing: [], sufficient: true })
+        : response({ answer: '已整理', changePlan: null })
+    },
+    executeWiki: async () => ({ content: '{}', status: 'succeeded' }),
+  })
+  assert.ok(requests.some(request => request.messages.some((message: any) =>
+    String(message.content || '').includes('待整理的上一条 assistant 回答：\n这是上一条回答正文'))))
 })
 
 test('Wiki Agent follows nested indexes until the leaf content is available', async () => {
@@ -223,14 +299,13 @@ test('Wiki two-phase keeps the model answer when a read is cancelled', async () 
 })
 
 test('Wiki two-phase keeps the model answer when a write fails', async () => {
+  let requests = 0
   const result = await runWikiTwoPhase({
     messages: [{ role: 'user', content: '写入 Wiki' }],
     task: '写入 Wiki',
     entryResult: '{}',
-    sendChatCompletion: async request =>
-      request.messages.some((message: any) =>
-        String(message.content || '').includes('WikiSynthesis'),
-      )
+    sendChatCompletion: async () =>
+      ++requests === 2
         ? response({
             answer: '这是给用户的正文',
             changePlan: {
@@ -273,12 +348,13 @@ test('Wiki two-phase returns an answer without supplementary reads when evidence
 })
 
 test('Wiki two-phase derives index maintenance when the model omits index declarations', async () => {
+  let requests = 0
   const result = await runWikiTwoPhase({
     messages: [{ role: 'user', content: '写入 Wiki' }],
     task: '写入 Wiki',
     entryResult: '{}',
-    sendChatCompletion: async request =>
-      request.messages.some((message: any) => String(message.content).includes('WikiSynthesis'))
+    sendChatCompletion: async () =>
+      ++requests === 2
         ? response({
             answer: '正文',
             changePlan: {

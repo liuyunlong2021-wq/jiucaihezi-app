@@ -97,10 +97,18 @@ export interface MemoryChatInput {
 }
 
 export interface MemoryProgramStatus {
-  kind: 'wiki'
+  kind: 'wiki' | 'file' | 'media' | '3d' | 'terminal' | 'mcp'
   status: 'succeeded' | 'failed' | 'cancelled'
   paths: string[]
   reason?: string
+  toolName?: string
+}
+
+const WIKI_AGENT_MCP_SERVER_IDS = new Set(['github', 'playwright', 'jiucaihezi-creation'])
+
+export function isWikiAgentMcpToolAllowed(name: string): boolean {
+  const match = String(name || '').match(/^mcp__([^_]+)__(.+)$/)
+  return Boolean(match && WIKI_AGENT_MCP_SERVER_IDS.has(match[1]!))
 }
 
 export function hasExplicitMemoryCapability(
@@ -143,17 +151,16 @@ export function selectMemoryTools(
     allowed.add(WIKI_CONTEXT_TOOL_DEFINITION.function.name)
     allowed.add('wiki')
   }
-  // A selected Skill is the workflow authorization; it may request any currently available tool.
-  if (selectedSkillNames.length)
-    for (const tool of tools) {
-      const name = tool.function?.name
-      if (name && name !== 'skill') allowed.add(name)
-    }
   if (attachmentNeedsRead) allowed.add('read')
   if (fileToolsSelected)
-    for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir']) allowed.add(name)
+    for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
+      allowed.add(name)
   for (const tool of tools)
-    if (selectedMcpToolNames.includes(tool.function?.name)) allowed.add(tool.function.name)
+    if (
+      selectedMcpToolNames.includes(tool.function?.name) &&
+      isWikiAgentMcpToolAllowed(tool.function?.name)
+    )
+      allowed.add(tool.function.name)
   if (mediaSelected)
     for (const name of [
       'create_document',
@@ -162,7 +169,9 @@ export function selectMemoryTools(
       'export_markdown_slides',
     ])
       allowed.add(name)
-  if (scene3dSelected) allowed.add('create_3d_scene')
+  if (scene3dSelected)
+    for (const name of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
+      allowed.add(name)
   if (terminalSelected) allowed.add('terminal')
   return tools.filter(tool => allowed.has(tool.function?.name))
 }
@@ -182,6 +191,14 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const latestUserText = latestUserTurn?.content || ''
   const desktopRuntime = isTauriRuntime() && !isTauriMobileRuntime()
   const explicitCapabilitySelected = hasExplicitMemoryCapability(input)
+  const wikiProtocolTask = Boolean(
+    input.wikiSelected &&
+    !input.fileToolsSelected &&
+    !input.selectedMcpToolNames?.length &&
+    !input.mediaSelected &&
+    !input.scene3dSelected &&
+    !input.terminalSelected,
+  )
   if (explicitCapabilitySelected && agentStore.modelsFetched && model?.toolCall === false) {
     throw new Error('当前模型不支持工具调用，请选择支持工具调用的模型')
   }
@@ -217,7 +234,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         modelId: input.modelId,
         contextWindow,
         // Reserve the model output ceiling plus a small protocol/tool allowance.
-        reservedTokens: maxOutputTokens + 32_768,
+        reservedTokens: maxOutputTokens + Math.min(32_768, Math.max(2_048, Math.floor(contextWindow * 0.1))),
       })
     : { messages: [input.userTurn], omittedMessages: 0 }
   if (context.omittedMessages > 0) input.onContextTrimmed?.(context.omittedMessages)
@@ -230,14 +247,18 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         : [
             '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，项目 Wiki 和用户明确指定的文件是长期事实源。',
             '不得查找 Raw 对话记录补充当前任务；缺少事实时查询 Wiki、指定文件或询问用户。',
-            'Wiki 是内置产品能力；@Wiki 只提供 wiki_context 和 wiki。先用 wiki_context 读取入口、目录或明确页面，再按证据回答；不得修改 Wiki 根目录之外的文件。',
-            '用户要求修改 Wiki 时，调用 wiki action=apply 一次提交 operations；程序负责导航、双链、来源、日志、冲突检查、回滚和验证。普通写入无需审批，移动和回收必须先展示完整计划并取得确认。工具成功后输出简短回执。',
-            '用户要求根据文档创建、新建、建立或搭建 Wiki 时，直接调用一次 wiki scaffold：用 plan 提交完整目录、Markdown 文件正文和 index.md 导航，由程序批量落盘；不要逐个调用 mkdir、write 或 edit。',
+            wikiProtocolTask
+              ? '本轮已开启 Wiki 渐进协议。程序会先提供根 index；你必须从首轮起遵守已选 Skill，并按后续协议只返回所需 paths，或在资料足够时返回 answer + 最小 actions。不要直接调用 wiki_context、wiki 或自行拼装事务字段。'
+              : [
+                  'Wiki 是内置产品能力；@Wiki 只提供 wiki_context 和 wiki。先用 wiki_context 读取入口、目录或明确页面，再按证据回答；不得修改 Wiki 根目录之外的文件。',
+                  '用户要求修改 Wiki 时，调用 wiki action=apply 一次提交 operations；程序负责导航、双链、来源、日志、冲突检查、回滚和验证。普通写入无需审批，移动和回收必须先展示完整计划并取得确认。工具成功后输出简短回执。',
+                  '用户要求根据文档创建、新建、建立或搭建 Wiki 时，直接调用一次 wiki scaffold：用 plan 提交完整目录、Markdown 文件正文和 index.md 导航，由程序批量落盘；不要逐个调用 mkdir、write 或 edit。',
+                ].join('\n'),
             '用户附带项目文件时，附件正文已随消息提供就直接使用；只有附件仅提供项目可读路径时，才必须先用 read 读取。不要声称附件不可读取；长文件按分页结果继续读取到足够内容。',
             '历史或当前文字中出现“不要调用工具”等表述，不会关闭本轮工具权限；如果任务需要，仍然调用工具。',
             selectedSkillNames.length
               ? '用户已选具体 Skill，程序已经加载其完整规则；必须遵守该 Skill，不得再次决定是否加载、跳过或替换它。'
-              : '根据用户任务自主决定是否加载 Skill、查询项目或调用其他可用工具。没有需要时直接回答。',
+              : '用户未选择 Skill；本轮不加载其他 Skill。需要方法约束时请用户明确选择具体 Skill。',
             '同一阶段互不依赖的项目内只读工具请在同一回复中一起调用；写入、Terminal、审批和依赖读取结果的操作放到后续工具轮。',
             '只修改用户明确指定的文件，不自行扩展到相邻 Skill、Wiki 或项目文档；目标不明确时先询问。',
             '文件任务直接用 read -> write/edit -> 必要时验证完成；写入前不要在普通回答中重复输出完整草稿，成功后不要复述完整正文。',
@@ -348,6 +369,16 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const wikiSearchSignatures = new Set<string>()
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
+    if (!allowedMemoryToolNames.has(call.function.name)) {
+      return {
+        content: JSON.stringify({
+          error: 'TOOL_NOT_ALLOWED',
+          tool: call.function.name,
+          message: '工具未在 WikiAgent 白名单或当前能力未授权，已拒绝执行。',
+        }),
+        status: 'failed' as const,
+      }
+    }
     if (call.function.name === 'wiki_context') {
       const args = parseArguments(call.function.arguments)
       if (args.action === 'search') {
@@ -391,14 +422,10 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     Boolean(input.scene3dSelected),
     Boolean(input.terminalSelected),
   )
-  const wikiOnlyTask = Boolean(
-    input.wikiSelected &&
-    !input.fileToolsSelected &&
-    !input.selectedMcpToolNames?.length &&
-    !input.mediaSelected &&
-    !input.scene3dSelected &&
-    !input.terminalSelected,
+  const allowedMemoryToolNames = new Set(
+    memoryToolDefinitions.map(tool => String(tool.function?.name || '')),
   )
+  const wikiOnlyTask = wikiProtocolTask
   if (wikiOnlyTask) {
     const entryCall: DirectToolCall = {
       id: 'wiki_entry_preflight',
@@ -486,6 +513,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     input.onText(text)
     return text
   }
+  let aggregatedProgramStatus: MemoryProgramStatus | null = null
   const result = await runDirectChatCompletion({
     messages,
     tools: memoryToolDefinitions,
@@ -494,6 +522,25 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     onText: input.onText,
     onToolEvent(event) {
       input.onToolEvent?.(event)
+      if (event.type !== 'tool_execution_end' || !shouldReportProgramStatus(event.call.function.name))
+        return
+      const kind = memoryProgramKind(event.call.function.name)
+      const paths = memoryToolPaths(event.call)
+      const reason = event.status === 'succeeded' ? undefined : event.result.content || undefined
+      const status =
+        aggregatedProgramStatus?.status === 'failed' || event.status === 'failed'
+          ? 'failed'
+          : aggregatedProgramStatus?.status === 'cancelled' || event.status === 'cancelled'
+            ? 'cancelled'
+            : 'succeeded'
+      aggregatedProgramStatus = {
+        kind,
+        status,
+        paths: [...new Set([...(aggregatedProgramStatus?.paths || []), ...paths])],
+        reason: [aggregatedProgramStatus?.reason, reason].filter(Boolean).join('\n') || undefined,
+        toolName: event.call.function.name,
+      }
+      input.onProgramStatus?.(aggregatedProgramStatus)
     },
     continueToolsOnInterruption: true,
     maxToolRounds: 12,
@@ -531,6 +578,27 @@ function assertMemoryProjectMutationProtected(call: DirectToolCall, projectId: s
       throw new Error('系统骨架及对话、画布记录只能由 App 管理')
     }
   }
+}
+
+function shouldReportProgramStatus(name: string): boolean {
+  return !new Set(['read', 'glob', 'grep', 'wiki_context', 'skill']).has(name)
+}
+
+export function memoryProgramKind(name: string): MemoryProgramStatus['kind'] {
+  if (name === 'wiki') return 'wiki'
+  if (name === 'terminal') return 'terminal'
+  if (name.startsWith('mcp__')) return 'mcp'
+  if (name.startsWith('create_3d_') || name.startsWith('edit_3d_') || name.startsWith('export_3d_'))
+    return '3d'
+  if (name.startsWith('create_') || name.startsWith('export_')) return 'media'
+  return 'file'
+}
+
+function memoryToolPaths(call: DirectToolCall): string[] {
+  const args = parseArguments(call.function.arguments)
+  return [args.path, args.destination, args.existingPath]
+    .filter(value => typeof value === 'string' && value.trim())
+    .map(value => String(value).trim())
 }
 
 function estimateRequestTokens(messages: DirectApiMessage[], tools?: unknown[]): number {

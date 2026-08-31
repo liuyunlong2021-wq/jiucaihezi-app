@@ -433,7 +433,23 @@ function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
 }
 
 function programStatusTitle(programStatus: MemoryProgramStatus): string {
-  return programStatus.status === 'succeeded' ? 'Wiki 已写入' : programStatus.status === 'cancelled' ? 'Wiki 写入已取消' : 'Wiki 写入失败'
+  const subject = {
+    wiki: 'Wiki',
+    file: '文件操作',
+    media: '媒体任务',
+    '3d': '3D 场景',
+    terminal: 'Terminal 命令',
+    mcp: 'MCP 调用',
+  }[programStatus.kind]
+  return programStatus.status === 'succeeded'
+    ? `${subject}已完成`
+    : programStatus.status === 'cancelled'
+      ? `${subject}已取消`
+      : `${subject}失败`
+}
+
+function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
+  return programStatus.kind === 'wiki' ? '索引、双链、日志已同步并验证' : '程序已返回真实执行回执'
 }
 const toolCommands = [
   { id: 'wiki', label: '@Wiki', icon: 'menu_book', description: '读取当前项目 Wiki' },
@@ -2260,7 +2276,7 @@ function readDataUrl(file: File): Promise<string> {
             <div v-if="programStatusFor(turn.id)?.paths.length" class="memory-program-status-paths">
               <span v-for="path in programStatusFor(turn.id)?.paths" :key="path">{{ path }}</span>
             </div>
-            <small v-if="programStatusFor(turn.id)?.status === 'succeeded'">索引、双链、日志已同步并验证</small>
+            <small v-if="programStatusFor(turn.id)?.status === 'succeeded'">{{ programStatusSuccessNote(programStatusFor(turn.id)!) }}</small>
             <small v-else-if="programStatusFor(turn.id)?.reason">{{ programStatusFor(turn.id)?.reason }}</small>
           </div>
           <button

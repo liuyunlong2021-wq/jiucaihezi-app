@@ -1,5 +1,5 @@
 import {
-  parseWikiReadPlan,
+  parseWikiAgentStep,
   parseWikiSynthesisAndChangePlan,
   WIKI_READ_PLAN_SYSTEM_PROMPT,
   WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT,
@@ -52,14 +52,28 @@ async function requestJson(input: {
   sendChatCompletion: (request: DirectChatCompletionRequest) => Promise<Response>
   signal?: AbortSignal
 }): Promise<{ text: string; metrics: DirectRunMetrics }> {
-  const result = await runDirectChatCompletion({
-    messages: input.messages,
+  const run = async (messages: DirectApiMessage[]) => await runDirectChatCompletion({
+    messages,
     sendChatCompletion: input.sendChatCompletion,
     onText: () => {},
     signal: input.signal,
     allowToolCalls: false,
     continueOnLength: false,
   })
+  const result = await run(input.messages)
+  if (!result.text.trim()) {
+    const retry = await run([
+      ...input.messages,
+      {
+        role: 'user',
+        content: '上一响应没有可见结果。停止继续分析，立即只输出本轮要求的最小 JSON。',
+      },
+    ])
+    return {
+      text: resolveDirectCompletionText(retry.text, retry.finishReason, '模型没有返回结构化计划'),
+      metrics: sumMetrics(result.metrics, retry.metrics),
+    }
+  }
   return {
     text: resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回结构化计划'),
     metrics: result.metrics,
@@ -75,14 +89,22 @@ export async function runWikiTwoPhase(input: {
   executeWiki: DirectToolExecutor
   signal?: AbortSignal
 }): Promise<WikiTwoPhaseResult> {
+  const referencedAnswer = /(?:上面|以上|上一条回答|前文)/u.test(input.task)
+    ? [...input.messages].reverse().find(message => message.role === 'assistant')?.content
+    : undefined
+  const referencedAnswerText = typeof referencedAnswer === 'string' ? referencedAnswer.trim() : ''
+  const taskContext = referencedAnswerText
+    ? `当前任务：${input.task}\n待整理的上一条 assistant 回答：\n${referencedAnswerText}`
+    : `当前任务：${input.task}`
   const state = createWikiAgentState({
     runId: input.runId || 'wiki-run',
     wikiRoot: 'wiki',
-    requiresMutation: /(?:写入|创建|更新|填充|移动|整理|删除|修正)/u.test(input.task),
+    requiresMutation: /(?:写入|填入|记录|沉淀|保存|归档|创建|更新|填充|移动|整理|删除|修正)/u.test(input.task),
   })
   let sources = input.entryResult
   let readPlan: WikiReadPlan = { paths: [], missing: [], sufficient: false }
   let readMetrics: DirectRunMetrics = EMPTY_METRICS
+  let plan: WikiSynthesisAndChangePlan | null = null
   const readPaths: string[] = []
   const maxReadRounds = 12
   let readStopReason: 'complete' | 'limit_reached' | 'failed' | 'stalled' = 'complete'
@@ -153,7 +175,7 @@ export async function runWikiTwoPhase(input: {
         { role: 'system', content: WIKI_READ_PLAN_SYSTEM_PROMPT },
         {
           role: 'user',
-          content: `当前任务：${input.task}\n已获得的 Wiki 资料：\n${sources}`,
+          content: `${taskContext}\n已获得的 Wiki 资料：\n${sources}`,
         },
       ],
       sendChatCompletion: input.sendChatCompletion,
@@ -161,7 +183,13 @@ export async function runWikiTwoPhase(input: {
     })
     readMetrics = sumMetrics(readMetrics, readRequest.metrics)
     try {
-      readPlan = parseWikiReadPlan(readRequest.text)
+      const step = parseWikiAgentStep(readRequest.text)
+      if (step.kind === 'final') {
+        plan = step.plan
+        readPlan = { paths: [], missing: [], sufficient: true, status: 'complete' }
+        break
+      }
+      readPlan = step.plan
     } catch (error) {
       readPlan = {
         paths: [],
@@ -195,27 +223,30 @@ export async function runWikiTwoPhase(input: {
   if (readStopReason === 'complete' && !readPlan.sufficient) readStopReason = 'limit_reached'
   const readIncomplete = readStopReason !== 'complete'
 
-  const synthesisRequest = await requestJson({
-    messages: [
-      ...input.messages,
-      { role: 'system', content: WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: `当前任务：${input.task}\nReadPlan：${JSON.stringify(readPlan)}\n实际 Wiki 资料：\n${sources}${readIncomplete ? `\n\n[Wiki 读取未完成：${readStopReason}。请基于现有真实资料完成任务，资料不足时如实说明。]` : ''}`,
-      },
-    ],
-    sendChatCompletion: input.sendChatCompletion,
-    signal: input.signal,
-  })
-  let plan: WikiSynthesisAndChangePlan
-  try {
-    plan = parseWikiSynthesisAndChangePlan(synthesisRequest.text)
-  } catch {
-    return {
-      text: [synthesisRequest.text, ...warnings].filter(Boolean).join('\n\n'),
-      plan: { answer: synthesisRequest.text, changePlan: null },
-      metrics: { ...sumMetrics(readMetrics, synthesisRequest.metrics), toolRounds: wikiToolRounds },
-      readPaths,
+  let synthesisMetrics = EMPTY_METRICS
+  if (!plan) {
+    const synthesisRequest = await requestJson({
+      messages: [
+        ...input.messages,
+        { role: 'system', content: WIKI_SYNTHESIS_CHANGE_PLAN_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `${taskContext}\nReadPlan：${JSON.stringify(readPlan)}\n实际 Wiki 资料：\n${sources}${readIncomplete ? `\n\n[Wiki 读取未完成：${readStopReason}。请基于现有真实资料完成任务，资料不足时如实说明。]` : ''}`,
+        },
+      ],
+      sendChatCompletion: input.sendChatCompletion,
+      signal: input.signal,
+    })
+    synthesisMetrics = synthesisRequest.metrics
+    try {
+      plan = parseWikiSynthesisAndChangePlan(synthesisRequest.text)
+    } catch {
+      return {
+        text: [synthesisRequest.text, ...warnings].filter(Boolean).join('\n\n'),
+        plan: { answer: synthesisRequest.text, changePlan: null },
+        metrics: { ...sumMetrics(readMetrics, synthesisMetrics), toolRounds: wikiToolRounds },
+        readPaths,
+      }
     }
   }
   if (readIncomplete) {
@@ -223,7 +254,7 @@ export async function runWikiTwoPhase(input: {
   }
   if (warnings.length) plan.answer = `${plan.answer}\n\n> Wiki 提示：${[...new Set(warnings)].join('；')}`
   const metrics = {
-    ...sumMetrics(readMetrics, synthesisRequest.metrics),
+    ...sumMetrics(readMetrics, synthesisMetrics),
     toolRounds: wikiToolRounds,
   }
   if (!plan.changePlan) return { text: plan.answer, plan, metrics, readPaths }
