@@ -10,7 +10,7 @@
 
 - `0829-WikiAgent` 提交 `49b515fc`、Skill-first 提交 `bcaa9163` 已合并到 `main`，合并提交 `1c83690e`；冲突文件保留 WikiAgent 白名单/渐进读取并接入 Skill-first Tool Search。
 - 合并后 Node focused `1243/1243`、Rust `403 passed / 1 ignored`、`vue-tsc -b`、`git diff --check` 全部通过。
-- 已删除已合并临时分支 `0829-WikiAgent`、`0829-rhapp-prompt-141`、`codex/0830-skill-first-agent`；OpenClaw 参考分支保留。真实模型、安装包、跨平台和生产发布验收未被自动测试替代。
+- 已删除已合并临时分支 `0829-Agent`、`0829-WikiAgent`、`0829-rhapp-prompt-141`、`codex/0830-skill-first-agent`；OpenClaw 参考分支保留。真实模型、安装包、跨平台和生产发布验收未被自动测试替代。
 
 ## [2026-08-28] 实施完成 | Wiki Agent 结果优先与独立状态卡
 
