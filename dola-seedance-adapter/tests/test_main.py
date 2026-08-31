@@ -1,4 +1,5 @@
 import unittest
+from pathlib import Path
 
 import httpx
 
@@ -83,6 +84,12 @@ class DolaContentEndpointTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 502)
         self.assertIsNone(self.http.stream_call)
+
+
+class DolaDeploymentContractTests(unittest.TestCase):
+    def test_adapter_listens_on_standard_http_port(self):
+        dockerfile = (Path(__file__).parents[1] / "Dockerfile").read_text()
+        self.assertIn('--port", "80"', dockerfile)
 
 
 if __name__ == "__main__":
