@@ -17,6 +17,13 @@ import {
   useMediaTaskStore,
 } from '../mediaTaskStore'
 
+test('Dola history persistence retries through authenticated same-origin content', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  assert.match(source, /dola-seedance2\.5/)
+  assert.match(source, /isDolaVideoModel/)
+  assert.match(source, /pollTask\(task\.pollUrl, task\.pollKind, undefined, 600, 10000, undefined, true\)/)
+})
+
 function installLocalStorage(values: Record<string, string> = {}) {
   const store = new Map<string, string>(Object.entries(values))
   const previous = (globalThis as any).localStorage

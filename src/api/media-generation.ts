@@ -677,13 +677,18 @@ function dataUrlToBlob(dataUrl: string): Blob {
 }
 
 function newApiVideoContentUrl(pollPath: string): string | null {
-  const match = /^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/.exec(pollPath)
+  const match = /^\/v1\/videos\/([A-Za-z0-9._:-]+)$/.exec(pollPath)
   return match ? `${getApiBase()}/v1/videos/${encodeURIComponent(match[1])}/content` : null
 }
 
 function isOmniModel(model: unknown): boolean {
   const value = String(model || '').trim().toLowerCase()
   return value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v')
+}
+
+function usesAuthenticatedVideoContent(model: unknown): boolean {
+  const value = String(model || '').trim().toLowerCase()
+  return isOmniModel(value) || value === 'dola-seedance2.5' || value.endsWith('/dola-seedance2.5')
 }
 
 // ---- Unified Task Poller (exported for task recovery) ----
@@ -1054,7 +1059,7 @@ export async function generateVideo(
         ? `/v1/video/generations/${taskId}`
         : `/v1/videos/${taskId}`
       await params.onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-      mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, params.signal, isOmniModel(model))
+      mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, params.signal, usesAuthenticatedVideoContent(model))
     }
   }
   if (!mediaUrl) throw new Error('视频生成失败')

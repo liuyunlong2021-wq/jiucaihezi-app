@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from time import time
+from urllib.parse import urlparse
 from uuid import uuid4
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 BASE_URL = "https://43.254.166.196"
 MODEL = "dola-seedance2.5"
@@ -90,24 +92,72 @@ async def create_video(request: Request):
 @app.get("/v1/videos/{task_id}")
 async def get_video(task_id: str, request: Request):
     authorization = require_auth(request)
-    try:
-        response = await request.app.state.http.get(f"{BASE_URL}/api/v1/videos/{task_id}", headers={"Authorization": authorization})
-    except httpx.HTTPError as exc:
-        raise HTTPException(502, "Dola service is unavailable") from exc
-    payload = response.json()
-    if not response.is_success:
-        raise HTTPException(502, payload.get("message", "Dola query failed"))
-    task = payload.get("task") or {}
-    status = str(task.get("status") or "processing")
-    code = str(payload.get("code") or "")
-    if code not in {"0", "1"}:
-        raise HTTPException(502, payload.get("message", "Invalid Dola response code"))
-    if (status == "succeeded") != (code == "1"):
-        raise HTTPException(502, payload.get("message", "Inconsistent Dola task response"))
+    task, status = await query_dola_task(request, task_id, authorization)
     result = {"id": task_id, "task_id": task_id, "object": "video", "model": MODEL, "status": "completed" if status == "succeeded" else status, "progress": 100 if status == "succeeded" else 0}
     if status == "succeeded": result["video_url"] = task.get("url")
     if status == "failed": result["error"] = task.get("error") or "Dola task failed"
     return result
+
+
+@app.get("/v1/videos/{task_id}/content")
+async def get_video_content(task_id: str, request: Request):
+    authorization = require_auth(request)
+    task, status = await query_dola_task(request, task_id, authorization)
+    if status != "succeeded":
+        raise HTTPException(409, "Dola video is not ready")
+    media_url = str(task.get("url") or "").strip()
+    parsed = urlparse(media_url)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        raise HTTPException(502, "Dola response did not include a safe video URL")
+
+    stream_context = request.app.state.http.stream("GET", media_url)
+    try:
+        upstream = await stream_context.__aenter__()
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Dola media is unavailable") from exc
+    if not upstream.is_success:
+        await stream_context.__aexit__(None, None, None)
+        raise HTTPException(502, "Dola media is unavailable")
+
+    async def iter_video():
+        try:
+            async for chunk in upstream.aiter_bytes():
+                yield chunk
+        finally:
+            await stream_context.__aexit__(None, None, None)
+
+    content_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip() or "video/mp4"
+    return StreamingResponse(
+        iter_video(),
+        media_type=content_type,
+        headers={"Content-Disposition": f'attachment; filename="{task_id}.mp4"'},
+    )
+
+
+async def query_dola_task(request: Request, task_id: str, authorization: str) -> tuple[dict, str]:
+    if not task_id or "/" in task_id or "?" in task_id:
+        raise HTTPException(400, "Invalid Dola task ID")
+    try:
+        response = await request.app.state.http.get(
+            f"{BASE_URL}/api/v1/videos/{task_id}",
+            headers={"Authorization": authorization},
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(502, "Dola service is unavailable") from exc
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise HTTPException(502, "Invalid Dola response") from exc
+    if not response.is_success:
+        raise HTTPException(502, "Dola query failed")
+    task = payload.get("task") or {}
+    status = str(task.get("status") or "processing")
+    code = str(payload.get("code") or "")
+    if code not in {"0", "1"}:
+        raise HTTPException(502, "Invalid Dola response code")
+    if (status == "succeeded") != (code == "1"):
+        raise HTTPException(502, "Inconsistent Dola task response")
+    return task, status
 
 
 def require_auth(request: Request) -> str:

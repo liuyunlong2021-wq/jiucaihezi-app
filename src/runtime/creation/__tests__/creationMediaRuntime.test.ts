@@ -67,6 +67,34 @@ test('P3 direct GPT Image 2 runtime uses the Xiaoyi async task contract', () => 
   assert.equal((request.imageParams as any)?.resolution, '2k')
 })
 
+test('Dola Seedance runtime resolves completed tasks to the same-origin content endpoint', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      return Response.json({ id: 'task_dola_001', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/task_dola_001')) {
+      return Response.json({ id: 'task_dola_001', status: 'completed', video_url: 'https://cdn.example.test/dola.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/dola/seedance2.5',
+      params: { prompt: '让画面动起来', ratio: '16:9', resolution: '720p', duration: 30 },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://api.jiucaihezi.studio/v1/videos/task_dola_001/content')
+    assert.equal(result.taskId, 'task_dola_001')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
