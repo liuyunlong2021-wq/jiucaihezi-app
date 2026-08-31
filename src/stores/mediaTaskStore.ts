@@ -56,14 +56,7 @@ export type TaskSource = 'chat' | 'creation'
 function usesAuthenticatedVideoContent(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
   const values = [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
     .map(value => String(value || '').trim().toLowerCase())
-  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v') || value === 'dola-seedance2.5' || value.endsWith('/dola-seedance2.5'))
-}
-
-function isDolaVideoModel(task: Pick<MediaTask, 'type' | 'model' | 'planSnapshot'>): boolean {
-  if (task.type !== 'video') return false
-  return [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
-    .map(value => String(value || '').trim().toLowerCase())
-    .some(value => value === 'dola-seedance2.5' || value.endsWith('/dola-seedance2.5'))
+  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v'))
 }
 
 function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {
@@ -71,7 +64,7 @@ function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask,
   try {
     const parsed = new URL(url, DEFAULT_API_BASE_URL)
     const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
-    if (!/^\/v1\/videos\/[A-Za-z0-9._:-]+\/content$/.test(pathname)) return url
+    if (!/^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(pathname)) return url
     return `${DEFAULT_API_BASE_URL}/v1/videos/${encodeURIComponent(task.upstreamTaskId)}/content`
   } catch {
     return url
@@ -81,7 +74,7 @@ function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask,
 function isContentResultUrl(url: string): boolean {
   try {
     const pathname = new URL(url, DEFAULT_API_BASE_URL).pathname.replace(/^\/__jc_api(?=\/)/, '')
-    return /^\/v1\/videos\/[A-Za-z0-9._:-]+\/content$/.test(pathname)
+    return /^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(pathname)
   } catch {
     return false
   }
@@ -1202,10 +1195,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return false
     }
 
-    // 历史 Dola 任务保存的是第三方 URL，重试时先换成同源内容端点。
-    if (isDolaVideoModel(task) && task.pollUrl && task.pollKind && !isContentResultUrl(resultUrl)) {
-      resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, 600, 10000, undefined, true)
-    } else if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
+    // 历史任务可能保存了错误的全局 /content 地址；无需鉴权内容端点的模型重新读取原始结果。
+    if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
       resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, 600, 10000, undefined, false)
     }
 
