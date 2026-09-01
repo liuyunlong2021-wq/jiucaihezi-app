@@ -1543,6 +1543,12 @@ pub async fn open_in_file_manager(
     open_in_file_manager_checked_impl(&state.db, &path, &context).await
 }
 
+#[tauri::command]
+pub async fn open_central_skills_directory(state: State<'_, SkillsAppState>) -> Result<(), String> {
+    let central_root = ensure_central_root_path(&state.db).await?;
+    open_in_file_manager_impl(&central_root.to_string_lossy())
+}
+
 async fn open_in_file_manager_checked_impl(
     pool: &DbPool,
     path: &str,
@@ -3443,5 +3449,21 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn test_ensure_central_root_path_creates_configured_directory() {
+        let pool = setup_test_db().await;
+        let temp = TempDir::new().unwrap();
+        let central_root = temp.path().join(".agents/skills");
+        sqlx::query("UPDATE agents SET global_skills_dir = ? WHERE id = 'central'")
+            .bind(central_root.to_string_lossy().as_ref())
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let resolved = ensure_central_root_path(&pool).await.unwrap();
+        assert_eq!(resolved, central_root.canonicalize().unwrap());
+        assert!(resolved.is_dir());
     }
 }

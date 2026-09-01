@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import { useAgentStore } from '@/stores/agentStore'
 import { searchSkills } from '@/utils/skillSearch'
 import type { SkillConfig } from '@/types/skill'
 import { confirmAction } from '@/utils/confirmAction'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 
 const store = useAgentStore()
 const query = ref('')
@@ -67,13 +69,21 @@ async function deleteSkill(skill: SkillConfig) {
   if (!await confirmAction(`删除自建 Skill「${skill.name}」？`)) return
   await store.deleteAgent(skill.id)
 }
+
+async function openLocalDirectory() {
+  if (!isTauriRuntime()) return
+  await invoke('open_central_skills_directory')
+}
 </script>
 
 <template>
   <section class="wsp">
     <header class="wsp-head">
       <strong>Skill 仓库</strong>
-      <button class="wsp-create" type="button" @click="openCreate">自建</button>
+      <div class="wsp-head-actions">
+        <button class="wsp-create" type="button" @click="openCreate">自建</button>
+        <button class="wsp-create" type="button" @click="openLocalDirectory">打开本地目录</button>
+      </div>
     </header>
     <label class="wsp-search"><input v-model="query" type="search" placeholder="搜索 Skill" /></label>
     <div v-if="!store.skillsBootstrapped" class="wsp-state">加载中...</div>
@@ -124,6 +134,7 @@ async function deleteSkill(skill: SkillConfig) {
 <style scoped>
 .wsp { height: 100%; display: flex; flex-direction: column; background: var(--surface); color: var(--ink1); overflow: hidden; }
 .wsp-head { display: flex; align-items: center; justify-content: space-between; padding: 14px; border-bottom: 1px solid var(--line); font-size: 16px; }
+.wsp-head-actions { display: flex; gap: 6px; }
 .wsp-create, .wsp-user-actions button, .wsp-editor button { border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .wsp-create { padding: 5px 10px; font-size: 12px; }
 .wsp-search { padding: 10px; }

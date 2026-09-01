@@ -27,6 +27,8 @@ test('Desktop keeps the bundled list while Web exposes only user-installed Skill
   assert.match(centralPanel, /viewMode === 'builtin'/)
   assert.match(centralPanel, /<BuiltInSkillList :skills="visibleBuiltInSkills"/)
   assert.match(webPanel, />自建</)
+  assert.match(webPanel, /打开本地目录/)
+  assert.match(webPanel, /invoke\('open_central_skills_directory'\)/)
   assert.match(webPanel, /store\.getCustomSkills\(\)/)
   assert.match(webPanel, /openCreate\(/)
   assert.match(webPanel, /openEdit\(skill: SkillConfig\)/)

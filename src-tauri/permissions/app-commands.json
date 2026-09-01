@@ -120,6 +120,7 @@
           "read_file_by_path",
           "list_skill_directory",
           "open_in_file_manager",
+          "open_central_skills_directory",
           "create_collection",
           "get_collections",
           "get_collection_detail",
