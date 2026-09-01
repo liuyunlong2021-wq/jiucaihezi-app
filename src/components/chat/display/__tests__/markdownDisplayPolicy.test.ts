@@ -18,6 +18,12 @@ test('renderMessageMarkdown keeps unsafe assistant links inert after sanitizatio
   assert.equal(html.includes('onmouseover'), false)
 })
 
+test('renderMessageMarkdown keeps project file links in-app', () => {
+  const html = renderMessageMarkdown('[笔记](#jc-file=notes%2Fresult)', 'assistant')
+  assert.match(html, /href="#jc-file=notes%2Fresult"/)
+  assert.doesNotMatch(html, /target="_blank"/)
+})
+
 test('renderMessageMarkdown renders code copy chrome and table wrapper', () => {
   const html = renderMessageMarkdown('```ts\nconst x = 1\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |', 'assistant')
 

@@ -818,6 +818,10 @@ test('memory file actions use the supported DOM prompt and headers share one bas
   assert.match(tree, /\.pft\.memory-mode \.pft-head \{[\s\S]*height: var\(--memory-header-height\)/)
   assert.match(tree, /\.pft-brand-logo \{[\s\S]*transform: translateY\(3px\)/)
   assert.match(tree, /\.pft-memory-actions \{[\s\S]*height: 34px/)
+  assert.match(workbench, /fileWriteSearch = ref\(''\)/)
+  assert.match(workbench, /v-for="resource in filteredFileWriteTargets"/)
+  assert.match(workbench, /await appendFileWriteIndex\(owner, target\.path, savedPath\)/)
+  assert.match(workbench, /const link = `\[\[\$\{linkTarget\}\]\]`/)
   assert.match(workbench, /\.memory-workbench\.desktop-runtime \{ padding-top: 28px/)
   assert.match(workbench, /grid-template-rows: var\(--memory-header-height\)/)
 })
@@ -831,6 +835,7 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
     workbench,
     /async function openCreationHost\(\) \{[\s\S]*?await loadCreationPanel\(\)[\s\S]*?creationMounted\.value = true[\s\S]*?creationOpen\.value = true/,
   )
+  assert.match(workbench, /if \(resource\.type === 'conversation'\) \{[\s\S]*if \(creationMounted\.value\) \{[\s\S]*flushCanvasSave/)
   assert.match(
     workbench,
     /async function openMediaPlanInCreation[\s\S]*?await openCreationHost\(\)[\s\S]*?emitEvent\('memory-media-plan-load'/,

@@ -61,7 +61,8 @@ function configureMarkdownRenderer() {
         const text = this.parser.parseInline(tokens)
         const safeHref = normalizeLinkHref(href)
         const titleAttr = title ? ` title="${escapeAttr(title)}"` : ''
-        return `<a href="${escapeAttr(safeHref)}"${titleAttr} target="_blank" rel="noopener noreferrer">${text}</a>`
+        const externalAttrs = safeHref.startsWith('#jc-file=') ? '' : ' target="_blank" rel="noopener noreferrer"'
+        return `<a href="${escapeAttr(safeHref)}"${titleAttr}${externalAttrs}>${text}</a>`
       },
       code(this: any, { text, lang }: any) {
         if (lang === 'mermaid') {

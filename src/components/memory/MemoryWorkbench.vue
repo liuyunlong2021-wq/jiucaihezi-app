@@ -65,7 +65,7 @@ import type { ConversationAttachment, ConversationTurn } from '@/runtime/memory/
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
-import { findMarkdownFileBacklinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
+import { findMarkdownFileBacklinks, parseMarkdownFileLinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
@@ -114,6 +114,7 @@ const fileWriteOpen = ref(false)
 const fileWriteTargets = ref<ProjectResource[]>([])
 const fileWriteSelected = ref<ProjectResource | null>(null)
 const fileWriteSource = ref('')
+const fileWriteSearch = ref('')
 const fileWritePending = ref(false)
 type MemoryIndexState = 'idle' | 'writing' | 'success' | 'error'
 const memoryIndexStates = ref<Record<string, MemoryIndexState>>({})
@@ -425,6 +426,10 @@ const filteredConversations = computed(() => {
     .slice()
     .reverse()
 })
+const filteredFileWriteTargets = computed(() => {
+  const query = fileWriteSearch.value.trim().toLocaleLowerCase()
+  return query ? fileWriteTargets.value.filter(resource => `${resource.name} ${resource.path}`.toLocaleLowerCase().includes(query)) : fileWriteTargets.value
+})
 const textModels = computed(() => agentStore.textModels.filter(model => !isInternalMediaModel(model.id)))
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof textModels.value>()
@@ -680,7 +685,12 @@ async function openResource(resource: ProjectResourceOpenResult) {
   editingMarkdown.value = false
   markdownSaveError.value = ''
   if (resource.type === 'conversation') {
-    if (creationMounted.value && !(await closeCreationHost())) return
+    if (creationMounted.value) {
+      try { await creationPanelRef.value?.flushCanvasSave?.() } catch (cause) {
+        error.value = `创作画布保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+        return
+      }
+    }
     backlinks.value = []
     closePreview()
     opened.value = resource
@@ -906,17 +916,38 @@ function fileWriteTargetName(resource: ProjectResource): string {
   return `${'  '.repeat(depth)}${resource.isDirectory ? '目录 · ' : '文件 · '}${resource.name}`
 }
 
+async function appendFileWriteIndex(owner: string, directoryPath: string, savedPath: string) {
+  const indexPath = directoryPath ? `${directoryPath}/index.md` : 'index.md'
+  const linkTarget = (directoryPath && savedPath.startsWith(`${directoryPath}/`) ? savedPath.slice(directoryPath.length + 1) : savedPath).replace(/\.md$/i, '')
+  const link = `[[${linkTarget}]]`
+  const indexResource: ProjectResource = { runtime: desktopRuntime ? 'desktop' : 'web', owner, path: indexPath, name: 'index.md', isDirectory: false, kind: 'document', mimeType: 'text/markdown' }
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let current: Awaited<ReturnType<typeof files.readTextAt>> | null = null
+    try { current = await files.readTextAt(owner, indexPath) } catch { current = null }
+    if (!current) {
+      try { await files.createText(owner, indexPath, `# ${directoryPath.split('/').at(-1) || '项目'}\n\n- ${link}\n`); return } catch { continue }
+    }
+    if (parseMarkdownFileLinks(current.content).some(item => item.target.replace(/\.md$/i, '') === linkTarget)) return
+    const result = await files.writeText(indexResource, `${current.content.trimEnd()}\n\n- ${link}\n`, current.revision)
+    if (result.status === 'saved') return
+    if (result.status === 'missing') continue
+  }
+  throw new Error('目录 index.md 正在其他窗口更新，请重试')
+}
+
 async function suggestFileWrite(turn: ConversationTurn) {
   const owner = projectOwner.value
   const source = displayTurnContent(turn).trim()
   if (!owner || !source) return
   try {
     const resources = await files.list(owner)
-    fileWriteTargets.value = resources
-      .filter(resource => resource.isDirectory || /\.md$/i.test(resource.path))
-      .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.path.localeCompare(b.path, 'zh-CN'))
+    fileWriteTargets.value = [
+      { runtime: (desktopRuntime ? 'desktop' : 'web') as 'desktop' | 'web', owner, path: '', name: '项目根目录', isDirectory: true, kind: 'binary' as const },
+      ...resources.filter(resource => resource.isDirectory),
+    ].sort((a, b) => a.path.localeCompare(b.path, 'zh-CN'))
     fileWriteSelected.value = null
     fileWriteSource.value = source
+    fileWriteSearch.value = ''
     fileWriteOpen.value = true
   } catch (cause) {
     error.value = `打开文件写入目标失败：${cause instanceof Error ? cause.message : String(cause)}`
@@ -928,6 +959,7 @@ function closeFileWrite() {
   fileWriteOpen.value = false
   fileWriteSelected.value = null
   fileWriteSource.value = ''
+  fileWriteSearch.value = ''
 }
 
 async function commitFileWrite() {
@@ -938,29 +970,16 @@ async function commitFileWrite() {
   fileWritePending.value = true
   error.value = ''
   try {
-    let savedPath = target.path
-    if (target.isDirectory) {
-      const filename = (await safePrompt('新建 Markdown 文件名', '新笔记.md', { forceDom: desktopRuntime }))?.trim()
-      if (!filename) return
-      if (!/\.md$/i.test(filename) || /[\\/\0]/.test(filename) || filename === '.' || filename === '..') {
-        throw new Error('文件名必须是合法的 Markdown 文件名')
-      }
-      savedPath = `${target.path}/${filename}`
-      await saveMemoryMarkdown(owner, {
-        mode: 'create',
-        path: savedPath,
-        content: source,
-      }, files)
-    } else {
-      await saveMemoryMarkdown(owner, {
-        mode: 'append',
-        path: target.path,
-        content: source,
-      }, files)
-    }
+    const filename = (await safePrompt('新建 Markdown 文件名', '新笔记.md', { forceDom: desktopRuntime }))?.trim()
+    if (!filename) return
+    if (!/\.md$/i.test(filename) || /[\\/\0]/.test(filename) || filename === '.' || filename === '..') throw new Error('文件名必须是合法的 Markdown 文件名')
+    const savedPath = `${target.path ? `${target.path}/` : ''}${filename}`
+    await saveMemoryMarkdown(owner, { mode: 'create', path: savedPath, content: source }, files)
+    await appendFileWriteIndex(owner, target.path, savedPath)
     fileWriteOpen.value = false
     fileWriteSelected.value = null
     fileWriteSource.value = ''
+    fileWriteSearch.value = ''
     status.value = `已写入文件：${savedPath}`
     const resource = (await files.list(owner)).find(item => item.path === savedPath)
     if (resource) await openProjectFile(resource)
@@ -2705,17 +2724,18 @@ function readDataUrl(file: File): Promise<string> {
             <strong>选择文件写入位置</strong>
             <button class="icon-button" type="button" title="关闭" aria-label="关闭" :disabled="fileWritePending" @click="closeFileWrite"><JcIcon name="close" /></button>
           </header>
-          <p class="memory-file-write-hint">选择 Markdown 文件追加，或选择文件夹新建文件。</p>
+          <input v-model="fileWriteSearch" class="memory-file-write-search" type="search" placeholder="搜索目录" aria-label="搜索目录" />
+          <p class="memory-file-write-hint">选择文件夹，新建 Markdown 文件并自动加入该目录 index.md。</p>
           <div class="memory-file-write-list">
             <button
-              v-for="resource in fileWriteTargets"
+              v-for="resource in filteredFileWriteTargets"
               :key="resource.path"
               type="button"
               class="memory-file-write-target"
               :class="{ selected: fileWriteSelected?.path === resource.path }"
               @click="fileWriteSelected = resource"
             >{{ fileWriteTargetName(resource) }}</button>
-            <p v-if="!fileWriteTargets.length" class="memory-model-empty">没有可写入的 Markdown 文件或文件夹</p>
+            <p v-if="!filteredFileWriteTargets.length" class="memory-model-empty">没有匹配的目录</p>
           </div>
           <footer>
             <button type="button" class="memory-editing-cancel" :disabled="fileWritePending" @click="closeFileWrite">取消</button>
@@ -2846,6 +2866,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-file-write-dialog > header, .memory-file-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
 .memory-file-write-dialog > footer { justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); border-bottom: 0; }
 .memory-file-write-hint { margin: 0; padding: 10px 12px 6px; color: var(--ink3); font-size: 12px; }
+.memory-file-write-search { display: block; width: calc(100% - 24px); height: 34px; margin: 0 12px 6px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--surface); color: var(--ink1); font: inherit; }
+.memory-file-write-search:focus { border-color: var(--olive); }
 .memory-file-write-list { max-height: min(480px, 58vh); overflow-y: auto; padding: 4px 8px 10px; }
 .memory-file-write-target { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 13px; text-align: left; white-space: pre; }
 .memory-file-write-target:hover, .memory-file-write-target.selected { background: color-mix(in srgb, var(--olive) 14%, transparent); color: var(--olive); }
@@ -2903,9 +2925,9 @@ function readDataUrl(file: File): Promise<string> {
 .memory-status.error { color: var(--danger); }
 .memory-status.success { display: flex; min-width: 0; align-items: center; gap: 7px; margin: 7px 10px 0; padding: 8px 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--olive) 34%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 13%, var(--paper)); color: var(--olive); white-space: nowrap; }
 .memory-status.success span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.memory-context-notice { display: flex; align-items: flex-start; gap: 8px; margin: 7px 10px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-context-notice { display: flex; min-height: 0; align-items: center; gap: 6px; margin: 7px 10px 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.35; }
 .memory-context-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-.memory-context-notice button { display: grid; width: 22px; height: 22px; flex: 0 0 22px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }
+.memory-context-notice button { display: grid; width: 18px; height: 18px; flex: 0 0 18px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }
 .memory-run-status { margin: 7px 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
 .memory-run-head { display: flex; min-width: 0; align-items: center; gap: 6px; white-space: nowrap; }
 .memory-run-head strong { flex: 0 0 auto; color: var(--ink1); font-weight: 600; }
