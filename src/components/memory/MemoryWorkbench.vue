@@ -7,6 +7,7 @@ import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import MemorySettings from './MemorySettings.vue'
 import MemoryMarkdown from './MemoryMarkdown.vue'
+import PromptSelectionRevision from './PromptSelectionRevision.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useMcpStore } from '@/stores/mcpStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
@@ -65,13 +66,16 @@ import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
 import { findMarkdownFileBacklinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
-import { highlightCode } from '@/utils/highlight'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
+import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
+import { safeFetch } from '@/utils/httpClient'
+import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
+import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -100,8 +104,6 @@ const editingMarkdown = ref(false)
 const markdownDraft = ref('')
 const markdownSavePending = ref(false)
 const markdownSaveError = ref('')
-const markdownEditorRef = ref<HTMLTextAreaElement | null>(null)
-const markdownHighlightRef = ref<HTMLElement | null>(null)
 const conversations = ref<MemoryConversation[]>([])
 const conversationPickerOpen = ref(false)
 const conversationSearch = ref('')
@@ -746,7 +748,6 @@ function startMarkdownEdit() {
   markdownDraft.value = previewResource.value.text.content
   markdownSaveError.value = ''
   editingMarkdown.value = true
-  void nextTick(() => markdownEditorRef.value?.focus())
 }
 
 function cancelMarkdownEdit() {
@@ -754,10 +755,28 @@ function cancelMarkdownEdit() {
   markdownSaveError.value = ''
 }
 
-function syncMarkdownEditorScroll() {
-  if (!markdownEditorRef.value || !markdownHighlightRef.value) return
-  markdownHighlightRef.value.scrollTop = markdownEditorRef.value.scrollTop
-  markdownHighlightRef.value.scrollLeft = markdownEditorRef.value.scrollLeft
+async function reviseMarkdownSelection(input: { selectedText: string; instruction: string }): Promise<string> {
+  const providerId = localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
+  const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: providerId })
+  const response = await sendDirectRequestWithRetry(() => sendNewApiRequest(
+    {
+      model: config.model,
+      temperature: 0.2,
+      stream: false,
+      max_tokens: 1200,
+      ...buildChatCompletionExtras(config),
+      messages: [
+        { role: 'system', content: '你是 Markdown 局部修订助手。只返回修改后的替换文本，不要解释，不要包裹 Markdown 代码围栏。保留原文的格式、语气和语言，只执行用户提出的局部修改。' },
+        { role: 'user', content: `原文选区：\n${input.selectedText}\n\n修改要求：\n${input.instruction}` },
+      ],
+    },
+    payload => safeFetch(`${config.apiBase}/v1/chat/completions`, { method: 'POST', headers: buildHeaders(config), body: payload }),
+  ))
+  if (!response.ok) throw new ChatHttpError(await readChatErrorResponse(response, 'Markdown 局部修改失败', config.apiKey))
+  const payload = (await response.json().catch(() => null)) as any
+  const text = String(payload?.choices?.[0]?.message?.content || '').trim().replace(/^```(?:markdown|text)?\s*/i, '').replace(/\s*```$/, '')
+  if (!text) throw new Error('模型没有返回修改后的内容')
+  return text
 }
 
 async function saveMarkdownEdit() {
@@ -2636,16 +2655,7 @@ function readDataUrl(file: File): Promise<string> {
             :outline="/\.md$/i.test(previewResource.resource.path)"
             @click="handleMarkdownClick"
           />
-          <div v-else class="memory-markdown-editor">
-            <pre ref="markdownHighlightRef" aria-hidden="true" v-html="highlightCode(markdownDraft, 'markdown')"></pre>
-            <textarea
-              ref="markdownEditorRef"
-              v-model="markdownDraft"
-              spellcheck="false"
-              aria-label="Markdown 原文编辑器"
-              @scroll="syncMarkdownEditorScroll"
-            ></textarea>
-          </div>
+          <PromptSelectionRevision v-else v-model="markdownDraft" :revise="reviseMarkdownSelection" />
           <p v-if="markdownSaveError" class="memory-editor-error">{{ markdownSaveError }}</p>
           <section v-if="backlinks.length" class="memory-backlinks">
             <h2>被以下文件引用</h2>
