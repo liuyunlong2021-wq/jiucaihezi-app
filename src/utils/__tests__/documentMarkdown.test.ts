@@ -5,14 +5,30 @@ import { test } from 'node:test'
 
 import {
   classifyDocumentMarkdownReuse,
+  convertDocumentToMarkdown,
   isMeaningfulMarkdownContent,
   normalizeMarkdownOutputFilename,
 } from '../documentMarkdown'
+import { detectFileType } from '@/composables/useFileUpload'
 
 test('normalizeMarkdownOutputFilename keeps a single markdown extension', () => {
   assert.equal(normalizeMarkdownOutputFilename('救猫咪 3 反击战！.pdf'), '救猫咪 3 反击战！.md')
   assert.equal(normalizeMarkdownOutputFilename('notes.md'), 'notes.md')
   assert.equal(normalizeMarkdownOutputFilename('a/b:测试?.docx'), 'a_b_测试_.md')
+})
+
+test('subtitle files stay on the text path instead of becoming binary attachments', () => {
+  assert.equal(detectFileType(new File(['1\n00:00:00,000 --> 00:00:01,000\n字幕'], 'clip.srt')), 'text')
+  assert.equal(detectFileType(new File(['WEBVTT\n'], 'clip.vtt')), 'text')
+})
+
+test('subtitle conversion uses the local text Markdown path', async () => {
+  const result = await convertDocumentToMarkdown({
+    file: new File(['1\n00:00:00,000 --> 00:00:01,000\n字幕'], 'clip.srt'),
+  })
+  assert.equal(result.status, 'success')
+  assert.equal(result.engine, 'text')
+  assert.match(result.content, /字幕/)
 })
 
 test('isMeaningfulMarkdownContent rejects empty page marker extraction', () => {

@@ -158,6 +158,13 @@ test('Skill allowed-tools join the current tool authorization set', async () => 
   )
 })
 
+test('Wiki Memory declares the file tool bundle for read/write tasks', () => {
+  assert.deepEqual(
+    normalizeSkillAllowedToolNames(['file']),
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
+  )
+})
+
 test('selected Skill load failures remain visible to the model contract', async () => {
   const prompt = await buildSelectedSkillPrompt(['missing-skill'], new Map(), async () => {
     throw new Error('测试加载失败')

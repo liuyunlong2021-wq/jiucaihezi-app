@@ -1,6 +1,7 @@
 import { isTauriMobileRuntime, isTauriRuntime } from './tauriEnv'
 import { decodeApiKey, DEFAULT_PROVIDER_HOST, resolveWebApiBaseUrl } from './providerConfig'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
+import { SUPPORTED_TEXT_EXT } from './fileProcessor'
 
 export interface DocumentToMarkdownInput {
   file: File
@@ -88,8 +89,7 @@ function buildTextMarkdown(file: File, text: string): string {
 }
 
 function isLikelyTextFile(file: File): boolean {
-  return file.type.startsWith('text/') ||
-    /\.(txt|md|markdown|csv|json|xml|html|css|js|jsx|ts|tsx|py|java|c|cpp|h|go|rs|sh|yaml|yml|toml|sql|vue|svelte|log)$/i.test(file.name)
+  return file.type.startsWith('text/') || SUPPORTED_TEXT_EXT.test(file.name)
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {

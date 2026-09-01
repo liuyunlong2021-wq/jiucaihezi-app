@@ -9,6 +9,7 @@
  * 统一返回 ProcessedFile 对象，各组件直接使用。
  */
 import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
+import { SUPPORTED_TEXT_EXT } from '@/utils/fileProcessor'
 
 // ─── 类型 ───
 
@@ -64,7 +65,6 @@ const OFFICE_EXT = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i
 const PDF_EXT = /\.pdf$/i
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp']
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff?)$/i
-const TEXT_EXT = /\.(txt|md|csv|json|xml|html|css|js|jsx|ts|tsx|py|java|c|cpp|h|hpp|go|rs|sh|bash|zsh|yaml|yml|toml|sql|r|swift|kt|rb|php|dockerfile|env|ini|conf|log|vue|svelte|lua|pl|scala|zig|dart|makefile|cmake)$/i
 const AUDIO_EXT = /\.(mp3|wav|ogg|flac|aac|m4a|wma|opus)$/i
 const VIDEO_EXT = /\.(mp4|mov|avi|mkv|webm|flv|wmv|m4v)$/i
 
@@ -84,7 +84,7 @@ export function detectFileType(file: File): ProcessedFile['type'] {
   // 3. 文本类型
   if (mime.startsWith('text/') || mime === 'application/json' ||
       mime === 'application/xml' || mime === 'application/javascript' ||
-      TEXT_EXT.test(name)) return 'text'
+      SUPPORTED_TEXT_EXT.test(name)) return 'text'
 
   // 4. 音视频
   if (mime.startsWith('audio/') || AUDIO_EXT.test(name)) return 'audio'
@@ -94,7 +94,7 @@ export function detectFileType(file: File): ProcessedFile['type'] {
   if (!mime || mime === 'application/octet-stream') {
     if (OFFICE_EXT.test(name)) return 'office'
     if (PDF_EXT.test(name)) return 'pdf'
-    if (TEXT_EXT.test(name)) return 'text'
+    if (SUPPORTED_TEXT_EXT.test(name)) return 'text'
   }
 
   return 'unknown'

@@ -132,7 +132,15 @@ const scene3dSelected = ref(false)
 const terminalSelected = ref(false)
 const selectedToolChips = computed(() => [
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
-  { id: 'mcp', label: '@MCP', icon: 'extension', selected: selectedMcpToolNames.value.length > 0 },
+  ...selectedMcpToolNames.value.map(id => {
+    const serverId = id.slice('mcp__'.length)
+    return {
+      id,
+      label: mcpStore.servers.find(server => server.id === serverId)?.name || serverId,
+      icon: 'extension',
+      selected: true,
+    }
+  }),
   { id: 'media', label: '@图文', icon: 'image', selected: mediaSelected.value },
   { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
@@ -383,6 +391,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     type: 'tool', id: `mcp__${serverId}`, display: `MCP · ${serverId}`,
     description: `整体工具（${count} 个 operation）`, icon: 'extension',
   }))
+  if (query.trim().startsWith('mcp__')) return mcpTools
   return query.trim() ? [...toolOptions, ...skills, ...mcpTools, ...projectOptions] : [...toolOptions, ...skills.slice(0, 5), ...mcpTools, ...projectOptions]
 }
 const mentionKey = (item: MemoryMentionOption) => item.type === 'tool'
@@ -905,6 +914,10 @@ function enableTool(id: string) {
 
 function disableTool(id: string) {
   if (id === 'file') fileToolsSelected.value = false
+  if (id.startsWith('mcp__')) {
+    selectedMcpToolNames.value = selectedMcpToolNames.value.filter(item => item !== id)
+    return
+  }
   if (id === 'media') mediaSelected.value = false
   if (id === 'av') avSelected.value = false
   if (id === 'scene3d') scene3dSelected.value = false

@@ -1242,6 +1242,10 @@ test('memory settings expose the existing Desktop local model runtime', () => {
 test('aggregate MCP mentions remain searchable by their internal tool prefix', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
+  assert.match(workbench, /selectedMcpToolNames\.value\.map\(id => \{[\s\S]*mcpStore\.servers\.find\(server => server\.id === serverId\)\?\.name \|\| serverId/)
+  assert.match(workbench, /if \(id\.startsWith\('mcp__'\)\) \{[\s\S]*selectedMcpToolNames\.value = selectedMcpToolNames\.value\.filter\(item => item !== id\)/)
   assert.match(workbench, /filterKeys: \['id', 'display', 'description'\]/)
   assert.match(workbench, /mentionOnInput\('mcp__'\)/)
+  assert.match(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return mcpTools/)
+  assert.doesNotMatch(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return \[\.\.\.skills/)
 })
