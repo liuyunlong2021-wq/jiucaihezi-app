@@ -145,6 +145,7 @@ import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
 import { buildMediaFilename } from '@/utils/mediaFilename'
+import { saveGeneratedFile } from '@/utils/exportSave'
 import type {
   CanvasDocumentV3,
   CanvasMediaKind,
@@ -308,8 +309,8 @@ function regenerateTask(task: MediaTask) {
 function canCopyTaskResultUrl(task: MediaTask): boolean {
   return (
     task.status === 'success' &&
-    !task.projectPath &&
-    !task.assetUri &&
+    ([task.model, task.modelLabel].some(value => String(value || '').toLowerCase().includes('dola')) ||
+      (!task.projectPath && !task.assetUri)) &&
     typeof task.resultUrl === 'string' &&
     isSafePublicHttpUrl(task.resultUrl)
   )
@@ -318,6 +319,36 @@ function canCopyTaskResultUrl(task: MediaTask): boolean {
 async function copyTaskResultUrl(task: MediaTask) {
   if (!canCopyTaskResultUrl(task) || !task.resultUrl) return
   cpState.progressText = await writeClipboardText(task.resultUrl) ? '链接已复制' : '复制链接失败'
+}
+
+function canDownloadDolaResult(task: MediaTask): boolean {
+  return (
+    task.status === 'success' &&
+    [task.model, task.modelLabel].some(value => String(value || '').toLowerCase().includes('dola')) &&
+    typeof task.resultUrl === 'string' &&
+    isSafePublicHttpUrl(task.resultUrl)
+  )
+}
+
+async function downloadDolaResult(task: MediaTask) {
+  if (!canDownloadDolaResult(task) || !task.resultUrl) return
+  try {
+    const { blob } = await fetchCreationMediaBlob(task.resultUrl, 'video', true)
+    const saved = await saveGeneratedFile({
+      filename: buildMediaFilename({
+        summary: task.summary,
+        prompt: task.prompt,
+        model: task.modelLabel || task.model,
+        taskId: task.id,
+        extension: 'mp4',
+      }),
+      mimeType: 'video/mp4',
+      data: blob,
+    })
+    cpState.progressText = saved.status === 'saved' ? '下载完成' : '已取消下载'
+  } catch (error) {
+    cpState.progressText = `下载失败: ${error instanceof Error ? error.message : String(error)}`
+  }
 }
 
 async function cancelTask(task: MediaTask) {
@@ -4069,6 +4100,7 @@ const canSend = computed(
                 </button>
                 <button v-if="canRegenerateTask(task)" @click="regenerateTask(task)">重新生成</button>
                 <button v-if="canCopyTaskResultUrl(task)" @click="copyTaskResultUrl(task)">复制链接</button>
+                <button v-if="canDownloadDolaResult(task)" @click="downloadDolaResult(task)">下载链接</button>
                 <button
                   v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"

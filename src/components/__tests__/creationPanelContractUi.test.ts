@@ -961,7 +961,7 @@ test('chat task bubble renders text success and precise cancellation as separate
   assert.doesNotMatch(bubble, /<!-- 已取消 -->\s*<div v-else class="mtb-cancelled">/)
 })
 
-test('remote-only successful tasks can copy a safe result URL without downloading it', () => {
+test('Dola successful tasks can copy the original safe result URL without downloading it', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const copy = source.match(
     /function canCopyTaskResultUrl[\s\S]*?\n}\n\nasync function copyTaskResultUrl[\s\S]*?\n}/,
@@ -970,6 +970,7 @@ test('remote-only successful tasks can copy a safe result URL without downloadin
   assert.match(source, /import \{ isAllowedCreationResultUrl, isSafePublicHttpUrl \} from '@\/utils\/urlSafety'/)
   assert.match(source, /import \{ writeClipboardText \} from '@\/utils\/clipboard'/)
   assert.match(copy, /task\.status === 'success'/)
+  assert.match(copy, /\[task\.model, task\.modelLabel\][\s\S]*includes\('dola'\)/)
   assert.match(copy, /!task\.projectPath/)
   assert.match(copy, /!task\.assetUri/)
   assert.match(copy, /isSafePublicHttpUrl\(task\.resultUrl\)/)
@@ -980,4 +981,19 @@ test('remote-only successful tasks can copy a safe result URL without downloadin
     source,
     /v-if="canCopyTaskResultUrl\(task\)" @click="copyTaskResultUrl\(task\)">复制链接<\/button>/,
   )
+})
+
+test('Dola successful tasks download the original URL as a prompt-named mp4', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const download = source.match(
+    /function canDownloadDolaResult[\s\S]*?\n}\n\nasync function downloadDolaResult[\s\S]*?\n}/,
+  )?.[0] || ''
+
+  assert.match(source, /<button v-if="canDownloadDolaResult\(task\)" @click="downloadDolaResult\(task\)">下载链接<\/button>/)
+  assert.match(download, /fetchCreationMediaBlob\(task\.resultUrl, 'video', true\)/)
+  assert.match(download, /saveGeneratedFile\(/)
+  assert.match(download, /summary: task\.summary/)
+  assert.match(download, /prompt: task\.prompt/)
+  assert.match(download, /extension: 'mp4'/)
+  assert.match(download, /mimeType: 'video\/mp4'/)
 })
