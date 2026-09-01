@@ -4,14 +4,14 @@ import { test } from 'node:test'
 import {
   buildSelectedSkillPrompt,
   hasExplicitMemoryCapability,
-  isWikiAgentMcpToolAllowed,
   memoryProgramKind,
   normalizeMemoryToolResult,
+  normalizeSkillAllowedToolNames,
   resolveMemoryToolSearchDefinitions,
   selectMemoryTools,
   selectedSkillNamesForInput,
 } from '../memoryChat'
-import type { SkillConfig } from '@/types/skill'
+import { parseSkillMd, type SkillConfig } from '@/types/skill'
 import {
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
@@ -19,9 +19,6 @@ import {
 
 const tools = [
   'skill',
-  'wiki_context',
-  'wiki_search',
-  'wiki',
   'read',
   'glob',
   'grep',
@@ -39,10 +36,10 @@ const tools = [
   'mcp__demo__run',
 ].map(name => ({ function: { name } }))
 
-test('Wiki exposes the complete native Wiki tool set', () => {
+test('knowledge files use the ordinary file tool set', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], true).map(tool => tool.function.name),
-    ['wiki_context', 'wiki'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
   )
 })
 
@@ -56,7 +53,6 @@ test('project tool results default to success without masking explicit failures'
 })
 
 test('program status kind follows the selected tool family', () => {
-  assert.equal(memoryProgramKind('wiki'), 'wiki')
   assert.equal(memoryProgramKind('write'), 'file')
   assert.equal(memoryProgramKind('create_document'), 'media')
   assert.equal(memoryProgramKind('edit_3d_scene'), '3d')
@@ -65,21 +61,7 @@ test('program status kind follows the selected tool family', () => {
   assert.equal(memoryProgramKind('mcp__github__run'), 'mcp')
 })
 
-test('Wiki writing keeps generic file, media, and terminal tools closed', () => {
-  assert.deepEqual(
-    selectMemoryTools(tools, [], true).map(tool => tool.function.name),
-    ['wiki_context', 'wiki'],
-  )
-})
-
-test('creating a Wiki from an inline document exposes one native Wiki batch tool', () => {
-  assert.deepEqual(
-    selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),
-    ['read'],
-  )
-})
-
-test('creating a Wiki from a long document adds only the required read tool', () => {
+test('an attached document exposes only the required read tool', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, true).map(tool => tool.function.name),
     ['read'],
@@ -99,7 +81,7 @@ test('an attached document does not activate history or project capabilities', (
 })
 
 test('a selected capability connects the task explicitly', () => {
-  assert.equal(hasExplicitMemoryCapability({ wikiSelected: true }), true)
+  assert.equal(hasExplicitMemoryCapability({ fileToolsSelected: true }), true)
   assert.equal(hasExplicitMemoryCapability({ selectedSkillNames: ['jc-film-style'] }), true)
   assert.equal(hasExplicitMemoryCapability({ avSelected: true }), true)
 })
@@ -118,6 +100,19 @@ test('a selected Skill cannot load another Skill implicitly', () => {
   )
 })
 
+test('Skill frontmatter accepts scalar and list tool declarations', () => {
+  assert.deepEqual(parseSkillMd('---\nallowed-tools: terminal\n---\nbody').allowedTools, ['terminal'])
+  assert.deepEqual(parseSkillMd('---\nallowed-tools:\n  - read\n  - mcp__demo__run\n---\nbody').allowedTools, ['read', 'mcp__demo__run'])
+  assert.deepEqual(parseSkillMd('---\r\nallowed-tools: terminal\r\n---\r\nbody').allowedTools, ['terminal'])
+})
+
+test('Skill tool declarations expand to the real current tool names', () => {
+  assert.deepEqual(
+    normalizeSkillAllowedToolNames(['file', 'media', '3d', 'mcp__demo__run', 'terminal']),
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'mcp__demo', 'terminal'],
+  )
+})
+
 test('selected Skill rules are injected as a mandatory contract', async () => {
   const skill = {
     id: 'writer',
@@ -130,6 +125,28 @@ test('selected Skill rules are injected as a mandatory contract', async () => {
   assert.match(prompt, /# 必须遵守/)
   assert.match(prompt, /references\/style\.md/)
   assert.match(prompt, /skill:\/\/local\/writer/)
+})
+
+test('Skill allowed-tools join the current tool authorization set', async () => {
+  const skill = {
+    id: 'writer',
+    name: 'writer',
+    skillContent: '必须修改文件',
+    allowedTools: ['read', 'edit', 'mcp__demo__run'],
+  } as SkillConfig
+  const allowedTools = new Set<string>()
+  await buildSelectedSkillPrompt(
+    ['writer'],
+    new Map([['writer', skill]]),
+    undefined,
+    allowedTools,
+  )
+  assert.deepEqual([...allowedTools], ['read', 'edit', 'mcp__demo__run'])
+  assert.deepEqual(
+    selectMemoryTools(tools, ['writer'], false, false, false, [], false, false, false, [...allowedTools])
+      .map(tool => tool.function.name),
+    ['read', 'edit', 'mcp__demo__run'],
+  )
 })
 
 test('selected Skill load failures remain visible to the model contract', async () => {
@@ -149,10 +166,10 @@ test('Skill binding normalizes names and rejects non-concrete selections', () =>
   assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: ['Skill'] }), /具体 Skill/)
 })
 
-test('Wiki plus Skill keeps the Wiki route without opening unrelated tools', () => {
+test('Skill and file selection combine without a special route', () => {
   assert.deepEqual(
     selectMemoryTools(tools, ['jc-film-style'], true).map(tool => tool.function.name),
-    ['wiki_context', 'wiki'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
   )
 })
 
@@ -181,21 +198,13 @@ test('explicit MCP keeps only the selected MCP tools', () => {
   )
 })
 
-test('WikiAgent rejects MCP tools outside the three allowed servers', () => {
+test('selected MCP tools are not restricted by a special Agent allowlist', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, false, false, ['mcp__demo__run']).map(
       tool => tool.function.name,
     ),
-    [],
+    ['mcp__demo__run'],
   )
-})
-
-test('WikiAgent MCP authorization is evaluated by the whole server', () => {
-  assert.equal(isWikiAgentMcpToolAllowed('mcp__github__run'), true)
-  assert.equal(isWikiAgentMcpToolAllowed('mcp__playwright__navigate'), true)
-  assert.equal(isWikiAgentMcpToolAllowed('mcp__jiucaihezi-creation__generate'), true)
-  assert.equal(isWikiAgentMcpToolAllowed('mcp__obsidian__read_note'), false)
-  assert.equal(isWikiAgentMcpToolAllowed('mcp__github'), false)
 })
 
 test('MCP selection without a concrete tool exposes nothing', () => {
@@ -210,11 +219,11 @@ test('tool search exposes only core tools until an authorized tool is described'
   assert.equal(TOOL_DESCRIBE_TOOL_DEFINITION.function.name, 'tool_describe')
   assert.deepEqual(
     resolveMemoryToolSearchDefinitions(tools, new Set()).map(tool => tool.function.name),
-    ['wiki_context', 'tool_search', 'tool_describe'],
+    ['tool_search', 'tool_describe'],
   )
   assert.deepEqual(
     resolveMemoryToolSearchDefinitions(tools, new Set(['terminal'])).map(tool => tool.function.name),
-    ['wiki_context', 'tool_search', 'tool_describe', 'terminal'],
+    ['tool_search', 'tool_describe', 'terminal'],
   )
 })
 

@@ -182,7 +182,7 @@ async function logout() {
 
 async function deleteAccount() {
   if (deleteBusy.value) return
-  const confirmed = await confirmAction('注销后，账号和云端文字同步数据将永久删除，无法恢复。手机里的本地项目、Wiki 和媒体不会删除。', {
+  const confirmed = await confirmAction('注销后，账号和云端文字同步数据将永久删除，无法恢复。手机里的本地项目、文件和媒体不会删除。', {
     title: '注销账号',
     kind: 'error',
     okLabel: '永久注销',

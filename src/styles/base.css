@@ -66,52 +66,6 @@ html, body, #app {
   to { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 
-/* ── WikiLink [[双向链接]] 全局样式 ── */
-.wiki-link {
-  display: inline-block;
-  background: rgba(107, 142, 35, 0.10);
-  color: var(--olive-dark, #5a7a00);
-  border: 1px solid rgba(107, 142, 35, 0.25);
-  border-radius: 5px;
-  padding: 0 5px;
-  font-size: 0.92em;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-  user-select: none;
-}
-.wiki-link:hover {
-  background: rgba(107, 142, 35, 0.20);
-  text-decoration: underline;
-}
-
-.wiki-link-popup {
-  position: fixed;
-  z-index: 9000;
-  min-width: 200px;
-  max-width: 300px;
-  background: var(--surface, #fff);
-  border: 1px solid var(--line, #e0e0e0);
-  border-radius: 10px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.14);
-  padding: 4px;
-  overflow: hidden;
-}
-.wl-item {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 7px 12px;
-  background: none; border: none; border-radius: 6px;
-  font-size: 13px; color: var(--ink, #333);
-  cursor: pointer; text-align: left; font-family: inherit;
-  transition: background 0.1s;
-}
-.wl-item:hover, .wl-selected {
-  background: rgba(107, 142, 35, 0.10);
-  color: var(--olive-dark, #5a7a00);
-}
-.wl-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wl-empty { padding: 10px 12px; font-size: 12px; color: var(--ink3, #999); }
-
 /* TaskList */
 ul[data-type="taskList"] { list-style: none; padding: 0; }
 ul[data-type="taskList"] li { display: flex; align-items: flex-start; gap: 8px; margin: 4px 0; }

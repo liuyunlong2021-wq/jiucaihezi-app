@@ -1,6 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { createProjectFileService, type ProjectFileAdapter, type ProjectFileEntry } from '@/services/projectFileService'
@@ -11,14 +9,7 @@ import {
   parseConversationTranscript,
   type ConversationTurn,
 } from '../conversationTranscript'
-import { appendMemoryRound, initializeMemoryProject, listMemoryConversations } from '../memoryProject'
-
-const memoryProjectSource = readFileSync(join(process.cwd(), 'src/runtime/memory/memoryProject.ts'), 'utf8')
-
-test('memory Wiki writes use the file service hash instead of hashing truncated text', () => {
-  assert.match(memoryProjectSource, /async fingerprint\(path\) \{[\s\S]{0,200}files\.hashFile/)
-  assert.doesNotMatch(memoryProjectSource, /async fingerprint\([^)]*\) \{[\s\S]{0,300}readText/)
-})
+import { appendMemoryRound, initializeMemoryProject, listMemoryConversations, saveMemoryMarkdown } from '../memoryProject'
 
 test('memory project initialization creates the complete protected skeleton', async () => {
   const entries = new Map<string, ProjectFileEntry>()
@@ -50,6 +41,30 @@ test('memory project initialization creates the complete protected skeleton', as
   for (const path of MEMORY_PROJECT_SKELETON_DIRECTORIES) {
     assert.equal(entries.get(path)?.isDirectory, true, path)
   }
+})
+
+test('assistant output is saved as an ordinary Markdown file', async () => {
+  const entries = new Map<string, ProjectFileEntry>()
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return [...entries.values()] },
+    async readText(_owner, path) {
+      const entry = entries.get(path)
+      if (!entry || entry.isDirectory) throw new Error('missing')
+      const content = String(entry.content || '')
+      return { content, size: content.length, truncated: false, revision: { value: path, size: content.length } }
+    },
+    async createText(_owner, path, content) {
+      const entry = { path, isDirectory: false, content, mimeType: 'text/markdown' }
+      entries.set(path, entry)
+      return entry
+    },
+    async createFolder() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  await saveMemoryMarkdown('project', { path: 'notes/result.md', content: '# Result', mode: 'create' }, createProjectFileService(adapter))
+  assert.equal(entries.get('notes/result.md')?.content, '# Result\n')
 })
 
 test('appendMemoryRound is idempotent for the same user turn', async () => {

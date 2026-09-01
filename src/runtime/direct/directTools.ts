@@ -165,14 +165,6 @@ function toolMessage(call: DirectToolCall, result: DirectToolResult): DirectApiM
 
 function isParallelRead(call: DirectToolCall): boolean {
   const name = call.function.name
-  if (name === 'wiki') {
-    try {
-      const action = String(JSON.parse(call.function.arguments || '{}').action || '')
-      return ['inspect', 'search', 'status', 'validate', 'audit', 'evidence'].includes(action)
-    } catch {
-      return false
-    }
-  }
   if (!['read', 'glob', 'grep'].includes(name)) return false
   try {
     const path = JSON.parse(call.function.arguments || '{}').path

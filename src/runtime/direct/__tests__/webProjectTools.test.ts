@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
 import type { FileEntry } from '@/composables/useFileStore'
@@ -64,19 +63,38 @@ function call(name: string, args: Record<string, unknown>) {
 test('web project tools use OpenCode-compatible names', () => {
   assert.deepEqual(
     WEB_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
-    ['wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
+    ['read', 'glob', 'grep', 'write', 'edit'],
   )
 })
 
 test('web project tool definitions exclude Desktop-only 3D and custom MCP tools', () => {
   assert.deepEqual(
     buildWebProjectToolDefinitions().map(tool => tool.function.name),
-    ['wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit'],
+    ['read', 'glob', 'grep', 'write', 'edit'],
   )
   assert.deepEqual(
     buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-    ['wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
   )
+})
+
+test('web memory tools expose connected MCP server aggregates for standalone use', () => {
+  const previous = (globalThis as any).__jiucaihezi_mcpStore__
+  ;(globalThis as any).__jiucaihezi_mcpStore__ = {
+    useMcpStore: () => ({
+      allMcpTools: [{
+        name: 'mcp__demo__run', description: 'Run demo', inputSchema: { type: 'object' },
+        serverId: 'demo', originalName: 'run',
+      }],
+      isServerEnabled: () => true,
+      isServerConnected: () => true,
+    }),
+  }
+  try {
+    assert.equal(buildMemoryWebProjectToolDefinitions().some(tool => tool.function.name === 'mcp__demo'), true)
+  } finally {
+    ;(globalThis as any).__jiucaihezi_mcpStore__ = previous
+  }
 })
 
 test('web project tools hide Raw conversations from model file operations', async () => {
@@ -159,75 +177,9 @@ test('web project tools do not write a rendered artifact after cancellation', as
   assert.equal((await files.list(project.id)).some(entry => entry.path.includes('取消.png')), false)
 })
 
-test('web project tools execute the native Wiki runtime without Python or Node', async () => {
-  const files = createWebProjectFiles(memoryAdapter())
-  const project = await files.createProject('原生 Wiki')
-  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
 
-  assert.match((await execute(call('wiki', { action: 'scaffold', type: 'dev_project' }))).content, /created-or-completed: docs\/wiki/)
-  assert.match((await execute(call('wiki', { action: 'inspect' }))).content, /path: docs\/wiki/)
-  const applied = await execute(
-    call('wiki', {
-      action: 'apply',
-      reason: '回执测试',
-      basis: ['测试'],
-      operations: [{ kind: 'create', path: '测试/回执.md', title: '回执', content: '# 回执\n' }],
-    }),
-  )
-  assert.equal(applied.status, 'succeeded')
-  assert.equal((applied.details as { status?: string } | undefined)?.status, 'succeeded')
-  assert.match((await execute(call('wiki_search', { query: 'Hot' }))).content, /CLAUDE\.md/)
-  await assert.rejects(() => execute(call('wiki_search', { query: 'Hot', action: 'replace' })), /工具参数不支持/)
-  assert.equal((await files.list(project.id)).some(entry => entry.path === '.raw' || entry.path.startsWith('.raw/')), false)
-})
 
-test('web wiki evidence fingerprints OPFS binary bytes', async () => {
-  const files = createWebProjectFiles(memoryAdapter(), () => {}, memoryBinaryAdapter())
-  const project = await files.createProject('证据指纹')
-  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
-  await files.writeBinary(project.id, '资料/制度.docx', new Blob(['docx-bytes']), {
-    category: 'binary', mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  })
 
-  const output = (await execute(call('wiki', { action: 'evidence', evidencePaths: ['资料/制度.docx'] }))).content
-
-  assert.match(output, new RegExp(`资料/制度\\.docx sha256:${createHash('sha256').update('docx-bytes').digest('hex')}`))
-})
-
-test('web wiki evidence rejects remote media placeholders without original bytes', async () => {
-  const files = createWebProjectFiles(memoryAdapter())
-  const project = await files.createProject('远程媒体证据')
-  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
-  await files.addMedia(project.id, '资料/远程图片.png', 'https://example.com/image.png', 'image', 'image/png')
-
-  await assert.rejects(
-    () => execute(call('wiki', { action: 'evidence', evidencePaths: ['资料/远程图片.png'] })),
-    /没有原始字节|无法计算.*指纹/,
-  )
-})
-
-test('web wiki evidence rejects oversized OPFS files before loading their bytes', async () => {
-  let binaryRead = false
-  const binary: WebProjectBinaryAdapter = {
-    async write(_id, source) { return (await sourceBlob(source)).size },
-    async read() { binaryRead = true; throw new Error('should not read oversized bytes') },
-    async remove() {},
-    async estimate() { return { usage: 0, quota: 1_000_000_000 } },
-    async persist() { return true },
-  }
-  const files = createWebProjectFiles(memoryAdapter(), () => {}, binary)
-  const project = await files.createProject('超大证据')
-  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
-  await files.writeBinary(project.id, '资料/超大.bin', new Blob([new Uint8Array(30_000_001)]), {
-    category: 'binary', mimeType: 'application/octet-stream',
-  })
-
-  await assert.rejects(
-    () => execute(call('wiki', { action: 'evidence', evidencePaths: ['资料/超大.bin'] })),
-    /超过 30 MB/,
-  )
-  assert.equal(binaryRead, false)
-})
 
 test('web project tool executor reads writes searches and edits the bound project', async () => {
   const files = createWebProjectFiles(memoryAdapter())

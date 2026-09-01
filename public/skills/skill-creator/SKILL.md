@@ -1,6 +1,12 @@
 ---
 name: skill-creator
 description: Use when users want to create, edit, optimize, evaluate, benchmark, or confirm installation of a reusable Skill and its discovery description.
+allowed-tools:
+  - read
+  - write
+  - edit
+  - mkdir
+  - terminal
 triggers:
   - 'Skill缔造'
   - '创建技能'

@@ -45,7 +45,7 @@ test('MCP catalog ships Playwright as a pinned desktop stdio server', () => {
   assert.match(source, /entry\.transport === 'stdio' && !isDesktopRuntime/)
 })
 
-test('MCP catalog exposes only the three WikiAgent-approved built-ins', () => {
+test('MCP catalog exposes only the three product-approved built-ins', () => {
   assert.match(catalogSource, /id: 'jiucaihezi-creation'/)
   assert.match(catalogSource, /id: 'github'/)
   assert.match(catalogSource, /id: 'playwright'/)

@@ -8,10 +8,10 @@ function call(name: string, args: Record<string, unknown>) {
 }
 
 test('memory tools approve side effects without blocking safe project work', () => {
-  assert.equal(memoryToolNeedsApproval(call('read', { path: 'wiki/hot.md' }), '查看资料'), false)
-  assert.equal(memoryToolNeedsApproval(call('write', { path: 'wiki/new.md', content: 'x' }), '保存资料'), false)
+  assert.equal(memoryToolNeedsApproval(call('read', { path: 'notes/hot.md' }), '查看资料'), false)
+  assert.equal(memoryToolNeedsApproval(call('write', { path: 'notes/new.md', content: 'x' }), '保存资料'), false)
   assert.equal(memoryToolNeedsApproval(call('terminal', { command: 'ls' }), '运行命令'), true)
-  assert.equal(memoryToolNeedsApproval(call('delete', { path: 'wiki/new.md' }), '删除资料'), true)
+  assert.equal(memoryToolNeedsApproval(call('delete', { path: 'notes/new.md' }), '删除资料'), true)
   assert.equal(memoryToolNeedsApproval(call('export_3d_scene_video', { path: '.raw/jc-media/文档/选矿.jcscene' }), '导出视频'), true)
 })
 
@@ -54,16 +54,6 @@ test('current-project absolute paths do not require external authorization', () 
     ),
     false,
   )
-})
-
-test('memory wiki previews auto-run but writing actions require approval', () => {
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'inspect' }), '检查 Wiki'), false)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'evidence', evidencePaths: ['资料/制度.md'] }), '核对来源'), false)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'replace', apply: false }), '预览修改'), false)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'scaffold' }), '创建 Wiki'), true)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'graph' }), '生成关系图'), true)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'replace', apply: true }), '修改 Wiki'), true)
-  assert.equal(memoryToolNeedsApproval(call('wiki', { action: 'extend', apply: true }), '修改 Wiki'), true)
 })
 
 test('memory tools auto-run annotated read-only MCP and approve unannotated MCP', () => {

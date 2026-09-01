@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { buildToolResultMessages } from '../directTools'
-import { parseCreativeToolArguments, WIKI_SEARCH_TOOL_DEFINITION } from '../creativeToolContract'
 
 function call(id: string, name: string, args: Record<string, unknown> = {}) {
   return { id, type: 'function' as const, function: { name, arguments: JSON.stringify(args) } }
@@ -13,14 +12,14 @@ test('buildToolResultMessages always returns paired assistant tool_calls and too
     {
       id: '',
       type: 'function',
-      function: { name: 'wiki_search', arguments: 'not json' },
+      function: { name: 'read', arguments: 'not json' },
     },
   ], async () => { throw new Error('Tool argument parse failed') })
 
   assert.equal(messages.length, 2)
   assert.equal(messages[0].role, 'assistant')
   assert.equal(messages[0].tool_calls.length, 1)
-  assert.match(messages[0].tool_calls[0].id, /^call_wiki_search_/)
+  assert.match(messages[0].tool_calls[0].id, /^call_read_/)
   assert.equal(messages[1].role, 'tool')
   assert.equal(messages[1].tool_call_id, messages[0].tool_calls[0].id)
   assert.match(messages[1].content, /Tool argument parse failed/)
@@ -52,7 +51,7 @@ test('buildToolResultMessages appends executor followup messages after tool outp
     {
       id: 'call_empty_query',
       type: 'function',
-      function: { name: 'wiki_search', arguments: '{"query":"   "}' },
+      function: { name: 'read', arguments: '{"path":"notes/a.md"}' },
     },
   ], async () => ({
     content: 'Image read successfully',
@@ -110,14 +109,14 @@ test('buildToolResultMessages starts consecutive project reads in parallel and p
   ])
 })
 
-test('buildToolResultMessages keeps writes and mutating Wiki actions as serial barriers', async () => {
+test('buildToolResultMessages keeps writes and deletes as serial barriers', async () => {
   const timeline: string[] = []
   const messages = await buildToolResultMessages([
     call('call_read_a', 'read', { path: 'wiki/a.md' }),
     call('call_write', 'write', { path: 'wiki/b.md', content: 'b' }),
     call('call_read_c', 'read', { path: 'wiki/c.md' }),
-    call('call_wiki_search', 'wiki', { action: 'search', query: '规则' }),
-    call('call_wiki_replace', 'wiki', { action: 'replace', path: 'a.md' }),
+    call('call_grep', 'grep', { pattern: '规则', path: 'notes' }),
+    call('call_delete', 'delete', { path: 'notes/a.md' }),
   ], async toolCall => {
     timeline.push(`start:${toolCall.id}`)
     await Promise.resolve()
@@ -128,12 +127,12 @@ test('buildToolResultMessages keeps writes and mutating Wiki actions as serial b
   assert.deepEqual(timeline, [
     'start:call_read_a', 'end:call_read_a',
     'start:call_write', 'end:call_write',
-    'start:call_read_c', 'start:call_wiki_search',
-    'end:call_read_c', 'end:call_wiki_search',
-    'start:call_wiki_replace', 'end:call_wiki_replace',
+    'start:call_read_c', 'start:call_grep',
+    'end:call_read_c', 'end:call_grep',
+    'start:call_delete', 'end:call_delete',
   ])
   assert.deepEqual(messages.slice(1).map(message => message.tool_call_id), [
-    'call_read_a', 'call_write', 'call_read_c', 'call_wiki_search', 'call_wiki_replace',
+    'call_read_a', 'call_write', 'call_read_c', 'call_grep', 'call_delete',
   ])
 })
 
@@ -229,14 +228,4 @@ test('buildToolResultMessages keeps approval calls behind a serial barrier', asy
     'before:call_approval', 'execute:call_approval',
     'before:call_after', 'execute:call_after',
   ])
-})
-
-test('Wiki tool schemas and argument parsing accept a bounded string array', () => {
-  const query = WIKI_SEARCH_TOOL_DEFINITION.function.parameters.properties.query as any
-  const arraySchema = query.anyOf.find((item: any) => item.type === 'array')
-  assert.deepEqual([arraySchema.minItems, arraySchema.maxItems, arraySchema.items.type], [1, 3, 'string'])
-  assert.deepEqual(
-    parseCreativeToolArguments(call('call_search', 'wiki_search', { query: ['Codex', '并行读取'] })),
-    { query: ['Codex', '并行读取'] },
-  )
 })

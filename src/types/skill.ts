@@ -4,7 +4,6 @@
  * 对齐标准：
  *   - official Skill: skills/{name}/SKILL.md (frontmatter + body)
  *   - colleague-skill: .skill 格式 (persona + work)
- *   - karpathy-llm-wiki: raw/ + wiki/ 编译模型
  *   - darwin-skill: evaluate → improve → test → keep/revert
  */
 
@@ -13,6 +12,7 @@ export interface SkillFrontmatter {
   name: string
   description: string      // 官方 Skill 标准：描述适用场景 + 职责
   triggers: string[]        // 用户可见的搜索/筛选关键词
+  allowedTools?: string[]   // Skill 明确声明且本轮可调用的插件工具
 }
 
 /* ─── 进化日志（darwin-skill） ─── */
@@ -30,6 +30,7 @@ export interface SkillConfig {
   name: string
   description: string
   triggers: string[]
+  allowedTools?: string[]
 
   // ─── SKILL.md body ───
   skillContent: string   // 完整的 SKILL.md body（角色定义/工作流程/输出格式/示例/参考资料）
@@ -129,6 +130,9 @@ export function serializeToSkillMd(skill: SkillConfig): string {
     '---',
     `name: ${skill.name}`,
     `description: "${skill.description}"`,
+    ...(skill.allowedTools?.length
+      ? ['allowed-tools:', ...skill.allowedTools.map(tool => `  - ${tool}`)]
+      : []),
     `triggers:`,
     ...skill.triggers.map(t => `  - ${t}`),
     '---',
@@ -141,18 +145,19 @@ export function serializeToSkillMd(skill: SkillConfig): string {
  * 从 SKILL.md 文本解析为 SkillConfig（GitHub 导入用）
  */
 export function parseSkillMd(text: string, id?: string): Partial<SkillConfig> {
-  const fmMatch = text.match(/^---\n([\s\S]*?)\n---/)
-  const body = text.replace(/^---\n[\s\S]*?\n---\n*/, '').trim()
+  const fmMatch = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)
+  const body = text.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n*/, '').trim()
 
   let name = ''
   let description = ''
   let triggers: string[] = []
+  let allowedTools: string[] = []
 
   if (fmMatch) {
     const fm = fmMatch[1]
     const nameMatch = fm.match(/^name:\s*(.+)$/m)
     const descMatch = fm.match(/^description:\s*"?(.+?)"?\s*$/m)
-    const triggerLines = fm.match(/^triggers:\n((?:\s+-\s+.+\n?)*)/m)
+    const triggerLines = fm.match(/^triggers:\r?\n((?:\s+-\s+.+\r?\n?)*)/m)
 
     if (nameMatch) name = nameMatch[1].trim()
     if (descMatch) description = descMatch[1].trim()
@@ -162,6 +167,21 @@ export function parseSkillMd(text: string, id?: string): Partial<SkillConfig> {
         .map(l => l.replace(/^\s*-\s*/, '').trim())
         .filter(Boolean)
     }
+    const allowedToolsScalar = fm.match(/^allowed-tools:[ \t]+(.+)$/m)
+    const allowedToolsList = fm.match(/^allowed-tools:[ \t]*\r?\n((?:[ \t]+-[ \t]+.+(?:\r?\n|$))*)/m)
+    if (allowedToolsScalar) {
+      allowedTools = allowedToolsScalar[1]
+        .trim()
+        .replace(/^\[|\]$/g, '')
+        .split(',')
+        .map(tool => tool.trim().replace(/^['"]|['"]$/g, ''))
+        .filter(Boolean)
+    } else if (allowedToolsList) {
+      allowedTools = allowedToolsList[1]
+        .split(/\r?\n/)
+        .map(line => line.replace(/^[ \t]*-[ \t]*/, '').trim())
+        .filter(Boolean)
+    }
   }
 
   return {
@@ -169,6 +189,7 @@ export function parseSkillMd(text: string, id?: string): Partial<SkillConfig> {
     name: name || 'Imported Skill',
     description,
     triggers,
+    allowedTools,
     skillContent: body,
     references: [],
     examples: [],

@@ -211,7 +211,6 @@ test('memory space and conversations are created only by their explicit actions'
     '对话记录',
     '.sync',
     'jc-canvas',
-    'wiki',
   ]) {
     assert.match(paths, new RegExp(path.replace('.', '\\.')))
   }
@@ -375,9 +374,9 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速<|>记忆</)
   assert.match(workbench, /const toolCommands = \[/)
-  for (const label of ['@Wiki', '@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP', '@Terminal'])
+  for (const label of ['@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP', '@Terminal'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
-  assert.doesNotMatch(workbench, /@Skill \+ @Wiki|@Skill \+ @MCP/)
+  assert.doesNotMatch(workbench, /@Skill \+ @MCP/)
   assert.doesNotMatch(workbench, /const commonCommands = \[/)
   assert.match(workbench, /function insertCommand\(command/)
   assert.match(workbench, /fileToolsSelected = ref\(false\)/)
@@ -392,7 +391,6 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(runtime, /onProgramStatus\?: \(status: MemoryProgramStatus\) => void/)
   assert.match(workbench, /programStatuses = ref<Record<string, MemoryProgramStatus>>/)
   assert.match(workbench, /class="memory-program-status"/)
-  assert.match(workbench, /索引、双链、日志已同步并验证/)
   assert.match(workbench, /程序已返回真实执行回执/)
   assert.match(workbench, /programStatus\.kind/)
   assert.doesNotMatch(
@@ -417,7 +415,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   )
   assert.match(
     workbench,
-    /较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。[\s\S]*长期保留的结论请写入 Wiki/,
+    /较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。[\s\S]*长期保留的结论请保存到项目文件/,
   )
   assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{/)
@@ -469,7 +467,7 @@ test('memory composer reads the native clipboard only for an empty Desktop image
   assert.equal(shouldReadNativeClipboardImage(0, '', true, true), false)
 })
 
-test('memory mode keeps explicit Skill and Wiki connections', () => {
+test('memory mode keeps explicit Skill and plugin connections', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
@@ -486,19 +484,20 @@ test('memory mode keeps explicit Skill and Wiki connections', () => {
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
   assert.match(workbench, /selectedSkillNames: selectedSkillNames\.value/)
-  assert.match(workbench, /const wikiSelected = ref\(false\)/)
-  assert.match(workbench, /wikiSelected: wikiSelected\.value/)
+  assert.doesNotMatch(workbench, /wikiSelected|@Wiki/)
   assert.match(runtime, /selectMemoryTools\(\n\s*allMemoryToolDefinitions/)
-  assert.doesNotMatch(runtime, /const explicitWiki =/)
-  assert.doesNotMatch(runtime, /REQUIRED_SKILL|loadedRequiredSkill|queriedWiki|每次回复必须先调用/)
+  assert.doesNotMatch(runtime, /WikiAgent|wikiProtocolTask|runWikiTwoPhase/)
   assert.doesNotMatch(runtime, /customSkill\?\.skillContent\.trim\(\)/)
   assert.doesNotMatch(runtime, /selectedSkillNames\.map\(\(name, index\)/)
   assert.match(runtime, /buildSelectedSkillPrompt\(/)
-  assert.match(runtime, /wikiProtocolTask[\s\S]*只返回所需 paths[\s\S]*answer \+ 最小 actions/)
-  assert.match(runtime, /不要直接调用 wiki_context、wiki 或自行拼装事务字段/)
+  assert.match(runtime, /skillAllowedToolNames/)
+  assert.match(runtime, /工具未由 Skill 或用户选择授权/)
   assert.match(runtime, /selectedSkillPrompt \|\| buildWebSkillCatalogPrompt\(catalog\)/)
   assert.match(runtime, /buildMemoryDesktopToolDefinitions\(\)/)
   assert.match(runtime, /buildMemoryWebProjectToolDefinitions\(\)/)
+  assert.match(runtime, /projectId\?: string/)
+  assert.match(runtime, /explicitCapabilitySelected && !input\.projectId/)
+  assert.match(workbench, /desktopOnlyRuntime \? \[/)
 })
 
 test('memory composer does not expose removed Jina web tools', () => {
@@ -1138,7 +1137,7 @@ test('memory files and conversation turns use the shared safe Markdown renderer'
   const renderer = source('src/components/memory/MemoryMarkdown.vue')
 
   assert.match(workbench, /<MemoryMarkdown/)
-  assert.match(renderer, /renderMessageMarkdown\(renderWikiLinks\(props\.content\), 'assistant'\)/)
+  assert.match(renderer, /renderMessageMarkdown\(renderMarkdownFileLinks\(props\.content\), 'assistant'\)/)
   assert.match(renderer, /renderStreamingText\(props\.content\)/)
   assert.match(renderer, /renderMermaidBlocks\(base,/)
   assert.match(renderer, /querySelectorAll<HTMLElement>\('h1,h2,h3'\)/)
@@ -1159,14 +1158,14 @@ test('memory project maps stay separate from the creation canvas and preserve re
 
 test('memory Markdown supports forward links and scanned backlink sources', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  const links = source('src/runtime/memory/markdownLinks.ts')
+  const links = source('src/runtime/memory/markdownFileLinks.ts')
 
-  assert.match(workbench, /resolveWikiLinkTarget\(target, sourcePath, await files\.list\(owner\)\)/)
-  assert.match(workbench, /findWikiBacklinks\(target, sources\)/)
+  assert.match(workbench, /resolveMarkdownFileLinkTarget\(target, sourcePath, await files\.list\(owner\)\)/)
+  assert.match(workbench, /findMarkdownFileBacklinks\(target, sources\)/)
   assert.match(workbench, /被以下文件引用/)
   assert.match(workbench, /文件不存在：\$\{target\}/)
   assert.doesNotMatch(workbench, /wiki.*index.*database/i)
-  assert.match(links, /parseWikiLinks/)
+  assert.match(links, /parseMarkdownFileLinks/)
   assert.match(links, /resources: ProjectResource\[\]/)
 })
 

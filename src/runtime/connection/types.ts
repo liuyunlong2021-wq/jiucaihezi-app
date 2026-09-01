@@ -14,7 +14,7 @@ export interface ParsedSkillMd {
   description: string
   body: string
   fullSkillMd: string
-  frontmatter: Record<string, string>
+  frontmatter: Record<string, string | string[]>
 }
 
 export interface SkillConnection {
@@ -25,6 +25,7 @@ export interface SkillConnection {
   fullSkillMd: string
   body: string
   resources: SkillConnectionResource[]
+  allowedTools: string[]
 }
 
 export interface ToolConnection {

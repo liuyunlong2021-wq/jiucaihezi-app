@@ -33,7 +33,6 @@ test('memory project paths keep one protected skeleton and four media categories
     '.raw/对话记录',
     '.raw/.sync',
     'jc-canvas',
-    'wiki',
   ])
   assert.equal(memoryMediaDirectoryFor('cover.png'), '.raw/jc-media/图片')
   assert.equal(memoryMediaDirectoryFor('movie.bin', 'video/mp4'), '.raw/jc-media/视频')
@@ -47,7 +46,7 @@ test('memory project paths hide selector records and protect only the fixed skel
   for (const path of ['.raw/对话记录', '.raw/对话记录/a.md', '.raw/.sync/state.json', 'jc-canvas/a.jccanvas', 'wiki/.DS_Store']) {
     assert.equal(isMemoryProjectHiddenPath(path), true, path)
   }
-  for (const path of ['.raw', '.raw/jc-media', '.raw/jc-media/图片', 'wiki', '.raw/对话记录/a.md', 'jc-canvas/a.jccanvas']) {
+  for (const path of ['.raw', '.raw/jc-media', '.raw/jc-media/图片', '.raw/对话记录/a.md', 'jc-canvas/a.jccanvas']) {
     assert.equal(isMemoryProjectMutationBlocked(path), true, path)
   }
   for (const path of ['.raw/自建资料/笔记.md', '.raw/jc-media/图片/a.png', '.raw/jc-media/文档/a.md', 'wiki/hot.md']) {

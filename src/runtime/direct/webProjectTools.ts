@@ -8,16 +8,8 @@ import {
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
   MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   MEMORY_FILE_TOOL_DEFINITIONS,
-  WIKI_SEARCH_TOOL_DEFINITION,
-  WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
-import {
-  buildWikiContext,
-  executeWikiAction,
-  executeWikiActionWithReceipt,
-  sha256Hex,
-  type WikiWorkspace,
-} from './wikiRuntime'
+import { executeMcpBridgeToolCall, getMcpServerBridgeToolDefinitions } from '@/runtime/tools/mcpBridge'
 import {
   artifactFilename,
   createArtifactHtml,
@@ -43,11 +35,13 @@ export function buildWebProjectToolDefinitions() {
 }
 
 export function buildMemoryWebProjectToolDefinitions() {
-  return [
+  const coreTools = [
     ...WEB_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   ].filter(tool => !['create_3d_scene', 'edit_3d_scene'].includes(tool.function.name))
+  const coreToolNames = coreTools.map(tool => tool.function.name)
+  return [...coreTools, ...getMcpServerBridgeToolDefinitions({ coreToolNames })]
 }
 
 export function createWebProjectToolExecutor(input: {
@@ -73,49 +67,6 @@ export function createWebProjectToolExecutor(input: {
     return input.projectId
   }
 
-  const wikiWorkspace: WikiWorkspace = {
-    async list() {
-      return (await input.files.list(requireProject())).map(entry => ({
-        path: entry.path,
-        isDir: entry.isDir,
-      }))
-    },
-    async read(path) {
-      const entry = await input.files.read(requireProject(), path)
-      if (entry.mimeType === 'folder') throw new Error(`读取路径必须是文件: ${path}`)
-      return entry.content
-    },
-    async fingerprint(path) {
-      const entry = await input.files.read(requireProject(), path)
-      if (entry.mimeType === 'folder') throw new Error(`来源证据必须是文件: ${path}`)
-      if (entry.metadata?.sourceUrl && entry.metadata?.binaryStorage !== 'opfs') {
-        throw new Error(`远程媒体没有原始字节，无法计算指纹: ${path}`)
-      }
-      if (entry.metadata?.binaryStorage === 'opfs' && entry.size > 30_000_000) {
-        throw new Error(`文件超过 30 MB，无法计算完整指纹: ${path}`)
-      }
-      const bytes =
-        entry.metadata?.binaryStorage === 'opfs'
-          ? new Uint8Array(
-              await (await input.files.readBinary(requireProject(), path)).arrayBuffer(),
-            )
-          : new TextEncoder().encode(entry.content)
-      return await sha256Hex(bytes)
-    },
-    async write(path, content) {
-      await input.files.write(requireProject(), path, content)
-    },
-    async createDirectory(path) {
-      await input.files.createFolder(requireProject(), path)
-    },
-    async move(path, destination) {
-      await input.files.rename(requireProject(), path, destination)
-    },
-    async remove(path) {
-      await input.files.remove(requireProject(), path)
-    },
-  }
-
   return async (call, signal): Promise<DirectToolResult> => {
     signal?.throwIfAborted()
     const args = parseCreativeToolArguments(call)
@@ -125,24 +76,6 @@ export function createWebProjectToolExecutor(input: {
 
     if (name === 'skill') {
       throw new Error('Web 端不支持动态 Skill 工具，请在本轮直接选择具体 Skill')
-    }
-
-    if (name === 'wiki') {
-      if (args.action !== 'apply') return { content: await executeWikiAction(wikiWorkspace, args as any) }
-      const result = await executeWikiActionWithReceipt(wikiWorkspace, args as any, signal)
-      return { content: result.content, status: result.status, details: result.receipt as unknown as Record<string, unknown> }
-    }
-
-    if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {
-      return {
-        content: await executeWikiAction(wikiWorkspace, { ...args, action: 'search' } as any),
-      }
-    }
-
-    if (name === WIKI_CONTEXT_TOOL_DEFINITION.function.name) {
-      return {
-        content: JSON.stringify(await buildWikiContext(wikiWorkspace, args as any), null, 2),
-      }
     }
 
     if (name === 'read') {
@@ -292,6 +225,10 @@ export function createWebProjectToolExecutor(input: {
     if (name === 'delete') {
       await input.files.remove(requireProject(), String(args.path || ''))
       return { content: `已删除浏览器本地项目资源: ${args.path}` }
+    }
+
+    if (name.startsWith('mcp__')) {
+      return { content: await executeMcpBridgeToolCall(name, args) }
     }
 
     if (name === 'export_markdown_png') {

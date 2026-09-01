@@ -32,44 +32,6 @@ const pathProperty = {
     'Path relative to the current project, or an absolute path after the user approves this task',
 }
 const vectorProperty = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
-const wikiQueryProperty = {
-  anyOf: [
-    { type: 'string' },
-    { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 3 },
-  ],
-  description: 'One search term or 1-3 search terms scanned together in the current project Wiki',
-}
-
-export const WIKI_SEARCH_TOOL_DEFINITION = tool(
-  'wiki_search',
-  'Search the current project Wiki read-only. Use it only when the answer depends on project facts.',
-  {
-    query: wikiQueryProperty,
-    scope: {
-      type: 'string',
-      enum: ['active', 'all'],
-      description: 'active excludes archived knowledge; all includes it',
-    },
-    limit: { type: 'integer', minimum: 1, maximum: 1000 },
-  },
-  ['query'],
-)
-
-export const WIKI_CONTEXT_TOOL_DEFINITION = tool(
-  'wiki_context',
-  'Read the current project Wiki progressively. Start with entry or tree, then read only explicit paths or run a precise search/link query.',
-  {
-    action: { type: 'string', enum: ['entry', 'tree', 'read', 'search', 'links'] },
-    scope: { type: 'string', enum: ['active', 'all'] },
-    entryPath: { type: 'string' },
-    paths: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 12 },
-    query: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 3 },
-    maxPages: { type: 'integer', minimum: 1, maximum: 12 },
-    maxTokens: { type: 'integer', minimum: 1000, maximum: 50000 },
-  },
-  ['action'],
-)
-
 export const TOOL_SEARCH_TOOL_DEFINITION = tool(
   'tool_search',
   'Search currently authorized tools by name or description. Read-only; does not execute a tool.',
@@ -96,129 +58,6 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
     },
     ['name'],
   ),
-  WIKI_CONTEXT_TOOL_DEFINITION,
-  tool(
-    'wiki',
-    'Run native deterministic project Wiki operations without Python, Node, or Wiki Skill loading. For creating a Wiki from supplied content, call scaffold once with the complete plan; the program validates and writes the whole plan in one batch.',
-    {
-      action: {
-        type: 'string',
-        enum: ['apply', 'scaffold', 'status', 'graph', 'validate', 'audit'],
-      },
-      type: {
-        type: 'string',
-        enum: [
-          'dev_project',
-          'novel',
-          'manju',
-          'short_story',
-          'film',
-          'tv_series',
-          'advertisement',
-          'generic',
-        ],
-      },
-      plan: {
-        type: 'object',
-        description: 'Complete batch plan for action=scaffold. Paths are relative to the Wiki root; use type=generic for a custom structure.',
-        properties: {
-          directories: {
-            type: 'array',
-            items: { type: 'string' },
-            maxItems: 200,
-          },
-          files: {
-            type: 'array',
-            maxItems: 200,
-            items: {
-              type: 'object',
-              properties: {
-                path: { type: 'string', description: 'Markdown path relative to the Wiki root' },
-                content: { type: 'string' },
-              },
-              required: ['path', 'content'],
-              additionalProperties: false,
-            },
-          },
-        },
-        additionalProperties: false,
-      },
-      query: wikiQueryProperty,
-      scope: { type: 'string', enum: ['active', 'all'] },
-      limit: { type: 'integer', minimum: 1, maximum: 1000 },
-      depth: {
-        type: 'integer',
-        minimum: 1,
-        maximum: 2,
-        description: 'Relationship graph depth from confirmed seed pages',
-      },
-      evidencePaths: { type: 'array', items: { type: 'string' } },
-      path: { type: 'string', description: 'Project-relative Wiki file or evidence path' },
-      oldText: { type: 'string' },
-      newText: { type: 'string' },
-      replaceAll: {
-        type: 'boolean',
-        description: 'Only after explicit confirmation, replace every match in this one file',
-      },
-      category: { type: 'string' },
-      description: { type: 'string' },
-      reason: { type: 'string', description: 'Confirmed problem being repaired' },
-      basis: {
-        anyOf: [
-          { type: 'string' },
-          { type: 'array', items: { type: 'string' }, minItems: 1 },
-        ],
-        description: 'User decisions, sources, or inspection items supporting the change',
-      },
-      confirmedPlanId: {
-        type: 'string',
-        description: 'Required for move or trash after the user confirms the complete preview',
-      },
-      operations: {
-        type: 'array',
-        minItems: 1,
-        maxItems: 200,
-        items: {
-          type: 'object',
-          properties: {
-            kind: { type: 'string', enum: ['mkdir', 'create', 'replace', 'append', 'move', 'trash'] },
-            path: { type: 'string' },
-            destination: { type: 'string' },
-            purpose: { type: 'string' },
-            content: { type: 'string' },
-            title: { type: 'string' },
-            summary: { type: 'string' },
-            oldText: { type: 'string' },
-            newText: { type: 'string' },
-            replaceAll: { type: 'boolean' },
-            idempotencyKey: { type: 'string' },
-          },
-          required: ['kind', 'path'],
-          additionalProperties: false,
-        },
-      },
-      sources: {
-        type: 'array',
-        items: {
-          type: 'object',
-          properties: {
-            wikiPath: { type: 'string' },
-            wikiSection: { type: 'string' },
-            sourceRole: { type: 'string' },
-            sourcePath: { type: 'string' },
-            processedScope: { type: 'string' },
-          },
-          required: ['wikiPath', 'sourceRole', 'sourcePath', 'processedScope'],
-          additionalProperties: false,
-        },
-      },
-      apply: {
-        type: 'boolean',
-        description: 'Omit or false for preview; true only after confirmation',
-      },
-    },
-    ['action'],
-  ),
   tool(
     'read',
     'Read a directory, UTF-8 text file, supported image, or a loaded Skill resource. Relative paths use the current project; user-approved absolute paths are also supported.',
@@ -238,7 +77,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
     'glob',
     'Find files by glob pattern. Relative paths use the current project; user-approved absolute paths are also supported.',
     {
-      pattern: { type: 'string', description: 'Glob pattern such as wiki/**/*.md' },
+      pattern: { type: 'string', description: 'Glob pattern such as docs/**/*.md' },
       path: {
         type: 'string',
         description: 'Optional project subdirectory or approved absolute directory',
@@ -660,46 +499,12 @@ type ToolFieldType =
   | 'string'
   | 'boolean'
   | 'integer'
-  | 'stringArray'
-  | 'stringOrStringArray'
   | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   tool_search: { query: 'string', limit: 'integer' },
   tool_describe: { name: 'string' },
-  wiki_search: { query: 'stringOrStringArray', scope: 'string', limit: 'integer' },
-  wiki_context: {
-    action: 'string',
-    scope: 'string',
-    entryPath: 'string',
-    paths: 'stringArray',
-    query: 'stringArray',
-    maxPages: 'integer',
-    maxTokens: 'integer',
-  },
   skill: { name: 'string' },
-  wiki: {
-    action: 'string',
-    type: 'string',
-    plan: 'json',
-    query: 'stringOrStringArray',
-    scope: 'string',
-    limit: 'integer',
-    depth: 'integer',
-    evidencePaths: 'stringArray',
-    path: 'string',
-    oldText: 'string',
-    newText: 'string',
-    replaceAll: 'boolean',
-    category: 'string',
-    description: 'string',
-    reason: 'string',
-    basis: 'stringOrStringArray',
-    apply: 'boolean',
-    confirmedPlanId: 'string',
-    operations: 'json',
-    sources: 'json',
-  },
   read: { path: 'string', offset: 'integer', limit: 'integer' },
   glob: { pattern: 'string', path: 'string', limit: 'integer' },
   grep: { pattern: 'string', path: 'string', include: 'string', limit: 'integer' },
@@ -749,14 +554,9 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     const invalid =
       expected === 'json'
         ? false
-        : expected === 'stringOrStringArray'
-          ? typeof item !== 'string' &&
-            (!Array.isArray(item) || item.some(value => typeof value !== 'string'))
-          : expected === 'integer'
+        : expected === 'integer'
             ? !Number.isInteger(item)
-            : expected === 'stringArray'
-              ? !Array.isArray(item) || item.some(value => typeof value !== 'string')
-              : typeof item !== expected
+            : typeof item !== expected
     if (invalid) {
       throw new Error(`工具参数类型无效: ${key}`)
     }
@@ -764,7 +564,6 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   const definition = [
     TOOL_SEARCH_TOOL_DEFINITION,
     TOOL_DESCRIBE_TOOL_DEFINITION,
-    WIKI_SEARCH_TOOL_DEFINITION,
     ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,

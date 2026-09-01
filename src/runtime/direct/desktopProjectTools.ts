@@ -7,17 +7,8 @@ import {
   normalizeCreativeProjectPath,
   parseCreativeToolArguments,
   resolveCreativeProjectPath,
-  WIKI_SEARCH_TOOL_DEFINITION,
-  WIKI_CONTEXT_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
-import {
-  buildWikiContext,
-  executeWikiAction,
-  executeWikiActionWithReceipt,
-  sha256Hex,
-  type WikiWorkspace,
-} from './wikiRuntime'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import {
   artifactFilename,
@@ -211,57 +202,6 @@ export function createDesktopProjectToolExecutor(input: {
     return outputPath.startsWith(`${rootPath}/`) ? outputPath.slice(rootPath.length + 1) : path
   }
 
-  const wikiWorkspace: WikiWorkspace = {
-    rootPath: root,
-    async list() {
-      return (await listFiles()).map(entry => ({ path: entry.path, isDir: entry.isDir }))
-    },
-    async read(path) {
-      return (await readFile(path)).content
-    },
-    async fingerprint(path) {
-      const file = await readFile(path)
-      if (file.truncated) throw new Error(`文件超过 30 MB，无法计算完整指纹: ${path}`)
-      return await sha256Hex(Uint8Array.from(atob(file.base64), char => char.charCodeAt(0)))
-    },
-    async write(path, content) {
-      await invoke('dev_write_file', { root: requireProject(), relativePath: path, content })
-    },
-    async createDirectory(path) {
-      await invoke('dev_create_dir', { root: requireProject(), relativePath: path })
-    },
-    async move(path, destination) {
-      await invoke('dev_rename_file', {
-        root: requireProject(),
-        oldRelativePath: path,
-        newRelativePath: destination,
-      })
-    },
-    async remove(path) {
-      await invoke('dev_delete_file', { root: requireProject(), relativePath: path })
-    },
-    async gitEvidence() {
-      const status = await invoke('dev_run_command', {
-        root: requireProject(),
-        command: 'git status --short',
-        workdir: '.',
-        timeoutSeconds: 30,
-      })
-      const diff = await invoke('dev_run_command', {
-        root: requireProject(),
-        command: 'git diff --no-ext-diff --binary HEAD',
-        workdir: '.',
-        timeoutSeconds: 30,
-      })
-      if (
-        Number(status.exitCode ?? status.exit_code) !== 0 ||
-        Number(diff.exitCode ?? diff.exit_code) !== 0
-      )
-        return null
-      return { status: String(status.stdout || ''), diff: String(diff.stdout || '') }
-    },
-  }
-
   function renderReadFile(
     path: string,
     file: DesktopReadFile,
@@ -310,24 +250,6 @@ export function createDesktopProjectToolExecutor(input: {
         return { content: localSkillOutput(skillName, skill) }
       }
       return { content: await skills.load(skillName) }
-    }
-
-    if (name === 'wiki') {
-      if (args.action !== 'apply') return { content: await executeWikiAction(wikiWorkspace, args as any) }
-      const result = await executeWikiActionWithReceipt(wikiWorkspace, args as any, signal)
-      return { content: result.content, status: result.status, details: result.receipt as unknown as Record<string, unknown> }
-    }
-
-    if (name === WIKI_SEARCH_TOOL_DEFINITION.function.name) {
-      return {
-        content: await executeWikiAction(wikiWorkspace, { ...args, action: 'search' } as any),
-      }
-    }
-
-    if (name === WIKI_CONTEXT_TOOL_DEFINITION.function.name) {
-      return {
-        content: JSON.stringify(await buildWikiContext(wikiWorkspace, args as any), null, 2),
-      }
     }
 
     if (name === 'read') {

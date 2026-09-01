@@ -50,6 +50,22 @@ test('buildSkillConnection preserves official Skill shape and records progressiv
   assert.deepEqual(connection.resources.map(resource => resource.kind), ['references', 'scripts', 'assets'])
 })
 
+test('buildSkillConnection preserves scalar and list allowed-tools declarations', () => {
+  const scalar = buildSkillConnection({
+    id: 'scalar',
+    selectedBy: 'user',
+    skillMd: '---\nname: scalar\nallowed-tools: terminal\n---\nbody',
+  })
+  const list = buildSkillConnection({
+    id: 'list',
+    selectedBy: 'user',
+    skillMd: '---\nname: list\nallowed-tools:\n  - read\n  - mcp__demo__run\n---\nbody',
+  })
+
+  assert.deepEqual(scalar.allowedTools, ['terminal'])
+  assert.deepEqual(list.allowedTools, ['read', 'mcp__demo__run'])
+})
+
 test('resolveSkillConnection builds a connection from inline official SKILL.md content', async () => {
   const result = await resolveSkillConnection({
     selectedBy: 'user',

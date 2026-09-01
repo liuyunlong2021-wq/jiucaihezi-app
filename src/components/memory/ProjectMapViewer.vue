@@ -28,7 +28,7 @@ function nodeText(node: JsonCanvasNode) {
   return node.type === 'file' ? node.file || node.id : node.type === 'link' ? node.url || node.id : node.label || node.text || node.id
 }
 
-function wikiPath(node: JsonCanvasNode): string {
+function filePath(node: JsonCanvasNode): string {
   if (node.type === 'file') return String(node.file || '')
   return /\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/.exec(String(node.text || ''))?.[1]?.trim() || ''
 }
@@ -36,7 +36,7 @@ function wikiPath(node: JsonCanvasNode): string {
 function currentViewport() { return { ...pan.value, zoom: zoom.value } }
 
 function openNode(node: JsonCanvasNode) {
-  const path = wikiPath(node)
+  const path = filePath(node)
   if (path) emit('open', path, currentViewport())
   else if (node.type === 'link' && node.url) window.open(node.url, '_blank', 'noopener,noreferrer')
 }

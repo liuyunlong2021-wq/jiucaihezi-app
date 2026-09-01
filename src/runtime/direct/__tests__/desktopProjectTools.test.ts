@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { createHash } from 'node:crypto'
 import { test } from 'node:test'
 
 import {
@@ -63,32 +62,14 @@ function fixtureInvoke(command: string, payload: any): Promise<any> {
 test('creative tool contract exposes the project tools and Desktop terminal', () => {
   assert.deepEqual(
     CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name),
-    ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
+    ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'terminal'],
   )
   const terminal = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'terminal')
   assert.match(terminal?.function.description || '', /explicitly lists that exact token/)
   assert.match(terminal?.function.description || '', /absolute paths supplied in user text directly/)
 })
 
-test('wiki tool contract exposes evidence, scoped replace, and no bare link action', () => {
-  const wiki = CREATIVE_PROJECT_TOOL_DEFINITIONS.find(tool => tool.function.name === 'wiki')!
-  const properties = wiki.function.parameters.properties as Record<string, any>
 
-  assert.deepEqual(properties.action.enum, ['apply', 'scaffold', 'status', 'graph', 'validate', 'audit'])
-  assert.equal(properties.operations.type, 'array')
-  assert.equal(properties.replaceAll.type, 'boolean')
-  assert.equal(properties.target, undefined)
-})
-
-test('wiki scaffold accepts a structured batch plan', () => {
-  assert.deepEqual(
-    parseCreativeToolArguments(call('wiki', {
-      action: 'scaffold',
-      plan: { directories: ['角色'], files: [{ path: '角色/主角.md', content: '# 主角\n' }] },
-    })),
-    { action: 'scaffold', plan: { directories: ['角色'], files: [{ path: '角色/主角.md', content: '# 主角\n' }] } },
-  )
-})
 
 test('3D scene tool schema requires a valid nested Storyboarder character', () => {
   const tool = buildMemoryDesktopToolDefinitions().find(item => item.function.name === 'create_3d_scene')!
@@ -103,45 +84,7 @@ test('3D scene tool schema requires a valid nested Storyboarder character', () =
   })
 })
 
-test('desktop wiki evidence fingerprints the original project bytes', async () => {
-  const execute = createDesktopProjectToolExecutor({ projectDir: '/tmp/project', invoke: fixtureInvoke })
 
-  const output = (await execute(call('wiki', { action: 'evidence', evidencePaths: ['media/ref.png'] }))).content
-
-  assert.match(output, new RegExp(`media/ref\\.png sha256:${createHash('sha256').update('img').digest('hex')}`))
-})
-
-test('desktop Wiki audit classifies Rust ENOENT as a missing source', async () => {
-  const invoke = async (command: string, payload: { input: Record<string, unknown> }) => {
-    const path = String(payload.input.relativePath || '')
-    if (command === 'dev_list_files') {
-      return [
-        { path: 'wiki', isDir: true },
-        { path: 'wiki/index.md', isDir: false, size: 5 },
-        { path: 'wiki/hot.md', isDir: false, size: 5 },
-        { path: 'wiki/log.md', isDir: false, size: 5 },
-        { path: 'wiki/来源索引.md', isDir: false, size: 260 },
-        { path: 'wiki/制度.md', isDir: false, size: 20 },
-      ]
-    }
-    if (command !== 'dev_read_file') throw new Error(`unexpected command: ${command}`)
-    if (path === 'wiki/来源索引.md') {
-      return {
-        path,
-        content: '# 来源索引\n\n## 证据记录\n\n| Wiki 位置 | 来源角色 | 原始来源 | 已处理范围 | 写入时指纹 | 记录时间 |\n|---|---|---|---|---|---|\n| [[制度#期限]] | 原件 | 资料/不存在.md | 全文 | sha256:' + 'a'.repeat(64) + ' | 2026-08-05T22:00:00+08:00 |\n',
-        base64: '', size: 260, truncated: false,
-      }
-    }
-    if (path === 'wiki/制度.md') return { path, content: '# 制度\n\n## 期限\n', base64: '', size: 20, truncated: false }
-    if (path.startsWith('wiki/')) return { path, content: '# 页面\n', base64: '', size: 5, truncated: false }
-    throw new Error('项目内路径不可访问: No such file or directory (os error 2)')
-  }
-
-  const execute = createDesktopProjectToolExecutor({ projectDir: '/tmp/project', invoke })
-  const output = (await execute(call('wiki', { action: 'audit' }))).content
-
-  assert.match(output, /来源不存在.*制度#期限/s)
-})
 
 test('creative tool definitions append connected MCP tools without changing core tools', () => {
   const original = (globalThis as any).__jiucaihezi_mcpStore__
@@ -171,11 +114,11 @@ test('creative tool definitions append connected MCP tools without changing core
   try {
     assert.deepEqual(
       buildCreativeToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'terminal', 'mcp__docs__lookup'],
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'wiki_context', 'wiki', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
@@ -282,15 +225,6 @@ test('desktop project tools do not write a rendered artifact after cancellation'
   assert.equal(writes, 0)
 })
 
-test('desktop project tools execute native Wiki inspection through existing Tauri files', async () => {
-  const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
-
-  const result = await execute(call('wiki', { action: 'inspect' }))
-
-  assert.match(result.content, /state: existing/)
-  assert.match(result.content, /path: wiki/)
-  assert.match((await execute(call('wiki_search', { query: '林风' }))).content, /hot\.md/)
-})
 
 test('desktop project tools use relative Tauri IPC with Web-compatible output', async () => {
   const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })

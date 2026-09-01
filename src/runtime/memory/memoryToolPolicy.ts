@@ -38,16 +38,6 @@ export function memoryToolNeedsApproval(call: DirectToolCall, currentUserText: s
     if (!isPathExplicitlyMentioned(currentUserText, path)) throw new Error(`项目外路径必须由用户在本轮明确提供: ${path}`)
   }
   if (name === 'terminal' || name === 'delete' || name === 'export_3d_scene_video') return true
-  if (name === 'wiki') {
-    const action = String(args.action || '')
-    if (action === 'apply' && Array.isArray(args.operations)) {
-      const operations = args.operations as Array<Record<string, unknown>>
-      if (operations.some(operation => operation.kind === 'move' || operation.kind === 'trash')) return true
-      if (operations.some(operation => operation.kind === 'replace' && operation.replaceAll === true)) return true
-    }
-    return action === 'scaffold' || action === 'graph'
-      || (args.apply === true && ['replace', 'extend'].includes(action))
-  }
   if ((name === 'write' || name === 'edit') && paths.length) return true
   if (name.startsWith('mcp__')) return !isMcpToolReadOnly(name)
   return false

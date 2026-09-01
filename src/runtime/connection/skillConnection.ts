@@ -4,6 +4,7 @@ import type {
   SkillConnectionResource,
   SkillSelectedBy,
 } from './types'
+import { parseSkillMd } from '@/types/skill'
 
 export interface BuildSkillConnectionInput {
   id: string
@@ -27,8 +28,8 @@ export function parseSkillFrontmatter(skillMd: string): ParsedSkillMd {
 
   const frontmatter = parseFlatYaml(match[1])
   return {
-    name: frontmatter.name || '',
-    description: frontmatter.description || '',
+    name: typeof frontmatter.name === 'string' ? frontmatter.name : '',
+    description: typeof frontmatter.description === 'string' ? frontmatter.description : '',
     body: fullSkillMd.slice(match[0].length).trim(),
     fullSkillMd,
     frontmatter,
@@ -45,15 +46,25 @@ export function buildSkillConnection(input: BuildSkillConnectionInput): SkillCon
     fullSkillMd: parsed.fullSkillMd,
     body: parsed.body,
     resources: [...(input.resources || [])],
+    allowedTools: parseSkillMd(parsed.fullSkillMd).allowedTools || [],
   }
 }
 
-function parseFlatYaml(text: string): Record<string, string> {
-  const result: Record<string, string> = {}
+function parseFlatYaml(text: string): Record<string, string | string[]> {
+  const result: Record<string, string | string[]> = {}
+  let listKey = ''
   for (const line of text.split(/\r?\n/)) {
+    const listItem = line.match(/^\s+-\s+(.+)$/)
+    if (listItem && listKey) {
+      const current = Array.isArray(result[listKey]) ? result[listKey] as string[] : []
+      current.push(unquoteYamlScalar(listItem[1]!.trim()))
+      result[listKey] = current
+      continue
+    }
     const match = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
     if (!match) continue
-    result[match[1]] = unquoteYamlScalar(match[2].trim())
+    listKey = match[2].trim() ? '' : match[1]
+    result[match[1]] = match[2].trim() ? unquoteYamlScalar(match[2].trim()) : []
   }
   return result
 }
@@ -67,4 +78,3 @@ function unquoteYamlScalar(value: string): string {
   }
   return value
 }
-

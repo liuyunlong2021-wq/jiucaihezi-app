@@ -18,7 +18,7 @@ import type { ProjectResourceOpenResult } from '@/services/projectExplorerServic
 import { openProjectResource } from '@/services/projectExplorerService'
 import {
   appendMemoryRound,
-  applyMemoryWikiWrite,
+  saveMemoryMarkdown,
   createMemoryConversation,
   initializeMemoryProject,
   inspectMemoryProject,
@@ -62,7 +62,7 @@ import type { ConversationAttachment, ConversationTurn } from '@/runtime/memory/
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
-import { findWikiBacklinks, resolveWikiLinkTarget } from '@/runtime/memory/markdownLinks'
+import { findMarkdownFileBacklinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
 import { highlightCode } from '@/utils/highlight'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
@@ -106,13 +106,11 @@ const conversationSearch = ref('')
 const conversationPickerRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const editingTurnId = ref('')
-const wikiWriteOpen = ref(false)
-const wikiWriteTargets = ref<ProjectResource[]>([])
-const wikiWriteSelected = ref<ProjectResource | null>(null)
-const wikiWriteSource = ref('')
-const wikiWriteTurnId = ref('')
-const wikiWriteRoot = ref('')
-const wikiWritePending = ref(false)
+const fileWriteOpen = ref(false)
+const fileWriteTargets = ref<ProjectResource[]>([])
+const fileWriteSelected = ref<ProjectResource | null>(null)
+const fileWriteSource = ref('')
+const fileWritePending = ref(false)
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
@@ -132,7 +130,6 @@ const selectedToolChips = computed(() => [
   { id: 'terminal', label: '@Terminal', icon: 'terminal', selected: terminalSelected.value },
 ].filter(tool => tool.selected))
 function clearToolSelections() {
-  wikiSelected.value = false
   fileToolsSelected.value = false
   selectedMcpToolNames.value = []
   mediaSelected.value = false
@@ -321,11 +318,8 @@ type MemoryMentionOption =
   | { type: 'file'; display: string; description: string; resource: ProjectResource }
   | { type: 'skill'; display: string; description: string; name: string }
 
-const wikiSelected = ref(false)
-
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   const toolOptions: MemoryMentionOption[] = [
-    { type: 'tool', id: 'wiki', display: 'Wiki', description: '读取当前项目 Wiki', icon: 'menu_book' },
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
     { type: 'tool', id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' },
@@ -443,7 +437,6 @@ function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
 
 function programStatusTitle(programStatus: MemoryProgramStatus): string {
   const subject = {
-    wiki: 'Wiki',
     file: '文件操作',
     media: '媒体任务',
     '3d': '3D 场景',
@@ -458,17 +451,18 @@ function programStatusTitle(programStatus: MemoryProgramStatus): string {
 }
 
 function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
-  return programStatus.kind === 'wiki' ? '索引、双链、日志已同步并验证' : '程序已返回真实执行回执'
+  return '程序已返回真实执行回执'
 }
 const toolCommands = [
-  { id: 'wiki', label: '@Wiki', icon: 'menu_book', description: '读取当前项目 Wiki' },
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '加载指定 Skill' },
   { id: 'file', label: '@文件', icon: 'description', description: '读取、写入和管理文件' },
-  { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
   { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
-  { id: 'terminal', label: '@Terminal', icon: 'terminal', description: '执行终端命令' },
+  ...(desktopOnlyRuntime ? [
+    { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
+    { id: 'terminal', label: '@Terminal', icon: 'terminal', description: '执行终端命令' },
+  ] : []),
 ]
 const primaryCommands = toolCommands
 
@@ -781,7 +775,7 @@ async function saveMarkdownEdit() {
   }
 }
 
-async function openWikiResource(resource: ProjectResource) {
+async function openProjectFile(resource: ProjectResource) {
   await openResource(await openProjectResource(files, resource))
 }
 
@@ -806,13 +800,13 @@ async function handleMarkdownClick(event: MouseEvent) {
   const owner = projectOwner.value
   if (!owner) return
   const target = decodeURIComponent(anchor.getAttribute('href')!.slice('#jc-file='.length))
-  const sourcePath = (event.currentTarget as HTMLElement).dataset.wikiSource || ''
-  const resource = resolveWikiLinkTarget(target, sourcePath, await files.list(owner))
+  const sourcePath = (event.currentTarget as HTMLElement).dataset.fileSource || ''
+  const resource = resolveMarkdownFileLinkTarget(target, sourcePath, await files.list(owner))
   if (!resource) {
     error.value = `文件不存在：${target}`
     return
   }
-  await openWikiResource(resource)
+  await openProjectFile(resource)
 }
 
 async function loadBacklinks(target: ProjectResource) {
@@ -827,7 +821,7 @@ async function loadBacklinks(target: ProjectResource) {
     } catch { /* unreadable files are not backlink sources */ }
   }
   if (generation === backlinkGeneration && previewResource.value?.resource.path === target.path) {
-    backlinks.value = findWikiBacklinks(target, sources)
+    backlinks.value = findMarkdownFileBacklinks(target, sources)
   }
 }
 
@@ -846,7 +840,6 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 function insertCommand(command: { id: string; label: string }) {
-  if (command.id === 'wiki') wikiSelected.value = true
   if (command.id === 'file') fileToolsSelected.value = true
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
@@ -867,7 +860,6 @@ function insertCommand(command: { id: string; label: string }) {
 }
 
 function enableTool(id: string) {
-  if (id === 'wiki') wikiSelected.value = true
   if (id === 'file') fileToolsSelected.value = true
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
   if (id === 'media') mediaSelected.value = true
@@ -884,53 +876,41 @@ function disableTool(id: string) {
   if (id === 'terminal') terminalSelected.value = false
 }
 
-function wikiWritePathAllowed(path: string, root: string): boolean {
-  return path === root || path.startsWith(`${root}/`)
-}
-
-function wikiWriteTargetName(resource: ProjectResource): string {
-  const depth = Math.max(0, resource.path.split('/').length - wikiWriteRoot.value.split('/').length - 1)
+function fileWriteTargetName(resource: ProjectResource): string {
+  const depth = Math.max(0, resource.path.split('/').length - 1)
   return `${'  '.repeat(depth)}${resource.isDirectory ? '目录 · ' : '文件 · '}${resource.name}`
 }
 
-async function suggestWikiWrite(turn: ConversationTurn) {
+async function suggestFileWrite(turn: ConversationTurn) {
   const owner = projectOwner.value
   const source = displayTurnContent(turn).trim()
   if (!owner || !source) return
   try {
     const resources = await files.list(owner)
-    const root = ['wiki', 'docs/wiki'].find(candidate => resources.some(resource =>
-      resource.path === candidate || resource.path.startsWith(`${candidate}/`))) || ''
-    if (!root) throw new Error('当前项目没有 Wiki 文件夹')
-    wikiWriteRoot.value = root
-    wikiWriteTargets.value = resources
-      .filter(resource => wikiWritePathAllowed(resource.path, root)
-        && (resource.isDirectory || /\.md$/i.test(resource.path)))
+    fileWriteTargets.value = resources
+      .filter(resource => resource.isDirectory || /\.md$/i.test(resource.path))
       .sort((a, b) => Number(b.isDirectory) - Number(a.isDirectory) || a.path.localeCompare(b.path, 'zh-CN'))
-    wikiWriteSelected.value = null
-    wikiWriteSource.value = source
-    wikiWriteTurnId.value = turn.id
-    wikiWriteOpen.value = true
+    fileWriteSelected.value = null
+    fileWriteSource.value = source
+    fileWriteOpen.value = true
   } catch (cause) {
-    error.value = `打开 Wiki 写入目标失败：${cause instanceof Error ? cause.message : String(cause)}`
+    error.value = `打开文件写入目标失败：${cause instanceof Error ? cause.message : String(cause)}`
   }
 }
 
-function closeWikiWrite() {
-  if (wikiWritePending.value) return
-  wikiWriteOpen.value = false
-  wikiWriteSelected.value = null
-  wikiWriteSource.value = ''
-  wikiWriteTurnId.value = ''
+function closeFileWrite() {
+  if (fileWritePending.value) return
+  fileWriteOpen.value = false
+  fileWriteSelected.value = null
+  fileWriteSource.value = ''
 }
 
-async function commitWikiWrite() {
-  const target = wikiWriteSelected.value
+async function commitFileWrite() {
+  const target = fileWriteSelected.value
   const owner = projectOwner.value
-  const root = wikiWriteRoot.value
-  const source = wikiWriteSource.value.trim()
-  if (!target || !owner || !source || !wikiWritePathAllowed(target.path, root) || wikiWritePending.value) return
-  wikiWritePending.value = true
+  const source = fileWriteSource.value.trim()
+  if (!target || !owner || !source || fileWritePending.value) return
+  fileWritePending.value = true
   error.value = ''
   try {
     let savedPath = target.path
@@ -941,35 +921,32 @@ async function commitWikiWrite() {
         throw new Error('文件名必须是合法的 Markdown 文件名')
       }
       savedPath = `${target.path}/${filename}`
-      await applyMemoryWikiWrite(owner, {
-        kind: 'create',
+      await saveMemoryMarkdown(owner, {
+        mode: 'create',
         path: savedPath,
-        content: `${source}\n`,
-        title: filename.replace(/\.md$/i, ''),
+        content: source,
       }, files)
     } else {
-      await applyMemoryWikiWrite(owner, {
-        kind: 'append',
+      await saveMemoryMarkdown(owner, {
+        mode: 'append',
         path: target.path,
         content: source,
-        idempotencyKey: wikiWriteTurnId.value || `manual-${Date.now()}`,
       }, files)
     }
-    wikiWriteOpen.value = false
-    wikiWriteSelected.value = null
-    wikiWriteSource.value = ''
-    wikiWriteTurnId.value = ''
-    status.value = `已写入 Wiki：${savedPath}`
+    fileWriteOpen.value = false
+    fileWriteSelected.value = null
+    fileWriteSource.value = ''
+    status.value = `已写入文件：${savedPath}`
     const resource = (await files.list(owner)).find(item => item.path === savedPath)
-    if (resource) await openWikiResource(resource)
+    if (resource) await openProjectFile(resource)
   } catch (cause) {
-    error.value = `写入 Wiki 失败：${cause instanceof Error ? cause.message : String(cause)}`
+    error.value = `写入文件失败：${cause instanceof Error ? cause.message : String(cause)}`
   } finally {
-    wikiWritePending.value = false
+    fileWritePending.value = false
   }
 }
 
-function shouldSuggestWikiWrite(turn: ConversationTurn): boolean {
+function shouldSuggestFileWrite(turn: ConversationTurn): boolean {
   return turn.role === 'assistant'
     && turn.id !== 'streaming-assistant'
     && turn.id === latestAssistantTurnId.value
@@ -1130,7 +1107,7 @@ async function send() {
   const active = conversation.value
   const message = input.value.trim()
   const pendingAttachments = attachments.value.slice()
-  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length && !wikiSelected.value) || sending.value || sendInFlight) return
+  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
@@ -1177,7 +1154,6 @@ async function send() {
       attachments: pendingAttachments,
       files: referencedFiles.value,
       selectedSkillNames: selectedSkillNames.value,
-      wikiSelected: wikiSelected.value,
       fileToolsSelected: fileToolsSelected.value,
       selectedMcpToolNames: selectedMcpToolNames.value,
       mediaSelected: mediaSelected.value,
@@ -1203,7 +1179,7 @@ async function send() {
         if (!isCurrentRun()) return
         if (contextNoticeShownConversations.has(active.transcript.id)) return
         contextNoticeShownConversations.add(active.transcript.id)
-        contextNotice.value = '较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。需要长期保留的结论请写入 Wiki。'
+        contextNotice.value = '较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。需要长期保留的结论请保存到项目文件。'
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false
@@ -1322,16 +1298,6 @@ function memoryToolApprovalMessage(call: DirectToolCall): string {
   if (call.function.name === 'terminal') return String(args.reason || '').split(/[。；;\n]/)[0]?.trim().slice(0, 24) || '执行本机命令'
   if (call.function.name === 'export_3d_scene_video') return '调用本机 FFmpeg 导出 MP4'
   if (call.function.name === 'delete') return `删除项目资源：${String(args.path || '')}`
-  if (call.function.name === 'wiki') {
-    try {
-      const operations = Array.isArray(args.operations) ? args.operations as Array<Record<string, unknown>> : []
-      if (operations.some(operation => operation.kind === 'replace' && operation.replaceAll === true)) {
-        const path = String(operations.find(operation => operation.kind === 'replace' && operation.replaceAll === true)?.path || '')
-        return `确认将 Wiki 文件中的所有匹配项替换：${path}`
-      }
-    } catch { /* malformed arguments are reported by the tool */ }
-    return '修改项目 Wiki'
-  }
   if (call.function.name === 'write' || call.function.name === 'edit') return `修改项目外文件：${String(args.path || '')}`
   return '允许扩展工具继续操作'
 }
@@ -1370,8 +1336,6 @@ function updateRunTool(event: DirectToolExecutionEvent) {
 function memoryToolLabel(name: string): string {
   return ({
     skill: '加载 Skill',
-    wiki: '检查 Wiki',
-    wiki_search: '搜索 Wiki',
     read: '读取文件',
     glob: '查找文件',
     grep: '搜索内容',
@@ -2353,7 +2317,7 @@ function readDataUrl(file: File): Promise<string> {
           <MemoryMarkdown
             v-if="displayTurnContent(turn)"
             class="memory-message-text memory-markdown markdown-body"
-            :data-wiki-source="conversation?.resource.path"
+            :data-file-source="conversation?.resource.path"
             :content="displayTurnContent(turn)"
             :render-id="turn.id"
             :streaming="turn.id === 'streaming-assistant'"
@@ -2376,7 +2340,7 @@ function readDataUrl(file: File): Promise<string> {
             <small v-else-if="programStatusFor(turn.id)?.reason">{{ programStatusFor(turn.id)?.reason }}</small>
           </div>
           <div
-            v-if="(turn.id !== 'streaming-assistant' && displayTurnContent(turn)) || turn.role === 'user' || shouldSuggestWikiWrite(turn)"
+            v-if="(turn.id !== 'streaming-assistant' && displayTurnContent(turn)) || turn.role === 'user' || shouldSuggestFileWrite(turn)"
             class="memory-message-actions"
           >
             <button
@@ -2397,12 +2361,12 @@ function readDataUrl(file: File): Promise<string> {
               @click="copyTurn(turn)"
             ><JcIcon :name="copiedTurnId === turn.id ? 'check' : 'content-copy'" /></button>
             <button
-              v-if="shouldSuggestWikiWrite(turn)"
-              class="memory-wiki-suggest"
+              v-if="shouldSuggestFileWrite(turn)"
+              class="memory-file-suggest"
               type="button"
-              title="把这条回答整理后写入 Wiki"
-              @click="suggestWikiWrite(turn)"
-            ><JcIcon name="save" /><span>写入 Wiki</span></button>
+              title="把这条回答保存到项目文件"
+              @click="suggestFileWrite(turn)"
+            ><JcIcon name="save" /><span>保存到文件</span></button>
           </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
@@ -2473,15 +2437,11 @@ function readDataUrl(file: File): Promise<string> {
       />
 
       <footer v-if="conversation" class="memory-composer">
-        <div v-if="selectedSkillNames.length || wikiSelected || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
+        <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name">{{ name }}</span>
             <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
-          </div>
-          <div v-if="wikiSelected" class="memory-attachment-chip">
-            <JcIcon name="menu_book" /><span class="memory-attachment-name">@Wiki</span>
-            <button title="移除 Wiki" :disabled="sending" @click="wikiSelected = false">×</button>
           </div>
           <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
@@ -2580,7 +2540,7 @@ function readDataUrl(file: File): Promise<string> {
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length && !wikiSelected" @click="send"><JcIcon name="arrow-upward" /></button>
+            <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
       </footer>
@@ -2624,7 +2584,7 @@ function readDataUrl(file: File): Promise<string> {
         <div v-else-if="previewResource.type === 'editor'" class="memory-document">
           <MemoryMarkdown v-if="!editingMarkdown"
             class="memory-markdown markdown-body"
-            :data-wiki-source="previewResource.resource.path"
+            :data-file-source="previewResource.resource.path"
             :content="previewResource.text.content"
             :render-id="previewResource.resource.path"
             :outline="/\.md$/i.test(previewResource.resource.path)"
@@ -2643,7 +2603,7 @@ function readDataUrl(file: File): Promise<string> {
           <p v-if="markdownSaveError" class="memory-editor-error">{{ markdownSaveError }}</p>
           <section v-if="backlinks.length" class="memory-backlinks">
             <h2>被以下文件引用</h2>
-            <button v-for="source in backlinks" :key="source.path" type="button" @click="openWikiResource(source)">{{ source.path }}</button>
+            <button v-for="source in backlinks" :key="source.path" type="button" @click="openProjectFile(source)">{{ source.path }}</button>
           </section>
         </div>
         <div v-else-if="previewResource.type === 'media'" class="memory-media">
@@ -2683,28 +2643,28 @@ function readDataUrl(file: File): Promise<string> {
       />
     </aside>
     <Teleport to="body">
-      <div v-if="wikiWriteOpen" class="memory-wiki-write-backdrop" @click.self="closeWikiWrite">
-        <section class="memory-wiki-write-dialog" role="dialog" aria-modal="true" aria-label="选择 Wiki 写入位置">
+      <div v-if="fileWriteOpen" class="memory-file-write-backdrop" @click.self="closeFileWrite">
+        <section class="memory-file-write-dialog" role="dialog" aria-modal="true" aria-label="选择文件写入位置">
           <header>
-            <strong>选择 Wiki 写入位置</strong>
-            <button class="icon-button" type="button" title="关闭" aria-label="关闭" :disabled="wikiWritePending" @click="closeWikiWrite"><JcIcon name="close" /></button>
+            <strong>选择文件写入位置</strong>
+            <button class="icon-button" type="button" title="关闭" aria-label="关闭" :disabled="fileWritePending" @click="closeFileWrite"><JcIcon name="close" /></button>
           </header>
-          <p class="memory-wiki-write-hint">选择 Markdown 文件追加，或选择文件夹新建文件。</p>
-          <div class="memory-wiki-write-list">
+          <p class="memory-file-write-hint">选择 Markdown 文件追加，或选择文件夹新建文件。</p>
+          <div class="memory-file-write-list">
             <button
-              v-for="resource in wikiWriteTargets"
+              v-for="resource in fileWriteTargets"
               :key="resource.path"
               type="button"
-              class="memory-wiki-write-target"
-              :class="{ selected: wikiWriteSelected?.path === resource.path }"
-              @click="wikiWriteSelected = resource"
-            >{{ wikiWriteTargetName(resource) }}</button>
-            <p v-if="!wikiWriteTargets.length" class="memory-model-empty">没有可写入的 Markdown 文件或文件夹</p>
+              class="memory-file-write-target"
+              :class="{ selected: fileWriteSelected?.path === resource.path }"
+              @click="fileWriteSelected = resource"
+            >{{ fileWriteTargetName(resource) }}</button>
+            <p v-if="!fileWriteTargets.length" class="memory-model-empty">没有可写入的 Markdown 文件或文件夹</p>
           </div>
           <footer>
-            <button type="button" class="memory-editing-cancel" :disabled="wikiWritePending" @click="closeWikiWrite">取消</button>
-            <button type="button" class="send-button memory-wiki-write-submit" :disabled="!wikiWriteSelected || wikiWritePending" title="确认写入" @click="commitWikiWrite">
-              <JcIcon :name="wikiWritePending ? 'sync' : 'save'" :class="{ spinning: wikiWritePending }" />
+            <button type="button" class="memory-editing-cancel" :disabled="fileWritePending" @click="closeFileWrite">取消</button>
+            <button type="button" class="send-button memory-file-write-submit" :disabled="!fileWriteSelected || fileWritePending" title="确认写入" @click="commitFileWrite">
+              <JcIcon :name="fileWritePending ? 'sync' : 'save'" :class="{ spinning: fileWritePending }" />
             </button>
           </footer>
         </section>
@@ -2816,17 +2776,17 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-message-edit { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-wiki-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
-.memory-wiki-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
-.memory-wiki-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
-.memory-wiki-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
-.memory-wiki-write-dialog > header, .memory-wiki-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.memory-wiki-write-dialog > footer { justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); border-bottom: 0; }
-.memory-wiki-write-hint { margin: 0; padding: 10px 12px 6px; color: var(--ink3); font-size: 12px; }
-.memory-wiki-write-list { max-height: min(480px, 58vh); overflow-y: auto; padding: 4px 8px 10px; }
-.memory-wiki-write-target { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 13px; text-align: left; white-space: pre; }
-.memory-wiki-write-target:hover, .memory-wiki-write-target.selected { background: color-mix(in srgb, var(--olive) 14%, transparent); color: var(--olive); }
-.memory-wiki-write-submit { border-color: var(--olive); background: var(--olive); color: white; }
+.memory-file-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-file-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
+.memory-file-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
+.memory-file-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
+.memory-file-write-dialog > header, .memory-file-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.memory-file-write-dialog > footer { justify-content: flex-end; gap: 8px; border-top: 1px solid var(--line); border-bottom: 0; }
+.memory-file-write-hint { margin: 0; padding: 10px 12px 6px; color: var(--ink3); font-size: 12px; }
+.memory-file-write-list { max-height: min(480px, 58vh); overflow-y: auto; padding: 4px 8px 10px; }
+.memory-file-write-target { display: block; width: 100%; padding: 8px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 13px; text-align: left; white-space: pre; }
+.memory-file-write-target:hover, .memory-file-write-target.selected { background: color-mix(in srgb, var(--olive) 14%, transparent); color: var(--olive); }
+.memory-file-write-submit { border-color: var(--olive); background: var(--olive); color: white; }
 .memory-media-plan-link { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; margin-top: 8px; padding: 0 10px; border: 1px solid color-mix(in srgb, var(--olive) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 6%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-media-plan-link:hover { border-color: var(--olive); }
 .memory-media-plan-link .mso { color: var(--olive); }

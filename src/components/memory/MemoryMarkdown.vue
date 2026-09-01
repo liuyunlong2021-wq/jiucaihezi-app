@@ -2,7 +2,7 @@
 import { nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { renderMessageMarkdown } from '@/components/chat/display/markdownDisplayPolicy'
 import { renderStreamingText } from '@/components/chat/display/streamingTextRenderer'
-import { renderWikiLinks } from '@/runtime/memory/markdownLinks'
+import { renderMarkdownFileLinks } from '@/runtime/memory/markdownFileLinks'
 import { renderMermaidBlocks } from '@/utils/mermaidRenderer'
 
 const props = withDefaults(defineProps<{ content: string; renderId: string; streaming?: boolean; outline?: boolean }>(), {
@@ -38,7 +38,7 @@ async function render() {
   const current = ++generation
   const base = props.streaming
     ? renderStreamingText(props.content)
-    : renderMessageMarkdown(renderWikiLinks(props.content), 'assistant')
+    : renderMessageMarkdown(renderMarkdownFileLinks(props.content), 'assistant')
   html.value = base
   if (!props.streaming) html.value = await renderMermaidBlocks(base, props.renderId.replace(/[^a-z0-9_-]/gi, '-'))
   if (current !== generation) return

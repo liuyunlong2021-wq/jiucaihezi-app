@@ -3,11 +3,6 @@ import {
   flattenProjectResourceChange,
   type ProjectFileService,
 } from '@/services/projectFileService'
-import {
-  executeWikiAction,
-  type WikiOperation,
-  type WikiWorkspace,
-} from '@/runtime/direct/wikiRuntime'
 import type { ProjectResource } from '@/utils/projectResource'
 import {
   MEMORY_MEDIA_DIRECTORIES,
@@ -45,7 +40,7 @@ export async function inspectMemoryProject(
 ): Promise<MemoryProjectState> {
   const resources = await files.list(owner)
   const hasTree = (path: string) => resources.some(resource => resource.path === path || resource.path.startsWith(`${path}/`))
-  const initialized = (hasTree('wiki') || hasTree('docs/wiki')) && hasTree(CONVERSATION_DIRECTORY)
+  const initialized = hasTree(CONVERSATION_DIRECTORY)
   if (initialized) {
     await ensureMemoryDirectories(owner, files, resources)
     await migrateLegacyMemoryMaterials(owner, files)
@@ -60,7 +55,6 @@ export async function initializeMemoryProject(
   owner: string,
   files: ProjectFileService = createRuntimeProjectFileService(),
 ): Promise<void> {
-  await executeWikiAction(projectWikiWorkspace(owner, files), { action: 'scaffold', type: 'generic' })
   await ensureMemoryDirectories(owner, files)
   await migrateLegacyMemoryMaterials(owner, files)
 }
@@ -184,59 +178,32 @@ async function mutateConversation(
   throw new Error('对话记录正在其他窗口更新，请重试')
 }
 
-export async function applyMemoryWikiWrite(
+export async function saveMemoryMarkdown(
   owner: string,
-  operation: Extract<WikiOperation, { kind: 'create' | 'append' }>,
+  input: { path: string; content: string; mode: 'create' | 'append' },
   files: ProjectFileService = createRuntimeProjectFileService(),
 ): Promise<void> {
-  await executeWikiAction(projectWikiWorkspace(owner, files), {
-    action: 'apply',
-    operations: [operation],
-    reason: '用户确认将模型回复写入 Wiki',
-    basis: ['用户点击“写入 Wiki”并选择目标'],
-  })
-}
-
-function projectWikiWorkspace(owner: string, files: ProjectFileService): WikiWorkspace {
-  return {
-    async list() {
-      return (await files.list(owner)).map(resource => ({
-        path: resource.path,
-        isDir: resource.isDirectory,
-      }))
-    },
-    async read(path) {
-      const resource = await findResource(owner, path, files)
-      return (await files.readText(resource)).content
-    },
-    async fingerprint(path) {
-      return await files.hashFile(await findResource(owner, path, files))
-    },
-    async write(path, content) {
-      const existing = (await files.list(owner)).find(resource => resource.path === path)
-      if (!existing) {
-        await files.createText(owner, path, content)
-        return
-      }
-      const current = await files.readText(existing)
-      const result = await files.writeText(existing, content, current.revision)
-      if (result.status !== 'saved') throw new Error(`Wiki 文件写入冲突: ${path}`)
-    },
-    async createDirectory(path) {
-      await files.createFolder(owner, path)
-    },
-    async remove(path) {
-      const resource = (await files.list(owner)).find(item => item.path === path)
-      if (!resource) throw new Error(`路径不存在: ${path}`)
-      await files.remove(resource)
-    },
+  const path = String(input.path || '').replace(/\\/g, '/').replace(/^\/+/, '')
+  const content = String(input.content || '').trim()
+  if (!path || !/\.md$/i.test(path) || path.split('/').some(part => !part || part === '.' || part === '..'))
+    throw new Error('目标必须是项目内 Markdown 文件')
+  if (!content) throw new Error('写入内容不能为空')
+  const existing = (await files.list(owner)).find(resource => resource.path === path)
+  if (!existing) {
+    if (input.mode !== 'create') throw new Error(`文件不存在: ${path}`)
+    await files.createText(owner, path, `${content}\n`)
+    return
   }
-}
-
-async function findResource(owner: string, path: string, files: ProjectFileService): Promise<ProjectResource> {
-  const resource = (await files.list(owner)).find(item => item.path === path)
-  if (!resource || resource.isDirectory) throw new Error(`文件不存在: ${path}`)
-  return resource
+  if (existing.isDirectory) throw new Error(`目标不是文件: ${path}`)
+  if (input.mode === 'create') throw new Error(`文件已存在: ${path}`)
+  for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+    const current = await files.readText(existing)
+    const next = `${current.content.trimEnd()}\n\n${content}\n`
+    const result = await files.writeText(existing, next, current.revision)
+    if (result.status === 'saved') return
+    if (result.status === 'missing') throw new Error(`文件不存在: ${path}`)
+  }
+  throw new Error('文件正在其他窗口更新，请重试')
 }
 
 function uniqueId(prefix: string): string {

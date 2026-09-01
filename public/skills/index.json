@@ -2,7 +2,7 @@
   {
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
-    "description": "Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, Wiki, synchronization, attachments, or model selection. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子 Wiki、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、jc-new-user-guide.",
+    "description": "Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, project files, synchronization, attachments, or model selection. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子文件、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、jc-new-user-guide.",
     "triggers": [],
     "commands": [],
     "files": [
@@ -63,17 +63,6 @@
       "scripts/run_eval.py",
       "scripts/run_loop.py",
       "scripts/utils.py"
-    ]
-  },
-  {
-    "id": "wiki-creator",
-    "name": "wiki-creator",
-    "description": "Use when a user wants to create, initialize, restructure, or take over a local Markdown Wiki from documents or an existing folder. Design a short wiki/index.md, only the necessary section indexes and confirmed initial pages, then submit one WikiCreatePlan for native validation and confirmed batch writing. Do not use for ordinary Wiki queries, routine edits, or creative writing.",
-    "triggers": [],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "references/wiki-architecture.md"
     ]
   }
 ]

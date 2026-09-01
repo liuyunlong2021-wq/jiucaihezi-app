@@ -476,6 +476,7 @@ export const useAgentStore = defineStore('agents', () => {
       name: parsed.name || skill.name,
       description: parsed.description || skill.description || '',
       triggers: parsed.triggers || [],
+      allowedTools: parsed.allowedTools || [],
       skillContent: parsed.skillContent || skillMd,
       references: [],
       examples: [],
