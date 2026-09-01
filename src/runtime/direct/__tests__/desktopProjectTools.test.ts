@@ -118,7 +118,7 @@ test('creative tool definitions append connected MCP tools without changing core
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'conversation_memory_query', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,

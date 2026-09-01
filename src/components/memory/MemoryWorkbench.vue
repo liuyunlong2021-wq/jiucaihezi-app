@@ -24,8 +24,10 @@ import {
   inspectMemoryProject,
   renameMemoryConversation,
   replaceMemoryRound,
+  writeConversationMemoryIndex,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
+import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -111,6 +113,10 @@ const fileWriteTargets = ref<ProjectResource[]>([])
 const fileWriteSelected = ref<ProjectResource | null>(null)
 const fileWriteSource = ref('')
 const fileWritePending = ref(false)
+type MemoryIndexState = 'idle' | 'writing' | 'success' | 'error'
+const memoryIndexStates = ref<Record<string, MemoryIndexState>>({})
+const memoryIndexErrors = ref<Record<string, string>>({})
+const memoryIndexPaths = ref<Record<string, string>>({})
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
@@ -946,6 +952,32 @@ async function commitFileWrite() {
   }
 }
 
+async function writeMemoryIndex(turn: ConversationTurn) {
+  const active = conversation.value
+  const owner = projectOwner.value
+  if (!active || !owner || turn.role !== 'assistant' || memoryIndexStates.value[turn.id] === 'writing' || memoryIndexStates.value[turn.id] === 'success') return
+  const index = active.transcript.turns.findIndex(item => item.id === turn.id)
+  if (index < 0) { error.value = '这条回答已不存在或已被编辑'; return }
+  memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'writing' }
+  memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: '' }
+  error.value = ''
+  try {
+    const summary = await generateConversationMemorySummary({ modelId: agentStore.currentModel, assistantTurn: turn })
+    const path = await writeConversationMemoryIndex(owner, { conversationId: active.transcript.id, rawPath: active.resource.path, assistantTurnId: turn.id, runtime: active.resource.runtime }, summary, files)
+    memoryIndexPaths.value = { ...memoryIndexPaths.value, [turn.id]: path }
+    memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'success' }
+    status.value = `已写入 Wiki：${path}`
+  } catch (cause) {
+    const message = cause instanceof Error ? cause.message : String(cause)
+    memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'error' }
+    memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: message }
+  }
+}
+
+function shouldSuggestMemoryIndex(turn: ConversationTurn): boolean {
+  return turn.role === 'assistant' && turn.id !== 'streaming-assistant' && Boolean(displayTurnContent(turn).trim())
+}
+
 function shouldSuggestFileWrite(turn: ConversationTurn): boolean {
   return turn.role === 'assistant'
     && turn.id !== 'streaming-assistant'
@@ -1147,6 +1179,7 @@ async function send() {
     )
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
+      conversationId: active.transcript.id,
       conversationTurns: editTargetId ? baseTurns : active.transcript.turns,
       userTurn,
       modelId: agentStore.currentModel,
@@ -1179,7 +1212,7 @@ async function send() {
         if (!isCurrentRun()) return
         if (contextNoticeShownConversations.has(active.transcript.id)) return
         contextNoticeShownConversations.add(active.transcript.id)
-        contextNotice.value = '较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。需要长期保留的结论请保存到项目文件。'
+        contextNotice.value = '点击“写入 Wiki”保存这条记忆，之后使用 @jiyiskill 即可精准找回相关内容。'
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false
@@ -2367,6 +2400,16 @@ function readDataUrl(file: File): Promise<string> {
               title="把这条回答保存到项目文件"
               @click="suggestFileWrite(turn)"
             ><JcIcon name="save" /><span>保存到文件</span></button>
+            <button
+              v-if="shouldSuggestMemoryIndex(turn)"
+              class="memory-index-suggest"
+              :class="`state-${memoryIndexStates[turn.id] || 'idle'}`"
+              type="button"
+              :disabled="memoryIndexStates[turn.id] === 'writing' || memoryIndexStates[turn.id] === 'success'"
+              :title="memoryIndexStates[turn.id] === 'error' ? `写入 Wiki 失败：${memoryIndexErrors[turn.id] || '请重试'}` : memoryIndexPaths[turn.id] ? `已写入 Wiki：${memoryIndexPaths[turn.id]}` : '写入 Wiki'"
+              @click="writeMemoryIndex(turn)"
+            ><JcIcon :name="memoryIndexStates[turn.id] === 'writing' ? 'sync' : memoryIndexStates[turn.id] === 'error' ? 'error' : 'save'" :class="{ spinning: memoryIndexStates[turn.id] === 'writing' }" /><span>{{ memoryIndexStates[turn.id] === 'writing' ? '正在写入 Wiki' : memoryIndexStates[turn.id] === 'success' ? '已写入 Wiki' : memoryIndexStates[turn.id] === 'error' ? '写入 Wiki 失败，重试' : '写入 Wiki' }}</span></button>
+            <small v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-error">{{ memoryIndexErrors[turn.id] || '请重试' }}</small>
           </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
@@ -2474,6 +2517,7 @@ function readDataUrl(file: File): Promise<string> {
           <div class="memory-run-head">
             <JcIcon :name="error ? 'error' : status === '已完成' ? 'check_circle' : status === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !error }" />
             <strong>{{ status }}</strong>
+            <small v-if="runMetrics" class="memory-run-metrics">{{ formatRunMetrics(runMetrics) }}</small>
             <span>{{ formatRunElapsed(runElapsed) }}</span>
           </div>
           <div v-if="(sending || error) && visibleRunSteps.length" class="memory-run-steps">
@@ -2483,7 +2527,6 @@ function readDataUrl(file: File): Promise<string> {
               <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
             </div>
           </div>
-          <small v-if="runMetrics" class="memory-run-metrics">{{ formatRunMetrics(runMetrics) }}</small>
           <small v-if="error">{{ error }}</small>
         </div>
         <ToolApprovalStrip
@@ -2493,7 +2536,10 @@ function readDataUrl(file: File): Promise<string> {
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error) }">{{ error || status }}</div>
+        <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error), success: !error && status.startsWith('已写入 Wiki') }">
+          <JcIcon v-if="!error && status.startsWith('已写入 Wiki')" name="check_circle" />
+          <span>{{ error || status }}</span>
+        </div>
         <div
           class="memory-input-row"
           data-project-drop-target="chat"
@@ -2778,6 +2824,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-file-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-file-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
+.memory-index-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-index-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
+.memory-index-suggest:disabled { opacity: .65; cursor: wait; }
+.memory-index-suggest.state-success { border-color: color-mix(in srgb, var(--olive) 58%, var(--line)); background: color-mix(in srgb, var(--olive) 16%, var(--paper)); }
+.memory-index-suggest.state-error { border-color: color-mix(in srgb, #b34a4a 52%, var(--line)); background: color-mix(in srgb, #b34a4a 8%, var(--paper)); color: #a13f3f; cursor: pointer; }
+.memory-index-suggest.state-error:hover { border-color: #b34a4a; background: color-mix(in srgb, #b34a4a 14%, var(--paper)); }
+.memory-index-error { max-width: 260px; color: #a13f3f; font-size: 11px; }
 .memory-file-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
 .memory-file-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
 .memory-file-write-dialog > header, .memory-file-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
@@ -2838,22 +2891,24 @@ function readDataUrl(file: File): Promise<string> {
 .send-button:disabled { opacity: .4; cursor: default; }
 .memory-status { padding: 6px 12px 0; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-status.error { color: var(--danger); }
+.memory-status.success { display: flex; min-width: 0; align-items: center; gap: 7px; margin: 7px 10px 0; padding: 8px 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--olive) 34%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 13%, var(--paper)); color: var(--olive); white-space: nowrap; }
+.memory-status.success span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .memory-context-notice { display: flex; align-items: flex-start; gap: 8px; margin: 7px 10px 0; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
 .memory-context-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .memory-context-notice button { display: grid; width: 22px; height: 22px; flex: 0 0 22px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }
 .memory-run-status { margin: 7px 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
-.memory-run-head { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; align-items: center; gap: 6px; }
-.memory-run-head strong { overflow-wrap: anywhere; color: var(--ink1); font-weight: 600; }
+.memory-run-head { display: flex; min-width: 0; align-items: center; gap: 6px; white-space: nowrap; }
+.memory-run-head strong { flex: 0 0 auto; color: var(--ink1); font-weight: 600; }
 .memory-run-head > span { color: var(--ink3); font-variant-numeric: tabular-nums; }
 .memory-run-status .mso { font-size: 15px; }
 .memory-run-status .spinning { animation: memory-run-spin .9s linear infinite; }
 .memory-run-steps { display: grid; gap: 4px; margin: 7px 0 0 24px; }
 .memory-run-steps > div { display: grid; grid-template-columns: 17px minmax(0, 1fr) auto; align-items: center; gap: 4px; color: var(--ink3); }
 .memory-run-steps em { font-style: normal; font-variant-numeric: tabular-nums; }
-.memory-run-metrics { color: var(--ink3); font-variant-numeric: tabular-nums; }
+.memory-run-metrics { min-width: 0; flex: 1; overflow: hidden; margin: 0; color: var(--ink3); font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .memory-run-steps > div.running { color: var(--ink1); }
 .memory-run-steps > div.failed, .memory-run-status.error, .memory-run-status.error strong { color: var(--danger); }
-.memory-run-status small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }
+.memory-run-status > small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }
 @keyframes memory-run-spin { to { transform: rotate(360deg); } }
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }
 .memory-attachment-chip { display: flex; height: 34px; max-width: 240px; align-items: center; gap: 5px; padding: 0 7px; box-sizing: border-box; border-radius: 5px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); }

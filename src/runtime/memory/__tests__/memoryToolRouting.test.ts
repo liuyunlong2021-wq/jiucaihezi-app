@@ -15,6 +15,7 @@ import { parseSkillMd, type SkillConfig } from '@/types/skill'
 import {
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
+  CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION,
 } from '@/runtime/direct/creativeToolContract'
 
 const tools = [
@@ -40,6 +41,14 @@ test('knowledge files use the ordinary file tool set', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], true).map(tool => tool.function.name),
     ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
+  )
+})
+
+test('conversation memory query is available only when its Skill is selected', () => {
+  assert.deepEqual(
+    selectMemoryTools([...tools, CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION], ['jc-jiyi'])
+      .map(tool => tool.function.name),
+    ['conversation_memory_query'],
   )
 })
 

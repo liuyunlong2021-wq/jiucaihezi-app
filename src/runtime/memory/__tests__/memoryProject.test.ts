@@ -5,11 +5,12 @@ import { createProjectFileService, type ProjectFileAdapter, type ProjectFileEntr
 import { MEMORY_PROJECT_SKELETON_DIRECTORIES } from '@/utils/memoryProjectPaths'
 import {
   CONVERSATION_DIRECTORY,
+  appendConversationTurn,
   createConversationTranscript,
   parseConversationTranscript,
   type ConversationTurn,
 } from '../conversationTranscript'
-import { appendMemoryRound, initializeMemoryProject, listMemoryConversations, saveMemoryMarkdown } from '../memoryProject'
+import { appendMemoryRound, initializeMemoryProject, listMemoryConversations, saveMemoryMarkdown, writeConversationMemoryIndex } from '../memoryProject'
 
 test('memory project initialization creates the complete protected skeleton', async () => {
   const entries = new Map<string, ProjectFileEntry>()
@@ -108,6 +109,38 @@ test('appendMemoryRound is idempotent for the same user turn', async () => {
     ['user', '继续任务'],
     ['assistant', '已完成'],
   ])
+})
+
+test('conversation memory index creates one record for a saved assistant turn', async () => {
+  const path = `${CONVERSATION_DIRECTORY}/conversation-index.md`
+  let content = createConversationTranscript('conversation-index')
+  content = appendConversationTurn(content, { id: 'u1', role: 'user', content: '问题', createdAt: '2026-08-09T00:00:00.000Z' })
+  content = appendConversationTurn(content, { id: 'a1', role: 'assistant', content: '回答', createdAt: '2026-08-09T00:00:01.000Z' })
+  const entries = new Map<string, ProjectFileEntry>([[path, { path, isDirectory: false, content }]])
+  let rawReads = 0
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { throw new Error('V2 write must not list files') },
+    async readText(_owner, target) {
+      const entry = entries.get(target)
+      if (!entry || entry.isDirectory) throw new Error('missing')
+      if (target === path) rawReads += 1
+      const text = String(entry.content || '')
+      return { content: text, size: text.length, truncated: false, revision: { value: target, size: text.length } }
+    },
+    async createText(_owner, target, text) { const entry = { path: target, isDirectory: false, content: text }; entries.set(target, entry); return entry },
+    async createFolder(_owner, target) { const entry = { path: target, isDirectory: true }; entries.set(target, entry); return entry },
+    async writeText(_owner, target, text) { const entry = entries.get(target); if (!entry) return { status: 'missing' as const }; entry.content = text; return { status: 'saved' as const, revision: { value: target, size: text.length } } },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  const files = createProjectFileService(adapter)
+  await writeConversationMemoryIndex('project', { conversationId: 'conversation-index', rawPath: path, assistantTurnId: 'a1', runtime: 'web' }, { summary: '简介', keywords: ['索引'] }, files)
+  await writeConversationMemoryIndex('project', { conversationId: 'conversation-index', rawPath: path, assistantTurnId: 'a1', runtime: 'web' }, { summary: '更新', keywords: ['索引'] }, files)
+  const index = entries.get('.raw/记忆索引/conversation-index.md')?.content || ''
+  assert.equal((index.match(/^- 简介：/gm) || []).length, 1)
+  assert.match(index, /简介：更新/)
+  assert.equal(rawReads, 0)
 })
 
 test('listMemoryConversations orders by latest activity', async () => {

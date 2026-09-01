@@ -30,6 +30,7 @@ const wave1FocusedTests = [
   'src/components/memory/__tests__/memoryWorkbench.test.ts',
   'src/runtime/memory/__tests__/markdownFileLinks.test.ts',
   'src/runtime/memory/__tests__/conversationTranscript.test.ts',
+  'src/runtime/memory/__tests__/conversationMemoryIndex.test.ts',
   'src/runtime/memory/__tests__/memoryProject.test.ts',
   'src/runtime/memory/__tests__/memoryToolRouting.test.ts',
   'src/runtime/memory/__tests__/memoryToolPolicy.test.ts',

@@ -8,6 +8,7 @@ import {
   MEMORY_MEDIA_DIRECTORIES,
   MEMORY_PROJECT_SKELETON_DIRECTORIES,
   memoryMediaDirectoryFor,
+  MEMORY_INDEX_DIRECTORY,
 } from '@/utils/memoryProjectPaths'
 
 import {
@@ -21,6 +22,7 @@ import {
   type ConversationTranscript,
   type ConversationTurn,
 } from './conversationTranscript'
+import { conversationMemoryIndexPath, upsertConversationMemoryIndex, type ConversationMemoryIndexInput, type ConversationMemorySummary } from './conversationMemoryIndex'
 
 const MAX_WRITE_ATTEMPTS = 3
 
@@ -204,6 +206,39 @@ export async function saveMemoryMarkdown(
     if (result.status === 'missing') throw new Error(`文件不存在: ${path}`)
   }
   throw new Error('文件正在其他窗口更新，请重试')
+}
+
+export async function writeConversationMemoryIndex(
+  owner: string,
+  input: ConversationMemoryIndexInput,
+  summary: ConversationMemorySummary,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+): Promise<string> {
+  const path = conversationMemoryIndexPath(input.conversationId)
+  const indexResource: ProjectResource = {
+    runtime: input.runtime || 'web', owner, path, name: path.split('/').pop() || path, isDirectory: false, kind: 'document',
+  }
+  let current: Awaited<ReturnType<ProjectFileService['readTextAt']>> | null = null
+  try { current = await files.readTextAt(owner, path) } catch { current = null }
+  if (!current) {
+    try {
+      await files.createText(owner, path, upsertConversationMemoryIndex('', input, summary))
+      return path
+    } catch {
+      try { await files.createFolder(owner, MEMORY_INDEX_DIRECTORY) } catch { /* already exists */ }
+      await files.createText(owner, path, upsertConversationMemoryIndex('', input, summary))
+      return path
+    }
+  }
+  for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+    const next = upsertConversationMemoryIndex(current.content, input, summary)
+    if (next === current.content) return path
+    const result = await files.writeText(indexResource, next, current.revision)
+    if (result.status === 'saved') return path
+    if (result.status === 'missing') throw new Error('记忆索引文件已被删除')
+    try { current = await files.readTextAt(owner, path) } catch { break }
+  }
+  throw new Error('记忆索引正在其他窗口更新，请重试')
 }
 
 function uniqueId(prefix: string): string {

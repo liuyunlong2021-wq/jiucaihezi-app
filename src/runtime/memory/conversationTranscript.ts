@@ -86,6 +86,7 @@ export function appendConversationTurn(content: string, turn: ConversationTurn):
   if (!turn.id || !turn.content.trim()) throw new Error('对话 turn 不完整')
   const heading = turn.role === 'user' ? '用户' : '助手'
   const block = [
+    `<a id="jc-turn-${attribute(turn.id)}"></a>`,
     `<!-- jc:turn id="${attribute(turn.id)}" role="${turn.role}" created-at="${attribute(turn.createdAt)}"${serializeAttachments(turn.attachments)} -->`,
     `## ${heading}`,
     '',

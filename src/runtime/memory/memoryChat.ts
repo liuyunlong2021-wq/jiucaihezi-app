@@ -1,4 +1,5 @@
 import { useAgentStore } from '@/stores/agentStore'
+import { createRuntimeProjectFileService } from '@/services/projectFileService'
 import {
   buildChatCompletionExtras,
   buildHeaders,
@@ -34,6 +35,7 @@ import {
 } from '@/runtime/direct/webProjectTools'
 import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
+import { queryConversationMemoryIndex } from './conversationMemoryIndex'
 import {
   buildMemoryDesktopToolDefinitions,
   parseCreativeToolArguments,
@@ -71,6 +73,7 @@ import { describeToolDefinition, searchToolDefinitions } from '@/runtime/direct/
 
 export interface MemoryChatInput {
   projectId?: string
+  conversationId?: string
   conversationTurns: ConversationTurn[]
   userTurn: ConversationTurn
   modelId: string
@@ -141,6 +144,7 @@ export function selectMemoryTools(
   skillAllowedToolNames: string[] = [],
 ): any[] {
   const allowed = new Set<string>()
+  if (selectedSkillNames.includes('jc-jiyi')) allowed.add('conversation_memory_query')
   if (knowledgeFilesSelected)
     for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
       allowed.add(name)
@@ -395,6 +399,21 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
 
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
+    if (call.function.name === 'conversation_memory_query') {
+      if (!allowedMemoryToolNames.has(call.function.name))
+        return { content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }), status: 'failed' as const }
+      const args = parseCreativeToolArguments(call)
+      if (!input.projectId || !input.conversationId) throw new Error('当前对话未绑定项目或 conversation ID')
+      return {
+        content: JSON.stringify(await queryConversationMemoryIndex(
+          input.projectId,
+          input.conversationId,
+          String(args.query || ''),
+          createRuntimeProjectFileService(),
+          Number(args.limit) || 5,
+        )),
+      }
+    }
     if (call.function.name === 'tool_search') {
       const args = parseCreativeToolArguments(call)
       return {

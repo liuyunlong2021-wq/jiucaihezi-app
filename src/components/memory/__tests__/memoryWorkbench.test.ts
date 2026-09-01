@@ -415,8 +415,10 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   )
   assert.match(
     workbench,
-    /较早的对话已退出本轮直接上下文，但仍完整保存在 Raw 中。[\s\S]*长期保留的结论请保存到项目文件/,
+    /点击“写入 Wiki”保存这条记忆，之后使用 @jiyiskill 即可精准找回相关内容/,
   )
+  assert.match(workbench, /memory-status.*success: !error && status\.startsWith\('已写入 Wiki'\)/)
+  assert.match(workbench, /v-if="!error && status\.startsWith\('已写入 Wiki'\)" name="check_circle"/)
   assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{/)
 })
