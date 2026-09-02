@@ -2391,9 +2391,11 @@ test(
       markPollStarted = resolve
     })
     let offSettled: () => void = () => {}
+    let activeAtSettled = true
     const settled = new Promise<string>(resolve => {
       offSettled = eventBus.onEvent('media-task-settled', payload => {
         if ((payload as { taskId?: string }).taskId === 'mtask_restore_by_poll_url') {
+          activeAtSettled = store.isTaskActive('mtask_restore_by_poll_url')
           resolve(String((payload as { status?: string }).status || ''))
         }
       })
@@ -2435,6 +2437,7 @@ test(
         await store.init()
         await pollStarted
         assert.equal(await settled, 'success')
+        assert.equal(activeAtSettled, false)
         await successPersisted
       })
       const task = store.getTask('mtask_restore_by_poll_url')

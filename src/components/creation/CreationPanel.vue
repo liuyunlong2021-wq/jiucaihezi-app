@@ -333,7 +333,21 @@ function canDownloadDolaResult(task: MediaTask): boolean {
 async function downloadDolaResult(task: MediaTask) {
   if (!canDownloadDolaResult(task) || !task.resultUrl) return
   try {
-    const { blob } = await fetchCreationMediaBlob(task.resultUrl, 'video', true)
+    const data = isTauriRuntime()
+      ? await (async () => {
+          const { invoke } = await import('@tauri-apps/api/core')
+          const response = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
+            request: { url: task.resultUrl, timeout_secs: 300 },
+          })
+          if (response.status < 200 || response.status >= 300 || !response.data_base64) {
+            throw new Error(`媒体下载失败: HTTP ${response.status}`)
+          }
+          const binary = atob(response.data_base64)
+          const bytes = new Uint8Array(binary.length)
+          for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+          return bytes
+        })()
+      : (await fetchCreationMediaBlob(task.resultUrl, 'video', true)).blob
     const saved = await saveGeneratedFile({
       filename: buildMediaFilename({
         summary: task.summary,
@@ -343,7 +357,7 @@ async function downloadDolaResult(task: MediaTask) {
         extension: 'mp4',
       }),
       mimeType: 'video/mp4',
-      data: blob,
+      data,
     })
     cpState.progressText = saved.status === 'saved' ? '下载完成' : '已取消下载'
   } catch (error) {

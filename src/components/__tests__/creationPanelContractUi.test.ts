@@ -991,6 +991,8 @@ test('Dola successful tasks download the original URL as a prompt-named mp4', ()
 
   assert.match(source, /<button v-if="canDownloadDolaResult\(task\)" @click="downloadDolaResult\(task\)">下载链接<\/button>/)
   assert.match(download, /fetchCreationMediaBlob\(task\.resultUrl, 'video', true\)/)
+  assert.match(download, /http_download_base64/)
+  assert.match(download, /new Uint8Array\(binary\.length\)/)
   assert.match(download, /saveGeneratedFile\(/)
   assert.match(download, /summary: task\.summary/)
   assert.match(download, /prompt: task\.prompt/)

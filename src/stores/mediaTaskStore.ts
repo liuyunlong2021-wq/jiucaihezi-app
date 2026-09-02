@@ -945,6 +945,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   function emitSettled(task: MediaTask) {
+    activeTaskIds.value.delete(task.id)
     emitEvent('media-task-settled', {
       taskId: task.id,
       type: task.type,
