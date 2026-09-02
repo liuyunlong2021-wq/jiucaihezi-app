@@ -1,7 +1,7 @@
 # 通用记忆工作台 iPhone TestFlight 外部测试 TDD（2026-08-25）
 
-> 状态：待实施（RED）
-> 基线：`main` / `v2.1.34` / `096fadc4`
+> 状态：已实施至 `2.1.40` Beta App Review；正在等待审核
+> 初始基线：`main` / `v2.1.34` / `096fadc4`
 > 移动身份：`com.jiucaihezi.mobile` / Apple Team `RXD4L9387J`
 > 目标：不正式上架 App Store，先通过 TestFlight 外部测试让其他用户可安装和更新当前 iPhone App。
 > 范围：先关闭 iPhone 云项目“下载并覆盖本地”回归，再完成 `2.1.34` 的 TestFlight 内部安装、外部 Beta 审核、公开链接和 90 天续期闭环。
@@ -196,6 +196,15 @@ git diff --check
 - 不修改 Desktop/Web 的现有产品能力、发布身份或更新通道。
 - 不恢复 Android 开发，不把 Android 构建加入本轮门禁。
 - 不在本轮开发签名验证中上传 App Store Connect、提交 Beta App Review 或生成公开链接。
+
+## 11. `2.1.40` 实施与 TestFlight 回执（2026-09-02）
+
+- `0902-shouji` 从 `main` / `v2.1.40` 建立，根因修复提交为 `902e85f0`。移动导出、Desktop 专属入口隐藏和 `cloudProjectId` 精确绑定均在该提交中完成。
+- focused `1172/1172`、TypeScript、Rust iOS target、iOS quick build 和差异检查通过。开发签名 IPA 已在真实 iPhone 13 Pro Max 安装和启动；完整云覆盖与文件落盘人工矩阵未执行。
+- App Store IPA 从 `902e85f0` 的独立干净 worktree 构建，未包含主工作区其他未提交改动。产物为 arm64、`com.jiucaihezi.mobile`、`2.1.40 (2.1.40.1)`、Team `RXD4L9387J`，使用 Apple Distribution 和 Store 描述文件签名，严格签名验证通过。
+- IPA 大小 `19,817,102` bytes，SHA-256 `0198627403bee38bdf3e43f513a852422128d3608c9df6c1dbd6d52baa347bde`；Xcode 上传成功，App Store Connect 构建处理完成。
+- 构建已加入内部组“4C-13 内部验收”和外部组“公开内测”，本轮测试重点已填写并提交 Beta App Review；当前状态为“正在等待审核”。公开链接为 <https://testflight.apple.com/join/FUySJFr6>，上限 `110` 人。
+- 审核通过前不写成 `2.1.40` 已可供外部下载。TestFlight 安装回归、外部账号安装、第二台设备和 90 天续期仍未执行；本轮没有正式上架 App Store，也没有发布 macOS DMG。
 
 ## 关联
 
