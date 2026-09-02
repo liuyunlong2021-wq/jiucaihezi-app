@@ -1,0 +1,4 @@
+interface:
+  display_name: "Wiki Memory"
+  short_description: "Manage a local indexed Wiki as durable memory"
+  default_prompt: "Use $wiki-memory to create, query, write, or inspect this local Wiki."

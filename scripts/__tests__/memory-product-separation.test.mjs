@@ -145,6 +145,7 @@ test('App bundles only the remaining product Skills', () => {
     'jc-jiyi',
     'jc-new-user-guide',
     'skill-creator',
+    'wiki-memory',
   ]
   const directories = readdirSync('public/skills', { withFileTypes: true })
     .filter(entry => entry.isDirectory() && existsSync(join('public/skills', entry.name, 'SKILL.md')))

@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useAgentStore } from '@/stores/agentStore'
 import { searchSkills } from '@/utils/skillSearch'
 import type { SkillConfig } from '@/types/skill'
+import { parseSkillMd } from '@/types/skill'
+import { loadWebSkillCatalog, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
 import { confirmAction } from '@/utils/confirmAction'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
@@ -12,10 +14,17 @@ const query = ref('')
 const showEditor = ref(false)
 const editingSkill = ref<SkillConfig | null>(null)
 const editForm = ref({ name: '', description: '', content: '' })
+const bundledSkills = ref<WebSkillCatalogEntry[]>([])
+const customizingSkillId = ref('')
 const userSkills = computed(() => searchSkills(
   query.value,
   store.getCustomSkills(),
 ))
+const visibleBundledSkills = computed(() => searchSkills(query.value, bundledSkills.value))
+
+onMounted(async () => {
+  bundledSkills.value = await loadWebSkillCatalog().catch(() => [])
+})
 
 function openCreate() {
   editingSkill.value = null
@@ -70,6 +79,39 @@ async function deleteSkill(skill: SkillConfig) {
   await store.deleteAgent(skill.id)
 }
 
+async function customizeBuiltInSkill(skill: WebSkillCatalogEntry) {
+  if (customizingSkillId.value) return
+  customizingSkillId.value = skill.id
+  try {
+    const response = await fetch(`/skills/${skill.id}/SKILL.md`)
+    if (!response.ok) throw new Error(`内置 Skill 加载失败：${skill.name}`)
+    const markdown = await response.text()
+    const parsed = parseSkillMd(markdown)
+    const slug = skill.id.replace(/[^a-z0-9-]+/gi, '-').replace(/^-+|-+$/g, '') || 'skill'
+    const customSkill: SkillConfig = {
+      id: `${slug}-custom-${Date.now().toString(36)}`,
+      name: `${parsed.name || skill.name}（我的定制）`,
+      description: parsed.description || skill.description || '',
+      triggers: parsed.triggers || [],
+      allowedTools: parsed.allowedTools || [],
+      skillContent: parsed.skillContent || markdown,
+      references: [],
+      examples: [],
+      version: 1,
+      source: 'user',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      evolutionLog: [],
+    }
+    await store.createAgent(customSkill)
+    openEdit(customSkill)
+  } catch (cause) {
+    console.error('Failed to customize bundled Skill', cause)
+  } finally {
+    customizingSkillId.value = ''
+  }
+}
+
 async function openLocalDirectory() {
   if (!isTauriRuntime()) return
   await invoke('open_central_skills_directory')
@@ -88,6 +130,20 @@ async function openLocalDirectory() {
     <label class="wsp-search"><input v-model="query" type="search" placeholder="搜索 Skill" /></label>
     <div v-if="!store.skillsBootstrapped" class="wsp-state">加载中...</div>
     <div v-else class="wsp-list">
+      <section v-if="visibleBundledSkills.length" class="wsp-section">
+        <div class="wsp-section-title">内置 Skill（只读模板）</div>
+        <article v-for="skill in visibleBundledSkills" :key="skill.id" class="wsp-user-skill">
+          <div class="wsp-user-main">
+            <strong>{{ skill.name }}</strong>
+            <p>{{ skill.description || '暂无描述' }}</p>
+          </div>
+          <div class="wsp-user-actions">
+            <button type="button" :disabled="!!customizingSkillId" @click="customizeBuiltInSkill(skill)">
+              {{ customizingSkillId === skill.id ? '复制中…' : '定制' }}
+            </button>
+          </div>
+        </article>
+      </section>
       <section v-if="userSkills.length" class="wsp-section">
         <div class="wsp-section-title">我的 Skill</div>
         <article v-for="skill in userSkills" :key="skill.id" class="wsp-user-skill">

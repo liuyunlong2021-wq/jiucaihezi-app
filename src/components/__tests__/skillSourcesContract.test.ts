@@ -35,7 +35,10 @@ test('Desktop keeps the bundled list while Web exposes only user-installed Skill
   assert.match(webPanel, /await store\.createAgent\(skill\)/)
   assert.match(webPanel, /store\.updateSkill\(editingSkill\.value\.id, skill\)/)
   assert.match(webPanel, /await store\.deleteAgent\(skill\.id\)/)
-  assert.doesNotMatch(webPanel, /BuiltInSkillList|内置 Skill/)
+  assert.doesNotMatch(webPanel, /BuiltInSkillList/)
+  assert.match(webPanel, /loadWebSkillCatalog\(\)/)
+  assert.match(webPanel, /customizeBuiltInSkill/)
+  assert.match(webPanel, /定制/)
   assert.doesNotMatch(builtInList, /<button/)
 })
 

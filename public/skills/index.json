@@ -74,5 +74,16 @@
       "scripts/run_loop.py",
       "scripts/utils.py"
     ]
+  },
+  {
+    "id": "wiki-memory",
+    "name": "wiki-memory",
+    "description": "Use when a user asks to create or plan a local Markdown Wiki, query or search local knowledge, write or update Wiki content, inspect consistency, or says 创建Wiki、查询Wiki、写入Wiki、检查Wiki、本地知识库、第二大脑. Every Wiki content directory uses index.md. Do not use for Wikipedia, general web search, or unrelated file management.",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml"
+    ]
   }
 ]
