@@ -101,7 +101,10 @@ test('memory project entry unifies local and cloud projects while settings only 
   assert.match(tree, /getGatewaySessionToken\(\) \|\| await initGatewaySessionToken\(\)/)
   assert.match(tree, /gatewaySessionAuthenticated/)
   assert.match(tree, /projectTextSync\.cloudProjectIdFor\(project\.owner\)/)
-  assert.match(tree, /project\.name === cloud\.name/)
+  assert.match(
+    tree,
+    /return isMobile\s*\?\s*null\s*:\s*availableLocalProjects\.find\(project\s*=>\s*project\.name\s*===\s*cloud\.name\)/,
+  )
   assert.match(tree, /@click="openCloudProject\(project\)"/)
   assert.match(
     tree,
@@ -1105,7 +1108,7 @@ test('memory file actions stay inside the memory resource route on Desktop', () 
     /const result = await openProjectResource\(projectFiles, resource\)\s*emitEvent\('memory:open-resource', result\)/,
   )
   assert.match(tree, /createText\(projectKey\.value, relPath, ''\)[\s\S]*memory:open-resource/)
-  assert.match(tree, /v-if="isDesktop"[\s\S]*用系统默认应用打开/)
+  assert.match(tree, /v-if="isDesktop && !isMobile"[\s\S]*用系统默认应用打开/)
 })
 
 test('memory navigation separates Raw conversations from project files and transient previews', () => {

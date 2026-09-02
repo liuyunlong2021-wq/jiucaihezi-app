@@ -482,6 +482,21 @@ test('new project files open in the memory workbench', () => {
   assert.doesNotMatch(source, /projectTextEditorMode|project:new-document/)
 })
 
+test('mobile project export does not call desktop folder pickers', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+  const exportSelected =
+    source.match(/async function exportSelectedProjectResources[\s\S]*?\n}\n\ninterface MobileShareData/)?.[0] || ''
+  assert.match(source, /async function exportMobileResources[\s\S]*shareWindow\.share/)
+  assert.match(exportSelected, /if \(isMobile\)[\s\S]*exportMobileResources/)
+  assert.ok(
+    exportSelected.indexOf('exportMobileResources') < exportSelected.indexOf('showDirectoryPicker'),
+  )
+  assert.match(source, /if \(isDesktop && !isMobile\) \{[\s\S]*exportDesktopProject\(\)/)
+})
+
 test('a project tree only consumes the still-supported pending export request after remount', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),

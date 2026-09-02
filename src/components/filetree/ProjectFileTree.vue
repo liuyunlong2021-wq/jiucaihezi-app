@@ -1328,7 +1328,9 @@ async function localOwnerForCloud(cloud: SyncProject): Promise<{ owner: string; 
       // Missing/deleted recent projects are ignored.
     }
   }
-  return availableLocalProjects.find(project => project.name === cloud.name) || null
+  return isMobile
+    ? null
+    : availableLocalProjects.find(project => project.name === cloud.name) || null
 }
 async function openCloudProject(cloud: SyncProject) {
   if (projectMenuBusy.value) return
@@ -1707,8 +1709,18 @@ async function writeProjectExportEntry(
 }
 async function ctxExportProject() {
   closeCtxMenu()
-  if (isDesktop) {
+  if (isDesktop && !isMobile) {
     await exportDesktopProject()
+    return
+  }
+  if (isMobile) {
+    const owner = projectKey.value
+    if (!owner) return
+    await exportSelectedProjectResources(
+      (await projectFiles.list(owner)).filter(
+        resource => !resource.isDirectory && isVisibleMemoryResource(resource.path),
+      ),
+    )
     return
   }
   const projectId = webProjectId.value
@@ -1734,6 +1746,10 @@ async function exportSelectedProjectResources(roots: ProjectResource[]) {
     await projectFileActions.exportResources({
       resources: roots,
       export: async selected => {
+        if (isMobile) {
+          await exportMobileResources(selected)
+          return
+        }
         if (isDesktop) {
           const owner = projectDir.value
           if (!owner) return
@@ -1790,6 +1806,82 @@ async function exportSelectedProjectResources(roots: ProjectResource[]) {
     if (error instanceof DOMException && error.name === 'AbortError') return
     errorMsg.value = `导出所选资源失败: ${error instanceof Error ? error.message : String(error)}`
     throw error
+  }
+}
+
+interface MobileShareData {
+  files: File[]
+  title?: string
+}
+interface MobileShareNavigator {
+  share?: (data: MobileShareData) => Promise<void>
+  canShare?: (data: Pick<MobileShareData, 'files'>) => boolean
+}
+async function exportMobileResources(resources: ProjectResource[]): Promise<void> {
+  const owner = projectKey.value
+  if (!owner) return
+  const all = await projectFiles.list(owner)
+  const files = new Map<string, ProjectResource>()
+  for (const resource of all) {
+    if (
+      !resource.isDirectory &&
+      isVisibleMemoryResource(resource.path) &&
+      resources.some(
+        root =>
+          root.path === resource.path ||
+          (root.isDirectory && resource.path.startsWith(`${root.path}/`)),
+      )
+    )
+      files.set(resource.path, resource)
+  }
+  for (const resource of resources) if (!resource.isDirectory) files.set(resource.path, resource)
+  if (!files.size) throw new Error('所选资源中没有可导出的文件')
+
+  const usedNames = new Map<string, number>()
+  const sharedFiles: File[] = []
+  for (const resource of files.values()) {
+    const baseName = resource.name || resource.path.split('/').pop() || '导出文件'
+    const count = usedNames.get(baseName) || 0
+    usedNames.set(baseName, count + 1)
+    const dot = baseName.lastIndexOf('.')
+    const suffix = count ? ` (${count})` : ''
+    const filename = count
+      ? `${baseName.slice(0, dot > 0 ? dot : baseName.length)}${suffix}${dot > 0 ? baseName.slice(dot) : ''}`
+      : baseName
+    const mimeType =
+      resource.mimeType ||
+      (resource.kind === 'document' ? 'text/plain' : 'application/octet-stream')
+    let data: Blob
+    if (
+      resource.kind === 'document' ||
+      resource.kind === 'canvas' ||
+      resource.kind === 'project-map'
+    ) {
+      data = new Blob([(await projectFiles.readText(resource)).content], { type: mimeType })
+    } else {
+      const binary = new Uint8Array((await projectFiles.readBinary(resource)).data)
+      data = new Blob([binary.buffer], { type: mimeType })
+    }
+    sharedFiles.push(new File([data], filename, { type: mimeType }))
+  }
+
+  const shareWindow = navigator as Navigator & MobileShareNavigator
+  if (
+    shareWindow.share &&
+    (!shareWindow.canShare || shareWindow.canShare({ files: sharedFiles }))
+  ) {
+    await shareWindow.share({ files: sharedFiles, title: `${projectStore.projectName.value} 导出` })
+    return
+  }
+  for (const file of sharedFiles) {
+    const url = URL.createObjectURL(file)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = file.name
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 }
 
@@ -2421,7 +2513,7 @@ onBeforeUnmount(() => {
             <JcIcon name="delete" /><span>删除</span>
           </button>
           <div class="pft-ctx-divider"></div>
-          <button v-if="isDesktop" class="pft-ctx-item" @click="ctxReveal">
+          <button v-if="isDesktop && !isMobile" class="pft-ctx-item" @click="ctxReveal">
             <JcIcon name="folder-open" /><span>电脑中打开</span>
           </button>
           <button class="pft-ctx-item" @click="ctxCopyPath">
@@ -2451,7 +2543,7 @@ onBeforeUnmount(() => {
             <JcIcon name="palette" /><span>加入画布</span>
           </button>
           <button
-            v-if="isDesktop"
+            v-if="isDesktop && !isMobile"
             class="pft-ctx-item"
             @click="ctxOpenInSystem"
           >
@@ -2492,7 +2584,7 @@ onBeforeUnmount(() => {
             <JcIcon name="download" /><span>另存为</span>
           </button>
           <div class="pft-ctx-divider"></div>
-          <button v-if="isDesktop" class="pft-ctx-item" @click="ctxReveal">
+          <button v-if="isDesktop && !isMobile" class="pft-ctx-item" @click="ctxReveal">
             <JcIcon name="folder-open" /><span>电脑中打开</span>
           </button>
           <button class="pft-ctx-item" @click="ctxCopyPath">
