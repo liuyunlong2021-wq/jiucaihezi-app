@@ -136,6 +136,7 @@ export async function runDirectChatCompletion(
   let lengthPrefix = ''
   let lengthContinuations = 0
   let lastFailedToolSignatures = new Set<string>()
+  const successfulEditSignatures = new Set<string>()
   let successfulTerminalToolContent = ''
   let finalResponseUsed = false
   let roundToolOutcomes: Array<{ signature: string; failed: boolean }> = []
@@ -207,9 +208,23 @@ export async function runDirectChatCompletion(
         status: 'failed',
       }
     }
+    if (call.function.name === 'edit' && successfulEditSignatures.has(signature)) {
+      return {
+        content: '文件已是目标状态，跳过重复编辑。',
+        status: 'succeeded',
+        details: { idempotent: true, skipped: true },
+      }
+    }
     try {
       const result = await executeTool(call, signal)
       roundToolOutcomes[outcomeIndex]!.failed = result.status === 'failed'
+      if (
+        call.function.name === 'edit' &&
+        result.status !== 'failed' &&
+        result.status !== 'cancelled'
+      ) {
+        successfulEditSignatures.add(signature)
+      }
       if (
         result.status !== 'failed' &&
         ((options.stopAfterSuccessfulToolNames || []).includes(call.function.name) ||

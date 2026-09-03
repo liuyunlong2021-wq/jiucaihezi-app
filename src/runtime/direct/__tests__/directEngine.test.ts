@@ -927,6 +927,68 @@ test('runDirectChatCompletion does not execute an immediately repeated failed to
   assert.equal(executions, 1)
 })
 
+test('runDirectChatCompletion treats a repeated successful edit as idempotent', async () => {
+  let executions = 0
+  const responses = [
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_edit_1',
+                  function: {
+                    name: 'edit',
+                    arguments: '{"path":"wiki/note.md","oldString":"旧","newString":"新"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_edit_2',
+                  function: {
+                    name: 'edit',
+                    arguments: '{"path":"wiki/note.md","oldString":"旧","newString":"新"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '已完成' } }] }), '[DONE]']),
+  ]
+
+  await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '修改文档' }],
+    tools: [{ type: 'function', function: { name: 'edit' } }],
+    onText: () => {},
+    executeTool: async () => {
+      executions += 1
+      return { content: 'Edited file successfully', status: 'succeeded' }
+    },
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(executions, 1)
+})
+
 test('runDirectChatCompletion commits repeat protection in source order after parallel completion', async () => {
   let releaseFirst!: () => void
   const firstReleased = new Promise<void>(resolve => {
