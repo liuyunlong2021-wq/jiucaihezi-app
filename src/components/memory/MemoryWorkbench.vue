@@ -1259,9 +1259,8 @@ async function send() {
       },
       onContextTrimmed() {
         if (!isCurrentRun()) return
-        if (contextNoticeShownConversations.has(active.transcript.id)) return
+        // P0 fix: Removed outdated “写入 Wiki” prompt - memory_search is now native
         contextNoticeShownConversations.add(active.transcript.id)
-        contextNotice.value = '点击“写入 Wiki”保存这条记忆，之后使用 @jiyiskill 即可精准找回相关内容。'
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false
@@ -2347,6 +2346,13 @@ function readDataUrl(file: File): Promise<string> {
             </div>
           </div>
         </div>
+        <!-- P0 fix: Show active Skills in topbar -->
+        <div v-if="selectedSkillNames.length" class="memory-active-skills" aria-label="当前激活的 Skill">
+          <div v-for="name in selectedSkillNames" :key="`active-skill:${name}`" class="memory-active-skill-chip">
+            <span>{{ name }}</span>
+            <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+          </div>
+        </div>
         <button
           v-if="memoryReady"
           class="new-conversation-button"
@@ -2812,6 +2818,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .memory-conversation-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
 .memory-conversation-action:hover { color: var(--olive); }
+/* P0 fix: Active Skills display in topbar */
+.memory-active-skills { display: flex; min-width: 0; align-items: center; gap: 6px; margin-left: 8px; overflow-x: auto; scrollbar-width: none; }
+.memory-active-skills::-webkit-scrollbar { display: none; }
+.memory-active-skill-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--olive) 34%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 13%, var(--paper)); color: var(--olive); font-size: 12px; white-space: nowrap; }
+.memory-active-skill-chip button { display: grid; width: 16px; height: 16px; place-items: center; border: 0; background: transparent; color: currentColor; cursor: pointer; font-size: 16px; line-height: 1; opacity: .7; }
+.memory-active-skill-chip button:hover { opacity: 1; }
+.memory-active-skill-chip button:disabled { cursor: default; opacity: .3; }
 .new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
 .memory-model-picker { position: relative; min-width: 0; max-width: min(260px, 28vw); }
