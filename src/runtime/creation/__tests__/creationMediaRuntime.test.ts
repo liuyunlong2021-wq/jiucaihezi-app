@@ -103,24 +103,18 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
   }
 })
 
-test('Gemini image maps panel ratio and resolution to the verified Xiaoyi size field', { concurrency: false }, async () => {
+test('Gemini image submits the native Xiaoyi generation contract', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
-      const body = init.body as FormData
-      assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
-      assert.equal(body.get('size'), '3840x2160')
-      assert.equal(body.get('aspect_ratio'), null)
-      assert.equal(body.get('quality'), null)
-      assert.equal(body.get('resolution'), null)
-      assert.equal(body.get('seconds'), '1')
-      return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/task_xiaoyi_gemini')) {
-      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gemini.png' } })
+    if (url.endsWith('/v1/images/generations') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.model, 'gemini-3-pro-image-preview')
+      assert.equal(body.size, '3840x2160')
+      assert.equal(body.response_format, 'url')
+      return Response.json({ data: [{ url: 'https://cdn.example.test/gemini.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }

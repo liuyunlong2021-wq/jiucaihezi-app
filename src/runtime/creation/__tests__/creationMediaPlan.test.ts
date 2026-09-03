@@ -66,6 +66,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'gpt-image-2-中质量',
     'gpt-image-2-vip',
     'gpt-image-2-官方',
+    'gpt-image-2-Token',
     'newapi/trump/seedance-2.0',
     'newapi/kik/doubao-seedance-2',
     'newapi/kik/doubao-seedance-2-0-fast-260128',
@@ -257,16 +258,18 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
     ['gpt-image-2-中质量', ['1k', '2k', '4k'], '0.15/张'],
     ['gpt-image-2-vip', ['1k', '2k', '4k'], '0.2/张'],
     ['gpt-image-2-官方', ['1k', '2k', '4k'], '0.25/张'],
+    ['gpt-image-2-Token', ['1k', '2k', '4k'], '按 Token'],
   ]) {
     const route = getCreationModelSpec(modelId)!
-    assert.equal(route.model, modelId)
+    assert.equal(route.model, modelId === 'gpt-image-2-Token' ? '[按token]gpt-image-2' : modelId)
     assert.deepEqual(route.capabilities.resolutions, resolutions)
     assert.equal(displayModelPrice(route), price)
     assert.equal(route.fields.some(field => field.key === 'response_format'), false)
+    assert.equal(route.files?.images?.max, modelId === 'gpt-image-2-Token' ? 16 : 8)
   }
 })
 
-test('Gemini image models use the Xiaoyi async task contract', () => {
+test('Gemini image models use the native Xiaoyi image contract', () => {
   for (const [modelId, model, price] of [
     ['gemini-3.1-flash-image-preview', 'gemini-3.1-flash-image-preview', 0.1],
     ['gemini-3-pro-image-preview', 'gemini-3-pro-image-preview', 0.2],
@@ -277,9 +280,9 @@ test('Gemini image models use the Xiaoyi async task contract', () => {
 
     assert.equal(spec?.price, price)
     assert.equal(textOnly.model, model)
-    assert.equal(textOnly.endpoint, '/v1/videos')
-    assert.equal(textOnly.apiStyle, 'xiaoyi-image-task')
-    assert.equal(textOnly.pollKind, 'newapi-task')
+    assert.equal(textOnly.endpoint, '/v1/images/generations')
+    assert.equal(textOnly.apiStyle, 'openai-images')
+    assert.equal(textOnly.pollKind, 'none')
     assert.equal(textOnly.debug.normalizedParams.size, '2048x2048')
     const landscape = buildCreationRunPlan({ modelId, params: { prompt: '横向产品图', ratio: '16:9', resolution: '2k' } })
     assert.equal(landscape.debug.normalizedParams.size, '2048x1152')
@@ -288,8 +291,8 @@ test('Gemini image models use the Xiaoyi async task contract', () => {
     assert.deepEqual(spec?.capabilities.ratios, ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'])
     assert.equal(spec?.files?.images?.max, 10)
     assert.equal(spec?.fields.some(field => field.key === 'ratio'), true)
-    assert.equal(withImage.endpoint, '/v1/videos')
-    assert.equal(withImage.apiStyle, 'xiaoyi-image-task')
+    assert.equal(withImage.endpoint, '/v1/images/edits')
+    assert.equal(withImage.apiStyle, 'openai-image-edits')
     assert.equal(withImage.assetFlow, 'newapi-upload')
   }
 

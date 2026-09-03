@@ -1,10 +1,9 @@
 # 韭菜盒子 Seedance 2.5 API 接口说明
 
-> 本文档以附件《API接口说明.md》的参数和调用流程为底稿，仅按已确认的中转合同修正参考图数量和单文件大小限制，并将入口映射到韭菜盒子 NewAPI。
+> 本文档是韭菜盒子 NewAPI 的对外接入合同，只描述公开接口，不包含上游渠道信息。
 >
 > 适用对象：希望通过韭菜盒子 NewAPI 中转站调用 Dola Seedance 2.5 的 OpenAI 兼容客户端。
 >
-> 本页是中转站接入说明；RunningHub 上游原始参数请参阅 [[RH-seedace25]]，两者不要混用。
 
 ## 接入信息
 
@@ -15,7 +14,7 @@
 | 查询任务 | `GET /v1/videos/{task_id}` |
 | 模型名 | `dola-seedance2.5` |
 | 认证 | `Authorization: Bearer <你的 API Key>` |
-| 计价 | `0.2/秒`，当前任务固定生成 30 秒 |
+| 计价 | `0.2/秒`，当前模型固定生成 30 秒 |
 | 分辨率 | `720p`（固定，不需要额外选择） |
 
 ## 创建任务
@@ -81,23 +80,22 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos/task_xxx' \
 }
 ```
 
-`video_url` 的值就是上游官方响应中的 `task.url` 原始视频地址；中转站不改写、不转码，也不通过自建下载接口代理。点击或下载时直接使用这个 URL。上游结果链接是临时链接，通常只保留 24 小时，请在任务完成后尽快预览或下载。
+`video_url` 是可直接预览或下载的视频地址。请在任务完成后尽快保存结果。
 
 ## 常见错误
 
 | 错误 | 原因 |
 | --- | --- |
-| `Unsupported Dola Seedance model` | `model` 不是 `dola-seedance2.5` |
+| `Unsupported model` | `model` 不是 `dola-seedance2.5` |
 | `Reference images must be URLs` | `images` 传入了本地路径、Base64 或其他类型 |
 | `Unable to fetch reference image` | 图片 URL 对中转服务不可访问，或返回了错误状态 |
 | `Only JPG, JPEG and PNG images are supported` | 参考图不是 JPEG/PNG |
 | `Reference image exceeds 20 MiB` | 单张参考图超过 20 MiB |
-| `Dola Seedance supports at most 30 images` | 参考图超过 30 张 |
+| `Reference images exceed the limit` | 参考图超过 30 张 |
 
-## 与附件上游接口的映射
+## 接入边界
 
-- 第三方客户端只连接上面的 NewAPI Base URL，不直接连接 Dola 或 RunningHub。
-- 客户端发送 `model: dola-seedance2.5`；不要发送 `rh-seedance25-*`，也不要拼接渠道 ID。
-- 附件中的上游 `POST /api/v1/videos` 是 multipart 文件上传；韭菜盒子公开中转使用 `POST /v1/videos` JSON，并通过 `images` URL 数组传递参考图。
-- 附件中“最多 9 张、总计 20 MiB”是上游旧限制；韭菜盒子中转已按确认结果改为最多 30 张、每张不超过 20 MiB。
-- 当前 Dola 中转仅支持参考图片；不支持参考视频和参考音频。
+- 第三方客户端只连接上面的 NewAPI Base URL，不需要知道任何上游服务。
+- 客户端发送 `model: dola-seedance2.5`，不要拼接渠道 ID。
+- 韭菜盒子公开接口使用 `POST /v1/videos` JSON，并通过 `images` URL 数组传递参考图。
+- 当前接口仅支持参考图片，不支持参考视频和参考音频。
