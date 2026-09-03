@@ -289,6 +289,7 @@ test('desktop project tools allow only resources declared by a loaded Skill', as
 
   await execute(call('skill', { name: '测试 Skill' }))
   assert.match((await execute(call('read', { path: '/skills/test/skill/references/rule.md' }))).content, /只允许这个资源/)
+  assert.match((await execute(call('read', { path: 'references/rule.md' }))).content, /只允许这个资源/)
   await assert.rejects(
     () => execute(call('read', { path: '/skills/test/skill/private.md' })),
     /Skill 资源不存在/,

@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-03] 原生长期记忆与连续 Skill 根治合同（待实施）
+
+- 用户已确认四层记忆边界：最近三轮是工作记忆，Raw + 索引是情节记忆，`wiki/` 是语义记忆，Skill 是程序记忆。
+- 待实施：所有轮次都装入最近三轮；Skill 在当前任务持续到用户移除或新建对话；每条完成回答在 Raw 落盘后自动建索引；项目级原生 `memory_search` 取代 `jc-jiyi`。
+- 不新增“沉淀到 Wiki”按钮，不把现有“保存到文件”错改名为 Wiki 专用动作；不增加向量库、第二份正文或第二套 Agent Loop。详见 [[开发/通用记忆工作台原生长期记忆与连续Skill上下文根治TDD-2026-09-03]]。
+
 ## [2026-09-03] 对话切换保持中间文档
 
 - `MemoryWorkbench.openResource()` 已隔离 conversation 与中间资源清理路径；新建/切换对话不会关闭当前文档预览，也不会退出 Markdown 编辑态。显式关闭预览、打开其他资源、切换创作面板或切换项目仍按原合同清理。
@@ -10,6 +16,12 @@
 - 用户确认索引模型必须继续返回 `summary + keywords`；请求改用严格 `response_format.json_schema`，程序二次校验后才拼装 Wiki。
 - 不支持 `json_schema` 的模型明确失败且不写索引；不使用 Prompt-only、JSON 大括号截取或 reasoning fallback。详见 [[开发/通用记忆工作台对话记忆索引摘要模型接口约束TDD-2026-09-03]]。
 - 摘要请求、严格 Schema、可见 `message.content` 解析和程序边界校验已落地；focused `1176/1176`、`vue-tsc -b`、格式检查和差异检查通过。真实 `jiucaihezi`、Ollama、MLX Provider 与三端人工验收仍待执行。
+
+## [2026-09-02] 三平台发布指令（现行）
+
+- `.github/workflows/build.yml` 只由 `v*` tag 触发桌面发布，目标是 macOS Apple Silicon、macOS Intel、Windows x64；完整成功还要等 GitHub Actions 的三个构建 job 和 `publish-download-manifest`。
+- 已有提交和 tag 时只推送指定 ref：`git push origin main`、`git push origin vX.Y.Z`。**禁止** `git push origin main --tags` / `git push --tags`，否则会把本地全部 tag 一起推送，误触发旧版本或因远端已有 tag 被拒绝。
+- `v2.1.39`、`main`、`origin/main` 当前均指向 `a58d49cf`；此前额外触发的 `v2.1.37` 属于推送范围错误，不是代码构建根因。完整指令与排错见 [[学习/GitHub推送与发布边界-2026-07-20]]。
 
 ## [2026-09-01] 对话记忆索引 V2 正确链路
 
@@ -163,6 +175,8 @@
 - 媒体任务竞态红灯先确认旧实现缺少存储等待合同；绿色结果为媒体任务专项 `46/46`、完整 focused、TypeScript、Desktop quick build 与产物审计。两次干净 Desktop 启动中 SQLite 约 5.1 秒和 4.9 秒完成，均无 mounted-hook 未处理异常；中断的 Grok Video 任务自动恢复并最终 `success 100%`。Veo 3.1 与 Fast 的真实 `404 fail_to_fetch_task` 尚未修复，不属于本轮结果。
 
 ## 下一步
+
+- **iPhone 文件树支线 `0902-shouji` 已完成本地根因修复。** iOS 不再调用 Desktop 文件夹选择器，导出改走系统文件分享/逐文件下载回退；“电脑中打开”在移动端隐藏；云下载按 `cloudProjectId` 精确绑定，同名未绑定项目不会被误覆盖。基线为 `v2.1.40`，文件树与项目中心回归、TypeScript 通过；真实 iPhone 文件落盘和 TestFlight 仍待验收，见 [[开发/文件系统/iPhone文件树与云端覆盖根治方案-2026-09-02]]。
 
 - 先按 [[开发/通用记忆工作台原生Wiki能力与五Skill退役TDD-2026-08-26#9. 最小实施顺序]] 完成 TDD 一的入口、原生命令、行为等价与退役门禁；再实施 [[开发/通用记忆工作台轻上下文任务运行时TDD-2026-08-26]]，最后执行固定真实模型矩阵。完成前不登记为已实施或真实模型性能验收通过。
 - 按 [[开发/通用记忆工作台RawChaJian证据链与可信检索TDD]] 执行五类独立模型前向验收；只有真实关键词检索持续漏召回时，才另写 TDD 评估全文检索或 BM25。提交、推送和发布须另行明确授权。

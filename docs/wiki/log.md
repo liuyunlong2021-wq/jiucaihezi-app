@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-09-03] 设计确认 | 原生长期记忆与连续 Skill
+
+- 根因确认：Skill 每轮清空与“无显式能力不发历史”组合后，会把 `skill-creator` 的测试等第二轮降级为无上下文普通问答；手动索引与只查当前 conversation 也不构成项目长期记忆。
+- 用户确认写入 [[开发/通用记忆工作台原生长期记忆与连续Skill上下文根治TDD-2026-09-03]]：最近三轮与能力选择解耦，Skill 在当前任务持续，成功回答自动索引，`memory_search` 作为项目级原生只读工具，`jc-jiyi` 和手动“写入 Wiki”退役。
+- 不新增“沉淀到 Wiki”；现有“保存到文件”保持原名和任意合法 Markdown 目标。本轮只完成 TDD 和导航记录，未修改运行时、未执行真实平台验收。
+
 ## [2026-09-03] 实施完成 | 对话切换保持中间文档
 
 - 根因：`openResource()` 的 conversation 分支无条件调用 `closePreview()`，将右侧对话切换误当成中间资源切换，清空 `previewResource` 并退出 Markdown 编辑态。
@@ -10,6 +16,13 @@
 
 - 用户确认模型输出保持 `summary + keywords`，要求接口级结构化约束；新增 TDD 固定 System Prompt、assistant 正文输入边界、严格 JSON Schema、程序二次校验和失败不写入测试矩阵。
 - 本轮只写入 TDD 与入口记录，不修改运行时代码，不执行真实模型或跨平台验收。
+
+## [2026-09-02] Wiki 沉淀 | 三平台发布指令与 `--tags` 边界
+
+- 复核 `.github/workflows/build.yml`：桌面发布只由 `v*` tag 触发，构建 macOS Apple Silicon、macOS Intel、Windows x64，全部构建成功后才由 `publish-download-manifest` 发布公开下载清单。
+- 固化最短正确指令：已完成 commit/tag 时执行 `git push origin main` 与 `git push origin vX.Y.Z`；从版本准备开始则先统一版本、commit、annotated tag，再推送这两个指定 ref。
+- 明确禁止 `git push origin main --tags` / `git push --tags`。本次 `v2.1.39` 复核中，`main`、`origin/main`、`v2.1.39` 均指向 `a58d49cf`；此前额外推送 `v2.1.37` 造成旧任务触发，根因是推送范围错误，不是代码构建失败。
+- 本轮只更新 Wiki，不执行新的发布、构建、取消任务或远端修改。
 
 ## [2026-09-01] TDD 启动 | 对话记忆索引 V2
 
@@ -1127,11 +1140,18 @@
 - Direct Runtime 记录真实 HTTP 请求次数、逐请求耗时、工具轮数、工具耗时和总耗时，不记录正文或参数；工作台运行步骤显示工具耗时。Cha Skill 改为一次提交初始短词及同轮读取独立证据页。
 - 红灯已在旧实现确认；定向 `158/158`、Cha Skill `7/7`、完整 Node focused `1129/1129`、Rust `402 passed / 1 ignored`、TypeScript、定向 lint 和差异检查通过。
 - 当前项目三词本地基准读取 `363 -> 121` 次，中位 `48.66 ms -> 24.27 ms`，约 `2.0x`。当前正式 App 为旧版 `2.1.33`；新构建上的三次 `gpt-5.6-sol` / `jiucaihezi` 真实前向未执行，不登记为端到端性能验收通过。
+
 ## [2026-08-29] 生产验收 | RH AI App 统一模型注册与部署
 
 - 6 个 Minimax-h3 RunningHub AI App 通过 `rh-aiapp` 通用模型接入，不新增独立模型名或渠道 ID。
 - 服务器部署固定为 `/opt/jiucai-repo` 拉取 `main`、稀疏检出 `rh-adapter`、复制到 `/opt/rh-adapter`，再执行 `docker compose up -d --force-recreate --build rh-adapter`；`.env` 的 `RH_AI_APP_WHITELIST` 必须包含新 `webappId`。
 - 首次部署因在 `/opt/rh-adapter` 执行 `cp rh-adapter/*` 而失败，修正复制目录和白名单后，容器内映射、公网 `app-directory`（11 项）及创作面板显示均已确认。
+
+## [2026-09-02] iPhone 文件树与云端覆盖根因修复
+
+- 支线 `0902-shouji` 从 `main` / `v2.1.40` 创建。iOS 文件树导出不再进入 Desktop 目录选择器，改为 `navigator.share({ files })`，不支持时逐文件下载；移动端隐藏“电脑中打开”。
+- 手机云项目只按 `.raw/.sync/state.json` 中的 `cloudProjectId` 精确复用本地目录；同名但未绑定时创建新 App 管理目录。上传/下载继续复用 `ProjectTextSync` 的完整文字覆盖合同，媒体、凭据、设置和 `.raw/.sync` 排除。
+- 文件树专项回归 `33/33`、TypeScript、`git diff --check` 通过；真实 iPhone、IPA 安装和 TestFlight 未执行，不登记为移动端发布通过。
 
 ## [2026-09-03] 实施完成 | 对话记忆索引摘要模型接口约束
 

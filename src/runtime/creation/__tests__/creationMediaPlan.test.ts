@@ -248,9 +248,9 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
   assert.equal(plan.source, 'newapi-direct')
   assert.equal(plan.route, 'newapi-direct')
   assert.equal(plan.usesRhAdapter, false)
-  assert.equal(plan.endpoint, '/v1/videos')
-  assert.equal(plan.apiStyle, 'xiaoyi-image-task')
-  assert.equal(plan.pollKind, 'newapi-task')
+  assert.equal(plan.endpoint, '/v1/images/edits')
+  assert.equal(plan.apiStyle, 'openai-image-edits')
+  assert.equal(plan.pollKind, 'none')
   for (const [modelId, resolutions, price] of [
     ['gpt-image-2-1k', ['1k'], '0.08/张'],
     ['gpt-image-2-低质量', ['1k', '2k', '4k'], '0.1/张'],
@@ -311,7 +311,8 @@ test('legacy GPT Image 2 plans keep their 2K contract through the low-quality ro
 
   assert.equal(plan.modelId, 'gpt-image-2-低质量')
   assert.equal(plan.model, 'gpt-image-2-低质量')
-  assert.equal(plan.debug.normalizedParams.resolution, '2k')
+  assert.equal(plan.debug.normalizedParams.size, '2048x2048')
+  assert.equal('resolution' in plan.debug.normalizedParams, false)
 })
 
 test('Veo 3.1 preview models use the verified OpenAI video contract', () => {
@@ -454,7 +455,7 @@ test('ZX Grok fixed-duration aliases support text and reference-image video', ()
   }
 })
 
-test('direct GPT Image 2 plan uses the Xiaoyi async task fields', () => {
+test('direct GPT Image 2 plan uses the native image fields', () => {
   const plan = buildCreationRunPlan({
     modelId: 'gpt-image-2-中质量',
     params: {
@@ -471,7 +472,7 @@ test('direct GPT Image 2 plan uses the Xiaoyi async task fields', () => {
   assert.equal(plan.usesRhAdapter, false)
   assert.equal(plan.debug.normalizedParams.size, '2048x1152')
   assert.equal('aspectRatio' in plan.debug.normalizedParams, false)
-  assert.equal(plan.debug.normalizedParams.resolution, '2k')
+  assert.equal('resolution' in plan.debug.normalizedParams, false)
   assert.match(plan.submitSummary, /直连/)
   assert.match(plan.submitSummary, /OpenAI-compatible/)
   assert.match(plan.submitSummary, /size=2048x1152/)
@@ -565,12 +566,12 @@ test('direct GPT Image 2 uses one Xiaoyi async contract with and without a refer
     },
   })
 
-  assert.equal(textOnly.endpoint, '/v1/videos')
-  assert.equal(textOnly.apiStyle, 'xiaoyi-image-task')
+  assert.equal(textOnly.endpoint, '/v1/images/generations')
+  assert.equal(textOnly.apiStyle, 'openai-images')
   assert.equal(textOnly.mode, 'text-to-image')
   assert.equal(textOnly.assetFlow, 'none')
-  assert.equal(withImage.endpoint, '/v1/videos')
-  assert.equal(withImage.apiStyle, 'xiaoyi-image-task')
+  assert.equal(withImage.endpoint, '/v1/images/edits')
+  assert.equal(withImage.apiStyle, 'openai-image-edits')
   assert.equal(withImage.mode, 'image-to-image')
   assert.equal(withImage.assetFlow, 'newapi-upload')
   assert.equal(withImage.debug.referenceImageCount, 1)

@@ -43,7 +43,7 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
-test('P3 direct GPT Image 2 runtime uses the Xiaoyi async task contract', () => {
+test('P3 direct GPT Image 2 runtime uses the native OpenAI image contract', () => {
   const plan = buildCreationRunPlan({
     modelId: 'gpt-image-2-中质量',
     params: {
@@ -58,33 +58,29 @@ test('P3 direct GPT Image 2 runtime uses the Xiaoyi async task contract', () => 
 
   assert.equal(request.runtime, 'newapi-direct')
   assert.equal(request.taskType, 'image')
-  assert.equal(request.endpoint, '/v1/videos')
-  assert.equal(request.pollKind, 'newapi-task')
+  assert.equal(request.endpoint, '/v1/images/edits')
+  assert.equal(request.pollKind, 'none')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
   assert.equal(request.imageParams?.responseFormat, 'url')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
-  assert.equal((request.imageParams as any)?.resolution, '2k')
+  assert.equal((request.imageParams as any)?.resolution, undefined)
 })
 
-test('direct GPT Image 2 submits and polls its Xiaoyi task through NewAPI', { concurrency: false }, async () => {
+test('direct GPT Image 2 submits to the native image edit endpoint', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+    if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       assert.equal(init.body instanceof FormData, true)
       const body = init.body as FormData
       assert.equal(body.get('model'), 'gpt-image-2-中质量')
       assert.equal(body.get('prompt'), '把手表改成黄色')
       assert.equal(body.get('size'), '2048x1152')
-      assert.equal(body.get('seconds'), '1')
       assert.equal(body.get('image[]') instanceof Blob, true)
-      return Response.json({ id: 'task_xiaoyi_gpt', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/task_xiaoyi_gpt')) {
-      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } })
+      return Response.json({ data: [{ url: 'https://cdn.example.test/gpt.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -205,13 +201,10 @@ test('Xiaoyi image upload uses the actual JPEG MIME type', { concurrency: false 
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+    if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal((body.get('image[]') as Blob).type, 'image/jpeg')
-      return Response.json({ id: 'task_xiaoyi_jpeg', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/task_xiaoyi_jpeg')) {
-      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } })
+      return Response.json({ data: [{ url: 'https://cdn.example.test/gpt.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -245,13 +238,6 @@ test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Ty
               headers: { 'content-type': 'image/png' },
             }
           }
-          if (command === 'http_request' && args?.request?.url?.endsWith('/v1/videos/task_xiaoyi_desktop_jpeg')) {
-            return {
-              status: 200,
-              body: JSON.stringify({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } }),
-              headers: { 'content-type': 'application/json' },
-            }
-          }
           throw new Error(`Unexpected invoke ${command}`)
         },
       },
@@ -260,13 +246,10 @@ test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Ty
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+    if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal((body.get('image[]') as Blob).type, 'image/jpeg')
-      return Response.json({ id: 'task_xiaoyi_desktop_jpeg', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/task_xiaoyi_desktop_jpeg')) {
-      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gpt.png' } })
+      return Response.json({ data: [{ url: 'https://cdn.example.test/gpt.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }

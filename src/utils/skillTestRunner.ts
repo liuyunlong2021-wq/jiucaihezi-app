@@ -194,7 +194,7 @@ function isSafePackagePath(path: string): boolean {
   const segments = value.split('/')
   if (segments.some(segment => !segment || segment === '.' || segment === '..')) return false
   if (value === 'SKILL.md') return true
-  return /^(references|scripts|assets)\//.test(value)
+  return value === 'LICENSE.txt' || /^(references|scripts|assets|agents|eval-viewer)\//.test(value)
 }
 
 function sanitizePackageName(name: string): string {
@@ -396,6 +396,20 @@ async function callLlm(
   } catch {
     return { output: '[响应解析失败]', tokens: 0, durationMs }
   }
+}
+
+export async function improveSkillDescription(
+  input: Parameters<typeof buildDescriptionOptimizationPrompt>[0],
+  signal?: AbortSignal,
+): Promise<{ skillMd: string; output: string }> {
+  const config = await resolveApiConfig()
+  const output = (await callLlm(
+    config,
+    'You are the official Skill Creator description optimizer. Return only the complete updated SKILL.md.',
+    buildDescriptionOptimizationPrompt(input),
+    signal,
+  )).output
+  return { skillMd: extractSkillMdFromModelOutput(output), output }
 }
 
 async function gradeAssertions(

@@ -70,6 +70,10 @@ import type { ConversationTurn } from './conversationTranscript'
 import type { DirectRunMetrics, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { parseSkillMd, serializeToSkillMd, type SkillConfig } from '@/types/skill'
 import { describeToolDefinition, searchToolDefinitions } from '@/runtime/direct/toolSearch'
+import {
+  ALL_SKILL_TOOLS,
+} from '@/utils/skillTestRunner'
+import { executeSkillCreatorToolCall, isSkillCreatorToolName } from './skillCreatorToolExecutor'
 
 export interface MemoryChatInput {
   projectId?: string
@@ -399,6 +403,21 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
 
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
+    if (isSkillCreatorToolName(call.function.name)) {
+      if (!selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')) {
+        return { content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }), status: 'failed' as const }
+      }
+      return {
+        content: await executeSkillCreatorToolCall(call, {
+          agentId: selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')
+            ? 'skill-creator'
+            : undefined,
+          sessionId: input.conversationId,
+          userInput: latestUserText,
+          signal,
+        }),
+      }
+    }
     if (call.function.name === 'conversation_memory_query') {
       if (!allowedMemoryToolNames.has(call.function.name))
         return { content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }), status: 'failed' as const }
@@ -454,9 +473,15 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return toolResult
   }
   const sceneResults = new Map<string, ReturnType<typeof parseScene3DResultMarkers>[number]>()
-  const allMemoryToolDefinitions = desktopRuntime
+  const allMemoryToolDefinitions = [
+    ...(desktopRuntime
     ? buildMemoryDesktopToolDefinitions()
-    : buildMemoryWebProjectToolDefinitions()
+    : buildMemoryWebProjectToolDefinitions()),
+    ...(selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator') ? ALL_SKILL_TOOLS : []),
+  ]
+  if (selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')) {
+    for (const tool of ALL_SKILL_TOOLS) skillAllowedToolNames.add(tool.function.name)
+  }
   const declaredSkillTools = normalizeSkillAllowedToolNames(skillAllowedToolNames)
   const availableToolNames = new Set(allMemoryToolDefinitions.map(tool => String(tool.function?.name || '')))
   const unavailableSkillTools = declaredSkillTools.filter(name => !availableToolNames.has(name))

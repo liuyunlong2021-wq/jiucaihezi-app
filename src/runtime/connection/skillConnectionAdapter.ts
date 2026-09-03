@@ -151,6 +151,12 @@ function buildSkillRuntimeAppendix(
 const SKILL_CREATOR_RUNTIME_APPENDIX = `
 
 ---
+## 韭菜盒子运行时覆盖（优先于上文）
+
+当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill、subagent 或 /Users/... 外部路径。
+Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。
+官方 Python 脚本通过韭菜盒子已接入的受限脚本执行能力运行；Web/Mobile 不伪造本地脚本执行结果。
+
 ## 强制工作流（不可跳过任何步骤）
 
 你可以使用 7 个官方生命周期工具：skill_creator_validate、run_skill_tests、skill_creator_aggregate_benchmark、skill_creator_open_eval_review、skill_creator_improve_description、skill_creator_package、save_skill。

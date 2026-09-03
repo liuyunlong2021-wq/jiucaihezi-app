@@ -694,11 +694,19 @@ export function createCreativeSkillSession(fetcher: typeof fetch = fetch) {
       return skillOutput(skill)
     },
     async read(path: string): Promise<string | null> {
+      const rawPath = String(path || '').replace(/\\/g, '/')
+      const normalized = rawPath.startsWith('/') || /^[A-Za-z]:\//.test(rawPath)
+        ? ''
+        : rawPath
       const skill = [...loadedSkills.values()].find(item =>
         path.startsWith(`${item.baseDirectory}/`),
-      )
+      ) || (normalized && [...loadedSkills.values()].filter(item => item.files.includes(normalized)).length === 1
+        ? [...loadedSkills.values()].find(item => item.files.includes(normalized))
+        : undefined)
       if (!skill) return null
-      const relative = path.slice(skill.baseDirectory.length + 1)
+      const relative = path.startsWith(`${skill.baseDirectory}/`)
+        ? path.slice(skill.baseDirectory.length + 1)
+        : normalized
       if (!skill.files.includes(relative)) throw new Error(`Skill 资源不存在: ${relative}`)
       return await readWebSkillResource(skill.baseDirectory, relative, fetcher)
     },

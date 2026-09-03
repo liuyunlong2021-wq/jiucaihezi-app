@@ -186,6 +186,15 @@ fn stream_error_message(status: u16, headers: &HashMap<String, String>, detail: 
     )
 }
 
+fn is_binary_content_type(value: Option<&str>) -> bool {
+    let content_type = value.unwrap_or_default().to_ascii_lowercase();
+    content_type.starts_with("audio/")
+        || content_type.starts_with("video/")
+        || content_type.starts_with("image/")
+        || content_type == "binary/octet-stream"
+        || content_type == "application/octet-stream"
+}
+
 #[tauri::command]
 pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> {
     let mut client_builder = reqwest::Client::builder()
@@ -241,14 +250,12 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
             headers.insert(key.to_string(), v.to_string());
         }
     }
-    let is_audio = headers
-        .get("content-type")
-        .is_some_and(|value| value.to_ascii_lowercase().starts_with("audio/"));
-    let (body, body_base64) = if is_audio {
+    let is_binary = is_binary_content_type(headers.get("content-type").map(String::as_str));
+    let (body, body_base64) = if is_binary {
         let bytes = resp
             .bytes()
             .await
-            .map_err(|e| format!("读取音频响应失败: {}", e))?;
+            .map_err(|e| format!("读取二进制响应失败: {}", e))?;
         (String::new(), Some(general_purpose::STANDARD.encode(bytes)))
     } else {
         let body = resp
@@ -570,5 +577,14 @@ mod tests {
         assert!(!is_document_converter_url(
             "https://api.jiucaihezi.studio/documents/markdown?next=evil"
         ));
+    }
+
+    #[test]
+    fn media_content_types_are_kept_as_binary() {
+        assert!(is_binary_content_type(Some("binary/octet-stream")));
+        assert!(is_binary_content_type(Some("application/octet-stream")));
+        assert!(is_binary_content_type(Some("video/mp4; charset=binary")));
+        assert!(!is_binary_content_type(Some("application/json")));
+        assert!(!is_binary_content_type(Some("text/plain")));
     }
 }
