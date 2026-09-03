@@ -1,5 +1,10 @@
 # Wiki 操作日志
 
+## [2026-09-03] TDD 启动 | 对话记忆索引摘要模型接口约束
+
+- 用户确认模型输出保持 `summary + keywords`，要求接口级结构化约束；新增 TDD 固定 System Prompt、assistant 正文输入边界、严格 JSON Schema、程序二次校验和失败不写入测试矩阵。
+- 本轮只写入 TDD 与入口记录，不修改运行时代码，不执行真实模型或跨平台验收。
+
 ## [2026-09-01] TDD 启动 | 对话记忆索引 V2
 
 - 新建 [[开发/通用记忆工作台对话记忆索引按钮TDD-V2-2026-09-01]]，先固定 V2 格式、按路径读写和无 Raw/目录扫描测试，再执行 Runtime 与 Skill 修改。
@@ -1121,3 +1126,9 @@
 - 6 个 Minimax-h3 RunningHub AI App 通过 `rh-aiapp` 通用模型接入，不新增独立模型名或渠道 ID。
 - 服务器部署固定为 `/opt/jiucai-repo` 拉取 `main`、稀疏检出 `rh-adapter`、复制到 `/opt/rh-adapter`，再执行 `docker compose up -d --force-recreate --build rh-adapter`；`.env` 的 `RH_AI_APP_WHITELIST` 必须包含新 `webappId`。
 - 首次部署因在 `/opt/rh-adapter` 执行 `cp rh-adapter/*` 而失败，修正复制目录和白名单后，容器内映射、公网 `app-directory`（11 项）及创作面板显示均已确认。
+
+## [2026-09-03] 实施完成 | 对话记忆索引摘要模型接口约束
+
+- 索引模型固定返回 `summary + keywords`；请求携带严格 `response_format.json_schema`，程序只解析 `message.content`，拒绝 reasoning、Markdown、额外字段、截断和长度越界，并在校验成功后才写入 Wiki。
+- 已补摘要请求与响应解析 TDD，删除 JSON 大括号截取和 reasoning fallback；不支持结构化输出的模型明确失败且不写入。
+- 本地 focused `1176/1176`、`vue-tsc -b`、格式检查和 `git diff --check` 通过；真实 `jiucaihezi`、Ollama、MLX Provider、Web/Desktop/Mobile 人工验收仍待执行。

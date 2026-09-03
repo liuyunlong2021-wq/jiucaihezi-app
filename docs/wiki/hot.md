@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-03] 对话记忆索引摘要模型接口约束（已实施）
+
+- 用户确认索引模型必须继续返回 `summary + keywords`；请求改用严格 `response_format.json_schema`，程序二次校验后才拼装 Wiki。
+- 不支持 `json_schema` 的模型明确失败且不写索引；不使用 Prompt-only、JSON 大括号截取或 reasoning fallback。详见 [[开发/通用记忆工作台对话记忆索引摘要模型接口约束TDD-2026-09-03]]。
+- 摘要请求、严格 Schema、可见 `message.content` 解析和程序边界校验已落地；focused `1176/1176`、`vue-tsc -b`、格式检查和差异检查通过。真实 `jiucaihezi`、Ollama、MLX Provider 与三端人工验收仍待执行。
+
 ## [2026-09-01] 对话记忆索引 V2 正确链路
 
 - 写入只处理用户点击的当前 assistant 输出：一次模型请求生成 `summary + keywords`，程序生成 Raw 正链并按 conversation ID 直接更新固定索引文件；写入时不读 Raw、不扫描目录。
