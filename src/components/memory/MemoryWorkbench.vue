@@ -691,8 +691,6 @@ async function openResource(resource: ProjectResourceOpenResult) {
     runVisible.value = false
   }
   streamingText.value = ''
-  editingMarkdown.value = false
-  markdownSaveError.value = ''
   if (resource.type === 'conversation') {
     if (creationMounted.value) {
       try { await creationPanelRef.value?.flushCanvasSave?.() } catch (cause) {
@@ -700,8 +698,6 @@ async function openResource(resource: ProjectResourceOpenResult) {
         return
       }
     }
-    backlinks.value = []
-    closePreview()
     opened.value = resource
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     conversationPickerOpen.value = false
@@ -730,6 +726,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
     }
     void loadConversationAttachmentPreviews(resource, generation)
   } else {
+    editingMarkdown.value = false
+    markdownSaveError.value = ''
     if (creationMounted.value && !(await closeCreationHost())) return
     if (generation !== resourceOpenGeneration) return
     prepareDockLayout()

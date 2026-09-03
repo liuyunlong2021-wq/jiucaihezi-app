@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-09-03] 实施完成 | 对话切换保持中间文档
+
+- 根因：`openResource()` 的 conversation 分支无条件调用 `closePreview()`，将右侧对话切换误当成中间资源切换，清空 `previewResource` 并退出 Markdown 编辑态。
+- 修复：仅在中间资源分支执行预览/编辑状态清理；conversation 分支保留当前文档和编辑状态。显式关闭预览、打开其他资源、切换创作面板和切换项目仍可清理。
+- 新增源码级回归测试；focused `1177/1177` 通过。真实 Desktop/Web/Mobile 人工验收未执行，不能据此登记为跨端验收通过。
+
 ## [2026-09-03] TDD 启动 | 对话记忆索引摘要模型接口约束
 
 - 用户确认模型输出保持 `summary + keywords`，要求接口级结构化约束；新增 TDD 固定 System Prompt、assistant 正文输入边界、严格 JSON Schema、程序二次校验和失败不写入测试矩阵。

@@ -1,5 +1,10 @@
 # 热缓存
 
+## [2026-09-03] 对话切换保持中间文档
+
+- `MemoryWorkbench.openResource()` 已隔离 conversation 与中间资源清理路径；新建/切换对话不会关闭当前文档预览，也不会退出 Markdown 编辑态。显式关闭预览、打开其他资源、切换创作面板或切换项目仍按原合同清理。
+- 回归测试已加入 `memoryWorkbench.test.ts`，focused `1177/1177` 通过；`vue-tsc -b`、真实 Desktop/Web/Mobile 人工验收待执行。
+
 ## [2026-09-03] 对话记忆索引摘要模型接口约束（已实施）
 
 - 用户确认索引模型必须继续返回 `summary + keywords`；请求改用严格 `response_format.json_schema`，程序二次校验后才拼装 Wiki。

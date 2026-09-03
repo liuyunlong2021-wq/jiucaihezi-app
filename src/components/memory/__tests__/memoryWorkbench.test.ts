@@ -60,6 +60,20 @@ test('memory right chat dock separates preview layout and collapses to a compact
   assert.match(markdown, /<JcIcon v-else name="view-list" \/>/)
 })
 
+test('switching conversations keeps the middle document preview open', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const conversationBranch = workbench.match(
+    /if \(resource\.type === 'conversation'\) \{([\s\S]*?)\n  \} else \{/,
+  )?.[1]
+
+  assert.ok(conversationBranch, 'conversation resource branch should exist')
+  assert.doesNotMatch(conversationBranch, /closePreview\(\)/)
+  assert.doesNotMatch(conversationBranch, /editingMarkdown\.value\s*=\s*false/)
+  assert.doesNotMatch(conversationBranch, /markdownSaveError\.value\s*=\s*''/)
+  assert.match(workbench, /function closePreview\(\)[\s\S]*previewResource\.value = null/)
+  assert.match(workbench, /<button[^>]*title="关闭预览"[^>]*@click="closePreview"/)
+})
+
 test('memory composer keeps long Chinese input inside the available width', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /\.memory-input-row \{[^}]*min-width: 0;/)
