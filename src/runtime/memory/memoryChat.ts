@@ -41,6 +41,7 @@ import {
   parseCreativeToolArguments,
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
+  MEMORY_SEARCH_TOOL_DEFINITION,
 } from '@/runtime/direct/creativeToolContract'
 import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
@@ -148,6 +149,8 @@ export function selectMemoryTools(
   skillAllowedToolNames: string[] = [],
 ): any[] {
   const allowed = new Set<string>()
+  // T4: memory_search is now a native tool, always available
+  allowed.add('memory_search')
   if (selectedSkillNames.includes('jc-jiyi')) allowed.add('conversation_memory_query')
   if (knowledgeFilesSelected)
     for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
@@ -402,6 +405,34 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
 
   const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
     signal?.throwIfAborted()
+    // T4: memory_search - native tool for current conversation
+    if (call.function.name === 'memory_search') {
+      const args = parseCreativeToolArguments(call)
+      if (!input.projectId || !input.conversationId) {
+        return {
+          content: JSON.stringify({ error: 'NO_CONVERSATION', message: '当前对话未绑定项目' }),
+          status: 'failed' as const
+        }
+      }
+      try {
+        const result = await queryConversationMemoryIndex(
+          input.projectId,
+          input.conversationId,
+          String(args.query || ''),
+          createRuntimeProjectFileService(),
+          Math.min(Number(args.limit) || 5, 10),
+        )
+        return { content: JSON.stringify(result) }
+      } catch (error) {
+        return {
+          content: JSON.stringify({
+            error: 'QUERY_FAILED',
+            message: error instanceof Error ? error.message : '查询失败'
+          }),
+          status: 'failed' as const
+        }
+      }
+    }
     if (isSkillCreatorToolName(call.function.name)) {
       if (!selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')) {
         return { content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }), status: 'failed' as const }
@@ -473,6 +504,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
   const sceneResults = new Map<string, ReturnType<typeof parseScene3DResultMarkers>[number]>()
   const allMemoryToolDefinitions = [
+    // T4: Add memory_search as native tool
+    MEMORY_SEARCH_TOOL_DEFINITION,
     ...(desktopRuntime
     ? buildMemoryDesktopToolDefinitions()
     : buildMemoryWebProjectToolDefinitions()),

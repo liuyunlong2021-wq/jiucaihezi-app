@@ -49,6 +49,16 @@ export const TOOL_DESCRIBE_TOOL_DEFINITION = tool(
   ['name'],
 )
 
+export const MEMORY_SEARCH_TOOL_DEFINITION = tool(
+  'memory_search',
+  'Search earlier assistant responses in the current conversation. Only finds content from this conversation, not from other conversations. Read-only.',
+  {
+    query: { type: 'string', description: 'Keywords or topic to search for in earlier responses' },
+    limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum number of results to return' },
+  },
+  ['query'],
+)
+
 export const CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION = tool(
   'conversation_memory_query',
   'Query the active conversation memory index and return exact matching user/assistant turns. Read-only and limited to the current conversation.',
