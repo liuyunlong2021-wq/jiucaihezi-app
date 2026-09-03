@@ -151,6 +151,7 @@ export function selectMemoryTools(
   const allowed = new Set<string>()
   // T4: memory_search is now a native tool, always available
   allowed.add('memory_search')
+  // T5: jc-jiyi retired - conversation_memory_query only for backward compatibility
   if (selectedSkillNames.includes('jc-jiyi')) allowed.add('conversation_memory_query')
   if (knowledgeFilesSelected)
     for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
