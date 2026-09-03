@@ -265,22 +265,21 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
   const maxOutputTokens =
     model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
-  const context = explicitCapabilitySelected
-    ? buildCreativeContext({
-        messages: [...input.conversationTurns, input.userTurn],
-        modelId: input.modelId,
-        contextWindow,
-        // Reserve the model output ceiling plus a small protocol/tool allowance.
-        reservedTokens: maxOutputTokens + Math.min(32_768, Math.max(2_048, Math.floor(contextWindow * 0.1))),
-      })
-    : { messages: [input.userTurn], omittedMessages: 0 }
+  // T1: Always build context with recent history, regardless of capability selection
+  const context = buildCreativeContext({
+    messages: [...input.conversationTurns, input.userTurn],
+    modelId: input.modelId,
+    contextWindow,
+    // Reserve the model output ceiling plus a small protocol/tool allowance.
+    reservedTokens: maxOutputTokens + Math.min(32_768, Math.max(2_048, Math.floor(contextWindow * 0.1))),
+  })
   if (context.omittedMessages > 0) input.onContextTrimmed?.(context.omittedMessages)
   const messages: DirectApiMessage[] = buildDirectMessages({
     messages: context.messages,
     historyLimit: null,
     systemPrompt: [
       !explicitCapabilitySelected
-        ? '只回答当前用户消息。不要读取历史、Skill、项目文件或任何工具；不要把模型自身的工具能力暴露给本轮任务。'
+        ? '你是韭菜盒子记忆工作台。已提供最近轮次对话历史保持连续；回答当前用户消息。本轮未选择 Skill 或工具，不要使用任何工具能力。'
         : [
             '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，用户明确指定的项目文件是长期事实源。',
             '不得查找 Raw 对话记录补充当前任务；缺少事实时查询指定文件或询问用户。',

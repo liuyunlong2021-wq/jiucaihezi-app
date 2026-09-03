@@ -12,7 +12,7 @@ export interface CreativeContextMessage {
 }
 
 const MAX_HISTORY_ROUNDS = 3
-const MAX_HISTORY_TOKENS = 12_000
+const MAX_HISTORY_TOKENS = 24_000
 
 const FAILED_ASSISTANT_FINISH_REASONS = new Set([
   'network_error',

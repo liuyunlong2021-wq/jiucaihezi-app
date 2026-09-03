@@ -19,6 +19,7 @@ export interface ConversationTurn {
   content: string
   createdAt: string
   attachments?: ConversationAttachment[]
+  skillNames?: string[]
 }
 
 export interface ConversationTranscript {
@@ -42,7 +43,7 @@ export function conversationDocumentSources(turns: ConversationTurn[]): Array<{ 
 
 const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"\s*-->/
 // Keep accepting the removed mode attribute so existing Raw conversations remain readable.
-const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(?:quick|memory)")?(?:\s+attachments="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
+const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(?:quick|memory)")?(?:\s+attachments="([^"]*)")?(?:\s+skills="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
 
 export function isConversationPath(path: string): boolean {
   return String(path || '').replace(/^\/+/, '').startsWith(`${CONVERSATION_DIRECTORY}/`)
@@ -63,8 +64,9 @@ export function parseConversationTranscript(path: string, content: string): Conv
       id: match[1],
       role: match[2] as ConversationTurn['role'],
       createdAt: match[3],
-      content: match[5],
+      content: match[6],
       attachments: parseAttachments(match[4]),
+      skillNames: parseSkillNames(match[5]),
     }
     const previous = turns.at(-1)
     // ponytail: normalize the old click+Enter race without rewriting the user's Raw file.
@@ -87,7 +89,7 @@ export function appendConversationTurn(content: string, turn: ConversationTurn):
   const heading = turn.role === 'user' ? '用户' : '助手'
   const block = [
     `<a id="jc-turn-${attribute(turn.id)}"></a>`,
-    `<!-- jc:turn id="${attribute(turn.id)}" role="${turn.role}" created-at="${attribute(turn.createdAt)}"${serializeAttachments(turn.attachments)} -->`,
+    `<!-- jc:turn id="${attribute(turn.id)}" role="${turn.role}" created-at="${attribute(turn.createdAt)}"${serializeAttachments(turn.attachments)}${serializeSkillNames(turn.skillNames)} -->`,
     `## ${heading}`,
     '',
     turn.content.replace(/\s+$/, ''),
@@ -217,4 +219,23 @@ function cleanTitle(value: string): string {
 
 function attribute(value: string): string {
   return String(value || '').replace(/["<>]/g, '')
+}
+
+function serializeSkillNames(skillNames?: string[]): string {
+  if (!skillNames?.length) return ''
+  const names = skillNames.filter(name => String(name || '').trim())
+  if (!names.length) return ''
+  return ` skills="${attribute(encodeURIComponent(JSON.stringify(names)))}"`
+}
+
+function parseSkillNames(value?: string): string[] | undefined {
+  if (!value) return undefined
+  try {
+    const parsed = JSON.parse(decodeURIComponent(value))
+    if (!Array.isArray(parsed)) return undefined
+    const names = parsed.filter(name => typeof name === 'string' && name.trim()).map(name => String(name).trim())
+    return names.length ? names : undefined
+  } catch {
+    return undefined
+  }
 }
