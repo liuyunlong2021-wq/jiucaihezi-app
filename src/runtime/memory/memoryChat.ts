@@ -86,6 +86,7 @@ export interface MemoryChatInput {
   attachments?: ResolvedDirectAttachment[]
   files?: DirectMessageFile[]
   selectedSkillNames?: string[]
+  memoryQueryEnabled?: boolean
   fileToolsSelected?: boolean
   selectedMcpToolNames?: string[]
   mediaSelected?: boolean
@@ -147,10 +148,10 @@ export function selectMemoryTools(
   scene3dSelected = false,
   terminalSelected = false,
   skillAllowedToolNames: string[] = [],
+  memoryQueryEnabled = true,
 ): any[] {
   const allowed = new Set<string>()
-  // T4: memory_search is now a native tool, always available
-  allowed.add('memory_search')
+  if (memoryQueryEnabled) allowed.add('memory_search')
   // T5: jc-jiyi retired - conversation_memory_query only for backward compatibility
   if (selectedSkillNames.includes('jc-jiyi')) allowed.add('conversation_memory_query')
   if (knowledgeFilesSelected)
@@ -269,6 +270,24 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
   const maxOutputTokens =
     model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
+  let memoryQueryContext = ''
+  if (input.memoryQueryEnabled && input.projectId && input.conversationId) {
+    const result = await queryConversationMemoryIndex(
+      input.projectId,
+      input.conversationId,
+      latestUserText,
+      createRuntimeProjectFileService(),
+      5,
+    )
+    if (result.matches.length) {
+      memoryQueryContext = [
+        '当前对话记忆查询结果（只读历史参考；项目文件和用户明确指令优先）：',
+        ...result.matches.map((match, index) =>
+          `${index + 1}. ${match.summary}\n关键词：${match.keywords.join('、')}\n原文：${match.content.slice(0, 6000)}`,
+        ),
+      ].join('\n\n')
+    }
+  }
   // T1: Always build context with recent history, regardless of capability selection
   const context = buildCreativeContext({
     messages: [...input.conversationTurns, input.userTurn],
@@ -302,7 +321,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           ].join('\n'),
     ]
       .filter(Boolean)
-      .join('\n\n'),
+      .join('\n\n') + (memoryQueryContext ? `\n\n${memoryQueryContext}` : ''),
     skillSystemPrompt: explicitCapabilitySelected
       ? [
           (input.mediaSelected || input.avSelected || [...skillAllowedToolNames].some(name => name === 'media' || name === 'av'))
@@ -537,6 +556,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     Boolean(input.scene3dSelected),
     Boolean(input.terminalSelected),
     declaredSkillTools,
+    input.memoryQueryEnabled !== false,
   )
   const authorizedMemoryToolDefinitions = memoryToolDefinitions
   const allowedMemoryToolNames = new Set(

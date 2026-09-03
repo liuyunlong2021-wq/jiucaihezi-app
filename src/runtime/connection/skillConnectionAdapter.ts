@@ -186,10 +186,10 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 如果测试显示命中不准、without_skill 也能通过、用户说"不够准"或"触发不稳定"，调用 skill_creator_improve_description 优化 YAML description，并把完整 SKILL.md 展示给用户确认。
 
 ### 步骤 7：等待用户确认并输出安装卡
-用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认满意后，输出一个 ```jc-skill-install 代码块，包含完整的 SKILL.md 内容（含 YAML frontmatter 和正文）。用户会看到安装卡并点击安装按钮，系统会自动调用 save_skill 保存。
+用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认满意后，输出一个 \`\`\`jc-skill-install 代码块，包含完整的 SKILL.md 内容（含 YAML frontmatter 和正文）。用户会看到安装卡并点击安装按钮，系统会自动调用 save_skill 保存。
 
 安装卡格式示例：
-```
+\`\`\`
 Skill 已准备好，请确认安装。
 
 \`\`\`jc-skill-install
@@ -204,7 +204,7 @@ triggers:
 # 指令正文
 ...
 \`\`\`
-```
+\`\`\`
 
 绝对不要在用户确认之前输出安装卡。输出安装卡后不要自己调用 save_skill，系统会在用户点击安装按钮时自动调用。
 

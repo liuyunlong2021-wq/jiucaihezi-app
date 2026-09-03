@@ -57,9 +57,11 @@ export async function queryConversationMemoryIndex(owner: string, conversationId
     try { rawTexts.set(entry.rawPath, (await files.readTextAt(owner, entry.rawPath)).content) } catch { rawTexts.set(entry.rawPath, '') }
   }
   const matches = candidates.flatMap(({ entry }) => {
+    if (!entry.rawPath.startsWith(`${MEMORY_CONVERSATION_DIRECTORY}/`)) return []
     const raw = rawTexts.get(entry.rawPath)
     const transcript = raw ? parseConversationTranscript(entry.rawPath, raw) : null
-    const assistant = transcript?.turns.find(turn => turn.id === entry.assistantTurnId && turn.role === 'assistant')
+    if (!transcript || transcript.id !== id) return []
+    const assistant = transcript.turns.find(turn => turn.id === entry.assistantTurnId && turn.role === 'assistant')
     return assistant ? [{ summary: entry.summary, keywords: entry.keywords, rawPath: entry.rawPath, assistantTurnId: assistant.id, content: assistant.content }] : []
   })
   return { conversationId: id, matches }

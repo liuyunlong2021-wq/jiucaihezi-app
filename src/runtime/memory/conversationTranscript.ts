@@ -26,6 +26,8 @@ export interface ConversationTranscript {
   id: string
   title: string
   createdAt: string
+  memoryEnabled: boolean
+  memoryQueryEnabled: boolean
   turns: ConversationTurn[]
 }
 
@@ -41,7 +43,7 @@ export function conversationDocumentSources(turns: ConversationTurn[]): Array<{ 
   return [...sources.values()]
 }
 
-const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"\s*-->/
+const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"(?:\s+memory-enabled="(on|off)")?(?:\s+memory-query-enabled="(on|off)")?\s*-->/
 // Keep accepting the removed mode attribute so existing Raw conversations remain readable.
 const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(?:quick|memory)")?(?:\s+attachments="([^"]*)")?(?:\s+skills="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
 
@@ -49,8 +51,13 @@ export function isConversationPath(path: string): boolean {
   return String(path || '').replace(/^\/+/, '').startsWith(`${CONVERSATION_DIRECTORY}/`)
 }
 
-export function createConversationTranscript(id: string, title = '新对话', createdAt = new Date().toISOString()): string {
-  return `# ${cleanTitle(title)}\n\n<!-- jc:conversation id="${attribute(id)}" created-at="${attribute(createdAt)}" -->\n`
+export function createConversationTranscript(
+  id: string,
+  title = '新对话',
+  createdAt = new Date().toISOString(),
+  settings: Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled'> = { memoryEnabled: true, memoryQueryEnabled: true },
+): string {
+  return `# ${cleanTitle(title)}\n\n<!-- jc:conversation id="${attribute(id)}" created-at="${attribute(createdAt)}" memory-enabled="${settings.memoryEnabled ? 'on' : 'off'}" memory-query-enabled="${settings.memoryQueryEnabled ? 'on' : 'off'}" -->\n`
 }
 
 export function parseConversationTranscript(path: string, content: string): ConversationTranscript | null {
@@ -73,7 +80,12 @@ export function parseConversationTranscript(path: string, content: string): Conv
     if (previous && isAccidentalDuplicate(previous, turn)) continue
     turns.push(turn)
   }
-  return { id: marker[1], title, createdAt: marker[2], turns }
+  return {
+    id: marker[1], title, createdAt: marker[2],
+    memoryEnabled: marker[3] !== 'off',
+    memoryQueryEnabled: marker[4] !== 'off',
+    turns,
+  }
 }
 
 function isAccidentalDuplicate(previous: ConversationTurn, current: ConversationTurn): boolean {
@@ -109,7 +121,7 @@ export function replaceConversationTurnAndTruncate(
   const index = transcript.turns.findIndex(turn => turn.id === turnId)
   if (index < 0 || transcript.turns[index]?.role !== 'user') throw new Error('只能编辑用户消息')
   if (replacement.role !== 'user' || assistant.role !== 'assistant') throw new Error('编辑轮次角色不正确')
-  let next = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt)
+  let next = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt, transcript)
   for (const turn of [...transcript.turns.slice(0, index), replacement, assistant]) next = appendConversationTurn(next, turn)
   return next
 }
@@ -126,6 +138,7 @@ export function mergeConversationTranscriptContents(path: string, remote: string
     localTranscript.id,
     localTranscript.title === '新对话' ? remoteTranscript.title : localTranscript.title,
     localTranscript.createdAt,
+    localTranscript,
   )
   for (const turn of ordered) merged = appendConversationTurn(merged, turn)
   return merged
@@ -154,7 +167,7 @@ export function remapConversationAttachmentPaths(
     }),
   }))
   if (!changed) return content
-  let remapped = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt)
+  let remapped = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt, transcript)
   for (const turn of turns) remapped = appendConversationTurn(remapped, turn)
   return remapped
 }

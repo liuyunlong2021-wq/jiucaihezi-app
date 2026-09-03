@@ -239,7 +239,7 @@ test('memory space and conversations are created only by their explicit actions'
   assert.match(project, /migrateLegacyMemoryMaterials[\s\S]*kind: 'move'[\s\S]*'keep-both'/)
   assert.match(
     project,
-    /appendMemoryRound[\s\S]*return mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/,
+    /appendMemoryRound[\s\S]*const result = await mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/,
   )
 })
 
@@ -441,14 +441,11 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(runtime, /reservedTokens: maxOutputTokens \+ Math\.min\(32_768, Math\.max\(2_048, Math\.floor\(contextWindow \* 0\.1\)\)\)/)
   assert.match(
     workbench,
-    /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.has\(active\.transcript\.id\)/,
+    /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.add\(active\.transcript\.id\)/,
   )
-  assert.match(
-    workbench,
-    /点击“写入 Wiki”保存这条记忆，之后使用 @jiyiskill 即可精准找回相关内容/,
-  )
-  assert.match(workbench, /memory-status.*success: !error && status\.startsWith\('已写入 Wiki'\)/)
-  assert.match(workbench, /v-if="!error && status\.startsWith\('已写入 Wiki'\)" name="check_circle"/)
+  assert.match(workbench, /recordConversation\(turn\)/)
+  assert.match(workbench, /memory-status.*success: !error && status\.startsWith\('已记录对话'\)/)
+  assert.match(workbench, /v-if="!error && status\.startsWith\('已记录对话'\)" name="check_circle"/)
   assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{/)
 })
@@ -515,7 +512,7 @@ test('memory mode keeps explicit Skill and plugin connections', () => {
   assert.match(workbench, /v-show="mentionOpen && !sending"/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
-  assert.match(workbench, /selectedSkillNames: selectedSkillNames\.value/)
+  assert.match(workbench, /selectedSkillNames: skillSnapshot/)
   assert.doesNotMatch(workbench, /wikiSelected|@Wiki/)
   assert.match(runtime, /selectMemoryTools\(\n\s*allMemoryToolDefinitions/)
   assert.doesNotMatch(runtime, /WikiAgent|wikiProtocolTask|runWikiTwoPhase/)

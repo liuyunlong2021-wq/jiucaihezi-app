@@ -25,9 +25,11 @@ import {
   inspectMemoryProject,
   renameMemoryConversation,
   replaceMemoryRound,
+  updateMemoryConversationSettings,
   writeConversationMemoryIndex,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
+import { persistSkillPackageDraft } from '@/utils/skillPackageStorage'
 import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
@@ -120,6 +122,8 @@ type MemoryIndexState = 'idle' | 'writing' | 'success' | 'error'
 const memoryIndexStates = ref<Record<string, MemoryIndexState>>({})
 const memoryIndexErrors = ref<Record<string, string>>({})
 const memoryIndexPaths = ref<Record<string, string>>({})
+const memoryEnabled = ref(true)
+const memoryQueryEnabled = ref(true)
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
@@ -665,6 +669,25 @@ async function startNewConversation() {
   }
 }
 
+async function toggleConversationSetting(kind: 'memory' | 'query') {
+  const active = conversation.value
+  if (!active || projectActionPending.value) return
+  const next = kind === 'memory' ? !memoryEnabled.value : !memoryQueryEnabled.value
+  if (kind === 'memory') memoryEnabled.value = next
+  else memoryQueryEnabled.value = next
+  try {
+    const updated = await updateMemoryConversationSettings(active.resource, kind === 'memory'
+      ? { memoryEnabled: next }
+      : { memoryQueryEnabled: next }, files)
+    rememberConversation(updated)
+    if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
+  } catch (cause) {
+    if (kind === 'memory') memoryEnabled.value = !next
+    else memoryQueryEnabled.value = !next
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  }
+}
+
 watch(() => conversation.value?.transcript.turns.length, async () => {
   await nextTick()
   memoryScrollNav.value?.scheduleAutoScrollIfNeeded()
@@ -699,6 +722,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
       }
     }
     opened.value = resource
+    memoryEnabled.value = resource.transcript.memoryEnabled
+    memoryQueryEnabled.value = resource.transcript.memoryQueryEnabled
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     conversationPickerOpen.value = false
     conversationSearch.value = ''
@@ -1001,9 +1026,9 @@ async function commitFileWrite() {
   }
 }
 
-async function writeMemoryIndex(turn: ConversationTurn) {
-  const active = conversation.value
-  const owner = projectOwner.value
+async function recordConversation(turn: ConversationTurn, source = conversation.value) {
+  const active = source
+  const owner = active?.resource.owner || projectOwner.value
   if (!active || !owner || turn.role !== 'assistant' || memoryIndexStates.value[turn.id] === 'writing' || memoryIndexStates.value[turn.id] === 'success') return
   const index = active.transcript.turns.findIndex(item => item.id === turn.id)
   if (index < 0) { error.value = '这条回答已不存在或已被编辑'; return }
@@ -1015,7 +1040,7 @@ async function writeMemoryIndex(turn: ConversationTurn) {
     const path = await writeConversationMemoryIndex(owner, { conversationId: active.transcript.id, rawPath: active.resource.path, assistantTurnId: turn.id, runtime: active.resource.runtime }, summary, files)
     memoryIndexPaths.value = { ...memoryIndexPaths.value, [turn.id]: path }
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'success' }
-    status.value = `已写入 Wiki：${path}`
+    status.value = `已记录对话：${path}`
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause)
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'error' }
@@ -1188,6 +1213,9 @@ async function send() {
   const active = conversation.value
   const message = input.value.trim()
   const pendingAttachments = attachments.value.slice()
+  const memorySnapshot = memoryEnabled.value
+  const memoryQuerySnapshot = memoryQueryEnabled.value
+  const skillSnapshot = selectedSkillNames.value.slice()
   if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
   const editTargetId = editingTurnId.value
@@ -1208,6 +1236,7 @@ async function send() {
     content: message || '请查看以下附件。',
     createdAt: new Date().toISOString(),
     attachments: attachmentMetadata(pendingAttachments),
+    skillNames: skillSnapshot,
   }
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
@@ -1235,7 +1264,8 @@ async function send() {
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
       attachments: pendingAttachments,
       files: referencedFiles.value,
-      selectedSkillNames: selectedSkillNames.value,
+      selectedSkillNames: skillSnapshot,
+      memoryQueryEnabled: memoryQuerySnapshot,
       fileToolsSelected: fileToolsSelected.value,
       selectedMcpToolNames: selectedMcpToolNames.value,
       mediaSelected: mediaSelected.value,
@@ -1295,6 +1325,7 @@ async function send() {
     streamingText.value = ''
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
+      if (memorySnapshot) void recordConversation(turn, { ...active, transcript: complete.transcript })
       if (pendingProgramStatus.value) programStatuses.value[turn.id] = pendingProgramStatus.value
       try {
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
@@ -1309,7 +1340,6 @@ async function send() {
     }
     attachments.value = []
     referencedFiles.value = []
-    selectedSkillNames.value = []
     clearToolSelections()
     editingTurnId.value = ''
     input.value = ''
@@ -1338,7 +1368,6 @@ async function send() {
           opened.value = await openProjectResource(files, interrupted.resource)
           attachments.value = []
           referencedFiles.value = []
-          selectedSkillNames.value = []
           clearToolSelections()
           input.value = ''
           setEditorText(composerRef.value, '')
@@ -1960,6 +1989,18 @@ async function approveSkillInstall(turnId: string) {
   skillInstallErrors.value[turnId] = ''
   const existing = installedSkill(plan)
   try {
+    // 保存到 ~/.agents/skills 目录
+    const persisted = await persistSkillPackageDraft({
+      skillId: plan.id,
+      skillMd: plan.skillMd,
+      references: [],
+    })
+
+    if (!persisted) {
+      throw new Error('无法保存 Skill 包到本地目录')
+    }
+
+    // 同时更新 AgentStore（用于 UI 显示和触发器）
     await agentStore.createAgent({
       id: plan.id,
       name: plan.name,
@@ -2370,6 +2411,24 @@ function readDataUrl(file: File): Promise<string> {
             title="创作面板"
             @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
           ><JcIcon name="palette" /></button>
+          <button
+            v-if="conversation"
+            class="memory-toggle-button"
+            :class="{ enabled: memoryEnabled }"
+            type="button"
+            :aria-pressed="memoryEnabled"
+            :title="memoryEnabled ? '关闭对话记忆' : '开启对话记忆'"
+            @click="toggleConversationSetting('memory')"
+          ><span class="memory-toggle-label">对话记忆</span><span class="memory-toggle-state">{{ memoryEnabled ? '开' : '关' }}</span></button>
+          <button
+            v-if="conversation"
+            class="memory-toggle-button"
+            :class="{ enabled: memoryQueryEnabled }"
+            type="button"
+            :aria-pressed="memoryQueryEnabled"
+            :title="memoryQueryEnabled ? '关闭对话查询' : '开启对话查询'"
+            @click="toggleConversationSetting('query')"
+          ><span class="memory-toggle-label">对话查询</span><span class="memory-toggle-state">{{ memoryQueryEnabled ? '开' : '关' }}</span></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -2461,9 +2520,9 @@ function readDataUrl(file: File): Promise<string> {
               :class="`state-${memoryIndexStates[turn.id] || 'idle'}`"
               type="button"
               :disabled="memoryIndexStates[turn.id] === 'writing' || memoryIndexStates[turn.id] === 'success'"
-              :title="memoryIndexStates[turn.id] === 'error' ? `写入 Wiki 失败：${memoryIndexErrors[turn.id] || '请重试'}` : memoryIndexPaths[turn.id] ? `已写入 Wiki：${memoryIndexPaths[turn.id]}` : '写入 Wiki'"
-              @click="writeMemoryIndex(turn)"
-            ><JcIcon :name="memoryIndexStates[turn.id] === 'writing' ? 'sync' : memoryIndexStates[turn.id] === 'error' ? 'error' : 'save'" :class="{ spinning: memoryIndexStates[turn.id] === 'writing' }" /><span>{{ memoryIndexStates[turn.id] === 'writing' ? '正在写入 Wiki' : memoryIndexStates[turn.id] === 'success' ? '已写入 Wiki' : memoryIndexStates[turn.id] === 'error' ? '写入 Wiki 失败，重试' : '写入 Wiki' }}</span></button>
+              :title="memoryIndexStates[turn.id] === 'error' ? `记录对话失败：${memoryIndexErrors[turn.id] || '请重试'}` : memoryIndexPaths[turn.id] ? `已记录对话：${memoryIndexPaths[turn.id]}` : '记录对话'"
+              @click="recordConversation(turn)"
+            ><JcIcon :name="memoryIndexStates[turn.id] === 'writing' ? 'sync' : memoryIndexStates[turn.id] === 'error' ? 'error' : 'save'" :class="{ spinning: memoryIndexStates[turn.id] === 'writing' }" /><span>{{ memoryIndexStates[turn.id] === 'writing' ? '正在记录对话' : memoryIndexStates[turn.id] === 'success' ? '已记录对话' : memoryIndexStates[turn.id] === 'error' ? '未记录，重试' : '记录对话' }}</span></button>
             <small v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-error">{{ memoryIndexErrors[turn.id] || '请重试' }}</small>
           </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
@@ -2591,8 +2650,8 @@ function readDataUrl(file: File): Promise<string> {
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error), success: !error && status.startsWith('已写入 Wiki') }">
-          <JcIcon v-if="!error && status.startsWith('已写入 Wiki')" name="check_circle" />
+        <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error), success: !error && status.startsWith('已记录对话') }">
+          <JcIcon v-if="!error && status.startsWith('已记录对话')" name="check_circle" />
           <span>{{ error || status }}</span>
         </div>
         <div
@@ -2803,6 +2862,13 @@ function readDataUrl(file: File): Promise<string> {
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.memory-toggle-button { display: inline-flex; height: 34px; align-items: center; gap: 9px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.memory-toggle-button:hover { border-color: var(--olive); color: var(--olive); }
+.memory-toggle-button.enabled { border-color: color-mix(in srgb, #4b9978 62%, var(--line)); background: color-mix(in srgb, #4b9978 14%, var(--paper)); color: #327657; }
+.memory-toggle-label { line-height: 1; }
+.memory-toggle-state { display: inline-flex; height: 22px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink3); font-size: 11px; line-height: 1; }
+.memory-toggle-button.enabled .memory-toggle-state { border-color: color-mix(in srgb, #4b9978 42%, transparent); background: color-mix(in srgb, #4b9978 16%, var(--paper)); color: #327657; }
+.memory-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
 .memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }

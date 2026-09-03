@@ -40,6 +40,27 @@ test('conversation transcript requires both the Raw path and metadata marker', (
   assert.equal(parseConversationTranscript('.raw/对话记录/plain.md', '# 普通文档\n'), null)
 })
 
+test('conversation transcript stores independent memory settings and keeps legacy defaults', () => {
+  const disabled = createConversationTranscript('chat-settings', '设置', '2026-07-24T10:00:00.000Z', {
+    memoryEnabled: false,
+    memoryQueryEnabled: true,
+  })
+  assert.deepEqual(
+    ((parseConversationTranscript('.raw/对话记录/chat-settings.md', disabled) || {}) as any),
+    {
+      id: 'chat-settings',
+      title: '设置',
+      createdAt: '2026-07-24T10:00:00.000Z',
+      memoryEnabled: false,
+      memoryQueryEnabled: true,
+      turns: [],
+    },
+  )
+  const legacy = '<!-- jc:conversation id="legacy" created-at="2026-07-24T10:00:00.000Z" -->'
+  assert.equal(parseConversationTranscript('.raw/对话记录/legacy.md', legacy)?.memoryEnabled, true)
+  assert.equal(parseConversationTranscript('.raw/对话记录/legacy.md', legacy)?.memoryQueryEnabled, true)
+})
+
 test('conversation transcript appends complete turns and renames only the H1 title', () => {
   const empty = createConversationTranscript('chat_fixed', '新对话', '2026-07-24T10:00:00.000Z')
   const withUser = appendConversationTurn(empty, {
