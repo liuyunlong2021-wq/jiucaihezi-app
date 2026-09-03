@@ -185,11 +185,31 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 ### 步骤 6.5：优化命中描述
 如果测试显示命中不准、without_skill 也能通过、用户说"不够准"或"触发不稳定"，调用 skill_creator_improve_description 优化 YAML description，并把完整 SKILL.md 展示给用户确认。
 
-### 步骤 7：等待用户确认后保存
-用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能调用 save_skill 工具。绝对不要在用户确认之前自行保存。保存后告诉用户："Skill已保存，在「我的Skill」中可用。"
+### 步骤 7：等待用户确认并输出安装卡
+用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认满意后，输出一个 ```jc-skill-install 代码块，包含完整的 SKILL.md 内容（含 YAML frontmatter 和正文）。用户会看到安装卡并点击安装按钮，系统会自动调用 save_skill 保存。
 
-### 步骤 8：打包预检
-保存前可调用 skill_creator_package 做官方 .skill 包预检。这个步骤是内部能力，不要让用户理解文件夹、脚本或 manifest 细节。
+安装卡格式示例：
+```
+Skill 已准备好，请确认安装。
+
+\`\`\`jc-skill-install
+---
+name: skill-name
+description: "Skill 描述"
+triggers:
+  - 触发词1
+  - 触发词2
+---
+
+# 指令正文
+...
+\`\`\`
+```
+
+绝对不要在用户确认之前输出安装卡。输出安装卡后不要自己调用 save_skill，系统会在用户点击安装按钮时自动调用。
+
+### 步骤 8：打包预检（可选）
+如果需要，可在输出安装卡前调用 skill_creator_package 做官方 .skill 包预检。这个步骤是内部能力，不要让用户理解文件夹、脚本或 manifest 细节。
 `
 
 const SKILL_BUILDER_RUNTIME_APPENDIX_BASE = `
