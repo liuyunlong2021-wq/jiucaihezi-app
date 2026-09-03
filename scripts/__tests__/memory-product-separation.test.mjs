@@ -142,7 +142,6 @@ test('current product instructions and packaged Wiki templates use the memory co
 
 test('App bundles only the remaining product Skills', () => {
   const expected = [
-    'jc-jiyi',
     'jc-new-user-guide',
     'skill-creator',
     'wiki-memory',
