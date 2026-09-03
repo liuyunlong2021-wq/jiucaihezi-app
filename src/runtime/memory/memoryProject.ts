@@ -29,6 +29,7 @@ const MAX_WRITE_ATTEMPTS = 3
 export interface MemoryConversation {
   resource: ProjectResource
   transcript: ConversationTranscript
+  lastAssistantTurnId?: string
 }
 
 export interface MemoryProjectState {
@@ -129,12 +130,14 @@ export async function appendMemoryRound(
     content: String(assistantContent || '').trim(),
     createdAt: new Date().toISOString(),
   }
-  return mutateConversation(resource, files, current => {
+  const result = await mutateConversation(resource, files, current => {
     const transcript = parseConversationTranscript(resource.path, current)
     if (transcript?.turns.some(turn => turn.id === userTurn.id)) return current
     const complete = appendConversationTurn(appendConversationTurn(current, userTurn), assistantTurn)
     return title ? renameConversationTranscript(complete, title) : complete
   })
+  // T3: Return assistant turn ID for auto-indexing
+  return { ...result, lastAssistantTurnId: assistantTurn.id }
 }
 
 export async function replaceMemoryRound(
@@ -148,10 +151,12 @@ export async function replaceMemoryRound(
   const assistantTurn: ConversationTurn = {
     id: uniqueId('turn'), role: 'assistant', content: String(assistantContent || '').trim(), createdAt: new Date().toISOString(),
   }
-  return mutateConversation(resource, files, current => {
+  const result = await mutateConversation(resource, files, current => {
     const next = replaceConversationTurnAndTruncate(current, targetTurnId, userTurn, assistantTurn)
     return title ? renameConversationTranscript(next, title) : next
   })
+  // T3: Return assistant turn ID for auto-indexing
+  return { ...result, lastAssistantTurnId: assistantTurn.id }
 }
 
 export async function renameMemoryConversation(
