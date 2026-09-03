@@ -217,6 +217,10 @@ test('memory space and conversations are created only by their explicit actions'
   )
   assert.match(workbench, /'新建记忆空间'/)
   assert.match(workbench, /<span>新建对话<\/span>/)
+  assert.match(
+    project,
+    /const result = await mutateConversation[\s\S]*return \{ \.\.\.result, lastAssistantTurnId: assistantTurn\.id \}/,
+  )
   assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
   for (const path of [
     '.raw',
