@@ -61,10 +61,19 @@ test('creation prompt grows for typed and programmatically loaded text', () => {
 test('RH app node 141 prompt is rendered in the composer', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /field\.kind === 'text' && field\.label === '提示词' && field\.key\.startsWith\('141:'\)/)
-  assert.match(source, /!isAiAppPromptField\(field\)/)
+  assert.match(source, /isAiAppPromptField\(field, cpState\.aiAppWebappId\)/)
+  assert.match(source, /!isAiAppPromptField\(field, cpState\.aiAppWebappId\)/)
   assert.match(source, /v-if="showPromptInput \|\| aiAppPromptField"/)
   assert.match(source, /setModelFieldValue\(promptField, cpState\.prompt\)/)
+})
+
+test('creation attachment button uses the native multi-file picker on Desktop', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /async function pickCanvasMediaFiles\(\)/)
+  assert.match(source, /multiple: true/)
+  assert.match(source, /await importDesktopCanvasPaths\(paths\)/)
+  assert.match(source, /@click="pickCanvasMediaFiles"/)
 })
 
 test('creation panel persists and restores complete Leafer scene snapshots', () => {
@@ -922,7 +931,7 @@ test('creation panel lets a remote successful result be saved into its project',
 test('successful, failed and cancelled creation tasks can prefill the panel without resubmitting', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const regenerate = source.match(
-    /function canRegenerateTask[\s\S]*?\n}\n\nfunction regenerateTask[\s\S]*?\n}\n\nasync function retryTaskPersistence/,
+    /function canRegenerateTask[\s\S]*?\n}\n\n(?:async )?function regenerateTask[\s\S]*?\n}\n\nasync function retryTaskPersistence/,
   )?.[0] || ''
 
   assert.match(regenerate, /task\.source === 'creation'/)
@@ -930,8 +939,12 @@ test('successful, failed and cancelled creation tasks can prefill the panel with
   assert.match(regenerate, /task\.status === 'failed'/)
   assert.match(regenerate, /task\.status === 'cancelled'/)
   assert.match(regenerate, /Boolean\(task\.planSnapshot\)/)
-  assert.match(regenerate, /switchTask\(plan\.task\)/)
+  assert.match(regenerate, /const isAiApp = plan\.apiStyle === 'rh-aiapp'/)
+  assert.match(regenerate, /switchTask\(isAiApp \? 'ai-app' : plan\.task\)/)
   assert.match(regenerate, /switchModel\(plan\.modelId\)/)
+  assert.match(regenerate, /cpState\.aiAppWebappId/)
+  assert.match(regenerate, /cpState\.aiAppOutputType/)
+  assert.match(regenerate, /cpState\.aiAppBillingModel/)
   assert.match(regenerate, /cpState\.fieldValues = \{\}/)
   assert.match(regenerate, /cpState\.prompt = task\.prompt/)
   assert.match(regenerate, /cpState\.files = \[\]/)

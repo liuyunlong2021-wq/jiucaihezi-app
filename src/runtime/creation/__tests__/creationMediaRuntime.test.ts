@@ -103,24 +103,18 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
   }
 })
 
-test('Gemini image maps panel ratio and resolution to the verified Xiaoyi size field', { concurrency: false }, async () => {
+test('Gemini image submits the native Xiaoyi generation contract', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
-      const body = init.body as FormData
-      assert.equal(body.get('model'), 'gemini-3-pro-image-preview')
-      assert.equal(body.get('size'), '3840x2160')
-      assert.equal(body.get('aspect_ratio'), null)
-      assert.equal(body.get('quality'), null)
-      assert.equal(body.get('resolution'), null)
-      assert.equal(body.get('seconds'), '1')
-      return Response.json({ id: 'task_xiaoyi_gemini', status: 'processing' })
-    }
-    if (url.endsWith('/v1/videos/task_xiaoyi_gemini')) {
-      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/gemini.png' } })
+    if (url.endsWith('/v1/images/generations') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.model, 'gemini-3-pro-image-preview')
+      assert.equal(body.size, '3840x2160')
+      assert.equal(body.response_format, 'url')
+      return Response.json({ data: [{ url: 'https://cdn.example.test/gemini.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
   }
@@ -511,6 +505,7 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
         { nodeId: '4', fieldName: 'image', fieldValue: 'https://cdn.jiucaihezi.studio/person.png' },
         { nodeId: '10', fieldName: 'value', fieldValue: '832' },
       ])
+      assert.equal(body.webappId, '12345')
       assert.deepEqual(body.extra_fields, { webappId: '12345' })
       return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'processing', ai_app: true })
     }
@@ -549,6 +544,36 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
   }
 })
 
+test('generic RunningHub AI App runtime rejects a plan without webappId before submitting', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let fetchCalled = false
+  globalThis.fetch = async () => {
+    fetchCalled = true
+    throw new Error('fetch must not be called')
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'runninghub/aiapp/rh-aiapp',
+      params: {
+        billingModel: 'rh-aiapp',
+        outputType: 'video',
+        '141:text': 'move',
+      },
+    })
+
+    await assert.rejects(
+      () => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)),
+      /缺少 webappId/,
+    )
+    assert.equal(fetchCalled, false)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('generic RunningHub image and audio AI Apps use their existing media runtimes', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
@@ -559,6 +584,7 @@ test('generic RunningHub image and audio AI Apps use their existing media runtim
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-custom-image')
       assert.deepEqual(body.nodeInfoList, [{ nodeId: '1', fieldName: 'text', fieldValue: 'poster' }])
+      assert.equal(body.webappId, 'image-app')
       assert.deepEqual(body.extra_fields, { webappId: 'image-app' })
       return Response.json({ task_id: 'rh_aiapp_image', status: 'processing', ai_app: true })
     }
@@ -566,6 +592,7 @@ test('generic RunningHub image and audio AI Apps use their existing media runtim
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'rh-custom-audio')
       assert.deepEqual(body.nodeInfoList, [{ nodeId: '2', fieldName: 'text', fieldValue: 'hello' }])
+      assert.equal(body.webappId, 'audio-app')
       assert.deepEqual(body.extra_fields, { webappId: 'audio-app' })
       assert.match(body.voice, /^__rh_nodeinfo__/)
       return Response.json({ task_id: 'rh_aiapp_audio', status: 'processing', ai_app: true })

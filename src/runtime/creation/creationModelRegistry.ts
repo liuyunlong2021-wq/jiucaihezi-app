@@ -34,15 +34,18 @@ const GPT_IMAGE_SIZES = [
 
 const GPT_IMAGE_2_ROUTES: Array<{
   id: string
+  model?: string
   label: string
-  price: number
+  price: number | string
   resolutions: string[]
+  maxImages?: number
 }> = [
   { id: 'gpt-image-2-1k', label: 'GPT Image 2 1K', price: 0.08, resolutions: ['1k'] },
   { id: 'gpt-image-2-低质量', label: 'GPT Image 2 低质量', price: 0.1, resolutions: ['1k', '2k', '4k'] },
   { id: 'gpt-image-2-中质量', label: 'GPT Image 2 中质量', price: 0.15, resolutions: ['1k', '2k', '4k'] },
   { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', price: 0.2, resolutions: ['1k', '2k', '4k'] },
   { id: 'gpt-image-2-官方', label: 'GPT Image 2 官方', price: 0.25, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2-Token', model: '[按token]gpt-image-2', label: 'gpt-image-2-Token', price: '按 Token', resolutions: ['1k', '2k', '4k'], maxImages: 16 },
 ]
 const XIAOYI_GEMINI_FIELDS = promptFields([
   {
@@ -436,7 +439,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   ...GPT_IMAGE_2_ROUTES.map(route => baseSpec({
     id: route.id,
-    model: route.id,
+    model: route.model || route.id,
     label: route.label,
     task: 'image',
     source: 'newapi-direct',
@@ -450,7 +453,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
-    files: { images: { min: 0, max: 8 } },
+    files: { images: { min: 0, max: route.maxImages || 8 } },
     aliases: route.id === 'gpt-image-2-低质量' ? ['gpt-image-2'] : undefined,
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
@@ -651,12 +654,12 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Gemini 3.1 Flash Image',
     price: 0.1,
     upstreamFamily: 'openai-compatible',
-    apiStyle: 'xiaoyi-image-task',
+    apiStyle: 'openai-images',
     mode: 'text-to-image',
-    endpoint: '/v1/videos',
+    endpoint: '/v1/images/generations',
     assetFlow: 'none',
-    resultExtractor: 'newapi-task',
-    pollKind: 'newapi-task',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
     fields: XIAOYI_GEMINI_FIELDS,
     ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'],
     resolutions: ['1k', '2k', '4k'],
@@ -670,12 +673,12 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Gemini 3 Pro Image',
     price: 0.2,
     upstreamFamily: 'openai-compatible',
-    apiStyle: 'xiaoyi-image-task',
+    apiStyle: 'openai-images',
     mode: 'text-to-image',
-    endpoint: '/v1/videos',
+    endpoint: '/v1/images/generations',
     assetFlow: 'none',
-    resultExtractor: 'newapi-task',
-    pollKind: 'newapi-task',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
     fields: XIAOYI_GEMINI_FIELDS,
     ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9'],
     resolutions: ['1k', '2k', '4k'],
