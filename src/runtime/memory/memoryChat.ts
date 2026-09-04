@@ -152,8 +152,6 @@ export function selectMemoryTools(
 ): any[] {
   const allowed = new Set<string>()
   if (memoryQueryEnabled) allowed.add('memory_search')
-  // T5: jc-jiyi retired - conversation_memory_query only for backward compatibility
-  if (selectedSkillNames.includes('jc-jiyi')) allowed.add('conversation_memory_query')
   if (knowledgeFilesSelected)
     for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
       allowed.add(name)
@@ -468,21 +466,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           userInput: latestUserText,
           signal,
         }),
-      }
-    }
-    if (call.function.name === 'conversation_memory_query') {
-      if (!allowedMemoryToolNames.has(call.function.name))
-        return { content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }), status: 'failed' as const }
-      const args = parseCreativeToolArguments(call)
-      if (!input.projectId || !input.conversationId) throw new Error('当前对话未绑定项目或 conversation ID')
-      return {
-        content: JSON.stringify(await queryConversationMemoryIndex(
-          input.projectId,
-          input.conversationId,
-          String(args.query || ''),
-          createRuntimeProjectFileService(),
-          Number(args.limit) || 5,
-        )),
       }
     }
     if (call.function.name === 'tool_search') {

@@ -74,7 +74,7 @@ test('web project tool definitions exclude Desktop-only 3D and custom MCP tools'
   )
   assert.deepEqual(
     buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-    ['read', 'glob', 'grep', 'write', 'edit', 'conversation_memory_query', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
   )
 })
 

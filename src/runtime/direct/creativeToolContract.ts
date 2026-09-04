@@ -59,16 +59,6 @@ export const MEMORY_SEARCH_TOOL_DEFINITION = tool(
   ['query'],
 )
 
-export const CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION = tool(
-  'conversation_memory_query',
-  'Query the active conversation memory index and return exact matching user/assistant turns. Read-only and limited to the current conversation.',
-  {
-    query: { type: 'string', description: 'Current task or focused memory terms to search for' },
-    limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Maximum number of matching turns' },
-  },
-  ['query'],
-)
-
 export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   tool(
     'skill',
@@ -497,7 +487,6 @@ const MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS = [
 const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
 const MEMORY_DESKTOP_TOOL_DEFINITIONS = [
   ...CREATIVE_PROJECT_TOOL_DEFINITIONS.slice(0, -1),
-  CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION,
   ...MEMORY_FILE_TOOL_DEFINITIONS,
   ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   ...MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS,
@@ -523,7 +512,6 @@ type ToolFieldType =
   | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
-  conversation_memory_query: { query: 'string', limit: 'integer' },
   tool_search: { query: 'string', limit: 'integer' },
   tool_describe: { name: 'string' },
   skill: { name: 'string' },

@@ -8,7 +8,6 @@ import {
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
   MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   MEMORY_FILE_TOOL_DEFINITIONS,
-  CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, getMcpServerBridgeToolDefinitions } from '@/runtime/tools/mcpBridge'
 import {
@@ -38,7 +37,6 @@ export function buildWebProjectToolDefinitions() {
 export function buildMemoryWebProjectToolDefinitions() {
   const coreTools = [
     ...WEB_PROJECT_TOOL_DEFINITIONS,
-    CONVERSATION_MEMORY_QUERY_TOOL_DEFINITION,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   ].filter(tool => !['create_3d_scene', 'edit_3d_scene'].includes(tool.function.name))

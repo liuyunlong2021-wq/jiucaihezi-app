@@ -246,7 +246,9 @@ test('memory space and conversations are created only by their explicit actions'
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.ok(workbench.includes("const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')"))
-  assert.ok(workbench.includes('selectedSkillNames.value = [...new Set(latestUserTurn?.skillNames || [])]'))
+  assert.ok(workbench.includes('const availableSkillNames = new Set(['))
+  assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
+  assert.ok(workbench.includes('selectedSkillNames.value = [...new Set((latestUserTurn?.skillNames || []).filter(name => availableSkillNames.has(name)))]'))
   assert.ok(workbench.includes("const created = await createMemoryConversation(owner, '新对话', files)"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
@@ -829,6 +831,7 @@ test('memory Skill install card writes only after explicit approval', () => {
   assert.match(workbench, /parseSkillInstallPlan\(turn\.content\)/)
   assert.match(workbench, /async function approveSkillInstall\(turnId: string\)/)
   assert.match(workbench, /await agentStore\.createAgent\(/)
+  assert.doesNotMatch(workbench, /persistSkillPackageDraft/)
   assert.match(workbench, /@approve="approveSkillInstall\(turn\.id\)"/)
   assert.doesNotMatch(card, /createAgent|updateSkill|localStorage/)
   assert.match(card, /安装到我的 Skill/)

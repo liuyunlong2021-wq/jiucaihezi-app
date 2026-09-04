@@ -29,7 +29,6 @@ import {
   writeConversationMemoryIndex,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
-import { persistSkillPackageDraft } from '@/utils/skillPackageStorage'
 import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
 import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
@@ -727,7 +726,11 @@ async function openResource(resource: ProjectResourceOpenResult) {
     memoryEnabled.value = resource.transcript.memoryEnabled
     memoryQueryEnabled.value = resource.transcript.memoryQueryEnabled
     const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')
-    selectedSkillNames.value = [...new Set(latestUserTurn?.skillNames || [])]
+    const availableSkillNames = new Set([
+      ...(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name),
+      ...agentStore.getCustomSkills().filter(skill => skill.enabled !== false).map(skill => skill.name),
+    ])
+    selectedSkillNames.value = [...new Set((latestUserTurn?.skillNames || []).filter(name => availableSkillNames.has(name)))]
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     await restoreConversationMemoryIndexState(resource, generation)
     if (generation !== resourceOpenGeneration) return
@@ -2014,18 +2017,6 @@ async function approveSkillInstall(turnId: string) {
   skillInstallErrors.value[turnId] = ''
   const existing = installedSkill(plan)
   try {
-    // 保存到 ~/.agents/skills 目录
-    const persisted = await persistSkillPackageDraft({
-      skillId: plan.id,
-      skillMd: plan.skillMd,
-      references: [],
-    })
-
-    if (!persisted) {
-      throw new Error('无法保存 Skill 包到本地目录')
-    }
-
-    // 同时更新 AgentStore（用于 UI 显示和触发器）
     await agentStore.createAgent({
       id: plan.id,
       name: plan.name,
