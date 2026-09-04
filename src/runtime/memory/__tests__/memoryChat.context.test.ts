@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
+
+const memoryChatSource = readFileSync('src/runtime/memory/memoryChat.ts', 'utf8')
+
+test('all memory chats share one Direct Agent Loop and ordinary chat supplies no tools', () => {
+  assert.equal(memoryChatSource.match(/runDirectChatCompletion\(\{/g)?.length, 1)
+  assert.doesNotMatch(memoryChatSource, /if \(!explicitCapabilitySelected\) \{[\s\S]*runDirectChatCompletion/)
+  assert.match(memoryChatSource, /const memoryToolDefinitions = toolLoopRequired[\s\S]*: \[\]/)
+  assert.match(memoryChatSource, /const resolveTools = \(\) => memoryToolDefinitions\.length[\s\S]*: \[\]/)
+  assert.match(memoryChatSource, /const toolLoopRequired = explicitCapabilitySelected \|\| attachmentNeedsRead/)
+  assert.match(memoryChatSource, /!toolLoopRequired[\s\S]*不要使用任何工具能力/)
+})
 
 test('T1.1: context building includes history when no explicit capabilities selected', () => {
   const messages = [

@@ -488,6 +488,22 @@ test('memory composer routes pasted images and media plans into the existing cre
   )
 })
 
+test('conversation memory status restores from its persisted index and only failures expose retry', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /conversationMemoryIndexPath, parseConversationMemoryIndex/)
+  assert.match(workbench, /files\.readTextAt\(resource\.resource\.owner, conversationMemoryIndexPath\(resource\.transcript\.id\)\)/)
+  assert.match(workbench, /index\.conversationId !== resource\.transcript\.id/)
+  assert.match(workbench, /entry\.rawPath === resource\.resource\.path/)
+  assert.match(workbench, /memoryIndexStates\.value = Object\.fromEntries/)
+  assert.match(workbench, /v-if="memoryIndexStates\[turn\.id\] === 'writing'"/)
+  assert.match(workbench, /v-else-if="memoryIndexStates\[turn\.id\] === 'success'"/)
+  assert.match(workbench, /v-if="memoryIndexStates\[turn\.id\] === 'error'" class="memory-index-error"/)
+  assert.match(workbench, /<button v-if="memoryIndexStates\[turn\.id\] === 'error'"[\s\S]{0,240}@click="recordConversation\(turn\)"/)
+  assert.doesNotMatch(workbench, /shouldSuggestMemoryIndex/)
+  assert.doesNotMatch(workbench, /memoryIndexStates\[turn\.id\] \|\| 'idle'/)
+})
+
 test('memory composer reads the native clipboard only for an empty Desktop image paste', () => {
   assert.equal(shouldReadNativeClipboardImage(0, '', true, false), true)
   assert.equal(shouldReadNativeClipboardImage(1, '', true, false), false)
@@ -525,7 +541,7 @@ test('memory mode keeps explicit Skill and plugin connections', () => {
   assert.match(runtime, /buildMemoryDesktopToolDefinitions\(\)/)
   assert.match(runtime, /buildMemoryWebProjectToolDefinitions\(\)/)
   assert.match(runtime, /projectId\?: string/)
-  assert.match(runtime, /explicitCapabilitySelected && !input\.projectId/)
+  assert.match(runtime, /toolLoopRequired && !input\.projectId/)
   assert.match(workbench, /desktopOnlyRuntime \? \[/)
 })
 
@@ -1111,7 +1127,7 @@ test('memory text models default to tools unless the gateway explicitly disables
   )
   assert.match(
     runtime,
-    /explicitCapabilitySelected && agentStore\.modelsFetched && model\?\.toolCall === false/,
+    /toolLoopRequired && agentStore\.modelsFetched && model\?\.toolCall === false/,
   )
 })
 

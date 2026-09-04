@@ -234,8 +234,14 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const latestUserText = latestUserTurn?.content || ''
   const desktopRuntime = isTauriRuntime() && !isTauriMobileRuntime()
   const explicitCapabilitySelected = hasExplicitMemoryCapability(input)
-  if (explicitCapabilitySelected && !input.projectId) throw new Error('请先创建或选择项目')
-  if (explicitCapabilitySelected && agentStore.modelsFetched && model?.toolCall === false) {
+  const attachmentNeedsRead = Boolean(
+    input.attachments?.some(
+      attachment => attachment.kind === 'file' && attachment.readablePath && !attachment.textContent,
+    ),
+  )
+  const toolLoopRequired = explicitCapabilitySelected || attachmentNeedsRead
+  if (toolLoopRequired && !input.projectId) throw new Error('请先创建或选择项目')
+  if (toolLoopRequired && agentStore.modelsFetched && model?.toolCall === false) {
     throw new Error('当前模型不支持工具调用，请选择支持工具调用的模型')
   }
   const providerId = model?.providerId || selectedProviderId
@@ -301,7 +307,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     messages: context.messages,
     historyLimit: null,
     systemPrompt: [
-      !explicitCapabilitySelected
+      !toolLoopRequired
         ? '你是韭菜盒子记忆工作台。已提供最近轮次对话历史保持连续；回答当前用户消息。本轮未选择 Skill 或工具，不要使用任何工具能力。'
         : [
             '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，用户明确指定的项目文件是长期事实源。',
@@ -389,20 +395,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return response
   }
 
-  if (!explicitCapabilitySelected) {
-    const result = await runDirectChatCompletion({
-      messages,
-      tools: undefined,
-      sendChatCompletion,
-      signal: input.signal,
-      onText: input.onText,
-    })
-    const text = resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容')
-    input.onMetrics?.(result.metrics)
-    input.onText(text)
-    return text
-  }
-
   const localSkillLoader = desktopRuntime ? createLocalSkillLoader(customSkillsByName) : undefined
   const rawProjectTools = isTauriRuntime()
     ? createDesktopProjectToolExecutor({
@@ -427,6 +419,16 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     signal?.throwIfAborted()
     // T4: memory_search - native tool for current conversation
     if (call.function.name === 'memory_search') {
+      if (!allowedMemoryToolNames.has('memory_search')) {
+        return {
+          content: JSON.stringify({
+            error: 'TOOL_NOT_ALLOWED',
+            tool: 'memory_search',
+            message: '对话查询已关闭',
+          }),
+          status: 'failed' as const,
+        }
+      }
       const args = parseCreativeToolArguments(call)
       if (!input.projectId || !input.conversationId) {
         return {
@@ -540,35 +542,34 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   if (unavailableSkillTools.length) {
     throw new Error(`Skill 声明的工具当前不可用：${unavailableSkillTools.join(', ')}`)
   }
-  const memoryToolDefinitions = selectMemoryTools(
-    allMemoryToolDefinitions,
-    [],
-    false,
-    Boolean(
-      input.attachments?.some(
-        attachment =>
-          attachment.kind === 'file' && attachment.readablePath && !attachment.textContent,
-      ),
-    ),
-    Boolean(input.fileToolsSelected),
-    input.selectedMcpToolNames || [],
-    Boolean(input.mediaSelected || input.avSelected),
-    Boolean(input.scene3dSelected),
-    Boolean(input.terminalSelected),
-    declaredSkillTools,
-    input.memoryQueryEnabled !== false,
-  )
+  const memoryToolDefinitions = toolLoopRequired
+    ? selectMemoryTools(
+        allMemoryToolDefinitions,
+        [],
+        false,
+        attachmentNeedsRead,
+        Boolean(input.fileToolsSelected),
+        input.selectedMcpToolNames || [],
+        Boolean(input.mediaSelected || input.avSelected),
+        Boolean(input.scene3dSelected),
+        Boolean(input.terminalSelected),
+        declaredSkillTools,
+        input.memoryQueryEnabled !== false,
+      )
+    : []
   const authorizedMemoryToolDefinitions = memoryToolDefinitions
   const allowedMemoryToolNames = new Set(
     authorizedMemoryToolDefinitions.map(tool => String(tool.function?.name || '')),
   )
   const describedToolNames = new Set<string>()
   const directlyExposedToolNames = new Set(memoryToolDefinitions.map(tool => String(tool.function?.name || '')))
-  const resolveTools = () => resolveMemoryToolSearchDefinitions(
-    authorizedMemoryToolDefinitions,
-    describedToolNames,
-    directlyExposedToolNames,
-  )
+  const resolveTools = () => memoryToolDefinitions.length
+    ? resolveMemoryToolSearchDefinitions(
+        authorizedMemoryToolDefinitions,
+        describedToolNames,
+        directlyExposedToolNames,
+      )
+    : []
   let aggregatedProgramStatus: MemoryProgramStatus | null = null
   const result = await runDirectChatCompletion({
     messages,

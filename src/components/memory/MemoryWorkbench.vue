@@ -31,6 +31,7 @@ import {
 } from '@/runtime/memory/memoryProject'
 import { persistSkillPackageDraft } from '@/utils/skillPackageStorage'
 import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
+import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -118,7 +119,7 @@ const fileWriteSelected = ref<ProjectResource | null>(null)
 const fileWriteSource = ref('')
 const fileWriteSearch = ref('')
 const fileWritePending = ref(false)
-type MemoryIndexState = 'idle' | 'writing' | 'success' | 'error'
+type MemoryIndexState = 'writing' | 'success' | 'error'
 const memoryIndexStates = ref<Record<string, MemoryIndexState>>({})
 const memoryIndexErrors = ref<Record<string, string>>({})
 const memoryIndexPaths = ref<Record<string, string>>({})
@@ -725,6 +726,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
     memoryEnabled.value = resource.transcript.memoryEnabled
     memoryQueryEnabled.value = resource.transcript.memoryQueryEnabled
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
+    await restoreConversationMemoryIndexState(resource, generation)
+    if (generation !== resourceOpenGeneration) return
     conversationPickerOpen.value = false
     conversationSearch.value = ''
     await nextTick()
@@ -783,6 +786,29 @@ async function openResource(resource: ProjectResourceOpenResult) {
     }
   }
   if (generation === resourceOpenGeneration && window.innerWidth <= 760) treeOpen.value = false
+}
+
+async function restoreConversationMemoryIndexState(
+  resource: Extract<ProjectResourceOpenResult, { type: 'conversation' }>,
+  generation: number,
+) {
+  memoryIndexStates.value = {}
+  memoryIndexErrors.value = {}
+  memoryIndexPaths.value = {}
+  let content = ''
+  try {
+    content = (await files.readTextAt(resource.resource.owner, conversationMemoryIndexPath(resource.transcript.id))).content
+  } catch { return }
+  if (generation !== resourceOpenGeneration) return
+  const index = parseConversationMemoryIndex(content)
+  if (!index || index.conversationId !== resource.transcript.id) return
+  const assistantTurnIds = new Set(resource.transcript.turns.filter(turn => turn.role === 'assistant').map(turn => turn.id))
+  const recordedTurnIds = index.entries
+    .filter(entry => entry.rawPath === resource.resource.path && assistantTurnIds.has(entry.assistantTurnId))
+    .map(entry => entry.assistantTurnId)
+  const path = conversationMemoryIndexPath(resource.transcript.id)
+  memoryIndexStates.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, 'success' as const]))
+  memoryIndexPaths.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, path]))
 }
 
 function startMarkdownEdit() {
@@ -1046,10 +1072,6 @@ async function recordConversation(turn: ConversationTurn, source = conversation.
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'error' }
     memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: message }
   }
-}
-
-function shouldSuggestMemoryIndex(turn: ConversationTurn): boolean {
-  return turn.role === 'assistant' && turn.id !== 'streaming-assistant' && Boolean(displayTurnContent(turn).trim())
 }
 
 function shouldSuggestFileWrite(turn: ConversationTurn): boolean {
@@ -2514,16 +2536,10 @@ function readDataUrl(file: File): Promise<string> {
               title="把这条回答保存到项目文件"
               @click="suggestFileWrite(turn)"
             ><JcIcon name="save" /><span>保存到文件</span></button>
-            <button
-              v-if="shouldSuggestMemoryIndex(turn)"
-              class="memory-index-suggest"
-              :class="`state-${memoryIndexStates[turn.id] || 'idle'}`"
-              type="button"
-              :disabled="memoryIndexStates[turn.id] === 'writing' || memoryIndexStates[turn.id] === 'success'"
-              :title="memoryIndexStates[turn.id] === 'error' ? `记录对话失败：${memoryIndexErrors[turn.id] || '请重试'}` : memoryIndexPaths[turn.id] ? `已记录对话：${memoryIndexPaths[turn.id]}` : '记录对话'"
-              @click="recordConversation(turn)"
-            ><JcIcon :name="memoryIndexStates[turn.id] === 'writing' ? 'sync' : memoryIndexStates[turn.id] === 'error' ? 'error' : 'save'" :class="{ spinning: memoryIndexStates[turn.id] === 'writing' }" /><span>{{ memoryIndexStates[turn.id] === 'writing' ? '正在记录对话' : memoryIndexStates[turn.id] === 'success' ? '已记录对话' : memoryIndexStates[turn.id] === 'error' ? '未记录，重试' : '记录对话' }}</span></button>
-            <small v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-error">{{ memoryIndexErrors[turn.id] || '请重试' }}</small>
+            <span v-if="memoryIndexStates[turn.id] === 'writing'" class="memory-index-status state-writing"><JcIcon name="sync" class="spinning" />正在记录对话</span>
+            <span v-else-if="memoryIndexStates[turn.id] === 'success'" class="memory-index-status state-success" :title="memoryIndexPaths[turn.id] ? `已记录对话：${memoryIndexPaths[turn.id]}` : '已记录对话'"><JcIcon name="check_circle" />已记录对话</span>
+            <small v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-error" :title="memoryIndexErrors[turn.id] || '请重试'">未记录</small>
+            <button v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-suggest state-error" type="button" :title="`记录对话失败：${memoryIndexErrors[turn.id] || '请重试'}`" @click="recordConversation(turn)"><JcIcon name="save" /><span>记录对话</span></button>
           </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
@@ -2946,10 +2962,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-file-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
 .memory-index-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-index-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
-.memory-index-suggest:disabled { opacity: .65; cursor: wait; }
-.memory-index-suggest.state-success { border-color: color-mix(in srgb, var(--olive) 58%, var(--line)); background: color-mix(in srgb, var(--olive) 16%, var(--paper)); }
 .memory-index-suggest.state-error { border-color: color-mix(in srgb, #b34a4a 52%, var(--line)); background: color-mix(in srgb, #b34a4a 8%, var(--paper)); color: #a13f3f; cursor: pointer; }
 .memory-index-suggest.state-error:hover { border-color: #b34a4a; background: color-mix(in srgb, #b34a4a 14%, var(--paper)); }
+.memory-index-status { display: inline-flex; align-items: center; gap: 4px; color: var(--ink3); font-size: 12px; }
+.memory-index-status.state-success { color: var(--olive); }
 .memory-index-error { max-width: 260px; color: #a13f3f; font-size: 11px; }
 .memory-file-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
 .memory-file-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }

@@ -49,7 +49,12 @@ export async function queryConversationMemoryIndex(owner: string, conversationId
   const index = parseConversationMemoryIndex(indexContent)
   if (!index || index.conversationId !== id) return { conversationId: id, matches: [] }
   const terms = tokenize(query)
-  const candidates = index.entries.map(entry => ({ entry, score: terms.reduce((total, term) => total + (`${entry.summary}\n${entry.keywords.join(' ')}`.toLocaleLowerCase().includes(term) ? 1 : 0), 0) })).filter(value => terms.length === 0 || value.score > 0).sort((left, right) => right.score - left.score).slice(0, Math.max(1, Math.min(20, limit)))
+  const candidates = index.entries
+    .filter(entry => isValidConversationRawPath(entry.rawPath, id))
+    .map(entry => ({ entry, score: terms.reduce((total, term) => total + (`${entry.summary}\n${entry.keywords.join(' ')}`.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }))
+    .filter(value => terms.length === 0 || value.score > 0)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, Math.max(1, Math.min(20, limit)))
   if (!candidates.length) return { conversationId: id, matches: [] }
   const rawTexts = new Map<string, string>()
   for (const { entry } of candidates) {
@@ -73,6 +78,15 @@ function formatConversationMemoryIndexEntry(entry: ConversationMemoryIndexEntry)
 function relativeRawPath(rawPath: string): string { const normalized = rawPath.replace(/^\/+/, '').replace(/^\.\//, ''); return normalized.startsWith('.raw/') ? `../${normalized.slice(5)}` : `../${normalized}` }
 function resolveRawPath(link: string): string { const normalized = link.replace(/^\/+/, '').replace(/^\.\//, ''); return normalized.startsWith('../') ? `.raw/${normalized.slice(3)}` : normalized }
 function parseKeywords(value: string): string[] { return value.split(/[,，、]/).map(item => item.trim()).filter(Boolean) }
-function safeSegment(value: string): string { const normalized = String(value || '').replace(/[\\/\0]/g, '').trim(); if (!normalized || normalized === '.' || normalized === '..') throw new Error('会话 ID 无效'); return normalized }
+function safeSegment(value: string): string {
+  const normalized = String(value || '').trim()
+  if (!normalized || normalized === '.' || normalized === '..' || normalized.includes('/') || normalized.includes('\\') || normalized.includes('\0')) throw new Error('会话 ID 无效')
+  return normalized
+}
+function isValidConversationRawPath(rawPath: string, conversationId: string): boolean {
+  const normalized = String(rawPath || '').replace(/^\.\/+/, '')
+  if (!normalized.startsWith(MEMORY_CONVERSATION_DIRECTORY + '/') || normalized.startsWith('/') || normalized.includes('\\')) return false
+  return normalized === MEMORY_CONVERSATION_DIRECTORY + '/' + conversationId + '.md'
+}
 function tokenize(value: string): string[] { return [...new Set(String(value || '').toLocaleLowerCase().split(/[\s,，。；;、|/\\:：!?！？()[\]{}"'`]+/).map(item => item.trim()).filter(Boolean))] }
 function attribute(value: string): string { return String(value || '').replace(/["<>]/g, '') }
