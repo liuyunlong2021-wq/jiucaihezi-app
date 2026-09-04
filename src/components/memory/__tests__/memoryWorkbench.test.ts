@@ -243,6 +243,14 @@ test('memory space and conversations are created only by their explicit actions'
   )
 })
 
+test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.ok(workbench.includes("const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')"))
+  assert.ok(workbench.includes('selectedSkillNames.value = [...new Set(latestUserTurn?.skillNames || [])]'))
+  assert.ok(workbench.includes("const created = await createMemoryConversation(owner, '新对话', files)"))
+  assert.ok(workbench.includes('selectedSkillNames.value = []'))
+})
+
 test('memory file tree and model tools share the hidden and protected project contract', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')

@@ -659,6 +659,7 @@ async function startNewConversation() {
   error.value = ''
   try {
     const created = await createMemoryConversation(owner, '新对话', files)
+    selectedSkillNames.value = []
     rememberConversation(created)
     await openResource(await openProjectResource(files, created.resource))
     await nextTick()
@@ -725,6 +726,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
     opened.value = resource
     memoryEnabled.value = resource.transcript.memoryEnabled
     memoryQueryEnabled.value = resource.transcript.memoryQueryEnabled
+    const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')
+    selectedSkillNames.value = [...new Set(latestUserTurn?.skillNames || [])]
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     await restoreConversationMemoryIndexState(resource, generation)
     if (generation !== resourceOpenGeneration) return
