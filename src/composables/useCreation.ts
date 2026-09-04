@@ -83,6 +83,27 @@ export interface CpState {
 
 export type AiAppOutputType = 'image' | 'audio' | 'video'
 
+const MINIMAX_H3_WEBAPP_IDS = new Set([
+  '2093604127250149377',
+  '2093571735550521345',
+  '2093579373894000642',
+  '2093654136997900290',
+  '2093651661213491202',
+  '2093662476146667522',
+  '2093706819385516034',
+])
+
+export function isAiAppPromptField(
+  field: Pick<CreationFieldSpec, 'kind' | 'key' | 'label'>,
+  webappId: string,
+): boolean {
+  if (field.kind !== 'text') return false
+  if (MINIMAX_H3_WEBAPP_IDS.has(webappId)) {
+    return field.key === '134:text' || field.key === '141:text'
+  }
+  return field.label === '提示词'
+}
+
 export interface AiAppDirectoryEntry {
   webappId: string
   label: string
@@ -442,9 +463,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
   const audios = materializedFiles?.audios || currentFiles.audios
   return {
     ...modelFieldParams(),
-    prompt: cpState.task === 'ai-app' && cpState.aiAppWebappId
-      ? (cpState.aiAppLabel || cpState.prompt)
-      : cpState.prompt,
+    prompt: cpState.prompt,
     title: cpState.title,
     tags: cpState.tags,
     negative_tags: cpState.negativeTags,
@@ -475,11 +494,11 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     webappId: cpState.aiAppWebappId,
     outputType: cpState.task === 'ai-app' ? cpState.aiAppOutputType : undefined,
     billingModel: cpState.task === 'ai-app' ? cpState.aiAppBillingModel : undefined,
-    ...(cpState.task === 'ai-app' ? aiAppFieldParams() : {}),
+    ...(cpState.task === 'ai-app' ? aiAppFieldParams(images) : {}),
   }
 }
 
-function aiAppFieldParams(): Record<string, unknown> {
+function aiAppFieldParams(images: unknown[]): Record<string, unknown> {
   const output: Record<string, unknown> = {}
   for (const field of cpState.aiAppFields) {
     const value = cpState.fieldValues[field.key]
@@ -488,6 +507,24 @@ function aiAppFieldParams(): Record<string, unknown> {
     } else if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== '') {
       output[field.key] = field.defaultValue
     }
+  }
+  if (!MINIMAX_H3_WEBAPP_IDS.has(cpState.aiAppWebappId)) return output
+
+  const promptField = cpState.aiAppFields.find(field =>
+    isAiAppPromptField(field, cpState.aiAppWebappId),
+  )
+  if (promptField) output[promptField.key] = cpState.prompt
+
+  const imageFields = cpState.aiAppFields.filter(field => field.kind === 'image')
+  if (images.length) {
+    if (images.length !== imageFields.length) {
+      throw new Error(`${cpState.aiAppLabel || '当前应用'}需要 ${imageFields.length} 张参考图，当前已选 ${images.length} 张`)
+    }
+    imageFields.forEach((field, index) => {
+      output[field.key] = images[index]
+    })
+  } else if (imageFields.some(field => !isFieldValuePresent(output[field.key]))) {
+    throw new Error(`${cpState.aiAppLabel || '当前应用'}需要 ${imageFields.length} 张参考图`)
   }
   return output
 }

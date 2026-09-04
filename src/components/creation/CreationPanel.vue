@@ -94,6 +94,7 @@ import {
   aiAppDirectory,
   fetchAiAppDirectory,
   discoverAiAppNodes,
+  isAiAppPromptField,
   type AiAppDirectoryEntry,
 } from '@/composables/useCreation'
 import { creationModelFamily, displayModelLabel, displayModelPrice, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
@@ -263,14 +264,26 @@ function canRegenerateTask(task: MediaTask): boolean {
   )
 }
 
-function regenerateTask(task: MediaTask) {
+async function regenerateTask(task: MediaTask) {
   const plan = task.planSnapshot
   if (!plan || !canRegenerateTask(task)) return
-  switchTask(plan.task)
+  const isAiApp = plan.apiStyle === 'rh-aiapp'
+  switchTask(isAiApp ? 'ai-app' : plan.task)
   switchModel(plan.modelId)
   cpState.fieldValues = {}
   const params = plan.normalizedParams
   const scalar = (key: string) => params[key]
+  if (isAiApp) {
+    cpState.aiAppWebappId = typeof scalar('webappId') === 'string' ? String(scalar('webappId')) : ''
+    const outputType = scalar('outputType')
+    cpState.aiAppOutputType = outputType === 'image' || outputType === 'audio' || outputType === 'video'
+      ? outputType
+      : plan.task === 'image' || plan.task === 'audio' || plan.task === 'video' ? plan.task : ''
+    cpState.aiAppBillingModel = typeof scalar('billingModel') === 'string' ? String(scalar('billingModel')) : ''
+    cpState.aiAppLabel = ''
+    cpState.aiAppFields = []
+    await handleDiscoverAiApp()
+  }
   const ratio = scalar('ratio') ?? scalar('aspectRatio') ?? scalar('aspect_ratio')
   const resolution = scalar('resolution')
   const duration = scalar('duration')
@@ -289,6 +302,13 @@ function regenerateTask(task: MediaTask) {
     const value = scalar(field.key)
     if (value !== undefined && ['string', 'number', 'boolean'].includes(typeof value)) {
       cpState.fieldValues[field.key] = value as string | number | boolean
+    }
+  }
+  if (isAiApp) {
+    for (const [key, value] of Object.entries(params)) {
+      if (key.includes(':') && value !== undefined && value !== null && value !== '' && ['string', 'number', 'boolean'].includes(typeof value)) {
+        cpState.fieldValues[key] = value as string | number | boolean
+      }
     }
   }
   mediaTaskSummary = task.summary ? { value: task.summary, prompt: task.prompt } : null
@@ -600,8 +620,11 @@ async function handleDiscoverAiApp() {
     cpState.aiAppOutputType = app.outputType
     cpState.aiAppBillingModel = app.billingModel
     cpState.aiAppFields = fields
-    const promptField = fields.find(isAiAppPromptField)
-    if (promptField) cpState.prompt = String(getModelFieldValue(promptField) || '')
+    const promptField = fields.find(field => isAiAppPromptField(field, cpState.aiAppWebappId))
+    if (promptField) {
+      cpState.prompt = String(getModelFieldValue(promptField) || '')
+      setModelFieldValue(promptField, cpState.prompt)
+    }
     saveCpState()
   } catch (e: any) {
     cpState.progressText = `发现节点失败: ${e.message || e}`
@@ -618,13 +641,10 @@ function isAiAppMediaField(field: { kind: string; key: string }): boolean {
   return MEDIA_FIELD_KINDS.has(field.kind) && field.key.includes(':')
 }
 
-function isAiAppPromptField(field: { kind: string; key: string; label?: string }): boolean {
-  // ponytail: 7 个 Minimax H3 应用共用 141 提示词节点，保持其它动态文本字段不变
-  return field.kind === 'text' && field.label === '提示词' && field.key.startsWith('141:')
-}
-
 const aiAppPromptField = computed(() =>
-  cpState.task === 'ai-app' ? cpState.aiAppFields.find(isAiAppPromptField) : undefined,
+  cpState.task === 'ai-app'
+    ? cpState.aiAppFields.find(field => isAiAppPromptField(field, cpState.aiAppWebappId))
+    : undefined,
 )
 
 async function pickAiAppMediaFile(field: CreationFieldSpec) {
@@ -747,9 +767,8 @@ async function runCreationViaTaskStore() {
         cpState.progressText = `当前模型最多支持 ${fileLimits.audios.max} 段音频`
         return
       }
-      const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
       for (const { node, asset } of assets) {
-        if (!modalities.includes(asset.kind)) continue
+        if (!currentReferenceModalities.value.has(asset.kind)) continue
         const mediaPath = asset.resource.path
         const maxBytes = asset.kind === 'image'
           ? fileLimits?.images?.maxBytes
@@ -939,18 +958,26 @@ const selectedReferenceAssets = computed(() =>
     .map(id => canvasStore.assets[id])
     .filter((asset): asset is NonNullable<typeof asset> => Boolean(asset)),
 )
+const currentReferenceModalities = computed(() => {
+  const modalities = new Set<string>(currentCreationSpec.value?.capabilities.inputModalities || [])
+  if (cpState.task === 'ai-app') {
+    for (const field of cpState.aiAppFields) {
+      if (MEDIA_FIELD_KINDS.has(field.kind)) modalities.add(field.kind)
+    }
+  }
+  return modalities
+})
 const canvasReferenceRunPlan = computed(() => {
   const spec = currentCreationSpec.value
   if (!spec) return null
-  const modalities = spec.capabilities.inputModalities
   const images = selectedReferenceAssets.value
-    .filter(asset => asset.kind === 'image' && modalities.includes('image'))
+    .filter(asset => asset.kind === 'image' && currentReferenceModalities.value.has('image'))
     .map(() => 'data:image/png;base64,')
   const videos = selectedReferenceAssets.value
-    .filter(asset => asset.kind === 'video' && modalities.includes('video'))
+    .filter(asset => asset.kind === 'video' && currentReferenceModalities.value.has('video'))
     .map(() => 'data:video/mp4;base64,')
   const audios = selectedReferenceAssets.value
-    .filter(asset => asset.kind === 'audio' && modalities.includes('audio'))
+    .filter(asset => asset.kind === 'audio' && currentReferenceModalities.value.has('audio'))
     .map(() => 'data:audio/mpeg;base64,')
   if (!images.length && !videos.length && !audios.length) return null
   try {
@@ -976,15 +1003,14 @@ const selectedReferenceSummary = computed(() => {
   return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
 const unsupportedReferenceSummary = computed(() => {
-  const modalities = currentCreationSpec.value?.capabilities.inputModalities || []
   const images = selectedReferenceAssets.value.filter(
-    asset => asset.kind === 'image' && !modalities.includes('image'),
+    asset => asset.kind === 'image' && !currentReferenceModalities.value.has('image'),
   ).length
   const videos = selectedReferenceAssets.value.filter(
-    asset => asset.kind === 'video' && !modalities.includes('video'),
+    asset => asset.kind === 'video' && !currentReferenceModalities.value.has('video'),
   ).length
   const audios = selectedReferenceAssets.value.filter(
-    asset => asset.kind === 'audio' && !modalities.includes('audio'),
+    asset => asset.kind === 'audio' && !currentReferenceModalities.value.has('audio'),
   ).length
   return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
@@ -1766,6 +1792,29 @@ function onCanvasImport(event: Event) {
   const input = event.target as HTMLInputElement
   if (input.files) void addCanvasFiles(input.files)
   input.value = ''
+}
+
+async function pickCanvasMediaFiles() {
+  if (!isTauriRuntime()) {
+    canvasImportInput.value?.click()
+    return
+  }
+  const { open } = await import('@tauri-apps/plugin-dialog')
+  const selected = await open({
+    title: '选择参考素材',
+    filters: [{
+      name: '媒体',
+      extensions: [
+        'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg',
+        'mp4', 'mov', 'avi', 'webm', 'mkv',
+        'mp3', 'wav', 'ogg', 'm4a', 'flac',
+      ],
+    }],
+    multiple: true,
+  })
+  if (!selected) return
+  const paths = Array.isArray(selected) ? selected : [selected]
+  await importDesktopCanvasPaths(paths)
 }
 
 /** 画布拖入处理（模板直接绑定 @drop） */
@@ -4407,7 +4456,7 @@ const canSend = computed(
         <div
           v-if="
             !isAiAppMediaField(field) &&
-            !isAiAppPromptField(field) &&
+            !isAiAppPromptField(field, cpState.aiAppWebappId) &&
             ((field.key !== 'customWidth' && field.key !== 'customHight') ||
               cpState.ar === 'custom')
           "
@@ -4592,7 +4641,7 @@ const canSend = computed(
               class="cp-add-reference"
               title="上传并选为参考素材"
               aria-label="上传并选为参考素材"
-              @click="canvasImportInput?.click()"
+              @click="pickCanvasMediaFiles"
             >
               <JcIcon name="attach-file" />
             </button>

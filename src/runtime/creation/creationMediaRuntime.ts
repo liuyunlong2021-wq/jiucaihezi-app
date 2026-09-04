@@ -604,7 +604,10 @@ async function executeRunningHubImageRequest(
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList
     const webappId = asOptionalString(normalized.webappId)
-    if (webappId) body.extra_fields = { webappId }
+    if (webappId) {
+      body.webappId = webappId
+      body.extra_fields = { webappId }
+    }
   }
   // ★ 扩大的调试日志：覆盖所有 RH 图片模型，帮助排查 image-to-image 422 问题
   if (request.plan.usesRhAdapter && request.plan.task === 'image') {
@@ -649,9 +652,9 @@ async function executeRunningHubVideoRequest(
     body.nodeInfoList = nodeInfoList
     // 透传 webappId 到 rh-adapter
     const webappId = asOptionalString(normParams['webappId'])
-    if (webappId) {
-      body.extra_fields = { webappId }
-    }
+    if (!webappId) throw new Error(`RH AI App 缺少 webappId，无法提交 ${request.plan.model}`)
+    body.webappId = webappId
+    body.extra_fields = { webappId }
   } else {
     const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
     Object.assign(body, compact({
@@ -713,7 +716,10 @@ async function executeRunningHubAudioRequest(
     if (!nodeInfoList.length) throw new Error(`RH AI App 暂未完成 ${request.plan.model} 的 nodeInfoList 映射`)
     body.nodeInfoList = nodeInfoList
     const webappId = asOptionalString(normParams['webappId'])
-    if (webappId) body.extra_fields = { webappId }
+    if (webappId) {
+      body.webappId = webappId
+      body.extra_fields = { webappId }
+    }
     // ★ 防止 NewAPI TTS adaptor 丢弃非标准字段 nodeInfoList：
     //    同时把 nodeInfoList base64 编码后塞进 voice 字段（rh-aiapp 模型不使用 voice）
     //    rh-adapter audio.py 会优先使用 nodeInfoList，fallback 时从 voice 恢复。

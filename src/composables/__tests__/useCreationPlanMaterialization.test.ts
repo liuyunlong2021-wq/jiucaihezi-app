@@ -76,7 +76,55 @@ test('buildCurrentCreationParams uses the selected server AI App contract', () =
   assert.equal(params.webappId, '12345')
   assert.equal(params.outputType, 'image')
   assert.equal(params.billingModel, 'rh-custom-image')
-  assert.equal(params.prompt, '图片应用')
+  assert.equal(params.prompt, cpState.prompt)
+})
+
+test('Minimax H3 AI Apps use one prompt and map canvas images to workflow slots', () => {
+  switchTask('ai-app')
+  switchModel('runninghub/aiapp/rh-aiapp')
+  cpState.aiAppWebappId = '2093662476146667522'
+  cpState.aiAppLabel = 'Minimax-h3 多参3图'
+  cpState.aiAppOutputType = 'video'
+  cpState.aiAppBillingModel = 'rh-aiapp'
+  cpState.prompt = '三个人一起大笑'
+  cpState.aiAppFields = [
+    { key: '137:image', label: 'image1', kind: 'image' },
+    { key: '156:image', label: 'image2', kind: 'image' },
+    { key: '157:image', label: 'image3', kind: 'image' },
+    { key: '141:text', label: '提示词', kind: 'text', defaultValue: '旧提示词' },
+  ]
+
+  const params = buildCurrentCreationParams({ images: ['left.png', 'middle.png', 'right.png'] })
+
+  assert.equal(params.prompt, '三个人一起大笑')
+  assert.equal(params['141:text'], '三个人一起大笑')
+  assert.equal(params['137:image'], 'left.png')
+  assert.equal(params['156:image'], 'middle.png')
+  assert.equal(params['157:image'], 'right.png')
+  assert.throws(
+    () => buildCurrentCreationParams({ images: ['only-one.png'] }),
+    /需要 3 张参考图/,
+  )
+})
+
+test('Minimax H3 node 134 prompt is merged into the main creation prompt', () => {
+  switchTask('ai-app')
+  switchModel('runninghub/aiapp/rh-aiapp')
+  cpState.aiAppWebappId = '2093571735550521345'
+  cpState.aiAppLabel = 'Minimax-h3 首帧图生视频'
+  cpState.aiAppOutputType = 'video'
+  cpState.aiAppBillingModel = 'rh-aiapp'
+  cpState.prompt = '镜头推近人物'
+  cpState.aiAppFields = [
+    { key: '134:text', label: '提示词', kind: 'text', defaultValue: '工作流默认提示词' },
+    { key: '140:image', label: '首帧', kind: 'image' },
+  ]
+
+  const params = buildCurrentCreationParams({ images: ['first.png'] })
+
+  assert.equal(params.prompt, '镜头推近人物')
+  assert.equal(params['134:text'], '镜头推近人物')
+  assert.equal(params['140:image'], 'first.png')
 })
 
 test('Seed Audio rejects reference files larger than 10 MB', () => {
