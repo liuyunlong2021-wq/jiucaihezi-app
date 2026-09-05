@@ -1,5 +1,20 @@
 # 热缓存
 
+## [2026-09-05] Skill Creator 修改入口与 v2.1.42 发布
+
+- “我的 Skill”修改入口现在传递精确 Skill ID，并展示真实中央目录 `~/.agents/skills/<skill-id>/SKILL.md`；Skill Creator 按 ID 读取，安装卡确认后覆盖原 Skill。
+- v2.1.42 已统一写入 `package.json`、`src-tauri/Cargo.toml`、`tauri.conf.json` 和 `Cargo.lock`，提交 `14ce5a15` 已推送 `main`；桌面三平台仍需创建并推送 `v2.1.42` tag 才会触发 CI。
+
+## [2026-09-05] Skill Creator 读取并更新“我的 Skill”
+
+- 已安装 Skill 无法修改的根因不是安装失败，而是 `skill-creator` 缺少中央 Skill 只读入口，错误退回当前项目 Terminal 搜索。
+- 新增 `skill_creator_load_installed_skill`：按精确 ID/唯一名称读取真实 `SKILL.md`，缺失、冲突、空文件和只读目标给出明确错误；禁止 Terminal、项目文件、Wiki 和绝对路径查找。
+- 更新继续使用现有用户确认卡，同 ID 覆盖原 `SKILL.md`，包内其他文件不删除。focused `1212/1212`、TypeScript 和定向 lint 通过；真实 Desktop 更新与重启复查待人工验收。详见 [[排障/Skill Creator无法读取已安装Skill-2026-09-05]]。
+
+## [2026-09-05] 顶部记忆开关文案精简
+
+- 顶部两个开关仅显示“记忆”和“查询”，状态仍显示“开/关”，悬浮提示同步去掉“对话”；开关字段和行为不变。
+
 ## [2026-09-03] 原生长期记忆与连续 Skill 根治合同（待实施）
 
 - 用户已确认四层记忆边界：最近三轮是工作记忆，Raw + 索引是情节记忆，`wiki/` 是语义记忆，Skill 是程序记忆。

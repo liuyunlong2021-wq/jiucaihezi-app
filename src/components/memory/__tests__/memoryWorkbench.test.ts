@@ -431,7 +431,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
-  assert.doesNotMatch(workbench, /memory-mode-segment|>快速<|>记忆</)
+  assert.doesNotMatch(workbench, /memory-mode-segment|>快速</)
   assert.match(workbench, /const toolCommands = \[/)
   for (const label of ['@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP', '@Terminal'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
@@ -473,8 +473,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
     /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.add\(active\.transcript\.id\)/,
   )
   assert.match(workbench, /recordConversation\(turn\)/)
-  assert.match(workbench, /memory-status.*success: !error && status\.startsWith\('已记录对话'\)/)
-  assert.match(workbench, /v-if="!error && status\.startsWith\('已记录对话'\)" name="check_circle"/)
+  assert.doesNotMatch(workbench, /status\.value = `已记录对话：\$\{path\}`/)
   assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{/)
 })
@@ -607,6 +606,9 @@ test('memory topbar uses a grouped model popover and an adaptive new conversatio
   assert.match(workbench, /\.memory-model-menu \{[\s\S]*left: 0;/)
   assert.match(workbench, /role="option" :aria-selected="isSelectedModel\(model\)"/)
   assert.match(workbench, /agentStore\.setModel\(model\.id, model\.providerId\)/)
+  assert.match(workbench, /memory-toggle-label">记忆<\/span>/)
+  assert.match(workbench, /memory-toggle-label">查询<\/span>/)
+  assert.doesNotMatch(workbench, /memory-toggle-label">对话(?:记忆|查询)<\/span>/)
 })
 
 test('memory message copy stays compact and copies the original markdown', () => {
@@ -818,7 +820,7 @@ test('memory run status does not render the legacy duplicate status line', () =>
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(workbench, /v-else-if="!runVisible && \(status \|\| error\)" class="memory-status"/)
+  assert.match(workbench, /v-else-if="!runVisible && \(status \|\| error\) && !status\.startsWith\('已记录对话'\)" class="memory-status"/)
   assert.doesNotMatch(runtime, /以最后一条用户消息为当前指令/)
 })
 

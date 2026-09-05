@@ -1095,7 +1095,6 @@ async function recordConversation(turn: ConversationTurn, source = conversation.
     const path = await writeConversationMemoryIndex(owner, { conversationId: active.transcript.id, rawPath: active.resource.path, assistantTurnId: turn.id, runtime: active.resource.runtime }, summary, files)
     memoryIndexPaths.value = { ...memoryIndexPaths.value, [turn.id]: path }
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'success' }
-    status.value = `已记录对话：${path}`
   } catch (cause) {
     const message = cause instanceof Error ? cause.message : String(cause)
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'error' }
@@ -2429,13 +2428,6 @@ function readDataUrl(file: File): Promise<string> {
             </div>
           </div>
         </div>
-        <!-- P0 fix: Show active Skills in topbar -->
-        <div v-if="selectedSkillNames.length" class="memory-active-skills" aria-label="当前激活的 Skill">
-          <div v-for="name in selectedSkillNames" :key="`active-skill:${name}`" class="memory-active-skill-chip">
-            <span>{{ name }}</span>
-            <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
-          </div>
-        </div>
         <button
           v-if="memoryReady"
           class="new-conversation-button"
@@ -2459,18 +2451,18 @@ function readDataUrl(file: File): Promise<string> {
             :class="{ enabled: memoryEnabled }"
             type="button"
             :aria-pressed="memoryEnabled"
-            :title="memoryEnabled ? '关闭对话记忆' : '开启对话记忆'"
+            :title="memoryEnabled ? '关闭记忆' : '开启记忆'"
             @click="toggleConversationSetting('memory')"
-          ><span class="memory-toggle-label">对话记忆</span><span class="memory-toggle-state">{{ memoryEnabled ? '开' : '关' }}</span></button>
+          ><span class="memory-toggle-label">记忆</span><span class="memory-toggle-state">{{ memoryEnabled ? '开' : '关' }}</span></button>
           <button
             v-if="conversation"
             class="memory-toggle-button"
             :class="{ enabled: memoryQueryEnabled }"
             type="button"
             :aria-pressed="memoryQueryEnabled"
-            :title="memoryQueryEnabled ? '关闭对话查询' : '开启对话查询'"
+            :title="memoryQueryEnabled ? '关闭查询' : '开启查询'"
             @click="toggleConversationSetting('query')"
-          ><span class="memory-toggle-label">对话查询</span><span class="memory-toggle-state">{{ memoryQueryEnabled ? '开' : '关' }}</span></button>
+          ><span class="memory-toggle-label">查询</span><span class="memory-toggle-state">{{ memoryQueryEnabled ? '开' : '关' }}</span></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -2686,8 +2678,7 @@ function readDataUrl(file: File): Promise<string> {
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runVisible && (status || error)" class="memory-status" :class="{ error: Boolean(error), success: !error && status.startsWith('已记录对话') }">
-          <JcIcon v-if="!error && status.startsWith('已记录对话')" name="check_circle" />
+        <div v-else-if="!runVisible && (status || error) && !status.startsWith('已记录对话')" class="memory-status" :class="{ error: Boolean(error) }">
           <span>{{ error || status }}</span>
         </div>
         <div
@@ -2920,13 +2911,6 @@ function readDataUrl(file: File): Promise<string> {
 .memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .memory-conversation-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
 .memory-conversation-action:hover { color: var(--olive); }
-/* P0 fix: Active Skills display in topbar */
-.memory-active-skills { display: flex; min-width: 0; align-items: center; gap: 6px; margin-left: 8px; overflow-x: auto; scrollbar-width: none; }
-.memory-active-skills::-webkit-scrollbar { display: none; }
-.memory-active-skill-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--olive) 34%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 13%, var(--paper)); color: var(--olive); font-size: 12px; white-space: nowrap; }
-.memory-active-skill-chip button { display: grid; width: 16px; height: 16px; place-items: center; border: 0; background: transparent; color: currentColor; cursor: pointer; font-size: 16px; line-height: 1; opacity: .7; }
-.memory-active-skill-chip button:hover { opacity: 1; }
-.memory-active-skill-chip button:disabled { cursor: default; opacity: .3; }
 .new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
 .memory-model-picker { position: relative; min-width: 0; max-width: min(260px, 28vw); }
@@ -3050,8 +3034,6 @@ function readDataUrl(file: File): Promise<string> {
 .send-button:disabled { opacity: .4; cursor: default; }
 .memory-status { padding: 6px 12px 0; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-status.error { color: var(--danger); }
-.memory-status.success { display: flex; min-width: 0; align-items: center; gap: 7px; margin: 7px 10px 0; padding: 8px 10px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--olive) 34%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 13%, var(--paper)); color: var(--olive); white-space: nowrap; }
-.memory-status.success span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .memory-context-notice { display: flex; min-height: 0; align-items: center; gap: 6px; margin: 7px 10px 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.35; }
 .memory-context-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .memory-context-notice button { display: grid; width: 18px; height: 18px; flex: 0 0 18px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }

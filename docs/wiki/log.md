@@ -1,5 +1,23 @@
 # Wiki 操作日志
 
+## [2026-09-05] Skill Creator 修改入口与 v2.1.42 版本准备
+
+- 修改入口由路径识别改为精确 Skill ID，中央目录统一使用 `~/.agents/skills`；读取仍走 `skill_creator_load_installed_skill`，不扩大文件权限。
+- 新手指南同步更新 Skill 修改流程、记忆开关当前文案和三平台发布边界。
+- 版本统一为 `2.1.42`，提交 `14ce5a15` 已推送 `origin/main`；tag 推送和 GitHub Actions 三平台构建需单独验收。
+
+## [2026-09-05] 实施完成 | Skill Creator 读取并更新已安装 Skill
+
+- 根因：设置页和 Skill 管理器能读取中央仓库，但 `skill-creator` 没有读取目标 Skill 的生命周期工具，只能错误搜索当前项目目录并误报未安装。
+- 新增只读 `skill_creator_load_installed_skill`，复用现有中央 Skill Store 和受限资源目录；缺失、歧义、空内容、只读目标明确失败，不扩大文件系统权限。
+- 修改现有 Skill 强制先加载真实 `SKILL.md`，禁用 Terminal/项目/Wiki 路径回退；安装卡继续作为唯一写入入口并保留原 ID。
+- 定向 `28/28`、完整 focused `1212/1212`、`vue-tsc -b` 和定向 lint 通过；未执行真实 Desktop 点击更新和重启验收。详见 [[排障/Skill Creator无法读取已安装Skill-2026-09-05]]。
+
+## [2026-09-05] UI 精简 | 顶部记忆与查询开关
+
+- 将顶部按钮文案从“对话记忆/对话查询”精简为“记忆/查询”，同步修改悬浮提示；不改开关状态、持久化和发送链路。
+- UI 定向测试 `64/64`、`vue-tsc -b` 和 `git diff --check` 通过。
+
 ## [2026-09-03] 设计确认 | 原生长期记忆与连续 Skill
 
 - 根因确认：Skill 每轮清空与“无显式能力不发历史”组合后，会把 `skill-creator` 的测试等第二轮降级为无上下文普通问答；手动索引与只查当前 conversation 也不构成项目长期记忆。

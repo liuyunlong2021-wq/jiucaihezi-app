@@ -19,3 +19,10 @@ Skill 管理器通过中央 Skill 仓库读取用户已安装的 Skill；对话�
 没有增加通用文件权限、第二套 Skill 管理器或自动写入。`skill-creator` 仍不能隐式执行目标 Skill；目标 Skill 只是待编辑源码。
 
 自动验证：新增读取成功、缺失和只读边界测试；定向 `28/28`、完整 focused `1212/1212`、`vue-tsc -b` 和定向 lint 通过。真实 Desktop 中选择 `skill-creator` 修改已安装 Skill、点击更新卡并重启复查尚未人工验收。
+
+## 后续维护与发布
+
+- 「我的 Skill」的“修改”按钮自动选择 `skill-creator`，并把 `skill_id` 与展示路径填入输入框；实际加载必须使用 `skill_creator_load_installed_skill`，不能按路径搜索。
+- 中央 Skill 根目录是 `~/.agents/skills`（本机示例：`/Users/by3/.agents/skills`）；`.agent/skills/...` 是错误路径写法。
+- 修改后的安装卡仍由用户点击确认，同一 `skill_id` 覆盖原 `SKILL.md`，保留同目录的 `references/`、`scripts/` 和 `assets/`。
+- 桌面三平台发布由 `.github/workflows/build.yml` 的 `v*` tag 触发，顺序是提交版本文件、创建 annotated tag、分别推送 `main` 和指定 tag；不能直接推送不存在的 tag，也不能使用 `git push --tags`。

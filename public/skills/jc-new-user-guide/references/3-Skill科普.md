@@ -25,7 +25,7 @@ Skill 是产品最核心的插件，也是给 AI 写的强制执行合同。它�
 
 Skill 本身是插件。Skill 规则中声明或要求的文件、MCP、媒体、3D、Terminal 等工具，必须进入本轮授权并真实调用；工具返回什么就以什么为准。平台确实不提供的工具必须明确报错，不能静默跳过。
 
-Skill 不负责保存对话历史，也不等于 Wiki。当前对话的最近三轮由工作台自动保留；更早的当前对话回答由“对话查询”开关控制的原生 `memory_search` 查找；项目长期知识使用 Wiki 普通文件和 `wiki-memory`。
+Skill 不负责保存对话历史，也不等于 Wiki。当前对话的最近三轮由工作台自动保留；更早的当前对话回答由“查询”开关控制的原生 `memory_search` 查找；项目长期知识使用 Wiki 普通文件和 `wiki-memory`。
 
 ## 什么时候使用 Skill
 
@@ -43,6 +43,8 @@ Skill 不负责保存对话历史，也不等于 Wiki。当前对话的最近三
 | 修改 Skill | `帮我改一下 [Skill名]，让它能 [新功能]` |
 | 检查 Skill | `审计一下 [Skill名]，看看有没有问题` |
 | 优化 Skill | `优化一下 [Skill名] 的描述/触发词` |
+
+在“我的 Skill”点击“修改”时，工作台会自动选择 Skill Creator，并填入精确 Skill ID 和中央 Skill 路径。Skill Creator 必须先按 Skill ID 读取已安装的真实 `SKILL.md`，修改后展示安装卡；用户点击确认后才覆盖原 Skill。中央目录通常是 `~/.agents/skills`，不要把输入框里的展示路径当作加载参数，也不要让它用 Terminal 搜索。
 
 ## 常见问题
 
