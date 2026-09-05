@@ -2997,7 +2997,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-command-strip > button { position: relative; }
 .memory-command-strip > button::after { position: absolute; z-index: 5; left: 50%; bottom: calc(100% + 7px); padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); content: attr(data-tooltip); opacity: 0; pointer-events: none; transform: translate(-50%, 3px); transition: opacity .12s ease, transform .12s ease; white-space: nowrap; }
 .memory-command-strip > button:hover::after, .memory-command-strip > button:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
-.memory-command-strip > button:hover, .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
+.memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
+.memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 .memory-command-strip button:disabled { cursor: default; opacity: .45; }
 .memory-command-more { position: relative; flex: 0 0 auto; }
 .memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
