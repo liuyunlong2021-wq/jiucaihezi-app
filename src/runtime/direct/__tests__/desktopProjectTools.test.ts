@@ -69,6 +69,13 @@ test('creative tool contract exposes the project tools and Desktop terminal', ()
   assert.match(terminal?.function.description || '', /absolute paths supplied in user text directly/)
 })
 
+test('memory_search arguments follow the shared creative tool contract', () => {
+  assert.deepEqual(
+    parseCreativeToolArguments(call('memory_search', { query: '角色设定', limit: 5 })),
+    { query: '角色设定', limit: 5 },
+  )
+})
+
 
 
 test('3D scene tool schema requires a valid nested Storyboarder character', () => {

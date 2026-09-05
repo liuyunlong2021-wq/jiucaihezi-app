@@ -377,6 +377,22 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
     ],
   },
+  {
+    id: 'minimax_h3_image_audio_to_video_v2_15s',
+    label: 'MiniMax H3 参考生视频 · 菠萝',
+    task: 'video',
+    model: 'minimax_h3_image_audio_to_video_v2_15s',
+    provider: 'gateway-video',
+    maxFiles: 12,
+    acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 12000 },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '768p竖', options: options(['480p竖', '768p竖', '480p横', '768p横']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 15, min: 1, max: 15, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' },
+    ],
+  },
   // ── Sora2 图生视频 ──
   {
     id: 'rh-sora2-image',

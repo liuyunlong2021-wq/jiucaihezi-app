@@ -514,6 +514,7 @@ type ToolFieldType =
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   tool_search: { query: 'string', limit: 'integer' },
   tool_describe: { name: 'string' },
+  memory_search: { query: 'string', limit: 'integer' },
   skill: { name: 'string' },
   read: { path: 'string', offset: 'integer', limit: 'integer' },
   glob: { pattern: 'string', path: 'string', limit: 'integer' },
@@ -574,6 +575,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   const definition = [
     TOOL_SEARCH_TOOL_DEFINITION,
     TOOL_DESCRIBE_TOOL_DEFINITION,
+    MEMORY_SEARCH_TOOL_DEFINITION,
     ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
