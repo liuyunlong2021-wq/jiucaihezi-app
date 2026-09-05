@@ -8,6 +8,7 @@ import { parseSkillMd } from '@/types/skill'
 import { loadWebSkillCatalog, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
 import { confirmAction } from '@/utils/confirmAction'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { emitEvent } from '@/utils/eventBus'
 
 const store = useAgentStore()
 const query = ref('')
@@ -40,6 +41,13 @@ function openEdit(skill: SkillConfig) {
     content: skill.skillContent,
   }
   showEditor.value = true
+}
+
+function requestSkillEdit(skill: SkillConfig) {
+  emitEvent('skill-creator-edit', {
+    skillId: skill.id,
+    skillPath: `.agent/skills/${skill.id}/SKILL.md`,
+  })
 }
 
 function closeEditor() {
@@ -152,6 +160,7 @@ async function openLocalDirectory() {
             <p>{{ skill.description || '暂无描述' }}</p>
           </div>
           <div class="wsp-user-actions">
+            <button type="button" @click="requestSkillEdit(skill)">修改</button>
             <button type="button" @click="openEdit(skill)">编辑</button>
             <button class="danger" type="button" @click="deleteSkill(skill)">删除</button>
           </div>

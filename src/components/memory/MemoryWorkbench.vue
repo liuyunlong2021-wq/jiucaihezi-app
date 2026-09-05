@@ -228,6 +228,7 @@ let offReferenceFile: (() => void) | null = null
 let offMediaReferenceAdd: (() => void) | null = null
 let offSwitchPanel: (() => void) | null = null
 let offDesktopProjectDrop: (() => void) | null = null
+let offSkillCreatorEdit: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 let creationClosePromise: Promise<boolean> | null = null
 let chatResizeStartX = 0
@@ -511,8 +512,11 @@ onMounted(async () => {
     if (drop.target === 'chat' && Array.isArray(drop.paths))
       void importDesktopChatPaths(drop.paths, drop.warnings || [])
   })
+  offSkillCreatorEdit = onEvent('skill-creator-edit', payload => requestSkillCreatorEdit(payload))
   const pendingMediaReference = consumeLastEvent('media-reference:add')
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
+  const pendingSkillCreatorEdit = consumeLastEvent('skill-creator-edit')
+  if (pendingSkillCreatorEdit) requestSkillCreatorEdit(pendingSkillCreatorEdit[0])
   document.addEventListener('pointerdown', closeModelPicker)
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('resize', resizeCreationForWindow)
@@ -532,6 +536,7 @@ onBeforeUnmount(() => {
   offMediaReferenceAdd?.()
   offSwitchPanel?.()
   offDesktopProjectDrop?.()
+  offSkillCreatorEdit?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
@@ -579,6 +584,20 @@ function closeModelPicker(event: PointerEvent) {
 
 function handleGlobalKeydown(event: KeyboardEvent) {
   if (event.key === 'Escape' && previewResource.value) closePreview()
+}
+
+function requestSkillCreatorEdit(payload: unknown) {
+  const data = payload as { skillPath?: unknown } | null
+  const skillPath = String(data?.skillPath || '').trim()
+  if (!/^\.agent\/skills\/[a-z0-9][a-z0-9-]*\/SKILL\.md$/i.test(skillPath)) return
+  selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
+  const prefix = `请使用 Skill Creator 修改这个 Skill：\n\n目标文件：\n${skillPath}\n\n修改要求：\n`
+  input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
+  setEditorText(composerRef.value, input.value)
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
 }
 
 function selectedModel() {
