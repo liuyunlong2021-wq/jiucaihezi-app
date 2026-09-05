@@ -3632,10 +3632,20 @@ const modelList = computed(() =>
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof modelList.value>()
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
-  const order = [
-    'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Veo', 'Grok Video',
-    'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
-  ]
+  const order = cpState.task === 'image'
+    ? [
+        'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
+        'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+      ]
+    : cpState.task === 'video'
+      ? [
+          'Seedance 2.0', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
+          'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+        ]
+      : [
+          'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Veo', 'Grok Video',
+          'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+        ]
   return [...groups].sort(([left], [right]) => order.indexOf(left) - order.indexOf(right))
 })
 
