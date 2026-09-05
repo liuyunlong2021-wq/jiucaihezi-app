@@ -200,6 +200,7 @@ const mediaPlans = ref<Record<string, MediaPlan[]>>({})
 const creationMounted = ref(false)
 const creationOpen = ref(false)
 const creationFocused = ref(false)
+const restoreCreationAfterPreview = ref(false)
 const creationPanelRef = ref<{ flushCanvasSave?: () => Promise<void> } | null>(null)
 const creationClosing = ref(false)
 const MEMORY_CHAT_DEFAULT = 360
@@ -762,7 +763,9 @@ async function openResource(resource: ProjectResourceOpenResult) {
   } else {
     editingMarkdown.value = false
     markdownSaveError.value = ''
+    const shouldRestoreCreation = creationOpen.value || creationMounted.value
     if (creationMounted.value && !(await closeCreationHost())) return
+    restoreCreationAfterPreview.value = shouldRestoreCreation
     if (generation !== resourceOpenGeneration) return
     prepareDockLayout()
     releaseMediaUrl()
@@ -1175,6 +1178,8 @@ async function deleteConversation(item: MemoryConversation) {
 }
 
 function closePreview() {
+  const shouldRestoreCreation = restoreCreationAfterPreview.value
+  restoreCreationAfterPreview.value = false
   backlinkGeneration++
   backlinks.value = []
   editingMarkdown.value = false
@@ -1183,6 +1188,7 @@ function closePreview() {
   projectMapReturn.value = null
   projectMapViewport.value = null
   releaseMediaUrl()
+  if (shouldRestoreCreation) void openCreationHost()
 }
 
 async function returnFromPreview() {

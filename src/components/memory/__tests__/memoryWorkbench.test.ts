@@ -74,6 +74,15 @@ test('switching conversations keeps the middle document preview open', () => {
   assert.match(workbench, /<button[^>]*title="关闭预览"[^>]*@click="closePreview"/)
 })
 
+test('closing a project preview restores the creation panel that opened it', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /const restoreCreationAfterPreview = ref\(false\)/)
+  assert.match(workbench, /const shouldRestoreCreation = creationOpen\.value \|\| creationMounted\.value/)
+  assert.match(workbench, /restoreCreationAfterPreview\.value = shouldRestoreCreation/)
+  assert.match(workbench, /const shouldRestoreCreation = restoreCreationAfterPreview\.value[\s\S]*?restoreCreationAfterPreview\.value = false/)
+  assert.match(workbench, /if \(shouldRestoreCreation\) void openCreationHost\(\)/)
+})
+
 test('memory composer keeps long Chinese input inside the available width', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /\.memory-input-row \{[^}]*min-width: 0;/)

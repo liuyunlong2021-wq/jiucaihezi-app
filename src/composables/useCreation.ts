@@ -250,7 +250,15 @@ export function getVisibleCreationTasks(): CreationTask[] {
 }
 
 function getModelsForTask(task: CreationTask): string[] {
-  return listCreationModels({ task }).map(model => model.id)
+  const priority = task === 'image'
+    ? 'newapi/xiaoyi/grok-imagine-image-2.0'
+    : task === 'video'
+      ? 'newapi/dola/seedance2.5'
+      : ''
+  const models = listCreationModels({ task }).map(model => model.id)
+  return priority && models.includes(priority)
+    ? [priority, ...models.filter(model => model !== priority)]
+    : models
 }
 
 function getMediaFieldCompat(model: CreationModel | undefined, key: string): MediaModelField | undefined {

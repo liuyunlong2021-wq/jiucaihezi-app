@@ -616,7 +616,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: ['16:9', '9:16', '1:1', '3:4', '4:3', '21:9'],
     resolutions: ['720p'],
     duration: { allowedValues: [30] },
-    files: { images: { min: 0, max: 30 } },
+    files: { images: { min: 0, max: 30, maxBytes: 20 * 1024 * 1024 } },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '3:4', '4:3', '21:9']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
