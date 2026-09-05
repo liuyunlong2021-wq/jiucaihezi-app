@@ -864,6 +864,21 @@ render();
 // Tool Definitions（给 LLM 的 Skill Creator lifecycle tools）
 // ═══════════════════════════════════════════════
 
+export const LOAD_INSTALLED_SKILL_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_load_installed_skill',
+    description: '修改现有 Skill 时，按精确 Skill ID 从「我的 Skill」读取完整 SKILL.md。不得用 Terminal 或项目文件搜索代替。',
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_id: { type: 'string', description: '要修改的已安装 Skill ID，例如 jc-dongman-gaoxiao。' },
+      },
+      required: ['skill_id'],
+    },
+  },
+}
+
 export const VALIDATE_SKILL_TOOL = {
   type: 'function' as const,
   function: {
@@ -1064,6 +1079,7 @@ export const SAVE_SKILL_TOOL = {
 }
 
 export const ALL_SKILL_TOOLS = [
+  LOAD_INSTALLED_SKILL_TOOL,
   VALIDATE_SKILL_TOOL,
   RUN_SKILL_TESTS_TOOL,
   AGGREGATE_SKILL_BENCHMARK_TOOL,

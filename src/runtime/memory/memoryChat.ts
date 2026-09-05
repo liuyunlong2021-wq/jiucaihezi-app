@@ -74,7 +74,11 @@ import { describeToolDefinition, searchToolDefinitions } from '@/runtime/direct/
 import {
   ALL_SKILL_TOOLS,
 } from '@/utils/skillTestRunner'
-import { executeSkillCreatorToolCall, isSkillCreatorToolName } from './skillCreatorToolExecutor'
+import {
+  executeSkillCreatorToolCall,
+  isSkillCreatorToolName,
+  type SkillCreatorInstalledSkill,
+} from './skillCreatorToolExecutor'
 
 export interface MemoryChatInput {
   projectId?: string
@@ -393,7 +397,28 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     return response
   }
 
-  const localSkillLoader = desktopRuntime ? createLocalSkillLoader(customSkillsByName) : undefined
+  const localSkillLoader = desktopRuntime ? createLocalSkillLoader(customSkills) : undefined
+  const loadInstalledSkillForCreator = async (requestedId: string): Promise<SkillCreatorInstalledSkill | null> => {
+    let skills = agentStore.loadSkills()
+    if (!skills.some(skill => skill.id === requestedId || skill.name === requestedId)) {
+      await agentStore.refreshSkills()
+      skills = agentStore.loadSkills()
+    }
+    const exact = skills.find(skill => skill.id === requestedId)
+    const nameMatches = exact ? [] : skills.filter(skill => skill.name === requestedId)
+    if (nameMatches.length > 1) throw new Error(`多个 Skill 使用名称 ${requestedId}，请提供精确 Skill ID。`)
+    const skill = exact || nameMatches[0]
+    if (!skill) return null
+    const editable = skill.source === 'user' || skill.source === 'github' || skill.source === 'evolved'
+    const loaded = editable && desktopRuntime ? await createLocalSkillLoader([skill])(skill.id) : null
+    return {
+      skillId: skill.id,
+      skillMd: loaded?.content || localSkillMarkdown(skill),
+      files: loaded?.resources || ['SKILL.md', ...(skill.assetIndex || []).map(item => item.path)],
+      source: String(skill.source || ''),
+      editable,
+    }
+  }
   const rawProjectTools = isTauriRuntime()
     ? createDesktopProjectToolExecutor({
         projectDir: input.projectId || '',
@@ -465,6 +490,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           sessionId: input.conversationId,
           userInput: latestUserText,
           signal,
+          loadInstalledSkill: loadInstalledSkillForCreator,
         }),
       }
     }
@@ -735,9 +761,10 @@ type LocalSkillDirectoryNode = {
   children?: LocalSkillDirectoryNode[]
 }
 
-function createLocalSkillLoader(skills: Map<string, SkillConfig>) {
+function createLocalSkillLoader(skills: SkillConfig[]) {
   return async (name: string) => {
-    const skill = skills.get(name)
+    const skill = skills.find(item => item.id === name)
+      || skills.find(item => item.name === name)
     if (!skill) return null
     const packagePath = String(skill.packagePath || '')
       .replace(/\\/g, '/')

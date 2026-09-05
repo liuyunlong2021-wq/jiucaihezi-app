@@ -33,7 +33,7 @@ test('Desktop keeps the bundled list while Web exposes only user-installed Skill
   assert.match(webPanel, /openCreate\(/)
   assert.match(webPanel, /openEdit\(skill: SkillConfig\)/)
   assert.match(webPanel, /emitEvent\('skill-creator-edit'/)
-  assert.match(webPanel, /\.agent\/skills\/\$\{skill\.id\}\/SKILL\.md/)
+  assert.match(webPanel, /\.agents\/skills\/\$\{skill\.id\}\/SKILL\.md/)
   assert.match(webPanel, /修改<\/button>/)
   assert.match(webPanel, /await store\.createAgent\(skill\)/)
   assert.match(webPanel, /store\.updateSkill\(editingSkill\.value\.id, skill\)/)

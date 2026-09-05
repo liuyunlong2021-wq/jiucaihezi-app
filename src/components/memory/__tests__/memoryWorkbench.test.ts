@@ -60,11 +60,13 @@ test('memory right chat dock separates preview layout and collapses to a compact
   assert.match(markdown, /<JcIcon v-else name="view-list" \/>/)
 })
 
-test('skill edit requests select Skill Creator and prefill the project Skill path', () => {
+test('skill edit requests select Skill Creator and prefill the Skill ID and path', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /onEvent\('skill-creator-edit'/)
   assert.match(workbench, /selectedSkillNames\.value = \[\.\.\.new Set\(\[\.\.\.selectedSkillNames\.value, 'skill-creator'\]\)\]/)
-  assert.match(workbench, /\.agent\\\/skills\\\//)
+  assert.match(workbench, /skillId\?: unknown/)
+  assert.match(workbench, /Skill ID：\\n\$\{skillId\}/)
+  assert.match(workbench, /\.agents\\\/skills\\\//)
   assert.match(workbench, /修改要求：\\n/)
 })
 

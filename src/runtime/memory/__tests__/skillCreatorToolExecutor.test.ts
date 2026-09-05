@@ -9,6 +9,55 @@ function call(name: string, args: Record<string, unknown>) {
 
 const skillMd = `---\nname: demo-skill\ndescription: A demo skill for testing.\n---\n\n# Demo\n\nFollow the request.`
 
+test('skill-creator loads an installed editable Skill by exact id', async () => {
+  const result = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_load_installed_skill', {
+    skill_id: 'demo-skill',
+  }), {
+    agentId: 'skill-creator',
+    sessionId: 'load-installed',
+    loadInstalledSkill: async skillId => ({
+      skillId,
+      skillMd,
+      files: ['SKILL.md', 'references/style.md'],
+      source: 'user',
+      editable: true,
+    }),
+  }))
+
+  assert.equal(result.status, 'ok')
+  assert.equal(result.target_skill_id, 'demo-skill')
+  assert.equal(result.skill_md, skillMd)
+  assert.deepEqual(result.files, ['SKILL.md', 'references/style.md'])
+})
+
+test('skill-creator reports missing and read-only installed Skills without filesystem search', async () => {
+  const missing = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_load_installed_skill', {
+    skill_id: 'missing-skill',
+  }), {
+    agentId: 'skill-creator',
+    sessionId: 'load-missing',
+    loadInstalledSkill: async () => null,
+  }))
+  assert.equal(missing.status, 'error')
+  assert.equal(missing.errorCode, 'SKILL_NOT_INSTALLED')
+
+  const readOnly = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_load_installed_skill', {
+    skill_id: 'builtin-skill',
+  }), {
+    agentId: 'skill-creator',
+    sessionId: 'load-readonly',
+    loadInstalledSkill: async skillId => ({
+      skillId,
+      skillMd,
+      files: ['SKILL.md'],
+      source: 'builtin',
+      editable: false,
+    }),
+  }))
+  assert.equal(readOnly.status, 'error')
+  assert.equal(readOnly.errorCode, 'SKILL_READ_ONLY')
+})
+
 test('skill-creator validates official agents and eval-viewer package paths', async () => {
   const result = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_validate', {
     skill_md: skillMd,

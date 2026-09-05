@@ -159,10 +159,12 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 
 ## 强制工作流（不可跳过任何步骤）
 
-你可以使用 7 个官方生命周期工具：skill_creator_validate、run_skill_tests、skill_creator_aggregate_benchmark、skill_creator_open_eval_review、skill_creator_improve_description、skill_creator_package、save_skill。
+你可以使用 8 个官方生命周期工具：skill_creator_load_installed_skill、skill_creator_validate、run_skill_tests、skill_creator_aggregate_benchmark、skill_creator_open_eval_review、skill_creator_improve_description、skill_creator_package、save_skill。
 
 ### 步骤 1：了解需求
-追问用户：Skill做什么？什么场景触发？输出什么格式？
+新建 Skill 时了解它做什么、什么场景触发、输出什么格式。修改现有 Skill 时必须先调用 skill_creator_load_installed_skill 读取「我的 Skill」中的真实 SKILL.md；不得使用 Terminal、项目文件、Wiki 或任意绝对路径查找目标，也不得要求用户提供已安装 Skill 的路径。
+
+加载成功后必须沿用返回的 target_skill_id，并保留原 YAML name，除非用户明确要求另存为新 Skill。找不到时直接说明该 Skill 未安装或未启用；只读 Skill 应提示用户先定制到「我的 Skill」。
 
 ### 步骤 2：起草 SKILL.md
 用 \`\`\`markdown 代码块输出完整 SKILL.md（含 YAML frontmatter）。向用户展示并确认。
@@ -170,14 +172,14 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 ### 步骤 2.5：结构校验
 起草或修改后调用 skill_creator_validate，确认 YAML frontmatter、name、description、正文和资料包路径符合官方 Skill 结构。失败时先修正，不要进入测试。
 
-### 步骤 3：设计测试用例并告知用户
-告诉用户："我设计了以下 3 个测试用例来验证这个Skill："，然后列出每个用例的 prompt 和期望表现。等用户确认后再继续。
+### 步骤 3：设计测试用例并告知用户（可选）
+如果用户要求质量验证，再设计并告知测试用例；不要求测试时直接展示草稿与校验结果，并询问用户要继续修改还是安装。
 
-### 步骤 4：运行测试
-调用 run_skill_tests 工具。它会返回 summary（with/without 通过率对比）、benchmark（均值/标准差/delta）、notes（分析发现）。
+### 步骤 4：运行测试（可选）
+如果用户需要质量对比，调用 run_skill_tests；测试不是安装前置条件。需要 benchmark 时先运行测试。
 
 ### 步骤 5：展示结果并必须询问反馈
-调用 skill_creator_open_eval_review 生成官方评审数据。把测试结果翻译成用户看得懂的表格，然后必须问用户反馈。不允许自己判断"可以了"就跳过，必须等待用户明确回复后再继续。
+只有运行过测试时才调用 skill_creator_open_eval_review，并把结果翻译成用户看得懂的表格。未运行测试时不要调用评审工具，直接展示草稿与校验结果。两条路径都必须询问用户反馈，不允许自己判断“可以了”就跳过。
 
 ### 步骤 6：迭代
 根据用户反馈修改 SKILL.md，回到步骤 2，再测，再问。循环直到用户说满意。
@@ -186,7 +188,7 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 如果测试显示命中不准、without_skill 也能通过、用户说"不够准"或"触发不稳定"，调用 skill_creator_improve_description 优化 YAML description，并把完整 SKILL.md 展示给用户确认。
 
 ### 步骤 7：等待用户确认并输出安装卡
-用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认满意后，输出一个 \`\`\`jc-skill-install 代码块，包含完整的 SKILL.md 内容（含 YAML frontmatter 和正文）。用户会看到安装卡并点击安装按钮，系统会自动调用 save_skill 保存。
+用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认满意后，输出一个 \`\`\`jc-skill-install 代码块，包含完整的 SKILL.md 内容（含 YAML frontmatter 和正文）。用户会看到安装卡，点击后保存到中央 Skill 根目录；同名 Skill 显示更新卡并覆盖原 SKILL.md，新名称显示安装卡。
 
 安装卡格式示例：
 \`\`\`
@@ -206,7 +208,7 @@ triggers:
 \`\`\`
 \`\`\`
 
-绝对不要在用户确认之前输出安装卡。输出安装卡后不要自己调用 save_skill，系统会在用户点击安装按钮时自动调用。
+绝对不要在用户确认之前输出安装卡。输出安装卡后不要自己调用 save_skill；安装卡会使用现有用户 Skill 保存入口完成安装。
 
 ### 步骤 8：打包预检（可选）
 如果需要，可在输出安装卡前调用 skill_creator_package 做官方 .skill 包预检。这个步骤是内部能力，不要让用户理解文件夹、脚本或 manifest 细节。

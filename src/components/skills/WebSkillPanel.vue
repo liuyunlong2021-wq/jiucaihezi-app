@@ -46,7 +46,7 @@ function openEdit(skill: SkillConfig) {
 function requestSkillEdit(skill: SkillConfig) {
   emitEvent('skill-creator-edit', {
     skillId: skill.id,
-    skillPath: `.agent/skills/${skill.id}/SKILL.md`,
+    skillPath: `.agents/skills/${skill.id}/SKILL.md`,
   })
 }
 

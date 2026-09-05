@@ -7,6 +7,7 @@ import {
   buildDefaultChatTools,
   resolveToolConnection,
 } from '../toolConnectionAdapter'
+import { resolveSelectedSkillCandidate } from '../skillConnectionAdapter'
 
 const searchTool = {
   type: 'function',
@@ -89,6 +90,20 @@ test('buildAvailableChatTools preserves the skill-creator special tool policy', 
   assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
 })
 
+test('Skill Creator skips eval review when tests were not requested and installs through the card', () => {
+  const result = resolveSelectedSkillCandidate({
+    agentId: 'preset_skill-creator',
+    agents: [{ id: 'preset_skill-creator', skillContent: '# Skill Creator' }],
+  })
+  const appendix = result.skill?.appendSkillMd || ''
+
+  assert.match(appendix, /修改现有 Skill.*skill_creator_load_installed_skill/)
+  assert.match(appendix, /不得使用 Terminal/)
+  assert.match(appendix, /未运行测试时不要调用评审工具/)
+  assert.match(appendix, /点击后保存到中央 Skill 根目录/)
+  assert.doesNotMatch(appendix, /自动调用 save_skill/)
+})
+
 test('buildAvailableChatTools gives skill-builder the skill creation save tools', () => {
   const tools = buildAvailableChatTools({
     agentId: 'preset_skill-builder',
@@ -140,6 +155,7 @@ test('buildDefaultChatTools gives text source builder only to 素材转Skill', (
     'compile_skill_materials',
   ])
   assert.deepEqual(creatorTools, [
+    'skill_creator_load_installed_skill',
     'skill_creator_validate',
     'run_skill_tests',
     'skill_creator_aggregate_benchmark',

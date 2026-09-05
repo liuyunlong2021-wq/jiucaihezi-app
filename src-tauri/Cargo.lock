@@ -2659,7 +2659,7 @@ dependencies = [
 
 [[package]]
 name = "jiucaihezi-app"
-version = "2.1.41"
+version = "2.1.42"
 dependencies = [
  "anydoc",
  "arboard",

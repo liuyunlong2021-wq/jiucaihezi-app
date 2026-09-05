@@ -40,6 +40,7 @@ function installSkillRunnerLocalStorage(values: Record<string, string> = {}) {
 
 test('Skill缔造 exposes the official lifecycle tools without changing 素材转Skill', () => {
   assert.deepEqual(ALL_SKILL_TOOLS.map(tool => tool.function.name), [
+    'skill_creator_load_installed_skill',
     'skill_creator_validate',
     'run_skill_tests',
     'skill_creator_aggregate_benchmark',

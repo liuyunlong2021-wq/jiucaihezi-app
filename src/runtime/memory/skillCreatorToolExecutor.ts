@@ -14,6 +14,7 @@ import { persistSkillPackageDraft } from '@/utils/skillPackageStorage'
 import { skillCreatorRuntime, shouldUseSkillCreatorRuntime } from '@/runtime/tools/skillCreatorRuntime'
 
 const TOOL_NAMES = new Set([
+  'skill_creator_load_installed_skill',
   'skill_creator_validate',
   'run_skill_tests',
   'skill_creator_aggregate_benchmark',
@@ -26,13 +27,29 @@ const TOOL_NAMES = new Set([
 type StoredRun = { results: SingleTestResult[]; benchmark: BenchmarkData; skillName: string; skillMd: string }
 const runs = new Map<string, StoredRun>()
 
+export interface SkillCreatorInstalledSkill {
+  skillId: string
+  skillMd: string
+  files: string[]
+  source: string
+  editable: boolean
+}
+
+interface SkillCreatorToolContext {
+  agentId?: string
+  sessionId?: string
+  userInput?: string
+  signal?: AbortSignal
+  loadInstalledSkill?: (skillId: string) => Promise<SkillCreatorInstalledSkill | null>
+}
+
 export function isSkillCreatorToolName(name: string): boolean {
   return TOOL_NAMES.has(String(name || '').trim())
 }
 
 export async function executeSkillCreatorToolCall(
   call: DirectToolCall,
-  context: { agentId?: string; sessionId?: string; userInput?: string; signal?: AbortSignal },
+  context: SkillCreatorToolContext,
 ): Promise<string> {
   const args = parseArgs(call.function.arguments)
   const runtimeContext = {
@@ -46,7 +63,7 @@ export async function executeSkillCreatorToolCall(
   if (!gate.allowed) return JSON.stringify({ status: 'error', errorCode: 'errorCode' in gate ? gate.errorCode : undefined, message: 'message' in gate ? gate.message : undefined, nextStep: 'nextStep' in gate ? gate.nextStep : undefined })
 
   try {
-    const result = await execute(call.function.name, args, context.signal)
+    const result = await execute(call.function.name, args, context)
     if (shouldUseSkillCreatorRuntime(runtimeContext))
       skillCreatorRuntime.afterToolResult({ toolName: call.function.name, args, context: runtimeContext, result: JSON.parse(result) })
     return result
@@ -58,7 +75,23 @@ export async function executeSkillCreatorToolCall(
   }
 }
 
-async function execute(name: string, args: Record<string, any>, signal?: AbortSignal): Promise<string> {
+async function execute(name: string, args: Record<string, any>, context: SkillCreatorToolContext): Promise<string> {
+  if (name === 'skill_creator_load_installed_skill') {
+    const skillId = String(args.skill_id || '').trim()
+    if (!skillId) return JSON.stringify({ status: 'error', errorCode: 'SKILL_ID_REQUIRED', message: '请提供要修改的 Skill ID。' })
+    if (!context.loadInstalledSkill) return JSON.stringify({ status: 'error', errorCode: 'SKILL_LOOKUP_UNAVAILABLE', message: '当前平台无法读取已安装 Skill。' })
+    const skill = await context.loadInstalledSkill(skillId)
+    if (!skill) return JSON.stringify({ status: 'error', errorCode: 'SKILL_NOT_INSTALLED', message: `「我的 Skill」中找不到 ${skillId}。` })
+    if (!skill.editable) return JSON.stringify({ status: 'error', errorCode: 'SKILL_READ_ONLY', message: `${skill.skillId} 是只读 Skill，请先定制到「我的 Skill」。` })
+    if (!skill.skillMd.trim()) return JSON.stringify({ status: 'error', errorCode: 'SKILL_CONTENT_EMPTY', message: `${skill.skillId} 的 SKILL.md 为空。` })
+    return JSON.stringify({
+      status: 'ok',
+      target_skill_id: skill.skillId,
+      skill_md: skill.skillMd,
+      files: [...new Set(['SKILL.md', ...skill.files.map(String).filter(Boolean)])],
+      source: skill.source,
+    })
+  }
   const testId = String(args.test_id || args.run_id || 'default')
   if (name === 'skill_creator_validate') {
     return JSON.stringify(validateSkillDraft(String(args.skill_md || ''), normalizeReferences(args.references)))
@@ -95,7 +128,7 @@ async function execute(name: string, args: Record<string, any>, signal?: AbortSi
       userIntent: String(args.user_intent || ''),
       feedback: String(args.feedback || ''),
       benchmarkNotes: Array.isArray(args.benchmark_notes) ? args.benchmark_notes.map(String) : [],
-    }, signal)
+    }, context.signal)
     return JSON.stringify({ status: 'ok', skill_md: improved.skillMd, output: improved.output })
   }
   if (name === 'skill_creator_package') {

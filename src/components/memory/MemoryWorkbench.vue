@@ -587,11 +587,12 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 }
 
 function requestSkillCreatorEdit(payload: unknown) {
-  const data = payload as { skillPath?: unknown } | null
+  const data = payload as { skillId?: unknown; skillPath?: unknown } | null
+  const skillId = String(data?.skillId || '').trim()
   const skillPath = String(data?.skillPath || '').trim()
-  if (!/^\.agent\/skills\/[a-z0-9][a-z0-9-]*\/SKILL\.md$/i.test(skillPath)) return
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(skillId) || !/^\.agents\/skills\/[a-z0-9][a-z0-9-]*\/SKILL\.md$/i.test(skillPath)) return
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
-  const prefix = `请使用 Skill Creator 修改这个 Skill：\n\n目标文件：\n${skillPath}\n\n修改要求：\n`
+  const prefix = `请使用 Skill Creator 修改这个 Skill：\n\nSkill ID：\n${skillId}\n\n目标文件：\n${skillPath}\n\n修改要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
   setEditorText(composerRef.value, input.value)
   void nextTick(() => {
