@@ -128,6 +128,7 @@ test('removed defaults stay absent and model metadata drives family and fee labe
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-gpt2-image')!), 'GPT Image')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-gpt2-text')!), 'GPT Image')
   assert.equal(creationModelFamily(getCreationModelSpec('gemini-3-pro-image-preview')!), 'Banana')
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/xiaoyi/grok-imagine-image-2.0')!), 'Grok Image')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-mini-image')!), 'Seedance 2.0 Mini')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-fast-text')!), 'Seedance 2.0 Fast')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-image')!), 'Seedance 2.0')
