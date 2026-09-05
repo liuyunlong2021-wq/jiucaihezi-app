@@ -85,6 +85,13 @@ def test_minimax_h3_ai_apps_share_generic_billing_model():
         assert directory[webapp_id]["outputType"] == "video"
 
 
+def test_image_audio_video_ai_app_is_registered():
+    app = next(entry for entry in get_ai_app_directory() if entry["webappId"] == "2096079329523494914")
+    assert app["label"] == "图音生视频"
+    assert app["outputType"] == "video"
+    assert app["billingModel"] == "rh-aiapp"
+
+
 def test_get_rh_endpoint_text_to_image():
     endpoint = get_rh_endpoint("rh-pro-image", has_image=False)
     assert endpoint == "rhart-image-n-pro/text-to-image"

@@ -432,6 +432,7 @@ def get_ai_app_directory() -> list[dict[str, str]]:
             "billingModel": "rh-aiapp",
         }
         for webapp_id, label in (
+            ("2096079329523494914", "图音生视频"),
             ("2093604127250149377", "Minimax-h3 文生视频"),
             ("2093571735550521345", "Minimax-h3 首帧图生视频"),
             ("2093579373894000642", "Minimax-h3 首尾帧"),
