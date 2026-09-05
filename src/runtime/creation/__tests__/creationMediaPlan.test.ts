@@ -185,6 +185,14 @@ test('Dola Seedance 2.5 switches to image-to-video with four references and stay
     modelId: 'newapi/dola/seedance2.5',
     params: { prompt: '超出参考图上限', images: Array.from({ length: 31 }, (_, i) => `https://example.com/${i}.jpg`) },
   }), /参考图最多支持 30 个/)
+  assert.doesNotThrow(() => buildCreationRunPlan({
+    modelId: 'newapi/dola/seedance2.5',
+    params: { prompt: 'a'.repeat(12000) },
+  }))
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/dola/seedance2.5',
+    params: { prompt: 'a'.repeat(12001) },
+  }), /提示词不能超过 12000 字符/)
 })
 
 test('model lookup prefers exact ids and resolves aliases', () => {

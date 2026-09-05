@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException, Request
 
 BASE_URL = "https://43.254.166.196"
 MODEL = "dola-seedance2.5"
-MAX_PROMPT = 3000
+MAX_PROMPT = 12000
 MAX_IMAGES = 30
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
@@ -44,7 +44,7 @@ async def create_video(request: Request):
         raise HTTPException(400, "Unsupported Dola Seedance model")
     prompt = str(body.get("prompt") or "").strip()
     if not prompt or len(prompt) > MAX_PROMPT:
-        raise HTTPException(400, "prompt must contain 1-3000 characters")
+        raise HTTPException(400, "prompt must contain 1-12000 characters")
     ratio = str(body.get("ratio") or body.get("aspect_ratio") or "16:9")
     if ratio not in {"16:9", "9:16", "1:1", "3:4", "4:3", "21:9"}:
         raise HTTPException(400, "Unsupported ratio")

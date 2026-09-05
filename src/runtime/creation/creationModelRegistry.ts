@@ -81,8 +81,10 @@ function options(values: Array<string | number | boolean>) {
   return values.map(value => ({ value, label: String(value) }))
 }
 
-function promptFields(extra: CreationFieldSpec[] = []): CreationFieldSpec[] {
-  return [{ key: 'prompt', label: '提示词', kind: 'prompt', required: true }, ...extra]
+function promptFields(extra: CreationFieldSpec[] = [], maxLength?: number): CreationFieldSpec[] {
+  const prompt: CreationFieldSpec = { key: 'prompt', label: '提示词', kind: 'prompt', required: true }
+  if (maxLength !== undefined) prompt.maxLength = maxLength
+  return [prompt, ...extra]
 }
 
 function baseSpec(input: {
@@ -622,7 +624,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
       { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
       { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
-    ]),
+    ], 12000),
     notes: ['API接口说明.md', '独立 Dola 适配器。'],
   }),
   directVideo({
