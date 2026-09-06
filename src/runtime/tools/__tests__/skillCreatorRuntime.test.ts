@@ -71,13 +71,11 @@ test('Skill Creator runtime blocks review until tests complete', () => {
   assert.equal(allowed.allowed, true)
 })
 
-test('Skill Creator runtime requires review feedback and explicit save intent before save_skill', () => {
+test('Skill Creator runtime allows an explicitly confirmed save after validation without tests', () => {
   const runtime = createSkillCreatorRuntime()
   const args = { test_id: 'run_c' }
 
   runtime.afterToolResult({ toolName: 'skill_creator_validate', args, context, result: { status: 'ok' } })
-  runtime.afterToolResult({ toolName: 'run_skill_tests', args, context, result: { status: 'ok' } })
-  runtime.afterToolResult({ toolName: 'skill_creator_open_eval_review', args, context, result: { status: 'ok' } })
 
   const notConfirmed = runtime.beforeToolCall({
     toolName: 'save_skill',
@@ -93,6 +91,29 @@ test('Skill Creator runtime requires review feedback and explicit save intent be
     context: { ...context, userInput: '确认保存这个 Skill' },
   })
   assert.equal(confirmed.allowed, true)
+
+  const prepared = runtime.afterToolResult({
+    toolName: 'save_skill',
+    args,
+    context,
+    result: { status: 'prepared' },
+  })
+  assert.equal(prepared.state, 'package_ready')
+})
+
+test('Skill Creator runtime requires review when optional tests were run', () => {
+  const runtime = createSkillCreatorRuntime()
+  const args = { test_id: 'run_tested' }
+  runtime.afterToolResult({ toolName: 'skill_creator_validate', args, context, result: { status: 'ok' } })
+  runtime.afterToolResult({ toolName: 'run_skill_tests', args, context, result: { status: 'ok' } })
+
+  const blocked = runtime.beforeToolCall({
+    toolName: 'save_skill',
+    args,
+    context: { ...context, userInput: '确认保存' },
+  })
+  assert.equal(blocked.allowed, false)
+  assert.equal(blocked.errorCode, 'SKILL_CREATOR_REVIEW_REQUIRED')
 })
 
 test('Skill Creator runtime isolates same test_id across sessions', () => {
@@ -139,6 +160,14 @@ test('Skill Creator runtime turns continue-improve feedback into improving state
   assert.equal(runtime.getSnapshot(args, context)?.state, 'improving')
 })
 
+test('Skill Creator runtime allows improvement after validation when tests were skipped', () => {
+  const runtime = createSkillCreatorRuntime()
+  const args = { test_id: 'run_no_tests' }
+  runtime.afterToolResult({ toolName: 'skill_creator_validate', args, context, result: { status: 'ok' } })
+  const decision = runtime.beforeToolCall({ toolName: 'skill_creator_improve_description', args, context: { ...context, userInput: '继续优化描述' } })
+  assert.equal(decision.allowed, true)
+})
+
 test('Skill Creator runtime requires a new validation cycle after improvement', () => {
   const runtime = createSkillCreatorRuntime()
   const args = { test_id: 'run_e' }
@@ -163,5 +192,24 @@ test('Skill Creator runtime requires a new validation cycle after improvement', 
     context: { ...context, userInput: '确认保存' },
   })
   assert.equal(blockedSave.allowed, false)
-  assert.equal(blockedSave.errorCode, 'SKILL_CREATOR_WAITING_FEEDBACK_REQUIRED')
+  assert.equal(blockedSave.errorCode, 'SKILL_CREATOR_VALIDATE_REQUIRED')
+})
+
+test('Skill Creator runtime rejects a stale draft revision after validation', () => {
+  const runtime = createSkillCreatorRuntime()
+  const validated = { draft_id: 'draft-a', revision: 1, content_hash: 'hash-1' }
+  runtime.afterToolResult({
+    toolName: 'skill_creator_validate',
+    args: validated,
+    context,
+    result: { status: 'ok', ...validated },
+  })
+
+  const stale = runtime.beforeToolCall({
+    toolName: 'run_skill_tests',
+    args: { draft_id: 'draft-a', revision: 2, content_hash: 'hash-2' },
+    context,
+  })
+  assert.equal(stale.allowed, false)
+  assert.equal(stale.errorCode, 'STALE_SKILL_DRAFT')
 })

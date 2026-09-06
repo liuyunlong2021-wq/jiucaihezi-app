@@ -25,6 +25,7 @@ const emit = defineEmits<{
       <JcIcon name="extension" aria-hidden="true" />
     </header>
     <p>{{ plan.description }}</p>
+    <p v-if="plan.files.length > 1">包含 {{ plan.files.length }} 个文件</p>
     <div v-if="plan.triggers.length" class="skill-install-triggers">
       <span v-for="trigger in plan.triggers" :key="trigger">{{ trigger }}</span>
     </div>

@@ -156,7 +156,7 @@ export async function executeCompileSkillMaterialsToolCall(
           errorMessage: normalized.message,
         }
       }
-      const draft = registerSkillBuilderDraft({
+      const draft = await registerSkillBuilderDraft({
         skillMd: normalized.skillMd,
         references: normalized.references,
         manifest: normalized.manifest,
@@ -169,6 +169,8 @@ export async function executeCompileSkillMaterialsToolCall(
         message: '已整理资料并生成 Skill 草稿。请展示草稿摘要，设计至少 3 个测试用例。',
         data: {
           draft_id: draft.draftId,
+          revision: draft.revision,
+          content_hash: draft.contentHash,
           package: {
             skillMdPath: normalized.skillMdPath,
             manifestPath: normalized.manifestPath,

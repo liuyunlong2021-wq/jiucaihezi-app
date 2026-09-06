@@ -15,6 +15,7 @@ const query = ref('')
 const showEditor = ref(false)
 const editingSkill = ref<SkillConfig | null>(null)
 const editForm = ref({ name: '', description: '', content: '' })
+const saveError = ref('')
 const bundledSkills = ref<WebSkillCatalogEntry[]>([])
 const customizingSkillId = ref('')
 const userSkills = computed(() => searchSkills(
@@ -30,6 +31,7 @@ onMounted(async () => {
 function openCreate() {
   editingSkill.value = null
   editForm.value = { name: '', description: '', content: '' }
+  saveError.value = ''
   showEditor.value = true
 }
 
@@ -40,6 +42,7 @@ function openEdit(skill: SkillConfig) {
     description: skill.description,
     content: skill.skillContent,
   }
+  saveError.value = ''
   showEditor.value = true
 }
 
@@ -52,13 +55,17 @@ function requestSkillEdit(skill: SkillConfig) {
 
 function closeEditor() {
   showEditor.value = false
+  saveError.value = ''
 }
 
 async function saveSkill() {
   const name = editForm.value.name.trim()
   const description = editForm.value.description.trim()
   const content = editForm.value.content.trim()
-  if (!name || !content) return
+  if (!name || !content) {
+    saveError.value = '名称和 SKILL.md 内容不能为空'
+    return
+  }
 
   const skill: SkillConfig = {
     id: editingSkill.value?.id || name.toLowerCase().replace(/\s+/g, '-'),
@@ -74,12 +81,17 @@ async function saveSkill() {
     updatedAt: Date.now(),
     evolutionLog: editingSkill.value?.evolutionLog || [],
   }
-  if (editingSkill.value) {
-    store.updateSkill(editingSkill.value.id, skill)
-  } else {
-    await store.createAgent(skill)
+  saveError.value = ''
+  try {
+    if (editingSkill.value) {
+      await store.updateSkill(editingSkill.value.id, skill)
+    } else {
+      await store.createAgent(skill)
+    }
+    closeEditor()
+  } catch (cause) {
+    saveError.value = cause instanceof Error ? cause.message : String(cause)
   }
-  closeEditor()
 }
 
 async function deleteSkill(skill: SkillConfig) {
@@ -187,6 +199,7 @@ async function openLocalDirectory() {
           <span>SKILL.md</span>
           <textarea v-model="editForm.content" required rows="12" placeholder="填写完整的 SKILL.md 内容" />
         </label>
+        <p v-if="saveError" class="wsp-error">{{ saveError }}</p>
         <footer>
           <button type="button" @click="closeEditor">取消</button>
           <button class="primary" type="submit">保存</button>
@@ -223,6 +236,7 @@ async function openLocalDirectory() {
 .wsp-editor input, .wsp-editor textarea { box-sizing: border-box; width: 100%; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; font-size: 13px; }
 .wsp-editor input { height: 34px; padding: 0 9px; }
 .wsp-editor textarea { padding: 9px; resize: vertical; }
+.wsp-error { margin: 0; color: var(--red, #b42318); font-size: 12px; }
 .wsp-editor footer { justify-content: flex-end; gap: 8px; }
 .wsp-editor footer button { padding: 6px 12px; font-size: 13px; }
 .wsp-editor footer .primary { border-color: var(--olive); background: var(--olive); color: #fff; }

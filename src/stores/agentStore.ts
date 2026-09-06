@@ -14,6 +14,7 @@ import { parseSkillMd, serializeToSkillMd } from '../types/skill'
 import { gatewayModels } from '@/services/newApiClient'
 import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { appendSkillCreatorHistory } from '@/utils/skillCreatorWorkspace'
 import type { SkillWithLinks } from '@/types/skillsManage'
 import {
   LOCAL_MLX_PROVIDER_ID,
@@ -620,7 +621,7 @@ export const useAgentStore = defineStore('agents', () => {
     if (saved) currentAgent.value = saved
   }
 
-  function updateSkill(id: string, patch: Partial<SkillConfig>) {
+  async function updateSkill(id: string, patch: Partial<SkillConfig>) {
     id = normalizeSkillId(id)
     const all = loadSkills()
     const idx = all.findIndex(s => s.id === id)
@@ -634,15 +635,32 @@ export const useAgentStore = defineStore('agents', () => {
     }
     centralSkillCache.value = sortSkillConfigs(all.map(skill => skill.id === id ? updated : skill))
     _skillsVersion.value++
-    void invoke('save_central_skill', {
-      input: {
-        skillId: id,
-        skillMd: skillMdForSave(updated),
-      },
-    }).then(() => refreshSkills()).catch(error => {
-      console.error('Failed to update Central Skill', error)
-      void refreshSkills()
-    })
+    try {
+      await invoke('save_central_skill', {
+        input: {
+          skillId: id,
+          skillMd: skillMdForSave(updated),
+        },
+      })
+      await refreshSkills()
+    } catch (error) {
+      await refreshSkills()
+      throw error
+    }
+  }
+
+  async function commitSkillDraft(token: {
+    draftId: string
+    sessionId: string
+    revision: number
+    contentHash: string
+    targetSkillId: string
+  }) {
+    if (!isTauriRuntime()) throw new Error('Web 端请使用浏览器 Skill 存储')
+    await invoke('commit_central_skill_draft', { input: token })
+    await appendSkillCreatorHistory({ sessionId: token.sessionId, draftId: token.draftId, entry: { event: 'installed', revision: token.revision, timestamp: new Date().toISOString() } })
+    await refreshSkills()
+    currentAgent.value = centralSkillCache.value.find(skill => skill.id === token.targetSkillId) || null
   }
 
   async function deleteAgent(id: string) {
@@ -855,6 +873,7 @@ export const useAgentStore = defineStore('agents', () => {
     restoreLastAgent,
     createAgent,
     updateSkill,
+    commitSkillDraft,
     deleteAgent,
     toggleWarehouse,
     togglePresetEnabled,

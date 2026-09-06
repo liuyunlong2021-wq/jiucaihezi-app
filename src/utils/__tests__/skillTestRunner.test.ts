@@ -9,6 +9,7 @@ import {
   packageSkillDraft,
   validateSkillDraft,
   runSkillTests,
+  buildBlindComparison,
 } from '../skillTestRunner'
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 
@@ -45,6 +46,10 @@ test('Skill缔造 exposes the official lifecycle tools without changing 素材�
     'run_skill_tests',
     'skill_creator_aggregate_benchmark',
     'skill_creator_open_eval_review',
+    'skill_creator_submit_eval_feedback',
+    'skill_creator_load_eval_feedback',
+    'skill_creator_compare_outputs',
+    'skill_creator_analyze_comparison',
     'skill_creator_improve_description',
     'skill_creator_package',
     'save_skill',
@@ -68,6 +73,29 @@ test('validateSkillDraft enforces official Skill frontmatter and package paths',
   assert.equal(bad.status, 'error')
   assert.match(bad.message, /YAML frontmatter/)
   assert.equal(bad.checks.some(check => check.id === 'safe_package_paths' && !check.passed), true)
+})
+
+test('validateSkillDraft accepts triggers but rejects invalid official field types and limits', () => {
+  const extended = validateSkillDraft(validSkillMd.replace(
+    '---\n\n# Storyboard',
+    'compatibility: Works with Markdown outputs\ntriggers:\n  - 分镜\n  - storyboard\n---\n\n# Storyboard',
+  ))
+  assert.equal(extended.status, 'ok')
+
+  const badName = validateSkillDraft(validSkillMd.replace('storyboard-helper', 'Storyboard--Helper'))
+  assert.equal(badName.status, 'error')
+  assert.equal(badName.checks.some(check => check.id === 'valid_name' && !check.passed), true)
+
+  const badDescription = validateSkillDraft(validSkillMd.replace(
+    'description: Use this skill whenever the user asks for short-video storyboard planning, shot breakdowns, or visual continuity checks.',
+    'description: [not, a, string]',
+  ))
+  assert.equal(badDescription.status, 'error')
+  assert.equal(badDescription.checks.some(check => check.id === 'valid_description' && !check.passed), true)
+
+  const badTriggers = validateSkillDraft(validSkillMd.replace('---\n\n# Storyboard', 'triggers: wrong\n---\n\n# Storyboard'))
+  assert.equal(badTriggers.status, 'error')
+  assert.equal(badTriggers.checks.some(check => check.id === 'valid_triggers' && !check.passed), true)
 })
 
 test('packageSkillDraft returns a deterministic local package manifest without saving user data', () => {
@@ -203,4 +231,55 @@ test('aggregateBenchmark marks API failures as errors instead of successful asse
   const withRun = benchmark.runs.find(run => run.configuration === 'with_skill')
   assert.equal(withRun?.result.errors, 1)
   assert.equal(withRun?.result.pass_rate, 0)
+})
+
+test('runSkillTests repeats both configurations and uses an installed baseline', async () => {
+  const restoreStorage = installSkillRunnerLocalStorage({ jcModel: 'gpt-5.5', jcModelProviderId: 'jiucaihezi' })
+  const previousFetch = globalThis.fetch
+  try {
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body || '{}'))
+      const system = String(body.messages?.[0]?.role === 'system' ? body.messages[0].content : '')
+      if (String(body.messages?.at(-1)?.content || '').includes('返回 JSON 数组')) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '[{"text":"ok","passed":true,"evidence":"ok"}]' } }] }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ choices: [{ message: { content: system.includes('Old Skill') ? 'old' : 'new' } }], usage: { total_tokens: 2 } }), { status: 200 })
+    }
+    const result = await runSkillTests(validSkillMd, [{ prompt: 'test', expect: 'ok' }], {
+      runsPerConfiguration: 2,
+      baselineSkillMd: '# Old Skill',
+    })
+    assert.deepEqual(result.results[0].runs.map(run => run.configuration), ['with_skill', 'installed_version', 'with_skill', 'installed_version'])
+    const benchmark = aggregateBenchmark(result.results, 'storyboard-helper', { provider: 'jiucaihezi', model: 'gpt-5.5', revision: 2 })
+    assert.deepEqual(benchmark.runs.map(run => run.run_number), [1, 1, 2, 2])
+    assert.equal(benchmark.metadata.runs_per_configuration, 2)
+    assert.equal(benchmark.metadata.model, 'gpt-5.5')
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('grader rejects claims about generated files when a run has no artifacts', () => {
+  const benchmark = aggregateBenchmark([{ eval_id: 1, eval_name: 'file claim', prompt: 'make file', expect: 'file', runs: [{
+    configuration: 'with_skill', output: '已生成 report.csv', tokenCount: 1, durationMs: 1,
+    assertions: [{ text: '生成文件', passed: true, evidence: '已生成' }],
+    timing: { total_tokens: 1, duration_ms: 1, total_duration_seconds: 0.001 }, transcript: [], outputs: [],
+  }] }], 'file-claim')
+  assert.equal(benchmark.runs[0].result.pass_rate, 0)
+  assert.equal(benchmark.runs[0].claims?.[0].verified, false)
+})
+
+test('blind comparison hides configuration labels and is deterministic for a seed', () => {
+  const runs = [
+    { configuration: 'with_skill' as const, output: 'new output', tokenCount: 1, durationMs: 1, assertions: [], timing: { total_tokens: 1, duration_ms: 1, total_duration_seconds: 0.001 } },
+    { configuration: 'installed_version' as const, output: 'old output', tokenCount: 1, durationMs: 1, assertions: [], timing: { total_tokens: 1, duration_ms: 1, total_duration_seconds: 0.001 } },
+  ]
+  const first = buildBlindComparison(runs, 'eval-1')
+  const second = buildBlindComparison(runs, 'eval-1')
+  assert.deepEqual(first, second)
+  assert.doesNotMatch(JSON.stringify(first.publicInput), /with_skill|installed_version|revision/)
+  assert.deepEqual(new Set([first.hiddenMapping.A, first.hiddenMapping.B]), new Set(['with_skill', 'installed_version']))
 })

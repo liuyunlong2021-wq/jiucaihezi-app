@@ -106,8 +106,8 @@ test('executeCompileSkillMaterialsToolCall starts a job and stores compiled draf
   assert.equal(final?.status, 'succeeded')
   const data = final?.result?.data as any
   assert.match(data.draft_id, /^draft_/)
-  assert.equal(getSkillBuilderDraft(data.draft_id, 'session_compile')?.references[0].content, 'Repo source material')
-  assert.equal(getSkillBuilderDraft(data.draft_id, 'other_session'), null)
+  assert.equal((await getSkillBuilderDraft(data.draft_id, 'session_compile'))?.references[0].content, 'Repo source material')
+  assert.equal(await getSkillBuilderDraft(data.draft_id, 'other_session'), null)
 })
 
 test('executeCompileSkillMaterialsToolCall uses a unique workspace per job', async () => {

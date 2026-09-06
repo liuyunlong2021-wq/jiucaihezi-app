@@ -3,6 +3,12 @@ import { skillBuilderRuntime, shouldUseSkillBuilderRuntime } from '@/runtime/too
 import { getLocalContentToolDefinitions } from '@/utils/localContentTools'
 import { buildSkillPackageFromText, type SkillPackageDraftManifest, type SkillPackageReference } from '@/utils/skillTextBuilder'
 import {
+  hashSkillDraft,
+  loadLatestSkillDraftRevision,
+  persistSkillDraftRevision,
+  type PersistedSkillDraftRecord,
+} from '@/utils/skillDraftStorage'
+import {
   RUN_SKILL_TESTS_TOOL,
   SAVE_SKILL_TOOL,
 } from '@/utils/skillTestRunner'
@@ -23,14 +29,26 @@ export interface SkillBuilderToolContext {
 export interface SkillBuilderDraftRecord {
   draftId: string
   sessionId: string
+  revision: number
+  contentHash: string
   skillMd: string
   references: SkillPackageReference[]
   manifest: SkillPackageDraftManifest
   quality: ReturnType<typeof buildSkillPackageFromText>['quality']
   createdAt: number
+  updatedAt: number
+}
+
+export class SkillBuilderDraftError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message)
+    this.name = 'SkillBuilderDraftError'
+  }
 }
 
 export interface RegisterSkillBuilderDraftInput {
+  draftId?: string
+  expectedRevision?: number
   skillMd: string
   references: SkillPackageReference[]
   manifest: SkillPackageDraftManifest
@@ -143,19 +161,26 @@ export async function executeSkillBuilderToolCall(
       sourceTitle: String(args.source_title || ''),
       sourceText: String(args.source_text || ''),
     })
-    const draftRecord = storeSkillBuilderDraft(draft, context)
+    const draftRecord = await registerSkillBuilderDraft({ ...draft, sessionId: context?.sessionId })
     if (shouldUseSkillBuilderRuntime(context)) {
       skillBuilderRuntime.afterToolResult({
         toolName: 'build_skill_from_text',
         args: { ...args, draft_id: draftRecord.draftId },
         context,
-        result: { status: 'ok', draft_id: draftRecord.draftId },
+        result: {
+          status: 'ok',
+          draft_id: draftRecord.draftId,
+          revision: draftRecord.revision,
+          content_hash: draftRecord.contentHash,
+        },
       })
     }
 
     return JSON.stringify({
       status: 'ok',
       draft_id: draftRecord.draftId,
+      revision: draftRecord.revision,
+      content_hash: draftRecord.contentHash,
       skill_md: draft.skillMd,
       references: draft.references,
       manifest: draft.manifest,
@@ -171,49 +196,51 @@ export async function executeSkillBuilderToolCall(
   }
 }
 
-export function getSkillBuilderDraft(draftId: string, sessionId?: string | null): SkillBuilderDraftRecord | null {
+export async function getSkillBuilderDraft(draftId: string, sessionId?: string | null): Promise<SkillBuilderDraftRecord | null> {
   const key = buildDraftKey(sessionId, draftId)
   const record = skillBuilderDrafts.get(key)
-  return record ? cloneDraftRecord(record) : null
+  if (record) return cloneDraftRecord(record)
+  const persisted = await loadLatestSkillDraftRevision(normalizeSessionId(sessionId), draftId)
+  if (!persisted) return null
+  const restored = fromPersistedRecord(persisted)
+  skillBuilderDrafts.set(key, restored)
+  return cloneDraftRecord(restored)
 }
 
-export function registerSkillBuilderDraft(input: RegisterSkillBuilderDraftInput): SkillBuilderDraftRecord {
+export async function registerSkillBuilderDraft(input: RegisterSkillBuilderDraftInput): Promise<SkillBuilderDraftRecord> {
   const sessionId = normalizeSessionId(input.sessionId)
-  const draftId = `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  const draftId = String(input.draftId || '').trim() || `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  const existing = input.draftId ? await getSkillBuilderDraft(draftId, sessionId) : null
+  if (existing && input.expectedRevision !== undefined && input.expectedRevision !== existing.revision) {
+    throw new SkillBuilderDraftError('STALE_SKILL_DRAFT', `Skill 草稿版本已变化：当前 revision ${existing.revision}。`)
+  }
+  const references = input.references.map(reference => ({ ...reference }))
+  const contentHash = await hashSkillDraft(input.skillMd, references)
+  if (existing?.contentHash === contentHash) return existing
+  const now = Date.now()
   const record: SkillBuilderDraftRecord = {
     draftId,
     sessionId,
+    revision: (existing?.revision || 0) + 1,
+    contentHash,
     skillMd: input.skillMd,
-    references: input.references.map(reference => ({ ...reference })),
+    references,
     manifest: { ...input.manifest },
     quality: input.quality || {
       hardGatePassed: true,
       errors: [],
       warnings: [],
     },
-    createdAt: Date.now(),
+    createdAt: existing?.createdAt || now,
+    updatedAt: now,
   }
+  await persistSkillDraftRevision(toPersistedRecord(record))
   skillBuilderDrafts.set(buildDraftKey(sessionId, draftId), record)
   return cloneDraftRecord(record)
 }
 
-function storeSkillBuilderDraft(
-  draft: ReturnType<typeof buildSkillPackageFromText>,
-  context?: SkillBuilderToolContext,
-): SkillBuilderDraftRecord {
-  const sessionId = normalizeSessionId(context?.sessionId)
-  const draftId = `draft_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
-  const record: SkillBuilderDraftRecord = {
-    draftId,
-    sessionId,
-    skillMd: draft.skillMd,
-    references: draft.references,
-    manifest: draft.manifest,
-    quality: draft.quality,
-    createdAt: Date.now(),
-  }
-  skillBuilderDrafts.set(buildDraftKey(sessionId, draftId), record)
-  return cloneDraftRecord(record)
+export function __resetSkillBuilderDraftMemoryForTests(): void {
+  skillBuilderDrafts.clear()
 }
 
 function buildDraftKey(sessionId: string | null | undefined, draftId: string): string {
@@ -229,6 +256,24 @@ function cloneDraftRecord(record: SkillBuilderDraftRecord): SkillBuilderDraftRec
     ...record,
     references: record.references.map(reference => ({ ...reference })),
     manifest: { ...record.manifest },
+    quality: { ...record.quality },
+  }
+}
+
+function toPersistedRecord(record: SkillBuilderDraftRecord): PersistedSkillDraftRecord {
+  return {
+    ...record,
+    references: record.references.map(reference => ({ ...reference })),
+    manifest: { ...record.manifest },
+    quality: { ...record.quality },
+  }
+}
+
+function fromPersistedRecord(record: PersistedSkillDraftRecord): SkillBuilderDraftRecord {
+  return {
+    ...record,
+    references: record.references.map(reference => ({ ...reference, mimeType: 'text/markdown' as const })),
+    manifest: record.manifest as unknown as SkillPackageDraftManifest,
     quality: { ...record.quality },
   }
 }

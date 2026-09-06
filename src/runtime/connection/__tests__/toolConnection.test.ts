@@ -100,7 +100,7 @@ test('Skill Creator skips eval review when tests were not requested and installs
   assert.match(appendix, /修改现有 Skill.*skill_creator_load_installed_skill/)
   assert.match(appendix, /不得使用 Terminal/)
   assert.match(appendix, /未运行测试时不要调用评审工具/)
-  assert.match(appendix, /点击后保存到中央 Skill 根目录/)
+  assert.match(appendix, /点击安装卡后.*保存到中央 Skill 根目录/)
   assert.doesNotMatch(appendix, /自动调用 save_skill/)
 })
 
@@ -160,6 +160,10 @@ test('buildDefaultChatTools gives text source builder only to 素材转Skill', (
     'run_skill_tests',
     'skill_creator_aggregate_benchmark',
     'skill_creator_open_eval_review',
+    'skill_creator_submit_eval_feedback',
+    'skill_creator_load_eval_feedback',
+    'skill_creator_compare_outputs',
+    'skill_creator_analyze_comparison',
     'skill_creator_improve_description',
     'skill_creator_package',
     'save_skill',

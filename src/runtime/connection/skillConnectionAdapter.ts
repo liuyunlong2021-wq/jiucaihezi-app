@@ -157,9 +157,9 @@ const SKILL_CREATOR_RUNTIME_APPENDIX = `
 Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。
 官方 Python 脚本通过韭菜盒子已接入的受限脚本执行能力运行；Web/Mobile 不伪造本地脚本执行结果。
 
-## 强制工作流（不可跳过任何步骤）
+## 工作流
 
-你可以使用 8 个官方生命周期工具：skill_creator_load_installed_skill、skill_creator_validate、run_skill_tests、skill_creator_aggregate_benchmark、skill_creator_open_eval_review、skill_creator_improve_description、skill_creator_package、save_skill。
+你可以使用生命周期工具完成读取、校验、测试、评审、反馈保存、改进、打包和安装准备。测试后用 skill_creator_submit_eval_feedback 保存用户逐项意见；下一轮用 skill_creator_load_eval_feedback 读取上一轮反馈。
 
 ### 步骤 1：了解需求
 新建 Skill 时了解它做什么、什么场景触发、输出什么格式。修改现有 Skill 时必须先调用 skill_creator_load_installed_skill 读取「我的 Skill」中的真实 SKILL.md；不得使用 Terminal、项目文件、Wiki 或任意绝对路径查找目标，也不得要求用户提供已安装 Skill 的路径。
@@ -171,12 +171,14 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 
 ### 步骤 2.5：结构校验
 起草或修改后调用 skill_creator_validate，确认 YAML frontmatter、name、description、正文和资料包路径符合官方 Skill 结构。失败时先修正，不要进入测试。
+保存并沿用校验返回的 draft_id、revision 和 content_hash；后续测试、评审、优化、打包和保存都必须原样携带，内容修改后必须重新校验。
 
 ### 步骤 3：设计测试用例并告知用户（可选）
 如果用户要求质量验证，再设计并告知测试用例；不要求测试时直接展示草稿与校验结果，并询问用户要继续修改还是安装。
 
 ### 步骤 4：运行测试（可选）
 如果用户需要质量对比，调用 run_skill_tests；测试不是安装前置条件。需要 benchmark 时先运行测试。
+只有用户明确要求严谨比较时，才调用 skill_creator_compare_outputs；完成后可调用 skill_creator_analyze_comparison 解盲分析。两者都不是安装前置条件。
 
 ### 步骤 5：展示结果并必须询问反馈
 只有运行过测试时才调用 skill_creator_open_eval_review，并把结果翻译成用户看得懂的表格。未运行测试时不要调用评审工具，直接展示草稿与校验结果。两条路径都必须询问用户反馈，不允许自己判断“可以了”就跳过。
@@ -188,27 +190,18 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 如果测试显示命中不准、without_skill 也能通过、用户说"不够准"或"触发不稳定"，调用 skill_creator_improve_description 优化 YAML description，并把完整 SKILL.md 展示给用户确认。
 
 ### 步骤 7：等待用户确认并输出安装卡
-用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认满意后，输出一个 \`\`\`jc-skill-install 代码块，包含完整的 SKILL.md 内容（含 YAML frontmatter 和正文）。用户会看到安装卡，点击后保存到中央 Skill 根目录；同名 Skill 显示更新卡并覆盖原 SKILL.md，新名称显示安装卡。
+用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认后调用 save_skill，并把返回的 install_token 原样输出为 \`\`\`jc-skill-install-v2 JSON 代码块。用户点击安装卡后才会把完整草稿包保存到中央 Skill 根目录。
 
 安装卡格式示例：
 \`\`\`
 Skill 已准备好，请确认安装。
 
-\`\`\`jc-skill-install
----
-name: skill-name
-description: "Skill 描述"
-triggers:
-  - 触发词1
-  - 触发词2
----
-
-# 指令正文
-...
+\`\`\`jc-skill-install-v2
+{"schemaVersion":2,"draftId":"...","sessionId":"...","revision":1,"contentHash":"...","targetSkillId":"skill-name"}
 \`\`\`
 \`\`\`
 
-绝对不要在用户确认之前输出安装卡。输出安装卡后不要自己调用 save_skill；安装卡会使用现有用户 Skill 保存入口完成安装。
+绝对不要在用户确认之前调用 save_skill 或输出安装卡。不得改写 install_token。
 
 ### 步骤 8：打包预检（可选）
 如果需要，可在输出安装卡前调用 skill_creator_package 做官方 .skill 包预检。这个步骤是内部能力，不要让用户理解文件夹、脚本或 manifest 细节。

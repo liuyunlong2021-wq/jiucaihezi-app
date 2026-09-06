@@ -21,7 +21,7 @@ export interface SkillPackageQuality {
 export interface SkillPackageDraftManifest {
   kind: 'skill-package-draft'
   schemaVersion: '2026-06-03.v1'
-  sourceType: 'text'
+  sourceType: 'text' | 'manual'
   createdAt: string
   entry: 'SKILL.md'
   references: Array<{ path: string; title: string }>

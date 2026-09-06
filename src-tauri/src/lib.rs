@@ -1497,6 +1497,7 @@ pub fn run() {
             skills::skills::get_skills_by_agent,
             skills::skills::get_central_skills,
             skills::skills::save_central_skill,
+            skills::skills::commit_central_skill_draft,
             skills::skills::get_central_skill_bundles,
             skills::skills::get_central_skill_bundle_detail,
             skills::skills::preview_delete_central_skill_bundle,

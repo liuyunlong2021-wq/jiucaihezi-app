@@ -26,6 +26,9 @@ export interface SkillCreatorRuntimeSnapshot {
   reviewOpened: boolean
   enteredWaitingUserFeedback: boolean
   saveRequested: boolean
+  draftId?: string
+  revision?: number
+  contentHash?: string
   updatedAt: number
   lastToolName?: string
   lastErrorCode?: string
@@ -87,6 +90,14 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
     const record = getOrCreate(input.args, input.context, now)
     applyUserIntent(record, input.context?.userInput, now)
 
+    if (input.toolName !== 'skill_creator_validate' && draftIdentityMismatch(record, input.args)) {
+      const stale = createBlockedDecision(record.state, 'STALE_SKILL_DRAFT', 'Skill 草稿版本已变化，请重新校验当前版本。', '重新调用 skill_creator_validate，并沿用返回的 draft_id、revision 和 content_hash。')
+      record.lastToolName = input.toolName
+      record.lastErrorCode = stale.errorCode
+      record.updatedAt = now
+      return { allowed: false, runId: record.runId, ...stale }
+    }
+
     const blocked = validateBeforeTool(record, input.toolName)
     if (blocked) {
       record.state = blocked.state
@@ -119,12 +130,18 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
     const now = input.now ?? Date.now()
     const record = getOrCreate(input.args, input.context, now)
     const status = String(input.result?.status || '')
-    const isOk = status === 'ok' || status === 'success'
+    const isOk = status === 'ok' || status === 'success' || status === 'prepared'
+    const resultDraftId = String(input.result?.draft_id || input.args.draft_id || '').trim()
+    const resultRevision = Number(input.result?.revision ?? input.args.revision)
+    const resultContentHash = String(input.result?.content_hash || input.args.content_hash || '').trim()
 
     if (!isOk && status) {
       record.state = 'error'
       record.lastErrorCode = String(input.result?.error || input.result?.errorCode || 'SKILL_CREATOR_TOOL_ERROR')
     } else if (input.toolName === 'skill_creator_validate') {
+      if (resultDraftId) record.draftId = resultDraftId
+      if (Number.isSafeInteger(resultRevision)) record.revision = resultRevision
+      if (resultContentHash) record.contentHash = resultContentHash
       record.validated = true
       record.tested = false
       record.reviewOpened = false
@@ -143,6 +160,9 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
       record.enteredWaitingUserFeedback = true
       record.state = 'waiting_user_feedback'
     } else if (input.toolName === 'skill_creator_improve_description') {
+      if (resultDraftId) record.draftId = resultDraftId
+      if (Number.isSafeInteger(resultRevision)) record.revision = resultRevision
+      if (resultContentHash) record.contentHash = resultContentHash
       record.validated = false
       record.tested = false
       record.reviewOpened = false
@@ -151,8 +171,10 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
       record.state = 'improving'
     } else if (input.toolName === 'skill_creator_package') {
       record.state = 'package_ready'
-    } else if (input.toolName === 'save_skill') {
+    } else if (input.toolName === 'save_skill' && (status === 'ok' || status === 'success')) {
       record.state = 'saved'
+    } else if (input.toolName === 'save_skill') {
+      record.state = 'package_ready'
     }
 
     record.lastToolName = input.toolName
@@ -197,7 +219,7 @@ export function resolveSkillCreatorRuntimeIdentity(
 }
 
 export function isExplicitSkillSaveIntent(value?: string | null): boolean {
-  return /(确认)?保存|保存(这个|下来|为|成)|就这样|可以保存|没问题.*保存/.test(String(value || ''))
+  return /(确认)?保存|保存(这个|下来|为|成)|就这样|可以保存|没问题.*保存|满意|可以了|^\s*ok\s*[.!！。]?\s*$/i.test(String(value || ''))
 }
 
 export function isSkillImproveIntent(value?: string | null): boolean {
@@ -220,29 +242,44 @@ function validateBeforeTool(
   toolName: string,
 ): { state: SkillCreatorRuntimeState; errorCode: string; message: string; nextStep: string } | null {
   if (toolName === 'run_skill_tests' && !record.validated) {
-    return blocked('idle', 'SKILL_CREATOR_VALIDATE_REQUIRED', '还不能运行测试：请先调用 skill_creator_validate 校验 SKILL.md。', '先调用 skill_creator_validate。')
+    return createBlockedDecision('idle', 'SKILL_CREATOR_VALIDATE_REQUIRED', '还不能运行测试：请先调用 skill_creator_validate 校验 SKILL.md。', '先调用 skill_creator_validate。')
   }
   if ((toolName === 'skill_creator_open_eval_review' || toolName === 'skill_creator_aggregate_benchmark') && !record.tested) {
-    return blocked(record.validated ? 'validated' : 'idle', 'SKILL_CREATOR_TESTS_REQUIRED', '还不能打开评审页：请先完成 run_skill_tests。', '先调用 run_skill_tests。')
+    return createBlockedDecision(record.validated ? 'validated' : 'idle', 'SKILL_CREATOR_TESTS_REQUIRED', '还不能打开评审页：请先完成 run_skill_tests。', '先调用 run_skill_tests。')
   }
-  if (toolName === 'skill_creator_improve_description' && !record.enteredWaitingUserFeedback) {
-    return blocked(record.state, 'SKILL_CREATOR_REVIEW_REQUIRED', '还不能优化：请先打开评审页，让用户基于评审结果反馈。', '先调用 skill_creator_open_eval_review。')
+  if (toolName === 'skill_creator_improve_description') {
+    if (!record.validated) return createBlockedDecision(record.state, 'SKILL_CREATOR_VALIDATE_REQUIRED', '还不能优化：请先校验当前 Skill 草稿。', '先调用 skill_creator_validate。')
+    if (record.tested && !record.enteredWaitingUserFeedback) return createBlockedDecision(record.state, 'SKILL_CREATOR_REVIEW_REQUIRED', '还不能优化：已运行测试，请先打开评审页。', '先调用 skill_creator_open_eval_review。')
   }
   if (toolName === 'skill_creator_package' && !record.enteredWaitingUserFeedback) {
-    return blocked(record.state, 'SKILL_CREATOR_REVIEW_REQUIRED', '还不能打包：请先完成评审并等待用户反馈。', '先调用 skill_creator_open_eval_review。')
+    if (!record.validated) return createBlockedDecision(record.state, 'SKILL_CREATOR_VALIDATE_REQUIRED', '还不能打包：请先校验当前 Skill 草稿。', '先调用 skill_creator_validate。')
+    if (record.tested) return createBlockedDecision(record.state, 'SKILL_CREATOR_REVIEW_REQUIRED', '还不能打包：已运行测试，请先完成评审。', '先调用 skill_creator_open_eval_review。')
   }
   if (toolName === 'save_skill') {
-    if (!record.enteredWaitingUserFeedback) {
-      return blocked(record.state, 'SKILL_CREATOR_WAITING_FEEDBACK_REQUIRED', '还不能保存：请先完成 validate、run_skill_tests 和评审页，并等待用户确认。', '先调用 skill_creator_validate，再调用 run_skill_tests，最后打开 skill_creator_open_eval_review。')
-    }
+    if (!record.validated) return createBlockedDecision(record.state, 'SKILL_CREATOR_VALIDATE_REQUIRED', '还不能保存：请先校验当前 Skill 草稿。', '先调用 skill_creator_validate。')
+    if (record.tested && !record.enteredWaitingUserFeedback) return createBlockedDecision(record.state, 'SKILL_CREATOR_REVIEW_REQUIRED', '还不能保存：已运行测试，请先完成评审。', '先调用 skill_creator_open_eval_review。')
     if (!record.saveRequested) {
-      return blocked(record.state, 'SKILL_CREATOR_SAVE_CONFIRMATION_REQUIRED', '还不能保存：需要用户明确说“保存”或“确认保存”。', '请先向用户展示评审结论，并等待用户明确确认保存。')
+      return createBlockedDecision(record.state, 'SKILL_CREATOR_SAVE_CONFIRMATION_REQUIRED', '还不能保存：需要用户明确说“保存”或“确认保存”。', '请先向用户展示当前草稿与校验结论，并等待用户明确确认保存。')
     }
   }
   return null
 }
 
-function blocked(
+function draftIdentityMismatch(
+  record: SkillCreatorRuntimeSnapshot,
+  args: Record<string, unknown>,
+): boolean {
+  const draftId = String(args.draft_id || '').trim()
+  const revision = Number(args.revision)
+  const contentHash = String(args.content_hash || '').trim()
+  return Boolean(
+    (record.draftId && draftId && record.draftId !== draftId)
+    || (record.revision !== undefined && Number.isSafeInteger(revision) && record.revision !== revision)
+    || (record.contentHash && contentHash && record.contentHash !== contentHash)
+  )
+}
+
+function createBlockedDecision(
   state: SkillCreatorRuntimeState,
   errorCode: string,
   message: string,

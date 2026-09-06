@@ -2,10 +2,32 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  appendProjectDirectoryIndex,
   createProjectFileService,
   flattenProjectResourceChange,
   type ProjectFileAdapter,
 } from '../projectFileService'
+
+test('directory index append is idempotent and includes folders', async () => {
+  const entries = new Map<string, { content: string; directory?: boolean }>()
+  const files = createProjectFileService({
+    runtime: 'web',
+    async list() { return [...entries].map(([path, entry]) => ({ path, isDirectory: entry.directory, content: entry.content })) },
+    async readText(_owner, path) {
+      const entry = entries.get(path)
+      if (!entry || entry.directory) throw new Error('missing')
+      return { content: entry.content, size: entry.content.length, truncated: false, revision: { value: path, size: entry.content.length } }
+    },
+    async writeText(_owner, path, content) { entries.set(path, { content }); return { status: 'saved', revision: { value: path, size: content.length } } },
+    async createText(_owner, path, content) { entries.set(path, { content }); return { path, isDirectory: false, content, size: content.length } },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  })
+  await appendProjectDirectoryIndex(files, 'project', 'notes', 'notes/todo.md')
+  await appendProjectDirectoryIndex(files, 'project', 'notes', 'notes/todo.md')
+  await appendProjectDirectoryIndex(files, 'project', 'notes', 'notes/archive')
+  assert.equal(entries.get('notes/index.md')?.content, '# notes\n\n- [[todo]]\n\n- [[archive]]\n')
+})
 
 function createAdapter(): ProjectFileAdapter {
   const files = new Map<string, { id?: string; content: string; mimeType: string; truncated?: boolean }>([

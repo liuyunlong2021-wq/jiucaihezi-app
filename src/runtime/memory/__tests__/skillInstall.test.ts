@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import { parseSkillInstallPlan, stripSkillInstallBlock } from '../skillInstall'
+import { registerSkillBuilderDraft } from '@/utils/skillBuilderTools'
 
 const reply = [
   'Skill 已准备好，请确认安装。',
@@ -21,8 +22,8 @@ const reply = [
   '```',
 ].join('\n')
 
-test('parses a confirmed single-file Skill install block', () => {
-  const plan = parseSkillInstallPlan(reply)
+test('parses a confirmed single-file Skill install block', async () => {
+  const plan = await parseSkillInstallPlan(reply)
 
   assert.equal(plan.id, 'concise-writer')
   assert.equal(plan.description, '把长文压缩成清晰短文')
@@ -31,8 +32,24 @@ test('parses a confirmed single-file Skill install block', () => {
   assert.equal(stripSkillInstallBlock(reply), 'Skill 已准备好，请确认安装。')
 })
 
-test('rejects invalid or incomplete install blocks', () => {
-  assert.throws(() => parseSkillInstallPlan('普通回复'), /没有可安装/)
-  assert.throws(() => parseSkillInstallPlan(reply.replace('concise-writer', '中文名称')), /名称必须/)
-  assert.throws(() => parseSkillInstallPlan(reply.replace('description: "把长文压缩成清晰短文"\n', '')), /description/)
+test('parses a V2 install token and rejects stale revisions', async () => {
+  const draft = await registerSkillBuilderDraft({
+    skillMd: reply.match(/```jc-skill-install\s*\n([\s\S]*?)\n```/)![1],
+    references: [{ path: 'references/guide.md', title: 'Guide', content: '# Guide', mimeType: 'text/markdown' }],
+    manifest: { kind: 'skill-package-draft', schemaVersion: '2026-06-03.v1', sourceType: 'manual', createdAt: new Date(0).toISOString(), entry: 'SKILL.md', references: [], quality: { hardGatePassed: true, errors: [], warnings: [] } },
+    sessionId: 'install-session',
+  })
+  const token = { schemaVersion: 2, draftId: draft.draftId, sessionId: draft.sessionId, revision: draft.revision, contentHash: draft.contentHash, targetSkillId: 'concise-writer' }
+  const content = `Skill 已准备好。\n\n\`\`\`jc-skill-install-v2\n${JSON.stringify(token)}\n\`\`\``
+  const plan = await parseSkillInstallPlan(content)
+  assert.equal(plan.token?.draftId, draft.draftId)
+  assert.deepEqual(plan.files, ['SKILL.md', 'references/guide.md'])
+
+  await assert.rejects(() => parseSkillInstallPlan(content.replace('"revision":1', '"revision":2')), /版本已变化/)
+})
+
+test('rejects invalid or incomplete install blocks', async () => {
+  await assert.rejects(() => parseSkillInstallPlan('普通回复'), /没有可安装/)
+  await assert.rejects(() => parseSkillInstallPlan(reply.replace('concise-writer', '中文名称')), /名称必须/)
+  await assert.rejects(() => parseSkillInstallPlan(reply.replace('description: "把长文压缩成清晰短文"\n', '')), /description/)
 })

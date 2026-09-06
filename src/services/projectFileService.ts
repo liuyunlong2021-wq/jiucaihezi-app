@@ -9,6 +9,7 @@ import {
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { webProjectFiles, webProjectTextRevision } from '@/utils/webProjectFiles'
 import { copyCanvasDocument, parseCanvasDocument } from '@/components/canvas/canvasDocument'
+import { parseMarkdownFileLinks } from '@/runtime/memory/markdownFileLinks'
 
 export interface ProjectFileEntry {
   id?: string
@@ -205,6 +206,27 @@ export interface ProjectFileService {
   planBatch(request: ProjectBatchRequest): Promise<ProjectBatchPlan>
   executeBatch(plan: ProjectBatchPlan, policy?: ProjectCollisionPolicy): Promise<ProjectBatchResult>
   onDidChange(listener: (change: ProjectResourceChange) => void): () => void
+}
+
+export async function appendProjectDirectoryIndex(files: ProjectFileService, owner: string, directoryPath: string, savedPath: string): Promise<void> {
+  const indexPath = directoryPath ? `${directoryPath}/index.md` : 'index.md'
+  if (savedPath === indexPath) return
+  const linkTarget = (directoryPath && savedPath.startsWith(`${directoryPath}/`) ? savedPath.slice(directoryPath.length + 1) : savedPath).replace(/\.md$/i, '')
+  const link = `[[${linkTarget}]]`
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    let current: ProjectTextRead | null = null
+    try { current = await files.readTextAt(owner, indexPath) } catch { current = null }
+    if (!current) {
+      try { await files.createText(owner, indexPath, `# ${directoryPath.split('/').at(-1) || '项目'}\n\n- ${link}\n`); return } catch { continue }
+    }
+    if (parseMarkdownFileLinks(current.content).some(item => item.target.replace(/\.md$/i, '') === linkTarget)) return
+    const index = (await files.list(owner)).find(resource => resource.path === indexPath)
+    if (!index) continue
+    const result = await files.writeText(index, `${current.content.trimEnd()}\n\n- ${link}\n`, current.revision)
+    if (result.status === 'saved') return
+    if (result.status === 'missing') continue
+  }
+  throw new Error('目录 index.md 正在其他窗口更新，请重试')
 }
 
 const changeListeners = new Set<(change: ProjectResourceChange) => void>()

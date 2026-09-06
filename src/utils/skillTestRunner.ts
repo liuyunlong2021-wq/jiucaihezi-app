@@ -1,8 +1,8 @@
 /**
  * skillTestRunner.ts — Skill测试执行引擎（对齐官方 skill-creator）
  *
- * 对标 anthropics/skills skill-creator 的测试评估流程：
- *   Step 1: Spawn runs (with-skill + without-skill baseline)
+ * 对齐 Skill Creator 的测试评估流程：
+ *   Step 1: Run with-skill + without-skill baseline
  *   Step 2: Draft assertions while running
  *   Step 3: Capture timing
  *   Step 4: Grade + Aggregate + Launch viewer
@@ -10,7 +10,7 @@
  * 提供给 LLM 官方生命周期工具：validate / evals / benchmark / review / description optimize / package / save
  */
 
-import { resolveApiConfig, buildHeaders } from '@/utils/api'
+import { resolveApiConfig, buildHeaders, getAssistantMessageContent } from '@/utils/api'
 
 const MAX_TEST_CASES = 12
 
@@ -31,7 +31,7 @@ export interface TestCase {
 }
 
 export interface RunResult {
-  configuration: 'with_skill' | 'without_skill'
+  configuration: 'with_skill' | 'without_skill' | 'installed_version'
   output: string
   tokenCount: number
   durationMs: number
@@ -41,6 +41,8 @@ export interface RunResult {
     duration_ms: number
     total_duration_seconds: number
   }
+  transcript?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  outputs?: Array<{ path: string; mimeType: string; bytes: number; sha256?: string }>
 }
 
 export interface SingleTestResult {
@@ -61,6 +63,7 @@ export interface TestResults {
     deltaPassRate: string
     totalTests: number
   }
+  execution: { provider: string; model: string; runsPerConfiguration: number; baseline: 'without_skill' | 'installed_version' }
 }
 
 export interface BenchmarkStats {
@@ -76,6 +79,10 @@ export interface BenchmarkData {
     timestamp: string
     evals_run: number[]
     runs_per_configuration: number
+    provider?: string
+    model?: string
+    revision?: number
+    baseline_revision?: number
   }
   runs: BenchmarkRun[]
   run_summary: {
@@ -160,6 +167,8 @@ interface BenchmarkRun {
   }
   expectations: { text: string; passed: boolean; evidence: string }[]
   notes: string[]
+  claims?: Array<{ text: string; verified: boolean; evidence: string }>
+  eval_feedback?: string[]
 }
 
 // ═══════════════════════════════════════════════
@@ -170,18 +179,37 @@ const MAX_CONCURRENT = 5
 const TEST_TIMEOUT_MS = 60000
 const EVAL_TIMEOUT_MS = 15000
 
-function parseFrontmatter(skillMd: string): { body: string; fields: Record<string, string> } | null {
+function parseFrontmatter(skillMd: string): { body: string; fields: Record<string, unknown>; duplicateFields: string[] } | null {
   const normalized = String(skillMd || '').replace(/\r\n/g, '\n')
   const match = normalized.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/)
   if (!match) return null
 
-  const fields: Record<string, string> = {}
-  for (const line of match[1].split('\n')) {
+  const fields: Record<string, unknown> = {}
+  const duplicateFields: string[] = []
+  const lines = match[1].split('\n')
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index]
     const field = line.match(/^([A-Za-z0-9_-]+):\s*(.*)$/)
     if (!field) continue
-    fields[field[1]] = field[2].trim().replace(/^["']|["']$/g, '')
+    const key = field[1]
+    if (key in fields) duplicateFields.push(key)
+    const raw = field[2].trim()
+    if (!raw) {
+      const items: string[] = []
+      while (lines[index + 1]?.match(/^\s+-\s+(.+)$/)) {
+        index += 1
+        items.push(String(lines[index].match(/^\s+-\s+(.+)$/)?.[1] || '').trim().replace(/^["']|["']$/g, ''))
+      }
+      fields[key] = items.length ? items : {}
+    } else if (/^\[.*\]$/.test(raw)) {
+      fields[key] = raw.slice(1, -1).split(',').map(value => value.trim().replace(/^["']|["']$/g, '')).filter(Boolean)
+    } else if (/^(true|false|null|[-+]?\d+(?:\.\d+)?)$/i.test(raw)) {
+      fields[key] = JSON.parse(raw.toLowerCase())
+    } else {
+      fields[key] = raw.replace(/^["']|["']$/g, '')
+    }
   }
-  return { body: match[2] || '', fields }
+  return { body: match[2] || '', fields, duplicateFields }
 }
 
 function byteLength(value: string): number {
@@ -211,8 +239,15 @@ export function validateSkillDraft(
   references: SkillPackageReferenceInput[] = [],
 ): SkillValidationResult {
   const parsed = parseFrontmatter(skillMd)
-  const name = parsed?.fields.name || ''
-  const description = parsed?.fields.description || ''
+  const name = typeof parsed?.fields.name === 'string' ? parsed.fields.name : ''
+  const description = typeof parsed?.fields.description === 'string' ? parsed.fields.description : ''
+  const compatibility = parsed?.fields.compatibility
+  const triggers = parsed?.fields.triggers
+  const license = parsed?.fields.license
+  const allowedTools = parsed?.fields['allowed-tools']
+  const metadata = parsed?.fields.metadata
+  const allowedFields = new Set(['name', 'description', 'license', 'allowed-tools', 'metadata', 'compatibility', 'triggers'])
+  const unknownFields = Object.keys(parsed?.fields || {}).filter(field => !allowedFields.has(field))
   const safePaths = references.every(reference => isSafePackagePath(reference.path))
   const checks: SkillValidationCheck[] = [
     {
@@ -228,10 +263,48 @@ export function validateSkillDraft(
       message: name ? `name 为 ${name}。` : 'frontmatter 里缺少 name。',
     },
     {
+      id: 'valid_name',
+      label: 'name format',
+      passed: /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name) && name.length <= 64,
+      message: 'name 必须是最长 64 字符的小写字母、数字和单连字符。',
+    },
+    {
       id: 'required_description',
       label: 'description',
       passed: Boolean(description),
       message: description ? 'description 已填写。' : 'frontmatter 里缺少 description。',
+    },
+    {
+      id: 'valid_description',
+      label: 'description format',
+      passed: Boolean(description) && description.length <= 1024 && !/[<>]/.test(description),
+      message: 'description 必须是非空字符串，最长 1024 字符，且不能包含 < 或 >。',
+    },
+    {
+      id: 'valid_compatibility',
+      label: 'compatibility',
+      passed: compatibility === undefined || (typeof compatibility === 'string' && compatibility.length <= 500),
+      message: 'compatibility 必须是最长 500 字符的字符串。',
+    },
+    {
+      id: 'valid_triggers',
+      label: 'triggers',
+      passed: triggers === undefined || (Array.isArray(triggers) && triggers.every(value => typeof value === 'string' && value.trim())),
+      message: 'triggers 必须是非空字符串数组。',
+    },
+    {
+      id: 'valid_optional_fields',
+      label: 'optional fields',
+      passed: (license === undefined || typeof license === 'string')
+        && (allowedTools === undefined || typeof allowedTools === 'string')
+        && (metadata === undefined || (typeof metadata === 'object' && !Array.isArray(metadata))),
+      message: 'license 和 allowed-tools 必须是字符串；metadata 必须是映射。',
+    },
+    {
+      id: 'known_fields',
+      label: 'frontmatter fields',
+      passed: Boolean(parsed) && !parsed?.duplicateFields.length && !unknownFields.length,
+      message: parsed?.duplicateFields.length ? `frontmatter 字段重复：${parsed.duplicateFields.join('、')}。` : unknownFields.length ? `不支持的 frontmatter 字段：${unknownFields.join('、')}。` : 'frontmatter 字段合法。',
     },
     {
       id: 'body_content',
@@ -322,8 +395,8 @@ export function buildDescriptionOptimizationPrompt(input: {
   benchmarkNotes?: string[]
 }): string {
   const parsed = parseFrontmatter(input.skillMd)
-  const name = parsed?.fields.name || 'unknown-skill'
-  const description = parsed?.fields.description || ''
+  const name = typeof parsed?.fields.name === 'string' ? parsed.fields.name : 'unknown-skill'
+  const description = typeof parsed?.fields.description === 'string' ? parsed.fields.description : ''
   const notes = (input.benchmarkNotes || []).map(note => `- ${note}`).join('\n') || '- No benchmark notes provided.'
 
   return `Optimize only the YAML description for the Skill named "${name}".
@@ -374,7 +447,7 @@ async function callLlm(
     method: 'POST',
     headers: buildHeaders(config),
     body: JSON.stringify({
-      model: config.model || 'claude-sonnet-4-6',
+      model: config.model,
       messages,
       temperature: 0.7,
       max_tokens: 2000,
@@ -389,7 +462,7 @@ async function callLlm(
   try {
     const data = await res.json()
     return {
-      output: data.choices?.[0]?.message?.content || '[空输出]',
+      output: getAssistantMessageContent(data) || '[空输出]',
       tokens: data.usage?.total_tokens || 0,
       durationMs,
     }
@@ -447,7 +520,7 @@ ${assertionsText}
       method: 'POST',
       headers: buildHeaders(config),
       body: JSON.stringify({
-        model: config.model || 'claude-haiku-4-5',
+        model: config.model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0,
         max_tokens: 1000,
@@ -458,7 +531,7 @@ ${assertionsText}
 
     if (!res.ok) return assertions.map(a => ({ ...a, passed: false, evidence: `评分API ${res.status}` }))
     const data = await res.json()
-    const content = data.choices?.[0]?.message?.content || ''
+    const content = getAssistantMessageContent(data)
     const match = content.match(/\[[\s\S]*\]/)
     if (match) {
       try {
@@ -486,13 +559,15 @@ ${assertionsText}
  */
 export async function runSkillTests(
   draftSkillMd: string,
-  testCases: TestCase[]
+  testCases: TestCase[],
+  options: { runsPerConfiguration?: number; baselineSkillMd?: string } = {},
 ): Promise<TestResults> {
   if (testCases.length > MAX_TEST_CASES) {
     throw new Error(`测试用例最多 ${MAX_TEST_CASES} 个，请分批运行。`)
   }
 
   const config = await resolveApiConfig()
+  const runsPerConfiguration = Math.min(3, Math.max(1, Math.floor(options.runsPerConfiguration || 1)))
   const results: SingleTestResult[] = []
 
   for (let batch = 0; batch < testCases.length; batch += MAX_CONCURRENT) {
@@ -503,49 +578,27 @@ export async function runSkillTests(
       const timeout = setTimeout(() => controller.abort(), TEST_TIMEOUT_MS)
 
       try {
-        // 并行跑 with-skill + without-skill
-        const [withRun, withoutRun] = await Promise.all([
-          callLlm(config, draftSkillMd, tc.prompt, controller.signal),
-          callLlm(config, null, tc.prompt, controller.signal),
-        ])
-
         const assertions = normalizeTestCaseAssertions(tc)
-        const [withAssertions, withoutAssertions] = await Promise.all([
-          assertions.length > 0 ? gradeAssertions(config, withRun.output, assertions, tc.expect) : [],
-          assertions.length > 0 ? gradeAssertions(config, withoutRun.output, assertions, tc.expect) : [],
-        ])
+        const runs: RunResult[] = []
+        for (let runNumber = 1; runNumber <= runsPerConfiguration; runNumber += 1) {
+          const [withRun, baselineRun] = await Promise.all([
+            callLlm(config, draftSkillMd, tc.prompt, controller.signal),
+            callLlm(config, options.baselineSkillMd || null, tc.prompt, controller.signal),
+          ])
+          const [withAssertions, baselineAssertions] = await Promise.all([
+            gradeAssertions(config, withRun.output, assertions, tc.expect),
+            gradeAssertions(config, baselineRun.output, assertions, tc.expect),
+          ])
+          runs.push(toRunResult('with_skill', withRun, withAssertions, draftSkillMd, tc.prompt))
+          runs.push(toRunResult(options.baselineSkillMd ? 'installed_version' : 'without_skill', baselineRun, baselineAssertions, options.baselineSkillMd || null, tc.prompt))
+        }
 
         return {
           eval_id: i + 1,
           eval_name: tc.expect.slice(0, 40),
           prompt: tc.prompt,
           expect: tc.expect,
-          runs: [
-            {
-              configuration: 'with_skill',
-              output: withRun.output,
-              tokenCount: withRun.tokens,
-              durationMs: withRun.durationMs,
-              assertions: withAssertions,
-              timing: {
-                total_tokens: withRun.tokens,
-                duration_ms: withRun.durationMs,
-                total_duration_seconds: withRun.durationMs / 1000,
-              },
-            },
-            {
-              configuration: 'without_skill',
-              output: withoutRun.output,
-              tokenCount: withoutRun.tokens,
-              durationMs: withoutRun.durationMs,
-              assertions: withoutAssertions,
-              timing: {
-                total_tokens: withoutRun.tokens,
-                duration_ms: withoutRun.durationMs,
-                total_duration_seconds: withoutRun.durationMs / 1000,
-              },
-            },
-          ],
+          runs,
         } as SingleTestResult
       } catch (e: any) {
         const errRun: RunResult = {
@@ -568,15 +621,16 @@ export async function runSkillTests(
     results.push(...batchResults)
   }
 
-  const calcPassRate = (config: 'with_skill' | 'without_skill') => {
+  const baselineConfiguration = options.baselineSkillMd ? 'installed_version' : 'without_skill'
+  const calcPassRate = (configuration: RunResult['configuration']) => {
     const allA = results.flatMap(r =>
-      r.runs.find(run => run.configuration === config)?.assertions || []
+      r.runs.filter(run => run.configuration === configuration).flatMap(run => run.assertions || [])
     )
     if (allA.length === 0) return 0
     return allA.filter(a => a.passed).length / allA.length
   }
   const wsRate = calcPassRate('with_skill')
-  const wosRate = calcPassRate('without_skill')
+  const wosRate = calcPassRate(baselineConfiguration)
 
   return {
     draftSkillMd,
@@ -588,6 +642,16 @@ export async function runSkillTests(
       deltaPassRate: `${wsRate >= wosRate ? '+' : ''}${Math.round((wsRate - wosRate) * 1000) / 10}%`,
       totalTests: testCases.length,
     },
+    execution: { provider: config.providerId, model: config.model, runsPerConfiguration, baseline: baselineConfiguration },
+  }
+}
+
+function toRunResult(configuration: RunResult['configuration'], run: { output: string; tokens: number; durationMs: number }, assertions: Assertion[], system: string | null, prompt: string): RunResult {
+  return {
+    configuration, output: run.output, tokenCount: run.tokens, durationMs: run.durationMs, assertions,
+    timing: { total_tokens: run.tokens, duration_ms: run.durationMs, total_duration_seconds: run.durationMs / 1000 },
+    transcript: [...(system ? [{ role: 'system' as const, content: system }] : []), { role: 'user', content: prompt }, { role: 'assistant', content: run.output }],
+    outputs: [],
   }
 }
 
@@ -618,20 +682,24 @@ function calcStats(values: number[]): BenchmarkStats {
   }
 }
 
-export function aggregateBenchmark(results: SingleTestResult[], skillName: string): BenchmarkData {
+export function aggregateBenchmark(results: SingleTestResult[], skillName: string, metadata: { provider?: string; model?: string; revision?: number; baselineRevision?: number } = {}): BenchmarkData {
   const evalIds = results.map(r => r.eval_id)
   const runs: BenchmarkRun[] = []
 
   for (const r of results) {
+    const runNumbers = new Map<string, number>()
     for (const run of r.runs) {
+      const runNumber = (runNumbers.get(run.configuration) || 0) + 1
+      runNumbers.set(run.configuration, runNumber)
       const assertions = run.assertions || []
-      const passed = assertions.filter(a => a.passed).length
+      const claims = detectUnverifiedFileClaims(run)
+      const passed = claims.some(claim => !claim.verified) ? 0 : assertions.filter(a => a.passed).length
       const total = assertions.length || 1
       runs.push({
         eval_id: r.eval_id,
         eval_name: r.eval_name,
         configuration: run.configuration,
-        run_number: 1,
+        run_number: runNumber,
         result: {
           pass_rate: passed / total,
           passed,
@@ -645,12 +713,15 @@ export function aggregateBenchmark(results: SingleTestResult[], skillName: strin
           text: a.text, passed: a.passed ?? false, evidence: a.evidence || '',
         })),
         notes: [],
+        claims,
+        eval_feedback: assertions.some(assertion => /应该|良好|高质量|合适/.test(assertion.text)) ? ['断言包含主观词，建议改为可观察的输出条件。'] : [],
       })
     }
   }
 
   const withRuns = runs.filter(r => r.configuration === 'with_skill')
-  const withoutRuns = runs.filter(r => r.configuration === 'without_skill')
+  const baselineName = runs.some(run => run.configuration === 'installed_version') ? 'installed_version' : 'without_skill'
+  const withoutRuns = runs.filter(r => r.configuration === baselineName)
 
   const wsPR = withRuns.map(r => r.result.pass_rate)
   const wosPR = withoutRuns.map(r => r.result.pass_rate)
@@ -689,7 +760,11 @@ export function aggregateBenchmark(results: SingleTestResult[], skillName: strin
       skill_name: skillName,
       timestamp: new Date().toISOString(),
       evals_run: evalIds,
-      runs_per_configuration: 1,
+      runs_per_configuration: Math.max(1, ...runs.map(run => run.run_number)),
+      provider: metadata.provider,
+      model: metadata.model,
+      revision: metadata.revision,
+      baseline_revision: metadata.baselineRevision,
     },
     runs,
     run_summary: {
@@ -711,6 +786,39 @@ export function aggregateBenchmark(results: SingleTestResult[], skillName: strin
     },
     notes,
   }
+}
+
+function detectUnverifiedFileClaims(run: RunResult): Array<{ text: string; verified: boolean; evidence: string }> {
+  const match = run.output.match(/(?:已生成|已创建|saved|created)\s*[:：]?\s*([^\n]*\.(?:csv|json|xlsx|docx|pdf|png|jpg|mp4))/i)
+  if (!match) return []
+  const exists = Boolean(run.outputs?.some(output => run.output.includes(output.path)))
+  return [{ text: match[0], verified: exists, evidence: exists ? '输出文件索引中存在对应文件。' : '执行记录中没有对应输出文件。' }]
+}
+
+export function buildBlindComparison(runs: RunResult[], seed: string): {
+  publicInput: { A: string; B: string }
+  hiddenMapping: { A: string; B: string }
+} {
+  if (runs.length !== 2) throw new Error('Blind comparison requires exactly two completed runs')
+  const swap = Array.from(seed).reduce((sum, character) => sum + character.charCodeAt(0), 0) % 2 === 1
+  const [a, b] = swap ? [runs[1], runs[0]] : runs
+  return { publicInput: { A: a.output, B: b.output }, hiddenMapping: { A: a.configuration, B: b.configuration } }
+}
+
+export async function compareSkillOutputs(runs: RunResult[], rubric: string, seed: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const blind = buildBlindComparison(runs, seed)
+  const config = await resolveApiConfig()
+  const response = await callLlm(config, null, `Blindly compare output A and B using this rubric: ${rubric}\n\nA:\n${blind.publicInput.A}\n\nB:\n${blind.publicInput.B}\n\nReturn JSON with winner (A, B, or tie), confidence (0-1), scores, and reasons.`, signal)
+  const match = response.output.match(/\{[\s\S]*\}/)
+  let comparison: Record<string, unknown> = { winner: 'tie', confidence: 0, reasons: response.output }
+  if (match) try { comparison = JSON.parse(match[0]) } catch { /* retain fallback */ }
+  return { comparison, hidden_mapping: blind.hiddenMapping }
+}
+
+export async function analyzeSkillComparison(comparison: Record<string, unknown>, evidence: string, signal?: AbortSignal): Promise<Record<string, unknown>> {
+  const config = await resolveApiConfig()
+  const response = await callLlm(config, null, `Analyze this now-unblinded Skill comparison. Cite concrete output or execution evidence and propose generalizable changes.\n\nComparison:\n${JSON.stringify(comparison)}\n\nEvidence:\n${evidence}`, signal)
+  return { analysis: response.output, provider: config.providerId, model: config.model }
 }
 
 // ═══════════════════════════════════════════════
@@ -887,6 +995,9 @@ export const VALIDATE_SKILL_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。提供后由应用读取受控草稿。' },
+        revision: { type: 'integer', description: 'validate 返回的草稿 revision；后续调用必须原样携带。' },
+        content_hash: { type: 'string', description: 'validate 返回的草稿内容哈希；后续调用必须原样携带。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；后续测试、评审和保存请沿用。' },
         skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
         references: {
@@ -904,7 +1015,7 @@ export const VALIDATE_SKILL_TOOL = {
           },
         },
       },
-      required: ['skill_md'],
+      required: [],
     },
   },
 }
@@ -917,6 +1028,9 @@ export const RUN_SKILL_TESTS_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。提供后由应用读取受控草稿，不要重复粘贴全文。' },
+        revision: { type: 'integer', description: '当前已校验草稿 revision。' },
+        content_hash: { type: 'string', description: '当前已校验草稿内容哈希。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；应沿用 validate 返回或本轮自定的 ID。' },
         draft_skill_md: {
           type: 'string',
@@ -949,8 +1063,11 @@ export const RUN_SKILL_TESTS_TOOL = {
             required: ['prompt', 'expect'],
           },
         },
+        baseline_mode: { type: 'string', enum: ['without_skill', 'installed_version'], description: '新建默认 without_skill；修改已安装 Skill 时使用 installed_version。' },
+        runs_per_configuration: { type: 'integer', minimum: 1, maximum: 3, description: '每个配置重复次数，默认 1，正式稳定性评测建议 3。' },
+        target_skill_id: { type: 'string', description: '修改已安装 Skill 时沿用 load 返回的目标 ID。' },
       },
-      required: ['draft_skill_md', 'test_cases'],
+      required: ['test_cases'],
     },
   },
 }
@@ -963,6 +1080,9 @@ export const AGGREGATE_SKILL_BENCHMARK_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
+        revision: { type: 'integer', description: '当前已测试草稿 revision。' },
+        content_hash: { type: 'string', description: '当前已测试草稿内容哈希。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；用于复看指定测试结果。' },
         skill_name: { type: 'string', description: 'Skill 名称' },
       },
@@ -979,6 +1099,9 @@ export const OPEN_EVAL_REVIEW_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
+        revision: { type: 'integer', description: '当前已测试草稿 revision。' },
+        content_hash: { type: 'string', description: '当前已测试草稿内容哈希。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；用于打开对应测试结果的评审页。' },
         skill_name: { type: 'string', description: 'Skill 名称' },
       },
@@ -995,6 +1118,9 @@ export const IMPROVE_SKILL_DESCRIPTION_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
+        revision: { type: 'integer', description: '当前草稿 revision。' },
+        content_hash: { type: 'string', description: '当前草稿内容哈希。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；用于读取对应 benchmark 笔记。' },
         skill_md: { type: 'string', description: '当前完整 SKILL.md' },
         user_intent: { type: 'string', description: '用户希望这个 Skill 在哪些场景命中' },
@@ -1018,6 +1144,9 @@ export const PACKAGE_SKILL_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
+        revision: { type: 'integer', description: '当前已校验草稿 revision。' },
+        content_hash: { type: 'string', description: '当前已校验草稿内容哈希。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；打包前沿用评审任务 ID。' },
         skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
         references: {
@@ -1035,7 +1164,7 @@ export const PACKAGE_SKILL_TOOL = {
           },
         },
       },
-      required: ['skill_md'],
+      required: [],
     },
   },
 }
@@ -1048,6 +1177,9 @@ export const SAVE_SKILL_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
+        revision: { type: 'integer', description: '当前已校验草稿 revision。' },
+        content_hash: { type: 'string', description: '当前已校验草稿内容哈希。' },
         test_id: { type: 'string', description: '可选。同一次 Skill Creator 任务的稳定 ID；Skill缔造保存时必须沿用已评审任务 ID。' },
         skill_md: { type: 'string', description: '完整的 SKILL.md 内容（含 YAML frontmatter）' },
         references: {
@@ -1073,8 +1205,51 @@ export const SAVE_SKILL_TOOL = {
           description: '可选。修改现有 Skill 时传入目标 Skill ID，保存时覆盖原 Skill；新建 Skill 时不要传。',
         },
       },
-      required: ['skill_md'],
+      required: [],
     },
+  },
+}
+
+export const SUBMIT_EVAL_FEEDBACK_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_submit_eval_feedback',
+    description: '把用户对当前测试轮次的逐项反馈保存到受控评审工作区。空反馈表示已审阅且无修改意见。',
+    parameters: { type: 'object', properties: {
+      draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' },
+      iteration: { type: 'integer', minimum: 1 },
+      reviews: { type: 'array', items: { type: 'object', properties: { run_id: { type: 'string' }, feedback: { type: 'string' } }, required: ['run_id', 'feedback'] } },
+    }, required: ['draft_id', 'revision', 'content_hash', 'iteration', 'reviews'] },
+  },
+}
+
+export const LOAD_EVAL_FEEDBACK_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_load_eval_feedback',
+    description: '读取指定 Skill 草稿上一轮已提交的评审反馈。',
+    parameters: { type: 'object', properties: {
+      draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' },
+      iteration: { type: 'integer', minimum: 1 },
+    }, required: ['draft_id', 'revision', 'content_hash', 'iteration'] },
+  },
+}
+
+export const COMPARE_SKILL_OUTPUTS_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_compare_outputs',
+    description: '用户明确要求严谨比较时，对同一用例的两个完成结果做隐藏身份的 A/B 比较。',
+    parameters: { type: 'object', properties: { draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' }, test_id: { type: 'string' }, eval_id: { type: 'integer' }, rubric: { type: 'string' } }, required: ['draft_id', 'revision', 'content_hash', 'test_id', 'eval_id', 'rubric'] },
+  },
+}
+
+export const ANALYZE_SKILL_COMPARISON_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_analyze_comparison',
+    description: 'A/B 比较完成后解盲，并基于 Skill、执行记录和输出证据分析差异。',
+    parameters: { type: 'object', properties: { draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' }, test_id: { type: 'string' }, eval_id: { type: 'integer' } }, required: ['draft_id', 'revision', 'content_hash', 'test_id', 'eval_id'] },
   },
 }
 
@@ -1084,6 +1259,10 @@ export const ALL_SKILL_TOOLS = [
   RUN_SKILL_TESTS_TOOL,
   AGGREGATE_SKILL_BENCHMARK_TOOL,
   OPEN_EVAL_REVIEW_TOOL,
+  SUBMIT_EVAL_FEEDBACK_TOOL,
+  LOAD_EVAL_FEEDBACK_TOOL,
+  COMPARE_SKILL_OUTPUTS_TOOL,
+  ANALYZE_SKILL_COMPARISON_TOOL,
   IMPROVE_SKILL_DESCRIPTION_TOOL,
   PACKAGE_SKILL_TOOL,
   SAVE_SKILL_TOOL,

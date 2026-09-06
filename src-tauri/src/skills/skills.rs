@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -165,6 +166,60 @@ pub struct SaveCentralSkillResult {
     pub file_path: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitCentralSkillDraftInput {
+    pub draft_id: String,
+    pub session_id: String,
+    pub revision: u64,
+    pub content_hash: String,
+    pub target_skill_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedSkillDraftFile {
+    path: String,
+    title: String,
+    content: String,
+    mime_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PersistedSkillDraft {
+    draft_id: String,
+    session_id: String,
+    revision: u64,
+    content_hash: String,
+    skill_md: String,
+    references: Vec<PersistedSkillDraftFile>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillDraftHashPayload<'a> {
+    skill_md: String,
+    files: Vec<SkillDraftHashFile<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SkillDraftHashFile<'a> {
+    path: String,
+    title: &'a str,
+    content: String,
+    mime_type: &'a str,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedSkillPackage {
+    schema_version: u8,
+    content_hash: String,
+    managed_files: Vec<String>,
+}
+
 // ─── Tauri Commands ───────────────────────────────────────────────────────────
 
 fn system_time_to_rfc3339(time: SystemTime) -> String {
@@ -193,6 +248,118 @@ fn sanitize_central_skill_id(raw: &str) -> Result<String, String> {
     }
 }
 
+fn sanitize_draft_path_part(raw: &str) -> String {
+    let mut result = String::new();
+    let mut last_underscore = false;
+    for ch in raw.trim().chars() {
+        let accepted = ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-');
+        let next = if accepted { ch } else { '_' };
+        if next == '_' && last_underscore {
+            continue;
+        }
+        result.push(next);
+        last_underscore = next == '_';
+    }
+    let trimmed = result.trim_matches('_');
+    if trimmed.is_empty() {
+        "default".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn normalize_package_path(raw: &str) -> Result<PathBuf, String> {
+    let normalized = raw.replace('\\', "/");
+    let path = Path::new(&normalized);
+    if path.is_absolute() {
+        return Err(format!("Unsafe Skill package path: {raw}"));
+    }
+    let mut output = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::Normal(part) => output.push(part),
+            _ => return Err(format!("Unsafe Skill package path: {raw}")),
+        }
+    }
+    let first = output.components().next().and_then(|part| match part {
+        std::path::Component::Normal(value) => value.to_str(),
+        _ => None,
+    });
+    if !matches!(
+        first,
+        Some("references" | "scripts" | "assets" | "agents" | "eval-viewer")
+    ) {
+        return Err(format!("Unsupported Skill package path: {raw}"));
+    }
+    Ok(output)
+}
+
+fn compute_skill_draft_hash(draft: &PersistedSkillDraft) -> Result<String, String> {
+    let mut files = draft
+        .references
+        .iter()
+        .map(|file| SkillDraftHashFile {
+            path: file.path.replace('\\', "/"),
+            title: &file.title,
+            content: file.content.replace("\r\n", "\n"),
+            mime_type: &file.mime_type,
+        })
+        .collect::<Vec<_>>();
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let canonical = serde_json::to_vec(&SkillDraftHashPayload {
+        skill_md: draft.skill_md.replace("\r\n", "\n"),
+        files,
+    })
+    .map_err(|error| format!("Failed to hash Skill draft: {error}"))?;
+    Ok(format!("{:x}", Sha256::digest(canonical)))
+}
+
+fn copy_skill_directory(source: &Path, target: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(target)
+        .map_err(|error| format!("Failed to create staging directory: {error}"))?;
+    for entry in std::fs::read_dir(source)
+        .map_err(|error| format!("Failed to read existing Skill: {error}"))?
+    {
+        let entry =
+            entry.map_err(|error| format!("Failed to read existing Skill entry: {error}"))?;
+        let metadata = std::fs::symlink_metadata(entry.path())
+            .map_err(|error| format!("Failed to inspect existing Skill entry: {error}"))?;
+        if metadata.file_type().is_symlink() {
+            return Err("Existing Skill contains a symlink; refusing atomic update".to_string());
+        }
+        let destination = target.join(entry.file_name());
+        if metadata.is_dir() {
+            copy_skill_directory(&entry.path(), &destination)?;
+        } else if metadata.is_file() {
+            std::fs::copy(entry.path(), destination)
+                .map_err(|error| format!("Failed to copy existing Skill file: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
+fn remove_managed_files(staging: &Path) -> Result<(), String> {
+    let manifest_path = staging.join(".jc-skill-package.json");
+    let Ok(value) = std::fs::read_to_string(&manifest_path) else {
+        return Ok(());
+    };
+    let manifest: ManagedSkillPackage = serde_json::from_str(&value)
+        .map_err(|error| format!("Invalid managed Skill manifest: {error}"))?;
+    for path in manifest.managed_files {
+        if path == "SKILL.md" {
+            let _ = std::fs::remove_file(staging.join(path));
+            continue;
+        }
+        let safe_path = normalize_package_path(&path)?;
+        let full_path = staging.join(safe_path);
+        if full_path.is_file() {
+            std::fs::remove_file(full_path)
+                .map_err(|error| format!("Failed to replace managed Skill file: {error}"))?;
+        }
+    }
+    Ok(())
+}
+
 fn skill_md_frontmatter_name(skill_md: &str) -> Result<String, String> {
     let after_open = skill_md
         .strip_prefix("---\n")
@@ -210,6 +377,95 @@ fn skill_md_frontmatter_name(skill_md: &str) -> Result<String, String> {
         .filter(|name| !name.is_empty())
         .map(str::to_string)
         .ok_or_else(|| "SKILL.md frontmatter must include a name".to_string())
+}
+
+fn validate_skill_frontmatter(skill_md: &str) -> Result<String, String> {
+    let after_open = skill_md
+        .strip_prefix("---\n")
+        .or_else(|| skill_md.strip_prefix("---\r\n"))
+        .ok_or_else(|| "SKILL.md must start with YAML frontmatter".to_string())?;
+    let close_pos = after_open
+        .find("\n---")
+        .ok_or_else(|| "SKILL.md frontmatter is missing a closing delimiter".to_string())?;
+    let frontmatter = &after_open[..close_pos];
+    let body = after_open[close_pos + 4..].trim();
+    if body.is_empty() {
+        return Err("SKILL.md body cannot be empty".to_string());
+    }
+    let yaml: serde_yaml::Value = serde_yaml::from_str(frontmatter)
+        .map_err(|error| format!("Invalid SKILL.md frontmatter: {error}"))?;
+    let fields = yaml
+        .as_mapping()
+        .ok_or_else(|| "SKILL.md frontmatter must be a YAML mapping".to_string())?;
+    let allowed = [
+        "name",
+        "description",
+        "license",
+        "allowed-tools",
+        "metadata",
+        "compatibility",
+        "triggers",
+    ];
+    for key in fields.keys() {
+        let key = key
+            .as_str()
+            .ok_or_else(|| "SKILL.md frontmatter keys must be strings".to_string())?;
+        if !allowed.contains(&key) {
+            return Err(format!("Unsupported SKILL.md frontmatter field: {key}"));
+        }
+    }
+    let value = |key: &str| fields.get(serde_yaml::Value::String(key.to_string()));
+    let name = value("name")
+        .and_then(serde_yaml::Value::as_str)
+        .map(str::trim)
+        .ok_or_else(|| "SKILL.md name must be a string".to_string())?;
+    if name.is_empty()
+        || name.len() > 64
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        || name.starts_with('-')
+        || name.ends_with('-')
+        || name.contains("--")
+    {
+        return Err(
+            "SKILL.md name must be at most 64 lowercase letters, numbers, and single hyphens"
+                .to_string(),
+        );
+    }
+    let description = value("description")
+        .and_then(serde_yaml::Value::as_str)
+        .map(str::trim)
+        .ok_or_else(|| "SKILL.md description must be a string".to_string())?;
+    if description.is_empty() || description.len() > 1024 || description.contains(['<', '>']) {
+        return Err("SKILL.md description must be non-empty, at most 1024 characters, and contain no angle brackets".to_string());
+    }
+    if value("compatibility").is_some_and(|item| item.as_str().is_none_or(|text| text.len() > 500))
+    {
+        return Err(
+            "SKILL.md compatibility must be a string of at most 500 characters".to_string(),
+        );
+    }
+    for key in ["license", "allowed-tools"] {
+        if value(key).is_some_and(|item| !item.is_string()) {
+            return Err(format!("SKILL.md {key} must be a string"));
+        }
+    }
+    if value("metadata").is_some_and(|item| !item.is_mapping()) {
+        return Err("SKILL.md metadata must be a mapping".to_string());
+    }
+    if let Some(triggers) = value("triggers") {
+        let items = triggers
+            .as_sequence()
+            .ok_or_else(|| "SKILL.md triggers must be a string array".to_string())?;
+        if items
+            .iter()
+            .any(|item| item.as_str().is_none_or(|text| text.trim().is_empty()))
+        {
+            return Err("SKILL.md triggers must contain only non-empty strings".to_string());
+        }
+    }
+    Ok(name.to_string())
 }
 
 fn skill_filesystem_timestamps(skill: &db::Skill) -> (String, String) {
@@ -1189,6 +1445,161 @@ pub async fn save_central_skill(
     save_central_skill_impl(&state.db, input).await
 }
 
+pub async fn commit_central_skill_draft_impl(
+    pool: &DbPool,
+    input: CommitCentralSkillDraftInput,
+) -> Result<SaveCentralSkillResult, String> {
+    let draft_path = std::env::temp_dir()
+        .join("jiucaihezi-skill-drafts")
+        .join(sanitize_draft_path_part(&input.session_id))
+        .join(sanitize_draft_path_part(&input.draft_id))
+        .join(format!("revision-{}.json", input.revision));
+    let draft_value = std::fs::read_to_string(&draft_path)
+        .map_err(|_| "Skill draft revision was not found or has expired".to_string())?;
+    let draft: PersistedSkillDraft = serde_json::from_str(&draft_value)
+        .map_err(|error| format!("Invalid persisted Skill draft: {error}"))?;
+    if draft.draft_id != input.draft_id
+        || draft.session_id != input.session_id
+        || draft.revision != input.revision
+    {
+        return Err("STALE_SKILL_DRAFT: draft identity does not match install token".to_string());
+    }
+    let actual_hash = compute_skill_draft_hash(&draft)?;
+    if draft.content_hash != input.content_hash || actual_hash != input.content_hash {
+        return Err(
+            "STALE_SKILL_DRAFT: draft content hash does not match install token".to_string(),
+        );
+    }
+
+    let target_skill_id = sanitize_central_skill_id(&input.target_skill_id)?;
+    if target_skill_id != input.target_skill_id {
+        return Err(
+            "Skill install target must use lowercase letters, numbers, and single hyphens"
+                .to_string(),
+        );
+    }
+    let frontmatter_name = validate_skill_frontmatter(draft.skill_md.trim())?;
+    if frontmatter_name != target_skill_id {
+        return Err("Skill install target does not match SKILL.md name".to_string());
+    }
+    if draft.skill_md.len() > 80_000 {
+        return Err("SKILL.md exceeds the 80000 byte limit".to_string());
+    }
+
+    let mut package_files = Vec::with_capacity(draft.references.len());
+    let mut total_bytes = draft.skill_md.len();
+    let mut seen_paths = BTreeSet::new();
+    for file in &draft.references {
+        let path = normalize_package_path(&file.path)?;
+        if !seen_paths.insert(path.clone()) {
+            return Err(format!("Duplicate Skill package path: {}", file.path));
+        }
+        if file.content.len() > 2_000_000 {
+            return Err(format!("Skill package file is too large: {}", file.path));
+        }
+        total_bytes += file.content.len();
+        package_files.push((path, file));
+    }
+    if total_bytes > 10_000_000 {
+        return Err("Skill package exceeds the 10 MB limit".to_string());
+    }
+
+    let central_root = ensure_central_root_path(pool).await?;
+    let target_dir = central_root.join(&target_skill_id);
+    validate_central_skill_save_target(&target_dir, &central_root)?;
+    let nonce = uuid::Uuid::new_v4();
+    let staging = central_root.join(format!(".jc-install-{target_skill_id}-{nonce}"));
+    let backup = central_root.join(format!(".jc-backup-{target_skill_id}-{nonce}"));
+
+    let prepare_result = (|| -> Result<Vec<String>, String> {
+        if target_dir.exists() {
+            copy_skill_directory(&target_dir, &staging)?;
+        } else {
+            std::fs::create_dir_all(&staging)
+                .map_err(|error| format!("Failed to create Skill staging directory: {error}"))?;
+        }
+        remove_managed_files(&staging)?;
+
+        let mut managed_files = vec!["SKILL.md".to_string()];
+        std::fs::write(
+            staging.join("SKILL.md"),
+            format!("{}\n", draft.skill_md.trim()),
+        )
+        .map_err(|error| format!("Failed to stage SKILL.md: {error}"))?;
+        for (relative_path, file) in package_files {
+            let destination = staging.join(&relative_path);
+            if let Some(parent) = destination.parent() {
+                std::fs::create_dir_all(parent).map_err(|error| {
+                    format!("Failed to create Skill package directory: {error}")
+                })?;
+            }
+            std::fs::write(&destination, file.content.as_bytes()).map_err(|error| {
+                format!(
+                    "Failed to stage Skill package file '{}': {error}",
+                    file.path
+                )
+            })?;
+            managed_files.push(relative_path.to_string_lossy().replace('\\', "/"));
+        }
+        let manifest = ManagedSkillPackage {
+            schema_version: 1,
+            content_hash: actual_hash.clone(),
+            managed_files: managed_files.clone(),
+        };
+        std::fs::write(
+            staging.join(".jc-skill-package.json"),
+            serde_json::to_vec_pretty(&manifest).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| format!("Failed to stage Skill package manifest: {error}"))?;
+        Ok(managed_files)
+    })();
+
+    if let Err(error) = prepare_result {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(error);
+    }
+
+    if target_dir.exists() {
+        std::fs::rename(&target_dir, &backup).map_err(|error| {
+            let _ = std::fs::remove_dir_all(&staging);
+            format!("Failed to back up existing Skill before commit: {error}")
+        })?;
+    }
+    if let Err(error) = std::fs::rename(&staging, &target_dir) {
+        if backup.exists() {
+            let _ = std::fs::rename(&backup, &target_dir);
+        }
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(format!("Failed to commit Skill package: {error}"));
+    }
+
+    if let Err(error) = scan_product_skills_impl(pool).await {
+        let _ = std::fs::remove_dir_all(&target_dir);
+        if backup.exists() {
+            let _ = std::fs::rename(&backup, &target_dir);
+        }
+        let _ = scan_product_skills_impl(pool).await;
+        return Err(error);
+    }
+    if backup.exists() {
+        let _ = std::fs::remove_dir_all(&backup);
+    }
+    let _ = std::fs::remove_dir_all(draft_path.parent().unwrap_or(&draft_path));
+
+    Ok(SaveCentralSkillResult {
+        skill_id: target_skill_id,
+        file_path: target_dir.join("SKILL.md").to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+pub async fn commit_central_skill_draft(
+    state: State<'_, SkillsAppState>,
+    input: CommitCentralSkillDraftInput,
+) -> Result<SaveCentralSkillResult, String> {
+    commit_central_skill_draft_impl(&state.db, input).await
+}
+
 pub async fn get_central_skill_bundles_impl(
     pool: &DbPool,
 ) -> Result<Vec<CentralSkillBundle>, String> {
@@ -1806,6 +2217,76 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+    }
+
+    #[tokio::test]
+    async fn commit_central_skill_draft_writes_the_complete_package_and_checks_hash() {
+        let pool = setup_test_db().await;
+        let temp = TempDir::new().unwrap();
+        let central_dir = temp.path().join("central");
+        set_agent_dir(&pool, "central", &central_dir).await;
+        let nonce = uuid::Uuid::new_v4().to_string();
+        let session_id = format!("session-{nonce}");
+        let draft_id = format!("draft-{nonce}");
+        let draft_dir = std::env::temp_dir()
+            .join("jiucaihezi-skill-drafts")
+            .join(&session_id)
+            .join(&draft_id);
+        fs::create_dir_all(&draft_dir).unwrap();
+        let mut draft = PersistedSkillDraft {
+            draft_id: draft_id.clone(),
+            session_id: session_id.clone(),
+            revision: 1,
+            content_hash: String::new(),
+            skill_md: "---\nname: package-test\ndescription: Complete package\n---\n\n# Package"
+                .to_string(),
+            references: vec![PersistedSkillDraftFile {
+                path: "references/guide.md".to_string(),
+                title: "Guide".to_string(),
+                content: "# Guide".to_string(),
+                mime_type: "text/markdown".to_string(),
+            }],
+        };
+        draft.content_hash = compute_skill_draft_hash(&draft).unwrap();
+        fs::write(
+            draft_dir.join("revision-1.json"),
+            serde_json::to_vec(&draft).unwrap(),
+        )
+        .unwrap();
+
+        let stale = commit_central_skill_draft_impl(
+            &pool,
+            CommitCentralSkillDraftInput {
+                draft_id: draft_id.clone(),
+                session_id: session_id.clone(),
+                revision: 1,
+                content_hash: "stale".to_string(),
+                target_skill_id: "package-test".to_string(),
+            },
+        )
+        .await;
+        assert!(stale.unwrap_err().contains("STALE_SKILL_DRAFT"));
+        assert!(!central_dir.join("package-test").exists());
+
+        commit_central_skill_draft_impl(
+            &pool,
+            CommitCentralSkillDraftInput {
+                draft_id,
+                session_id,
+                revision: 1,
+                content_hash: draft.content_hash,
+                target_skill_id: "package-test".to_string(),
+            },
+        )
+        .await
+        .unwrap();
+        let installed = central_dir.join("package-test");
+        assert!(installed.join("SKILL.md").exists());
+        assert_eq!(
+            fs::read_to_string(installed.join("references/guide.md")).unwrap(),
+            "# Guide"
+        );
+        assert!(installed.join(".jc-skill-package.json").exists());
     }
 
     async fn create_nested_central_skill(

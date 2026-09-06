@@ -79,3 +79,16 @@ test('skill-creator runtime rejects tests before validation', async () => {
   assert.equal(result.status, 'error')
   assert.equal(result.errorCode, 'SKILL_CREATOR_VALIDATE_REQUIRED')
 })
+
+test('save_skill prepares a draft for user confirmation without claiming it is installed', async () => {
+  const result = JSON.parse(await executeSkillCreatorToolCall(call('save_skill', {
+    skill_md: skillMd,
+  }), { agentId: 'other-agent', sessionId: 'prepare-save' }))
+
+  assert.equal(result.status, 'prepared')
+  assert.match(result.draft_id, /^draft_/)
+  assert.equal(result.skill_md, skillMd)
+  assert.match(result.message, /install_token/)
+  assert.equal(result.install_token.revision, result.revision)
+  assert.equal('packagePath' in result, false)
+})

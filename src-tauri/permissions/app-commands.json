@@ -110,6 +110,7 @@
           "get_skills_by_agent",
           "get_central_skills",
           "save_central_skill",
+          "commit_central_skill_draft",
           "get_central_skill_bundles",
           "get_central_skill_bundle_detail",
           "preview_delete_central_skill_bundle",

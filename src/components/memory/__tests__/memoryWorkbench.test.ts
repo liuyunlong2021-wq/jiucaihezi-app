@@ -887,7 +887,7 @@ test('memory file actions use the supported DOM prompt and headers share one bas
   assert.match(workbench, /fileWriteSearch = ref\(''\)/)
   assert.match(workbench, /v-for="resource in filteredFileWriteTargets"/)
   assert.match(workbench, /await appendFileWriteIndex\(owner, target\.path, savedPath\)/)
-  assert.match(workbench, /const link = `\[\[\$\{linkTarget\}\]\]`/)
+  assert.match(workbench, /appendProjectDirectoryIndex\(files, owner, directoryPath, savedPath\)/)
   assert.match(workbench, /\.memory-workbench\.desktop-runtime \{ padding-top: 28px/)
   assert.match(workbench, /grid-template-rows: var\(--memory-header-height\)/)
 })

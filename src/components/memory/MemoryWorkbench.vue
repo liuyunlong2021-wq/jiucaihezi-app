@@ -13,7 +13,7 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
-import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
 import type { ProjectResourceOpenResult } from '@/services/projectExplorerService'
 import { openProjectResource } from '@/services/projectExplorerService'
@@ -67,7 +67,7 @@ import type { ConversationAttachment, ConversationTurn } from '@/runtime/memory/
 import type { ProjectResource } from '@/utils/projectResource'
 import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
-import { findMarkdownFileBacklinks, parseMarkdownFileLinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
+import { findMarkdownFileBacklinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
@@ -775,7 +775,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
         mediaPlans.value[turn.id] = plans
       } catch { /* ordinary assistant reply */ }
       try {
-        skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
+        skillInstallPlans.value[turn.id] = await parseSkillInstallPlan(turn.content)
         skillInstallStatus.value[turn.id] ||= 'ready'
       } catch { /* ordinary assistant reply */ }
     }
@@ -1008,22 +1008,7 @@ function fileWriteTargetName(resource: ProjectResource): string {
 }
 
 async function appendFileWriteIndex(owner: string, directoryPath: string, savedPath: string) {
-  const indexPath = directoryPath ? `${directoryPath}/index.md` : 'index.md'
-  const linkTarget = (directoryPath && savedPath.startsWith(`${directoryPath}/`) ? savedPath.slice(directoryPath.length + 1) : savedPath).replace(/\.md$/i, '')
-  const link = `[[${linkTarget}]]`
-  const indexResource: ProjectResource = { runtime: desktopRuntime ? 'desktop' : 'web', owner, path: indexPath, name: 'index.md', isDirectory: false, kind: 'document', mimeType: 'text/markdown' }
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    let current: Awaited<ReturnType<typeof files.readTextAt>> | null = null
-    try { current = await files.readTextAt(owner, indexPath) } catch { current = null }
-    if (!current) {
-      try { await files.createText(owner, indexPath, `# ${directoryPath.split('/').at(-1) || '项目'}\n\n- ${link}\n`); return } catch { continue }
-    }
-    if (parseMarkdownFileLinks(current.content).some(item => item.target.replace(/\.md$/i, '') === linkTarget)) return
-    const result = await files.writeText(indexResource, `${current.content.trimEnd()}\n\n- ${link}\n`, current.revision)
-    if (result.status === 'saved') return
-    if (result.status === 'missing') continue
-  }
-  throw new Error('目录 index.md 正在其他窗口更新，请重试')
+  await appendProjectDirectoryIndex(files, owner, directoryPath, savedPath)
 }
 
 async function suggestFileWrite(turn: ConversationTurn) {
@@ -1387,7 +1372,7 @@ async function send() {
         if (firstPlan) await openMediaPlanInCreation(turn.id, 0, firstPlan)
       } catch { /* no media plan */ }
       try {
-        skillInstallPlans.value[turn.id] = parseSkillInstallPlan(turn.content)
+        skillInstallPlans.value[turn.id] = await parseSkillInstallPlan(turn.content)
         skillInstallStatus.value[turn.id] = 'ready'
       } catch { /* no Skill install plan */ }
     }
@@ -2042,13 +2027,18 @@ async function approveSkillInstall(turnId: string) {
   skillInstallErrors.value[turnId] = ''
   const existing = installedSkill(plan)
   try {
+    if (plan.token && isTauriRuntime()) {
+      await agentStore.commitSkillDraft(plan.token)
+      skillInstallStatus.value[turnId] = 'installed'
+      return
+    }
     await agentStore.createAgent({
       id: plan.id,
       name: plan.name,
       description: plan.description,
       triggers: plan.triggers,
       skillContent: plan.skillMd,
-      references: existing?.references || [],
+      references: plan.files.slice(1),
       examples: existing?.examples || [],
       version: existing ? existing.version + 1 : 1,
       source: 'user',

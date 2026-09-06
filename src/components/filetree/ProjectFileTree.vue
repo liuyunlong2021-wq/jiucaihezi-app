@@ -28,6 +28,7 @@ import {
   type ProjectResource,
 } from '@/utils/projectResource'
 import {
+  appendProjectDirectoryIndex,
   createRuntimeProjectFileService,
   flattenProjectResourceChange,
   onProjectResourceChange,
@@ -1426,6 +1427,7 @@ async function ctxNewFolder() {
   const relPath = (dirRel ? dirRel + '/' : '') + name.trim().replace(/^\/+/, '')
   try {
     await projectFiles.createFolder(projectKey.value, relPath)
+    await appendProjectDirectoryIndex(projectFiles, projectKey.value, dirRel, relPath)
   } catch (e) {
     errorMsg.value = `创建文件夹失败: ${e instanceof Error ? e.message : String(e)}`
   }
@@ -1433,6 +1435,8 @@ async function ctxNewFolder() {
 async function createFileAt(relPath: string) {
   try {
     const resource = await projectFiles.createText(projectKey.value, relPath, '')
+    const slash = relPath.lastIndexOf('/')
+    await appendProjectDirectoryIndex(projectFiles, projectKey.value, slash < 0 ? '' : relPath.slice(0, slash), relPath)
     emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
   } catch (e) {
     errorMsg.value = `创建失败: ${e instanceof Error ? e.message : String(e)}`
@@ -1558,15 +1562,17 @@ async function uploadWebFiles(files: File[]) {
   const projectId = webProjectId.value
   if (isDesktop || !projectId || !files.length) return
   try {
+    const entries = files.map(file => ({ file, path: uploadPathForFile(file, memoryMediaDirectoryFor(file.name, file.type)) }))
     await writeWebProjectEntries(
       webProjectFiles,
       projectId,
-      files.map(file => transferEntryForFile(
-        file,
-        uploadPathForFile(file, memoryMediaDirectoryFor(file.name, file.type)),
-      )),
+      entries.map(entry => transferEntryForFile(entry.file, entry.path)),
       { resolveCollision: ({ path }) => requestCollision(path) },
     )
+    for (const entry of entries) {
+      const slash = entry.path.lastIndexOf('/')
+      await appendProjectDirectoryIndex(projectFiles, projectId, entry.path.slice(0, slash), entry.path)
+    }
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -1607,6 +1613,8 @@ async function classifyImportedMemoryFiles(owner: string, importedPaths: string[
       'keep-both',
     )
     if (result.failures.length) throw new Error(result.failures[0]!.message)
+    for (const resource of resources)
+      await appendProjectDirectoryIndex(projectFiles, owner, target, `${target}/${resource.name}`)
   }
   await refreshLoadedDirectories()
 }
