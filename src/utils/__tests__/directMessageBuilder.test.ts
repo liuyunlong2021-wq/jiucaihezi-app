@@ -153,14 +153,15 @@ describe('buildDirectMessages', () => {
     assert.match(result.at(-1)?.content as string, new RegExp(tail))
   })
 
-  test('有可读路径的长文档只发送定位信息，不内联转换正文', () => {
-    const sentinel = '不应进入首次模型请求的附件正文'
+  test('当前轮明确选择的长文档自动发送首段并保留分页提示', () => {
+    const sentinel = '首段正文内容'
     const result = buildDirectMessages({
       messages: [user('u1', '根据附件更新规则')],
       attachments: [{
         id: 'word', name: '长篇.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         size: 75_000, kind: 'file', value: '', textContent: sentinel.repeat(5_000),
         readablePath: '.raw/jc-media/文档/长篇.docx.md',
+        characterCount: 75_000,
       }],
       visionModel: true,
       apiFormat: 'openai',
@@ -169,7 +170,9 @@ describe('buildDirectMessages', () => {
 
     const body = JSON.stringify(result)
     assert.match(body, /长篇\.docx\.md/)
-    assert.doesNotMatch(body, new RegExp(sentinel))
+    assert.match(body, new RegExp(sentinel))
+    assert.match(body, /已自动读取首段/)
+    assert.match(body, /继续分页/)
   })
 
   test('短文本附件优先内联正文，即使同时有可读路径', () => {

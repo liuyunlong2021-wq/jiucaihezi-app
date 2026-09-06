@@ -1592,7 +1592,7 @@ async function addProjectFileReference(resource: ProjectResource) {
         id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'application/octet-stream',
         size: resource.size || 0, kind: 'file', value: '', resourcePath: resource.path,
         readablePath,
-        ...(content.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent: content } : {}),
+        textContent: content.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
         characterCount: content.length,
       })
     } finally {
@@ -1604,7 +1604,7 @@ async function addProjectFileReference(resource: ProjectResource) {
   if (!attachments.value.some(item => item.resourcePath === resource.path)) attachments.value.push({
     id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'text/plain', size: text.size,
     kind: 'file', value: '', resourcePath: resource.path, readablePath: resource.path,
-    ...(text.content.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent: text.content } : {}),
+    textContent: text.content.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
     characterCount: text.content.length,
   })
 }
@@ -1869,7 +1869,7 @@ async function addAttachmentFiles(selected: File[]) {
           resolved.push({
             id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
             resourcePath: resource.path, readablePath: resource.path,
-            ...(textContent.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent } : {}),
+            textContent: textContent.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
             characterCount: textContent.length,
           })
           continue
@@ -1903,7 +1903,7 @@ async function addAttachmentFiles(selected: File[]) {
         resolved.push({
           id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file', value: '',
           resourcePath: resource.path, readablePath,
-          ...(readableContent.length <= MAX_INLINE_ATTACHMENT_CHARS ? { textContent: readableContent } : {}),
+          textContent: readableContent.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
           characterCount: readableContent.length,
         })
         continue

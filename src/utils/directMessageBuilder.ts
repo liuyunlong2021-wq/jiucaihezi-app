@@ -2,7 +2,7 @@ import { normalizeNewApiAttachment } from '@/runtime/direct/newApiAttachments'
 
 export interface DirectMessageFile { name: string; content: string }
 export const MAX_INLINE_ATTACHMENT_CHARS = 60_000
-type DirectAttachmentLocator = { name: string; readablePath?: string; textContent?: string }
+type DirectAttachmentLocator = { name: string; readablePath?: string; textContent?: string; characterCount?: number }
 export type DirectAttachmentKind = 'image' | 'video' | 'audio' | 'file'
 export interface ResolvedDirectAttachment {
   id: string
@@ -89,8 +89,14 @@ function buildOpenAiAttachmentParts(args: BuildDirectMessagesInput, images: stri
 function attachmentTextFiles(attachments?: DirectAttachmentLocator[], inlineText = false): DirectMessageFile[] {
   return (attachments || []).flatMap(attachment => {
     const content = String(attachment.textContent || '').trim()
-    if (inlineText && content && content.length <= MAX_INLINE_ATTACHMENT_CHARS) {
-      return [{ name: attachment.name, content }]
+    if (inlineText && content) {
+      const total = Number(attachment.characterCount || content.length)
+      const truncated = total > content.length || content.length > MAX_INLINE_ATTACHMENT_CHARS
+      const prefix = truncated
+        ? `已自动读取首段（${content.length}/${total} 字符）；需要后续内容时使用 read 继续分页。`
+        : '已自动读取全文。'
+      const path = truncated ? String(attachment.readablePath || '').trim() : ''
+      return [{ name: attachment.name, content: `${prefix}${path ? `\n项目可读路径：${path}` : ''}\n${content.slice(0, MAX_INLINE_ATTACHMENT_CHARS)}` }]
     }
     const readablePath = String(attachment.readablePath || '').trim()
     if (readablePath) {
