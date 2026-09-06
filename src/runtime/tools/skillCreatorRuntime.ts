@@ -273,9 +273,9 @@ function draftIdentityMismatch(
   const revision = Number(args.revision)
   const contentHash = String(args.content_hash || '').trim()
   return Boolean(
-    (record.draftId && draftId && record.draftId !== draftId)
-    || (record.revision !== undefined && Number.isSafeInteger(revision) && record.revision !== revision)
-    || (record.contentHash && contentHash && record.contentHash !== contentHash)
+    (record.draftId && draftId !== record.draftId)
+    || (record.revision !== undefined && (!Number.isSafeInteger(revision) || revision !== record.revision))
+    || (record.contentHash && contentHash !== record.contentHash)
   )
 }
 

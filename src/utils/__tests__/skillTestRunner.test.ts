@@ -10,6 +10,7 @@ import {
   validateSkillDraft,
   runSkillTests,
   buildBlindComparison,
+  generateEvalViewerHtml,
 } from '../skillTestRunner'
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 
@@ -255,11 +256,59 @@ test('runSkillTests repeats both configurations and uses an installed baseline',
     assert.deepEqual(benchmark.runs.map(run => run.run_number), [1, 1, 2, 2])
     assert.equal(benchmark.metadata.runs_per_configuration, 2)
     assert.equal(benchmark.metadata.model, 'gpt-5.5')
+    assert.equal(benchmark.metadata.baseline_configuration, 'installed_version')
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     globalThis.fetch = previousFetch
     restoreStorage()
   }
+})
+
+test('runSkillTests executes authorized tool calls and records output artifacts', async () => {
+  const restoreStorage = installSkillRunnerLocalStorage({ jcModel: 'gpt-5.5', jcModelProviderId: 'jiucaihezi' })
+  const previousFetch = globalThis.fetch
+  let taskCalls = 0
+  try {
+    __resetApiKeyMemoryCacheForTests('session-tool-test')
+    globalThis.fetch = async (_url, init) => {
+      const body = JSON.parse(String(init?.body || '{}'))
+      if (String(body.messages?.at(-1)?.content || '').includes('返回 JSON 数组')) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '[]' } }] }), { status: 200 })
+      }
+      if (Array.isArray(body.messages) && body.messages.at(-1)?.role === 'tool') {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '已完成 report.txt' } }], usage: { total_tokens: 3 } }), { status: 200 })
+      }
+      taskCalls += 1
+      return new Response(JSON.stringify({ choices: [{ message: {
+        content: null,
+        tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'write', arguments: JSON.stringify({ path: 'report.txt', content: 'done' }) } }],
+      } }], usage: { total_tokens: 2 } }), { status: 200 })
+    }
+    const result = await runSkillTests(validSkillMd, [{ prompt: '写入报告', expect: '完成' }], {
+      toolAdapter: {
+        tools: [{ type: 'function', function: { name: 'write', parameters: { type: 'object' } } }],
+        execute: async () => ({ content: '已写入 report.txt' }),
+      },
+    })
+    assert.equal(taskCalls, 2)
+    assert.equal(result.results[0].runs[0].outputs?.[0]?.path, 'report.txt')
+    assert.match(result.results[0].runs[0].transcript?.[1]?.content || '', /写入报告/)
+    assert.ok(result.results[0].runs[0].transcript?.some(message => message.role === 'tool' && message.content.includes('report.txt')))
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('eval viewer shows installed baseline and previous iteration output', () => {
+  const run = (configuration: 'with_skill' | 'installed_version', output: string) => ({
+    configuration, output, tokenCount: 1, durationMs: 1, assertions: [],
+    timing: { total_tokens: 1, duration_ms: 1, total_duration_seconds: 0.001 },
+  })
+  const html = generateEvalViewerHtml('demo', [{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'new'), run('installed_version', 'current-old')] }], null, {}, [{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'previous-new'), run('installed_version', 'previous-old')] }])
+  assert.match(html, /INSTALLED VERSION/)
+  assert.match(html, /previous-old/)
 })
 
 test('grader rejects claims about generated files when a run has no artifacts', () => {

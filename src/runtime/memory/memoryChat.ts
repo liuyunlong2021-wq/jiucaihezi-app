@@ -438,7 +438,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const projectTools: DirectToolExecutor = async (call, signal) =>
     normalizeMemoryToolResult(await rawProjectTools(call, signal))
 
-  const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal) => {
+  const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal): Promise<DirectToolResult> => {
     signal?.throwIfAborted()
     // T4: memory_search - native tool for current conversation
     if (call.function.name === 'memory_search') {
@@ -491,6 +491,18 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           userInput: latestUserText,
           signal,
           loadInstalledSkill: loadInstalledSkillForCreator,
+          testToolAdapter: {
+            tools: authorizedMemoryToolDefinitions.filter(tool => !isSkillCreatorToolName(String(tool.function?.name || ''))),
+            execute: async (testCall, testSignal): Promise<{ content: string }> => {
+              const directCall = testCall as DirectToolCall
+              if (memoryToolNeedsApproval(directCall, latestUserText, input.projectId)) {
+                const approved = await input.confirmTool(directCall)
+                if (!approved) return { content: JSON.stringify({ error: 'TOOL_CANCELLED', message: '用户取消了评测工具调用。' }) }
+              }
+              const result: DirectToolResult = await executeMemoryTool(directCall, testSignal)
+              return { content: result.content }
+            },
+          },
         }),
       }
     }

@@ -41,8 +41,24 @@ export interface RunResult {
     duration_ms: number
     total_duration_seconds: number
   }
-  transcript?: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
+  transcript?: Array<{ role: 'system' | 'user' | 'assistant' | 'tool'; content: string }>
   outputs?: Array<{ path: string; mimeType: string; bytes: number; sha256?: string }>
+}
+
+export interface SkillTestToolCall {
+  id: string
+  type: 'function'
+  function: { name: string; arguments: string }
+}
+
+export interface SkillTestToolResult {
+  content: string
+  outputs?: Array<{ path: string; mimeType?: string; bytes?: number; sha256?: string }>
+}
+
+export interface SkillTestToolAdapter {
+  tools: unknown[]
+  execute: (call: SkillTestToolCall, signal?: AbortSignal) => Promise<SkillTestToolResult>
 }
 
 export interface SingleTestResult {
@@ -83,6 +99,7 @@ export interface BenchmarkData {
     model?: string
     revision?: number
     baseline_revision?: number
+    baseline_configuration?: 'without_skill' | 'installed_version'
   }
   runs: BenchmarkRun[]
   run_summary: {
@@ -438,10 +455,20 @@ async function callLlm(
   userPrompt: string,
   signal?: AbortSignal
 ): Promise<{ output: string; tokens: number; durationMs: number }> {
+  const result = await callLlmRequest(config, [
+    ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+    { role: 'user', content: userPrompt },
+  ], signal)
+  return { output: result.output, tokens: result.tokens, durationMs: result.durationMs }
+}
+
+async function callLlmRequest(
+  config: Awaited<ReturnType<typeof resolveApiConfig>>,
+  messages: Array<Record<string, unknown>>,
+  signal?: AbortSignal,
+  tools?: unknown[],
+): Promise<{ output: string; tokens: number; durationMs: number; toolCalls: SkillTestToolCall[] }> {
   const startTime = Date.now()
-  const messages: any[] = []
-  if (systemPrompt) messages.push({ role: 'system', content: systemPrompt })
-  messages.push({ role: 'user', content: userPrompt })
 
   const res = await fetch(`${config.apiBase}/v1/chat/completions`, {
     method: 'POST',
@@ -452,23 +479,113 @@ async function callLlm(
       temperature: 0.7,
       max_tokens: 2000,
       stream: false,
+      ...(tools?.length ? { tools } : {}),
     }),
     signal,
   })
 
   const durationMs = Date.now() - startTime
-  if (!res.ok) return { output: `[API ${res.status}]`, tokens: 0, durationMs }
+  if (!res.ok) return { output: `[API ${res.status}]`, tokens: 0, durationMs, toolCalls: [] }
 
   try {
     const data = await res.json()
+    const message = data?.choices?.[0]?.message || {}
     return {
-      output: getAssistantMessageContent(data) || '[空输出]',
+      output: getAssistantMessageContent(data) || '',
       tokens: data.usage?.total_tokens || 0,
       durationMs,
+      toolCalls: Array.isArray(message.tool_calls)
+        ? message.tool_calls.filter((call: any) => call?.function?.name).map((call: any, index: number) => ({
+          id: String(call.id || `skill-test-call-${index + 1}`),
+          type: 'function' as const,
+          function: { name: String(call.function.name), arguments: String(call.function.arguments || '{}') },
+        }))
+        : [],
     }
   } catch {
-    return { output: '[响应解析失败]', tokens: 0, durationMs }
+    return { output: '[响应解析失败]', tokens: 0, durationMs, toolCalls: [] }
   }
+}
+
+async function runSkillTestTask(
+  config: Awaited<ReturnType<typeof resolveApiConfig>>,
+  systemPrompt: string | null,
+  userPrompt: string,
+  adapter: SkillTestToolAdapter | undefined,
+  signal?: AbortSignal,
+): Promise<{ output: string; tokens: number; durationMs: number; outputs: RunResult['outputs']; transcript: NonNullable<RunResult['transcript']> }> {
+  const messages: Array<Record<string, unknown>> = [
+    ...(systemPrompt ? [{ role: 'system', content: systemPrompt }] : []),
+    { role: 'user', content: userPrompt },
+  ]
+  const outputs: NonNullable<RunResult['outputs']> = []
+  const transcript: NonNullable<RunResult['transcript']> = [
+    ...(systemPrompt ? [{ role: 'system' as const, content: systemPrompt }] : []),
+    { role: 'user' as const, content: userPrompt },
+  ]
+  const startedAt = Date.now()
+  let tokens = 0
+  for (let round = 0; round < 8; round += 1) {
+    const response = await callLlmRequest(config, messages, signal, adapter?.tools)
+    tokens += response.tokens
+    if (!response.toolCalls.length || !adapter) {
+      const output = response.output || '[空输出]'
+      transcript.push({ role: 'assistant', content: output })
+      return { output, tokens, durationMs: Date.now() - startedAt, outputs, transcript }
+    }
+    transcript.push({
+      role: 'assistant',
+      content: JSON.stringify({ content: response.output || '', tool_calls: response.toolCalls }),
+    })
+    messages.push({
+      role: 'assistant',
+      content: response.output || null,
+      tool_calls: response.toolCalls,
+    })
+    for (const toolCall of response.toolCalls) {
+      const result = await adapter.execute(toolCall, signal)
+      outputs.push(...(result.outputs || []).map(output => ({
+        path: String(output.path),
+        mimeType: output.mimeType || 'application/octet-stream',
+        bytes: Number(output.bytes || 0),
+        ...(output.sha256 ? { sha256: output.sha256 } : {}),
+      })))
+      outputs.push(...inferToolOutputs(toolCall, result.content))
+      transcript.push({ role: 'tool', content: result.content })
+      messages.push({ role: 'tool', tool_call_id: toolCall.id, content: result.content })
+    }
+  }
+  const output = '[工具调用超过 8 轮，已停止]'
+  transcript.push({ role: 'assistant', content: output })
+  return { output, tokens, durationMs: Date.now() - startedAt, outputs, transcript }
+}
+
+function inferToolOutputs(call: SkillTestToolCall, content: string): NonNullable<RunResult['outputs']> {
+  const result: NonNullable<RunResult['outputs']> = []
+  try {
+    const parsed = JSON.parse(content)
+    const candidates = Array.isArray(parsed?.outputs) ? parsed.outputs : Array.isArray(parsed?.files) ? parsed.files : []
+    for (const item of candidates) {
+      const path = String(item?.path || item?.file_path || '').trim()
+      if (path) result.push({ path, mimeType: String(item?.mimeType || 'application/octet-stream'), bytes: Number(item?.bytes || 0) })
+    }
+  } catch { /* tool results are often plain text */ }
+  for (const match of content.matchAll(/(?:\.raw\/[^\s,，。；;]+|(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.(?:md|txt|csv|json|xlsx|docx|pdf|png|jpg|jpeg|html|pptx|mp4|jcscene))+/gi)) {
+    const path = match[0].trim().replace(/[)\]}>。，；;]+$/, '')
+    if (path && !result.some(output => output.path === path)) {
+      result.push({ path, mimeType: 'application/octet-stream', bytes: 0 })
+    }
+  }
+  if (/^(write|edit|mkdir|create_document|create_html|office_create)$/.test(call.function.name)) {
+    try {
+      const args = JSON.parse(call.function.arguments || '{}')
+      const path = String(args.path || args.output_path || '').trim()
+      if (path && !result.some(output => output.path === path)) {
+        result.push({ path, mimeType: 'text/plain', bytes: byteLength(String(args.content || '')) })
+      }
+    } catch { /* malformed tool arguments are handled by the executor */ }
+  }
+  return result
 }
 
 export async function improveSkillDescription(
@@ -560,7 +677,7 @@ ${assertionsText}
 export async function runSkillTests(
   draftSkillMd: string,
   testCases: TestCase[],
-  options: { runsPerConfiguration?: number; baselineSkillMd?: string } = {},
+  options: { runsPerConfiguration?: number; baselineSkillMd?: string; toolAdapter?: SkillTestToolAdapter } = {},
 ): Promise<TestResults> {
   if (testCases.length > MAX_TEST_CASES) {
     throw new Error(`测试用例最多 ${MAX_TEST_CASES} 个，请分批运行。`)
@@ -582,8 +699,8 @@ export async function runSkillTests(
         const runs: RunResult[] = []
         for (let runNumber = 1; runNumber <= runsPerConfiguration; runNumber += 1) {
           const [withRun, baselineRun] = await Promise.all([
-            callLlm(config, draftSkillMd, tc.prompt, controller.signal),
-            callLlm(config, options.baselineSkillMd || null, tc.prompt, controller.signal),
+            runSkillTestTask(config, draftSkillMd, tc.prompt, options.toolAdapter, controller.signal),
+            runSkillTestTask(config, options.baselineSkillMd || null, tc.prompt, options.toolAdapter, controller.signal),
           ])
           const [withAssertions, baselineAssertions] = await Promise.all([
             gradeAssertions(config, withRun.output, assertions, tc.expect),
@@ -646,12 +763,12 @@ export async function runSkillTests(
   }
 }
 
-function toRunResult(configuration: RunResult['configuration'], run: { output: string; tokens: number; durationMs: number }, assertions: Assertion[], system: string | null, prompt: string): RunResult {
+function toRunResult(configuration: RunResult['configuration'], run: { output: string; tokens: number; durationMs: number; outputs?: RunResult['outputs']; transcript?: RunResult['transcript'] }, assertions: Assertion[], system: string | null, prompt: string): RunResult {
   return {
     configuration, output: run.output, tokenCount: run.tokens, durationMs: run.durationMs, assertions,
     timing: { total_tokens: run.tokens, duration_ms: run.durationMs, total_duration_seconds: run.durationMs / 1000 },
-    transcript: [...(system ? [{ role: 'system' as const, content: system }] : []), { role: 'user', content: prompt }, { role: 'assistant', content: run.output }],
-    outputs: [],
+    transcript: run.transcript || [...(system ? [{ role: 'system' as const, content: system }] : []), { role: 'user', content: prompt }, { role: 'assistant', content: run.output }],
+    outputs: run.outputs || [],
   }
 }
 
@@ -682,7 +799,7 @@ function calcStats(values: number[]): BenchmarkStats {
   }
 }
 
-export function aggregateBenchmark(results: SingleTestResult[], skillName: string, metadata: { provider?: string; model?: string; revision?: number; baselineRevision?: number } = {}): BenchmarkData {
+export function aggregateBenchmark(results: SingleTestResult[], skillName: string, metadata: { provider?: string; model?: string; revision?: number; baselineRevision?: number; baselineConfiguration?: 'without_skill' | 'installed_version' } = {}): BenchmarkData {
   const evalIds = results.map(r => r.eval_id)
   const runs: BenchmarkRun[] = []
 
@@ -765,6 +882,7 @@ export function aggregateBenchmark(results: SingleTestResult[], skillName: strin
       model: metadata.model,
       revision: metadata.revision,
       baseline_revision: metadata.baselineRevision,
+      baseline_configuration: metadata.baselineConfiguration || baselineName,
     },
     runs,
     run_summary: {
@@ -829,8 +947,17 @@ export function generateEvalViewerHtml(
   skillName: string,
   results: SingleTestResult[],
   benchmark: BenchmarkData | null,
-  previousFeedback?: Record<string, string>
+  previousFeedback?: Record<string, string>,
+  previousResults?: SingleTestResult[],
 ): string {
+  const baselineConfiguration = results.some(result => result.runs.some(run => run.configuration === 'installed_version'))
+    ? 'installed_version'
+    : 'without_skill'
+  const baselineLabel = baselineConfiguration === 'installed_version' ? 'INSTALLED VERSION' : 'WITHOUT skill'
+  const previousOutputs = Object.fromEntries((previousResults || []).flatMap(result => result.runs.map(run => [
+    `${result.eval_id}:${run.configuration}`,
+    run.output,
+  ])))
   const encoded = JSON.stringify({
     skill_name: skillName,
     runs: results.flatMap(r => [
@@ -850,15 +977,15 @@ export function generateEvalViewerHtml(
         })(),
       },
       {
-        id: `eval-${r.eval_id}-without_skill`,
+        id: `eval-${r.eval_id}-${baselineConfiguration}`,
         prompt: r.prompt,
         eval_id: r.eval_id,
         outputs: [{
           name: 'output.md', type: 'text',
-          content: r.runs.find(x => x.configuration === 'without_skill')?.output || '',
+          content: r.runs.find(x => x.configuration === baselineConfiguration)?.output || '',
         }],
         grading: (() => {
-          const a = r.runs.find(x => x.configuration === 'without_skill')?.assertions || []
+          const a = r.runs.find(x => x.configuration === baselineConfiguration)?.assertions || []
           if (!a.length) return null
           const passed = a.filter(x => x.passed).length
           return { summary: { passed, failed: a.length - passed, total: a.length, pass_rate: passed / a.length }, expectations: a }
@@ -866,7 +993,9 @@ export function generateEvalViewerHtml(
       },
     ]),
     previous_feedback: previousFeedback || {},
-    previous_outputs: {},
+    previous_outputs: previousOutputs,
+    baseline_configuration: baselineConfiguration,
+    baseline_label: baselineLabel,
     benchmark: benchmark || undefined,
   })
 
@@ -914,7 +1043,7 @@ function render() {
   const runs = DATA.runs;
   const r = runs[currentIdx];
   const isWith = r.id.includes('with_skill');
-  const configLabel = isWith ? 'WITH skill' : 'WITHOUT skill';
+  const configLabel = isWith ? 'WITH skill' : (DATA.baseline_label || 'WITHOUT skill');
   const badgeClass = isWith ? 'badge-with' : 'badge-without';
 
   let html = '<h1>Skill测试: ' + DATA.skill_name + '</h1>';
@@ -930,6 +1059,8 @@ function render() {
     if (r.outputs && r.outputs[0]) {
       html += '<pre>' + escapeHtml(r.outputs[0].content.slice(0, 2000)) + '</pre>';
     }
+    const previous = DATA.previous_outputs && DATA.previous_outputs[r.eval_id + ':' + (isWith ? 'with_skill' : DATA.baseline_configuration)];
+    if (previous) html += '<details style="margin-top:0.75rem"><summary>上一轮输出</summary><pre>' + escapeHtml(previous.slice(0, 2000)) + '</pre></details>';
     if (r.grading && r.grading.expectations) {
       html += '<div style="margin-top:0.75rem"><strong style="font-size:0.8rem">断言评分 (' + r.grading.summary.passed + '/' + r.grading.summary.total + ')</strong>';
       r.grading.expectations.forEach(function(a) {
@@ -945,7 +1076,7 @@ function render() {
   } else if (tab === 'benchmark' && DATA.benchmark) {
     var b = DATA.benchmark;
     html += '<div class="card"><h3>Benchmark 摘要</h3>';
-    html += '<table class="benchmark-table"><tr><th>指标</th><th>With Skill</th><th>Without Skill</th><th>Delta</th></tr>';
+    html += '<table class="benchmark-table"><tr><th>指标</th><th>With Skill</th><th>' + (DATA.baseline_label || 'WITHOUT skill') + '</th><th>Delta</th></tr>';
     var ws = b.run_summary.with_skill, wos = b.run_summary.without_skill, d = b.run_summary.delta;
     html += '<tr><td>Pass Rate</td><td>' + (ws.pass_rate.mean*100).toFixed(0) + '% \u00b1' + (ws.pass_rate.stddev*100).toFixed(0) + '%</td><td>' + (wos.pass_rate.mean*100).toFixed(0) + '% \u00b1' + (wos.pass_rate.stddev*100).toFixed(0) + '%</td><td class="' + (d.pass_rate.startsWith('+')?'delta-positive':'delta-negative') + '">' + d.pass_rate + '</td></tr>';
     html += '<tr><td>Time (s)</td><td>' + ws.time_seconds.mean.toFixed(1) + ' \u00b1' + ws.time_seconds.stddev.toFixed(1) + '</td><td>' + wos.time_seconds.mean.toFixed(1) + ' \u00b1' + wos.time_seconds.stddev.toFixed(1) + '</td><td>' + d.time_seconds + 's</td></tr>';

@@ -213,3 +213,22 @@ test('Skill Creator runtime rejects a stale draft revision after validation', ()
   assert.equal(stale.allowed, false)
   assert.equal(stale.errorCode, 'STALE_SKILL_DRAFT')
 })
+
+test('Skill Creator runtime rejects missing draft identity after validation', () => {
+  const runtime = createSkillCreatorRuntime()
+  const validated = { test_id: 'run-bound', draft_id: 'draft-bound', revision: 1, content_hash: 'hash-bound' }
+  runtime.afterToolResult({
+    toolName: 'skill_creator_validate',
+    args: validated,
+    context,
+    result: { status: 'ok', ...validated },
+  })
+
+  const missingIdentity = runtime.beforeToolCall({
+    toolName: 'save_skill',
+    args: { test_id: 'run-bound' },
+    context: { ...context, userInput: '确认保存' },
+  })
+  assert.equal(missingIdentity.allowed, false)
+  assert.equal(missingIdentity.errorCode, 'STALE_SKILL_DRAFT')
+})

@@ -10,6 +10,8 @@ import {
   validateSkillDraft,
   type BenchmarkData,
   type SingleTestResult,
+  type SkillTestToolCall,
+  type SkillTestToolResult,
 } from '@/utils/skillTestRunner'
 import { appendSkillCreatorHistory, loadSkillCreatorFeedback, persistSkillCreatorFeedback, persistSkillCreatorReviewWorkspace, persistSkillCreatorWorkspaceArtifact } from '@/utils/skillCreatorWorkspace'
 import { getSkillBuilderDraft, registerSkillBuilderDraft, SkillBuilderDraftError } from '@/utils/skillBuilderTools'
@@ -30,7 +32,7 @@ const TOOL_NAMES = new Set([
   'save_skill',
 ])
 
-type StoredRun = { results: SingleTestResult[]; benchmark: BenchmarkData; skillName: string; skillMd: string; draftId: string; iteration: number }
+type StoredRun = { results: SingleTestResult[]; previousResults?: SingleTestResult[]; benchmark: BenchmarkData; skillName: string; skillMd: string; draftId: string; iteration: number }
 const runs = new Map<string, StoredRun>()
 const installedSnapshots = new Map<string, SkillCreatorInstalledSkill>()
 const comparisons = new Map<string, Record<string, unknown>>()
@@ -49,6 +51,10 @@ interface SkillCreatorToolContext {
   userInput?: string
   signal?: AbortSignal
   loadInstalledSkill?: (skillId: string) => Promise<SkillCreatorInstalledSkill | null>
+  testToolAdapter?: {
+    tools: unknown[]
+    execute: (call: SkillTestToolCall, signal?: AbortSignal) => Promise<SkillTestToolResult>
+  }
 }
 
 export function isSkillCreatorToolName(name: string): boolean {
@@ -124,11 +130,17 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     const installed = targetSkillId ? installedSnapshots.get(`${context.sessionId || 'unsaved-session'}::${targetSkillId}`) : undefined
     const baselineSkillMd = args.baseline_mode === 'installed_version' ? installed?.skillMd : undefined
     if (args.baseline_mode === 'installed_version' && !baselineSkillMd) throw new Error('找不到当前会话加载的已安装 Skill 基线')
-    const result = await runSkillTests(skillMd, testCases, { runsPerConfiguration: Number(args.runs_per_configuration) || 1, baselineSkillMd })
+    const previous = runs.get(runKey)
+    const result = await runSkillTests(skillMd, testCases, { runsPerConfiguration: Number(args.runs_per_configuration) || 1, baselineSkillMd, toolAdapter: context.testToolAdapter })
     const skillName = String(args.skill_name || 'Skill')
-    const benchmark = aggregateBenchmark(result.results, skillName, { provider: result.execution.provider, model: result.execution.model, revision: draft.revision })
+    const benchmark = aggregateBenchmark(result.results, skillName, {
+      provider: result.execution.provider,
+      model: result.execution.model,
+      revision: draft.revision,
+      baselineConfiguration: result.execution.baseline,
+    })
     const iteration = (runs.get(runKey)?.iteration || 0) + 1
-    runs.set(runKey, { results: result.results, benchmark, skillName, skillMd, draftId: draft.draftId, iteration })
+    runs.set(runKey, { results: result.results, previousResults: previous?.results, benchmark, skillName, skillMd, draftId: draft.draftId, iteration })
     await appendSkillCreatorHistory({ sessionId: draft.sessionId, draftId: draft.draftId, entry: { event: 'tested', revision: draft.revision, iteration, timestamp: new Date().toISOString(), provider: result.execution.provider, model: result.execution.model } })
     return JSON.stringify({
       status: 'ok',
@@ -151,7 +163,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     if (!stored) throw new Error(`找不到测试结果: ${testId}`)
     const draft = await resolveDraft(args, context)
     const previous = stored.iteration > 1 ? await loadSkillCreatorFeedback({ sessionId: context.sessionId || 'unsaved-session', draftId: draft.draftId, iteration: stored.iteration - 1 }) : null
-    const html = generateEvalViewerHtml(stored.skillName, stored.results, stored.benchmark, Object.fromEntries((previous?.reviews || []).map(review => [review.run_id, review.feedback])))
+    const html = generateEvalViewerHtml(stored.skillName, stored.results, stored.benchmark, Object.fromEntries((previous?.reviews || []).map(review => [review.run_id, review.feedback])), stored.previousResults)
     const workspace = await persistSkillCreatorReviewWorkspace({
       skillName: stored.skillName,
       workspaceId: `${context.sessionId || 'unsaved-session'}/${draft.draftId}/iteration-${stored.iteration}`,
