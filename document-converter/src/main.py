@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 import httpx
+import anydoc
 from fastapi import FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.responses import JSONResponse
 
@@ -17,7 +18,7 @@ from .converter import (
 )
 
 NEWAPI_VALIDATION_URL = os.getenv('NEWAPI_VALIDATION_URL', 'https://api.jiucaihezi.studio').rstrip('/')
-MARKITDOWN_TIMEOUT_SECONDS = 90
+ANYDOC_TIMEOUT_SECONDS = 90
 
 app = FastAPI(title='document-converter', version='0.1.0')
 
@@ -51,21 +52,14 @@ async def save_upload(upload: UploadFile, directory: Path) -> tuple[Path, int]:
     return source, size
 
 
-async def run_markitdown(source: Path, output: Path) -> str:
-    process = await asyncio.create_subprocess_exec(
-        'markitdown', str(source), '-o', str(output),
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+async def run_anydoc(source: Path) -> str:
     try:
-        _, stderr = await asyncio.wait_for(process.communicate(), timeout=MARKITDOWN_TIMEOUT_SECONDS)
+        return (await asyncio.wait_for(
+            asyncio.to_thread(anydoc.to_markdown, str(source)),
+            timeout=ANYDOC_TIMEOUT_SECONDS,
+        )).strip()
     except TimeoutError:
-        process.kill()
-        await process.communicate()
         raise RuntimeError('转换超时，请缩小文件后重试。')
-    if process.returncode != 0:
-        raise RuntimeError(stderr.decode('utf-8', errors='replace').strip() or 'MarkItDown 未能读取该文档。')
-    return output.read_text(encoding='utf-8', errors='replace').strip()
 
 
 @app.get('/health')
@@ -87,8 +81,7 @@ async def convert_document(
     directory = Path(tempfile.mkdtemp(prefix='jc-document-'))
     try:
         source, _ = await save_upload(file, directory)
-        output = directory / markdown_filename(filename)
-        content = await run_markitdown(source, output)
+        content = await run_anydoc(source)
         if not content:
             raise RuntimeError('没有提取到可读文字。')
         limit = clamp_max_chars(max_chars)
@@ -98,7 +91,7 @@ async def convert_document(
             'source': filename,
             'filename': markdown_filename(filename),
             'content': content[:limit],
-            'engine': 'markitdown',
+            'engine': 'anydoc',
             'truncated': truncated,
             'message': '文档已转换为 Markdown。',
         }

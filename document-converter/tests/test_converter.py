@@ -34,10 +34,10 @@ class ConverterContractTest(unittest.TestCase):
         self.assertNotIn('Traceback', message)
         self.assertNotIn('/app/src/main.py', message)
 
-    def test_requirements_include_supported_markitdown_office_converters(self):
+    def test_requirements_include_anydoc_converter(self):
         requirements = (Path(__file__).resolve().parents[1] / 'requirements.txt').read_text()
         self.assertRegex(
             requirements,
-            r'(?m)^markitdown\[docx,pdf,pptx,xls,xlsx\]>=',
-            msg='Office conversion needs the matching MarkItDown dependencies',
+            r'(?m)^firecrawl-anydoc==0\.2\.3$',
+            msg='Cloud conversion must use the same pinned AnyDoc version as Desktop',
         )
