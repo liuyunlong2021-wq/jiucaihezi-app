@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Eval Review</title>
+  <title>评测审核</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
@@ -544,16 +544,16 @@
   <div id="app" style="height:100vh; display:flex; flex-direction:column;">
     <div class="header">
       <div>
-        <h1>Eval Review: <span id="skill-name"></span></h1>
-        <div class="instructions">Review each output and leave feedback below. Navigate with arrow keys or buttons. When done, return to the application and continue the review.</div>
+        <h1>评测审核：<span id="skill-name"></span></h1>
+        <div class="instructions">审核每项输出，并在下方留下反馈。可使用方向键或按钮导航。完成后返回应用程序继续审核。</div>
       </div>
       <div class="progress" id="progress"></div>
     </div>
 
     <!-- View tabs (only shown when benchmark data exists) -->
     <div class="view-tabs" id="view-tabs" style="display:none;">
-      <button class="view-tab active" onclick="switchView('outputs')">Outputs</button>
-      <button class="view-tab" onclick="switchView('benchmark')">Benchmark</button>
+      <button class="view-tab active" onclick="switchView('outputs')">输出</button>
+      <button class="view-tab" onclick="switchView('benchmark')">基准测试</button>
     </div>
 
     <!-- Outputs panel (qualitative review) -->
@@ -561,7 +561,7 @@
     <div class="main">
       <!-- Prompt -->
       <div class="section">
-        <div class="section-header">Prompt <span class="config-badge" id="config-badge" style="display:none;"></span></div>
+        <div class="section-header">提示词 <span class="config-badge" id="config-badge" style="display:none;"></span></div>
         <div class="section-body">
           <div class="prompt-text" id="prompt-text"></div>
         </div>
@@ -569,9 +569,9 @@
 
       <!-- Outputs -->
       <div class="section">
-        <div class="section-header">Output</div>
+        <div class="section-header">输出</div>
         <div class="section-body" id="outputs-body">
-          <div class="empty-state">No output files found</div>
+          <div class="empty-state">未找到输出文件</div>
         </div>
       </div>
 
@@ -580,7 +580,7 @@
         <div class="section-header">
           <div class="grades-toggle" onclick="togglePrevOutputs()">
             <span class="arrow" id="prev-outputs-arrow">&#9654;</span>
-            Previous Output
+            上次输出
           </div>
         </div>
         <div class="grades-content" id="prev-outputs-content"></div>
@@ -591,7 +591,7 @@
         <div class="section-header">
           <div class="grades-toggle" onclick="toggleGrades()">
             <span class="arrow" id="grades-arrow">&#9654;</span>
-            Formal Grades
+            正式评分
           </div>
         </div>
         <div class="grades-content" id="grades-content"></div>
@@ -599,16 +599,16 @@
 
       <!-- Feedback -->
       <div class="section">
-        <div class="section-header">Your Feedback</div>
+        <div class="section-header">你的反馈</div>
         <div class="section-body">
           <textarea
             class="feedback-textarea"
             id="feedback"
-            placeholder="What do you think of this output? Any issues, suggestions, or things that look great?"
+            placeholder="你认为这项输出怎么样？有任何问题、建议或值得肯定的地方吗？"
           ></textarea>
           <div class="feedback-status" id="feedback-status"></div>
           <div class="prev-feedback" id="prev-feedback" style="display:none;">
-            <div class="prev-feedback-label">Previous feedback</div>
+            <div class="prev-feedback-label">上次反馈</div>
             <div id="prev-feedback-text"></div>
           </div>
         </div>
@@ -616,16 +616,16 @@
     </div>
 
     <div class="nav" id="outputs-nav">
-      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; Previous</button>
-      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">Submit All Reviews</button>
-      <button class="nav-btn" id="next-btn" onclick="navigate(1)">Next &#8594;</button>
+      <button class="nav-btn" id="prev-btn" onclick="navigate(-1)">&#8592; 上一项</button>
+      <button class="done-btn" id="done-btn" onclick="showDoneDialog()">提交全部审核</button>
+      <button class="nav-btn" id="next-btn" onclick="navigate(1)">下一项 &#8594;</button>
     </div>
     </div><!-- end panel-outputs -->
 
     <!-- Benchmark panel (quantitative stats) -->
     <div class="view-panel" id="panel-benchmark">
       <div class="benchmark-view" id="benchmark-content">
-        <div class="benchmark-empty">No benchmark data available. Run a benchmark to see quantitative results here.</div>
+        <div class="benchmark-empty">没有可用的基准测试数据。运行基准测试后可在此查看量化结果。</div>
       </div>
     </div>
   </div>
@@ -633,10 +633,10 @@
   <!-- Done overlay -->
   <div class="done-overlay" id="done-overlay">
     <div class="done-card">
-      <h2>Review Complete</h2>
-      <p>Your feedback has been saved. Return to the application and confirm that the review is complete.</p>
+      <h2>审核完成</h2>
+      <p>你的反馈已保存。请返回应用程序并确认审核已完成。</p>
       <div class="btn-row">
-        <button onclick="closeDoneDialog()">OK</button>
+        <button onclick="closeDoneDialog()">确定</button>
       </div>
     </div>
   </div>
@@ -706,7 +706,7 @@
 
       // Progress
       document.getElementById("progress").textContent =
-        `${index + 1} of ${EMBEDDED_DATA.runs.length}`;
+        `第 ${index + 1} 项，共 ${EMBEDDED_DATA.runs.length} 项`;
 
       // Prompt
       document.getElementById("prompt-text").textContent = run.prompt;
@@ -717,7 +717,7 @@
       if (configMatch) {
         const config = configMatch[1];
         const isBaseline = config === "without_skill" || config === "old_skill";
-        badge.textContent = config.replace(/_/g, " ");
+        badge.textContent = config === "with_skill" ? "使用技能" : config === "without_skill" ? "不使用技能" : config === "new_skill" ? "新技能" : "旧技能";
         badge.className = "config-badge " + (isBaseline ? "config-baseline" : "config-primary");
         badge.style.display = "inline-block";
       } else {
@@ -767,7 +767,7 @@
 
       const outputs = run.outputs || [];
       if (outputs.length === 0) {
-        container.innerHTML = '<div class="empty-state">No output files</div>';
+        container.innerHTML = '<div class="empty-state">没有输出文件</div>';
         return;
       }
 
@@ -783,7 +783,7 @@
         header.appendChild(nameSpan);
         const dlBtn = document.createElement("a");
         dlBtn.className = "dl-btn";
-        dlBtn.textContent = "Download";
+        dlBtn.textContent = "下载";
         dlBtn.download = file.name;
         dlBtn.href = getDownloadUri(file);
         header.appendChild(dlBtn);
@@ -812,7 +812,7 @@
           a.className = "download-link";
           a.href = file.data_uri;
           a.download = file.name;
-          a.textContent = "Download " + file.name;
+          a.textContent = "下载 " + file.name;
           content.appendChild(a);
         } else if (file.type === "error") {
           const pre = document.createElement("pre");
@@ -840,7 +840,7 @@
             const sheetLabel = document.createElement("div");
             sheetLabel.style.cssText =
               "font-weight:600; font-size:0.8rem; color:#b0aea5; margin-top:0.5rem; margin-bottom:0.25rem;";
-            sheetLabel.textContent = "Sheet: " + sheetName;
+            sheetLabel.textContent = "工作表：" + sheetName;
             container.appendChild(sheetLabel);
           }
 
@@ -850,7 +850,7 @@
           container.appendChild(wrapper);
         }
       } catch (err) {
-        container.textContent = "Error rendering spreadsheet: " + err.message;
+        container.textContent = "渲染电子表格时出错：" + err.message;
       }
     }
 
@@ -882,7 +882,7 @@
       const badgeClass = summary.pass_rate >= 0.8 ? "grade-pass" : summary.pass_rate >= 0.5 ? "" : "grade-fail";
       html += '<div class="grades-summary">';
       html += '<span class="grade-badge ' + badgeClass + '">' + passRate + '</span>';
-      html += '<span>' + (summary.passed || 0) + ' passed, ' + (summary.failed || 0) + ' failed of ' + (summary.total || 0) + '</span>';
+      html += '<span>共 ' + (summary.total || 0) + ' 项：' + (summary.passed || 0) + ' 项通过，' + (summary.failed || 0) + ' 项未通过</span>';
       html += '</div>';
 
       // Assertions list
@@ -943,7 +943,7 @@
         header.appendChild(nameSpan);
         const dlBtn = document.createElement("a");
         dlBtn.className = "dl-btn";
-        dlBtn.textContent = "Download";
+        dlBtn.textContent = "下载";
         dlBtn.download = file.name;
         dlBtn.href = getDownloadUri(file);
         header.appendChild(dlBtn);
@@ -972,7 +972,7 @@
           a.className = "download-link";
           a.href = file.data_uri;
           a.download = file.name;
-          a.textContent = "Download " + file.name;
+          a.textContent = "下载 " + file.name;
           fc.appendChild(a);
         }
 
@@ -1014,11 +1014,11 @@
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reviews, status: "in_progress" }),
       }).then(() => {
-        document.getElementById("feedback-status").textContent = "Saved";
+        document.getElementById("feedback-status").textContent = "已保存";
       }).catch(() => {
         // Static mode or server unavailable — no-op on auto-save,
         // feedback will be downloaded on final submit
-        document.getElementById("feedback-status").textContent = "Will download on submit";
+        document.getElementById("feedback-status").textContent = "提交时将下载文件";
       });
     }
 
@@ -1115,6 +1115,16 @@
       const data = EMBEDDED_DATA.benchmark;
       if (!data) return;
 
+      const configLabels = {
+        with_skill: "使用技能",
+        without_skill: "不使用技能",
+        new_skill: "新技能",
+        old_skill: "旧技能",
+        config_a: "配置 A",
+        config_b: "配置 B",
+      };
+      const formatConfigLabel = config => configLabels[config] || config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+
       // Show the tabs
       document.getElementById("view-tabs").style.display = "flex";
 
@@ -1126,12 +1136,12 @@
       let html = "";
 
       // Header
-      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>Benchmark Results</h2>";
+      html += "<h2 style='font-family: Poppins, sans-serif; margin-bottom: 0.5rem;'>基准测试结果</h2>";
       html += "<p style='color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;'>";
       if (metadata.skill_name) html += "<strong>" + escapeHtml(metadata.skill_name) + "</strong> &mdash; ";
       if (metadata.timestamp) html += metadata.timestamp + " &mdash; ";
-      if (metadata.evals_run) html += "Evals: " + metadata.evals_run.join(", ") + " &mdash; ";
-      html += (metadata.runs_per_configuration || "?") + " runs per configuration";
+      if (metadata.evals_run) html += "评测：" + metadata.evals_run.join(", ") + " &mdash; ";
+      html += (metadata.runs_per_configuration || "?") + " 次运行/配置";
       html += "</p>";
 
       // Summary table
@@ -1157,23 +1167,23 @@
       const configs = Object.keys(summary).filter(k => k !== "delta");
       const configA = configs[0] || "config_a";
       const configB = configs[1] || "config_b";
-      const labelA = configA.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-      const labelB = configB.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+      const labelA = formatConfigLabel(configA);
+      const labelB = formatConfigLabel(configB);
       const a = summary[configA] || {};
       const b = summary[configB] || {};
       const delta = summary.delta || {};
 
-      html += "<thead><tr><th>Metric</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>Delta</th></tr></thead>";
+      html += "<thead><tr><th>指标</th><th>" + escapeHtml(labelA) + "</th><th>" + escapeHtml(labelB) + "</th><th>差值</th></tr></thead>";
       html += "<tbody>";
 
-      html += "<tr><td><strong>Pass Rate</strong></td>";
+      html += "<tr><td><strong>通过率</strong></td>";
       html += "<td>" + fmtStat(a.pass_rate, true) + "</td>";
       html += "<td>" + fmtStat(b.pass_rate, true) + "</td>";
       html += '<td class="' + deltaClass(delta.pass_rate) + '">' + (delta.pass_rate || "—") + "</td></tr>";
 
       // Time (only show row if data exists)
       if (a.time_seconds || b.time_seconds) {
-        html += "<tr><td><strong>Time (s)</strong></td>";
+        html += "<tr><td><strong>耗时（秒）</strong></td>";
         html += "<td>" + fmtStat(a.time_seconds, false) + "</td>";
         html += "<td>" + fmtStat(b.time_seconds, false) + "</td>";
         html += '<td class="' + deltaClass(delta.time_seconds) + '">' + (delta.time_seconds ? delta.time_seconds + "s" : "—") + "</td></tr>";
@@ -1181,7 +1191,7 @@
 
       // Tokens (only show row if data exists)
       if (a.tokens || b.tokens) {
-        html += "<tr><td><strong>Tokens</strong></td>";
+        html += "<tr><td><strong>词元数</strong></td>";
         html += "<td>" + fmtStat(a.tokens, false) + "</td>";
         html += "<td>" + fmtStat(b.tokens, false) + "</td>";
         html += '<td class="' + deltaClass(delta.tokens) + '">' + (delta.tokens || "—") + "</td></tr>";
@@ -1194,20 +1204,20 @@
       if (runs.length > 0) {
         const evalIds = [...new Set(runs.map(r => r.eval_id))].sort((a, b) => a - b);
 
-        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>Per-Eval Breakdown</h3>";
+        html += "<h3 style='font-family: Poppins, sans-serif; margin-bottom: 0.75rem;'>逐项评测明细</h3>";
 
         const hasTime = runs.some(r => r.result && r.result.time_seconds != null);
         const hasErrors = runs.some(r => r.result && r.result.errors > 0);
 
         for (const evalId of evalIds) {
           const evalRuns = runs.filter(r => r.eval_id === evalId);
-          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "Eval " + evalId;
+          const evalName = evalRuns[0] && evalRuns[0].eval_name ? evalRuns[0].eval_name : "评测 " + evalId;
 
           html += "<h4 style='font-family: Poppins, sans-serif; margin: 1rem 0 0.5rem; color: var(--text);'>" + escapeHtml(evalName) + "</h4>";
           html += '<table class="benchmark-table">';
-          html += "<thead><tr><th>Config</th><th>Run</th><th>Pass Rate</th>";
-          if (hasTime) html += "<th>Time (s)</th>";
-          if (hasErrors) html += "<th>Crashes During Execution</th>";
+          html += "<thead><tr><th>配置</th><th>运行</th><th>通过率</th>";
+          if (hasTime) html += "<th>耗时（秒）</th>";
+          if (hasErrors) html += "<th>执行期间崩溃次数</th>";
           html += "</tr></thead>";
           html += "<tbody>";
 
@@ -1219,7 +1229,7 @@
             if (configRuns.length === 0) continue;
 
             const rowClass = ci === 0 ? "benchmark-row-with" : "benchmark-row-without";
-            const configLabel = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+            const configLabel = formatConfigLabel(config);
 
             for (const run of configRuns) {
               const r = run.result || {};
@@ -1239,7 +1249,7 @@
             const avgPrClass = avgRate >= 0.8 ? "benchmark-delta-positive" : avgRate < 0.5 ? "benchmark-delta-negative" : "";
             html += '<tr class="benchmark-row-avg ' + rowClass + '">';
             html += "<td>" + configLabel + "</td>";
-            html += "<td>Avg</td>";
+            html += "<td>平均值</td>";
             html += '<td class="' + avgPrClass + '">' + (avgRate * 100).toFixed(0) + "%</td>";
             if (hasTime) {
               const times = configRuns.map(r => (r.result || {}).time_seconds).filter(t => t != null);
@@ -1272,9 +1282,9 @@
             }
 
             html += '<table class="benchmark-table" style="margin-top: 0.5rem;">';
-            html += "<thead><tr><th>Assertion</th>";
+            html += "<thead><tr><th>断言</th>";
             for (const config of configGroups) {
-              const label = config.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+              const label = formatConfigLabel(config);
               html += "<th>" + escapeHtml(label) + "</th>";
             }
             html += "</tr></thead><tbody>";
@@ -1289,7 +1299,7 @@
                   if (exp) {
                     const cls = exp.passed ? "benchmark-delta-positive" : "benchmark-delta-negative";
                     const icon = exp.passed ? "\u2713" : "\u2717";
-                    html += '<span class="' + cls + '" title="Run ' + run.run_number + ': ' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
+                    html += '<span class="' + cls + '" title="第 ' + run.run_number + ' 次运行：' + escapeHtml(exp.evidence || "") + '">' + icon + "</span> ";
                   } else {
                     html += "— ";
                   }
@@ -1306,7 +1316,7 @@
       // Notes
       if (notes.length > 0) {
         html += '<div class="benchmark-notes">';
-        html += "<h3>Analysis Notes</h3>";
+        html += "<h3>分析说明</h3>";
         html += "<ul>";
         for (const note of notes) {
           html += "<li>" + escapeHtml(note) + "</li>";

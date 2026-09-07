@@ -45,6 +45,7 @@ export interface LocalCreativeSkill {
   content: string
   resources: string[]
   readResource: (path: string) => Promise<string>
+  workdir?: string
 }
 type LocalSkillLoader = (name: string) => Promise<LocalCreativeSkill | null>
 
@@ -256,6 +257,13 @@ export function createDesktopProjectToolExecutor(input: {
       const rawPath = String(args.path)
       const resource = await skills.read(rawPath)
       if (resource !== null) return { content: linesPage(resource, args.offset, args.limit) }
+      const localResources = [...localSkills.values()].filter(skill => skill.resources.includes(rawPath))
+      if (localResources.length === 1) {
+        return { content: linesPage(await localResources[0]!.readResource(rawPath), args.offset, args.limit) }
+      }
+      if (localResources.length > 1) {
+        throw new Error(`多个已选 Skill 包含资源 ${rawPath}；请使用加载结果中的完整资源路径。`)
+      }
       const localEntry = [...localSkills.entries()].find(([base]) => rawPath.startsWith(`${base}/`))
       if (localEntry) {
         const [base, skill] = localEntry
@@ -583,7 +591,14 @@ export function createDesktopProjectToolExecutor(input: {
       }
       const resolvedCommand = resolveTerminalAttachments(command, input.attachments || [])
       const rawWorkdir = String(args.workdir || '')
-      const externalWorkdir = isAbsolutePath(rawWorkdir) ? rawWorkdir : undefined
+      if (rawWorkdir.startsWith('skill://')) await ensurePreloadedSkills()
+      const skillWorkdir = rawWorkdir.startsWith('skill://')
+        ? localSkills.get(localSkillBase(rawWorkdir.slice('skill://'.length)))?.workdir
+        : undefined
+      if (rawWorkdir.startsWith('skill://') && !skillWorkdir) {
+        throw new Error('Skill 脚本工作目录不可用；请确认该 Skill 是本轮已选的本地包且包含实际目录。')
+      }
+      const externalWorkdir = skillWorkdir || (isAbsolutePath(rawWorkdir) ? rawWorkdir : undefined)
       const workdir = externalWorkdir
         ? undefined
         : normalizeCreativeProjectPath(rawWorkdir, true) || '.'

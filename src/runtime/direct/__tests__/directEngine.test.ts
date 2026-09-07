@@ -170,6 +170,77 @@ test('runDirectChatCompletion performs a second pass when the model requests a t
   assert.equal(sentMessages[1][2].content, '[result:韭菜盒子]')
 })
 
+test('runDirectChatCompletion retries an empty final response after tools without exposing tools again', async () => {
+  const requests: Array<{ messages: any[]; tools?: unknown[] }> = []
+  const responses = [
+    sseResponse([
+      JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"wiki/index.md"}' } }],
+          },
+        }],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse([
+      JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{ index: 0, id: 'call_write', function: { name: 'write', arguments: '{"path":"wiki/progress.md","content":"已更新"}' } }],
+          },
+        }],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse(['[DONE]']),
+    sseResponse([JSON.stringify({ choices: [{ delta: { content: '工作进度已写入 wiki/progress.md。' } }] }), '[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写入本周工作进度' }],
+    tools: [{ type: 'function', function: { name: 'read' } }, { type: 'function', function: { name: 'write' } }],
+    onText: () => {},
+    executeTool: async () => ({ content: 'ok' }),
+    sendChatCompletion: async request => {
+      requests.push(request)
+      return responses.shift()!
+    },
+  })
+
+  assert.equal(result.text, '工作进度已写入 wiki/progress.md。')
+  assert.equal(requests.length, 4)
+  assert.equal(requests[3].tools, undefined)
+  assert.match(String(requests[3].messages.at(-1)?.content), /未返回可见正文/)
+})
+
+test('runDirectChatCompletion reports a recoverable status when the final retry is also empty', async () => {
+  const responses = [
+    sseResponse([
+      JSON.stringify({
+        choices: [{
+          delta: {
+            tool_calls: [{ index: 0, id: 'call_read', function: { name: 'read', arguments: '{"path":"wiki/index.md"}' } }],
+          },
+        }],
+      }),
+      '[DONE]',
+    ]),
+    sseResponse(['[DONE]']),
+    sseResponse(['[DONE]']),
+  ]
+
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '读取 Wiki' }],
+    tools: [{ type: 'function', function: { name: 'read' } }],
+    onText: () => {},
+    executeTool: async () => ({ content: 'ok' }),
+    sendChatCompletion: async () => responses.shift()!,
+  })
+
+  assert.equal(result.text, '工具已执行，但模型未返回可见正文。请重试。')
+})
+
 test('runDirectChatCompletion does not continue an interrupted stream when continuation is disabled', async () => {
   let requests = 0
 

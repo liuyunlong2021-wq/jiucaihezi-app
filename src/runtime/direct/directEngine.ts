@@ -272,6 +272,7 @@ export async function runDirectChatCompletion(
 
   const finalizeWithoutTools = async (
     finalMessages: DirectApiMessage[],
+    instruction = '工具调用预算已用尽。请只根据已经返回的工具结果直接给出最终回答，不要再调用工具；如果证据不足，请明确说明。',
   ): Promise<RunDirectChatCompletionResult> => {
     const finalRequest = await sendChatCompletion(
       {
@@ -279,8 +280,7 @@ export async function runDirectChatCompletion(
           ...finalMessages,
           {
             role: 'user',
-            content:
-              '工具调用预算已用尽。请只根据已经返回的工具结果直接给出最终回答，不要再调用工具；如果证据不足，请明确说明。',
+            content: instruction,
           },
         ],
         tools: undefined,
@@ -293,7 +293,7 @@ export async function runDirectChatCompletion(
         options.onText(value),
       )
       return completed({
-        text: final.text || fallbackText,
+        text: final.text || fallbackText || '工具已执行，但模型未返回可见正文。请重试。',
         toolCalls: allToolCalls,
         usedSecondPass: toolRounds > 0,
         finishReason: final.finishReason,
@@ -462,7 +462,14 @@ export async function runDirectChatCompletion(
         lengthContinuations += 1
         continue
       }
-      const finalText = joinText(lengthPrefix, text) || fallbackText
+      const completionText = joinText(lengthPrefix, text)
+      if (!completionText && allToolCalls.length) {
+        return finalizeWithoutTools(
+          messages,
+          '工具已执行，但上一条模型响应未返回可见正文。请只根据已经返回的工具结果直接给出简短最终结论，不要调用工具。',
+        )
+      }
+      const finalText = completionText || fallbackText
       const rejection = options.rejectFinalResponse?.(finalText, allToolCalls)
       if (rejection) {
         messages.push(

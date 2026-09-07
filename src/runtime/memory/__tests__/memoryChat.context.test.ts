@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
+import { createProjectFileService, type ProjectFileAdapter, type ProjectFileEntry } from '@/services/projectFileService'
+import { buildConversationMemoryIndexContext, buildWikiMemoryIndexContext } from '../memoryChat'
 
 const memoryChatSource = readFileSync('src/runtime/memory/memoryChat.ts', 'utf8')
 
@@ -96,4 +98,49 @@ test('T1.3: explicit capability selection and no capability get same history con
     context2.messages.map(m => m.id),
     'Same history regardless of capability selection',
   )
+})
+
+function files(records: Record<string, string>) {
+  const entries = new Map<string, ProjectFileEntry>(
+    Object.entries(records).map(([path, content]) => [path, { path, content, isDirectory: false }]),
+  )
+  const adapter: ProjectFileAdapter = {
+    runtime: 'web',
+    async list() { return [...entries.values()] },
+    async readText(_owner, path) {
+      const entry = entries.get(path)
+      if (!entry) throw new Error('missing')
+      const content = String(entry.content || '')
+      return { content, size: content.length, truncated: false, revision: { value: path, size: content.length } }
+    },
+    async createText() { throw new Error('not used') },
+    async rename() { throw new Error('not used') },
+    async remove() { throw new Error('not used') },
+  }
+  return createProjectFileService(adapter)
+}
+
+test('wiki-memory preloads only the first three Wiki index levels', async () => {
+  const context = await buildWikiMemoryIndexContext('project', files({
+    'wiki/index.md': '# Wiki root',
+    'wiki/团队/index.md': '# 团队',
+    'wiki/团队/工作进度/index.md': '# 工作进度',
+    'wiki/团队/工作进度/历史/index.md': '# 不应预读',
+    'wiki/团队/工作进度/2026-09-07.md': '# 正文不应预读',
+  }))
+
+  assert.match(context, /wiki\/index\.md/)
+  assert.match(context, /wiki\/团队\/index\.md/)
+  assert.match(context, /wiki\/团队\/工作进度\/index\.md/)
+  assert.doesNotMatch(context, /不应预读|正文不应预读/)
+})
+
+test('wiki-memory injects only the current conversation memory index', async () => {
+  const context = await buildConversationMemoryIndexContext('project', 'current', files({
+    '.raw/记忆索引/current.md': '# 对话记忆索引\n\n- 简介：当前会话',
+    '.raw/记忆索引/other.md': '# 对话记忆索引\n\n- 简介：其他会话',
+  }))
+
+  assert.match(context, /当前会话/)
+  assert.doesNotMatch(context, /其他会话/)
 })

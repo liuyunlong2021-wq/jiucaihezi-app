@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Eval Set Review - __SKILL_NAME_PLACEHOLDER__</title>
+  <title>评测集审核 - __SKILL_NAME_PLACEHOLDER__</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600&family=Lora:wght@400;500&display=swap" rel="stylesheet">
@@ -38,20 +38,20 @@
   </style>
 </head>
 <body>
-  <h1>Eval Set Review: <span id="skill-name">__SKILL_NAME_PLACEHOLDER__</span></h1>
-  <p class="description">Current description: <span id="skill-desc">__SKILL_DESCRIPTION_PLACEHOLDER__</span></p>
+  <h1>评测集审核：<span id="skill-name">__SKILL_NAME_PLACEHOLDER__</span></h1>
+  <p class="description">当前描述：<span id="skill-desc">__SKILL_DESCRIPTION_PLACEHOLDER__</span></p>
 
   <div class="controls">
-    <button class="btn btn-add" onclick="addRow()">+ Add Query</button>
-    <button class="btn btn-export" onclick="exportEvalSet()">Export Eval Set</button>
+    <button class="btn btn-add" onclick="addRow()">+ 添加查询</button>
+    <button class="btn btn-export" onclick="exportEvalSet()">导出评测集</button>
   </div>
 
   <table>
     <thead>
       <tr>
-        <th style="width:65%">Query</th>
-        <th style="width:18%">Should Trigger</th>
-        <th style="width:10%">Actions</th>
+        <th style="width:65%">查询</th>
+        <th style="width:18%">应触发</th>
+        <th style="width:10%">操作</th>
       </tr>
     </thead>
     <tbody id="eval-body"></tbody>
@@ -79,7 +79,7 @@
         if (group !== lastGroup) {
           const headerRow = document.createElement('tr');
           headerRow.className = 'section-header';
-          headerRow.innerHTML = `<td colspan="3">${item.should_trigger ? 'Should Trigger' : 'Should NOT Trigger'}</td>`;
+          headerRow.innerHTML = `<td colspan="3">${item.should_trigger ? '应触发' : '不应触发'}</td>`;
           tbody.appendChild(headerRow);
           lastGroup = group;
         }
@@ -93,9 +93,9 @@
               <input type="checkbox" ${item.should_trigger ? 'checked' : ''} onchange="updateTrigger(${idx}, this.checked)">
               <span class="slider"></span>
             </label>
-            <span style="margin-left:8px;font-size:0.8rem;color:#b0aea5">${item.should_trigger ? 'Yes' : 'No'}</span>
+            <span style="margin-left:8px;font-size:0.8rem;color:#b0aea5">${item.should_trigger ? '是' : '否'}</span>
           </td>
-          <td><button class="btn-delete" onclick="deleteRow(${idx})">Delete</button></td>
+          <td><button class="btn-delete" onclick="deleteRow(${idx})">删除</button></td>
         `;
         tbody.appendChild(tr);
       });
@@ -123,7 +123,7 @@
       const trigger = evalItems.filter(i => i.should_trigger).length;
       const noTrigger = evalItems.filter(i => !i.should_trigger).length;
       document.getElementById('summary').textContent =
-        `${evalItems.length} queries total: ${trigger} should trigger, ${noTrigger} should not trigger`;
+        `共 ${evalItems.length} 条查询：${trigger} 条应触发，${noTrigger} 条不应触发`;
     }
 
     function exportEvalSet() {

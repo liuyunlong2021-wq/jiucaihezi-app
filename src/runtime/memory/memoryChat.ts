@@ -1,5 +1,5 @@
 import { useAgentStore } from '@/stores/agentStore'
-import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { createRuntimeProjectFileService, type ProjectFileService } from '@/services/projectFileService'
 import {
   buildChatCompletionExtras,
   buildHeaders,
@@ -35,7 +35,7 @@ import {
 } from '@/runtime/direct/webProjectTools'
 import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
-import { queryConversationMemoryIndex } from './conversationMemoryIndex'
+import { conversationMemoryIndexPath, queryConversationMemoryIndex } from './conversationMemoryIndex'
 import {
   buildMemoryDesktopToolDefinitions,
   parseCreativeToolArguments,
@@ -139,6 +139,66 @@ export function hasExplicitMemoryCapability(
     input.scene3dSelected ||
     input.terminalSelected,
   )
+}
+
+export async function buildWikiMemoryIndexContext(
+  owner: string,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+): Promise<string> {
+  let resources
+  try {
+    resources = await files.list(owner)
+  } catch {
+    return 'Wiki 索引预读失败；请用户选择有效的项目后重试。'
+  }
+  const roots = ['wiki', 'docs/wiki'].filter(root =>
+    resources.some(resource => resource.path === root || resource.path.startsWith(`${root}/`)),
+  )
+  if (roots.length !== 1) {
+    return roots.length
+      ? `检测到多个 Wiki 根目录：${roots.join('、')}。请先请用户明确选择，不能混合读取。`
+      : '项目中未发现 wiki/ 或 docs/wiki/，请用户指定 Wiki 根目录。'
+  }
+  const root = roots[0]!
+  const indexPaths = resources
+    .filter(resource => {
+      if (!resource.path.startsWith(`${root}/`) || !resource.path.endsWith('/index.md')) return false
+      return resource.path.slice(root.length + 1).split('/').length <= 3
+    })
+    .map(resource => resource.path)
+    .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+  const indexes = await Promise.all(
+    indexPaths.map(async path => {
+      try {
+        const result = await files.readTextAt(owner, path)
+        return `<wiki_index path="${path}">\n${result.content}\n</wiki_index>`
+      } catch {
+        return `<wiki_index path="${path}" unavailable="true" />`
+      }
+    }),
+  )
+  return [
+    `Wiki 根目录：${root}。以下只包含根目录、一级目录和二级目录的 index.md；正文和更深层索引必须按需用 read 读取。`,
+    ...indexes,
+  ].join('\n\n')
+}
+
+export async function buildConversationMemoryIndexContext(
+  owner: string,
+  conversationId: string,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+): Promise<string> {
+  try {
+    const path = conversationMemoryIndexPath(conversationId)
+    const result = await files.readTextAt(owner, path)
+    return `<conversation_memory_index path="${path}">\n${result.content}\n</conversation_memory_index>`
+  } catch {
+    return ''
+  }
+}
+
+function hasWikiWriteIntent(value: string): boolean {
+  return /创建|新建|写入|更新|修正|修改|添加|保存|记录|整理|归档/.test(value)
 }
 
 export function selectMemoryTools(
@@ -254,6 +314,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
 
   const customSkills = explicitCapabilitySelected ? agentStore.getCustomSkills() : []
   const selectedSkillNames = selectedSkillNamesForInput(input)
+  const wikiMemorySelected = selectedSkillNames.includes('wiki-memory')
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   let catalog: ReturnType<typeof mergeCreativeSkillCatalog> = []
   let catalogError = ''
@@ -278,13 +339,22 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
   const maxOutputTokens =
     model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
+  const projectFiles = createRuntimeProjectFileService()
   let memoryQueryContext = ''
-  if (input.memoryQueryEnabled && input.projectId && input.conversationId) {
+  if (wikiMemorySelected && input.projectId) {
+    const [wikiIndexContext, conversationIndexContext] = await Promise.all([
+      buildWikiMemoryIndexContext(input.projectId, projectFiles),
+      input.memoryQueryEnabled && input.conversationId
+        ? buildConversationMemoryIndexContext(input.projectId, input.conversationId, projectFiles)
+        : '',
+    ])
+    memoryQueryContext = [wikiIndexContext, conversationIndexContext].filter(Boolean).join('\n\n')
+  } else if (input.memoryQueryEnabled && input.projectId && input.conversationId) {
     const result = await queryConversationMemoryIndex(
       input.projectId,
       input.conversationId,
       latestUserText,
-      createRuntimeProjectFileService(),
+      projectFiles,
       5,
     )
     if (result.matches.length) {
@@ -578,7 +648,13 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         input.memoryQueryEnabled !== false,
       )
     : []
-  const authorizedMemoryToolDefinitions = memoryToolDefinitions
+  const authorizedMemoryToolDefinitions = wikiMemorySelected
+    ? memoryToolDefinitions.filter(tool =>
+        (hasWikiWriteIntent(latestUserText)
+          ? ['read', 'write', 'edit', 'mkdir']
+          : ['read']).includes(String(tool.function?.name || '')),
+      )
+    : memoryToolDefinitions
   const allowedMemoryToolNames = new Set(
     authorizedMemoryToolDefinitions.map(tool => String(tool.function?.name || '')),
   )
@@ -714,7 +790,6 @@ export async function buildSelectedSkillPrompt(
     names.map(async name => {
       const local = localSkills.get(name)
       if (local) {
-        const resourceRoot = `skill://local/${encodeURIComponent(name)}`
         const resources = [
           ...new Set(['SKILL.md', ...(local.assetIndex || []).map(item => item.path)]),
         ]
@@ -729,7 +804,9 @@ export async function buildSelectedSkillPrompt(
           '<skill_files>',
           ...resources.map(path => `<file>${path}</file>`),
           '</skill_files>',
-          `资源根路径：${resourceRoot}`,
+          ...(resources.some(path => path.startsWith('scripts/'))
+            ? [`脚本工作目录：skill://${name}`]
+            : []),
           '</selected_skill>',
         ].join('\n')
       }
@@ -745,7 +822,9 @@ export async function buildSelectedSkillPrompt(
           '<skill_files>',
           ...skill.files.map(path => `<file>${path}</file>`),
           '</skill_files>',
-          `资源根路径：${skill.baseDirectory}`,
+          ...(skill.files.some(path => path.startsWith('scripts/'))
+            ? [`脚本工作目录：skill://${skill.name}`]
+            : []),
           '</selected_skill>',
         ].join('\n')
       } catch (error) {
@@ -760,7 +839,7 @@ export async function buildSelectedSkillPrompt(
   return [
     '用户已明确选择以下具体 Skill。它们不是可选参考资料，而是本轮必须遵守的执行合同。',
     '完整 SKILL.md 的角色、步骤、输出格式、必填项、禁止事项和质量检查全部有效；不得自行跳过、改写或降级。',
-    'Skill 明确要求的 references、scripts 或 assets 必须先通过当前 Skill 包的受限资源读取获得真实内容；读取失败时如实说明，不得伪造已读取。',
+    'Skill 明确要求的 references、scripts 或 assets 必须先通过 read 读取获得真实内容。对当前已选 Skill 包，直接使用清单中的相对路径，例如 read("references/动作专项.md")；读取失败时如实说明，不得伪造已读取。',
     'Skill 规则决定怎么做，用户消息决定做什么，已连接能力只提供真实事实和动作结果。',
     ...blocks,
   ].join('\n\n')
@@ -809,6 +888,7 @@ function createLocalSkillLoader(skills: SkillConfig[]) {
     return {
       content: localSkillMarkdown(skill),
       resources,
+      workdir: packagePath || undefined,
       readResource: async (relativePath: string) => {
         const relative = safeResource(relativePath)
         if (!resources.includes(relative)) throw new Error(`Skill 资源不存在: ${relative}`)

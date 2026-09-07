@@ -2,6 +2,7 @@
   {
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
+    "displayName": "新手指南",
     "description": "Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, project files, synchronization, attachments, or model selection. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子文件、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、jc-new-user-guide.",
     "triggers": [],
     "commands": [],
@@ -19,7 +20,8 @@
   {
     "id": "skill-creator",
     "name": "skill-creator",
-    "description": "Use when users want to create, edit, optimize, evaluate, benchmark, or confirm installation of a reusable Skill and its discovery description.",
+    "displayName": "skill-creator",
+    "description": "Use when 用户想要创建、编辑、优化、评估、基准测试或确认安装可复用的 Skill 及其发现描述。",
     "triggers": [
       "'Skill缔造'",
       "'创建技能'",
@@ -41,7 +43,7 @@
       "输出标准 SKILL.md + references/ + scripts/ + assets/ 目录结构。",
       "修改已有 Skill: 请用 Skill 缔造器帮我修改 Skill「[Skill名]」：",
       "修改要求：[描述要改什么]",
-      "保持 SKILL.md 格式规范，更新版本号。"
+      "保持 SKILL.md 格式规范。"
     ],
     "files": [
       ".seed_complete",
@@ -56,18 +58,15 @@
       "references/schemas.md",
       "scripts/__init__.py",
       "scripts/aggregate_benchmark.py",
-      "scripts/generate_report.py",
-      "scripts/improve_description.py",
       "scripts/package_skill.py",
       "scripts/quick_validate.py",
-      "scripts/run_eval.py",
-      "scripts/run_loop.py",
       "scripts/utils.py"
     ]
   },
   {
     "id": "wiki-memory",
     "name": "wiki-memory",
+    "displayName": "wiki-memory",
     "description": "Use when a user asks to create or plan a local Markdown Wiki, query or search local knowledge, write or update Wiki content, inspect consistency, or says 创建Wiki、查询Wiki、写入Wiki、检查Wiki、本地知识库、第二大脑. Every Wiki content directory uses index.md. Do not use for Wikipedia, general web search, or unrelated file management.",
     "triggers": [],
     "commands": [],

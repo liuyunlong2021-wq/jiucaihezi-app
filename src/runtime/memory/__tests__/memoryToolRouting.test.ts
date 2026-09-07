@@ -131,7 +131,7 @@ test('selected Skill rules are injected as a mandatory contract', async () => {
   assert.match(prompt, /本轮必须遵守的执行合同/)
   assert.match(prompt, /# 必须遵守/)
   assert.match(prompt, /references\/style\.md/)
-  assert.match(prompt, /skill:\/\/local\/writer/)
+  assert.match(prompt, /直接使用清单中的相对路径/)
 })
 
 test('Skill allowed-tools join the current tool authorization set', async () => {

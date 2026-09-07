@@ -338,6 +338,24 @@ test('desktop project tools read only declared resources from a loaded local Ski
   )
 })
 
+test('desktop project tools read a selected local Skill resource by its relative path', async () => {
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    invoke: fixtureInvoke,
+    loadSkill: async () => ({
+      content: '# 打戏 Skill',
+      resources: ['references/动作专项.md'],
+      readResource: async () => '# 动作专项规则',
+    }),
+    preloadSkills: ['jc-daxi'],
+  })
+
+  assert.match(
+    (await execute(call('read', { path: 'references/动作专项.md' }))).content,
+    /动作专项规则/,
+  )
+})
+
 test('desktop project tools let the model inspect a temporary image after user approval', async () => {
   const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
 
@@ -483,6 +501,29 @@ test('desktop creative terminal accepts an approved external working directory',
 
   assert.equal(request.workdir, undefined)
   assert.equal(request.externalWorkdir, '/tmp/frames')
+})
+
+test('desktop creative terminal runs a selected local Skill script in its package directory', async () => {
+  let request: any
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    loadSkill: async () => ({
+      content: '# 校验 Skill',
+      resources: ['scripts/check.py'],
+      workdir: '/Users/test/.agents/skills/checker',
+      readResource: async () => '',
+    }),
+    preloadSkills: ['checker'],
+    invoke: async (_command, payload) => {
+      request = payload.input
+      return { exitCode: 0, stdout: 'validated', stderr: '', durationMs: 1 }
+    },
+  })
+
+  await execute(call('terminal', { command: 'python3 scripts/check.py', workdir: 'skill://checker' }))
+
+  assert.equal(request.externalWorkdir, '/Users/test/.agents/skills/checker')
+  assert.equal(request.workdir, undefined)
 })
 
 test('desktop creative terminal blocks only an immediate identical retry after failure', async () => {

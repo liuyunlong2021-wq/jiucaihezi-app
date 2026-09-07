@@ -142,7 +142,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   ),
   tool(
     'terminal',
-    'Run a shell command after the user approves it. Use an attachment token only when this task explicitly lists that exact token; use absolute paths supplied in user text directly. If a command fails, inspect its output and choose an alternative command, the Skill fallback, or install and verify a missing dependency before retrying; do not repeat the same failed command unchanged.',
+    'Run a shell command after the user approves it. Use an attachment token only when this task explicitly lists that exact token; use absolute paths supplied in user text directly. For a selected local Skill script, set workdir to its declared skill://Name directory and use its relative scripts path. If a command fails, inspect its output and choose an alternative command, the Skill fallback, or install and verify a missing dependency before retrying; do not repeat the same failed command unchanged.',
     {
       command: { type: 'string', description: 'The shell command to run' },
       reason: {
@@ -153,7 +153,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
       workdir: {
         type: 'string',
         description:
-          'Optional project-relative working directory, or a user-approved absolute directory',
+          'Optional project-relative directory, user-approved absolute directory, or a selected local Skill directory such as skill://checker',
       },
       timeoutSeconds: {
         type: 'integer',
