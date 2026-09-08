@@ -69,12 +69,13 @@ async def create_video(request: Request):
         extension = "png" if content_type == "image/png" else "jpg"
         files.append(("images[]", (f"reference-{index}.{extension}", response.content, content_type)))
     form = {"prompt": prompt, "ratio": ratio, "seconds": "30"}
+    multipart = [(name, (None, value)) for name, value in form.items()]
+    multipart.extend(files)
     try:
         response = await request.app.state.http.post(
             f"{BASE_URL}/api/v1/videos",
             headers={"Authorization": authorization, "Idempotency-Key": str(uuid4())},
-            data=form,
-            files=files or None,
+            files=multipart,
         )
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Dola service is unavailable") from exc
