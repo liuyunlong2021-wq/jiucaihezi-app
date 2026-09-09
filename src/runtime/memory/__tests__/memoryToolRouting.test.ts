@@ -3,6 +3,7 @@ import { test } from 'node:test'
 
 import {
   buildSelectedSkillPrompt,
+  hasWikiWriteIntent,
   hasExplicitMemoryCapability,
   memoryProgramKind,
   normalizeMemoryToolResult,
@@ -16,6 +17,8 @@ import {
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
   MEMORY_SEARCH_TOOL_DEFINITION,
+  MEMORY_STORY_TOOL_DEFINITIONS,
+  parseCreativeToolArguments,
 } from '@/runtime/direct/creativeToolContract'
 
 const tools = [
@@ -28,6 +31,7 @@ const tools = [
   'mkdir',
   'move',
   'delete',
+  'write_text_batch',
   'terminal',
   'create_document',
   'create_3d_scene',
@@ -40,7 +44,7 @@ const tools = [
 test('knowledge files use the ordinary file tool set', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], true).map(tool => tool.function.name),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch'],
   )
 })
 
@@ -75,8 +79,16 @@ test('ordinary conversation exposes no project tools', () => {
 
 test('memory_search follows the conversation query switch', () => {
   const tools = [MEMORY_SEARCH_TOOL_DEFINITION]
-  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], false), [])
-  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], true).map(tool => tool.function.name), ['memory_search'])
+  assert.deepEqual(
+    selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], false),
+    [],
+  )
+  assert.deepEqual(
+    selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], true).map(
+      tool => tool.function.name,
+    ),
+    ['memory_search'],
+  )
 })
 
 test('ordinary conversation has no explicit capability connection', () => {
@@ -108,15 +120,41 @@ test('a selected Skill cannot load another Skill implicitly', () => {
 })
 
 test('Skill frontmatter accepts scalar and list tool declarations', () => {
-  assert.deepEqual(parseSkillMd('---\nallowed-tools: terminal\n---\nbody').allowedTools, ['terminal'])
-  assert.deepEqual(parseSkillMd('---\nallowed-tools:\n  - read\n  - mcp__demo__run\n---\nbody').allowedTools, ['read', 'mcp__demo__run'])
-  assert.deepEqual(parseSkillMd('---\r\nallowed-tools: terminal\r\n---\r\nbody').allowedTools, ['terminal'])
+  assert.deepEqual(parseSkillMd('---\nallowed-tools: terminal\n---\nbody').allowedTools, [
+    'terminal',
+  ])
+  assert.deepEqual(
+    parseSkillMd('---\nallowed-tools:\n  - read\n  - mcp__demo__run\n---\nbody').allowedTools,
+    ['read', 'mcp__demo__run'],
+  )
+  assert.deepEqual(parseSkillMd('---\r\nallowed-tools: terminal\r\n---\r\nbody').allowedTools, [
+    'terminal',
+  ])
 })
 
 test('Skill tool declarations expand to the real current tool names', () => {
   assert.deepEqual(
     normalizeSkillAllowedToolNames(['file', 'media', '3d', 'mcp__demo__run', 'terminal']),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'mcp__demo', 'terminal'],
+    [
+      'read',
+      'glob',
+      'grep',
+      'write',
+      'edit',
+      'mkdir',
+      'move',
+      'delete',
+      'write_text_batch',
+      'export_markdown_png',
+      'create_document',
+      'create_html',
+      'export_markdown_slides',
+      'create_3d_scene',
+      'edit_3d_scene',
+      'export_3d_scene_video',
+      'mcp__demo',
+      'terminal',
+    ],
   )
 })
 
@@ -142,24 +180,52 @@ test('Skill allowed-tools join the current tool authorization set', async () => 
     allowedTools: ['read', 'edit', 'mcp__demo__run'],
   } as SkillConfig
   const allowedTools = new Set<string>()
-  await buildSelectedSkillPrompt(
-    ['writer'],
-    new Map([['writer', skill]]),
-    undefined,
-    allowedTools,
-  )
+  await buildSelectedSkillPrompt(['writer'], new Map([['writer', skill]]), undefined, allowedTools)
   assert.deepEqual([...allowedTools], ['read', 'edit', 'mcp__demo__run'])
   assert.deepEqual(
-    selectMemoryTools(tools, ['writer'], false, false, false, [], false, false, false, [...allowedTools])
-      .map(tool => tool.function.name),
+    selectMemoryTools(tools, ['writer'], false, false, false, [], false, false, false, [
+      ...allowedTools,
+    ]).map(tool => tool.function.name),
     ['read', 'edit', 'mcp__demo__run'],
   )
 })
 
 test('Wiki Memory declares the file tool bundle for read/write tasks', () => {
+  assert.deepEqual(normalizeSkillAllowedToolNames(['file']), [
+    'read',
+    'glob',
+    'grep',
+    'write',
+    'edit',
+    'mkdir',
+    'move',
+    'delete',
+    'write_text_batch',
+  ])
+})
+
+test('Wiki story distillation is treated as write intent', () => {
+  assert.equal(hasWikiWriteIntent('把这部小说拆分并沉淀到 Wiki'), true)
+  assert.equal(hasWikiWriteIntent('继续分析下一章'), true)
+  assert.equal(hasWikiWriteIntent('同意'), true)
+  assert.equal(hasWikiWriteIntent('查询这部小说有哪些人物'), false)
+})
+
+test('story analysis exposes one read operation and one structured commit operation', () => {
   assert.deepEqual(
-    normalizeSkillAllowedToolNames(['file']),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
+    MEMORY_STORY_TOOL_DEFINITIONS.map(tool => tool.function.name),
+    ['prepare_story_analysis', 'commit_story_analysis'],
+  )
+  assert.deepEqual(
+    parseCreativeToolArguments({
+      id: 'story',
+      type: 'function',
+      function: {
+        name: 'prepare_story_analysis',
+        arguments: '{"workDirectory":"wiki/原始材料/三结义","limit":2}',
+      },
+    } as any),
+    { workDirectory: 'wiki/原始材料/三结义', limit: 2 },
   )
 })
 
@@ -172,10 +238,9 @@ test('selected Skill load failures remain visible to the model contract', async 
 })
 
 test('Skill binding normalizes names and rejects non-concrete selections', () => {
-  assert.deepEqual(
-    selectedSkillNamesForInput({ selectedSkillNames: [' writer ', 'writer'] }),
-    ['writer'],
-  )
+  assert.deepEqual(selectedSkillNamesForInput({ selectedSkillNames: [' writer ', 'writer'] }), [
+    'writer',
+  ])
   assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: [''] }), /名称不能为空/)
   assert.throws(() => selectedSkillNamesForInput({ selectedSkillNames: ['Skill'] }), /具体 Skill/)
 })
@@ -183,14 +248,14 @@ test('Skill binding normalizes names and rejects non-concrete selections', () =>
 test('Skill and file selection combine without a special route', () => {
   assert.deepEqual(
     selectMemoryTools(tools, ['jc-film-style'], true).map(tool => tool.function.name),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch'],
   )
 })
 
 test('file selection exposes the complete project file tool set', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, false, true).map(tool => tool.function.name),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch'],
   )
 })
 
@@ -236,7 +301,9 @@ test('tool search exposes only core tools until an authorized tool is described'
     ['tool_search', 'tool_describe'],
   )
   assert.deepEqual(
-    resolveMemoryToolSearchDefinitions(tools, new Set(['terminal'])).map(tool => tool.function.name),
+    resolveMemoryToolSearchDefinitions(tools, new Set(['terminal'])).map(
+      tool => tool.function.name,
+    ),
     ['tool_search', 'tool_describe', 'terminal'],
   )
 })

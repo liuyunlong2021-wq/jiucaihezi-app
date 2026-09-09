@@ -67,12 +67,13 @@
     "id": "wiki-memory",
     "name": "wiki-memory",
     "displayName": "wiki-memory",
-    "description": "Use when a user asks to create or plan a local Markdown Wiki, query or search local knowledge, write or update Wiki content, inspect consistency, or says 创建Wiki、查询Wiki、写入Wiki、检查Wiki、本地知识库、第二大脑. Every Wiki content directory uses index.md. Do not use for Wikipedia, general web search, or unrelated file management.",
+    "description": "Use when a user asks to create, plan, query, search, write, update, inspect, split, or distill material into a local Markdown Wiki, or asks for an answer or creation grounded in project Wiki knowledge; also when they say 创建Wiki、查询Wiki、写入Wiki、资料沉淀、拆小说、检查Wiki、本地知识库、第二大脑、基于Wiki创作. Do not use for Wikipedia, general web search, or unrelated file management.",
     "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",
-      "agents/openai.yaml"
+      "agents/openai.yaml",
+      "references/故事资料沉淀规则.md"
     ]
   }
 ]

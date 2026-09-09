@@ -1,5 +1,8 @@
 import { useAgentStore } from '@/stores/agentStore'
-import { createRuntimeProjectFileService, type ProjectFileService } from '@/services/projectFileService'
+import {
+  createRuntimeProjectFileService,
+  type ProjectFileService,
+} from '@/services/projectFileService'
 import {
   buildChatCompletionExtras,
   buildHeaders,
@@ -35,13 +38,17 @@ import {
 } from '@/runtime/direct/webProjectTools'
 import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
-import { conversationMemoryIndexPath, queryConversationMemoryIndex } from './conversationMemoryIndex'
+import {
+  conversationMemoryIndexPath,
+  queryConversationMemoryIndex,
+} from './conversationMemoryIndex'
 import {
   buildMemoryDesktopToolDefinitions,
   parseCreativeToolArguments,
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
   MEMORY_SEARCH_TOOL_DEFINITION,
+  MEMORY_STORY_TOOL_DEFINITIONS,
 } from '@/runtime/direct/creativeToolContract'
 import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
@@ -71,14 +78,17 @@ import type { ConversationTurn } from './conversationTranscript'
 import type { DirectRunMetrics, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { parseSkillMd, serializeToSkillMd, type SkillConfig } from '@/types/skill'
 import { describeToolDefinition, searchToolDefinitions } from '@/runtime/direct/toolSearch'
-import {
-  ALL_SKILL_TOOLS,
-} from '@/utils/skillTestRunner'
+import { ALL_SKILL_TOOLS } from '@/utils/skillTestRunner'
 import {
   executeSkillCreatorToolCall,
   isSkillCreatorToolName,
   type SkillCreatorInstalledSkill,
 } from './skillCreatorToolExecutor'
+import {
+  commitStoryAnalysis,
+  parseStoryAnalysisSubmissions,
+  prepareStoryAnalysis,
+} from './storyAnalysis'
 
 export interface MemoryChatInput {
   projectId?: string
@@ -162,7 +172,8 @@ export async function buildWikiMemoryIndexContext(
   const root = roots[0]!
   const indexPaths = resources
     .filter(resource => {
-      if (!resource.path.startsWith(`${root}/`) || !resource.path.endsWith('/index.md')) return false
+      if (!resource.path.startsWith(`${root}/`) || !resource.path.endsWith('/index.md'))
+        return false
       return resource.path.slice(root.length + 1).split('/').length <= 3
     })
     .map(resource => resource.path)
@@ -197,8 +208,10 @@ export async function buildConversationMemoryIndexContext(
   }
 }
 
-function hasWikiWriteIntent(value: string): boolean {
-  return /创建|新建|写入|更新|修正|修改|添加|保存|记录|整理|归档/.test(value)
+export function hasWikiWriteIntent(value: string): boolean {
+  return /创建|新建|写入|更新|修正|修改|添加|保存|记录|整理|归档|沉淀|拆分|拆书|拆小说|切分|分析|反推|继续|执行下一步|同意|确认/.test(
+    value,
+  )
 }
 
 export function selectMemoryTools(
@@ -217,11 +230,31 @@ export function selectMemoryTools(
   const allowed = new Set<string>()
   if (memoryQueryEnabled) allowed.add('memory_search')
   if (knowledgeFilesSelected)
-    for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
+    for (const name of [
+      'read',
+      'glob',
+      'grep',
+      'write',
+      'edit',
+      'mkdir',
+      'move',
+      'delete',
+      'write_text_batch',
+    ])
       allowed.add(name)
   if (attachmentNeedsRead) allowed.add('read')
   if (fileToolsSelected)
-    for (const name of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete'])
+    for (const name of [
+      'read',
+      'glob',
+      'grep',
+      'write',
+      'edit',
+      'mkdir',
+      'move',
+      'delete',
+      'write_text_batch',
+    ])
       allowed.add(name)
   const selectedTools = new Set([
     ...selectedMcpToolNames.map(name => String(name || '').trim()),
@@ -241,7 +274,11 @@ export function selectMemoryTools(
     for (const name of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
       allowed.add(name)
   if (terminalSelected) allowed.add('terminal')
-  for (const name of [...skillAllowedToolNames, ...normalizeSkillAllowedToolNames(skillAllowedToolNames)]) allowed.add(name)
+  for (const name of [
+    ...skillAllowedToolNames,
+    ...normalizeSkillAllowedToolNames(skillAllowedToolNames),
+  ])
+    allowed.add(name)
   return tools.filter(tool => allowed.has(tool.function?.name))
 }
 
@@ -251,11 +288,29 @@ export function normalizeSkillAllowedToolNames(names: Iterable<string>): string[
     const name = String(raw || '').trim()
     if (!name) continue
     if (name === 'file') {
-      for (const tool of ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete']) expanded.add(tool)
+      for (const tool of [
+        'read',
+        'glob',
+        'grep',
+        'write',
+        'edit',
+        'mkdir',
+        'move',
+        'delete',
+        'write_text_batch',
+      ])
+        expanded.add(tool)
     } else if (name === 'media' || name === 'av') {
-      for (const tool of ['export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides']) expanded.add(tool)
+      for (const tool of [
+        'export_markdown_png',
+        'create_document',
+        'create_html',
+        'export_markdown_slides',
+      ])
+        expanded.add(tool)
     } else if (name === '3d') {
-      for (const tool of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video']) expanded.add(tool)
+      for (const tool of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
+        expanded.add(tool)
     } else if (/^mcp__[^_]+__.+$/.test(name)) {
       expanded.add(name.replace(/^((?:mcp__[^_]+)__).+$/, '$1').replace(/__$/, ''))
     } else expanded.add(name)
@@ -298,7 +353,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const explicitCapabilitySelected = hasExplicitMemoryCapability(input)
   const attachmentNeedsRead = Boolean(
     input.attachments?.some(
-      attachment => attachment.kind === 'file' && attachment.readablePath && !attachment.textContent,
+      attachment =>
+        attachment.kind === 'file' && attachment.readablePath && !attachment.textContent,
     ),
   )
   const toolLoopRequired = explicitCapabilitySelected || attachmentNeedsRead
@@ -372,6 +428,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     modelId: input.modelId,
     contextWindow,
     // Reserve the model output ceiling plus a small protocol/tool allowance.
+    // oxfmt-ignore
     reservedTokens: maxOutputTokens + Math.min(32_768, Math.max(2_048, Math.floor(contextWindow * 0.1))),
   })
   if (context.omittedMessages > 0) input.onContextTrimmed?.(context.omittedMessages)
@@ -402,10 +459,14 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       .join('\n\n') + (memoryQueryContext ? `\n\n${memoryQueryContext}` : ''),
     skillSystemPrompt: explicitCapabilitySelected
       ? [
-          (input.mediaSelected || input.avSelected || [...skillAllowedToolNames].some(name => name === 'media' || name === 'av'))
+          input.mediaSelected ||
+          input.avSelected ||
+          [...skillAllowedToolNames].some(name => name === 'media' || name === 'av')
             ? buildMediaPlanPolicy(input.mediaReferencePolicy)
             : '',
-          (input.mediaSelected || input.avSelected || [...skillAllowedToolNames].some(name => name === 'media' || name === 'av'))
+          input.mediaSelected ||
+          input.avSelected ||
+          [...skillAllowedToolNames].some(name => name === 'media' || name === 'av')
             ? '记忆工作台支持批量媒体确认：单个任务在 jc-media-plan 中写一个 JSON 对象；多个独立任务写对象数组，每个任务一项。不要输出多个 jc-media-plan 代码块.'
             : '',
           selectedSkillPrompt || buildWebSkillCatalogPrompt(catalog),
@@ -468,7 +529,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
 
   const localSkillLoader = desktopRuntime ? createLocalSkillLoader(customSkills) : undefined
-  const loadInstalledSkillForCreator = async (requestedId: string): Promise<SkillCreatorInstalledSkill | null> => {
+  const loadInstalledSkillForCreator = async (
+    requestedId: string,
+  ): Promise<SkillCreatorInstalledSkill | null> => {
     let skills = agentStore.loadSkills()
     if (!skills.some(skill => skill.id === requestedId || skill.name === requestedId)) {
       await agentStore.refreshSkills()
@@ -476,11 +539,14 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     }
     const exact = skills.find(skill => skill.id === requestedId)
     const nameMatches = exact ? [] : skills.filter(skill => skill.name === requestedId)
-    if (nameMatches.length > 1) throw new Error(`多个 Skill 使用名称 ${requestedId}，请提供精确 Skill ID。`)
+    if (nameMatches.length > 1)
+      throw new Error(`多个 Skill 使用名称 ${requestedId}，请提供精确 Skill ID。`)
     const skill = exact || nameMatches[0]
     if (!skill) return null
-    const editable = skill.source === 'user' || skill.source === 'github' || skill.source === 'evolved'
-    const loaded = editable && desktopRuntime ? await createLocalSkillLoader([skill])(skill.id) : null
+    const editable =
+      skill.source === 'user' || skill.source === 'github' || skill.source === 'evolved'
+    const loaded =
+      editable && desktopRuntime ? await createLocalSkillLoader([skill])(skill.id) : null
     return {
       skillId: skill.id,
       skillMd: loaded?.content || localSkillMarkdown(skill),
@@ -507,8 +573,12 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       })
   const projectTools: DirectToolExecutor = async (call, signal) =>
     normalizeMemoryToolResult(await rawProjectTools(call, signal))
+  const storyFiles = createRuntimeProjectFileService()
 
-  const executeMemoryTool = async (call: DirectToolCall, signal?: AbortSignal): Promise<DirectToolResult> => {
+  const executeMemoryTool = async (
+    call: DirectToolCall,
+    signal?: AbortSignal,
+  ): Promise<DirectToolResult> => {
     signal?.throwIfAborted()
     // T4: memory_search - native tool for current conversation
     if (call.function.name === 'memory_search') {
@@ -526,7 +596,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       if (!input.projectId || !input.conversationId) {
         return {
           content: JSON.stringify({ error: 'NO_CONVERSATION', message: '当前对话未绑定项目' }),
-          status: 'failed' as const
+          status: 'failed' as const,
         }
       }
       try {
@@ -542,19 +612,73 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         return {
           content: JSON.stringify({
             error: 'QUERY_FAILED',
-            message: error instanceof Error ? error.message : '查询失败'
+            message: error instanceof Error ? error.message : '查询失败',
           }),
-          status: 'failed' as const
+          status: 'failed' as const,
         }
       }
     }
+    if (call.function.name === 'prepare_story_analysis') {
+      if (!allowedMemoryToolNames.has(call.function.name))
+        return {
+          content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }),
+          status: 'failed',
+        }
+      const args = parseCreativeToolArguments(call)
+      if (!input.projectId)
+        return {
+          content: JSON.stringify({ error: 'NO_PROJECT', message: '请先选择项目' }),
+          status: 'failed',
+        }
+      const result = await prepareStoryAnalysis(
+        {
+          workDirectory: String(args.workDirectory),
+          limit: Number(args.limit) || 1,
+          includeNeedsReview: Boolean(args.includeNeedsReview),
+        },
+        storyFiles,
+        input.projectId,
+      )
+      return { content: JSON.stringify(result) }
+    }
+    if (call.function.name === 'commit_story_analysis') {
+      if (!allowedMemoryToolNames.has(call.function.name))
+        return {
+          content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }),
+          status: 'failed',
+        }
+      const args = parseCreativeToolArguments(call)
+      if (!input.projectId)
+        return {
+          content: JSON.stringify({ error: 'NO_PROJECT', message: '请先选择项目' }),
+          status: 'failed',
+        }
+      const result = await commitStoryAnalysis(
+        {
+          workDirectory: String(args.workDirectory),
+          analyses: parseStoryAnalysisSubmissions(args.analyses),
+        },
+        storyFiles,
+        input.projectId,
+      )
+      return { content: JSON.stringify(result), details: { ...result } }
+    }
     if (isSkillCreatorToolName(call.function.name)) {
-      if (!selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')) {
-        return { content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }), status: 'failed' as const }
+      if (
+        !selectedSkillNames.some(
+          name => name === 'skill-creator' || name === 'preset_skill-creator',
+        )
+      ) {
+        return {
+          content: JSON.stringify({ error: 'TOOL_NOT_ALLOWED', tool: call.function.name }),
+          status: 'failed' as const,
+        }
       }
       return {
         content: await executeSkillCreatorToolCall(call, {
-          agentId: selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')
+          agentId: selectedSkillNames.some(
+            name => name === 'skill-creator' || name === 'preset_skill-creator',
+          )
             ? 'skill-creator'
             : undefined,
           sessionId: input.conversationId,
@@ -562,12 +686,20 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           signal,
           loadInstalledSkill: loadInstalledSkillForCreator,
           testToolAdapter: {
-            tools: authorizedMemoryToolDefinitions.filter(tool => !isSkillCreatorToolName(String(tool.function?.name || ''))),
+            tools: authorizedMemoryToolDefinitions.filter(
+              tool => !isSkillCreatorToolName(String(tool.function?.name || '')),
+            ),
             execute: async (testCall, testSignal): Promise<{ content: string }> => {
               const directCall = testCall as DirectToolCall
               if (memoryToolNeedsApproval(directCall, latestUserText, input.projectId)) {
                 const approved = await input.confirmTool(directCall)
-                if (!approved) return { content: JSON.stringify({ error: 'TOOL_CANCELLED', message: '用户取消了评测工具调用。' }) }
+                if (!approved)
+                  return {
+                    content: JSON.stringify({
+                      error: 'TOOL_CANCELLED',
+                      message: '用户取消了评测工具调用。',
+                    }),
+                  }
               }
               const result: DirectToolResult = await executeMemoryTool(directCall, testSignal)
               return { content: result.content }
@@ -619,10 +751,13 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const allMemoryToolDefinitions = [
     // T4: Add memory_search as native tool
     MEMORY_SEARCH_TOOL_DEFINITION,
+    ...MEMORY_STORY_TOOL_DEFINITIONS,
     ...(desktopRuntime
     ? buildMemoryDesktopToolDefinitions()
     : buildMemoryWebProjectToolDefinitions()),
-    ...(selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator') ? ALL_SKILL_TOOLS : []),
+    ...(selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')
+      ? ALL_SKILL_TOOLS
+      : []),
   ]
   if (selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')) {
     for (const tool of ALL_SKILL_TOOLS) skillAllowedToolNames.add(tool.function.name)
@@ -651,15 +786,27 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const authorizedMemoryToolDefinitions = wikiMemorySelected
     ? memoryToolDefinitions.filter(tool =>
         (hasWikiWriteIntent(latestUserText)
-          ? ['read', 'write', 'edit', 'mkdir']
-          : ['read']).includes(String(tool.function?.name || '')),
+          ? [
+              'read',
+              'write',
+              'edit',
+              'mkdir',
+              'write_text_batch',
+              'prepare_story_analysis',
+              'commit_story_analysis',
+            ]
+          : ['read', 'prepare_story_analysis']
+        ).includes(String(tool.function?.name || '')),
       )
     : memoryToolDefinitions
   const allowedMemoryToolNames = new Set(
     authorizedMemoryToolDefinitions.map(tool => String(tool.function?.name || '')),
   )
   const describedToolNames = new Set<string>()
-  const directlyExposedToolNames = new Set(memoryToolDefinitions.map(tool => String(tool.function?.name || '')))
+  const directlyExposedToolNames = new Set(
+    memoryToolDefinitions.map(tool => String(tool.function?.name || '')),
+  )
+  // oxfmt-ignore
   const resolveTools = () => memoryToolDefinitions.length
     ? resolveMemoryToolSearchDefinitions(
         authorizedMemoryToolDefinitions,
@@ -677,10 +824,13 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     onText: input.onText,
     onToolEvent(event) {
       input.onToolEvent?.(event)
-      if (event.type !== 'tool_execution_end' || !shouldReportProgramStatus(event.call.function.name))
+      if (
+        event.type !== 'tool_execution_end' ||
+        !shouldReportProgramStatus(event.call.function.name)
+      )
         return
       const kind = memoryProgramKind(event.call.function.name)
-      const paths = memoryToolPaths(event.call)
+      const paths = memoryToolPaths(event.call, event.result.content)
       const reason = event.status === 'succeeded' ? undefined : event.result.content || undefined
       const status =
         aggregatedProgramStatus?.status === 'failed' || event.status === 'failed'
@@ -736,7 +886,7 @@ function assertMemoryProjectMutationProtected(call: DirectToolCall, projectId = 
 }
 
 function shouldReportProgramStatus(name: string): boolean {
-  return !new Set(['read', 'glob', 'grep', 'skill']).has(name)
+  return !new Set(['read', 'glob', 'grep', 'skill', 'prepare_story_analysis']).has(name)
 }
 
 export function memoryProgramKind(name: string): MemoryProgramStatus['kind'] {
@@ -748,9 +898,23 @@ export function memoryProgramKind(name: string): MemoryProgramStatus['kind'] {
   return 'file'
 }
 
-function memoryToolPaths(call: DirectToolCall): string[] {
+function memoryToolPaths(call: DirectToolCall, resultContent = ''): string[] {
   const args = parseArguments(call.function.arguments)
-  return [args.path, args.destination, args.existingPath]
+  const result = parseArguments(resultContent)
+  const batchPaths = Array.isArray(args.files)
+    ? args.files.map(file =>
+        file && typeof file === 'object' ? (file as Record<string, unknown>).path : undefined,
+      )
+    : []
+  const affectedPaths = Array.isArray(result.affected_paths) ? result.affected_paths : []
+  return [
+    args.path,
+    args.destination,
+    args.existingPath,
+    args.workDirectory,
+    ...batchPaths,
+    ...affectedPaths,
+  ]
     .filter(value => typeof value === 'string' && value.trim())
     .map(value => String(value).trim())
 }
@@ -770,7 +934,9 @@ function parseArguments(value: string): Record<string, unknown> {
   }
 }
 
-export function selectedSkillNamesForInput(input: Pick<MemoryChatInput, 'selectedSkillNames'>): string[] {
+export function selectedSkillNamesForInput(
+  input: Pick<MemoryChatInput, 'selectedSkillNames'>,
+): string[] {
   const names = [...new Set((input.selectedSkillNames || []).map(name => String(name).trim()))]
   if (names.some(name => !name)) throw new Error('Skill 名称不能为空')
   if (names.some(name => name.toLowerCase() === 'skill')) {
@@ -854,8 +1020,7 @@ type LocalSkillDirectoryNode = {
 
 function createLocalSkillLoader(skills: SkillConfig[]) {
   return async (name: string) => {
-    const skill = skills.find(item => item.id === name)
-      || skills.find(item => item.name === name)
+    const skill = skills.find(item => item.id === name) || skills.find(item => item.name === name)
     if (!skill) return null
     const packagePath = String(skill.packagePath || '')
       .replace(/\\/g, '/')

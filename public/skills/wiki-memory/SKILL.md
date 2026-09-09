@@ -1,7 +1,10 @@
 ---
 name: wiki-memory
-description: Use when a user asks to create or plan a local Markdown Wiki, query or search local knowledge, write or update Wiki content, inspect consistency, or says 创建Wiki、查询Wiki、写入Wiki、检查Wiki、本地知识库、第二大脑. Every Wiki content directory uses index.md. Do not use for Wikipedia, general web search, or unrelated file management.
-allowed-tools: file
+description: Use when a user asks to create, plan, query, search, write, update, inspect, split, or distill material into a local Markdown Wiki, or asks for an answer or creation grounded in project Wiki knowledge; also when they say 创建Wiki、查询Wiki、写入Wiki、资料沉淀、拆小说、检查Wiki、本地知识库、第二大脑、基于Wiki创作. Do not use for Wikipedia, general web search, or unrelated file management.
+allowed-tools:
+  - file
+  - prepare_story_analysis
+  - commit_story_analysis
 ---
 
 # Wiki Memory
@@ -10,6 +13,7 @@ allowed-tools: file
 
 ## 核心合同
 
+- 分工原则：Wiki 保存结构化事实，双链表达关系，Index 负责导航，Skill 规定取证顺序，Runtime 负责确定性校验。
 - 使用运行时提供的 `wiki_index`。它包含根目录、一级目录和二级目录的 `index.md`，不是正文。
 - 若预读结果显示多个根目录、没有根目录或索引不可用，先请用户选择或修正；不得混合读取或自行新建平行 Wiki。
 - 根据索引中的真实路径，只用 `read` 读取支持结论所需的页面；更深目录先读取其 `index.md`，不要扫描、搜索或通读整个 Wiki。
@@ -20,7 +24,7 @@ allowed-tools: file
 
 ## `index.md` 合同
 
-每个索引只导航直属子项，使用相对 Markdown 链接和一句可检索摘要，不复制正文、不列自身：
+每个索引只导航直属子项，内部页面统一使用双链 `[[<相对路径>|<显示名称>]]` 和一句可检索摘要，不复制正文、不列自身：
 
 ```markdown
 # <目录名>
@@ -29,18 +33,42 @@ allowed-tools: file
 
 ## 子目录
 
-- [<名称>](<相对目录>/index.md) - <一句话摘要>
+- [[<相对目录>/index|<名称>]] - <一句话摘要>
 
 ## 页面
 
-- [<标题>](<相对文件>.md) - <一句话摘要>
+- [[<相对文件>|<标题>]] - <一句话摘要>
 ```
 
-没有对应子项时可省略该章节。每个直属内容目录都指向其 `index.md`；每个直属 Markdown 页面都应登记，`index.md` 自身除外。内容变化时只更新直属父索引；祖先索引没有变化时不重写。
+没有对应子项时可省略该章节。每个直属内容目录都指向其 `index.md`；每个直属 Markdown 页面都应登记，`index.md` 自身除外。摘要可以包含检索词，但不充当事实或关系真源。内容变化时只更新直属父索引；祖先索引没有变化时不重写。
+
+## 结构化事实与关系
+
+- 正文保存完整事实；需要稳定识别或机器读取的类型、ID、别名、状态和关系可写入 YAML Properties。
+- Wiki 内部关系使用双链，外部 URL 使用标准 Markdown 链接。跨目录双链优先写可唯一解析的完整项目路径；不得依赖有歧义的同名短链。
+- 一个事实或关系只设一个权威位置。Index 只导航，不复制页面中的完整事实或关系清单。
+
+## 资料沉淀
+
+- 资料沉淀分两阶段：先以确定性方式无损拆出来源结构树，再由模型按需分析结构节点并连接规范实体。结构树负责完整性和顺序，实体图负责复用和检索；不得把两者混成一次不可追溯的摘要写入。
+- 故事的导入、边界识别、分段、稳定编号、建页、建索引、状态、并发提交和中断恢复属于产品 Runtime；语义识别、证据归属、实体消歧和关系变化属于模型。原生“故事拆分”可用时，模型不得调用文件工具模拟第一阶段；没有原生能力时也不得用多轮自由写文件模拟大规模机械拆分。
+- 原始分段和语义分析分开保存。原始分段保留原文与来源定位；分析页保存摘要、场次和直接资产链接。人物、地点、道具等可复用对象各自只有一个规范页面，不在每个章节下复制。
+- 批次只决定一次处理多少节点，不改变最终存储粒度。处理一章或十章，仍为每个最小结构节点分别记录分析状态和结果，以便暂停、续跑和定点检索。
+- 模型只提交结构化语义判断；Runtime 校验证据、链接、版本和状态后负责写入正文与直属 Index。分析页是分析状态的唯一真源，来源节点不保存会过期的待分析状态。
+- 沉淀故事、小说、新闻故事或剧本时，必须读取并遵守 [故事资料沉淀规则](references/故事资料沉淀规则.md)。其他资料类型没有专用规则时，沿用上述两阶段原则，不能套用故事资产类型。
+
+## 基于 Wiki 回答或创作
+
+1. 从用户消息和 `wiki_index` 确定集数、章节、主题或实体等任务锚点，并读取其权威页面。
+2. 检查锚点正文和 Properties 中与当前任务相关的直接关系；读取这些双链指向的目标正文，再回答或创作。
+3. 只展开当前任务需要的一层直接关系；目标正文出现的其他链接不自动递归展开。
+4. 不得只根据 Index 摘要、双链名称或模型已有知识推测目标正文。Wiki 没有记录的内容必须与创作补充明确区分。
+5. 目标不存在或不能唯一解析时，报告缺失或歧义，不得替用户选择或补成 Wiki 事实。
 
 ## 写入
 
 1. 从预读索引选择已有的最准确位置；位置会影响含义时先给最小方案并等待确认。
 2. 读取目标页面及其直属 `index.md`，只写新增或用户已确认更新；重复跳过，冲突请用户裁决。
-3. 正文成功后更新直属 `index.md` 的链接和摘要，并重新读取这两个文件验证。
-4. 工具调用结束后必须给出简短回执：结论、实际写入路径、跳过项或待确认项。不得以空正文结束。
+3. 写入双链前确认目标唯一且存在；新增目标页面时先写正文，再写引用它的关系。
+4. 正文成功后更新直属 `index.md` 的双链和摘要，并重新读取正文与索引验证。
+5. 工具调用结束后必须给出简短回执：结论、实际写入路径、跳过项或待确认项。不得以空正文结束。

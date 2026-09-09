@@ -6,6 +6,7 @@ import {
   linesPage,
   normalizeCreativeProjectPath,
   parseCreativeToolArguments,
+  parseTextBatchFiles,
   resolveCreativeProjectPath,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
@@ -29,6 +30,7 @@ import {
 import {
   isAuthorizedMemoryConversationPath,
   isMemoryConversationPath,
+  isMemoryProjectMutationBlocked,
 } from '@/utils/memoryProjectPaths'
 
 type DesktopFileEntry = { path: string; isDir: boolean; size?: number | null }
@@ -38,6 +40,7 @@ type DesktopReadFile = {
   base64: string
   size: number
   truncated: boolean
+  revision?: { value: string }
 }
 type Invoke = (command: string, payload: { input: Record<string, unknown> }) => Promise<any>
 type TerminalAttachment = { name: string; inputPath: string }
@@ -168,12 +171,21 @@ export function createDesktopProjectToolExecutor(input: {
     )
   }
 
-  async function readFile(path: string): Promise<DesktopReadFile> {
+  async function readFile(path: string, maxBytes = 30_000_000): Promise<DesktopReadFile> {
     return await invoke('dev_read_file', {
       root: requireProject(),
       relativePath: path,
-      maxBytes: 30_000_000,
+      maxBytes,
     })
+  }
+
+  async function readFileIfExists(path: string): Promise<string | null> {
+    try {
+      return (await readFile(path)).content
+    } catch (error) {
+      if (/不存在|not found|No such file|不可访问/i.test(error instanceof Error ? error.message : String(error))) return null
+      throw error
+    }
   }
 
   async function listExternalFiles(path: string): Promise<DesktopFileEntry[]> {
@@ -398,6 +410,44 @@ export function createDesktopProjectToolExecutor(input: {
             ].join('\n')
           : 'No files found',
       }
+    }
+
+    if (name === 'write_text_batch') {
+      const batch = parseTextBatchFiles(args.files)
+      const current = new Map<string, DesktopReadFile | null>()
+      for (const file of batch) {
+        if (isMemoryProjectMutationBlocked(file.path, 'text')) throw new Error(`系统管理文件不能批量写入: ${file.path}`)
+        try { current.set(file.path, await readFile(file.path)) } catch (error) {
+          if (/不存在|not found|No such file|不可访问/i.test(error instanceof Error ? error.message : String(error))) current.set(file.path, null)
+          else throw error
+        }
+      }
+      const conflicts = batch.filter(file => {
+        const before = current.get(file.path)
+        if (before === undefined) return true
+        if (before?.content === file.content) return false
+        return before === null ? file.expectedContent !== undefined : file.expectedContent !== before?.content
+      })
+      if (conflicts.length) throw new Error(`批量写入冲突，未修改任何文件：${conflicts.map(file => file.path).join('、')}`)
+      let created = 0
+      let updated = 0
+      let skipped = 0
+      for (const file of batch) {
+        const before = current.get(file.path)
+        if (before?.content === file.content) { skipped += 1; continue }
+        if (before === null) {
+          await invoke('dev_create_file_if_missing', { root: requireProject(), relativePath: file.path, content: file.content })
+          created += 1
+          continue
+        }
+        if (!before?.revision?.value) throw new Error(`无法安全更新没有版本号的文件: ${file.path}`)
+        const result = await invoke('dev_write_file_if_revision', {
+          root: requireProject(), relativePath: file.path, content: file.content, expectedRevision: before.revision.value,
+        })
+        if (result.status !== 'saved') throw new Error(`批量写入期间文件已变化: ${file.path}`)
+        updated += 1
+      }
+      return { content: `批量写入完成：创建 ${created}，更新 ${updated}，跳过 ${skipped}。`, details: { created, updated, skipped } }
     }
 
     if (name === 'write') {

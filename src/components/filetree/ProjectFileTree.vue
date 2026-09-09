@@ -23,10 +23,13 @@ import { canvasFilePath } from '@/components/canvas/canvasDocument'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
 import { isTextFile } from '@/utils/fileProcessor'
+import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
 import {
-  classifyProjectResource,
-  type ProjectResource,
-} from '@/utils/projectResource'
+  applyStoryImportPlan,
+  buildStoryImportPlan,
+  type StoryImportPlan,
+} from '@/runtime/memory/storyImport'
+import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
 import {
   appendProjectDirectoryIndex,
   createRuntimeProjectFileService,
@@ -152,6 +155,7 @@ const ctxMenu = ref<CtxMenu>({ show: false, x: 0, y: 0, node: null })
 const ctxMenuRef = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 const uploadInput = ref<HTMLInputElement | null>(null)
+const storyInput = ref<HTMLInputElement | null>(null)
 const directoryInput = ref<HTMLInputElement | null>(null)
 const projectDir = computed(() => projectStore.projectDir.value)
 const webProjectId = computed(() => projectStore.webProjectId.value)
@@ -179,6 +183,12 @@ let webProjectChannel: BroadcastChannel | null = null
 let stopDesktopProjectFsHints: UnlistenFn | null = null
 let loadFileTreeRequestId = 0
 const resourceClipboard = ref<ProjectResourceClipboard | null>(null)
+const storyImport = ref<{
+  plan: StoryImportPlan
+  content: string
+} | null>(null)
+const storyImportBusy = ref(false)
+const storyImportError = ref('')
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
@@ -305,7 +315,9 @@ async function loadFileTree() {
   loading.value = true
   errorMsg.value = ''
   try {
-    const resources = (await projectFiles.listDirectory(requestedProjectKey, '')).filter(resource => isVisibleMemoryResource(resource.path))
+    const resources = (await projectFiles.listDirectory(requestedProjectKey, '')).filter(resource =>
+      isVisibleMemoryResource(resource.path),
+    )
     const nextTree = buildTree(
       resources.map(resource => ({
         id: resource.id,
@@ -532,8 +544,7 @@ const offProjectResourceChanged = onProjectResourceChange(change => {
     if (entry.resource.owner !== projectKey.value) continue
     // 内容保存不改变目录结构。重建懒加载树会丢失展开状态。
     if (entry.type === 'changed') continue
-    if (entry.type === 'renamed')
-      remapLoadedNode(entry.oldResource.path, entry.resource.path)
+    if (entry.type === 'renamed') remapLoadedNode(entry.oldResource.path, entry.resource.path)
     void refreshAffectedDirectory(
       entry.type === 'renamed' ? entry.oldResource.path : entry.resource.path,
     )
@@ -577,8 +588,10 @@ const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'webm', 'mkv'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'ogg', 'm4a', 'flac'])
 const CANVAS_EXT = 'jccanvas'
 function isVisibleMemoryResource(path: string): boolean {
-  return !isMemoryProjectHiddenPath(path)
-    && ((isDesktop && !isMobile) || !path.toLowerCase().endsWith('.jcscene'))
+  return (
+    !isMemoryProjectHiddenPath(path) &&
+    ((isDesktop && !isMobile) || !path.toLowerCase().endsWith('.jcscene'))
+  )
 }
 function isProtectedMemoryPath(path: string): boolean {
   return isMemoryProjectMutationBlocked(path)
@@ -1236,6 +1249,7 @@ async function refreshProjectCenter() {
   try {
     if (isMobile) await refreshMobileProjects()
     else if (!isDesktop) await refreshWebProjects()
+    // oxfmt-ignore
     const session = getGatewaySessionToken() || await initGatewaySessionToken()
     cloudProjects.value = session ? await projectTextSync.listCloudProjects() : []
   } catch (e) {
@@ -1245,6 +1259,7 @@ async function refreshProjectCenter() {
 async function refreshMobileProjects() {
   const { invoke } = await import('@tauri-apps/api/core')
   mobileProjects.value = await invoke<MobileProject[]>('list_mobile_projects')
+  // oxfmt-ignore
   const current = mobileProjects.value.find(project => project.name === projectStore.projectName.value)
   if (current && current.path !== projectDir.value) projectStore.selectProject(current.path)
 }
@@ -1271,7 +1286,7 @@ async function createWebProject() {
   await selectWebProject(project)
 }
 async function createMobileProject(name?: string, select = true): Promise<MobileProject | null> {
-  const projectName = name || await safePrompt('新建项目名称', '未命名项目', { forceDom: true })
+  const projectName = name || (await safePrompt('新建项目名称', '未命名项目', { forceDom: true }))
   if (!projectName?.trim()) return null
   const { invoke } = await import('@tauri-apps/api/core')
   const project = await invoke<MobileProject>('create_mobile_project', { name: projectName.trim() })
@@ -1290,10 +1305,17 @@ async function openLocalProjectFolder() {
 }
 async function uploadCurrentProject() {
   if (!projectKey.value || projectMenuBusy.value) return
-  if (!(await confirmAction('本地允许同步的文字将覆盖云端文字，云端独有文字将被删除。媒体和空目录不处理。', {
-    title: '上传并覆盖云端',
-    okLabel: '确认上传并覆盖',
-  }))) return
+  if (
+    !(await confirmAction(
+      '本地允许同步的文字将覆盖云端文字，云端独有文字将被删除。媒体和空目录不处理。',
+      {
+        title: '上传并覆盖云端',
+        okLabel: '确认上传并覆盖',
+      },
+    ))
+  )
+    return
+  // oxfmt-ignore
   if (!(getGatewaySessionToken() || await initGatewaySessionToken())) {
     projectMenuError.value = '请先在设置的“账号”中重新登录一次，以启用云同步'
     return
@@ -1313,12 +1335,17 @@ async function uploadCurrentProject() {
 function projectNameFromOwner(owner: string): string {
   return owner.replace(/\/+$/, '').split('/').pop() || owner
 }
-async function localOwnerForCloud(cloud: SyncProject): Promise<{ owner: string; name: string } | null> {
+async function localOwnerForCloud(
+  cloud: SyncProject,
+): Promise<{ owner: string; name: string } | null> {
   const localProjects = isMobile
     ? mobileProjects.value.map(project => ({ owner: project.path, name: project.name }))
     : isDesktop
-      ? projectStore.recentProjectDirs.value.map(owner => ({ owner, name: projectNameFromOwner(owner) }))
-    : webProjects.value.map(project => ({ owner: project.id, name: project.name }))
+      ? projectStore.recentProjectDirs.value.map(owner => ({
+          owner,
+          name: projectNameFromOwner(owner),
+        }))
+      : webProjects.value.map(project => ({ owner: project.id, name: project.name }))
   const availableLocalProjects: typeof localProjects = []
   for (const project of localProjects) {
     try {
@@ -1335,18 +1362,22 @@ async function localOwnerForCloud(cloud: SyncProject): Promise<{ owner: string; 
 }
 async function openCloudProject(cloud: SyncProject) {
   if (projectMenuBusy.value) return
-  if (!(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
-    title: '下载并覆盖本地',
-    okLabel: '确认下载并覆盖',
-  }))) return
+  if (
+    !(await confirmAction('云端文字将覆盖本地文字，本地独有文字将被删除。媒体和空目录不处理。', {
+      title: '下载并覆盖本地',
+      okLabel: '确认下载并覆盖',
+    }))
+  )
+    return
   projectMenuBusy.value = true
   projectMenuError.value = ''
   const operationId = `cloud_download_${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`}`
-  const trace = (step: string, error?: unknown) => console.info('[JC][cloud-sync]', {
-    operationId,
-    step,
-    ...(error === undefined ? {} : { error: error instanceof Error ? error.name : 'unknown' }),
-  })
+  const trace = (step: string, error?: unknown) =>
+    console.info('[JC][cloud-sync]', {
+      operationId,
+      step,
+      ...(error === undefined ? {} : { error: error instanceof Error ? error.name : 'unknown' }),
+    })
   trace('cloud-click-confirmed')
   try {
     const existing = await localOwnerForCloud(cloud)
@@ -1355,7 +1386,8 @@ async function openCloudProject(cloud: SyncProject) {
       if (isDesktop || isMobile) projectStore.selectProject(existing.owner)
       else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
       await projectTextSync.open(existing.owner, existing.name, operationId)
-      if (await projectTextSync.cloudProjectIdFor(existing.owner) === cloud.id) await projectTextSync.downloadNow(operationId)
+      if ((await projectTextSync.cloudProjectIdFor(existing.owner)) === cloud.id)
+        await projectTextSync.downloadNow(operationId)
       else await projectTextSync.connect(cloud.id, operationId)
       trace('local-project-complete')
       showProjectMenu.value = false
@@ -1387,7 +1419,8 @@ async function openCloudProject(cloud: SyncProject) {
     const { invoke } = await import('@tauri-apps/api/core')
     const dir = await invoke<string | null>('pick_project_folder')
     if (!dir) return
-    if ((await projectFiles.list(dir)).length) throw new Error('请选择或新建一个空文件夹来保存云项目')
+    if ((await projectFiles.list(dir)).length)
+      throw new Error('请选择或新建一个空文件夹来保存云项目')
     projectStore.selectProject(dir)
     await projectTextSync.open(dir, projectNameFromOwner(dir))
     await projectTextSync.connect(cloud.id)
@@ -1436,7 +1469,12 @@ async function createFileAt(relPath: string) {
   try {
     const resource = await projectFiles.createText(projectKey.value, relPath, '')
     const slash = relPath.lastIndexOf('/')
-    await appendProjectDirectoryIndex(projectFiles, projectKey.value, slash < 0 ? '' : relPath.slice(0, slash), relPath)
+    await appendProjectDirectoryIndex(
+      projectFiles,
+      projectKey.value,
+      slash < 0 ? '' : relPath.slice(0, slash),
+      relPath,
+    )
     emitEvent('memory:open-resource', await openProjectResource(projectFiles, resource))
   } catch (e) {
     errorMsg.value = `创建失败: ${e instanceof Error ? e.message : String(e)}`
@@ -1562,7 +1600,10 @@ async function uploadWebFiles(files: File[]) {
   const projectId = webProjectId.value
   if (isDesktop || !projectId || !files.length) return
   try {
-    const entries = files.map(file => ({ file, path: uploadPathForFile(file, memoryMediaDirectoryFor(file.name, file.type)) }))
+    const entries = files.map(file => ({
+      file,
+      path: uploadPathForFile(file, memoryMediaDirectoryFor(file.name, file.type)),
+    }))
     await writeWebProjectEntries(
       webProjectFiles,
       projectId,
@@ -1571,7 +1612,12 @@ async function uploadWebFiles(files: File[]) {
     )
     for (const entry of entries) {
       const slash = entry.path.lastIndexOf('/')
-      await appendProjectDirectoryIndex(projectFiles, projectId, entry.path.slice(0, slash), entry.path)
+      await appendProjectDirectoryIndex(
+        projectFiles,
+        projectId,
+        entry.path.slice(0, slash),
+        entry.path,
+      )
     }
   } catch (error) {
     errorMsg.value = `上传失败: ${error instanceof Error ? error.message : String(error)}`
@@ -1596,7 +1642,9 @@ async function importDesktopFiles() {
 async function classifyImportedMemoryFiles(owner: string, importedPaths: string[]) {
   const resources = await projectFiles.list(owner)
   const byPath = new Map(resources.map(resource => [resource.path, resource]))
-  const directories = new Map(resources.filter(resource => resource.isDirectory).map(resource => [resource.path, resource]))
+  const directories = new Map(
+    resources.filter(resource => resource.isDirectory).map(resource => [resource.path, resource]),
+  )
   const groups = new Map<string, ProjectResource[]>()
   for (const path of importedPaths) {
     const resource = byPath.get(path)
@@ -1630,6 +1678,116 @@ async function onUploadInputChange(event: Event) {
   const files = Array.from(input.files || [])
   input.value = ''
   await uploadWebFiles(files)
+}
+
+async function prepareStoryImport(content: string, name: string, sourceEncoding: string) {
+  const owner = projectKey.value
+  if (!owner) throw new Error('请先打开项目')
+  const resources = await projectFiles.list(owner)
+  const roots = ['wiki', 'docs/wiki'].filter(root =>
+    resources.some(resource => resource.path === root || resource.path.startsWith(`${root}/`)),
+  ) as Array<'wiki' | 'docs/wiki'>
+  if (roots.length > 1) throw new Error('检测到多个 Wiki 根目录，请先保留一个')
+  storyImport.value = {
+    content,
+    plan: await buildStoryImportPlan({
+      content,
+      title: name.replace(/\.[^.]+$/, ''),
+      originalName: name,
+      sourceEncoding,
+      wikiRoot: roots[0] || 'wiki',
+    }),
+  }
+}
+
+async function convertStoryFile(file: File) {
+  const converted = await convertDocumentToMarkdown({
+    file,
+    maxChars: 20_000_000,
+    timeoutMs: 1_800_000,
+  })
+  if (converted.status !== 'success' || !converted.content)
+    throw new Error(converted.message || converted.error || '故事转换失败')
+  if (converted.truncated) throw new Error('故事转换结果超过 2000 万字符，请先按卷拆分')
+  await prepareStoryImport(
+    converted.content,
+    file.name,
+    converted.sourceEncoding || converted.engine,
+  )
+}
+
+async function openStoryImport() {
+  storyImportError.value = ''
+  const owner = projectKey.value
+  const path = selectedPath.value
+  if (owner && path) {
+    storyImportBusy.value = true
+    try {
+      const resource = (await projectFiles.list(owner)).find(
+        item => item.path === path && !item.isDirectory,
+      )
+      if (!resource) {
+        storyInput.value?.click()
+        return
+      }
+      let file: File
+      try {
+        const binary = await projectFiles.readBinary(resource)
+        file = new File([binary.data.slice().buffer], resource.name, {
+          type: binary.mimeType || resource.mimeType || 'application/octet-stream',
+        })
+      } catch {
+        const text = await projectFiles.readText(resource, 30 * 1024 * 1024)
+        if (text.truncated) throw new Error('故事超过 30 MB，请先按卷拆分')
+        file = new File([text.content], resource.name, {
+          type: resource.mimeType || 'text/plain',
+        })
+      }
+      await convertStoryFile(file)
+    } catch (error) {
+      storyImportError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+      storyImportBusy.value = false
+    }
+    return
+  }
+  storyInput.value?.click()
+}
+
+async function onStoryInputChange(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  storyImportBusy.value = true
+  storyImportError.value = ''
+  try {
+    await convertStoryFile(file)
+  } catch (error) {
+    storyImportError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    storyImportBusy.value = false
+  }
+}
+
+async function confirmStoryImport() {
+  const pending = storyImport.value
+  const owner = projectKey.value
+  if (!pending || !owner || storyImportBusy.value) return
+  storyImportBusy.value = true
+  storyImportError.value = ''
+  try {
+    await applyStoryImportPlan(pending.plan, pending.content, projectFiles, owner, {
+      acceptWarnings: true,
+    })
+    storyImport.value = null
+    await loadFileTree()
+    await locateProjectResource(pending.plan.workDirectory)
+  } catch (error) {
+    storyImportError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    storyImportBusy.value = false
+  }
 }
 async function importWebDirectory(files: File[]) {
   if (!files.length) return
@@ -2184,6 +2342,8 @@ watch(
     focusedPath.value = null
     ctxMenu.value = { show: false, x: 0, y: 0, node: null }
     treeDropActive.value = false
+    storyImport.value = null
+    storyImportError.value = ''
     closeFilePreview()
     chooseCollision('cancel')
     filterQuery.value = ''
@@ -2258,7 +2418,13 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="pft memory-mode" :class="{ 'memory-desktop': isDesktop }" data-project-drop-target="project" @keydown="onTreeKeydown" tabindex="0">
+  <div
+    class="pft memory-mode"
+    :class="{ 'memory-desktop': isDesktop }"
+    data-project-drop-target="project"
+    @keydown="onTreeKeydown"
+    tabindex="0"
+  >
     <input
       ref="uploadInput"
       class="pft-native-input"
@@ -2274,6 +2440,13 @@ onBeforeUnmount(() => {
       webkitdirectory
       @change="onDirectoryInputChange"
     />
+    <input
+      ref="storyInput"
+      class="pft-native-input"
+      type="file"
+      accept=".md,.markdown,.txt,.pdf,.doc,.docx,.rtf,.odt,.html,.htm,.csv,.json,.xml,.srt,.vtt,.ppt,.pptx,.xls,.xlsx,.ods,.odp,.epub"
+      @change="onStoryInputChange"
+    />
     <div v-if="!hasProject" class="pft-empty">
       <JcIcon name="folder" style="font-size: 32px; opacity: 0.3" />
       <p>还没有打开项目</p>
@@ -2287,19 +2460,39 @@ onBeforeUnmount(() => {
       <!-- ═══ 顶部工具栏 ═══ -->
       <header class="pft-head">
         <div class="pft-project-row">
-          <button class="pft-project-name pft-project-trigger" :title="`切换项目：${projectStore.projectName.value}`" @click="ctxAddProjectFolder">
+          <button
+            class="pft-project-name pft-project-trigger"
+            :title="`切换项目：${projectStore.projectName.value}`"
+            @click="ctxAddProjectFolder"
+          >
             <img class="pft-brand-logo" src="/logo.svg" alt="" />
             <strong>{{ projectStore.projectName.value }}</strong>
             <JcIcon name="expand-more" />
           </button>
-          <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree"><JcIcon name="chevron-left" /></button>
+          <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree">
+            <JcIcon name="chevron-left" />
+          </button>
         </div>
       </header>
 
       <div class="pft-actions pft-memory-actions">
-        <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection"><JcIcon name="note-add" /></button>
-        <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection"><JcIcon name="create-new-folder" /></button>
-        <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories"><JcIcon name="refresh" /></button>
+        <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection">
+          <JcIcon name="note-add" />
+        </button>
+        <button class="pft-icon-btn" title="新建文件夹" @click="ctxNewFolderFromSelection">
+          <JcIcon name="create-new-folder" />
+        </button>
+        <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories">
+          <JcIcon name="refresh" />
+        </button>
+        <button
+          class="pft-icon-btn"
+          title="故事拆分（选中 Markdown 或选择文件）"
+          :disabled="storyImportBusy"
+          @click="openStoryImport"
+        >
+          <JcIcon name="article" />
+        </button>
       </div>
 
       <!-- 文件筛选 -->
@@ -2392,7 +2585,9 @@ onBeforeUnmount(() => {
       <template v-if="hasProject">
         <div class="pft-project-current">
           <strong>{{ projectStore.projectName.value }}</strong>
-          <span v-if="currentCloudProjectId">{{ projectTextSyncStatus.message || '已连接云端' }}</span>
+          <span v-if="currentCloudProjectId">{{
+            projectTextSyncStatus.message || '已连接云端'
+          }}</span>
           <span v-else>仅保存在当前设备</span>
           <progress
             v-if="projectTextSyncStatus.phase === 'syncing' && projectTextSyncStatus.progressTotal"
@@ -2409,10 +2604,19 @@ onBeforeUnmount(() => {
 
       <div class="pft-project-section">本机项目</div>
       <button
-        v-for="project in (isMobile ? mobileProjects.map(project => ({ id: project.path, name: project.name })) : isDesktop ? projectStore.recentProjectDirs.value.map(dir => ({ id: dir, name: projectNameFromOwner(dir) })) : webProjects)"
+        v-for="project in isMobile
+          ? mobileProjects.map(project => ({ id: project.path, name: project.name }))
+          : isDesktop
+            ? projectStore.recentProjectDirs.value.map(dir => ({
+                id: dir,
+                name: projectNameFromOwner(dir),
+              }))
+            : webProjects"
         :key="project.id"
         :class="{ active: project.id === projectKey }"
-        @click="isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)"
+        @click="
+          isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)
+        "
       >
         <JcIcon name="folder" /><span>{{ project.name }}</span>
       </button>
@@ -2437,7 +2641,12 @@ onBeforeUnmount(() => {
       >
         <JcIcon name="cloud" /><span>{{ project.name }}</span>
       </button>
-      <p v-if="gatewaySessionAuthenticated && !cloudProjects.length && !projectMenuError" class="pft-project-hint">还没有云项目</p>
+      <p
+        v-if="gatewaySessionAuthenticated && !cloudProjects.length && !projectMenuError"
+        class="pft-project-hint"
+      >
+        还没有云项目
+      </p>
       <p v-if="projectMenuError" class="pft-project-error">{{ projectMenuError }}</p>
     </div>
 
@@ -2536,11 +2745,7 @@ onBeforeUnmount(() => {
           <button v-if="previewType(ctxMenu.node)" class="pft-ctx-item" @click="ctxPreview">
             <JcIcon name="visibility" /><span>预览</span>
           </button>
-          <button
-            v-if="!ctxMenu.node.isDir"
-            class="pft-ctx-item"
-            @click="ctxReferenceInChat"
-          >
+          <button v-if="!ctxMenu.node.isDir" class="pft-ctx-item" @click="ctxReferenceInChat">
             <JcIcon name="alternate-email" /><span>引用到对话</span>
           </button>
           <button
@@ -2550,11 +2755,7 @@ onBeforeUnmount(() => {
           >
             <JcIcon name="palette" /><span>加入画布</span>
           </button>
-          <button
-            v-if="isDesktop && !isMobile"
-            class="pft-ctx-item"
-            @click="ctxOpenInSystem"
-          >
+          <button v-if="isDesktop && !isMobile" class="pft-ctx-item" @click="ctxOpenInSystem">
             <JcIcon name="open_in_new" /><span>用系统默认应用打开</span>
           </button>
           <button v-if="isCanvasFile(ctxMenu.node)" class="pft-ctx-item" @click="ctxOpen">
@@ -2618,6 +2819,70 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div
+        v-if="storyImport || storyImportBusy || storyImportError"
+        class="pft-story-overlay"
+        @click.self="!storyImportBusy && (storyImport = null)"
+      >
+        <div class="pft-story-dialog" role="dialog" aria-modal="true" aria-label="故事拆分预览">
+          <strong>故事拆分</strong>
+          <p v-if="storyImportBusy && !storyImport">正在读取并识别故事结构…</p>
+          <template v-if="storyImport">
+            <dl>
+              <dt>作品</dt>
+              <dd>{{ storyImport.plan.title }}</dd>
+              <dt>识别方式</dt>
+              <dd>{{ storyImport.plan.split.strategy }}</dd>
+              <dt>检测编码</dt>
+              <dd>{{ storyImport.plan.sourceEncoding }}</dd>
+              <dt>识别节点数</dt>
+              <dd>{{ storyImport.plan.split.nodes.filter(node => node.order > 0).length }}</dd>
+              <dt>首个节点</dt>
+              <dd>{{ storyImport.plan.split.nodes.find(node => node.order > 0)?.title }}</dd>
+              <dt>最后节点</dt>
+              <dd>{{ storyImport.plan.split.nodes.at(-1)?.title }}</dd>
+              <dt>输出位置</dt>
+              <dd>{{ storyImport.plan.workDirectory }}</dd>
+            </dl>
+            <div v-if="storyImport.plan.split.warnings.length" class="pft-story-warnings">
+              <span>发现以下来源标号异常，仍将按原文顺序拆分：</span>
+              <ul>
+                <li v-for="warning in storyImport.plan.split.warnings" :key="warning">
+                  {{ warning }}
+                </li>
+              </ul>
+            </div>
+          </template>
+          <p v-if="storyImportError" class="pft-story-error">{{ storyImportError }}</p>
+          <div>
+            <button
+              type="button"
+              :disabled="storyImportBusy"
+              @click="storyImport = null; storyImportError = ''"
+            >
+              取消
+            </button>
+            <button
+              v-if="storyImport"
+              type="button"
+              class="pft-story-confirm"
+              :disabled="storyImportBusy"
+              @click="confirmStoryImport"
+            >
+              {{ storyImportBusy ? '正在拆分…' : storyImport.plan.split.requiresReview ? '确认警告并拆分' : '开始拆分' }}
+            </button>
+            <button
+              v-else-if="storyImportError"
+              type="button"
+              :disabled="storyImportBusy"
+              @click="storyImportError = ''; storyInput?.click()"
+            >
+              重新选择
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div
         v-if="pendingCollision"
         class="pft-collision-overlay"
         @click.self="chooseCollision('cancel')"
@@ -2638,7 +2903,12 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div v-if="pendingDelete.length" class="pft-delete-overlay" @click.self="cancelDelete">
-        <div class="pft-delete-dialog" role="dialog" aria-modal="true" :aria-label="usesSystemTrash ? '移入废纸篓确认' : '永久删除确认'">
+        <div
+          class="pft-delete-dialog"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="usesSystemTrash ? '移入废纸篓确认' : '永久删除确认'"
+        >
           <strong>{{ usesSystemTrash ? '移入废纸篓？' : '永久删除？' }}</strong>
           <p v-if="usesSystemTrash">
             {{ pendingDelete.length }} 个项目会移入系统废纸篓，可在废纸篓中恢复。
@@ -2647,6 +2917,7 @@ onBeforeUnmount(() => {
           <div>
             <button :disabled="deletingDelete" @click="cancelDelete">取消</button>
             <button class="pft-delete-confirm" :disabled="deletingDelete" @click="confirmDelete">
+              <!-- oxfmt-ignore -->
               {{ deletingDelete ? (usesSystemTrash ? '正在移入...' : '正在删除...') : usesSystemTrash ? '移入废纸篓' : '永久删除' }}
             </button>
           </div>
@@ -2771,7 +3042,9 @@ onBeforeUnmount(() => {
   padding: 6px 8px;
   line-height: 1.45;
 }
-.pft-project-error { color: var(--danger); }
+.pft-project-error {
+  color: var(--danger);
+}
 .pft-project-menu button:hover,
 .pft-project-menu button.active {
   background: var(--olive-pale);
@@ -2819,9 +3092,19 @@ onBeforeUnmount(() => {
   cursor: pointer;
   text-align: left;
 }
-.pft-project-name:hover { background: var(--olive-pale); }
-.pft-project-name strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pft-project-name :deep(.jc-icon) { flex: 0 0 auto; color: var(--ink3); }
+.pft-project-name:hover {
+  background: var(--olive-pale);
+}
+.pft-project-name strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pft-project-name :deep(.jc-icon) {
+  flex: 0 0 auto;
+  color: var(--ink3);
+}
 .pft-brand-logo {
   width: 28px;
   height: 28px;
@@ -2855,6 +3138,89 @@ onBeforeUnmount(() => {
 }
 .pft-icon-btn:hover {
   background: var(--olive-pale);
+}
+.pft-icon-btn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.pft-story-overlay {
+  position: fixed;
+  z-index: 1200;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 32%);
+}
+.pft-story-dialog {
+  width: min(460px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface, #fff);
+  color: var(--ink);
+  padding: 18px;
+  box-shadow: 0 16px 48px rgb(0 0 0 / 20%);
+}
+.pft-story-dialog strong {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 16px;
+}
+.pft-story-dialog dl {
+  display: grid;
+  grid-template-columns: 76px 1fr;
+  gap: 8px;
+  margin: 0;
+  font-size: 13px;
+}
+.pft-story-dialog dt {
+  color: var(--ink3);
+}
+.pft-story-dialog dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.pft-story-dialog > div:last-child {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.pft-story-dialog button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 7px 12px;
+  background: var(--surface, #fff);
+  color: var(--ink);
+  cursor: pointer;
+}
+.pft-story-dialog button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+.pft-story-dialog .pft-story-confirm {
+  border-color: var(--brand, #4f7b55);
+  background: var(--brand, #4f7b55);
+  color: #fff;
+}
+.pft-story-warnings {
+  margin-top: 14px;
+  border-radius: 6px;
+  background: var(--warning-bg, #fff7dd);
+  padding: 10px;
+  font-size: 12px;
+}
+.pft-story-warnings ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.pft-story-error {
+  color: var(--danger, #b3261e);
+  font-size: 12px;
 }
 
 /* ─── 搜索 ─── */
@@ -2910,7 +3276,9 @@ onBeforeUnmount(() => {
   height: var(--memory-header-height);
   flex-basis: var(--memory-header-height);
 }
-.pft.memory-mode.memory-desktop .pft-project-menu { top: var(--memory-header-height); }
+.pft.memory-mode.memory-desktop .pft-project-menu {
+  top: var(--memory-header-height);
+}
 .pft.memory-mode.memory-desktop .pft-search {
   height: 34px;
   flex-basis: 34px;
@@ -2921,7 +3289,9 @@ onBeforeUnmount(() => {
   justify-content: flex-start;
   padding: 0 10px;
 }
-.pft.memory-mode .pft-search { border-bottom-color: color-mix(in srgb, var(--line) 55%, transparent); }
+.pft.memory-mode .pft-search {
+  border-bottom-color: color-mix(in srgb, var(--line) 55%, transparent);
+}
 .pft.memory-mode .pft-title,
 .pft.memory-mode .pft-node,
 .pft.memory-mode .pft-project-menu button,
@@ -2975,8 +3345,15 @@ onBeforeUnmount(() => {
   scrollbar-color: color-mix(in srgb, var(--ink3) 48%, transparent) transparent;
   scrollbar-width: thin;
 }
-.pft-list::-webkit-scrollbar { width: 10px; }
-.pft-list::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 48%, transparent); background-clip: content-box; }
+.pft-list::-webkit-scrollbar {
+  width: 10px;
+}
+.pft-list::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink3) 48%, transparent);
+  background-clip: content-box;
+}
 .pft-list.drop-active {
   background: var(--olive-pale);
   outline: 1px dashed var(--olive);

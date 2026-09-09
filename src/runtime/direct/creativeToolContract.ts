@@ -54,7 +54,12 @@ export const MEMORY_SEARCH_TOOL_DEFINITION = tool(
   'Search earlier assistant responses in the current conversation. Only finds content from this conversation, not from other conversations. Read-only.',
   {
     query: { type: 'string', description: 'Keywords or topic to search for in earlier responses' },
-    limit: { type: 'integer', minimum: 1, maximum: 10, description: 'Maximum number of results to return' },
+    limit: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 10,
+      description: 'Maximum number of results to return',
+    },
   },
   ['query'],
 )
@@ -194,6 +199,124 @@ export const MEMORY_FILE_TOOL_DEFINITIONS = [
       path: { type: 'string', description: 'Existing project-relative path' },
     },
     ['path'],
+  ),
+  tool(
+    'write_text_batch',
+    'Create or update multiple UTF-8 project files as one preflighted batch. For an existing file, expectedContent must equal the content just read; any conflict stops the batch before writing.',
+    {
+      files: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 100,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['path', 'content'],
+          properties: {
+            path: { type: 'string', description: 'Project-relative file path' },
+            content: { type: 'string', description: 'Complete desired file content' },
+            expectedContent: {
+              type: 'string',
+              description: 'Required current content when updating an existing file',
+            },
+          },
+        },
+      },
+    },
+    ['files'],
+  ),
+]
+
+const evidenceProperty = {
+  type: 'array',
+  items: { type: 'string', minLength: 1 },
+  description: 'Exact quotations copied from this source node',
+}
+
+const storyFactProperty = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'description', 'evidence'],
+  properties: {
+    name: { type: 'string', minLength: 1 },
+    description: { type: 'string', minLength: 1 },
+    evidence: evidenceProperty,
+  },
+}
+
+export const MEMORY_STORY_TOOL_DEFINITIONS = [
+  tool(
+    'prepare_story_analysis',
+    'Read the next unfinished source nodes and existing asset indexes for evidence-grounded story analysis. Does not write files.',
+    {
+      workDirectory: {
+        type: 'string',
+        description: 'Project-relative wiki/原始材料/<作品> or docs/wiki/原始材料/<作品> directory',
+      },
+      limit: { type: 'integer', minimum: 1, maximum: 10 },
+      includeNeedsReview: {
+        type: 'boolean',
+        description: 'Include needs_review nodes only when the user is resolving them',
+      },
+    },
+    ['workDirectory'],
+  ),
+  tool(
+    'commit_story_analysis',
+    'Validate and persist structured story analysis. Runtime derives every output path and rejects unsupported evidence or changed source nodes.',
+    {
+      workDirectory: {
+        type: 'string',
+        description: 'The same work directory returned by prepare_story_analysis',
+      },
+      analyses: {
+        type: 'array',
+        minItems: 1,
+        maxItems: 10,
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          required: [
+            'node_id',
+            'source_hash',
+            'summary',
+            'scenes',
+            'characters',
+            'props',
+            'relations',
+            'evidence',
+            'needs_review',
+          ],
+          properties: {
+            node_id: { type: 'string', minLength: 1 },
+            source_hash: { type: 'string', minLength: 1 },
+            summary: { type: 'string', minLength: 1 },
+            scenes: { type: 'array', items: storyFactProperty },
+            characters: { type: 'array', items: storyFactProperty },
+            props: { type: 'array', items: storyFactProperty },
+            relations: {
+              type: 'array',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                required: ['subject', 'predicate', 'object', 'description', 'evidence'],
+                properties: {
+                  subject: { type: 'string', minLength: 1 },
+                  predicate: { type: 'string', minLength: 1 },
+                  object: { type: 'string', minLength: 1 },
+                  description: { type: 'string', minLength: 1 },
+                  evidence: evidenceProperty,
+                },
+              },
+            },
+            evidence: evidenceProperty,
+            needs_review: { type: 'array', items: { type: 'string', minLength: 1 } },
+            expected_analysis_revision: { type: 'string' },
+          },
+        },
+      },
+    },
+    ['workDirectory', 'analyses'],
   ),
 ]
 
@@ -502,14 +625,13 @@ export function buildCreativeToolDefinitions() {
 
 export function buildMemoryDesktopToolDefinitions() {
   const coreToolNames = MEMORY_DESKTOP_TOOL_DEFINITIONS.map(tool => tool.function.name)
-  return [...MEMORY_DESKTOP_TOOL_DEFINITIONS, ...getMcpServerBridgeToolDefinitions({ coreToolNames })]
+  return [
+    ...MEMORY_DESKTOP_TOOL_DEFINITIONS,
+    ...getMcpServerBridgeToolDefinitions({ coreToolNames }),
+  ]
 }
 
-type ToolFieldType =
-  | 'string'
-  | 'boolean'
-  | 'integer'
-  | 'json'
+type ToolFieldType = 'string' | 'boolean' | 'integer' | 'json'
 
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   tool_search: { query: 'string', limit: 'integer' },
@@ -524,6 +646,13 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   mkdir: { path: 'string' },
   move: { path: 'string', destination: 'string' },
   delete: { path: 'string' },
+  write_text_batch: { files: 'json' },
+  prepare_story_analysis: {
+    workDirectory: 'string',
+    limit: 'integer',
+    includeNeedsReview: 'boolean',
+  },
+  commit_story_analysis: { workDirectory: 'string', analyses: 'json' },
   export_markdown_png: { title: 'string', content: 'string', width: 'integer' },
   create_document: { title: 'string', content: 'string', format: 'string' },
   create_html: { title: 'string', content: 'string' },
@@ -578,6 +707,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     MEMORY_SEARCH_TOOL_DEFINITION,
     ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
+    ...MEMORY_STORY_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
     ...MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS,
   ].find(tool => tool.function.name === call.function.name)!
@@ -585,6 +715,34 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     if (!(field in args)) throw new Error(`缺少工具参数: ${field}`)
   }
   return args
+}
+
+export interface TextBatchFile {
+  path: string
+  content: string
+  expectedContent?: string
+}
+
+export function parseTextBatchFiles(value: unknown): TextBatchFile[] {
+  if (!Array.isArray(value) || !value.length || value.length > 100)
+    throw new Error('批量文件数量必须为 1-100')
+  const files = value.map(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item))
+      throw new Error('批量文件参数无效')
+    const record = item as Record<string, unknown>
+    if (typeof record.path !== 'string' || typeof record.content !== 'string')
+      throw new Error('批量文件必须包含 path 和 content')
+    if (record.expectedContent !== undefined && typeof record.expectedContent !== 'string')
+      throw new Error('expectedContent 必须是字符串')
+    return {
+      path: normalizeCreativeProjectPath(record.path),
+      content: record.content,
+      ...(record.expectedContent === undefined ? {} : { expectedContent: record.expectedContent }),
+    }
+  })
+  if (new Set(files.map(file => file.path)).size !== files.length)
+    throw new Error('批量文件路径不能重复')
+  return files
 }
 
 export function boundedInteger(value: unknown, fallback: number, maximum = 1000): number {
@@ -695,14 +853,13 @@ export function createCreativeSkillSession(fetcher: typeof fetch = fetch) {
     },
     async read(path: string): Promise<string | null> {
       const rawPath = String(path || '').replace(/\\/g, '/')
-      const normalized = rawPath.startsWith('/') || /^[A-Za-z]:\//.test(rawPath)
-        ? ''
-        : rawPath
-      const skill = [...loadedSkills.values()].find(item =>
-        path.startsWith(`${item.baseDirectory}/`),
-      ) || (normalized && [...loadedSkills.values()].filter(item => item.files.includes(normalized)).length === 1
-        ? [...loadedSkills.values()].find(item => item.files.includes(normalized))
-        : undefined)
+      const normalized = rawPath.startsWith('/') || /^[A-Za-z]:\//.test(rawPath) ? '' : rawPath
+      const skill =
+        [...loadedSkills.values()].find(item => path.startsWith(`${item.baseDirectory}/`)) ||
+        (normalized &&
+        [...loadedSkills.values()].filter(item => item.files.includes(normalized)).length === 1
+          ? [...loadedSkills.values()].find(item => item.files.includes(normalized))
+          : undefined)
       if (!skill) return null
       const relative = path.startsWith(`${skill.baseDirectory}/`)
         ? path.slice(skill.baseDirectory.length + 1)

@@ -143,7 +143,8 @@ test('same-project Web notifications refresh loaded directories instead of rebui
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
   )
-  const webChange = source.match(/const offWebProjectFilesChanged = onEvent\([\s\S]*?\n\}\)\n/)?.[0] || ''
+  const webChange =
+    source.match(/const offWebProjectFilesChanged = onEvent\([\s\S]*?\n\}\)\n/)?.[0] || ''
 
   assert.match(webChange, /refreshLoadedDirectories\(\)/)
   assert.doesNotMatch(webChange, /loadFileTree\(\)/)
@@ -154,7 +155,8 @@ test('creating a project file refreshes its parent directory without rebuilding 
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
     'utf8',
   )
-  const createFile = source.match(/async function createFileAt\([\s\S]*?\n\}\nasync function ctxRename/)?.[0] || ''
+  const createFile =
+    source.match(/async function createFileAt\([\s\S]*?\n\}\nasync function ctxRename/)?.[0] || ''
 
   assert.match(createFile, /await projectFiles\.createText\(/)
   assert.doesNotMatch(createFile, /await loadFileTree\(\)/)
@@ -199,7 +201,10 @@ test('mobile file tree opens the existing context menu on long press without blo
   assert.match(source, /function startNodeLongPress\(e: PointerEvent, node: TreeNode\)/)
   assert.match(source, /if \(!isMobile \|\| e\.pointerType === 'mouse'\) return/)
   assert.match(source, /openNodeContextMenu\(node, nodeLongPressStart\.x, nodeLongPressStart\.y\)/)
-  assert.match(source, /function moveNodeLongPress[\s\S]*?NODE_LONG_PRESS_MOVE_LIMIT[\s\S]*?cancelNodeLongPress\(\)/)
+  assert.match(
+    source,
+    /function moveNodeLongPress[\s\S]*?NODE_LONG_PRESS_MOVE_LIMIT[\s\S]*?cancelNodeLongPress\(\)/,
+  )
   assert.match(source, /@pointerdown="startNodeLongPress\(\$event, item\.node\)"/)
   assert.match(source, /@pointerup="cancelNodeLongPress"/)
   assert.match(source, /-webkit-touch-callout:\s*none/)
@@ -441,6 +446,25 @@ test('project tree can clear selection and create directly in the project root',
   )
 })
 
+test('project tree exposes native story splitting with a deterministic preview and commit', () => {
+  const source = readFileSync(
+    join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
+    'utf8',
+  )
+
+  assert.match(source, /title="故事拆分（选中 Markdown 或选择文件）"/)
+  assert.match(source, /convertDocumentToMarkdown\(/)
+  assert.match(source, /buildStoryImportPlan/)
+  assert.match(source, /applyStoryImportPlan/)
+  assert.match(source, /故事拆分预览/)
+  assert.match(source, /首个节点/)
+  assert.match(source, /最后节点/)
+  assert.match(source, /检测编码/)
+  assert.match(source, /确认警告并拆分/)
+  assert.match(source, /locateProjectResource\(pending\.plan\.workDirectory\)/)
+  assert.match(source, /开始拆分/)
+})
+
 test('project export resolves external file collisions before opening a writable', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),
@@ -478,7 +502,10 @@ test('new project files open in the memory workbench', () => {
     createFile,
     /const resource = await projectFiles\.createText\(projectKey\.value, relPath, ''\)/,
   )
-  assert.match(createFile, /emitEvent\('memory:open-resource', await openProjectResource\(projectFiles, resource\)\)/)
+  assert.match(
+    createFile,
+    /emitEvent\('memory:open-resource', await openProjectResource\(projectFiles, resource\)\)/,
+  )
   assert.doesNotMatch(source, /projectTextEditorMode|project:new-document/)
 })
 
@@ -488,7 +515,9 @@ test('mobile project export does not call desktop folder pickers', () => {
     'utf8',
   )
   const exportSelected =
-    source.match(/async function exportSelectedProjectResources[\s\S]*?\n}\n\ninterface MobileShareData/)?.[0] || ''
+    source.match(
+      /async function exportSelectedProjectResources[\s\S]*?\n}\n\ninterface MobileShareData/,
+    )?.[0] || ''
   assert.match(source, /async function exportMobileResources[\s\S]*shareWindow\.share/)
   assert.match(exportSelected, /if \(isMobile\)[\s\S]*exportMobileResources/)
   assert.ok(

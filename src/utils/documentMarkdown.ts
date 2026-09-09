@@ -15,6 +15,7 @@ export interface DocumentToMarkdownResult {
   filename: string
   content: string
   engine: 'text' | 'anydoc' | 'markitdown' | 'attachment_text' | 'unsupported'
+  sourceEncoding?: string
   sourcePath?: string
   outputPath?: string
   truncated: boolean
@@ -90,6 +91,20 @@ function buildTextMarkdown(file: File, text: string): string {
 
 function isLikelyTextFile(file: File): boolean {
   return file.type.startsWith('text/') || SUPPORTED_TEXT_EXT.test(file.name)
+}
+
+export function decodeTextBytes(bytes: Uint8Array): { text: string; encoding: string } {
+  const bom = bytes.length >= 2 ? `${bytes[0]!.toString(16)}:${bytes[1]!.toString(16)}` : ''
+  const encoding = bom === 'ff:fe' ? 'utf-16le' : bom === 'fe:ff' ? 'utf-16be' : 'utf-8'
+  try {
+    return { text: new TextDecoder(encoding, { fatal: true }).decode(bytes), encoding }
+  } catch {
+    try {
+      return { text: new TextDecoder('gb18030', { fatal: true }).decode(bytes), encoding: 'gb18030' }
+    } catch {
+      return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows-1252' }
+    }
+  }
 }
 
 function arrayBufferToBase64(buffer: ArrayBuffer): string {
@@ -187,8 +202,8 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
   const outputFilename = normalizeMarkdownOutputFilename(input.file.name)
 
   if (isLikelyTextFile(input.file)) {
-    const text = await input.file.text()
-    const markdown = buildTextMarkdown(input.file, text)
+    const decoded = decodeTextBytes(new Uint8Array(await input.file.arrayBuffer()))
+    const markdown = buildTextMarkdown(input.file, decoded.text)
     const truncated = truncateContent(markdown, maxChars)
     if (!isMeaningfulMarkdownContent(truncated.content)) {
       return {
@@ -208,6 +223,7 @@ export async function convertDocumentToMarkdown(input: DocumentToMarkdownInput):
       filename: outputFilename,
       content: truncated.content,
       engine: 'text',
+      sourceEncoding: decoded.encoding,
       truncated: truncated.truncated,
       message: `已将 ${input.file.name} 转换为 Markdown。`,
     }

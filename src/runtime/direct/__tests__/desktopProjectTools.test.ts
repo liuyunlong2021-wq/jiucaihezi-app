@@ -125,7 +125,7 @@ test('creative tool definitions append connected MCP tools without changing core
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
@@ -253,6 +253,41 @@ test('desktop project tools use relative Tauri IPC with Web-compatible output', 
   assert.match((await execute(call('delete', { path: '资料/会议/纪要.md' }))).content, /废纸篓/)
   await assert.rejects(() => execute(call('read', { path: '../secret.md' })), /项目路径/)
   await assert.rejects(() => execute(call('read', { path: 'missing.md' })), /file not found/)
+})
+
+test('desktop memory tools use revisions for a preflighted semantic text batch', async () => {
+  const files = new Map<string, { content: string; revision: string }>([
+    ['wiki/人物/index.md', { content: '# 人物', revision: 'rev-1' }],
+  ])
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    invoke: async (command, payload) => {
+      const path = String(payload.input.relativePath || '')
+      const file = files.get(path)
+      if (command === 'dev_read_file') {
+        if (!file) throw new Error(`file not found: ${path}`)
+        return { path, content: file.content, base64: '', size: file.content.length, truncated: false, revision: { value: file.revision } }
+      }
+      if (command === 'dev_create_file_if_missing') {
+        if (file) throw new Error('文件已存在')
+        files.set(path, { content: String(payload.input.content), revision: 'rev-new' })
+        return { path }
+      }
+      if (command === 'dev_write_file_if_revision') {
+        if (!file || payload.input.expectedRevision !== file.revision) return { status: 'conflict' }
+        files.set(path, { content: String(payload.input.content), revision: 'rev-2' })
+        return { status: 'saved' }
+      }
+      throw new Error(`unexpected command: ${command}`)
+    },
+  })
+
+  const result = await execute(call('write_text_batch', { files: [
+    { path: 'wiki/章节分析/0001.md', content: '# 第一章分析' },
+    { path: 'wiki/人物/index.md', expectedContent: '# 人物', content: '# 人物\n\n- [[刘备]]' },
+  ] }))
+  assert.match(result.content, /创建 1，更新 1/)
+  assert.equal(files.get('wiki/人物/index.md')?.content, '# 人物\n\n- [[刘备]]')
 })
 
 test('desktop project tools hide Raw conversations from model file operations', async () => {

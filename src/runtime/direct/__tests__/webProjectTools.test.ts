@@ -74,8 +74,31 @@ test('web project tool definitions exclude Desktop-only 3D and custom MCP tools'
   )
   assert.deepEqual(
     buildMemoryWebProjectToolDefinitions().map(tool => tool.function.name),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
+    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides'],
   )
+})
+
+test('web memory tools preflight a semantic text batch before creating or updating files', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('语义沉淀')
+  await files.write(project.id, 'wiki/人物/index.md', '# 人物')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+
+  const result = await execute(call('write_text_batch', { files: [
+    { path: 'wiki/章节分析/0001.md', content: '# 第一章分析' },
+    { path: 'wiki/人物/index.md', expectedContent: '# 人物', content: '# 人物\n\n- [[刘备]]' },
+  ] }))
+  assert.match(result.content, /创建 1，更新 1/)
+  assert.equal((await files.read(project.id, 'wiki/人物/index.md')).content, '# 人物\n\n- [[刘备]]')
+
+  await assert.rejects(
+    () => execute(call('write_text_batch', { files: [
+      { path: 'wiki/人物/index.md', expectedContent: '# 旧内容', content: '# 覆盖' },
+      { path: 'wiki/人物/关羽.md', content: '# 关羽' },
+    ] })),
+    /批量写入冲突/,
+  )
+  await assert.rejects(() => files.read(project.id, 'wiki/人物/关羽.md'), /文件不存在/)
 })
 
 test('web memory tools expose connected MCP server aggregates for standalone use', () => {

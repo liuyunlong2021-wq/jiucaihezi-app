@@ -1,10 +1,11 @@
 import type { DirectToolExecutor, DirectToolResult } from './directTypes'
-import type { createWebProjectFiles } from '@/utils/webProjectFiles'
+import { webProjectTextRevision, type createWebProjectFiles } from '@/utils/webProjectFiles'
 import {
   boundedInteger,
   createCreativeSkillSession,
   linesPage,
   parseCreativeToolArguments,
+  parseTextBatchFiles,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
   MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   MEMORY_FILE_TOOL_DEFINITIONS,
@@ -21,6 +22,7 @@ import {
 import {
   isAuthorizedMemoryConversationPath,
   isMemoryConversationPath,
+  isMemoryProjectMutationBlocked,
 } from '@/utils/memoryProjectPaths'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
@@ -186,6 +188,45 @@ export function createWebProjectToolExecutor(input: {
           ...result.map(item => `${item.path}: Line ${item.line}: ${item.text}`),
         ].join('\n'),
       }
+    }
+
+    if (name === 'write_text_batch') {
+      const batch = parseTextBatchFiles(args.files)
+      const current = new Map<string, { content: string; revision: string } | null>()
+      for (const file of batch) {
+        if (isMemoryProjectMutationBlocked(file.path, 'text')) throw new Error(`系统管理文件不能批量写入: ${file.path}`)
+        try {
+          const entry = await input.files.read(requireProject(), file.path)
+          if (entry.mimeType === 'folder' || entry.metadata?.binaryStorage === 'opfs') throw new Error(`目标不是文本文件: ${file.path}`)
+          current.set(file.path, { content: entry.content, revision: webProjectTextRevision(entry) })
+        } catch (error) {
+          if (/文件不存在/.test(error instanceof Error ? error.message : String(error))) current.set(file.path, null)
+          else throw error
+        }
+      }
+      const conflicts = batch.filter(file => {
+        const before = current.get(file.path)
+        if (before === undefined) return true
+        if (before?.content === file.content) return false
+        return before === null ? file.expectedContent !== undefined : file.expectedContent !== before.content
+      })
+      if (conflicts.length) throw new Error(`批量写入冲突，未修改任何文件：${conflicts.map(file => file.path).join('、')}`)
+      let created = 0
+      let updated = 0
+      let skipped = 0
+      for (const file of batch) {
+        const before = current.get(file.path)
+        if (before?.content === file.content) { skipped += 1; continue }
+        if (before === null) {
+          await input.files.createText(requireProject(), file.path, file.content)
+          created += 1
+          continue
+        }
+        const result = await input.files.writeIfRevision(requireProject(), file.path, file.content, before!.revision)
+        if (result.status !== 'saved') throw new Error(`批量写入期间文件已变化: ${file.path}`)
+        updated += 1
+      }
+      return { content: `批量写入完成：创建 ${created}，更新 ${updated}，跳过 ${skipped}。`, details: { created, updated, skipped } }
     }
 
     if (name === 'write') {

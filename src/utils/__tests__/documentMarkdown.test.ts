@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import {
   classifyDocumentMarkdownReuse,
   convertDocumentToMarkdown,
+  decodeTextBytes,
   isMeaningfulMarkdownContent,
   normalizeMarkdownOutputFilename,
 } from '../documentMarkdown'
@@ -29,6 +30,21 @@ test('subtitle conversion uses the local text Markdown path', async () => {
   assert.equal(result.status, 'success')
   assert.equal(result.engine, 'text')
   assert.match(result.content, /字幕/)
+})
+
+test('text conversion decodes GBK bytes before producing Markdown', async () => {
+  const decoded = decodeTextBytes(Uint8Array.from([
+    0xd2, 0xbb, 0xcf, 0xf2, 0x0d, 0x0a, 0x31, 0x0d, 0x0a,
+  ]))
+  assert.equal(decoded.encoding, 'gb18030')
+  assert.equal(decoded.text, '一向\r\n1\r\n')
+
+  const result = await convertDocumentToMarkdown({
+    file: new File([Uint8Array.from([0xd2, 0xbb, 0xcf, 0xf2, 0x0a, 0x31])], '故事.txt'),
+  })
+  assert.equal(result.status, 'success')
+  assert.equal(result.sourceEncoding, 'gb18030')
+  assert.match(result.content, /一向\n1/)
 })
 
 test('isMeaningfulMarkdownContent rejects empty page marker extraction', () => {
