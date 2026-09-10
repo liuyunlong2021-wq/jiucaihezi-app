@@ -125,7 +125,7 @@ test('creative tool definitions append connected MCP tools without changing core
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'skill_copy_asset', 'skill_run_script', 'mkdir', 'move', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
@@ -144,6 +144,12 @@ test('creative tool definitions append connected MCP tools without changing core
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
+})
+
+test('Web creative tools do not expose local Skill Asset or Script execution', () => {
+  const names = buildCreativeToolDefinitions().map(tool => tool.function.name)
+  assert.equal(names.includes('skill_copy_asset'), false)
+  assert.equal(names.includes('skill_run_script'), false)
 })
 
 test('desktop incrementally edits one existing scene and writes it once', async () => {
@@ -343,7 +349,7 @@ test('desktop project tools load a registered local Skill instead of requiring p
     projectDir: '/fixture',
     invoke: fixtureInvoke,
     loadSkill: async (name) => name === 'JC-反推视频提示词'
-      ? { content: '# local video workflow', resources: [], readResource: async () => '' }
+      ? { content: '# local video workflow', resources: [], readResource: async path => ({ path, mimeType: 'text/plain', size: 0, text: '' }) }
       : null,
   })
 
@@ -358,7 +364,7 @@ test('desktop project tools read only declared resources from a loaded local Ski
       ? {
           content: '# local video workflow',
           resources: ['references/character-prompt-format.md'],
-          readResource: async (path) => path === 'references/character-prompt-format.md' ? '# character format' : '',
+          readResource: async path => ({ path, mimeType: 'text/markdown', size: 18, text: path === 'references/character-prompt-format.md' ? '# character format' : '' }),
         }
       : null,
   })
@@ -380,7 +386,7 @@ test('desktop project tools read a selected local Skill resource by its relative
     loadSkill: async () => ({
       content: '# 打戏 Skill',
       resources: ['references/动作专项.md'],
-      readResource: async () => '# 动作专项规则',
+      readResource: async path => ({ path, mimeType: 'text/markdown', size: 8, text: '# 动作专项规则' }),
     }),
     preloadSkills: ['jc-daxi'],
   })
@@ -388,6 +394,113 @@ test('desktop project tools read a selected local Skill resource by its relative
   assert.match(
     (await execute(call('read', { path: 'references/动作专项.md' }))).content,
     /动作专项规则/,
+  )
+})
+
+test('desktop project tools return a declared local Skill image as multimodal input', async () => {
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    invoke: fixtureInvoke,
+    loadSkill: async () => ({
+      id: 'visual-skill',
+      content: '# 视觉 Skill',
+      resources: ['references/layout.png'],
+      readResource: async path => ({ path, mimeType: 'image/png', size: 3, base64: 'aW1n' }),
+    }),
+    preloadSkills: ['视觉 Skill'],
+  })
+
+  const result = await execute(call('read', { path: 'references/layout.png' }))
+  assert.deepEqual(result.followupMessages, [{
+    role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,aW1n' } }],
+  }])
+})
+
+test('desktop project tools copy only declared assets into a project-relative path', async () => {
+  let request: any
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    loadSkill: async () => ({
+      id: 'visual-skill',
+      content: '# 视觉 Skill',
+      resources: ['assets/card.png', 'references/rule.md'],
+      readResource: async path => ({ path, mimeType: 'image/png', size: 3, base64: 'aW1n' }),
+    }),
+    preloadSkills: ['视觉 Skill'],
+    invoke: async (command, payload) => {
+      assert.equal(command, 'dev_write_file_bytes')
+      request = payload.input
+      return { path: payload.input.relativePath, bytesWritten: 3 }
+    },
+  })
+
+  assert.match((await execute(call('skill_copy_asset', {
+    skill: '视觉 Skill', path: 'assets/card.png', destination: '素材/card.png',
+  }))).content, /素材\/card.png/)
+  assert.deepEqual(request, { root: '/fixture', relativePath: '素材/card.png', dataBase64: 'aW1n' })
+  await assert.rejects(
+    () => execute(call('skill_copy_asset', { skill: '视觉 Skill', path: 'references/rule.md', destination: 'rule.md' })),
+    /assets\//,
+  )
+  await assert.rejects(
+    () => execute(call('skill_copy_asset', { skill: '视觉 Skill', path: 'assets/private.png', destination: 'private.png' })),
+    /未声明资源/,
+  )
+})
+
+test('desktop project tools copy a declared text Asset without requiring binary Base64', async () => {
+  let request: any
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    loadSkill: async () => ({
+      id: 'template-skill',
+      content: '# 模板 Skill',
+      resources: ['assets/template.json'],
+      readResource: async path => ({ path, mimeType: 'application/json', size: 11, text: '{"ok":true}' }),
+    }),
+    preloadSkills: ['模板 Skill'],
+    invoke: async (_command, payload) => {
+      request = payload.input
+      return { path: payload.input.relativePath, bytesWritten: 11 }
+    },
+  })
+  await execute(call('skill_copy_asset', {
+    skill: 'template-skill', path: 'assets/template.json', destination: '模板/template.json',
+  }))
+  assert.equal(request.dataBase64, 'eyJvayI6dHJ1ZX0=')
+})
+
+test('desktop project tools run only declared scripts with structured arguments and the real Skill id', async () => {
+  let request: any
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    loadSkill: async () => ({
+      id: 'checker-id',
+      content: '# 校验 Skill',
+      resources: ['scripts/check.mjs', 'references/rule.md'],
+      workdir: '/Users/test/.agents/skills/checker',
+      readResource: async path => ({ path, mimeType: 'text/plain', size: 0, text: '' }),
+    }),
+    preloadSkills: ['校验 Skill'],
+    invoke: async (command, payload) => {
+      assert.equal(command, 'run_skill_script')
+      request = payload.input
+      return { exitCode: 0, stdout: 'ok', stderr: '', durationMs: 2 }
+    },
+  })
+
+  const result = await execute(call('skill_run_script', {
+    skill: '校验 Skill', path: 'scripts/check.mjs', args: ['--mode', 'safe'], timeoutSeconds: 20,
+  }))
+  assert.equal(result.status, 'succeeded')
+  assert.equal(request.path, '/Users/test/.agents/skills/checker/scripts/check.mjs')
+  assert.deepEqual(request.args, ['--mode', 'safe'])
+  assert.deepEqual(request.context, { skillId: 'checker-id', agentId: null, rowId: null })
+  await execute(call('skill_run_script', { skill: 'checker-id', path: 'scripts/check.mjs' }))
+  assert.equal(request.context.skillId, 'checker-id')
+  await assert.rejects(
+    () => execute(call('skill_run_script', { skill: '校验 Skill', path: 'references/rule.md' })),
+    /scripts\//,
   )
 })
 
@@ -448,7 +561,7 @@ test('desktop project tools keep malformed local Skill paths out of the project 
     loadSkill: async () => ({
       content: '# local video workflow',
       resources: ['references/prop-format.md'],
-      readResource: async () => '',
+      readResource: async path => ({ path, mimeType: 'text/plain', size: 0, text: '' }),
     }),
   })
   await execute(call('skill', { name: 'JC-反推视频提示词' }))
@@ -546,7 +659,7 @@ test('desktop creative terminal runs a selected local Skill script in its packag
       content: '# 校验 Skill',
       resources: ['scripts/check.py'],
       workdir: '/Users/test/.agents/skills/checker',
-      readResource: async () => '',
+      readResource: async path => ({ path, mimeType: 'text/plain', size: 0, text: '' }),
     }),
     preloadSkills: ['checker'],
     invoke: async (_command, payload) => {

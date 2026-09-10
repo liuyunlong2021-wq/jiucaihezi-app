@@ -15,7 +15,45 @@
       "references/5-模型科普.md",
       "references/8-办公.md",
       "references/待补充.md"
-    ]
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "huanying.GIF",
+          "kind": "other"
+        },
+        {
+          "path": "references/1-Wiki使用.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/3-Skill科普.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/4-产品功能.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/5-模型科普.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/8-办公.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/待补充.md",
+          "kind": "reference"
+        }
+      ]
+    }
   },
   {
     "id": "skill-creator",
@@ -61,7 +99,73 @@
       "scripts/package_skill.py",
       "scripts/quick_validate.py",
       "scripts/utils.py"
-    ]
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": ".seed_complete",
+          "kind": "other"
+        },
+        {
+          "path": "LICENSE.txt",
+          "kind": "other"
+        },
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/analyzer.md",
+          "kind": "metadata"
+        },
+        {
+          "path": "agents/comparator.md",
+          "kind": "metadata"
+        },
+        {
+          "path": "agents/grader.md",
+          "kind": "metadata"
+        },
+        {
+          "path": "assets/eval_review.html",
+          "kind": "asset"
+        },
+        {
+          "path": "eval-viewer/generate_review.py",
+          "kind": "other"
+        },
+        {
+          "path": "eval-viewer/viewer.html",
+          "kind": "other"
+        },
+        {
+          "path": "references/schemas.md",
+          "kind": "reference"
+        },
+        {
+          "path": "scripts/__init__.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/aggregate_benchmark.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/package_skill.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/quick_validate.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/utils.py",
+          "kind": "script"
+        }
+      ]
+    }
   },
   {
     "id": "wiki-memory",
@@ -74,6 +178,24 @@
       "SKILL.md",
       "agents/openai.yaml",
       "references/故事资料沉淀规则.md"
-    ]
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        },
+        {
+          "path": "references/故事资料沉淀规则.md",
+          "kind": "reference"
+        }
+      ]
+    }
   }
 ]

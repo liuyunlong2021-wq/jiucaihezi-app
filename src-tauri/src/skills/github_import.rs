@@ -286,7 +286,7 @@ async fn preview_github_repo_import_impl(
     Ok(GitHubRepoPreview { repo, skills })
 }
 
-async fn import_github_repo_skills_impl(
+pub(crate) async fn import_github_repo_skills_impl(
     pool: &DbPool,
     repo_url: &str,
     selections: Vec<GitHubSkillImportSelection>,

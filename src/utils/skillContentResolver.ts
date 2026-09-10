@@ -1,3 +1,5 @@
+import { validateSkillPackageReferences } from '@/runtime/skills/skillPackageManifest'
+
 /**
  * Shared skill:// URI content resolver.
  * Used by both Web cloud chat (chatCloud.ts) and desktop direct chat (useChat.ts).
@@ -26,11 +28,52 @@ export interface WebSkillCatalogEntry {
   triggers: string[]
   commands: string[]
   files: string[]
+  package?: {
+    schemaVersion: 1
+    entry: 'SKILL.md'
+    files: Array<{ path: string; kind: string }>
+  }
 }
 
 export interface WebLoadedSkill extends WebSkillCatalogEntry {
   content: string
   baseDirectory: string
+}
+
+export interface WebSkillResource {
+  path: string
+  mimeType: string
+  size: number
+  text?: string | null
+  base64?: string | null
+}
+
+const MAX_WEB_SKILL_RESOURCE_BYTES = 30 * 1024 * 1024
+
+function webSkillResourceMime(path: string, header: string | null): string {
+  const declared = String(header || '').split(';')[0]?.trim().toLowerCase()
+  if (declared) return declared
+  const extension = path.split('.').pop()?.toLowerCase()
+  const known: Record<string, string> = {
+    md: 'text/markdown', txt: 'text/plain', json: 'application/json', yaml: 'application/yaml',
+    yml: 'application/yaml', py: 'text/x-python', js: 'text/javascript', mjs: 'text/javascript',
+    ts: 'text/typescript', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+    gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', pdf: 'application/pdf',
+  }
+  return known[extension || ''] || 'application/octet-stream'
+}
+
+function isWebSkillTextResource(mimeType: string): boolean {
+  return mimeType.startsWith('text/')
+    || ['application/json', 'application/yaml', 'image/svg+xml'].includes(mimeType)
+}
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  }
+  return btoa(binary)
 }
 
 let catalogPromise: Promise<WebSkillCatalogEntry[]> | null = null
@@ -53,6 +96,7 @@ async function fetchWebSkillCatalog(fetcher: typeof fetch): Promise<WebSkillCata
       triggers: Array.isArray(item.triggers) ? item.triggers.map(String) : [],
       commands: Array.isArray(item.commands) ? item.commands.map(String) : [],
       files: Array.isArray(item.files) ? item.files.map(String) : ['SKILL.md'],
+      package: item.package && item.package.schemaVersion === 1 ? item.package : undefined,
     }))
 }
 
@@ -91,9 +135,12 @@ export async function loadWebSkillByName(
   const encodedId = skill.id.split('/').map(encodeURIComponent).join('/')
   const response = await fetcher(`/skills/${encodedId}/SKILL.md`)
   if (!response.ok) throw new Error(`Skill 加载失败: ${skill.name}`)
+  const content = await response.text()
+  const missing = validateSkillPackageReferences(content, skill.files)
+  if (missing.length) throw new Error(`Skill 包不完整，缺少引用资源: ${missing.join(', ')}`)
   return {
     ...skill,
-    content: await response.text(),
+    content,
     baseDirectory: `/skills/${encodedId}`,
   }
 }
@@ -102,7 +149,7 @@ export async function readWebSkillResource(
   baseDirectory: string,
   relativePath: string,
   fetcher: typeof fetch = fetch,
-): Promise<string> {
+): Promise<WebSkillResource> {
   const base = String(baseDirectory || '').replace(/\/+$/, '')
   const rawPath = String(relativePath || '').replace(/\\/g, '/')
   const path = rawPath.replace(/^\/+/, '')
@@ -119,7 +166,21 @@ export async function readWebSkillResource(
   const url = `${base}/${path.split('/').map(encodeURIComponent).join('/')}`
   const response = await fetcher(url)
   if (!response.ok) throw new Error(`Skill 资源读取失败: ${path}`)
-  return await response.text()
+  const declaredSize = Number(response.headers.get('content-length') || 0)
+  if (declaredSize > MAX_WEB_SKILL_RESOURCE_BYTES) throw new Error('Skill 资源超过 30 MB 限制')
+  const bytes = new Uint8Array(await response.arrayBuffer())
+  if (bytes.byteLength > MAX_WEB_SKILL_RESOURCE_BYTES) throw new Error('Skill 资源超过 30 MB 限制')
+  const mimeType = webSkillResourceMime(path, response.headers.get('content-type'))
+  const text = isWebSkillTextResource(mimeType)
+    ? new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+    : null
+  return {
+    path,
+    mimeType,
+    size: bytes.byteLength,
+    text,
+    base64: text === null || mimeType.startsWith('image/') ? bytesToBase64(bytes) : null,
+  }
 }
 
 /**

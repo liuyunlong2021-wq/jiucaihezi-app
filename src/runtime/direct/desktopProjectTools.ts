@@ -45,10 +45,18 @@ type DesktopReadFile = {
 type Invoke = (command: string, payload: { input: Record<string, unknown> }) => Promise<any>
 type TerminalAttachment = { name: string; inputPath: string }
 export interface LocalCreativeSkill {
+  id?: string
   content: string
   resources: string[]
-  readResource: (path: string) => Promise<string>
+  readResource: (path: string) => Promise<LocalSkillResource>
   workdir?: string
+}
+export interface LocalSkillResource {
+  path: string
+  mimeType: string
+  size: number
+  text?: string | null
+  base64?: string | null
 }
 type LocalSkillLoader = (name: string) => Promise<LocalCreativeSkill | null>
 
@@ -85,10 +93,21 @@ function localSkillOutput(name: string, skill: LocalCreativeSkill): string {
     '',
     `Base directory for this skill: ${baseDirectory}`,
     '<skill_files>',
-    ...skill.resources.slice(0, 100).map(path => `<file>${path}</file>`),
+    ...skill.resources.map(path => `<file>${path}</file>`),
     '</skill_files>',
     '</skill_content>',
   ].join('\n')
+}
+
+function renderSkillResource(resource: LocalSkillResource, args: Record<string, unknown>): DirectToolResult {
+  if (resource.mimeType.startsWith('image/') && resource.base64) {
+    return {
+      content: `Skill image read successfully: ${resource.path}`,
+      followupMessages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:${resource.mimeType};base64,${resource.base64}` } }] }],
+    }
+  }
+  if (typeof resource.text === 'string') return { content: linesPage(resource.text, args.offset, args.limit) }
+  return { content: [`Skill binary resource: ${resource.path}`, `MIME: ${resource.mimeType}`, `Size: ${resource.size} bytes`].join('\n') }
 }
 
 function mimeForPath(path: string): string {
@@ -215,6 +234,11 @@ export function createDesktopProjectToolExecutor(input: {
     return outputPath.startsWith(`${rootPath}/`) ? outputPath.slice(rootPath.length + 1) : path
   }
 
+  function selectedLocalSkill(nameOrId: string): LocalCreativeSkill | undefined {
+    return localSkills.get(localSkillBase(nameOrId))
+      || [...localSkills.values()].find(skill => skill.id === nameOrId)
+  }
+
   function renderReadFile(
     path: string,
     file: DesktopReadFile,
@@ -253,6 +277,7 @@ export function createDesktopProjectToolExecutor(input: {
     const name = call.function.name
 
     if (name === 'read') await ensurePreloadedSkills()
+    if (name === 'skill_copy_asset' || name === 'skill_run_script') await ensurePreloadedSkills()
 
     if (name === 'skill') {
       const skillName = String(args.name)
@@ -268,10 +293,10 @@ export function createDesktopProjectToolExecutor(input: {
     if (name === 'read') {
       const rawPath = String(args.path)
       const resource = await skills.read(rawPath)
-      if (resource !== null) return { content: linesPage(resource, args.offset, args.limit) }
+      if (resource !== null) return renderSkillResource(resource, args)
       const localResources = [...localSkills.values()].filter(skill => skill.resources.includes(rawPath))
       if (localResources.length === 1) {
-        return { content: linesPage(await localResources[0]!.readResource(rawPath), args.offset, args.limit) }
+        return renderSkillResource(await localResources[0]!.readResource(rawPath), args)
       }
       if (localResources.length > 1) {
         throw new Error(`多个已选 Skill 包含资源 ${rawPath}；请使用加载结果中的完整资源路径。`)
@@ -281,7 +306,7 @@ export function createDesktopProjectToolExecutor(input: {
         const [base, skill] = localEntry
         const relative = rawPath.slice(base.length + 1)
         if (!skill.resources.includes(relative)) throw new Error(`Skill 资源不存在: ${relative}`)
-        return { content: linesPage(await skill.readResource(relative), args.offset, args.limit) }
+        return renderSkillResource(await skill.readResource(relative), args)
       }
       if (rawPath.startsWith('skill://local/')) {
         const resources = [...localSkills.values()].flatMap(skill => skill.resources)
@@ -333,6 +358,47 @@ export function createDesktopProjectToolExecutor(input: {
         }
       }
       return renderReadFile(path, await readFile(path), args)
+    }
+
+    if (name === 'skill_copy_asset') {
+      const skillName = String(args.skill || '')
+      const path = normalizeCreativeProjectPath(String(args.path || ''))
+      if (!path.startsWith('assets/')) throw new Error('Skill Asset 必须位于 assets/ 目录')
+      const skill = selectedLocalSkill(skillName)
+      if (!skill || !skill.resources.includes(path)) throw new Error(`已选 Skill 未声明资源: ${path}`)
+      const resource = await skill.readResource(path)
+      const dataBase64 = resource.base64
+        || (typeof resource.text === 'string'
+          ? uint8ArrayToBase64(new TextEncoder().encode(resource.text))
+          : '')
+      if (!dataBase64) throw new Error(`Skill Asset 内容不可用: ${path}`)
+      const destination = normalizeCreativeProjectPath(String(args.destination || ''))
+      if (!destination) throw new Error('项目目标路径不能为空')
+      const output = await invoke('dev_write_file_bytes', {
+        root: requireProject(),
+        relativePath: destination,
+        dataBase64,
+      })
+      return { content: `已复制 Skill Asset: ${path} -> ${String(output?.path || destination)}` }
+    }
+
+    if (name === 'skill_run_script') {
+      const skillName = String(args.skill || '')
+      const path = normalizeCreativeProjectPath(String(args.path || ''))
+      if (!path.startsWith('scripts/')) throw new Error('Skill Script 必须位于 scripts/ 目录')
+      const skill = selectedLocalSkill(skillName)
+      if (!skill?.workdir || !skill.resources.includes(path)) throw new Error(`已选本地 Skill 未声明脚本: ${path}`)
+      const scriptArgs = Array.isArray(args.args) ? args.args.map(value => String(value)) : []
+      const result = await invoke('run_skill_script', {
+        path: `${skill.workdir}/${path}`,
+        context: { skillId: skill.id || skillName, agentId: null, rowId: null },
+        args: scriptArgs, timeoutSeconds: boundedInteger(args.timeoutSeconds, 120, 300),
+      })
+      const exitCode = result.exitCode ?? result.exit_code ?? 'unknown'
+      return {
+        content: [`Script: ${path}`, `Exit code: ${exitCode}`, String(result.stdout || '').trim() && `stdout:\n${String(result.stdout).trim()}`, String(result.stderr || '').trim() && `stderr:\n${String(result.stderr).trim()}`].filter(Boolean).join('\n'),
+        status: Number(exitCode) === 0 ? 'succeeded' : 'failed',
+      }
     }
 
     if (name === 'glob') {

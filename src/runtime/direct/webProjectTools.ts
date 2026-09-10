@@ -24,8 +24,29 @@ import {
   isMemoryConversationPath,
   isMemoryProjectMutationBlocked,
 } from '@/utils/memoryProjectPaths'
+import type { WebSkillResource } from '@/utils/skillContentResolver'
 
 type WebProjectFiles = ReturnType<typeof createWebProjectFiles>
+
+function renderWebSkillResource(resource: WebSkillResource, args: Record<string, unknown>): DirectToolResult {
+  if (resource.mimeType.startsWith('image/') && resource.base64) {
+    return {
+      content: `Skill image read successfully: ${resource.path}`,
+      followupMessages: [{
+        role: 'user',
+        content: [{ type: 'image_url', image_url: { url: `data:${resource.mimeType};base64,${resource.base64}` } }],
+      }],
+    }
+  }
+  if (typeof resource.text === 'string') return { content: linesPage(resource.text, args.offset, args.limit) }
+  return {
+    content: [
+      `Skill binary resource: ${resource.path}`,
+      `MIME: ${resource.mimeType}`,
+      `Size: ${resource.size} bytes`,
+    ].join('\n'),
+  }
+}
 
 // `terminal` is Desktop-only; never advertise an unavailable tool to Web models.
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS.filter(
@@ -83,7 +104,7 @@ export function createWebProjectToolExecutor(input: {
     if (name === 'read') {
       const rawPath = String(args.path || '')
       const resource = await skills.read(rawPath)
-      if (resource !== null) return { content: linesPage(resource, args.offset, args.limit) }
+      if (resource !== null) return renderWebSkillResource(resource, args)
       if (rawPath === '.' || rawPath === '') {
         const offset = boundedInteger(args.offset, 1)
         const limit = boundedInteger(args.limit, 200)

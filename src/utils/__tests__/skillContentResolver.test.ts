@@ -70,6 +70,22 @@ test('web skill loader resolves frontmatter name to the packaged SKILL.md', asyn
   await assert.rejects(() => loadWebSkillByName('missing', fetcher as typeof fetch), /不存在/)
 })
 
+test('web skill loader rejects a package whose SKILL.md references a missing resource', async () => {
+  const incompleteFetcher = (url: string | URL | Request): Promise<Response> => {
+    if (String(url) === '/skills/incomplete/SKILL.md') {
+      return Promise.resolve(new Response('Read `references/missing.md` before writing.'))
+    }
+    if (String(url) === '/skills/index.json') {
+      return Promise.resolve(Response.json([{ id: 'incomplete', name: 'incomplete', files: ['SKILL.md'] }]))
+    }
+    return Promise.resolve(new Response('not found', { status: 404 }))
+  }
+  await assert.rejects(
+    () => loadWebSkillByName('incomplete', incompleteFetcher as typeof fetch),
+    /缺少引用资源: references\/missing\.md/,
+  )
+})
+
 test('web skill loader preserves nested package path segments', async () => {
   const skill = await loadWebSkillByName('JC-manju-fengge', fetcher as typeof fetch)
   assert.equal(skill.baseDirectory, '/skills/JC-manju-skills/JC-manju-fengge')
@@ -89,6 +105,28 @@ test('web skill resource reader rejects absolute, empty, and traversal paths', a
     )
   }
   assert.equal(fetchCount, 0)
+})
+
+test('web skill resource reader returns text, images, and binary through one resource contract', async () => {
+  const resourceFetcher = async (url: string | URL | Request) => {
+    const path = String(url)
+    if (path.endsWith('/references/rule.md')) {
+      return new Response('# 规则', { headers: { 'content-type': 'text/markdown; charset=utf-8' } })
+    }
+    if (path.endsWith('/assets/card.png')) {
+      return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png' } })
+    }
+    return new Response(new Uint8Array([0, 1, 2]), { headers: { 'content-type': 'application/octet-stream' } })
+  }
+  const text = await readWebSkillResource('/skills/test', 'references/rule.md', resourceFetcher as typeof fetch)
+  assert.equal(text.text, '# 规则')
+  assert.equal(text.base64, null)
+  const image = await readWebSkillResource('/skills/test', 'assets/card.png', resourceFetcher as typeof fetch)
+  assert.equal(image.mimeType, 'image/png')
+  assert.equal(image.base64, 'iVBORw==')
+  const binary = await readWebSkillResource('/skills/test', 'assets/data.bin', resourceFetcher as typeof fetch)
+  assert.equal(binary.text, null)
+  assert.equal(binary.base64, 'AAEC')
 })
 
 test('generated Web Skill catalog contains only packages with a standard SKILL.md entry', () => {

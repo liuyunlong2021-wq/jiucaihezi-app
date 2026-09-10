@@ -8,6 +8,7 @@ import {
   loadWebSkillByName,
   readWebSkillResource,
   type WebLoadedSkill,
+  type WebSkillResource,
 } from '@/utils/skillContentResolver'
 
 function tool(
@@ -224,6 +225,30 @@ export const MEMORY_FILE_TOOL_DEFINITIONS = [
       },
     },
     ['files'],
+  ),
+]
+
+export const SKILL_PACKAGE_TOOL_DEFINITIONS = [
+  tool(
+    'skill_copy_asset',
+    'Copy one file from the assets/ directory of a selected Skill into the current project. The source must be declared by the loaded Skill package.',
+    {
+      skill: { type: 'string', description: 'Exact selected Skill name or id' },
+      path: { type: 'string', description: 'Skill-relative assets/ path' },
+      destination: { type: 'string', description: 'Project-relative destination path' },
+    },
+    ['skill', 'path', 'destination'],
+  ),
+  tool(
+    'skill_run_script',
+    'Run one declared scripts/ file from a selected local Skill with structured arguments. Requires user approval and is unavailable on Web/Mobile without an isolated runner.',
+    {
+      skill: { type: 'string', description: 'Exact selected local Skill name or id' },
+      path: { type: 'string', description: 'Skill-relative scripts/ path' },
+      args: { type: 'array', items: { type: 'string' }, maxItems: 50, description: 'Literal arguments; shell syntax is not interpreted' },
+      timeoutSeconds: { type: 'integer', minimum: 1, maximum: 300 },
+    },
+    ['skill', 'path'],
   ),
 ]
 
@@ -610,6 +635,7 @@ const MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS = [
 const CORE_TOOL_NAMES = CREATIVE_PROJECT_TOOL_DEFINITIONS.map(tool => tool.function.name)
 const MEMORY_DESKTOP_TOOL_DEFINITIONS = [
   ...CREATIVE_PROJECT_TOOL_DEFINITIONS.slice(0, -1),
+  ...SKILL_PACKAGE_TOOL_DEFINITIONS,
   ...MEMORY_FILE_TOOL_DEFINITIONS,
   ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
   ...MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS,
@@ -647,6 +673,8 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   move: { path: 'string', destination: 'string' },
   delete: { path: 'string' },
   write_text_batch: { files: 'json' },
+  skill_copy_asset: { skill: 'string', path: 'string', destination: 'string' },
+  skill_run_script: { skill: 'string', path: 'string', args: 'json', timeoutSeconds: 'integer' },
   prepare_story_analysis: {
     workDirectory: 'string',
     limit: 'integer',
@@ -706,6 +734,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     TOOL_DESCRIBE_TOOL_DEFINITION,
     MEMORY_SEARCH_TOOL_DEFINITION,
     ...CREATIVE_PROJECT_TOOL_DEFINITIONS,
+    ...SKILL_PACKAGE_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_STORY_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
@@ -835,7 +864,6 @@ function skillOutput(skill: WebLoadedSkill): string {
     '<skill_files>',
     ...skill.files
       .filter(path => path !== 'SKILL.md')
-      .slice(0, 10)
       .map(path => `<file>${path}</file>`),
     '</skill_files>',
     '</skill_content>',
@@ -851,7 +879,7 @@ export function createCreativeSkillSession(fetcher: typeof fetch = fetch) {
       loadedSkills.set(skill.baseDirectory, skill)
       return skillOutput(skill)
     },
-    async read(path: string): Promise<string | null> {
+    async read(path: string): Promise<WebSkillResource | null> {
       const rawPath = String(path || '').replace(/\\/g, '/')
       const normalized = rawPath.startsWith('/') || /^[A-Za-z]:\//.test(rawPath) ? '' : rawPath
       const skill =

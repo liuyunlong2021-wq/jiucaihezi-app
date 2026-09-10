@@ -59,6 +59,7 @@ import { getModelMaxOutputTokens } from '@/data/modelContextWindows'
 import { estimateTokenCount } from 'tokenx'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { invoke } from '@tauri-apps/api/core'
+import { validateSkillPackageReferences } from '@/runtime/skills/skillPackageManifest'
 
 export function normalizeMemoryToolResult(result: DirectToolResult): DirectToolResult {
   return { ...result, status: result.status ?? 'succeeded' }
@@ -1050,19 +1051,27 @@ function createLocalSkillLoader(skills: SkillConfig[]) {
         // The loader still exposes the complete SKILL.md when a directory listing is unavailable.
       }
     }
+    const content = localSkillMarkdown(skill)
+    const missing = validateSkillPackageReferences(content, resources)
+    if (missing.length) throw new Error(`Skill 包不完整，缺少引用资源: ${missing.join(', ')}`)
     return {
-      content: localSkillMarkdown(skill),
+      id: skill.id,
+      content,
       resources,
       workdir: packagePath || undefined,
       readResource: async (relativePath: string) => {
         const relative = safeResource(relativePath)
         if (!resources.includes(relative)) throw new Error(`Skill 资源不存在: ${relative}`)
-        if (relative === 'SKILL.md') return localSkillMarkdown(skill)
+        if (relative === 'SKILL.md') {
+          const text = localSkillMarkdown(skill)
+          return { path: 'SKILL.md', mimeType: 'text/markdown', size: new TextEncoder().encode(text).byteLength, text }
+        }
         if (!packagePath) throw new Error(`Skill 资源路径不可用: ${relative}`)
-        return await invoke<string>('read_file_by_path', {
+        const resource = await invoke<{ path: string; mimeType: string; size: number; text?: string | null; base64?: string | null }>('read_skill_resource', {
           path: `${packagePath}/${relative}`,
           context,
         })
+        return resource
       },
     }
   }

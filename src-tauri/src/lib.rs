@@ -1506,6 +1506,8 @@ pub fn run() {
             skills::skills::get_skill_detail,
             skills::skills::read_skill_content,
             skills::skills::read_file_by_path,
+            skills::skills::read_skill_resource,
+            skills::skills::run_skill_script,
             skills::skills::list_skill_directory,
             skills::skills::open_in_file_manager,
             skills::skills::open_central_skills_directory,

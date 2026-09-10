@@ -20,6 +20,15 @@ test('project file tree exposes canvas create, copy, rename, and delete actions'
   assert.match(source, /projectFileActions\.remove/)
 })
 
+test('project file tree exposes the deterministic adaptation Wiki scaffold action', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  assert.match(source, /建立改编 Wiki/)
+  assert.match(source, /createAdaptationWiki/)
+  assert.match(source, /buildAdaptationWikiScaffoldPlan/)
+  assert.match(source, /applyAdaptationWikiScaffold/)
+  assert.match(source, /已有文件不会被覆盖/)
+})
+
 test('project file tree waits for pending canvas persistence before rename or delete', () => {
   const source = readFileSync(
     join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'),

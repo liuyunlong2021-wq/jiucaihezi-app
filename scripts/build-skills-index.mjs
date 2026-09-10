@@ -77,6 +77,15 @@ function listPackageFiles(directory, prefix = '') {
   return files.sort()
 }
 
+function packageFileKind(path) {
+  if (path === 'SKILL.md') return 'instruction'
+  if (path.startsWith('references/')) return 'reference'
+  if (path.startsWith('scripts/')) return 'script'
+  if (path.startsWith('assets/')) return 'asset'
+  if (path.startsWith('agents/')) return 'metadata'
+  return 'other'
+}
+
 const skills = []
 
 function findSkillPackages(directory, relative = '') {
@@ -105,6 +114,7 @@ for (const skillPackage of findSkillPackages(SKILLS_DIR)) {
 
   const commands = parseCommands(content)
 
+  const files = listPackageFiles(skillPackage.directory)
   skills.push({
     id: skillPackage.id,
     name: fm.name,
@@ -112,7 +122,12 @@ for (const skillPackage of findSkillPackages(SKILLS_DIR)) {
     description: fm.description || null,
     triggers: fm.triggers || [],
     commands: commands,
-    files: listPackageFiles(skillPackage.directory)
+    files,
+    package: {
+      schemaVersion: 1,
+      entry: 'SKILL.md',
+      files: files.map(path => ({ path, kind: packageFileKind(path) })),
+    },
   })
 }
 

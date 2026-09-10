@@ -1,16 +1,23 @@
+use base64::engine::general_purpose;
+use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
+use std::process::Stdio;
 use std::time::SystemTime;
+use std::time::{Duration, Instant};
 use tauri::State;
+use tokio::io::{AsyncRead, AsyncReadExt};
+use tokio::process::Command;
+use tokio::time::timeout;
 
-use crate::skills::SkillsAppState;
 use crate::skills::db::{self, Collection, DbPool, SkillForAgent};
+use crate::skills::SkillsAppState;
 
 use super::linker::uninstall_skill_from_agent_impl;
-use super::scanner::{ScanDirectoryOptions, scan_product_skills_impl, scan_skill_root};
+use super::scanner::{scan_product_skills_impl, scan_skill_root, ScanDirectoryOptions};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,6 +97,34 @@ pub struct SkillFileAccessContext {
     pub skill_id: String,
     pub agent_id: Option<String>,
     pub row_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillResourceRead {
+    pub path: String,
+    pub mime_type: String,
+    pub size: u64,
+    pub text: Option<String>,
+    pub base64: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunSkillScriptInput {
+    pub path: String,
+    pub context: SkillFileAccessContext,
+    pub args: Vec<String>,
+    pub timeout_seconds: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunSkillScriptOutput {
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    pub duration_ms: u128,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1898,6 +1933,223 @@ pub async fn read_file_by_path(
     read_file_by_path_impl(&state.db, &path, &context).await
 }
 
+fn skill_resource_mime(path: &Path) -> &'static str {
+    match path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "md" => "text/markdown",
+        "txt" => "text/plain",
+        "json" => "application/json",
+        "yaml" | "yml" => "application/yaml",
+        "py" => "text/x-python",
+        "js" | "mjs" => "text/javascript",
+        "ts" => "text/typescript",
+        "sh" => "text/x-shellscript",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "pdf" => "application/pdf",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        _ => "application/octet-stream",
+    }
+}
+
+fn skill_resource_is_text(mime: &str) -> bool {
+    mime.starts_with("text/")
+        || matches!(
+            mime,
+            "application/json" | "application/yaml" | "image/svg+xml"
+        )
+}
+
+#[tauri::command]
+pub async fn read_skill_resource(
+    state: State<'_, SkillsAppState>,
+    path: String,
+    context: SkillFileAccessContext,
+) -> Result<SkillResourceRead, String> {
+    read_skill_resource_impl(&state.db, &path, &context).await
+}
+
+async fn read_skill_resource_impl(
+    pool: &DbPool,
+    path: &str,
+    context: &SkillFileAccessContext,
+) -> Result<SkillResourceRead, String> {
+    let (authorized_path, _) = authorize_skill_file_path(pool, path, context).await?;
+    if !authorized_path.is_file() {
+        return Err("Skill resource must be a file".to_string());
+    }
+    let bytes = std::fs::read(&authorized_path)
+        .map_err(|e| format!("Failed to read '{}': {}", authorized_path.display(), e))?;
+    if bytes.len() > 30 * 1024 * 1024 {
+        return Err("Skill resource exceeds the 30 MB limit".to_string());
+    }
+    let mime_type = skill_resource_mime(&authorized_path).to_string();
+    let text = if skill_resource_is_text(&mime_type) {
+        Some(
+            String::from_utf8(bytes.clone())
+                .map_err(|_| "Skill text resource is not valid UTF-8".to_string())?,
+        )
+    } else {
+        None
+    };
+    let base64 = if text.is_none() || mime_type.starts_with("image/") {
+        Some(general_purpose::STANDARD.encode(&bytes))
+    } else {
+        None
+    };
+    Ok(SkillResourceRead {
+        path: authorized_path.to_string_lossy().into_owned(),
+        mime_type,
+        size: bytes.len() as u64,
+        text,
+        base64,
+    })
+}
+
+#[tauri::command]
+pub async fn run_skill_script(
+    state: State<'_, SkillsAppState>,
+    input: RunSkillScriptInput,
+) -> Result<RunSkillScriptOutput, String> {
+    run_skill_script_impl(&state.db, &input).await
+}
+
+async fn run_skill_script_impl(
+    pool: &DbPool,
+    input: &RunSkillScriptInput,
+) -> Result<RunSkillScriptOutput, String> {
+    let (script, roots) = authorize_skill_file_path(pool, &input.path, &input.context).await?;
+    let root = roots
+        .into_iter()
+        .find(|root| script.starts_with(root))
+        .ok_or_else(|| "Script is outside the selected Skill package".to_string())?;
+    let relative = script
+        .strip_prefix(&root)
+        .map_err(|_| "Invalid Skill script path".to_string())?;
+    if relative
+        .components()
+        .next()
+        .and_then(|part| part.as_os_str().to_str())
+        != Some("scripts")
+    {
+        return Err("Skill scripts must be inside scripts/".to_string());
+    }
+    if !script.is_file() {
+        return Err("Skill script must be a file".to_string());
+    }
+    if input.args.len() > 50
+        || input
+            .args
+            .iter()
+            .any(|value| value.len() > 4096 || value.contains('\0'))
+    {
+        return Err("Skill script arguments exceed the safety limit".to_string());
+    }
+    let program = match script
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "py" => "python3",
+        "js" | "mjs" => "node",
+        _ => return Err("Only .py, .js, and .mjs Skill scripts are supported".to_string()),
+    };
+    let started = Instant::now();
+    let mut command = Command::new(program);
+    command
+        .arg(&script)
+        .args(&input.args)
+        .current_dir(&root)
+        .kill_on_drop(true)
+        .env_clear()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for safe_name in [
+        "PATH", "LANG", "LC_ALL", "TMPDIR", "TEMP", "TMP",
+        "SYSTEMROOT", "PATHEXT", "COMSPEC",
+    ] {
+        if let Some(value) = std::env::var_os(safe_name) {
+            command.env(safe_name, value);
+        }
+    }
+    let seconds = input.timeout_seconds.unwrap_or(120).clamp(1, 300);
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("Failed to start Skill script: {}", e))?;
+    let stdout = child.stdout.take().ok_or_else(|| "Failed to capture Skill script stdout".to_string())?;
+    let stderr = child.stderr.take().ok_or_else(|| "Failed to capture Skill script stderr".to_string())?;
+    let execution = async {
+        let (status, stdout, stderr) = tokio::join!(
+            child.wait(),
+            read_limited_process_output(stdout, 1_000_000),
+            read_limited_process_output(stderr, 1_000_000),
+        );
+        Ok::<_, String>((
+            status.map_err(|e| format!("Failed to wait for Skill script: {}", e))?,
+            stdout.map_err(|e| format!("Failed to read Skill script stdout: {}", e))?,
+            stderr.map_err(|e| format!("Failed to read Skill script stderr: {}", e))?,
+        ))
+    };
+    let (status, stdout, stderr) = timeout(Duration::from_secs(seconds), execution)
+        .await
+        .map_err(|_| format!("Skill script timed out after {} seconds", seconds))??;
+    Ok(RunSkillScriptOutput {
+        exit_code: status.code(),
+        stdout: format_limited_process_output(stdout),
+        stderr: format_limited_process_output(stderr),
+        duration_ms: started.elapsed().as_millis(),
+    })
+}
+
+struct LimitedProcessOutput {
+    bytes: Vec<u8>,
+    truncated: bool,
+}
+
+async fn read_limited_process_output<R: AsyncRead + Unpin>(
+    mut reader: R,
+    limit: usize,
+) -> std::io::Result<LimitedProcessOutput> {
+    let mut stored = Vec::with_capacity(limit.min(64 * 1024));
+    let mut buffer = [0u8; 16 * 1024];
+    let mut truncated = false;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = limit.saturating_sub(stored.len());
+        if remaining > 0 {
+            stored.extend_from_slice(&buffer[..read.min(remaining)]);
+        }
+        if read > remaining {
+            truncated = true;
+        }
+    }
+    Ok(LimitedProcessOutput { bytes: stored, truncated })
+}
+
+fn format_limited_process_output(output: LimitedProcessOutput) -> String {
+    let mut value = String::from_utf8_lossy(&output.bytes).to_string();
+    if output.truncated {
+        value.push_str("\n[output truncated at 1000000 bytes]");
+    }
+    value
+}
+
 async fn read_file_by_path_impl(
     pool: &DbPool,
     path: &str,
@@ -2211,12 +2463,10 @@ mod tests {
 
         assert!(result.unwrap_err().contains("refusing to write through it"));
         assert!(!outside_dir.join("SKILL.md").exists());
-        assert!(
-            db::get_skill_by_id(&pool, "escape")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(db::get_skill_by_id(&pool, "escape")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -2538,12 +2788,10 @@ mod tests {
 
         assert_eq!(result.skill_id, "delete-me");
         assert!(!central_dir.join("delete-me").exists());
-        assert!(
-            db::get_skill_by_id(&pool, "delete-me")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(db::get_skill_by_id(&pool, "delete-me")
+            .await
+            .unwrap()
+            .is_none());
 
         let collection_count: i64 = sqlx::query_scalar(
             "SELECT COUNT(*) FROM collection_skills WHERE skill_id = 'delete-me'",
@@ -2614,12 +2862,10 @@ mod tests {
 
         assert!(err.contains("installed on agents"));
         assert!(central_dir.join("linked-skill").exists());
-        assert!(
-            db::get_skill_by_id(&pool, "linked-skill")
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(db::get_skill_by_id(&pool, "linked-skill")
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
@@ -2668,12 +2914,10 @@ mod tests {
         assert_eq!(result.uninstalled_agents, vec!["claude-code".to_string()]);
         assert!(!install_path.exists());
         assert!(!central_dir.join("cascade-me").exists());
-        assert!(
-            db::get_skill_installations(&pool, "cascade-me")
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(db::get_skill_installations(&pool, "cascade-me")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -2704,12 +2948,10 @@ mod tests {
 
         assert!(err.contains("outside Central Skills root"));
         assert!(outside_dir.exists());
-        assert!(
-            db::get_skill_by_id(&pool, "escape-skill")
-                .await
-                .unwrap()
-                .is_some()
-        );
+        assert!(db::get_skill_by_id(&pool, "escape-skill")
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
@@ -2751,12 +2993,10 @@ mod tests {
 
         assert!(result.uninstalled_agents.is_empty());
         assert!(!central_dir.join("shared-root").exists());
-        assert!(
-            db::get_skill_installations(&pool, "shared-root")
-                .await
-                .unwrap()
-                .is_empty()
-        );
+        assert!(db::get_skill_installations(&pool, "shared-root")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -2934,18 +3174,14 @@ mod tests {
         assert_eq!(result.uninstalled_agents, vec!["claude-code".to_string()]);
         assert!(!bundle_dir.exists());
         assert!(!install_path.exists());
-        assert!(
-            db::get_skill_by_id(&pool, "using-superpowers")
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(
-            db::get_skill_by_id(&pool, "writing-plans")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(db::get_skill_by_id(&pool, "using-superpowers")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(db::get_skill_by_id(&pool, "writing-plans")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -2992,12 +3228,10 @@ mod tests {
         assert_eq!(result.removed_kind, "symlink");
         assert!(std::fs::symlink_metadata(&central_bundle_link).is_err());
         assert!(real_bundle_dir.join("using-superpowers/SKILL.md").exists());
-        assert!(
-            db::get_skill_by_id(&pool, "using-superpowers")
-                .await
-                .unwrap()
-                .is_none()
-        );
+        assert!(db::get_skill_by_id(&pool, "using-superpowers")
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[tokio::test]
@@ -3812,11 +4046,165 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .contains("outside the allowed Skill directories")
-        );
+        assert!(result
+            .unwrap_err()
+            .contains("outside the allowed Skill directories"));
+    }
+
+    #[tokio::test]
+    async fn test_read_skill_resource_returns_binary_base64_and_mime() {
+        let tmp = TempDir::new().unwrap();
+        let pool = setup_test_db().await;
+        let central_dir = tmp.path().join("central");
+        fs::create_dir_all(&central_dir).unwrap();
+        set_agent_dir(&pool, "central", &central_dir).await;
+        create_central_skill(&pool, &central_dir, "binary-resource").await;
+        let asset = central_dir
+            .join("binary-resource")
+            .join("assets")
+            .join("card.png");
+        fs::create_dir_all(asset.parent().unwrap()).unwrap();
+        fs::write(&asset, [137u8, 80, 78, 71]).unwrap();
+
+        let result = read_skill_resource_impl(
+            &pool,
+            &asset.to_string_lossy(),
+            &file_context("binary-resource", None, None),
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.mime_type, "image/png");
+        assert_eq!(result.size, 4);
+        assert_eq!(result.text, None);
+        assert_eq!(result.base64.as_deref(), Some("iVBORw=="));
+    }
+
+    #[tokio::test]
+    async fn test_run_skill_script_requires_scripts_directory_and_supported_extension() {
+        let tmp = TempDir::new().unwrap();
+        let pool = setup_test_db().await;
+        let central_dir = tmp.path().join("central");
+        fs::create_dir_all(&central_dir).unwrap();
+        set_agent_dir(&pool, "central", &central_dir).await;
+        create_central_skill(&pool, &central_dir, "script-boundary").await;
+        let root = central_dir.join("script-boundary");
+        fs::create_dir_all(root.join("scripts")).unwrap();
+        let script = root.join("scripts").join("echo.mjs");
+        fs::write(&script, "console.log(process.argv.slice(2).join('|'))").unwrap();
+        let outside = root.join("references").join("bad.sh");
+        fs::create_dir_all(outside.parent().unwrap()).unwrap();
+        fs::write(&outside, "echo bad").unwrap();
+
+        let result = run_skill_script_impl(
+            &pool,
+            &RunSkillScriptInput {
+                path: script.to_string_lossy().into_owned(),
+                context: file_context("script-boundary", None, None),
+                args: vec!["one".to_string(), "two".to_string()],
+                timeout_seconds: Some(20),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(result.stdout.trim(), "one|two");
+
+        let outside_result = run_skill_script_impl(
+            &pool,
+            &RunSkillScriptInput {
+                path: outside.to_string_lossy().into_owned(),
+                context: file_context("script-boundary", None, None),
+                args: vec![],
+                timeout_seconds: Some(20),
+            },
+        )
+        .await;
+        assert!(outside_result.unwrap_err().contains("scripts/"));
+    }
+
+    #[tokio::test]
+    async fn test_run_skill_script_rejects_unsupported_extension_and_symlink_escape() {
+        let tmp = TempDir::new().unwrap();
+        let pool = setup_test_db().await;
+        let central_dir = tmp.path().join("central");
+        fs::create_dir_all(&central_dir).unwrap();
+        set_agent_dir(&pool, "central", &central_dir).await;
+        create_central_skill(&pool, &central_dir, "script-safety").await;
+        let root = central_dir.join("script-safety");
+        fs::create_dir_all(root.join("scripts")).unwrap();
+        let unsupported = root.join("scripts").join("run.sh");
+        fs::write(&unsupported, "echo no").unwrap();
+        let outside = tmp.path().join("outside.mjs");
+        fs::write(&outside, "console.log('secret')").unwrap();
+        #[cfg(unix)]
+        create_symlink(&outside, &root.join("scripts").join("link.mjs")).unwrap();
+
+        let unsupported_result = run_skill_script_impl(
+            &pool,
+            &RunSkillScriptInput {
+                path: unsupported.to_string_lossy().into_owned(),
+                context: file_context("script-safety", None, None),
+                args: vec![],
+                timeout_seconds: Some(20),
+            },
+        )
+        .await;
+        assert!(unsupported_result
+            .unwrap_err()
+            .contains("Only .py, .js, and .mjs"));
+        #[cfg(unix)]
+        {
+            let symlink_result = run_skill_script_impl(
+                &pool,
+                &RunSkillScriptInput {
+                    path: root
+                        .join("scripts")
+                        .join("link.mjs")
+                        .to_string_lossy()
+                        .into_owned(),
+                    context: file_context("script-safety", None, None),
+                    args: vec![],
+                    timeout_seconds: Some(20),
+                },
+            )
+            .await;
+            assert!(symlink_result.is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn test_run_skill_script_limits_captured_output_and_clears_unapproved_environment() {
+        let tmp = TempDir::new().unwrap();
+        let pool = setup_test_db().await;
+        let central_dir = tmp.path().join("central");
+        fs::create_dir_all(&central_dir).unwrap();
+        set_agent_dir(&pool, "central", &central_dir).await;
+        create_central_skill(&pool, &central_dir, "script-output-boundary").await;
+        let root = central_dir.join("script-output-boundary");
+        fs::create_dir_all(root.join("scripts")).unwrap();
+        let script = root.join("scripts").join("output.mjs");
+        fs::write(
+            &script,
+            "process.stdout.write((process.env.CARGO_MANIFEST_DIR || 'cleared') + '\\n' + 'x'.repeat(1100000))",
+        )
+        .unwrap();
+
+        let result = run_skill_script_impl(
+            &pool,
+            &RunSkillScriptInput {
+                path: script.to_string_lossy().into_owned(),
+                context: file_context("script-output-boundary", None, None),
+                args: vec![],
+                timeout_seconds: Some(20),
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(result.exit_code, Some(0));
+        assert!(result.stdout.starts_with("cleared\n"));
+        assert!(result.stdout.ends_with("[output truncated at 1000000 bytes]"));
+        assert!(result.stdout.len() < 1_000_100);
     }
 
     #[tokio::test]

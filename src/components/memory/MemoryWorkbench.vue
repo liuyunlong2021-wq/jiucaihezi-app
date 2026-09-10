@@ -106,6 +106,7 @@ const editingMarkdown = ref(false)
 const markdownDraft = ref('')
 const markdownSavePending = ref(false)
 const markdownSaveError = ref('')
+const markdownWikiLinkResources = ref<Array<{ path: string; isDirectory: boolean }>>([])
 const conversations = ref<MemoryConversation[]>([])
 const conversationPickerOpen = ref(false)
 const conversationSearch = ref('')
@@ -583,6 +584,7 @@ function closeModelPicker(event: PointerEvent) {
 }
 
 function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && (event.defaultPrevented || (event.target as Element | null)?.closest('.prompt-selection-editor'))) return
   if (event.key === 'Escape' && previewResource.value) closePreview()
 }
 
@@ -840,15 +842,21 @@ async function restoreConversationMemoryIndexState(
   memoryIndexPaths.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, path]))
 }
 
-function startMarkdownEdit() {
+async function startMarkdownEdit() {
   if (previewResource.value?.type !== 'editor') return
   markdownDraft.value = previewResource.value.text.content
   markdownSaveError.value = ''
+  try {
+    markdownWikiLinkResources.value = (await files.list(previewResource.value.resource.owner)).map(resource => ({ path: resource.path, isDirectory: resource.isDirectory }))
+  } catch {
+    markdownWikiLinkResources.value = []
+  }
   editingMarkdown.value = true
 }
 
 function cancelMarkdownEdit() {
   editingMarkdown.value = false
+  markdownWikiLinkResources.value = []
   markdownSaveError.value = ''
 }
 
@@ -2767,7 +2775,7 @@ function readDataUrl(file: File): Promise<string> {
             :outline="/\.md$/i.test(previewResource.resource.path)"
             @click="handleMarkdownClick"
           />
-          <PromptSelectionRevision v-else v-model="markdownDraft" :revise="reviseMarkdownSelection" />
+          <PromptSelectionRevision v-else v-model="markdownDraft" :revise="reviseMarkdownSelection" :wiki-link-resources="markdownWikiLinkResources" @cancel-edit="cancelMarkdownEdit" />
           <p v-if="markdownSaveError" class="memory-editor-error">{{ markdownSaveError }}</p>
           <section v-if="backlinks.length" class="memory-backlinks">
             <h2>被以下文件引用</h2>

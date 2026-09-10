@@ -67,6 +67,34 @@ test('web project tools use OpenCode-compatible names', () => {
   )
 })
 
+test('web project tools pass a loaded Skill image to the model as multimodal input', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('Skill 图片')
+  const execute = createWebProjectToolExecutor({
+    projectId: project.id,
+    files,
+    preloadSkills: ['视觉 Skill'],
+    fetcher: async (url: string | URL | Request) => {
+      const path = String(url)
+      if (path === '/skills/index.json') {
+        return Response.json([{ id: 'visual-skill', name: '视觉 Skill', description: '视觉参考', files: ['SKILL.md', 'assets/card.png'] }])
+      }
+      if (path === '/skills/visual-skill/SKILL.md') {
+        return new Response('---\nname: visual-skill\ndescription: 视觉参考\n---\n读取 `assets/card.png`')
+      }
+      if (path === '/skills/visual-skill/assets/card.png') {
+        return new Response(new Uint8Array([137, 80, 78, 71]), { headers: { 'content-type': 'image/png' } })
+      }
+      return new Response('not found', { status: 404 })
+    },
+  })
+  const result = await execute(call('read', { path: 'assets/card.png' }))
+  assert.deepEqual(result.followupMessages, [{
+    role: 'user',
+    content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw==' } }],
+  }])
+})
+
 test('web project tool definitions exclude Desktop-only 3D and custom MCP tools', () => {
   assert.deepEqual(
     buildWebProjectToolDefinitions().map(tool => tool.function.name),

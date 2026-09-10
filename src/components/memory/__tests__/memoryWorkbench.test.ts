@@ -364,7 +364,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
     /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/,
   )
   assert.match(workbench, /function resizeComposer\(\)/)
-  assert.match(workbench, /<PromptSelectionRevision v-else v-model="markdownDraft" :revise="reviseMarkdownSelection" \/>/)
+  assert.match(workbench, /<PromptSelectionRevision[\s\S]*v-model="markdownDraft"[\s\S]*:revise="reviseMarkdownSelection"/)
   const revision = source('src/components/memory/PromptSelectionRevision.vue')
   assert.match(revision, /selectedText: string; instruction: string/)
   assert.match(revision, /内容已变化，请重新选择/)
@@ -1262,7 +1262,7 @@ test('memory Markdown editing keeps source text and protects revision conflicts'
   assert.match(workbench, /result\.status === 'conflict'/)
   assert.match(workbench, /当前草稿已保留/)
   assert.match(workbench, /v-model="markdownDraft"/)
-  assert.match(workbench, /<PromptSelectionRevision v-else v-model="markdownDraft"/)
+  assert.match(workbench, /<PromptSelectionRevision[\s\S]*v-model="markdownDraft"/)
   assert.match(workbench, /async function reviseMarkdownSelection\(/)
   assert.match(workbench, /title="编辑 Markdown"/)
 })
@@ -1271,6 +1271,30 @@ test('Windows startup does not infer WebView2 availability from the browser user
   const main = source('src/main.ts')
 
   assert.doesNotMatch(main, /当前使用的浏览器不是 Edge|LinkId=2124703|\/Edg\\\//)
+})
+
+test('memory Markdown editing supplies project files to one shared WikiLink picker', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const editor = source('src/components/memory/PromptSelectionRevision.vue')
+  const picker = source('src/components/memory/WikiLinkPicker.vue')
+  assert.match(workbench, /const markdownWikiLinkResources = ref/)
+  assert.match(workbench, /files\.list\(previewResource\.value\.resource\.owner\)/)
+  assert.match(workbench, /:wiki-link-resources="markdownWikiLinkResources"/)
+  assert.ok(editor.includes('插入双链（Command/Ctrl + Shift + K）'))
+  assert.ok(editor.includes('event.metaKey || event.ctrlKey'))
+  assert.ok(editor.includes("event.shiftKey && event.key.toLowerCase() === 'k'"))
+  assert.ok(editor.includes('findOpenWikiLink'))
+  assert.ok(editor.includes('searchWikiLinkCandidates'))
+  assert.ok(editor.includes('completeWikiLink'))
+  assert.match(editor, /import WikiLinkPicker from/)
+  assert.match(editor, /event\.stopPropagation\(\)/)
+  assert.match(editor, /updateWikiLinkAnchor/)
+  assert.match(editor, /emit\('cancel-edit'\)/)
+  assert.doesNotMatch(editor, /class="wiki-link-picker"/)
+  assert.match(picker, /class="wiki-link-picker"/)
+  assert.match(workbench, /event\.defaultPrevented/)
+  assert.match(workbench, /closest\('\.prompt-selection-editor'\)/)
+  assert.match(workbench, /@cancel-edit="cancelMarkdownEdit"/)
 })
 
 test('memory settings expose the existing Desktop local model runtime', () => {

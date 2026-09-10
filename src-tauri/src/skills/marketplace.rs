@@ -479,6 +479,7 @@ fn row_to_marketplace_skill(row: &sqlx::sqlite::SqliteRow) -> MarketplaceSkill {
 
 #[derive(sqlx::FromRow)]
 struct MarketplaceSkillRow {
+    registry_url: String,
     name: String,
     download_url: String,
 }
@@ -490,8 +491,10 @@ pub async fn install_marketplace_skill(
 ) -> Result<(), String> {
     // Get skill info
     let skill = sqlx::query_as::<_, MarketplaceSkillRow>(
-        "SELECT id, registry_id, name, description, download_url, is_installed, synced_at
-         FROM marketplace_skills WHERE id = ?",
+        "SELECT r.url AS registry_url, m.name, m.download_url
+         FROM marketplace_skills m
+         JOIN skill_registries r ON r.id = m.registry_id
+         WHERE m.id = ?",
     )
     .bind(&skill_id)
     .fetch_optional(&state.db)
@@ -499,35 +502,35 @@ pub async fn install_marketplace_skill(
     .map_err(|e| e.to_string())?
     .ok_or_else(|| "Skill not found".to_string())?;
 
-    // Download SKILL.md content
-    let client = reqwest::Client::builder()
-        .user_agent("skills-manage/0.9.1")
-        .build()
-        .map_err(|e| e.to_string())?;
+    // Marketplace entries come from a GitHub registry. Resolve the candidate
+    // again and import its complete directory, including references/, scripts/,
+    // assets/, and agents/. Never degrade a package to a lone SKILL.md file.
+    let auth = github_import::github_direct_auth_from_settings(&state.db).await?;
+    let repo = github_import::resolve_repo_ref(&skill.registry_url, auth.as_deref()).await?;
+    let candidates = github_import::fetch_repo_skill_candidates(&repo, auth.as_deref()).await?;
+    let candidate = candidates
+        .into_iter()
+        .find(|candidate| {
+            candidate.download_url == skill.download_url || candidate.skill_name == skill.name
+        })
+        .ok_or_else(|| {
+            format!(
+                "Skill '{}' is no longer present in registry '{}'. Refresh the registry and retry.",
+                skill.name, skill.registry_url
+            )
+        })?;
 
-    let resp = client
-        .get(&skill.download_url)
-        .send()
-        .await
-        .map_err(|e| format!("Download failed: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("Download returned {}", resp.status()));
-    }
-
-    let content = resp
-        .text()
-        .await
-        .map_err(|e| format!("Failed to read response: {}", e))?;
-
-    // Create directory and write SKILL.md
-    let skill_dir = central_skills_dir().join(&skill.name);
-    std::fs::create_dir_all(&skill_dir)
-        .map_err(|e| format!("Failed to create directory: {}", e))?;
-
-    let skill_md_path = skill_dir.join("SKILL.md");
-    std::fs::write(&skill_md_path, &content)
-        .map_err(|e| format!("Failed to write SKILL.md: {}", e))?;
+    github_import::import_github_repo_skills_impl(
+        &state.db,
+        &skill.registry_url,
+        vec![github_import::GitHubSkillImportSelection {
+            source_path: candidate.source_path,
+            resolution: github_import::DuplicateResolution::Overwrite,
+            renamed_skill_id: None,
+        }],
+        None,
+    )
+    .await?;
 
     // Mark as installed in DB
     sqlx::query("UPDATE marketplace_skills SET is_installed = 1 WHERE id = ?")

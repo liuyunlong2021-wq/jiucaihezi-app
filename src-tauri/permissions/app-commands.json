@@ -118,6 +118,8 @@
           "delete_central_skill",
           "get_skill_detail",
           "read_skill_content",
+          "read_skill_resource",
+          "run_skill_script",
           "read_file_by_path",
           "list_skill_directory",
           "open_in_file_manager",

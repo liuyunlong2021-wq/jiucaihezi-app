@@ -30,6 +30,7 @@ import {
   type StoryImportPlan,
 } from '@/runtime/memory/storyImport'
 import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
+import { applyAdaptationWikiScaffold, buildAdaptationWikiScaffoldPlan } from '@/runtime/memory/adaptationWikiScaffold'
 import {
   appendProjectDirectoryIndex,
   createRuntimeProjectFileService,
@@ -189,6 +190,8 @@ const storyImport = ref<{
 } | null>(null)
 const storyImportBusy = ref(false)
 const storyImportError = ref('')
+const wikiScaffoldBusy = ref(false)
+const wikiScaffoldNotice = ref('')
 
 /* ─── 构建树 ─── */
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
@@ -450,6 +453,31 @@ async function refreshLoadedDirectories() {
   for (const path of paths) {
     const directory = findLoadedDirectory(path)
     if (directory) await refreshDirectory(directory)
+  }
+}
+async function createAdaptationWiki() {
+  const owner = projectKey.value
+  if (!owner || wikiScaffoldBusy.value) return
+  wikiScaffoldBusy.value = true
+  errorMsg.value = ''
+  wikiScaffoldNotice.value = ''
+  try {
+    const plan = buildAdaptationWikiScaffoldPlan((await projectFiles.list(owner)).map(resource => ({ path: resource.path, isDirectory: resource.isDirectory })))
+    if (plan.conflicts.length) throw new Error(plan.conflicts.join('\n'))
+    if (!plan.directories.length && !plan.files.length) {
+      wikiScaffoldNotice.value = `${plan.wikiRoot}/ 改编 Wiki 已完整，无需补齐`
+      return
+    }
+    const preview = [...plan.directories.map(path => `目录：${path}/`), ...plan.files.map(file => `索引：${file.path}`)]
+    const approved = await confirmAction(`将补齐改编 Wiki：\n\n${preview.join('\n')}\n\n已有文件不会被覆盖。`, { title: '建库', kind: 'info', okLabel: '开始建库' })
+    if (!approved) return
+    const result = await applyAdaptationWikiScaffold(projectFiles, owner)
+    await loadFileTree()
+    wikiScaffoldNotice.value = `建库完成：新增 ${result.createdDirectories.length} 个目录、${result.createdFiles.length} 个索引`
+  } catch (error) {
+    errorMsg.value = `建库失败：${error instanceof Error ? error.message : String(error)}`
+  } finally {
+    wikiScaffoldBusy.value = false
   }
 }
 function resourceKey(resource: ProjectResource): string {
@@ -2476,6 +2504,9 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="pft-actions pft-memory-actions">
+        <button class="pft-icon-btn" title="建立改编 Wiki" aria-label="建立改编 Wiki" :disabled="wikiScaffoldBusy" @click="createAdaptationWiki">
+          <JcIcon name="account-tree" />
+        </button>
         <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection">
           <JcIcon name="note-add" />
         </button>
@@ -2509,6 +2540,7 @@ onBeforeUnmount(() => {
 
       <!-- 错误 -->
       <div v-if="!loading && errorMsg" class="pft-status pft-error">{{ errorMsg }}</div>
+      <div v-if="!loading && wikiScaffoldNotice" class="pft-status pft-success">{{ wikiScaffoldNotice }}</div>
 
       <!-- ═══ 文件树列表 ═══ -->
       <div
@@ -3143,6 +3175,7 @@ onBeforeUnmount(() => {
   cursor: default;
   opacity: 0.45;
 }
+.pft-success { color: var(--olive, #2e7d32); }
 
 .pft-story-overlay {
   position: fixed;

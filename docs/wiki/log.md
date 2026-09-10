@@ -1182,3 +1182,7 @@
 - 索引模型固定返回 `summary + keywords`；请求携带严格 `response_format.json_schema`，程序只解析 `message.content`，拒绝 reasoning、Markdown、额外字段、截断和长度越界，并在校验成功后才写入 Wiki。
 - 已补摘要请求与响应解析 TDD，删除 JSON 大括号截取和 reasoning fallback；不支持结构化输出的模型明确失败且不写入。
 - 本地 focused `1176/1176`、`vue-tsc -b`、格式检查和 `git diff --check` 通过；真实 `jiucaihezi`、Ollama、MLX Provider、Web/Desktop/Mobile 人工验收仍待执行。
+## 2026-09-10 改编 Wiki 建库与双链输入合同确认
+
+- 用户确认韭菜盒子只提供通用基础能力：文件树“建库”、Markdown 双链按钮、`Command/Ctrl + Shift + K`、输入 `[[` 自动联想；角色、场景、道具判断及逐集改编继续交给 Skill。
+- 新增并实施 [[开发/通用记忆工作台改编Wiki建库与双链输入TDD-2026-09-10]]，加入 [[CLAUDE]] 当前开发入口；类型检查、相关测试和完整 focused 测试通过，真实平台人工验收仍待执行。
