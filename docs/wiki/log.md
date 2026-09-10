@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-09-07] 生产运维完成 | 磁盘清理、输出过期与 AnyDoc 归一
+
+- 回收 Docker BuildKit 缓存 `20.53 GB`，清理确认无用的旧日志、历史更新包和过期输出；根盘最终已用 `25 GB`、可用 `41 GB`、使用率 `38%`。不删除运行容器、生产数据卷、数据库或配置。
+- `cleanup-jiucaihezi-output.timer` 已启用，`/opt/jiucaihezi/output` 的超过 24 小时可再生产物每日清理；目录由约 `4.2 GB` 降至 `276 KB`。
+- 云端 `document-converter` 由 MarkItDown 切换为 AnyDoc `0.2.3`：staging `8811` 真实 DOCX 成功，生产 `8810` 健康检查成功，用户正式 Web 上传 `.doc` 并打开 Markdown 副本成功。扫描 PDF OCR 不在 AnyDoc 范围内。详见 [[运维/服务器存储清理与AnyDoc生产切换-2026-09-07]]。
+
 ## [2026-09-05] Skill Creator 修改入口与 v2.1.42 版本准备
 
 - 修改入口由路径识别改为精确 Skill ID，中央目录统一使用 `~/.agents/skills`；读取仍走 `skill_creator_load_installed_skill`，不扩大文件权限。

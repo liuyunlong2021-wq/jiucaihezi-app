@@ -13,6 +13,7 @@
 | 模型名 | `seed-audio-1.0` |
 | 认证 | `Authorization: Bearer <你的 API Key>` |
 | 参考音频 | 最多 3 段 |
+| 上传本地参考音频 | `POST /api/creations/uploads` |
 | 默认输出 | MP3 |
 
 创作面板显示名为 `豆包音频生成1.0`；第三方请求必须使用模型名 `seed-audio-1.0`。
@@ -77,6 +78,22 @@ curl --location 'https://api.jiucaihezi.studio/v1/audio/speech' \
   }
 }
 ```
+
+本地音频如需使用 `audio_url`，先上传到临时素材接口，再把返回的 HTTPS URL 填入 `audio_url`：
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/api/creations/uploads' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>' \
+  --form 'file=@./reference.wav'
+```
+
+```json
+{
+  "url": "https://api.jiucaihezi.studio/media/creation/<token>"
+}
+```
+
+临时素材接口支持 `image/*`、`audio/*` 和 `video/*`，单文件最大 20 MB，上传后 15 分钟失效。请在有效期内发起音频生成请求；不需要 URL 的客户端也可直接使用本文档的 `audio_data` 方式。
 
 约束：
 

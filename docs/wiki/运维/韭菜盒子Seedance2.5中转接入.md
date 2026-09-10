@@ -16,6 +16,7 @@
 | 认证 | `Authorization: Bearer <你的 API Key>` |
 | 计价 | `0.2/秒`，当前模型固定生成 30 秒 |
 | 分辨率 | `720p`（固定，不需要额外选择） |
+| 上传本地参考图 | `POST /api/creations/uploads` |
 
 ## 创建任务
 
@@ -43,6 +44,24 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 | `images` | 否 | 参考图 URL 数组，最多 30 张；每张不超过 20 MiB |
 
 参考图必须是中转服务可以直接访问的 `http://` 或 `https://` URL，并返回 `image/jpeg` 或 `image/png`。本中转接口不接受本地路径，也不接受 Base64 Data URI。图片数量最多 **30 张**；大小限制是**每个文件单张** 20 MiB，不是所有图片合计 20 MiB。
+
+### 上传本地参考图
+
+本地图片先上传到韭菜盒子临时素材接口，再将响应中的 `url` 填入 `images`：
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/api/creations/uploads' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>' \
+  --form 'file=@./reference.jpg'
+```
+
+```json
+{
+  "url": "https://api.jiucaihezi.studio/media/creation/<token>"
+}
+```
+
+临时素材接口只接受 `image/*`、`audio/*` 或 `video/*`，单文件最大 20 MB，上传后 15 分钟失效。请在有效期内调用 `POST /v1/videos`。创建任务成功并返回 `task_id` 后，参考图已由中转服务读取并上传，不受临时 URL 后续过期影响。
 
 成功提交后会返回任务 ID，例如：
 

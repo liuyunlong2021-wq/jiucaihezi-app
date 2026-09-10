@@ -1,5 +1,10 @@
 # 热缓存
 
+## [2026-09-07] 生产运维 | 存储治理与云端 AnyDoc
+
+- 已清理确认无用的 Docker BuildKit 缓存、旧日志、历史更新包和过期输出；根盘最终已用 `25 GB`、可用 `41 GB`、使用率 `38%`。`cleanup-jiucaihezi-output.timer` 每日清理 `/opt/jiucaihezi/output` 中超过 24 小时的可再生产物。
+- 云端 `document-converter` 已从 MarkItDown 切换至 AnyDoc `0.2.3`，生产 `127.0.0.1:8810/health` 和正式 Web DOC 转 Markdown 均通过用户验收。扫描版 PDF 仍需独立 OCR，不属于本次能力。详见 [[运维/服务器存储清理与AnyDoc生产切换-2026-09-07]]。
+
 ## [2026-09-05] Skill Creator 修改入口与 v2.1.42 发布
 
 - “我的 Skill”修改入口现在传递精确 Skill ID，并展示真实中央目录 `~/.agents/skills/<skill-id>/SKILL.md`；Skill Creator 按 ID 读取，安装卡确认后覆盖原 Skill。
@@ -93,7 +98,7 @@
 
 - **工作台右侧对话 Dock 布局已实施并完成 Desktop 多尺寸实测。** 打开文档或创作面板后，中间主区与右侧对话可同时操作；Dock 默认约 `360px`，可拖至完整态下限或吸附为窄栏，临界宽度提前切换图标。创作与资源预览互斥并复用同一次画布关闭 Promise；设置仍是悬浮抽屉。文档大纲折叠后不再保留空列，正文恢复单列全宽。对话下拉菜单未修改。定向测试 `56/56`、TypeScript、`build:quick`、Web 产物审计和差异检查通过；移动端与真实触控拖拽仍待人工验收。见 [[开发/通用记忆工作台右侧对话Dock布局TDD-2026-08-23]]。
 
-- **Desktop 文档转换已切换为内置 AnyDoc `0.2.3` 并通过用户验收。** 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 成功；图片型 104 页 PDF 被正确识别为无文字层并提示需要 OCR，原件保留。Desktop 本地 AnyDoc 路径不调用 MarkItDown，也不要求本机 Python 或 LibreOffice；仅 `internal`/不可用错误可回退现有云端 MarkItDown，Web/Mobile 也仍使用该云端服务。云端 AnyDoc staging 和生产切换按用户决定暂缓。见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]。
+- **Desktop 文档转换已切换为内置 AnyDoc `0.2.3` 并通过用户验收。** 用户已在 macOS ARM 安装包实际验证 DOCX、XLSX、PPTX 成功；图片型 104 页 PDF 被正确识别为无文字层并提示需要 OCR，原件保留。Desktop 本地 AnyDoc 路径不调用 MarkItDown，也不要求本机 Python 或 LibreOffice；仅 `internal`/不可用错误可回退云端。云端已于 2026-09-07 切换至同版本 AnyDoc，并由 staging、生产健康检查和正式 Web `.doc` 转 Markdown 验收。见 [[开发/通用记忆工作台AnyDoc内置格式转换升级TDD-2026-08-22]]、[[运维/服务器存储清理与AnyDoc生产切换-2026-09-07]]。
 
 - **迅虎支付 404 已完成生产修复与真实验收。** `jiucai-adapter` 和支付预览服务均未重启；故障在 Nginx 2026-08-20 06:09 重启后暴露：旧 `/xunhu/` 的 `rewrite +` 无尾斜杠 `proxy_pass` 没有可靠剥离前缀，容器收到不存在的 `/xunhu/submit.php`。现改为带尾斜杠的 `proxy_pass http://127.0.0.1:8081/;` 并 reload，公网探测返回 `200`，用户确认真实支付恢复。Nginx 备份不得留在 `sites-enabled`。见 [[运维/服务器运维#迅虎支付 `/xunhu/submit.php` 在 Nginx 重启后 404（2026-08-20）]]。
 

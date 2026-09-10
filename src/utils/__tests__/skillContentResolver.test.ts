@@ -13,6 +13,7 @@ import {
 const catalog = [{
   id: 'JC-短剧-世界模型',
   name: 'JC-duanju-shijiemoxing',
+  displayName: '短剧世界模型',
   description: '短剧世界模型',
   triggers: ['短剧'],
   commands: [],
@@ -20,6 +21,7 @@ const catalog = [{
 }, {
   id: 'JC-manju-skills/JC-manju-fengge',
   name: 'JC-manju-fengge',
+  displayName: '漫剧风格',
   description: '确定全片风格',
   triggers: ['风格'],
   commands: [],

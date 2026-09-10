@@ -355,7 +355,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   const skillOptions = [
     ...bundledSkills.map(skill => ({
       type: 'skill' as const,
-      display: skill.name,
+      display: skill.displayName,
       description: skill.description || '韭菜盒子内置 Skill',
       name: skill.name,
     })),

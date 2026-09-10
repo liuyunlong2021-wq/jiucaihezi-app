@@ -6,8 +6,8 @@ function createKv() {
   const map = new Map();
   return {
     map,
-    async put(key, value) { map.set(key, value); },
-    async get(key) { return map.get(key) || null; },
+    async put(key, value, options) { map.set(key, { value, options }); },
+    async get(key) { return map.get(key)?.value || null; },
     async delete(key) { map.delete(key); }
   };
 }
@@ -381,6 +381,7 @@ test('creation media upload accepts a NewAPI key only after upstream validation'
     assert.equal(response.status, 200);
     assert.match(payload.url, /\/media\/creation\/[a-f0-9]{32}$/);
     assert.equal(env.PLUGIN_KV.map.size, 1);
+    assert.equal([...env.PLUGIN_KV.map.values()][0].options.expirationTtl, 15 * 60);
   } finally {
     globalThis.fetch = previousFetch;
   }

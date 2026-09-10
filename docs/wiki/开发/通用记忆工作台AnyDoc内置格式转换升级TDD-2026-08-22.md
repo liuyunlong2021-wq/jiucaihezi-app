@@ -2,14 +2,14 @@
 
 > 日期：2026-08-22
 > 分支：`0822anydoc`
-> 状态：阶段 B Desktop AnyDoc 已完成并通过用户验收；阶段 C/D 云端归一暂缓
+> 状态：阶段 B Desktop AnyDoc 已完成并通过用户验收；阶段 C/D 已于 2026-09-07 完成 staging 与生产归一
 
 ## 1. 背景与根因
 
 当前格式转换链路按平台分裂：
 
 - 历史 Desktop 路径曾调用外部 MarkItDown，环境缺失或版本不同会导致失败和结果差异；现行 Desktop 已改为内置 AnyDoc。
-- Web/Mobile 依赖云端 Python MarkItDown，离线不可用，三端解析能力不一致。
+- Web/Mobile 依赖云端转换服务，离线不可用；该服务已于 2026-09-07 切换至 AnyDoc，三端解析内核版本统一为 `0.2.3`。
 - 原件保存、SHA-256 去重、Markdown 可读副本和模型读取合同已经稳定，不应随解析器替换而改变。
 - 虚假的 OCR 模式已删除。扫描 PDF 只能明确提示需要外部 OCR，不得伪造成功或进度。
 
@@ -31,7 +31,7 @@ AnyDoc（`firecrawl/anydoc`，审查版本 `v0.2.3`）适合作为统一解析�
 - 不重新引入 OCR、虚假 OCR 进度、占位页或取消协议。
 - 不把 AnyDoc WASM 直接加入 Web/Mobile 主包；离线需求未确认前继续使用云端。
 - 不修改 NewAPI 主容器、认证合同或现有持久化格式。
-- 不在本阶段删除云端 MarkItDown；云端归一另行验收。
+- 不承诺 Web/Mobile 离线转换；它们继续使用云端 AnyDoc 服务。
 - 不承诺 v1 将 Office/PDF 内嵌图片转换为模型可见图片；v1 保留原件，Markdown 至少保留正文、表格、链接和可用 alt 文本。
 
 ## 4. 设计逻辑
@@ -74,13 +74,13 @@ AnyDoc 只负责“文档导入解析”；现有 artifact 工具继续负责“
 
 阶段 B 是本 TDD 的第一交付目标。完成后必须生成可安装的 Desktop 测试包，用户可在真实 Mac/Windows 上直接测试：离线转换、中文 Office、复杂表格、PPT、文本型 PDF、损坏/加密文件和扫描 PDF 提示。阶段 B 未通过用户验收前，不切换云端生产解析器。
 
-### 阶段 C：云端 AnyDoc staging
+### 阶段 C：云端 AnyDoc staging（已完成，2026-09-07）
 
-阶段 B 已通过用户验收；阶段 C 暂缓。恢复时使用同一 AnyDoc Rust core 构建云端 `document-converter` staging。保持 `/documents/markdown` API、认证、20 MB 限制、超时和错误脱敏不变；验证 Docker/VPS 运行时、资源隔离、真实文件输出和 Desktop/云端结果对照。不以本地成功代替部署验证，也不直接覆盖生产 MarkItDown。
+阶段 B 已通过用户验收；staging 使用 Python `firecrawl-anydoc==0.2.3` binding，并在独立 `127.0.0.1:8811` 容器验证真实 DOCX 成功返回 `engine: "anydoc"`。`/documents/markdown` API、认证、20 MB 限制、90 秒超时和错误脱敏未改变。详细回执见 [[运维/服务器存储清理与AnyDoc生产切换-2026-09-07]]。
 
-### 阶段 D：云端生产归一
+### 阶段 D：云端生产归一（已完成，2026-09-07）
 
-阶段 C staging 通过且得到单独发布授权后，再将生产 `/documents/markdown` 的解析内核切换到 AnyDoc。Web/Mobile 不改变操作；Desktop 仍优先本地 AnyDoc。生产切换期间保留 MarkItDown fallback，并准备按 parser 版本回滚。本阶段不部署、不切换生产云端。
+staging 通过并获发布授权后，生产 `/documents/markdown` 已切换到 AnyDoc，继续绑定 `127.0.0.1:8810`。健康检查、正式 Web 上传 `.doc` 到 Markdown 副本均由用户验证成功；Web/Mobile 操作未改变，Desktop 仍优先本地 AnyDoc。保留切换前 MarkItDown 镜像/Compose 配置用于回滚；不删除原件或 Markdown 副本。
 
 ### 阶段 E：Web/Mobile 离线（可选）
 
@@ -131,24 +131,24 @@ AnyDoc 只负责“文档导入解析”；现有 artifact 工具继续负责“
 - Desktop：AnyDoc 随 Tauri 原生二进制编译，目标是 macOS ARM、macOS Intel、Windows x64 均可离线使用。
 - Web/Mobile：第一阶段继续云端转换；不承诺离线 AnyDoc。未来若采用 WASM，必须 Worker 化并通过包体和设备验收。
 - “Desktop 内置”验收必须同时证明：本机无 Python、MarkItDown、LibreOffice 时，成功样本仍可离线转换；否则只能称为实验集成。
-- 当前 Desktop 已集成 AnyDoc 并已通过用户验收；Desktop 本地转换不依赖本机 Python、MarkItDown 或 LibreOffice。Web/Mobile 仍走现有云端 MarkItDown；桌面 AnyDoc 失败时仅按错误矩阵对内部错误尝试云端回退。
+- 当前 Desktop 已集成 AnyDoc 并已通过用户验收；Desktop 本地转换不依赖本机 Python、MarkItDown 或 LibreOffice。Web/Mobile 继续走现有云端 AnyDoc；桌面 AnyDoc 失败时仅按错误矩阵对内部错误尝试云端回退。
 
 ## 8. 回滚与风险
 
-保留云端 MarkItDown fallback。若未来云端 AnyDoc staging 的失败率、中文样本质量、性能或跨平台运行不达标，则切回云端 MarkItDown；切换期间必须保留 parser 元数据，避免新旧 Markdown 静默混用。不删除用户原件、Markdown 副本、项目文件，不改变 API 路径和持久化数据。
+生产回滚依赖切换前保留的 MarkItDown 镜像/Compose 配置；当前未执行回滚演练，不能把它写成已验证能力。切换期间保留 parser 元数据，避免新旧 Markdown 静默混用；不删除用户原件、Markdown 副本、项目文件，不改变 API 路径和持久化数据。
 
 主要风险：AnyDoc 版本较新且公开 issue 仍涉及 PPT 页边界、嵌套表格、列表编号、嵌入图片、PDF 分页、加密 Office 和资源限制；扫描 PDF/OCR 明确不在其能力内；WASM 包体约 6.7 MB 且同步转换会阻塞主线程。
 
 ## 9. 完成定义
 
-阶段 B（Desktop 先行）已完成：自动化测试全绿、资源与路径边界测试通过、当前 macOS ARM 构建产物签名和 DMG 校验通过、可安装测试包交付、用户已验收 DOCX/XLSX/PPTX 与扫描 PDF 错误提示，失败矩阵符合预期。Intel Mac、Windows x64 和完整脱敏样本对照仍是后续跨平台门禁，不将其写成已通过。未完成阶段 C/D 前不得进入云端生产归一。
+阶段 B（Desktop 先行）已完成：自动化测试全绿、资源与路径边界测试通过、当前 macOS ARM 构建产物签名和 DMG 校验通过、可安装测试包交付、用户已验收 DOCX/XLSX/PPTX 与扫描 PDF 错误提示，失败矩阵符合预期。Intel Mac、Windows x64 和完整脱敏样本对照仍是后续跨平台门禁，不将其写成已通过。
 
-阶段 D（云端生产归一）完成必须同时满足：阶段 B 用户验收通过、阶段 C staging 通过、Desktop/云端同样本输出对照通过、云端真实运行时验收通过、生产回滚演练通过。当前阶段 C/D 暂缓；未满足前不得删除云端 MarkItDown fallback，也不得宣称“全平台离线转换”。
+阶段 D（云端生产归一）已完成 staging DOCX、生产健康检查和正式 Web `.doc` 转 Markdown 验收。复杂 XLSX、PPTX、文本 PDF、加密/损坏文件、扫描 PDF 及生产回滚演练仍未完成；不得据此宣称“全平台离线转换”或完整格式矩阵已通过。
 
-## 10. 当前实现与边界（2026-08-22）
+## 10. 当前实现与边界（更新至 2026-09-07）
 
 - Desktop `document_to_markdown_file`、`document_path_to_markdown_file` 和源文件转 Markdown 共用 Rust AnyDoc `0.2.3`；结果记录 `sourceSha256`、转换器版本和输出规范版本。
-- Desktop 本地 AnyDoc 路径不调用 MarkItDown。仓库中仍保留旧 Python/MarkItDown 解析辅助代码和兼容类型字段，供历史工具或云端合同兼容；它们不是当前 Desktop 本地文档转换的执行引擎。AnyDoc 仅在 `internal`/不可用错误时可按既有合同回退到云端 MarkItDown。
-- Web/Mobile 继续调用现有 `/documents/markdown` 云端接口，当前云端解析器仍是 MarkItDown。云端 AnyDoc 部署、staging 和生产切换全部暂缓。
+- Desktop 本地 AnyDoc 路径不调用 MarkItDown；仅 `internal`/不可用错误可按既有合同回退云端。
+- Web/Mobile 继续调用现有 `/documents/markdown` 云端接口；云端 `document-converter` 使用 Python `firecrawl-anydoc==0.2.3`，staging 和生产切换均已完成。运行时与正式 Web 验收见 [[运维/服务器存储清理与AnyDoc生产切换-2026-09-07]]。
 - 用户操作没有变化：上传文档后自动转换并进入对话；转换成功继续读取，扫描版/图片型 PDF 明确提示需要 OCR，原件保留。
 - 本轮交付包：`src-tauri/target/release/bundle/dmg/韭菜盒子_2.1.33_aarch64.dmg`；`hdiutil verify` 通过，SHA-256 为 `4c58ea80196c74b069e173053c5bcab9996f6be10668d2a55d81b5614bb0e57a`。

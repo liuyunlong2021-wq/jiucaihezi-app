@@ -108,6 +108,7 @@ for (const skillPackage of findSkillPackages(SKILLS_DIR)) {
   skills.push({
     id: skillPackage.id,
     name: fm.name,
+    displayName: fm.display_name || fm.name,
     description: fm.description || null,
     triggers: fm.triggers || [],
     commands: commands,

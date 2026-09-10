@@ -21,6 +21,7 @@ export async function resolveSkillUriContent(skillContent: string): Promise<stri
 export interface WebSkillCatalogEntry {
   id: string
   name: string
+  displayName: string
   description: string | null
   triggers: string[]
   commands: string[]
@@ -44,6 +45,10 @@ async function fetchWebSkillCatalog(fetcher: typeof fetch): Promise<WebSkillCata
     .map(item => ({
       id: item.id,
       name: item.name,
+      displayName:
+        typeof item.displayName === 'string' && item.displayName.trim()
+          ? item.displayName.trim()
+          : item.name,
       description: typeof item.description === 'string' ? item.description : null,
       triggers: Array.isArray(item.triggers) ? item.triggers.map(String) : [],
       commands: Array.isArray(item.commands) ? item.commands.map(String) : [],
@@ -63,7 +68,9 @@ export async function loadWebSkillCatalog(
   return await catalogPromise
 }
 
-export function buildWebSkillCatalogPrompt(entries: WebSkillCatalogEntry[]): string {
+export function buildWebSkillCatalogPrompt(
+  entries: Array<Pick<WebSkillCatalogEntry, 'name' | 'description'>>,
+): string {
   if (!entries.length) return ''
   return [
     'Available Skills:',
@@ -132,7 +139,9 @@ export async function resolveWebSkillSystemPrompt(
     return [
       `当前用户选择的 Skill：${selected.name}`,
       selected.description ? `Skill 描述：${selected.description}` : '',
-    ].filter(Boolean).join('\n')
+    ]
+      .filter(Boolean)
+      .join('\n')
   }
   return [
     `当前用户选择的 Skill：${selected.name}`,

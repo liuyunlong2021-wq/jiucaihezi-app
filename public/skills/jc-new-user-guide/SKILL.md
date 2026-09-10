@@ -1,5 +1,6 @@
 ---
 name: jc-new-user-guide
+display_name: 新手指南
 description: Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, project files, synchronization, attachments, or model selection. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子文件、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、jc-new-user-guide.
 allowed-tools:
   - read

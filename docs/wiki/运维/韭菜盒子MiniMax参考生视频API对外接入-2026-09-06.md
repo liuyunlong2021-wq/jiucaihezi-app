@@ -12,6 +12,7 @@
 | 创建视频 | `POST /v1/videos` |
 | 查询任务 | `GET /v1/videos/{task_id}` |
 | 下载成片 | `GET /v1/videos/{task_id}/content` |
+| 上传参考素材 | `POST /api/creations/uploads` |
 | 模型名 | `minimax_h3_image_audio_to_video_v2_15s` |
 | 认证 | `Authorization: Bearer <你的 API Key>` |
 | 计价 | `0.08/秒` |
@@ -73,7 +74,23 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 
 ### 参考素材
 
-参考素材使用服务端可访问的 `http://` 或 `https://` URL，不接受本地路径。服务会在提交上游任务前处理素材上传。
+参考素材必须是服务端可访问的 `http://` 或 `https://` URL，不接受本地路径或 `data:` URL。已有公网 URL 可以直接使用；本地文件先上传到韭菜盒子临时素材接口，再将返回的 URL 填入 `images` 或 `audios`。
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/api/creations/uploads' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>' \
+  --form 'file=@./reference.png'
+```
+
+响应示例：
+
+```json
+{
+  "url": "https://api.jiucaihezi.studio/media/creation/<token>"
+}
+```
+
+临时素材接口支持 `image/*`、`audio/*` 和 `video/*`，单文件最大 20 MB；返回 URL 为公网 HTTPS 地址，15 分钟后自动失效。请在上传完成后 15 分钟内创建视频任务。
 
 - 图片最多 9 张，每张不超过 20 MB
 - 音频最多 3 段，每段不超过 20 MB
