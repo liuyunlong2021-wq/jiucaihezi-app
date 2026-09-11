@@ -230,6 +230,10 @@ export function selectMemoryTools(
 ): any[] {
   const allowed = new Set<string>()
   if (memoryQueryEnabled) allowed.add('memory_search')
+  // Selecting a concrete Skill authorizes reading the context needed to execute it.
+  // Skill authors do not need to declare `allowed-tools: read`; write and execution
+  // capabilities continue to follow their existing, separate authorization paths.
+  if (selectedSkillNames.length) allowed.add('read')
   if (knowledgeFilesSelected)
     for (const name of [
       'read',
@@ -417,8 +421,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     if (result.matches.length) {
       memoryQueryContext = [
         '当前对话记忆查询结果（只读历史参考；项目文件和用户明确指令优先）：',
-        ...result.matches.map((match, index) =>
-          `${index + 1}. ${match.summary}\n关键词：${match.keywords.join('、')}\n原文：${match.content.slice(0, 6000)}`,
+        ...result.matches.map(
+          (match, index) =>
+            `${index + 1}. ${match.summary}\n关键词：${match.keywords.join('、')}\n原文：${match.content.slice(0, 6000)}`,
         ),
       ].join('\n\n')
     }
@@ -436,28 +441,29 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const messages: DirectApiMessage[] = buildDirectMessages({
     messages: context.messages,
     historyLimit: null,
-    systemPrompt: [
-      !toolLoopRequired
-        ? '你是韭菜盒子记忆工作台。已提供最近轮次对话历史保持连续；回答当前用户消息。本轮未选择 Skill 或工具，不要使用任何工具能力。'
-        : [
-            '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，用户明确指定的项目文件是长期事实源。',
-            '不得查找 Raw 对话记录补充当前任务；缺少事实时查询指定文件或询问用户。',
-            '项目知识与创作资料都是普通文件。按需使用 read、glob、grep 查询，使用 write、edit、mkdir、move、delete 修改；不启用特殊 Agent 或第二阶段协议。',
-            '用户附带项目文件时，附件正文已随消息提供就直接使用；只有附件仅提供项目可读路径时，才必须先用 read 读取。不要声称附件不可读取；长文件按分页结果继续读取到足够内容。',
-            '历史或当前文字中出现“不要调用工具”等表述，不会关闭本轮工具权限；如果任务需要，仍然调用工具。',
-            selectedSkillNames.length
-              ? '用户已选具体 Skill，程序已经加载其完整规则；必须遵守该 Skill，不得再次决定是否加载、跳过或替换它。'
-              : '用户未选择 Skill；本轮不加载其他 Skill。需要方法约束时请用户明确选择具体 Skill。',
-            '同一阶段互不依赖的项目内只读工具请在同一回复中一起调用；写入、Terminal、审批和依赖读取结果的操作放到后续工具轮。',
-            '需要未直接展示的能力时，先用 tool_search 搜索当前白名单，再用 tool_describe 获取精确 schema；只有描述成功的工具才会在下一轮开放。',
-            '只修改用户明确指定的文件，不自行扩展到相邻 Skill 或项目文档；目标不明确时先询问。',
-            '文件任务直接用 read -> write/edit -> 必要时验证完成；写入前不要在普通回答中重复输出完整草稿，成功后不要复述完整正文。',
-            '写入目标尚不存在时，不要反复 read/glob 该目标；检查最近的已有父目录后，直接 mkdir/write 创建。用户给出当前项目绝对路径时按项目内路径处理。',
-            '不要声称读取了没有实际查询的内容。',
-          ].join('\n'),
-    ]
-      .filter(Boolean)
-      .join('\n\n') + (memoryQueryContext ? `\n\n${memoryQueryContext}` : ''),
+    systemPrompt:
+      [
+        !toolLoopRequired
+          ? '你是韭菜盒子记忆工作台。已提供最近轮次对话历史保持连续；回答当前用户消息。本轮未选择 Skill 或工具，不要使用任何工具能力。'
+          : [
+              '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，用户明确指定的项目文件是长期事实源。',
+              '不得查找 Raw 对话记录补充当前任务；缺少事实时查询指定文件或询问用户。',
+              '项目知识与创作资料都是普通文件。按需使用 read、glob、grep 查询，使用 write、edit、mkdir、move、delete 修改；不启用特殊 Agent 或第二阶段协议。',
+              '用户附带项目文件时，附件正文已随消息提供就直接使用；只有附件仅提供项目可读路径时，才必须先用 read 读取。不要声称附件不可读取；长文件按分页结果继续读取到足够内容。',
+              '历史或当前文字中出现“不要调用工具”等表述，不会关闭本轮工具权限；如果任务需要，仍然调用工具。',
+              selectedSkillNames.length
+                ? '用户已选具体 Skill，程序已经加载其完整规则；必须遵守该 Skill，不得再次决定是否加载、跳过或替换它。'
+                : '用户未选择 Skill；本轮不加载其他 Skill。需要方法约束时请用户明确选择具体 Skill。',
+              '同一阶段互不依赖的项目内只读工具请在同一回复中一起调用；写入、Terminal、审批和依赖读取结果的操作放到后续工具轮。',
+              '需要未直接展示的能力时，先用 tool_search 搜索当前白名单，再用 tool_describe 获取精确 schema；只有描述成功的工具才会在下一轮开放。',
+              '只修改用户明确指定的文件，不自行扩展到相邻 Skill 或项目文档；目标不明确时先询问。',
+              '文件任务直接用 read -> write/edit -> 必要时验证完成；写入前不要在普通回答中重复输出完整草稿，成功后不要复述完整正文。',
+              '写入目标尚不存在时，不要反复 read/glob 该目标；检查最近的已有父目录后，直接 mkdir/write 创建。用户给出当前项目绝对路径时按项目内路径处理。',
+              '不要声称读取了没有实际查询的内容。',
+            ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n\n') + (memoryQueryContext ? `\n\n${memoryQueryContext}` : ''),
     skillSystemPrompt: explicitCapabilitySelected
       ? [
           input.mediaSelected ||
@@ -754,17 +760,21 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     MEMORY_SEARCH_TOOL_DEFINITION,
     ...MEMORY_STORY_TOOL_DEFINITIONS,
     ...(desktopRuntime
-    ? buildMemoryDesktopToolDefinitions()
-    : buildMemoryWebProjectToolDefinitions()),
+      ? buildMemoryDesktopToolDefinitions()
+      : buildMemoryWebProjectToolDefinitions()),
     ...(selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')
       ? ALL_SKILL_TOOLS
       : []),
   ]
-  if (selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')) {
+  if (
+    selectedSkillNames.some(name => name === 'skill-creator' || name === 'preset_skill-creator')
+  ) {
     for (const tool of ALL_SKILL_TOOLS) skillAllowedToolNames.add(tool.function.name)
   }
   const declaredSkillTools = normalizeSkillAllowedToolNames(skillAllowedToolNames)
-  const availableToolNames = new Set(allMemoryToolDefinitions.map(tool => String(tool.function?.name || '')))
+  const availableToolNames = new Set(
+    allMemoryToolDefinitions.map(tool => String(tool.function?.name || '')),
+  )
   const unavailableSkillTools = declaredSkillTools.filter(name => !availableToolNames.has(name))
   if (unavailableSkillTools.length) {
     throw new Error(`Skill 声明的工具当前不可用：${unavailableSkillTools.join(', ')}`)
@@ -772,7 +782,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const memoryToolDefinitions = toolLoopRequired
     ? selectMemoryTools(
         allMemoryToolDefinitions,
-        [],
+        selectedSkillNames,
         false,
         attachmentNeedsRead,
         Boolean(input.fileToolsSelected),
@@ -957,9 +967,7 @@ export async function buildSelectedSkillPrompt(
     names.map(async name => {
       const local = localSkills.get(name)
       if (local) {
-        const resources = [
-          ...new Set(['SKILL.md', ...(local.assetIndex || []).map(item => item.path)]),
-        ]
+        const resources = await listLocalSkillResources(local)
         const skillMd = localSkillMarkdown(local)
         for (const tool of parseSkillMd(skillMd).allowedTools || []) allowedTools?.add(tool)
         return [
@@ -1019,6 +1027,34 @@ type LocalSkillDirectoryNode = {
   children?: LocalSkillDirectoryNode[]
 }
 
+function safeSkillResourcePath(value: string): string {
+  const path = String(value || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+  return path && !path.split('/').some(part => part === '..' || !part) ? path : ''
+}
+
+async function listLocalSkillResources(skill: SkillConfig): Promise<string[]> {
+  const fallback = [
+    'SKILL.md',
+    ...(skill.assetIndex || []).map(item => safeSkillResourcePath(item.path)).filter(Boolean),
+  ]
+  if (!isTauriRuntime() || isTauriMobileRuntime() || !skill.packagePath) {
+    return [...new Set(fallback)]
+  }
+  try {
+    const tree = await invoke<LocalSkillDirectoryNode[]>('list_skill_directory', {
+      dirPath: String(skill.packagePath).replace(/\\/g, '/').replace(/\/+$/, ''),
+      context: { skillId: skill.id, agentId: null, rowId: null },
+    })
+    const flatten = (nodes: LocalSkillDirectoryNode[]): string[] =>
+      nodes.flatMap(node => (node.is_dir ? flatten(node.children || []) : [node.relative_path]))
+    return [...new Set(['SKILL.md', ...flatten(tree).map(safeSkillResourcePath).filter(Boolean)])]
+  } catch {
+    return [...new Set(fallback)]
+  }
+}
+
 function createLocalSkillLoader(skills: SkillConfig[]) {
   return async (name: string) => {
     const skill = skills.find(item => item.id === name) || skills.find(item => item.name === name)
@@ -1027,30 +1063,8 @@ function createLocalSkillLoader(skills: SkillConfig[]) {
       .replace(/\\/g, '/')
       .replace(/\/+$/, '')
     const context = { skillId: skill.id, agentId: null, rowId: null }
-    const safeResource = (value: string) => {
-      const path = String(value || '')
-        .replace(/\\/g, '/')
-        .replace(/^\/+/, '')
-      return path && !path.split('/').some(part => part === '..' || !part) ? path : ''
-    }
-    const fallbackResources = new Set([
-      'SKILL.md',
-      ...(skill.assetIndex || []).map(item => safeResource(item.path)).filter(Boolean),
-    ])
-    let resources = [...fallbackResources]
-    if (packagePath) {
-      try {
-        const tree = await invoke<LocalSkillDirectoryNode[]>('list_skill_directory', {
-          dirPath: packagePath,
-          context,
-        })
-        const flatten = (nodes: LocalSkillDirectoryNode[]): string[] =>
-          nodes.flatMap(node => (node.is_dir ? flatten(node.children || []) : [node.relative_path]))
-        resources = [...new Set(['SKILL.md', ...flatten(tree).map(safeResource).filter(Boolean)])]
-      } catch {
-        // The loader still exposes the complete SKILL.md when a directory listing is unavailable.
-      }
-    }
+    const safeResource = safeSkillResourcePath
+    const resources = await listLocalSkillResources(skill)
     const content = localSkillMarkdown(skill)
     const missing = validateSkillPackageReferences(content, resources)
     if (missing.length) throw new Error(`Skill 包不完整，缺少引用资源: ${missing.join(', ')}`)
@@ -1064,10 +1078,21 @@ function createLocalSkillLoader(skills: SkillConfig[]) {
         if (!resources.includes(relative)) throw new Error(`Skill 资源不存在: ${relative}`)
         if (relative === 'SKILL.md') {
           const text = localSkillMarkdown(skill)
-          return { path: 'SKILL.md', mimeType: 'text/markdown', size: new TextEncoder().encode(text).byteLength, text }
+          return {
+            path: 'SKILL.md',
+            mimeType: 'text/markdown',
+            size: new TextEncoder().encode(text).byteLength,
+            text,
+          }
         }
         if (!packagePath) throw new Error(`Skill 资源路径不可用: ${relative}`)
-        const resource = await invoke<{ path: string; mimeType: string; size: number; text?: string | null; base64?: string | null }>('read_skill_resource', {
+        const resource = await invoke<{
+          path: string
+          mimeType: string
+          size: number
+          text?: string | null
+          base64?: string | null
+        }>('read_skill_resource', {
           path: `${packagePath}/${relative}`,
           context,
         })

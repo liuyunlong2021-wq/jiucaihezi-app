@@ -105,10 +105,25 @@ test('a selected capability connects the task explicitly', () => {
   assert.equal(hasExplicitMemoryCapability({ avSelected: true }), true)
 })
 
-test('selecting a concrete Skill does not expose unrelated tools', () => {
+test('selecting a concrete Skill always exposes read but no mutation tools', () => {
   assert.deepEqual(
     selectMemoryTools(tools, ['jc-film-style']).map(tool => tool.function.name),
-    [],
+    ['read'],
+  )
+})
+
+test('a Skill without allowed-tools can read its declared package resources', async () => {
+  const skill = {
+    id: 'reader',
+    name: 'reader',
+    skillContent: '# Read the bundled reference first',
+    assetIndex: [{ path: 'references/rules.md' }],
+  } as SkillConfig
+  const prompt = await buildSelectedSkillPrompt(['reader'], new Map([['reader', skill]]))
+  assert.match(prompt, /references\/rules\.md/)
+  assert.deepEqual(
+    selectMemoryTools(tools, ['reader']).map(tool => tool.function.name),
+    ['read'],
   )
 })
 
