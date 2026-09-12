@@ -21,6 +21,7 @@ from src.main import (
     get_video,
     media_values,
     object_extension,
+    reference_fetch_url,
     reference_limit,
     resolve_resolution,
     resolution_axis,
@@ -95,6 +96,23 @@ class AdapterContractTest(unittest.TestCase):
         self.assertEqual(object_extension("audio/wav"), ".wav")
         self.assertEqual(object_extension("audio/x-unknown"), ".mp3")
         self.assertEqual(object_extension("application/octet-stream"), ".bin")
+
+    def test_our_own_public_assets_are_fetched_over_the_internal_network(self):
+        # 公网域名经 Cloudflare 会 403，内网同一个 NewAPI 是 200/0.03s
+        self.assertEqual(reference_fetch_url("https://api.jiucaihezi.studio/x.png"), "https://api.jiucaihezi.studio/x.png")
+        with mock.patch.object(main, "ASSET_FETCH_ORIGIN", "https://api.jiucaihezi.studio"), mock.patch.object(
+            main, "ASSET_INTERNAL_BASE", "http://new-api:3000"
+        ):
+            self.assertEqual(
+                reference_fetch_url("https://api.jiucaihezi.studio/api/creations/uploads/a.png"),
+                "http://new-api:3000/api/creations/uploads/a.png",
+            )
+            # 只改写自家 origin，别的域名和嗘得名一概不动
+            self.assertEqual(reference_fetch_url("https://cdn.example/a.png"), "https://cdn.example/a.png")
+            self.assertEqual(
+                reference_fetch_url("https://api.jiucaihezi.studio.evil.com/a.png"),
+                "https://api.jiucaihezi.studio.evil.com/a.png",
+            )
 
 
 class FakeResponse:

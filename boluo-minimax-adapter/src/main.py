@@ -6,6 +6,7 @@ import email.utils
 import hashlib
 import hmac
 import logging
+import os
 import uuid
 from time import time
 from urllib.parse import urlsplit
@@ -38,8 +39,12 @@ DEFAULT_RESOLUTION = "768p竖"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 STS_TIMEOUT_SECONDS = 30.0
-REFERENCE_TIMEOUT_SECONDS = 60.0
+REFERENCE_TIMEOUT_SECONDS = float(os.environ.get("REFERENCE_TIMEOUT_SECONDS", "60"))
 TASK_TTL_SECONDS = 2 * 60 * 60
+# 参考素材存在自家 NewAPI 上。公网域名经 Cloudflare 会拦非浏览器请求（实测 403），
+# 而 docker 内网同一个 NewAPI 是 200/0.03s，所以匹配到自家域名就改走内网。
+ASSET_FETCH_ORIGIN = os.environ.get("ASSET_FETCH_ORIGIN", "").strip().rstrip("/")
+ASSET_INTERNAL_BASE = os.environ.get("ASSET_INTERNAL_BASE", "").strip().rstrip("/")
 
 logger = logging.getLogger("boluo-minimax-adapter")
 
@@ -244,6 +249,19 @@ async def upload_all(media: list[tuple[str, str]], sts: dict) -> list[str]:
         raise
 
 
+def reference_fetch_url(url: str) -> str:
+    """自家素材改走 docker 内网；没配或不是自家域名就原样返回。
+
+    严格用 `origin + /` 做前缀匹配，`api.jiucaihezi.studio.evil.com` 这类域名不会被改写。
+    """
+    if not ASSET_FETCH_ORIGIN or not ASSET_INTERNAL_BASE:
+        return url
+    prefix = f"{ASSET_FETCH_ORIGIN}/"
+    if not url.startswith(prefix):
+        return url
+    return f"{ASSET_INTERNAL_BASE}/{url[len(prefix):]}"
+
+
 async def upload_reference(kind: str, url: str, sts: dict) -> str:
     host = urlsplit(url).hostname or "unknown-host"
     limit = reference_limit(kind, sts)
@@ -252,7 +270,12 @@ async def upload_reference(kind: str, url: str, sts: dict) -> str:
         async with asyncio.timeout(REFERENCE_TIMEOUT_SECONDS):
             uploaded = await transfer_reference(kind, url, sts, limit, host)
     except TimeoutError as exc:
-        raise HTTPException(504, f"Reference {kind} from {host} timed out after {REFERENCE_TIMEOUT_SECONDS:.0f}s") from exc
+        # 带上实际抓取目标：能一眼看出改写有没有生效（内网 vs 公网）。
+        raise HTTPException(
+            504,
+            f"Reference {kind} from {host} timed out after {REFERENCE_TIMEOUT_SECONDS:.0f}s "
+            f"(fetching {urlsplit(reference_fetch_url(url)).netloc})",
+        ) from exc
     logger.info("reference kind=%s host=%s stage=uploaded elapsed=%.1fs", kind, host, time() - started)
     return uploaded
 
@@ -321,7 +344,8 @@ async def transfer_reference(kind: str, url: str, sts: dict, limit: int, host: s
     # httpx 的 AsyncClient 不接受文件对象当 body（会被包成同步流，直接 RuntimeError），
     # 所以边下边攒成 bytes 再 PUT，线格式与上游文档的 `requests.put(data=f)` 一致（带 Content-Length）。
     # ponytail: 内存上限就是前面校验过的单文件上限（图片 10 MB / 音频 20 MB），并发转存时按文件数叠加。
-    async with app.state.http.stream("GET", url) as source:
+    fetch_url = reference_fetch_url(url)
+    async with app.state.http.stream("GET", fetch_url) as source:
         if not source.is_success:
             raise HTTPException(400, f"Unable to fetch reference {kind} from {host} (HTTP {source.status_code})")
         content_type = source.headers.get("content-type", "image/png" if kind == "image" else "audio/mpeg").split(";")[0]

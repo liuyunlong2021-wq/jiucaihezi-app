@@ -49,6 +49,16 @@ NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上�
 
 ## 字段契约（对齐 `docs/wiki/运维/菠萝MiniMaxapi.md`）
 
+环境变量（compose 里已有默认值，不需要在服务器上改）：
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `ASSET_FETCH_ORIGIN` | `https://api.jiucaihezi.studio` | 匹配到这个 origin 的参考素材改走内网取 |
+| `ASSET_INTERNAL_BASE` | `http://new-api:3000` | 改写后的内网地址；两个变量任一为空则不改写 |
+| `REFERENCE_TIMEOUT_SECONDS` | `60` | 单个素材下载 + 转存的总超时 |
+
+为什么要改写：参考素材是 NewAPI 托管的（App 传到 `/api/creations/uploads`）。从容器里访问**自己的公网域名会被 Cloudflare 拦（实测 403）**，而同一个 NewAPI 的内网地址是 `200 / 0.03s`，所以匹配到自家域名就改走内网。
+
 - `model` 只收 `minimax_h3_image_audio_to_video_v2_15s` 和 `minimax_h3_zm_u24`，其它一律 400。
 - `duration` 1-15 秒（`seconds` 同义，不传或传 null 时按模型默认值：旧版 15 秒、增强版 5 秒）。
 - `resolution` 按模型各自的白名单校验：旧版只有四个 `竖/横`；增强版额外支持 `480p(1:1)` 和 `768p(1:1)`。
