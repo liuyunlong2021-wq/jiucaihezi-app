@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import email.utils
 import hashlib
 import hmac
+import logging
+import tempfile
 import uuid
 from time import time
+from urllib.parse import urlsplit
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
@@ -17,8 +21,18 @@ MODEL = "minimax_h3_image_audio_to_video_v2_15s"
 RESOLUTIONS = {"480p竖", "768p竖", "480p横", "768p横"}
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
+STS_TIMEOUT_SECONDS = 30.0
+REFERENCE_TIMEOUT_SECONDS = 60.0
+MAX_MEMORY_BUFFER_BYTES = 1024 * 1024
+TASK_TTL_SECONDS = 2 * 60 * 60
 
-app = FastAPI(title="Boluo MiniMax Adapter", version="0.1.0")
+logger = logging.getLogger("boluo-minimax-adapter")
+
+# 本地任务表：素材搬运和上游提交都在后台完成，创建请求立即返回本地任务 ID。
+# ponytail: 单容器内存表，容器重启即丢；那时客户端再轮询这个 ID 会拿到上游的错误响应而不是本地结果。要跨重启就换落盘存储。
+TASKS: dict[str, dict] = {}
+
+app = FastAPI(title="Boluo MiniMax Adapter", version="0.2.0")
 
 
 @app.on_event("startup")
@@ -50,7 +64,7 @@ async def models(request: Request):
 
 
 @app.post("/v1/videos")
-async def create_video(request: Request):
+async def create_video(request: Request, background: BackgroundTasks):
     key = token(request)
     try:
         body = await request.json()
@@ -78,33 +92,52 @@ async def create_video(request: Request):
         raise HTTPException(400, "At most 9 reference images are allowed")
     if len(audios) > 3:
         raise HTTPException(400, "At most 3 reference audios are allowed")
-    sts = await get_sts(key)
-    payload = {"model": MODEL, "prompt": prompt, "duration": duration, "resolution": resolution}
-    for index, url in enumerate(images):
-        payload[f"ref_image_{index}"] = await upload_url(url, sts, "image", key)
-    for index, url in enumerate(audios):
-        payload[f"ref_audio_{index}"] = await upload_url(url, sts, "audio", key)
-    response = await app.state.http.post(f"{BASE}/v1/videos", headers={"Authorization": f"Bearer {key}"}, json=payload)
-    data = response_json(response)
-    if not response.is_success:
-        raise HTTPException(response.status_code, str(data.get("message") or data.get("error") or "Boluo request failed"))
-    return data
+    # 校验全部同步完成后再建任务：参数错误仍然是立即 4xx，不会变成异步失败。
+    purge_tasks()
+    task_id = uuid.uuid4().hex
+    TASKS[task_id] = {
+        "created_at": int(time()),
+        "key": key,
+        "status": "queued",
+        "progress": 0,
+        "upstream": "",
+        "error": "",
+        "payload": {"model": MODEL, "prompt": prompt, "duration": duration, "resolution": resolution},
+        "media": [("image", url) for url in images] + [("audio", url) for url in audios],
+    }
+    background.add_task(run_task, task_id)
+    logger.info("task=%s stage=accepted images=%d audios=%d", task_id, len(images), len(audios))
+    return task_response(task_id)
 
 
 @app.get("/v1/videos/{task_id}")
 async def get_video(task_id: str, request: Request):
     key = token(request)
-    response = await app.state.http.get(f"{BASE}/v1/videos/{task_id}", headers={"Authorization": f"Bearer {key}"})
+    purge_tasks()
+    task = TASKS.get(task_id)
+    if task and not task["upstream"]:
+        return task_response(task_id)
+    upstream_id = task["upstream"] if task else task_id
+    authorization = task["key"] if task else key
+    response = await app.state.http.get(f"{BASE}/v1/videos/{upstream_id}", headers={"Authorization": f"Bearer {authorization}"})
     data = response_json(response)
     if not response.is_success:
         raise HTTPException(response.status_code, str(data.get("message") or "Boluo request failed"))
+    if task:
+        # 客户端只会用创建时拿到的 ID 轮询，响应里的 ID 保持同一个。
+        data["id"] = task_id
+        data["task_id"] = task_id
     return data
 
 
 @app.get("/v1/videos/{task_id}/content")
 async def content(task_id: str, request: Request):
     key = token(request)
-    stream = app.state.http.stream("GET", f"{BASE}/v1/videos/{task_id}/content", headers={"Authorization": f"Bearer {key}"})
+    purge_tasks()
+    task = TASKS.get(task_id)
+    upstream_id = task["upstream"] if task and task["upstream"] else task_id
+    authorization = task["key"] if task else key
+    stream = app.state.http.stream("GET", f"{BASE}/v1/videos/{upstream_id}/content", headers={"Authorization": f"Bearer {authorization}"})
     response = await stream.__aenter__()
     if not response.is_success:
         await stream.__aexit__(None, None, None)
@@ -124,32 +157,119 @@ def media_values(body: dict, keys: tuple[str, ...]) -> list[str]:
     return output
 
 
+def purge_tasks() -> None:
+    # ponytail: 惰性清理，只在有请求进来时触发；单容器够用，不为它起后台线程。
+    deadline = time() - TASK_TTL_SECONDS
+    for stale in [task_id for task_id, task in TASKS.items() if task["created_at"] < deadline]:
+        TASKS.pop(stale, None)
+
+
+def task_response(task_id: str) -> dict:
+    task = TASKS[task_id]
+    payload = {
+        "id": task_id,
+        "task_id": task_id,
+        "object": "video",
+        "model": MODEL,
+        "status": task["status"],
+        "progress": task["progress"],
+        "created_at": task["created_at"],
+    }
+    if task["error"]:
+        # 轮询期表达失败：HTTP 200 + status failed，和上游任务对象同构。
+        payload["error"] = {"message": task["error"], "code": "adapter_error"}
+    return payload
+
+
+async def run_task(task_id: str) -> None:
+    task = TASKS.get(task_id)
+    if task is None:
+        return
+    started = time()
+    try:
+        sts = await get_sts(task["key"])
+        task.update(status="in_progress", progress=5)
+        references = await upload_all(task["media"], sts)
+        payload = dict(task["payload"])
+        counters = {"image": 0, "audio": 0}
+        for (kind, _), uploaded in zip(task["media"], references):
+            payload[f"ref_{kind}_{counters[kind]}"] = uploaded
+            counters[kind] += 1
+        response = await app.state.http.post(f"{BASE}/v1/videos", headers={"Authorization": f"Bearer {task['key']}"}, json=payload)
+        data = response_json(response)
+        if not response.is_success:
+            raise HTTPException(response.status_code, str(data.get("message") or data.get("error") or "Boluo request failed"))
+        upstream = str(data.get("id") or "")
+        if not upstream:
+            raise HTTPException(502, "Boluo did not return a task ID")
+        task["upstream"] = upstream
+        logger.info("task=%s stage=submitted upstream=%s elapsed=%.1fs", task_id, upstream, time() - started)
+    except HTTPException as exc:
+        task.update(status="failed", error=str(exc.detail))
+        logger.warning("task=%s stage=failed status=%s detail=%s", task_id, exc.status_code, exc.detail)
+    except Exception as exc:  # 后台任务必须兜住所有异常，否则会变成 ASGI 层未处理错误
+        task.update(status="failed", error=f"{type(exc).__name__}: {exc}")
+        logger.warning("task=%s stage=failed error=%s", task_id, exc)
+
+
+async def upload_all(media: list[tuple[str, str]], sts: dict) -> list[str]:
+    # 全部素材并发搬运；任一失败就取消其余，避免失败后还在空转上传。
+    running = [asyncio.create_task(upload_reference(kind, url, sts)) for kind, url in media]
+    try:
+        return list(await asyncio.gather(*running))
+    except Exception:
+        for task in running:
+            task.cancel()
+        await asyncio.gather(*running, return_exceptions=True)
+        raise
+
+
+async def upload_reference(kind: str, url: str, sts: dict) -> str:
+    host = urlsplit(url).hostname or "unknown-host"
+    limit = MAX_IMAGE_BYTES if kind == "image" else MAX_AUDIO_BYTES
+    started = time()
+    try:
+        async with asyncio.timeout(REFERENCE_TIMEOUT_SECONDS):
+            uploaded = await transfer_reference(kind, url, sts, limit, host)
+    except TimeoutError as exc:
+        raise HTTPException(504, f"Reference {kind} from {host} timed out after {REFERENCE_TIMEOUT_SECONDS:.0f}s") from exc
+    logger.info("reference kind=%s host=%s stage=uploaded elapsed=%.1fs", kind, host, time() - started)
+    return uploaded
+
+
+async def transfer_reference(kind: str, url: str, sts: dict, limit: int, host: str) -> str:
+    # 边下边传：流式下载到临时缓冲（超过 1 MiB 落盘），再按同样的 Content-Length 线格式 PUT 给 OSS。
+    # ponytail: 用临时磁盘换有界内存；磁盘不足时这里会直接失败，不做落盘以外的重试。
+    with tempfile.SpooledTemporaryFile(max_size=MAX_MEMORY_BUFFER_BYTES) as buffer:
+        async with app.state.http.stream("GET", url) as source:
+            if not source.is_success:
+                raise HTTPException(400, f"Unable to fetch reference {kind} from {host} (HTTP {source.status_code})")
+            content_type = source.headers.get("content-type", "image/png" if kind == "image" else "audio/mpeg").split(";")[0]
+            size = 0
+            async for chunk in source.aiter_bytes():
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"Reference {kind} from {host} exceeds {limit // (1024 * 1024)} MB")
+                buffer.write(chunk)
+        buffer.seek(0)
+        date = email.utils.formatdate(usegmt=True)
+        ext = ".png" if kind == "image" else ".mp3"
+        path = f'{sts["dir"].rstrip("/")}/{uuid.uuid4().hex}{ext}'
+        canonical = "\n".join(sorted([f"x-oss-date:{date}", "x-oss-object-acl:public-read", f'x-oss-security-token:{sts["securityToken"]}']))
+        string_to_sign = "\n".join(["PUT", "", content_type, date, canonical, f'/{sts["bucket"]}/{path}'])
+        signature = base64.b64encode(hmac.new(sts["accessKeySecret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
+        response = await app.state.http.put(f'{sts["host"].rstrip("/")}/{path}', content=buffer, headers={"Authorization": f'OSS {sts["accessKeyId"]}:{signature}', "Content-Type": content_type, "x-oss-date": date, "x-oss-object-acl": "public-read", "x-oss-security-token": sts["securityToken"]})
+        if not response.is_success:
+            raise HTTPException(502, f"OSS upload failed for reference {kind} from {host} (HTTP {response.status_code})")
+    return f'{sts["host"].rstrip("/")}/{path}'
+
+
 async def get_sts(key: str) -> dict:
-    response = await app.state.http.post(f"{BASE}/api/video-upload/oss-sts", headers={"Authorization": f"Bearer {key}"})
+    response = await app.state.http.post(f"{BASE}/api/video-upload/oss-sts", headers={"Authorization": f"Bearer {key}"}, timeout=STS_TIMEOUT_SECONDS)
     data = response_json(response)
     if not response.is_success or not data.get("success"):
         raise HTTPException(response.status_code if response.status_code >= 400 else 502, str(data.get("message") or "OSS STS unavailable"))
     return data
-
-
-async def upload_url(url: str, sts: dict, kind: str, key: str) -> str:
-    source = await app.state.http.get(url)
-    if not source.is_success:
-        raise HTTPException(400, f"Unable to fetch reference {kind}")
-    limit = MAX_IMAGE_BYTES if kind == "image" else MAX_AUDIO_BYTES
-    if len(source.content) > limit:
-        raise HTTPException(413, f"Reference {kind} exceeds 20 MB")
-    content_type = source.headers.get("content-type", "image/png" if kind == "image" else "audio/mpeg").split(";")[0]
-    date = email.utils.formatdate(usegmt=True)
-    ext = ".png" if kind == "image" else ".mp3"
-    path = f'{sts["dir"].rstrip("/")}/{uuid.uuid4().hex}{ext}'
-    canonical = "\n".join(sorted([f"x-oss-date:{date}", "x-oss-object-acl:public-read", f'x-oss-security-token:{sts["securityToken"]}']))
-    string_to_sign = "\n".join(["PUT", "", content_type, date, canonical, f'/{sts["bucket"]}/{path}'])
-    signature = base64.b64encode(hmac.new(sts["accessKeySecret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
-    response = await app.state.http.put(f'{sts["host"].rstrip("/")}/{path}', content=source.content, headers={"Authorization": f'OSS {sts["accessKeyId"]}:{signature}', "Content-Type": content_type, "x-oss-date": date, "x-oss-object-acl": "public-read", "x-oss-security-token": sts["securityToken"]})
-    if not response.is_success:
-        raise HTTPException(502, "OSS upload failed")
-    return f'{sts["host"].rstrip("/")}/{path}'
 
 
 def response_json(response: httpx.Response) -> dict:
@@ -162,4 +282,4 @@ def response_json(response: httpx.Response) -> dict:
 
 @app.exception_handler(HTTPException)
 async def errors(_: Request, exc: HTTPException):
-    return JSONResponse(exc.status_code, {"error": {"code": str(exc.status_code), "message": str(exc.detail), "type": "boluo_minimax_error"}})
+    return JSONResponse({"error": {"code": str(exc.status_code), "message": str(exc.detail), "type": "boluo_minimax_error"}}, exc.status_code)
