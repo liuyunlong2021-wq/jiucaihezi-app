@@ -39,10 +39,30 @@ function escapeAttr(str: string): string {
   return escapeHtml(str).replace(/'/g, '&#39;')
 }
 
+/**
+ * Markdown 里的项目内文件路径（`30秒广告.md`、`wiki/剧本/30秒广告.md`、`/wiki/剧本/30秒广告.md`）
+ * 必须带着路径交给点击处理器，否则链接只剩外观。返回未编码的项目路径。
+ */
+function projectFileLinkTarget(href: string): string | null {
+  if (!href || /^[a-z][a-z0-9+.-]*:/i.test(href)) return null
+  let path = href.replace(/[?#].*$/, '')
+  try {
+    path = decodeURIComponent(path)
+  } catch {
+    /* 含裸 % 的路径按原样处理 */
+  }
+  if (!/\.(?:md|markdown)$/i.test(path)) return null
+  const target = path.replace(/^\.?\//, '')
+  if (!target || target.startsWith('/') || target.includes('//')) return null
+  return target
+}
+
 function normalizeLinkHref(href: string): string {
   const trimmed = String(href || '').trim()
+  const projectFile = projectFileLinkTarget(trimmed)
+  if (projectFile) return `#jc-file=${encodeURIComponent(projectFile)}`
   if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed
-  if (trimmed.startsWith('#') || trimmed.startsWith('/')) return trimmed
+  if (trimmed.startsWith('#')) return trimmed
   return '#'
 }
 

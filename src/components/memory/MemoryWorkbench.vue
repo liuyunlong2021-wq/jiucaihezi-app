@@ -949,6 +949,7 @@ async function handleMarkdownClick(event: MouseEvent) {
     error.value = `文件不存在：${target}`
     return
   }
+  emitEvent('project-filetree:locate', { path: resource.path })
   await openProjectFile(resource)
 }
 
@@ -2747,7 +2748,10 @@ function readDataUrl(file: File): Promise<string> {
     <section v-if="previewResource" class="memory-preview">
         <header class="memory-preview-header">
           <button class="memory-preview-back" @click="returnFromPreview"><JcIcon name="arrow-back" /><span>{{ projectMapReturn ? '返回项目地图' : '返回对话' }}</span></button>
-          <strong>{{ previewResource.resource.name }}</strong>
+          <strong class="memory-preview-title" :title="previewResource.resource.path">
+            <span class="memory-preview-name">{{ previewResource.resource.name }}</span>
+            <span class="memory-preview-path">{{ previewResource.resource.path }}</span>
+          </strong>
           <div class="memory-preview-actions">
             <template v-if="previewResource.type === 'editor' && !editingMarkdown">
               <button class="icon-button" title="编辑 Markdown" @click="startMarkdownEdit"><JcIcon name="edit" /></button>
@@ -3086,7 +3090,10 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench.creation-focused .memory-creation { width: 100vw; height: 100dvh; border-left: 0; }
 .memory-workbench.desktop-runtime.creation-focused .memory-creation { height: calc(100dvh - 28px); }
 .memory-preview-header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); }
-.memory-preview-header > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.memory-preview-header > strong { min-width: 0; text-align: center; }
+.memory-preview-title { display: flex; flex-direction: column; min-width: 0; }
+.memory-preview-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-preview-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink3); font-size: 11px; font-weight: 400; }
 .memory-preview-back { display: flex; height: 34px; align-items: center; gap: 5px; padding: 0 8px; border: 0; background: transparent; color: var(--olive); cursor: pointer; font: inherit; }
 .memory-empty-state { display: grid; min-height: 0; padding: 32px; place-items: center; color: var(--ink3); font-size: calc(var(--font-base) - 1px); }
 .memory-onboarding { display: grid; min-height: 0; padding: 32px; place-items: center; text-align: center; }

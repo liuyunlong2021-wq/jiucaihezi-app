@@ -24,6 +24,26 @@ test('renderMessageMarkdown keeps project file links in-app', () => {
   assert.doesNotMatch(html, /target="_blank"/)
 })
 
+test('renderMessageMarkdown resolves Markdown file links instead of dropping the path', () => {
+  const relative = renderMessageMarkdown('[30秒广告.md](wiki/剧本/30秒广告.md)', 'assistant')
+  assert.match(
+    relative,
+    /href="#jc-file=wiki%2F%E5%89%A7%E6%9C%AC%2F30%E7%A7%92%E5%B9%BF%E5%91%8A\.md"/,
+  )
+  assert.doesNotMatch(relative, /target="_blank"/)
+
+  const absolute = renderMessageMarkdown('[30秒广告.md](/wiki/剧本/30秒广告.md)', 'assistant')
+  assert.match(absolute, /href="#jc-file=wiki%2F/)
+  assert.equal(absolute.includes('href="/wiki'), false)
+
+  const directory = renderMessageMarkdown('[剧本](/wiki/剧本)', 'assistant')
+  assert.equal(directory.includes('href="/wiki'), false)
+  assert.equal(directory.includes('jc-file'), false)
+
+  const external = renderMessageMarkdown('[x](//evil.test/a.md)', 'assistant')
+  assert.equal(external.includes('jc-file'), false)
+})
+
 test('renderMessageMarkdown renders code copy chrome and table wrapper', () => {
   const html = renderMessageMarkdown('```ts\nconst x = 1\n```\n\n| A | B |\n| - | - |\n| 1 | 2 |', 'assistant')
 

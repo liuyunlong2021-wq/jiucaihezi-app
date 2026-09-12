@@ -1243,6 +1243,11 @@ test('memory Markdown supports forward links and scanned backlink sources', () =
   const links = source('src/runtime/memory/markdownFileLinks.ts')
 
   assert.match(workbench, /resolveMarkdownFileLinkTarget\(target, sourcePath, await files\.list\(owner\)\)/)
+  assert.match(
+    workbench,
+    /emitEvent\('project-filetree:locate', \{ path: resource\.path \}\)\n\s*await openProjectFile\(resource\)/,
+  )
+  assert.match(workbench, /memory-preview-path/)
   assert.match(workbench, /findMarkdownFileBacklinks\(target, sources\)/)
   assert.match(workbench, /被以下文件引用/)
   assert.match(workbench, /文件不存在：\$\{target\}/)
