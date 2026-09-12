@@ -45,7 +45,7 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
 
 test('P3 direct GPT Image 2 runtime uses the native OpenAI image contract', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'gpt-image-2-中质量',
+    modelId: 'gpt-image-2-超分',
     params: {
       prompt: '一张产品主图',
       ratio: '16:9',
@@ -76,7 +76,7 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
     if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       assert.equal(init.body instanceof FormData, true)
       const body = init.body as FormData
-      assert.equal(body.get('model'), 'gpt-image-2-中质量')
+      assert.equal(body.get('model'), 'gpt-image-2-超分')
       assert.equal(body.get('prompt'), '把手表改成黄色')
       assert.equal(body.get('size'), '2048x1152')
       assert.equal(body.get('image[]') instanceof Blob, true)
@@ -87,7 +87,7 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'gpt-image-2-中质量',
+      modelId: 'gpt-image-2-超分',
       params: {
         prompt: '把手表改成黄色',
         ratio: '16:9',
@@ -205,7 +205,7 @@ test('Xiaoyi image upload uses the actual JPEG MIME type', { concurrency: false 
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'gpt-image-2-中质量',
+      modelId: 'gpt-image-2-超分',
       params: { prompt: '修复参考图', ratio: '16:9', resolution: '2k', images: [jpeg] },
     })
     await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
@@ -250,7 +250,7 @@ test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Ty
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'gpt-image-2-中质量',
+      modelId: 'gpt-image-2-超分',
       params: {
         prompt: '修复桌面参考图',
         ratio: '16:9',

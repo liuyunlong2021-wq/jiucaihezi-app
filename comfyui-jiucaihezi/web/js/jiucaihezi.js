@@ -3,7 +3,13 @@ import { app } from "../../../scripts/app.js";
 const gptRatios = ["1:1", "2:3", "3:2", "4:5", "5:4", "4:3", "3:4", "16:9", "9:16", "21:9"];
 const geminiRatios = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"];
 const resolutions = {
+  "gpt-image-2.5-1k": ["1k"],
+  "gpt-image-2.5-flare-1k": ["1k"],
+  "gpt-image-2.5-sunburst-1k": ["1k"],
   "gpt-image-2-1k": ["1k"],
+  "gpt-image-2-超分": ["1k", "2k", "4k"],
+  "gpt-image-2.5-flare-CF-超分": ["1k", "2k", "4k"],
+  "gpt-image-2.5-sunburst-CF-超分": ["1k", "2k", "4k"],
   "gpt-image-2-低质量": ["1k", "2k", "4k"],
   "gpt-image-2-中质量": ["1k", "2k", "4k"],
   "gpt-image-2-vip": ["1k", "2k", "4k"],

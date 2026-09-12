@@ -12,10 +12,36 @@ from PIL import Image
 
 API_BASE = "https://api.jiucaihezi.studio/v1"
 LLM_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "claude-opus-5", "grok-4.6", "gpt-5.6-sol", "gemini-3.7-flash"]
-GPT_MODELS = ["gpt-image-2-1k", "gpt-image-2-低质量", "gpt-image-2-中质量", "gpt-image-2-vip", "gpt-image-2-官方"]
+GPT_MODELS = [
+    "gpt-image-2.5-1k",
+    "gpt-image-2.5-flare-1k",
+    "gpt-image-2.5-sunburst-1k",
+    "gpt-image-2-1k",
+    "gpt-image-2-超分",
+    "gpt-image-2.5-flare-CF-超分",
+    "gpt-image-2.5-sunburst-CF-超分",
+    "gpt-image-2-低质量",
+    "gpt-image-2-中质量",
+    "gpt-image-2-vip",
+    "gpt-image-2-官方",
+]
 GPT_RATIOS = ["1:1", "2:3", "3:2", "4:5", "5:4", "4:3", "3:4", "16:9", "9:16", "21:9"]
 GEMINI_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "5:4", "4:5", "21:9"]
-GPT_RESOLUTIONS = {"gpt-image-2-1k": ["1k"], **{model: ["1k", "2k", "4k"] for model in GPT_MODELS[1:]}}
+GPT_RESOLUTIONS = {
+    **{model: ["1k"] for model in ("gpt-image-2.5-1k", "gpt-image-2.5-flare-1k", "gpt-image-2.5-sunburst-1k", "gpt-image-2-1k")},
+    **{
+        model: ["1k", "2k", "4k"]
+        for model in (
+            "gpt-image-2-超分",
+            "gpt-image-2.5-flare-CF-超分",
+            "gpt-image-2.5-sunburst-CF-超分",
+            "gpt-image-2-低质量",
+            "gpt-image-2-中质量",
+            "gpt-image-2-vip",
+            "gpt-image-2-官方",
+        )
+    },
+}
 GEMINI_MODELS = ["gemini-3.1-flash-image-preview", "gemini-3-pro-image-preview"]
 ALL_MODELS = [*GPT_MODELS, *GEMINI_MODELS]
 GEMINI_RESOLUTIONS = ["1k", "2k", "4k"]

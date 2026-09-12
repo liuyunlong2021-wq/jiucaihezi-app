@@ -61,12 +61,13 @@ test('listCreationModels excludes jina-search and filters by source', () => {
 test('registry keeps current direct, RunningHub and generic AI App entries', () => {
   const ids = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
   const requiredIds = [
+    'gpt-image-2.5-1k',
+    'gpt-image-2.5-flare-1k',
+    'gpt-image-2.5-sunburst-1k',
     'gpt-image-2-1k',
-    'gpt-image-2-低质量',
-    'gpt-image-2-中质量',
-    'gpt-image-2-vip',
-    'gpt-image-2-官方',
-    'gpt-image-2-Token',
+    'gpt-image-2-超分',
+    'gpt-image-2.5-flare-CF-超分',
+    'gpt-image-2.5-sunburst-CF-超分',
     'newapi/trump/seedance-2.0',
     'newapi/kik/doubao-seedance-2',
     'newapi/kik/doubao-seedance-2-0-fast-260128',
@@ -100,6 +101,11 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
   }
   const visibleIds = new Set(listCreationModels().map(model => model.id))
   for (const retiredId of [
+    'gpt-image-2-低质量',
+    'gpt-image-2-中质量',
+    'gpt-image-2-vip',
+    'gpt-image-2-官方',
+    'gpt-image-2-Token',
     'newapi/volcengine/doubao-seedance-2-0-260128',
     'runninghub/aiapp/rh-aiapp-fast-digital-human',
     'runninghub/aiapp/rh-aiapp-digital-human',
@@ -124,7 +130,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
 
 test('removed defaults stay absent and model metadata drives family and fee labels', () => {
   assert.equal(getCreationModelSpec('runninghub/api/rh-gpt2-official'), undefined)
-  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2-中质量')!), 'GPT Image')
+  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2.5-1k')!), 'GPT Image')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-gpt2-image')!), 'GPT Image')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-gpt2-text')!), 'GPT Image')
   assert.equal(creationModelFamily(getCreationModelSpec('gemini-3-pro-image-preview')!), 'Banana')
@@ -196,8 +202,8 @@ test('Dola Seedance 2.5 switches to image-to-video with four references and stay
 })
 
 test('model lookup prefers exact ids and resolves aliases', () => {
-  assert.equal(getCreationModelSpec('gpt-image-2-中质量')?.model, 'gpt-image-2-中质量')
-  assert.equal(getCreationModelSpec('gpt-image-2')?.id, 'gpt-image-2-低质量')
+  assert.equal(getCreationModelSpec('gpt-image-2.5-1k')?.model, 'gpt-image-2.5-1k')
+  assert.equal(getCreationModelSpec('gpt-image-2')?.id, 'gpt-image-2-超分')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
   assert.equal(getCreationModelSpec('rh-digital-human-fast'), undefined)
@@ -243,9 +249,9 @@ test('KIK Seedance models expose provider resolutions and multimodal references'
 })
 
 test('GPT Image 2 routes send exact model names and expose only their supported resolutions', () => {
-  const spec = getCreationModelSpec('gpt-image-2-中质量')
+  const spec = getCreationModelSpec('gpt-image-2.5-1k')
   const plan = buildCreationRunPlan({
-    modelId: 'gpt-image-2-中质量',
+    modelId: 'gpt-image-2.5-1k',
     params: {
       prompt: '商品图',
       ratio: '1:1',
@@ -253,8 +259,8 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
     },
   })
 
-  assert.equal(spec?.model, 'gpt-image-2-中质量')
-  assert.equal(plan.model, 'gpt-image-2-中质量')
+  assert.equal(spec?.model, 'gpt-image-2.5-1k')
+  assert.equal(plan.model, 'gpt-image-2.5-1k')
   assert.equal(plan.source, 'newapi-direct')
   assert.equal(plan.route, 'newapi-direct')
   assert.equal(plan.usesRhAdapter, false)
@@ -262,20 +268,30 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
   assert.equal(plan.apiStyle, 'openai-image-edits')
   assert.equal(plan.pollKind, 'none')
   for (const [modelId, resolutions, price] of [
+    ['gpt-image-2.5-1k', ['1k'], '0.08/张'],
+    ['gpt-image-2.5-flare-1k', ['1k'], '0.08/张'],
+    ['gpt-image-2.5-sunburst-1k', ['1k'], '0.08/张'],
     ['gpt-image-2-1k', ['1k'], '0.08/张'],
-    ['gpt-image-2-低质量', ['1k', '2k', '4k'], '0.1/张'],
-    ['gpt-image-2-中质量', ['1k', '2k', '4k'], '0.15/张'],
-    ['gpt-image-2-vip', ['1k', '2k', '4k'], '0.2/张'],
-    ['gpt-image-2-官方', ['1k', '2k', '4k'], '0.25/张'],
-    ['gpt-image-2-Token', ['1k', '2k', '4k'], '按 Token'],
+    ['gpt-image-2-超分', ['1k', '2k', '4k'], '0.15/张'],
+    ['gpt-image-2.5-flare-CF-超分', ['1k', '2k', '4k'], '0.15/张'],
+    ['gpt-image-2.5-sunburst-CF-超分', ['1k', '2k', '4k'], '0.15/张'],
   ]) {
     const route = getCreationModelSpec(modelId)!
-    assert.equal(route.model, modelId === 'gpt-image-2-Token' ? '[按token]gpt-image-2' : modelId)
+    assert.equal(route.model, modelId)
     assert.deepEqual(route.capabilities.resolutions, resolutions)
     assert.equal(displayModelPrice(route), price)
     assert.equal(route.fields.some(field => field.key === 'response_format'), false)
-    assert.equal(route.files?.images?.max, modelId === 'gpt-image-2-Token' ? 16 : 8)
+    assert.equal(route.files?.images?.max, 8)
   }
+})
+
+test('creation panel keeps the requested GPT Image 2.5 order and drops the retired tiers', () => {
+  const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
+  const position = (id: string) => imageIds.indexOf(id)
+  assert.ok(position('gpt-image-2.5-sunburst-1k') < position('gpt-image-2-1k'))
+  assert.ok(position('gpt-image-2-1k') < position('gpt-image-2-超分'))
+  assert.ok(position('gpt-image-2-超分') < position('gpt-image-2.5-flare-CF-超分'))
+  assert.ok(position('gpt-image-2.5-flare-CF-超分') < position('gpt-image-2.5-sunburst-CF-超分'))
 })
 
 test('Gemini image models use the native Xiaoyi image contract', () => {
@@ -315,14 +331,14 @@ test('Gemini image models use the native Xiaoyi image contract', () => {
   )
 })
 
-test('legacy GPT Image 2 plans keep their 2K contract through the low-quality route', () => {
+test('legacy GPT Image 2 plans keep their 2K contract through the super-resolution route', () => {
   const plan = buildCreationRunPlan({
     modelId: 'gpt-image-2',
     params: { prompt: '历史任务', resolution: '2k' },
   })
 
-  assert.equal(plan.modelId, 'gpt-image-2-低质量')
-  assert.equal(plan.model, 'gpt-image-2-低质量')
+  assert.equal(plan.modelId, 'gpt-image-2-超分')
+  assert.equal(plan.model, 'gpt-image-2-超分')
   assert.equal(plan.debug.normalizedParams.size, '2048x2048')
   assert.equal('resolution' in plan.debug.normalizedParams, false)
 })
@@ -469,7 +485,7 @@ test('ZX Grok fixed-duration aliases support text and reference-image video', ()
 
 test('direct GPT Image 2 plan uses the native image fields', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'gpt-image-2-中质量',
+    modelId: 'gpt-image-2-超分',
     params: {
       prompt: '一张电影感海报',
       ratio: '16:9',
@@ -491,7 +507,7 @@ test('direct GPT Image 2 plan uses the native image fields', () => {
 })
 
 test('direct GPT Image 2 shows the configured group price', () => {
-  assert.equal(getCreationModelSpec('gpt-image-2-中质量')?.price, 0.15)
+  assert.equal(getCreationModelSpec('gpt-image-2-超分')?.price, 0.15)
 })
 
 test('ZX video registry exposes Grok 0-7 references and the three added models', () => {
@@ -561,7 +577,7 @@ test('RunningHub Omni text and image models stay fixed at 10 seconds', () => {
 
 test('direct GPT Image 2 uses one Xiaoyi async contract with and without a reference image', () => {
   const textOnly = buildCreationRunPlan({
-    modelId: 'gpt-image-2-中质量',
+    modelId: 'gpt-image-2-超分',
     params: {
       prompt: '一张电影感海报',
       ratio: '16:9',
@@ -569,7 +585,7 @@ test('direct GPT Image 2 uses one Xiaoyi async contract with and without a refer
     },
   })
   const withImage = buildCreationRunPlan({
-    modelId: 'gpt-image-2-中质量',
+    modelId: 'gpt-image-2-超分',
     params: {
       prompt: '改成电影感海报',
       ratio: '16:9',
@@ -769,7 +785,7 @@ test('generic AI App registry leaves workflow fields to runtime discovery', () =
 
 test('RunPlan blocks invalid required fields, file counts, select options and number ranges', () => {
   assert.throws(
-    () => buildCreationRunPlan({ modelId: 'gpt-image-2-中质量', params: { ratio: '16:9' } }),
+    () => buildCreationRunPlan({ modelId: 'gpt-image-2.5-1k', params: { ratio: '16:9' } }),
     /缺少必填字段.*提示词/,
   )
   assert.throws(
@@ -884,7 +900,7 @@ test('validateCreationModelSpec rejects apiStyle contracts that do not match the
     apiStyle: 'newapi-task' as const,
   } satisfies CreationModelSpec
   const directSpec = {
-    ...getCreationModelSpec('gpt-image-2-中质量')!,
+    ...getCreationModelSpec('gpt-image-2.5-1k')!,
     apiStyle: 'rh-standard' as const,
   } satisfies CreationModelSpec
 
@@ -894,7 +910,7 @@ test('validateCreationModelSpec rejects apiStyle contracts that do not match the
 
 test('invalid route and source combinations are rejected before runtime dispatch', () => {
   const badSpec: CreationModelSpec = {
-    ...getCreationModelSpec('gpt-image-2-中质量')!,
+    ...getCreationModelSpec('gpt-image-2.5-1k')!,
     id: 'bad/direct-through-rh',
     route: 'runninghub-adapter',
   }
@@ -917,7 +933,7 @@ test('partial contracts produce plan warnings instead of silent submits', () => 
   assert.match((partial.warnings || []).join('\n'), /nodeInfoList|部分核对/)
 
   const verified = buildCreationRunPlan({
-    modelId: 'gpt-image-2-中质量',
+    modelId: 'gpt-image-2-超分',
     params: {
       prompt: '一张产品图',
       ratio: '1:1',
@@ -929,7 +945,7 @@ test('partial contracts produce plan warnings instead of silent submits', () => 
 
 test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary', () => {
   const items = listCreationPanelModels({ task: 'image', source: 'all' })
-  const gpt = items.find(item => item.id === 'gpt-image-2-中质量')
+  const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
   const zImage = items.find(item => item.id === 'runninghub/api/z-image-turbo')
 
@@ -949,11 +965,11 @@ test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary'
 
 test('panel model labels distinguish GPT Image 2 routing tiers', () => {
   const items = listCreationPanelModels({ task: 'image', source: 'all' })
-  const gpt = items.find(item => item.id === 'gpt-image-2-中质量')
+  const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
   const zImage = items.find(item => item.id === 'runninghub/api/z-image-turbo')
 
-  assert.equal(gpt?.label, 'GPT Image 2 中质量')
+  assert.equal(gpt?.label, 'GPT Image 2.5 1K')
   assert.equal(rh?.label, 'GPT2.0 图生图')
   assert.equal(zImage?.label, 'Z Image Turbo')
   for (const item of items) {

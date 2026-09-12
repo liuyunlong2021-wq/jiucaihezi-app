@@ -40,12 +40,13 @@ const GPT_IMAGE_2_ROUTES: Array<{
   resolutions: string[]
   maxImages?: number
 }> = [
+  { id: 'gpt-image-2.5-1k', label: 'GPT Image 2.5 1K', price: 0.08, resolutions: ['1k'] },
+  { id: 'gpt-image-2.5-flare-1k', label: 'GPT Image 2.5 Flare 1K', price: 0.08, resolutions: ['1k'] },
+  { id: 'gpt-image-2.5-sunburst-1k', label: 'GPT Image 2.5 Sunburst 1K', price: 0.08, resolutions: ['1k'] },
   { id: 'gpt-image-2-1k', label: 'GPT Image 2 1K', price: 0.08, resolutions: ['1k'] },
-  { id: 'gpt-image-2-低质量', label: 'GPT Image 2 低质量', price: 0.1, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2-中质量', label: 'GPT Image 2 中质量', price: 0.15, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2-vip', label: 'GPT Image 2 VIP', price: 0.2, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2-官方', label: 'GPT Image 2 官方', price: 0.25, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2-Token', model: '[按token]gpt-image-2', label: 'gpt-image-2-Token', price: '按 Token', resolutions: ['1k', '2k', '4k'], maxImages: 16 },
+  { id: 'gpt-image-2-超分', label: 'GPT Image 2 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2.5-flare-CF-超分', label: 'GPT Image 2.5 Flare CF 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2.5-sunburst-CF-超分', label: 'GPT Image 2.5 Sunburst CF 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
 ]
 const XIAOYI_GEMINI_FIELDS = promptFields([
   {
@@ -456,7 +457,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     assetFlow: 'none',
     resultExtractor: 'openai-image',
     files: { images: { min: 0, max: route.maxImages || 8 } },
-    aliases: route.id === 'gpt-image-2-低质量' ? ['gpt-image-2'] : undefined,
+    aliases: route.id === 'gpt-image-2-超分' ? ['gpt-image-2'] : undefined,
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
       {

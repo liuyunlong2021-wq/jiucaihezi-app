@@ -16,7 +16,13 @@ const PSQL_USER = process.env.NEWAPI_PSQL_USER || 'newapi'
 const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
+  { id: 'gpt-image-2.5-1k', aliases: ['gpt-image-2.5-1k'] },
+  { id: 'gpt-image-2.5-flare-1k', aliases: ['gpt-image-2.5-flare-1k'] },
+  { id: 'gpt-image-2.5-sunburst-1k', aliases: ['gpt-image-2.5-sunburst-1k'] },
   { id: 'gpt-image-2-1k', aliases: ['gpt-image-2-1k'] },
+  { id: 'gpt-image-2-超分', aliases: ['gpt-image-2-超分'] },
+  { id: 'gpt-image-2.5-flare-CF-超分', aliases: ['gpt-image-2.5-flare-CF-超分'] },
+  { id: 'gpt-image-2.5-sunburst-CF-超分', aliases: ['gpt-image-2.5-sunburst-CF-超分'] },
   { id: 'gpt-image-2-低质量', aliases: ['gpt-image-2-低质量'] },
   { id: 'gpt-image-2-中质量', aliases: ['gpt-image-2-中质量'] },
   { id: 'gpt-image-2-vip', aliases: ['gpt-image-2-vip'] },

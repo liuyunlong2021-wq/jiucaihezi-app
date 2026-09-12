@@ -19,7 +19,7 @@ function makeFile(name: string, type: string): File {
 
 test('switching from a 2K GPT route to the 1K route discards the stale derived size', () => {
   switchTask('image')
-  switchModel('gpt-image-2-中质量')
+  switchModel('gpt-image-2-超分')
   cpState.prompt = '一张方形图片'
   cpState.ar = '1:1'
   setResolution('2k')
@@ -33,7 +33,7 @@ test('switching from a 2K GPT route to the 1K route discards the stale derived s
 
 test('buildCurrentCreationParams keeps creation file objects so plan preview can materialize the same payload as submit', () => {
   switchTask('image')
-  switchModel('gpt-image-2-中质量')
+  switchModel('gpt-image-2-超分')
   clearFiles()
 
   addFiles([makeFile('hero.png', 'image/png')])

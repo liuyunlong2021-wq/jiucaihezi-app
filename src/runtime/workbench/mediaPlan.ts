@@ -261,7 +261,7 @@ export function updateMediaPlanParameters(
 }
 
 export function resolveProductDefaultModelId(plan: Pick<MediaPlan, 'kind' | 'resolution' | 'referenceImages' | 'referenceVideos' | 'mediaReferences'>): string {
-  if (plan.kind === 'image') return plan.resolution && plan.resolution !== '1k' ? 'gpt-image-2-低质量' : 'gpt-image-2-1k'
+  if (plan.kind === 'image') return plan.resolution && plan.resolution !== '1k' ? 'gpt-image-2-超分' : 'gpt-image-2-1k'
   if (plan.kind === 'audio') return 'runninghub/api/rh-suno-v55-single'
 
   const imageCount = Math.max(
