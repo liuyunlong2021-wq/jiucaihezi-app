@@ -3,7 +3,7 @@ import unittest
 
 import httpx
 
-from src.main import app, video_payload
+from src.main import MODEL_MAP, PUBLIC_MODELS, app, video_payload
 
 
 class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
@@ -84,6 +84,29 @@ class XiaoyiImageAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(self.requests[0].content)["model"], "gpt-image-2")
+
+    async def test_maps_gpt_image_2_5_tiers_to_xiaoyi_channels(self):
+        cases = {
+            "gpt-image-2.5-1k": "gpt-image-2.5",
+            "gpt-image-2.5-flare-1k": "gpt-image-2.5-flare",
+            "gpt-image-2.5-sunburst-1k": "gpt-image-2.5-sunburst",
+            "gpt-image-2-超分": "gpt-image-2.5-CF",
+            "gpt-image-2.5-flare-CF-超分": "gpt-image-2.5-flare-CF",
+            "gpt-image-2.5-sunburst-CF-超分": "gpt-image-2.5-sunburst-CF",
+        }
+        self.assertTrue(set(cases).issubset(PUBLIC_MODELS))
+        for alias, upstream in cases.items():
+            self.requests.clear()
+            response = await self.client.post(
+                "/v1/videos",
+                headers={"Authorization": "Bearer key"},
+                json={"model": alias, "prompt": "draw"},
+            )
+            self.assertEqual(response.status_code, 200, alias)
+            self.assertEqual(json.loads(self.requests[0].content)["model"], upstream, alias)
+        # NewAPI 若先做了模型映射，适配器也要直接接受上游名。
+        for upstream in cases.values():
+            self.assertEqual(MODEL_MAP.get(upstream), upstream)
 
     async def test_gemini_forwards_xiaoyi_aspect_ratio_and_quality(self):
         response = await self.client.post(
