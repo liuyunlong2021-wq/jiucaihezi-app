@@ -1552,6 +1552,59 @@ async function ctxDelete() {
   pendingDelete.value = resources
 }
 
+/* ─── 移动到新建文件夹 ─── */
+const hasProjectSelection = computed(() => selectedPaths.value.size > 0)
+
+async function ctxMoveToNewFolder() {
+  const resources = selectedResources()
+  const owner = projectKey.value
+  closeCtxMenu()
+  if (!owner || !resources.length) return
+  if (resources.some(resource => isProtectedMemoryPath(resource.path))) {
+    errorMsg.value = '系统骨架及对话、画布记录只能由 App 管理'
+    return
+  }
+  if (resources.some(resource => resource.owner !== owner)) {
+    errorMsg.value = '项目已切换，已取消移动'
+    return
+  }
+  const first = resources[0].path
+  const parentDir = first.includes('/') ? first.slice(0, first.lastIndexOf('/')) : ''
+  if (parentDir === MEMORY_MEDIA_DIRECTORY) {
+    errorMsg.value = '媒体根目录只保留四个固定分类'
+    return
+  }
+  const name = await safePrompt('新建文件夹名', 'new-folder', { forceDom: true })
+  if (!name?.trim()) return
+  const folderName = name.trim().replace(/^\/+/, '')
+  const folderPath = (parentDir ? `${parentDir}/` : '') + folderName
+  errorMsg.value = ''
+  try {
+    await projectFiles.createFolder(owner, folderPath)
+    await appendProjectDirectoryIndex(projectFiles, owner, parentDir, folderPath)
+    if (projectKey.value !== owner) return
+    const targetDirectory: ProjectResource = {
+      runtime: isDesktop ? 'desktop' : 'web',
+      owner,
+      path: folderPath,
+      name: folderName,
+      isDirectory: true,
+      kind: 'binary',
+    }
+    const plan = await projectFiles.planBatch({ kind: 'move', resources, targetDirectory })
+    const gates = await prepareBatchCanvasLifecycle(plan)
+    try {
+      completeBatchCanvasLifecycle(await projectFiles.executeBatch(plan), gates)
+    } catch (error) {
+      gates.forEach(gate => emitEvent('canvas:lifecycle-failed', gate))
+      throw error
+    }
+    errorMsg.value = `已把 ${resources.length} 项移动到 ${folderName}`
+  } catch (error) {
+    errorMsg.value = `移动到新建文件夹失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
 /* ─── 媒体排序编号 ─── */
 const mediaReorderFolder = ref<{ path: string; name: string } | null>(null)
 const mediaReorderItems = ref<ProjectResource[]>([])
@@ -2448,6 +2501,17 @@ function toggleFileTree() {
 }
 
 /* ─── 键盘导航 ─── */
+/** 焦点落到媒体文件时通知预览面板跟随；面板没在预览媒体时会自行忽略。 */
+function notifyFocusedMedia() {
+  if (!projectKey.value) return
+  const path = focusedPath.value
+  if (!path) return
+  const entry = visibleNodes.value.find(item => item.node.path === path)
+  if (!entry || entry.node.isDir) return
+  if (mediaKindOf(entry.node.path, entry.node.mimeType) === null) return
+  emitEvent('filetree:focus-media', resourceForNode(entry.node))
+}
+
 function onTreeKeydown(e: KeyboardEvent) {
   if (!focusedPath.value || !visibleNodes.value.length) return
   const idx = visibleNodes.value.findIndex(v => v.node.path === focusedPath.value)
@@ -2488,12 +2552,17 @@ function onTreeKeydown(e: KeyboardEvent) {
       break
     case 'ArrowDown':
       e.preventDefault()
-      if (idx + 1 < visibleNodes.value.length)
+      if (idx + 1 < visibleNodes.value.length) {
         focusedPath.value = visibleNodes.value[idx + 1].node.path
+        notifyFocusedMedia()
+      }
       break
     case 'ArrowUp':
       e.preventDefault()
-      if (idx > 0) focusedPath.value = visibleNodes.value[idx - 1].node.path
+      if (idx > 0) {
+        focusedPath.value = visibleNodes.value[idx - 1].node.path
+        notifyFocusedMedia()
+      }
       break
     case 'ArrowLeft':
       e.preventDefault()
@@ -2898,6 +2967,9 @@ onBeforeUnmount(() => {
           <button class="pft-ctx-item" @click="ctxCutResources">
             <JcIcon name="content-cut" /><span>剪切</span>
           </button>
+          <button v-if="hasProjectSelection" class="pft-ctx-item" @click="ctxMoveToNewFolder">
+            <JcIcon name="create-new-folder" /><span>移动到新建文件夹...</span>
+          </button>
           <button class="pft-ctx-item" @click="ctxExportSelected">
             <JcIcon name="download" /><span>导出所选资源</span>
           </button>
@@ -2955,6 +3027,9 @@ onBeforeUnmount(() => {
           </button>
           <button class="pft-ctx-item" @click="ctxCutResources">
             <JcIcon name="content-cut" /><span>剪切</span>
+          </button>
+          <button v-if="hasProjectSelection" class="pft-ctx-item" @click="ctxMoveToNewFolder">
+            <JcIcon name="create-new-folder" /><span>移动到新建文件夹...</span>
           </button>
           <button class="pft-ctx-item" @click="ctxExportSelected">
             <JcIcon name="download" /><span>导出所选资源</span>

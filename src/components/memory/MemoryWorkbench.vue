@@ -224,6 +224,7 @@ let conversationSelectionGeneration = 0
 let sendInFlight = false
 let memoryRunGeneration = 0
 let offOpenResource: (() => void) | null = null
+let offFocusMedia: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
 let offReferenceFile: (() => void) | null = null
 let offMediaReferenceAdd: (() => void) | null = null
@@ -498,6 +499,17 @@ const primaryCommands = toolCommands
 onMounted(async () => {
   void checkSceneVideoExport()
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
+  offFocusMedia = onEvent('filetree:focus-media', payload => {
+    const resource = payload as ProjectResource
+    const current = previewResource.value
+    if (!resource?.path || current?.type !== 'media') return
+    if (current.resource.path === resource.path) return
+    void openProjectResource(files, resource)
+      .then(result => openResource(result))
+      .catch(cause => {
+        error.value = `预览失败：${cause instanceof Error ? cause.message : String(cause)}`
+      })
+  })
   offToggleTree = onEvent('toggle-file-tree', () => { treeOpen.value = !treeOpen.value })
   offReferenceFile = onEvent('reference-file', payload => {
     void addReferencedFile(payload).catch(cause => {
@@ -532,6 +544,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   offOpenResource?.()
+  offFocusMedia?.()
   offToggleTree?.()
   offReferenceFile?.()
   offMediaReferenceAdd?.()
