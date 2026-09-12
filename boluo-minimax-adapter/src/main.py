@@ -32,6 +32,8 @@ MODELS: dict[str, dict] = {
     },
 }
 MAX_DURATION = 15
+# 上游没有比例字段，方向靠 resolution 后缀表达；ratio 是权威方向。
+AXIS_BY_RATIO = {"16:9": "横", "9:16": "竖", "1:1": "(1:1)"}
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 STS_TIMEOUT_SECONDS = 30.0
@@ -97,14 +99,12 @@ async def create_video(request: Request, background: BackgroundTasks):
         raise HTTPException(400, f"duration must be from 1 to {MAX_DURATION} seconds")
     resolution = str(body.get("resolution") or "768p竖")
     ratio = str(body.get("aspect_ratio") or body.get("ratio") or "")
-    if ratio == "1:1" and resolution.endswith(("竖", "横")):
-        resolution = resolution[:-1] + "(1:1)"
-    elif ratio == "16:9" and resolution.endswith("竖"):
-        resolution = resolution[:-1] + "横"
-    elif ratio == "9:16" and resolution.endswith("横"):
-        resolution = resolution[:-1] + "竖"
+    axis = AXIS_BY_RATIO.get(ratio)
+    if axis:
+        # 按 ratio 的轴重建分辨率名（只换后缀，保住 480p / 768p 的档位）。
+        resolution = f"{resolution.split('p')[0]}p{axis}"
     if resolution not in spec["resolutions"]:
-        raise HTTPException(400, "Unsupported resolution")
+        raise HTTPException(400, f"Unsupported resolution for {model}: {resolution}")
     images = media_values(body, ("images", "image_urls", "image"))
     audios = media_values(body, ("audios", "audio_urls", "audio"))
     if len(images) > 9:

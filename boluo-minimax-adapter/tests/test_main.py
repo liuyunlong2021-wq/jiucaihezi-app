@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import src.main as main
 from src.main import (
+    AXIS_BY_RATIO,
     BASE,
     MAX_IMAGE_BYTES,
     MODEL,
@@ -49,11 +50,21 @@ class AdapterContractTest(unittest.TestCase):
         self.assertEqual(media_values({"images": [{"url": "https://a.test/x.png"}]}, ("images", "image")), ["https://a.test/x.png"])
 
     def test_resolution_orientation_follows_ratio_contract(self):
-        resolution = "768p竖"
-        ratio = "16:9"
-        if ratio == "16:9" and resolution.endswith("竖"):
-            resolution = resolution[:-1] + "横"
-        self.assertEqual(resolution, "768p横")
+        self.assertEqual(AXIS_BY_RATIO, {"16:9": "横", "9:16": "竖", "1:1": "(1:1)"})
+        for ratio, resolution, expected in (
+            ("16:9", "768p竖", "768p横"),
+            ("9:16", "768p横", "768p竖"),
+            ("16:9", "768p(1:1)", "768p横"),  # ratio 是权威方向，不能被分辨率带跑
+            ("1:1", "480p竖", "480p(1:1)"),
+        ):
+            self.assertEqual(f"{resolution.split('p')[0]}p{AXIS_BY_RATIO[ratio]}", expected)
+
+    def test_square_ratio_is_rejected_by_the_legacy_model(self):
+        background = FakeBackground()
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(create_video(FakeRequest({**BODY, "aspect_ratio": "1:1"}), background))
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertIn("Unsupported resolution", caught.exception.detail)
 
     def test_reference_limits_prefer_the_sts_declaration(self):
         self.assertEqual(reference_limit("image", {}), MAX_IMAGE_BYTES)
@@ -221,7 +232,7 @@ class AdapterTaskTest(unittest.TestCase):
             "model": ZM_U24,
             "prompt": "square",
             "aspect_ratio": "1:1",
-            "resolution": "768p竖",
+            "resolution": "768p横",
             "images": ["https://a.example/1.png"],
         }), background))
         func, args, kwargs = background.tasks[0]
@@ -231,10 +242,12 @@ class AdapterTaskTest(unittest.TestCase):
         self.assertEqual(self.http.submitted["duration"], 5)
         self.assertEqual(created["model"], ZM_U24)
 
-    def test_legacy_model_rejects_the_square_resolution(self):
+    def test_square_resolution_needs_the_square_ratio(self):
         background = FakeBackground()
         with self.assertRaises(HTTPException) as caught:
-            asyncio.run(create_video(FakeRequest({**BODY, "resolution": "768p(1:1)"}), background))
+            asyncio.run(create_video(FakeRequest({
+                "model": MODEL, "prompt": "x", "resolution": "768p(1:1)",
+            }), background))
         self.assertEqual(caught.exception.status_code, 400)
         self.assertEqual(background.tasks, [])
 

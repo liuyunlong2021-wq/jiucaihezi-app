@@ -126,6 +126,35 @@ test('buildCreationModelAvailability tracks Xiaoyi MiniMax H3 channels', () => {
   assert.equal(models.find(model => model.id === 'newapi/xiaoyi/MiniMaxH3-720p-sec')?.status, 'disabled')
 })
 
+test('buildCreationModelAvailability tracks both Boluo reference-video channels', () => {
+  const models = buildCreationModelAvailability([
+    {
+      id: 130,
+      name: 'Boluo 参考生',
+      status: 1,
+      baseUrl: 'x',
+      models: ['minimax_h3_image_audio_to_video_v2_15s', 'minimax_h3_zm_u24'],
+    },
+  ])
+
+  assert.equal(models.find(model => model.id === 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'newapi/boluo/minimax_h3_zm_u24')?.status, 'enabled')
+})
+
+// ponytail: 两条路由的 aliases 分别是各自的模型名，渠道只配一条时另一条必须是 disabled，
+// 否则面板会把没配的模型显示成可用。这条用例就是钉住这个边界。
+test('buildCreationModelAvailability keeps the two Boluo models isolated', () => {
+  const models = buildCreationModelAvailability([
+    { id: 131, name: 'Boluo 增强版', status: 1, baseUrl: 'x', models: ['minimax_h3_zm_u24'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'newapi/boluo/minimax_h3_zm_u24')?.status, 'enabled')
+  assert.equal(
+    models.find(model => model.id === 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s')?.status,
+    'disabled',
+  )
+})
+
 test('buildCreationModelAvailability detects channel 82 Veo video models', () => {
   const models = buildCreationModelAvailability([
     { id: 82, name: 'Veo', status: 1, baseUrl: 'x', models: ['veo-3.1-generate-preview', 'veo-3.1-fast-generate-preview'] },
