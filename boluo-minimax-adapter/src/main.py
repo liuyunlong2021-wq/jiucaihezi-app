@@ -1,12 +1,21 @@
+"""菠萝 max（aimanplay.cn）MiniMax H3 参考生视频适配器。
+
+参考素材由调用方（App / NewAPI）先传到 `/api/creations/uploads`，换成
+`https://api.jiucaihezi.studio/media/creation/<token>` 这样的公网 URL 后才到我们这里。
+适配器**原样透传**这些 URL，不做二次转存 —— 照 lumenx 那套已验证的范式：
+「已有 http URL 的参考图不会重复上传」。
+
+2026-09-12 实测：自己再去下载那个 URL 转存到菠萝 OSS 是错的。素材存在 Cloudflare
+Worker 的 KV 里（`gateway/src/index.js`），容器绕公网取它会卡满 60 秒；而且这一圈
+既带来过 `RuntimeError`（把文件对象传给 AsyncClient），也带来过超时。既然 App 侧
+已经换过 URL，这里就没有任何理由再搬一遍。
+
+创建接口校验后立即返回本地任务 ID，上游提交在响应之后完成：客户端拿到 ID 的速度与
+上游快慢无关。
+"""
 from __future__ import annotations
 
-import asyncio
-import base64
-import email.utils
-import hashlib
-import hmac
 import logging
-import os
 import uuid
 from time import time
 from urllib.parse import urlsplit
@@ -15,6 +24,8 @@ import httpx
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
+
+logger = logging.getLogger("boluo-minimax-adapter")
 
 BASE = "https://aimanplay.cn"
 MODEL = "minimax_h3_image_audio_to_video_v2_15s"
@@ -32,35 +43,19 @@ MODELS: dict[str, dict] = {
     },
 }
 MAX_DURATION = 15
-# 这两个模型没有比例参数，方向完全写在 resolution 的后缀里；比例只用于“没给分辨率”时的推导。
+# 这两个模型没有比例参数，方向完全写在 resolution 的后缀里；比例只用于「没给分辨率」时的推导。
 RATIO_AXIS = {"16:9": "横", "9:16": "竖", "1:1": "(1:1)"}
 RESOLUTION_AXIS = {"竖": "9:16", "横": "16:9", "(1:1)": "1:1"}
 DEFAULT_RESOLUTION = "768p竖"
-MAX_IMAGE_BYTES = 10 * 1024 * 1024
-MAX_AUDIO_BYTES = 20 * 1024 * 1024
-logger = logging.getLogger("boluo-minimax-adapter")
-
-STS_TIMEOUT_SECONDS = 30.0
-# 参考素材的下载 + 转存总超时；配置写错不该让容器起不来。
-def env_float(name: str, default: float) -> float:
-    try:
-        value = float(os.environ.get(name, "") or default)
-    except ValueError:
-        logger.warning("env %s is not a number, falling back to %s", name, default)
-        return default
-    return value if value > 0 else default
-
-
-REFERENCE_TIMEOUT_SECONDS = env_float("REFERENCE_TIMEOUT_SECONDS", 60.0)
+MAX_IMAGES = 9
+MAX_AUDIOS = 3
 TASK_TTL_SECONDS = 2 * 60 * 60
 
-logger = logging.getLogger("boluo-minimax-adapter")
-
-# 本地任务表：素材搬运和上游提交都在后台完成，创建请求立即返回本地任务 ID。
+# 本地任务表：上游提交在响应之后完成，创建请求立即返回本地任务 ID。
 # ponytail: 单容器内存表，容器重启即丢；那时客户端再轮询这个 ID 会拿到上游的错误响应而不是本地结果。要跨重启就换落盘存储。
 TASKS: dict[str, dict] = {}
 
-app = FastAPI(title="Boluo MiniMax Adapter", version="0.2.0")
+app = FastAPI(title="Boluo MiniMax Adapter", version="0.3.0")
 
 
 @app.on_event("startup")
@@ -114,10 +109,10 @@ async def create_video(request: Request, background: BackgroundTasks):
     resolution = resolve_resolution(spec, body, model)
     images = media_values(body, ("images", "image_urls", "image"))
     audios = media_values(body, ("audios", "audio_urls", "audio"))
-    if len(images) > 9:
-        raise HTTPException(400, "At most 9 reference images are allowed")
-    if len(audios) > 3:
-        raise HTTPException(400, "At most 3 reference audios are allowed")
+    if len(images) > MAX_IMAGES:
+        raise HTTPException(400, f"At most {MAX_IMAGES} reference images are allowed")
+    if len(audios) > MAX_AUDIOS:
+        raise HTTPException(400, f"At most {MAX_AUDIOS} reference audios are allowed")
     seed = body.get("seed")
     if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
         raise HTTPException(400, "seed must be a non-negative integer")
@@ -136,10 +131,18 @@ async def create_video(request: Request, background: BackgroundTasks):
         "upstream": "",
         "error": "",
         "payload": payload,
-        "media": [("image", url) for url in images] + [("audio", url) for url in audios],
+        "images": images,
+        "audios": audios,
     }
     background.add_task(run_task, task_id)
-    logger.info("task=%s stage=accepted model=%s images=%d audios=%d", task_id, model, len(images), len(audios))
+    # 只记主机名，不记完整 URL（temporary token 不该进日志）。
+    logger.info(
+        "task=%s stage=accepted model=%s images=%s audios=%s",
+        task_id,
+        model,
+        [urlsplit(url).hostname for url in images],
+        [urlsplit(url).hostname for url in audios],
+    )
     return task_response(task_id)
 
 
@@ -190,6 +193,33 @@ def media_values(body: dict, keys: tuple[str, ...]) -> list[str]:
     return output
 
 
+def resolution_axis(resolution: str) -> str:
+    """从分辨率后缀读出它暗示的画幅。"""
+    for suffix, ratio in RESOLUTION_AXIS.items():
+        if resolution.endswith(suffix):
+            return ratio
+    return ""
+
+
+def resolve_resolution(spec: dict, body: dict, model: str) -> str:
+    """方向以 resolution 为准；只有没给 resolution 时才用 ratio 推导，
+    两者都给了且互相矛盾就打回 400 —— 不能让客户端拿到一个方向不对的视频。"""
+    resolution = str(body.get("resolution") or "")
+    ratio = str(body.get("aspect_ratio") or body.get("ratio") or "")
+    if not resolution:
+        axis = RATIO_AXIS.get(ratio)
+        resolution = f"768p{axis}" if axis else DEFAULT_RESOLUTION
+    elif ratio in RATIO_AXIS and ratio != resolution_axis(resolution):
+        raise HTTPException(
+            400,
+            f"resolution {resolution} conflicts with aspect_ratio {ratio} for {model}: "
+            "这两个模型只认 resolution，请传带竖/横/(1:1) 后缀的分辨率",
+        )
+    if resolution not in spec["resolutions"]:
+        raise HTTPException(400, f"Unsupported resolution for {model}: {resolution}")
+    return resolution
+
+
 def purge_tasks() -> None:
     # ponytail: 惰性清理，只在有请求进来时触发；单容器够用，不为它起后台线程。
     deadline = time() - TASK_TTL_SECONDS
@@ -219,15 +249,13 @@ async def run_task(task_id: str) -> None:
     if task is None:
         return
     started = time()
+    payload = dict(task["payload"])
+    # 参考素材原样透传给菠萝：URL 已经是调用方换好的公网临时素材，不重传。
+    for index, url in enumerate(task["images"]):
+        payload[f"ref_image_{index}"] = url
+    for index, url in enumerate(task["audios"]):
+        payload[f"ref_audio_{index}"] = url
     try:
-        sts = await get_sts(task["key"])
-        task.update(status="in_progress", progress=5)
-        references = await upload_all(task["media"], sts)
-        payload = dict(task["payload"])
-        counters = {"image": 0, "audio": 0}
-        for (kind, _), uploaded in zip(task["media"], references):
-            payload[f"ref_{kind}_{counters[kind]}"] = uploaded
-            counters[kind] += 1
         response = await app.state.http.post(f"{BASE}/v1/videos", headers={"Authorization": f"Bearer {task['key']}"}, json=payload)
         data = response_json(response)
         if not response.is_success:
@@ -236,6 +264,7 @@ async def run_task(task_id: str) -> None:
         if not upstream:
             raise HTTPException(502, "Boluo did not return a task ID")
         task["upstream"] = upstream
+        task.update(status="in_progress", progress=5)
         logger.info("task=%s stage=submitted upstream=%s elapsed=%.1fs", task_id, upstream, time() - started)
     except HTTPException as exc:
         task.update(status="failed", error=str(exc.detail))
@@ -243,133 +272,6 @@ async def run_task(task_id: str) -> None:
     except Exception as exc:  # 后台任务必须兜住所有异常，否则会变成 ASGI 层未处理错误
         task.update(status="failed", error=f"{type(exc).__name__}: {exc}")
         logger.warning("task=%s stage=failed error=%s", task_id, exc)
-
-
-async def upload_all(media: list[tuple[str, str]], sts: dict) -> list[str]:
-    # 全部素材并发搬运；任一失败就取消其余，避免失败后还在空转上传。
-    running = [asyncio.create_task(upload_reference(kind, url, sts)) for kind, url in media]
-    try:
-        return list(await asyncio.gather(*running))
-    except Exception:
-        for task in running:
-            task.cancel()
-        await asyncio.gather(*running, return_exceptions=True)
-        raise
-
-
-async def upload_reference(kind: str, url: str, sts: dict) -> str:
-    host = urlsplit(url).hostname or "unknown-host"
-    limit = reference_limit(kind, sts)
-    started = time()
-    # 卡住时要知道卡在哪：拿到响应了吗？收到多少字节？
-    progress: dict[str, int] = {"status": 0, "bytes": 0}
-    logger.info("reference kind=%s host=%s stage=fetching timeout=%.0fs", kind, host, REFERENCE_TIMEOUT_SECONDS)
-    try:
-        async with asyncio.timeout(REFERENCE_TIMEOUT_SECONDS):
-            uploaded = await transfer_reference(kind, url, sts, limit, host, progress)
-    except TimeoutError as exc:
-        raise HTTPException(
-            504,
-            f"Reference {kind} from {host} timed out after {REFERENCE_TIMEOUT_SECONDS:.0f}s "
-            f"(status={progress['status'] or 'none'}, received={progress['bytes']}B)",
-        ) from exc
-    logger.info("reference kind=%s host=%s stage=uploaded elapsed=%.1fs", kind, host, time() - started)
-    return uploaded
-
-
-def resolution_axis(resolution: str) -> str:
-    """从分辨率后缀读出它暗示的画幅。"""
-    for suffix, ratio in RESOLUTION_AXIS.items():
-        if resolution.endswith(suffix):
-            return ratio
-    return ""
-
-
-def resolve_resolution(spec: dict, body: dict, model: str) -> str:
-    """方向以 resolution 为准；只有没给 resolution 时才用 ratio 推导，
-    两者都给了且互相矛盾就打回 400 —— 不能让客户端拿到一个方向不对的视频。"""
-    resolution = str(body.get("resolution") or "")
-    ratio = str(body.get("aspect_ratio") or body.get("ratio") or "")
-    if not resolution:
-        axis = RATIO_AXIS.get(ratio)
-        resolution = f"768p{axis}" if axis else DEFAULT_RESOLUTION
-    elif ratio in RATIO_AXIS and ratio != resolution_axis(resolution):
-        raise HTTPException(
-            400,
-            f"resolution {resolution} conflicts with aspect_ratio {ratio} for {model}: "
-            "这两个模型只认 resolution，请传带竖/横/(1:1) 后缀的分辨率",
-        )
-    if resolution not in spec["resolutions"]:
-        raise HTTPException(400, f"Unsupported resolution for {model}: {resolution}")
-    return resolution
-
-
-def reference_limit(kind: str, sts: dict) -> int:
-    """STS 声明的上限优先，缺省用文档默认值（图片 10 MB、音频 20 MB）。"""
-    declared = sts.get("maxImageBytes" if kind == "image" else "maxAudioBytes")
-    if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared > 0:
-        return int(declared)
-    return MAX_IMAGE_BYTES if kind == "image" else MAX_AUDIO_BYTES
-
-
-EXTENSIONS = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "image/gif": ".gif",
-    "image/avif": ".avif",
-    "image/heic": ".heic",
-    "audio/mpeg": ".mp3",
-    "audio/mp3": ".mp3",
-    "audio/wav": ".wav",
-    "audio/x-wav": ".wav",
-    "audio/mp4": ".m4a",
-    "audio/aac": ".aac",
-    "audio/ogg": ".ogg",
-    "audio/flac": ".flac",
-}
-
-
-def object_extension(content_type: str) -> str:
-    """对象 key 的扩展名跟着真实 Content-Type 走；未知类型按文档回退。"""
-    if content_type in EXTENSIONS:
-        return EXTENSIONS[content_type]
-    return ".mp3" if content_type.startswith("audio/") else ".bin"
-
-
-async def transfer_reference(kind: str, url: str, sts: dict, limit: int, host: str, progress: dict[str, int]) -> str:
-    # httpx 的 AsyncClient 不接受文件对象当 body（会被包成同步流，直接 RuntimeError），
-    # 所以边下边攒成 bytes 再 PUT，线格式与上游文档的 `requests.put(data=f)` 一致（带 Content-Length）。
-    # ponytail: 内存上限就是前面校验过的单文件上限（图片 10 MB / 音频 20 MB），并发转存时按文件数叠加。
-    async with app.state.http.stream("GET", url) as source:
-        progress["status"] = source.status_code
-        if not source.is_success:
-            raise HTTPException(400, f"Unable to fetch reference {kind} from {host} (HTTP {source.status_code})")
-        content_type = source.headers.get("content-type", "image/png" if kind == "image" else "audio/mpeg").split(";")[0]
-        body = bytearray()
-        async for chunk in source.aiter_bytes():
-            body.extend(chunk)
-            progress["bytes"] = len(body)
-            if len(body) > limit:
-                raise HTTPException(413, f"Reference {kind} from {host} exceeds {limit // (1024 * 1024)} MB")
-    date = email.utils.formatdate(usegmt=True)
-    ext = object_extension(content_type)
-    path = f'{sts["dir"].rstrip("/")}/{uuid.uuid4().hex}{ext}'
-    canonical = "\n".join(sorted([f"x-oss-date:{date}", "x-oss-object-acl:public-read", f'x-oss-security-token:{sts["securityToken"]}']))
-    string_to_sign = "\n".join(["PUT", "", content_type, date, canonical, f'/{sts["bucket"]}/{path}'])
-    signature = base64.b64encode(hmac.new(sts["accessKeySecret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
-    response = await app.state.http.put(f'{sts["host"].rstrip("/")}/{path}', content=bytes(body), headers={"Authorization": f'OSS {sts["accessKeyId"]}:{signature}', "Content-Type": content_type, "x-oss-date": date, "x-oss-object-acl": "public-read", "x-oss-security-token": sts["securityToken"]})
-    if not response.is_success:
-        raise HTTPException(502, f"OSS upload failed for reference {kind} from {host} (HTTP {response.status_code})")
-    return f'{sts["host"].rstrip("/")}/{path}'
-
-
-async def get_sts(key: str) -> dict:
-    response = await app.state.http.post(f"{BASE}/api/video-upload/oss-sts", headers={"Authorization": f"Bearer {key}"}, timeout=STS_TIMEOUT_SECONDS)
-    data = response_json(response)
-    if not response.is_success or not data.get("success"):
-        raise HTTPException(response.status_code if response.status_code >= 400 else 502, str(data.get("message") or "OSS STS unavailable"))
-    return data
 
 
 def response_json(response: httpx.Response) -> dict:

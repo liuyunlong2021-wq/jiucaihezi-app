@@ -43,19 +43,14 @@ NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上�
 | 已提交上游 | 原样代理菠萝任务对象；响应里的 `id` 仍保持创建时返回的本地 ID |
 | 转存或提交失败 | HTTP `200` + `status: failed` + `error.message`（参数错误仍是立即 `4xx`） |
 
-- 单个参考素材的下载 + 转存上限 **60 秒**，超时的错误信息会指出素材主机和阶段。
-- 多个参考素材并发转存，并行下载后按 `ref_image_N` / `ref_audio_N` 顺序编号提交。
+- 创建接口只做校验，不做任何网络调用；参考素材原样透传，不下载也不转存。
 - 任务表在内存里，容器重启后旧 ID 无法再解析，需要重新创建任务。
 
 ## 字段契约（对齐 `docs/wiki/运维/菠萝MiniMaxapi.md`）
 
-环境变量（compose 里已有默认值，不需要在服务器上改）：
+**参考素材原样透传**：App 先 `POST /api/creations/uploads` 把文件换成公网 URL（Worker 存 KV），适配器把这串 URL 直接送给菠萝的 `ref_image_N` / `ref_audio_N`。适配器**不碰 STS、不碰 OSS、不下载素材** —— 自己再搬一遍既慢又会卡（素材存在 Cloudflare Worker KV 里，容器绕公网取它会卡满 60 秒，实测）。非 `http(s)` 的参考一律 400。
 
-| 变量 | 默认 | 作用 |
-| --- | --- | --- |
-| `REFERENCE_TIMEOUT_SECONDS` | `60` | 单个素材下载 + 转存的总超时；填非法值会回退到默认，不会让容器起不来 |
-
-参考素材存在**Cloudflare Worker（gateway）的 KV** 里：App `POST /api/creations/uploads` → Worker 存入 `PLUGIN_KV` → 回一个 `/media/creation/<32位token>` 的公网 URL（公共读、带 TTL）。所以适配器只能走公网取它，**没有内网路线**（`http://new-api:3000/media/creation/...` 是 404）。
+注意 Worker 的 KV `expirationTtl = 15 分钟`：透传后是菠萝自己去取，所以排队超过 15 分钟的任务可能取不到素材。
 
 - `model` 只收 `minimax_h3_image_audio_to_video_v2_15s` 和 `minimax_h3_zm_u24`，其它一律 400。
 - `duration` 1-15 秒（`seconds` 同义，不传或传 null 时按模型默认值：旧版 15 秒、增强版 5 秒）。
