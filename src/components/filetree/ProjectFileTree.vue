@@ -19,6 +19,14 @@ import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { searchItems } from '@/utils/generalSearch'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
+import {
+  fileNameTaskSuffix,
+  mediaKindOf,
+  planMediaReorder,
+  temporaryReorderName,
+  type MediaReorderMode,
+  type MediaReorderPlan,
+} from '@/utils/mediaReorder'
 import { canvasFilePath } from '@/components/canvas/canvasDocument'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
@@ -826,6 +834,8 @@ async function positionCtxMenu(clientX: number, clientY: number) {
 function openNodeContextMenu(node: TreeNode, clientX: number, clientY: number) {
   if (!selectedPaths.value.has(node.path)) selectTreeNode(node)
   ctxMenu.value = { show: true, x: clientX, y: clientY, node }
+  mediaReorderAvailable.value = null
+  if (node.isDir) void refreshMediaReorderAvailability(node)
   void positionCtxMenu(clientX, clientY)
 }
 function onContextMenu(e: MouseEvent, node: TreeNode) {
@@ -1541,6 +1551,142 @@ async function ctxDelete() {
   errorMsg.value = ''
   pendingDelete.value = resources
 }
+
+/* ─── 媒体排序编号 ─── */
+const mediaReorderFolder = ref<{ path: string; name: string } | null>(null)
+const mediaReorderItems = ref<ProjectResource[]>([])
+const mediaReorderPlan = ref<MediaReorderPlan | null>(null)
+const mediaReorderMode = ref<MediaReorderMode>('respect')
+const mediaReorderBusy = ref(false)
+/** null = 还没数出来（此时先允许入口），否则为目录内媒体文件数。 */
+const mediaReorderAvailable = ref<number | null>(null)
+
+function taskNameSuffix(taskId: string): string {
+  return String(taskId || '')
+    .replace(/[^a-z0-9]/gi, '')
+    .slice(-6)
+    .toLowerCase()
+}
+
+/** 生成时间：文件名末尾的任务后缀 → 任务 createdAt。缺失则交给文件时间兜底。 */
+function mediaCreatedAtOf(name: string): number | undefined {
+  const suffix = fileNameTaskSuffix(name)
+  if (!suffix) return undefined
+  return mediaTaskStore.tasks.find(task => taskNameSuffix(task.id) === suffix)?.createdAt
+}
+
+function buildMediaReorderPlan(): MediaReorderPlan {
+  return planMediaReorder({
+    resources: mediaReorderItems.value,
+    createdAtOf: (_path, name) => mediaCreatedAtOf(name),
+    mode: mediaReorderMode.value,
+    isProtected: isProtectedMemoryPath,
+  })
+}
+
+async function refreshMediaReorderAvailability(node: TreeNode | null) {
+  mediaReorderAvailable.value = null
+  const owner = projectKey.value
+  if (!owner || !node?.isDir) return
+  try {
+    const children = (await projectFiles.listDirectory(owner, node.path)).filter(resource =>
+      isVisibleMemoryResource(resource.path),
+    )
+    if (projectKey.value !== owner || ctxMenu.value.node?.path !== node.path) return
+    mediaReorderAvailable.value = children.filter(
+      resource => !resource.isDirectory && mediaKindOf(resource.path, resource.mimeType) !== null,
+    ).length
+  } catch {
+    mediaReorderAvailable.value = null
+  }
+}
+
+async function ctxReorderMedia() {
+  const node = ctxMenu.value.node
+  closeCtxMenu()
+  const owner = projectKey.value
+  if (!node?.isDir || !owner) return
+  errorMsg.value = ''
+  try {
+    const children = (await projectFiles.listDirectory(owner, node.path)).filter(resource =>
+      isVisibleMemoryResource(resource.path),
+    )
+    if (projectKey.value !== owner) return
+    mediaReorderItems.value = children
+    const plan = buildMediaReorderPlan()
+    if (!plan.renames.length) {
+      const hasMedia = children.some(
+        resource => !resource.isDirectory && mediaKindOf(resource.path, resource.mimeType) !== null,
+      )
+      errorMsg.value = hasMedia ? '该文件夹的媒体文件已经是连续编号。' : '该文件夹没有可编号的媒体文件。'
+      mediaReorderItems.value = []
+      return
+    }
+    mediaReorderFolder.value = { path: node.path, name: node.name }
+    mediaReorderPlan.value = plan
+  } catch (error) {
+    errorMsg.value = `读取文件夹失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+function setMediaReorderMode(mode: MediaReorderMode) {
+  mediaReorderMode.value = mode
+  mediaReorderPlan.value = buildMediaReorderPlan()
+}
+
+function cancelMediaReorder() {
+  if (mediaReorderBusy.value) return
+  mediaReorderFolder.value = null
+  mediaReorderPlan.value = null
+  mediaReorderItems.value = []
+}
+
+async function confirmMediaReorder() {
+  const plan = mediaReorderPlan.value
+  const folder = mediaReorderFolder.value
+  const owner = projectKey.value
+  if (!plan || !folder || !owner || mediaReorderBusy.value) return
+  const byPath = new Map(mediaReorderItems.value.map(resource => [resource.path, resource]))
+  const requested = plan.renames
+  if (!requested.length) return
+  mediaReorderBusy.value = true
+  let done = 0
+  let failure = ''
+  try {
+    // 交换型重名：先只把涉事的文件改成临时名，再统一落到最终名。
+    const staged = new Map<string, ProjectResource>()
+    if (plan.needsTempPass) {
+      for (const [index, rename] of requested.entries()) {
+        const involved = plan.conflicts.some(
+          conflict => conflict.path === rename.path || conflict.holderPath === rename.path,
+        )
+        const source = byPath.get(rename.path)
+        if (!involved || !source) continue
+        staged.set(rename.path, await projectFiles.rename(source, temporaryReorderName(index + 1, source.name)))
+      }
+    }
+    for (const rename of requested) {
+      const source = staged.get(rename.path) || byPath.get(rename.path)
+      if (!source) continue
+      await projectFiles.rename(source, rename.nextName)
+      done += 1
+    }
+  } catch (error) {
+    failure = error instanceof Error ? error.message : String(error)
+  } finally {
+    mediaReorderBusy.value = false
+    mediaReorderFolder.value = null
+    mediaReorderPlan.value = null
+    mediaReorderItems.value = []
+  }
+  if (failure) {
+    const stagedHint = plan.needsTempPass ? '；若有文件停留在 __pft_reorder_tmp_ 临时名，请手动改回或重新编号' : ''
+    errorMsg.value = `已编号 ${done}/${requested.length} 个，随后失败：${failure}${stagedHint}`
+    return
+  }
+  errorMsg.value = `${folder.name}：已为 ${done} 个媒体文件编号`
+}
+
 function cancelDelete() {
   if (!deletingDelete.value) pendingDelete.value = []
 }
@@ -2739,6 +2885,13 @@ onBeforeUnmount(() => {
             <JcIcon name="upload" /><span>上传文件</span>
           </button>
           <div class="pft-ctx-divider"></div>
+          <button
+            v-if="mediaReorderAvailable === null || mediaReorderAvailable > 1"
+            class="pft-ctx-item"
+            @click="ctxReorderMedia"
+          >
+            <JcIcon name="format_list_numbered" /><span>媒体排序编号...</span>
+          </button>
           <button class="pft-ctx-item" @click="ctxCopyResources">
             <JcIcon name="content-copy" /><span>复制</span>
           </button>
@@ -2951,6 +3104,67 @@ onBeforeUnmount(() => {
             <button class="pft-delete-confirm" :disabled="deletingDelete" @click="confirmDelete">
               <!-- oxfmt-ignore -->
               {{ deletingDelete ? (usesSystemTrash ? '正在移入...' : '正在删除...') : usesSystemTrash ? '移入废纸篓' : '永久删除' }}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <Teleport to="body">
+      <div
+        v-if="mediaReorderFolder && mediaReorderPlan"
+        class="pft-reorder-overlay"
+        @click.self="cancelMediaReorder"
+      >
+        <div class="pft-reorder-dialog" role="dialog" aria-modal="true" aria-label="媒体排序编号">
+          <strong>媒体排序编号</strong>
+          <p>{{ mediaReorderFolder.name }} · 将改名 {{ mediaReorderPlan.renames.length }} 个媒体文件</p>
+          <div class="pft-reorder-modes">
+            <label>
+              <input
+                type="radio"
+                :checked="mediaReorderMode === 'respect'"
+                @change="setMediaReorderMode('respect')"
+              />
+              <span>尊重现有编号（未编号的按生成时间接在后面）</span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                :checked="mediaReorderMode === 'created'"
+                @change="setMediaReorderMode('created')"
+              />
+              <span>全部按生成时间重排</span>
+            </label>
+          </div>
+          <p class="pft-reorder-hint">
+            已编号 {{ mediaReorderPlan.numberedCount }} 个 · 未编号 {{ mediaReorderPlan.unnumberedCount }} 个<template
+              v-if="mediaReorderPlan.fileTimeCount"
+              >，其中 {{ mediaReorderPlan.fileTimeCount }} 个没有生成记录、使用文件时间</template
+            >
+          </p>
+          <ul class="pft-reorder-list">
+            <li v-for="rename in mediaReorderPlan.renames" :key="rename.path">
+              <span class="pft-reorder-old">{{ rename.name }}</span>
+              <span class="pft-reorder-arrow">→</span>
+              <span class="pft-reorder-new">{{ rename.nextName }}</span>
+              <em v-if="rename.timeSource === 'file'">文件时间</em>
+            </li>
+          </ul>
+          <p v-if="mediaReorderPlan.needsTempPass" class="pft-reorder-warning">
+            存在交换型重名，会先改成临时名再落到最终名。
+          </p>
+          <p class="pft-reorder-note">
+            改名不会动到其他类型文件；用相对路径引用这些媒体的 Markdown 链接会失效。
+          </p>
+          <div class="pft-reorder-actions">
+            <button :disabled="mediaReorderBusy" @click="cancelMediaReorder">取消</button>
+            <button
+              class="pft-reorder-confirm"
+              :disabled="mediaReorderBusy"
+              @click="confirmMediaReorder"
+            >
+              {{ mediaReorderBusy ? '正在编号...' : '开始编号' }}
             </button>
           </div>
         </div>
@@ -3602,6 +3816,109 @@ onBeforeUnmount(() => {
   cursor: default;
 }
 .pft-delete-dialog .pft-delete-confirm {
+  border-color: var(--olive);
+  background: var(--olive);
+  color: #fff;
+}
+.pft-reorder-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10001;
+  display: grid;
+  place-items: center;
+  background: rgba(0, 0, 0, 0.34);
+}
+.pft-reorder-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(460px, calc(100vw - 32px));
+  max-height: min(72vh, 560px);
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.18);
+}
+.pft-reorder-dialog strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+.pft-reorder-dialog p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink3);
+  font-size: 12px;
+}
+.pft-reorder-modes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  color: var(--ink);
+  font-size: 12px;
+}
+.pft-reorder-modes label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.pft-reorder-list {
+  max-height: 240px;
+  margin: 0;
+  padding: 4px 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  list-style: none;
+  font-size: 12px;
+}
+.pft-reorder-list li {
+  display: flex;
+  gap: 6px;
+  padding: 2px 8px;
+  color: var(--ink);
+}
+.pft-reorder-old {
+  overflow-wrap: anywhere;
+  color: var(--ink3);
+}
+.pft-reorder-arrow {
+  flex: 0 0 auto;
+  color: var(--ink3);
+}
+.pft-reorder-new {
+  overflow-wrap: anywhere;
+}
+.pft-reorder-list em {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--ink3);
+  font-style: normal;
+}
+.pft-reorder-warning {
+  color: var(--ink);
+}
+.pft-reorder-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.pft-reorder-actions button {
+  min-height: 28px;
+  padding: 4px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 12px;
+  cursor: pointer;
+}
+.pft-reorder-actions button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.pft-reorder-actions .pft-reorder-confirm {
   border-color: var(--olive);
   background: var(--olive);
   color: #fff;

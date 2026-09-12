@@ -136,10 +136,12 @@ const wave1FocusedTests = [
   'src/services/__tests__/creationModelAvailability.test.ts',
   'src/utils/__tests__/creationResults.test.ts',
   'src/components/filetree/__tests__/projectFileTreeCanvas.test.ts',
+  'src/components/filetree/__tests__/projectFileTreeMediaReorder.test.ts',
   'src/components/chat/display/__tests__/autoScrollPolicy.test.ts',
   'src/utils/__tests__/idbPath.test.ts',
   'src/utils/__tests__/mediaAssetTypes.test.ts',
   'src/utils/__tests__/projectResource.test.ts',
+  'src/utils/__tests__/mediaReorder.test.ts',
 ]
 
 const externalNodeTests = [
