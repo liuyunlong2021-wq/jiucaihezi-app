@@ -1,7 +1,8 @@
 /**
  * mediaReorder.ts — 文件树单层媒体排序编号（纯函数）
  *
- * 规则：已有编号的文件一律尊重现有编号顺序；未编号的文件按生成时间接在后面。
+ * 规则：编号名统一为 `三位编号_父文件夹名.原扩展名`（如 `第一集/001_第一集.png`）；
+ *      已有编号的文件一律尊重现有编号顺序，未编号的文件按生成时间接在后面。
  * 只做「读列表 → 算新名字」：不碰文件系统、不碰 Vue、不读当前时间。
  */
 import type { ProjectResource } from '@/utils/projectResource'
@@ -70,8 +71,14 @@ export function stripOrderPrefix(name: string): string {
   return match ? value.slice(match[0].length) : value
 }
 
-export function orderName(index: number, name: string): string {
-  return `${String(index).padStart(3, '0')}_${stripOrderPrefix(name)}`
+function extensionOf(name: string): string {
+  const match = /\.[^.]+$/.exec(String(name || ''))
+  return match ? match[0] : ''
+}
+
+/** 编号名：三位数字 + 下划线 + 父文件夹名 + 原扩展名。 */
+export function orderName(index: number, folderName: string, fileName: string): string {
+  return `${String(index).padStart(3, '0')}_${String(folderName || '').trim()}${extensionOf(fileName)}`
 }
 
 /** 交换型冲突时使用的临时名，保留扩展名以便分类不跳变。 */
@@ -117,6 +124,8 @@ function compareRespectingNumber(a: ReorderEntry, b: ReorderEntry): number {
 
 export function planMediaReorder(input: {
   resources: ReorderResource[]
+  /** 编号基础名：父文件夹名。 */
+  baseName: string
   /** 该文件的生成时间（任务 createdAt）；找不到返回 undefined，交给文件时间兜底。 */
   createdAtOf?: (path: string, name: string) => number | undefined
   mode?: MediaReorderMode
@@ -165,7 +174,7 @@ export function planMediaReorder(input: {
   const planned: MediaReorderRename[] = ordered.map((entry, index) => ({
     path: entry.path,
     name: entry.name,
-    nextName: orderName(index + 1, entry.name),
+    nextName: orderName(index + 1, input.baseName, entry.name),
     timeSource: entry.timeSource,
   }))
   const renames = planned.filter(entry => entry.nextName !== entry.name)

@@ -49,6 +49,19 @@ test('编号计划由纯函数产出，并复用现有重命名合同', () => {
   assert.match(source, /getTask|mediaTaskStore\.tasks/)
 })
 
+test('编号基础名取当前文件夹名，而不是文件原名', () => {
+  const build = sliceFunction('function buildMediaReorderPlan()')
+  assert.match(build, /baseName: mediaReorderFolder\.value\?\.name/)
+
+  const open = sliceFunction('async function ctxReorderMedia()')
+  const folderReady = open.indexOf('mediaReorderFolder.value = {')
+  assert.notEqual(folderReady, -1)
+  assert.ok(
+    folderReady < open.indexOf('buildMediaReorderPlan()'),
+    '文件夹名必须在算计划之前就位',
+  )
+})
+
 test('预演弹窗沿用现有弹窗的可访问性范式', () => {
   assert.match(source, /class="pft-reorder-overlay"/)
   assert.match(source, /role="dialog" aria-modal="true" aria-label="媒体排序编号"/)

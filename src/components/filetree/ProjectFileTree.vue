@@ -156,6 +156,8 @@ let searchRequestId = 0
 const treeRoot = ref<TreeNode | null>(null)
 const loading = ref(false)
 const errorMsg = ref('')
+/** 与 errorMsg 互斥的成功提示；只放操作成功文案，失败一律走 errorMsg。 */
+const statusMsg = ref('')
 const selectedPath = ref<string | null>(null)
 const selectedPaths = ref<Set<string>>(new Set())
 let selectionAnchorPath: string | null = null
@@ -202,6 +204,20 @@ const wikiScaffoldBusy = ref(false)
 const wikiScaffoldNotice = ref('')
 
 /* ─── 构建树 ─── */
+/**
+ * 同级排序：目录优先；同级目录按最后修改时间倒序（刚建的、刚动过的在最上面），
+ * 文件按名字——文件必须按名字才能对上编号顺序。
+ */
+function sortTreeChildren<T extends { isDir: boolean; path: string; updatedAt?: number }>(children: T[]): T[] {
+  return children.sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+    if (a.isDir) {
+      const timeDiff = (b.updatedAt ?? 0) - (a.updatedAt ?? 0)
+      if (timeDiff !== 0) return timeDiff
+    }
+    return a.path.localeCompare(b.path)
+  })
+}
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
   const root: TreeNode = {
     name: rootPath.split('/').filter(Boolean).pop() || rootPath,
@@ -212,13 +228,9 @@ function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
     loaded: true,
     depth: 0,
   }
-  const sorted = [...entries].sort((a, b) => {
-    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
-    return a.path.localeCompare(b.path)
-  })
   const nodeMap = new Map<string, TreeNode>()
   nodeMap.set('', root)
-  for (const e of sorted) {
+  for (const e of entries) {
     const parts = e.path.split('/')
     const n: TreeNode = {
       id: e.id,
@@ -238,6 +250,8 @@ function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
     if (p) p.children.push(n)
     if (e.isDir) nodeMap.set(e.path, n)
   }
+  // 按父逐个排序，而不是把扁平列表整体排——否则子目录可能排到父目录之前而丢掉。
+  for (const node of nodeMap.values()) sortTreeChildren(node.children)
   return root
 }
 function buildSearchTree(resources: ProjectResource[], rootPath: string): TreeNode {
@@ -325,6 +339,7 @@ async function loadFileTree() {
   }
   loading.value = true
   errorMsg.value = ''
+  statusMsg.value = ''
   try {
     const resources = (await projectFiles.listDirectory(requestedProjectKey, '')).filter(resource =>
       isVisibleMemoryResource(resource.path),
@@ -408,7 +423,7 @@ async function refreshDirectory(directory: TreeNode) {
   const children = (await projectFiles.listDirectory(owner, directory.path)).filter(resource => isVisibleMemoryResource(resource.path))
   if (owner !== projectKey.value) return
   const previous = new Map(directory.children.map(child => [child.path, child]))
-  directory.children = await Promise.all(children.map(async resource => {
+  directory.children = sortTreeChildren(await Promise.all(children.map(async resource => {
     const old = previous.get(resource.path)
     let displayName = resource.name
     if (!resource.isDirectory && resource.path.startsWith('.raw/对话记录/')) {
@@ -430,7 +445,7 @@ async function refreshDirectory(directory: TreeNode) {
       loaded: old?.loaded ?? !resource.isDirectory,
       depth: resource.path.split('/').length,
     }
-  }))
+  })))
 }
 async function refreshAffectedDirectory(changedPath: string) {
   const parts = changedPath.split('/').slice(0, -1)
@@ -469,6 +484,7 @@ async function createAdaptationWiki() {
   wikiScaffoldBusy.value = true
   errorMsg.value = ''
   wikiScaffoldNotice.value = ''
+  statusMsg.value = ''
   try {
     const plan = buildAdaptationWikiScaffoldPlan((await projectFiles.list(owner)).map(resource => ({ path: resource.path, isDirectory: resource.isDirectory })))
     if (plan.conflicts.length) throw new Error(plan.conflicts.join('\n'))
@@ -715,7 +731,7 @@ async function ensureDirectoryLoaded(node: TreeNode): Promise<boolean> {
     if (!owner) return false
     const children = (await projectFiles.listDirectory(owner, node.path)).filter(resource => isVisibleMemoryResource(resource.path))
     if (owner !== projectKey.value) return false
-    node.children = await Promise.all(children.map(async resource => {
+    node.children = sortTreeChildren(await Promise.all(children.map(async resource => {
       let displayName = resource.name
       if (!resource.isDirectory && resource.path.startsWith('.raw/对话记录/')) {
         try {
@@ -736,7 +752,7 @@ async function ensureDirectoryLoaded(node: TreeNode): Promise<boolean> {
         loaded: !resource.isDirectory,
         depth: resource.path.split('/').length,
       }
-    }))
+    })))
     node.loaded = true
     return true
   } catch (error) {
@@ -792,6 +808,11 @@ function clearProjectSelection() {
   selectedPath.value = null
   focusedPath.value = null
   selectionAnchorPath = null
+}
+/** 有些 WebView 会绕过父级 user-select: none，把文件名划成文字选中；松手时清掉。 */
+function dropStrayTextSelection() {
+  const selection = window.getSelection()
+  if (selection && !selection.isCollapsed) selection.removeAllRanges()
 }
 function selectedResources(): ProjectResource[] {
   return visibleNodes.value
@@ -1549,6 +1570,7 @@ async function ctxDelete() {
   )
     return
   errorMsg.value = ''
+  statusMsg.value = ''
   pendingDelete.value = resources
 }
 
@@ -1579,6 +1601,7 @@ async function ctxMoveToNewFolder() {
   const folderName = name.trim().replace(/^\/+/, '')
   const folderPath = (parentDir ? `${parentDir}/` : '') + folderName
   errorMsg.value = ''
+  statusMsg.value = ''
   try {
     await projectFiles.createFolder(owner, folderPath)
     await appendProjectDirectoryIndex(projectFiles, owner, parentDir, folderPath)
@@ -1599,7 +1622,7 @@ async function ctxMoveToNewFolder() {
       gates.forEach(gate => emitEvent('canvas:lifecycle-failed', gate))
       throw error
     }
-    errorMsg.value = `已把 ${resources.length} 项移动到 ${folderName}`
+    statusMsg.value = `已把 ${resources.length} 项移动到 ${folderName}`
   } catch (error) {
     errorMsg.value = `移动到新建文件夹失败: ${error instanceof Error ? error.message : String(error)}`
   }
@@ -1631,6 +1654,7 @@ function mediaCreatedAtOf(name: string): number | undefined {
 function buildMediaReorderPlan(): MediaReorderPlan {
   return planMediaReorder({
     resources: mediaReorderItems.value,
+    baseName: mediaReorderFolder.value?.name || '',
     createdAtOf: (_path, name) => mediaCreatedAtOf(name),
     mode: mediaReorderMode.value,
     isProtected: isProtectedMemoryPath,
@@ -1660,22 +1684,26 @@ async function ctxReorderMedia() {
   const owner = projectKey.value
   if (!node?.isDir || !owner) return
   errorMsg.value = ''
+  statusMsg.value = ''
   try {
     const children = (await projectFiles.listDirectory(owner, node.path)).filter(resource =>
       isVisibleMemoryResource(resource.path),
     )
     if (projectKey.value !== owner) return
     mediaReorderItems.value = children
+    mediaReorderFolder.value = { path: node.path, name: node.name }
     const plan = buildMediaReorderPlan()
     if (!plan.renames.length) {
       const hasMedia = children.some(
         resource => !resource.isDirectory && mediaKindOf(resource.path, resource.mimeType) !== null,
       )
-      errorMsg.value = hasMedia ? '该文件夹的媒体文件已经是连续编号。' : '该文件夹没有可编号的媒体文件。'
+      errorMsg.value = hasMedia
+        ? `该文件夹的媒体文件已经是「编号_${node.name}」格式。`
+        : '该文件夹没有可编号的媒体文件。'
       mediaReorderItems.value = []
+      mediaReorderFolder.value = null
       return
     }
-    mediaReorderFolder.value = { path: node.path, name: node.name }
     mediaReorderPlan.value = plan
   } catch (error) {
     errorMsg.value = `读取文件夹失败: ${error instanceof Error ? error.message : String(error)}`
@@ -1737,7 +1765,7 @@ async function confirmMediaReorder() {
     errorMsg.value = `已编号 ${done}/${requested.length} 个，随后失败：${failure}${stagedHint}`
     return
   }
-  errorMsg.value = `${folder.name}：已为 ${done} 个媒体文件编号`
+  statusMsg.value = `${folder.name}：已为 ${done} 个媒体文件编号`
 }
 
 function cancelDelete() {
@@ -2755,6 +2783,8 @@ onBeforeUnmount(() => {
 
       <!-- 错误 -->
       <div v-if="!loading && errorMsg" class="pft-status pft-error">{{ errorMsg }}</div>
+      <!-- 成功（与错误互斥） -->
+      <div v-else-if="!loading && statusMsg" class="pft-status pft-success">{{ statusMsg }}</div>
       <div v-if="!loading && wikiScaffoldNotice" class="pft-status pft-success">{{ wikiScaffoldNotice }}</div>
 
       <!-- ═══ 文件树列表 ═══ -->
@@ -2763,6 +2793,7 @@ onBeforeUnmount(() => {
         ref="listEl"
         class="pft-list"
         :class="{ 'drop-active': treeDropActive }"
+        @mouseup="dropStrayTextSelection"
         @click.self="clearProjectSelection"
         @contextmenu="onEmptyContextMenu"
         @dragover.prevent="onTreeDragOver"
@@ -3228,6 +3259,9 @@ onBeforeUnmount(() => {
           </ul>
           <p v-if="mediaReorderPlan.needsTempPass" class="pft-reorder-warning">
             存在交换型重名，会先改成临时名再落到最终名。
+          </p>
+          <p class="pft-reorder-note">
+            编号格式：三位数字 + 下划线 + 当前文件夹名，例如 001_{{ mediaReorderFolder.name }}.png。
           </p>
           <p class="pft-reorder-note">
             改名不会动到其他类型文件；用相对路径引用这些媒体的 Markdown 链接会失效。
@@ -3711,13 +3745,17 @@ onBeforeUnmount(() => {
   background-size: calc(var(--tree-depth) * 16px) 100%;
 }
 .pft-node:hover {
-  background: var(--olive-pale);
+  background-color: var(--olive-pale);
 }
 .pft-node.selected {
-  background: rgba(213, 199, 135, 0.16);
+  background-color: color-mix(in srgb, var(--olive) 18%, var(--paper));
+  color: var(--olive);
+}
+.pft-node.selected .pft-icon {
+  color: var(--olive);
 }
 .pft-node.focused {
-  background: rgba(213, 199, 135, 0.22);
+  background-color: color-mix(in srgb, var(--olive) 26%, var(--paper));
   outline: 1px solid var(--olive);
   outline-offset: -1px;
 }
@@ -3744,6 +3782,8 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 /* ─── 右键菜单 ─── */
