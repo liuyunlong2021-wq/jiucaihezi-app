@@ -1,7 +1,7 @@
 # 菠萝 MiniMax 参考生视频适配器
 
-将 NewAPI 的 OpenAI-compatible `/v1/videos` 请求转发到 `aimanplay.cn` 的
-`minimax_h3_image_audio_to_video_v2_15s`。
+将 NewAPI 的 OpenAI-compatible `/v1/videos` 请求转发到 `aimanplay.cn` 的两个图音参考生模型：
+`minimax_h3_image_audio_to_video_v2_15s` 与 `minimax_h3_zm_u24`（增强版）。
 
 ## 部署
 
@@ -18,8 +18,7 @@ curl http://127.0.0.1:8794/health
 
 - 类型：OpenAI 兼容
 - Base URL：`http://boluo-minimax-adapter:8794`
-- 模型：`minimax_h3_image_audio_to_video_v2_15s`
-- 对外售价：`0.08/秒`
+- 模型：`minimax_h3_image_audio_to_video_v2_15s`（对外价 `0.08/秒`）、`minimax_h3_zm_u24`（对外价 `0.1/秒`）
 - 上游密钥：菠萝平台 `sk-...` 令牌
 
 NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上游任务提交和成片下载代理。
@@ -41,9 +40,10 @@ NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上�
 
 ## 字段契约（对齐 `docs/wiki/运维/菠萝MiniMaxapi.md`）
 
-- `model` 只收 `minimax_h3_image_audio_to_video_v2_15s`，其它一律 400。
-- `duration` 1-15 秒（缺省 15），`seconds` 同义；`resolution` 只收 `480p竖` / `768p竖` / `480p横` / `768p横`。
-- 上游没有比例字段，方向靠 `resolution` 的后缀表达：适配器把 `aspect_ratio`（或 `ratio`）折进去 —— `16:9` + `xxx竖` → `xxx横`，`9:16` + `xxx横` → `xxx竖`。
+- `model` 只收 `minimax_h3_image_audio_to_video_v2_15s` 和 `minimax_h3_zm_u24`，其它一律 400。
+- `duration` 1-15 秒（`seconds` 同义，不传或传 null 时按模型默认值：旧版 15 秒、增强版 5 秒）。
+- `resolution` 按模型各自的白名单校验：旧版只有四个 `竖/横`；增强版额外支持 `480p(1:1)` 和 `768p(1:1)`。
+- 上游没有比例字段，方向靠 `resolution` 的后缀表达：适配器把 `aspect_ratio`（或 `ratio`）折进去 —— `16:9` + `xxx竖` → `xxx横`，`9:16` + `xxx横` → `xxx竖`，`1:1` + `xxx竖/横` → `xxx(1:1)`。
 - 参考素材最多 9 张图 + 3 段音频，上限优先用 STS 响应的 `maxImageBytes` / `maxAudioBytes`，缺失时用文档默认的 10 MB / 20 MB。面板侧选择上限是 20 MB，真实闸门在适配器。
 - 转存到 OSS 的对象 key 用真实 Content-Type 推导扩展名（`png`/`jpg`/`webp`/`wav`/… ），未知类型回退 `.mp3`（音频）或 `.bin`。
 - `seed` 可选，非负整数，原样转发；非法值立即 400。

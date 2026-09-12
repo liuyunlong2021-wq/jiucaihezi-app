@@ -9,17 +9,18 @@
 
 - 平台域名:**aimanplay.cn**(中文品牌:菠萝 max)
 - 能力:视频生成 API(MiniMax-H3 图生/音生/文生视频,经由 AutoDL ComfyUI workflow)
-- 计费:**¥0.06 / 秒**,按请求中声明的时长(秒)预扣,**任务失败自动退款**
+- 计费:按模型区分 —— ¥0.06/秒(首尾帧、图音参考、纯文生)与 ¥0.07/秒(图音参考增强版),按请求中声明的时长(秒)预扣,**任务失败自动退款**
 - 额度换算:约 **1 元 ≈ 70000 quota**(金额 → quota 的展示换算按站点配置,此数值为站点约定值)
 - 充值方式:登录网站在「钱包」页充值,或使用兑换码
 - 全流程:建令牌 → 上传素材到 OSS → 提交视频任务 → 轮询任务 → 下载成片
 
-三个可用模型:
+四个可用模型:
 
 | 模型名 | 说明 |
 | --- | --- |
 | `minimax_h3_lightx2v` | 首尾帧图生视频(需首、尾两帧图片) |
 | `minimax_h3_image_audio_to_video_v2_15s` | 图片 + 音频参考生成视频 |
+| `minimax_h3_zm_u24` | 图片 + 音频参考增强版(额外支持 1:1 分辨率,¥0.07/秒) |
 | `minimax_h3_lightx2v_no_pic` | 纯文生视频(仅需 prompt) |
 
 ---
@@ -249,8 +250,8 @@ Content-Type: application/json
 | `duration` | number | 视频时长(秒)。取值范围见下表;**计费以该声明秒数为准预扣**。`seconds` 为同义兼容字段 |
 | `resolution` | string | 分辨率,取值必须是下表该模型的枚举值,不能发明 |
 | `first_frame` / `last_frame` | string | 首尾帧 URL,仅 `minimax_h3_lightx2v`,两项均必填 |
-| `ref_image_0` … `ref_image_8` | string | 参考图 URL(最多 9 张),仅 `minimax_h3_image_audio_to_video_v2_15s`;下标从 0 连续编号 |
-| `ref_audio_0` … `ref_audio_2` | string | 参考音频 URL(最多 3 段),仅 `minimax_h3_image_audio_to_video_v2_15s`;下标从 0 连续编号 |
+| `ref_image_0` … `ref_image_8` | string | 参考图 URL(最多 9 张),仅图音参考模型(`minimax_h3_image_audio_to_video_v2_15s`、`minimax_h3_zm_u24`);下标从 0 连续编号 |
+| `ref_audio_0` … `ref_audio_2` | string | 参考音频 URL(最多 3 段),仅图音参考模型(`minimax_h3_image_audio_to_video_v2_15s`、`minimax_h3_zm_u24`);下标从 0 连续编号 |
 | `seed` | number | 可选,非负整数,固定随机种子 |
 
 ### 模型参数表
@@ -259,6 +260,7 @@ Content-Type: application/json
 | --- | --- | --- | --- | --- |
 | `minimax_h3_lightx2v` | 首尾帧图生视频 | 1–10 秒(默认 5) | `480p竖`、`480p横`、`768p竖`、`768p横`、`480p(1:1)`、`768p(1:1)` | 必填 `first_frame`、`last_frame`,无 ref 组 |
 | `minimax_h3_image_audio_to_video_v2_15s` | 图片 + 音频参考 | 1–15 秒(默认 15) | `480p竖`、`768p竖`、`480p横`、`768p横` | `ref_image_0`~`ref_image_8`(≤9)、`ref_audio_0`~`ref_audio_2`(≤3);无首尾帧字段 |
+| `minimax_h3_zm_u24` | 图片 + 音频参考增强版(¥0.07/秒) | 1–15 秒(默认 5) | `480p竖`、`768p竖`、`480p横`、`768p横`、`480p(1:1)`、`768p(1:1)` | `ref_image_0`~`ref_image_8`(≤9)、`ref_audio_0`~`ref_audio_2`(≤3);无首尾帧字段 |
 | `minimax_h3_lightx2v_no_pic` | 纯文生视频 | 1–10 秒(默认 5) | `480p竖`、`480p横`、`768p竖`、`768p横`、`480p(1:1)`、`768p(1:1)` | 无,仅 `prompt` |
 
 > 请求中未传 `duration` 时,后端按模型默认值计费估算(`minimax_h3_image_audio_to_video_v2_15s` 默认 15,其余默认 5)。**建议显式传 `duration`**。
@@ -592,7 +594,7 @@ if __name__ == "__main__":
 
 ## 8. 计费
 
-- **单价:¥0.06 / 秒**,按请求声明的 `duration`(秒)预扣
+- **单价:¥0.06 / 秒**(图音参考增强版 `minimax_h3_zm_u24` 为 **¥0.07 / 秒**),按请求声明的 `duration`(秒)预扣
 - 计费预扣在提交时完成;**失败自动退款**,无需人工申请
 - 额度单位与展示:1 元 ≈ 70000 quota;余额以站点「钱包」展示为准
 - 充值:网站「钱包」页在线充值,或使用兑换码
@@ -604,17 +606,19 @@ if __name__ == "__main__":
 
 > 第 1-8 节是 aimanplay 上游文档原文；本节由韭菜盒子侧维护，记录我们实际用到哪部分、哪些地方和原文不同。核对日期：2026-09-12。
 
-**接入范围**：三个模型里只接了 `minimax_h3_image_audio_to_video_v2_15s`（图 + 音频参考生视频）。`minimax_h3_lightx2v`（首尾帧图生视频）和 `minimax_h3_lightx2v_no_pic`（纯文生视频）**没有接入**，适配器对这两个模型名直接返回 400。
+**接入范围**：四个模型里接了**两个图音参考**的：`minimax_h3_image_audio_to_video_v2_15s` 和 `minimax_h3_zm_u24`（参考生视频增强版）。`minimax_h3_lightx2v`（首尾帧图生视频）和 `minimax_h3_lightx2v_no_pic`（纯文生视频）**没有接入**，适配器对这两个模型名直接返回 400。
 
 | 项 | 上游文档 | 韭菜盒子侧 |
 | --- | --- | --- |
-| 模型 | 三个都可用 | 只接参考生那一个，另两个未接 |
-| 比例 | 请求里没有 `ratio` / `aspect_ratio` 字段，方向靠 `resolution` 的 `竖` / `横` 后缀表达 | 面板送 `aspect_ratio`（`16:9` / `9:16`），适配器把它折进 `resolution` 后缀：`16:9` + `xxx竖` → `xxx横`，`9:16` + `xxx横` → `xxx竖`，其余原样。面板默认 `16:9` |
+| 模型 | 四个都可用 | 只接两个图音参考模型，首尾帧与纯文生未接 |
+| 比例 | 请求里没有 `ratio` / `aspect_ratio` 字段，方向靠 `resolution` 的后缀表达 | 面板送 `aspect_ratio`，适配器把它折进 `resolution` 后缀：`16:9` + `xxx竖` → `xxx横`，`9:16` + `xxx横` → `xxx竖`，`1:1` + `xxx竖/横` → `xxx(1:1)`。面板目前只暴露 `16:9` / `9:16`，默认 `16:9` |
+| 1:1 分辨率 | 只有 `minimax_h3_zm_u24` 和两个 `lightx2v` 模型支持 `480p(1:1)` / `768p(1:1)` | 适配器按模型各自的白名单放行，所以 `zm_u24` 收 1:1、`v2_15s` 收到就 400；**创作面板暂未提供 1:1 选项** |
+| 默认时长 | `v2_15s` 默认 15 秒，`zm_u24` 默认 5 秒 | 适配器按模型取默认值；创作面板两条都显式发送，默认分别是 15 / 5 |
 | 参考素材大小 | STS 返回 `maxImageBytes`（默认 10 MB）、`maxAudioBytes`（默认 20 MB） | 适配器优先用 STS 声明的值，STS 没给才用 10 MB / 20 MB。创作面板选择文件时的上限是 20 MB，**真实上限以适配器判定为准**，超限在轮询期表现为 `status: failed` |
 | 对象 key 扩展名 | `image/png`→`.png`、`image/jpeg`→`.jpg`、`audio/*`→`.mp3`、其它→`.bin` | 同一规则，另外对我们确实接受的 `webp`/`gif`/`avif`/`heic` 和 `wav`/`m4a`/`aac`/`ogg`/`flac` 给出真实扩展名，未知类型仍回退 `.mp3` / `.bin` |
 | `seed` | 可选，非负整数 | 原样转发给上游；非法值（负数、小数、字符串）立即 400 |
 | 任务 ID | 上游任务 ID | 适配器生成自己的 32 位十六进制 ID，上游 ID 只存在服务端；轮询和下载都按本地 ID 解析，响应里的 `id` 始终是本地 ID |
 | `GET /content` 的 `Range` | 上游内部支持 | 适配器**不转发** `Range`，总是返回完整字节流 —— App 下载整段视频，不需要断点续传。要支持续传就在这里补 `Range` 透传和 `206` / `Content-Range` 回传 |
-| 计费 | ¥0.06 / 秒 | 创作面板标价 `0.08/秒` |
+| 计费 | ¥0.06 / 秒，`zm_u24` 为 ¥0.07 / 秒 | 创作面板标价：`v2_15s` 为 `0.08/秒`，`zm_u24` 为 `0.1/秒` |
 
-**尚未验证**：本节所有差异只在适配器单元测试（`boluo-minimax-adapter/tests/test_main.py`，15 条）和本机静态核对下成立；真实 STS、真实 OSS 流式 PUT、真实上游提交与成片下载都**没有**跑过，适配器也**未部署**到服务器。
+**尚未验证**：本节所有差异只在适配器单元测试（`boluo-minimax-adapter/tests/test_main.py`）和本机静态核对下成立；真实 STS、真实 OSS 流式 PUT、真实上游提交与成片下载都**没有**跑过，适配器也**未部署**到服务器。

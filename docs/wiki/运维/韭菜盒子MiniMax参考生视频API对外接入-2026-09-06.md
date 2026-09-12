@@ -2,7 +2,7 @@
 
 > 本文档是韭菜盒子 NewAPI 的公开接入合同，只描述韭菜盒子接口，不包含上游服务、内部适配器或密钥信息。
 >
-> 适用对象：需要通过第三方客户端调用 `minimax_h3_image_audio_to_video_v2_15s` 的用户。
+> 适用对象：需要通过第三方客户端调用 `minimax_h3_image_audio_to_video_v2_15s` 或 `minimax_h3_zm_u24` 的用户。
 >
 > 2026-09-12 起：创建接口立即返回任务 ID，参考素材转存和上游提交在响应之后进行；素材类失败改在任务状态里体现，不再占用创建接口的 HTTP 状态码。
 
@@ -15,9 +15,16 @@
 | 查询任务 | `GET /v1/videos/{task_id}` |
 | 下载成片 | `GET /v1/videos/{task_id}/content` |
 | 上传参考素材 | `POST /api/creations/uploads` |
-| 模型名 | `minimax_h3_image_audio_to_video_v2_15s` |
 | 认证 | `Authorization: Bearer <你的 API Key>` |
-| 计价 | `0.08/秒` |
+
+### 模型与计价
+
+| 模型名 | 说明 | 计价 | 支持的 `resolution` | 默认时长 |
+| --- | --- | --- | --- | --- |
+| `minimax_h3_image_audio_to_video_v2_15s` | 参考生视频 | `0.08/秒` | `480p竖`、`768p竖`、`480p横`、`768p横` | 15 秒 |
+| `minimax_h3_zm_u24` | 参考生视频增强版 | `0.1/秒` | `480p竖`、`768p竖`、`480p横`、`768p横`、`480p(1:1)`、`768p(1:1)` | 5 秒 |
+
+两个模型的请求字段、素材数量上限和时长范围完全相同，只有上表的三个差异。`duration` 不传时按上表的默认值计费，**建议显式传**。
 
 ## 创建任务
 
@@ -60,10 +67,10 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 
 | 字段 | 必填 | 说明 |
 | --- | --- | --- |
-| `model` | 是 | 固定为 `minimax_h3_image_audio_to_video_v2_15s`。 |
+| `model` | 是 | `minimax_h3_image_audio_to_video_v2_15s` 或 `minimax_h3_zm_u24`，其它值返回 400。 |
 | `prompt` | 是 | 视频内容描述，最多 12,000 个字符。 |
-| `duration` | 否 | 视频时长，1–15 秒；建议显式传入。也兼容 `seconds`。 |
-| `resolution` | 否 | `480p竖`、`768p竖`、`480p横`、`768p横`。 |
+| `duration` | 否 | 视频时长，1–15 秒；不传时按模型默认值（15 秒 / 5 秒）计费，建议显式传入。也兼容 `seconds`。 |
+| `resolution` | 否 | 见上方模型表；取值必须是该模型支持的枚举之一，否则 400。默认 `768p竖`。 |
 | `images` | 否 | 参考图 URL 数组，最多 9 张。 |
 | `audios` | 否 | 参考音频 URL 数组，最多 3 段。 |
 
@@ -73,8 +80,9 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 
 - `16:9` 建议使用 `480p横` 或 `768p横`
 - `9:16` 建议使用 `480p竖` 或 `768p竖`
+- `1:1` 只有 `minimax_h3_zm_u24` 支持，使用 `480p(1:1)` 或 `768p(1:1)`
 
-客户端可额外传 `ratio` 或 `aspect_ratio`，服务会据此纠正横竖方向；推荐直接传与目标画幅一致的 `resolution`。
+客户端可额外传 `ratio` 或 `aspect_ratio`，服务会据此纠正横竖方向（`16:9` 把 `竖` 纠正成 `横`，`9:16` 反向，`1:1` 纠正成 `(1:1)`）；推荐直接传与目标画幅一致的 `resolution`。
 
 ### 参考素材
 

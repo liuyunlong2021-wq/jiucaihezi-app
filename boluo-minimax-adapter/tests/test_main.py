@@ -11,8 +11,9 @@ from src.main import (
     BASE,
     MAX_IMAGE_BYTES,
     MODEL,
-    RESOLUTIONS,
+    MODELS,
     TASKS,
+    ZM_U24,
     app,
     content,
     create_video,
@@ -35,7 +36,14 @@ BODY = {
 class AdapterContractTest(unittest.TestCase):
     def test_model_contract(self):
         self.assertEqual(MODEL, "minimax_h3_image_audio_to_video_v2_15s")
-        self.assertEqual(len(RESOLUTIONS), 4)
+        self.assertEqual(ZM_U24, "minimax_h3_zm_u24")
+        self.assertEqual(sorted(MODELS), ["minimax_h3_image_audio_to_video_v2_15s", "minimax_h3_zm_u24"])
+        self.assertEqual(len(MODELS[MODEL]["resolutions"]), 4)
+        self.assertEqual(len(MODELS[ZM_U24]["resolutions"]), 6)
+        # 1:1 只有增强版支持，别把它的枚举放宽给旧模型
+        self.assertNotIn("768p(1:1)", MODELS[MODEL]["resolutions"])
+        self.assertEqual(MODELS[MODEL]["default_duration"], 15)
+        self.assertEqual(MODELS[ZM_U24]["default_duration"], 5)
 
     def test_media_values_accepts_openai_arrays(self):
         self.assertEqual(media_values({"images": [{"url": "https://a.test/x.png"}]}, ("images", "image")), ["https://a.test/x.png"])
@@ -207,6 +215,35 @@ class AdapterTaskTest(unittest.TestCase):
         self.assertEqual(background.tasks, [])
         self.assertEqual(TASKS, {})
 
+    def test_enhanced_model_takes_square_resolution_and_its_own_default_duration(self):
+        background = FakeBackground()
+        created = asyncio.run(create_video(FakeRequest({
+            "model": ZM_U24,
+            "prompt": "square",
+            "aspect_ratio": "1:1",
+            "resolution": "768p竖",
+            "images": ["https://a.example/1.png"],
+        }), background))
+        func, args, kwargs = background.tasks[0]
+        asyncio.run(func(*args, **kwargs))
+        self.assertEqual(self.http.submitted["model"], ZM_U24)
+        self.assertEqual(self.http.submitted["resolution"], "768p(1:1)")
+        self.assertEqual(self.http.submitted["duration"], 5)
+        self.assertEqual(created["model"], ZM_U24)
+
+    def test_legacy_model_rejects_the_square_resolution(self):
+        background = FakeBackground()
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(create_video(FakeRequest({**BODY, "resolution": "768p(1:1)"}), background))
+        self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(background.tasks, [])
+
+    def test_missing_or_null_duration_falls_back_to_the_model_default(self):
+        self.accept({**BODY, "duration": None})
+        self.assertEqual(self.http.submitted["duration"], 15)
+        self.accept({"model": ZM_U24, "prompt": "x"})
+        self.assertEqual(self.http.submitted["duration"], 5)
+
     def test_references_are_transferred_concurrently(self):
         self.accept()
         self.assertEqual(self.http.max_open_streams, 3)
@@ -273,10 +310,13 @@ class AdapterTaskTest(unittest.TestCase):
             created = client.post("/v1/videos", json=BODY, headers=headers)
             self.assertEqual(created.status_code, 200)
             self.assertEqual(created.json()["status"], "queued")
+            self.assertEqual(created.json()["model"], MODEL)
             task_id = created.json()["id"]
             polled = client.get(f"/v1/videos/{task_id}", headers=headers)
             self.assertEqual(polled.json()["status"], "completed")
             self.assertEqual(polled.json()["id"], task_id)
+            listed = client.get("/v1/models", headers=headers)
+            self.assertEqual({item["id"] for item in listed.json()["data"]}, {MODEL, ZM_U24})
             rejected = client.post("/v1/videos", json={**BODY, "duration": 99}, headers=headers)
             self.assertEqual(rejected.status_code, 400)
 

@@ -18,7 +18,20 @@ from starlette.background import BackgroundTask
 
 BASE = "https://aimanplay.cn"
 MODEL = "minimax_h3_image_audio_to_video_v2_15s"
-RESOLUTIONS = {"480p竖", "768p竖", "480p横", "768p横"}
+ZM_U24 = "minimax_h3_zm_u24"
+# 两个图音参考生模型的请求字段完全相同（图 ≤9 + 音频 ≤3、时长 1-15），
+# 只有分辨率枚举和默认时长不同；首尾帧与纯文生模型未接入。
+MODELS: dict[str, dict] = {
+    MODEL: {
+        "default_duration": 15,
+        "resolutions": ("480p竖", "768p竖", "480p横", "768p横"),
+    },
+    ZM_U24: {
+        "default_duration": 5,
+        "resolutions": ("480p竖", "768p竖", "480p横", "768p横", "480p(1:1)", "768p(1:1)"),
+    },
+}
+MAX_DURATION = 15
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 STS_TIMEOUT_SECONDS = 30.0
@@ -54,13 +67,13 @@ def token(request: Request) -> str:
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "boluo-minimax-adapter", "model": MODEL}
+    return {"status": "ok", "service": "boluo-minimax-adapter", "models": sorted(MODELS)}
 
 
 @app.get("/v1/models")
 async def models(request: Request):
     token(request)
-    return {"object": "list", "data": [{"id": MODEL, "object": "model", "owned_by": "boluo"}]}
+    return {"object": "list", "data": [{"id": model, "object": "model", "owned_by": "boluo"} for model in sorted(MODELS)]}
 
 
 @app.post("/v1/videos")
@@ -70,21 +83,27 @@ async def create_video(request: Request, background: BackgroundTasks):
         body = await request.json()
     except Exception as exc:
         raise HTTPException(400, "Invalid JSON body") from exc
-    if not isinstance(body, dict) or body.get("model") != MODEL:
+    if not isinstance(body, dict) or body.get("model") not in MODELS:
         raise HTTPException(400, "Unsupported model")
+    model = str(body["model"])
+    spec = MODELS[model]
     prompt = str(body.get("prompt") or "").strip()
     if not prompt or len(prompt) > 12000:
         raise HTTPException(400, "prompt is required and must be at most 12000 characters")
-    duration = body.get("duration", body.get("seconds", 15))
-    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 1 <= duration <= 15:
-        raise HTTPException(400, "duration must be from 1 to 15 seconds")
+    duration = body.get("duration", body.get("seconds"))
+    if duration is None:  # 显式传 null 和没传一样走默认值，不要让它掉进比较里炸成 500
+        duration = spec["default_duration"]
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 1 <= duration <= MAX_DURATION:
+        raise HTTPException(400, f"duration must be from 1 to {MAX_DURATION} seconds")
     resolution = str(body.get("resolution") or "768p竖")
     ratio = str(body.get("aspect_ratio") or body.get("ratio") or "")
-    if ratio == "16:9" and resolution.endswith("竖"):
+    if ratio == "1:1" and resolution.endswith(("竖", "横")):
+        resolution = resolution[:-1] + "(1:1)"
+    elif ratio == "16:9" and resolution.endswith("竖"):
         resolution = resolution[:-1] + "横"
     elif ratio == "9:16" and resolution.endswith("横"):
         resolution = resolution[:-1] + "竖"
-    if resolution not in RESOLUTIONS:
+    if resolution not in spec["resolutions"]:
         raise HTTPException(400, "Unsupported resolution")
     images = media_values(body, ("images", "image_urls", "image"))
     audios = media_values(body, ("audios", "audio_urls", "audio"))
@@ -98,12 +117,13 @@ async def create_video(request: Request, background: BackgroundTasks):
     # 校验全部同步完成后再建任务：参数错误仍然是立即 4xx，不会变成异步失败。
     purge_tasks()
     task_id = uuid.uuid4().hex
-    payload = {"model": MODEL, "prompt": prompt, "duration": duration, "resolution": resolution}
+    payload = {"model": model, "prompt": prompt, "duration": duration, "resolution": resolution}
     if seed is not None:
         payload["seed"] = seed
     TASKS[task_id] = {
         "created_at": int(time()),
         "key": key,
+        "model": model,
         "status": "queued",
         "progress": 0,
         "upstream": "",
@@ -176,7 +196,7 @@ def task_response(task_id: str) -> dict:
         "id": task_id,
         "task_id": task_id,
         "object": "video",
-        "model": MODEL,
+        "model": task["model"],
         "status": task["status"],
         "progress": task["progress"],
         "created_at": task["created_at"],
