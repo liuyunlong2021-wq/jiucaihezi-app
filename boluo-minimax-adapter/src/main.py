@@ -86,7 +86,8 @@ async def create_video(request: Request, background: BackgroundTasks):
     except Exception as exc:
         raise HTTPException(400, "Invalid JSON body") from exc
     if not isinstance(body, dict) or body.get("model") not in MODELS:
-        raise HTTPException(400, "Unsupported model")
+        # 把收到的名字回显出来：NewAPI 渠道映射写错时一眼就能看出转发的是什么。
+        raise HTTPException(400, f"Unsupported model: {body.get('model') if isinstance(body, dict) else body!r}; expected one of {sorted(MODELS)}")
     model = str(body["model"])
     spec = MODELS[model]
     prompt = str(body.get("prompt") or "").strip()
@@ -132,7 +133,7 @@ async def create_video(request: Request, background: BackgroundTasks):
         "media": [("image", url) for url in images] + [("audio", url) for url in audios],
     }
     background.add_task(run_task, task_id)
-    logger.info("task=%s stage=accepted images=%d audios=%d", task_id, len(images), len(audios))
+    logger.info("task=%s stage=accepted model=%s images=%d audios=%d", task_id, model, len(images), len(audios))
     return task_response(task_id)
 
 

@@ -226,6 +226,15 @@ class AdapterTaskTest(unittest.TestCase):
         self.assertEqual(background.tasks, [])
         self.assertEqual(TASKS, {})
 
+    def test_unknown_model_error_echoes_what_was_received(self):
+        background = FakeBackground()
+        with self.assertRaises(HTTPException) as caught:
+            asyncio.run(create_video(FakeRequest({**BODY, "model": "minimax_h3_zm_u2"}), background))
+        self.assertEqual(caught.exception.status_code, 400)
+        # NewAPI 渠道映射写错时靠这条定位
+        self.assertIn("minimax_h3_zm_u2", caught.exception.detail)
+        self.assertIn("minimax_h3_zm_u24", caught.exception.detail)
+
     def test_enhanced_model_takes_square_resolution_and_its_own_default_duration(self):
         background = FakeBackground()
         created = asyncio.run(create_video(FakeRequest({

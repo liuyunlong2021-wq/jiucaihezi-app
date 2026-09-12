@@ -5,14 +5,23 @@
 
 ## 部署
 
+服务器目录 `/opt/boluo-minimax-adapter`，只需同步 `src/`、`requirements.txt`、`Dockerfile`；
+`docker-compose.yml` 用服务器上已有的那份，不要覆盖。
+
 ```bash
 cd /opt/boluo-minimax-adapter
 docker compose up -d --build --force-recreate boluo-minimax-adapter
-curl http://127.0.0.1:8794/health
 ```
 
-将目录复制到服务器后，确保它加入与 NewAPI 相同的 Docker 网络。当前 compose 使用：
-`new-api-new_new-api-network`。
+compose 没有映射宿主端口，`8794` 只在 docker 网络内可达，验证要在容器里做：
+
+```bash
+docker compose exec -T boluo-minimax-adapter \
+  python -c "import json,urllib.request;print(json.load(urllib.request.urlopen('http://127.0.0.1:8794/health')))"
+```
+
+预期 `models` 列出两个模型。重建会清空进程内的任务表，重启前已创建的任务 ID 失效，需要重新创建。
+适配器必须加入与 NewAPI 相同的 Docker 网络：`new-api-new_new-api-network`。
 
 ## NewAPI 渠道
 
