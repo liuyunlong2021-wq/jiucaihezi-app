@@ -1,4 +1,5 @@
 import asyncio
+import os
 import unittest
 from unittest import mock
 
@@ -21,7 +22,6 @@ from src.main import (
     get_video,
     media_values,
     object_extension,
-    reference_fetch_url,
     reference_limit,
     resolve_resolution,
     resolution_axis,
@@ -90,6 +90,16 @@ class AdapterContractTest(unittest.TestCase):
         self.assertEqual(reference_limit("audio", {"maxAudioBytes": 2 * 1024 * 1024}), 2 * 1024 * 1024)
         self.assertEqual(reference_limit("image", {"maxImageBytes": 0}), MAX_IMAGE_BYTES)
 
+    def test_bad_reference_timeout_env_falls_back_instead_of_crashing(self):
+        with mock.patch.dict("os.environ", {"REFERENCE_TIMEOUT_SECONDS": ""}):
+            self.assertEqual(main.env_float("REFERENCE_TIMEOUT_SECONDS", 60.0), 60.0)
+        with mock.patch.dict("os.environ", {"REFERENCE_TIMEOUT_SECONDS": "abc"}):
+            self.assertEqual(main.env_float("REFERENCE_TIMEOUT_SECONDS", 60.0), 60.0)
+        with mock.patch.dict("os.environ", {"REFERENCE_TIMEOUT_SECONDS": "-3"}):
+            self.assertEqual(main.env_float("REFERENCE_TIMEOUT_SECONDS", 60.0), 60.0)
+        with mock.patch.dict("os.environ", {"REFERENCE_TIMEOUT_SECONDS": "180"}):
+            self.assertEqual(main.env_float("REFERENCE_TIMEOUT_SECONDS", 60.0), 180.0)
+
     def test_object_key_extension_follows_content_type(self):
         self.assertEqual(object_extension("image/jpeg"), ".jpg")
         self.assertEqual(object_extension("image/webp"), ".webp")
@@ -97,22 +107,11 @@ class AdapterContractTest(unittest.TestCase):
         self.assertEqual(object_extension("audio/x-unknown"), ".mp3")
         self.assertEqual(object_extension("application/octet-stream"), ".bin")
 
-    def test_our_own_public_assets_are_fetched_over_the_internal_network(self):
-        # 公网域名经 Cloudflare 会 403，内网同一个 NewAPI 是 200/0.03s
-        self.assertEqual(reference_fetch_url("https://api.jiucaihezi.studio/x.png"), "https://api.jiucaihezi.studio/x.png")
-        with mock.patch.object(main, "ASSET_FETCH_ORIGIN", "https://api.jiucaihezi.studio"), mock.patch.object(
-            main, "ASSET_INTERNAL_BASE", "http://new-api:3000"
-        ):
-            self.assertEqual(
-                reference_fetch_url("https://api.jiucaihezi.studio/api/creations/uploads/a.png"),
-                "http://new-api:3000/api/creations/uploads/a.png",
-            )
-            # 只改写自家 origin，别的域名和嗘得名一概不动
-            self.assertEqual(reference_fetch_url("https://cdn.example/a.png"), "https://cdn.example/a.png")
-            self.assertEqual(
-                reference_fetch_url("https://api.jiucaihezi.studio.evil.com/a.png"),
-                "https://api.jiucaihezi.studio.evil.com/a.png",
-            )
+    def test_bad_reference_timeout_env_falls_back_instead_of_crashing(self):
+        # 配置写错不能让容器起不来
+        for raw, expected in (("", 60.0), ("abc", 60.0), ("-3", 60.0), ("0", 60.0), ("180", 180.0)):
+            with mock.patch.dict(os.environ, {"REFERENCE_TIMEOUT_SECONDS": raw}):
+                self.assertEqual(main.env_float("REFERENCE_TIMEOUT_SECONDS", 60.0), expected, raw)
 
 
 class FakeResponse:
@@ -249,7 +248,9 @@ class RealAsyncClientTest(unittest.IsolatedAsyncioTestCase):
 
         app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         try:
-            url = await transfer_reference("image", "https://a.example/1.jpg", self.STS, 10 * 1024 * 1024, "a.example")
+            url = await transfer_reference(
+                "image", "https://a.example/1.jpg", self.STS, 10 * 1024 * 1024, "a.example", {"status": 0, "bytes": 0}
+            )
         finally:
             await app.state.http.aclose()
 
@@ -269,7 +270,9 @@ class RealAsyncClientTest(unittest.IsolatedAsyncioTestCase):
         app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
         try:
             with self.assertRaises(HTTPException) as caught:
-                await transfer_reference("image", "https://a.example/big.png", self.STS, 16, "a.example")
+                await transfer_reference(
+                    "image", "https://a.example/big.png", self.STS, 16, "a.example", {"status": 0, "bytes": 0}
+                )
         finally:
             await app.state.http.aclose()
         self.assertEqual(caught.exception.status_code, 413)
@@ -407,6 +410,9 @@ class AdapterTaskTest(unittest.TestCase):
         self.assertEqual(TASKS[task_id]["status"], "failed")
         self.assertIn("timed out after", TASKS[task_id]["error"])
         self.assertIn("from a.example", TASKS[task_id]["error"])
+        # 卡住时必须说得清：拿到响应了吗、收到多少字节
+        self.assertIn("status=200", TASKS[task_id]["error"])
+        self.assertIn("received=", TASKS[task_id]["error"])
 
     def test_content_resolves_local_id_to_upstream_id(self):
         task_id = self.accept()

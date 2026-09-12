@@ -53,11 +53,9 @@ NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上�
 
 | 变量 | 默认 | 作用 |
 | --- | --- | --- |
-| `ASSET_FETCH_ORIGIN` | `https://api.jiucaihezi.studio` | 匹配到这个 origin 的参考素材改走内网取 |
-| `ASSET_INTERNAL_BASE` | `http://new-api:3000` | 改写后的内网地址；两个变量任一为空则不改写 |
-| `REFERENCE_TIMEOUT_SECONDS` | `60` | 单个素材下载 + 转存的总超时 |
+| `REFERENCE_TIMEOUT_SECONDS` | `60` | 单个素材下载 + 转存的总超时；填非法值会回退到默认，不会让容器起不来 |
 
-为什么要改写：参考素材是 NewAPI 托管的（App 传到 `/api/creations/uploads`）。从容器里访问**自己的公网域名会被 Cloudflare 拦（实测 403）**，而同一个 NewAPI 的内网地址是 `200 / 0.03s`，所以匹配到自家域名就改走内网。
+参考素材存在**Cloudflare Worker（gateway）的 KV** 里：App `POST /api/creations/uploads` → Worker 存入 `PLUGIN_KV` → 回一个 `/media/creation/<32位token>` 的公网 URL（公共读、带 TTL）。所以适配器只能走公网取它，**没有内网路线**（`http://new-api:3000/media/creation/...` 是 404）。
 
 - `model` 只收 `minimax_h3_image_audio_to_video_v2_15s` 和 `minimax_h3_zm_u24`，其它一律 400。
 - `duration` 1-15 秒（`seconds` 同义，不传或传 null 时按模型默认值：旧版 15 秒、增强版 5 秒）。

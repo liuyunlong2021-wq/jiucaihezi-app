@@ -4,10 +4,6 @@ services:
     networks:
       - new-api-network
     environment:
-      # 自家素材改走 docker 内网：公网域名经 Cloudflare 会拦非浏览器请求（实测 403），
-      # 内网同一个 NewAPI 是 200/0.03s。留空则不改写。
-      ASSET_FETCH_ORIGIN: ${ASSET_FETCH_ORIGIN:-https://api.jiucaihezi.studio}
-      ASSET_INTERNAL_BASE: ${ASSET_INTERNAL_BASE:-http://new-api:3000}
       REFERENCE_TIMEOUT_SECONDS: ${REFERENCE_TIMEOUT_SECONDS:-60}
     restart: unless-stopped
 

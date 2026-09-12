@@ -616,6 +616,8 @@ if __name__ == "__main__":
 | 参考图数量 | 模型支持 0–9 张（`ref_image_0..8`） | 创作面板要求**至少 1 张**：实测未带参考图时上游报 `缺少必填参数：ref_image_0`，所以面板提前用 `files.images.min = 1` 拦住 |
 | 默认时长 | `v2_15s` 默认 15 秒，`zm_u24` 默认 5 秒 | 适配器按模型取默认值；创作面板两条都显式发送，默认分别是 15 / 5 |
 | 参考素材大小 | STS 返回 `maxImageBytes`（默认 10 MB）、`maxAudioBytes`（默认 20 MB） | 适配器优先用 STS 声明的值，STS 没给才用 10 MB / 20 MB。创作面板选择文件时的上限是 20 MB，**真实上限以适配器判定为准**，超限在轮询期表现为 `status: failed` |
+| 素材从哪里取 | 无关（上游只收 URL） | 参考素材由 **Cloudflare Worker（仓库里的 `gateway/`）存入 KV**：App `POST /api/creations/uploads` → Worker 存入 `PLUGIN_KV` → 回一个 `https://api.jiucaihezi.studio/media/creation/<32 位 token>` 的公网 URL（公共读、带 TTL）。适配器**只能走公网**取它 —— `http://new-api:3000/media/creation/...` 是 404（该路由属于 Worker，不在 NewAPI），**没有内网捷径**。2026-09-12 实测：容器内访问公网 `.../api/status` 返回 403，而 `http://new-api:3000/api/status` 是 200/0.03s——但 403 只说明 `/api/*` 那条路被拦，与 `/media/*` 无关 |
+| 参考素材下载超时 | 无此概念 | 单素材下载 + 转存共 60 秒（`REFERENCE_TIMEOUT_SECONDS` 可调）。超时报错会带上 `status=` 与 `received=NB`：`status=none, received=0B` 表示没拿到任何响应（网络/TLS 层），`status=200, received=0B` 表示拿到了响应头但对方不吐数据 |
 | 对象 key 扩展名 | `image/png`→`.png`、`image/jpeg`→`.jpg`、`audio/*`→`.mp3`、其它→`.bin` | 同一规则，另外对我们确实接受的 `webp`/`gif`/`avif`/`heic` 和 `wav`/`m4a`/`aac`/`ogg`/`flac` 给出真实扩展名，未知类型仍回退 `.mp3` / `.bin` |
 | `seed` | 可选，非负整数 | 原样转发给上游；非法值（负数、小数、字符串）立即 400 |
 | 任务 ID | 上游任务 ID | 适配器生成自己的 32 位十六进制 ID，上游 ID 只存在服务端；轮询和下载都按本地 ID 解析，响应里的 `id` 始终是本地 ID |
