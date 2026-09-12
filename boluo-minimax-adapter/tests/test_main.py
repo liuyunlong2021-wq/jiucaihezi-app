@@ -2,13 +2,13 @@ import asyncio
 import unittest
 from unittest import mock
 
+import httpx
 from fastapi import HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 import src.main as main
 from src.main import (
-    AXIS_BY_RATIO,
     BASE,
     MAX_IMAGE_BYTES,
     MODEL,
@@ -22,6 +22,9 @@ from src.main import (
     media_values,
     object_extension,
     reference_limit,
+    resolve_resolution,
+    resolution_axis,
+    transfer_reference,
 )
 
 
@@ -49,22 +52,36 @@ class AdapterContractTest(unittest.TestCase):
     def test_media_values_accepts_openai_arrays(self):
         self.assertEqual(media_values({"images": [{"url": "https://a.test/x.png"}]}, ("images", "image")), ["https://a.test/x.png"])
 
-    def test_resolution_orientation_follows_ratio_contract(self):
-        self.assertEqual(AXIS_BY_RATIO, {"16:9": "横", "9:16": "竖", "1:1": "(1:1)"})
-        for ratio, resolution, expected in (
-            ("16:9", "768p竖", "768p横"),
-            ("9:16", "768p横", "768p竖"),
-            ("16:9", "768p(1:1)", "768p横"),  # ratio 是权威方向，不能被分辨率带跑
-            ("1:1", "480p竖", "480p(1:1)"),
-        ):
-            self.assertEqual(f"{resolution.split('p')[0]}p{AXIS_BY_RATIO[ratio]}", expected)
+    def test_resolution_carries_the_orientation(self):
+        self.assertEqual(resolution_axis("768p竖"), "9:16")
+        self.assertEqual(resolution_axis("480p横"), "16:9")
+        self.assertEqual(resolution_axis("768p(1:1)"), "1:1")
+        self.assertEqual(resolution_axis("768p"), "")
 
-    def test_square_ratio_is_rejected_by_the_legacy_model(self):
-        background = FakeBackground()
+    def test_resolution_wins_and_conflicting_ratio_is_rejected(self):
+        spec = MODELS[MODEL]
+        # 只传分辨率：原样透传
+        self.assertEqual(resolve_resolution(spec, {"resolution": "480p横"}, MODEL), "480p横")
+        # 比例与分辨率一致：通过
+        self.assertEqual(
+            resolve_resolution(spec, {"resolution": "768p竖", "aspect_ratio": "9:16"}, MODEL),
+            "768p竖",
+        )
+        # 比例与分辨率矛盾：不静默换画幅，直接 400
         with self.assertRaises(HTTPException) as caught:
-            asyncio.run(create_video(FakeRequest({**BODY, "aspect_ratio": "1:1"}), background))
+            resolve_resolution(spec, {"resolution": "768p竖", "aspect_ratio": "16:9"}, MODEL)
         self.assertEqual(caught.exception.status_code, 400)
-        self.assertIn("Unsupported resolution", caught.exception.detail)
+        self.assertIn("conflicts", caught.exception.detail)
+
+    def test_ratio_only_requests_derive_the_default_resolution(self):
+        spec = MODELS[ZM_U24]
+        self.assertEqual(resolve_resolution(spec, {"aspect_ratio": "16:9"}, ZM_U24), "768p横")
+        self.assertEqual(resolve_resolution(spec, {"aspect_ratio": "1:1"}, ZM_U24), "768p(1:1)")
+        self.assertEqual(resolve_resolution(spec, {}, ZM_U24), "768p竖")
+        # 旧模型不支持 1:1，推导出来的名字不在白名单里
+        with self.assertRaises(HTTPException) as caught:
+            resolve_resolution(MODELS[MODEL], {"aspect_ratio": "1:1"}, MODEL)
+        self.assertEqual(caught.exception.status_code, 400)
 
     def test_reference_limits_prefer_the_sts_declaration(self):
         self.assertEqual(reference_limit("image", {}), MAX_IMAGE_BYTES)
@@ -157,7 +174,8 @@ class FakeHttp:
 
     async def put(self, url, content=None, headers=None):
         self.requests.append(("PUT", url))
-        self.uploaded_bytes.append(len(content.read()))
+        # 真实 body 必须是 bytes（RealAsyncClientTest 兑这个合同）；这里只数长度。
+        self.uploaded_bytes.append(len(content))
         return FakeResponse(self.oss_status)
 
     async def aclose(self):
@@ -182,6 +200,61 @@ class FakeBackground:
 
     def add_task(self, func, *args, **kwargs):
         self.tasks.append((func, args, kwargs))
+
+
+class RealAsyncClientTest(unittest.IsolatedAsyncioTestCase):
+    """走真实 httpx.AsyncClient：手写的假客户端绕过了 httpx 自己的 body 校验，
+    生产上因此漏掉了「给 AsyncClient 传文件对象」这个 500。"""
+
+    STS = {
+        "success": True,
+        "host": "https://oss.test",
+        "dir": "upload",
+        "bucket": "bucket",
+        "accessKeyId": "ak",
+        "accessKeySecret": "sk",
+        "securityToken": "token",
+    }
+
+    async def test_reference_upload_sends_bytes_with_content_length(self):
+        seen = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET":
+                return httpx.Response(200, content=b"image-bytes", headers={"content-type": "image/jpeg"})
+            seen["content-length"] = request.headers.get("content-length")
+            seen["transfer-encoding"] = request.headers.get("transfer-encoding")
+            seen["content-type"] = request.headers.get("content-type")
+            seen["body"] = request.content
+            seen["authorization"] = request.headers.get("authorization", "")
+            return httpx.Response(200, json={})
+
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            url = await transfer_reference("image", "https://a.example/1.jpg", self.STS, 10 * 1024 * 1024, "a.example")
+        finally:
+            await app.state.http.aclose()
+
+        self.assertEqual(seen["body"], b"image-bytes")
+        # 关键：必须是已知长度，不能退化成 chunked（OSS V1 签名按 Content-Type 线格式签）
+        self.assertEqual(seen["content-length"], str(len(b"image-bytes")))
+        self.assertIsNone(seen["transfer-encoding"])
+        self.assertEqual(seen["content-type"], "image/jpeg")
+        self.assertTrue(seen["authorization"].startswith("OSS ak:"))
+        self.assertTrue(url.startswith("https://oss.test/upload/"))
+        self.assertTrue(url.endswith(".jpg"))
+
+    async def test_reference_upload_rejects_over_limit_stream(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, content=b"x" * 32, headers={"content-type": "image/png"})
+
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+        try:
+            with self.assertRaises(HTTPException) as caught:
+                await transfer_reference("image", "https://a.example/big.png", self.STS, 16, "a.example")
+        finally:
+            await app.state.http.aclose()
+        self.assertEqual(caught.exception.status_code, 413)
 
 
 class AdapterTaskTest(unittest.TestCase):
@@ -240,8 +313,7 @@ class AdapterTaskTest(unittest.TestCase):
         created = asyncio.run(create_video(FakeRequest({
             "model": ZM_U24,
             "prompt": "square",
-            "aspect_ratio": "1:1",
-            "resolution": "768p横",
+            "resolution": "768p(1:1)",
             "images": ["https://a.example/1.png"],
         }), background))
         func, args, kwargs = background.tasks[0]

@@ -138,6 +138,7 @@ const wave1FocusedTests = [
   'src/components/filetree/__tests__/projectFileTreeCanvas.test.ts',
   'src/components/filetree/__tests__/projectFileTreeMediaReorder.test.ts',
   'src/components/filetree/__tests__/projectFileTreeMediaWorkflow.test.ts',
+  'src/composables/__tests__/useCreationBoluoAspect.test.ts',
   'src/components/chat/display/__tests__/autoScrollPolicy.test.ts',
   'src/utils/__tests__/idbPath.test.ts',
   'src/utils/__tests__/mediaAssetTypes.test.ts',

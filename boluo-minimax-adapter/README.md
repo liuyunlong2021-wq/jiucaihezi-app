@@ -52,8 +52,9 @@ NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上�
 - `model` 只收 `minimax_h3_image_audio_to_video_v2_15s` 和 `minimax_h3_zm_u24`，其它一律 400。
 - `duration` 1-15 秒（`seconds` 同义，不传或传 null 时按模型默认值：旧版 15 秒、增强版 5 秒）。
 - `resolution` 按模型各自的白名单校验：旧版只有四个 `竖/横`；增强版额外支持 `480p(1:1)` 和 `768p(1:1)`。
-- 上游没有比例字段，方向靠 `resolution` 的后缀表达：适配器把 `aspect_ratio`（或 `ratio`）折进去 —— `16:9` + `xxx竖` → `xxx横`，`9:16` + `xxx横` → `xxx竖`，`1:1` + `xxx竖/横` → `xxx(1:1)`。
-- 参考素材最多 9 张图 + 3 段音频，上限优先用 STS 响应的 `maxImageBytes` / `maxAudioBytes`，缺失时用文档默认的 10 MB / 20 MB。面板侧选择上限是 20 MB，真实闸门在适配器。
+- 上游没有比例字段，方向**完全以 `resolution` 为准**；`aspect_ratio` 只在没给 `resolution` 时用来推导默认值，两者矛盾时返回 400。
+- 参考素材最多 9 张图 + 3 段音频（创作面板要求至少 1 张参考图），上限优先用 STS 响应的 `maxImageBytes` / `maxAudioBytes`，缺失时用文档默认的 10 MB / 20 MB。面板侧选择上限是 20 MB，真实闸门在适配器。
+- 参考素材的下载 + 转存走真 `httpx.AsyncClient`：body 必须是 bytes（文件对象会被包成同步流直接 RuntimeError），所以边下边攒再 PUT，线上带 `Content-Length`。
 - 转存到 OSS 的对象 key 用真实 Content-Type 推导扩展名（`png`/`jpg`/`webp`/`wav`/… ），未知类型回退 `.mp3`（音频）或 `.bin`。
 - `seed` 可选，非负整数，原样转发；非法值立即 400。
 - `GET /v1/videos/{id}/content` 不转发 `Range`，总是返回完整字节流。

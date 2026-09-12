@@ -6,7 +6,6 @@ import email.utils
 import hashlib
 import hmac
 import logging
-import tempfile
 import uuid
 from time import time
 from urllib.parse import urlsplit
@@ -32,13 +31,14 @@ MODELS: dict[str, dict] = {
     },
 }
 MAX_DURATION = 15
-# 上游没有比例字段，方向靠 resolution 后缀表达；ratio 是权威方向。
-AXIS_BY_RATIO = {"16:9": "横", "9:16": "竖", "1:1": "(1:1)"}
+# 这两个模型没有比例参数，方向完全写在 resolution 的后缀里；比例只用于“没给分辨率”时的推导。
+RATIO_AXIS = {"16:9": "横", "9:16": "竖", "1:1": "(1:1)"}
+RESOLUTION_AXIS = {"竖": "9:16", "横": "16:9", "(1:1)": "1:1"}
+DEFAULT_RESOLUTION = "768p竖"
 MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 STS_TIMEOUT_SECONDS = 30.0
 REFERENCE_TIMEOUT_SECONDS = 60.0
-MAX_MEMORY_BUFFER_BYTES = 1024 * 1024
 TASK_TTL_SECONDS = 2 * 60 * 60
 
 logger = logging.getLogger("boluo-minimax-adapter")
@@ -98,14 +98,7 @@ async def create_video(request: Request, background: BackgroundTasks):
         duration = spec["default_duration"]
     if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not 1 <= duration <= MAX_DURATION:
         raise HTTPException(400, f"duration must be from 1 to {MAX_DURATION} seconds")
-    resolution = str(body.get("resolution") or "768p竖")
-    ratio = str(body.get("aspect_ratio") or body.get("ratio") or "")
-    axis = AXIS_BY_RATIO.get(ratio)
-    if axis:
-        # 按 ratio 的轴重建分辨率名（只换后缀，保住 480p / 768p 的档位）。
-        resolution = f"{resolution.split('p')[0]}p{axis}"
-    if resolution not in spec["resolutions"]:
-        raise HTTPException(400, f"Unsupported resolution for {model}: {resolution}")
+    resolution = resolve_resolution(spec, body, model)
     images = media_values(body, ("images", "image_urls", "image"))
     audios = media_values(body, ("audios", "audio_urls", "audio"))
     if len(images) > 9:
@@ -264,6 +257,33 @@ async def upload_reference(kind: str, url: str, sts: dict) -> str:
     return uploaded
 
 
+def resolution_axis(resolution: str) -> str:
+    """从分辨率后缀读出它暗示的画幅。"""
+    for suffix, ratio in RESOLUTION_AXIS.items():
+        if resolution.endswith(suffix):
+            return ratio
+    return ""
+
+
+def resolve_resolution(spec: dict, body: dict, model: str) -> str:
+    """方向以 resolution 为准；只有没给 resolution 时才用 ratio 推导，
+    两者都给了且互相矛盾就打回 400 —— 不能让客户端拿到一个方向不对的视频。"""
+    resolution = str(body.get("resolution") or "")
+    ratio = str(body.get("aspect_ratio") or body.get("ratio") or "")
+    if not resolution:
+        axis = RATIO_AXIS.get(ratio)
+        resolution = f"768p{axis}" if axis else DEFAULT_RESOLUTION
+    elif ratio in RATIO_AXIS and ratio != resolution_axis(resolution):
+        raise HTTPException(
+            400,
+            f"resolution {resolution} conflicts with aspect_ratio {ratio} for {model}: "
+            "这两个模型只认 resolution，请传带竖/横/(1:1) 后缀的分辨率",
+        )
+    if resolution not in spec["resolutions"]:
+        raise HTTPException(400, f"Unsupported resolution for {model}: {resolution}")
+    return resolution
+
+
 def reference_limit(kind: str, sts: dict) -> int:
     """STS 声明的上限优先，缺省用文档默认值（图片 10 MB、音频 20 MB）。"""
     declared = sts.get("maxImageBytes" if kind == "image" else "maxAudioBytes")
@@ -298,29 +318,27 @@ def object_extension(content_type: str) -> str:
 
 
 async def transfer_reference(kind: str, url: str, sts: dict, limit: int, host: str) -> str:
-    # 边下边传：流式下载到临时缓冲（超过 1 MiB 落盘），再按同样的 Content-Length 线格式 PUT 给 OSS。
-    # ponytail: 用临时磁盘换有界内存；磁盘不足时这里会直接失败，不做落盘以外的重试。
-    with tempfile.SpooledTemporaryFile(max_size=MAX_MEMORY_BUFFER_BYTES) as buffer:
-        async with app.state.http.stream("GET", url) as source:
-            if not source.is_success:
-                raise HTTPException(400, f"Unable to fetch reference {kind} from {host} (HTTP {source.status_code})")
-            content_type = source.headers.get("content-type", "image/png" if kind == "image" else "audio/mpeg").split(";")[0]
-            size = 0
-            async for chunk in source.aiter_bytes():
-                size += len(chunk)
-                if size > limit:
-                    raise HTTPException(413, f"Reference {kind} from {host} exceeds {limit // (1024 * 1024)} MB")
-                buffer.write(chunk)
-        buffer.seek(0)
-        date = email.utils.formatdate(usegmt=True)
-        ext = object_extension(content_type)
-        path = f'{sts["dir"].rstrip("/")}/{uuid.uuid4().hex}{ext}'
-        canonical = "\n".join(sorted([f"x-oss-date:{date}", "x-oss-object-acl:public-read", f'x-oss-security-token:{sts["securityToken"]}']))
-        string_to_sign = "\n".join(["PUT", "", content_type, date, canonical, f'/{sts["bucket"]}/{path}'])
-        signature = base64.b64encode(hmac.new(sts["accessKeySecret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
-        response = await app.state.http.put(f'{sts["host"].rstrip("/")}/{path}', content=buffer, headers={"Authorization": f'OSS {sts["accessKeyId"]}:{signature}', "Content-Type": content_type, "x-oss-date": date, "x-oss-object-acl": "public-read", "x-oss-security-token": sts["securityToken"]})
-        if not response.is_success:
-            raise HTTPException(502, f"OSS upload failed for reference {kind} from {host} (HTTP {response.status_code})")
+    # httpx 的 AsyncClient 不接受文件对象当 body（会被包成同步流，直接 RuntimeError），
+    # 所以边下边攒成 bytes 再 PUT，线格式与上游文档的 `requests.put(data=f)` 一致（带 Content-Length）。
+    # ponytail: 内存上限就是前面校验过的单文件上限（图片 10 MB / 音频 20 MB），并发转存时按文件数叠加。
+    async with app.state.http.stream("GET", url) as source:
+        if not source.is_success:
+            raise HTTPException(400, f"Unable to fetch reference {kind} from {host} (HTTP {source.status_code})")
+        content_type = source.headers.get("content-type", "image/png" if kind == "image" else "audio/mpeg").split(";")[0]
+        body = bytearray()
+        async for chunk in source.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > limit:
+                raise HTTPException(413, f"Reference {kind} from {host} exceeds {limit // (1024 * 1024)} MB")
+    date = email.utils.formatdate(usegmt=True)
+    ext = object_extension(content_type)
+    path = f'{sts["dir"].rstrip("/")}/{uuid.uuid4().hex}{ext}'
+    canonical = "\n".join(sorted([f"x-oss-date:{date}", "x-oss-object-acl:public-read", f'x-oss-security-token:{sts["securityToken"]}']))
+    string_to_sign = "\n".join(["PUT", "", content_type, date, canonical, f'/{sts["bucket"]}/{path}'])
+    signature = base64.b64encode(hmac.new(sts["accessKeySecret"].encode(), string_to_sign.encode(), hashlib.sha1).digest()).decode()
+    response = await app.state.http.put(f'{sts["host"].rstrip("/")}/{path}', content=bytes(body), headers={"Authorization": f'OSS {sts["accessKeyId"]}:{signature}', "Content-Type": content_type, "x-oss-date": date, "x-oss-object-acl": "public-read", "x-oss-security-token": sts["securityToken"]})
+    if not response.is_success:
+        raise HTTPException(502, f"OSS upload failed for reference {kind} from {host} (HTTP {response.status_code})")
     return f'{sts["host"].rstrip("/")}/{path}'
 
 

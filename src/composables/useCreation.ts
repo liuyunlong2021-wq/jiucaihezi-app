@@ -468,6 +468,11 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
   const images = materializedFiles?.images || currentFiles.images
   const videos = materializedFiles?.videos || currentFiles.videos
   const audios = materializedFiles?.audios || currentFiles.audios
+  // 方向写在 resolution 里的模型（capabilities.ratios 为空数组）不展示比例，
+  // 也不能把界面残留的比例一起发出去，否则上游会按比例改写画幅。
+  const ratioParams = currentCreationSpec.value?.capabilities.ratios?.length === 0
+    ? {}
+    : { ratio: cpState.ar, aspectRatio: cpState.ar, aspect_ratio: cpState.ar }
   return {
     ...modelFieldParams(),
     prompt: cpState.prompt,
@@ -483,9 +488,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     width: cpState.width,
     height: cpState.height,
     value: cpState.value,
-    ratio: cpState.ar,
-    aspectRatio: cpState.ar,
-    aspect_ratio: cpState.ar,
+    ...ratioParams,
     resolution: cpState.res,
     duration: currentCreationSpec.value?.mode === 'video-edit' ? undefined : cpState.dur,
     size: getSizeOptions(currentModel.value!).length ? cpState.size : undefined,
