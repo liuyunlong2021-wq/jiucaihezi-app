@@ -166,7 +166,8 @@ export async function prepareStoryAnalysis(
   const analysisDirectory = `${workDirectory}/节点分析`
   const sourcePages = directMarkdownPages(resources, sourceDirectory)
     .filter(
-      resource => /\/[0-9]{4}\.md$/u.test(resource.path) && !resource.path.endsWith('/0000.md'),
+      resource => /\/[0-9]{4}(?:_[^/]*)?\.md$/u.test(resource.path) &&
+        !resource.path.endsWith('/0000.md'),
     )
     .sort((a, b) => a.path.localeCompare(b.path))
   if (!sourcePages.length) throw new Error(`没有可分析的原文节点：${sourceDirectory}`)

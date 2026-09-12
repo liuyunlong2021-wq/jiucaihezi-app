@@ -239,6 +239,23 @@ export async function applyStoryImportPlan(
       throw new Error('拆分预览存在需要确认的编号警告')
     const resources = await files.list(owner)
     const byPath = new Map(resources.map(resource => [resource.path, resource]))
+    // 节点文件名带原文派生的短名：同一序号出现不同名字说明原文已改稿或来自旧版命名，
+    // 直接写入会留下两套节点，所以在任何写入前停下。
+    const plannedPaths = new Set(plan.split.nodes.map(node => node.path))
+    const plannedByNumber = new Map<string, string>()
+    for (const node of plan.split.nodes) {
+      const directory = node.path.slice(0, node.path.lastIndexOf('/'))
+      const number = node.path.slice(directory.length + 1).match(/^([0-9]+)/u)?.[1]
+      if (number) plannedByNumber.set(`${directory}/${number}`, node.path)
+    }
+    const renamedNode = resources.find(resource => {
+      if (plannedPaths.has(resource.path) || !/\.md$/i.test(resource.path)) return false
+      const directory = resource.path.slice(0, resource.path.lastIndexOf('/'))
+      const number = resource.path.slice(directory.length + 1).match(/^([0-9]+)(?:_|\.md$)/u)?.[1]
+      return Boolean(number && plannedByNumber.has(`${directory}/${number}`))
+    })
+    if (renamedNode)
+      throw new Error(`同一序号已有不同名称的节点文件，未写入任何内容：${renamedNode.path}`)
     const reads = new Map<string, ProjectTextRead | null>()
     const read = async (path: string): Promise<ProjectTextRead | null> => {
       if (reads.has(path)) return reads.get(path) || null

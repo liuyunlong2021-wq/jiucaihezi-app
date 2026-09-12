@@ -200,6 +200,7 @@ const storyImport = ref<{
 } | null>(null)
 const storyImportBusy = ref(false)
 const storyImportError = ref('')
+const storyImportNamesExpanded = ref(false)
 const wikiScaffoldBusy = ref(false)
 const wikiScaffoldNotice = ref('')
 
@@ -1943,6 +1944,7 @@ async function prepareStoryImport(content: string, name: string, sourceEncoding:
     resources.some(resource => resource.path === root || resource.path.startsWith(`${root}/`)),
   ) as Array<'wiki' | 'docs/wiki'>
   if (roots.length > 1) throw new Error('检测到多个 Wiki 根目录，请先保留一个')
+  storyImportNamesExpanded.value = false
   storyImport.value = {
     content,
     plan: await buildStoryImportPlan({
@@ -3131,6 +3133,14 @@ onBeforeUnmount(() => {
               <dd>{{ storyImport.plan.split.nodes.find(node => node.order > 0)?.title }}</dd>
               <dt>最后节点</dt>
               <dd>{{ storyImport.plan.split.nodes.at(-1)?.title }}</dd>
+              <dt>命名示例</dt>
+              <dd class="pft-story-names">
+                <span v-for="node in storyImport.plan.split.nodes.filter(item => item.order > 0).slice(0, 3)" :key="node.path">{{ node.path.split('/').at(-1) }}</span>
+                <button v-if="!storyImportNamesExpanded" type="button" class="pft-story-names-toggle" @click="storyImportNamesExpanded = true">
+                  查看全部 {{ storyImport.plan.split.nodes.filter(item => item.order > 0).length }} 个
+                </button>
+                <span v-else>{{ storyImport.plan.split.nodes.filter(item => item.order > 0).slice(3).map(item => item.path.split('/').at(-1)).join('、') }}</span>
+              </dd>
               <dt>输出位置</dt>
               <dd>{{ storyImport.plan.workDirectory }}</dd>
             </dl>
@@ -3398,7 +3408,7 @@ onBeforeUnmount(() => {
   line-height: 1.45;
 }
 .pft-project-error {
-  color: var(--danger);
+  color: var(--jc-error);
 }
 .pft-project-menu button:hover,
 .pft-project-menu button.active {
@@ -3515,7 +3525,7 @@ onBeforeUnmount(() => {
   overflow: auto;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: var(--surface, #fff);
+  background: var(--paper);
   color: var(--ink);
   padding: 18px;
   box-shadow: 0 16px 48px rgb(0 0 0 / 20%);
@@ -3550,7 +3560,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 7px 12px;
-  background: var(--surface, #fff);
+  background: transparent;
   color: var(--ink);
   cursor: pointer;
 }
@@ -3559,14 +3569,33 @@ onBeforeUnmount(() => {
   opacity: 0.55;
 }
 .pft-story-dialog .pft-story-confirm {
-  border-color: var(--brand, #4f7b55);
-  background: var(--brand, #4f7b55);
-  color: #fff;
+  border-color: var(--olive);
+  background: var(--olive);
+  color: var(--jc-on-primary);
+}
+.pft-story-names span {
+  display: inline-block;
+  margin: 0 6px 4px 0;
+  border-radius: 4px;
+  padding: 1px 6px;
+  background: var(--olive-pale);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.pft-story-dialog .pft-story-names-toggle {
+  border: none;
+  padding: 0;
+  background: transparent;
+  color: var(--olive);
+  font-size: 12px;
+  text-decoration: underline;
 }
 .pft-story-warnings {
   margin-top: 14px;
+  border: 1px solid color-mix(in srgb, var(--jc-warning) 34%, var(--border));
   border-radius: 6px;
-  background: var(--warning-bg, #fff7dd);
+  background: color-mix(in srgb, var(--jc-warning) 12%, var(--paper));
+  color: var(--ink);
   padding: 10px;
   font-size: 12px;
 }
@@ -3575,7 +3604,7 @@ onBeforeUnmount(() => {
   padding-left: 18px;
 }
 .pft-story-error {
-  color: var(--danger, #b3261e);
+  color: var(--jc-error);
   font-size: 12px;
 }
 
@@ -3687,7 +3716,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
 }
 .pft-error {
-  color: var(--color-error, #d32f2f);
+  color: var(--jc-error);
 }
 
 /* ─── 列表 ─── */

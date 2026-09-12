@@ -112,7 +112,7 @@ test('runtime prepares only unfinished story nodes and commits a grounded analys
     'project',
   )
 
-  const analysisPath = `${plan.workDirectory}/节点分析/0001.md`
+  const analysisPath = `${plan.workDirectory}/节点分析/0001_刘备走进桃园.md`
   assert.deepEqual(result.committed, [prepared.nodes[0]!.nodeId])
   assert.equal(state.writes.at(-1), analysisPath)
   assert.match(state.entries.get(analysisPath)?.content || '', /analysis_status: complete/)
@@ -164,7 +164,7 @@ test('runtime rejects invented evidence before writing any semantic file', async
     /摘要证据不在原文节点中/,
   )
   assert.equal(state.writes.length, 0)
-  assert.equal(state.entries.has(`${plan.workDirectory}/节点分析/0001.md`), false)
+  assert.equal(state.entries.has(`${plan.workDirectory}/节点分析/0001_刘备走进桃园.md`), false)
 })
 
 test('needs-review nodes wait until explicitly included and carry their revision', async () => {
@@ -239,7 +239,7 @@ test('semantic commit links but never rewrites a user-maintained canonical asset
   assert.equal(state.entries.get('wiki/资产/人物/刘备.md')?.content, canonical)
   assert.equal(result.affected_paths.includes('wiki/资产/人物/刘备.md'), false)
   assert.match(
-    state.entries.get(`${plan.workDirectory}/节点分析/0001.md`)?.content || '',
+    state.entries.get(`${plan.workDirectory}/节点分析/0001_刘备走进桃园.md`)?.content || '',
     /wiki\/资产\/人物\/刘备/,
   )
 })
@@ -280,7 +280,8 @@ test('ambiguous canonical assets stay unresolved and cannot become complete', as
     'project',
   )
 
-  const analysis = state.entries.get(`${plan.workDirectory}/节点分析/0001.md`)?.content || ''
+  const analysis =
+    state.entries.get(`${plan.workDirectory}/节点分析/0001_刘备走进桃园.md`)?.content || ''
   assert.deepEqual(result.needs_review, [node!.nodeId])
   assert.equal(result.conflicts.length, 1)
   assert.match(analysis, /analysis_status: needs_review/)

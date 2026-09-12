@@ -468,6 +468,8 @@ test('project tree exposes native story splitting with a deterministic preview a
   assert.match(source, /故事拆分预览/)
   assert.match(source, /首个节点/)
   assert.match(source, /最后节点/)
+  assert.match(source, /命名示例/)
+  assert.match(source, /storyImportNamesExpanded/)
   assert.match(source, /检测编码/)
   assert.match(source, /确认警告并拆分/)
   assert.match(source, /locateProjectResource\(pending\.plan\.workDirectory\)/)

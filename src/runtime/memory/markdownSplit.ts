@@ -12,6 +12,8 @@ export interface MarkdownSplitNode {
   order: number
   title: string
   sourceLabel: string
+  shortName: string
+  summary: string
   source: string
   startLine: number
   endLine: number
@@ -82,11 +84,130 @@ function titleFromBoundary(line: string): string {
   return line.replace(/^\s*#{1,6}\s*/, '').trim()
 }
 
+// 名称与摘要预算：文件树与侧栏都要单行读完。短名只允许来自原文本身
+// （标题名称、标题括注、章内小标题、首个正文句子），模型产出永不进入路径——
+// 否则同一份原文两次导入会得到不同文件名。
+const SHORT_NAME_LIMIT = 12
+const SUMMARY_LIMIT = 24
+const MIN_SUBHEADING_NAME = 2
+const MIN_SENTENCE_NAME = 4
+
+function plainText(value: string): string {
+  return value.normalize('NFC').replace(/\s+/g, ' ').trim()
+}
+
+function truncate(value: string, limit: number): string {
+  const chars = [...value]
+  return chars.length <= limit ? value : `${chars.slice(0, limit - 1).join('')}…`
+}
+
+function pathSegment(value: string, limit: number): string {
+  const cleaned = plainText(value)
+    .replace(/[\\/:*?"<>|#[\]{}]/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[.\-_ ·、。，,]+|[.\-_ ·、。，,]+$/gu, '')
+  return [...cleaned].slice(0, limit).join('')
+}
+
+function unwrapBookMarks(value: string): string {
+  return value.replace(/^[《〈「『【[]+/u, '').replace(/[》〉」』】\]]+$/u, '')
+}
+
+function splitTitleNote(title: string): { name: string; note: string } {
+  const match = plainText(title).match(/^(.*?)\s*[（(]([^（()）]*)[）)]\s*$/u)
+  if (!match) return { name: title, note: '' }
+  return { name: match[1]!.trim(), note: plainText(match[2]!) }
+}
+
+/** 剥掉标题里的编号前缀，剩下的就是作者自己给的名称；剥不出名称时返回空串。 */
+function nameFromTitle(title: string): string {
+  // 名称要匹配全角编号，所以只在这里做 NFKC；摘要保留原文用字，不做兼容归一。
+  const normalized = plainText(title).normalize('NFKC')
+  const patterns = [
+    new RegExp(`^第\\s*${ORDINAL_TOKEN}\\s*${CHAPTER_UNIT}\\s*`, 'iu'),
+    // 编号后面必须跟空白、行尾或分隔符，否则 `Episode` 会被当成“ep + 罗马数字 I”。
+    new RegExp(
+      `^${ENGLISH_CHAPTER}\\.?\\s*${ORDINAL_TOKEN}(?=\\s|$|[.、:：\\-–—])`,
+      'iu',
+    ),
+    new RegExp(`^${ORDINAL_TOKEN}\\s*[.、)）:：\\-–—]\\s*`, 'iu'),
+    new RegExp(`^${NUMERIC_TOKEN}\\s+`, 'u'),
+    new RegExp(`^${ORDINAL_TOKEN}\\s*[.、．]?$`, 'iu'),
+  ]
+  for (const pattern of patterns) {
+    if (!pattern.test(normalized)) continue
+    const rest = normalized.replace(pattern, '').replace(/^[\s.、,，:：\-–—]+/u, '')
+    return unwrapBookMarks(rest)
+  }
+  return unwrapBookMarks(normalized)
+}
+
+function bodyLines(source: string, title: string): string[] {
+  const lines = source.split(/\r?\n/)
+  if (lines.length && titleFromBoundary(lines[0]!) === title) lines.shift()
+  return lines
+}
+
+function inlineText(line: string): string {
+  return plainText(
+    line
+      .replace(/^\s*[-*>+]\s+/u, '')
+      .replace(/!\[[^\]]*\]\([^)]*\)/gu, '')
+      .replace(/\[\[([^\]|]+)\|([^\]]+)\]\]/gu, '$2')
+      .replace(/\[\[([^\]]+)\]\]/gu, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/gu, '$1')
+      .replace(/[*_`~]/gu, ''),
+  )
+}
+
+function firstSubheading(lines: string[]): string {
+  for (const line of lines) {
+    const match = line.match(/^\s*#{1,6}\s+(\S.*)$/u)
+    if (match) return inlineText(match[1]!)
+  }
+  return ''
+}
+
+function firstSentence(lines: string[]): string {
+  for (const line of lines) {
+    if (/^\s*#{1,6}\s/u.test(line)) continue
+    const text = inlineText(line)
+    if (!text || /^[-=_*~·—]{3,}$/u.test(text)) continue
+    return plainText(text.match(/^[^。！？!?；;…]*[。！？!?；;…]?/u)?.[0] || text)
+  }
+  return ''
+}
+
+function firstClause(sentence: string): string {
+  return plainText(sentence.match(/^[^，,、；;：:。！？!?…]+/u)?.[0] || sentence)
+}
+
+function deriveNodeNaming(title: string, source: string): { shortName: string; summary: string } {
+  const lines = bodyLines(source, title)
+  const { name, note } = splitTitleNote(title)
+  const titled = pathSegment(nameFromTitle(name), SHORT_NAME_LIMIT)
+  const heading = firstSubheading(lines)
+  const sentence = firstSentence(lines)
+  const clause = firstClause(sentence)
+  const shortName =
+    titled ||
+    (heading.length >= MIN_SUBHEADING_NAME ? pathSegment(heading, SHORT_NAME_LIMIT) : '') ||
+    (clause.length >= MIN_SENTENCE_NAME ? pathSegment(clause, SHORT_NAME_LIMIT) : '')
+  const candidate = [note, heading, sentence].map(plainText).find(value => {
+    if (!value) return false
+    if (value === heading && heading.length < MIN_SUBHEADING_NAME) return false
+    if (value === sentence && sentence.length < MIN_SENTENCE_NAME) return false
+    return truncate(value, SUMMARY_LIMIT) !== shortName
+  })
+  return { shortName, summary: candidate ? truncate(candidate, SUMMARY_LIMIT) : '' }
+}
+
 const CHINESE_NUMBER =
   '零〇○一壹壱二贰貳弐两兩三叁參参四肆五伍六陆陸七柒八捌九玖十拾什百佰陌千仟阡万萬'
 const ORDINAL_TOKEN = `(?:[0-9]+|[${CHINESE_NUMBER}]+|[IVXLCDM]+)`
 const CHAPTER_UNIT = '(?:章|回|节|節|集|幕|卷|巻|话|話|篇|部)'
 const ENGLISH_CHAPTER = '(?:chapter|chap|ch|part|book|episode|ep|section|scene|act|volume|vol)'
+const NUMERIC_TOKEN = `(?:[0-9]+|[${CHINESE_NUMBER}]+)`
 
 function parseChineseNumber(token: string): number | null {
   const normalized = token
@@ -228,6 +349,15 @@ function pageContent(node: MarkdownSplitNode, sourcePath: string, targetDirector
   ].join('\n')
 }
 
+function indexEntry(node: MarkdownSplitNode): string {
+  const stem = withoutMarkdownExtension(node.path.split('/').pop()!)
+  const label =
+    node.shortName && !node.title.includes(node.shortName)
+      ? `${node.title} ${node.shortName}`
+      : node.title
+  return `- [[${stem}|${label}]]${node.summary ? ` - ${node.summary}` : ''}`
+}
+
 function pageIndex(title: string, nodes: MarkdownSplitNode[]): string {
   return [
     `# ${title}`,
@@ -236,10 +366,7 @@ function pageIndex(title: string, nodes: MarkdownSplitNode[]): string {
     '',
     '## 页面',
     '',
-    ...nodes.map(
-      node =>
-        `- [[${withoutMarkdownExtension(node.path.split('/').pop()!)}|${node.title}]] - 原文第 ${node.startLine}-${node.endLine} 行`,
-    ),
+    ...nodes.map(indexEntry),
     '',
   ].join('\n')
 }
@@ -344,9 +471,15 @@ export async function buildMarkdownSplitPlan(
       grouped && draft.order > 0
         ? `${String(groupStart).padStart(width, '0')}-${String(groupEnd).padStart(width, '0')}/`
         : ''
+    const naming = deriveNodeNaming(draft.title, draft.source)
+    // 序号前缀不可省：重复标题就靠它避免撞路径。前置内容固定为 0000.md，便于续跑识别。
+    const shortName = draft.order > 0 ? naming.shortName : ''
+    const stem = shortName ? `${number}_${shortName}` : number
     nodes.push({
       ...draft,
-      path: `${targetDirectory}/${group}${number}.md`,
+      shortName,
+      summary: naming.summary,
+      path: `${targetDirectory}/${group}${stem}.md`,
       hash: await hashText(draft.source),
     })
   }
@@ -357,16 +490,7 @@ export async function buildMarkdownSplitPlan(
   }))
   const rootLines = ['# 章节', '', '用途：按原始顺序导航无损拆分的故事节点；不保存资产事实。', '']
   const preface = nodes.filter(node => node.order === 0)
-  if (preface.length)
-    rootLines.push(
-      '## 页面',
-      '',
-      ...preface.map(
-        node =>
-          `- [[${withoutMarkdownExtension(node.path.split('/').pop()!)}|${node.title}]] - 原文第 ${node.startLine}-${node.endLine} 行`,
-      ),
-      '',
-    )
+  if (preface.length) rootLines.push('## 页面', '', ...preface.map(indexEntry), '')
   if (grouped) {
     const groups = new Map<string, MarkdownSplitNode[]>()
     for (const node of nodes.filter(item => item.order > 0)) {
@@ -386,16 +510,7 @@ export async function buildMarkdownSplitPlan(
     rootLines.push('')
   } else {
     const chapters = nodes.filter(node => node.order > 0)
-    if (chapters.length)
-      rootLines.push(
-        '## 页面',
-        '',
-        ...chapters.map(
-          node =>
-            `- [[${withoutMarkdownExtension(node.path.split('/').pop()!)}|${node.title}]] - 原文第 ${node.startLine}-${node.endLine} 行`,
-        ),
-        '',
-      )
+    if (chapters.length) rootLines.push('## 页面', '', ...chapters.map(indexEntry), '')
   }
   writes.push({ path: `${targetDirectory}/index.md`, content: rootLines.join('\n') })
 

@@ -25,14 +25,80 @@ test('story split preserves preface and chapter source while building navigable 
   assert.equal(plan.nodes[0]?.title, '前置内容')
   assert.equal(plan.nodes[1]?.title, '第一章 桃园相遇')
   assert.equal(plan.nodes[1]?.source, '第一章 桃园相遇\n刘备遇见关羽和张飞。\n\n')
-  assert.ok(plan.writes.some(write => write.path.endsWith('/0001.md')))
-  assert.match(
-    plan.writes.find(write => write.path.endsWith('/index.md'))?.content || '',
-    /\[\[0001\|第一章 桃园相遇\]\]/,
+  assert.deepEqual(
+    plan.nodes.map(node => node.path.split('/').at(-1)),
+    ['0000.md', '0001_桃园相遇.md', '0002_初次同行.md'],
   )
-  const firstChapter = plan.writes.find(write => write.path.endsWith('/0001.md'))?.content || ''
+  assert.equal(plan.nodes[1]?.shortName, '桃园相遇')
+  assert.equal(plan.nodes[1]?.summary, '刘备遇见关羽和张飞。')
+  const rootIndex = plan.writes.find(write => write.path.endsWith('/index.md'))?.content || ''
+  assert.match(rootIndex, /\[\[0001_桃园相遇\|第一章 桃园相遇\]\] - 刘备遇见关羽和张飞。/)
+  assert.doesNotMatch(rootIndex, /原文第 /)
+  const firstChapter =
+    plan.writes.find(write => write.path.endsWith('/0001_桃园相遇.md'))?.content || ''
+  assert.match(firstChapter, /title: "第一章 桃园相遇"/)
   assert.match(firstChapter, /source_label: "第一章 桃园相遇"/)
   assert.doesNotMatch(firstChapter, /analysis_status/)
+})
+
+test('chapter names come from the source title and note, never invented', async () => {
+  const plan = await buildMarkdownSplitPlan(
+    [
+      '第27章《痔疮的治疗》',
+      '丹溪先生治一人患痔。',
+      '',
+      '第28章 中风（附眩晕）',
+      '### 诊脉',
+      '按之不足。',
+      '',
+      'Episode １２ 试炼',
+      '他抬起手。',
+      '',
+    ].join('\n'),
+    {
+      sourcePath: '原始资料/医案.md',
+      targetDirectory: 'wiki/医案/章节',
+      strategy: 'story_chapter',
+    },
+  )
+
+  assert.deepEqual(
+    plan.nodes.map(node => [node.path.split('/').at(-1), node.shortName, node.summary]),
+    [
+      ['0001_痔疮的治疗.md', '痔疮的治疗', '丹溪先生治一人患痔。'],
+      ['0002_中风.md', '中风', '附眩晕'],
+      ['0003_试炼.md', '试炼', '他抬起手。'],
+    ],
+  )
+  assert.match(
+    plan.writes.find(write => write.path.endsWith('/index.md'))?.content || '',
+    /\[\[0001_痔疮的治疗\|第27章《痔疮的治疗》\]\] - 丹溪先生治一人患痔。/,
+  )
+})
+
+test('numbered nodes borrow an in-chapter subheading or first sentence as their name', async () => {
+  const plan = await buildMarkdownSplitPlan(
+    ['1.', '### 诊脉', '按之不足。', '', '2.', '甲', '', '001、旧账', '他翻了翻账本。', ''].join(
+      '\n',
+    ),
+    {
+      sourcePath: '原始材料/原文.md',
+      targetDirectory: 'wiki/原始材料/故事/原文节点',
+      strategy: 'story_numbered',
+    },
+  )
+
+  assert.deepEqual(
+    plan.nodes.map(node => [node.path.split('/').at(-1), node.shortName, node.summary]),
+    [
+      ['0001_诊脉.md', '诊脉', '按之不足。'],
+      ['0002.md', '', ''],
+      ['0003_旧账.md', '旧账', '他翻了翻账本。'],
+    ],
+  )
+  const rootIndex = plan.writes.find(write => write.path.endsWith('/index.md'))?.content || ''
+  assert.match(rootIndex, /\[\[0003_旧账\|001、旧账\]\] - 他翻了翻账本。/)
+  assert.match(rootIndex, /- \[\[0002\|2\.\]\]\n/)
 })
 
 test('numbered story nodes keep source labels but use physical order for stable paths', async () => {
@@ -58,7 +124,7 @@ test('numbered story nodes keep source labels but use physical order for stable 
 test('large split creates fixed-range intermediate indexes without merging chapters', async () => {
   const content = Array.from(
     { length: 1000 },
-    (_, index) => `第${index + 1}章\n正文${index + 1}\n`,
+    (_, index) => `第${index + 1}章\n张三进城${index + 1}。\n`,
   ).join('')
   const plan = await buildMarkdownSplitPlan(content, {
     sourcePath: '原始资料/长篇.md',
@@ -71,7 +137,8 @@ test('large split creates fixed-range intermediate indexes without merging chapt
   assert.equal(plan.writes.length, 1011)
   assert.ok(plan.writes.some(write => write.path === 'wiki/长篇/章节/0001-0100/index.md'))
   assert.ok(plan.writes.some(write => write.path === 'wiki/长篇/章节/0901-1000/index.md'))
-  assert.equal(plan.writes.filter(write => /\/\d{4}\.md$/.test(write.path)).length, 1000)
+  assert.equal(plan.writes.filter(write => /\/\d{4}_[^/]*\.md$/.test(write.path)).length, 1000)
+  assert.ok(plan.writes.some(write => write.path === 'wiki/长篇/章节/0001-0100/0001_张三进城1.md'))
 })
 
 test('apply preflights every target, skips identical files, and never overwrites conflicts', async () => {

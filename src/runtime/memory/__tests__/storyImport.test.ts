@@ -166,7 +166,7 @@ test('one import builds all 33 physical nodes even when source labels repeat or 
   const labels = Array.from({ length: 33 }, (_, index) =>
     index === 1 ? '1' : index === 20 ? '85' : String(index + 1),
   )
-  const content = labels.map((label, index) => `${label}.\n第 ${index + 1} 个节点点`).join('\n')
+  const content = labels.map((label, index) => `${label}.\n张三进城${index + 1}。`).join('\n')
   const plan = await buildStoryImportPlan({
     content,
     title: '三十三节点',
@@ -178,13 +178,16 @@ test('one import builds all 33 physical nodes even when source labels repeat or 
   assert.equal(plan.split.nodes.length, 33)
   assert.deepEqual(
     plan.split.nodes.map(node => node.path.split('/').at(-1)),
-    Array.from({ length: 33 }, (_, index) => `${String(index + 1).padStart(4, '0')}.md`),
+    Array.from(
+      { length: 33 },
+      (_, index) => `${String(index + 1).padStart(4, '0')}_张三进城${index + 1}.md`,
+    ),
   )
   assert.equal(plan.split.nodes[1]?.sourceLabel, '1.')
   assert.equal(plan.split.nodes[20]?.sourceLabel, '85.')
   assert.match(
     state.entries.get(`${plan.workDirectory}/原文节点/index.md`)?.content || '',
-    /\[\[0033\|33\.\]\]/,
+    /\[\[0033_张三进城33\|33\. 张三进城33\]\]/,
   )
   assert.equal(state.writes.at(-1), plan.completionPath)
 })
@@ -234,6 +237,36 @@ test('story import preflights conflicts before writing and never marks a partial
   )
   assert.equal(state.writes.length, 0)
   assert.equal(state.entries.has(plan.completionPath), false)
+})
+
+test('story import stops when a node number already carries a different name', async () => {
+  const content = '第一章\n刘备走进桃园。\n第二章\n张飞端来酒碗。'
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '换名故事',
+    originalName: '换名故事.md',
+  })
+  assert.equal(plan.split.nodes[0]!.path.endsWith('/0001_刘备走进桃园.md'), true)
+
+  const renamed = memoryFiles({
+    'wiki/index.md': '# Wiki\n',
+    [`${plan.workDirectory}/原文节点/0001_旧名.md`]: '上一版内容',
+  })
+  await assert.rejects(
+    () => applyStoryImportPlan(plan, content, renamed.files, 'project'),
+    /同一序号已有不同名称的节点文件/,
+  )
+  assert.equal(renamed.writes.length, 0)
+
+  const legacy = memoryFiles({
+    'wiki/index.md': '# Wiki\n',
+    [`${plan.workDirectory}/原文节点/0001.md`]: '旧版纯编号内容',
+  })
+  await assert.rejects(
+    () => applyStoryImportPlan(plan, content, legacy.files, 'project'),
+    /同一序号已有不同名称的节点文件/,
+  )
+  assert.equal(legacy.writes.length, 0)
 })
 
 test('story imports for one project serialize and the queued duplicate becomes a no-op', async () => {
