@@ -7,7 +7,20 @@ from fastapi.responses import StreamingResponse
 from fastapi.testclient import TestClient
 
 import src.main as main
-from src.main import BASE, MODEL, RESOLUTIONS, TASKS, app, content, create_video, get_video, media_values
+from src.main import (
+    BASE,
+    MAX_IMAGE_BYTES,
+    MODEL,
+    RESOLUTIONS,
+    TASKS,
+    app,
+    content,
+    create_video,
+    get_video,
+    media_values,
+    object_extension,
+    reference_limit,
+)
 
 
 BODY = {
@@ -33,6 +46,19 @@ class AdapterContractTest(unittest.TestCase):
         if ratio == "16:9" and resolution.endswith("竖"):
             resolution = resolution[:-1] + "横"
         self.assertEqual(resolution, "768p横")
+
+    def test_reference_limits_prefer_the_sts_declaration(self):
+        self.assertEqual(reference_limit("image", {}), MAX_IMAGE_BYTES)
+        self.assertEqual(reference_limit("image", {"maxImageBytes": 5 * 1024 * 1024}), 5 * 1024 * 1024)
+        self.assertEqual(reference_limit("audio", {"maxAudioBytes": 2 * 1024 * 1024}), 2 * 1024 * 1024)
+        self.assertEqual(reference_limit("image", {"maxImageBytes": 0}), MAX_IMAGE_BYTES)
+
+    def test_object_key_extension_follows_content_type(self):
+        self.assertEqual(object_extension("image/jpeg"), ".jpg")
+        self.assertEqual(object_extension("image/webp"), ".webp")
+        self.assertEqual(object_extension("audio/wav"), ".wav")
+        self.assertEqual(object_extension("audio/x-unknown"), ".mp3")
+        self.assertEqual(object_extension("application/octet-stream"), ".bin")
 
 
 class FakeResponse:
@@ -82,11 +108,12 @@ class FakeStream:
 class FakeHttp:
     """只记录事实并返回固定结果，测试全程不触网。"""
 
-    def __init__(self, *, oss_status=200, submit_id="video_upstream_1", source_status=200, chunk_delay=0.0, poll_payload=None):
+    def __init__(self, *, oss_status=200, submit_id="video_upstream_1", source_status=200, chunk_delay=0.0, poll_payload=None, sts=None):
         self.oss_status = oss_status
         self.submit_id = submit_id
         self.source_status = source_status
         self.chunk_delay = chunk_delay
+        self.sts = sts or {}
         self.poll_payload = poll_payload or {"id": submit_id, "object": "video", "status": "completed", "progress": 100}
         self.requests = []
         self.open_streams = 0
@@ -105,7 +132,7 @@ class FakeHttp:
     async def post(self, url, headers=None, json=None, timeout=None):
         self.requests.append(("POST", url))
         if url.endswith("/api/video-upload/oss-sts"):
-            return FakeResponse(200, {"success": True, "host": "https://oss.test", "dir": "upload", "bucket": "bucket", "accessKeyId": "ak", "accessKeySecret": "sk", "securityToken": "token"})
+            return FakeResponse(200, {"success": True, "host": "https://oss.test", "dir": "upload", "bucket": "bucket", "accessKeyId": "ak", "accessKeySecret": "sk", "securityToken": "token", **self.sts})
         self.submitted = json
         return FakeResponse(200, {"id": self.submit_id, "object": "video", "status": "queued", "progress": 0})
 
@@ -186,6 +213,22 @@ class AdapterTaskTest(unittest.TestCase):
         self.assertEqual(len(self.http.uploaded_bytes), 3)
         self.assertTrue(self.http.submitted["ref_image_0"].startswith("https://oss.test/upload/"))
         self.assertEqual(sorted(key for key in self.http.submitted if key.startswith("ref_")), ["ref_audio_0", "ref_image_0", "ref_image_1"])
+
+    def test_seed_is_forwarded_and_validated(self):
+        self.accept({**BODY, "seed": 42})
+        self.assertEqual(self.http.submitted["seed"], 42)
+        background = FakeBackground()
+        for seed in (-1, 1.5, True, "7"):
+            with self.assertRaises(HTTPException) as caught:
+                asyncio.run(create_video(FakeRequest({**BODY, "seed": seed}), background))
+            self.assertEqual(caught.exception.status_code, 400)
+        self.assertEqual(background.tasks, [])
+
+    def test_reference_over_the_sts_limit_fails_the_task(self):
+        self.http.sts = {"maxImageBytes": 4}
+        task_id = self.accept()
+        self.assertEqual(TASKS[task_id]["status"], "failed")
+        self.assertIn("exceeds", TASKS[task_id]["error"])
 
     def test_poll_is_queued_before_submit_then_proxies_upstream(self):
         background = FakeBackground()

@@ -19,7 +19,7 @@ from starlette.background import BackgroundTask
 BASE = "https://aimanplay.cn"
 MODEL = "minimax_h3_image_audio_to_video_v2_15s"
 RESOLUTIONS = {"480p竖", "768p竖", "480p横", "768p横"}
-MAX_IMAGE_BYTES = 20 * 1024 * 1024
+MAX_IMAGE_BYTES = 10 * 1024 * 1024
 MAX_AUDIO_BYTES = 20 * 1024 * 1024
 STS_TIMEOUT_SECONDS = 30.0
 REFERENCE_TIMEOUT_SECONDS = 60.0
@@ -92,9 +92,15 @@ async def create_video(request: Request, background: BackgroundTasks):
         raise HTTPException(400, "At most 9 reference images are allowed")
     if len(audios) > 3:
         raise HTTPException(400, "At most 3 reference audios are allowed")
+    seed = body.get("seed")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
+        raise HTTPException(400, "seed must be a non-negative integer")
     # 校验全部同步完成后再建任务：参数错误仍然是立即 4xx，不会变成异步失败。
     purge_tasks()
     task_id = uuid.uuid4().hex
+    payload = {"model": MODEL, "prompt": prompt, "duration": duration, "resolution": resolution}
+    if seed is not None:
+        payload["seed"] = seed
     TASKS[task_id] = {
         "created_at": int(time()),
         "key": key,
@@ -102,7 +108,7 @@ async def create_video(request: Request, background: BackgroundTasks):
         "progress": 0,
         "upstream": "",
         "error": "",
-        "payload": {"model": MODEL, "prompt": prompt, "duration": duration, "resolution": resolution},
+        "payload": payload,
         "media": [("image", url) for url in images] + [("audio", url) for url in audios],
     }
     background.add_task(run_task, task_id)
@@ -226,7 +232,7 @@ async def upload_all(media: list[tuple[str, str]], sts: dict) -> list[str]:
 
 async def upload_reference(kind: str, url: str, sts: dict) -> str:
     host = urlsplit(url).hostname or "unknown-host"
-    limit = MAX_IMAGE_BYTES if kind == "image" else MAX_AUDIO_BYTES
+    limit = reference_limit(kind, sts)
     started = time()
     try:
         async with asyncio.timeout(REFERENCE_TIMEOUT_SECONDS):
@@ -235,6 +241,39 @@ async def upload_reference(kind: str, url: str, sts: dict) -> str:
         raise HTTPException(504, f"Reference {kind} from {host} timed out after {REFERENCE_TIMEOUT_SECONDS:.0f}s") from exc
     logger.info("reference kind=%s host=%s stage=uploaded elapsed=%.1fs", kind, host, time() - started)
     return uploaded
+
+
+def reference_limit(kind: str, sts: dict) -> int:
+    """STS 声明的上限优先，缺省用文档默认值（图片 10 MB、音频 20 MB）。"""
+    declared = sts.get("maxImageBytes" if kind == "image" else "maxAudioBytes")
+    if isinstance(declared, (int, float)) and not isinstance(declared, bool) and declared > 0:
+        return int(declared)
+    return MAX_IMAGE_BYTES if kind == "image" else MAX_AUDIO_BYTES
+
+
+EXTENSIONS = {
+    "image/png": ".png",
+    "image/jpeg": ".jpg",
+    "image/webp": ".webp",
+    "image/gif": ".gif",
+    "image/avif": ".avif",
+    "image/heic": ".heic",
+    "audio/mpeg": ".mp3",
+    "audio/mp3": ".mp3",
+    "audio/wav": ".wav",
+    "audio/x-wav": ".wav",
+    "audio/mp4": ".m4a",
+    "audio/aac": ".aac",
+    "audio/ogg": ".ogg",
+    "audio/flac": ".flac",
+}
+
+
+def object_extension(content_type: str) -> str:
+    """对象 key 的扩展名跟着真实 Content-Type 走；未知类型按文档回退。"""
+    if content_type in EXTENSIONS:
+        return EXTENSIONS[content_type]
+    return ".mp3" if content_type.startswith("audio/") else ".bin"
 
 
 async def transfer_reference(kind: str, url: str, sts: dict, limit: int, host: str) -> str:
@@ -253,7 +292,7 @@ async def transfer_reference(kind: str, url: str, sts: dict, limit: int, host: s
                 buffer.write(chunk)
         buffer.seek(0)
         date = email.utils.formatdate(usegmt=True)
-        ext = ".png" if kind == "image" else ".mp3"
+        ext = object_extension(content_type)
         path = f'{sts["dir"].rstrip("/")}/{uuid.uuid4().hex}{ext}'
         canonical = "\n".join(sorted([f"x-oss-date:{date}", "x-oss-object-acl:public-read", f'x-oss-security-token:{sts["securityToken"]}']))
         string_to_sign = "\n".join(["PUT", "", content_type, date, canonical, f'/{sts["bucket"]}/{path}'])

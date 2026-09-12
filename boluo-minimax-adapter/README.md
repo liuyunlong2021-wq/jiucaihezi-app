@@ -38,3 +38,13 @@ NewAPI 负责鉴权和计费，适配器负责字段转换、素材转存、上�
 - 单个参考素材的下载 + 转存上限 **60 秒**，超时的错误信息会指出素材主机和阶段。
 - 多个参考素材并发转存，并行下载后按 `ref_image_N` / `ref_audio_N` 顺序编号提交。
 - 任务表在内存里，容器重启后旧 ID 无法再解析，需要重新创建任务。
+
+## 字段契约（对齐 `docs/wiki/运维/菠萝MiniMaxapi.md`）
+
+- `model` 只收 `minimax_h3_image_audio_to_video_v2_15s`，其它一律 400。
+- `duration` 1-15 秒（缺省 15），`seconds` 同义；`resolution` 只收 `480p竖` / `768p竖` / `480p横` / `768p横`。
+- 上游没有比例字段，方向靠 `resolution` 的后缀表达：适配器把 `aspect_ratio`（或 `ratio`）折进去 —— `16:9` + `xxx竖` → `xxx横`，`9:16` + `xxx横` → `xxx竖`。
+- 参考素材最多 9 张图 + 3 段音频，上限优先用 STS 响应的 `maxImageBytes` / `maxAudioBytes`，缺失时用文档默认的 10 MB / 20 MB。面板侧选择上限是 20 MB，真实闸门在适配器。
+- 转存到 OSS 的对象 key 用真实 Content-Type 推导扩展名（`png`/`jpg`/`webp`/`wav`/… ），未知类型回退 `.mp3`（音频）或 `.bin`。
+- `seed` 可选，非负整数，原样转发；非法值立即 400。
+- `GET /v1/videos/{id}/content` 不转发 `Range`，总是返回完整字节流。
