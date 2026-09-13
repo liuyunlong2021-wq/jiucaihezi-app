@@ -1,5 +1,16 @@
 # Wiki 操作日志
 
+## [2026-09-13] 修复 | 支持页补上自有联系方式（App Store 1.5 拒审）
+
+- **触发**：App Store 拒审 —— `https://jiucaihezi.studio/support/` 被判定「does not direct to a website with information users can use to ask questions and request support」。
+- **根因**：`privacy` 与 `terms` 都把用户指向 `/support/`，而该页**唯一**的求助通道是一个外部 GitHub issue 链接，**没有任何自有联系方式**（无邮箱、无表单、无 FAQ）。页面 HTTP 200 正常，问题在内容本身是空壳。
+- 修法：`public/support/index.html` 新增「联系我们」（`mailto:` 邮箱，Apple 最认的通道）与「常见问题」4 条（要不要登录 / 登录失败怎么办 / 数据存哪 / 怎么反馈 Bug），GitHub Issues 降级为次要通道；账号注销补邮件兜底，并加一段英文说明方便英文审核员。
+- 新增 `scripts/__tests__/legal-pages.test.mjs`（支持页必须含 `mailto:` 与常见问题；`privacy`/`terms` 必须指向 `/support/`）并登记进 `wave1FocusedTests`。这条检查锁的正是本次被拒的形态。
+- 验证：focused `1338/1338`、Rust `412/412`；真实 dev server 渲染确认全部小节与 `mailto:` 链接正常，线上 `/support/` 为 200。
+- 注意：Vite dev 下 `/support/` 会被 SPA 回退成 App 首页，只有 `/support/index.html` 是真实页面；Cloudflare Pages 生产环境 `/support/` 正常。
+- **未做**：`/help/` 仍是 404（`public/help/guide.md` 是裸 md，无 `index.html` 构不成路由），本轮未动。
+- **仍未解决**：`iPad`（`00008027-000D495A1A06802E`）未注册进 Apple 开发者账号，`pnpm tauri ios dev` 报 `Provisioning profile ... doesn't include the currently selected device`（exit 65）。这是本地调试拦路，不影响 App Store 分发。
+
 ## [2026-09-13] 修复 | MCP OAuth 打通（两处状态位置错误）+ 输入框三处修复
 
 - **症状**：点 GitHub「连接」→ 浏览器跳转 → 回调唤起 App → **永远连不上**；设置页状态停在「连接中」。

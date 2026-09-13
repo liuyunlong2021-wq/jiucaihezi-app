@@ -1,5 +1,16 @@
 # 热缓存
 
+## [2026-09-13] App Store 1.5 拒审：支持页补上自有联系方式
+
+- **拒审原文**：`https://jiucaihezi.studio/support/` "does not direct to a website with information users can use to ask questions and request support"。
+- **根因**：`privacy` 和 `terms` 都把用户送到 `/support/`，而该页**唯一**通道是一个外部 GitHub issue 链接，**没有任何自有联系方式**——无邮箱、无表单、无 FAQ。页面 HTTP 200 正常，空的是内容本身。
+- **已修**（只动 `public/support/index.html` 一个文件）：新增「联系我们」`mailto:` 邮箱 +「常见问题」4 条（要不要登录 / 登录失败怎么办 / 数据存哪 / 怎么反馈 Bug）；GitHub Issues 降级为次要通道；账号注销补邮件兜底；末尾加英文段方便英文审核员。
+- 新增 `scripts/__tests__/legal-pages.test.mjs` 锁住这个形态（支持页必须含 `mailto:` 与常见问题；`privacy`/`terms` 必须指向 `/support/`），并登记进 `wave1FocusedTests`。
+- 验证：focused `1338/1338`、Rust `412/412`、dev server 渲染正常、线上 `/support/` 200。
+- **待办（Apple 2.1(a)）**：移动端账号页已放回 API Key + 保存按钮，只藏商业入口；待真机确认。
+- **待办（提交必做）**：审核备注要写清「本地优先 + 自带 API Key」，并附一个可用测试 Key，否则审核员还是走不下去。
+- **待办（本地调试）**：`iPad`（`00008027-000D495A1A06802E`）未注册进开发者账号 → `pnpm tauri ios dev` exit 65，需在 developer.apple.com 注册设备。
+
 ## [2026-09-13] MCP OAuth 打通 + 输入框三处修复
 
 - **MCP OAuth 一直连不上（两个根因，均已修）**：① OAuth `state` 存在 `sessionStorage`，而深链回调（`jiucaihezi://mcp/oauth/callback`）会落在**新的 WebView 会话甚至新实例**上，那里的 `sessionStorage` 是空的 → `state` 校验必然失败、授权码被丢弃；改为 `localStorage`。② 回调监听器注册在 **MCP 设置面板组件**上（`onMounted`/`onBeforeUnmount`），面板没打开、被切走或换了窗口就没人接收，回调被**静默丢弃**；已提到应用级（`main.ts` 的 `handleDeepLinkUrls` 直接处理并写 store）。
