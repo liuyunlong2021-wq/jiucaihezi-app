@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-const page = name => readFileSync(`public/${name}/index.html`, 'utf8')
+const source = path => readFileSync(path, 'utf8')
+const page = name => source(`public/${name}/index.html`)
 
 // App Store 审核指南 1.5 就是在这条上被拒的：支持页当时整页只有第三方 issue 区，
 // 没有任何自有的联系方式，审核员判定「没有用户能用来提问和求支持的信息」。
@@ -22,4 +23,28 @@ test('privacy and terms route questions to the same support page', () => {
   for (const name of ['privacy', 'terms']) {
     assert.match(page(name), /href="\/support\/"/)
   }
+})
+
+// 根路径是落地页，工作台在 /try/。搞反了不会报错，只会让所有人一进站就撞上工作台，
+// 或者让桌面 App 打开下载页（Tauri 的 frontendDist 就是 dist/index.html）。
+test('web root is the landing page and /try/ is the workbench', () => {
+  const landing = source('index.html')
+  const workbench = source('try/index.html')
+
+  assert.doesNotMatch(landing, /\/src\/main\.ts/, '落地页不能挂 app 脚本')
+  assert.match(landing, /href="\/try\/"/)
+  assert.match(workbench, /\/src\/main\.ts/, '/try/ 必须挂 app 脚本')
+
+  // App Review 会顺着官网找隐私与支持入口，三个法务页都得能从落地页走到。
+  for (const legal of ['/support/', '/privacy/', '/terms/']) {
+    assert.match(landing, new RegExp(`href="${legal}"`), `落地页缺少 ${legal} 链接`)
+  }
+})
+
+test('landing page ships a share card WeChat can render', () => {
+  const image = source('index.html').match(/<meta property="og:image" content="([^"]+)"/)?.[1]
+
+  assert.ok(image, 'og:image 缺失，微信分享出去是一张空卡片')
+  // 微信卡片不渲染 WebP 和 SVG
+  assert.match(image, /\.(jpe?g|png)$/i)
 })

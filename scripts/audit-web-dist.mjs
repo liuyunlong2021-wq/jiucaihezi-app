@@ -39,6 +39,7 @@ const requiredFiles = [
 const allowedRootFiles = new Set([
   '404.html',
   '_headers',
+  'apple-touch-icon.png',
   'boot-guard.js',
   'boot-diagnostics.js',
   'community-qr.jpg',
@@ -49,15 +50,19 @@ const allowedRootFiles = new Set([
   'legal.css',
   'logo.svg',
   'logo-solid.svg',
+  'robots.txt',
+  'sitemap.xml',
 ])
 
 const allowedTopLevelDirs = new Set([
   'assets',
   'help',
+  'landing',
   'privacy',
   'skills',
   'support',
   'terms',
+  'try',
 ])
 
 function walk(directory) {

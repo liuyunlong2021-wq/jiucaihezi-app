@@ -62,6 +62,12 @@ export default defineConfig({
     // produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     rolldownOptions: {
+      // 两个入口：/ 是落地页（拉下载），/try/ 才是工作台本体。
+      // 桌面 / iOS 构建随后由 prune-desktop-dist.mjs 把 try/index.html 提回根。
+      input: {
+        index: resolve(__dirname, 'index.html'),
+        try: resolve(__dirname, 'try/index.html'),
+      },
       output: {
         entryFileNames: `assets/[name]-[hash]-${assetVersion}.js`,
         chunkFileNames: `assets/[name]-[hash]-${assetVersion}.js`,
