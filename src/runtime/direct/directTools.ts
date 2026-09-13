@@ -31,6 +31,9 @@ export async function buildToolResultMessages(
   }))
   const assistantMessage: DirectApiMessage = {
     role: 'assistant',
+    // content 必须存在且是字符串。OpenAI 允许省略/为 null，但 Ollama 等本地推理的
+    // 兼容层遇到缺失就 400（invalid message content type），云端网关则宽容放行。
+    content: '',
     tool_calls: calls.map(call => ({
       id: call.id,
       type: 'function' as const,

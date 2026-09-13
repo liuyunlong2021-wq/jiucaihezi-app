@@ -5,7 +5,8 @@
 - **症状**：点 GitHub「连接」→ 浏览器跳转 → 回调唤起 App → **永远连不上**；设置页状态停在「连接中」。
 - **根因一（`src/services/mcpOAuth.ts`）**：OAuth `state` 存在 `sessionStorage`。深链回调 `jiucaihezi://mcp/oauth/callback` 会落在**新的 WebView 会话甚至新实例**上，那里的 `sessionStorage` 是空的 → `consumeMcpOAuthCallbackUrl` 的 `intent.state !== state` 必然成立 → 授权码被丢弃并清空 intent。改为 `localStorage`（同一 App 内跨会话持久共享；15 分钟 TTL + 用后即删负责清理）。
 - **根因二（`src/components/mcp/McpManagerPanel.vue`）**：回调监听器注册在**组件**上（`onMounted`/`onBeforeUnmount`），只有 MCP 设置面板挂载时才接收。面板关闭、切走视图或深链唤起另一个窗口 → 回调**无人接收、静默丢弃**。已提到应用级：`main.ts` 的 `handleDeepLinkUrls` 直接调 `completeMcpOAuthCallback`，结果写进 store；组件只读状态。顺带清掉组件里的死 import（`completeMcpServerAuthorization`、`McpOAuthCallback`、`onMounted`、`onBeforeUnmount`）。
-- **真实环境验证**：GitHub MCP 连接成功并可用（云端 `gemini-3.8-flash` 调起 MCP 工具正常）。本地小模型 `qwen3.8:9b-q5` 报 `API 400: invalid message content type`，属本地模型对工具消息格式的兼容问题，**未修**，待单独处理。
+- **真实环境验证**：GitHub MCP 连接成功并可用（云端 `gemini-3.8-flash` 调起 MCP 工具正常）。
+- **本地模型 400 已修（同一晚）**：`qwen3.8:9b-q5` 每轮工具调用都报 `API 400: invalid message content type`。根因：`buildToolResultMessages` 回传的 assistant 消息只带 `tool_calls`、**没有 `content` 字段**；OpenAI 规范允许省略，云端网关放行，但 Ollama 这类兼容层要求 `content` 存在且为字符串。已补 `content: ''`（两边都接受），并同步 `directTools.test.ts` / `directEngine.test.ts` 里原本断言 `undefined` 的地方。实测本地模型恢复正常。
 - **芯片提示改为 `position: fixed` 自绘**：原生 `title` 无法走主题色、无法固定在按钮正下方。`chipTip` 用 `getBoundingClientRect` 定位，绕开 `.memory-command-strip` 的 `overflow` 裁剪；并加 `watch(sending)` 防 disabled 按钮不派发 `pointerleave` 导致提示残留。
 - **`@Skill` 面板只列 Skill**：新增 `skillPickerOnly`（从芯片排进入为 true，`closeMention` 重置），列表放宽到 40 项；手打 `@` 保持全套候选。删掉 `@Terminal` 合并时漏掉的 `mentionItems` Terminal 死入口，并让 3D 只在桌面出现。
 - **排障记录**：`pnpm tauri build --debug` 的 App 会**强制连 `devUrl`（`http://localhost:1420`）**（`src-tauri/src/lib.rs` 的 `#[cfg(all(debug_assertions, not(mobile)))]` 分支），停掉 Vite 即白屏 —— 这是设计行为，要独立可用的包必须走 release 构建。另：本机 LaunchServices 里同时存在 debug/release/Xcode/Applications 四份「韭菜盒子」抢 `jiucaihezi:` scheme，唤起哪个不确定。

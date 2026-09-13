@@ -164,7 +164,8 @@ test('runDirectChatCompletion performs a second pass when the model requests a t
   assert.equal(sentMessages.length, 2)
   assert.deepEqual(sentMessages[0], [{ role: 'user', content: '查一下韭菜盒子' }])
   assert.equal(sentMessages[1][1].role, 'assistant')
-  assert.equal(sentMessages[1][1].content, undefined)
+  // 空串而不是 undefined：本地推理兼容层要求 assistant 的 content 必须是字符串。
+  assert.equal(sentMessages[1][1].content, '')
   assert.equal(sentMessages[1][1].reasoning_content, '先查资料')
   assert.equal(sentMessages[1][2].role, 'tool')
   assert.equal(sentMessages[1][2].content, '[result:韭菜盒子]')

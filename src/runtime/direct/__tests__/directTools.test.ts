@@ -18,6 +18,8 @@ test('buildToolResultMessages always returns paired assistant tool_calls and too
 
   assert.equal(messages.length, 2)
   assert.equal(messages[0].role, 'assistant')
+  // 本地推理兼容层要求 content 存在且为字符串，否则整轮 400。
+  assert.equal(typeof messages[0].content, 'string')
   assert.equal(messages[0].tool_calls.length, 1)
   assert.match(messages[0].tool_calls[0].id, /^call_read_/)
   assert.equal(messages[1].role, 'tool')
