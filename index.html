@@ -359,12 +359,12 @@
 <nav class="nav">
   <div class="nav-inner">
     <a href="https://jiucaihezi.studio" class="nav-logo">
-      <div class="nav-logo-icon"><img src="/landing/logo.svg" alt="韭菜盒子Studio" /></div>
+      <div class="nav-logo-icon"><img src="/logo.svg" alt="韭菜盒子Studio" /></div>
       韭菜盒子Studio
     </a>
     <div class="nav-actions">
       <a href="/try/" class="btn-nav btn-nav-outline">网页版</a>
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn-nav btn-nav-outline download-link" data-platform="auto">下载</a>
+      <a href="https://api.jiucaihezi.studio/download/" class="btn-nav btn-nav-outline download-link">下载</a>
       <a href="https://api.jiucaihezi.studio/sign-in" class="btn-nav btn-nav-primary">登录 / 注册</a>
     </div>
   </div>
@@ -384,14 +384,14 @@
       最适合新手的AI工具
     </p>
     <div class="hero-btns" id="hero-download-btns">
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-primary btn-lg download-link" data-platform="darwin-aarch64">
+      <a href="https://api.jiucaihezi.studio/download/" class="btn btn-primary btn-lg download-link">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         📥 下载 macOS (Apple芯片)
       </a>
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-outline btn-lg download-link" data-platform="darwin-x86_64" style="margin-top:8px;">
+      <a href="https://api.jiucaihezi.studio/download/" class="btn btn-outline btn-lg download-link" style="margin-top:8px;">
         📥 下载 macOS (Intel芯片)
       </a>
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-outline btn-lg download-link" data-platform="windows-x86_64" style="margin-top:8px;">
+      <a href="https://api.jiucaihezi.studio/download/" class="btn btn-outline btn-lg download-link" style="margin-top:8px;">
         📥 下载 Windows
       </a>
     </div>
@@ -692,7 +692,7 @@
     <h2>准备好提升工作效率了吗？</h2>
     <p>免费下载韭菜盒子Studio，开启你的 AI 办公新时代。</p>
     <div class="cta-btns">
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener" class="btn btn-primary btn-lg download-link" data-platform="auto">
+      <a href="https://api.jiucaihezi.studio/download/" class="btn btn-primary btn-lg download-link">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         📥 下载 APP
       </a>
@@ -709,7 +709,7 @@
     <div>© 2025–2026 韭菜盒子Studio</div>
     <div class="footer-links">
       <a href="/try/">网页版</a>
-      <a href="https://github.com/liuyunlong2021-wq/jiucaihezi-app/releases" target="_blank" rel="noopener">下载</a>
+      <a href="https://api.jiucaihezi.studio/download/">下载</a>
       <a href="https://api.jiucaihezi.studio/pricing">模型价格</a>
       <a href="/support/">用户支持</a>
       <a href="/privacy/">隐私政策</a>
@@ -720,44 +720,26 @@
 </footer>
 
 <script>
-// 动态加载下载链接：从服务器 latest.json 读取最新版本
+// 下载统一走 /download/ —— 那边才是选平台、看安装说明的地方，直接给 .dmg 会
+// 让选错平台的人白下一遍。这里只从 latest.json 取版本号写进按钮文案。
 (function() {
-  var UPDATE_JSON = 'https://api.jiucaihezi.studio/updates/latest.json';
   var links = document.querySelectorAll('.download-link');
   if (!links.length) return;
 
   var xhr = new XMLHttpRequest();
-  xhr.open('GET', UPDATE_JSON, true);
+  xhr.open('GET', 'https://api.jiucaihezi.studio/updates/latest.json', true);
   xhr.timeout = 5000;
   xhr.onload = function() {
     if (xhr.status !== 200) return;
     try {
-      var data = JSON.parse(xhr.responseText);
-      var platforms = data.platforms || {};
+      var version = JSON.parse(xhr.responseText).version;
+      if (!version) return;
       links.forEach(function(link) {
-        var plat = link.getAttribute('data-platform');
-        // auto: 根据 userAgent 猜平台
-        if (plat === 'auto') {
-          var ua = navigator.userAgent;
-          if (/Windows/i.test(ua)) plat = 'windows-x86_64';
-          else if (/Intel|i686|x86_64/i.test(ua)) plat = 'darwin-x86_64';
-          else plat = 'darwin-aarch64';
-        }
-        var info = platforms[plat];
-        if (info && info.url) {
-          link.href = info.url;
-          // 显示版本号
-          if (data.version) {
-            var existing = link.textContent || link.innerText || '';
-            if (!/v\d/.test(existing)) {
-              link.textContent = (existing.trim() + ' v' + data.version);
-            }
-          }
-        }
+        var text = (link.textContent || '').trim();
+        if (text && !/v\d/.test(text)) link.textContent = text + ' v' + version;
       });
-    } catch(e) { /* JSON 解析失败，保持默认 GitHub Releases 链接 */ }
+    } catch(e) { /* 取不到版本号就不显示，链接照常可用 */ }
   };
-  xhr.onerror = function() { /* 网络不通，保持默认 */ };
   xhr.send();
 })();
 </script>
