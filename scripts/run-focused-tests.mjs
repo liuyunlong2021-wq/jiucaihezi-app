@@ -65,6 +65,7 @@ const wave1FocusedTests = [
   'src/stores/__tests__/agentStore.test.ts',
   'src/stores/__tests__/skillsManageStore.test.ts',
   'src/utils/__tests__/skillDisplayAlias.test.ts',
+  'src/utils/__tests__/skillPickerOrder.test.ts',
   'src/utils/__tests__/centralSkillViewModel.test.ts',
   'src/utils/__tests__/skillsSettingsViewModel.test.ts',
   'src/stores/__tests__/mediaTaskStore.test.ts',

@@ -1,5 +1,12 @@
 # 热缓存
 
+## [2026-09-13] 记忆工作台输入框两处修复：芯片提示残影 + @Skill 面板只列 Skill
+
+- **鼠标划过芯片会出现无来由的灰影**：芯片排 `.memory-command-strip` 是 `overflow-x: auto` 的滚动容器，它会把 `overflow-y` 也计算成 `auto`；画在按钮上方 7px 的自绘 tooltip（`::after`）因此被裁掉本体，只剩 `box-shadow` 落回容器内 —— 表现为一条跟着鼠标走、宽度随提示文字变化的灰带。修法是**删掉自绘 tooltip，改用原生 `title`**（系统在溢出上下文之外渲染），净删 CSS。
+- **点 `@Skill` 弹出的却是工具列表**：空查询返回「7 个工具 + 前 5 个 Skill + MCP + 项目文件」，而面板只渲染前 12 项，前 7 项全是下面芯片排里已经有的工具入口。现在从芯片排「@Skill」进入时**只列 Skill**（40 项、可滚动、仍可打字过滤）；手打 `@` 仍给全套候选。
+- **Skill 排序**：`jc-new-user-guide`、`skill-creator`、`wiki-memory` 三个永远置顶；其余按用户选中次数降序（`localStorage['jc_skill_use_counts']`），同次数保持原顺序。比较器抽到 `src/utils/skillPickerOrder.ts` 并配真测试（置顶优先级、频率降序、同频稳定、不改原数组）。
+- 验证：focused 全绿、Rust `412/412`、`vue-tsc -b` 与 `lint` 通过；真实 Desktop 未单独验收（dev 下 HMR 即时可见）。
+
 ## [2026-09-13 晚] 开关即全权：@Terminal 并入 @文件，全部审批取消
 
 - 用户原话："艾特文件这个功能本身就是把能力都给它。" 据此二次定稿 [[开发/记忆工作台文件能力合同与TDD-2026-09-13]]：**`@文件` = 本机全权**——10 项文件工具 + `terminal` + `skill_run_script` + `export_3d_scene_video` 一次给全；**`@Terminal` 芯片删除**（输入框 7 芯片 → 6）；**全部审批弹窗取消**（含 MCP 写工具、Skill 脚本、3D 导出，勾选即授权）。

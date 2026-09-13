@@ -437,6 +437,14 @@ test('memory workbench saves Office attachments as durable project materials', (
   assert.doesNotMatch(runtime, /只写了尚未执行的脚本不算完成/)
 })
 
+test('点 @Skill 只列 Skill，不重复芯片排已有的工具入口', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /skillPickerOnly\.value = true/)
+  assert.match(workbench, /if \(skillPickerOnly\.value\) return skills/)
+  assert.match(workbench, /sortSkillsForPicker\(/)
+  assert.match(workbench, /recordSkillUse\(option\.name\)/)
+})
+
 test('memory composer uses one workbench mode with beginner-friendly command templates', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')

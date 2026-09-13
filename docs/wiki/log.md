@@ -1,5 +1,13 @@
 # Wiki 操作日志
 
+## [2026-09-13] 修复 | 芯片提示残影 + @Skill 面板只列 Skill 并排序
+
+- **残影根因**：`.memory-command-strip` 是 `overflow-x: auto` 的滚动容器，按 CSS 规范会把 `overflow-y` 计算成 `auto`；自绘 tooltip（`::after`，位于按钮上方 7px）被裁掉本体，只剩 `box-shadow` 落回容器内 → 用户看到一条跟着鼠标走、宽度随提示文字变化的灰带。已在真实 dev server 上用并排最小复现验证（`overflow-x: auto` 容器里 tooltip 完全消失，`overflow: visible` 里完整显示）。修法：删掉自绘 tooltip 与 `position: relative`，提示改用原生 `title`。
+- **`@Skill` 列出工具的原因**：`mentionItems('')` 返回「7 个工具 + 前 5 个 Skill + MCP + 项目文件」，模板 `mentionFlat.slice(0, 12)` 只渲染 12 项 → 前 7 项全是工具。新增 `skillPickerOnly` 模式：从芯片排「@Skill」进入时只列 Skill（`slice(0, 40)`）；手打 `@` 的路径不变。
+- **Skill 排序**：新增 `src/utils/skillPickerOrder.ts`（`PINNED_SKILLS` / `readSkillUseCounts` / `recordSkillUse` / `sortSkillsForPicker`）。三个置顶 + 其余按选中次数降序，同次数靠稳定排序保序；`counts` 可注入以便测试。计数点在 `selectMention` 的 skill 分支（**新选中时 +1**，重复点已选中的不计数）。
+- 测试：新增 `src/utils/__tests__/skillPickerOrder.test.ts`（置顶不被高频 Skill 挤掉、频率降序、同频保序、不改原数组）并加入 `wave1FocusedTests`；`memoryWorkbench.test.ts` 增加「点 @Skill 只列 Skill」的源码断言。
+- 验证：focused 全绿、Rust `412/412`、`vue-tsc -b` 与 `lint` 通过。
+
 ## [2026-09-13] 定稿 | 开关即全权：@Terminal 并入 @文件 + 零弹窗 + copy 工具
 
 - 触发：用户实测「AI 新建」失败——模型只写出 `references/guxiang.md`（46603 字节里的一份），没有 `SKILL.md`，其余 reference 缺失，并自称"临时草稿目录禁止创建"。排查确认权限侧是通的（文件真的写进去了），真凶是**工具缺口 + 轮次上限**。

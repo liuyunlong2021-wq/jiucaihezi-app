@@ -75,6 +75,7 @@ import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
+import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
@@ -160,6 +161,8 @@ function clearToolSelections() {
   scene3dSelected.value = false
 }
 const mentionOpen = ref(false)
+// 从芯片排「@Skill」进入时只列 Skill；手打 @ 时仍给全套候选。
+const skillPickerOnly = ref(false)
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const sending = ref(false)
@@ -373,11 +376,13 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       })),
   ]
   const seenSkillNames = new Set<string>()
-  const skills = skillOptions.filter(skill => {
+  const skills = sortSkillsForPicker(skillOptions.filter(skill => {
     if (seenSkillNames.has(skill.name)) return false
     seenSkillNames.add(skill.name)
     return true
-  })
+  }))
+  // 从芯片排的「@Skill」进来时只列 Skill：下面的芯片排已经有全部工具入口了。
+  if (skillPickerOnly.value) return skills
   const owner = projectOwner.value
   const resources = !owner ? [] : await (query.trim()
     ? files.searchPaths(owner, query.trim(), 40)
@@ -1015,10 +1020,12 @@ function insertCommand(command: { id: string; label: string }) {
   if (command.id === 'av') avSelected.value = true
   if (command.id === 'scene3d') scene3dSelected.value = true
   if (command.id === 'skill') {
+    skillPickerOnly.value = true
     mentionOpen.value = true
     mentionOnInput('')
   }
   if (command.id === 'mcp') {
+    skillPickerOnly.value = false
     mentionOpen.value = true
     mentionOnInput('mcp__')
   }
@@ -1762,6 +1769,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
 
 function closeMention() {
   mentionOpen.value = false
+  skillPickerOnly.value = false
   clearMentionFilter()
 }
 
@@ -1772,7 +1780,10 @@ async function selectMention(option: MemoryMentionOption) {
         if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
       } else enableTool(option.id)
     } else if (option.type === 'skill') {
-      if (!selectedSkillNames.value.includes(option.name)) selectedSkillNames.value.push(option.name)
+      if (!selectedSkillNames.value.includes(option.name)) {
+        selectedSkillNames.value.push(option.name)
+        recordSkillUse(option.name)
+      }
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {
@@ -2746,7 +2757,7 @@ function readDataUrl(file: File): Promise<string> {
           <div v-show="mentionOpen && !sending" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
             <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>
             <button
-              v-for="item in mentionFlat.slice(0, 12)"
+              v-for="item in mentionFlat.slice(0, skillPickerOnly ? 40 : 12)"
               :key="mentionKey(item)"
               type="button"
               :class="{ active: mentionActive === mentionKey(item) }"
@@ -2774,7 +2785,7 @@ function readDataUrl(file: File): Promise<string> {
             <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
             <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
             <div class="memory-command-strip" aria-label="常用指令">
-              <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" :data-tooltip="command.description" @click="insertCommand(command)">
+              <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" :title="command.description" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
             </div>
@@ -3060,9 +3071,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-command-strip { display: flex; min-width: 0; max-width: calc(100% - 80px); flex: 0 1 auto; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .memory-command-strip::-webkit-scrollbar { display: none; }
 .memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-.memory-command-strip > button { position: relative; }
-.memory-command-strip > button::after { position: absolute; z-index: 5; left: 50%; bottom: calc(100% + 7px); padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); content: attr(data-tooltip); opacity: 0; pointer-events: none; transform: translate(-50%, 3px); transition: opacity .12s ease, transform .12s ease; white-space: nowrap; }
-.memory-command-strip > button:hover::after, .memory-command-strip > button:focus-visible::after { opacity: 1; transform: translate(-50%, 0); }
+/* 提示文案走原生 title：这套芯片在 overflow-x: auto 的滚动容器里，自绘 tooltip 会被裁成一条阴影。 */
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 .memory-command-strip button:disabled { cursor: default; opacity: .45; }
