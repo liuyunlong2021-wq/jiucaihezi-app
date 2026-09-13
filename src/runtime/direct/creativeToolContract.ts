@@ -30,7 +30,7 @@ function tool(
 const pathProperty = {
   type: 'string',
   description:
-    'Path relative to the current project, or an absolute path after the user approves this task',
+    'Path relative to the current project, or an absolute path the user gave in this conversation',
 }
 const vectorProperty = { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }
 export const TOOL_SEARCH_TOOL_DEFINITION = tool(
@@ -76,7 +76,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   ),
   tool(
     'read',
-    'Read a directory, UTF-8 text file, supported image, or a loaded Skill resource. Relative paths use the current project; user-approved absolute paths are also supported.',
+    'Read a directory, UTF-8 text file, supported image, or a loaded Skill resource. Relative paths use the current project; absolute paths the user gave in this conversation are also supported.',
     {
       path: pathProperty,
       offset: { type: 'integer', description: 'Optional 1-based line offset', minimum: 1 },
@@ -91,12 +91,12 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   ),
   tool(
     'glob',
-    'Find files by glob pattern. Relative paths use the current project; user-approved absolute paths are also supported.',
+    'Find files by glob pattern. Relative paths use the current project; absolute paths the user gave in this conversation are also supported.',
     {
       pattern: { type: 'string', description: 'Glob pattern such as docs/**/*.md' },
       path: {
         type: 'string',
-        description: 'Optional project subdirectory or approved absolute directory',
+        description: 'Optional project subdirectory or user-provided absolute directory',
       },
       limit: {
         type: 'integer',
@@ -109,12 +109,12 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   ),
   tool(
     'grep',
-    'Search UTF-8 text files by regular expression. Relative paths use the current project; user-approved absolute paths are also supported.',
+    'Search UTF-8 text files by regular expression. Relative paths use the current project; absolute paths the user gave in this conversation are also supported.',
     {
       pattern: { type: 'string', description: 'Regular expression to search for' },
       path: {
         type: 'string',
-        description: 'Optional project path prefix or approved absolute directory',
+        description: 'Optional project path prefix or user-provided absolute directory',
       },
       include: { type: 'string', description: 'Optional filename glob' },
       limit: {
@@ -128,7 +128,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   ),
   tool(
     'write',
-    'Create or overwrite one UTF-8 file. Relative paths use the current project; user-approved absolute paths are also supported.',
+    'Create or overwrite one UTF-8 file. Relative paths use the current project; absolute paths the user gave in this conversation are also supported.',
     {
       path: pathProperty,
       content: { type: 'string', description: 'Complete file content' },
@@ -137,7 +137,7 @@ export const CREATIVE_PROJECT_TOOL_DEFINITIONS = [
   ),
   tool(
     'edit',
-    'Replace exact text in one file. Relative paths use the current project; user-approved absolute paths are also supported.',
+    'Replace exact text in one file. Relative paths use the current project; absolute paths the user gave in this conversation are also supported.',
     {
       path: pathProperty,
       oldString: { type: 'string', description: 'Exact text to replace' },
@@ -194,8 +194,20 @@ export const MEMORY_FILE_TOOL_DEFINITIONS = [
     ['path', 'destination'],
   ),
   tool(
+    'copy',
+    'Copy one file or directory to a new path. Use this for duplicating, backing up or cloning a folder instead of reading and rewriting each file. Both paths must be absolute and outside the project; the destination must not exist yet.',
+    {
+      path: { type: 'string', description: 'Existing absolute source path' },
+      destination: {
+        type: 'string',
+        description: 'New absolute destination path, including the final name',
+      },
+    },
+    ['path', 'destination'],
+  ),
+  tool(
     'delete',
-    'Move one project file or directory to the system trash on Desktop, or delete it from the browser-local project on Web. Always requires user approval.',
+    'Move one project file or directory to the system trash on Desktop, or delete it from the browser-local project on Web. Inside the project no approval is needed; a project-external path must be one the user gave in this conversation.',
     {
       path: { type: 'string', description: 'Existing project-relative path' },
     },
@@ -621,7 +633,7 @@ export const MEMORY_ARTIFACT_TOOL_DEFINITIONS = [
 const MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS = [
   tool(
     'export_3d_scene_video',
-    'Record an existing animated .jcscene with the local Three.js renderer and export it as H.264 MP4 using the computer system FFmpeg. Use only for local geometric explainers, after create_3d_scene has created a duration and timeline. This starts a local process and requires approval.',
+    'Record an existing animated .jcscene with the local Three.js renderer and export it as H.264 MP4 using the computer system FFmpeg. Use only for local geometric explainers, after create_3d_scene has created a duration and timeline.',
     {
       path: {
         type: 'string',
@@ -671,6 +683,7 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   edit: { path: 'string', oldString: 'string', newString: 'string', replaceAll: 'boolean' },
   mkdir: { path: 'string' },
   move: { path: 'string', destination: 'string' },
+  copy: { path: 'string', destination: 'string' },
   delete: { path: 'string' },
   write_text_batch: { files: 'json' },
   skill_copy_asset: { skill: 'string', path: 'string', destination: 'string' },
@@ -780,15 +793,22 @@ export function boundedInteger(value: unknown, fallback: number, maximum = 1000)
   return Math.max(1, Math.min(Math.floor(number), maximum))
 }
 
-export function linesPage(content: string, offsetValue: unknown, limitValue: unknown): string {
+/**
+ * 读取文本文件的分页输出。
+ * 合同（2026-09-13）：行内容必须是原文，不能带 `N: ` 前缀，否则模型的 old_text
+ * 永远与磁盘字节对不上；未读完时在首行给出定位头。
+ */
+export function readTextPage(content: string, offsetValue: unknown, limitValue: unknown): string {
   const lines = content.split(/\r?\n/)
   const offset = boundedInteger(offsetValue, 1)
   const limit = boundedInteger(limitValue, 200)
   const page = lines.slice(offset - 1, offset - 1 + limit)
   const end = page.length ? offset + page.length - 1 : Math.min(offset - 1, lines.length)
+  const body = page.join('\n')
+  if (offset === 1 && end >= lines.length) return body
   return [
     `[lines ${page.length ? offset : 0}-${end} of ${lines.length}; eof=${end >= lines.length}]`,
-    ...page.map((line, index) => `${offset + index}: ${line}`),
+    body,
   ].join('\n')
 }
 

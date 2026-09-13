@@ -97,8 +97,10 @@ test('Skill Creator skips eval review when tests were not requested and installs
   })
   const appendix = result.skill?.appendSkillMd || ''
 
-  assert.match(appendix, /修改现有 Skill.*skill_creator_load_installed_skill/)
-  assert.match(appendix, /不得使用 Terminal/)
+  // 文件能力合同：Skill 层不再限制文件权限，用户给了绝对路径就直接读写
+  assert.match(appendix, /修改已安装 Skill[\s\S]*用户已给出 Skill 目录的绝对路径/)
+  assert.match(appendix, /skill_creator_load_installed_skill/)
+  assert.doesNotMatch(appendix, /不得使用 Terminal/)
   assert.match(appendix, /未运行测试时不要调用评审工具/)
   assert.match(appendix, /点击安装卡后.*保存到中央 Skill 根目录/)
   assert.doesNotMatch(appendix, /自动调用 save_skill/)

@@ -178,6 +178,19 @@ struct DevExternalReadFileInput {
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DevExternalPathInput {
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DevExternalMoveInput {
+    source: String,
+    destination: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DevExternalWriteFileInput {
     path: String,
     #[serde(default)]
@@ -1441,6 +1454,10 @@ pub fn run() {
             commands::dev::dev_read_file,
             commands::dev::dev_hash_project_file,
             commands::dev::dev_read_external_file,
+            commands::dev::dev_create_dir_external,
+            commands::dev::dev_move_external,
+            commands::dev::dev_copy_external,
+            commands::dev::dev_delete_external,
             commands::dev::dev_read_many_files,
             commands::dev::dev_write_file,
             commands::dev::dev_create_file_if_missing,

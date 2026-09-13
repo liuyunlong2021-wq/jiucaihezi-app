@@ -142,6 +142,80 @@ pub fn display_external(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// 项目外复制文件或目录（用户已给出两端路径）。目标已存在时拒绝，避免静默覆盖。
+#[tauri::command]
+pub fn dev_copy_external(input: DevExternalMoveInput) -> Result<String, String> {
+    let source = canonical_external_existing_path(&input.source)?;
+    let destination = PathBuf::from(input.destination.trim());
+    if !destination.is_absolute() {
+        return Err("外部路径必须是绝对路径".into());
+    }
+    if destination.starts_with(&source) {
+        return Err("目标不能位于来源内部".into());
+    }
+    if destination.exists() {
+        return Err(format!("目标已存在: {}", display_external(&destination)));
+    }
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    }
+    if source.is_dir() {
+        crate::skills::linker::copy_dir_all(&source, &destination)
+            .map_err(|e| format!("复制目录失败: {}", e))?;
+    } else {
+        copy_file_new(&source, &destination)?;
+    }
+    Ok(display_external(&destination))
+}
+
+/// 项目外建目录（用户已给出该路径）。
+#[tauri::command]
+pub fn dev_create_dir_external(input: DevExternalPathInput) -> Result<String, String> {
+    let target = resolve_external_write_path(&input.path)?;
+    std::fs::create_dir_all(&target).map_err(|e| format!("创建目录失败: {}", e))?;
+    Ok(display_external(&target))
+}
+
+/// 项目外移动/重命名（用户已给出两端路径）。目标已存在时拒绝，避免静默覆盖。
+#[tauri::command]
+pub fn dev_move_external(input: DevExternalMoveInput) -> Result<String, String> {
+    let source = canonical_external_existing_path(&input.source)?;
+    let destination = PathBuf::from(input.destination.trim());
+    if !destination.is_absolute() {
+        return Err("外部路径必须是绝对路径".into());
+    }
+    if destination.exists() {
+        return Err(format!("目标已存在: {}", display_external(&destination)));
+    }
+    if let Some(parent) = destination.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    }
+    std::fs::rename(&source, &destination).map_err(|e| format!("移动失败: {}", e))?;
+    Ok(display_external(&destination))
+}
+
+/// 项目外删除（移入系统废纸篓，可恢复）。
+#[tauri::command]
+pub fn dev_delete_external(input: DevExternalPathInput) -> Result<DevDeleteFileOutput, String> {
+    let target = PathBuf::from(input.path.trim());
+    if !target.is_absolute() {
+        return Err("外部路径必须是绝对路径".into());
+    }
+    match std::fs::symlink_metadata(&target) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DevDeleteFileOutput {
+                status: "missing".into(),
+            });
+        }
+        Err(error) => return Err(format!("外部路径不可访问: {}", error)),
+        Ok(_) => {}
+    }
+    move_project_path_to_trash(&target)?;
+    Ok(DevDeleteFileOutput {
+        status: "trashed".into(),
+    })
+}
+
 pub fn display_relative(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
@@ -3134,5 +3208,97 @@ mod tests {
         .unwrap();
         assert_eq!(replaced.replacements, 1);
         assert_eq!(std::fs::read_to_string(notes).unwrap(), "陆川");
+    }
+
+    #[test]
+    fn external_path_commands_create_move_and_trash_without_a_project() {
+        let external = tempfile::tempdir().unwrap();
+        let created = dev_create_dir_external(DevExternalPathInput {
+            path: external.path().join("新目录/子目录").to_string_lossy().to_string(),
+        })
+        .unwrap();
+        assert!(created.ends_with("新目录/子目录"));
+        assert!(external.path().join("新目录/子目录").is_dir());
+
+        let source = external.path().join("新目录/子目录");
+        let moved = dev_move_external(DevExternalMoveInput {
+            source: source.to_string_lossy().to_string(),
+            destination: external.path().join("改名后").to_string_lossy().to_string(),
+        })
+        .unwrap();
+        assert!(moved.ends_with("改名后"));
+        assert!(external.path().join("改名后").is_dir());
+        assert!(!source.exists());
+
+        assert!(dev_move_external(DevExternalMoveInput {
+            source: external.path().join("改名后").to_string_lossy().to_string(),
+            destination: external.path().join("改名后").to_string_lossy().to_string(),
+        })
+        .is_err());
+
+        let deleted = dev_delete_external(DevExternalPathInput {
+            path: external.path().join("改名后").to_string_lossy().to_string(),
+        })
+        .unwrap();
+        assert_eq!(deleted.status, "trashed");
+
+        let missing = dev_delete_external(DevExternalPathInput {
+            path: external.path().join("不存在").to_string_lossy().to_string(),
+        })
+        .unwrap();
+        assert_eq!(missing.status, "missing");
+    }
+
+    #[test]
+    fn external_copy_duplicates_a_tree_without_touching_the_source() {
+        let external = tempfile::tempdir().unwrap();
+        let source = external.path().join("源Skill");
+        std::fs::create_dir_all(source.join("references")).unwrap();
+        std::fs::write(source.join("SKILL.md"), "---\nname: demo\n---\n正文").unwrap();
+        std::fs::write(source.join("references/相术.md"), "骨相内容").unwrap();
+
+        let destination = external.path().join("新Skill");
+        let copied = dev_copy_external(DevExternalMoveInput {
+            source: source.to_string_lossy().to_string(),
+            destination: destination.to_string_lossy().to_string(),
+        })
+        .unwrap();
+        assert!(copied.ends_with("新Skill"));
+        assert_eq!(
+            std::fs::read_to_string(destination.join("SKILL.md")).unwrap(),
+            "---\nname: demo\n---\n正文"
+        );
+        assert_eq!(
+            std::fs::read_to_string(destination.join("references/相术.md")).unwrap(),
+            "骨相内容"
+        );
+        // 源目录必须原样保留，复制不是移动
+        assert!(source.join("references/相术.md").is_file());
+
+        // 目标已存在时拒绝，避免静默覆盖
+        assert!(dev_copy_external(DevExternalMoveInput {
+            source: source.to_string_lossy().to_string(),
+            destination: destination.to_string_lossy().to_string(),
+        })
+        .is_err());
+
+        // 目标不能落在来源内部，否则会无限递归
+        assert!(dev_copy_external(DevExternalMoveInput {
+            source: source.to_string_lossy().to_string(),
+            destination: source.join("自己/里面").to_string_lossy().to_string(),
+        })
+        .is_err());
+
+        // 单文件复制走 copy_file_new，内容逐字节一致
+        let single = dev_copy_external(DevExternalMoveInput {
+            source: source.join("SKILL.md").to_string_lossy().to_string(),
+            destination: external.path().join("单独副本.md").to_string_lossy().to_string(),
+        })
+        .unwrap();
+        assert!(single.ends_with("单独副本.md"));
+        assert_eq!(
+            std::fs::read_to_string(external.path().join("单独副本.md")).unwrap(),
+            "---\nname: demo\n---\n正文"
+        );
     }
 }

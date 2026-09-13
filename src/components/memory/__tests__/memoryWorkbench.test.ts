@@ -63,11 +63,22 @@ test('memory right chat dock separates preview layout and collapses to a compact
 test('skill edit requests select Skill Creator and prefill the Skill ID and path', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /onEvent\('skill-creator-edit'/)
-  assert.match(workbench, /selectedSkillNames\.value = \[\.\.\.new Set\(\[\.\.\.selectedSkillNames\.value, 'skill-creator'\]\)\]/)
   assert.match(workbench, /skillId\?: unknown/)
-  assert.match(workbench, /Skill ID：\\n\$\{skillId\}/)
-  assert.match(workbench, /\.agents\\\/skills\\\//)
+  assert.match(workbench, /Skill 目录：\\n/)
+  assert.match(workbench, /fileToolsSelected\.value = true/)
   assert.match(workbench, /修改要求：\\n/)
+  assert.match(workbench, /selectedSkillNames\.value = \[\.\.\.new Set\(\[\.\.\.selectedSkillNames\.value, 'skill-creator'\]\)\]/)
+})
+
+test('skill creation requests prefill the central Skill root and open file tools', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /onEvent\('skill-creator-create'/)
+  assert.match(workbench, /consumeLastEvent\('skill-creator-create'\)/)
+  assert.match(workbench, /offSkillCreatorCreate\?\.\(\)/)
+  assert.match(workbench, /skillsRoot\?: unknown/)
+  assert.match(workbench, /Skill 根目录：\\n/)
+  assert.match(workbench, /新建要求：\\n/)
+  assert.match(workbench, /fileToolsSelected\.value = true/)
 })
 
 test('switching conversations keeps the middle document preview open', () => {
@@ -433,8 +444,11 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速</)
   assert.match(workbench, /const toolCommands = \[/)
-  for (const label of ['@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP', '@Terminal'])
+  for (const label of ['@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
+  // @Terminal 已并入 @文件：开关一开就是本机全权，不留第二个终端入口。
+  assert.doesNotMatch(workbench, /@Terminal/)
+  assert.doesNotMatch(workbench, /terminalSelected/)
   assert.doesNotMatch(workbench, /@Skill \+ @MCP/)
   assert.doesNotMatch(workbench, /const commonCommands = \[/)
   assert.match(workbench, /function insertCommand\(command/)
@@ -459,7 +473,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(runtime, /memoryMode|input\.mode(?:\W|$)|快速模式/)
   assert.doesNotMatch(runtime, /tools: \[WIKI_CONTEXT_TOOL_DEFINITION\]/)
   assert.doesNotMatch(runtime, /maxModelRequests: maxMemorySteps|stopAfterSuccessfulToolNames/)
-  assert.match(runtime, /maxToolRounds: 12/)
+  assert.match(runtime, /maxToolRounds: 64/)
   assert.match(runtime, /finalizeAtToolRoundLimit: true/)
   assert.match(runtime, /compactToolHistory: selectedSkillNames\.length === 0/)
   assert.doesNotMatch(runtime, /WIKI_SEARCH_TOOL_DEFINITION/)

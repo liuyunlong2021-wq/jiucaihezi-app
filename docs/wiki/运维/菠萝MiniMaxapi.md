@@ -615,7 +615,7 @@ if __name__ == "__main__":
 | 1:1 分辨率 | 只有 `minimax_h3_zm_u24` 和两个 `lightx2v` 模型支持 `480p(1:1)` / `768p(1:1)` | 适配器按模型各自的白名单放行：`zm_u24` 六个分辨率（含两个 1:1），旧版 `v2_15s` 四个 |
 | 参考图数量 | 模型支持 0–9 张（`ref_image_0..8`） | 创作面板要求**至少 1 张**：实测未带参考图时上游报 `缺少必填参数：ref_image_0`，所以面板提前用 `files.images.min = 1` 拦住 |
 | 默认时长 | `v2_15s` 默认 15 秒，`zm_u24` 默认 5 秒 | 适配器按模型取默认值；创作面板两条都显式发送，默认分别是 15 / 5 |
-| 素材要不要再传一次 | 原文说「素材必须先上传到 OSS，拿到公开 URL 后再传给生成接口」 | **不再二次转存**：App 已经通过 `POST /api/creations/uploads` 把文件换成了公网 URL（`https://api.jiucaihezi.studio/media/creation/<32 位 token>`，Worker 存 KV、公共读），适配器把这串 URL **原样透传**给菠萝的 `ref_image_N` / `ref_audio_N`。照的是 lumenx 客户端的已验证做法：「已有 http URL 的参考图不会重复上传」 |
+| 素材要不要再传一次 | 原文说「素材必须先上传到 OSS，拿到公开 URL 后再传给生成接口」 | **不再二次转存**：App 已经通过 `POST /api/creations/uploads` 把文件换成了公网 URL（`https://api.jiucaihezi.studio/media/creation/<32 位 token>`，Worker 存 KV、公共读），适配器把这串 URL **原样透传**给菠萝的 `ref_image_N` / `ref_audio_N`。照的是 lumenx 客户端的已验证做法：「已有 http URL 的参考图不会重复上传」。**2026-09-12 生产实测两个模型均出片成功** |
 | 为什么不再转存 | —— | 2026-09-12 实测：适配器自己再去下载那个 URL 再传菠萝 OSS 是错的。素材存在 Cloudflare Worker 的 KV 里（`gateway/src/index.js`），容器绕公网取它会卡满 60 秒；而且 `http://new-api:3000/media/creation/...` 是 404（该路由属 Worker，不在 NewAPI），**没有内网捷径**。这一圈先后制造过 `RuntimeError`（给 AsyncClient 传文件对象）和超时，既然 App 侧已换过 URL，就没理由再搬一遍 |
 | 临时素材有效期 | 无此概念 | Worker 的 KV `expirationTtl = 15 分钟`（`CREATION_MEDIA_TTL_SECONDS`）。透传后菠萝是在提交后自行去取，所以**排队超过 15 分钟的任务可能取不到参考图** —— 这是透传方案的新边界 |
 | 参考素材大小 | STS 返回 `maxImageBytes`（默认 10 MB）、`maxAudioBytes`（默认 20 MB） | 适配器**不再碰 STS 与 OSS**，所以上游那两个上限对我们已经无效；真实闸门在入口：Worker 单文件 20 MB（`CREATION_MEDIA_MAX_BYTES`），面板选择上限也是 20 MB。历史实现里的 STS 上传、V1 签名 PUT 与扩展名推导已随透传一起删除 |
@@ -626,4 +626,16 @@ if __name__ == "__main__":
 
 **可用性登记**：两个菠萝模型都已登记进 `scripts/creation-models/server.mjs` 的路由表（id 用面板 id，`aliases` 用 NewAPI 渠道里的裸模型名），面板可以显示「已启用 / 不可用」。渠道里只配了其中一个时，另一个会显示为不可用 —— 两个 `aliases` 是分开的，不会互相冒充。
 
-**尚未验证**：本节只在本机单元测试（`boluo-minimax-adapter/tests/test_main.py`，20 条）与静态核对下成立。**透传方案尚未部署、尚未真实出片**；菠萝服务器能否直接取到我们 Worker 上的临时素材 URL（会不会被 Cloudflare 拦、会不会超过 15 分钟 TTL）是第一个要验的点。
+**已真实验证（2026-09-12 19:59）**：透传方案已部署（服务器 `/opt/boluo-minimax-adapter` 从提交 `78ae5eb9` 重建），两个图音参考模型**都真实出片成功**：
+
+- 增强版 `minimax_h3_zm_u24`：创作面板回执「男人惊讶 · MiniMax H3 参考生视频增强版 · 菠萝」，成片落盘 `.raw/jc-media/视频/男人惊讶_ymr9j1.mp4`
+- 基础版 `minimax_h3_image_audio_to_video_v2_15s`：同轮真实出片成功
+
+这同时否掉了透传方案唯一的不确定点：**菠萝服务器能直接取到我们 Worker 上托管的临时素材 URL**（`https://api.jiucaihezi.studio/media/creation/<32 位 token>`），担心的「被 Cloudflare 拦」没有发生。一次创建只发一次上游请求，STS 申请 / OSS 签名 PUT / 素材下载转存整条链路确认不参与。
+
+**仍未验证**：
+
+- Worker KV `expirationTtl = 15 分钟` 的越界现场 —— 没有构造过排队超过 15 分钟的任务
+- 上游 4xx / 5xx 与超时路径在生产下的重试表现（`test_main.py` 20 条只覆盖到假客户端）
+- `/content` 的 `Range` 续传（本就不支持，需要时才补）
+- `minimax_h3_lightx2v` / `minimax_h3_lightx2v_no_pic` 仍未接入

@@ -31,8 +31,8 @@ function transcript(id: string, answer: string) {
 
 test('memory_search is only selected when query is enabled', () => {
   const tools = [{ function: { name: 'memory_search' } }, { function: { name: 'read' } }]
-  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], false), [])
-  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], true), [tools[0]])
+  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, [], false, false, [], false), [])
+  assert.deepEqual(selectMemoryTools(tools, [], false, false, false, [], false, false, [], true), [tools[0]])
 })
 
 test('memory search stays in the current conversation and reads only valid linked raws', async () => {

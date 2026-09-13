@@ -30,9 +30,11 @@ const tools = [
   'edit',
   'mkdir',
   'move',
+  'copy',
   'delete',
   'write_text_batch',
   'terminal',
+  'skill_run_script',
   'create_document',
   'create_3d_scene',
   'edit_3d_scene',
@@ -80,11 +82,11 @@ test('ordinary conversation exposes no project tools', () => {
 test('memory_search follows the conversation query switch', () => {
   const tools = [MEMORY_SEARCH_TOOL_DEFINITION]
   assert.deepEqual(
-    selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], false),
+    selectMemoryTools(tools, [], false, false, false, [], false, false, [], false),
     [],
   )
   assert.deepEqual(
-    selectMemoryTools(tools, [], false, false, false, [], false, false, false, [], true).map(
+    selectMemoryTools(tools, [], false, false, false, [], false, false, [], true).map(
       tool => tool.function.name,
     ),
     ['memory_search'],
@@ -198,7 +200,7 @@ test('Skill allowed-tools join the current tool authorization set', async () => 
   await buildSelectedSkillPrompt(['writer'], new Map([['writer', skill]]), undefined, allowedTools)
   assert.deepEqual([...allowedTools], ['read', 'edit', 'mcp__demo__run'])
   assert.deepEqual(
-    selectMemoryTools(tools, ['writer'], false, false, false, [], false, false, false, [
+    selectMemoryTools(tools, ['writer'], false, false, false, [], false, false, [
       ...allowedTools,
     ]).map(tool => tool.function.name),
     ['read', 'edit', 'mcp__demo__run'],
@@ -267,10 +269,24 @@ test('Skill and file selection combine without a special route', () => {
   )
 })
 
-test('file selection exposes the complete project file tool set', () => {
+test('file selection exposes the complete local tool set including terminal', () => {
   assert.deepEqual(
     selectMemoryTools(tools, [], false, false, true).map(tool => tool.function.name),
-    ['read', 'glob', 'grep', 'write', 'edit', 'mkdir', 'move', 'delete', 'write_text_batch'],
+    [
+      'read',
+      'glob',
+      'grep',
+      'write',
+      'edit',
+      'mkdir',
+      'move',
+      'copy',
+      'delete',
+      'write_text_batch',
+      'terminal',
+      'skill_run_script',
+      'export_3d_scene_video',
+    ],
   )
 })
 

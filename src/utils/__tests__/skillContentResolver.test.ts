@@ -86,6 +86,20 @@ test('web skill loader rejects a package whose SKILL.md references a missing res
   )
 })
 
+test('web skill loader accepts a package that only uses placeholder paths in examples', async () => {
+  const placeholderFetcher = (url: string | URL | Request): Promise<Response> => {
+    if (String(url) === '/skills/placeholder/SKILL.md') {
+      return Promise.resolve(new Response('```yaml\nfile_path: "references/{相术类型}.md"\n```'))
+    }
+    if (String(url) === '/skills/index.json') {
+      return Promise.resolve(Response.json([{ id: 'placeholder', name: 'placeholder', files: ['SKILL.md'] }]))
+    }
+    return Promise.resolve(new Response('not found', { status: 404 }))
+  }
+  const skill = await loadWebSkillByName('placeholder', placeholderFetcher as typeof fetch)
+  assert.equal(skill.name, 'placeholder')
+})
+
 test('web skill loader preserves nested package path segments', async () => {
   const skill = await loadWebSkillByName('JC-manju-fengge', fetcher as typeof fetch)
   assert.equal(skill.baseDirectory, '/skills/JC-manju-skills/JC-manju-fengge')

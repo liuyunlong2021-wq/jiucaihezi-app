@@ -32,6 +32,7 @@ import {
 import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
 import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
+import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
 import {
@@ -129,12 +130,13 @@ const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
 const fileToolsSelected = ref(false)
+// 文件能力合同：授权只来自用户在消息里给出的绝对路径，本会话内累积有效。
+const authorizedPaths = ref<string[]>([])
 const selectedMcpToolNames = ref<string[]>([])
 const mcpStore = useMcpStore()
 const mediaSelected = ref(false)
 const avSelected = ref(false)
 const scene3dSelected = ref(false)
-const terminalSelected = ref(false)
 const selectedToolChips = computed(() => [
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
   ...selectedMcpToolNames.value.map(id => {
@@ -149,7 +151,6 @@ const selectedToolChips = computed(() => [
   { id: 'media', label: '@图文', icon: 'image', selected: mediaSelected.value },
   { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
-  { id: 'terminal', label: '@Terminal', icon: 'terminal', selected: terminalSelected.value },
 ].filter(tool => tool.selected))
 function clearToolSelections() {
   fileToolsSelected.value = false
@@ -157,7 +158,6 @@ function clearToolSelections() {
   mediaSelected.value = false
   avSelected.value = false
   scene3dSelected.value = false
-  terminalSelected.value = false
 }
 const mentionOpen = ref(false)
 const modelPickerOpen = ref(false)
@@ -231,6 +231,7 @@ let offMediaReferenceAdd: (() => void) | null = null
 let offSwitchPanel: (() => void) | null = null
 let offDesktopProjectDrop: (() => void) | null = null
 let offSkillCreatorEdit: (() => void) | null = null
+let offSkillCreatorCreate: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 let creationClosePromise: Promise<boolean> | null = null
 let chatResizeStartX = 0
@@ -334,6 +335,7 @@ function resizeCreationForWindow() {
 }
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
+watch(() => conversation.value?.transcript.id, () => { authorizedPaths.value = [] })
 watch(() => conversation.value?.transcript.id, () => { contextNotice.value = '' })
 const projectOwner = computed(() => desktopRuntime
   ? projectStore.projectDir.value
@@ -485,13 +487,12 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
 }
 const toolCommands = [
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '加载指定 Skill' },
-  { id: 'file', label: '@文件', icon: 'description', description: '读取、写入和管理文件' },
+  { id: 'file', label: '@文件', icon: 'description', description: '读写文件、执行终端命令（本机全权）' },
   { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
   ...(desktopOnlyRuntime ? [
     { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
-    { id: 'terminal', label: '@Terminal', icon: 'terminal', description: '执行终端命令' },
   ] : []),
 ]
 const primaryCommands = toolCommands
@@ -526,10 +527,13 @@ onMounted(async () => {
       void importDesktopChatPaths(drop.paths, drop.warnings || [])
   })
   offSkillCreatorEdit = onEvent('skill-creator-edit', payload => requestSkillCreatorEdit(payload))
+  offSkillCreatorCreate = onEvent('skill-creator-create', payload => requestSkillCreatorCreate(payload))
   const pendingMediaReference = consumeLastEvent('media-reference:add')
   if (pendingMediaReference) void addProjectMediaReferences(pendingMediaReference[0])
   const pendingSkillCreatorEdit = consumeLastEvent('skill-creator-edit')
   if (pendingSkillCreatorEdit) requestSkillCreatorEdit(pendingSkillCreatorEdit[0])
+  const pendingSkillCreatorCreate = consumeLastEvent('skill-creator-create')
+  if (pendingSkillCreatorCreate) requestSkillCreatorCreate(pendingSkillCreatorCreate[0])
   document.addEventListener('pointerdown', closeModelPicker)
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('resize', resizeCreationForWindow)
@@ -551,6 +555,7 @@ onBeforeUnmount(() => {
   offSwitchPanel?.()
   offDesktopProjectDrop?.()
   offSkillCreatorEdit?.()
+  offSkillCreatorCreate?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
@@ -604,10 +609,29 @@ function handleGlobalKeydown(event: KeyboardEvent) {
 function requestSkillCreatorEdit(payload: unknown) {
   const data = payload as { skillId?: unknown; skillPath?: unknown } | null
   const skillId = String(data?.skillId || '').trim()
-  const skillPath = String(data?.skillPath || '').trim()
-  if (!/^[a-z0-9][a-z0-9-]*$/i.test(skillId) || !/^\.agents\/skills\/[a-z0-9][a-z0-9-]*\/SKILL\.md$/i.test(skillPath)) return
+  const skillPath = String(data?.skillPath || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  if (!/^[a-z0-9][a-z0-9-]*$/i.test(skillId)) return
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
-  const prefix = `请使用 Skill Creator 修改这个 Skill：\n\nSkill ID：\n${skillId}\n\n目标文件：\n${skillPath}\n\n修改要求：\n`
+  // 文件能力合同：@文件 是唯一文件开关；Skill 目录的绝对路径就是本会话的读写授权
+  fileToolsSelected.value = true
+  const target = /^(?:\/|[A-Za-z]:\/)/.test(skillPath) ? skillPath : ''
+  const prefix = `请修改这个 Skill：\n\nSkill 目录：\n${target || '（把 Skill 文件夹的完整绝对路径粘贴到这里）'}\n\n修改要求：\n`
+  input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
+  setEditorText(composerRef.value, input.value)
+  void nextTick(() => {
+    resizeComposer()
+    composerRef.value?.focus()
+  })
+}
+
+function requestSkillCreatorCreate(payload: unknown) {
+  const data = payload as { skillsRoot?: unknown } | null
+  const skillsRoot = String(data?.skillsRoot || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
+  const target = /^(?:\/|[A-Za-z]:\/)/.test(skillsRoot) ? skillsRoot : ''
+  selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
+  // 文件能力合同：产品入口代用户给出中央 Skill 根目录的绝对路径，就是本次的写授权
+  fileToolsSelected.value = true
+  const prefix = `请新建一个 Skill：\n\nSkill 根目录：\n${target || '（把中央 Skill 根目录的完整绝对路径粘贴到这里）'}\n\n新建要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
   setEditorText(composerRef.value, input.value)
   void nextTick(() => {
@@ -636,6 +660,8 @@ async function openProject(owner: string) {
   if (sending.value) stop()
   conversationSelectionGeneration++
   resourceOpenGeneration++
+  // 创作画布保存失败会在这里早退；授权集属于旧项目，必须在此之前清掉
+  authorizedPaths.value = []
   if (!await closeCreationHost()) return
   const generation = ++projectGeneration
   opened.value = null
@@ -988,7 +1014,6 @@ function insertCommand(command: { id: string; label: string }) {
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
   if (command.id === 'scene3d') scene3dSelected.value = true
-  if (command.id === 'terminal') terminalSelected.value = true
   if (command.id === 'skill') {
     mentionOpen.value = true
     mentionOnInput('')
@@ -1009,7 +1034,6 @@ function enableTool(id: string) {
   if (id === 'media') mediaSelected.value = true
   if (id === 'av') avSelected.value = true
   if (id === 'scene3d') scene3dSelected.value = true
-  if (id === 'terminal') terminalSelected.value = true
 }
 
 function disableTool(id: string) {
@@ -1021,7 +1045,6 @@ function disableTool(id: string) {
   if (id === 'media') mediaSelected.value = false
   if (id === 'av') avSelected.value = false
   if (id === 'scene3d') scene3dSelected.value = false
-  if (id === 'terminal') terminalSelected.value = false
 }
 
 function fileWriteTargetName(resource: ProjectResource): string {
@@ -1180,6 +1203,8 @@ async function renameConversation(item: MemoryConversation) {
 }
 
 async function deleteConversation(item: MemoryConversation) {
+  // 删除正在运行的当前会话前先停止，否则已派发的工具调用会继续用旧授权落盘
+  if (item.transcript.id === conversation.value?.transcript.id && sending.value) stop()
   const message = mobileRuntime
     ? `永久删除对话“${item.transcript.title}”？此操作无法恢复。`
     : `删除对话“${item.transcript.title}”？`
@@ -1302,6 +1327,18 @@ async function send() {
     ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
     : undefined
   pendingUserTurn.value = userTurn
+  // 合同：授权来自用户消息。「编辑并重新发送」会截断后续轮次，被截掉的授权必须一起失效，
+  // 所以按保留的轮次重算，而不是把历史授权直接并上来。
+  authorizedPaths.value = [
+    ...new Set(
+      collectAuthorizedPaths(
+        [...(editTargetId ? baseTurns : active.transcript.turns), userTurn]
+          .filter(turn => turn.role === 'user')
+          .map(turn => turn.content)
+          .join('\n'),
+      ),
+    ),
+  ]
   beginRunStatus()
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
@@ -1327,11 +1364,11 @@ async function send() {
       selectedSkillNames: skillSnapshot,
       memoryQueryEnabled: memoryQuerySnapshot,
       fileToolsSelected: fileToolsSelected.value,
+      authorizedPaths: authorizedPaths.value,
       selectedMcpToolNames: selectedMcpToolNames.value,
       mediaSelected: mediaSelected.value,
       avSelected: avSelected.value,
       scene3dSelected: scene3dSelected.value,
-      terminalSelected: terminalSelected.value,
       recordSceneVideo,
       signal: abortController.signal,
       onToolEvent: event => {
@@ -1453,6 +1490,10 @@ function stop() {
   memoryRunGeneration++
   settleMemoryToolApproval('reject')
   abortController?.abort()
+  // 断开运行时会话状态，避免旧运行的气泡/步骤显示到切换后的会话上
+  pendingUserTurn.value = null
+  runVisible.value = false
+  runSteps.value = []
 }
 
 function settleMemoryToolApproval(decision: MemoryToolApprovalDecision) {

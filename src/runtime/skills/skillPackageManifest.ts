@@ -14,9 +14,16 @@ export interface SkillPackageManifest {
 const QUOTED_PACKAGE_PATH = /[`'"]((?:references|scripts|assets|agents|eval-viewer)\/[^`'"\r\n]+)[`'"]/gmu
 const MARKDOWN_PACKAGE_PATH = /\]\(((?:references|scripts|assets|agents|eval-viewer)\/[^)\r\n]+)\)/gmu
 const PLAIN_PACKAGE_PATH = /(?:^|[\s(\[])((?:references|scripts|assets|agents|eval-viewer)\/[^\s`'"),\]:；，。]+)/gmu
+// 文档里的示例/占位写法（references/{相术类型}.md、scripts/<name>.py）不是真实依赖
+const PLACEHOLDER_PACKAGE_PATH = /[<>{}*$]/
 
 export function normalizeSkillPackagePath(value: string): string {
-  const path = String(value || '').trim().replace(/\\/g, '/').replace(/^\.\//, '')
+  const path = String(value || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '')
+    // 句末标点不是路径的一部分（`use assets/template.docx.` 曾被判成缺失依赖）
+    .replace(/[.,;:!?]+$/, '')
   if (!path || path.startsWith('/') || /^[A-Za-z]:\//.test(path) || path.includes('\0') || path.split('/').some(part => !part || part === '.' || part === '..')) return ''
   return path
 }
@@ -42,7 +49,7 @@ export function extractReferencedSkillPackagePaths(skillMd: string): string[] {
   for (const pattern of [QUOTED_PACKAGE_PATH, MARKDOWN_PACKAGE_PATH, PLAIN_PACKAGE_PATH]) {
     for (const match of content.matchAll(pattern)) {
       const normalized = normalizeSkillPackagePath(match[1] || '')
-      if (normalized) paths.add(normalized)
+      if (normalized && !PLACEHOLDER_PACKAGE_PATH.test(normalized)) paths.add(normalized)
     }
   }
   return [...paths].sort()

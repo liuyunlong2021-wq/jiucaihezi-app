@@ -3,7 +3,7 @@ import { webProjectTextRevision, type createWebProjectFiles } from '@/utils/webP
 import {
   boundedInteger,
   createCreativeSkillSession,
-  linesPage,
+  readTextPage,
   parseCreativeToolArguments,
   parseTextBatchFiles,
   CREATIVE_PROJECT_TOOL_DEFINITIONS,
@@ -38,7 +38,7 @@ function renderWebSkillResource(resource: WebSkillResource, args: Record<string,
       }],
     }
   }
-  if (typeof resource.text === 'string') return { content: linesPage(resource.text, args.offset, args.limit) }
+  if (typeof resource.text === 'string') return { content: readTextPage(resource.text, args.offset, args.limit) }
   return {
     content: [
       `Skill binary resource: ${resource.path}`,
@@ -49,8 +49,9 @@ function renderWebSkillResource(resource: WebSkillResource, args: Record<string,
 }
 
 // `terminal` is Desktop-only; never advertise an unavailable tool to Web models.
+// `copy` is Desktop-only too: Web projects live in browser storage with no project-external tree.
 export const WEB_PROJECT_TOOL_DEFINITIONS = CREATIVE_PROJECT_TOOL_DEFINITIONS.filter(
-  tool => !['terminal', 'skill'].includes(tool.function.name),
+  tool => !['terminal', 'skill', 'copy'].includes(tool.function.name),
 )
 
 export function buildWebProjectToolDefinitions() {
@@ -62,7 +63,7 @@ export function buildMemoryWebProjectToolDefinitions() {
     ...WEB_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
-  ].filter(tool => !['create_3d_scene', 'edit_3d_scene'].includes(tool.function.name))
+  ].filter(tool => !['create_3d_scene', 'edit_3d_scene', 'copy'].includes(tool.function.name))
   const coreToolNames = coreTools.map(tool => tool.function.name)
   return [...coreTools, ...getMcpServerBridgeToolDefinitions({ coreToolNames })]
 }
@@ -171,7 +172,7 @@ export function createWebProjectToolExecutor(input: {
           ],
         }
       }
-      return { content: linesPage(entry.content, args.offset, args.limit) }
+      return { content: readTextPage(entry.content, args.offset, args.limit) }
     }
 
     if (name === 'glob') {

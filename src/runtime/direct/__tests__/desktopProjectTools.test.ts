@@ -56,6 +56,10 @@ function fixtureInvoke(command: string, payload: any): Promise<any> {
   if (command === 'dev_delete_file') return Promise.resolve({ status: 'trashed' })
   if (command === 'dev_write_external_file') return Promise.resolve({ path, bytesWritten: payload.input.content.length })
   if (command === 'dev_replace_in_external_file') return Promise.resolve({ path, replacements: 1 })
+  if (command === 'dev_create_dir_external') return Promise.resolve(payload.input.path)
+  if (command === 'dev_move_external') return Promise.resolve(payload.input.destination)
+  if (command === 'dev_copy_external') return Promise.resolve(payload.input.destination)
+  if (command === 'dev_delete_external') return Promise.resolve({ status: 'trashed' })
   throw new Error(`unexpected command: ${command}`)
 }
 
@@ -125,7 +129,7 @@ test('creative tool definitions append connected MCP tools without changing core
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'skill_copy_asset', 'skill_run_script', 'mkdir', 'move', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'skill_copy_asset', 'skill_run_script', 'mkdir', 'move', 'copy', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
@@ -243,8 +247,10 @@ test('desktop project tools use relative Tauri IPC with Web-compatible output', 
   const execute = createDesktopProjectToolExecutor({ projectDir: '/fixture', invoke: fixtureInvoke })
 
   assert.match((await execute(call('read', { path: '.' }))).content, /dir\twiki/)
-  assert.match((await execute(call('read', { path: 'wiki/hot.md' }))).content, /2: 林风/)
+  // 合同：整篇读取返回原文（无 `N: ` 前缀），模型的 old_text 才能命中磁盘字节
+  assert.equal((await execute(call('read', { path: 'wiki/hot.md' }))).content, '# 热缓存\n林风')
   assert.match((await execute(call('read', { path: 'wiki/hot.md', offset: 2, limit: 1 }))).content, /lines 2-2 of 2; eof=true/)
+  assert.match((await execute(call('read', { path: 'wiki/hot.md', offset: 2, limit: 1 }))).content, /^\[lines[^\n]*\n林风$/)
   assert.deepEqual((await execute(call('read', { path: 'media/ref.png' }))).followupMessages, [{
     role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,aW1n' } }],
   }])
@@ -529,6 +535,18 @@ test('desktop project tools use external IPC for absolute file paths', async () 
   assert.match((await execute(call('grep', { pattern: '林风', path: '/tmp' }))).content, /\/tmp\/notes.txt: Line 2: 林风/)
   await execute(call('write', { path: '/tmp/output/result.txt', content: '完成' }))
   await execute(call('edit', { path: '/tmp/notes.txt', oldString: '林风', newString: '陆川' }))
+  // 合同：项目外的建目录/移动/删除与读写同权限
+  assert.match((await execute(call('mkdir', { path: '/tmp/output/子目录' }))).content, /已创建文件夹: \/tmp\/output\/子目录/)
+  assert.match((await execute(call('move', { path: '/tmp/output/result.txt', destination: '/tmp/output/改名.txt' }))).content, /已移动/)
+  // 复制整棵目录：直接走 dev_copy_external，不让模型逐个读出来重写
+  assert.match((await execute(call('copy', { path: '/Users/test/.agents/skills/human-physiognomy', destination: '/Users/test/.agents/skills/jc-xiangshu' }))).content, /已复制: \/Users\/test\/\.agents\/skills\/human-physiognomy -> \/Users\/test\/\.agents\/skills\/jc-xiangshu/)
+  assert.match((await execute(call('delete', { path: '/tmp/output/改名.txt' }))).content, /已移入废纸篓/)
+
+  const seen = () => JSON.stringify(calls.map(entry => [entry.command, entry.payload?.input]))
+  assert.ok(calls.some(call => call.command === 'dev_create_dir_external' && call.payload.input.path === '/tmp/output/子目录'), seen())
+  assert.ok(calls.some(call => call.command === 'dev_move_external' && call.payload.input.destination === '/tmp/output/改名.txt'), seen())
+  assert.ok(calls.some(call => call.command === 'dev_copy_external' && call.payload.input.source === '/Users/test/.agents/skills/human-physiognomy' && call.payload.input.destination === '/Users/test/.agents/skills/jc-xiangshu'), seen())
+  assert.ok(calls.some(call => call.command === 'dev_delete_external' && call.payload.input.path === '/tmp/output/改名.txt'), seen())
 
   assert.ok(calls.some(call => call.command === 'dev_list_external_files'))
   assert.ok(calls.some(call => call.command === 'dev_write_external_file' && call.payload.input.path === '/tmp/output/result.txt'))

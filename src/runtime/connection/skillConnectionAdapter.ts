@@ -153,7 +153,7 @@ const SKILL_CREATOR_RUNTIME_APPENDIX = `
 ---
 ## 韭菜盒子运行时覆盖（优先于上文）
 
-当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill、subagent 或 /Users/... 外部路径。
+当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill 或 subagent；读写项目外绝对路径时，是否放行由系统运行时判定（用户消息里给过该路径才可用，本会话内持续有效）；Skill 不得假设或代为决定权限。
 Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。
 官方 Python 脚本通过韭菜盒子已接入的受限脚本执行能力运行；Web/Mobile 不伪造本地脚本执行结果。
 
@@ -162,7 +162,7 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 你可以使用生命周期工具完成读取、校验、测试、评审、反馈保存、改进、打包和安装准备。测试后用 skill_creator_submit_eval_feedback 保存用户逐项意见；下一轮用 skill_creator_load_eval_feedback 读取上一轮反馈。
 
 ### 步骤 1：了解需求
-新建 Skill 时了解它做什么、什么场景触发、输出什么格式。修改现有 Skill 时必须先调用 skill_creator_load_installed_skill 读取「我的 Skill」中的真实 SKILL.md；不得使用 Terminal、项目文件、Wiki 或任意绝对路径查找目标，也不得要求用户提供已安装 Skill 的路径。
+新建 Skill 时了解它做什么、什么场景触发、输出什么格式。修改已安装 Skill 时有两条合法入口：用户已给出 Skill 目录的绝对路径时，直接用 read、write、edit 读写该目录（含 references、scripts、assets），不要绕道其他写法；没有路径时，调用 skill_creator_load_installed_skill 按精确 ID 读取「我的 Skill」中的真实 SKILL.md，并请用户把 Skill 文件夹的绝对路径发过来。不得自造路径，也不得用 Terminal 兜底搜索。
 
 加载成功后必须沿用返回的 target_skill_id，并保留原 YAML name，除非用户明确要求另存为新 Skill。找不到时直接说明该 Skill 未安装或未启用；只读 Skill 应提示用户先定制到「我的 Skill」。
 

@@ -3,10 +3,10 @@ import {
   boundedInteger,
   createCreativeSkillSession,
   globMatcher,
-  linesPage,
   normalizeCreativeProjectPath,
   parseCreativeToolArguments,
   parseTextBatchFiles,
+  readTextPage,
   resolveCreativeProjectPath,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
@@ -106,7 +106,7 @@ function renderSkillResource(resource: LocalSkillResource, args: Record<string, 
       followupMessages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:${resource.mimeType};base64,${resource.base64}` } }] }],
     }
   }
-  if (typeof resource.text === 'string') return { content: linesPage(resource.text, args.offset, args.limit) }
+    if (typeof resource.text === 'string') return { content: readTextPage(resource.text, args.offset, args.limit) }
   return { content: [`Skill binary resource: ${resource.path}`, `MIME: ${resource.mimeType}`, `Size: ${resource.size} bytes`].join('\n') }
 }
 
@@ -268,7 +268,7 @@ export function createDesktopProjectToolExecutor(input: {
         ].join('\n'),
       }
     }
-    return { content: linesPage(file.content, args.offset, args.limit) }
+    return { content: readTextPage(file.content, args.offset, args.limit) }
   }
 
   return async (call, signal): Promise<DirectToolResult> => {
@@ -555,7 +555,10 @@ export function createDesktopProjectToolExecutor(input: {
 
     if (name === 'mkdir') {
       const { path, external } = resolveCreativeProjectPath(String(args.path), requireProject())
-      if (external) throw new Error('文件夹必须位于当前项目内')
+      if (external) {
+        const created = await invoke('dev_create_dir_external', { path })
+        return { content: `已创建文件夹: ${String(created || path)}` }
+      }
       await invoke('dev_create_dir', { root: requireProject(), relativePath: path, content: '' })
       return { content: `已创建文件夹: ${path}` }
     }
@@ -563,7 +566,15 @@ export function createDesktopProjectToolExecutor(input: {
     if (name === 'move') {
       const source = resolveCreativeProjectPath(String(args.path), requireProject())
       const target = resolveCreativeProjectPath(String(args.destination), requireProject())
-      if (source.external || target.external) throw new Error('移动路径必须位于当前项目内')
+      if (source.external || target.external) {
+        if (!source.external || !target.external)
+          throw new Error('项目内与项目外之间不支持移动；请给出两端同在项目外的绝对路径。')
+        const moved = await invoke('dev_move_external', {
+          source: source.path,
+          destination: target.path,
+        })
+        return { content: `已移动: ${source.path} -> ${String(moved || target.path)}` }
+      }
       const path = source.path
       const destination = target.path
       const moved = await invoke('dev_rename_file', {
@@ -574,9 +585,29 @@ export function createDesktopProjectToolExecutor(input: {
       return { content: `已移动: ${path} -> ${String(moved || destination)}` }
     }
 
+    if (name === 'copy') {
+      const source = resolveCreativeProjectPath(String(args.path), requireProject())
+      const target = resolveCreativeProjectPath(String(args.destination), requireProject())
+      if (!source.external || !target.external)
+        throw new Error('copy 只用于项目外路径；项目内复制请用 read + write，或直接用终端。')
+      const copied = await invoke('dev_copy_external', {
+        source: source.path,
+        destination: target.path,
+      })
+      return { content: `已复制: ${source.path} -> ${String(copied || target.path)}` }
+    }
+
     if (name === 'delete') {
       const resolved = resolveCreativeProjectPath(String(args.path), requireProject())
-      if (resolved.external) throw new Error('删除路径必须位于当前项目内')
+      if (resolved.external) {
+        const result = await invoke('dev_delete_external', { path: resolved.path })
+        return {
+          content:
+            result.status === 'missing'
+              ? `文件不存在，未删除: ${resolved.path}`
+              : `已移入废纸篓: ${resolved.path}`,
+        }
+      }
       const path = resolved.path
       const result = await invoke('dev_delete_file', { root: requireProject(), relativePath: path })
       return {

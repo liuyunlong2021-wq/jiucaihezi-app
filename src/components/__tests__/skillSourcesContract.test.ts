@@ -33,7 +33,13 @@ test('Desktop keeps the bundled list while Web exposes only user-installed Skill
   assert.match(webPanel, /openCreate\(/)
   assert.match(webPanel, /openEdit\(skill: SkillConfig\)/)
   assert.match(webPanel, /emitEvent\('skill-creator-edit'/)
-  assert.match(webPanel, /\.agents\/skills\/\$\{skill\.id\}\/SKILL\.md/)
+  // 文件能力合同：中央 Skill 在项目外，预填必须是绝对目录，不能用项目内相对路径
+  assert.match(webPanel, /skillPath: skill\.packagePath \|\| ''/)
+  // 新建入口与修改对称：预填中央 Skill 根目录的绝对路径，模型才能直接落盘
+  assert.match(webPanel, /emitEvent\('skill-creator-create', \{ skillsRoot: centralSkillsRoot\.value \}\)/)
+  assert.match(webPanel, /@click="requestSkillCreate"/)
+  assert.match(webPanel, /store\.getCustomSkills\(\)\.find\(skill => \/\^\\\/\/\.test\(String\(skill\.packagePath \|\| ''\)\)\)/)
+  assert.doesNotMatch(webPanel, /\.agents\/skills\/\$\{skill\.id\}\/SKILL\.md/)
   assert.match(webPanel, /修改<\/button>/)
   assert.match(webPanel, /await store\.createAgent\(skill\)/)
   assert.match(webPanel, /store\.updateSkill\(editingSkill\.value\.id, skill\)/)

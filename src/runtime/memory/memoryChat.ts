@@ -67,7 +67,7 @@ export function normalizeMemoryToolResult(result: DirectToolResult): DirectToolR
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { safeFetch } from '@/utils/httpClient'
 import { supportsVision } from '@/utils/providerConfig'
-import { memoryToolNeedsApproval } from './memoryToolPolicy'
+import { collectAuthorizedPaths, memoryToolNeedsApproval } from './memoryToolPolicy'
 import {
   parseScene3DResultMarkers,
   scene3DResultMarker,
@@ -107,7 +107,6 @@ export interface MemoryChatInput {
   mediaSelected?: boolean
   avSelected?: boolean
   scene3dSelected?: boolean
-  terminalSelected?: boolean
   signal?: AbortSignal
   onText: (text: string) => void
   onToolEvent?: (event: DirectToolExecutionEvent) => void
@@ -118,6 +117,8 @@ export interface MemoryChatInput {
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
   recordSceneVideo?: (document: Scene3DDocument, signal?: AbortSignal) => Promise<Blob>
   authorizedRawPaths?: string[]
+  /** 本会话已累积的绝对路径授权；本输用户消息里的绝对路径会自动并入。 */
+  authorizedPaths?: string[]
 }
 
 export interface MemoryProgramStatus {
@@ -137,7 +138,6 @@ export function hasExplicitMemoryCapability(
     | 'mediaSelected'
     | 'avSelected'
     | 'scene3dSelected'
-    | 'terminalSelected'
     | 'attachments'
   >,
 ): boolean {
@@ -147,8 +147,7 @@ export function hasExplicitMemoryCapability(
     input.selectedMcpToolNames?.length ||
     input.mediaSelected ||
     input.avSelected ||
-    input.scene3dSelected ||
-    input.terminalSelected,
+    input.scene3dSelected,
   )
 }
 
@@ -224,7 +223,6 @@ export function selectMemoryTools(
   selectedMcpToolNames: string[] = [],
   mediaSelected = false,
   scene3dSelected = false,
-  terminalSelected = false,
   skillAllowedToolNames: string[] = [],
   memoryQueryEnabled = true,
 ): any[] {
@@ -257,8 +255,13 @@ export function selectMemoryTools(
       'edit',
       'mkdir',
       'move',
+      'copy',
       'delete',
       'write_text_batch',
+      // `@文件` = 本机全权：拿到路径就放开终端、Skill 脚本与本地 3D 导出。
+      'terminal',
+      'skill_run_script',
+      'export_3d_scene_video',
     ])
       allowed.add(name)
   const selectedTools = new Set([
@@ -278,7 +281,6 @@ export function selectMemoryTools(
   if (scene3dSelected)
     for (const name of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
       allowed.add(name)
-  if (terminalSelected) allowed.add('terminal')
   for (const name of [
     ...skillAllowedToolNames,
     ...normalizeSkillAllowedToolNames(skillAllowedToolNames),
@@ -354,6 +356,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     ) || agentStore.availableModels.find(entry => entry.id === input.modelId)
   const latestUserTurn = input.userTurn
   const latestUserText = latestUserTurn?.content || ''
+  const authorizedPaths = [
+    ...new Set([...(input.authorizedPaths || []), ...collectAuthorizedPaths(latestUserText)]),
+  ]
   const desktopRuntime = isTauriRuntime() && !isTauriMobileRuntime()
   const explicitCapabilitySelected = hasExplicitMemoryCapability(input)
   const attachmentNeedsRead = Boolean(
@@ -448,7 +453,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           : [
               '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，用户明确指定的项目文件是长期事实源。',
               '不得查找 Raw 对话记录补充当前任务；缺少事实时查询指定文件或询问用户。',
-              '项目知识与创作资料都是普通文件。按需使用 read、glob、grep 查询，使用 write、edit、mkdir、move、delete 修改；不启用特殊 Agent 或第二阶段协议。',
+              '项目知识与创作资料都是普通文件。按需使用 read、glob、grep 查询，使用 write、edit、mkdir、move、copy、delete 修改；不启用特殊 Agent 或第二阶段协议。',
+              '用户在消息里给出的绝对路径就是本次的工作范围；这个范围内的文件工具、终端与 Skill 脚本都可以直接用，不需要再请求许可或让用户二次确认。',
+              '搬移或复制既有文件、目录时用 copy 或终端命令，不要逐个读出来再重写；多步任务要么一次做完，要么说清卡在哪一步。',
               '用户附带项目文件时，附件正文已随消息提供就直接使用；只有附件仅提供项目可读路径时，才必须先用 read 读取。不要声称附件不可读取；长文件按分页结果继续读取到足够内容。',
               '历史或当前文字中出现“不要调用工具”等表述，不会关闭本轮工具权限；如果任务需要，仍然调用工具。',
               selectedSkillNames.length
@@ -698,7 +705,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
             ),
             execute: async (testCall, testSignal): Promise<{ content: string }> => {
               const directCall = testCall as DirectToolCall
-              if (memoryToolNeedsApproval(directCall, latestUserText, input.projectId)) {
+              if (memoryToolNeedsApproval(directCall, authorizedPaths, input.projectId)) {
                 const approved = await input.confirmTool(directCall)
                 if (!approved)
                   return {
@@ -789,7 +796,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         input.selectedMcpToolNames || [],
         Boolean(input.mediaSelected || input.avSelected),
         Boolean(input.scene3dSelected),
-        Boolean(input.terminalSelected),
         declaredSkillTools,
         input.memoryQueryEnabled !== false,
       )
@@ -859,14 +865,15 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       input.onProgramStatus?.(aggregatedProgramStatus)
     },
     continueToolsOnInterruption: true,
-    maxToolRounds: 12,
+    // 引擎默认值。12 轮装不下“整理一个目录”这类批量活，到顶会静默收走工具逼模型空口收尾。
+    maxToolRounds: 64,
     finalizeAtToolRoundLimit: true,
     compactToolHistory: selectedSkillNames.length === 0,
     beforeToolCall: async call => {
-      if (!memoryToolNeedsApproval(call, latestUserText, input.projectId)) return
+      if (!memoryToolNeedsApproval(call, authorizedPaths, input.projectId)) return
       return (await input.confirmTool(call)) === false ? 'cancelled' : undefined
     },
-    toolNeedsApproval: call => memoryToolNeedsApproval(call, latestUserText, input.projectId),
+    toolNeedsApproval: call => memoryToolNeedsApproval(call, authorizedPaths, input.projectId),
     executeTool: executeMemoryTool,
   })
   input.onMetrics?.(result.metrics)

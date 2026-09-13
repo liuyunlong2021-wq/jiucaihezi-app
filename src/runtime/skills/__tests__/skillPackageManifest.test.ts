@@ -34,3 +34,19 @@ test('skill package reference validation finds explicit bundled paths', () => {
     'scripts/check.py',
   ])
 })
+
+test('skill package reference validation ignores placeholder examples', () => {
+  // 真实现场：human-physiognomy 的 SKILL.md 用 `references/{相术类型}.md` 举例，
+  // 曾把整个包判成不完整，导致 Skill Creator 无法读取。
+  const skillMd = [
+    '面相 → references/mianxiang.md',
+    '```yaml',
+    'file_path: "references/{相术类型}.md"',
+    '```',
+  ].join('\n')
+  assert.deepEqual(extractReferencedSkillPackagePaths(skillMd), ['references/mianxiang.md'])
+  assert.deepEqual(
+    validateSkillPackageReferences(skillMd, ['SKILL.md', 'references/mianxiang.md']),
+    [],
+  )
+})

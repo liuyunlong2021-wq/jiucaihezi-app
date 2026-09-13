@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { useAgentStore } from '@/stores/agentStore'
+import { useSkillsManageStore } from '@/stores/skillsManageStore'
 import { searchSkills } from '@/utils/skillSearch'
 import type { SkillConfig } from '@/types/skill'
 import { parseSkillMd } from '@/types/skill'
@@ -11,6 +12,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { emitEvent } from '@/utils/eventBus'
 
 const store = useAgentStore()
+const manage = useSkillsManageStore()
 const query = ref('')
 const showEditor = ref(false)
 const editingSkill = ref<SkillConfig | null>(null)
@@ -26,6 +28,15 @@ const visibleBundledSkills = computed(() => searchSkills(query.value, bundledSki
 
 onMounted(async () => {
   bundledSkills.value = await loadWebSkillCatalog().catch(() => [])
+  // 中央 Skill 根目录来自扫描结果；拿不到时从已装 Skill 的包路径推导（两者都是绝对路径）
+  await manage.loadAgents().catch(() => {})
+})
+
+const centralSkillsRoot = computed(() => {
+  const scanned = String(manage.centralRoot || '').trim().replace(/\/+$/, '')
+  if (scanned.startsWith('/') || /^[A-Za-z]:\//.test(scanned)) return scanned
+  const packaged = store.getCustomSkills().find(skill => /^\//.test(String(skill.packagePath || '')))
+  return String(packaged?.packagePath || '').replace(/\/[^/]+$/, '')
 })
 
 function openCreate() {
@@ -49,8 +60,14 @@ function openEdit(skill: SkillConfig) {
 function requestSkillEdit(skill: SkillConfig) {
   emitEvent('skill-creator-edit', {
     skillId: skill.id,
-    skillPath: `.agents/skills/${skill.id}/SKILL.md`,
+    // 文件能力合同：中央 Skill 在项目外，必须是绝对路径；目录授权才能连带改 references
+    skillPath: skill.packagePath || '',
   })
+}
+
+/** AI 新建：把中央 Skill 根目录的绝对路径交给对话，模型就能直接落盘 */
+function requestSkillCreate() {
+  emitEvent('skill-creator-create', { skillsRoot: centralSkillsRoot.value })
 }
 
 function closeEditor() {
@@ -143,6 +160,7 @@ async function openLocalDirectory() {
     <header class="wsp-head">
       <strong>Skill 仓库</strong>
       <div class="wsp-head-actions">
+        <button class="wsp-create" type="button" @click="requestSkillCreate">AI 新建</button>
         <button class="wsp-create" type="button" @click="openCreate">自建</button>
         <button class="wsp-create" type="button" @click="openLocalDirectory">打开本地目录</button>
       </div>

@@ -1,5 +1,56 @@
 # Wiki 操作日志
 
+## [2026-09-13] 定稿 | 开关即全权：@Terminal 并入 @文件 + 零弹窗 + copy 工具
+
+- 触发：用户实测「AI 新建」失败——模型只写出 `references/guxiang.md`（46603 字节里的一份），没有 `SKILL.md`，其余 reference 缺失，并自称"临时草稿目录禁止创建"。排查确认权限侧是通的（文件真的写进去了），真凶是**工具缺口 + 轮次上限**。
+- 用户指出约束打架："既告诉它这个路径可以搞，又告诉它随便搞"。真正的不一致是**文件工具受路径边界管、终端完全不受管**。修法定为统一：文件工具保留路径前缀校验，终端按用户选择不做命令级扫描。
+- 拍板（用户四答）：终端越界**不管**；`copy` **做**；`maxToolRounds` **64**；Web **不做**。
+- 实施：`dev_copy_external`（复用 `skills::linker::copy_dir_all`，目标已存在拒绝、目标不得在来源内部）+ `copy` 工具定义/字段类型/执行分支；`@文件` 注入 10 项文件工具 + 终端 + Skill 脚本 + 3D 导出；删 `@Terminal` 芯片与 `terminalSelected` 一路参数；删 `ALWAYS_APPROVED_TOOL_NAMES` 与 MCP 审批分支（判断函数只剩"项目外路径未授权就报错"）；`maxToolRounds` 12→64；系统提示补工作范围与"搬移用 copy、一次做完"。
+- 9 个能力模块盘点的结论：`git`/代码搜索/测试构建/Issue 都是 shell 命令的别名，放开终端即得；只有 Web 与 Subagent 是真新能力——Web 是用户 2026-08-07 自己砍掉的（有测试锁着），Subagent 需改引擎且当前场景串行，均不做。
+- 验证：focused `1330/1330`、Rust `412/412`（新增 `external_copy_duplicates_a_tree_without_touching_the_source`）、`vue-tsc -b` 与 `lint` 通过。
+- **真实 Desktop 验证通过（2026-09-13 14:22）**：一条消息 `Skill 目录：/Users/by3/.agents/skills 你直接帮我执行` 建出 `jc-xiangshu-character`，4 个 reference 与原目录 **md5 全同**（逐字节真复制），`SKILL.md` 从 255 行改写为 103 行（定位改造，非丢内容），芯片区 `@Terminal` 已消失，全程无弹窗；上轮“只写 1/5 个文件 + 空口收尾”未再出现。执行方式为 Terminal（目标目录已有上轮残留，`copy` 的“目标已存在即拒”不适用于增量补齐）。
+- 文档：[[开发/记忆工作台文件能力合同与TDD-2026-09-13]] 的 §1、§2（改 10 条）、新增 §2.1 能力划分 / §2.2 明确不做 / §8.3 二次定稿决策 / **§9.1 真实 Desktop 验证证据**、§6 非目标、§6.1 落地位置、§6.2 验证、§9 验收清单全部同步；[[hot]] 同步。
+
+## [2026-09-13] 补充 | 「新建 Skill」补 AI 入口（对齐「修改」）
+
+- 根因：`@文件` 授权合同只覆盖了「修改」路径，用户新建 Skill 时没有任何入口替他给出绝对路径，模型只能自己猜中央根目录 → 授权失败后退化成输出 `mkdir`/`cp` 手工命令，Skill 不落盘。
+- 修复：`WebSkillPanel.vue` 工具栏新增「AI 新建」（`centralSkillsRoot` 取扫描到的 `global_skills_dir`，取不到时回退到已装 Skill 包路径的父目录），点击 `emitEvent('skill-creator-create', { skillsRoot })`；`MemoryWorkbench.vue` 新增 `requestSkillCreatorCreate`，选上 `skill-creator`、打开 `@文件`、预填 `请新建一个 Skill：/ Skill 根目录：/ 新建要求：`。与「修改」完全对称；新建时 Skill ID 未定，所以给的是根目录（授权粒度是路径前缀，建子目录即已授权）。
+- 只做 B，跳过 A（把合同硬约束塞进 Skill 附录）。
+- 验证：focused `1330/1330`、Rust `411/411`、`vue-tsc -b` 与 `lint` 通过；真实 Desktop 手工验收未做（新增 §9 第 7 条）。
+
+## [2026-09-13] 定稿 | @文件 合同按用户总原则收尾（删备份、补项目外三命令）
+
+- 用户总原则：**点 `@文件` + 在消息里给出路径 = 该范围内不设额外限制**，路径由用户手动给，风险自担。据此定案：
+  - **备份功能取消**：删除 Rust `dev_backup_external_file`、`prune_external_backups`、JS 的 `backupBeforeExternalWrite` 及其调用、Tauri 权限项、Rust 测试与文档条款。
+  - **项目外建目录/移动/删除补齐**：新增 `dev_create_dir_external` / `dev_move_external`（拒绝覆盖已有目标）/ `dev_delete_external`（走系统废纸篓），工具层 `mkdir`/`move`/`delete` 增加 external 分支。
+  - **符号链接逃逸不修**、**`wiki-memory` 与 `allowed-tools: file` 一行不动**、**不加授权范围 UI 回显**。
+- 合同文档 §2 条款、§6.1 落地位置、§6.2 验证结果、§8（改为「审计结论与决策记录」）、§9 手工清单已同步。
+- 验证：focused `1327/1327`、Rust `411/411`、`vue-tsc -b` 与 `lint` 通过；真实 Desktop 手工验收仍未做。
+
+## [2026-09-13] 并发审计 | @文件 授权改动（4 路）+ 修复 8 项
+
+- 审计分工：安全绕过与授权尺度 / 回归风险 / 并发与状态一致性 / 合同逐条一致。
+- 🔴 已修：① `isAuthorizedPath` 不做路径折叠，`/授权目录/../../etc/hosts` 会被放行（Rust 侧 `canonicalize` 会真落到 `/etc`）——现改为前缀比较前折叠 `.`/`..`；② 备份失败被吞成文案后仍继续覆盖写——现改为中止写入。
+- 🟡 已修：授权抽取漏授权（`路径=/绝对路径`、行尾 `.`、中文紧贴）；「编辑并重新发送」后已截断消息的授权仍生效，改为按保留轮次重算；删除运行中会话不 `stop()`；切项目在创作画布保存失败早退时残留授权集；`stop()` 未清 pendingTurn/run 状态；`creativeToolContract.ts` 7 处工具描述仍写“需用户逐次审批”（`delete` 那句是事实错误）。
+- 🟡 未修待决策：符号链接逃逸（TS 字面前缀挡不住软链，彻底修需把授权根下传 Rust 复验）；`wiki-memory` 声明 `allowed-tools: file` 即拿到 9 件套（不点 `@文件` 也能写，测试已锁该行为，需在“保留 Wiki 写作”与“合同第 1/9 条”之间拍板）；项目外 `mkdir`/`move`/`delete` 未实现（合同已按现状改写）；粘贴文本里的绝对路径会成为授权且 UI 不回显范围；Rust 备份目录同秒撞名为 `check-then-use`（当前单窗口串行不可达，已标 ceiling）。
+- 验证：focused `1327/1327`、Rust `411/411`、`vue-tsc -b` 与 `lint` 通过；真实 Desktop 手工验收仍未做。
+- 文档：[[开发/记忆工作台文件能力合同与TDD-2026-09-13]] 补 §8「已知缺口」并把超出实现的措辞改为与代码一致；[[hot]] 同步。
+
+## [2026-09-13] 实施完成 | 文件能力合同：@文件 + 绝对路径 = 零弹窗读写
+
+- 根因：Skill Creator 读不到已安装 Skill 的 `references/`，用户判定属**文件规则**问题。旧实现把项目外路径限制为“逐文件精确匹配 + 必须出现在本轮消息 + 写入仍需审批”，且 Skill 层（`skillConnectionAdapter` 附录）越权明文禁止使用绝对路径。
+- 修复：`memoryToolPolicy` 改为**路径前缀授权 + 会话内累积 + 授权范围内零弹窗**，未授权路径硬失败并提示用户补路径；`memoryChat`/`MemoryWorkbench` 接入会话级授权集；`read` 改回原文（`readTextPage`），行号不再混进可编辑内容；「我的 Skill → 修改」改为预填 Skill 目录绝对路径并自动打开 `@skill-creator` + `@文件`；删除 Skill 层越权条款；新增 `dev_backup_external_file`，覆盖项目外文件前把原件备份到项目文件树 `.raw/文件备份/<时间戳>/`；Skill 包引用校验忽略占位示例与句末标点。
+- 验证：focused `1325/1325`、Rust `411/411`、`vue-tsc -b` 与 `lint` 通过（新增：前缀授权、占位引用、备份路径三组回归）。**未验证**：真实 Desktop 手工点击验收（6 条清单见文档）。
+- 文档：新增 [[开发/记忆工作台文件能力合同与TDD-2026-09-13]]（合同 9 条 + P1–P4 TDD）；[[来源索引]] 增行；[[hot]] 更新；本合同替代 [[开发/通用记忆工作台模型主导工具与审批SDD]] 中“项目外路径必须在当轮消息出现且写入需审批”的旧条款。
+
+## [2026-09-12] 生产验证成功 | 菠萝参考生适配器改为原样透传
+
+- 现象：适配器自己下载 Worker 托管的临时素材再转存菠萝 OSS，先后产生 `RuntimeError: Attempted to send an sync request with an AsyncClient instance` 与 `Reference image from api.jiucaihezi.studio timed out after 60s`。审计 `gateway/src/index.js` 确认素材存在 Cloudflare Worker 的 KV、由 `/media/creation/<token>` 公共读，`http://new-api:3000/media/creation/...` 是 404，**没有内网捷径**，上一轮的内网改写方案被推翻。
+- 修复：按 MiniMax 链路已验证的 lumenx 范式改回**原样透传** —— App 已通过 `/api/creations/uploads` 换成公网 URL，适配器直接把它装进 `ref_image_N` / `ref_audio_N`。删除 STS 申请、OSS V1 签名 PUT、素材下载转存、大小上限、扩展名推导及 `ASSET_FETCH_ORIGIN` / `ASSET_INTERNAL_BASE` / `REFERENCE_TIMEOUT_SECONDS` 三个环境变量，`main.py` 从 340+ 行降到 287 行，一次创建只发一次上游请求。保留创建接口先返回本地任务 ID（180 秒超时的修复）与 `/content` 代理。
+- 证据：提交 `78ae5eb9` 部署到 `/opt/boluo-minimax-adapter` 后，两个图音参考模型均真实出片成功 —— 增强版 `minimax_h3_zm_u24`（面板回执 2026-09-12 19:59:39，成片 `.raw/jc-media/视频/男人惊讶_ymr9j1.mp4`）与基础版 `minimax_h3_image_audio_to_video_v2_15s`（用户确认）。这同时否掉了透传方案唯一的不确定点：**菠萝服务器能直接取到我们 Worker 上的临时素材 URL**，担心的 Cloudflare 拦截没有发生。
+- 未验证：Worker KV `expirationTtl = 15 分钟` 的排队越界现场、上游 4xx/5xx 与超时重试在生产下的表现、`/content` 的 `Range` 续传；上游首尾帧与纯文生两个模型仍未接入。
+- 文档同步：[[运维/菠萝MiniMaxapi]] §9 的「尚未验证」段改写为已验事实加剩余边界；[[来源索引]] 增补证据行；[[运维/服务器运维]] 适配器清单补生产出片状态；[[hot]] 更新。
+
 ## [2026-09-07] 生产运维完成 | 磁盘清理、输出过期与 AnyDoc 归一
 
 - 回收 Docker BuildKit 缓存 `20.53 GB`，清理确认无用的旧日志、历史更新包和过期输出；根盘最终已用 `25 GB`、可用 `41 GB`、使用率 `38%`。不删除运行容器、生产数据卷、数据库或配置。
