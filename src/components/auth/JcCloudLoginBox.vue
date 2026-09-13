@@ -236,12 +236,12 @@ function closeConfigDialog() {
       </button>
     </div>
 
-    <div v-if="!accountOnly && loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
+    <div v-if="loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
       <strong>已登录，可直接使用</strong>
       <button class="jc-login-inline" @click="setAdvancedOpen(true)">高级：使用自己的 API Key</button>
     </div>
 
-    <div v-else-if="!accountOnly">
+    <div v-else>
       <label class="jc-login-label">API Key</label>
       <div class="jc-login-key-row">
         <input
@@ -279,7 +279,7 @@ function closeConfigDialog() {
       </button>
     </div>
 
-    <button v-if="!accountOnly" class="jc-login-save" :disabled="busy" @click="emit('save-key')">
+    <button class="jc-login-save" :disabled="busy" @click="emit('save-key')">
       <JcIcon :name="busy ? 'hourglass_top' : saved ? 'check' : 'save'" />
       {{ busy ? '诊断中' : saved ? '已保存' : '保存设置' }}
     </button>
