@@ -14,6 +14,10 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getItem, initDB, setItem } from '@/utils/idb'
 import {
+  CREATION_REFRESH_POLL_INTERVAL_MS,
+  CREATION_REFRESH_POLL_MAX_SEC,
+  CREATION_VIDEO_POLL_INTERVAL_MS,
+  CREATION_VIDEO_POLL_MAX_SEC,
   generateImage,
   generateVideo,
   generateAudio,
@@ -52,6 +56,13 @@ import type { CanvasTaskTarget } from '@/types/canvas'
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
 export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text'
 export type TaskSource = 'chat' | 'creation'
+
+/** 轮询窗口：视频按上游合同给足 30 分钟，其余保持原有的 10 分钟。 */
+function pollWindowFor(kind: 'image' | 'video' | 'audio' | 'text', isVideo: boolean): { maxSec: number; intervalMs: number } {
+  return kind === 'video' || isVideo
+    ? { maxSec: CREATION_VIDEO_POLL_MAX_SEC, intervalMs: CREATION_VIDEO_POLL_INTERVAL_MS }
+    : { maxSec: 600, intervalMs: 10000 }
+}
 
 function usesAuthenticatedVideoContent(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
   const values = [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
@@ -1022,8 +1033,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
 
     try {
+      const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
       const mediaUrl = await abortTaskExecution(
-        pollTask(task.pollUrl, task.pollKind, onProgress, 600, 10000, controller.signal, usesAuthenticatedVideoContent(task)),
+        pollTask(task.pollUrl, task.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, usesAuthenticatedVideoContent(task)),
         controller.signal,
       )
       if ((task as MediaTask).status === 'cancelled') {
@@ -1198,7 +1210,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     // 历史任务可能保存了错误的全局 /content 地址；无需鉴权内容端点的模型重新读取原始结果。
     if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
-      resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, 600, 10000, undefined, false)
+      const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
+      resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, false)
     }
 
     task.status = 'running'
@@ -1211,6 +1224,72 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     await persistTasksSafely('retry-media-persistence-start')
     await completeMediaTask(task, resultUrl, 'retry-media-persistence')
     return Boolean(task.projectPath || task.assetUri)
+  }
+
+  // ─── 刷新结果（不重新提交）───
+  // 任务已拿到上游 id，却因轮询上限或网络中断被判失败；这里只重新查询上游，
+  // 命中就恢复成 success，不产生新的提交和计费。
+  function canRefreshTaskResult(task: MediaTask): boolean {
+    return task.status === 'failed' && Boolean(task.pollUrl) && Boolean(task.pollKind)
+  }
+
+  async function refreshTaskResult(taskId: string): Promise<boolean> {
+    const task = tasks.value.find(item => item.id === taskId)
+    if (!task || !canRefreshTaskResult(task) || activeTaskIds.value.has(task.id)) return false
+    const controller = new AbortController()
+    taskAbortControllers.set(task.id, controller)
+    activeTaskIds.value.add(task.id)
+    task.status = 'running'
+    task.progress = 0
+    task.progressText = '查询上游结果...'
+    task.errorMsg = undefined
+    task.error = undefined
+    const onProgress = (elapsed: number, status: string) => {
+      if (task.status === 'cancelled') return
+      task.progressText = `查询结果 ${Math.round(elapsed)}s · ${status}`
+    }
+    try {
+      const mediaUrl = await abortTaskExecution(
+        pollTask(
+          task.pollUrl!, task.pollKind!, onProgress,
+          CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS,
+          controller.signal, usesAuthenticatedVideoContent(task),
+        ),
+        controller.signal,
+      )
+      if ((task as MediaTask).status === 'cancelled') {
+        markCanvasWriteUnwritten(task)
+        return false
+      }
+      if (task.pollKind === 'text' && mediaUrl) {
+        task.status = 'success'
+        task.progress = 100
+        task.progressText = '完成'
+        task.resultText = mediaUrl
+        task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task)
+        emitSettled(task)
+        await persistTasksSafely('refresh-text-success')
+        return true
+      }
+      await completeMediaTask(task, mediaUrl, 'refresh-result')
+      return true
+    } catch (e: any) {
+      if ((task as MediaTask).status === 'cancelled') return false
+      const previousMessage = task.errorMsg
+      task.status = 'failed'
+      task.progress = 0
+      task.progressText = '上游还没有结果，稍后再试'
+      task.errorMsg = previousMessage || (e.message || String(e)).slice(0, 200)
+      task.completedAt = Date.now()
+      markCanvasWriteUnwritten(task)
+      emitSettled(task)
+      await persistTasksSafely('refresh-result-miss')
+      return false
+    } finally {
+      activeTaskIds.value.delete(task.id)
+      if (taskAbortControllers.get(task.id) === controller) taskAbortControllers.delete(task.id)
+    }
   }
 
   async function addTaskResultToCanvas(taskId: string, target: CanvasTaskTarget): Promise<boolean> {
@@ -1405,7 +1484,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         return
       }
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
-        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, 600, 10000, controller.signal)
+        const pollWindow = pollWindowFor(result.pollKind, result.pollKind === 'video')
+        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal)
       }
       await completeMediaTask(task, resultUrl, 'execute-success')
       return
@@ -1452,9 +1532,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     runningCount,
     isTaskActive,
     canCancelTask,
+    canRefreshTaskResult,
     init,
     submitTask,
     cancelTask,
+    refreshTaskResult,
     retryMediaPersistence,
     addTaskResultToCanvas,
     clearFinished,

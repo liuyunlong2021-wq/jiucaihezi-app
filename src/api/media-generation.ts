@@ -90,6 +90,15 @@ export interface CreationTaskSubmitted {
 
 const CREATION_TASK_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CREATION_TASK_POLL_INTERVAL_MS || 5000)
 
+// ponytail: 视频上游（Dola）合同自述「创建到完成大概需要 15 分钟」，实测成功区间 7–15 分钟。
+// 原上限 600 秒会把还在生成的任务判成失败，任务随后成功也没有入口取回。
+export const CREATION_VIDEO_POLL_MAX_SEC = Number((import.meta as any).env?.VITE_CREATION_VIDEO_POLL_MAX_SEC || 1800)
+// Dola 限制同一来源 IP 每分钟最多查询 30 次；10 秒间隔下 5 个并发任务就触顶，放宽到 15 秒。
+export const CREATION_VIDEO_POLL_INTERVAL_MS = Number((import.meta as any).env?.VITE_CREATION_VIDEO_POLL_INTERVAL_MS || 15000)
+// 手动「刷新结果」只确认上游此刻有没有结果，不让用户再等一轮长轮询。
+export const CREATION_REFRESH_POLL_MAX_SEC = 60
+export const CREATION_REFRESH_POLL_INTERVAL_MS = 5000
+
 // ---- API Config ----
 
 // BUG-11 修复: 统一使用 resolveApiConfig，不再独立读 localStorage

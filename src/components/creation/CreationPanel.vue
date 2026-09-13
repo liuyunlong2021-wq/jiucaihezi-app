@@ -399,6 +399,21 @@ async function retryTaskPersistence(task: MediaTask) {
   }
 }
 
+/** 上游已受理但结果没取回的任务，可以只重查一次而不重新提交、不再计费。 */
+function canRefreshTaskResult(task: MediaTask): boolean {
+  return task.source === 'creation' && mediaTaskStore.canRefreshTaskResult(task)
+}
+
+async function refreshTaskResult(task: MediaTask) {
+  if (!canRefreshTaskResult(task)) return
+  try {
+    const refreshed = await mediaTaskStore.refreshTaskResult(task.id)
+    if (!refreshed) cpState.progressText = '上游还没有结果，稍后再试'
+  } catch (error) {
+    cpState.progressText = `刷新失败: ${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
 function taskPath(task: MediaTask): string {
   return task.projectPath || task.assetUri || task.resultUrl || ''
 }
@@ -4160,7 +4175,7 @@ const canSend = computed(
                 {{ taskPath(task) }}
               </div>
               <div
-                v-if="mediaTaskStore.canCancelTask(task.id) || task.status === 'success' || canPersistMediaResult(task) || canRegenerateTask(task)"
+                v-if="mediaTaskStore.canCancelTask(task.id) || task.status === 'success' || canPersistMediaResult(task) || canRegenerateTask(task) || canRefreshTaskResult(task)"
                 class="cp-task-actions"
               >
                 <button
@@ -4171,6 +4186,7 @@ const canSend = computed(
                 >
                   <JcIcon name="close" />
                 </button>
+                <button v-if="canRefreshTaskResult(task)" @click="refreshTaskResult(task)">刷新结果</button>
                 <button v-if="canRegenerateTask(task)" @click="regenerateTask(task)">重新生成</button>
                 <button v-if="canCopyTaskResultUrl(task)" @click="copyTaskResultUrl(task)">复制链接</button>
                 <button v-if="canDownloadDolaResult(task)" @click="downloadDolaResult(task)">下载链接</button>

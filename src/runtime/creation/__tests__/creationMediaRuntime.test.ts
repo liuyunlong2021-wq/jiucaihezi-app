@@ -1121,3 +1121,20 @@ test('不可用的非 RH 视频模型 contractStatus 不为 verified（通过 sp
     assert.equal(spec.contractStatus, 'broken', `${modelId} should be broken`)
   }
 })
+
+test('视频轮询窗口按上游合同延长，图片/音频保持原窗口', () => {
+  const api = readFileSync('src/api/media-generation.ts', 'utf8')
+  assert.match(api, /export const CREATION_VIDEO_POLL_MAX_SEC = [\s\S]{0,140}1800/)
+  assert.match(api, /export const CREATION_VIDEO_POLL_INTERVAL_MS = [\s\S]{0,140}15000/)
+
+  const store = readFileSync('src/stores/mediaTaskStore.ts', 'utf8')
+  const window = store.match(/function pollWindowFor\([\s\S]*?\n\}/)?.[0] || ''
+  assert.ok(window, 'pollWindowFor should be found')
+  assert.match(window, /kind === 'video' \|\| isVideo/)
+  assert.match(window, /maxSec: CREATION_VIDEO_POLL_MAX_SEC, intervalMs: CREATION_VIDEO_POLL_INTERVAL_MS/)
+  assert.match(window, /maxSec: 600, intervalMs: 10000/)
+
+  const runtime = readFileSync('src/runtime/creation/creationMediaRuntime.ts', 'utf8')
+  assert.match(runtime, /pollTask\([\s\S]{0,60}CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS/)
+  assert.doesNotMatch(runtime, /pollTask\(pollUrl, 'video', onProgress, 600, 10000/)
+})

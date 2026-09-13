@@ -395,7 +395,7 @@ test('mediaTaskStore polls async media results before persistence', () => {
 
   assert.match(
     source,
-    /if \(!resultUrl && result\?\.pollUrl && result\?\.pollKind\) \{\s+resultUrl = await pollTask\(result\.pollUrl, result\.pollKind, onProgress[\s\S]*?\s+\}\s+await completeMediaTask\(task, resultUrl, 'execute-success'\)/,
+    /if \(!resultUrl && result\?\.pollUrl && result\?\.pollKind\) \{\s+const pollWindow = pollWindowFor\(result\.pollKind, result\.pollKind === 'video'\)\s+resultUrl = await pollTask\(result\.pollUrl, result\.pollKind, onProgress[\s\S]*?\s+\}\s+await completeMediaTask\(task, resultUrl, 'execute-success'\)/,
   )
 })
 

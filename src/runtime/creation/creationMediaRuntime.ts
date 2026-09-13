@@ -1,4 +1,6 @@
 import {
+  CREATION_VIDEO_POLL_INTERVAL_MS,
+  CREATION_VIDEO_POLL_MAX_SEC,
   apiCall,
   apiCallBinary,
   apiCallMultipart,
@@ -492,7 +494,11 @@ async function executeDirectVideoRequest(
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
     const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v'
-    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal, useContentEndpoint)
+    mediaUrl = await pollTask(
+      pollUrl, 'video', onProgress,
+      CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS,
+      request.signal, useContentEndpoint,
+    )
   }
   if (!mediaUrl) throw new Error('视频生成失败')
   return { url: mediaUrl, type: 'video', taskId, pollUrl, pollKind: 'video' }
@@ -692,7 +698,11 @@ async function executeRunningHubVideoRequest(
   if (!mediaUrl && taskId) {
     const pollUrl = buildRunningHubPollUrl(taskId, request.plan.apiStyle === 'rh-aiapp' || isAiAppResponse(data))
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    mediaUrl = await pollTask(pollUrl, 'video', onProgress, 600, 10000, request.signal)
+    mediaUrl = await pollTask(
+      pollUrl, 'video', onProgress,
+      CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS,
+      request.signal,
+    )
     return { url: mediaUrl, type: request.plan.task === 'model3d' ? 'model3d' : 'video', taskId, pollUrl, pollKind: 'video' }
   }
   if (!mediaUrl) throw new Error('RunningHub 视频生成失败')
