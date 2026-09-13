@@ -1,11 +1,14 @@
 # 热缓存
 
-## [2026-09-13] 记忆工作台输入框两处修复：芯片提示残影 + @Skill 面板只列 Skill
+## [2026-09-13] MCP OAuth 打通 + 输入框三处修复
 
-- **鼠标划过芯片会出现无来由的灰影**：芯片排 `.memory-command-strip` 是 `overflow-x: auto` 的滚动容器，它会把 `overflow-y` 也计算成 `auto`；画在按钮上方 7px 的自绘 tooltip（`::after`）因此被裁掉本体，只剩 `box-shadow` 落回容器内 —— 表现为一条跟着鼠标走、宽度随提示文字变化的灰带。修法是**删掉自绘 tooltip，改用原生 `title`**（系统在溢出上下文之外渲染），净删 CSS。
-- **点 `@Skill` 弹出的却是工具列表**：空查询返回「7 个工具 + 前 5 个 Skill + MCP + 项目文件」，而面板只渲染前 12 项，前 7 项全是下面芯片排里已经有的工具入口。现在从芯片排「@Skill」进入时**只列 Skill**（40 项、可滚动、仍可打字过滤）；手打 `@` 仍给全套候选。
-- **Skill 排序**：`jc-new-user-guide`、`skill-creator`、`wiki-memory` 三个永远置顶；其余按用户选中次数降序（`localStorage['jc_skill_use_counts']`），同次数保持原顺序。比较器抽到 `src/utils/skillPickerOrder.ts` 并配真测试（置顶优先级、频率降序、同频稳定、不改原数组）。
-- 验证：focused 全绿、Rust `412/412`、`vue-tsc -b` 与 `lint` 通过；真实 Desktop 未单独验收（dev 下 HMR 即时可见）。
+- **MCP OAuth 一直连不上（两个根因，均已修）**：① OAuth `state` 存在 `sessionStorage`，而深链回调（`jiucaihezi://mcp/oauth/callback`）会落在**新的 WebView 会话甚至新实例**上，那里的 `sessionStorage` 是空的 → `state` 校验必然失败、授权码被丢弃；改为 `localStorage`。② 回调监听器注册在 **MCP 设置面板组件**上（`onMounted`/`onBeforeUnmount`），面板没打开、被切走或换了窗口就没人接收，回调被**静默丢弃**；已提到应用级（`main.ts` 的 `handleDeepLinkUrls` 直接处理并写 store）。
+- **真实环境已验证**：GitHub MCP 连接成功、工具可调用（云端 `gemini-3.8-flash`）。本地小模型（`qwen3.8:9b-q5`）报 `API 400: invalid message content type`，属本地模型对工具消息格式的兼容问题，待单独处理。
+- **鼠标划过芯片出现无来由灰影**：芯片排是 `overflow-x: auto` 的滚动容器，会把 `overflow-y` 也算成 `auto`；画在按钮上方 7px 的自绘 tooltip 被裁掉本体、只剩 `box-shadow` 落回容器内。先试过原生 `title`，但它**改不了颜色、位置跟鼠标走**，最终改成 **`position: fixed` 的自绘提示**（`chipTip` + `getBoundingClientRect`）——躲开裁剪，正下方居中、走主题色；顺带修了 disabled 按钮不派发 `pointerleave` 导致提示卡住。
+- **点 `@Skill` 弹出的却是工具列表**：空查询返回「7 个工具 + 前 5 个 Skill + MCP + 项目文件」，面板只渲染前 12 项。现在从芯片排进入**只列 Skill**（40 项、可滚动、可过滤）；手打 `@` 仍给全套候选。顺手删掉 `@Terminal` 合并时漏掉的 `mentionItems` Terminal 死入口（点了没反应）。
+- **Skill 排序**：`jc-new-user-guide`、`skill-creator`、`wiki-memory` 三个永远置顶；其余按选中次数降序（`localStorage['jc_skill_use_counts']`），同次数保持原顺序。比较器在 `src/utils/skillPickerOrder.ts`，配真测试（置顶优先级、频率降序、同频稳定、不改原数组）。
+- **排障知识**：`pnpm tauri build --debug` 出的 App **刻意连 `http://localhost:1420`**（`lib.rs` 的 `debug_assertions` 分支，注释写明"否则源码改动被旧 dist 盖住"），停了 Vite 就白屏；要独立可用的包必须走 release 构建。
+- 验证：focused 全绿、Rust `412/412`、`vue-tsc -b` 与 `lint` 通过。
 
 ## [2026-09-13 晚] 开关即全权：@Terminal 并入 @文件，全部审批取消
 

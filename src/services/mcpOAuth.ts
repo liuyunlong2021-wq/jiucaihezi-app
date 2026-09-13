@@ -12,8 +12,14 @@ interface McpOAuthIntent {
   codeVerifier?: string
 }
 
+/**
+ * 深链回调（jiucaihezi://mcp/oauth/callback）会落在新的 WebView 会话甚至新实例上，
+ * 那里的 sessionStorage 是空的，会让 state 校验必然失败 —— 表现为"授权跳转回来了但永远连不上"。
+ * localStorage 在同一 App 内跨会话持久共享，符合"授权从发起到回调"的真实生命周期。
+ * 15 分钟 TTL 和用后即删（saveTokens / 失败分支）负责清理。
+ */
 function defaultStorage(): Storage | undefined {
-  return globalThis.sessionStorage
+  return globalThis.localStorage
 }
 
 function randomState(): string {

@@ -9,8 +9,8 @@ import { registerCreationMcpBridge } from '@/runtime/creation/creationMcpBridge'
 import { useMcpStore } from '@/stores/mcpStore'
 import { initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newApiClient'
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
-import { consumeMcpOAuthCallbackUrl } from '@/services/mcpOAuth'
-import { restoreMcpServers } from '@/services/mcpClient'
+import { consumeMcpOAuthCallbackUrl, type McpOAuthCallback } from '@/services/mcpOAuth'
+import { completeMcpServerAuthorization, restoreMcpServers } from '@/services/mcpClient'
 import JcIcon from '@/components/icons/JcIcon.vue'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
@@ -122,7 +122,7 @@ async function handleDeepLinkUrls(urls: string[] | null | undefined) {
   for (const url of urls || []) {
     const mcpOAuthCallback = consumeMcpOAuthCallbackUrl({ href: url })
     if (mcpOAuthCallback) {
-      window.dispatchEvent(new CustomEvent('jc-mcp-oauth-callback', { detail: mcpOAuthCallback }))
+      await completeMcpOAuthCallback(mcpOAuthCallback)
       continue
     }
     const callbackKey = consumeApiKeyCallbackUrl({ href: url })
@@ -131,6 +131,33 @@ async function handleDeepLinkUrls(urls: string[] | null | undefined) {
     window.dispatchEvent(new CustomEvent('jc-api-key-callback', {
       detail: { apiKey: callbackKey },
     }))
+  }
+}
+
+/**
+ * MCP OAuth 回调必须在应用级处理。以前它挂在 MCP 设置面板组件上：
+ * 面板没打开、被切走，或者深链唤起的是另一个窗口时，回调就没人接收，授权码被静默丢弃。
+ * 状态写进 store，任何界面都能读到结果。
+ */
+async function completeMcpOAuthCallback(callback: McpOAuthCallback) {
+  const mcpStore = useMcpStore()
+  const name = mcpStore.servers.find(server => server.id === callback.serverId)?.name || callback.serverId
+  if ('error' in callback) {
+    const reason =
+      callback.error === 'access_denied'
+        ? '授权已取消。'
+        : `授权失败：${callback.errorDescription || callback.error}`
+    mcpStore.setServerStatus(callback.serverId, 'error', `${name} ${reason}`)
+    return
+  }
+  mcpStore.setServerStatus(callback.serverId, 'connecting')
+  try {
+    const tools = await completeMcpServerAuthorization(callback.serverId, callback.code)
+    mcpStore.setServerTools(callback.serverId, tools)
+    mcpStore.setServerStatus(callback.serverId, 'connected')
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    mcpStore.setServerStatus(callback.serverId, 'error', `${name} 授权失败：${message}`)
   }
 }
 

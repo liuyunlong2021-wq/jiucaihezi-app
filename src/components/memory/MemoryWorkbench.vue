@@ -349,14 +349,16 @@ type MemoryMentionOption =
   | { type: 'skill'; display: string; description: string; name: string }
 
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
+  // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
-    { type: 'tool', id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' },
+    ...(desktopOnlyRuntime
+      ? [{ type: 'tool' as const, id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' }]
+      : []),
     { type: 'tool', id: 'media', display: '图文', description: '创建文档、网页、图片和幻灯片', icon: 'image' },
     { type: 'tool', id: 'av', display: '影音', description: '生成图片、视频和音频', icon: 'movie' },
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
-    { type: 'tool', id: 'terminal', display: 'Terminal', description: '执行终端命令', icon: 'terminal' },
   ]
   const bundledSkills = await loadWebSkillCatalog().catch(() => [])
   const skillOptions = [
@@ -491,8 +493,8 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
   return '程序已返回真实执行回执'
 }
 const toolCommands = [
-  { id: 'skill', label: '@Skill', icon: 'psychology', description: '加载指定 Skill' },
-  { id: 'file', label: '@文件', icon: 'description', description: '读写文件、执行终端命令（本机全权）' },
+  { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
+  { id: 'file', label: '@文件', icon: 'description', description: '读写权限' },
   { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
@@ -501,6 +503,25 @@ const toolCommands = [
   ] : []),
 ]
 const primaryCommands = toolCommands
+
+// 芯片提示必须用 fixed 定位：芯片排在 `overflow-x: auto` 的滚动容器里，
+// 绝对定位的提示会被裁掉本体、只剩投影落回容器内（看起来像一条无来由的灰影）。
+const chipTip = ref<{ text: string; left: number; top: number } | null>(null)
+
+function showChipTip(event: Event, text: string) {
+  const rect = (event.currentTarget as HTMLElement | null)?.getBoundingClientRect()
+  if (!rect) return
+  chipTip.value = { text, left: rect.left + rect.width / 2, top: rect.bottom + 8 }
+}
+
+function hideChipTip() {
+  chipTip.value = null
+}
+
+// 发送中按钮会变成 disabled，disabled 按钮不派发 pointerleave，提示会卡在屏幕上。
+watch(sending, () => {
+  chipTip.value = null
+})
 
 onMounted(async () => {
   void checkSceneVideoExport()
@@ -2785,7 +2806,7 @@ function readDataUrl(file: File): Promise<string> {
             <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
             <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
             <div class="memory-command-strip" aria-label="常用指令">
-              <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" :title="command.description" @click="insertCommand(command)">
+              <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
             </div>
@@ -2794,6 +2815,12 @@ function readDataUrl(file: File): Promise<string> {
             <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
+        <div
+          v-if="chipTip"
+          class="memory-chip-tip"
+          role="tooltip"
+          :style="{ left: `${chipTip.left}px`, top: `${chipTip.top}px` }"
+        >{{ chipTip.text }}</div>
       </footer>
     </main>
 
@@ -3071,7 +3098,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-command-strip { display: flex; min-width: 0; max-width: calc(100% - 80px); flex: 0 1 auto; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .memory-command-strip::-webkit-scrollbar { display: none; }
 .memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-/* 提示文案走原生 title：这套芯片在 overflow-x: auto 的滚动容器里，自绘 tooltip 会被裁成一条阴影。 */
+/* 芯片提示用 fixed 定位，避开 `.memory-command-strip` 的 overflow 裁剪；颜色走主题。 */
+.memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 .memory-command-strip button:disabled { cursor: default; opacity: .45; }

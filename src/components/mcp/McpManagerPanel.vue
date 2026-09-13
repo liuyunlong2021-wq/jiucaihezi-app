@@ -1,13 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useMcpStore, type McpServerConfig } from '@/stores/mcpStore'
 import {
-  completeMcpServerAuthorization,
   connectMcpServer,
   disconnectMcpServer,
   McpAuthorizationRequiredError,
 } from '@/services/mcpClient'
-import type { McpOAuthCallback } from '@/services/mcpOAuth'
 import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
@@ -347,39 +345,6 @@ async function toggleServer(server: McpServerConfig) {
     connectingId.value = ''
   }
 }
-
-async function completeOAuthAuthorization(event: Event) {
-  const detail = (event as CustomEvent<McpOAuthCallback>).detail
-  const server = mcpStore.servers.find(item => item.id === detail?.serverId)
-  if (!server) return
-  if ('error' in detail) {
-    const reason =
-      detail.error === 'access_denied'
-        ? '授权已取消。'
-        : `授权失败：${detail.errorDescription || detail.error}`
-    mcpStore.setServerStatus(server.id, 'error', reason)
-    message.value = `${server.name} ${reason}`
-    return
-  }
-  connectingId.value = server.id
-  try {
-    const tools = await completeMcpServerAuthorization(server.id, detail.code)
-    mcpStore.setServerTools(server.id, tools)
-    mcpStore.setServerStatus(server.id, 'connected')
-    message.value = `${server.name} 已连接，发现 ${tools.length} 个外部工具。`
-  } catch (error) {
-    const errMsg = error instanceof Error ? error.message : String(error)
-    mcpStore.setServerStatus(server.id, 'error', errMsg)
-    message.value = `${server.name} 授权失败：${errMsg}`
-  } finally {
-    connectingId.value = ''
-  }
-}
-
-onMounted(() => window.addEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization))
-onBeforeUnmount(() =>
-  window.removeEventListener('jc-mcp-oauth-callback', completeOAuthAuthorization),
-)
 
 async function removeServer(server: McpServerConfig) {
   if (!(await confirmAction(`删除 MCP 扩展「${server.name}」？`))) return

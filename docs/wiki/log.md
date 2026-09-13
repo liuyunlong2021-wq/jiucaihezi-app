@@ -1,5 +1,16 @@
 # Wiki 操作日志
 
+## [2026-09-13] 修复 | MCP OAuth 打通（两处状态位置错误）+ 输入框三处修复
+
+- **症状**：点 GitHub「连接」→ 浏览器跳转 → 回调唤起 App → **永远连不上**；设置页状态停在「连接中」。
+- **根因一（`src/services/mcpOAuth.ts`）**：OAuth `state` 存在 `sessionStorage`。深链回调 `jiucaihezi://mcp/oauth/callback` 会落在**新的 WebView 会话甚至新实例**上，那里的 `sessionStorage` 是空的 → `consumeMcpOAuthCallbackUrl` 的 `intent.state !== state` 必然成立 → 授权码被丢弃并清空 intent。改为 `localStorage`（同一 App 内跨会话持久共享；15 分钟 TTL + 用后即删负责清理）。
+- **根因二（`src/components/mcp/McpManagerPanel.vue`）**：回调监听器注册在**组件**上（`onMounted`/`onBeforeUnmount`），只有 MCP 设置面板挂载时才接收。面板关闭、切走视图或深链唤起另一个窗口 → 回调**无人接收、静默丢弃**。已提到应用级：`main.ts` 的 `handleDeepLinkUrls` 直接调 `completeMcpOAuthCallback`，结果写进 store；组件只读状态。顺带清掉组件里的死 import（`completeMcpServerAuthorization`、`McpOAuthCallback`、`onMounted`、`onBeforeUnmount`）。
+- **真实环境验证**：GitHub MCP 连接成功并可用（云端 `gemini-3.8-flash` 调起 MCP 工具正常）。本地小模型 `qwen3.8:9b-q5` 报 `API 400: invalid message content type`，属本地模型对工具消息格式的兼容问题，**未修**，待单独处理。
+- **芯片提示改为 `position: fixed` 自绘**：原生 `title` 无法走主题色、无法固定在按钮正下方。`chipTip` 用 `getBoundingClientRect` 定位，绕开 `.memory-command-strip` 的 `overflow` 裁剪；并加 `watch(sending)` 防 disabled 按钮不派发 `pointerleave` 导致提示残留。
+- **`@Skill` 面板只列 Skill**：新增 `skillPickerOnly`（从芯片排进入为 true，`closeMention` 重置），列表放宽到 40 项；手打 `@` 保持全套候选。删掉 `@Terminal` 合并时漏掉的 `mentionItems` Terminal 死入口，并让 3D 只在桌面出现。
+- **排障记录**：`pnpm tauri build --debug` 的 App 会**强制连 `devUrl`（`http://localhost:1420`）**（`src-tauri/src/lib.rs` 的 `#[cfg(all(debug_assertions, not(mobile)))]` 分支），停掉 Vite 即白屏 —— 这是设计行为，要独立可用的包必须走 release 构建。另：本机 LaunchServices 里同时存在 debug/release/Xcode/Applications 四份「韭菜盒子」抢 `jiucaihezi:` scheme，唤起哪个不确定。
+- 验证：focused 全绿、Rust `412/412`、`vue-tsc -b` 与 `lint` 通过。
+
 ## [2026-09-13] 修复 | 芯片提示残影 + @Skill 面板只列 Skill 并排序
 
 - **残影根因**：`.memory-command-strip` 是 `overflow-x: auto` 的滚动容器，按 CSS 规范会把 `overflow-y` 计算成 `auto`；自绘 tooltip（`::after`，位于按钮上方 7px）被裁掉本体，只剩 `box-shadow` 落回容器内 → 用户看到一条跟着鼠标走、宽度随提示文字变化的灰带。已在真实 dev server 上用并排最小复现验证（`overflow-x: auto` 容器里 tooltip 完全消失，`overflow: visible` 里完整显示）。修法：删掉自绘 tooltip 与 `position: relative`，提示改用原生 `title`。
