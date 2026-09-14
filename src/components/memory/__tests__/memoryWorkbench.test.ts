@@ -1040,8 +1040,8 @@ test('3D scene editor clones plain scene data instead of Vue proxies', () => {
   assert.match(editor, /document = parseScene3DDocument\(value\)/)
   assert.match(editor, /sizeAttenuation: false/)
   assert.doesNotMatch(editor, /depthTest: false/)
-  assert.match(editor, /camera\('全景'/)
-  assert.match(editor, /camera\(`\$\{secondName\}近景`/)
+  assert.match(editor, /scenePeople\.slice\(0, PERSON_BUTTON_LIMIT\)/)
+  assert.match(editor, /function applyCloseShot\(index: number\)/)
   assert.match(editor, /person\.add\(body, head, leftArm, rightArm, leftLeg, rightLeg, direction\)/)
   assert.match(editor, /if \(pose === 'lying'\)/)
 })
@@ -1129,6 +1129,119 @@ test('3D scene preview sends edits with the current path and refreshes after com
   assert.match(workbench, /data-placeholder="直接说怎么修改当前场景"/)
   assert.match(workbench, /await refreshOpenScene\(current\.resource\.path\)/)
   assert.match(workbench, /class="memory-scene-composer"/)
+})
+
+test('3D scene editor keeps fine movement precision instead of teleporting one unit', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+
+  assert.match(editor, /const snapStep = ref\(0\.1\)/)
+  assert.match(editor, /const SNAP_STEPS = \[1, 0\.5, 0\.25, 0\.1\]/)
+  assert.match(editor, /transform\.setTranslationSnap\(document\.canvas\.snap \? snapStep\.value : null\)/)
+  assert.doesNotMatch(editor, /setTranslationSnap\(document\.canvas\.snap \? 1 : null\)/)
+  assert.match(editor, /v-model\.number="snapStep"/)
+  assert.match(editor, /function updateSelectedPosition\(axis: number, raw: string\)/)
+  assert.match(editor, /function nudgeSelection\(offset: \[number, number, number\]\)/)
+  assert.match(editor, /function handleNudgeKeys\(event: KeyboardEvent\)/)
+  assert.match(editor, /window\.addEventListener\('keydown', handleNudgeKeys\)/)
+  assert.match(editor, /window\.removeEventListener\('keydown', handleNudgeKeys\)/)
+  assert.match(editor, /class="scene3d-inspector-grid scene3d-position-grid"/)
+  assert.match(editor, /v-for="\(axis, index\) in \['x', 'y', 'z'\]"/)
+})
+
+test('3D scene editor frames what it captures and moves framing without moving the scene', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+
+  assert.match(editor, /function cropRect\(width: number, height: number\)/)
+  assert.match(editor, /const frameRect = computed\(\(\) => cropRect\(stageSize\.value\.width, stageSize\.value\.height\)\)/)
+  assert.match(editor, /const crop = cropRect\(width, height\)/)
+  assert.match(editor, /stageSize\.value = \{ width: canvas\.value\.clientWidth, height: canvas\.value\.clientHeight \}/)
+  assert.match(editor, /:style="\{ width: `\$\{frameRect\.width\}px`, height: `\$\{frameRect\.height\}px` \}"/)
+  assert.doesNotMatch(editor, /72vh/)
+  assert.doesNotMatch(editor, /aspect-ratio: var\(--scene-aspect\)/)
+  assert.match(editor, /function panCamera\(right: number, up: number\)/)
+  assert.match(editor, /function toggleFrameMode\(\)/)
+  assert.match(editor, /orbit\.mouseButtons = frameMode\.value/)
+  assert.match(editor, /function applyCloseShot\(index: number\)/)
+})
+
+test('3D scene editor keeps the live camera, the focal length and the canvas aspect stable', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+
+  assert.match(editor, /orbit\.addEventListener\('end', syncCameraState\)/)
+  assert.match(editor, /function syncCameraState\(\) \{\s*if \(!camera \|\| !orbit \|\| playing\.value \|\| manualRecording\.value\) return/)
+  assert.match(editor, /const position = tuple\(camera\.position\)/)
+  assert.match(editor, /if \(samePoint\(position, document\.camera\.position\) && samePoint\(target, document\.camera\.target\)\) return/)
+  assert.match(editor, /persist\(\{ history: false \}\)/)
+  assert.match(editor, /document\.camera = \{ \.\.\.structuredClone\(source\), aspect: document\.canvas\.aspect \}/)
+  assert.doesNotMatch(editor, /document\.canvas\.aspect = source\.aspect/)
+  assert.match(editor, /const FOCAL_STEPS = \[24, 35, 50, 85, 135\]/)
+  assert.match(editor, /function focalFov\(focal: number, aspect: number\)/)
+  assert.match(editor, /function cameraFov\(canvasRatio: number\)/)
+  assert.match(editor, /const HEAD_FILL_MEDIUM = 0\.2/)
+  assert.match(editor, /const PERSON_BUTTON_LIMIT = 6/)
+  assert.match(editor, /scenePeople\.slice\(0, PERSON_BUTTON_LIMIT\)/)
+  assert.match(editor, /function personForward\(person: Scene3DPersonShot\)/)
+  assert.match(editor, /const distance = shotDistance\(person\.scale, HEAD_FILL_MEDIUM\)/)
+  // 机位行的预设不能再依赖写死的世界坐标
+  assert.doesNotMatch(editor, /defaultCameras/)
+  assert.doesNotMatch(editor, /camera\('俯拍'/)
+  // 取景框必须和舞台边缘留出可见间距，否则边框会和面板边框粘在一起
+  assert.match(editor, /\.scene3d-stage \{ position: relative; min-height: 320px; overflow: hidden; padding: 8px; \}/)
+  assert.match(editor, /perspective\.fov = cameraFov\(perspective\.aspect\)/)
+  assert.match(editor, /perspective\.aspect = renderRatio; perspective\.fov = cameraFov\(renderRatio\)/)
+  assert.match(editor, /v-for="focal in FOCAL_STEPS"/)
+  assert.doesNotMatch(editor, /lensFov|setLens\(/)
+  assert.match(editor, /function setProjection\(projection: Scene3DCamera\['projection'\]\) \{\s*if \(document\.camera\.projection === projection\) return/)
+})
+
+test('3D scene editor marks camera points and records the move through the hidden recorder', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(editor, /const cameraPoints = computed\(\(\) => \{ renderRevision\.value; return cameraPointsFromDocument\(document\) \}\)/)
+  assert.match(editor, /document = applyCameraPoints\(document, points\)/)
+  assert.match(editor, /function markCameraPoint\(\)/)
+  assert.match(editor, /function removeCameraPoint\(index: number\)/)
+  assert.match(editor, /function updateCameraPoint\(index: number, patch: Partial<Scene3DCameraPoint>\)/)
+  assert.match(editor, /function useCameraPoint\(index: number\)/)
+  assert.match(editor, /function replaceCameraPoint\(\)/)
+  // 运镜必须交给隐藏录制器：可见编辑器的画布是舞台形状，直接录会带上取景框外的画面
+  assert.match(editor, /emit\('record', structuredClone\(document\), /)
+  assert.match(editor, /function requestCameraPathRecording\(\)/)
+  assert.match(editor, /<span>运镜<\/span>/)
+  assert.match(editor, /title="把当前机位打成一个点"/)
+  assert.match(editor, /watch\(playing, value => \{ if \(!value\) restoreLens\(\) \}\)/)
+  assert.match(editor, /applyAnimation\(currentTime\.value, false\)/)
+  assert.match(editor, /function cameraFovFor\(focal: number, canvasRatio: number\)/)
+  assert.match(workbench, /@record="recordScenePath"/)
+  assert.match(workbench, /async function recordScenePath\(document: Scene3DDocument, title: string\)/)
+  assert.match(workbench, /await saveSceneVideo\(await recordSceneVideo\(document\), title\)/)
+})
+
+test('3D scene editor hides the inspector with no selection and surfaces recording results', () => {
+  const editor = source('src/components/memory/Scene3DEditor.vue')
+
+  // 没选中对象时检视栏隐藏且不再占一列宽度
+  assert.match(editor, /<div class="scene3d-workspace" :class="\{ 'inspector-open': Boolean\(selectedEntry\) \}">/)
+  assert.match(editor, /\.scene3d-workspace \{ min-height: 0; display: grid; grid-template-columns: minmax\(0, 1fr\); \}/)
+  assert.match(editor, /\.scene3d-workspace\.inspector-open \{ grid-template-columns: minmax\(0, 1fr\) 260px; \}/)
+  assert.match(editor, /\.scene3d-workspace, \.scene3d-workspace\.inspector-open \{ grid-template-columns: minmax\(0, 1fr\); grid-template-rows:/)
+  // 录制/截图结果改成画面上可读的浮动提示（工具栏里会横向滚动被截断）
+  assert.match(editor, /function showNotice\(text: string\)/)
+  assert.match(editor, /function noticeTone\(text: string\)/)
+  assert.match(editor, /watch\(\(\) => props\.videoStatus, value => \{ if \(value\) showNotice\(value\) \}, \{ immediate: true \}\)/)
+  assert.match(editor, /watch\(recordingError, value => \{ if \(value\) showNotice\(value\) \}\)/)
+  assert.match(editor, /class="scene3d-notice"/)
+  assert.doesNotMatch(editor, /\{\{ videoStatus \}\}/)
+})
+
+test('memory chat dock keeps its rail only while a third column exists', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  // 曾经：对话框拖成窄条后关掉预览，主列变满宽但窄条仍铺满整列且内容被隐藏 → 只剩一片空白
+  assert.doesNotMatch(workbench, /chat-dock-compact \.memory-main > :not\(\.memory-chat-compact-bar\) \{ visibility: hidden/)
+  assert.match(workbench, /\.memory-workbench\.chat-dock-compact:is\(\.preview-open, \.creation-open\) \.memory-main > :not\(\.memory-chat-compact-bar\) \{ visibility: hidden; \}/)
+  assert.match(workbench, /v-if="chatDockMode === 'compact' && \(previewResource \|\| creationOpen\)"/)
 })
 
 test('Desktop starts the memory workbench without the legacy OpenCode workspace', () => {

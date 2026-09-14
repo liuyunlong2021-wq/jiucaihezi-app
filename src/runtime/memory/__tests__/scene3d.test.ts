@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { reactive } from 'vue'
 
-import { applyScene3DEdits, createScene3DDocument, evaluateScene3DAnimation, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
+import { applyCameraPoints, applyScene3DEdits, cameraPointsFromDocument, createScene3DDocument, evaluateScene3DAnimation, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
 
 test('scene3d normalizes reusable primitives, formations and cameras', () => {
   const scene = createScene3DDocument({
@@ -139,9 +139,64 @@ test('scene3d camera timeline supports hard cuts and continuous camera moves', (
     ],
   })
 
-  assert.deepEqual(evaluateScene3DAnimation(scene, 0).camera, { position: [10, 5, 8], target: [4, 1, 0] })
-  assert.deepEqual(evaluateScene3DAnimation(scene, 3).camera, { position: [8, 4, 6], target: [5, 1, 0] })
-  assert.deepEqual(evaluateScene3DAnimation(scene, 4).camera, { position: [6, 3, 4], target: [6, 1, 0] })
+  assert.deepEqual(evaluateScene3DAnimation(scene, 0).camera, { position: [10, 5, 8], target: [4, 1, 0], focal: 50 })
+  assert.deepEqual(evaluateScene3DAnimation(scene, 3).camera, { position: [8, 4, 6], target: [5, 1, 0], focal: 50 })
+  assert.deepEqual(evaluateScene3DAnimation(scene, 4).camera, { position: [6, 3, 4], target: [6, 1, 0], focal: 50 })
+})
+
+test('scene3d camera points round-trip through the timeline with hold, travel and focal', () => {
+  const points = [
+    { position: [0, 2, 6] as [number, number, number], target: [0, 1, 0] as [number, number, number], focal: 24, hold: 1, travel: 0 },
+    { position: [4, 2, 6] as [number, number, number], target: [4, 1, 0] as [number, number, number], focal: 50, hold: 0, travel: 3 },
+    { position: [4, 2, 2] as [number, number, number], target: [4, 1, 0] as [number, number, number], focal: 135, hold: 1, travel: 3 },
+  ]
+  const scene = applyCameraPoints(createScene3DDocument({ title: '运镜', objects: [] }), points)
+
+  assert.equal(scene.duration, 8)
+  assert.deepEqual(cameraPointsFromDocument(scene).map(point => [point.hold, point.travel, point.focal]), [[1, 0, 24], [0, 3, 50], [1, 3, 135]])
+  // 硬切到起点 → 停 1 秒 → 推 3 秒 → 停 1 秒
+  assert.deepEqual(evaluateScene3DAnimation(scene, 0).camera.position, [0, 2, 6])
+  assert.deepEqual(evaluateScene3DAnimation(scene, 1).camera.position, [0, 2, 6])
+  assert.deepEqual(evaluateScene3DAnimation(scene, 4).camera.position, [4, 2, 6])
+  assert.deepEqual(evaluateScene3DAnimation(scene, 7).camera.position, [4, 2, 2])
+  assert.deepEqual(evaluateScene3DAnimation(scene, 8).camera.position, [4, 2, 2])
+  // 焦段跟着点位插值：2.5 秒正好在 24mm 与 50mm 中间
+  assert.equal(evaluateScene3DAnimation(scene, 2.5).camera.focal, 37)
+  assert.equal(evaluateScene3DAnimation(scene, 7).camera.focal, 135)
+})
+
+test('scene3d camera points keep object animation and never outlive the longest animation', () => {
+  const source = createScene3DDocument({
+    title: '混合', duration: 6, objects: [{ id: 'ore', type: 'box', position: [0, 0, 0] }],
+    timeline: [{ at: 4, duration: 2, target: 'ore', action: 'move', to: [2, 0, 0] }],
+  })
+  const withPoint = applyCameraPoints(source, [{ position: [0, 2, 6], target: [0, 1, 0], focal: 50, hold: 0, travel: 0 }])
+
+  assert.equal(withPoint.timeline.length, 2)
+  assert.equal(withPoint.timeline.some(entry => entry.target === 'ore'), true)
+  assert.equal(withPoint.duration, 6)
+
+  const cleared = applyCameraPoints(withPoint, [])
+  assert.equal(cleared.timeline.length, 1)
+  assert.equal(cleared.duration, 6)
+
+  const staticScene = applyCameraPoints(createScene3DDocument({ title: '静态', objects: [] }), [])
+  assert.equal(staticScene.timeline, undefined)
+  assert.equal(staticScene.duration, undefined)
+})
+
+test('scene3d cameras carry an equivalent focal length and read legacy lens names', () => {
+  const scene = createScene3DDocument({ title: '焦段', objects: [], camera: { position: [0, 2, 6], target: [0, 1, 0], focal: 135 } })
+  assert.equal(scene.camera.focal, 135)
+  assert.equal(parseScene3DDocument(JSON.parse(JSON.stringify(scene))).camera.focal, 135)
+  assert.equal(parseScene3DDocument({ title: '旧场景', objects: [], camera: { lens: 'wide' } }).camera.focal, 24)
+  assert.equal(parseScene3DDocument({ title: '旧场景', objects: [], camera: { lens: 'telephoto' } }).camera.focal, 135)
+  assert.equal(parseScene3DDocument({ title: '没写镜头', objects: [] }).camera.focal, 50)
+  assert.equal(parseScene3DDocument({ title: '新旧都有', objects: [], camera: { lens: 'wide', focal: 85 } }).camera.focal, 85)
+  assert.equal(createScene3DDocument({ title: '机位焦段', objects: [], savedCameras: [{ position: [1, 2, 3], target: [0, 1, 0], focal: 24 }] }).savedCameras[0].focal, 24)
+  assert.throws(() => createScene3DDocument({ title: '错', objects: [], camera: { focal: 4 } }), /场景数值/)
+  assert.throws(() => createScene3DDocument({ title: '错', objects: [], camera: { focal: 400 } }), /场景数值/)
+  assert.throws(() => createScene3DDocument({ title: '错', objects: [], camera: { lens: 'zoom' } }), /镜头类型无效/)
 })
 
 test('scene3d applies atomic object, formation, movement, removal and camera edits', () => {

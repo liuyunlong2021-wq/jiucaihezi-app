@@ -2,6 +2,11 @@ export type Scene3DShape = 'person' | 'box' | 'plane' | 'wall' | 'entrance' | 'c
 export type Scene3DFormationType = 'line' | 'grid' | 'circle' | 'scatter'
 export type Scene3DAspect = '16:9' | '9:16' | '1:1' | '4:3' | '3:4'
 export type Scene3DProjection = 'perspective' | 'orthographic'
+/** 等效焦距（毫米）。机位距离和机位预设都由它推算，长焦靠压缩空间把两人拍得靠近。 */
+export type Scene3DCameraFocal = number
+export const SCENE3D_FOCAL = { minimum: 8, maximum: 300, fallback: 50 }
+/** 旧文件写的是镜头名，按惯用焦段读回来 */
+const LEGACY_LENS_FOCAL: Record<string, number> = { wide: 24, standard: 50, telephoto: 135 }
 export type Scene3DAnimationAction = 'show' | 'hide' | 'move' | 'rotate' | 'scale' | 'color' | 'camera' | 'label'
 
 export interface Scene3DObject {
@@ -54,7 +59,7 @@ export interface Scene3DCamera {
   position: [number, number, number]
   target: [number, number, number]
   projection?: Scene3DProjection
-  lens?: 'wide' | 'standard' | 'telephoto'
+  focal?: Scene3DCameraFocal
   aspect?: Scene3DAspect
 }
 
@@ -65,9 +70,20 @@ export interface Scene3DTimelineEntry {
   action: Scene3DAnimationAction
   to?: [number, number, number]
   lookAt?: [number, number, number]
+  /** camera 动作到位的等效焦距（毫米） */
+  focal?: number
   color?: string
   text?: string
   easing?: 'linear' | 'ease-in-out'
+}
+
+/** 一个机位点：停留 hold 秒，再用 travel 秒从上一个点移动过来（第一个点 travel 固定 0） */
+export interface Scene3DCameraPoint {
+  position: [number, number, number]
+  target: [number, number, number]
+  focal: number
+  hold: number
+  travel: number
 }
 
 export interface Scene3DDocument {
@@ -86,7 +102,7 @@ export interface Scene3DDocument {
 
 export interface Scene3DAnimationState {
   targets: Record<string, { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number]; visible: boolean; color?: string }>
-  camera: { position: [number, number, number]; target: [number, number, number] }
+  camera: { position: [number, number, number]; target: [number, number, number]; focal: number }
   label: string
 }
 
@@ -158,14 +174,15 @@ function enumValue<T extends string>(value: unknown, allowed: Set<T>, fallback: 
 
 function parseCamera(value: unknown, fallbackName = ''): Scene3DCamera {
   const item = record(value ?? {}, '机位')
-  const lens = String(item.lens || 'standard')
-  if (!['wide', 'standard', 'telephoto'].includes(lens)) throw new Error('镜头类型无效')
+  const legacyName = String(item.lens ?? '')
+  const legacy = legacyName ? LEGACY_LENS_FOCAL[legacyName] : SCENE3D_FOCAL.fallback
+  if (!legacy) throw new Error('镜头类型无效')
   return {
     ...(text(item.name || fallbackName) ? { name: text(item.name || fallbackName) } : {}),
     position: vector(item.position, [10, 8, 12]),
     target: vector(item.target, [0, 1, 0]),
     projection: enumValue(item.projection, PROJECTIONS, 'perspective', '投影类型'),
-    lens: lens as Scene3DCamera['lens'],
+    focal: item.focal === undefined ? legacy : number(item.focal, SCENE3D_FOCAL.fallback, SCENE3D_FOCAL.minimum, SCENE3D_FOCAL.maximum),
     aspect: enumValue(item.aspect, ASPECTS, '16:9', '画幅'),
   }
 }
@@ -274,6 +291,7 @@ export function parseScene3DDocument(input: unknown): Scene3DDocument {
       at, ...(actionDuration === undefined ? {} : { duration: actionDuration }), target, action,
       ...(item.to === undefined ? {} : { to: vector(item.to, [0, 0, 0], action === 'scale' ? 0.01 : -10_000) }),
       ...(item.lookAt === undefined ? {} : { lookAt: vector(item.lookAt) }),
+      ...(item.focal === undefined ? {} : { focal: number(item.focal, SCENE3D_FOCAL.fallback, SCENE3D_FOCAL.minimum, SCENE3D_FOCAL.maximum) }),
       ...(item.color === undefined ? {} : { color: color(item.color) }),
       ...(text(item.text) ? { text: text(item.text, '', 120) } : {}),
       ...(item.easing === 'ease-in-out' ? { easing: 'ease-in-out' as const } : {}),
@@ -301,7 +319,7 @@ export function evaluateScene3DAnimation(source: Scene3DDocument, time: number):
     position: [...item.position], rotation: 'rotation' in item && item.rotation ? [...item.rotation] : [0, 0, 0], scale: [1, 1, 1], visible: true,
   }
   for (const item of document.groups) targets[item.id] = { position: [...(item.position || [0, 0, 0])], rotation: [0, 0, 0], scale: [1, 1, 1], visible: true }
-  const state: Scene3DAnimationState = { targets, camera: { position: [...document.camera.position], target: [...document.camera.target] }, label: '' }
+  const state: Scene3DAnimationState = { targets, camera: { position: [...document.camera.position], target: [...document.camera.target], focal: document.camera.focal || SCENE3D_FOCAL.fallback }, label: '' }
   const now = Math.max(0, Math.min(time, document.duration || 0))
   for (const entry of document.timeline || []) {
     if (entry.at > now) break
@@ -311,6 +329,7 @@ export function evaluateScene3DAnimation(source: Scene3DDocument, time: number):
     else if (entry.action === 'camera') {
       if (entry.to) state.camera.position = mix(state.camera.position, entry.to, amount)
       if (entry.lookAt) state.camera.target = mix(state.camera.target, entry.lookAt, amount)
+      if (entry.focal !== undefined) state.camera.focal = state.camera.focal + (entry.focal - state.camera.focal) * amount
     } else {
       const target = state.targets[entry.target]
       if (!target) continue
@@ -364,6 +383,56 @@ export function applyScene3DEdits(source: Scene3DDocument, operations: unknown):
 
 export function serializeScene3DDocument(document: Scene3DDocument): string {
   return `${JSON.stringify(parseScene3DDocument(document), null, 2)}\n`
+}
+
+/**
+ * 把场景里的机位点读回来。只认 camera 动作的条目，它们是按时间顺序排列的关键帧：
+ * 每条的 duration 是从上一个点移动过来的用时，上一个点与这一条之间的空档就是这个点的停留。
+ */
+export function cameraPointsFromDocument(document: Scene3DDocument): Scene3DCameraPoint[] {
+  const entries = (document.timeline || []).filter(entry => entry.action === 'camera')
+  const end = document.duration || 0
+  return entries.map((entry, index) => {
+    const arrivesAt = entry.at + (entry.duration || 0)
+    const nextStartsAt = entries[index + 1]?.at ?? end
+    return {
+      position: [...(entry.to || document.camera.position)],
+      target: [...(entry.lookAt || document.camera.target)],
+      focal: entry.focal || document.camera.focal || SCENE3D_FOCAL.fallback,
+      hold: Math.max(0, Math.round((nextStartsAt - arrivesAt) * 10) / 10),
+      travel: index === 0 ? 0 : Math.round((entry.duration || 0) * 10) / 10,
+    }
+  })
+}
+
+/**
+ * 把机位点写回 scene3d 场景：只替换 camera 条目，已有的物体动画条目全保留。
+ * 总时长取“运镜结束时间”与“其它动画结束时间”的较大者，保证两类动画都能跑完。
+ */
+export function applyCameraPoints(source: Scene3DDocument, points: Scene3DCameraPoint[]): Scene3DDocument {
+  const document = structuredClone(source)
+  const kept = (document.timeline || []).filter(entry => entry.action !== 'camera')
+  const timeline: Scene3DTimelineEntry[] = [...kept]
+  let at = 0
+  points.forEach((point, index) => {
+    const travel = index === 0 ? 0 : Math.max(0, point.travel)
+    timeline.push({
+      at, ...(travel ? { duration: travel } : {}), target: 'camera', action: 'camera',
+      to: [...point.position], lookAt: [...point.target], focal: point.focal,
+      ...(index === 0 ? {} : { easing: 'ease-in-out' as const }),
+    })
+    at += travel + Math.max(0, point.hold)
+  })
+  const othersEnd = kept.reduce((end, entry) => Math.max(end, entry.at + (entry.duration || 0)), 0)
+  const duration = Math.max(at, othersEnd)
+  if (!timeline.length) {
+    delete document.duration
+    delete document.timeline
+    return parseScene3DDocument(document)
+  }
+  document.timeline = timeline
+  document.duration = Math.max(0.1, Math.round(duration * 10) / 10)
+  return parseScene3DDocument(document)
 }
 
 export function scene3DResultMarker(artifact: { path: string; title: string; objectCount: number; formationCount: number }): string {

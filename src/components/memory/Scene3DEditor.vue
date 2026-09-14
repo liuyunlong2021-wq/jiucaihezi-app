@@ -5,11 +5,11 @@ import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
-import { STORYBOARDER_BONE_NAMES, evaluateScene3DAnimation, parseScene3DDocument, type Scene3DCamera, type Scene3DCharacter, type Scene3DDocument, type Scene3DFormation, type Scene3DGroup, type Scene3DObject } from '@/runtime/memory/scene3d'
+import { STORYBOARDER_BONE_NAMES, applyCameraPoints, cameraPointsFromDocument, evaluateScene3DAnimation, parseScene3DDocument, SCENE3D_FOCAL, type Scene3DCamera, type Scene3DCameraPoint, type Scene3DCharacter, type Scene3DDocument, type Scene3DFormation, type Scene3DGroup, type Scene3DObject } from '@/runtime/memory/scene3d'
 import { STORYBOARDER_CHARACTER_MODELS, STORYBOARDER_EDITABLE_BONES, STORYBOARDER_HAND_POSES, STORYBOARDER_POSES, handPosePreset, posePreset, resolveStoryboarderModelUrl } from '@/runtime/memory/storyboarderAssets'
 
 const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean; videoStatus?: string }>(), { recordingOnly: false, videoStatus: '' })
-const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string] }>()
+const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string]; record: [document: Scene3DDocument, title: string] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
 const labelsVisible = ref(true)
@@ -24,6 +24,29 @@ const activeBoneName = ref('')
 const characterLoading = ref(0)
 const characterLoadError = ref('')
 const contextMenu = ref({ show: false, x: 0, y: 0 })
+const framingNote = ref('')
+const notice = ref('')
+let noticeTimer = 0
+
+/** 录制/截图的结果原来挤在会横向滚动的工具栏末尾会被截断，改成压在画面上的一条可读提示 */
+function noticeTone(text: string) {
+  // ponytail: 按文案判色；要更严谨就给工作台加一个 tone prop
+  if (/失败|不可用|不支持/.test(text)) return 'error'
+  if (/已保存|已就绪|已录制/.test(text)) return 'success'
+  return 'info'
+}
+
+function showNotice(text: string) {
+  notice.value = text
+  window.clearTimeout(noticeTimer)
+  noticeTimer = window.setTimeout(() => { notice.value = '' }, 10000)
+}
+const frameMode = ref(false)
+const snapStep = ref(0.1)
+const previewHidden = ref(new Set<string>())
+const stageSize = ref({ width: 0, height: 0 })
+const selectedPoint = ref(-1)
+const SNAP_STEPS = [1, 0.5, 0.25, 0.1]
 let document = parseScene3DDocument(props.document)
 let scene: THREE.Scene | null = null
 let root: THREE.Group | null = null
@@ -81,40 +104,126 @@ const poseOptions = computed(() => {
   return preferred.map(name => STORYBOARDER_POSES.find(item => item.name.toLowerCase() === name)).filter((item): item is (typeof STORYBOARDER_POSES)[number] => Boolean(item))
 })
 const handOptions = computed(() => ['Relaxed', 'Flat Spread', 'Point', 'Peace', 'Fist'].map(name => STORYBOARDER_HAND_POSES.find(item => item.name === name)).filter((item): item is (typeof STORYBOARDER_HAND_POSES)[number] => Boolean(item)))
-const defaultCameras = computed(() => {
+
+// 人物机位按“头部占画面高度的比例”锁定构图，机位距离由焦段推算：焦段越长机位退得越远。
+const HEAD_HEIGHT = 0.24
+const EYE_HEIGHT = 1.5
+/** 正面中景：脑袋约占画面高度 20% */
+const HEAD_FILL_MEDIUM = 0.2
+/** 机位行最多列几个人 */
+const PERSON_BUTTON_LIMIT = 6
+/** 机位不能进到头部里面 */
+const MIN_SHOT_DISTANCE = 0.5
+
+interface Scene3DPersonShot { id: string; label: string; position: [number, number, number]; rotation: [number, number, number]; scale: number }
+
+const scenePeople = computed<Scene3DPersonShot[]>(() => {
   renderRevision.value
-  const characters = [
-    ...document.objects.filter(item => item.type === 'person').map(item => ({ name: item.label, position: item.position })),
-    ...document.formations.filter(item => (item.shape || 'person') === 'person').map(item => ({ name: item.label, position: item.position })),
-  ]
-  const first = characters[0] || { name: '人物 A', position: [-2, 0, 0] as [number, number, number] }
-  const second = characters[1] || { name: '人物 B', position: [2, 0, 0] as [number, number, number] }
-  const firstName = first.name || '人物 A'
-  const secondName = second.name || '人物 B'
-  const midpoint: [number, number, number] = [
-    (first.position[0] + second.position[0]) / 2,
-    (first.position[1] + second.position[1]) / 2 + 1,
-    (first.position[2] + second.position[2]) / 2,
-  ]
-  const camera = (name: string, position: [number, number, number], target = document.camera.target, projection: Scene3DCamera['projection'] = 'perspective'): Scene3DCamera =>
-    ({ name, position, target, projection, lens: 'standard', aspect: document.canvas.aspect })
-  return [
-    camera('全景', [12, 9, 14]), camera('正面中景', [0, 4, 10]), camera('俯拍', [0, 20, .01], midpoint, 'orthographic'),
-    camera('低机位', [8, 2, 12]), camera('双人中景', [midpoint[0], midpoint[1] + 2, midpoint[2] + 8], midpoint),
-    camera(`${firstName}过肩`, [first.position[0], first.position[1] + 2, first.position[2] + 2], [second.position[0], second.position[1] + 1, second.position[2]]),
-    camera(`${secondName}过肩`, [second.position[0], second.position[1] + 2, second.position[2] + 2], [first.position[0], first.position[1] + 1, first.position[2]]),
-    camera(`${firstName}近景`, [first.position[0], first.position[1] + 2, first.position[2] + 5], [first.position[0], first.position[1] + 1, first.position[2]]),
-    camera(`${secondName}近景`, [second.position[0], second.position[1] + 2, second.position[2] + 5], [second.position[0], second.position[1] + 1, second.position[2]]),
-  ]
+  const used = new Map<string, number>()
+  return document.objects.filter(item => item.type === 'person').map((item, index) => {
+    const base = item.label || `人物 ${index + 1}`
+    const count = (used.get(base) || 0) + 1
+    used.set(base, count)
+    return {
+      id: item.id,
+      label: count > 1 ? `${base}${count}` : base,
+      position: item.position,
+      rotation: item.rotation || [0, 0, 0] as [number, number, number],
+      scale: item.character?.scale || 1,
+    }
+  })
 })
+
+/** 取景框（成片）的垂直视角，机位预设按它算距离 */
+function frameFov() { return focalFov(currentFocal.value, aspectRatio(document.canvas.aspect)) }
+
+/** 保持头部在画面里的高度占比所需的机位距离；焦段越长距离越远 */
+function shotDistance(scale: number, fill: number) {
+  const half = THREE.MathUtils.degToRad(frameFov()) / 2
+  return Math.max(MIN_SHOT_DISTANCE * scale, HEAD_HEIGHT * scale / (2 * fill * Math.tan(half)))
+}
+
+function shotNote(distance: number) {
+  return `${currentFocal.value}mm · 机位在人前 ${distance.toFixed(1)} 米`
+}
+
+function personHead(person: Scene3DPersonShot) {
+  return new THREE.Vector3(person.position[0], person.position[1] + EYE_HEIGHT * person.scale, person.position[2])
+}
+
+/** 人物朝向（模型正面是局部 +Z），已拍平到地面 */
+function personForward(person: Scene3DPersonShot) {
+  const forward = new THREE.Vector3(0, 0, 1).applyEuler(new THREE.Euler(...person.rotation))
+  forward.y = 0
+  return forward.lengthSq() < 1e-6 ? new THREE.Vector3(0, 0, 1) : forward.normalize()
+}
+
+function applyShot(name: string, position: THREE.Vector3, target: THREE.Vector3, note = '') {
+  applyCamera({ name, position: tuple(position), target: tuple(target), projection: 'perspective', focal: currentFocal.value, aspect: document.canvas.aspect })
+  cameraName.value = name
+  framingNote.value = note
+  persist()
+}
+
+function applyCloseShot(index: number) {
+  const person = scenePeople.value[index]
+  if (!person) return
+  const forward = personForward(person)
+  const head = personHead(person)
+  const distance = shotDistance(person.scale, HEAD_FILL_MEDIUM)
+  applyShot(`${person.label}正面中景`, head.clone().add(forward.multiplyScalar(distance)), head, shotNote(distance))
+}
 
 function vector(value: [number, number, number]) { return new THREE.Vector3(...value) }
 function tuple(value: THREE.Vector3): [number, number, number] { return [value.x, value.y, value.z] }
-function lensFov(lens: Scene3DCamera['lens']) { return lens === 'wide' ? 65 : lens === 'telephoto' ? 28 : 45 }
 function aspectRatio(value: Scene3DDocument['canvas']['aspect']) {
   const [width, height] = value.split(':').map(Number)
   return width / height
 }
+
+/** 等效焦距档位（毫米）。长焦压缩空间，是窄空间里拍过肩的唯一办法。 */
+const FOCAL_STEPS = [24, 35, 50, 85, 135]
+const FOCAL_TITLES: Record<number, string> = {
+  24: '24mm 广角 · 空间感强', 35: '35mm 小广角 · 人物带环境', 50: '50mm 标准 · 接近人眼',
+  85: '85mm 中长焦 · 人像，开始压缩空间', 135: '135mm 长焦 · 明显压缩空间，过肩首选',
+}
+/** 长边按 36mm 胶片折算；竖画幅时长边就是画面高度 */
+const SENSOR_LONG = 36
+
+const currentFocal = computed(() => { renderRevision.value; return document.camera.focal || SCENE3D_FOCAL.fallback })
+
+/** 焦段 + 画幅 → 成片的垂直视角（度） */
+function focalFov(focal: number, aspect: number) {
+  const longAngle = 2 * Math.atan(SENSOR_LONG / 2 / focal)
+  return THREE.MathUtils.radToDeg(aspect >= 1 ? 2 * Math.atan(Math.tan(longAngle / 2) / aspect) : longAngle)
+}
+
+/** 相机垂直视角：取景框按标称焦段成像，画布比框多出来的部分只是编辑余量 */
+function cameraFovFor(focal: number, canvasRatio: number) {
+  const targetAspect = aspectRatio(document.canvas.aspect)
+  const frameHalf = THREE.MathUtils.degToRad(focalFov(focal, targetAspect)) / 2
+  return THREE.MathUtils.radToDeg(2 * Math.atan(Math.tan(frameHalf) / Math.min(1, canvasRatio / targetAspect)))
+}
+
+function cameraFov(canvasRatio: number) { return cameraFovFor(currentFocal.value, canvasRatio) }
+
+/** 把相机视角按当前焦段复位：运镜播放时视角在变，停下来要回到工具栏显示的焦段 */
+function restoreLens() {
+  if (!perspective || camera !== perspective) return
+  const fov = cameraFov(perspective.aspect)
+  if (Math.abs(perspective.fov - fov) < 0.01) return
+  perspective.fov = fov
+  perspective.updateProjectionMatrix()
+}
+
+/** 取景框和截图共用同一个裁剪矩形：当前画幅在画面里能取到的最大居中矩形 */
+function cropRect(width: number, height: number) {
+  const ratio = aspectRatio(currentAspect.value)
+  const frameWidth = Math.min(width, height * ratio)
+  return { width: frameWidth, height: frameWidth / ratio }
+}
+
+const frameRect = computed(() => cropRect(stageSize.value.width, stageSize.value.height))
 
 function material(color: string) {
   return new THREE.MeshStandardMaterial({ color, roughness: 0.82, metalness: 0 })
@@ -390,8 +499,13 @@ function buildScene() {
     selectable.set(groupData.id, group)
     root.add(group)
   }
+  for (const id of previewHidden.value) {
+    const node = nodes.get(id) || selectable.get(id)
+    if (node) node.visible = false
+  }
   scene.add(root)
-  applyAnimation(currentTime.value)
+  // 重建场景只恢复对象状态；机位要留在用户当前看的位置，不要被时间轴拉走
+  applyAnimation(currentTime.value, false)
   attachSelection(selectedId.value)
 }
 
@@ -408,7 +522,7 @@ function updateStepLabel(value: string) {
   stepLabel.scale.set(.9, .1, 1); scene.add(stepLabel)
 }
 
-function applyAnimation(time: number) {
+function applyAnimation(time: number, includeCamera = true) {
   if (!document.timeline?.length || !camera) return
   const state = evaluateScene3DAnimation(document, time)
   for (const [id, value] of Object.entries(state.targets)) {
@@ -421,7 +535,13 @@ function applyAnimation(time: number) {
       materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.color.set(value.color || item.userData.baseColor) })
     })
   }
-  camera.position.set(...state.camera.position); camera.lookAt(vector(state.camera.target)); orbit?.target.set(...state.camera.target)
+  if (includeCamera) {
+    camera.position.set(...state.camera.position); camera.lookAt(vector(state.camera.target)); orbit?.target.set(...state.camera.target)
+    if (perspective && camera === perspective) {
+      const fov = cameraFovFor(state.camera.focal, perspective.aspect)
+      if (Math.abs(perspective.fov - fov) > 0.01) { perspective.fov = fov; perspective.updateProjectionMatrix() }
+    }
+  }
   if (stepLabel?.userData.text !== state.label) { updateStepLabel(state.label); if (stepLabel) stepLabel.userData.text = state.label }
   if (stepLabel) {
     const direction = new THREE.Vector3(); camera.getWorldDirection(direction)
@@ -441,10 +561,47 @@ function replay() { currentTime.value = 0; applyAnimation(0); playing.value = fa
 
 function activeCamera() { return camera as THREE.Camera }
 function applyCamera(source: Scene3DCamera) {
-  document.camera = structuredClone(source)
-  document.canvas.aspect = source.aspect || document.canvas.aspect
+  // 机位只描述机位；画幅永远由场景的 canvas.aspect 决定，不能被旧机位改回去。
+  document.camera = { ...structuredClone(source), aspect: document.canvas.aspect }
   createCameraControls()
 }
+
+/** 取景模式的拖动与方向键都只平移机位：方向和朝向不变，构图整体滑动 */
+function panCamera(right: number, up: number) {
+  if (!camera || !orbit) return
+  const forward = new THREE.Vector3(); camera.getWorldDirection(forward)
+  const rightAxis = new THREE.Vector3().crossVectors(forward, camera.up).normalize()
+  const upAxis = new THREE.Vector3().crossVectors(rightAxis, forward).normalize()
+  const offset = rightAxis.multiplyScalar(right).add(upAxis.multiplyScalar(up))
+  camera.position.add(offset); orbit.target.add(offset)
+  syncCameraState()
+}
+
+function samePoint(left: [number, number, number], right: [number, number, number]) {
+  return Math.abs(left[0] - right[0]) < 1e-6 && Math.abs(left[1] - right[1]) < 1e-6 && Math.abs(left[2] - right[2]) < 1e-6
+}
+
+/** 把实时机位写回场景，切焦段、切投影和重开场景都不再丢掉构图 */
+function syncCameraState() {
+  if (!camera || !orbit || playing.value || manualRecording.value) return
+  const position = tuple(camera.position)
+  const target = tuple(orbit.target)
+  // OrbitControls 每次 pointerup 都会派发 end，机位没动就不写盘。
+  if (samePoint(position, document.camera.position) && samePoint(target, document.camera.target)) return
+  document.camera.position = position
+  document.camera.target = target
+  persist({ history: false })
+}
+
+function applyFrameMode() {
+  if (!orbit) return
+  orbit.enableRotate = !frameMode.value
+  orbit.mouseButtons = frameMode.value
+    ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
+    : { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
+}
+
+function toggleFrameMode() { frameMode.value = !frameMode.value; applyFrameMode() }
 
 function createCameraControls() {
   if (!renderer || !canvas.value) return
@@ -457,16 +614,18 @@ function createCameraControls() {
     orthographic = new THREE.OrthographicCamera(-size * ratio / 2, size * ratio / 2, size / 2, -size / 2, .01, 1000)
     camera = orthographic
   } else {
-    perspective = new THREE.PerspectiveCamera(lensFov(source.lens), ratio, .01, 1000)
+    perspective = new THREE.PerspectiveCamera(cameraFov(ratio), ratio, .01, 1000)
     camera = perspective
   }
   camera.position.copy(vector(source.position))
   camera.lookAt(vector(source.target))
   orbit = new OrbitControls(activeCamera(), canvas.value)
   orbit.target.copy(vector(source.target)); orbit.enableDamping = true; orbit.dampingFactor = .08
+  orbit.addEventListener('end', syncCameraState)
+  applyFrameMode()
   transform = new TransformControls(activeCamera(), canvas.value)
   transform.setMode('translate')
-  transform.setTranslationSnap(document.canvas.snap ? 1 : null)
+  transform.setTranslationSnap(document.canvas.snap ? snapStep.value : null)
   transform.addEventListener('dragging-changed', event => {
     orbit!.enabled = !event.value
     if (!event.value) {
@@ -491,15 +650,42 @@ function setCameraPreset(name: 'top' | 'front' | 'side' | 'low' | 'reset') {
   createCameraControls(); persist()
 }
 
-function setLens(lens: Scene3DCamera['lens']) { document.camera.lens = lens; document.camera.projection = 'perspective'; createCameraControls(); persist() }
-function setProjection(projection: Scene3DCamera['projection']) { document.camera.projection = projection; createCameraControls(); persist() }
+function setFocal(focal: number) {
+  document.camera.focal = focal
+  if (document.camera.projection === 'perspective' && perspective && camera === perspective) {
+    perspective.fov = cameraFov(perspective.aspect)
+    perspective.updateProjectionMatrix()
+    persist()
+    return
+  }
+  document.camera.projection = 'perspective'
+  createCameraControls(); persist()
+}
+function setProjection(projection: Scene3DCamera['projection']) {
+  if (document.camera.projection === projection) return
+  document.camera.projection = projection; createCameraControls(); persist()
+}
 function setAspect(aspect: Scene3DDocument['canvas']['aspect']) { document.canvas.aspect = aspect; document.camera.aspect = aspect; persist() }
+function setSnapStep(step: number) { snapStep.value = step; transform?.setTranslationSnap(document.canvas.snap ? step : null) }
 function setLighting(direction: Scene3DDocument['lighting']['direction']) { document.lighting.direction = direction; updateLights(); persist() }
 function setLightIntensity(intensity: Scene3DDocument['lighting']['intensity']) { document.lighting.intensity = intensity; updateLights(); persist() }
 function toggleShadows() { document.lighting.shadows = !document.lighting.shadows; renderer!.shadowMap.enabled = document.lighting.shadows; buildScene(); updateLights(); persist() }
 function toggleGrid() { document.canvas.grid = !document.canvas.grid; updateGrid(); persist() }
-function toggleSnap() { document.canvas.snap = !document.canvas.snap; transform?.setTranslationSnap(document.canvas.snap ? 1 : null); persist() }
+function toggleSnap() { document.canvas.snap = !document.canvas.snap; transform?.setTranslationSnap(document.canvas.snap ? snapStep.value : null); persist() }
 function toggleLabels() { labelsVisible.value = !labelsVisible.value; root?.traverse(node => { if (node.name === 'scene-label') node.visible = labelsVisible.value }) }
+
+/** 临时隐藏选中对象：只在预览里生效，不写进 .jcscene，方便贴着肩摄影机卡构图 */
+function togglePreviewHidden() {
+  const id = selectedId.value
+  if (!id) return
+  const next = new Set(previewHidden.value)
+  if (next.has(id)) next.delete(id)
+  else next.add(id)
+  previewHidden.value = next
+  const node = selectable.get(id)
+  if (node) node.visible = !next.has(id)
+  renderRevision.value++
+}
 
 function updateLights() {
   if (!scene) return
@@ -554,6 +740,48 @@ function updateSelectedColor(color: string) {
 }
 
 function clearSelectedLabel() { updateSelectedLabel('') }
+
+function positionValue(axis: number) { return Number((selectedEntry.value?.position?.[axis] ?? 0).toFixed(2)) }
+
+function updateSelectedPosition(axis: number, raw: string) {
+  const item = selectedEntry.value
+  const node = selectable.get(selectedId.value)
+  const position = item?.position
+  const value = Number(raw)
+  if (!node || !position || !Number.isFinite(value) || axis < 0 || axis > 2) return
+  position[axis] = Number(value.toFixed(4))
+  node.position.set(...position)
+  persist()
+}
+
+function nudgeSelection(offset: [number, number, number]) {
+  const item = selectedEntry.value
+  const node = selectable.get(selectedId.value)
+  const position = item?.position
+  if (!node || !position) return false
+  const next = position.map((value, axis) => Number((value + offset[axis]!).toFixed(4))) as [number, number, number]
+  item!.position = next
+  node.position.set(...next)
+  persist()
+  return true
+}
+
+/** 有选中就微调对象，没选中就平移机位调构图；步长和吸附档位保持一致 */
+function handleNudgeKeys(event: KeyboardEvent) {
+  if (event.metaKey || event.ctrlKey || event.altKey || playing.value) return
+  if ((event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
+  const step = snapStep.value
+  const vertical = event.shiftKey && (event.key === 'ArrowUp' || event.key === 'ArrowDown')
+  const offset: [number, number, number] = vertical
+    ? [0, event.key === 'ArrowUp' ? step : -step, 0]
+    : event.key === 'ArrowLeft' ? [-step, 0, 0]
+      : event.key === 'ArrowRight' ? [step, 0, 0]
+        : [0, 0, event.key === 'ArrowUp' ? -step : step]
+  event.preventDefault()
+  if (nudgeSelection(offset)) return
+  if (!vertical) panCamera(offset[0], -offset[2])
+}
 
 function openContextMenu(event: MouseEvent) {
   pick(event as PointerEvent)
@@ -627,7 +855,7 @@ function applyHand(id: string, side: 'left' | 'right') {
 }
 
 function pick(event: PointerEvent) {
-  if (manualRecording.value || ignoreScenePick || !canvas.value || !camera || !root || !raycaster || transform?.dragging) return
+  if (manualRecording.value || ignoreScenePick || !canvas.value || !camera || !root || !raycaster || transform?.dragging || frameMode.value) return
   const rect = canvas.value.getBoundingClientRect()
   const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
   raycaster.setFromCamera(pointer, activeCamera())
@@ -733,8 +961,66 @@ function saveCamera() {
   persist()
 }
 
-function useSavedCamera(item: Scene3DCamera) { cameraName.value = item.name || ''; applyCamera(item); persist() }
+function useSavedCamera(item: Scene3DCamera) { cameraName.value = item.name || ''; framingNote.value = ''; applyCamera(item); persist() }
 function removeSavedCamera(index: number) { document.savedCameras.splice(index, 1); persist() }
+
+/** 运镜机位点直接存在 timeline 里，这里只把它读成点列表；点点位的数字可内联改 */
+const cameraPoints = computed(() => { renderRevision.value; return cameraPointsFromDocument(document) })
+
+function writeCameraPoints(points: Scene3DCameraPoint[]) {
+  document = applyCameraPoints(document, points)
+  selectedPoint.value = Math.min(selectedPoint.value, points.length - 1)
+  renderRevision.value++
+  persist()
+}
+
+function markCameraPoint() {
+  if (!camera || !orbit || playing.value) return
+  const points: Scene3DCameraPoint[] = [...cameraPoints.value, {
+    position: tuple(camera.position), target: tuple(orbit.target), focal: currentFocal.value,
+    hold: cameraPoints.value.length ? 0 : 1, travel: 3,
+  }]
+  selectedPoint.value = points.length - 1
+  writeCameraPoints(points)
+  framingNote.value = `已打第 ${points.length} 个机位点 · 运镜总时长 ${duration.value.toFixed(1)} 秒`
+}
+
+function removeCameraPoint(index: number) {
+  selectedPoint.value = -1
+  writeCameraPoints(cameraPoints.value.filter((_, position) => position !== index))
+  framingNote.value = ''
+}
+
+function updateCameraPoint(index: number, patch: Partial<Scene3DCameraPoint>) {
+  writeCameraPoints(cameraPoints.value.map((point, position) => position === index ? { ...point, ...patch } : point))
+}
+
+/** 跳到某个机位点，方便微调后用“重打”覆盖它 */
+function useCameraPoint(index: number) {
+  const point = cameraPoints.value[index]
+  if (!point) return
+  selectedPoint.value = index
+  applyCamera({ position: point.position, target: point.target, projection: 'perspective', focal: point.focal, aspect: document.canvas.aspect })
+  persist({ history: false })
+}
+
+function replaceCameraPoint() {
+  const index = selectedPoint.value
+  if (!camera || !orbit || !cameraPoints.value[index]) return
+  updateCameraPoint(index, { position: tuple(camera.position), target: tuple(orbit.target), focal: currentFocal.value })
+  framingNote.value = `第 ${index + 1} 个机位点已重打`
+}
+
+/**
+ * 运镜录制交给工作台的隐藏录制器：可见编辑器的画布是舞台形状，直接录会把取景框外的画面也录进去。
+ * 隐藏录制器按画幅 1920 出片，再走现有 FFmpeg 链路存进视频目录。
+ */
+function requestCameraPathRecording() {
+  if (playing.value || manualRecording.value || !cameraPoints.value.length) return
+  framingNote.value = ''
+  recordingError.value = ''
+  emit('record', structuredClone(document), `${document.title}-运镜`)
+}
 
 function removeSelection() {
   const target = selectable.get(selectedId.value)
@@ -760,12 +1046,11 @@ async function capture() {
   clearSelection()
   renderer.render(scene!, activeCamera())
   const source = renderer.domElement
-  const ratio = aspectRatio(currentAspect.value)
   const width = source.width; const height = source.height
-  const cropWidth = Math.min(width, Math.round(height * ratio)); const cropHeight = Math.min(height, Math.round(width / ratio))
+  const crop = cropRect(width, height)
   const output = window.document.createElement('canvas')
-  output.width = cropWidth; output.height = cropHeight
-  output.getContext('2d')!.drawImage(source, (width - cropWidth) / 2, (height - cropHeight) / 2, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight)
+  output.width = Math.max(1, Math.round(crop.width)); output.height = Math.max(1, Math.round(crop.width / aspectRatio(currentAspect.value)))
+  output.getContext('2d')!.drawImage(source, (width - crop.width) / 2, (height - crop.height) / 2, crop.width, crop.height, 0, 0, output.width, output.height)
   const blob = await new Promise<Blob | null>(resolve => output.toBlob(resolve, 'image/png'))
   if (blob && blob.size) emit('screenshot', blob, `${document.title}-${cameraName.value || '机位'}`)
 }
@@ -815,12 +1100,13 @@ function stopManualRecording() {
 
 function resize() {
   if (!renderer || !canvas.value || !camera) return
+  stageSize.value = { width: canvas.value.clientWidth, height: canvas.value.clientHeight }
   const ratio = aspectRatio(currentAspect.value)
   const width = props.recordingOnly ? (ratio >= 1 ? 1920 : Math.round(1920 * ratio)) : Math.max(canvas.value.clientWidth, 1)
   const height = props.recordingOnly ? (ratio >= 1 ? Math.round(1920 / ratio) : 1920) : Math.max(canvas.value.clientHeight, 1)
   renderer.setSize(width, height, false)
   const renderRatio = width / height
-  if (perspective && camera === perspective) { perspective.aspect = renderRatio; perspective.updateProjectionMatrix() }
+  if (perspective && camera === perspective) { perspective.aspect = renderRatio; perspective.fov = cameraFov(renderRatio); perspective.updateProjectionMatrix() }
   if (orthographic && camera === orthographic) { const size = 18; orthographic.left = -size * renderRatio / 2; orthographic.right = size * renderRatio / 2; orthographic.top = size / 2; orthographic.bottom = -size / 2; orthographic.updateProjectionMatrix() }
 }
 
@@ -878,6 +1164,7 @@ onMounted(() => {
   window.addEventListener('pointerdown', closeContextMenu)
   window.addEventListener('keydown', removeSelectedWithKeyboard)
   window.addEventListener('keydown', handleHistoryKeyboard)
+  window.addEventListener('keydown', handleNudgeKeys)
   resizeObserver = new ResizeObserver(resize); resizeObserver.observe(canvas.value); render()
 })
 
@@ -885,11 +1172,18 @@ watch(() => props.document, value => {
   document = parseScene3DDocument(value); currentTime.value = 0; playing.value = false; renderRevision.value++; buildScene(); createCameraControls(); applyAnimation(0)
 })
 
+// 运镜播放时视角在变；停下来要把视角复位成工具栏显示的焦段
+watch(playing, value => { if (!value) restoreLens() })
+
+// 工作台回的录制/截图结果、本机录制错误，都走画面上的浮动提示
+watch(() => props.videoStatus, value => { if (value) showNotice(value) }, { immediate: true })
+watch(recordingError, value => { if (value) showNotice(value) })
+
 onBeforeUnmount(() => {
   discardManualRecording = true
   const recorder = manualRecorder
   if (recorder && recorder.state !== 'inactive') recorder.stop()
-  cancelAnimationFrame(animationFrame); resizeObserver?.disconnect(); canvas.value?.removeEventListener('pointerup', pick); window.removeEventListener('pointerdown', closeContextMenu); window.removeEventListener('keydown', removeSelectedWithKeyboard); window.removeEventListener('keydown', handleHistoryKeyboard)
+  cancelAnimationFrame(animationFrame); window.clearTimeout(noticeTimer); resizeObserver?.disconnect(); canvas.value?.removeEventListener('pointerup', pick); window.removeEventListener('pointerdown', closeContextMenu); window.removeEventListener('keydown', removeSelectedWithKeyboard); window.removeEventListener('keydown', handleHistoryKeyboard); window.removeEventListener('keydown', handleNudgeKeys)
   orbit?.dispose(); transform?.dispose(); renderer?.dispose()
   if (root) disposeObject(root)
   characterTemplates.forEach(template => disposeObject(template, true))
@@ -910,15 +1204,18 @@ onBeforeUnmount(() => {
         <span class="scene3d-divider"></span>
         <button :class="{ active: document.camera.projection === 'perspective' }" title="透视视图" @click="setProjection('perspective')">透</button>
         <button :class="{ active: document.camera.projection === 'orthographic' }" title="正交视图" @click="setProjection('orthographic')">正</button>
-        <button :class="{ active: document.camera.lens === 'wide' }" title="广角" @click="setLens('wide')">广</button>
-        <button :class="{ active: document.camera.lens === 'standard' }" title="标准镜头" @click="setLens('standard')">标</button>
-        <button :class="{ active: document.camera.lens === 'telephoto' }" title="长焦" @click="setLens('telephoto')">长</button>
+        <button v-for="focal in FOCAL_STEPS" :key="focal" :class="{ active: currentFocal === focal }" :title="FOCAL_TITLES[focal]" @click="setFocal(focal)">{{ focal }}</button>
         <span class="scene3d-divider"></span>
         <button v-for="aspect in ['16:9', '9:16', '1:1', '4:3', '3:4']" :key="aspect" :class="{ active: currentAspect === aspect }" :title="`${aspect} 画幅`" @click="setAspect(aspect as Scene3DDocument['canvas']['aspect'])">{{ aspect }}</button>
         <span class="scene3d-divider"></span>
         <button :class="{ active: document.canvas.grid }" title="显示或隐藏网格" @click="toggleGrid"><JcIcon name="grid-on" /></button>
-        <button :class="{ active: document.canvas.snap }" title="开启或关闭网格吸附" @click="toggleSnap"><JcIcon name="sync" /></button>
+        <button :class="{ active: document.canvas.snap }" title="开启或关闭吸附（拖动按当前步长对齐）" @click="toggleSnap"><JcIcon name="sync" /></button>
+        <select v-if="document.canvas.snap" v-model.number="snapStep" class="scene3d-snap-step" title="吸附步长（米）" aria-label="吸附步长" @change="setSnapStep(snapStep)">
+          <option v-for="step in SNAP_STEPS" :key="step" :value="step">{{ step }}</option>
+        </select>
+        <button :class="{ active: frameMode }" title="取景模式：拖动只平移机位，不改朝向" @click="toggleFrameMode">取景</button>
         <button :class="{ active: labelsVisible }" title="显示或隐藏标签" @click="toggleLabels"><JcIcon name="label" /></button>
+        <button :disabled="!selectedId" :class="{ active: previewHidden.has(selectedId) }" :title="previewHidden.has(selectedId) ? '恢复显示选中对象' : '临时隐藏选中对象（只影响预览，不写进场景）'" @click="togglePreviewHidden"><JcIcon :name="previewHidden.has(selectedId) ? 'visibility-off' : 'visibility'" /></button>
         <details class="scene3d-lighting">
           <summary title="展开光影控制">光影</summary>
           <div class="scene3d-lighting-menu">
@@ -940,7 +1237,6 @@ onBeforeUnmount(() => {
         <button v-if="!manualRecording" title="开始手动运镜录制" @click="startManualRecording"><JcIcon name="radio-button-checked" /></button>
         <button v-else class="recording" title="停止并保存录制" @click="stopManualRecording"><JcIcon name="stop" /></button>
         <span v-if="recordingError" class="scene3d-recording-error">{{ recordingError }}</span>
-        <span v-if="videoStatus" class="scene3d-video-status">{{ videoStatus }}</span>
         <template v-if="duration">
           <span class="scene3d-divider"></span>
           <button :title="playing ? '暂停' : '播放'" @click="togglePlayback"><JcIcon :name="playing ? 'pause' : 'play_arrow'" /></button>
@@ -949,8 +1245,8 @@ onBeforeUnmount(() => {
         </template>
       </div>
     </header>
-    <div class="scene3d-workspace">
-      <div class="scene3d-stage" :style="{ '--scene-aspect': String(aspectRatio(currentAspect)) }">
+    <div class="scene3d-workspace" :class="{ 'inspector-open': Boolean(selectedEntry) }">
+      <div class="scene3d-stage">
         <canvas ref="canvas" aria-label="3D 白膜场景" @contextmenu.prevent="openContextMenu"></canvas>
         <div v-if="contextMenu.show" class="scene3d-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @pointerdown.stop>
           <button @click="copySelection">复制</button>
@@ -958,8 +1254,9 @@ onBeforeUnmount(() => {
           <button @click="removeSelection">删除</button>
           <button v-if="selectedEntry && 'label' in selectedEntry" @click="clearSelectedLabel">删字</button>
         </div>
-        <div v-if="!recordingOnly" class="scene3d-frame"></div>
-        <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击人物、物体或队伍后拖动调整位置</p>
+        <div v-if="!recordingOnly" class="scene3d-frame" :class="{ framing: frameMode }" :style="{ width: `${frameRect.width}px`, height: `${frameRect.height}px` }"></div>
+        <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击选中后拖动或按方向键微调 · 取景模式拖动平移镜头</p>
+        <p v-if="notice" class="scene3d-notice" :class="`tone-${noticeTone(notice)}`" :title="notice" @click="notice = ''">{{ notice }}</p>
       </div>
       <aside v-if="selectedEntry" class="scene3d-inspector" aria-label="对象设置">
         <section v-if="'label' in selectedEntry" class="scene3d-inspector-section">
@@ -967,6 +1264,15 @@ onBeforeUnmount(() => {
           <input :value="selectedEntry.label || ''" aria-label="对象名称" placeholder="对象名称" @change="updateSelectedLabel(($event.target as HTMLInputElement).value)" />
           <button title="删除显示文字" @click="clearSelectedLabel">删字</button>
           <input v-if="'color' in selectedEntry" type="color" :value="selectedEntry.color || '#e7ece9'" title="对象颜色" aria-label="对象颜色" @input="updateSelectedColor(($event.target as HTMLInputElement).value)" />
+        </section>
+        <section v-if="'position' in selectedEntry" class="scene3d-inspector-section">
+          <h2>位置</h2>
+          <div class="scene3d-inspector-grid scene3d-position-grid">
+            <label v-for="(axis, index) in ['x', 'y', 'z']" :key="axis">
+              <span>{{ axis }}</span>
+              <input type="number" :step="snapStep" :value="positionValue(index)" :aria-label="`位置 ${axis}`" @change="updateSelectedPosition(index, ($event.target as HTMLInputElement).value)" />
+            </label>
+          </div>
         </section>
         <template v-if="selectedCharacter">
           <section class="scene3d-inspector-section">
@@ -1006,9 +1312,23 @@ onBeforeUnmount(() => {
         </template>
       </aside>
     </div>
+    <footer v-if="!recordingOnly" class="scene3d-cameras scene3d-path">
+      <span>运镜</span>
+      <div v-for="(point, index) in cameraPoints" :key="`point-${index}`" class="scene3d-point-chip" :class="{ active: selectedPoint === index }">
+        <button :title="`跳到第 ${index + 1} 个机位点`" @click="useCameraPoint(index)">{{ index + 1 }}</button>
+        <label>停<input type="number" min="0" max="60" step="0.5" :value="point.hold" :aria-label="`第 ${index + 1} 点停留秒数`" @change="updateCameraPoint(index, { hold: Number(($event.target as HTMLInputElement).value) })" /></label>
+        <label v-if="index">移<input type="number" min="0" max="60" step="0.5" :value="point.travel" :aria-label="`第 ${index + 1} 点移动秒数`" @change="updateCameraPoint(index, { travel: Number(($event.target as HTMLInputElement).value) })" /></label>
+        <button :title="`删除第 ${index + 1} 个机位点`" @click="removeCameraPoint(index)"><JcIcon name="close" /></button>
+      </div>
+      <button :disabled="playing || manualRecording" title="把当前机位打成一个点" @click="markCameraPoint">打点</button>
+      <button :disabled="selectedPoint < 0 || playing" title="用当前机位覆盖选中的点" @click="replaceCameraPoint">重打</button>
+      <button :disabled="!cameraPoints.length || playing || manualRecording" :title="cameraPoints.length ? `录制这段运镜（${duration.toFixed(1)} 秒，按取景框出片）` : '先打点'" @click="requestCameraPathRecording"><JcIcon name="radio-button-checked" /></button>
+      <span v-if="framingNote" class="scene3d-framing-note">{{ framingNote }}</span>
+    </footer>
     <footer v-if="!recordingOnly" class="scene3d-cameras">
       <span>机位</span>
-      <button v-for="item in defaultCameras" :key="item.name" @click="useSavedCamera(item)">{{ item.name }}</button>
+      <button v-for="(person, index) in scenePeople.slice(0, PERSON_BUTTON_LIMIT)" :key="person.id" :title="`${person.label} 正面中景；机位距离按当前 ${currentFocal}mm 推算`" @click="applyCloseShot(index)">{{ person.label }}</button>
+      <span v-if="framingNote" class="scene3d-framing-note">{{ framingNote }}</span>
       <div v-for="(item, index) in savedCameras" :key="`${item.name}-${index}`" class="scene3d-camera-chip">
         <button @click="useSavedCamera(item)">{{ item.name || `机位 ${index + 1}` }}</button>
         <button :title="`删除 ${item.name || `机位 ${index + 1}`}`" @click="removeSavedCamera(index)"><JcIcon name="close" /></button>
@@ -1018,15 +1338,20 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.scene3d-editor { min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; background: #15201c; color: #e8efeb; }
+.scene3d-editor { min-height: 0; height: 100%; display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto; background: #15201c; color: #e8efeb; }
 .scene3d-toolbar { display: flex; align-items: flex-start; gap: 12px; min-height: 46px; padding: 6px 10px; border-bottom: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
 .scene3d-toolbar strong { flex: 0 0 auto; font-size: 14px; }
 .scene3d-tools { display: flex; align-items: center; gap: 3px; }
 .scene3d-character-name { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
 .scene3d-tools button, .scene3d-cameras button, .scene3d-lighting summary { min-width: 30px; height: 30px; border: 1px solid transparent; color: #dce8e1; background: transparent; border-radius: 4px; cursor: pointer; font: inherit; font-size: 11px; }
+.scene3d-snap-step { height: 30px; padding: 0 2px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 4px; color: #dce8e1; background: rgba(0, 0, 0, .18); font: inherit; font-size: 11px; }
+.scene3d-framing-note { color: #f0d69a; font-size: 11px; white-space: nowrap; }
 .scene3d-tools button.recording { color: #ff8f8f; }
 .scene3d-recording-error { color: #ff9d9d; font-size: 11px; white-space: nowrap; }
 .scene3d-video-status { color: #a9d8b8; font-size: 11px; white-space: nowrap; }
+.scene3d-notice { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); max-width: calc(100% - 24px); margin: 0; padding: 7px 10px; border-left: 3px solid #86c8a5; border-radius: 4px; background: rgba(10, 17, 14, .92); color: #e8efeb; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; cursor: pointer; }
+.scene3d-notice.tone-success { border-left-color: #86c8a5; }
+.scene3d-notice.tone-error { border-left-color: #ff8f8f; color: #ffd9d9; }
 .scene3d-context-menu { position: absolute; z-index: 5; display: grid; gap: 2px; min-width: 120px; padding: 5px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
 .scene3d-context-menu button { padding: 5px 8px; border: 0; color: #e8efeb; background: transparent; text-align: left; cursor: pointer; }
 .scene3d-context-menu button:hover { background: rgba(222, 243, 229, .14); }
@@ -1041,8 +1366,9 @@ onBeforeUnmount(() => {
 .scene3d-lighting-menu { position: absolute; z-index: 4; top: calc(100% + 6px); left: 0; display: grid; grid-template-columns: repeat(5, 30px); gap: 4px; width: max-content; padding: 8px; border: 1px solid rgba(216, 235, 223, .24); border-radius: 4px; background: #1c2923; box-shadow: 0 8px 20px rgba(0, 0, 0, .3); }
 .scene3d-lighting-menu span { grid-column: 1 / -1; color: #aebcb5; font-size: 11px; }
 .scene3d-lighting-menu button { border-color: rgba(216, 235, 223, .16); }
-.scene3d-workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 260px; }
-.scene3d-stage { position: relative; min-height: 320px; overflow: hidden; }
+.scene3d-workspace { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.scene3d-workspace.inspector-open { grid-template-columns: minmax(0, 1fr) 260px; }
+.scene3d-stage { position: relative; min-height: 320px; overflow: hidden; padding: 8px; }
 .scene3d-stage canvas { width: 100%; height: 100%; display: block; touch-action: none; }
 .scene3d-inspector { overflow-y: auto; padding: 10px; border-left: 1px solid rgba(216, 235, 223, .12); background: #18241f; }
 .scene3d-inspector-section { display: grid; gap: 6px; margin: 0 0 12px; padding: 0 0 12px; border: 0; border-bottom: 1px solid rgba(216, 235, 223, .12); }
@@ -1054,17 +1380,29 @@ onBeforeUnmount(() => {
 .scene3d-inspector button:hover, .scene3d-inspector button.active { background: rgba(222, 243, 229, .14); border-color: rgba(222, 243, 229, .2); }
 .scene3d-inspector button:disabled { opacity: .45; cursor: not-allowed; }
 .scene3d-inspector-actions, .scene3d-inspector-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.scene3d-position-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.scene3d-position-grid label { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px; align-items: center; }
+.scene3d-position-grid span { color: #aebcb5; font-size: 11px; }
 .scene3d-inspector-actions span { color: #a9d8b8; font-size: 11px; text-align: center; }
-.scene3d-frame { position: absolute; inset: 50% auto auto 50%; width: min(86%, calc(72vh * var(--scene-aspect))); aspect-ratio: var(--scene-aspect); transform: translate(-50%, -50%); border: 1px solid rgba(235, 248, 240, .42); pointer-events: none; }
+.scene3d-frame { position: absolute; inset: 50% auto auto 50%; transform: translate(-50%, -50%); border: 1px solid rgba(235, 248, 240, .42); pointer-events: none; }
+.scene3d-frame.framing { border-color: #86c8a5; box-shadow: 0 0 0 1px rgba(134, 200, 165, .4); }
 .scene3d-hint { position: absolute; left: 12px; bottom: 10px; margin: 0; padding: 6px 8px; color: #dce8e1; background: rgba(10, 17, 14, .72); border-radius: 4px; font-size: 12px; pointer-events: none; }
 .scene3d-cameras { display: flex; align-items: center; gap: 6px; min-height: 42px; padding: 5px 10px; border-top: 1px solid rgba(216, 235, 223, .12); overflow-x: auto; }
+.scene3d-path { border-top: 0; }
+.scene3d-point-chip { display: flex; flex: 0 0 auto; align-items: center; gap: 3px; padding: 0 4px; border: 1px solid rgba(216, 235, 223, .18); border-radius: 4px; }
+.scene3d-point-chip.active { border-color: #86c8a5; }
+.scene3d-point-chip label { display: flex; align-items: center; gap: 2px; color: #aebcb5; font-size: 11px; }
+.scene3d-point-chip input { width: 42px; height: 24px; padding: 0 3px; border: 1px solid rgba(216, 235, 223, .2); border-radius: 3px; color: #e8efeb; background: rgba(0, 0, 0, .18); font: inherit; font-size: 11px; }
+.scene3d-point-chip > button:first-child { padding: 0 6px; }
+.scene3d-point-chip > button:last-child { min-width: 24px; width: 24px; }
 .scene3d-cameras > span { color: #aebcb5; font-size: 12px; }
 .scene3d-editor.recording-only { width: 100%; height: 100%; grid-template-rows: minmax(0, 1fr); }
 .scene3d-cameras > button { flex: 0 0 auto; padding: 0 8px; border-color: rgba(216, 235, 223, .18); }
 .scene3d-cameras > button:hover { background: rgba(222, 243, 229, .14); }
+.scene3d-cameras > button:disabled { opacity: .45; cursor: not-allowed; }
 .scene3d-camera-chip { display: flex; align-items: center; border: 1px solid rgba(216, 235, 223, .18); border-radius: 4px; }
 .scene3d-camera-chip button:first-child { padding: 0 8px; min-width: auto; }
 .scene3d-camera-chip button:last-child { min-width: 24px; width: 24px; }
 .scene3d-camera-chip .mso { font-size: 15px; }
-@media (max-width: 760px) { .scene3d-toolbar { gap: 8px; } .scene3d-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) auto; } .scene3d-inspector { max-height: 260px; border-top: 1px solid rgba(216, 235, 223, .12); border-left: 0; } .scene3d-stage { min-height: 300px; } .scene3d-frame { width: 90%; } }
+@media (max-width: 760px) { .scene3d-toolbar { gap: 8px; } .scene3d-workspace, .scene3d-workspace.inspector-open { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(300px, 1fr) auto; } .scene3d-inspector { max-height: 260px; border-top: 1px solid rgba(216, 235, 223, .12); border-left: 0; } .scene3d-stage { min-height: 300px; } }
 </style>

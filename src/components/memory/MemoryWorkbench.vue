@@ -2279,6 +2279,17 @@ async function recordSceneVideo(document: Scene3DDocument, signal?: AbortSignal)
   finally { recordingScene.value = null; await nextTick() }
 }
 
+/** 编辑器里“打点后录制运镜”走这里：用隐藏录制器按画幅出片，再转成 MP4 存进视频目录 */
+async function recordScenePath(document: Scene3DDocument, title: string) {
+  if (!desktopOnlyRuntime || recordingScene.value) return
+  sceneVideoStatus.value = '运镜录制中…'
+  try {
+    await saveSceneVideo(await recordSceneVideo(document), title)
+  } catch (cause) {
+    sceneVideoStatus.value = `运镜录制失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 function mediaResultTaskId(turn: ConversationTurn): string {
   if (turn.role !== 'assistant') return ''
   return /^\[媒体结果\]\n任务\s+(mtask_[^\s，。]+)/.exec(turn.content)?.[1] || ''
@@ -2478,7 +2489,8 @@ function readDataUrl(file: File): Promise<string> {
 
     <main class="memory-main memory-chat-dock">
       <div v-if="previewResource || creationOpen" class="memory-chat-dock-resizer" title="拖动调整对话宽度" @pointerdown.prevent="startChatDockResize" />
-      <div v-if="chatDockMode === 'compact'" class="memory-chat-compact-bar">
+      <!-- 窄条只在有第三列（预览/创作面板）时才成立；没有第三列时主列必须能用完整宽度，否则会被不透明的窄条盖住 -->
+      <div v-if="chatDockMode === 'compact' && (previewResource || creationOpen)" class="memory-chat-compact-bar">
         <button class="icon-button" title="展开对话" aria-label="展开对话" @click="expandChatDock"><JcIcon name="chevron-left" /></button>
         <JcIcon v-if="sending" name="sync" class="spinning" />
         <JcIcon v-else-if="error" name="error" />
@@ -2849,6 +2861,7 @@ function readDataUrl(file: File): Promise<string> {
             @save="saveScene3D"
             @screenshot="saveSceneScreenshot"
             @video="saveSceneVideo"
+            @record="recordScenePath"
           />
           <form v-if="desktopOnlyRuntime" class="memory-scene-composer" @submit.prevent="sendSceneInstruction">
             <input v-model="sceneInstruction" data-placeholder="直接说怎么修改当前场景" placeholder="直接说怎么修改当前场景" :disabled="sceneInstructionSending || sending" />
@@ -2970,7 +2983,7 @@ function readDataUrl(file: File): Promise<string> {
 .memory-workbench.chat-dock-narrow .memory-conversation-icon, .memory-workbench.chat-dock-narrow .memory-new-conversation-icon, .memory-workbench.chat-dock-narrow .memory-model-icon { display: inline; }
 .memory-chat-compact-bar { position: absolute; z-index: 30; inset: 0; display: grid; align-content: start; justify-items: center; gap: 10px; padding-top: 10px; background: var(--paper); }
 .memory-chat-compact-bar .icon-button { width: 34px; }
-.memory-workbench.chat-dock-compact .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
+.memory-workbench.chat-dock-compact:is(.preview-open, .creation-open) .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
 .memory-workbench.chat-dock-resizing > * { transition: none !important; }
 .memory-workbench.creation-open .memory-title-drag { min-width: 0; }
 .memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: min(220px, 30%); }
