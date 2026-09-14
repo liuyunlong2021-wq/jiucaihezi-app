@@ -3168,7 +3168,8 @@ function readDataUrl(file: File): Promise<string> {
 .memory-document, .memory-model-menu { scrollbar-color: color-mix(in srgb, var(--ink3) 48%, transparent) transparent; scrollbar-width: thin; }
 .memory-document::-webkit-scrollbar, .memory-model-menu::-webkit-scrollbar { width: 10px; }
 .memory-document::-webkit-scrollbar-thumb, .memory-model-menu::-webkit-scrollbar-thumb { border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--ink3) 48%, transparent); background-clip: content-box; }
-.memory-media { display: grid; min-height: 0; padding: 20px; place-items: center; overflow: auto; }
+/* 行高必须显式 1fr：auto 行会被媒体自身撑开，导致 max-height: 100% 失效，竖屏视频会溢出容器并因容器内滚动而偏到下方 */
+.memory-media { display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; padding: 20px; place-items: center; overflow: hidden; }
 .memory-media img, .memory-media video { max-width: 100%; max-height: 100%; object-fit: contain; }
 .memory-media audio { width: min(620px, 100%); }
 .memory-preview { position: relative; z-index: 20; min-height: 0; display: grid; grid-template-rows: 48px minmax(0, 1fr); background: var(--paper); }

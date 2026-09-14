@@ -23,6 +23,11 @@ test('memory right chat dock separates preview layout and collapses to a compact
     workbench,
     /\.memory-preview[^}]*position: relative|\.memory-preview[^}]*position: static/,
   )
+  // 媒体区行高必须显式 1fr，否则 max-height: 100% 失效，竖屏视频会溢出容器并偏到下方
+  assert.match(
+    workbench,
+    /\.memory-media \{ display: grid; grid-template-rows: minmax\(0, 1fr\); min-height: 0; padding: 20px; place-items: center; overflow: hidden; \}/,
+  )
   assert.match(workbench, /if \(previewResource\.value\) closePreview\(\)/)
   assert.match(workbench, /creationMounted\.value && !\(await closeCreationHost\(\)\)/)
   assert.match(workbench, /if \(creationClosePromise\) return creationClosePromise/)

@@ -13,6 +13,7 @@
 - **追加（机位打点）**：新增“机位打点 → 点录制自动走位”的运镜能力，复用既有 timeline 的 camera 条目（只新增两个纯函数 `cameraPointsFromDocument`/`applyCameraPoints` 和底部“运镜”行）。每个点两个数值（停留/到位），焦段按点位插值（timeline camera 条目新增 `focal`，动画 SDD 的“不做焦距动画”已放宽）。运镜录制走工作台隐藏的 `recordingOnly` 编辑器按画幅出片，不能在可见编辑器里直接录（会把取景框外画面录进去）。顺手修掉 `buildScene()` 把正在编辑的机位拉回时间轴的存量问题。`vue-tsc -b` + focused `1347/1347`。
 - **追加（检视栏与录制提示）**：① 右侧检视栏在没选中对象时不再占一列宽度（`scene3d-workspace` 改默认单列，`inspector-open` 才出 260px）；② 录制/截图结果原来挤在会横向滚动的工具栏末尾、被截断导致用户“没看到成功提示”，改成压在 3D 画面上方的浮动提示（全文可读、可点关闭、10 秒自动消失、成功/错误左边框判色）。focused `1347/1347`。
 - **追加（空白界面）**：修掉“把对话栏拖成窄条后关掉 3D 编辑器，整个界面变成一片空白”的 bug。根因是 `.memory-chat-compact-bar`（`inset: 0` + 不透明 `--paper`）与 `.chat-dock-compact .memory-main > :not(...) { visibility: hidden }` 没有限定“必须存在第三列”，关掉预览后主列变满宽仍被窄条盖住；改为 `:is(.preview-open, .creation-open)` 限定 + 窄条 `v-if` 加同样的条件（移动端媒体查询早就有这道保护，桌面端漏了）。focused `1349/1349`。
+- **追加（竖屏预览）**：修掉“点开竖屏运镜 MP4，视频跑到下方、上面一大块空白”。根因在 `.memory-media`：媒体挂在该容器的唯一 `auto` 网格行里，行高由媒体自身撑开，`max-height: 100%` 的百分比因此无法解析（降级为 `none`），实测容器 `937` 高而竖屏媒体渲染成 `1771` 高，溢出 874px 且不进居中；`overflow: auto` 又让这块溢出区可滚动，点击后视野落在中段。改成显式 `grid-template-rows: minmax(0, 1fr)` + `overflow: hidden`，同一复现页上媒体从 `996×1771`（`scrollHeight 1811`）变为 `505×897`（`scrollHeight 937`）。横屏素材因 `max-width` 先命中所以一直没暴露；`ffprobe` 确认 5 条运镜成片都是 `1080×1920 / 120 帧 / 4 秒`，与取景框 9:16 一致。focused `1349/1349`。
 
 ## [2026-09-13] 修复 | 支持页补上自有联系方式（App Store 1.5 拒审）
 
