@@ -1,4 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="84" height="46" viewBox="8 8 84 46" fill="none">
-  <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100" fill="none">
+  <!-- 正方形 viewBox 是 NewAPI 的硬要求：它的 React 容器是正方形且 object-fit:cover，
+       非正方形会被裁掉左右两边（弧形两端消失）。所以这里不裁画布，改成把图形
+       居中——原图形只占 y 9~53，贴在顶部，看起来就是“logo 在上面”。
+       图形实际范围 x 9~91、y 9~53.25，居中需往下移 (100-44.25)/2-9 = 18.875。 -->
+  <g transform="translate(0, 18.875)">
+    <path d="M10 50C10 50 10 10 50 10C90 10 90 50 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M10 50C12 47 15 47 17 50C19 53 22 53 24 50C26 47 29 47 31 50C33 53 36 53 38 50C40 47 43 47 45 50C47 53 50 53 52 50C54 47 57 47 59 50C61 53 64 53 66 50C68 47 71 47 73 50C75 53 78 53 80 50C82 47 85 47 87 50C89 53 90 53 90 50" stroke="#4A5D23" stroke-width="2" stroke-linecap="round"/>
+  </g>
 </svg>
