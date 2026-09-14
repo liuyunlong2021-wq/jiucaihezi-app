@@ -318,11 +318,11 @@ test('landing assets redirect only approved download files to static hosting', a
   assert.equal(missing.status, 404);
 });
 
-test('root opens the current account sign-in', async () => {
+test('root opens the account dashboard', async () => {
   const response = await gateway.fetch(request('/'), createEnv());
 
   assert.equal(response.status, 302);
-  assert.equal(response.headers.get('Location'), 'https://api.jiucaihezi.studio/sign-in');
+  assert.equal(response.headers.get('Location'), 'https://api.jiucaihezi.studio/dashboard/overview');
 });
 
 test('landing image and logo paths redirect to static hosting', async () => {

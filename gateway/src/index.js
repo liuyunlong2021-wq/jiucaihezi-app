@@ -539,7 +539,7 @@ export default {
     try {
       if (request.method === 'OPTIONS') return handleOptions(request);
       const url = new URL(request.url);
-      if (url.pathname === '/') return Response.redirect('https://api.jiucaihezi.studio/sign-in', 302);
+      if (url.pathname === '/') return Response.redirect('https://api.jiucaihezi.studio/dashboard/overview', 302);
       if (ROOT_ICON_REDIRECTS.has(url.pathname)) return await handleRootIcon(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/health') return handleHealth(request);
       if (request.method === 'POST' && url.pathname === '/api/creations/uploads') return await handleCreationMediaUpload(request, env);
