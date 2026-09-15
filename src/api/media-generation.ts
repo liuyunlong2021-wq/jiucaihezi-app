@@ -667,12 +667,12 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   return json
 }
 
-/** 过滤安全图片 URL：仅允许 data: 和 http(s): 前缀 */
+/** 过滤请求期图片来源；blob/asset 只在同一请求边界内使用。 */
 function filterSafeImageUrls(imageUrls?: string[], imageUrl?: string): string[] {
   const urls = imageUrls?.length ? [...imageUrls] : imageUrl ? [imageUrl] : []
   return urls.filter(url => {
     const s = String(url || '').trim()
-    return s.startsWith('data:') || s.startsWith('http://') || s.startsWith('https://')
+    return s.startsWith('data:') || s.startsWith('blob:') || s.startsWith('asset:') || s.startsWith('http://') || s.startsWith('https://')
   })
 }
 

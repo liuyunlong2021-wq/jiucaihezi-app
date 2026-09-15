@@ -29,6 +29,9 @@ import {
 import type { CreationFieldSpec, CreationModelSpec, CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
 import { fetchCreationModelAvailability } from '@/services/creationModelAvailability'
 import { normalizeCreationTextField, sanitizeCreationResults } from '@/utils/creationResults'
+import type { ProjectResource } from '@/utils/projectResource'
+
+export type CreationFieldValue = string | number | boolean | string[] | ProjectResource
 
 // ─── 结果项 ───
 export interface CreationResult {
@@ -65,7 +68,7 @@ export interface CpState {
   size: string
   res: string
   dur: number
-  fieldValues: Record<string, string | number | boolean | string[]>
+  fieldValues: Record<string, CreationFieldValue>
   files: File[]
   generating: boolean
   runningTasks: number
@@ -311,12 +314,18 @@ function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   return getModelsForTask(task)[0] || 'gpt-image-2-1k'
 }
 
-function normalizeSavedFieldValues(value: unknown): Record<string, string | number | boolean | string[]> {
+function isSavedProjectResource(value: unknown): value is ProjectResource {
+  const item = value as Partial<ProjectResource> | null
+  return Boolean(item && (item.runtime === 'desktop' || item.runtime === 'web') && item.owner && item.path && item.kind === 'media')
+}
+
+function normalizeSavedFieldValues(value: unknown): Record<string, CreationFieldValue> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-  const output: Record<string, string | number | boolean | string[]> = {}
+  const output: Record<string, CreationFieldValue> = {}
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
     if (typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean') output[key] = raw
     else if (Array.isArray(raw) && raw.every(item => typeof item === 'string')) output[key] = raw
+    else if (isSavedProjectResource(raw)) output[key] = raw
   }
   return output
 }
@@ -368,9 +377,12 @@ export function saveCpState() {
     } = cpState
     // BUG-4 修复: 限制保存的结果数量，避免 URL 累积超过 localStorage 5MB 限制
     const trimmedResults = sanitizeCreationResults<CreationResult>(results, { forStorage: true })
+    const stableFieldValues = Object.fromEntries(Object.entries(fieldValues).filter(([, fieldValue]) =>
+      typeof fieldValue !== 'string' || !/^(?:data|blob|asset):/i.test(fieldValue),
+    ))
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       task, modelKey, prompt, tags, title, negativeTags, text, refText, voicePrompt,
-      language, startTime, endTime, width, height, value, mv, ar, size, res, dur, fieldValues,
+      language, startTime, endTime, width, height, value, mv, ar, size, res, dur, fieldValues: stableFieldValues,
       results: trimmedResults,
     }))
   } catch (e) {
@@ -696,7 +708,7 @@ export function setLanguage(language: string) { cpState.language = language; sav
 // Normalize persisted values before computed run plans validate them.
 syncParams()
 
-export function getModelFieldValue(field: CreationFieldSpec): string | number | boolean | string[] {
+export function getModelFieldValue(field: CreationFieldSpec): CreationFieldValue {
   const value = cpState.fieldValues[field.key]
   if (isFieldValuePresent(value)) return value
   if (isFieldValuePresent(field.defaultValue)) return field.defaultValue as string | number | boolean | string[]
@@ -705,7 +717,7 @@ export function getModelFieldValue(field: CreationFieldSpec): string | number | 
   return ''
 }
 
-export function setModelFieldValue(field: CreationFieldSpec, value: string | number | boolean | string[]) {
+export function setModelFieldValue(field: CreationFieldSpec, value: CreationFieldValue) {
   cpState.fieldValues[field.key] = value
   saveCpState()
 }

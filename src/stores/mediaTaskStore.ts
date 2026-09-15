@@ -33,7 +33,7 @@ import type {
 import { emitEvent, emitEventAsync } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
 import { writeMediaAsset } from '@/utils/mediaFileWriter'
-import { writeProjectMedia } from '@/utils/projectMediaWriter'
+import { downloadProjectMedia, writeProjectMedia } from '@/utils/projectMediaWriter'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { useProjectStore } from '@/stores/projectStore'
 import { validateMediaModelInputs } from '@/data/mediaModelInputValidation'
@@ -134,6 +134,7 @@ export interface CreationPlanSnapshot {
   usesRhAdapter: boolean
   pollKind: CreationRunPlan['pollKind']
   assetFlow: CreationRunPlan['assetFlow']
+  mediaInputTransport: CreationRunPlan['mediaInputTransport']
   submitSummary: string
   warnings?: string[]
   normalizedParams: Record<string, unknown>
@@ -157,6 +158,8 @@ export interface MediaTask {
   completedAt?: number
   /** 生成成功后的结果 URL（远程 CDN URL，历史兼容，不可变） */
   resultUrl?: string
+  /** 上游结果来源；本地落盘后不再作为日常展示主引用。 */
+  sourceUrl?: string
   /** 本地资产 URI（Desktop 预览使用） */
   assetUri?: string
   /** 当前项目内的稳定相对路径（Web/Desktop 共用） */
@@ -253,10 +256,11 @@ export interface MediaTaskSettledPayload {
 
 const TASKS_KEY = 'jc_media_tasks_v1'
 const INLINE_MEDIA_DATA_URL = /^data:(?:image|video|audio)\//i
+const TRANSIENT_MEDIA_URL = /^(?:blob:|asset:|data:(?:image|video|audio)\/)/i
 
 function withoutInlineMedia<T>(value: T): T {
   return JSON.parse(JSON.stringify(value, (_key, item) =>
-    typeof item === 'string' && INLINE_MEDIA_DATA_URL.test(item) ? '' : item,
+    typeof item === 'string' && TRANSIENT_MEDIA_URL.test(item) ? '' : item,
   )) as T
 }
 
@@ -265,7 +269,14 @@ async function loadTasks(): Promise<MediaTask[]> {
     const raw = await getItem(TASKS_KEY)
     if (!raw) return []
     const list = typeof raw === 'string' ? JSON.parse(raw) : raw
-    return Array.isArray(list) ? list : []
+    if (!Array.isArray(list)) return []
+    return list.map((task: MediaTask) => {
+      if (task.assetStatus === 'local' && (task.projectPath || task.assetUri) && task.resultUrl) {
+        task.sourceUrl ||= task.resultUrl
+        task.resultUrl = undefined
+      }
+      return task
+    })
   } catch (error) {
     if (isTauriRuntime()) throw error
     return []
@@ -332,6 +343,7 @@ function toPlanSnapshot(plan: CreationRunPlan): CreationPlanSnapshot {
     usesRhAdapter: plan.usesRhAdapter,
     pollKind: plan.pollKind,
     assetFlow: plan.assetFlow,
+    mediaInputTransport: plan.mediaInputTransport,
     submitSummary: plan.submitSummary,
     warnings: plan.warnings,
     normalizedParams: withoutInlineMedia(plan.debug.normalizedParams),
@@ -651,6 +663,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.projectPath = projectPath
       task.assetStatus = 'local'
       task.assetRetryCount = 0
+      task.sourceUrl = downloadUrl
+      task.resultUrl = undefined
       console.log('[JC] Web 创作结果已落项目文件夹:', `${projectId}/${projectPath}`)
       return
     }
@@ -658,6 +672,39 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     try {
       console.log('[JC] 开始下载创作结果:', downloadUrl.substring(0, 80))
       const dataUri = /^data:([^;,]+);base64,(.+)$/i.exec(downloadUrl)
+      const projectDir = task.directory || canvasOwner || useProjectStore().projectDir.value
+      const kind = task.type === 'video' ? 'video'
+        : task.type === 'audio' ? 'audio'
+          : task.type === 'model3d' ? 'model3d'
+            : task.type === 'text' ? 'text' : 'image'
+      const fallbackMime = kind === 'video' ? 'video/mp4'
+        : kind === 'audio' ? 'audio/mpeg'
+          : kind === 'model3d' ? 'model/gltf-binary'
+            : kind === 'text' ? 'text/plain' : 'image/png'
+      if (projectDir && !dataUri) {
+        const { filePath, projectPath } = await downloadProjectMedia({
+          url: downloadUrl,
+          headers: creationResultRequestHeaders(downloadUrl),
+          timeoutSecs: 300,
+          projectDir,
+          mime: fallbackMime,
+          kind,
+          summary: task.summary,
+          prompt: task.prompt || task.modelLabel || '',
+          taskId: task.id,
+          memory: task.memory,
+        })
+        task.assetUri = filePath
+        task.projectPath = projectPath
+        task.directory = projectDir
+        task.assetStatus = 'local'
+        task.assetRetryCount = 0
+        task.sourceUrl = /^https?:\/\//i.test(downloadUrl) ? downloadUrl : undefined
+        task.resultUrl = undefined
+        console.log('[JC] 创作结果已直接落项目文件夹:', task.assetUri)
+        void persistTasksSafely('asset-localized-project')
+        return
+      }
       let dataBase64 = dataUri?.[2] || ''
       let contentType = dataUri?.[1] || ''
       if (!dataUri) {
@@ -685,18 +732,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
 
       // ★ 桌面端有项目文件夹 → 直写到项目文件夹
-      const projectDir = task.directory || canvasOwner || useProjectStore().projectDir.value
       if (projectDir) {
-        const kind =
-          task.type === 'video'
-            ? ('video' as const)
-            : task.type === 'audio'
-              ? ('audio' as const)
-              : task.type === 'model3d'
-                ? ('model3d' as const)
-              : task.type === 'text'
-                ? ('text' as const)
-                : ('image' as const)
         const { filePath, projectPath } = await writeProjectMedia({
           dataBase64,
           mime: contentType,
@@ -713,6 +749,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.directory = projectDir
         task.assetStatus = 'local'
         task.assetRetryCount = 0
+        task.sourceUrl = /^https?:\/\//i.test(downloadUrl) ? downloadUrl : undefined
+        task.resultUrl = undefined
         console.log('[JC] 创作结果已落项目文件夹:', filePath)
         void persistTasksSafely('asset-localized-project')
         return
@@ -732,6 +770,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.assetUri = `jc-media://${result.assetId}`
       task.assetStatus = 'local'
       task.assetRetryCount = 0
+      task.sourceUrl = /^https?:\/\//i.test(downloadUrl) ? downloadUrl : undefined
+      task.resultUrl = undefined
       console.log('[JC] 创作结果已落地:', result.assetId)
       void persistTasksSafely('asset-localized')
     } catch (e) {
@@ -1197,13 +1237,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.status !== 'success' ||
       Boolean(task.projectPath || task.assetUri) ||
       (!isTauriRuntime() && !task.projectId) ||
-      !task.resultUrl
+      !(task.resultUrl || task.sourceUrl)
     )
       return false
 
     let resultUrl: string
     try {
-      resultUrl = task.resultUrl.trim()
+      resultUrl = String(task.resultUrl || task.sourceUrl).trim()
     } catch {
       return false
     }

@@ -5,7 +5,7 @@
  * 在对话区显示媒体生成任务的实时进度和最终结果。
  * 响应式连接到 mediaTaskStore，自动更新。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useMediaTaskStore, type MediaTask } from '@/stores/mediaTaskStore'
 import { emitEvent } from '@/utils/eventBus'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
@@ -15,6 +15,7 @@ import { openProjectResource } from '@/services/projectExplorerService'
 import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
 import { saveGeneratedFile } from '@/utils/exportSave'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
+import { acquireProjectMediaDisplay, type MediaDisplayLease } from '@/services/projectMediaResolver'
 
 const props = defineProps<{
   taskId: string
@@ -32,7 +33,7 @@ const isFailed = computed(() => task.value?.status === 'failed')
 const hasSaveWarning = computed(() => task.value?.status === 'success' && task.value.assetStatus === 'failed')
 const isSafeResult = computed(() => {
   const t = task.value
-  return Boolean(t && (t.projectPath || t.assetUri || t.resultUrl))
+  return Boolean(t && (t.projectPath || t.assetUri || t.resultUrl || t.sourceUrl))
 })
 const hasDisplayableResult = computed(() =>
   isSafeResult.value || Boolean(task.value?.type === 'text' && task.value.resultText),
@@ -41,7 +42,7 @@ const linkCopied = ref(false)
 const projectResource = computed<ProjectResource | undefined>(() => {
   const t = task.value
   const path = String(t?.projectPath || '')
-  const owner = String(t?.projectId || projectStore.projectDir.value || '')
+  const owner = String(t?.projectId || t?.directory || projectStore.projectDir.value || '')
   if (!t || !path || !owner) return undefined
   const mimeType = t.type === 'video' ? 'video/mp4'
     : t.type === 'audio' ? 'audio/mpeg'
@@ -56,7 +57,23 @@ const projectResource = computed<ProjectResource | undefined>(() => {
     kind: classifyProjectResource({ path, mimeType }),
   }
 })
-const displayUrl = computed(() => task.value?.resultUrl || '')
+const displayUrl = ref('')
+let displayLease: MediaDisplayLease | null = null
+watch(projectResource, async resource => {
+  displayLease?.release()
+  displayLease = null
+  displayUrl.value = task.value?.resultUrl || task.value?.sourceUrl || ''
+  if (!resource) return
+  try {
+    const lease = await acquireProjectMediaDisplay(resource)
+    if (resource !== projectResource.value) { lease.release(); return }
+    displayLease = lease
+    displayUrl.value = lease.url
+  } catch {
+    displayUrl.value = task.value?.sourceUrl || task.value?.resultUrl || ''
+  }
+}, { immediate: true })
+onBeforeUnmount(() => displayLease?.release())
 
 async function cancel() {
   await taskStore.cancelTask(props.taskId)
@@ -78,16 +95,17 @@ async function downloadCopy() {
     return
   }
   const t = task.value
-  if (!t?.resultUrl || !isAllowedCreationResultUrl(t.resultUrl)) return
+  const sourceUrl = t?.resultUrl || t?.sourceUrl
+  if (!t || !sourceUrl || !isAllowedCreationResultUrl(sourceUrl)) return
   await saveGeneratedFile({
     filename: `${t.modelLabel}_${t.id}.${t.type === 'video' ? 'mp4' : t.type === 'audio' ? 'mp3' : t.type === 'model3d' ? 'glb' : 'png'}`,
     mimeType: t.type === 'video' ? 'video/mp4' : t.type === 'audio' ? 'audio/mpeg' : t.type === 'model3d' ? 'model/gltf-binary' : 'image/png',
-    data: (await fetchCreationMediaBlob(t.resultUrl, t.type === 'video' ? 'video' : t.type === 'audio' ? 'audio' : t.type === 'model3d' ? 'model3d' : 'image')).blob,
+    data: (await fetchCreationMediaBlob(sourceUrl, t.type === 'video' ? 'video' : t.type === 'audio' ? 'audio' : t.type === 'model3d' ? 'model3d' : 'image')).blob,
   })
 }
 
 async function copyOriginalLink() {
-  const url = task.value?.resultUrl
+  const url = task.value?.sourceUrl || task.value?.resultUrl
   if (!url) return
   await navigator.clipboard.writeText(url)
   linkCopied.value = true
@@ -129,7 +147,7 @@ async function previewResult() {
     <!-- 成功 -->
     <div v-else-if="isSuccess && hasDisplayableResult" class="mtb-result">
       <div v-if="task.type === 'text' && task.resultText" class="mtb-text-result">{{ task.resultText }}</div>
-      <img v-else-if="task.type === 'image' && isAllowedCreationResultUrl(displayUrl)" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
+      <img v-else-if="task.type === 'image' && displayUrl" :src="displayUrl" loading="lazy" decoding="async" class="mtb-image" @click="previewResult" />
       <div v-else-if="task.type === 'image'" class="mtb-file-result">
         <JcIcon name="image" />
         <span>{{ projectResource ? '图片已保存到项目' : '图片已生成，等待保存' }}</span>
@@ -158,7 +176,7 @@ async function previewResult() {
         <button class="mtb-act-btn" @click="downloadCopy" title="下载副本">
           <JcIcon name="download" /> 下载
         </button>
-        <button class="mtb-act-btn" @click="copyOriginalLink" title="复制上游返回的原始链接">
+        <button v-if="task.sourceUrl || task.resultUrl" class="mtb-act-btn" @click="copyOriginalLink" title="复制上游返回的原始链接">
           <JcIcon name="link" /> {{ linkCopied ? '已复制' : '原始链接' }}
         </button>
         <button v-if="projectResource" class="mtb-act-btn" @click="revealInTree" title="在文件树中查看">

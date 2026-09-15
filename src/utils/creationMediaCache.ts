@@ -241,35 +241,39 @@ export async function cacheCreationMediaResult(params: {
   // 桌面端：下载 → output/creation/ + media_assets，不经过 documents 表
   if (isTauriRuntime() && /^https?:\/\//.test(params.url)) {
     try {
+      const projectDir = useProjectStore().projectDir.value
+      if (projectDir) {
+        const { downloadProjectMedia } = await import('@/utils/projectMediaWriter')
+        const result = await downloadProjectMedia({
+          url: params.url,
+          headers: creationResultRequestHeaders(params.url),
+          timeoutSecs: 120,
+          projectDir,
+          mime: mimeFor(params.type),
+          kind: params.type,
+          summary: params.summary,
+          prompt: params.prompt,
+          model: params.model,
+          taskId: params.taskId,
+        })
+        const contentType = normalizeContentType(result.headers, mimeFor(params.type))
+        return {
+          ref: result.filePath,
+          file: {
+            id: `proj_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+            name: result.projectPath.split('/').pop() || 'creation',
+            category: params.type, mimeType: contentType, size: 0, content: '',
+            metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId, projectPath: result.projectPath, originalUrl: params.url },
+            createdAt: Date.now(), updatedAt: Date.now(),
+          } as FileEntry,
+        }
+      }
       const { invoke } = await import('@tauri-apps/api/core')
       const dl = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
         request: { url: params.url, headers: creationResultRequestHeaders(params.url), timeout_secs: 120 },
       })
       if (dl.status >= 200 && dl.status < 300 && dl.data_base64) {
         const contentType = normalizeContentType(dl.headers || {}, mimeFor(params.type))
-        // ★ 项目文件夹优先
-        const projectDir = (await import('@/stores/projectStore')).useProjectStore().projectDir.value
-        if (projectDir) {
-          const { writeProjectMedia } = await import('@/utils/projectMediaWriter')
-          const { filePath } = await writeProjectMedia({
-            dataBase64: dl.data_base64, mime: contentType,
-            projectDir, kind: params.type,
-            summary: params.summary,
-            prompt: params.prompt,
-            model: params.model,
-            taskId: params.taskId,
-          })
-          return {
-            ref: filePath,
-            file: {
-              id: `proj_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
-              name: filePath.split('/').pop() || 'creation',
-              category: params.type, mimeType: contentType, size: 0, content: '',
-              metadata: { source: CREATION_GALLERY_SOURCE, prompt: params.prompt, model: params.model, taskId: params.taskId, projectPath: filePath },
-              createdAt: Date.now(), updatedAt: Date.now(),
-            } as FileEntry,
-          }
-        }
         // 无项目 → 回退 output/creation/
         const dataUri = `data:${contentType};base64,${dl.data_base64}`
         const name = String(params.prompt || params.model || 'creation').trim().slice(0, 50)

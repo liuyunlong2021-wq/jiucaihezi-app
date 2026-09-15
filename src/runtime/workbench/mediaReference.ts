@@ -236,7 +236,7 @@ export function buildRecentTaskReferences(
   const eligible = tasks
     .filter(task => task.status === 'success')
     .filter(task => task.type === 'image' || task.type === 'video')
-    .filter(task => Boolean(task.resultUrl))
+    .filter(task => Boolean(projectResourceForMediaTask(task) || task.resultUrl))
     .filter(task => task.sessionId === context.sessionId)
     .filter(task => (task.directory || task.projectId) === context.owner)
     .sort((a, b) => a.createdAt - b.createdAt)
@@ -252,7 +252,7 @@ export function buildRecentTaskReferences(
       kind,
       source: 'task',
       label: `本对话生成${kind === 'image' ? '图' : '视频'} ${index}`,
-      value: task.resultUrl!,
+      value: task.resultUrl || '',
       explicit: false,
       locator: { type: 'task', taskId: task.id },
     }

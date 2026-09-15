@@ -16,6 +16,7 @@
           "document_markdown_request",
           "comfy_upload_image",
           "http_download_base64",
+          "http_download_to_project",
           "http_request_stream",
           "get_api_key",
           "get_cli_api_key",

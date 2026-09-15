@@ -1416,6 +1416,7 @@ pub fn run() {
             commands::http::document_markdown_request,
             commands::http::comfy_upload_image,
             commands::http::http_download_base64,
+            commands::http::http_download_to_project,
             commands::http::http_request_stream,
             secure_store::get_api_key,
             secure_store::get_cli_api_key,

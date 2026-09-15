@@ -4,6 +4,7 @@ import type {
   CreationApiStyle,
   CreationAssetFlow,
   CreationMode,
+  CreationMediaInputTransport,
   CreationModelSpec,
   CreationPollKind,
   CreationRunPlan,
@@ -98,6 +99,7 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
     usesRhAdapter,
     pollKind: effective.pollKind,
     assetFlow: effective.assetFlow,
+    mediaInputTransport: mediaInputTransportFor(spec, effective.apiStyle, effective.assetFlow),
     submitSummary: '',
     price: spec.price,
     warnings: warnings.length ? warnings : undefined,
@@ -115,6 +117,21 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
 
   plan.submitSummary = buildSubmitSummary(plan)
   return plan
+}
+
+function mediaInputTransportFor(
+  spec: CreationModelSpec,
+  apiStyle: CreationApiStyle,
+  assetFlow: CreationAssetFlow,
+): CreationMediaInputTransport {
+  if (spec.route === 'local-comfy') return 'base64'
+  if (apiStyle === 'openai-image-edits' || apiStyle === 'xiaoyi-image-task') {
+    return 'multipart'
+  }
+  if (apiStyle === 'openai-videos' && /^veo-3\.1-/.test(spec.model)) return 'multipart'
+  if (apiStyle === 'openai-audio-speech') return 'base64'
+  if (assetFlow !== 'none' || spec.route === 'runninghub-adapter') return 'url'
+  return 'url'
 }
 
 function resolvePlanTask(
@@ -599,6 +616,12 @@ function normalizeReferenceValue(value: unknown): string {
   if (value === undefined || value === null) return ''
   if (typeof File !== 'undefined' && value instanceof File) {
     return `file:${value.name}:${value.size}:${value.type}:${value.lastModified}`
+  }
+  if (value && typeof value === 'object') {
+    const resource = value as { runtime?: unknown; owner?: unknown; path?: unknown; kind?: unknown }
+    if ((resource.runtime === 'desktop' || resource.runtime === 'web') && resource.owner && resource.path && resource.kind === 'media') {
+      return `project:${resource.runtime}:${resource.owner}:${resource.path}`
+    }
   }
   const text = String(value).trim()
   return text

@@ -82,6 +82,14 @@ test('Tauri CSP allows approved creation result CDN hosts used for media caching
   assert.match(mediaSrc, /(^|\s)https:(\s|$)/)
 })
 
+test('Tauri asset protocol can serve project media stored below .raw', () => {
+  const tauriConfig = JSON.parse(readFileSync(join(process.cwd(), 'src-tauri/tauri.conf.json'), 'utf8'))
+  const scope = tauriConfig.app?.security?.assetProtocol?.scope
+
+  assert.equal(scope?.requireLiteralLeadingDot, false)
+  assert.ok(scope?.allow?.includes('$HOME/**'))
+})
+
 test('Web CSP permits HTTPS fetches for trusted media execution results', () => {
   const headers = readFileSync(join(process.cwd(), 'public/_headers'), 'utf8')
   const connectSrc = headers.match(/connect-src[^;]+/)?.[0] || ''

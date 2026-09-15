@@ -342,7 +342,7 @@ test('memory messages expose one copy action and project GLB files use the share
   )
   assert.match(
     workbench,
-    /if \(resource\.mediaKind === 'model3d'\) \{\s+modelData\.value = data\.buffer/,
+    /if \(resource\.mediaKind === 'model3d'\) \{[\s\S]*?modelData\.value = data\.buffer/,
   )
   assert.match(mediaViewer, /<Model3DViewer[^>]*type === 'model3d'/)
   assert.match(viewer, /GLTFLoader/)
@@ -360,7 +360,8 @@ test('memory opens the latest conversation and keeps message actions at the bott
   assert.match(workbench, /class="memory-message-actions"/)
   assert.match(workbench, /\.memory-message-actions \{ display: flex; align-items: center; justify-content: flex-end;/)
   assert.match(workbench, /loadConversationAttachmentPreviews\(resource, generation\)/)
-  assert.match(workbench, /createImageBitmap\(new Blob\(\[data\.buffer\]/)
+  assert.match(workbench, /loadConversationAttachmentPreviews[\s\S]*acquireProjectMediaDisplay/)
+  assert.match(workbench, /await image\.decode\(\)/)
   assert.match(workbench, /URL\.revokeObjectURL\(url\)/)
 })
 
@@ -527,7 +528,8 @@ test('memory composer routes pasted images and media plans into the existing cre
     workbench,
     /onEvent\('media-reference:add', payload => void addProjectMediaReferences\(payload\)\)/,
   )
-  assert.match(workbench, /fileActions\.readMedia\(resource\)/)
+  assert.doesNotMatch(workbench, /fileActions\.readMedia\(resource\)/)
+  assert.match(workbench, /value: '',\s+resourcePath: resource\.path/)
   assert.match(workbench, /attachment\.resourcePath === resource\.path/)
   assert.match(workbench, /resourcePath: resource\.path/)
   assert.match(workbench, /v-for="\(plan, planIndex\) in mediaPlans\[turn\.id\]"/)
@@ -691,16 +693,14 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.doesNotMatch(workbench, /\$\{result\.url \|\| result\.text \|\| ''\}/)
   assert.match(bubble, /> \u4e0b\u8f7d\s*<\/button>/)
   assert.match(bubble, /project-filetree:locate/)
-  assert.match(bubble, /const displayUrl = computed/)
+  assert.match(bubble, /const displayUrl = ref\(''\)/)
   assert.match(bubble, /:src="displayUrl"/)
   assert.match(bubble, /loading="lazy" decoding="async"/)
   assert.doesNotMatch(bubble, /<video|<audio|preload="metadata"/)
   assert.match(bubble, /class="mtb-media-preview"/)
   assert.match(bubble, /await revealInTree\(\)/)
-  assert.doesNotMatch(
-    bubble,
-    /watch\(projectResource|projectMediaUrl|URL\.createObjectURL|URL\.revokeObjectURL/,
-  )
+  assert.match(bubble, /watch\(projectResource[\s\S]*acquireProjectMediaDisplay\(resource\)/)
+  assert.doesNotMatch(bubble, /URL\.createObjectURL|URL\.revokeObjectURL/)
   assert.match(bubble, /async function downloadCopy\(\)[\s\S]*readBinary\(resource\)/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)

@@ -48,6 +48,8 @@ export type CreationPollKind = 'none' | 'newapi-task' | 'rh-task' | 'suno-task' 
 
 export type CreationAssetFlow = 'none' | 'newapi-upload' | 'seedance-asset' | 'rh-upload'
 
+export type CreationMediaInputTransport = 'multipart' | 'url' | 'base64'
+
 export type CreationResultExtractor =
   | 'openai-image'
   | 'openai-video'
@@ -168,6 +170,7 @@ export interface CreationRunPlan {
   usesRhAdapter: boolean
   pollKind: CreationPollKind
   assetFlow: CreationAssetFlow
+  mediaInputTransport: CreationMediaInputTransport
   submitSummary: string
   price?: number | string
   warnings?: string[]

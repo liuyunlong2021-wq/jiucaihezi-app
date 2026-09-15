@@ -15,6 +15,7 @@ import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
 import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
+import { acquireProjectMediaDisplay, type MediaDisplayLease } from '@/services/projectMediaResolver'
 import type { ProjectResourceOpenResult } from '@/services/projectExplorerService'
 import { openProjectResource } from '@/services/projectExplorerService'
 import {
@@ -219,7 +220,7 @@ const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installe
 const skillInstallErrors = ref<Record<string, string>>({})
 const transientAttachments = ref<Record<string, ResolvedDirectAttachment[]>>({})
 let abortController: AbortController | null = null
-let mediaObjectUrl = ''
+let mediaDisplayLease: MediaDisplayLease | null = null
 let projectGeneration = 0
 let backlinkGeneration = 0
 let resourceOpenGeneration = 0
@@ -862,18 +863,20 @@ async function openResource(resource: ProjectResourceOpenResult) {
   }
   if (resource.type === 'media') {
     try {
-      const binary = await files.readBinary(resource.resource)
-      if (generation !== resourceOpenGeneration) return
-      const data = new Uint8Array(binary.data.byteLength)
-      data.set(binary.data)
       if (resource.mediaKind === 'model3d') {
+        const binary = await files.readBinary(resource.resource)
+        if (generation !== resourceOpenGeneration) return
+        const data = new Uint8Array(binary.data.byteLength)
+        data.set(binary.data)
         modelData.value = data.buffer
       } else {
-        mediaObjectUrl = URL.createObjectURL(new Blob(
-          [data.buffer],
-          { type: binary.mimeType || resource.resource.mimeType },
-        ))
-        mediaUrl.value = mediaObjectUrl
+        const lease = await acquireProjectMediaDisplay(resource.resource)
+        if (generation !== resourceOpenGeneration) {
+          lease.release()
+          return
+        }
+        mediaDisplayLease = lease
+        mediaUrl.value = lease.url
       }
     } catch {
       if (generation !== resourceOpenGeneration) return
@@ -1375,6 +1378,7 @@ async function send() {
   abortController = new AbortController()
   let replyCompleted = false
   try {
+    const requestAttachments = await materializeChatAttachments(pendingAttachments)
     const mediaContext = conversationMediaContext(
       [...baseTurns, userTurn],
       userTurn.id,
@@ -1387,7 +1391,7 @@ async function send() {
       userTurn,
       modelId: agentStore.currentModel,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
-      attachments: pendingAttachments,
+      attachments: requestAttachments,
       files: referencedFiles.value,
       selectedSkillNames: skillSnapshot,
       memoryQueryEnabled: memoryQuerySnapshot,
@@ -1706,20 +1710,16 @@ async function addProjectMediaReferences(payload: unknown) {
     if (resource.isDirectory || resource.kind !== 'media'
       || attachments.value.some(attachment => attachment.resourcePath === resource.path)) continue
     try {
-      const binary = await fileActions.readMedia(resource)
-      const mime = binary.mimeType || resource.mimeType || mediaMimeForPath(resource.path) || 'application/octet-stream'
-      const bytes = new Uint8Array(binary.data.byteLength)
-      bytes.set(binary.data)
-      const file = new File([bytes.buffer], resource.name, { type: mime })
+      const mime = resource.mimeType || mediaMimeForPath(resource.path) || 'application/octet-stream'
       attachments.value.push({
         id: crypto.randomUUID(),
         name: resource.name,
         mime,
-        size: binary.size,
+        size: resource.size || 0,
         kind: mime.startsWith('image/') ? 'image'
           : mime.startsWith('video/') ? 'video'
             : mime.startsWith('audio/') ? 'audio' : 'file',
-        value: await readDataUrl(file),
+        value: '',
         resourcePath: resource.path,
       })
       await nextTick()
@@ -2009,9 +2009,9 @@ async function addAttachmentFiles(selected: File[]) {
           owner, path: originalPath, data: new Uint8Array(await file.arrayBuffer()), mimeType: mime,
         })
         existing.add(resource.path)
-        resolved.push({
+      resolved.push({
           id: crypto.randomUUID(), name: file.name, mime, size: file.size, kind: 'file',
-          value: await readDataUrl(file), resourcePath: resource.path,
+          value: '', resourcePath: resource.path,
         })
         continue
       }
@@ -2029,7 +2029,7 @@ async function addAttachmentFiles(selected: File[]) {
       resolved.push({
         id: crypto.randomUUID(), name: file.name, mime, size: file.size,
         kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
-        value: await readDataUrl(file), resourcePath: resource.path,
+        value: '', resourcePath: resource.path,
       })
     } catch (cause) {
       failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`)
@@ -2307,6 +2307,7 @@ function turnAttachments(turn: ConversationTurn): Array<ConversationAttachment &
 }
 
 const conversationPreviewUrls = new Set<string>()
+const mediaPlanDisplayLeases = new Set<MediaDisplayLease>()
 
 async function loadConversationAttachmentPreviews(
   resource: Extract<ProjectResourceOpenResult, { type: 'conversation' }>,
@@ -2318,16 +2319,19 @@ async function loadConversationAttachmentPreviews(
   for (const { turnId, attachment } of candidates) {
     if (generation !== resourceOpenGeneration) return
     try {
-      const binary = await fileActions.readMedia(attachmentResource(resource.resource.owner, attachment))
-      const data = new Uint8Array(binary.data.byteLength)
-      data.set(binary.data)
-      const bitmap = await createImageBitmap(new Blob([data.buffer], { type: binary.mimeType || attachment.mime }))
-      const scale = Math.min(1, 160 / Math.max(bitmap.width, bitmap.height))
+      const lease = await acquireProjectMediaDisplay(attachmentResource(resource.resource.owner, attachment))
+      const image = new Image()
       const canvas = document.createElement('canvas')
-      canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-      canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-      canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-      bitmap.close()
+      try {
+        image.src = lease.url
+        await image.decode()
+        const scale = Math.min(1, 160 / Math.max(image.naturalWidth, image.naturalHeight))
+        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+        canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
+      } finally {
+        lease.release()
+      }
       const thumbnail = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.78))
       if (!thumbnail) continue
       const value = URL.createObjectURL(thumbnail)
@@ -2402,7 +2406,7 @@ async function resolveMediaPlanReferences(plan: MediaPlan, context: MediaContext
 function mediaReferenceResolvers(): MediaReferenceResolvers {
   return {
     async readProject(locator) {
-      return fileActions.readMediaDataUrl({
+      const lease = await acquireProjectMediaDisplay({
         runtime: locator.runtime,
         owner: locator.owner,
         path: locator.path,
@@ -2411,15 +2415,21 @@ function mediaReferenceResolvers(): MediaReferenceResolvers {
         isDirectory: false,
         kind: 'media',
       })
+      mediaPlanDisplayLeases.add(lease)
+      return lease.url
     },
     async readTask(taskId) {
       const task = mediaTaskStore.getTask(taskId)
       if (task?.status !== 'success') return ''
       const resource = projectResourceForMediaTask(task)
       if (resource) {
-        try { return await fileActions.readMediaDataUrl(resource) } catch { /* result URL fallback */ }
+        try {
+          const lease = await acquireProjectMediaDisplay(resource)
+          mediaPlanDisplayLeases.add(lease)
+          return lease.url
+        } catch { /* result URL fallback */ }
       }
-      return task.resultUrl || ''
+      return task.resultUrl || task.sourceUrl || ''
     },
   }
 }
@@ -2437,13 +2447,15 @@ function attachmentResource(owner: string, attachment: ConversationAttachment): 
 }
 
 function releaseMediaUrl() {
-  if (mediaObjectUrl) URL.revokeObjectURL(mediaObjectUrl)
-  mediaObjectUrl = ''
+  mediaDisplayLease?.release()
+  mediaDisplayLease = null
   mediaUrl.value = ''
   modelData.value = null
 }
 
 function releaseConversationPreviewUrls() {
+  for (const lease of mediaPlanDisplayLeases) lease.release()
+  mediaPlanDisplayLeases.clear()
   const generated = new Set(conversationPreviewUrls)
   for (const url of generated) URL.revokeObjectURL(url)
   conversationPreviewUrls.clear()
@@ -2456,13 +2468,25 @@ function releaseConversationPreviewUrls() {
   transientAttachments.value = next
 }
 
-function readDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(new Error(`无法读取附件：${file.name}`))
-    reader.readAsDataURL(file)
-  })
+async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Promise<ResolvedDirectAttachment[]> {
+  return Promise.all(items.map(async attachment => {
+    if (attachment.value || !attachment.resourcePath || attachment.textContent) return attachment
+    const resource: ProjectResource = {
+      runtime: desktopRuntime ? 'desktop' : 'web',
+      owner: projectOwner.value,
+      path: attachment.resourcePath,
+      name: attachment.name,
+      isDirectory: false,
+      kind: attachment.kind === 'file' ? 'binary' : 'media',
+      mimeType: attachment.mime,
+    }
+    const binary = await files.readBinary(resource)
+    let content = ''
+    for (let offset = 0; offset < binary.data.length; offset += 0x8000) {
+      content += String.fromCharCode(...binary.data.subarray(offset, offset + 0x8000))
+    }
+    return { ...attachment, value: `data:${binary.mimeType || attachment.mime};base64,${btoa(content)}` }
+  }))
 }
 </script>
 

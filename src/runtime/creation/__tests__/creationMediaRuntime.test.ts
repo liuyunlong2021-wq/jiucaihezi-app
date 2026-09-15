@@ -9,6 +9,7 @@ import { buildCreationRunPlan } from '../creationMediaPlan'
 import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
+  materializeMediaInput,
 } from '../creationMediaRuntime'
 import { getCreationModelSpec } from '../creationModelRegistry'
 
@@ -21,6 +22,28 @@ test('creation MCP submissions opt into project media persistence', () => {
   assert.match(source, /dev_read_external_file/)
   assert.match(source, /参考图不可读取或超过 50 MB/)
   assert.match(readFileSync('src/stores/mediaTaskStore.ts', 'utf8'), /task\.directory \|\| canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
+})
+
+test('media transport materializes only at the request boundary', { concurrency: false }, async () => {
+  let uploads = 0
+  const upload = async () => {
+    uploads += 1
+    return 'https://cdn.example.test/reference.png'
+  }
+
+  assert.equal(await materializeMediaInput('blob:reference', 'multipart', upload), 'blob:reference')
+  assert.equal(uploads, 0)
+  assert.equal(await materializeMediaInput('blob:reference', 'url', upload), 'https://cdn.example.test/reference.png')
+  assert.equal(uploads, 1)
+
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(new Blob(['audio'], { type: 'audio/mpeg' }))
+  try {
+    assert.match(await materializeMediaInput('blob:reference', 'base64', upload), /^data:audio\/mpeg;base64,/)
+    assert.equal(uploads, 1)
+  } finally {
+    globalThis.fetch = previousFetch
+  }
 })
 
 async function installGatewaySession() {
@@ -215,31 +238,17 @@ test('Xiaoyi image upload uses the actual JPEG MIME type', { concurrency: false 
   }
 })
 
-test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Type', { concurrency: false }, async () => {
+test('Xiaoyi multipart loads the source Blob directly and trusts its bytes over Content-Type', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
-  const previousWindow = Object.getOwnPropertyDescriptor(globalThis, 'window')
-
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: {
-      __TAURI_INTERNALS__: {
-        async invoke(command: string, args?: { request?: { url?: string } }) {
-          if (command === 'http_download_base64') {
-            return {
-              status: 200,
-              data_base64: '/9j/2Q==',
-              headers: { 'content-type': 'image/png' },
-            }
-          }
-          throw new Error(`Unexpected invoke ${command}`)
-        },
-      },
-    },
-  })
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
+    if (url === 'https://cdn.example.test/reference-without-extension') {
+      return new Response(new Uint8Array([0xff, 0xd8, 0xff, 0xd9]), {
+        headers: { 'content-type': 'image/png' },
+      })
+    }
     if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal((body.get('image[]') as Blob).type, 'image/jpeg')
@@ -261,8 +270,6 @@ test('Desktop Xiaoyi upload trusts downloaded bytes over a misleading Content-Ty
     await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
   } finally {
     globalThis.fetch = previousFetch
-    if (previousWindow) Object.defineProperty(globalThis, 'window', previousWindow)
-    else delete (globalThis as any).window
     await restoreStorage()
   }
 })
@@ -359,17 +366,20 @@ test('P4 RunningHub GPT2 runtime preserves RH aspectRatio and polls via rh-adapt
   }
 })
 
-test('RunningHub image edit sends canvas data directly to the RH adapter', async () => {
+test('RunningHub URL contract uploads local canvas data once before adapter submit', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const image = 'data:image/png;base64,aGVsbG8='
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    assert.notEqual(url.endsWith('/api/creations/uploads'), true)
+    if (url.endsWith('/api/creations/uploads')) {
+      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
+      return Response.json({ url: 'https://cdn.example.test/rh-input.png' })
+    }
     if (url.endsWith('/v1/images/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.deepEqual(body.images, [image])
+      assert.deepEqual(body.images, ['https://cdn.example.test/rh-input.png'])
       return Response.json({ task_id: 'rh_canvas_data_001', status: 'processing' })
     }
     if (url.endsWith('/rh/tasks/rh_canvas_data_001')) {
@@ -1038,18 +1048,21 @@ test('KIK uploads local video and audio before submitting them to NewAPI', { con
   }
 })
 
-test('ZX Grok sends local reference data directly without the deleted upload route', async () => {
+test('ZX Grok URL contract uploads local reference before model submit', async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   const image = 'data:image/png;base64,aGVsbG8='
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    assert.equal(url.endsWith('/api/creations/uploads'), false)
+    if (url.endsWith('/api/creations/uploads')) {
+      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
+      return Response.json({ url: 'https://cdn.example.test/grok-input.png' })
+    }
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'grok-1.5-video-10s')
-      assert.equal(body.image, image)
+      assert.equal(body.image, 'https://cdn.example.test/grok-input.png')
       return Response.json({ task_id: 'zx_grok_10_001', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/zx_grok_10_001')) {

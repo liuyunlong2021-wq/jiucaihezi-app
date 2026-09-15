@@ -94,12 +94,6 @@ async function recoverOversizedCanvas(
   })
 }
 
-function binaryDataUrl(data: Uint8Array, mimeType?: string): string {
-  let binary = ''
-  for (let offset = 0; offset < data.length; offset += 0x8000) binary += String.fromCharCode(...data.subarray(offset, offset + 0x8000))
-  return `data:${mimeType || 'application/octet-stream'};base64,${btoa(binary)}`
-}
-
 export function mediaMimeForPath(path: string): string | undefined {
   const extension = path.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1]
   return extension && ({
@@ -148,13 +142,6 @@ export function createProjectFileActions(projectFiles: ProjectFileService) {
         throw new Error('不是有效的项目媒体资源')
       }
       return await projectFiles.readBinary(resource)
-    },
-    async readMediaDataUrl(resource: ProjectResource): Promise<string> {
-      if (resource.kind !== 'media' || resource.isDirectory) {
-        throw new Error('不是有效的项目媒体资源')
-      }
-      const binary = await projectFiles.readBinary(resource)
-      return binaryDataUrl(binary.data, binary.mimeType || resource.mimeType || mediaMimeForPath(resource.path))
     },
     async exportResources(input: ExportProjectResourcesInput): Promise<void> {
       if (!input.resources.length) throw new Error('请先选择项目资源')

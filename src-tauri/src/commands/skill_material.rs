@@ -70,7 +70,7 @@ fn reject_symlink_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_public_http_url(value: &str) -> Result<(), String> {
+pub(crate) fn validate_public_http_url(value: &str) -> Result<(), String> {
     let url = reqwest::Url::parse(value).map_err(|_| "文档 URL 无效".to_string())?;
     if !matches!(url.scheme(), "http" | "https") {
         return Err("文档 URL 只支持 http/https".into());

@@ -75,12 +75,23 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           args: {
             input?: Record<string, string>
             paths?: string[]
-            request?: { url?: string }
+            request?: {
+              url?: string
+              root?: string
+              relative_path?: string
+            }
           } = {},
         ) {
           if (command === 'http_download_base64') {
             downloads.push(args.request?.url || '')
             return { status: 200, data_base64: 'cG5n', headers: { 'content-type': 'image/png' } }
+          }
+          if (command === 'http_download_to_project') {
+            const root = args.request?.root || ''
+            const path = args.request?.relative_path || ''
+            downloads.push(args.request?.url || '')
+            projectContents(root).set(path, 'png')
+            return { status: 200, relative_path: path, bytes_written: 3 }
           }
           if (command === 'http_request') {
             const url = args.request?.url || ''
@@ -757,7 +768,8 @@ test(
       assert.equal(task?.projectPath, write.path)
       assert.equal(task?.assetStatus, 'local')
       assert.equal(task?.assetUri, undefined)
-      assert.equal(task?.resultUrl, resultUrl)
+      assert.equal(task?.resultUrl, undefined)
+      assert.equal(task?.sourceUrl, resultUrl)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       globalThis.fetch = previousFetch
@@ -811,7 +823,8 @@ test(
 
       await waitFor(() => store.getTask(taskId)?.status === 'success')
       const task = store.getTask(taskId)
-      assert.equal(task?.resultUrl, resultUrl)
+      assert.equal(task?.resultUrl, undefined)
+      assert.equal(task?.sourceUrl, resultUrl)
       assert.equal(task?.assetStatus, 'local')
       assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
     } finally {
@@ -1345,7 +1358,8 @@ test(
       const task = store.getTask(taskId)
 
       assert.equal(files.downloads.length, 0)
-      assert.equal(task?.resultUrl, '')
+      assert.equal(task?.resultUrl, undefined)
+      assert.equal(task?.sourceUrl, undefined)
       assert.match(task?.assetUri || '', /^\/projects\/base64-image\/jc-media\/images\//)
       assert.equal(task?.assetStatus, 'local')
       assert.equal(JSON.stringify(task?.params).includes('data:image/'), false)
@@ -2269,7 +2283,8 @@ test(
       const task = store.getTask(taskId)
 
       assert.equal(task?.status, 'success')
-      assert.equal(task?.resultUrl, 'https://webstatic.aiproxy.vip/output/rh-success.png')
+      assert.equal(task?.resultUrl, undefined)
+      assert.equal(task?.sourceUrl, 'https://webstatic.aiproxy.vip/output/rh-success.png')
       assert.equal(task?.error?.category, 'persistence')
     } finally {
       __setCreationSubmitExecutorForTests(null)
@@ -2443,7 +2458,8 @@ test(
       const task = store.getTask('mtask_restore_by_poll_url')
 
       assert.equal(task?.status, 'success')
-      assert.equal(task?.resultUrl, 'https://webstatic.aiproxy.vip/output/rh-restore.mp4')
+      assert.equal(task?.resultUrl, undefined)
+      assert.equal(task?.sourceUrl, 'https://webstatic.aiproxy.vip/output/rh-restore.mp4')
       assert.equal(
         requestedUrls.some(url => url.endsWith('/rh/tasks/rh_restore_001')),
         true,
@@ -2620,10 +2636,10 @@ test('MediaTaskBubble stays on the memory-workbench project and media paths', ()
     source.includes("import { isAllowedCreationResultUrl } from '@/utils/urlSafety'"),
     true,
   )
-  assert.match(source, /const isSafeResult = computed\(\(\) => \{[\s\S]*t\.projectPath \|\| t\.assetUri \|\| t\.resultUrl/)
+  assert.match(source, /const isSafeResult = computed\(\(\) => \{[\s\S]*t\.projectPath \|\| t\.assetUri \|\| t\.resultUrl \|\| t\.sourceUrl/)
   assert.equal(source.includes('taskStore.retryMediaPersistence(props.taskId)'), true)
   assert.equal(source.includes('const binary = await projectFiles.readBinary(resource)'), true)
-  assert.match(source, /fetchCreationMediaBlob\(t\.resultUrl/)
+  assert.match(source, /fetchCreationMediaBlob\(sourceUrl/)
   assert.doesNotMatch(source, /workbenchMode|fetchBlobForExport|sendToGallery|sendAsReference/)
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
   assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)

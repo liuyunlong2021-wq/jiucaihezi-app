@@ -40,6 +40,25 @@ test('image size matrix preserves ratio and upstream constraints', () => {
   }
 })
 
+test('run plan chooses media transport from the effective API contract', () => {
+  const multipart = buildCreationRunPlan({
+    modelId: 'gpt-image-2.5-1k',
+    params: { prompt: 'edit', images: ['blob:local-reference'] },
+  })
+  const url = buildCreationRunPlan({
+    modelId: 'newapi/dola/seedance2.5',
+    params: { prompt: 'animate', images: ['blob:local-reference'] },
+  })
+  const base64 = buildCreationRunPlan({
+    modelId: 'seed-audio-1.0',
+    params: { prompt: 'speak', audios: ['blob:local-reference'] },
+  })
+
+  assert.equal(multipart.mediaInputTransport, 'multipart')
+  assert.equal(url.mediaInputTransport, 'url')
+  assert.equal(base64.mediaInputTransport, 'base64')
+})
+
 test('image MIME detection covers desktop reference formats', () => {
   assert.equal(detectImageMimeFromBytes(Uint8Array.from([0xff, 0xd8, 0xff])), 'image/jpeg')
   assert.equal(detectImageMimeFromBytes(Uint8Array.from([0x42, 0x4d, 0, 0])), 'image/bmp')

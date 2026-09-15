@@ -593,7 +593,7 @@ test('project file preview ignores stale OPFS reads and revokes stale object URL
   assert.match(preview, /const requestId = \+\+filePreviewRequestId/)
   assert.match(
     preview,
-    /if \(requestId !== filePreviewRequestId\) \{\s+URL\.revokeObjectURL\(objectUrl\)\s+return\s+}/,
+    /if \(requestId !== filePreviewRequestId\) \{\s+lease\.release\(\)\s+return\s+}/,
   )
-  assert.match(preview, /if \(requestId !== filePreviewRequestId\) return/)
+  assert.match(preview, /filePreviewLease = lease/)
 })

@@ -126,12 +126,8 @@ test('creation panel uses a static video reference node without a fake canvas pl
   assert.doesNotMatch(source, /videoPreview/)
   assert.match(source, /createVideoReferenceNode/)
   assert.match(source, /stripRuntimeVideoPoster/)
-  assert.match(source, /getMediaSubmissionUrl/)
-  assert.match(
-    source,
-    /async function getMediaSubmissionUrl\(filePath: string, owner: string, maxBytes\?: number\): Promise<string>/,
-  )
-  assert.match(source, /result\.truncated/)
+  assert.match(source, /acquireProjectMediaDisplay/)
+  assert.doesNotMatch(source, /async function getMediaSubmissionUrl|dev_read_file/)
   assert.match(source, /canvasMediaPosition/)
   assert.match(source, /fitCanvasImageSize/)
   assert.match(source, /selectCanvasReferences/)
@@ -194,7 +190,7 @@ test('creation panel restores the canvas once after applying every media change 
   assert.doesNotMatch(reconcile, /flattenProjectResourceChange\(change\)\.forEach/)
 })
 
-test('Desktop audio playback reads project bytes instead of relying on the asset protocol', () => {
+test('Desktop audio playback uses the shared display lease without reading project bytes', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const toggleAudio =
     source.match(
@@ -203,8 +199,9 @@ test('Desktop audio playback reads project bytes instead of relying on the asset
 
   assert.match(
     toggleAudio,
-    /const src = isTauriRuntime\(\)[\s\S]{0,120}\? await getMediaSubmissionUrl\(filePath, owner\)[\s\S]{0,80}: await getMediaRuntimeUrl\(filePath, owner\)/,
+    /const src = await getMediaRuntimeUrl\(filePath, owner\)/,
   )
+  assert.doesNotMatch(toggleAudio, /getMediaSubmissionUrl|readAsDataURL|dev_read_file/)
   assert.match(toggleAudio, /audio\.onerror/)
 })
 
@@ -265,7 +262,7 @@ test('selected canvas audio is submitted as a Seed Audio reference', () => {
   assert.doesNotMatch(source, /if \(asset\.kind === 'audio'\) continue/)
   assert.match(source, /buildCurrentCreationParams\(\{ images, videos, audios \}\)/)
   assert.match(source, /audios \? `\$\{audios\} 音频` : ''/)
-  assert.match(source, /catch \(error\) \{\s+if \(maxBytes\) throw error/)
+  assert.doesNotMatch(source, /getMediaSubmissionUrl|readAsDataURL/)
 })
 
 test('canvas annotations are local to the selected image and export only that image', () => {
@@ -282,10 +279,11 @@ test('canvas annotations are local to the selected image and export only that im
   assert.match(source, /drawingImage\.add\(drawing\)/)
   assert.match(source, /target\.node\.add\(text\)/)
   assert.match(source, /target\.node\.add\(marker\)/)
-  assert.match(source, /function getCanvasImageSubmissionUrl[\s\S]*?hasCanvasImageAnnotations[\s\S]*?const composite = node\.clone\(\)[\s\S]*?composite\.export\('png'/)
+  assert.match(source, /function getCanvasImageRequestUrl[\s\S]*?hasCanvasImageAnnotations[\s\S]*?const composite = node\.clone\(\)[\s\S]*?composite\.export\('png'/)
   assert.match(source, /clip: \{ x: 0, y: 0, width: Number\(image\.width\), height: Number\(image\.height\) \}/)
   assert.match(source, /size: naturalSize/)
-  assert.match(source, /asset\.kind === 'image'\s+\? await getCanvasImageSubmissionUrl\(node, asset\.id, mediaPath, owner, maxBytes\)/)
+  assert.match(source, /asset\.kind === 'image'\s+\? await getCanvasImageRequestUrl\(node, asset\.id, mediaPath, owner, maxBytes, objectUrls\)/)
+  assert.match(source, /URL\.createObjectURL\(exported\.data\)/)
   assert.match(source, /if \(maxBytes \&\& exported\.data\.size > maxBytes\)/)
   assert.match(source, /const imageAtEvent = \(event: any\)/)
   assert.match(source, /const imageAtEventForNode = \(event: any, node: any\)/)
@@ -416,7 +414,8 @@ test('creation panel uses selected canvas media as references without auto-targe
     source.match(/if \(selected\.length && canvasStore\.canvasPath\) \{[\s\S]*?\n  \}/)?.[0] || ''
 
   assert.match(target, /const owner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
-  assert.match(target, /getMediaSubmissionUrl/)
+  assert.match(target, /getMediaRuntimeUrl\(mediaPath, owner\)/)
+  assert.doesNotMatch(target, /readAsDataURL|getMediaSubmissionUrl/)
   assert.doesNotMatch(target, /canvasTarget =/)
   assert.doesNotMatch(source, /canvasTarget,\s*\n\s*\}\)/)
 })
@@ -475,29 +474,21 @@ test('creation panel fences stale restores and drains queued media after restora
     source,
     /async function createAndOpenCanvas[\s\S]*?await flushCanvasSave\(\)[\s\S]*?createCanvasFile\(owner\)/,
   )
-  assert.match(source, /onBeforeUnmount\(\(\) => \{\s+\+\+canvasLoadToken/)
+  assert.match(source, /onBeforeUnmount\(\(\) => \{[\s\S]{0,140}\+\+canvasLoadToken/)
 })
 
 test('creation panel resolves Web project media without serializing object URLs', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const runtime =
     source.match(
-      /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
+      /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nfunction getCanvasImageContent/,
     )?.[0] || ''
 
   assert.match(source, /const projectFiles = createRuntimeProjectFileService\(\)/)
   assert.match(source, /createProjectFileActions\(projectFiles\)/)
-  assert.match(source, /projectFileActions\.readMedia\(\{/)
-  assert.match(source, /const bytes = new Uint8Array\(binary\.data\.byteLength\)/)
-  assert.match(source, /bytes\.set\(binary\.data\)/)
-  assert.match(
-    source,
-    /URL\.createObjectURL\(new Blob\(\[bytes\.buffer\], \{ type: binary\.mimeType \}\)\)/,
-  )
-  assert.match(source, /URL\.revokeObjectURL\(url\)/)
+  assert.match(source, /acquireProjectMediaDisplay\(\{/)
   assert.match(source, /canvasAssetUrlResolver\.releaseAll\(\)/)
   assert.match(source, /releaseCanvasRuntimeMediaUrls\(\)\s+app\.tree\.clear\(\)/)
-  assert.match(source, /projectFileActions\.readMediaDataUrl\(\{/)
   assert.match(
     source,
     /isTauriRuntime\(\) \? `\$\{projectDir\}\/\$\{asset\.resource\.path\}` : asset\.resource\.path,\s+asset\.id,\s+owner,\s+canContinue/,
@@ -512,10 +503,10 @@ test('creation panel resolves Web project media without serializing object URLs'
   )
   assert.match(
     source,
-    /getMediaSubmissionUrl\(\s+isTauriRuntime\(\) \? `\$\{owner\}\/\$\{mediaPath\}` : mediaPath,\s+owner,\s+maxBytes,?\s+\)/,
+    /getMediaRuntimeUrl\(mediaPath, owner\)/,
   )
-  assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, filePath/)
-  assert.match(runtime, /projectFileActions\.readMedia\(\{/)
+  assert.match(runtime, /canvasAssetUrlResolver\.acquire\(owner, path/)
+  assert.match(runtime, /acquireProjectMediaDisplay\(\{/)
   assert.match(source, /import \{ CanvasAssetUrlResolver \}/)
 })
 
@@ -539,7 +530,7 @@ test('creation panel resolves file-tree media from its project-relative event pa
     /captureCanvasMediaRequest\(filePath, kind, 'import', label, '', \{[\s\S]{0,100}owner: projectId,[\s\S]{0,60}loadToken: canvasLoadToken/,
   )
   assert.doesNotMatch(receiver, /payload\.url/)
-  assert.match(source, /if \(!owner \|\| !isWebProjectMediaPath\(filePath\)\) return filePath/)
+  assert.match(source, /if \(!owner \|\| \(!isTauriRuntime\(\) && !isWebProjectMediaPath\(filePath\)\)\) return filePath/)
   assert.match(mounted, /addFileTreeMediaToCanvas\(payload\)/)
 })
 
@@ -660,7 +651,7 @@ test('creation panel scopes task write gates to the current owner and canvas pat
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const mediaUrl =
     source.match(
-      /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nasync function getMediaSubmissionUrl/,
+      /async function getMediaRuntimeUrl[\s\S]*?\n}\n\nfunction getCanvasImageContent/,
     )?.[0] || ''
   const fit =
     source.match(
@@ -691,7 +682,7 @@ test('creation panel scopes task write gates to the current owner and canvas pat
     source,
     /function isCurrentCanvasMediaRequest\(request: CanvasMediaOwnership\): boolean \{[\s\S]*?request\.owner === canvasMediaOwner\(\)[\s\S]*?request\.owner === selectedCanvasOwner\(\)/,
   )
-  assert.match(mediaUrl, /const projectDir = owner/)
+  assert.match(mediaUrl, /const path = isTauriRuntime\(\) \? mediaPathForStorage\(filePath, owner\) : filePath/)
   assert.doesNotMatch(mediaUrl, /useProjectStore\(\)\.projectDir\.value/)
   assert.match(
     fit,
@@ -889,7 +880,7 @@ test('creation panel delegates persisted previews to the host and keeps failed-s
   assert.match(preview, /showTaskHistory\.value = false[\s\S]*emit\('previewResource', resource\)/)
   assert.match(
     preview,
-    /if \(task\.resultUrl && isAllowedCreationResultUrl\(task\.resultUrl\)\)[\s\S]*taskPreview\.value =/,
+    /const sourceUrl = task\.resultUrl \|\| task\.sourceUrl[\s\S]*if \(sourceUrl && isAllowedCreationResultUrl\(sourceUrl\)\)[\s\S]*taskPreview\.value =/,
   )
   assert.match(source, /<MediaViewer[\s\S]*v-if="taskPreview"/)
   assert.doesNotMatch(preview, /readMedia|createObjectURL/)
@@ -986,9 +977,10 @@ test('Dola successful tasks can copy the original safe result URL without downlo
   assert.match(copy, /\[task\.model, task\.modelLabel\][\s\S]*includes\('dola'\)/)
   assert.match(copy, /!task\.projectPath/)
   assert.match(copy, /!task\.assetUri/)
-  assert.match(copy, /isSafePublicHttpUrl\(task\.resultUrl\)/)
-  assert.doesNotMatch(copy, /isAllowedCreationResultUrl\(task\.resultUrl\)/)
-  assert.match(copy, /await writeClipboardText\(task\.resultUrl\)/)
+  assert.match(copy, /const sourceUrl = task\.sourceUrl \|\| task\.resultUrl/)
+  assert.match(copy, /isSafePublicHttpUrl\(sourceUrl\)/)
+  assert.doesNotMatch(copy, /isAllowedCreationResultUrl/)
+  assert.match(copy, /await writeClipboardText\(sourceUrl\)/)
   assert.doesNotMatch(copy, /fetch\(|download|retryMediaPersistence|regenerateTask/)
   assert.match(
     source,
@@ -1003,7 +995,7 @@ test('Dola successful tasks download the original URL as a prompt-named mp4', ()
   )?.[0] || ''
 
   assert.match(source, /<button v-if="canDownloadDolaResult\(task\)" @click="downloadDolaResult\(task\)">下载链接<\/button>/)
-  assert.match(download, /fetchCreationMediaBlob\(task\.resultUrl, 'video', true\)/)
+  assert.match(download, /fetchCreationMediaBlob\(sourceUrl, 'video', true\)/)
   assert.match(download, /http_download_base64/)
   assert.match(download, /new Uint8Array\(binary\.length\)/)
   assert.match(download, /saveGeneratedFile\(/)

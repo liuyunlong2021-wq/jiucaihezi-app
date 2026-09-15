@@ -15,7 +15,7 @@ import {
   type MediaResult,
   type VideoGenParams,
 } from '@/api/media-generation'
-import type { CreationRunPlan } from './creationMediaTypes'
+import type { CreationMediaInputTransport, CreationRunPlan } from './creationMediaTypes'
 import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
@@ -142,6 +142,7 @@ export async function executeCreationSubmitRequest(
   signal?: AbortSignal,
 ): Promise<MediaResult> {
   if (signal) request = { ...request, signal }
+  request = await materializeRequestMedia(request)
   if (request.runtime === 'local-comfy') return executeLocalComfyRequest(request, onProgress, onSubmitted)
   if (request.runtime === 'newapi-direct') {
     if (request.taskType === 'image') return executeDirectImageRequest(request, onProgress, onSubmitted)
@@ -151,6 +152,74 @@ export async function executeCreationSubmitRequest(
   if (request.taskType === 'image') return executeRunningHubImageRequest(request, onProgress, onSubmitted)
   if (request.taskType === 'video') return executeRunningHubVideoRequest(request, onProgress, onSubmitted)
   return executeRunningHubAudioRequest(request, onProgress, onSubmitted)
+}
+
+export async function materializeMediaInput(
+  source: string,
+  transport: CreationMediaInputTransport,
+  upload: typeof uploadCreationAsset = uploadCreationAsset,
+  signal?: AbortSignal,
+): Promise<string> {
+  if (!source || transport === 'multipart') return source
+  if (transport === 'url') return upload(source, signal)
+  if (source.startsWith('data:')) return source
+  const response = await fetch(source, { signal })
+  if (!response.ok) throw new Error(`读取本地素材失败 (${response.status})`)
+  const blob = await response.blob()
+  const bytes = new Uint8Array(await blob.arrayBuffer())
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+  }
+  return `data:${blob.type || 'application/octet-stream'};base64,${btoa(binary)}`
+}
+
+async function materializeRequestMedia(request: CreationSubmitRequest): Promise<CreationSubmitRequest> {
+  const transport = request.plan.mediaInputTransport
+  const cache = new Map<string, Promise<string>>()
+  const materialize = (value: string) => {
+    const pending = cache.get(value) || materializeMediaInput(value, transport, uploadCreationAsset, request.signal)
+    cache.set(value, pending)
+    return pending
+  }
+  const convert = (value?: string) => value ? materialize(value) : Promise.resolve(undefined)
+  const convertMany = (values?: string[]) => Promise.all((values || []).map(materialize))
+  const plan = {
+    ...request.plan,
+    debug: {
+      ...request.plan.debug,
+      normalizedParams: { ...request.plan.debug.normalizedParams },
+    },
+  }
+  for (const [key, value] of Object.entries(plan.debug.normalizedParams)) {
+    if (!/(?:^|:)(?:image|images|video|videos|audio|audios)$/i.test(key)) continue
+    if (typeof value === 'string') plan.debug.normalizedParams[key] = await materialize(value)
+    else if (Array.isArray(value)) plan.debug.normalizedParams[key] = await convertMany(value.map(String))
+  }
+  return {
+    ...request,
+    plan,
+    imageParams: request.imageParams ? {
+      ...request.imageParams,
+      image: Array.isArray(request.imageParams.image)
+        ? await convertMany(request.imageParams.image)
+        : await convert(request.imageParams.image),
+    } : undefined,
+    videoParams: request.videoParams ? {
+      ...request.videoParams,
+      imageUrl: await convert(request.videoParams.imageUrl),
+      imageUrls: await convertMany(request.videoParams.imageUrls),
+      videoUrl: await convert(request.videoParams.videoUrl),
+      videoUrls: await convertMany(request.videoParams.videoUrls),
+      audioUrl: await convert(request.videoParams.audioUrl),
+      audioUrls: await convertMany(request.videoParams.audioUrls),
+    } : undefined,
+    audioParams: request.audioParams ? {
+      ...request.audioParams,
+      audioUrl: await convert(request.audioParams.audioUrl),
+      audioUrls: await convertMany(request.audioParams.audioUrls),
+    } : undefined,
+  }
 }
 
 async function executeLocalComfyRequest(
@@ -426,34 +495,13 @@ async function executeDirectImageRequest(
 async function imageReferenceToBlob(source: string, signal?: AbortSignal): Promise<Blob> {
   throwIfCreationAborted(signal)
   if (source.startsWith('data:')) return dataUrlToBlob(source)
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    const downloaded = await invoke<{ status: number; data_base64: string; headers?: Record<string, string> }>('http_download_base64', {
-      request: { url: source, timeout_secs: 60 },
-    })
-    throwIfCreationAborted(signal)
-    if (downloaded.status >= 200 && downloaded.status < 300 && downloaded.data_base64) {
-      return base64ToBlob(downloaded.data_base64, imageMimeFromHeaders(downloaded.headers))
-    }
-  } catch {
-    // Browser references retain the established fetch fallback below.
-  }
   const response = await fetch(source, { signal })
   if (!response.ok) throw new Error('无法加载参考图片')
   const blob = await response.blob()
-  const bytes = new Uint8Array(await blob.arrayBuffer())
-  return new Blob([bytes], { type: detectImageMimeFromBytes(bytes) || blob.type || 'application/octet-stream' })
-}
-
-function base64ToBlob(base64: string, type?: string): Blob {
-  const bytes = Uint8Array.from(atob(base64), char => char.charCodeAt(0))
-  return new Blob([bytes], { type: detectImageMimeFromBytes(bytes) || type || 'application/octet-stream' })
-}
-
-function imageMimeFromHeaders(headers?: Record<string, string>): string | undefined {
-  const value = headers?.['content-type'] || headers?.['Content-Type']
-  const mime = value?.split(';', 1)[0].trim().toLowerCase()
-  return mime?.startsWith('image/') ? mime : undefined
+  const head = new Uint8Array(await blob.slice(0, 16).arrayBuffer())
+  return new Blob([blob], {
+    type: detectImageMimeFromBytes(head) || blob.type || 'application/octet-stream',
+  })
 }
 
 async function executeDirectVideoRequest(

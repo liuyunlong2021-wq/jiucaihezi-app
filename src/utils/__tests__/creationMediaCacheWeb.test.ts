@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { test } from 'node:test'
 
 import { useProjectStore } from '@/stores/projectStore'
@@ -6,6 +8,20 @@ import * as creationMediaCache from '../creationMediaCache'
 import { buildMediaFilename } from '../mediaFilename'
 import { webProjectFiles } from '../webProjectFiles'
 import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
+
+test('Desktop project caching streams remote media directly into the project', () => {
+  const cacheSource = readFileSync(join(process.cwd(), 'src/utils/creationMediaCache.ts'), 'utf8')
+  const writerSource = readFileSync(join(process.cwd(), 'src/utils/projectMediaWriter.ts'), 'utf8')
+  const projectStart = cacheSource.indexOf('if (projectDir) {')
+  const projectBranch = cacheSource.slice(
+    projectStart,
+    cacheSource.indexOf("const { invoke } = await import('@tauri-apps/api/core')", projectStart),
+  )
+
+  assert.match(projectBranch, /downloadProjectMedia/)
+  assert.match(writerSource, /invoke<\{ headers\?: Record<string, string> \}>\('http_download_to_project'/)
+  assert.doesNotMatch(projectBranch, /dataBase64/)
+})
 
 test('creation media filenames use a cleaned semantic prompt and six task characters', () => {
   assert.equal(

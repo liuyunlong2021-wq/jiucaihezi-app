@@ -2,10 +2,9 @@
  * projectMediaWriter.ts — 桌面端媒体直写项目文件夹
  *
  * 职责：
- * 1. 接收 base64 媒体数据
- * 2. 生成安全文件名
- * 3. 通过项目文件总管写入 {projectDir}/jc-media/{kind}s/
- * 4. 返回文件系统绝对路径（用于 convertFileSrc 显示）
+ * 1. 生成稳定的项目内媒体路径
+ * 2. 远程结果流式下载到项目，或兼容写入已有 Base64 结果
+ * 3. 返回文件系统绝对路径（用于 convertFileSrc 显示）
  *
  * Web 端 / 无项目文件夹时不可用，调用方自行 fallback。
  */
@@ -26,9 +25,63 @@ function mimeToExt(mime: string, sourceUrl = ''): string {
   return map[mime] || urlExt || (mime.startsWith('image/') ? '.png' : mime.startsWith('video/') ? '.mp4' : mime.startsWith('audio/') ? '.mp3' : '.bin')
 }
 
+export function buildProjectMediaPath(opts: {
+  mime: string
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  summary?: string
+  prompt?: string
+  model?: string
+  taskId?: string
+  sourceUrl?: string
+  memory?: boolean
+}): string {
+  const filename = buildMediaFilename({
+    summary: opts.summary,
+    prompt: opts.prompt,
+    model: opts.model,
+    taskId: opts.taskId,
+    extension: mimeToExt(opts.mime, opts.sourceUrl),
+  })
+  const folderName = opts.memory
+    ? opts.kind === 'image' ? '图片' : opts.kind === 'video' ? '视频' : opts.kind === 'audio' ? '音频' : '文档'
+    : opts.kind === 'text' ? 'text' : opts.kind === 'model3d' ? 'models' : `${opts.kind}s`
+  return `${opts.memory ? '.raw/jc-media' : 'jc-media'}/${folderName}/${filename}`
+}
+
 export interface WriteProjectMediaResult {
   filePath: string   // 绝对路径，用于 convertFileSrc()
   projectPath: string
+}
+
+export async function downloadProjectMedia(opts: {
+  url: string
+  headers?: Record<string, string>
+  timeoutSecs?: number
+  projectDir: string
+  mime: string
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  summary?: string
+  prompt?: string
+  model?: string
+  taskId?: string
+  memory?: boolean
+}): Promise<WriteProjectMediaResult & { headers: Record<string, string> }> {
+  const projectPath = buildProjectMediaPath({ ...opts, sourceUrl: opts.url })
+  const { invoke } = await import('@tauri-apps/api/core')
+  const response = await invoke<{ headers?: Record<string, string> }>('http_download_to_project', {
+    request: {
+      root: opts.projectDir,
+      relative_path: projectPath,
+      url: opts.url,
+      headers: opts.headers,
+      timeout_secs: opts.timeoutSecs ?? 300,
+    },
+  })
+  return {
+    filePath: `${opts.projectDir.replace(/[\\/]+$/, '')}/${projectPath}`,
+    projectPath,
+    headers: response.headers || {},
+  }
 }
 
 function base64ToBytes(value: string): Uint8Array {
@@ -50,19 +103,7 @@ export async function writeProjectMedia(opts: {
   sourceUrl?: string
   memory?: boolean
 }): Promise<WriteProjectMediaResult> {
-  const ext = mimeToExt(opts.mime, opts.sourceUrl)
-  const filename = buildMediaFilename({
-    summary: opts.summary,
-    prompt: opts.prompt,
-    model: opts.model,
-    taskId: opts.taskId,
-    extension: ext,
-  })
-
-  const folderName = opts.memory
-    ? opts.kind === 'image' ? '图片' : opts.kind === 'video' ? '视频' : opts.kind === 'audio' ? '音频' : '文档'
-    : opts.kind === 'text' ? 'text' : opts.kind === 'model3d' ? 'models' : `${opts.kind}s`
-  const relativePath = `${opts.memory ? '.raw/jc-media' : 'jc-media'}/${folderName}/${filename}`
+  const relativePath = buildProjectMediaPath(opts)
 
   const [{ createProjectFileActions }, { createRuntimeProjectFileService }] = await Promise.all([
     import('@/services/projectFileActions'), import('@/services/projectFileService'),

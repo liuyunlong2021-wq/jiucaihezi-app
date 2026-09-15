@@ -1,6 +1,8 @@
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use futures_util::StreamExt;
+use tokio::io::AsyncWriteExt;
 use tauri::ipc::Channel;
 
 #[derive(Deserialize)]
@@ -32,6 +34,23 @@ pub struct HttpDownloadResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
     pub data_base64: String,
+}
+
+#[derive(Deserialize)]
+pub struct HttpDownloadToProjectRequest {
+    pub root: String,
+    pub relative_path: String,
+    pub url: String,
+    pub headers: Option<HashMap<String, String>>,
+    pub timeout_secs: Option<u64>,
+}
+
+#[derive(Serialize)]
+pub struct HttpDownloadToProjectResponse {
+    pub status: u16,
+    pub headers: HashMap<String, String>,
+    pub bytes_written: u64,
+    pub relative_path: String,
 }
 
 #[derive(Deserialize)]
@@ -430,6 +449,84 @@ pub async fn http_download_base64(
     })
 }
 
+#[tauri::command]
+pub async fn http_download_to_project(
+    request: HttpDownloadToProjectRequest,
+) -> Result<HttpDownloadToProjectResponse, String> {
+    crate::commands::skill_material::validate_public_http_url(&request.url)?;
+    let root = crate::commands::dev::canonical_root(&request.root)?;
+    let target = crate::commands::dev::resolve_write_path(&root, &request.relative_path)?;
+    if target.exists() {
+        return Err("目标文件已存在".into());
+    }
+    let parent = target.parent().ok_or_else(|| "写入路径无效".to_string())?;
+    tokio::fs::create_dir_all(parent)
+        .await
+        .map_err(|e| format!("创建媒体目录失败: {}", e))?;
+    let target = crate::commands::dev::resolve_write_path(&root, &request.relative_path)?;
+    let temp = target.with_file_name(format!(
+        ".{}.{}.part",
+        target.file_name().and_then(|name| name.to_str()).unwrap_or("media"),
+        uuid::Uuid::new_v4(),
+    ));
+
+    let mut client_builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .pool_idle_timeout(std::time::Duration::from_secs(90))
+        .timeout(std::time::Duration::from_secs(request.timeout_secs.unwrap_or(300)));
+    let download_request = HttpDownloadRequest {
+        url: request.url.clone(),
+        headers: request.headers.clone(),
+        timeout_secs: request.timeout_secs,
+    };
+    if should_direct_unified_download_to_newapi(&download_request) {
+        client_builder = with_newapi_source_resolution(client_builder);
+    }
+    let client = client_builder.build().map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
+    let mut builder = client.get(&request.url);
+    if let Some(headers) = &request.headers {
+        for (key, value) in headers { builder = builder.header(key, value); }
+    }
+    let response = builder.send().await.map_err(|e| format!("HTTP 下载失败: {}", e))?;
+    let (status, headers, bytes_written) = persist_download_response(response, &target, &temp).await?;
+    Ok(HttpDownloadToProjectResponse {
+        status,
+        headers,
+        bytes_written,
+        relative_path: request.relative_path,
+    })
+}
+
+async fn persist_download_response(
+    response: reqwest::Response,
+    target: &std::path::Path,
+    temp: &std::path::Path,
+) -> Result<(u16, HashMap<String, String>, u64), String> {
+    let status = response.status().as_u16();
+    let headers = response.headers().iter().filter_map(|(key, value)| {
+        value.to_str().ok().map(|value| (key.to_string(), value.to_string()))
+    }).collect::<HashMap<_, _>>();
+    if !(200..300).contains(&status) {
+        return Err(format!("HTTP 下载失败: {}", status));
+    }
+    let result = async {
+        let mut file = tokio::fs::File::create(temp).await.map_err(|e| format!("创建临时文件失败: {}", e))?;
+        let mut stream = response.bytes_stream();
+        let mut bytes_written = 0_u64;
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("读取下载数据失败: {}", e))?;
+            file.write_all(&chunk).await.map_err(|e| format!("写入媒体文件失败: {}", e))?;
+            bytes_written += chunk.len() as u64;
+        }
+        file.flush().await.map_err(|e| format!("刷新媒体文件失败: {}", e))?;
+        drop(file);
+        tokio::fs::rename(temp, target).await.map_err(|e| format!("完成媒体文件失败: {}", e))?;
+        Ok::<u64, String>(bytes_written)
+    }.await;
+    if result.is_err() { let _ = tokio::fs::remove_file(temp).await; }
+    Ok((status, headers, result?))
+}
+
 /// SSE 流式 HTTP 请求 — 通过 Tauri Channel 逐块推送响应
 #[tauri::command]
 pub async fn http_request_stream(
@@ -548,6 +645,31 @@ pub async fn http_request_stream(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+
+    fn serve_once(response: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(response).unwrap();
+        });
+        (format!("http://{}", address), handle)
+    }
+
+    fn serve_stalled_once() -> (String, std::thread::JoinHandle<()>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        });
+        (format!("http://{}", address), handle)
+    }
 
     #[test]
     fn stream_error_includes_safe_response_diagnostics() {
@@ -586,5 +708,84 @@ mod tests {
         assert!(is_binary_content_type(Some("video/mp4; charset=binary")));
         assert!(!is_binary_content_type(Some("application/json")));
         assert!(!is_binary_content_type(Some("text/plain")));
+    }
+
+    #[tokio::test]
+    async fn project_download_atomically_promotes_a_complete_response() {
+        let (url, server) = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Type: video/mp4\r\nConnection: close\r\n\r\nvideo");
+        let response = reqwest::get(url).await.unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("result.mp4");
+        let temp = dir.path().join(".result.part");
+
+        let (_, headers, bytes) = persist_download_response(response, &target, &temp).await.unwrap();
+
+        server.join().unwrap();
+        assert_eq!(bytes, 5);
+        assert_eq!(headers.get("content-type").map(String::as_str), Some("video/mp4"));
+        assert_eq!(std::fs::read(target).unwrap(), b"video");
+        assert!(!temp.exists());
+    }
+
+    #[tokio::test]
+    async fn project_download_removes_partial_files_after_a_broken_stream() {
+        let (url, server) = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nbad");
+        let response = reqwest::get(url).await.unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("result.mp4");
+        let temp = dir.path().join(".result.part");
+
+        assert!(persist_download_response(response, &target, &temp).await.is_err());
+
+        server.join().unwrap();
+        assert!(!target.exists());
+        assert!(!temp.exists());
+    }
+
+    #[tokio::test]
+    async fn project_download_rejects_http_failures_without_creating_files() {
+        let (url, server) = serve_once(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        let response = reqwest::get(url).await.unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("result.mp4");
+        let temp = dir.path().join(".result.part");
+
+        assert!(persist_download_response(response, &target, &temp).await.unwrap_err().contains("503"));
+
+        server.join().unwrap();
+        assert!(!target.exists());
+        assert!(!temp.exists());
+    }
+
+    #[tokio::test]
+    async fn project_download_timeout_does_not_create_project_files() {
+        let (url, server) = serve_stalled_once();
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("result.mp4");
+        let temp = dir.path().join(".result.part");
+        let result = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(10))
+            .build().unwrap()
+            .get(url).send().await;
+
+        server.join().unwrap();
+        assert!(result.is_err());
+        assert!(!target.exists());
+        assert!(!temp.exists());
+    }
+
+    #[tokio::test]
+    async fn project_download_rejects_paths_outside_the_project_before_network_io() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let result = http_download_to_project(HttpDownloadToProjectRequest {
+            root: dir.path().to_string_lossy().into_owned(),
+            relative_path: "../escape.mp4".into(),
+            url: "https://example.com/result.mp4".into(),
+            headers: None,
+            timeout_secs: Some(1),
+        }).await;
+
+        assert!(matches!(result, Err(message) if message.contains("路径") || message.contains("目录")));
+        assert!(!dir.path().parent().unwrap().join("escape.mp4").exists());
     }
 }

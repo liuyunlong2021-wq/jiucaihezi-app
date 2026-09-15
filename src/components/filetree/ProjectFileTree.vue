@@ -46,6 +46,7 @@ import {
   onProjectResourceChange,
 } from '@/services/projectFileService'
 import { createProjectFileActions } from '@/services/projectFileActions'
+import { acquireProjectMediaDisplay, type MediaDisplayLease } from '@/services/projectMediaResolver'
 import { openProjectResource } from '@/services/projectExplorerService'
 import { createProjectResourceWatcher } from '@/services/projectResourceWatcher'
 import {
@@ -187,7 +188,7 @@ const pendingCollision = ref<PendingCollision | null>(null)
 const pendingDelete = ref<ProjectResource[]>([])
 const deletingDelete = ref(false)
 const deletingResourceKeys = new Set<string>()
-let filePreviewObjectUrl = ''
+let filePreviewLease: MediaDisplayLease | null = null
 let filePreviewRequestId = 0
 let pollTimer: ReturnType<typeof setInterval> | null = null
 let webProjectChannel: BroadcastChannel | null = null
@@ -2338,8 +2339,8 @@ async function exportDesktopProject() {
   }
 }
 function releaseFilePreviewUrl() {
-  if (filePreviewObjectUrl) URL.revokeObjectURL(filePreviewObjectUrl)
-  filePreviewObjectUrl = ''
+  filePreviewLease?.release()
+  filePreviewLease = null
 }
 function closeFilePreview() {
   filePreviewRequestId++
@@ -2352,39 +2353,18 @@ async function openFilePreview(node: TreeNode) {
   const requestId = ++filePreviewRequestId
   releaseFilePreviewUrl()
   filePreview.value = null
-  let objectUrl = ''
+  let lease: MediaDisplayLease | null = null
   try {
-    let url: string
-    if (isDesktop) {
-      url = (await import('@tauri-apps/api/core')).convertFileSrc(
-        `${projectDir.value}/${node.path}`,
-      )
-      if (requestId !== filePreviewRequestId) return
-    } else {
-      const entry = await webProjectFiles.read(webProjectId.value, node.path)
-      if (requestId !== filePreviewRequestId) return
-      if (entry.metadata?.binaryStorage === 'opfs') {
-        objectUrl = URL.createObjectURL(
-          await webProjectFiles.readBinary(webProjectId.value, node.path),
-        )
-        if (requestId !== filePreviewRequestId) {
-          URL.revokeObjectURL(objectUrl)
-          return
-        }
-        url = objectUrl
-      } else {
-        url = entry.content
-      }
-    }
-    if (requestId !== filePreviewRequestId) return
-    if (!url) throw new Error('媒体文件为空')
-    filePreviewObjectUrl = objectUrl
-    filePreview.value = { node, type, url }
-  } catch (error) {
+    lease = await acquireProjectMediaDisplay(resourceForNode(node))
     if (requestId !== filePreviewRequestId) {
-      if (objectUrl) URL.revokeObjectURL(objectUrl)
+      lease.release()
       return
     }
+    if (!lease.url) throw new Error('媒体文件为空')
+    filePreviewLease = lease
+    filePreview.value = { node, type, url: lease.url }
+  } catch (error) {
+    if (requestId !== filePreviewRequestId) { lease?.release(); return }
     releaseFilePreviewUrl()
     errorMsg.value = `预览失败: ${error instanceof Error ? error.message : String(error)}`
   }

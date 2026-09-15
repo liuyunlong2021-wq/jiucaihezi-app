@@ -108,7 +108,7 @@ import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import { getMediaAssetById } from '@/utils/idb'
 import { assetRowToRealPath, parseMediaRef } from '@/utils/mediaFileReader'
-import { extractVideoFirstFrameThumbnail, readVideoDuration } from '@/utils/mediaThumbnail'
+import { extractVideoFirstFrameThumbnail, readVideoDuration, resolveProjectVideoThumbnail } from '@/utils/mediaThumbnail'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { isAllowedCreationResultUrl, isSafePublicHttpUrl } from '@/utils/urlSafety'
 import { writeClipboardText } from '@/utils/clipboard'
@@ -138,7 +138,8 @@ import {
   type ProjectResourceChange,
   type ProjectResourceChangeEntry,
 } from '@/services/projectFileService'
-import { createProjectFileActions } from '@/services/projectFileActions'
+import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
+import { acquireProjectMediaDisplay } from '@/services/projectMediaResolver'
 import type { ProjectResource } from '@/utils/projectResource'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { nextMaterialPath } from '@/utils/projectMaterials'
@@ -172,6 +173,12 @@ interface MemoryMediaOrigin {
 const memoryMediaOrigin = ref<MemoryMediaOrigin | null>(null)
 let mediaTaskSummary: { value: string; prompt: string } | null = null
 let pendingMemoryPlanResources: ProjectResource[] = []
+const submissionObjectUrls = new Map<string, string[]>()
+
+function releaseSubmissionObjectUrls(taskId: string) {
+  for (const url of submissionObjectUrls.get(taskId) || []) URL.revokeObjectURL(url)
+  submissionObjectUrls.delete(taskId)
+}
 
 // ─── 任务状态 ───
 
@@ -327,37 +334,41 @@ async function regenerateTask(task: MediaTask) {
 }
 
 function canCopyTaskResultUrl(task: MediaTask): boolean {
+  const sourceUrl = task.sourceUrl || task.resultUrl
   return (
     task.status === 'success' &&
     ([task.model, task.modelLabel].some(value => String(value || '').toLowerCase().includes('dola')) ||
       (!task.projectPath && !task.assetUri)) &&
-    typeof task.resultUrl === 'string' &&
-    isSafePublicHttpUrl(task.resultUrl)
+    typeof sourceUrl === 'string' &&
+    isSafePublicHttpUrl(sourceUrl)
   )
 }
 
 async function copyTaskResultUrl(task: MediaTask) {
-  if (!canCopyTaskResultUrl(task) || !task.resultUrl) return
-  cpState.progressText = await writeClipboardText(task.resultUrl) ? '链接已复制' : '复制链接失败'
+  const sourceUrl = task.sourceUrl || task.resultUrl
+  if (!canCopyTaskResultUrl(task) || !sourceUrl) return
+  cpState.progressText = await writeClipboardText(sourceUrl) ? '链接已复制' : '复制链接失败'
 }
 
 function canDownloadDolaResult(task: MediaTask): boolean {
+  const sourceUrl = task.sourceUrl || task.resultUrl
   return (
     task.status === 'success' &&
     [task.model, task.modelLabel].some(value => String(value || '').toLowerCase().includes('dola')) &&
-    typeof task.resultUrl === 'string' &&
-    isSafePublicHttpUrl(task.resultUrl)
+    typeof sourceUrl === 'string' &&
+    isSafePublicHttpUrl(sourceUrl)
   )
 }
 
 async function downloadDolaResult(task: MediaTask) {
-  if (!canDownloadDolaResult(task) || !task.resultUrl) return
+  const sourceUrl = task.sourceUrl || task.resultUrl
+  if (!canDownloadDolaResult(task) || !sourceUrl) return
   try {
     const data = isTauriRuntime()
       ? await (async () => {
           const { invoke } = await import('@tauri-apps/api/core')
           const response = await invoke<{ status: number; data_base64: string }>('http_download_base64', {
-            request: { url: task.resultUrl, timeout_secs: 300 },
+            request: { url: sourceUrl, timeout_secs: 300 },
           })
           if (response.status < 200 || response.status >= 300 || !response.data_base64) {
             throw new Error(`媒体下载失败: HTTP ${response.status}`)
@@ -367,7 +378,7 @@ async function downloadDolaResult(task: MediaTask) {
           for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
           return bytes
         })()
-      : (await fetchCreationMediaBlob(task.resultUrl, 'video', true)).blob
+      : (await fetchCreationMediaBlob(sourceUrl, 'video', true)).blob
     const saved = await saveGeneratedFile({
       filename: buildMediaFilename({
         summary: task.summary,
@@ -475,7 +486,8 @@ async function previewTask(task: MediaTask) {
     emit('previewResource', resource)
     return
   }
-  if (task.resultUrl && isAllowedCreationResultUrl(task.resultUrl)) {
+  const sourceUrl = task.resultUrl || task.sourceUrl
+  if (sourceUrl && isAllowedCreationResultUrl(sourceUrl)) {
     const type =
       task.type === 'video'
         ? 'video'
@@ -485,10 +497,10 @@ async function previewTask(task: MediaTask) {
               ? 'model3d'
               : 'image'
     taskPreview.value = {
-      url: task.resultUrl,
+      url: sourceUrl,
       type,
       model: task.modelLabel || task.model,
-      sourceUrl: task.resultUrl,
+      sourceUrl,
       filename: buildMediaFilename({
         summary: task.summary,
         prompt: task.prompt,
@@ -670,41 +682,38 @@ async function pickAiAppMediaFile(field: CreationFieldSpec) {
       audio: ['mp3', 'wav', 'm4a', 'aac', 'ogg', 'flac'],
     }
     const exts = extMap[field.kind] || ['*']
+    const owner = selectedCanvasOwner()
+    if (!owner) throw new Error(isTauriRuntime() ? '请先选择项目文件夹' : '请先选择 Web 项目')
 
     if (isTauriRuntime()) {
       const { open } = await import('@tauri-apps/plugin-dialog')
-      const { readFile } = await import('@tauri-apps/plugin-fs')
       const selected = await open({
         title: `选择${field.label}`,
         filters: [{ name: field.kind, extensions: exts }],
         multiple: false,
       })
       if (!selected) return
-      const filePath = selected
-      const bytes = await readFile(filePath)
-      const mime =
-        field.kind === 'image' ? 'image/png' : field.kind === 'video' ? 'video/mp4' : 'audio/mpeg'
-      // ponytail: 用 Blob + FileReader 转 data URL，避免大文件 String.fromCharCode 爆栈
-      const blobBytes = new Uint8Array(bytes.byteLength)
-      blobBytes.set(bytes)
-      const blob = new Blob([blobBytes.buffer], { type: mime })
-      const dataUrl = await new Promise<string>(resolve => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result || ''))
-        reader.readAsDataURL(blob)
+      const resources = await projectFileActions.importDesktopPaths({
+        owner,
+        paths: [selected],
+        targetPath: memoryMediaDirectoryFor(selected),
       })
-      setModelFieldValue(field, dataUrl)
+      if (resources[0]) setModelFieldValue(field, resources[0])
     } else {
       // Web fallback
       const input = document.createElement('input')
       input.type = 'file'
       input.accept = exts.map(e => `.${e}`).join(',')
-      input.onchange = () => {
+      input.onchange = async () => {
         const file = input.files?.[0]
         if (!file) return
-        const reader = new FileReader()
-        reader.onload = () => setModelFieldValue(field, String(reader.result || ''))
-        reader.readAsDataURL(file)
+        const resource = await projectFileActions.importMedia({
+          owner,
+          path: nextMaterialPath(memoryMediaDirectoryFor(file.name, file.type), file.name, new Set()),
+          data: new Uint8Array(await file.arrayBuffer()),
+          mimeType: file.type || 'application/octet-stream',
+        })
+        setModelFieldValue(field, resource)
       }
       input.click()
     }
@@ -713,8 +722,23 @@ async function pickAiAppMediaFile(field: CreationFieldSpec) {
   }
 }
 
+function aiAppMediaFieldDisplayValue(field: CreationFieldSpec): string {
+  const value = getModelFieldValue(field)
+  return value && typeof value === 'object' && !Array.isArray(value) && 'path' in value
+    ? String(value.name || value.path)
+    : String(value || '')
+}
+
+async function materializeAiAppMediaFields(params: Record<string, unknown>): Promise<void> {
+  for (const [key, value] of Object.entries(params)) {
+    if (!key.includes(':') || !value || typeof value !== 'object' || Array.isArray(value) || !('path' in value)) continue
+    params[key] = await getMediaRuntimeUrl((value as ProjectResource).path, (value as ProjectResource).owner)
+  }
+}
+
 // ─── 生成入口 ───
 async function runCreationViaTaskStore() {
+  const objectUrls: string[] = []
   try {
     console.log('[Creation] runCreationViaTaskStore called')
     const m = currentModel.value
@@ -738,15 +762,14 @@ async function runCreationViaTaskStore() {
               ? ('model3d' as const)
             : ('video' as const)
 
-    const refImages = await Promise.all(
-      cpState.files.filter(file => file.type.startsWith('image/')).map(fileToDataUrl),
-    )
-    const refVideos = await Promise.all(
-      cpState.files.filter(file => file.type.startsWith('video/')).map(fileToDataUrl),
-    )
-    const refAudios = await Promise.all(
-      cpState.files.filter(file => file.type.startsWith('audio/')).map(fileToDataUrl),
-    )
+    const runtimeUrl = (file: File) => {
+      const url = URL.createObjectURL(file)
+      objectUrls.push(url)
+      return url
+    }
+    const refImages = cpState.files.filter(file => file.type.startsWith('image/')).map(runtimeUrl)
+    const refVideos = cpState.files.filter(file => file.type.startsWith('video/')).map(runtimeUrl)
+    const refAudios = cpState.files.filter(file => file.type.startsWith('audio/')).map(runtimeUrl)
     const selected = (app?.editor?.list || []) as any[]
     if (selected.length && canvasStore.canvasPath) {
       const owner = canvasOwner.value || selectedCanvasOwner()
@@ -794,12 +817,8 @@ async function runCreationViaTaskStore() {
               : undefined
         const url =
           asset.kind === 'image'
-            ? await getCanvasImageSubmissionUrl(node, asset.id, mediaPath, owner, maxBytes)
-            : await getMediaSubmissionUrl(
-                isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath,
-                owner,
-                maxBytes,
-              )
+            ? await getCanvasImageRequestUrl(node, asset.id, mediaPath, owner, maxBytes, objectUrls)
+            : await getMediaRuntimeUrl(mediaPath, owner)
         if (asset.kind === 'audio') refAudios.push(url)
         else if (asset.kind === 'video') refVideos.push(url)
         else refImages.push(url)
@@ -811,6 +830,7 @@ async function runCreationViaTaskStore() {
     }
 
     const creationParams = buildCurrentCreationParams({ images: refImages, videos: refVideos, audios: refAudios })
+    await materializeAiAppMediaFields(creationParams)
     if (currentCreationSpec.value?.id === 'runninghub/api/rh-gemini-omni-video-edit') {
       if (!refVideos[0]) {
         cpState.progressText = '无法读取输入视频时长'
@@ -836,7 +856,7 @@ async function runCreationViaTaskStore() {
       : undefined
     try {
       const origin = memoryMediaOrigin.value
-      await mediaTaskStore.submitTask({
+      const taskId = await mediaTaskStore.submitTask({
         type: mediaType,
         model: m.modelName,
         modelLabel: m.label,
@@ -855,6 +875,7 @@ async function runCreationViaTaskStore() {
           memory: true,
         } : {}),
       })
+      if (objectUrls.length) submissionObjectUrls.set(taskId, objectUrls.splice(0))
     } catch (e: any) {
       cpState.generating = creationRunningCount.value > 0
       cpState.progressText = `提交失败: ${(e.message || e).toString().slice(0, 100)}`
@@ -862,6 +883,8 @@ async function runCreationViaTaskStore() {
   } catch (outerErr: any) {
     console.error('[Creation] FATAL:', outerErr)
     cpState.progressText = `\u274C 错误: ${(outerErr.message || String(outerErr)).slice(0, 100)}`
+  } finally {
+    for (const url of objectUrls) URL.revokeObjectURL(url)
   }
 }
 
@@ -912,6 +935,7 @@ onBeforeUnmount(offMemoryMediaPlanLoad)
 
 // 任务完成/失败 → 更新进度
 const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
+  releaseSubmissionObjectUrls(String(payload.taskId || ''))
   if (payload.source === 'creation') {
     const runningCount = creationRunningCount.value
     cpState.runningTasks = runningCount
@@ -936,16 +960,6 @@ const offTaskSettled = onEvent('media-task-settled', (payload: any) => {
 onBeforeUnmount(offTaskSettled)
 
 // ─── 🆕 画布集成 ───
-
-/** 图片/视频→dataURL */
-function fileToDataUrl(f: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(reader.result as string)
-    reader.onerror = () => reject(new Error('读取文件失败'))
-    reader.readAsDataURL(f)
-  })
-}
 
 const canvasContainer = ref<HTMLDivElement>()
 const canvasImportInput = ref<HTMLInputElement>()
@@ -1130,126 +1144,30 @@ function isWebProjectMediaPath(filePath: string): boolean {
 async function getMediaRuntimeUrl(filePath: string, owner: string): Promise<string> {
   if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:'))
     return filePath
-  if (!isTauriRuntime()) {
-    if (!owner || !isWebProjectMediaPath(filePath)) return filePath
-    const generation = canvasRuntimeMediaGeneration
-    try {
-      const lease = await canvasAssetUrlResolver.acquire(owner, filePath, async () => {
-        const binary = await projectFileActions.readMedia({
-          runtime: 'web',
-          owner,
-          path: filePath,
-          name: filePath.split('/').pop() || filePath,
-          isDirectory: false,
-          kind: 'media',
-        })
-        const bytes = new Uint8Array(binary.data.byteLength)
-        bytes.set(binary.data)
-        return {
-          url: URL.createObjectURL(new Blob([bytes.buffer], { type: binary.mimeType })),
-          revoke: true,
-        }
+  if (!owner || (!isTauriRuntime() && !isWebProjectMediaPath(filePath))) return filePath
+  const path = isTauriRuntime() ? mediaPathForStorage(filePath, owner) : filePath
+  const generation = canvasRuntimeMediaGeneration
+  try {
+    const lease = await canvasAssetUrlResolver.acquire(owner, path, async () => {
+      const display = await acquireProjectMediaDisplay({
+        runtime: isTauriRuntime() ? 'desktop' : 'web',
+        owner,
+        path,
+        name: path.split('/').pop() || path,
+        isDirectory: false,
+        kind: 'media',
+        mimeType: mediaMimeForPath(path),
       })
-      if (generation !== canvasRuntimeMediaGeneration) {
-        lease.release()
-        return filePath
-      }
-      return lease.url
-    } catch {
+      return { url: display.url, revoke: display.url.startsWith('blob:') }
+    })
+    if (generation !== canvasRuntimeMediaGeneration) {
+      lease.release()
       return filePath
     }
-  }
-  try {
-    const projectDir = owner
-    if (!projectDir) return filePath
-    const relativePath = mediaPathForStorage(filePath, projectDir)
-    const { invoke } = await import('@tauri-apps/api/core')
-    const result = await invoke<{ base64: string; truncated: boolean }>('dev_read_file', {
-      input: { root: projectDir, relativePath, maxBytes: 20_000_000 },
-    })
-    if (!result?.base64 || result.truncated) return filePath
-    const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
-    const mime =
-      ext === 'mp4'
-        ? 'video/mp4'
-        : ext === 'webm'
-          ? 'video/webm'
-          : ext === 'mov'
-            ? 'video/quicktime'
-            : ext === 'avi'
-              ? 'video/x-msvideo'
-              : ext === 'mkv'
-                ? 'video/x-matroska'
-                : ext === 'jpg' || ext === 'jpeg'
-                  ? 'image/jpeg'
-                  : ext === 'webp'
-                    ? 'image/webp'
-                    : ext === 'gif'
-                      ? 'image/gif'
-                      : 'image/png'
-    return `data:${mime};base64,${result.base64}`
+    return lease.url
   } catch {
     return filePath
   }
-}
-
-async function getMediaSubmissionUrl(filePath: string, owner: string, maxBytes?: number): Promise<string> {
-  if (!isTauriRuntime() && owner && isWebProjectMediaPath(filePath)) {
-    const url = await projectFileActions.readMediaDataUrl({
-      runtime: 'web',
-      owner,
-      path: filePath,
-      name: filePath.split('/').pop() || filePath,
-      isDirectory: false,
-      kind: 'media',
-    })
-    const encoded = url.startsWith('data:') ? url.slice(url.indexOf(',') + 1) : ''
-    if (maxBytes && encoded.length > 4 * Math.ceil(maxBytes / 3)) {
-      throw new Error(`参考媒体不能超过 ${Math.round(maxBytes / 1024 / 1024)} MB`)
-    }
-    return url
-  }
-  if (isTauriRuntime()) {
-    const projectDir = owner
-    if (!projectDir) return filePath
-    try {
-      const relativePath = mediaPathForStorage(filePath, projectDir)
-      const { invoke } = await import('@tauri-apps/api/core')
-      const result = await invoke<{ base64: string; truncated: boolean }>('dev_read_file', {
-        input: { root: projectDir, relativePath, maxBytes: maxBytes || 20_000_000 },
-      })
-      if (maxBytes && result?.truncated) throw new Error(`参考媒体不能超过 ${Math.round(maxBytes / 1024 / 1024)} MB`)
-      if (result?.base64 && !result.truncated) {
-        const ext = filePath.split('.').pop()?.toLowerCase() || 'png'
-        const mime =
-          ext === 'mp4'
-            ? 'video/mp4'
-            : ext === 'webm'
-              ? 'video/webm'
-              : ext === 'mov'
-                ? 'video/quicktime'
-                : ext === 'mp3'
-                  ? 'audio/mpeg'
-                  : ext === 'wav'
-                    ? 'audio/wav'
-                    : ext === 'ogg'
-                      ? 'audio/ogg'
-                      : ext === 'm4a'
-                        ? 'audio/mp4'
-                        : ext === 'jpg' || ext === 'jpeg'
-                          ? 'image/jpeg'
-                          : ext === 'webp'
-                            ? 'image/webp'
-                            : ext === 'gif'
-                              ? 'image/gif'
-                              : 'image/png'
-        return `data:${mime};base64,${result.base64}`
-      }
-    } catch (error) {
-      if (maxBytes) throw error
-    }
-  }
-  return getMediaRuntimeUrl(filePath, owner)
 }
 
 function getCanvasImageContent(node: any): Image | undefined {
@@ -1270,24 +1188,15 @@ function getImageSize(src: string): Promise<{ width: number; height: number }> {
   })
 }
 
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result || ''))
-    reader.onerror = () => reject(reader.error || new Error('标注图片导出失败'))
-    reader.readAsDataURL(blob)
-  })
-}
-
-async function getCanvasImageSubmissionUrl(
+async function getCanvasImageRequestUrl(
   node: any,
   assetId: string,
   mediaPath: string,
   owner: string,
   maxBytes?: number,
+  objectUrls: string[] = [],
 ): Promise<string> {
-  const filePath = isTauriRuntime() ? `${owner}/${mediaPath}` : mediaPath
-  const original = await getMediaSubmissionUrl(filePath, owner, maxBytes)
+  const original = await getMediaRuntimeUrl(mediaPath, owner)
   const image = getCanvasImageContent(node)
   if (!image || !hasCanvasImageAnnotations(node, assetId)) return original
 
@@ -1308,7 +1217,9 @@ async function getCanvasImageSubmissionUrl(
     if (maxBytes && exported.data.size > maxBytes) {
       throw new Error(`参考媒体不能超过 ${Math.round(maxBytes / 1024 / 1024)} MB`)
     }
-    return blobToDataUrl(exported.data)
+    const url = URL.createObjectURL(exported.data)
+    objectUrls.push(url)
+    return url
   } finally {
     composite.destroy()
   }
@@ -2819,9 +2730,7 @@ async function toggleCanvasAudio(
     setAudioReferencePlaying(playingCanvasAudioId, false)
     canvasAudio.pause()
   }
-  const src = isTauriRuntime()
-    ? await getMediaSubmissionUrl(filePath, owner)
-    : await getMediaRuntimeUrl(filePath, owner)
+  const src = await getMediaRuntimeUrl(filePath, owner)
   if (!canContinue()) return
   const audio = new Audio(src)
   canvasAudio = audio
@@ -2890,14 +2799,6 @@ function setVideoReferenceLayout(card: Group, width: number, mediaHeight: number
   }
 }
 
-async function getMediaDisplayUrl(filePath: string, owner: string): Promise<string> {
-  if (!isTauriRuntime()) return getMediaRuntimeUrl(filePath, owner)
-  if (filePath.startsWith('http') || filePath.startsWith('data:') || filePath.startsWith('blob:'))
-    return filePath
-  const { convertFileSrc } = await import('@tauri-apps/api/core')
-  return convertFileSrc(filePath)
-}
-
 async function hydrateVideoReferenceNode(
   card: Group,
   filePath: string,
@@ -2907,11 +2808,15 @@ async function hydrateVideoReferenceNode(
 ) {
   if (!canContinue()) return
   try {
-    const dataUrl = await getMediaRuntimeUrl(filePath, owner)
-    if (!canContinue()) return
-    const displayUrl = dataUrl === filePath ? await getMediaDisplayUrl(filePath, owner) : dataUrl
-    if (!canContinue()) return
-    const preview = await extractVideoFirstFrameThumbnail(displayUrl)
+    const preview = isTauriRuntime()
+      ? {
+          thumbnailUrl: await resolveProjectVideoThumbnail(owner, mediaPathForStorage(filePath, owner)),
+          width: 320,
+          height: 180,
+          duration: canvasStore.assets[assetId]?.duration,
+        }
+      : await extractVideoFirstFrameThumbnail(await getMediaRuntimeUrl(filePath, owner))
+    if (!preview.thumbnailUrl) throw new Error('视频缩略图生成失败')
     if (!canContinue() || card.destroyed) return
     const scale = Math.min(320 / (preview.width || 320), 320 / (preview.height || 180), 1)
     const width = Math.round((preview.width || 320) * scale)
@@ -3539,6 +3444,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  for (const taskId of submissionObjectUrls.keys()) releaseSubmissionObjectUrls(taskId)
   ++canvasLoadToken
   queuedCanvasMedia.length = 0
   releaseCanvasRuntimeMediaUrls()
@@ -4552,7 +4458,7 @@ const canSend = computed(
           <div class="cp-generic-media-row">
             <input
               class="cp-suno-input cp-generic-input"
-              :value="String(getModelFieldValue(field) || '')"
+              :value="aiAppMediaFieldDisplayValue(field)"
               @input="setModelFieldValue(field, ($event.target as HTMLInputElement).value)"
             />
             <button
