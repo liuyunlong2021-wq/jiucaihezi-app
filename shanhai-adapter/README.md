@@ -56,12 +56,29 @@
 服务器目录 `/opt/shanhai-adapter`。compose 不映射宿主端口，`8795` 只在 docker 网络内可达：
 
 ```bash
-cd /opt/jiucai-repo && git pull --ff-only origin main
-mkdir -p /opt/shanhai-adapter && cp -r shanhai-adapter/* /opt/shanhai-adapter/
-cd /opt/shanhai-adapter && docker compose up -d --build --force-recreate shanhai-adapter
+set -euo pipefail
+
+cd /opt/jiucai-repo
+git status --short                  # 必须无输出；有本地改动先弄清楚再继续
+git fetch origin main --depth=1
+git reset --hard origin/main        # 不能用 --ff-only：浅仓库会误报 diverged
+git sparse-checkout add shanhai-adapter
+git log -1 --oneline
+
+mkdir -p /opt/shanhai-adapter
+rsync -a --delete \
+  /opt/jiucai-repo/shanhai-adapter/ \
+  /opt/shanhai-adapter/             # --delete 会覆盖服务器上的 compose，先 diff 再决定
+
+cd /opt/shanhai-adapter
+docker compose config >/dev/null && echo "compose 合法"
+docker compose up -d --force-recreate --build
+docker compose ps
+docker compose logs --tail=50
 ```
 
-必须加入与 NewAPI 相同的 Docker 网络 `new-api-new_new-api-network`。
+服务器是 `--depth=1` 浅仓库 + 稀疏检出，`git pull --ff-only` 会报 `diverged` 并被拒绝 —— 那是浅仓库的
+假象，不是真分叉。容器必须加入与 NewAPI 相同的 Docker 网络 `new-api-new_new-api-network`。
 
 重建会清空进程内的建单 Key 表（TTL 6 小时），重启前创建、还没下载完的任务需要重新提交。
 
