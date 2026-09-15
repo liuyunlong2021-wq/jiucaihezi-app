@@ -27,6 +27,10 @@ SHANHAI_BASE_URL = "https://shanhai.vnshu.cn/api/v1"
 SHANHAI_SUBMIT_TIMEOUT_SECONDS = 120.0
 SHANHAI_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 SHANHAI_MEDIA_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
+# 状态查询不能拖住调用方：实测山海 /tasks/{id} 会长时间不响应（>30s），
+# 而 NewAPI 的轮询器等不起 —— 见 poll_shanhai_task。
+SHANHAI_POLL_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
+SHANHAI_POLL_ATTEMPTS = 2
 MAX_REFERENCE_IMAGES = 10
 
 logger = logging.getLogger("shanhai_adapter")
@@ -110,7 +114,10 @@ async def create_video(request: Request):
 @app.get("/v1/videos/{task_id}")
 async def get_video(task_id: str, request: Request):
     validate_task_id(task_id)
-    data = await shanhai_get(request, f"/tasks/{task_id}", task_key(task_id, request))
+    data = await poll_shanhai_task(request, task_id, task_key(task_id, request))
+    if data is None:
+        # 瞬时故障就报「处理中」，不要回 5xx：调用方会把无法识别的响应判成任务失败。
+        return task_response(task_id, {"status": "running"})
     return task_response(task_id, data)
 
 
@@ -148,6 +155,44 @@ async def get_video_content(task_id: str, request: Request):
         headers=passthrough,
         background=BackgroundTask(stream.__aexit__, None, None, None),
     )
+
+
+async def poll_shanhai_task(request: Request, task_id: str, key: str) -> dict | None:
+    """查询上游任务状态。
+
+    超时 / 网络错误 / 上游 5xx 都返回 None：这是瞬时故障，不是任务结论。回 5xx 会让 NewAPI 的
+    轮询器把「无法识别的响应」当成任务失败，一次抖动就能终结一个还在生成的任务（实测发生
+    过一次）。4xx（id 不对、Key 失效）照常抛出。
+    """
+    path = f"/tasks/{task_id}"
+    for attempt in range(SHANHAI_POLL_ATTEMPTS):
+        try:
+            response = await request.app.state.http.get(
+                f"{SHANHAI_BASE_URL}{path}",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=SHANHAI_POLL_TIMEOUT,
+            )
+        except httpx.HTTPError as exc:
+            logger.warning(
+                "Shanhai poll failed task=%s attempt=%s exception=%s",
+                task_id,
+                attempt + 1,
+                type(exc).__name__,
+            )
+            continue
+        try:
+            data = response_json(response)
+        except HTTPException as exc:
+            logger.warning(
+                "Shanhai poll failed task=%s attempt=%s reason=%s", task_id, attempt + 1, exc.detail
+            )
+            continue
+        if response.is_success:
+            return data
+        log_upstream_failure("GET", path, response, data)
+        if response.status_code < 500:
+            raise upstream_error(response, data)
+    return None
 
 
 async def shanhai_get(request: Request, path: str, key: str | None = None) -> dict:

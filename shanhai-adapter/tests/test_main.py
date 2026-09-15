@@ -163,7 +163,7 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(body["status"], "failed")
         self.assertEqual(body["error"]["message"], "素材地址不可访问")
 
-    async def test_logs_the_real_upstream_reason_when_a_poll_fails(self):
+    async def test_poll_keeps_the_task_alive_on_upstream_5xx_and_logs_the_reason(self):
         async def failing(request: httpx.Request):
             return httpx.Response(
                 500, json={"error": {"code": "internal_error", "message": "任务不存在"}}
@@ -175,10 +175,40 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "/v1/videos/run_unknown",
                 headers={"Authorization": "Bearer oc_live_channel"},
             )
-        self.assertEqual(response.status_code, 502)
-        # 只有状态码时无法排障：上游的 code/message 必须落到日志里。
-        self.assertIn("任务不存在", "\n".join(captured.output))
-        self.assertIn("status=500", "\n".join(captured.output))
+        # 上游 5xx 是瞬时故障：回 5xx 会被调用方判成任务失败，所以只能报「处理中」。
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "processing")
+        joined = "\n".join(captured.output)
+        self.assertIn("任务不存在", joined)
+        self.assertIn("status=500", joined)
+
+    async def test_poll_keeps_the_task_alive_when_the_upstream_times_out(self):
+        async def hanging(request: httpx.Request):
+            raise httpx.ReadTimeout("shanghai status endpoint did not answer")
+
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(hanging))
+        with self.assertLogs("shanhai_adapter", level="WARNING") as captured:
+            response = await self.client.get(
+                "/v1/videos/run_slow",
+                headers={"Authorization": "Bearer oc_live_channel"},
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "processing")
+        self.assertIn("ReadTimeout", "\n".join(captured.output))
+
+    async def test_poll_propagates_a_real_upstream_404(self):
+        async def missing(request: httpx.Request):
+            return httpx.Response(
+                404, json={"error": {"code": "not_found", "message": "任务不存在"}}
+            )
+
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(missing))
+        response = await self.client.get(
+            "/v1/videos/run_missing", headers={"Authorization": "Bearer oc_live_channel"}
+        )
+        # 4xx 是确定的负面结论（id 不对 / Key 失效），不该被当成瞬时故障。
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json()["error"]["message"], "任务不存在")
 
     async def test_content_proxy_forwards_range_and_key(self):
         response = await self.client.get(
