@@ -115,12 +115,13 @@ docker compose logs --tail=50
 docker compose exec -T shanhai-adapter \
   python -c "import json,urllib.request;print(json.load(urllib.request.urlopen('http://127.0.0.1:8795/health')))"
 
-# 用真实渠道 Key 核对上游目录（不花额度；Key 进环境变量，不落 shell 历史）
+# 用真实渠道 Key 核对上游目录（不花额度；Key 走 stdin，不进环境变量、不落 shell 历史）
 read -rsp '山海 API Key (oc_live_...): ' SHANHAI_KEY && echo
-docker compose exec -T -e SHANHAI_KEY shanhai-adapter python3 -c "
-import json, os, urllib.request
+printf '%s' "$SHANHAI_KEY" | docker compose exec -T shanhai-adapter python3 -c "
+import json, sys, urllib.request
+key = sys.stdin.readline().strip()
 req = urllib.request.Request('http://127.0.0.1:8795/v1/models',
-                             headers={'Authorization': 'Bearer ' + os.environ['SHANHAI_KEY']})
+                             headers={'Authorization': 'Bearer ' + key})
 data = json.load(urllib.request.urlopen(req, timeout=30))
 for item in data['data']:
     if item['id'] in ('shanhai-dola-seedance-v2-5-30-9-0-7', 'oc-model-r5cfh8'):
@@ -128,6 +129,8 @@ for item in data['data']:
 "
 unset SHANHAI_KEY
 ```
+
+（`docker compose exec -e 变量名` 不会透传宿主环境，只认 `变量名=值`，所以这里不用 `-e`。）
 
 能打出两条模型，说明渠道 Key 有效、适配器到山海的链路通；`capabilities` 里是该模型真实的分辨率、
 比例、时长和参考图上限，与面板登记值对不上时以它为准。
