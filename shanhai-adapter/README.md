@@ -108,6 +108,24 @@ docker compose logs --tail=50
 也是拿渠道里的公开名去匹配，对不上面板就会显示“未配置该模型渠道”。面板定价是人民币实付价
 （`1/次` 与 `2元/次`），NewAPI 渠道倍率要调到与之一致，否则面板显示与实扣不符。
 
+**SSRF 白名单必须先配，否则任务成功也拿不到成片**：面板拉成片时是 NewAPI 主动访问本服务的
+`/content`，它会校验 `fetch_setting.allowed_ports`。生产现值如果不含 `8795`，下载会被拦成
+`request blocked: port 8795 is not allowed`：
+
+```bash
+docker exec postgres psql -U newapi -d new-api -c \
+"UPDATE options SET value='[\"80\",\"443\",\"8080\",\"8443\",\"8794\",\"8795\"]' WHERE key='fetch_setting.allowed_ports';"
+
+docker exec postgres psql -U newapi -d new-api -Atc \
+"SELECT key,value FROM options WHERE key='fetch_setting.allowed_ports';"
+
+cd /root/new-api-new && docker compose restart new-api
+```
+
+必须保持**字符串数组**格式，数字数组当前后端读不出来（会静默回退默认端口）。不要从后台 SSRF 页面
+重新保存允许端口（可能写回数字数组）。完整排障见
+`docs/wiki/运维/NewAPI视频下载SSRF端口配置失效排障-2026-09-09.md`。
+
 ## 验证
 
 ```bash

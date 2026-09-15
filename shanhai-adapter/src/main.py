@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 import logging
 from time import monotonic, time
 from urllib.parse import urlsplit
-
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -101,6 +100,7 @@ async def create_video(request: Request):
         raise HTTPException(502, "Shanhai generation service is unavailable") from exc
     data = response_json(response)
     if not response.is_success:
+        log_upstream_failure("submit", "/generations", response, data)
         raise upstream_error(response, data)
     result = submitted_response(data, str(body.get("model") or "").strip())
     remember_task_key(result["id"], key)
@@ -158,11 +158,28 @@ async def shanhai_get(request: Request, path: str, key: str | None = None) -> di
             headers={"Authorization": f"Bearer {key}"},
         )
     except httpx.HTTPError as exc:
+        logger.warning("Shanhai GET %s failed exception=%s", path, type(exc).__name__)
         raise HTTPException(502, "Shanhai service is unavailable") from exc
     data = response_json(response)
     if not response.is_success:
+        log_upstream_failure("GET", path, response, data)
         raise upstream_error(response, data)
     return data
+
+
+def log_upstream_failure(
+    operation: str, path: str, response: httpx.Response, data: dict
+) -> None:
+    """把上游的真实原因写进日志；只取 error 里的 code/message，不落请求体与 Key。"""
+    error = data.get("error") if isinstance(data.get("error"), dict) else {}
+    logger.warning(
+        "Shanhai %s failed path=%s status=%s code=%s message=%s",
+        operation,
+        path,
+        response.status_code,
+        error.get("code") or data.get("code") or "-",
+        str(error.get("message") or data.get("message") or "-")[:200],
+    )
 
 
 def remember_task_key(task_id: str, key: str) -> None:
