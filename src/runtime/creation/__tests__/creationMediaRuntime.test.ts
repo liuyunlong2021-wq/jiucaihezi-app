@@ -1133,7 +1133,8 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
     }
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.equal(body.model, 'shanhai-dola-seedance-v2-5-30-9-0-7')
+      // 面板发渠道公开名；NewAPI 的模型映射再换成 shanhai-dola-seedance-v2-5-30-9-0-7。
+      assert.equal(body.model, '山seedance2.5')
       assert.equal(body.prompt, '让参考图里的主体自然运动')
       assert.equal(body.ratio, '16:9')
       assert.equal(body.resolution, '720p')

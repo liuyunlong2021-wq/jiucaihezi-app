@@ -33,7 +33,9 @@
 
 ## 字段契约
 
-- `model` 必须是下面 2 个 ID 之一，其它一律 400（图片模型和 sd-2.0 官渠本轮没接）。
+- `model` 收两种写法：NewAPI 渠道的公开名（`山seedance2.5` / `海seedance2.5`）或山海的上游 id
+  （`shanhai-dola-seedance-v2-5-30-9-0-7` / `oc-model-r5cfh8`）。渠道开了模型映射时收到的是上游 id；
+  映射未生效时适配器自己把公开名换成上游 id，所以两种都能跑。其它一律 400。
 - `prompt` 必填，最长 20000 字符。
 - 参考图接受 `images` / `image` / `imageUrl` / `imageUrls`，每项可以是字符串或 `{url}`；
   必须是 `http(s)` 公开直链（山海自己去抓），最多 10 张 —— 面板侧按文档表更严（两条线路分别 9 / 10 张）。
@@ -89,25 +91,56 @@ docker compose logs --tail=50
 | 类型 | OpenAI 兼容 |
 | Base URL | `http://shanhai-adapter:8795` |
 | 密钥 | 山海画布 API Key（`oc_live_...`，在账户中心「API 接入」创建） |
-| 模型 | 下面 2 个 ID，逗号分隔 |
+| 模型 | 下面 2 个渠道公开名，逗号分隔 |
 
 ```text
-shanhai-dola-seedance-v2-5-30-9-0-7,oc-model-r5cfh8
+山seedance2.5,海seedance2.5
 ```
 
-模型 ID 必须与创作面板注册的 `model` 逐字一致（面板发的就是这些 ID）。面板定价是人民币实付价
+模型映射（把公开名换成上游 id，面板只发公开名）：
+
+| 原始模型 | 替换模型 |
+| --- | --- |
+| `山seedance2.5` | `shanhai-dola-seedance-v2-5-30-9-0-7` |
+| `海seedance2.5` | `oc-model-r5cfh8` |
+
+渠道公开名必须与创作面板注册的 `model` 逐字一致（面板发的就是它）；可用性服务（`scripts/creation-models/server.mjs`）
+也是拿渠道里的公开名去匹配，对不上面板就会显示“未配置该模型渠道”。面板定价是人民币实付价
 （`1/次` 与 `2元/次`），NewAPI 渠道倍率要调到与之一致，否则面板显示与实扣不符。
 
 ## 验证
 
 ```bash
-# 容器内自检
+# 容器内自检（镜像没有 curl，8795 也没映射到宿主，只能用 python 在容器里查）
 docker compose exec -T shanhai-adapter \
   python -c "import json,urllib.request;print(json.load(urllib.request.urlopen('http://127.0.0.1:8795/health')))"
 
-# 用真实渠道 Key 核对上游目录（不需要花额度）
-curl -s -H "Authorization: Bearer oc_live_xxx" http://127.0.0.1:8795/v1/models | head -c 400
+# 用真实渠道 Key 核对上游目录（不花额度；Key 进环境变量，不落 shell 历史）
+read -rsp '山海 API Key (oc_live_...): ' SHANHAI_KEY && echo
+docker compose exec -T -e SHANHAI_KEY shanhai-adapter python3 -c "
+import json, os, urllib.request
+req = urllib.request.Request('http://127.0.0.1:8795/v1/models',
+                             headers={'Authorization': 'Bearer ' + os.environ['SHANHAI_KEY']})
+data = json.load(urllib.request.urlopen(req, timeout=30))
+for item in data['data']:
+    if item['id'] in ('shanhai-dola-seedance-v2-5-30-9-0-7', 'oc-model-r5cfh8'):
+        print(item['id'], item.get('type'), json.dumps(item.get('capabilities'), ensure_ascii=False))
+"
+unset SHANHAI_KEY
 ```
 
-第二步能列出模型，说明渠道 Key 有效、适配器到山海的链路通；`capabilities` 里是该模型真实的分辨率、
+能打出两条模型，说明渠道 Key 有效、适配器到山海的链路通；`capabilities` 里是该模型真实的分辨率、
 比例、时长和参考图上限，与面板登记值对不上时以它为准。
+
+面板侧可用性（`creation-models` 每次请求实时查库，加完渠道不用重启它）：
+
+```bash
+curl -s https://api.jiucaihezi.studio/api/creation/models | python3 -c "
+import sys, json
+models = json.load(sys.stdin)['data']['models']
+print([m for m in models if 'shanhai' in m['id'] or 'oc-model' in m['id']])
+"
+# 仍为空时对一下渠道里实际存的名字：
+docker exec -i $(docker ps -q -f name=postgres) \
+  psql -U newapi -d new-api -t -c "SELECT id, status, models FROM channels ORDER BY id DESC LIMIT 5;"
+```

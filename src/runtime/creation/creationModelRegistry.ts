@@ -77,12 +77,17 @@ const XIAOYI_MINIMAX_H3_MODELS = [
 // 轮询 GET /tasks/{id}，成片地址需同一个 Bearer Key。统一经 shanhai-adapter 翻译，
 // 成片由适配器 /v1/videos/{id}/content 代理下载。
 // 只接两条 Seedance 2.5 线路；参考图上限与参数按官方文档表登记，price 是面板对用户的实付价。
+// `model` 必须是 NewAPI 渠道里的**公开模型名**（面板发什么，NewAPI 就按什么找渠道）；
+// 渠道的模型映射再把它换成山海的上游 id 送给 shanhai-adapter。
 const SHANHAI_NOTES = ['https://shanhai.vnshu.cn/docs']
 const SHANHAI_CONTRACT_ISSUES = ['参数按山海官方文档核对，尚未在拿到渠道 Key 的环境实测。']
 const SHANHAI_VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 
 const SHANHAI_VIDEO_MODELS: Array<{
+  // NewAPI 渠道里的公开模型名（面板发什么，NewAPI 就按什么找渠道）
   model: string
+  // 山海的上游 id：NewAPI 的模型映射把它送给 shanhai-adapter，也用它拼注册表 id
+  upstream: string
   label: string
   price: string
   ratios: string[]
@@ -92,7 +97,8 @@ const SHANHAI_VIDEO_MODELS: Array<{
   maxImages: number
 }> = [
   {
-    model: 'shanhai-dola-seedance-v2-5-30-9-0-7',
+    model: '山seedance2.5',
+    upstream: 'shanhai-dola-seedance-v2-5-30-9-0-7',
     label: '山Seedance 2.5 1元/次',
     price: '1/次',
     ratios: SHANHAI_VIDEO_RATIOS,
@@ -102,7 +108,8 @@ const SHANHAI_VIDEO_MODELS: Array<{
     maxImages: 9,
   },
   {
-    model: 'oc-model-r5cfh8',
+    model: '海seedance2.5',
+    upstream: 'oc-model-r5cfh8',
     label: '海Seedance 2.5 2元/次',
     price: '2元/次',
     ratios: SHANHAI_VIDEO_RATIOS,
@@ -725,7 +732,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   // ── 山海画布：参考图经网关上传成公开 HTTPS 地址后提交（山海只接受公开直链）──
   ...SHANHAI_VIDEO_MODELS.map(model => directVideo({
-    id: `newapi/shanhai/${model.model}`,
+    id: `newapi/shanhai/${model.upstream}`,
     model: model.model,
     label: model.label,
     price: model.price,

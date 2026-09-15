@@ -128,6 +128,22 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
             },
         )
 
+    async def test_accepts_the_newapi_public_alias_and_submits_the_upstream_id(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer oc_live_channel"},
+            json={
+                "model": "海seedance2.5",
+                "prompt": "海边的黄昏",
+                "ratio": "16:9",
+                "duration": 30,
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["model"], "海seedance2.5")
+        # 面板发的是渠道公开名；无论 NewAPI 的模型映射有没有生效，山海只收上游 id。
+        self.assertEqual(json.loads(self.requests[0].read())["model"], "oc-model-r5cfh8")
+
     async def test_poll_returns_relative_content_path_for_authenticated_download(self):
         response = await self.client.get(
             "/v1/videos/run_aaa", headers={"Authorization": "Bearer oc_live_channel"}

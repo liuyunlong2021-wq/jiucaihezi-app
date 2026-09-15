@@ -1018,13 +1018,14 @@ test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任
   assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.0')
 
   // 定价与范围是有意钉住的：加模型或改价必须同步改这里，避免静默漂移。
+  // model 必须是 NewAPI 渠道的公开名（渠道里的模型映射再换成山海上游 id）。
   assert.deepEqual(
     listCreationModels({ source: 'all' })
       .filter(model => model.id.startsWith('newapi/shanhai/'))
       .map(model => [model.id, model.model, model.price, model.task]),
     [
-      ['newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', 'shanhai-dola-seedance-v2-5-30-9-0-7', '1/次', 'video'],
-      ['newapi/shanhai/oc-model-r5cfh8', 'oc-model-r5cfh8', '2元/次', 'video'],
+      ['newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', '山seedance2.5', '1/次', 'video'],
+      ['newapi/shanhai/oc-model-r5cfh8', '海seedance2.5', '2元/次', 'video'],
     ],
   )
   assert.equal(

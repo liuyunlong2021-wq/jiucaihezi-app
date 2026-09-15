@@ -32,10 +32,18 @@ MAX_REFERENCE_IMAGES = 10
 
 logger = logging.getLogger("shanhai_adapter")
 
+# 面板发的是 NewAPI 渠道里的**公开模型名**（山seedance2.5 / 海seedance2.5），渠道的模型映射
+# 会在转发前把它换成山海的上游 id；映射未生效时按下面这张表替换，两种名字都收。
+MODEL_ALIASES = {
+    "山seedance2.5": "shanhai-dola-seedance-v2-5-30-9-0-7",
+    "海seedance2.5": "oc-model-r5cfh8",
+}
+
 # 只接按次计费的两条 Seedance 2.5 线路（9 图参考生视频，720p）。
 MODELS = {
     "shanhai-dola-seedance-v2-5-30-9-0-7",
     "oc-model-r5cfh8",
+    *MODEL_ALIASES,
 }
 
 # 建单时记下这枚渠道 Key：轮询与成片下载端点可能不带渠道 Key 过来，
@@ -94,7 +102,7 @@ async def create_video(request: Request):
     data = response_json(response)
     if not response.is_success:
         raise upstream_error(response, data)
-    result = submitted_response(data, body["model"])
+    result = submitted_response(data, str(body.get("model") or "").strip())
     remember_task_key(result["id"], key)
     return result
 
@@ -199,6 +207,7 @@ def generation_payload(body: dict) -> dict:
     model = str(body.get("model") or "").strip()
     if model not in MODELS:
         raise HTTPException(400, "Unsupported Shanhai model")
+    upstream_model = MODEL_ALIASES.get(model, model)
     prompt = prompt_text(body.get("prompt"))
     if not prompt:
         raise HTTPException(400, "prompt is required")
@@ -207,7 +216,7 @@ def generation_payload(body: dict) -> dict:
         raise HTTPException(422, "Shanhai adapter does not support audio references yet")
 
     payload: dict = {
-        "model": model,
+        "model": upstream_model,
         "prompt": prompt,
         "media_type": "video",
     }
