@@ -45,7 +45,7 @@ test('desktop release creation and public download manifest are independent from
   assert.match(downloadJob, /\/opt\/updates\/latest\.json/)
 })
 
-test('every desktop release job builds the bundled Creation MCP before Tauri', () => {
+test('every desktop release job uses the audited desktop build before Tauri', () => {
   for (const [job, nextJob] of [
     ['macos-arm', 'macos-intel'],
     ['macos-intel', 'windows'],
@@ -53,8 +53,8 @@ test('every desktop release job builds the bundled Creation MCP before Tauri', (
   ]) {
     const body = workflow.match(new RegExp(`\\n  ${job}:[\\s\\S]*?(?=\\n  ${nextJob}:)`))?.[0]
     assert.ok(body, job)
-    assert.match(body, /pnpm run build:creation-mcp/, job)
-    assert.ok(body.indexOf('pnpm run build:creation-mcp') < body.indexOf('pnpm tauri'), job)
+    assert.match(body, /pnpm run build:desktop:quick/, job)
+    assert.ok(body.indexOf('pnpm run build:desktop:quick') < body.indexOf('pnpm tauri'), job)
   }
 })
 

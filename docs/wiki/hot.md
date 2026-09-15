@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-15] v2.1.52 Desktop 错装 Web 首页与 v2.1.53 修复
+
+- `v2.1.52` 三平台 CI 绕过 `build:desktop:quick`，只执行 Vite 构建；由于 Web 根页是官网、工作台在 `/try/`，正式安装包启动后错误显示官网。三个 Desktop 包均受影响，用户决定不回滚，直接发布 `v2.1.53`。
+- 三个平台现统一在 `pnpm tauri` 前运行 `pnpm run build:desktop:quick`，由它完成工作台入口提升、官网文件清理和 Desktop 产物审计；合同测试逐 job 锁定，禁止 CI 再手工拼装 `vite build`。
+- 本地真实 Desktop quick build 与 `audit:desktop-dist` 已通过；正式 `v2.1.53` 安装包首屏仍须人工确认，不能用 Actions 成功或进程存活代替。
+
 ## [2026-09-15] v2.1.51 发布准备
 
 - Word 故事集标题兼容修复已收口，版本统一为 `2.1.51`。发布前验证通过：focused Node `1350/1350`、Rust `412 passed / 1 ignored`、TypeScript、定向 lint 与差异检查；真实三平台 CI 仍须由 `v2.1.51` tag 触发后验收。

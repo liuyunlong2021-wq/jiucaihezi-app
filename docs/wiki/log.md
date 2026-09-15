@@ -1294,3 +1294,9 @@
 
 - 用户确认韭菜盒子只提供通用基础能力：文件树“建库”、Markdown 双链按钮、`Command/Ctrl + Shift + K`、输入 `[[` 自动联想；角色、场景、道具判断及逐集改编继续交给 Skill。
 - 新增并实施 [[开发/通用记忆工作台改编Wiki建库与双链输入TDD-2026-09-10]]，加入 [[CLAUDE]] 当前开发入口；类型检查、相关测试和完整 focused 测试通过，真实平台人工验收仍待执行。
+
+## [2026-09-15] v2.1.52 Desktop 入口事故与发布链修复
+
+- 用户安装 `v2.1.52` 后确认三平台 Desktop 包把 Web 官网当成首屏；该版本视为坏版本，按用户决定不回滚，直接准备 `v2.1.53`。
+- 根因是 GitHub Actions 三个平台手工执行 `vite build`，同时清空 Tauri `beforeBuildCommand`，绕过 `prune-desktop-dist.mjs` 与 `audit:desktop-dist`。本地开发直接打开 `/try/`，所以未暴露正式包入口错误。
+- 三个平台现统一调用 `pnpm run build:desktop:quick`；发布合同测试逐 job 锁定该命令。定向测试 `5/5`、本地 Desktop quick build和产物审计通过，正式包首屏待新 tag 构建后人工验收。

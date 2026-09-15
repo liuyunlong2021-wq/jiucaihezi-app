@@ -37,12 +37,10 @@ jobs:
       - run: pnpm install
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
-      - name: Build bundled Creation MCP
-        run: pnpm run build:creation-mcp
-      - name: Frontend build (skip tests)
+      - name: Build audited Desktop frontend
         env:
           VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-        run: pnpm exec vite build
+        run: pnpm run build:desktop:quick
 
       - id: build-macos-arm
         continue-on-error: true
@@ -172,16 +170,13 @@ jobs:
 
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
-      - name: Build bundled Creation MCP
-        run: pnpm run build:creation-mcp
-
       - name: Install Rust x86_64 target
         run: rustup target add x86_64-apple-darwin
 
-      - name: Frontend build (skip tests)
+      - name: Build audited Desktop frontend
         env:
           VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-        run: pnpm exec vite build
+        run: pnpm run build:desktop:quick
 
       - uses: tauri-apps/tauri-action@v0
         env:
@@ -297,12 +292,10 @@ jobs:
       - run: pnpm install
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
-      - name: Build bundled Creation MCP
-        run: pnpm run build:creation-mcp
-      - name: Frontend build (skip tests)
+      - name: Build audited Desktop frontend
         env:
           VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
-        run: pnpm exec vue-tsc -b && pnpm exec vite build
+        run: pnpm run build:desktop:quick
 
       - name: Build Windows app (portable)
         shell: pwsh
