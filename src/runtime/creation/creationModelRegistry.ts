@@ -71,6 +71,47 @@ const XIAOYI_MINIMAX_H3_MODELS = [
   { model: 'MiniMaxH3-2k-sec', label: 'MiniMax H3 2K', price: 0.14, resolution: '2k' },
   { model: 'MiniMaxH3-720p-sec', label: 'MiniMax H3 720P', price: 0.12, resolution: '720p' },
 ] as const
+
+// ── 山海画布（https://shanhai.vnshu.cn/docs）────────────────────────────────
+// 上游不是 OpenAI 兼容面：提交 POST /generations（media_type + inputs + options），
+// 轮询 GET /tasks/{id}，成片地址需同一个 Bearer Key。统一经 shanhai-adapter 翻译，
+// 成片由适配器 /v1/videos/{id}/content 代理下载。
+// 只接两条 Seedance 2.5 线路；参考图上限与参数按官方文档表登记，price 是面板对用户的实付价。
+const SHANHAI_NOTES = ['https://shanhai.vnshu.cn/docs']
+const SHANHAI_CONTRACT_ISSUES = ['参数按山海官方文档核对，尚未在拿到渠道 Key 的环境实测。']
+const SHANHAI_VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
+
+const SHANHAI_VIDEO_MODELS: Array<{
+  model: string
+  label: string
+  price: string
+  ratios: string[]
+  resolutions: string[]
+  duration: { min?: number; max?: number; allowedValues?: number[] }
+  defaultDuration?: number
+  maxImages: number
+}> = [
+  {
+    model: 'shanhai-dola-seedance-v2-5-30-9-0-7',
+    label: '山Seedance 2.5 1元/次',
+    price: '1/次',
+    ratios: SHANHAI_VIDEO_RATIOS,
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 30,
+    maxImages: 9,
+  },
+  {
+    model: 'oc-model-r5cfh8',
+    label: '海Seedance 2.5 2元/次',
+    price: '2元/次',
+    ratios: SHANHAI_VIDEO_RATIOS,
+    resolutions: ['720p'],
+    duration: { allowedValues: [30] },
+    defaultDuration: 30,
+    maxImages: 10,
+  },
+]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
@@ -682,6 +723,39 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ], 12000),
     notes: ['菠萝MiniMaxapi.md', '上游 0.07/秒；默认 5 秒，与旧版 15 秒不同。'],
   }),
+  // ── 山海画布：参考图经网关上传成公开 HTTPS 地址后提交（山海只接受公开直链）──
+  ...SHANHAI_VIDEO_MODELS.map(model => directVideo({
+    id: `newapi/shanhai/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    contractStatus: 'partial',
+    contractIssues: SHANHAI_CONTRACT_ISSUES,
+    ratios: model.ratios,
+    resolutions: model.resolutions,
+    duration: model.duration,
+    files: { images: { min: 0, max: model.maxImages } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: model.ratios[0], options: options(model.ratios) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: model.resolutions[0], options: options(model.resolutions) },
+      {
+        key: 'duration',
+        label: '时长(秒)',
+        kind: 'number',
+        defaultValue: model.defaultDuration ?? model.duration.allowedValues?.[0] ?? model.duration.min,
+        min: model.duration.min,
+        max: model.duration.max,
+        step: 1,
+      },
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+    ]),
+    notes: SHANHAI_NOTES,
+  })),
   directVideo({
     id: 'newapi/xiaoyi/grok-imagine-video-1.5',
     model: 'grok-imagine-video-1.5',
@@ -1818,6 +1892,9 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
+  // 山海画布当前只接两条 Seedance 2.5 线路，且上游 id（含 oc-model-*）不带厂商前缀，
+  // 不显式归族会掉进「其他模型」
+  if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.0'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'
   if (spec.task === 'image' && ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'rh-image-v2', 'rh-pro-image'].some(key => id.includes(key))) return 'Banana'
   if (id.includes('z-image')) return 'Z Image'

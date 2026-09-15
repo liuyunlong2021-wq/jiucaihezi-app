@@ -1122,6 +1122,65 @@ test('不可用的非 RH 视频模型 contractStatus 不为 verified（通过 sp
   }
 })
 
+test('P6 山海画布视频经适配器任务路由提交并回传代理成片地址', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/api/creations/uploads')) {
+      return Response.json({ url: 'https://api.jiucaihezi.studio/media/creation/ref.png' })
+    }
+    if (url.endsWith('/v1/videos')) {
+      const body = JSON.parse(String(init?.body || '{}'))
+      assert.equal(body.model, 'shanhai-dola-seedance-v2-5-30-9-0-7')
+      assert.equal(body.prompt, '让参考图里的主体自然运动')
+      assert.equal(body.ratio, '16:9')
+      assert.equal(body.resolution, '720p')
+      assert.equal(body.duration, 30)
+      // 参考图必须是网关上传后的公开 HTTPS 地址：山海只接受可公开抓取的直链。
+      assert.deepEqual(body.images, [
+        'https://api.jiucaihezi.studio/media/creation/ref.png',
+        'https://api.jiucaihezi.studio/media/creation/ref.png',
+      ])
+      return Response.json({ id: 'run_shanhai_1', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/run_shanhai_1')) {
+      return Response.json({
+        id: 'run_shanhai_1',
+        status: 'completed',
+        video_url: '/v1/videos/run_shanhai_1/content',
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
+      params: {
+        prompt: '让参考图里的主体自然运动',
+        images: ['data:image/png;base64,aGVsbG8=', 'data:image/png;base64,aGVsbG8='],
+        ratio: '16:9',
+        resolution: '720p',
+        duration: 30,
+      },
+    })
+    const request = buildCreationSubmitRequest(plan)
+    assert.equal(request.runtime, 'newapi-direct')
+    assert.equal(request.endpoint, '/v1/videos')
+
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(request))
+    assert.equal(result.taskId, 'run_shanhai_1')
+    assert.equal(result.pollUrl, '/v1/videos/run_shanhai_1')
+    // 山海成片地址需要渠道 Key，客户端只能用适配器的代理端点，由 NewAPI 转发。
+    assert.equal(result.url, 'https://api.jiucaihezi.studio/v1/videos/run_shanhai_1/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('视频轮询窗口按上游合同延长，图片/音频保持原窗口', () => {
   const api = readFileSync('src/api/media-generation.ts', 'utf8')
   assert.match(api, /export const CREATION_VIDEO_POLL_MAX_SEC = [\s\S]{0,140}1800/)

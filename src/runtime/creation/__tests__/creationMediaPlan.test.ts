@@ -985,6 +985,54 @@ test('Seed Audio creation model uses the Chinese label, minute price, and three 
   assert.deepEqual(spec.capabilities.inputModalities, ['text', 'audio'])
 })
 
+test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任务路由', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
+    params: {
+      prompt: '让参考图里的主体自然运动',
+      images: ['https://example.com/1.jpg'],
+      ratio: '16:9',
+      resolution: '720p',
+      duration: 30,
+    },
+  })
+
+  assert.equal(plan.route, 'newapi-direct')
+  assert.equal(plan.endpoint, '/v1/videos')
+  assert.equal(plan.pollKind, 'newapi-task')
+  assert.equal(plan.assetFlow, 'newapi-upload')
+  assert.equal(plan.mode, 'image-to-video')
+
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
+    params: {
+      prompt: '超出参考图上限',
+      images: Array.from({ length: 10 }, (_, index) => `https://example.com/${index}.jpg`),
+    },
+  }), /参考图最多支持 9 个/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/shanhai/oc-model-r5cfh8',
+    params: { prompt: '这条线路固定 30 秒', duration: 15 },
+  }), /时长不支持/)
+
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.0')
+
+  // 定价与范围是有意钉住的：加模型或改价必须同步改这里，避免静默漂移。
+  assert.deepEqual(
+    listCreationModels({ source: 'all' })
+      .filter(model => model.id.startsWith('newapi/shanhai/'))
+      .map(model => [model.id, model.model, model.price, model.task]),
+    [
+      ['newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', 'shanhai-dola-seedance-v2-5-30-9-0-7', '1/次', 'video'],
+      ['newapi/shanhai/oc-model-r5cfh8', 'oc-model-r5cfh8', '2元/次', 'video'],
+    ],
+  )
+  assert.equal(
+    listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/shanhai/')),
+    false,
+  )
+})
+
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   const params: Record<string, unknown> = {
     prompt: '测试提示词',

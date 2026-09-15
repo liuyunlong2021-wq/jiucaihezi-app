@@ -34,6 +34,8 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'newapi/xiaoyi/MiniMaxH3-720p-sec', aliases: ['MiniMaxH3-720p-sec'] },
   { id: 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s', aliases: ['minimax_h3_image_audio_to_video_v2_15s'] },
   { id: 'newapi/boluo/minimax_h3_zm_u24', aliases: ['minimax_h3_zm_u24'] },
+  { id: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', aliases: ['shanhai-dola-seedance-v2-5-30-9-0-7'] },
+  { id: 'newapi/shanhai/oc-model-r5cfh8', aliases: ['oc-model-r5cfh8'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },
   { id: 'veo-3.1-fast-generate-preview', aliases: ['veo-3.1-fast-generate-preview'] },
   { id: 'nano-banana-4k', aliases: ['nano-banana-4k', 'nano-banana-pro-4k'] },
