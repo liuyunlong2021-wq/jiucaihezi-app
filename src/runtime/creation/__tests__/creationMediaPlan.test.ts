@@ -1014,6 +1014,22 @@ test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任
     modelId: 'newapi/shanhai/oc-model-r5cfh8',
     params: { prompt: '这条线路固定 30 秒', duration: 15 },
   }), /时长不支持/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/shanhai/oc-model-r5cfh8',
+    params: {
+      prompt: '超出参考图上限',
+      images: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.jpg`),
+    },
+  }), /参考图最多支持 10 个/)
+
+  // 上游 GET /models 已核对（2026-09-15）：720p、6 档比例、时长 4-30 / 仅 30、参考图 9 / 10，
+  // 且 audio_input 与 video_reference 均为 false，所以这里钉住 verified 与参考图上限。
+  for (const id of [
+    'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
+    'newapi/shanhai/oc-model-r5cfh8',
+  ]) {
+    assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
+  }
 
   assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.0')
 

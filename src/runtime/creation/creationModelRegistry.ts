@@ -80,7 +80,7 @@ const XIAOYI_MINIMAX_H3_MODELS = [
 // `model` 必须是 NewAPI 渠道里的**公开模型名**（面板发什么，NewAPI 就按什么找渠道）；
 // 渠道的模型映射再把它换成山海的上游 id 送给 shanhai-adapter。
 const SHANHAI_NOTES = ['https://shanhai.vnshu.cn/docs']
-const SHANHAI_CONTRACT_ISSUES = ['参数按山海官方文档核对，尚未在拿到渠道 Key 的环境实测。']
+const SHANHAI_CONTRACT_ISSUES = ['上游能力已按 GET /models 核对；真实提交、出片与扣费尚未实测。']
 const SHANHAI_VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']
 
 const SHANHAI_VIDEO_MODELS: Array<{
@@ -741,7 +741,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     mode: 'text-to-video',
     endpoint: '/v1/videos',
     assetFlow: 'newapi-upload',
-    contractStatus: 'partial',
+    contractStatus: 'verified',
     contractIssues: SHANHAI_CONTRACT_ISSUES,
     ratios: model.ratios,
     resolutions: model.resolutions,
