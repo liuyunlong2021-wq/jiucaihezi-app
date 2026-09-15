@@ -1248,6 +1248,17 @@
 - 已加入云下载操作追踪和回归合同；iOS Debug 仅桌面加载 Vite，创作面板遵守顶部安全区并保留唯一返回对话入口。`1115` 个 focused 测试、iOS Rust target 检查、Debug IPA 构建、真机覆盖安装和启动完成，用户确认可返回对话。
 - 未执行云下载真机文件落盘验证；未上传 `2.1.34` 到 App Store Connect，未完成 TestFlight 内部安装、Beta App Review 或外部公开链接。
 
+## [2026-09-15] 发布准备 | v2.1.51
+
+- Word 故事集标题兼容修复随 `2.1.51` 收口；`package.json`、`src-tauri/Cargo.toml`、`src-tauri/tauri.conf.json` 和 `Cargo.lock` 版本一致。
+- 发布前验证通过：focused Node `1350/1350`、Rust `412 passed / 1 ignored`、TypeScript、定向 lint 与差异检查。当前只提交并推送 `main`；三平台构建、签名、公证、Windows 启动和下载清单须由 `v2.1.51` tag 另行触发并验收。
+
+## [2026-09-14] 修复 | Word 故事按集拆分
+
+- 用户提供的 `.docx` 中集标题使用正文段落、文本内 Markdown `##` 与整段加粗；AnyDoc 输出 `**## 第一集…**`，旧边界识别因此漏掉全部集标题。
+- `markdownSplit.ts` 在共享标题入口解开整行强调包装，并阻止包裹后的 Markdown 数字标题被独立数字段号规则重复计入；未新增 Word 专用拆分旁路。
+- 真实文件转换复验得到 3 个集节点与 1 个无损前置节点；focused `1350/1350`、`vue-tsc -b`、定向 lint 与差异检查通过，真实 App 点击验收待完成。
+
 ## [2026-08-26] TDD 建立 | Wiki 任务执行提速
 
 - 用户确认后续按“一次多词 Wiki 扫描、同轮只读工具并行、写操作串行屏障、最小耗时记录”的最小路线执行，新建 [[开发/通用记忆工作台Wiki任务执行提速TDD-2026-08-26]]。

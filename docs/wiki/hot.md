@@ -1,5 +1,15 @@
 # 热缓存
 
+## [2026-09-15] v2.1.51 发布准备
+
+- Word 故事集标题兼容修复已收口，版本统一为 `2.1.51`。发布前验证通过：focused Node `1350/1350`、Rust `412 passed / 1 ignored`、TypeScript、定向 lint 与差异检查；真实三平台 CI 仍须由 `v2.1.51` tag 触发后验收。
+
+## [2026-09-14] Word 故事按集拆分修复
+
+- 用户文件《钓系恶女攻略疯批的正确姿势.docx》的段落全是正文样式，标题文字自带 `##` 且整段加粗；AnyDoc 因而输出 `**## 第一集…**`，旧拆分器只认行首裸 `##` / `第一集`，报“没有识别到故事边界”。
+- 共享边界规范化现先解开整行 `**` / `__`，并继续把这类行视为 Markdown 标题，避免前置人物资料中的 `1. 江晚` 等标题进入独立数字段号候选、压过三个集标题。
+- 真实 Word 经 AnyDoc 转换后复验为 `story_chapter`：前置资料保留 `0000.md`，三集分别生成 `0001_下错药的一夜.md`、`0002_疯批医生.md`、`0003_我死了,就挺突然.md`。focused `1350/1350`、TypeScript、定向 lint 与差异检查通过；真实 App 点击拆分待人工验收。
+
 ## [2026-09-13] App Store 1.5 拒审：支持页补上自有联系方式
 
 - **拒审原文**：`https://jiucaihezi.studio/support/` "does not direct to a website with information users can use to ask questions and request support"。

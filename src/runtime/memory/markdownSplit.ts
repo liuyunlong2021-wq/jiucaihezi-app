@@ -80,8 +80,17 @@ function sourceLines(
   return lines
 }
 
+function unwrapBoundary(line: string): string {
+  return line
+    .trim()
+    .replace(/^(\*\*|__)(.*)\1$/u, '$2')
+    .trim()
+}
+
 function titleFromBoundary(line: string): string {
-  return line.replace(/^\s*#{1,6}\s*/, '').trim()
+  return unwrapBoundary(line)
+    .replace(/^#{1,6}\s*/, '')
+    .trim()
 }
 
 // 名称与摘要预算：文件树与侧栏都要单行读完。短名只允许来自原文本身
@@ -313,7 +322,7 @@ export function isStoryChapterBoundary(line: string): boolean {
 }
 
 export function isStoryNumberedBoundary(line: string): boolean {
-  if (/^\s*#{1,6}\s+/.test(line)) return false
+  if (/^#{1,6}\s+/.test(unwrapBoundary(line))) return false
   const title = titleFromBoundary(line).normalize('NFKC').trim()
   return new RegExp(`^(?:${ORDINAL_TOKEN})(?:(?:[.、)）:：-]\\s*|\\s+)\\S+|[.、．]?)$`, 'iu').test(
     title,

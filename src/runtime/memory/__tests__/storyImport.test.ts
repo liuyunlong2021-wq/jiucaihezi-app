@@ -154,6 +154,39 @@ test('numbered heading sequence outranks wrapper headings', () => {
   assert.deepEqual(detectStorySplit(englishRoman), { strategy: 'story_chapter' })
 })
 
+test('story import recognizes AnyDoc bold-wrapped Word episode headings', async () => {
+  const content = [
+    '**## 一、项目信息**',
+    '前置资料',
+    '**### 1. 江晚（女主）**',
+    '人物资料',
+    '**### 2. 傅行止（男主）**',
+    '人物资料',
+    '**### 3. 系统999**',
+    '人物资料',
+    '**### 4. 温予棠**',
+    '人物资料',
+    '**## 第一集 下错药的一夜**',
+    '江晚在失重的昏眩里睁眼。',
+    '**---**',
+    '**## 第二集 疯批医生**',
+    '江晚瘫坐在地。',
+    '**## 第三集 我死了，就挺突然**',
+    '光屏亮起。',
+  ].join('\n')
+
+  assert.deepEqual(detectStorySplit(content), { strategy: 'story_chapter' })
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '钓系恶女攻略疯批的正确姿势',
+    originalName: '钓系恶女攻略疯批的正确姿势.docx',
+  })
+  assert.deepEqual(
+    plan.split.nodes.filter(node => node.order > 0).map(node => node.title),
+    ['第一集 下错药的一夜', '第二集 疯批医生', '第三集 我死了，就挺突然'],
+  )
+})
+
 test('Chinese heading gaps are reported without inventing a boundary', async () => {
   const content = '# 书名\n### 开端一\n正文\n### 转折三\n正文'
   const plan = await buildStoryImportPlan({ content, title: '缺章书', originalName: '缺章书.epub' })
