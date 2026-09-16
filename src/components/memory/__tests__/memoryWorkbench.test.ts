@@ -801,6 +801,7 @@ test('memory composer keeps project file references until the user cancels them'
   assert.match(workbench, /const persistentAttachments = ref<ResolvedDirectAttachment\[\]>\(\[\]\)/)
   assert.match(workbench, /const activeAttachments = \[\.\.\.persistentAttachments\.value, \.\.\.attachments\.value\]/)
   assert.match(workbench, /persistentAttachments\.value = \(resource\.transcript\.persistentAttachments \|\| \[\]\)/)
+  assert.match(workbench, /if \(attachment\.kind === 'file' && attachment\.readablePath\)[\s\S]*files\.readText\([\s\S]*path: attachment\.readablePath[\s\S]*textContent: text\.content\.slice\(0, MAX_INLINE_ATTACHMENT_CHARS\)/)
   assert.match(workbench, /title="取消持续引用"/)
 })
 

@@ -2512,6 +2512,20 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       kind: attachment.kind === 'file' ? 'binary' : 'media',
       mimeType: attachment.mime,
     }
+    if (attachment.kind === 'file' && attachment.readablePath) {
+      const text = await files.readText({
+        ...resource,
+        path: attachment.readablePath,
+        name: attachment.readablePath.split('/').pop() || attachment.name,
+        kind: 'document',
+        mimeType: 'text/markdown',
+      })
+      return {
+        ...attachment,
+        textContent: text.content.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
+        characterCount: text.content.length,
+      }
+    }
     const binary = await files.readBinary(resource)
     let content = ''
     for (let offset = 0; offset < binary.data.length; offset += 0x8000) {

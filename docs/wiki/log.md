@@ -1298,6 +1298,16 @@
 - 索引模型固定返回 `summary + keywords`；请求携带严格 `response_format.json_schema`，程序只解析 `message.content`，拒绝 reasoning、Markdown、额外字段、截断和长度越界，并在校验成功后才写入 Wiki。
 - 已补摘要请求与响应解析 TDD，删除 JSON 大括号截取和 reasoning fallback；不支持结构化输出的模型明确失败且不写入。
 - 本地 focused `1176/1176`、`vue-tsc -b`、格式检查和 `git diff --check` 通过；真实 `jiucaihezi`、Ollama、MLX Provider、Web/Desktop/Mobile 人工验收仍待执行。
+
+## [2026-09-16] 修复 | 对话记忆索引不再依赖结构化输出
+
+- 用户实测“记录对话”失败后确认改为“模型出文字，程序负责拼结构”。根因是旧链路把 `response_format.json_schema` / 强制工具调用作为写索引前置条件，部分模型或网关不支持该协议。
+- 摘要请求统一为两行纯文本；程序负责提取简介与关键词、限长、去重和原有索引结构写入。索引文件格式、正链和查询均不变；无关键词行时用简介和技术标识兜底。
+
+## [2026-09-16] 修复 | 持续引用重开后主对话请求 400
+
+- 用户实测持续引用文件后主对话直接返回 `API 400: invalid message format`。根因是 Raw 只保存附件定位信息，重开后内联文本为空；发送链路把它回退编码为二进制 `file` 消息片段，而当前网关不接受该格式。
+- 持续文本引用现按已保存的 `readablePath` 重读文本并以内联文本发送，避免二进制 `file` 片段；媒体附件原路径不变。focused Node `1361/1361`、`vue-tsc -b` 与 `git diff --check` 通过，用户已用原失败场景确认成功。
 ## 2026-09-10 改编 Wiki 建库与双链输入合同确认
 
 - 用户确认韭菜盒子只提供通用基础能力：文件树“建库”、Markdown 双链按钮、`Command/Ctrl + Shift + K`、输入 `[[` 自动联想；角色、场景、道具判断及逐集改编继续交给 Skill。
