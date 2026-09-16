@@ -58,7 +58,7 @@ export interface StoryAnalysisCommitResult {
 }
 
 const ASSET_DIRECTORIES: Record<AssetKind | 'relations', string> = {
-  characters: '人物',
+  characters: '角色',
   scenes: '场景',
   props: '道具',
   relations: '关系',
@@ -154,6 +154,20 @@ function directMarkdownPages(resources: ProjectResource[], directory: string): P
   )
 }
 
+/**
+ * 旧合同把角色写在 `资产/人物/`。它和 `资产/角色/` 并存时，`角色/` 的实体发现看不见旧档案，
+ * 同一角色会被重新建档成两份，所以建库与节点分析都在写入之前停下来。
+ */
+export function legacyCharacterDirectoryConflict(
+  entries: Array<{ path: string; isDirectory: boolean }>,
+  wikiRoot: string,
+): string | null {
+  const legacy = `${wikiRoot}/资产/人物`
+  return entries.some(entry => entry.isDirectory && entry.path.replace(/\/+$/, '') === legacy)
+    ? '检测到旧资产目录 资产/人物/：现行合同为 资产/角色/，请先确认改名方式。'
+    : null
+}
+
 export async function prepareStoryAnalysis(
   input: { workDirectory: string; limit?: number; includeNeedsReview?: boolean },
   files: ProjectFileService,
@@ -162,6 +176,8 @@ export async function prepareStoryAnalysis(
   const { workDirectory, wikiRoot } = normalizeWorkDirectory(input.workDirectory)
   const limit = Math.max(1, Math.min(Math.floor(input.limit || 1), 10))
   const resources = await files.list(owner)
+  const legacyConflict = legacyCharacterDirectoryConflict(resources, wikiRoot)
+  if (legacyConflict) throw new Error(legacyConflict)
   const sourceDirectory = `${workDirectory}/原文节点`
   const analysisDirectory = `${workDirectory}/节点分析`
   const sourcePages = directMarkdownPages(resources, sourceDirectory)
@@ -201,7 +217,8 @@ export async function prepareStoryAnalysis(
     if (nodes.length >= limit) break
   }
   const assetIndexes: Array<{ path: string; content: string }> = []
-  for (const directory of ['资产', '资产/人物', '资产/场景', '资产/道具', '资产/关系']) {
+  const assetDirectories = ['资产', ...Object.values(ASSET_DIRECTORIES).map(name => `资产/${name}`)]
+  for (const directory of assetDirectories) {
     const path = `${wikiRoot}/${directory}/index.md`
     const resource = resourceByPath.get(path)
     if (resource) assetIndexes.push({ path, content: (await files.readText(resource)).content })
@@ -378,6 +395,8 @@ export async function commitStoryAnalysis(
     if (new Set(analyses.map(item => item.node_id)).size !== analyses.length)
       throw new Error('node_id 不能重复')
     const resources = await files.list(owner)
+    const legacyConflict = legacyCharacterDirectoryConflict(resources, wikiRoot)
+    if (legacyConflict) throw new Error(legacyConflict)
     const resourceByPath = new Map(resources.map(resource => [resource.path, resource]))
     const reads = new Map<string, ProjectTextRead>()
     const read = async (resource: ProjectResource) => {

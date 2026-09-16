@@ -1,4 +1,5 @@
 import type { ProjectFileService } from '@/services/projectFileService'
+import { legacyCharacterDirectoryConflict } from './storyAnalysis'
 
 export interface AdaptationWikiScaffoldEntry {
   path: string
@@ -20,6 +21,7 @@ const DIRECTORIES = [
   '资产/角色',
   '资产/场景',
   '资产/道具',
+  '资产/关系',
 ]
 const indexContent = (relative: string): string => {
   if (!relative)
@@ -30,23 +32,24 @@ const indexContent = (relative: string): string => {
       '',
       '## 子目录',
       '',
-      '- [原始材料](原始材料/index.md) - 保存用户提供或授权使用的故事来源。',
-      '- [改编方案](改编方案/index.md) - 保存故事拆解和已确认的改编约束。',
-      '- [剧本](剧本/index.md) - 保存逐集剧本及其配套交付文档。',
-      '- [资产](资产/index.md) - 保存角色、场景和道具的唯一档案。',
+      '- [[原始材料/index|原始材料]] - 保存用户提供或授权使用的故事来源。',
+      '- [[改编方案/index|改编方案]] - 保存故事拆解和已确认的改编约束。',
+      '- [[剧本/index|剧本]] - 保存逐集剧本及其配套交付文档。',
+      '- [[资产/index|资产]] - 保存角色、场景、道具和关系的唯一档案。',
       '',
     ].join('\n')
   if (relative === '资产')
     return [
       '# 资产',
       '',
-      '用途：保存跨集复用的角色、场景和道具档案。',
+      '用途：保存跨集复用的角色、场景、道具和关系档案。',
       '',
       '## 子目录',
       '',
-      '- [角色](角色/index.md) - 角色身份、关系、外观和声音资料。',
-      '- [场景](场景/index.md) - 可复用表演空间及视觉资料。',
-      '- [道具](道具/index.md) - 实际出镜或推动剧情的道具资料。',
+      '- [[角色/index|角色]] - 角色身份、关系、外观和声音资料。',
+      '- [[场景/index|场景]] - 可复用表演空间及视觉资料。',
+      '- [[道具/index|道具]] - 实际出镜或推动剧情的道具资料。',
+      '- [[关系/index|关系]] - 人物之间的稳定关系。',
       '',
     ].join('\n')
   const title = relative.split('/').at(-1) || relative
@@ -54,9 +57,10 @@ const indexContent = (relative: string): string => {
     原始材料: '保存用户提供或授权使用的来源材料。',
     改编方案: '保存故事拆解、总体方案和逐集改编约束。',
     剧本: '保存逐集剧本及其配套交付文档。',
-    角色: '保存一个角色一个目录的稳定角色档案。',
-    场景: '保存一个场景一个目录的可复用场景档案。',
-    道具: '保存一个道具一个目录的可复用道具档案。',
+    角色: '保存一个角色一个文件的稳定角色档案。',
+    场景: '保存一个场景一个文件的可复用场景档案。',
+    道具: '保存一个道具一个文件的可复用道具档案。',
+    关系: '保存人物之间稳定的关系记载。',
   }
   return `# ${title}\n\n用途：${purposes[title] || '保存改编项目内容。'}\n`
 }
@@ -77,6 +81,8 @@ export function buildAdaptationWikiScaffoldPlan(
   }
   if (entries.some(entry => /(^|\/)_index\.md$/i.test(entry.path)))
     conflicts.push('检测到旧 _index.md，请先确认迁移方式。')
+  const legacyCharacterDirectory = legacyCharacterDirectoryConflict(entries, wikiRoot)
+  if (legacyCharacterDirectory) conflicts.push(legacyCharacterDirectory)
   const expectedDirectories = DIRECTORIES.map(path => (path ? `${wikiRoot}/${path}` : wikiRoot))
   for (const path of expectedDirectories)
     if (byPath.get(path) && !byPath.get(path)!.isDirectory)

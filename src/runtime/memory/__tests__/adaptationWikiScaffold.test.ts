@@ -15,6 +15,7 @@ test('adaptation Wiki scaffold creates the fixed minimal wiki tree', () => {
     'wiki/资产/角色',
     'wiki/资产/场景',
     'wiki/资产/道具',
+    'wiki/资产/关系',
   ])
   assert.deepEqual(
     plan.files.map(item => item.path),
@@ -27,8 +28,23 @@ test('adaptation Wiki scaffold creates the fixed minimal wiki tree', () => {
       'wiki/资产/角色/index.md',
       'wiki/资产/场景/index.md',
       'wiki/资产/道具/index.md',
+      'wiki/资产/关系/index.md',
     ],
   )
+})
+
+// 建库写的是相对 Markdown 链接时，storyImport 的 hasLink 认不出，节点分析会再追加一份同名导航。
+test('adaptation Wiki scaffold indexes use the same wikilink targets as the runtime index upsert', () => {
+  const content = new Map(
+    buildAdaptationWikiScaffoldPlan([]).files.map(item => [item.path, item.content]),
+  )
+  const expectations: Array<[string, string[]]> = [
+    ['wiki/index.md', ['原始材料', '改编方案', '剧本', '资产']],
+    ['wiki/资产/index.md', ['角色', '场景', '道具', '关系']],
+  ]
+  for (const [path, directories] of expectations)
+    for (const directory of directories)
+      assert.match(content.get(path) || '', new RegExp(`\\[\\[${directory}/index\\|`))
 })
 
 test('adaptation Wiki scaffold reuses the only existing wiki root and stays idempotent', () => {
@@ -62,5 +78,12 @@ test('adaptation Wiki scaffold rejects parallel roots, legacy indexes, and occup
   assert.match(
     buildAdaptationWikiScaffoldPlan([{ path: 'wiki', isDirectory: false }]).conflicts.join('\n'),
     /普通文件占用/,
+  )
+  assert.match(
+    buildAdaptationWikiScaffoldPlan([
+      { path: 'wiki', isDirectory: true },
+      { path: 'wiki/资产/人物', isDirectory: true },
+    ]).conflicts.join('\n'),
+    /旧资产目录/,
   )
 })

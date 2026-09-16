@@ -4,20 +4,26 @@ import { test } from 'node:test'
 import type { ProjectFileService } from '@/services/projectFileService'
 import type { ProjectResource } from '@/utils/projectResource'
 import { commitStoryAnalysis, prepareStoryAnalysis } from '../storyAnalysis'
+import { buildAdaptationWikiScaffoldPlan } from '../adaptationWikiScaffold'
 import { applyStoryImportPlan, buildStoryImportPlan } from '../storyImport'
 
-function memoryFiles(initial: Record<string, string> = {}) {
+function memoryFiles(initial: Record<string, string> = {}, directories: string[] = []) {
   const entries = new Map(
     Object.entries(initial).map(([path, content]) => [path, { content, revision: 1 }]),
   )
   const writes: string[] = []
-  const resource = (owner: string, path: string, content: string): ProjectResource => ({
+  const resource = (
+    owner: string,
+    path: string,
+    content: string,
+    isDirectory = false,
+  ): ProjectResource => ({
     runtime: 'web',
     owner,
     path,
     name: path.split('/').at(-1) || path,
-    isDirectory: false,
-    kind: 'document',
+    isDirectory,
+    kind: isDirectory ? 'binary' : 'document',
     size: content.length,
   })
   const read = async (path: string) => {
@@ -32,7 +38,10 @@ function memoryFiles(initial: Record<string, string> = {}) {
   }
   const files = {
     async list(owner: string) {
-      return [...entries].map(([path, value]) => resource(owner, path, value.content))
+      return [
+        ...directories.map(path => resource(owner, path, '', true)),
+        ...[...entries].map(([path, value]) => resource(owner, path, value.content)),
+      ]
     },
     async readTextAt(_owner: string, path: string) {
       return await read(path)
@@ -63,10 +72,10 @@ function memoryFiles(initial: Record<string, string> = {}) {
   return { entries, files, writes }
 }
 
-async function importedStory() {
+async function importedStory(directories: string[] = []) {
   const content = '第一章\n刘备走进桃园，见到关羽。\n第二章\n张飞端来酒碗。'
   const plan = await buildStoryImportPlan({ content, title: '三结义', originalName: '三结义.md' })
-  const state = memoryFiles({ 'wiki/index.md': '# Wiki\n' })
+  const state = memoryFiles({ 'wiki/index.md': '# Wiki\n' }, directories)
   await applyStoryImportPlan(plan, content, state.files, 'project')
   state.writes.length = 0
   return { plan, state }
@@ -118,9 +127,9 @@ test('runtime prepares only unfinished story nodes and commits a grounded analys
   assert.match(state.entries.get(analysisPath)?.content || '', /analysis_status: complete/)
   assert.match(
     state.entries.get(analysisPath)?.content || '',
-    /\[\[wiki\/资产\/人物\/刘备\|刘备\]\]/,
+    /\[\[wiki\/资产\/角色\/刘备\|刘备\]\]/,
   )
-  assert.match(state.entries.get('wiki/资产/人物/刘备.md')?.content || '', /刘备走进桃园/)
+  assert.match(state.entries.get('wiki/资产/角色/刘备.md')?.content || '', /刘备走进桃园/)
 
   const next = await prepareStoryAnalysis(
     { workDirectory: plan.workDirectory, limit: 10 },
@@ -132,6 +141,62 @@ test('runtime prepares only unfinished story nodes and commits a grounded analys
     false,
   )
   assert.equal(next.nodes.length, 1)
+})
+
+// 旧 资产/人物/ 与新的 资产/角色/ 并存时，角色实体的实体发现看不见旧档案，
+// 同一角色会被重建一份，所以分析在写入之前先停下来。
+test('legacy 资产/人物 directory stops analysis before any write', async () => {
+  const { plan, state } = await importedStory(['wiki/资产/人物'])
+  await assert.rejects(
+    () => prepareStoryAnalysis({ workDirectory: plan.workDirectory }, state.files, 'project'),
+    /旧资产目录 资产\/人物/,
+  )
+  assert.equal(state.writes.length, 0)
+})
+
+// 建库先写资产索引、节点分析后追加时，两边的双链目标必须一致，否则同一目录会被导航两次。
+test('scaffolded asset index and runtime index upsert agree on every directory', async () => {
+  const { plan, state } = await importedStory()
+  state.entries.set('wiki/资产/index.md', {
+    content: buildAdaptationWikiScaffoldPlan([]).files.find(
+      file => file.path === 'wiki/资产/index.md',
+    )!.content,
+    revision: 1,
+  })
+  const [node] = (
+    await prepareStoryAnalysis({ workDirectory: plan.workDirectory }, state.files, 'project')
+  ).nodes
+  await commitStoryAnalysis(
+    {
+      workDirectory: plan.workDirectory,
+      analyses: [
+        {
+          node_id: node!.nodeId,
+          source_hash: node!.sourceHash,
+          summary: '刘备走进桃园。',
+          scenes: [
+            { name: '桃园', description: '相遇地点。', evidence: ['刘备走进桃园，见到关羽。'] },
+          ],
+          characters: [
+            { name: '刘备', description: '走进桃园。', evidence: ['刘备走进桃园，见到关羽。'] },
+          ],
+          props: [],
+          relations: [],
+          evidence: ['刘备走进桃园，见到关羽。'],
+          needs_review: [],
+        },
+      ],
+    },
+    state.files,
+    'project',
+  )
+  const index = state.entries.get('wiki/资产/index.md')!.content
+  for (const directory of ['角色', '场景', '道具', '关系'])
+    assert.equal(
+      index.split('\n').filter(line => line.includes(`${directory}/index`)).length,
+      1,
+      `${directory}/index 应只被导航一次`,
+    )
 })
 
 test('runtime rejects invented evidence before writing any semantic file', async () => {
@@ -210,7 +275,7 @@ test('needs-review nodes wait until explicitly included and carry their revision
 test('semantic commit links but never rewrites a user-maintained canonical asset', async () => {
   const { plan, state } = await importedStory()
   const canonical = '---\ntype: character\ntitle: "刘备"\n---\n\n# 刘备\n\n用户确认的人物资料。\n'
-  state.entries.set('wiki/资产/人物/刘备.md', { content: canonical, revision: 1 })
+  state.entries.set('wiki/资产/角色/刘备.md', { content: canonical, revision: 1 })
   const [node] = (
     await prepareStoryAnalysis({ workDirectory: plan.workDirectory }, state.files, 'project')
   ).nodes
@@ -236,21 +301,21 @@ test('semantic commit links but never rewrites a user-maintained canonical asset
     state.files,
     'project',
   )
-  assert.equal(state.entries.get('wiki/资产/人物/刘备.md')?.content, canonical)
-  assert.equal(result.affected_paths.includes('wiki/资产/人物/刘备.md'), false)
+  assert.equal(state.entries.get('wiki/资产/角色/刘备.md')?.content, canonical)
+  assert.equal(result.affected_paths.includes('wiki/资产/角色/刘备.md'), false)
   assert.match(
     state.entries.get(`${plan.workDirectory}/节点分析/0001_刘备走进桃园.md`)?.content || '',
-    /wiki\/资产\/人物\/刘备/,
+    /wiki\/资产\/角色\/刘备/,
   )
 })
 
 test('ambiguous canonical assets stay unresolved and cannot become complete', async () => {
   const { plan, state } = await importedStory()
-  state.entries.set('wiki/资产/人物/玄德.md', {
+  state.entries.set('wiki/资产/角色/玄德.md', {
     content: '---\ntype: character\ntitle: "玄德"\naliases: ["刘备"]\n---\n\n# 玄德\n',
     revision: 1,
   })
-  state.entries.set('wiki/资产/人物/刘皇叔.md', {
+  state.entries.set('wiki/资产/角色/刘皇叔.md', {
     content: '---\ntype: character\ntitle: "刘皇叔"\naliases: ["刘备"]\n---\n\n# 刘皇叔\n',
     revision: 1,
   })
@@ -285,8 +350,8 @@ test('ambiguous canonical assets stay unresolved and cannot become complete', as
   assert.deepEqual(result.needs_review, [node!.nodeId])
   assert.equal(result.conflicts.length, 1)
   assert.match(analysis, /analysis_status: needs_review/)
-  assert.doesNotMatch(analysis, /\[\[wiki\/资产\/人物\/(?:玄德|刘皇叔)/)
-  assert.equal(state.entries.has('wiki/资产/人物/刘备.md'), false)
+  assert.doesNotMatch(analysis, /\[\[wiki\/资产\/角色\/(?:玄德|刘皇叔)/)
+  assert.equal(state.entries.has('wiki/资产/角色/刘备.md'), false)
 })
 
 test('semantic commit rejects a changed source hash before writing', async () => {
