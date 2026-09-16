@@ -61,6 +61,23 @@ test('conversation transcript stores independent memory settings and keeps legac
   assert.equal(parseConversationTranscript('.raw/对话记录/legacy.md', legacy)?.memoryQueryEnabled, true)
 })
 
+test('conversation transcript keeps persistent project references in its Raw header', () => {
+  const content = createConversationTranscript('chat-references', '持续引用', '2026-09-16T00:00:00.000Z', {
+    memoryEnabled: true,
+    memoryQueryEnabled: true,
+    persistentAttachments: [{
+      id: 'doc-1', name: '剧本.md', mime: 'text/markdown', size: 12, kind: 'file',
+      projectPath: 'jc-materials/剧本.md', readablePath: 'jc-materials/剧本.md', characterCount: 12,
+    }],
+  })
+
+  assert.deepEqual(parseConversationTranscript('.raw/对话记录/chat-references.md', content)?.persistentAttachments, [{
+    id: 'doc-1', name: '剧本.md', mime: 'text/markdown', size: 12, kind: 'file',
+    projectPath: 'jc-materials/剧本.md', readablePath: 'jc-materials/剧本.md', characterCount: 12,
+  }])
+  assert.doesNotMatch(content, /base64|data:/)
+})
+
 test('conversation transcript appends complete turns and renames only the H1 title', () => {
   const empty = createConversationTranscript('chat_fixed', '新对话', '2026-07-24T10:00:00.000Z')
   const withUser = appendConversationTurn(empty, {
@@ -204,7 +221,14 @@ test('conversation transcript merges concurrent append-only turns by id', () => 
 
 test('conversation transcript remaps legacy attachment paths without changing the turn pair', () => {
   const path = '.raw/对话记录/chat_migrate.md'
-  let content = createConversationTranscript('chat_migrate', '迁移')
+  let content = createConversationTranscript('chat_migrate', '迁移', undefined, {
+    memoryEnabled: true,
+    memoryQueryEnabled: true,
+    persistentAttachments: [{
+      id: 'persistent-doc', name: '资料.docx', mime: 'application/octet-stream', size: 10, kind: 'file',
+      projectPath: 'jc-materials/originals/资料.docx', readablePath: 'jc-materials/markdown/资料.docx.md',
+    }],
+  })
   content = appendConversationTurn(content, {
     id: 'turn_1', role: 'user', content: '总结资料', createdAt: '2026-07-24T10:01:00.000Z',
     attachments: [{
@@ -224,4 +248,6 @@ test('conversation transcript remaps legacy attachment paths without changing th
   assert.deepEqual(parsed?.turns.map(turn => turn.role), ['user', 'assistant'])
   assert.equal(parsed?.turns[0]?.attachments?.[0]?.projectPath, '.raw/jc-media/文档/资料.docx')
   assert.equal(parsed?.turns[0]?.attachments?.[0]?.readablePath, '.raw/jc-media/文档/资料.docx.md')
+  assert.equal(parsed?.persistentAttachments?.[0]?.projectPath, '.raw/jc-media/文档/资料.docx')
+  assert.equal(parsed?.persistentAttachments?.[0]?.readablePath, '.raw/jc-media/文档/资料.docx.md')
 })

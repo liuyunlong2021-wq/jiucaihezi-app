@@ -795,6 +795,15 @@ test('memory retries transient requests and writes one Raw recovery point only a
   assert.match(workbench, /title="移除附件" :disabled="sending"/)
 })
 
+test('memory composer keeps project file references until the user cancels them', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /const persistentAttachments = ref<ResolvedDirectAttachment\[\]>\(\[\]\)/)
+  assert.match(workbench, /const activeAttachments = \[\.\.\.persistentAttachments\.value, \.\.\.attachments\.value\]/)
+  assert.match(workbench, /persistentAttachments\.value = \(resource\.transcript\.persistentAttachments \|\| \[\]\)/)
+  assert.match(workbench, /title="取消持续引用"/)
+})
+
 test('memory cancellation settles the visible run before invalidating stale callbacks', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 

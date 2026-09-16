@@ -26,6 +26,7 @@ import {
   inspectMemoryProject,
   renameMemoryConversation,
   replaceMemoryRound,
+  updateMemoryConversationPersistentAttachments,
   updateMemoryConversationSettings,
   writeConversationMemoryIndex,
   type MemoryConversation,
@@ -128,6 +129,7 @@ const memoryIndexErrors = ref<Record<string, string>>({})
 const memoryIndexPaths = ref<Record<string, string>>({})
 const memoryEnabled = ref(true)
 const memoryQueryEnabled = ref(true)
+const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
@@ -814,6 +816,11 @@ async function openResource(resource: ProjectResourceOpenResult) {
     opened.value = resource
     memoryEnabled.value = resource.transcript.memoryEnabled
     memoryQueryEnabled.value = resource.transcript.memoryQueryEnabled
+    attachments.value = []
+    referencedFiles.value = []
+    persistentAttachments.value = (resource.transcript.persistentAttachments || []).map(attachment => ({
+      ...attachment, value: '', resourcePath: attachment.projectPath,
+    }))
     const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')
     const availableSkillNames = new Set([
       ...(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name),
@@ -1188,7 +1195,7 @@ async function editTurn(turn: ConversationTurn) {
         size: attachment.size,
       }
       if (attachment.kind === 'image' || attachment.kind === 'video' || attachment.kind === 'audio') await addProjectMediaReferences({ resources: [resource] })
-      else await addProjectFileReference(resource)
+      else await addProjectFileReference(resource, false)
     }
   } catch (cause) {
     error.value = `编辑附件恢复失败：${cause instanceof Error ? cause.message : String(cause)}`
@@ -1328,11 +1335,12 @@ async function previewProjectResource(resource: ProjectResource) {
 async function send() {
   const active = conversation.value
   const message = input.value.trim()
+  const activeAttachments = [...persistentAttachments.value, ...attachments.value]
   const pendingAttachments = attachments.value.slice()
   const memorySnapshot = memoryEnabled.value
   const memoryQuerySnapshot = memoryQueryEnabled.value
   const skillSnapshot = selectedSkillNames.value.slice()
-  if (!active || (!message && !pendingAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
+  if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
@@ -1351,11 +1359,11 @@ async function send() {
     role: 'user',
     content: message || '请查看以下附件。',
     createdAt: new Date().toISOString(),
-    attachments: attachmentMetadata(pendingAttachments),
+    attachments: attachmentMetadata(activeAttachments),
     skillNames: skillSnapshot,
   }
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
-    ? (message || pendingAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
+    ? (message || activeAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
     : undefined
   pendingUserTurn.value = userTurn
   // 合同：授权来自用户消息。「编辑并重新发送」会截断后续轮次，被截掉的授权必须一起失效，
@@ -1378,11 +1386,11 @@ async function send() {
   abortController = new AbortController()
   let replyCompleted = false
   try {
-    const requestAttachments = await materializeChatAttachments(pendingAttachments)
+    const requestAttachments = await materializeChatAttachments(activeAttachments)
     const mediaContext = conversationMediaContext(
       [...baseTurns, userTurn],
       userTurn.id,
-      pendingAttachments,
+      activeAttachments,
     )
     const reply = await runMemoryChat({
       projectId: active.resource.owner,
@@ -1621,12 +1629,30 @@ async function addReferencedFile(payload: unknown) {
   referencedFiles.value.push({ name: file.name, content: file.content })
 }
 
+async function setPersistentAttachments(next: ResolvedDirectAttachment[]) {
+  const active = conversation.value
+  if (!active) return
+  const updated = await updateMemoryConversationPersistentAttachments(active.resource, attachmentMetadata(next), files)
+  if (conversation.value?.transcript.id !== updated.transcript.id) return
+  persistentAttachments.value = next
+  rememberConversation(updated)
+  if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
+}
+
+async function removePersistentAttachment(id: string) {
+  try {
+    await setPersistentAttachments(persistentAttachments.value.filter(item => item.id !== id))
+  } catch (cause) {
+    error.value = `取消持续引用失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 function isOfficeResource(resource: Pick<ProjectResource, 'name' | 'mimeType'>): boolean {
   const type = detectFileType(new File([], resource.name, { type: resource.mimeType || '' }))
   return type === 'office' || type === 'pdf'
 }
 
-async function addProjectFileReference(resource: ProjectResource) {
+async function addProjectFileReference(resource: ProjectResource, persistent = true) {
   if (isOfficeResource(resource)) {
     const referenceKey = `${resource.runtime}:${resource.owner}:${resource.path}`
     if (referencingDocuments.has(referenceKey)
@@ -1683,25 +1709,31 @@ async function addProjectFileReference(resource: ProjectResource) {
           content = processed.textContent
         }
       }
-      if (!attachments.value.some(item => item.readablePath === readablePath)) attachments.value.push({
+      const attachment: ResolvedDirectAttachment = {
         id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'application/octet-stream',
         size: resource.size || 0, kind: 'file', value: '', resourcePath: resource.path,
         readablePath,
         textContent: content.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
         characterCount: content.length,
-      })
+      }
+      if (persistent) {
+        if (!persistentAttachments.value.some(item => item.readablePath === readablePath)) await setPersistentAttachments([...persistentAttachments.value, attachment])
+      } else if (!attachments.value.some(item => item.readablePath === readablePath)) attachments.value.push(attachment)
     } finally {
       referencingDocuments.delete(referenceKey)
     }
     return
   }
   const text = await files.readText(resource)
-  if (!attachments.value.some(item => item.resourcePath === resource.path)) attachments.value.push({
+  const attachment: ResolvedDirectAttachment = {
     id: crypto.randomUUID(), name: resource.name, mime: resource.mimeType || 'text/plain', size: text.size,
     kind: 'file', value: '', resourcePath: resource.path, readablePath: resource.path,
     textContent: text.content.slice(0, MAX_INLINE_ATTACHMENT_CHARS),
     characterCount: text.content.length,
-  })
+  }
+  if (persistent) {
+    if (!persistentAttachments.value.some(item => item.resourcePath === resource.path)) await setPersistentAttachments([...persistentAttachments.value, attachment])
+  } else if (!attachments.value.some(item => item.resourcePath === resource.path)) attachments.value.push(attachment)
 }
 
 async function addProjectMediaReferences(payload: unknown) {
@@ -1930,7 +1962,7 @@ async function importDesktopChatPaths(paths: string[], warnings: string[] = []) 
       const resources = await fileActions.importDesktopPaths({ owner, paths: sourcePaths, targetPath })
       const media = resources.filter(resource => resource.kind === 'media')
       if (media.length) await addProjectMediaReferences({ resources: media })
-      for (const resource of resources.filter(item => item.kind !== 'media')) await addProjectFileReference(resource)
+      for (const resource of resources.filter(item => item.kind !== 'media')) await addProjectFileReference(resource, false)
     }
     if (warnings.length) status.value = warnings.join('；')
   } catch (cause) {
@@ -2754,7 +2786,15 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button :title="`移除${tool.label}`" :disabled="sending" @click="disableTool(tool.id)">×</button>
           </div>
         </div>
-        <div v-if="attachments.length" class="memory-attachments">
+        <div v-if="persistentAttachments.length || attachments.length" class="memory-attachments">
+          <div v-for="file in persistentAttachments" :key="file.id" class="memory-attachment-chip">
+            <JcIcon name="description" />
+            <span class="memory-attachment-copy">
+              <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
+              <small>持续引用</small>
+            </span>
+            <button title="取消持续引用" :disabled="sending" @click="removePersistentAttachment(file.id)">×</button>
+          </div>
           <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip">
             <img v-if="file.kind === 'image'" :src="file.value" :alt="file.name" />
             <JcIcon v-else :name="file.kind === 'video' ? 'movie' : file.kind === 'audio' ? 'music-note' : 'description'" />
@@ -2848,7 +2888,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
+            <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
         <div

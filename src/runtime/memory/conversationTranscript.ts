@@ -28,6 +28,7 @@ export interface ConversationTranscript {
   createdAt: string
   memoryEnabled: boolean
   memoryQueryEnabled: boolean
+  persistentAttachments?: ConversationAttachment[]
   turns: ConversationTurn[]
 }
 
@@ -43,7 +44,7 @@ export function conversationDocumentSources(turns: ConversationTurn[]): Array<{ 
   return [...sources.values()]
 }
 
-const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"(?:\s+memory-enabled="(on|off)")?(?:\s+memory-query-enabled="(on|off)")?\s*-->/
+const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"(?:\s+memory-enabled="(on|off)")?(?:\s+memory-query-enabled="(on|off)")?(?:\s+persistent-attachments="([^"]*)")?\s*-->/
 // Keep accepting the removed mode attribute so existing Raw conversations remain readable.
 const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(?:quick|memory)")?(?:\s+attachments="([^"]*)")?(?:\s+skills="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
 
@@ -55,9 +56,9 @@ export function createConversationTranscript(
   id: string,
   title = '新对话',
   createdAt = new Date().toISOString(),
-  settings: Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled'> = { memoryEnabled: true, memoryQueryEnabled: true },
+  settings: Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled' | 'persistentAttachments'> = { memoryEnabled: true, memoryQueryEnabled: true },
 ): string {
-  return `# ${cleanTitle(title)}\n\n<!-- jc:conversation id="${attribute(id)}" created-at="${attribute(createdAt)}" memory-enabled="${settings.memoryEnabled ? 'on' : 'off'}" memory-query-enabled="${settings.memoryQueryEnabled ? 'on' : 'off'}" -->\n`
+  return `# ${cleanTitle(title)}\n\n<!-- jc:conversation id="${attribute(id)}" created-at="${attribute(createdAt)}" memory-enabled="${settings.memoryEnabled ? 'on' : 'off'}" memory-query-enabled="${settings.memoryQueryEnabled ? 'on' : 'off'}"${serializePersistentAttachments(settings.persistentAttachments)} -->\n`
 }
 
 export function parseConversationTranscript(path: string, content: string): ConversationTranscript | null {
@@ -80,10 +81,12 @@ export function parseConversationTranscript(path: string, content: string): Conv
     if (previous && isAccidentalDuplicate(previous, turn)) continue
     turns.push(turn)
   }
+  const persistentAttachments = parseAttachments(marker[5])
   return {
     id: marker[1], title, createdAt: marker[2],
     memoryEnabled: marker[3] !== 'off',
     memoryQueryEnabled: marker[4] !== 'off',
+    ...(persistentAttachments ? { persistentAttachments } : {}),
     turns,
   }
 }
@@ -152,22 +155,26 @@ export function remapConversationAttachmentPaths(
   const transcript = parseConversationTranscript(path, content)
   if (!transcript) return content
   let changed = false
+  const remap = (attachment: ConversationAttachment) => {
+    const projectPath = attachment.projectPath && paths.get(attachment.projectPath)
+    const readablePath = attachment.readablePath && paths.get(attachment.readablePath)
+    if (!projectPath && !readablePath) return attachment
+    changed = true
+    return {
+      ...attachment,
+      ...(projectPath ? { projectPath } : {}),
+      ...(readablePath ? { readablePath } : {}),
+    }
+  }
   const turns = transcript.turns.map(turn => ({
     ...turn,
-    attachments: turn.attachments?.map(attachment => {
-      const projectPath = attachment.projectPath && paths.get(attachment.projectPath)
-      const readablePath = attachment.readablePath && paths.get(attachment.readablePath)
-      if (!projectPath && !readablePath) return attachment
-      changed = true
-      return {
-        ...attachment,
-        ...(projectPath ? { projectPath } : {}),
-        ...(readablePath ? { readablePath } : {}),
-      }
-    }),
+    attachments: turn.attachments?.map(remap),
   }))
   if (!changed) return content
-  let remapped = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt, transcript)
+  let remapped = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt, {
+    ...transcript,
+    persistentAttachments: transcript.persistentAttachments?.map(remap),
+  })
   for (const turn of turns) remapped = appendConversationTurn(remapped, turn)
   return remapped
 }
@@ -175,6 +182,11 @@ export function remapConversationAttachmentPaths(
 function serializeAttachments(attachments?: ConversationAttachment[]): string {
   if (!attachments?.length) return ''
   return ` attachments="${attribute(encodeURIComponent(JSON.stringify(attachments)))}"`
+}
+
+function serializePersistentAttachments(attachments?: ConversationAttachment[]): string {
+  if (!attachments?.length) return ''
+  return ` persistent-attachments="${attribute(encodeURIComponent(JSON.stringify(attachments)))}"`
 }
 
 function parseAttachments(value?: string): ConversationAttachment[] | undefined {
@@ -201,13 +213,13 @@ function parseAttachments(value?: string): ConversationAttachment[] | undefined 
 
 function validProjectAttachmentPath(value: unknown): value is string {
   return typeof value === 'string'
-    && (value.startsWith('.raw/jc-media/') || value.startsWith('jc-media/') || value.startsWith('jc-materials/'))
+    && !value.startsWith(`${CONVERSATION_DIRECTORY}/`)
     && validSafeRelativePath(value)
 }
 
 function validReadablePath(value: unknown): value is string {
   return typeof value === 'string'
-    && (value.startsWith('.raw/jc-media/文档/') || value.startsWith('jc-materials/'))
+    && !value.startsWith(`${CONVERSATION_DIRECTORY}/`)
     && /\.(?:md|markdown|txt|csv|tsv|json|ya?ml|xml|html?|srt|vtt|log)$/i.test(value)
     && validSafeRelativePath(value)
 }

@@ -178,10 +178,28 @@ export async function updateMemoryConversationSettings(
     const next = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt, {
       memoryEnabled: settings.memoryEnabled ?? transcript.memoryEnabled,
       memoryQueryEnabled: settings.memoryQueryEnabled ?? transcript.memoryQueryEnabled,
+      persistentAttachments: transcript.persistentAttachments,
     })
     let merged = next
     for (const turn of transcript.turns) merged = appendConversationTurn(merged, turn)
     return merged
+  })
+}
+
+export async function updateMemoryConversationPersistentAttachments(
+  resource: ProjectResource,
+  persistentAttachments: ConversationTranscript['persistentAttachments'],
+  files: ProjectFileService = createRuntimeProjectFileService(),
+): Promise<MemoryConversation> {
+  return mutateConversation(resource, files, current => {
+    const transcript = parseConversationTranscript(resource.path, current)
+    if (!transcript) throw new Error('选择的文件不是有效对话记录')
+    let next = createConversationTranscript(transcript.id, transcript.title, transcript.createdAt, {
+      ...transcript,
+      persistentAttachments,
+    })
+    for (const turn of transcript.turns) next = appendConversationTurn(next, turn)
+    return next
   })
 }
 
