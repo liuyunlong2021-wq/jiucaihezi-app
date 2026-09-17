@@ -107,6 +107,7 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'newapi/zx/grok-1.5-video-6s',
     'newapi/zx/grok-1.5-video-10s',
     'newapi/zx/grok-1.5-video-15s',
+    'newapi/zx/mj_fast_imagine',
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
@@ -188,6 +189,24 @@ test('every registry model has a valid route contract and can produce a run plan
     assert.equal(plan.usesRhAdapter, spec.route === 'runninghub-adapter', spec.id)
     assert.ok(plan.submitSummary.length > 0, spec.id)
   }
+})
+
+test('ZX Midjourney Fast Imagine uses the NewAPI image task contract', () => {
+  const textPlan = buildCreationRunPlan({
+    modelId: 'newapi/zx/mj_fast_imagine',
+    params: { prompt: '一只小花猫坐在窗边 --ar 1:1' },
+  })
+  const imagePlan = buildCreationRunPlan({
+    modelId: 'newapi/zx/mj_fast_imagine',
+    params: { prompt: '保留猫的花纹 --ar 1:1', images: ['data:image/png;base64,aGVsbG8='] },
+  })
+
+  assert.equal(textPlan.apiStyle, 'newapi-image-task')
+  assert.equal(textPlan.endpoint, '/v1/videos')
+  assert.equal(textPlan.pollKind, 'newapi-task')
+  assert.equal(textPlan.assetFlow, 'none')
+  assert.equal(imagePlan.mode, 'image-to-image')
+  assert.equal(imagePlan.assetFlow, 'none')
 })
 
 test('Dola Seedance 2.5 switches to image-to-video with four references and stays fixed at 720p', () => {

@@ -274,6 +274,37 @@ test('Xiaoyi multipart loads the source Blob directly and trusts its bytes over 
   }
 })
 
+test('ZX Midjourney Fast Imagine submits through the NewAPI image task contract', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = init.body as FormData
+      assert.equal(body.get('model'), 'mj_fast_imagine')
+      assert.equal(body.get('seconds'), '1')
+      assert.equal(body.get('response_format'), 'url')
+      assert.ok(body.get('image[]') instanceof Blob)
+      return Response.json({ id: 'mj_fast_task_1', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/mj_fast_task_1')) {
+      return Response.json({ status: 'completed', metadata: { url: 'https://cdn.example.test/mj.png' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/zx/mj_fast_imagine',
+      params: { prompt: '一只小花猫 --ar 1:1', images: ['data:image/png;base64,aGVsbG8='] },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://cdn.example.test/mj.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Veo Creation Runtime reuses the verified multipart and public-task result contract', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

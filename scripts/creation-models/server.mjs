@@ -36,6 +36,7 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'newapi/boluo/minimax_h3_zm_u24', aliases: ['minimax_h3_zm_u24'] },
   { id: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', aliases: ['山seedance2.5'] },
   { id: 'newapi/shanhai/oc-model-r5cfh8', aliases: ['海seedance2.5'] },
+  { id: 'newapi/zx/mj_fast_imagine', aliases: ['mj_fast_imagine'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },
   { id: 'veo-3.1-fast-generate-preview', aliases: ['veo-3.1-fast-generate-preview'] },
   { id: 'nano-banana-4k', aliases: ['nano-banana-4k', 'nano-banana-pro-4k'] },

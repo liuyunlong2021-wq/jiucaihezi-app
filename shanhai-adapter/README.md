@@ -38,7 +38,7 @@
   映射未生效时适配器自己把公开名换成上游 id，所以两种都能跑。其它一律 400。
 - `prompt` 必填，最长 20000 字符。
 - 参考图接受 `images` / `image` / `imageUrl` / `imageUrls`，每项可以是字符串或 `{url}`；
-  必须是 `http(s)` 公开直链（山海自己去抓），最多 10 张 —— 面板侧按文档表更严（两条线路分别 9 / 10 张）。
+  必须是公开 HTTPS 直链（山海自己去抓）；两条线路分别最多 9 / 10 张。
 - `aspect_ratio` / `ratio` / `aspectRatio` 任一即可，`auto` / `adaptive` / `empty` 不下发。
 - `resolution` 原样透传（当前两条都是 `720p`）。
 - `duration`（或同义的 `seconds`）归一成字符串上报。

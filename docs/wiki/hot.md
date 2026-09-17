@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-17] Skill Creator 草稿目录权限根因修复
+
+- 根因不是 Skill 内容或用户电脑权限：Desktop 把草稿写到 `$TEMP/jiucaihezi-skill-drafts/**`，但 Tauri `fs:default` 未授权该目录，因此即使用户已选择 `@文件`，`plugin-fs` 仍必然返回 `forbidden path`。
+- Tauri 现仅开放该应用专属草稿子目录，不开放整个 `$TEMP/**`；`@文件` 仍是用户侧本机操作开关，草稿持久化属于 App 内部事务。
+- ACL 检查已加入 focused 回归；红灯可稳定复现，修复后 Node focused `1368/1368` 通过。真实 Desktop Skill Creator 修改、校验与安装仍待人工验收。
+
 ## [2026-09-16] 改编资产目录统一与建库索引双链化
 
 - 规范资产目录由 `资产/人物/` 统一为 `资产/角色/`（`storyAnalysis.ts` 的 `ASSET_DIRECTORIES`），建库骨架补上 `资产/关系/index.md`；角色、场景、道具、关系一律平铺为 `资产/<类型>/<名称>.md`。

@@ -222,21 +222,17 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requests[0].headers["range"], "bytes=0-3")
         self.assertEqual(self.requests[0].url.path, "/api/v1/media/runs/run_aaa")
 
-    async def test_poll_and_content_reuse_the_channel_key_from_submit(self):
+    async def test_poll_and_content_reuse_the_channel_key_from_submit_without_auth_header(self):
         await self.client.post(
             "/v1/videos",
             headers={"Authorization": "Bearer oc_live_channel"},
             json={"model": "oc-model-r5cfh8", "prompt": "hi"},
         )
-        # NewAPI 的工作台 Key 不是山海的 Key：轮询和成片下载必须回到建单时那枚渠道 Key。
-        await self.client.get(
-            "/v1/videos/run_aaa", headers={"Authorization": "Bearer sk-workbench"}
-        )
+        # NewAPI 可能不转发 Authorization：已建单的任务必须使用缓存的渠道 Key。
+        await self.client.get("/v1/videos/run_aaa")
         self.assertEqual(self.requests[-1].headers["authorization"], "Bearer oc_live_channel")
 
-        response = await self.client.get(
-            "/v1/videos/run_aaa/content", headers={"Authorization": "Bearer sk-workbench"}
-        )
+        response = await self.client.get("/v1/videos/run_aaa/content")
         self.assertEqual(response.status_code, 206)
         self.assertEqual(self.requests[-1].headers["authorization"], "Bearer oc_live_channel")
 
@@ -265,6 +261,29 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
             "/v1/videos", json={"model": "oc-model-r5cfh8", "prompt": "hi"}
         )
         self.assertEqual(unauthorized.status_code, 401)
+
+    async def test_rejects_http_images_and_tenth_image_for_nine_image_model(self):
+        http_image = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer oc_live_channel"},
+            json={
+                "model": "oc-model-r5cfh8",
+                "prompt": "hi",
+                "images": ["http://cdn.example.test/reference.png"],
+            },
+        )
+        self.assertEqual(http_image.status_code, 422)
+
+        tenth_image = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer oc_live_channel"},
+            json={
+                "model": "shanhai-dola-seedance-v2-5-30-9-0-7",
+                "prompt": "hi",
+                "images": [f"https://cdn.example.test/{index}.png" for index in range(10)],
+            },
+        )
+        self.assertEqual(tenth_image.status_code, 422)
 
     async def test_forwards_upstream_error_status_and_message(self):
         async def failing(request: httpx.Request):

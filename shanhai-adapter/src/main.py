@@ -31,7 +31,10 @@ SHANHAI_MEDIA_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
 # 而 NewAPI 的轮询器等不起 —— 见 poll_shanhai_task。
 SHANHAI_POLL_TIMEOUT = httpx.Timeout(20.0, connect=10.0)
 SHANHAI_POLL_ATTEMPTS = 2
-MAX_REFERENCE_IMAGES = 10
+MAX_REFERENCE_IMAGES_BY_MODEL = {
+    "shanhai-dola-seedance-v2-5-30-9-0-7": 9,
+    "oc-model-r5cfh8": 10,
+}
 
 logger = logging.getLogger("shanhai_adapter")
 
@@ -238,9 +241,8 @@ def remember_task_key(task_id: str, key: str) -> None:
 
 
 def task_key(task_id: str, request: Request) -> str:
-    incoming = bearer_token(request)
     stored = TASK_KEYS.get(task_id)
-    return stored[1] if stored else incoming
+    return stored[1] if stored else bearer_token(request)
 
 
 def bearer_token(request: Request) -> str:
@@ -282,7 +284,7 @@ def generation_payload(body: dict) -> dict:
         "prompt": prompt,
         "media_type": "video",
     }
-    images = reference_images(body)
+    images = reference_images(body, MAX_REFERENCE_IMAGES_BY_MODEL[upstream_model])
     if images:
         payload["inputs"] = [{"type": "image", "url": url} for url in images]
 
@@ -301,7 +303,7 @@ def generation_payload(body: dict) -> dict:
     return payload
 
 
-def reference_images(body: dict) -> list[str]:
+def reference_images(body: dict, max_images: int) -> list[str]:
     raw = first_value(body, IMAGE_KEYS)
     items = raw if isinstance(raw, list) else [raw] if raw is not None else []
     urls: list[str] = []
@@ -312,14 +314,14 @@ def reference_images(body: dict) -> list[str]:
         clean = url.strip()
         if clean not in urls:
             urls.append(clean)
-    if len(urls) > MAX_REFERENCE_IMAGES:
-        raise HTTPException(422, f"Shanhai accepts at most {MAX_REFERENCE_IMAGES} reference images")
+    if len(urls) > max_images:
+        raise HTTPException(422, f"Shanhai accepts at most {max_images} reference images")
     return urls
 
 
 def valid_media_url(value: str) -> bool:
     parsed = urlsplit(value)
-    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
+    return parsed.scheme == "https" and bool(parsed.netloc)
 
 
 def prompt_text(value: object) -> str:

@@ -14,6 +14,7 @@
       "allow": [
         { "path": "$APPDATA/**" },
         { "path": "$DOWNLOAD/**" },
+        { "path": "$TEMP/jiucaihezi-skill-drafts/**" },
         { "path": "$HOME/.jiucaihezi/**" },
         { "path": "$HOME/韭菜盒子/**" },
         { "path": "$HOME/.agents/**" },

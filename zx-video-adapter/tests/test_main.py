@@ -3,17 +3,32 @@ import unittest
 
 import httpx
 
-from src.main import SEEDANCE_TASKS, TASK_AUTHORIZATIONS, app, normalized_task_response
+from src.main import MJ_FAST_TASKS, SEEDANCE_TASKS, TASK_AUTHORIZATIONS, app, normalized_task_response
 
 
 class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.upstream_requests = []
+        MJ_FAST_TASKS.clear()
         SEEDANCE_TASKS.clear()
         TASK_AUTHORIZATIONS.clear()
 
         async def upstream_handler(request: httpx.Request):
             self.upstream_requests.append(request)
+            if request.url.path == "/mj-fast/mj/submit/imagine":
+                return httpx.Response(200, json={"code": 1, "description": "提交成功", "result": "mj_task_1"})
+            if request.url.path == "/mj-fast/mj/task/mj_task_1/fetch":
+                return httpx.Response(200, json={
+                    "id": "mj_task_1", "modelName": "mj_fast_imagine", "status": "SUCCESS",
+                    "progress": "100%", "imageUrl": "https://cdn.example/mj.png",
+                })
+            if request.url.path == "/v1/videos/mj_task_after_restart" or request.url.path == "/v1/video/generations/mj_task_after_restart":
+                return httpx.Response(404, json={"error": "not found"})
+            if request.url.path == "/mj-fast/mj/task/mj_task_after_restart/fetch":
+                return httpx.Response(200, json={
+                    "id": "mj_task_after_restart", "modelName": "mj_fast_imagine", "status": "SUCCESS",
+                    "imageUrl": "https://cdn.example/mj-restart.png",
+                })
             if request.url.path.endswith("/content"):
                 return httpx.Response(200, content=b"streamed-video", headers={"content-type": "video/mp4"})
             if request.url.path.endswith("/v1/videos"):
@@ -95,6 +110,39 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "resolution": "720p",
             },
         )
+
+    async def test_submits_and_polls_mj_fast_imagine(self):
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer zx-test-key"},
+            json={
+                "model": "mj_fast_imagine",
+                "prompt": "一只小花猫坐在窗边 --ar 1:1",
+                "image": "data:image/png;base64,aGVsbG8=",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], "mj_task_1")
+        submit = self.upstream_requests[0]
+        self.assertEqual(submit.url.path, "/mj-fast/mj/submit/imagine")
+        self.assertEqual(json.loads(submit.read()), {
+            "prompt": "一只小花猫坐在窗边 --ar 1:1",
+            "base64Array": ["data:image/png;base64,aGVsbG8="],
+        })
+
+        response = await self.client.get("/v1/videos/mj_task_1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "completed")
+        self.assertEqual(response.json()["metadata"]["url"], "https://cdn.example/mj.png")
+        self.assertEqual(self.upstream_requests[-1].headers["Authorization"], "Bearer zx-test-key")
+
+    async def test_mj_poll_survives_adapter_restart(self):
+        response = await self.client.get(
+            "/v1/videos/mj_task_after_restart",
+            headers={"Authorization": "Bearer zx-test-key"},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["metadata"]["url"], "https://cdn.example/mj-restart.png")
 
     async def test_accepts_direct_multipart_reference(self):
         response = await self.client.post(

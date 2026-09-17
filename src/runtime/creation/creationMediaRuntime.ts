@@ -423,14 +423,14 @@ async function executeDirectImageRequest(
 ): Promise<MediaResult> {
   const params = request.imageParams || {}
   const prompt = asString(params.prompt)
-  if (request.plan.apiStyle === 'xiaoyi-image-task') {
+  if (request.plan.apiStyle === 'xiaoyi-image-task' || request.plan.apiStyle === 'newapi-image-task') {
     onProgress?.(0, '提交图片任务...')
     const images = asStringArray(params.image)
     const fields: Record<string, string | Blob | Blob[]> = {
       model: request.plan.model,
       prompt,
       seconds: '1',
-      response_format: request.plan.model === 'grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
+      response_format: request.plan.apiStyle === 'newapi-image-task' || request.plan.model === 'grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
     }
     if (params.size) fields.size = params.size
     if (images.length) fields.image = await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal)))

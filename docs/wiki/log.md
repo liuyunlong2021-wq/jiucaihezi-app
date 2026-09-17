@@ -1346,3 +1346,9 @@
 - 用户安装 `v2.1.52` 后确认三平台 Desktop 包把 Web 官网当成首屏；该版本视为坏版本，按用户决定不回滚，直接准备 `v2.1.53`。
 - 根因是 GitHub Actions 三个平台手工执行 `vite build`，同时清空 Tauri `beforeBuildCommand`，绕过 `prune-desktop-dist.mjs` 与 `audit:desktop-dist`。本地开发直接打开 `/try/`，所以未暴露正式包入口错误。
 - 三个平台现统一调用 `pnpm run build:desktop:quick`；发布合同测试逐 job 锁定该命令。定向测试 `5/5`、本地 Desktop quick build和产物审计通过，正式包首屏待新 tag 构建后人工验收。
+
+## [2026-09-17] 修复 | Skill Creator 草稿目录被 Tauri ACL 拒绝
+
+- Desktop 草稿路径与 Rust 安装读取均使用 `$TEMP/jiucaihezi-skill-drafts/**`，但 `fs:default` 原先只允许 AppData、下载和指定 Home 子目录；因此 `@文件` 已选中也无法越过宿主 ACL。
+- `src-tauri/capabilities/default.json` 仅新增该应用专属临时子目录；`scripts/check-tauri-fs-acl.mjs` 新增精确 scope 断言并登记进 focused 测试。
+- 旧配置红灯已复现；修复后 ACL、JSON 解析与 Node focused `1368/1368` 通过。真实 Desktop 全链待验收。

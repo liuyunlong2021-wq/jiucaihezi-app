@@ -6,6 +6,9 @@ const capability = JSON.parse(await readFile(capabilityPath, 'utf8'))
 const permissions = new Set(
   capability.permissions.filter((permission) => typeof permission === 'string')
 )
+const fsScope = capability.permissions.find(
+  (permission) => permission?.identifier === 'fs:default'
+)
 
 const requiredPermissions = [
   'fs:allow-read-text-file',
@@ -22,5 +25,11 @@ for (const permission of requiredPermissions) {
     `Missing Tauri FS permission: ${permission}`
   )
 }
+
+assert.equal(
+  fsScope?.allow?.some(({ path }) => path === '$TEMP/jiucaihezi-skill-drafts/**'),
+  true,
+  'Missing Tauri FS scope for Skill Creator drafts'
+)
 
 console.log(`Tauri FS ACL OK: ${requiredPermissions.join(', ')}`)

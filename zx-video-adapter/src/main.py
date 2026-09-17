@@ -17,13 +17,16 @@ from fastapi.responses import StreamingResponse
 from starlette.background import BackgroundTask
 
 BASE_URL = "https://img-api.zxcode.vip"
+MJ_FAST_BASE_URL = "https://zxai.work/mj-fast/mj"
+MJ_FAST_MODEL = "mj_fast_imagine"
 GROK_MODELS = {
     "grok-1.5-video-6s": 6,
     "grok-1.5-video-10s": 10,
     "grok-1.5-video-15s": 15,
 }
 SEEDANCE_MODEL = "doubao-seedance-2-5-260628"
-MODELS = {**GROK_MODELS, SEEDANCE_MODEL: None, "omni-fast": None, "omni-v2v": None}
+MODELS = {**GROK_MODELS, SEEDANCE_MODEL: None, "omni-fast": None, "omni-v2v": None, MJ_FAST_MODEL: None}
+MJ_FAST_TASKS: set[str] = set()
 SEEDANCE_TASKS: set[str] = set()
 TASK_AUTHORIZATIONS: dict[str, str] = {}
 MAX_PROMPT_CHARS = 5000
@@ -76,6 +79,8 @@ async def create_video(request: Request):
     prompt = payload.get("prompt")
     validate_common(model, prompt)
 
+    if model == MJ_FAST_MODEL:
+        return await submit_mj_fast(str(prompt), images, authorization, request.app.state.http)
     if model == SEEDANCE_MODEL:
         return await submit_seedance(payload, authorization, request.app.state.http)
     if model in GROK_MODELS:
@@ -141,6 +146,36 @@ async def submit_seedance(payload: dict, authorization: str, client: httpx.Async
     return result
 
 
+async def submit_mj_fast(prompt: str, images: list, authorization: str, client: httpx.AsyncClient) -> dict:
+    base64_array = []
+    for image in images:
+        _, data, mime = await materialize_image(image, client)
+        base64_array.append(f"data:{mime};base64,{base64.b64encode(data).decode()}")
+    try:
+        response = await client.post(
+            f"{MJ_FAST_BASE_URL}/submit/imagine",
+            headers={"Authorization": authorization},
+            json={"prompt": prompt, "base64Array": base64_array},
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="ZX Midjourney service is unavailable") from exc
+    body = decode_json(response)
+    task_id = str(body.get("result") or "")
+    if not response.is_success or body.get("code") != 1 or not task_id:
+        raise HTTPException(status_code=502, detail=str(body.get("description") or "ZX Midjourney submit failed"))
+    MJ_FAST_TASKS.add(task_id)
+    TASK_AUTHORIZATIONS[task_id] = authorization
+    return {
+        "id": task_id,
+        "task_id": task_id,
+        "object": "video",
+        "model": MJ_FAST_MODEL,
+        "status": "processing",
+        "progress": 0,
+        "created_at": int(time()),
+    }
+
+
 @app.get("/v1/videos/{task_id}/content")
 async def get_video_content(task_id: str, request: Request):
     request_authorization = require_authorization(request)
@@ -168,9 +203,15 @@ async def get_video_content(task_id: str, request: Request):
 
 @app.get("/v1/videos/{task_id}")
 async def get_video(task_id: str, request: Request):
-    authorization = require_authorization(request)
     validate_task_id(task_id)
+    authorization = TASK_AUTHORIZATIONS.get(task_id) or require_authorization(request)
     try:
+        if task_id in MJ_FAST_TASKS:
+            response = await request.app.state.http.get(
+                f"{MJ_FAST_BASE_URL}/task/{task_id}/fetch",
+                headers={"Authorization": authorization},
+            )
+            return normalized_mj_task_response(response, task_id)
         if task_id in SEEDANCE_TASKS:
             response = await request.app.state.http.get(
                 f"{BASE_URL}/v1/video/generations/{task_id}",
@@ -188,6 +229,13 @@ async def get_video(task_id: str, request: Request):
                 )
                 if seedance_response.is_success:
                     response = seedance_response
+                elif seedance_response.status_code in {400, 404}:
+                    mj_response = await request.app.state.http.get(
+                        f"{MJ_FAST_BASE_URL}/task/{task_id}/fetch",
+                        headers={"Authorization": authorization},
+                    )
+                    if mj_response.is_success:
+                        return normalized_mj_task_response(mj_response, task_id)
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
     result = normalized_task_response(response, task_id)
@@ -403,6 +451,33 @@ def normalized_task_response(response: httpx.Response, task_id: str) -> dict:
             "message": body.get("errorMessage") or body.get("message") or "ZX video task failed",
         }
         result["completed_at"] = body.get("completed_at", int(time()))
+    return result
+
+
+def normalized_mj_task_response(response: httpx.Response, task_id: str) -> dict:
+    body = decode_json(response)
+    if not response.is_success:
+        raise HTTPException(status_code=502, detail=upstream_error(body, response.status_code))
+    status = str(body.get("status") or "").upper()
+    result = {
+        "id": str(body.get("id") or task_id),
+        "task_id": str(body.get("id") or task_id),
+        "object": "video",
+        "model": str(body.get("modelName") or MJ_FAST_MODEL),
+        "status": "completed" if status == "SUCCESS" else "failed" if status == "FAILURE" else "processing",
+        "progress": 100 if status == "SUCCESS" else body.get("progress", 0),
+        "created_at": int(time()),
+    }
+    if result["status"] == "completed":
+        image_url = body.get("imageUrl")
+        if not isinstance(image_url, str) or not image_url:
+            raise HTTPException(status_code=502, detail="ZX Midjourney completed without imageUrl")
+        result["metadata"] = {"url": image_url}
+        result["completed_at"] = int(time())
+    if result["status"] == "failed":
+        message = str(body.get("failReason") or "ZX Midjourney task failed")
+        result["error"] = {"code": "TASK_FAILED", "message": message}
+        result["completed_at"] = int(time())
     return result
 
 
