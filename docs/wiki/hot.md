@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-17] 创作面板 GPT Image 2.5 官方档调整
+
+- 创作面板移除 `gpt-image-2.5-flare-CF-超分`、`gpt-image-2.5-sunburst-CF-超分`，新增 `gpt-image-2.5-官方`、`gpt-image-2.5-flare-官方`、`gpt-image-2.5-sunburst-官方`。
+- 三个新模型均按精确模型名提交 NewAPI，支持 1K/2K/4K，面板价统一 `0.15/张`；旧 CF 模型仅退出面板和可用性服务，不删除小易适配器/NewAPI 的兼容能力。
+- 定向注册表与可用性测试 `59/59`、Node focused `1368/1368`、`vue-tsc -b` 与差异检查通过；真实渠道生成待验收。
+
 ## [2026-09-17] Skill Creator 草稿目录权限根因修复
 
 - 根因不是 Skill 内容或用户电脑权限：Desktop 把草稿写到 `$TEMP/jiucaihezi-skill-drafts/**`，但 Tauri `fs:default` 未授权该目录，因此即使用户已选择 `@文件`，`plugin-fs` 仍必然返回 `forbidden path`。

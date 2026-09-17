@@ -45,8 +45,9 @@ const GPT_IMAGE_2_ROUTES: Array<{
   { id: 'gpt-image-2.5-sunburst-1k', label: 'GPT Image 2.5 Sunburst 1K', price: 0.08, resolutions: ['1k'] },
   { id: 'gpt-image-2-1k', label: 'GPT Image 2 1K', price: 0.08, resolutions: ['1k'] },
   { id: 'gpt-image-2-超分', label: 'GPT Image 2 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2.5-flare-CF-超分', label: 'GPT Image 2.5 Flare CF 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2.5-sunburst-CF-超分', label: 'GPT Image 2.5 Sunburst CF 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2.5-官方', label: 'GPT Image 2.5 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2.5-flare-官方', label: 'GPT Image 2.5 Flare 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2.5-sunburst-官方', label: 'GPT Image 2.5 Sunburst 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
 ]
 const XIAOYI_GEMINI_FIELDS = promptFields([
   {

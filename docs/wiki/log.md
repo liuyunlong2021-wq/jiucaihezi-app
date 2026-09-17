@@ -1352,3 +1352,9 @@
 - Desktop 草稿路径与 Rust 安装读取均使用 `$TEMP/jiucaihezi-skill-drafts/**`，但 `fs:default` 原先只允许 AppData、下载和指定 Home 子目录；因此 `@文件` 已选中也无法越过宿主 ACL。
 - `src-tauri/capabilities/default.json` 仅新增该应用专属临时子目录；`scripts/check-tauri-fs-acl.mjs` 新增精确 scope 断言并登记进 focused 测试。
 - 旧配置红灯已复现；修复后 ACL、JSON 解析与 Node focused `1368/1368` 通过。真实 Desktop 全链待验收。
+
+## [2026-09-17] 调整 | 创作面板 GPT Image 2.5 官方档
+
+- 面板删除 `gpt-image-2.5-flare-CF-超分`、`gpt-image-2.5-sunburst-CF-超分`；新增 `gpt-image-2.5-官方`、`gpt-image-2.5-flare-官方`、`gpt-image-2.5-sunburst-官方`。
+- 三个新模型按原名提交 NewAPI，支持 1K/2K/4K，显示价均为 `0.15/张`；旧 CF 路由继续留在小易适配器和公开 API 兼容层。
+- TDD 红灯 4 项已复现；定向注册表与可用性测试 `59/59`、Node focused `1368/1368`、`vue-tsc -b` 与差异检查通过；真实渠道生成待验收。

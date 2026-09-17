@@ -85,8 +85,9 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'gpt-image-2.5-sunburst-1k',
     'gpt-image-2-1k',
     'gpt-image-2-超分',
-    'gpt-image-2.5-flare-CF-超分',
-    'gpt-image-2.5-sunburst-CF-超分',
+    'gpt-image-2.5-官方',
+    'gpt-image-2.5-flare-官方',
+    'gpt-image-2.5-sunburst-官方',
     'newapi/trump/seedance-2.0',
     'newapi/kik/doubao-seedance-2',
     'newapi/kik/doubao-seedance-2-0-fast-260128',
@@ -126,6 +127,8 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'gpt-image-2-vip',
     'gpt-image-2-官方',
     'gpt-image-2-Token',
+    'gpt-image-2.5-flare-CF-超分',
+    'gpt-image-2.5-sunburst-CF-超分',
     'newapi/volcengine/doubao-seedance-2-0-260128',
     'runninghub/aiapp/rh-aiapp-fast-digital-human',
     'runninghub/aiapp/rh-aiapp-digital-human',
@@ -311,8 +314,9 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
     ['gpt-image-2.5-sunburst-1k', ['1k'], '0.08/张'],
     ['gpt-image-2-1k', ['1k'], '0.08/张'],
     ['gpt-image-2-超分', ['1k', '2k', '4k'], '0.15/张'],
-    ['gpt-image-2.5-flare-CF-超分', ['1k', '2k', '4k'], '0.15/张'],
-    ['gpt-image-2.5-sunburst-CF-超分', ['1k', '2k', '4k'], '0.15/张'],
+    ['gpt-image-2.5-官方', ['1k', '2k', '4k'], '0.15/张'],
+    ['gpt-image-2.5-flare-官方', ['1k', '2k', '4k'], '0.15/张'],
+    ['gpt-image-2.5-sunburst-官方', ['1k', '2k', '4k'], '0.15/张'],
   ]) {
     const route = getCreationModelSpec(modelId)!
     assert.equal(route.model, modelId)
@@ -328,8 +332,9 @@ test('creation panel keeps the requested GPT Image 2.5 order and drops the retir
   const position = (id: string) => imageIds.indexOf(id)
   assert.ok(position('gpt-image-2.5-sunburst-1k') < position('gpt-image-2-1k'))
   assert.ok(position('gpt-image-2-1k') < position('gpt-image-2-超分'))
-  assert.ok(position('gpt-image-2-超分') < position('gpt-image-2.5-flare-CF-超分'))
-  assert.ok(position('gpt-image-2.5-flare-CF-超分') < position('gpt-image-2.5-sunburst-CF-超分'))
+  assert.ok(position('gpt-image-2-超分') < position('gpt-image-2.5-官方'))
+  assert.ok(position('gpt-image-2.5-官方') < position('gpt-image-2.5-flare-官方'))
+  assert.ok(position('gpt-image-2.5-flare-官方') < position('gpt-image-2.5-sunburst-官方'))
 })
 
 test('Gemini image models use the native Xiaoyi image contract', () => {
