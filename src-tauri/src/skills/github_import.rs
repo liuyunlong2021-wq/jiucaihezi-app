@@ -1398,7 +1398,7 @@ fn parse_rate_limit_reset_epoch(raw: &str) -> Option<String> {
 }
 
 fn parse_frontmatter(content: &str) -> Option<SkillFrontmatter> {
-    let trimmed = content.trim();
+    let trimmed = content.trim_start_matches('\u{FEFF}').trim();
     if !trimmed.starts_with("---") {
         return None;
     }

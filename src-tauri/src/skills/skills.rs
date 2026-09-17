@@ -396,6 +396,7 @@ fn remove_managed_files(staging: &Path) -> Result<(), String> {
 }
 
 fn skill_md_frontmatter_name(skill_md: &str) -> Result<String, String> {
+    let skill_md = skill_md.trim_start_matches('\u{FEFF}');
     let after_open = skill_md
         .strip_prefix("---\n")
         .or_else(|| skill_md.strip_prefix("---\r\n"))

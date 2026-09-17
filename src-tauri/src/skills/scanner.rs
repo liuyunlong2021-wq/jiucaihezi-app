@@ -132,6 +132,7 @@ pub fn parse_skill_md(path: &Path, fallback_name: &str) -> SkillInfo {
             };
         }
     };
+    let content = content.trim_start_matches('\u{FEFF}');
 
     // Try to extract YAML frontmatter
     let yaml = content
