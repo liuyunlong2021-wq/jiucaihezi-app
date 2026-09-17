@@ -1125,13 +1125,15 @@ async function ctxCopyProjectPath() {
 }
 async function ctxReveal() {
   const n = ctxMenu.value.node
-  if (n && isDesktop)
+  if (n && isDesktop) {
+    const target = projectDir.value + '/' + n.path
     try {
       const { invoke } = await import('@tauri-apps/api/core')
-      await invoke('dev_reveal_in_finder', { path: projectDir.value + '/' + n.path })
-    } catch {
-      /* */
+      await invoke('dev_reveal_in_finder', { path: target })
+    } catch (e) {
+      console.warn('[JC] 电脑中打开失败:', target, e)
     }
+  }
   closeCtxMenu()
 }
 function isCanvasMediaFile(node: TreeNode | null | undefined): boolean {

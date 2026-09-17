@@ -1113,10 +1113,20 @@ pub fn run() {
         let mut found = false;
         let mut checked_paths: Vec<String> = Vec::new();
         for base in [&pf, &pfx86] {
-            let candidate = std::path::PathBuf::from(base)
-                .join("Microsoft/EdgeWebView/Application/msedgewebview2.exe");
-            checked_paths.push(candidate.display().to_string());
-            if candidate.exists() {
+            // WebView2 装在带版本号的子目录里，例如
+            // .../Microsoft/EdgeWebView/Application/151.0.4129.72/msedgewebview2.exe，
+            // 所以不能直接拼 msedgewebview2.exe，要下探一层子目录。
+            let app_dir =
+                std::path::PathBuf::from(base).join("Microsoft/EdgeWebView/Application");
+            checked_paths.push(app_dir.display().to_string());
+            let found_here = std::fs::read_dir(&app_dir)
+                .map(|entries| {
+                    entries
+                        .flatten()
+                        .any(|e| e.path().join("msedgewebview2.exe").exists())
+                })
+                .unwrap_or(false);
+            if found_here {
                 found = true;
                 break;
             }

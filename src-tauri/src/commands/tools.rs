@@ -91,6 +91,11 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
 }
 
 fn ensure_binary_executable(path: &Path) {
+    // Windows 上既没有可执行位也没有隔离属性，本函数是空实现；
+    // 这个 let 只为让参数在非 unix 平台不触发 unused_variables
+    #[cfg(not(unix))]
+    let _ = path;
+
     #[cfg(target_os = "macos")]
     {
         let _ = std::process::Command::new("xattr")

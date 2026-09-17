@@ -54,7 +54,19 @@ export function isLocalOllamaUrl(url: string): boolean {
 
 export function shouldUseRustHttpBridge(url: string, init?: RequestInit): boolean {
   if (!(url.startsWith('http://') || url.startsWith('https://'))) return false
-  if (isLocalLoopbackUrl(url)) return canUseRustFetch(init)
+  // Tauri 自己的端点不能走 Rust 桥，否则 invoke 会被二次转发成死循环：
+  //   invoke → fetch(ipc.localhost) → rustFetch → invoke(http_request) → …
+  // 每层把上层 payload 包进去，对象指数级膨胀，最终 JSON.stringify 撞穿 V8
+  // 字符串上限（RangeError: Invalid string length）把主线程彻底卡死。
+  // macOS 上 IPC 走 ipc:// 自定义协议，不以 http 开头，所以只有 Windows 中招。
+  try {
+    const host = new URL(url).hostname
+    if (host === 'ipc.localhost' || host === 'tauri.localhost' || host === 'asset.localhost') {
+      return false
+    }
+  } catch {
+    return false
+  }
   return canUseRustFetch(init)
 }
 

@@ -35,6 +35,19 @@ test('routes all loopback requests through the rust bridge in Tauri', () => {
   }), true)
 })
 
+test('never routes Tauri own endpoints through the rust bridge', () => {
+  // Windows 上 Tauri 的 IPC 端点是 http://ipc.localhost/<cmd>。
+  // 一旦判成 true：invoke → Tauri 内部 fetch(ipc.localhost) → patchFetch 劫持 →
+  // rustFetch → invoke('http_request') → 又是 fetch(ipc.localhost) … 无限递归，
+  // 每层包裹上层 payload，最终 JSON.stringify 撞穿 V8 字符串上限
+  // （RangeError: Invalid string length）把主线程卡死。
+  // macOS 的 IPC 走 ipc:// 自定义协议，不以 http 开头，所以只有 Windows 会中招。
+  assert.equal(shouldUseRustHttpBridge('http://ipc.localhost/http_request', { method: 'POST' }), false)
+  assert.equal(shouldUseRustHttpBridge('http://ipc.localhost/get_cli_api_key', { method: 'POST' }), false)
+  assert.equal(shouldUseRustHttpBridge('http://tauri.localhost/index.html', { method: 'GET' }), false)
+  assert.equal(shouldUseRustHttpBridge('http://asset.localhost/D%3A%5Cfoo.png', { method: 'GET' }), false)
+})
+
 test('recognizes OpenCode global event GET as a streaming request', async () => {
   const { isStreamingHttpRequest } = await import('../httpClient')
   assert.equal(isStreamingHttpRequest('http://127.0.0.1:53486/global/event', {

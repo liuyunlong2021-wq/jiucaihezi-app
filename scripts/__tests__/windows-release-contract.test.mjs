@@ -3,7 +3,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
-const workflow = readFileSync('.github/workflows/build.yml', 'utf8')
+// 统一行尾：仓库在 Windows 上 checkout 出来是 CRLF，而下面的断言用 \n 匹配
+const workflow = readFileSync('.github/workflows/build.yml', 'utf8').replace(/\r\n/g, '\n')
 const rustApp = readFileSync('src-tauri/src/lib.rs', 'utf8')
 const rustManifest = readFileSync('src-tauri/Cargo.toml', 'utf8')
 const packageManifest = JSON.parse(readFileSync('package.json', 'utf8'))

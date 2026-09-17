@@ -1961,28 +1961,71 @@ pub fn dev_create_dir(input: DevWriteFileInput) -> Result<(), String> {
     Ok(())
 }
 
+/// 把前端拼出来的路径统一成平台原生分隔符。
+///
+/// 前端传的是 `projectDir + '/' + 相对路径`，Windows 下必然是混合形态
+/// （例如 `D:\bosideng/.raw/jc-media/文档`）。explorer 会把自己命令行里的 `/`
+/// 当成开关前缀，混合分隔符的 `/select` 参数解析不了，于是无论点哪个都打开「桌面」。
+/// 用 components() 重组一次即可统一，不碰文件系统。
+fn native_separators(raw: &str) -> PathBuf {
+    PathBuf::from(raw).components().collect()
+}
+
 #[tauri::command]
 pub fn dev_reveal_in_finder(path: String) -> Result<(), String> {
-    let path = PathBuf::from(path);
+    // 实测（全反斜杠）：文件 → 打开 wiki 并选中「规则1」；文件夹 → 打开 jc-media 并选中「文档」。
+    let path = native_separators(&path);
     if !path.exists() {
+        eprintln!("[JC] 电脑中打开：路径不存在 {}", path.display());
         return Err("文件不存在。".into());
     }
-    #[cfg(target_os = "macos")]
-    let status = StdCommand::new("open").arg("-R").arg(path).status();
-    #[cfg(target_os = "windows")]
-    let status = StdCommand::new("explorer")
-        .arg(format!("/select,{}", path.to_string_lossy()))
-        .status();
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let status = StdCommand::new("xdg-open")
-        .arg(path.parent().unwrap_or(&path))
-        .status();
 
-    status
-        .map_err(|e| format!("打开文件失败: {}", e))?
-        .success()
-        .then_some(())
-        .ok_or_else(|| "打开文件失败。".to_string())
+    // explorer.exe 的老毛病：不管成功还是失败，退出码都是 1，
+    // 所以 Windows 分支只能看 spawn 有没有失败，绝不能看退出码。
+    // 另外 /select 后面的路径必须自带引号，否则含空格的路径会被解析错。
+    #[cfg(target_os = "macos")]
+    let result: Result<(), String> = StdCommand::new("open")
+        .arg("-R")
+        .arg(&path)
+        .status()
+        .map_err(|e| format!("打开文件失败: {}", e))
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| "打开文件失败。".to_string())
+        });
+
+    #[cfg(target_os = "windows")]
+    let result: Result<(), String> = {
+        use std::os::windows::process::CommandExt as _;
+        // 必须用 raw_arg 原样投递，不能走 .arg()：
+        // .arg() 会把含引号的参数再套一层外层引号并转义，实际发出的是
+        //   explorer "/select,\"D:\a\b\""
+        // explorer 解析不了这种形态，会退回打开「桌面/文档」。
+        // 实测：/select,"D:\a\b" ✓ 选中   ／   "/select,\"D:\a\b\"" ✗ 打开 Documents。
+        // 用引号是为了带空格的路径不被拆成两个参数。
+        StdCommand::new("explorer")
+            .raw_arg(format!("/select,\"{}\"", path.display()))
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("打开文件失败: {}", e))
+    };
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result: Result<(), String> = StdCommand::new("xdg-open")
+        .arg(path.parent().unwrap_or(&path))
+        .status()
+        .map_err(|e| format!("打开文件失败: {}", e))
+        .and_then(|s| {
+            s.success()
+                .then_some(())
+                .ok_or_else(|| "打开文件失败。".to_string())
+        });
+
+    if let Err(e) = &result {
+        eprintln!("[JC] 电脑中打开失败（{}）：{}", path.display(), e);
+    }
+    result
 }
 
 pub fn build_replacement_diff(path: &str, old_text: &str, new_text: &str) -> String {
@@ -2535,6 +2578,16 @@ pub fn dev_export_project_paths(input: DevExportProjectPathsInput) -> Result<Vec
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn native_separators_fixes_mixed_paths_for_explorer() {
+        // explorer 把自己命令行里的 '/' 当开关前缀，混合分隔符会让 /select 失效，
+        // 表现为「电脑中打开」无论点哪个都打开桌面。
+        let mixed = native_separators("D:/bosideng/.raw/jc-media/文档");
+        assert_eq!(mixed, PathBuf::from(r"D:\bosideng\.raw\jc-media\文档"));
+        assert!(!mixed.to_string_lossy().contains('/'));
+    }
 
     #[test]
     fn rename_refuses_to_overwrite_an_existing_target() {

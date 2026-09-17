@@ -1,8 +1,12 @@
 import { spawn } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { build } from 'esbuild'
 
-const outdir = '/private/tmp/jc-focused-tests'
+// 临时目录必须用平台自带的：写死 macOS 的 /private/tmp 时，
+// Windows 上会把构建产物倒在项目根目录下（多出一个 private/ 目录）。
+const outdir = join(tmpdir(), 'jc-focused-tests')
 
 const wave1FocusedTests = [
   'src/components/canvas/__tests__/canvasDocument.test.ts',

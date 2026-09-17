@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { test } from 'node:test'
+import { test as nodeTest } from 'node:test'
 
 import {
   buildCreateDmgArgs,
@@ -7,6 +7,13 @@ import {
   ensureSafeBundleName,
   shouldRefuseDirtySource,
 } from '../create-official-dmg.mjs'
+
+// create-official-dmg.mjs 是 macOS 专用脚本（生成 .dmg / 调 hdiutil），
+// 它内部的路径全部按 POSIX 拼装。在 Windows / Linux 上这些断言没有意义，整文件跳过。
+const test =
+  process.platform === 'darwin'
+    ? nodeTest
+    : (name, fn) => nodeTest.skip(name, fn)
 
 test('deriveDmgPaths writes official DMG artifacts outside the macOS source directory', () => {
   const paths = deriveDmgPaths({

@@ -11,7 +11,11 @@ function testFiles(directory, files = []) {
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name)
     if (entry.isDirectory()) testFiles(path, files)
-    else if (/\.(test|spec)\.(ts|mjs|js)$/.test(entry.name)) files.push(relative(process.cwd(), path))
+    else if (/\.(test|spec)\.(ts|mjs|js)$/.test(entry.name)) {
+      // 注册表（run-focused-tests.mjs）里用的是正斜杠，
+      // 而 Windows 上 relative() 返回反斜杠，不统一就会永远对不上。
+      files.push(relative(process.cwd(), path).replace(/\\/g, '/'))
+    }
   }
   return files
 }
