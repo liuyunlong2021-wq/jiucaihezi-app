@@ -273,7 +273,7 @@ test('media plan editor uses compatible registry models and normalizes changed m
   assert.doesNotThrow(() => validateMediaPlan(updated))
 })
 
-test('media plan editor keeps the user in control of the final prompt and disambiguates duplicate models', () => {
+test('media plan editor keeps the user in control of the final prompt and lists only visible models', () => {
   const plan = {
     kind: 'video' as const,
     title: '推进镜头',
@@ -287,8 +287,5 @@ test('media plan editor keeps the user in control of the final prompt and disamb
     .filter(model => model.label.startsWith('Veo 3.1 Fast'))
 
   assert.equal(updated.prompt, '镜头推进')
-  assert.deepEqual(veoFast.map(model => model.label), [
-    'Veo 3.1 Fast · 直连',
-    'Veo 3.1 Fast · RunningHub',
-  ])
+  assert.deepEqual(veoFast.map(model => model.label), ['Veo 3.1 Fast'])
 })

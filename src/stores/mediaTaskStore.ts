@@ -1267,10 +1267,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   // ─── 刷新结果（不重新提交）───
-  // 任务已拿到上游 id，却因轮询上限或网络中断被判失败；这里只重新查询上游，
+  // 任务已拿到上游 id，却因轮询上限或网络中断未取回结果；这里只重新查询上游，
   // 命中就恢复成 success，不产生新的提交和计费。
   function canRefreshTaskResult(task: MediaTask): boolean {
-    return task.status === 'failed' && Boolean(task.pollUrl) && Boolean(task.pollKind)
+    return ['running', 'pending', 'failed'].includes(task.status)
+      && Boolean(task.upstreamTaskId) && Boolean(task.pollUrl) && Boolean(task.pollKind)
+      && !activeTaskIds.value.has(task.id)
   }
 
   async function refreshTaskResult(taskId: string): Promise<boolean> {

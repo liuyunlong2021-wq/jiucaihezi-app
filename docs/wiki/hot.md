@@ -1,5 +1,10 @@
 # 热缓存
 
+## [2026-09-17] 创作面板隐藏七条视频线路
+
+- 面板隐藏小易 MiniMax H3 三条、Kling Video V3、Grok Imagine Video 1.5、Seedance 2.5，以及 RunningHub Veo 3.1 Fast；同名 ZX Veo Fast、Dola/山海等其他线路不受影响。
+- 仅使用注册表 `hidden` 退出 UI，保留模型合同供历史任务读取；Node focused `1368/1368` 与 `vue-tsc -b` 通过。
+
 ## [2026-09-17] 创作面板 GPT Image 2.5 官方档调整
 
 - 创作面板移除 `gpt-image-2.5-flare-CF-超分`、`gpt-image-2.5-sunburst-CF-超分`，新增 `gpt-image-2.5-官方`、`gpt-image-2.5-flare-官方`、`gpt-image-2.5-sunburst-官方`。

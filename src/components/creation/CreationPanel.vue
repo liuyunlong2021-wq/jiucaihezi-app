@@ -4092,7 +4092,7 @@ const canSend = computed(
                 >
                   <JcIcon name="close" />
                 </button>
-                <button v-if="canRefreshTaskResult(task)" @click="refreshTaskResult(task)">刷新结果</button>
+                <button v-if="canRefreshTaskResult(task)" @click="refreshTaskResult(task)">重新查询结果</button>
                 <button v-if="canRegenerateTask(task)" @click="regenerateTask(task)">重新生成</button>
                 <button v-if="canCopyTaskResultUrl(task)" @click="copyTaskResultUrl(task)">复制链接</button>
                 <button v-if="canDownloadDolaResult(task)" @click="downloadDolaResult(task)">下载链接</button>

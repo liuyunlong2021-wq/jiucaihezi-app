@@ -474,6 +474,9 @@ test('Xiaoyi Kling and Seedance 2.5 display per-second prices', () => {
 
 test('unstable or retired video models stay out of the creation panel', () => {
   const retiredIds = [
+    'newapi/xiaoyi/MiniMaxH3-2k-pro-sec', 'newapi/xiaoyi/MiniMaxH3-2k-sec', 'newapi/xiaoyi/MiniMaxH3-720p-sec',
+    'newapi/xiaoyi/kling-video-v3', 'newapi/xiaoyi/grok-imagine-video-1.5', 'newapi/xiaoyi/seedance2.5',
+    'runninghub/api/rh-video-v31-fast',
     'newapi/zx/grok-1.5-video-6s', 'newapi/zx/grok-1.5-video-10s', 'newapi/zx/grok-1.5-video-15s',
     'newapi/zx/doubao-seedance-2-5-260628', 'runninghub/api/rh-seedance25-no-video-ref', 'runninghub/api/rh-seedance25-with-video-ref',
     'runninghub/api/rh-sora2-text', 'runninghub/api/rh-sora2-image', 'runninghub/api/rh-sora2-character',

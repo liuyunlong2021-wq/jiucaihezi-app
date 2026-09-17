@@ -608,6 +608,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/xiaoyi/kling-video-v3',
+    hidden: true,
     model: 'kling-video-v3',
     label: 'Kling Video V3 · 小易',
     price: 0.3,
@@ -631,6 +632,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/xiaoyi/seedance2.5',
+    hidden: true,
     model: 'seedance2.5',
     label: 'Seedance 2.5 · 小易',
     price: 1,
@@ -766,6 +768,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   })),
   directVideo({
     id: 'newapi/xiaoyi/grok-imagine-video-1.5',
+    hidden: true,
     model: 'grok-imagine-video-1.5',
     label: 'Grok Imagine Video 1.5 · 小易',
     price: 0.25,
@@ -828,6 +831,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
 
   ...XIAOYI_MINIMAX_H3_MODELS.map(({ model, label, price, resolution }) => directVideo({
     id: `newapi/xiaoyi/${model}`,
+    hidden: true,
     model,
     label,
     price,
@@ -1234,6 +1238,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
 
   runninghubStandard({
     id: 'runninghub/api/rh-video-v31-fast',
+    hidden: true,
     model: 'rh-video-v31-fast',
     label: '全能视频 V3.1 Fast · RunningHub',
     task: 'video',

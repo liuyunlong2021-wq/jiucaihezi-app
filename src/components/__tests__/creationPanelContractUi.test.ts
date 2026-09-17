@@ -1005,12 +1005,13 @@ test('Dola successful tasks download the original URL as a prompt-named mp4', ()
   assert.match(download, /mimeType: 'video\/mp4'/)
 })
 
-test('Dola failed video tasks refresh the upstream result without resubmitting', () => {
+test('submitted or failed video tasks can query the upstream result without resubmitting', () => {
   const panel = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
   const store = readFileSync(join(root, 'src/stores/mediaTaskStore.ts'), 'utf8')
 
   // store：只重查上游，不重新提交、不计费
-  assert.match(store, /function canRefreshTaskResult\(task: MediaTask\): boolean \{\s+return task\.status === 'failed' && Boolean\(task\.pollUrl\) && Boolean\(task\.pollKind\)/)
+  assert.match(store, /\['running', 'pending', 'failed'\]\.includes\(task\.status\)/)
+  assert.match(store, /Boolean\(task\.upstreamTaskId\) && Boolean\(task\.pollUrl\) && Boolean\(task\.pollKind\)/)
   assert.match(store, /async function refreshTaskResult\(taskId: string\): Promise<boolean> \{/)
   assert.match(store, /CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS/)
   assert.match(store, /canRefreshTaskResult,\n    init,/)
@@ -1021,7 +1022,7 @@ test('Dola failed video tasks refresh the upstream result without resubmitting',
   assert.doesNotMatch(refresh, /submitTask|generateVideo|generateImage|generateAudio/)
   assert.match(refresh, /await completeMediaTask\(task, mediaUrl, 'refresh-result'\)/)
 
-  // 面板：按钮只在失败任务上出现，且调用 store 的刷新动作
-  assert.match(panel, /v-if="canRefreshTaskResult\(task\)" @click="refreshTaskResult\(task\)">刷新结果<\/button>/)
+  // 面板：有上游任务 ID 的未完成/失败任务均可重查，且调用 store 的刷新动作。
+  assert.match(panel, /v-if="canRefreshTaskResult\(task\)" @click="refreshTaskResult\(task\)">重新查询结果<\/button>/)
   assert.match(panel, /const refreshed = await mediaTaskStore\.refreshTaskResult\(task\.id\)/)
 })
