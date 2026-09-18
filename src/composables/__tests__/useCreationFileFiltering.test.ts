@@ -59,21 +59,5 @@ test('creation lists the most-used image and video models first', () => {
   switchTask('image')
   assert.equal(availableModels.value[0], 'newapi/xiaoyi/grok-imagine-image-2.0')
   switchTask('video')
-  assert.equal(availableModels.value[0], 'newapi/dola/seedance2.5')
-})
-
-test('Dola Seedance accepts up to 30 images with a 20 MB per-image limit', () => {
-  switchTask('video')
-  switchModel('newapi/dola/seedance2.5')
-  clearFiles()
-
-  addFiles(Array.from({ length: 30 }, (_, index) => makeFile(`${index}.png`, 'image/png')))
-  assert.equal(cpState.files.length, 30)
-
-  clearFiles()
-  const oversized = makeFile('oversized.png', 'image/png')
-  Object.defineProperty(oversized, 'size', { value: 20 * 1024 * 1024 + 1 })
-  addFiles([oversized])
-  assert.equal(cpState.files.length, 0)
-  clearFiles()
+  assert.equal(availableModels.value[0], 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s')
 })

@@ -5,6 +5,30 @@ import { test } from 'node:test'
 
 const root = process.cwd()
 
+test('video capture dialog is wired into the creation panel and the memory workbench', () => {
+  const dialog = readFileSync(join(root, 'src/components/media/FrameCaptureDialog.vue'), 'utf8')
+  assert.match(dialog, /截此帧 → 存入图片并加入画布/)
+  assert.match(dialog, /保存到项目「图片」目录/)
+  assert.match(dialog, /captureVideoFrame/)
+  assert.match(dialog, /photo_camera/)
+
+  const viewer = readFileSync(join(root, 'src/components/media/MediaViewer.vue'), 'utf8')
+  assert.match(viewer, /captureEnabled/)
+  assert.match(viewer, /emit\('requestCapture'\)/)
+
+  const panel = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(panel, /@request-capture="openFrameCapture"/)
+  assert.match(panel, /importMedia\(/)
+  assert.match(panel, /queuePendingCanvasMedia/)
+  assert.match(panel, /await flushPendingCanvasMedia\(owner\)/)
+
+  const workbench = readFileSync(join(root, 'src/components/memory/MemoryWorkbench.vue'), 'utf8')
+  assert.match(workbench, /<FrameCaptureDialog/)
+  assert.match(workbench, /handleCapturedFrame/)
+  assert.match(workbench, /queuePendingCanvasMedia/)
+  assert.match(workbench, /flushPendingCanvasMedia/)
+})
+
 test('canvas shortcuts do not consume copy outside the canvas', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

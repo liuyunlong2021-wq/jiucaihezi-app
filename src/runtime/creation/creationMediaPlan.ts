@@ -256,6 +256,7 @@ function normalizeOpenAiImageParams(
     model: spec.model,
     prompt: params.prompt,
     size,
+    quality: params.quality,
     resolution: spec.apiStyle === 'xiaoyi-image-task' ? params.resolution : undefined,
     image: params.image,
     images: params.images,

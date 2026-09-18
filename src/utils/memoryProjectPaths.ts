@@ -41,6 +41,28 @@ function isSameOrChild(path: string, directory: string): boolean {
   return path === directory || path.startsWith(`${directory}/`)
 }
 
+/**
+ * 旧画布资产路径 → 现行路径候选（会话附件迁移时漏改了画布文档：jc-media/images → .raw/jc-media/图片）。
+ * 调用方用项目文件集合挑第一个存在的候选；没有候选则返回空数组。
+ */
+export function legacyCanvasMediaCandidates(path: string): string[] {
+  const normalized = normalizedPath(path)
+  const base = normalized.split('/').pop() || ''
+  if (!base) return []
+  if (normalized.startsWith('jc-media/images/')) return [`${MEMORY_MEDIA_DIRECTORIES.image}/${base}`]
+  if (normalized.startsWith('jc-media/videos/')) return [`${MEMORY_MEDIA_DIRECTORIES.video}/${base}`]
+  if (normalized.startsWith('jc-media/audios/')) return [`${MEMORY_MEDIA_DIRECTORIES.audio}/${base}`]
+  if (normalized.startsWith('jc-media/uploads/')) {
+    return [
+      `${MEMORY_MEDIA_DIRECTORIES.image}/${base}`,
+      `${MEMORY_MEDIA_DIRECTORIES.video}/${base}`,
+      `${MEMORY_MEDIA_DIRECTORIES.audio}/${base}`,
+      `${MEMORY_MEDIA_DIRECTORIES.document}/${base}`,
+    ]
+  }
+  return []
+}
+
 export function isMemoryConversationPath(path: string): boolean {
   const normalized = normalizedPath(path)
   return isSameOrChild(normalized, MEMORY_CONVERSATION_DIRECTORY)

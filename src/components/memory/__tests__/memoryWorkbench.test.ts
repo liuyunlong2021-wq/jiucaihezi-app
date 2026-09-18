@@ -964,8 +964,8 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
     /:title="creationFocused \? '\u9000\u51fa\u4e13\u6ce8\u521b\u4f5c' : '\u4e13\u6ce8\u521b\u4f5c'"/,
   )
   assert.match(workbench, /title="\u6536\u8d77\u521b\u4f5c\u9762\u677f"/)
-  assert.match(creation, /defineExpose\(\{ flushCanvasSave: \(\) => flushCanvasSave\(true\) \}\)/)
-  assert.match(workbench, /ref<\{ flushCanvasSave\?: \(\) => Promise<void> \} \| null>/)
+  assert.match(creation, /flushCanvasSave: \(\) => flushCanvasSave\(true\)/)
+  assert.match(workbench, /ref<\{\s*flushCanvasSave\?: \(\) => Promise<void>/)
   assert.match(workbench, /await creationPanelRef\.value\?\.flushCanvasSave\?\.\(\)/)
   assert.doesNotMatch(workbench, /creationPanelRef\.value\?\.flushCanvasSave\(\)/)
   assert.match(workbench, /creationMounted\.value = false/)

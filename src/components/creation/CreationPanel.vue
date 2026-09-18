@@ -141,8 +141,10 @@ import {
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
 import { acquireProjectMediaDisplay } from '@/services/projectMediaResolver'
 import type { ProjectResource } from '@/utils/projectResource'
-import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
+import { memoryMediaDirectoryFor, legacyCanvasMediaCandidates } from '@/utils/memoryProjectPaths'
+import { queuePendingCanvasMedia, takePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
 import { nextMaterialPath } from '@/utils/projectMaterials'
+import FrameCaptureDialog from '@/components/media/FrameCaptureDialog.vue'
 import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
@@ -458,6 +460,39 @@ function closeTaskPreview() {
   taskPreview.value = null
 }
 
+const showFrameCapture = ref(false)
+
+function openFrameCapture() {
+  if (taskPreview.value?.type !== 'video') return
+  showFrameCapture.value = true
+}
+
+async function handleCapturedFrame(file: File) {
+  const owner = canvasMediaOwner()
+  if (!owner) {
+    cpState.progressText = '请先选择项目文件夹，再截帧'
+    return
+  }
+  try {
+    const existing = new Set((await projectFiles.list(owner)).map(item => item.path))
+    const resource = await projectFileActions.importMedia({
+      owner,
+      path: nextMaterialPath('.raw/jc-media/图片', file.name, existing),
+      data: new Uint8Array(await file.arrayBuffer()),
+      mimeType: 'image/png',
+    })
+    // 画布与预览互斥：先入队，画布就绪时立即消费，否则等下次打开画布时自动出现。
+    queuePendingCanvasMedia({ owner, path: resource.path, kind: 'image', addedAt: Date.now() })
+    const placed = await flushPendingCanvasMedia(owner)
+    showFrameCapture.value = false
+    cpState.progressText = placed > 0
+      ? '已存入图片并放到画布'
+      : '已存入图片；下次打开画布时会自动出现'
+  } catch (cause) {
+    cpState.progressText = `截帧保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 async function downloadTaskPreview() {
   const preview = taskPreview.value
   if (!preview) return
@@ -569,7 +604,7 @@ const rhChannelLabel = computed(() => {
   const spec = currentCreationSpec.value
   if (!spec) return '未选择模型'
   if (spec.source === 'local-comfy') return '本机 ComfyUI'
-  if (spec.source === 'newapi-direct') return 'NewAPI 直连'
+  if (spec.source === 'newapi-direct') return '韭菜盒子'
   return spec.apiStyle === 'rh-aiapp' ? 'RH 工作流' : 'RH 官方 API'
 })
 
@@ -1565,6 +1600,30 @@ async function flushQueuedCanvasMedia(owner: string, loadToken: number) {
       request,
     )
   }
+  // 预览截帧等面板不在时入队的媒体，在画布打开完成时一并加入。
+  await flushPendingCanvasMedia(owner)
+}
+
+/** 消费待入画布队列；画布未就绪或项目不匹配时保留队列，返回本次加入数量。 */
+async function flushPendingCanvasMedia(owner = canvasOwner.value): Promise<number> {
+  if (!app || !canvasReady || canvasRestoring || activeCanvasGate) return 0
+  if (!owner || owner !== selectedCanvasOwner() || !canvasStore.canvasPath) return 0
+  const pending = takePendingCanvasMedia(owner)
+  if (!pending.length) return 0
+  let added = 0
+  for (const entry of pending) {
+    if (!app || canvasRestoring) {
+      queuePendingCanvasMedia(entry)
+      continue
+    }
+    try {
+      await addMediaToCanvas(entry.path, entry.kind, 'creation', '', '截帧')
+      added += 1
+    } catch {
+      queuePendingCanvasMedia(entry)
+    }
+  }
+  return added
 }
 
 let relinkCanvasAssetId = ''
@@ -1949,7 +2008,11 @@ async function flushCanvasSave(allowPreviousOwner = false) {
   await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, owner)
 }
 
-defineExpose({ flushCanvasSave: () => flushCanvasSave(true) })
+defineExpose({
+  flushCanvasSave: () => flushCanvasSave(true),
+  /** 消费待入画布队列（预览截帧留下的）；画布未就绪时保留队列并返回 0。 */
+  flushPendingCanvasMedia: (owner?: string) => flushPendingCanvasMedia(owner),
+})
 
 async function restoreCanvasScene(
   document: CanvasDocumentV3,
@@ -1963,10 +2026,20 @@ async function restoreCanvasScene(
   releaseCanvasRuntimeMediaUrls()
   app.tree.clear()
   const projectDir = owner
+  // 旧路径自愈：会话附件迁移时漏改了画布文档（jc-media/images → .raw/jc-media/图片）。
+  const projectPaths = new Set((await projectFiles.list(owner)).map(item => item.path))
   for (const node of document.scene) {
     if (!app || !canContinue()) return
     const asset = document.assets[String((node as any).id)]
-    if (asset) rememberCanvasAssetRuntimeResource(asset.id, owner, asset.resource.path)
+    if (asset) {
+      if (!projectPaths.has(asset.resource.path)) {
+        const healed = legacyCanvasMediaCandidates(asset.resource.path).find(candidate =>
+          projectPaths.has(candidate),
+        )
+        if (healed) asset.resource.path = healed
+      }
+      rememberCanvasAssetRuntimeResource(asset.id, owner, asset.resource.path)
+    }
     if (asset?.missing) {
       app.tree.add(
         createMissingMediaNode(
@@ -4034,8 +4107,17 @@ const canSend = computed(
       :type="taskPreview.type"
       :model="taskPreview.model"
       :source-url="taskPreview.sourceUrl"
+      :capture-enabled="true"
+      @request-capture="openFrameCapture"
       @close="closeTaskPreview"
       @download="downloadTaskPreview"
+    />
+    <FrameCaptureDialog
+      :show="showFrameCapture"
+      :url="taskPreview?.url || ''"
+      :title="taskPreview?.filename || ''"
+      @close="showFrameCapture = false"
+      @captured="handleCapturedFrame"
     />
     <!-- 🆕 历史 Modal -->
     <Teleport to="body">

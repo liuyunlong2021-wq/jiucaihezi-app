@@ -98,21 +98,10 @@ const SHANHAI_VIDEO_MODELS: Array<{
   maxImages: number
 }> = [
   {
-    model: '山seedance2.5',
-    upstream: 'shanhai-dola-seedance-v2-5-30-9-0-7',
-    label: '山Seedance 2.5 1元/次',
-    price: '1/次',
-    ratios: SHANHAI_VIDEO_RATIOS,
-    resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 30,
-    maxImages: 9,
-  },
-  {
     model: '海seedance2.5',
     upstream: 'oc-model-r5cfh8',
-    label: '海Seedance 2.5 2元/次',
-    price: '2元/次',
+    label: '海Seedance 2.5 0.2/秒',
+    price: '0.2/秒',
     ratios: SHANHAI_VIDEO_RATIOS,
     resolutions: ['720p'],
     duration: { allowedValues: [30] },
@@ -529,6 +518,55 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: route.resolutions,
   })),
+  // 菠萝（aimanplay.cn）GPT Image 同步生图：OpenAI Images 兼容，NewAPI 直配、无适配器。
+  // 实测（2026-09-18 非高峰）：1K 约 56s、4K+high 约 64s；高峰期上游可到 9 分钟，
+  // 可能撞网关 100 秒超时（524），重试即可。计费档：长边 ≥3072 按 4K 档。
+  baseSpec({
+    id: 'gpt-image-2.5-菠萝',
+    model: 'gpt-image-2.5-菠萝',
+    label: 'GPT Image 2.5 菠萝',
+    task: 'image',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    pollKind: 'none',
+    mode: 'text-to-image',
+    contractStatus: 'verified',
+    price: 0.08,
+    endpoint: '/v1/images/generations',
+    assetFlow: 'none',
+    resultExtractor: 'openai-image',
+    files: { images: { min: 0, max: 8 } },
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '1:1',
+        options: options(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21']),
+      },
+      {
+        key: 'resolution',
+        label: '分辨率',
+        kind: 'select',
+        defaultValue: '1k',
+        options: options(['1k', '2k', '4k']),
+      },
+      {
+        key: 'quality',
+        label: '质量',
+        kind: 'select',
+        defaultValue: 'auto',
+        options: options(['auto', 'low', 'medium', 'high']),
+      },
+      { key: 'image', label: '参考图', kind: 'images' },
+    ],
+    notes: ['docs/wiki/运维/菠萝生图.md', '同步接口，不要连续高频重试；失败多为网关超时，稍后再试即可。'],
+    ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'],
+    resolutions: ['1k', '2k', '4k'],
+  }),
   baseSpec({
     id: 'seed-audio-1.0',
     label: '豆包音频生成1.0',
@@ -655,29 +693,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       { key: 'audios', label: '参考音频', kind: 'audio' },
     ]),
     notes: ['https://xiaoyiapi.xyz/docs/api/video-generation/'],
-  }),
-  directVideo({
-    id: 'newapi/dola/seedance2.5',
-    model: 'dola-seedance2.5',
-    label: 'Seedance 2.5 · Dola',
-    price: 0.2,
-    upstreamFamily: 'openai-compatible',
-    apiStyle: 'newapi-task',
-    mode: 'text-to-video',
-    endpoint: '/v1/videos',
-    assetFlow: 'newapi-upload',
-    contractStatus: 'verified',
-    ratios: ['16:9', '9:16', '1:1', '3:4', '4:3', '21:9'],
-    resolutions: ['720p'],
-    duration: { allowedValues: [30] },
-    files: { images: { min: 0, max: 30, maxBytes: 20 * 1024 * 1024 } },
-    fields: promptFields([
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '3:4', '4:3', '21:9']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
-      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
-    ], 12000),
-    notes: ['API接口说明.md', '独立 Dola 适配器。'],
   }),
   directVideo({
     id: 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s',
@@ -1923,7 +1938,7 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
-  // 山海画布当前只接两条 Seedance 2.5 线路，且上游 id（含 oc-model-*）不带厂商前缀，
+  // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.0'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'

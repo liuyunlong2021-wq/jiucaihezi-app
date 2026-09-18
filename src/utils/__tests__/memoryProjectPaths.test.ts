@@ -6,9 +6,24 @@ import {
   isMemoryMediaFilePath,
   isMemoryProjectHiddenPath,
   isMemoryProjectMutationBlocked,
+  legacyCanvasMediaCandidates,
   MEMORY_PROJECT_SKELETON_DIRECTORIES,
   memoryMediaDirectoryFor,
 } from '../memoryProjectPaths'
+
+test('legacy canvas media paths map into the .raw media directories', () => {
+  assert.deepEqual(legacyCanvasMediaCandidates('jc-media/images/a.png'), ['.raw/jc-media/图片/a.png'])
+  assert.deepEqual(legacyCanvasMediaCandidates('jc-media/videos/b.mp4'), ['.raw/jc-media/视频/b.mp4'])
+  assert.deepEqual(legacyCanvasMediaCandidates('jc-media/audios/c.mp3'), ['.raw/jc-media/音频/c.mp3'])
+  assert.deepEqual(legacyCanvasMediaCandidates('jc-media/uploads/d.png'), [
+    '.raw/jc-media/图片/d.png',
+    '.raw/jc-media/视频/d.png',
+    '.raw/jc-media/音频/d.png',
+    '.raw/jc-media/文档/d.png',
+  ])
+  assert.deepEqual(legacyCanvasMediaCandidates('.raw/jc-media/图片/e.png'), [])
+  assert.deepEqual(legacyCanvasMediaCandidates('随便/路径/f.png'), [])
+})
 
 test('memory conversation paths match relative, absolute, and Windows paths only', () => {
   for (const path of [

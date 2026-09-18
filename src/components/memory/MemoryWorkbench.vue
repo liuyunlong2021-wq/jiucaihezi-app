@@ -72,6 +72,7 @@ import { projectTextSync } from '@/services/projectTextSync'
 import { readClipboardImageFile, shouldReadNativeClipboardImage, writeClipboardText } from '@/utils/clipboard'
 import { findMarkdownFileBacklinks, resolveMarkdownFileLinkTarget } from '@/runtime/memory/markdownFileLinks'
 import { materialMarkdownPath, nextMaterialMarkdownPath, nextMaterialPath, nextOriginalMaterialPath } from '@/utils/projectMaterials'
+import { queuePendingCanvasMedia } from '@/utils/pendingCanvasMedia'
 import { classifyDocumentMarkdownReuse } from '@/utils/documentMarkdown'
 import { memoryMediaDirectoryFor } from '@/utils/memoryProjectPaths'
 import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResultMarkers, type Scene3DDocument } from '@/runtime/memory/scene3d'
@@ -94,6 +95,7 @@ const desktopOnlyRuntime = desktopRuntime && !mobileRuntime
 const loadCreationPanel = () => import('@/components/creation/CreationPanel.vue')
 const CreationPanel = defineAsyncComponent(loadCreationPanel)
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
+const FrameCaptureDialog = defineAsyncComponent(() => import('@/components/media/FrameCaptureDialog.vue'))
 const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
@@ -177,6 +179,35 @@ const copiedTurnId = ref('')
 const status = ref('')
 const error = ref('')
 const contextNotice = ref('')
+const showFrameCapture = ref(false)
+
+async function handleCapturedFrame(file: File) {
+  const owner = projectOwner.value
+  if (!owner) {
+    contextNotice.value = '请先选择项目再截帧'
+    return
+  }
+  try {
+    const existing = new Set((await files.list(owner)).map(item => item.path))
+    const resource = await fileActions.importMedia({
+      owner,
+      path: nextMaterialPath('.raw/jc-media/图片', file.name, existing),
+      data: new Uint8Array(await file.arrayBuffer()),
+      mimeType: 'image/png',
+    })
+    queuePendingCanvasMedia({ owner, path: resource.path, kind: 'image', addedAt: Date.now() })
+    let placed = 0
+    if (creationMounted.value) {
+      placed = (await creationPanelRef.value?.flushPendingCanvasMedia?.(owner)) || 0
+    }
+    showFrameCapture.value = false
+    contextNotice.value = placed > 0
+      ? '已存入图片并放到画布'
+      : '已存入图片；下次打开画布时会自动出现'
+  } catch (cause) {
+    contextNotice.value = `截帧保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
 type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
 const pendingMemoryToolApproval = ref<{
   message: string
@@ -208,7 +239,10 @@ const creationMounted = ref(false)
 const creationOpen = ref(false)
 const creationFocused = ref(false)
 const restoreCreationAfterPreview = ref(false)
-const creationPanelRef = ref<{ flushCanvasSave?: () => Promise<void> } | null>(null)
+const creationPanelRef = ref<{
+  flushCanvasSave?: () => Promise<void>
+  flushPendingCanvasMedia?: (owner?: string) => Promise<number>
+} | null>(null)
 const creationClosing = ref(false)
 const MEMORY_CHAT_DEFAULT = 360
 const MEMORY_CHAT_FULL_MIN = 220
@@ -2922,6 +2956,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <span class="memory-preview-path">{{ previewResource.resource.path }}</span>
           </strong>
           <div class="memory-preview-actions">
+            <button
+              v-if="previewResource.type === 'media' && previewResource.mediaKind === 'video' && mediaUrl"
+              class="icon-button"
+              title="截帧 → 取一帧当参考图"
+              @click="showFrameCapture = true"
+            ><JcIcon name="photo_camera" /></button>
             <template v-if="previewResource.type === 'editor' && !editingMarkdown">
               <button class="icon-button" title="编辑 Markdown" @click="startMarkdownEdit"><JcIcon name="edit" /></button>
             </template>
@@ -2978,6 +3018,14 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         </div>
         <div v-else class="memory-empty-state">该文件不支持直接预览，请从文件树菜单导出。</div>
     </section>
+
+    <FrameCaptureDialog
+      :show="showFrameCapture"
+      :url="mediaUrl"
+      :title="previewResource?.resource?.name || ''"
+      @close="showFrameCapture = false"
+      @captured="handleCapturedFrame"
+    />
 
     <aside v-if="creationMounted" class="memory-creation">
       <CreationPanel ref="creationPanelRef" @preview-resource="previewProjectResource">

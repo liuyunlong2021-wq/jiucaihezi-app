@@ -126,6 +126,61 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
   }
 })
 
+test('菠萝 GPT Image 2.5 透传 size 与 quality（文生图 + 图生图）', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  const seen: Array<Record<string, unknown>> = []
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/images/generations') && init?.method === 'POST') {
+      seen.push({ kind: 'generations', ...JSON.parse(String(init.body)) })
+      return Response.json({ data: [{ url: 'https://cdn.example.test/boluo/gen.png' }] })
+    }
+    if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
+      const body = init.body as FormData
+      seen.push({ kind: 'edits', size: body.get('size'), quality: body.get('quality') })
+      return Response.json({ data: [{ url: 'https://cdn.example.test/boluo/edit.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const genPlan = buildCreationRunPlan({
+      modelId: 'gpt-image-2.5-菠萝',
+      params: { prompt: '一只橙色狐狸', ratio: '16:9', resolution: '2k', quality: 'high' },
+    })
+    const genResult = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(genPlan)))
+    assert.equal(genResult.url, 'https://cdn.example.test/boluo/gen.png')
+
+    const editPlan = buildCreationRunPlan({
+      modelId: 'gpt-image-2.5-菠萝',
+      params: {
+        prompt: '把背景改成浅蓝',
+        ratio: '16:9',
+        resolution: '2k',
+        quality: 'medium',
+        images: ['data:image/png;base64,aGVsbG8='],
+      },
+    })
+    const editResult = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(editPlan)))
+    assert.equal(editResult.url, 'https://cdn.example.test/boluo/edit.png')
+
+    assert.deepEqual(seen[0], {
+      kind: 'generations',
+      model: 'gpt-image-2.5-菠萝',
+      prompt: '一只橙色狐狸',
+      size: '2048x1152',
+      quality: 'high',
+      response_format: 'url',
+    })
+    assert.deepEqual(seen[1], { kind: 'edits', size: '2048x1152', quality: 'medium' })
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Gemini image submits the native Xiaoyi generation contract', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
@@ -1177,8 +1232,8 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
     }
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      // 面板发渠道公开名；NewAPI 的模型映射再换成 shanhai-dola-seedance-v2-5-30-9-0-7。
-      assert.equal(body.model, '山seedance2.5')
+      // 面板发渠道公开名；NewAPI 的模型映射再换成 oc-model-r5cfh8。
+      assert.equal(body.model, '海seedance2.5')
       assert.equal(body.prompt, '让参考图里的主体自然运动')
       assert.equal(body.ratio, '16:9')
       assert.equal(body.resolution, '720p')
@@ -1202,7 +1257,7 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
 
   try {
     const plan = buildCreationRunPlan({
-      modelId: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
+      modelId: 'newapi/shanhai/oc-model-r5cfh8',
       params: {
         prompt: '让参考图里的主体自然运动',
         images: ['data:image/png;base64,aGVsbG8=', 'data:image/png;base64,aGVsbG8='],

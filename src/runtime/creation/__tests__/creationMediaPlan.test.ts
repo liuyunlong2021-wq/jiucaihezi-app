@@ -46,7 +46,7 @@ test('run plan chooses media transport from the effective API contract', () => {
     params: { prompt: 'edit', images: ['blob:local-reference'] },
   })
   const url = buildCreationRunPlan({
-    modelId: 'newapi/dola/seedance2.5',
+    modelId: 'newapi/shanhai/oc-model-r5cfh8',
     params: { prompt: 'animate', images: ['blob:local-reference'] },
   })
   const base64 = buildCreationRunPlan({
@@ -210,36 +210,6 @@ test('ZX Midjourney Fast Imagine uses the NewAPI image task contract', () => {
   assert.equal(textPlan.assetFlow, 'none')
   assert.equal(imagePlan.mode, 'image-to-image')
   assert.equal(imagePlan.assetFlow, 'none')
-})
-
-test('Dola Seedance 2.5 switches to image-to-video with four references and stays fixed at 720p', () => {
-  const plan = buildCreationRunPlan({
-    modelId: 'newapi/dola/seedance2.5',
-    params: {
-      prompt: '让参考图中的主体自然运动',
-      images: ['https://example.com/1.jpg', 'https://example.com/2.jpg', 'https://example.com/3.jpg', 'https://example.com/4.jpg'],
-      ratio: '16:9',
-      resolution: '720p',
-      duration: 30,
-    },
-  })
-
-  assert.equal(plan.mode, 'image-to-video')
-  assert.equal(plan.debug.referenceImageCount, 4)
-  assert.equal(plan.debug.normalizedParams.resolution, '720p')
-  assert.equal(plan.debug.normalizedParams.duration, 30)
-  assert.throws(() => buildCreationRunPlan({
-    modelId: 'newapi/dola/seedance2.5',
-    params: { prompt: '超出参考图上限', images: Array.from({ length: 31 }, (_, i) => `https://example.com/${i}.jpg`) },
-  }), /参考图最多支持 30 个/)
-  assert.doesNotThrow(() => buildCreationRunPlan({
-    modelId: 'newapi/dola/seedance2.5',
-    params: { prompt: 'a'.repeat(12000) },
-  }))
-  assert.throws(() => buildCreationRunPlan({
-    modelId: 'newapi/dola/seedance2.5',
-    params: { prompt: 'a'.repeat(12001) },
-  }), /提示词不能超过 12000 字符/)
 })
 
 test('model lookup prefers exact ids and resolves aliases', () => {
@@ -1031,9 +1001,9 @@ test('Seed Audio creation model uses the Chinese label, minute price, and three 
   assert.deepEqual(spec.capabilities.inputModalities, ['text', 'audio'])
 })
 
-test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任务路由', () => {
+test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任务路由', () => {
   const plan = buildCreationRunPlan({
-    modelId: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
+    modelId: 'newapi/shanhai/oc-model-r5cfh8',
     params: {
       prompt: '让参考图里的主体自然运动',
       images: ['https://example.com/1.jpg'],
@@ -1050,13 +1020,6 @@ test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任
   assert.equal(plan.mode, 'image-to-video')
 
   assert.throws(() => buildCreationRunPlan({
-    modelId: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
-    params: {
-      prompt: '超出参考图上限',
-      images: Array.from({ length: 10 }, (_, index) => `https://example.com/${index}.jpg`),
-    },
-  }), /参考图最多支持 9 个/)
-  assert.throws(() => buildCreationRunPlan({
     modelId: 'newapi/shanhai/oc-model-r5cfh8',
     params: { prompt: '这条线路固定 30 秒', duration: 15 },
   }), /时长不支持/)
@@ -1068,10 +1031,9 @@ test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任
     },
   }), /参考图最多支持 10 个/)
 
-  // 上游 GET /models 已核对（2026-09-15）：720p、6 档比例、时长 4-30 / 仅 30、参考图 9 / 10，
+  // 上游 GET /models 已核对（2026-09-15）：720p、6 档比例、时长固定 30、参考图 10，
   // 且 audio_input 与 video_reference 均为 false，所以这里钉住 verified 与参考图上限。
   for (const id of [
-    'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7',
     'newapi/shanhai/oc-model-r5cfh8',
   ]) {
     assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
@@ -1086,8 +1048,7 @@ test('山海画布渠道只登记两条 Seedance 2.5 线路，并走适配器任
       .filter(model => model.id.startsWith('newapi/shanhai/'))
       .map(model => [model.id, model.model, model.price, model.task]),
     [
-      ['newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', '山seedance2.5', '1/次', 'video'],
-      ['newapi/shanhai/oc-model-r5cfh8', '海seedance2.5', '2元/次', 'video'],
+      ['newapi/shanhai/oc-model-r5cfh8', '海seedance2.5', '0.2/秒', 'video'],
     ],
   )
   assert.equal(

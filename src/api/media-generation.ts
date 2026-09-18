@@ -26,6 +26,7 @@ export interface ImageGenParams {
   lora?: string
   lora_strength?: number
   outputFormat?: string
+  quality?: string
   responseFormat?: 'url' | 'b64_json'
   onSubmitted?: (payload: CreationTaskSubmitted) => void | Promise<void>
   signal?: AbortSignal

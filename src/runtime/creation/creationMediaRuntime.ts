@@ -85,6 +85,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
       lora: asOptionalString(params.lora),
       lora_strength: asOptionalNumber(params.lora_strength),
       outputFormat: asOptionalString(params.outputFormat),
+      quality: asOptionalString(params.quality),
       responseFormat: (asOptionalString(params.response_format) || 'url') as ImageGenParams['responseFormat'],
     }
     return request
@@ -455,6 +456,7 @@ async function executeDirectImageRequest(
       image: await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal))),
     }
     if (params.size) fields.size = params.size
+    if (params.quality) fields.quality = params.quality
     const data = await apiCallMultipart(request.endpoint, fields, request.signal)
     const mediaUrl = extractMediaUrl(data, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
@@ -471,6 +473,7 @@ async function executeDirectImageRequest(
     model: request.plan.model,
     prompt,
     size: params.size,
+    quality: params.quality,
     aspect_ratio: params.aspectRatio,
     aspectRatio: params.aspectRatio,
     ratio: params.aspectRatio,

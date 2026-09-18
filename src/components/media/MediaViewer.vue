@@ -20,6 +20,7 @@ const props = defineProps<{
   errorMsg?: string
   sourceUrl?: string
   mode?: 'creation' | 'file'
+  captureEnabled?: boolean
 }>()
 const Model3DViewer = defineAsyncComponent(() => import('./Model3DViewer.vue'))
 
@@ -28,6 +29,7 @@ const emit = defineEmits<{
   download: []
   reference: []
   regenerate: []
+  requestCapture: []
     copyUrl: []
   prev: []
   next: []
@@ -59,6 +61,10 @@ watchEffect(() => {
   const rid = ++resolveId
   resolveJcMediaUrl(props.url).then(u => { if (rid === resolveId) resolvedSrc.value = u })
 })
+
+function requestCaptureClick() {
+  emit('requestCapture')
+}
 
 function onKeydown(e: KeyboardEvent) {
   if (!props.show) return
@@ -124,6 +130,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onKeydown))
         </button>
         <button v-if="isMedia && props.mode !== 'file'" class="mv-btn ghost" @click="emit('regenerate')" title="重新生成">
           <JcIcon name="restart_alt" />
+        </button>
+        <button v-if="type === 'video' && captureEnabled" class="mv-btn ghost" @click="requestCaptureClick" title="截帧 → 取一帧当参考图">
+          <JcIcon name="photo_camera" />
         </button>
         <button v-if="isMedia" class="mv-btn primary" @click="emit('download')" title="下载">
           <JcIcon name="download" />
