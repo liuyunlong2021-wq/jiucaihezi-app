@@ -173,7 +173,7 @@ export function getLocalContentToolDefinitions(): ChatCompletionTool[] {
               description: '输出格式，默认 txt；需要字幕时用 srt 或 vtt。',
             },
             language: { type: 'string', description: '可选语言，例如 Chinese、zh、English、en。' },
-            model: { type: 'string', description: 'Whisper 模型名，默认 base。' },
+            model: { type: 'string', description: '可选，whisper 模型名或路径（如 base、small、ggml-large-v3-turbo.bin），默认自动选择本机已装模型。' },
           },
         },
       },
@@ -204,7 +204,7 @@ export function getLocalContentToolDefinitions(): ChatCompletionTool[] {
           properties: {
             filename: { type: 'string', description: '源视频文件名，可填部分文件名。' },
             language: { type: 'string', description: '可选语言，默认 auto 自动检测。' },
-            model: { type: 'string', description: 'Whisper 模型名，默认 base（推荐 tiny/base/small/medium/large）。' },
+            model: { type: 'string', description: '可选，whisper 模型名或路径（如 base、small、ggml-large-v3-turbo.bin），默认自动选择本机已装模型。' },
           },
         },
       },

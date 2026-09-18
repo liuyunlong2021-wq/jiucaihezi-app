@@ -865,6 +865,72 @@ pub fn supported_transcript_format(format: &str) -> bool {
     matches!(format, "txt" | "srt" | "vtt" | "json")
 }
 
+/// whisper.cpp 用开关选输出格式（-otxt / -osrt / -ovtt / -oj），不是取值参数。
+pub fn transcript_format_flag(format: &str) -> &'static str {
+    match format {
+        "srt" => "-osrt",
+        "vtt" => "-ovtt",
+        "json" => "-oj",
+        _ => "-otxt",
+    }
+}
+
+/// 多语言模型优先：`.en` 版本识别不了中文。
+const WHISPER_MODEL_PREFERENCE: [&str; 6] = [
+    "ggml-large-v3-turbo.bin",
+    "ggml-large-v3.bin",
+    "ggml-medium.bin",
+    "ggml-small.bin",
+    "ggml-base.bin",
+    "ggml-tiny.bin",
+];
+
+fn whisper_model_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    if let Some(home) = env::var_os("HOME") {
+        let home = PathBuf::from(home);
+        dirs.push(home.join(".cache").join("whisper.cpp"));
+        dirs.push(home.join(".jiucaihezi").join("tools").join("whisper-models"));
+        dirs.push(home.join(".jiucaihezi").join("models").join("whisper"));
+    }
+    dirs.push(PathBuf::from("/opt/homebrew/share/whisper.cpp"));
+    dirs.push(PathBuf::from("/usr/local/share/whisper.cpp"));
+    dirs
+}
+
+/// whisper.cpp 只接受模型文件路径。请求值可以是路径，也可以是模型名（base / small / …）；
+/// 都不给时按偏好从缓存目录挑一个。
+pub fn resolve_whisper_model(requested: Option<&str>) -> Option<PathBuf> {
+    if let Some(name) = requested.map(str::trim).filter(|value| !value.is_empty()) {
+        let direct = PathBuf::from(name);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        let file_name = format!("ggml-{}.bin", name.trim_end_matches(".bin"));
+        if let Some(found) = whisper_model_dirs()
+            .into_iter()
+            .map(|dir| dir.join(&file_name))
+            .find(|candidate| candidate.is_file())
+        {
+            return Some(found);
+        }
+    }
+    for env_name in ["JC_WATCH_WHISPER_MODEL", "WHISPER_MODEL"] {
+        if let Some(value) = env::var_os(env_name) {
+            let candidate = PathBuf::from(value);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    whisper_model_dirs().into_iter().find_map(|dir| {
+        WHISPER_MODEL_PREFERENCE
+            .iter()
+            .map(|name| dir.join(name))
+            .find(|candidate| candidate.is_file())
+    })
+}
+
 pub fn find_transcript_output(
     output_dir: &Path,
     stem: &str,
@@ -1339,13 +1405,25 @@ pub async fn media_transcribe_file(
     if !supported_transcript_format(&format) {
         return Err(format!("不支持的转写输出格式: {}", format));
     }
-    let model = input.model.unwrap_or_else(|| "base".into());
     let stem = media_file_stem(
         source
             .file_name()
             .and_then(|value| value.to_str())
             .unwrap_or("media"),
     );
+    let model_path = resolve_whisper_model(input.model.as_deref()).ok_or_else(|| {
+        "未找到 whisper 模型。请下载 ggml 模型到 ~/.cache/whisper.cpp/ 后重试，例如：\
+         curl -L -o ~/.cache/whisper.cpp/ggml-base.bin \
+         https://hf-mirror.com/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+            .to_string()
+    })?;
+    let output_base = output_dir.join(&stem);
+    let language = input
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("auto");
     let start = Instant::now();
     let started_at = SystemTime::now();
 
@@ -1355,18 +1433,14 @@ pub async fn media_transcribe_file(
             .map_err(|_| "媒体处理组件不可用，请重新安装应用后重试。".to_string())?
     });
     command
-        .arg(source.to_string_lossy().to_string())
-        .arg("--model")
-        .arg(model)
-        .arg("--output_dir")
-        .arg(output_dir.to_string_lossy().to_string())
-        .arg("--output_format")
-        .arg(format.clone());
-    if let Some(language) = input.language {
-        if !language.trim().is_empty() {
-            command.arg("--language").arg(language);
-        }
-    }
+        .arg("-m")
+        .arg(&model_path)
+        .arg("-l")
+        .arg(language)
+        .arg(transcript_format_flag(&format))
+        .arg("-of")
+        .arg(&output_base)
+        .arg(source.to_string_lossy().to_string());
 
     let output = timeout(
         Duration::from_secs(1800),

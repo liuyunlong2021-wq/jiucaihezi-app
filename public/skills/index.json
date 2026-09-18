@@ -56,6 +56,71 @@
     }
   },
   {
+    "id": "jc-watch",
+    "name": "jc-watch",
+    "displayName": "看视频",
+    "description": "Use when 用户给出一个视频链接或本地视频文件，要求分析、拆解、总结、提问、找问题、提取文案字幕、对比参考视频或基于视频内容创作。触发词：看视频、拆解视频、分析视频、总结视频、这个视频讲了什么、帮我看看这个视频、视频转文字、提取视频文案、提取字幕、录屏哪里出问题、竞品视频拆解、参考视频分析、爆款拆解、jc-watch。不用于生成视频、剪辑视频或单纯的视频转码压缩。",
+    "triggers": [
+      "'看视频'",
+      "'拆解视频'",
+      "'分析视频'",
+      "'总结视频'",
+      "'视频转文字'",
+      "'提取视频文案'",
+      "'竞品视频拆解'"
+    ],
+    "commands": [
+      "看视频：<视频链接或本地文件路径>",
+      "拆解这个视频：<链接>，重点讲开头钩子、节奏和结构",
+      "这个视频讲了什么：<链接>",
+      "提取视频文案：<链接>",
+      "这个录屏哪里出问题了：<本地文件路径>"
+    ],
+    "files": [
+      "SKILL.md",
+      "scripts/config.py",
+      "scripts/download.py",
+      "scripts/frames.py",
+      "scripts/jc_watch.py",
+      "scripts/local_whisper.py",
+      "scripts/transcribe.py"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "scripts/config.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/download.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/frames.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/jc_watch.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/local_whisper.py",
+          "kind": "script"
+        },
+        {
+          "path": "scripts/transcribe.py",
+          "kind": "script"
+        }
+      ]
+    }
+  },
+  {
     "id": "skill-creator",
     "name": "skill-creator",
     "displayName": "skill-creator",

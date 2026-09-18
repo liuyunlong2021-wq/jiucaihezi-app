@@ -611,7 +611,8 @@ mod tests {
     use crate::commands::media::{
         convert_markdown_for_output, find_transcript_output, is_meaningful_markdown,
         is_successful_markdown_content, map_anydoc_error, parse_document_bytes,
-        validate_document_project_paths, validate_selected_media_path,
+        resolve_whisper_model, transcript_format_flag, validate_document_project_paths,
+        validate_selected_media_path,
     };
     use crate::commands::skill_material::{
         build_skill_material_command, collect_skill_material_raw_files,
@@ -677,6 +678,25 @@ mod tests {
         let selected = find_transcript_output(&output_dir, "demo", "txt", SystemTime::now())
             .expect("find transcript");
         assert_eq!(selected, expected);
+    }
+
+    #[test]
+    fn transcript_format_flag_maps_every_supported_format() {
+        // whisper.cpp 用开关选格式；传成取值参数（--output_format txt）会被拒绝。
+        assert_eq!(transcript_format_flag("txt"), "-otxt");
+        assert_eq!(transcript_format_flag("srt"), "-osrt");
+        assert_eq!(transcript_format_flag("vtt"), "-ovtt");
+        assert_eq!(transcript_format_flag("json"), "-oj");
+    }
+
+    #[test]
+    fn whisper_model_resolution_prefers_an_explicit_file_path() {
+        let root = temp_test_dir("whisper_model_resolution");
+        let model = root.join("ggml-base.bin");
+        std::fs::write(&model, b"model").expect("write model placeholder");
+
+        let explicit = model.to_string_lossy().to_string();
+        assert_eq!(resolve_whisper_model(Some(&explicit)), Some(model));
     }
 
     #[test]
