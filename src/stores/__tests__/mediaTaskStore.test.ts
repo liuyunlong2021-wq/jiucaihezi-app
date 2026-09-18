@@ -89,13 +89,27 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           if (command === 'http_download_to_project') {
             const root = args.request?.root || ''
             const path = args.request?.relative_path || ''
-            downloads.push(args.request?.url || '')
+            const requestUrl = args.request?.url || ''
+            downloads.push(requestUrl)
+            if (requestUrl.includes('task_download_fail_001')) {
+              throw new Error('HTTP 403: request blocked: port 8795 is not allowed')
+            }
             projectContents(root).set(path, 'png')
             return { status: 200, relative_path: path, bytes_written: 3 }
           }
           if (command === 'http_request') {
             const url = args.request?.url || ''
             if (url.endsWith('/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL')) {
+              return {
+                status: 200,
+                body: JSON.stringify({
+                  status: 'completed',
+                  image_url: '/v1/videos/690ff4cb-aab6-4202-bd7d-59afc55aa32d/content',
+                }),
+                headers: { 'content-type': 'application/json' },
+              }
+            }
+            if (url.endsWith('/v1/videos/task_download_fail_001')) {
               return {
                 status: 200,
                 body: JSON.stringify({
@@ -1560,6 +1574,51 @@ test('retry persistence holds the task in the active set while re-reading and do
   assert.match(retry, /activeTaskIds\.value\.add\(task\.id\)/)
   assert.match(retry, /finally \{\s*\n?\s*activeTaskIds\.value\.delete\(task\.id\)/)
 })
+
+test(
+  'mediaTaskStore surfaces download failures on the task instead of failing silently',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_download_fail', type: 'video', model: '海seedance2.5',
+      modelLabel: '海Seedance 2.5', prompt: '山海视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation',
+      resultUrl: 'https://api.jiucaihezi.studio/v1/videos/task_download_fail_001/content',
+      upstreamTaskId: 'task_download_fail_001',
+      pollUrl: '/v1/videos/task_download_fail_001',
+      pollKind: 'video',
+      assetStatus: 'pending',
+      assetRetryCount: 0,
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/shanhai'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_download_fail'), false)
+      })
+      const task = store.getTask('mtask_download_fail')
+      assert.equal(task?.status, 'success')
+      assert.equal(task?.assetStatus, 'failed')
+      assert.match(task?.errorMsg || '', /保存到项目失败/)
+      assert.equal(task?.assetRetryCount, 1)
+      assert.deepEqual(files.downloads, [
+        'https://api.jiucaihezi.studio/v1/videos/task_download_fail_001/content',
+      ])
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
 
 test(
   'mediaTaskStore leaves legacy targeted tasks without an owner unwritten',

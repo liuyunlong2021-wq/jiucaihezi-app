@@ -5,6 +5,7 @@ import GlobalSearch from './components/search/GlobalSearch.vue'
 import LocalCapabilitySetup from './components/settings/LocalCapabilitySetup.vue'
 import { shouldShowSetupWizard } from './utils/localCapabilities'
 import { isTauriRuntime } from './utils/tauriEnv'
+import { isNewerVersion } from './utils/version'
 import { startDesktopProjectDropDispatcher } from './services/desktopProjectDrop'
 
 const showSetupWizard = ref(false)
@@ -34,21 +35,23 @@ onBeforeUnmount(() => {
 
 async function checkNewVersion() {
   try {
+    // 用自家服务器的 latest.json（CI 发版时自动更新）：国内可达；
+    // GitHub API 在国内网络下会超时，用户永远收不到升级提示。
     const resp = await fetch(
-      'https://api.github.com/repos/liuyunlong2021-wq/jiucaihezi-app/releases/latest',
+      'https://api.jiucaihezi.studio/updates/latest.json',
       { signal: AbortSignal.timeout(5000) }
     )
     if (!resp.ok) return
     const release = await resp.json()
-    const latestVer = (release.tag_name || '').replace(/^v/, '')
+    const latestVer = (release.version || '').replace(/^v/, '')
     const currentVer = ((window as any).__JC_APP_BUILD_ID__ || '')
       .match(/[\d.]+/)?.[0] || '0'
 
-    if (latestVer > currentVer) {
+    if (isNewerVersion(latestVer, currentVer)) {
       const ok = window.confirm(
-        `韭菜盒子 ${release.tag_name} 已发布！\n\n` +
+        `韭菜盒子 v${latestVer} 已发布！\n\n` +
         `当前版本：v${currentVer}\n` +
-        `最新版本：${release.tag_name}\n\n` +
+        `最新版本：v${latestVer}\n\n` +
         `点击「确定」前往下载页。`
       )
       if (ok) {

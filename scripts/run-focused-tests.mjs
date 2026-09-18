@@ -115,6 +115,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/skillContentResolver.test.ts',
   'src/utils/__tests__/mediaDisplayAsset.test.ts',
   'src/utils/__tests__/urlSafety.test.ts',
+  'src/utils/__tests__/version.test.ts',
   'src/utils/__tests__/fileDownload.test.ts',
   'src/utils/__tests__/officeDownloads.test.ts',
   'src/utils/__tests__/messageDisplay.test.ts',

@@ -787,6 +787,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     } catch (e) {
       console.warn('[JC] 创作结果落地失败:', e)
       handleAssetDownloadFailure(task)
+      // 下载失败不能静默：卡片与重试入口都要能看到真实原因。
+      task.errorMsg = `保存到项目失败：${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`
+      task.error = {
+        category: 'persistence',
+        stage: 'persistence',
+        message: task.errorMsg,
+        raw: e,
+      }
     }
   }
 
@@ -816,8 +824,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   function handleAssetDownloadFailure(task: MediaTask) {
     task.assetRetryCount = (task.assetRetryCount || 0) + 1
+    task.assetStatus = task.assetRetryCount >= 3 ? 'remote-only' : 'failed'
     if (task.assetRetryCount >= 3) {
-      task.assetStatus = 'remote-only'
       console.warn('[JC] 创作结果本地化永久放弃（3次失败）:', task.id)
     }
   }
