@@ -1,3 +1,4 @@
+use crate::skills::path_utils::resolve_home_dir;
 use std::env;
 use std::path::{Path, PathBuf};
 use tauri;
@@ -31,15 +32,13 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
         return direct;
     }
 
-    if let Some(home) = env::var_os("HOME") {
-        let candidate = PathBuf::from(home)
-            .join(".jiucaihezi")
-            .join("tools")
-            .join("bin")
-            .join(program);
-        if candidate.exists() {
-            return candidate;
-        }
+    let candidate = resolve_home_dir()
+        .join(".jiucaihezi")
+        .join("tools")
+        .join("bin")
+        .join(program);
+    if candidate.exists() {
+        return candidate;
     }
 
     // PATH 环境变量查找（已覆盖各平台）
@@ -138,14 +137,8 @@ pub(crate) fn resolve_app_media_binary(
 }
 
 pub(crate) fn local_tools_python_path() -> Option<PathBuf> {
-    env::var_os("HOME")
-        .map(|home| {
-            PathBuf::from(home)
-                .join(".jiucaihezi")
-                .join("tools")
-                .join("python")
-        })
-        .filter(|path| path.exists())
+    let path = resolve_home_dir().join(".jiucaihezi").join("tools").join("python");
+    path.exists().then_some(path)
 }
 
 fn python_path_from_token(token: &str) -> Option<PathBuf> {
@@ -178,8 +171,8 @@ fn python_from_wrapper_script(path: &Path) -> Option<PathBuf> {
 }
 
 pub(crate) fn resolve_local_python() -> PathBuf {
-    if let Some(home) = env::var_os("HOME") {
-        let tools_root = PathBuf::from(home).join(".jiucaihezi").join("tools");
+    {
+        let tools_root = resolve_home_dir().join(".jiucaihezi").join("tools");
         for candidate in [
             tools_root.join("bin").join("python3"),
             tools_root.join("python").join("bin").join("python3"),

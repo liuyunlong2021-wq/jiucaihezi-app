@@ -1692,6 +1692,12 @@ mod tests {
     use super::*;
     use crate::skills::linker;
 
+    /// `dir_path` / `file_path` 存的是本机原生路径（Windows 上是 `\`）。断言里统一折成正斜杠，
+    /// 只验证「路径结构」这个真实意图，不把 POSIX 分隔符误当成契约。
+    fn as_posix(value: &str) -> String {
+        value.replace('\\', "/")
+    }
+
     static SCAN_CANCEL_TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     const CROSS_AREA_FIXTURE_ROOT: &str = "/tmp/skills-manage-val-cross-012";
     const CROSS_AREA_FIXTURE_CENTRAL_DIR: &str = "/tmp/skills-manage-val-cross-012/central";
@@ -1960,8 +1966,7 @@ mod tests {
             "hermes__hermes-project__weights-and-biases"
         );
         assert!(
-            projects[0].skills[0]
-                .dir_path
+            as_posix(&projects[0].skills[0].dir_path)
                 .contains(".hermes/skills/mlops/evaluation/weights-and-biases")
         );
     }
@@ -2598,7 +2603,7 @@ mod tests {
         assert_eq!(projects.len(), 1);
         assert_eq!(projects[0].skills.len(), 1);
         assert!(
-            projects[0].skills[0].dir_path.contains(".skills/shared"),
+            as_posix(&projects[0].skills[0].dir_path).contains(".skills/shared"),
             ".skills should win over lower-priority duplicates"
         );
 
@@ -2606,9 +2611,7 @@ mod tests {
         let projects = scan_for_test(&vault_dir, &central_dir);
         assert_eq!(projects[0].skills.len(), 1);
         assert!(
-            projects[0].skills[0]
-                .dir_path
-                .contains(".agents/skills/shared"),
+            as_posix(&projects[0].skills[0].dir_path).contains(".agents/skills/shared"),
             ".agents/skills should win when .skills is absent"
         );
 
@@ -2617,9 +2620,7 @@ mod tests {
         let projects = scan_for_test(&vault_dir, &central_dir);
         assert_eq!(projects[0].skills.len(), 1);
         assert!(
-            projects[0].skills[0]
-                .dir_path
-                .contains(".agents/skills/shared"),
+            as_posix(&projects[0].skills[0].dir_path).contains(".agents/skills/shared"),
             "malformed frontmatter keeps the higher-priority directory via fallback metadata"
         );
     }
@@ -3094,8 +3095,14 @@ mod tests {
         assert_eq!(fixture_skill.platform_id, OBSIDIAN_PLATFORM_ID);
         assert_eq!(fixture_skill.platform_name, OBSIDIAN_PLATFORM_NAME);
         assert_eq!(fixture_skill.project_path, CROSS_AREA_FIXTURE_VAULT_PATH);
-        assert_eq!(fixture_skill.dir_path, CROSS_AREA_FIXTURE_SOURCE_DIR);
-        assert_eq!(fixture_skill.file_path, CROSS_AREA_FIXTURE_SOURCE_FILE);
+        assert_eq!(
+            as_posix(&fixture_skill.dir_path),
+            CROSS_AREA_FIXTURE_SOURCE_DIR
+        );
+        assert_eq!(
+            as_posix(&fixture_skill.file_path),
+            CROSS_AREA_FIXTURE_SOURCE_FILE
+        );
 
         let ordinary = result
             .projects
@@ -3115,8 +3122,14 @@ mod tests {
             .expect("Obsidian fixture should be persisted");
         assert_eq!(persisted.id, CROSS_AREA_FIXTURE_SKILL_ID);
         assert_eq!(persisted.project_path, CROSS_AREA_FIXTURE_VAULT_PATH);
-        assert_eq!(persisted.file_path, CROSS_AREA_FIXTURE_SOURCE_FILE);
-        assert_eq!(persisted.dir_path, CROSS_AREA_FIXTURE_SOURCE_DIR);
+        assert_eq!(
+            as_posix(&persisted.file_path),
+            CROSS_AREA_FIXTURE_SOURCE_FILE
+        );
+        assert_eq!(
+            as_posix(&persisted.dir_path),
+            CROSS_AREA_FIXTURE_SOURCE_DIR
+        );
 
         let cached = get_discovered_skills_impl(&pool, &central_dir)
             .await
@@ -3128,7 +3141,7 @@ mod tests {
         assert_eq!(cached_vault.project_name, CROSS_AREA_FIXTURE_VAULT_NAME);
         assert_eq!(cached_vault.skills[0].id, CROSS_AREA_FIXTURE_SKILL_ID);
         assert_eq!(
-            cached_vault.skills[0].file_path,
+            as_posix(&cached_vault.skills[0].file_path),
             CROSS_AREA_FIXTURE_SOURCE_FILE
         );
         assert!(!cached_vault.skills[0].is_already_central);
@@ -3158,8 +3171,8 @@ mod tests {
                 .expect("platform install row should be recorded for the same fixture skill");
         assert_eq!(platform_install.link_type, "symlink");
         assert_eq!(
-            platform_install.symlink_target.as_deref(),
-            Some(CROSS_AREA_FIXTURE_SOURCE_DIR)
+            platform_install.symlink_target.as_deref().map(as_posix),
+            Some(CROSS_AREA_FIXTURE_SOURCE_DIR.to_string())
         );
 
         let copy_result = import_discovered_skill_to_platform_from_pool(
@@ -3186,7 +3199,10 @@ mod tests {
             .find(|installation| installation.agent_id == "cursor")
             .expect("copy install row should be recorded for the same fixture skill");
         assert_eq!(copy_install.link_type, "copy");
-        assert_eq!(copy_install.installed_path, CROSS_AREA_FIXTURE_COPY_TARGET);
+        assert_eq!(
+            as_posix(&copy_install.installed_path),
+            CROSS_AREA_FIXTURE_COPY_TARGET
+        );
         assert!(
             db::get_discovered_skill_by_id(&pool, &fixture_skill.id)
                 .await
@@ -4721,8 +4737,7 @@ mod tests {
             OBSIDIAN_PLATFORM_ID
         );
         assert!(
-            third.projects[0].skills[0]
-                .dir_path
+            as_posix(&third.projects[0].skills[0].dir_path)
                 .contains(".agents/skills/changing-skill"),
             "after marker removal the remaining .agents/skills directory is ordinary Discover data"
         );

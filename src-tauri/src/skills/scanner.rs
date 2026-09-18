@@ -960,8 +960,16 @@ async fn scan_all_skills_inner(state: &SkillsAppState) -> Result<ScanResult, Str
 mod tests {
     use super::*;
     use std::fs;
+    // Windows 创建符号链接需要管理员权限或开发者模式，这些用例只在 unix 上有意义。
+    #[cfg(unix)]
     use std::os::unix::fs::symlink;
     use tempfile::TempDir;
+
+    /// `dir_path` / `file_path` 存的是本机原生路径（Windows 上是 `\`）。断言里统一折成正斜杠，
+    /// 只验证「路径结构」这个真实意图，不把 POSIX 分隔符误当成契约。
+    fn as_posix(value: &str) -> String {
+        value.replace('\\', "/")
+    }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -1141,6 +1149,7 @@ mod tests {
         assert!(target.is_none());
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_detect_link_type_symlink() {
         let tmp = TempDir::new().unwrap();
@@ -1161,6 +1170,7 @@ mod tests {
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_detect_link_type_symlink_is_symlink_regardless_of_is_central() {
         let tmp = TempDir::new().unwrap();
@@ -1291,6 +1301,7 @@ mod tests {
         assert!(skills[0].is_central);
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_scan_directory_detects_symlinked_skill() {
         let tmp = TempDir::new().unwrap();
@@ -1350,15 +1361,14 @@ mod tests {
 
         assert_eq!(skills.len(), 2);
         assert_eq!(skills[0].id, "apple-reminders");
-        assert!(skills[0].dir_path.contains("apple/apple-reminders"));
+        assert!(as_posix(&skills[0].dir_path).contains("apple/apple-reminders"));
         assert_eq!(skills[1].id, "weights-and-biases");
         assert!(
-            skills[1]
-                .dir_path
-                .contains("mlops/evaluation/weights-and-biases")
+            as_posix(&skills[1].dir_path).contains("mlops/evaluation/weights-and-biases")
         );
     }
 
+    #[cfg(unix)]
     #[test]
     fn test_scan_skill_root_follows_symlinked_bundle_without_looping() {
         let tmp = TempDir::new().unwrap();
@@ -1617,7 +1627,7 @@ mod tests {
             .unwrap();
         assert_eq!(skills.len(), 1);
         assert_eq!(skills[0].id, "apple-reminders");
-        assert!(skills[0].dir_path.contains("apple/apple-reminders"));
+        assert!(as_posix(&skills[0].dir_path).contains("apple/apple-reminders"));
     }
 
     #[tokio::test]
@@ -1757,8 +1767,8 @@ mod tests {
         assert_eq!(plugin_b_rows.len(), 1);
         assert_eq!(plugin_b_rows[0].source_kind, "plugin");
         assert_eq!(
-            plugin_b_rows[0].dir_path,
-            plugin_b_skill_root.join("plugin-b-skill").to_string_lossy()
+            as_posix(&plugin_b_rows[0].dir_path),
+            as_posix(&plugin_b_skill_root.join("plugin-b-skill").to_string_lossy())
         );
         assert_eq!(
             plugin_b_rows[0].source_root,
@@ -1848,8 +1858,8 @@ mod tests {
             .unwrap()
             .expect("user copy should still back the logical skill row");
         assert_eq!(
-            stored_skill.file_path,
-            user_root.join("shared-skill/SKILL.md").to_string_lossy()
+            as_posix(&stored_skill.file_path),
+            as_posix(&user_root.join("shared-skill/SKILL.md").to_string_lossy())
         );
     }
 
@@ -2034,9 +2044,7 @@ mod tests {
         assert_eq!(observations[0].source_kind, "compatibility");
         assert!(observations[0].is_read_only);
         assert!(
-            observations[0]
-                .dir_path
-                .contains("superpowers/using-superpowers")
+            as_posix(&observations[0].dir_path).contains("superpowers/using-superpowers")
         );
 
         let platform_skills = db::get_skills_for_agent(&pool, "factory-droid")
@@ -2063,13 +2071,10 @@ mod tests {
             .expect("central scan should persist the shared skill");
         assert!(skill.is_central);
         assert_eq!(
-            skill.canonical_path.as_deref(),
-            Some(
-                shared_root
-                    .join("superpowers/using-superpowers")
-                    .to_string_lossy()
-                    .as_ref()
-            )
+            skill.canonical_path.as_deref().map(as_posix),
+            Some(as_posix(
+                &shared_root.join("superpowers/using-superpowers").to_string_lossy()
+            ))
         );
     }
 

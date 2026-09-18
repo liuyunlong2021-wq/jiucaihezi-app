@@ -1,5 +1,5 @@
 use crate::commands::tools::resolve_local_binary;
-use std::env;
+use crate::skills::path_utils::resolve_home_dir;
 use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use tokio::io::AsyncReadExt;
@@ -37,14 +37,13 @@ fn find_mlx_server(model_path: &str) -> Option<PathBuf> {
             }
         }
     }
-    if let Some(home) = env::var_os("HOME") {
-        for candidate in [
-            PathBuf::from(&home).join(".jiucaihezi/local-mlx/venv/bin/mlx_lm.server"),
-            PathBuf::from(&home).join("MLX/.venv/bin/mlx_lm.server"),
-        ] {
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+    let home = resolve_home_dir();
+    for candidate in [
+        home.join(".jiucaihezi/local-mlx/venv/bin/mlx_lm.server"),
+        home.join("MLX/.venv/bin/mlx_lm.server"),
+    ] {
+        if candidate.is_file() {
+            return Some(candidate);
         }
     }
     let candidate = resolve_local_binary("mlx_lm.server");
@@ -52,10 +51,10 @@ fn find_mlx_server(model_path: &str) -> Option<PathBuf> {
 }
 
 fn resolve_default_model_path() -> Option<String> {
-    let home = env::var_os("HOME")?;
+    let home = resolve_home_dir();
     let candidates = [
-        PathBuf::from(&home).join("MLX/Qwen3.8-27B-Uncensored-MLX/6-bit"),
-        PathBuf::from(&home).join("MLX/Qwen3.8-27B-Uncensored-MLX"),
+        home.join("MLX/Qwen3.8-27B-Uncensored-MLX/6-bit"),
+        home.join("MLX/Qwen3.8-27B-Uncensored-MLX"),
     ];
     candidates
         .into_iter()

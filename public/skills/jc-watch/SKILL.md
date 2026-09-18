@@ -31,19 +31,56 @@ allowed-tools:
 
 ## 运行
 
-脚本在固定路径（技能目录在运行时是 HTTP 资源路径，拿不到文件系统路径，所以脚本必须落在本机固定位置）：
+脚本必须落在本机固定位置：技能目录在运行时是 HTTP 资源路径，拿不到文件系统路径。
+
+### 1. 探测 Python 解释器
+
+各平台的可执行名不一样，**按顺序试，用第一个能打印出版本号的**：
 
 ```bash
-python3 ~/.jiucaihezi/tools/jc-watch/jc_watch.py "<视频链接或本地路径>" [参数]
+python3 --version    # macOS / Linux 首选
+python  --version    # Windows 首选
+py -3   --version    # Windows 启动器兜底
 ```
 
-若该路径不存在，先用 `terminal` 部署一次：
+> Windows 上 `python3` 常常是**微软商店的占位符**，会打印
+> `Python was not found; run without arguments to install from the Microsoft Store`
+> 并返回退出码 **9009**。看到这个直接换下一个解释器，别在原地反复重试。
+
+### 2. 确认脚本已落地
 
 ```bash
-mkdir -p ~/.jiucaihezi/tools && ln -sfn "<应用仓库>/public/skills/jc-watch/scripts" ~/.jiucaihezi/tools/jc-watch
+<解释器> <用户目录>/.jiucaihezi/tools/jc-watch/jc_watch.py --help
 ```
 
-（找不到仓库路径时，改用 `cp` 把技能自带的 `scripts/*.py` 复制到 `~/.jiucaihezi/tools/jc-watch/`。）
+`<用户目录>` 取 `$HOME`（macOS / Linux）或 `$env:USERPROFILE`（Windows）。
+
+### 3. 未落地就部署一次
+
+把技能自带的 `scripts/*.py`（共 6 个）复制到 `~/.jiucaihezi/tools/jc-watch/`，**平铺放，不要再套一层 `scripts/`**。
+
+macOS / Linux：
+
+```bash
+mkdir -p ~/.jiucaihezi/tools/jc-watch && cp "<技能目录>/scripts/"*.py ~/.jiucaihezi/tools/jc-watch/
+```
+
+Windows（PowerShell）：
+
+```powershell
+New-Item -ItemType Directory -Force "$env:USERPROFILE\.jiucaihezi\tools\jc-watch" | Out-Null
+Copy-Item "<技能目录>\scripts\*.py" "$env:USERPROFILE\.jiucaihezi\tools\jc-watch\"
+```
+
+**不要用 `ln -s` / `mklink` 建符号链接**：Windows 创建符号链接需要管理员权限或开发者模式，普通用户机器上大概率失败，而且失败方式很难诊断。复制是唯一跨平台可靠的部署方式，这几个文件只有几十 KB。
+
+落地后的路径就是 `~/.jiucaihezi/tools/jc-watch/jc_watch.py`，**没有 `scripts/` 这一层**；而仓库里的布局是 `skills/jc-watch/scripts/`。两者不一样，排错时别混用。
+
+### 4. 跑
+
+```bash
+<解释器> ~/.jiucaihezi/tools/jc-watch/jc_watch.py "<视频链接或本地路径>" [参数]
+```
 
 ## 流程
 
@@ -71,20 +108,38 @@ mkdir -p ~/.jiucaihezi/tools && ln -sfn "<应用仓库>/public/skills/jc-watch/s
 
 ## 依赖与排错
 
-| 依赖 | 缺失时的处理 |
-|---|---|
-| `yt-dlp` | 只能处理本地文件。提示用户 `brew install yt-dlp` |
-| `ffmpeg` / `ffprobe` | 无法抽帧。提示用户 `brew install ffmpeg` |
-| `whisper-cli` + ggml 模型 | 无字幕视频拿不到台词，只能靠画面。提示用户 `brew install whisper-cpp`，模型见下 |
+| 依赖 | 缺了会怎样 | 安装 |
+|---|---|---|
+| `ffmpeg` / `ffprobe` | 抽不了帧，整个技能不可用 | macOS `brew install ffmpeg` · Windows `winget install Gyan.FFmpeg`（或 `choco install ffmpeg`）· Linux `apt install ffmpeg` |
+| `yt-dlp` | 只能处理本地文件，链接下不了 | macOS `brew install yt-dlp` · Windows `winget install yt-dlp.yt-dlp` · Linux `pipx install yt-dlp` |
+| `whisper-cli` + ggml 模型 | 拿不到台词，报告 `Transcript` 段为空，只能靠画面 | 见下 |
 
-whisper 模型查找顺序：`--whisper-model` → `$JC_WATCH_WHISPER_MODEL` → `$WHISPER_MODEL` → `~/.cache/whisper.cpp/` → `~/.jiucaihezi/tools/whisper-models/`。没有多语言模型时提示：
+### whisper 模型发现顺序
+
+桌面端应用和本脚本**共用同一份约定**，所以放一个地方两边都能用。按顺序找：
+
+1. `--whisper-model <路径>`
+2. 环境变量 `$JC_WATCH_WHISPER_MODEL`
+3. 环境变量 `$WHISPER_MODEL`
+4. **`~/.jiucaihezi/tools/whisper-models/`** ← 推荐用户放这里
+5. `~/.cache/whisper.cpp/`
+6. `~/.jiucaihezi/models/whisper/`
+7. macOS brew：`/opt/homebrew/share/whisper.cpp/`、`/usr/local/share/whisper.cpp/`
+
+模型必须是 ggml 格式，**多语言版优先**（`.en` 版识别不了中文）。`ggml-base.bin` 约 148 MB，够起步：
 
 ```bash
-mkdir -p ~/.cache/whisper.cpp && curl -L -o ~/.cache/whisper.cpp/ggml-base.bin \
+mkdir -p ~/.jiucaihezi/tools/whisper-models && curl -L -o ~/.jiucaihezi/tools/whisper-models/ggml-base.bin \
   https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin
 ```
 
+用户**已经自己下载过模型**时，先按上面的顺序找一遍，用 `--whisper-model` 指过去即可，**不要复制、移动或重复下载用户的文件**。
+
 注意：`for-tests-ggml-*.bin` 是 whisper.cpp 的 CI 空壳模型，转录结果为空，不是可用模型。
+
+### 拿不到转录时必须如实说明
+
+报告里会写 `Transcript: none available`。此时回答要明确声明「基于画面、没有语音信息」，**绝不能凭画面猜台词**。画面里出现字幕另算——那是画面内容，可以读。
 
 ## 取舍
 

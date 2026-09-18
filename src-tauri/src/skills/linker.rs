@@ -86,6 +86,23 @@ pub fn create_symlink(_target: &Path, _link: &Path) -> Result<(), String> {
     Err("Symlink creation is only supported on Unix systems".to_string())
 }
 
+/// 删除符号链接本身（不触碰它指向的目标）。
+///
+/// **删除必须与创建对称地处理目录/文件差异**：`create_symlink` 在 Windows 上走
+/// `symlink_dir`（建出来的是**目录链接**），而 `remove_file`（DeleteFileW）对目录链接会返回
+/// `ERROR_ACCESS_DENIED`（os error 5）——目录链接只能用 `remove_dir`（RemoveDirectoryW）删。
+/// Unix 的 `unlink` 对两种链接都有效，所以这个差异只在 Windows 上暴露。
+pub fn remove_symlink(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(file_error) => match std::fs::remove_dir(path) {
+            Ok(()) => Ok(()),
+            // 两种都失败：报前者，「本来就不是链接 / 权限不足」时它更有说明力。
+            Err(_) => Err(file_error),
+        },
+    }
+}
+
 pub fn symlink_target_path(from_dir: &Path, to_path: &Path) -> PathBuf {
     #[cfg(windows)]
     {
@@ -295,7 +312,7 @@ pub async fn install_skill_to_agent_impl(
     match std::fs::symlink_metadata(&symlink_path) {
         Ok(meta) if meta.file_type().is_symlink() => {
             // Remove stale symlink so we can replace it.
-            std::fs::remove_file(&symlink_path)
+            remove_symlink(&symlink_path)
                 .map_err(|e| format!("Failed to remove existing symlink: {}", e))?;
         }
         Ok(meta) if meta.is_dir() => {
@@ -408,7 +425,7 @@ pub async fn install_skill_to_agent_copy_impl(
     match std::fs::symlink_metadata(&target_path) {
         Ok(meta) if meta.file_type().is_symlink() => {
             // Remove stale symlink so we can replace it with a real copy.
-            std::fs::remove_file(&target_path)
+            remove_symlink(&target_path)
                 .map_err(|e| format!("Failed to remove existing symlink: {}", e))?;
         }
         Ok(meta) if meta.is_dir() => {
@@ -478,7 +495,7 @@ pub async fn uninstall_skill_from_agent_impl(
     match std::fs::symlink_metadata(&install_path) {
         Ok(meta) if meta.file_type().is_symlink() => {
             // Always safe to remove symlinks.
-            std::fs::remove_file(&install_path)
+            remove_symlink(&install_path)
                 .map_err(|e| format!("Failed to remove symlink: {}", e))?;
         }
         Ok(meta) if meta.is_dir() => {
@@ -581,6 +598,31 @@ mod tests {
     use sqlx::SqlitePool;
     use std::fs;
     use tempfile::TempDir;
+
+    /// 路径字符串断言统一折成正斜杠：Windows 上原生分隔符是 `\`，
+    /// 只验证「路径结构」这个真实意图，不把 POSIX 分隔符误当成契约。
+    fn as_posix(value: &str) -> String {
+        value.replace('\\', "/")
+    }
+
+    /// 回归：Windows 上 `remove_file`（DeleteFileW）删不掉**指向目录**的符号链接，会返回
+    /// `ERROR_ACCESS_DENIED`（os error 5）；而 `create_symlink` 在 Windows 上建的恰恰是目录
+    /// 链接（`symlink_dir`）。删除必须与创建对称，否则 Windows 上卸载/重装技能必定失败。
+    #[test]
+    fn remove_symlink_deletes_a_directory_link_without_touching_the_target() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("target");
+        fs::create_dir_all(target.join("nested")).unwrap();
+        fs::write(target.join("SKILL.md"), "正文").unwrap();
+        let link = tmp.path().join("link");
+        create_symlink(&target, &link).expect("create dir symlink");
+        assert!(fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+
+        remove_symlink(&link).expect("remove dir symlink");
+
+        assert!(fs::symlink_metadata(&link).is_err(), "链接应已被删除");
+        assert!(target.join("SKILL.md").is_file(), "目标目录必须原样保留");
+    }
 
     // ── Test helpers ──────────────────────────────────────────────────────────
 
@@ -839,9 +881,7 @@ mod tests {
         );
         let link_target = fs::read_link(&symlink_path).unwrap();
         assert!(
-            link_target
-                .to_string_lossy()
-                .contains("superpowers/using-superpowers"),
+            as_posix(&link_target.to_string_lossy()).contains("superpowers/using-superpowers"),
             "symlink should point at nested canonical path, got {:?}",
             link_target
         );

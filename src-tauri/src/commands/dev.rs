@@ -142,6 +142,28 @@ pub fn display_external(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// 把路径折成与 `std::fs::canonicalize` 同形态，供 `starts_with` 比较。
+///
+/// Windows 上 `canonicalize` 返回的是 `\\?\C:\...` 逐字前缀，而未规范化过的路径是
+/// `C:\...`；两者按组件比较永不相等，会让「目标不能位于来源内部」这类防线**静默失效**
+/// ——外部复制时把目录复制进自己的子目录不再被拦截，`copy_dir_all` 随即无限递归爆栈。
+fn normalized_for_compare(path: &Path) -> PathBuf {
+    if !path.is_absolute() {
+        return path.to_path_buf();
+    }
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return canonical;
+    }
+    // 目标往往还不存在：折成「已存在祖先的规范形式 + 余下后缀」再比较。
+    for ancestor in path.ancestors().skip(1) {
+        if let Ok(canonical) = std::fs::canonicalize(ancestor) {
+            let suffix = path.strip_prefix(ancestor).unwrap_or(Path::new(""));
+            return canonical.join(suffix);
+        }
+    }
+    path.to_path_buf()
+}
+
 /// 项目外复制文件或目录（用户已给出两端路径）。目标已存在时拒绝，避免静默覆盖。
 #[tauri::command]
 pub fn dev_copy_external(input: DevExternalMoveInput) -> Result<String, String> {
@@ -150,7 +172,9 @@ pub fn dev_copy_external(input: DevExternalMoveInput) -> Result<String, String> 
     if !destination.is_absolute() {
         return Err("外部路径必须是绝对路径".into());
     }
-    if destination.starts_with(&source) {
+    if destination.starts_with(&source)
+        || normalized_for_compare(&destination).starts_with(&normalized_for_compare(&source))
+    {
         return Err("目标不能位于来源内部".into());
     }
     if destination.exists() {
@@ -760,7 +784,7 @@ pub fn export_project_to_directory(
     if !destination_directory.is_dir() {
         return Err("导出位置必须是文件夹".into());
     }
-    if destination_directory.starts_with(root) {
+    if normalized_for_compare(destination_directory).starts_with(&normalized_for_compare(root)) {
         return Err("不能导出到项目目录或其子目录".into());
     }
     let project_name = root
@@ -796,7 +820,9 @@ pub fn export_project_paths_to_directory(
     policy: Option<&str>,
 ) -> Result<Vec<String>, String> {
     let root = std::fs::canonicalize(root).map_err(|e| format!("项目目录不可访问: {}", e))?;
-    if !destination.is_dir() || destination.starts_with(&root) {
+    if !destination.is_dir()
+        || normalized_for_compare(destination).starts_with(&normalized_for_compare(&root))
+    {
         return Err("导出位置无效".into());
     }
     let mut reserved = HashSet::new();
@@ -3184,6 +3210,9 @@ mod tests {
         assert_eq!(result.status, "missing");
     }
 
+    // Windows 文件系统会剥掉名字的首尾空格：建 ` 东周 ` 实际落盘为 `东周`，
+    // 因此“保留首尾空格”这个用例的前提在 Windows 上不成立。
+    #[cfg(not(windows))]
     #[test]
     fn trash_project_path_preserves_leading_and_trailing_spaces_in_names() {
         let project = tempfile::tempdir().unwrap();
@@ -3353,5 +3382,29 @@ mod tests {
             std::fs::read_to_string(external.path().join("单独副本.md")).unwrap(),
             "---\nname: demo\n---\n正文"
         );
+    }
+
+    /// 回归：Windows 上 `canonicalize` 返回 `\\?\C:\...` 逐字前缀。若拿未经规范化的目标路径
+    /// 去和它 `starts_with` 比较，结果恒为假 →「目标不能位于来源内部」这道防线失效 →
+    /// 复制目录到自身子目录不再被拦截，`copy_dir_all` 会一直递归到爆栈。
+    #[test]
+    fn external_copy_refuses_a_destination_inside_the_source() {
+        let external = tempfile::tempdir().unwrap();
+        let source = external.path().join("源");
+        std::fs::create_dir_all(source.join("子")).unwrap();
+        std::fs::write(source.join("SKILL.md"), "内容").unwrap();
+
+        let nested = source.join("自己/里面").to_string_lossy().to_string();
+        assert!(
+            dev_copy_external(DevExternalMoveInput {
+                source: source.to_string_lossy().to_string(),
+                destination: nested,
+            })
+            .is_err(),
+            "目标位于来源内部时必须被拒绝，否则会无限递归"
+        );
+
+        assert!(source.join("SKILL.md").is_file());
+        assert!(!source.join("自己").exists(), "被拒绝的调用不应留下任何产物");
     }
 }

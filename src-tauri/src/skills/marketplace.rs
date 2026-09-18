@@ -648,16 +648,21 @@ fn classify_reqwest_error(e: &reqwest::Error, fallback_tried: bool) -> Explanati
             "系统代理可能拦截了请求。请尝试为该域名配置直连规则或切换区域端点".to_string(),
             true,
         )
+    } else if e.is_connect() || low.contains("connect") {
+        // 连接阶段的失败要排在超时之前判定：`is_connect()` 说明「在哪失败」，
+        // `is_timeout()` 只说明「怎么失败」。连接阶段超时会同时满足两者
+        // （错误链形如 `client error (Connect) → tcp connect error → deadline has elapsed`），
+        // 若让超时先命中，Windows 上一条「连不上」的报错会被说成「请求超时」，
+        // 而「无法建立连接 + 提示切换区域端点」才是用户能照着做的动作。
+        (
+            ExplanationErrorKind::Connect,
+            "无法建立连接。请确认 URL 可从本机访问，或尝试切换区域端点".to_string(),
+            true,
+        )
     } else if e.is_timeout() || low.contains("timed out") {
         (
             ExplanationErrorKind::Timeout,
             "请求超时，可能网络不通或被防火墙拦截。可在终端 `curl -v <url>` 验证连通性".to_string(),
-            true,
-        )
-    } else if e.is_connect() || low.contains("connect") {
-        (
-            ExplanationErrorKind::Connect,
-            "无法建立连接。请确认 URL 可从本机访问，或尝试切换区域端点".to_string(),
             true,
         )
     } else if low.contains("dns") || low.contains("lookup") {

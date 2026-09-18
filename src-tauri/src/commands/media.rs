@@ -1,6 +1,7 @@
 use crate::commands::tools::{
     local_tools_python_path, resolve_app_media_binary, resolve_local_python,
 };
+use crate::skills::path_utils::resolve_home_dir;
 use crate::*;
 use base64::{Engine as _, engine::general_purpose};
 use sha2::{Digest, Sha256};
@@ -885,14 +886,15 @@ const WHISPER_MODEL_PREFERENCE: [&str; 6] = [
     "ggml-tiny.bin",
 ];
 
-fn whisper_model_dirs() -> Vec<PathBuf> {
-    let mut dirs = Vec::new();
-    if let Some(home) = env::var_os("HOME") {
-        let home = PathBuf::from(home);
-        dirs.push(home.join(".cache").join("whisper.cpp"));
-        dirs.push(home.join(".jiucaihezi").join("tools").join("whisper-models"));
-        dirs.push(home.join(".jiucaihezi").join("models").join("whisper"));
-    }
+pub(crate) fn whisper_model_dirs() -> Vec<PathBuf> {
+    // HOME 在 Windows 上通常不存在，必须回退到 USERPROFILE，
+    // 否则 ~/.jiucaihezi/tools/whisper-models/ 里的模型永远发现不了。
+    let home = resolve_home_dir();
+    let mut dirs = vec![
+        home.join(".cache").join("whisper.cpp"),
+        home.join(".jiucaihezi").join("tools").join("whisper-models"),
+        home.join(".jiucaihezi").join("models").join("whisper"),
+    ];
     dirs.push(PathBuf::from("/opt/homebrew/share/whisper.cpp"));
     dirs.push(PathBuf::from("/usr/local/share/whisper.cpp"));
     dirs

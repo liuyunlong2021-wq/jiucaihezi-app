@@ -612,7 +612,7 @@ mod tests {
         convert_markdown_for_output, find_transcript_output, is_meaningful_markdown,
         is_successful_markdown_content, map_anydoc_error, parse_document_bytes,
         resolve_whisper_model, transcript_format_flag, validate_document_project_paths,
-        validate_selected_media_path,
+        validate_selected_media_path, whisper_model_dirs,
     };
     use crate::commands::skill_material::{
         build_skill_material_command, collect_skill_material_raw_files,
@@ -699,6 +699,21 @@ mod tests {
         assert_eq!(resolve_whisper_model(Some(&explicit)), Some(model));
     }
 
+    /// 根因回归：Windows 上 `HOME` 通常不存在，只有 `USERPROFILE`。
+    /// 若 whisper 模型目录直接读 `HOME`，用户放进共享目录的模型永远发现不了。
+    #[test]
+    fn whisper_model_dirs_follow_the_shared_home_convention() {
+        let home = crate::skills::path_utils::resolve_home_dir();
+        let shared = home.join(".jiucaihezi").join("tools").join("whisper-models");
+
+        assert!(
+            whisper_model_dirs().contains(&shared),
+            "whisper 模型搜索目录必须包含 {:?}，实际为 {:?}",
+            shared,
+            whisper_model_dirs()
+        );
+    }
+
     #[test]
     fn media_process_error_sanitizer_hides_internal_tool_details() {
         let raw = "ffmpeg failed opening /Users/by3/private/demo.mp4";
@@ -756,10 +771,13 @@ mod tests {
     #[test]
     fn skill_material_command_writes_to_job_workspace() {
         let runtime_root = temp_test_dir("runtime_workspace");
+        // 用真实绝对路径：`/Users/...` 这类 POSIX 路径在 Windows 上没有盘符，
+        // `Path::is_absolute()` 返回 false，会被 validate_skill_material_source 直接拒掉。
+        let source_root = temp_test_dir("local_codebase_source");
         let input = compile_input(
             &runtime_root,
             "local_codebase",
-            "/Users/by3/Documents/project",
+            &source_root.to_string_lossy(),
         );
 
         let spec = build_skill_material_command(&input).expect("build command");

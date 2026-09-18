@@ -16,7 +16,7 @@ use tokio::time::timeout;
 use crate::skills::db::{self, Collection, DbPool, SkillForAgent};
 use crate::skills::SkillsAppState;
 
-use super::linker::uninstall_skill_from_agent_impl;
+use super::linker::{remove_symlink, uninstall_skill_from_agent_impl};
 use super::scanner::{scan_product_skills_impl, scan_skill_root, ScanDirectoryOptions};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -624,8 +624,7 @@ fn remove_central_skill_dir(target: &Path) -> Result<(), String> {
     })?;
 
     if metadata.file_type().is_symlink() {
-        std::fs::remove_file(target)
-            .map_err(|e| format!("Failed to remove central skill symlink: {}", e))
+        remove_symlink(target).map_err(|e| format!("Failed to remove central skill symlink: {}", e))
     } else if metadata.is_dir() {
         std::fs::remove_dir_all(target)
             .map_err(|e| format!("Failed to remove central skill directory: {}", e))
@@ -850,7 +849,7 @@ fn remove_central_bundle_target(target: &CentralBundleTarget) -> Result<(), Stri
     })?;
 
     if metadata.file_type().is_symlink() {
-        std::fs::remove_file(&target.delete_path)
+        remove_symlink(&target.delete_path)
             .map_err(|e| format!("Failed to remove Central bundle symlink: {}", e))
     } else if metadata.is_dir() {
         std::fs::remove_dir_all(&target.delete_path)
@@ -991,6 +990,26 @@ fn is_path_under_root(path: &Path, root: &Path) -> bool {
 fn canonicalize_existing_path(path: &Path, label: &str) -> Result<PathBuf, String> {
     path.canonicalize()
         .map_err(|e| format!("Failed to resolve {} '{}': {}", label, path.display(), e))
+}
+
+/// 把 Windows 逐字路径（`\\?\C:\...`）折回普通形式。
+///
+/// `Path::canonicalize` 在 Windows 上返回带 `\\?\` 逐字前缀的路径 —— 这对 `std::fs` 无害，
+/// 但**外部解释器不认**：Node 会把 `\\?\` 当成 UNC 前缀，进而把 `C:` 当作主机名去 `lstat`，
+/// 报 `EISDIR` 后以退出码 1 结束。后果是 Windows 上**所有技能脚本都跑不起来**。
+/// 只在把路径交给外部进程时使用，内部路径比较仍用 canonical 形式。
+fn to_plain_path(path: &Path) -> PathBuf {
+    #[cfg(windows)]
+    {
+        let raw = path.to_string_lossy();
+        if let Some(rest) = raw.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{}", rest));
+        }
+        if let Some(rest) = raw.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    path.to_path_buf()
 }
 
 fn canonical_skill_dir_from_file_path(file_path: &str) -> Option<PathBuf> {
@@ -2070,7 +2089,8 @@ async fn run_skill_script_impl(
     let started = Instant::now();
     let mut command = Command::new(program);
     command
-        .arg(&script)
+        // 交绘解释器的路径必须是普通形式：Windows 的 `\\?\` 逐字前缀会让 Node 直接崩掉。
+        .arg(to_plain_path(&script))
         .args(&input.args)
         .current_dir(&root)
         .kill_on_drop(true)
@@ -2265,6 +2285,32 @@ mod tests {
     use sqlx::SqlitePool;
     use std::{fs, path::Path};
     use tempfile::TempDir;
+
+    /// `relative_path` 由本机原生路径派生（Windows 上是 `\`）。断言里统一折成正斜杠，
+    /// 只验证「相对结构」这个真实意图，不把 POSIX 分隔符误当成契约。
+    fn as_posix(value: &str) -> String {
+        value.replace('\\', "/")
+    }
+
+    /// 回归：Windows 上 `canonicalize` 会加 `\\?\` 逐字前缀，直接交给 Node 会让它把 `C:`
+    /// 当成主机名去 `lstat`，脚本必以退出码 1 结束 —— 技能脚本在 Windows 上全废。
+    #[test]
+    fn script_paths_are_handed_to_interpreters_without_the_windows_verbatim_prefix() {
+        let plain = Path::new("/tmp/skill/scripts/echo.mjs");
+        assert_eq!(to_plain_path(plain), plain);
+
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                to_plain_path(Path::new(r"\\?\C:\skills\scripts\echo.mjs")),
+                PathBuf::from(r"C:\skills\scripts\echo.mjs")
+            );
+            assert_eq!(
+                to_plain_path(Path::new(r"\\?\UNC\server\share\scripts\echo.mjs")),
+                PathBuf::from(r"\\server\share\scripts\echo.mjs")
+            );
+        }
+    }
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePool::connect(":memory:").await.unwrap();
@@ -4107,7 +4153,13 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result.exit_code,
+            Some(0),
+            "Skill script should exit 0; stderr={:?}, stdout.len()={}",
+            result.stderr,
+            result.stdout.len()
+        );
         assert_eq!(result.stdout.trim(), "one|two");
 
         let outside_result = run_skill_script_impl(
@@ -4202,7 +4254,13 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(result.exit_code, Some(0));
+        assert_eq!(
+            result.exit_code,
+            Some(0),
+            "Skill script should exit 0; stderr={:?}, stdout.len()={}",
+            result.stderr,
+            result.stdout.len()
+        );
         assert!(result.stdout.starts_with("cleared\n"));
         assert!(result.stdout.ends_with("[output truncated at 1000000 bytes]"));
         assert!(result.stdout.len() < 1_000_100);
@@ -4251,7 +4309,7 @@ mod tests {
         assert_eq!(nodes[0].children[0].name, "guides");
         assert!(nodes[0].children[0].is_dir);
         assert_eq!(
-            nodes[0].children[0].children[0].relative_path,
+            as_posix(&nodes[0].children[0].children[0].relative_path),
             "docs/guides/tips.md"
         );
         assert_eq!(nodes[1].name, "notes.txt");
