@@ -82,13 +82,19 @@ function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask,
   }
 }
 
+/** NewAPI content 形式的结果地址；历史任务可能保存了适配器内部 ID 拼出的死链，重试时按上游任务重查修正。 */
 function isContentResultUrl(url: string): boolean {
   try {
     const pathname = new URL(url, DEFAULT_API_BASE_URL).pathname.replace(/^\/__jc_api(?=\/)/, '')
-    return /^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(pathname)
+    return /^\/v1\/videos\/[^/]+\/content$/.test(pathname)
   } catch {
     return false
   }
+}
+
+/** dev WebView（加载 localhost 页面）里 getApiBase 给出的 Vite 代理相对前缀；Rust 下载通道只认绝对地址。 */
+function toApiAbsoluteUrl(url: string): string {
+  return url.startsWith('/__jc_api/') ? `${DEFAULT_API_BASE_URL}${url.slice('/__jc_api'.length)}` : url
 }
 
 export type CreationErrorCategory =
@@ -621,7 +627,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
-    const downloadUrl = normalizeAuthenticatedVideoResultUrl(url, task)
+    // dev WebView（加载 localhost 页面）里 getApiBase 会给出 Vite 代理相对前缀 /__jc_api：
+    // 浏览器 fetch 靠它绕 CORS，但 Tauri 的 Rust 下载通道只认绝对地址，先还原。
+    const downloadUrl = isTauriRuntime()
+      ? toApiAbsoluteUrl(normalizeAuthenticatedVideoResultUrl(url, task))
+      : normalizeAuthenticatedVideoResultUrl(url, task)
     task.resultUrl = downloadUrl
     if (!isAllowedCreationResultUrl(downloadUrl, true)) throw new Error('媒体结果地址不安全，已阻止缓存')
     const canvasOwner = canvasTaskOwner(task)
@@ -1248,12 +1258,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return false
     }
 
-    // 历史任务可能保存了错误的全局 /content 地址；无需鉴权内容端点的模型重新读取原始结果。
-    if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
-      const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
-      resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, false)
-    }
-
     task.status = 'running'
     task.progress = 0
     task.progressText = '重新保存到项目...'
@@ -1262,8 +1266,29 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     task.assetStatus = 'pending'
     task.completedAt = undefined
     await persistTasksSafely('retry-media-persistence-start')
-    await completeMediaTask(task, resultUrl, 'retry-media-persistence')
-    return Boolean(task.projectPath || task.assetUri)
+
+    // 重试期间占用 activeTaskIds：卡片改为显示「保存中」，并发刷新也被挡在门外。
+    activeTaskIds.value.add(task.id)
+    try {
+      // 历史任务可能保存了错误的全局 /content 地址（含适配器内部任务 ID 拼出的死链）；
+      // 无需鉴权内容端点的模型重新读取原始结果，由 pollTask 用 NewAPI 任务 ID 重建地址。
+      if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
+        const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
+        try {
+          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, false)
+        } catch (error) {
+          // 重查失败必须回到显式失败态；否则任务会停在 running，错误又无处显示。
+          markWebMediaPersistenceFailure(task, error)
+          await persistTasksSafely('retry-media-persistence-refresh-failed')
+          return false
+        }
+      }
+
+      await completeMediaTask(task, resultUrl, 'retry-media-persistence')
+      return Boolean(task.projectPath || task.assetUri)
+    } finally {
+      activeTaskIds.value.delete(task.id)
+    }
   }
 
   // ─── 刷新结果（不重新提交）───

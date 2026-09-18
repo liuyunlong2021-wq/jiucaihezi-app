@@ -4071,7 +4071,7 @@ const canSend = computed(
                   <i :style="{ width: Math.min(100, Math.max(0, task.progress)) + '%' }" />
                 </div>
               </div>
-              <div v-if="task.status === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
+              <div v-if="task.status === 'failed' || task.assetStatus === 'failed'" class="cp-task-error">{{ task.errorMsg }}</div>
               <div v-if="task.status === 'cancelled'" class="cp-task-progress">{{ task.progressText }}</div>
               <div
                 v-if="taskPath(task) && task.status === 'success'"

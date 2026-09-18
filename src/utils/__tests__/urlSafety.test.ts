@@ -59,6 +59,10 @@ test('download and media attachment url guards reject unsafe protocols and broad
   assert.equal(isAllowedCreationResultUrl('blob:https://jiucaihezi.studio/result'), false)
   assert.equal(isAllowedCreationResultUrl('javascript:alert(1)'), false)
   assert.equal(isAllowedCreationResultUrl('file:///Users/by3/result.png'), false)
+  assert.equal(isAllowedCreationResultUrl('/__jc_api/v1/videos/task_abc123/content'), true)
+  assert.equal(isAllowedCreationResultUrl('/__jc_api/v1/videos/../content'), false)
+  assert.equal(isAllowedCreationResultUrl('/__jc_api/v1/images/generations/task_abc123'), false)
+  assert.equal(isAllowedCreationResultUrl('/v1/videos/task_abc123/content'), false)
 })
 
 test('large media data URLs are accepted only for trusted generation results', () => {

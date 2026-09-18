@@ -82,6 +82,40 @@ test('non-Omni NewAPI video polling keeps the original result extraction path', 
   }
 })
 
+test('adapter-relative video results are rebuilt with the polling task id', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({
+    status: 'completed',
+    image_url: '/v1/videos/690ff4cb-aab6-4202-bd7d-59afc55aa32d/content',
+  })
+
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL', 'video', undefined, 1, 10))
+    assert.equal(result, 'https://api.jiucaihezi.studio/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('relative task_-prefixed content results keep their own task id', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async () => Response.json({
+    status: 'completed',
+    video_url: '/v1/videos/task_own_001/content',
+  })
+
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_poll_999', 'video', undefined, 1, 10))
+    assert.equal(result, 'https://api.jiucaihezi.studio/v1/videos/task_own_001/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 
 test('media generation API rejects removed and stale model ids before execution', () => {
   for (const id of ['nano-banana', 'nano-banana-hd', 'grok-4.2-image', 'grok-4.1-image']) {

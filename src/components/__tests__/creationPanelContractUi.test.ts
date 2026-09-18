@@ -917,6 +917,10 @@ test('creation panel lets a remote successful result be saved into its project',
     source,
     /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| \(task\.resultUrl && !canPersistMediaResult\(task\)\)\)\s+"\s+@click="previewTask\(task\)"/,
   )
+  assert.match(
+    source,
+    /v-if="task\.status === 'failed' \|\| task\.assetStatus === 'failed'" class="cp-task-error"/,
+  )
 })
 
 test('successful, failed and cancelled creation tasks can prefill the panel without resubmitting', () => {

@@ -95,6 +95,16 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           }
           if (command === 'http_request') {
             const url = args.request?.url || ''
+            if (url.endsWith('/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL')) {
+              return {
+                status: 200,
+                body: JSON.stringify({
+                  status: 'completed',
+                  image_url: '/v1/videos/690ff4cb-aab6-4202-bd7d-59afc55aa32d/content',
+                }),
+                headers: { 'content-type': 'application/json' },
+              }
+            }
             if (url.endsWith('/rh/tasks/targeted-owner')) {
               return {
                 status: 200,
@@ -1408,6 +1418,148 @@ test(
     }
   },
 )
+
+test(
+  'mediaTaskStore rebuilds adapter-relative video results from the polling task id when retrying persistence',
+  { concurrency: false },
+  async () => {
+    const deadLinkUrl = 'https://api.jiucaihezi.studio/v1/videos/690ff4cb-aab6-4202-bd7d-59afc55aa32d/content'
+    const rebuiltUrl = 'https://api.jiucaihezi.studio/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL/content'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_shanhai_deadlink', type: 'video', model: '海seedance2.5',
+      modelLabel: '海Seedance 2.5', prompt: '山海视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl: deadLinkUrl,
+      upstreamTaskId: 'task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL',
+      pollUrl: '/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL',
+      pollKind: 'video',
+      assetStatus: 'remote-only',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/shanhai'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_shanhai_deadlink'), true)
+      })
+      const task = store.getTask('mtask_shanhai_deadlink')
+      assert.deepEqual(files.downloads, [rebuiltUrl])
+      assert.equal(task?.status, 'success')
+      assert.equal(task?.assetStatus, 'local')
+      assert.match(task?.assetUri || '', /^\/projects\/shanhai\/jc-media\/videos\//)
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore restores an explicit failure state when retry persistence cannot re-read the upstream result',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_shanhai_refresh_fail', type: 'video', model: '海seedance2.5',
+      modelLabel: '海Seedance 2.5', prompt: '山海视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation',
+      projectId: 'web-project-a',
+      resultUrl: '/__jc_api/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL/content',
+      upstreamTaskId: 'task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL',
+      pollUrl: '/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL',
+      pollKind: 'video',
+      assetStatus: 'failed',
+      errorMsg: '保存到项目失败：媒体结果地址不安全，已阻止缓存',
+    }]) })
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = async () => new Response('upstream down', { status: 500 })
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_shanhai_refresh_fail'), false)
+      })
+      const task = store.getTask('mtask_shanhai_refresh_fail')
+      assert.equal(task?.status, 'success')
+      assert.equal(task?.assetStatus, 'failed')
+      assert.match(task?.errorMsg || '', /保存到项目失败：HTTP 500/)
+      assert.equal(task?.progressText, '生成完成，保存到项目失败')
+    } finally {
+      globalThis.fetch = previousFetch
+      storage.restore()
+    }
+  },
+)
+
+test(
+  'mediaTaskStore resolves dev proxy result urls to the API origin before the Rust download channel',
+  { concurrency: false },
+  async () => {
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_dev_proxy_relative', type: 'video', model: '海seedance2.5',
+      modelLabel: '海Seedance 2.5', prompt: '山海视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation',
+      resultUrl: '/__jc_api/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL/content',
+      upstreamTaskId: 'task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL',
+      pollUrl: '/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL',
+      pollKind: 'video',
+      assetStatus: 'remote-only',
+      assetRetryCount: 5,
+    }]) })
+    const files = installTauriTaskFileStore()
+    // 模拟 Tauri dev：WebView 加载 localhost 页面，getApiBase 走 Vite 代理相对前缀
+    ;(globalThis as any).window.location = { href: 'http://localhost:1420/', origin: 'http://localhost:1420' }
+    const previousFetch = globalThis.fetch
+    globalThis.fetch = async () => Response.json({
+      status: 'completed',
+      image_url: '/v1/videos/690ff4cb-aab6-4202-bd7d-59afc55aa32d/content',
+    })
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/shanhai'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_dev_proxy_relative'), true)
+      })
+      const task = store.getTask('mtask_dev_proxy_relative')
+      assert.deepEqual(files.downloads, [
+        'https://api.jiucaihezi.studio/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL/content',
+      ])
+      assert.equal(task?.assetStatus, 'local')
+      assert.equal(task?.resultUrl, undefined)
+      assert.equal(task?.sourceUrl, 'https://api.jiucaihezi.studio/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL/content')
+    } finally {
+      globalThis.fetch = previousFetch
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test('retry persistence holds the task in the active set while re-reading and downloading', () => {
+  const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  const retry = source.match(/async function retryMediaPersistence\(taskId: string\): Promise<boolean> \{[\s\S]*?\n  \}/)?.[0] || ''
+
+  assert.match(retry, /activeTaskIds\.value\.add\(task\.id\)/)
+  assert.match(retry, /finally \{\s*\n?\s*activeTaskIds\.value\.delete\(task\.id\)/)
+})
 
 test(
   'mediaTaskStore leaves legacy targeted tasks without an owner unwritten',

@@ -88,10 +88,22 @@ function isAllowedMediaDataUrl(text: string, allowLarge = false): boolean {
   return /^data:(image|video|audio)\/[a-z0-9.+-]+;base64,[a-z0-9+/]+={0,2}$/i.test(text)
 }
 
+/**
+ * dev 浏览器环境 getApiBase() 返回 Vite 代理前缀 `/__jc_api`，
+ * NewAPI content 结果会以 `/__jc_api/v1/videos/{task}/content` 形态进入下载链路。
+ * 只放行这一种内部相对地址；绝对地址仍走 isSafePublicHttpUrl。
+ */
+function isAllowedDevProxyResultUrl(text: string): boolean {
+  return text.startsWith('/__jc_api/') &&
+    !text.includes('..') &&
+    /^\/__jc_api\/v1\/videos\/[A-Za-z0-9._:-]+\/content$/.test(text)
+}
+
 export function isAllowedCreationResultUrl(input: string, allowLargeDataUrl = false): boolean {
   const text = String(input || '').trim()
   if (/^data:(image|video|audio)\//i.test(text)) return isAllowedMediaDataUrl(text, allowLargeDataUrl)
   if (/^http:\/\/127\.0\.0\.1:8000\/view\?/i.test(text)) return true
+  if (isAllowedDevProxyResultUrl(text)) return true
   return isSafePublicHttpUrl(text)
 }
 

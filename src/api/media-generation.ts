@@ -690,6 +690,21 @@ function newApiVideoContentUrl(pollPath: string): string | null {
   return match ? `${getApiBase()}/v1/videos/${encodeURIComponent(match[1])}/content` : null
 }
 
+/**
+ * 适配器（如山海）完成任务时返回的相对地址用的是它自己的内部任务 ID：
+ * /v1/videos/{adapter-id}/content。NewAPI 只认自己的 task_ 任务 ID，
+ * 直接拼域名会得到 404 死链；此时改用轮询路径里的 NewAPI 任务 ID 重建地址。
+ */
+function normalizeAdapterRelativeResultUrl(url: string, pollPath: string): string {
+  if (!url.startsWith('/v1/videos/')) return url
+  const adapterContent = /^\/v1\/videos\/([^/]+)\/content$/.exec(url)
+  const taskId = /^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/.exec(pollPath)?.[1]
+  if (adapterContent && taskId && !adapterContent[1].startsWith('task_')) {
+    return `${getApiBase()}/v1/videos/${encodeURIComponent(taskId)}/content`
+  }
+  return `${getApiBase()}${url}`
+}
+
 function isOmniModel(model: unknown): boolean {
   const value = String(model || '').trim().toLowerCase()
   return value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v')
@@ -760,7 +775,7 @@ export async function pollTask(
       if (newApiVideoUrl) return newApiVideoUrl
       const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
       if (url) {
-        return url.startsWith('/v1/videos/') ? `${getApiBase()}${url}` : url
+        return normalizeAdapterRelativeResultUrl(url, pollPath)
       }
       const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
       if (publicVideoTask) {
