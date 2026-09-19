@@ -2821,7 +2821,7 @@ onBeforeUnmount(() => {
       ref="storyInput"
       class="pft-native-input"
       type="file"
-      accept=".md,.markdown,.txt,.pdf,.doc,.docx,.rtf,.odt,.html,.htm,.csv,.json,.xml,.srt,.vtt,.ppt,.pptx,.xls,.xlsx,.ods,.odp,.epub"
+      accept=".md,.markdown,.txt,.pdf,.doc,.docx,.docm,.rtf,.odt,.html,.htm,.csv,.json,.xml,.srt,.vtt,.ppt,.pptx,.pptm,.pps,.ppsx,.ppsm,.pot,.xls,.xlsx,.xlsm,.xlsb,.ods,.odp,.epub"
       @change="onStoryInputChange"
     />
     <div v-if="!hasProject" class="pft-empty">

@@ -76,7 +76,7 @@ async def convert_document(
     await validate_api_key(authorization)
     filename = file.filename or 'document'
     if not is_supported_filename(filename):
-        raise HTTPException(status_code=415, detail='仅支持 Word、PDF、Excel、PPT、OpenDocument 和 RTF 文档。')
+        raise HTTPException(status_code=415, detail='仅支持 Word、PDF、PowerPoint、Excel、OpenDocument、RTF 和 EPUB 文档。')
 
     directory = Path(tempfile.mkdtemp(prefix='jc-document-'))
     try:

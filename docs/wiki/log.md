@@ -1,5 +1,14 @@
 # Wiki 操作日志
 
+## [2026-09-19] 修复 | 文档转换白名单落后于引擎，.epub 能选不能传
+
+- **触发**：用户问「所有文件不是都能转 md 吗、加 EPUB 难不高」。核查后发现不是「支不支持」，而是**同一件事在三处各写了一份格式清单，且都落后于引擎能力**。
+- **根因**：云端 `document-converter` 的解析内核就是 AnyDoc，但 `SUPPORTED_EXTENSIONS` 只列了 11 个扩展名，漏了引擎 `Format::from_extension` 本就支持的 9 个；`ProjectFileTree` 的文件选择器 `accept` 里**一直写着 `.epub`**，所以用户选得到、传上去被 415 拒（UI 承诺与后端能力矛盾）。前端 `useFileUpload.ts` 的 `OFFICE_EXT` 漏得更多，`.epub` 在聊天附件链路直接落到 `unknown` 被拒。
+- **关键事实**：Desktop 侧不走白名单（`parse_document_markdown` 用 `Format::from_bytes` 内容识别，扩展名只当兜底），所以 **.epub 在已安装的桌面版当时就能转**；卡住的只有 Web / 移动端。
+- **实施**：白名单按 anydoc 0.2.3 逐条对齐（`doc/docx/docm`、`ppt/pps/pot/pptx/pptm/ppsx/ppsm`、`xls/xlsx/xlsm/xlsb`、`odt/ods/odp`、`rtf/pdf/epub`，共 20 个）；**不含 `.csv`**——它已由前端文本链路直通处理，再列入会多出一条互相竞争的转换路径；415 文案不再列举具体格式；`useFileUpload.OFFICE_EXT` 与文件选择器 `accept` 同步。三处各加一条回归断言，云端加「白名单 == 引擎能力」的集合相等测试。
+- **实测**（真 EPUB `召唤万岁(霞飞双颊).epub`，5.4 MB）：引擎侧 0.39s 转出 542 万字、`## 第一章：【穿越】` 层级完整；本地起服务 POST 真文件得到 **HTTP 200 / 0.52s / 5,423,555 字符**；用真实拆分器 + 标记词「章」拆出 **1492 章**，短名干净（`0001_穿越.md`）。另发现：这类 EPUB 走自动识别会被主动拒绕（`## 第一章` 同时命中 markdown 标题与章节标题两套规则），需显式指定标记词——与知识资料规则的既有纪律一致。
+- **验证**：focused 全量 `1409/1409`、`vue-tsc -b` 通过、`document-converter` Python `7/7`。**未做**：真实 App 内导入（待用户验收）、云端服务重新部署、新手指南未改（线上未部署前不宣称）。
+
 ## [2026-09-19] 变更 | 新增知识资料沉淀规则，修原文节点 index 重复标题
 
 - **触发**：用户看到 `virgiliojr94/book-to-skill`（文档 → skill 转换器），问怎么适配我们的 Wiki。核查后确定它补的是我们没做的那一半——非叙事物料：五 Skill 退役后 `wiki-memory` 只剩故事型规则，用户丢一本技术书进来只能「沿用两阶段原则」，而两阶段的语义字段（角色/场景/道具/关系）与资产目录都是为故事设计的。

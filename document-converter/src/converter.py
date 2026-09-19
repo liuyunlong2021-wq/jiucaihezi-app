@@ -3,9 +3,21 @@ from pathlib import Path
 
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_CHARS = 20_000_000
+# 与 Desktop 端内嵌的同一版本 AnyDoc 保持同一份能力，条目来自 anydoc 0.2.3 的
+# `Format::from_extension`。白名单落后于引擎时会出现“文件选择器让选、服务端 415 拒”
+# 的矛盾（.epub 就这样漏了很久），所以这里逐条对齐引擎，升 anydoc 时同步复查。
+# 不含 .csv：它已由前端文本链路直通处理，再列入这里会多出一条互相竞争的转换路径。
 SUPPORTED_EXTENSIONS = {
-    '.doc', '.docx', '.pdf', '.xls', '.xlsx', '.ppt', '.pptx',
-    '.odt', '.ods', '.odp', '.rtf',
+    # Word
+    '.doc', '.docx', '.docm',
+    # PowerPoint
+    '.ppt', '.pps', '.pot', '.pptx', '.pptm', '.ppsx', '.ppsm',
+    # Excel
+    '.xls', '.xlsx', '.xlsm', '.xlsb',
+    # OpenDocument
+    '.odt', '.ods', '.odp',
+    # 其他
+    '.rtf', '.pdf', '.epub',
 }
 
 

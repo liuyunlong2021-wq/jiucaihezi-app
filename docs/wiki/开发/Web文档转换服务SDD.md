@@ -6,7 +6,9 @@
 
 ## 目标
 
-让 Web 创模式能上传 `DOC/DOCX/PDF/XLS/XLSX/PPT/PPTX/ODT/ODS/ODP/RTF`。文件先转换为 Markdown，再沿用现有 `files: [{ name, content }]` 聊天链路送给模型。本页记录的是现有云端 MarkItDown 合同；Desktop 文档转换已由 2026-08-22 的 AnyDoc TDD 接管，云端归一暂缓。
+让 Web 创模式能上传 `DOC/DOCX/DOCM/PDF/XLS/XLSX/XLSM/XLSB/PPT/PPTX/PPTM/PPS/PPSX/PPSM/POT/ODT/ODS/ODP/RTF/EPUB`。文件先转换为 Markdown，再沿用现有 `files: [{ name, content }]` 聊天链路送给模型。本页记录的是现有云端 MarkItDown 合同；Desktop 文档转换已由 2026-08-22 的 AnyDoc TDD 接管，云端归一暂缓。
+
+> 2026-09-19：云端的解析内核已与 Desktop 同为 AnyDoc `0.2.3`，但服务端白名单只列了 11 个扩展名，漏掉引擎本来就能转的 9 个——`.epub` 尤其严重，因为文件选择器 `accept` 里一直写着 `.epub`：用户选得到、上传后被 415 拒。白名单现按 anydoc 的 `Format::from_extension` 逐条对齐（不含 `.csv`，它由前端文本链路直通处理，再列入会多出一条互相竞争的转换路径），并加了「白名单 == 引擎能力」的测试。消费者可见的新手指南暂未改：云端服务需先重新部署，Desktop 侧则因为走内容识别、不经白名单，`.epub` 当时就已经能转。
 
 ## 不做什么
 

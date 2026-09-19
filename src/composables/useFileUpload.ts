@@ -61,7 +61,9 @@ export interface UploadOptions {
 
 // ─── 文件类型检测 ───
 
-const OFFICE_EXT = /\.(docx?|xlsx?|pptx?|odt|ods|odp|rtf)$/i
+// 与 document-converter 的服务端白名单同源（anydoc 0.2.3 的能力）：
+// 两处不一致时会出现“UI 让选、服务端 415 拒”。.csv 不在这里，它走文本直通。
+const OFFICE_EXT = /\.(doc|docx|docm|xls|xlsx|xlsm|xlsb|ppt|pptx|pptm|pps|ppsx|ppsm|pot|odt|ods|odp|rtf|epub)$/i
 const PDF_EXT = /\.pdf$/i
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp']
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff?)$/i

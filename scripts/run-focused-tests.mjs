@@ -172,6 +172,7 @@ const externalNodeTests = [
 const legacyOrSupersededTests = [
   'scripts/rh-deploy/__tests__/config.test.mjs',
   'src/composables/__tests__/useCreationFileFiltering.test.ts',
+  'src/composables/__tests__/useFileUpload.test.ts',
   'src/runtime/connection/__tests__/architectureGuards.test.ts',
   'src/runtime/connection/__tests__/runtimeConnection.test.ts',
   'src/runtime/connection/__tests__/skillApplicability.test.ts',

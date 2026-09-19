@@ -3,6 +3,7 @@ from pathlib import Path
 
 from src.converter import (
     MAX_FILE_BYTES,
+    SUPPORTED_EXTENSIONS,
     clamp_max_chars,
     is_supported_filename,
     public_error_message,
@@ -16,6 +17,27 @@ class ConverterContractTest(unittest.TestCase):
         self.assertTrue(is_supported_filename('sheet.xlsx'))
         self.assertFalse(is_supported_filename('archive.zip'))
         self.assertFalse(is_supported_filename('no-extension'))
+
+    def test_allowlist_matches_the_pinned_anydoc_engine(self):
+        # 逐条对齐 anydoc 0.2.3 的 `Format::from_extension`（csv 除外：由前端文本链路
+        # 直通处理）。引擎升版必须同步这份清单，否则会出现“UI 让选、服务端 415 拒”。
+        self.assertEqual(
+            SUPPORTED_EXTENSIONS,
+            {
+                '.doc', '.docx', '.docm',
+                '.ppt', '.pps', '.pot', '.pptx', '.pptm', '.ppsx', '.ppsm',
+                '.xls', '.xlsx', '.xlsm', '.xlsb',
+                '.odt', '.ods', '.odp',
+                '.rtf', '.pdf', '.epub',
+            },
+        )
+
+    def test_every_allowed_extension_is_one_the_engine_can_convert(self):
+        # 回归：.epub 曾在文件选择器里可选，却在这里被 415 拒掉。
+        for name in ('book.epub', 'BOOK.EPUB', 'deck.ppsm', 'macro.docm', 'sheet.xlsb'):
+            self.assertTrue(is_supported_filename(name), msg=name)
+        for name in ('book.mobi', 'book.azw3', 'page.html'):
+            self.assertFalse(is_supported_filename(name), msg=name)
 
     def test_clamps_client_text_limit_to_server_bounds(self):
         self.assertEqual(clamp_max_chars(0), 1)
