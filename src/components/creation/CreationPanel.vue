@@ -2587,7 +2587,9 @@ function getCanvasAccent(): string {
 
 function refreshCanvasTheme() {
   if (!app) return
-  app.renderer.config.fill = getCanvasFill()
+  // ponytail: Web 画布走 allowBackgroundColor 分支，背景是画布容器的 CSS 背景色；
+  // 只改 renderer.config.fill 不生效，必须走 app.fill 才会写回画布背景。
+  app.fill = getCanvasFill()
   Object.assign((app.editor as any)?.config || {}, {
     stroke: getCanvasAccent(),
     pointFill: getCanvasAccent(),

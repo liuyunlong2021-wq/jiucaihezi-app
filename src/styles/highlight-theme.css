@@ -5,10 +5,11 @@
  * 暗色/护眼: github-dark 风格
  */
 
-/* ── 亮色主题 (默认 / data-theme 不存在 / white / light) ── */
+/* ── 亮色主题 (默认 / data-theme 不存在 / white / light / nord) ── */
 :root,
 [data-theme="white"],
-[data-theme="light"] {
+[data-theme="light"],
+[data-theme="nord"] {
   --hl-bg: #f6f8fa;
   --hl-color: #1f2328;
   --hl-comment: #6e7781;
@@ -33,7 +34,8 @@
 }
 
 /* ── 暗色主题 ── */
-[data-theme="dark"] {
+[data-theme="dark"],
+[data-theme="dracula"] {
   --hl-bg: #161b22;
   --hl-color: #e6edf3;
   --hl-comment: #8b949e;

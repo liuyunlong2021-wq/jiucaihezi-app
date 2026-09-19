@@ -131,7 +131,9 @@ test('creation panel persists and restores complete Leafer scene snapshots', () 
 test('creation panel refreshes the live Leafer renderer when the theme changes', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.match(source, /app\.renderer\.config\.fill = getCanvasFill\(\)/)
+  // 背景色必须走 app.fill：Web 画布背景是容器 CSS 背景，只改 renderer.config.fill 不重绘
+  assert.match(source, /app\.fill = getCanvasFill\(\)/)
+  assert.doesNotMatch(source, /app\.renderer\.config\.fill = getCanvasFill\(\)/)
   assert.match(source, /app\.requestRender\(true\)/)
   assert.match(source, /attributeFilter: \['data-theme'\]/)
   assert.doesNotMatch(source, /app as any\)\.config\.fill/)

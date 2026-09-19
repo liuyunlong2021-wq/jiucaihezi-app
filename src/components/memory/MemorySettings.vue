@@ -60,11 +60,14 @@ const themeOptions = [
   { key: 'light', label: '浅色' },
   { key: 'dark', label: '黑夜' },
   { key: 'green', label: '护眼' },
+  { key: 'nord', label: '冷灰' },
+  { key: 'dracula', label: '暗紫' },
 ] as const
 const fontSizes = [
   { value: 14, label: '标准' },
   { value: 16, label: '大字' },
   { value: 18, label: '特大' },
+  { value: 30, label: '超级大' },
 ] as const
 const fontSize = ref(Number(localStorage.getItem('jcFontSize')) || 14)
 
@@ -423,6 +426,8 @@ function showSync() {
 .memory-theme-swatch.light { background: #fdf6e3; }
 .memory-theme-swatch.dark { background: #201b14; }
 .memory-theme-swatch.green { background: #c7edcc; }
+.memory-theme-swatch.nord { background: #eceff4; }
+.memory-theme-swatch.dracula { background: #282a36; }
 .memory-font-setting { display: grid; gap: 8px; }
 .memory-font-setting > strong { font-size: var(--font-base); }
 .memory-font-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }

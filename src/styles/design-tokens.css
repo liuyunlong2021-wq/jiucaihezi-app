@@ -183,3 +183,73 @@
   --jc-member-glow: #0078D4;
   --jc-member-glow-text: #005FB8;
 }
+
+/* 冷灰蓝 — 取自 daisyUI nord，色值已从 oklch 换算为 sRGB hex */
+:root[data-theme="nord"], [data-theme="nord"] {
+  color-scheme: light;
+
+  --jc-surface: #ECEFF4;
+  --jc-surface-container-lowest: #ECEFF4;
+  --jc-surface-container-low: #E9ECF2;
+  --jc-surface-container: #E5E9F0;
+  --jc-surface-container-high: #E0E5ED;
+  --jc-surface-container-highest: #D8DEE9;
+  --jc-surface-dim: #E5E9F0;
+
+  --jc-primary: #5E81AC;
+  --jc-primary-container: #4D6A8D;
+  --jc-on-primary: #03060B;
+
+  --jc-secondary-container: #D8E0EA;
+  --jc-on-secondary-container: #4B6281;
+
+  --jc-on-surface: #2E3440;
+  --jc-on-surface-variant: #6B7079;
+  --jc-outline-variant: rgba(44, 50, 67, 0.18);
+
+  --jc-error: #BF616A;
+  --jc-success: #A3BE8D;
+  --jc-warning: #EBCB8B;
+
+  --jc-shadow-color: rgba(49, 49, 66, 0.12);
+
+  /* Account / Membership area */
+  --jc-account-card-bg: rgba(236, 239, 244, 0.85);
+  --jc-member-glow: #5E81AC;
+  --jc-member-glow-text: #445770;
+}
+
+/* 暗紫 — 取自 daisyUI dracula，色值已从 oklch 换算为 sRGB hex */
+:root[data-theme="dracula"], [data-theme="dracula"] {
+  color-scheme: dark;
+
+  --jc-surface: #282A36;
+  --jc-surface-container-lowest: #282A36;
+  --jc-surface-container-low: #262833;
+  --jc-surface-container: #232530;
+  --jc-surface-container-high: #22232E;
+  --jc-surface-container-highest: #1F202A;
+  --jc-surface-dim: #232530;
+
+  --jc-primary: #FF79C6;
+  --jc-primary-container: #D163A2;
+  --jc-on-primary: #16050E;
+
+  --jc-secondary-container: #46354A;
+  --jc-on-secondary-container: #FCACD8;
+
+  --jc-on-surface: #F8F8F3;
+  --jc-on-surface-variant: #B5B6B6;
+  --jc-outline-variant: rgba(250, 250, 245, 0.2);
+
+  --jc-error: #FF5555;
+  --jc-success: #51FA7B;
+  --jc-warning: #F1FA8C;
+
+  --jc-shadow-color: rgba(0, 0, 0, 0.4);
+
+  /* Account / Membership area */
+  --jc-account-card-bg: rgba(255, 255, 255, 0.06);
+  --jc-member-glow: #FF79C6;
+  --jc-member-glow-text: #FBBFDF;
+}

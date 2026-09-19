@@ -900,11 +900,11 @@ test('memory Skill install card writes only after explicit approval', () => {
   assert.match(card, /继续修改/)
 })
 
-test('memory settings expose all four shared themes and initialize Web to green once', () => {
+test('memory settings expose all shared themes and initialize Web to green once', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
   const theme = source('src/composables/useTheme.ts')
 
-  for (const key of ['white', 'light', 'dark', 'green']) {
+  for (const key of ['white', 'light', 'dark', 'green', 'nord', 'dracula']) {
     assert.match(settings, new RegExp(`key: '${key}'`))
   }
   assert.match(settings, /theme = option\.key/)
@@ -1022,12 +1022,12 @@ test('single-product UI contains no dormant Studio mode switches or editor sessi
   assert.equal(existsSync(join(process.cwd(), 'src/types/mention.ts')), false)
 })
 
-test('memory settings provide and persist three accessible font sizes', () => {
+test('memory settings provide and persist accessible font sizes', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const main = source('src/main.ts')
 
-  for (const size of [14, 16, 18]) assert.match(settings, new RegExp(`value: ${size}`))
+  for (const size of [14, 16, 18, 30]) assert.match(settings, new RegExp(`value: ${size}`))
   assert.match(settings, /localStorage\.setItem\('jcFontSize'/)
   assert.match(settings, /style\.setProperty\('--font-base'/)
   assert.match(workbench, /font-size: var\(--font-base\)/)

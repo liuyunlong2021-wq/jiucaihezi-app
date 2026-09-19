@@ -35,14 +35,15 @@ try {
     localStorage.setItem('jcTheme', 'green')
     localStorage.setItem('jcMemoryThemeInitialized', '1')
   }
-  if (theme === 'dark' || theme === 'green') {
+  // 只有 light 用 :root 默认值；其余主题（含 white）都要提前写 data-theme，否则启动会闪一下默认配色
+  if (theme && theme !== 'light') {
     document.documentElement.setAttribute('data-theme', theme)
   }
 } catch (_) {}
 
 try {
   const fontSize = Number(localStorage.getItem('jcFontSize'))
-  if (fontSize === 16 || fontSize === 18) {
+  if (Number.isFinite(fontSize) && fontSize > 0) {
     document.documentElement.style.setProperty('--font-base', `${fontSize}px`)
   }
 } catch (_) {}
