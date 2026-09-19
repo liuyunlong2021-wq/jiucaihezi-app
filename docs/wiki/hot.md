@@ -1,5 +1,20 @@
 # 热缓存
 
+## [2026-09-19] 通用 Wiki 骨架新增创作规划层，jc-novel 对齐现行合同
+
+- `wiki/创作/` 成为故事类项目的**创作规划层**：一个项目一部作品一个，与 `改编方案/` 同级，放世界设定、大纲、逐章/逐集规划、伏笔、市场分析与包装文案。**通用合同只定三件事**：只在第一次产生真实内容时创建；必须有 `创作/index.md` 并登记本目录页面；页面文件名由创建它的 Skill 按项目类型定（小说写「章纲」、短剧写「集纲」是同类不同名），读取时以 index 登记的真实文件名为准，**不得凭名称推测**。规划层是模型产出，不走两阶段沉淀、不生成原文节点、不需要内容哈希。
+- 长篇小说 Skill `jc-novel` 原先停在两代前的合同上：它引用的 `jc-jian-wiki` / `jc-raw-wiki` / `jiyiyasuo` / `yizhixing` 在当前环境**一个都加载不到**（五个 Wiki Skill 已退役，只剩 `wiki-memory`）；自建骨架 `wiki/{剧本,角色,世界,剧情,文案包装}` 与现行 `原始材料/资产` 分叉，角色会落成两份；它依赖的 `CLAUDE.md` / `hot.md` 自 2026-08-05 起已不再注入，写了没人读。
+- `jc-novel` 改动：收窄 `description`/触发词（去掉「创作」「章节」「角色设计」这类会抢别的 Skill 活儿的词）、补启动闸门与 `allowed-tools`、新增 `references/落位与提交.md`（**不写死路径，按运行时注入的 index 定位**）、新增 `references/engines/index.md` 路由表（100 个引擎全覆盖，原先 61 个无任何地方指路）、删除自建库脚本 `scripts/scaffold_wiki.py`（第二真源，已备份 `/tmp/jc-novel-scripts-backup`）。
+- 正文的归属也改了：**原创正文不再由模型手写记忆**，而是追加进 `原始材料/<作品>/原文.md`，重跑一次「故事拆分」（幂等，老节点跳过）后由原生节点分析从原文派生角色/场景/道具/关系。角色页按 `文件名 + title + aliases` 被原生链路匹配，匹配上只加双链、不重写，所以 Skill 先写的设计卡不会被冲掉。
+- 验证：本轮只改 Markdown（`public/skills/wiki-memory/references/故事资料沉淀规则.md` + `~/.agents/skills/jc-novel/`），**无产品代码变更**；引擎路由表已用脚本核对 100/100 覆盖。`jc-novel` 的真实模型跑批验收待执行。
+
+## [2026-09-19] 故事拆分支持自定义标记词，补 场/SC 白名单
+
+- 剧本编号写法穷举不完：实测「第一场 雨夜」与「SC01 雨夜」两份稿子都直接报「没有识别到故事边界」（`CHAPTER_UNIT` 没有「场」、`ENGLISH_CHAPTER` 认不出 `SC`），而 `EP01`、`第一集` 能认。
+- 用户可填一个**标记词**由代码生成规则：`normalizeStoryMarker` 收口（`SC01`/`第1场` 这种整段抄标题的写法也认），`probeStoryMarker` 前缀优先、前缀不足 2 处退回后缀式；短名剥离复用同一条规则；`marker` 进 plan `optionKey`。
+- 白名单补 `场|場`，新增 `ABBREV_CHAPTER(sc|ep)`：缩写编号**只认数字**，认罗马数字会让「Sci-fi 的设定」被当成 SC+罗马数字 I 命中。
+- 验证：`storyImport` 17/17（含两条误判陷阱）、`projectFileTreeCanvas` 35/35、与 `storyAnalysis`/`adaptationWikiScaffold` 合计 64/64、`vue-tsc -b` 通过；真实 UI 人工验收待执行。
+
 ## [2026-09-17] 创作面板隐藏七条视频线路
 
 - 面板隐藏小易 MiniMax H3 三条、Kling Video V3、Grok Imagine Video 1.5、Seedance 2.5，以及 RunningHub Veo 3.1 Fast；同名 ZX Veo Fast、Dola/山海等其他线路不受影响。

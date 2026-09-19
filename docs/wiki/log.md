@@ -1,5 +1,13 @@
 # Wiki 操作日志
 
+## [2026-09-19] 变更 | 通用 Wiki 骨架新增创作规划层，jc-novel 对齐现行合同
+
+- **触发**：用户要求探讨 `jc-novel`（长篇小说 Skill）与 `wiki-memory`、现行 Wiki 架构的合作关系。核查后发现 jc-novel 停在两代前的合同上：① 它写的「配合 jc-jian-wiki（巡检）和 jc-raw-wiki（填充）」和更早的 `jiyiyasuo`/`yizhixing`，在当前环境**一个都加载不到**（`~/.agents/skills` 里五个 Wiki Skill 全部不存在）；② 自建骨架 `wiki/{剧本,角色,世界,剧情,文案包装}` 与现行 `原始材料/资产` 分叉，角色会落成两份（`legacyCharacterDirectoryConflict` 只拦 `资产/人物/`，拦不住 `wiki/角色/`）；③ 它依赖的 `CLAUDE.md`/`hot.md` 自 2026-08-05 起已不再注入，且被 `creativeMemory.test.ts` 的断言锁死；④ 它建的 `index.md` 没有双链也没有子目录 index，而运行时只注入深度 ≤ 2 的 `index.md`，等于预读上下文是空的。
+- **分工定案**：判据是「改它会同时影响两个以上 Skill 的东西放 `wiki-memory`，只影响本 Skill 的放自己的 references」。**通用层**（目录名、存在条件、index 合同、写入顺序）加一层 `创作/`：一个项目一部作品一个，放世界设定、大纲、逐章/逐集规划、伏笔、包装文案；Runtime 不预设固定文件名，小说写「章纲」、短剧写「集纲」是同类不同名，读取以 `创作/index.md` 登记的真实文件名为准。规划层是模型产出，不走两阶段沉淀。**Skill 层**保留各自的方法论与模板。
+- **jc-novel 侧**：收窄 `description` 与触发词（去掉「创作」「章节」「角色设计」等会抢别的 Skill 活儿的泛词）、补启动闸门与 `allowed-tools`（`file` + 两个原生分析工具）、新增 `references/落位与提交.md`（落位表 + 角色页模板 + 禁止事项，**路径不写死，一律按运行时索引定位**）、新增 `references/engines/index.md` 路由表（100 个引擎全覆盖，此前 61 个无任何地方指路）、正文改为追加进 `原始材料/<作品>/原文.md` 后重跑幂等拆分、删除自建库脚本 `scripts/scaffold_wiki.py`（已备份 `/tmp/jc-novel-scripts-backup`）。
+- **关键依据**：原生节点分析按 **文件名 + `title` + `aliases`** 匹配已有资产页，匹配上只往分析页加双链、**不重写实体页**（`newAssets` 只走 `createText`），所以 Skill 先写的角色设计卡不会被冲掉，来源事实也不会在资产页里双写。
+- **验证**：本轮只改 Markdown（`public/skills/wiki-memory/references/故事资料沉淀规则.md`、`~/.agents/skills/jc-novel/**`），**无产品代码变更**，故未跑 focused；引擎路由表用脚本核对 `100/100` 覆盖；`jc-novel` 的真实模型跑批验收未执行。
+
 ## [2026-09-19] 变更 | 故事拆分支持用户自定义标记词
 
 - **触发**：用户提出剧本编号写法穷举不完，想改成「用户输入什么就拆什么」。实测确认缺口真实：`第一场 雨夜` 与 `SC01 雨夜` 两份稿子都直接报「没有识别到故事边界」（`CHAPTER_UNIT` 里没有「场」，`ENGLISH_CHAPTER` 里认不出 `SC`），而 `EP01`、`第一集` 能认。
