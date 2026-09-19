@@ -5,9 +5,12 @@ import {
   hashText,
   isStoryChapterBoundary,
   isStoryNumberedBoundary,
+  normalizeStoryMarker,
   parseStoryOrdinal,
+  probeStoryMarker,
   type MarkdownSplitPlan,
   type MarkdownSplitStrategy,
+  type StoryMarkerShape,
 } from './markdownSplit'
 
 export { parseStoryOrdinal } from './markdownSplit'
@@ -65,10 +68,24 @@ function candidateScore(
   return ordinals.length * 100 + Math.round((transitions / (ordinals.length - 1)) * 50)
 }
 
-export function detectStorySplit(content: string): {
+export function detectStorySplit(
+  content: string,
+  options: { marker?: string } = {},
+): {
   strategy: MarkdownSplitStrategy
   headingLevel?: number
+  marker?: string
+  markerShape?: StoryMarkerShape
 } {
+  // 填了标记词就不参与候选打分：剧本里常把 `SC01` 分场和 `1.` 分镜号混排，
+  // 让自定义规则去比分数很容易被 story_numbered 挤掉。
+  const marker = normalizeStoryMarker(options.marker || '')
+  if (marker) {
+    const probe = probeStoryMarker(content, marker)
+    if (!probe)
+      throw new Error(`没有识别到「${marker}」的拆分边界：至少要有 2 处匹配，换一个标记词试试`)
+    return { strategy: 'story_custom', marker: probe.marker, markerShape: probe.shape }
+  }
   const lines = content.split(/\r?\n/)
   const candidates: Array<{
     result: { strategy: MarkdownSplitStrategy; headingLevel?: number }
@@ -115,6 +132,7 @@ export async function buildStoryImportPlan(input: {
   originalName: string
   sourceEncoding?: string
   wikiRoot?: 'wiki' | 'docs/wiki'
+  marker?: string
 }): Promise<StoryImportPlan> {
   const title = safeWikiSegment(input.title)
   const originalName = String(input.originalName || '').trim() || `${title}.md`
@@ -125,7 +143,7 @@ export async function buildStoryImportPlan(input: {
   const split = await buildMarkdownSplitPlan(input.content, {
     sourcePath,
     targetDirectory: `${workDirectory}/原文节点`,
-    ...detectStorySplit(input.content),
+    ...detectStorySplit(input.content, { marker: input.marker }),
   })
   const completionPath = `${workDirectory}/来源.md`
   const completionContent = [

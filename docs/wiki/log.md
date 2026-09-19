@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-09-19] 变更 | 故事拆分支持用户自定义标记词
+
+- **触发**：用户提出剧本编号写法穷举不完，想改成「用户输入什么就拆什么」。实测确认缺口真实：`第一场 雨夜` 与 `SC01 雨夜` 两份稿子都直接报「没有识别到故事边界」（`CHAPTER_UNIT` 里没有「场」，`ENGLISH_CHAPTER` 里认不出 `SC`），而 `EP01`、`第一集` 能认。
+- **实施**：① `markdownSplit.ts` 新增 `story_custom` 策略与标记词规则：用户只填一个词，`normalizeStoryMarker` 收口（`SC01`/`第1场` 这种整段抄标题的写法也认），`probeStoryMarker` 前缀优先、前缀不足 2 处退回后缀式，两类形状共用一个 `storyMarkerPattern`；② 短名剥离复用同一条规则，否则 `SC01 雨夜追踪` 会生成 `0001_SC01 雨夜追踪.md`；③ 编号校验（缺号/倒序）也改走该规则取序号；④ `marker` 进 plan `optionKey`，换规则必须换 id；⑤ 白名单按用户要求补 `场|場`，并新增 `ABBREV_CHAPTER`（`sc|ep`）——缩写后的编号**只认数字**，放宽到罗马数字会让 `Sci-fi 的设定` 被当成「SC + I」命中；⑥ 预览弹窗加「自定义标记」输入框，输入 300ms 防抖后从原始素材重拆，识别方式由英文枚举改为中文。
+- **验证**：`storyImport.test.ts` 17/17（+4 用例，覆盖前缀式/后缀式/`1场大雨` 与 `Sci-fi` 两条误判陷阱/白名单回归）、`projectFileTreeCanvas.test.ts` 35/35、`storyAnalysis` + `adaptationWikiScaffold` 合计 64/64、`vue-tsc -b` 通过。未执行真实 UI 人工验收。
+
 ## [2026-09-17] 变更 | 创作面板隐藏七条视频线路
 
 - **触发**：用户要求删除截图中的 MiniMax H3 三条、小易 Kling/Grok/Seedance 和 `2/秒` 的 RunningHub Veo Fast UI 项。

@@ -199,9 +199,20 @@ const storyImport = ref<{
   plan: StoryImportPlan
   content: string
 } | null>(null)
+/** 弹窗的原始输入：标记词改了要从这里重新拆，所以它不能挂在 plan 上。 */
+const storyImportSource = ref<{
+  content: string
+  title: string
+  originalName: string
+  sourceEncoding: string
+  wikiRoot: 'wiki' | 'docs/wiki'
+} | null>(null)
+const storyImportMarker = ref('')
 const storyImportBusy = ref(false)
 const storyImportError = ref('')
 const storyImportNamesExpanded = ref(false)
+let storyImportRequestId = 0
+let storyImportMarkerTimer: ReturnType<typeof setTimeout> | null = null
 const wikiScaffoldBusy = ref(false)
 const wikiScaffoldNotice = ref('')
 
@@ -1939,6 +1950,58 @@ async function onUploadInputChange(event: Event) {
   await uploadWebFiles(files)
 }
 
+const storySplitStrategyLabel = computed(() => {
+  const split = storyImport.value?.plan.split
+  if (!split) return ''
+  if (split.strategy === 'story_custom')
+    return `按标记「${split.marker}」${split.markerShape === 'suffix' ? '后缀' : '前缀'}编号`
+  return {
+    story_chapter: '章节标题（第X章 / 第X场 / SC01）',
+    story_numbered: '独立数字段号（1. / 2、）',
+    markdown_heading: 'Markdown 标题层级',
+  }[split.strategy]
+})
+
+/** 标记词一变就重建计划：预览里的节点数和命名示例跟着变，写入前就能看出拆错没拆错。 */
+async function rebuildStoryPlan() {
+  const source = storyImportSource.value
+  if (!source) return
+  const requestId = ++storyImportRequestId
+  storyImportBusy.value = true
+  storyImportError.value = ''
+  try {
+    const plan = await buildStoryImportPlan({
+      ...source,
+      marker: storyImportMarker.value.trim() || undefined,
+    })
+    if (requestId !== storyImportRequestId) return
+    storyImport.value = { plan, content: source.content }
+    storyImportNamesExpanded.value = false
+  } catch (error) {
+    if (requestId !== storyImportRequestId) return
+    // 标记词填到一半没匹配上是正常的：清掉旧计划，只留提示，避免把上一版结果拆下去。
+    storyImport.value = null
+    storyImportError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    if (requestId === storyImportRequestId) storyImportBusy.value = false
+  }
+}
+
+function onStoryMarkerInput() {
+  if (storyImportMarkerTimer) clearTimeout(storyImportMarkerTimer)
+  storyImportMarkerTimer = setTimeout(() => void rebuildStoryPlan(), 300)
+}
+
+function closeStoryImport() {
+  if (storyImportMarkerTimer) clearTimeout(storyImportMarkerTimer)
+  storyImportMarkerTimer = null
+  storyImportRequestId += 1
+  storyImport.value = null
+  storyImportSource.value = null
+  storyImportMarker.value = ''
+  storyImportError.value = ''
+}
+
 async function prepareStoryImport(content: string, name: string, sourceEncoding: string) {
   const owner = projectKey.value
   if (!owner) throw new Error('请先打开项目')
@@ -1948,16 +2011,16 @@ async function prepareStoryImport(content: string, name: string, sourceEncoding:
   ) as Array<'wiki' | 'docs/wiki'>
   if (roots.length > 1) throw new Error('检测到多个 Wiki 根目录，请先保留一个')
   storyImportNamesExpanded.value = false
-  storyImport.value = {
+  storyImportMarker.value = ''
+  storyImport.value = null
+  storyImportSource.value = {
     content,
-    plan: await buildStoryImportPlan({
-      content,
-      title: name.replace(/\.[^.]+$/, ''),
-      originalName: name,
-      sourceEncoding,
-      wikiRoot: roots[0] || 'wiki',
-    }),
+    title: name.replace(/\.[^.]+$/, ''),
+    originalName: name,
+    sourceEncoding,
+    wikiRoot: roots[0] || 'wiki',
   }
+  await rebuildStoryPlan()
 }
 
 async function convertStoryFile(file: File) {
@@ -2040,7 +2103,7 @@ async function confirmStoryImport() {
     await applyStoryImportPlan(pending.plan, pending.content, projectFiles, owner, {
       acceptWarnings: true,
     })
-    storyImport.value = null
+    closeStoryImport()
     await loadFileTree()
     await locateProjectResource(pending.plan.workDirectory)
   } catch (error) {
@@ -2597,8 +2660,7 @@ watch(
     focusedPath.value = null
     ctxMenu.value = { show: false, x: 0, y: 0, node: null }
     treeDropActive.value = false
-    storyImport.value = null
-    storyImportError.value = ''
+    closeStoryImport()
     closeFilePreview()
     chooseCollision('cancel')
     filterQuery.value = ''
@@ -3094,53 +3156,68 @@ onBeforeUnmount(() => {
 
     <Teleport to="body">
       <div
-        v-if="storyImport || storyImportBusy || storyImportError"
+        v-if="storyImportSource || storyImportBusy || storyImportError"
         class="pft-story-overlay"
-        @click.self="!storyImportBusy && (storyImport = null)"
+        @click.self="!storyImportBusy && closeStoryImport()"
       >
         <div class="pft-story-dialog" role="dialog" aria-modal="true" aria-label="故事拆分预览">
           <strong>故事拆分</strong>
           <p v-if="storyImportBusy && !storyImport">正在读取并识别故事结构…</p>
-          <template v-if="storyImport">
+          <template v-if="storyImportSource">
             <dl>
               <dt>作品</dt>
-              <dd>{{ storyImport.plan.title }}</dd>
+              <dd>{{ storyImportSource.title }}</dd>
               <dt>识别方式</dt>
-              <dd>{{ storyImport.plan.split.strategy }}</dd>
-              <dt>检测编码</dt>
-              <dd>{{ storyImport.plan.sourceEncoding }}</dd>
-              <dt>识别节点数</dt>
-              <dd>{{ storyImport.plan.split.nodes.filter(node => node.order > 0).length }}</dd>
-              <dt>首个节点</dt>
-              <dd>{{ storyImport.plan.split.nodes.find(node => node.order > 0)?.title }}</dd>
-              <dt>最后节点</dt>
-              <dd>{{ storyImport.plan.split.nodes.at(-1)?.title }}</dd>
-              <dt>命名示例</dt>
-              <dd class="pft-story-names">
-                <span v-for="node in storyImport.plan.split.nodes.filter(item => item.order > 0).slice(0, 3)" :key="node.path">{{ node.path.split('/').at(-1) }}</span>
-                <button v-if="!storyImportNamesExpanded" type="button" class="pft-story-names-toggle" @click="storyImportNamesExpanded = true">
-                  查看全部 {{ storyImport.plan.split.nodes.filter(item => item.order > 0).length }} 个
-                </button>
-                <span v-else>{{ storyImport.plan.split.nodes.filter(item => item.order > 0).slice(3).map(item => item.path.split('/').at(-1)).join('、') }}</span>
+              <dd>{{ storySplitStrategyLabel || '未识别到边界' }}</dd>
+              <dt>自定义标记</dt>
+              <dd>
+                <input
+                  v-model="storyImportMarker"
+                  class="pft-story-marker"
+                  type="text"
+                  placeholder="填编号里那个词，如 SC、场、EP"
+                  :disabled="storyImportBusy"
+                  @input="onStoryMarkerInput"
+                />
               </dd>
-              <dt>输出位置</dt>
-              <dd>{{ storyImport.plan.workDirectory }}</dd>
             </dl>
-            <div v-if="storyImport.plan.split.warnings.length" class="pft-story-warnings">
-              <span>发现以下来源标号异常，仍将按原文顺序拆分：</span>
-              <ul>
-                <li v-for="warning in storyImport.plan.split.warnings" :key="warning">
-                  {{ warning }}
-                </li>
-              </ul>
-            </div>
+            <template v-if="storyImport">
+              <dl>
+                <dt>检测编码</dt>
+                <dd>{{ storyImport.plan.sourceEncoding }}</dd>
+                <dt>识别节点数</dt>
+                <dd>{{ storyImport.plan.split.nodes.filter(node => node.order > 0).length }}</dd>
+                <dt>首个节点</dt>
+                <dd>{{ storyImport.plan.split.nodes.find(node => node.order > 0)?.title }}</dd>
+                <dt>最后节点</dt>
+                <dd>{{ storyImport.plan.split.nodes.at(-1)?.title }}</dd>
+                <dt>命名示例</dt>
+                <dd class="pft-story-names">
+                  <span v-for="node in storyImport.plan.split.nodes.filter(item => item.order > 0).slice(0, 3)" :key="node.path">{{ node.path.split('/').at(-1) }}</span>
+                  <button v-if="!storyImportNamesExpanded" type="button" class="pft-story-names-toggle" @click="storyImportNamesExpanded = true">
+                    查看全部 {{ storyImport.plan.split.nodes.filter(item => item.order > 0).length }} 个
+                  </button>
+                  <span v-else>{{ storyImport.plan.split.nodes.filter(item => item.order > 0).slice(3).map(item => item.path.split('/').at(-1)).join('、') }}</span>
+                </dd>
+                <dt>输出位置</dt>
+                <dd>{{ storyImport.plan.workDirectory }}</dd>
+              </dl>
+              <div v-if="storyImport.plan.split.warnings.length" class="pft-story-warnings">
+                <span>发现以下来源标号异常，仍将按原文顺序拆分：</span>
+                <ul>
+                  <li v-for="warning in storyImport.plan.split.warnings" :key="warning">
+                    {{ warning }}
+                  </li>
+                </ul>
+              </div>
+            </template>
           </template>
           <p v-if="storyImportError" class="pft-story-error">{{ storyImportError }}</p>
           <div>
             <button
               type="button"
               :disabled="storyImportBusy"
-              @click="storyImport = null; storyImportError = ''"
+              @click="closeStoryImport()"
             >
               取消
             </button>
@@ -3526,6 +3603,16 @@ onBeforeUnmount(() => {
 }
 .pft-story-dialog dt {
   color: var(--ink3);
+}
+.pft-story-dialog .pft-story-marker {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  background: var(--paper);
+  color: var(--ink);
+  font-size: 13px;
 }
 .pft-story-dialog dd {
   min-width: 0;

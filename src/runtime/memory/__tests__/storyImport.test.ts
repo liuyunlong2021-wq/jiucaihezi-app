@@ -10,6 +10,7 @@ import {
   parseStoryOrdinal,
   upsertWikiIndex,
 } from '../storyImport'
+import { normalizeStoryMarker, probeStoryMarker } from '../markdownSplit'
 
 function memoryFiles(initial: Record<string, string> = {}) {
   const entries = new Map(
@@ -152,6 +153,92 @@ test('numbered heading sequence outranks wrapper headings', () => {
 
   const englishRoman = '# Book\n## Chapter I\nText\n## Chapter II\nText\n## Chapter III\nText'
   assert.deepEqual(detectStorySplit(englishRoman), { strategy: 'story_chapter' })
+})
+
+test('自定义标记词按前缀式拆 SC 分场，短名剥掉标记', async () => {
+  const content = [
+    'SC01 雨夜追踪',
+    '甲走了。',
+    'SC02 清晨',
+    '乙来了。',
+    'SC03 黄昏',
+    '丙回来了。',
+  ].join('\n')
+  assert.deepEqual(detectStorySplit(content, { marker: 'SC' }), {
+    strategy: 'story_custom',
+    marker: 'SC',
+    markerShape: 'prefix',
+  })
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '分场剧本',
+    originalName: '分场剧本.txt',
+    marker: 'SC01',
+  })
+  assert.equal(plan.split.nodes[0]?.path.endsWith('/0001_雨夜追踪.md'), true)
+  assert.equal(plan.split.nodes[2]?.path.endsWith('/0003_黄昏.md'), true)
+  // 标记词进 optionKey：换规则必须换 plan id，否则续跑会把两次拆分认成同一次。
+  const auto = await buildStoryImportPlan({
+    content,
+    title: '分场剧本',
+    originalName: '分场剧本.txt',
+  })
+  assert.equal(auto.split.strategy, 'story_chapter')
+  assert.notEqual(auto.split.id, plan.split.id)
+})
+
+test('自定义标记词退回后缀式，正文里的“1场大雨”不算边界', async () => {
+  const content = [
+    '第一场 雨夜',
+    '甲走了。',
+    '1场大雨下了整夜。',
+    '第二场 清晨',
+    '乙来了。',
+    '第三场 黄昏',
+    '丙回来了。',
+  ].join('\n')
+  assert.deepEqual(detectStorySplit(content, { marker: '场' }), {
+    strategy: 'story_custom',
+    marker: '场',
+    markerShape: 'suffix',
+  })
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '场次剧本',
+    originalName: '场次剧本.md',
+    marker: '场',
+  })
+  assert.equal(plan.split.nodes.length, 3)
+  assert.equal(plan.split.nodes[0]?.path.endsWith('/0001_雨夜.md'), true)
+  assert.match(plan.split.nodes[0]!.source, /1场大雨下了整夜。/)
+})
+
+test('白名单认下常见缩写与场次，整段抄标题的标记词也认', () => {
+  assert.deepEqual(detectStorySplit('第一场 雨夜\n正文\n第二场 清晨\n正文'), {
+    strategy: 'story_chapter',
+  })
+  assert.deepEqual(detectStorySplit('SC01 雨夜\n正文\nSC02 清晨\n正文'), {
+    strategy: 'story_chapter',
+  })
+  assert.equal(normalizeStoryMarker('SC'), 'SC')
+  assert.equal(normalizeStoryMarker('SC01'), 'SC')
+  assert.equal(normalizeStoryMarker('SC-01'), 'SC')
+  assert.equal(normalizeStoryMarker('第一场'), '场')
+  assert.equal(normalizeStoryMarker('第1场'), '场')
+  assert.equal(normalizeStoryMarker('01'), '')
+  assert.deepEqual(probeStoryMarker('SC01 雨夜\n正文\nSC02 清晨', 'SC'), {
+    marker: 'SC',
+    shape: 'prefix',
+    count: 2,
+    firstLine: 'SC01 雨夜',
+  })
+})
+
+test('缩写前缀不会把 Sci-fi 这类正文行当成边界', () => {
+  const content = ['Sci-fi 的设定', '没错。', '1场大雨下了整夜。', '还是雨。'].join('\n')
+  assert.throws(() => detectStorySplit(content), /没有识别到故事边界/)
+  assert.equal(probeStoryMarker(content, 'S'), null)
+  assert.throws(() => detectStorySplit(content, { marker: 'SC' }), /没有识别到「SC」的拆分边界/)
 })
 
 test('story import recognizes AnyDoc bold-wrapped Word episode headings', async () => {

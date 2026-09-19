@@ -1,4 +1,21 @@
-export type MarkdownSplitStrategy = 'story_chapter' | 'story_numbered' | 'markdown_heading'
+export type MarkdownSplitStrategy =
+  | 'story_chapter'
+  | 'story_numbered'
+  | 'markdown_heading'
+  | 'story_custom'
+
+/** 自定义标记词落在编号的哪一侧：`SC01` 是前缀式，`第1场` 是后缀式。 */
+export type StoryMarkerShape = 'prefix' | 'suffix'
+
+export interface StoryMarkerRule {
+  marker: string
+  shape: StoryMarkerShape
+}
+
+export interface StoryMarkerProbe extends StoryMarkerRule {
+  count: number
+  firstLine: string
+}
 
 export interface MarkdownSplitOptions {
   sourcePath: string
@@ -6,6 +23,8 @@ export interface MarkdownSplitOptions {
   strategy: MarkdownSplitStrategy
   headingLevel?: number
   groupSize?: number
+  marker?: string
+  markerShape?: StoryMarkerShape
 }
 
 export interface MarkdownSplitNode {
@@ -32,6 +51,8 @@ export interface MarkdownSplitPlan {
   sourceHash: string
   targetDirectory: string
   strategy: MarkdownSplitStrategy
+  marker?: string
+  markerShape?: StoryMarkerShape
   nodes: MarkdownSplitNode[]
   writes: MarkdownSplitWrite[]
   warnings: string[]
@@ -129,16 +150,19 @@ function splitTitleNote(title: string): { name: string; note: string } {
 }
 
 /** 剥掉标题里的编号前缀，剩下的就是作者自己给的名称；剥不出名称时返回空串。 */
-function nameFromTitle(title: string): string {
+function nameFromTitle(title: string, rule?: StoryMarkerRule): string {
   // 名称要匹配全角编号，所以只在这里做 NFKC；摘要保留原文用字，不做兼容归一。
   const normalized = plainText(title).normalize('NFKC')
   const patterns = [
+    // 用户自定义的标记词优先剥：`SC01 雨夜追踪` 的短名要是「雨夜追踪」。
+    ...(rule ? [storyMarkerPattern(rule)] : []),
     new RegExp(`^第\\s*${ORDINAL_TOKEN}\\s*${CHAPTER_UNIT}\\s*`, 'iu'),
     // 编号后面必须跟空白、行尾或分隔符，否则 `Episode` 会被当成“ep + 罗马数字 I”。
     new RegExp(
       `^${ENGLISH_CHAPTER}\\.?\\s*${ORDINAL_TOKEN}(?=\\s|$|[.、:：\\-–—])`,
       'iu',
     ),
+    new RegExp(`^${ABBREV_CHAPTER}\\s*[-_.·:：#]?\\s*${NUMERIC_TOKEN}`, 'iu'),
     new RegExp(`^${ORDINAL_TOKEN}\\s*[.、)）:：\\-–—]\\s*`, 'iu'),
     new RegExp(`^${NUMERIC_TOKEN}\\s+`, 'u'),
     new RegExp(`^${ORDINAL_TOKEN}\\s*[.、．]?$`, 'iu'),
@@ -191,10 +215,14 @@ function firstClause(sentence: string): string {
   return plainText(sentence.match(/^[^，,、；;：:。！？!?…]+/u)?.[0] || sentence)
 }
 
-function deriveNodeNaming(title: string, source: string): { shortName: string; summary: string } {
+function deriveNodeNaming(
+  title: string,
+  source: string,
+  rule?: StoryMarkerRule,
+): { shortName: string; summary: string } {
   const lines = bodyLines(source, title)
   const { name, note } = splitTitleNote(title)
-  const titled = pathSegment(nameFromTitle(name), SHORT_NAME_LIMIT)
+  const titled = pathSegment(nameFromTitle(name, rule), SHORT_NAME_LIMIT)
   const heading = firstSubheading(lines)
   const sentence = firstSentence(lines)
   const clause = firstClause(sentence)
@@ -214,8 +242,11 @@ function deriveNodeNaming(title: string, source: string): { shortName: string; s
 const CHINESE_NUMBER =
   '零〇○一壹壱二贰貳弐两兩三叁參参四肆五伍六陆陸七柒八捌九玖十拾什百佰陌千仟阡万萬'
 const ORDINAL_TOKEN = `(?:[0-9]+|[${CHINESE_NUMBER}]+|[IVXLCDM]+)`
-const CHAPTER_UNIT = '(?:章|回|节|節|集|幕|卷|巻|话|話|篇|部)'
+const CHAPTER_UNIT = '(?:章|回|节|節|集|幕|卷|巻|话|話|篇|部|场|場)'
 const ENGLISH_CHAPTER = '(?:chapter|chap|ch|part|book|episode|ep|section|scene|act|volume|vol)'
+// 纯字母缩写前缀（`SC01`、`EP-02`）：编号只认数字，不认罗马数字——
+// 否则 `Sci-fi 的设定` 会被当成 “sc + 罗马数字 I” 命中。
+const ABBREV_CHAPTER = '(?:sc|ep)'
 const NUMERIC_TOKEN = `(?:[0-9]+|[${CHINESE_NUMBER}]+)`
 
 function parseChineseNumber(token: string): number | null {
@@ -300,6 +331,7 @@ export function parseStoryOrdinal(line: string): number | null {
   const patterns = [
     new RegExp(`^第\\s*(${ORDINAL_TOKEN})\\s*${CHAPTER_UNIT}`, 'iu'),
     new RegExp(`^${ENGLISH_CHAPTER}\\.?\\s*(${ORDINAL_TOKEN})(?:\\s|$|[.、:：-])`, 'iu'),
+    new RegExp(`^${ABBREV_CHAPTER}\\s*[-_.·:：#]?\\s*(${NUMERIC_TOKEN})`, 'iu'),
     new RegExp(`^(${ORDINAL_TOKEN})(?:[.、)）:：-]\\s*|\\s+)(?=\\S)`, 'iu'),
     new RegExp(`^(${ORDINAL_TOKEN})(?:[.、．])?$`, 'iu'),
     new RegExp(`([0-9]+)${suffix}`, 'u'),
@@ -317,8 +349,67 @@ export function isStoryChapterBoundary(line: string): boolean {
   const title = titleFromBoundary(line).normalize('NFKC').trim()
   return (
     new RegExp(`^第\\s*${ORDINAL_TOKEN}\\s*${CHAPTER_UNIT}`, 'iu').test(title) ||
-    new RegExp(`^${ENGLISH_CHAPTER}\\.?\\s*${ORDINAL_TOKEN}(?:\\s|$|[.、:：-])`, 'iu').test(title)
+    new RegExp(`^${ENGLISH_CHAPTER}\\.?\\s*${ORDINAL_TOKEN}(?:\\s|$|[.、:：-])`, 'iu').test(title) ||
+    new RegExp(`^${ABBREV_CHAPTER}\\s*[-_.·:：#]?\\s*${NUMERIC_TOKEN}`, 'iu').test(title)
   )
+}
+
+/* ─── 自定义标记词 ─── */
+// 编号写法穷举不完（第一场、SC01、EP-02、Scene 12…），白名单只当常见词的快捷方式；
+// 长尾写法由用户在预览弹窗里填一个标记词：前缀式 `SC01`、后缀式 `第1场` 都编译成同一条规则。
+const MARKER_LIMIT = 16
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** 把用户输入收成一个标记词：整段抄标题的 `SC01`、`第一场` 也认。 */
+export function normalizeStoryMarker(input: string): string {
+  const raw = plainText(input).normalize('NFKC')
+  if (!raw) return ''
+  return raw
+    .replace(new RegExp(`^第\\s*${ORDINAL_TOKEN}\\s*`, 'u'), '')
+    // 结尾只剥数字：用 ORDINAL_TOKEN 会把 `SC` 的尾字母 C 当罗马数字吃掉。
+    .replace(new RegExp(`\\s*${NUMERIC_TOKEN}\\s*$`, 'u'), '')
+    .replace(/^[\s.、,，:：\-–—_·#]+|[\s.、,，:：\-–—_·#]+$/gu, '')
+    .slice(0, MARKER_LIMIT)
+}
+
+/** 一条既判断边界、又能取回序号的规则；用户填的是词，正则由我们生成。 */
+export function storyMarkerPattern(rule: StoryMarkerRule): RegExp {
+  const marker = escapeRegExp(rule.marker)
+  return rule.shape === 'prefix'
+    ? new RegExp(`^${marker}\\s*[-_.·:：#]?\\s*(${NUMERIC_TOKEN})`, 'iu')
+    : new RegExp(`^第?\\s*(${ORDINAL_TOKEN})\\s*${marker}(?=\\s|$|[.、:：\\-–—])`, 'iu')
+}
+
+export function isStoryMarkerBoundary(rule: StoryMarkerRule): (line: string) => boolean {
+  const pattern = storyMarkerPattern(rule)
+  return (line: string) => pattern.test(titleFromBoundary(line).normalize('NFKC').trim())
+}
+
+function readMarkerOrdinal(rule: StoryMarkerRule, line: string): number | null {
+  const token = storyMarkerPattern(rule).exec(titleFromBoundary(line).normalize('NFKC').trim())
+  return token?.[1] ? parseOrdinalToken(token[1]) : null
+}
+
+/** 前缀优先：前缀式匹配到 ≥2 处就用它，否则退回后缀式；都不够返回 null。 */
+export function probeStoryMarker(content: string, input: string): StoryMarkerProbe | null {
+  const marker = normalizeStoryMarker(input)
+  if (!marker) return null
+  const lines = content.split(/\r?\n/)
+  for (const shape of ['prefix', 'suffix'] as const) {
+    const matcher = isStoryMarkerBoundary({ marker, shape })
+    let count = 0
+    let firstLine = ''
+    for (const line of lines) {
+      if (!matcher(line)) continue
+      if (!count) firstLine = titleFromBoundary(line).trim()
+      count += 1
+    }
+    if (count >= 2) return { marker, shape, count, firstLine }
+  }
+  return null
 }
 
 export function isStoryNumberedBoundary(line: string): boolean {
@@ -385,7 +476,11 @@ export async function buildMarkdownSplitPlan(
   options: MarkdownSplitOptions,
 ): Promise<MarkdownSplitPlan> {
   if (!content.trim()) throw new Error('源文件没有可拆分内容')
-  if (!['story_chapter', 'story_numbered', 'markdown_heading'].includes(options.strategy))
+  if (
+    !['story_chapter', 'story_numbered', 'markdown_heading', 'story_custom'].includes(
+      options.strategy,
+    )
+  )
     throw new Error('不支持的拆分策略')
   const sourcePath = normalizePath(options.sourcePath)
   const targetDirectory = normalizePath(options.targetDirectory)
@@ -398,12 +493,23 @@ export async function buildMarkdownSplitPlan(
   }
   const groupSize = Math.max(2, Math.min(Math.floor(options.groupSize || 100), 500))
   const headingLevel = Math.max(1, Math.min(Math.floor(options.headingLevel || 1), 6))
+  const marker = normalizeStoryMarker(options.marker || '')
+  if (options.strategy === 'story_custom' && !marker) throw new Error('请先填写自定义拆分标记词')
+  const markerRule: StoryMarkerRule | undefined = marker
+    ? { marker, shape: options.markerShape === 'suffix' ? 'suffix' : 'prefix' }
+    : undefined
   const matcher =
-    options.strategy === 'story_chapter'
-      ? isStoryChapterBoundary
-      : options.strategy === 'story_numbered'
-        ? isStoryNumberedBoundary
-        : (line: string) => new RegExp(`^\\s*#{${headingLevel}}\\s+\\S`).test(line)
+    options.strategy === 'story_custom'
+      ? isStoryMarkerBoundary(markerRule!)
+      : options.strategy === 'story_chapter'
+        ? isStoryChapterBoundary
+        : options.strategy === 'story_numbered'
+          ? isStoryNumberedBoundary
+          : (line: string) => new RegExp(`^\\s*#{${headingLevel}}\\s+\\S`).test(line)
+  const ordinalOf =
+    options.strategy === 'story_custom'
+      ? (line: string) => readMarkerOrdinal(markerRule!, line)
+      : parseStoryOrdinal
   const lines = sourceLines(content)
   const boundaries = lines.filter(line => matcher(line.text))
   if (!boundaries.length) throw new Error('没有识别到拆分边界，请检查拆分策略或标题层级')
@@ -447,7 +553,7 @@ export async function buildMarkdownSplitPlan(
       node.order > 0 && drafts.findIndex(item => item.sourceLabel === node.sourceLabel) !== index,
   )
   const ordinals = boundaries
-    .map(item => parseStoryOrdinal(item.text))
+    .map(item => ordinalOf(item.text))
     .filter(value => value !== null)
   const repeatedOrdinals = [
     ...new Set(ordinals.filter((value, index) => ordinals.indexOf(value) !== index)),
@@ -480,7 +586,7 @@ export async function buildMarkdownSplitPlan(
       grouped && draft.order > 0
         ? `${String(groupStart).padStart(width, '0')}-${String(groupEnd).padStart(width, '0')}/`
         : ''
-    const naming = deriveNodeNaming(draft.title, draft.source)
+    const naming = deriveNodeNaming(draft.title, draft.source, markerRule)
     // 序号前缀不可省：重复标题就靠它避免撞路径。前置内容固定为 0000.md，便于续跑识别。
     const shortName = draft.order > 0 ? naming.shortName : ''
     const stem = shortName ? `${number}_${shortName}` : number
@@ -530,6 +636,7 @@ export async function buildMarkdownSplitPlan(
     strategy: options.strategy,
     headingLevel,
     groupSize,
+    marker: markerRule ? `${markerRule.shape}:${markerRule.marker}` : '',
   })
   return {
     id: `markdown_split_${(await hashText(`${sourceHash}:${optionKey}`)).slice(0, 16)}`,
@@ -537,6 +644,8 @@ export async function buildMarkdownSplitPlan(
     sourceHash,
     targetDirectory,
     strategy: options.strategy,
+    marker: markerRule?.marker,
+    markerShape: markerRule?.shape,
     nodes,
     writes,
     warnings,

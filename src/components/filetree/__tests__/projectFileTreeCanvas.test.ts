@@ -474,6 +474,10 @@ test('project tree exposes native story splitting with a deterministic preview a
   assert.match(source, /确认警告并拆分/)
   assert.match(source, /locateProjectResource\(pending\.plan\.workDirectory\)/)
   assert.match(source, /开始拆分/)
+  // 自定义标记词：弹窗里能改规则，且改了要从原始素材重拆（不能拿旧 plan 直接写）。
+  assert.match(source, /v-model="storyImportMarker"/)
+  assert.match(source, /@input="onStoryMarkerInput"/)
+  assert.match(source, /marker: storyImportMarker\.value\.trim\(\) \|\| undefined/)
 })
 
 test('project export resolves external file collisions before opening a writable', () => {
