@@ -11,6 +11,7 @@ import {
   runSkillTests,
   buildBlindComparison,
   generateEvalViewerHtml,
+  parseEvalViewerData,
 } from '../skillTestRunner'
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 
@@ -394,6 +395,15 @@ test('eval viewer script stays parseable so the report renders instead of a blan
   assert.match(html, /<div id="app"><h1>Skill测试: demo<\/h1>/)
   assert.match(html, /检查项/)
   assert.match(html, /Benchmark 摘要/) // 切 tab 的快照也预先渲染好，不用等脚本
+  // 数据落在 application/json 标签里：应用预览靠它还原报告，不用解析 JS 字面量。
+  assert.match(html, /<script type="application\/json" id="eval-viewer-data">/)
+  const parsed = parseEvalViewerData(html)
+  assert.equal(parsed?.skill_name, 'demo')
+  assert.equal(parsed?.runs.length, 2)
+  // 旧版报告把数据写成单行 JS 字面量，也要能认出来，历史报告不用重新生成。
+  const legacy = '<div id="app"></div><script>\nconst DATA = {"skill_name":"old","runs":[{"id":"eval-1-with_skill","prompt":"p","eval_id":1}]};\nlet currentIdx = 0;\n</script>'
+  assert.equal(parseEvalViewerData(legacy)?.skill_name, 'old')
+  assert.equal(parseEvalViewerData('<html><body>不是报告</body></html>'), null)
   const script = html.match(/<script>([\s\S]*)<\/script>/)![1]
   assert.ok(script.includes('SNAPSHOTS.outputs[currentIdx]'), '切页要从预渲染快照里取')
   assert.doesNotThrow(() => new Function(script))

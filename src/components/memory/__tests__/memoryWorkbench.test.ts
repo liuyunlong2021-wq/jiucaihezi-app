@@ -1572,4 +1572,9 @@ test('the preview panel renders project HTML in a sandboxed frame', () => {
   // blob: 在打包后的 tauri:// 源下加载不出来。
   assert.match(workbench, /title="HTML 预览"\s+sandbox="allow-scripts"\s+:srcdoc="htmlPreview"/)
   assert.doesNotMatch(workbench, /createObjectURL\(new Blob/)
+  // 评测报告不走 iframe：iframe 里脚本进不来（翻页/切页点不动），也拿不到应用的 CSS 变量（颜色不跟主题）。
+  assert.match(explorer, /\| \{ type: 'eval-report'; resource: ProjectResource; text: ProjectTextRead; data: EvalViewerData \}/)
+  assert.match(explorer, /parseEvalViewerData\(text\.content\)/)
+  assert.match(workbench, /v-else-if="previewResource\.type === 'eval-report'"/)
+  assert.match(workbench, /<EvalReportViewer :data="previewResource\.data" \/>/)
 })

@@ -3,6 +3,7 @@ import { parseConversationTranscript, type ConversationTranscript } from '@/runt
 import { canEditProjectText, projectTextEditorMode, type ProjectResource, type ProjectTextRead } from '@/utils/projectResource'
 import { parseScene3DDocument, type Scene3DDocument } from '@/runtime/memory/scene3d'
 import { parseJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
+import { parseEvalViewerData, type EvalViewerData } from '@/utils/skillTestRunner'
 
 export type ProjectCanvasMediaKind = 'image' | 'video' | 'audio'
 export type ProjectPreviewMediaKind = ProjectCanvasMediaKind | 'model3d'
@@ -11,6 +12,7 @@ export type ProjectResourceOpenResult =
   | { type: 'conversation'; resource: ProjectResource; text: ProjectTextRead; transcript: ConversationTranscript }
   | { type: 'editor'; resource: ProjectResource; text: ProjectTextRead; editorMode: 'rich' | 'plain' }
   | { type: 'html'; resource: ProjectResource; text: ProjectTextRead }
+  | { type: 'eval-report'; resource: ProjectResource; text: ProjectTextRead; data: EvalViewerData }
   | { type: 'unsafe-text'; resource: ProjectResource }
   | { type: 'canvas'; resource: ProjectResource }
   | { type: 'project-map'; resource: ProjectResource; text: ProjectTextRead; document: JsonCanvasDocument }
@@ -57,9 +59,11 @@ export async function openProjectResource(
   if (transcript) return { type: 'conversation', resource, text, transcript }
   // HTML 是基本可读格式：截断或内容不安全时才退成不可预览，不能因为“没写过这条分支”就一律拒掉。
   if (/\.html?$/i.test(resource.path)) {
-    return canEditProjectText(text)
-      ? { type: 'html', resource, text }
-      : { type: 'unsafe-text', resource }
+    if (!canEditProjectText(text)) return { type: 'unsafe-text', resource }
+    // 评测报告是自渲染页面，交给应用自己渲染：iframe 里脚本进不来（翻页/切页点不动），
+    // 也拿不到应用的 CSS 变量（颜色不跟主题）。
+    const data = parseEvalViewerData(text.content)
+    return data ? { type: 'eval-report', resource, text, data } : { type: 'html', resource, text }
   }
   return canEditProjectText(text)
     ? { type: 'editor', resource, text, editorMode: projectTextEditorMode(resource) }

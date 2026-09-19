@@ -7,6 +7,7 @@ import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import MemorySettings from './MemorySettings.vue'
 import MemoryMarkdown from './MemoryMarkdown.vue'
+import EvalReportViewer from './EvalReportViewer.vue'
 import PromptSelectionRevision from './PromptSelectionRevision.vue'
 import { useAgentStore } from '@/stores/agentStore'
 import { useMcpStore } from '@/stores/mcpStore'
@@ -3104,6 +3105,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @open="openProjectMapPath"
           @save="saveProjectMap"
         />
+        <div v-else-if="previewResource.type === 'eval-report'" class="memory-document">
+          <EvalReportViewer :data="previewResource.data" />
+        </div>
         <div v-else-if="previewResource.type === 'html'" class="memory-document">
           <iframe
             v-if="htmlPreview"

@@ -1018,8 +1018,8 @@ export interface EvalViewerData {
   benchmark?: BenchmarkData | null
 }
 
-/** 报告正文渲染：按每个可切换状态渲染一次，产出静态快照。 */
-function renderEvalViewerBody(data: EvalViewerData, state: { currentIdx: number; tab: 'outputs' | 'benchmark' }): string {
+/** 报告正文渲染。chrome=true 时带标题/切页栏/翻页（报告文件用）；false 时只出正文，交给应用自己配导航和主题。 */
+export function renderEvalViewerBody(data: EvalViewerData, state: { currentIdx: number; tab: 'outputs' | 'benchmark' }, chrome = true): string {
   const { currentIdx, tab } = state
   const escapeHtml = (value: unknown) => String(value == null ? '' : value)
     .replace(/&/g, '&amp;')
@@ -1033,16 +1033,18 @@ function renderEvalViewerBody(data: EvalViewerData, state: { currentIdx: number;
   const configLabel = isWith ? 'WITH skill' : (data.baseline_label || 'WITHOUT skill')
   const badgeClass = isWith ? 'badge-with' : 'badge-without'
 
-  let html = '<h1>Skill测试: ' + escapeHtml(data.skill_name) + '</h1>';
-  html += '<div class="meta">共 ' + runs.length + ' 个结果</div>';
-
-  if (data.benchmark) {
-    html += '<div class="tabs"><div class="tab' + (tab === 'outputs' ? ' active' : '') + '" onclick="switchTab(\'outputs\')">Outputs</div><div class="tab' + (tab === 'benchmark' ? ' active' : '') + '" onclick="switchTab(\'benchmark\')">Benchmark</div></div>';
+  let html = ''
+  if (chrome) {
+    html += '<h1>Skill测试: ' + escapeHtml(data.skill_name) + '</h1>';
+    html += '<div class="meta">共 ' + runs.length + ' 个结果</div>';
+    if (data.benchmark) {
+      html += '<div class="tabs"><div class="tab' + (tab === 'outputs' ? ' active' : '') + '" onclick="switchTab(\'outputs\')">Outputs</div><div class="tab' + (tab === 'benchmark' ? ' active' : '') + '" onclick="switchTab(\'benchmark\')">Benchmark</div></div>';
+    }
   }
 
   if (tab === 'outputs') {
     html += '<div class="card"><h3><span class="badge ' + badgeClass + '">' + configLabel + '</span> 测试 #' + r.eval_id + '</h3>';
-    html += '<p style="color:#999;font-size:0.8rem;margin-bottom:0.5rem">' + escapeHtml(r.prompt) + '</p>';
+    html += '<p class="prompt">' + escapeHtml(r.prompt) + '</p>';
     if (r.outputs && r.outputs[0]) {
       html += '<pre>' + escapeHtml(r.outputs[0].content.slice(0, 2000)) + '</pre>';
     }
@@ -1057,9 +1059,11 @@ function renderEvalViewerBody(data: EvalViewerData, state: { currentIdx: number;
       });
       html += '</div>';
     }
-    html += '<textarea placeholder="反馈..."></textarea>';
     html += '</div>';
-    html += '<div class="nav"><button ' + (currentIdx === 0 ? 'disabled' : '') + ' onclick="nav(-1)">\u2190 上一个</button><span style="line-height:2">' + (currentIdx + 1) + '/' + runs.length + '</span><button ' + (currentIdx >= runs.length - 1 ? 'disabled' : '') + ' onclick="nav(1)">下一个 \u2192</button></div>';
+    if (chrome) {
+      html += '<textarea placeholder="反馈..."></textarea>';
+      html += '<div class="nav"><button ' + (currentIdx === 0 ? 'disabled' : '') + ' onclick="nav(-1)">\u2190 上一个</button><span class="page">' + (currentIdx + 1) + '/' + runs.length + '</span><button ' + (currentIdx >= runs.length - 1 ? 'disabled' : '') + ' onclick="nav(1)">下一个 \u2192</button></div>';
+    }
   } else if (tab === 'benchmark' && data.benchmark) {
     const b = data.benchmark;
     html += '<div class="card"><h3>Benchmark 摘要</h3>';
@@ -1069,13 +1073,28 @@ function renderEvalViewerBody(data: EvalViewerData, state: { currentIdx: number;
     html += '<tr><td>Time (s)</td><td>' + ws.time_seconds.mean.toFixed(1) + ' \u00b1' + ws.time_seconds.stddev.toFixed(1) + '</td><td>' + wos.time_seconds.mean.toFixed(1) + ' \u00b1' + wos.time_seconds.stddev.toFixed(1) + '</td><td>' + d.time_seconds + 's</td></tr>';
     html += '<tr><td>Tokens</td><td>' + ws.tokens.mean.toFixed(0) + ' \u00b1' + ws.tokens.stddev.toFixed(0) + '</td><td>' + wos.tokens.mean.toFixed(0) + ' \u00b1' + wos.tokens.stddev.toFixed(0) + '</td><td>' + d.tokens + '</td></tr>';
     html += '</table></div>';
-    if (b.notes && b.notes.length) {
+    if (chrome && b.notes && b.notes.length) {
       html += '<div class="notes"><strong>分析笔记</strong><ul>' + b.notes.map(n => '<li>' + escapeHtml(n) + '</li>').join('') + '</ul></div>';
     }
-    html += '<div class="nav"><button onclick="switchTab(\'outputs\')">\u2190 返回 Outputs</button></div>';
+    if (chrome) html += '<div class="nav"><button onclick="switchTab(\'outputs\')">\u2190 返回 Outputs</button></div>';
   }
 
   return html
+}
+
+/** 从报告 HTML 里取回渲染数据（生成时落在 application/json 标签里）。 */
+export function parseEvalViewerData(html: string): EvalViewerData | null {
+  // 旧版报告把数据写成单行 JS 字面量（`const DATA = {...};`），一并认下来，
+  // 历史报告不用全部重新生成。（`.` 不匹配换行，所以只会在那一行内匹配。）
+  const raw = /<script type="application\/json" id="eval-viewer-data">([\s\S]*?)<\/script>/.exec(html)?.[1]
+    ?? /const DATA = (\{.*\});/.exec(html)?.[1]
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw) as EvalViewerData
+    return Array.isArray(parsed?.runs) && parsed.runs.length ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 export function generateEvalViewerHtml(
@@ -1147,6 +1166,7 @@ export function generateEvalViewerHtml(
 body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#faf9f5;color:#141413;padding:1.5rem}
 h1{font-size:1.25rem;margin-bottom:0.5rem}
 .meta{color:#999;font-size:0.8rem;margin-bottom:1.5rem}
+.prompt{color:#999;font-size:0.8rem;margin-bottom:0.5rem}
 .tabs{display:flex;gap:0;margin-bottom:1rem;border-bottom:2px solid #e8e6dc}
 .tab{padding:0.5rem 1.25rem;cursor:pointer;font-weight:500;font-size:0.85rem;color:#999;border-bottom:2px solid transparent;margin-bottom:-2px}
 .tab.active{color:#d97757;border-bottom-color:#d97757}
@@ -1172,12 +1192,14 @@ pre{background:#f5f5f0;padding:0.75rem;border-radius:6px;font-size:0.75rem;line-
 .nav button{padding:0.5rem 1rem;border:1px solid #e8e6dc;border-radius:6px;background:#fff;cursor:pointer;font-size:0.85rem}
 .nav button:hover{background:#f5f5f0}
 .nav button:disabled{opacity:0.4;cursor:not-allowed}
+.nav .page{line-height:2}
 textarea{width:100%;min-height:60px;padding:0.5rem;border:1px solid #e8e6dc;border-radius:6px;font-size:0.85rem;margin-top:0.5rem;font-family:inherit;resize:vertical}
 </style></head><body>
 <div id="app">${snapshots.outputs[0]}</div>
+<script type="application/json" id="eval-viewer-data">${encoded.replace(/</g, '\\u003c')}</script>
 <script>
-const DATA = ${encoded};
-const SNAPSHOTS = ${JSON.stringify(snapshots)};
+const DATA = JSON.parse(document.getElementById('eval-viewer-data').textContent);
+const SNAPSHOTS = ${JSON.stringify(snapshots).replace(/</g, '\\u003c')};
 let currentIdx = 0;
 let tab = 'outputs';
 
