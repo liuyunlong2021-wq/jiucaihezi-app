@@ -256,7 +256,7 @@ function getModelsForTask(task: CreationTask): string[] {
   const priorities = task === 'image'
     ? ['newapi/xiaoyi/grok-imagine-image-2.0']
     : task === 'video'
-      ? ['newapi/boluo/minimax_h3_image_audio_to_video_v2_15s']
+      ? ['newapi/dola/seedance2.5', 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s']
       : []
   const models = listCreationModels({ task }).map(model => model.id)
   const selected = priorities.filter(model => models.includes(model))

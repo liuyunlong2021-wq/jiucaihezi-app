@@ -79,7 +79,7 @@ async def create_video(request: Request):
         )
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Dola service is unavailable") from exc
-    payload = response.json()
+    payload = response_json(response)
     if not response.is_success or payload.get("code") != "1":
         raise HTTPException(response.status_code if response.status_code >= 400 else 502, payload.get("message", "Dola request failed"))
     task_id = str(payload.get("task_id") or "")
@@ -95,10 +95,10 @@ async def get_video(task_id: str, request: Request):
         response = await request.app.state.http.get(f"{BASE_URL}/api/v1/videos/{task_id}", headers={"Authorization": authorization})
     except httpx.HTTPError as exc:
         raise HTTPException(502, "Dola service is unavailable") from exc
-    payload = response.json()
+    payload = response_json(response)
     if not response.is_success:
         raise HTTPException(502, payload.get("message", "Dola query failed"))
-    task = payload.get("task") or {}
+    task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
     status = str(task.get("status") or "processing")
     code = str(payload.get("code") or "")
     if code not in {"0", "1"}:
@@ -109,6 +109,21 @@ async def get_video(task_id: str, request: Request):
     if status == "succeeded": result["video_url"] = task.get("url")
     if status == "failed": result["error"] = task.get("error") or "Dola task failed"
     return result
+
+
+def response_json(response: httpx.Response) -> dict:
+    """上游回非 JSON（网关 HTML 错误页、空体、被掐断的响应）时给出可读错误。
+
+    以前这里是裸 response.json()：上游一回非 JSON 就抛 JSONDecodeError，被 uvicorn 兜成
+    裸 500，NewAPI 再包成 fail_to_fetch_task「Internal Server Error」，看不出上游到底回了什么。
+    """
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise HTTPException(502, f"Dola returned invalid JSON ({response.status_code})") from exc
+    if not isinstance(data, dict):
+        raise HTTPException(502, f"Dola returned an invalid response ({response.status_code})")
+    return data
 
 
 def require_auth(request: Request) -> str:

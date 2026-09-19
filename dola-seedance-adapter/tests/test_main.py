@@ -20,6 +20,10 @@ class DolaSeedanceAdapterTest(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         await app.state.http.aclose()
 
+    async def use_upstream(self, handler):
+        await app.state.http.aclose()
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
     async def test_text_to_video_still_uses_multipart(self):
         response = await self.client.post(
             "/v1/videos",
@@ -33,6 +37,26 @@ class DolaSeedanceAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn('name="prompt"\r\n\r\nanimate', body)
         self.assertIn('name="ratio"\r\n\r\n9:16', body)
         self.assertIn('name="seconds"\r\n\r\n30', body)
+
+    async def test_non_json_upstream_response_reports_upstream_status(self):
+        await self.use_upstream(lambda request: httpx.Response(502, text="<html>Bad Gateway</html>"))
+
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer key"},
+            json={"model": "dola-seedance2.5", "prompt": "animate", "ratio": "16:9"},
+        )
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("invalid JSON (502)", response.json()["detail"])
+
+    async def test_non_object_upstream_body_reports_upstream_status(self):
+        await self.use_upstream(lambda request: httpx.Response(200, json=["unexpected"]))
+
+        response = await self.client.get("/v1/videos/dola-task-1", headers={"Authorization": "Bearer key"})
+
+        self.assertEqual(response.status_code, 502)
+        self.assertIn("invalid response (200)", response.json()["detail"])
 
 
 if __name__ == "__main__":
