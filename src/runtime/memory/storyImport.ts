@@ -50,17 +50,30 @@ export function safeWikiSegment(value: string): string {
   return result
 }
 
-/** 下载器习惯把文件命名成 `书名(作者).epub`，括号里就是作者。 */
+/**
+ * 下载器把作者写进文件名的三种常见写法：`书名(作者)`、`《书名》作者：作者`、`书名 - 作者`。
+ * 认不出来就留空让用户手填；卷册后缀（`- 第1卷`）不给作者，避免把卷名当人名。
+ */
 function splitFileNameAuthor(fileName: string): { title: string; author: string } {
   const stem = String(fileName || '').replace(/\.[^.]+$/, '').trim()
-  const matched = stem.match(/^(.*?)\s*[（(]([^（()）]{1,40})[）)]\s*$/u)
-  if (!matched) return { title: stem, author: '' }
-  return { title: matched[1]!.trim() || stem, author: matched[2]!.trim() }
+  const named = stem.match(/^(.*?)\s*(?:作者|著)\s*[:：]\s*(.{1,40})$/u)
+  if (named) return { title: unwrapTitle(named[1]!), author: named[2]!.trim() }
+  const bracketed = stem.match(/^(.*?)\s*[（(]([^（()）]{1,40})[）)]\s*$/u)
+  if (bracketed) return { title: unwrapTitle(bracketed[1]!), author: bracketed[2]!.trim() }
+  const dashed = stem.match(/^(.{1,60}?)\s+[-–—]\s+(\S{1,20})$/u)
+  if (dashed && !/[卷章册部集场幕上下全完版篇季]/u.test(dashed[2]!))
+    return { title: unwrapTitle(dashed[1]!), author: dashed[2]!.trim() }
+  return { title: unwrapTitle(stem), author: '' }
+}
+
+/** 书名的《》是包装，不是名字的一部分。 */
+function unwrapTitle(value: string): string {
+  return value.trim().replace(/^《(.*)》$/u, '$1').trim()
 }
 
 /**
  * 书名优先取转换产物里的第一个一级标题（书自己的标题），否则退回文件名；
- * 作者只能从文件名形如 `书名(作者)` 的括号里拿——AnyDoc 的文档模型不带元数据。
+ * 作者只能从文件名里拿——AnyDoc 的文档模型不带元数据。
  * 两项都可以在导入预览里由用户改写，所以猜错不致命。
  */
 export function inferStoryIdentity(

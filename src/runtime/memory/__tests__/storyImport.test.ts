@@ -449,6 +449,20 @@ test('故事名与作者先从原文标题和文件名推断', () => {
     title: '兽血沸腾',
     author: '静官',
   })
+  // 下载器另外两种常见写法：带《》和「作者：」，以及 `书名 - 作者`
+  assert.deepEqual(inferStoryIdentity('正文', '《赘婿》作者：愤怒的香蕉.epub'), {
+    title: '赘婿',
+    author: '愤怒的香蕉',
+  })
+  assert.deepEqual(inferStoryIdentity('正文', '十日终焉 - 杀虫队队员.txt'), {
+    title: '十日终焉',
+    author: '杀虫队队员',
+  })
+  // 破折号后面是卷册不是作者；纯书名不留作者
+  assert.deepEqual(inferStoryIdentity('正文', '斗破苍穹 - 第1卷.txt'), {
+    title: '斗破苍穹 - 第1卷',
+    author: '',
+  })
   assert.deepEqual(inferStoryIdentity('正文', '三结义.md'), { title: '三结义', author: '' })
 })
 
