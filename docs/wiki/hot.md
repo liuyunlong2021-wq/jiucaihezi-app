@@ -5,6 +5,7 @@
 - 格式清单散在三处（云端 `document-converter/src/converter.py`、前端 `useFileUpload.ts` 的 `OFFICE_EXT`、文件选择器的 `accept`），三处都落后于引擎：云端漏 9 个、附件链路漏得更多。`.epub` 以前在文件选择器里写着、传上去被 415 拒。现按 anydoc `0.2.3` 的 `Format::from_extension` 逐条对齐（20 个，**不含 `.csv`**——它走前端文本直通）。
 - Desktop 一向不走白名单（内容识别），所以 `.epub` 在已安装的桌面版本就能转；卡住的是 Web / 移动端，**需要重新部署云端服务**才生效。
 - 真 EPUB 实测：引擎 0.39s / 542 万字；本地服务 POST 得到 200 / 0.52s；拆分器 + 标记词「章」得到 1492 章，短名干净。注意这类 EPUB 走自动识别会被主动拒绝，**必须显式指定标记词**。
+- 新手指南（`jc-new-user-guide`）三处格式列举已加 EPUB。**`attachment-processor`（8091）不做对齐**：该服务 2026-06-28 已停用、前端适配层已删、无调用方，且它的 Office 分支依赖本仓外的 LibreOffice 系 8090 服务，EPUB 在那边本来就读不了。
 
 ## [2026-09-19] 知识型资料有了专用沉淀规则
 

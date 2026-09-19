@@ -18,7 +18,7 @@ allowed-tools:
 - 右上角有两个独立开关：“记忆”控制回答完成后的自动索引，“查询”控制下一轮是否预取当前对话的 `memory_search`；新建对话默认都开启，互不影响。
 - 自动索引写入 `.raw/记忆索引`，不是 `wiki/`；索引失败不会丢回答，可在消息旁点击“记录对话”重试。
 - `wiki-memory` 用于 Wiki 的组织、查询、写入和检查；当前对话的历史召回由原生 `memory_search` 完成，旧 `jc-jiyi` 不再使用。
-- DOCX、PDF、XLSX、PPTX 上传后保留原件并生成 Markdown 可读副本，模型读取 Markdown；原件不会被替换。
+- DOCX、PDF、XLSX、PPTX、EPUB 上传后保留原件并生成 Markdown 可读副本，模型读取 Markdown；原件不会被替换。
 - `上传并覆盖云端` 用本地文字快照覆盖云端，`下载并覆盖本地` 用云端文字快照覆盖本地；两者都不合并、不产生冲突副本。
 - 同步只处理允许的文字资料；媒体二进制、原始附件、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不参与同步。
 - Desktop 保留完整本机能力。

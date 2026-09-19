@@ -7,7 +7,9 @@
 - **关键事实**：Desktop 侧不走白名单（`parse_document_markdown` 用 `Format::from_bytes` 内容识别，扩展名只当兜底），所以 **.epub 在已安装的桌面版当时就能转**；卡住的只有 Web / 移动端。
 - **实施**：白名单按 anydoc 0.2.3 逐条对齐（`doc/docx/docm`、`ppt/pps/pot/pptx/pptm/ppsx/ppsm`、`xls/xlsx/xlsm/xlsb`、`odt/ods/odp`、`rtf/pdf/epub`，共 20 个）；**不含 `.csv`**——它已由前端文本链路直通处理，再列入会多出一条互相竞争的转换路径；415 文案不再列举具体格式；`useFileUpload.OFFICE_EXT` 与文件选择器 `accept` 同步。三处各加一条回归断言，云端加「白名单 == 引擎能力」的集合相等测试。
 - **实测**（真 EPUB `召唤万岁(霞飞双颊).epub`，5.4 MB）：引擎侧 0.39s 转出 542 万字、`## 第一章：【穿越】` 层级完整；本地起服务 POST 真文件得到 **HTTP 200 / 0.52s / 5,423,555 字符**；用真实拆分器 + 标记词「章」拆出 **1492 章**，短名干净（`0001_穿越.md`）。另发现：这类 EPUB 走自动识别会被主动拒绕（`## 第一章` 同时命中 markdown 标题与章节标题两套规则），需显式指定标记词——与知识资料规则的既有纪律一致。
-- **验证**：focused 全量 `1409/1409`、`vue-tsc -b` 通过、`document-converter` Python `7/7`。**未做**：真实 App 内导入（待用户验收）、云端服务重新部署、新手指南未改（线上未部署前不宣称）。
+- **验证**：focused 全量 `1409/1409`、`vue-tsc -b` 通过、`document-converter` Python `7/7`。**未做**：真实 App 内导入（待用户验收）、云端服务重新部署。
+- **补充（同日）**：用户确认后已同步面向用户的新手指南（`jc-new-user-guide` 的 SKILL.md、`4-产品功能.md`、`8-办公.md` 三处格式列举加 EPUB）。注意 **Web / 移动端在云端服务重新部署前仍会 415**，桌面端因走内容识别不受影响。
+- **附件链路不改（2026-06-28 已停用）**：原计划把 `attachment-processor` 的 `OFFICE_EXTENSIONS` 一起对齐，核查后发现该服务已在 2026-06-28 停用（[[运维/服务器运维]] 明列）、前端适配层 `webChatAttachments.ts` 已删、`src/` 中无任何 `api/attachments` 调用方；且它的 Office 分支依赖服务器上另一个不在本仓、LibreOffice 系的 8090 服务，**EPUB 在那边本来就读不了**。对齐一个无调用方的死服务只是给没人跑的代码加扩展名，故不动。
 
 ## [2026-09-19] 变更 | 新增知识资料沉淀规则，修原文节点 index 重复标题
 
