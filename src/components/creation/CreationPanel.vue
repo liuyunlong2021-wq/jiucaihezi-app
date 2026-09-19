@@ -3149,7 +3149,8 @@ function canvasTool(action: string) {
         drawingImage = target.node
         if (isPen) {
           pen = new Pen({ id: crypto.randomUUID(), assetId: target.assetId, editable: true }).setStyle({
-            stroke: '#333',
+            // 和箭头、编号标注同一个红：标注家族里只有画笔原来不是红的，画出来是深灰。
+            stroke: '#e74c3c',
             strokeWidth: penWidth.value,
             strokeCap: 'round',
             strokeJoin: 'round',
@@ -3199,7 +3200,8 @@ function canvasTool(action: string) {
           x: target.point.x,
           y: target.point.y,
           editable: true,
-          fill: '#333',
+          // 与画笔、箭头、编号标注同一个红：标注家族统一成一套颜色。
+          fill: '#e74c3c',
           fontSize: 18,
           text: '',
           padding: [4, 8],

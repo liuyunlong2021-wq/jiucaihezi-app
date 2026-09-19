@@ -331,6 +331,18 @@ test('canvas pen offers five visual stroke widths and uses the selected width', 
   assert.match(source, /const penWidths = \[2, 3, 5, 8, 12\] as const/)
   assert.match(source, /const penWidth = ref<number>\(3\)/)
   assert.match(source, /strokeWidth: penWidth\.value/)
+  // 画笔与箭头、编号标注同一个红：标注家族里只有画笔原来是深灰 #333。
+  assert.match(
+    source,
+    /new Pen\(\{ id: crypto\.randomUUID\(\), assetId: target\.assetId, editable: true \}\)\.setStyle\(\{\s*(?:\/\/[^\n]*\n\s*)?stroke: '#e74c3c',\s*strokeWidth: penWidth\.value/,
+  )
+  // 文字标注同色；标注家族里只剩这一处也是深灰就会被落回单色。
+  assert.match(
+    source,
+    /new LeaferText\(\{\s*id: crypto\.randomUUID\(\),\s*assetId: target\.assetId,\s*x: target\.point\.x,\s*y: target\.point\.y,\s*editable: true,\s*(?:\/\/[^\n]*\n\s*)?fill: '#e74c3c'/,
+  )
+  assert.doesNotMatch(source, /new Pen\([\s\S]{0,200}?stroke: '#333'/)
+  assert.doesNotMatch(source, /new LeaferText\(\{[\s\S]{0,200}?fill: '#333'/)
   assert.match(source, /v-for="width in penWidths"/)
   assert.match(source, /:aria-label="`笔尖粗细 \$\{width\}`"/)
   assert.match(source, /function selectPenWidth\(width: number\)[\s\S]*?showPenWidths\.value = false/)
