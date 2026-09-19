@@ -10,6 +10,7 @@ export type ProjectPreviewMediaKind = ProjectCanvasMediaKind | 'model3d'
 export type ProjectResourceOpenResult =
   | { type: 'conversation'; resource: ProjectResource; text: ProjectTextRead; transcript: ConversationTranscript }
   | { type: 'editor'; resource: ProjectResource; text: ProjectTextRead; editorMode: 'rich' | 'plain' }
+  | { type: 'html'; resource: ProjectResource; text: ProjectTextRead }
   | { type: 'unsafe-text'; resource: ProjectResource }
   | { type: 'canvas'; resource: ProjectResource }
   | { type: 'project-map'; resource: ProjectResource; text: ProjectTextRead; document: JsonCanvasDocument }
@@ -54,6 +55,12 @@ export async function openProjectResource(
     ? parseConversationTranscript(resource.path, text.content)
     : null
   if (transcript) return { type: 'conversation', resource, text, transcript }
+  // HTML 是基本可读格式：截断或内容不安全时才退成不可预览，不能因为“没写过这条分支”就一律拒掉。
+  if (/\.html?$/i.test(resource.path)) {
+    return canEditProjectText(text)
+      ? { type: 'html', resource, text }
+      : { type: 'unsafe-text', resource }
+  }
   return canEditProjectText(text)
     ? { type: 'editor', resource, text, editorMode: projectTextEditorMode(resource) }
     : { type: 'unsafe-text', resource }

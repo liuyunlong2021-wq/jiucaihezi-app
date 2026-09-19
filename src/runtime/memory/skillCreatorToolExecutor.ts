@@ -65,7 +65,18 @@ export async function executeSkillCreatorToolCall(
   call: DirectToolCall,
   context: SkillCreatorToolContext,
 ): Promise<string> {
-  const args = parseArgs(call.function.arguments)
+  // 参数解析失败必须在进闸门前就地成结果：抛出去只会变成一句引擎原生报错，
+  // 模型和用户都看不出该怎么自救。
+  let args: Record<string, any>
+  try {
+    args = parseArgs(call.function.name, call.function.arguments)
+  } catch (error) {
+    return JSON.stringify({
+      status: 'error',
+      errorCode: 'MALFORMED_TOOL_ARGUMENTS',
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
   const runtimeContext = {
     agentId: context.agentId,
     sessionId: context.sessionId,
@@ -280,10 +291,16 @@ function positiveInteger(value: unknown): number {
   return parsed
 }
 
-function parseArgs(value: string): Record<string, any> {
-  const parsed = JSON.parse(value || '{}')
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('工具参数必须是 JSON 对象')
-  return parsed
+function parseArgs(toolName: string, value?: string): Record<string, any> {
+  const raw = value || '{}'
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch {
+    throw new Error(`工具参数 JSON 不完整（${toolName}，收到 ${raw.length} 字符）：多半是回复被输出长度截断。请缩短参数后重试——只传 draft_id、revision、content_hash 这类标识，不要把 SKILL.md 正文或 references 全文复制进参数；必要时拆成多次调用。`)
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`工具参数必须是 JSON 对象（${toolName}）。`)
+  return parsed as Record<string, any>
 }
 
 function normalizeReferences(value: unknown): Array<{ path: string; content: string; title?: string; mimeType?: string }> {

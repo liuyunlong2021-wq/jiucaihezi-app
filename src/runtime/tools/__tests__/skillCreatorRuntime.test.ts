@@ -71,26 +71,25 @@ test('Skill Creator runtime blocks review until tests complete', () => {
   assert.equal(allowed.allowed, true)
 })
 
-test('Skill Creator runtime allows an explicitly confirmed save after validation without tests', () => {
+test('Skill Creator runtime prepares the install card once the draft is validated, whatever the user wrote', () => {
   const runtime = createSkillCreatorRuntime()
   const args = { test_id: 'run_c' }
 
+  const beforeValidation = runtime.beforeToolCall({
+    toolName: 'save_skill',
+    args,
+    context: { ...context, userInput: '确认保存' },
+  })
+  assert.equal(beforeValidation.allowed, false)
+  assert.equal(beforeValidation.errorCode, 'SKILL_CREATOR_VALIDATE_REQUIRED')
+
   runtime.afterToolResult({ toolName: 'skill_creator_validate', args, context, result: { status: 'ok' } })
 
-  const notConfirmed = runtime.beforeToolCall({
-    toolName: 'save_skill',
-    args,
-    context: { ...context, userInput: '看起来还可以' },
-  })
-  assert.equal(notConfirmed.allowed, false)
-  assert.equal(notConfirmed.errorCode, 'SKILL_CREATOR_SAVE_CONFIRMATION_REQUIRED')
-
-  const confirmed = runtime.beforeToolCall({
-    toolName: 'save_skill',
-    args,
-    context: { ...context, userInput: '确认保存这个 Skill' },
-  })
-  assert.equal(confirmed.allowed, true)
+  // 出卡不等于安装：装不装由用户点安装卡决定，所以不再要求用户复述“保存”这类确认词。
+  for (const userInput of ['确认！安装', '看起来还可以', '']) {
+    const decision = runtime.beforeToolCall({ toolName: 'save_skill', args, context: { ...context, userInput } })
+    assert.equal(decision.allowed, true, `userInput=${userInput}`)
+  }
 
   const prepared = runtime.afterToolResult({
     toolName: 'save_skill',

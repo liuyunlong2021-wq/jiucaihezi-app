@@ -189,8 +189,8 @@ Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使
 ### 步骤 6.5：优化命中描述
 如果测试显示命中不准、without_skill 也能通过、用户说"不够准"或"触发不稳定"，调用 skill_creator_improve_description 优化 YAML description，并把完整 SKILL.md 展示给用户确认。
 
-### 步骤 7：等待用户确认并输出安装卡
-用户必须明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，你才能继续。用户确认后调用 save_skill，并把返回的 install_token 原样输出为 \`\`\`jc-skill-install-v2 JSON 代码块。用户点击安装卡后才会把完整草稿包保存到中央 Skill 根目录。
+### 步骤 7：展示草稿后输出安装卡
+草稿已在对话里展示给用户、并拿到校验结论之后，就可以调用 save_skill，并把返回的 install_token 原样输出为 \`\`\`jc-skill-install-v2 JSON 代码块。用户点击安装卡后才会把完整草稿包保存到中央 Skill 根目录。
 
 安装卡格式示例：
 \`\`\`
@@ -201,7 +201,8 @@ Skill 已准备好，请确认安装。
 \`\`\`
 \`\`\`
 
-绝对不要在用户确认之前调用 save_skill 或输出安装卡。不得改写 install_token。
+出卡不等于安装：完整草稿包只有在用户点击安装卡之后才会写入中央 Skill 根目录，所以不需要在出卡前追问确认，也不要要求用户复述“保存”、“确认保存”这类特定字串，更不要自己发明“再确认一次”的关卡。
+绝对不要在展示草稿与校验结论之前调用 save_skill 或输出安装卡。不得改写 install_token。
 
 ### 步骤 8：打包预检（可选）
 如果需要，可在输出安装卡前调用 skill_creator_package 做官方 .skill 包预检。这个步骤是内部能力，不要让用户理解文件夹、脚本或 manifest 细节。
@@ -225,8 +226,8 @@ const SKILL_BUILDER_RUNTIME_APPENDIX_BASE = `
 6. 设计测试用例，说明每个用例的 prompt 和期望表现，等待用户确认。
 7. 用户确认后调用 run_skill_tests，至少提供 3 个测试用例，并沿用 draft_id。
 8. 展示测试结果并询问是否需要修改。
-9. 只有用户明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，才能调用 save_skill，并优先传入 draft_id，不要复制大段 references JSON。
-10. 保存后告诉用户："Skill已保存，在「我的Skill」中可用。"
+9. 草稿展示给用户之后，就可以调用 save_skill，并优先传入 draft_id，不要复制大段 references JSON。出卡不等于保存：用户点击安装卡后才真正保存，所以不要先追问确认，也不要要求用户复述特定字串。
+10. 出卡后不要声称已经保存；只有用户点击安装卡并拿到成功回执后，才能说"Skill已保存，在「我的Skill」中可用。"
 `
 
 const SKILL_BUILDER_RUNTIME_APPENDIX_WITH_ADVANCED_RUNTIME = `
@@ -247,8 +248,8 @@ const SKILL_BUILDER_RUNTIME_APPENDIX_WITH_ADVANCED_RUNTIME = `
 6. 设计测试用例，说明每个用例的 prompt 和期望表现，等待用户确认。
 7. 用户确认后调用 run_skill_tests，至少提供 3 个测试用例，并沿用 draft_id。
 8. 展示测试结果并询问是否需要修改。
-9. 只有用户明确说"满意"、"可以了"、"ok"、"保存吧" 等确认词之后，才能调用 save_skill，并优先传入 draft_id，不要复制大段 references JSON。
-10. 保存后告诉用户："Skill已保存，在「我的Skill」中可用。"
+9. 草稿展示给用户之后，就可以调用 save_skill，并优先传入 draft_id，不要复制大段 references JSON。出卡不等于保存：用户点击安装卡后才真正保存，所以不要先追问确认，也不要要求用户复述特定字串。
+10. 出卡后不要声称已经保存；只有用户点击安装卡并拿到成功回执后，才能说"Skill已保存，在「我的Skill」中可用。"
 `
 
 async function resolveSkillMdContent(

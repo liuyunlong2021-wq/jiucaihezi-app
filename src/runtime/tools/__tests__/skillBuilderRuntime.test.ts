@@ -9,7 +9,7 @@ const context = {
   userInput: '继续',
 }
 
-test('Skill Builder runtime blocks save until draft tests and explicit confirmation complete', () => {
+test('Skill Builder runtime blocks save until the draft and its tests are done', () => {
   const runtime = createSkillBuilderRuntime()
   const args = { draft_id: 'draft_a' }
 
@@ -43,54 +43,11 @@ test('Skill Builder runtime blocks save until draft tests and explicit confirmat
     result: { status: 'ok', eval_count: 3 },
   })
 
-  const noConfirmation = runtime.beforeToolCall({
-    toolName: 'save_skill',
-    args,
-    context: { ...context, userInput: '测试通过了' },
-  })
-  assert.equal(noConfirmation.allowed, false)
-  assert.equal(noConfirmation.errorCode, 'SKILL_BUILDER_SAVE_CONFIRMATION_REQUIRED')
-
-  const confirmed = runtime.beforeToolCall({
-    toolName: 'save_skill',
-    args,
-    context: { ...context, userInput: '确认保存这个 Skill' },
-  })
-  assert.equal(confirmed.allowed, true)
-})
-
-test('Skill Builder runtime rejects save preauthorization from the same turn that ran tests', () => {
-  const runtime = createSkillBuilderRuntime()
-  const args = { draft_id: 'draft_same_turn' }
-  const sameTurnContext = { ...context, userInput: '生成这个 Skill，测试通过后直接保存' }
-
-  runtime.afterToolResult({
-    toolName: 'build_skill_from_text',
-    args,
-    context: sameTurnContext,
-    result: { status: 'ok', draft_id: 'draft_same_turn' },
-  })
-  runtime.afterToolResult({
-    toolName: 'run_skill_tests',
-    args: { ...args, test_cases: [{}, {}, {}] },
-    context: sameTurnContext,
-    result: { status: 'ok', eval_count: 3 },
-  })
-
-  const sameTurnSave = runtime.beforeToolCall({
-    toolName: 'save_skill',
-    args,
-    context: sameTurnContext,
-  })
-  assert.equal(sameTurnSave.allowed, false)
-  assert.equal(sameTurnSave.errorCode, 'SKILL_BUILDER_SAVE_CONFIRMATION_REQUIRED')
-
-  const nextTurnSave = runtime.beforeToolCall({
-    toolName: 'save_skill',
-    args,
-    context: { ...context, userInput: '确认保存' },
-  })
-  assert.equal(nextTurnSave.allowed, true)
+  // 出卡不等于保存：保存由用户点安装卡决定，所以不再要求用户复述“保存”这类确认词。
+  for (const userInput of ['测试通过了', '确认保存这个 Skill']) {
+    const decision = runtime.beforeToolCall({ toolName: 'save_skill', args, context: { ...context, userInput } })
+    assert.equal(decision.allowed, true, `userInput=${userInput}`)
+  }
 })
 
 test('Skill Builder runtime requires at least three successful test cases before save', () => {

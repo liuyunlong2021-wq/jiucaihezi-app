@@ -12,7 +12,7 @@ interface MediaDisplayDependencies {
   revokeObjectUrl(url: string): void
 }
 
-function absoluteProjectPath(resource: ProjectResource): string {
+export function absoluteProjectPath(resource: ProjectResource): string {
   return `${resource.owner.replace(/[\\/]+$/, '')}/${resource.path.replace(/^[/\\]+/, '')}`
 }
 

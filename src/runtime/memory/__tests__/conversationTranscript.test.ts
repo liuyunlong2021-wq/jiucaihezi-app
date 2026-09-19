@@ -251,3 +251,43 @@ test('conversation transcript remaps legacy attachment paths without changing th
   assert.equal(parsed?.persistentAttachments?.[0]?.projectPath, '.raw/jc-media/文档/资料.docx')
   assert.equal(parsed?.persistentAttachments?.[0]?.readablePath, '.raw/jc-media/文档/资料.docx.md')
 })
+
+test('conversation turns keep the capability chips that were on when the turn was sent', () => {
+  const path = '.raw/对话记录/chat_tools.md'
+  let content = createConversationTranscript('chat_tools', '带开关', '2026-09-18T10:00:00.000Z')
+  content = appendConversationTurn(content, {
+    id: 'turn_tools_1', role: 'user', content: '改这个 Skill', createdAt: '2026-09-18T10:00:01.000Z',
+    skillNames: ['skill-creator'],
+    toolChips: ['file', 'media', 'mcp__github'],
+  })
+  content = appendConversationTurn(content, {
+    id: 'turn_tools_2', role: 'assistant', content: '好', createdAt: '2026-09-18T10:00:02.000Z',
+  })
+  const parsed = parseConversationTranscript(path, content)
+
+  assert.deepEqual(parsed?.turns[0]?.toolChips, ['file', 'media', 'mcp__github'])
+  assert.deepEqual(parsed?.turns[0]?.skillNames, ['skill-creator'])
+  assert.equal(parsed?.turns[0]?.content, '改这个 Skill')
+  assert.equal(parsed?.turns[1]?.toolChips, undefined)
+  assert.equal(parsed?.turns[1]?.content, '好')
+})
+
+test('turns written before the tools attribute existed still parse their content', () => {
+  let content = createConversationTranscript('chat_legacy_tools', '老对话', '2026-09-18T10:00:00.000Z')
+  content = appendConversationTurn(content, {
+    id: 'turn_legacy', role: 'user', content: '旧格式正文', createdAt: '2026-09-18T10:00:01.000Z',
+    skillNames: ['jc-duanju'],
+  })
+  content = appendConversationTurn(content, {
+    id: 'turn_legacy_reply', role: 'assistant', content: '好', createdAt: '2026-09-18T10:00:02.000Z',
+  })
+  // 没有开关的轮次不写 tools 属性——与开关功能上线前写下的旧文件同形。
+  assert.doesNotMatch(content, /tools="/)
+
+  const parsed = parseConversationTranscript('.raw/对话记录/chat_legacy_tools.md', content)
+
+  assert.equal(parsed?.turns[0]?.content, '旧格式正文')
+  assert.deepEqual(parsed?.turns[0]?.skillNames, ['jc-duanju'])
+  assert.equal(parsed?.turns[0]?.toolChips, undefined)
+  assert.equal(parsed?.turns[1]?.content, '好')
+})

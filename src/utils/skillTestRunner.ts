@@ -543,7 +543,7 @@ async function runSkillTestTask(
       tool_calls: response.toolCalls,
     })
     for (const toolCall of response.toolCalls) {
-      const result = await adapter.execute(toolCall, signal)
+      const result = await executeTestToolCall(adapter, toolCall, signal)
       outputs.push(...(result.outputs || []).map(output => ({
         path: String(output.path),
         mimeType: output.mimeType || 'application/octet-stream',
@@ -696,18 +696,20 @@ export async function runSkillTests(
 
       try {
         const assertions = normalizeTestCaseAssertions(tc)
+        const baselineConfiguration: RunResult['configuration'] = options.baselineSkillMd ? 'installed_version' : 'without_skill'
         const runs: RunResult[] = []
         for (let runNumber = 1; runNumber <= runsPerConfiguration; runNumber += 1) {
-          const [withRun, baselineRun] = await Promise.all([
-            runSkillTestTask(config, draftSkillMd, tc.prompt, options.toolAdapter, controller.signal),
-            runSkillTestTask(config, options.baselineSkillMd || null, tc.prompt, options.toolAdapter, controller.signal),
+          // 两路各自结算：一路炸不该把另一路真跑出来的结果也改写成异常。
+          const [withOutcome, baselineOutcome] = await Promise.all([
+            settleSkillTestRun(runSkillTestTask(config, draftSkillMd, tc.prompt, options.toolAdapter, controller.signal)),
+            settleSkillTestRun(runSkillTestTask(config, options.baselineSkillMd || null, tc.prompt, options.toolAdapter, controller.signal)),
           ])
           const [withAssertions, baselineAssertions] = await Promise.all([
-            gradeAssertions(config, withRun.output, assertions, tc.expect),
-            gradeAssertions(config, baselineRun.output, assertions, tc.expect),
+            withOutcome.run ? gradeAssertions(config, withOutcome.run.output, assertions, tc.expect) : [],
+            baselineOutcome.run ? gradeAssertions(config, baselineOutcome.run.output, assertions, tc.expect) : [],
           ])
-          runs.push(toRunResult('with_skill', withRun, withAssertions, draftSkillMd, tc.prompt))
-          runs.push(toRunResult(options.baselineSkillMd ? 'installed_version' : 'without_skill', baselineRun, baselineAssertions, options.baselineSkillMd || null, tc.prompt))
+          runs.push(toRunResult('with_skill', withOutcome.run || failedSkillTestRun(withOutcome.error), withAssertions, draftSkillMd, tc.prompt))
+          runs.push(toRunResult(baselineConfiguration, baselineOutcome.run || failedSkillTestRun(baselineOutcome.error), baselineAssertions, options.baselineSkillMd || null, tc.prompt))
         }
 
         return {
@@ -717,17 +719,15 @@ export async function runSkillTests(
           expect: tc.expect,
           runs,
         } as SingleTestResult
-      } catch (e: any) {
-        const errRun: RunResult = {
-          configuration: 'with_skill',
-          output: e.name === 'AbortError' ? '[超时]' : `[异常: ${e.message}]`,
-          tokenCount: 0, durationMs: 0, assertions: [],
-          timing: { total_tokens: 0, duration_ms: 0, total_duration_seconds: 0 },
-        }
+      } catch (error) {
+        const errRun = failedSkillTestRun(error)
         return {
           eval_id: i + 1, eval_name: tc.expect.slice(0, 40),
           prompt: tc.prompt, expect: tc.expect,
-          runs: [errRun, { ...errRun, configuration: 'without_skill' }],
+          runs: [
+            toRunResult('with_skill', errRun, [], null, tc.prompt),
+            toRunResult(options.baselineSkillMd ? 'installed_version' : 'without_skill', errRun, [], null, tc.prompt),
+          ],
         } as SingleTestResult
       } finally {
         clearTimeout(timeout)
@@ -769,6 +769,63 @@ function toRunResult(configuration: RunResult['configuration'], run: { output: s
     timing: { total_tokens: run.tokens, duration_ms: run.durationMs, total_duration_seconds: run.durationMs / 1000 },
     transcript: run.transcript || [...(system ? [{ role: 'system' as const, content: system }] : []), { role: 'user', content: prompt }, { role: 'assistant', content: run.output }],
     outputs: run.outputs || [],
+  }
+}
+
+type SkillTestRun = Awaited<ReturnType<typeof runSkillTestTask>>
+
+async function settleSkillTestRun(task: Promise<SkillTestRun>): Promise<{ run?: SkillTestRun; error?: unknown }> {
+  try {
+    return { run: await task }
+  } catch (error) {
+    return { error }
+  }
+}
+
+/**
+ * 评测里模型的一次工具失败是正常回合结果，交给模型看见并自救；
+ * 让它冒到用例级别会把整个用例（连另一路配置）一起顶成异常，评测就没了意义。
+ */
+async function executeTestToolCall(
+  adapter: SkillTestToolAdapter,
+  toolCall: SkillTestToolCall,
+  signal?: AbortSignal,
+): Promise<SkillTestToolResult> {
+  try {
+    return await adapter.execute(toolCall, signal)
+  } catch (error) {
+    // 超时中断属于整轮失败，不是工具层面的错误，照旧往上抛。
+    if (signal?.aborted) throw error
+    return {
+      content: JSON.stringify({
+        status: 'error',
+        message: `工具 ${toolCall.function.name} 执行失败：${describeThrown(error)}`,
+      }),
+    }
+  }
+}
+
+function failedSkillTestRun(error: unknown): { output: string; tokens: number; durationMs: number } {
+  return {
+    output: isAbortError(error) ? '[超时]' : `[异常: ${describeThrown(error)}]`,
+    tokens: 0,
+    durationMs: 0,
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError'
+}
+
+/** 抛出物不一定是 Error：Tauri 命令的 Result<_, String> 拒绝值是字符串，取 `.message` 只会得到 undefined。 */
+function describeThrown(error: unknown): string {
+  if (error instanceof Error) return error.name && error.name !== 'Error' ? `${error.name}: ${error.message}` : error.message
+  if (typeof error === 'string') return error
+  if (error === undefined || error === null) return String(error)
+  try {
+    return JSON.stringify(error) ?? String(error)
+  } catch {
+    return String(error)
   }
 }
 
@@ -1050,7 +1107,7 @@ function render() {
   html += '<div class="meta">共 ' + runs.length + ' 个结果 | ' + new Date().toLocaleString() + '</div>';
 
   if (DATA.benchmark) {
-    html += '<div class="tabs"><div class="tab' + (tab==='outputs'?' active':'') + '" onclick="switchTab(\'outputs\')">Outputs</div><div class="tab' + (tab===\'benchmark\'?\' active\':\'\') + '" onclick="switchTab(\'benchmark\')">Benchmark</div></div>';
+    html += '<div class="tabs"><div class="tab' + (tab==='outputs'?' active':'') + '" onclick="switchTab(\\'outputs\\')">Outputs</div><div class="tab' + (tab==='benchmark'?' active':'') + '" onclick="switchTab(\\'benchmark\\')">Benchmark</div></div>';
   }
 
   if (tab === 'outputs') {
@@ -1085,7 +1142,7 @@ function render() {
     if (b.notes && b.notes.length) {
       html += '<div class="notes"><strong>分析笔记</strong><ul>' + b.notes.map(function(n){return '<li>'+escapeHtml(n)+'</li>'}).join('') + '</ul></div>';
     }
-    html += '<div class="nav"><button onclick="switchTab(\'outputs\')">\u2190 返回 Outputs</button></div>';
+    html += '<div class="nav"><button onclick="switchTab(\\'outputs\\')">\u2190 返回 Outputs</button></div>';
   }
 
   document.getElementById('app').innerHTML = html;

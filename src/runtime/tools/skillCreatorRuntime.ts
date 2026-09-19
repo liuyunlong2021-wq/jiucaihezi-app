@@ -25,7 +25,6 @@ export interface SkillCreatorRuntimeSnapshot {
   tested: boolean
   reviewOpened: boolean
   enteredWaitingUserFeedback: boolean
-  saveRequested: boolean
   draftId?: string
   revision?: number
   contentHash?: string
@@ -78,7 +77,6 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
       tested: false,
       reviewOpened: false,
       enteredWaitingUserFeedback: false,
-      saveRequested: false,
       updatedAt: now,
     }
     records.set(identity.key, created)
@@ -146,7 +144,6 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
       record.tested = false
       record.reviewOpened = false
       record.enteredWaitingUserFeedback = false
-      record.saveRequested = false
       record.state = 'validated'
     } else if (input.toolName === 'run_skill_tests') {
       record.tested = true
@@ -167,7 +164,6 @@ export function createSkillCreatorRuntime(): SkillCreatorRuntime {
       record.tested = false
       record.reviewOpened = false
       record.enteredWaitingUserFeedback = false
-      record.saveRequested = false
       record.state = 'improving'
     } else if (input.toolName === 'skill_creator_package') {
       record.state = 'package_ready'
@@ -218,19 +214,13 @@ export function resolveSkillCreatorRuntimeIdentity(
   }
 }
 
-export function isExplicitSkillSaveIntent(value?: string | null): boolean {
-  return /(确认)?保存|保存(这个|下来|为|成)|就这样|可以保存|没问题.*保存|满意|可以了|^\s*ok\s*[.!！。]?\s*$/i.test(String(value || ''))
-}
-
 export function isSkillImproveIntent(value?: string | null): boolean {
   return /不满意|继续(改|优化|调整|完善)|优化描述|命中不准|关键词不准|再改|重写|改一下/.test(String(value || ''))
 }
 
+// 出卡（save_skill）不等于安装：真正写入中央 Skill 根目录的是用户点安装卡那一下，
+// 所以这里不再要求用户复述“保存”这类确认词——那会把用户卡在猜暗号的循环里。
 function applyUserIntent(record: SkillCreatorRuntimeSnapshot, userInput: string | null | undefined, now: number): void {
-  if (isExplicitSkillSaveIntent(userInput)) {
-    record.saveRequested = true
-    record.updatedAt = now
-  }
   if (record.enteredWaitingUserFeedback && isSkillImproveIntent(userInput)) {
     record.state = 'improving'
     record.updatedAt = now
@@ -258,9 +248,6 @@ function validateBeforeTool(
   if (toolName === 'save_skill') {
     if (!record.validated) return createBlockedDecision(record.state, 'SKILL_CREATOR_VALIDATE_REQUIRED', '还不能保存：请先校验当前 Skill 草稿。', '先调用 skill_creator_validate。')
     if (record.tested && !record.enteredWaitingUserFeedback) return createBlockedDecision(record.state, 'SKILL_CREATOR_REVIEW_REQUIRED', '还不能保存：已运行测试，请先完成评审。', '先调用 skill_creator_open_eval_review。')
-    if (!record.saveRequested) {
-      return createBlockedDecision(record.state, 'SKILL_CREATOR_SAVE_CONFIRMATION_REQUIRED', '还不能保存：需要用户明确说“保存”或“确认保存”。', '请先向用户展示当前草稿与校验结论，并等待用户明确确认保存。')
-    }
   }
   return null
 }

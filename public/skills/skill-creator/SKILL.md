@@ -43,7 +43,7 @@ Skill 稳定后，仅在用户要求更清晰的表述或搜索标签时改进�
 
 此 Skill 与模型无关。不要假定特定提供商、CLI、编排机制、发现变量或流式格式。请使用宿主应用的 Skill Creator 工具完成验证、测试、审查、打包与保存。
 
-草稿归应用所有，并通过 `draft_id`、`revision` 和 `content_hash` 标识。在验证、可选测试、审查、打包和保存的全过程中携带这三个值。迭代期间将草稿保留在受控临时存储中。`save_skill` 仅准备安装结果，绝不可直接写入真实 Skill 根目录。获得用户明确确认后，在 `jc-skill-install-v2` 块中原样输出返回的令牌，并由宿主 UI 原子化安装完整包。
+草稿归应用所有，并通过 `draft_id`、`revision` 和 `content_hash` 标识。在验证、可选测试、审查、打包和保存的全过程中携带这三个值。迭代期间将草稿保留在受控临时存储中。`save_skill` 仅准备安装结果，绝不可直接写入真实 Skill 根目录。草稿展示给用户后，在 `jc-skill-install-v2` 块中原样输出返回的令牌，由宿主 UI 转换成安装卡；用户点击安装卡才会原子化安装完整包。
 
 使用宿主生命周期工具，而非 shell 命令或提供商特定编排方式。测试为可选项。用户要求测试时，使用 `run_skill_tests`，通过 `skill_creator_submit_eval_feedback` 持久化反馈，并以 `skill_creator_load_eval_feedback` 加载既有反馈。仅在用户明确要求严格比较时，使用 `skill_creator_compare_outputs` 和 `skill_creator_analyze_comparison`。
 
@@ -377,9 +377,9 @@ kill $VIEWER_PID 2>/dev/null
 
 ## 交付与安装
 
-评估完成后，保留最终草稿及其全部 `references/`、`scripts/`、`assets/` 文件。先向用户说明已完成的内容和验证结果，再等待明确安装确认；没有确认时，草稿仍停留在受控临时存储中。
+评估完成后，保留最终草稿及其全部 `references/`、`scripts/`、`assets/` 文件。先向用户说明已完成的内容和验证结果，然后就可以调用 `save_skill` 准备安装令牌：出卡不等于安装，草稿仍停留在受控临时存储中，只有用户点击安装卡之后才会写入真实 Skill 根目录。
 
-用户明确说“安装”“帮我安装”或同等确认后，调用 `save_skill` 准备安装令牌。它冻结当前 `draft_id + revision + content_hash`，不会直接写入真实 Skill 根目录。不要手工复制草稿文件、生成 `.skill` 文件或改写令牌。
+不要要求用户复述“保存”“确认保存”这类特定字串，也不要自己发明“再确认一次”的关卡。`save_skill` 会冻结当前 `draft_id + revision + content_hash`，不会直接写入真实 Skill 根目录。不要手工复制草稿文件、生成 `.skill` 文件或改写令牌。
 
 随后输出一句简短确认语，再输出且只输出一个如下格式的代码块，其中 JSON 必须是 `save_skill` 返回的 `install_token`：
 

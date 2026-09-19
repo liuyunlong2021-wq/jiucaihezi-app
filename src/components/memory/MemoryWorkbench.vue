@@ -53,6 +53,7 @@ import {
   type MediaReferenceResolvers,
 } from '@/runtime/workbench/mediaReference'
 import {
+  parseEvalReviewPath,
   parseSkillInstallPlan,
   stripSkillInstallBlock,
   type SkillInstallPlan,
@@ -100,6 +101,24 @@ const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
+// HTML 用 blob URL 交给 iframe：srcdoc 会继承主文档 CSP 拦掉内联脚本，asset:// 在 webview 的 iframe 里加载不出内容，两者都是白屏。
+const htmlPreviewUrl = ref('')
+let htmlPreviewObjectUrl = ''
+function releaseHtmlPreviewUrl() {
+  if (htmlPreviewObjectUrl) URL.revokeObjectURL(htmlPreviewObjectUrl)
+  htmlPreviewObjectUrl = ''
+  htmlPreviewUrl.value = ''
+}
+watch(
+  () => (previewResource.value?.type === 'html' ? previewResource.value.text.content : ''),
+  content => {
+    releaseHtmlPreviewUrl()
+    if (!content) return
+    htmlPreviewObjectUrl = URL.createObjectURL(new Blob([content], { type: 'text/html' }))
+    htmlPreviewUrl.value = htmlPreviewObjectUrl
+  },
+)
+onBeforeUnmount(releaseHtmlPreviewUrl)
 const recordingScene = ref<Scene3DDocument | null>(null)
 const recordingSceneEditor = ref<{ recordVideo: (signal?: AbortSignal) => Promise<Blob> } | null>(null)
 const sceneVideoStatus = ref('正在检测 FFmpeg…')
@@ -158,12 +177,88 @@ const selectedToolChips = computed(() => [
   { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
 ].filter(tool => tool.selected))
-function clearToolSelections() {
-  fileToolsSelected.value = false
-  selectedMcpToolNames.value = []
-  mediaSelected.value = false
-  avSelected.value = false
-  scene3dSelected.value = false
+// 文件能力合同：开关与引用文件是会话级状态，随用户消息落盘、重开对话时从最后一轮用户消息恢复。
+// 一轮跑完只清一次性状态（输入框、当轮附件），不清开关与引用——静默收权、引用自己掉下来
+// 都会让用户以为能力还在，得再点一次才能继续。
+function toolChipIds(): string[] {
+  const ids: string[] = []
+  if (fileToolsSelected.value) ids.push('file')
+  if (mediaSelected.value) ids.push('media')
+  if (avSelected.value) ids.push('av')
+  if (scene3dSelected.value) ids.push('scene3d')
+  ids.push(...selectedMcpToolNames.value)
+  return ids
+}
+
+function applyToolChipIds(ids?: string[]) {
+  const next = new Set(ids || [])
+  fileToolsSelected.value = next.has('file')
+  selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
+  mediaSelected.value = next.has('media')
+  avSelected.value = next.has('av')
+  scene3dSelected.value = next.has('scene3d')
+}
+
+function latestUserToolChips(turns: ConversationTurn[]): string[] | undefined {
+  return [...turns].reverse().find(turn => turn.role === 'user')?.toolChips
+}
+
+function latestUserTurnToolNames(turns: ConversationTurn[]): string[] | undefined {
+  return [...turns].reverse().find(turn => turn.role === 'user')?.skillNames
+}
+
+// 评测报告：落进项目的 JC Media 文档，用现成的 HTML 预览看（不另设浮层）。
+async function openEvalReport(path: string) {
+  const owner = projectOwner.value
+  if (!owner) return
+  try {
+    const dirName = String(path.match(/[\\/]([^\\/]+)[\\/]eval-review\.html$/i)?.[1] || `iteration-${Date.now().toString(36)}`)
+    const projectPath = `.raw/jc-media/文档/评测报告-${dirName}.html`
+    const existing = (await files.list(owner)).find(resource => resource.path === projectPath)
+    if (!existing) {
+      const { readTextFile } = await import('@tauri-apps/plugin-fs')
+      await files.createText(owner, projectPath, await readTextFile(path))
+    }
+    const resource: ProjectResource = {
+      runtime: desktopRuntime ? 'desktop' : 'web',
+      owner,
+      path: projectPath,
+      name: projectPath.split('/').at(-1) || '评测报告.html',
+      isDirectory: false,
+      kind: 'document',
+      mimeType: 'text/html',
+      size: 0,
+    }
+    emitEvent('project-filetree:locate', { path: projectPath })
+    await openProjectFile(resource)
+  } catch (cause) {
+    contextNotice.value = `打开评测报告失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
+async function revealEvalReport(path: string) {
+  try {
+    const { revealItemInDir } = await import('@tauri-apps/plugin-opener')
+    await revealItemInDir(path.replace(/\/[^/]+$/, ''))
+  } catch (cause) {
+    contextNotice.value = `打开报告目录失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
+async function availableSkillNamesForComposer(): Promise<Set<string>> {
+  return new Set([
+    ...(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name),
+    ...agentStore.getCustomSkills().filter(skill => skill.enabled !== false).map(skill => skill.name),
+  ])
+}
+
+/**
+ * 恢复输入框里的 @Skill。必须过滤掉已经不存在的 Skill：
+ * 坏引用会让整段会话的 Skill 加载失败，连带 read 全部不可用。
+ */
+async function restoreComposerSkills(names?: string[]) {
+  const available = await availableSkillNamesForComposer()
+  selectedSkillNames.value = [...new Set((names || []).filter(name => available.has(name)))]
 }
 const mentionOpen = ref(false)
 // 从芯片排「@Skill」进入时只列 Skill；手打 @ 时仍给全套候选。
@@ -253,6 +348,8 @@ const chatDockWidth = ref(Number.isFinite(storedChatWidth) && storedChatWidth >=
 const chatDockResizing = ref(false)
 const skillInstallPlans = ref<Record<string, SkillInstallPlan>>({})
 const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installed' | 'failed'>>({})
+// 评测报告：固定落在 skill-workspaces 下的 eval-review.html，用沙箱 iframe 在应用内看，不跳浏览器。
+const evalReports = ref<Record<string, string>>({})
 const skillInstallErrors = ref<Record<string, string>>({})
 const transientAttachments = ref<Record<string, ResolvedDirectAttachment[]>>({})
 let abortController: AbortController | null = null
@@ -856,11 +953,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
       ...attachment, value: '', resourcePath: attachment.projectPath,
     }))
     const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')
-    const availableSkillNames = new Set([
-      ...(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name),
-      ...agentStore.getCustomSkills().filter(skill => skill.enabled !== false).map(skill => skill.name),
-    ])
-    selectedSkillNames.value = [...new Set((latestUserTurn?.skillNames || []).filter(name => availableSkillNames.has(name)))]
+    await restoreComposerSkills(latestUserTurn?.skillNames)
+    applyToolChipIds(latestUserToolChips(resource.transcript.turns))
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     await restoreConversationMemoryIndexState(resource, generation)
     if (generation !== resourceOpenGeneration) return
@@ -887,6 +981,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
         skillInstallPlans.value[turn.id] = await parseSkillInstallPlan(turn.content)
         skillInstallStatus.value[turn.id] ||= 'ready'
       } catch { /* ordinary assistant reply */ }
+      const evalReviewPath = parseEvalReviewPath(turn.content)
+      if (evalReviewPath) evalReports.value[turn.id] = evalReviewPath
     }
     void loadConversationAttachmentPreviews(resource, generation)
   } else {
@@ -1031,6 +1127,22 @@ async function handleMarkdownClick(event: MouseEvent) {
       copyButton.classList.remove('copied')
       if (label) label.textContent = '复制'
     }, copied ? 1200 : 1800)
+    return
+  }
+  const reportLink = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#jc-eval-review="]')
+  if (reportLink) {
+    event.preventDefault()
+    await openEvalReport(decodeURIComponent(reportLink.getAttribute('href')!.slice('#jc-eval-review='.length)))
+    return
+  }
+  // 消息正文里指向评测报告的链接（模型自己写的那种）必须在应用内打开，不能丢给系统浏览器。
+  const reportAnchor = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href]')
+  const reportPath = reportAnchor
+    ? parseEvalReviewPath([reportAnchor.getAttribute('href'), reportAnchor.getAttribute('title'), reportAnchor.textContent].filter(Boolean).join(' '))
+    : null
+  if (reportPath) {
+    event.preventDefault()
+    await openEvalReport(reportPath)
     return
   }
   const anchor = (event.target as Element | null)?.closest<HTMLAnchorElement>('a[href^="#jc-file="]')
@@ -1216,9 +1328,8 @@ async function editTurn(turn: ConversationTurn) {
   editingTurnId.value = turn.id
   input.value = turn.content
   attachments.value = []
-  referencedFiles.value = []
-  selectedSkillNames.value = []
-  clearToolSelections()
+  applyToolChipIds(turn.toolChips)
+  await restoreComposerSkills(turn.skillNames)
   try {
     for (const attachment of turn.attachments || []) {
       const path = attachment.projectPath || attachment.readablePath
@@ -1240,13 +1351,13 @@ async function editTurn(turn: ConversationTurn) {
   composerRef.value?.focus()
 }
 
-function cancelEdit() {
+async function cancelEdit() {
   editingTurnId.value = ''
   input.value = ''
   attachments.value = []
-  referencedFiles.value = []
-  selectedSkillNames.value = []
-  clearToolSelections()
+  const turns = conversation.value?.transcript.turns || []
+  applyToolChipIds(latestUserToolChips(turns))
+  await restoreComposerSkills(latestUserTurnToolNames(turns))
   setEditorText(composerRef.value, '')
   resizeComposer()
   composerRef.value?.focus()
@@ -1395,6 +1506,7 @@ async function send() {
     createdAt: new Date().toISOString(),
     attachments: attachmentMetadata(activeAttachments),
     skillNames: skillSnapshot,
+    toolChips: toolChipIds(),
   }
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || activeAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
@@ -1412,6 +1524,10 @@ async function send() {
       ),
     ),
   ]
+  // 文件能力合同：开关关掉就是收权，收权必须可见——静默收权会让用户以为文件能力还在。
+  if (!fileToolsSelected.value && authorizedPaths.value.length)
+    contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但 @文件 已关闭：本轮不会读写这些路径。`
+
   beginRunStatus()
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
@@ -1508,10 +1624,10 @@ async function send() {
         skillInstallPlans.value[turn.id] = await parseSkillInstallPlan(turn.content)
         skillInstallStatus.value[turn.id] = 'ready'
       } catch { /* no Skill install plan */ }
+      const evalReviewPath = parseEvalReviewPath(turn.content)
+      if (evalReviewPath) evalReports.value[turn.id] = evalReviewPath
     }
     attachments.value = []
-    referencedFiles.value = []
-    clearToolSelections()
     editingTurnId.value = ''
     input.value = ''
     setEditorText(composerRef.value, '')
@@ -1538,8 +1654,6 @@ async function send() {
           rememberConversation(interrupted)
           opened.value = await openProjectResource(files, interrupted.resource)
           attachments.value = []
-          referencedFiles.value = []
-          clearToolSelections()
           input.value = ''
           setEditorText(composerRef.value, '')
           streamingText.value = ''
@@ -2754,6 +2868,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <small v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-error" :title="memoryIndexErrors[turn.id] || '请重试'">未记录</small>
             <button v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-suggest state-error" type="button" :title="`记录对话失败：${memoryIndexErrors[turn.id] || '请重试'}`" @click="recordConversation(turn)"><JcIcon name="save" /><span>记录对话</span></button>
           </div>
+          <div v-if="evalReports[turn.id]" class="memory-eval-report-actions">
+            <button type="button" class="memory-media-plan-link" @click="openEvalReport(evalReports[turn.id]!)">
+              <JcIcon name="description" />
+              <span>查看评测报告</span>
+              <small>应用内打开</small>
+            </button>
+            <button type="button" class="memory-media-plan-link" @click="revealEvalReport(evalReports[turn.id]!)">
+              <JcIcon name="description" />
+              <span>报告位置</span>
+              <small>{{ evalReports[turn.id] }}</small>
+            </button>
+          </div>
           <template v-for="(plan, planIndex) in mediaPlans[turn.id]" :key="mediaPlanKey(turn.id, planIndex)">
             <button
               type="button"
@@ -2993,6 +3119,16 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @open="openProjectMapPath"
           @save="saveProjectMap"
         />
+        <div v-else-if="previewResource.type === 'html'" class="memory-document">
+          <iframe
+            v-if="htmlPreviewUrl"
+            title="HTML 预览"
+            sandbox="allow-scripts"
+            :src="htmlPreviewUrl"
+            style="width: 100%; min-height: 70vh; border: 0; background: #ffffff;"
+          ></iframe>
+          <p v-else>这个 HTML 读不出来，无法预览。</p>
+        </div>
         <div v-else-if="previewResource.type === 'editor'" class="memory-document">
           <MemoryMarkdown v-if="!editingMarkdown"
             class="memory-markdown markdown-body"

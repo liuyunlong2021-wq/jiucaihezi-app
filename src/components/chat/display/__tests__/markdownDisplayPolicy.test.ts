@@ -24,6 +24,19 @@ test('renderMessageMarkdown keeps project file links in-app', () => {
   assert.doesNotMatch(html, /target="_blank"/)
 })
 
+test('renderMessageMarkdown turns an eval review report into an in-app link instead of a dead fragment', () => {
+  const report = '/Users/by3/Library/Application Support/com.jiucaihezi.desktop/skill-workspaces/conv_1_draft_1_iteration-1/eval-review.html'
+  const html = renderMessageMarkdown(
+    '[查看测试记录](file:///Users/by3/Library/Application%20Support/com.jiucaihezi.desktop/skill-workspaces/conv_1_draft_1_iteration-1/eval-review.html)',
+    'assistant',
+  )
+
+  assert.ok(html.includes(`href="#jc-eval-review=${encodeURIComponent(report)}"`))
+  // 以前这里会被压成 href="#"：点下去只会产生一个无意义的 # 导航。
+  assert.doesNotMatch(html, /href="#"/)
+  assert.doesNotMatch(html, /target="_blank"/)
+})
+
 test('renderMessageMarkdown resolves Markdown file links instead of dropping the path', () => {
   const relative = renderMessageMarkdown('[30秒广告.md](wiki/剧本/30秒广告.md)', 'assistant')
   assert.match(

@@ -1,5 +1,3 @@
-import { isExplicitSkillSaveIntent } from './skillCreatorRuntime'
-
 export type SkillBuilderRuntimeState =
   | 'idle'
   | 'draft_ready'
@@ -21,11 +19,9 @@ export interface SkillBuilderRuntimeSnapshot {
   draftReady: boolean
   tested: boolean
   testCount: number
-  saveRequested: boolean
   updatedAt: number
   lastToolName?: string
   lastErrorCode?: string
-  testedUserInput?: string | null
 }
 
 export interface SkillBuilderRuntimeToolInput {
@@ -72,7 +68,6 @@ export function createSkillBuilderRuntime(): SkillBuilderRuntime {
       draftReady: false,
       tested: false,
       testCount: 0,
-      saveRequested: false,
       updatedAt: now,
     }
     records.set(identity.key, created)
@@ -82,7 +77,6 @@ export function createSkillBuilderRuntime(): SkillBuilderRuntime {
   function beforeToolCall(input: SkillBuilderRuntimeToolInput): SkillBuilderRuntimeDecision {
     const now = input.now ?? Date.now()
     const record = getOrCreate(input.args, input.context, now)
-    applyUserIntent(record, input.context?.userInput, now)
     const blocked = validateBeforeTool(record, input.toolName, input.args)
     if (blocked) {
       record.state = blocked.state
@@ -122,13 +116,10 @@ export function createSkillBuilderRuntime(): SkillBuilderRuntime {
       record.draftReady = true
       record.tested = false
       record.testCount = 0
-      record.saveRequested = false
       record.state = 'draft_ready'
     } else if (input.toolName === 'run_skill_tests') {
       record.testCount = Number(input.result?.eval_count || countTestCases(input.args))
       record.tested = record.testCount >= MIN_TEST_CASES
-      record.saveRequested = false
-      record.testedUserInput = input.context?.userInput || null
       record.state = record.tested ? 'tested' : 'draft_ready'
       if (!record.tested) record.lastErrorCode = 'SKILL_BUILDER_MIN_TESTS_REQUIRED'
     } else if (input.toolName === 'save_skill') {
@@ -176,21 +167,6 @@ export function resolveSkillBuilderRuntimeIdentity(
   }
 }
 
-function applyUserIntent(record: SkillBuilderRuntimeSnapshot, userInput: string | null | undefined, now: number): void {
-  if (
-    record.tested
-    && isExplicitSkillSaveIntent(userInput)
-    && normalizeIntentText(userInput) !== normalizeIntentText(record.testedUserInput)
-  ) {
-    record.saveRequested = true
-    record.updatedAt = now
-  }
-}
-
-function normalizeIntentText(value: string | null | undefined): string {
-  return String(value || '').normalize('NFKC').replace(/\s+/g, '')
-}
-
 function validateBeforeTool(
   record: SkillBuilderRuntimeSnapshot,
   toolName: string,
@@ -205,9 +181,6 @@ function validateBeforeTool(
     }
     if (!record.tested) {
       return blocked(record.state, record.testCount > 0 ? 'SKILL_BUILDER_MIN_TESTS_REQUIRED' : 'SKILL_BUILDER_TESTS_REQUIRED', '还不能保存：请先运行至少 3 个测试用例。', '先调用 run_skill_tests，并提供至少 3 个测试用例。')
-    }
-    if (!record.saveRequested) {
-      return blocked(record.state, 'SKILL_BUILDER_SAVE_CONFIRMATION_REQUIRED', '还不能保存：需要用户明确说“保存”或“确认保存”。', '请先展示草稿和测试结果，并等待用户明确确认保存。')
     }
   }
   return null

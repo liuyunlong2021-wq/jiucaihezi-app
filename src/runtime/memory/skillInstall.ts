@@ -23,6 +23,22 @@ export interface SkillInstallPlan {
 const INSTALL_BLOCK = /```jc-skill-install\s*\n([\s\S]*?)\n```/
 const INSTALL_V2_BLOCK = /```jc-skill-install-v2\s*\n([\s\S]*?)\n```/
 const SKILL_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+// 评测报告固定在 skill-workspaces 下，文件名固定；只认绝对路径，避免把项目内的同名文件当报告。
+// 路径可能含空格（macOS 的 Application Support），所以从分隔符后起、允许中间有空格，尾部锚定到固定文件名。
+const EVAL_REVIEW_PATH = /(?:^|[\s(（【「[`'"：:，,。；;])((?:file:\/\/)?(?:\/|[A-Za-z]:\/)[^\n]*?skill-workspaces\/[^/\s]+\/eval-review\.html)/i
+
+/** 从助手回复里认出评测报告文件（`file://` 链接、绝对路径都能认），用于在应用内打开。 */
+export function parseEvalReviewPath(content: string): string | null {
+  const matched = String(content || '').match(EVAL_REVIEW_PATH)?.[1]
+  if (!matched) return null
+  // `file:///Users/...` 会多带一层前缀与斜杠，这里折掉；%20 这类转义同时还原。
+  const path = matched.replace(/^file:\/\//i, '/').replace(/^(\/){2,}/, '/')
+  try {
+    return decodeURIComponent(path)
+  } catch {
+    return path
+  }
+}
 
 export async function parseSkillInstallPlan(content: string): Promise<SkillInstallPlan> {
   const tokenText = String(content || '').match(INSTALL_V2_BLOCK)?.[1]?.trim()

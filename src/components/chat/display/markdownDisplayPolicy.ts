@@ -2,6 +2,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { highlightCode } from '@/utils/highlight'
 import { renderMathInText } from '@/utils/mathRenderer'
+import { parseEvalReviewPath } from '@/runtime/memory/skillInstall'
 
 type MessageMarkdownRole = 'user' | 'assistant' | 'system' | 'tool' | 'divider'
 type DomPurifyLike = {
@@ -59,6 +60,9 @@ function projectFileLinkTarget(href: string): string | null {
 
 function normalizeLinkHref(href: string): string {
   const trimmed = String(href || '').trim()
+  // 评测报告走应用内预览：不能压成 `#` 变成死链，那样点了只会得到一个无意义的 `#` 导航。
+  const evalReport = parseEvalReviewPath(trimmed)
+  if (evalReport) return `#jc-eval-review=${encodeURIComponent(evalReport)}`
   const projectFile = projectFileLinkTarget(trimmed)
   if (projectFile) return `#jc-file=${encodeURIComponent(projectFile)}`
   if (/^(https?:|mailto:)/i.test(trimmed)) return trimmed
@@ -81,7 +85,9 @@ function configureMarkdownRenderer() {
         const text = this.parser.parseInline(tokens)
         const safeHref = normalizeLinkHref(href)
         const titleAttr = title ? ` title="${escapeAttr(title)}"` : ''
-        const externalAttrs = safeHref.startsWith('#jc-file=') ? '' : ' target="_blank" rel="noopener noreferrer"'
+        // 应用内链接（项目文件、评测报告）不能带 target=_blank，否则会被当成外部链接交给系统浏览器。
+        const inAppLink = /^#jc-(?:file|eval-review)=/.test(safeHref)
+        const externalAttrs = inAppLink ? '' : ' target="_blank" rel="noopener noreferrer"'
         return `<a href="${escapeAttr(safeHref)}"${titleAttr}${externalAttrs}>${text}</a>`
       },
       code(this: any, { text, lang }: any) {

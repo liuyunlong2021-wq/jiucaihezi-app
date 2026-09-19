@@ -284,9 +284,10 @@ test('memory space and conversations are created only by their explicit actions'
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.ok(workbench.includes("const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')"))
-  assert.ok(workbench.includes('const availableSkillNames = new Set(['))
+  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames)'))
+  assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
-  assert.ok(workbench.includes('selectedSkillNames.value = [...new Set((latestUserTurn?.skillNames || []).filter(name => availableSkillNames.has(name)))]'))
+  assert.ok(workbench.includes('selectedSkillNames.value = [...new Set((names || []).filter(name => available.has(name)))]'))
   assert.ok(workbench.includes("const created = await createMemoryConversation(owner, '新对话', files)"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
@@ -1496,4 +1497,79 @@ test('aggregate MCP mentions remain searchable by their internal tool prefix', (
   assert.match(workbench, /mentionOnInput\('mcp__'\)/)
   assert.match(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return mcpTools/)
   assert.doesNotMatch(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return \[\.\.\.skills/)
+})
+
+test('capability chips survive a completed round and come back with the conversation', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  // 一轮跑完只清一次性状态（输入框、当轮附件）；清掉 @文件 等于静默收权，用户要再点一次才能继续。
+  assert.doesNotMatch(workbench, /clearToolSelections/)
+  // 正常收尾与中断收尾都在清完当轮附件后直接收场，中间不再夹带清开关/清引用。
+  assert.match(workbench, /attachments\.value = \[\]\n\s*editingTurnId\.value = ''/)
+  assert.match(workbench, /attachments\.value = \[\]\n\s*input\.value = ''/)
+  // 本轮开关随用户消息落盘，重开这个对话时按最后一轮用户消息恢复。
+  assert.match(workbench, /toolChips: toolChipIds\(\)/)
+  assert.match(workbench, /applyToolChipIds\(latestUserToolChips\(resource\.transcript\.turns\)\)/)
+  assert.match(workbench, /function applyToolChipIds\(ids\?: string\[\]\) \{/)
+  // 开关手动关掉时可以有个说法，变成可解释的提醒。
+  assert.match(workbench, /!fileToolsSelected\.value && authorizedPaths\.value\.length/)
+  assert.match(workbench, /但 @文件 已关闭/)
+})
+
+test('editing a turn restores the Skill it was sent with and keeps its referenced files', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const editTurn = workbench.match(/async function editTurn\(turn: ConversationTurn\) \{([\s\S]*?)\n\}/)?.[1]
+  const cancelEdit = workbench.match(/async function cancelEdit\(\) \{([\s\S]*?)\n\}/)?.[1]
+
+  assert.ok(editTurn, 'editTurn should exist')
+  assert.ok(cancelEdit, 'cancelEdit should exist')
+  // 轮次上存了 skillNames 就必须恢复：丢了它，模型重发时一个 skill-creator 工具都没有。
+  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames\)/)
+  assert.match(cancelEdit, /restoreComposerSkills\(latestUserTurnToolNames\(/)
+  assert.match(workbench, /async function restoreComposerSkills\(names\?: string\[\]\) \{/)
+  // 恢复要过滤掉已卸载的 Skill：坏引用会污染整段会话的 Skill 加载。
+  assert.match(workbench, /selectedSkillNames\.value = \[\.\.\.new Set\(\(names \|\| \[\]\)\.filter\(name => available\.has\(name\)\)\)\]/)
+  // 引用文件已经跨轮保留，编辑时不该再把它清空。
+  assert.doesNotMatch(editTurn, /referencedFiles\.value = \[\]/)
+  assert.doesNotMatch(cancelEdit, /referencedFiles\.value = \[\]/)
+})
+
+test('the eval review report opens inside the app instead of the system browser', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.match(workbench, /parseEvalReviewPath,\n  parseSkillInstallPlan,/)
+  // 重新打开对话、跑完一轮都要重新认一遍报告路径。
+  assert.equal(workbench.match(/if \(evalReviewPath\) evalReports\.value\[turn\.id\] = evalReviewPath/g)?.length, 2)
+  assert.match(workbench, /async function openEvalReport\(path: string\) \{/)
+  // 报告是模型输出驱动的 HTML：沙箱 iframe 不给脚本权限，也不走外部浏览器。
+  // 报告整页由自带脚本渲染，所以要放脚本；但不给 allow-same-origin，保持不透明源。
+  // 报告落进项目的 JC Media 文档，再用现成的预览打开；不再自建浮层。
+  assert.match(workbench, /const projectPath = `\.raw\/jc-media\/文档\/评测报告-\$\{dirName\}\.html`/)
+  assert.match(workbench, /await files\.createText\(owner, projectPath, await readTextFile\(path\)\)/)
+  assert.match(workbench, /await openProjectFile\(resource\)/)
+  assert.doesNotMatch(workbench, /srcdoc="evalReport\.html"/)
+  assert.match(workbench, /revealItemInDir/)
+  // 渲染器会把报告链接标成 #jc-eval-review=，点击时就认这个标记（比靠 href/title/文字猜可靠）。
+  assert.match(workbench, /closest<HTMLAnchorElement>\('a\[href\^="#jc-eval-review="\]'\)/)
+  assert.match(workbench, /await openEvalReport\(decodeURIComponent\(reportLink\.getAttribute\('href'\)!\.slice\('#jc-eval-review='\.length\)\)\)/)
+  // 消息正文里那条链接也要接管：解析出报告路径就拦下来，在应用内打开。
+  assert.match(workbench, /const reportAnchor = \(event\.target as Element \| null\)\?\.closest<HTMLAnchorElement>\('a\[href\]'\)/)
+  assert.match(workbench, /if \(reportPath\) \{\n    event\.preventDefault\(\)\n    await openEvalReport\(reportPath\)/)
+  assert.match(workbench, /v-if="evalReports\[turn\.id\]" class="memory-eval-report-actions"/)
+  assert.doesNotMatch(workbench, /openEvalReport[\s\S]{0,240}openUrl/)
+})
+
+test('the preview panel renders project HTML in a sandboxed frame', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const explorer = source('src/services/projectExplorerService.ts')
+
+  // HTML 是基本可读格式，opener 必须给它一条自己的类型，而不是落到“不支持预览”。
+  assert.match(explorer, /\| \{ type: 'html'; resource: ProjectResource; text: ProjectTextRead \}/)
+  assert.match(explorer, /if \(\/\\\.html\?\$\/i\.test\(resource\.path\)\) \{/)
+  // 报告这类 HTML 靠自带脚本渲染，要放脚本，但不给同源。
+  assert.match(workbench, /v-else-if="previewResource\.type === 'html'"/)
+  // HTML 走 blob URL：srcdoc 会继承主文档 CSP 拦掉内联脚本，asset:// 在 iframe 里加载不出内容。
+  assert.match(workbench, /title="HTML 预览"\s+sandbox="allow-scripts"\s+:src="htmlPreviewUrl"/)
+  assert.match(workbench, /URL\.createObjectURL\(new Blob\(\[content\], \{ type: 'text\/html' \}\)\)/)
+  assert.match(source('src-tauri/tauri.conf.json'), /frame-src blob:;/)
 })

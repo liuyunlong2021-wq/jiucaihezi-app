@@ -301,6 +301,79 @@ test('runSkillTests executes authorized tool calls and records output artifacts'
   }
 })
 
+test('a failing tool call inside skill tests stays a tool result instead of killing both configurations', async () => {
+  const restoreStorage = installSkillRunnerLocalStorage({ jcModel: 'gpt-5.5', jcModelProviderId: 'jiucaihezi' })
+  const previousFetch = globalThis.fetch
+  let taskCalls = 0
+  try {
+    __resetApiKeyMemoryCacheForTests('session-tool-failure')
+    ;(globalThis as any).fetch = async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'))
+      if (String(body.messages?.at?.(-1)?.content || '').includes('返回 JSON 数组')) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '[]' } }] }), { status: 200 })
+      }
+      if (Array.isArray(body.messages) && body.messages.at(-1)?.role === 'tool') {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '工具报错后我继续完成了' } }], usage: { total_tokens: 3 } }), { status: 200 })
+      }
+      taskCalls += 1
+      return new Response(JSON.stringify({ choices: [{ message: {
+        content: null,
+        tool_calls: [{ id: 'tool-1', type: 'function', function: { name: 'read', arguments: JSON.stringify({ path: 'missing.md' }) } }],
+      } }], usage: { total_tokens: 2 } }), { status: 200 })
+    }
+
+    const result = await runSkillTests(validSkillMd, [{ prompt: '读一下', expect: '完成' }], {
+      toolAdapter: {
+        tools: [{ type: 'function', function: { name: 'read', parameters: { type: 'object' } } }],
+        // Tauri 命令的 Result<_, String> 拒绝值是字符串，不是 Error——旧代码会把它变成 [异常: undefined]。
+        execute: async () => { throw '文件不存在：missing.md' },
+      },
+    })
+
+    // 两路配置都真的跑完了模型，没有被一次工具失败顶掉。
+    assert.equal(taskCalls, 2)
+    for (const run of result.results[0].runs) {
+      assert.equal(run.output, '工具报错后我继续完成了')
+    }
+    const toolMessage = result.results[0].runs[0].transcript?.find(message => message.role === 'tool')
+    assert.match(String(toolMessage?.content), /文件不存在：missing\.md/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
+test('runSkillTests keeps the surviving configuration and names the real failure', async () => {
+  const restoreStorage = installSkillRunnerLocalStorage({ jcModel: 'gpt-5.5', jcModelProviderId: 'jiucaihezi' })
+  const previousFetch = globalThis.fetch
+  try {
+    __resetApiKeyMemoryCacheForTests('session-one-side-fails')
+    ;(globalThis as any).fetch = async (_url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body || '{}'))
+      if (String(body.messages?.at?.(-1)?.content || '').includes('返回 JSON 数组')) {
+        return new Response(JSON.stringify({ choices: [{ message: { content: '[{"text":"ok","passed":true,"evidence":"ok"}]' } }] }), { status: 200 })
+      }
+      // 只有 with-skill 这一路炸，而且炸的是字符串（模拟 Tauri 命令错误）。
+      if (String(body.messages?.[0]?.content || '').includes('storyboard-helper')) throw '技能目录不可读'
+      return new Response(JSON.stringify({ choices: [{ message: { content: 'baseline ok' } }], usage: { total_tokens: 4 } }), { status: 200 })
+    }
+
+    const result = await runSkillTests(validSkillMd, [{ prompt: 'test', expect: 'ok' }], { baselineSkillMd: '# Old Skill' })
+
+    const withRun = result.results[0].runs.find(run => run.configuration === 'with_skill')
+    const baselineRun = result.results[0].runs.find(run => run.configuration === 'installed_version')
+    assert.equal(withRun?.output, '[异常: 技能目录不可读]')
+    // 真跑完的那一路不该被连坐，也不该被写成同样的异常。
+    assert.equal(baselineRun?.output, 'baseline ok')
+    assert.doesNotMatch(String(baselineRun?.output), /异常/)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    ;(globalThis as any).fetch = previousFetch
+    restoreStorage()
+  }
+})
+
 test('eval viewer shows installed baseline and previous iteration output', () => {
   const run = (configuration: 'with_skill' | 'installed_version', output: string) => ({
     configuration, output, tokenCount: 1, durationMs: 1, assertions: [],
@@ -309,6 +382,19 @@ test('eval viewer shows installed baseline and previous iteration output', () =>
   const html = generateEvalViewerHtml('demo', [{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'new'), run('installed_version', 'current-old')] }], null, {}, [{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'previous-new'), run('installed_version', 'previous-old')] }])
   assert.match(html, /INSTALLED VERSION/)
   assert.match(html, /previous-old/)
+})
+
+test('eval viewer script stays parseable so the report renders instead of a blank frame', () => {
+  const run = (configuration: 'with_skill' | 'installed_version', output: string) => ({
+    configuration, output, tokenCount: 1, durationMs: 1, assertions: [],
+    timing: { total_tokens: 1, duration_ms: 1, total_duration_seconds: 0.001 },
+  })
+  const html = generateEvalViewerHtml('demo', [{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'new')] }], aggregateBenchmark([{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'new')] }], 'demo'), {})
+  const script = html.match(/<script>([\s\S]*)<\/script>/)![1]
+  // switchTab 的单引号必须转义着落进 JS 字符串，裸着写会让整段脚本语法错误、报告白屏。
+  assert.ok(script.includes(String.raw`switchTab(\'outputs\')`), 'switchTab 的引号要转义进字符串')
+  assert.ok(script.includes(String.raw`switchTab(\'benchmark\')`), 'switchTab 的引号要转义进字符串')
+  assert.doesNotThrow(() => new Function(script))
 })
 
 test('grader rejects claims about generated files when a run has no artifacts', () => {

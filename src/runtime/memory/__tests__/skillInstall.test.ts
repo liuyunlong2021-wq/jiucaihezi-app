@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { parseSkillInstallPlan, stripSkillInstallBlock } from '../skillInstall'
+import { parseEvalReviewPath, parseSkillInstallPlan, stripSkillInstallBlock } from '../skillInstall'
 import { registerSkillBuilderDraft } from '@/utils/skillBuilderTools'
 
 const reply = [
@@ -52,4 +52,23 @@ test('rejects invalid or incomplete install blocks', async () => {
   await assert.rejects(() => parseSkillInstallPlan('普通回复'), /没有可安装/)
   await assert.rejects(() => parseSkillInstallPlan(reply.replace('concise-writer', '中文名称')), /名称必须/)
   await assert.rejects(() => parseSkillInstallPlan(reply.replace('description: "把长文压缩成清晰短文"\n', '')), /description/)
+})
+
+test('finds the generated eval review report path in an assistant reply', () => {
+  const macPath = '/Users/by3/Library/Application Support/com.jiucaihezi.desktop/skill-workspaces/conv_1_draft_1_iteration-2/eval-review.html'
+
+  assert.equal(parseEvalReviewPath(`测试完成，报告在 ${macPath}`), macPath)
+  // file:// 链接带 %20，不能留下多余斜杠，也要还原空格
+  assert.equal(
+    parseEvalReviewPath(`[查看测试结果](file:///Users/by3/Library/Application%20Support/com.jiucaihezi.desktop/skill-workspaces/conv_1_draft_1_iteration-1/eval-review.html)`),
+    macPath.replace('iteration-2', 'iteration-1'),
+  )
+  // Windows 盘符同样要认
+  assert.equal(
+    parseEvalReviewPath('报告：C:/Users/by3/AppData/Roaming/com.jiucaihezi.desktop/skill-workspaces/c_d_iteration-1/eval-review.html'),
+    'C:/Users/by3/AppData/Roaming/com.jiucaihezi.desktop/skill-workspaces/c_d_iteration-1/eval-review.html',
+  )
+  // 普通回复与项目内同名文件都不算评测报告
+  assert.equal(parseEvalReviewPath('测试完成了。'), null)
+  assert.equal(parseEvalReviewPath('看 wiki/eval-review.html'), null)
 })
