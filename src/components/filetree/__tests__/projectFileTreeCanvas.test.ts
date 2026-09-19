@@ -115,9 +115,9 @@ test('project file tree locates a deep resource by loading its collapsed ancesto
     'utf8',
   )
 
-  assert.match(source, /async function locateProjectResource\(path: string\)/)
+  assert.match(source, /async function locateProjectResource\(path: string, quiet = false\)/)
   assert.match(source, /await ensureDirectoryLoaded\(node\)/)
-  assert.match(source, /void locateProjectResource\(path\)/)
+  assert.match(source, /void locateProjectResource\(String\(path\), Boolean\(payload\?\.quiet\)\)/)
 })
 
 test('Desktop project tree receives filesystem hints instead of restoring the five second poller', () => {

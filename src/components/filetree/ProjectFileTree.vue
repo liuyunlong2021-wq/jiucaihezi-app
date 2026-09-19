@@ -28,6 +28,14 @@ import {
   type MediaReorderPlan,
 } from '@/utils/mediaReorder'
 import { canvasFilePath } from '@/components/canvas/canvasDocument'
+import {
+  compareFileEntries,
+  fileSortLabel,
+  isFileSortMode,
+  DEFAULT_FILE_SORT_MODE,
+  FILE_SORT_OPTIONS,
+  type FileSortMode,
+} from '@/utils/fileSort'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
 import { isTextFile } from '@/utils/fileProcessor'
@@ -166,6 +174,10 @@ const focusedPath = ref<string | null>(null)
 const ctxMenu = ref<CtxMenu>({ show: false, x: 0, y: 0, node: null })
 const ctxMenuRef = ref<HTMLElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
+const FILE_SORT_STORAGE_KEY = 'jcFileTreeSortMode'
+const fileSortMode = ref<FileSortMode>(readStoredFileSortMode())
+const sortMenuOpen = ref(false)
+const sortMenuRef = ref<HTMLElement | null>(null)
 const uploadInput = ref<HTMLInputElement | null>(null)
 const storyInput = ref<HTMLInputElement | null>(null)
 const directoryInput = ref<HTMLInputElement | null>(null)
@@ -220,6 +232,8 @@ const wikiScaffoldNotice = ref('')
 /**
  * 同级排序：目录优先；同级目录按最后修改时间倒序（刚建的、刚动过的在最上面），
  * 文件按名字——文件必须按名字才能对上编号顺序。
+ *
+ * 这是加载时的基础顺序；屏幕上的实际顺序由 `sortedChildren()` 按用户选的排序模式决定。
  */
 function sortTreeChildren<T extends { isDir: boolean; path: string; updatedAt?: number }>(children: T[]): T[] {
   return children.sort((a, b) => {
@@ -230,6 +244,23 @@ function sortTreeChildren<T extends { isDir: boolean; path: string; updatedAt?: 
     }
     return a.path.localeCompare(b.path)
   })
+}
+
+/** 排序模式持久化在本地；不合法（版本变更、手改）或读不到就回默认值。 */
+function readStoredFileSortMode(): FileSortMode {
+  try {
+    const stored = localStorage.getItem(FILE_SORT_STORAGE_KEY)
+    return isFileSortMode(stored) ? stored : DEFAULT_FILE_SORT_MODE
+  } catch {
+    return DEFAULT_FILE_SORT_MODE
+  }
+}
+function setFileSortMode(mode: FileSortMode) {
+  fileSortMode.value = mode
+  sortMenuOpen.value = false
+  try {
+    localStorage.setItem(FILE_SORT_STORAGE_KEY, mode)
+  } catch { /* 隐私模式下写不进 localStorage，本次会话仍生效 */ }
 }
 function buildTree(entries: FlatEntry[], rootPath: string): TreeNode {
   const root: TreeNode = {
@@ -303,14 +334,27 @@ function flattenVisible(root: TreeNode | null, filter: string): VisibleNode[] {
   if (!root) return []
   const result: VisibleNode[] = []
   const q = filter.trim()
+  const mode = fileSortMode.value
   function walk(node: TreeNode) {
     if (!q || fuzzyMatch(node.name, q) || node.children.some(c => nodeMatchesFilter(c, q))) {
       result.push({ node, indent: node.depth, hasChildren: node.isDir, isExpanded: node.expanded })
-      if (node.expanded && node.isDir) for (const child of node.children) walk(child)
+      if (node.expanded && node.isDir) for (const child of sortedChildren(node.children, mode)) walk(child)
     }
   }
-  for (const child of root.children) walk(child)
+  for (const child of sortedChildren(root.children, mode)) walk(child)
   return result
+}
+
+/**
+ * 屏幕顺序的唯一真源：目录永远优先（混排会把目录冲散，nodeMap 找不到父节点会静默丢节点），
+ * 同级再按当前模式。排序放在展开视图这一步而不是加载时：换排序不用重读目录，
+ * 也不会漏掉 buildTree / ensureDirectoryLoaded / refreshDirectory 里某一条加载路径。
+ */
+function sortedChildren(children: TreeNode[], mode: FileSortMode): TreeNode[] {
+  return children.slice().sort((a, b) => {
+    if (a.isDir !== b.isDir) return a.isDir ? -1 : 1
+    return compareFileEntries(a, b, mode)
+  })
 }
 const visibleNodes = computed(() => {
   const root = filterQuery.value.trim() ? searchTree.value : treeRoot.value
@@ -541,7 +585,11 @@ function stopPolling() {
 }
 const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
   const path = payload?.path
-  if (path) void locateProjectResource(path)
+  if (!path) return
+  // 别的项目的路径不碰这棵树，也不抱怨（结果自动定位会带上 owner）。
+  const owner = String(payload?.owner || '')
+  if (owner && projectKey.value && owner !== projectKey.value) return
+  void locateProjectResource(String(path), Boolean(payload?.quiet))
 })
 const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload: unknown) => {
   const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
@@ -778,19 +826,30 @@ async function toggleNode(node: TreeNode) {
   if (!node.expanded && !(await ensureDirectoryLoaded(node))) return
   node.expanded = !node.expanded
 }
-async function locateProjectResource(path: string) {
+async function locateProjectResource(path: string, quiet = false) {
   let node: TreeNode | null = treeRoot.value
   for (const part of path.split('/')) {
     const current = node
     if (!current || !(await ensureDirectoryLoaded(current))) return
     current.expanded = true
     const child = current.children.find(item => item.name === part)
-    if (!child) return
+    if (!child) {
+      // 静默返回会让人以为是「点了没反应」。用户点的那次要说话（走 statusMsg：
+      // 写 errorMsg 会把整棵树藏起来）；结果自动定位失败不能留下赶不走的提示。
+      if (!quiet) statusMsg.value = `文件树里没有 ${path}`
+      return
+    }
     node = child
   }
+  // 筛选开着时目标可能被过滤掉，先摘掉筛选，否则「定位」看起来又像没反应。
+  if (filterQuery.value.trim() && !visibleNodes.value.some(entry => entry.node.path === path)) filterQuery.value = ''
   selectedPaths.value = new Set([path])
   selectedPath.value = path
   focusedPath.value = path
+  // 列表是虚拟滚动的：只设选中而不滚动，目标就落在屏幕外，用户看不到「定位」发生了。
+  await nextTick()
+  const index = visibleNodes.value.findIndex(entry => entry.node.path === path)
+  if (index >= 0) fileTreeVirtualizer.value.scrollToIndex(index, { align: 'center' })
 }
 
 /* ─── 左键打开 ─── */
@@ -919,6 +978,7 @@ function closeCtxMenu() {
 function onCtxMenuClick(e: MouseEvent) {
   const target = e.target as HTMLElement
   if (ctxMenuRef.value && !ctxMenuRef.value.contains(target)) closeCtxMenu()
+  if (sortMenuOpen.value && !sortMenuRef.value?.contains(target)) sortMenuOpen.value = false
   if (
     showProjectMenu.value &&
     !target.closest('.pft-project-menu') &&
@@ -2813,6 +2873,33 @@ onBeforeUnmount(() => {
         >
           <JcIcon name="article" />
         </button>
+        <div ref="sortMenuRef" class="pft-sort">
+          <button
+            class="pft-icon-btn"
+            :title="`排序：${fileSortLabel(fileSortMode)}`"
+            aria-label="排序方式"
+            :aria-expanded="sortMenuOpen"
+            @click="sortMenuOpen = !sortMenuOpen"
+          >
+            <JcIcon name="sort" />
+          </button>
+          <div v-if="sortMenuOpen" class="pft-sort-menu" role="menu">
+            <button
+              v-for="option in FILE_SORT_OPTIONS"
+              :key="option.mode"
+              type="button"
+              class="pft-ctx-item"
+              :class="{ active: option.mode === fileSortMode }"
+              role="menuitemradio"
+              :aria-checked="option.mode === fileSortMode"
+              :title="option.title"
+              @click="setFileSortMode(option.mode)"
+            >
+              <JcIcon name="check" class="pft-sort-check" />
+              <span>{{ option.shortLabel }}</span>
+            </button>
+          </div>
+        </div>
       </div>
 
       <!-- 文件筛选 -->
@@ -3934,6 +4021,35 @@ onBeforeUnmount(() => {
   height: 1px;
   margin: 4px 8px;
   background: var(--border);
+}
+/* 排序菜单：靠按钮右对齐，不跟右键菜单共用固定定位（那套坐标由 JS 算）。 */
+.pft-sort {
+  position: relative;
+  margin-left: auto;
+}
+.pft-sort-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 1000;
+  box-sizing: border-box;
+  min-width: 200px;
+  padding: 4px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.16);
+}
+.pft-sort-check {
+  visibility: hidden;
+  font-size: 16px;
+}
+.pft-ctx-item.active {
+  color: var(--olive-dark);
+}
+.pft-ctx-item.active .pft-sort-check {
+  visibility: visible;
+  color: var(--olive-dark);
 }
 .pft-collision-overlay {
   position: fixed;

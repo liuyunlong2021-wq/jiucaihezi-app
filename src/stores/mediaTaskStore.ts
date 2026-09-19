@@ -624,6 +624,22 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     return task.source !== 'creation'
   }
 
+  /**
+   * 结果落进项目后把文件树定位过去：生成物在 .raw/jc-media/<类>/<分集>/ 下有好几层，
+   * 不定位用户只能自己一层层翻。
+   * quiet：自动动作失败不能留下赶不走的提示（手动定位才需要告知失败）；
+   * owner 用来让别的项目的文件树直接忽略这条请求。
+   */
+  function revealMediaResultInFileTree(task: MediaTask) {
+    const path = String(task.projectPath || '').trim()
+    if (!path) return
+    emitEvent('project-filetree:locate', {
+      path,
+      owner: String(task.directory || task.projectId || ''),
+      quiet: true,
+    })
+  }
+
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
@@ -676,6 +692,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.sourceUrl = downloadUrl
       task.resultUrl = undefined
       console.log('[JC] Web 创作结果已落项目文件夹:', `${projectId}/${projectPath}`)
+      revealMediaResultInFileTree(task)
       return
     }
 
@@ -712,6 +729,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.sourceUrl = /^https?:\/\//i.test(downloadUrl) ? downloadUrl : undefined
         task.resultUrl = undefined
         console.log('[JC] 创作结果已直接落项目文件夹:', task.assetUri)
+        revealMediaResultInFileTree(task)
         void persistTasksSafely('asset-localized-project')
         return
       }
@@ -762,6 +780,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.sourceUrl = /^https?:\/\//i.test(downloadUrl) ? downloadUrl : undefined
         task.resultUrl = undefined
         console.log('[JC] 创作结果已落项目文件夹:', filePath)
+        revealMediaResultInFileTree(task)
         void persistTasksSafely('asset-localized-project')
         return
       }
