@@ -379,7 +379,7 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.match(tree, /v-if="!ctxMenu\.node\.isDir"[\s\S]*@click="ctxReferenceInChat"/)
   assert.match(tree, /emitEvent\('reference-file', \{ resource: resourceForNode\(node\) \}\)/)
   assert.doesNotMatch(tree, /emitEvent\('reference-file', \{ name:/)
-  assert.match(workbench, /:contenteditable="!sending"/)
+  assert.match(workbench, /contenteditable="true"/)
   assert.match(
     workbench,
     /const editor = event\.currentTarget as HTMLElement[\s\S]*getPlainText\(editor\)/,
@@ -586,7 +586,7 @@ test('memory mode keeps explicit Skill and plugin connections', () => {
     workbench,
     /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/,
   )
-  assert.match(workbench, /v-show="mentionOpen && !sending"/)
+  assert.match(workbench, /v-show="mentionOpen" ref="mentionPopoverRef"/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
   assert.match(workbench, /selectedSkillNames: skillSnapshot/)
@@ -726,9 +726,9 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
   assert.match(
     workbench,
-    /const complete = editTargetId[\s\S]*appendMemoryRound\(active\.resource, userTurn, reply, files, title\)[\s\S]*const completeResource = await openProjectResource[\s\S]*opened\.value = completeResource\s*\n\s*streamingText\.value = ''/,
+    /const complete = editTargetId[\s\S]*appendMemoryRound\(active\.resource, userTurn, reply, files, title\)[\s\S]*if \(!isOnScreen\(run\)\) return\s*\n\s*opened\.value = await openProjectResource\(files, complete\.resource\)[\s\S]*run\.streamingText = ''/,
   )
-  assert.match(workbench, /pendingUserTurn\.value = userTurn/)
+  assert.match(workbench, /const pendingUserTurn = computed\(\(\) => activeRun\.value\?\.userTurn \?\? null\)/)
   assert.match(workbench, /await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
   assert.match(workbench, /\.memory-message \{[^}]*content-visibility: auto;/)
@@ -753,17 +753,17 @@ test('memory run status follows real tool start and end events without entering 
   assert.doesNotMatch(runtime, /event\.type === 'tool_execution_start'\) input\.onToolEvent/)
   assert.match(
     workbench,
-    /event\.type === 'tool_execution_start'[\s\S]*status\.value = `正在\$\{label\}`/,
+    /event\.type === 'tool_execution_start'[\s\S]*run\.status = `正在\$\{label\}`/,
   )
   assert.match(
     workbench,
-    /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*runSteps\.value\.find\(item => item\.state === 'running'\)[\s\S]*正在等待模型继续处理/,
+    /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*run\.steps\.find\(item => item\.state === 'running'\)[\s\S]*正在等待模型继续处理/,
   )
   assert.match(workbench, /v-if="runVisible" class="memory-run-status"/)
   assert.match(workbench, /v-for="step in visibleRunSteps"/)
-  assert.match(workbench, /\(sending \|\| error\) && visibleRunSteps\.length/)
+  assert.match(workbench, /\(sending \|\| displayedError\) && visibleRunSteps\.length/)
   assert.match(workbench, /formatRunElapsed\(runElapsed\)/)
-  assert.match(workbench, /onMetrics\(metrics\)[\s\S]*runMetrics\.value = metrics/)
+  assert.match(workbench, /onMetrics\(metrics\)[\s\S]*run\.metrics = metrics/)
   assert.match(workbench, /formatRunMetrics\(runMetrics\)/)
   assert.doesNotMatch(workbench, /opencodeClient|openCodeSyncStore|AgentStatusBar/)
 })
@@ -785,15 +785,19 @@ test('memory retries transient requests and writes one Raw recovery point only a
   )
   assert.match(
     workbench,
-    /if \(runGeneration !== memoryRunGeneration\) return\s*\n\s*const interrupted = await appendMemoryRound[\s\S]*if \(runGeneration !== memoryRunGeneration\) return/,
+    /const interrupted = await appendMemoryRound\(active\.resource, userTurn, interruptedReply, files, title\)[\s\S]*if \(!isCurrentRun\(\) \|\| !isOnScreen\(run\)\) return/,
   )
   assert.match(
     workbench,
-    /const aborted = cause instanceof DOMException && cause\.name === 'AbortError'[\s\S]*if \(aborted\) status\.value = '已停止'/,
+    /const aborted = cause instanceof DOMException && cause\.name === 'AbortError'[\s\S]*if \(aborted\) \{\s*run\.phase = 'stopped'\s*run\.status = '已停止'/,
   )
-  assert.match(workbench, /:contenteditable="!sending"/)
-  assert.match(workbench, /title="添加附件" :disabled="sending"/)
-  assert.match(workbench, /title="移除附件" :disabled="sending"/)
+  // 运行中 composer 仍然可用：只有发送键变成停止键，草稿属于下一轮。
+  assert.match(workbench, /contenteditable="true"/)
+  assert.match(workbench, /title="添加附件" @click="fileInput\?\.click\(\)"/)
+  assert.match(workbench, /title="移除附件" @click="attachments = attachments\.filter/)
+  assert.match(workbench, /<button v-if="sending" class="send-button" title="本条对话正在运行/)
+  // 唯一还按运行态禁用的控件是消息级「编辑并重新发送」；输入下一轮的入口全部放开。
+  assert.equal((workbench.match(/:disabled="sending"/g) || []).length, 1)
 })
 
 test('memory composer keeps project file references until the user cancels them', () => {
@@ -811,19 +815,51 @@ test('memory cancellation settles the visible run before invalidating stale call
 
   assert.match(
     workbench,
-    /function stop\(\) \{\s*status\.value = '已停止'\s*stopRunTimer\(\)\s*memoryRunGeneration\+\+[\s\S]*abortController\?\.abort\(\)/,
+    /function stopRun\(run: MemoryRun\) \{\s*if \(run\.phase === 'running'\) run\.phase = 'stopped'\s*run\.status = '已停止'\s*stopRunTimer\(run\)\s*settleApproval\(run, 'reject'\)\s*run\.controller\.abort\(\)/,
   )
+})
+
+test('memory runs belong to their conversation instead of the visible one', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const openProject = workbench.match(/async function openProject\(owner: string\) \{([\s\S]*?)\n\}/)?.[1]
+  const selectConversation = workbench.match(/async function selectConversation\(item: MemoryConversation\) \{([\s\S]*?)\n\}/)?.[1]
+  const deleteConversation = workbench.match(/async function deleteConversation\(item: MemoryConversation\) \{([\s\S]*?)const message = /)?.[1]
+
+  // 运行表按 owner::路径 索引：不同项目的对话 Raw 可能同名，只按路径索引会串项目。
+  assert.match(workbench, /const runs = reactive\(new Map<string, MemoryRun>\(\)\)/)
+  assert.match(workbench, /const memoryRunKey = \(owner: string, path: string\) => `\$\{owner\}::\$\{path\}`/)
+  assert.match(workbench, /const sending = computed\(\(\) => activeRun\.value\?\.phase === 'running'\)/)
+  // 派发那一刻就清空草稿，不必等这一轮跑完才能输入下一段。
+  assert.match(
+    workbench,
+    /const isCurrentRun = \(\) => runs\.get\(runKey\) === run[\s\S]*input\.value = ''\n  editingTurnId\.value = ''\n  setEditorText\(composerRef\.value, ''\)[\s\S]*await runMemoryChat\(/,
+  )
+  // 切项目、切对话都不再中断运行。
+  assert.ok(openProject && selectConversation, 'openProject and selectConversation should exist')
+  assert.doesNotMatch(openProject, /stop\(\)/)
+  assert.doesNotMatch(selectConversation, /stop\(\)/)
+  // 删除对话仍然只停它自己的运行：授权随对话消失，继续跑会用旧授权落盘。
+  assert.ok(deleteConversation, 'deleteConversation should exist')
+  assert.match(deleteConversation, /const deletedRun = runs\.get\(memoryRunKey\(item\.resource\.owner, item\.resource\.path\)\)/)
+  assert.match(deleteConversation, /if \(deletedRun\) stopRun\(deletedRun\)/)
+  // 落盘无条件，改视图有条件：切走了也要写完，但界面不被别的对话的运行改写。
+  assert.match(workbench, /const isOnScreen = \(run: MemoryRun\) => run\.owner === projectOwner\.value && conversation\.value\?\.resource\.path === run\.resourcePath/)
+  assert.match(workbench, /if \(run\.owner === projectOwner\.value\) rememberConversation\(complete\)/)
+  assert.match(workbench, /if \(!isOnScreen\(run\)\) return\n\s*opened\.value = await openProjectResource/)
+  // 审批跟着 run 走，后台对话的审批不会弹到当前对话上。
+  assert.match(workbench, /const pendingMemoryToolApproval = computed\(\(\) => activeRun\.value\?\.approval \?\? null\)/)
+  assert.match(workbench, /run\.approval = \{\n\s*message: memoryToolApprovalMessage\(call\)/)
 })
 
 test('memory ignores stale streaming callbacks and stale resource loads', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /const isCurrentRun = \(\) => runGeneration === memoryRunGeneration/)
+  assert.match(workbench, /const isCurrentRun = \(\) => runs\.get\(runKey\) === run && run\.phase === 'running'/)
   assert.match(workbench, /onRetry\(attempt, total\) \{\s*if \(!isCurrentRun\(\)\) return/)
   assert.match(workbench, /onText\(text\) \{\s*if \(!isCurrentRun\(\)\) return/)
   assert.match(
     workbench,
-    /onToolEvent: event => \{\s*if \(isCurrentRun\(\)\) updateRunTool\(event\)/,
+    /onToolEvent: event => \{\s*if \(isCurrentRun\(\)\) updateRunTool\(run, event\)/,
   )
   assert.match(workbench, /let resourceOpenGeneration = 0/)
   assert.match(
@@ -853,15 +889,15 @@ test('memory Desktop keeps always-allow for the current conversation in this App
   assert.match(workbench, /memoryToolAlwaysAllowedConversations\.add\(active\.transcript\.id\)/)
   assert.match(workbench, /call\.function\.name !== 'delete'/)
   assert.doesNotMatch(workbench, /localStorage[\s\S]{0,120}始终允许/)
-  assert.match(workbench, /memoryRunGeneration\+\+/)
-  assert.match(workbench, /settleMemoryToolApproval\('reject'\)[\s\S]*abortController\?\.abort\(\)/)
+  assert.match(workbench, /const run = runs\.get\(runKey\) as MemoryRun/)
+  assert.match(workbench, /settleApproval\(run, 'reject'\)[\s\S]*run\.controller\.abort\(\)/)
 })
 
 test('memory run status does not render the legacy duplicate status line', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(workbench, /v-else-if="!runVisible && \(status \|\| error\) && !status\.startsWith\('已记录对话'\)" class="memory-status"/)
+  assert.match(workbench, /v-else-if="!runVisible && \(displayedStatus \|\| displayedError\) && !displayedStatus\.startsWith\('已记录对话'\)" class="memory-status"/)
   assert.doesNotMatch(runtime, /以最后一条用户消息为当前指令/)
 })
 
@@ -1504,9 +1540,11 @@ test('capability chips survive a completed round and come back with the conversa
 
   // 一轮跑完只清一次性状态（输入框、当轮附件）；清掉 @文件 等于静默收权，用户要再点一次才能继续。
   assert.doesNotMatch(workbench, /clearToolSelections/)
-  // 正常收尾与中断收尾都在清完当轮附件后直接收场，中间不再夹带清开关/清引用。
-  assert.match(workbench, /attachments\.value = \[\]\n\s*editingTurnId\.value = ''/)
-  assert.match(workbench, /attachments\.value = \[\]\n\s*input\.value = ''/)
+  // 派发瞬间清草稿（不然要等整轮跑完才能输入下一段）；当轮附件在落盘成功与中断收尾各清一次，中间不夹带清开关/清引用。
+  const sendBody = workbench.match(/async function send\(\) \{([\s\S]*?)\n\}/)?.[1]
+  assert.ok(sendBody, 'send should exist')
+  assert.match(sendBody, /input\.value = ''\n  editingTurnId\.value = ''\n  setEditorText\(composerRef\.value, ''\)/)
+  assert.equal((sendBody.match(/attachments\.value = \[\]/g) || []).length, 2)
   // 本轮开关随用户消息落盘，重开这个对话时按最后一轮用户消息恢复。
   assert.match(workbench, /toolChips: toolChipIds\(\)/)
   assert.match(workbench, /applyToolChipIds\(latestUserToolChips\(resource\.transcript\.turns\)\)/)

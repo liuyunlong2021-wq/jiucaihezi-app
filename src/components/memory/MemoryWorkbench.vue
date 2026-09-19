@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import ProjectFileTree from '@/components/filetree/ProjectFileTree.vue'
 import ChatScrollNav from '@/components/chat/ChatScrollNav.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
@@ -251,12 +251,11 @@ const mentionOpen = ref(false)
 const skillPickerOnly = ref(false)
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
-const sending = ref(false)
 const projectActionPending = ref(false)
 const memoryReady = ref(false)
-const streamingText = ref('')
-const pendingUserTurn = ref<ConversationTurn | null>(null)
 const copiedTurnId = ref('')
+// status / error 只承载非运行的视图提示（写文件、解析附件、预览失败）。
+// 运行自己的进度和错误挂在 run 上，否则后台运行时会把 A 对话的状态写到 B 对话的界面上。
 const status = ref('')
 const error = ref('')
 const contextNotice = ref('')
@@ -290,20 +289,11 @@ async function handleCapturedFrame(file: File) {
   }
 }
 type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
-const pendingMemoryToolApproval = ref<{
-  message: string
-  resolve: (decision: MemoryToolApprovalDecision) => void
-} | null>(null)
 const memoryToolAlwaysAllowedConversations = new Set<string>()
 const contextNoticeShownConversations = new Set<string>()
 const referencingDocuments = new Set<string>()
 type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed'; durationMs?: number }
-const runVisible = ref(false)
-const runElapsed = ref(0)
-const runSteps = ref<MemoryRunStep[]>([])
-const runMetrics = ref<DirectRunMetrics | null>(null)
 const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
-const pendingProgramStatus = ref<MemoryProgramStatus | null>(null)
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
 const viewportWidth = ref(window.innerWidth)
@@ -338,14 +328,12 @@ const skillInstallStatus = ref<Record<string, 'ready' | 'installing' | 'installe
 const evalReports = ref<Record<string, string>>({})
 const skillInstallErrors = ref<Record<string, string>>({})
 const transientAttachments = ref<Record<string, ResolvedDirectAttachment[]>>({})
-let abortController: AbortController | null = null
 let mediaDisplayLease: MediaDisplayLease | null = null
 let projectGeneration = 0
 let backlinkGeneration = 0
 let resourceOpenGeneration = 0
 let conversationSelectionGeneration = 0
 let sendInFlight = false
-let memoryRunGeneration = 0
 let offOpenResource: (() => void) | null = null
 let offFocusMedia: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
@@ -359,7 +347,6 @@ let stopProjectWatch: (() => void) | null = null
 let creationClosePromise: Promise<boolean> | null = null
 let chatResizeStartX = 0
 let chatResizeStartWidth = 0
-let runTimer: ReturnType<typeof setInterval> | null = null
 let sceneSaveQueue = Promise.resolve()
 let projectMapSaveQueue = Promise.resolve()
 
@@ -463,6 +450,57 @@ watch(() => conversation.value?.transcript.id, () => { contextNotice.value = '' 
 const projectOwner = computed(() => desktopRuntime
   ? projectStore.projectDir.value
   : projectStore.webProjectId.value)
+
+type MemoryRunPhase = 'running' | 'done' | 'failed' | 'stopped'
+type MemoryRunApproval = { message: string; resolve: (decision: MemoryToolApprovalDecision) => void }
+type MemoryRun = {
+  owner: string
+  resourcePath: string
+  conversationId: string
+  phase: MemoryRunPhase
+  status: string
+  error: string
+  streamingText: string
+  steps: MemoryRunStep[]
+  elapsed: number
+  metrics: DirectRunMetrics | null
+  userTurn: ConversationTurn | null
+  programStatus: MemoryProgramStatus | null
+  approval: MemoryRunApproval | null
+  controller: AbortController
+  timer: ReturnType<typeof setInterval> | null
+  startedAt: number
+  title?: string
+  editTargetId: string
+  memoryEnabled: boolean
+}
+
+/**
+ * 运行态按对话归属，而不是按「屏幕上正在显示的那条对话」。
+ * 必须用 reactive 包 Map：回调从 runs.get() 拿到的 run 是代理，写 run.status 才会触发渲染；
+ * 直接改 `runs.set(key, raw)` 里那个裸对象不会通知视图。
+ */
+// ponytail: 跑完的 run 记录留在表里，切回来仍能看到「已完成」横幅；上限是本次会话跑过的对话数。
+const runs = reactive(new Map<string, MemoryRun>())
+// 本方案的前提：切项目不重建 MemoryWorkbench（App.vue 常驻渲染）。改成 :key="projectOwner" 会让运行随组件销毁。
+const memoryRunKey = (owner: string, path: string) => `${owner}::${path}`
+const activeRun = computed(() => {
+  const active = conversation.value
+  return active ? runs.get(memoryRunKey(active.resource.owner, active.resource.path)) ?? null : null
+})
+const sending = computed(() => activeRun.value?.phase === 'running')
+const streamingText = computed(() => activeRun.value?.streamingText || '')
+const pendingUserTurn = computed(() => activeRun.value?.userTurn ?? null)
+const runVisible = computed(() => Boolean(activeRun.value) && activeRun.value?.phase !== 'stopped')
+const runElapsed = computed(() => activeRun.value?.elapsed ?? 0)
+const runMetrics = computed(() => activeRun.value?.metrics ?? null)
+const runStatus = computed(() => activeRun.value?.status || '')
+const runError = computed(() => activeRun.value?.error || '')
+const displayedStatus = computed(() => runStatus.value || status.value)
+const displayedError = computed(() => runError.value || error.value)
+const pendingMemoryToolApproval = computed(() => activeRun.value?.approval ?? null)
+const isOnScreen = (run: MemoryRun) => run.owner === projectOwner.value && conversation.value?.resource.path === run.resourcePath
+
 type MemoryMentionOption =
   | { type: 'tool'; id: string; display: string; description: string; icon: string }
   | { type: 'file'; display: string; description: string; resource: ProjectResource }
@@ -588,7 +626,7 @@ const modelGroups = computed(() => {
   return [...groups.entries()].map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
-const visibleRunSteps = computed(() => runSteps.value.slice(-5))
+const visibleRunSteps = computed(() => activeRun.value?.steps.slice(-5) ?? [])
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
 function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
   return programStatuses.value[turnId]
@@ -637,11 +675,6 @@ function showChipTip(event: Event, text: string) {
 function hideChipTip() {
   chipTip.value = null
 }
-
-// 发送中按钮会变成 disabled，disabled 按钮不派发 pointerleave，提示会卡在屏幕上。
-watch(sending, () => {
-  chipTip.value = null
-})
 
 onMounted(async () => {
   void checkSceneVideoExport()
@@ -707,10 +740,14 @@ onBeforeUnmount(() => {
   window.removeEventListener('resize', resizeCreationForWindow)
   stopChatDockResize()
   stopProjectWatch?.()
-  stopRunTimer()
   projectGeneration++
-  settleMemoryToolApproval('reject')
-  abortController?.abort()
+  // 卸载 = 退出工作台：中断所有还在跑的运行，并让挂着的审批先落地。
+  for (const run of runs.values()) {
+    settleApproval(run, 'reject')
+    stopRunTimer(run)
+    run.controller.abort()
+  }
+  runs.clear()
   releaseConversationPreviewUrls()
   releaseMediaUrl()
 })
@@ -803,7 +840,7 @@ function selectModel(model: { id: string; providerId?: string }) {
 }
 
 async function openProject(owner: string) {
-  if (sending.value) stop()
+  // 切项目不停运行：运行归对话，结果落盘，回来读盘就能看到。
   conversationSelectionGeneration++
   resourceOpenGeneration++
   // 创作画布保存失败会在这里早退；授权集属于旧项目，必须在此之前清掉
@@ -861,7 +898,7 @@ async function createMemorySpace() {
 
 async function startNewConversation() {
   const owner = projectOwner.value
-  if (!owner || !memoryReady.value || sending.value || projectActionPending.value) return
+  if (!owner || !memoryReady.value || projectActionPending.value) return
   projectActionPending.value = true
   error.value = ''
   try {
@@ -918,11 +955,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
   }
   releaseConversationPreviewUrls()
   error.value = ''
-  if (!sending.value) {
-    status.value = ''
-    runVisible.value = false
-  }
-  streamingText.value = ''
+  status.value = ''
   if (resource.type === 'conversation') {
     if (creationMounted.value) {
       try { await creationPanelRef.value?.flushCanvasSave?.() } catch (cause) {
@@ -1351,7 +1384,6 @@ async function cancelEdit() {
 
 async function selectConversation(item: MemoryConversation) {
   const generation = ++conversationSelectionGeneration
-  if (sending.value) stop()
   const resource = await openProjectResource(files, item.resource)
   if (generation !== conversationSelectionGeneration) return
   await openResource(resource)
@@ -1372,8 +1404,9 @@ async function renameConversation(item: MemoryConversation) {
 }
 
 async function deleteConversation(item: MemoryConversation) {
-  // 删除正在运行的当前会话前先停止，否则已派发的工具调用会继续用旧授权落盘
-  if (item.transcript.id === conversation.value?.transcript.id && sending.value) stop()
+  // 删除正在运行的会话前先停它自己的运行，否则已派发的工具调用会继续用旧授权落盘
+  const deletedRun = runs.get(memoryRunKey(item.resource.owner, item.resource.path))
+  if (deletedRun) stopRun(deletedRun)
   const message = mobileRuntime
     ? `永久删除对话“${item.transcript.title}”？此操作无法恢复。`
     : `删除对话“${item.transcript.title}”？`
@@ -1481,10 +1514,6 @@ async function send() {
     return
   }
   const baseTurns = editIndex >= 0 ? active.transcript.turns.slice(0, editIndex) : active.transcript.turns
-  const runGeneration = ++memoryRunGeneration
-  const isCurrentRun = () => runGeneration === memoryRunGeneration
-  sending.value = true
-  pendingProgramStatus.value = null
   const userTurn: ConversationTurn = {
     id: `turn-${crypto.randomUUID()}`,
     role: 'user',
@@ -1497,7 +1526,6 @@ async function send() {
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || activeAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
     : undefined
-  pendingUserTurn.value = userTurn
   // 合同：授权来自用户消息。「编辑并重新发送」会截断后续轮次，被截掉的授权必须一起失效，
   // 所以按保留的轮次重算，而不是把历史授权直接并上来。
   authorizedPaths.value = [
@@ -1514,15 +1542,44 @@ async function send() {
   if (!fileToolsSelected.value && authorizedPaths.value.length)
     contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但 @文件 已关闭：本轮不会读写这些路径。`
 
-  beginRunStatus()
+  const runKey = memoryRunKey(active.resource.owner, active.resource.path)
+  runs.set(runKey, {
+    owner: active.resource.owner,
+    resourcePath: active.resource.path,
+    conversationId: active.transcript.id,
+    phase: 'running',
+    status: '正在思考',
+    error: '',
+    streamingText: '',
+    steps: [],
+    elapsed: 0,
+    metrics: null,
+    userTurn,
+    programStatus: null,
+    approval: null,
+    controller: new AbortController(),
+    timer: null,
+    startedAt: Date.now(),
+    title,
+    editTargetId,
+    memoryEnabled: memorySnapshot,
+  })
+  // 派发这一刻起，这一轮就归这条 run；下面所有回调只写它，界面状态由 activeRun 派生。
+  const run = runs.get(runKey) as MemoryRun
+  const isCurrentRun = () => runs.get(runKey) === run && run.phase === 'running'
+  // 点发送即完成：立刻清空草稿，不必等这一轮跑完才能输入下一段。
+  input.value = ''
+  editingTurnId.value = ''
+  setEditorText(composerRef.value, '')
+  resizeComposer()
+
+  beginRunStatus(run)
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
-  status.value = '正在思考'
-  streamingText.value = ''
-  abortController = new AbortController()
   let replyCompleted = false
   try {
     const requestAttachments = await materializeChatAttachments(activeAttachments)
+    if (!isCurrentRun()) return
     const mediaContext = conversationMediaContext(
       [...baseTurns, userTurn],
       userTurn.id,
@@ -1546,19 +1603,19 @@ async function send() {
       avSelected: avSelected.value,
       scene3dSelected: scene3dSelected.value,
       recordSceneVideo,
-      signal: abortController.signal,
+      signal: run.controller.signal,
       onToolEvent: event => {
-        if (isCurrentRun()) updateRunTool(event)
+        if (isCurrentRun()) updateRunTool(run, event)
       },
       onProgramStatus: programStatus => {
-        if (isCurrentRun()) pendingProgramStatus.value = programStatus
+        if (isCurrentRun()) run.programStatus = programStatus
       },
       onMetrics(metrics) {
-        if (isCurrentRun()) runMetrics.value = metrics
+        if (isCurrentRun()) run.metrics = metrics
       },
       onRetry(attempt, total) {
         if (!isCurrentRun()) return
-        status.value = `通道超时，正在重连 ${attempt}/${total}`
+        run.status = `通道超时，正在重连 ${attempt}/${total}`
       },
       onContextTrimmed() {
         if (!isCurrentRun()) return
@@ -1569,7 +1626,7 @@ async function send() {
         if (!isCurrentRun()) return false
         if (memoryToolAlwaysAllowedConversations.has(active.transcript.id) && call.function.name !== 'delete') return true
         const approved = await new Promise<boolean>(resolve => {
-          pendingMemoryToolApproval.value = {
+          run.approval = {
             message: memoryToolApprovalMessage(call),
             resolve: decision => {
               if (decision === 'always' && call.function.name !== 'delete') memoryToolAlwaysAllowedConversations.add(active.transcript.id)
@@ -1581,25 +1638,29 @@ async function send() {
       },
       onText(text) {
         if (!isCurrentRun()) return
-        status.value = '正在整理回答'
-        streamingText.value = text
+        run.status = '正在整理回答'
+        run.streamingText = text
       },
     })
     replyCompleted = true
-    if (runGeneration !== memoryRunGeneration) return
+    if (!isCurrentRun()) return
     const complete = editTargetId
       ? await replaceMemoryRound(active.resource, editTargetId, userTurn, reply, files, title)
       : await appendMemoryRound(active.resource, userTurn, reply, files, title)
-    if (runGeneration !== memoryRunGeneration) return
+    // 落盘无条件：用户切走了也要写完，切回来直接读盘就能看到结果。
     if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
-    const completeResource = await openProjectResource(files, complete.resource)
-    rememberConversation(complete)
-    opened.value = completeResource
-    streamingText.value = ''
+    if (run.owner === projectOwner.value) rememberConversation(complete)
+    if (!isCurrentRun()) return
+    run.status = '已完成'
+    // 改视图有条件：这条 run 不在屏上时，只落盘、不碰界面。
+    if (!isOnScreen(run)) return
+    opened.value = await openProjectResource(files, complete.resource)
+    if (!isCurrentRun()) return
+    run.streamingText = ''
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
       if (memorySnapshot) void recordConversation(turn, { ...active, transcript: complete.transcript })
-      if (pendingProgramStatus.value) programStatuses.value[turn.id] = pendingProgramStatus.value
+      if (run.programStatus) programStatuses.value[turn.id] = run.programStatus
       try {
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
@@ -1614,67 +1675,71 @@ async function send() {
       if (evalReviewPath) evalReports.value[turn.id] = evalReviewPath
     }
     attachments.value = []
-    editingTurnId.value = ''
-    input.value = ''
-    setEditorText(composerRef.value, '')
-    streamingText.value = ''
-    status.value = '已完成'
-    stopRunTimer()
   } catch (cause) {
-    if (runGeneration !== memoryRunGeneration) return
+    if (!isCurrentRun()) return
     const aborted = cause instanceof DOMException && cause.name === 'AbortError'
-    if (aborted) status.value = '已停止'
-    else {
-      status.value = '处理失败'
-      error.value = cause instanceof Error ? cause.message : String(cause)
+    if (aborted) {
+      run.phase = 'stopped'
+      run.status = '已停止'
+    } else {
+      run.phase = 'failed'
+      run.status = '处理失败'
+      run.error = cause instanceof Error ? cause.message : String(cause)
       if (!replyCompleted && isRecoverableDirectTransportFailure(cause)) {
         const interruptedReply = [
-          streamingText.value.trim(),
+          run.streamingText.trim(),
           '> 本轮因网络或上游服务中断，已保留当前结果。继续前请先检查项目现状，避免重复写入或外部操作。',
         ].filter(Boolean).join('\n\n')
         try {
-          if (runGeneration !== memoryRunGeneration) return
           const interrupted = await appendMemoryRound(active.resource, userTurn, interruptedReply, files, title)
-          if (runGeneration !== memoryRunGeneration) return
           if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
-          rememberConversation(interrupted)
+          if (run.owner === projectOwner.value) rememberConversation(interrupted)
+          if (!isCurrentRun() || !isOnScreen(run)) return
           opened.value = await openProjectResource(files, interrupted.resource)
           attachments.value = []
-          input.value = ''
-          setEditorText(composerRef.value, '')
-          streamingText.value = ''
+          run.streamingText = ''
         } catch (persistCause) {
-          error.value += `；中断记录保存失败：${persistCause instanceof Error ? persistCause.message : String(persistCause)}`
+          run.error += `；中断记录保存失败：${persistCause instanceof Error ? persistCause.message : String(persistCause)}`
         }
       }
     }
-    stopRunTimer()
   } finally {
-    pendingUserTurn.value = null
-    settleMemoryToolApproval('reject')
-    sending.value = false
-    abortController = null
+    // 只有仍标记为 running 的运行才算正常结束，被停掉或换掉的不能被这里改回 done。
+    if (run.phase === 'running') run.phase = 'done'
+    run.userTurn = null
+    settleApproval(run, 'reject')
+    stopRunTimer(run)
     sendInFlight = false
   }
 }
 
 function stop() {
-  status.value = '已停止'
-  stopRunTimer()
-  memoryRunGeneration++
-  settleMemoryToolApproval('reject')
-  abortController?.abort()
+  const run = activeRun.value
+  if (run) stopRun(run)
+}
+
+/** 停止单条 run：不影响其他对话正在跑的任务。 */
+function stopRun(run: MemoryRun) {
+  if (run.phase === 'running') run.phase = 'stopped'
+  run.status = '已停止'
+  stopRunTimer(run)
+  settleApproval(run, 'reject')
+  run.controller.abort()
   // 断开运行时会话状态，避免旧运行的气泡/步骤显示到切换后的会话上
-  pendingUserTurn.value = null
-  runVisible.value = false
-  runSteps.value = []
+  run.userTurn = null
+  run.streamingText = ''
+  run.steps = []
+}
+
+function settleApproval(run: MemoryRun | null, decision: MemoryToolApprovalDecision) {
+  const pending = run?.approval
+  if (!run || !pending) return
+  run.approval = null
+  pending.resolve(decision)
 }
 
 function settleMemoryToolApproval(decision: MemoryToolApprovalDecision) {
-  const pending = pendingMemoryToolApproval.value
-  if (!pending) return
-  pendingMemoryToolApproval.value = null
-  pending.resolve(decision)
+  settleApproval(activeRun.value, decision)
 }
 
 function memoryToolApprovalMessage(call: DirectToolCall): string {
@@ -1687,35 +1752,34 @@ function memoryToolApprovalMessage(call: DirectToolCall): string {
   return '允许扩展工具继续操作'
 }
 
-function beginRunStatus() {
-  stopRunTimer()
-  runVisible.value = true
-  runElapsed.value = 0
-  runSteps.value = []
-  runMetrics.value = null
-  const startedAt = Date.now()
-  runTimer = setInterval(() => { runElapsed.value = Math.floor((Date.now() - startedAt) / 1000) }, 1000)
+function beginRunStatus(run: MemoryRun) {
+  stopRunTimer(run)
+  run.elapsed = 0
+  run.steps = []
+  run.metrics = null
+  run.startedAt = Date.now()
+  run.timer = setInterval(() => { run.elapsed = Math.floor((Date.now() - run.startedAt) / 1000) }, 1000)
 }
 
-function stopRunTimer() {
-  if (runTimer) clearInterval(runTimer)
-  runTimer = null
+function stopRunTimer(run: MemoryRun) {
+  if (run.timer) clearInterval(run.timer)
+  run.timer = null
 }
 
-function updateRunTool(event: DirectToolExecutionEvent) {
+function updateRunTool(run: MemoryRun, event: DirectToolExecutionEvent) {
   const label = memoryToolLabel(event.call.function.name)
   if (event.type === 'tool_execution_start') {
-    runSteps.value.push({ id: event.call.id, label, state: 'running' })
-    status.value = `正在${label}`
+    run.steps.push({ id: event.call.id, label, state: 'running' })
+    run.status = `正在${label}`
     return
   }
-  const step = runSteps.value.find(item => item.id === event.call.id)
+  const step = run.steps.find(item => item.id === event.call.id)
   if (step) {
     step.state = event.status === 'succeeded' ? 'done' : 'failed'
     step.durationMs = event.durationMs
   }
-  const running = runSteps.value.find(item => item.state === 'running')
-  status.value = running ? `正在${running.label}` : '正在等待模型继续处理'
+  const running = run.steps.find(item => item.state === 'running')
+  run.status = running ? `正在${running.label}` : '正在等待模型继续处理'
 }
 
 function memoryToolLabel(name: string): string {
@@ -2041,7 +2105,7 @@ async function selectFiles(event: Event) {
 }
 
 function setComposerDropActive(event: DragEvent, active: boolean) {
-  if (desktopOnlyRuntime || sending.value || !event.dataTransfer?.types.includes('Files')) return
+  if (desktopOnlyRuntime || !event.dataTransfer?.types.includes('Files')) return
   event.preventDefault()
   event.dataTransfer.dropEffect = 'copy'
   composerDropActive.value = active
@@ -2072,7 +2136,7 @@ async function filesFromDrop(event: DragEvent): Promise<File[]> {
 }
 
 async function onComposerDrop(event: DragEvent) {
-  if (desktopOnlyRuntime || sending.value) return
+  if (desktopOnlyRuntime) return
   composerDropActive.value = false
   event.preventDefault()
   event.stopPropagation()
@@ -2085,7 +2149,7 @@ async function onComposerDrop(event: DragEvent) {
 
 async function importDesktopChatPaths(paths: string[], warnings: string[] = []) {
   const owner = projectOwner.value
-  if (!owner || !memoryReady.value || sending.value) return
+  if (!owner || !memoryReady.value) return
   const groups = new Map<string, string[]>()
   for (const path of paths) {
     const target = memoryMediaDirectoryFor(path)
@@ -2732,7 +2796,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <button
           v-if="memoryReady"
           class="new-conversation-button"
-          :disabled="sending || projectActionPending"
+          :disabled="projectActionPending"
           @click="startNewConversation"
         >
           <JcIcon name="add" class="memory-new-conversation-icon" />
@@ -2939,11 +3003,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name">{{ name }}</span>
-            <button title="移除 Skill" :disabled="sending" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+            <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
           </div>
           <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
-            <button :title="`移除${tool.label}`" :disabled="sending" @click="disableTool(tool.id)">×</button>
+            <button :title="`移除${tool.label}`" @click="disableTool(tool.id)">×</button>
           </div>
         </div>
         <div v-if="persistentAttachments.length || attachments.length" class="memory-attachments">
@@ -2953,7 +3017,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
               <small>持续引用</small>
             </span>
-            <button title="取消持续引用" :disabled="sending" @click="removePersistentAttachment(file.id)">×</button>
+            <button title="取消持续引用" @click="removePersistentAttachment(file.id)">×</button>
           </div>
           <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip">
             <img v-if="file.kind === 'image'" :src="file.value" :alt="file.name" />
@@ -2962,35 +3026,35 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
               <small v-if="file.readablePath">已保存 · 已解析 {{ (file.characterCount || 0).toLocaleString() }} 字</small>
             </span>
-            <button title="移除附件" :disabled="sending" @click="attachments = attachments.filter(item => item.id !== file.id)">×</button>
+            <button title="移除附件" @click="attachments = attachments.filter(item => item.id !== file.id)">×</button>
           </div>
         </div>
         <div v-if="referencedFiles.length" class="memory-attachments memory-references">
           <div v-for="file in referencedFiles" :key="file.name" class="memory-attachment-chip">
             <JcIcon name="attach-file" />
             <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
-            <button title="移除引用" :disabled="sending" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
+            <button title="移除引用" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
           </div>
         </div>
         <div v-if="contextNotice" class="memory-context-notice" role="status">
           <span>{{ contextNotice }}</span>
           <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
         </div>
-        <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(error) }" aria-live="polite">
+        <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(displayedError) }" aria-live="polite">
           <div class="memory-run-head">
-            <JcIcon :name="error ? 'error' : status === '已完成' ? 'check_circle' : status === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !error }" />
-            <strong>{{ status }}</strong>
+            <JcIcon :name="displayedError ? 'error' : displayedStatus === '已完成' ? 'check_circle' : displayedStatus === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !displayedError }" />
+            <strong>{{ displayedStatus }}</strong>
             <small v-if="runMetrics" class="memory-run-metrics">{{ formatRunMetrics(runMetrics) }}</small>
             <span>{{ formatRunElapsed(runElapsed) }}</span>
           </div>
-          <div v-if="(sending || error) && visibleRunSteps.length" class="memory-run-steps">
+          <div v-if="(sending || displayedError) && visibleRunSteps.length" class="memory-run-steps">
             <div v-for="step in visibleRunSteps" :key="step.id" :class="step.state">
               <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
               <span>{{ step.label }}</span>
               <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
             </div>
           </div>
-          <small v-if="error">{{ error }}</small>
+          <small v-if="displayedError">{{ displayedError }}</small>
         </div>
         <ToolApprovalStrip
           v-if="pendingMemoryToolApproval"
@@ -2999,19 +3063,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runVisible && (status || error) && !status.startsWith('已记录对话')" class="memory-status" :class="{ error: Boolean(error) }">
-          <span>{{ error || status }}</span>
+        <div v-else-if="!runVisible && (displayedStatus || displayedError) && !displayedStatus.startsWith('已记录对话')" class="memory-status" :class="{ error: Boolean(displayedError) }">
+          <span>{{ displayedError || displayedStatus }}</span>
         </div>
         <div
           class="memory-input-row"
           data-project-drop-target="chat"
-          :data-project-drop-disabled="sending ? 'true' : undefined"
           :class="{ 'memory-input-drop-active': composerDropActive }"
           @dragover.prevent="setComposerDropActive($event, true)"
           @dragleave.prevent="setComposerDropActive($event, false)"
           @drop.prevent.stop="onComposerDrop"
         >
-          <div v-show="mentionOpen && !sending" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
+          <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
             <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>
             <button
               v-for="item in mentionFlat.slice(0, skillPickerOnly ? 40 : 12)"
@@ -3026,12 +3089,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <span class="memory-mention-kind">{{ item.type === 'tool' ? '工具' : item.type === 'skill' ? 'Skill' : item.description }}</span>
             </button>
           </div>
-          <input ref="fileInput" type="file" multiple hidden :disabled="sending" @change="selectFiles" />
+          <input ref="fileInput" type="file" multiple hidden @change="selectFiles" />
           <div class="memory-input-area">
             <div
               ref="composerRef"
               class="memory-composer-editable"
-              :contenteditable="!sending"
+              contenteditable="true"
               data-placeholder="输入消息"
               @input="handleComposerInput"
               @keydown="handleComposerKeydown"
@@ -3040,14 +3103,14 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           </div>
           <div class="memory-action-row">
             <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
-            <button class="icon-button" title="添加附件" :disabled="sending" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
+            <button class="icon-button" title="添加附件" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
             <div class="memory-command-strip" aria-label="常用指令">
-              <button v-for="command in primaryCommands" :key="command.id" type="button" :disabled="sending" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
+              <button v-for="command in primaryCommands" :key="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
-            <button v-if="sending" class="send-button" title="停止" @click="stop"><JcIcon name="stop" /></button>
+            <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
             <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>

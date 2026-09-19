@@ -47,7 +47,7 @@ test('Desktop and Web drop paths are mutually exclusive at the consumers', () =>
 
   assert.match(
     workbench,
-    /async function onComposerDrop[\s\S]{0,160}if \(desktopOnlyRuntime \|\| sending\.value\) return/,
+    /async function onComposerDrop[\s\S]{0,160}if \(desktopOnlyRuntime\) return/,
   )
   assert.match(creation, /isTauriRuntime\(\) && .*dataTransfer\?\.files/)
   assert.match(tree, /if \(isDesktop\) return/)
