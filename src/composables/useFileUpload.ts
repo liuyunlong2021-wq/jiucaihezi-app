@@ -9,6 +9,7 @@
  * 统一返回 ProcessedFile 对象，各组件直接使用。
  */
 import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
+import { DOCUMENT_EXT } from '@/utils/documentFormats'
 import { SUPPORTED_TEXT_EXT } from '@/utils/fileProcessor'
 
 // ─── 类型 ───
@@ -61,9 +62,6 @@ export interface UploadOptions {
 
 // ─── 文件类型检测 ───
 
-// 与 document-converter 的服务端白名单同源（anydoc 0.2.3 的能力）：
-// 两处不一致时会出现“UI 让选、服务端 415 拒”。.csv 不在这里，它走文本直通。
-const OFFICE_EXT = /\.(doc|docx|docm|xls|xlsx|xlsm|xlsb|ppt|pptx|pptm|pps|ppsx|ppsm|pot|odt|ods|odp|rtf|epub)$/i
 const PDF_EXT = /\.pdf$/i
 const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/bmp']
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|ico|tiff?)$/i
@@ -81,7 +79,7 @@ export function detectFileType(file: File): ProcessedFile['type'] {
   // 2. Office MIME types（浏览器对 Office 文件 MIME 识别更可靠）
   if (mime.includes('officedocument') || mime.includes('msword') || mime.includes('ms-excel') ||
       mime.includes('ms-powerpoint') || mime === 'application/rtf' ||
-      mime.includes('opendocument') || OFFICE_EXT.test(name)) return 'office'
+      mime.includes('opendocument') || DOCUMENT_EXT.test(name)) return 'office'
 
   // 3. 文本类型
   if (mime.startsWith('text/') || mime === 'application/json' ||
@@ -94,7 +92,7 @@ export function detectFileType(file: File): ProcessedFile['type'] {
 
   // 5. 无 MIME 时根据扩展名兜底
   if (!mime || mime === 'application/octet-stream') {
-    if (OFFICE_EXT.test(name)) return 'office'
+    if (DOCUMENT_EXT.test(name)) return 'office'
     if (PDF_EXT.test(name)) return 'pdf'
     if (SUPPORTED_TEXT_EXT.test(name)) return 'text'
   }

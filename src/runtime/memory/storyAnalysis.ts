@@ -47,6 +47,18 @@ export interface PreparedStoryAnalysis {
   workDirectory: string
   nodes: PreparedStoryAnalysisNode[]
   assetIndexes: Array<{ path: string; content: string }>
+  /** 整本书的进度：超长作品（网文常见上千章）需要告诉用户还剩多少、下一步从哪接。 */
+  progress: {
+    /** 全部原文节点数，不含 0000 前置内容。 */
+    total: number
+    /** 已有分析页的节点数，不论页面状态是 complete 还是 needs_review。 */
+    analyzed: number
+    remaining: number
+    /** 第一个还没有分析页的节点序号；全部处理完为 0。 */
+    nextOrder: number
+    /** 本次实际采用的起始序号。 */
+    startOrder: number
+  }
 }
 
 export interface StoryAnalysisCommitResult {
@@ -142,6 +154,11 @@ function normalizedName(value: string): string {
   return value.normalize('NFC').trim().toLocaleLowerCase()
 }
 
+/** 原文节点的物理序号（`0001_短名.md` → 1）；前置内容 0000 不算节点。 */
+function storyNodeOrder(path: string): number {
+  return Number(path.match(/\/([0-9]{4})(?:_[^/]*)?\.md$/u)?.[1] || 0)
+}
+
 function directMarkdownPages(resources: ProjectResource[], directory: string): ProjectResource[] {
   const prefix = `${directory}/`
   return resources.filter(
@@ -169,25 +186,48 @@ export function legacyCharacterDirectoryConflict(
 }
 
 export async function prepareStoryAnalysis(
-  input: { workDirectory: string; limit?: number; includeNeedsReview?: boolean },
+  input: { workDirectory: string; limit?: number; includeNeedsReview?: boolean; startOrder?: number },
   files: ProjectFileService,
   owner: string,
 ): Promise<PreparedStoryAnalysis> {
   const { workDirectory, wikiRoot } = normalizeWorkDirectory(input.workDirectory)
   const limit = Math.max(1, Math.min(Math.floor(input.limit || 1), 10))
+  const startOrder = Math.max(0, Math.floor(Number(input.startOrder) || 0))
   const resources = await files.list(owner)
   const legacyConflict = legacyCharacterDirectoryConflict(resources, wikiRoot)
   if (legacyConflict) throw new Error(legacyConflict)
   const sourceDirectory = `${workDirectory}/原文节点`
   const analysisDirectory = `${workDirectory}/节点分析`
-  const sourcePages = directMarkdownPages(resources, sourceDirectory)
+  const allSourcePages = directMarkdownPages(resources, sourceDirectory)
     .filter(
       resource => /\/[0-9]{4}(?:_[^/]*)?\.md$/u.test(resource.path) &&
         !resource.path.endsWith('/0000.md'),
     )
     .sort((a, b) => a.path.localeCompare(b.path))
-  if (!sourcePages.length) throw new Error(`没有可分析的原文节点：${sourceDirectory}`)
+  if (!allSourcePages.length) throw new Error(`没有可分析的原文节点：${sourceDirectory}`)
   const resourceByPath = new Map(resources.map(resource => [resource.path, resource]))
+  // 分析页与原文节点同名，用文件是否存在算进度，不用逐个读 frontmatter（上千章时太贵）。
+  const analyzedPaths = new Set(
+    directMarkdownPages(resources, analysisDirectory).map(resource => resource.path),
+  )
+  const analyzed = allSourcePages.filter(resource =>
+    analyzedPaths.has(`${analysisDirectory}/${resource.path.split('/').at(-1)}`),
+  ).length
+  // `nextOrder` 必须是「本次起点之后的第一个未分析节点」，否则分段推进时会往回跳、原地打转。
+  // 传 0 表示本次起点（含）之后没有待分析了；整本进度看 remaining。
+  const sourcePages = startOrder
+    ? allSourcePages.filter(resource => storyNodeOrder(resource.path) >= startOrder)
+    : allSourcePages
+  const firstPending = sourcePages.find(
+    resource => !analyzedPaths.has(`${analysisDirectory}/${resource.path.split('/').at(-1)}`),
+  )
+  const progress = {
+    total: allSourcePages.length,
+    analyzed,
+    remaining: allSourcePages.length - analyzed,
+    nextOrder: firstPending ? storyNodeOrder(firstPending.path) : 0,
+    startOrder,
+  }
   const nodes: PreparedStoryAnalysisNode[] = []
   for (const resource of sourcePages) {
     const source = await files.readText(resource)
@@ -223,7 +263,7 @@ export async function prepareStoryAnalysis(
     const resource = resourceByPath.get(path)
     if (resource) assetIndexes.push({ path, content: (await files.readText(resource)).content })
   }
-  return { workDirectory, nodes, assetIndexes }
+  return { workDirectory, nodes, assetIndexes, progress }
 }
 
 function stringList(value: unknown, label: string): string[] {

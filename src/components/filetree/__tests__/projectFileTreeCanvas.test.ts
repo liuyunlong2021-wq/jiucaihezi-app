@@ -476,8 +476,18 @@ test('project tree exposes native story splitting with a deterministic preview a
   assert.match(source, /开始拆分/)
   // 自定义标记词：弹窗里能改规则，且改了要从原始素材重拆（不能拿旧 plan 直接写）。
   assert.match(source, /v-model="storyImportMarker"/)
-  assert.match(source, /@input="onStoryMarkerInput"/)
+  assert.match(source, /@input="onStoryPlanInput"/)
   assert.match(source, /marker: storyImportMarker\.value\.trim\(\) \|\| undefined/)
+  // 书名/作者推断出来后可当场改，改完同样重拆。
+  assert.match(source, /inferStoryIdentity\(content, name\)/)
+  assert.match(source, /v-model="storyImportSource\.title"/)
+  assert.match(source, /v-model="storyImportSource\.author"/)
+  // 选中文件夹即可批量导入：排队逐本确认，出错能跳过这一本。
+  assert.match(source, /if \(selected\.isDirectory\) \{\s+await openStoryBatchImport\(resources, selected\.path\)/)
+  assert.match(source, /isConvertibleDocument\(resource\.name\) \|\| SUPPORTED_TEXT_EXT\.test\(resource\.name\)/)
+  assert.match(source, /storyImportBatch\.value = \{ index: batch\.index \+ 1, total: batch\.total \}/)
+  assert.match(source, /if \(storyImportQueue\.value\.length\) \{\s+closeStoryPlanOnly\(\)\s+await loadNextStoryImport\(\)/)
+  assert.match(source, /@click="skipStoryImport"/)
 })
 
 test('project export resolves external file collisions before opening a writable', () => {

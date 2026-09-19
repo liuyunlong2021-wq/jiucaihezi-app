@@ -143,6 +143,63 @@ test('runtime prepares only unfinished story nodes and commits a grounded analys
   assert.equal(next.nodes.length, 1)
 })
 
+// 单本上千章时用户要能分段推进：指定起点只取该段，进度按整本报，nextOrder 只往前走。
+test('prepare_story_analysis reports progress and resumes from a given node order', async () => {
+  const { plan, state } = await importedStory()
+
+  const whole = await prepareStoryAnalysis({ workDirectory: plan.workDirectory }, state.files, 'project')
+  assert.deepEqual(whole.progress, {
+    total: 2,
+    analyzed: 0,
+    remaining: 2,
+    nextOrder: 1,
+    startOrder: 0,
+  })
+
+  // 第 1 章没分析过，也能直接从第 2 章开始；进度仍按整本算。
+  const segment = await prepareStoryAnalysis(
+    { workDirectory: plan.workDirectory, limit: 10, startOrder: 2 },
+    state.files,
+    'project',
+  )
+  assert.deepEqual(
+    segment.nodes.map(node => node.sourceLabel),
+    ['第二章'],
+  )
+  assert.equal(segment.progress.startOrder, 2)
+  assert.equal(segment.progress.nextOrder, 2)
+
+  // 0001 有分析页（真实链路里由 commit_story_analysis 写出）后，进度推进到 0002。
+  state.entries.set(`${plan.workDirectory}/节点分析/0001_刘备走进桃园.md`, {
+    content: '---\ntype: story-node-analysis\nanalysis_status: complete\n---\n',
+    revision: 1,
+  })
+  const resumed = await prepareStoryAnalysis({ workDirectory: plan.workDirectory }, state.files, 'project')
+  assert.deepEqual(resumed.progress, {
+    total: 2,
+    analyzed: 1,
+    remaining: 1,
+    nextOrder: 2,
+    startOrder: 0,
+  })
+  assert.equal(resumed.nodes.length, 1)
+
+  // 两个节点都有分析页后整本完成：nextOrder 归 0，没有可交付的节点。
+  state.entries.set(
+    `${plan.workDirectory}/节点分析/${segment.nodes[0]!.sourcePath.split('/').at(-1)}`,
+    { content: '---\ntype: story-node-analysis\nanalysis_status: complete\n---\n', revision: 1 },
+  )
+  const finished = await prepareStoryAnalysis({ workDirectory: plan.workDirectory }, state.files, 'project')
+  assert.deepEqual(finished.progress, {
+    total: 2,
+    analyzed: 2,
+    remaining: 0,
+    nextOrder: 0,
+    startOrder: 0,
+  })
+  assert.equal(finished.nodes.length, 0)
+})
+
 // 旧 资产/人物/ 与新的 资产/角色/ 并存时，角色实体的实体发现看不见旧档案，
 // 同一角色会被重建一份，所以分析在写入之前先停下来。
 test('legacy 资产/人物 directory stops analysis before any write', async () => {

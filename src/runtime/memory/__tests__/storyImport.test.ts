@@ -7,6 +7,7 @@ import {
   applyStoryImportPlan,
   buildStoryImportPlan,
   detectStorySplit,
+  inferStoryIdentity,
   parseStoryOrdinal,
   upsertWikiIndex,
 } from '../storyImport'
@@ -436,6 +437,107 @@ test('前置内容与章节共用一个页面小节', async () => {
   assert.equal((index.match(/^## 页面$/gm) || []).length, 1)
   assert.ok(index.indexOf('[[0000|') < index.indexOf('[[0001_'))
   assert.ok(index.indexOf('[[0001_') < index.indexOf('[[0002_'))
+})
+
+test('故事名与作者先从原文标题和文件名推断', () => {
+  assert.deepEqual(inferStoryIdentity('# 召唤万岁\n\n正文', '召唤万岁(霞飞双颊).epub'), {
+    title: '召唤万岁',
+    author: '霞飞双颊',
+  })
+  // 转换产物没有一级标题时退回文件名，并照样拆出作者
+  assert.deepEqual(inferStoryIdentity('正文', '兽血沸腾（静官）.epub'), {
+    title: '兽血沸腾',
+    author: '静官',
+  })
+  assert.deepEqual(inferStoryIdentity('正文', '三结义.md'), { title: '三结义', author: '' })
+})
+
+test('作者写进来源记录，空作者不留空字段', async () => {
+  const withAuthor = await buildStoryImportPlan({
+    content: '# 召唤万岁\n\n## 第一章 穿越\n甲走了很久。\n## 第二章 醒来\n乙来了。',
+    title: '召唤万岁',
+    author: '霞飞双颊',
+    originalName: '召唤万岁(霞飞双颊).epub',
+    marker: '章',
+  })
+  assert.match(withAuthor.completionContent, /author: "霞飞双颊"/)
+  assert.match(withAuthor.completionContent, /- 作者：霞飞双颊/)
+
+  const withoutAuthor = await buildStoryImportPlan({
+    content: '题记\n第一章\n甲',
+    title: '无作者书',
+    originalName: '无作者书.md',
+  })
+  assert.doesNotMatch(withoutAuthor.completionContent, /author:/)
+})
+
+test('追加章节后重导：老节点跳过、新节点创建、原文与来源记录刷新', async () => {
+  const first = '题记\n第一章 雨夜\n甲走了很久。\n第二章 清晨\n乙来了。'
+  const plan = await buildStoryImportPlan({
+    content: first,
+    title: '追加书',
+    originalName: '追加书.md',
+  })
+  const state = memoryFiles({ 'wiki/index.md': '# Wiki\n' })
+  await applyStoryImportPlan(plan, first, state.files, 'project', { acceptWarnings: true })
+
+  const grown = `${first}\n第三章 黄昏\n丙回来了。`
+  const grownPlan = await buildStoryImportPlan({
+    content: grown,
+    title: '追加书',
+    originalName: '追加书.md',
+  })
+  const result = await applyStoryImportPlan(grownPlan, grown, state.files, 'project', {
+    acceptWarnings: true,
+  })
+
+  // 老节点内容没变 → 跳过；新章节建新节点
+  assert.ok(result.created > 0)
+  assert.equal(state.entries.has('wiki/原始材料/追加书/原文节点/0003_黄昏.md'), true)
+  // 原文.md 与 来源.md 是本次导入生成的记录，允许刷新（旧代码在这里抛「目标文件冲突」）
+  assert.match(state.entries.get('wiki/原始材料/追加书/原文.md')!.content, /第三章 黄昏/)
+  assert.match(
+    state.entries.get('wiki/原始材料/追加书/来源.md')!.content,
+    /node_count: 4/,
+  )
+})
+
+test('改稿被挡，用户写在生成块之后的笔记保留', async () => {
+  const content = '题记\n第一章 雨夜\n甲走了很久。'
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '改稿书',
+    originalName: '改稿书.md',
+  })
+  const state = memoryFiles({ 'wiki/index.md': '# Wiki\n' })
+  await applyStoryImportPlan(plan, content, state.files, 'project', { acceptWarnings: true })
+
+  // 非追加的改稿：新内容不是旧内容的开头 → 仍然停下
+  const rewritten = '序\n第一章 雨夜\n甲走了很久，但又不同。'
+  const rewrittenPlan = await buildStoryImportPlan({
+    content: rewritten,
+    title: '改稿书',
+    originalName: '改稿书.md',
+  })
+  await assert.rejects(
+    () => applyStoryImportPlan(rewrittenPlan, rewritten, state.files, 'project', { acceptWarnings: true }),
+    /目标文件冲突/,
+  )
+
+  // 用户写在生成块之后的笔记：重导时刷新记录，但笔记必须还在
+  const record = state.entries.get('wiki/原始材料/改稿书/来源.md')!
+  record.content = `${record.content}\n## 我的笔记\n别删这段。\n`
+  const appended = `${content}\n第二章 清晨\n乙来了很久。`
+  const appendedPlan = await buildStoryImportPlan({
+    content: appended,
+    title: '改稿书',
+    originalName: '改稿书.md',
+  })
+  await applyStoryImportPlan(appendedPlan, appended, state.files, 'project', { acceptWarnings: true })
+
+  const refreshed = state.entries.get('wiki/原始材料/改稿书/来源.md')!.content
+  assert.match(refreshed, /node_count: 3/)
+  assert.match(refreshed, /## 我的笔记\n别删这段。/)
 })
 
 test('story import resumes after interruption and writes the completion marker last', async () => {

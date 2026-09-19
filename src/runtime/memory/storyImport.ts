@@ -18,6 +18,7 @@ export { parseStoryOrdinal } from './markdownSplit'
 export interface StoryImportPlan {
   id: string
   title: string
+  author: string
   originalName: string
   sourceEncoding: string
   wikiRoot: 'wiki' | 'docs/wiki'
@@ -47,6 +48,42 @@ export function safeWikiSegment(value: string): string {
     .slice(0, 80)
   if (!result) throw new Error('无法确定故事名称')
   return result
+}
+
+/** 下载器习惯把文件命名成 `书名(作者).epub`，括号里就是作者。 */
+function splitFileNameAuthor(fileName: string): { title: string; author: string } {
+  const stem = String(fileName || '').replace(/\.[^.]+$/, '').trim()
+  const matched = stem.match(/^(.*?)\s*[（(]([^（()）]{1,40})[）)]\s*$/u)
+  if (!matched) return { title: stem, author: '' }
+  return { title: matched[1]!.trim() || stem, author: matched[2]!.trim() }
+}
+
+/**
+ * 书名优先取转换产物里的第一个一级标题（书自己的标题），否则退回文件名；
+ * 作者只能从文件名形如 `书名(作者)` 的括号里拿——AnyDoc 的文档模型不带元数据。
+ * 两项都可以在导入预览里由用户改写，所以猜错不致命。
+ */
+export function inferStoryIdentity(
+  content: string,
+  fileName: string,
+): { title: string; author: string } {
+  const fromFile = splitFileNameAuthor(fileName)
+  const heading = content.match(/^#\s+(\S.*)$/mu)?.[1]?.trim()
+  return { title: heading || fromFile.title, author: fromFile.author }
+}
+
+/** 来源.md 是生成物：这一行之后的内容不由本流程产出，刷新时必须原样保留。 */
+export const STORY_SOURCE_MARKER = '<!-- jc-story-source -->'
+
+/** 节点文件的正文（去掉 frontmatter）：比较切片是否只是被延长时用。 */
+function storyNodeBody(content: string): string {
+  const match = content.match(/^---\r?\n[\s\S]*?\r?\n---\r?\n/)
+  return match ? content.slice(match[0].length) : content
+}
+
+/** 判据：这份记录看起来是本流程生成的（而不是用户自己建的 来源.md）。 */
+function isGeneratedStorySourceRecord(content: string): boolean {
+  return content.startsWith('---\n') && /\ntype: story-source\n/u.test(content)
 }
 
 function matchLines(lines: string[], matcher: RegExp): number[] {
@@ -129,12 +166,14 @@ export function detectStorySplit(
 export async function buildStoryImportPlan(input: {
   content: string
   title: string
+  author?: string
   originalName: string
   sourceEncoding?: string
   wikiRoot?: 'wiki' | 'docs/wiki'
   marker?: string
 }): Promise<StoryImportPlan> {
   const title = safeWikiSegment(input.title)
+  const author = String(input.author || '').trim()
   const originalName = String(input.originalName || '').trim() || `${title}.md`
   const sourceEncoding = String(input.sourceEncoding || 'unknown')
   const wikiRoot = input.wikiRoot || 'wiki'
@@ -151,6 +190,7 @@ export async function buildStoryImportPlan(input: {
     'type: story-source',
     `id: ${JSON.stringify(`story.${split.sourceHash.slice(0, 16)}`)}`,
     `title: ${JSON.stringify(title)}`,
+    ...(author ? [`author: ${JSON.stringify(author)}`] : []),
     `original_name: ${JSON.stringify(originalName)}`,
     `source_encoding: ${JSON.stringify(sourceEncoding)}`,
     `source_hash: ${JSON.stringify(split.sourceHash)}`,
@@ -162,16 +202,20 @@ export async function buildStoryImportPlan(input: {
     `# ${title}来源`,
     '',
     `- 原始文件：${originalName}`,
+    ...(author ? [`- 作者：${author}`] : []),
     `- 原文：[[原文]]`,
     `- 原文节点：[[原文节点/index|${split.nodes.length} 个节点]]`,
     ...(split.warnings.length
       ? ['', '## 导入警告', '', ...split.warnings.map(item => `- ${item}`)]
       : []),
     '',
+    STORY_SOURCE_MARKER,
+    '',
   ].join('\n')
   return {
     id: split.id,
     title,
+    author,
     originalName,
     sourceEncoding,
     wikiRoot,
@@ -288,13 +332,34 @@ export async function applyStoryImportPlan(
     }
 
     const staticWrites = [{ path: plan.sourcePath, content: currentSource }, ...plan.split.writes]
-    const existingCompletion = await read(plan.completionPath)
-    if (existingCompletion && existingCompletion.content !== plan.completionContent) {
-      throw new Error(`目标文件冲突，未写入任何内容：${plan.completionPath}`)
+    const existingSource = await read(plan.sourcePath)
+    // 原文.md 允许「追加后重导」：新内容以旧内容开头说明只是往后加了章节，
+    // 节点侧仍按内容哈希跳过/新建。真正危险的改稿（覆盖、换书）继续停下。
+    if (existingSource && existingSource.content !== currentSource) {
+      if (!currentSource.startsWith(existingSource.content))
+        throw new Error(`目标文件冲突，未写入任何内容：${plan.sourcePath}`)
     }
-    for (const write of staticWrites) {
+    const existingCompletion = await read(plan.completionPath)
+    let completionContent = plan.completionContent
+    if (existingCompletion && existingCompletion.content !== completionContent) {
+      // 来源.md 是本流程自己生成的导入记录，允许刷新（元数据升级、追加章节后重导）；
+      // 用户自己建的 来源.md 不碰，用户写在生成块之后的笔记跟着原样保留。
+      if (!isGeneratedStorySourceRecord(existingCompletion.content))
+        throw new Error(`目标文件冲突，未写入任何内容：${plan.completionPath}`)
+      const at = existingCompletion.content.indexOf(STORY_SOURCE_MARKER)
+      if (at >= 0)
+        completionContent += existingCompletion.content.slice(at + STORY_SOURCE_MARKER.length)
+    }
+    for (const write of plan.split.writes) {
       const existing = await read(write.path)
-      if (existing && existing.content !== write.content) {
+      // 节点是原文的派生切片，不是用户内容：内容没变就跳过；只在「正文是旧正文的
+      // 延长」（往后加了东西，切片的末端跟着挪，frontmatter 的 source_range 与
+      // source_hash 随之更新）时刷新；其余改动一律停下。
+      if (
+        existing &&
+        existing.content !== write.content &&
+        !storyNodeBody(write.content).startsWith(storyNodeBody(existing.content))
+      ) {
         throw new Error(`目标文件冲突，未写入任何内容：${write.path}`)
       }
     }
@@ -308,7 +373,6 @@ export async function applyStoryImportPlan(
     const indexWrites = [
       {
         path: workIndexPath,
-        before: workBefore,
         content: upsertWikiIndex(
           workBefore?.content || '',
           plan.title,
@@ -328,7 +392,6 @@ export async function applyStoryImportPlan(
       },
       {
         path: materialsIndexPath,
-        before: materialsBefore,
         content: upsertWikiIndex(
           materialsBefore?.content || '',
           '原始材料',
@@ -344,7 +407,6 @@ export async function applyStoryImportPlan(
       },
       {
         path: rootIndexPath,
-        before: rootBefore,
         content: upsertWikiIndex(
           rootBefore?.content || '',
           plan.wikiRoot === 'wiki' ? 'Wiki' : '文档 Wiki',
@@ -364,35 +426,31 @@ export async function applyStoryImportPlan(
     let updated = 0
     let skipped = 0
     const paths: string[] = []
-    const createStatic = async (path: string, content: string) => {
-      if ((await read(path))?.content === content) {
+    // 同一个写入器同时负责新建与刷新：追加章节后重导需要更新 原文.md 与 来源.md，
+    // 老代码只走 createText，会在文件已存在时失败。
+    const writeStatic = async (path: string, content: string) => {
+      const existing = await read(path)
+      if (existing?.content === content) {
         skipped += 1
         return
       }
-      await files.createText(owner, path, content)
-      created += 1
+      if (existing) {
+        const resource = byPath.get(path)
+        if (!resource) throw new Error(`文件已变化，请重新执行：${path}`)
+        const result = await files.writeText(resource, content, existing.revision)
+        if (result.status !== 'saved')
+          throw new Error(`文件正在其他窗口更新，请重新执行：${path}`)
+        updated += 1
+      } else {
+        await files.createText(owner, path, content)
+        created += 1
+      }
       paths.push(path)
     }
-    for (const write of staticWrites) await createStatic(write.path, write.content)
-    for (const write of indexWrites) {
-      if (write.before?.content === write.content) {
-        skipped += 1
-        continue
-      }
-      if (!write.before) {
-        await files.createText(owner, write.path, write.content)
-        created += 1
-      } else {
-        const resource = byPath.get(write.path) as ProjectResource | undefined
-        if (!resource) throw new Error(`索引已变化，请重新执行：${write.path}`)
-        const result = await files.writeText(resource, write.content, write.before.revision)
-        if (result.status !== 'saved')
-          throw new Error(`索引正在其他窗口更新，请重新执行：${write.path}`)
-        updated += 1
-      }
-      paths.push(write.path)
-    }
-    await createStatic(plan.completionPath, plan.completionContent)
+    for (const write of staticWrites) await writeStatic(write.path, write.content)
+    // 索引与正文走同一个写入器：新建、刷新、跳过三种结果一致，不再各写一套。
+    for (const write of indexWrites) await writeStatic(write.path, write.content)
+    await writeStatic(plan.completionPath, completionContent)
     return { created, updated, skipped, paths }
   })
 }

@@ -38,11 +38,13 @@ import {
 } from '@/utils/fileSort'
 import { WEB_PROJECT_FILES_CHANNEL, webProjectFiles } from '@/utils/webProjectFiles'
 import { buildSaveDialogFilters, saveGeneratedFile } from '@/utils/exportSave'
-import { isTextFile } from '@/utils/fileProcessor'
+import { isTextFile, SUPPORTED_TEXT_EXT } from '@/utils/fileProcessor'
+import { DOCUMENT_ACCEPT, isConvertibleDocument } from '@/utils/documentFormats'
 import { convertDocumentToMarkdown } from '@/utils/documentMarkdown'
 import {
   applyStoryImportPlan,
   buildStoryImportPlan,
+  inferStoryIdentity,
   type StoryImportPlan,
 } from '@/runtime/memory/storyImport'
 import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
@@ -211,15 +213,33 @@ const storyImport = ref<{
   plan: StoryImportPlan
   content: string
 } | null>(null)
-/** 弹窗的原始输入：标记词改了要从这里重新拆，所以它不能挂在 plan 上。 */
+/** 弹窗的原始输入：标记词、书名、作者改了都要从原始素材重拆，所以不能挂在 plan 上。 */
 const storyImportSource = ref<{
   content: string
   title: string
+  author: string
   originalName: string
   sourceEncoding: string
   wikiRoot: 'wiki' | 'docs/wiki'
 } | null>(null)
+/** 文件夹批量导入：待处理队列与「第几本 / 共几本」。 */
+const storyImportQueue = ref<Array<{ path: string; name: string }>>([])
+const storyImportBatch = ref<{ index: number; total: number } | null>(null)
 const storyImportMarker = ref('')
+/** 故事导入可选的文件类型：纯文本直读 + 可转换文档（真闸门在 `isConvertibleDocument` / `SUPPORTED_TEXT_EXT`）。 */
+const STORY_IMPORT_ACCEPT = [
+  '.md',
+  '.markdown',
+  '.txt',
+  '.csv',
+  '.json',
+  '.xml',
+  '.srt',
+  '.vtt',
+  '.html',
+  '.htm',
+  DOCUMENT_ACCEPT,
+].join(',')
 const storyImportBusy = ref(false)
 const storyImportError = ref('')
 const storyImportNamesExpanded = ref(false)
@@ -2022,7 +2042,7 @@ const storySplitStrategyLabel = computed(() => {
   }[split.strategy]
 })
 
-/** 标记词一变就重建计划：预览里的节点数和命名示例跟着变，写入前就能看出拆错没拆错。 */
+/** 标记词、书名、作者任一变化都重建计划：预览里的节点数和命名示例跟着变，写入前就能看出拆错没拆错。 */
 async function rebuildStoryPlan() {
   const source = storyImportSource.value
   if (!source) return
@@ -2047,7 +2067,7 @@ async function rebuildStoryPlan() {
   }
 }
 
-function onStoryMarkerInput() {
+function onStoryPlanInput() {
   if (storyImportMarkerTimer) clearTimeout(storyImportMarkerTimer)
   storyImportMarkerTimer = setTimeout(() => void rebuildStoryPlan(), 300)
 }
@@ -2060,6 +2080,8 @@ function closeStoryImport() {
   storyImportSource.value = null
   storyImportMarker.value = ''
   storyImportError.value = ''
+  storyImportQueue.value = []
+  storyImportBatch.value = null
 }
 
 async function prepareStoryImport(content: string, name: string, sourceEncoding: string) {
@@ -2070,12 +2092,15 @@ async function prepareStoryImport(content: string, name: string, sourceEncoding:
     resources.some(resource => resource.path === root || resource.path.startsWith(`${root}/`)),
   ) as Array<'wiki' | 'docs/wiki'>
   if (roots.length > 1) throw new Error('检测到多个 Wiki 根目录，请先保留一个')
+  // 书名优先用转换产物里的标题，作者从 `书名(作者).epub` 这类文件名里拿；两项都能在预览里改。
+  const identity = inferStoryIdentity(content, name)
   storyImportNamesExpanded.value = false
   storyImportMarker.value = ''
   storyImport.value = null
   storyImportSource.value = {
     content,
-    title: name.replace(/\.[^.]+$/, ''),
+    title: identity.title,
+    author: identity.author,
     originalName: name,
     sourceEncoding,
     wikiRoot: roots[0] || 'wiki',
@@ -2100,41 +2125,108 @@ async function convertStoryFile(file: File) {
 }
 
 async function openStoryImport() {
-  storyImportError.value = ''
+  // 每次都从干净状态开始：残留的批次信息会把上一次的队列带到这一次。
+  closeStoryImport()
   const owner = projectKey.value
   const path = selectedPath.value
-  if (owner && path) {
-    storyImportBusy.value = true
-    try {
-      const resource = (await projectFiles.list(owner)).find(
-        item => item.path === path && !item.isDirectory,
-      )
-      if (!resource) {
-        storyInput.value?.click()
-        return
-      }
-      let file: File
-      try {
-        const binary = await projectFiles.readBinary(resource)
-        file = new File([binary.data.slice().buffer], resource.name, {
-          type: binary.mimeType || resource.mimeType || 'application/octet-stream',
-        })
-      } catch {
-        const text = await projectFiles.readText(resource, 30 * 1024 * 1024)
-        if (text.truncated) throw new Error('故事超过 30 MB，请先按卷拆分')
-        file = new File([text.content], resource.name, {
-          type: resource.mimeType || 'text/plain',
-        })
-      }
-      await convertStoryFile(file)
-    } catch (error) {
-      storyImportError.value = error instanceof Error ? error.message : String(error)
-    } finally {
-      storyImportBusy.value = false
-    }
+  if (!owner || !path) {
+    storyInput.value?.click()
     return
   }
-  storyInput.value?.click()
+  storyImportBusy.value = true
+  try {
+    const resources = await projectFiles.list(owner)
+    const selected = resources.find(item => item.path === path)
+    if (!selected) {
+      storyInput.value?.click()
+      return
+    }
+    if (selected.isDirectory) {
+      await openStoryBatchImport(resources, selected.path)
+      return
+    }
+    await importStoryResource(selected)
+  } catch (error) {
+    storyImportError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    storyImportBusy.value = false
+  }
+}
+
+/** 下载器一次下很多本放一个文件夹，所以目录要能批量导：递归找可导入的文件，排队逐个确认。 */
+async function openStoryBatchImport(resources: ProjectResource[], directory: string) {
+  const files = resources
+    .filter(
+      resource =>
+        !resource.isDirectory &&
+        resource.path.startsWith(`${directory}/`) &&
+        (isConvertibleDocument(resource.name) || SUPPORTED_TEXT_EXT.test(resource.name)),
+    )
+    .sort((left, right) => left.path.localeCompare(right.path, 'zh-CN'))
+  if (!files.length) throw new Error('这个文件夹里没有可导入的文档')
+  storyImportQueue.value = files.map(item => ({ path: item.path, name: item.name }))
+  storyImportBatch.value = { index: 0, total: files.length }
+  await loadNextStoryImport()
+}
+
+/** 读出可用于转换的 File：二进制读不到（例如纯文本适配器）时退回文本读取。 */
+async function fileFromStoryResource(resource: ProjectResource): Promise<File> {
+  try {
+    const binary = await projectFiles.readBinary(resource)
+    return new File([binary.data.slice().buffer], resource.name, {
+      type: binary.mimeType || resource.mimeType || 'application/octet-stream',
+    })
+  } catch {
+    const text = await projectFiles.readText(resource, 30 * 1024 * 1024)
+    if (text.truncated) throw new Error('故事超过 30 MB，请先按卷拆分')
+    return new File([text.content], resource.name, {
+      type: resource.mimeType || 'text/plain',
+    })
+  }
+}
+
+async function importStoryResource(resource: ProjectResource) {
+  await convertStoryFile(await fileFromStoryResource(resource))
+}
+
+/** 批量队列推进：一次只拆一本，每本都要用户看过预览才写盘。 */
+async function loadNextStoryImport() {
+  const next = storyImportQueue.value.shift()
+  const batch = storyImportBatch.value
+  if (!next || !batch) return
+  storyImportBatch.value = { index: batch.index + 1, total: batch.total }
+  const owner = projectKey.value
+  if (!owner) return
+  closeStoryPlanOnly()
+  storyImportBusy.value = true
+  try {
+    const resource = (await projectFiles.list(owner)).find(
+      item => item.path === next.path && !item.isDirectory,
+    )
+    if (!resource) throw new Error(`文件不存在或已被移动：${next.path}`)
+    await importStoryResource(resource)
+  } catch (error) {
+    storyImportError.value = error instanceof Error ? error.message : String(error)
+  } finally {
+    storyImportBusy.value = false
+  }
+}
+
+/** 切下一本时只清掉上一本的预览，队列与批次信息要留着。 */
+function closeStoryPlanOnly() {
+  if (storyImportMarkerTimer) clearTimeout(storyImportMarkerTimer)
+  storyImportMarkerTimer = null
+  storyImportRequestId += 1
+  storyImport.value = null
+  storyImportSource.value = null
+  storyImportMarker.value = ''
+  storyImportError.value = ''
+}
+
+/** 错误状态下跳过这一本，继续处理队列里的下一本。 */
+async function skipStoryImport() {
+  if (storyImportQueue.value.length) await loadNextStoryImport()
+  else closeStoryImport()
 }
 
 async function onStoryInputChange(event: Event) {
@@ -2142,8 +2234,8 @@ async function onStoryInputChange(event: Event) {
   const file = input.files?.[0]
   input.value = ''
   if (!file) return
+  closeStoryImport()
   storyImportBusy.value = true
-  storyImportError.value = ''
   try {
     await convertStoryFile(file)
   } catch (error) {
@@ -2163,8 +2255,13 @@ async function confirmStoryImport() {
     await applyStoryImportPlan(pending.plan, pending.content, projectFiles, owner, {
       acceptWarnings: true,
     })
-    closeStoryImport()
     await loadFileTree()
+    if (storyImportQueue.value.length) {
+      closeStoryPlanOnly()
+      await loadNextStoryImport()
+      return
+    }
+    closeStoryImport()
     await locateProjectResource(pending.plan.workDirectory)
   } catch (error) {
     storyImportError.value = error instanceof Error ? error.message : String(error)
@@ -2821,7 +2918,7 @@ onBeforeUnmount(() => {
       ref="storyInput"
       class="pft-native-input"
       type="file"
-      accept=".md,.markdown,.txt,.pdf,.doc,.docx,.docm,.rtf,.odt,.html,.htm,.csv,.json,.xml,.srt,.vtt,.ppt,.pptx,.pptm,.pps,.ppsx,.ppsm,.pot,.xls,.xlsx,.xlsm,.xlsb,.ods,.odp,.epub"
+      :accept="STORY_IMPORT_ACCEPT"
       @change="onStoryInputChange"
     />
     <div v-if="!hasProject" class="pft-empty">
@@ -3249,11 +3346,35 @@ onBeforeUnmount(() => {
       >
         <div class="pft-story-dialog" role="dialog" aria-modal="true" aria-label="故事拆分预览">
           <strong>故事拆分</strong>
+          <p v-if="storyImportBatch" class="pft-story-batch">
+            第 {{ storyImportBatch.index }} / {{ storyImportBatch.total }} 本<span v-if="storyImportQueue.length">（队列还剩 {{ storyImportQueue.length }} 本）</span>
+          </p>
           <p v-if="storyImportBusy && !storyImport">正在读取并识别故事结构…</p>
           <template v-if="storyImportSource">
             <dl>
-              <dt>作品</dt>
-              <dd>{{ storyImportSource.title }}</dd>
+              <dt>源文件</dt>
+              <dd>{{ storyImportSource.originalName }}</dd>
+              <dt>书名</dt>
+              <dd>
+                <input
+                  v-model="storyImportSource.title"
+                  class="pft-story-marker"
+                  type="text"
+                  :disabled="storyImportBusy"
+                  @input="onStoryPlanInput"
+                />
+              </dd>
+              <dt>作者</dt>
+              <dd>
+                <input
+                  v-model="storyImportSource.author"
+                  class="pft-story-marker"
+                  type="text"
+                  placeholder="留空则不写作者"
+                  :disabled="storyImportBusy"
+                  @input="onStoryPlanInput"
+                />
+              </dd>
               <dt>识别方式</dt>
               <dd>{{ storySplitStrategyLabel || '未识别到边界' }}</dd>
               <dt>自定义标记</dt>
@@ -3264,7 +3385,7 @@ onBeforeUnmount(() => {
                   type="text"
                   placeholder="填编号里那个词，如 SC、场、EP"
                   :disabled="storyImportBusy"
-                  @input="onStoryMarkerInput"
+                  @input="onStoryPlanInput"
                 />
               </dd>
             </dl>
@@ -3324,6 +3445,14 @@ onBeforeUnmount(() => {
               @click="storyImportError = ''; storyInput?.click()"
             >
               重新选择
+            </button>
+            <button
+              v-if="storyImportError && storyImportQueue.length"
+              type="button"
+              :disabled="storyImportBusy"
+              @click="skipStoryImport"
+            >
+              跳过这一本
             </button>
           </div>
         </div>
@@ -3745,6 +3874,11 @@ onBeforeUnmount(() => {
   color: var(--olive);
   font-size: 12px;
   text-decoration: underline;
+}
+.pft-story-batch {
+  margin: -6px 0 10px;
+  color: var(--ink3);
+  font-size: 12px;
 }
 .pft-story-warnings {
   margin-top: 14px;

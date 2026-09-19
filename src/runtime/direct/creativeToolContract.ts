@@ -291,6 +291,12 @@ export const MEMORY_STORY_TOOL_DEFINITIONS = [
         description: 'Project-relative wiki/原始材料/<作品> or docs/wiki/原始材料/<作品> directory',
       },
       limit: { type: 'integer', minimum: 1, maximum: 10 },
+      startOrder: {
+        type: 'integer',
+        minimum: 0,
+        description:
+          'Start from this node order instead of the first unfinished node. Use it to work through a long work in segments.',
+      },
       includeNeedsReview: {
         type: 'boolean',
         description: 'Include needs_review nodes only when the user is resolving them',
@@ -691,6 +697,7 @@ const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   prepare_story_analysis: {
     workDirectory: 'string',
     limit: 'integer',
+    startOrder: 'integer',
     includeNeedsReview: 'boolean',
   },
   commit_story_analysis: { workDirectory: 'string', analyses: 'json' },

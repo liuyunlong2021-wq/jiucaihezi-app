@@ -1398,3 +1398,12 @@
 - 面板删除 `gpt-image-2.5-flare-CF-超分`、`gpt-image-2.5-sunburst-CF-超分`；新增 `gpt-image-2.5-官方`、`gpt-image-2.5-flare-官方`、`gpt-image-2.5-sunburst-官方`。
 - 三个新模型按原名提交 NewAPI，支持 1K/2K/4K，显示价均为 `0.15/张`；旧 CF 路由继续留在小易适配器和公开 API 兼容层。
 - TDD 红灯 4 项已复现；定向注册表与可用性测试 `59/59`、Node focused `1368/1368`、`vue-tsc -b` 与差异检查通过；真实渠道生成待验收。
+
+## [2026-09-19] 实施完成 | 故事导入补齐格式真源、文件夹批量与长书分段
+
+- 文档格式清单收敛到 `src/utils/documentFormats.ts` 单一真源（等于 AnyDoc 0.2.3 的 20 个扩展名），附件分类与故事导入共用同一份，避免再出现「UI 让选、服务端 415 拒」。
+- 文件树选中文件夹即可批量导入：可导入的文档排队，弹窗显示「第 N / 共 M 本」，每本都要看过预览才写盘，出错可以「跳过这一本」。
+- 书名不再等于文件名：`书名(作者).epub` 这类写法会识别出作者，书名与作者都能在预览里改，改完按新名字重建拆分计划。
+- 拆分改为受控刷新：`原文.md` 仅在纯追加时覆盖；`来源.md` 只刷新 Runtime 自己生成的记录（`type: story-source`）并原样保留标记 `<!-- jc-story-source -->` 之后的用户笔记；节点仅在正文是旧正文的延长时刷新（`source_range`/`source_hash` 本来就变，不参与比较）。此前任何重导都会被冲突闸门整条拦住。
+- `prepare_story_analysis` 新增 `startOrder` 与 `progress`（`total`/`analyzed`/`remaining`/`nextOrder`）：上千章的书可以只处理某一卷、某五十章，`nextOrder` 只往前走，不会往回跳。
+- 定向回归：故事导入与节点分析 `31/31`、文件树 `35/35`、完整 focused `1414/1414`、`vue-tsc -b` 通过。真实超长书分段推进、Web/Mobile 线上 EPUB 转换（需重新部署 `document-converter`）待人工验收。

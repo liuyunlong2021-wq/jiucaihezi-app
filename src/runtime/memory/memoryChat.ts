@@ -648,6 +648,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         {
           workDirectory: String(args.workDirectory),
           limit: Number(args.limit) || 1,
+          startOrder: Number(args.startOrder) || 0,
           includeNeedsReview: Boolean(args.includeNeedsReview),
         },
         storyFiles,
