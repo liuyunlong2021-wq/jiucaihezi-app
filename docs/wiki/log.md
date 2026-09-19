@@ -1,5 +1,14 @@
 # Wiki 操作日志
 
+## [2026-09-19] 变更 | 新增知识资料沉淀规则，修原文节点 index 重复标题
+
+- **触发**：用户看到 `virgiliojr94/book-to-skill`（文档 → skill 转换器），问怎么适配我们的 Wiki。核查后确定它补的是我们没做的那一半——非叙事物料：五 Skill 退役后 `wiki-memory` 只剩故事型规则，用户丢一本技术书进来只能「沿用两阶段原则」，而两阶段的语义字段（角色/场景/道具/关系）与资产目录都是为故事设计的。
+- **已重合不重做**：文档→Markdown（`document-converter`）、章节识别（自定义标记词）、渐进披露（index 三层 + 按需 read）、增量（hash 幂等）、版权纪律（两阶段天然分了「原文无损 / 分析页综合」）。
+- **实施（L1，零代码）**：新增 `public/skills/wiki-memory/references/知识资料沉淀规则.md`，与故事规则并列并由 `SKILL.md` 路由；复用来源树与拆分链路不动，只加 `知识/` 横向层；术语索引只放「概念 → 节点」映射不放定义，速查只放决策规则/阈值/气味，术语与框架先留分析页不建实体页。**明知差异**：知识型物料不走 `commit_story_analysis`（其字段与目录为故事资产设计，会产出形状错误的页面），分析页改由模型直接写，代价是没有 Runtime 的证据与唯一性校验，补偿是 `source_hash` 从原文节点原样复制 + 自己维护节点分析 index 与父级登记。
+- **真实书实测**（《电影剧本写作基础》114 页 PDF，pypdf 抽取 13.3 万字）：自动识别选了“独立数字段号”给出 **138 个节点**（正文行首裸数字胜出），换成自定义标记词「章」才是 17 章；目录页的 17 行也会被当成边界（34 命中），必须先剔目录。两条都写进规则。用真实 `applyStoryImportPlan` 落盘 24 个文件，短名与真实目录一致。
+- **顺带修 bug**：`buildMarkdownSplitPlan` 在前置内容分支与非分组分支各 push 一次 `## 页面`，有前置内容的稿件（题记/序/版权页）生成的 `原文节点/index.md` 会出现两个同名标题，章节导航被劈成两段。合并为一个小节；新用例已实测在修复前版本失败（17 pass / 1 fail）、修复后 18/18。
+- **验证**：`storyImport` 18/18、合并 `storyAnalysis`/`adaptationWikiScaffold`/`projectFileTreeCanvas` 共 65/65、`vue-tsc -b` 通过；真实书只跑通第一阶段 + 手写一页精读档/一页备查档与两个横向页，**未做 App 内 UI 人工验收**。
+
 ## [2026-09-19] 变更 | 通用 Wiki 骨架新增创作规划层，jc-novel 对齐现行合同
 
 - **触发**：用户要求探讨 `jc-novel`（长篇小说 Skill）与 `wiki-memory`、现行 Wiki 架构的合作关系。核查后发现 jc-novel 停在两代前的合同上：① 它写的「配合 jc-jian-wiki（巡检）和 jc-raw-wiki（填充）」和更早的 `jiyiyasuo`/`yizhixing`，在当前环境**一个都加载不到**（`~/.agents/skills` 里五个 Wiki Skill 全部不存在）；② 自建骨架 `wiki/{剧本,角色,世界,剧情,文案包装}` 与现行 `原始材料/资产` 分叉，角色会落成两份（`legacyCharacterDirectoryConflict` 只拦 `资产/人物/`，拦不住 `wiki/角色/`）；③ 它依赖的 `CLAUDE.md`/`hot.md` 自 2026-08-05 起已不再注入，且被 `creativeMemory.test.ts` 的断言锁死；④ 它建的 `index.md` 没有双链也没有子目录 index，而运行时只注入深度 ≤ 2 的 `index.md`，等于预读上下文是空的。
