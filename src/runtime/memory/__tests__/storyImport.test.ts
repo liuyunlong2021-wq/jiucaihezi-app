@@ -11,7 +11,11 @@ import {
   parseStoryOrdinal,
   upsertWikiIndex,
 } from '../storyImport'
-import { normalizeStoryMarker, probeStoryMarker } from '../markdownSplit'
+import {
+  isStoryChapterBoundary,
+  normalizeStoryMarker,
+  probeStoryMarker,
+} from '../markdownSplit'
 
 function memoryFiles(initial: Record<string, string> = {}) {
   const entries = new Map(
@@ -313,14 +317,106 @@ test('one import builds all 33 physical nodes even when source labels repeat or 
   assert.equal(state.writes.at(-1), plan.completionPath)
 })
 
-test('automatic detection stops when similarly strong rules would cut at different lines', () => {
-  assert.throws(
-    () => detectStorySplit('第一章\n甲\n1.\n乙\n第二章\n丙\n2.\n丁'),
-    /多种接近但切片位置不同/,
-  )
-  assert.deepEqual(detectStorySplit('# 第一章\n甲\n# 第二章\n乙'), {
-    strategy: 'story_chapter',
+test('明确写了章的写法胜过裸编号，目录页不再拦下自动识别', async () => {
+  // 实样：真实 EPUB 的目录页就是 `1. [第1章 …](#anchor)`，条数和正文章节一样多，
+  // 以前按数量比分数会判成「两种都接近但位置不同」，直接把导入拒了（用户只能手填标记词）。
+  const content = [
+    '# 三国：中兴大汉，蜀之浪漫',
+    '# 目录',
+    '### 第一卷：默认',
+    '1. [第1章 开局抢了赵云的戏](#a)',
+    '2. [第2章 我选择救刘阿斗](#b)',
+    '# 第1章 开局抢了赵云的戏',
+    '甲走了很久。',
+    '1. 这是正文里的一条清单，不是章节',
+    '# 第2章 我选择救刘阿斗',
+    '乙来了。',
+  ].join('\n')
+  assert.deepEqual(detectStorySplit(content), { strategy: 'story_chapter' })
+
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '三国',
+    originalName: '三国.epub',
   })
+  // 卷是容器不算节点；书名、简介、目录和目录页全部留在前置内容里，不参与切分。
+  assert.deepEqual(
+    plan.split.nodes.map(node => node.title),
+    ['前置内容', '第1章 开局抢了赵云的戏', '第2章 我选择救刘阿斗'],
+  )
+  assert.match(plan.split.nodes[0]!.source, /第一卷：默认/)
+  // 手填「章」是这条规则的等价写法，不该再出现两种结果
+  const manual = await buildStoryImportPlan({
+    content,
+    title: '三国',
+    originalName: '三国.epub',
+    marker: '章',
+  })
+  assert.deepEqual(
+    manual.split.nodes.map(node => node.path),
+    plan.split.nodes.map(node => node.path),
+  )
+})
+
+test('目录行不是边界：页码导引线和锚点链接都不算章节', async () => {
+  // 实样：PDF 工具书的目录会被压成「第二章 主题**.....6** 第三章 人物**...11**」，
+  // 行首长得跟章标题一样，漏了这条整页目录都会被拆成节点。
+  const content = [
+    '# 编剧工具书',
+    '第一章 电影剧本是什么？**................................................ 2**',
+    '第二章 主题**....................................................... 6**',
+    '### 第一章 电影剧本是什么？',
+    '正文。',
+    '### 第二章 主题',
+    '正文。',
+  ].join('\n')
+  assert.deepEqual(detectStorySplit(content), { strategy: 'story_chapter' })
+
+  const plan = await buildStoryImportPlan({
+    content,
+    title: '编剧工具书',
+    originalName: '编剧工具书.pdf',
+  })
+  assert.deepEqual(
+    plan.split.nodes.map(node => node.title),
+    ['前置内容', '第一章 电影剧本是什么？', '第二章 主题'],
+  )
+  assert.match(plan.split.nodes[0]!.source, /\*\*\.{2,}/)
+
+  // 用户手填标记词时也走同一条目录过滤，否则目录页会被整片拆成章节
+  const manual = await buildStoryImportPlan({
+    content,
+    title: '编剧工具书',
+    originalName: '编剧工具书.pdf',
+    marker: '章',
+  })
+  assert.equal(manual.split.nodes.length, 3)
+})
+
+test('边界行是标题不是段落：行首撞上单位词的长句不算章节', () => {
+  // 实样：讲三幕结构的书，正文段落以「第一幕是开端…」开头，行首和幕标题一模一样。
+  const prose =
+    '第一幕是开端，可看成建置(setup)部分，这是因为你要用 30 页左右的稿纸去建置（确定）你的故事。你时常会自觉或不自觉地做出判断。'
+  const content = ['# 书', '### 第一章 开端', prose, '### 第二章 结尾', '正文。'].join('\n')
+  assert.deepEqual(detectStorySplit(content), { strategy: 'story_chapter' })
+
+  const lines = content.split('\n')
+  const boundaries = lines.filter(line => /^### 第[一二]章/.test(line))
+  assert.equal(boundaries.length, 2)
+  assert.equal(isStoryChapterBoundary(prose), false)
+  assert.equal(isStoryChapterBoundary('第一幕 开端'), true)
+})
+
+test('同样的可靠度才停下来问：两种标题层级都说得通时不猜', () => {
+  assert.throws(
+    () => detectStorySplit('# 一\n甲\n## 一\n乙\n# 二\n丙\n## 二\n丁'),
+    /两种同样可靠的拆分写法/,
+  )
+  assert.equal(
+    // 整本只用卷时，卷就是最大的边界
+    JSON.stringify(detectStorySplit('第一卷 风起\n甲。\n第二卷 云涌\n乙。')),
+    JSON.stringify({ strategy: 'story_chapter' }),
+  )
 })
 
 test('missing numeric labels require an explicit warning confirmation', async () => {
@@ -463,6 +559,27 @@ test('故事名与作者先从原文标题和文件名推断', () => {
     title: '斗破苍穹 - 第1卷',
     author: '',
   })
+  // 实样：文件名里没有作者，但简介区写着「作者：满地是菠萝」（AnyDoc 不带元数据）
+  const withNote = [
+    '# 三国：中兴大汉，蜀之浪漫',
+    '# 简介',
+    '书名：三国：中兴大汉，蜀之浪漫',
+    '',
+    '作者：满地是菠萝',
+    '',
+    '标签：穿越|历史|系统|三国|已完结',
+  ].join('\n')
+  assert.deepEqual(inferStoryIdentity(withNote, '三国：中兴大汉，蜀之浪漫.epub'), {
+    title: '三国：中兴大汉，蜀之浪漫',
+    author: '满地是菠萝',
+  })
+  // 书名里的作者优先于简介区；只有整行就是一条短作者信息才算
+  assert.equal(inferStoryIdentity('正文', '兽血沸腾（静官）.epub').author, '静官')
+  assert.equal(inferStoryIdentity('他说：作者：是谁呀', 'x.md').author, '')
+  assert.equal(
+    inferStoryIdentity('作者：这段说明文字太长了明显不是一个人的笔名而是整句话', 'x.md').author,
+    '',
+  )
   assert.deepEqual(inferStoryIdentity('正文', '三结义.md'), { title: '三结义', author: '' })
 })
 

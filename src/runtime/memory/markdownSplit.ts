@@ -345,13 +345,52 @@ export function parseStoryOrdinal(line: string): number | null {
   return null
 }
 
+// 边界行是标题，不是段落：正文里「第一幕是开端，可看成建置(setup)部分…」这种长句
+// 只是行首偶然撞上单位词。真实章节标题实测 ≤25 字（三国 100 章最长 19 字），
+// 而这类正文段落 ≥145 字，60 字的上限把它们分开。
+// ponytail: 再长的章标题（>60 字）会被漏检，那种书只能用自定义标记词。
+const TITLE_LINE_LIMIT = 60
+
+function isTitleLike(line: string): boolean {
+  return titleFromBoundary(line).trim().length <= TITLE_LINE_LIMIT
+}
+
 export function isStoryChapterBoundary(line: string): boolean {
+  if (!isTitleLike(line)) return false
   const title = titleFromBoundary(line).normalize('NFKC').trim()
   return (
     new RegExp(`^第\\s*${ORDINAL_TOKEN}\\s*${CHAPTER_UNIT}`, 'iu').test(title) ||
     new RegExp(`^${ENGLISH_CHAPTER}\\.?\\s*${ORDINAL_TOKEN}(?:\\s|$|[.、:：-])`, 'iu').test(title) ||
     new RegExp(`^${ABBREV_CHAPTER}\\s*[-_.·:：#]?\\s*${NUMERIC_TOKEN}`, 'iu').test(title)
   )
+}
+
+/** `卷` 是容器不是章节：目录里的「第一卷：默认」也算边界，但它装的是后面的章。 */
+function isStoryVolumeBoundary(line: string): boolean {
+  return new RegExp(`^第\\s*${ORDINAL_TOKEN}\\s*[卷巻]`, 'iu').test(
+    titleFromBoundary(line).normalize('NFKC').trim(),
+  )
+}
+
+/**
+ * 目录行不是故事边界：条目后面跟着页码（`…… 6`）或是带锚点的链接（`](#x)`）。
+ * 真实书的目录页每一条都长得像标题，漏了它就会把目录当章节拆一遍。
+ */
+function isStoryTocLine(line: string): boolean {
+  const text = titleFromBoundary(line)
+  return /[.．·…]{2,}\s*\d/u.test(text) || /\]\(#[^)]*\)/u.test(text)
+}
+
+/**
+ * 按章边界的行号。同一本书里同时有 `第N卷` 和 `第N章` 时只取章（否则目录里的
+ * 「第一卷：默认」会单独变成一个只装目录的节点）；整本只用「第N卷」时才退回卷。
+ */
+export function storyChapterIndexes(lines: string[]): number[] {
+  const all = lines.flatMap((line, index) =>
+    !isStoryTocLine(line) && isStoryChapterBoundary(line) ? [index] : [],
+  )
+  const chapters = all.filter(index => !isStoryVolumeBoundary(lines[index]!))
+  return chapters.length >= 2 ? chapters : all
 }
 
 /* ─── 自定义标记词 ─── */
@@ -385,7 +424,9 @@ export function storyMarkerPattern(rule: StoryMarkerRule): RegExp {
 
 export function isStoryMarkerBoundary(rule: StoryMarkerRule): (line: string) => boolean {
   const pattern = storyMarkerPattern(rule)
-  return (line: string) => pattern.test(titleFromBoundary(line).normalize('NFKC').trim())
+  // 目录行不算边界：用户填的标记词也会在目录页里成片命中，那是导航不是章节。
+  return (line: string) =>
+    !isStoryTocLine(line) && pattern.test(titleFromBoundary(line).normalize('NFKC').trim())
 }
 
 function readMarkerOrdinal(rule: StoryMarkerRule, line: string): number | null {
@@ -414,6 +455,7 @@ export function probeStoryMarker(content: string, input: string): StoryMarkerPro
 
 export function isStoryNumberedBoundary(line: string): boolean {
   if (/^#{1,6}\s+/.test(unwrapBoundary(line))) return false
+  if (isStoryTocLine(line) || !isTitleLike(line)) return false
   const title = titleFromBoundary(line).normalize('NFKC').trim()
   return new RegExp(`^(?:${ORDINAL_TOKEN})(?:(?:[.、)）:：-]\\s*|\\s+)\\S+|[.、．]?)$`, 'iu').test(
     title,
@@ -511,7 +553,10 @@ export async function buildMarkdownSplitPlan(
       ? (line: string) => readMarkerOrdinal(markerRule!, line)
       : parseStoryOrdinal
   const lines = sourceLines(content)
-  const boundaries = lines.filter(line => matcher(line.text))
+  const boundaries =
+    options.strategy === 'story_chapter'
+      ? storyChapterIndexes(lines.map(line => line.text)).map(index => lines[index]!)
+      : lines.filter(line => matcher(line.text))
   if (!boundaries.length) throw new Error('没有识别到拆分边界，请检查拆分策略或标题层级')
 
   const drafts: Array<{

@@ -5,6 +5,7 @@ import {
   hashText,
   isStoryChapterBoundary,
   isStoryNumberedBoundary,
+  storyChapterIndexes,
   normalizeStoryMarker,
   parseStoryOrdinal,
   probeStoryMarker,
@@ -72,8 +73,20 @@ function unwrapTitle(value: string): string {
 }
 
 /**
+ * 电子书的简介区常写着 `作者：某某`，而 AnyDoc 不解析文档元数据，只能从正文读。
+ * 只看开头 80 行，且要求整行就是一条作者信息（`作者：` + 24 字以内）。
+ */
+function authorFromContent(content: string): string {
+  for (const line of content.split(/\r?\n/, 80)) {
+    const matched = line.match(/^\s*[-*]?\s*作者\s*[:：]\s*(\S.{0,19}?)\s*$/u)
+    if (matched) return matched[1]!.trim()
+  }
+  return ''
+}
+
+/**
  * 书名优先取转换产物里的第一个一级标题（书自己的标题），否则退回文件名；
- * 作者只能从文件名里拿——AnyDoc 的文档模型不带元数据。
+ * 作者先看文件名（下载器命名），再看简介区的 `作者：` 行。
  * 两项都可以在导入预览里由用户改写，所以猜错不致命。
  */
 export function inferStoryIdentity(
@@ -82,7 +95,7 @@ export function inferStoryIdentity(
 ): { title: string; author: string } {
   const fromFile = splitFileNameAuthor(fileName)
   const heading = content.match(/^#\s+(\S.*)$/mu)?.[1]?.trim()
-  return { title: heading || fromFile.title, author: fromFile.author }
+  return { title: heading || fromFile.title, author: fromFile.author || authorFromContent(content) }
 }
 
 /** 来源.md 是生成物：这一行之后的内容不由本流程产出，刷新时必须原样保留。 */
@@ -118,6 +131,30 @@ function candidateScore(
   return ordinals.length * 100 + Math.round((transitions / (ordinals.length - 1)) * 50)
 }
 
+/**
+ * 规则的可靠度（越大越可信）：明确写了「第 N 章 / Chapter N」的书最算数，
+ * markdown 标题层级是文档自己的结构次之，裸编号最弱。
+ * 靠数量比分数是不行的：真实 EPUB 的目录页就是 `1. [第1章 …](#anchor)` 这种裸编号，
+ * 条数和正文章节一样多，于是两种规则「接近但切片位置不同」→ 直接把导入拒了。
+ */
+function candidateAuthority(strategy: MarkdownSplitStrategy, lineCount: number): number {
+  // 只有一根边界谈不上「拆分」，不能靠它去压别的规则。
+  if (lineCount < 2) return 0
+  if (strategy === 'story_chapter') return 2
+  return strategy === 'markdown_heading' ? 1 : 0
+}
+
+/** 报错时告诉用户到底看到了哪两种写法，否则「请先明确拆分规则」等于没说。 */
+function describeCandidate(candidate: {
+  result: { strategy: MarkdownSplitStrategy; headingLevel?: number }
+  lines: number[]
+}): string {
+  const count = `${candidate.lines.length} 处`
+  if (candidate.result.strategy === 'story_chapter') return `按章（第…章）${count}`
+  if (candidate.result.strategy === 'story_numbered') return `按编号（1. 2.）${count}`
+  return `按标题（${'#'.repeat(candidate.result.headingLevel || 1)}）${count}`
+}
+
 export function detectStorySplit(
   content: string,
   options: { marker?: string } = {},
@@ -141,13 +178,16 @@ export function detectStorySplit(
     result: { strategy: MarkdownSplitStrategy; headingLevel?: number }
     lines: number[]
     score: number
+    authority: number
   }> = []
-  const chapters = lines.flatMap((line, index) => (isStoryChapterBoundary(line) ? [index] : []))
+  // 卷不算章这件事在 storyChapterIndexes 里定一次，拆分器用的是同一条规则。
+  const chapters = storyChapterIndexes(lines)
   if (chapters.length)
     candidates.push({
       result: { strategy: 'story_chapter' },
       lines: chapters,
       score: candidateScore(lines, chapters, 'story_chapter'),
+      authority: candidateAuthority('story_chapter', chapters.length),
     })
   const numbered = lines.flatMap((line, index) => (isStoryNumberedBoundary(line) ? [index] : []))
   if (numbered.length >= 2)
@@ -155,6 +195,7 @@ export function detectStorySplit(
       result: { strategy: 'story_numbered' },
       lines: numbered,
       score: candidateScore(lines, numbered, 'story_numbered'),
+      authority: candidateAuthority('story_numbered', numbered.length),
     })
   for (let level = 1; level <= 6; level += 1) {
     const headings = matchLines(lines, new RegExp(`^\\s*#{${level}}\\s+\\S`))
@@ -163,16 +204,28 @@ export function detectStorySplit(
         result: { strategy: 'markdown_heading', headingLevel: level },
         lines: headings,
         score: candidateScore(lines, headings, 'markdown_heading') - level,
+        authority: candidateAuthority('markdown_heading', headings.length),
       })
   }
-  candidates.sort((left, right) => right.score - left.score)
+  candidates.sort(
+    (left, right) =>
+      right.authority - left.authority || right.score - left.score,
+  )
   const selected = candidates[0]
   if (!selected) throw new Error('没有识别到故事边界，请先补充章节标题或独立数字段号')
-  const competing = candidates.slice(1).find(candidate => {
-    const similarScore = candidate.score / selected.score >= 0.8
-    return similarScore && candidate.lines.join(',') !== selected.lines.join(',')
-  })
-  if (competing) throw new Error('检测到多种接近但切片位置不同的故事边界，请先明确拆分规则')
+  // 只有同一可靠度的候选才算「互斥」：低可靠度的规则（目录页的 `1.`、正文行首数字）
+  // 位置再不同也只是噪声，不该拦住按章拆分。
+  const competing = candidates
+    .slice(1)
+    .filter(candidate => candidate.authority === selected.authority)
+    .find(candidate => {
+      const similarScore = candidate.score / selected.score >= 0.8
+      return similarScore && candidate.lines.join(',') !== selected.lines.join(',')
+    })
+  if (competing)
+    throw new Error(
+      `检测到两种同样可靠的拆分写法：${describeCandidate(selected)}与${describeCandidate(competing)}，请先明确拆分规则`,
+    )
   return selected.result
 }
 
