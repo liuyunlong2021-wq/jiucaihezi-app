@@ -605,8 +605,8 @@ export async function buildMarkdownSplitPlan(
   }))
   const rootLines = ['# 章节', '', '用途：按原始顺序导航无损拆分的故事节点；不保存资产事实。', '']
   const preface = nodes.filter(node => node.order === 0)
-  if (preface.length) rootLines.push('## 页面', '', ...preface.map(indexEntry), '')
   if (grouped) {
+    if (preface.length) rootLines.push('## 页面', '', ...preface.map(indexEntry), '')
     const groups = new Map<string, MarkdownSplitNode[]>()
     for (const node of nodes.filter(item => item.order > 0)) {
       const directory = node.path.slice(targetDirectory.length + 1).split('/')[0]!
@@ -624,8 +624,9 @@ export async function buildMarkdownSplitPlan(
     }
     rootLines.push('')
   } else {
-    const chapters = nodes.filter(node => node.order > 0)
-    if (chapters.length) rootLines.push('## 页面', '', ...chapters.map(indexEntry), '')
+    // 前置内容与章节共用一个「## 页面」：分两次 push 会在有前置内容时写出两个同名标题。
+    const pages = [...preface, ...nodes.filter(node => node.order > 0)]
+    if (pages.length) rootLines.push('## 页面', '', ...pages.map(indexEntry), '')
   }
   writes.push({ path: `${targetDirectory}/index.md`, content: rootLines.join('\n') })
 

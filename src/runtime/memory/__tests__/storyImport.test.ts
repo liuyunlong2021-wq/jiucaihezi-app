@@ -427,6 +427,17 @@ test('story imports for one project serialize and the queued duplicate becomes a
   assert.equal(repeated.updated, 0)
 })
 
+test('前置内容与章节共用一个页面小节', async () => {
+  const content = '题记\n第一章 雨夜\n甲走了很久。\n第二章 清晨\n乙来了。'
+  const plan = await buildStoryImportPlan({ content, title: '前置内容', originalName: '前置内容.md' })
+  const index = plan.split.writes.find(write => write.path.endsWith('原文节点/index.md'))!.content
+
+  // 分两次 push「## 页面」会在有前置内容时写出两个同名标题：章节导航被劈成两段。
+  assert.equal((index.match(/^## 页面$/gm) || []).length, 1)
+  assert.ok(index.indexOf('[[0000|') < index.indexOf('[[0001_'))
+  assert.ok(index.indexOf('[[0001_') < index.indexOf('[[0002_'))
+})
+
 test('story import resumes after interruption and writes the completion marker last', async () => {
   const content = '第一章\n甲\n第二章\n乙'
   const plan = await buildStoryImportPlan({
