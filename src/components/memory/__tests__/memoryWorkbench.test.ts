@@ -1568,8 +1568,8 @@ test('the preview panel renders project HTML in a sandboxed frame', () => {
   assert.match(explorer, /if \(\/\\\.html\?\$\/i\.test\(resource\.path\)\) \{/)
   // 报告这类 HTML 靠自带脚本渲染，要放脚本，但不给同源。
   assert.match(workbench, /v-else-if="previewResource\.type === 'html'"/)
-  // HTML 走 blob URL：srcdoc 会继承主文档 CSP 拦掉内联脚本，asset:// 在 iframe 里加载不出内容。
-  assert.match(workbench, /title="HTML 预览"\s+sandbox="allow-scripts"\s+:src="htmlPreviewUrl"/)
-  assert.match(workbench, /URL\.createObjectURL\(new Blob\(\[content\], \{ type: 'text\/html' \}\)\)/)
-  assert.match(source('src-tauri/tauri.conf.json'), /frame-src blob:;/)
+  // 预览走 srcdoc：报告生成时已预渲染静态快照，脚本被 CSP 拦住也看得见内容；
+  // blob: 在打包后的 tauri:// 源下加载不出来。
+  assert.match(workbench, /title="HTML 预览"\s+sandbox="allow-scripts"\s+:srcdoc="htmlPreview"/)
+  assert.doesNotMatch(workbench, /createObjectURL\(new Blob/)
 })

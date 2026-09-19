@@ -101,24 +101,9 @@ const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
 const previewResource = ref<ProjectResourceOpenResult | null>(null)
-// HTML 用 blob URL 交给 iframe：srcdoc 会继承主文档 CSP 拦掉内联脚本，asset:// 在 webview 的 iframe 里加载不出内容，两者都是白屏。
-const htmlPreviewUrl = ref('')
-let htmlPreviewObjectUrl = ''
-function releaseHtmlPreviewUrl() {
-  if (htmlPreviewObjectUrl) URL.revokeObjectURL(htmlPreviewObjectUrl)
-  htmlPreviewObjectUrl = ''
-  htmlPreviewUrl.value = ''
-}
-watch(
-  () => (previewResource.value?.type === 'html' ? previewResource.value.text.content : ''),
-  content => {
-    releaseHtmlPreviewUrl()
-    if (!content) return
-    htmlPreviewObjectUrl = URL.createObjectURL(new Blob([content], { type: 'text/html' }))
-    htmlPreviewUrl.value = htmlPreviewObjectUrl
-  },
-)
-onBeforeUnmount(releaseHtmlPreviewUrl)
+// HTML 预览走 srcdoc：报告生成时已把每个状态预渲染成静态快照，脚本被 CSP 拦住也看得见内容；
+// blob: 在打包后的 tauri:// 源下加载不出来，不用。
+const htmlPreview = computed(() => (previewResource.value?.type === 'html' ? previewResource.value.text.content : ''))
 const recordingScene = ref<Scene3DDocument | null>(null)
 const recordingSceneEditor = ref<{ recordVideo: (signal?: AbortSignal) => Promise<Blob> } | null>(null)
 const sceneVideoStatus = ref('正在检测 FFmpeg…')
@@ -3121,10 +3106,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         />
         <div v-else-if="previewResource.type === 'html'" class="memory-document">
           <iframe
-            v-if="htmlPreviewUrl"
+            v-if="htmlPreview"
             title="HTML 预览"
             sandbox="allow-scripts"
-            :src="htmlPreviewUrl"
+            :srcdoc="htmlPreview"
             style="width: 100%; min-height: 70vh; border: 0; background: #ffffff;"
           ></iframe>
           <p v-else>这个 HTML 读不出来，无法预览。</p>

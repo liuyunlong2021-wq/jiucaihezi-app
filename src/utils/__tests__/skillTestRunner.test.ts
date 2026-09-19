@@ -389,11 +389,13 @@ test('eval viewer script stays parseable so the report renders instead of a blan
     configuration, output, tokenCount: 1, durationMs: 1, assertions: [],
     timing: { total_tokens: 1, duration_ms: 1, total_duration_seconds: 0.001 },
   })
-  const html = generateEvalViewerHtml('demo', [{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'new')] }], aggregateBenchmark([{ eval_id: 1, eval_name: 'demo', prompt: 'p', expect: 'e', runs: [run('with_skill', 'new')] }], 'demo'), {})
+  const html = generateEvalViewerHtml('demo', [{ eval_id: 1, eval_name: 'demo', prompt: '检查项', expect: 'e', runs: [run('with_skill', 'new')] }], aggregateBenchmark([{ eval_id: 1, eval_name: 'demo', prompt: '检查项', expect: 'e', runs: [run('with_skill', 'new')] }], 'demo'), {})
+  // 正文在生成时已预渲染进 HTML：预览里脚本被 CSP 拦住（srcdoc 继承主文档策略）也看得见内容。
+  assert.match(html, /<div id="app"><h1>Skill测试: demo<\/h1>/)
+  assert.match(html, /检查项/)
+  assert.match(html, /Benchmark 摘要/) // 切 tab 的快照也预先渲染好，不用等脚本
   const script = html.match(/<script>([\s\S]*)<\/script>/)![1]
-  // switchTab 的单引号必须转义着落进 JS 字符串，裸着写会让整段脚本语法错误、报告白屏。
-  assert.ok(script.includes(String.raw`switchTab(\'outputs\')`), 'switchTab 的引号要转义进字符串')
-  assert.ok(script.includes(String.raw`switchTab(\'benchmark\')`), 'switchTab 的引号要转义进字符串')
+  assert.ok(script.includes('SNAPSHOTS.outputs[currentIdx]'), '切页要从预渲染快照里取')
   assert.doesNotThrow(() => new Function(script))
 })
 

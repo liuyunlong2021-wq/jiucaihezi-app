@@ -1000,6 +1000,84 @@ export async function analyzeSkillComparison(comparison: Record<string, unknown>
 // open_eval_viewer — 对标官方 generate_review.py
 // ═══════════════════════════════════════════════
 
+interface EvalViewerRun {
+  id: string
+  prompt: string
+  eval_id: number
+  outputs?: Array<{ name: string; type: string; content: string }>
+  grading?: { summary: { passed: number; total: number }; expectations: Assertion[] } | null
+}
+
+export interface EvalViewerData {
+  skill_name: string
+  runs: EvalViewerRun[]
+  previous_feedback?: Record<string, string>
+  previous_outputs?: Record<string, string>
+  baseline_label?: string
+  baseline_configuration?: string
+  benchmark?: BenchmarkData | null
+}
+
+/** 报告正文渲染：按每个可切换状态渲染一次，产出静态快照。 */
+function renderEvalViewerBody(data: EvalViewerData, state: { currentIdx: number; tab: 'outputs' | 'benchmark' }): string {
+  const { currentIdx, tab } = state
+  const escapeHtml = (value: unknown) => String(value == null ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+  const runs = data.runs
+  const r = runs[currentIdx]
+  const isWith = r.id.includes('with_skill')
+  const configLabel = isWith ? 'WITH skill' : (data.baseline_label || 'WITHOUT skill')
+  const badgeClass = isWith ? 'badge-with' : 'badge-without'
+
+  let html = '<h1>Skill测试: ' + escapeHtml(data.skill_name) + '</h1>';
+  html += '<div class="meta">共 ' + runs.length + ' 个结果</div>';
+
+  if (data.benchmark) {
+    html += '<div class="tabs"><div class="tab' + (tab === 'outputs' ? ' active' : '') + '" onclick="switchTab(\'outputs\')">Outputs</div><div class="tab' + (tab === 'benchmark' ? ' active' : '') + '" onclick="switchTab(\'benchmark\')">Benchmark</div></div>';
+  }
+
+  if (tab === 'outputs') {
+    html += '<div class="card"><h3><span class="badge ' + badgeClass + '">' + configLabel + '</span> 测试 #' + r.eval_id + '</h3>';
+    html += '<p style="color:#999;font-size:0.8rem;margin-bottom:0.5rem">' + escapeHtml(r.prompt) + '</p>';
+    if (r.outputs && r.outputs[0]) {
+      html += '<pre>' + escapeHtml(r.outputs[0].content.slice(0, 2000)) + '</pre>';
+    }
+    const previous = data.previous_outputs && data.previous_outputs[r.eval_id + ':' + (isWith ? 'with_skill' : data.baseline_configuration)];
+    if (previous) html += '<details style="margin-top:0.75rem"><summary>上一轮输出</summary><pre>' + escapeHtml(previous.slice(0, 2000)) + '</pre></details>';
+    if (r.grading && r.grading.expectations) {
+      html += '<div style="margin-top:0.75rem"><strong style="font-size:0.8rem">断言评分 (' + r.grading.summary.passed + '/' + r.grading.summary.total + ')</strong>';
+      r.grading.expectations.forEach(a => {
+        html += '<div class="assertion"><span class="' + (a.passed ? 'pass' : 'fail') + '">' + (a.passed ? '\u2713' : '\u2717') + '</span> ' + escapeHtml(a.text);
+        if (a.evidence) html += '<div class="evidence">' + escapeHtml(a.evidence) + '</div>';
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+    html += '<textarea placeholder="反馈..."></textarea>';
+    html += '</div>';
+    html += '<div class="nav"><button ' + (currentIdx === 0 ? 'disabled' : '') + ' onclick="nav(-1)">\u2190 上一个</button><span style="line-height:2">' + (currentIdx + 1) + '/' + runs.length + '</span><button ' + (currentIdx >= runs.length - 1 ? 'disabled' : '') + ' onclick="nav(1)">下一个 \u2192</button></div>';
+  } else if (tab === 'benchmark' && data.benchmark) {
+    const b = data.benchmark;
+    html += '<div class="card"><h3>Benchmark 摘要</h3>';
+    html += '<table class="benchmark-table"><tr><th>指标</th><th>With Skill</th><th>' + (data.baseline_label || 'WITHOUT skill') + '</th><th>Delta</th></tr>';
+    const ws = b.run_summary.with_skill, wos = b.run_summary.without_skill, d = b.run_summary.delta;
+    html += '<tr><td>Pass Rate</td><td>' + (ws.pass_rate.mean * 100).toFixed(0) + '% \u00b1' + (ws.pass_rate.stddev * 100).toFixed(0) + '%</td><td>' + (wos.pass_rate.mean * 100).toFixed(0) + '% \u00b1' + (wos.pass_rate.stddev * 100).toFixed(0) + '%</td><td class="' + (d.pass_rate.startsWith('+') ? 'delta-positive' : 'delta-negative') + '">' + d.pass_rate + '</td></tr>';
+    html += '<tr><td>Time (s)</td><td>' + ws.time_seconds.mean.toFixed(1) + ' \u00b1' + ws.time_seconds.stddev.toFixed(1) + '</td><td>' + wos.time_seconds.mean.toFixed(1) + ' \u00b1' + wos.time_seconds.stddev.toFixed(1) + '</td><td>' + d.time_seconds + 's</td></tr>';
+    html += '<tr><td>Tokens</td><td>' + ws.tokens.mean.toFixed(0) + ' \u00b1' + ws.tokens.stddev.toFixed(0) + '</td><td>' + wos.tokens.mean.toFixed(0) + ' \u00b1' + wos.tokens.stddev.toFixed(0) + '</td><td>' + d.tokens + '</td></tr>';
+    html += '</table></div>';
+    if (b.notes && b.notes.length) {
+      html += '<div class="notes"><strong>分析笔记</strong><ul>' + b.notes.map(n => '<li>' + escapeHtml(n) + '</li>').join('') + '</ul></div>';
+    }
+    html += '<div class="nav"><button onclick="switchTab(\'outputs\')">\u2190 返回 Outputs</button></div>';
+  }
+
+  return html
+}
+
 export function generateEvalViewerHtml(
   skillName: string,
   results: SingleTestResult[],
@@ -1015,7 +1093,7 @@ export function generateEvalViewerHtml(
     `${result.eval_id}:${run.configuration}`,
     run.output,
   ])))
-  const encoded = JSON.stringify({
+  const viewerData: EvalViewerData = {
     skill_name: skillName,
     runs: results.flatMap(r => [
       {
@@ -1054,7 +1132,14 @@ export function generateEvalViewerHtml(
     baseline_configuration: baselineConfiguration,
     baseline_label: baselineLabel,
     benchmark: benchmark || undefined,
-  })
+  }
+  const encoded = JSON.stringify(viewerData)
+  // 生成时就把每个可切换状态渲染成静态快照：预览不依赖脚本执行——srcdoc 会继承主文档 CSP 拦掉
+  // 内联脚本，blob: 在打包后的 tauri:// 源下也加载不出来；浏览器里打开时脚本照旧接管切 tab。
+  const snapshots = {
+    outputs: viewerData.runs.map((_, index) => renderEvalViewerBody(viewerData, { currentIdx: index, tab: 'outputs' })),
+    benchmark: viewerData.benchmark ? renderEvalViewerBody(viewerData, { currentIdx: 0, tab: 'benchmark' }) : null,
+  }
 
   return `<!DOCTYPE html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0"><title>Skill测试结果 — ${skillName}</title>
 <style>
@@ -1089,70 +1174,19 @@ pre{background:#f5f5f0;padding:0.75rem;border-radius:6px;font-size:0.75rem;line-
 .nav button:disabled{opacity:0.4;cursor:not-allowed}
 textarea{width:100%;min-height:60px;padding:0.5rem;border:1px solid #e8e6dc;border-radius:6px;font-size:0.85rem;margin-top:0.5rem;font-family:inherit;resize:vertical}
 </style></head><body>
-<div id="app"></div>
+<div id="app">${snapshots.outputs[0]}</div>
 <script>
 const DATA = ${encoded};
+const SNAPSHOTS = ${JSON.stringify(snapshots)};
 let currentIdx = 0;
-let feedback = {};
 let tab = 'outputs';
 
 function render() {
-  const runs = DATA.runs;
-  const r = runs[currentIdx];
-  const isWith = r.id.includes('with_skill');
-  const configLabel = isWith ? 'WITH skill' : (DATA.baseline_label || 'WITHOUT skill');
-  const badgeClass = isWith ? 'badge-with' : 'badge-without';
-
-  let html = '<h1>Skill测试: ' + DATA.skill_name + '</h1>';
-  html += '<div class="meta">共 ' + runs.length + ' 个结果 | ' + new Date().toLocaleString() + '</div>';
-
-  if (DATA.benchmark) {
-    html += '<div class="tabs"><div class="tab' + (tab==='outputs'?' active':'') + '" onclick="switchTab(\\'outputs\\')">Outputs</div><div class="tab' + (tab==='benchmark'?' active':'') + '" onclick="switchTab(\\'benchmark\\')">Benchmark</div></div>';
-  }
-
-  if (tab === 'outputs') {
-    html += '<div class="card"><h3><span class="badge ' + badgeClass + '">' + configLabel + '</span> 测试 #' + r.eval_id + '</h3>';
-    html += '<p style="color:#999;font-size:0.8rem;margin-bottom:0.5rem">' + escapeHtml(r.prompt) + '</p>';
-    if (r.outputs && r.outputs[0]) {
-      html += '<pre>' + escapeHtml(r.outputs[0].content.slice(0, 2000)) + '</pre>';
-    }
-    const previous = DATA.previous_outputs && DATA.previous_outputs[r.eval_id + ':' + (isWith ? 'with_skill' : DATA.baseline_configuration)];
-    if (previous) html += '<details style="margin-top:0.75rem"><summary>上一轮输出</summary><pre>' + escapeHtml(previous.slice(0, 2000)) + '</pre></details>';
-    if (r.grading && r.grading.expectations) {
-      html += '<div style="margin-top:0.75rem"><strong style="font-size:0.8rem">断言评分 (' + r.grading.summary.passed + '/' + r.grading.summary.total + ')</strong>';
-      r.grading.expectations.forEach(function(a) {
-        html += '<div class="assertion"><span class="' + (a.passed?'pass':'fail') + '">' + (a.passed?'\u2713':'\u2717') + '</span> ' + escapeHtml(a.text);
-        if (a.evidence) html += '<div class="evidence">' + escapeHtml(a.evidence) + '</div>';
-        html += '</div>';
-      });
-      html += '</div>';
-    }
-    html += '<textarea placeholder="反馈..." onchange="saveFeedback(' + currentIdx + ',this.value)">' + (feedback[currentIdx]||'') + '</textarea>';
-    html += '</div>';
-    html += '<div class="nav"><button ' + (currentIdx===0?'disabled':'') + ' onclick="nav(-1)">\u2190 上一个</button><span style="line-height:2">' + (currentIdx+1) + '/' + runs.length + '</span><button ' + (currentIdx>=runs.length-1?'disabled':'') + ' onclick="nav(1)">下一个 \u2192</button></div>';
-  } else if (tab === 'benchmark' && DATA.benchmark) {
-    var b = DATA.benchmark;
-    html += '<div class="card"><h3>Benchmark 摘要</h3>';
-    html += '<table class="benchmark-table"><tr><th>指标</th><th>With Skill</th><th>' + (DATA.baseline_label || 'WITHOUT skill') + '</th><th>Delta</th></tr>';
-    var ws = b.run_summary.with_skill, wos = b.run_summary.without_skill, d = b.run_summary.delta;
-    html += '<tr><td>Pass Rate</td><td>' + (ws.pass_rate.mean*100).toFixed(0) + '% \u00b1' + (ws.pass_rate.stddev*100).toFixed(0) + '%</td><td>' + (wos.pass_rate.mean*100).toFixed(0) + '% \u00b1' + (wos.pass_rate.stddev*100).toFixed(0) + '%</td><td class="' + (d.pass_rate.startsWith('+')?'delta-positive':'delta-negative') + '">' + d.pass_rate + '</td></tr>';
-    html += '<tr><td>Time (s)</td><td>' + ws.time_seconds.mean.toFixed(1) + ' \u00b1' + ws.time_seconds.stddev.toFixed(1) + '</td><td>' + wos.time_seconds.mean.toFixed(1) + ' \u00b1' + wos.time_seconds.stddev.toFixed(1) + '</td><td>' + d.time_seconds + 's</td></tr>';
-    html += '<tr><td>Tokens</td><td>' + ws.tokens.mean.toFixed(0) + ' \u00b1' + ws.tokens.stddev.toFixed(0) + '</td><td>' + wos.tokens.mean.toFixed(0) + ' \u00b1' + wos.tokens.stddev.toFixed(0) + '</td><td>' + d.tokens + '</td></tr>';
-    html += '</table></div>';
-    if (b.notes && b.notes.length) {
-      html += '<div class="notes"><strong>分析笔记</strong><ul>' + b.notes.map(function(n){return '<li>'+escapeHtml(n)+'</li>'}).join('') + '</ul></div>';
-    }
-    html += '<div class="nav"><button onclick="switchTab(\\'outputs\\')">\u2190 返回 Outputs</button></div>';
-  }
-
-  document.getElementById('app').innerHTML = html;
+  document.getElementById('app').innerHTML = tab === 'benchmark' && SNAPSHOTS.benchmark ? SNAPSHOTS.benchmark : SNAPSHOTS.outputs[currentIdx];
 }
-
-function nav(d) { currentIdx = Math.max(0, Math.min(DATA.runs.length-1, currentIdx+d)); render(); }
+function nav(d) { currentIdx = Math.max(0, Math.min(SNAPSHOTS.outputs.length - 1, currentIdx + d)); render(); }
 function switchTab(t) { tab = t; render(); }
-function saveFeedback(idx, val) { feedback[idx] = val; }
-function escapeHtml(t) { var d=document.createElement('div');d.textContent=t;return d.innerHTML; }
-render();
+function saveFeedback() {}
 </script></body></html>`
 }
 
