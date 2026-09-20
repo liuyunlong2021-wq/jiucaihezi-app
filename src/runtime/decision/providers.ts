@@ -75,7 +75,14 @@ const TOOL_RULES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
     pattern:
       /生成.{0,6}(图片|照片|图像|插画|封面)|画一[张幅个]|出图|配图|生图|文生图|文生视频|生成视频|配音|朗读|语音|音频|音乐|bgm/i,
   },
-  { id: 'media', pattern: /文档|网页|幻灯片|ppt|演示稿|海报排版/i },
+  {
+    id: 'media',
+    // 「以图片的形式」「长图」「图文卡片」指的是把内容排版成图（export_markdown_png），
+    // 不是 AI 生图——所以归 @图文 而不是 @影音。原来只认「文档/网页/幻灯片/海报排版」，
+    // 用户说「写一个长文，以图片的形式发我」时两个都掽不上，@图文 没开、模型只能说不支持。
+    pattern:
+      /文档|网页|幻灯片|ppt|演示稿|海报|排版|长图|图文卡片|卡片图|以图片(的)?形式|图片形式|做成图片|变成图片|转成图片|导出.{0,4}图片|存成图片/i,
+  },
   { id: 'scene3d', pattern: /3d|三维|建模/i },
 ]
 
@@ -306,42 +313,65 @@ export function readDecisionText(payload: unknown): string {
 }
 
 export function createLlmDecisionProvider(
-  resolveModel: () => DecisionModelRef | null,
+  resolveModels: () => DecisionModelRef[],
 ): DecisionProvider {
   return {
     id: 'llm',
     async decide(request) {
-      const target = resolveModel()
-      if (!target) return null
-      const config = await resolveApiConfig({
-        modelId: target.modelId,
-        modelProviderId: target.providerId,
-      })
-      const isOllama = config.providerId === 'local-ollama'
-      const response = await sendDirectRequestWithRetry(() =>
-        sendNewApiRequest(
-          {
-            ...buildDecisionRequestBody(config.model, request, config.providerId),
-            ...buildChatCompletionExtras(config),
-          },
-          payload =>
-            safeFetch(`${config.apiBase}${isOllama ? '/api/chat' : '/v1/chat/completions'}`, {
-              method: 'POST',
-              headers: buildHeaders(config),
-              body: payload,
-            }),
-        ),
-      )
-      if (!response.ok)
-        throw new ChatHttpError(
-          await readChatErrorResponse(response, '决策模型请求失败', config.apiKey),
-        )
-      const parsed = parseDecisionOutput(
-        readDecisionText(await response.json().catch(() => null)),
-        request.candidates,
-      )
-      if (!parsed) return null
-      return { ...parsed, suggestions: [], provider: 'llm', latencyMs: 0 }
+      const targets = resolveModels()
+      // 按优先级逐个试：本地 Ollama 优先，它不可用（没拉起来、不是聊天模型、报错）就回落云端轻量档。
+      // 只判断「有没有配本地模型」不够——实测用户列表第一个是 glm-ocr，决策落到 OCR 模型上什么都选不出来，
+      // 而且失败被 decide() 静默吞掉，表现就是「@Jev 什么都没开」。
+      for (const target of targets) {
+        try {
+          const result = await callDecisionModel(target, request)
+          if (result) return result
+        } catch (cause) {
+          console.debug(
+            '[jev] 决策模型不可用',
+            target.providerId,
+            target.modelId,
+            cause instanceof Error ? cause.message : cause,
+          )
+        }
+      }
+      return null
     },
   }
+}
+
+/** 拿一个模型跑一次决策。抛错代表这个模型不可用，由调用方决定是否换下一个。 */
+async function callDecisionModel(
+  target: DecisionModelRef,
+  request: DecisionRequest,
+): Promise<DecisionResult | null> {
+  const config = await resolveApiConfig({
+    modelId: target.modelId,
+    modelProviderId: target.providerId,
+  })
+  const isOllama = config.providerId === 'local-ollama'
+  const response = await sendDirectRequestWithRetry(() =>
+    sendNewApiRequest(
+      {
+        ...buildDecisionRequestBody(config.model, request, config.providerId),
+        ...buildChatCompletionExtras(config),
+      },
+      payload =>
+        safeFetch(`${config.apiBase}${isOllama ? '/api/chat' : '/v1/chat/completions'}`, {
+          method: 'POST',
+          headers: buildHeaders(config),
+          body: payload,
+        }),
+    ),
+  )
+  if (!response.ok)
+    throw new ChatHttpError(
+      await readChatErrorResponse(response, '决策模型请求失败', config.apiKey),
+    )
+  const parsed = parseDecisionOutput(
+    readDecisionText(await response.json().catch(() => null)),
+    request.candidates,
+  )
+  if (!parsed) return null
+  return { ...parsed, suggestions: [], provider: 'llm', latencyMs: 0 }
 }

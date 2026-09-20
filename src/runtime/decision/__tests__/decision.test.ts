@@ -412,6 +412,38 @@ test('MCP 服务按自己声明的工具关键词被选中，无关服务不被�
   )
 })
 
+test('「以图片的形式发我」算图文排版，要开 @图文', async () => {
+  // 用户实测：说「写一个小红书的长文，以图片的形式发我」，@图文 没开，模型只能回
+  // 「无法直接生成二进制图片」。原规则表只认「文档/网页/幻灯片/海报排版」。
+  const candidates: DecisionCandidate[] = [
+    { id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' },
+    { id: 'av', kind: 'tool', label: '影音', description: '生成图片、视频和音频' },
+  ]
+  const mediaPhrasings = [
+    '写一个小红书的长文，以图片的形式发我',
+    '把上面这段做成图片',
+    '生成长图',
+    '整理成图文卡片',
+    '导出成图片给我',
+  ]
+  for (const userRequest of mediaPhrasings)
+    assert.deepEqual(
+      (await createRuleDecisionProvider().decide({ userRequest, candidates }))?.tools,
+      ['media'],
+      userRequest,
+    )
+  // AI 生图仍然走 @影音，没被改坏。
+  assert.deepEqual(
+    (
+      await createRuleDecisionProvider().decide({
+        userRequest: '生成一张人物照片',
+        candidates,
+      })
+    )?.tools,
+    ['av'],
+  )
+})
+
 test('@Jev 接在输入框的提及列表里，且在发送链路的最前面回填芯片', () => {
   const workbench = readFileSync(
     join(process.cwd(), 'src/components/memory/MemoryWorkbench.vue'),

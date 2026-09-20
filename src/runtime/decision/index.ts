@@ -22,18 +22,37 @@ export {
   parseDecisionOutput,
 } from './providers'
 
-/** 决策调用用的模型：本地 Ollama 优先（零 token、零网络），不可用再回落云端轻量档。 */
-export function resolveDecisionModelRef(): DecisionModelRef | null {
-  const local = getLocalOllamaModels()[0]
-  if (local) return { modelId: local.id, providerId: LOCAL_OLLAMA_PROVIDER_ID }
+/**
+ * 不是聊天模型的本地模型不拿来决策。用户装的第一台本地模型可能是 OCR / 嵌入模型
+ * （实测 ollama 列表第一个就是 `glm-ocr`），盲取 models[0] 会让决策落到一个不会做题的模型上。
+ */
+const NON_CHAT_LOCAL_MODEL = /ocr|embed|rerank|whisper|tts|bge|gte/i
+
+/**
+ * 决策调用用的模型，按优先级排：本地 Ollama 优先（零 token、零网络），再回落云端轻量档。
+ * 返回多个而不是一个，是因为「本地配了但不可用」也得能落到云端——只判断有没有配
+ * 是不够的，实测那正是「@Jev 什么都没开」的原因。
+ */
+export function resolveDecisionModelRefs(): DecisionModelRef[] {
+  const refs: DecisionModelRef[] = []
+  const local = getLocalOllamaModels().find(model => !NON_CHAT_LOCAL_MODEL.test(model.id))
+  if (local) refs.push({ modelId: local.id, providerId: LOCAL_OLLAMA_PROVIDER_ID })
+
   const agentStore = useAgentStore()
   const light = agentStore.textModels.find(model => inferModelTier(model.id) === 'light')
-  const modelId = light?.id || agentStore.currentModel
-  if (!modelId) return null
-  return {
-    modelId,
-    providerId: light?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi',
-  }
+  const cloudId = light?.id || agentStore.currentModel
+  if (cloudId)
+    refs.push({
+      modelId: cloudId,
+      providerId: light?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi',
+    })
+
+  return refs.filter(
+    (ref, index) =>
+      refs.findIndex(
+        other => other.modelId === ref.modelId && other.providerId === ref.providerId,
+      ) === index,
+  )
 }
 
 /**
@@ -42,7 +61,7 @@ export function resolveDecisionModelRef(): DecisionModelRef | null {
  */
 export const DECISION_PROVIDER_CHAIN: DecisionProvider[] = [
   createRuleDecisionProvider(),
-  createLlmDecisionProvider(resolveDecisionModelRef),
+  createLlmDecisionProvider(resolveDecisionModelRefs),
 ]
 
 /**
