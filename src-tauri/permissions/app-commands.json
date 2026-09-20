@@ -42,6 +42,7 @@
           "creation_mcp_complete",
           "resolve_creation_mcp",
           "save_generated_file",
+          "erase_image_region",
           "dev_detect_project",
           "dev_list_files",
           "dev_list_directory",

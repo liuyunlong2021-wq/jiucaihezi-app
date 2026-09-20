@@ -1538,6 +1538,7 @@ pub fn run() {
             commands::dev::create_mobile_project,
             commands::dev::open_file_picker,
             commands::dev::save_file_picker,
+            commands::image_edit::erase_image_region,
             commands::skill_material::skill_material_compile,
             commands::media::media_cache_file,
             commands::media::document_to_markdown_file,

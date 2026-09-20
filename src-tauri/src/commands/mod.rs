@@ -3,6 +3,7 @@ pub mod creation_mcp;
 pub mod dev;
 pub mod greet;
 pub mod http;
+pub mod image_edit;
 pub mod mcp;
 pub mod local_mlx;
 pub mod media;

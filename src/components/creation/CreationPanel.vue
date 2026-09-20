@@ -123,6 +123,12 @@ import {
 } from '@/components/canvas/canvasCoordinates'
 import { unreferencedCanvasAssetIds } from '@/components/canvas/canvasDocument'
 import {
+  eraseImageRegion,
+  isEraseRectUsable,
+  toImagePixelRect,
+  type EraseRect,
+} from '@/components/canvas/canvasErase'
+import {
   createCanvasFile,
   deleteCanvasFile,
   listCanvasFiles,
@@ -149,6 +155,7 @@ import { projectResourceForMediaTask } from '@/runtime/workbench/mediaReference'
 import MediaViewer from '@/components/media/MediaViewer.vue'
 import { fetchCreationMediaBlob } from '@/utils/creationMediaCache'
 import { buildMediaFilename } from '@/utils/mediaFilename'
+import { writeProjectMedia } from '@/utils/projectMediaWriter'
 import { saveGeneratedFile } from '@/utils/exportSave'
 import type {
   CanvasDocumentV3,
@@ -1013,6 +1020,19 @@ const penWidth = ref<number>(3)
 const showPenWidths = ref(false)
 // ponytail: 跟踪当前激活的工具类型，解决切换工具时的 toggle 竞态
 const activeDrawType = ref<'arrow' | 'text' | 'pen' | 'number' | null>(null)
+const eraseMode = ref(false)
+const erasing = ref(false)
+const erasePreview = ref<{ left: number; top: number; width: number; height: number } | null>(null)
+const erasePreviewStyle = computed(() =>
+  erasePreview.value
+    ? {
+        left: `${erasePreview.value.left}px`,
+        top: `${erasePreview.value.top}px`,
+        width: `${erasePreview.value.width}px`,
+        height: `${erasePreview.value.height}px`,
+      }
+    : undefined,
+)
 // 右键菜单
 const ctxMenu = ref({ show: false, x: 0, y: 0 })
 let app: App | null = null
@@ -3056,7 +3076,196 @@ function fitCanvasViewport() {
   setCanvasViewportScale(scale, { x: (minX + maxX) / 2, y: (minY + maxY) / 2 })
 }
 
+/* ── 擦除：框选一块交给本地算法擦掉，原图不动，结果作为新图片进画布 ── */
+
+let eraseNode: any = null
+let eraseDragging = false
+let eraseLocalStart: { x: number; y: number } | null = null
+let eraseLocalCurrent: { x: number; y: number } | null = null
+let eraseScreenStart: { x: number; y: number } | null = null
+const eraseBindings: any[] = []
+
+function clearEraseSelecting() {
+  eraseDragging = false
+  eraseLocalStart = null
+  eraseLocalCurrent = null
+  eraseScreenStart = null
+  erasePreview.value = null
+}
+
+function unbindEraseGestures() {
+  if (app && eraseBindings.length) eraseBindings.forEach(id => app!.off_(id as any))
+  eraseBindings.length = 0
+}
+
+/** 进擦除模式时锁住目标节点的拖拽/编辑，框选才不会把图片一起拖走。 */
+function lockEraseTarget(node: any, locked: boolean) {
+  if (!node) return
+  node.draggable = !locked
+  node.editable = !locked
+}
+
+function exitEraseMode() {
+  lockEraseTarget(eraseNode, false)
+  eraseMode.value = false
+  unbindEraseGestures()
+  clearEraseSelecting()
+  eraseNode = null
+  if (app) app.mode = 'normal'
+}
+
+/**
+ * 指针在图片内的本地坐标（图片显示坐标系，不是原图像素）。
+ * `allowOutside` 为假时，指针不在图片上就返回 undefined —— 起手必须落在图片里。
+ */
+function erasePointAt(event: any, node: any, allowOutside = true) {
+  const content = getCanvasImageContent(node)
+  const width = Number(content?.width || 0)
+  const height = Number(content?.height || 0)
+  if (!content || width <= 0 || height <= 0) return undefined
+  const point = canvasAnnotationPoint(event, node)
+  const inside = point.x >= 0 && point.y >= 0 && point.x <= width && point.y <= height
+  if (!inside && !allowOutside) return undefined
+  return {
+    x: Math.min(Math.max(point.x, 0), width),
+    y: Math.min(Math.max(point.y, 0), height),
+  }
+}
+
+function eraseLocalRect(): EraseRect | null {
+  if (!eraseLocalStart || !eraseLocalCurrent) return null
+  return {
+    x: Math.min(eraseLocalStart.x, eraseLocalCurrent.x),
+    y: Math.min(eraseLocalStart.y, eraseLocalCurrent.y),
+    width: Math.abs(eraseLocalCurrent.x - eraseLocalStart.x),
+    height: Math.abs(eraseLocalCurrent.y - eraseLocalStart.y),
+  }
+}
+
+function updateErasePreview(screen: { x: number; y: number }) {
+  if (!eraseScreenStart) return
+  erasePreview.value = {
+    left: Math.min(eraseScreenStart.x, screen.x),
+    top: Math.min(eraseScreenStart.y, screen.y),
+    width: Math.abs(screen.x - eraseScreenStart.x),
+    height: Math.abs(screen.y - eraseScreenStart.y),
+  }
+}
+
+async function runCanvasErase(node: any, nodeSize: { width: number; height: number }, localRect: EraseRect) {
+  const asset = canvasStore.assets[String(node?.id)]
+  if (!asset || asset.kind !== 'image' || erasing.value) return
+  erasing.value = true
+  cpState.progressText = '正在擦除…'
+  let stage = '准备'
+  try {
+    stage = '读取图片'
+    const owner = canvasMediaOwner()
+    const sourceUrl = await getMediaRuntimeUrl(asset.resource.path, owner)
+    const natural = await getImageSize(sourceUrl)
+    stage = '擦除像素'
+    const result = await eraseImageRegion({
+      sourceUrl,
+      rect: toImagePixelRect(localRect, nodeSize, natural),
+    })
+    stage = '保存新图'
+    const { filePath } = await writeProjectMedia({
+      dataBase64: result.base64,
+      mime: result.mime,
+      projectDir: owner,
+      kind: 'image',
+      summary: '擦除',
+      prompt: asset.prompt || '',
+      model: asset.model || '',
+      memory: true,
+    })
+    stage = '加入画布'
+    await addMediaToCanvas(filePath, 'image', 'creation', asset.prompt || '', asset.model || '')
+    cpState.progressText = ''
+  } catch (error) {
+    // Tauri 的命令失败会把 Rust 的 Err(String) 直接当 reject 值抛出来，不是 Error 实例。
+    const reason = typeof error === 'string' ? error : (error as Error)?.message
+    cpState.progressText = `❌ 擦除失败（${stage}）：${reason || '没有拿到失败原因'}`
+  } finally {
+    erasing.value = false
+  }
+}
+
+function bindEraseGestures() {
+  if (!app) return
+  unbindEraseGestures()
+  const start = (event: any) => {
+    if (!eraseMode.value || erasing.value) return
+    // 用进模式时锁定的目标，不再读实时选中态：切模式后 Leafer 可能已经取消选中。
+    const node = eraseNode
+    if (!node || !canvasStore.assets[String(node.id)]) {
+      cpState.progressText = '擦除目标不在了，请重新选中图片再点擦除'
+      return
+    }
+    const point = erasePointAt(event, node, false)
+    if (!point) {
+      cpState.progressText = '请从图片上开始框选'
+      return
+    }
+    eraseDragging = true
+    eraseLocalStart = point
+    eraseLocalCurrent = point
+    eraseScreenStart = { x: Number(event.x || 0), y: Number(event.y || 0) }
+    updateErasePreview(eraseScreenStart)
+  }
+  const drag = (event: any) => {
+    if (!eraseDragging || !eraseNode) return
+    eraseLocalCurrent = erasePointAt(event, eraseNode) || eraseLocalCurrent
+    updateErasePreview({ x: Number(event.x || 0), y: Number(event.y || 0) })
+  }
+  const end = () => {
+    if (!eraseDragging) return
+    const rect = eraseLocalRect()
+    const node = eraseNode
+    const content = node ? getCanvasImageContent(node) : undefined
+    clearEraseSelecting()
+    if (!rect || !node || !content) return
+    if (!isEraseRectUsable(rect)) {
+      cpState.progressText = '选区太小，框大一点再试'
+      return
+    }
+    void runCanvasErase(node, { width: Number(content.width), height: Number(content.height) }, rect)
+  }
+  // ponytail: 跟项目其余画布交互保持一致用 DragEvent，它经实测能在画布上收到拖拽。
+  eraseBindings.push(
+    app.on_(LeaferDragEvent.START, start),
+    app.on_(LeaferDragEvent.DRAG, drag),
+    app.on_(LeaferDragEvent.END, end),
+  )
+}
+
+/** 擦除要选中一张图片才能开：框选落在哪张图上没有歧义。 */
+function toggleEraseMode() {
+  if (!app) return
+  if (eraseMode.value) {
+    exitEraseMode()
+    return
+  }
+  if (!isTauriRuntime()) {
+    cpState.progressText = '擦除目前只在桌面客户端可用'
+    return
+  }
+  const node = selectedCanvasImageNode()
+  if (!node) {
+    cpState.progressText = '请先选中一张图片，再框选要擦掉的区域'
+    return
+  }
+  canvasTool('select')
+  // 进模式就把目标锁定，并禁掉它的拖拽：不依赖随后的选中态，也避免框选把图片拖走。
+  eraseNode = node
+  lockEraseTarget(node, true)
+  eraseMode.value = true
+  bindEraseGestures()
+  cpState.progressText = '在图片上拖拽，框住要擦掉的地方'
+}
+
 function canvasTool(action: string) {
+  if (eraseMode.value) exitEraseMode()
   if (!app || canvasInteractionBlocked.value) return
   if (action !== 'draw' || drawType.value !== 'pen') showPenWidths.value = false
   switch (action) {
@@ -3744,6 +3953,7 @@ const canSend = computed(
           <i :style="{ width: Math.min(100, Math.max(0, creationProgress)) + '%' }" />
         </div>
       </div>
+      <div v-if="erasePreview" class="cp-erase-preview" :style="erasePreviewStyle" />
       <!-- 🆕 右上角工具栏 -->
       <div class="cp-canvas-toolbar">
         <input
@@ -3754,8 +3964,15 @@ const canSend = computed(
           accept="image/*,video/*,audio/*"
           @change="onCanvasImport"
         />
-        <button title="选择工具 V" :class="{ active: !drawMode }" @click="canvasTool('select')">
+        <button title="选择工具 V" :class="{ active: !drawMode && !eraseMode }" @click="canvasTool('select')">
           <JcIcon name="select" />
+        </button>
+        <button
+          title="擦除选区：选中图片后框住要擦掉的地方"
+          :class="{ active: eraseMode }"
+          @click="toggleEraseMode"
+        >
+          <JcIcon name="auto_fix_high" />
         </button>
         <span class="cp-toolbar-sep" />
         <button
@@ -4762,6 +4979,15 @@ const canSend = computed(
 }
 .cp-toolbar-icon { width: 28px; padding: 0; justify-content: center; }
 .cp-toolbar-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
+.cp-erase-active { cursor: crosshair; }
+.cp-erase-preview {
+  position: absolute;
+  z-index: 30;
+  pointer-events: none;
+  border: 1px dashed var(--jc-accent, #4c8bf5);
+  background: rgba(76, 139, 245, 0.16);
+  border-radius: 2px;
+}
 .cp-canvas-picker { position: relative; min-width: 0; max-width: min(220px, 30vw); }
 .cp-canvas-trigger { display: flex; width: 100%; height: 28px; align-items: center; gap: 4px; padding: 0 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); color: var(--ink1); cursor: pointer; font: inherit; }
 .cp-canvas-trigger > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
