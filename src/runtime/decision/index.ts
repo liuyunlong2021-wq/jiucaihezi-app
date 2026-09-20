@@ -1,10 +1,12 @@
 import { inferModelTier, useAgentStore } from '@/stores/agentStore'
-import { getLocalOllamaModels, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import {
   createLlmDecisionProvider,
   createRuleDecisionProvider,
   isToolGrantedByUser,
   matchesOwnTriggers,
+  pickLocalDecisionModel,
+  PRODUCING_TOOL_IDS,
+  wantsTextDeliverable,
   type DecisionModelRef,
 } from './providers'
 import type { DecisionModelTier, DecisionProvider, DecisionRequest, DecisionResult } from './types'
@@ -19,24 +21,25 @@ export {
   LOCAL_GRANT_INTENT,
   LOCAL_GRANT_TOOL_IDS,
   matchesOwnTriggers,
+  NON_CHAT_LOCAL_MODEL,
   parseDecisionOutput,
+  pickLocalDecisionModel,
+  PRODUCING_TOOL_IDS,
+  wantsTextDeliverable,
 } from './providers'
-
-/**
- * 不是聊天模型的本地模型不拿来决策。用户装的第一台本地模型可能是 OCR / 嵌入模型
- * （实测 ollama 列表第一个就是 `glm-ocr`），盲取 models[0] 会让决策落到一个不会做题的模型上。
- */
-const NON_CHAT_LOCAL_MODEL = /ocr|embed|rerank|whisper|tts|bge|gte/i
 
 /**
  * 决策调用用的模型，按优先级排：本地 Ollama 优先（零 token、零网络），再回落云端轻量档。
  * 返回多个而不是一个，是因为「本地配了但不可用」也得能落到云端——只判断有没有配
  * 是不够的，实测那正是「@Jev 什么都没开」的原因。
+ *
+ * 本地那一台由 pickLocalDecisionModel 按体积挑最小的（大模型读 4k token 的决策提示词
+ * 会超 HTTP 层 30s 上限，表现成「判断没回来」）；云端那一档在本地不可用时才轮到。
  */
-export function resolveDecisionModelRefs(): DecisionModelRef[] {
+export async function resolveDecisionModelRefs(): Promise<DecisionModelRef[]> {
   const refs: DecisionModelRef[] = []
-  const local = getLocalOllamaModels().find(model => !NON_CHAT_LOCAL_MODEL.test(model.id))
-  if (local) refs.push({ modelId: local.id, providerId: LOCAL_OLLAMA_PROVIDER_ID })
+  const local = await pickLocalDecisionModel()
+  if (local) refs.push(local)
 
   const agentStore = useAgentStore()
   const light = agentStore.textModels.find(model => inferModelTier(model.id) === 'light')
@@ -115,8 +118,15 @@ export async function decide(
       continue
     }
     if (!result) continue
+    // 要文字的那轮不开产出型能力：规则层和模型层都可能想开 @影音，
+    // 所以闸门只在这里执行一次，provider 绕不过去。改放进 suggestions，用户想开自己点。
+    const wantsText = wantsTextDeliverable(request.userRequest)
     const granted: string[] = []
     for (const id of result.tools) {
+      if (wantsText && PRODUCING_TOOL_IDS.has(id)) {
+        suggestions.add(id)
+        continue
+      }
       if (isToolGrantedByUser(id, request.userRequest)) granted.push(id)
       else suggestions.add(id)
     }

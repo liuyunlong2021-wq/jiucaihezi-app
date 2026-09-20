@@ -85,7 +85,12 @@ import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorRe
 import { safeFetch } from '@/utils/httpClient'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
-import { decide, resolveModelForTier, type DecisionCandidate } from '@/runtime/decision'
+import {
+  DECISION_BUDGET_MS,
+  decide,
+  resolveModelForTier,
+  type DecisionCandidate,
+} from '@/runtime/decision'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -1351,8 +1356,15 @@ async function applyJevDecision(message: string) {
     })
     if (!result) {
       // 没把握和超时都不改芯片（等于手动模式），但等过的人要知道刚才那几秒在干什么。
+      // 超时与「模型没把握」要分开说：前者是能力问题（模型太慢/太大），后者是判断问题。
+      const waited = Date.now() - startedAt
       contextNotice.value =
-        Date.now() - startedAt > 3000 ? '@Jev 判断没回来，本轮按手动模式发出' : ''
+        waited > 3000
+          ? waited >= DECISION_BUDGET_MS - 1000
+            ? `@Jev 判断超时（${Math.round(waited / 1000)} 秒没等到结果），本轮按手动模式发出`
+            : '@Jev 判断没回来，本轮按手动模式发出'
+          : ''
+      console.debug('[jev] 决策无结果', { waited, candidates: candidates.length })
       return
     }
     // Skill 换成决策结果；一个都没选到时保留用户自己点的，不静默清空。

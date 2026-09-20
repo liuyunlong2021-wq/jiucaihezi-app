@@ -1,5 +1,6 @@
 import { resolveSkillApplicability } from '@/runtime/connection/skillApplicability'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
+import { getLocalOllamaModels, LOCAL_OLLAMA_API_BASE, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import {
   buildChatCompletionExtras,
   buildHeaders,
@@ -20,6 +21,53 @@ import type {
 export interface DecisionModelRef {
   modelId: string
   providerId: string
+}
+
+/**
+ * 不是聊天模型的本地模型不拿来决策：OCR / 嵌入 / TTS 都不做题，base 与 coder 也不会跟指令。
+ * 实测用户列表第一台就是 `glm-ocr`，盲取 models[0] 会让决策落到一个不会做题的模型上。
+ */
+export const NON_CHAT_LOCAL_MODEL = /ocr|embed|rerank|whisper|tts|bge|gte|coder|base/i
+
+/** ollama 给云端模型报的 size 是几百字节的占位符，不是本地权重。 */
+const MIN_LOCAL_MODEL_BYTES = 1_000_000
+
+function localOllamaApiBase(): string {
+  return localStorage.getItem('jcLocalOllamaApiBase') || LOCAL_OLLAMA_API_BASE
+}
+
+/** ollama 的模型清单。拿不到就是空数组——ollama 没起不该把整条决策链拖挂。 */
+async function fetchOllamaTags(apiBase: string): Promise<Array<{ name: string; size: number }>> {
+  try {
+    const response = await safeFetch(`${apiBase}/api/tags`)
+    if (!response.ok) return []
+    const data = (await response.json()) as { models?: Array<{ name?: string; size?: number }> }
+    return (data.models || [])
+      .map(model => ({ name: String(model?.name || ''), size: Number(model?.size) || 0 }))
+      .filter(model => model.name)
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 决策该用哪台本地模型。**小是这里唯一的硬指标**：决策提示词有 4k+ token（49 个 Skill 的
+ * 描述全在里头），27B 模型光读完提示词就要几十秒，而 HTTP 层单次请求上限 30s——
+ * 实测表现就是「@Jev 判断没回来，本轮按手动模式发出」。9b 级模型读同样的提示词是秒级。
+ * 按「已加载优先」反而会选回那台 27B（它正被聊天占用），所以这里只看体积。
+ */
+export async function pickLocalDecisionModel(
+  models?: Array<{ name: string; size: number }>,
+): Promise<DecisionModelRef | null> {
+  const list = models ?? (await fetchOllamaTags(localOllamaApiBase()))
+  const usable = list
+    .filter(model => !NON_CHAT_LOCAL_MODEL.test(model.name))
+    .filter(model => model.size >= MIN_LOCAL_MODEL_BYTES)
+    .sort((left, right) => left.size - right.size)
+  if (usable.length) return { modelId: usable[0].name, providerId: LOCAL_OLLAMA_PROVIDER_ID }
+  // 清单读不到（ollama 没起 / 旧版本）就退回设置里存的那份，至少把非对话模型排掉。
+  const saved = getLocalOllamaModels().find(model => !NON_CHAT_LOCAL_MODEL.test(model.id))
+  return saved ? { modelId: saved.id, providerId: LOCAL_OLLAMA_PROVIDER_ID } : null
 }
 
 // ─── 规则 provider：常见说法零成本零延迟命中 ───
@@ -65,18 +113,27 @@ export function matchesOwnTriggers(
 }
 
 /**
- * 「要的是一段文字」的请求：写提示词、写文案、写脚本。
- * 这类请求里出现的「文生视频」「生成图片」是在说**这段字写给谁用**，不是要出片，
- * 而 @影音 / @图文 是产出型能力——开了就会真的去调生图生视频模型。
- * 实测：「根据上面的内容写一个 MiniMax 的文生视频的视频提示词」把 @影音 打开了，
- * 用户要的只是一段字。反过来「用这段提示词生成一段视频」里动词在「提示词」之后，
- * 不命中，照常开 @影音。
+ * 「要的是一段文字」的请求：写提示词、写文案。这类请求里出现的「文生视频」「生成图片」
+ * 是在说**这段字写给谁用**，不是要出片，而 @影音 / @图文 是产出型能力——
+ * 开了就会真的去调生图生视频模型。
+ * 实测两条：「写一个 MiniMax 的文生视频的提示词」被规则层误开 @影音；
+ * 「写一个美女拿着口红的图片的提示词」被模型自己开了 @影音。所以闸门统一在 decide() 执行。
+ *
+ * 判据是「交付物是提示词」而不是「写…提示词靠得近」：中间那句画描述可以很长
+ * （「写一个真人摄影风格的美女拿着口红的有氛围感的图片的提示词」），窗口卡不住。
  */
-const TEXT_DELIVERABLE_INTENT =
-  /(写|拟|起草|整理|生成|优化|润色|改|来一?[份个段])[^，。；！？\n]{0,8}(提示词|prompt)/i
+const TEXT_DELIVERABLE_INTENT = /提示词|prompt/i
 
-/** 产出型能力：会真的调用模型造出文件。只在用户要成品时才自动开。 */
-const PRODUCING_TOOL_IDS = new Set(['av', 'media'])
+/** 「用这段提示词生成一段视频」：提示词是**输入**，产出动作在它后面——那就不算要文字。 */
+const PRODUCES_AFTER_PROMPT =
+  /(提示词|prompt)[^。；！？\n]{0,20}(生成|做|出|画|渲染|产出|合成|变成|做成)/i
+
+export function wantsTextDeliverable(userRequest: string): boolean {
+  return TEXT_DELIVERABLE_INTENT.test(userRequest) && !PRODUCES_AFTER_PROMPT.test(userRequest)
+}
+
+/** 产出型能力：会真的调用模型造出文件。用户要文字时不开，改放进 suggestions。 */
+export const PRODUCING_TOOL_IDS = new Set(['av', 'media'])
 
 /**
  * 用户这句话直接点名的能力芯片。只收明确信号；模糊说法留给 LLM provider，避免误开能力反而更费 token。
@@ -190,14 +247,10 @@ export function createRuleDecisionProvider(): DecisionProvider {
   return {
     id: 'rule',
     async decide(request) {
-      // 要文字的那轮不开产出型能力，看 TEXT_DELIVERABLE_INTENT 的说明。
-      const wantsText = TEXT_DELIVERABLE_INTENT.test(request.userRequest)
       const chipIds = TOOL_RULES.filter(rule => rule.pattern.test(request.userRequest))
         .map(rule => rule.id)
-        .filter(
-          id =>
-            !(wantsText && PRODUCING_TOOL_IDS.has(id)) &&
-            request.candidates.some(candidate => candidate.kind === 'tool' && candidate.id === id),
+        .filter(id =>
+          request.candidates.some(candidate => candidate.kind === 'tool' && candidate.id === id),
         )
       // MCP 服务也按它自己声明的关键词选，和 Skill 走同一套。
       const tools = [
@@ -335,12 +388,12 @@ export function readDecisionText(payload: unknown): string {
 }
 
 export function createLlmDecisionProvider(
-  resolveModels: () => DecisionModelRef[],
+  resolveModels: () => DecisionModelRef[] | Promise<DecisionModelRef[]>,
 ): DecisionProvider {
   return {
     id: 'llm',
     async decide(request) {
-      const targets = resolveModels()
+      const targets = await resolveModels()
       // 按优先级逐个试：本地 Ollama 优先，它不可用（没拉起来、不是聊天模型、报错）就回落云端轻量档。
       // 只判断「有没有配本地模型」不够——实测用户列表第一个是 glm-ocr，决策落到 OCR 模型上什么都选不出来，
       // 而且失败被 decide() 静默吞掉，表现就是「@Jev 什么都没开」。

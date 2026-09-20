@@ -8,6 +8,7 @@ import {
   createRuleDecisionProvider,
   isToolGrantedByUser,
   parseDecisionOutput,
+  pickLocalDecisionModel,
 } from '@/runtime/decision/providers'
 import type { DecisionCandidate, DecisionProvider } from '@/runtime/decision/types'
 
@@ -96,19 +97,63 @@ test('规则命中：生成照片开 @影音', async () => {
   assert.deepEqual(result?.tools, ['av'])
 })
 
+// 用户实测：@Jev 老是「判断没回来」。根因是决策模型取了模型清单里第一个非 OCR 的——
+// 那是一台 27B（34.9GB），光读完 4k token 的决策提示词就超过 HTTP 层 30s 上限。
+test('决策模型按体积挑最小的，不能盲取第一个', async () => {
+  const picked = await pickLocalDecisionModel([
+    { name: 'glm-ocr:latest', size: 2_219_299_168 },
+    { name: 'orcarouter/Qwen3.8-27B-Uncensored:latest', size: 17_741_860_746 },
+    { name: 'qwen3.8:9b-q5', size: 6_642_544_089 },
+    { name: 'qwen3.8:27b-mlx', size: 18_174_721_847 },
+    { name: 'qwen2.5-coder:1.5b-base', size: 986_060_385 },
+  ])
+  assert.deepEqual(picked, { modelId: 'qwen3.8:9b-q5', providerId: 'local-ollama' })
+})
+
+test('云端模型混在清单里时不被当成本地模型：它的 size 只是几百字节的占位符', async () => {
+  const picked = await pickLocalDecisionModel([
+    { name: 'gemini-3-flash-preview:latest', size: 367 },
+    { name: 'glm-4.6:cloud', size: 366 },
+    { name: 'qwen3.8:27b-mlx', size: 18_174_721_847 },
+  ])
+  assert.deepEqual(picked, { modelId: 'qwen3.8:27b-mlx', providerId: 'local-ollama' })
+})
+
 // 用户实测：让 @Jev 挑「写视频提示词」的 Skill，它却开了 @影音（会真的去调生视频模型）。
 // 「文生视频」「生成图片」在这类句子里是模式名，说明这段字写给谁用，不是要出片。
-// 规则层扫不到该开的 Skill 时返回 null 交给下一个 provider，也算正确结果。
+// 闸门在 decide() 里执行，所以两个 provider 都绕不过去，测试也必须走 decide()。
 test('要一段文字时不开产出型能力：写视频提示词不开 @影音', async () => {
-  const provider = createRuleDecisionProvider()
   for (const userRequest of [
     '根据上面的内容写一个MiniMax的文生视频的视频提示词',
     '帮我写一个生成视频的提示词',
     '写一段海报的提示词',
   ]) {
-    const result = await provider.decide(request(userRequest))
+    const result = await decide(request(userRequest), [createRuleDecisionProvider()])
     assert.ok(!(result?.tools || []).includes('av'), `${userRequest} 不该开 @影音`)
   }
+})
+
+// 用户实测第二条：模型自己给「写美女拿着口红的图片的提示词」开了 @影音。
+// 要的是文字却开了会真的生图的能力，只能改放进 suggestions 由用户自己点。
+test('模型层想开产出型能力，用户要的是文字，就只能进 suggestions', async () => {
+  const modelSays = stub('llm', {
+    skills: ['gpt-image-2-prompts'],
+    tools: ['av'],
+    modelTier: null,
+    suggestions: [],
+    reason: '要生图',
+    provider: 'llm',
+    latencyMs: 0,
+  })
+  const wantsText = await decide(
+    request('给我写一个真人摄影风格的美女拿着口红的有氛围感的图片的提示词'),
+    [modelSays],
+  )
+  assert.deepEqual(wantsText?.tools, [])
+  assert.deepEqual(wantsText?.suggestions, ['av'])
+  // 真的要出片时照样开。
+  const wantsMedia = await decide(request('用这段提示词生成一张图片'), [modelSays])
+  assert.deepEqual(wantsMedia?.tools, ['av'])
 })
 
 test('反过来没被误伤：真的要出片仍然开 @影音', async () => {
