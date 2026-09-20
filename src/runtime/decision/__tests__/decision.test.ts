@@ -451,6 +451,13 @@ test('@Jev 接在输入框的提及列表里，且在发送链路的最前面回
   )
   assert.match(workbench, /type: 'tool', id: 'jev', display: 'Jev'/)
   assert.match(workbench, /\{ id: 'jev', label: '@Jev', icon: 'alt-route'/)
+  // 指令条（输入框下面那排）里 @Jev 必须排在 @Skill 左边——用户指定的位置。
+  const strip = workbench.slice(workbench.indexOf('const toolCommands = ['))
+  assert.ok(
+    strip.indexOf("id: 'jev'") >= 0 && strip.indexOf("id: 'jev'") < strip.indexOf("id: 'skill'"),
+    '指令条里 @Jev 要排在 @Skill 左边',
+  )
+  assert.match(workbench, /if \(command\.id === 'jev'\) jevSelected\.value = true/)
   // 决策必须发生在 skillSnapshot 之前，否则本轮发出去的还是决策前的空选择。
   assert.match(
     workbench,
