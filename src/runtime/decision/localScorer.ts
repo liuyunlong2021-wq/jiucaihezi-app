@@ -32,6 +32,9 @@ export function createLocalScorerProvider(options: LocalScorerOptions = {}): Dec
   const url = (options.url || DEFAULT_SCORER_URL).replace(/\/$/, '')
   const timeoutMs = options.timeoutMs ?? SCORER_TIMEOUT_MS
   const doFetch = options.fetchImpl || fetch
+  // 降级本身是设计好的（下一层接着答），但用户得知道这一轮跑的是哪一档 ——
+  // 不然界面看着一样，实际准确率从 95% 掉回 71%，没人查得出来。只喊一次，不刷屏。
+  let unreachable = false
 
   return {
     id: 'scorer',
@@ -45,12 +48,25 @@ export function createLocalScorerProvider(options: LocalScorerOptions = {}): Dec
           text: String(candidate.description || '').replace(/\s+/g, ' '),
         })),
       }
-      const response = await doFetch(`${url}/score`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: AbortSignal.timeout(timeoutMs),
-      })
+      let response: Response
+      try {
+        response = await doFetch(`${url}/score`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(timeoutMs),
+        })
+      } catch (cause) {
+        // 抛出去交给 decide() 继续下一层；但它必须留在日志里，不能被当成「打分器说没有 Skill」。
+        if (!unreachable) {
+          unreachable = true
+          console.info(
+            `[jev] 本地打分器不可用（${url}），本轮降级到规则层 + 模型层。起来：pnpm jev:scorer`,
+            cause instanceof Error ? cause.message : cause,
+          )
+        }
+        throw cause
+      }
       if (!response.ok) return null
       const data = (await response.json()) as ScorerResponse
       // 服务只负责排序；「服务是不是抽风返回了一个不存在的 id」由这里兜住 —— 候选清单外的一律丢。
