@@ -7,10 +7,12 @@ from uuid import uuid4
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 
-BASE_URL = "https://43.254.166.196"
+BASE_URL = "https://43.254.166.145"
 MODEL = "dola-seedance2.5"
-MAX_PROMPT = 12000
-MAX_IMAGES = 30
+# 上限对齐上游（2026-09-19 用户版接口说明）：prompt 8000 字符、参考图最多 9 张。
+# 以前我们自己放得比上游宽（12000 / 30），超出后只能等上游 400，错误信息也绕一层。
+MAX_PROMPT = 8000
+MAX_IMAGES = 9
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
@@ -44,14 +46,14 @@ async def create_video(request: Request):
         raise HTTPException(400, "Unsupported Dola Seedance model")
     prompt = str(body.get("prompt") or "").strip()
     if not prompt or len(prompt) > MAX_PROMPT:
-        raise HTTPException(400, "prompt must contain 1-12000 characters")
+        raise HTTPException(400, "prompt must contain 1-8000 characters")
     ratio = str(body.get("ratio") or body.get("aspect_ratio") or "16:9")
     if ratio not in {"16:9", "9:16", "1:1", "3:4", "4:3", "21:9"}:
         raise HTTPException(400, "Unsupported ratio")
     images = body.get("images") or body.get("image") or []
     images = images if isinstance(images, list) else [images]
     if len(images) > MAX_IMAGES:
-        raise HTTPException(400, "Dola Seedance supports at most 30 images")
+        raise HTTPException(400, "Dola Seedance supports at most 9 images")
     files = []
     for index, url in enumerate(images, 1):
         if not isinstance(url, str) or not url.startswith(("http://", "https://")):
@@ -99,15 +101,17 @@ async def get_video(task_id: str, request: Request):
     if not response.is_success:
         raise HTTPException(502, payload.get("message", "Dola query failed"))
     task = payload.get("task") if isinstance(payload.get("task"), dict) else {}
-    status = str(task.get("status") or "processing")
-    code = str(payload.get("code") or "")
-    if code not in {"0", "1"}:
-        raise HTTPException(502, payload.get("message", "Invalid Dola response code"))
-    if (status == "succeeded") != (code == "1"):
-        raise HTTPException(502, payload.get("message", "Inconsistent Dola task response"))
+    # 上游 2026-09-19 改了 code 语义：「1」= 请求被正常处理（排队中、生成中也是「1」），
+    # 「0」= 请求出错。所以**不能再拿 code 推断任务状态**：旧代码的一致性校验
+    # `(status == "succeeded") != (code == "1")` 在新语义下会把 queued / processing /
+    # failed 全判成 502，只有「已成功」那一帧能查出来。状态只看 status。
+    if str(payload.get("code") or "") != "1":
+        raise HTTPException(502, payload.get("message", "Dola query failed"))
+    # 新版把状态字段在顶层也平铺了一份，两边都读，兼容新旧。
+    status = str(task.get("status") or payload.get("status") or "processing")
     result = {"id": task_id, "task_id": task_id, "object": "video", "model": MODEL, "status": "completed" if status == "succeeded" else status, "progress": 100 if status == "succeeded" else 0}
-    if status == "succeeded": result["video_url"] = task.get("url")
-    if status == "failed": result["error"] = task.get("error") or "Dola task failed"
+    if status == "succeeded": result["video_url"] = task.get("url") or payload.get("url")
+    if status == "failed": result["error"] = task.get("error") or payload.get("error") or "Dola task failed"
     return result
 
 
