@@ -1,0 +1,99 @@
+{
+  "note": "决策路由的中文基准。每条 = 一句真实口吻的用户请求 + 期望结果。expectSkills 要求完全一致（[] 表示「不该挂任何 Skill」，这是允许且常见的正确答案）；expectTools 要求出现；forbidTools 要求不出现。split 为 train 的可以进训练集，test 的留作评测，调提示词/阈值时只看 test。",
+  "version": 1,
+  "cases": [
+    { "id": "novel-write-1", "split": "train", "task": "我想写一部关于口红的小说", "expectSkills": ["jc-novel"] },
+    { "id": "novel-write-2", "split": "test", "task": "帮我写小说", "expectSkills": ["jc-novel"] },
+    { "id": "novel-write-3", "split": "train", "task": "开一本新书，长篇网文那种", "expectSkills": ["jc-novel"] },
+    { "id": "novel-write-4", "split": "test", "task": "给这部长篇列一下章纲", "expectSkills": ["jc-novel"] },
+    { "id": "novel-topic-only-1", "split": "train", "task": "把这部小说翻译成英文", "expectSkills": [], "note": "话题是小说，但任务是翻译；jc-novel 的 triggers 里有「小说」，规则层必须让位给评分层" },
+    { "id": "novel-topic-only-2", "split": "test", "task": "这部小说太长了帮我总结一下", "expectSkills": [], "note": "同上：提到话题不等于该用这个 Skill" },
+    { "id": "novel-topic-only-3", "split": "train", "task": "小说的封面用什么字体好看", "expectSkills": [] },
+
+    { "id": "duanju-1", "split": "train", "task": "帮我写一个短剧剧本", "expectSkills": ["jc-duanju"] },
+    { "id": "duanju-2", "split": "test", "task": "把这段故事梗概扩写成三集短剧", "expectSkills": ["jc-duanju"] },
+
+    { "id": "juben-yingyi-1", "split": "train", "task": "把这段中文剧本翻译成英文剧本", "expectSkills": ["jc-juben-yingyi"] },
+    { "id": "juben-yingyi-2", "split": "test", "task": "这集对白要译成英文，角色语气各有区别", "expectSkills": ["jc-juben-yingyi"] },
+    { "id": "juben-yingyi-reverse", "split": "train", "task": "把这段英文剧本翻译成中文", "expectSkills": [], "note": "它只做中译英，方向相反就是不合格" },
+
+    { "id": "daoyan-fenjing-1", "split": "train", "task": "把这场戏拆成导演分镜，标好景别和运镜", "expectSkills": ["jc-daoyan-fenjing"] },
+    { "id": "jichu-fenjing-1", "split": "train", "task": "按总监方案和声音稿出基础分镜，一镜一份", "expectSkills": ["jc-jichu-fenjing"] },
+    { "id": "juanzhou-fenjing-1", "split": "train", "task": "把这几组镜头做成动态关键帧分镜卷轴图", "expectSkills": ["jc-juanzhou-fenjing"] },
+    { "id": "storyboard-jiugong-1", "split": "train", "task": "把这个剧本转成电影级九宫格分镜图", "expectSkills": ["cinematic-storyboard-design"] },
+
+    { "id": "daxi-1", "split": "train", "task": "帮我写一段两个人巷战的打戏", "expectSkills": ["jc-daxi"] },
+    { "id": "daxi-2", "split": "test", "task": "这段动作戏要逐镜头的攻防动作", "expectSkills": ["jc-daxi"] },
+    { "id": "daxi-no-topic-trap", "split": "train", "task": "生成一张人物照片", "expectSkills": [], "expectTools": ["av"], "note": "jc-daxi 的描述里有「剧情、人物、场景」，按关键词撞词就会误挂它——实测踩过" },
+
+    { "id": "single-scene-1", "split": "train", "task": "写一段电影感的暧昧戏视频提示词", "expectSkills": ["single-scene-video-prompts"] },
+    { "id": "dongman-gaoxiao-1", "split": "train", "task": "把这个段子做成动漫搞笑短片，要有内心 OS 反差", "expectSkills": ["jc-dongman-gaoxiao"] },
+
+    { "id": "juese-1", "split": "train", "task": "按剧情统筹这几个人物的外观，要有群像差异", "expectSkills": ["jc-juese"] },
+    { "id": "character-prompt-1", "split": "train", "task": "把这段人物设定做成三格角色设定图的提示词", "expectSkills": ["jc-character-prompt"] },
+    { "id": "renqun-1", "split": "train", "task": "出一张同阵营群像阵容图，一字排开那种", "expectSkills": ["jc-renqun"] },
+    { "id": "xiangshu-1", "split": "train", "task": "用相术给这个反派推导一下外貌特征", "expectSkills": ["jc-xiangshu-character"] },
+
+    { "id": "scene-prompt-1", "split": "train", "task": "给这个场景写设计提示词，要 16:9 和 9:16 两版", "expectSkills": ["jc-scene-prompt"] },
+    { "id": "prop-prompt-1", "split": "train", "task": "设计一件剧情关键道具，出三视图设定图", "expectSkills": ["jc-prop-prompt"] },
+    { "id": "asset-reference-1", "split": "train", "task": "帮我Pinterest搜一张这个角色的参考图并下载", "expectSkills": ["jc-asset-reference-search"] },
+    { "id": "renqun-vs-juese", "split": "test", "task": "帮我弄个弟子阵容图", "expectSkills": ["jc-renqun"] },
+
+    { "id": "film-style-1", "split": "train", "task": "从剧本出一份项目总纲，定视觉方向和生产路线", "expectSkills": ["jc-film-style"] },
+    { "id": "gongchengjuben-1", "split": "train", "task": "把这段文学剧本改写成能直接进组的拍摄台本，一镜一行", "expectSkills": ["jc-gongchengjuben"] },
+    { "id": "zichantiqu-1", "split": "train", "task": "从这几集 md 里提取场景、角色和关键道具", "expectSkills": ["jc-zichantiqu"] },
+
+    { "id": "gaibian-silu-1", "split": "train", "task": "定一下这部小说的改编方向和尺度", "expectSkills": ["jc-gaibian-silu"] },
+    { "id": "gaibian-luobi-1", "split": "train", "task": "按改编方案接着改这一集", "expectSkills": ["jc-gaibian-luobi"] },
+
+    { "id": "shengyin-daoyan-1", "split": "train", "task": "编排这一集的声音导演稿", "expectSkills": ["jc-shengyin-daoyan"] },
+    { "id": "shengyin-sheji-1", "split": "train", "task": "给这三个角色设计音色，要能复用", "expectSkills": ["jc-shengyin-sheji"] },
+    { "id": "juese-fantui-1", "split": "train", "task": "根据声纹和字幕反推每句话是谁说的", "expectSkills": ["jc-juese-fantui"] },
+    { "id": "taici-fantui-1", "split": "train", "task": "把这批字幕归一下说话人，顺便改错别字", "expectSkills": ["jc-taici-fantui"] },
+    { "id": "duibai-1", "split": "train", "task": "把这个 mp4 里的对白提取出来", "expectSkills": ["jc-duibai"] },
+
+    { "id": "h3-prompt-1", "split": "train", "task": "把上面的镜头描述改写成 MiniMax H3 的提示词结构", "expectSkills": ["h3-prompt-writing"] },
+    { "id": "h3-prompt-video-only", "split": "train", "task": "根据上面的内容写一个MiniMax的文生视频的视频提示词", "expectSkills": ["h3-prompt-writing"], "forbidTools": ["av"], "note": "要的是文字，@影音 不该开（实测踩过）" },
+    { "id": "minimax-fenjing-1", "split": "train", "task": "把这段故事和角色参考图做成能直接提交给 MiniMax H3 的分镜提示词", "expectSkills": ["jc-minimax-fenjing"] },
+    { "id": "seedance-fenjing-1", "split": "train", "task": "按分镜卷轴出 Seedance 2.0 的视频提示词", "expectSkills": ["jc-seedance-fenjing"] },
+    { "id": "sd25-pe-1", "split": "train", "task": "按 Seedance 2.5 的规范优化一下这段提示词", "expectSkills": ["sd25-pe"] },
+
+    { "id": "gpt-image-2-prompts-1", "split": "train", "task": "写一个真人摄影风格的美女拿着口红的有氛围感的图片的提示词", "expectSkills": ["gpt-image-2-prompts"], "forbidTools": ["av"], "note": "要文字不要出片；它自己没写 triggers，只能靠评分层看见" },
+    { "id": "gpt-image-2-prompts-2", "split": "test", "task": "我要做电商主图，给我一套 GPT Image 2 的提示词", "expectSkills": ["gpt-image-2-prompts"] },
+    { "id": "prompt-deai-1", "split": "train", "task": "把这段生图提示词去一下 AI 味", "expectSkills": ["prompt-deai-polisher"] },
+    { "id": "visual-impact-1", "split": "train", "task": "做一个宝可梦卡牌揭晓的视觉冲击特效提示词", "expectSkills": ["视觉冲击力"] },
+
+    { "id": "3d-animation-1", "split": "train", "task": "把这句创意做成一条 3D 动画短片", "expectSkills": ["3d-animation-short-generator"] },
+    { "id": "brand-promo-1", "split": "train", "task": "给我的新店做一条品牌宣传短片，重点突出开业活动", "expectSkills": ["brand-promo-video-generator"] },
+    { "id": "coop-game-intro-1", "split": "train", "task": "给我和朋友的合作游戏做一个主菜单开场动画", "expectSkills": ["co-op-game-intro-generator"] },
+    { "id": "minimalist-ad-1", "split": "train", "task": "用这张产品图做一条 Apple 风的广告短片", "expectSkills": ["minimalist-product-ad-generator"] },
+    { "id": "paper-collage-1", "split": "train", "task": "用纸拼贴风格讲一下通货膨胀", "expectSkills": ["paper-collage-explainer-generator"] },
+    { "id": "papercraft-1", "split": "train", "task": "做一条纸艺定格的科普视频，讲光合作用", "expectSkills": ["papercraft-stop-motion-explainer"] },
+    { "id": "handdrawn-1", "split": "train", "task": "用手绘实时视频生成器做一段手绘动画", "expectSkills": ["handdrawn-live-video-generator"] },
+    { "id": "mv-subtitle-1", "split": "train", "task": "这首歌做个带歌词贴字的 MV", "expectSkills": ["music-video-subtitle-generator"] },
+
+    { "id": "douyin-script-1", "split": "train", "task": "写一条抖音口播文案，讲职场干货那种", "expectSkills": ["douyin-script"] },
+    { "id": "media-script-1", "split": "train", "task": "给我这条短视频写一段口播脚本，开头要抓人", "expectSkills": ["jc-media-script"] },
+    { "id": "x-dafen-1", "split": "train", "task": "给我这条抖音脚本打个分，看看完播率", "expectSkills": ["jc-x-dafen"] },
+
+    { "id": "physiognomy-1", "split": "train", "task": "帮我看看这张脸的面相", "expectSkills": ["human-physiognomy"] },
+    { "id": "writing-skills-1", "split": "train", "task": "帮我新建一个 Skill，用来做周报", "expectSkills": ["writing-skills"] },
+
+    { "id": "empty-limestone", "split": "train", "task": "估一下一块石灰岩样本的地质年龄", "expectSkills": [] },
+    { "id": "empty-weather", "split": "test", "task": "今天北京天气怎么样", "expectSkills": [] },
+    { "id": "empty-react", "split": "train", "task": "这个 React 组件为什么一直重渲染", "expectSkills": [] },
+    { "id": "empty-japanese", "split": "train", "task": "帮我把这段话翻译成日语", "expectSkills": [] },
+    { "id": "empty-proofread", "split": "test", "task": "这段剧本帮我改一下错别字", "expectSkills": [], "note": "修错别字没有对应 Skill，应该什么都不挂" },
+    { "id": "empty-short", "split": "test", "task": "帮我看下这个", "expectSkills": [] },
+    { "id": "empty-summarize", "split": "train", "task": "把上面这段总结成三句话", "expectSkills": [] },
+
+    { "id": "tool-gen-image", "split": "train", "task": "用这段提示词生成一张图片", "expectSkills": [], "expectTools": ["av"] },
+    { "id": "tool-gen-video", "split": "test", "task": "帮我生成一段 5 秒的猫咪视频", "expectSkills": [], "expectTools": ["av"] },
+    { "id": "tool-to-png", "split": "train", "task": "把上面这段做成图片", "expectSkills": [], "expectTools": ["media"], "forbidTools": ["av"] },
+    { "id": "tool-make-ppt", "split": "train", "task": "把这份材料做成幻灯片", "expectSkills": [], "expectTools": ["media"] },
+    { "id": "tool-save-file", "split": "train", "task": "写一份周报保存到项目里", "expectSkills": [], "expectTools": ["file"] },
+    { "id": "tool-no-file", "split": "test", "task": "把当前剧本翻译成英文", "expectSkills": ["jc-juben-yingyi"], "forbidTools": ["file"], "note": "用户没提文件，@文件 不能代开" },
+
+    { "id": "prompt-then-generate", "split": "train", "task": "用这个提示词生成一段视频", "expectSkills": [], "expectTools": ["av"], "note": "提示词是输入、产出在后，这就是真的要出片" }
+  ]
+}
