@@ -3,12 +3,12 @@ import {
   createLlmDecisionProvider,
   createRuleDecisionProvider,
   isToolGrantedByUser,
-  matchesOwnTriggers,
   pickLocalDecisionModel,
   PRODUCING_TOOL_IDS,
   wantsTextDeliverable,
   type DecisionModelRef,
 } from './providers'
+import { createLocalScorerProvider } from './localScorer'
 import type { DecisionModelTier, DecisionProvider, DecisionRequest, DecisionResult } from './types'
 
 export * from './types'
@@ -17,6 +17,7 @@ export {
   buildDecisionPrompt,
   createLlmDecisionProvider,
   createRuleDecisionProvider,
+  gateSkillsByOwnTriggers,
   isToolGrantedByUser,
   LOCAL_GRANT_INTENT,
   LOCAL_GRANT_TOOL_IDS,
@@ -80,11 +81,16 @@ export async function resolveDecisionModelRefs(): Promise<DecisionModelRef[]> {
   )
 }
 
+/** 芯片（@文件/@图文/@影音/@3D）的拥有者。芯片是结构判断，只有规则层会给。 */
+export const CHIP_PROVIDER_ID = 'rule'
+
 /**
- * 决策链：规则先跑（零成本零延迟），没把握才花一次轻量调用。
+ * 决策链：打分器先跑（语义判断 Skill，本地、离线、0.6 秒），规则层接着补能力芯片，
+ * 云端/本地模型是兜底——前两个都没给出结论时才轮到它。
  * 这就是「Provider 可替换」的证据——换实现只动这个数组，执行层完全不知情。
  */
 export const DECISION_PROVIDER_CHAIN: DecisionProvider[] = [
+  createLocalScorerProvider(),
   createRuleDecisionProvider(),
   createLlmDecisionProvider(resolveDecisionModelRefs),
 ]
@@ -116,6 +122,15 @@ export const DECISION_BUDGET_MS = 35_000
  * null 的含义是「什么都不改」，也就是和其它所有轮一样的手动行为——
  * 决策层是增强，不能变成发送的单点故障。
  *
+ * 分层叠加，不是「谁先出声谁说了算」：规则层管能力芯片（关键词是结构判断），
+ * 打分器管 Skill（语义判断，见 localScorer）。曾经是拿第一个非空结果就 return，
+ * 于是规则层给出 @影音/@3D 之后就返回了，Skill 那一步永远轮不到——
+ * 实测端到端只有 75%，而打分器单独跑是 93%。
+ *
+ * 现在的契约：**第一个给出结论的 provider 拥有 Skill 决定权**（包括「本轮不挂 Skill」这个结论），
+ * 芯片和档位各家叠加、谁先给用谁的。真机实测规则层单独只有 33%，它凭关键词撞上的 Skill
+ * 不能盖掉 93% 的打分器（「广告短片」被撞成 3D 短片 Skill 就是这么来的）。
+ *
  * 授权边界在这里统一执行（不是在各 provider 里）：provider 可以想要 `@文件`，
  * 但只要用户自己的话里没点名文件，就只能进 suggestions，由界面上请用户自己开。
  */
@@ -126,8 +141,17 @@ export async function decide(
 ): Promise<DecisionResult | null> {
   const startedAt = Date.now()
   const suggestions = new Set<string>()
+  const granted: string[] = []
+  let skills: string[] = []
+  let modelTier: DecisionModelTier | null = null
   let lastProvider = ''
+  let verdictProvider = ''
+  let anyResult = false
+  let skillVerdictTaken = false
   for (const provider of providers) {
+    // Skill 有结论就不再问别人（尤其是别把云端/本地模型拖进来），
+    // 但芯片必须问：@文件 / @图文 / @影音 / @3D 是结构判断，只有规则层会给。
+    if (skillVerdictTaken && provider.id !== CHIP_PROVIDER_ID) continue
     lastProvider = provider.id
     const remaining = budgetMs - (Date.now() - startedAt)
     if (remaining <= 0) break
@@ -140,11 +164,14 @@ export async function decide(
       continue
     }
     if (!result) continue
+    anyResult = true
+    // 第一个答话的 provider 就是本次决策的出处（打分器在跑就是它，没跑就是规则层）。
+    if (!verdictProvider) verdictProvider = provider.id
     // 要文字的那轮不开产出型能力：规则层和模型层都可能想开 @影音，
     // 所以闸门只在这里执行一次，provider 绕不过去。改放进 suggestions，用户想开自己点。
     const wantsText = wantsTextDeliverable(request.userRequest)
-    const granted: string[] = []
     for (const id of result.tools) {
+      if (granted.includes(id)) continue
       if (wantsText && PRODUCING_TOOL_IDS.has(id)) {
         suggestions.add(id)
         continue
@@ -152,33 +179,34 @@ export async function decide(
       if (isToolGrantedByUser(id, request.userRequest)) granted.push(id)
       else suggestions.add(id)
     }
-    // 复核模型挑的 Skill：它自己声明的 triggers 一个都没命中就退回不挂 Skill。
-    // 「这一轮不挂 Skill」等于今天的手动模式，比强制注入一份方向相反的 SKILL.md 便宜。
-    const skills = result.skills.filter(id =>
-      matchesOwnTriggers(
-        request.candidates.find(candidate => candidate.kind === 'skill' && candidate.id === id),
-        request.userRequest,
-      ),
-    )
-    if (granted.length || skills.length || result.modelTier)
-      return {
-        ...result,
-        skills,
-        tools: granted,
-        suggestions: [...suggestions],
-        latencyMs: Date.now() - startedAt,
-      }
+    if (!modelTier && result.modelTier) modelTier = result.modelTier
+    // 谁先答话谁定 Skill。各层自己对自己的结论负责：规则层的命中就是候选自带的
+    // triggers（同源，不用复核），打分器是真的读过候选描述做语义比对，
+    // 而模型层是自由发挥——它的复核查在 createLlmDecisionProvider 里。
+    if (!skillVerdictTaken) {
+      skillVerdictTaken = true
+      skills = result.skills
+    }
   }
-  if (!suggestions.size) return null
+  if (!anyResult) return null
+  // suggestions 也算「有话说」：模型想要的东西需要用户自己开，这条提示得送出去。
+  if (!skills.length && !granted.length && !modelTier && !suggestions.size) return null
   return {
-    skills: [],
-    tools: [],
-    modelTier: null,
+    skills,
+    tools: granted,
+    modelTier,
     suggestions: [...suggestions],
-    reason: '这些能力需要你自己开',
-    provider: lastProvider,
+    reason: providerReason(skills, granted, suggestions.size),
+    provider: verdictProvider || lastProvider,
     latencyMs: Date.now() - startedAt,
   }
+}
+
+function providerReason(skills: string[], tools: string[], suggestionCount: number): string {
+  if (skills.length) return '已选定 Skill'
+  if (tools.length) return '只开了能力芯片'
+  if (suggestionCount) return '这些能力需要你自己开'
+  return '没把握，不改动'
 }
 
 /**

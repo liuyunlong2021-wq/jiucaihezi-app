@@ -8,6 +8,7 @@ import { createLocalScorerProvider } from '@/runtime/decision/localScorer'
 import {
   buildDecisionPrompt,
   createRuleDecisionProvider,
+  gateSkillsByOwnTriggers,
   isToolGrantedByUser,
   parseDecisionOutput,
   pickLocalDecisionModel,
@@ -73,7 +74,9 @@ function stub(
 }
 
 test('规则命中：写短剧剧本只选剧本 Skill，不开任何文件或终端能力', async () => {
-  const result = await decide(request('帮我写一个短剧剧本'))
+  // 显式传链路：默认链里第一个是本地打分器（一次 HTTP 调用），
+  // 拿默认链做断言会变成「看服务在不在跑」而不是看代码。
+  const result = await decide(request('帮我写一个短剧剧本'), [createRuleDecisionProvider()])
   assert.deepEqual(result?.skills, ['jc-duanju'])
   assert.deepEqual(result?.tools, [])
   assert.equal(result?.modelTier, 'strong')
@@ -81,14 +84,14 @@ test('规则命中：写短剧剧本只选剧本 Skill，不开任何文件或�
 })
 
 test('规则命中：翻译剧本选中翻译 Skill，用户没提文件就不开 @文件', async () => {
-  const result = await decide(request('把当前剧本翻译成英文'))
+  const result = await decide(request('把当前剧本翻译成英文'), [createRuleDecisionProvider()])
   // 只取最匹配的一个：多挂一个 Skill 就多注入一份 SKILL.md 全文。
   assert.deepEqual(result?.skills, ['jc-juben-yingyi'])
   assert.deepEqual(result?.tools, [])
 })
 
 test('规则命中：用户自己说了「保存到项目里」，才允许代开 @文件', async () => {
-  const result = await decide(request('把当前剧本翻译成英文，然后保存到项目里'))
+  const result = await decide(request('把当前剧本翻译成英文，然后保存到项目里'), [createRuleDecisionProvider()])
   assert.deepEqual(result?.skills, ['jc-juben-yingyi'])
   assert.deepEqual(result?.tools, ['file'])
   assert.deepEqual(result?.suggestions, [])
@@ -131,7 +134,7 @@ test('本地打分器：服务没起来时链路继续走到下一个 provider',
 })
 
 test('规则命中：生成照片开 @影音', async () => {
-  const result = await decide(request('生成一张人物照片'))
+  const result = await decide(request('生成一张人物照片'), [createRuleDecisionProvider()])
   assert.deepEqual(result?.tools, ['av'])
 })
 
@@ -267,24 +270,51 @@ test('模型挑的 Skill 必须被它自己声明的 triggers 佐证，否则退
       triggers: ['剧本翻译', '中译英'],
     },
   ]
-  const modelSays = stub('llm', {
-    skills: ['jc-juben-yingyi'],
-    tools: [],
-    modelTier: null,
-    suggestions: [],
-    reason: '反向操作',
-    provider: 'llm',
-    latencyMs: 0,
-  })
-  assert.equal(
-    await decide({ userRequest: '把上面的提示词翻译成中文，放入Wiki里', candidates }, [modelSays]),
-    null,
+  // 闸门只对模型层执行：模型是自由发挥，方向相反的错得拦。
+  assert.deepEqual(
+    gateSkillsByOwnTriggers(['jc-juben-yingyi'], {
+      userRequest: '把上面的提示词翻译成中文，放入Wiki里',
+      candidates,
+    }),
+    [],
   )
   // 真命中作者写的关键词时才放行。
   assert.deepEqual(
-    (await decide({ userRequest: '把这个剧本翻译成英文剧本', candidates }, [modelSays]))?.skills,
+    gateSkillsByOwnTriggers(['jc-juben-yingyi'], {
+      userRequest: '把这个剧本翻译成英文剧本',
+      candidates,
+    }),
     ['jc-juben-yingyi'],
   )
+})
+
+// 修的是这个：bench.py 里打分器单独测 93%，接进产品链路只剩 79%。
+// 14 条漏选全是「打分器排第 1、分数 0.84~0.997，却被触发器闸门毙掉」——
+// 触发词是「写打戏」「把素材写成短剧」这种短语，本来就匹配不上自然句。
+// 语义判断的结论不该被字面匹配推翻，所以闸门现在只管模型层。
+test('打分器的语义结论不被字面触发器推翻', async () => {
+  const candidates: DecisionCandidate[] = [
+    {
+      id: 'jc-daxi',
+      kind: 'skill',
+      label: '打戏',
+      description: '写打戏动作设计。',
+      // 真实触发词就是这个形式：短语，不含用户那句话里的连续子串。
+      triggers: ['写打戏', '搏斗分镜'],
+    },
+  ]
+  const scorerSays = stub('scorer', {
+    skills: ['jc-daxi'],
+    tools: [],
+    modelTier: null,
+    suggestions: [],
+    reason: '本地打分器',
+    provider: 'scorer',
+    latencyMs: 0,
+  })
+  const result = await decide({ userRequest: '帮我写一段两个人巷战的打戏', candidates }, [scorerSays])
+  assert.deepEqual(result?.skills, ['jc-daxi'])
+  assert.equal(result?.provider, 'scorer')
 })
 
 test('没写 triggers 的 Skill 无从复核，尊重模型的判断', async () => {

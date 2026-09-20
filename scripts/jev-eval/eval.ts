@@ -3,6 +3,7 @@
  *
  * 三种跑法：
  *   --provider rule  只跑规则层（毫秒级，离线）
+ *   --provider scorer 跑产品链路（规则 + 本地打分器），需要 serve.py 在 4789 上
  *   --provider chain 跑完整链路（规则 → 云端/本地模型），需要能调模型
  *   --provider llm   跳过规则层，只跑模型层（看模型层单独有多强）
  * 加 --split test 只看留出集；--min 0.8 低于阈值就退出码 1（给 CI 用）。
@@ -14,6 +15,7 @@ import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createLlmDecisionProvider, createRuleDecisionProvider, decide } from '@/runtime/decision'
+import { createLocalScorerProvider } from '@/runtime/decision/localScorer'
 import type { DecisionCandidate, DecisionProvider } from '@/runtime/decision/types'
 import { parseSkillMd, stripYamlQuotes } from '@/types/skill'
 
@@ -71,6 +73,8 @@ function buildCandidates(): DecisionCandidate[] {
 function buildChain(): DecisionProvider[] {
   const rule = createRuleDecisionProvider()
   if (provider === 'rule') return [rule]
+  if (provider === 'scorer') return [createLocalScorerProvider(), rule]
+  if (provider === 'scorer-only') return [createLocalScorerProvider()]
   if (provider === 'llm') return [createLlmDecisionProvider(() => (modelId ? [{ modelId, providerId: 'local-ollama' }] : []))]
   return [rule, createLlmDecisionProvider(() => (modelId ? [{ modelId, providerId: 'local-ollama' }] : []))]
 }

@@ -147,8 +147,9 @@ const TOOL_RULES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
     // 而真要出片时说「做个视频」「生成一段视频」反而一个都不中。
     // 图片类名词额外禁止动作与名词之间出现「成/为」：「把这段做成图片」是把现成内容排版导出，
     // 归 @图文；而「做成视频」是真的要出片，所以只对图片类收窄。
+    // 中间窗口给到 10 个字：「生成一段 5 秒的猫咪视频」隔着「一段 5 秒的猫咪」也得算。
     pattern:
-      /(生成|做|出|画|渲染|合成|配|弄|来一?[段张个份])(?:(?![成为])[^，。；！？\n]){0,4}(图片|照片|图像|插画|封面|海报)|(生成|做|出|画|渲染|合成|配|弄|来一?[段张个份])[^，。；！？\n]{0,4}(视频|短片|动画|音频|配音|语音|朗读|音乐|bgm)|画一[张幅个]|出图|配图|生图|配音|朗读|语音/i,
+      /(生成|做|出|画|渲染|合成|配|弄|来一?[段张个份])(?:(?![成为])[^，。；！？\n]){0,10}(图片|照片|图像|插画|封面|海报)|(生成|做|出|画|渲染|合成|配|弄|来一?[段张个份])[^，。；！？\n]{0,10}(视频|短片|动画|音频|配音|语音|朗读|音乐|bgm)|画一[张幅个]|出图|配图|生图|配音|朗读|语音/i,
   },
   {
     id: 'media',
@@ -485,5 +486,32 @@ async function callDecisionModel(
     request.candidates,
   )
   if (!parsed) return null
-  return { ...parsed, suggestions: [], provider: 'llm', latencyMs: 0 }
+  return {
+    ...parsed,
+    skills: gateSkillsByOwnTriggers(parsed.skills, request),
+    suggestions: [],
+    provider: 'llm',
+    latencyMs: 0,
+  }
+}
+
+/**
+ * 复核模型挑的 Skill：候选自己声明的 triggers 一个都没命中就退回不挂 Skill。
+ *
+ * 只有模型层需要这道复核：它是自由发挥，会犯方向相反的错（实测「把英文剧本翻译成
+ * 中文」选了只做中译英的 jc-juben-yingyi）。规则层的命中本来就来自 triggers（同源）；
+ * 本地打分器是真读过候选描述做语义比对的——拿字面触发词去反驳它，实测会毙掉 14 条
+ * 它已经答对的题（触发词是「写打戏」这类短语，本来就匹配不上自然句）。
+ * 不挂 Skill 等于今天的手动模式，比注入一份方向相反的 SKILL.md 便宜。
+ */
+export function gateSkillsByOwnTriggers(
+  skills: string[],
+  request: Pick<DecisionRequest, 'userRequest' | 'candidates'>,
+): string[] {
+  return skills.filter(id =>
+    matchesOwnTriggers(
+      request.candidates.find(candidate => candidate.kind === 'skill' && candidate.id === id),
+      request.userRequest,
+    ),
+  )
 }
