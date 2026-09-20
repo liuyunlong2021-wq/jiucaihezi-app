@@ -12,7 +12,10 @@ export interface DecisionCandidate {
   kind: 'skill' | 'tool'
   label: string
   description: string
-  /** Skill 自己声明的搜索关键词。没有它，长描述按标点切词后撞不上用户这句短话。 */
+  /**
+   * 候选自己声明的关键词：Skill 用 SKILL.md 的 triggers；MCP 服务用服务名 + 工具名 + 工具说明。
+   * 规则 provider 只认这批词（不扫描述），LLM provider 挑的 Skill 也要被它佐证。
+   */
   triggers?: string[]
 }
 

@@ -1288,10 +1288,24 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
   push({ id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' })
   push({ id: 'av', kind: 'tool', label: '影音', description: '生成图片、视频和音频' })
   if (desktopOnlyRuntime) push({ id: 'scene3d', kind: 'tool', label: '3D', description: '创建或编辑 3D 场景' })
+  // MCP 服务按服务聚合。描述必须带上它的工具——McpServerConfig 没有 description 字段，
+  // 原来那句「调用 MCP 服务 X 的工具」对每个服务一模一样、零区分度，模型不可能选对。
+  const mcpServers = new Map<string, { label: string; tools: string[] }>()
   for (const tool of mcpStore.allMcpTools || []) {
     const label = mcpStore.servers.find(server => server.id === tool.serverId)?.name || tool.serverId
-    push({ id: `mcp__${tool.serverId}`, kind: 'tool', label, description: `调用 MCP 服务 ${label} 的工具` })
+    const entry = mcpServers.get(tool.serverId) || { label, tools: [] }
+    entry.tools.push(`${tool.originalName}（${describe(tool.description, '无说明')}）`)
+    mcpServers.set(tool.serverId, entry)
   }
+  for (const [serverId, entry] of mcpServers)
+    push({
+      id: `mcp__${serverId}`,
+      kind: 'tool',
+      label: entry.label,
+      description: `已连接的外部 MCP 服务「${entry.label}」，可提供：${entry.tools.join('；')}`,
+      // 服务名 + 工具名 + 工具说明就是它自我声明的能力，规则层与复核都靠这批词。
+      triggers: [entry.label, ...entry.tools],
+    })
   for (const skill of await loadWebSkillCatalog().catch(() => []))
     push({
       id: skill.name,
@@ -1320,9 +1334,10 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
  */
 async function applyJevDecision(message: string) {
   try {
+    const candidates = await decisionCandidates()
     const result = await decide({
       userRequest: message || '请查看以下附件。',
-      candidates: await decisionCandidates(),
+      candidates,
     })
     if (!result) return
     // Skill 换成决策结果；一个都没选到时保留用户自己点的，不静默清空。
@@ -1337,14 +1352,17 @@ async function applyJevDecision(message: string) {
       const target = resolveModelForTier(result.modelTier)
       if (target) agentStore.setModel(target.modelId, target.providerId)
     }
-    const picked = [...result.skills, ...result.tools]
-    const tier = result.modelTier ? ` · 模型 ${result.modelTier}` : ''
-    const suggestion = result.suggestions.length
-      ? `；这个需要你自己开：${result.suggestions.map(id => TOOL_CHIP_LABELS[id] || id).join('、')}`
-      : ''
-    contextNotice.value = picked.length
-      ? `@Jev 已选：${picked.join('、')}${tier}${suggestion}`
-      : `@Jev 没看出要另开能力，沿用你已选的${suggestion}`
+    // 选中的 Skill 与芯片在 chip 行里已经看得见，这里不复述（复述一遍是纯噪音）；
+    // 只留 chip 行看不到的两件事：模型档位被动过、还有能力需要用户自己开。
+    const notes: string[] = []
+    if (result.modelTier) notes.push(`模型切到 ${result.modelTier} 档`)
+    if (result.suggestions.length)
+      notes.push(
+        `需要你自己开：${result.suggestions.map(id => TOOL_CHIP_LABELS[id] || id).join('、')}`,
+      )
+    contextNotice.value = notes.length ? `@Jev：${notes.join('；')}` : ''
+    // 决策细节不进界面，但排障时必须有：选错时要能一眼看出走的哪条路径、候选多少个。
+    console.debug('[jev] 决策结果', result, '候选数', candidates.length)
   } catch (cause) {
     // 决策层是增强，不是单点故障：它挂掉只留一条说明，本轮照常按手动模式发出去。
     contextNotice.value = `@Jev 决策不可用，已按手动模式继续：${cause instanceof Error ? cause.message : String(cause)}`

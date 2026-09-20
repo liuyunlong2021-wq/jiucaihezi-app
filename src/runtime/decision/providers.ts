@@ -30,7 +30,7 @@ export interface DecisionModelRef {
  * 只能来自用户自己的话，不能由模型猜。命中即视为用户已授权。
  */
 export const LOCAL_GRANT_INTENT =
-  /保存|存到|存入|写入|写到|文件|文件夹|目录|项目里|项目内|导出到|磁盘/i
+  /保存|存到|存入|存进|写入|写进|写到|文件|文件夹|目录|项目里|项目内|导出到|磁盘|放入|放进|归档|落盘|wiki/i
 
 /** 决策层不得代开的能力芯片，由 decide() 统一执行。 */
 export const LOCAL_GRANT_TOOL_IDS = new Set(['file'])
@@ -114,39 +114,46 @@ function isMeaningfulMatch(term: string, userRequest: string): boolean {
 }
 
 /**
- * 用 Skill 的 triggers 去撞用户这句话，取最具体的那一个。
+ * 用候选自己声明的关键词撞用户这句话，取最具体的那几个。
+ * 适用对象：Skill（triggers 是作者手写的「什么时候该用我」）与 MCP 服务（服务名 +
+ * 工具名 + 工具说明——`McpServerConfig` 没有 description 字段，工具是唯一可信的信号）。
  *
- * 两条都是实测踩出来的：
- * 1. **只信 triggers，不扫描述。** triggers 是作者手写的搜索关键词（见 types/skill.ts）；
- *    描述是写给人看的散文，拿它做子串匹配会捞出泛词——`jc-daxi` 的描述里有
- *    「剧情、人物、场景」，于是「生成一张人物照片」就把打戏 Skill 挂上来了。
- *    代价是没写 triggers 的 Skill 规则层看不见，会落到 LLM provider，那比猜错便宜。
+ * 三条都是实测踩出来的：
+ * 1. **只信自带关键词，不扫描述。** 描述是写给人看的散文，拿它做子串匹配会捞出泛词——
+ *    `jc-daxi` 的描述里有「剧情、人物、场景」，于是「生成一张人物照片」就把打戏挂上来了。
+ *    代价是没写关键词的 Skill 规则层看不见，会落到 LLM provider，那比猜错便宜。
  * 2. **按词的具体程度排序，不是按命中条数。** 「帮我写一个短剧剧本」时 jc-duanju 命中
  *    「短剧剧本」、jc-daoyan-fenjing 命中「剧本」，都是 1 条；只比条数就按目录顺序定胜负，
  *    结果选了导演分镜。长词优先才对。
- *
- * 只取一个 Skill 也是故意的：多挂一个就多注入一份 SKILL.md 全文，而省 token 正是 @Jev
- * 存在的理由；真要组合两个，用户看到 chip 行自己再点一个就行。
+ * 3. **Skill 只取 1 个**（多挂一个就多注入一份 SKILL.md 全文，而省 token 正是 @Jev 存在的
+ *    理由）；MCP 服务取 2 个，因为它只多几份工具 schema，而漏掉用户要的那一个代价更大。
  */
-function rankSkillCandidates(userRequest: string, candidates: DecisionCandidate[]): string[] {
+function rankByOwnKeywords(
+  userRequest: string,
+  candidates: DecisionCandidate[],
+  kind: DecisionCandidate['kind'],
+): string[] {
   return candidates
-    .filter(candidate => candidate.kind === 'skill')
-    .map(candidate => ({
-      id: candidate.id,
-      terms: resolveSkillApplicability({
-        userInput: userRequest,
-        // 故意不给 description 与 skillContent：让词表只剩 triggers（和名字）。
-        selectedSkill: { id: candidate.id, name: candidate.label, triggers: candidate.triggers },
-      })
-        .matchedTerms
-        // 合成信号不是真实词命中，会让所有写作类 Skill 一起中招。
-        .filter(term => term !== 'writing-intent')
-        .filter(term => isMeaningfulMatch(term, userRequest)),
-    }))
+    .filter(candidate => candidate.kind === kind && (candidate.triggers || []).length)
+    .map(candidate => ({ id: candidate.id, terms: matchedKeywordTerms(userRequest, candidate) }))
     .filter(item => item.terms.length > 0)
     .sort((left, right) => specificity(right.terms) - specificity(left.terms))
-    .slice(0, 1)
+    .slice(0, kind === 'skill' ? 1 : 2)
     .map(item => item.id)
+}
+
+function matchedKeywordTerms(userRequest: string, candidate: DecisionCandidate): string[] {
+  return (
+    resolveSkillApplicability({
+      userInput: userRequest,
+      // 故意不给 description 与 skillContent：让词表只剩 triggers（和名字）。
+      selectedSkill: { id: candidate.id, name: candidate.label, triggers: candidate.triggers },
+    })
+      .matchedTerms
+      // 合成信号不是真实词命中，会让所有写作类 Skill 一起中招。
+      .filter(term => term !== 'writing-intent')
+      .filter(term => isMeaningfulMatch(term, userRequest))
+  )
 }
 
 /** 先比命中的最长词（越具体越可信），再比命中条数。 */
@@ -158,12 +165,19 @@ export function createRuleDecisionProvider(): DecisionProvider {
   return {
     id: 'rule',
     async decide(request) {
-      const tools = TOOL_RULES.filter(rule => rule.pattern.test(request.userRequest))
+      const chipIds = TOOL_RULES.filter(rule => rule.pattern.test(request.userRequest))
         .map(rule => rule.id)
         .filter(id =>
           request.candidates.some(candidate => candidate.kind === 'tool' && candidate.id === id),
         )
-      const skills = rankSkillCandidates(request.userRequest, request.candidates)
+      // MCP 服务也按它自己声明的关键词选，和 Skill 走同一套。
+      const tools = [
+        ...new Set([
+          ...chipIds,
+          ...rankByOwnKeywords(request.userRequest, request.candidates, 'tool'),
+        ]),
+      ]
+      const skills = rankByOwnKeywords(request.userRequest, request.candidates, 'skill')
       // 一个都没命中 = 规则没把握，交给下一个 provider，别硬猜。
       if (!skills.length && !tools.length) return null
       return {
@@ -218,7 +232,8 @@ export function buildDecisionPrompt(request: DecisionRequest): string {
     '2. 不需要就留空数组；宁少勿多，多开能力会让本轮更慢更贵。',
     '3. skills 最多 1 个，而且必须真有一款 Skill 是为这件事设计的。必须看限定语（「只做某方向」「仅限X」「不负责Y」）：用户请求落在它的排除范围里就不算合适。只是「沾边」、只是话题相同（如提到剧本），都不算——选错会强制挂上一整份不相干的 SKILL.md。',
     '4. 没有任何一款合适就留空，直接回答反而更好，这是允许的答案。',
-    '5. modelTier 只能取 keep / light / medium / strong；拿不准就 keep。',
+    '5. id 以 mcp__ 开头的是已连接的外部 MCP 服务。用户要联网搜索、抓网页、查仓库这类本机没有的能力时，从工具清单里挑提供该能力的服务。',
+    '6. modelTier 只能取 keep / light / medium / strong；拿不准就 keep。',
     '只输出一行 JSON，不要解释、不要 Markdown、不要代码围栏：',
     '{"skills":[],"tools":[],"modelTier":"keep","reason":"一句话"}',
     '',

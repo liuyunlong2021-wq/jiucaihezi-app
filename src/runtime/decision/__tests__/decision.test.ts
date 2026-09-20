@@ -6,6 +6,7 @@ import { decide } from '@/runtime/decision'
 import {
   buildDecisionPrompt,
   createRuleDecisionProvider,
+  isToolGrantedByUser,
   parseDecisionOutput,
 } from '@/runtime/decision/providers'
 import type { DecisionCandidate, DecisionProvider } from '@/runtime/decision/types'
@@ -358,6 +359,59 @@ test('短描述原样进提示词，限定条件不许被切掉', () => {
   assert.doesNotMatch(prompt, /…/)
 })
 
+test('「放入Wiki里」算文件写入意图，@文件 该开', async () => {
+  // 用户实测报的错：「放入Wiki里」没被认出来，于是 @文件 没开、模型只能把结果留在聊天里，
+  // 没真正落盘。原词表只有「保存/写入/文件/目录」这类写法，漏了「放入/放迲/wiki」。
+  const candidates: DecisionCandidate[] = [
+    {
+      id: 'file',
+      kind: 'tool',
+      label: '文件',
+      description: '读取、创建、修改和保存当前项目中的文件',
+    },
+  ]
+  const message = '把上面的提示词翻译成中文，放入Wiki里'
+  assert.equal(isToolGrantedByUser('file', message), true)
+  assert.deepEqual(
+    (await createRuleDecisionProvider().decide({ userRequest: message, candidates }))?.tools,
+    ['file'],
+  )
+  // 只有要联网搜索就没道理送本机全权（@文件 含终端、零弹窗）。
+  assert.equal(isToolGrantedByUser('file', '打开网络搜索，搜索一下今天有哪些直播的新闻'), false)
+})
+
+test('MCP 服务按自己声明的工具关键词被选中，无关服务不被误选', async () => {
+  // McpServerConfig 没有 description 字段，工具名与工具说明是唯一可信的信号。
+  const searchServer: DecisionCandidate = {
+    id: 'mcp__search',
+    kind: 'tool',
+    label: '搜索',
+    description: '已连接的外部 MCP 服务「搜索」，可提供：search（搜索网页并返回结果）',
+    triggers: ['搜索', 'search（搜索网页并返回结果）'],
+  }
+  const unrelated: DecisionCandidate = {
+    id: 'mcp__github',
+    kind: 'tool',
+    label: 'GitHub',
+    description: '已连接的外部 MCP 服务「GitHub」，可提供：create_pr（创建拉取请求）',
+    triggers: ['GitHub', 'create_pr（创建拉取请求）'],
+  }
+  const message = '打开网络搜索，搜索一下今天有哪些直播的新闻'
+  assert.deepEqual(
+    (
+      await createRuleDecisionProvider().decide({
+        userRequest: message,
+        candidates: [searchServer, unrelated],
+      })
+    )?.tools,
+    ['mcp__search'],
+  )
+  assert.equal(
+    await createRuleDecisionProvider().decide({ userRequest: message, candidates: [unrelated] }),
+    null,
+  )
+})
+
 test('@Jev 接在输入框的提及列表里，且在发送链路的最前面回填芯片', () => {
   const workbench = readFileSync(
     join(process.cwd(), 'src/components/memory/MemoryWorkbench.vue'),
@@ -372,6 +426,11 @@ test('@Jev 接在输入框的提及列表里，且在发送链路的最前面回
   )
   // 决策结果只能落成芯片与模型选择；执行仍然交给 runMemoryChat。
   assert.match(workbench, /for \(const id of result\.tools\) enableTool\(id\)/)
+  // 选中的 Skill 与芯片已经在 chip 行里看得见，说明行不得再复述一遍（用户实测报的噪音）。
+  assert.doesNotMatch(workbench, /@Jev 已选：/)
+  // 但 chip 行看不到的两件事要留：模型档位被动过、还有能力需要用户自己开。
+  assert.match(workbench, /notes\.push\(`模型切到 \$\{result\.modelTier\} 档`\)/)
+  assert.match(workbench, /需要你自己开/)
   // 决策没选到 Skill 时不得清空用户自己点的 Skill。
   assert.match(
     workbench,
