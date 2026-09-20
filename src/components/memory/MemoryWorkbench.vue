@@ -339,7 +339,9 @@ let projectGeneration = 0
 let backlinkGeneration = 0
 let resourceOpenGeneration = 0
 let conversationSelectionGeneration = 0
-let sendInFlight = false
+// 发送锁必须是响应式的：它在 @Jev 决策期间为真（决策最长可等 DECISION_BUDGET_MS），
+// 非响应式的话按钮看着是亮的、点了却被静默吐掉，用户只会以为「点不动了」。
+const sendInFlight = ref(false)
 let offOpenResource: (() => void) | null = null
 let offFocusMedia: (() => void) | null = null
 let offToggleTree: (() => void) | null = null
@@ -1337,13 +1339,22 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
  * 决策层只有选择权：它填不了芯片以外的任何东西，也不会自己执行任何操作。
  */
 async function applyJevDecision(message: string) {
+  // 决策最长可等 DECISION_BUDGET_MS，这段等待必须看得见：之前是零反馈，
+  // 用户以为发送键坏了（点击被 sendInFlight 静默吞掉）。
+  contextNotice.value = '@Jev 正在判断这一轮该用哪个 Skill、开哪些能力…'
+  const startedAt = Date.now()
   try {
     const candidates = await decisionCandidates()
     const result = await decide({
       userRequest: message || '请查看以下附件。',
       candidates,
     })
-    if (!result) return
+    if (!result) {
+      // 没把握和超时都不改芯片（等于手动模式），但等过的人要知道刚才那几秒在干什么。
+      contextNotice.value =
+        Date.now() - startedAt > 3000 ? '@Jev 判断没回来，本轮按手动模式发出' : ''
+      return
+    }
     // Skill 换成决策结果；一个都没选到时保留用户自己点的，不静默清空。
     // 同时挂两个 Skill 会白烧正文 token，所以选到时就只留决策那一个。
     if (result.skills.length) {
@@ -1626,8 +1637,8 @@ async function send() {
   const pendingAttachments = attachments.value.slice()
   const memorySnapshot = memoryEnabled.value
   const memoryQuerySnapshot = memoryQueryEnabled.value
-  if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
-  sendInFlight = true
+  if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value) return
+  sendInFlight.value = true
   // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
   if (jevSelected.value) await applyJevDecision(message)
   const skillSnapshot = selectedSkillNames.value.slice()
@@ -1635,7 +1646,7 @@ async function send() {
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
   if (editTargetId && editIndex < 0) {
     editingTurnId.value = ''
-    sendInFlight = false
+    sendInFlight.value = false
     return
   }
   const baseTurns = editIndex >= 0 ? active.transcript.turns.slice(0, editIndex) : active.transcript.turns
@@ -1834,7 +1845,7 @@ async function send() {
     run.userTurn = null
     settleApproval(run, 'reject')
     stopRunTimer(run)
-    sendInFlight = false
+    sendInFlight.value = false
   }
 }
 
@@ -3236,7 +3247,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else class="send-button" :title="editingTurnId ? '重新发送' : '发送'" :disabled="!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length" @click="send"><JcIcon name="arrow-upward" /></button>
+            <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
         <div

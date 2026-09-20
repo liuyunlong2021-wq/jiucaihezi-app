@@ -1,5 +1,4 @@
 import { resolveSkillApplicability } from '@/runtime/connection/skillApplicability'
-import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import {
   buildChatCompletionExtras,
@@ -373,19 +372,19 @@ async function callDecisionModel(
     modelProviderId: target.providerId,
   })
   const isOllama = config.providerId === 'local-ollama'
-  const response = await sendDirectRequestWithRetry(() =>
-    sendNewApiRequest(
-      {
-        ...buildDecisionRequestBody(config.model, request, config.providerId),
-        ...buildChatCompletionExtras(config),
-      },
-      payload =>
-        safeFetch(`${config.apiBase}${isOllama ? '/api/chat' : '/v1/chat/completions'}`, {
-          method: 'POST',
-          headers: buildHeaders(config),
-          body: payload,
-        }),
-    ),
+  // 决策是可选增强，**不走重试路径**：3 次重试把一次 30s 的上限放大成 96s，
+  // 而这段时间里发送一直被阻塞，用户看到的就是「发送键点不动了」。
+  const response = await sendNewApiRequest(
+    {
+      ...buildDecisionRequestBody(config.model, request, config.providerId),
+      ...buildChatCompletionExtras(config),
+    },
+    payload =>
+      safeFetch(`${config.apiBase}${isOllama ? '/api/chat' : '/v1/chat/completions'}`, {
+        method: 'POST',
+        headers: buildHeaders(config),
+        body: payload,
+      }),
   )
   if (!response.ok)
     throw new ChatHttpError(

@@ -64,6 +64,28 @@ export const DECISION_PROVIDER_CHAIN: DecisionProvider[] = [
   createLlmDecisionProvider(resolveDecisionModelRefs),
 ]
 
+const BUDGET_EXCEEDED = Symbol('budget-exceeded')
+
+/**
+ * 到点就把这次决策当作「没把握」。底层请求不会因此中止（HTTP 层有它自己的 30s 上限），
+ * 但发送不再等它——决策迟到比决策缺席更贵。
+ */
+function withBudget<T>(promise: Promise<T>, ms: number): Promise<T | typeof BUDGET_EXCEEDED> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const expiry = new Promise<typeof BUDGET_EXCEEDED>(resolve => {
+    timer = setTimeout(() => resolve(BUDGET_EXCEEDED), ms)
+  })
+  return Promise.race([promise, expiry]).finally(() => clearTimeout(timer))
+}
+
+/**
+ * 一次决策的时间上限。决策是可选增强，不能把发送卡住——最坏路径（本地模型不可用 → 云端
+ * 回落）实测能把发送键按住一分钟以上，用户看到的就是「发送键点不动了」。
+ * 实测本机 qwen3.8:9b 一次判断 4.6s（热）~21s（冷），HTTP 层单次请求上限 30s，
+ * 所以 35s 够一次完整的本地尝试，又切掉了「本地 + 云端」双份等待。
+ */
+export const DECISION_BUDGET_MS = 35_000
+
 /**
  * 一次决策。任一 provider 抛错只当作「没把握」继续往下走；全都没把握返回 null。
  * null 的含义是「什么都不改」，也就是和其它所有轮一样的手动行为——
@@ -75,15 +97,20 @@ export const DECISION_PROVIDER_CHAIN: DecisionProvider[] = [
 export async function decide(
   request: DecisionRequest,
   providers: DecisionProvider[] = DECISION_PROVIDER_CHAIN,
+  budgetMs = DECISION_BUDGET_MS,
 ): Promise<DecisionResult | null> {
   const startedAt = Date.now()
   const suggestions = new Set<string>()
   let lastProvider = ''
   for (const provider of providers) {
     lastProvider = provider.id
+    const remaining = budgetMs - (Date.now() - startedAt)
+    if (remaining <= 0) break
     let result: DecisionResult | null = null
     try {
-      result = await provider.decide(request)
+      const raced = await withBudget(provider.decide(request), remaining)
+      if (raced === BUDGET_EXCEEDED) break
+      result = raced
     } catch {
       continue
     }

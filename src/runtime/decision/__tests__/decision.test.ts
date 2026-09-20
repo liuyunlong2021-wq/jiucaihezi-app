@@ -533,3 +533,31 @@ test('决策层只有选择权：不引入任何执行器、终端或文件写�
   assert.match(providers, /from '@\/runtime\/connection\/skillApplicability'/)
   assert.match(providers, /resolveSkillApplicability/)
 })
+
+// 用户实测：点发送后按钮一直是亮的、点了却没反应，其实是在等决策。
+// 根因是决策用了带重试的请求路径（3 次重试把 30s 上限放大成 96s），而发送被它挡着。
+test('决策有总预算：provider 挂着不返回也要按时退回手动模式', async () => {
+  const hung: DecisionProvider = { id: 'hang', decide: () => new Promise<never>(() => {}) }
+  const startedAt = Date.now()
+  const result = await decide(
+    { userRequest: '我想写一部关于口红的小说', candidates: CANDIDATES },
+    [hung],
+    40,
+  )
+  assert.equal(result, null, '超时等于没把握，不改任何芯片')
+  assert.ok(Date.now() - startedAt < 2000, '必须在预算内返回，不能把发送按住')
+})
+
+test('决策请求不走重试路径，且发送按钮看得见决策中的状态', () => {
+  const providers = readFileSync(join(process.cwd(), 'src/runtime/decision/providers.ts'), 'utf8')
+  assert.doesNotMatch(providers, /sendDirectRequestWithRetry/)
+  const workbench = readFileSync(
+    join(process.cwd(), 'src/components/memory/MemoryWorkbench.vue'),
+    'utf8',
+  )
+  // 发送锁非响应式时，按钮看着是亮的、点了却被静默吐掉——这就是「点不动」的观感。
+  assert.match(workbench, /const sendInFlight = ref\(false\)/)
+  assert.match(workbench, /:disabled="sendInFlight \|\| \(!input\.trim\(\)/)
+  // 决策期间的等待要有提示语，不能什么都不显示。
+  assert.match(workbench, /@Jev 正在判断这一轮该用哪个 Skill/)
+})
