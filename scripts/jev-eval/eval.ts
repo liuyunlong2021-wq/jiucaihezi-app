@@ -81,8 +81,8 @@ const chain = buildChain()
 /**
  * 导出交叉编码器要的 (任务, 候选) 对 —— 每条用例 × 每个候选 Skill，命中标 1，其余标 0。
  * 关键是**负例是白送的**：把「把这部小说翻译成英文」标成 expect [] 之后，jc-novel 这一对
- * 自动成为「话题沾边但没用」的负例，正是最难学的那类。每行：
- *   task \t skill_id \t label \t description
+ * 自动成为「话题沾边但没用」的负例，正是最难学的那类。每行（Python 侧不用再解析 SKILL.md）：
+ *   case_id \t split \t task \t skill_id \t label \t description \t triggers
  */
 const emitPairsPath = argValue('--emit-pairs', '')
 if (emitPairsPath) {
@@ -91,11 +91,19 @@ if (emitPairsPath) {
       .filter(candidate => candidate.kind === 'skill')
       .map(candidate => {
         const label = item.expectSkills.includes(candidate.id) ? '1' : '0'
-        return [item.task, candidate.id, label, item.split, String(candidate.description || '').replace(/\s+/g, ' ')].join('\t')
+        return [
+          item.id,
+          item.split,
+          item.task,
+          candidate.id,
+          label,
+          String(candidate.description || '').replace(/\s+/g, ' '),
+          (candidate.triggers || []).join('、'),
+        ].join('\t')
       }),
   )
   writeFileSync(emitPairsPath, `${lines.join('\n')}\n`)
-  const positives = lines.filter(line => line.split('\t')[2] === '1').length
+  const positives = lines.filter(line => line.split('\t')[4] === '1').length
   console.log(`已导出 ${lines.length} 对到 ${emitPairsPath}（正例 ${positives}）`)
   process.exit(0)
 }
