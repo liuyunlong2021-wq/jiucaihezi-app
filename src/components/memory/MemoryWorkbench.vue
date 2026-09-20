@@ -85,6 +85,7 @@ import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorRe
 import { safeFetch } from '@/utils/httpClient'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
+import { decide, resolveModelForTier, type DecisionCandidate } from '@/runtime/decision'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -148,7 +149,10 @@ const mcpStore = useMcpStore()
 const mediaSelected = ref(false)
 const avSelected = ref(false)
 const scene3dSelected = ref(false)
+// @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
+const jevSelected = ref(false)
 const selectedToolChips = computed(() => [
+  { id: 'jev', label: '@Jev', icon: 'alt-route', selected: jevSelected.value },
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
@@ -168,6 +172,7 @@ const selectedToolChips = computed(() => [
 // 都会让用户以为能力还在，得再点一次才能继续。
 function toolChipIds(): string[] {
   const ids: string[] = []
+  if (jevSelected.value) ids.push('jev')
   if (fileToolsSelected.value) ids.push('file')
   if (mediaSelected.value) ids.push('media')
   if (avSelected.value) ids.push('av')
@@ -178,6 +183,7 @@ function toolChipIds(): string[] {
 
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
+  jevSelected.value = next.has('jev')
   fileToolsSelected.value = next.has('file')
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
   mediaSelected.value = next.has('media')
@@ -509,6 +515,7 @@ type MemoryMentionOption =
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
+    { type: 'tool', id: 'jev', display: 'Jev', description: '自动判断本轮需要的 Skill、能力和模型档位', icon: 'alt-route' },
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
     ...(desktopOnlyRuntime
@@ -1232,14 +1239,17 @@ function insertCommand(command: { id: string; label: string }) {
 }
 
 function enableTool(id: string) {
+  if (id === 'jev') jevSelected.value = true
   if (id === 'file') fileToolsSelected.value = true
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
+  if (id.startsWith('mcp__') && !selectedMcpToolNames.value.includes(id)) selectedMcpToolNames.value.push(id)
   if (id === 'media') mediaSelected.value = true
   if (id === 'av') avSelected.value = true
   if (id === 'scene3d') scene3dSelected.value = true
 }
 
 function disableTool(id: string) {
+  if (id === 'jev') jevSelected.value = false
   if (id === 'file') fileToolsSelected.value = false
   if (id.startsWith('mcp__')) {
     selectedMcpToolNames.value = selectedMcpToolNames.value.filter(item => item !== id)
@@ -1248,6 +1258,90 @@ function disableTool(id: string) {
   if (id === 'media') mediaSelected.value = false
   if (id === 'av') avSelected.value = false
   if (id === 'scene3d') scene3dSelected.value = false
+}
+
+/** 能力芯片的中文标签，用于 @Jev 的说明文案。 */
+const TOOL_CHIP_LABELS: Record<string, string> = { file: '@文件', media: '@图文', av: '@影音', scene3d: '@3D' }
+
+/**
+ * @Jev 的候选 = 输入框里能手动选的同一批能力，因此天然只含「当前已启用 + 用户已授权」的项。
+ * ponytail: 描述截到 80 字。凭这 80 字足够判断「要不要用这个 Skill」，而 50+ 个 Skill 的
+ * 全文描述会让每次决策的 prefill 涨到几千 token，正好反过来违背它省 token 的目的。
+ */
+async function decisionCandidates(): Promise<DecisionCandidate[]> {
+  const candidates: DecisionCandidate[] = []
+  const push = (candidate: DecisionCandidate) => {
+    if (!candidates.some(item => item.kind === candidate.kind && item.id === candidate.id))
+      candidates.push(candidate)
+  }
+  const describe = (description: unknown, fallback: string) =>
+    (String(description || '').replace(/\s+/g, ' ').trim() || fallback).slice(0, 80)
+
+  push({ id: 'file', kind: 'tool', label: '文件', description: '读取、创建、修改和保存当前项目中的文件' })
+  push({ id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' })
+  push({ id: 'av', kind: 'tool', label: '影音', description: '生成图片、视频和音频' })
+  if (desktopOnlyRuntime) push({ id: 'scene3d', kind: 'tool', label: '3D', description: '创建或编辑 3D 场景' })
+  for (const tool of mcpStore.allMcpTools || []) {
+    const label = mcpStore.servers.find(server => server.id === tool.serverId)?.name || tool.serverId
+    push({ id: `mcp__${tool.serverId}`, kind: 'tool', label, description: `调用 MCP 服务 ${label} 的工具` })
+  }
+  for (const skill of await loadWebSkillCatalog().catch(() => []))
+    push({
+      id: skill.name,
+      kind: 'skill',
+      label: skill.displayName,
+      description: describe(skill.description, '韭菜盒子内置 Skill'),
+      triggers: skill.triggers,
+    })
+  for (const skill of agentStore.getCustomSkills()) {
+    if (skill.enabled === false) continue
+    push({
+      id: skill.name,
+      kind: 'skill',
+      label: skill.name,
+      description: describe(skill.description, '本地 Skill'),
+      triggers: skill.triggers,
+    })
+  }
+  return candidates
+}
+
+/**
+ * @Jev：把「选哪个 Skill、开哪些能力、用哪档模型」交给一次决策，结果回填成普通芯片，
+ * 之后走的是和手动模式一模一样的一条链路——同样的权限检查、同样的 executor。
+ * 决策层只有选择权：它填不了芯片以外的任何东西，也不会自己执行任何操作。
+ */
+async function applyJevDecision(message: string) {
+  try {
+    const result = await decide({
+      userRequest: message || '请查看以下附件。',
+      candidates: await decisionCandidates(),
+    })
+    if (!result) return
+    // Skill 换成决策结果；一个都没选到时保留用户自己点的，不静默清空。
+    // 同时挂两个 Skill 会白烧正文 token，所以选到时就只留决策那一个。
+    if (result.skills.length) {
+      selectedSkillNames.value = result.skills
+      for (const name of result.skills) recordSkillUse(name)
+    }
+    // 能力芯片只加不减：会话级授权是用户给的，静默收权比多开一点更危险。
+    for (const id of result.tools) enableTool(id)
+    if (result.modelTier) {
+      const target = resolveModelForTier(result.modelTier)
+      if (target) agentStore.setModel(target.modelId, target.providerId)
+    }
+    const picked = [...result.skills, ...result.tools]
+    const tier = result.modelTier ? ` · 模型 ${result.modelTier}` : ''
+    const suggestion = result.suggestions.length
+      ? `；这个需要你自己开：${result.suggestions.map(id => TOOL_CHIP_LABELS[id] || id).join('、')}`
+      : ''
+    contextNotice.value = picked.length
+      ? `@Jev 已选：${picked.join('、')}${tier}${suggestion}`
+      : `@Jev 没看出要另开能力，沿用你已选的${suggestion}`
+  } catch (cause) {
+    // 决策层是增强，不是单点故障：它挂掉只留一条说明，本轮照常按手动模式发出去。
+    contextNotice.value = `@Jev 决策不可用，已按手动模式继续：${cause instanceof Error ? cause.message : String(cause)}`
+  }
 }
 
 function fileWriteTargetName(resource: ProjectResource): string {
@@ -1503,9 +1597,11 @@ async function send() {
   const pendingAttachments = attachments.value.slice()
   const memorySnapshot = memoryEnabled.value
   const memoryQuerySnapshot = memoryQueryEnabled.value
-  const skillSnapshot = selectedSkillNames.value.slice()
   if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight) return
   sendInFlight = true
+  // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
+  if (jevSelected.value) await applyJevDecision(message)
+  const skillSnapshot = selectedSkillNames.value.slice()
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
   if (editTargetId && editIndex < 0) {
