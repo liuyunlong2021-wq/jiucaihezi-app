@@ -122,6 +122,61 @@ test('@文件 的授权边界：模型想要、用户没说，就只建议不代
   assert.deepEqual(granted?.suggestions, [])
 })
 
+test('模型挑的 Skill 必须被它自己声明的 triggers 佐证，否则退回不挂', async () => {
+  // 真实场景：jc-juben-yingyi 只做中译英，模型却把它挂到「翻译成中文」上，理由是「反向操作」。
+  const candidates: DecisionCandidate[] = [
+    {
+      id: 'jc-juben-yingyi',
+      kind: 'skill',
+      label: 'jc-juben-yingyi',
+      description: '把中文剧本翻译成英文剧本。只做中译英，不改剧情。',
+      triggers: ['剧本翻译', '中译英'],
+    },
+  ]
+  const modelSays = stub('llm', {
+    skills: ['jc-juben-yingyi'],
+    tools: [],
+    modelTier: null,
+    suggestions: [],
+    reason: '反向操作',
+    provider: 'llm',
+    latencyMs: 0,
+  })
+  assert.equal(
+    await decide({ userRequest: '把上面的提示词翻译成中文，放入Wiki里', candidates }, [modelSays]),
+    null,
+  )
+  // 真命中作者写的关键词时才放行。
+  assert.deepEqual(
+    (await decide({ userRequest: '把这个剧本翻译成英文剧本', candidates }, [modelSays]))?.skills,
+    ['jc-juben-yingyi'],
+  )
+})
+
+test('没写 triggers 的 Skill 无从复核，尊重模型的判断', async () => {
+  const candidates: DecisionCandidate[] = [
+    {
+      id: 'no-triggers',
+      kind: 'skill',
+      label: 'no-triggers',
+      description: '什么都干',
+      triggers: [],
+    },
+  ]
+  const result = await decide({ userRequest: '帮我处理一下这个', candidates }, [
+    stub('llm', {
+      skills: ['no-triggers'],
+      tools: [],
+      modelTier: null,
+      suggestions: [],
+      reason: '',
+      provider: 'llm',
+      latencyMs: 0,
+    }),
+  ])
+  assert.deepEqual(result?.skills, ['no-triggers'])
+})
+
 test('决策层是增强不是单点：provider 抛错返回 null，发送照旧', async () => {
   const failing: DecisionProvider = {
     id: 'boom',

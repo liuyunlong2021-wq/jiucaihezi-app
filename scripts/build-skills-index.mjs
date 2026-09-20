@@ -28,7 +28,7 @@ function parseFrontmatter(content) {
     if (!trimmed || trimmed.startsWith('#')) continue
     if (trimmed.startsWith('- ') && currentKey) {
       if (!Array.isArray(result[currentKey])) result[currentKey] = []
-      result[currentKey].push(trimmed.slice(2).replace(/^"|"$/g, ''))
+      result[currentKey].push(trimmed.slice(2).replace(/^['"]|['"]$/g, ''))
       continue
     }
     const colonIdx = trimmed.indexOf(':')

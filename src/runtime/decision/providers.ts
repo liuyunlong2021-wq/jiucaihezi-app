@@ -41,6 +41,31 @@ export function isToolGrantedByUser(toolId: string, userRequest: string): boolea
 }
 
 /**
+ * 用户这句话有没有命中这个 Skill 自己声明的 triggers。
+ *
+ * triggers 是作者手写的「什么时候该用我」（types/skill.ts），所以它同时是**复核模型判断的依据**：
+ * 一个都没命中，说明模型在硬凑而不是真匹配。实测它会把「只做中译英、不改剧情」的
+ * `jc-juben-yingyi` 挂到「翻译成中文」上，理由是「反向操作」。
+ *
+ * 没写 triggers 的 Skill 返回 true——无从复核就尊重模型的判断（47 个里只有 17 个写了）。
+ */
+export function matchesOwnTriggers(
+  candidate: Pick<DecisionCandidate, 'triggers'> | undefined,
+  userRequest: string,
+): boolean {
+  const triggers = (candidate?.triggers || [])
+    .map(term =>
+      String(term || '')
+        .trim()
+        .toLowerCase(),
+    )
+    .filter(term => term.length >= 2)
+  if (!triggers.length) return true
+  const lower = String(userRequest || '').toLowerCase()
+  return triggers.some(term => lower.includes(term) && isMeaningfulMatch(term, userRequest))
+}
+
+/**
  * 用户这句话直接点名的能力芯片。只收明确信号；模糊说法留给 LLM provider，避免误开能力反而更费 token。
  */
 const TOOL_RULES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
@@ -191,7 +216,7 @@ export function buildDecisionPrompt(request: DecisionRequest): string {
     '要求：',
     '1. 只能选候选清单里出现过的 id，一个都不能编。',
     '2. 不需要就留空数组；宁少勿多，多开能力会让本轮更慢更贵。',
-    '3. skills 最多 1 个，而且必须真有一款 Skill 是为这件事设计的。只是「沾边」、只是话题相同（如提到剧本），都不算——选错会强制挂上一整份不相干的 SKILL.md。',
+    '3. skills 最多 1 个，而且必须真有一款 Skill 是为这件事设计的。必须看限定语（「只做某方向」「仅限X」「不负责Y」）：用户请求落在它的排除范围里就不算合适。只是「沾边」、只是话题相同（如提到剧本），都不算——选错会强制挂上一整份不相干的 SKILL.md。',
     '4. 没有任何一款合适就留空，直接回答反而更好，这是允许的答案。',
     '5. modelTier 只能取 keep / light / medium / strong；拿不准就 keep。',
     '只输出一行 JSON，不要解释、不要 Markdown、不要代码围栏：',

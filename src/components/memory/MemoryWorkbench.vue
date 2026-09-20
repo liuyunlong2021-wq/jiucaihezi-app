@@ -63,7 +63,7 @@ import { getCursorPosition, getPlainText, setEditorText } from '@/composables/us
 import { detectFileType, processFile } from '@/composables/useFileUpload'
 import { useFilteredList } from '@/composables/useFilteredList'
 import { MAX_INLINE_ATTACHMENT_CHARS, type DirectMessageFile, type ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
-import type { SkillConfig } from '@/types/skill'
+import { stripYamlQuotes, type SkillConfig } from '@/types/skill'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import { confirmAction } from '@/utils/confirmAction'
@@ -1276,6 +1276,13 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
   }
   const describe = (description: unknown, fallback: string) =>
     String(description || '').replace(/\s+/g, ' ').trim() || fallback
+  // triggers 来自两个解析器（本地 Skill 走 parseSkillMd，内置包走打包脚本产出的 index.json），
+  // 都可能带着 YAML 包裹引号（'看视频' / "写短剧"）。带引号的关键词一条也匹配不上，
+  // 而路由判定全靠它，所以在这个边界统一剥掉。
+  const triggers = (values: unknown) =>
+    (Array.isArray(values) ? values : [])
+      .map(value => stripYamlQuotes(String(value || '').trim()))
+      .filter(Boolean)
 
   push({ id: 'file', kind: 'tool', label: '文件', description: '读取、创建、修改和保存当前项目中的文件' })
   push({ id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' })
@@ -1291,7 +1298,7 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
       kind: 'skill',
       label: skill.displayName,
       description: describe(skill.description, '韭菜盒子内置 Skill'),
-      triggers: skill.triggers,
+      triggers: triggers(skill.triggers),
     })
   for (const skill of agentStore.getCustomSkills()) {
     if (skill.enabled === false) continue
@@ -1300,7 +1307,7 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
       kind: 'skill',
       label: skill.name,
       description: describe(skill.description, '本地 Skill'),
-      triggers: skill.triggers,
+      triggers: triggers(skill.triggers),
     })
   }
   return candidates

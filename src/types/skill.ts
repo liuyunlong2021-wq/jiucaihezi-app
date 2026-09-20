@@ -142,6 +142,17 @@ export function serializeToSkillMd(skill: SkillConfig): string {
 }
 
 /**
+ * 剥掉 YAML 序列项或标量外面的包裹引号：`- '看视频'`、`- "写短剧"`、`"terminal"`。
+ * 不剥的话关键词会带着引号，一条都匹配不上——triggers 曾因此全线失效（allowed-tools
+ * 早就剥了，triggers 漏了）。消费方只有一处需要它：把 Skill 元数据交给路由时。
+ */
+export function stripYamlQuotes(value: string): string {
+  return String(value || '')
+    .replace(/^['"]|['"]$/g, '')
+    .trim()
+}
+
+/**
  * 从 SKILL.md 文本解析为 SkillConfig（GitHub 导入用）
  */
 export function parseSkillMd(text: string, id?: string): Partial<SkillConfig> {
@@ -164,7 +175,7 @@ export function parseSkillMd(text: string, id?: string): Partial<SkillConfig> {
     if (triggerLines) {
       triggers = triggerLines[1]
         .split('\n')
-        .map(l => l.replace(/^\s*-\s*/, '').trim())
+        .map(l => stripYamlQuotes(l.replace(/^\s*-\s*/, '').trim()))
         .filter(Boolean)
     }
     const allowedToolsScalar = fm.match(/^allowed-tools:[ \t]+(.+)$/m)
@@ -179,7 +190,7 @@ export function parseSkillMd(text: string, id?: string): Partial<SkillConfig> {
     } else if (allowedToolsList) {
       allowedTools = allowedToolsList[1]
         .split(/\r?\n/)
-        .map(line => line.replace(/^[ \t]*-[ \t]*/, '').trim())
+        .map(line => stripYamlQuotes(line.replace(/^[ \t]*-[ \t]*/, '').trim()))
         .filter(Boolean)
     }
   }

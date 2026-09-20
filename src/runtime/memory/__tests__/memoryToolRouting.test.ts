@@ -149,6 +149,16 @@ test('Skill frontmatter accepts scalar and list tool declarations', () => {
   ])
 })
 
+test('Skill frontmatter 剥掉 triggers 与 allowed-tools 的 YAML 包裹引号', () => {
+  // 源文件常写成 - '看视频'（单引号）或 - "写短剧"（双引号）。不剥引号的话关键词带着引号，
+  // 一条都匹配不上——@Jev 的路由判定全靠 triggers，曾因此全线失效。
+  const parsed = parseSkillMd(
+    '---\nname: s\ntriggers:\n  - \'看视频\'\n  - "写短剧"\nallowed-tools:\n  - \'read\'\n  - "edit"\n---\nbody',
+  )
+  assert.deepEqual(parsed.triggers, ['看视频', '写短剧'])
+  assert.deepEqual(parsed.allowedTools, ['read', 'edit'])
+})
+
 test('Skill tool declarations expand to the real current tool names', () => {
   assert.deepEqual(
     normalizeSkillAllowedToolNames(['file', 'media', '3d', 'mcp__demo__run', 'terminal']),

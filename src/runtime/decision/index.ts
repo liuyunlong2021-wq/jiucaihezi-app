@@ -4,6 +4,7 @@ import {
   createLlmDecisionProvider,
   createRuleDecisionProvider,
   isToolGrantedByUser,
+  matchesOwnTriggers,
   type DecisionModelRef,
 } from './providers'
 import type { DecisionModelTier, DecisionProvider, DecisionRequest, DecisionResult } from './types'
@@ -17,6 +18,7 @@ export {
   isToolGrantedByUser,
   LOCAL_GRANT_INTENT,
   LOCAL_GRANT_TOOL_IDS,
+  matchesOwnTriggers,
   parseDecisionOutput,
 } from './providers'
 
@@ -72,9 +74,18 @@ export async function decide(
       if (isToolGrantedByUser(id, request.userRequest)) granted.push(id)
       else suggestions.add(id)
     }
-    if (granted.length || result.skills.length || result.modelTier)
+    // 复核模型挑的 Skill：它自己声明的 triggers 一个都没命中就退回不挂 Skill。
+    // 「这一轮不挂 Skill」等于今天的手动模式，比强制注入一份方向相反的 SKILL.md 便宜。
+    const skills = result.skills.filter(id =>
+      matchesOwnTriggers(
+        request.candidates.find(candidate => candidate.kind === 'skill' && candidate.id === id),
+        request.userRequest,
+      ),
+    )
+    if (granted.length || skills.length || result.modelTier)
       return {
         ...result,
+        skills,
         tools: granted,
         suggestions: [...suggestions],
         latencyMs: Date.now() - startedAt,
