@@ -739,7 +739,10 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   if (!types) throw new Error(`Unsupported tool: ${call.function.name}`)
   for (const [key, item] of Object.entries(args)) {
     const expected = types[key]
-    if (!expected) throw new Error(`工具参数不支持: ${key}`)
+    // 带上参数白名单：只报「不支持 filename」时，模型会原样重试三次（实测用户跑 PPT 时白烧了 3 轮）；
+    // 告诉它本工具接受什么，它才能一轮改用正确的形状。这句话模型和用户都会看到。
+    if (!expected)
+      throw new Error(`工具参数不支持: ${key}。本工具只接受: ${Object.keys(types).join('、')}`)
     const invalid =
       expected === 'json'
         ? false

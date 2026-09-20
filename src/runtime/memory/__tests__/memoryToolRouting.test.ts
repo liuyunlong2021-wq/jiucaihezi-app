@@ -257,6 +257,20 @@ test('story analysis exposes one read operation and one structured commit operat
   )
 })
 
+test('工具参数报错要列出本工具接受的参数，否则模型会原样重试', () => {
+  // 用户实测报的错：做 PPT 时模型传了 filename，只收到「不支持 filename」于是原样重试，
+  // 白烧 3 轮。报错里带上白名单，它才能一轮改用正确的形状。
+  assert.throws(
+    () =>
+      parseCreativeToolArguments({
+        id: 'slides',
+        type: 'function',
+        function: { name: 'export_markdown_slides', arguments: '{"filename":"a.png"}' },
+      } as any),
+    /工具参数不支持: filename。本工具只接受: title、content、format/,
+  )
+})
+
 test('selected Skill load failures remain visible to the model contract', async () => {
   const prompt = await buildSelectedSkillPrompt(['missing-skill'], new Map(), async () => {
     throw new Error('测试加载失败')
