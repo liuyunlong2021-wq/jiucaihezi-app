@@ -66,31 +66,67 @@ function inferTier(userRequest: string): DecisionModelTier | null {
 }
 
 /**
- * 用 Skill 自己的名称、描述与 triggers 去撞用户这句话，只取命中词最多的那一个。
- * 只取一个是故意的：多挂一个 Skill 就多注入一份 SKILL.md 全文，而省 token 正是
- * @Jev 存在的理由；真要组合两个 Skill，用户看到 chip 行自己再点一个就行。
- * `resolveSkillApplicability` 会补一个合成的 writing-intent 信号，它不是真实词命中，
- * 会让所有写作类 Skill 一起中招，这里剔除。
+ * 取第一个词。命中判定用的就是这批词，所以这里只做空白归一化，**不截断**：
+ * 描述曾经在候选阶段被按 80 字硬切，切出过尾巴上的半个 ASCII 词（`…产出并维护 wi`），
+ * 那个 `wi` 会命中任何带「Wiki」的消息，把一个错的 Skill 强制挂上来。
+ * 截断是提示词排版的事，放在 buildDecisionPrompt 里按分隔符切。
+ */
+function normalizeTermSource(value: unknown): string {
+  return String(value || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+/**
+ * 弱命中剔除。
+ * - ASCII 词必须整词命中：`wi` 不能命中 `Wiki`，`use` 不能命中 `useful`。
+ * - CJK 没有词边界，保持子串判断（「剧本」就该命中「短剧剧本」）。
+ */
+function isMeaningfulMatch(term: string, userRequest: string): boolean {
+  if (!/^[\x20-\x7e]+$/.test(term)) return true
+  const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return new RegExp(`(^|[^A-Za-z0-9_])${escaped}($|[^A-Za-z0-9_])`).test(userRequest)
+}
+
+/**
+ * 用 Skill 的 triggers 去撞用户这句话，取最具体的那一个。
+ *
+ * 两条都是实测踩出来的：
+ * 1. **只信 triggers，不扫描述。** triggers 是作者手写的搜索关键词（见 types/skill.ts）；
+ *    描述是写给人看的散文，拿它做子串匹配会捞出泛词——`jc-daxi` 的描述里有
+ *    「剧情、人物、场景」，于是「生成一张人物照片」就把打戏 Skill 挂上来了。
+ *    代价是没写 triggers 的 Skill 规则层看不见，会落到 LLM provider，那比猜错便宜。
+ * 2. **按词的具体程度排序，不是按命中条数。** 「帮我写一个短剧剧本」时 jc-duanju 命中
+ *    「短剧剧本」、jc-daoyan-fenjing 命中「剧本」，都是 1 条；只比条数就按目录顺序定胜负，
+ *    结果选了导演分镜。长词优先才对。
+ *
+ * 只取一个 Skill 也是故意的：多挂一个就多注入一份 SKILL.md 全文，而省 token 正是 @Jev
+ * 存在的理由；真要组合两个，用户看到 chip 行自己再点一个就行。
  */
 function rankSkillCandidates(userRequest: string, candidates: DecisionCandidate[]): string[] {
   return candidates
     .filter(candidate => candidate.kind === 'skill')
     .map(candidate => ({
       id: candidate.id,
-      hits: resolveSkillApplicability({
+      terms: resolveSkillApplicability({
         userInput: userRequest,
-        selectedSkill: {
-          id: candidate.id,
-          name: candidate.label,
-          description: candidate.description,
-          triggers: candidate.triggers,
-        },
-      }).matchedTerms.filter(term => term !== 'writing-intent').length,
+        // 故意不给 description 与 skillContent：让词表只剩 triggers（和名字）。
+        selectedSkill: { id: candidate.id, name: candidate.label, triggers: candidate.triggers },
+      })
+        .matchedTerms
+        // 合成信号不是真实词命中，会让所有写作类 Skill 一起中招。
+        .filter(term => term !== 'writing-intent')
+        .filter(term => isMeaningfulMatch(term, userRequest)),
     }))
-    .filter(item => item.hits > 0)
-    .sort((left, right) => right.hits - left.hits)
+    .filter(item => item.terms.length > 0)
+    .sort((left, right) => specificity(right.terms) - specificity(left.terms))
     .slice(0, 1)
     .map(item => item.id)
+}
+
+/** 先比命中的最长词（越具体越可信），再比命中条数。 */
+function specificity(terms: string[]): number {
+  return Math.max(...terms.map(term => term.length)) * 10 + terms.length
 }
 
 export function createRuleDecisionProvider(): DecisionProvider {
@@ -122,11 +158,32 @@ export function createRuleDecisionProvider(): DecisionProvider {
 
 export const DECISION_MAX_TOKENS = 500
 
+/**
+ * 提示词里每条描述最多留多少字。
+ * 实测 ~/.agents/skills 的 47 条描述最长 317 字、全量合计才 5,586 字，所以 400 字等于
+ * 「不截断」，同时挡掉异常超长描述把 prompt 撑爆。
+ * 曾经设 80 字：只有 8/47 条能完整保留，`jc-juben-yingyi` 结尾的「只做中译英，不改剧情」
+ * 被切掉，模型据此以为它「也支持反向」——路由恰恰需要这类限定条件。
+ * 仍按分隔符切，不要切出半个 ASCII 词：半个词在 prompt 里会被当成真关键词。
+ */
+const CLIP_LIMIT = 400
+
+const CLIP_SEPARATORS = ['、', '，', '；', '。', ' ', '：', ':', '\n']
+
+function clipForPrompt(value: string, limit = CLIP_LIMIT): string {
+  const text = normalizeTermSource(value)
+  if (text.length <= limit) return text
+  const head = text.slice(0, limit)
+  const cut = Math.max(...CLIP_SEPARATORS.map(separator => head.lastIndexOf(separator)))
+  // cut 是分隔符自身的位置，+1 才把它留下，否则会切到半个词的尾巴上。
+  return `${cut >= limit / 2 ? head.slice(0, cut + 1) : head}…`
+}
+
 export function buildDecisionPrompt(request: DecisionRequest): string {
   const render = (kind: DecisionCandidate['kind']) => {
     const rows = request.candidates
       .filter(candidate => candidate.kind === kind)
-      .map(candidate => `- ${candidate.id}：${candidate.description}`)
+      .map(candidate => `- ${candidate.id}：${clipForPrompt(candidate.description)}`)
     return rows.length ? rows : ['（无）']
   }
   return [
@@ -134,8 +191,9 @@ export function buildDecisionPrompt(request: DecisionRequest): string {
     '要求：',
     '1. 只能选候选清单里出现过的 id，一个都不能编。',
     '2. 不需要就留空数组；宁少勿多，多开能力会让本轮更慢更贵。',
-    '3. skills 最多 1 个；只有一个 Skill 能真正完成这件事才选它。',
-    '4. modelTier 只能取 keep / light / medium / strong；拿不准就 keep。',
+    '3. skills 最多 1 个，而且必须真有一款 Skill 是为这件事设计的。只是「沾边」、只是话题相同（如提到剧本），都不算——选错会强制挂上一整份不相干的 SKILL.md。',
+    '4. 没有任何一款合适就留空，直接回答反而更好，这是允许的答案。',
+    '5. modelTier 只能取 keep / light / medium / strong；拿不准就 keep。',
     '只输出一行 JSON，不要解释、不要 Markdown、不要代码围栏：',
     '{"skills":[],"tools":[],"modelTier":"keep","reason":"一句话"}',
     '',

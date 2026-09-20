@@ -1265,8 +1265,8 @@ const TOOL_CHIP_LABELS: Record<string, string> = { file: '@文件', media: '@图
 
 /**
  * @Jev 的候选 = 输入框里能手动选的同一批能力，因此天然只含「当前已启用 + 用户已授权」的项。
- * ponytail: 描述截到 80 字。凭这 80 字足够判断「要不要用这个 Skill」，而 50+ 个 Skill 的
- * 全文描述会让每次决策的 prefill 涨到几千 token，正好反过来违背它省 token 的目的。
+ * 描述在这里不做截断——截断是提示词排版的事，放在 buildDecisionPrompt 里按分隔符切；
+ * 在候选阶段按字数硬切会切出半个 ASCII 词，那个碎词会命中任何含它的消息，误挂 Skill。
  */
 async function decisionCandidates(): Promise<DecisionCandidate[]> {
   const candidates: DecisionCandidate[] = []
@@ -1275,7 +1275,7 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
       candidates.push(candidate)
   }
   const describe = (description: unknown, fallback: string) =>
-    (String(description || '').replace(/\s+/g, ' ').trim() || fallback).slice(0, 80)
+    String(description || '').replace(/\s+/g, ' ').trim() || fallback
 
   push({ id: 'file', kind: 'tool', label: '文件', description: '读取、创建、修改和保存当前项目中的文件' })
   push({ id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' })
