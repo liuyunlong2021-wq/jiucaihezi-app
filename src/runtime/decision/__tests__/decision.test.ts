@@ -401,7 +401,7 @@ test('CJK 没有词边界，仍按子串判断', async () => {
       kind: 'skill',
       label: 'jc-duanju',
       description: '创作短剧剧本',
-      triggers: ['剧本'],
+      triggers: ['短剧剧本'],
     },
   ]
   assert.deepEqual(
@@ -412,6 +412,43 @@ test('CJK 没有词边界，仍按子串判断', async () => {
       })
     )?.skills,
     ['jc-duanju'],
+  )
+})
+
+// skillbox 的做法：关键字撞词不算匹配，只有评分层能定。
+// 「小说」在「写一部小说」「把小说翻译成英文」「这部小说帮我总结一下」里是同一个词，
+// 前者该挂写小说的 Skill，后两者不该 —— 规则层分不出来，所以只命中一个短词时不结论。
+test('只命中一个短词时不下结论，交给评分那一层', async () => {
+  const candidates: DecisionCandidate[] = [
+    {
+      id: 'jc-novel',
+      kind: 'skill',
+      label: 'jc-novel',
+      description: '创作长篇网文或连载小说',
+      triggers: ['小说', '写小说'],
+    },
+  ]
+  for (const userRequest of [
+    '帮我把小说翻译成英文',
+    '这部小说太长了帮我总结一下',
+    // 改写说法也只命中「小说」一个词：绕一次评分层，换正确的判断。
+    '帮我写一部关于口红的小说',
+  ]) {
+    assert.equal(
+      await createRuleDecisionProvider().decide({ userRequest, candidates }),
+      null,
+      `${userRequest} 不该由规则层直接定 Skill`,
+    )
+  }
+  // 作者写进 triggers 的那句原话仍然秒回，不用等一次模型往返。
+  assert.deepEqual(
+    (
+      await createRuleDecisionProvider().decide({
+        userRequest: '帮我写小说',
+        candidates,
+      })
+    )?.skills,
+    ['jc-novel'],
   )
 })
 
