@@ -158,7 +158,6 @@ const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
 const selectedToolChips = computed(() => [
-  { id: 'jev', label: '@Jev', icon: 'alt-route', selected: jevSelected.value },
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
@@ -666,8 +665,6 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
   return '程序已返回真实执行回执'
 }
 const toolCommands = [
-  // @Jev 放最左：它是「本轮选什么」的总开关，比逐个点后面的能力芯片先一步。
-  { id: 'jev', label: '@Jev', icon: 'alt-route', description: '自动判断本轮需要的 Skill、能力和模型档位' },
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
   { id: 'file', label: '@文件', icon: 'description', description: '读写权限' },
   { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
@@ -1230,7 +1227,6 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 function insertCommand(command: { id: string; label: string }) {
-  if (command.id === 'jev') jevSelected.value = true
   if (command.id === 'file') fileToolsSelected.value = true
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true

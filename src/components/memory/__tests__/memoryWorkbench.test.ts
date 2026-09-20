@@ -464,6 +464,13 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(workbench, /const toolCommands = \[/)
   for (const label of ['@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
+  // @Jev 只留 @ 提及一个入口：输入框下沿的常驻开关用户实测不想要
+  // （他自己用 @ 的时候才开）。它仍然要能被开启、被持久化、被回填。
+  assert.doesNotMatch(workbench, /label: '@Jev'/)
+  assert.match(workbench, /id: 'jev', display: 'Jev'/)
+  assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = true/)
+  assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = false/)
+  assert.match(workbench, /if \(jevSelected\.value\) ids\.push\('jev'\)/)
   // @Terminal 已并入 @文件：开关一开就是本机全权，不留第二个终端入口。
   assert.doesNotMatch(workbench, /@Terminal/)
   assert.doesNotMatch(workbench, /terminalSelected/)

@@ -644,20 +644,24 @@ test('「以图片的形式发我」算图文排版，要开 @图文', async () 
   )
 })
 
-test('@Jev 接在输入框的提及列表里，且在发送链路的最前面回填芯片', () => {
+test('@Jev 只从 @ 提及进入，且在发送链路的最前面回填芯片', () => {
   const workbench = readFileSync(
     join(process.cwd(), 'src/components/memory/MemoryWorkbench.vue'),
     'utf8',
   )
   assert.match(workbench, /type: 'tool', id: 'jev', display: 'Jev'/)
-  assert.match(workbench, /\{ id: 'jev', label: '@Jev', icon: 'alt-route'/)
-  // 指令条（输入框下面那排）里 @Jev 必须排在 @Skill 左边——用户指定的位置。
-  const strip = workbench.slice(workbench.indexOf('const toolCommands = ['))
-  assert.ok(
-    strip.indexOf("id: 'jev'") >= 0 && strip.indexOf("id: 'jev'") < strip.indexOf("id: 'skill'"),
-    '指令条里 @Jev 要排在 @Skill 左边',
+  // 输入框下沿的常驻开关、以及那个菜单里的同名项都已撤（用户 2026-09-20 要求，
+  // 他自己用 @ 时才开）。范围切片里搜，别全局搜 id: 'jev' —— enableTool /
+  // disableTool 里合法地还有它。
+  assert.doesNotMatch(workbench, /\{ id: 'jev', label: '@Jev'/)
+  const strip = workbench.slice(
+    workbench.indexOf('const toolCommands = ['),
+    workbench.indexOf('const primaryCommands'),
   )
-  assert.match(workbench, /if \(command\.id === 'jev'\) jevSelected\.value = true/)
+  assert.ok(!strip.includes("id: 'jev'"), '输入框下沿的指令条里不该再有 @Jev')
+  // 开它的唯一路径是 @ 提及里选中 / 取消。
+  assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = true/)
+  assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = false/)
   // 决策必须发生在 skillSnapshot 之前，否则本轮发出去的还是决策前的空选择。
   assert.match(
     workbench,
