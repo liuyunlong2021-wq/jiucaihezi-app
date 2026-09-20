@@ -696,6 +696,14 @@ export const useAgentStore = defineStore('agents', () => {
     localStorage.setItem('jc_preset_enabled', presetEnabled.value ? '1' : '0')
   }
 
+  // ─── @Jev 本地打分器：启动时自动拉起（环境不在就静默降级，默认开） ───
+  const jevScorerAutostart = ref(localStorage.getItem('jc_jev_scorer') !== '0')
+
+  function toggleJevScorerAutostart(enabled?: boolean) {
+    jevScorerAutostart.value = enabled !== undefined ? enabled : !jevScorerAutostart.value
+    localStorage.setItem('jc_jev_scorer', jevScorerAutostart.value ? '1' : '0')
+  }
+
   // ─── 我的Skill：用户主动添加的Skill列表 ───
   function getMySkills(): SkillConfig[] {
     return loadSkills()
@@ -847,6 +855,8 @@ export const useAgentStore = defineStore('agents', () => {
     setModelVariant,
     warehouseEnabled,
     presetEnabled,
+    jevScorerAutostart,
+    toggleJevScorerAutostart,
     sortMode,
     agents,
     modelLabel,

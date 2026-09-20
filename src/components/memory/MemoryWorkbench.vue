@@ -83,6 +83,7 @@ import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
+import { ensureJevScorer } from '@/utils/jevScorerRuntime'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import {
@@ -694,6 +695,8 @@ function hideChipTip() {
 
 onMounted(async () => {
   void checkSceneVideoExport()
+  // 打分器是可选增强：装了就在后台拉起来（模型加载要十几秒，不等），没装什么都不做。
+  if (agentStore.jevScorerAutostart) void ensureJevScorer()
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
   offFocusMedia = onEvent('filetree:focus-media', payload => {
     const resource = payload as ProjectResource

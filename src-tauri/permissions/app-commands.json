@@ -39,6 +39,7 @@
           "mcp_kill_stdio",
           "resolve_mcp_node",
           "start_mlx_service",
+          "jev_scorer_ensure",
           "creation_mcp_complete",
           "resolve_creation_mcp",
           "save_generated_file",

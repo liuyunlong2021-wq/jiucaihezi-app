@@ -52,6 +52,7 @@
     "resources": {
       "../public/skills": "skills",
       "../scripts/jiucaihezi-creation-mcp/dist": "creation-mcp",
+      "../scripts/jev-scorer/serve.py": "jev-scorer/serve.py",
       "resources/storyboarder": "storyboarder"
     },
     "icon": [

@@ -1455,6 +1455,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet::greet,
+            commands::jev_scorer::jev_scorer_ensure,
             commands::session::read_session_token,
             commands::session::write_session_token,
             commands::clipboard::write_clipboard_text,
