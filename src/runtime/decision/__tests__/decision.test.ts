@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { decide } from '@/runtime/decision'
+import { orderDecisionModelRefs } from '@/runtime/decision/index'
 import {
   buildDecisionPrompt,
   createRuleDecisionProvider,
@@ -99,6 +100,17 @@ test('规则命中：生成照片开 @影音', async () => {
 
 // 用户实测：@Jev 老是「判断没回来」。根因是决策模型取了模型清单里第一个非 OCR 的——
 // 那是一台 27B（34.9GB），光读完 4k token 的决策提示词就超过 HTTP 层 30s 上限。
+// 决策该用云端还是本地：云端 1~3 秒且判断力更好（代价是一次约 4.5k token 的调用）；
+// 本地零 token，但 9b 级判断力偏弱、冷启动 20 秒。默认云端优先，本地兜底。
+test('决策模型顺序：云端优先，本地兜底，缺一个时另一个顶上', () => {
+  const cloud = { modelId: 'glm-4.6', providerId: 'jiucaihezi' }
+  const local = { modelId: 'qwen3.8:9b-q5', providerId: 'local-ollama' }
+  assert.deepEqual(orderDecisionModelRefs(cloud, local), [cloud, local])
+  assert.deepEqual(orderDecisionModelRefs(cloud, null), [cloud])
+  assert.deepEqual(orderDecisionModelRefs(null, local), [local])
+  assert.deepEqual(orderDecisionModelRefs(null, null), [])
+})
+
 test('决策模型按体积挑最小的，不能盲取第一个', async () => {
   const picked = await pickLocalDecisionModel([
     { name: 'glm-ocr:latest', size: 2_219_299_168 },

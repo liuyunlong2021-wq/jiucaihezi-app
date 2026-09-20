@@ -29,26 +29,47 @@ export {
 } from './providers'
 
 /**
- * 决策调用用的模型，按优先级排：本地 Ollama 优先（零 token、零网络），再回落云端轻量档。
- * 返回多个而不是一个，是因为「本地配了但不可用」也得能落到云端——只判断有没有配
- * 是不够的，实测那正是「@Jev 什么都没开」的原因。
+ * 决策先试云端还是先试本地？
  *
- * 本地那一台由 pickLocalDecisionModel 按体积挑最小的（大模型读 4k token 的决策提示词
- * 会超 HTTP 层 30s 上限，表现成「判断没回来」）；云端那一档在本地不可用时才轮到。
+ * - 云端（你正在用的模型）：1~3 秒，判断力明显更好，代价是每次发送多一次调用
+ *   （决策提示词约 4.5k token，会算进你的额度）。
+ * - 本地（ollama 里最小的对话模型）：零 token 零网络，但 9b 级判断力偏弱
+ *   ——实测「这部小说太长了帮我总结一下」仍会被挂上写小说的 Skill；冷启动还要 20 秒。
+ *
+ * 默认云端优先：@Jev 的价值就是挑对，挑错的代价（挂错一整份 SKILL.md、用户重做一遍）
+ * 比一次调用贵。想回到零 token 就把这里改成 false —— 本地永远是兜底，不会退化成「什么都不做」。
+ */
+const PREFER_CLOUD_DECISION = true
+
+/** 尝试顺序。云端优先时本地只做兜底；反之本地先试、云端接住。null 直接排掉。 */
+export function orderDecisionModelRefs(
+  cloud: DecisionModelRef | null,
+  local: DecisionModelRef | null,
+): DecisionModelRef[] {
+  const ordered = PREFER_CLOUD_DECISION ? [cloud, local] : [local, cloud]
+  return ordered.filter((ref): ref is DecisionModelRef => Boolean(ref))
+}
+
+/**
+ * 决策调用用的模型列表。返回多个而不是一个，是因为「配了但不可用」也得能落到下一个——
+ * 只判断有没有配是不够的，实测那正是「@Jev 什么都没开」的原因。
+ *
+ * 云端那一档优先取轻量档（便宜），没配轻量档就用当前模型；本地那台由
+ * pickLocalDecisionModel 按体积挑最小的（大模型读 4k token 的决策提示词会超
+ * HTTP 层 30s 上限，表现成「判断没回来」）。
  */
 export async function resolveDecisionModelRefs(): Promise<DecisionModelRef[]> {
-  const refs: DecisionModelRef[] = []
-  const local = await pickLocalDecisionModel()
-  if (local) refs.push(local)
-
   const agentStore = useAgentStore()
   const light = agentStore.textModels.find(model => inferModelTier(model.id) === 'light')
   const cloudId = light?.id || agentStore.currentModel
-  if (cloudId)
-    refs.push({
-      modelId: cloudId,
-      providerId: light?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi',
-    })
+  const cloud: DecisionModelRef | null = cloudId
+    ? {
+        modelId: cloudId,
+        providerId: light?.providerId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi',
+      }
+    : null
+
+  const refs = orderDecisionModelRefs(cloud, await pickLocalDecisionModel())
 
   return refs.filter(
     (ref, index) =>
