@@ -1,4 +1,5 @@
 import type { DirectToolCall } from './directTypes'
+import { renderSkillFiles } from '@/runtime/skills/skillFileListing'
 import {
   getMcpBridgeToolDefinitions,
   getMcpServerBridgeToolDefinitions,
@@ -888,11 +889,7 @@ function skillOutput(skill: WebLoadedSkill): string {
     '',
     `Base directory for this skill: ${skill.baseDirectory}`,
     'Relative paths in this skill are relative to this base directory.',
-    '<skill_files>',
-    ...skill.files
-      .filter(path => path !== 'SKILL.md')
-      .map(path => `<file>${path}</file>`),
-    '</skill_files>',
+    renderSkillFiles(skill.files.filter(path => path !== 'SKILL.md')),
     '</skill_content>',
   ].join('\n')
 }

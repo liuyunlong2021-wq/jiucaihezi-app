@@ -185,6 +185,7 @@ test('selected Skill rules are injected as a mandatory contract', async () => {
   const prompt = await buildSelectedSkillPrompt(['writer'], new Map([['writer', skill]]))
   assert.match(prompt, /本轮必须遵守的执行合同/)
   assert.match(prompt, /# 必须遵守/)
+  // 文件清单无论渲染成完整路径还是目录树，模型都必须拿得到可读的完整相对路径。
   assert.match(prompt, /references\/style\.md/)
   assert.match(prompt, /直接使用清单中的相对路径/)
 })

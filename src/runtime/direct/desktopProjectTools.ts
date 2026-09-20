@@ -10,6 +10,7 @@ import {
   resolveCreativeProjectPath,
 } from './creativeToolContract'
 import { executeMcpBridgeToolCall, isMcpToolName } from '@/runtime/tools/mcpBridge'
+import { renderSkillFiles } from '@/runtime/skills/skillFileListing'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import {
   artifactFilename,
@@ -92,9 +93,7 @@ function localSkillOutput(name: string, skill: LocalCreativeSkill): string {
     skill.content.trim(),
     '',
     `Base directory for this skill: ${baseDirectory}`,
-    '<skill_files>',
-    ...skill.resources.map(path => `<file>${path}</file>`),
-    '</skill_files>',
+    renderSkillFiles(skill.resources),
     '</skill_content>',
   ].join('\n')
 }

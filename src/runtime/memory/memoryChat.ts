@@ -60,6 +60,7 @@ import { estimateTokenCount } from 'tokenx'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { invoke } from '@tauri-apps/api/core'
 import { validateSkillPackageReferences } from '@/runtime/skills/skillPackageManifest'
+import { renderSkillFiles } from '@/runtime/skills/skillFileListing'
 
 export function normalizeMemoryToolResult(result: DirectToolResult): DirectToolResult {
   return { ...result, status: result.status ?? 'succeeded' }
@@ -984,9 +985,7 @@ export async function buildSelectedSkillPrompt(
           '<SKILL.md>',
           skillMd || '[SKILL.md 为空]',
           '</SKILL.md>',
-          '<skill_files>',
-          ...resources.map(path => `<file>${path}</file>`),
-          '</skill_files>',
+          renderSkillFiles(resources),
           ...(resources.some(path => path.startsWith('scripts/'))
             ? [`脚本工作目录：skill://${name}`]
             : []),
@@ -1002,9 +1001,7 @@ export async function buildSelectedSkillPrompt(
           '<SKILL.md>',
           skill.content.trim() || '[SKILL.md 为空]',
           '</SKILL.md>',
-          '<skill_files>',
-          ...skill.files.map(path => `<file>${path}</file>`),
-          '</skill_files>',
+          renderSkillFiles(skill.files),
           ...(skill.files.some(path => path.startsWith('scripts/'))
             ? [`脚本工作目录：skill://${skill.name}`]
             : []),
