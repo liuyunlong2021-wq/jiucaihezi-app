@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import { decide } from '@/runtime/decision'
 import { orderDecisionModelRefs } from '@/runtime/decision/index'
+import { createLocalScorerProvider } from '@/runtime/decision/localScorer'
 import {
   buildDecisionPrompt,
   createRuleDecisionProvider,
@@ -91,6 +92,42 @@ test('规则命中：用户自己说了「保存到项目里」，才允许代�
   assert.deepEqual(result?.skills, ['jc-juben-yingyi'])
   assert.deepEqual(result?.tools, ['file'])
   assert.deepEqual(result?.suggestions, [])
+})
+
+// 本地打分器只回答「该挂哪个 Skill」，芯片仍归规则层。
+// 它是外部进程，所以返回的 id 必须复核：服务抽风编一个不存在的 id 不能直接挂上去。
+test('本地打分器：过阈值的 Skill 才挂，清单外的 id 一律丢掉', async () => {
+  const fake = (payload: unknown) =>
+    (async () => ({ ok: true, json: async () => payload })) as unknown as typeof fetch
+  const candidates = CANDIDATES
+
+  const normal = await createLocalScorerProvider({ fetchImpl: fake({ picked: 'jc-novel' }) }).decide(
+    { userRequest: '我想写一部关于口红的小说', candidates },
+  )
+  assert.deepEqual(normal?.skills, ['jc-novel'])
+  assert.deepEqual(normal?.tools, [])
+
+  const noMatch = await createLocalScorerProvider({ fetchImpl: fake({ picked: null }) }).decide(
+    { userRequest: '今天天气怎么样', candidates },
+  )
+  assert.equal(noMatch, null, '没过阈值就该什么都不挂')
+
+  const invented = await createLocalScorerProvider({ fetchImpl: fake({ picked: 'made-up' }) }).decide(
+    { userRequest: '随便', candidates },
+  )
+  assert.equal(invented, null)
+})
+
+// provider 抛错是允许的（decide() 负责兜住并继续下一个），所以这里测的是「链路不断」。
+test('本地打分器：服务没起来时链路继续走到下一个 provider', async () => {
+  const boom = (async () => {
+    throw new Error('ECONNREFUSED')
+  }) as unknown as typeof fetch
+  const result = await decide(request('帮我写一个短剧剧本'), [
+    createLocalScorerProvider({ fetchImpl: boom }),
+    createRuleDecisionProvider(),
+  ])
+  assert.deepEqual(result?.skills, ['jc-duanju'])
 })
 
 test('规则命中：生成照片开 @影音', async () => {

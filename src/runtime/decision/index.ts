@@ -27,6 +27,7 @@ export {
   PRODUCING_TOOL_IDS,
   wantsTextDeliverable,
 } from './providers'
+export { createLocalScorerProvider, type LocalScorerOptions } from './localScorer'
 
 /**
  * 决策先试云端还是先试本地？
