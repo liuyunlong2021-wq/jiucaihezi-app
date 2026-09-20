@@ -44,8 +44,19 @@ const CANDIDATES: DecisionCandidate[] = [
     label: '文件',
     description: '读取、创建、修改和保存当前项目中的文件',
   },
-  { id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' },
-  { id: 'av', kind: 'tool', label: '影音', description: '生成图片、视频和音频' },
+  {
+    id: 'media',
+    kind: 'tool',
+    label: '图文',
+    description: '把内容排成文档、网页、长图、幻灯片并导出成文件',
+  },
+  // 「提到文生视频」不等于「要出片」，说明里写清它会真的调模型产出文件，减少误选。
+  {
+    id: 'av',
+    kind: 'tool',
+    label: '影音',
+    description: '调用生图、生视频、配音模型，真的产出图片、视频、音频文件',
+  },
   { id: 'scene3d', kind: 'tool', label: '3D', description: '创建或编辑 3D 场景' },
 ]
 
@@ -83,6 +94,34 @@ test('规则命中：用户自己说了「保存到项目里」，才允许代�
 test('规则命中：生成照片开 @影音', async () => {
   const result = await decide(request('生成一张人物照片'))
   assert.deepEqual(result?.tools, ['av'])
+})
+
+// 用户实测：让 @Jev 挑「写视频提示词」的 Skill，它却开了 @影音（会真的去调生视频模型）。
+// 「文生视频」「生成图片」在这类句子里是模式名，说明这段字写给谁用，不是要出片。
+// 规则层扫不到该开的 Skill 时返回 null 交给下一个 provider，也算正确结果。
+test('要一段文字时不开产出型能力：写视频提示词不开 @影音', async () => {
+  const provider = createRuleDecisionProvider()
+  for (const userRequest of [
+    '根据上面的内容写一个MiniMax的文生视频的视频提示词',
+    '帮我写一个生成视频的提示词',
+    '写一段海报的提示词',
+  ]) {
+    const result = await provider.decide(request(userRequest))
+    assert.ok(!(result?.tools || []).includes('av'), `${userRequest} 不该开 @影音`)
+  }
+})
+
+test('反过来没被误伤：真的要出片仍然开 @影音', async () => {
+  const provider = createRuleDecisionProvider()
+  for (const userRequest of [
+    '用这段提示词生成一段视频',
+    '把这个脚本做成视频',
+    '帮我做个视频',
+    '生成一张人物照片',
+  ]) {
+    const result = await provider.decide(request(userRequest))
+    assert.ok(result?.tools.includes('av'), `${userRequest} 该开 @影音`)
+  }
 })
 
 test('规则没把握就说没把握：运行项目测试交给下一个 provider，不硬猜能力', async () => {

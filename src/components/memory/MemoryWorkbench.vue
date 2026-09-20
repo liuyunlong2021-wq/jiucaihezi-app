@@ -1288,8 +1288,9 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
       .filter(Boolean)
 
   push({ id: 'file', kind: 'tool', label: '文件', description: '读取、创建、修改和保存当前项目中的文件' })
-  push({ id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' })
-  push({ id: 'av', kind: 'tool', label: '影音', description: '生成图片、视频和音频' })
+  push({ id: 'media', kind: 'tool', label: '图文', description: '把内容排成文档、网页、长图、幻灯片并导出成文件' })
+  // 「提到文生视频」不等于「要出片」，说明里写清它会真的调模型产出文件，减少误选。
+  push({ id: 'av', kind: 'tool', label: '影音', description: '调用生图、生视频、配音模型，真的产出图片、视频、音频文件' })
   if (desktopOnlyRuntime) push({ id: 'scene3d', kind: 'tool', label: '3D', description: '创建或编辑 3D 场景' })
   // MCP 服务按服务聚合。描述必须带上它的工具——McpServerConfig 没有 description 字段，
   // 原来那句「调用 MCP 服务 X 的工具」对每个服务一模一样、零区分度，模型不可能选对。

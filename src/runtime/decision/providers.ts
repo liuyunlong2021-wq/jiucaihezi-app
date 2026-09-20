@@ -66,14 +66,33 @@ export function matchesOwnTriggers(
 }
 
 /**
+ * 「要的是一段文字」的请求：写提示词、写文案、写脚本。
+ * 这类请求里出现的「文生视频」「生成图片」是在说**这段字写给谁用**，不是要出片，
+ * 而 @影音 / @图文 是产出型能力——开了就会真的去调生图生视频模型。
+ * 实测：「根据上面的内容写一个 MiniMax 的文生视频的视频提示词」把 @影音 打开了，
+ * 用户要的只是一段字。反过来「用这段提示词生成一段视频」里动词在「提示词」之后，
+ * 不命中，照常开 @影音。
+ */
+const TEXT_DELIVERABLE_INTENT =
+  /(写|拟|起草|整理|生成|优化|润色|改|来一?[份个段])[^，。；！？\n]{0,8}(提示词|prompt)/i
+
+/** 产出型能力：会真的调用模型造出文件。只在用户要成品时才自动开。 */
+const PRODUCING_TOOL_IDS = new Set(['av', 'media'])
+
+/**
  * 用户这句话直接点名的能力芯片。只收明确信号；模糊说法留给 LLM provider，避免误开能力反而更费 token。
  */
 const TOOL_RULES: ReadonlyArray<{ id: string; pattern: RegExp }> = [
   { id: 'file', pattern: LOCAL_GRANT_INTENT },
   {
     id: 'av',
+    // 产出动作 + 媒体名词，两个都要有。曾经 video 这一支只收了「文生视频」这个**模式名**
+    // （它本身不是动作），结果两头都错：用户说「写一个文生视频的提示词」误开了 @影音，
+    // 而真要出片时说「做个视频」「生成一段视频」反而一个都不中。
+    // 图片类名词额外禁止动作与名词之间出现「成/为」：「把这段做成图片」是把现成内容排版导出，
+    // 归 @图文；而「做成视频」是真的要出片，所以只对图片类收窄。
     pattern:
-      /生成.{0,6}(图片|照片|图像|插画|封面)|画一[张幅个]|出图|配图|生图|文生图|文生视频|生成视频|配音|朗读|语音|音频|音乐|bgm/i,
+      /(生成|做|出|画|渲染|合成|配|弄|来一?[段张个份])(?:(?![成为])[^，。；！？\n]){0,4}(图片|照片|图像|插画|封面|海报)|(生成|做|出|画|渲染|合成|配|弄|来一?[段张个份])[^，。；！？\n]{0,4}(视频|短片|动画|音频|配音|语音|朗读|音乐|bgm)|画一[张幅个]|出图|配图|生图|配音|朗读|语音/i,
   },
   {
     id: 'media',
@@ -172,10 +191,14 @@ export function createRuleDecisionProvider(): DecisionProvider {
   return {
     id: 'rule',
     async decide(request) {
+      // 要文字的那轮不开产出型能力，看 TEXT_DELIVERABLE_INTENT 的说明。
+      const wantsText = TEXT_DELIVERABLE_INTENT.test(request.userRequest)
       const chipIds = TOOL_RULES.filter(rule => rule.pattern.test(request.userRequest))
         .map(rule => rule.id)
-        .filter(id =>
-          request.candidates.some(candidate => candidate.kind === 'tool' && candidate.id === id),
+        .filter(
+          id =>
+            !(wantsText && PRODUCING_TOOL_IDS.has(id)) &&
+            request.candidates.some(candidate => candidate.kind === 'tool' && candidate.id === id),
         )
       // MCP 服务也按它自己声明的关键词选，和 Skill 走同一套。
       const tools = [
@@ -236,7 +259,7 @@ export function buildDecisionPrompt(request: DecisionRequest): string {
     '你是韭菜盒子的能力路由器。根据用户这一句话，从候选里挑出完成它所需的最少能力，并判断该用哪一档模型。',
     '要求：',
     '1. 只能选候选清单里出现过的 id，一个都不能编。',
-    '2. 不需要就留空数组；宁少勿多，多开能力会让本轮更慢更贵。',
+    '2. 不需要就留空数组；宁少勿多，多开能力会让本轮更慢更贵。「提到某种能力」不等于「要用它」：用户要一段提示词、文案、脚本、方案时，文中出现的文生视频、生图、配音之类只是谈论对象，不要因此开影音、图文这类真的会去调模型产出文件的能力。',
     '3. skills 最多 1 个，而且必须真有一款 Skill 是为这件事设计的。必须看限定语（「只做某方向」「仅限X」「不负责Y」）：用户请求落在它的排除范围里就不算合适。只是「沾边」、只是话题相同（如提到剧本），都不算——选错会强制挂上一整份不相干的 SKILL.md。',
     '4. 没有任何一款合适就留空，直接回答反而更好，这是允许的答案。',
     '5. id 以 mcp__ 开头的是已连接的外部 MCP 服务。用户要联网搜索、抓网页、查仓库这类本机没有的能力时，从工具清单里挑提供该能力的服务。',
