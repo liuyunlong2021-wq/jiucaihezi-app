@@ -92,6 +92,8 @@ test('Minimax H3 AI Apps use one prompt and map canvas images to workflow slots'
     { key: '156:image', label: 'image2', kind: 'image' },
     { key: '157:image', label: 'image3', kind: 'image' },
     { key: '141:text', label: '提示词', kind: 'text', defaultValue: '旧提示词' },
+    { key: '115:megapixels', label: '质量', kind: 'number', defaultValue: '0.4' },
+    { key: '132:value', label: '时长', kind: 'number', defaultValue: '2' },
   ]
 
   const params = buildCurrentCreationParams({ images: ['left.png', 'middle.png', 'right.png'] })
@@ -101,9 +103,19 @@ test('Minimax H3 AI Apps use one prompt and map canvas images to workflow slots'
   assert.equal(params['137:image'], 'left.png')
   assert.equal(params['156:image'], 'middle.png')
   assert.equal(params['157:image'], 'right.png')
+  // 质量控件已隐藏，固定提交 0.9；时长统一默认 5，不沿用工作流自带的 2
+  assert.equal(params['115:megapixels'], 0.9)
+  assert.equal(params['132:value'], 5)
+
+  // 张数是上限不是等值：少传时按顺序只占用前面的槽位
+  const partial = buildCurrentCreationParams({ images: ['only-one.png'] })
+  assert.equal(partial['137:image'], 'only-one.png')
+  assert.equal('156:image' in partial, false)
+  assert.equal('157:image' in partial, false)
+
   assert.throws(
-    () => buildCurrentCreationParams({ images: ['only-one.png'] }),
-    /需要 3 张参考图/,
+    () => buildCurrentCreationParams({ images: ['a.png', 'b.png', 'c.png', 'd.png'] }),
+    /最多 3 张参考图/,
   )
 })
 
@@ -127,7 +139,7 @@ test('Minimax H3 node 134 prompt is merged into the main creation prompt', () =>
   assert.equal(params['140:image'], 'first.png')
 })
 
-test('文武双修 应用用 28:prompt 承接主提示词并映射 9 张参考图', () => {
+test('文武双修 应用用 28:prompt 承接主提示词，参考图按画布顺序取前 N 张', () => {
   switchTask('ai-app')
   switchModel('runninghub/aiapp/rh-aiapp')
   cpState.aiAppWebappId = '2101840271142117377'
@@ -142,16 +154,21 @@ test('文武双修 应用用 28:prompt 承接主提示词并映射 9 张参考�
       label: `image${index + 1}`,
       kind: 'image',
     })),
+    { key: '29:aspect_ratio', label: '比例', kind: 'select', defaultValue: '16:9 (Widescreen)' },
+    { key: '27:value', label: '时长', kind: 'number', defaultValue: '15' },
   ]
 
   const params = buildCurrentCreationParams({
-    images: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(index => `ref-${index}.png`),
+    images: [1, 2, 3].map(index => `ref-${index}.png`),
   })
 
   assert.equal(params.prompt, '一个男人在雨里回头')
   assert.equal(params['28:prompt'], '一个男人在雨里回头')
   assert.equal(params['6:image'], 'ref-1.png')
-  assert.equal(params['42:image'], 'ref-9.png')
+  assert.equal(params['36:image'], 'ref-3.png')
+  assert.equal('37:image' in params, false)
+  assert.equal(params['29:aspect_ratio'], '16:9 (Widescreen)')
+  assert.equal(params['27:value'], 5)
 })
 
 test('Seed Audio rejects reference files larger than 10 MB', () => {

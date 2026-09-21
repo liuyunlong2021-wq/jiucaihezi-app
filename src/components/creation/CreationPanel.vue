@@ -95,7 +95,15 @@ import {
   fetchAiAppDirectory,
   discoverAiAppNodes,
   isAiAppPromptField,
+  isAiAppDurationField,
+  isAiAppQualityField,
+  isAiAppRatioField,
+  isH3AiApp,
+  shortRatioLabel,
+  H3_DURATION_DEFAULT,
+  H3_DURATION_RANGE,
   type AiAppDirectoryEntry,
+  type CreationFieldValue,
 } from '@/composables/useCreation'
 import { creationModelFamily, displayModelLabel, displayModelPrice, getCreationModelSpec, RH_ONLY_MODE } from '@/runtime/creation/creationModelRegistry'
 import { buildCreationRunPlan } from '@/runtime/creation/creationMediaPlan'
@@ -689,6 +697,11 @@ async function handleDiscoverAiApp() {
     cpState.aiAppOutputType = app.outputType
     cpState.aiAppBillingModel = app.billingModel
     cpState.aiAppFields = fields
+    if (isH3AiApp(cpState.aiAppWebappId)) {
+      // 时长不再跟工作流各自的默认值（9/4/2/2/2/15/3 不一致），统一按 5 秒入面板
+      const durationField = fields.find(field => isAiAppDurationField(field))
+      if (durationField) setModelFieldValue(durationField, H3_DURATION_DEFAULT)
+    }
     const promptField = fields.find(field => isAiAppPromptField(field, cpState.aiAppWebappId))
     if (promptField) {
       cpState.prompt = String(getModelFieldValue(promptField) || '')
@@ -715,6 +728,46 @@ const aiAppPromptField = computed(() =>
     ? cpState.aiAppFields.find(field => isAiAppPromptField(field, cpState.aiAppWebappId))
     : undefined,
 )
+
+// ─── H3 AI 应用专用控件 ───
+// 图槽（image1..imageN）不再逐个显示，张数与顺序完全跟随画布选中；
+// 比例换成浮层（长串只用于提交，界面显示短式），时长换成 1-15 秒滑条，质量隐藏。
+const isH3App = computed(() => cpState.task === 'ai-app' && isH3AiApp(cpState.aiAppWebappId))
+
+const h3RatioField = computed(() =>
+  isH3App.value ? cpState.aiAppFields.find(field => isAiAppRatioField(field)) : undefined,
+)
+const h3DurationField = computed(() =>
+  isH3App.value ? cpState.aiAppFields.find(field => isAiAppDurationField(field)) : undefined,
+)
+const h3ImageSlotCount = computed(() => cpState.aiAppFields.filter(field => field.kind === 'image').length)
+const h3SelectedImageCount = computed(
+  () => selectedReferenceAssets.value.filter(asset => asset.kind === 'image').length,
+)
+const h3RatioValue = computed(() => (h3RatioField.value ? getModelFieldValue(h3RatioField.value) : ''))
+const h3RatioOptions = computed(() => h3RatioField.value?.options || [])
+const h3DurationValue = computed(() => {
+  const field = h3DurationField.value
+  if (!field) return H3_DURATION_DEFAULT
+  const value = Number(getModelFieldValue(field))
+  return Number.isFinite(value) && value > 0 ? Math.round(value) : H3_DURATION_DEFAULT
+})
+
+function selectH3Ratio(value: CreationFieldValue) {
+  if (h3RatioField.value) setModelFieldValue(h3RatioField.value, value)
+  openPop.value = ''
+}
+
+function setH3Duration(value: number) {
+  if (h3DurationField.value) setModelFieldValue(h3DurationField.value, value)
+}
+
+// H3 应用里由专用控件接管的字段，不再走通用字段渲染
+function isH3HiddenField(field: CreationFieldSpec): boolean {
+  if (!isH3App.value) return false
+  if (field.kind === 'image') return true
+  return isAiAppRatioField(field) || isAiAppDurationField(field) || isAiAppQualityField(field)
+}
 
 async function pickAiAppMediaFile(field: CreationFieldSpec) {
   try {
@@ -4687,10 +4740,48 @@ const canSend = computed(
           @blur="saveCpState()"
         />
       </div>
+      <!-- H3 AI 应用专用控件（替代图槽/比例按钮组/时长输入框） -->
+      <div v-if="isH3App && h3ImageSlotCount" class="cp-island">
+        <div class="cp-island-label">参考图</div>
+        <div class="cp-island-val">
+          画布已选 {{ h3SelectedImageCount }} 张 / 最多 {{ h3ImageSlotCount }} 张
+        </div>
+      </div>
+      <div v-if="h3RatioField" class="cp-island" @click="togglePop('h3Ratio')">
+        <div class="cp-island-label">比例</div>
+        <div class="cp-island-val">{{ shortRatioLabel(h3RatioValue) }}</div>
+        <div v-if="openPop === 'h3Ratio'" class="cp-popover" @click.stop>
+          <button
+            v-for="option in h3RatioOptions"
+            :key="String(option.value)"
+            class="cp-pop-item"
+            :class="{ active: h3RatioValue === option.value }"
+            @click="selectH3Ratio(option.value)"
+          >
+            {{ shortRatioLabel(option.value) }}
+          </button>
+        </div>
+      </div>
+      <div v-if="h3DurationField" class="cp-island cp-island-grow">
+        <div class="cp-island-label">时长</div>
+        <div class="cp-dur-row">
+          <input
+            type="range"
+            class="cp-dur-slider"
+            :min="H3_DURATION_RANGE.min"
+            :max="H3_DURATION_RANGE.max"
+            :step="H3_DURATION_RANGE.step"
+            :value="h3DurationValue"
+            @input="setH3Duration(+($event.target as HTMLInputElement).value)"
+          />
+          <span class="cp-dur-val">{{ h3DurationValue }}s</span>
+        </div>
+      </div>
       <template v-for="field in genericModelFields" :key="field.key">
         <div
           v-if="
             !isAiAppMediaField(field) &&
+            !isH3HiddenField(field) &&
             !isAiAppPromptField(field, cpState.aiAppWebappId) &&
             ((field.key !== 'customWidth' && field.key !== 'customHight') ||
               cpState.ar === 'custom')
@@ -4756,7 +4847,7 @@ const canSend = computed(
 
       <!-- AI 应用媒体字段 — 独立渲染（带文件选择按钮） -->
       <template v-for="field in genericModelFields" :key="'media-' + field.key">
-        <div v-if="isAiAppMediaField(field)" class="cp-island cp-generic-field">
+        <div v-if="isAiAppMediaField(field) && !isH3HiddenField(field)" class="cp-island cp-generic-field">
           <div class="cp-island-label">{{ field.label }}</div>
           <div class="cp-generic-media-row">
             <input

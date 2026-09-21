@@ -110,6 +110,33 @@ export function isAiAppPromptField(
   return field.label === '提示词'
 }
 
+export const H3_DURATION_RANGE = { min: 1, max: 15, step: 1 }
+export const H3_DURATION_DEFAULT = 5
+// ponytail: 质量控件对用户无意义（画面大小交给比例决定），隐藏后固定提交 0.9
+const H3_QUALITY_VALUE = 0.9
+
+export function isH3AiApp(webappId: string): boolean {
+  return MINIMAX_H3_WEBAPP_IDS.has(webappId)
+}
+
+export function isAiAppRatioField(field: Pick<CreationFieldSpec, 'key'>): boolean {
+  const name = String(field.key).split(':')[1]?.toLowerCase() || ''
+  return name === 'aspect_ratio' || name === 'ratio'
+}
+
+export function isAiAppDurationField(field: Pick<CreationFieldSpec, 'label'>): boolean {
+  return field.label === '时长'
+}
+
+export function isAiAppQualityField(field: Pick<CreationFieldSpec, 'key'>): boolean {
+  return String(field.key).endsWith(':megapixels')
+}
+
+// "9:16 (Portrait Widescreen)" → "9:16"；提交仍用工作流原值
+export function shortRatioLabel(value: unknown): string {
+  return String(value ?? '').split(' (')[0]
+}
+
 export interface AiAppDirectoryEntry {
   webappId: string
   label: string
@@ -533,24 +560,37 @@ function aiAppFieldParams(images: unknown[]): Record<string, unknown> {
       output[field.key] = field.defaultValue
     }
   }
-  if (!MINIMAX_H3_WEBAPP_IDS.has(cpState.aiAppWebappId)) return output
+  if (!isH3AiApp(cpState.aiAppWebappId)) return output
+
+  const label = cpState.aiAppLabel || '当前应用'
+
+  // 时长统一默认 5 秒；质量控件已隐藏，固定提交 H3_QUALITY_VALUE
+  for (const field of cpState.aiAppFields) {
+    if (isAiAppDurationField(field)) {
+      const value = cpState.fieldValues[field.key]
+      output[field.key] = isFieldValuePresent(value) ? value : H3_DURATION_DEFAULT
+    } else if (isAiAppQualityField(field)) {
+      output[field.key] = H3_QUALITY_VALUE
+    }
+  }
 
   const promptField = cpState.aiAppFields.find(field =>
     isAiAppPromptField(field, cpState.aiAppWebappId),
   )
   if (promptField) output[promptField.key] = cpState.prompt
 
+  // 画布选中顺序即 image1..imageN，张数是上限而不是等值；
+  // 未选到的槽位不提交，交给工作流自身默认值
   const imageFields = cpState.aiAppFields.filter(field => field.kind === 'image')
-  if (images.length) {
-    if (images.length !== imageFields.length) {
-      throw new Error(`${cpState.aiAppLabel || '当前应用'}需要 ${imageFields.length} 张参考图，当前已选 ${images.length} 张`)
-    }
-    imageFields.forEach((field, index) => {
-      output[field.key] = images[index]
-    })
-  } else if (imageFields.some(field => !isFieldValuePresent(output[field.key]))) {
-    throw new Error(`${cpState.aiAppLabel || '当前应用'}需要 ${imageFields.length} 张参考图`)
+  if (images.length > imageFields.length) {
+    throw new Error(`${label}最多 ${imageFields.length} 张参考图，当前已选 ${images.length} 张`)
   }
+  if (!images.length && imageFields.length) {
+    throw new Error(`${label}至少需要 1 张参考图`)
+  }
+  imageFields.forEach((field, index) => {
+    if (index < images.length) output[field.key] = images[index]
+  })
   return output
 }
 
