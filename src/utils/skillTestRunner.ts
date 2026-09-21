@@ -266,6 +266,9 @@ export function validateSkillDraft(
   const allowedFields = new Set(['name', 'description', 'license', 'allowed-tools', 'metadata', 'compatibility', 'triggers'])
   const unknownFields = Object.keys(parsed?.fields || {}).filter(field => !allowedFields.has(field))
   const safePaths = references.every(reference => isSafePackagePath(reference.path))
+  // 不点名的报错只能让模型猜是哪个文件不合规（草稿根目录放了个 test.md 也会中），
+  // 所以把不合规的路径直接列出来。
+  const unsafePaths = references.map(reference => reference.path).filter(path => !isSafePackagePath(path))
   const checks: SkillValidationCheck[] = [
     {
       id: 'yaml_frontmatter',
@@ -335,7 +338,7 @@ export function validateSkillDraft(
       passed: safePaths,
       message: safePaths
         ? 'references/scripts/assets 路径均安全。'
-        : '资料包路径只能位于 references/、scripts/ 或 assets/ 内，且不能包含 .. 或绝对路径。',
+        : `这些包内路径不合法：${unsafePaths.join('、')}。只允许 SKILL.md、LICENSE.txt，以及 references/、scripts/、assets/、agents/、eval-viewer/ 下的文件（不能含 .. 或绝对路径）。草稿目录里不要放临时文件，测试产物请放 iteration-N/。`,
     },
   ]
 
