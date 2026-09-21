@@ -262,9 +262,9 @@ async def app_info(webappId: str = ""):
         raise HTTPException(403, "此 AI 应用不在可用列表中")
 
     client = await get_client()
-    from .services.ai_app import fetch_ai_app_node_info
+    from .services.ai_app import fetch_ai_app_node_info, with_node_options
     nodes = await fetch_ai_app_node_info(client, RUNNINGHUB_API_KEY, webappId)
-    return {**registration, "nodeInfoList": nodes}
+    return {**registration, "nodeInfoList": with_node_options(nodes)}
 
 
 @app.get("/api/runninghub/app-directory")

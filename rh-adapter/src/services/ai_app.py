@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -43,6 +44,49 @@ async def fetch_ai_app_node_info(
             code=502,
         )
     return node_list
+
+
+def _node_options(node: dict[str, Any]) -> list[str] | None:
+    """Read ComboBox options out of RunningHub's fieldData.
+
+    apiCallDemo 只把选项放在 fieldData 里（如
+    ``["COMBO", {"options": [...]}]``），没有顶层 options；
+    不解析的话客户端只能拿到空选项列表。
+    """
+    if node.get("options"):
+        return None
+
+    field_data = node.get("fieldData")
+    if isinstance(field_data, str):
+        if "options" not in field_data:
+            return None
+        try:
+            field_data = json.loads(field_data)
+        except ValueError:
+            return None
+
+    if not isinstance(field_data, list) or len(field_data) < 2:
+        return None
+    meta = field_data[1]
+    if not isinstance(meta, dict):
+        return None
+    options = meta.get("options")
+    if not isinstance(options, list) or not options:
+        return None
+    return [str(option) for option in options]
+
+
+def with_node_options(node_list: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Lift ComboBox options onto the nodes for UI consumption.
+
+    只给 ``/api/runninghub/app-info`` 用。提交链路拿的是 fetch_ai_app_node_info
+    的原样节点，所以这里新增的 ``options`` 不会被带回上游。
+    """
+    enriched: list[dict[str, Any]] = []
+    for node in node_list:
+        options = _node_options(node)
+        enriched.append({**node, "options": options} if options else node)
+    return enriched
 
 
 def _text_for_match(node: dict[str, Any]) -> str:

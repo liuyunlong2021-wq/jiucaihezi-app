@@ -5,7 +5,7 @@ import pytest
 from src.config import RH_AI_APP_NODE_INFO, RH_AI_APP_UPLOAD, RH_STANDARD_UPLOAD
 import src.models.mapping as mapping
 from src.models.schemas import AudioRequest, ImageRequest, VideoRequest
-from src.services.ai_app import apply_ai_app_inputs, fetch_ai_app_node_info
+from src.services.ai_app import apply_ai_app_inputs, fetch_ai_app_node_info, with_node_options
 from src.services.rh_client import RHError, maybe_upload, submit_ai_app
 from src.services.audio import generate_audio
 from src.services.image import generate_image
@@ -441,6 +441,66 @@ async def test_fetch_ai_app_node_info_uses_official_api_call_demo():
     url, kwargs = client.calls[0]
     assert url == RH_AI_APP_NODE_INFO
     assert kwargs["params"] == {"apiKey": "rh_key", "webappId": "2034917373414539273"}
+
+
+class ComboFieldDataClient(FakeClient):
+    """apiCallDemo 形状：选项只在 fieldData 里。"""
+
+    async def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if url == RH_AI_APP_NODE_INFO:
+            return FakeResponse({
+                "code": 0,
+                "data": {
+                    "nodeInfoList": [
+                        {
+                            "nodeId": "115",
+                            "fieldName": "aspect_ratio",
+                            "fieldType": "LIST",
+                            "fieldValue": "9:16 (Portrait Widescreen)",
+                            "fieldData": (
+                                '["COMBO", {"default": "1:1 (Square)", "options": '
+                                '["1:1 (Square)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)"], '
+                                '"multiselect": false}]'
+                            ),
+                        },
+                        {
+                            "nodeId": "132",
+                            "fieldName": "value",
+                            "fieldType": "FLOAT",
+                            "fieldValue": "3",
+                            "fieldData": '["FLOAT", {"min": 0, "max": 100, "step": 0.1}]',
+                        },
+                        {
+                            "nodeId": "99",
+                            "fieldName": "aspect_ratio",
+                            "fieldType": "LIST",
+                            "fieldValue": "1:1",
+                            "options": ["1:1"],
+                        },
+                    ],
+                },
+            })
+        return FakeResponse({"code": 404, "msg": "missing"})
+
+
+@pytest.mark.asyncio
+async def test_app_info_lifts_combo_options_out_of_field_data():
+    nodes = await fetch_ai_app_node_info(ComboFieldDataClient(), "rh_key", "123")
+
+    # 提交链路用的节点必须保持上游原样，多出来的 options 不能带回 RunningHub
+    assert "options" not in nodes[0]
+
+    enriched = with_node_options(nodes)
+
+    assert enriched[0]["options"] == [
+        "1:1 (Square)",
+        "9:16 (Portrait Widescreen)",
+        "16:9 (Widescreen)",
+    ]
+    assert "options" not in enriched[1]  # 非 COMBO 不凭空造字段
+    assert enriched[2]["options"] == ["1:1"]  # 上游已给的选项不覆盖
+    assert nodes[0].get("options") is None
 
 
 @pytest.mark.asyncio
