@@ -1,7 +1,7 @@
 ---
 name: jc-new-user-guide
 display_name: 新手指南
-description: Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, project files, synchronization, attachments, or model selection. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子文件、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、jc-new-user-guide.
+description: Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, project files, synchronization, attachments, model selection, or how to make a 漫剧 / comic drama step by step. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子文件、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、韭菜盒子怎么做漫剧、漫剧制作流程、jc-new-user-guide.
 allowed-tools:
   - read
 ---
@@ -42,6 +42,7 @@ allowed-tools:
 | Skill | `references/3-Skill科普.md` |
 | 产品功能、平台差异 | `references/4-产品功能.md` |
 | 模型、API、价格 | `references/5-模型科普.md` |
+| 漫剧等一步步的创作流程 | `references/6-漫剧制作.md` |
 | 附件、办公、格式转换 | `references/8-办公.md` |
 
 ## 记忆开关速查
