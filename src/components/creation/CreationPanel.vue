@@ -709,7 +709,12 @@ async function handleDiscoverAiApp() {
       if (durationField) setModelFieldValue(durationField, H3_DURATION_DEFAULT)
     }
     const promptField = fields.find(field => isAiAppPromptField(field, cpState.aiAppWebappId))
-    if (promptField) {
+    if (promptField && isH3AiApp(cpState.aiAppWebappId)) {
+      // H3 系列不预填工作流自带的示例提示词，输入框保持空白；
+      // 提交时空提示词不会写进节点，工作流仍会用它自己保存的默认值。
+      // 输入框里若还是那份示例（含上次存下来的），一并清掉；用户自己写的不动。
+      if (cpState.prompt === String(promptField.defaultValue ?? '')) cpState.prompt = ''
+    } else if (promptField) {
       cpState.prompt = String(getModelFieldValue(promptField) || '')
       setModelFieldValue(promptField, cpState.prompt)
     }

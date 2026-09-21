@@ -104,6 +104,9 @@ test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () =>
   // 选应用时把画幅与时长种成统一值
   assert.match(source, /setModelFieldValue\(ratioField, preferredRatio\.value\)/)
   assert.match(source, /setModelFieldValue\(durationField, H3_DURATION_DEFAULT\)/)
+  // H3 不预填工作流自带的示例提示词
+  assert.match(source, /if \(promptField && isH3AiApp\(cpState\.aiAppWebappId\)\)/)
+  assert.match(source, /cpState\.prompt === String\(promptField\.defaultValue \?\? ''\)\) cpState\.prompt = ''/)
 })
 
 test('creation attachment button uses the native multi-file picker on Desktop', () => {
