@@ -3,6 +3,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* MSVC 的 <math.h> 默认不定义 M_PI（那是 POSIX 扩展），
+   不兜底的话 Windows 构建会报 C2065 'M_PI': undeclared identifier。 */
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+
 enum { OUTSIDE = 0, RING = 1, HOLE = 2 };
 
 void heal_coverage_bounds(const uint8_t *gray, size_t width, size_t height, size_t stride, long bounds[4]) {
