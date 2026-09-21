@@ -267,7 +267,35 @@ test('工具参数报错要列出本工具接受的参数，否则模型会原�
         type: 'function',
         function: { name: 'export_markdown_slides', arguments: '{"filename":"a.png"}' },
       } as any),
-    /工具参数不支持: filename。本工具只接受: title、content、format/,
+    /工具参数不支持: filename。本工具只接受: title、content、format（export_markdown_slides）/,
+  )
+})
+
+test('tool_describe 收下自然的 tool_name 写法，不为一个叫法空烧几轮', () => {
+  // 用户实测：模型习惯写 tool_name，只认 name 时它连报三轮（两次不支持、一次缺参）。
+  const args = parseCreativeToolArguments({
+    id: 'describe',
+    type: 'function',
+    function: { name: 'tool_describe', arguments: '{"tool_name":"save_skill"}' },
+  } as any)
+  assert.deepEqual(args, { name: 'save_skill' })
+
+  const named = parseCreativeToolArguments({
+    id: 'describe2',
+    type: 'function',
+    function: { name: 'tool_describe', arguments: '{"name":"save_skill"}' },
+  } as any)
+  assert.deepEqual(named, { name: 'save_skill' })
+
+  // 别名只在语义一致时生效：别的工具不接受 tool_name
+  assert.throws(
+    () =>
+      parseCreativeToolArguments({
+        id: 'read',
+        type: 'function',
+        function: { name: 'read', arguments: '{"tool_name":"a.md"}' },
+      } as any),
+    /工具参数不支持: tool_name/,
   )
 })
 

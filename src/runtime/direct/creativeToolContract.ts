@@ -737,12 +737,19 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
   if (isMcpToolName(call.function.name)) return args
   const types = fieldTypes[call.function.name]
   if (!types) throw new Error(`Unsupported tool: ${call.function.name}`)
+  // 「要描述哪个工具」模型习惯写 tool_name，而参数名只认 name。实测它拿着
+  // 「不支持 tool_name」的报错又空烧了两轮（第三次干脆什么参数都没带）。
+  // 语义完全一致就直接收下，不为一个叫法白烧一轮。
+  if (!('name' in args) && typeof args.tool_name === 'string' && 'name' in types) {
+    args.name = args.tool_name
+    delete args.tool_name
+  }
   for (const [key, item] of Object.entries(args)) {
     const expected = types[key]
-    // 带上参数白名单：只报「不支持 filename」时，模型会原样重试三次（实测用户跑 PPT 时白烧了 3 轮）；
-    // 告诉它本工具接受什么，它才能一轮改用正确的形状。这句话模型和用户都会看到。
+    // 带上参数白名单和工具名：只报「不支持 filename」时，模型会原样重试三次（实测用户跑 PPT 时白烧了 3 轮）；
+    // 不报工具名时，用户把截图发过来也看不出是谁错了。这句话模型和用户都会看到。
     if (!expected)
-      throw new Error(`工具参数不支持: ${key}。本工具只接受: ${Object.keys(types).join('、')}`)
+      throw new Error(`工具参数不支持: ${key}。本工具只接受: ${Object.keys(types).join('、')}（${call.function.name}）`)
     const invalid =
       expected === 'json'
         ? false
@@ -750,7 +757,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
             ? !Number.isInteger(item)
             : typeof item !== expected
     if (invalid) {
-      throw new Error(`工具参数类型无效: ${key}`)
+      throw new Error(`工具参数类型无效: ${key}（${call.function.name}）`)
     }
   }
   const definition = [
@@ -765,7 +772,7 @@ export function parseCreativeToolArguments(call: DirectToolCall): Record<string,
     ...MEMORY_DESKTOP_VIDEO_TOOL_DEFINITIONS,
   ].find(tool => tool.function.name === call.function.name)!
   for (const field of definition.function.parameters.required) {
-    if (!(field in args)) throw new Error(`缺少工具参数: ${field}`)
+    if (!(field in args)) throw new Error(`缺少工具参数: ${field}（${call.function.name}）`)
   }
   return args
 }
