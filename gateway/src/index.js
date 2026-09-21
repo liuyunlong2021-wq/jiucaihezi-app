@@ -394,13 +394,24 @@ function handleHealth(request) {
 
 const CREATION_MEDIA_TTL_SECONDS = 15 * 60;
 const CREATION_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
-// 登录校验要从 Worker 绕回公网调 NewAPI 的 /v1/models，5 秒预算在边缘抖动时
-// 会把正常上传打成 502（2026-09-21 图生图实拍）。留给 15 秒并重试一次，
-// 两次都失败才按上游故障报 502。
-// ponytail: 该端点返回整份模型目录，只用来判活；若 NewAPI 长期超 15 秒，
-// 应换成轻量鉴权端点，而不是继续放宽这个数字。
+// 登录校验要从 Worker 绕回公网调 NewAPI 的 /v1/models：源站在国内、前面套着 Cloudflare，
+// 这一跳 2026-09-21 实测源站本机 8ms、走公网 5.5s，还有一次直接 522（21.6s）；而客户端
+// 每张参考图都会单独上传一次（文武双修 9 张 = 9 次校验）。所以 15 秒 + 重试一次，
+// 并把「这个 Key 刚验过」缓存 5 分钟 —— 9 张图只回源 1 次，也把这条慢链路移出上传路径。
+// ponytail: 代价是撤销的 Key 最多还能用 5 分钟；要做到零延迟撤销，得上 gateway 签发的上传票据。
 const CREATION_MEDIA_AUTH_TIMEOUT_MS = 15_000;
 const CREATION_MEDIA_AUTH_ATTEMPTS = 2;
+const CREATION_MEDIA_AUTH_CACHE_TTL_SECONDS = 5 * 60;
+const CREATION_MEDIA_AUTH_CACHE_PREFIX = 'creation-media-auth:';
+
+/** 缓存键存 Key 的摘要：KV 是明文存储，凭据本身不落进去。 */
+async function mediaAuthCacheKey(token) {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
+  const hex = [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+  return `${CREATION_MEDIA_AUTH_CACHE_PREFIX}${hex}`;
+}
 
 async function fetchMediaKeyValidation(env, token) {
   for (let attempt = 1; attempt <= CREATION_MEDIA_AUTH_ATTEMPTS; attempt += 1) {
@@ -424,8 +435,14 @@ async function requireMediaUploadAuth(request, env) {
   const token = extractManualApiKey(request);
   if (!token) throw unauthorized('请先登录');
 
+  const cacheable = Boolean(env.PLUGIN_KV && typeof env.PLUGIN_KV.get === 'function');
+  const cacheKey = cacheable ? await mediaAuthCacheKey(token) : '';
+  if (cacheable && (await env.PLUGIN_KV.get(cacheKey))) return;
+
   const response = await fetchMediaKeyValidation(env, token);
   if (!response.ok) throw unauthorized('请先登录');
+  if (cacheable)
+    await env.PLUGIN_KV.put(cacheKey, '1', { expirationTtl: CREATION_MEDIA_AUTH_CACHE_TTL_SECONDS });
 }
 
 function creationMediaKey(token) {

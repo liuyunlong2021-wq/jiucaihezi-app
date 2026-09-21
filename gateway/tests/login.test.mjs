@@ -380,8 +380,11 @@ test('creation media upload accepts a NewAPI key only after upstream validation'
     const payload = await readJson(response);
     assert.equal(response.status, 200);
     assert.match(payload.url, /\/media\/creation\/[a-f0-9]{32}$/);
-    assert.equal(env.PLUGIN_KV.map.size, 1);
-    assert.equal([...env.PLUGIN_KV.map.values()][0].options.expirationTtl, 15 * 60);
+    // KV 里现在有两项：凭据校验缓存 + 媒体本体
+    const mediaKeys = [...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media:'));
+    assert.equal(mediaKeys.length, 1);
+    assert.equal(env.PLUGIN_KV.map.get(mediaKeys[0]).options.expirationTtl, 15 * 60);
+    assert.equal([...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media-auth:')).length, 1);
   } finally {
     globalThis.fetch = previousFetch;
   }
@@ -425,7 +428,59 @@ test('creation media upload retries once when credential validation flaps', asyn
     }), env);
     assert.equal(response.status, 200);
     assert.equal(attempts, 2);
-    assert.equal(env.PLUGIN_KV.map.size, 1);
+    assert.equal([...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media:')).length, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('creation media upload caches a valid credential check for the following uploads', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  let validations = 0;
+  globalThis.fetch = async () => {
+    validations += 1;
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    // 多张参考图 = 多次上传，第二次起不得再跑那条慢的回源校验
+    for (const name of ['first.png', 'second.png', 'third.png']) {
+      const form = new FormData();
+      form.append('file', new File(['image'], name, { type: 'image/png' }));
+      const response = await gateway.fetch(request('/api/creations/uploads', {
+        method: 'POST',
+        headers: { 'x-api-key': 'sk-valid-1234567890' },
+        body: form
+      }), env);
+      assert.equal(response.status, 200);
+    }
+    assert.equal(validations, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
+test('creation media upload never caches a rejected credential check', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  let validations = 0;
+  globalThis.fetch = async () => {
+    validations += 1;
+    return new Response('{}', { status: 401 });
+  };
+  try {
+    for (const name of ['first.png', 'second.png']) {
+      const form = new FormData();
+      form.append('file', new File(['image'], name, { type: 'image/png' }));
+      const response = await gateway.fetch(request('/api/creations/uploads', {
+        method: 'POST',
+        headers: { 'x-api-key': 'sk-rejected-1234567890' },
+        body: form
+      }), env);
+      assert.equal(response.status, 401);
+    }
+    assert.equal(validations, 2);
+    assert.equal([...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media-auth:')).length, 0);
   } finally {
     globalThis.fetch = previousFetch;
   }
