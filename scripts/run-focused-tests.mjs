@@ -62,8 +62,6 @@ const wave1FocusedTests = [
   'src/composables/__tests__/officeTools.test.ts',
   'src/runtime/tools/__tests__/kernel.test.ts',
   'src/runtime/tools/__tests__/artifacts.test.ts',
-  'src/runtime/tools/__tests__/skillCreatorRuntime.test.ts',
-  'src/runtime/tools/__tests__/skillBuilderRuntime.test.ts',
   'src/runtime/tools/__tests__/jobRunner.test.ts',
   'src/runtime/tools/__tests__/mcpBridge.test.ts',
   'src/runtime/connection/__tests__/toolConnection.test.ts',

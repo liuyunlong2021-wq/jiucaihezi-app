@@ -60,34 +60,56 @@ test('skill-creator reports missing and read-only installed Skills without files
 })
 
 test('skill-creator validates official agents and eval-viewer package paths', async () => {
+  const draftPath = '.raw/jc-media/文档/skill-demo-skill'
+  const entries = {
+    [`${draftPath}/SKILL.md`]: skillMd,
+    [`${draftPath}/agents/grader.md`]: '# grader',
+    [`${draftPath}/eval-viewer/generate_review.py`]: 'print(1)',
+    [`${draftPath}/LICENSE.txt`]: 'MIT',
+  }
   const result = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_validate', {
-    skill_md: skillMd,
-    references: [
-      { path: 'agents/grader.md', content: '# grader' },
-      { path: 'eval-viewer/generate_review.py', content: 'print(1)' },
-      { path: 'LICENSE.txt', content: 'MIT' },
-    ],
-  }), { agentId: 'skill-creator', sessionId: 'test' }))
+    draft_path: draftPath,
+  }), {
+    agentId: 'skill-creator',
+    sessionId: 'package-paths',
+    files: {
+      async list(directory) { return Object.keys(entries).filter(path => path.startsWith(`${directory}/`)) },
+      async readText(path) { return entries[path as keyof typeof entries] ?? '' },
+      async hashFile() { return 'hash' },
+    },
+  }))
   assert.equal(result.status, 'ok')
 })
 
-test('skill-creator runtime rejects tests before validation', async () => {
+test('skill-creator asks for a draft path when the call carries none', async () => {
   const result = JSON.parse(await executeSkillCreatorToolCall(call('run_skill_tests', {
-    draft_skill_md: skillMd,
     test_cases: [],
     test_id: 'blocked',
   }), { agentId: 'skill-creator', sessionId: 'test' }))
   assert.equal(result.status, 'error')
-  assert.equal(result.errorCode, 'SKILL_CREATOR_VALIDATE_REQUIRED')
+  assert.equal(result.errorCode, 'SKILL_DRAFT_PATH_REQUIRED')
+  // 报错要能自敕：告诉模型草稿该放在哪里
+  assert.match(result.message, /draft_path/)
+  assert.match(result.message, /jc-media\/文档\/skill-/)
 })
 
-test('save_skill prepares a draft for user confirmation without claiming it is installed', async () => {
+test('save_skill freezes a file-tree draft for user confirmation without claiming it is installed', async () => {
+  const draftPath = '.raw/jc-media/文档/skill-demo-skill'
   const result = JSON.parse(await executeSkillCreatorToolCall(call('save_skill', {
-    skill_md: skillMd,
-  }), { agentId: 'other-agent', sessionId: 'prepare-save' }))
+    draft_path: draftPath,
+  }), {
+    agentId: 'skill-creator',
+    sessionId: 'prepare-save',
+    files: {
+      async list(directory) { return [`${directory}/SKILL.md`] },
+      async readText(path) { return path.endsWith('SKILL.md') ? skillMd : '' },
+      async hashFile() { return 'hash' },
+    },
+  }))
 
   assert.equal(result.status, 'prepared')
-  assert.match(result.draft_id, /^draft_/)
+  assert.equal(result.draft_path, draftPath)
+  assert.match(result.draft_id, /^draft_/, '安装快照必须有自己的 draftId')
   assert.equal(result.skill_md, skillMd)
   assert.match(result.message, /install_token/)
   assert.equal(result.install_token.revision, result.revision)
@@ -100,7 +122,7 @@ test('truncated tool arguments return an actionable error instead of the raw JSO
     type: 'function',
     function: {
       name: 'save_skill',
-      arguments: '{"draft_id":"draft_1","revision":1,"content_hash":"abc',
+      arguments: '{"draft_path":".raw/jc-media/文档/skill-x","test_cases":[',
     },
   }
 
@@ -110,7 +132,7 @@ test('truncated tool arguments return an actionable error instead of the raw JSO
   assert.equal(result.errorCode, 'MALFORMED_TOOL_ARGUMENTS')
   assert.match(result.message, /save_skill/)
   assert.match(result.message, /收到 \d+ 字符/)
-  assert.match(result.message, /draft_id/)
+  assert.match(result.message, /draft_path/)
   // 不能把引擎的原生报错原样丢给模型和用户。
   assert.doesNotMatch(result.message, /Unterminated|JSON Parse error/i)
 })

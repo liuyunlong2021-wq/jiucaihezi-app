@@ -1,5 +1,4 @@
 import type { ChatCompletionTool } from '@/composables/officeTools'
-import { skillBuilderRuntime, shouldUseSkillBuilderRuntime } from '@/runtime/tools/skillBuilderRuntime'
 import { getLocalContentToolDefinitions } from '@/utils/localContentTools'
 import { buildSkillPackageFromText, type SkillPackageDraftManifest, type SkillPackageReference } from '@/utils/skillTextBuilder'
 import {
@@ -162,19 +161,6 @@ export async function executeSkillBuilderToolCall(
       sourceText: String(args.source_text || ''),
     })
     const draftRecord = await registerSkillBuilderDraft({ ...draft, sessionId: context?.sessionId })
-    if (shouldUseSkillBuilderRuntime(context)) {
-      skillBuilderRuntime.afterToolResult({
-        toolName: 'build_skill_from_text',
-        args: { ...args, draft_id: draftRecord.draftId },
-        context,
-        result: {
-          status: 'ok',
-          draft_id: draftRecord.draftId,
-          revision: draftRecord.revision,
-          content_hash: draftRecord.contentHash,
-        },
-      })
-    }
 
     return JSON.stringify({
       status: 'ok',

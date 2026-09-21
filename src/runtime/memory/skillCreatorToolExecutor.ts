@@ -14,10 +14,9 @@ import {
   type SkillTestToolResult,
 } from '@/utils/skillTestRunner'
 import { appendSkillCreatorHistory, loadSkillCreatorFeedback, persistSkillCreatorFeedback, persistSkillCreatorReviewWorkspace, persistSkillCreatorWorkspaceArtifact } from '@/utils/skillCreatorWorkspace'
-import { getSkillBuilderDraft, registerSkillBuilderDraft, SkillBuilderDraftError } from '@/utils/skillBuilderTools'
+import { registerSkillBuilderDraft, SkillBuilderDraftError } from '@/utils/skillBuilderTools'
 import { type SkillPackageDraftManifest, type SkillPackageReference } from '@/utils/skillTextBuilder'
-import { assertSkillDraftPath, hashSkillDraftDirectory, readSkillDraft, type SkillDraftFiles } from '@/utils/skillDraftPath'
-import { skillCreatorRuntime, shouldUseSkillCreatorRuntime } from '@/runtime/tools/skillCreatorRuntime'
+import { assertSkillDraftPath, readSkillDraft, type SkillDraftFiles } from '@/utils/skillDraftPath'
 
 const TOOL_NAMES = new Set([
   'skill_creator_load_installed_skill',
@@ -86,30 +85,17 @@ export async function executeSkillCreatorToolCall(
       message: error instanceof Error ? error.message : String(error),
     })
   }
-  const runtimeContext = {
-    agentId: context.agentId,
-    sessionId: context.sessionId,
-    userInput: context.userInput,
-  }
-  const gate = shouldUseSkillCreatorRuntime(runtimeContext)
-    ? skillCreatorRuntime.beforeToolCall({ toolName: call.function.name, args, context: runtimeContext })
-    : { allowed: true }
-  if (!gate.allowed) return JSON.stringify({ status: 'error', errorCode: 'errorCode' in gate ? gate.errorCode : undefined, message: 'message' in gate ? gate.message : undefined, nextStep: 'nextStep' in gate ? gate.nextStep : undefined })
-
+  // 流程顺序不再由宿主状态机把守：草稿状态就是文件本身，校验、测试、评审、出卡各自
+  // 从草稿目录读当前内容。"不能安装没校验过的草稿"仍由 save_skill 内部的
+  // validateSkillDraft 兜住。
   try {
-    const result = await execute(call.function.name, args, context)
-    if (shouldUseSkillCreatorRuntime(runtimeContext))
-      skillCreatorRuntime.afterToolResult({ toolName: call.function.name, args, context: runtimeContext, result: JSON.parse(result) })
-    return result
+    return await execute(call.function.name, args, context)
   } catch (error) {
-    const result = JSON.stringify({
+    return JSON.stringify({
       status: 'error',
       errorCode: error instanceof SkillDraftError || error instanceof SkillBuilderDraftError ? error.code : undefined,
       message: error instanceof Error ? error.message : String(error),
     })
-    if (shouldUseSkillCreatorRuntime(runtimeContext))
-      skillCreatorRuntime.afterToolResult({ toolName: call.function.name, args, context: runtimeContext, result: JSON.parse(result) })
-    return result
   }
 }
 
@@ -137,9 +123,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     const draft = await resolveDraft(args, context)
     return JSON.stringify({
       ...validateSkillDraft(draft.skillMd, draft.references),
-      draft_id: draft.draftId,
-      revision: draft.revision,
-      content_hash: draft.contentHash,
+      draft_path: draft.draftPath,
     })
   }
   if (name === 'run_skill_tests') {
@@ -164,9 +148,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     await appendSkillCreatorHistory({ sessionId: draft.sessionId, draftId: draft.draftId, entry: { event: 'tested', revision: draft.revision, iteration, timestamp: new Date().toISOString(), provider: result.execution.provider, model: result.execution.model } })
     return JSON.stringify({
       status: 'ok',
-      draft_id: draft.draftId,
-      revision: draft.revision,
-      content_hash: draft.contentHash,
+      draft_path: draft.draftPath,
       ...result,
       benchmark,
       notes: benchmark.notes,
@@ -177,7 +159,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
   if (name === 'skill_creator_aggregate_benchmark') {
     if (!stored) throw new Error(`找不到测试结果: ${testId}`)
     const draft = await resolveDraft(args, context)
-    return JSON.stringify({ status: 'ok', draft_id: draft.draftId, revision: draft.revision, content_hash: draft.contentHash, benchmark: aggregateBenchmark(stored.results, String(args.skill_name || stored.skillName)) })
+    return JSON.stringify({ status: 'ok', draft_path: draft.draftPath, benchmark: aggregateBenchmark(stored.results, String(args.skill_name || stored.skillName)) })
   }
   if (name === 'skill_creator_open_eval_review') {
     if (!stored) throw new Error(`找不到测试结果: ${testId}`)
@@ -191,7 +173,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
       results: stored.results,
       benchmark: stored.benchmark,
     })
-    return JSON.stringify({ status: 'ok', draft_id: draft.draftId, revision: draft.revision, content_hash: draft.contentHash, iteration: stored.iteration, review_html: workspace ? undefined : html, review_path: workspace?.reviewHtmlPath, benchmark: stored.benchmark })
+    return JSON.stringify({ status: 'ok', draft_path: draft.draftPath, iteration: stored.iteration, review_html: workspace ? undefined : html, review_path: workspace?.reviewHtmlPath, benchmark: stored.benchmark })
   }
   if (name === 'skill_creator_submit_eval_feedback') {
     const draft = await resolveDraft(args, context)
@@ -199,13 +181,13 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     const reviews = Array.isArray(args.reviews) ? args.reviews.map((review: any) => ({ run_id: String(review.run_id || ''), feedback: String(review.feedback ?? ''), timestamp: new Date().toISOString() })).filter(review => review.run_id) : []
     const saved = await persistSkillCreatorFeedback({ sessionId: draft.sessionId, draftId: draft.draftId, iteration, reviews })
     await appendSkillCreatorHistory({ sessionId: draft.sessionId, draftId: draft.draftId, entry: { event: 'feedback', revision: draft.revision, iteration, timestamp: new Date().toISOString() } })
-    return JSON.stringify({ status: 'ok', draft_id: draft.draftId, revision: draft.revision, content_hash: draft.contentHash, iteration, saved_count: saved.reviews.length, empty_feedback_count: saved.reviews.filter(review => !review.feedback.trim()).length })
+    return JSON.stringify({ status: 'ok', draft_path: draft.draftPath, iteration, saved_count: saved.reviews.length, empty_feedback_count: saved.reviews.filter(review => !review.feedback.trim()).length })
   }
   if (name === 'skill_creator_load_eval_feedback') {
     const draft = await resolveDraft(args, context)
     const iteration = positiveInteger(args.iteration)
     const feedback = await loadSkillCreatorFeedback({ sessionId: draft.sessionId, draftId: draft.draftId, iteration })
-    return JSON.stringify({ status: 'ok', draft_id: draft.draftId, revision: draft.revision, content_hash: draft.contentHash, iteration, feedback })
+    return JSON.stringify({ status: 'ok', draft_path: draft.draftPath, iteration, feedback })
   }
   if (name === 'skill_creator_compare_outputs') {
     if (!stored) throw new Error(`找不到测试结果: ${testId}`)
@@ -218,7 +200,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     const comparison = await compareSkillOutputs(selected, String(args.rubric || ''), `${testId}:${evalId}`, context.signal)
     comparisons.set(`${runKey}::${evalId}`, comparison)
     const comparisonPath = await persistSkillCreatorWorkspaceArtifact({ sessionId: draft.sessionId, draftId: draft.draftId, iteration: stored.iteration, fileName: 'comparison.json', value: comparison })
-    return JSON.stringify({ status: 'ok', draft_id: draft.draftId, revision: draft.revision, content_hash: draft.contentHash, eval_id: evalId, comparison: comparison.comparison, comparison_path: comparisonPath })
+    return JSON.stringify({ status: 'ok', draft_path: draft.draftPath, eval_id: evalId, comparison: comparison.comparison, comparison_path: comparisonPath })
   }
   if (name === 'skill_creator_analyze_comparison') {
     if (!stored) throw new Error(`找不到测试结果: ${testId}`)
@@ -230,7 +212,7 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     const evidence = JSON.stringify({ skill_md: stored.skillMd, runs: result?.runs.map(run => ({ configuration: run.configuration, transcript: run.transcript, output: run.output, assertions: run.assertions })) })
     const analysis = await analyzeSkillComparison(comparison, evidence, context.signal)
     const analysisPath = await persistSkillCreatorWorkspaceArtifact({ sessionId: draft.sessionId, draftId: draft.draftId, iteration: stored.iteration, fileName: 'analysis.json', value: analysis })
-    return JSON.stringify({ status: 'ok', draft_id: draft.draftId, revision: draft.revision, content_hash: draft.contentHash, eval_id: evalId, comparison, analysis, analysis_path: analysisPath })
+    return JSON.stringify({ status: 'ok', draft_path: draft.draftPath, eval_id: evalId, comparison, analysis, analysis_path: analysisPath })
   }
   if (name === 'skill_creator_improve_description') {
     const draft = await resolveDraft(args, context)
@@ -241,40 +223,19 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
       benchmarkNotes: Array.isArray(args.benchmark_notes) ? args.benchmark_notes.map(String) : [],
     }, context.signal)
     // 草稿归模型管：宿主不替它改文件树，只把改好的正文交回去由模型自己写回。
-    if (draft.draftPath) {
-      return JSON.stringify({
-        status: 'ok',
-        draft_path: draft.draftPath,
-        skill_md: improved.skillMd,
-        output: improved.output,
-        message: `请把 skill_md 用 write_text_batch 写回 ${draft.draftPath}/SKILL.md，然后重新调用 skill_creator_validate。`,
-      })
-    }
-    const updated = await registerSkillBuilderDraft({
-      draftId: draft.draftId,
-      expectedRevision: draft.revision,
-      skillMd: improved.skillMd,
-      references: draft.references,
-      manifest: draft.manifest,
-      quality: draft.quality,
-      sessionId: context.sessionId,
-    })
     return JSON.stringify({
       status: 'ok',
-      draft_id: updated.draftId,
-      revision: updated.revision,
-      content_hash: updated.contentHash,
-      skill_md: updated.skillMd,
+      draft_path: draft.draftPath,
+      skill_md: improved.skillMd,
       output: improved.output,
+      message: `请把 skill_md 用 write_text_batch 写回 ${draft.draftPath}/SKILL.md，然后重新调用 skill_creator_validate。`,
     })
   }
   if (name === 'skill_creator_package') {
     const draft = await resolveDraft(args, context)
     return JSON.stringify({
       ...packageSkillDraft(draft.skillMd, draft.references),
-      draft_id: draft.draftId,
-      revision: draft.revision,
-      content_hash: draft.contentHash,
+      draft_path: draft.draftPath,
     })
   }
   if (name === 'save_skill') {
@@ -284,15 +245,15 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     const targetSkillId = String(args.target_skill_id || validation.name)
     // 出卡即冻结：文件树草稿在这里被复制成一份受控快照（旧受控草稿库的草稿本身就是快照）。
     // Rust 侧只认快照与它的哈希，模型指定的路径不会被当成安装来源。
-    const frozen = draft.draftPath
-      ? await registerSkillBuilderDraft({
-          skillMd: draft.skillMd,
-          references: draft.references,
-          manifest: buildDraftManifest(draft.references),
-          sessionId: context.sessionId,
-        })
-      : draft
-    if (!frozen.draftId || !Number.isSafeInteger(frozen.revision) || !frozen.contentHash) {
+    // 出卡即冻结：把文件树草稿读回来、校验通过后冻结成一份受控快照。Rust 侧只认快照
+    // 与它的哈希，模型给的路径永远不会被当成安装来源。
+    const frozen = await registerSkillBuilderDraft({
+      skillMd: draft.skillMd,
+      references: draft.references,
+      manifest: buildDraftManifest(draft.references),
+      sessionId: context.sessionId,
+    })
+    if (!Number.isSafeInteger(frozen.revision) || !frozen.contentHash) {
       throw new SkillDraftError('SKILL_DRAFT_REQUIRED', '草稿冻结失败，请稍后重试。')
     }
     return JSON.stringify({
@@ -312,7 +273,6 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
       },
       skill_md: draft.skillMd,
       references: draft.references,
-      manifest: args.manifest,
       message: '草稿已准备完成。请把 install_token 原样放进 jc-skill-install-v2 代码块；用户点击安装卡后才会写入中央 Skill 根目录。',
     })
   }
@@ -331,7 +291,7 @@ function parseArgs(toolName: string, value?: string): Record<string, any> {
   try {
     parsed = JSON.parse(raw)
   } catch {
-    throw new Error(`工具参数 JSON 不完整（${toolName}，收到 ${raw.length} 字符）：多半是回复被输出长度截断。请缩短参数后重试——只传 draft_id、revision、content_hash 这类标识，不要把 SKILL.md 正文或 references 全文复制进参数；必要时拆成多次调用。`)
+    throw new Error(`工具参数 JSON 不完整（${toolName}，收到 ${raw.length} 字符）：多半是回复被输出长度截断。请缩短参数后重试——只传 draft_path 这类标识，不要把 SKILL.md 正文或 references 全文复制进参数；必要时拆成多次调用。`)
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`工具参数必须是 JSON 对象（${toolName}）。`)
   return parsed as Record<string, any>
@@ -346,46 +306,20 @@ function normalizeReferences(value: unknown): Array<{ path: string; content: str
     : []
 }
 
+/**
+ * 草稿就在项目文件树里，模型给目录，宿主只读回来。
+ *
+ * 路径即身份：不再有不透明标识，也不再有宿主内的草稿状态。
+ */
 async function resolveDraft(args: Record<string, any>, context: SkillCreatorToolContext): Promise<ResolvedSkillDraft> {
-  // 文件树草稿：路径即身份。
   const draftPath = String(args.draft_path || '').trim()
-  if (draftPath) return await readFileTreeDraft(draftPath, context)
-
-  const draftId = String(args.draft_id || '').trim()
-  const stored = draftId ? await getSkillBuilderDraft(draftId, context.sessionId) : null
-  if (draftId && !stored) throw new SkillDraftError('SKILL_DRAFT_NOT_FOUND', `找不到当前会话的 Skill 草稿: ${draftId}`)
-  if (stored) {
-    assertDraftIdentity(stored, args)
-    const nextSkillMd = String(args.draft_skill_md || args.skill_md || '')
-    const hasReferences = Array.isArray(args.references)
-    if (!nextSkillMd.trim() && !hasReferences) return stored
-    return registerSkillBuilderDraft({
-      draftId: stored.draftId,
-      expectedRevision: stored.revision,
-      skillMd: nextSkillMd.trim() ? nextSkillMd : stored.skillMd,
-      references: hasReferences ? toDraftReferences(normalizeReferences(args.references)) : stored.references,
-      manifest: args.manifest || stored.manifest,
-      quality: stored.quality,
-      sessionId: context.sessionId,
-    })
+  if (!draftPath) {
+    throw new SkillDraftError(
+      'SKILL_DRAFT_PATH_REQUIRED',
+      '请提供 draft_path（草稿目录，形如 .raw/jc-media/文档/skill-<name>）。草稿由你用文件工具写在项目文件树里。',
+    )
   }
-  const skillMd = String(args.draft_skill_md || args.skill_md || '')
-  if (!skillMd.trim()) throw new SkillDraftError('SKILL_DRAFT_REQUIRED', '请提供 draft_id 或 skill_md')
-  const references = normalizeReferences(args.references)
-  return registerSkillBuilderDraft({
-    skillMd,
-    references: toDraftReferences(references),
-    manifest: args.manifest || {
-      kind: 'skill-package-draft',
-      schemaVersion: '2026-06-03.v1',
-      sourceType: 'manual',
-      createdAt: new Date().toISOString(),
-      entry: 'SKILL.md',
-      references: references.map(reference => ({ path: reference.path, title: reference.title || reference.path })),
-      quality: { hardGatePassed: true, errors: [], warnings: [] },
-    },
-    sessionId: context.sessionId,
-  })
+  return await readFileTreeDraft(draftPath, context)
 }
 
 function toDraftReferences(references: ReturnType<typeof normalizeReferences>): SkillPackageReference[] {
@@ -411,62 +345,34 @@ function buildDraftManifest(references: SkillPackageReference[]): SkillPackageDr
 }
 
 interface ResolvedSkillDraft {
-  /** 文件树草稿的项目相对目录；旧受控草稿库的草稿没有这个字段。 */
-  draftPath?: string
-  /** 内部句柄：旧受控草稿库是 `draft_xxx`，文件树草稿是草稿目录名。 */
+  /** 草稿目录（项目相对路径）。路径即身份。 */
+  draftPath: string
+  /** 宿主内部句柄，用于评测工作区与历史记录的路径；就是草稿目录名。 */
   draftId: string
   sessionId: string
+  /** 文件树草稿没有修订概念，恒为 1（仅供评测元数据）。 */
   revision: number
-  contentHash: string
   skillMd: string
   references: SkillPackageReference[]
-  manifest: SkillPackageDraftManifest
-  quality: { hardGatePassed: boolean; errors: string[]; warnings: string[] }
-  /** 草稿目录下的文件清单（含 SKILL.md）。 */
-  files?: string[]
 }
 
-/**
- * 读文件树里的草稿。
- *
- * 草稿由模型用现有文件工具写在 `.raw/jc-media/文档/skill-<id>/`，这里只读回来。
- * `revision` 对文件树草稿恒为 1：它没有修订概念，内容就是文件本身。
- */
+/** 读回文件树里的草稿：草稿由模型用现有文件工具写，宿主只读。 */
 async function readFileTreeDraft(draftPath: string, context: SkillCreatorToolContext): Promise<ResolvedSkillDraft> {
   const files = context.files
   if (!files) throw new SkillDraftError('SKILL_DRAFT_FILES_UNAVAILABLE', '当前运行环境读不到项目文件树里的草稿。')
   const directory = assertSkillDraftPath(draftPath)
   const draft = await readSkillDraft(directory, files)
-  const references = toDraftReferences(draft.references)
   return {
     draftPath: directory,
     draftId: directory.slice(directory.lastIndexOf('/') + 1),
     sessionId: context.sessionId || 'unsaved-session',
     revision: 1,
-    // ponytail: 每次调用都哈希一遍草稿目录。草稿是 KB 级的（一个 SKILL.md + 几个引用），
-    // 换来的是调用点零改动；若将来草稿带大资产，改成只有 save_skill / package 惰性计算。
-    contentHash: await hashSkillDraftDirectory(directory, files),
     skillMd: draft.skillMd,
-    references,
-    manifest: buildDraftManifest(references),
-    quality: { hardGatePassed: true, errors: [], warnings: [] },
-    files: draft.files,
+    references: toDraftReferences(draft.references),
   }
 }
 
-function assertDraftIdentity(
-  draft: { revision: number; contentHash: string },
-  args: Record<string, any>,
-): void {
-  const revision = Number(args.revision)
-  const contentHash = String(args.content_hash || '').trim()
-  if ((Number.isSafeInteger(revision) && revision !== draft.revision) || (contentHash && contentHash !== draft.contentHash)) {
-    throw new SkillDraftError(
-      'STALE_SKILL_DRAFT',
-      `Skill 草稿版本已变化：当前 revision ${draft.revision}，请重新校验并生成确认卡。`,
-    )
-  }
-}
+function assertDraftIdentityRemovedForReference() { /* 旧的 draft_id/revision/content_hash 核对已随状态机一起删除 */ }
 
 class SkillDraftError extends Error {
   constructor(readonly code: string, message: string) {

@@ -102,7 +102,25 @@
 
 **待办的前置验证**：`write_text_batch` 是否能显式写 `.raw/jc-media/文档/` 下的路径（现有证据只证明 `create_document`/`create_html` 会写该目录，以及 `write_text_batch` 支持 `wiki/` 下的显式路径）。这是第 1 步的第一道门，不通过则草稿落点改走 `create_document` 的命名规则。
 
-## 7. 明确不做
+## 7. 状态机删掉之后，原先由它把守的规则去了哪
+
+状态机不只是身份校验，它还拦过两件事。删除后这两条从「宿主强拦」变成「契约约定」：
+
+| 原先的强拦 | 现在 |
+| --- | --- |
+| 不能安装未校验的草稿 | **仍然把守**：`save_skill` 内部先跑 `validateSkillDraft`，不通过就返回校验错误 |
+| 测过之后必须先开评审才能出卡 | **不再强拦**，写在 SKILL.md 流程里由模型遵循 |
+| 素材转Skill 保存前至少 3 个测试用例 | **不再强拦**，同样写在流程里（且该线不可达，见下） |
+
+判定标准：能装不能装是数据完整性问题，必须把守；「有没有先看看评审再保存」是体验问题，不值得用宿主状态去强拦 —— 上一版正是在这里制造了死锁。
+
+### 素材转Skill 线当前不可达
+
+`build_skill_from_text` / `compile_skill_materials` / `local_extract_attachment` / `document_to_markdown` 这一线靠 `agentId` 为 `skill-builder` / `preset_skill-builder` 触发，但 `public/skills/index.json` 只有 `jc-new-user-guide` / `jc-watch` / `skill-creator` / `wiki-memory` 四个预设，**没有 skill-builder**。所以这一线目前没有入口。
+
+本次只删了它的状态机，没把它迁到文件树（合同 §3 写的是「产出的草稿同样落文件树」）。迁还是删，待定。
+
+## 8. 明确不做
 
 - 不建设第二套 Skill 管理器；复用现有扫描与安装卡。
 - 不增加 `should_trigger` / 训练集 / 自动 description 搜索循环。
@@ -110,6 +128,5 @@
 - 不改「用户手动选择 Skill」这条产品前提。
 
 ## 修订记录
-
-- 2026-09-21（实施中修订）：第 3 步落地时把「安装卡 V3」改成「出卡即冻结」——参考 §4 的说明。零 Rust 改动、零 UI 改动就拿到了同样的保证。
+- 2026-09-21（实施完成）：第 3 步与第 5 步已落地 —— 草稿按 `draft_path` 读写（11 个工具的 schema 只剩一个路径参数，旧的 `draft_id`/`revision`/`content_hash`/`skill_md`/`draft_skill_md`/`references`/`manifest` 全部退出协议）；两个状态机及其测试删除（-892 行）；原先被状态机把守的三条规则改由 §7 接管。- 2026-09-21（实施中修订）：第 3 步落地时把「安装卡 V3」改成「出卡即冻结」——参考 §4 的说明。零 Rust 改动、零 UI 改动就拿到了同样的保证。
 - 2026-09-21：制定。把散在 5 处的合同收敛为一份；草稿从系统临时目录改到项目文件树；三件套与内存状态机退出合同；安装卡升级为引用草稿路径的 V3 并保留出卡后防篡改校验。

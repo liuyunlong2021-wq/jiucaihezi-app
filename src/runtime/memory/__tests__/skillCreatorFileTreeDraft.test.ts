@@ -50,9 +50,10 @@ test('草稿在文件树里时，校验按 draft_path 读回', async () => {
   ))
 
   assert.equal(result.status, 'ok')
-  assert.equal(result.draft_id, 'skill-demo-skill')
-  assert.equal(result.revision, 1)
-  assert.match(result.content_hash, /^[0-9a-f]{64}$/)
+  assert.equal(result.draft_path, DRAFT_DIR)
+  // 三件套已退出协议：响应里不再回传任何不透明标识
+  assert.equal('draft_id' in result, false)
+  assert.equal('content_hash' in result, false)
 })
 
 test('草稿缺 SKILL.md 时给出可自救的报错，不报文件系统内部错误', async () => {
@@ -67,7 +68,7 @@ test('草稿缺 SKILL.md 时给出可自救的报错，不报文件系统内部�
   assert.match(result.message, /没有 SKILL\.md/)
 })
 
-test('draft_path 优先于 draft_id，不再依赖模型回传的标识', async () => {
+test('旧标识已退出协议：只认 draft_path，传旧的 draft_id 不会被误当成草稿来源', async () => {
   const files = draftFiles({ [`${DRAFT_DIR}/SKILL.md`]: SKILL_MD })
 
   const result = JSON.parse(await executeSkillCreatorToolCall(
@@ -76,6 +77,7 @@ test('draft_path 优先于 draft_id，不再依赖模型回传的标识', async 
   ))
 
   assert.equal(result.status, 'ok')
+  assert.equal(result.draft_path, DRAFT_DIR)
 })
 
 test('草稿路径越界时拒绝，并说清草稿该放哪', async () => {
