@@ -406,6 +406,31 @@ test('creation media upload returns 502 when upstream credential validation is u
   }
 });
 
+test('creation media upload retries once when credential validation flaps', async () => {
+  const env = createEnv();
+  const previousFetch = globalThis.fetch;
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts += 1;
+    if (attempts === 1) throw new Error('edge flap');
+    return new Response('{}', { status: 200 });
+  };
+  try {
+    const form = new FormData();
+    form.append('file', new File(['image'], 'reference.png', { type: 'image/png' }));
+    const response = await gateway.fetch(request('/api/creations/uploads', {
+      method: 'POST',
+      headers: { 'x-api-key': 'sk-valid-1234567890' },
+      body: form
+    }), env);
+    assert.equal(response.status, 200);
+    assert.equal(attempts, 2);
+    assert.equal(env.PLUGIN_KV.map.size, 1);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
+});
+
 test('browser tab icons redirect to the shared landing logo', async () => {
   const env = createEnv();
   const favicon = await gateway.fetch(request('/favicon.ico', { method: 'HEAD' }), env);

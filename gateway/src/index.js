@@ -394,7 +394,28 @@ function handleHealth(request) {
 
 const CREATION_MEDIA_TTL_SECONDS = 15 * 60;
 const CREATION_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
-const CREATION_MEDIA_AUTH_TIMEOUT_MS = 5_000;
+// 登录校验要从 Worker 绕回公网调 NewAPI 的 /v1/models，5 秒预算在边缘抖动时
+// 会把正常上传打成 502（2026-09-21 图生图实拍）。留给 15 秒并重试一次，
+// 两次都失败才按上游故障报 502。
+// ponytail: 该端点返回整份模型目录，只用来判活；若 NewAPI 长期超 15 秒，
+// 应换成轻量鉴权端点，而不是继续放宽这个数字。
+const CREATION_MEDIA_AUTH_TIMEOUT_MS = 15_000;
+const CREATION_MEDIA_AUTH_ATTEMPTS = 2;
+
+async function fetchMediaKeyValidation(env, token) {
+  for (let attempt = 1; attempt <= CREATION_MEDIA_AUTH_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetch(`${legacyApiBase(env)}/v1/models`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}`, 'x-api-key': token },
+        signal: AbortSignal.timeout(CREATION_MEDIA_AUTH_TIMEOUT_MS)
+      });
+    } catch {
+      // 抖动就再试一次；最后一次也失败时跳出循环，由调用方报上游故障
+    }
+  }
+  throw upstreamError('登录校验服务暂时不可用');
+}
 
 async function requireMediaUploadAuth(request, env) {
   const sessionUser = await getSessionUser(request, env);
@@ -403,16 +424,7 @@ async function requireMediaUploadAuth(request, env) {
   const token = extractManualApiKey(request);
   if (!token) throw unauthorized('请先登录');
 
-  let response;
-  try {
-    response = await fetch(`${legacyApiBase(env)}/v1/models`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}`, 'x-api-key': token },
-      signal: AbortSignal.timeout(CREATION_MEDIA_AUTH_TIMEOUT_MS)
-    });
-  } catch {
-    throw upstreamError('登录校验服务暂时不可用');
-  }
+  const response = await fetchMediaKeyValidation(env, token);
   if (!response.ok) throw unauthorized('请先登录');
 }
 
