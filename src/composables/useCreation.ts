@@ -124,8 +124,10 @@ export function isAiAppRatioField(field: Pick<CreationFieldSpec, 'key'>): boolea
   return name === 'aspect_ratio' || name === 'ratio'
 }
 
-export function isAiAppDurationField(field: Pick<CreationFieldSpec, 'label'>): boolean {
-  return field.label === '时长'
+// 8 个 H3 应用的时长节点分别是 132:value / 133:value / 27:value；
+// 多参-4图 的描述是 value（不是「时长」），所以不能只认 label
+export function isAiAppDurationField(field: Pick<CreationFieldSpec, 'key' | 'label'>): boolean {
+  return field.label === '时长' || String(field.key).endsWith(':value')
 }
 
 export function isAiAppQualityField(field: Pick<CreationFieldSpec, 'key'>): boolean {

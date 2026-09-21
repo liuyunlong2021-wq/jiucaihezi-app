@@ -171,6 +171,36 @@ test('文武双修 应用用 28:prompt 承接主提示词，参考图按画布�
   assert.equal(params['27:value'], 5)
 })
 
+test('多参-4图 的时长节点描述是 value，仍按统一默认 5 提交', () => {
+  switchTask('ai-app')
+  switchModel('runninghub/aiapp/rh-aiapp')
+  cpState.aiAppWebappId = '2093651661213491202'
+  cpState.aiAppLabel = 'Minimax-h3 多参-4图'
+  cpState.aiAppOutputType = 'video'
+  cpState.aiAppBillingModel = 'rh-aiapp'
+  cpState.prompt = '四个人一起转绘'
+  cpState.aiAppFields = [
+    ...[137, 156, 157, 158].map((nodeId, index) => ({
+      key: `${nodeId}:image`,
+      label: 'image',
+      kind: 'image',
+    })),
+    { key: '141:text', label: 'text', kind: 'text', defaultValue: '旧提示词' },
+    { key: '115:aspect_ratio', label: 'aspect_ratio', kind: 'select', defaultValue: '9:16 (Portrait Widescreen)' },
+    { key: '115:megapixels', label: 'megapixels', kind: 'number', defaultValue: '0.4' },
+    { key: '132:value', label: 'value', kind: 'number', defaultValue: '15' },
+  ]
+
+  const params = buildCurrentCreationParams({ images: ['a.png', 'b.png'] })
+
+  assert.equal(params['141:text'], '四个人一起转绘')
+  assert.equal(params['137:image'], 'a.png')
+  assert.equal(params['156:image'], 'b.png')
+  assert.equal('157:image' in params, false)
+  assert.equal(params['115:megapixels'], 0.9)
+  assert.equal(params['132:value'], 5)
+})
+
 test('Seed Audio rejects reference files larger than 10 MB', () => {
   switchTask('audio')
   switchModel('seed-audio-1.0')
