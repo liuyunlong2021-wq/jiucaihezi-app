@@ -1,0 +1,193 @@
+# 韭菜盒子 RH 渠道 MiniMax H3 视频 API 对外接入
+
+> 本文档是韭菜盒子 NewAPI 的公开接入合同，只描述韭菜盒子接口，不包含上游服务、内部适配器或密钥信息。
+>
+> 适用对象：需要通过第三方客户端调用 `rh-minimax-h3-*` 系列视频模型的用户。
+>
+> 2026-09-21 制定，随 v2.1.63 生效：RH 渠道的 7 个 Minimax-h3 应用从统一模型名拆分为 7 个独立模型名，每个模型名对应一种参考图用法。旧写法（统一模型名 + 参考图槽位参数）不再是接入合同。
+
+## 接入信息
+
+| 项目 | 值 |
+| --- | --- |
+| Base URL | `https://api.jiucaihezi.studio` |
+| 创建视频 | `POST /v1/videos` |
+| 查询任务 | `GET /v1/videos/{task_id}` |
+| 下载成片 | `GET /v1/videos/{task_id}/content` |
+| 上传参考素材 | `POST /api/creations/uploads` |
+| 认证 | `Authorization: Bearer <你的 API Key>` |
+
+## 模型与计价
+
+7 个模型的请求字段、比例枚举和响应格式完全相同，只有参考图数量不同。
+
+| 模型名 | 用法 | 需要几张 `images` | 不传 `duration` 时的时长 |
+| --- | --- | --- | --- |
+| `rh-minimax-h3-text` | 纯文字生成视频 | 0 张，**不能传图** | 9 秒 |
+| `rh-minimax-h3-first-frame` | 指定首帧，补出后续画面 | 必须 1 张 | 4 秒 |
+| `rh-minimax-h3-first-last-frame` | 同时指定首帧与尾帧 | 必须 2 张 | 2 秒 |
+| `rh-minimax-h3-ref-2` | 两张参考图 | 必须 2 张 | 2 秒 |
+| `rh-minimax-h3-ref-3` | 三张参考图 | 必须 3 张 | 2 秒 |
+| `rh-minimax-h3-ref-4` | 四张参考图 | 必须 4 张 | 15 秒 |
+| `rh-minimax-h3-ref-5` | 五张参考图 | 必须 5 张 | 3 秒 |
+
+按秒计费，实际扣费以响应中的 `charged_points` 和账户账单为准，**客户端不要写死单价**。上表的默认时长是各模型自带值，不传时按该值出片，建议始终显式传 `duration`。
+
+### 怎么选
+
+| 需求 | 用哪个 |
+| --- | --- |
+| 只有文字描述 | `rh-minimax-h3-text` |
+| 有起始画面，要它继续演 | `rh-minimax-h3-first-frame` |
+| 起始和结束画面都定好了 | `rh-minimax-h3-first-last-frame` |
+| 要角色、场景、道具各自保持原样 | 按参考图数量选 `rh-minimax-h3-ref-2` 到 `-ref-5` |
+
+`first-frame` 与 `ref-2` 都收 2 张图，但语义不同：前者是「从这张演到那张」，后者是「这两张都是参考，画面由提示词决定」。三类模型不能互替。
+
+## 创建任务
+
+接口为异步接口，成功后返回任务 ID。
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/v1/videos' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>' \
+  --header 'Content-Type: application/json' \
+  --data '{
+    "model": "rh-minimax-h3-ref-5",
+    "prompt": "生成一段图1和图2和图3三个男人在图5的大树下结拜的电影片段，图4的人群在围观。",
+    "images": [
+      "https://example.com/man-1.png",
+      "https://example.com/man-2.png",
+      "https://example.com/man-3.png",
+      "https://example.com/crowd.png",
+      "https://example.com/tree.png"
+    ],
+    "duration": 3,
+    "ratio": "9:16",
+    "quality": 0.4
+  }'
+```
+
+最小响应示例：
+
+```json
+{
+  "id": "<task_id>",
+  "task_id": "<task_id>",
+  "object": "video",
+  "model": "rh-minimax-h3-ref-5",
+  "status": "queued",
+  "progress": 0
+}
+```
+
+创建成功只表示请求已被受理，视频此时还没生成。轮询和下载始终使用创建时返回的 `id`。
+
+## 请求字段
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `model` | 是 | 上表 7 个模型名之一，其它值返回 400。 |
+| `prompt` | 是 | 视频内容描述，纯文本。长度上限由服务端决定，建议不超过 2000 字符。 |
+| `images` | 见上表 | 参考图 URL 数组。**数量必须与模型要求的张数完全相等**：少传或多传都返回 400，不会用占位图或忽略多余图片凑数。 |
+| `duration` | 否 | 视频时长（秒），按一位小数精度传入，例如 `3`、`2.5`。不传时按模型自带时长出片。 |
+| `ratio` | 否 | 画面比例，取值见下节。默认 `16:9`。 |
+| `quality` | 否 | 画面质量，`0.1`～`16`，步进 `0.1`，默认 `0.4`。取值越大分辨率越高，生成越慢。 |
+
+### 参考图顺序
+
+`images` 数组按顺序对应下表位置，服务端不额外排序。一条请求里的图片数量与模型不匹配时直接失败。
+
+| 模型 | 图 1 | 图 2 | 图 3 | 图 4 | 图 5 |
+| --- | --- | --- | --- | --- | --- |
+| `rh-minimax-h3-first-frame` | 首帧 | — | — | — | — |
+| `rh-minimax-h3-first-last-frame` | 首帧 | 尾帧 | — | — | — |
+| `rh-minimax-h3-ref-2` | 参考图 1 | 参考图 2 | — | — | — |
+| `rh-minimax-h3-ref-3` | 参考图 1 | 参考图 2 | 参考图 3 | — | — |
+| `rh-minimax-h3-ref-4` | 参考图 1 | 参考图 2 | 参考图 3 | 参考图 4 | — |
+| `rh-minimax-h3-ref-5` | 参考图 1 | 参考图 2 | 参考图 3 | 参考图 4 | 参考图 5 |
+
+**提示词里可以直接用「图1」「图2」指代对应位置的图片**，这是这几个模型最稳的用法。上节示例就是这么写的：图 1～3 是三个结拜的人，图 4 围观人群，图 5 大树。
+
+### 比例与画面尺寸
+
+`ratio` 支持 8 种取值：
+
+```text
+16:9   9:16   1:1   4:3   3:4   3:2   2:3   21:9
+```
+
+分辨率不是独立参数，由 `ratio` 和 `quality` 共同决定：`ratio` 定形状，`quality` 定大小。需要竖屏短片时用 `9:16`，需要横屏用 `16:9`。取值必须是上面 8 个之一，其它写法返回 400。
+
+### 参考图要求
+
+参考图必须是服务端可访问的 `http://` 或 `https://` URL，不接受本地文件路径。已有公网 URL 可以直接填；本地文件先上传到临时素材接口，再把返回的 URL 填进 `images`。
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/api/creations/uploads' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>' \
+  --form 'file=@./reference.png'
+```
+
+响应示例：
+
+```json
+{
+  "url": "https://api.jiucaihezi.studio/media/creation/<token>"
+}
+```
+
+- 单张图片不超过 20 MB，支持 JPG/PNG/WebP 等常见格式。
+- 临时素材接口返回的 URL **15 分钟后失效**，请在上传完成后 15 分钟内创建视频任务。
+- 图片链接需要在 **60 秒内**能被服务端完整读取，建议先用临时素材接口转存。
+
+## 查询任务
+
+建议每 5 秒查询一次，直到 `status` 为 `completed` 或 `failed`：
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>'
+```
+
+状态说明：
+
+| 状态 | 含义 |
+| --- | --- |
+| `queued` | 已受理：参考图转存或排队中。 |
+| `in_progress` | 生成中。 |
+| `completed` | 已完成，读取 `url`。 |
+| `failed` | 失败，读取 `error`，停止轮询。 |
+
+这几个模型的成片较长，生成期间停留在 `in_progress` 是正常的，**不要因为等待时间较长就重复创建任务**。
+
+## 下载成片
+
+完成后通过 `/content` 获取视频二进制，不要按 JSON 解析：
+
+```bash
+curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>/content' \
+  --header 'Authorization: Bearer <YOUR_API_KEY>' \
+  --output result.mp4
+```
+
+也可以直接使用查询响应里的 `url`。该地址不承诺永久有效，请及时把成片转存到自己的存储。
+
+任务数据由平台保留一段时间（当前为 7 天，与平台其它视频模型一致），超过保留期后查询和下载返回 `404`。
+
+## 错误处理
+
+| 状态/错误 | 原因与处理 |
+| --- | --- |
+| `400` | 模型名不在上表、提示词超长、`duration`/`ratio`/`quality` 取值不合法，或**参考图数量与模型不符**（最常见）。修正请求后按新任务重新提交。 |
+| `401` / `403` | API Key 缺失、错误，或账号没有该模型权限。 |
+| `402` | 余额不足。 |
+| `404` | 任务编号不存在，或已超出保留期。 |
+| `429` | 查询过快。降低查询频率后重试。 |
+| `500`、`502`、`503`、`504` | 服务暂不可用。稍后继续查询原任务，不要在客户端把它改成最终失败。 |
+
+参考图数量不符占了 400 的绝大多数：`rh-minimax-h3-text` 带了 `images`、`rh-minimax-h3-ref-3` 只传了 2 张、`ref-2` 传了 3 张，都会直接返回 400。
+
+## 修订记录
+
+- 2026-09-21：制定本合同。RH 渠道 7 个 Minimax-h3 应用从统一模型名改为 7 个独立模型名，参考图按数组顺序映射到位置，提示词统一写在一个字段里。
