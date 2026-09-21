@@ -33,6 +33,12 @@ import {
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
 import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
+import {
+  applyConversationSplitPlan,
+  buildConversationSplitPlan,
+  type ConversationSplitPlan,
+  type ConversationSplitResult,
+} from '@/runtime/memory/conversationSplit'
 import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
@@ -1575,6 +1581,58 @@ async function deleteConversation(item: MemoryConversation) {
   }
 }
 
+// ── 对话拆分：每轮一份文档，落到 .raw/jc-media/文档/对话/<短名>/ ──
+const conversationSplitPreview = ref<{ plan: ConversationSplitPlan; sourceContent: string } | null>(null)
+const conversationSplitResult = ref<ConversationSplitResult | null>(null)
+const conversationSplitBusy = ref(false)
+const conversationSplitError = ref('')
+
+function closeConversationSplit() {
+  if (conversationSplitBusy.value) return
+  conversationSplitPreview.value = null
+  conversationSplitResult.value = null
+  conversationSplitError.value = ''
+}
+
+async function splitConversation(item: MemoryConversation) {
+  conversationSplitPreview.value = null
+  conversationSplitResult.value = null
+  conversationSplitError.value = ''
+  conversationSplitBusy.value = true
+  try {
+    const text = await files.readText(item.resource)
+    conversationSplitPreview.value = {
+      plan: await buildConversationSplitPlan({
+        transcript: item.transcript,
+        sourcePath: item.resource.path,
+        sourceContent: text.content,
+      }),
+      sourceContent: text.content,
+    }
+  } catch (cause) {
+    conversationSplitError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    conversationSplitBusy.value = false
+  }
+}
+
+async function commitConversationSplit() {
+  const preview = conversationSplitPreview.value
+  if (!preview) return
+  conversationSplitBusy.value = true
+  try {
+    const result = await applyConversationSplitPlan(preview.plan, preview.sourceContent, files, projectOwner.value)
+    conversationSplitResult.value = result
+    conversationSplitPreview.value = null
+    // 产物是文件树里的新目录，写完就带用户去看（虚拟滚动下只设选中会落在屏幕外）。
+    emitEvent('project-filetree:locate', { path: result.directory, quiet: true })
+  } catch (cause) {
+    conversationSplitError.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    conversationSplitBusy.value = false
+  }
+}
+
 function closePreview() {
   const shouldRestoreCreation = restoreCreationAfterPreview.value
   restoreCreationAfterPreview.value = false
@@ -2943,6 +3001,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 :class="{ active: item.resource.path === conversation?.resource.path }"
               >
                 <button class="memory-conversation-name" @click="selectConversation(item)">{{ item.transcript.title }}</button>
+                <button class="memory-conversation-action" title="拆分" @click="splitConversation(item)"><JcIcon name="content-cut" /></button>
                 <button class="memory-conversation-action" title="重命名" @click="renameConversation(item)"><JcIcon name="edit" /></button>
                 <button class="memory-conversation-action" title="删除" @click="deleteConversation(item)"><JcIcon name="delete" /></button>
               </div>
@@ -3422,6 +3481,44 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button type="button" class="memory-editing-cancel" :disabled="fileWritePending" @click="closeFileWrite">取消</button>
             <button type="button" class="send-button memory-file-write-submit" :disabled="!fileWriteSelected || fileWritePending" title="确认写入" @click="commitFileWrite">
               <JcIcon :name="fileWritePending ? 'sync' : 'save'" :class="{ spinning: fileWritePending }" />
+            </button>
+          </footer>
+        </section>
+      </div>
+    </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="conversationSplitPreview || conversationSplitResult || conversationSplitError"
+        class="memory-file-write-backdrop"
+        @click.self="closeConversationSplit"
+      >
+        <section class="memory-file-write-dialog" role="dialog" aria-modal="true" aria-label="拆分对话">
+          <header>
+            <strong>拆分对话</strong>
+            <button class="icon-button" type="button" title="关闭" aria-label="关闭" :disabled="conversationSplitBusy" @click="closeConversationSplit"><JcIcon name="close" /></button>
+          </header>
+          <p v-if="conversationSplitBusy" class="memory-file-write-hint">正在写入…</p>
+          <template v-else-if="conversationSplitResult">
+            <p class="memory-file-write-hint">已拆分：新建 {{ conversationSplitResult.created }} · 刷新 {{ conversationSplitResult.updated }} · 跳过 {{ conversationSplitResult.skipped }}</p>
+            <p class="memory-file-write-hint">位置：{{ conversationSplitResult.directory }}</p>
+          </template>
+          <template v-else-if="conversationSplitPreview">
+            <p class="memory-file-write-hint">每轮一份文档：{{ conversationSplitPreview.plan.rounds }} 份 + index.md + 来源.md</p>
+            <p class="memory-file-write-hint">位置：{{ conversationSplitPreview.plan.directory }}</p>
+            <p class="memory-file-write-hint">首份：{{ conversationSplitPreview.plan.writes[0]?.fileName }}</p>
+          </template>
+          <p v-if="conversationSplitError" class="memory-file-write-hint">⚠️ {{ conversationSplitError }}</p>
+          <footer>
+            <button type="button" class="memory-editing-cancel" :disabled="conversationSplitBusy" @click="closeConversationSplit">{{ conversationSplitResult ? '关闭' : '取消' }}</button>
+            <button
+              v-if="conversationSplitPreview && !conversationSplitResult"
+              type="button"
+              class="send-button memory-file-write-submit"
+              :disabled="conversationSplitBusy"
+              title="开始拆分"
+              @click="commitConversationSplit"
+            >
+              <JcIcon name="content-cut" />
             </button>
           </footer>
         </section>
