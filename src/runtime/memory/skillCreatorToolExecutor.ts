@@ -15,6 +15,8 @@ import {
 } from '@/utils/skillTestRunner'
 import { appendSkillCreatorHistory, loadSkillCreatorFeedback, persistSkillCreatorFeedback, persistSkillCreatorReviewWorkspace, persistSkillCreatorWorkspaceArtifact } from '@/utils/skillCreatorWorkspace'
 import { registerSkillBuilderDraft, SkillBuilderDraftError } from '@/utils/skillBuilderTools'
+import { loadLatestSkillDraftRevision } from '@/utils/skillDraftStorage'
+import { isTauriRuntime } from '@/utils/tauriEnv'
 import { type SkillPackageDraftManifest, type SkillPackageReference } from '@/utils/skillTextBuilder'
 import { assertSkillDraftPath, readSkillDraft, type SkillDraftFiles } from '@/utils/skillDraftPath'
 
@@ -255,6 +257,18 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
     })
     if (!Number.isSafeInteger(frozen.revision) || !frozen.contentHash) {
       throw new SkillDraftError('SKILL_DRAFT_REQUIRED', '草稿冻结失败，请稍后重试。')
+    }
+    // 冻结点必须真的落盘：安装走 Rust，只认临时目录里的 revision 文件。
+    // 没写进去却发卡，用户点下去才看到「not found or has expired」——把失败往前拉到这里，
+    // 当场说清楚，而不是发一张注定装不上的卡。Web 不带 token 安装（走 createAgent），不查。
+    if (isTauriRuntime()) {
+      const persisted = await loadLatestSkillDraftRevision(frozen.sessionId, frozen.draftId)
+      if (!persisted || persisted.revision !== frozen.revision) {
+        throw new SkillDraftError(
+          'SKILL_DRAFT_NOT_PERSISTED',
+          `草稿快照没写进磁盘：${frozen.draftId} revision ${frozen.revision}。安装会找不到它，请检查临时目录（系统 temp）是否可写后重试。`,
+        )
+      }
     }
     return JSON.stringify({
       status: 'prepared',
