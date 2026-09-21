@@ -1055,7 +1055,7 @@ export function createRuntimeProjectFileService(): ProjectFileService {
     async readText(owner, path, maxBytes) {
       const { invoke } = await import('@tauri-apps/api/core')
       const result = await invoke<ProjectTextRead>('dev_read_file', {
-        input: { root: owner, relativePath: path, maxBytes: maxBytes || 500_000 },
+        input: { root: owner, relativePath: path, maxBytes: maxBytes || 30_000_000 },
       })
       return result
     },
