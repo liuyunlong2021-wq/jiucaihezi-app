@@ -43,7 +43,11 @@ Skill 稳定后，仅在用户要求更清晰的表述或搜索标签时改进�
 
 此 Skill 与模型无关。不要假定特定提供商、CLI、编排机制、发现变量或流式格式。请使用宿主应用的 Skill Creator 工具完成验证、测试、审查、打包与保存。
 
-草稿归应用所有，并通过 `draft_id`、`revision` 和 `content_hash` 标识。在验证、可选测试、审查、打包和保存的全过程中携带这三个值。迭代期间将草稿保留在受控临时存储中。`save_skill` 仅准备安装结果，绝不可直接写入真实 Skill 根目录。草稿展示给用户后，在 `jc-skill-install-v2` 块中原样输出返回的令牌，由宿主 UI 转换成安装卡；用户点击安装卡才会原子化安装完整包。
+**草稿就写在项目文件树里**：`.raw/jc-media/文档/skill-<skill-name>/`。用宿主的文件工具写（`write_text_batch` 一次写多份，自带 `expectedContent` 乐观锁；或 `create_document` 写单份），把 `SKILL.md` 和 `references/`、`scripts/`、`assets/` 一并写进去。用户在文件树里能直接看到、直接改。
+
+**路径就是草稿的标识**：后续校验、测试、评审、打包和保存都传 `draft_path`，不要再发明或回传任何草稿编号。改内容就用文件工具改那个目录里的文件，改完重新调用 `skill_creator_validate`。
+
+`save_skill` 只准备安装结果：它会把草稿目录冻结成一份受控快照并返回令牌，**绝不可直接写入真实 Skill 根目录**。把令牌原样放进 `jc-skill-install-v2` 块，由宿主 UI 转换成安装卡；用户点击安装卡才会原子化安装完整包。
 
 使用宿主生命周期工具，而非 shell 命令或提供商特定编排方式。测试为可选项。用户要求测试时，使用 `run_skill_tests`，通过 `skill_creator_submit_eval_feedback` 持久化反馈，并以 `skill_creator_load_eval_feedback` 加载既有反馈。仅在用户明确要求严格比较时，使用 `skill_creator_compare_outputs` 和 `skill_creator_analyze_comparison`。
 
@@ -377,9 +381,11 @@ kill $VIEWER_PID 2>/dev/null
 
 ## 交付与安装
 
-评估完成后，保留最终草稿及其全部 `references/`、`scripts/`、`assets/` 文件。先向用户说明已完成的内容和验证结果，然后就可以调用 `save_skill` 准备安装令牌：出卡不等于安装，草稿仍停留在受控临时存储中，只有用户点击安装卡之后才会写入真实 Skill 根目录。
+只有运行过测试时才调用 `skill_creator_open_eval_review`，并把结果翻译成用户看得懂的表格。未运行测试时不要调用评审工具，直接展示草稿与校验结果。两条路径都必须询问用户反馈，不允许自己判断“可以了”就跳过。
 
-不要要求用户复述“保存”“确认保存”这类特定字串，也不要自己发明“再确认一次”的关卡。`save_skill` 会冻结当前 `draft_id + revision + content_hash`，不会直接写入真实 Skill 根目录。不要手工复制草稿文件、生成 `.skill` 文件或改写令牌。
+评估完成后，保留最终草稿及其全部 `references/`、`scripts/`、`assets/` 文件（它们就在项目文件树的草稿目录里，不要移动或复制）。先向用户说明已完成的内容和验证结果，然后就可以调用 `save_skill({draft_path})` 准备安装令牌：出卡不等于安装，草稿仍在文件树里，只有用户点击安装卡之后才会写入真实 Skill 根目录。
+
+不要要求用户复述“保存”“确认保存”这类特定字串，也不要自己发明“再确认一次”的关卡。`save_skill` 会把你给的 `draft_path` 冻结成受控快照，不会直接写入真实 Skill 根目录。不要手工复制草稿文件、生成 `.skill` 文件或改写令牌。
 
 随后输出一句简短确认语，再输出且只输出一个如下格式的代码块，其中 JSON 必须是 `save_skill` 返回的 `install_token`：
 
@@ -391,7 +397,7 @@ Skill 已准备好，请确认安装。
 ```
 ````
 
-界面会从受控临时草稿读取 `SKILL.md` 和所有资源，并将代码块转换成安装确认卡。点击时重新校验 revision/hash；只有原子提交成功后才算安装成功。旧的单文件 `jc-skill-install` 只用于历史会话兼容。
+界面会从冻结快照读取 `SKILL.md` 和所有资源，并将代码块转换成安装确认卡。点击时重新校验快照哈希；只有原子提交成功后才算安装成功。旧的单文件 `jc-skill-install` 只用于历史会话兼容。
 
 ---
 
@@ -399,7 +405,7 @@ Skill 已准备好，请确认安装。
 
 宿主可能提供并行工作器、浏览器，或两者均不提供。将它们视为可选能力：可用时使用；不可用时通过应用工具完成相同生命周期，并在对话中展示结果。绝不调用提供商专用 CLI，也不要直接写入提供商专用命令目录。
 
-更新现有 Skill 时，保留其 ID，并在应用受控的临时草稿存储中暂存编辑。不要自行写入 `/tmp/<name>/SKILL.md` 或已安装的 Skill 目录。最终安装仅能由用户通过宿主安装卡确认。
+更新现有 Skill 时，保留其 ID。用 `skill_creator_load_installed_skill` 取回已安装的正文，把编辑写进项目文件树里的草稿目录（`.raw/jc-media/文档/skill-<id>/`）—— 草稿目录与安装目录是两回事。不要直接写入已安装的 Skill 目录（`~/.agents/skills/<id>/`），也不要自行拼 `/tmp/<name>/SKILL.md` 这类临时路径。最终安装仅能由用户通过宿主安装卡确认。
 
 ---
 
@@ -420,7 +426,8 @@ references/ 目录包含额外文档：
 再次强调核心循环：
 
 - 明确 Skill 的目标
-- 起草或编辑 Skill
+- 把草稿写进项目文件树的草稿目录（`SKILL.md` + `references/`/`scripts/`/`assets/`）
+- 起草或编辑 Skill：用文件工具改草稿目录里的文件，改完重新校验
 - 使用宿主应用选定的模型，在加载和未加载草稿 Skill 的情况下运行测试提示词
 - 与用户共同评估输出：
   - 创建 benchmark.json 并运行 `eval-viewer/generate_review.py` 协助用户审查
@@ -439,7 +446,7 @@ references/ 目录包含额外文档：
 名称：[Skill名]
 用途：[描述Skill要做什么]
 触发词：[逗号分隔]
-输出标准 SKILL.md + references/ + scripts/ + assets/ 目录结构。
+把标准 SKILL.md + references/ + scripts/ + assets/ 结构写进项目文件树的草稿目录。
 修改已有 Skill: 请用 Skill 缔造器帮我修改 Skill「[Skill名]」：
 修改要求：[描述要改什么]
 保持 SKILL.md 格式规范。

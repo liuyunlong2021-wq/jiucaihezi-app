@@ -151,61 +151,17 @@ function buildSkillRuntimeAppendix(
 const SKILL_CREATOR_RUNTIME_APPENDIX = `
 
 ---
-## 韭菜盒子运行时覆盖（优先于上文）
+## 韭菜盒子运行时差异（只列宿主差异；流程以本 Skill 正文为准）
 
 当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill 或 subagent；读写项目外绝对路径时，是否放行由系统运行时判定（用户消息里给过该路径才可用，本会话内持续有效）；Skill 不得假设或代为决定权限。
 Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。
 官方 Python 脚本通过韭菜盒子已接入的受限脚本执行能力运行；Web/Mobile 不伪造本地脚本执行结果。
 
-## 工作流
+**文件能力**：Skill 层不限制文件权限。用户已给出某个目录或文件的绝对路径时，直接用 read、write、edit 读写它（含 references、scripts、assets），不要绕道其他写法；没有路径时用 skill_creator_load_installed_skill 按精确 ID 读「我的 Skill」里的 SKILL.md，并请用户把 Skill 文件夹的绝对路径发过来。不得自造路径，也不得用 Terminal 兜底搜索。
 
-你可以使用生命周期工具完成读取、校验、测试、评审、反馈保存、改进、打包和安装准备。测试后用 skill_creator_submit_eval_feedback 保存用户逐项意见；下一轮用 skill_creator_load_eval_feedback 读取上一轮反馈。
+**草稿位置**：草稿写在项目文件树里 —— \`.raw/jc-media/文档/skill-<skill-name>/\`，用文件工具写（write_text_batch 一次写多份，或 create_document 写单份）。所有生命周期工具都传同一个 draft_path，不再有别的草稿标识。改内容就用文件工具改那个目录，改完重新调用 skill_creator_validate。
 
-### 步骤 1：了解需求
-新建 Skill 时了解它做什么、什么场景触发、输出什么格式。修改已安装 Skill 时有两条合法入口：用户已给出 Skill 目录的绝对路径时，直接用 read、write、edit 读写该目录（含 references、scripts、assets），不要绕道其他写法；没有路径时，调用 skill_creator_load_installed_skill 按精确 ID 读取「我的 Skill」中的真实 SKILL.md，并请用户把 Skill 文件夹的绝对路径发过来。不得自造路径，也不得用 Terminal 兜底搜索。
-
-加载成功后必须沿用返回的 target_skill_id，并保留原 YAML name，除非用户明确要求另存为新 Skill。找不到时直接说明该 Skill 未安装或未启用；只读 Skill 应提示用户先定制到「我的 Skill」。
-
-### 步骤 2：起草 SKILL.md
-用 \`\`\`markdown 代码块输出完整 SKILL.md（含 YAML frontmatter）。向用户展示并确认。
-
-### 步骤 2.5：结构校验
-起草或修改后调用 skill_creator_validate，确认 YAML frontmatter、name、description、正文和资料包路径符合官方 Skill 结构。失败时先修正，不要进入测试。
-保存并沿用校验返回的 draft_id、revision 和 content_hash；后续测试、评审、优化、打包和保存都必须原样携带，内容修改后必须重新校验。
-
-### 步骤 3：设计测试用例并告知用户（可选）
-如果用户要求质量验证，再设计并告知测试用例；不要求测试时直接展示草稿与校验结果，并询问用户要继续修改还是安装。
-
-### 步骤 4：运行测试（可选）
-如果用户需要质量对比，调用 run_skill_tests；测试不是安装前置条件。需要 benchmark 时先运行测试。
-只有用户明确要求严谨比较时，才调用 skill_creator_compare_outputs；完成后可调用 skill_creator_analyze_comparison 解盲分析。两者都不是安装前置条件。
-
-### 步骤 5：展示结果并必须询问反馈
-只有运行过测试时才调用 skill_creator_open_eval_review，并把结果翻译成用户看得懂的表格。未运行测试时不要调用评审工具，直接展示草稿与校验结果。两条路径都必须询问用户反馈，不允许自己判断“可以了”就跳过。
-
-### 步骤 6：迭代
-根据用户反馈修改 SKILL.md，回到步骤 2，再测，再问。循环直到用户说满意。
-
-### 步骤 6.5：优化命中描述
-如果测试显示命中不准、without_skill 也能通过、用户说"不够准"或"触发不稳定"，调用 skill_creator_improve_description 优化 YAML description，并把完整 SKILL.md 展示给用户确认。
-
-### 步骤 7：展示草稿后输出安装卡
-草稿已在对话里展示给用户、并拿到校验结论之后，就可以调用 save_skill，并把返回的 install_token 原样输出为 \`\`\`jc-skill-install-v2 JSON 代码块。用户点击安装卡后才会把完整草稿包保存到中央 Skill 根目录。
-
-安装卡格式示例：
-\`\`\`
-Skill 已准备好，请确认安装。
-
-\`\`\`jc-skill-install-v2
-{"schemaVersion":2,"draftId":"...","sessionId":"...","revision":1,"contentHash":"...","targetSkillId":"skill-name"}
-\`\`\`
-\`\`\`
-
-出卡不等于安装：完整草稿包只有在用户点击安装卡之后才会写入中央 Skill 根目录，所以不需要在出卡前追问确认，也不要要求用户复述“保存”、“确认保存”这类特定字串，更不要自己发明“再确认一次”的关卡。
-绝对不要在展示草稿与校验结论之前调用 save_skill 或输出安装卡。不得改写 install_token。
-
-### 步骤 8：打包预检（可选）
-如果需要，可在输出安装卡前调用 skill_creator_package 做官方 .skill 包预检。这个步骤是内部能力，不要让用户理解文件夹、脚本或 manifest 细节。
+可用工具：skill_creator_load_installed_skill、skill_creator_validate、run_skill_tests、skill_creator_submit_eval_feedback、skill_creator_load_eval_feedback、skill_creator_open_eval_review、skill_creator_compare_outputs、skill_creator_analyze_comparison、skill_creator_aggregate_benchmark、skill_creator_improve_description、skill_creator_package、save_skill。
 `
 
 const SKILL_BUILDER_RUNTIME_APPENDIX_BASE = `

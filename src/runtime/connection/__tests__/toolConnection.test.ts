@@ -90,19 +90,24 @@ test('buildAvailableChatTools preserves the skill-creator special tool policy', 
   assert.deepEqual(tools.map(tool => tool.function.name), ['browser_search'])
 })
 
-test('Skill Creator skips eval review when tests were not requested and installs through the card', () => {
+test('Skill Creator appendix carries host differences only, not a second copy of the flow', () => {
   const result = resolveSelectedSkillCandidate({
     agentId: 'preset_skill-creator',
     agents: [{ id: 'preset_skill-creator', skillContent: '# Skill Creator' }],
   })
   const appendix = result.skill?.appendSkillMd || ''
 
-  // 文件能力合同：Skill 层不再限制文件权限，用户给了绝对路径就直接读写
-  assert.match(appendix, /修改已安装 Skill[\s\S]*用户已给出 Skill 目录的绝对路径/)
+  // 宿主差异：文件能力合同（Skill 层不管文件权限，用户给了绝对路径就直接读写）
+  assert.match(appendix, /用户已给出某个目录或文件的绝对路径/)
   assert.match(appendix, /skill_creator_load_installed_skill/)
   assert.doesNotMatch(appendix, /不得使用 Terminal/)
-  assert.match(appendix, /未运行测试时不要调用评审工具/)
-  assert.match(appendix, /点击安装卡后.*保存到中央 Skill 根目录/)
+  // 宿主差异：草稿落点与唯一的草稿标识
+  assert.match(appendix, /\.raw\/jc-media\/文档\/skill-/)
+  assert.match(appendix, /draft_path/)
+  assert.doesNotMatch(appendix, /draft_id/)
+  // 附录不再复述流程 —— 流程只写在 SKILL.md 正文里
+  assert.doesNotMatch(appendix, /### 步骤 \d/)
+  assert.doesNotMatch(appendix, /未运行测试时不要调用评审工具/)
   assert.doesNotMatch(appendix, /自动调用 save_skill/)
 })
 
