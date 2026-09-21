@@ -1,5 +1,7 @@
 """Tests: AI App official protocol behavior."""
 
+import json
+
 import pytest
 
 from src.config import RH_AI_APP_NODE_INFO, RH_AI_APP_UPLOAD, RH_STANDARD_UPLOAD
@@ -522,3 +524,93 @@ async def test_apply_ai_app_inputs_fills_discovered_nodes_and_uploads_images():
     assert resolved[1]["fieldValue"] == "input_123.png"
     assert resolved[2]["fieldValue"] == "8"
     assert resolved[3]["fieldValue"] == "16:9"
+
+
+# ── Qwen Image 2.1（webappId 2101972248130318338）真实节点形状 ──
+
+QWEN_IMAGE_NODE_IDS = ["470", "510", "503", "511", "506", "512", "507", "513", "508", "514"]
+
+
+def qwen_image_node_list() -> list[dict]:
+    ratio_options = [
+        "1:1 (Square)", "2:3 (Portrait Photo)", "3:2 (Photo)", "3:4 (Portrait Standard)",
+        "4:3 (Standard)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)", "21:9 (Ultrawide)",
+    ]
+    return [
+        {"nodeId": "516", "fieldName": "value", "fieldType": "STRING", "fieldValue": "", "description": "提示词"},
+        {
+            "nodeId": "13",
+            "fieldName": "aspect_ratio",
+            "fieldType": "COMBO",
+            "fieldValue": "1:1 (Square)",
+            "fieldData": json.dumps(["COMBO", {
+                "default": "1:1 (Square)",
+                "options": ratio_options,
+                "multiselect": False,
+            }]),
+            "description": "比例",
+        },
+        *[
+            {
+                "nodeId": node_id,
+                "fieldName": "image",
+                "fieldType": "IMAGE",
+                "fieldValue": "None",
+                "description": f"image{index}",
+            }
+            for index, node_id in enumerate(QWEN_IMAGE_NODE_IDS, start=1)
+        ],
+    ]
+
+
+class QwenImageNodeInfoClient(FakeClient):
+    async def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        if url == RH_AI_APP_NODE_INFO:
+            return FakeResponse({"code": 0, "data": {"nodeInfoList": qwen_image_node_list()}})
+        return FakeResponse({"code": 404, "msg": "missing"})
+
+
+@pytest.mark.asyncio
+async def test_qwen_image_app_fills_prompt_ratio_and_images_in_order(monkeypatch):
+    """提示词→516、比例→13（短式对齐 COMBO）、参考图按 image1-N 顺序填充，其余保持 None。"""
+    monkeypatch.setattr("src.config.RH_AI_APP_WHITELIST", set())
+    client = QwenImageNodeInfoClient()
+
+    result = await generate_image(
+        client,
+        request=ImageRequest(
+            model="Qwen-image-2.1",
+            prompt="生成9:16的场景卡",
+            aspect_ratio="9:16",
+            images=["data:image/png;base64,ZmFrZQ=="] * 3,
+        ),
+        api_key="rh_key",
+    )
+
+    assert result["ai_app"] is True
+    nodes = {node["nodeId"]: node for node in client.calls[-1][1]["json"]["nodeInfoList"]}
+    assert nodes["516"]["fieldValue"] == "生成9:16的场景卡"
+    assert nodes["13"]["fieldValue"] == "9:16 (Portrait Widescreen)"
+    filled = [node_id for node_id in QWEN_IMAGE_NODE_IDS if nodes[node_id]["fieldValue"] != "None"]
+    assert filled == ["470", "510", "503"]
+
+
+@pytest.mark.asyncio
+async def test_qwen_image_app_takes_ratio_from_extra_fields(monkeypatch):
+    """上游把比例放进 extra_fields 时也要落到节点 13。"""
+    monkeypatch.setattr("src.config.RH_AI_APP_WHITELIST", set())
+    client = QwenImageNodeInfoClient()
+
+    await generate_image(
+        client,
+        request=ImageRequest(
+            model="Qwen-image-2.1",
+            prompt="森林",
+            extra_fields={"aspectRatio": "16:9"},
+        ),
+        api_key="rh_key",
+    )
+
+    nodes = {node["nodeId"]: node for node in client.calls[-1][1]["json"]["nodeInfoList"]}
+    assert nodes["13"]["fieldValue"] == "16:9 (Widescreen)"

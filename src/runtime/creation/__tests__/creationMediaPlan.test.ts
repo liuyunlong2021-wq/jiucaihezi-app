@@ -1112,3 +1112,36 @@ function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   }
   return params
 }
+
+test('Qwen Image 2.1 按图片模型登记，提交走 RH 工作流（10 张参考图 / 8 个比例）', () => {
+  const modelId = 'runninghub/api/Qwen-image-2.1'
+  const spec = getCreationModelSpec(modelId)!
+  assert.equal(spec.model, 'Qwen-image-2.1')
+  assert.equal(spec.task, 'image')
+  assert.equal(spec.apiStyle, 'rh-standard')
+  assert.equal(spec.files?.images?.max, 10)
+  assert.deepEqual(spec.capabilities.ratios, ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'])
+
+  const plan = buildCreationRunPlan({
+    modelId,
+    params: {
+      prompt: '生成9:16的场景卡',
+      aspect_ratio: '9:16',
+      images: Array.from({ length: 10 }, (_, index) => `https://example.com/ref-${index}.jpg`),
+    },
+  })
+  assert.equal(plan.endpoint, '/v1/images/generations')
+  assert.equal(plan.route, 'runninghub-adapter')
+  assert.equal(plan.debug?.normalizedParams.aspectRatio, '9:16')
+
+  assert.throws(
+    () => buildCreationRunPlan({
+      modelId,
+      params: {
+        prompt: '超过上游限制',
+        images: Array.from({ length: 11 }, (_, index) => `https://example.com/ref-${index}.jpg`),
+      },
+    }),
+    /参考图最多支持 10 个/,
+  )
+})

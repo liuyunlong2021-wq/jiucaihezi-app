@@ -14,6 +14,7 @@ from src.models.mapping import (
     is_ai_app_model,
     normalize_custom_ai_app_models,
     get_ai_app_directory,
+    get_ai_app_registration,
 )
 from src.models.capabilities import get_official_capability
 
@@ -90,6 +91,42 @@ def test_image_audio_video_ai_app_is_registered():
     assert app["label"] == "图音生视频"
     assert app["outputType"] == "video"
     assert app["billingModel"] == "rh-aiapp"
+
+
+def test_qwen_image_app_is_registered_as_image_model():
+    """Qwen Image 2.1 对外是图片模型，但提交走 AI App（webappId）。"""
+    assert is_image_model("Qwen-image-2.1")
+    assert get_output_type("Qwen-image-2.1") == "image"
+    assert is_ai_app_model("Qwen-image-2.1")
+    assert get_webapp_id("Qwen-image-2.1") == "2101972248130318338"
+    with pytest.raises(ValueError):
+        get_rh_endpoint("Qwen-image-2.1")
+
+
+def test_image_ai_app_keeps_registration_but_leaves_app_directory():
+    """图片类 AI 应用要能通过判权（registration），但不出现在「AI 应用」下拉里。"""
+    webapp_id = "2101972248130318338"
+    assert webapp_id not in {entry["webappId"] for entry in get_ai_app_directory()}
+    registration = get_ai_app_registration(webapp_id)
+    assert registration is not None
+    assert registration["billingModel"] == "Qwen-image-2.1"
+    assert registration["outputType"] == "image"
+
+
+def test_custom_image_ai_app_keeps_its_app_directory_slot(monkeypatch):
+    """env 注册的自定义图片应用在 app 侧没有图片模型行，必须留在下拉里。"""
+    import src.models.mapping as mapping
+
+    monkeypatch.setitem(mapping.MODEL_MAP, "rh-custom-image-app", {
+        "endpoint": None,
+        "label": "自定义图片应用",
+        "output_type": "image",
+        "webapp_id": "123456789",
+        "custom": True,
+    })
+
+    assert "123456789" in {entry["webappId"] for entry in get_ai_app_directory()}
+    assert get_ai_app_registration("123456789")["billingModel"] == "rh-custom-image-app"
 
 
 def test_get_rh_endpoint_text_to_image():
