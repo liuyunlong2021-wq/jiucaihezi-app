@@ -4,7 +4,6 @@ import { test } from 'node:test'
 import { isMemoryProjectMutationBlocked } from '../memoryProjectPaths'
 import {
   assertSkillDraftPath,
-  assertSkillDraftWritable,
   hashSkillDraftDirectory,
   readSkillDraft,
   isSkillDraftPath,
@@ -62,9 +61,9 @@ test('草稿路径必须在文档区里，目录名必须是 skill-*', () => {
 })
 
 test('草稿落点是可写的文本路径（合同里唯一需要守的规则）', () => {
-  assert.equal(assertSkillDraftWritable(DRAFT), DRAFT)
-  // 守卫本身放行：写入侧靠的就是这一条，回归时它会先红
+  // 写入侧靠的就是这一条：回归时它会先红
   assert.equal(isMemoryProjectMutationBlocked(`${DRAFT}/SKILL.md`, 'text'), false)
+  assert.equal(isMemoryProjectMutationBlocked(`${DRAFT}/references/a.md`, 'text'), false)
   // 但草稿目录本身不能被当成目录操作，也不能写到对话记录里
   assert.equal(isMemoryProjectMutationBlocked(DRAFT, 'directory'), true)
   assert.equal(isMemoryProjectMutationBlocked('.raw/对话记录/x.md', 'text'), true)
@@ -76,6 +75,7 @@ test('读回草稿：SKILL.md 是正文，其余文本都是 references，iterat
     [`${DRAFT}/references/checklist.md`]: '- [ ] 节奏',
     [`${DRAFT}/scripts/run.py`]: 'print(1)',
     [`${DRAFT}/iteration-1/benchmark.json`]: '{}',
+    [`${DRAFT}/.DS_Store`]: '\ufffdbinary\ufffd',
   })
 
   const draft = await readSkillDraft(DRAFT, files)

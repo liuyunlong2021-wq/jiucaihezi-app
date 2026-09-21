@@ -159,6 +159,55 @@ test('Skill Creator runtime turns continue-improve feedback into improving state
   assert.equal(runtime.getSnapshot(args, context)?.state, 'improving')
 })
 
+// 线上事故回归：校验一次之后，不带草稿标识的调用被永久拦住。
+// `skill_creator_load_installed_skill` 的参数只有 skill_id，模型无法「沿用返回的三件套」。
+test('Skill Creator runtime lets tools that carry no draft identity through after validation', () => {
+  const runtime = createSkillCreatorRuntime()
+  const args = { test_id: 'run_deadlock' }
+
+  runtime.afterToolResult({
+    toolName: 'skill_creator_validate',
+    args,
+    context,
+    result: { status: 'ok', draft_id: 'draft_x', revision: 1, content_hash: 'hash_x' },
+  })
+
+  const loadInstalled = runtime.beforeToolCall({
+    toolName: 'skill_creator_load_installed_skill',
+    args: { ...args, skill_id: 'jc-minimax-fenjing' },
+    context,
+  })
+  assert.equal(loadInstalled.allowed, true, '读已安装 Skill 不该被草稿身份守卫拦住')
+
+  const fileTreeDraft = runtime.beforeToolCall({
+    toolName: 'save_skill',
+    args: { ...args, draft_path: '.raw/jc-media/文档/skill-jc-minimax-fenjing' },
+    context,
+  })
+  assert.equal(fileTreeDraft.allowed, true, '按 draft_path 操作的草稿没有可核对的标识')
+})
+
+// 守卫只在真有东西可核对时才生效，不能因为放宽就形同虚设。
+test('Skill Creator runtime still blocks a stale draft identity', () => {
+  const runtime = createSkillCreatorRuntime()
+  const args = { test_id: 'run_stale' }
+
+  runtime.afterToolResult({
+    toolName: 'skill_creator_validate',
+    args,
+    context,
+    result: { status: 'ok', draft_id: 'draft_y', revision: 2, content_hash: 'hash_y' },
+  })
+
+  const stale = runtime.beforeToolCall({
+    toolName: 'run_skill_tests',
+    args: { ...args, draft_id: 'draft_old', revision: 1, content_hash: 'hash_old' },
+    context,
+  })
+  assert.equal(stale.allowed, false)
+  assert.equal(stale.errorCode, 'STALE_SKILL_DRAFT')
+})
+
 test('Skill Creator runtime allows improvement after validation when tests were skipped', () => {
   const runtime = createSkillCreatorRuntime()
   const args = { test_id: 'run_no_tests' }
@@ -213,7 +262,13 @@ test('Skill Creator runtime rejects a stale draft revision after validation', ()
   assert.equal(stale.errorCode, 'STALE_SKILL_DRAFT')
 })
 
-test('Skill Creator runtime rejects missing draft identity after validation', () => {
+// 这条测试原来断言「漏传三件套就拦 STALE_SKILL_DRAFT」。那个断言本身锁死了线上事故：
+// 参数里完全没有草稿标识的调用没有可核对的对象（读已安装 Skill、按 draft_path 操作的
+// 文件树草稿、以及漏传三件套的调用都属此类），拦住它只会让模型无路可走 —— 报错还让
+// 它「沿用返回的三件套」，而它手上根本没有。
+// 现在这类调用交给执行器：那边对着真草稿库说话，报的是「请提供 draft_id 或 skill_md」，
+// 模型能自己往下走。身份绑定本身由下面「stale revision」那条继续守着。
+test('Skill Creator runtime leaves identity-less calls to the executor', () => {
   const runtime = createSkillCreatorRuntime()
   const validated = { test_id: 'run-bound', draft_id: 'draft-bound', revision: 1, content_hash: 'hash-bound' }
   runtime.afterToolResult({
@@ -228,6 +283,5 @@ test('Skill Creator runtime rejects missing draft identity after validation', ()
     args: { test_id: 'run-bound' },
     context: { ...context, userInput: '确认保存' },
   })
-  assert.equal(missingIdentity.allowed, false)
-  assert.equal(missingIdentity.errorCode, 'STALE_SKILL_DRAFT')
+  assert.equal(missingIdentity.allowed, true)
 })

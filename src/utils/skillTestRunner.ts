@@ -1239,6 +1239,7 @@ export const VALIDATE_SKILL_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径，形如 .raw/jc-media/文档/skill-<name>）。优先用它：宿主直接读这个目录。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。提供后由应用读取受控草稿。' },
         revision: { type: 'integer', description: 'validate 返回的草稿 revision；后续调用必须原样携带。' },
         content_hash: { type: 'string', description: 'validate 返回的草稿内容哈希；后续调用必须原样携带。' },
@@ -1272,6 +1273,7 @@ export const RUN_SKILL_TESTS_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它，不要重复粘贴全文。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。提供后由应用读取受控草稿，不要重复粘贴全文。' },
         revision: { type: 'integer', description: '当前已校验草稿 revision。' },
         content_hash: { type: 'string', description: '当前已校验草稿内容哈希。' },
@@ -1324,6 +1326,7 @@ export const AGGREGATE_SKILL_BENCHMARK_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
         revision: { type: 'integer', description: '当前已测试草稿 revision。' },
         content_hash: { type: 'string', description: '当前已测试草稿内容哈希。' },
@@ -1343,6 +1346,7 @@ export const OPEN_EVAL_REVIEW_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
         revision: { type: 'integer', description: '当前已测试草稿 revision。' },
         content_hash: { type: 'string', description: '当前已测试草稿内容哈希。' },
@@ -1362,6 +1366,7 @@ export const IMPROVE_SKILL_DESCRIPTION_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
         revision: { type: 'integer', description: '当前草稿 revision。' },
         content_hash: { type: 'string', description: '当前草稿内容哈希。' },
@@ -1388,6 +1393,7 @@ export const PACKAGE_SKILL_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
         revision: { type: 'integer', description: '当前已校验草稿 revision。' },
         content_hash: { type: 'string', description: '当前已校验草稿内容哈希。' },
@@ -1421,6 +1427,7 @@ export const SAVE_SKILL_TOOL = {
     parameters: {
       type: 'object',
       properties: {
+        draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
         draft_id: { type: 'string', description: '当前会话的 Skill 草稿 ID。' },
         revision: { type: 'integer', description: '当前已校验草稿 revision。' },
         content_hash: { type: 'string', description: '当前已校验草稿内容哈希。' },
@@ -1460,10 +1467,11 @@ export const SUBMIT_EVAL_FEEDBACK_TOOL = {
     name: 'skill_creator_submit_eval_feedback',
     description: '把用户对当前测试轮次的逐项反馈保存到受控评审工作区。空反馈表示已审阅且无修改意见。',
     parameters: { type: 'object', properties: {
+      draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
       draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' },
       iteration: { type: 'integer', minimum: 1 },
       reviews: { type: 'array', items: { type: 'object', properties: { run_id: { type: 'string' }, feedback: { type: 'string' } }, required: ['run_id', 'feedback'] } },
-    }, required: ['draft_id', 'revision', 'content_hash', 'iteration', 'reviews'] },
+    }, required: ['iteration', 'reviews'] },
   },
 }
 
@@ -1473,9 +1481,10 @@ export const LOAD_EVAL_FEEDBACK_TOOL = {
     name: 'skill_creator_load_eval_feedback',
     description: '读取指定 Skill 草稿上一轮已提交的评审反馈。',
     parameters: { type: 'object', properties: {
+      draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' },
       draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' },
       iteration: { type: 'integer', minimum: 1 },
-    }, required: ['draft_id', 'revision', 'content_hash', 'iteration'] },
+    }, required: ['iteration'] },
   },
 }
 
@@ -1484,7 +1493,7 @@ export const COMPARE_SKILL_OUTPUTS_TOOL = {
   function: {
     name: 'skill_creator_compare_outputs',
     description: '用户明确要求严谨比较时，对同一用例的两个完成结果做隐藏身份的 A/B 比较。',
-    parameters: { type: 'object', properties: { draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' }, test_id: { type: 'string' }, eval_id: { type: 'integer' }, rubric: { type: 'string' } }, required: ['draft_id', 'revision', 'content_hash', 'test_id', 'eval_id', 'rubric'] },
+    parameters: { type: 'object', properties: { draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' }, draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' }, test_id: { type: 'string' }, eval_id: { type: 'integer' }, rubric: { type: 'string' } }, required: ['test_id', 'eval_id', 'rubric'] },
   },
 }
 
@@ -1493,7 +1502,7 @@ export const ANALYZE_SKILL_COMPARISON_TOOL = {
   function: {
     name: 'skill_creator_analyze_comparison',
     description: 'A/B 比较完成后解盲，并基于 Skill、执行记录和输出证据分析差异。',
-    parameters: { type: 'object', properties: { draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' }, test_id: { type: 'string' }, eval_id: { type: 'integer' } }, required: ['draft_id', 'revision', 'content_hash', 'test_id', 'eval_id'] },
+    parameters: { type: 'object', properties: { draft_path: { type: 'string', description: '草稿目录（项目相对路径）。优先用它。' }, draft_id: { type: 'string' }, revision: { type: 'integer' }, content_hash: { type: 'string' }, test_id: { type: 'string' }, eval_id: { type: 'integer' } }, required: ['test_id', 'eval_id'] },
   },
 }
 

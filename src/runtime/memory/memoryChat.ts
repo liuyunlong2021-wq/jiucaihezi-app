@@ -1,6 +1,7 @@
 import { useAgentStore } from '@/stores/agentStore'
 import {
   createRuntimeProjectFileService,
+  createSkillDraftFiles,
   type ProjectFileService,
 } from '@/services/projectFileService'
 import {
@@ -701,6 +702,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           userInput: latestUserText,
           signal,
           loadInstalledSkill: loadInstalledSkillForCreator,
+          // 草稿在项目文件树里（`.raw/jc-media/文档/skill-<id>/`）：路径即身份，宿主只读回。
+          files: input.projectId ? createSkillDraftFiles(projectFiles, input.projectId) : undefined,
           testToolAdapter: {
             tools: authorizedMemoryToolDefinitions.filter(
               tool => !isSkillCreatorToolName(String(tool.function?.name || '')),

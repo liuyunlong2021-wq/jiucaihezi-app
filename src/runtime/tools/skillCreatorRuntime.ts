@@ -259,6 +259,14 @@ function draftIdentityMismatch(
   const draftId = String(args.draft_id || '').trim()
   const revision = Number(args.revision)
   const contentHash = String(args.content_hash || '').trim()
+  // 只核对真正回传了草稿标识的调用。
+  //
+  // 原先「除 validate 之外一律核对」会把不读草稿的调用也拦下来：那种调用没有可核对的
+  // 对象，draft_id 取不到就必然与已记录的标识不等，于是被永久拦住 ——
+  // `skill_creator_load_installed_skill`（参数只有 skill_id）和在文件树里按
+  // `draft_path` 操作的草稿都会撞上，而且报错让模型「沿用返回的三件套」，它做不到。
+  // 传了三件套的调用照旧核对；真伪由执行器对着草稿库再校验一次。
+  if (!draftId && !contentHash && !Number.isSafeInteger(revision)) return false
   return Boolean(
     (record.draftId && draftId !== record.draftId)
     || (record.revision !== undefined && (!Number.isSafeInteger(revision) || revision !== record.revision))

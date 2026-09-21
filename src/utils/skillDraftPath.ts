@@ -5,7 +5,7 @@
  * 文件（`.raw/jc-media/文档/skill-<target-skill-id>/`），模型用现有文件工具读写，
  * **路径即身份**，不再有 draft_id / revision / content_hash 三件套与内存状态机。
  */
-import { MEMORY_MEDIA_DIRECTORIES, isMemoryProjectMutationBlocked } from './memoryProjectPaths'
+import { MEMORY_MEDIA_DIRECTORIES, isMemoryProjectHiddenPath } from './memoryProjectPaths'
 
 /** 草稿根目录：项目文件树的文档区。 */
 export const SKILL_DRAFT_ROOT = MEMORY_MEDIA_DIRECTORIES.document
@@ -110,7 +110,8 @@ function relativeTo(directory: string, path: string): string {
 }
 
 function isDraftContent(relative: string): boolean {
-  return relative !== '' && !relative.startsWith(SKILL_DRAFT_ITERATION_PREFIX)
+  // 草稿目录一旦被 Finder 打开就会多出 .DS_Store，读它只会报错；评审产物也不算包内容。
+  return relative !== '' && !relative.startsWith(SKILL_DRAFT_ITERATION_PREFIX) && !isMemoryProjectHiddenPath(relative)
 }
 
 /**
@@ -166,15 +167,6 @@ export async function hashSkillDraftDirectory(directory: string, files: SkillDra
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 
-/**
- * 草稿落点必须是可写文本路径。
- *
- * 这条守住合同里唯一需要守的规则：草稿在文档区里，模型碰不到中央 Skill 根目录。
- */
-export function assertSkillDraftWritable(directory: string): string {
-  const draftDirectory = assertSkillDraftPath(directory)
-  if (isMemoryProjectMutationBlocked(draftDirectory, 'text')) {
-    throw new Error(`草稿目录不可写：${draftDirectory}`)
-  }
-  return draftDirectory
-}
+// 草稿落点是否可写由写入侧自己把关：`write_text_batch` 会走
+// `isMemoryProjectMutationBlocked(path, 'text')`，而它对本模块产生的路径返回 false。
+// 参见 `__tests__/skillDraftPath.test.ts` 里的回归断言。

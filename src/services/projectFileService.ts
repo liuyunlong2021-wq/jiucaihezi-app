@@ -10,6 +10,7 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { webProjectFiles, webProjectTextRevision } from '@/utils/webProjectFiles'
 import { copyCanvasDocument, parseCanvasDocument } from '@/components/canvas/canvasDocument'
 import { parseMarkdownFileLinks } from '@/runtime/memory/markdownFileLinks'
+import type { SkillDraftFiles } from '@/utils/skillDraftPath'
 
 export interface ProjectFileEntry {
   id?: string
@@ -206,6 +207,30 @@ export interface ProjectFileService {
   planBatch(request: ProjectBatchRequest): Promise<ProjectBatchPlan>
   executeBatch(plan: ProjectBatchPlan, policy?: ProjectCollisionPolicy): Promise<ProjectBatchResult>
   onDidChange(listener: (change: ProjectResourceChange) => void): () => void
+}
+
+/**
+ * 把 `ProjectFileService` 适配成 Skill 草稿读写口。
+ *
+ * 只读：草稿归模型管（模型用现有文件工具读写），宿主只回读，不替它改文件。
+ */
+export function createSkillDraftFiles(service: ProjectFileService, owner: string): SkillDraftFiles {
+  const resources = async () => await service.list(owner)
+  return {
+    async list(directory) {
+      return (await resources())
+        .map(resource => String(resource.path))
+        .filter(path => path.startsWith(`${directory}/`))
+    },
+    async readText(path) {
+      return (await service.readTextAt(owner, path)).content
+    },
+    async hashFile(path) {
+      const resource = (await resources()).find(item => String(item.path) === path)
+      if (!resource) throw new Error(`找不到文件: ${path}`)
+      return await service.hashFile(resource)
+    },
+  }
 }
 
 export async function appendProjectDirectoryIndex(files: ProjectFileService, owner: string, directoryPath: string, savedPath: string): Promise<void> {
