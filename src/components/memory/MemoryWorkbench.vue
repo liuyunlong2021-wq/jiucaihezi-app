@@ -3580,7 +3580,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-conversation-menu > input { width: 100%; height: 32px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--surface); color: var(--ink1); font: inherit; }
 .memory-conversation-menu > input:focus { border-color: var(--olive); }
 .memory-conversation-list { max-height: min(420px, 58vh); margin-top: 6px; overflow-y: auto; }
-.memory-conversation-item { display: grid; grid-template-columns: minmax(0, 1fr) 30px 30px; align-items: center; border-radius: 5px; }
+.memory-conversation-item { display: grid; grid-template-columns: minmax(0, 1fr) 30px 30px 30px; align-items: center; border-radius: 5px; }
 .memory-conversation-item:hover, .memory-conversation-item.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
 .memory-conversation-name, .memory-conversation-action { min-width: 0; height: 34px; border: 0; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; }
 .memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
