@@ -36,14 +36,6 @@ def _aspect_ratio_from_size(size: str | None) -> str | None:
     return mapping.get(value)
 
 
-def _extra_str(extra: dict, *keys: str) -> str | None:
-    for key in keys:
-        value = extra.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
 async def generate_image(
     client: httpx.AsyncClient,
     request: ImageRequest,
@@ -60,17 +52,9 @@ async def generate_image(
 
     model = request.model
     has_image = bool(request.images or request.image)
-    extra = request.extra_fields or {}
-
-    # 比例可能只到 extra_fields（上游透传时只保留 model/prompt/images/extra_fields），
-    # 统一解析一次，标准链路与 AI 应用链路共用同一份值。
-    # ponytail: 只认字符串型比例，别的类型不猜，交给下游默认值。
-    request.aspect_ratio = request.aspect_ratio or _extra_str(
-        extra, "aspectRatio", "aspect_ratio", "ratio"
-    )
 
     # AI app: 请求里的 webappId 优先，其次从模型映射查
-    webapp_id = extra.get("webappId") or get_webapp_id(model)
+    webapp_id = (request.extra_fields or {}).get("webappId") or get_webapp_id(model)
     if is_ai_app_model(model) or webapp_id:
         return await _submit_via_app(client, request, key, webapp_id=webapp_id)
 
@@ -85,6 +69,9 @@ async def generate_image(
     # ★ rh-gpt2-official: force quality=low, resolution=1k for unified billing
     is_gpt2_official = (model == "rh-gpt2-official")
     resolution = "1k" if is_gpt2_official else request.resolution
+
+    # ★ Phase 1d: 从 extra_fields 读取新模型独有字段
+    extra = request.extra_fields or {}
 
     payload = await build_standard_payload(client, key, endpoint, {
         "prompt": request.prompt,

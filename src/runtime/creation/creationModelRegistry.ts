@@ -110,8 +110,6 @@ const SHANHAI_VIDEO_MODELS: Array<{
   },
 ]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
-/** RH 工作流 13:aspect_ratio 的 8 个枚举短式；提交短式，适配器对齐成长串。 */
-const QWEN_IMAGE_RATIOS = ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
@@ -1122,23 +1120,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     price: 0.5,
     notes: ['docs/notes/runninghub-banana.md'],
     files: { images: { min: 0, max: 8 } },
-  }),
-
-  // ── 🆕 Qwen Image 2.1（RH 工作流：图片模型，提交时走 webappId）──
-  runninghubStandard({
-    id: 'runninghub/api/Qwen-image-2.1',
-    model: 'Qwen-image-2.1',
-    label: 'Qwen Image 2.1 · RunningHub',
-    task: 'image',
-    mode: 'text-to-image',
-    notes: ['RunningHub AI App 2101972248130318338'],
-    ratios: QWEN_IMAGE_RATIOS,
-    files: { images: { min: 0, max: 10 } },
-    fields: promptFields([
-      // 默认值跟工作流节点 13 的 default 一致（1:1），不替用户改口径
-      { key: 'aspect_ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(QWEN_IMAGE_RATIOS) },
-      { key: 'images', label: '参考图（按 image1-10 顺序映射）', kind: 'images' },
-    ]),
   }),
 
   // ── 🆕 FLUX.2 Klein 9B 系列 (3 个) ──

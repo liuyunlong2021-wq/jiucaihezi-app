@@ -85,15 +85,6 @@ IMAGE_MODELS: dict[str, dict] = {
         "output_type": "image",
         "site": "global",
     },
-    # ── Qwen Image 2.1（RH 工作流，走 webappId 提交）──
-    # endpoint 为空 + webapp_id 即 is_ai_app_model → 图片链路自动走 _submit_via_app；
-    # output_type=image 让它留在图片模型里、不进「AI 应用」下拉（见 get_ai_app_directory）。
-    "Qwen-image-2.1": {
-        "endpoint": None,
-        "label": "Qwen Image 2.1",
-        "output_type": "image",
-        "webapp_id": "2101972248130318338",
-    },
 }
 
 # ── Video models ──
@@ -422,8 +413,7 @@ def get_rh_site(model: str) -> str:
     return entry.get("site", "cn")
 
 
-def _ai_app_registrations() -> list[dict[str, str]]:
-    """全部 AI 应用登记（含图片类）。判权用，必须覆盖每个已登记的 webappId。"""
+def get_ai_app_directory() -> list[dict[str, str]]:
     apps = [
         {
             "webappId": str(entry["webapp_id"]),
@@ -456,29 +446,8 @@ def _ai_app_registrations() -> list[dict[str, str]]:
     return apps
 
 
-def get_ai_app_directory() -> list[dict[str, str]]:
-    """对外「AI 应用」下拉列表。
-
-    图片类 AI 应用属于图片模型表，不进下拉，否则「AI 应用」里会多一个
-    只能出图的条目。env 注册的自定义应用（RH_CUSTOM_AI_APPS）在 app 侧
-    没有对应的图片模型行，仍留在下拉里，否则没有入口可达。
-    """
-    hidden = {
-        str(entry["webapp_id"])
-        for entry in MODEL_MAP.values()
-        if entry.get("endpoint") is None
-        and entry.get("webapp_id")
-        and entry.get("output_type") == "image"
-        and not entry.get("custom")
-    }
-    return [app for app in _ai_app_registrations() if app["webappId"] not in hidden]
-
-
 def get_ai_app_registration(webapp_id: str) -> dict[str, str] | None:
-    return next(
-        (app for app in _ai_app_registrations() if app["webappId"] == str(webapp_id)),
-        None,
-    )
+    return next((app for app in get_ai_app_directory() if app["webappId"] == str(webapp_id)), None)
 
 
 def matches_ai_app_registration(webapp_id: str, billing_model: str) -> bool:
