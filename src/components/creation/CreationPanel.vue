@@ -660,8 +660,29 @@ function modeLabel(mode?: string): string {
 onMounted(async () => {
   await mediaTaskStore.init().catch(() => {})
   refreshCreationModelAvailability().catch(() => {})
-  fetchAiAppDirectory().catch(() => {})
+  // 目录拉回来后再补默认应用：切到 AI 应用时面板应该直接停在文武双修，而不是「选择应用...」
+  fetchAiAppDirectory()
+    .then(() => ensureDefaultAiApp())
+    .catch(() => {})
 })
+
+// 默认应用：首次切到 AI 应用（或恢复时还没选过）直接落在这一项上。
+// 用户自己选过就尊重已选的那个，不再覆盖。
+const DEFAULT_AI_APP_ID = '2101840271142117377'
+
+async function ensureDefaultAiApp() {
+  if (cpState.task !== 'ai-app' || cpState.aiAppWebappId) return
+  const app = aiAppDirectory.value.find(item => item.webappId === DEFAULT_AI_APP_ID)
+  if (!app) return
+  selectAiApp(app)
+}
+
+watch(
+  () => cpState.task,
+  task => {
+    if (task === 'ai-app') void ensureDefaultAiApp()
+  },
+)
 
 function aiAppLabel(webappId: string): string {
   const app = aiAppDirectory.value.find(a => a.webappId === webappId)

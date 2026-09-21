@@ -109,6 +109,15 @@ test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () =>
   assert.match(source, /cpState\.prompt === String\(promptField\.defaultValue \?\? ''\)\) cpState\.prompt = ''/)
 })
 
+test('切到 AI 应用时默认选中文武双修', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /const DEFAULT_AI_APP_ID = '2101840271142117377'/)
+  assert.match(source, /if \(cpState\.task !== 'ai-app' \|\| cpState\.aiAppWebappId\) return/)
+  assert.match(source, /fetchAiAppDirectory\(\)\s*\n\s*\.then\(\(\) => ensureDefaultAiApp\(\)\)/)
+  assert.match(source, /if \(task === 'ai-app'\) void ensureDefaultAiApp\(\)/)
+})
+
 test('creation attachment button uses the native multi-file picker on Desktop', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
