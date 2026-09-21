@@ -1131,7 +1131,6 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Qwen Image 2.1 · RunningHub',
     task: 'image',
     mode: 'text-to-image',
-    price: 0.05,
     notes: ['RunningHub AI App 2101972248130318338'],
     ratios: QWEN_IMAGE_RATIOS,
     files: { images: { min: 0, max: 10 } },
@@ -1984,7 +1983,6 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.0'
-  if (spec.task === 'image' && id.includes('qwen-image')) return 'Qwen Image'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'
   if (spec.task === 'image' && ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'rh-image-v2', 'rh-pro-image'].some(key => id.includes(key))) return 'Banana'
   if (id.includes('z-image')) return 'Z Image'

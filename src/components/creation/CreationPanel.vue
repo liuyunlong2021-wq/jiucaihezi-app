@@ -3926,7 +3926,7 @@ const modelGroups = computed(() => {
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
   const order = cpState.task === 'image'
     ? [
-        'Qwen Image', 'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
+        'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
         'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
       ]
     : cpState.task === 'video'

@@ -1120,7 +1120,6 @@ test('Qwen Image 2.1 按图片模型登记，提交走 RH 工作流（10 张参�
   assert.equal(spec.task, 'image')
   assert.equal(spec.apiStyle, 'rh-standard')
   assert.equal(spec.files?.images?.max, 10)
-  assert.equal(creationModelFamily(spec), 'Qwen Image')
   assert.deepEqual(spec.capabilities.ratios, ['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9', '21:9'])
 
   const plan = buildCreationRunPlan({
