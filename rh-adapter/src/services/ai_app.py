@@ -118,6 +118,19 @@ def _is_prompt_node(node: dict[str, Any]) -> bool:
     )
 
 
+def _ratio_option_value(node: dict[str, Any], ratio: str) -> str:
+    """把「9:16」这类短式解析成工作流里存的枚举值（如 9:16 (Portrait Widescreen)）。
+
+    RunningHub 的 aspect_ratio 是 COMBO，合法值就是节点 fieldData 里那 8 个长串；
+    对外接口按文档收短式，所以在这里对齐。已经是合法值或对不上时原样返回，
+    不改变任何现有行为。
+    """
+    options = _node_options(node) or []
+    if ratio in options:
+        return ratio
+    return next((option for option in options if option.split(" (")[0] == ratio), ratio)
+
+
 def _matches_scalar(node: dict[str, Any], key: str) -> bool:
     text = _text_for_match(node)
     if key == "duration":
@@ -209,7 +222,7 @@ async def apply_ai_app_inputs(
             next_node["fieldValue"] = str(duration)
             duration_set = True
         elif ratio and not ratio_set and _matches_scalar(next_node, "ratio"):
-            next_node["fieldValue"] = ratio
+            next_node["fieldValue"] = _ratio_option_value(next_node, ratio)
             ratio_set = True
         elif size and not size_set and _matches_scalar(next_node, "size"):
             next_node["fieldValue"] = size

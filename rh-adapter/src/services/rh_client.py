@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import ipaddress
 import logging
+import socket
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -375,6 +378,85 @@ MAX_UPLOAD_SIZE = 20_971_520   # 20MB
 ALLOWED_UPLOAD_MIMES = ("image/", "video/", "audio/")
 
 
+async def upload_ai_app_url(
+    client: httpx.AsyncClient,
+    api_key: str,
+    url: str,
+) -> str:
+    """Download a public reference file and re-upload it as an RH fileName token.
+
+    AI 应用的媒体节点只认 /task/openapi/upload 返回的 fileName（RunningHub 官方
+    文档里 image1 的值就是 `131f54...jpg` 这种令牌），公网 URL 直接塞进去上游读
+    不到文件。这里把 URL 换成令牌，对外接口才能按文档接受 http(s) 参考图。
+    """
+    await _assert_public_url(url)
+
+    try:
+        # 不跟随重定向：跟跳可绕过下面的内网校验
+        resp = await client.get(url, timeout=120, follow_redirects=False)
+        resp.raise_for_status()
+    except Exception as e:
+        raise RHError(f"Failed to fetch reference media {url}: {e}", code=502)
+
+    raw = resp.content
+    if not raw:
+        raise RHError(f"Reference media is empty: {url}", code=400)
+    if len(raw) > MAX_UPLOAD_SIZE:
+        raise RHError("File exceeds 20MB limit", code=413)
+
+    mime = str(resp.headers.get("content-type") or "").split(";")[0].strip().lower()
+    if not any(mime.startswith(prefix) for prefix in ALLOWED_UPLOAD_MIMES):
+        mime = _mime_from_url(url)
+    ext = mime.split("/")[-1] or "png"
+    return await upload_ai_app_file(client, api_key, raw, f"input.{ext}", mime)
+
+
+async def _assert_public_url(url: str) -> None:
+    """拒绝内网/回环/链路本地地址，避免请求方借这里探测内部服务。"""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        raise RHError(f"Unsupported reference media URL: {url}", code=400)
+    try:
+        infos = await asyncio.to_thread(
+            socket.getaddrinfo, parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80)
+        )
+    except Exception as e:
+        raise RHError(f"Cannot resolve reference media host: {e}", code=400)
+    for info in infos:
+        address = ipaddress.ip_address(info[4][0])
+        if (
+            address.is_private
+            or address.is_loopback
+            or address.is_link_local
+            or address.is_reserved
+            or address.is_multicast
+            or address.is_unspecified
+        ):
+            raise RHError("Reference media URL must be publicly reachable", code=400)
+
+
+def _mime_from_url(url: str) -> str:
+    """图床不一定回 content-type，按扩展名兜底；再不行当图片处理。"""
+    path = urlparse(url).path.lower()
+    for ext, mime in (
+        (".png", "image/png"),
+        (".jpg", "image/jpeg"),
+        (".jpeg", "image/jpeg"),
+        (".webp", "image/webp"),
+        (".gif", "image/gif"),
+        (".bmp", "image/bmp"),
+        (".mp4", "video/mp4"),
+        (".mov", "video/quicktime"),
+        (".webm", "video/webm"),
+        (".mp3", "audio/mpeg"),
+        (".wav", "audio/wav"),
+        (".m4a", "audio/mp4"),
+    ):
+        if path.endswith(ext):
+            return mime
+    return "image/png"
+
+
 async def maybe_upload(
     client: httpx.AsyncClient,
     api_key: str,
@@ -387,11 +469,15 @@ async def maybe_upload(
     """Resolve media for RH.
 
     Standard API accepts small data URIs and uploaded URLs. AI App media nodes
-    expect the fileName token returned by /task/openapi/upload.
+    expect the fileName token returned by /task/openapi/upload, so both data URIs
+    and public URLs are converted to that token when mode is "ai_app".
     """
     if not data_url:
         return data_url
     if data_url.startswith(("http://", "https://")):
+        # 标准接口接受公网 URL，AI 应用的媒体节点只认 fileName 令牌
+        if mode == "ai_app":
+            return await upload_ai_app_url(client, api_key, data_url)
         return data_url
     if not data_url.startswith("data:"):
         return data_url
