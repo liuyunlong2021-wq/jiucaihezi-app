@@ -13,11 +13,6 @@ from .rh_client import RHError, maybe_upload
 
 logger = logging.getLogger(__name__)
 
-# Minimax-h3 系列统一参数，与 src/composables/useCreation.ts 的 H3_* 常量对齐
-H3_DURATION_DEFAULT = 5
-H3_RATIO_DEFAULT = "9:16"
-H3_QUALITY_VALUE = "0.9"
-
 
 async def fetch_ai_app_node_info(
     client: httpx.AsyncClient,
@@ -123,21 +118,6 @@ def _is_prompt_node(node: dict[str, Any]) -> bool:
     )
 
 
-def _is_quality_node(node: dict[str, Any]) -> bool:
-    return "megapixel" in _text_for_match(node)
-
-
-def _ratio_option_value(node: dict[str, Any], ratio: str) -> str:
-    """把「 9:16」这类短式解析成工作流里存的长串（如 9:16 (Portrait Widescreen)）。
-
-    对不上就原样返回，保持原有「写什么传什么」的行为不变。
-    """
-    options = _node_options(node) or []
-    if ratio in options:
-        return ratio
-    return next((option for option in options if option.split(" (")[0] == ratio), ratio)
-
-
 def _matches_scalar(node: dict[str, Any], key: str) -> bool:
     text = _text_for_match(node)
     if key == "duration":
@@ -181,19 +161,8 @@ async def apply_ai_app_inputs(
     duration: int | str | None = None,
     ratio: str | None = None,
     size: str | None = None,
-    h3_defaults: bool = False,
 ) -> list[dict[str, Any]]:
     """Fill discovered AI App nodes with user inputs using conservative matching."""
-    if h3_defaults:
-        # Minimax-h3 系列的对外统一口径：时长默认 5 秒、画幅默认 9:16、质量固定 0.9。
-        # 这两个默认值是我们补的，不是调用方要的，所以不参与下面的「缺节点」校验。
-        defaulted_duration = duration is None
-        defaulted_ratio = not ratio
-        if defaulted_duration:
-            duration = H3_DURATION_DEFAULT
-        if defaulted_ratio:
-            ratio = H3_RATIO_DEFAULT
-
     image_values = list(images or [])
     video_values = list(videos or [])
     audio_values = list(audios or [])
@@ -240,10 +209,8 @@ async def apply_ai_app_inputs(
             next_node["fieldValue"] = str(duration)
             duration_set = True
         elif ratio and not ratio_set and _matches_scalar(next_node, "ratio"):
-            next_node["fieldValue"] = _ratio_option_value(next_node, ratio)
+            next_node["fieldValue"] = ratio
             ratio_set = True
-        elif h3_defaults and _is_quality_node(next_node):
-            next_node["fieldValue"] = H3_QUALITY_VALUE
         elif size and not size_set and _matches_scalar(next_node, "size"):
             next_node["fieldValue"] = size
             size_set = True
@@ -259,9 +226,9 @@ async def apply_ai_app_inputs(
         missing.append(f"video x{len(video_values) - video_index}")
     if audio_index < len(audio_values):
         missing.append(f"audio x{len(audio_values) - audio_index}")
-    if duration is not None and not duration_set and not (h3_defaults and defaulted_duration):
+    if duration is not None and not duration_set:
         missing.append("duration")
-    if ratio and not ratio_set and not (h3_defaults and defaulted_ratio):
+    if ratio and not ratio_set:
         missing.append("ratio")
     if size and not size_set:
         missing.append("size")

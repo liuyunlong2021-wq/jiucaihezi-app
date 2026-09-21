@@ -450,42 +450,6 @@ def get_ai_app_registration(webapp_id: str) -> dict[str, str] | None:
     return next((app for app in get_ai_app_directory() if app["webappId"] == str(webapp_id)), None)
 
 
-# ── Minimax-h3 系列（对外统一口径）──
-# 这 8 个应用在客户端统一成「时长 1-15 默认 5 秒 / 画幅 9:16 / 质量 0.9」，
-# 与 src/composables/useCreation.ts 的 H3_* 常量必须保持一致。
-H3_AI_APP_IDS = frozenset({
-    "2093604127250149377",
-    "2093571735550521345",
-    "2093579373894000642",
-    "2093654136997900290",
-    "2093662476146667522",
-    "2093651661213491202",
-    "2093706819385516034",
-    "2101840271142117377",
-})
-
-
-def is_h3_ai_app(webapp_id: str) -> bool:
-    return str(webapp_id) in H3_AI_APP_IDS
-
-
-def resolve_ai_app_id(value: str) -> str:
-    """Accept the app's display name as well as the numeric webapp ID.
-
-    对外文档让第三方直接写「文武双修」这种应用名（客户端的「应用」
-    下拉里就是这个名字），这里按目录反查成数字 ID，免去让调用方硬记
-    19 位编号，也保证「选哪个应用 → 就是那个 RH appId」一一对应。
-    """
-    candidate = str(value or "").strip()
-    if not candidate or candidate.isdigit():
-        return candidate
-    entry = next(
-        (app for app in get_ai_app_directory() if str(app["label"]).strip() == candidate),
-        None,
-    )
-    return str(entry["webappId"]) if entry else candidate
-
-
 def matches_ai_app_registration(webapp_id: str, billing_model: str) -> bool:
     registration = get_ai_app_registration(webapp_id)
     return bool(registration and registration["billingModel"] == billing_model)
