@@ -110,7 +110,9 @@ export function isMemoryProjectMutationBlocked(
   if (SKELETON_PATHS.has(normalized)) return true
   if (SELECTOR_MANAGED_DIRECTORIES.some(directory => isSameOrChild(normalized, directory))) return true
   if (!normalized.startsWith(`${MEMORY_MEDIA_DIRECTORY}/`)) return false
-  if (operation === 'directory') return true
+  // 文档区的子目录归用户/模型管（Skill 草稿本身就是个目录），骨架目录自己仍然只有 App 能建删。
+  // 不这么放：模型建草稿目录时的 mkdir 会被拦下，而且报的是「系统骨架…只能由 App 管理」这种误导文案。
+  if (operation === 'directory') return !normalized.startsWith(`${MEMORY_MEDIA_DIRECTORIES.document}/`)
   if (operation === 'text') return !normalized.startsWith(`${MEMORY_MEDIA_DIRECTORIES.document}/`)
   return !Object.values(MEMORY_MEDIA_DIRECTORIES).some(directory => normalized.startsWith(`${directory}/`))
 }

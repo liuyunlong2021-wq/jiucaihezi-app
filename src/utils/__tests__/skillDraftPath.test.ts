@@ -11,6 +11,7 @@ import {
   skillDraftPath,
   type SkillDraftFiles,
 } from '../skillDraftPath'
+import { createSkillDraftFiles } from '@/services/projectFileService'
 
 /** 用内存 Map 顶掉 ProjectFileService：端口只暴露路径与文本，假实现几行就够。 */
 function createFiles(entries: Record<string, string>): SkillDraftFiles {
@@ -64,8 +65,12 @@ test('草稿落点是可写的文本路径（合同里唯一需要守的规则�
   // 写入侧靠的就是这一条：回归时它会先红
   assert.equal(isMemoryProjectMutationBlocked(`${DRAFT}/SKILL.md`, 'text'), false)
   assert.equal(isMemoryProjectMutationBlocked(`${DRAFT}/references/a.md`, 'text'), false)
-  // 但草稿目录本身不能被当成目录操作，也不能写到对话记录里
-  assert.equal(isMemoryProjectMutationBlocked(DRAFT, 'directory'), true)
+  // 文档区的子目录（草稿目录）归用户/模型管：建删都不该被拦，
+  // 否则模型 mkdir 草稿目录时只会拿到「系统骨架…只能由 App 管理」这种误导报错。
+  assert.equal(isMemoryProjectMutationBlocked(DRAFT, 'directory'), false)
+  // 骨架目录自己仍然只有 App 能建删；对话记录任何写操作都禁止
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/文档', 'directory'), true)
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/图片', 'directory'), true)
   assert.equal(isMemoryProjectMutationBlocked('.raw/对话记录/x.md', 'text'), true)
 })
 
@@ -88,6 +93,39 @@ test('读回草稿：SKILL.md 是正文，其余文本都是 references，iterat
 test('草稿没有 SKILL.md 时报错并说清怎么办', async () => {
   const files = createFiles({ [`${DRAFT}/references/a.md`]: 'x' })
   await assert.rejects(() => readSkillDraft(DRAFT, files), /没有 SKILL\.md/)
+})
+
+test('草稿读写口只吐文件：list 会把目录一起返回，带着目录去读会报「读取路径必须是文件」', async () => {
+  const entries = [
+    { path: DRAFT, isDirectory: true },
+    { path: `${DRAFT}/references`, isDirectory: true },
+    { path: `${DRAFT}/SKILL.md`, isDirectory: false },
+    { path: `${DRAFT}/references/style.md`, isDirectory: false },
+    { path: `${DRAFT}/iteration-1`, isDirectory: true },
+  ]
+  const files = createSkillDraftFiles(
+    /** 只用到 list / readTextAt / hashFile 三个方法。 */
+    {
+      async list() {
+        return entries.map(entry => ({ ...entry, owner: 'p', runtime: 'desktop' as const, name: entry.path, kind: 'document' as const }))
+      },
+      async readTextAt(_owner: string, path: string) {
+        if (entries.some(entry => entry.path === path && entry.isDirectory))
+          throw new Error(`读取路径必须是文件: ${path}`)
+        return { content: `# ${path}`, size: 1, truncated: false }
+      },
+      async hashFile(resource: { path: string }) {
+        return `hash:${resource.path}`
+      },
+    } as never,
+    'p',
+  )
+
+  assert.deepEqual(await files.list(DRAFT), [`${DRAFT}/SKILL.md`, `${DRAFT}/references/style.md`])
+  // 修复前这里会抛「读取路径必须是文件」：目录被当成文件去读了
+  const draft = await readSkillDraft(DRAFT, files)
+  assert.equal(draft.skillMd, `# ${DRAFT}/SKILL.md`)
+  assert.deepEqual(draft.references.map(reference => reference.path), ['references/style.md'])
 })
 
 test('冻结哈希：内容变则哈希变，路径顺序不影响结果', async () => {

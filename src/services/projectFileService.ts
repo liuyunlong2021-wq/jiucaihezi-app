@@ -219,6 +219,9 @@ export function createSkillDraftFiles(service: ProjectFileService, owner: string
   return {
     async list(directory) {
       return (await resources())
+        // `list` 会把目录也返回（ProjectResource.isDirectory）；草稿口只能吐文件，
+        // 否则读口会拿着目录路径去 readText，底层直接报「读取路径必须是文件」。
+        .filter(resource => !resource.isDirectory)
         .map(resource => String(resource.path))
         .filter(path => path.startsWith(`${directory}/`))
     },

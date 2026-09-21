@@ -71,4 +71,12 @@ test('memory project paths hide selector records and protect only the fixed skel
   assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/图片/a.png', 'text'), true)
   assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/文档/a.md', 'text'), false)
   assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/generated', 'directory'), true)
+  // 文档区的子目录归用户/模型管（Skill 草稿就是个目录）：模型 mkdir 草稿目录不能被拦，
+  // 否则它只能拿到一句「系统骨架…只能由 App 管理」的误导报错。
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/文档/skill-demo', 'directory'), false)
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/文档/skill-demo/references', 'directory'), false)
+  // 骨架目录自己仍然只有 App 能建删
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/文档', 'directory'), true)
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media/图片', 'directory'), true)
+  assert.equal(isMemoryProjectMutationBlocked('.raw/jc-media', 'directory'), true)
 })
