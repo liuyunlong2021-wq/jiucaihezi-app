@@ -256,6 +256,9 @@ async def app_info(webappId: str = ""):
     if not webappId:
         raise HTTPException(400, "webappId required")
 
+    from .models.mapping import resolve_ai_app_id
+    webappId = resolve_ai_app_id(webappId)
+
     from .config import RH_AI_APP_WHITELIST
     registration = get_ai_app_registration(webappId)
     if not registration or (RH_AI_APP_WHITELIST and webappId not in RH_AI_APP_WHITELIST):

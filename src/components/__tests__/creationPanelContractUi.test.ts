@@ -91,6 +91,21 @@ test('RH app node 141 prompt is rendered in the composer', () => {
   assert.match(source, /setModelFieldValue\(promptField, cpState\.prompt\)/)
 })
 
+test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  // 图槽、比例、时长、质量都交给 H3 专用控件，不再走通用字段渲染
+  assert.match(source, /!isH3HiddenField\(field\)/)
+  assert.match(source, /isAiAppMediaField\(field\) && !isH3HiddenField\(field\)/)
+  // 比例浮层 / 时长滑条 / 参考图状态条
+  assert.match(source, /togglePop\('h3Ratio'\)/)
+  assert.match(source, /class="cp-dur-slider"/)
+  assert.match(source, /\{\{ h3SelectedImageCount \}\} 张 \/ 最多 \{\{ h3ImageSlotCount \}\} 张/)
+  // 选应用时把画幅与时长种成统一值
+  assert.match(source, /setModelFieldValue\(ratioField, preferredRatio\.value\)/)
+  assert.match(source, /setModelFieldValue\(durationField, H3_DURATION_DEFAULT\)/)
+})
+
 test('creation attachment button uses the native multi-file picker on Desktop', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 

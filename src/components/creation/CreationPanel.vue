@@ -102,6 +102,7 @@ import {
   shortRatioLabel,
   H3_DURATION_DEFAULT,
   H3_DURATION_RANGE,
+  H3_RATIO_DEFAULT,
   type AiAppDirectoryEntry,
   type CreationFieldValue,
 } from '@/composables/useCreation'
@@ -698,7 +699,12 @@ async function handleDiscoverAiApp() {
     cpState.aiAppBillingModel = app.billingModel
     cpState.aiAppFields = fields
     if (isH3AiApp(cpState.aiAppWebappId)) {
-      // 时长不再跟工作流各自的默认值（9/4/2/2/2/15/3 不一致），统一按 5 秒入面板
+      // 时长、画幅不再跟工作流各自的默认值（9/4/2/2/2/15/3、部分 16:9），统一按 5 秒 + 9:16 入面板
+      const ratioField = fields.find(field => isAiAppRatioField(field))
+      const preferredRatio = (ratioField?.options || []).find(
+        option => shortRatioLabel(option.value) === H3_RATIO_DEFAULT,
+      )
+      if (ratioField && preferredRatio) setModelFieldValue(ratioField, preferredRatio.value)
       const durationField = fields.find(field => isAiAppDurationField(field))
       if (durationField) setModelFieldValue(durationField, H3_DURATION_DEFAULT)
     }

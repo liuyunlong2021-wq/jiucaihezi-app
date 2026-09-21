@@ -4,6 +4,7 @@ import pytest
 
 from src.config import RH_AI_APP_NODE_INFO, RH_AI_APP_UPLOAD, RH_STANDARD_UPLOAD
 import src.models.mapping as mapping
+from src.models.mapping import is_h3_ai_app, resolve_ai_app_id
 from src.models.schemas import AudioRequest, ImageRequest, VideoRequest
 from src.services.ai_app import apply_ai_app_inputs, fetch_ai_app_node_info, with_node_options
 from src.services.rh_client import RHError, maybe_upload, submit_ai_app
@@ -501,6 +502,68 @@ async def test_app_info_lifts_combo_options_out_of_field_data():
     assert "options" not in enriched[1]  # 非 COMBO 不凭空造字段
     assert enriched[2]["options"] == ["1:1"]  # 上游已给的选项不覆盖
     assert nodes[0].get("options") is None
+
+
+@pytest.mark.asyncio
+async def test_ai_app_id_resolves_from_display_name():
+    assert resolve_ai_app_id("文武双修") == "2101840271142117377"
+    assert resolve_ai_app_id("  Minimax-h3多参5图  ") == "2093706819385516034"
+    assert resolve_ai_app_id("2093706819385516034") == "2093706819385516034"
+    assert resolve_ai_app_id("不存在的应用") == "不存在的应用"
+    assert resolve_ai_app_id("") == ""
+
+
+def test_h3_app_set_matches_the_minimax_h3_family():
+    assert is_h3_ai_app("2101840271142117377")
+    assert is_h3_ai_app(2093706819385516034)
+    assert not is_h3_ai_app("2096079329523494914")  # 图音生视频
+
+
+H3_NODES = [
+    {"nodeId": "134", "fieldName": "text", "fieldType": "STRING", "fieldValue": "old", "description": "提示词"},
+    {
+        "nodeId": "115",
+        "fieldName": "aspect_ratio",
+        "fieldType": "LIST",
+        "fieldValue": "16:9 (Widescreen)",
+        "nodeName": "ResolutionSelector",
+        "fieldData": (
+            '["COMBO", {"options": '
+            '["1:1 (Square)", "9:16 (Portrait Widescreen)", "16:9 (Widescreen)"]}]'
+        ),
+    },
+    {"nodeId": "132", "fieldName": "value", "fieldType": "FLOAT", "fieldValue": "15", "description": "时长"},
+    {"nodeId": "115", "fieldName": "megapixels", "fieldType": "FLOAT", "fieldValue": "0.4", "description": "质量"},
+]
+
+
+def _node_values(nodes):
+    return {f"{n['nodeId']}:{n['fieldName']}": n["fieldValue"] for n in nodes}
+
+
+@pytest.mark.asyncio
+async def test_h3_ai_app_gets_unified_duration_ratio_and_quality():
+    nodes = await apply_ai_app_inputs(
+        FakeClient(), "rh_key", H3_NODES, prompt="一起结拜", h3_defaults=True,
+    )
+
+    values = _node_values(nodes)
+    assert values["134:text"] == "一起结拜"
+    assert values["132:value"] == "5"            # 时长默认 5 秒
+    assert values["115:aspect_ratio"] == "9:16 (Portrait Widescreen)"  # 短式转工作流长串
+    assert values["115:megapixels"] == "0.9"     # 质量固定 0.9
+
+
+@pytest.mark.asyncio
+async def test_non_h3_ai_app_keeps_workflow_defaults():
+    nodes = await apply_ai_app_inputs(
+        FakeClient(), "rh_key", H3_NODES, prompt="p", ratio="9:16",
+    )
+
+    values = _node_values(nodes)
+    assert values["132:value"] == "15"           # 工作流原值不动
+    assert values["115:megapixels"] == "0.4"     # 质量不碰
+    assert values["115:aspect_ratio"] == "9:16 (Portrait Widescreen)"
 
 
 @pytest.mark.asyncio

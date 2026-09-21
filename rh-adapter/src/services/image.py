@@ -7,7 +7,7 @@ import logging
 import httpx
 
 from ..config import RUNNINGHUB_API_KEY, runninghub_api_key
-from ..models.mapping import get_rh_endpoint, get_rh_site, is_ai_app_model, get_webapp_id, matches_ai_app_registration
+from ..models.mapping import get_rh_endpoint, get_rh_site, is_ai_app_model, get_webapp_id, matches_ai_app_registration, resolve_ai_app_id
 from ..models.schemas import ImageRequest
 from .ai_app import apply_ai_app_inputs, fetch_ai_app_node_info, resolve_ai_app_node_media
 from .rh_client import (
@@ -121,7 +121,7 @@ async def _submit_via_app(
     webapp_id: str = "",
 ) -> dict:
     """Submit via AI Application (ComfyUI workflow)."""
-    wid = webapp_id or get_webapp_id(request.model)
+    wid = resolve_ai_app_id(webapp_id) or get_webapp_id(request.model)
     if not wid:
         raise RHError(f"No webapp ID for model: {request.model}")
     if not matches_ai_app_registration(wid, request.model):
