@@ -127,6 +127,33 @@ test('Minimax H3 node 134 prompt is merged into the main creation prompt', () =>
   assert.equal(params['140:image'], 'first.png')
 })
 
+test('文武双修 应用用 28:prompt 承接主提示词并映射 9 张参考图', () => {
+  switchTask('ai-app')
+  switchModel('runninghub/aiapp/rh-aiapp')
+  cpState.aiAppWebappId = '2101840271142117377'
+  cpState.aiAppLabel = '文武双修'
+  cpState.aiAppOutputType = 'video'
+  cpState.aiAppBillingModel = 'rh-aiapp'
+  cpState.prompt = '一个男人在雨里回头'
+  cpState.aiAppFields = [
+    { key: '28:prompt', label: 'prompt', kind: 'text', defaultValue: '作者示例提示词' },
+    ...[6, 35, 36, 37, 38, 39, 40, 41, 42].map((nodeId, index) => ({
+      key: `${nodeId}:image`,
+      label: `image${index + 1}`,
+      kind: 'image',
+    })),
+  ]
+
+  const params = buildCurrentCreationParams({
+    images: [1, 2, 3, 4, 5, 6, 7, 8, 9].map(index => `ref-${index}.png`),
+  })
+
+  assert.equal(params.prompt, '一个男人在雨里回头')
+  assert.equal(params['28:prompt'], '一个男人在雨里回头')
+  assert.equal(params['6:image'], 'ref-1.png')
+  assert.equal(params['42:image'], 'ref-9.png')
+})
+
 test('Seed Audio rejects reference files larger than 10 MB', () => {
   switchTask('audio')
   switchModel('seed-audio-1.0')

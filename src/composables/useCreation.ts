@@ -94,6 +94,7 @@ const MINIMAX_H3_WEBAPP_IDS = new Set([
   '2093651661213491202',
   '2093662476146667522',
   '2093706819385516034',
+  '2101840271142117377',
 ])
 
 export function isAiAppPromptField(
@@ -102,7 +103,9 @@ export function isAiAppPromptField(
 ): boolean {
   if (field.kind !== 'text') return false
   if (MINIMAX_H3_WEBAPP_IDS.has(webappId)) {
-    return field.key === '134:text' || field.key === '141:text'
+    // ponytail: 逐节点白名单。文武双修（2101840271142117377）的提示词节点是 28:prompt，
+    // 其余同系列应用是 134:text / 141:text。新增同系列应用时按实际节点追加。
+    return field.key === '134:text' || field.key === '141:text' || field.key === '28:prompt'
   }
   return field.label === '提示词'
 }
