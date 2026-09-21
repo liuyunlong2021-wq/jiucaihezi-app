@@ -1623,3 +1623,19 @@ test('the preview panel renders project HTML in a sandboxed frame', () => {
   assert.match(workbench, /v-else-if="previewResource\.type === 'eval-report'"/)
   assert.match(workbench, /<EvalReportViewer :data="previewResource\.data" \/>/)
 })
+
+test('stopping a send gives the draft back to the composer instead of losing it', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  // 点发送那一刻就清空输入框（为了能接着打下一段），而停止的那一轮不落盘 ——
+  // 不把草稿还回去，用户输入的内容就凭空消失。
+  assert.match(workbench, /点发送即完成：立刻清空草稿/)
+  assert.match(
+    workbench,
+    /if \(aborted\) \{[\s\S]*?run\.status = '已停止'[\s\S]*?input\.value = message[\s\S]*?setEditorText\(composerRef\.value, message\)/,
+  )
+  // 只在输入框还空着时回填：绝不覆盖用户已经重新打的字。
+  assert.match(workbench, /isOnScreen\(run\) && !input\.value\.trim\(\) && message/)
+  // 编辑后重发被停止时要回到编辑态，否则「取消编辑」入口和改的是哪一轮都丢了。
+  assert.match(workbench, /if \(editTargetId\) editingTurnId\.value = editTargetId/)
+})

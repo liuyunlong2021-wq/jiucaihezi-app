@@ -1828,6 +1828,16 @@ async function send() {
     if (aborted) {
       run.phase = 'stopped'
       run.status = '已停止'
+      // 停止等于「这次发送作废」：轮次没落盘（落盘在下面的 else 分支），而草稿在点发送那一刻
+      // 就被清空了 —— 不还回去，用户输入的内容就凭空消失。只在输入框还空着、这条 run 还在屏上
+      // 时回填，绝不覆盖用户已经重新打的字。
+      if (!replyCompleted && isOnScreen(run) && !input.value.trim() && message) {
+        input.value = message
+        if (editTargetId) editingTurnId.value = editTargetId
+        setEditorText(composerRef.value, message)
+        resizeComposer()
+        composerRef.value?.focus()
+      }
     } else {
       run.phase = 'failed'
       run.status = '处理失败'
