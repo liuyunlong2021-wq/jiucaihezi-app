@@ -31,6 +31,12 @@ function createFiles(entries: Record<string, string>): SkillDraftFiles {
       const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
       return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
     },
+    async writeText(path, content, options) {
+      if (options?.ifMissing && files.has(path)) return 'unchanged'
+      const status = files.has(path) ? 'updated' : 'created'
+      files.set(path, content)
+      return status
+    },
   }
 }
 
@@ -65,7 +71,7 @@ test('草稿落点是可写的文本路径（合同里唯一需要守的规则�
   // 写入侧靠的就是这一条：回归时它会先红
   assert.equal(isMemoryProjectMutationBlocked(`${DRAFT}/SKILL.md`, 'text'), false)
   assert.equal(isMemoryProjectMutationBlocked(`${DRAFT}/references/a.md`, 'text'), false)
-  // 文档区的子目录（草稿目录）归用户/模型管：建删都不该被拦，
+  // 文档区的子目录（草稿目录）归用户/Runtime 管：建删都不该被拦，
   // 否则模型 mkdir 草稿目录时只会拿到「系统骨架…只能由 App 管理」这种误导报错。
   assert.equal(isMemoryProjectMutationBlocked(DRAFT, 'directory'), false)
   // 骨架目录自己仍然只有 App 能建删；对话记录任何写操作都禁止

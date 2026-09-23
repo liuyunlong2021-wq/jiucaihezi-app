@@ -76,6 +76,7 @@ test('skill-creator validates official agents and eval-viewer package paths', as
       async list(directory) { return Object.keys(entries).filter(path => path.startsWith(`${directory}/`)) },
       async readText(path) { return entries[path as keyof typeof entries] ?? '' },
       async hashFile() { return 'hash' },
+      async writeText() { return 'unchanged' as const },
     },
   }))
   assert.equal(result.status, 'ok')
@@ -104,6 +105,7 @@ test('save_skill freezes a file-tree draft for user confirmation without claimin
       async list(directory) { return [`${directory}/SKILL.md`] },
       async readText(path) { return path.endsWith('SKILL.md') ? skillMd : '' },
       async hashFile() { return 'hash' },
+      async writeText() { return 'unchanged' as const },
     },
   }))
 

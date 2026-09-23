@@ -662,10 +662,10 @@ test('@Jev 只从 @ 提及进入，且在发送链路的最前面回填芯片', 
   // 开它的唯一路径是 @ 提及里选中 / 取消。
   assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = true/)
   assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = false/)
-  // 决策必须发生在 skillSnapshot 之前，否则本轮发出去的还是决策前的空选择。
+  // 决策必须发生在所有发送快照之前，否则本轮发出去的还是决策前的空选择。
   assert.match(
     workbench,
-    /if \(jevSelected\.value\) await applyJevDecision\(message\)\s*\n\s*const skillSnapshot = selectedSkillNames\.value\.slice\(\)/,
+    /if \(jevSelected\.value\) await applyJevDecision\(message\)\s*\n\s*const dhSnapshot = dhSelected\.value\s*\n\s*const skillSnapshot = selectedSkillNames\.value\.slice\(\)/,
   )
   // 决策结果只能落成芯片与模型选择；执行仍然交给 runMemoryChat。
   assert.match(workbench, /for \(const id of result\.tools\) enableTool\(id\)/)

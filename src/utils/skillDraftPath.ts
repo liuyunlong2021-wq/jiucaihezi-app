@@ -2,7 +2,7 @@
  * Skill 草稿在项目文件树里的落点与读写。
  *
  * 合同见 `docs/wiki/开发/SkillCreator合同-2026-09-21.md` §2：草稿就是文件树里的
- * 文件（`.raw/jc-media/文档/skill-<target-skill-id>/`），模型用现有文件工具读写，
+ * 文件（`.raw/jc-media/文档/skill-<target-skill-id>/`），Runtime 负责写入与读回，
  * **路径即身份**，不再有 draft_id / revision / content_hash 三件套与内存状态机。
  */
 import { MEMORY_MEDIA_DIRECTORIES, isMemoryProjectHiddenPath } from './memoryProjectPaths'
@@ -28,6 +28,11 @@ export interface SkillDraftFiles {
   list(directory: string): Promise<string[]>
   readText(path: string): Promise<string>
   hashFile(path: string): Promise<string>
+  writeText(
+    path: string,
+    content: string,
+    options?: { ifMissing?: boolean },
+  ): Promise<'created' | 'updated' | 'unchanged'>
 }
 
 export interface SkillDraftReference {

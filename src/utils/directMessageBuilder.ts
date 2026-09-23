@@ -11,6 +11,8 @@ export interface ResolvedDirectAttachment {
   size: number
   kind: DirectAttachmentKind
   value: string
+  /** Ephemeral UI thumbnail. Never persisted or sent to a model. */
+  previewUrl?: string
   /** Office 等二进制文档转换后的模型可读文本；存在时不再发送原始二进制。 */
   textContent?: string
   cachePath?: string

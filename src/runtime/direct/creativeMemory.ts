@@ -48,6 +48,8 @@ export function buildCreativeContext(input: {
   modelId: string
   contextWindow: number
   reservedTokens: number
+  maxHistoryRounds?: number
+  maxHistoryTokens?: number
 }): { messages: CreativeContextMessage[]; estimatedTokens: number; omittedMessages: number } {
   const contextWindow = input.contextWindow || getModelContextWindow(input.modelId)
   const budget = Math.max(0, contextWindow - input.reservedTokens)
@@ -71,10 +73,13 @@ export function buildCreativeContext(input: {
   used += latestTokens
   index -= 1
 
-  const historyBudget = Math.min(MAX_HISTORY_TOKENS, Math.max(0, budget - latestTokens))
+  const historyBudget = Math.min(
+    input.maxHistoryTokens ?? MAX_HISTORY_TOKENS,
+    Math.max(0, budget - latestTokens),
+  )
   let historyTokens = 0
   let historyRounds = 0
-  while (index >= 1 && historyRounds < MAX_HISTORY_ROUNDS) {
+  while (index >= 1 && historyRounds < (input.maxHistoryRounds ?? MAX_HISTORY_ROUNDS)) {
     const assistant = history[index]
     const user = history[index - 1]
     if (assistant.role !== 'assistant' || user.role !== 'user') break

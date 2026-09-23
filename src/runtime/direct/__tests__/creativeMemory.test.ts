@@ -94,6 +94,25 @@ test('buildCreativeContext keeps only the last three complete rounds', () => {
   ])
 })
 
+test('buildCreativeContext can transfer every complete round that fits for a native session handoff', () => {
+  const messages = Array.from({ length: 5 }, (_, index) => [
+    { id: `u${index + 1}`, role: 'user', content: `问题 ${index + 1}` },
+    { id: `a${index + 1}`, role: 'assistant', content: `回答 ${index + 1}` },
+  ]).flat()
+  const result = buildCreativeContext({
+    messages: [...messages, { id: 'u-latest', role: 'user', content: '切换到 DH' }],
+    modelId: 'gpt-5.6-terra',
+    contextWindow: 100_000,
+    reservedTokens: 0,
+    maxHistoryRounds: Number.MAX_SAFE_INTEGER,
+    maxHistoryTokens: Number.MAX_SAFE_INTEGER,
+  })
+
+  assert.deepEqual(result.messages.map(message => message.id), [
+    'u1', 'a1', 'u2', 'a2', 'u3', 'a3', 'u4', 'a4', 'u5', 'a5', 'u-latest',
+  ])
+})
+
 test('buildCreativeContext caps completed-round history at 12K tokens', () => {
   const result = buildCreativeContext({
     messages: [

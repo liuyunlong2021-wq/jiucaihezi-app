@@ -1,5 +1,23 @@
 # 热缓存
 
+## [2026-09-23] @DH 改由官方 SDK Client 持有 Runtime
+
+- 五分钟无结果的直接原因是 Provider 两次约 125 秒后返回 524，再被 `maxRetries: 5` 放大；集成根因是前端自写 JSON-RPC 生命周期只在 `session.status=idle` 时收尾，Helper 退出后等待 Promise 不会结束。
+- Runtime 与 Client 已统一到官方 `@deepseek-ai/dsh-sdk-client@0.1.7-alpha.2`：bundled Node 的薄 bridge 只转交任务与通知，SDK 负责 Harness 子进程、订阅、退出、stderr 与错误传播；自动重试降为 1 次。
+- 明确 `@文件` 已加载的正文与转换文档会进入首个 Harness prompt，不再先让模型逐个 `glob/read`。流式补丁仍只负责展示 `text-delta`，不承担生命周期。
+- `@DH` 现只选择执行器，不再清除 `@文件`；`@文件` 是明确的本机文件全权开关，给官方 Harness 传 `DSH_PERMISSION_MODE=danger-full-access`，关闭则恢复 `workspace-write`。权限模式进入 Runtime key，切换时不会复用旧权限进程；两枚芯片按任意顺序选择、重开会话均能同时保留。
+- @DH 不再套用普通模型的最近三轮合同：一个 Raw 对话固定映射到一个 `jc-v1-<conversationId>` Harness Session，连续轮次只发送当前消息，由官方 Session 保存完整事件历史并负责 Compaction。首次启用或中间经过非 DH 对话时，才按真实上下文容量一次移交尚未进入 Harness 的完整轮次。
+- SDK Server `0.1.7-alpha.2` 首次见到持久 Session 时原本只会 `agents.create()`，现用官方 `sessionPersistence.stat()` + `agents.resume()` 补齐恢复；移除随机 nonce。停止时完整等待官方 `close()` 的有界回收梯子，不再 2 秒提前杀外层 runner 并遗留子进程。
+- 本轮定向 `106/106`、`vue-tsc -b`、构建补丁连续两次幂等及 `git diff --check` 通过；完整 focused 仍有本轮前已存在的 Jev 源码形态断言与两项未登记测试清单失败。真实 Desktop 跨重启续接和简单文件任务耗时待人工验收。
+
+## [2026-09-22] 文件写入收回任务事务 Runtime
+
+- 用户确认核心目标不是“更好地标记失败”，而是让已经理解清楚的文件任务稳定成功。现行实施合同定为 [[开发/通用记忆工作台任务事务Runtime合同-2026-09-22]]：模型负责语义判断与变更提案，Runtime 负责账本、写入、读回验证、恢复与程序收尾。
+- Skill Creator 是第一个适配器：草稿仍在 `.raw/jc-media/文档/skill-<id>/`，但不再让模型转调 `write/edit/write_text_batch`；Runtime 写回、验证后冻结快照并出现有安装卡。
+- `@文件` 的“开关即全权”授权合同不变；执行改为公共事务内核。简单任务只用内存，只有分批/跨重启长任务才惰性创建 `.raw/临时任务/<run-id>/manifest.json`；对话 Raw 仍只存已完成的可见对话。
+- Skill Creator 已由 Runtime 完成草稿提交、读回验证、冻结与出卡；`@文件` 的项目内 UTF-8 文本 `write/edit/write_text_batch` 已接入同一事务内核：副作用前写 manifest、写后精确读回、整批全部通过才程序收尾，完成即清理临时账本，失败账本保留。
+- 尚未实施的是目录枚举后的模型分批调度、Office/PDF 规范化和跨重启自动续跑；这些继续沿用同一 manifest 合同增量补齐，不另建第二套 Runtime。
+
 ## [2026-09-19] 故事拆分自动识别不再被目录页拦下
 
 - 用户实测《三国：中兴大汉，蜀之浪漫》：通篇 `# 第N章` 却报「未识别到边界」，只能手

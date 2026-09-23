@@ -18,10 +18,11 @@ import { registerSkillBuilderDraft, SkillBuilderDraftError } from '@/utils/skill
 import { loadLatestSkillDraftRevision } from '@/utils/skillDraftStorage'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { type SkillPackageDraftManifest, type SkillPackageReference } from '@/utils/skillTextBuilder'
-import { assertSkillDraftPath, readSkillDraft, type SkillDraftFiles } from '@/utils/skillDraftPath'
+import { assertSkillDraftPath, readSkillDraft, skillDraftPath, type SkillDraftFiles } from '@/utils/skillDraftPath'
 
 const TOOL_NAMES = new Set([
   'skill_creator_load_installed_skill',
+  'skill_creator_commit_draft',
   'skill_creator_validate',
   'run_skill_tests',
   'skill_creator_aggregate_benchmark',
@@ -44,6 +45,8 @@ export interface SkillCreatorInstalledSkill {
   skillId: string
   skillMd: string
   files: string[]
+  references?: Array<{ path: string; content: string }>
+  unsupportedFiles?: string[]
   source: string
   editable: boolean
 }
@@ -54,12 +57,7 @@ interface SkillCreatorToolContext {
   userInput?: string
   signal?: AbortSignal
   loadInstalledSkill?: (skillId: string) => Promise<SkillCreatorInstalledSkill | null>
-  /**
-   * 草稿所在项目文件树的读写口。
-   *
-   * 草稿归模型管（模型用现有文件工具读写），这里只提供只读回读，供校验、测试、评审
-   * 和出卡使用。不提供写入 —— 宿主不替模型改草稿。
-   */
+  /** Runtime 持有草稿读写口；模型只提交变更提案。 */
   files?: SkillDraftFiles
   testToolAdapter?: {
     tools: unknown[]
@@ -118,6 +116,31 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
       files: [...new Set(['SKILL.md', ...skill.files.map(String).filter(Boolean)])],
       source: skill.source,
     })
+  }
+  if (name === 'skill_creator_commit_draft') {
+    const targetSkillId = String(args.target_skill_id || '').trim()
+    if (!targetSkillId) throw new SkillDraftError('SKILL_ID_REQUIRED', '请提供 target_skill_id。')
+    const snapshot = installedSnapshots.get(`${context.sessionId || 'unsaved-session'}::${targetSkillId}`)
+    const fullSkillMd = String(args.skill_md || '').trim()
+    const sectionHeading = String(args.section_heading || '').trim()
+    const replacement = String(args.replacement || '').trim()
+    if (fullSkillMd && (sectionHeading || replacement)) {
+      throw new SkillDraftError('SKILL_DRAFT_PROPOSAL_INVALID', 'skill_md 与章节替换参数只能二选一。')
+    }
+    let proposed = fullSkillMd
+    if (!proposed) {
+      if (!sectionHeading || !replacement) {
+        throw new SkillDraftError('SKILL_DRAFT_PROPOSAL_REQUIRED', '请提供完整 skill_md，或同时提供 section_heading + replacement。')
+      }
+      const directory = skillDraftPath(targetSkillId)
+      const current = await readDraftIfPresent(directory, context)
+      const source = current?.skillMd || snapshot?.skillMd
+      if (!source) {
+        throw new SkillDraftError('SKILL_SOURCE_REQUIRED', `修改 ${targetSkillId} 前请先调用 skill_creator_load_installed_skill。`)
+      }
+      proposed = replaceMarkdownSection(source, sectionHeading, replacement)
+    }
+    return JSON.stringify(await commitSkillDraft(targetSkillId, proposed, snapshot, context))
   }
   const testId = String(args.test_id || args.run_id || 'default')
   const runKey = `${context.sessionId || 'unsaved-session'}::${testId}`
@@ -224,13 +247,12 @@ async function execute(name: string, args: Record<string, any>, context: SkillCr
       feedback: String(args.feedback || ''),
       benchmarkNotes: Array.isArray(args.benchmark_notes) ? args.benchmark_notes.map(String) : [],
     }, context.signal)
-    // 草稿归模型管：宿主不替它改文件树，只把改好的正文交回去由模型自己写回。
+    const targetSkillId = draft.draftPath.slice(draft.draftPath.lastIndexOf('/skill-') + '/skill-'.length)
+    const committed = await commitSkillDraft(targetSkillId, improved.skillMd, undefined, context)
     return JSON.stringify({
-      status: 'ok',
-      draft_path: draft.draftPath,
-      skill_md: improved.skillMd,
+      ...committed,
       output: improved.output,
-      message: `请把 skill_md 用 write_text_batch 写回 ${draft.draftPath}/SKILL.md，然后重新调用 skill_creator_validate。`,
+      message: 'description 已由 Runtime 写回草稿并读回验证。',
     })
   }
   if (name === 'skill_creator_package') {
@@ -305,7 +327,10 @@ function parseArgs(toolName: string, value?: string): Record<string, any> {
   try {
     parsed = JSON.parse(raw)
   } catch {
-    throw new Error(`工具参数 JSON 不完整（${toolName}，收到 ${raw.length} 字符）：多半是回复被输出长度截断。请缩短参数后重试——只传 draft_path 这类标识，不要把 SKILL.md 正文或 references 全文复制进参数；必要时拆成多次调用。`)
+    const hint = toolName === 'skill_creator_commit_draft'
+      ? '请优先提交唯一章节替换，避免传整份 SKILL.md。'
+      : '请只传 draft_path 等 schema 定义的小参数。'
+    throw new Error(`工具参数 JSON 不完整（${toolName}，收到 ${raw.length} 字符）：多半是回复被输出长度截断。${hint}`)
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`工具参数必须是 JSON 对象（${toolName}）。`)
   return parsed as Record<string, any>
@@ -321,7 +346,7 @@ function normalizeReferences(value: unknown): Array<{ path: string; content: str
 }
 
 /**
- * 草稿就在项目文件树里，模型给目录，宿主只读回来。
+ * 草稿就在项目文件树里，模型给目录，宿主读回来。
  *
  * 路径即身份：不再有不透明标识，也不再有宿主内的草稿状态。
  */
@@ -370,7 +395,7 @@ interface ResolvedSkillDraft {
   references: SkillPackageReference[]
 }
 
-/** 读回文件树里的草稿：草稿由模型用现有文件工具写，宿主只读。 */
+/** 读回文件树里的草稿。 */
 async function readFileTreeDraft(draftPath: string, context: SkillCreatorToolContext): Promise<ResolvedSkillDraft> {
   const files = context.files
   if (!files) throw new SkillDraftError('SKILL_DRAFT_FILES_UNAVAILABLE', '当前运行环境读不到项目文件树里的草稿。')
@@ -384,6 +409,96 @@ async function readFileTreeDraft(draftPath: string, context: SkillCreatorToolCon
     skillMd: draft.skillMd,
     references: toDraftReferences(draft.references),
   }
+}
+
+async function readDraftIfPresent(draftPath: string, context: SkillCreatorToolContext): Promise<ResolvedSkillDraft | null> {
+  const files = context.files
+  if (!files) throw new SkillDraftError('SKILL_DRAFT_FILES_UNAVAILABLE', '当前运行环境读不到项目文件树里的草稿。')
+  const directory = assertSkillDraftPath(draftPath)
+  return (await files.list(directory)).includes(`${directory}/SKILL.md`)
+    ? await readFileTreeDraft(directory, context)
+    : null
+}
+
+async function commitSkillDraft(
+  targetSkillId: string,
+  skillMd: string,
+  installed: SkillCreatorInstalledSkill | undefined,
+  context: SkillCreatorToolContext,
+): Promise<Record<string, unknown>> {
+  const files = context.files
+  if (!files) throw new SkillDraftError('SKILL_DRAFT_FILES_UNAVAILABLE', '当前运行环境无法写入项目文件树里的草稿。')
+  if (installed?.unsupportedFiles?.length) {
+    throw new SkillDraftError(
+      'SKILL_BINARY_RESOURCES_UNSUPPORTED',
+      `当前草稿通道不能无损保留以下非文本资源，已在写入前停止: ${installed.unsupportedFiles.join('、')}`,
+    )
+  }
+  const directory = skillDraftPath(targetSkillId)
+  const current = await readDraftIfPresent(directory, context)
+  const references = mergeReferences(current?.references || [], toDraftReferences(installed?.references || []))
+  const validation = validateSkillDraft(skillMd, references)
+  if (validation.status !== 'ok') return { ...validation, draft_path: directory, verified: false }
+  if (validation.name !== targetSkillId) {
+    throw new SkillDraftError(
+      'SKILL_TARGET_MISMATCH',
+      `SKILL.md 中的 name=${validation.name} 与目标 ${targetSkillId} 不一致，已在写入前停止。`,
+    )
+  }
+
+  for (const reference of installed?.references || []) {
+    await files.writeText(`${directory}/${reference.path}`, reference.content, { ifMissing: true })
+  }
+  const operation = await files.writeText(`${directory}/SKILL.md`, skillMd)
+  const committed = await readFileTreeDraft(directory, context)
+  if (committed.skillMd !== skillMd) {
+    throw new SkillDraftError('SKILL_DRAFT_VERIFY_FAILED', `Skill 草稿写后读回不一致: ${directory}/SKILL.md`)
+  }
+  const verified = validateSkillDraft(committed.skillMd, committed.references)
+  if (verified.status !== 'ok') {
+    throw new SkillDraftError('SKILL_DRAFT_VERIFY_FAILED', verified.message || 'Skill 草稿写后校验未通过。')
+  }
+  return {
+    ...verified,
+    status: 'ok',
+    verified: true,
+    operation,
+    draft_path: directory,
+    target_skill_id: targetSkillId,
+    content_hash: await files.hashFile(`${directory}/SKILL.md`),
+    message: `Runtime 已写入并读回验证 ${directory}/SKILL.md。`,
+  }
+}
+
+function mergeReferences(primary: SkillPackageReference[], fallback: SkillPackageReference[]): SkillPackageReference[] {
+  const merged = new Map(fallback.map(reference => [reference.path, reference]))
+  for (const reference of primary) merged.set(reference.path, reference)
+  return [...merged.values()]
+}
+
+function replaceMarkdownSection(source: string, heading: string, replacement: string): string {
+  const headingMatch = heading.match(/^(#{1,6})\s+\S/)
+  if (!headingMatch) throw new SkillDraftError('SKILL_SECTION_INVALID', 'section_heading 必须是完整 Markdown 标题，例如 ## STEP 3。')
+  if (replacement.split(/\r?\n/, 1)[0]?.trim() !== heading) {
+    throw new SkillDraftError('SKILL_SECTION_INVALID', 'replacement 第一行必须与 section_heading 完全一致。')
+  }
+  const lines = source.split(/\r?\n/)
+  const matches = lines.flatMap((line, index) => line.trim() === heading ? [index] : [])
+  if (!matches.length) throw new SkillDraftError('SKILL_SECTION_NOT_FOUND', `找不到唯一章节: ${heading}`)
+  if (matches.length > 1) throw new SkillDraftError('SKILL_SECTION_AMBIGUOUS', `章节标题出现 ${matches.length} 次，已拒绝猜测替换: ${heading}`)
+  const start = matches[0]
+  const level = headingMatch[1].length
+  let end = lines.length
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const next = lines[index].match(/^(#{1,6})\s+\S/)
+    if (next && next[1].length <= level) { end = index; break }
+  }
+  const before = lines.slice(0, start)
+  const after = lines.slice(end)
+  const section = replacement.trim().split(/\r?\n/)
+  while (before.at(-1) === '') before.pop()
+  while (after[0] === '') after.shift()
+  return [...before, '', ...section, ...(after.length ? ['', ...after] : [])].join('\n').replace(/^\n/, '')
 }
 
 function assertDraftIdentityRemovedForReference() { /* 旧的 draft_id/revision/content_hash 核对已随状态机一起删除 */ }

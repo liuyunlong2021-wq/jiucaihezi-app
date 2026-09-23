@@ -163,6 +163,7 @@ test('buildDefaultChatTools gives text source builder only to 素材转Skill', (
   ])
   assert.deepEqual(creatorTools, [
     'skill_creator_load_installed_skill',
+    'skill_creator_commit_draft',
     'skill_creator_validate',
     'run_skill_tests',
     'skill_creator_aggregate_benchmark',

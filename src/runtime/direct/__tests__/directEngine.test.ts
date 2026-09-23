@@ -1467,6 +1467,54 @@ test('runDirectChatCompletion stops after a successful terminal tool', async () 
   assert.equal(result.text, '已写入 wiki/结果.md')
 })
 
+test('runDirectChatCompletion does not report a partially failed terminal batch as complete', async () => {
+  let requests = 0
+  const result = await runDirectChatCompletion({
+    messages: [{ role: 'user', content: '写入两个文件' }],
+    tools: [{ type: 'function', function: { name: 'write' } }],
+    stopAfterSuccessfulToolNames: ['write'],
+    onText: () => {},
+    executeTool: async call =>
+      JSON.parse(call.function.arguments).path === 'wiki/a.md'
+        ? { content: '已写入 wiki/a.md', status: 'succeeded' }
+        : { content: '写入 wiki/b.md 失败', status: 'failed' },
+    sendChatCompletion: async () => {
+      requests += 1
+      if (requests === 2)
+        return sseResponse([
+          JSON.stringify({ choices: [{ delta: { content: '第二个文件未写入，任务未完成。' } }] }),
+          '[DONE]',
+        ])
+      return sseResponse([
+        JSON.stringify({
+          choices: [
+            {
+              delta: {
+                tool_calls: [
+                  {
+                    index: 0,
+                    id: 'call_write_a',
+                    function: { name: 'write', arguments: '{"path":"wiki/a.md","content":"a"}' },
+                  },
+                  {
+                    index: 1,
+                    id: 'call_write_b',
+                    function: { name: 'write', arguments: '{"path":"wiki/b.md","content":"b"}' },
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        '[DONE]',
+      ])
+    },
+  })
+
+  assert.equal(requests, 2)
+  assert.equal(result.text, '第二个文件未写入，任务未完成。')
+})
+
 test('runDirectChatCompletion stops after a matching successful batch tool call', async () => {
   let requests = 0
   const result = await runDirectChatCompletion({

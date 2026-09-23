@@ -210,9 +210,8 @@ export interface ProjectFileService {
 }
 
 /**
- * 把 `ProjectFileService` 适配成 Skill 草稿读写口。
- *
- * 只读：草稿归模型管（模型用现有文件工具读写），宿主只回读，不替它改文件。
+ * 把 `ProjectFileService` 适配成 Skill 草稿读写口。Runtime 通过修订号写入，
+ * 模型只提交新正文，不直接维护项目文件状态。
  */
 export function createSkillDraftFiles(service: ProjectFileService, owner: string): SkillDraftFiles {
   const resources = async () => await service.list(owner)
@@ -229,9 +228,22 @@ export function createSkillDraftFiles(service: ProjectFileService, owner: string
       return (await service.readTextAt(owner, path)).content
     },
     async hashFile(path) {
-      const resource = (await resources()).find(item => String(item.path) === path)
+      const resource = (await resources()).find(item => !item.isDirectory && String(item.path) === path)
       if (!resource) throw new Error(`找不到文件: ${path}`)
       return await service.hashFile(resource)
+    },
+    async writeText(path, content, options) {
+      const resource = (await resources()).find(item => !item.isDirectory && String(item.path) === path)
+      if (resource) {
+        if (options?.ifMissing) return 'unchanged'
+        const current = await service.readText(resource)
+        if (current.content === content) return 'unchanged'
+        const result = await service.writeText(resource, content, current.revision)
+        if (result.status !== 'saved') throw new Error(`Skill 草稿在写入前已变化: ${path}`)
+        return 'updated'
+      }
+      await service.createText(owner, path, content)
+      return 'created'
     },
   }
 }

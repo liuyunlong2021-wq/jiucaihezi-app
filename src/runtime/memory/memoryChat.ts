@@ -66,6 +66,30 @@ import { renderSkillFiles } from '@/runtime/skills/skillFileListing'
 export function normalizeMemoryToolResult(result: DirectToolResult): DirectToolResult {
   return { ...result, status: result.status ?? 'succeeded' }
 }
+
+export function normalizeSkillCreatorToolResult(
+  toolName: string,
+  content: string,
+): DirectToolResult {
+  let payload: Record<string, unknown>
+  try {
+    payload = JSON.parse(content) as Record<string, unknown>
+  } catch {
+    return { content, status: 'failed' }
+  }
+  if (payload.status === 'error' || payload.error) {
+    return { content, status: 'failed', details: payload }
+  }
+  if (toolName !== 'save_skill') return { content, status: 'succeeded', details: payload }
+  if (payload.status !== 'prepared' || !payload.install_token) {
+    return { content, status: 'failed', details: payload }
+  }
+  return {
+    content: `Skill 草稿已由 Runtime 读回验证并冻结。点击下方安装卡后才会写入中央 Skill 目录。\n\n\`\`\`jc-skill-install-v2\n${JSON.stringify(payload.install_token)}\n\`\`\``,
+    status: 'succeeded',
+    details: payload,
+  }
+}
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { safeFetch } from '@/utils/httpClient'
 import { supportsVision } from '@/utils/providerConfig'
@@ -92,6 +116,13 @@ import {
   parseStoryAnalysisSubmissions,
   prepareStoryAnalysis,
 } from './storyAnalysis'
+import {
+  cleanupCompletedFileTask,
+  executeVerifiedFileMutation,
+  fileTaskFingerprint,
+  fileTaskRunId,
+  isProjectTextMutationCall,
+} from './fileTaskRuntime'
 
 export interface MemoryChatInput {
   projectId?: string
@@ -563,10 +594,22 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       skill.source === 'user' || skill.source === 'github' || skill.source === 'evolved'
     const loaded =
       editable && desktopRuntime ? await createLocalSkillLoader([skill])(skill.id) : null
+    const references: Array<{ path: string; content: string }> = []
+    const unsupportedFiles: string[] = []
+    if (loaded) {
+      for (const path of loaded.resources) {
+        if (path === 'SKILL.md') continue
+        const resource = await loaded.readResource(path)
+        if (typeof resource.text === 'string') references.push({ path, content: resource.text })
+        else unsupportedFiles.push(path)
+      }
+    }
     return {
       skillId: skill.id,
       skillMd: loaded?.content || localSkillMarkdown(skill),
       files: loaded?.resources || ['SKILL.md', ...(skill.assetIndex || []).map(item => item.path)],
+      references,
+      unsupportedFiles,
       source: String(skill.source || ''),
       editable,
     }
@@ -590,6 +633,13 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const projectTools: DirectToolExecutor = async (call, signal) =>
     normalizeMemoryToolResult(await rawProjectTools(call, signal))
   const storyFiles = createRuntimeProjectFileService()
+  const currentFileTaskRunId = fileTaskRunId(
+    input.conversationId || 'unsaved-conversation',
+    input.userTurn.id || 'unsaved-turn',
+  )
+  const currentFileTaskFingerprint = fileTaskFingerprint(
+    `${input.userTurn.id}\u0000${latestUserText}`,
+  )
 
   const executeMemoryTool = async (
     call: DirectToolCall,
@@ -691,8 +741,9 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
           status: 'failed' as const,
         }
       }
-      return {
-        content: await executeSkillCreatorToolCall(call, {
+      return normalizeSkillCreatorToolResult(
+        call.function.name,
+        await executeSkillCreatorToolCall(call, {
           agentId: selectedSkillNames.some(
             name => name === 'skill-creator' || name === 'preset_skill-creator',
           )
@@ -725,7 +776,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
             },
           },
         }),
-      }
+      )
     }
     if (call.function.name === 'tool_search') {
       const args = parseCreativeToolArguments(call)
@@ -759,7 +810,18 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
       }
     }
     assertMemoryProjectMutationProtected(call, input.projectId)
-    const toolResult = await projectTools(call, signal)
+    const toolResult =
+      input.fileToolsSelected && input.projectId && isProjectTextMutationCall(call)
+        ? await executeVerifiedFileMutation({
+            owner: input.projectId,
+            runId: currentFileTaskRunId,
+            taskFingerprint: await currentFileTaskFingerprint,
+            call,
+            files: storyFiles,
+            execute: projectTools,
+            signal,
+          })
+        : await projectTools(call, signal)
     if (call.function.name === 'create_3d_scene') {
       for (const marker of parseScene3DResultMarkers(toolResult.content))
         sceneResults.set(marker.path, marker)
@@ -880,7 +942,20 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     },
     toolNeedsApproval: call => memoryToolNeedsApproval(call, authorizedPaths, input.projectId),
     executeTool: executeMemoryTool,
+    stopAfterSuccessfulToolCall: call =>
+      (call.function.name === 'save_skill' &&
+        selectedSkillNames.some(
+          name => name === 'skill-creator' || name === 'preset_skill-creator',
+        )) ||
+      (Boolean(input.fileToolsSelected) && isProjectTextMutationCall(call)),
   })
+  if (
+    input.fileToolsSelected &&
+    input.projectId &&
+    result.toolCalls.some(isProjectTextMutationCall)
+  ) {
+    await cleanupCompletedFileTask(storyFiles, input.projectId, currentFileTaskRunId)
+  }
   input.onMetrics?.(result.metrics)
   const answer = stripScene3DResultMarkers(
     resolveDirectCompletionText(result.text, result.finishReason, '模型没有返回内容'),

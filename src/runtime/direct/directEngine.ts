@@ -217,7 +217,8 @@ export async function runDirectChatCompletion(
     }
     try {
       const result = await executeTool(call, signal)
-      roundToolOutcomes[outcomeIndex]!.failed = result.status === 'failed'
+      roundToolOutcomes[outcomeIndex]!.failed =
+        result.status === 'failed' || result.status === 'cancelled'
       if (
         call.function.name === 'edit' &&
         result.status !== 'failed' &&
@@ -227,6 +228,7 @@ export async function runDirectChatCompletion(
       }
       if (
         result.status !== 'failed' &&
+        result.status !== 'cancelled' &&
         ((options.stopAfterSuccessfulToolNames || []).includes(call.function.name) ||
           options.stopAfterSuccessfulToolCall?.(call))
       ) {
@@ -397,7 +399,7 @@ export async function runDirectChatCompletion(
           )
           messages = appendToolMessages(continuationToolMessages)
           toolRounds += 1
-          if (successfulTerminalToolContent)
+          if (successfulTerminalToolContent && roundToolOutcomes.every(outcome => !outcome.failed))
             return completed({
               text: successfulTerminalToolContent,
               toolCalls: allToolCalls,
@@ -509,7 +511,7 @@ export async function runDirectChatCompletion(
     const toolMessages = await buildToolMessages(toolCalls, stream.reasoning, currentTools)
     messages = appendToolMessages(toolMessages)
     toolRounds += 1
-    if (successfulTerminalToolContent)
+    if (successfulTerminalToolContent && roundToolOutcomes.every(outcome => !outcome.failed))
       return completed({
         text: successfulTerminalToolContent,
         toolCalls: allToolCalls,

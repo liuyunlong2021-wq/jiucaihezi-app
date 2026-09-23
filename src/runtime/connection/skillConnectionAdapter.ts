@@ -153,15 +153,15 @@ const SKILL_CREATOR_RUNTIME_APPENDIX = `
 ---
 ## 韭菜盒子运行时差异（只列宿主差异；流程以本 Skill 正文为准）
 
-当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill 或 subagent；读写项目外绝对路径时，是否放行由系统运行时判定（用户消息里给过该路径才可用，本会话内持续有效）；Skill 不得假设或代为决定权限。
+当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill 或 subagent；用户已给出某个目录或文件的绝对路径时，是否放行由系统运行时判定（本会话内持续有效）；Skill 不得假设或代为决定权限。
 Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。
 官方 Python 脚本通过韭菜盒子已接入的受限脚本执行能力运行；Web/Mobile 不伪造本地脚本执行结果。
 
-**文件能力**：Skill 层不限制文件权限。用户已给出某个目录或文件的绝对路径时，直接用 read、write、edit 读写它（含 references、scripts、assets），不要绕道其他写法；没有路径时用 skill_creator_load_installed_skill 按精确 ID 读「我的 Skill」里的 SKILL.md，并请用户把 Skill 文件夹的绝对路径发过来。不得自造路径，也不得用 Terminal 兜底搜索。
+**文件能力**：Skill 层不限制文件权限。用户明确要修改已安装 Skill 时，用 skill_creator_load_installed_skill 按精确 ID 读取；不得用 Terminal 兜底搜索或直接改中央 Skill 目录。
 
-**草稿位置**：草稿写在项目文件树里 —— \`.raw/jc-media/文档/skill-<skill-name>/\`，用文件工具写（write_text_batch 一次写多份，或 create_document 写单份）。所有生命周期工具都传同一个 draft_path，不再有别的草稿标识。改内容就用文件工具改那个目录，改完重新调用 skill_creator_validate。
+**草稿位置**：草稿在项目文件树的 \`.raw/jc-media/文档/skill-<skill-name>/\`，返回的 \`draft_path\` 是唯一草稿标识。只需调用 skill_creator_commit_draft 提交完整 SKILL.md 或唯一 Markdown 章节替换；Runtime 自动写入、读回验证并保留已加载 Skill 的文本资源。不要再调用 write/edit/write_text_batch 改草稿。
 
-可用工具：skill_creator_load_installed_skill、skill_creator_validate、run_skill_tests、skill_creator_submit_eval_feedback、skill_creator_load_eval_feedback、skill_creator_open_eval_review、skill_creator_compare_outputs、skill_creator_analyze_comparison、skill_creator_aggregate_benchmark、skill_creator_improve_description、skill_creator_package、save_skill。
+可用工具：skill_creator_load_installed_skill、skill_creator_commit_draft、skill_creator_validate、run_skill_tests、skill_creator_submit_eval_feedback、skill_creator_load_eval_feedback、skill_creator_open_eval_review、skill_creator_compare_outputs、skill_creator_analyze_comparison、skill_creator_aggregate_benchmark、skill_creator_improve_description、skill_creator_package、save_skill。
 `
 
 const SKILL_BUILDER_RUNTIME_APPENDIX_BASE = `

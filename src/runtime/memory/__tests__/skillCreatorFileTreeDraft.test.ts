@@ -31,6 +31,12 @@ function draftFiles(entries: Record<string, string>): SkillDraftFiles {
       const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(content))
       return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('')
     },
+    async writeText(path, content, options) {
+      if (options?.ifMissing && files.has(path)) return 'unchanged'
+      const status = files.has(path) ? 'updated' : 'created'
+      files.set(path, content)
+      return status
+    },
   }
 }
 
@@ -100,6 +106,74 @@ test('没有文件读写口时明确报不可用，而不是悄悄当成空草�
 
   assert.equal(result.status, 'error')
   assert.equal(result.errorCode, 'SKILL_DRAFT_FILES_UNAVAILABLE')
+})
+
+test('Runtime 替换唯一章节，读回验证并保留已安装 Skill 的文本资源', async () => {
+  const installed = `${SKILL_MD}\n\n## STEP 2\n\n保留二。\n\n## STEP 3\n\n旧角色卡。\n\n## STEP 4\n\n保留四。`
+  const replacement = '## STEP 3\n\n9:16 竖屏：上格齐胸身份近景；下左正面无头全身；下右带头背面全身。'
+  const files = draftFiles({})
+  const shared = {
+    ...context('runtime-section-commit', files),
+    loadInstalledSkill: async () => ({
+      skillId: 'demo-skill',
+      skillMd: installed,
+      files: ['SKILL.md', 'references/style.md'],
+      references: [{ path: 'references/style.md', content: '# 风格' }],
+      source: 'user',
+      editable: true,
+    }),
+  }
+
+  await executeSkillCreatorToolCall(call('skill_creator_load_installed_skill', { skill_id: 'demo-skill' }), shared)
+  const result = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_commit_draft', {
+    target_skill_id: 'demo-skill',
+    section_heading: '## STEP 3',
+    replacement,
+  }), shared))
+
+  assert.equal(result.status, 'ok', JSON.stringify(result))
+  assert.equal(result.verified, true)
+  assert.equal(result.draft_path, DRAFT_DIR)
+  assert.match(await files.readText(`${DRAFT_DIR}/SKILL.md`), /## STEP 2\n\n保留二。\n\n## STEP 3\n\n9:16 竖屏/)
+  assert.match(await files.readText(`${DRAFT_DIR}/SKILL.md`), /## STEP 4\n\n保留四。$/)
+  assert.doesNotMatch(await files.readText(`${DRAFT_DIR}/SKILL.md`), /旧角色卡/)
+  assert.equal(await files.readText(`${DRAFT_DIR}/references/style.md`), '# 风格')
+})
+
+test('Runtime 拒绝模糊章节边界，不在多个同名章节中猜一个', async () => {
+  const duplicate = `${SKILL_MD}\n\n## STEP 3\n\nA\n\n## STEP 3\n\nB`
+  const files = draftFiles({})
+  const shared = {
+    ...context('runtime-ambiguous-section', files),
+    loadInstalledSkill: async () => ({
+      skillId: 'demo-skill', skillMd: duplicate, files: ['SKILL.md'], references: [], source: 'user', editable: true,
+    }),
+  }
+  await executeSkillCreatorToolCall(call('skill_creator_load_installed_skill', { skill_id: 'demo-skill' }), shared)
+
+  const result = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_commit_draft', {
+    target_skill_id: 'demo-skill',
+    section_heading: '## STEP 3',
+    replacement: '## STEP 3\n\n新内容',
+  }), shared))
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.errorCode, 'SKILL_SECTION_AMBIGUOUS')
+  await assert.rejects(() => files.readText(`${DRAFT_DIR}/SKILL.md`), /找不到文件/)
+})
+
+test('Runtime 拒绝把另一 ID 的 SKILL.md 写进目标草稿目录', async () => {
+  const files = draftFiles({})
+  const wrongId = SKILL_MD.replace('name: demo-skill', 'name: another-skill')
+
+  const result = JSON.parse(await executeSkillCreatorToolCall(call('skill_creator_commit_draft', {
+    target_skill_id: 'demo-skill',
+    skill_md: wrongId,
+  }), context('runtime-target-mismatch', files)))
+
+  assert.equal(result.status, 'error')
+  assert.equal(result.errorCode, 'SKILL_TARGET_MISMATCH')
+  await assert.rejects(() => files.readText(`${DRAFT_DIR}/SKILL.md`), /找不到文件/)
 })
 
 test('出卡会把文件树草稿冻结成受控快照，安装卡读得回同一份内容', async () => {

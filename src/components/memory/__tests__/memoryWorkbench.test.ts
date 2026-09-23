@@ -16,9 +16,41 @@ test('@DH is a desktop runtime that accepts selected Skills and bypasses legacy 
   assert.match(workbench, /sessionId: active\.transcript\.id/)
   assert.match(workbench, /cwd: active\.resource\.owner/)
   assert.match(workbench, /if \(run\.runtime === 'dh'\) void stopDeepSeekHarness\(\)/)
-  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot\)/)
+  assert.match(workbench, /deepSeekHandoffTurns\(baseTurns\)/)
+  assert.match(workbench, /ids\.push\('dh', DEEPSEEK_HARNESS_SESSION_MARKER\)/)
+  assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
+  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns\)/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?attachments: requestAttachments/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
   assert.doesNotMatch(workbench, /const skillSnapshot = dhSnapshot \? \[\]/)
   assert.doesNotMatch(workbench, /function selectDeepSeekHarness\(\)[\s\S]{0,400}selectedSkillNames\.value = \[\]/)
+})
+
+test('@DH executor composes with the @文件 full-access capability in either click order', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const selectDh = workbench.match(/function selectDeepSeekHarness\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
+  const enableTool = workbench.match(/function enableTool\(id: string\) \{([\s\S]*?)\n\}/)?.[1] || ''
+  const restoreTools = workbench.match(/function applyToolChipIds\(ids\?: string\[\]\) \{([\s\S]*?)\n\}/)?.[1] || ''
+  assert.doesNotMatch(selectDh, /fileToolsSelected\.value = false/)
+  assert.doesNotMatch(enableTool, /dhSelected\.value = false\s*\n\s*if \(id === 'file'\)/)
+  assert.match(restoreTools, /dhSelected\.value = next\.has\('dh'\)/)
+  assert.match(restoreTools, /fileToolsSelected\.value = next\.has\('file'\)/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?fileAccessEnabled: fileToolsSelected\.value/)
+})
+
+test('image and video attachments display their project paths while models receive the saved original', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /attachment\.previewUrl = await createProjectMediaPreview\(resource\)/)
+  assert.match(workbench, /:src="file\.previewUrl \|\| file\.value"/)
+  assert.match(workbench, /file\.kind !== 'image' && file\.kind !== 'video'/)
+  assert.match(workbench, /<video v-else-if="file\.kind === 'video'/)
+  assert.match(workbench, /attachment\.previewUrl \|\| attachment\.value/)
+  assert.match(workbench, /const binary = await files\.readBinary\(resource\)/)
+  assert.match(workbench, /function revokeAttachmentPreview/)
+  assert.doesNotMatch(workbench, /createImageThumbnail|canvas\.toBlob/)
+  assert.match(workbench, /detectImageMimeFromBytes\(data\)/)
+  assert.match(workbench, /detectImageMimeFromBytes\(new Uint8Array\(await file\.slice\(0, 16\)\.arrayBuffer\(\)\)\)/)
+  assert.doesNotMatch(workbench, /DeepSeek Harness 正在执行/)
 })
 
 test('memory right chat dock separates preview layout and collapses to a compact rail', () => {
@@ -375,8 +407,8 @@ test('memory opens the latest conversation and keeps message actions at the bott
   assert.match(workbench, /\.memory-message-actions \{ display: flex; align-items: center; justify-content: flex-end;/)
   assert.match(workbench, /loadConversationAttachmentPreviews\(resource, generation\)/)
   assert.match(workbench, /loadConversationAttachmentPreviews[\s\S]*acquireProjectMediaDisplay/)
-  assert.match(workbench, /await image\.decode\(\)/)
-  assert.match(workbench, /URL\.revokeObjectURL\(url\)/)
+  assert.match(workbench, /conversationPreviewLeases\.set\(lease\.url, lease\)/)
+  assert.match(workbench, /for \(const lease of conversationPreviewLeases\.values\(\)\) lease\.release\(\)/)
 })
 
 test('memory composer starts at a three-line input height', () => {
@@ -814,7 +846,7 @@ test('memory retries transient requests and writes one Raw recovery point only a
   // 运行中 composer 仍然可用：只有发送键变成停止键，草稿属于下一轮。
   assert.match(workbench, /contenteditable="true"/)
   assert.match(workbench, /title="添加附件" @click="fileInput\?\.click\(\)"/)
-  assert.match(workbench, /title="移除附件" @click="attachments = attachments\.filter/)
+  assert.match(workbench, /title="移除附件" @click="removeAttachment\(file\.id\)"/)
   assert.match(workbench, /<button v-if="sending" class="send-button" title="本条对话正在运行/)
   // 唯一还按运行态禁用的控件是消息级「编辑并重新发送」；输入下一轮的入口全部放开。
   assert.equal((workbench.match(/:disabled="sending"/g) || []).length, 1)
@@ -1640,15 +1672,11 @@ test('the preview panel renders project HTML in a sandboxed frame', () => {
 test('stopping a send gives the draft back to the composer instead of losing it', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  // 点发送那一刻就清空输入框（为了能接着打下一段），而停止的那一轮不落盘 ——
-  // 不把草稿还回去，用户输入的内容就凭空消失。
   assert.match(workbench, /点发送即完成：立刻清空草稿/)
-  assert.match(
-    workbench,
-    /if \(aborted\) \{[\s\S]*?run\.status = '已停止'[\s\S]*?input\.value = message[\s\S]*?setEditorText\(composerRef\.value, message\)/,
-  )
-  // 只在输入框还空着时回填：绝不覆盖用户已经重新打的字。
-  assert.match(workbench, /isOnScreen\(run\) && !input\.value\.trim\(\) && message/)
-  // 编辑后重发被停止时要回到编辑态，否则「取消编辑」入口和改的是哪一轮都丢了。
+  assert.match(workbench, /const restoreDraft = \(\) => \{/)
+  assert.match(workbench, /if \(roundPersisted \|\| !isOnScreen\(run\)\) return/)
+  assert.match(workbench, /if \(runs\.get\(runKey\) !== run\) return/)
+  assert.equal(workbench.match(/restoreDraft\(\)/g)?.length, 2)
+  assert.match(workbench, /attachments\.value = \[\.\.\.byPath\.values\(\)\]/)
   assert.match(workbench, /if \(editTargetId\) editingTurnId\.value = editTargetId/)
 })

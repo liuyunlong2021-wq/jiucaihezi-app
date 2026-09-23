@@ -1,5 +1,15 @@
 # Wiki 操作日志
 
+## [2026-09-22] 合同 | 文件副作用收回任务事务 Runtime
+
+- **用户决策**：核心目标是让文件任务成功，不是只改善失败文案；先把 Skill Creator 的“写草稿、读回验证、冻结出卡”从模型收回 Runtime，再扩展到 `@文件` 长任务。
+- **合同收敛**：新增 [[开发/通用记忆工作台任务事务Runtime合同-2026-09-22]]，定义“模型产出结构化变更意图，Runtime 负责账本、写入、读回验证、恢复和程序收尾”。`@文件` 的开关即全权授权不变；授权与执行职责明确分层。
+- **存储边界**：对话完成记录继续放 `.raw/对话记录/`；可见 Skill 草稿继续放 `.raw/jc-media/文档/skill-<id>/`；只有分批或跨重启任务才惰性创建 `.raw/临时任务/<run-id>/manifest.json`，不存模型隐藏推理。
+- **范围控制**：不建 DAG、任务数据库或新 Agent；首期仅落 Skill Creator、`@文件` 单文件提交和长任务恢复，现有媒体/3D/故事 Runtime 不强迁。
+- **已实施**：Skill Creator 的草稿写入、读回校验、冻结和出卡已收回 Runtime；`@文件` 的项目内 UTF-8 文本 `write/edit/write_text_batch` 已接入 `.raw/临时任务/<run-id>/manifest.json`，副作用前记账、写后精确读回、整批全成功才由程序收尾，完成账本自动清理，失败账本保留。
+- **自动验证**：覆盖预写账本、读回不一致、同 run 累积、重复 edit 幂等、成功清理、失败保留及部分失败不得误报完成；Desktop/Web 文件工具和 Direct Engine 回归继续通过。
+- **待实施边界**：目录全量枚举、模型批次调度、Office/PDF 规范化、跨重启自动续跑和真实 Desktop/Web 人工验收尚未完成。
+
 ## [2026-09-19] 修复 | 文档转换白名单落后于引擎，.epub 能选不能传
 
 - **触发**：用户问「所有文件不是都能转 md 吗、加 EPUB 难不高」。核查后发现不是「支不支持」，而是**同一件事在三处各写了一份格式清单，且都落后于引擎能力**。
@@ -1421,3 +1431,28 @@
 
 - 用户在 Desktop 重新导入《三国：中兴大汉，蜀之浪漫》确认成功：弹窗显示「识别方式：章节标题（第X章 / 第X场 / SC01）」「识别节点数：100」「首个节点：第1章 开局抢了赵云的戏」「最后节点：第100章 第二次征合淝！」，命名示例为 `0001_开局抢了赵云的戏.md` 等，作者栏自动带出「满地是菠萝」，无需再手填标记词。目录页与「第一卷：默认」都留在前置内容里。
 - 上一轮登记的真样本比对（自动与手填「章」逐节点路径完全一致，101 节点 = 100 章 + 前置内容）由此获得真实 UI 侧的确认；「章与幕混排」的工具书仍需人工确认。
+
+## [2026-09-23] 实施 | @DH 流式正文与执行进度
+
+- SDK JSON-RPC 构建补丁转发 `agent/assistant-stream`，工作台复用既有流式消息区域；只展示正文增量，不展示 reasoning，持久化仍只采用最终 `assistant/message`。
+- `tool/call`/`tool/result` 映射到现有步骤条，`step/start` 与 `llm/retry` 更新运行状态。定向 `92/92`、TypeScript、补丁幂等和差异检查通过；真实 Desktop 待验收。
+
+## [2026-09-23] 根治 | @DH 官方 SDK Client 与首轮文件直送
+
+- 用官方 `@deepseek-ai/dsh-sdk-client@0.1.7-alpha.2` 替换前端自写的 Harness JSON-RPC 请求、订阅和 idle 收尾；资源内 Node bridge 只做 WebView 到官方 Client 的逐行消息转交。
+- SDK Runtime/Client 版本统一；Helper 或 Harness 退出会把官方错误与 stderr 传回当前 run，不再永久显示“正在执行”。重试由 5 次降为 1 次。
+- 工作台已读取的 `@文件` 正文和转换文档随第一轮 prompt 发送，减少一次或多次模型决定 `read` 的往返。
+- 定向 `93/93`、TypeScript 与 SDK 错误传播验证通过；完整 focused 的两个既有门禁失败未在本任务中扩修，真实 Desktop/Provider 待验收。
+
+## [2026-09-23] 根治 | @DH 与 @文件改为执行器和能力组合
+
+- 删除两枚芯片的双向互斥：`@DH` 只选择执行器，`@文件` 作为文件能力可在任意点击顺序下同时保留；会话 `toolChips` 恢复不再因 `dh` 提前返回而丢失 `file`。
+- `@DH + @文件` 通过官方 `DSH_PERMISSION_MODE=danger-full-access` 获得本机文件全权；`@DH` 单独使用时为 `workspace-write`。权限模式纳入 Runtime key，开关变化会关闭旧 Runtime 后按新权限启动。
+- 定向 `95/95`、TypeScript 和差异检查通过；真实 Desktop 外部 Skill 目录读写待人工验收。
+
+## [2026-09-23] 根治 | @DH 使用官方持久 Session，不再截成最近三轮
+
+- 一个 Raw 对话稳定映射到一个带版本命名空间的 Harness Session；删除 Runtime nonce。连续 @DH 轮次只发送当前消息，完整历史、工具轨迹和 Compaction 由 Harness Session 自己负责。
+- 首次启用 @DH 会按上下文容量移交已有完整对话；从普通执行器切回 @DH 时只移交中间新增轮次。`dh-session-v1` 隐藏标记保证旧 nonce 会话升级后执行一次完整迁移，此后不重复注入。
+- pinned SDK Server 首次见到持久 ID 时改用官方 `sessionPersistence.stat()` 判断并调用 `agents.resume()`；不存在才 `agents.create()`，根除跨 Runtime 的 `session already exists`。停止链完整等待官方 SDK `close()`，不再用 2 秒超时提前杀 runner。
+- 定向 `106/106`、TypeScript、补丁两次幂等和差异检查通过；完整 focused 的 Jev 断言与两项测试登记失败为本轮前既有问题。真实 Desktop 跨重启续接与 Provider 文件修改待验收。

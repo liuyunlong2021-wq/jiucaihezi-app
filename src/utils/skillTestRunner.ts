@@ -1234,6 +1234,24 @@ export const LOAD_INSTALLED_SKILL_TOOL = {
   },
 }
 
+export const COMMIT_SKILL_DRAFT_TOOL = {
+  type: 'function' as const,
+  function: {
+    name: 'skill_creator_commit_draft',
+    description: '把完整 SKILL.md 或一个唯一 Markdown 章节替换提案交给 Runtime。Runtime 自动推导草稿路径、保留已加载 Skill 的文本资源、写入、读回并校验；不要再调用通用文件写工具改草稿。',
+    parameters: {
+      type: 'object',
+      properties: {
+        target_skill_id: { type: 'string', description: '目标 Skill ID。修改现有 Skill 时必须与 load 返回的 target_skill_id 一致。' },
+        skill_md: { type: 'string', description: '新建 Skill 或需要重写整份文件时提交的完整 SKILL.md。与章节替换参数二选一。' },
+        section_heading: { type: 'string', description: '精准修改时的唯一 Markdown 标题，例如 ## STEP 3。' },
+        replacement: { type: 'string', description: '包含同一标题行的完整新章节。Runtime 只替换该章节到下一个同级或更高级标题之前的内容。' },
+      },
+      required: ['target_skill_id'],
+    },
+  },
+}
+
 export const VALIDATE_SKILL_TOOL = {
   type: 'function' as const,
   function: {
@@ -1434,6 +1452,7 @@ export const ANALYZE_SKILL_COMPARISON_TOOL = {
 
 export const ALL_SKILL_TOOLS = [
   LOAD_INSTALLED_SKILL_TOOL,
+  COMMIT_SKILL_DRAFT_TOOL,
   VALIDATE_SKILL_TOOL,
   RUN_SKILL_TESTS_TOOL,
   AGGREGATE_SKILL_BENCHMARK_TOOL,

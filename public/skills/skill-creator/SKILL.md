@@ -43,9 +43,9 @@ Skill 稳定后，仅在用户要求更清晰的表述或搜索标签时改进�
 
 此 Skill 与模型无关。不要假定特定提供商、CLI、编排机制、发现变量或流式格式。请使用宿主应用的 Skill Creator 工具完成验证、测试、审查、打包与保存。
 
-**草稿就写在项目文件树里**：`.raw/jc-media/文档/skill-<skill-name>/`。用宿主的文件工具写（`write_text_batch` 一次写多份，自带 `expectedContent` 乐观锁；或 `create_document` 写单份），把 `SKILL.md` 和 `references/`、`scripts/`、`assets/` 一并写进去。用户在文件树里能直接看到、直接改。
+**草稿就在项目文件树里**：`.raw/jc-media/文档/skill-<skill-name>/`。你负责产出内容，宿主 Runtime 负责写入、读回验证和保留已加载 Skill 的文本资源。用户在文件树里能直接看到、直接改。
 
-**路径就是草稿的标识**：后续校验、测试、评审、打包和保存都传 `draft_path`，不要再发明或回传任何草稿编号。改内容就用文件工具改那个目录里的文件，改完重新调用 `skill_creator_validate`。
+**路径就是草稿的标识**：新建时调用 `skill_creator_commit_draft({target_skill_id, skill_md})`；精准修改现有章节时，优先调用 `skill_creator_commit_draft({target_skill_id, section_heading, replacement})`。`replacement` 必须包含完整标题行。Runtime 会只替换该章节、读回逐字比较并返回 `draft_path`。不要调用通用 `write` / `edit` / `write_text_batch` 改草稿。
 
 `save_skill` 只准备安装结果：它会把草稿目录冻结成一份受控快照并返回令牌，**绝不可直接写入真实 Skill 根目录**。把令牌原样放进 `jc-skill-install-v2` 块，由宿主 UI 转换成安装卡；用户点击安装卡才会原子化安装完整包。
 
@@ -405,7 +405,7 @@ Skill 已准备好，请确认安装。
 
 宿主可能提供并行工作器、浏览器，或两者均不提供。将它们视为可选能力：可用时使用；不可用时通过应用工具完成相同生命周期，并在对话中展示结果。绝不调用提供商专用 CLI，也不要直接写入提供商专用命令目录。
 
-更新现有 Skill 时，保留其 ID。用 `skill_creator_load_installed_skill` 取回已安装的正文，把编辑写进项目文件树里的草稿目录（`.raw/jc-media/文档/skill-<id>/`）—— 草稿目录与安装目录是两回事。不要直接写入已安装的 Skill 目录（`~/.agents/skills/<id>/`），也不要自行拼 `/tmp/<name>/SKILL.md` 这类临时路径。最终安装仅能由用户通过宿主安装卡确认。
+更新现有 Skill 时，保留其 ID。先用 `skill_creator_load_installed_skill` 取回已安装正文，再把完整新文件或唯一章节替换提交给 `skill_creator_commit_draft`。草稿目录与安装目录是两回事；不要直接写入已安装的 Skill 目录（`~/.agents/skills/<id>/`），也不要自行拼 `/tmp/<name>/SKILL.md` 这类临时路径。最终安装仅能由用户通过宿主安装卡确认。
 
 ---
 

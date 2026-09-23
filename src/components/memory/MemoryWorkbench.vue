@@ -41,10 +41,19 @@ import {
 } from '@/runtime/memory/conversationSplit'
 import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
-import { deepSeekPrompt, runDeepSeekHarness, stopDeepSeekHarness } from '@/services/deepSeekHarness'
+import {
+  DEEPSEEK_HARNESS_CONTEXT_WINDOW,
+  DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
+  DEEPSEEK_HARNESS_SESSION_MARKER,
+  deepSeekHandoffTurns,
+  deepSeekPrompt,
+  runDeepSeekHarness,
+  stopDeepSeekHarness,
+} from '@/services/deepSeekHarness'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
+import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
 import {
   parseMediaPlans,
   stripMediaPlanBlocks,
@@ -73,6 +82,7 @@ import { MAX_INLINE_ATTACHMENT_CHARS, type DirectMessageFile, type ResolvedDirec
 import { stripYamlQuotes, type SkillConfig } from '@/types/skill'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
+import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 import { confirmAction } from '@/utils/confirmAction'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationTurn } from '@/runtime/memory/conversationTranscript'
@@ -186,7 +196,7 @@ const selectedToolChips = computed(() => [
 // 都会让用户以为能力还在，得再点一次才能继续。
 function toolChipIds(): string[] {
   const ids: string[] = []
-  if (dhSelected.value) ids.push('dh')
+  if (dhSelected.value) ids.push('dh', DEEPSEEK_HARNESS_SESSION_MARKER)
   if (jevSelected.value) ids.push('jev')
   if (fileToolsSelected.value) ids.push('file')
   if (mediaSelected.value) ids.push('media')
@@ -198,12 +208,8 @@ function toolChipIds(): string[] {
 
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
-  if (next.has('dh')) {
-    selectDeepSeekHarness()
-    return
-  }
-  dhSelected.value = false
-  jevSelected.value = next.has('jev')
+  dhSelected.value = next.has('dh')
+  jevSelected.value = !dhSelected.value && next.has('jev')
   fileToolsSelected.value = next.has('file')
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
   mediaSelected.value = next.has('media')
@@ -1250,7 +1256,7 @@ async function copyTurn(turn: ConversationTurn) {
 
 function insertCommand(command: { id: string; label: string }) {
   if (command.id === 'dh') selectDeepSeekHarness()
-  else if (command.id !== 'skill') dhSelected.value = false
+  else if (command.id !== 'skill' && command.id !== 'file') dhSelected.value = false
   if (command.id === 'file') fileToolsSelected.value = true
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
@@ -1274,7 +1280,6 @@ function insertCommand(command: { id: string; label: string }) {
 function selectDeepSeekHarness() {
   dhSelected.value = true
   jevSelected.value = false
-  fileToolsSelected.value = false
   mediaSelected.value = false
   avSelected.value = false
   scene3dSelected.value = false
@@ -1286,7 +1291,7 @@ function enableTool(id: string) {
     selectDeepSeekHarness()
     return
   }
-  dhSelected.value = false
+  if (id !== 'file') dhSelected.value = false
   if (id === 'jev') jevSelected.value = true
   if (id === 'file') fileToolsSelected.value = true
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
@@ -1819,6 +1824,22 @@ async function send() {
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
   error.value = ''
   let replyCompleted = false
+  let roundPersisted = false
+  const restoreDraft = () => {
+    if (roundPersisted || !isOnScreen(run)) return
+    const current = input.value.trim()
+    const restored = [message, current === message ? '' : current].filter(Boolean).join('\n\n')
+    if (restored) {
+      input.value = restored
+      if (editTargetId) editingTurnId.value = editTargetId
+      setEditorText(composerRef.value, restored)
+      resizeComposer()
+      composerRef.value?.focus()
+    }
+    const byPath = new Map(attachments.value.map(attachment => [attachment.resourcePath || attachment.id, attachment]))
+    for (const attachment of pendingAttachments) byPath.set(attachment.resourcePath || attachment.id, attachment)
+    attachments.value = [...byPath.values()]
+  }
   try {
     const requestAttachments = await materializeChatAttachments(activeAttachments)
     if (!isCurrentRun()) return
@@ -1830,21 +1851,48 @@ async function send() {
     const dhConfig = dhSnapshot
       ? await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
       : null
+    const dhMissingTurns = dhSnapshot ? deepSeekHandoffTurns(baseTurns) : []
+    const dhContext = dhSnapshot && dhMissingTurns.length
+      ? buildCreativeContext({
+          messages: [...dhMissingTurns, userTurn],
+          modelId: dhConfig!.model,
+          contextWindow: DEEPSEEK_HARNESS_CONTEXT_WINDOW,
+          reservedTokens: DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS + 32_768,
+          maxHistoryRounds: Number.MAX_SAFE_INTEGER,
+          maxHistoryTokens: Number.MAX_SAFE_INTEGER,
+        })
+      : null
+    const dhHandoffTurns = (dhContext?.messages.slice(0, -1) || []) as ConversationTurn[]
     const reply = dhSnapshot ? await runDeepSeekHarness({
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
-      message: deepSeekPrompt(userTurn.content, skillSnapshot),
+      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns),
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
+      fileAccessEnabled: fileToolsSelected.value,
+      files: referencedFiles.value,
+      attachments: requestAttachments,
       signal: run.controller.signal,
       onStatus(next) {
         if (isCurrentRun()) run.status = next
       },
       onText(text) {
         if (!isCurrentRun()) return
-        run.status = 'DeepSeek Harness 正在执行'
+        run.status = '正在执行'
         run.streamingText = text
+      },
+      onProgress(progress) {
+        if (!isCurrentRun()) return
+        const step = run.steps.find(item => item.id === progress.id)
+        if (progress.state === 'running') {
+          if (!step) run.steps.push({ id: progress.id, label: progress.label || '执行工具', state: 'running' })
+          run.status = `正在${progress.label || '执行工具'}`
+          return
+        }
+        if (step) step.state = progress.state
+        const running = run.steps.find(item => item.state === 'running')
+        run.status = running ? `正在${running.label}` : '正在等待模型继续处理'
       },
     }) : await runMemoryChat({
       projectId: active.resource.owner,
@@ -1908,6 +1956,7 @@ async function send() {
     const complete = editTargetId
       ? await replaceMemoryRound(active.resource, editTargetId, userTurn, reply, files, title)
       : await appendMemoryRound(active.resource, userTurn, reply, files, title)
+    roundPersisted = true
     // 落盘无条件：用户切走了也要写完，切回来直接读盘就能看到结果。
     if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
     if (run.owner === projectOwner.value) rememberConversation(complete)
@@ -1937,21 +1986,12 @@ async function send() {
     }
     attachments.value = []
   } catch (cause) {
-    if (!isCurrentRun()) return
+    if (runs.get(runKey) !== run) return
     const aborted = cause instanceof DOMException && cause.name === 'AbortError'
     if (aborted) {
       run.phase = 'stopped'
       run.status = '已停止'
-      // 停止等于「这次发送作废」：轮次没落盘（落盘在下面的 else 分支），而草稿在点发送那一刻
-      // 就被清空了 —— 不还回去，用户输入的内容就凭空消失。只在输入框还空着、这条 run 还在屏上
-      // 时回填，绝不覆盖用户已经重新打的字。
-      if (!replyCompleted && isOnScreen(run) && !input.value.trim() && message) {
-        input.value = message
-        if (editTargetId) editingTurnId.value = editTargetId
-        setEditorText(composerRef.value, message)
-        resizeComposer()
-        composerRef.value?.focus()
-      }
+      restoreDraft()
     } else {
       run.phase = 'failed'
       run.status = '处理失败'
@@ -1963,6 +2003,7 @@ async function send() {
         ].filter(Boolean).join('\n\n')
         try {
           const interrupted = await appendMemoryRound(active.resource, userTurn, interruptedReply, files, title)
+          roundPersisted = true
           if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
           if (run.owner === projectOwner.value) rememberConversation(interrupted)
           if (!isCurrentRun() || !isOnScreen(run)) return
@@ -1973,6 +2014,7 @@ async function send() {
           run.error += `；中断记录保存失败：${persistCause instanceof Error ? persistCause.message : String(persistCause)}`
         }
       }
+      restoreDraft()
     }
   } finally {
     // 只有仍标记为 running 的运行才算正常结束，被停掉或换掉的不能被这里改回 done。
@@ -2213,7 +2255,7 @@ async function addProjectMediaReferences(payload: unknown) {
       || attachments.value.some(attachment => attachment.resourcePath === resource.path)) continue
     try {
       const mime = resource.mimeType || mediaMimeForPath(resource.path) || 'application/octet-stream'
-      attachments.value.push({
+      const attachment: ResolvedDirectAttachment = {
         id: crypto.randomUUID(),
         name: resource.name,
         mime,
@@ -2223,7 +2265,12 @@ async function addProjectMediaReferences(payload: unknown) {
             : mime.startsWith('audio/') ? 'audio' : 'file',
         value: '',
         resourcePath: resource.path,
-      })
+      }
+      if (attachment.kind === 'image' || attachment.kind === 'video') {
+        try { attachment.previewUrl = await createProjectMediaPreview(resource) }
+        catch { /* keep the file fallback */ }
+      }
+      attachments.value.push(attachment)
       await nextTick()
       composerRef.value?.focus()
     } catch (cause) {
@@ -2423,7 +2470,31 @@ async function importDesktopChatPaths(paths: string[], warnings: string[] = []) 
   const owner = projectOwner.value
   if (!owner || !memoryReady.value) return
   const groups = new Map<string, string[]>()
+  const existing = new Set((await files.list(owner)).map(resource => resource.path))
   for (const path of paths) {
+    if (!/\.[a-z0-9]{1,8}$/i.test(path)) try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const source = await invoke<{ base64: string; truncated: boolean }>('dev_read_external_file', {
+        input: { path, maxBytes: 30_000_000 },
+      })
+      const data = Uint8Array.from(atob(source.base64), char => char.charCodeAt(0))
+      const mime = detectImageMimeFromBytes(data)
+      if (mime && !source.truncated) {
+        const base = path.split(/[\\/]/).pop() || 'image'
+        const extension = mime === 'image/jpeg' ? 'jpg' : mime.split('/')[1]
+        const resource = await fileActions.importMedia({
+          owner,
+          path: nextMaterialPath('.raw/jc-media/图片', `${base}.${extension}`, existing),
+          data,
+          mimeType: mime,
+        })
+        existing.add(resource.path)
+        await addProjectMediaReferences({ resources: [resource] })
+        continue
+      }
+    } catch {
+      // 无法嗅探时沿用普通文件导入。
+    }
     const target = memoryMediaDirectoryFor(path)
     groups.set(target, [...(groups.get(target) || []), path])
   }
@@ -2451,8 +2522,15 @@ async function addAttachmentFiles(selected: File[]) {
   const failures: string[] = []
   for (const file of selected) {
     try {
-      const mime = file.type || 'application/octet-stream'
-      const type = detectFileType(file)
+      let mime = file.type || 'application/octet-stream'
+      let type = detectFileType(file)
+      if (type === 'unknown') {
+        const detected = detectImageMimeFromBytes(new Uint8Array(await file.slice(0, 16).arrayBuffer()))
+        if (detected) {
+          mime = detected
+          type = 'image'
+        }
+      }
       if (type === 'office' || type === 'pdf' || type === 'text') {
         const originalPath = nextOriginalMaterialPath(file.name, new Set())
         const textContent = type === 'text' ? await file.text() : ''
@@ -2528,11 +2606,16 @@ async function addAttachmentFiles(selected: File[]) {
         mimeType: mime,
       })
       existing.add(resource.path)
-      resolved.push({
+      const attachment: ResolvedDirectAttachment = {
         id: crypto.randomUUID(), name: file.name, mime, size: file.size,
         kind: mime.startsWith('image/') ? 'image' : mime.startsWith('video/') ? 'video' : mime.startsWith('audio/') ? 'audio' : 'file',
         value: '', resourcePath: resource.path,
-      })
+      }
+      if (attachment.kind === 'image' || attachment.kind === 'video') {
+        try { attachment.previewUrl = await createProjectMediaPreview(resource) }
+        catch { /* keep the file fallback */ }
+      }
+      resolved.push(attachment)
     } catch (cause) {
       failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`)
     }
@@ -2804,44 +2887,47 @@ function attachmentMetadata(attachments: ResolvedDirectAttachment[]): Conversati
 }
 
 function turnAttachments(turn: ConversationTurn): Array<ConversationAttachment & { value?: string }> {
-  const previews = new Map((transientAttachments.value[turn.id] || []).map(attachment => [attachment.id, attachment.value]))
+  const previews = new Map((transientAttachments.value[turn.id] || []).map(attachment => [attachment.id, attachment.previewUrl || attachment.value]))
   return (turn.attachments || []).map(attachment => ({ ...attachment, value: previews.get(attachment.id) }))
 }
 
-const conversationPreviewUrls = new Set<string>()
+const conversationPreviewLeases = new Map<string, MediaDisplayLease>()
 const mediaPlanDisplayLeases = new Set<MediaDisplayLease>()
+
+async function createProjectMediaPreview(resource: ProjectResource): Promise<string> {
+  const lease = await acquireProjectMediaDisplay(resource)
+  conversationPreviewLeases.set(lease.url, lease)
+  return lease.url
+}
+
+function revokeAttachmentPreview(attachment: ResolvedDirectAttachment) {
+  const url = attachment.previewUrl
+  const lease = url ? conversationPreviewLeases.get(url) : undefined
+  lease?.release()
+  if (url) conversationPreviewLeases.delete(url)
+}
+
+function removeAttachment(id: string) {
+  const attachment = attachments.value.find(item => item.id === id)
+  if (attachment) revokeAttachmentPreview(attachment)
+  attachments.value = attachments.value.filter(item => item.id !== id)
+}
 
 async function loadConversationAttachmentPreviews(
   resource: Extract<ProjectResourceOpenResult, { type: 'conversation' }>,
   generation: number,
 ) {
   const candidates = resource.transcript.turns.flatMap(turn => (turn.role === 'user' ? (turn.attachments || []).map(attachment => ({ turnId: turn.id, attachment })) : []))
-    .filter(item => item.attachment.kind === 'image' && item.attachment.projectPath)
+    .filter(item => (item.attachment.kind === 'image' || item.attachment.kind === 'video') && item.attachment.projectPath)
   const previews: Array<{ turnId: string; attachment: ResolvedDirectAttachment }> = []
   for (const { turnId, attachment } of candidates) {
     if (generation !== resourceOpenGeneration) return
     try {
-      const lease = await acquireProjectMediaDisplay(attachmentResource(resource.resource.owner, attachment))
-      const image = new Image()
-      const canvas = document.createElement('canvas')
-      try {
-        image.src = lease.url
-        await image.decode()
-        const scale = Math.min(1, 160 / Math.max(image.naturalWidth, image.naturalHeight))
-        canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-        canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
-        canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
-      } finally {
-        lease.release()
-      }
-      const thumbnail = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', 0.78))
-      if (!thumbnail) continue
-      const value = URL.createObjectURL(thumbnail)
+      const previewUrl = await createProjectMediaPreview(attachmentResource(resource.resource.owner, attachment))
       if (generation !== resourceOpenGeneration) {
-        URL.revokeObjectURL(value)
+        revokeAttachmentPreview({ ...attachment, value: '', previewUrl })
         return
       }
-      conversationPreviewUrls.add(value)
       previews.push({
         turnId,
         attachment: {
@@ -2850,7 +2936,8 @@ async function loadConversationAttachmentPreviews(
           mime: attachment.mime,
           size: attachment.size,
           kind: attachment.kind,
-          value,
+          value: '',
+          previewUrl,
           resourcePath: attachment.projectPath,
           readablePath: attachment.readablePath,
           characterCount: attachment.characterCount,
@@ -2958,12 +3045,12 @@ function releaseMediaUrl() {
 function releaseConversationPreviewUrls() {
   for (const lease of mediaPlanDisplayLeases) lease.release()
   mediaPlanDisplayLeases.clear()
-  const generated = new Set(conversationPreviewUrls)
-  for (const url of generated) URL.revokeObjectURL(url)
-  conversationPreviewUrls.clear()
+  const generated = new Set(conversationPreviewLeases.keys())
+  for (const lease of conversationPreviewLeases.values()) lease.release()
+  conversationPreviewLeases.clear()
   const next = { ...transientAttachments.value }
   for (const [turnId, values] of Object.entries(next)) {
-    const kept = values.filter(value => !generated.has(value.value))
+    const kept = values.filter(value => !generated.has(value.previewUrl || value.value))
     if (kept.length) next[turnId] = kept
     else delete next[turnId]
   }
@@ -3130,6 +3217,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <div v-if="turn.role === 'user' && turnAttachments(turn).length" class="memory-message-attachments">
             <div v-for="attachment in turnAttachments(turn)" :key="attachment.id" class="memory-message-attachment" :class="attachment.kind">
               <img v-if="attachment.kind === 'image' && attachment.value" :src="attachment.value" :alt="attachment.name" />
+              <video v-else-if="attachment.kind === 'video' && attachment.value" :src="attachment.value" muted playsinline preload="auto" />
               <template v-else><JcIcon :name="attachment.kind === 'video' ? 'movie' : attachment.kind === 'audio' ? 'music-note' : 'description'" /><span :title="attachment.name">{{ attachment.name }}</span></template>
             </div>
           </div>
@@ -3292,14 +3380,15 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </span>
             <button title="取消持续引用" @click="removePersistentAttachment(file.id)">×</button>
           </div>
-          <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip">
-            <img v-if="file.kind === 'image'" :src="file.value" :alt="file.name" />
+          <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip" :class="file.kind">
+            <img v-if="file.kind === 'image' && (file.previewUrl || file.value)" :src="file.previewUrl || file.value" :alt="file.name" />
+            <video v-else-if="file.kind === 'video' && (file.previewUrl || file.value)" :src="file.previewUrl || file.value" muted playsinline preload="auto" />
             <JcIcon v-else :name="file.kind === 'video' ? 'movie' : file.kind === 'audio' ? 'music-note' : 'description'" />
-            <span class="memory-attachment-copy">
+            <span v-if="file.kind !== 'image' && file.kind !== 'video'" class="memory-attachment-copy">
               <span class="memory-attachment-name" :title="file.name">{{ file.name }}</span>
               <small v-if="file.readablePath">已保存 · 已解析 {{ (file.characterCount || 0).toLocaleString() }} 字</small>
             </span>
-            <button title="移除附件" @click="attachments = attachments.filter(item => item.id !== file.id)">×</button>
+            <button title="移除附件" @click="removeAttachment(file.id)">×</button>
           </div>
         </div>
         <div v-if="referencedFiles.length" class="memory-attachments memory-references">
@@ -3668,8 +3757,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .memory-message-attachment { display: flex; width: min(220px, 100%); height: 48px; align-items: center; gap: 8px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); overflow: hidden; color: var(--ink3); }
-.memory-message-attachment.image { width: 64px; padding: 0; }
-.memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
+.memory-message-attachment.image, .memory-message-attachment.video { width: 64px; padding: 0; }
+.memory-message-attachment img, .memory-message-attachment video { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
 .memory-message-text { overflow-wrap: anywhere; }
 .memory-program-status { display: grid; gap: 5px; margin-top: 9px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
@@ -3784,7 +3873,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 @keyframes memory-run-spin { to { transform: rotate(360deg); } }
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }
 .memory-attachment-chip { display: flex; height: 34px; max-width: 240px; align-items: center; gap: 5px; padding: 0 7px; box-sizing: border-box; border-radius: 5px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); }
-.memory-attachment-chip img { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 4px; object-fit: cover; }
+.memory-attachment-chip.image, .memory-attachment-chip.video { height: 54px; }
+.memory-attachment-chip img, .memory-attachment-chip video { width: 46px; height: 46px; flex: 0 0 46px; border-radius: 4px; object-fit: cover; }
 .memory-attachment-copy { display: grid; min-width: 0; line-height: 1.2; }
 .memory-attachment-copy small { overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -3,6 +3,7 @@ export const MEMORY_MEDIA_DIRECTORY = '.raw/jc-media'
 export const MEMORY_CONVERSATION_DIRECTORY = '.raw/对话记录'
 export const MEMORY_INDEX_DIRECTORY = '.raw/记忆索引'
 export const MEMORY_SYNC_DIRECTORY = '.raw/.sync'
+export const MEMORY_FILE_TASK_DIRECTORY = '.raw/临时任务'
 export const MEMORY_CANVAS_DIRECTORY = 'jc-canvas'
 
 export const MEMORY_MEDIA_DIRECTORIES = {
@@ -30,6 +31,7 @@ const SELECTOR_MANAGED_DIRECTORIES = [
   MEMORY_CONVERSATION_DIRECTORY,
   MEMORY_INDEX_DIRECTORY,
   MEMORY_SYNC_DIRECTORY,
+  MEMORY_FILE_TASK_DIRECTORY,
   MEMORY_CANVAS_DIRECTORY,
 ] as const
 
