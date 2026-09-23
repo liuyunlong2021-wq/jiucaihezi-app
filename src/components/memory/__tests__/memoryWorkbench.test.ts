@@ -8,6 +8,19 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
 
+test('@DH is a desktop runtime that accepts selected Skills and bypasses legacy execution', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /id: 'dh', label: '@DH'/)
+  assert.match(workbench, /function selectDeepSeekHarness\(\)/)
+  assert.match(workbench, /dhSnapshot\s*\?\s*await runDeepSeekHarness/)
+  assert.match(workbench, /sessionId: active\.transcript\.id/)
+  assert.match(workbench, /cwd: active\.resource\.owner/)
+  assert.match(workbench, /if \(run\.runtime === 'dh'\) void stopDeepSeekHarness\(\)/)
+  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot\)/)
+  assert.doesNotMatch(workbench, /const skillSnapshot = dhSnapshot \? \[\]/)
+  assert.doesNotMatch(workbench, /function selectDeepSeekHarness\(\)[\s\S]{0,400}selectedSkillNames\.value = \[\]/)
+})
+
 test('memory right chat dock separates preview layout and collapses to a compact rail', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const markdown = source('src/components/memory/MemoryMarkdown.vue')

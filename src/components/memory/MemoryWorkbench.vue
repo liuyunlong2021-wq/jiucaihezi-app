@@ -41,6 +41,7 @@ import {
 } from '@/runtime/memory/conversationSplit'
 import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
+import { deepSeekPrompt, runDeepSeekHarness, stopDeepSeekHarness } from '@/services/deepSeekHarness'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -163,7 +164,9 @@ const avSelected = ref(false)
 const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
+const dhSelected = ref(false)
 const selectedToolChips = computed(() => [
+  { id: 'dh', label: '@DH', icon: 'smart-toy', selected: dhSelected.value },
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
@@ -183,6 +186,7 @@ const selectedToolChips = computed(() => [
 // 都会让用户以为能力还在，得再点一次才能继续。
 function toolChipIds(): string[] {
   const ids: string[] = []
+  if (dhSelected.value) ids.push('dh')
   if (jevSelected.value) ids.push('jev')
   if (fileToolsSelected.value) ids.push('file')
   if (mediaSelected.value) ids.push('media')
@@ -194,6 +198,11 @@ function toolChipIds(): string[] {
 
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
+  if (next.has('dh')) {
+    selectDeepSeekHarness()
+    return
+  }
+  dhSelected.value = false
   jevSelected.value = next.has('jev')
   fileToolsSelected.value = next.has('file')
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
@@ -492,6 +501,7 @@ type MemoryRun = {
   title?: string
   editTargetId: string
   memoryEnabled: boolean
+  runtime: 'legacy' | 'dh'
 }
 
 /**
@@ -528,6 +538,9 @@ type MemoryMentionOption =
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
+    ...(desktopOnlyRuntime
+      ? [{ type: 'tool' as const, id: 'dh', display: 'DH', description: '交给 DeepSeek Harness 执行', icon: 'smart-toy' }]
+      : []),
     { type: 'tool', id: 'jev', display: 'Jev', description: '自动判断本轮需要的 Skill、能力和模型档位', icon: 'alt-route' },
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
@@ -671,6 +684,9 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
   return '程序已返回真实执行回执'
 }
 const toolCommands = [
+  ...(desktopOnlyRuntime ? [
+    { id: 'dh', label: '@DH', icon: 'smart-toy', description: '使用 DeepSeek Harness' },
+  ] : []),
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
   { id: 'file', label: '@文件', icon: 'description', description: '读写权限' },
   { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
@@ -1233,6 +1249,8 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 function insertCommand(command: { id: string; label: string }) {
+  if (command.id === 'dh') selectDeepSeekHarness()
+  else if (command.id !== 'skill') dhSelected.value = false
   if (command.id === 'file') fileToolsSelected.value = true
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
@@ -1253,7 +1271,22 @@ function insertCommand(command: { id: string; label: string }) {
   })
 }
 
+function selectDeepSeekHarness() {
+  dhSelected.value = true
+  jevSelected.value = false
+  fileToolsSelected.value = false
+  mediaSelected.value = false
+  avSelected.value = false
+  scene3dSelected.value = false
+  selectedMcpToolNames.value = []
+}
+
 function enableTool(id: string) {
+  if (id === 'dh') {
+    selectDeepSeekHarness()
+    return
+  }
+  dhSelected.value = false
   if (id === 'jev') jevSelected.value = true
   if (id === 'file') fileToolsSelected.value = true
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
@@ -1264,6 +1297,7 @@ function enableTool(id: string) {
 }
 
 function disableTool(id: string) {
+  if (id === 'dh') dhSelected.value = false
   if (id === 'jev') jevSelected.value = false
   if (id === 'file') fileToolsSelected.value = false
   if (id.startsWith('mcp__')) {
@@ -1710,6 +1744,8 @@ async function send() {
   sendInFlight.value = true
   // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
   if (jevSelected.value) await applyJevDecision(message)
+
+  const dhSnapshot = dhSelected.value
   const skillSnapshot = selectedSkillNames.value.slice()
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
@@ -1768,6 +1804,7 @@ async function send() {
     title,
     editTargetId,
     memoryEnabled: memorySnapshot,
+    runtime: dhSnapshot ? 'dh' : 'legacy',
   })
   // 派发这一刻起，这一轮就归这条 run；下面所有回调只写它，界面状态由 activeRun 派生。
   const run = runs.get(runKey) as MemoryRun
@@ -1790,7 +1827,26 @@ async function send() {
       userTurn.id,
       activeAttachments,
     )
-    const reply = await runMemoryChat({
+    const dhConfig = dhSnapshot
+      ? await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
+      : null
+    const reply = dhSnapshot ? await runDeepSeekHarness({
+      cwd: active.resource.owner,
+      sessionId: active.transcript.id,
+      message: deepSeekPrompt(userTurn.content, skillSnapshot),
+      model: dhConfig!.model,
+      apiBase: dhConfig!.apiBase,
+      apiKey: dhConfig!.apiKey,
+      signal: run.controller.signal,
+      onStatus(next) {
+        if (isCurrentRun()) run.status = next
+      },
+      onText(text) {
+        if (!isCurrentRun()) return
+        run.status = 'DeepSeek Harness 正在执行'
+        run.streamingText = text
+      },
+    }) : await runMemoryChat({
       projectId: active.resource.owner,
       conversationId: active.transcript.id,
       conversationTurns: editTargetId ? baseTurns : active.transcript.turns,
@@ -1940,6 +1996,7 @@ function stopRun(run: MemoryRun) {
   stopRunTimer(run)
   settleApproval(run, 'reject')
   run.controller.abort()
+  if (run.runtime === 'dh') void stopDeepSeekHarness()
   // 断开运行时会话状态，避免旧运行的气泡/步骤显示到切换后的会话上
   run.userTurn = null
   run.streamingText = ''

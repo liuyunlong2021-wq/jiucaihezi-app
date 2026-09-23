@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+src-tauri/resources/deepseek-harness/node_modules/
 rh-adapter/.venv/
 
 # Build
