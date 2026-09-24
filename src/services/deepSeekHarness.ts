@@ -1,22 +1,24 @@
 import { invoke } from '@tauri-apps/api/core'
-import { resolveResource } from '@tauri-apps/api/path'
+import { appDataDir, join, resolveResource } from '@tauri-apps/api/path'
+import { mkdir, writeTextFile } from '@tauri-apps/plugin-fs'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import { McpStdioTransport } from './mcpStdioTransport'
 
 type BridgeMessage = {
-  type: 'ready' | 'notification' | 'result' | 'error' | 'closed'
+  type: 'ready' | 'notification' | 'result' | 'query-result' | 'error' | 'closed'
   requestId?: string
   notification?: { method?: string; params?: any }
   text?: string
+  data?: unknown
   error?: string
 }
 type Runtime = {
   key: string
   transport: McpStdioTransport
   runs: Map<string, {
-    resolve: (value: string) => void
+    resolve: (value: any) => void
     reject: (error: Error) => void
     notify: (notification: NonNullable<BridgeMessage['notification']>) => void
   }>
@@ -52,6 +54,11 @@ export type DeepSeekAssistantStreamState = {
   text: string
 }
 
+export type DeepSeekSessionSnapshot = {
+  session: { id: string; cwd?: string; createdAt?: number }
+  events: any[]
+}
+
 export const DEEPSEEK_HARNESS_CONTEXT_WINDOW = 262_144
 export const DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS = 32_768
 export const DEEPSEEK_HARNESS_SESSION_MARKER = 'dh-session-v1'
@@ -79,6 +86,43 @@ export function deepSeekAssistantText(event: any): string {
         .map(block => String(block.text || ''))
         .join('')
     : ''
+}
+
+function deepSeekMessageText(content: any): string {
+  return Array.isArray(content)
+    ? content.filter(block => block?.type === 'text').map(block => String(block.text || '')).join('')
+    : ''
+}
+
+function visibleDeepSeekUserText(text: string): string {
+  const current = text.split('【本轮消息】\n\n').at(-1) || text
+  return current.replace(/^(?:\/[\w.-]+(?:\s+|$))+\n*/u, '').trim()
+}
+
+export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): ConversationTurn[] {
+  const turns: ConversationTurn[] = []
+  for (const event of snapshot.events || []) {
+    if (event?.type === 'user/message' && event.data?.source?.kind === 'user') {
+      const content = visibleDeepSeekUserText(deepSeekMessageText(event.data.content))
+      if (content) turns.push({
+        id: String(event.data.id || `dh-user-${event.seq}`),
+        role: 'user',
+        content,
+        createdAt: new Date(Number(event.time) || Date.now()).toISOString(),
+        toolChips: ['dh', DEEPSEEK_HARNESS_SESSION_MARKER],
+      })
+    }
+    if (event?.type === 'assistant/message') {
+      const content = deepSeekMessageText(event.data?.message?.content)
+      if (content) turns.push({
+        id: String(event.data.message.id || `dh-assistant-${event.seq}`),
+        role: 'assistant',
+        content,
+        createdAt: new Date(Number(event.time) || Date.now()).toISOString(),
+      })
+    }
+  }
+  return turns
 }
 
 export function applyDeepSeekAssistantStream(
@@ -188,16 +232,18 @@ export function deepSeekTurnError(event: any): string {
 }
 
 async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
-  const relativePatchPath = '.raw/临时任务/deepseek-harness/route.cordis.yml'
-  const routeDir = `${input.cwd.replace(/[\\/]+$/, '')}/.raw/临时任务/deepseek-harness`
-  const patchPath = `${routeDir}/route.cordis.yml`
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input.cwd))
+  const workspaceKey = [...new Uint8Array(digest)].slice(0, 12).map(byte => byte.toString(16).padStart(2, '0')).join('')
+  const routeDir = await join(await appDataDir(), 'deepseek-harness', 'workspaces', workspaceKey)
+  const legacyRouteDir = await join(input.cwd, '.raw', '临时任务', 'deepseek-harness')
+  try {
+    await invoke('dev_copy_external', { input: { source: legacyRouteDir, destination: routeDir } })
+  } catch { /* Missing/already migrated legacy state needs no action. */ }
+  const patchPath = await join(routeDir, 'route.cordis.yml')
   const apiBase = input.apiBase.replace(/\/+$/, '')
   const baseURL = apiBase.endsWith('/v1') ? apiBase : `${apiBase}/v1`
-  await invoke('dev_write_file', {
-    input: {
-      root: input.cwd,
-      relativePath: relativePatchPath,
-      content: [
+  await mkdir(routeDir, { recursive: true })
+  await writeTextFile(patchPath, [
         '- id: llm-pi-ai',
         '  config:',
         '    providers:',
@@ -222,9 +268,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         `            contextWindow: ${DEEPSEEK_HARNESS_CONTEXT_WINDOW}`,
         `            maxTokens: ${DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS}`,
         '',
-      ].join('\n'),
-    },
-  })
+      ].join('\n'))
 
   const runtimeRoot = 'deepseek-harness/node_modules'
   const command = await resolveResource(
@@ -262,6 +306,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     if (!pending) return
     if (frame.type === 'notification' && frame.notification) pending.notify(frame.notification)
     if (frame.type === 'result') { active.runs.delete(frame.requestId!); pending.resolve(frame.text || '') }
+    if (frame.type === 'query-result') { active.runs.delete(frame.requestId!); pending.resolve(frame.data) }
     if (frame.type === 'error') { active.runs.delete(frame.requestId!); pending.reject(new Error(frame.error || 'DeepSeek Harness 执行失败')) }
   }
   transport.onclose = () => {
@@ -285,6 +330,39 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     throw error
   }
   return active
+}
+
+async function queryDeepSeekHarness(
+  input: DeepSeekHarnessInput,
+  command: 'list-sessions' | 'read-session',
+): Promise<any> {
+  const active = await ensureRuntime(input)
+  const requestId = crypto.randomUUID()
+  const completed = new Promise<any>((resolve, reject) => {
+    active.runs.set(requestId, { resolve, reject, notify() {} })
+  })
+  try {
+    await active.transport.send({
+      type: command,
+      requestId,
+      ...(command === 'read-session' ? { sessionId: deepSeekSessionId(input.sessionId) } : {}),
+    } as unknown as JSONRPCMessage)
+    return await completed
+  } finally {
+    active.runs.delete(requestId)
+  }
+}
+
+export async function readDeepSeekHarnessSession(
+  input: DeepSeekHarnessInput,
+): Promise<DeepSeekSessionSnapshot> {
+  return queryDeepSeekHarness(input, 'read-session')
+}
+
+export async function listDeepSeekHarnessSessions(
+  input: DeepSeekHarnessInput,
+): Promise<Array<{ header: { id: string }; live: boolean; persisted: boolean }>> {
+  return queryDeepSeekHarness(input, 'list-sessions')
 }
 
 async function ensureRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {

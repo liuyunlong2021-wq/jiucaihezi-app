@@ -1,5 +1,16 @@
 # Wiki 操作日志
 
+## [2026-09-24] 合同 | Harness 会话、对话目录与可选建库统一
+
+- **用户决策**：现有文件树“建立改编 Wiki”按钮增加 `.raw/文档|图片|视频|音频`；删除 UI 的记忆/查询按钮及其前后端；对话记录无缝衔接 Harness Session。
+- **统一合同**：新增 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24]]。普通聊天不再依赖 `.raw` 初始化；Harness Session 是对话与工具轨迹唯一运行时真相，对话下拉只保存轻量目录和稳定 Session 映射。
+- **旧数据**：旧 `.raw/对话记录` 按用户打开惰性一次移交，成功后只续写 Harness，Raw 留作只读历史；`.raw/记忆索引`、`memory_search` 预取、最近三轮拼装和双写均退役。
+- **无缝显示前提**：当前 SDK 运行接口不会在重启后主动回放完整历史；先通过官方 `SessionQueryEngine.listSessions/readSession` 建最薄查询桥，把 Session 投影回现有 UI，再停止 Raw 写入。禁止直接解析 Harness 物理存储。
+- **建库与素材**：建库按钮仍为幂等补缺，不增加向导；补建 `.raw/<文档|图片|视频|音频>`。本期不顺带重写既有 `.raw/jc-media` 媒体保存链路。未来模板只创建项目文件，不承担 Runtime 或对话存储。
+- **官方边界**：当前 SDK 可持久化和恢复具名 Session，但没有单 Session 删除协议；本期删除只解除 UI 映射，不改写 Harness 私有存储，等待官方接口后接物理回收。
+- **状态**：生产迁移已完成；待真实 Desktop 跨重启人工验收。
+- **纪念封存**：旧“最近三轮 + Raw + 记忆索引 + `memory_search` + 记忆/查询按钮”源码和文稿已复制到 `/Users/by3/Documents/韭菜盒子-旧记忆系统纪念-2026-09-24/`；生产中的索引、摘要和查询链已删除，旧 Raw 解析只保留迁移兼容。
+
 ## [2026-09-22] 合同 | 文件副作用收回任务事务 Runtime
 
 - **用户决策**：核心目标是让文件任务成功，不是只改善失败文案；先把 Skill Creator 的“写草稿、读回验证、冻结出卡”从模型收回 Runtime，再扩展到 `@文件` 长任务。
@@ -1456,3 +1467,9 @@
 - 首次启用 @DH 会按上下文容量移交已有完整对话；从普通执行器切回 @DH 时只移交中间新增轮次。`dh-session-v1` 隐藏标记保证旧 nonce 会话升级后执行一次完整迁移，此后不重复注入。
 - pinned SDK Server 首次见到持久 ID 时改用官方 `sessionPersistence.stat()` 判断并调用 `agents.resume()`；不存在才 `agents.create()`，根除跨 Runtime 的 `session already exists`。停止链完整等待官方 SDK `close()`，不再用 2 秒超时提前杀 runner。
 - 定向 `106/106`、TypeScript、补丁两次幂等和差异检查通过；完整 focused 的 Jev 断言与两项测试登记失败为本轮前既有问题。真实 Desktop 跨重启续接与 Provider 文件修改待验收。
+## [2026-09-24] 实施 | Harness Session 读回与 Runtime 数据出项目
+
+- runner 新增薄 `session/list`、`session/read` 请求，服务端直接调用官方 `ctx.sessionQuery`；UI 可把持久 Session 的人类 `user/message` 与 `assistant/message` 投影回现有对话节点，不解析 `$DSH_HOME` 文件。
+- Harness 数据与 route patch 迁到 AppData，按项目路径哈希隔离；首次启动复制旧项目内 Harness 目录后继续恢复原 Session。
+- 工作台默认选择 Harness，删除“记忆/查询”按钮及编辑链路，并关闭旧 `memory_search`；“建立改编 Wiki”幂等增加 `.raw/文档|图片|视频|音频`。
+- 轻量对话目录、停止 Raw 双写、取消 `memoryReady` 门禁和旧 Raw 惰性移交已实施；定向退役回归 `127/127` 与 `vue-tsc -b` 通过，真实 Desktop 跨重启待验收。

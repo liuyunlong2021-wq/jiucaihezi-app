@@ -284,56 +284,24 @@ test('iPhone account settings reuse login while hiding commercial entries only',
   }
 })
 
-test('memory space and conversations are created only by their explicit actions', () => {
+test('Harness conversations open immediately without creating a Raw memory space', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  const project = source('src/runtime/memory/memoryProject.ts')
-  const paths = source('src/utils/memoryProjectPaths.ts')
-
-  assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
-  assert.match(
-    workbench,
-    /async function createMemorySpace\(\)[\s\S]*initializeMemoryProject\(owner, files\)/,
-  )
-  assert.match(
-    workbench,
-    /async function startNewConversation\(\)[\s\S]*createMemoryConversation\(owner, '新对话', files\)/,
-  )
-  assert.match(workbench, /'新建记忆空间'/)
+  assert.match(workbench, /listHarnessConversationCatalog/)
+  assert.match(workbench, /createHarnessConversationCatalogEntry/)
+  assert.doesNotMatch(workbench, /createMemorySpace|initializeMemoryProject|createMemoryConversation/)
+  assert.doesNotMatch(workbench, /新建记忆空间|memoryReady/)
   assert.match(workbench, /<span>新建对话<\/span>/)
-  assert.match(
-    project,
-    /const result = await mutateConversation[\s\S]*return \{ \.\.\.result, lastAssistantTurnId: assistantTurn\.id \}/,
-  )
-  assert.doesNotMatch(project, /initializeMemoryProject[\s\S]*return conversations\[0\]/)
-  for (const path of [
-    '.raw',
-    '.raw/jc-media',
-    '文档',
-    '图片',
-    '视频',
-    '音频',
-    '对话记录',
-    '.sync',
-    'jc-canvas',
-  ]) {
-    assert.match(paths, new RegExp(path.replace('.', '\\.')))
-  }
-  assert.match(project, /MEMORY_PROJECT_SKELETON_DIRECTORIES/)
-  assert.match(project, /migrateLegacyMemoryMaterials[\s\S]*kind: 'move'[\s\S]*'keep-both'/)
-  assert.match(
-    project,
-    /appendMemoryRound[\s\S]*const result = await mutateConversation[\s\S]*appendConversationTurn\(appendConversationTurn/,
-  )
+  assert.match(workbench, /dhSnapshot[\s\S]*deepSeekSessionTurns/)
 })
 
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.ok(workbench.includes("const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')"))
+  assert.ok(workbench.includes("const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')"))
   assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
   assert.ok(workbench.includes('selectedSkillNames.value = [...new Set((names || []).filter(name => available.has(name)))]'))
-  assert.ok(workbench.includes("const created = await createMemoryConversation(owner, '新对话', files)"))
+  assert.ok(workbench.includes("createHarnessConversationCatalogEntry(owner, '新对话')"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
 
@@ -349,12 +317,12 @@ test('memory file tree and model tools share the hidden and protected project co
   assert.match(runtime, /isMemoryProjectMutationBlocked\(path, operation\)/)
 })
 
-test('mobile conversation deletion confirms permanent removal', () => {
+test('conversation deletion removes only the local Harness catalog entry', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const tree = source('src/components/filetree/ProjectFileTree.vue')
 
-  assert.match(workbench, /mobileRuntime[\s\S]*永久删除对话[\s\S]*此操作无法恢复/)
-  assert.match(workbench, /okLabel: mobileRuntime \? '永久删除' : '删除'/)
+  assert.match(workbench, /removeHarnessConversationCatalogEntry/)
+  assert.doesNotMatch(workbench, /永久删除对话|files\.executeBatch\(plan\)/)
   assert.match(tree, /usesSystemTrash = isDesktop && !isMobile/)
   assert.match(tree, /usesSystemTrash \? '移入废纸篓' : '永久删除'/)
 })
@@ -400,12 +368,11 @@ test('memory messages expose one copy action and project GLB files use the share
 
 test('memory opens the latest conversation and keeps message actions at the bottom', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  const project = source('src/runtime/memory/memoryProject.ts')
-  assert.match(workbench, /const latest = state\.conversations\.at\(-1\)/)
-  assert.match(project, /conversationActivityTime\(left\) - conversationActivityTime\(right\)/)
+  assert.match(workbench, /const latest = conversations\.value\.at\(-1\)/)
+  assert.match(workbench, /listHarnessConversationCatalog\(owner\)/)
   assert.match(workbench, /class="memory-message-actions"/)
   assert.match(workbench, /\.memory-message-actions \{ display: flex; align-items: center; justify-content: flex-end;/)
-  assert.match(workbench, /loadConversationAttachmentPreviews\(resource, generation\)/)
+  assert.match(workbench, /loadConversationAttachmentPreviews\(activeConversation, generation\)/)
   assert.match(workbench, /loadConversationAttachmentPreviews[\s\S]*acquireProjectMediaDisplay/)
   assert.match(workbench, /conversationPreviewLeases\.set\(lease\.url, lease\)/)
   assert.match(workbench, /for \(const lease of conversationPreviewLeases\.values\(\)\) lease\.release\(\)/)
@@ -552,11 +519,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(runtime, /files: input\.files/)
   assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
   assert.match(runtime, /reservedTokens: maxOutputTokens \+ Math\.min\(32_768, Math\.max\(2_048, Math\.floor\(contextWindow \* 0\.1\)\)\)/)
-  assert.match(
-    workbench,
-    /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.add\(active\.transcript\.id\)/,
-  )
-  assert.match(workbench, /recordConversation\(turn\)/)
+  assert.doesNotMatch(workbench, /onContextTrimmed\(\)|contextNoticeShownConversations|recordConversation\(turn\)/)
   assert.doesNotMatch(workbench, /status\.value = `已记录对话：\$\{path\}`/)
   assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{/)
@@ -601,20 +564,12 @@ test('memory composer routes pasted images and media plans into the existing cre
   )
 })
 
-test('conversation memory status restores from its persisted index and only failures expose retry', () => {
+test('Harness sessions replace the retired conversation memory index UI and backend', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /conversationMemoryIndexPath, parseConversationMemoryIndex/)
-  assert.match(workbench, /files\.readTextAt\(resource\.resource\.owner, conversationMemoryIndexPath\(resource\.transcript\.id\)\)/)
-  assert.match(workbench, /index\.conversationId !== resource\.transcript\.id/)
-  assert.match(workbench, /entry\.rawPath === resource\.resource\.path/)
-  assert.match(workbench, /memoryIndexStates\.value = Object\.fromEntries/)
-  assert.match(workbench, /v-if="memoryIndexStates\[turn\.id\] === 'writing'"/)
-  assert.match(workbench, /v-else-if="memoryIndexStates\[turn\.id\] === 'success'"/)
-  assert.match(workbench, /v-if="memoryIndexStates\[turn\.id\] === 'error'" class="memory-index-error"/)
-  assert.match(workbench, /<button v-if="memoryIndexStates\[turn\.id\] === 'error'"[\s\S]{0,240}@click="recordConversation\(turn\)"/)
-  assert.doesNotMatch(workbench, /shouldSuggestMemoryIndex/)
-  assert.doesNotMatch(workbench, /memoryIndexStates\[turn\.id\] \|\| 'idle'/)
+  assert.doesNotMatch(workbench, /conversationMemoryIndex|memoryIndexStates|recordConversation/)
+  assert.doesNotMatch(workbench, /正在记录对话|已记录对话|未记录/)
+  assert.match(workbench, /readDeepSeekHarnessSession/)
 })
 
 test('memory composer reads the native clipboard only for an empty Desktop image paste', () => {
@@ -691,9 +646,7 @@ test('memory topbar uses a grouped model popover and an adaptive new conversatio
   assert.match(workbench, /\.memory-model-menu \{[\s\S]*left: 0;/)
   assert.match(workbench, /role="option" :aria-selected="isSelectedModel\(model\)"/)
   assert.match(workbench, /agentStore\.setModel\(model\.id, model\.providerId\)/)
-  assert.match(workbench, /memory-toggle-label">记忆<\/span>/)
-  assert.match(workbench, /memory-toggle-label">查询<\/span>/)
-  assert.doesNotMatch(workbench, /memory-toggle-label">对话(?:记忆|查询)<\/span>/)
+  assert.doesNotMatch(workbench, /memory-toggle-label">(?:记忆|查询)<\/span>/)
 })
 
 test('memory message copy stays compact and copies the original markdown', () => {
@@ -776,10 +729,8 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /v-for="turn in timelineTurns"/)
   assert.match(workbench, /:streaming="turn\.id === 'streaming-assistant'"/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
-  assert.match(
-    workbench,
-    /const complete = editTargetId[\s\S]*appendMemoryRound\(active\.resource, userTurn, reply, files, title\)[\s\S]*if \(!isOnScreen\(run\)\) return\s*\n\s*opened\.value = await openProjectResource\(files, complete\.resource\)[\s\S]*run\.streamingText = ''/,
-  )
+  assert.match(workbench, /readDeepSeekHarnessSession\([\s\S]*turns: mergedHarnessTurns/)
+  assert.match(workbench, /opened\.value = dhSnapshot[\s\S]*harnessConversationOpenResult\(complete\)/)
   assert.match(workbench, /const pendingUserTurn = computed\(\(\) => activeRun\.value\?\.userTurn \?\? null\)/)
   assert.match(workbench, /await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
@@ -820,7 +771,7 @@ test('memory run status follows real tool start and end events without entering 
   assert.doesNotMatch(workbench, /opencodeClient|openCodeSyncStore|AgentStatusBar/)
 })
 
-test('memory retries transient requests and writes one Raw recovery point only after exhaustion', () => {
+test('legacy retries may write one Raw recovery point while Harness failures keep the draft', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
@@ -829,7 +780,7 @@ test('memory retries transient requests and writes one Raw recovery point only a
   assert.match(workbench, /onRetry\(attempt, total\)[\s\S]*正在重连 \$\{attempt\}\/\$\{total\}/)
   assert.match(
     workbench,
-    /replyCompleted = true[\s\S]*if \(!replyCompleted && isRecoverableDirectTransportFailure\(cause\)\)/,
+    /replyCompleted = true[\s\S]*if \(!replyCompleted && run\.runtime !== 'dh' && isRecoverableDirectTransportFailure\(cause\)\)/,
   )
   assert.match(
     workbench,
@@ -857,7 +808,7 @@ test('memory composer keeps project file references until the user cancels them'
 
   assert.match(workbench, /const persistentAttachments = ref<ResolvedDirectAttachment\[\]>\(\[\]\)/)
   assert.match(workbench, /const activeAttachments = \[\.\.\.persistentAttachments\.value, \.\.\.attachments\.value\]/)
-  assert.match(workbench, /persistentAttachments\.value = \(resource\.transcript\.persistentAttachments \|\| \[\]\)/)
+  assert.match(workbench, /persistentAttachments\.value = \(activeConversation\.transcript\.persistentAttachments \|\| \[\]\)/)
   assert.match(workbench, /if \(attachment\.kind === 'file' && attachment\.readablePath\)[\s\S]*files\.readText\([\s\S]*path: attachment\.readablePath[\s\S]*textContent: text\.content\.slice\(0, MAX_INLINE_ATTACHMENT_CHARS\)/)
   assert.match(workbench, /title="取消持续引用"/)
 })
@@ -897,7 +848,7 @@ test('memory runs belong to their conversation instead of the visible one', () =
   // 落盘无条件，改视图有条件：切走了也要写完，但界面不被别的对话的运行改写。
   assert.match(workbench, /const isOnScreen = \(run: MemoryRun\) => run\.owner === projectOwner\.value && conversation\.value\?\.resource\.path === run\.resourcePath/)
   assert.match(workbench, /if \(run\.owner === projectOwner\.value\) rememberConversation\(complete\)/)
-  assert.match(workbench, /if \(!isOnScreen\(run\)\) return\n\s*opened\.value = await openProjectResource/)
+  assert.match(workbench, /if \(!isOnScreen\(run\)\) return[\s\S]*opened\.value = dhSnapshot[\s\S]*harnessConversationOpenResult\(complete\)/)
   // 审批跟着 run 走，后台对话的审批不会弹到当前对话上。
   assert.match(workbench, /const pendingMemoryToolApproval = computed\(\(\) => activeRun\.value\?\.approval \?\? null\)/)
   assert.match(workbench, /run\.approval = \{\n\s*message: memoryToolApprovalMessage\(call\)/)
@@ -945,11 +896,11 @@ test('memory Desktop keeps always-allow for the current conversation in this App
   assert.match(workbench, /settleApproval\(run, 'reject'\)[\s\S]*run\.controller\.abort\(\)/)
 })
 
-test('memory run status does not render the legacy duplicate status line', () => {
+test('memory run status renders one settled status line', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(workbench, /v-else-if="!runVisible && \(displayedStatus \|\| displayedError\) && !displayedStatus\.startsWith\('已记录对话'\)" class="memory-status"/)
+  assert.match(workbench, /v-else-if="!runVisible && \(displayedStatus \|\| displayedError\)" class="memory-status"/)
   assert.doesNotMatch(runtime, /以最后一条用户消息为当前指令/)
 })
 
@@ -1379,14 +1330,8 @@ test('memory workbench follows the current project owner on both runtimes', () =
     /watch\(projectOwner, owner => void openProject\(owner\), \{ immediate: true \}\)/,
   )
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
-  assert.match(
-    workbench,
-    /memoryReady\.value = state\.initialized[\s\S]*void projectTextSync\.open/,
-  )
-  assert.match(
-    workbench,
-    /initializeMemoryProject\(owner, files\)[\s\S]*memoryReady\.value = true[\s\S]*void projectTextSync\.open/,
-  )
+  assert.match(workbench, /listHarnessConversationCatalog\(owner\)[\s\S]*void projectTextSync\.open/)
+  assert.doesNotMatch(workbench, /memoryReady|initializeMemoryProject/)
   assert.doesNotMatch(workbench, /syncOnFocus|addEventListener\('focus'/)
   assert.doesNotMatch(workbench, /projectTextSync\.open\([\s\S]{0,180}projectTextSync\.enable\(\)/)
 })
@@ -1416,7 +1361,7 @@ test('memory file actions stay inside the memory resource route on Desktop', () 
   assert.match(tree, /v-if="isDesktop && !isMobile"[\s\S]*用系统默认应用打开/)
 })
 
-test('memory navigation separates Raw conversations from project files and transient previews', () => {
+test('memory navigation separates Harness catalog conversations from project files and previews', () => {
   const tree = source('src/components/filetree/ProjectFileTree.vue')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const paths = source('src/utils/memoryProjectPaths.ts')
@@ -1429,9 +1374,9 @@ test('memory navigation separates Raw conversations from project files and trans
   assert.match(workbench, /const conversations = ref<MemoryConversation\[\]>\(\[\]\)/)
   assert.match(workbench, /class="memory-conversation-trigger"/)
   assert.match(workbench, /filteredConversations/)
-  assert.match(workbench, /renameMemoryConversation\(item\.resource, nextTitle, files\)/)
-  assert.match(workbench, /files\.planBatch\(\{ kind: 'delete', resources: \[item\.resource\] \}\)/)
-  assert.match(workbench, /files\.executeBatch\(plan\)/)
+  assert.match(workbench, /renameHarnessConversationCatalogEntry/)
+  assert.match(workbench, /removeHarnessConversationCatalogEntry/)
+  assert.doesNotMatch(workbench, /files\.planBatch\(\{ kind: 'delete', resources: \[item\.resource\] \}\)/)
   assert.match(workbench, /const previewResource = ref<ProjectResourceOpenResult \| null>\(null\)/)
   assert.match(workbench, /releaseMediaUrl\(\)\s*previewResource\.value = resource/)
   assert.match(workbench, /projectMapReturn \? '返回项目地图' : '返回对话'/)
@@ -1599,7 +1544,7 @@ test('capability chips survive a completed round and come back with the conversa
   assert.equal((sendBody.match(/attachments\.value = \[\]/g) || []).length, 2)
   // 本轮开关随用户消息落盘，重开这个对话时按最后一轮用户消息恢复。
   assert.match(workbench, /toolChips: toolChipIds\(\)/)
-  assert.match(workbench, /applyToolChipIds\(latestUserToolChips\(resource\.transcript\.turns\)\)/)
+  assert.match(workbench, /applyToolChipIds\(latestUserToolChips\(activeConversation\.transcript\.turns\)\)/)
   assert.match(workbench, /function applyToolChipIds\(ids\?: string\[\]\) \{/)
   // 开关手动关掉时可以有个说法，变成可解释的提醒。
   assert.match(workbench, /!fileToolsSelected\.value && authorizedPaths\.value\.length/)

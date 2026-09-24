@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { readFileSync } from 'node:fs'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
 import { createProjectFileService, type ProjectFileAdapter, type ProjectFileEntry } from '@/services/projectFileService'
-import { buildConversationMemoryIndexContext, buildWikiMemoryIndexContext } from '../memoryChat'
+import { buildWikiMemoryIndexContext } from '../memoryChat'
 
 const memoryChatSource = readFileSync('src/runtime/memory/memoryChat.ts', 'utf8')
 
@@ -133,14 +133,4 @@ test('wiki-memory preloads only the first three Wiki index levels', async () => 
   assert.match(context, /wiki\/团队\/index\.md/)
   assert.match(context, /wiki\/团队\/工作进度\/index\.md/)
   assert.doesNotMatch(context, /不应预读|正文不应预读/)
-})
-
-test('wiki-memory injects only the current conversation memory index', async () => {
-  const context = await buildConversationMemoryIndexContext('project', 'current', files({
-    '.raw/记忆索引/current.md': '# 对话记忆索引\n\n- 简介：当前会话',
-    '.raw/记忆索引/other.md': '# 对话记忆索引\n\n- 简介：其他会话',
-  }))
-
-  assert.match(context, /当前会话/)
-  assert.doesNotMatch(context, /其他会话/)
 })

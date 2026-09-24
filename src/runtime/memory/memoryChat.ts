@@ -40,15 +40,10 @@ import {
 import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { isMemoryProjectMutationBlocked } from '@/utils/memoryProjectPaths'
 import {
-  conversationMemoryIndexPath,
-  queryConversationMemoryIndex,
-} from './conversationMemoryIndex'
-import {
   buildMemoryDesktopToolDefinitions,
   parseCreativeToolArguments,
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
-  MEMORY_SEARCH_TOOL_DEFINITION,
   MEMORY_STORY_TOOL_DEFINITIONS,
 } from '@/runtime/direct/creativeToolContract'
 import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContract'
@@ -134,7 +129,6 @@ export interface MemoryChatInput {
   attachments?: ResolvedDirectAttachment[]
   files?: DirectMessageFile[]
   selectedSkillNames?: string[]
-  memoryQueryEnabled?: boolean
   fileToolsSelected?: boolean
   selectedMcpToolNames?: string[]
   mediaSelected?: boolean
@@ -227,20 +221,6 @@ export async function buildWikiMemoryIndexContext(
   ].join('\n\n')
 }
 
-export async function buildConversationMemoryIndexContext(
-  owner: string,
-  conversationId: string,
-  files: ProjectFileService = createRuntimeProjectFileService(),
-): Promise<string> {
-  try {
-    const path = conversationMemoryIndexPath(conversationId)
-    const result = await files.readTextAt(owner, path)
-    return `<conversation_memory_index path="${path}">\n${result.content}\n</conversation_memory_index>`
-  } catch {
-    return ''
-  }
-}
-
 export function hasWikiWriteIntent(value: string): boolean {
   return /创建|新建|写入|更新|修正|修改|添加|保存|记录|整理|归档|沉淀|拆分|拆书|拆小说|切分|分析|反推|继续|执行下一步|同意|确认/.test(
     value,
@@ -257,10 +237,8 @@ export function selectMemoryTools(
   mediaSelected = false,
   scene3dSelected = false,
   skillAllowedToolNames: string[] = [],
-  memoryQueryEnabled = true,
 ): any[] {
   const allowed = new Set<string>()
-  if (memoryQueryEnabled) allowed.add('memory_search')
   // Selecting a concrete Skill authorizes reading the context needed to execute it.
   // Skill authors do not need to declare `allowed-tools: read`; write and execution
   // capabilities continue to follow their existing, separate authorization paths.
@@ -441,32 +419,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   const projectFiles = createRuntimeProjectFileService()
   let memoryQueryContext = ''
   if (wikiMemorySelected && input.projectId) {
-    const [wikiIndexContext, conversationIndexContext] = await Promise.all([
-      buildWikiMemoryIndexContext(input.projectId, projectFiles),
-      input.memoryQueryEnabled && input.conversationId
-        ? buildConversationMemoryIndexContext(input.projectId, input.conversationId, projectFiles)
-        : '',
-    ])
-    memoryQueryContext = [wikiIndexContext, conversationIndexContext].filter(Boolean).join('\n\n')
-  } else if (input.memoryQueryEnabled && input.projectId && input.conversationId) {
-    const result = await queryConversationMemoryIndex(
-      input.projectId,
-      input.conversationId,
-      latestUserText,
-      projectFiles,
-      5,
-    )
-    if (result.matches.length) {
-      memoryQueryContext = [
-        '当前对话记忆查询结果（只读历史参考；项目文件和用户明确指令优先）：',
-        ...result.matches.map(
-          (match, index) =>
-            `${index + 1}. ${match.summary}\n关键词：${match.keywords.join('、')}\n原文：${match.content.slice(0, 6000)}`,
-        ),
-      ].join('\n\n')
-    }
+    memoryQueryContext = await buildWikiMemoryIndexContext(input.projectId)
   }
-  // T1: Always build context with recent history, regardless of capability selection
   const context = buildCreativeContext({
     messages: [...input.conversationTurns, input.userTurn],
     modelId: input.modelId,
@@ -474,6 +428,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     // Reserve the model output ceiling plus a small protocol/tool allowance.
     // oxfmt-ignore
     reservedTokens: maxOutputTokens + Math.min(32_768, Math.max(2_048, Math.floor(contextWindow * 0.1))),
+    maxHistoryRounds: Number.MAX_SAFE_INTEGER,
+    maxHistoryTokens: Number.MAX_SAFE_INTEGER,
   })
   if (context.omittedMessages > 0) input.onContextTrimmed?.(context.omittedMessages)
   const messages: DirectApiMessage[] = buildDirectMessages({
@@ -484,7 +440,7 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         !toolLoopRequired
           ? '你是韭菜盒子记忆工作台。已提供最近轮次对话历史保持连续；回答当前用户消息。本轮未选择 Skill 或工具，不要使用任何工具能力。'
           : [
-              '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；只提供同一任务最近三轮短期上下文，用户明确指定的项目文件是长期事实源。',
+              '你是韭菜盒子记忆工作台。本轮用户消息是当前唯一任务；用户明确指定的项目文件是长期事实源。',
               '不得查找 Raw 对话记录补充当前任务；缺少事实时查询指定文件或询问用户。',
               '项目知识与创作资料都是普通文件。按需使用 read、glob、grep 查询，使用 write、edit、mkdir、move、copy、delete 修改；不启用特殊 Agent 或第二阶段协议。',
               '用户在消息里给出的绝对路径就是本次的工作范围；这个范围内的文件工具、终端与 Skill 脚本都可以直接用，不需要再请求许可或让用户二次确认。',
@@ -646,44 +602,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     signal?: AbortSignal,
   ): Promise<DirectToolResult> => {
     signal?.throwIfAborted()
-    // T4: memory_search - native tool for current conversation
-    if (call.function.name === 'memory_search') {
-      if (!allowedMemoryToolNames.has('memory_search')) {
-        return {
-          content: JSON.stringify({
-            error: 'TOOL_NOT_ALLOWED',
-            tool: 'memory_search',
-            message: '对话查询已关闭',
-          }),
-          status: 'failed' as const,
-        }
-      }
-      const args = parseCreativeToolArguments(call)
-      if (!input.projectId || !input.conversationId) {
-        return {
-          content: JSON.stringify({ error: 'NO_CONVERSATION', message: '当前对话未绑定项目' }),
-          status: 'failed' as const,
-        }
-      }
-      try {
-        const result = await queryConversationMemoryIndex(
-          input.projectId,
-          input.conversationId,
-          String(args.query || ''),
-          createRuntimeProjectFileService(),
-          Math.min(Number(args.limit) || 5, 10),
-        )
-        return { content: JSON.stringify(result) }
-      } catch (error) {
-        return {
-          content: JSON.stringify({
-            error: 'QUERY_FAILED',
-            message: error instanceof Error ? error.message : '查询失败',
-          }),
-          status: 'failed' as const,
-        }
-      }
-    }
     if (call.function.name === 'prepare_story_analysis') {
       if (!allowedMemoryToolNames.has(call.function.name))
         return {
@@ -830,8 +748,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
   const sceneResults = new Map<string, ReturnType<typeof parseScene3DResultMarkers>[number]>()
   const allMemoryToolDefinitions = [
-    // T4: Add memory_search as native tool
-    MEMORY_SEARCH_TOOL_DEFINITION,
     ...MEMORY_STORY_TOOL_DEFINITIONS,
     ...(desktopRuntime
       ? buildMemoryDesktopToolDefinitions()
@@ -864,7 +780,6 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
         Boolean(input.mediaSelected || input.avSelected),
         Boolean(input.scene3dSelected),
         declaredSkillTools,
-        input.memoryQueryEnabled !== false,
       )
     : []
   const authorizedMemoryToolDefinitions = wikiMemorySelected

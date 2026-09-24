@@ -7,6 +7,11 @@ test('adaptation Wiki scaffold creates the fixed minimal wiki tree', () => {
   assert.equal(plan.wikiRoot, 'wiki')
   assert.deepEqual(plan.conflicts, [])
   assert.deepEqual(plan.directories, [
+    '.raw',
+    '.raw/文档',
+    '.raw/图片',
+    '.raw/视频',
+    '.raw/音频',
     'wiki',
     'wiki/原始材料',
     'wiki/改编方案',

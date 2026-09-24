@@ -22,24 +22,25 @@ import { openProjectResource } from '@/services/projectExplorerService'
 import {
   appendMemoryRound,
   saveMemoryMarkdown,
-  createMemoryConversation,
-  initializeMemoryProject,
   inspectMemoryProject,
-  renameMemoryConversation,
   replaceMemoryRound,
   updateMemoryConversationPersistentAttachments,
-  updateMemoryConversationSettings,
-  writeConversationMemoryIndex,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
-import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
+import {
+  createHarnessConversationCatalogEntry,
+  listHarnessConversationCatalog,
+  removeHarnessConversationCatalogEntry,
+  renameHarnessConversationCatalogEntry,
+  upsertHarnessConversationCatalogEntry,
+  type HarnessConversationCatalogEntry,
+} from '@/runtime/memory/harnessConversationCatalog'
 import {
   applyConversationSplitPlan,
   buildConversationSplitPlan,
   type ConversationSplitPlan,
   type ConversationSplitResult,
 } from '@/runtime/memory/conversationSplit'
-import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import {
   DEEPSEEK_HARNESS_CONTEXT_WINDOW,
@@ -47,6 +48,8 @@ import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
   deepSeekHandoffTurns,
   deepSeekPrompt,
+  deepSeekSessionTurns,
+  readDeepSeekHarnessSession,
   runDeepSeekHarness,
   stopDeepSeekHarness,
 } from '@/services/deepSeekHarness'
@@ -154,12 +157,6 @@ const fileWriteSelected = ref<ProjectResource | null>(null)
 const fileWriteSource = ref('')
 const fileWriteSearch = ref('')
 const fileWritePending = ref(false)
-type MemoryIndexState = 'writing' | 'success' | 'error'
-const memoryIndexStates = ref<Record<string, MemoryIndexState>>({})
-const memoryIndexErrors = ref<Record<string, string>>({})
-const memoryIndexPaths = ref<Record<string, string>>({})
-const memoryEnabled = ref(true)
-const memoryQueryEnabled = ref(true)
 const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
@@ -174,7 +171,7 @@ const avSelected = ref(false)
 const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
-const dhSelected = ref(false)
+const dhSelected = ref(true)
 const selectedToolChips = computed(() => [
   { id: 'dh', label: '@DH', icon: 'smart-toy', selected: dhSelected.value },
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
@@ -208,7 +205,7 @@ function toolChipIds(): string[] {
 
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
-  dhSelected.value = next.has('dh')
+  dhSelected.value = next.has('dh') || !ids?.length
   jevSelected.value = !dhSelected.value && next.has('jev')
   fileToolsSelected.value = next.has('file')
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
@@ -284,7 +281,6 @@ const skillPickerOnly = ref(false)
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const projectActionPending = ref(false)
-const memoryReady = ref(false)
 const copiedTurnId = ref('')
 // status / error 只承载非运行的视图提示（写文件、解析附件、预览失败）。
 // 运行自己的进度和错误挂在 run 上，否则后台运行时会把 A 对话的状态写到 B 对话的界面上。
@@ -322,7 +318,6 @@ async function handleCapturedFrame(file: File) {
 }
 type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
 const memoryToolAlwaysAllowedConversations = new Set<string>()
-const contextNoticeShownConversations = new Set<string>()
 const referencingDocuments = new Set<string>()
 type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed'; durationMs?: number }
 const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
@@ -883,6 +878,53 @@ function selectModel(model: { id: string; providerId?: string }) {
   modelPickerOpen.value = false
 }
 
+const HARNESS_CONVERSATION_PREFIX = '.harness-conversations'
+
+function conversationFromCatalog(
+  entry: HarnessConversationCatalogEntry,
+  legacy?: MemoryConversation,
+): MemoryConversation {
+  const resource: ProjectResource = legacy?.resource || {
+    runtime: desktopRuntime ? 'desktop' : 'web',
+    owner: entry.workspaceKey,
+    path: `${HARNESS_CONVERSATION_PREFIX}/${entry.conversationId}.md`,
+    name: `${entry.title}.md`,
+    isDirectory: false,
+    kind: 'document',
+    updatedAt: Date.parse(entry.updatedAt),
+  }
+  return {
+    resource,
+    transcript: {
+      id: entry.conversationId,
+      title: entry.title,
+      createdAt: entry.createdAt,
+      memoryEnabled: false,
+      memoryQueryEnabled: false,
+      turns: legacy?.transcript.turns || [],
+    },
+  }
+}
+
+function harnessConversationOpenResult(item: MemoryConversation): ProjectResourceOpenResult {
+  const content = ''
+  return {
+    type: 'conversation',
+    resource: item.resource,
+    transcript: item.transcript,
+    text: { content, size: 0, truncated: false, revision: { value: '', size: 0 } },
+  }
+}
+
+function mergedHarnessTurns(
+  visibleTurns: ConversationTurn[],
+  sessionTurns: ConversationTurn[],
+): ConversationTurn[] {
+  const firstHarnessTurn = visibleTurns.findIndex(turn =>
+    turn.role === 'user' && turn.toolChips?.includes(DEEPSEEK_HARNESS_SESSION_MARKER))
+  return [...(firstHarnessTurn < 0 ? visibleTurns : visibleTurns.slice(0, firstHarnessTurn)), ...sessionTurns]
+}
+
 async function openProject(owner: string) {
   // 切项目不停运行：运行归对话，结果落盘，回来读盘就能看到。
   conversationSelectionGeneration++
@@ -894,16 +936,29 @@ async function openProject(owner: string) {
   opened.value = null
   previewResource.value = null
   conversations.value = []
-  memoryReady.value = false
   error.value = ''
   if (!owner) return
   try {
     const state = await inspectMemoryProject(owner, files)
     if (generation !== projectGeneration) return
-    memoryReady.value = state.initialized
-    conversations.value = state.conversations
-    const latest = state.conversations.at(-1)
-    if (latest) await openResource(await openProjectResource(files, latest.resource))
+    const legacyById = new Map(state.conversations.map(item => [item.transcript.id, item]))
+    for (const legacy of state.conversations) {
+      if (listHarnessConversationCatalog(owner).some(item => item.conversationId === legacy.transcript.id)) continue
+      upsertHarnessConversationCatalogEntry({
+        conversationId: legacy.transcript.id,
+        sessionId: `jc-v1-${legacy.transcript.id}`,
+        workspaceKey: owner,
+        title: legacy.transcript.title,
+        createdAt: legacy.transcript.createdAt,
+        updatedAt: new Date(legacy.resource.updatedAt || Date.parse(legacy.transcript.createdAt)).toISOString(),
+        legacyRawPath: legacy.resource.path,
+      })
+    }
+    const entries = listHarnessConversationCatalog(owner)
+    conversations.value = entries.map(entry => conversationFromCatalog(entry, legacyById.get(entry.conversationId)))
+    const latest = conversations.value.at(-1) || conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
+    if (!conversations.value.length) conversations.value.push(latest)
+    await selectConversation(latest)
     void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {
     if (generation !== projectGeneration) return
@@ -914,67 +969,31 @@ async function openProject(owner: string) {
 async function refreshProjectView(owner = projectOwner.value) {
   if (!owner) return
   const state = await inspectMemoryProject(owner, files)
-  memoryReady.value = state.initialized
-  conversations.value = state.conversations
+  const legacyById = new Map(state.conversations.map(item => [item.transcript.id, item]))
+  conversations.value = listHarnessConversationCatalog(owner)
+    .map(entry => conversationFromCatalog(entry, legacyById.get(entry.conversationId)))
   if (conversation.value) {
-    const current = state.conversations.find(item => item.resource.path === conversation.value?.resource.path)
-    if (current) await openResource(await openProjectResource(files, current.resource))
-  }
-}
-
-async function createMemorySpace() {
-  const owner = projectOwner.value
-  if (!owner || projectActionPending.value) return
-  projectActionPending.value = true
-  error.value = ''
-  try {
-    await initializeMemoryProject(owner, files)
-    memoryReady.value = true
-    opened.value = null
-    conversations.value = []
-    void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : String(cause)
-  } finally {
-    projectActionPending.value = false
+    const current = conversations.value.find(item => item.transcript.id === conversation.value?.transcript.id)
+    if (current) await selectConversation(current)
   }
 }
 
 async function startNewConversation() {
   const owner = projectOwner.value
-  if (!owner || !memoryReady.value || projectActionPending.value) return
+  if (!owner || projectActionPending.value) return
   projectActionPending.value = true
   error.value = ''
   try {
-    const created = await createMemoryConversation(owner, '新对话', files)
+    const created = conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
     selectedSkillNames.value = []
     rememberConversation(created)
-    await openResource(await openProjectResource(files, created.resource))
+    await selectConversation(created)
     await nextTick()
     composerRef.value?.focus()
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
   } finally {
     projectActionPending.value = false
-  }
-}
-
-async function toggleConversationSetting(kind: 'memory' | 'query') {
-  const active = conversation.value
-  if (!active || projectActionPending.value) return
-  const next = kind === 'memory' ? !memoryEnabled.value : !memoryQueryEnabled.value
-  if (kind === 'memory') memoryEnabled.value = next
-  else memoryQueryEnabled.value = next
-  try {
-    const updated = await updateMemoryConversationSettings(active.resource, kind === 'memory'
-      ? { memoryEnabled: next }
-      : { memoryQueryEnabled: next }, files)
-    rememberConversation(updated)
-    if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
-  } catch (cause) {
-    if (kind === 'memory') memoryEnabled.value = !next
-    else memoryQueryEnabled.value = !next
-    error.value = cause instanceof Error ? cause.message : String(cause)
   }
 }
 
@@ -1001,25 +1020,50 @@ async function openResource(resource: ProjectResourceOpenResult) {
   error.value = ''
   status.value = ''
   if (resource.type === 'conversation') {
+    let activeConversation = resource
+    const catalogEntry = listHarnessConversationCatalog(resource.resource.owner)
+      .find(item => item.conversationId === resource.transcript.id)
+    if (
+      catalogEntry?.migratedAt
+      || (catalogEntry && catalogEntry.updatedAt !== catalogEntry.createdAt)
+      || resource.transcript.turns.some(turn => turn.toolChips?.includes(DEEPSEEK_HARNESS_SESSION_MARKER))
+    ) {
+      try {
+        const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
+        const snapshot = await readDeepSeekHarnessSession({
+          cwd: resource.resource.owner,
+          sessionId: resource.transcript.id,
+          message: '',
+          model: config.model,
+          apiBase: config.apiBase,
+          apiKey: config.apiKey,
+          fileAccessEnabled: fileToolsSelected.value,
+        })
+        activeConversation = {
+          ...activeConversation,
+          transcript: {
+            ...activeConversation.transcript,
+            turns: mergedHarnessTurns(activeConversation.transcript.turns, deepSeekSessionTurns(snapshot)),
+          },
+        }
+      } catch { /* Legacy Raw remains readable until its first successful Harness handoff. */ }
+    }
     if (creationMounted.value) {
       try { await creationPanelRef.value?.flushCanvasSave?.() } catch (cause) {
         error.value = `创作画布保存失败：${cause instanceof Error ? cause.message : String(cause)}`
         return
       }
     }
-    opened.value = resource
-    memoryEnabled.value = resource.transcript.memoryEnabled
-    memoryQueryEnabled.value = resource.transcript.memoryQueryEnabled
+    opened.value = activeConversation
     attachments.value = []
     referencedFiles.value = []
-    persistentAttachments.value = (resource.transcript.persistentAttachments || []).map(attachment => ({
+    persistentAttachments.value = (activeConversation.transcript.persistentAttachments || []).map(attachment => ({
       ...attachment, value: '', resourcePath: attachment.projectPath,
     }))
-    const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')
+    const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')
     await restoreComposerSkills(latestUserTurn?.skillNames)
-    applyToolChipIds(latestUserToolChips(resource.transcript.turns))
-    rememberConversation({ resource: resource.resource, transcript: resource.transcript })
-    await restoreConversationMemoryIndexState(resource, generation)
+    applyToolChipIds(latestUserToolChips(activeConversation.transcript.turns))
+    rememberConversation({ resource: activeConversation.resource, transcript: activeConversation.transcript })
     if (generation !== resourceOpenGeneration) return
     conversationPickerOpen.value = false
     conversationSearch.value = ''
@@ -1027,14 +1071,14 @@ async function openResource(resource: ProjectResourceOpenResult) {
     if (generation !== resourceOpenGeneration) return
     memoryScrollNav.value?.startStickyFollow()
     let previousUserTurnId = ''
-    for (const turn of resource.transcript.turns) {
+    for (const turn of activeConversation.transcript.turns) {
       if (turn.role === 'user') {
         previousUserTurnId = turn.id
         continue
       }
       if (turn.role !== 'assistant') continue
       try {
-        const mediaContext = conversationMediaContext(resource.transcript.turns, previousUserTurnId)
+        const mediaContext = conversationMediaContext(activeConversation.transcript.turns, previousUserTurnId)
         const plans = await Promise.all(parseMediaPlans(turn.content)
           .map(plan => resolveMediaPlanReferences(plan, mediaContext)))
         if (generation !== resourceOpenGeneration) return
@@ -1047,7 +1091,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
       const evalReviewPath = parseEvalReviewPath(turn.content)
       if (evalReviewPath) evalReports.value[turn.id] = evalReviewPath
     }
-    void loadConversationAttachmentPreviews(resource, generation)
+    void loadConversationAttachmentPreviews(activeConversation, generation)
   } else {
     editingMarkdown.value = false
     markdownSaveError.value = ''
@@ -1085,29 +1129,6 @@ async function openResource(resource: ProjectResourceOpenResult) {
     }
   }
   if (generation === resourceOpenGeneration && window.innerWidth <= 760) treeOpen.value = false
-}
-
-async function restoreConversationMemoryIndexState(
-  resource: Extract<ProjectResourceOpenResult, { type: 'conversation' }>,
-  generation: number,
-) {
-  memoryIndexStates.value = {}
-  memoryIndexErrors.value = {}
-  memoryIndexPaths.value = {}
-  let content = ''
-  try {
-    content = (await files.readTextAt(resource.resource.owner, conversationMemoryIndexPath(resource.transcript.id))).content
-  } catch { return }
-  if (generation !== resourceOpenGeneration) return
-  const index = parseConversationMemoryIndex(content)
-  if (!index || index.conversationId !== resource.transcript.id) return
-  const assistantTurnIds = new Set(resource.transcript.turns.filter(turn => turn.role === 'assistant').map(turn => turn.id))
-  const recordedTurnIds = index.entries
-    .filter(entry => entry.rawPath === resource.resource.path && assistantTurnIds.has(entry.assistantTurnId))
-    .map(entry => entry.assistantTurnId)
-  const path = conversationMemoryIndexPath(resource.transcript.id)
-  memoryIndexStates.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, 'success' as const]))
-  memoryIndexPaths.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, path]))
 }
 
 async function startMarkdownEdit() {
@@ -1504,27 +1525,6 @@ async function commitFileWrite() {
   }
 }
 
-async function recordConversation(turn: ConversationTurn, source = conversation.value) {
-  const active = source
-  const owner = active?.resource.owner || projectOwner.value
-  if (!active || !owner || turn.role !== 'assistant' || memoryIndexStates.value[turn.id] === 'writing' || memoryIndexStates.value[turn.id] === 'success') return
-  const index = active.transcript.turns.findIndex(item => item.id === turn.id)
-  if (index < 0) { error.value = '这条回答已不存在或已被编辑'; return }
-  memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'writing' }
-  memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: '' }
-  error.value = ''
-  try {
-    const summary = await generateConversationMemorySummary({ modelId: agentStore.currentModel, assistantTurn: turn })
-    const path = await writeConversationMemoryIndex(owner, { conversationId: active.transcript.id, rawPath: active.resource.path, assistantTurnId: turn.id, runtime: active.resource.runtime }, summary, files)
-    memoryIndexPaths.value = { ...memoryIndexPaths.value, [turn.id]: path }
-    memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'success' }
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : String(cause)
-    memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'error' }
-    memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: message }
-  }
-}
-
 function shouldSuggestFileWrite(turn: ConversationTurn): boolean {
   return turn.role === 'assistant'
     && turn.id !== 'streaming-assistant'
@@ -1574,19 +1574,24 @@ async function cancelEdit() {
 
 async function selectConversation(item: MemoryConversation) {
   const generation = ++conversationSelectionGeneration
-  const resource = await openProjectResource(files, item.resource)
   if (generation !== conversationSelectionGeneration) return
-  await openResource(resource)
+  await openResource(harnessConversationOpenResult(item))
 }
 
 async function renameConversation(item: MemoryConversation) {
   const nextTitle = (await safePrompt('重命名对话', item.transcript.title, { forceDom: desktopRuntime }))?.trim()
   if (!nextTitle || nextTitle === item.transcript.title) return
   try {
-    const renamed = await renameMemoryConversation(item.resource, nextTitle, files)
+    const entry = renameHarnessConversationCatalogEntry(
+      item.resource.owner,
+      item.transcript.id,
+      nextTitle,
+    )
+    if (!entry) throw new Error('对话目录记录不存在')
+    const renamed = { ...item, transcript: { ...item.transcript, title: entry.title } }
     rememberConversation(renamed)
     if (conversation.value?.resource.path === item.resource.path) {
-      opened.value = await openProjectResource(files, renamed.resource)
+      opened.value = harnessConversationOpenResult(renamed)
     }
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : String(cause)
@@ -1597,17 +1602,13 @@ async function deleteConversation(item: MemoryConversation) {
   // 删除正在运行的会话前先停它自己的运行，否则已派发的工具调用会继续用旧授权落盘
   const deletedRun = runs.get(memoryRunKey(item.resource.owner, item.resource.path))
   if (deletedRun) stopRun(deletedRun)
-  const message = mobileRuntime
-    ? `永久删除对话“${item.transcript.title}”？此操作无法恢复。`
-    : `删除对话“${item.transcript.title}”？`
+  const message = `删除对话“${item.transcript.title}”？`
   if (!(await confirmAction(message, {
-    title: mobileRuntime ? '永久删除对话' : '删除对话',
-    okLabel: mobileRuntime ? '永久删除' : '删除',
+    title: '删除对话',
+    okLabel: '删除',
   }))) return
   try {
-    const plan = await files.planBatch({ kind: 'delete', resources: [item.resource] })
-    const result = await files.executeBatch(plan)
-    if (result.failures.length) throw new Error(result.failures[0].message)
+    removeHarnessConversationCatalogEntry(item.resource.owner, item.transcript.id)
     memoryToolAlwaysAllowedConversations.delete(item.transcript.id)
     conversations.value = conversations.value.filter(entry => entry.resource.path !== item.resource.path)
     if (conversation.value?.resource.path === item.resource.path) {
@@ -1639,14 +1640,16 @@ async function splitConversation(item: MemoryConversation) {
   conversationSplitError.value = ''
   conversationSplitBusy.value = true
   try {
-    const text = await files.readText(item.resource)
+    const sourceContent = item.resource.path.startsWith(HARNESS_CONVERSATION_PREFIX)
+      ? JSON.stringify(item.transcript)
+      : (await files.readText(item.resource)).content
     conversationSplitPreview.value = {
       plan: await buildConversationSplitPlan({
         transcript: item.transcript,
         sourcePath: item.resource.path,
-        sourceContent: text.content,
+        sourceContent,
       }),
-      sourceContent: text.content,
+      sourceContent,
     }
   } catch (cause) {
     conversationSplitError.value = cause instanceof Error ? cause.message : String(cause)
@@ -1743,8 +1746,6 @@ async function send() {
   const message = input.value.trim()
   const activeAttachments = [...persistentAttachments.value, ...attachments.value]
   const pendingAttachments = attachments.value.slice()
-  const memorySnapshot = memoryEnabled.value
-  const memoryQuerySnapshot = memoryQueryEnabled.value
   if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value) return
   sendInFlight.value = true
   // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
@@ -1808,7 +1809,7 @@ async function send() {
     startedAt: Date.now(),
     title,
     editTargetId,
-    memoryEnabled: memorySnapshot,
+    memoryEnabled: false,
     runtime: dhSnapshot ? 'dh' : 'legacy',
   })
   // 派发这一刻起，这一轮就归这条 run；下面所有回调只写它，界面状态由 activeRun 派生。
@@ -1904,7 +1905,6 @@ async function send() {
       attachments: requestAttachments,
       files: referencedFiles.value,
       selectedSkillNames: skillSnapshot,
-      memoryQueryEnabled: memoryQuerySnapshot,
       fileToolsSelected: fileToolsSelected.value,
       authorizedPaths: authorizedPaths.value,
       selectedMcpToolNames: selectedMcpToolNames.value,
@@ -1925,11 +1925,6 @@ async function send() {
       onRetry(attempt, total) {
         if (!isCurrentRun()) return
         run.status = `通道超时，正在重连 ${attempt}/${total}`
-      },
-      onContextTrimmed() {
-        if (!isCurrentRun()) return
-        // P0 fix: Removed outdated “写入 Wiki” prompt - memory_search is now native
-        contextNoticeShownConversations.add(active.transcript.id)
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false
@@ -1953,9 +1948,44 @@ async function send() {
     })
     replyCompleted = true
     if (!isCurrentRun()) return
-    const complete = editTargetId
-      ? await replaceMemoryRound(active.resource, editTargetId, userTurn, reply, files, title)
-      : await appendMemoryRound(active.resource, userTurn, reply, files, title)
+    let complete: MemoryConversation
+    if (dhSnapshot) {
+      const snapshot = await readDeepSeekHarnessSession({
+        cwd: active.resource.owner,
+        sessionId: active.transcript.id,
+        message: '',
+        model: dhConfig!.model,
+        apiBase: dhConfig!.apiBase,
+        apiKey: dhConfig!.apiKey,
+        fileAccessEnabled: fileToolsSelected.value,
+      })
+      const now = new Date().toISOString()
+      const existing = listHarnessConversationCatalog(active.resource.owner)
+        .find(item => item.conversationId === active.transcript.id)
+      upsertHarnessConversationCatalogEntry({
+        conversationId: active.transcript.id,
+        sessionId: `jc-v1-${active.transcript.id}`,
+        workspaceKey: active.resource.owner,
+        title: title || existing?.title || active.transcript.title,
+        createdAt: existing?.createdAt || active.transcript.createdAt,
+        updatedAt: now,
+        ...(existing?.legacyRawPath || !active.resource.path.startsWith(HARNESS_CONVERSATION_PREFIX)
+          ? { legacyRawPath: existing?.legacyRawPath || active.resource.path, migratedAt: now }
+          : {}),
+      })
+      complete = {
+        resource: active.resource,
+        transcript: {
+          ...active.transcript,
+          title: title || existing?.title || active.transcript.title,
+          turns: mergedHarnessTurns(active.transcript.turns, deepSeekSessionTurns(snapshot)),
+        },
+      }
+    } else {
+      complete = editTargetId
+        ? await replaceMemoryRound(active.resource, editTargetId, userTurn, reply, files, title)
+        : await appendMemoryRound(active.resource, userTurn, reply, files, title)
+    }
     roundPersisted = true
     // 落盘无条件：用户切走了也要写完，切回来直接读盘就能看到结果。
     if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
@@ -1964,12 +1994,13 @@ async function send() {
     run.status = '已完成'
     // 改视图有条件：这条 run 不在屏上时，只落盘、不碰界面。
     if (!isOnScreen(run)) return
-    opened.value = await openProjectResource(files, complete.resource)
+    opened.value = dhSnapshot
+      ? harnessConversationOpenResult(complete)
+      : await openProjectResource(files, complete.resource)
     if (!isCurrentRun()) return
     run.streamingText = ''
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
-      if (memorySnapshot) void recordConversation(turn, { ...active, transcript: complete.transcript })
       if (run.programStatus) programStatuses.value[turn.id] = run.programStatus
       try {
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
@@ -1996,7 +2027,7 @@ async function send() {
       run.phase = 'failed'
       run.status = '处理失败'
       run.error = cause instanceof Error ? cause.message : String(cause)
-      if (!replyCompleted && isRecoverableDirectTransportFailure(cause)) {
+      if (!replyCompleted && run.runtime !== 'dh' && isRecoverableDirectTransportFailure(cause)) {
         const interruptedReply = [
           run.streamingText.trim(),
           '> 本轮因网络或上游服务中断，已保留当前结果。继续前请先检查项目现状，避免重复写入或外部操作。',
@@ -2144,6 +2175,16 @@ async function addReferencedFile(payload: unknown) {
 async function setPersistentAttachments(next: ResolvedDirectAttachment[]) {
   const active = conversation.value
   if (!active) return
+  if (active.resource.path.startsWith(HARNESS_CONVERSATION_PREFIX)) {
+    const updated = {
+      ...active,
+      transcript: { ...active.transcript, persistentAttachments: attachmentMetadata(next) },
+    }
+    persistentAttachments.value = next
+    rememberConversation(updated)
+    if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
+    return
+  }
   const updated = await updateMemoryConversationPersistentAttachments(active.resource, attachmentMetadata(next), files)
   if (conversation.value?.transcript.id !== updated.transcript.id) return
   persistentAttachments.value = next
@@ -2468,7 +2509,7 @@ async function onComposerDrop(event: DragEvent) {
 
 async function importDesktopChatPaths(paths: string[], warnings: string[] = []) {
   const owner = projectOwner.value
-  if (!owner || !memoryReady.value) return
+  if (!owner) return
   const groups = new Map<string, string[]>()
   const existing = new Set((await files.list(owner)).map(resource => resource.path))
   for (const path of paths) {
@@ -2516,7 +2557,7 @@ async function importDesktopChatPaths(paths: string[], warnings: string[] = []) 
 
 async function addAttachmentFiles(selected: File[]) {
   const owner = projectOwner.value
-  if (!owner || !memoryReady.value) throw new Error('请先创建记忆空间')
+  if (!owner) throw new Error('请先选择项目')
   const existing = new Set((await files.list(owner)).map(resource => resource.path))
   const resolved: ResolvedDirectAttachment[] = []
   const failures: string[] = []
@@ -3124,7 +3165,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       </div>
       <header class="memory-topbar">
         <button v-if="!treeOpen" class="icon-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
-        <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
+        <div v-if="projectOwner" ref="conversationPickerRef" class="memory-conversation-picker">
           <button
             class="memory-conversation-trigger"
             type="button"
@@ -3154,7 +3195,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           </div>
         </div>
         <button
-          v-if="memoryReady"
+          v-if="projectOwner"
           class="new-conversation-button"
           :disabled="projectActionPending"
           @click="startNewConversation"
@@ -3170,24 +3211,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             title="创作面板"
             @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
           ><JcIcon name="palette" /></button>
-          <button
-            v-if="conversation"
-            class="memory-toggle-button"
-            :class="{ enabled: memoryEnabled }"
-            type="button"
-            :aria-pressed="memoryEnabled"
-            :title="memoryEnabled ? '关闭记忆' : '开启记忆'"
-            @click="toggleConversationSetting('memory')"
-          ><span class="memory-toggle-label">记忆</span><span class="memory-toggle-state">{{ memoryEnabled ? '开' : '关' }}</span></button>
-          <button
-            v-if="conversation"
-            class="memory-toggle-button"
-            :class="{ enabled: memoryQueryEnabled }"
-            type="button"
-            :aria-pressed="memoryQueryEnabled"
-            :title="memoryQueryEnabled ? '关闭查询' : '开启查询'"
-            @click="toggleConversationSetting('query')"
-          ><span class="memory-toggle-label">查询</span><span class="memory-toggle-state">{{ memoryQueryEnabled ? '开' : '关' }}</span></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -3274,10 +3297,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               title="把这条回答保存到项目文件"
               @click="suggestFileWrite(turn)"
             ><JcIcon name="save" /><span>保存到文件</span></button>
-            <span v-if="memoryIndexStates[turn.id] === 'writing'" class="memory-index-status state-writing"><JcIcon name="sync" class="spinning" />正在记录对话</span>
-            <span v-else-if="memoryIndexStates[turn.id] === 'success'" class="memory-index-status state-success" :title="memoryIndexPaths[turn.id] ? `已记录对话：${memoryIndexPaths[turn.id]}` : '已记录对话'"><JcIcon name="check_circle" />已记录对话</span>
-            <small v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-error" :title="memoryIndexErrors[turn.id] || '请重试'">未记录</small>
-            <button v-if="memoryIndexStates[turn.id] === 'error'" class="memory-index-suggest state-error" type="button" :title="`记录对话失败：${memoryIndexErrors[turn.id] || '请重试'}`" @click="recordConversation(turn)"><JcIcon name="save" /><span>记录对话</span></button>
           </div>
           <div v-if="evalReports[turn.id]" class="memory-eval-report-actions">
             <button type="button" class="memory-media-plan-link" @click="openEvalReport(evalReports[turn.id]!)">
@@ -3334,18 +3353,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         </article>
         </div>
       </section>
-      <section v-else-if="projectOwner && !memoryReady" class="memory-onboarding">
-        <div>
-          <img src="/logo.svg" alt="" />
-          <h1>开始使用记忆空间</h1>
-          <p>这个文件夹还没有韭菜盒子记忆结构。</p>
-          <button :disabled="projectActionPending" @click="createMemorySpace">
-            {{ projectActionPending ? '正在创建' : '新建记忆空间' }}
-          </button>
-          <p v-if="error" class="memory-onboarding-error">{{ error }}</p>
-        </div>
-      </section>
-      <section v-else-if="memoryReady" class="memory-onboarding">
+      <section v-else-if="projectOwner" class="memory-onboarding">
         <div>
           <h1>还没有对话</h1>
           <button :disabled="projectActionPending" @click="startNewConversation">新建对话</button>
@@ -3425,7 +3433,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runVisible && (displayedStatus || displayedError) && !displayedStatus.startsWith('已记录对话')" class="memory-status" :class="{ error: Boolean(displayedError) }">
+        <div v-else-if="!runVisible && (displayedStatus || displayedError)" class="memory-status" :class="{ error: Boolean(displayedError) }">
           <span>{{ displayedError || displayedStatus }}</span>
         </div>
         <div
@@ -3710,13 +3718,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.memory-toggle-button { display: inline-flex; height: 34px; align-items: center; gap: 9px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-.memory-toggle-button:hover { border-color: var(--olive); color: var(--olive); }
-.memory-toggle-button.enabled { border-color: color-mix(in srgb, #4b9978 62%, var(--line)); background: color-mix(in srgb, #4b9978 14%, var(--paper)); color: #327657; }
-.memory-toggle-label { line-height: 1; }
-.memory-toggle-state { display: inline-flex; height: 22px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink3); font-size: 11px; line-height: 1; }
-.memory-toggle-button.enabled .memory-toggle-state { border-color: color-mix(in srgb, #4b9978 42%, transparent); background: color-mix(in srgb, #4b9978 16%, var(--paper)); color: #327657; }
-.memory-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
 .memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }
@@ -3785,13 +3786,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-file-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-file-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
-.memory-index-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
-.memory-index-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
-.memory-index-suggest.state-error { border-color: color-mix(in srgb, #b34a4a 52%, var(--line)); background: color-mix(in srgb, #b34a4a 8%, var(--paper)); color: #a13f3f; cursor: pointer; }
-.memory-index-suggest.state-error:hover { border-color: #b34a4a; background: color-mix(in srgb, #b34a4a 14%, var(--paper)); }
-.memory-index-status { display: inline-flex; align-items: center; gap: 4px; color: var(--ink3); font-size: 12px; }
-.memory-index-status.state-success { color: var(--olive); }
-.memory-index-error { max-width: 260px; color: #a13f3f; font-size: 11px; }
 .memory-file-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
 .memory-file-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
 .memory-file-write-dialog > header, .memory-file-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }

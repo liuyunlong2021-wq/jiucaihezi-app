@@ -86,4 +86,20 @@ if (!server.includes(resumableSession)) {
   changed = true
 }
 
+// SDK 0.1.7 exposes prompts but not the official sessionQuery reads yet.
+// Keep the bridge at the protocol edge; the UI must never parse DSH_HOME itself.
+const requestCases = `\t\t\tcase "initialize": return this.initialize(params);
+\t\t\tcase "session/prompt": return this.prompt(params);
+\t\t\tcase "shutdown": return this.shutdown();`
+const queryCases = `\t\t\tcase "initialize": return this.initialize(params);
+\t\t\tcase "session/prompt": return this.prompt(params);
+\t\t\tcase "session/list": return this.ctx.sessionQuery.listSessions();
+\t\t\tcase "session/read": return this.ctx.sessionQuery.readSession(brandString(String(params?.sessionId || "")));
+\t\t\tcase "shutdown": return this.shutdown();`
+if (!server.includes(queryCases)) {
+  if (!server.includes(requestCases)) throw new Error('Unsupported DeepSeek Harness request server layout')
+  server = server.replace(requestCases, queryCases)
+  changed = true
+}
+
 if (changed) writeFileSync(serverPath, server)

@@ -1,5 +1,17 @@
 # 热缓存
 
+## [2026-09-24] Harness Session 成为对话真相，`.raw` 建库改为可选
+
+- 用户确认 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24]]：打开项目即可聊天，不再先创建“记忆空间”；Harness Session 独占完整对话、工具轨迹、持久化与压缩，韭菜盒子只保存对话标题、排序、工作区和稳定 Session 映射。
+- 现有文件树“建立改编 Wiki”按钮在原 Wiki 骨架之外补 `.raw/文档|图片|视频|音频`；未建库仍可文字聊天。本期不顺带重写既有 `.raw/jc-media` 媒体保存链路。
+- UI 的“记忆”和“查询”按钮及后端 `.raw/记忆索引`、`memory_search` 预取、最近三轮拼装整体退役。正式 Wiki 仍是项目文件，按用户选择的文件/Skill/MCP 能力读取，与 Harness 对话上下文分层。
+- 对话下拉继续保留。新对话固定映射 `jc-v1-<conversationId>`；旧 `.raw/对话记录` 在用户首次打开时一次移交，成功后只续写 Harness，Raw 保留为只读历史证据，不双写。
+- 无缝显示不能只靠当前 SDK 的 `run()`：实施第一步必须用官方 `sessionQuery.listSessions/readSession` 把持久 Session 投影回现有聊天 UI；在完整历史可恢复前不得停止旧 Raw 读取，也不得自行解析 `$DSH_HOME` 文件。
+- 当前 SDK 没有单 Session 删除方法：删除对话先移除 UI 目录映射，不私自解析 Harness 存储；等官方接口具备后再接物理回收。
+- 生产迁移已完成：官方 Session Query 薄桥、Session 正文投影、AppData 按项目隔离、轻量对话目录、打开即聊、旧 Raw 惰性移交、Harness 成功后停止 Raw 双写、逻辑删除和一键建库四类目录均已接通。
+- 旧索引 UI、摘要请求、`.raw/记忆索引` 生产实现、`memory_search` 与固定最近三轮拼装已退役。旧 Raw 解析仅为迁移保留；既有索引文件继续隐藏和保护但不再读取。
+- 旧记忆系统纪念封存位于 `/Users/by3/Documents/韭菜盒子-旧记忆系统纪念-2026-09-24/`，不受生产退役影响。
+
 ## [2026-09-23] @DH 改由官方 SDK Client 持有 Runtime
 
 - 五分钟无结果的直接原因是 Provider 两次约 125 秒后返回 524，再被 `maxRetries: 5` 放大；集成根因是前端自写 JSON-RPC 生命周期只在 `session.status=idle` 时收尾，Helper 退出后等待 Promise 不会结束。

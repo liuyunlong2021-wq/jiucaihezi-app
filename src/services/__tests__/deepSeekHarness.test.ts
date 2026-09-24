@@ -10,6 +10,7 @@ import {
   deepSeekProgress,
   deepSeekPrompt,
   deepSeekSessionId,
+  deepSeekSessionTurns,
   deepSeekTurnError,
 } from '@/services/deepSeekHarness'
 
@@ -96,6 +97,34 @@ test('DeepSeek Harness reads the committed assistant message', () => {
   assert.equal(deepSeekAssistantText({ type: 'tool/result', data: {} }), '')
 })
 
+test('DeepSeek Harness projects its official Session log into visible conversation turns', () => {
+  assert.deepEqual(deepSeekSessionTurns({
+    session: { id: 'jc-v1-conversation-1' },
+    events: [
+      {
+        seq: 3, time: 1_700_000_000_000, type: 'user/message',
+        data: { id: 'user-1', source: { kind: 'user' }, content: [{ type: 'text', text: '/skill-creator\n\n修改文件' }] },
+      },
+      {
+        seq: 4, time: 1_700_000_001_000, type: 'user/message',
+        data: { id: 'notice-1', source: { kind: 'skill-invocation' }, content: [{ type: 'text', text: '内部注入' }] },
+      },
+      {
+        seq: 5, time: 1_700_000_002_000, type: 'assistant/message',
+        data: { message: { id: 'assistant-1', content: [{ type: 'text', text: '已完成' }] } },
+      },
+    ],
+  }), [
+    {
+      id: 'user-1', role: 'user', content: '修改文件', createdAt: '2023-11-14T22:13:20.000Z',
+      toolChips: ['dh', 'dh-session-v1'],
+    },
+    {
+      id: 'assistant-1', role: 'assistant', content: '已完成', createdAt: '2023-11-14T22:13:22.000Z',
+    },
+  ])
+})
+
 test('DeepSeek Harness streams visible text in order and lets committed text stay authoritative', () => {
   const state = { attemptId: '', nextIndex: 0, text: '' }
   assert.equal(applyDeepSeekAssistantStream(state, {
@@ -159,10 +188,12 @@ test('desktop package pins and embeds the official Harness SDK client with Node'
   assert.match(tauri, /build:deepseek-harness/)
 })
 
-test('Harness writes its project-local runtime files through the Rust project boundary', () => {
+test('Harness keeps its runtime state in app data instead of the user project', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
-  assert.match(source, /invoke\('dev_write_file'/)
+  assert.match(source, /appDataDir\(\)/)
+  assert.match(source, /writeTextFile\(patchPath/)
+  assert.match(source, /dev_copy_external/)
   assert.match(source, /resolveResource\([^)]*node\/bin\//s)
   assert.match(source, /maxRetries: 1/)
   assert.match(source, /PI_AI_ERROR/)
@@ -178,6 +209,8 @@ test('Harness writes its project-local runtime files through the Rust project bo
   assert.match(prepare, /session\.assistant-stream/)
   assert.match(prepare, /sessionPersistence/)
   assert.match(prepare, /agents\.resume/)
+  assert.match(prepare, /session\/list/)
+  assert.match(prepare, /session\/read/)
+  assert.match(runner, /harness\.client\.request/)
   assert.doesNotMatch(source, /resolve_deepseek_harness/)
-  assert.doesNotMatch(source, /@tauri-apps\/plugin-fs|\bmkdir\(|\bwriteTextFile\(/)
 })

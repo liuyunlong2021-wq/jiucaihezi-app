@@ -47,7 +47,6 @@ test('memory project paths keep one protected skeleton and four media categories
     '.raw/jc-media/视频',
     '.raw/jc-media/音频',
     '.raw/对话记录',
-    '.raw/记忆索引',
     '.raw/.sync',
     'jc-canvas',
   ])

@@ -13,6 +13,11 @@ export interface AdaptationWikiScaffoldPlan {
 }
 
 const DIRECTORIES = [
+  '.raw',
+  '.raw/文档',
+  '.raw/图片',
+  '.raw/视频',
+  '.raw/音频',
   '',
   '原始材料',
   '改编方案',
@@ -83,11 +88,13 @@ export function buildAdaptationWikiScaffoldPlan(
     conflicts.push('检测到旧 _index.md，请先确认迁移方式。')
   const legacyCharacterDirectory = legacyCharacterDirectoryConflict(entries, wikiRoot)
   if (legacyCharacterDirectory) conflicts.push(legacyCharacterDirectory)
-  const expectedDirectories = DIRECTORIES.map(path => (path ? `${wikiRoot}/${path}` : wikiRoot))
+  const expectedDirectories = DIRECTORIES.map(path => path.startsWith('.raw')
+    ? path
+    : (path ? `${wikiRoot}/${path}` : wikiRoot))
   for (const path of expectedDirectories)
     if (byPath.get(path) && !byPath.get(path)!.isDirectory)
       conflicts.push(`目标目录 ${path} 被普通文件占用。`)
-  const expectedFiles = DIRECTORIES.map(relative => ({
+  const expectedFiles = DIRECTORIES.filter(relative => !relative.startsWith('.raw')).map(relative => ({
     path: `${relative ? `${wikiRoot}/${relative}` : wikiRoot}/index.md`,
     content: indexContent(relative),
   }))

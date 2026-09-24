@@ -31,6 +31,16 @@ createInterface({ input: process.stdin }).on('line', line => {
     void close()
     return
   }
+  if (command.type === 'list-sessions' || command.type === 'read-session') {
+    void harness.start().then(() => harness.client.request(
+      command.type === 'list-sessions' ? 'session/list' : 'session/read',
+      command.type === 'read-session' ? { sessionId: command.sessionId } : {},
+    )).then(
+      data => send({ type: 'query-result', requestId: command.requestId, data }),
+      error => send({ type: 'error', requestId: command.requestId, error: errorMessage(error) }),
+    )
+    return
+  }
   if (command.type !== 'run') return
   let turnError = ''
   void harness.run(command.contentBlocks, {

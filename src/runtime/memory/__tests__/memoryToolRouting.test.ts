@@ -16,7 +16,6 @@ import { parseSkillMd, type SkillConfig } from '@/types/skill'
 import {
   TOOL_DESCRIBE_TOOL_DEFINITION,
   TOOL_SEARCH_TOOL_DEFINITION,
-  MEMORY_SEARCH_TOOL_DEFINITION,
   MEMORY_STORY_TOOL_DEFINITIONS,
   parseCreativeToolArguments,
 } from '@/runtime/direct/creativeToolContract'
@@ -79,18 +78,8 @@ test('ordinary conversation exposes no project tools', () => {
   assert.deepEqual(selectMemoryTools(tools), [])
 })
 
-test('memory_search follows the conversation query switch', () => {
-  const tools = [MEMORY_SEARCH_TOOL_DEFINITION]
-  assert.deepEqual(
-    selectMemoryTools(tools, [], false, false, false, [], false, false, [], false),
-    [],
-  )
-  assert.deepEqual(
-    selectMemoryTools(tools, [], false, false, false, [], false, false, [], true).map(
-      tool => tool.function.name,
-    ),
-    ['memory_search'],
-  )
+test('the retired memory_search tool is never selected', () => {
+  assert.deepEqual(selectMemoryTools([{ function: { name: 'memory_search' } }]), [])
 })
 
 test('ordinary conversation has no explicit capability connection', () => {

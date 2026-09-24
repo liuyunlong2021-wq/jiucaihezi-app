@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { parseConversationMemoryIndex } from '../conversationMemoryIndex'
 
 function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
@@ -21,19 +20,12 @@ test('jc-jiyi and its legacy tool are absent from production catalogs', () => {
   }
 })
 
-test('existing V2 memory indexes remain readable without migration', () => {
-  const content = [
-    '# 对话记忆索引',
-    '',
-    '<!-- jc:conversation-memory-index conversation-id="chat-old" source="../对话记录/chat-old.md" version="2" -->',
-    '',
-    '- 简介：旧索引',
-    '  - 关键词：兼容、记忆',
-    '  - 正链：[查看这条回答](../对话记录/chat-old.md#jc-turn-a1)',
-  ].join('\n')
-  const parsed = parseConversationMemoryIndex(content)
-  assert.equal(parsed?.conversationId, 'chat-old')
-  assert.equal(parsed?.entries[0]?.assistantTurnId, 'a1')
+test('the archived memory index backend is absent from production', () => {
+  assert.equal(existsSync(join(process.cwd(), 'src/runtime/memory/conversationMemoryIndex.ts')), false)
+  assert.equal(existsSync(join(process.cwd(), 'src/runtime/memory/conversationMemorySummary.ts')), false)
+  for (const path of ['src/runtime/memory/memoryChat.ts', 'src/components/memory/MemoryWorkbench.vue']) {
+    assert.doesNotMatch(source(path), /memory_search|conversationMemoryIndex|最近三轮/)
+  }
 })
 
 test('memory UI keeps save-to-file and has no redundant Wiki action', () => {
