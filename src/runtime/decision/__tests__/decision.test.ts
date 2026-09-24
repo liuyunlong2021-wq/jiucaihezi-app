@@ -51,7 +51,7 @@ const CANDIDATES: DecisionCandidate[] = [
   {
     id: 'media',
     kind: 'tool',
-    label: '图文',
+    label: '排版',
     description: '把内容排成文档、网页、长图、幻灯片并导出成文件',
   },
   // 「提到文生视频」不等于「要出片」，说明里写清它会真的调模型产出文件，减少误选。
@@ -612,11 +612,11 @@ test('MCP 服务按自己声明的工具关键词被选中，无关服务不被�
   )
 })
 
-test('「以图片的形式发我」算图文排版，要开 @图文', async () => {
-  // 用户实测：说「写一个小红书的长文，以图片的形式发我」，@图文 没开，模型只能回
+test('「以图片的形式发我」算内容排版，要开 @排版', async () => {
+  // 用户实测：说「写一个小红书的长文，以图片的形式发我」，@排版 没开，模型只能回
   // 「无法直接生成二进制图片」。原规则表只认「文档/网页/幻灯片/海报排版」。
   const candidates: DecisionCandidate[] = [
-    { id: 'media', kind: 'tool', label: '图文', description: '创建文档、网页、图片和幻灯片' },
+    { id: 'media', kind: 'tool', label: '排版', description: '创建文档、网页、长图和幻灯片' },
     { id: 'av', kind: 'tool', label: '影音', description: '生成图片、视频和音频' },
   ]
   const mediaPhrasings = [
@@ -665,9 +665,9 @@ test('@Jev 只从 @ 提及进入，且在发送链路的最前面回填芯片', 
   // 决策必须发生在所有发送快照之前，否则本轮发出去的还是决策前的空选择。
   assert.match(
     workbench,
-    /if \(jevSelected\.value\) await applyJevDecision\(message\)\s*\n\s*const dhSnapshot = dhSelected\.value\s*\n\s*const skillSnapshot = selectedSkillNames\.value\.slice\(\)/,
+    /if \(jevSelected\.value\) await applyJevDecision\(message\)\s*\n\s*const useHarness = desktopOnlyRuntime\s*\n\s*const skillSnapshot = selectedSkillNames\.value\.slice\(\)/,
   )
-  // 决策结果只能落成芯片与模型选择；执行仍然交给 runMemoryChat。
+  // 决策结果只能落成芯片与模型选择；执行器由平台固定，不由 Jev 切换。
   assert.match(workbench, /for \(const id of result\.tools\) enableTool\(id\)/)
   // 选中的 Skill 与芯片已经在 chip 行里看得见，说明行不得再复述一遍（用户实测报的噪音）。
   assert.doesNotMatch(workbench, /@Jev 已选：/)

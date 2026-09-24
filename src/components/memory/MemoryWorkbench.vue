@@ -51,7 +51,6 @@ import {
   deepSeekSessionTurns,
   readDeepSeekHarnessSession,
   runDeepSeekHarness,
-  stopDeepSeekHarness,
 } from '@/services/deepSeekHarness'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
@@ -104,6 +103,7 @@ import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
 import { ensureJevScorer } from '@/utils/jevScorerRuntime'
+import { setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import {
@@ -171,9 +171,7 @@ const avSelected = ref(false)
 const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
-const dhSelected = ref(true)
 const selectedToolChips = computed(() => [
-  { id: 'dh', label: '@DH', icon: 'smart-toy', selected: dhSelected.value },
   { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
@@ -184,7 +182,7 @@ const selectedToolChips = computed(() => [
       selected: true,
     }
   }),
-  { id: 'media', label: '@图文', icon: 'image', selected: mediaSelected.value },
+  { id: 'media', label: '@排版', icon: 'image', selected: mediaSelected.value },
   { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
 ].filter(tool => tool.selected))
@@ -193,7 +191,7 @@ const selectedToolChips = computed(() => [
 // 都会让用户以为能力还在，得再点一次才能继续。
 function toolChipIds(): string[] {
   const ids: string[] = []
-  if (dhSelected.value) ids.push('dh', DEEPSEEK_HARNESS_SESSION_MARKER)
+  if (desktopOnlyRuntime) ids.push(DEEPSEEK_HARNESS_SESSION_MARKER)
   if (jevSelected.value) ids.push('jev')
   if (fileToolsSelected.value) ids.push('file')
   if (mediaSelected.value) ids.push('media')
@@ -205,8 +203,7 @@ function toolChipIds(): string[] {
 
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
-  dhSelected.value = next.has('dh') || !ids?.length
-  jevSelected.value = !dhSelected.value && next.has('jev')
+  jevSelected.value = next.has('jev')
   fileToolsSelected.value = next.has('file')
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
   mediaSelected.value = next.has('media')
@@ -539,16 +536,13 @@ type MemoryMentionOption =
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
-    ...(desktopOnlyRuntime
-      ? [{ type: 'tool' as const, id: 'dh', display: 'DH', description: '交给 DeepSeek Harness 执行', icon: 'smart-toy' }]
-      : []),
     { type: 'tool', id: 'jev', display: 'Jev', description: '自动判断本轮需要的 Skill、能力和模型档位', icon: 'alt-route' },
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
     ...(desktopOnlyRuntime
       ? [{ type: 'tool' as const, id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' }]
       : []),
-    { type: 'tool', id: 'media', display: '图文', description: '创建文档、网页、图片和幻灯片', icon: 'image' },
+    { type: 'tool', id: 'media', display: '排版', description: '创建文档、网页、长图和幻灯片', icon: 'image' },
     { type: 'tool', id: 'av', display: '影音', description: '生成图片、视频和音频', icon: 'movie' },
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
   ]
@@ -685,12 +679,9 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
   return '程序已返回真实执行回执'
 }
 const toolCommands = [
-  ...(desktopOnlyRuntime ? [
-    { id: 'dh', label: '@DH', icon: 'smart-toy', description: '使用 DeepSeek Harness' },
-  ] : []),
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
   { id: 'file', label: '@文件', icon: 'description', description: '读写权限' },
-  { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
+  { id: 'media', label: '@排版', icon: 'image', description: '创建文档、网页、长图和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
   ...(desktopOnlyRuntime ? [
@@ -714,6 +705,7 @@ function hideChipTip() {
 }
 
 onMounted(async () => {
+  setHarnessSceneRecorder(document => recordSceneVideo(document))
   void checkSceneVideoExport()
   // 打分器是可选增强：装了就在后台拉起来（模型加载要十几秒，不等），没装什么都不做。
   if (agentStore.jevScorerAutostart) void ensureJevScorer()
@@ -765,6 +757,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  setHarnessSceneRecorder()
   offOpenResource?.()
   offFocusMedia?.()
   offToggleTree?.()
@@ -1276,8 +1269,6 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 function insertCommand(command: { id: string; label: string }) {
-  if (command.id === 'dh') selectDeepSeekHarness()
-  else if (command.id !== 'skill' && command.id !== 'file') dhSelected.value = false
   if (command.id === 'file') fileToolsSelected.value = true
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
@@ -1298,21 +1289,7 @@ function insertCommand(command: { id: string; label: string }) {
   })
 }
 
-function selectDeepSeekHarness() {
-  dhSelected.value = true
-  jevSelected.value = false
-  mediaSelected.value = false
-  avSelected.value = false
-  scene3dSelected.value = false
-  selectedMcpToolNames.value = []
-}
-
 function enableTool(id: string) {
-  if (id === 'dh') {
-    selectDeepSeekHarness()
-    return
-  }
-  if (id !== 'file') dhSelected.value = false
   if (id === 'jev') jevSelected.value = true
   if (id === 'file') fileToolsSelected.value = true
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
@@ -1323,7 +1300,6 @@ function enableTool(id: string) {
 }
 
 function disableTool(id: string) {
-  if (id === 'dh') dhSelected.value = false
   if (id === 'jev') jevSelected.value = false
   if (id === 'file') fileToolsSelected.value = false
   if (id.startsWith('mcp__')) {
@@ -1336,7 +1312,7 @@ function disableTool(id: string) {
 }
 
 /** 能力芯片的中文标签，用于 @Jev 的说明文案。 */
-const TOOL_CHIP_LABELS: Record<string, string> = { file: '@文件', media: '@图文', av: '@影音', scene3d: '@3D' }
+const TOOL_CHIP_LABELS: Record<string, string> = { file: '@文件', media: '@排版', av: '@影音', scene3d: '@3D' }
 
 /**
  * @Jev 的候选 = 输入框里能手动选的同一批能力，因此天然只含「当前已启用 + 用户已授权」的项。
@@ -1360,7 +1336,7 @@ async function decisionCandidates(): Promise<DecisionCandidate[]> {
       .filter(Boolean)
 
   push({ id: 'file', kind: 'tool', label: '文件', description: '读取、创建、修改和保存当前项目中的文件' })
-  push({ id: 'media', kind: 'tool', label: '图文', description: '把内容排成文档、网页、长图、幻灯片并导出成文件' })
+  push({ id: 'media', kind: 'tool', label: '排版', description: '把内容排成文档、网页、长图、幻灯片并导出成文件' })
   // 「提到文生视频」不等于「要出片」，说明里写清它会真的调模型产出文件，减少误选。
   push({ id: 'av', kind: 'tool', label: '影音', description: '调用生图、生视频、配音模型，真的产出图片、视频、音频文件' })
   if (desktopOnlyRuntime) push({ id: 'scene3d', kind: 'tool', label: '3D', description: '创建或编辑 3D 场景' })
@@ -1751,7 +1727,7 @@ async function send() {
   // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
   if (jevSelected.value) await applyJevDecision(message)
 
-  const dhSnapshot = dhSelected.value
+  const useHarness = desktopOnlyRuntime
   const skillSnapshot = selectedSkillNames.value.slice()
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
@@ -1810,7 +1786,7 @@ async function send() {
     title,
     editTargetId,
     memoryEnabled: false,
-    runtime: dhSnapshot ? 'dh' : 'legacy',
+    runtime: useHarness ? 'dh' : 'legacy',
   })
   // 派发这一刻起，这一轮就归这条 run；下面所有回调只写它，界面状态由 activeRun 派生。
   const run = runs.get(runKey) as MemoryRun
@@ -1849,11 +1825,11 @@ async function send() {
       userTurn.id,
       activeAttachments,
     )
-    const dhConfig = dhSnapshot
+    const dhConfig = useHarness
       ? await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
       : null
-    const dhMissingTurns = dhSnapshot ? deepSeekHandoffTurns(baseTurns) : []
-    const dhContext = dhSnapshot && dhMissingTurns.length
+    const dhMissingTurns = useHarness ? deepSeekHandoffTurns(baseTurns) : []
+    const dhContext = useHarness && dhMissingTurns.length
       ? buildCreativeContext({
           messages: [...dhMissingTurns, userTurn],
           modelId: dhConfig!.model,
@@ -1864,7 +1840,7 @@ async function send() {
         })
       : null
     const dhHandoffTurns = (dhContext?.messages.slice(0, -1) || []) as ConversationTurn[]
-    const reply = dhSnapshot ? await runDeepSeekHarness({
+    const reply = useHarness ? await runDeepSeekHarness({
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
       message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns),
@@ -1872,6 +1848,10 @@ async function send() {
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
       fileAccessEnabled: fileToolsSelected.value,
+      mediaSelected: mediaSelected.value,
+      avSelected: avSelected.value,
+      scene3dSelected: scene3dSelected.value,
+      mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
       files: referencedFiles.value,
       attachments: requestAttachments,
       signal: run.controller.signal,
@@ -1949,16 +1929,35 @@ async function send() {
     replyCompleted = true
     if (!isCurrentRun()) return
     let complete: MemoryConversation
-    if (dhSnapshot) {
-      const snapshot = await readDeepSeekHarnessSession({
-        cwd: active.resource.owner,
-        sessionId: active.transcript.id,
-        message: '',
-        model: dhConfig!.model,
-        apiBase: dhConfig!.apiBase,
-        apiKey: dhConfig!.apiKey,
-        fileAccessEnabled: fileToolsSelected.value,
-      })
+    if (useHarness) {
+      let turns: ConversationTurn[]
+      try {
+        const snapshot = await readDeepSeekHarnessSession({
+          cwd: active.resource.owner,
+          sessionId: active.transcript.id,
+          message: '',
+          model: dhConfig!.model,
+          apiBase: dhConfig!.apiBase,
+          apiKey: dhConfig!.apiKey,
+          fileAccessEnabled: fileToolsSelected.value,
+          mediaSelected: mediaSelected.value,
+          avSelected: avSelected.value,
+          scene3dSelected: scene3dSelected.value,
+          mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
+        })
+        turns = mergedHarnessTurns(active.transcript.turns, deepSeekSessionTurns(snapshot))
+      } catch (readCause) {
+        run.status = '任务已完成，会话刷新失败'
+        run.error = readCause instanceof Error ? readCause.message : String(readCause)
+        run.phase = 'done'
+        turns = [...baseTurns, userTurn]
+        if (reply.trim()) turns.push({
+          id: `turn-${crypto.randomUUID()}`,
+          role: 'assistant',
+          content: reply,
+          createdAt: new Date().toISOString(),
+        })
+      }
       const now = new Date().toISOString()
       const existing = listHarnessConversationCatalog(active.resource.owner)
         .find(item => item.conversationId === active.transcript.id)
@@ -1978,7 +1977,7 @@ async function send() {
         transcript: {
           ...active.transcript,
           title: title || existing?.title || active.transcript.title,
-          turns: mergedHarnessTurns(active.transcript.turns, deepSeekSessionTurns(snapshot)),
+          turns,
         },
       }
     } else {
@@ -1991,10 +1990,10 @@ async function send() {
     if (pendingAttachments.length) transientAttachments.value[userTurn.id] = pendingAttachments
     if (run.owner === projectOwner.value) rememberConversation(complete)
     if (!isCurrentRun()) return
-    run.status = '已完成'
+    if (!run.error) run.status = '已完成'
     // 改视图有条件：这条 run 不在屏上时，只落盘、不碰界面。
     if (!isOnScreen(run)) return
-    opened.value = dhSnapshot
+    opened.value = useHarness
       ? harnessConversationOpenResult(complete)
       : await openProjectResource(files, complete.resource)
     if (!isCurrentRun()) return
@@ -2069,7 +2068,6 @@ function stopRun(run: MemoryRun) {
   stopRunTimer(run)
   settleApproval(run, 'reject')
   run.controller.abort()
-  if (run.runtime === 'dh') void stopDeepSeekHarness()
   // 断开运行时会话状态，避免旧运行的气泡/步骤显示到切换后的会话上
   run.userTurn = null
   run.streamingText = ''

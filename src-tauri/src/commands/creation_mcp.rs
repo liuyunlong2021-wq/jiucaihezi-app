@@ -20,6 +20,8 @@ const OPERATIONS: &[&str] = &[
     "cancel_creation_task",
     "retry_media_persistence",
     "add_creation_result_to_canvas",
+    "list_harness_tools",
+    "call_harness_tool",
 ];
 
 #[derive(Default)]
@@ -206,6 +208,11 @@ fn process_request(
         return Err(("400 Bad Request", "unknown creation operation".to_string()));
     }
 
+    let timeout = if input.operation == "call_harness_tool" {
+        Duration::from_secs(900)
+    } else {
+        Duration::from_secs(30)
+    };
     let request_id = Uuid::new_v4().to_string();
     let (sender, receiver) = mpsc::channel();
     app.state::<CreationMcpState>()
@@ -227,7 +234,7 @@ fn process_request(
         },
     )
     .map_err(internal_error)?;
-    match receiver.recv_timeout(Duration::from_secs(30)) {
+    match receiver.recv_timeout(timeout) {
         Ok(Ok(result)) => Ok(("200 OK", json!({ "result": result }))),
         Ok(Err(error)) => Ok(("422 Unprocessable Entity", json!({ "error": error }))),
         Err(_) => {
@@ -288,6 +295,7 @@ mod tests {
     #[test]
     fn bridge_contract_rejects_unknown_operations() {
         assert!(OPERATIONS.contains(&"submit_creation_task"));
+        assert!(OPERATIONS.contains(&"call_harness_tool"));
         assert!(!OPERATIONS.contains(&"read_file"));
         assert_eq!(MAX_REQUEST_BYTES, 1_048_576);
     }

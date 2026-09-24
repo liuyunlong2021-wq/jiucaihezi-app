@@ -8,34 +8,41 @@ function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
 
-test('@DH is a desktop runtime that accepts selected Skills and bypasses legacy execution', () => {
+test('Desktop defaults to Harness without an @DH switch', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /id: 'dh', label: '@DH'/)
-  assert.match(workbench, /function selectDeepSeekHarness\(\)/)
-  assert.match(workbench, /dhSnapshot\s*\?\s*await runDeepSeekHarness/)
+  assert.doesNotMatch(workbench, /id: 'dh', label: '@DH'/)
+  assert.doesNotMatch(workbench, /function selectDeepSeekHarness\(\)/)
+  assert.doesNotMatch(workbench, /dhSelected/)
+  assert.match(workbench, /const useHarness = desktopOnlyRuntime/)
+  assert.match(workbench, /useHarness\s*\?\s*await runDeepSeekHarness/)
   assert.match(workbench, /sessionId: active\.transcript\.id/)
   assert.match(workbench, /cwd: active\.resource\.owner/)
-  assert.match(workbench, /if \(run\.runtime === 'dh'\) void stopDeepSeekHarness\(\)/)
+  assert.doesNotMatch(workbench, /stopDeepSeekHarness\(\)/)
+  assert.match(workbench, /run\.controller\.abort\(\)/)
   assert.match(workbench, /deepSeekHandoffTurns\(baseTurns\)/)
-  assert.match(workbench, /ids\.push\('dh', DEEPSEEK_HARNESS_SESSION_MARKER\)/)
+  assert.match(workbench, /if \(desktopOnlyRuntime\) ids\.push\(DEEPSEEK_HARNESS_SESSION_MARKER\)/)
   assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
   assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns\)/)
   assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?attachments: requestAttachments/)
   assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
-  assert.doesNotMatch(workbench, /const skillSnapshot = dhSnapshot \? \[\]/)
-  assert.doesNotMatch(workbench, /function selectDeepSeekHarness\(\)[\s\S]{0,400}selectedSkillNames\.value = \[\]/)
+  assert.doesNotMatch(workbench, /const skillSnapshot = useHarness \? \[\]/)
 })
 
-test('@DH executor composes with the @文件 full-access capability in either click order', () => {
+test('@文件 changes Harness permission without selecting an executor', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  const selectDh = workbench.match(/function selectDeepSeekHarness\(\) \{([\s\S]*?)\n\}/)?.[1] || ''
-  const enableTool = workbench.match(/function enableTool\(id: string\) \{([\s\S]*?)\n\}/)?.[1] || ''
   const restoreTools = workbench.match(/function applyToolChipIds\(ids\?: string\[\]\) \{([\s\S]*?)\n\}/)?.[1] || ''
-  assert.doesNotMatch(selectDh, /fileToolsSelected\.value = false/)
-  assert.doesNotMatch(enableTool, /dhSelected\.value = false\s*\n\s*if \(id === 'file'\)/)
-  assert.match(restoreTools, /dhSelected\.value = next\.has\('dh'\)/)
+  assert.doesNotMatch(workbench, /display: 'DH'|label: '@DH'/)
   assert.match(restoreTools, /fileToolsSelected\.value = next\.has\('file'\)/)
   assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?fileAccessEnabled: fileToolsSelected\.value/)
+})
+
+test('Desktop specialized capabilities stay inside the Harness session', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /const useHarness = desktopOnlyRuntime/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?mediaSelected: mediaSelected\.value/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?avSelected: avSelected\.value/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?scene3dSelected: scene3dSelected\.value/)
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?mcpServerIds: selectedMcpToolNames\.value\.map/)
 })
 
 test('image and video attachments display their project paths while models receive the saved original', () => {
@@ -291,7 +298,7 @@ test('Harness conversations open immediately without creating a Raw memory space
   assert.doesNotMatch(workbench, /createMemorySpace|initializeMemoryProject|createMemoryConversation/)
   assert.doesNotMatch(workbench, /新建记忆空间|memoryReady/)
   assert.match(workbench, /<span>新建对话<\/span>/)
-  assert.match(workbench, /dhSnapshot[\s\S]*deepSeekSessionTurns/)
+  assert.match(workbench, /useHarness[\s\S]*deepSeekSessionTurns/)
 })
 
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
@@ -474,7 +481,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速</)
   assert.match(workbench, /const toolCommands = \[/)
-  for (const label of ['@Skill', '@文件', '@图文', '@影音', '@3D', '@MCP'])
+  for (const label of ['@Skill', '@文件', '@排版', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
   // @Jev 只留 @ 提及一个入口：输入框下沿的常驻开关用户实测不想要
   // （他自己用 @ 的时候才开）。它仍然要能被开启、被持久化、被回填。
@@ -570,6 +577,11 @@ test('Harness sessions replace the retired conversation memory index UI and back
   assert.doesNotMatch(workbench, /conversationMemoryIndex|memoryIndexStates|recordConversation/)
   assert.doesNotMatch(workbench, /正在记录对话|已记录对话|未记录/)
   assert.match(workbench, /readDeepSeekHarnessSession/)
+  assert.match(
+    workbench,
+    /catch \(readCause\)[\s\S]*任务已完成，会话刷新失败[\s\S]*run\.phase = 'done'/,
+  )
+  assert.match(workbench, /if \(!run\.error\) run\.status = '已完成'/)
 })
 
 test('memory composer reads the native clipboard only for an empty Desktop image paste', () => {
@@ -730,7 +742,7 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /:streaming="turn\.id === 'streaming-assistant'"/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
   assert.match(workbench, /readDeepSeekHarnessSession\([\s\S]*turns: mergedHarnessTurns/)
-  assert.match(workbench, /opened\.value = dhSnapshot[\s\S]*harnessConversationOpenResult\(complete\)/)
+  assert.match(workbench, /opened\.value = useHarness[\s\S]*harnessConversationOpenResult\(complete\)/)
   assert.match(workbench, /const pendingUserTurn = computed\(\(\) => activeRun\.value\?\.userTurn \?\? null\)/)
   assert.match(workbench, /await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
@@ -848,7 +860,7 @@ test('memory runs belong to their conversation instead of the visible one', () =
   // 落盘无条件，改视图有条件：切走了也要写完，但界面不被别的对话的运行改写。
   assert.match(workbench, /const isOnScreen = \(run: MemoryRun\) => run\.owner === projectOwner\.value && conversation\.value\?\.resource\.path === run\.resourcePath/)
   assert.match(workbench, /if \(run\.owner === projectOwner\.value\) rememberConversation\(complete\)/)
-  assert.match(workbench, /if \(!isOnScreen\(run\)\) return[\s\S]*opened\.value = dhSnapshot[\s\S]*harnessConversationOpenResult\(complete\)/)
+  assert.match(workbench, /if \(!isOnScreen\(run\)\) return[\s\S]*opened\.value = useHarness[\s\S]*harnessConversationOpenResult\(complete\)/)
   // 审批跟着 run 走，后台对话的审批不会弹到当前对话上。
   assert.match(workbench, /const pendingMemoryToolApproval = computed\(\(\) => activeRun\.value\?\.approval \?\? null\)/)
   assert.match(workbench, /run\.approval = \{\n\s*message: memoryToolApprovalMessage\(call\)/)

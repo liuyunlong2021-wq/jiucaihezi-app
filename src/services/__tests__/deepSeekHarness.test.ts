@@ -117,7 +117,7 @@ test('DeepSeek Harness projects its official Session log into visible conversati
   }), [
     {
       id: 'user-1', role: 'user', content: '修改文件', createdAt: '2023-11-14T22:13:20.000Z',
-      toolChips: ['dh', 'dh-session-v1'],
+      toolChips: ['dh-session-v1'],
     },
     {
       id: 'assistant-1', role: 'assistant', content: '已完成', createdAt: '2023-11-14T22:13:22.000Z',
@@ -196,8 +196,15 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /dev_copy_external/)
   assert.match(source, /resolveResource\([^)]*node\/bin\//s)
   assert.match(source, /maxRetries: 1/)
+  assert.match(source, /- SERVER/)
   assert.match(source, /PI_AI_ERROR/)
   assert.match(source, /DSH_PERMISSION_MODE: deepSeekPermissionMode\(input\.fileAccessEnabled\)/)
+  assert.match(source, /resolve_creation_mcp/)
+  assert.match(source, /@deepseek-ai\/dsh-mcp-client/)
+  assert.match(source, /JIUCAIHEZI_PROXY_CAPABILITIES/)
+  assert.match(source, /JIUCAIHEZI_PROXY_MCP_SERVER/)
+  assert.match(source, /const needsCreation = input\.avSelected/)
+  assert.match(source, /JIUCAIHEZI_CREATION_CAPABILITIES: 'av'/)
   assert.match(source, /runtimeKey\(input\)/)
   assert.match(source, /wireSessionId = deepSeekSessionId\(input\.sessionId\)/)
   assert.doesNotMatch(source, /sessionNonce/)
@@ -211,6 +218,19 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(prepare, /agents\.resume/)
   assert.match(prepare, /session\/list/)
   assert.match(prepare, /session\/read/)
+  assert.match(prepare, /const queryInject = 'const inject = \["agents", "sessionQuery"\];'/)
   assert.match(runner, /harness\.client\.request/)
   assert.doesNotMatch(source, /resolve_deepseek_harness/)
+})
+
+test('Harness runtimes are owned per workspace instead of one replaceable app singleton', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  assert.match(source, /const runtimes = new Map<string, RuntimeSlot>\(\)/)
+  assert.match(source, /function workspaceRuntimeKey\(input: DeepSeekHarnessInput\)/)
+  assert.doesNotMatch(source, /let runtime: Runtime \| null/)
+  assert.doesNotMatch(source, /await stopDeepSeekHarness\(\)\s*\n\s*runtime = await createRuntime/)
+  assert.match(source, /stopRuntime\(active\)/)
+  assert.match(source, /ensureRuntime\(input, true\)/)
+  assert.match(source, /if \(!active\.closing\) return active/)
+  assert.doesNotMatch(source, /await stopRuntime\(await current\.ready\) \} catch/)
 })

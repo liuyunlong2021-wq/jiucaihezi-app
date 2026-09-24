@@ -81,7 +81,7 @@ export async function resolveDecisionModelRefs(): Promise<DecisionModelRef[]> {
   )
 }
 
-/** 芯片（@文件/@图文/@影音/@3D）的拥有者。芯片是结构判断，只有规则层会给。 */
+/** 芯片（@文件/@排版/@影音/@3D）的拥有者。芯片是结构判断，只有规则层会给。 */
 export const CHIP_PROVIDER_ID = 'rule'
 
 /**
@@ -150,7 +150,7 @@ export async function decide(
   let skillVerdictTaken = false
   for (const provider of providers) {
     // Skill 有结论就不再问别人（尤其是别把云端/本地模型拖进来），
-    // 但芯片必须问：@文件 / @图文 / @影音 / @3D 是结构判断，只有规则层会给。
+    // 但芯片必须问：@文件 / @排版 / @影音 / @3D 是结构判断，只有规则层会给。
     if (skillVerdictTaken && provider.id !== CHIP_PROVIDER_ID) continue
     lastProvider = provider.id
     const remaining = budgetMs - (Date.now() - startedAt)

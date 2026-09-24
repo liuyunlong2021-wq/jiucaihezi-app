@@ -88,6 +88,13 @@ if (!server.includes(resumableSession)) {
 
 // SDK 0.1.7 exposes prompts but not the official sessionQuery reads yet.
 // Keep the bridge at the protocol edge; the UI must never parse DSH_HOME itself.
+const baseInject = 'const inject = ["agents"];'
+const queryInject = 'const inject = ["agents", "sessionQuery"];'
+if (!server.includes(queryInject)) {
+  if (!server.includes(baseInject)) throw new Error('Unsupported DeepSeek Harness injection layout')
+  server = server.replace(baseInject, queryInject)
+  changed = true
+}
 const requestCases = `\t\t\tcase "initialize": return this.initialize(params);
 \t\t\tcase "session/prompt": return this.prompt(params);
 \t\t\tcase "shutdown": return this.shutdown();`

@@ -2,7 +2,9 @@ import { readFile, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
+import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod'
 
 interface Discovery {
@@ -33,7 +35,7 @@ async function invokeBridge(operation: string, params: Record<string, unknown>):
     method: 'POST',
     headers: { authorization: `Bearer ${discovery.token}`, 'content-type': 'application/json' },
     body: JSON.stringify({ operation, params }),
-    signal: AbortSignal.timeout(35_000),
+    signal: AbortSignal.timeout(operation === 'call_harness_tool' ? 900_000 : 35_000),
   }).catch(error => {
     throw new Error(`无法连接韭菜盒子 Desktop：${error instanceof Error ? error.message : error}`)
   })
@@ -98,8 +100,53 @@ export function createCreationMcpServer(callBridge: InvokeBridge = invokeBridge)
   return server
 }
 
+export async function createProxyMcpServer(
+  callBridge: InvokeBridge = invokeBridge,
+  options: { capabilities?: string[]; mcpServerId?: string } = {},
+): Promise<Server> {
+  const scope = {
+    ...(options.capabilities?.length ? { capabilities: options.capabilities } : {}),
+    ...(options.mcpServerId ? { mcpServerId: options.mcpServerId } : {}),
+  }
+  const listed = await callBridge('list_harness_tools', scope) as { tools?: Array<{ name?: string }> }
+  const tools = Array.isArray(listed?.tools) ? listed.tools : []
+  const names = new Set(tools.map(tool => tool.name).filter(Boolean))
+  const server = new Server(
+    { name: 'jiucaihezi-harness-tools', version: '1.0.0' },
+    { capabilities: { tools: {} } },
+  )
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: tools as any }))
+  server.setRequestHandler(CallToolRequestSchema, async request => {
+    const name = request.params.name
+    if (!names.has(name)) return toolError(new Error(`未授权工具: ${name}`))
+    try {
+      const result = await callBridge('call_harness_tool', {
+        ...scope,
+        name,
+        arguments: request.params.arguments || {},
+      })
+      const text = result && typeof result === 'object' && 'content' in result
+        ? String((result as { content: unknown }).content)
+        : JSON.stringify(result)
+      return { content: [{ type: 'text' as const, text }] }
+    } catch (error) {
+      return toolError(error)
+    }
+  })
+  return server
+}
+
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
-  const server = createCreationMcpServer()
+  const capabilities = (process.env.JIUCAIHEZI_PROXY_CAPABILITIES || '').split(',').filter(Boolean)
+  const mcpServerId = process.env.JIUCAIHEZI_PROXY_MCP_SERVER || ''
+  const creationCapabilities = (process.env.JIUCAIHEZI_CREATION_CAPABILITIES || '').split(',').filter(Boolean)
+  const scopedBridge: InvokeBridge = (operation, params) => invokeBridge(operation, {
+    ...params,
+    ...(creationCapabilities.length ? { capabilities: creationCapabilities } : {}),
+  })
+  const server = capabilities.length || mcpServerId
+    ? await createProxyMcpServer(invokeBridge, { capabilities, mcpServerId })
+    : createCreationMcpServer(scopedBridge)
   server.connect(new StdioServerTransport()).catch(error => {
     console.error(error instanceof Error ? error.message : error)
     process.exitCode = 1

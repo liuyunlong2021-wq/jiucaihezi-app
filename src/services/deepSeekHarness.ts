@@ -24,7 +24,9 @@ type Runtime = {
   }>
   closed: Promise<void>
   markClosed: () => void
+  closing?: Promise<void>
 }
+type RuntimeSlot = { key: string; ready: Promise<Runtime> }
 
 export interface DeepSeekHarnessInput {
   cwd: string
@@ -34,6 +36,10 @@ export interface DeepSeekHarnessInput {
   apiBase: string
   apiKey: string
   fileAccessEnabled?: boolean
+  mediaSelected?: boolean
+  avSelected?: boolean
+  scene3dSelected?: boolean
+  mcpServerIds?: string[]
   files?: DirectMessageFile[]
   attachments?: ResolvedDirectAttachment[]
   signal?: AbortSignal
@@ -63,14 +69,27 @@ export const DEEPSEEK_HARNESS_CONTEXT_WINDOW = 262_144
 export const DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS = 32_768
 export const DEEPSEEK_HARNESS_SESSION_MARKER = 'dh-session-v1'
 
-let runtime: Runtime | null = null
+const runtimes = new Map<string, RuntimeSlot>()
 
 export function deepSeekPermissionMode(fileAccessEnabled = false): 'workspace-write' | 'danger-full-access' {
   return fileAccessEnabled ? 'danger-full-access' : 'workspace-write'
 }
 
 function runtimeKey(input: DeepSeekHarnessInput): string {
-  return `${input.cwd}\0${input.apiBase}\0${input.model}\0${deepSeekPermissionMode(input.fileAccessEnabled)}`
+  return [
+    input.cwd,
+    input.apiBase,
+    input.model,
+    deepSeekPermissionMode(input.fileAccessEnabled),
+    input.mediaSelected ? 'media' : '',
+    input.avSelected ? 'av' : '',
+    input.scene3dSelected ? '3d' : '',
+    [...new Set(input.mcpServerIds || [])].sort().join(','),
+  ].join('\0')
+}
+
+function workspaceRuntimeKey(input: DeepSeekHarnessInput): string {
+  return input.cwd
 }
 
 export function deepSeekSessionId(conversationId: string): string {
@@ -109,7 +128,7 @@ export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): Convers
         role: 'user',
         content,
         createdAt: new Date(Number(event.time) || Date.now()).toISOString(),
-        toolChips: ['dh', DEEPSEEK_HARNESS_SESSION_MARKER],
+        toolChips: [DEEPSEEK_HARNESS_SESSION_MARKER],
       })
     }
     if (event?.type === 'assistant/message') {
@@ -242,6 +261,42 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   const patchPath = await join(routeDir, 'route.cordis.yml')
   const apiBase = input.apiBase.replace(/\/+$/, '')
   const baseURL = apiBase.endsWith('/v1') ? apiBase : `${apiBase}/v1`
+  const mcpServerIds = [...new Set(input.mcpServerIds || [])]
+  for (const id of mcpServerIds) {
+    if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) throw new Error(`MCP 服务器 ID 不符合 Harness 命名规则: ${id}`)
+  }
+  const needsCreation = input.avSelected
+  const localCapabilities = [input.mediaSelected && 'media', input.scene3dSelected && '3d'].filter(Boolean) as string[]
+  const needsMcp = needsCreation || localCapabilities.length > 0 || mcpServerIds.length > 0
+  const mcpLaunch = needsMcp
+    ? await invoke<{ command: string; args: string[]; cwd?: string }>('resolve_creation_mcp')
+    : null
+  const mcpEntry = (id: string, serverName: string, env: Record<string, string>) => [
+    `- id: ${JSON.stringify(id)}`,
+    "  name: '@deepseek-ai/dsh-mcp-client'",
+    '  config:',
+    `    serverName: ${JSON.stringify(serverName)}`,
+    '    transport: stdio',
+    `    command: ${JSON.stringify(mcpLaunch!.command)}`,
+    `    args: ${JSON.stringify(mcpLaunch!.args)}`,
+    ...(mcpLaunch!.cwd ? [`    cwd: ${JSON.stringify(mcpLaunch!.cwd)}`] : []),
+    '    env:',
+    ...Object.entries(env).map(([key, value]) => `      ${key}: ${JSON.stringify(value)}`),
+    '    toolCallTimeoutMs: 900000',
+    '    failOnStartupError: true',
+    '',
+  ]
+  const mcpPatch = [
+    ...(needsCreation ? mcpEntry('mcp-jiucaihezi-creation', 'jiucaihezi-creation', {
+      JIUCAIHEZI_CREATION_CAPABILITIES: 'av',
+    }) : []),
+    ...(localCapabilities.length ? mcpEntry('mcp-jiucaihezi-tools', 'jiucaihezi', {
+      JIUCAIHEZI_PROXY_CAPABILITIES: localCapabilities.join(','),
+    }) : []),
+    ...mcpServerIds.flatMap((serverName, index) => mcpEntry(`mcp-proxy-${index}`, serverName, {
+      JIUCAIHEZI_PROXY_MCP_SERVER: serverName,
+    })),
+  ]
   await mkdir(routeDir, { recursive: true })
   await writeTextFile(patchPath, [
         '- id: llm-pi-ai',
@@ -268,6 +323,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         `            contextWindow: ${DEEPSEEK_HARNESS_CONTEXT_WINDOW}`,
         `            maxTokens: ${DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS}`,
         '',
+        ...mcpPatch,
       ].join('\n'))
 
   const runtimeRoot = 'deepseek-harness/node_modules'
@@ -317,7 +373,6 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     for (const pending of active.runs.values()) pending.reject(error)
     active.runs.clear()
     active.markClosed()
-    if (runtime === active) runtime = null
   }
   await transport.start()
   try {
@@ -336,7 +391,7 @@ async function queryDeepSeekHarness(
   input: DeepSeekHarnessInput,
   command: 'list-sessions' | 'read-session',
 ): Promise<any> {
-  const active = await ensureRuntime(input)
+  const active = await ensureRuntime(input, true)
   const requestId = crypto.randomUUID()
   const completed = new Promise<any>((resolve, reject) => {
     active.runs.set(requestId, { resolve, reject, notify() {} })
@@ -365,17 +420,45 @@ export async function listDeepSeekHarnessSessions(
   return queryDeepSeekHarness(input, 'list-sessions')
 }
 
-async function ensureRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
+async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false): Promise<Runtime> {
+  const workspaceKey = workspaceRuntimeKey(input)
   const key = runtimeKey(input)
-  if (runtime?.key === key) return runtime
-  await stopDeepSeekHarness()
-  runtime = await createRuntime(input)
-  return runtime
+  const current = runtimes.get(workspaceKey)
+  if (current && (reuseWorkspace || current.key === key)) {
+    const active = await current.ready
+    if (!active.closing) return active
+    await active.closing
+    if (runtimes.get(workspaceKey) === current) runtimes.delete(workspaceKey)
+    return ensureRuntime(input, reuseWorkspace)
+  }
+
+  const slot: RuntimeSlot = {
+    key,
+    ready: (async () => {
+      if (current) await stopRuntime(await current.ready)
+      return createRuntime(input)
+    })(),
+  }
+  runtimes.set(workspaceKey, slot)
+  try {
+    const active = await slot.ready
+    void active.closed.then(() => {
+      if (runtimes.get(workspaceKey) === slot) runtimes.delete(workspaceKey)
+    })
+    return active
+  } catch (error) {
+    if (runtimes.get(workspaceKey) === slot) runtimes.delete(workspaceKey)
+    throw error
+  }
 }
 
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
   if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const active = await ensureRuntime(input)
+  if (input.signal?.aborted) {
+    void stopRuntime(active)
+    throw new DOMException('Aborted', 'AbortError')
+  }
   const wireSessionId = deepSeekSessionId(input.sessionId)
   const requestId = crypto.randomUUID()
   let finalText = ''
@@ -405,7 +488,7 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
     }
   }
   const abort = () => {
-    void stopDeepSeekHarness()
+    void stopRuntime(active)
     active.runs.get(requestId)?.reject(new DOMException('Aborted', 'AbortError'))
     active.runs.delete(requestId)
   }
@@ -431,14 +514,20 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
   }
 }
 
+function stopRuntime(active: Runtime): Promise<void> {
+  active.closing ??= (async () => {
+    try {
+      await active.transport.send({ type: 'close' } as unknown as JSONRPCMessage)
+      await active.closed
+    } finally {
+      await active.transport.close()
+    }
+  })()
+  return active.closing
+}
+
 export async function stopDeepSeekHarness(): Promise<void> {
-  const active = runtime
-  runtime = null
-  if (!active) return
-  try {
-    await active.transport.send({ type: 'close' } as unknown as JSONRPCMessage)
-    await active.closed
-  } finally {
-    await active.transport.close()
-  }
+  const slots = [...runtimes.values()]
+  runtimes.clear()
+  await Promise.allSettled(slots.map(async slot => stopRuntime(await slot.ready)))
 }

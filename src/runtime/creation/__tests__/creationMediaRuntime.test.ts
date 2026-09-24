@@ -21,6 +21,11 @@ test('creation MCP submissions opt into project media persistence', () => {
   assert.match(source, /resolveReferenceImages\(rawParams\)/)
   assert.match(source, /dev_read_external_file/)
   assert.match(source, /参考图不可读取或超过 50 MB/)
+  assert.match(source, /operation === 'list_harness_tools'/)
+  assert.match(source, /operation === 'call_harness_tool'/)
+  assert.match(source, /createDesktopProjectToolExecutor/)
+  assert.match(source, /callMcpTool\(mcpServerId, name, args\)/)
+  assert.match(source, /model\.task === 'audio' \|\| model\.task === 'model3d'/)
   assert.match(readFileSync('src/stores/mediaTaskStore.ts', 'utf8'), /task\.directory \|\| canvasOwner \|\| useProjectStore\(\)\.projectDir\.value/)
 })
 

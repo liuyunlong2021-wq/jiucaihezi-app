@@ -6,7 +6,7 @@ import { build } from 'esbuild'
 
 const outfile = '/tmp/jiucaihezi-creation-mcp-test.mjs'
 await build({ entryPoints: ['scripts/jiucaihezi-creation-mcp/index.ts'], outfile, bundle: true, platform: 'node', format: 'esm' })
-const { createCreationMcpServer } = await import(`${outfile}?${Date.now()}`)
+const { createCreationMcpServer, createProxyMcpServer } = await import(`${outfile}?${Date.now()}`)
 
 test('creation MCP exposes the fixed tool contract and forwards structured calls', async () => {
   const calls = []
@@ -40,5 +40,29 @@ test('creation MCP schemas forbid unknown fields', async () => {
   const tool = (await client.listTools()).tools.find(item => item.name === 'get_creation_context')
   assert.equal(tool.inputSchema.additionalProperties, false)
   assert.deepEqual(tool.inputSchema.properties, {})
+  await Promise.all([client.close(), server.close()])
+})
+
+test('proxy MCP publishes the app-owned tool catalog and forwards exact calls', async () => {
+  const calls = []
+  const bridge = async (operation, params) => {
+    calls.push({ operation, params })
+    if (operation === 'list_harness_tools') return { tools: [{
+      name: 'create_3d_scene', description: '创建场景',
+      inputSchema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
+    }] }
+    return { content: '已创建' }
+  }
+  const server = await createProxyMcpServer(bridge, { capabilities: ['3d'] })
+  const client = new Client({ name: 'test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+  assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['create_3d_scene'])
+  const result = await client.callTool({ name: 'create_3d_scene', arguments: { title: '街道' } })
+  assert.equal(result.content[0].text, '已创建')
+  assert.deepEqual(calls, [
+    { operation: 'list_harness_tools', params: { capabilities: ['3d'] } },
+    { operation: 'call_harness_tool', params: { capabilities: ['3d'], name: 'create_3d_scene', arguments: { title: '街道' } } },
+  ])
   await Promise.all([client.close(), server.close()])
 })

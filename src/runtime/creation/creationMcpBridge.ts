@@ -5,6 +5,11 @@ import { buildCreationRunPlan } from './creationMediaPlan'
 import { getCreationModelSpec, listCreationPanelModels } from './creationModelRegistry'
 import { useMediaTaskStore, type MediaTask, type TaskMediaType } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
+import { useMcpStore } from '@/stores/mcpStore'
+import { buildMemoryDesktopToolDefinitions } from '@/runtime/direct/creativeToolContract'
+import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
+import { callMcpTool } from '@/services/mcpClient'
+import type { Scene3DDocument } from '@/runtime/memory/scene3d'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
@@ -15,6 +20,11 @@ interface BridgeEvent {
 }
 
 const submissions = new Map<string, string>()
+let sceneRecorder: ((document: Scene3DDocument) => Promise<Blob>) | undefined
+
+export function setHarnessSceneRecorder(recorder?: (document: Scene3DDocument) => Promise<Blob>) {
+  sceneRecorder = recorder
+}
 
 function currentContext() {
   const project = useProjectStore()
@@ -119,10 +129,72 @@ function mediaTypeFor(modelId: string): TaskMediaType {
     : 'image'
 }
 
+function capabilities(params: Record<string, unknown>): string[] {
+  return Array.isArray(params.capabilities) ? params.capabilities.map(String) : []
+}
+
+function creationModels(params: Record<string, unknown>) {
+  const selected = capabilities(params)
+  if (!selected.length) return listCreationPanelModels()
+  return listCreationPanelModels().filter(model =>
+    selected.includes('av')
+    && (model.task === 'image' || model.task === 'video' || model.task === 'audio' || model.task === 'model3d'),
+  )
+}
+
+function harnessToolCatalog(params: Record<string, unknown>) {
+  const mcpServerId = String(params.mcpServerId || '')
+  if (mcpServerId) return useMcpStore().allMcpTools
+    .filter(tool => tool.serverId === mcpServerId)
+    .map(tool => ({
+      name: tool.originalName,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: tool.annotations,
+    }))
+
+  const selected = capabilities(params)
+  const names = new Set([
+    ...(selected.includes('media')
+      ? ['export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides']
+      : []),
+    ...(selected.includes('3d')
+      ? ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video']
+      : []),
+  ])
+  return buildMemoryDesktopToolDefinitions()
+    .filter(tool => names.has(tool.function.name))
+    .map(tool => ({
+      name: tool.function.name,
+      description: tool.function.description,
+      inputSchema: tool.function.parameters,
+    }))
+}
+
+async function callHarnessTool(params: Record<string, unknown>) {
+  const name = requireString(params, 'name', 200)
+  if (!harnessToolCatalog(params).some(tool => tool.name === name)) throw new Error(`未授权工具: ${name}`)
+  const args = params.arguments && typeof params.arguments === 'object' && !Array.isArray(params.arguments)
+    ? params.arguments as Record<string, unknown>
+    : {}
+  const mcpServerId = String(params.mcpServerId || '')
+  if (mcpServerId) return { content: await callMcpTool(mcpServerId, name, args) }
+
+  const owner = currentContext().project.owner
+  const result = await createDesktopProjectToolExecutor({ projectDir: owner, recordSceneVideo: sceneRecorder })({
+    id: crypto.randomUUID(),
+    type: 'function',
+    function: { name, arguments: JSON.stringify(args) },
+  })
+  return { content: result.content }
+}
+
 async function handleBridgeRequest(operation: string, params: Record<string, unknown>): Promise<unknown> {
   const store = useMediaTaskStore()
   if (operation === 'get_creation_context') return currentContext()
-  if (operation === 'list_creation_models') return { models: listCreationPanelModels() }
+  if (operation === 'list_creation_models') return { models: creationModels(params) }
+  if (operation === 'list_harness_tools') return { tools: harnessToolCatalog(params) }
+  if (operation === 'call_harness_tool') return callHarnessTool(params)
 
   await store.init()
   if (operation === 'get_creation_task') {
@@ -170,6 +242,7 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
     const existing = submissions.get(requestId)
     if (existing) return { taskId: existing, duplicate: true }
     const modelId = requireString(params, 'modelId', 200)
+    if (!creationModels(params).some(model => model.id === modelId)) throw new Error(`当前能力未授权模型: ${modelId}`)
     const rawParams = params.params && typeof params.params === 'object' && !Array.isArray(params.params)
       ? params.params as Record<string, unknown>
       : {}
@@ -207,4 +280,4 @@ export async function registerCreationMcpBridge(): Promise<() => void> {
   })
 }
 
-export const __creationMcpBridgeForTests = { currentContext, handleBridgeRequest, submissions, resolveReferenceImages }
+export const __creationMcpBridgeForTests = { currentContext, handleBridgeRequest, submissions, resolveReferenceImages, harnessToolCatalog }

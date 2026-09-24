@@ -2,6 +2,8 @@
 
 ## [2026-09-24] Harness Session 成为对话真相，`.raw` 建库改为可选
 
+- Desktop 已删除 `@DH` 按钮、芯片和选择态，所有对话自动运行 Harness；`@排版`、`@影音`、`@MCP`、`@3D` 已通过官方 `dsh-mcp-client` 进入同一个 Harness Session，并复用韭菜盒子既有执行器。旧 `dh-session-v1` 仅用于迁移识别。
+- 524 属于 Harness 官方 `SERVER` 可重试错误；现行策略保留 `SERVER` 且 `maxRetries: 1`。官方 Provider 没有主请求首 token 超时配置，本轮不增加 Harness 外层整轮定时器，避免误杀合法长任务。
 - 用户确认 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24]]：打开项目即可聊天，不再先创建“记忆空间”；Harness Session 独占完整对话、工具轨迹、持久化与压缩，韭菜盒子只保存对话标题、排序、工作区和稳定 Session 映射。
 - 现有文件树“建立改编 Wiki”按钮在原 Wiki 骨架之外补 `.raw/文档|图片|视频|音频`；未建库仍可文字聊天。本期不顺带重写既有 `.raw/jc-media` 媒体保存链路。
 - UI 的“记忆”和“查询”按钮及后端 `.raw/记忆索引`、`memory_search` 预取、最近三轮拼装整体退役。正式 Wiki 仍是项目文件，按用户选择的文件/Skill/MCP 能力读取，与 Harness 对话上下文分层。
@@ -11,14 +13,15 @@
 - 生产迁移已完成：官方 Session Query 薄桥、Session 正文投影、AppData 按项目隔离、轻量对话目录、打开即聊、旧 Raw 惰性移交、Harness 成功后停止 Raw 双写、逻辑删除和一键建库四类目录均已接通。
 - 旧索引 UI、摘要请求、`.raw/记忆索引` 生产实现、`memory_search` 与固定最近三轮拼装已退役。旧 Raw 解析仅为迁移保留；既有索引文件继续隐藏和保护但不再读取。
 - 旧记忆系统纪念封存位于 `/Users/by3/Documents/韭菜盒子-旧记忆系统纪念-2026-09-24/`，不受生产退役影响。
+- Harness Runtime 不再是可被任意异步读取替换的应用级单例：现按项目工作区持有，同项目共享启动，跨项目 Session 读取不会关闭正在执行的进程；取消只关闭所属实例。定向 `101/101`、完整 focused `1509/1509` 与 TypeScript 通过，真实 Desktop 跨项目并行待人工验收。
 
 ## [2026-09-23] @DH 改由官方 SDK Client 持有 Runtime
 
 - 五分钟无结果的直接原因是 Provider 两次约 125 秒后返回 524，再被 `maxRetries: 5` 放大；集成根因是前端自写 JSON-RPC 生命周期只在 `session.status=idle` 时收尾，Helper 退出后等待 Promise 不会结束。
 - Runtime 与 Client 已统一到官方 `@deepseek-ai/dsh-sdk-client@0.1.7-alpha.2`：bundled Node 的薄 bridge 只转交任务与通知，SDK 负责 Harness 子进程、订阅、退出、stderr 与错误传播；自动重试降为 1 次。
 - 明确 `@文件` 已加载的正文与转换文档会进入首个 Harness prompt，不再先让模型逐个 `glob/read`。流式补丁仍只负责展示 `text-delta`，不承担生命周期。
-- `@DH` 现只选择执行器，不再清除 `@文件`；`@文件` 是明确的本机文件全权开关，给官方 Harness 传 `DSH_PERMISSION_MODE=danger-full-access`，关闭则恢复 `workspace-write`。权限模式进入 Runtime key，切换时不会复用旧权限进程；两枚芯片按任意顺序选择、重开会话均能同时保留。
-- @DH 不再套用普通模型的最近三轮合同：一个 Raw 对话固定映射到一个 `jc-v1-<conversationId>` Harness Session，连续轮次只发送当前消息，由官方 Session 保存完整事件历史并负责 Compaction。首次启用或中间经过非 DH 对话时，才按真实上下文容量一次移交尚未进入 Harness 的完整轮次。
+- `@文件` 是明确的本机文件全权开关，给官方 Harness 传 `DSH_PERMISSION_MODE=danger-full-access`，关闭则恢复 `workspace-write`。权限模式进入 Runtime key，切换时不会复用旧权限进程。
+- Harness 不套用普通模型的最近三轮合同：一个对话固定映射到一个 `jc-v1-<conversationId>` Harness Session，连续轮次只发送当前消息，由官方 Session 保存完整事件历史并负责 Compaction；旧 Raw 仅在首次迁移时完整移交。
 - SDK Server `0.1.7-alpha.2` 首次见到持久 Session 时原本只会 `agents.create()`，现用官方 `sessionPersistence.stat()` + `agents.resume()` 补齐恢复；移除随机 nonce。停止时完整等待官方 `close()` 的有界回收梯子，不再 2 秒提前杀外层 runner 并遗留子进程。
 - 本轮定向 `106/106`、`vue-tsc -b`、构建补丁连续两次幂等及 `git diff --check` 通过；完整 focused 仍有本轮前已存在的 Jev 源码形态断言与两项未登记测试清单失败。真实 Desktop 跨重启续接和简单文件任务耗时待人工验收。
 
