@@ -161,6 +161,26 @@ test('DeepSeek Harness exposes durable tool progress without leaking arguments',
   assert.equal(deepSeekProgress({ type: 'assistant/message', data: {} }), undefined)
 })
 
+test('Harness labels every official SDK tool instead of falling back to its raw name', () => {
+  // 官方 `--profile sdk` 工具面：实测 request/header 暴露的 24 个名字。
+  // 清单与来源插件登记在 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24]]。
+  const officialTools = [
+    'bash', 'create_goal', 'edit', 'exit_plan_mode', 'get_goal', 'glob', 'grep',
+    'interrupt_agent', 'job_kill', 'job_list', 'job_output', 'list_agents', 'read',
+    'read_image', 'send_message', 'skill', 'subagent', 'subagent_fork', 'todo_write',
+    'update_goal', 'web_fetch', 'web_search', 'workflow', 'write',
+  ]
+  for (const name of officialTools) {
+    const progress = deepSeekProgress({ type: 'tool/call', data: { callId: 'call-1', name } })
+    assert.ok(String(progress?.label || '').trim(), `${name} 缺少标签`)
+    assert.doesNotMatch(
+      String(progress?.label),
+      /^执行 [\w-]+$/,
+      `${name} 落到了兜底标签，应在 DEEPSEEK_TOOL_LABELS 中登记`,
+    )
+  }
+})
+
 test('DeepSeek Harness exposes terminal turn failures instead of completing on idle', () => {
   assert.equal(
     deepSeekTurnError({
@@ -221,6 +241,25 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(prepare, /const queryInject = 'const inject = \["agents", "sessionQuery"\];'/)
   assert.match(runner, /harness\.client\.request/)
   assert.doesNotMatch(source, /resolve_deepseek_harness/)
+})
+
+test('Harness run verdict belongs to its own session instead of a subagent turn', () => {
+  const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
+  // 子代理事件共用同一条通知流；没有这道会话过滤，子会话的失败会顶替本轮结论。
+  assert.match(runner, /const ownSession = params\?\.sessionId === command\.sessionId/)
+  assert.match(runner, /ownSession && notification\.method === 'session\.event'/)
+})
+
+test('Harness subagent calls return a result instead of a fire-and-forget id', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  // continuable 模式下 run_in_background 默认 true：父代理只拿到 “started subagent <id>”，
+  // 会误判完成并重复派活。one-shot 让调用等结果。
+  assert.match(source, /'    backgroundMode: one-shot'/)
+  assert.doesNotMatch(source, /backgroundMode: continuable/)
+  // patch 按顶层键整体替换 config：基线的 provider/toolName 必须一起给出，否则会被抹掉。
+  assert.match(source, /'- id: tool-subagent'/)
+  assert.match(source, /'    provider: spawn'/)
+  assert.match(source, /'    toolName: subagent'/)
 })
 
 test('Harness runtimes are owned per workspace instead of one replaceable app singleton', () => {

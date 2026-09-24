@@ -46,7 +46,12 @@ createInterface({ input: process.stdin }).on('line', line => {
   void harness.run(command.contentBlocks, {
     sessionId: command.sessionId,
     onNotification(notification) {
-      const event = notification.method === 'session.event' ? notification.params?.event : undefined
+      // 子代理（subagent）的事件也走这条通知流，而子会话是独立 turn：
+      // 只认本会话的 turn/end，否则子会话的失败会顶替本轮的结论——实测一轮 34 分钟正常
+      // 跑完、20 集全部落盘，却被一个早已失败的子会话的 content_filter 判成「处理失败」。
+      const params = notification.params
+      const ownSession = params?.sessionId === command.sessionId
+      const event = ownSession && notification.method === 'session.event' ? params.event : undefined
       if (event?.type === 'turn/end' && event.data?.reason?.kind === 'error')
         turnError = event.data.reason.error?.message || 'DeepSeek Harness 执行失败'
       send({ type: 'notification', requestId: command.requestId, notification })

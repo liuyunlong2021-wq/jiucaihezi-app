@@ -14,6 +14,9 @@
 - 旧索引 UI、摘要请求、`.raw/记忆索引` 生产实现、`memory_search` 与固定最近三轮拼装已退役。旧 Raw 解析仅为迁移保留；既有索引文件继续隐藏和保护但不再读取。
 - 旧记忆系统纪念封存位于 `/Users/by3/Documents/韭菜盒子-旧记忆系统纪念-2026-09-24/`，不受生产退役影响。
 - Harness Runtime 不再是可被任意异步读取替换的应用级单例：现按项目工作区持有，同项目共享启动，跨项目 Session 读取不会关闭正在执行的进程；取消只关闭所属实例。定向 `101/101`、完整 focused `1509/1509` 与 TypeScript 通过，真实 Desktop 跨项目并行待人工验收。
+- Harness 判定必须按会话收敛：`subagent`（子代理）事件与主会话共用同一条通知流，`runner.mjs` 曾把子会话的 `turn/end` 失败当成本轮结论——实测一轮 34 分钟正常跑完、20 集全部落盘，却因一个早已失败的子会话报「处理失败」（失败分支还不落盘该轮）。现 `runner.mjs` 只认本会话的 `turn/end`。
+- 官方 `sdk` 基线的 `subagent` 默认 `backgroundMode: continuable`（该模式下 `run_in_background` 默认 true，父代理只拿到 “started subagent <id>”，于是误判完成、重复派活——实测 `1.md`/`3.md` 各被写两遍）。已在 route patch 按官方字段收口为 `one-shot`，让调用等结果并回传失败；patch 按顶层键整体替换 `config`，必须给全量 `provider`/`toolName`，`subagent_fork` 基线本就是 `one-shot`。
+- **Harness 工具面以官方为准**：`--profile sdk` 默认启用的 24 个官方工具（含 `web_search`/`web_fetch`/`subagent`/`workflow`）全部对模型可见，官方自带的工具不增不删、不按工具做产品级开关，官方新增默认生效，产品只补中文标签；自家能力（`@排版`/`@影音`/`@3D`、外部 MCP）走官方 `dsh-mcp-client` 挂载。与 2026-08-07「Web Search/Fetch 不做」不再冲突（那条针对自建工具）。工具清单、偏离登记（provider、重试 1 次、MCP 超时 900s、`@文件`→权限模式等）与 4 处待上游收口的 SDK vendor patch 见 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24#12. 与官方 Harness 的关系]]。
 
 ## [2026-09-23] @DH 改由官方 SDK Client 持有 Runtime
 

@@ -165,7 +165,41 @@ export function applyDeepSeekAssistantStream(
   return state.text
 }
 
+/**
+ * 官方 Harness 工具面（`--profile sdk` 默认 24 个）的中文标签。
+ * 清单与来源插件见 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24#与官方 Harness 的关系]]；
+ * 表里没有的名字退回关键词规则，最后才落到「执行 <name>」——MCP 代理工具名由服务端决定，不能穷举。
+ */
+const DEEPSEEK_TOOL_LABELS: Record<string, string> = {
+  bash: '执行命令',
+  read: '读取文件',
+  read_image: '读取图片',
+  write: '修改文件',
+  edit: '修改文件',
+  glob: '查找文件',
+  grep: '搜索内容',
+  skill: '加载 Skill',
+  todo_write: '更新任务清单',
+  create_goal: '创建目标',
+  update_goal: '更新目标',
+  get_goal: '读取目标',
+  subagent: '派发子代理',
+  subagent_fork: '派发子代理分支',
+  list_agents: '列出子代理',
+  interrupt_agent: '中止子代理',
+  send_message: '发送子代理消息',
+  job_list: '列出后台任务',
+  job_output: '读取后台任务输出',
+  job_kill: '停止后台任务',
+  web_search: '联网搜索',
+  web_fetch: '抓取网页',
+  workflow: '运行工作流',
+  exit_plan_mode: '退出计划模式',
+}
+
 function deepSeekToolLabel(name: string): string {
+  const official = DEEPSEEK_TOOL_LABELS[name]
+  if (official) return official
   if (/read/i.test(name)) return '读取文件'
   if (/grep|search/i.test(name)) return '搜索内容'
   if (/glob|find|list/i.test(name)) return '查找文件'
@@ -297,6 +331,20 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
       JIUCAIHEZI_PROXY_MCP_SERVER: serverName,
     })),
   ]
+  // 官方 subagent 工具在 continuable（后台）模式下 `run_in_background` 默认 true：
+  // 派发只回一句 “started subagent <id>”，父代理拿不到结果却以为已完成，于是重复派活、
+  // 重复写文件（实测一轮 34 分钟里 1.md/3.md 各被写两遍，16–20 集的失败也无人知晓）。
+  // 改成官方 one-shot：该模式默认等结果，父代理能拿到子代理的产出与失败。
+  // config 必须给全量且照抄基线——patch 按顶层键整体替换，漏一个键会把 provider/toolName
+  // 一起抹掉；`subagent_fork` 在 sdk 基线上本来就是 one-shot，不需要在这里重复声明。
+  const subagentPatch = [
+    '- id: tool-subagent',
+    '  config:',
+    '    provider: spawn',
+    '    toolName: subagent',
+    '    backgroundMode: one-shot',
+    '',
+  ]
   await mkdir(routeDir, { recursive: true })
   await writeTextFile(patchPath, [
         '- id: llm-pi-ai',
@@ -324,6 +372,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         `            maxTokens: ${DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS}`,
         '',
         ...mcpPatch,
+        ...subagentPatch,
       ].join('\n'))
 
   const runtimeRoot = 'deepseek-harness/node_modules'
