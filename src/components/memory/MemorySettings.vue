@@ -5,9 +5,9 @@ import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { connectLocalMlx, startLocalMlx } from '@/utils/localMlxRuntime'
 import { ensureJevScorer, jevScorerReady, jevScorerStateLabel } from '@/utils/jevScorerRuntime'
-import { getLocalMlxApiBase, getLocalMlxModelPath, getLocalMlxModels, getLocalOllamaModels, saveLocalMlxModelPath, LOCAL_MLX_DEFAULT_MODEL, LOCAL_MLX_MODEL_HUGGINGFACE_URL, LOCAL_MLX_PROVIDER_ID } from '@/utils/providerConfig'
+import { getLocalOllamaModels } from '@/utils/providerConfig'
+import { getCustomProviders, normalizeCustomProviderApiBase, saveCustomProviders, type CustomProviderConfig } from '@/utils/providerConfig'
 import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
@@ -39,12 +39,17 @@ const McpManagerPanel = defineAsyncComponent(() => import('@/components/mcp/McpM
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
-const localMlxApiBase = ref(getLocalMlxApiBase())
-const savedMlxPath = getLocalMlxModelPath()
-const localMlxModelPath = ref(savedMlxPath && !/qwen3-tts/i.test(savedMlxPath) ? savedMlxPath : LOCAL_MLX_DEFAULT_MODEL)
-const localMlxBusy = ref(false)
-const localMlxStatus = ref('')
-const installedLocalMlxModelCount = ref(0)
+// 本机模型与服务默认折叠：五块展开后设置页过长，收起后一行也能看到状态。
+const localModelsOpen = ref(false)
+const customProviders = ref<CustomProviderConfig[]>(getCustomProviders())
+const customProviderStatus = ref('')
+const customProviderFormOpen = ref(false)
+const customProviderDraft = ref({ id: '', name: '', apiBase: '', apiKey: '', modelIds: '' })
+const localModelSummary = computed(() => {
+  const parts = [installedLocalModelCount.value ? `Ollama ${installedLocalModelCount.value} 个模型` : 'Ollama 未连接']
+  parts.push(customProviders.value.length ? `自定义端点 ${customProviders.value.length} 个` : '无自定义端点')
+  return parts.join(' · ')
+})
 const comfyUiBusy = ref(false)
 const comfyUiStatus = ref<ComfyUiRuntimeStatus | null>(null)
 const jevScorerBusy = ref(false)
@@ -83,7 +88,6 @@ function setFontSize(value: number) {
 onMounted(async () => {
   if (desktopRuntime) {
     installedLocalModelCount.value = getLocalOllamaModels().length
-    installedLocalMlxModelCount.value = getLocalMlxModels().length
   }
   if (desktopRuntime) void refreshComfyUi()
   if (desktopRuntime) comfyWorkflowApiKey.value = await getComfyWorkflowApiKey()
@@ -108,42 +112,70 @@ async function connectOllama() {
   }
 }
 
-async function connectMlx() {
-  if (localMlxBusy.value) return
-  localMlxBusy.value = true
-  localMlxStatus.value = '正在连接 MLX...'
-  try {
-    const result = await connectLocalMlx(localMlxApiBase.value)
-    installedLocalMlxModelCount.value = result.models.length
-    agentStore.refreshLocalModels()
-    agentStore.setModel(result.model.id, LOCAL_MLX_PROVIDER_ID)
-    localMlxStatus.value = result.message
-  } catch (error) {
-    localMlxStatus.value = error instanceof Error ? error.message : '未连接到 MLX 服务。'
-  } finally {
-    localMlxBusy.value = false
-  }
+function resetCustomProviderDraft() {
+  customProviderDraft.value = { id: '', name: '', apiBase: '', apiKey: '', modelIds: '' }
 }
 
-async function startAndConnectMlx() {
-  if (localMlxBusy.value) return
-  localMlxBusy.value = true
-  localMlxStatus.value = '正在启动 MLX...'
-  try {
-    const modelPath = localMlxModelPath.value.trim()
-    const launchPath = modelPath === LOCAL_MLX_DEFAULT_MODEL ? '' : modelPath
-    saveLocalMlxModelPath(modelPath)
-    await startLocalMlx(launchPath, localMlxApiBase.value)
-    const result = await connectLocalMlx(localMlxApiBase.value)
-    installedLocalMlxModelCount.value = result.models.length
-    agentStore.refreshLocalModels()
-    agentStore.setModel(result.model.id, LOCAL_MLX_PROVIDER_ID)
-    localMlxStatus.value = result.message
-  } catch (error) {
-    localMlxStatus.value = error instanceof Error ? error.message : '未能启动 MLX 服务。'
-  } finally {
-    localMlxBusy.value = false
+function openCustomProviderForm() {
+  resetCustomProviderDraft()
+  customProviderStatus.value = ''
+  customProviderFormOpen.value = true
+}
+
+function closeCustomProviderForm() {
+  resetCustomProviderDraft()
+  customProviderFormOpen.value = false
+}
+
+function editCustomProvider(provider: CustomProviderConfig) {
+  customProviderDraft.value = {
+    id: provider.id,
+    name: provider.name,
+    apiBase: provider.apiBase,
+    apiKey: provider.apiKey || '',
+    modelIds: provider.modelIds.join(', '),
   }
+  customProviderStatus.value = ''
+  customProviderFormOpen.value = true
+}
+
+function saveCustomProviderDraft() {
+  const draft = customProviderDraft.value
+  const name = draft.name.trim()
+  const id = (draft.id || name).trim().toLowerCase().replace(/\s+/g, '-')
+  if (!id) {
+    customProviderStatus.value = '请先填写端点名称。'
+    return
+  }
+  let apiBase = ''
+  try {
+    apiBase = normalizeCustomProviderApiBase(draft.apiBase)
+  } catch (error) {
+    customProviderStatus.value = error instanceof Error ? error.message : '端点地址无效。'
+    return
+  }
+  const modelIds = draft.modelIds.split(/[\n,]/).map(value => value.trim()).filter(Boolean)
+  if (modelIds.length === 0) {
+    customProviderStatus.value = '请至少填写一个模型 ID。'
+    return
+  }
+  saveCustomProviders([
+    ...customProviders.value.filter(provider => provider.id !== id),
+    { id, name: name || id, apiBase, apiKey: draft.apiKey.trim() || undefined, modelIds },
+  ])
+  customProviders.value = getCustomProviders()
+  agentStore.refreshLocalModels()
+  resetCustomProviderDraft()
+  customProviderFormOpen.value = false
+  customProviderStatus.value = `已保存 ${name || id}，可在顶部模型菜单选择。`
+}
+
+function removeCustomProvider(id: string) {
+  saveCustomProviders(customProviders.value.filter(provider => provider.id !== id))
+  customProviders.value = getCustomProviders()
+  agentStore.refreshLocalModels()
+  if (customProviderDraft.value.id === id) closeCustomProviderForm()
+  customProviderStatus.value = '已删除该端点。'
 }
 
 async function saveComfyApiKey() {
@@ -290,6 +322,12 @@ function showSync() {
           <button @click="openExternal('https://jiucaihezi.studio/support/')">用户支持</button>
           <button @click="openExternal('https://jiucaihezi.studio/terms/')">服务条款</button>
         </nav>
+        <div v-if="desktopRuntime" class="memory-local-head">
+          <strong>本机模型与服务</strong>
+          <span>{{ localModelSummary }}</span>
+          <button @click="localModelsOpen = !localModelsOpen">{{ localModelsOpen ? '收起' : '展开' }}</button>
+        </div>
+        <template v-if="desktopRuntime && localModelsOpen">
         <section v-if="desktopRuntime" class="memory-local-model">
           <div>
             <strong>Ollama 本地模型</strong>
@@ -305,22 +343,45 @@ function showSync() {
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">
           <div>
-            <strong>本机 MLX</strong>
-            <span>{{ installedLocalMlxModelCount ? `已识别 ${installedLocalMlxModelCount} 个模型` : '未连接' }}</span>
+            <strong>自定义端点</strong>
+            <span>{{ customProviders.length ? `已配置 ${customProviders.length} 个` : '未配置' }}</span>
           </div>
-          <p v-if="localMlxStatus">{{ localMlxStatus }}</p>
-          <label class="memory-comfy-key">
-            <span>服务地址</span>
-            <input v-model="localMlxApiBase" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:9523" />
-          </label>
-          <label class="memory-comfy-key">
-            <span>模型路径或仓库 ID（可留空，默认 {{ LOCAL_MLX_DEFAULT_MODEL }}）</span>
-            <input v-model="localMlxModelPath" type="text" autocomplete="off" :placeholder="LOCAL_MLX_DEFAULT_MODEL" />
-          </label>
-          <div class="memory-local-actions">
-            <button :disabled="localMlxBusy" @click="startAndConnectMlx">{{ localMlxBusy ? '启动中' : '启动并连接' }}</button>
-            <button :disabled="localMlxBusy" @click="connectMlx">仅连接</button>
-            <button :disabled="localMlxBusy" @click="openExternal(LOCAL_MLX_MODEL_HUGGINGFACE_URL)">安装模型</button>
+          <p v-if="customProviderStatus">{{ customProviderStatus }}</p>
+          <p v-else-if="customProviders.length === 0">接入 LM Studio、mlx_vlm.server、mlx-optiq、vLLM 等 OpenAI 兼容服务。</p>
+          <div v-for="provider in customProviders" :key="provider.id" class="memory-endpoint-row">
+            <div>
+              <strong>{{ provider.name }}</strong>
+              <span>{{ provider.apiBase }} · {{ provider.modelIds.length }} 个模型</span>
+            </div>
+            <div class="memory-local-actions">
+              <button @click="editCustomProvider(provider)">编辑</button>
+              <button @click="removeCustomProvider(provider.id)">删除</button>
+            </div>
+          </div>
+          <template v-if="customProviderFormOpen">
+            <label class="memory-comfy-key">
+              <span>名称</span>
+              <input v-model="customProviderDraft.name" type="text" autocomplete="off" placeholder="本机端点" />
+            </label>
+            <label class="memory-comfy-key">
+              <span>端点地址</span>
+              <input v-model="customProviderDraft.apiBase" type="url" inputmode="url" autocomplete="off" placeholder="http://127.0.0.1:8081" />
+            </label>
+            <label class="memory-comfy-key">
+              <span>API Key（可留空）</span>
+              <input v-model="customProviderDraft.apiKey" type="password" autocomplete="off" />
+            </label>
+            <label class="memory-comfy-key">
+              <span>模型 ID（逗号或换行分隔）</span>
+              <input v-model="customProviderDraft.modelIds" type="text" autocomplete="off" placeholder="mlx-community/LensVLM-9B-OptiQ-4bit" />
+            </label>
+            <div class="memory-local-actions">
+              <button @click="saveCustomProviderDraft">保存</button>
+              <button @click="closeCustomProviderForm">取消</button>
+            </div>
+          </template>
+          <div v-else class="memory-local-actions">
+            <button @click="openCustomProviderForm">添加端点</button>
           </div>
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">
@@ -368,6 +429,7 @@ function showSync() {
             <button @click="saveComfyApiKey">{{ comfyWorkflowApiKeySaved ? '已保存' : '保存 API Key' }}</button>
           </div>
         </section>
+        </template>
       </div>
       <div v-else-if="tab === 'sync'" class="memory-sync">
         <template v-if="!gatewaySessionAuthenticated">
@@ -443,10 +505,16 @@ function showSync() {
 .memory-account-error { margin: 0; color: var(--danger); font-size: 12px; }
 .memory-mobile-legal { display: flex; justify-content: center; gap: 12px; }
 .memory-mobile-legal button { padding: 0; border: 0; background: transparent; color: var(--ink3); font: inherit; font-size: 12px; text-decoration: underline; }
+.memory-local-head { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
+.memory-local-head strong { flex: 1; }
+.memory-local-head span { color: var(--ink3); font-size: 12px; }
+.memory-local-head button { min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .memory-local-model { display: grid; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); }
 .memory-local-model > div:first-child { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .memory-local-model span, .memory-local-model p { margin: 0; color: var(--ink3); font-size: 12px; }
 .memory-local-actions { display: flex; gap: 8px; }
+.memory-endpoint-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.memory-endpoint-row > div:first-child { display: grid; min-width: 0; gap: 2px; }
 .memory-local-actions button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .memory-local-actions button:disabled { opacity: .55; cursor: progress; }
 .memory-comfy-key { display: grid; gap: 6px; color: var(--ink2); font-size: 12px; }

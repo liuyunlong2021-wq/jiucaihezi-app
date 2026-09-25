@@ -6,7 +6,6 @@ pub mod http;
 pub mod image_edit;
 pub mod jev_scorer;
 pub mod mcp;
-pub mod local_mlx;
 pub mod media;
 pub mod plugin;
 pub mod session;

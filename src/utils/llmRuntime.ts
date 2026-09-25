@@ -1,4 +1,4 @@
-import { LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID } from './providerConfig'
+import { isLocalLikeProviderId } from './providerConfig'
 import type { ProviderCapabilityProbe } from './providerCapabilityProbe'
 
 export type LlmRuntimeKind = 'chat-completions' | 'responses' | 'local'
@@ -24,7 +24,7 @@ export function chooseLlmRuntime(input: {
   preferResponses?: boolean
   providerCapability?: ProviderCapabilityProbe | null
 }): LlmRuntimeKind {
-  if (input.providerId === LOCAL_MLX_PROVIDER_ID || input.providerId === LOCAL_OLLAMA_PROVIDER_ID) return 'local'
+  if (isLocalLikeProviderId(input.providerId)) return 'local'
   if (input.providerId === 'jiucaihezi') return 'chat-completions'
   const responsesCapable = input.responsesCapable === true || input.providerCapability?.supportsResponses === true
   if (input.preferResponses && responsesCapable) return 'responses'

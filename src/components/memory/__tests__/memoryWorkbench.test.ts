@@ -1504,19 +1504,17 @@ test('memory Markdown editing supplies project files to one shared WikiLink pick
 test('memory settings expose the existing Desktop local model runtime', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
-  const mlxRuntime = source('src/utils/localMlxRuntime.ts')
   const store = source('src/stores/agentStore.ts')
 
   assert.match(settings, /connectLocalOllama/)
   assert.match(settings, /getLocalOllamaModels/)
-  assert.match(settings, /connectLocalMlx/)
-  assert.match(settings, /startLocalMlx/)
-  assert.match(settings, /v-model="localMlxApiBase"/)
-  assert.match(settings, /v-model="localMlxModelPath"/)
-  assert.match(settings, /启动并连接/)
-  assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:9523"/)
-  assert.match(settings, /本机 MLX/)
-  assert.match(mlxRuntime, /fetcher: typeof fetch = safeFetch/)
+  assert.match(settings, /连接 Ollama/)
+  // 本机模型与服务收进可折叠区，默认收起；自定义端点覆盖原本机 MLX 的接入场景。
+  assert.match(settings, /本机模型与服务/)
+  assert.match(settings, /localModelsOpen/)
+  assert.match(settings, /自定义端点/)
+  assert.match(settings, /openCustomProviderForm/)
+  assert.doesNotMatch(settings, /localMlx|本机 MLX/)
   assert.match(
     store,
     /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/,

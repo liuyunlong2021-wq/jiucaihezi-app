@@ -2,16 +2,6 @@ export const DEFAULT_PROVIDER_ID = 'jiucaihezi'
 export const DEFAULT_PROVIDER_HOST = 'https://api.jiucaihezi.studio'
 export const LOCAL_WEB_API_PROXY_BASE = '/__jc_api'
 export const DEFAULT_PROVIDER_NAME = '韭菜盒子'
-export const LOCAL_MLX_PROVIDER_ID = 'local-mlx'
-export const LOCAL_MLX_PROVIDER_HOST = 'http://127.0.0.1:9523'
-const LEGACY_LOCAL_MLX_PROVIDER_HOST = 'http://127.0.0.1:8081'
-export const LOCAL_MLX_PROVIDER_NAME = 'MLX'
-export const LOCAL_MLX_DEFAULT_MODEL = 'Qwen3.8-27B-Uncensored-MLX'
-export const LOCAL_MLX_MODEL_HUGGINGFACE_URL = 'https://huggingface.co/orcarouter/Qwen3.8-27B-Uncensored-MLX'
-export const LOCAL_MLX_API_BASE = LOCAL_MLX_PROVIDER_HOST
-export const LOCAL_MLX_API_BASE_KEY = 'jcLocalMlxApiBase'
-export const LOCAL_MLX_MODELS_KEY = 'jcLocalMlxModels'
-export const LOCAL_MLX_MODEL_PATH_KEY = 'jcLocalMlxModelPath'
 export const LOCAL_OLLAMA_PROVIDER_ID = 'local-ollama'
 export const LOCAL_OLLAMA_PROVIDER_HOST = 'http://127.0.0.1:11434'
 export const LOCAL_OLLAMA_PROVIDER_NAME = 'Ollama'
@@ -38,23 +28,80 @@ export function getCustomProviders(store: KeyValueStore = getStorage()): CustomP
   try {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.map((p: Partial<CustomProviderConfig>) => ({
-      id: String(p.id || '').trim(),
-      name: String(p.name || p.id || '').trim(),
-      apiBase: String(p.apiBase || '').trim().replace(/\/+$/, ''),
-      apiKey: p.apiKey ? String(p.apiKey).trim() : undefined,
-      modelIds: Array.isArray(p.modelIds) ? p.modelIds.map(String) : [],
-    })).filter(p => p.id && p.apiBase)
+    return parsed
+      .map((p: Partial<CustomProviderConfig>) => sanitizeCustomProvider(p))
+      .filter(Boolean) as CustomProviderConfig[]
   } catch (_) {
     return []
   }
 }
 
-export function saveCustomProviders(providers: CustomProviderConfig[], store: KeyValueStore = getStorage()): void {
-  writeStore(store, CUSTOM_PROVIDERS_KEY, JSON.stringify(providers))
+/**
+ * 自定义 OpenAI 兼容端点的地址校验。
+ * 允许本机回环 http 与远程 https，并拒绝把凭据/查询参数写进地址，避免密钥跟着 URL 外泄。
+ */
+export function normalizeCustomProviderApiBase(value: string): string {
+  const raw = String(value || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '')
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('端点地址无效')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('端点只支持 http 或 https')
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('端点地址不能包含账号、密码、查询参数或片段')
+  }
+  if (url.protocol === 'http:' && !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname)) {
+    throw new Error('非本机端点必须使用 https')
+  }
+  return url.pathname === '/' ? url.origin : url.origin + url.pathname
 }
 
-export type ProviderType = 'new-api' | 'local-mlx' | 'local-ollama'
+/** 单个自定义端点的信任边界校验；地址非法时返回 null（不写入、不参与请求）。 */
+function sanitizeCustomProvider(provider: Partial<CustomProviderConfig>): CustomProviderConfig | null {
+  const id = String(provider.id || '').trim()
+  if (!id) return null
+  let apiBase: string
+  try {
+    apiBase = normalizeCustomProviderApiBase(String(provider.apiBase || ''))
+  } catch {
+    return null
+  }
+  return {
+    id,
+    name: String(provider.name || id).trim() || id,
+    apiBase,
+    apiKey: provider.apiKey ? String(provider.apiKey).trim() || undefined : undefined,
+    // ponytail: 只去空去重，不校验模型 ID 格式；端点自己能列出什么就填什么。
+    modelIds: Array.isArray(provider.modelIds)
+      ? [...new Set(provider.modelIds.map(modelId => String(modelId || '').trim()).filter(Boolean))]
+      : [],
+  }
+}
+
+export function saveCustomProviders(providers: CustomProviderConfig[], store: KeyValueStore = getStorage()): void {
+  const sanitized = (Array.isArray(providers) ? providers : [])
+    .map(provider => sanitizeCustomProvider(provider))
+    .filter(Boolean) as CustomProviderConfig[]
+  writeStore(store, CUSTOM_PROVIDERS_KEY, JSON.stringify(sanitized))
+}
+
+export function findCustomProvider(
+  providerId: string | null | undefined,
+  store: KeyValueStore = getStorage(),
+): CustomProviderConfig | undefined {
+  const id = String(providerId || '').trim()
+  if (!id) return undefined
+  try {
+    return getCustomProviders(store).find(provider => provider.id === id)
+  } catch {
+    // 存储不可用时按“未注册”处理，不让模型能力查询整体打挂。
+    return undefined
+  }
+}
+
+export type ProviderType = 'new-api' | 'local-ollama'
 
 export interface JcModelRef {
   id: string
@@ -94,52 +141,6 @@ function getStorage(): Storage | Map<string, string> {
     && typeof localStorage.setItem === 'function'
   ) return localStorage
   return new Map<string, string>()
-}
-
-export function normalizeLocalMlxApiBase(value: string): string {
-  const raw = String(value || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '')
-  let url: URL
-  try {
-    url = new URL(raw)
-  } catch {
-    throw new Error('MLX 地址无效')
-  }
-  if (url.protocol !== 'http:'
-    || !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname)
-    || url.username
-    || url.password
-    || (url.pathname && url.pathname !== '/')
-    || url.search
-    || url.hash) {
-    throw new Error('MLX 首版仅支持本机回环地址')
-  }
-  return url.origin
-}
-
-export function getLocalMlxApiBase(store: KeyValueStore = getStorage()): string {
-  try {
-    const saved = readStore(store, LOCAL_MLX_API_BASE_KEY)
-    if (saved === LEGACY_LOCAL_MLX_PROVIDER_HOST) return LOCAL_MLX_API_BASE
-    return normalizeLocalMlxApiBase(saved || LOCAL_MLX_API_BASE)
-  } catch {
-    return LOCAL_MLX_API_BASE
-  }
-}
-
-export function saveLocalMlxApiBase(value: string, store: KeyValueStore = getStorage()): string {
-  const normalized = normalizeLocalMlxApiBase(value)
-  writeStore(store, LOCAL_MLX_API_BASE_KEY, normalized)
-  return normalized
-}
-
-export function getLocalMlxModelPath(store: KeyValueStore = getStorage()): string {
-  return readStore(store, LOCAL_MLX_MODEL_PATH_KEY) || getLocalMlxModels(store)[0]?.id || ''
-}
-
-export function saveLocalMlxModelPath(value: string, store: KeyValueStore = getStorage()): string {
-  const path = String(value || '').trim()
-  writeStore(store, LOCAL_MLX_MODEL_PATH_KEY, path)
-  return path
 }
 
 export function normalizeApiHost(host = DEFAULT_PROVIDER_HOST): string {
@@ -195,9 +196,6 @@ export function createDefaultProvider(apiKey = ''): JcProvider {
 }
 
 function sanitizeProvider(provider: Partial<JcProvider> | null | undefined, legacyKey = ''): JcProvider {
-  if (provider?.id === LOCAL_MLX_PROVIDER_ID || provider?.type === 'local-mlx') {
-    return sanitizeLocalMlxProvider(provider)
-  }
   if (provider?.id === LOCAL_OLLAMA_PROVIDER_ID || provider?.type === 'local-ollama') {
     return sanitizeLocalOllamaProvider(provider)
   }
@@ -233,32 +231,6 @@ function sanitizeLocalOllamaProvider(provider: Partial<JcProvider> | null | unde
   }
 }
 
-function sanitizeLocalMlxProvider(provider: Partial<JcProvider> | null | undefined): JcProvider {
-  return {
-    id: LOCAL_MLX_PROVIDER_ID,
-    name: provider?.name || LOCAL_MLX_PROVIDER_NAME,
-    type: 'local-mlx',
-    apiKey: '',
-    apiHost: provider?.apiHost || LOCAL_MLX_PROVIDER_HOST,
-    enabled: provider?.enabled !== false,
-    models: Array.isArray(provider?.models)
-      ? provider.models.map(model => ({
-          id: model.id,
-          label: model.label,
-          providerId: LOCAL_MLX_PROVIDER_ID,
-        })).filter(model => model.id)
-      : [],
-  }
-}
-
-export function createLocalMlxProvider(models: JcModelRef[] = [], apiHost = LOCAL_MLX_PROVIDER_HOST): JcProvider {
-  return sanitizeLocalMlxProvider({
-    models,
-    apiHost,
-    enabled: models.length > 0,
-  })
-}
-
 export function createLocalOllamaProvider(models: JcModelRef[] = []): JcProvider {
   return sanitizeLocalOllamaProvider({
     models,
@@ -266,16 +238,16 @@ export function createLocalOllamaProvider(models: JcModelRef[] = []): JcProvider
   })
 }
 
-export function isLocalMlxProviderId(providerId: string | null | undefined): boolean {
-  return providerId === LOCAL_MLX_PROVIDER_ID
-}
-
 export function isLocalOllamaProviderId(providerId: string | null | undefined): boolean {
   return providerId === LOCAL_OLLAMA_PROVIDER_ID
 }
 
-export function isLocalModelProviderId(providerId: string | null | undefined): boolean {
-  return providerId === LOCAL_MLX_PROVIDER_ID || providerId === LOCAL_OLLAMA_PROVIDER_ID
+/**
+ * 本机/自定义端点：不适用云端预算与云端专用能力（responses、reasoning effort）。
+ * 取代原先散在各处的 providerId 字面量比较。
+ */
+export function isLocalLikeProviderId(providerId: string | null | undefined): boolean {
+  return isLocalOllamaProviderId(providerId) || Boolean(findCustomProvider(providerId))
 }
 
 // ─── 视觉模型检测 ───
@@ -341,53 +313,10 @@ export function saveLocalOllamaModels(models: JcModelRef[], store: KeyValueStore
 
   const providers = loadProvidersFromStorage(store)
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
-  const mlxProvider = providers.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID)
   const ollamaProvider = createLocalOllamaProvider(sanitized)
   saveProvidersToStorage([
     defaultProvider,
-    ...(mlxProvider ? [mlxProvider] : []),
     ...(sanitized.length > 0 ? [ollamaProvider] : []),
-  ], store)
-  return sanitized
-}
-
-export function getLocalMlxModels(store: KeyValueStore = getStorage()): JcModelRef[] {
-  const raw = readStore(store, LOCAL_MLX_MODELS_KEY)
-  if (!raw) return []
-  try {
-    const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return []
-    return parsed
-      .map((model: Partial<JcModelRef>) => ({
-        id: String(model?.id || '').trim(),
-        label: model?.label ? String(model.label) : String(model?.id || '').trim(),
-        providerId: LOCAL_MLX_PROVIDER_ID,
-      }))
-      .filter(model => model.id)
-  } catch (_) {
-    return []
-  }
-}
-
-export function saveLocalMlxModels(models: JcModelRef[], store: KeyValueStore = getStorage()): JcModelRef[] {
-  const sanitized = models
-    .map(model => ({
-      id: String(model.id || '').trim(),
-      label: model.label || String(model.id || '').trim(),
-      providerId: LOCAL_MLX_PROVIDER_ID,
-    }))
-    .filter(model => model.id)
-
-  writeStore(store, LOCAL_MLX_MODELS_KEY, JSON.stringify(sanitized))
-
-  const providers = loadProvidersFromStorage(store)
-  const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || createDefaultProvider()
-  const ollamaProvider = providers.find(provider => provider.id === LOCAL_OLLAMA_PROVIDER_ID)
-  const localProvider = createLocalMlxProvider(sanitized, getLocalMlxApiBase(store))
-  saveProvidersToStorage([
-    defaultProvider,
-    ...(sanitized.length > 0 ? [localProvider] : []),
-    ...(ollamaProvider ? [ollamaProvider] : []),
   ], store)
   return sanitized
 }
@@ -402,7 +331,6 @@ export function resolveModelProviderId(model: JcModelRef | string | null | undef
   if (!model) return DEFAULT_PROVIDER_ID
   const modelId = typeof model === 'string' ? model : model.id
   if (getLocalOllamaModels().some(item => item.id === modelId)) return LOCAL_OLLAMA_PROVIDER_ID
-  if (getLocalMlxModels().some(item => item.id === modelId)) return LOCAL_MLX_PROVIDER_ID
   if (typeof model === 'string') return DEFAULT_PROVIDER_ID
   return getModelProviderId(model)
 }
@@ -410,38 +338,28 @@ export function resolveModelProviderId(model: JcModelRef | string | null | undef
 export function loadProvidersFromStorage(store: KeyValueStore = getStorage()): JcProvider[] {
   const legacyKey = ''
   const raw = readStore(store, 'jcProviders')
-  const localModels = getLocalMlxModels(store)
   const ollamaModels = getLocalOllamaModels(store)
-  const maybeLocalProvider = [
-    ...(localModels.length > 0 ? [createLocalMlxProvider(localModels, getLocalMlxApiBase(store))] : []),
-    ...(ollamaModels.length > 0 ? [createLocalOllamaProvider(ollamaModels)] : []),
-  ]
+  const fallbackOllama = ollamaModels.length > 0 ? createLocalOllamaProvider(ollamaModels) : null
 
-  if (!raw) return [createDefaultProvider(legacyKey), ...maybeLocalProvider]
+  if (!raw) return [createDefaultProvider(legacyKey), ...(fallbackOllama ? [fallbackOllama] : [])]
 
   try {
     const parsed = JSON.parse(raw)
     if (Array.isArray(parsed)) {
       const defaultProvider = parsed.find((p: Partial<JcProvider>) => p?.id === DEFAULT_PROVIDER_ID) || parsed[0]
-      const localProvider = parsed.find((p: Partial<JcProvider>) => p?.id === LOCAL_MLX_PROVIDER_ID || p?.type === 'local-mlx')
       const ollamaProvider = parsed.find((p: Partial<JcProvider>) => p?.id === LOCAL_OLLAMA_PROVIDER_ID || p?.type === 'local-ollama')
-      const sanitizedLocal = localProvider ? sanitizeLocalMlxProvider({
-        ...localProvider,
-        models: localProvider.models?.length ? localProvider.models : localModels,
-      }) : maybeLocalProvider.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID)
       const sanitizedOllama = ollamaProvider ? sanitizeLocalOllamaProvider({
         ...ollamaProvider,
         models: ollamaProvider.models?.length ? ollamaProvider.models : ollamaModels,
-      }) : maybeLocalProvider.find(provider => provider.id === LOCAL_OLLAMA_PROVIDER_ID)
+      }) : fallbackOllama
       return [
         sanitizeProvider(defaultProvider, legacyKey),
-        ...(sanitizedLocal && sanitizedLocal.models.length > 0 ? [sanitizedLocal] : []),
         ...(sanitizedOllama && sanitizedOllama.models.length > 0 ? [sanitizedOllama] : []),
       ]
     }
   } catch (_) {}
 
-  return [createDefaultProvider(legacyKey), ...maybeLocalProvider]
+  return [createDefaultProvider(legacyKey), ...(fallbackOllama ? [fallbackOllama] : [])]
 }
 
 export function rotateProviderKey(
@@ -478,11 +396,9 @@ export function decodeApiKey(rawKey: string): string {
 export function saveProvidersToStorage(providers: JcProvider[], store: KeyValueStore = getStorage()): void {
   const legacyKey = ''
   const defaultProvider = providers.find(provider => provider.id === DEFAULT_PROVIDER_ID) || providers[0]
-  const localProvider = providers.find(provider => provider.id === LOCAL_MLX_PROVIDER_ID || provider.type === 'local-mlx')
   const ollamaProvider = providers.find(provider => provider.id === LOCAL_OLLAMA_PROVIDER_ID || provider.type === 'local-ollama')
   const sanitized = [
     sanitizeProvider(defaultProvider, legacyKey),
-    ...(localProvider ? [sanitizeLocalMlxProvider(localProvider)] : []),
     ...(ollamaProvider ? [sanitizeLocalOllamaProvider(ollamaProvider)] : []),
   ]
   writeStore(store, 'jcProviders', JSON.stringify(sanitized))
@@ -503,11 +419,9 @@ export function updateDefaultProviderModels(
     label: model.label,
     providerId: DEFAULT_PROVIDER_ID,
   }))
-  const localModels = getLocalMlxModels(store)
   const ollamaModels = getLocalOllamaModels(store)
   const providers = [
     provider,
-    ...(localModels.length > 0 ? [createLocalMlxProvider(localModels, getLocalMlxApiBase(store))] : []),
     ...(ollamaModels.length > 0 ? [createLocalOllamaProvider(ollamaModels)] : []),
   ]
   saveProvidersToStorage(providers, store)

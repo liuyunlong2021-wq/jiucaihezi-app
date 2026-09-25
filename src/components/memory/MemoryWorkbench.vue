@@ -14,6 +14,7 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { useMediaTaskStore } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { consumeLastEvent, emitEvent, onEvent } from '@/utils/eventBus'
+import { findCustomProvider, LOCAL_OLLAMA_PROVIDER_ID } from '@/utils/providerConfig'
 import { appendProjectDirectoryIndex, createRuntimeProjectFileService } from '@/services/projectFileService'
 import { createProjectFileActions, mediaMimeForPath } from '@/services/projectFileActions'
 import { acquireProjectMediaDisplay, type MediaDisplayLease } from '@/services/projectMediaResolver'
@@ -785,7 +786,9 @@ onBeforeUnmount(() => {
 })
 
 function modelGroupKey(model: { id: string; providerId?: string }): string {
-  if (model.providerId === 'local-mlx' || model.providerId === 'local-ollama') return 'local'
+  if (model.providerId === LOCAL_OLLAMA_PROVIDER_ID) return 'local'
+  // 自定义端点单独成组：共用 'other' 的话，刚配好的模型会掉在列表末尾找不到。
+  if (findCustomProvider(model.providerId)) return 'custom'
   const id = model.id.toLowerCase()
   if (id.includes('claude') || id.includes('anthropic')) return 'anthropic'
   if (id.includes('gpt') || id.includes('openai')) return 'openai'
@@ -800,7 +803,7 @@ function modelGroupKey(model: { id: string; providerId?: string }): string {
 }
 
 function modelGroupLabel(key: string): string {
-  return ({ anthropic: 'Claude', openai: 'GPT / OpenAI', google: 'Gemini / Google', xai: 'Grok / xAI', deepseek: 'DeepSeek', qwen: '通义千问', zhipu: '智谱', doubao: '豆包', local: '本地模型', other: '其他' } as Record<string, string>)[key] || key
+  return ({ anthropic: 'Claude', openai: 'GPT / OpenAI', google: 'Gemini / Google', xai: 'Grok / xAI', deepseek: 'DeepSeek', qwen: '通义千问', zhipu: '智谱', doubao: '豆包', local: '本地模型', custom: '自定义端点', other: '其他' } as Record<string, string>)[key] || key
 }
 
 function isInternalMediaModel(modelId: string): boolean {

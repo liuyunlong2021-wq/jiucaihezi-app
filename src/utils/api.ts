@@ -22,17 +22,16 @@ export interface ResolveApiConfigOptions {
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
-  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
   decodeApiKey,
-  getLocalMlxApiBase,
-  isLocalMlxProviderId,
+  findCustomProvider,
   isLocalOllamaProviderId,
   normalizeApiHost,
   resolveWebApiBaseUrl,
   resolveDefaultProviderFromStorage,
   rotateProviderKey,
+  type CustomProviderConfig,
 } from './providerConfig'
 import { isTauriRuntime } from './tauriEnv'
 import { DEFAULT_TEXT_MODEL } from './modelSelection'
@@ -55,9 +54,10 @@ export async function resolveApiConfig(options: ResolveApiConfigOptions = {}): P
   if (!options.forceCloud && isLocalOllamaProviderId(selectedProviderId)) {
     return resolveLocalOllamaApiConfig(config.model)
   }
-  if (!options.forceCloud && isLocalMlxProviderId(selectedProviderId)) {
-    return resolveLocalMlxApiConfig(config.model)
-  }
+  // 已注册的自定义端点（LM Studio / mlx_vlm.server / mlx-optiq / llama.cpp / vLLM …）
+  // 只用自己的 apiBase 与 apiKey，绝不回落到云端凭据。
+  const customProvider = options.forceCloud ? undefined : findCustomProvider(selectedProviderId)
+  if (customProvider) return resolveCustomProviderApiConfig(customProvider, config.model)
 
   if (selectedProviderId && selectedProviderId !== DEFAULT_PROVIDER_ID) {
     throw new Error(`当前直连模式不支持 Provider：${selectedProviderId}。请切换到该 Provider 支持的运行模式。`)
@@ -116,13 +116,14 @@ export async function resolveLocalOllamaApiConfig(modelId: string): Promise<ApiC
   }
 }
 
-export function resolveLocalMlxApiConfig(modelId: string): ApiConfig {
+/** 自定义 OpenAI 兼容端点。未配置 Key 时发空 Key：buildHeaders 会跳过鉴权头。 */
+export function resolveCustomProviderApiConfig(provider: CustomProviderConfig, modelId: string): ApiConfig {
   const model = String(modelId || '').trim()
-  if (!model || model === DEFAULT_MODEL) throw new Error('请先在设置中连接 MLX 并选择本地模型。')
+  if (!model || model === DEFAULT_MODEL) throw new Error('请先在设置中为该端点填写模型 ID 并使用它。')
   return {
-    providerId: LOCAL_MLX_PROVIDER_ID,
-    apiKey: 'local',
-    apiBase: getLocalMlxApiBase(),
+    providerId: provider.id,
+    apiKey: provider.apiKey || '',
+    apiBase: provider.apiBase,
     model,
   }
 }

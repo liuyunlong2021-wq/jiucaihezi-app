@@ -1,4 +1,4 @@
-import { LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID } from './providerConfig'
+import { isLocalLikeProviderId } from './providerConfig'
 import type { ContextAssemblyMode } from './contextAssembly'
 import { chooseLlmRuntime, type LlmRuntimeKind } from './llmRuntime'
 import type { ProviderCapabilityProbe } from './providerCapabilityProbe'
@@ -38,7 +38,7 @@ export function resolveRuntimeProfile(input: RuntimeProfileInput): RuntimeProfil
   const modelId = String(input.modelId || '').trim()
   const providerId = String(input.providerId || 'jiucaihezi')
   const requestedTier = input.requestedTier || 'balanced'
-  const isLocal = providerId === LOCAL_MLX_PROVIDER_ID || providerId === LOCAL_OLLAMA_PROVIDER_ID
+  const isLocal = isLocalLikeProviderId(providerId)
   const supportsReasoningEffort = !isLocal && isReasoningModel(modelId)
   const capabilityTier = isLocal ? 'fast' : requestedTier
 

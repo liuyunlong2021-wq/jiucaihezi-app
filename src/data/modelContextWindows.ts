@@ -5,6 +5,8 @@
  * 所有值以 tokens 为单位。
  */
 
+import { isLocalLikeProviderId } from '@/utils/providerConfig'
+
 export const DEFAULT_CLOUD_CONTEXT_WINDOW = 1_000_000
 export const DEFAULT_CLOUD_MAX_OUTPUT_TOKENS = 128_000
 export const DEFAULT_LOCAL_CONTEXT_WINDOW = 32_768
@@ -15,8 +17,8 @@ export const DEFAULT_LOCAL_MAX_OUTPUT_TOKENS = 4_096
  * @returns tokens 数，未知云端模型返回 1M
  */
 export function getModelContextWindow(modelId: string, providerId?: string): number {
-  // 本地运行时保守使用 32K，避免把云端默认能力误用于本机模型。
-  if (providerId === 'local-ollama' || providerId === 'local-mlx') return DEFAULT_LOCAL_CONTEXT_WINDOW
+  // 本地/自定义端点保守使用 32K，避免把云端默认能力误用于本机模型。
+  if (isLocalLikeProviderId(providerId)) return DEFAULT_LOCAL_CONTEXT_WINDOW
 
   if (modelId.toLowerCase().includes(':free')) return 32_000
   return DEFAULT_CLOUD_CONTEXT_WINDOW
@@ -24,7 +26,7 @@ export function getModelContextWindow(modelId: string, providerId?: string): num
 
 /** 单次输出默认上限；真实 Gateway 元数据优先于此兜底值。 */
 export function getModelMaxOutputTokens(modelId: string, providerId?: string): number {
-  if (providerId === 'local-ollama' || providerId === 'local-mlx') return DEFAULT_LOCAL_MAX_OUTPUT_TOKENS
+  if (isLocalLikeProviderId(providerId)) return DEFAULT_LOCAL_MAX_OUTPUT_TOKENS
   if (modelId.toLowerCase().includes(':free')) return 32_000
   return DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
 }

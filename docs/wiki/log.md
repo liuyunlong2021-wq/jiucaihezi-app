@@ -1485,3 +1485,11 @@
 - 根因是宿主层只有一个可替换的全局 Runtime；任一项目的 Session 读回都可能先执行全局 stop，把另一个项目仍在运行的官方 Harness 子进程关闭，于是 UI 立即显示“DeepSeek Harness 已退出”。
 - 现按工作区持有 Runtime，同工作区共享创建 Promise；Session Query 优先复用该工作区实例，不同项目不再相互关闭。同项目更换固定启动配置时，严格等待旧实例完整退出后再启动新实例。
 - 取消任务改为关闭任务捕获的实例，不再从工作台调用全局停机。定向 `101/101`、完整 focused `1509/1509`、`vue-tsc -b` 与差异检查通过；真实 Desktop 跨项目并行待人工验收。
+
+## [2026-09-25] 重构 | 自定义端点取代本机 MLX，设置页本机块收拢
+
+- 新增通用「自定义端点（OpenAI 兼容）」：可用 LM Studio / mlx_vlm.server / mlx-optiq / llama.cpp / vLLM 等任何提供 `/v1/chat/completions` 的服务；只用端点自带的 apiBase 与 apiKey，绝不回落云端凭据（未填 Key 时不发鉴权头）。地址校验允许本机回环 `http` 与远程 `https`，拒绝把凭据、查询参数或片段写进地址。
+- 删除 `local-mlx` Provider 整条链路：`localMlxRuntime`、`providerConfig` 的 MLX 常量与函数、`resolveLocalMlxApiConfig`、`agentStore` 的 MLX 条目；Rust 侧删除 `commands/local_mlx.rs`（224 行）、`start_mlx_service` 注册、ACL 条目与退出时的 `stop_mlx_service`。
+- 新增 `isLocalLikeProviderId()`（本机 Ollama 或已注册自定义端点），统一本地/自定义端点的 `32K/4K` 预算、`local` 运行时与不启用 responses/reasoning；本地与自定义模型声明 `text+image`，修复 VLM 收不到图。
+- 设置页 Ollama、自定义端点、@Jev 打分器、本机 ComfyUI 收进可折叠的「本机模型与服务」，默认收起并显示状态摘要。
+- 验证：`vue-tsc -b`、`pnpm run lint`（exit 0）、聚焦 `1510/1510`、`cargo check` 与残留引用 grep 通过；真窗口 UI 与 mlx_vlm / LM Studio 真实服务未验收。净删 303 行。

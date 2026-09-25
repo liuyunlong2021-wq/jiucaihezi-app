@@ -17,6 +17,6 @@ export function resolveModelInputModalities(model: InputCapableModel): ModelInpu
   const providerId = String(model.providerId || 'jiucaihezi')
   const verified = VERIFIED_MODALITIES.get(`${providerId}:${model.id}`)
   if (verified) return [...verified]
-  if (providerId === 'jiucaihezi' && supportsVision(model.id, providerId)) return ['text', 'image']
-  return ['text']
+  // supportsVision 已按 provider 分类：Gateway 走黑名单，本地/自定义 provider 乐观放行。
+  return supportsVision(model.id, providerId) ? ['text', 'image'] : ['text']
 }

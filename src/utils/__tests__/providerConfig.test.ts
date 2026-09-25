@@ -4,16 +4,12 @@ import { test } from 'node:test'
 import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
-  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_PROVIDER_ID,
   getModelProviderId,
-  getLocalMlxModels,
   getLocalOllamaModels,
   loadProvidersFromStorage,
   normalizeApiHost,
   resolveWebApiBaseUrl,
-  resolveModelProviderId,
-  saveLocalMlxModels,
   saveLocalOllamaModels,
   updateDefaultProviderModels,
 } from '../providerConfig'
@@ -77,37 +73,18 @@ test('updateDefaultProviderModels persists model ownership without exposing host
   ])
 })
 
-test('saveLocalMlxModels adds dynamic MLX models without replacing cloud provider', () => {
+test('updating cloud models preserves the dynamic Ollama provider', () => {
   const store = new Map<string, string>()
-
-  saveLocalMlxModels([{ id: '/Users/test/MLX/model/6-bit', label: 'model/6-bit' }], store)
-  const providers = loadProvidersFromStorage(store)
-
-  assert.equal(providers.length, 2)
-  assert.equal(providers[0].id, DEFAULT_PROVIDER_ID)
-  assert.equal(providers[0].apiKey, '')
-  assert.equal(providers[1].id, LOCAL_MLX_PROVIDER_ID)
-  assert.equal(providers[1].apiKey, '')
-  assert.equal(providers[1].models[0].id, '/Users/test/MLX/model/6-bit')
-  assert.equal(providers[1].models[0].providerId, LOCAL_MLX_PROVIDER_ID)
-  assert.deepEqual(getLocalMlxModels(store), providers[1].models)
-  assert.equal(resolveModelProviderId(providers[1].models[0]), LOCAL_MLX_PROVIDER_ID)
-})
-
-test('updating cloud models preserves dynamic MLX and Ollama providers', () => {
-  const store = new Map<string, string>()
-  saveLocalMlxModels([{ id: 'mlx-model' }], store)
   saveLocalOllamaModels([{ id: 'qwen3:8b' }], store)
 
   const providers = updateDefaultProviderModels([
     { id: 'gpt-5.5', label: 'GPT-5.5' },
   ], store)
 
-  assert.equal(providers.length, 3)
+  assert.equal(providers.length, 2)
   assert.equal(providers[0].id, DEFAULT_PROVIDER_ID)
-  assert.equal(providers[1].id, LOCAL_MLX_PROVIDER_ID)
-  assert.equal(providers[1].models[0].id, 'mlx-model')
-  assert.equal(providers[2].id, LOCAL_OLLAMA_PROVIDER_ID)
+  assert.equal(providers[1].id, LOCAL_OLLAMA_PROVIDER_ID)
+  assert.equal(providers[1].models[0].id, 'qwen3:8b')
 })
 
 test('saveLocalOllamaModels adds an Ollama provider without replacing cloud provider', () => {

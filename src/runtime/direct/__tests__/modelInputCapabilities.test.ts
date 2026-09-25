@@ -8,9 +8,21 @@ describe('direct model input capabilities', () => {
       resolveModelInputModalities({ id: 'gemini-3.5-flash', providerId: 'jiucaihezi' }),
       ['text', 'image', 'video', 'audio', 'file'],
     )
+    // 自定义 provider 只拿到 text+image：模型名相同也不继承 Gateway 的已验证合同。
     assert.deepEqual(
       resolveModelInputModalities({ id: 'gemini-3.5-flash', providerId: 'custom-a' }),
-      ['text'],
+      ['text', 'image'],
+    )
+  })
+
+  test('local providers no longer force every model to text-only', () => {
+    assert.deepEqual(
+      resolveModelInputModalities({ id: 'qwen3.8:27b-mlx', providerId: 'local-ollama' }),
+      ['text', 'image'],
+    )
+    assert.deepEqual(
+      resolveModelInputModalities({ id: 'LensVLM-9B-OptiQ-4bit', providerId: 'custom-vlm' }),
+      ['text', 'image'],
     )
   })
 

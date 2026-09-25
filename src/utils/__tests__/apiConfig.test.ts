@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { LOCAL_MLX_PROVIDER_ID } from '../providerConfig'
+import { saveCustomProviders } from '../providerConfig'
 import { __resetApiKeyMemoryCacheForTests, __resetGatewaySessionMemoryCacheForTests } from '../../services/newApiClient'
 import { buildChatCompletionExtras, buildHeaders, buildChatErrorMessage, buildProviderNetworkErrorMessage, checkAuth, readChatErrorResponse, resolveApiConfig, sanitizeProviderError, type ApiConfig } from '../api'
 
@@ -49,8 +49,8 @@ function withLocalStorage(values: Record<string, string>, fn: () => void) {
 }
 
 const localConfig: ApiConfig = {
-  providerId: LOCAL_MLX_PROVIDER_ID,
-  apiKey: 'local',
+  providerId: 'custom-local',
+  apiKey: '',
   apiBase: 'http://127.0.0.1:17880',
   model: 'mlx-community/gemma-4-e4b-it-OptiQ-4bit',
 }
@@ -248,37 +248,99 @@ test('resolveApiConfig still routes local Ollama when local provider is explicit
   })
 })
 
-test('resolveApiConfig routes local MLX through its OpenAI-compatible loopback service without cloud credentials', async () => {
-  await withAsyncLocalStorage({
-    jcModel: '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit',
-    jcModelProviderId: 'local-mlx',
-    jcLocalMlxApiBase: 'http://127.0.0.1:9523',
-  }, async () => {
-    const config = await resolveApiConfig({
-      modelId: '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit',
-      modelProviderId: 'local-mlx',
-    })
 
-    assert.equal(config.providerId, 'local-mlx')
-    assert.equal(config.apiBase, 'http://127.0.0.1:9523')
-    assert.equal(config.model, '/Users/test/MLX/Qwen3.8-27B-Uncensored-MLX/6-bit')
-  })
-})
-
-test('resolveApiConfig rejects unsupported custom providers instead of using the default provider K', async () => {
+test('resolveApiConfig rejects an unregistered custom provider instead of using the default provider Key', async () => {
   await withAsyncLocalStorage({
     jcApiKey: 'sk-default-provider-12345678901234567890',
     jcModel: 'custom-model',
     jcModelProviderId: 'custom-provider-a',
   }, async () => {
-    await assert.rejects(
-      () => resolveApiConfig({
-        forceCloud: true,
+    let message = ''
+    try {
+      await resolveApiConfig({
         modelId: 'custom-model',
         modelProviderId: 'custom-provider-a',
-      }),
-      /当前直连模式不支持 Provider：custom-provider-a/,
-    )
+      })
+      assert.fail('未注册的自定义 provider 必须被拒绝')
+    } catch (error) {
+      message = (error as Error).message
+    }
+
+    assert.match(message, /当前直连模式不支持 Provider：custom-provider-a/)
+    // 安全边界：拒绝时绝不能回显云端 Key，也不能悄悄降级到云端。
+    assert.equal(message.includes('sk-default-provider'), false)
+  })
+})
+
+test('resolveApiConfig routes a registered custom provider to its own OpenAI-compatible endpoint', async () => {
+  await withAsyncLocalStorage({
+    jcApiKey: 'sk-cloud-must-not-be-used-1234567890',
+    jcModel: 'mlx-community/LensVLM-9B-OptiQ-4bit',
+    jcModelProviderId: 'custom-mlx',
+  }, async () => {
+    saveCustomProviders([{
+      id: 'custom-mlx',
+      name: '本机 MLX 端点',
+      apiBase: 'http://127.0.0.1:8080',
+      modelIds: ['mlx-community/LensVLM-9B-OptiQ-4bit'],
+    }])
+
+    const config = await resolveApiConfig({
+      modelId: 'mlx-community/LensVLM-9B-OptiQ-4bit',
+      modelProviderId: 'custom-mlx',
+    })
+
+    assert.equal(config.providerId, 'custom-mlx')
+    assert.equal(config.apiBase, 'http://127.0.0.1:8080')
+    assert.equal(config.model, 'mlx-community/LensVLM-9B-OptiQ-4bit')
+    assert.notEqual(config.apiKey, 'sk-cloud-must-not-be-used-1234567890')
+    // 无 Key 的自定义端点不带鉴权头，避免把占位串当密钥外发。
+    assert.deepEqual(buildHeaders(config), { 'Content-Type': 'application/json' })
+  })
+})
+
+test('resolveApiConfig keeps a keyless custom endpoint usable without a cloud API Key', async () => {
+  await withAsyncLocalStorage({
+    jcModel: 'Qwen3-VL-4B-Instruct-4bit',
+    jcModelProviderId: 'custom-vlm',
+  }, async () => {
+    saveCustomProviders([{
+      id: 'custom-vlm',
+      name: '本机 VLM',
+      apiBase: 'http://127.0.0.1:8080',
+      modelIds: ['Qwen3-VL-4B-Instruct-4bit'],
+    }])
+
+    const config = await resolveApiConfig({
+      modelId: 'Qwen3-VL-4B-Instruct-4bit',
+      modelProviderId: 'custom-vlm',
+    })
+
+    assert.equal(config.apiKey, '')
+    assert.equal(config.apiBase, 'http://127.0.0.1:8080')
+  })
+})
+
+test('resolveApiConfig forwards a custom endpoint api key when one is configured', async () => {
+  await withAsyncLocalStorage({
+    jcModel: 'Qwen3-VL-4B-Instruct-4bit',
+    jcModelProviderId: 'custom-auth',
+  }, async () => {
+    saveCustomProviders([{
+      id: 'custom-auth',
+      name: '需要密钥的本机端点',
+      apiBase: 'http://127.0.0.1:8080',
+      apiKey: 'local-secret-1234567890',
+      modelIds: ['Qwen3-VL-4B-Instruct-4bit'],
+    }])
+
+    const config = await resolveApiConfig({
+      modelId: 'Qwen3-VL-4B-Instruct-4bit',
+      modelProviderId: 'custom-auth',
+    })
+
+    assert.equal(config.apiKey, 'local-secret-1234567890')
+    assert.equal(buildHeaders(config).Authorization, 'Bearer local-secret-1234567890')
   })
 })
 

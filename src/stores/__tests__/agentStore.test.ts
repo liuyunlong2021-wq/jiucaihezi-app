@@ -44,6 +44,33 @@ function skill(patch: Partial<SkillConfig> = {}): SkillConfig {
   }
 }
 
+test('custom OpenAI-compatible endpoints surface as selectable models with image input', { concurrency: false }, () => {
+  const storage = installLocalStorage({
+    jcCustomProviders: JSON.stringify([{
+      id: 'custom-mlx',
+      name: '本机 MLX',
+      apiBase: 'http://127.0.0.1:8080',
+      modelIds: ['mlx-community/LensVLM-9B-OptiQ-4bit'],
+    }]),
+  })
+  try {
+    setActivePinia(createPinia())
+    const agentStore = useAgentStore()
+
+    const entry = agentStore.availableModels.find(model => model.id === 'mlx-community/LensVLM-9B-OptiQ-4bit')
+
+    assert.equal(entry?.providerId, 'custom-mlx')
+    assert.equal(entry?.label, '本机 MLX: mlx-community/LensVLM-9B-OptiQ-4bit')
+    // 声明图片输入，否则本地 VLM 永远收不到图。
+    assert.deepEqual(entry?.inputModalities, ['text', 'image'])
+    // 自定义端点必须用本地保守预算，避免把云端 1M/128K 误用上去。
+    assert.equal(entry?.contextWindow, 32_768)
+    assert.equal(entry?.maxOutputTokens, 4_096)
+  } finally {
+    storage.restore()
+  }
+})
+
 test('Web restores only installed user Skills', { concurrency: false }, async () => {
   const legacySkill = skill({ id: 'legacy-writing-skill', name: '旧写作 Skill' })
   const storage = installLocalStorage({ jc_web_skills_v1: JSON.stringify([legacySkill]) })

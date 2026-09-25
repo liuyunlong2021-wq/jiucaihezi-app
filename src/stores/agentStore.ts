@@ -9,7 +9,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
-import { getModelContextWindow, getModelMaxOutputTokens } from '@/data/modelContextWindows'
+import { getModelContextWindow, getModelMaxOutputTokens, DEFAULT_LOCAL_CONTEXT_WINDOW, DEFAULT_LOCAL_MAX_OUTPUT_TOKENS } from '@/data/modelContextWindows'
 import { parseSkillMd, serializeToSkillMd } from '../types/skill'
 import { gatewayModels } from '@/services/newApiClient'
 import { invoke } from '@tauri-apps/api/core'
@@ -17,12 +17,11 @@ import { isTauriRuntime } from '@/utils/tauriEnv'
 import { appendSkillCreatorHistory } from '@/utils/skillCreatorWorkspace'
 import type { SkillWithLinks } from '@/types/skillsManage'
 import {
-  LOCAL_MLX_PROVIDER_ID,
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
-  getLocalMlxModels,
   getLocalOllamaModels,
   getCustomProviders,
+  isLocalLikeProviderId,
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
@@ -81,11 +80,13 @@ const DEFAULT_MODELS: ModelEntry[] = [
 ]
 
 function loadLocalModelEntries(): ModelEntry[] {
-  return [...getLocalMlxModels(), ...getLocalOllamaModels()].map(model => ({
+  return getLocalOllamaModels().map(model => ({
     id: model.id,
     label: model.label || model.id,
     providerId: model.providerId,
     capability: 'text' as const,
+    // 本地端点由模型自己决定能否收图；不声明就会被永远当成纯文本。
+    inputModalities: resolveModelInputModalities({ id: model.id, providerId: model.providerId }),
   }))
 }
 
@@ -96,6 +97,11 @@ function loadCustomProviderEntries(): ModelEntry[] {
       label: `${provider.name}: ${modelId}`,
       providerId: provider.id,
       capability: 'text' as const,
+      inputModalities: resolveModelInputModalities({ id: modelId, providerId: provider.id }),
+      // 自定义端点无法提前知道真实窗口，按本地保守值兜底；
+      // 否则云端 1M 上下文 / 128K 输出预算会被误用上去。
+      contextWindow: DEFAULT_LOCAL_CONTEXT_WINDOW,
+      maxOutputTokens: DEFAULT_LOCAL_MAX_OUTPUT_TOKENS,
     }))
   )
 }
@@ -104,7 +110,7 @@ function mergeLocalModels(models: ModelEntry[]): ModelEntry[] {
   const localModels = loadLocalModelEntries()
   const customModels = loadCustomProviderEntries()
   const allLocal = [...localModels, ...customModels]
-  const localProviderIds = new Set([LOCAL_MLX_PROVIDER_ID, LOCAL_OLLAMA_PROVIDER_ID])
+  const localProviderIds = new Set([LOCAL_OLLAMA_PROVIDER_ID])
   // 也排除自定义 provider 的旧条目
   const customProviderIds = new Set(customModels.map(m => m.providerId!))
   if (allLocal.length === 0) {
@@ -209,7 +215,7 @@ export const useAgentStore = defineStore('agents', () => {
     localStorage.setItem('jcModelProviderId', providerId)
     if (providerId === LOCAL_OLLAMA_PROVIDER_ID) {
       localStorage.setItem('jcLocalOllamaApiBase', LOCAL_OLLAMA_API_BASE)
-    } else if (providerId !== LOCAL_MLX_PROVIDER_ID) {
+    } else if (!isLocalLikeProviderId(providerId)) {
       localStorage.setItem('jcApiBase', 'https://api.jiucaihezi.studio')
     }
     return providerId
