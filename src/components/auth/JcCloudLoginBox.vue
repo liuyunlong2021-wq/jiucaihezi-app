@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { loginToJcCloud, type JcCloudLoginPayload, type JcCloudLoginResult } from './jcCloudAuth'
-import { createAutoGroupApiKey } from '@/services/newApiOneClickLogin'
 
 const props = withDefaults(defineProps<{
   apiBase?: string
@@ -109,7 +108,7 @@ async function submitLogin() {
       username: loginUsername.value.trim(),
       password: loginPassword.value,
     })
-    apiKeyDraft.value = result.apiKey
+    // 登录只建立云端身份与同步会话，不碰模型调用 Key。
     loginPassword.value = ''
     loginDialogOpen.value = false
     emit('login-success', result, rememberMe.value)
@@ -163,31 +162,16 @@ async function handleCopyConfig() {
 
   const existingKey = (apiKeyDraft.value || props.apiKey || '').trim()
 
+  // 模型 Key 完全手动：只拿已有 Key 生成配文，不再自动创建 Key。
+  if (!existingKey) {
+    localError.value = '请先填写并保存 API Key，再一键抄配置'
+    configBusy.value = false
+    return
+  }
+
   try {
-    // 策略 1：无已有 Key 时，尝试创建 auto-group Key（需要 NewAPI Web Session）
-    if (!existingKey) {
-      const result = await createAutoGroupApiKey()
-      if (result.status === 'ok') {
-        configContent.value = buildConfigText(result.apiKey, props.chatModels || [])
-        configDialogOpen.value = true
-        return
-      }
-      if (result.status === 'needs-login') {
-        localError.value = '请先点击「一键登录」，登录后即可一键抄配置'
-        return
-      }
-      // result.status === 'error'：兜底往下走
-    }
-
-    // 策略 2：使用已有 Key（一键登录后已填充，或手动填的）
-    if (existingKey) {
-      configContent.value = buildConfigText(existingKey, props.chatModels || [])
-      configDialogOpen.value = true
-      return
-    }
-
-    // 策略 3：既没有已有 Key，auto-group 也失败
-    localError.value = '请先点击「一键登录」，登录后即可一键抄配置'
+    configContent.value = buildConfigText(existingKey, props.chatModels || [])
+    configDialogOpen.value = true
   } catch (err: any) {
     localError.value = err?.message || '获取配置失败，请稍后重试'
   } finally {
@@ -237,12 +221,12 @@ function closeConfigDialog() {
     </div>
 
     <div v-if="loggedIn && !advancedOpen && !apiKeyDraft" class="jc-login-state">
-      <strong>已登录，可直接使用</strong>
-      <button class="jc-login-inline" @click="setAdvancedOpen(true)">高级：使用自己的 API Key</button>
+      <strong>已登录，云端同步已启用</strong>
+      <button class="jc-login-inline" @click="setAdvancedOpen(true)">填写模型调用 Key 才能使用云端模型</button>
     </div>
 
     <div v-else>
-      <label class="jc-login-label">API Key</label>
+      <label class="jc-login-label">模型调用 Key</label>
       <div class="jc-login-key-row">
         <input
           v-model="apiKeyDraft"
@@ -261,7 +245,7 @@ function closeConfigDialog() {
     </div>
 
     <div v-if="!accountOnly" class="jc-login-actions secondary">
-      <button class="jc-login-link jc-login-copy-config" :disabled="configBusy" @click="handleCopyConfig">
+      <button class="jc-login-link jc-login-copy-config" :disabled="configBusy || !(apiKeyDraft || apiKey)" @click="handleCopyConfig">
         <JcIcon name="auto_awesome" />
         {{ configBusy ? '获取中...' : '一键抄配置' }}
       </button>

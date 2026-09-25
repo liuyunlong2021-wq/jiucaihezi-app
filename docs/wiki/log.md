@@ -1493,3 +1493,11 @@
 - 新增 `isLocalLikeProviderId()`（本机 Ollama 或已注册自定义端点），统一本地/自定义端点的 `32K/4K` 预算、`local` 运行时与不启用 responses/reasoning；本地与自定义模型声明 `text+image`，修复 VLM 收不到图。
 - 设置页 Ollama、自定义端点、@Jev 打分器、本机 ComfyUI 收进可折叠的「本机模型与服务」，默认收起并显示状态摘要。
 - 验证：`vue-tsc -b`、`pnpm run lint`（exit 0）、聚焦 `1510/1510`、`cargo check` 与残留引用 grep 通过；真窗口 UI 与 mlx_vlm / LM Studio 真实服务未验收。净删 303 行。
+
+## [2026-09-25] 重构 | 账号登录与模型调用 Key 解耦（阶段 1：客户端）
+
+- 一键登录只建立云端身份与同步会话：`gatewayLogin` 不再解析或保存 `api_key`，登录响应即使带 `api_key` 也一律忽略，也不覆盖用户已填的 Key；`handleLogin` 不再回填 Key 输入框。同步链路本来就只认 `X-JC-Session`，不受影响。
+- 「一键抄配置」改为只在已有 Key 时生成配置文本，无 Key 时禁用并提示「请先填写并保存 API Key」；删除自动建 Key 通道 `createAutoGroupApiKey` 与整个 `newApiOneClickLogin.ts`（含无调用者的 Web 回跳 intent 机制）及其测试。
+- 文案：`getCloudRequiredMessage` 明确「账号登录只开启云端同步」并指向「管理密钥」页面与本地模型；登录态改为「已登录，云端同步已启用」；输入框标签由「API Key」改为「模型调用 Key」。
+- 范围：本轮只动客户端。服务端 `/auth/login` 仍返回 `api_key`（`ensureLegacyManagedTokenKey` 同时被服务端聊天代理 `gateway/src/newapi.js` 使用，不能删），留待云端阶段；浏览器登录 deep link 回调（`main.ts` 的 `consumeApiKeyCallbackUrl`）同为待完善项。
+- 验证：`vue-tsc -b`、lint（exit 0）、聚焦 `1505/1505`（含新增 `src/components/auth/__tests__/loginKeySeparation.test.ts`）通过；用户真机实测正常使用（登录后 App 可正常使用）。

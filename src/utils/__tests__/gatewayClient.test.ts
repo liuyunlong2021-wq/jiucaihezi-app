@@ -14,7 +14,6 @@ import {
   getApiKey,
   getGatewaySessionToken,
   gatewaySessionAuthenticated,
-  extractGatewayApiKey,
   extractGatewayBaseUrl,
   extractGatewaySessionToken,
   extractGatewayUserPayload,
@@ -115,7 +114,7 @@ test('initGatewaySessionToken restores sync authentication after refresh', async
   })
 })
 
-test('gatewayLogin saves the ordinary API key and dedicated sync session separately', async () => {
+test('gatewayLogin saves only the dedicated sync session and leaves the manual API key untouched', async () => {
   const previousStorage = (globalThis as any).localStorage
   const previousFetch = globalThis.fetch
   const store = new Map<string, string>([['jcGatewaySessionToken', 'legacy-session']])
@@ -135,14 +134,15 @@ test('gatewayLogin saves the ordinary API key and dedicated sync session separat
     headers: { 'Content-Type': 'application/json' },
   })) as typeof fetch
   try {
-    __resetApiKeyMemoryCacheForTests('')
+    __resetApiKeyMemoryCacheForTests('sk-manual-kept-12345678901234567890')
     __resetGatewaySessionMemoryCacheForTests('legacy-session')
     const result = await gatewayLogin({ username: 'alice', password: 'secret' })
-    assert.equal(result.apiKey, 'sk-auth-broker-12345678901234567890')
-    assert.equal(getApiKey(), 'sk-auth-broker-12345678901234567890')
     assert.equal(result.syncSession, 'sess_sync_1234567890')
     assert.equal(getGatewaySessionToken(), 'sess_sync_1234567890')
     assert.equal(store.get('jcGatewaySessionToken'), 'sess_sync_1234567890')
+    // 登录只负责云端身份：响应里带着 api_key 也要忽略，更不能覆盖用户手工填的 Key。
+    assert.equal(getApiKey(), 'sk-manual-kept-12345678901234567890')
+    assert.equal('apiKey' in result, false)
   } finally {
     __resetApiKeyMemoryCacheForTests('')
     __resetGatewaySessionMemoryCacheForTests('')
@@ -168,24 +168,26 @@ test('clearLegacyAuthStorage removes stale web routing state but preserves manua
   })
 })
 
-test('gatewayLogin rejects successful-looking responses without an api_key', async () => {
+test('gatewayLogin succeeds without an api_key and still stores the sync session', async () => {
   await withLocalStorage({}, async () => {
     const previousFetch = globalThis.fetch
     globalThis.fetch = (async () => new Response(JSON.stringify({
       success: true,
+      sync_session: 'sess_no_key_1234567890',
       user: { id: 'u1', username: 'alice' },
     }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
     })) as typeof fetch
     try {
-      await assert.rejects(
-        () => gatewayLogin({ username: 'alice', password: 'secret' }),
-        /登录响应缺少 API Key/,
-      )
-      assert.equal(getGatewaySessionToken(), '')
+      const result = await gatewayLogin({ username: 'alice', password: 'secret' })
+
+      assert.equal(result.syncSession, 'sess_no_key_1234567890')
+      assert.equal(getGatewaySessionToken(), 'sess_no_key_1234567890')
+      assert.equal(getApiKey(), '')
     } finally {
       globalThis.fetch = previousFetch
+      __resetGatewaySessionMemoryCacheForTests('')
     }
   })
 })
@@ -328,10 +330,7 @@ test('gatewayDeleteAccount preserves local credentials when deletion fails', asy
   })
 })
 
-test('extractGatewayApiKey accepts Auth Broker api_key aliases', () => {
-  assert.equal(extractGatewayApiKey({ api_key: 'sk-top' }), 'sk-top')
-  assert.equal(extractGatewayApiKey({ apiKey: 'sk-camel' }), 'sk-camel')
-  assert.equal(extractGatewayApiKey({ data: { api_key: 'sk-data' } }), 'sk-data')
+test('extractGatewayBaseUrl falls back to the production gateway host', () => {
   assert.equal(extractGatewayBaseUrl({}), 'https://api.jiucaihezi.studio/v1')
 })
 

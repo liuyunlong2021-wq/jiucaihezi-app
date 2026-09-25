@@ -281,9 +281,10 @@ test('iPhone account settings reuse login while hiding commercial entries only',
   // accountOnly 只管商业入口：充值/邀请/签到/下载页都依赖账号，移动端必须藏掉（2.1(b)）。
   assert.match(login, /v-if="!accountOnly" class="jc-login-link"[\s\S]*下载APP/)
   assert.match(login, /v-if="!accountOnly" class="jc-login-secondary"[\s\S]*注册账号/)
-  // 但 API Key 与保存不能被 accountOnly 藏：移动端只留一个需要账号的登录按钮，
-  // 审核员没有账号就走不进去，2.1(a) 就是这么来的。
-  assert.match(login, /<div v-else>\s*<label class="jc-login-label">API Key<\/label>/)
+  // 但模型调用 Key 与保存不能被 accountOnly 藏：移动端只留一个需要账号的登录按钮，
+  // 审核员没有账号就走不进去，2.1(a) 就是这么来的。（标签 2026-09-25 由“API Key”改为“模型调用 Key”，
+  // 与账号登录解耦后的语义一致。）
+  assert.match(login, /<div v-else>\s*<label class="jc-login-label">模型调用 Key<\/label>/)
   assert.match(login, /<button class="jc-login-save" :disabled="busy"/)
   for (const page of ['privacy', 'support', 'terms']) {
     assert.match(source(`public/${page}/index.html`), /韭菜盒子/)

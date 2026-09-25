@@ -21,7 +21,7 @@ export function getCloudRequiredMessage(kind: string = 'chat'): string {
     files: '文件分析',
     media: '图片/视频/音频生成',
   }
-  return `${labels[kind] || '此功能'}需要可用于模型调用的 API Key。账号登录和模型调用 Key 是两件事：请在设置里完成一键登录生成 Key，或在高级功能里填写自己的 API Key。\n\n也可以切换到本地模型（Ollama / 本地 MLX）继续使用。`
+  return `${labels[kind] || '此功能'}需要你自己的模型调用 Key。账号登录只开启云端同步，不会替你获取 Key。请在设置里填写 API Key（可在「管理密钥」页面创建），或切换到本地模型（Ollama / 自定义端点）继续使用。`
 }
 
 export { getApiKey }

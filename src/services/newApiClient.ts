@@ -336,20 +336,22 @@ async function gatewayJsonWithResponse<T = any>(path: string, init: RequestInit 
   throw lastError
 }
 
-export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; apiKey: string; baseUrl: string; syncSession: string }> {
-  const { payload: data, response } = await gatewayJsonWithResponse<any>('/auth/login', {
+/**
+ * 账号登录：只建立云端身份与同步会话。
+ * 模型调用 Key 完全由用户在设置里手动提供：登录响应即使带 api_key 也一律忽略，
+ * 既不复用云端密钥，也不覆盖用户已填的 Key。
+ */
+export async function gatewayLogin(payload: Record<string, unknown>): Promise<{ user: GatewayUser; baseUrl: string; syncSession: string }> {
+  const { payload: data } = await gatewayJsonWithResponse<any>('/auth/login', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
-  const apiKey = extractGatewayApiKey(data)
-  if (!apiKey) throw new Error('登录响应缺少 API Key，请稍后重试')
   const syncSession = String(data?.sync_session || data?.data?.sync_session || '').trim()
   if (!syncSession) throw new Error('登录响应缺少同步会话，请稍后重试')
-  await setApiKey(apiKey)
   await setGatewaySessionToken(syncSession)
   const user = normalizeGatewayUser(extractGatewayUserPayload(data))
   cacheGatewayAccount(user)
-  return { user, apiKey, baseUrl: extractGatewayBaseUrl(data), syncSession }
+  return { user, baseUrl: extractGatewayBaseUrl(data), syncSession }
 }
 
 export async function gatewayRegister(payload: Record<string, unknown>): Promise<{ user: GatewayUser; sessionToken: string }> {
@@ -494,17 +496,6 @@ export function extractGatewaySessionToken(payload: any): string {
   ).trim()
 }
 
-export function extractGatewayApiKey(payload: any): string {
-  return String(
-    payload?.api_key
-    || payload?.apiKey
-    || payload?.key
-    || payload?.data?.api_key
-    || payload?.data?.apiKey
-    || payload?.data?.key
-    || ''
-  ).trim()
-}
 
 export function extractGatewayBaseUrl(payload: any): string {
   return String(

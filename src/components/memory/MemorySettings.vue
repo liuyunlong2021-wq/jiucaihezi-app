@@ -213,14 +213,13 @@ async function refreshComfyUi() {
 
 async function login(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> {
   const result = await gatewayLogin({ username: payload.username, password: payload.password })
-  return { apiKey: result.apiKey, user: result.user, baseUrl: result.baseUrl, raw: result }
+  // 登录只建立云端身份与同步会话；模型调用 Key 由用户手动填写。
+  return { user: result.user, baseUrl: result.baseUrl, raw: result }
 }
 
-async function handleLogin(result: JcCloudLoginResult) {
-  apiKey.value = result.apiKey
-  await setApiKey(result.apiKey)
+async function handleLogin() {
   await agentStore.fetchModels().catch(() => {})
-  status.value = '已登录'
+  status.value = '已登录，云端同步已启用'
 }
 
 async function logout() {
