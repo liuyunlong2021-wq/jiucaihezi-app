@@ -1512,7 +1512,13 @@
 - 现象：`pnpm tauri dev` 正常，CI 出的安装包一发消息就「处理失败 00:00 · 无法启动 MCP 进程: No such file or directory (os error 2)」。
 - 根因：Harness 是用**随包分发的 node** 起子进程的（`src/services/deepSeekHarness.ts:378` 的 `deepseek-harness/node_modules/node/bin/node(.exe)` 交给 `McpStdioTransport` → `mcp_spawn_stdio`）。而该目录在 `.gitignore` 里，只有 `build:deepseek-harness` 会准备它；那道工序原本只长在 `tauri.conf.json` 的 `beforeBuildCommand` 上，**而 CI 为注入 `VITE_GITHUB_OAUTH_CLIENT_ID` 把 `beforeBuildCommand` 置空**，改跑 `build:desktop:quick`（不含该工序），于是安装包里的资源目录缺运行时，开发态却完全正常。
 - 修法（根因，不是症状）：把 `pnpm run build:deepseek-harness` 放进 `build:desktop:quick`，让构建入口自足；`scripts/audit-desktop-dist.mjs` 新增守卫，运行时缺失时直接构建失败并指出确切路径；`deepSeekHarness.test.ts` 把「准备工序必须在 `build:desktop:quick` 里」钉成合同。
-- 验证：缺失场景下审计 `exit=1` 并报出 `deepseek-harness/node_modules/node/bin/node`（临时改名实测，已恢复）；恢复后 `build:desktop:quick exit=0` + `audit passed`；聚焦 `1506/1506`、`vue-tsc -b`、lint 通过。**本轮未重发安装包**，已发布的 `v2.2.0` 安装包仍带此缺陷。
+- 验证：缺失场景下审计 `exit=1` 并报出 `deepseek-harness/node_modules/node/bin/node`（临时改名实测，已恢复）；恢复后 `build:desktop:quick exit=0` + `audit passed`；聚焦 `1506/1506`、`vue-tsc -b`、lint 通过。**本轮未重发安装包**，已发布的 `v2.2.0` 安装包仍带此缺陷（随后由 `2.2.1` 重发，见下条）。
+
+## [2026-09-25] 发版 | 2.2.1 重发安装包，修复 CI 包无法对话
+
+- `2.2.0` 的 CI 安装包带「Harness 运行时未打进包」缺陷（一发消息即 `处理失败 · 无法启动 MCP 进程: os error 2`），`2.2.1` 是重发补丁版；根因与修法见上一条根治记录。
+- 本次只 bump 版本号并重跑 CI，未改任何代码：`scripts/set-version.mjs 2.2.1` 写入 `package.json`、`tauri.conf.json`、`Cargo.toml`，`Cargo.lock` 随 `cargo check` 更新。
+- 验证：`vue-tsc -b`、lint、分离门禁、前端聚焦 `1506/1506` 通过。**新包是否真能对话以 CI 产物实测为准**，代码与构建层只做到「缺运行时即构建失败」。
 
 ## [2026-09-25] 重构 | 自定义端点取代本机 MLX，设置页本机块收拢
 
