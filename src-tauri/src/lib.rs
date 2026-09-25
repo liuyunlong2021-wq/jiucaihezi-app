@@ -625,7 +625,9 @@ mod tests {
             std::env::temp_dir().join(format!("jc_skill_material_{}_{}", name, std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp test dir");
-        dir
+        // macOS 的 `/var` 是指向 `/private/var` 的符号链接，原样返回会让 reject_symlink_path
+        // 把每个测试路径都判成非法；解析成真实路径后，测的才是被测代码而不是宿主目录布局。
+        std::fs::canonicalize(&dir).expect("canonicalize temp test dir")
     }
 
     fn compile_input(

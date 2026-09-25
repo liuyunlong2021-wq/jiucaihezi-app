@@ -1500,6 +1500,13 @@
 - `src/` 一行未改；web-only 分支变死代码属于后续独立批次。
 - 验证：Web 构建 `[web-dist] removed try/` + `audit passed`，产物根目录无 `try/`；桌面构建 `audit passed` 且 `dist/index.html` 仍是工作台（入口 `./assets/try-*.js`、含 `id="app"`）；`vue-tsc -b`、lint、分离门禁 `12/12`、聚焦 `1506/1506` 通过。线上 `jiucaihezi.studio/try/` 与搜索引擎收录的清理属部署侧，未执行。
 
+## [2026-09-25] 发版 | 版本号统一到 2.2.0（自 2.1.64 的累计大更新收尾）
+
+- 自 `2.1.64` 起的累计变更：通用自定义 OpenAI 兼容端点取代本机 MLX；账号登录与模型调用 Key 解耦；平台收缩（桌面只增不减、Web 只留下载展示、移动端冻结待改造为桌面控制器）；产品定位改为协作漫剧本地工作台；Web 端删除 `/try/` 体验入口。
+- 版本号由 `scripts/set-version.mjs 2.2.0` 统一写入 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`，`Cargo.lock` 随 cargo 更新；落地页版本号是运行时从 `latest.json` 读的，无需同步。
+- **同时修复一个既有 Rust 测试失败。** `tests::skill_material_command_writes_to_job_workspace` 自 2026-07-05（`e03a0332` 提取 `skill_material.rs`）起在 macOS 上必失败：测试辅助函数 `temp_test_dir` 返回 `std::env::temp_dir()` 的路径，而 macOS 的 `/var` 是指向 `/private/var` 的符号链接，被测守卫 `reject_symlink_path` 会遍历每个路径组件并拒绝符号链接，于是该路径永远非法。修法是让辅助函数返回 `std::fs::canonicalize` 后的真实路径，测的才是被测代码而不是宿主目录布局。CI 不跑 `cargo test`，所以该失败此前只在 macOS 本地可见。
+- 验证：`vue-tsc -b`、lint、分离门禁、前端聚焦 `1506/1506`、`cargo test --lib`  `427 passed / 0 failed / 1 ignored` 通过。真实安装包、升级链路与 Windows/iOS 构建未验收。
+
 ## [2026-09-25] 重构 | 自定义端点取代本机 MLX，设置页本机块收拢
 
 - 新增通用「自定义端点（OpenAI 兼容）」：可用 LM Studio / mlx_vlm.server / mlx-optiq / llama.cpp / vLLM 等任何提供 `/v1/chat/completions` 的服务；只用端点自带的 apiBase 与 apiKey，绝不回落云端凭据（未填 Key 时不发鉴权头）。地址校验允许本机回环 `http` 与远程 `https`，拒绝把凭据、查询参数或片段写进地址。
