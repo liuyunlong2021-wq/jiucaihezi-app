@@ -1501,3 +1501,12 @@
 - 文案：`getCloudRequiredMessage` 明确「账号登录只开启云端同步」并指向「管理密钥」页面与本地模型；登录态改为「已登录，云端同步已启用」；输入框标签由「API Key」改为「模型调用 Key」。
 - 范围：本轮只动客户端。服务端 `/auth/login` 仍返回 `api_key`（`ensureLegacyManagedTokenKey` 同时被服务端聊天代理 `gateway/src/newapi.js` 使用，不能删），留待云端阶段；浏览器登录 deep link 回调（`main.ts` 的 `consumeApiKeyCallbackUrl`）同为待完善项。
 - 验证：`vue-tsc -b`、lint（exit 0）、聚焦 `1505/1505`（含新增 `src/components/auth/__tests__/loginKeySeparation.test.ts`）通过；用户真机实测正常使用（登录后 App 可正常使用）。
+
+## [2026-09-25] 定位 | 平台收缩：桌面为唯一主产品，Web 只留下载展示，Mobile 冻结待改造为控制器
+
+- 决策依据：Harness 只在 Desktop 进程内运行（`src/services/deepSeekHarness.ts` 持有 Session），Web / Mobile 无法复用，两端长期只能提供半残能力，继续维护只会分散精力。
+- 桌面端**零改动**：本次不改任何桌面功能与代码，并在 `AGENTS.md` 写成硬约束「桌面端只增不减」。
+- Web：保留 `https://jiucaihezi.studio` 域名与现有 `public/` 展示页（landing / help / support / terms / privacy），删除 Web 端记忆工作台（「体验」）——代码改动待实施。
+- Mobile：代码暂不动，现有 App 冻结；目标形态是桌面 App 的控制器。
+- 移动端调研（下一步选型）：Happy（MIT，23.9k★，最接近目标形态）、VibeTunnel（不自建中继的路子）、Omnara（云端 agent 控制面，方向相反）。结论：以 Happy 为蓝本但去掉 CLI 包装层 —— Harness 已是进程内运行时，只需给 Session 加远程通道。
+- 涉及：`AGENTS.md` 平台能力段与产品边界段、`docs/wiki/架构/产品架构.md` 第 3 节。真实代码改动（Web 体验删除）尚未执行。
