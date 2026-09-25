@@ -206,6 +206,13 @@ test('desktop package pins and embeds the official Harness SDK client with Node'
   assert.equal(runtimePackage.dependencies.node, '22.23.2')
   assert.match(tauri, /resources\/deepseek-harness/)
   assert.match(tauri, /build:deepseek-harness/)
+
+  // 光在 beforeBuildCommand 里准备不够：CI 为了注入环境变量会把 beforeBuildCommand 置空，
+  // 只跑 build:desktop:quick。准备步骤必须长在那条命令里，否则装出来的包一开口就报
+  // 「无法启动 MCP 进程: os error 2」，而开发态完全正常。
+  const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts
+  assert.match(scripts['build:desktop:quick'], /build:deepseek-harness/)
+  assert.match(readFileSync('scripts/audit-desktop-dist.mjs', 'utf8'), /harnessNode/)
 })
 
 test('Harness keeps its runtime state in app data instead of the user project', () => {

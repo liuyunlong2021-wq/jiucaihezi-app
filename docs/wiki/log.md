@@ -1507,6 +1507,13 @@
 - **同时修复一个既有 Rust 测试失败。** `tests::skill_material_command_writes_to_job_workspace` 自 2026-07-05（`e03a0332` 提取 `skill_material.rs`）起在 macOS 上必失败：测试辅助函数 `temp_test_dir` 返回 `std::env::temp_dir()` 的路径，而 macOS 的 `/var` 是指向 `/private/var` 的符号链接，被测守卫 `reject_symlink_path` 会遍历每个路径组件并拒绝符号链接，于是该路径永远非法。修法是让辅助函数返回 `std::fs::canonicalize` 后的真实路径，测的才是被测代码而不是宿主目录布局。CI 不跑 `cargo test`，所以该失败此前只在 macOS 本地可见。
 - 验证：`vue-tsc -b`、lint、分离门禁、前端聚焦 `1506/1506`、`cargo test --lib`  `427 passed / 0 failed / 1 ignored` 通过。真实安装包、升级链路与 Windows/iOS 构建未验收。
 
+## [2026-09-25] 根治 | 修复 CI 安装包无法对话（Harness 运行时未打进包）
+
+- 现象：`pnpm tauri dev` 正常，CI 出的安装包一发消息就「处理失败 00:00 · 无法启动 MCP 进程: No such file or directory (os error 2)」。
+- 根因：Harness 是用**随包分发的 node** 起子进程的（`src/services/deepSeekHarness.ts:378` 的 `deepseek-harness/node_modules/node/bin/node(.exe)` 交给 `McpStdioTransport` → `mcp_spawn_stdio`）。而该目录在 `.gitignore` 里，只有 `build:deepseek-harness` 会准备它；那道工序原本只长在 `tauri.conf.json` 的 `beforeBuildCommand` 上，**而 CI 为注入 `VITE_GITHUB_OAUTH_CLIENT_ID` 把 `beforeBuildCommand` 置空**，改跑 `build:desktop:quick`（不含该工序），于是安装包里的资源目录缺运行时，开发态却完全正常。
+- 修法（根因，不是症状）：把 `pnpm run build:deepseek-harness` 放进 `build:desktop:quick`，让构建入口自足；`scripts/audit-desktop-dist.mjs` 新增守卫，运行时缺失时直接构建失败并指出确切路径；`deepSeekHarness.test.ts` 把「准备工序必须在 `build:desktop:quick` 里」钉成合同。
+- 验证：缺失场景下审计 `exit=1` 并报出 `deepseek-harness/node_modules/node/bin/node`（临时改名实测，已恢复）；恢复后 `build:desktop:quick exit=0` + `audit passed`；聚焦 `1506/1506`、`vue-tsc -b`、lint 通过。**本轮未重发安装包**，已发布的 `v2.2.0` 安装包仍带此缺陷。
+
 ## [2026-09-25] 重构 | 自定义端点取代本机 MLX，设置页本机块收拢
 
 - 新增通用「自定义端点（OpenAI 兼容）」：可用 LM Studio / mlx_vlm.server / mlx-optiq / llama.cpp / vLLM 等任何提供 `/v1/chat/completions` 的服务；只用端点自带的 apiBase 与 apiKey，绝不回落云端凭据（未填 Key 时不发鉴权头）。地址校验允许本机回环 `http` 与远程 `https`，拒绝把凭据、查询参数或片段写进地址。
