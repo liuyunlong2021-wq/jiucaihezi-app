@@ -44,6 +44,9 @@ test('desktop release creation and public download manifest are independent from
   assert.match(downloadJob, /gh release download/)
   assert.match(downloadJob, /inputs\.publish_tag \|\| github\.ref_name/)
   assert.match(downloadJob, /\/opt\/updates\/latest\.json/)
+  // 上传完之后必须收掉旧版本：每个版本 ≈ 487MB，只增不减会把服务器磁盘吃满。
+  assert.match(downloadJob, /bash -s \/opt\/updates 5/)
+  assert.match(downloadJob, /prune-updates\.sh/)
 })
 
 test('every desktop release job uses the audited desktop build before Tauri', () => {

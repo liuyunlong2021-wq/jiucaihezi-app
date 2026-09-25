@@ -1520,6 +1520,15 @@
 - 本次只 bump 版本号并重跑 CI，未改任何代码：`scripts/set-version.mjs 2.2.1` 写入 `package.json`、`tauri.conf.json`、`Cargo.toml`，`Cargo.lock` 随 `cargo check` 更新。
 - 验证：`vue-tsc -b`、lint、分离门禁、前端聚焦 `1506/1506` 通过。**新包是否真能对话以 CI 产物实测为准**，代码与构建层只做到「缺运行时即构建失败」。
 
+## [2026-09-25] 运维 | 服务器旧版本安装包自动清理 + 文档补齐
+
+- 背景：安装包从每版 48MB 涨到约 487MB（arm dmg 325 + intel dmg 18 + win setup 144），而 `publish-download-manifest` 只 `mkdir` + `scp`，**旧版本永不被删**，磁盘会一直累积。
+- 新增 `scripts/prune-updates.sh`：只保留最近 N 个版本目录（CI 传 5）。两条硬约束写进脚本：只删「目录名形如 `2.2.1`」的目录；**永不删 `latest.json`，也永不删它指向的版本**。
+- 接到发版流程最后一步（scp 全部成功之后才跑），并加合同断言钉住接线；新增 `scripts/__tests__/prune-updates.test.mjs`（4 条，含「钉住版本不被删」的反例）。
+- `docs/wiki/运维/服务器运维.md` 补齐 `/opt/updates/`：布局、谁写谁读、每版体积、保留策略、`df -h` / `du -sh` 巡检与手工清理命令。此前该目录在文档里**完全没有记录**。
+- 结论：下载页或客户端的更新提示只读 `latest.json`，删旧版本目录不影响任何更新路径。
+- 验证：`node --test scripts/__tests__/prune-updates.test.mjs` 4/4；完整聚焦、门禁、`vue-tsc -b`、lint 通过。**未在真服务器上执行过**（无凭据），磁盘实际占用待人工确认。
+
 ## [2026-09-25] 重构 | 自定义端点取代本机 MLX，设置页本机块收拢
 
 - 新增通用「自定义端点（OpenAI 兼容）」：可用 LM Studio / mlx_vlm.server / mlx-optiq / llama.cpp / vLLM 等任何提供 `/v1/chat/completions` 的服务；只用端点自带的 apiBase 与 apiKey，绝不回落云端凭据（未填 Key 时不发鉴权头）。地址校验允许本机回环 `http` 与远程 `https`，拒绝把凭据、查询参数或片段写进地址。

@@ -492,3 +492,10 @@ jobs:
           scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
             "$RUNNER_TEMP/latest.json" \
             "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/latest.json"
+
+          # 新版本已经就位（上面的 scp 都成功了），顺手把旧版本删到只留最近 5 个。
+          # 每个版本 arm dmg 325M + intel dmg 18M + win setup 144M ≈ 487M，只增不减
+          # 会把服务器磁盘吃满；脚本里钉死了「不碰 latest.json、不碰它指向的版本」。
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no \
+            "${DEPLOY_USER}@${DEPLOY_HOST}" "bash -s /opt/updates 5" \
+            < scripts/prune-updates.sh
