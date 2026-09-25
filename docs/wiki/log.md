@@ -1486,6 +1486,20 @@
 - 现按工作区持有 Runtime，同工作区共享创建 Promise；Session Query 优先复用该工作区实例，不同项目不再相互关闭。同项目更换固定启动配置时，严格等待旧实例完整退出后再启动新实例。
 - 取消任务改为关闭任务捕获的实例，不再从工作台调用全局停机。定向 `101/101`、完整 focused `1509/1509`、`vue-tsc -b` 与差异检查通过；真实 Desktop 跨项目并行待人工验收。
 
+## [2026-09-25] 定位 | 产品定位定为「协作漫剧本地工作台」，漫剧移出迁出名单
+
+- 用户确认：「协作」= 人与 AI 协作（不是多人协作），「本地」= 数据与模型可留在本机；漫剧是主用途，不再属于迁出对象。
+- **漫剧移出名单不等于恢复旧漫剧工作台**：其产品壳（`src/components/workbench/` 等）仍在兄弟仓库 `../jiucaihezi-legacy-products/`，不搬回主仓；漫剧能力由现行记忆工作台与创作面板（`CreationPanel`、`mediaTaskStore`）承接。OpenCode、旧 Studio、文/武/道/创、电商、制作工作台仍属迁出范围。
+- 涉及：`docs/wiki/架构/产品架构.md`（第 1 节改名「产品定位与唯一产品边界」并改写）、`docs/wiki/hot.md`、`docs/wiki/CLAUDE.md` 同步。
+- 本轮只改文档，不动任何代码。
+
+## [2026-09-25] 实施 | Web 端删除「体验」（/try/ 工作台入口）
+
+- Web 只保留下载与主页展示：落地页（`index.html`，纯静态、不挂 app 脚本）删掉 3 处 `/try/` 链接与「网页版」文案；`prune-web-dist.mjs` 在 Web 产物里删除 `dist/try/`；`audit-web-dist.mjs` 的 `allowedTopLevelDirs` 移除 `try`，工作台若重新进 Web 产物会直接审计失败；`public/sitemap.xml` 移除 `/try/`。
+- `vite.config.ts` 的 `try` 入口保留不动：桌面/iOS 构建靠 `prune-desktop-dist.mjs` 把 `try/index.html` 提回根目录成为 Tauri `frontendDist`。
+- `src/` 一行未改；web-only 分支变死代码属于后续独立批次。
+- 验证：Web 构建 `[web-dist] removed try/` + `audit passed`，产物根目录无 `try/`；桌面构建 `audit passed` 且 `dist/index.html` 仍是工作台（入口 `./assets/try-*.js`、含 `id="app"`）；`vue-tsc -b`、lint、分离门禁 `12/12`、聚焦 `1506/1506` 通过。线上 `jiucaihezi.studio/try/` 与搜索引擎收录的清理属部署侧，未执行。
+
 ## [2026-09-25] 重构 | 自定义端点取代本机 MLX，设置页本机块收拢
 
 - 新增通用「自定义端点（OpenAI 兼容）」：可用 LM Studio / mlx_vlm.server / mlx-optiq / llama.cpp / vLLM 等任何提供 `/v1/chat/completions` 的服务；只用端点自带的 apiBase 与 apiKey，绝不回落云端凭据（未填 Key 时不发鉴权头）。地址校验允许本机回环 `http` 与远程 `https`，拒绝把凭据、查询参数或片段写进地址。

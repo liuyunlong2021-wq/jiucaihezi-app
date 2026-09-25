@@ -5,10 +5,6 @@
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://jiucaihezi.studio/try/</loc>
-    <priority>0.8</priority>
-  </url>
-  <url>
     <loc>https://jiucaihezi.studio/support/</loc>
     <priority>0.5</priority>
   </url>

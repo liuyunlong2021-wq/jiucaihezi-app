@@ -62,7 +62,6 @@ const allowedTopLevelDirs = new Set([
   'skills',
   'support',
   'terms',
-  'try',
 ])
 
 function walk(directory) {
