@@ -1564,5 +1564,6 @@
 - 图片结果改走 `response_format: b64_json`：适配器的 `public_base_url` 是 Docker 内网名 `frps:8796`，桌面客户端解析不了；改成 `127.0.0.1` 又会被 `src/utils/urlSafety.ts` 的私有地址校验拦下 —— 只剩内联回收一条路。新增规格级 `imageResultFormat`，只对 jc 图片模型生效，其它图片模型行为不变。
 - 验证：`vue-tsc -b` exit 0；定向测试失败集合与基线逐项一致（47 项，全落在 creationPanel 契约 / filetree / memoryWorkbench / scene3d / skillMaterialRuntime / prune-updates，本次**新增 0**，`runtime/creation` 与 `data` 域 0 失败）；`comfy-adapter` 自检 `app.py --check` 四步全绿；`tools/verify_newapi_contract.py` 19/19。
 - **已实测**：图片文生成功并落盘（b64 路径通）。
-- **尚未跑通**：视频。参考图以 `https://asset.localhost/...`（Tauri 本地资源伪域名）发给了适配器，上游下载不到，报 `400 fail_to_fetch_task / 参考图错误: 下载参考图失败`。待修。
+- **已实测**：视频端到端跑通（2026-09-26 10:42，面板绿勾并落盘 `.raw/jc-media/视频/...mp4`）。路上逐个修掉三处：参考图把 Tauri 本地地址直接透传给远端（改成先上传）、改了 meta 但没重启适配器导致比例失效、异步提交回 202 被 NewAPI 当成失败。
+- 供应商可直接使用：`docs/wiki/运维/韭菜盒子本机ComfyUI图片模型API对外接入-2026-09-26.md`、`docs/wiki/运维/韭菜盒子本机ComfyUI视频模型API对外接入-2026-09-26.md`。
 - 运维记录见 `docs/wiki/运维/本机ComfyUI模型对外接入-2026-09-26.md`（含端口漂移、适配器父+子进程模型等坑）。
