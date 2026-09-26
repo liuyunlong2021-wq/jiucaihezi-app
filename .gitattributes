@@ -1,0 +1,12 @@
+# 仓库统一以 LF 存储与检出。
+#
+# 起因（2026-09-26）：仓库此前没有换行符策略，本机 core.autocrlf=true 把 Windows 检出
+# 变成 CRLF，而一批合同测试用 `\n` 锚定源码正则（CreationPanel.vue / ProjectFileTree.vue /
+# MemoryWorkbench.vue 的结构断言）。结果是同一个提交在 macOS/Linux 上全绿、在 Windows 上
+# 出现 39 个「Input: ''」式假失败。索引里 1251 个文本文件本来就是 LF，这里只是把既有事实
+# 写成策略，Windows 检出也拿到 LF。
+* text=auto eol=lf
+
+# Windows 批处理保留 CRLF。
+*.bat text eol=crlf
+*.cmd text eol=crlf
