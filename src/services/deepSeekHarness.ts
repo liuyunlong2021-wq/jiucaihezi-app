@@ -35,6 +35,11 @@ export interface DeepSeekHarnessInput {
   model: string
   apiBase: string
   apiKey: string
+  /**
+   * 当前模型是否声明图片输入。官方对「没声明」的模型按纯文本处理，图片既不会内联进
+   * 请求，`read_image` 也会被直接拒掉，于是「看一眼图片」退化成找文件、找 OCR。
+   */
+  imageInput?: boolean
   fileAccessEnabled?: boolean
   mediaSelected?: boolean
   avSelected?: boolean
@@ -75,11 +80,21 @@ export function deepSeekPermissionMode(fileAccessEnabled = false): 'workspace-wr
   return fileAccessEnabled ? 'danger-full-access' : 'workspace-write'
 }
 
+/**
+ * 路由 patch 里这条模型声明的输入模态。官方对没声明的模型取 `DEFAULT_INPUT = ["text"]`：
+ * 低估的代价是图片在附着前就被拒（点名模型），高估的代价是上游在轮次中途拒绝。
+ * 实测不声明时，一次「查看图片内容」变成 11 步工具乱找 + 6 次 429/524 重试，16 分钟无果。
+ */
+export function deepSeekModelInput(imageInput = false): Array<'text' | 'image'> {
+  return imageInput ? ['text', 'image'] : ['text']
+}
+
 function runtimeKey(input: DeepSeekHarnessInput): string {
   return [
     input.cwd,
     input.apiBase,
     input.model,
+    deepSeekModelInput(input.imageInput).join('+'),
     deepSeekPermissionMode(input.fileAccessEnabled),
     input.mediaSelected ? 'media' : '',
     input.avSelected ? 'av' : '',
@@ -257,6 +272,7 @@ export function deepSeekContentBlocks(
   message: string,
   attachments: ResolvedDirectAttachment[] = [],
   files: DirectMessageFile[] = [],
+  imageInput = false,
 ): any[] {
   const inlineFiles = [
     ...files,
@@ -264,19 +280,30 @@ export function deepSeekContentBlocks(
       ? [{ name: attachment.name, content: attachment.textContent }]
       : []),
   ]
+  const images = attachments.filter(attachment => attachment.kind === 'image')
+  const imageBlocks: any[] = []
+  // 模型声明的图片输入是唯一开关：官方对未声明的模型按纯文本处理，送过去的图片块
+  // 既不会内联，`read_image` 也会被拒。所以这里不发块，而是把它当“未送达”说清楚。
+  if (imageInput) {
+    for (const attachment of images) {
+      const match = /^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/s.exec(attachment.value)
+      const mimeType = (match?.[1] || attachment.mime).toLowerCase().replace('image/jpg', 'image/jpeg')
+      if (!match || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mimeType)) continue
+      imageBlocks.push({ type: 'image', data: match[2], mimeType })
+    }
+  }
+  // 看不见的图片必须说出来：直连路径一直有这句降级文案，Harness 路径漏了它，
+  // 模型只拿到一个附件 id 就去满盘找文件（实测 11 步工具、16 分钟、最终 524）。
+  const undelivered = images.length - imageBlocks.length
+  const notice = undelivered
+    ? `[附带 ${undelivered} 张图片，${imageInput ? '当前格式不受支持（仅支持 PNG/JPEG/WebP/GIF）' : '当前模型不支持视觉'}]`
+    : ''
   const text = [
     message,
     ...inlineFiles.map(file => `[已读取文件: ${file.name}]\n${file.content.slice(0, 120_000)}`),
+    notice,
   ].filter(Boolean).join('\n\n')
-  const blocks: any[] = [{ type: 'text', text }]
-  for (const attachment of attachments) {
-    if (attachment.kind !== 'image') continue
-    const match = /^data:([^;,]+)(?:;[^,]*)?;base64,(.+)$/s.exec(attachment.value)
-    const mimeType = (match?.[1] || attachment.mime).toLowerCase().replace('image/jpg', 'image/jpeg')
-    if (!match || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mimeType)) continue
-    blocks.push({ type: 'image', data: match[2], mimeType })
-  }
-  return blocks
+  return [{ type: 'text', text }, ...imageBlocks]
 }
 
 export function deepSeekTurnError(event: any): string {
@@ -346,6 +373,11 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     '',
   ]
   await mkdir(routeDir, { recursive: true })
+  // 不声明时官方默认就是纯文本（DEFAULT_INPUT = ["text"]），所以只有确实声明图片输入时才写这一行：
+  // 显式写 [text] 没有信息增量，却会把 catalog 自带的模态一并抹掉。
+  const modelInputLines = input.imageInput
+    ? [`            input: ${JSON.stringify(deepSeekModelInput(true))}`]
+    : []
   await writeTextFile(patchPath, [
         '- id: llm-pi-ai',
         '  config:',
@@ -370,6 +402,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         `            name: ${JSON.stringify(input.model)}`,
         `            contextWindow: ${DEEPSEEK_HARNESS_CONTEXT_WINDOW}`,
         `            maxTokens: ${DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS}`,
+        ...modelInputLines,
         '',
         ...mcpPatch,
         ...subagentPatch,
@@ -525,7 +558,14 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
       if (event?.type === 'llm/retry') {
         const retry = Number(event.data?.retry || 0)
         const max = Number(event.data?.maxRetries || 0)
-        input.onStatus?.(max ? `正在重试（${retry}/${max}）` : '正在重试')
+        // 上游原因必须显形：只报「正在重试」时，16 分钟的盲等和 10 秒的诊断没法区分。
+        // 事件自带 failure（如 RATE_LIMIT + 429 原文），JSON 主体不上面向用户的状态行。
+        const failure = event.data?.failure
+        const detail = [failure?.code, String(failure?.message ?? '').replace(/\s*\{[\s\S]*$/, '')]
+          .map(value => String(value ?? '').replace(/\s+/g, ' ').trim())
+          .filter(Boolean)
+          .join(' ')
+        input.onStatus?.(max ? `正在重试（${retry}/${max}）${detail ? `·${detail}` : ''}` : '正在重试')
       }
       const progress = deepSeekProgress(event)
       if (progress?.id) input.onProgress?.(progress)
@@ -551,7 +591,7 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
       type: 'run',
       requestId,
       sessionId: wireSessionId,
-      contentBlocks: deepSeekContentBlocks(input.message, input.attachments, input.files),
+      contentBlocks: deepSeekContentBlocks(input.message, input.attachments, input.files, input.imageInput),
     } as unknown as JSONRPCMessage)
     input.onStatus?.('正在执行')
     const result = await completed || finalText

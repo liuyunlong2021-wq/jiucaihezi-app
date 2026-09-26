@@ -43,6 +43,11 @@ test('Desktop specialized capabilities stay inside the Harness session', () => {
   assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?avSelected: avSelected\.value/)
   assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?scene3dSelected: scene3dSelected\.value/)
   assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?mcpServerIds: selectedMcpToolNames\.value\.map/)
+  // 图片能否到达模型取决于路由 patch 里的模态声明：不传能力，Harness 会按纯文本处理附件。
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?imageInput: dhImageInput/)
+  assert.match(workbench, /function harnessImageInput\(modelId: string\): boolean \{[\s\S]*?resolveModelInputModalities\(/)
+  // 看不见的图片必须给用户一句人话，而不是静默发出去等 16 分钟。
+  assert.match(workbench, /当前模型不支持图片输入，这 \$\{attachedImages\} 张图片不会送达/)
 })
 
 test('image and video attachments display their project paths while models receive the saved original', () => {

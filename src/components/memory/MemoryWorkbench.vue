@@ -105,6 +105,7 @@ import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorRe
 import { safeFetch } from '@/utils/httpClient'
 import { ensureJevScorer } from '@/utils/jevScorerRuntime'
 import { setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
+import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import {
@@ -864,6 +865,14 @@ function selectedModel() {
     || textModels.value.find(model => model.id === agentStore.currentModel)
 }
 
+/**
+ * Harness 对未声明图片输入的模型按纯文本处理：图片不会内联给模型，`read_image` 也会被拒。
+ * 能力判断复用产品既有的那一份（@Jev 与直连路径用的是同一份），不在 Harness 侧另立一套。
+ */
+function harnessImageInput(modelId: string): boolean {
+  return resolveModelInputModalities({ id: modelId, providerId: selectedModel()?.providerId }).includes('image')
+}
+
 function isSelectedModel(model: { id: string; providerId?: string }): boolean {
   return model.id === agentStore.currentModel
     && (model.providerId || 'jiucaihezi') === (localStorage.getItem('jcModelProviderId') || 'jiucaihezi')
@@ -1033,6 +1042,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
           model: config.model,
           apiBase: config.apiBase,
           apiKey: config.apiKey,
+          imageInput: harnessImageInput(config.model),
           fileAccessEnabled: fileToolsSelected.value,
         })
         activeConversation = {
@@ -1831,6 +1841,12 @@ async function send() {
     const dhConfig = useHarness
       ? await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
       : null
+    // 图片能不能送达取决于所选模型声明的输入模态；看不见就得说出来，
+    // 而不是让模型拿着一个附件 id 去满盘找文件（实测 16 分钟无果）。
+    const dhImageInput = useHarness ? harnessImageInput(dhConfig!.model) : false
+    const attachedImages = requestAttachments.filter(attachment => attachment.kind === 'image').length
+    if (!dhImageInput && attachedImages)
+      contextNotice.value = `当前模型不支持图片输入，这 ${attachedImages} 张图片不会送达；换成支持视觉的模型再试。`
     const dhMissingTurns = useHarness ? deepSeekHandoffTurns(baseTurns) : []
     const dhContext = useHarness && dhMissingTurns.length
       ? buildCreativeContext({
@@ -1850,6 +1866,7 @@ async function send() {
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
+      imageInput: dhImageInput,
       fileAccessEnabled: fileToolsSelected.value,
       mediaSelected: mediaSelected.value,
       avSelected: avSelected.value,
@@ -1942,6 +1959,7 @@ async function send() {
           model: dhConfig!.model,
           apiBase: dhConfig!.apiBase,
           apiKey: dhConfig!.apiKey,
+          imageInput: dhImageInput,
           fileAccessEnabled: fileToolsSelected.value,
           mediaSelected: mediaSelected.value,
           avSelected: avSelected.value,

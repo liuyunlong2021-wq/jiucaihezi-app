@@ -6,6 +6,7 @@ import {
   deepSeekAssistantText,
   deepSeekContentBlocks,
   deepSeekHandoffTurns,
+  deepSeekModelInput,
   deepSeekPermissionMode,
   deepSeekProgress,
   deepSeekPrompt,
@@ -61,13 +62,47 @@ test('DeepSeek Harness transfers missing history once without a three-round cont
   )
 })
 
+test('DeepSeek Harness declares image input so the attached image reaches the model', () => {
+  // 路由 patch 不声明模态时，官方取 DEFAULT_INPUT = ["text"]：图片不会内联进请求，
+  // read_image 直接报「does not declare image input」，实测一次“查看图片内容”就这么
+  // 变成 11 步工具乱找 + 6 次 429/524 重试，16 分钟无果。
+  assert.deepEqual(deepSeekModelInput(true), ['text', 'image'])
+  assert.deepEqual(deepSeekModelInput(false), ['text'])
+  assert.deepEqual(deepSeekModelInput(), ['text'])
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  assert.match(source, /imageInput\?: boolean/)
+  assert.match(source, /\.\.\.modelInputLines/)
+  assert.match(source, /\[`            input: \$\{JSON\.stringify\(deepSeekModelInput\(true\)\)\}`\]/)
+  // 模态影响 patch 内容，就必须进 Runtime key：否则读会话时建的纯文本 Runtime
+  // 会被第一轮发送直接复用，修好的声明永远不生效。
+  assert.match(source, /deepSeekModelInput\(input\.imageInput\)\.join\(/)
+})
+
 test('DeepSeek Harness sends materialized images through native SDK blocks', () => {
   assert.deepEqual(
     deepSeekContentBlocks('看图', [{
       id: 'image-1', name: 'image.png', mime: 'image/png', size: 3, kind: 'image',
       value: 'data:image/png;base64,QUJD', previewUrl: 'blob:thumbnail',
-    }]),
+    }], [], true),
     [{ type: 'text', text: '看图' }, { type: 'image', data: 'QUJD', mimeType: 'image/png' }],
+  )
+})
+
+test('DeepSeek Harness tells the model when an attached image cannot be delivered', () => {
+  const image = {
+    id: 'image-1', name: 'image.png', mime: 'image/png', size: 3, kind: 'image' as const,
+    value: 'data:image/png;base64,QUJD',
+  }
+  // 不声明图片输入的模型：不发图片块，但必须把“没送达”说出来。
+  // 不说的后果实测是模型拿着附件 id 满盘找图（11 步工具 / 16 分钟 / 524）。
+  assert.deepEqual(
+    deepSeekContentBlocks('看图', [image], []),
+    [{ type: 'text', text: '看图\n\n[附带 1 张图片，当前模型不支持视觉]' }],
+  )
+  // 声明了图片输入但格式不支持时，同样不能静默丢。
+  assert.deepEqual(
+    deepSeekContentBlocks('看图', [{ ...image, mime: 'image/heic', value: 'data:image/heic;base64,QUJD' }], [], true),
+    [{ type: 'text', text: '看图\n\n[附带 1 张图片，当前格式不受支持（仅支持 PNG/JPEG/WebP/GIF）]' }],
   )
 })
 
@@ -218,6 +253,9 @@ test('desktop package pins and embeds the official Harness SDK client with Node'
 test('Harness keeps its runtime state in app data instead of the user project', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
+  // 重试原因必须上状态行：带 failure 的事件已经给了 code 与原始文案，
+  // 只报「正在重试」时用户无法区分“上游限流”和“自己的代码在转圈”。
+  assert.match(source, /const detail = \[failure\?\.code, String\(failure\?\.message/)
   assert.match(source, /appDataDir\(\)/)
   assert.match(source, /writeTextFile\(patchPath/)
   assert.match(source, /dev_copy_external/)
