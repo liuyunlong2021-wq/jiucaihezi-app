@@ -123,7 +123,8 @@ def verify_video_contract(key: str) -> None:
         "steps": 4,
     }
     status, data, _ = call("/v1/videos", payload, "POST", key)
-    check("POST /v1/videos -> 202", status == 202, f"HTTP {status}")
+    # 必须 200：NewAPI 只把 200 当中继成功，收到 202 会把它自己的响应体当错误丢回面板
+    check("POST /v1/videos -> 200", status == 200, f"HTTP {status}")
     task_id = str((data or {}).get("id") or "")
     check("返回任务 id", task_id.startswith("task_"), task_id)
     if not task_id:

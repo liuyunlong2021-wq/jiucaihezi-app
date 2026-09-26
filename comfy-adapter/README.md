@@ -104,8 +104,9 @@ curl -X POST http://127.0.0.1:9000/v1/images/generations ^
 # 1) 提交（三种入口等价）
 curl -X POST .../v1/images/generations -H "Authorization: Bearer <key>" \
      -d '{"model":"qwen-image-2.1","prompt":"...","size":"1920x1080","async":true}'
-# HTTP 202
-# {"id":"task_20260925_f9de4afb2cd6","object":"generation.task","status":"queued",
+# HTTP 200（必须回 200：NewAPI 只把 200 当中继成功）
+# {"id":"task_20260925_f9de4afb2cd6","task_id":"task_20260925_f9de4afb2cd6",
+#  "object":"generation.task","status":"queued",
 #  "created_at":1790328000,"status_url":"/v1/tasks/task_20260925_f9de4afb2cd6"}
 
 # 2) 轮询

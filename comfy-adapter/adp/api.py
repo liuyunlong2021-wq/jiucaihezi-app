@@ -516,6 +516,9 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
     # ------------------------------------------------------------ 异步任务
     def _task_response(task: Task, *, include_result: bool = True) -> dict:
         view = task.view(include_result=include_result)
+        # task_id 是给中转网关认的：仓库里其它适配器（shanhai / boluo / xiaoyi /
+        # kik / zx-video）的提交体都同时给 id 与 task_id，NewAPI 按这个约定取任务号。
+        view["task_id"] = task.id
         view["status_url"] = f"/v1/tasks/{task.id}"
         return view
 
@@ -583,7 +586,10 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
             raise Busy(str(e)) from e
         asyncio.create_task(_run_task(task, model, raw, image_inputs))
         log.info("[任务 %s] 已入队（%s，模型 %s）", task.id, task_type, model)
-        return JSONResponse(status_code=202, content=_task_response(task, include_result=False))
+        # 必须回 200：NewAPI 只把 200 当中继成功，收到 202 会判为失败，
+        # 把它自己的响应体当作错误 message 丢回面板（表现为「后台成功但面板报错」）。
+        # 仓库里其它适配器的异步提交也都是 200。
+        return JSONResponse(status_code=200, content=_task_response(task, include_result=False))
 
     async def _refs_from_strings(items) -> list[ReferenceImage]:
         return await resolve_many(

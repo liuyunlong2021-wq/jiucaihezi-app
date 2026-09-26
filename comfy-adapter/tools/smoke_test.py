@@ -301,7 +301,8 @@ def main() -> int:
             endpoint = "images/generations"
 
     # 异步模式：先拿到 task id，再轮询到终态
-    if args.use_async and code == 202:
+    # 提交固定回 200（NewAPI 只认 200）；旧版本曾回 202，这里两种都接受。
+    if args.use_async and code in (200, 202):
         submit = json.loads(body)
         task_id = submit.get("id")
         print(f"\n--- POST /v1/{endpoint} (async) ---")
