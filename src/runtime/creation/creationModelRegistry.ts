@@ -18,7 +18,7 @@ import type {
 } from './creationMediaTypes'
 
 import { getRhEndpointCapability } from '@/data/rhCapabilities'
-import { MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
+import { JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_IMAGE_SIZE_OPTIONS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
 
 const RATIOS = ['adaptive', '1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 const GPT_IMAGE_SIZES = [
@@ -113,6 +113,30 @@ const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
+// comfy-adapter 的 minimax-h3 用 length（帧）表达时长，秒数由适配器按 24fps 换算；
+// 但对应的工作流约束是 max_length=501 帧（≈20.9 秒），所以面板只开到 15 秒。
+const JC_H3_DURATION_FIELD = {
+  key: 'duration',
+  label: '时长(秒)',
+  kind: 'number' as const,
+  defaultValue: 5,
+  min: 1,
+  max: 15,
+  step: 1,
+}
+
+/** comfy-adapter 的 H3 模板把 width/height 直接绑到节点上（multiple_of=32），所以画幅能传。
+ * 例外：minimax-h3-ref2v 的模板没有 width/height 绑定，
+ * 它的尺寸由工作流自带的 ResolutionSelector 按 mode 算 —— 那里不能给选择器，给了也不生效。
+ */
+const JC_H3_SIZE_FIELD = {
+  key: 'size',
+  label: '画幅',
+  kind: 'select' as const,
+  defaultValue: '1344x768',
+  options: JC_VIDEO_SIZE_OPTIONS,
+}
+
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型。 */
 export const RH_ONLY_MODE = false
 
@@ -155,6 +179,7 @@ function baseSpec(input: {
   duration?: CreationModelSpec['capabilities']['duration']
   inputModalities?: CreationInputModality[]
   contractIssues?: string[]
+  imageResultFormat?: CreationModelSpec['imageResultFormat']
 }): CreationModelSpec {
   const outputModalities =
     input.outputModalities ||
@@ -199,6 +224,7 @@ function baseSpec(input: {
     fields: input.fields || promptFields(),
     aliases: input.aliases,
     notes: input.notes,
+    imageResultFormat: input.imageResultFormat,
     verifiedAt: input.contractStatus === 'unknown' ? undefined : '2026-06-16',
     contractIssues: input.contractIssues,
   }
@@ -477,6 +503,160 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     resolutions: ['720P'],
     ratios: ['2:3', '3:2', '16:9', '9:16', '1:1'],
     duration: { min: 6, max: 30 },
+  }),
+  // ── 本机 GPU 的 comfy-adapter（NewAPI → 隧道 → 本机 ComfyUI）───────────────────
+  // 这里的 model 就是 NewAPI 渠道里的公开模型名，渠道的模型映射再换成适配器的 id。
+  // 必须有 GPU 的那台机器在线才能出图/出片；VPS 只负责中转、计费与鉴权。
+  baseSpec({
+    id: 'jc-qwen-image-2.1',
+    model: 'jc-qwen-image-2.1',
+    label: 'jc-Qwen-Image 2.1',
+    task: 'image',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    mode: 'text-to-image',
+    contractStatus: 'verified',
+    endpoint: '/v1/images/generations',
+    pollKind: 'none',
+    assetFlow: 'none',
+    resultExtractor: 'openai-image',
+    files: { images: { min: 0, max: 10, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      {
+        key: 'size',
+        label: '尺寸',
+        kind: 'select',
+        defaultValue: '1080x1920',
+        options: JC_IMAGE_SIZE_OPTIONS,
+      },
+      { key: 'image', label: '参考图', kind: 'images' },
+    ]),
+    // 适配器的 public_base_url 是 Docker 内网名（frps:8796）：NewAPI 容器能解析，
+    // 客户端解析不了，而 urlSafety 又禁止把结果地址指向 127.0.0.1 等私有地址。
+    // 所以图片必须走 b64_json 内联回收；视频另一条路：NewAPI 的 /v1/videos/{id}/content 代理。
+    imageResultFormat: 'b64_json',
+    notes: ['本机 ComfyUI 的 Qwen-Image 2.1：不给参考图＝文生图，给参考图＝单图/多图编辑（最多 10 张）。'],
+    // 画幅完全由 size 决定。不暴露 resolution —— 适配器的 resolution 是参考图缩放基准边长（整数），
+    // 和别的模型的 '1k'/'2k' 不是同一个东西，混用会互相踩。
+    ratios: [],
+    resolutions: [],
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3',
+    model: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 文生视频',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-video',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'none',
+    resultExtractor: 'newapi-task',
+    // 显式声明「不接受任何参考图」：适配器的 H3 模板一旦收到图就会切到 Ref2VA，
+    // 不拦的话用户选一张图会静默变成另一种模式。
+    files: { images: { min: 0, max: 0 } },
+    fields: promptFields([JC_H3_DURATION_FIELD, JC_H3_SIZE_FIELD]),
+    notes: ['本机 ComfyUI 的 MiniMax H3（音视频同步，4 步 Turbo）；默认 1344x768，纯文字生成。'],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 1, max: 15 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3-first-frame',
+    model: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 首帧图生',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-first-frame',
+    mode: 'image-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    files: { images: { min: 1, max: 1, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      JC_H3_DURATION_FIELD,
+      JC_H3_SIZE_FIELD,
+      { key: 'images', label: '首帧图', kind: 'images', required: true },
+    ]),
+    notes: ['画布选中的第 1 张图作为首帧，后续画面由提示词补出。'],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 1, max: 15 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3-first-last',
+    model: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 首尾帧',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-first-last',
+    mode: 'image-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    files: { images: { min: 2, max: 2, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      JC_H3_DURATION_FIELD,
+      JC_H3_SIZE_FIELD,
+      { key: 'images', label: '首帧 + 尾帧', kind: 'images', required: true },
+    ]),
+    notes: ['按画布顺序：第 1 张是首帧、第 2 张是尾帧，短片从首帧演到尾帧。'],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 1, max: 15 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3-ref2v',
+    model: 'jc-minimax-h3-ref2v',
+    label: 'jc-MiniMax H3 参考生视频',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-video',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    files: { images: { min: 1, max: 6, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      { ...JC_H3_DURATION_FIELD, defaultValue: 3, label: '时长(秒)' },
+      // 尺寸不给：ref2v 模板没绑 width/height，给了也不生效（假控件）。
+      // 但节点 29（ResolutionSelector）有 aspect_ratio 输入，已在 meta 里绑定。
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '16:9 (Widescreen)',
+        options: JC_H3_RATIO_OPTIONS,
+      },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+    ]),
+    notes: [
+      '双采 + 潜空间上采样（文武双修均衡版），音视频同步输出。',
+      '参考图 1~6 张：7 张以上会击穿 48GB 显存，适配器侧限制为 6 张。',
+      '只选比例：具体像素由工作流自带的 ResolutionSelector（multiple=32）算，再经 1.5x 潜空间上采样。',
+    ],
+    // 比例值必须是 ResolutionSelector 的枚举原字符串（带后缀），不能简写成 "9:16"
+    ratios: JC_H3_RATIOS,
+    resolutions: [],
+    duration: { min: 1, max: 15 },
   }),
   ...GPT_IMAGE_2_ROUTES.map(route => baseSpec({
     id: route.id,
@@ -1964,6 +2144,8 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.0'
+  // 本机 comfy-adapter 的模型统一用 jc- 前缀，单独成组，不要混进「其他模型」
+  if (spec.id.startsWith('jc-')) return 'jc 本机'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'
   if (spec.task === 'image' && ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'rh-image-v2', 'rh-pro-image'].some(key => id.includes(key))) return 'Banana'
   if (id.includes('z-image')) return 'Z Image'

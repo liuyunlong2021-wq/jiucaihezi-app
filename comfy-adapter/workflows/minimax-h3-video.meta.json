@@ -1,0 +1,99 @@
+{
+  "id": "minimax-h3",
+  "display_name": "MiniMax H3 (音视频同步)",
+  "description": "MiniMax H3 音视频同步生成，4 步 Turbo。不给图=文生视频；给首帧=图生视频；给首帧+尾帧=首尾帧；给参考图=参考生视频。1344x768 五秒约 110 秒。",
+
+  "template": "minimax-h3-video.json",
+
+  "output_kind": "video",
+  "default_async": true,
+  "_comment_async": "视频要跑 1~5 分钟，远超 Cloudflare 免费版 100 秒硬超时。所以默认异步：提交 20ms 返回 task_id，客户端轮询 /v1/tasks/{id}。",  "duration_fps": 24,
+  "_comment_duration_fps": "调用方按秒传 duration 时换算成 length 帧数（24fps）；H3 节点自己会对齐到 17n+5。不传则用 defaults.length。",
+  "capabilities": {
+    "text_to_video": true,
+    "image_to_video": true,
+    "first_last_frame": true,
+    "reference_to_video": true,
+    "max_reference_images": 10,
+    "audio": "generated",
+    "seed": true,
+    "steps": true
+  },
+
+  "defaults": {
+    "width": 1344,
+    "height": 768,
+    "length": 124,
+    "steps": 4,
+    "task_type": "auto",
+    "shift_video": 12.0,
+    "shift_audio": 3.0
+  },
+
+  "bind": {
+    "prompt": [{ "node": "6", "input": "prompt" }],
+    "width": [{ "node": "6", "input": "width" }],
+    "height": [{ "node": "6", "input": "height" }],
+    "length": [{ "node": "6", "input": "length" }],
+    "task_type": [{ "node": "6", "input": "task_type" }],
+    "steps": [{ "node": "7", "input": "steps" }],
+    "shift_video": [{ "node": "7", "input": "shift_video" }],
+    "shift_audio": [{ "node": "7", "input": "shift_audio" }],
+    "seed": [{ "node": "9", "input": "noise_seed" }]
+  },
+
+  "dynamic_blocks": [
+    {
+      "param": "first_frame",
+      "_comment": "首帧图 -> 第 1 个 LoadImage；接了就是 I2VA，同时还有尾帧就是 FL2VA",
+      "min_items": 1,
+      "max_items": 1,
+      "node_id_format": "ff{i1}",
+      "node_template": {
+        "class_type": "LoadImage",
+        "inputs": { "image": "{value}" },
+        "_meta": { "title": "首帧" }
+      },
+      "binding": [{ "node": "6", "input": "first_frame" }]
+    },
+    {
+      "param": "last_frame",
+      "min_items": 1,
+      "max_items": 1,
+      "node_id_format": "lf{i1}",
+      "node_template": {
+        "class_type": "LoadImage",
+        "inputs": { "image": "{value}" },
+        "_meta": { "title": "尾帧" }
+      },
+      "binding": [{ "node": "6", "input": "last_frame" }]
+    },
+    {
+      "param": "reference_images",
+      "_comment": "参考图最多 10 张。槽位名 ref_image_0..9（0 基，minimax 插件自己定的）",
+      "min_items": 0,
+      "max_items": 10,
+      "node_id_format": "ref{i1}",
+      "node_template": {
+        "class_type": "LoadImage",
+        "inputs": { "image": "{value}" },
+        "_meta": { "title": "参考图 {i1}" }
+      },
+      "binding": [{ "node": "6", "input": "ref_images.ref_image_{i}" }]
+    }
+  ],
+
+  "constraints": {
+    "multiple_of": 32,
+    "min_size": 256,
+    "max_size": 2048,
+    "max_pixels": 2100000,
+    "max_batch": 1,
+    "min_steps": 1,
+    "max_steps": 40,
+    "min_length": 5,
+    "max_length": 501
+  },
+
+  "output_node": "12"
+}

@@ -53,7 +53,11 @@ import {
   currentModelAvailability,
   availableModels,
   aspectOptions,
+  aspectChoices,
+  currentAspectLabel,
   sizeOptions,
+  sizeChoices,
+  currentSizeLabel,
   resolutionOptions,
   durationOptions,
   durationRange,
@@ -3926,15 +3930,18 @@ const modelGroups = computed(() => {
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
   const order = cpState.task === 'image'
     ? [
+        'jc 本机',
         'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
         'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
       ]
     : cpState.task === 'video'
       ? [
+          'jc 本机',
           'Seedance 2.0', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
       : [
+          'jc 本机',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Veo', 'Grok Video',
           'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
@@ -4625,38 +4632,38 @@ const canSend = computed(
       <!-- 尺寸 (gpt-image-2) -->
       <div v-if="sizeOptions.length" class="cp-island" @click="togglePop('size')">
         <div class="cp-island-label">尺寸</div>
-        <div class="cp-island-val">{{ cpState.size }}</div>
+        <div class="cp-island-val">{{ currentSizeLabel }}</div>
         <div v-if="openPop === 'size'" class="cp-popover" @click.stop>
           <button
-            v-for="s in sizeOptions"
-            :key="s"
+            v-for="s in sizeChoices"
+            :key="s.value"
             class="cp-pop-item"
-            :class="{ active: cpState.size === s }"
+            :class="{ active: cpState.size === s.value }"
             @click="
-              setSize(s);
+              setSize(s.value);
               openPop = ''
             "
           >
-            {{ s }}
+            {{ s.label }}
           </button>
         </div>
       </div>
       <!-- 比例 (视频) -->
       <div v-if="aspectOptions.length" class="cp-island" @click="togglePop('ar')">
         <div class="cp-island-label">比例</div>
-        <div class="cp-island-val">{{ cpState.ar }}</div>
+        <div class="cp-island-val">{{ currentAspectLabel }}</div>
         <div v-if="openPop === 'ar'" class="cp-popover" @click.stop>
           <button
-            v-for="a in aspectOptions"
-            :key="a"
+            v-for="a in aspectChoices"
+            :key="a.value"
             class="cp-pop-item"
-            :class="{ active: cpState.ar === a }"
+            :class="{ active: cpState.ar === a.value }"
             @click="
-              setAspect(a);
+              setAspect(a.value);
               openPop = ''
             "
           >
-            {{ a }}
+            {{ a.label }}
           </button>
         </div>
       </div>

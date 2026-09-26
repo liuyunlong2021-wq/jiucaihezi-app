@@ -1,0 +1,17 @@
+# frps 服务端配置模板（VPS）
+#
+# 真实文件是 frps.toml，含 token，已被 .gitignore 排除，不要提交。
+# 用 tools/init_tunnel_config.py 从本模板生成到 deploy/frps.toml。
+
+bindPort = 7000
+# kcp 与 tcp 都监听同一个端口：本机默认走 kcp，UDP 被运营商限速时可回退 tcp。
+kcpBindPort = 7000
+
+auth.method = "token"
+auth.token = "<由 init_tunnel_config.py 生成>"
+
+# 只允许隧道申请这一个远端端口，防止 frpc 侧随意在 VPS 内网开端口。
+allowPorts = [{ start = 8796, end = 8796 }]
+
+log.to = "console"
+log.level = "info"

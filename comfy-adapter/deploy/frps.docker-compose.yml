@@ -1,0 +1,28 @@
+# frps —— VPS 侧的隧道服务端
+#
+# 与其它适配器同一套路：加入 new-api 的外部网络、不映射宿主端口。
+# 隧道出口 8796 只绑在**容器内部**，NewAPI 按容器名访问 http://frps:8796。
+# 唯一对公网开放的是控制端口 7000（TCP + UDP，UDP 给 kcp）。
+#
+# 部署：把本文件与 frps.toml（含 token，不进仓库）放到 /opt/frps/，然后
+#   cd /opt/frps && docker compose up -d
+# token 由本机 `python tools/init_tunnel_config.py` 生成后推送，两端必须一致。
+
+services:
+  frps:
+    image: fatedier/frps:v0.71.0
+    container_name: frps
+    restart: unless-stopped
+    command: ["-c", "/etc/frp/frps.toml"]
+    networks:
+      - new-api-network
+    ports:
+      - "7000:7000/tcp"
+      - "7000:7000/udp"
+    volumes:
+      - ./frps.toml:/etc/frp/frps.toml:ro
+
+networks:
+  new-api-network:
+    external: true
+    name: new-api-new_new-api-network

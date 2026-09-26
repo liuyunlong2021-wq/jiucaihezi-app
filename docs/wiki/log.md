@@ -1553,3 +1553,16 @@
 - Mobile：代码暂不动，现有 App 冻结；目标形态是桌面 App 的控制器。
 - 移动端调研（下一步选型）：Happy（MIT，23.9k★，最接近目标形态）、VibeTunnel（不自建中继的路子）、Omnara（云端 agent 控制面，方向相反）。结论：以 Happy 为蓝本但去掉 CLI 包装层 —— Harness 已是进程内运行时，只需给 Session 加远程通道。
 - 涉及：`AGENTS.md` 平台能力段与产品边界段、`docs/wiki/架构/产品架构.md` 第 3 节。真实代码改动（Web 体验删除）尚未执行。
+
+## [2026-09-26] 接入 | 本机 ComfyUI 的 Qwen-Image 2.1 与 MiniMax H3 以 jc- 前缀进 NewAPI 与创作面板
+
+- 新增 `comfy-adapter/`：把本机 ComfyUI（RTX 4090）封成 OpenAI 兼容接口，源码入仓、独立 venv（Python 3.13）、只监听 `127.0.0.1:9000`；对外暴露一律走 frp 隧道（kcp over UDP 7000 + tcp 7000，出口 `remotePort=8796`）。
+- NewAPI：渠道 140「本机 ComfyUI 4090（comfy-adapter）」，`base_url=http://frps:8796`（容器内网名，不暴露公网），模型名即面板公开名 `jc-qwen-image-2.1` / `jc-minimax-h3` / `jc-minimax-h3-ref2v`，价格 0.2/张、0.2/秒。SSRF 端口白名单追加 `8796`。
+- 面板注册 5 个 `jc-` 模型（下拉新增「jc 本机」分组）：图片 `jc-Qwen-Image 2.1`（不给参考图＝文生，给图＝单图/多图编辑，最多 10 张）；视频四条 `jc-MiniMax H3`（文生 / 首帧 / 首尾帧 / 参考生），成片经 NewAPI 的 `/v1/videos/{id}/content` 回收。
+- 尺寸改成能看懂的说法：档位＝长边（1K=1024、2K=1920）×常规比例，**4K 给不了**（两个模板的 `max_size` 都是 2048）；表由 `scripts/gen-jc-sizes.mjs` 按模板 `constraints`（图片 8 的倍数、视频 32 的倍数、像素 ≤2.1MP）推导并校验，比例误差 <1%。图片默认 2K 竖屏 `1080×1920`；视频 9:16 的 2K 是 `1088×1920`（32 的倍数）。
+- 参考生视频：模板节点 29 是 `ResolutionSelector`，`aspect_ratio` 可以绑（`bind.aspect_ratio -> 29.aspect_ratio`），枚举必须带后缀（如 `9:16 (Portrait Widescreen)`）；`megapixels` 仍由 `mode` 决定。界面上**去掉档位、换成比例**，`mode` 退回工作流默认 0。
+- 图片结果改走 `response_format: b64_json`：适配器的 `public_base_url` 是 Docker 内网名 `frps:8796`，桌面客户端解析不了；改成 `127.0.0.1` 又会被 `src/utils/urlSafety.ts` 的私有地址校验拦下 —— 只剩内联回收一条路。新增规格级 `imageResultFormat`，只对 jc 图片模型生效，其它图片模型行为不变。
+- 验证：`vue-tsc -b` exit 0；定向测试失败集合与基线逐项一致（47 项，全落在 creationPanel 契约 / filetree / memoryWorkbench / scene3d / skillMaterialRuntime / prune-updates，本次**新增 0**，`runtime/creation` 与 `data` 域 0 失败）；`comfy-adapter` 自检 `app.py --check` 四步全绿；`tools/verify_newapi_contract.py` 19/19。
+- **已实测**：图片文生成功并落盘（b64 路径通）。
+- **尚未跑通**：视频。参考图以 `https://asset.localhost/...`（Tauri 本地资源伪域名）发给了适配器，上游下载不到，报 `400 fail_to_fetch_task / 参考图错误: 下载参考图失败`。待修。
+- 运维记录见 `docs/wiki/运维/本机ComfyUI模型对外接入-2026-09-26.md`（含端口漂移、适配器父+子进程模型等坑）。

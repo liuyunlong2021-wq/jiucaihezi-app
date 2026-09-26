@@ -28,6 +28,10 @@ export type CreationApiStyle =
   | 'rh-standard'
   | 'rh-aiapp'
   | 'comfy-grok-video'
+  // 本机 comfy-adapter：同一份 H3 工作流靠「图填进哪个槽位」区分文生 / 首帧 / 首尾帧 / 参考生
+  | 'comfy-video'
+  | 'comfy-first-frame'
+  | 'comfy-first-last'
 
 export type CreationMode =
   | 'text-to-image'
@@ -118,6 +122,13 @@ export interface CreationModelSpec {
   fields: CreationFieldSpec[]
   aliases?: string[]
   notes: string[]
+  /** 图片结果的返回方式。默认 url。
+   *
+   * NewAPI 直连本机适配器时必须用 b64_json：适配器的 public_base_url 是 Docker 内网名
+   * （frps:8796），只有 NewAPI 容器能解析；而客户端去下载时既解析不了这个名字，
+   * 又不能改成 127.0.0.1（urlSafety 会拦私有地址）。
+   */
+  imageResultFormat?: 'url' | 'b64_json'
   sourceUrls?: string[]
   verifiedAt?: string
   contractIssues?: string[]

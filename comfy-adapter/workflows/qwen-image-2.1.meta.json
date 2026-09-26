@@ -1,0 +1,67 @@
+{
+  "id": "qwen-image-2.1",
+  "display_name": "Qwen-Image 2.1",
+  "description": "Qwen-Image 2.1 UC fp8。不带参考图 = 文生图；带参考图 = 单图/多图编辑（最多 10 张）",
+  "template": "qwen-image-2.1.json",
+
+  "auto_resolution_from_size": true,
+  "_comment_auto_resolution": "参考图会被缩放到约 resolution×resolution 像素。不显式传 resolution 时按 sqrt(宽×高) 推导，让参考图面积与输出画布对齐（核心节点提示：尺寸不匹配会让编辑偏移）",
+
+  "capabilities": {
+    "image_generation": true,
+    "image_editing": true,
+    "max_reference_images": 10,
+    "negative_prompt": true,
+    "seed": true,
+    "steps": true,
+    "batch": true
+  },
+
+  "defaults": {
+    "width": 1024,
+    "height": 1024,
+    "steps": 40
+  },
+
+  "bind": {
+    "prompt": [{ "node": "5", "input": "prompt" }],
+    "negative_prompt": [{ "node": "5", "input": "negative_prompt" }],
+    "resolution": [{ "node": "5", "input": "resolution" }],
+    "width": [{ "node": "6", "input": "width" }],
+    "height": [{ "node": "6", "input": "height" }],
+    "batch_size": [{ "node": "6", "input": "batch_size" }],
+    "steps": [{ "node": "7", "input": "steps" }],
+    "seed": [{ "node": "7", "input": "seed" }]
+  },
+
+  "dynamic_blocks": [
+    {
+      "param": "reference_images",
+      "_comment": "有参考图就动态生成 LoadImage 接到 images.image_N；没有就一个字都不生成 —— 同一套模板同时覆盖文生图和编辑。ComfyUI 核心节点 TextEncodeQwenImage21 的槽位是 image_1..image_16（1 基，后端按数字后缀排序）",
+      "min_items": 0,
+      "max_items": 10,
+      "node_id_format": "ref{i1}",
+      "node_template": {
+        "class_type": "LoadImage",
+        "inputs": { "image": "{value}" },
+        "_meta": { "title": "参考图 {i1}" }
+      },
+      "binding": [
+        { "node": "5", "input": "images.image_{i1}" }
+      ]
+    }
+  ],
+
+  "constraints": {
+    "multiple_of": 8,
+    "min_size": 256,
+    "max_size": 2048,
+    "max_pixels": 2100000,
+    "max_batch": 4,
+    "max_steps": 100,
+    "resolution_step": 32,
+    "max_resolution": 4096
+  },
+
+  "output_node": "9"
+}

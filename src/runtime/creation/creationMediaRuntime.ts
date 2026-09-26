@@ -100,6 +100,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
       prompt: asString(params.prompt),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
       resolution: asOptionalString(params.resolution),
+      size: asOptionalString(params.size),
       duration: asOptionalNumber(params.duration),
       seconds: asOptionalNumber(params.seconds),
       imageUrl: images[0],
@@ -544,7 +545,12 @@ async function executeDirectVideoRequest(
   const pollUrl = taskId ? buildVideoPollUrl(request, taskId) : undefined
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v'
+    // 本机 comfy-adapter 的成片同样经 NewAPI 的 /v1/videos/{id}/content 回收，
+    // 这样客户端不必直连适配器，也不需要 public_base_url 对客户端可达。
+    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v' ||
+      request.plan.apiStyle === 'comfy-video' ||
+      request.plan.apiStyle === 'comfy-first-frame' ||
+      request.plan.apiStyle === 'comfy-first-last'
     mediaUrl = await pollTask(
       pollUrl, 'video', onProgress,
       CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS,
@@ -878,6 +884,36 @@ function buildDirectVideoBody(
   }
   const isMiniMaxH3 = request.plan.model.startsWith('MiniMaxH3-')
   const isGrokImagineVideo = request.plan.model === 'grok-imagine-video-1.5'
+  if (
+    request.plan.apiStyle === 'comfy-video' ||
+    request.plan.apiStyle === 'comfy-first-frame' ||
+    request.plan.apiStyle === 'comfy-first-last'
+  ) {
+    // 本机 comfy-adapter 的 minimax-h3 模板：首帧 / 尾帧 / 参考图是三个互斥字段。
+    // 面板只有 images 数组（画布选中顺序），所以在唯一一处把数组落到对应槽位。
+    // duration 交的是秒数，适配器按模板的 duration_fps 自己换算成帧。
+    // size 由适配器按模板 constraints（multiple_of=32）解析成 width/height；
+    // ref2v 的模板没有 width/height 绑定，传了会被适配器忽略。
+    const body: Record<string, unknown> = compact({
+      model: request.plan.model,
+      prompt: params.prompt,
+      duration: asOptionalNumber(params.duration),
+      size: asOptionalString(params.size),
+      // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
+      // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
+      aspect_ratio: asOptionalString(params.size) ? undefined : asOptionalString(params.aspectRatio),
+      mode: request.plan.debug.normalizedParams.mode,
+    })
+    if (request.plan.apiStyle === 'comfy-first-frame') {
+      body.first_frame = uploadedImages[0]
+    } else if (request.plan.apiStyle === 'comfy-first-last') {
+      body.first_frame = uploadedImages[0]
+      body.last_frame = uploadedImages[1]
+    } else if (uploadedImages.length) {
+      body.images = uploadedImages
+    }
+    return body
+  }
   return compact({
     model: request.plan.model,
     prompt: params.prompt,

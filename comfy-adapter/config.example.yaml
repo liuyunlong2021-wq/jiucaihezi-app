@@ -1,0 +1,65 @@
+# ============================================================================
+# comfy-adapter 配置模板
+# ----------------------------------------------------------------------------
+# 部署步骤：
+#   1. 把本文件复制成 config.yaml
+#   2. 改掉 auth.api_keys（用随机密钥）
+#   3. 改 public_base_url 为对外可达的地址
+#   4. run.bat check  然后  run.bat
+# ============================================================================
+
+log_level: INFO
+
+server:
+  # 只监听本机回环。对外暴露一律通过隧道（frp / cloudflared）。
+  host: 127.0.0.1
+  port: 9000
+  # 产物 URL 的前缀。必须是调用方能访问到的地址：
+  #   - 走 VPS：https://api.你的域名.com        （nginx 加 /files/ 反代到隧道出口）
+  #   - 走 CF 隧道：https://files.你的域名.com   （cloudflared 直连本机）
+  public_base_url: http://127.0.0.1:9000
+
+auth:
+  api_keys:
+    - "change-me-please"
+  # 填占位符时鉴权仍然开启（避免误以为开着其实没开），启动日志会告警
+
+comfy:
+  base_url: http://127.0.0.1:8188
+  client_id: comfy-adapter
+  poll_interval: 0.5
+  submit_timeout: 30
+  # 视频要跑几分钟，给足时间
+  job_timeout: 1800
+  progress_log_interval: 15
+  healthcheck_on_startup: true
+
+limits:
+  # 4090 48G 跑 20GB 模型时并发 2 会显存换页，反而更慢
+  max_concurrency: 1
+  max_queue: 4
+  max_batch: 4
+  wait_timeout: 300
+
+output:
+  default_response_format: b64_json
+  static_dir: static
+  # 素材只活 24 小时，落本地盘即可，不用买对象存储
+  static_ttl: 86400
+
+tasks:
+  ttl: 86400
+  max_entries: 500
+  allow_cancel: true
+
+edit:
+  max_reference_images: 10
+  max_image_bytes: 20971520
+  upload_subfolder: adapter/uploads
+  fetch_url_timeout: 30
+  default_to_reference_size: true
+
+models:
+  - workflows/qwen-image-2.1.meta.json
+  - workflows/minimax-h3-video.meta.json
+  - workflows/minimax-h3-ref2v.meta.json

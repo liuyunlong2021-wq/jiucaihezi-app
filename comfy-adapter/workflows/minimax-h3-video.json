@@ -1,0 +1,123 @@
+{
+  "1": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": { "title": "MiniMax H3 混合模型（同时支持 FL2VA 与 Ref2VA）" }
+  },
+  "2": {
+    "class_type": "LoraLoaderBypassModelOnly",
+    "inputs": {
+      "model": ["1", 0],
+      "lora_name": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+      "strength_model": 1.0
+    },
+    "_meta": { "title": "Turbo 4 步加速 LoRA" }
+  },
+  "3": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "_meta": { "title": "H3 文本/视觉编码器" }
+  },
+  "4": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "minimax_h3_video_vae_fp16.safetensors" },
+    "_meta": { "title": "视频 VAE" }
+  },
+  "5": {
+    "class_type": "VAELoader",
+    "inputs": { "vae_name": "minimax_h3_audio_vae_fp32.safetensors" },
+    "_meta": { "title": "音频 VAE" }
+  },
+  "6": {
+    "class_type": "MiniMaxH3AudioConditioningT8",
+    "inputs": {
+      "clip": ["3", 0],
+      "video_vae": ["4", 0],
+      "audio_vae": ["5", 0],
+      "prompt": "",
+      "width": 1344,
+      "height": 768,
+      "length": 124,
+      "task_type": "auto",
+      "audio_mode": "native",
+      "audio_denoise_strength": 1.0,
+      "add_source_as_reference": false,
+      "prompt_primary_audio_ordinal": 0,
+      "strict_prompt_tags": true,
+      "ref_image_size": "match",
+      "reference_video_policy": "official_2_to_15s",
+      "allow_above_reference_area": false
+    },
+    "_meta": { "title": "统一条件（task_type=auto 按接了哪些图自动判定；first_frame/last_frame/ref_images 由适配层动态接线）" }
+  },
+  "7": {
+    "class_type": "MiniMaxH3DualClockSamplerT8",
+    "inputs": {
+      "model": ["2", 0],
+      "av_latent": ["6", 1],
+      "steps": 4,
+      "shift_video": 12.0,
+      "shift_audio": 3.0,
+      "sampler_name": "dual_clock_euler",
+      "scheduler": "native_flow"
+    },
+    "_meta": { "title": "双时钟采样器（steps 由适配层注入）" }
+  },
+  "8": {
+    "class_type": "BasicGuider",
+    "inputs": {
+      "model": ["7", 0],
+      "conditioning": ["6", 0]
+    },
+    "_meta": { "title": "Guider" }
+  },
+  "9": {
+    "class_type": "RandomNoise",
+    "inputs": { "noise_seed": 0 },
+    "_meta": { "title": "噪声（seed 由适配层注入）" }
+  },
+  "10": {
+    "class_type": "SamplerCustomAdvanced",
+    "inputs": {
+      "noise": ["9", 0],
+      "guider": ["8", 0],
+      "sampler": ["7", 1],
+      "sigmas": ["7", 2],
+      "latent_image": ["6", 1]
+    },
+    "_meta": { "title": "采样" }
+  },
+  "11": {
+    "class_type": "MiniMaxH3AVDecodeT8",
+    "inputs": {
+      "av_latent": ["10", 0],
+      "video_vae": ["4", 0],
+      "audio_vae": ["5", 0]
+    },
+    "_meta": { "title": "音视频解码" }
+  },
+  "12": {
+    "class_type": "VHS_VideoCombine",
+    "inputs": {
+      "images": ["11", 0],
+      "audio": ["11", 1],
+      "frame_rate": 24.0,
+      "loop_count": 0,
+      "filename_prefix": "adapter/minimax-h3",
+      "format": "video/h265-mp4",
+      "pix_fmt": "yuv420p10le",
+      "crf": 22,
+      "save_metadata": true,
+      "pingpong": false,
+      "save_output": true
+    },
+    "_meta": { "title": "合成 MP4" }
+  }
+}

@@ -1,0 +1,116 @@
+{
+  "id": "minimax-h3-ref2v",
+  "display_name": "MiniMax H3 双采参考生视频 V3（文武双修均衡版）",
+  "description": "MiniMax H3 参考生视频，双采 + 潜空间上采样。LOW 首采 8 步 → 1.5x 潜空间上采样 → HIGH 精修 5 步，音视频同步输出（mp4 自带 AAC 音轨）。参考图 1~9 张，每张会同时接到 LOW 和 HIGH 两个 conditioning 节点 —— 双采工作流必须两遍都拿到参考图，否则报 REF2VA requires at least one reference media input。duration 按秒给，内部按 24fps 对齐到 17n+5 帧。",
+  "template": "minimax-h3-ref2v.json",
+  "output_kind": "video",
+  "default_async": true,
+  "output_node": "21",
+  "defaults": {
+    "duration": 15,
+    "mode": 0
+  },
+  "bind": {
+    "prompt": [
+      {
+        "node": "28",
+        "input": "prompt"
+      }
+    ],
+    "seed": [
+      {
+        "node": "11",
+        "input": "noise_seed"
+      }
+    ],
+    "duration": [
+      {
+        "node": "27",
+        "input": "value"
+      }
+    ],
+    "mode": [
+      {
+        "node": "64",
+        "input": "index"
+      },
+      {
+        "node": "69",
+        "input": "index"
+      }
+    ],
+    "aspect_ratio": [
+      {
+        "node": "29",
+        "input": "aspect_ratio"
+      }
+    ]
+  },
+  "set": {
+    "7": {
+      "task_type": "Ref2VA"
+    },
+    "14": {
+      "task_type": "Ref2VA"
+    }
+  },
+  "dynamic_blocks": [
+    {
+      "param": "reference_images",
+      "required": true,
+      "min_items": 1,
+      "max_items": 9,
+      "node_id_format": "ref{i1}",
+      "node_template": {
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "{value}"
+        }
+      },
+      "binding": [
+        {
+          "node": "7",
+          "input": "ref_images.ref_image_{i}"
+        },
+        {
+          "node": "14",
+          "input": "ref_images.ref_image_{i}"
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "reference_to_video": true,
+    "max_reference_images": 9,
+    "audio": "generated",
+    "two_pass": true,
+    "latent_upscale": true,
+    "seed": true,
+    "duration_seconds": true
+  },
+  "constraints": {
+    "clamp": {
+      "duration": [
+        1,
+        15
+      ],
+      "mode": [
+        0,
+        1
+      ]
+    },
+    "int_params": [
+      "mode"
+    ]
+  },
+  "extra": {
+    "source_workflow": "（极速高清新版-文武双修均衡版）MiniMax H3双采参考生视频V3.json",
+    "engine_note": "原工作流底座写的是 minimax_h3_hybrid_fl2va_ref2va_b25-49-int8_r.safetensors（int8 量化版），本机没装，已换成同系列的 minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors。下好 int8_r 后把模板里节点 4 的 unet_name 改回去即可。其余 LoRA / VAE / CLIP / 上采样器 / 所有采样参数均与工作流完全一致。",
+    "mode_legend": {
+      "0": "文戏：lms LoRA 0.4 / 首采 0.4MP",
+      "1": "武戏：lms LoRA 0.8 / 首采 0.5MP"
+    },
+    "resolution_note": "宽高由工作流自带的 ResolutionSelector（multiple=32）算首采尺寸：aspect_ratio 已绑定到节点 29（meta 里 bind.aspect_ratio），megapixels 仍由 mode 决定（默认 0），再由潜空间 1.5x 上采样得到成片尺寸。所以本模型**不接受** width/height/size —— 要改画幅请调 aspect_ratio，要改分辨率档位请调 mode 或改模板里的 megapixels 源。",
+    "reference_note": "每张参考图只上传一次，但会同时接到节点 7（LOW）和节点 14（HIGH）的 ref_images.ref_image_N —— 接线是 0 基。"
+  }
+}

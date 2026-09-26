@@ -37,6 +37,8 @@ export interface VideoGenParams {
   prompt: string
   aspectRatio?: string
   resolution?: string
+  /** 具体像素尺寸，如 1088x1920。适配器按模板 constraints 解析成 width/height。 */
+  size?: string
   duration?: string | number
   seconds?: string | number
   imageUrl?: string

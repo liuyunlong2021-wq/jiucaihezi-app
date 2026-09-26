@@ -57,6 +57,7 @@ const wave1FocusedTests = [
   'src/runtime/memory/__tests__/skillInstall.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',
+  'src/runtime/creation/__tests__/jcComfyAdapterPlan.test.ts',
   'src/runtime/creation/__tests__/localComfyRuntime.test.ts',
   'src/runtime/workbench/__tests__/mediaReference.test.ts',
   'src/runtime/workbench/__tests__/mediaPlan.test.ts',

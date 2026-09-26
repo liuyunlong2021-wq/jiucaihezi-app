@@ -262,7 +262,7 @@ function normalizeOpenAiImageParams(
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    response_format: spec.apiStyle === 'xiaoyi-image-task' || spec.apiStyle === 'newapi-image-task' ? 'url' : params.response_format || 'url',
+    response_format: spec.imageResultFormat || 'url',
   })
 }
 

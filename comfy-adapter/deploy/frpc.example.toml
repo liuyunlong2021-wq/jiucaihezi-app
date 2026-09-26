@@ -1,0 +1,30 @@
+# frpc 客户端配置模板（本机 Windows）
+#
+# 真实文件是 frpc.toml，含 token，已被 .gitignore 排除，不要提交。
+# 用 tools/init_tunnel_config.py 从本模板生成到 deploy/frpc.toml。
+#
+# ⚠️ 本机是 WLAN + 双层 NAT。隧道是**主动外连** VPS，NAT 不构成问题。
+
+serverAddr = "<由 init_tunnel_config.py 填入 VPS 公网 IP>"
+serverPort = 7000
+
+# 跨境 345ms。默认的 TCP-over-TCP 在这种 RTT 下会塌陷，默认走 kcp（UDP）。
+# 若 UDP 被运营商限速，把下面一行改成 "tcp" 即可（VPS 已同时监听 tcp 7000）。
+transport.protocol = "kcp"
+
+auth.method = "token"
+auth.token = "<由 init_tunnel_config.py 生成>"
+
+log.to = "./logs/frpc.log"
+log.level = "info"
+log.maxDays = 3
+
+[[proxies]]
+name = "comfy-adapter"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 9000
+# VPS 上的隧道出口：绑在 frps 容器**内部**，不进宿主端口表；
+# 只有同 Docker 网络的 NewAPI 能按容器名 http://frps:8796 访问它。
+remotePort = 8796
+

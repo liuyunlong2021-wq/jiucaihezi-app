@@ -537,7 +537,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     resolution: cpState.res,
     duration: currentCreationSpec.value?.mode === 'video-edit' ? undefined : cpState.dur,
     size: getSizeOptions(currentModel.value!).length ? cpState.size : undefined,
-    response_format: 'url',
+    response_format: currentCreationSpec.value?.imageResultFormat || 'url',
     mv: cpState.mv,
     images,
     videos,
@@ -636,6 +636,26 @@ export const aspectOptions = computed(() =>
 
 export const sizeOptions = computed(() =>
   currentModel.value ? getSizeOptions(currentModel.value) : []
+)
+
+/** 下拉要显示人话标签（如「2K 竖屏 9:16 · 1080×1920」），但提交的 value 必须是真实值。
+ * 标签来自当前规格里对应字段的 options；没有配标签的模型回退成原值，行为不变。
+ */
+function labeledChoices(keys: string[], values: string[]): Array<{ value: string; label: string }> {
+  const field = (currentCreationSpec.value?.fields || []).find(item => keys.includes(item.key))
+  const labels = new Map((field?.options || []).map(option => [String(option.value), option.label]))
+  return values.map(value => ({ value, label: labels.get(value) || value }))
+}
+
+export const sizeChoices = computed(() => labeledChoices(['size'], sizeOptions.value))
+export const aspectChoices = computed(() =>
+  labeledChoices(['aspect_ratio', 'ratio', 'aspectRatio'], aspectOptions.value)
+)
+export const currentSizeLabel = computed(
+  () => sizeChoices.value.find(item => item.value === cpState.size)?.label || cpState.size
+)
+export const currentAspectLabel = computed(
+  () => aspectChoices.value.find(item => item.value === cpState.ar)?.label || cpState.ar
 )
 
 export const resolutionOptions = computed(() =>

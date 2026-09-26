@@ -1,0 +1,24 @@
+# 虚拟环境（每个部署机器各自建）
+.venv/
+__pycache__/
+*.py[cod]
+
+# 运行时产物：24 小时就删的东西，不要进仓库
+static/
+tools/out/
+
+# 运行时配置：本地私密信息（api_keys、隧道地址）
+# 仓库里放的是 config.example.yaml，部署时复制一份改名再填
+config.yaml
+config.local.yaml
+
+# 隧道配置（含 frp token）
+deploy/frpc.toml
+deploy/frps.toml
+
+# 下载的隧道客户端二进制
+bin/
+
+# 日志与临时文件
+*.log
+_dump_*.*
