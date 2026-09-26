@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-26] Harness 能否看图，取决于路由 patch 的模态声明
+
+- `route.cordis.yml` 里 `models[].input`（合法值 `text` / `image`）是官方唯一开关。不声明时官方取 `DEFAULT_INPUT = ["text"]`：图片既不内联进请求，`read_image` 也会点名拒绝（`does not declare image input`）。实测一次「查看图片内容」因此变成 11 步工具乱找 + 6 次上游 429/524，**973.7 秒后 524 失败**。修法：`imageInput` 由 `resolveModelInputModalities` 传入，只在为真时写 `input: ["text","image"]`，并进 `runtimeKey`。
+- 两条配套：模型不支持视觉时 `deepSeekContentBlocks` **不发图片块**、改发降级文案（发块等于给模型一个它用不了的附件 id，正是乱找的起点）；`llm/retry` 的 `failure.code/message` 已上运行状态行。
+- 官方图片预算在请求侧：每图 1 MiB 原始字节、总像素 2048²、每请求 20 MiB base64，超预算由 `dsh-compaction-image-offload` 最老优先卸载并写 `image/offload` 事件。客户端不需要再压一遍；排障先看 `%APPDATA%\com.jiucaihezi.desktop\deepseek-harness\workspaces\<hash>\sessions\*.jsonl.zstd`（多帧 zstd，需按 magic 切帧解）。
+
 ## [2026-09-24] Harness Session 成为对话真相，`.raw` 建库改为可选
 
 - Desktop 已删除 `@DH` 按钮、芯片和选择态，所有对话自动运行 Harness；`@排版`、`@影音`、`@MCP`、`@3D` 已通过官方 `dsh-mcp-client` 进入同一个 Harness Session，并复用韭菜盒子既有执行器。旧 `dh-session-v1` 仅用于迁移识别。

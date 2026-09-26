@@ -1,5 +1,19 @@
 # Wiki 操作日志
 
+## [2026-09-26] 发版 | 2.2.2 传图修复版
+
+- 版本由 `node scripts/set-version.mjs 2.2.2` 统一写入 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`，`Cargo.lock` 随 cargo 更新；`AGENTS.md` 头部版本同步。
+- 门禁：完整 focused `1472/1523`、`vue-tsc -b` 通过。47 条失败**全部为改动前既有**且在 Windows 上稳定复现（`scripts/__tests__/prune-updates.test.mjs` 缺 `bash`；`creationPanelContractUi` / `projectFileTreeCanvas` / `memoryWorkbench` 的源码形态断言）；对照实验为同一批文件改动前后 `178/137/41` 逐条一致，本次改动 0 新增失败。
+- 桌面发布入口不变：`main` 与 tag 分开推送，`git push origin v2.2.2` 触发 macOS ARM / macOS Intel / Windows x64 三平台 CI；CI 产物实测前只记「已触发」。
+
+## [2026-09-26] 修复 | 输入框传图后模型看不见图片，16 分钟无果
+
+- **症状**：桌面端传图 + 一句「查看图片内容」，实测 **973.7 秒（16 分 14 秒）后以 524 失败**；模型不答图，而是 `glob`/`pwsh` 满盘按 hash 找文件、最后去找 tesseract。
+- **根因**：`src/services/deepSeekHarness.ts` 生成的 `route.cordis.yml` 没给模型声明输入模态，官方 `dsh-llm-pi-ai` 取 `DEFAULT_INPUT = ["text"]`；图片既不内联进请求，`read_image` 也直接报 `model "gemini-3.8-flash" does not declare image input`。附件本身正常（已按 192 KB webp 落进内容寻址存储），卡的是声明。
+- **修法**：`DeepSeekHarnessInput.imageInput` 由 `resolveModelInputModalities` 计算（复用 @Jev 与直连路径的同一份能力表）；patch 只在为真时写 `input: ["text","image"]`，并进 `runtimeKey` —— 否则读会话时建的纯文本 Runtime 会被第一轮发送直接复用。
+- **配套**：模型不支持视觉时 `deepSeekContentBlocks` 不再发图片块，改发 `[附带 N 张图片，当前模型不支持视觉]`（发块等于给模型一个它用不了的附件 id）；`llm/retry` 的 `failure.code/message` 上运行状态行，下次等很久先看是不是 `RATE_LIMIT`/`SERVER 524`。
+- **验证**：用户实机验收通过（传图提问一步答完）；定向 `deepSeekHarness` + `memoryWorkbench` 106 例 / 101 通过，5 条失败与改动前逐条一致；`vue-tsc -b` 通过。客户端图片压缩、`maxRequestImageBytes`、重试策略与整轮定时器均判定为过度设计，未动。
+
 ## [2026-09-24] 收口 | Desktop 固定 Harness，退役 `@DH`
 
 - **实施**：删除输入框下方、`@` 提及、已选芯片和会话恢复中的 `@DH` 选择态；Desktop 普通聊天、Skill 与文件任务自动进入 Harness。尚未接入 Harness 工具面的 MCP、媒体与 3D 继续复用现有专项执行链，避免已有按钮退化为空开关；Web/Mobile 保留原执行链。
