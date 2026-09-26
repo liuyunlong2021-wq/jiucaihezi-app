@@ -115,3 +115,20 @@ McpManagerPanel 添加表单
 - 用户已安装 `v2.1.17`，仍复现 `command=/opt/homebrew/bin/node`、`args=[.../npx-cli.js,"-y","@playwright/mcp@0.0.79"]` 和 `stderr=env: node: No such file or directory`。这证明绝对 Node 只覆盖了第一层启动；`npx` 继续拉起 Playwright 时仍通过 `env node` 查找 PATH。
 - 根修位于共享 `mcp_spawn_stdio`：Unix 子进程的 `PATH` 现在以前台解析后的可执行文件目录开头。因此 Homebrew Node 启动 `npx-cli.js` 后，所有后继脚本都能解析同一个 `node`。它适用于所有本地 stdio MCP，不是某台机器的专用配置。
 - 验证：MCP 专项 `5/5`、`vue-tsc -b`、`cargo check`、`git diff --check` 通过；以空 Homebrew PATH 运行官方 Playwright MCP 失败，补入 `/opt/homebrew/bin` 后 `--help` 成功。未执行新正式安装包的 Desktop 点击验收；必须发布 `v2.1.18` 或更高版本后再验收。
+
+## Windows 本地 stdio 启动失败根修（2026-09-26）
+
+- 用户在 Windows 桌面版 `v2.2.1` 复现 `无法启动 MCP 进程: %1不是有效的 Win32 应用程序。(os error 193)`，`command=npx`、`stderr` 为空、`exitCode=unknown`：失败发生在 spawn 时刻，不是 MCP 协议或 Playwright 包的问题。Linux/macOS 侧的重归一化逻辑对 Windows 不生效（它只匹配 `/bin/node` 布局）。
+- 根因在共享的 `resolve_local_binary`：Node.js 的 Windows 安装目录同时存在 `npx`（Unix shell 脚本）和 `npx.cmd`，而 PATH 扫描先探测无扩展名的 `npx` 并优先返回它。`mcp_spawn_stdio` 的 `cmd.exe /C` 分支只识别 `cmd` 扩展名，于是 shell 脚本被直接交给 `CreateProcess` 并以 193 失败——为 Windows 写的那段 `npx.cmd` 识别逻辑从未被命中过，此前记录里的 Windows 结论都建立在 macOS 实测上。
+- 根修：解析顺序改为 Windows 的 PATHEXT 语义，无扩展名的命令名先找 `exe`/`cmd`/`bat`、最后才回落到裸文件名，抽成 `find_in_path` + `path_candidate_names` 并补两个 Windows 单元测试。这是通用修复，`python3`、`yt-dlp`、`ffmpeg` 等同类解析同一处受益；TS 层与 MCP 传输层未改。
+- 验证：`rustc` 最小探针直接运行 `C:\Program Files\nodejs\npx` 复现原样错误 `%1 不是有效的 Win32 应用程序。 (os error 193)`；`cmd.exe /C "C:\Program Files\nodejs\npx.cmd" -y @playwright/mcp@0.0.79 --help` 返回 `Usage: Playwright MCP [options]`（含 npm 首次下载）；聚焦测试 `2/2`、Rust 全量 `421 passed / 0 failed / 1 ignored`、`git diff --check` 通过。
+- 待验证：未重新构建桌面版，也未在 App 设置里点击“连接”做整链路验收；发布新版本前不得记为已通过。
+
+## GitHub OAuth client id 改由 Gateway 下发（2026-09-26）
+
+- 症状：设置里的 GitHub 卡片固定提示「OAuth Client ID 尚未配置」。原因是 `src/data/mcpCatalog.ts` 读 `import.meta.env.VITE_GITHUB_OAUTH_CLIENT_ID`，而它只由 CI 的 `secrets.GITHUB_OAUTH_CLIENT_ID` 注入：本地 `tauri:dev` 永远没有它，CI 里少配一处也会静默退化成「未配置」，不是报错。
+- 设计问题：client id 与 client secret 是成对的，secret 只存在于 Gateway（`gateway/src/index.js` 的 `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`，token 交换与 `redirect_uri` 校验都在那里），App 再持有第二份构建期副本属于双来源；`VITE_` 变量还会被固化进产物，换 OAuth App 就得重新发版。client id 本身出现在 authorize URL 里，是公开信息，secret 始终不出 Gateway。
+- 根修：Gateway 新增只读端点 `GET /auth/mcp/github/config`（返回 `{ client_id }`，与 token 端点共用同一份凭据检查，secret 永不外发）；App 点击连接时经现有 `gatewayJson` 取，取不到就报真实失败原因。`build.yml` 三处 `VITE_GITHUB_OAUTH_CLIENT_ID` 注入随之删除，`mcpCatalog` 不再读任何构建期环境变量。
+- 验证：Gateway `24/24`（含 2 条新用例）、`mcpManagerPanel` 合同测试 `10/10`、TypeScript 无错误；线上 `POST /auth/mcp/github/token` 实测已越过凭据检查（返回 formData 解析错误而非「GitHub OAuth 尚未配置」），说明 Gateway 侧 client id/secret 齐全。
+- 待验证：Gateway Worker 未部署、App 未重建、设置里未点击连接。顺序必须是先 `pnpm --dir gateway run deploy` 再发版，否则 App 会显示「OAuth Client ID 获取失败」。
+- 顺带：CI 当初把 `beforeBuildCommand` 置空只是为了注入这个变量，动机现已消失；那处 `--config '{"build":{"beforeBuildCommand":""}}'` 不在本次改动范围，留待单独处理。

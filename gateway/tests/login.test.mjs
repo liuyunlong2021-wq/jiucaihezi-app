@@ -194,6 +194,30 @@ test('MCP OAuth callback returns the authorization code to the matching app deep
   assert.equal(location.href, 'jiucaihezi://mcp/oauth/callback?server=github&code=github-code&state=state-123');
 });
 
+test('GitHub MCP client id is served to the app without the OAuth App secret', async () => {
+  const env = {
+    ...createEnv(),
+    GITHUB_OAUTH_CLIENT_ID: 'github-client-id',
+    GITHUB_OAUTH_CLIENT_SECRET: 'github-client-secret'
+  };
+  const response = await gateway.fetch(request('/auth/mcp/github/config'), env);
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  const payload = await readJson(response);
+  assert.deepEqual(payload, { success: true, client_id: 'github-client-id' });
+  assert.equal(JSON.stringify(payload).includes('github-client-secret'), false);
+});
+
+test('GitHub MCP client id endpoint reports an unconfigured gateway', async () => {
+  const response = await gateway.fetch(request('/auth/mcp/github/config'), createEnv());
+
+  assert.equal(response.status, 500);
+  const payload = await readJson(response);
+  assert.equal(payload.code, 'gateway_error');
+  assert.equal(payload.message, 'GitHub OAuth 尚未配置');
+});
+
 test('GitHub MCP token exchange keeps the OAuth App secret in the gateway', async () => {
   const env = {
     ...createEnv(),

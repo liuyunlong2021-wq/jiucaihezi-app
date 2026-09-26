@@ -120,10 +120,24 @@ function handleMcpOAuthCallback(request, serverId) {
   });
 }
 
-async function handleGitHubMcpToken(request, env) {
+/**
+ * GitHub OAuth App 凭据只存放在 Gateway：client id 经 /auth/mcp/github/config 交给 App，
+ * client secret 永不外发。App 不再在构建期注入自己的副本。
+ */
+function githubOAuthAppCredentials(env) {
   const clientId = String(env.GITHUB_OAUTH_CLIENT_ID || '').trim();
   const clientSecret = String(env.GITHUB_OAUTH_CLIENT_SECRET || '').trim();
   if (!clientId || !clientSecret) throw new Error('GitHub OAuth 尚未配置');
+  return { clientId, clientSecret };
+}
+
+function handleGitHubMcpClient(request, env) {
+  const { clientId } = githubOAuthAppCredentials(env);
+  return jsonResponse({ success: true, client_id: clientId }, 200, request);
+}
+
+async function handleGitHubMcpToken(request, env) {
+  const { clientId, clientSecret } = githubOAuthAppCredentials(env);
 
   const body = await request.formData();
   const code = String(body.get('code') || '').trim();
@@ -581,6 +595,7 @@ export default {
       if (request.method === 'POST' && url.pathname === '/auth/desktop/authorize') return await handleDesktopAuthAuthorize(request, env);
       const mcpOAuthCallback = url.pathname.match(/^\/auth\/mcp\/([a-z0-9_-]{1,64})\/callback$/i);
       if (request.method === 'GET' && mcpOAuthCallback) return handleMcpOAuthCallback(request, mcpOAuthCallback[1]);
+      if (request.method === 'GET' && url.pathname === '/auth/mcp/github/config') return handleGitHubMcpClient(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/mcp/github/token') return await handleGitHubMcpToken(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/login') return await handleLogin(request, env);
       if (request.method === 'POST' && url.pathname === '/auth/logout') return await handleLogout(request, env);

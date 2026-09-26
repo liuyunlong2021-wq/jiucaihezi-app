@@ -38,8 +38,6 @@ jobs:
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
       - name: Build audited Desktop frontend
-        env:
-          VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
         run: pnpm run build:desktop:quick
 
       - id: build-macos-arm
@@ -174,8 +172,6 @@ jobs:
         run: rustup target add x86_64-apple-darwin
 
       - name: Build audited Desktop frontend
-        env:
-          VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
         run: pnpm run build:desktop:quick
 
       - uses: tauri-apps/tauri-action@v0
@@ -293,8 +289,6 @@ jobs:
       - name: Sync version from Git tag
         run: node scripts/set-version.mjs --auto
       - name: Build audited Desktop frontend
-        env:
-          VITE_GITHUB_OAUTH_CLIENT_ID: ${{ secrets.GITHUB_OAUTH_CLIENT_ID }}
         run: pnpm run build:desktop:quick
 
       - name: Build Windows app (portable)

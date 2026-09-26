@@ -6,7 +6,7 @@ import {
   disconnectMcpServer,
   McpAuthorizationRequiredError,
 } from '@/services/mcpClient'
-import { BUILTIN_MCP_CATALOG, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
+import { BUILTIN_MCP_CATALOG, resolveMcpOAuthClientId, type BuiltinMcpCatalogEntry } from '@/data/mcpCatalog'
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -240,7 +240,18 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       return
     }
   } else if (entry.auth === 'oauth') {
-    if (!entry.url || !entry.oauthClientId) {
+    if (!entry.url) {
+      message.value = `${entry.name} 缺少连接地址。`
+      return
+    }
+    let oauthClientId = ''
+    try {
+      oauthClientId = await resolveMcpOAuthClientId(entry)
+    } catch (error) {
+      message.value = `${entry.name} 的 OAuth Client ID 获取失败：${error instanceof Error ? error.message : String(error)}`
+      return
+    }
+    if (!oauthClientId) {
       message.value = `${entry.name} 的 OAuth Client ID 尚未配置。`
       return
     }
@@ -250,7 +261,7 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
       transport: entry.transport === 'remote' ? 'streamable-http' : entry.transport,
       url: entry.url,
       auth: 'oauth',
-      oauthClientId: entry.oauthClientId,
+      oauthClientId,
       oauthTokenProxyUrl: entry.oauthTokenProxyUrl,
       oauthAuthorizationServerUrl: entry.oauthAuthorizationServerUrl,
       oauthAuthorizationEndpoint: entry.oauthAuthorizationEndpoint,

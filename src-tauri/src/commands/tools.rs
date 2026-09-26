@@ -43,20 +43,8 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
 
     // PATH 环境变量查找（已覆盖各平台）
     if let Some(paths) = env::var_os("PATH") {
-        for dir in env::split_paths(&paths) {
-            let candidate = dir.join(program);
-            if candidate.exists() {
-                return candidate;
-            }
-            #[cfg(windows)]
-            if Path::new(program).extension().is_none() {
-                for extension in ["exe", "cmd"] {
-                    let candidate = dir.join(format!("{program}.{extension}"));
-                    if candidate.exists() {
-                        return candidate;
-                    }
-                }
-            }
+        if let Some(found) = find_in_path(program, env::split_paths(&paths)) {
+            return found;
         }
     }
 
@@ -87,6 +75,45 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
     }
 
     PathBuf::from(program)
+}
+
+/// 在给定目录列表中查找可执行文件，命中即返回。
+fn find_in_path(program: &str, dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    let names = path_candidate_names(program);
+    for dir in dirs {
+        for name in &names {
+            let candidate = dir.join(name);
+            if candidate.exists() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn path_candidate_names(program: &str) -> Vec<String> {
+    vec![program.to_string()]
+}
+
+/// Windows 的 CreateProcess 不能执行无扩展名文件：Node.js 安装目录里 `npx` 是 Unix shell
+/// 脚本，`npx.cmd` 才是命令入口。若先命中前者，启动会以 os error 193
+/// （%1 不是有效的 Win32 应用程序）失败，所以这里必须先按 PATHEXT 找 exe/cmd/bat。
+#[cfg(windows)]
+fn path_candidate_names(program: &str) -> Vec<String> {
+    if Path::new(program).extension().is_some() {
+        return vec![program.to_string()];
+    }
+    ["exe", "cmd", "bat", ""]
+        .into_iter()
+        .map(|extension| {
+            if extension.is_empty() {
+                program.to_string()
+            } else {
+                format!("{program}.{extension}")
+            }
+        })
+        .collect()
 }
 
 fn ensure_binary_executable(path: &Path) {
@@ -204,4 +231,29 @@ pub(crate) fn resolve_local_python() -> PathBuf {
     }
 
     resolve_local_binary("python3")
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn prefers_cmd_shim_over_extensionless_npx_script() {
+        let dir = tempfile::tempdir().unwrap();
+        // 复现 Node.js 安装目录的真实形态：`npx` 是 Unix shell 脚本，`npx.cmd` 是 Windows 入口
+        std::fs::write(dir.path().join("npx"), "#!/bin/sh\n").unwrap();
+        std::fs::write(dir.path().join("npx.cmd"), "@echo off\r\n").unwrap();
+
+        let resolved = find_in_path("npx", [dir.path().to_path_buf()]).expect("应命中 PATH 内的 npx");
+        assert_eq!(
+            resolved.file_name().unwrap().to_string_lossy(),
+            "npx.cmd",
+            "必须先命中可由 CreateProcess 执行的 npx.cmd"
+        );
+    }
+
+    #[test]
+    fn does_not_guess_extensions_for_explicit_program() {
+        assert_eq!(path_candidate_names("tool.cmd"), vec!["tool.cmd".to_string()]);
+    }
 }
