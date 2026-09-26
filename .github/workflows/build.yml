@@ -91,6 +91,7 @@ jobs:
           args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Notarize macOS app (ARM)
+        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -213,6 +214,7 @@ jobs:
           rm -rf "$SOURCE"
 
       - name: Notarize macOS app (Intel)
+        continue-on-error: true
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}

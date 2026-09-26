@@ -62,6 +62,16 @@ test('every desktop release job uses the audited desktop build before Tauri', ()
   }
 })
 
+test('macOS notarization failure does not block direct release assets', () => {
+  for (const architecture of ['ARM', 'Intel']) {
+    assert.match(
+      workflow,
+      new RegExp(`name: Notarize macOS app \\(${architecture}\\)\\n\\s+continue-on-error: true`),
+      architecture,
+    )
+  }
+})
+
 test('Storyboarder assets are fetchable and included in the Windows portable zip', () => {
   const csp = tauriConfig.app.security.csp
   const connectSrc = csp.match(/connect-src ([^;]+)/)?.[1] || ''
