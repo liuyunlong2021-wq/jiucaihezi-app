@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-09-26] 基线 | Windows 门禁从 `1515/1524` 转绿为 `1516/1524`
+
+- **根因一（换行符）**：仓库此前没有换行符策略，本机 `core.autocrlf=true` 把 Windows 检出变成 CRLF，而索引里 1251 个文本文件本来就是 LF。`creationPanelContractUi` / `projectFileTreeCanvas` / `memoryWorkbench` 用 `\n` 锚定源码正则切片段，CRLF 下切不出来，报成「Input: ''」式假失败 39 条。新增 `.gitattributes`（`* text=auto eol=lf`，`*.bat`/`*.cmd` 保留 CRLF），本机工作区按它重写为 LF 后 39 条一次性消失——这 39 条不是代码漂移，是同一提交在不同平台的两种结论。
+- **根因二（宿主绑定用例）**：`skillMaterialRuntime` 的「默认 exists」用例写死作者本机路径 `/Users/by3/Documents/jiucaihezi-app`，改用 `process.cwd()`，断言意图（默认实现真的在查文件系统）不变；`prune-updates` 的 4 条要用 `bash` 跑 `scripts/prune-updates.sh`，缺 bash 时跳过（脚本真实执行环境是 Linux 下载服务器，CI 上仍会运行）。
+- **验证**：完整 focused `1524 tests / 1516 pass / 0 fail / 8 skipped`（修复前 `1515 pass / 5 fail`，v2.2.2 发版时记录的是 47 条既有失败）。
+
 ## [2026-09-26] 发版 | 2.2.2 传图修复版
 
 - 版本由 `node scripts/set-version.mjs 2.2.2` 统一写入 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`，`Cargo.lock` 随 cargo 更新；`AGENTS.md` 头部版本同步。

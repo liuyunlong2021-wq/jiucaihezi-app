@@ -38,12 +38,15 @@ test('detectSkillMaterialRuntime exposes source capabilities for the configured 
 })
 
 test('detectSkillMaterialRuntime uses the real default filesystem check', async () => {
+  // 这条断言要验的是「默认 exists 真的在查文件系统」，与具体机器无关。
+  // 原先写死 /Users/by3/... 的作者本机路径，在 Windows 和 CI 上永远失败。
+  const repositoryRoot = process.cwd()
   const runtime = await detectSkillMaterialRuntime({
-    devProjectPath: '/Users/by3/Documents/jiucaihezi-app',
+    devProjectPath: repositoryRoot,
   })
 
   assert.equal(runtime.available, true)
-  assert.equal(runtime.cwd, '/Users/by3/Documents/jiucaihezi-app')
+  assert.equal(runtime.cwd, repositoryRoot)
 })
 
 test('buildSkillMaterialRuntimeCommand keeps GitHub token out of argv and passes it through env', () => {
