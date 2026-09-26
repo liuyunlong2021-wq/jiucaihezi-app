@@ -4,8 +4,6 @@ import { test } from 'node:test'
 import {
   JC_H3_RATIO_OPTIONS,
   JC_H3_RATIOS,
-  JC_IMAGE_SIZE_OPTIONS,
-  JC_IMAGE_SIZES,
   JC_VIDEO_SIZE_OPTIONS,
   JC_VIDEO_SIZES,
   isMediaModelEnabled,
@@ -17,15 +15,15 @@ import {
 } from '../creationMediaRuntime'
 import { buildCreationRunPlan } from '../creationMediaPlan'
 import {
-  CREATION_MODEL_REGISTRY,
   creationModelFamily,
   getCreationModelSpec,
   listCreationPanelModels,
 } from '../creationModelRegistry'
 
-/** 本机 comfy-adapter 的五个面板项（渠道公开模型名只有三个）。 */
+/** 本机 comfy-adapter 的四个面板项（渠道公开模型名只有两个）。
+ * 图片模型（jc-qwen-image-2.1）已从面板撤下：图片与视频两套权重在 48GB 显存里无法共存。
+ */
 const JC_MODEL_IDS = [
-  'jc-qwen-image-2.1',
   'jc-minimax-h3',
   'jc-minimax-h3-first-frame',
   'jc-minimax-h3-first-last',
@@ -70,8 +68,7 @@ test('本机 comfy-adapter 的模型在注册表和面板能力表里都在，�
   }
 })
 
-test('三个渠道模型名就是 NewAPI 里的公开模型名', () => {
-  assert.equal(getCreationModelSpec('jc-qwen-image-2.1')?.model, 'jc-qwen-image-2.1')
+test('两个渠道模型名就是 NewAPI 里的公开模型名', () => {
   assert.equal(getCreationModelSpec('jc-minimax-h3')?.model, 'jc-minimax-h3')
   assert.equal(getCreationModelSpec('jc-minimax-h3-ref2v')?.model, 'jc-minimax-h3-ref2v')
   // 文生 / 首帧 / 首尾帧共用同一个渠道模型名，靠给哪个槽位区分模式
@@ -79,39 +76,31 @@ test('三个渠道模型名就是 NewAPI 里的公开模型名', () => {
   assert.equal(getCreationModelSpec('jc-minimax-h3-first-last')?.model, 'jc-minimax-h3')
 })
 
-test('尺寸表守住 comfy-adapter 的约束：图 8 的倍数、视频 32 的倍数', () => {
-  const tables: Array<{ label: string; sizes: string[]; multiple: number }> = [
-    { label: '图片 Qwen-Image 2.1', sizes: JC_IMAGE_SIZES, multiple: 8 },
-    { label: '视频 MiniMax H3', sizes: JC_VIDEO_SIZES, multiple: 32 },
-  ]
-  for (const { label, sizes, multiple } of tables) {
-    assert.ok(sizes.length > 0, `${label} 尺寸表为空`)
-    for (const size of sizes) {
-      const [width, height] = size.split('x').map(Number)
-      assert.ok(Number.isFinite(width) && Number.isFinite(height), `${label} ${size} 格式不对`)
-      assert.equal(width % multiple, 0, `${label} ${size} 宽度不是 ${multiple} 的倍数`)
-      assert.equal(height % multiple, 0, `${label} ${size} 高度不是 ${multiple} 的倍数`)
-      assert.ok(Math.max(width, height) <= 2048, `${label} ${size} 超过最长边 2048`)
-      assert.ok(width * height <= 2_100_000, `${label} ${size} 超过 2100000 像素上限`)
-    }
-    assert.equal(new Set(sizes).size, sizes.length, `${label} 有重复尺寸`)
+test('视频画幅表守住 comfy-adapter 的约束：32 的倍数、≤最长边 2048、≤2.1MP', () => {
+  const sizes = JC_VIDEO_SIZES
+  assert.ok(sizes.length > 0, '视频尺寸表为空')
+  for (const size of sizes) {
+    const [width, height] = size.split('x').map(Number)
+    assert.ok(Number.isFinite(width) && Number.isFinite(height), `视频 ${size} 格式不对`)
+    assert.equal(width % 32, 0, `视频 ${size} 宽度不是 32 的倍数`)
+    assert.equal(height % 32, 0, `视频 ${size} 高度不是 32 的倍数`)
+    assert.ok(Math.max(width, height) <= 2048, `视频 ${size} 超过最长边 2048`)
+    assert.ok(width * height <= 2_100_000, `视频 ${size} 超过 2100000 像素上限`)
   }
+  assert.equal(new Set(sizes).size, sizes.length, '视频有重复尺寸')
 
-  // 4K（长边 3840）越不过适配器的 2048 上限，所以只应有 1K/2K 两档
-  assert.ok(JC_IMAGE_SIZES.every(size => !size.includes('3840')))
-  // 用户常用的竖屏 2K：图是 1080×1920（8 的倍数），视频是 1088×1920（32 的倍数）
-  assert.ok(JC_IMAGE_SIZES.includes('1080x1920'))
+  // 用户常用的竖屏 2K：32 的倍数落不到 1080，实际是 1088×1920
   assert.ok(JC_VIDEO_SIZES.includes('1088x1920'))
 })
 
 test('尺寸选项的标签是人话（档位 + 方位 + 比例 + 实际像素），value 就是真实像素', () => {
-  const tables = [JC_IMAGE_SIZE_OPTIONS, JC_VIDEO_SIZE_OPTIONS]
+  const tables = [JC_VIDEO_SIZE_OPTIONS]
   for (const table of tables) {
     for (const option of table) {
       const value = String(option.value)
       assert.match(value, /^\d+x\d+$/, `value ${value} 不是像素串`)
-      // 标签里必须带上真实像素，否则用户看到的尺寸和产出会对不上
-      assert.ok(option.label.includes(value), `标签「${option.label}」没写上实际像素 ${value}`)
+      // 标签里必须带上真实像素，否则用户看到的尺寸和产出会对不上（允许写成全角 ×）
+      assert.ok(option.label.replaceAll('×', 'x').includes(value), `标签「${option.label}」没写上实际像素 ${value}`)
       assert.ok(!option.label.includes('undefined'), `标签「${option.label}」有残留字段`)
     }
   }
@@ -155,64 +144,6 @@ test('三个用显式像素的视频模型保留画幅、不给比例', () => {
     assert.ok(!keys.includes('ratio'), `${id} 不该给比例（它绑的是 width/height）`)
     assert.deepEqual(spec.capabilities.ratios, [], `${id} 的 ratios 必须为空，否则会发多余参数`)
   }
-})
-
-test('本机适配器的图片结果走 b64 内联回收，其它图片模型不受牵连', () => {
-  assert.equal(getCreationModelSpec('jc-qwen-image-2.1')?.imageResultFormat, 'b64_json')
-  for (const id of JC_MODEL_IDS.filter(candidate => candidate !== 'jc-qwen-image-2.1')) {
-    assert.equal(getCreationModelSpec(id)?.imageResultFormat, undefined, `${id} 不应设 imageResultFormat`)
-  }
-
-  const plan = buildCreationRunPlan({
-    modelId: 'jc-qwen-image-2.1',
-    params: { prompt: '一只戴墨镜的柴犬', size: '1080x1920' },
-  })
-  assert.equal(plan.normalizedParams.response_format, 'b64_json')
-  const request = buildCreationSubmitRequest(plan)
-  // 适配器返回的是 Docker 内网名（frps:8796）的 URL，客户端解析不了；
-  // 改成 127.0.0.1 又会被 urlSafety 的私有地址拦截 —— 只能要字节。
-  assert.equal(request.imageParams?.responseFormat, 'b64_json')
-  assert.equal(request.imageParams?.size, '1080x1920')
-
-  // 不显式给 size 时的默认值就是 2K 竖屏（用户常用），不是 1024×1024
-  const defaultPlan = buildCreationRunPlan({
-    modelId: 'jc-qwen-image-2.1',
-    params: { prompt: '默认尺寸' },
-  })
-  assert.equal(defaultPlan.normalizedParams.size, '1080x1920')
-
-  // 其它渠道的图片模型仍然是 url（上游给的是公网地址）
-  const others = CREATION_MODEL_REGISTRY.filter(spec => spec.task === 'image' && !spec.id.startsWith('jc-'))
-  assert.ok(others.length > 0, '没有对照组模型')
-  for (const spec of others) {
-    assert.notEqual(spec.imageResultFormat, 'b64_json', `${spec.id} 被误改成 b64`)
-    assert.equal(spec.imageResultFormat, undefined, `${spec.id} 不应设 imageResultFormat`)
-  }
-})
-
-test('Qwen 不给参考图走文生图，给参考图自动切到编辑端点', () => {
-  const text = buildCreationRunPlan({
-    modelId: 'jc-qwen-image-2.1',
-    params: { prompt: '一只戴墨镜的柴犬', size: '1024x1024' },
-  })
-  assert.equal(text.apiStyle, 'openai-images')
-  assert.equal(text.endpoint, '/v1/images/generations')
-  assert.equal(text.pollKind, 'none')
-
-  const textRequest = buildCreationSubmitRequest(text)
-  assert.equal(textRequest.imageParams?.size, '1024x1024')
-  // resolution 在适配器里是「参考图缩放基准」整数，别的模型的画质字符串不能混进来
-  assert.equal((textRequest.imageParams as any)?.resolution, undefined)
-  assert.equal((textRequest.imageParams as any)?.aspectRatio, undefined)
-
-  const edit = buildCreationRunPlan({
-    modelId: 'jc-qwen-image-2.1',
-    params: { prompt: '把背景换成雪天', size: '1024x1024', images: refs(2) },
-  })
-  assert.equal(edit.apiStyle, 'openai-image-edits')
-  assert.equal(edit.endpoint, '/v1/images/edits')
-  // 编辑走 multipart，参考图不经过 NewAPI 转存
-  assert.equal(edit.mediaInputTransport, 'multipart')
 })
 
 test('视频三项的参考图张数按适配器槽位卡死', () => {
@@ -316,11 +247,11 @@ test('视频提交体把画布参考图落到适配器声明的槽位', { concur
   assert.equal(bodies[2].last_frame, 'https://cdn.example.test/ref-1.png')
   assert.equal(bodies[2].images, undefined)
 
-  // 参考生：整组进 images，档位透传
+  // 参考生：整组进 images；模式（mode）面板不再发，由适配器的模板默认值决定
   assert.equal(bodies[3].model, 'jc-minimax-h3-ref2v')
   assert.deepEqual(bodies[3].images, refs(3))
   assert.equal(bodies[3].first_frame, undefined)
-  assert.equal(bodies[3].mode, '1')
+  assert.equal(bodies[3].mode, undefined)
   assert.equal(bodies[3].duration, 3)
 
   for (const url of results) assert.match(url, /\/v1\/videos\/task_test_1\/content$/)

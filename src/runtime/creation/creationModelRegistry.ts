@@ -18,7 +18,7 @@ import type {
 } from './creationMediaTypes'
 
 import { getRhEndpointCapability } from '@/data/rhCapabilities'
-import { JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_IMAGE_SIZE_OPTIONS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
+import { JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
 
 const RATIOS = ['adaptive', '1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 const GPT_IMAGE_SIZES = [
@@ -179,7 +179,6 @@ function baseSpec(input: {
   duration?: CreationModelSpec['capabilities']['duration']
   inputModalities?: CreationInputModality[]
   contractIssues?: string[]
-  imageResultFormat?: CreationModelSpec['imageResultFormat']
 }): CreationModelSpec {
   const outputModalities =
     input.outputModalities ||
@@ -224,7 +223,6 @@ function baseSpec(input: {
     fields: input.fields || promptFields(),
     aliases: input.aliases,
     notes: input.notes,
-    imageResultFormat: input.imageResultFormat,
     verifiedAt: input.contractStatus === 'unknown' ? undefined : '2026-06-16',
     contractIssues: input.contractIssues,
   }
@@ -507,42 +505,10 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── 本机 GPU 的 comfy-adapter（NewAPI → 隧道 → 本机 ComfyUI）───────────────────
   // 这里的 model 就是 NewAPI 渠道里的公开模型名，渠道的模型映射再换成适配器的 id。
   // 必须有 GPU 的那台机器在线才能出图/出片；VPS 只负责中转、计费与鉴权。
-  baseSpec({
-    id: 'jc-qwen-image-2.1',
-    model: 'jc-qwen-image-2.1',
-    label: 'jc-Qwen-Image 2.1',
-    task: 'image',
-    source: 'newapi-direct',
-    route: 'newapi-direct',
-    upstreamFamily: 'openai-compatible',
-    apiStyle: 'openai-images',
-    mode: 'text-to-image',
-    contractStatus: 'verified',
-    endpoint: '/v1/images/generations',
-    pollKind: 'none',
-    assetFlow: 'none',
-    resultExtractor: 'openai-image',
-    files: { images: { min: 0, max: 10, maxBytes: 20 * 1024 * 1024 } },
-    fields: promptFields([
-      {
-        key: 'size',
-        label: '尺寸',
-        kind: 'select',
-        defaultValue: '1080x1920',
-        options: JC_IMAGE_SIZE_OPTIONS,
-      },
-      { key: 'image', label: '参考图', kind: 'images' },
-    ]),
-    // 适配器的 public_base_url 是 Docker 内网名（frps:8796）：NewAPI 容器能解析，
-    // 客户端解析不了，而 urlSafety 又禁止把结果地址指向 127.0.0.1 等私有地址。
-    // 所以图片必须走 b64_json 内联回收；视频另一条路：NewAPI 的 /v1/videos/{id}/content 代理。
-    imageResultFormat: 'b64_json',
-    notes: ['本机 ComfyUI 的 Qwen-Image 2.1：不给参考图＝文生图，给参考图＝单图/多图编辑（最多 10 张）。'],
-    // 画幅完全由 size 决定。不暴露 resolution —— 适配器的 resolution 是参考图缩放基准边长（整数），
-    // 和别的模型的 '1k'/'2k' 不是同一个东西，混用会互相踩。
-    ratios: [],
-    resolutions: [],
-  }),
+
+  // 只注册视频：图片模型（jc-qwen-image-2.1）已按 2026-09-26 的决定从面板撤下。
+  // 图片与视频两套权重在 48GB 显存里无法共存，频繁来回切会互相挤爆；
+  // 服务器端适配器与工作流都还在，等有第二台机器单独跑图片时再把上面那份规格接回来。
   baseSpec({
     id: 'jc-minimax-h3',
     model: 'jc-minimax-h3',

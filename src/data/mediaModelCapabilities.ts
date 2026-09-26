@@ -62,32 +62,6 @@ export interface MediaModelAvailabilityOverride {
 
 const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '3840x2160', '2160x3840']
 
-/** 本机 comfy-adapter 的 Qwen-Image 2.1 可选尺寸（图片，multiple_of=8）。
- *
- * 档位＝长边（1K=1024、2K=1920），比例误差 ≤1%，且不越过适配器 constraints：
- * 8 的倍数、最长边 ≤ 2048、总像素 ≤ 2100000。
- * 4K（长边 3840）超出适配器上限，所以只有 1K/2K 两档。
- * 表由 scripts/gen-jc-sizes.mjs 推导并校验，改档位前先跑那个脚本。
- */
-export const JC_IMAGE_SIZE_OPTIONS: MediaFieldOption[] = [
-  { value: '1024x1024', label: '1K 方图 1:1 · 1024×1024' },
-  { value: '1024x576', label: '1K 横屏 16:9 · 1024×576' },
-  { value: '576x1024', label: '1K 竖屏 9:16 · 576×1024' },
-  { value: '1024x768', label: '1K 横屏 4:3 · 1024×768' },
-  { value: '768x1024', label: '1K 竖屏 3:4 · 768×1024' },
-  { value: '1024x680', label: '1K 横屏 3:2 · 1024×680' },
-  { value: '680x1024', label: '1K 竖屏 2:3 · 680×1024' },
-  { value: '1448x1448', label: '2K 方图 1:1 · 1448×1448' },
-  { value: '1920x1080', label: '2K 横屏 16:9 · 1920×1080' },
-  { value: '1080x1920', label: '2K 竖屏 9:16 · 1080×1920' },
-  { value: '1664x1248', label: '2K 横屏 4:3 · 1664×1248' },
-  { value: '1248x1664', label: '2K 竖屏 3:4 · 1248×1664' },
-  { value: '1768x1176', label: '2K 横屏 3:2 · 1768×1176' },
-  { value: '1176x1768', label: '2K 竖屏 2:3 · 1176×1768' },
-]
-
-export const JC_IMAGE_SIZES = JC_IMAGE_SIZE_OPTIONS.map(option => String(option.value))
-
 /** 本机 comfy-adapter 的 MiniMax H3 可选画幅（视频，multiple_of=32）。
  *
  * 同 1K/2K 长边档位，但 32 的倍数比 8 的倍数粗，所以 1080p 系落不到整数：
@@ -643,27 +617,6 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
-    ],
-  },
-  {
-    id: 'jc-qwen-image-2.1',
-    label: 'jc-Qwen-Image 2.1',
-    task: 'image',
-    model: 'jc-qwen-image-2.1',
-    provider: 'gateway-image',
-    maxFiles: 10,
-    acceptedFiles: ['image'],
-    fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      {
-        key: 'size',
-        label: '尺寸',
-        kind: 'select',
-        // 默认 2K 竖屏：用户常用这个，比 1K 方图更符合创作习惯
-        defaultValue: '1080x1920',
-        options: JC_IMAGE_SIZE_OPTIONS,
-      },
-      { key: 'image', label: '参考图', kind: 'images' },
     ],
   },
   {

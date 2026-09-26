@@ -262,7 +262,7 @@ function normalizeOpenAiImageParams(
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    response_format: spec.imageResultFormat || 'url',
+    response_format: 'url',
   })
 }
 

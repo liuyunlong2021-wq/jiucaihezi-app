@@ -1567,3 +1567,15 @@
 - **已实测**：视频端到端跑通（2026-09-26 10:42，面板绿勾并落盘 `.raw/jc-media/视频/...mp4`）。路上逐个修掉三处：参考图把 Tauri 本地地址直接透传给远端（改成先上传）、改了 meta 但没重启适配器导致比例失效、异步提交回 202 被 NewAPI 当成失败。
 - 供应商可直接使用：`docs/wiki/运维/韭菜盒子本机ComfyUI图片模型API对外接入-2026-09-26.md`、`docs/wiki/运维/韭菜盒子本机ComfyUI视频模型API对外接入-2026-09-26.md`。
 - 运维记录见 `docs/wiki/运维/本机ComfyUI模型对外接入-2026-09-26.md`（含端口漂移、适配器父+子进程模型等坑）。
+
+## [2026-09-26] 决策 | 撤下本机图片模型 jc-qwen-image-2.1，本机只跑视频
+
+- 用户决定：图片模型有多个备选，本机只留视频；「服务器里不用删除，等我以后再买电脑单独部署图片模型就行了」。
+- 根因是**显存**，不是质量：H3 权重栈（UNET 19.53GB + 32B CLIP + LoRA + 潜空间上采样）与 Qwen-Image 栈合计超过 48GB，而真实用法是图片/视频交替，每次切换必然整栈重载，切换过程会把显存顶满甚至卡死 ComfyUI（已实测：探针换栈后连 `/interrupt` 都够不到，用户的视频任务排队 300 秒被拒）。
+- 客户端改动（本仓库）：
+  - `creationModelRegistry.ts` 删除 `jc-qwen-image-2.1` 规格；`mediaModelCapabilities.ts` 删除对应面板条目与 `JC_IMAGE_SIZE_OPTIONS` / `JC_IMAGE_SIZES`。
+  - 只为它存在的规格字段 `imageResultFormat` 一并删除（`creationMediaTypes.ts`、`creationMediaPlan.ts`、`useCreation.ts` 三处取值改回固定 `'url'`）—— 留死代码就是留补丁层，将来接回时这条链路必然一起回来（`git log` 可查）。
+  - 视频侧一律不动：`isLocalAssetUrl` / `uploadCreationAsset` 仍然必要（视频参考图同样是 Tauri 本地地址），四个 H3 模型、`JC_VIDEO_SIZE_OPTIONS`、`JC_H3_RATIO_OPTIONS` 全部保留。
+- 服务器端**不动**：`comfy-adapter` 的 `qwen-image-2.1` 模板与工作流、frp 隧道、NewAPI 渠道 140 的模型映射都留在原地；只有 NewAPI 里的模型与价格条目由用户自行删除。
+- 文档：图片供应商文档保留并加「当前未上线」标注（接回时合同不用重写）；视频供应商文档里「与图片模型共享同一个队列」的说法同步修正；运维文档新增一节说明取舍，以及将来真要混跑的两条路（适配器换模板前 `POST /free`，或 ComfyUI 带 `--disable-smart-memory` 启动）。
+- 验证：`vue-tsc -b` exit 0；`jcComfyAdapterPlan.test.ts` 10/10 全绿；全量聚焦测试 **fail 50 → 47**（顺手修掉 3 条过时断言：尺寸标签用全角 × 导致像素比较失败、ref2v 的 `mode` 断言在「去档位改比例」时已失效），本次新增 0 失败。

@@ -14,6 +14,6 @@
 - [韭菜盒子 MiniMax 参考生视频 API 对外接入](韭菜盒子MiniMax参考生视频API对外接入-2026-09-06.md) - 可直接发给第三方用户的 MiniMax H3 图片与音频参考生视频接口、参数限制和异步下载流程。
 - [韭菜盒子 RH 渠道 MiniMax H3 视频 API 对外接入](韭菜盒子RH渠道MiniMaxH3视频API对外接入-2026-09-21.md) - 可直接发给第三方用户的 RH 渠道 7 个 MiniMax H3 视频模型：模型名、参考图张数、提示词写法和错误处理。
 - [韭菜盒子 Seedance 2.5 API 接口](韭菜盒子Seedance2.5中转接入.md) - 可直接发给第三方用户的 `dola-seedance2.5` 视频接口合同。
-- [本机 ComfyUI 模型对外接入（jc- 前缀）](本机ComfyUI模型对外接入-2026-09-26.md) - 本机 4090 上的 Qwen-Image 与 MiniMax H3 经 comfy-adapter + frp 隧道接入 NewAPI 与创作面板；含已完成证据、剩余步骤和关键坑。
-- [韭菜盒子本机 ComfyUI 图片模型 API 对外接入](韭菜盒子本机ComfyUI图片模型API对外接入-2026-09-26.md) - 可直接发给第三方用户的 `jc-qwen-image-2.1`：模型名、尺寸档位表、b64 响应和错误处理。
+- [本机 ComfyUI 模型对外接入（jc- 前缀）](本机ComfyUI模型对外接入-2026-09-26.md) - 本机 4090 上的 MiniMax H3 经 comfy-adapter + frp 隧道接入 NewAPI 与创作面板；含已完成证据、剩余步骤和关键坑。（图片模型 `jc-qwen-image-2.1` 已于 2026-09-26 撤下，服务器端保留）
+- [韭菜盒子本机 ComfyUI 图片模型 API 对外接入](韭菜盒子本机ComfyUI图片模型API对外接入-2026-09-26.md) - `jc-qwen-image-2.1` 的接口合同（模型名、尺寸档位表、b64 响应和错误处理）。**当前未上线**：图片与视频两套权重在 48GB 显存里无法共存，等搬到独立机器后再启用。
 - [韭菜盒子本机 ComfyUI 视频模型 API 对外接入](韭菜盒子本机ComfyUI视频模型API对外接入-2026-09-26.md) - 可直接发给第三方用户的 `jc-MiniMax H3` 四个视频模型：传图字段、画幅表、比例枚举、异步下载和保留期。

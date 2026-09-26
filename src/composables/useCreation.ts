@@ -537,7 +537,7 @@ export function buildCurrentCreationParams(materializedFiles?: Partial<CreationM
     resolution: cpState.res,
     duration: currentCreationSpec.value?.mode === 'video-edit' ? undefined : cpState.dur,
     size: getSizeOptions(currentModel.value!).length ? cpState.size : undefined,
-    response_format: currentCreationSpec.value?.imageResultFormat || 'url',
+    response_format: 'url',
     mv: cpState.mv,
     images,
     videos,
