@@ -130,5 +130,7 @@ McpManagerPanel 添加表单
 - 设计问题：client id 与 client secret 是成对的，secret 只存在于 Gateway（`gateway/src/index.js` 的 `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET`，token 交换与 `redirect_uri` 校验都在那里），App 再持有第二份构建期副本属于双来源；`VITE_` 变量还会被固化进产物，换 OAuth App 就得重新发版。client id 本身出现在 authorize URL 里，是公开信息，secret 始终不出 Gateway。
 - 根修：Gateway 新增只读端点 `GET /auth/mcp/github/config`（返回 `{ client_id }`，与 token 端点共用同一份凭据检查，secret 永不外发）；App 点击连接时经现有 `gatewayJson` 取，取不到就报真实失败原因。`build.yml` 三处 `VITE_GITHUB_OAUTH_CLIENT_ID` 注入随之删除，`mcpCatalog` 不再读任何构建期环境变量。
 - 验证：Gateway `24/24`（含 2 条新用例）、`mcpManagerPanel` 合同测试 `10/10`、TypeScript 无错误；线上 `POST /auth/mcp/github/token` 实测已越过凭据检查（返回 formData 解析错误而非「GitHub OAuth 尚未配置」），说明 Gateway 侧 client id/secret 齐全。
-- 待验证：Gateway Worker 未部署、App 未重建、设置里未点击连接。顺序必须是先 `pnpm --dir gateway run deploy` 再发版，否则 App 会显示「OAuth Client ID 获取失败」。
+- 部署（2026-09-26）：`gateway/` 依赖装好后用 `pnpm run deploy`（即 `wrangler deploy --keep-vars`）发布到生产 Worker，版本 ID `8362d1f7-7947-48da-8294-6f1699bc34c0`。必须带 `--keep-vars`：官方帮助写明不加时 Wrangler 会**先删掉所有 vars** 再写入配置文件里的那份，会冲掉只存在 Cloudflare 侧的 `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` / `GATEWAY_SECRET`。`wrangler.toml` 已有的 `api.jiucaihezi.studio/auth/*` 通配已覆盖新路由，未改部署配置。
+- 线上验证：`GET /auth/mcp/github/config` 返回 200 且带 20 位 `client_id`；`GET /health` 200 且能力列表不变；`POST /auth/mcp/github/token` 仍越过凭据检查（只报请求体缺 Content-Type）——证明 secret 未被本次部署影响。
+- 待验证：App 未重建、设置里未点击连接。新 App 依赖上面这条路由，所以顺序必须是先部署 Worker 再发版，否则 App 会显示「OAuth Client ID 获取失败」。
 - 顺带：CI 当初把 `beforeBuildCommand` 置空只是为了注入这个变量，动机现已消失；那处 `--config '{"build":{"beforeBuildCommand":""}}'` 不在本次改动范围，留待单独处理。
