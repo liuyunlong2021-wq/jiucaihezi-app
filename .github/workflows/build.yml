@@ -63,7 +63,7 @@ jobs:
             ### 校验
             下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
           tauriScript: pnpm tauri
-          args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+          args: --target aarch64-apple-darwin --bundles app --config '{"build":{"beforeBuildCommand":""}}'
 
       - name: Retry macOS ARM build after transient signing failure
         if: steps.build-macos-arm.outcome == 'failure'
@@ -88,7 +88,25 @@ jobs:
             ### 校验
             下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
           tauriScript: pnpm tauri
-          args: --target aarch64-apple-darwin --config '{"build":{"beforeBuildCommand":""}}'
+          args: --target aarch64-apple-darwin --bundles app --config '{"build":{"beforeBuildCommand":""}}'
+
+      - name: Sign nested macOS code (ARM)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: node scripts/fix-macos-app.mjs "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+
+      - name: Create DMG (ARM, headless)
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+          BUNDLE="src-tauri/target/aarch64-apple-darwin/release/bundle/dmg"
+          SOURCE=$(mktemp -d)
+          DMG="$BUNDLE/韭菜盒子_${GITHUB_REF_NAME}_aarch64.dmg"
+          mkdir -p "$BUNDLE"
+          cp -R "$APP" "$SOURCE/韭菜盒子.app"
+          ln -s /Applications "$SOURCE/Applications"
+          hdiutil create -volname "韭菜盒子" -srcfolder "$SOURCE" -ov -format UDZO "$DMG"
+          rm -rf "$SOURCE"
 
       - name: Notarize macOS app (ARM)
         env:
@@ -104,14 +122,25 @@ jobs:
             # 引入重试机制与明确的超时机制，防止单次长连接因网络瞬断导致整条流水线报错
             for i in {1..3}; do
               echo "开始提交公证（第 $i 次尝试）..."
-              if xcrun notarytool submit "$dmg" \
+              if result=$(xcrun notarytool submit "$dmg" \
                 --apple-id "$APPLE_ID" \
                 --team-id "$APPLE_TEAM_ID" \
                 --password "$APPLE_APP_PASSWORD" \
                 --timeout 30m \
-                --wait; then
-                echo "✅ 公证成功"
-                break
+                --wait \
+                --output-format json); then
+                echo "$result" | jq .
+                submission_id=$(echo "$result" | jq -r '.id')
+                if [ "$(echo "$result" | jq -r '.status')" = "Accepted" ]; then
+                  echo "✅ 公证成功"
+                  break
+                fi
+                echo "❌ Apple 拒绝公证"
+                xcrun notarytool log "$submission_id" \
+                  --apple-id "$APPLE_ID" \
+                  --team-id "$APPLE_TEAM_ID" \
+                  --password "$APPLE_APP_PASSWORD" || true
+                exit 1
               else
                 echo "⚠️ 第 $i 次尝试失败，可能是网络抖动，等待 30 秒后重试..."
                 if [ $i -eq 3 ]; then
@@ -122,6 +151,7 @@ jobs:
               fi
             done
             xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
           done
 
       - name: Generate SHA256
@@ -130,6 +160,9 @@ jobs:
             shasum -a 256 "$dmg" > "${dmg}.sha256"
             gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
           done
+          tar -czf "$RUNNER_TEMP/_aarch64.app.tar.gz" \
+            -C src-tauri/target/aarch64-apple-darwin/release/bundle/macos "韭菜盒子.app"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/_aarch64.app.tar.gz" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -141,7 +174,7 @@ jobs:
           APP_PATH=$(find /Volumes -maxdepth 2 -name "*.app" 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then echo "❌ 未找到 .app"; exit 1; fi
           echo "APP_PATH=$APP_PATH"
-          if find "$APP_PATH" -iname '*opencode*' -print -quit | grep -q .; then
+          if find "$APP_PATH/Contents/MacOS" -maxdepth 1 -type f -iname 'opencode*' -print -quit | grep -q .; then
             echo "❌ 记忆 APP 不得携带 OpenCode sidecar"
             exit 1
           fi
@@ -199,6 +232,11 @@ jobs:
           # 先只生成已签名 .app，下一步用 hdiutil 生成可安装 DMG。
           args: --target x86_64-apple-darwin --bundles app --config '{"build":{"beforeBuildCommand":""}}'
 
+      - name: Sign nested macOS code (Intel)
+        env:
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: node scripts/fix-macos-app.mjs "src-tauri/target/x86_64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+
       - name: Create DMG (Intel, headless)
         run: |
           set -euo pipefail
@@ -226,14 +264,25 @@ jobs:
             # 引入重试机制与明确的超时机制，防止单次长连接因网络瞬断导致整条流水线报错
             for i in {1..3}; do
               echo "开始提交公证（第 $i 次尝试）..."
-              if xcrun notarytool submit "$dmg" \
+              if result=$(xcrun notarytool submit "$dmg" \
                 --apple-id "$APPLE_ID" \
                 --team-id "$APPLE_TEAM_ID" \
                 --password "$APPLE_APP_PASSWORD" \
                 --timeout 30m \
-                --wait; then
-                echo "✅ 公证成功"
-                break
+                --wait \
+                --output-format json); then
+                echo "$result" | jq .
+                submission_id=$(echo "$result" | jq -r '.id')
+                if [ "$(echo "$result" | jq -r '.status')" = "Accepted" ]; then
+                  echo "✅ 公证成功"
+                  break
+                fi
+                echo "❌ Apple 拒绝公证"
+                xcrun notarytool log "$submission_id" \
+                  --apple-id "$APPLE_ID" \
+                  --team-id "$APPLE_TEAM_ID" \
+                  --password "$APPLE_APP_PASSWORD" || true
+                exit 1
               else
                 echo "⚠️ 第 $i 次尝试失败，可能是网络抖动，等待 30 秒后重试..."
                 if [ $i -eq 3 ]; then
@@ -244,6 +293,7 @@ jobs:
               fi
             done
             xcrun stapler staple "$dmg"
+            xcrun stapler validate "$dmg"
           done
 
       - name: Generate SHA256
@@ -252,6 +302,9 @@ jobs:
             shasum -a 256 "$dmg" > "${dmg}.sha256"
             gh release upload "$GITHUB_REF_NAME" "$dmg" --clobber
           done
+          tar -czf "$RUNNER_TEMP/_x64.app.tar.gz" \
+            -C src-tauri/target/x86_64-apple-darwin/release/bundle/macos "韭菜盒子.app"
+          gh release upload "$GITHUB_REF_NAME" "$RUNNER_TEMP/_x64.app.tar.gz" --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -263,7 +316,7 @@ jobs:
           APP_PATH=$(find /Volumes -maxdepth 2 -name "*.app" 2>/dev/null | head -1)
           if [ -z "$APP_PATH" ]; then echo "❌ 未找到 .app"; exit 1; fi
           echo "APP_PATH=$APP_PATH"
-          if find "$APP_PATH" -iname '*opencode*' -print -quit | grep -q .; then
+          if find "$APP_PATH/Contents/MacOS" -maxdepth 1 -type f -iname 'opencode*' -print -quit | grep -q .; then
             echo "❌ 记忆 APP 不得携带 OpenCode sidecar"
             exit 1
           fi

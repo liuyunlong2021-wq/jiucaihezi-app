@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-09-27] macOS 公证改为逐层签名并以 Accepted 为唯一成功条件
+
+- `v2.2.3` 修复两个 Mac 架构共同的公证失败根因：App 内 231 个 Mach-O 原先没有由内向外签名，bundled Node 还继承了发行包禁止的 `get-task-allow`。现由 `scripts/fix-macos-app.mjs` 逐层签名，Node 使用不含调试权限的专用 entitlements，外层 App 最后签名并执行 `codesign --verify --deep --strict`。
+- CI 不再把 `notarytool submit` 的零退出码直接当作通过；只有 JSON 状态为 `Accepted` 才 staple，并追加 `stapler validate`。被 Apple 拒绝时立即打印公证日志并失败。ARM 与 Intel 都先生成 `.app`、完成嵌套签名，再制作 DMG 和公证。
+- Mac 冒烟测试只在 `Contents/MacOS` 查真实 OpenCode sidecar，不再把普通资源里的 `opencode.js` 误判为违规二进制。本地完整 focused `1525/1525`、Rust `427/427`（另 1 项人工检查 ignored）、Desktop 构建审计及本地 ARM ad-hoc 深度验签通过；Developer ID 时间戳与 Apple `Accepted` 以正式 CI 为准。
+
 ## [2026-09-26] Harness 能否看图，取决于路由 patch 的模态声明
 
 - `route.cordis.yml` 里 `models[].input`（合法值 `text` / `image`）是官方唯一开关。不声明时官方取 `DEFAULT_INPUT = ["text"]`：图片既不内联进请求，`read_image` 也会点名拒绝（`does not declare image input`）。实测一次「查看图片内容」因此变成 11 步工具乱找 + 6 次上游 429/524，**973.7 秒后 524 失败**。修法：`imageInput` 由 `resolveModelInputModalities` 传入，只在为真时写 `input: ["text","image"]`，并进 `runtimeKey`。

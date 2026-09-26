@@ -8,6 +8,8 @@ const workflow = readFileSync('.github/workflows/build.yml', 'utf8').replace(/\r
 const rustApp = readFileSync('src-tauri/src/lib.rs', 'utf8')
 const rustManifest = readFileSync('src-tauri/Cargo.toml', 'utf8')
 const packageManifest = JSON.parse(readFileSync('package.json', 'utf8'))
+const macSigner = readFileSync('scripts/fix-macos-app.mjs', 'utf8')
+const nodeEntitlements = readFileSync('src-tauri/node-entitlements.plist', 'utf8')
 
 test('Windows release config installs WebView2 through the NSIS installer', () => {
   assert.deepEqual(tauriConfig.bundle.windows.webviewInstallMode, {
@@ -60,6 +62,31 @@ test('every desktop release job uses the audited desktop build before Tauri', ()
     assert.match(body, /pnpm run build:desktop:quick/, job)
     assert.ok(body.indexOf('pnpm run build:desktop:quick') < body.indexOf('pnpm tauri'), job)
   }
+})
+
+test('macOS release signs nested code before packaging and requires accepted notarization', () => {
+  for (const [job, nextJob, architecture] of [
+    ['macos-arm', 'macos-intel', 'aarch64-apple-darwin'],
+    ['macos-intel', 'windows', 'x86_64-apple-darwin'],
+  ]) {
+    const body = workflow.match(new RegExp(`\\n  ${job}:[\\s\\S]*?(?=\\n  ${nextJob}:)`))?.[0]
+    assert.ok(body, job)
+    assert.match(body, new RegExp(`--target ${architecture} --bundles app`), job)
+    assert.match(body, new RegExp(`fix-macos-app\\.mjs .*${architecture}`), job)
+    assert.ok(body.indexOf('fix-macos-app.mjs') < body.indexOf('Create DMG'), job)
+    assert.ok(body.indexOf('Create DMG') < body.indexOf('Notarize macOS app'), job)
+    assert.match(body, /\.status'\)" = "Accepted"/, job)
+    assert.match(body, /notarytool log/, job)
+    assert.match(body, /stapler validate/, job)
+    assert.doesNotMatch(body, /name: Notarize macOS app[^\n]*\n\s+continue-on-error: true/, job)
+    assert.match(body, /find "\$APP_PATH\/Contents\/MacOS" -maxdepth 1 -type f -iname 'opencode\*'/, job)
+  }
+
+  assert.match(macSigner, /files\.sort\(\(left, right\) => right\.length - left\.length\)/)
+  assert.match(macSigner, /node-entitlements\.plist/)
+  assert.match(macSigner, /codesign'[\s\S]*--verify'[\s\S]*--deep'[\s\S]*--strict'/)
+  assert.match(nodeEntitlements, /com\.apple\.security\.cs\.allow-jit/)
+  assert.doesNotMatch(nodeEntitlements, /get-task-allow/)
 })
 
 test('Storyboarder assets are fetchable and included in the Windows portable zip', () => {

@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-09-27] 发版候选 | 2.2.3 macOS 签名与公证修复
+
+- **根因**：旧 CI 只重签外层 `.app`，App 内 DeepSeek Harness 的 Node 与原生依赖没有按 Apple 要求由内向外签名；bundled Node 还带 `get-task-allow`。`notarytool submit --wait` 在 Apple 返回 `Invalid` 时仍可能以进程码 0 结束，旧脚本因此误印「公证成功」，随后 `stapler` 才以 65 失败。旧冒烟又递归搜索所有 `*opencode*`，把普通 JS provider 文件误判为 sidecar。
+- **修法**：`fix-macos-app.mjs` 识别并逐层签名所有 Mach-O 与嵌套 bundle，Node 使用专用 entitlements；ARM/Intel 均在制 DMG 前运行。公证解析 JSON，只接受 `Accepted`，拒绝时输出 `notarytool log`；staple 后执行 validate。Mac sidecar 检查收窄到 `Contents/MacOS`。
+- **本地验证**：focused `1525/1525`；Rust `427 passed / 1 ignored`；Desktop quick build 与审计通过；发布合同 `18/18`；本地 ARM App 共处理 231 个嵌套 Mach-O，ad-hoc `codesign --verify --deep --strict` 通过。正式 Developer ID 签名、公证及三平台安装包仍以 tag CI 结果为准。
+
 ## [2026-09-26] 基线 | Windows 门禁从 `1515/1524` 转绿为 `1516/1524`
 
 - **根因一（换行符）**：仓库此前没有换行符策略，本机 `core.autocrlf=true` 把 Windows 检出变成 CRLF，而索引里 1251 个文本文件本来就是 LF。`creationPanelContractUi` / `projectFileTreeCanvas` / `memoryWorkbench` 用 `\n` 锚定源码正则切片段，CRLF 下切不出来，报成「Input: ''」式假失败 39 条。新增 `.gitattributes`（`* text=auto eol=lf`，`*.bat`/`*.cmd` 保留 CRLF），本机工作区按它重写为 LF 后 39 条一次性消失——这 39 条不是代码漂移，是同一提交在不同平台的两种结论。
