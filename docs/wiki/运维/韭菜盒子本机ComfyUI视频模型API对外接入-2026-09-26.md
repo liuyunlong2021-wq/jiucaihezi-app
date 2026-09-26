@@ -134,7 +134,7 @@ curl --location 'https://api.jiucaihezi.studio/api/creations/uploads' \
 
 ## 查询任务
 
-建议每 5–15 秒查询一次，直到 `status` 为 `completed` 或 `failed`：
+建议每 5–15 秒查询一次，直到 `status` 为 `completed` 或 `failed`。**排队与失败都只在这里体现**：提交接口返回 `200` 只表示已受理，排队超时、参考图读取失败、上游生成失败都写在 `error.message` 里。
 
 ```bash
 curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>' \
@@ -169,7 +169,8 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>/content' \
 | `401` / `403` | API Key 缺失、错误或无该模型权限。 |
 | `400` | 模型名、`duration`、`size`、`aspect_ratio`、参考图数量或格式不合法；参考图无法读取。同步返回。 |
 | `413` | 只在临时素材上传接口出现：单文件超过 20 MB。 |
-| `429` / `server_busy` | 队列已满或排队等待超时。本系列**单并发**（在途 1 个、排队上限 4 个、排队等待上限 5 分钟）。收到后请降低并发、稍后重试。 |
+| `429` / `server_busy` | **提交阶段**被拒：在途任务已超过上限（单并发 1 + 排队 4）。降低并发、稍后重试。 |
+| 任务 `status: failed` 且 `error.code: server_busy` | **已受理但排不上队**：前面有任务在跑时接口会自动排队，不会失败；但排队等待超过 **5 分钟**仍未拿到执行槽位，任务就以此失败。注意：这类失败发生在提交之后，提交时拿到的仍然是 `200`，不会补一个 `429`——必须在轮询里读 `error.message` 才能发现。处理：降低并发、稍后重试。 |
 | 任务 `status: failed` | 创建成功之后的失败：参考图读取失败、上游生成失败等。读 `error.message`。 |
 | `404` | 任务 ID 不存在，或已超过 24 小时保留期。 |
 | `503` | 本机 ComfyUI 不可用（未启动、正在加载模型或正在执行上一个任务），稍后重试。 |
