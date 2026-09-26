@@ -3,7 +3,20 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
-import { isAllowedCreationResultUrl, isAllowedCreationPollUrl, isAllowedDownloadUrl, isAllowedExternalUrl, isAllowedMediaAttachmentUrl, normalizeEditorLinkUrl } from '../urlSafety'
+import { isAllowedCreationResultUrl, isAllowedCreationPollUrl, isAllowedDownloadUrl, isAllowedExternalUrl, isAllowedMediaAttachmentUrl, isLocalAssetUrl, normalizeEditorLinkUrl } from '../urlSafety'
+
+test('isLocalAssetUrl 认全 Tauri 本地资源的两种形态', () => {
+  // macOS: convertFileSrc 给 asset://localhost/...；Windows: http(s)://asset.localhost/...
+  assert.equal(isLocalAssetUrl('asset://localhost/Users/by3/pics/a.png'), true)
+  assert.equal(isLocalAssetUrl('http://asset.localhost/D%3A%5Cpics%5Ca.png'), true)
+  assert.equal(isLocalAssetUrl('https://asset.localhost/D%3A%5Cpics%5Ca.png'), true)
+  // 只看协议会把后者当成公网可达，客户端本地路径就这样发给了远端服务
+  assert.equal(isLocalAssetUrl('https://cdn.example.test/a.png'), false)
+  assert.equal(isLocalAssetUrl('https://asset.localhost.evil.test/a.png'), false)
+  assert.equal(isLocalAssetUrl('data:image/png;base64,AAAA'), false)
+  assert.equal(isLocalAssetUrl('blob:https://studio.example/abc'), false)
+  assert.equal(isLocalAssetUrl(''), false)
+})
 
 test('normalizeEditorLinkUrl allows web and mail links and rejects scriptable protocols', () => {
   assert.equal(normalizeEditorLinkUrl('https://jiucaihezi.studio/docs'), 'https://jiucaihezi.studio/docs')

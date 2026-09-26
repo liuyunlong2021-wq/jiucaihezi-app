@@ -66,6 +66,20 @@ export function isAllowedExternalUrl(input: string): boolean {
   return Boolean(parsed && EXTERNAL_URL_PROTOCOLS.has(parsed.protocol))
 }
 
+/**
+ * Tauri 的本地资源地址。桌面端 convertFileSrc 在 macOS 是 `asset://localhost/...`，
+ * 在 Windows 是 `http(s)://asset.localhost/...`。
+ *
+ * 后者以 `http(s):` 开头，只看协议会把它当成「公网可达」，
+ * 于是客户端本地路径被直接发给远端（参考图下载失败就是这来的）。
+ */
+export function isLocalAssetUrl(input: string): boolean {
+  const text = String(input || '').trim()
+  if (!text) return false
+  if (text.startsWith('asset:')) return true
+  return /^https?:\/\/asset\.localhost(?:[/?#]|$)/i.test(text)
+}
+
 export function isAllowedDownloadUrl(input: string): boolean {
   const text = String(input || '').trim()
   if (!text) return false

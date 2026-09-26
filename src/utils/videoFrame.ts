@@ -2,6 +2,8 @@
  * 视频截帧：把 video 元素当前显示的画面转成 PNG Blob。
  * 浏览器原生（canvas.drawImage），Tauri / Web 通用，零依赖。
  */
+import { isLocalAssetUrl } from '@/utils/urlSafety'
+
 export async function captureVideoFrame(video: HTMLVideoElement): Promise<Blob> {
   const width = video.videoWidth
   const height = video.videoHeight
@@ -34,5 +36,5 @@ export async function captureVideoFrame(video: HTMLVideoElement): Promise<Blob> 
  * canvas 截帧才不被污染；远程源保持原样，避免无 CORS 头的源直接加载失败。
  */
 export function videoCrossOriginFor(src: string): 'anonymous' | undefined {
-  return /^https?:\/\/asset\.localhost\//.test(src) || src.startsWith('asset:') ? 'anonymous' : undefined
+  return isLocalAssetUrl(src) ? 'anonymous' : undefined
 }

@@ -326,6 +326,50 @@ test('视频提交体把画布参考图落到适配器声明的槽位', { concur
   for (const url of results) assert.match(url, /\/v1\/videos\/task_test_1\/content$/)
 })
 
+test('本机视频模型的参考图必须先上传：asset.localhost 不能直接透传给适配器', { concurrency: false }, async () => {
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const previousFetch = globalThis.fetch
+  const seen: string[] = []
+  let posted: Record<string, any> | null = null
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    seen.push(url)
+    // 面板把本地字节传到网关，拿回一个远端可访问的短存 URL
+    if (url.includes('/api/creations/uploads')) return Response.json({ url: 'https://cdn.example.test/uploaded-0.png' })
+    // 本地 Tauri 资源地址：只有上传前读字节会走到这里
+    if (url.startsWith('http://asset.localhost/')) {
+      return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }))
+    }
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      posted = JSON.parse(String(init.body))
+      return Response.json({ id: 'task_test_1', status: 'queued' }, { status: 202 })
+    }
+    if (url.includes('/v1/videos/task_test_1')) {
+      return Response.json({ id: 'task_test_1', status: 'completed', metadata: { url: 'https://cdn.example.test/out.mp4' } })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'jc-minimax-h3-first-frame',
+      params: {
+        prompt: '镜头缓慢推进',
+        duration: 5,
+        images: ['http://asset.localhost/D%3A%5Cpics%5Cframe.png'],
+      },
+    })
+    await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+  } finally {
+    globalThis.fetch = previousFetch
+    __resetApiKeyMemoryCacheForTests('')
+  }
+
+  assert.ok(seen.some(url => url.includes('/api/creations/uploads')), '参考图没有被上传，本地地址被直接透传了')
+  assert.equal(posted?.first_frame, 'https://cdn.example.test/uploaded-0.png')
+})
+
 test('本地 comfy 视频时长单位是秒，帧数换算留给适配器', () => {
   const plan = buildCreationRunPlan({
     modelId: 'jc-minimax-h3',
