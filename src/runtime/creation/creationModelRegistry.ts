@@ -697,7 +697,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // 实测（2026-09-18 非高峰）：1K 约 56s、4K+high 约 64s；高峰期上游可到 9 分钟，
   // 可能撞网关 100 秒超时（524），重试即可。计费档：长边 ≥3072 按 4K 档。
   // gpt-image-2 的菠萝线路（2026-09-27 上架）：提交字段与 2.5 菠萝完全一致，
-  // 价格暂按同档 0.08/张 记（NewAPI 单价以管理员配置为准）。
+  // 单价 0.08/张（管理员 2026-09-27 核实）。
   baseSpec({
     id: 'gpt-image-2-菠萝',
     model: 'gpt-image-2-菠萝',

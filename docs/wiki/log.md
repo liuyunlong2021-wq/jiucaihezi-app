@@ -1,12 +1,18 @@
 # Wiki 操作日志
 
+## [2026-09-27] 版本 | 版本号统一到 2.2.4（待打 tag 发版）
+
+- **本批内容**：comfy-adapter ref2v 换「30秒文武双修」V4 模板与 28 秒上限；Harness 运行时收尾对齐官方语义（会话写锁不再被活着的孤儿占住）；创作面板模型清单收口（AI 应用只留文武双修、H3 时长 1~28 秒、菠萝自成一族并新增 `gpt-image-2-菠萝`、Seedance 组名改 2.5、默认视频模型换参考生视频、九项退出面板）。另经管理员核实 `gpt-image-2-菠萝` 单价 **0.08/张**，注册表里的「暂按同档」标记已去掉。
+- 版本号由 `node scripts/set-version.mjs 2.2.4` 统一写入 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml`，`Cargo.lock` 随 `cargo update -p jiucaihezi-app` 更新；`AGENTS.md` 头部版本同步。
+- **验证**：完整 focused `1534 tests / 1526 pass / 0 fail`、退出码 0；`cargo test --lib 422 passed / 1 ignored`；`vue-tsc -b` exit 0。安装包构建、三平台 CI 与真机验收未执行；`gpt-image-2-菠萝` 在 NewAPI 侧是否已建好、真实出图均未验。
+
 ## [2026-09-27] 面板口径 | 菠萝单独成组、Seedance 组名改 2.5、默认视频模型换参考生视频、九项模型退出面板
 
-- **菠萝（aimanplay.cn）自成一族**：`creationModelFamily` 新增 `菠萝`（`newapi/boluo/` 前缀或名字带「菠萝」），面板 order 数组里图片侧排最前、视频侧跟在 `jc 本机` 后面；新增图片项 `gpt-image-2-菠萝`（1k/2k/4k + 质量，字段与 2.5 菠萝一致，**价格暂按同档 0.08/张 记，待管理员核实**，`contractStatus: partial`）。
+- **菠萝（aimanplay.cn）自成一族**：`creationModelFamily` 新增 `菠萝`（`newapi/boluo/` 前缀或名字带「菠萝」），面板 order 数组里图片侧排最前、视频侧跟在 `jc 本机` 后面；新增图片项 `gpt-image-2-菠萝`（1k/2k/4k + 质量，字段与 2.5 菠萝一致，单价 **0.08/张** 经管理员 2026-09-27 核实，`contractStatus: partial`）。
 - **Seedance 组名 2.0 → 2.5**：该族现有的可见成员（`newapi/dola/seedance2.5`、山海 `oc-model-r5cfh8`）本来就都是 2.5；`Seedance 2.0 Mini` / `Fast` 两个族名保留（那三套 RH 模型此前已退役隐藏）。
 - **视频默认模型换成 `jc-minimax-h3-ref2v`**：注册表里把它排到 `jc 本机` 组第一位 —— `switchTask` 取 `models[0]`、面板分组也按注册表顺序，所以「任务默认」与「组内第一」一次满足。
 - **九项模型用 `hidden: true` 退出面板**（合同保留，历史任务与按 id 调用照旧）：视频五项 `newapi/zx/veo-3.1-generate-preview`、`newapi/zx/veo-3.1-fast-generate-preview`、`local-comfy/grok-video-3-30s`、`runninghub/api/rh-grok-text-video`、`runninghub/api/rh-grok-image-video`；图片四项 `gpt-image-2.5-flare-1k`、`gpt-image-2.5-sunburst-1k`、`gpt-image-2.5-flare-官方`、`gpt-image-2.5-sunburst-官方`（`GPT_IMAGE_2_ROUTES` 加了 `hidden?` 字段透传）。
-- **两处待用户确认**：① `gpt-image-2-菠萝` 的单价、以及在 NewAPI 侧是否已建好模型；② 「四个 GPT Image 2.5 变体」按 Flare/Sunburst 读数（`GPT Image 2.5 1K` 与 `2.5 官方` 保留）。
+- **待确认**：① `gpt-image-2-菠萝` 在 NewAPI 侧是否已建好、真实出图未验（单价 0.08/张 已核实）；② 「四个 GPT Image 2.5 变体」按 Flare/Sunburst 读数（`GPT Image 2.5 1K` 与 `2.5 官方` 保留）。
 - **验证**：完整 focused `1534 tests / 1526 pass / 0 fail`、退出码 0；`vue-tsc -b` exit 0；另用一次性探针脚本把三个任务的「分组 → 条目 → 价格」原样打印核对（视频 13 → 9 项、图片 22 → 19 项）。面板目视待人工。
 
 ## [2026-09-27] 实施 | 创作面板：H3 应用时长上限放到 28 秒，「应用」下拉只留文武双修
