@@ -1,5 +1,14 @@
 # 热缓存
 
+## [2026-09-27] Mobile 桌面控制器合同与局域网 MVP TDD 已统一
+
+- 用户确认 [[开发/韭菜盒子Mobile桌面控制器统一合同与局域网MVP-TDD-2026-09-27]]：现有 Mobile 独立工作台继续冻结，解冻的只有 Desktop 控制器；Desktop 是 Harness Runtime、模型/密钥、Skill/MCP、项目文件和 Session 的唯一所有者，Mobile 不运行第二套 Agent。
+- 首期只做局域网当前活动项目/当前活动 Session：扫码配对且 Desktop 必须确认、读取权威历史、订阅过程、发送纯文字、停止和审批。iOS 先行；全部项目/对话导航、公网 Relay、推送、媒体/文件和 Android 后置。
+- 安全从首期生效：一次性二维码最长 5 分钟、每设备独立身份与可吊销、连接加密和重放保护；不以“同一局域网”代替认证，不先上明文协议。
+- P0 已完成：协议/配对与 Desktop Host 新增 11 条红测，旧代码先因模块不存在失败，最小纯内存实现后新增 `11/11`、完整 focused `1561/1561`。
+- P1 Desktop 端已完成：默认关闭的 Rust/Tauri 随机端口监听、Noise XX 加密、一次性二维码 + 本机确认、钥匙串身份/设备、吊销、帧/连接/频率/重放限制、单调启停代次，以及当前 Session 的读/订阅/发送/停止/审批桥；设置页可开启、配对与吊销。远程发送不夹带桌面输入框附件、文件引用、编辑态或 Jev。
+- P1 自动验证：focused `1564/1564`、Rust `436 passed / 1 ignored`（Remote Bridge `8/8`，含真实 TCP + Noise 假 Mobile）、Desktop quick build/产物审计通过。P2 Mobile 客户端、iOS 构建、Mac/Windows 防火墙和 iPhone 真机均未实施，不能宣传为手机已可用。
+
 ## [2026-09-27] 「保存到项目失败」的真因：`pollTask` 的 content 端点判据有四处各写一份
 
 - 现象：comfy 成片生成成功（适配器 `static/` 里已有 15.4 MB 文件、任务 `task_20260927_4fed141a05f7` 执行 596 秒），但「保存到项目」永远失败：`HTTP 下载失败: error sending request for url (http://frps:8796/files/…mp4)`。

@@ -1,5 +1,24 @@
 # Wiki 操作日志
 
+## [2026-09-27] 实施 | Mobile 桌面控制器 P1 Desktop 局域网 Bridge
+
+- **实现**：Rust/Tauri 增加默认关闭的随机端口 TCP Bridge，以 Noise XX 加密全部配对和业务帧；5 分钟一次性 offer 必须由 Desktop 确认，设备 token 只存哈希并绑定 Mobile Noise 公钥，长期身份/设备写系统钥匙串；限制 64 KiB 帧、4 连接、30 请求/秒并拒绝过期、未知与重放请求。设置页支持开启/关闭、二维码、允许/拒绝和吊销。
+- **复用**：TypeScript Bridge 只把最小协议转给 P0 `DesktopRemoteHost`；`MemoryWorkbench` 复用现有官方 Session Query、发送、停止与审批对象，不启动第二 Runtime。远程纯文字与桌面 composer 的附件、引用、编辑态和 Jev 隔离。
+- **根因修正**：审查发现共享布尔启停会让旧监听在快速重启后复活，改为单调监听代次，关闭后旧监听和旧连接永久失效；补回归测试。
+- **验证**：focused `1564/1564`；Rust 全量 `436 passed / 1 ignored`，Bridge `8/8`（真实 `127.0.0.1` TCP + Noise 假 Mobile）；Desktop quick build与产物审计通过。P2 Mobile 客户端、iOS 构建、Mac/Windows 防火墙与 iPhone 真机未执行。
+
+## [2026-09-27] 实施 | Mobile 桌面控制器 P0 协议与 Host 红测转绿
+
+- **红灯**：先登记两组测试，旧代码因 `desktopRemoteProtocol` / `desktopRemoteHost` 不存在而构建失败；随后只补最小纯内存实现。
+- **实现**：协议层固定版本 1 信封、消息白名单、帧/时间/请求 ID 校验、重放拒绝、设备级固定窗口限流、5 分钟一次性 offer、Desktop 确认/拒绝、设备凭证与吊销、审计元数据；Host 只暴露当前 context/Session，过滤跨 Session 事件，单忙锁拒绝第二次发送，停止与审批委托既有入口且不启动第二 Harness。
+- **验证**：新增 `11/11`、完整 focused `1561/1561`、`vue-tsc -b`、定向 oxlint、`git diff --check` 通过。未做真实端口、网络加密、Tauri 命令、Mobile UI、Rust 或真机验收；这些属于 P1/P2。
+
+## [2026-09-27] 设计 | 统一 Mobile 桌面控制器合同，先写局域网 MVP TDD
+
+- **定案**：Mobile 不再补齐独立工作台，只作为 Desktop 已有 Harness Session 的控制面；Desktop 保持唯一 Runtime、配置、权限与数据真相。首期限制为局域网当前活动 Session，iOS 先行，Android 与公网 Relay 后置。
+- **TDD**：新增 [[开发/韭菜盒子Mobile桌面控制器统一合同与局域网MVP-TDD-2026-09-27]]，明确配对安全、最小协议、事件恢复、同 Session 并发/幂等、权限边界、红测矩阵和 P0-P5 验收顺序；同步更新 [[架构/产品架构]] 与 [[CLAUDE]]。
+- **验证边界**：本轮仅文档设计，尚未实施测试或功能代码，未启动端口，也未声称 iOS/Windows/Mac 真机通过。
+
 ## [2026-09-27] 版本 | 版本号统一到 2.2.4（待打 tag 发版）
 
 - **本批内容**：comfy-adapter ref2v 换「30秒文武双修」V4 模板与 28 秒上限；Harness 运行时收尾对齐官方语义（会话写锁不再被活着的孤儿占住）；创作面板模型清单收口（AI 应用只留文武双修、H3 时长 1~28 秒、菠萝自成一族并新增 `gpt-image-2-菠萝`、Seedance 组名改 2.5、默认视频模型换参考生视频、九项退出面板）。另经管理员核实 `gpt-image-2-菠萝` 单价 **0.08/张**，注册表里的「暂按同档」标记已去掉。

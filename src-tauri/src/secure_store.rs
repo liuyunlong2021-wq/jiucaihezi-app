@@ -4,6 +4,8 @@ const KEYCHAIN_SERVICE: &str = "com.jiucaihezi.app";
 const KEYCHAIN_ACCOUNT: &str = "primary-api-key";
 const GATEWAY_SESSION_ACCOUNT: &str = "gateway-session-token";
 const COMFY_WORKFLOW_ACCOUNT: &str = "comfy-workflow-api-key";
+const REMOTE_BRIDGE_IDENTITY_ACCOUNT: &str = "remote-bridge-identity-v1";
+const REMOTE_BRIDGE_DEVICES_ACCOUNT: &str = "remote-bridge-devices-v1";
 
 /// CLI tools (jc_media.py etc.) 读取 Key 的文件路径
 fn cli_key_file_path() -> std::path::PathBuf {
@@ -46,6 +48,30 @@ fn gateway_session_entry() -> Result<Entry, String> {
 
 fn comfy_workflow_entry() -> Result<Entry, String> {
     Entry::new(KEYCHAIN_SERVICE, COMFY_WORKFLOW_ACCOUNT).map_err(|error| error.to_string())
+}
+
+fn remote_bridge_entry(account: &str) -> Result<Entry, String> {
+    Entry::new(KEYCHAIN_SERVICE, account).map_err(|error| error.to_string())
+}
+
+pub(crate) fn get_remote_bridge_identity() -> Result<Option<String>, String> {
+    get_entry_value(remote_bridge_entry(REMOTE_BRIDGE_IDENTITY_ACCOUNT)?)
+}
+
+pub(crate) fn set_remote_bridge_identity(value: &str) -> Result<(), String> {
+    remote_bridge_entry(REMOTE_BRIDGE_IDENTITY_ACCOUNT)?
+        .set_password(value)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn get_remote_bridge_devices() -> Result<Option<String>, String> {
+    get_entry_value(remote_bridge_entry(REMOTE_BRIDGE_DEVICES_ACCOUNT)?)
+}
+
+pub(crate) fn set_remote_bridge_devices(value: &str) -> Result<(), String> {
+    remote_bridge_entry(REMOTE_BRIDGE_DEVICES_ACCOUNT)?
+        .set_password(value)
+        .map_err(|error| error.to_string())
 }
 
 fn mcp_oauth_entry(server_id: &str) -> Result<Entry, String> {

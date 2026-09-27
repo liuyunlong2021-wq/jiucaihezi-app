@@ -8,6 +8,7 @@ pub mod jev_scorer;
 pub mod mcp;
 pub mod media;
 pub mod plugin;
+pub mod remote_bridge;
 pub mod session;
 pub mod skill_material;
 pub mod tools;

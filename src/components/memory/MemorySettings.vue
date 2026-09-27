@@ -25,7 +25,7 @@ import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSy
 import { confirmAction } from '@/utils/confirmAction'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
-type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'theme'
+type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'remote' | 'theme'
 
 const tab = ref<SettingsTab>('account')
 const apiKey = ref('')
@@ -36,6 +36,7 @@ const mobileRuntime = isTauriMobileRuntime()
 const desktopRuntime = isTauriRuntime() && !mobileRuntime
 const WebSkillPanel = defineAsyncComponent(() => import('@/components/skills/WebSkillPanel.vue'))
 const McpManagerPanel = defineAsyncComponent(() => import('@/components/mcp/McpManagerPanel.vue'))
+const DesktopRemoteSettings = defineAsyncComponent(() => import('./DesktopRemoteSettings.vue'))
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
@@ -287,6 +288,9 @@ function showSync() {
       <button v-if="desktopRuntime" :class="{ active: tab === 'mcp' }" @click="tab = 'mcp'">
         <JcIcon name="hub" />MCP
       </button>
+      <button v-if="desktopRuntime" :class="{ active: tab === 'remote' }" @click="tab = 'remote'">
+        <JcIcon name="smartphone_outline" />手机
+      </button>
       <button :class="{ active: tab === 'theme' }" @click="tab = 'theme'">
         <JcIcon name="palette" />主题
       </button>
@@ -458,6 +462,7 @@ function showSync() {
       </div>
       <WebSkillPanel v-else-if="desktopRuntime && tab === 'skills'" />
       <McpManagerPanel v-else-if="desktopRuntime && tab === 'mcp'" />
+      <DesktopRemoteSettings v-else-if="desktopRuntime && tab === 'remote'" />
       <div v-else class="memory-appearance">
         <div class="memory-theme-options" aria-label="主题">
           <button
@@ -491,7 +496,7 @@ function showSync() {
 
 <style scoped>
 .memory-settings { display: flex; height: 100%; min-height: 0; flex-direction: column; }
-.memory-settings-tabs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; padding: 10px; border-bottom: 1px solid var(--line); }
+.memory-settings-tabs { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; padding: 10px; border-bottom: 1px solid var(--line); }
 .memory-settings-tabs button { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; height: 36px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }

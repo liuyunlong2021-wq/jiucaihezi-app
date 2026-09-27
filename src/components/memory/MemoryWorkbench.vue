@@ -57,6 +57,8 @@ import {
   type DeepSeekProcessStep,
   type DeepSeekSessionSnapshot,
 } from '@/services/deepSeekHarness'
+import { DesktopRemoteHost } from '@/services/desktopRemoteHost'
+import { publishDesktopRemoteEvent, registerDesktopRemoteBridge } from '@/services/desktopRemoteBridge'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -388,6 +390,7 @@ let offSwitchPanel: (() => void) | null = null
 let offDesktopProjectDrop: (() => void) | null = null
 let offSkillCreatorEdit: (() => void) | null = null
 let offSkillCreatorCreate: (() => void) | null = null
+let offDesktopRemote: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 let creationClosePromise: Promise<boolean> | null = null
 let chatResizeStartX = 0
@@ -497,7 +500,7 @@ const projectOwner = computed(() => desktopRuntime
   : projectStore.webProjectId.value)
 
 type MemoryRunPhase = 'running' | 'done' | 'failed' | 'stopped'
-type MemoryRunApproval = { message: string; resolve: (decision: MemoryToolApprovalDecision) => void }
+type MemoryRunApproval = { id: string; message: string; resolve: (decision: MemoryToolApprovalDecision) => void }
 type MemoryRun = {
   owner: string
   resourcePath: string
@@ -792,6 +795,7 @@ onMounted(async () => {
   window.addEventListener('resize', resizeCreationForWindow)
   resizeCreationForWindow()
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
+  if (desktopOnlyRuntime) offDesktopRemote = await registerDesktopRemoteBridge(createDesktopRemoteHost())
   await Promise.all([
     refreshSkills().catch(() => {}),
     agentStore.fetchModels().catch(() => {}),
@@ -810,6 +814,7 @@ onBeforeUnmount(() => {
   offDesktopProjectDrop?.()
   offSkillCreatorEdit?.()
   offSkillCreatorCreate?.()
+  offDesktopRemote?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
@@ -1772,19 +1777,21 @@ async function previewProjectResource(resource: ProjectResource) {
   }
 }
 
-async function send() {
+async function send(remoteText?: string) {
+  const remote = typeof remoteText === 'string'
   const active = conversation.value
-  const message = input.value.trim()
-  const activeAttachments = [...persistentAttachments.value, ...attachments.value]
-  const pendingAttachments = attachments.value.slice()
-  if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value) return
+  const message = (remote ? remoteText : input.value).trim()
+  const activeAttachments = remote ? [] : [...persistentAttachments.value, ...attachments.value]
+  const pendingAttachments = remote ? [] : attachments.value.slice()
+  const activeReferencedFiles = remote ? [] : referencedFiles.value
+  if (!active || (!message && !activeAttachments.length && !activeReferencedFiles.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value) return
   sendInFlight.value = true
   // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
-  if (jevSelected.value) await applyJevDecision(message)
+  if (jevSelected.value && !remote) await applyJevDecision(message)
 
   const useHarness = desktopOnlyRuntime
   const skillSnapshot = selectedSkillNames.value.slice()
-  const editTargetId = editingTurnId.value
+  const editTargetId = remote ? '' : editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
   if (editTargetId && editIndex < 0) {
     editingTurnId.value = ''
@@ -1848,10 +1855,12 @@ async function send() {
   const run = runs.get(runKey) as MemoryRun
   const isCurrentRun = () => runs.get(runKey) === run && run.phase === 'running'
   // 点发送即完成：立刻清空草稿，不必等这一轮跑完才能输入下一段。
-  input.value = ''
-  editingTurnId.value = ''
-  setEditorText(composerRef.value, '')
-  resizeComposer()
+  if (!remote) {
+    input.value = ''
+    editingTurnId.value = ''
+    setEditorText(composerRef.value, '')
+    resizeComposer()
+  }
 
   beginRunStatus(run)
   void nextTick(() => memoryScrollNav.value?.startStickyFollow())
@@ -1859,6 +1868,7 @@ async function send() {
   let replyCompleted = false
   let roundPersisted = false
   const restoreDraft = () => {
+    if (remote) return
     if (roundPersisted || !isOnScreen(run)) return
     const current = input.value.trim()
     const restored = [message, current === message ? '' : current].filter(Boolean).join('\n\n')
@@ -1915,7 +1925,7 @@ async function send() {
       avSelected: avSelected.value,
       scene3dSelected: scene3dSelected.value,
       mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
-      files: referencedFiles.value,
+      files: activeReferencedFiles,
       attachments: requestAttachments,
       signal: run.controller.signal,
       onStatus(next) {
@@ -1962,7 +1972,7 @@ async function send() {
       modelId: agentStore.currentModel,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
       attachments: requestAttachments,
-      files: referencedFiles.value,
+      files: activeReferencedFiles,
       selectedSkillNames: skillSnapshot,
       fileToolsSelected: fileToolsSelected.value,
       authorizedPaths: authorizedPaths.value,
@@ -1990,6 +2000,7 @@ async function send() {
         if (memoryToolAlwaysAllowedConversations.has(active.transcript.id) && call.function.name !== 'delete') return true
         const approved = await new Promise<boolean>(resolve => {
           run.approval = {
+            id: `approval-${crypto.randomUUID()}`,
             message: memoryToolApprovalMessage(call),
             resolve: decision => {
               if (decision === 'always' && call.function.name !== 'delete') memoryToolAlwaysAllowedConversations.add(active.transcript.id)
@@ -2095,7 +2106,7 @@ async function send() {
       const evalReviewPath = parseEvalReviewPath(turn.content)
       if (evalReviewPath) evalReports.value[turn.id] = evalReviewPath
     }
-    attachments.value = []
+    if (!remote) attachments.value = []
   } catch (cause) {
     if (runs.get(runKey) !== run) return
     const aborted = cause instanceof DOMException && cause.name === 'AbortError'
@@ -2119,7 +2130,7 @@ async function send() {
           if (run.owner === projectOwner.value) rememberConversation(interrupted)
           if (!isCurrentRun() || !isOnScreen(run)) return
           opened.value = await openProjectResource(files, interrupted.resource)
-          attachments.value = []
+          if (!remote) attachments.value = []
           run.streamingText = ''
         } catch (persistCause) {
           run.error += `；中断记录保存失败：${persistCause instanceof Error ? persistCause.message : String(persistCause)}`
@@ -2141,6 +2152,114 @@ function stop() {
   const run = activeRun.value
   if (run) stopRun(run)
 }
+
+function desktopRemoteContext() {
+  const active = conversation.value
+  return {
+    projectName: projectStore.projectName.value || '当前项目',
+    conversationTitle: active?.transcript.title || '',
+    conversationId: active?.transcript.id || '',
+    sessionId: active ? `jc-v1-${active.transcript.id}` : '',
+  }
+}
+
+function desktopRemoteTurns(turns: ConversationTurn[]) {
+  return turns.map(({ id, role, content, createdAt }) => ({ id, role, content, createdAt }))
+}
+
+function desktopRemoteProcess(snapshot: DeepSeekSessionSnapshot) {
+  return Object.fromEntries([...deepSeekSessionProcess(snapshot)].map(([turnId, steps]) => [
+    turnId,
+    steps.map(({ id, label, state, durationMs, errorReason }) => ({ id, label, state, durationMs, errorReason })),
+  ]))
+}
+
+async function desktopRemoteSnapshot(sessionId: string) {
+  const active = conversation.value
+  if (!active || sessionId !== `jc-v1-${active.transcript.id}`) throw new Error('SESSION_NOT_CURRENT')
+  const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
+  const snapshot = await readDeepSeekHarnessSession({
+    cwd: active.resource.owner,
+    sessionId: active.transcript.id,
+    message: '',
+    model: config.model,
+    apiBase: config.apiBase,
+    apiKey: config.apiKey,
+    imageInput: harnessImageInput(config.model),
+    fileAccessEnabled: fileToolsSelected.value,
+  })
+  rememberHarnessSnapshot(snapshot)
+  return {
+    sessionId,
+    turns: desktopRemoteTurns(deepSeekSessionTurns(snapshot)),
+    process: desktopRemoteProcess(snapshot),
+    reasoning: Object.fromEntries(deepSeekSessionReasoning(snapshot)),
+  }
+}
+
+function createDesktopRemoteHost() {
+  return new DesktopRemoteHost({
+    getContext: desktopRemoteContext,
+    readSession: desktopRemoteSnapshot,
+    sendMessage: async text => { void send(text) },
+    stopRun: async () => {
+      const run = activeRun.value
+      if (run?.phase === 'running') stopRun(run)
+      return activeRun.value?.phase || 'idle'
+    },
+    respondApproval: async (approvalId, decision) => {
+      const approval = activeRun.value?.approval
+      if (!approval || approval.id !== approvalId) throw new Error('APPROVAL_NOT_FOUND')
+      settleApproval(activeRun.value, decision === 'approve' ? 'once' : decision)
+    },
+    subscribe: () => () => undefined,
+    isBusy: () => sending.value || sendInFlight.value,
+  })
+}
+
+let desktopRemoteSeq = 0
+function publishDesktopRemoteSnapshot() {
+  if (!desktopOnlyRuntime) return
+  const context = desktopRemoteContext()
+  void publishDesktopRemoteEvent(context.sessionId, {
+    version: 1,
+    requestId: `event-${++desktopRemoteSeq}`,
+    type: 'session.event',
+    sentAt: Date.now(),
+    payload: {
+      sessionId: context.sessionId,
+      seq: desktopRemoteSeq,
+      turns: desktopRemoteTurns(conversation.value?.transcript.turns || []),
+      streamingText: streamingText.value,
+      run: activeRun.value ? {
+        state: activeRun.value.phase,
+        status: activeRun.value.status,
+        steps: activeRun.value.steps.map(({ id, label, state, durationMs, errorReason }) => ({ id, label, state, durationMs, errorReason })),
+        approval: activeRun.value.approval
+          ? { id: activeRun.value.approval.id, message: activeRun.value.approval.message }
+          : null,
+      } : { state: 'idle' },
+    },
+  }).catch(() => {})
+}
+
+watch([
+  () => conversation.value?.transcript.turns.length,
+  streamingText,
+  runStatus,
+  () => activeRun.value?.steps.length,
+  () => activeRun.value?.approval?.id,
+], publishDesktopRemoteSnapshot)
+watch(() => conversation.value?.transcript.id, () => {
+  if (!desktopOnlyRuntime) return
+  void publishDesktopRemoteEvent('', {
+    version: 1,
+    requestId: `context-${++desktopRemoteSeq}`,
+    type: 'context.changed',
+    sentAt: Date.now(),
+    payload: desktopRemoteContext(),
+  }).catch(() => {})
+})
 
 /** 停止单条 run：不影响其他对话正在跑的任务。 */
 function stopRun(run: MemoryRun) {
@@ -3598,7 +3717,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send"><JcIcon name="arrow-upward" /></button>
+            <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send()"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
         <div

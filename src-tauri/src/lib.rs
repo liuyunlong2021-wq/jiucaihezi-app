@@ -1186,6 +1186,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(commands::creation_mcp::CreationMcpState::default())
+        .manage(commands::remote_bridge::RemoteBridgeState::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
@@ -1492,6 +1493,15 @@ pub fn run() {
             commands::mcp::resolve_mcp_node,
             commands::creation_mcp::creation_mcp_complete,
             commands::creation_mcp::resolve_creation_mcp,
+            commands::remote_bridge::remote_bridge_status,
+            commands::remote_bridge::remote_bridge_start,
+            commands::remote_bridge::remote_bridge_stop,
+            commands::remote_bridge::remote_pairing_offer,
+            commands::remote_bridge::remote_pairing_approve,
+            commands::remote_bridge::remote_pairing_reject,
+            commands::remote_bridge::remote_device_revoke,
+            commands::remote_bridge::remote_bridge_complete,
+            commands::remote_bridge::remote_bridge_publish,
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,

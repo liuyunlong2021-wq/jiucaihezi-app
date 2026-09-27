@@ -662,10 +662,10 @@ test('@Jev 只从 @ 提及进入，且在发送链路的最前面回填芯片', 
   // 开它的唯一路径是 @ 提及里选中 / 取消。
   assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = true/)
   assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = false/)
-  // 决策必须发生在所有发送快照之前，否则本轮发出去的还是决策前的空选择。
+  // 本地发送的决策必须发生在所有发送快照之前；远程请求不得借用桌面输入框的 Jev 状态。
   assert.match(
     workbench,
-    /if \(jevSelected\.value\) await applyJevDecision\(message\)\s*\n\s*const useHarness = desktopOnlyRuntime\s*\n\s*const skillSnapshot = selectedSkillNames\.value\.slice\(\)/,
+    /if \(jevSelected\.value && !remote\) await applyJevDecision\(message\)\s*\n\s*const useHarness = desktopOnlyRuntime\s*\n\s*const skillSnapshot = selectedSkillNames\.value\.slice\(\)/,
   )
   // 决策结果只能落成芯片与模型选择；执行器由平台固定，不由 Jev 切换。
   assert.match(workbench, /for \(const id of result\.tools\) enableTool\(id\)/)

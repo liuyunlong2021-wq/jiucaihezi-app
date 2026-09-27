@@ -420,7 +420,8 @@ test('memory workbench accepts text references and uses the adaptive main compos
   assert.doesNotMatch(revision, /selection-input-hidden[^}]*color: transparent/)
   assert.doesNotMatch(revision, /v-html="highlightedValue"/)
   assert.match(revision, /<mark>\{\{ modelValue\.slice\(start, end\) \}\}<\/mark>/)
-  assert.match(workbench, /files: referencedFiles\.value/)
+  assert.match(workbench, /const activeReferencedFiles = remote \? \[\] : referencedFiles\.value/)
+  assert.match(workbench, /files: activeReferencedFiles/)
   assert.match(runtime, /files: input\.files/)
 })
 
@@ -825,7 +826,7 @@ test('memory composer keeps project file references until the user cancels them'
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /const persistentAttachments = ref<ResolvedDirectAttachment\[\]>\(\[\]\)/)
-  assert.match(workbench, /const activeAttachments = \[\.\.\.persistentAttachments\.value, \.\.\.attachments\.value\]/)
+  assert.match(workbench, /const activeAttachments = remote \? \[\] : \[\.\.\.persistentAttachments\.value, \.\.\.attachments\.value\]/)
   assert.match(workbench, /persistentAttachments\.value = \(activeConversation\.transcript\.persistentAttachments \|\| \[\]\)/)
   assert.match(workbench, /if \(attachment\.kind === 'file' && attachment\.readablePath\)[\s\S]*files\.readText\([\s\S]*path: attachment\.readablePath[\s\S]*textContent: text\.content\.slice\(0, MAX_INLINE_ATTACHMENT_CHARS\)/)
   assert.match(workbench, /title="取消持续引用"/)
@@ -853,7 +854,7 @@ test('memory runs belong to their conversation instead of the visible one', () =
   // 派发那一刻就清空草稿，不必等这一轮跑完才能输入下一段。
   assert.match(
     workbench,
-    /const isCurrentRun = \(\) => runs\.get\(runKey\) === run[\s\S]*input\.value = ''\n  editingTurnId\.value = ''\n  setEditorText\(composerRef\.value, ''\)[\s\S]*await runMemoryChat\(/,
+    /const isCurrentRun = \(\) => runs\.get\(runKey\) === run[\s\S]*if \(!remote\) \{\s*input\.value = ''\n    editingTurnId\.value = ''\n    setEditorText\(composerRef\.value, ''\)[\s\S]*await runMemoryChat\(/,
   )
   // 切项目、切对话都不再中断运行。
   assert.ok(openProject && selectConversation, 'openProject and selectConversation should exist')
@@ -869,7 +870,7 @@ test('memory runs belong to their conversation instead of the visible one', () =
   assert.match(workbench, /if \(!isOnScreen\(run\)\) return[\s\S]*opened\.value = useHarness[\s\S]*harnessConversationOpenResult\(complete\)/)
   // 审批跟着 run 走，后台对话的审批不会弹到当前对话上。
   assert.match(workbench, /const pendingMemoryToolApproval = computed\(\(\) => activeRun\.value\?\.approval \?\? null\)/)
-  assert.match(workbench, /run\.approval = \{\n\s*message: memoryToolApprovalMessage\(call\)/)
+  assert.match(workbench, /run\.approval = \{\n\s*id: `approval-\$\{crypto\.randomUUID\(\)\}`,\n\s*message: memoryToolApprovalMessage\(call\)/)
 })
 
 test('memory ignores stale streaming callbacks and stale resource loads', () => {
@@ -1554,9 +1555,9 @@ test('capability chips survive a completed round and come back with the conversa
   // 一轮跑完只清一次性状态（输入框、当轮附件）；清掉 @文件 等于静默收权，用户要再点一次才能继续。
   assert.doesNotMatch(workbench, /clearToolSelections/)
   // 派发瞬间清草稿（不然要等整轮跑完才能输入下一段）；当轮附件在落盘成功与中断收尾各清一次，中间不夹带清开关/清引用。
-  const sendBody = workbench.match(/async function send\(\) \{([\s\S]*?)\n\}/)?.[1]
+  const sendBody = workbench.match(/async function send\(remoteText\?: string\) \{([\s\S]*?)\n\}/)?.[1]
   assert.ok(sendBody, 'send should exist')
-  assert.match(sendBody, /input\.value = ''\n  editingTurnId\.value = ''\n  setEditorText\(composerRef\.value, ''\)/)
+  assert.match(sendBody, /if \(!remote\) \{\s*input\.value = ''\n    editingTurnId\.value = ''\n    setEditorText\(composerRef\.value, ''\)/)
   assert.equal((sendBody.match(/attachments\.value = \[\]/g) || []).length, 2)
   // 本轮开关随用户消息落盘，重开这个对话时按最后一轮用户消息恢复。
   assert.match(workbench, /toolChips: toolChipIds\(\)/)
