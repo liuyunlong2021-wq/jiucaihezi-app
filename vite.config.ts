@@ -62,12 +62,16 @@ export default defineConfig({
     // produce sourcemaps for debug builds
     sourcemap: !!process.env.TAURI_ENV_DEBUG,
     rolldownOptions: {
-      // 两个入口：/ 是落地页（拉下载），/try/ 才是工作台本体。
-      // 桌面 / iOS 构建随后由 prune-desktop-dist.mjs 把 try/index.html 提回根。
-      input: {
-        index: resolve(__dirname, 'index.html'),
-        try: resolve(__dirname, 'try/index.html'),
-      },
+      // 三个入口候选：/ 是落地页（拉下载），/try/ 是工作台本体，/mobile/ 是 iOS 遥控器。
+      // 桌面构建随后由 prune-desktop-dist.mjs 把 try/index.html 提回根；
+      // iOS 构建（JC_BUILD_TARGET=mobile）只编 /mobile/，产物直接落在 dist/index.html，
+      // 因此 rollup 图里根本不会出现工作台和 Harness 客户端的 chunk。
+      input: process.env.JC_BUILD_TARGET === 'mobile'
+        ? { index: resolve(__dirname, 'mobile/index.html') }
+        : {
+            index: resolve(__dirname, 'index.html'),
+            try: resolve(__dirname, 'try/index.html'),
+          },
       output: {
         entryFileNames: `assets/[name]-[hash]-${assetVersion}.js`,
         chunkFileNames: `assets/[name]-[hash]-${assetVersion}.js`,

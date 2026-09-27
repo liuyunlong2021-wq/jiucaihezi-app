@@ -18,6 +18,9 @@ const wave1FocusedTests = [
   'src/services/__tests__/desktopRemoteProtocol.test.ts',
   'src/services/__tests__/desktopRemoteHost.test.ts',
   'src/services/__tests__/desktopRemoteBridge.test.ts',
+  'src/services/__tests__/mobileRemoteClient.test.ts',
+  'src/services/__tests__/mobileRemoteTransport.test.ts',
+  'src/mobile/__tests__/mobileControllerUi.test.ts',
   'src/components/__tests__/creationPanelContractUi.test.ts',
   'src/components/__tests__/desktopProjectDrop.test.ts',
   'src/components/chat/display/__tests__/streamingTextRenderer.test.ts',
@@ -172,6 +175,7 @@ const externalNodeTests = [
   'scripts/__tests__/create-official-dmg.test.mjs',
   'scripts/__tests__/legal-pages.test.mjs',
   'scripts/__tests__/memory-product-separation.test.mjs',
+  'scripts/__tests__/mobile-controller-dist.test.mjs',
   'scripts/__tests__/prune-updates.test.mjs',
   'scripts/__tests__/windows-release-contract.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone

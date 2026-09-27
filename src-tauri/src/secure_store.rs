@@ -6,6 +6,8 @@ const GATEWAY_SESSION_ACCOUNT: &str = "gateway-session-token";
 const COMFY_WORKFLOW_ACCOUNT: &str = "comfy-workflow-api-key";
 const REMOTE_BRIDGE_IDENTITY_ACCOUNT: &str = "remote-bridge-identity-v1";
 const REMOTE_BRIDGE_DEVICES_ACCOUNT: &str = "remote-bridge-devices-v1";
+const MOBILE_REMOTE_IDENTITY_ACCOUNT: &str = "mobile-remote-identity-v1";
+const MOBILE_REMOTE_CREDENTIAL_ACCOUNT: &str = "mobile-remote-credential-v1";
 
 /// CLI tools (jc_media.py etc.) 读取 Key 的文件路径
 fn cli_key_file_path() -> std::path::PathBuf {
@@ -72,6 +74,34 @@ pub(crate) fn set_remote_bridge_devices(value: &str) -> Result<(), String> {
     remote_bridge_entry(REMOTE_BRIDGE_DEVICES_ACCOUNT)?
         .set_password(value)
         .map_err(|error| error.to_string())
+}
+
+/// 手机控制器的设备身份与配对凭证。
+///
+/// 与 Desktop 那两条区分开：这里存的是本机的设备私钥和 Desktop 签发的 token，
+/// 既不是 Desktop 的长期身份，也不含 Desktop 私钥（合同 §4）。
+pub(crate) fn get_mobile_remote_identity() -> Result<Option<String>, String> {
+    get_entry_value(remote_bridge_entry(MOBILE_REMOTE_IDENTITY_ACCOUNT)?)
+}
+
+pub(crate) fn set_mobile_remote_identity(value: &str) -> Result<(), String> {
+    remote_bridge_entry(MOBILE_REMOTE_IDENTITY_ACCOUNT)?
+        .set_password(value)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn get_mobile_remote_credential() -> Result<Option<String>, String> {
+    get_entry_value(remote_bridge_entry(MOBILE_REMOTE_CREDENTIAL_ACCOUNT)?)
+}
+
+pub(crate) fn set_mobile_remote_credential(value: &str) -> Result<(), String> {
+    remote_bridge_entry(MOBILE_REMOTE_CREDENTIAL_ACCOUNT)?
+        .set_password(value)
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn clear_mobile_remote_credential() -> Result<(), String> {
+    clear_entry_value(remote_bridge_entry(MOBILE_REMOTE_CREDENTIAL_ACCOUNT)?)
 }
 
 fn mcp_oauth_entry(server_id: &str) -> Result<Entry, String> {

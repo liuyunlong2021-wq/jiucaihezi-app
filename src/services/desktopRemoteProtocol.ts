@@ -8,6 +8,7 @@ const REMOTE_MESSAGE_TYPES = new Set([
   'message.send',
   'run.stop',
   'approval.respond',
+  'context.changed',
   'session.snapshot',
   'session.event',
   'run.state',

@@ -2,6 +2,7 @@
   "identifier": "default",
   "description": "Main window capabilities — FS access scoped to app data",
   "windows": ["main"],
+  "platforms": ["macOS", "windows", "linux"],
   "remote": {
     "urls": ["http://localhost:1420/*"]
   },

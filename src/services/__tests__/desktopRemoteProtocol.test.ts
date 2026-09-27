@@ -103,6 +103,18 @@ test('remote envelopes reject replay, oversized frames, and unknown messages', (
   )
 })
 
+test('切换当前对话的 context.changed 是协议消息而不是未知类型', () => {
+  const envelope = parseRemoteEnvelope(JSON.stringify({
+    version: 1,
+    requestId: 'context-1',
+    type: 'context.changed',
+    sentAt: 1_000,
+    payload: { projectName: '项目 A', conversationTitle: '对话 B', conversationId: 'b', sessionId: 'jc-v1-b' },
+  }), { now: 1_000 })
+
+  assert.equal(envelope.type, 'context.changed')
+})
+
 test('remote rate limits are isolated per device and reset after the fixed window', () => {
   let now = 1_000
   const limiter = createRemoteRateLimiter({ limit: 2, windowMs: 1_000, now: () => now })

@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
 const PAIRING_TTL_MS: u64 = 5 * 60 * 1000;
-const NOISE_PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
+pub(crate) const NOISE_PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 const MESSAGE_TYPES: &[&str] = &[
     "context.get",
     "session.read",
@@ -820,7 +820,7 @@ fn handle_pairing(
     }
 }
 
-fn server_noise_handshake(
+pub(crate) fn server_noise_handshake(
     stream: &mut TcpStream,
     private_key: &[u8],
 ) -> Result<(TransportState, Vec<u8>), String> {
@@ -858,14 +858,14 @@ fn server_noise_handshake(
     ))
 }
 
-fn read_encrypted_json<T: for<'de> Deserialize<'de>>(
+pub(crate) fn read_encrypted_json<T: for<'de> Deserialize<'de>>(
     stream: &mut TcpStream,
     transport: &Arc<Mutex<TransportState>>,
 ) -> Result<T, String> {
     serde_json::from_slice(&read_encrypted(stream, transport)?).map_err(|error| error.to_string())
 }
 
-fn read_encrypted(
+pub(crate) fn read_encrypted(
     stream: &mut TcpStream,
     transport: &Arc<Mutex<TransportState>>,
 ) -> Result<Vec<u8>, String> {
@@ -880,7 +880,7 @@ fn read_encrypted(
     Ok(plain)
 }
 
-fn write_encrypted_json(
+pub(crate) fn write_encrypted_json(
     stream: &mut TcpStream,
     transport: &Arc<Mutex<TransportState>>,
     value: &serde_json::Value,
@@ -898,7 +898,7 @@ fn write_encrypted_json(
     write_frame(stream, &encrypted[..size])
 }
 
-fn read_frame(stream: &mut TcpStream, max: usize) -> Result<Vec<u8>, String> {
+pub(crate) fn read_frame(stream: &mut TcpStream, max: usize) -> Result<Vec<u8>, String> {
     let mut length = [0u8; 4];
     stream
         .read_exact(&mut length)
@@ -914,7 +914,7 @@ fn read_frame(stream: &mut TcpStream, max: usize) -> Result<Vec<u8>, String> {
     Ok(bytes)
 }
 
-fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), String> {
     stream
         .write_all(&(bytes.len() as u32).to_be_bytes())
         .map_err(|error| error.to_string())?;
@@ -945,7 +945,7 @@ fn validate_id(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
+pub(crate) fn lock_error<T>(_: std::sync::PoisonError<T>) -> String {
     "REMOTE_BRIDGE_STATE_UNAVAILABLE".to_string()
 }
 
@@ -953,7 +953,7 @@ fn generation_is_current(state: &RemoteBridgeState, generation: usize) -> bool {
     state.generation.load(Ordering::Acquire) == generation
 }
 
-fn now_ms() -> u64 {
+pub(crate) fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()

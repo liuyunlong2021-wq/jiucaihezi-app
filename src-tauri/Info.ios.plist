@@ -10,6 +10,8 @@
   </array>
   <key>ITSAppUsesNonExemptEncryption</key>
   <false/>
+  <key>NSCameraUsageDescription</key>
+  <string>扫描电脑上显示的一次性二维码以连接你的电脑。</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>允许韭菜盒子在开发期间连接此 Mac 上的本地服务。</string>
   <key>NSPhotoLibraryAddUsageDescription</key>

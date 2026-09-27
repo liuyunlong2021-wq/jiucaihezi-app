@@ -1,0 +1,11 @@
+{
+  "identifier": "mobile-capability",
+  "description": "iPhone 控制器：只放行相机扫码，不继承桌面端的文件与 Shell 能力",
+  "windows": ["main"],
+  "platforms": ["iOS"],
+  "permissions": [
+    "allow-app-commands",
+    "barcode-scanner:allow-scan",
+    "barcode-scanner:allow-cancel"
+  ]
+}

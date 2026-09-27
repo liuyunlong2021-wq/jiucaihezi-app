@@ -1184,15 +1184,21 @@ pub fn run() {
         }
     }
 
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .manage(commands::creation_mcp::CreationMcpState::default())
         .manage(commands::remote_bridge::RemoteBridgeState::default())
+        .manage(commands::remote_client::MobileRemoteState::default())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_notification::init());
+    // 条码扫描插件整包是 #![cfg(mobile)]：桌面目标上编不出它的 init，
+    // 只能在移动目标注册。手机控制器靠它扫配对二维码。
+    #[cfg(any(target_os = "ios", target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_barcode_scanner::init());
+    let app = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
@@ -1502,6 +1508,11 @@ pub fn run() {
             commands::remote_bridge::remote_device_revoke,
             commands::remote_bridge::remote_bridge_complete,
             commands::remote_bridge::remote_bridge_publish,
+            commands::remote_client::mobile_remote_status,
+            commands::remote_client::mobile_remote_pair,
+            commands::remote_client::mobile_remote_connect,
+            commands::remote_client::mobile_remote_request,
+            commands::remote_client::mobile_remote_disconnect,
             commands::greet::save_generated_file,
             commands::dev::dev_detect_project,
             commands::dev::dev_list_files,

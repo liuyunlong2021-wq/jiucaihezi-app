@@ -337,10 +337,20 @@ type RemoteEnvelope = {
    - `build:ios:quick` 不再跑 `build:deepseek-harness` 与 `build:creation-mcp`。
 2. **协议收口**：`context.changed` 进入 `REMOTE_MESSAGE_TYPES`（此前 Desktop 已在发、协议表却未收录）；§9 补记 `session.event` 是全量投影的实现约定。
 3. **Mobile 连接客户端**：`src/services/mobileRemoteClient.ts` + 10 条合同测试，覆盖连接顺序（§10.4）、副作用命令不自动重发（§11）、seq 单调与串线过滤（§10.3、§10.5）、切对话重同步（§10.6）、未知入站消息、断线后迟到推送、停止与审批的精确 ID。
+4. **Rust 客户端半边**：`src-tauri/src/commands/remote_client.rs` 实现 Noise XX 发起方握手、二维码公钥 pinning（对端静态公钥不一致即 `DESKTOP_KEY_MISMATCH`）、最多 5 分钟的配对等待、认证后长期连接的读写分离与写锁（避免并发帧互相插入）、按 requestId 的请求/响应关联、连接断开时唤醒所有等待者。设备身份与 Desktop 签发的 token 只入本机钥匙串，不回传 WebView（§4），且模块不监听任何端口。新增 5 个命令并登记 ACL。测试直接复用服务端那套握手代码，在真实 `127.0.0.1` TCP 上跑，7/7 通过。
+5. **TS 传输层**：`src/services/mobileRemoteTransport.ts` 把 5 个命令封成 `MobileRemoteTransport`；二维码解析只允许五个字段，多带字段即拒绝（§8.2）。客户端新增 `handleTransportClosed()`：通道断开只置离线，不动已有投影、不猜成败（§10.7）。
+6. **扫码**：采用 Tauri 官方 `tauri-plugin-barcode-scanner`（与仓库已在用的 fs/dialog/notification 同源，Apache-2.0/MIT），Rust 与 JS 两侧都锁 `2.4.6`（两边版本不一致时 CLI 直接拒绝构建）。iOS 加 `NSCameraUsageDescription`；新增只面向 iOS 的 `capabilities/mobile.json`（扫码 + 本项目命令白名单），同时把桌面 `default.json` 限定到 `macOS/windows/linux`，手机包拿不到文件、Shell、SQL 与对话框能力。
+7. **控制器界面**：设备页 + 单会话聊天页（`src/mobile/*`）。只发纯文字，无附件与 `@` 入口；复用 `ToolApprovalStrip`、`ChatScrollNav`、`streamingTextRenderer`，不引工作台运行时、也不新造第二套 markdown 管线（正文先用与本地同一套转义渲染，富渲染后置）。
+8. **安装包审计**：新增 `scripts/audit-ios-app.mjs`（`pnpm run audit:ios-app`）直接检查打出来的 `.app`：无 `skills`/`deepseek-harness`/`creation-mcp`/`storyboarder`/`jev-scorer`、`assets/` 为空、二进制 plist 里的相机用途与 Bundle ID 正确。前端 dist 审计看不到 `bundle.resources` 这一层。
 
-证据：focused `1581/1581`；`build:ios:quick` 全链通过，iOS 产物根只有 `index.html` / `favicon.svg` / `assets`（1.7 MB），产物内无 `deepseek-harness`、`mcp_spawn_stdio`、`creation-mcp`、`jev-scorer` 标记；`build:desktop:quick` 与桌面审计通过（入口仍是 `try-*`，桌面未削弱）。
+证据：focused `1592/1592`；Rust 全量 `443 passed / 1 ignored`（Remote Client `7/7`）；`tauri ios build -t aarch64-sim -d` 真实构建成功，`pnpm run audit:ios-app` 在安装包上通过（`assets/` 为空、相机说明与 Bundle ID 正确）；iOS 目标 ACL manifest 含 `mobile_remote_*` 与 `barcode-scanner:allow-scan`，macOS ACL 仍含全部桌面命令；`build:ios:quick` 与 `build:desktop:quick` + 两侧产物审计通过；`build:desktop:quick` 后桌面入口仍是 `try-*`（未削弱）。
 
-未做：控制器真实界面（当前 `src/mobile/MobileController.vue` 是入口占位）、扫码、Rust 客户端 Noise 与服务端命令的平台 cfg 门禁、iOS 真机矩阵。iOS 尚未在任何真机或模拟器上构建运行，不得登记为可用。
+本轮两个必须记住的坑：
+
+1. **Xcode 27 与 swift-rs 1.0.7 不兼容**：带 Swift 的插件（扫码）在 `cargo build --target aarch64-apple-ios*` 时就失败，报 macOS SDK 的 `CoreServices/AppKit/WebKit` 模块建不起来；根因不是本仓库代码。把锁文件里的 `swift-rs` 从 `1.0.7` 升到 `1.0.8`（只改 `Cargo.lock`）后正常。同时这也意味着 `cargo check --target aarch64-apple-ios` 从引入 Swift 插件起不能再当作 iOS 验证通道，真实验证只能用 `tauri ios build`。
+2. **陈旧资源拷贝会绕过配置**：Xcode 工程把 `gen/apple/assets` 整个目录当资源打包（`project.yml` 的 `buildPhase: resources`），而该目录是 CLI 早先写入的拷贝。因此 `tauri.ios.conf.json` 的 `resources: null` 已生效（新构建不会再重建内容），安装包里却仍带着 8 月 25 日那份含 1.2 MB `skills` 的旧拷贝。处理：`rm -rf src-tauri/gen/apple/assets`（`gen/` 不受版本控制）后重建，并用 `audit:ios-app` 在**安装包**层面把关。
+
+未做：iOS 真机装包与 Local Network/ATS/后台恢复矩阵（本机已检测到可用真机，属下一阶段）、应用内控制台的 markdown 富渲染、服务端命令的平台 cfg 门禁。iOS 尚未在真机上运行，不得登记为可用。
 
 ### P3：完整项目与会话控制
 

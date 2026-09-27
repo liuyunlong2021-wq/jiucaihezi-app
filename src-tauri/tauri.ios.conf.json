@@ -5,6 +5,7 @@
     "beforeBuildCommand": "pnpm build:ios:quick"
   },
   "bundle": {
+    "resources": null,
     "iOS": {
       "developmentTeam": "RXD4L9387J"
     }
