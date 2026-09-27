@@ -6,6 +6,14 @@
 - **武戏档位实测核对**（用户 25 秒参考生视频成功那次，读 ComfyUI `/history/<prompt_id>` 的**实际提交体**，不是 dry-run）：节点 65 `easy anythingIndexSwitch.index = 1`；它的 `value0 → 节点 64 Float 0.5000000000000001`（文戏）、`value1 → 节点 66 Float 1.0000000000000002`（武戏）；节点 47 `LoraLoaderBypassModelOnly.strength_model` 正是引用节点 65 —— 所以武戏确实拿到 LoRA 强度 1.0。同时节点 27 `PrimitiveFloat.value = 25.0`，25 秒原样落到工作流，没被 28 秒上限截断。
 - **验证**：完整 focused `1531 tests / 1523 pass / 0 fail / 8 skipped`（+1 为新增价格用例），退出码 0；`cargo test --lib` 422 passed；`vue-tsc -b` exit 0。面板实际渲染待用户刷新后目视确认。
 
+## [2026-09-27] 根治 | Harness 运行时收尾对齐官方语义（会话写锁不再被活着的孤儿占住）
+
+- **现象与真因**：生成提示词 3 秒即报 `session "jc-v1-…" is already owned by an active write handle`。官方 jsonl 后端的 lease 是一把**跨进程内核锁**（Windows 命名信号量 / POSIX `flock`），`dsh-session-persistence-jsonl` 的注释写明：holder 进程死掉由内核释放，**活着却卡住的 holder 会一直持有，故意不设过期**。也就是说这把锁只认「进程还活不活」，不认「谁在用它」——页面重载 / 模块热替换丢掉 `runtimes` 这个模块级 Map 之后，App 里再没有任何引用能关掉那些运行时：进程活着、stdin 开着、写句柄还握着，锁就永远解不开（本机实测泄漏过 4 对 07:29/07:33/07:41/07:52）。
+- **官方契约**：`create` / `open(id,'write')` 是进程内单写者所有权，`session/disposed` 的 memoized teardown 负责放手；`HarnessClient.close()` 的拆卸阶梯本身有界（shutdown 请求 1s → stdin EOF 宽限 6s → 强杀 3s）；同一会话的**并发 resume 由调用方自己排除**，`dsh-agent-loop` 只会等待同进程内正在 drain 的同一 id。
+- **修法**：① 运行时登记表移到 `globalThis.__JC_DEEPSEEK_HARNESS__`，热替换后仍握得住旧运行时；② `stopRuntime` 的 `await active.closed` 加 15 秒上限（高于官方阶梯，不打断协同 flush），`finally` 里的收尾改成无条件执行——没有上限时进程已死或 stdin 写不进去都会让兜底永不可达；③ 同一会话已有活跃 run 时直接拒绝并给中文提示，不再让用户看见英文锁冲突；④ Rust `mcp_kill_stdio` 改成按**进程树**收尾（Windows `taskkill /T /F`，POSIX spawn 时 `process_group(0)` 后 `kill -KILL -<pid>`），并加两条兜底：页面挂载时 `mcp_reap_stale_harness` 收掉上一批遗留 Harness，`RunEvent::Exit` 收掉所有 stdio 进程树。
+- **验证**：完整 focused `1530 tests / 1522 pass / 0 fail / 8 skipped`，退出码 0；`cargo test --lib` **422 passed**（新增进程树用例）；`vue-tsc -b` exit 0。另做受控实测（自造 runner→dsh 两层 node 进程树）：Windows 上 node 会给非 `detached` 的子进程挂 job object，**只杀 runner 也会连带带走 dsh**，所以 ④ 的价值是「不依赖 libuv 实现细节的显式保证」，而不是新发现的孤儿来源；真正的泄漏来源是没有人再去关掉活着的运行时。
+- **未验**：真实桌面里「改代码触发重载 → 同一会话接着发」只在代码层保证，待人工验收。
+
 ## [2026-09-27] 换模板 | comfy-adapter 的 ref2v 换上「30秒文武双修」V4
 
 - **动作**：用户的新画布（48 节点）整体替换 `comfy-adapter/workflows/minimax-h3-ref2v.json`；旧画布与旧转换产物归档为 `reference/minimax-h3-ref2v.v3.src.{ui,api}.json`，旧模板仍可从 `v2.2.3` tag 回滚。转换走仓库自己的 `tools/ui_to_api.py --drop-class LoadImage --output 21`——先用旧画布校准过：产物与旧模板**只差 node 4 的 unet_name 一处**，且工具会自动清掉 7/14 上的 9 个悬空 ref 引用。

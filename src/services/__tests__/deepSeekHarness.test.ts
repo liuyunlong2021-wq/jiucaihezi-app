@@ -273,7 +273,7 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /runtimeKey\(input\)/)
   assert.match(source, /wireSessionId = deepSeekSessionId\(input\.sessionId\)/)
   assert.doesNotMatch(source, /sessionNonce/)
-  assert.match(source, /await active\.closed/)
+  assert.match(source, /await waitForRuntimeClose\(active, DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS\)/)
   assert.doesNotMatch(source, /active\.closed,[\s\S]{0,100}2_000/)
   assert.match(runner, /DeepSeekHarness.*@deepseek-ai\/dsh-sdk-client/s)
   assert.match(runner, /await harness\.close\(\)/)
@@ -309,7 +309,7 @@ test('Harness subagent calls return a result instead of a fire-and-forget id', (
 
 test('Harness runtimes are owned per workspace instead of one replaceable app singleton', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
-  assert.match(source, /const runtimes = new Map<string, RuntimeSlot>\(\)/)
+  assert.match(source, /const runtimes = harnessRegistry\.runtimes/)
   assert.match(source, /function workspaceRuntimeKey\(input: DeepSeekHarnessInput\)/)
   assert.doesNotMatch(source, /let runtime: Runtime \| null/)
   assert.doesNotMatch(source, /await stopDeepSeekHarness\(\)\s*\n\s*runtime = await createRuntime/)
@@ -317,4 +317,49 @@ test('Harness runtimes are owned per workspace instead of one replaceable app si
   assert.match(source, /ensureRuntime\(input, true\)/)
   assert.match(source, /if \(!active\.closing\) return active/)
   assert.doesNotMatch(source, /await stopRuntime\(await current\.ready\) \} catch/)
+})
+
+test('Harness runtime registry survives a module hot replacement', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  // Vite 热替换会重新求值本模块：模块级 Map 一丢，唯一指向运行时的引用就没了，
+  // 进程还活着并握着会话写锁，而 App 再也关不掉它（07:29/07:33/07:41/07:52 四个泄漏运行时）。
+  assert.match(source, /__JC_DEEPSEEK_HARNESS__ \?\?=/)
+  assert.match(source, /globalThis as unknown as Record<string, unknown>/)
+  assert.doesNotMatch(source, /^const runtimes = new Map/m)
+})
+
+test('Harness shutdown is bounded and always reaps the runtime', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  // 官方 close 的拆卸阶梯有界：shutdown 1s → stdin EOF 宽限 6s → 强杀 3s。
+  const timeout = Number(
+    source.match(/DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS = ([\d_]+)/)?.[1].replace(/_/g, ''),
+  )
+  assert.ok(timeout > 10_000, `等待上限必须高于官方阶梯（实测 ${timeout}）`)
+  assert.match(source, /if \(!await waitForRuntimeClose\(active, DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS\)\)/)
+  // 兜底必须无条件执行：进程已死/写不进去时 `closed` 永不来，没有这句就永远收不到尾。
+  assert.match(source, /finally \{\s*\/\/[\s\S]*?await active\.transport\.close\(\)\.catch\(\(\) => \{\}\)\s*\}/)
+  assert.doesNotMatch(source, /await active\.closed\s*\n\s*\} finally/)
+})
+
+test('Harness refuses a second concurrent run on the same session', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  // 官方把「同一会话的并发 resume」划给调用方排除，撞上去只会拿到 SessionAlreadyOwnedError。
+  assert.match(source, /if \(runningSessions\.has\(wireSessionId\)\) throw new Error\(DEEPSEEK_HARNESS_BUSY_MESSAGE\)/)
+  assert.match(source, /runningSessions\.add\(wireSessionId\)/)
+  assert.match(source, /finally \{\s*runningSessions\.delete\(wireSessionId\)\s*\}/)
+  assert.match(source, /const runningSessions = harnessRegistry\.runningSessions/)
+})
+
+test('Harness stdio children are reaped as a process tree', () => {
+  const rust = readFileSync('src-tauri/src/commands/mcp.rs', 'utf8')
+  const lib = readFileSync('src-tauri/src/lib.rs', 'utf8')
+  // 只杀直接子进程会留下 runner 拉起的 dsh 孙进程，它握着会话的跨进程内核写锁且永不过期。
+  assert.match(rust, /fn tree_kill_plan\(pid: u32\)/)
+  assert.match(rust, /vec!\["\/T"\.into\(\), "\/F"\.into\(\), "\/PID"\.into\(\), pid\.to_string\(\)\]/)
+  assert.match(rust, /cmd\.process_group\(0\)/)
+  assert.match(rust, /if let Some\(pid\) = process\.child\.id\(\) \{\s*kill_process_tree\(pid\)/)
+  assert.match(rust, /pub fn mcp_reap_stale_harness\(\) -> usize/)
+  // 页面重载收 Harness 运行时；应用退出收所有 stdio 进程树。
+  assert.match(readFileSync('src/main.ts', 'utf8'), /invoke<number>\('mcp_reap_stale_harness'\)/)
+  assert.match(lib, /commands::mcp::reap_all_stdio_processes\(\)/)
 })

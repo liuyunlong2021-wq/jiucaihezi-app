@@ -74,7 +74,42 @@ export const DEEPSEEK_HARNESS_CONTEXT_WINDOW = 262_144
 export const DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS = 32_768
 export const DEEPSEEK_HARNESS_SESSION_MARKER = 'dh-session-v1'
 
-const runtimes = new Map<string, RuntimeSlot>()
+/**
+ * 等运行时确认关闭的上限。
+ *
+ * 官方 `HarnessClient.close()` 的拆卸阶梯本身有界：shutdown 请求 1s → stdin EOF 宽限 6s →
+ * （Windows 直接强杀）3s，所以这个值必须高于它，否则会打断官方正在做的协同 flush。
+ * 但上限不能没有：官方只对「进程还守规矩」的情况承诺回调，进程已死、stdin 写不进去
+ * 或拆卸阶梯自己卡住时 `closed` 永不来 —— 没有上限，下面的兜底杀进程就永远不可达，
+ * 运行时连同它的 `dsh` 子进程一起变孤儿，而那把跨进程写锁是永不过期的。
+ */
+export const DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS = 15_000
+
+/** 同一会话上一轮还没落地时再发一条时给用户看的话。 */
+export const DEEPSEEK_HARNESS_BUSY_MESSAGE =
+  '这个会话的上一轮还在进行，Harness 同一会话只允许一个写入方；等它结束后再发一次。'
+
+/**
+ * 登记表挂在 `globalThis` 上，不用模块级 Map。Vite 的模块热替换会重新求值本模块，
+ * 模块级 Map 会连同里面唯一指向运行时的引用一起丢掉：进程还活着、stdin 还开着、
+ * 会话写句柄还握着那把跨进程写锁，但 App 里再没有人能关掉它 —— 同一会话的下一轮
+ * resume 就只剩「session ... is already owned by an active write handle」。
+ */
+type HarnessRegistry = {
+  runtimes: Map<string, RuntimeSlot>
+  /** 正在跑的会话（wire id）。官方把「同一会话的并发 resume」划给调用方排除。 */
+  runningSessions: Set<string>
+}
+
+const harnessRegistry: HarnessRegistry = ((
+  globalThis as unknown as Record<string, unknown>
+).__JC_DEEPSEEK_HARNESS__ ??= {
+  runtimes: new Map<string, RuntimeSlot>(),
+  runningSessions: new Set<string>(),
+}) as HarnessRegistry
+
+const runtimes = harnessRegistry.runtimes
+const runningSessions = harnessRegistry.runningSessions
 
 export function deepSeekPermissionMode(fileAccessEnabled = false): 'workspace-write' | 'danger-full-access' {
   return fileAccessEnabled ? 'danger-full-access' : 'workspace-write'
@@ -536,12 +571,28 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
 
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
   if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
+  const wireSessionId = deepSeekSessionId(input.sessionId)
+  // 官方把「同一会话的并发 resume」划给调用方排除：resume 要先把会话的写所有权拿到手，
+  // 上一个句柄还没放手时第二次以写模式打开会被跨进程写锁顶回 `SessionAlreadyOwnedError`。
+  // 在这里挡住，用户看到的是一句话，而不是几秒后的英文锁冲突。
+  if (runningSessions.has(wireSessionId)) throw new Error(DEEPSEEK_HARNESS_BUSY_MESSAGE)
+  runningSessions.add(wireSessionId)
+  try {
+    return await runDeepSeekHarnessTurn(input, wireSessionId)
+  } finally {
+    runningSessions.delete(wireSessionId)
+  }
+}
+
+async function runDeepSeekHarnessTurn(
+  input: DeepSeekHarnessInput,
+  wireSessionId: string,
+): Promise<string> {
   const active = await ensureRuntime(input)
   if (input.signal?.aborted) {
     void stopRuntime(active)
     throw new DOMException('Aborted', 'AbortError')
   }
-  const wireSessionId = deepSeekSessionId(input.sessionId)
   const requestId = crypto.randomUUID()
   let finalText = ''
   const stream = { attemptId: '', nextIndex: 0, text: '' }
@@ -603,13 +654,32 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
   }
 }
 
+async function waitForRuntimeClose(active: Runtime, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      active.closed.then(() => true),
+      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), timeoutMs) }),
+    ])
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 function stopRuntime(active: Runtime): Promise<void> {
   active.closing ??= (async () => {
     try {
       await active.transport.send({ type: 'close' } as unknown as JSONRPCMessage)
-      await active.closed
+      if (!await waitForRuntimeClose(active, DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS)) {
+        console.warn(`[JC-DH] ${DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS}ms 内未确认关闭，按进程树收尾`)
+      }
+    } catch (error) {
+      // 进程早就没了、或 stdin 已经写不进去：都不影响下面的收尾。
+      console.warn('[JC-DH] 关闭请求未能送达:', error)
     } finally {
-      await active.transport.close()
+      // 兜底必须无条件执行：`mcp_kill_stdio` 现在按进程树收尾，否则留下的 `dsh` 子进程
+      // 会一直握着这个会话的跨进程写锁。
+      await active.transport.close().catch(() => {})
     }
   })()
   return active.closing

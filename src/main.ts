@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import { invoke } from '@tauri-apps/api/core'
 import App from '@app-root'
 import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -92,6 +93,21 @@ if (earlyErrors && earlyErrors.length > 0) {
 
 // ─── P1-5: patchFetch 状态追踪 ───
 ;(window as any).__JC_FETCH_PATCHED__ = false
+
+// 页面重载（dev 的 F5、HMR 重挂）会丢掉 App 里唯一指向 Harness 运行时的句柄：进程还活着、
+// 会话写句柄还握着那把永不过期的跨进程写锁，但再没人能关掉它，同一会话下一轮 resume
+// 就只剩「already owned by an active write handle」。在本次挂载拉起任何运行时之前先收掉上一批。
+if (isTauri) {
+  void invoke<number>('mcp_reap_stale_harness').then(
+    reaped => { if (reaped) bootLog('warn', `已收掉上一批遗留的 Harness 运行时：${reaped}`) },
+    err => bootLog('warn', `清理遗留 Harness 运行时失败: ${err}`),
+  )
+  // 页面离开（重载 / 应用退出）时尽力让运行时自己 dispose：官方只承诺 flush 过的数据，
+  // 优雅关闭才能把最后一批落盘。这是尽力而为的一层，硬保证在 Rust 退出时的进程树收尾。
+  void import('@/services/deepSeekHarness').then(({ stopDeepSeekHarness }) => {
+    window.addEventListener('pagehide', () => { void stopDeepSeekHarness() })
+  })
+}
 
 // apiKeyReady: initApiKey 完成时 resolve（无论有无 Key），供 fetchModels 等待
 let keyReadyResolve: (() => void) | null = null

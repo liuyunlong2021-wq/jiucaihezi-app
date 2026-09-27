@@ -1488,6 +1488,7 @@ pub fn run() {
             commands::mcp::mcp_spawn_stdio,
             commands::mcp::mcp_write_stdin,
             commands::mcp::mcp_kill_stdio,
+            commands::mcp::mcp_reap_stale_harness,
             commands::mcp::resolve_mcp_node,
             commands::creation_mcp::creation_mcp_complete,
             commands::creation_mcp::resolve_creation_mcp,
@@ -1629,6 +1630,10 @@ pub fn run() {
     app.run(|_, event| {
         if matches!(event, tauri::RunEvent::Exit { .. }) {
             commands::creation_mcp::remove_discovery();
+            // stdio 子进程不会跟着 App 一起走：Harness 的 runner 还带着一个 dsh 孙进程，
+            // 而会话写锁是跨进程内核锁且永不过期。退出前按进程树收干净，否则下次启动
+            // 同一会话就撞 `already owned by an active write handle`。
+            commands::mcp::reap_all_stdio_processes();
         }
     });
 }
