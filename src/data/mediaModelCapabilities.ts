@@ -103,6 +103,14 @@ export const JC_H3_RATIO_OPTIONS: MediaFieldOption[] = [
 ]
 
 export const JC_H3_RATIOS = JC_H3_RATIO_OPTIONS.map(option => String(option.value))
+
+/** 文武档位：绑到 H3 双采模板节点 65（easy anythingIndexSwitch）的 index，
+ * 切的是节点 47（turbo v4 hybrid LoRA）的强度；分辨率不再随档位变（固定 0.4MP 首采）。
+ */
+export const JC_H3_MODE_OPTIONS: MediaFieldOption[] = [
+  { value: 0, label: '文戏' },
+  { value: 1, label: '武戏' },
+]
 const NANO_ASPECT_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:1', '4:5', '5:4', '21:9']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 const VEO_RATIOS = ['16:9', '9:16']
@@ -628,7 +636,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     maxFiles: 0,
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 15, step: 1 },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
       { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
     ],
   },
@@ -642,7 +650,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 15, step: 1 },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
       { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
       { key: 'images', label: '首帧图', kind: 'images', required: true },
     ],
@@ -657,7 +665,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 15, step: 1 },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
       { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
       { key: 'images', label: '首帧 + 尾帧', kind: 'images', required: true },
     ],
@@ -672,10 +680,13 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 3, min: 1, max: 15, step: 1 },
-      // ref2v 的模板没有 width/height 绑定，尺寸由工作流的 ResolutionSelector 按 mode 算，
-      // 所以这里只给比例（绑到节点 29 的 aspect_ratio），不给尺寸也不给档位。
+      // 28 秒是实测上限：30 秒会被算式补到 736 帧，成片最后约 2 秒无效（见模板 meta 的 duration_note）
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 3, min: 1, max: 28, step: 1 },
+      // ref2v 的模板没有 width/height 绑定，尺寸由工作流的 ResolutionSelector 算，
+      // 所以这里只给比例（绑到节点 29 的 aspect_ratio），不给尺寸。
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9 (Widescreen)', options: JC_H3_RATIO_OPTIONS },
+      // 戏种绑到模板节点 65 的 index（切节点 47 的 LoRA 强度）
+      { key: 'mode', label: '戏种', kind: 'select', defaultValue: 0, options: JC_H3_MODE_OPTIONS },
       { key: 'images', label: '参考图', kind: 'images', required: true },
     ],
   },

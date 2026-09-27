@@ -24,7 +24,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from adp import harden_stdout  # noqa: E402
 from adp.config import load_config  # noqa: E402
+
+# 汇总行带 emoji，Windows 重定向到管道时按 GBK 编码会 UnicodeEncodeError 直接崩，
+# 结果就是「19 项都跑了但看不到结论」。
+harden_stdout()
 
 BASE = "http://127.0.0.1:9000"
 PLACEHOLDER_KEYS = ("change-me-please", "changeme", "your-key-here")

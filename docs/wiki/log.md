@@ -1,5 +1,21 @@
 # Wiki 操作日志
 
+## [2026-09-27] 实施 | jc 本机四个视频面板项显示「0.2/秒」，武戏档位实测核对通过
+
+- **价格**：面板模型下拉（`CreationPanel.vue` 的 `<small>{{ m.price }}</small>`）此前对四个 jc-MiniMax H3 项显示「费用以实际扣费为准」，因为注册表没写 `price`（旧断言还专门钉住 `item.price === undefined`，理由是「价格未在 NewAPI 配置前不写死单价」）。管理员核实渠道 140 按秒计费 0.2 后，注册表新增单一事实源 `JC_H3_PRICE = '0.2/秒'`，四个面板项共用；`jcComfyAdapterPlan.test.ts` 把展示值与四个 id 一一钉住（改价必须同步改常量）。
+- **武戏档位实测核对**（用户 25 秒参考生视频成功那次，读 ComfyUI `/history/<prompt_id>` 的**实际提交体**，不是 dry-run）：节点 65 `easy anythingIndexSwitch.index = 1`；它的 `value0 → 节点 64 Float 0.5000000000000001`（文戏）、`value1 → 节点 66 Float 1.0000000000000002`（武戏）；节点 47 `LoraLoaderBypassModelOnly.strength_model` 正是引用节点 65 —— 所以武戏确实拿到 LoRA 强度 1.0。同时节点 27 `PrimitiveFloat.value = 25.0`，25 秒原样落到工作流，没被 28 秒上限截断。
+- **验证**：完整 focused `1531 tests / 1523 pass / 0 fail / 8 skipped`（+1 为新增价格用例），退出码 0；`cargo test --lib` 422 passed；`vue-tsc -b` exit 0。面板实际渲染待用户刷新后目视确认。
+
+## [2026-09-27] 换模板 | comfy-adapter 的 ref2v 换上「30秒文武双修」V4
+
+- **动作**：用户的新画布（48 节点）整体替换 `comfy-adapter/workflows/minimax-h3-ref2v.json`；旧画布与旧转换产物归档为 `reference/minimax-h3-ref2v.v3.src.{ui,api}.json`，旧模板仍可从 `v2.2.3` tag 回滚。转换走仓库自己的 `tools/ui_to_api.py --drop-class LoadImage --output 21`——先用旧画布校准过：产物与旧模板**只差 node 4 的 unet_name 一处**，且工具会自动清掉 7/14 上的 9 个悬空 ref 引用。
+- **必须重绑的一条**：`mode`（文武档位）在 V3 绑的是 `64.index + 69.index` 两个 index switch；新图只剩节点 65 一个开关，64 变成 `Float`、69 变成 `RunningHub Deepcleaner`。而 meta 的 `defaults.mode = 0` 是**会真实写进节点**的，不重绑就是往这两个节点写非法输入。
+- **三条用户决定**：① 戏种（文/武）回到面板做开关，语义变成「只切节点 47 的 LoRA 强度 0.5 / 1.0」，不再改分辨率（`megapixels` 固定 0.4MP）；② V3 里 HIGH 的 `ConcatTextOfUtils` 细节增强词**有意去掉**，不要补回；③ 时长上限取 **28 秒**——实测 30 秒会被算式补到 736 帧（≈30.7s）且最后约 2 秒无效，28 秒 → 685 帧（≈28.54s）。适配器 `constraints.clamp` 与面板 `max` 同步到 28，实测请求 30 被 clamp 成 28。
+- **验证**：`app.py --check` 四步全绿（ref2v 31 个节点类全注册、19 个模型文件全存在）、`verify_newapi_contract.py` 19/19（走 `minimax-h3` 模板真实出片 5 帧 30.92s）、`dry_run.py` 落点正确（`mode`→节点 65.index、`duration`→节点 27.value、参考图→7/14 的 `ref_image_0`）、`jcComfyAdapterPlan.test.ts` 11/11、完整 focused 门禁退出码 0。
+- **顺手修**：`verify_newapi_contract.py` 缺 `harden_stdout()`，Windows 上把输出重定向到管道时汇总行的 ✅ 会 `UnicodeEncodeError` 崩掉 —— 19 项都跑完却看不到结论，已按其它工具的做法补上。
+- **未做**：新模板的**真实出片**没跑（只跑了 dry-run 与合同自检，后者走的是 `minimax-h3` 模板）；成片效果与耗时待人工验收。
+- **追加（同日，用户决定「都改」）**：兄弟模板 `minimax-h3-video.meta.json` 的 `constraints.max_length` 从 501（≈20.9 秒）放到 **685（28 秒）**，面板文生 / 首帧图生 / 首尾帧三项同步，`JC_H3_DURATION_FIELD` 上限 15 → 28（四个 jc 模型共用）。那 501 是适配器**自设**的运行时保护 —— 节点自身 `length` 输入没有 max（只有 `min=5` / `step=17`），所以放大安全；`dry_run --duration 28` 实测 → `length: 672`（28.00s），不再被截断。
+
 ## [2026-09-27] 发版候选 | 2.2.3 macOS 签名与公证修复
 
 - **根因**：旧 CI 只重签外层 `.app`，App 内 DeepSeek Harness 的 Node 与原生依赖没有按 Apple 要求由内向外签名；bundled Node 还带 `get-task-allow`。`notarytool submit --wait` 在 Apple 返回 `Invalid` 时仍可能以进程码 0 结束，旧脚本因此误印「公证成功」，随后 `stapler` 才以 65 失败。旧冒烟又递归搜索所有 `*opencode*`，把普通 JS provider 文件误判为 sidecar。

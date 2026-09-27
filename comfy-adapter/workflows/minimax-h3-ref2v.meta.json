@@ -1,7 +1,7 @@
 {
   "id": "minimax-h3-ref2v",
-  "display_name": "MiniMax H3 双采参考生视频 V3（文武双修均衡版）",
-  "description": "MiniMax H3 参考生视频，双采 + 潜空间上采样。LOW 首采 8 步 → 1.5x 潜空间上采样 → HIGH 精修 5 步，音视频同步输出（mp4 自带 AAC 音轨）。参考图 1~9 张，每张会同时接到 LOW 和 HIGH 两个 conditioning 节点 —— 双采工作流必须两遍都拿到参考图，否则报 REF2VA requires at least one reference media input。duration 按秒给，内部按 24fps 对齐到 17n+5 帧。",
+  "display_name": "MiniMax H3 双采参考生视频 V4（文武双修 · 单开关版）",
+  "description": "MiniMax H3 参考生视频，双采 + 潜空间上采样。LOW 首采 8 步 → 1.5x 潜空间上采样 → HIGH 精修 5 步，音视频同步输出（mp4 自带 AAC 音轨）。参考图 1~9 张，每张会同时接到 LOW 和 HIGH 两个 conditioning 节点 —— 双采工作流必须两遍都拿到参考图，否则报 REF2VA requires at least one reference media input。duration 按秒给，内部按 24fps 对齐到 17n+5 帧；上限取 28 秒（详见 extra.duration_note）。mode 是单开关，只切节点 47 的 LoRA 强度。",
   "template": "minimax-h3-ref2v.json",
   "output_kind": "video",
   "default_async": true,
@@ -31,11 +31,7 @@
     ],
     "mode": [
       {
-        "node": "64",
-        "input": "index"
-      },
-      {
-        "node": "69",
+        "node": "65",
         "input": "index"
       }
     ],
@@ -92,7 +88,7 @@
     "clamp": {
       "duration": [
         1,
-        15
+        28
       ],
       "mode": [
         0,
@@ -104,13 +100,15 @@
     ]
   },
   "extra": {
-    "source_workflow": "（极速高清新版-文武双修均衡版）MiniMax H3双采参考生视频V3.json",
-    "engine_note": "原工作流底座写的是 minimax_h3_hybrid_fl2va_ref2va_b25-49-int8_r.safetensors（int8 量化版），本机没装，已换成同系列的 minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors。下好 int8_r 后把模板里节点 4 的 unet_name 改回去即可。其余 LoRA / VAE / CLIP / 上采样器 / 所有采样参数均与工作流完全一致。",
+    "source_workflow": "30秒文武双修.json（2026-09-27 换上；同源的 V3 画布已归档为 reference/minimax-h3-ref2v.v3.src.ui.json）",
+    "engine_note": "本图底座直接用 minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors（非 int8），不用再改节点 4。比 V3 多挂四个模块：MiniMaxH3SemanticBridgeConfigT8/ApplyT8（节点 56/55/58，权重 MiniMaxH3_SemanticBridge_v1_T8_Compat.safetensors）、MiniMaxH3ChunkFeedForwardT8Advanced（节点 54，chunks=2 / seq_threshold=4096）、easy cleanGpuUsed（节点 68）、RunningHub Deepcleaner（节点 69，Purge Model，在输出路径上）。",
     "mode_legend": {
-      "0": "文戏：lms LoRA 0.4 / 首采 0.4MP",
-      "1": "武戏：lms LoRA 0.8 / 首采 0.5MP"
+      "0": "文戏：节点 47（turbo v4 hybrid）强度 0.5，首采固定 0.4MP",
+      "1": "武戏：节点 47 强度 1.0，首采固定 0.4MP"
     },
-    "resolution_note": "宽高由工作流自带的 ResolutionSelector（multiple=32）算首采尺寸：aspect_ratio 已绑定到节点 29（meta 里 bind.aspect_ratio），megapixels 仍由 mode 决定（默认 0），再由潜空间 1.5x 上采样得到成片尺寸。所以本模型**不接受** width/height/size —— 要改画幅请调 aspect_ratio，要改分辨率档位请调 mode 或改模板里的 megapixels 源。",
+    "duration_note": "clamp 上限取 28 秒而不用官方的 30：实测提交 30 秒会被算式补到 736 帧（≈30.7s），成片最后约 2 秒无效；28 秒 → 685 帧（≈28.54s）。不满足 17n+5 的秒数会被算式向上取整到下一个合法帧数。",
+    "resolution_note": "宽高由工作流自带的 ResolutionSelector（multiple=32）算首采尺寸：aspect_ratio 已绑定到节点 29（meta 里 bind.aspect_ratio），megapixels 现在固定 0.4（V3 是随 mode 从 0.4/0.5 切），再由潜空间 1.5x 上采样得到成片尺寸。所以本模型**不接受** width/height/size —— 要改画幅请调 aspect_ratio。",
+    "high_prompt_note": "V3 的 HIGH prompt 走 ConcatTextOfUtils（自动拼 'Enhance this video with sharp, crisp details…'）；本图节点 7 和节点 14 都直接吃节点 28 —— 2026-09-27 确认去掉，不要补回。",
     "reference_note": "每张参考图只上传一次，但会同时接到节点 7（LOW）和节点 14（HIGH）的 ref_images.ref_image_N —— 接线是 0 基。"
   }
 }

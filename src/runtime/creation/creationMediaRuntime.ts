@@ -894,6 +894,10 @@ function buildDirectVideoBody(
     // duration 交的是秒数，适配器按模板的 duration_fps 自己换算成帧。
     // size 由适配器按模板 constraints（multiple_of=32）解析成 width/height；
     // ref2v 的模板没有 width/height 绑定，传了会被适配器忽略。
+    // 模板自定义参数（戏种 mode）必须走 extra_fields：顶层的 mode 是 NewAPI 自己的
+    // string 字段，发数字会被它的 JSON 绑定直接拒掉
+    // （invalid_json: cannot unmarshal number into ... .mode of type string）。
+    const workflowMode = request.plan.debug.normalizedParams.mode
     const body: Record<string, unknown> = compact({
       model: request.plan.model,
       prompt: params.prompt,
@@ -902,7 +906,7 @@ function buildDirectVideoBody(
       // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
       // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
       aspect_ratio: asOptionalString(params.size) ? undefined : asOptionalString(params.aspectRatio),
-      mode: request.plan.debug.normalizedParams.mode,
+      extra_fields: workflowMode === undefined ? undefined : { mode: workflowMode },
     })
     if (request.plan.apiStyle === 'comfy-first-frame') {
       body.first_frame = uploadedImages[0]

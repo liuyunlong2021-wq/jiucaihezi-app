@@ -18,7 +18,7 @@ import type {
 } from './creationMediaTypes'
 
 import { getRhEndpointCapability } from '@/data/rhCapabilities'
-import { JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
+import { JC_H3_MODE_OPTIONS, JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
 
 const RATIOS = ['adaptive', '1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 const GPT_IMAGE_SIZES = [
@@ -113,15 +113,16 @@ const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 
-// comfy-adapter 的 minimax-h3 用 length（帧）表达时长，秒数由适配器按 24fps 换算；
-// 但对应的工作流约束是 max_length=501 帧（≈20.9 秒），所以面板只开到 15 秒。
+// comfy-adapter 的 H3 用 length（帧）表达时长，秒数由适配器按 24fps 换算，节点自己再对齐到 17n+5。
+// 上限取 28 秒（28 → 672 帧，节点补到 685）：实测 30 秒的成片最后约 2 秒无效。
+// 适配器侧的帧上限是各模板 meta 的 constraints（minimax-h3 用 max_length=685，ref2v 用 clamp.duration）。
 const JC_H3_DURATION_FIELD = {
   key: 'duration',
   label: '时长(秒)',
   kind: 'number' as const,
   defaultValue: 5,
   min: 1,
-  max: 15,
+  max: 28,
   step: 1,
 }
 
@@ -136,6 +137,12 @@ const JC_H3_SIZE_FIELD = {
   defaultValue: '1344x768',
   options: JC_VIDEO_SIZE_OPTIONS,
 }
+
+/** 本机 H3 四个面板项的统一单价：渠道 140 按秒计费。
+ * 面板拿不到自建渠道的单价（NewAPI 只对已知模型回传价目），所以这里是唯一事实源；
+ * 改价只改这一处，`jcComfyAdapterPlan.test.ts` 把四个模型的展示值一起钉住。
+ */
+const JC_H3_PRICE = '0.2/秒'
 
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型。 */
 export const RH_ONLY_MODE = false
@@ -509,6 +516,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // 只注册视频：图片模型（jc-qwen-image-2.1）已按 2026-09-26 的决定从面板撤下。
   // 图片与视频两套权重在 48GB 显存里无法共存，频繁来回切会互相挤爆；
   // 服务器端适配器与工作流都还在，等有第二台机器单独跑图片时再把上面那份规格接回来。
+  // 四个面板项同价：渠道 140 按秒计费，管理员 2026-09-27 核实。
   baseSpec({
     id: 'jc-minimax-h3',
     model: 'jc-minimax-h3',
@@ -524,6 +532,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     assetFlow: 'none',
     resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
     // 显式声明「不接受任何参考图」：适配器的 H3 模板一旦收到图就会切到 Ref2VA，
     // 不拦的话用户选一张图会静默变成另一种模式。
     files: { images: { min: 0, max: 0 } },
@@ -531,7 +540,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['本机 ComfyUI 的 MiniMax H3（音视频同步，4 步 Turbo）；默认 1344x768，纯文字生成。'],
     ratios: [],
     resolutions: [],
-    duration: { min: 1, max: 15 },
+    duration: { min: 1, max: 28 },
   }),
   baseSpec({
     id: 'jc-minimax-h3-first-frame',
@@ -548,6 +557,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     assetFlow: 'newapi-upload',
     resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
     files: { images: { min: 1, max: 1, maxBytes: 20 * 1024 * 1024 } },
     fields: promptFields([
       JC_H3_DURATION_FIELD,
@@ -557,7 +567,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['画布选中的第 1 张图作为首帧，后续画面由提示词补出。'],
     ratios: [],
     resolutions: [],
-    duration: { min: 1, max: 15 },
+    duration: { min: 1, max: 28 },
   }),
   baseSpec({
     id: 'jc-minimax-h3-first-last',
@@ -574,6 +584,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     assetFlow: 'newapi-upload',
     resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
     files: { images: { min: 2, max: 2, maxBytes: 20 * 1024 * 1024 } },
     fields: promptFields([
       JC_H3_DURATION_FIELD,
@@ -583,7 +594,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['按画布顺序：第 1 张是首帧、第 2 张是尾帧，短片从首帧演到尾帧。'],
     ratios: [],
     resolutions: [],
-    duration: { min: 1, max: 15 },
+    duration: { min: 1, max: 28 },
   }),
   baseSpec({
     id: 'jc-minimax-h3-ref2v',
@@ -600,6 +611,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     assetFlow: 'newapi-upload',
     resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
     files: { images: { min: 1, max: 6, maxBytes: 20 * 1024 * 1024 } },
     fields: promptFields([
       { ...JC_H3_DURATION_FIELD, defaultValue: 3, label: '时长(秒)' },
@@ -612,17 +624,27 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         defaultValue: '16:9 (Widescreen)',
         options: JC_H3_RATIO_OPTIONS,
       },
+      // 文武档位：绑到模板节点 65 的 index（切节点 47 的 LoRA 强度）
+      {
+        key: 'mode',
+        label: '戏种',
+        kind: 'select',
+        defaultValue: 0,
+        options: JC_H3_MODE_OPTIONS,
+      },
       { key: 'images', label: '参考图', kind: 'images', required: true },
     ]),
     notes: [
-      '双采 + 潜空间上采样（文武双修均衡版），音视频同步输出。',
+      '双采 + 潜空间上采样 V4（SemanticBridge 语义桥 + 分块前馈），音视频同步输出。',
       '参考图 1~6 张：7 张以上会击穿 48GB 显存，适配器侧限制为 6 张。',
       '只选比例：具体像素由工作流自带的 ResolutionSelector（multiple=32）算，再经 1.5x 潜空间上采样。',
+      '戏种只切节点 47 的 LoRA 强度（文戏 0.5 / 武戏 1.0），不再改分辨率。',
+      '时长上限 28 秒：30 秒的成片最后约 2 秒无效。',
     ],
     // 比例值必须是 ResolutionSelector 的枚举原字符串（带后缀），不能简写成 "9:16"
     ratios: JC_H3_RATIOS,
     resolutions: [],
-    duration: { min: 1, max: 15 },
+    duration: { min: 1, max: 28 },
   }),
   ...GPT_IMAGE_2_ROUTES.map(route => baseSpec({
     id: route.id,

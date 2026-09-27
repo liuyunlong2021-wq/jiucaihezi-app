@@ -218,6 +218,13 @@ class WorkflowTemplate:
     # ------------------------------------------------------ 参数归一化
     def normalize(self, raw: dict, *, max_batch: int) -> dict[str, Any]:
         """把 OpenAI 风格入参整理成可直接渲染的字典。"""
+        # NewAPI 只透传它认识的顶层字段，自定义参数由调用方放在 extra_fields 里发过来
+        # （RH 链路的 webappId 就是这么传的）。先摊平到顶层，后面的 bind / clamp / int_params
+        # 照旧工作；已存在的同名顶层键优先。
+        extra = raw.get("extra_fields") or raw.get("extraFields")
+        if isinstance(extra, dict):
+            for key, value in extra.items():
+                raw.setdefault(key, value)
         c = self.constraints
         multiple = int(c.get("multiple_of", 16))
         lo = int(c.get("min_size", 256))

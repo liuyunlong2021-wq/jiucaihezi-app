@@ -16,6 +16,7 @@ import {
 import { buildCreationRunPlan } from '../creationMediaPlan'
 import {
   creationModelFamily,
+  displayModelPrice,
   getCreationModelSpec,
   listCreationPanelModels,
 } from '../creationModelRegistry'
@@ -63,9 +64,22 @@ test('本机 comfy-adapter 的模型在注册表和面板能力表里都在，�
     const item = panel.find(entry => entry.id === id)
     assert.ok(item, `面板列表缺少 ${id}`)
     assert.match(item.label, /^jc-/, `面板显示名 ${item.label} 缺少 jc- 前缀`)
-    // 价格未在 NewAPI 配置前不写死单价
-    assert.equal(item.price, undefined)
+    // 管理员 2026-09-27 核实的渠道 140 单价：不写死的话面板会掉回「费用以实际扣费为准」
+    assert.equal(item.price, '0.2/秒')
   }
+})
+
+test('本机 H3 四个面板项的价格钉在渠道 140 的 0.2/秒', () => {
+  // 定价是有意钉住的：改价必须同步改注册表里的 JC_H3_PRICE，避免静默漂移。
+  assert.deepEqual(
+    JC_MODEL_IDS.map(id => [id, displayModelPrice(getCreationModelSpec(id)!)]),
+    [
+      ['jc-minimax-h3', '0.2/秒'],
+      ['jc-minimax-h3-first-frame', '0.2/秒'],
+      ['jc-minimax-h3-first-last', '0.2/秒'],
+      ['jc-minimax-h3-ref2v', '0.2/秒'],
+    ],
+  )
 })
 
 test('两个渠道模型名就是 NewAPI 里的公开模型名', () => {
@@ -106,7 +120,7 @@ test('尺寸选项的标签是人话（档位 + 方位 + 比例 + 实际像素�
   }
 })
 
-test('参考生视频用比例代替档位：比例值就是 ResolutionSelector 的枚举，不能简写', () => {
+test('参考生视频用比例代替画幅，戏种是独立开关：比例值必须是 ResolutionSelector 的枚举', () => {
   // 取值来自 comfy_extras/nodes_resolution.py 的 AspectRatio（带后缀，写错 ComfyUI 会直接报错）
   assert.deepEqual(JC_H3_RATIOS, [
     '16:9 (Widescreen)',
@@ -123,8 +137,14 @@ test('参考生视频用比例代替档位：比例值就是 ResolutionSelector 
   assert.ok(ref2v)
   const keys = ref2v.fields.map(field => field.key)
   assert.ok(keys.includes('ratio'), '参考生视频应该有比例选择')
-  assert.ok(!keys.includes('mode'), '档位不应再出现在界面上')
+  assert.ok(keys.includes('mode'), '戏种（文戏/武戏）开关应该在界面上')
   assert.ok(!keys.includes('size'), '它不接受 width/height，所以不能给尺寸选择')
+
+  // 戏种绑到模板节点 65 的 index：0=文戏、1=武戏，默认文戏
+  const modeField = ref2v.fields.find(field => field.key === 'mode')
+  assert.equal(modeField?.defaultValue, 0)
+  assert.deepEqual(modeField?.options?.map(option => option.value), [0, 1])
+  assert.deepEqual(modeField?.options?.map(option => option.label), ['文戏', '武戏'])
   assert.deepEqual(ref2v.capabilities.ratios, JC_H3_RATIOS, '面板的比例下拉要按规格里的 ratios 渲染')
   assert.equal(ref2v.fields.find(field => field.key === 'ratio')?.defaultValue, '16:9 (Widescreen)')
 
@@ -167,6 +187,21 @@ test('视频三项的参考图张数按适配器槽位卡死', () => {
   assert.throws(() => plan('jc-minimax-h3', refs(1)), /参考图最多支持 0 个/)
 })
 
+test('H3 参考生视频的时长上限是 28 秒（30 秒的成片最后约 2 秒无效）', () => {
+  const spec = getCreationModelSpec('jc-minimax-h3-ref2v')
+  assert.equal(spec?.capabilities.duration?.max, 28)
+  assert.equal(spec?.fields.find(field => field.key === 'duration')?.max, 28)
+
+  const plan = (duration: number) =>
+    buildCreationRunPlan({
+      modelId: 'jc-minimax-h3-ref2v',
+      params: { prompt: '镜头', duration, images: refs(1) },
+    })
+
+  assert.doesNotThrow(() => plan(28))
+  assert.throws(() => plan(29), /时长\(秒\)不能大于 28/)
+})
+
 test('视频提交体把画布参考图落到适配器声明的槽位', { concurrency: false }, async () => {
   __resetApiKeyMemoryCacheForTests('session-cloud')
   const previousFetch = globalThis.fetch
@@ -192,7 +227,7 @@ test('视频提交体把画布参考图落到适配器声明的槽位', { concur
     { id: 'jc-minimax-h3', images: [], duration: 5, params: { size: '1088x1920' } },
     { id: 'jc-minimax-h3-first-frame', images: refs(1), duration: 5 },
     { id: 'jc-minimax-h3-first-last', images: refs(2), duration: 5 },
-    { id: 'jc-minimax-h3-ref2v', images: refs(3), duration: 3, params: { ratio: '9:16 (Portrait Widescreen)' } },
+    { id: 'jc-minimax-h3-ref2v', images: refs(3), duration: 3, params: { ratio: '9:16 (Portrait Widescreen)', mode: 1 } },
   ]
 
   const results: string[] = []
@@ -247,11 +282,12 @@ test('视频提交体把画布参考图落到适配器声明的槽位', { concur
   assert.equal(bodies[2].last_frame, 'https://cdn.example.test/ref-1.png')
   assert.equal(bodies[2].images, undefined)
 
-  // 参考生：整组进 images；模式（mode）面板不再发，由适配器的模板默认值决定
+  // 参考生：整组进 images；戏种走 NewAPI 的 extra_fields 透传（顶层 mode 会撞 NewAPI 的 string 字段）
   assert.equal(bodies[3].model, 'jc-minimax-h3-ref2v')
   assert.deepEqual(bodies[3].images, refs(3))
   assert.equal(bodies[3].first_frame, undefined)
   assert.equal(bodies[3].mode, undefined)
+  assert.equal((bodies[3].extra_fields as { mode?: number })?.mode, 1)
   assert.equal(bodies[3].duration, 3)
 
   for (const url of results) assert.match(url, /\/v1\/videos\/task_test_1\/content$/)

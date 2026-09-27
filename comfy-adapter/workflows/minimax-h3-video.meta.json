@@ -92,7 +92,8 @@
     "min_steps": 1,
     "max_steps": 40,
     "min_length": 5,
-    "max_length": 501
+    "max_length": 685,
+    "_comment_max_length": "685 帧 = 28 秒（28×24=672 帧，节点按 17n+5 补到 685）。2026-09-27 与面板一起从 501（≈20.9 秒）放大：实测 30 秒的成片最后约 2 秒无效，所以上限定在 28 秒。节点自身的 length 输入没有 max（只有 min=5 / step=17），这个上限是适配器自己设的运行时保护。"
   },
 
   "output_node": "12"
