@@ -110,7 +110,12 @@ export function isAiAppPromptField(
   return field.label === '提示词'
 }
 
-export const H3_DURATION_RANGE = { min: 1, max: 15, step: 1 }
+/** H3 应用的时长滑条：1~28 秒整数。
+ * RH 侧时长节点（如文武双修的 `27:value`）是裸 FLOAT，公网 `app-info` 实测它自报
+ * min/max 只是 ±9.2e18、step 0.1，`rh-adapter` 也不做范围校验 —— 上限完全由面板定。
+ * 28 与本体 comfy 的封顶一致：同一张画布 30 秒会被算式补到 736 帧（≈30.7s），最后约 2 秒无效。
+ */
+export const H3_DURATION_RANGE = { min: 1, max: 28, step: 1 }
 export const H3_DURATION_DEFAULT = 5
 export const H3_RATIO_DEFAULT = '9:16'
 // ponytail: 质量控件对用户无意义（画面大小交给画幅决定），隐藏后固定提交 0.9

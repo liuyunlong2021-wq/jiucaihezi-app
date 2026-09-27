@@ -283,9 +283,13 @@ test('media plan editor keeps the user in control of the final prompt and lists 
   }
 
   const updated = updateMediaPlanParameters(plan, { prompt: '镜头推进' })
-  const veoFast = getMediaPlanEditorControls(updated).models
-    .filter(model => model.label.startsWith('Veo 3.1 Fast'))
+  const labels = getMediaPlanEditorControls(updated).models.map(model => model.label)
 
   assert.equal(updated.prompt, '镜头推进')
-  assert.deepEqual(veoFast.map(model => model.label), ['Veo 3.1 Fast'])
+  // 退出面板的模型不再出现在编辑器的可选列表里（2026-09-27 把 Veo 两项一起隐藏），
+  // 但历史计划仍带着自己的 modelId，改写与提交照旧。
+  assert.equal(labels.some(label => label.startsWith('Veo 3.1 Fast')), false)
+  assert.equal(updated.modelId, 'newapi/zx/veo-3.1-fast-generate-preview')
+  // 可见模型照旧在列表里
+  assert.equal(labels.includes('jc-MiniMax H3 参考生视频'), true)
 })

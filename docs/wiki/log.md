@@ -1,5 +1,21 @@
 # Wiki 操作日志
 
+## [2026-09-27] 面板口径 | 菠萝单独成组、Seedance 组名改 2.5、默认视频模型换参考生视频、九项模型退出面板
+
+- **菠萝（aimanplay.cn）自成一族**：`creationModelFamily` 新增 `菠萝`（`newapi/boluo/` 前缀或名字带「菠萝」），面板 order 数组里图片侧排最前、视频侧跟在 `jc 本机` 后面；新增图片项 `gpt-image-2-菠萝`（1k/2k/4k + 质量，字段与 2.5 菠萝一致，**价格暂按同档 0.08/张 记，待管理员核实**，`contractStatus: partial`）。
+- **Seedance 组名 2.0 → 2.5**：该族现有的可见成员（`newapi/dola/seedance2.5`、山海 `oc-model-r5cfh8`）本来就都是 2.5；`Seedance 2.0 Mini` / `Fast` 两个族名保留（那三套 RH 模型此前已退役隐藏）。
+- **视频默认模型换成 `jc-minimax-h3-ref2v`**：注册表里把它排到 `jc 本机` 组第一位 —— `switchTask` 取 `models[0]`、面板分组也按注册表顺序，所以「任务默认」与「组内第一」一次满足。
+- **九项模型用 `hidden: true` 退出面板**（合同保留，历史任务与按 id 调用照旧）：视频五项 `newapi/zx/veo-3.1-generate-preview`、`newapi/zx/veo-3.1-fast-generate-preview`、`local-comfy/grok-video-3-30s`、`runninghub/api/rh-grok-text-video`、`runninghub/api/rh-grok-image-video`；图片四项 `gpt-image-2.5-flare-1k`、`gpt-image-2.5-sunburst-1k`、`gpt-image-2.5-flare-官方`、`gpt-image-2.5-sunburst-官方`（`GPT_IMAGE_2_ROUTES` 加了 `hidden?` 字段透传）。
+- **两处待用户确认**：① `gpt-image-2-菠萝` 的单价、以及在 NewAPI 侧是否已建好模型；② 「四个 GPT Image 2.5 变体」按 Flare/Sunburst 读数（`GPT Image 2.5 1K` 与 `2.5 官方` 保留）。
+- **验证**：完整 focused `1534 tests / 1526 pass / 0 fail`、退出码 0；`vue-tsc -b` exit 0；另用一次性探针脚本把三个任务的「分组 → 条目 → 价格」原样打印核对（视频 13 → 9 项、图片 22 → 19 项）。面板目视待人工。
+
+## [2026-09-27] 实施 | 创作面板：H3 应用时长上限放到 28 秒，「应用」下拉只留文武双修
+
+- **时长 28 秒**：`H3_DURATION_RANGE` 的 `max` 15 → 28（8 个 H3 应用共用，用户决定「一起放开」），默认仍 5 秒。上限纯属面板自设：公网 `app-info` 实测 RH 的时长节点（文武双修 `27:value`，`PrimitiveFloat`）自报 `min/max = ±9.2e18`、`step 0.1`，`rh-adapter` 的 `apply_ai_app_inputs` 也只写值不校验。取 28 而不是 30 的理由与本体 comfy 一致 —— 同一张画布 30 秒会被算式补到 736 帧（≈30.7s），最后约 2 秒无效。
+- **「应用」下拉只展示文武双修**：服务器 `app-directory` 实测返回 **14 项**，面板新增 `PANEL_AI_APP_IDS`（数组顺序即下拉顺序，文武双修是唯一项也是第一条）。其余 13 项（7 个 Minimax-h3 变体、5 个数字人/语音类、图音生视频）不再上项目面板，**服务器目录与接口一行未动**，需要时仍可用下拉底部的「或粘贴 ID…」指定；`aiAppLabel()` 仍读完整目录，所以粘贴被隐藏的编号时名字照常显示。
+- **没做**：`MINIMAX_H3_WEBAPP_IDS` 保留全部 8 个 id（本地已存选中状态时判定不乱）；`rh-adapter`、NewAPI、本机 `comfy-adapter` 均未改。
+- **验证**：定向用例 70/70（`creationPanelContractUi`、`useCreationFileFiltering`、`useCreationPlanMaterialization`）；新增两条合同 —— 面板只认 `PANEL_AI_APP_IDS`、时长常量值 28。面板实拉目录后的目视确认待人工。
+
 ## [2026-09-27] 实施 | jc 本机四个视频面板项显示「0.2/秒」，武戏档位实测核对通过
 
 - **价格**：面板模型下拉（`CreationPanel.vue` 的 `<small>{{ m.price }}</small>`）此前对四个 jc-MiniMax H3 项显示「费用以实际扣费为准」，因为注册表没写 `price`（旧断言还专门钉住 `item.price === undefined`，理由是「价格未在 NewAPI 配置前不写死单价」）。管理员核实渠道 140 按秒计费 0.2 后，注册表新增单一事实源 `JC_H3_PRICE = '0.2/秒'`，四个面板项共用；`jcComfyAdapterPlan.test.ts` 把展示值与四个 id 一一钉住（改价必须同步改常量）。

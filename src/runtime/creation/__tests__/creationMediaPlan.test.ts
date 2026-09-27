@@ -160,7 +160,8 @@ test('removed defaults stay absent and model metadata drives family and fee labe
   assert.equal(creationModelFamily(getCreationModelSpec('newapi/xiaoyi/grok-imagine-image-2.0')!), 'Grok Image')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-mini-image')!), 'Seedance 2.0 Mini')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-fast-text')!), 'Seedance 2.0 Fast')
-  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-image')!), 'Seedance 2.0')
+  // 这一档里现在只有 2.5（2.0 的 Mini/Fast/标准三套 RH 模型已退役隐藏），组名跟着改成 2.5
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-image')!), 'Seedance 2.5')
   assert.equal(displayModelPrice(getCreationModelSpec('gemini-3-pro-image-preview')!), '0.2/张')
   assert.equal(displayModelPrice(getCreationModelSpec('runninghub/api/rh-3d-image')!), '6.6/次')
 })
@@ -330,11 +331,53 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
 test('creation panel keeps the requested GPT Image 2.5 order and drops the retired tiers', () => {
   const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
   const position = (id: string) => imageIds.indexOf(id)
-  assert.ok(position('gpt-image-2.5-sunburst-1k') < position('gpt-image-2-1k'))
+  // 面板分组顺序由 CreationPanel 的 order 数组定；这里钉住保留下来的四档相对顺序
+  assert.ok(position('gpt-image-2.5-1k') < position('gpt-image-2-1k'))
   assert.ok(position('gpt-image-2-1k') < position('gpt-image-2-超分'))
   assert.ok(position('gpt-image-2-超分') < position('gpt-image-2.5-官方'))
-  assert.ok(position('gpt-image-2.5-官方') < position('gpt-image-2.5-flare-官方'))
-  assert.ok(position('gpt-image-2.5-flare-官方') < position('gpt-image-2.5-sunburst-官方'))
+})
+
+test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 变体退出面板', () => {
+  // 族名：视频两项看 `newapi/boluo/` 前缀，图片两项看名字里的「菠萝」
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/boluo/minimax_h3_zm_u24')!), '菠萝')
+  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2-菠萝')!), '菠萝')
+  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2.5-菠萝')!), '菠萝')
+
+  const videoIds = listCreationModels({ task: 'video' }).map(model => model.id)
+  const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
+
+  // 视频任务的默认模型 = jc 本机的参考生视频（switchTask 取 models[0]，面板分组里也是本组第一条）
+  assert.equal(videoIds[0], 'jc-minimax-h3-ref2v')
+
+  // 截图里的五个视频模型（Veo 两项 + 本机 Grok 30 秒 + RH Grok 文生/图生）不再上面板，
+  // 但合同保留（按 id 调用与历史任务照旧）
+  for (const id of [
+    'newapi/zx/veo-3.1-generate-preview',
+    'newapi/zx/veo-3.1-fast-generate-preview',
+    'local-comfy/grok-video-3-30s',
+    'runninghub/api/rh-grok-text-video',
+    'runninghub/api/rh-grok-image-video',
+  ]) {
+    assert.equal(videoIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
+  }
+
+  // 四个 GPT Image 2.5 变体（Flare / Sunburst 的 1K 与官方）同样退出面板
+  for (const id of [
+    'gpt-image-2.5-flare-1k',
+    'gpt-image-2.5-sunburst-1k',
+    'gpt-image-2.5-flare-官方',
+    'gpt-image-2.5-sunburst-官方',
+  ]) {
+    assert.equal(imageIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
+  }
+
+  // 图片侧保留：2.5 的 1K / 官方 与两个菠萝项
+  for (const id of ['gpt-image-2.5-1k', 'gpt-image-2.5-官方', 'gpt-image-2-菠萝', 'gpt-image-2.5-菠萝']) {
+    assert.equal(imageIds.includes(id), true, id)
+  }
+  assert.equal(displayModelPrice(getCreationModelSpec('gpt-image-2-菠萝')!), '0.08/张')
 })
 
 test('Gemini image models use the native Xiaoyi image contract', () => {
@@ -1069,7 +1112,7 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
     assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
   }
 
-  assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.0')
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.5')
 
   // 定价与范围是有意钉住的：加模型或改价必须同步改这里，避免静默漂移。
   // model 必须是 NewAPI 渠道的公开名（渠道里的模型映射再换成山海上游 id）。
