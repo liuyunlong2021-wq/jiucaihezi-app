@@ -25,20 +25,30 @@ test('待审批动作的三个决定都接到当前审批项的精确 ID', () =>
   assert.match(session, /@always="\$emit\('approve', approval\.id, 'always'\)"/)
 })
 
-test('扫码只取二维码，并交给协议的 offer 解析器', () => {
+test('扫码与粘贴都只把内容交给协议的 offer 解析器', () => {
   const remote = source('src/mobile/useMobileRemote.ts')
 
   assert.match(remote, /scan\(\{\s*formats:\s*\[Format\.QRCode\]\s*\}\)/)
-  assert.match(remote, /parsePairingOffer\(result\.content\)/)
+  assert.match(remote, /pairWithOfferText\(result\.content\)/)
+  assert.match(remote, /const offer = parsePairingOffer\(text\)/)
   // 不能绕开协议解析直接 JSON.parse 二维码内容。
-  assert.doesNotMatch(remote, /JSON\.parse\(result\.content\)/)
+  assert.doesNotMatch(remote, /JSON\.parse/)
 })
 
 test('通道断开由传输层通知客户端进入离线，不猜任务结果', () => {
   const remote = source('src/mobile/useMobileRemote.ts')
 
   assert.match(remote, /createTauriMobileTransport\(\{\s*onClosed:\s*\(\)\s*=>\s*onClosed\.value\?\.\(\)\s*\}\)/)
-  assert.match(remote, /onClosed\.value = \(\) => client\.handleTransportClosed\(\)/)
+  assert.match(remote, /onClosed\.value = \(\) => \{\s*client\.handleTransportClosed\(\)/)
+})
+
+test('断开后刷新状态，回到前台自动重连', () => {
+  const remote = source('src/mobile/useMobileRemote.ts')
+
+  // 断开后不重拉状态，Rust 侧就还会说「已连接」，界面既看不到真相也没有重连入口。
+  assert.match(remote, /handleTransportClosed\(\)[\s\S]{0,80}refreshStatus\(\)/)
+  assert.match(remote, /document\.addEventListener\('visibilitychange'/)
+  assert.match(remote, /shouldAutoReconnect\(status\.value\)/)
 })
 
 test('控制器不导入工作台运行时、Harness、模型或密钥', () => {

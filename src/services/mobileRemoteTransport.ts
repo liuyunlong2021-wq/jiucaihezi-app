@@ -22,6 +22,16 @@ export const MOBILE_REMOTE_EVENT = 'mobile-remote:event'
 export const MOBILE_REMOTE_CLOSED_EVENT = 'mobile-remote:closed'
 
 /**
+ * 回到前台后该不该自动重连：配过对、但当前不在线。
+ *
+ * 手机切后台会被系统挂起，socket 随之失效（合同 §13.6 要求这时能自己回来）。
+ * 没配过对时不做任何事——不能替用户发起配对。
+ */
+export function shouldAutoReconnect(status: MobileRemoteStatus | null | undefined): boolean {
+  return Boolean(status?.paired) && !status?.connected
+}
+
+/**
  * 二维码里不能含长期凭证、API Key、项目路径或 Desktop 私钥（合同 §8.2），
  * 因此这里只解析五个展示/连接必需的字段，发现多余内容一律拒绝。
  */

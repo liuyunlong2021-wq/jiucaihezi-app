@@ -5,7 +5,16 @@ import {
   MOBILE_REMOTE_CLOSED_EVENT,
   MOBILE_REMOTE_EVENT,
   parsePairingOffer,
+  shouldAutoReconnect,
 } from '@/services/mobileRemoteTransport'
+import { createPairingRegistry } from '@/services/desktopRemoteProtocol'
+
+test('只有配过对但不在线时才自动重连', () => {
+  assert.equal(shouldAutoReconnect({ paired: true, connected: false }), true)
+  assert.equal(shouldAutoReconnect({ paired: true, connected: true }), false)
+  assert.equal(shouldAutoReconnect({ paired: false, connected: false }), false)
+  assert.equal(shouldAutoReconnect(null), false)
+})
 
 const offer = {
   version: 1,
@@ -58,4 +67,13 @@ test('手机端每条命令都登记在 ACL 与 Rust 处理器里，事件名与
 
   assert.match(rust, new RegExp(`MOBILE_EVENT_NAME: &str = "${MOBILE_REMOTE_EVENT}"`))
   assert.match(rust, new RegExp(`MOBILE_CLOSED_EVENT_NAME: &str = "${MOBILE_REMOTE_CLOSED_EVENT}"`))
+})
+
+test('桌面生成的配对信息能被手机端解析（二维码与粘贴通道共用同一份 offer）', () => {
+  // 设置页把 QR 内容写成 JSON.stringify(offer)，粘贴通道用同一串；
+  // 桌面侧多一个字段就会让 parsePairingOffer 拒绝，这里提前拦下。
+  const registry = createPairingRegistry({ now: () => 1_000, randomId: () => 'offer-1' })
+  const created = registry.createOffer('192.168.1.16:61997', 'Zm9vYmFyYmF6cXV4')
+
+  assert.deepEqual(parsePairingOffer(JSON.stringify(created)), created)
 })

@@ -59,6 +59,7 @@ import {
 } from '@/services/deepSeekHarness'
 import { DesktopRemoteHost } from '@/services/desktopRemoteHost'
 import { publishDesktopRemoteEvent, registerDesktopRemoteBridge } from '@/services/desktopRemoteBridge'
+import { nextDesktopRemoteEventSeq } from '@/services/desktopRemoteEventSeq'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -2221,14 +2222,16 @@ let desktopRemoteSeq = 0
 function publishDesktopRemoteSnapshot() {
   if (!desktopOnlyRuntime) return
   const context = desktopRemoteContext()
+  // 序号必须跨页面重载递增，否则手机端会当成旧事件丢掉（见 desktopRemoteEventSeq）。
+  const seq = nextDesktopRemoteEventSeq()
   void publishDesktopRemoteEvent(context.sessionId, {
     version: 1,
-    requestId: `event-${++desktopRemoteSeq}`,
+    requestId: `event-${seq}`,
     type: 'session.event',
     sentAt: Date.now(),
     payload: {
       sessionId: context.sessionId,
-      seq: desktopRemoteSeq,
+      seq,
       turns: desktopRemoteTurns(conversation.value?.transcript.turns || []),
       streamingText: streamingText.value,
       run: activeRun.value ? {

@@ -20,7 +20,9 @@ const offer = ref<RemotePairingOffer | null>(null)
 const pending = ref<RemotePairingRequest | null>(null)
 const busy = ref(false)
 const error = ref('')
-const qr = computed(() => offer.value ? buildQrCodeSvgDataUrl(JSON.stringify(offer.value)) : '')
+const copied = ref(false)
+const payload = computed(() => offer.value ? JSON.stringify(offer.value) : '')
+const qr = computed(() => payload.value ? buildQrCodeSvgDataUrl(payload.value) : '')
 let unlisten: (() => void) | undefined
 
 onMounted(async () => {
@@ -40,7 +42,17 @@ async function run(action: () => Promise<unknown>) {
 
 function start() { return run(async () => { status.value = await startRemoteBridge() }) }
 function stop() { return run(async () => { status.value = await stopRemoteBridge(); offer.value = null; pending.value = null }) }
-function pair() { return run(async () => { offer.value = await createRemotePairingOffer() }) }
+function pair() { return run(async () => { offer.value = await createRemotePairingOffer(); copied.value = false }) }
+
+/** 扫码在这台手机上不触发识别（插件 iOS 上游问题），粘贴通道用同一份 offer 把链路走通。 */
+async function copyPayload() {
+  try {
+    await navigator.clipboard.writeText(payload.value)
+    copied.value = true
+  } catch {
+    error.value = '复制失败，请手动选中下面的配对信息复制'
+  }
+}
 function approve() { if (pending.value) void run(async () => { await approveRemotePairing(pending.value!.offerId); pending.value = null; offer.value = null }) }
 function reject() { if (pending.value) void run(async () => { await rejectRemotePairing(pending.value!.offerId); pending.value = null }) }
 function revoke(deviceId: string) { return run(async () => { await revokeRemoteDevice(deviceId) }) }
@@ -60,6 +72,9 @@ function revoke(deviceId: string) { return run(async () => { await revokeRemoteD
       <div v-if="offer" class="remote-qr">
         <img :src="qr" alt="连接手机二维码" />
         <span>5 分钟内有效，只能使用一次</span>
+        <button :disabled="busy" @click="copyPayload">{{ copied ? '已复制到剪贴板' : '复制配对信息' }}</button>
+        <span class="remote-payload">手机扫不出来时，点上面复制（或直接选中这串），在手机配对页粘贴。</span>
+        <code class="remote-payload">{{ payload }}</code>
       </div>
       <p v-if="error" class="remote-error">{{ error }}</p>
     </section>
@@ -89,7 +104,10 @@ function revoke(deviceId: string) { return run(async () => { await revokeRemoteD
 .remote-settings button { min-height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .remote-settings button:disabled { opacity: .55; }
 .remote-qr { display: grid; justify-items: center; gap: 6px; }
-.remote-qr img { width: min(220px, 100%); border-radius: 6px; }
+/* 配对码内容约 184 字节 → 49×49 模块，显示太小手机解不出来：
+   真机上 220px 时每模块不到 4 像素，扫码器没反应。这里放大并保留白边静区。 */
+.remote-qr img { width: min(400px, 100%); padding: 12px; border-radius: 6px; background: #fff; image-rendering: pixelated; }
 .remote-pending > div { display: flex; gap: 8px; }
+.remote-payload { font-size: 11px; user-select: all; word-break: break-all; text-align: left; }
 .remote-error { color: var(--danger) !important; }
 </style>

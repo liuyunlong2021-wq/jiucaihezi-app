@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref } from 'vue'
-import { Format, scan } from '@tauri-apps/plugin-barcode-scanner'
+import { Format, cancel, scan } from '@tauri-apps/plugin-barcode-scanner'
 import {
   MobileRemoteClient,
   type MobileRemoteApprovalDecision,
@@ -12,8 +12,13 @@ import {
   mobileRemoteStatus,
   pairMobileRemote,
   parsePairingOffer,
+  shouldAutoReconnect,
   type MobileRemoteStatus,
 } from '@/services/mobileRemoteTransport'
+import { describeRemoteError } from './describeRemoteError'
+
+/** 扫码最多等这么久：插件在 iOS 上没有取消入口，超时必须我们自己收尾。 */
+const SCAN_TIMEOUT_MS = 90_000
 
 /**
  * 控制器页面唯一的数据入口：把 Remote Client 的视图投影成 Vue 状态。
@@ -23,7 +28,11 @@ export function useMobileRemote() {
   const onClosed = ref<(() => void) | null>(null)
   const transport = createTauriMobileTransport({ onClosed: () => onClosed.value?.() })
   const client = new MobileRemoteClient(transport)
-  onClosed.value = () => client.handleTransportClosed()
+  // 断开后必须重新拉一次状态：Rust 侧这时才不再报「已连接」，重连按钮才会出现。
+  onClosed.value = () => {
+    client.handleTransportClosed()
+    void refreshStatus()
+  }
 
   const view = ref<MobileRemoteView>(client.view)
   const status = ref<MobileRemoteStatus | null>(null)
@@ -31,35 +40,18 @@ export function useMobileRemote() {
   const busy = ref(false)
 
   const stopWatching = client.onChange(next => { view.value = next })
+
+  /** 手机切后台会被挂起，回来时 socket 已经死了：已配对但不在线就自动重连（合同 §13.6）。 */
+  function onVisibilityChange() {
+    if (document.visibilityState === 'visible' && shouldAutoReconnect(status.value)) void reconnect()
+  }
+  document.addEventListener('visibilitychange', onVisibilityChange)
+
   onBeforeUnmount(() => {
     stopWatching()
+    document.removeEventListener('visibilitychange', onVisibilityChange)
     client.disconnect()
   })
-
-  const CONNECTION_ERRORS: Record<string, string> = {
-    PAIRING_REJECTED: '电脑上拒绝了这次连接',
-    PAIRING_APPROVAL_TIMEOUT: '电脑上没有确认，二维码可能已失效',
-    PAIRING_OFFER_EXPIRED: '二维码已过期，请在电脑上重新生成',
-    PAIRING_OFFER_USED: '这个二维码已经用过了，请重新生成',
-    PAIRING_DEVICE_INVALID: '设备信息无效，请重新扫码',
-    PAIRING_ADDRESS_INVALID: '二维码里的地址无效',
-    DESKTOP_KEY_INVALID: '二维码内容不完整',
-    DESKTOP_KEY_MISMATCH: '对方不是那台电脑，已中止连接',
-    AUTH_INVALID: '这台设备已被移除，请重新扫码连接',
-    PAIRING_REQUIRED: '还没有和电脑配对',
-    REMOTE_NOT_CONNECTED: '还没有连上电脑',
-    REMOTE_CONNECTION_CLOSED: '与电脑的连接已断开',
-    REMOTE_HOST_TIMEOUT: '电脑没有及时响应',
-    SESSION_BUSY: '电脑上这个对话正在运行，请先停止',
-    SESSION_NOT_CURRENT: '电脑上已经切换到别的对话',
-    MESSAGE_EMPTY: '消息不能为空',
-    APPROVAL_NOT_FOUND: '这个待确认动作已经结束了',
-  }
-
-  function describe(cause: unknown) {
-    const raw = cause instanceof Error ? cause.message : String(cause ?? '')
-    return CONNECTION_ERRORS[raw] || raw || '连接失败'
-  }
 
   async function run(action: () => Promise<unknown>) {
     if (busy.value) return
@@ -68,7 +60,7 @@ export function useMobileRemote() {
     try {
       await action()
     } catch (cause) {
-      error.value = describe(cause)
+      error.value = describeRemoteError(cause)
     } finally {
       busy.value = false
     }
@@ -78,14 +70,35 @@ export function useMobileRemote() {
     status.value = await mobileRemoteStatus()
   })
 
-  /** 扫码 → 用 Desktop 的一次性 offer 配对 → 立刻按 §10.4 建立当前 Session。 */
-  const pairByScan = () => run(async () => {
-    const result = await scan({ formats: [Format.QRCode] })
-    const offer = parsePairingOffer(result.content)
+  /** 用 Desktop 的一次性 offer 配对，然后按 §10.4 建立当前 Session。 */
+  const pairWithOfferText = async (text: string) => {
+    const offer = parsePairingOffer(text)
     status.value = await pairMobileRemote(offer, 'iPhone')
     status.value = await connectMobileRemote()
     await client.connect()
+  }
+
+  /**
+   * 扫码配对。
+   *
+   * 插件在 iOS 非窗口模式下是全屏相机、没有任何取消入口，识别不到时用户只能强杀 App
+   * （上游 #3050/#3081）。这里加超时自动取消，至少不让用户卡死。
+   */
+  const pairByScan = () => run(async () => {
+    const result = await Promise.race([
+      scan({ formats: [Format.QRCode] }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          void cancel().catch(() => undefined)
+          reject(new Error('SCAN_TIMEOUT'))
+        }, SCAN_TIMEOUT_MS)
+      }),
+    ])
+    await pairWithOfferText(result.content)
   })
+
+  /** 相机不可用时的兜底：粘贴电脑上复制的同一份 offer（内容与二维码完全一致）。 */
+  const pairByText = (text: string) => run(() => pairWithOfferText(text))
 
   const reconnect = () => run(async () => {
     status.value = await connectMobileRemote()
@@ -104,6 +117,6 @@ export function useMobileRemote() {
 
   return {
     view, status, error, busy,
-    refreshStatus, pairByScan, reconnect, disconnect, send, stop, respondApproval,
+    refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
   }
 }

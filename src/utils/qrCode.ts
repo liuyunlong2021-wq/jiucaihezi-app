@@ -90,14 +90,18 @@ function addErrorCorrectionAndInterleave(dataCodewords: number[], version: numbe
 
 function drawFunctionPatterns(modules: boolean[][], isFunction: boolean[][], version: number): void {
   const size = modules.length
-  drawFinderPattern(modules, isFunction, 3, 3)
-  drawFinderPattern(modules, isFunction, size - 4, 3)
-  drawFinderPattern(modules, isFunction, 3, size - 4)
 
+  // 顺序必须与 Nayuki 参考实现一致：先定时图形，再用定位图形覆盖。
+  // 反过来（先定位再定时）会让定时图形把三个定位框的边缘挖掉 12 个模块
+  // （(6,1)(6,3)(6,5)、(1,6)(3,6)(5,6) 等），整张码任何解码器都读不出来。
   for (let i = 0; i < size; i += 1) {
     setFunctionModule(modules, isFunction, 6, i, i % 2 === 0)
     setFunctionModule(modules, isFunction, i, 6, i % 2 === 0)
   }
+
+  drawFinderPattern(modules, isFunction, 3, 3)
+  drawFinderPattern(modules, isFunction, size - 4, 3)
+  drawFinderPattern(modules, isFunction, 3, size - 4)
 
   const align = getAlignmentPatternPositions(version)
   for (let i = 0; i < align.length; i += 1) {
@@ -207,7 +211,11 @@ function getAlignmentPatternPositions(version: number): number[] {
   if (version === 1) return []
   const size = version * 4 + 17
   const count = Math.floor(version / 7) + 2
-  const step = version === 32 ? 26 : Math.ceil((version * 4 + count * 2 + 1) / (count * 2 - 2)) * 2
+  // 与 Nayuki 参考实现一致。旧公式（ceil((v*4 + count*2 + 1) / (count*2 - 2)) * 2）
+  // 在 count ≥ 3（version ≥ 7）时算错步长：8 版给出 [6,22,42]，标准要求 [6,24,42]，
+  // 校正图形错位导致整张码任何解码器都读不出来（2026-09-27 真机扫码一直没反应的真因）。
+  // 版本 ≤ 6 只有两个校正点，用不到 step，所以以前发短字符串一直看不出问题。
+  const step = Math.floor((version * 8 + count * 3 + 5) / (count * 4 - 4)) * 2
   const result = [6]
   for (let pos = size - 7; result.length < count; pos -= step) result.splice(1, 0, pos)
   return result

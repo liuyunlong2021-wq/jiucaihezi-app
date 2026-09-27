@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 use snow::{Builder as NoiseBuilder, Keypair, TransportState, params::NoiseParams};
 use std::collections::HashMap;
 use std::net::{Shutdown, TcpStream};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -75,9 +76,16 @@ struct DesktopSession {
     stream: Mutex<TcpStream>,
     transport: Arc<Mutex<TransportState>>,
     pending: Arc<Mutex<HashMap<String, mpsc::Sender<Result<serde_json::Value, String>>>>>,
+    /// 读线程退出（手机切后台、电脑关了、网断了）时置位。
+    /// 状态必须立刻反映它，否则界面会一直说「已连接」，用户连重连按钮都看不到。
+    closed: Arc<AtomicBool>,
 }
 
 impl DesktopSession {
+    fn is_live(&self) -> bool {
+        !self.closed.load(Ordering::Acquire)
+    }
+
     fn send(&self, value: &serde_json::Value) -> Result<(), String> {
         let mut stream = self.stream.lock().map_err(lock_error)?;
         write_encrypted_json(&mut stream, &self.transport, value)
@@ -172,6 +180,12 @@ fn read_credential() -> Result<Option<StoredCredential>, String> {
     }
 }
 
+/// 手机端只接受裸 host:port；地址来自电脑发来的一次性 offer（不可信输入），
+/// 带 scheme 或其他写法都当成非法，避免直接丢给 getaddrinfo 变成看不懂的系统错误。
+fn socket_address(raw: &str) -> &str {
+    raw.trim().strip_prefix("tcp://").unwrap_or(raw.trim())
+}
+
 /// 完成 Noise XX 发起方握手，并校验对端就是二维码里那把静态公钥。
 fn open_encrypted(
     address: &str,
@@ -186,7 +200,8 @@ fn open_encrypted(
         .map_err(|error| error.to_string())?
         .build_initiator()
         .map_err(|error| error.to_string())?;
-    let mut stream = TcpStream::connect(address).map_err(|error| error.to_string())?;
+    let mut stream =
+        TcpStream::connect(socket_address(address)).map_err(|error| error.to_string())?;
     stream
         .set_read_timeout(Some(TRANSPORT_TIMEOUT))
         .map_err(|error| error.to_string())?;
@@ -292,10 +307,12 @@ fn connect_session(
         .map_err(|error| error.to_string())?;
     let reader_stream = stream.try_clone().map_err(|error| error.to_string())?;
     let pending = Arc::new(Mutex::new(HashMap::new()));
+    let closed = Arc::new(AtomicBool::new(false));
     spawn_reader(
         reader_stream,
         Arc::clone(&transport),
         Arc::clone(&pending),
+        Arc::clone(&closed),
         on_event,
         on_closed,
     );
@@ -305,6 +322,7 @@ fn connect_session(
         stream: Mutex::new(stream),
         transport,
         pending,
+        closed,
     }))
 }
 
@@ -312,6 +330,7 @@ fn spawn_reader(
     mut stream: TcpStream,
     transport: Arc<Mutex<TransportState>>,
     pending: Arc<Mutex<HashMap<String, mpsc::Sender<Result<serde_json::Value, String>>>>>,
+    closed: Arc<AtomicBool>,
     on_event: Box<dyn Fn(serde_json::Value) + Send>,
     on_closed: Box<dyn Fn() + Send>,
 ) {
@@ -352,7 +371,8 @@ fn spawn_reader(
                 _ => on_event(value),
             }
         }
-        // 连接结束：唤醒所有等待者，并让界面知道现在是离线（合同 §10.7）。
+        // 连接结束：唤醒所有等待者，先标死再通知界面（合同 §10.7）。
+        closed.store(true, Ordering::Release);
         if let Ok(mut map) = pending.lock() {
             for (_, sender) in map.drain() {
                 let _ = sender.send(Err("REMOTE_CONNECTION_CLOSED".to_string()));
@@ -362,15 +382,22 @@ fn spawn_reader(
     });
 }
 
+/// 只认还活着的连接：断掉的会话必须立刻从状态里消失，否则界面一直说「已连接」，
+/// 用户既看不到真相也找不到重连入口。
+fn live_session(state: &MobileRemoteState) -> Option<Arc<DesktopSession>> {
+    state
+        .session
+        .lock()
+        .ok()
+        .and_then(|guard| guard.as_ref().map(Arc::clone))
+        .filter(|session| session.is_live())
+}
+
 fn status_of(
     state: &MobileRemoteState,
     credential: Option<&StoredCredential>,
 ) -> MobileRemoteStatus {
-    let session = state
-        .session
-        .lock()
-        .ok()
-        .and_then(|guard| guard.as_ref().map(Arc::clone));
+    let session = live_session(state);
     MobileRemoteStatus {
         paired: credential.is_some(),
         connected: session.is_some(),
@@ -489,13 +516,7 @@ pub async fn mobile_remote_request(
     message_type: String,
     payload: Option<serde_json::Value>,
 ) -> Result<serde_json::Value, String> {
-    let session = state
-        .session
-        .lock()
-        .map_err(lock_error)?
-        .as_ref()
-        .map(Arc::clone)
-        .ok_or_else(|| "REMOTE_NOT_CONNECTED".to_string())?;
+    let session = live_session(&state).ok_or_else(|| "REMOTE_NOT_CONNECTED".to_string())?;
     let body = payload.unwrap_or_else(|| serde_json::json!({}));
     tokio::task::spawn_blocking(move || session.request(&request_id, &message_type, body))
         .await
@@ -519,6 +540,18 @@ mod tests {
     use std::net::TcpListener;
 
     const TOKEN: &str = "device-token-1";
+
+    #[test]
+    fn socket_address_normalizes_whatever_the_desktop_puts_in_the_offer() {
+        assert_eq!(socket_address("192.168.1.16:61997"), "192.168.1.16:61997");
+        assert_eq!(socket_address(" 192.168.1.16:61997 "), "192.168.1.16:61997");
+        // 电脑端曾把展示用的 tcp:// 前缀写进 offer，手机端直接 connect 会报
+        // getaddrinfo "nodename nor servname provided"。
+        assert_eq!(
+            socket_address("tcp://192.168.1.16:61997"),
+            "192.168.1.16:61997"
+        );
+    }
 
     /// 测试全程不碰系统钥匙串：设备身份与凭证都由调用方注入。
     fn device_identity() -> (StoredDeviceIdentity, Keypair) {
@@ -579,6 +612,42 @@ mod tests {
                 let _ = closed.send(());
             }),
         )
+    }
+
+    #[test]
+    fn a_dropped_connection_stops_reporting_connected() {
+        let (listener, address, server) = desktop_listener();
+        let private = server.private.clone();
+        let (release, release_rx) = mpsc::channel::<()>();
+        let desktop = thread::spawn(move || {
+            let (mut stream, transport) = accept_encrypted(&listener, &private);
+            let _auth: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+            write_encrypted_json(&mut stream, &transport, &serde_json::json!({ "ok": true }))
+                .unwrap();
+            let _ = release_rx.recv_timeout(Duration::from_secs(5));
+            // 手机切到别的 App / 电脑关了：连接就这么没了。
+            drop(stream);
+        });
+
+        let (_, keypair) = device_identity();
+        let cred = credential(&address, &server.public);
+        let (events, _inbox) = mpsc::channel();
+        let (closed, closed_rx) = mpsc::channel();
+        let session = connect(&address, &cred, &keypair, events, closed).unwrap();
+
+        let state = MobileRemoteState::default();
+        *state.session.lock().unwrap() = Some(session);
+        assert!(status_of(&state, Some(&cred)).connected);
+
+        release.send(()).unwrap();
+        closed_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("读线程应当发现连接断开");
+        assert!(
+            !status_of(&state, Some(&cred)).connected,
+            "连接已经断了，状态不能继续说已连接"
+        );
+        desktop.join().unwrap();
     }
 
     #[test]

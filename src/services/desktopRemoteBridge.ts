@@ -64,11 +64,25 @@ async function dispatch(host: DesktopRemoteHost, request: RemoteRequest) {
   throw new Error('UNSUPPORTED_MESSAGE')
 }
 
+let activeHost: DesktopRemoteHost | undefined
+let stopListening: UnlistenFn | undefined
+
+/**
+ * 桥接处理器在**进程内只注册一次**，且始终响应「最新的 host」。
+ *
+ * 之前每次组件挂载都 `listen` 一个新监听器：组件重挂（开发期 HMR、切视图）会把旧实例
+ * 留在事件上，而旧实例的闭包读的是旧组件状态 —— 对话为空 —— 它可能抢先用空
+ * sessionId 回给手机，手机就报「电脑上还没有打开任何对话」（2026-09-27 真机，
+ * 电脑上明明开着对话）。
+ */
 export async function registerDesktopRemoteBridge(host: DesktopRemoteHost): Promise<UnlistenFn> {
   if (!isTauriRuntime()) return () => undefined
-  return await listen<RemoteRequest>('desktop-remote:request', event => {
+  activeHost = host
+  stopListening ??= await listen<RemoteRequest>('desktop-remote:request', event => {
     const request = event.payload
-    void dispatch(host, request).then(
+    const target = activeHost
+    if (!target) return
+    void dispatch(target, request).then(
       result => invoke('remote_bridge_complete', { requestId: request.requestId, result }),
       error => invoke('remote_bridge_complete', {
         requestId: request.requestId,
@@ -76,6 +90,9 @@ export async function registerDesktopRemoteBridge(host: DesktopRemoteHost): Prom
       }),
     )
   })
+  return () => {
+    if (activeHost === host) activeHost = undefined
+  }
 }
 
 export async function publishDesktopRemoteEvent(sessionId: string, event: unknown) {

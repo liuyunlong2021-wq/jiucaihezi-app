@@ -417,3 +417,40 @@ P4 不得倒逼 P1 抽象通用传输框架；局域网协议稳定后再抽共�
 - [DeepSeek Harness Mobile](https://github.com/guoyihub/deepseek-harness-mobile)
 - [DSH Mobile Suite](https://github.com/april-jk/dsh-mobile-suite)
 - [Happy](https://github.com/slopus/happy)
+
+## 19. 真机联调记录（2026-09-27 晚）
+
+环境：iPhone 13 Pro Max / iOS 26.6.2、Xcode 27、Tauri 2.11.2、官方 barcode-scanner 2.4.6、Noise XX 局域网 Bridge。
+
+### 19.1 真机已验证
+
+- 配对：扫码路径可用（修完二维码后）；「复制配对信息 → 手机粘贴」兜底路径可用
+- 电脑端「允许这台设备连接？」审批弹窗 → 允许 → 手机完成配对
+- 手机端 session 读取与订阅推送（电脑对话内容与逐字输出同步到手机）
+- 手机发送 → 电脑执行 run
+- 手机端错误提示可读（含电脑返回原文；不再出现 [object Object] 或裸 io 错误）
+
+### 19.2 本轮修掉的真机 bug（全部有本机验证或代码依据）
+
+1. 二维码生成器两处错误（**扫码识别不到的真因**）：画图顺序反了（定时图形覆盖定位框边缘 12 个模块）、校正图形步长公式错（8 版算成 6/22/42，标准为 6/24/42）。文件 `src/utils/qrCode.ts`。验证：与 Nayuki 参考实现逐位一致（12 种长度 / 版本 1~37）；严格解码器 jsQR 在 160/200/240/300/400px 全部可解（修复前全部不可解）；新增 3 条回归用例与黄金矩阵哈希。
+2. 电脑端接客套接字继承了监听 socket 的非阻塞标志（macOS/BSD 会继承，Linux 不会），第一次读立刻 EAGAIN，连接在 Noise 手握手之前就被丢掉。`src-tauri/src/commands/remote_bridge.rs` 增加 `prepare_connection`。
+3. 电脑端认证后仍保留 30 秒读超时，空闲会话被读死（手机连上 30 多秒后自动断开）。增加 `enter_session_mode`。
+4. 手机端会话关闭后状态仍报「已连接」，且藏起重连入口。`DesktopSession` 增加 `closed` 标志，状态与请求统一走 `live_session`。
+5. 事件序号是页面内自增计数器，页面重载/热更新后归零，手机端（要求严格递增）会把之后所有事件当旧事件丢弃。新增 `src/services/desktopRemoteEventSeq.ts`（时钟打底）。
+6. 桥接监听器每次组件挂载都注册一个新的，且 `await` 期间卸载会导致清理失效（`offDesktopRemote` 仍是 null），旧实例被留在事件上，用空 context 抢答。`registerDesktopRemoteBridge` 改为进程内单例且始终指向最新 host。
+
+### 19.3 当前阻塞点（交接）
+
+- `context.get` 已正常：电脑返回 `sessionId = jc-v1-conversation-<uuid>`。
+- 卡在下一步 `session.read`：电脑返回 `session "jc-v1-conversation-<uuid>" not found`。
+- 入口链路：`src/components/memory/MemoryWorkbench.vue` 的 `desktopRemoteSnapshot` → `readDeepSeekHarnessSession`（`src/services/deepSeekHarness.ts`）。即该对话尚无对应的 harness 会话时，需要给出可用快照（或先建立会话），而不是抛错。
+
+### 19.4 诊断手段（保留）
+
+- 电脑端：debug 构建下 Bridge 生命周期写入 `/tmp/jc-bridge.log`（accept / 手握手 / 认证 / 认领 offer / 审批 / 断开原因）。
+- 手机端：`INVALID_CONTEXT` 等失败会把电脑返回的原始 JSON 一起显示出来。
+
+### 19.5 验证命令
+
+- 门禁：`pnpm run test:focused:build && pnpm run test:focused:run`（本轮 1609/1609）、`pnpm exec vue-tsc -b`、`cd src-tauri && cargo test --lib remote_`（19/19）
+- 出包装机：`pnpm run build:ios:quick` → `npx tauri ios build -t aarch64 -d --config '{"build":{"beforeDevCommand":""}}'` → `xcrun devicectl device install app --device <UDID> <解包后的 .app>`

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ref } from 'vue'
 import type { MobileRemoteStatus } from '@/services/mobileRemoteTransport'
 
 // 设备页：配对与连接。这里不出现项目、对话、模型或技能入口（合同 §7.2）。
@@ -8,11 +9,19 @@ defineProps<{
   error: string
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   scan: []
+  pair: [text: string]
   connect: []
   disconnect: []
 }>()
+
+const pasted = ref('')
+
+function submitPasted() {
+  const text = pasted.value.trim()
+  if (text) emit('pair', text)
+}
 </script>
 
 <template>
@@ -35,7 +44,7 @@ defineEmits<{
       <span>{{ status?.paired ? '重新扫码配对' : '扫描二维码连接' }}</span>
     </button>
     <button
-      v-if="status?.paired && !status?.connected"
+      v-if="status?.paired"
       type="button"
       :disabled="busy"
       @click="$emit('connect')"
@@ -48,7 +57,31 @@ defineEmits<{
       <span>断开</span>
     </button>
 
+    <p v-if="busy" class="state waiting">
+      <JcIcon name="hourglass_top" />
+      <span>正在连接电脑…配对时电脑上会问「允许这台设备连接？」，请点允许</span>
+    </p>
+
     <p v-if="error" class="error" role="alert">{{ error }}</p>
+
+    <details class="fallback">
+      <summary>相机扫不出来？用粘贴配对</summary>
+      <p>在电脑上点「复制配对信息」（或用系统相机扫那个二维码并复制），长按下面输入框粘贴。</p>
+      <textarea
+        v-model="pasted"
+        rows="3"
+        autocapitalize="off"
+        autocomplete="off"
+        autocorrect="off"
+        spellcheck="false"
+        placeholder="在这里粘贴配对信息"
+      />
+      <button class="wide" type="button" :disabled="busy || !pasted.trim()" @click="submitPasted">
+        <JcIcon name="content_paste" />
+        <span>用粘贴的信息配对</span>
+      </button>
+    </details>
+
     <p class="hint">手机只操作电脑上当前打开的那个对话；对话历史留在电脑，手机不保存副本。</p>
   </section>
 </template>
@@ -60,9 +93,16 @@ defineEmits<{
 .pairing header p { margin: 0; color: var(--ink3); font-size: 13px; line-height: 1.5; }
 .state { display: flex; align-items: center; gap: 6px; margin: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); font-size: 13px; }
 .state.offline { color: var(--ink3); }
+.state.waiting { color: var(--ink2, var(--ink3)); }
 button { display: flex; align-items: center; justify-content: center; gap: 6px; min-height: 46px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 14px; cursor: pointer; }
 button.primary { border-color: var(--olive); background: var(--olive); color: #fff; }
 button:disabled { opacity: 0.55; cursor: default; }
 .error { margin: 0; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--danger, #c0392b) 45%, var(--line)); border-radius: 10px; color: var(--danger, #c0392b); font-size: 13px; }
 .hint { margin: 4px 0 0; color: var(--ink3); font-size: 12px; line-height: 1.5; }
+.fallback { display: grid; gap: 8px; }
+.fallback summary { color: var(--ink3); font-size: 13px; cursor: pointer; }
+.fallback p { margin: 0; color: var(--ink3); font-size: 12px; line-height: 1.5; }
+.fallback textarea { width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink1); font: inherit; font-size: 13px; resize: vertical; }
+/* 兜底按钮也按主按钮的尺寸来，之前贴着图标变成一个方块很难看。 */
+.fallback .wide { width: 100%; min-height: 48px; font-size: 14px; }
 </style>

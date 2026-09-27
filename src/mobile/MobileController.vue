@@ -7,7 +7,7 @@ import { useMobileRemote } from './useMobileRemote'
 // P2 控制器入口：没连上时是设备页，连上后是单会话聊天页。
 const {
   view, status, error, busy,
-  refreshStatus, pairByScan, reconnect, disconnect, send, stop, respondApproval,
+  refreshStatus, pairByScan, pairByText, reconnect, disconnect, send, stop, respondApproval,
 } = useMobileRemote()
 
 const connected = computed(() => view.value.state === 'connected' && Boolean(view.value.context))
@@ -31,6 +31,7 @@ onMounted(() => { void refreshStatus() })
     :busy="busy"
     :error="error"
     @scan="pairByScan"
+    @pair="pairByText"
     @connect="reconnect"
     @disconnect="disconnect"
   />

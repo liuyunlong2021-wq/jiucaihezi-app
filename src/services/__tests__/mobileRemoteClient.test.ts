@@ -228,3 +228,57 @@ test('停止与审批只透传当前 Session 的精确决定', async () => {
     sessionId: context.sessionId, approvalId: 'approval-1', decision: 'approve',
   })
 })
+
+test('电脑上没有打开对话时保持等待，等 context.changed 自动进入', async () => {
+  const bridge = fakeTransport({
+    'context.get': () => {
+      throw 'INVALID_CONTEXT'
+    },
+    'session.read': () => ({ ...snapshot }),
+    'session.subscribe': payload => ({ subscribed: true, sessionId: payload.sessionId }),
+  })
+  const client = new MobileRemoteClient(bridge.transport)
+
+  const failure = await client.connect().then(() => null, error => error)
+  assert.match(String(failure), /^INVALID_CONTEXT/)
+  // 关键：不能就此离线 —— 离线状态下连 context.changed 都会被忽略，手机永远进不去。
+  assert.equal(client.view.state, 'connecting')
+
+  // 用户在电脑上打开了一个对话 → 电脑广播 context.changed（合同 §10.5）
+  bridge.emit({
+    version: 1,
+    requestId: 'ctx-1',
+    type: 'context.changed',
+    sentAt: Date.now(),
+    payload: { ...context },
+  })
+  await new Promise(resolve => setTimeout(resolve, 0))
+
+  assert.equal(client.view.state, 'connected')
+  assert.deepEqual(client.view.turns, snapshot.turns)
+  assert.ok(bridge.types().includes('session.subscribe'), '进入对话要重新订阅当前会话')
+  client.disconnect()
+})
+
+test('电脑上还没有对话时定时重试，电脑一开对话就自己进入', async () => {
+  let attempts = 0
+  const bridge = fakeTransport({
+    'context.get': () => {
+      attempts += 1
+      // 前两次电脑上确实没有活动对话（context.sessionId 为空），第三次才打开。
+      if (attempts < 3) throw 'INVALID_CONTEXT'
+      return { ...context }
+    },
+    'session.read': () => ({ ...snapshot }),
+    'session.subscribe': payload => ({ subscribed: true, sessionId: payload.sessionId }),
+  })
+  const client = new MobileRemoteClient(bridge.transport, { contextRetryMs: 5 })
+
+  const failure = await client.connect().then(() => null, error => error)
+  assert.match(String(failure), /^INVALID_CONTEXT/)
+  await new Promise(resolve => setTimeout(resolve, 80))
+
+  assert.equal(client.view.state, 'connected')
+  assert.deepEqual(client.view.turns, snapshot.turns)
+  client.disconnect()
+})

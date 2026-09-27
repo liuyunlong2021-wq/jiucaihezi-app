@@ -437,7 +437,10 @@ pub fn remote_bridge_start(
         .local_addr()
         .map_err(|error| error.to_string())?
         .port();
-    let address = format!("tcp://{}:{port}", local_ip()?);
+    // 这个字符串会原样进一次性 offer，手机端拿它直接 TcpStream::connect，
+    // 所以必须是裸 host:port：带任何 scheme 都会让 getaddrinfo 报
+    // "nodename nor servname provided"。
+    let address = format!("{}:{port}", local_ip()?);
     let generation = state.generation.fetch_add(1, Ordering::AcqRel) + 1;
     state.core.lock().map_err(lock_error)?.set_listener(address);
     let server_state = state.inner().clone();
@@ -469,7 +472,9 @@ pub fn remote_pairing_offer(
     if !core.status().listening {
         return Err("REMOTE_BRIDGE_DISABLED".to_string());
     }
-    Ok(core.create_offer(Uuid::new_v4().to_string(), now_ms()))
+    let offer = core.create_offer(Uuid::new_v4().to_string(), now_ms());
+    bridge_log(&format!("pairing offer created {}", offer.offer_id));
+    Ok(offer)
 }
 
 #[tauri::command]
@@ -483,6 +488,7 @@ pub fn remote_pairing_approve(
         .map_err(lock_error)?
         .remove(&offer_id)
         .ok_or_else(|| "PAIRING_REQUEST_NOT_FOUND".to_string())?;
+    bridge_log(&format!("pairing approved {offer_id}"));
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let mut core = state.core.lock().map_err(lock_error)?;
     core.authorize_device(
@@ -585,14 +591,18 @@ fn accept_loop(listener: TcpListener, app: AppHandle, state: RemoteBridgeState, 
     while generation_is_current(&state, generation) {
         match listener.accept() {
             Ok((stream, _)) => {
-                if state.active_connections.fetch_add(1, Ordering::AcqRel) >= 4 {
+                let active = state.active_connections.fetch_add(1, Ordering::AcqRel);
+                if active >= 4 {
                     state.active_connections.fetch_sub(1, Ordering::AcqRel);
+                    bridge_log(&format!("reject: too many connections active={active}"));
                     continue;
                 }
+                bridge_log(&format!("accept active={active}"));
                 let app = app.clone();
                 let state = state.clone();
                 thread::spawn(move || {
-                    let _ = handle_connection(stream, &app, &state, generation);
+                    let result = handle_connection(stream, &app, &state, generation);
+                    bridge_log(&format!("close: {result:?}"));
                     state.active_connections.fetch_sub(1, Ordering::AcqRel);
                 });
             }
@@ -604,22 +614,45 @@ fn accept_loop(listener: TcpListener, app: AppHandle, state: RemoteBridgeState, 
     }
 }
 
+/// 接客套接字必须恢复成阻塞模式再设超时。
+///
+/// 监听 socket 为了轮询 accept 设了 `set_nonblocking(true)`，而 macOS/BSD 下
+/// `accept()` 出来的连接**会继承**这个标志（Linux 不会）。不还原的话第一次读
+/// 立刻返回 EAGAIN（os error 35），连接在手握前就被丢掉，手机端只看到一句
+/// 「连接被断开」——2026-09-27 真机联调就是这么卡住的。
+fn prepare_connection(stream: &TcpStream) -> Result<(), String> {
+    stream
+        .set_nonblocking(false)
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|error| error.to_string())
+}
+
+/// 会话连接不能带读超时：手机可能几分钟不发一句话，
+/// 留着 30 秒超时会被当成断线把连接关掉（2026-09-27 真机：手机连上 30 多秒后电脑就断开了）。
+fn enter_session_mode(stream: &TcpStream) -> Result<(), String> {
+    stream
+        .set_read_timeout(None)
+        .map_err(|error| error.to_string())
+}
+
 fn handle_connection(
     mut stream: TcpStream,
     app: &AppHandle,
     state: &RemoteBridgeState,
     generation: usize,
 ) -> Result<(), String> {
-    stream
-        .set_read_timeout(Some(Duration::from_secs(30)))
-        .map_err(|error| error.to_string())?;
-    stream
-        .set_write_timeout(Some(Duration::from_secs(30)))
-        .map_err(|error| error.to_string())?;
+    prepare_connection(&stream)?;
     let private_key = state.core.lock().map_err(lock_error)?.private_key();
     let (transport, client_public_key) = server_noise_handshake(&mut stream, &private_key)?;
+    bridge_log("handshake ok");
     let transport = Arc::new(Mutex::new(transport));
     let auth = read_encrypted_json::<RemoteAuthFrame>(&mut stream, &transport)?;
+    bridge_log(&format!("auth kind={} device={}", auth.kind, auth.device_id));
     let device_id = if auth.kind == "pair.request" {
         handle_pairing(
             &mut stream,
@@ -646,6 +679,9 @@ fn handle_connection(
     } else {
         return Err("AUTH_INVALID".to_string());
     };
+
+    // 认证之后才算会话：从这一刻起不能再有读超时。
+    enter_session_mode(&stream)?;
 
     let connection_id = Uuid::new_v4().to_string();
     let (outbound, outgoing) = mpsc::channel::<serde_json::Value>();
@@ -773,6 +809,7 @@ fn handle_pairing(
         .map_err(lock_error)?
         .claim_offer(&offer_id, now_ms())
         .map_err(str::to_string)?;
+    bridge_log(&format!("pairing offer claimed {offer_id}"));
     let (sender, receiver) = mpsc::channel();
     state.pending_pairings.lock().map_err(lock_error)?.insert(
         offer_id.clone(),
@@ -795,6 +832,7 @@ fn handle_pairing(
     let decision = receiver
         .recv_timeout(Duration::from_secs(300))
         .map_err(|_| "PAIRING_APPROVAL_TIMEOUT".to_string())?;
+    bridge_log("pairing decision received");
     state
         .pending_pairings
         .lock()
@@ -921,6 +959,21 @@ pub(crate) fn write_frame(stream: &mut TcpStream, bytes: &[u8]) -> Result<(), St
     stream.write_all(bytes).map_err(|error| error.to_string())
 }
 
+#[cfg(debug_assertions)]
+fn bridge_log(message: &str) {
+    use std::io::Write;
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open("/tmp/jc-bridge.log")
+    {
+        let _ = writeln!(file, "{} {message}", now_ms());
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn bridge_log(_message: &str) {}
+
 fn local_ip() -> Result<String, String> {
     let socket = UdpSocket::bind("0.0.0.0:0").map_err(|error| error.to_string())?;
     socket
@@ -998,6 +1051,61 @@ mod tests {
     use super::*;
 
     #[test]
+    fn session_mode_clears_the_read_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let _stream = TcpStream::connect(address).unwrap();
+            thread::sleep(Duration::from_millis(300));
+        });
+        let (stream, _) = listener.accept().unwrap();
+
+        prepare_connection(&stream).unwrap();
+        assert!(stream.read_timeout().unwrap().is_some());
+
+        enter_session_mode(&stream).unwrap();
+        assert_eq!(stream.read_timeout().unwrap(), None);
+        let _ = client.join();
+    }
+
+    #[test]
+    fn accepted_connections_are_blocking_again() {
+        // macOS/BSD 的 accept() 会继承监听 socket 的非阻塞标志（Linux 不会）：
+        // 不还原的话第一次读立刻 EAGAIN，连接在手握前就被丢掉（2026-09-27 真机问题）。
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let stream = TcpStream::connect(address).unwrap();
+            thread::sleep(Duration::from_millis(500));
+        });
+
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(pair) => break pair,
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10))
+                }
+                Err(error) => panic!("accept failed: {error}"),
+            }
+        };
+        prepare_connection(&stream).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
+
+        let started = std::time::Instant::now();
+        let mut byte = [0_u8; 1];
+        assert!(stream.read(&mut byte).is_err());
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(200),
+            "读只等了 {waited:?}，说明接客连接还是非阻塞的"
+        );
+        let _ = client.join();
+    }
+
+    #[test]
     fn bridge_is_disabled_until_the_user_starts_it() {
         let core = RemoteBridgeCore::new(noise_keypair(), 1_000);
         assert!(!core.status().listening);
@@ -1020,6 +1128,8 @@ mod tests {
         let mut core = RemoteBridgeCore::new(noise_keypair(), 1_000);
         core.set_listener("192.168.1.2:9527".into());
         let offer = core.create_offer("offer-1".into(), 1_000);
+        // offer 里的地址会原样交给手机端 TcpStream::connect，必须保持裸 host:port。
+        assert_eq!(offer.address, "192.168.1.2:9527");
         assert_eq!(offer.expires_at, 301_000);
         core.claim_offer(&offer.offer_id, 2_000).unwrap();
         assert_eq!(
