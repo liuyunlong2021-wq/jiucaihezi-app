@@ -49,9 +49,13 @@ import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
   deepSeekHandoffTurns,
   deepSeekPrompt,
+  deepSeekSessionProcess,
+  deepSeekSessionReasoning,
   deepSeekSessionTurns,
   readDeepSeekHarnessSession,
   runDeepSeekHarness,
+  type DeepSeekProcessStep,
+  type DeepSeekSessionSnapshot,
 } from '@/services/deepSeekHarness'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
@@ -318,8 +322,21 @@ async function handleCapturedFrame(file: File) {
 type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
 const memoryToolAlwaysAllowedConversations = new Set<string>()
 const referencingDocuments = new Set<string>()
-type MemoryRunStep = { id: string; label: string; state: 'running' | 'done' | 'failed'; durationMs?: number }
+type MemoryRunStep = {
+  id: string
+  label: string
+  state: 'running' | 'done' | 'failed'
+  durationMs?: number
+  /** 白名单字段拼出的参数摘要；只有 Harness 路径有。 */
+  summary?: string
+  startedAt?: number
+  errorReason?: string
+}
 const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
+// Harness 的过程投影：按 assistant message id 侧存，不写 ConversationTurn。
+// Harness 对话以 Session 为唯一真源，每次打开重建即可，不需要新的持久化格式。
+const harnessProcess = ref<Record<string, DeepSeekProcessStep[]>>({})
+const harnessReasoning = ref<Record<string, string>>({})
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
 const viewportWidth = ref(window.innerWidth)
@@ -489,6 +506,8 @@ type MemoryRun = {
   status: string
   error: string
   streamingText: string
+  /** 实时推理正文（与消息体分开，官方也是同一个 content 里的独立块）。 */
+  reasoning: string
   steps: MemoryRunStep[]
   elapsed: number
   metrics: DirectRunMetrics | null
@@ -519,6 +538,11 @@ const activeRun = computed(() => {
 })
 const sending = computed(() => activeRun.value?.phase === 'running')
 const streamingText = computed(() => activeRun.value?.streamingText || '')
+// 折叠的 Think 行跟随最新一行（官方 ReasoningRow 也是这个行为），过长时从左侧裁掉。
+const liveReasoningTail = computed(() => {
+  const line = (activeRun.value?.reasoning || '').split('\n').map(item => item.trim()).filter(Boolean).at(-1) || ''
+  return line.length > 80 ? `…${line.slice(-80)}` : line
+})
 const pendingUserTurn = computed(() => activeRun.value?.userTurn ?? null)
 const runVisible = computed(() => Boolean(activeRun.value) && activeRun.value?.phase !== 'stopped')
 const runElapsed = computed(() => activeRun.value?.elapsed ?? 0)
@@ -660,6 +684,23 @@ const visibleRunSteps = computed(() => activeRun.value?.steps.slice(-5) ?? [])
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
 function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
   return programStatuses.value[turnId]
+}
+
+function harnessStepsFor(turnId: string): DeepSeekProcessStep[] | undefined {
+  return harnessProcess.value[turnId]
+}
+
+function harnessReasoningFor(turnId: string): string {
+  return harnessReasoning.value[turnId] || ''
+}
+
+/**
+ * 把一次 Session 快照的过程与推理登记到按 turn id 的侧存表里。
+ * 实时与历史走同一个投影，不另存一份副本——官方也是“事件日志是 UI 投影的唯一真相”。
+ */
+function rememberHarnessSnapshot(snapshot: DeepSeekSessionSnapshot) {
+  for (const [turnId, steps] of deepSeekSessionProcess(snapshot)) harnessProcess.value[turnId] = steps
+  for (const [turnId, reasoning] of deepSeekSessionReasoning(snapshot)) harnessReasoning.value[turnId] = reasoning
 }
 
 function programStatusTitle(programStatus: MemoryProgramStatus): string {
@@ -1052,6 +1093,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
             turns: mergedHarnessTurns(activeConversation.transcript.turns, deepSeekSessionTurns(snapshot)),
           },
         }
+        rememberHarnessSnapshot(snapshot)
       } catch { /* Legacy Raw remains readable until its first successful Harness handoff. */ }
     }
     if (creationMounted.value) {
@@ -1787,6 +1829,7 @@ async function send() {
     status: '正在思考',
     error: '',
     streamingText: '',
+    reasoning: '',
     steps: [],
     elapsed: 0,
     metrics: null,
@@ -1883,15 +1926,31 @@ async function send() {
         run.status = '正在执行'
         run.streamingText = text
       },
+      onReasoning(text) {
+        if (!isCurrentRun()) return
+        run.reasoning = text
+      },
       onProgress(progress) {
         if (!isCurrentRun()) return
         const step = run.steps.find(item => item.id === progress.id)
         if (progress.state === 'running') {
-          if (!step) run.steps.push({ id: progress.id, label: progress.label || '执行工具', state: 'running' })
+          if (!step) run.steps.push({
+            id: progress.id,
+            label: progress.label || '执行工具',
+            state: 'running',
+            summary: progress.summary,
+            startedAt: progress.startedAt,
+          })
           run.status = `正在${progress.label || '执行工具'}`
           return
         }
-        if (step) step.state = progress.state
+        if (step) {
+          step.state = progress.state
+          step.errorReason = progress.errorReason
+          // 时长由 call→result 两个事件的时间戳算出，不依赖事件里的额外字段。
+          if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
+            step.durationMs = progress.endedAt - step.startedAt
+        }
         const running = run.steps.find(item => item.state === 'running')
         run.status = running ? `正在${running.label}` : '正在等待模型继续处理'
       },
@@ -1967,6 +2026,7 @@ async function send() {
           mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
         })
         turns = mergedHarnessTurns(active.transcript.turns, deepSeekSessionTurns(snapshot))
+        rememberHarnessSnapshot(snapshot)
       } catch (readCause) {
         run.status = '任务已完成，会话刷新失败'
         run.error = readCause instanceof Error ? readCause.message : String(readCause)
@@ -2120,6 +2180,7 @@ function beginRunStatus(run: MemoryRun) {
   stopRunTimer(run)
   run.elapsed = 0
   run.steps = []
+  run.reasoning = ''
   run.metrics = null
   run.startedAt = Date.now()
   run.timer = setInterval(() => { run.elapsed = Math.floor((Date.now() - run.startedAt) / 1000) }, 1000)
@@ -3272,6 +3333,42 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             :streaming="turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
           />
+          <!--
+            过程挂在本轮发起人（用户消息）上，不挂 assistant message：纯工具步不产出 UI 轮次，
+            挂它就等于过程永远不可见（真样本一整轮 10 个工具步就是这样消失的）。
+            位置放在本轮正文之后，即「问 → 它做了什么 → 答」，与官方把过程放在轮次内的布局一致。
+          -->
+          <div
+            v-if="turn.role === 'user' && (harnessReasoningFor(turn.id) || harnessStepsFor(turn.id)?.length)"
+            class="memory-turn-process"
+          >
+            <details v-if="harnessReasoningFor(turn.id)" class="memory-think">
+              <summary><JcIcon name="psychology" /><span>思考</span></summary>
+              <MemoryMarkdown
+                class="memory-think-body memory-markdown markdown-body"
+                :content="harnessReasoningFor(turn.id)"
+                :render-id="`think-${turn.id}`"
+              />
+            </details>
+            <div v-if="harnessStepsFor(turn.id)?.length" class="memory-process">
+              <div
+                v-for="step in harnessStepsFor(turn.id)"
+                :key="step.id"
+                class="memory-process-step"
+                :class="step.state"
+              >
+                <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
+                <span class="memory-process-label">{{ step.label }}</span>
+                <span v-if="step.summary" class="memory-process-summary" :title="step.summary">{{ step.summary }}</span>
+                <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
+                <small v-if="step.errorReason" class="memory-process-error">{{ step.errorReason }}</small>
+                <details v-if="step.resultText" class="memory-process-result">
+                  <summary>查看结果</summary>
+                  <pre>{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
+                </details>
+              </div>
+            </div>
+          </div>
           <div
             v-if="programStatusFor(turn.id)"
             class="memory-program-status"
@@ -3439,10 +3536,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <div v-if="(sending || displayedError) && visibleRunSteps.length" class="memory-run-steps">
             <div v-for="step in visibleRunSteps" :key="step.id" :class="step.state">
               <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
-              <span>{{ step.label }}</span>
+              <span class="memory-run-step-text">{{ step.label }}<span v-if="step.summary" class="memory-run-step-summary" :title="step.summary">{{ step.summary }}</span><span v-if="step.errorReason" class="memory-run-step-error">{{ step.errorReason }}</span></span>
               <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
             </div>
           </div>
+          <small v-if="sending && liveReasoningTail" class="memory-run-think">思考中 · {{ liveReasoningTail }}</small>
           <small v-if="displayedError">{{ displayedError }}</small>
         </div>
         <ToolApprovalStrip
@@ -3882,6 +3980,32 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-run-metrics { min-width: 0; flex: 1; overflow: hidden; margin: 0; color: var(--ink3); font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .memory-run-steps > div.running { color: var(--ink1); }
 .memory-run-steps > div.failed, .memory-run-status.error, .memory-run-status.error strong { color: var(--danger); }
+.memory-run-step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-run-step-summary { margin-left: 6px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.memory-run-step-error { display: block; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-run-think { display: block; margin-top: 5px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 定稿后的过程属于该轮对话：Think 行折叠，工具行一行一步、结果按需展开。
+   挂在用户气泡里（该轮的发起人），所以加一条分隔线把它和提问正文分开。 */
+.memory-turn-process { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+.memory-think { margin: 2px 0 6px; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
+.memory-think > summary { display: flex; width: fit-content; align-items: center; gap: 5px; cursor: pointer; list-style: none; }
+.memory-think > summary::-webkit-details-marker { display: none; }
+.memory-think > summary .mso { font-size: 15px; }
+.memory-think-body { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--ink2); }
+.memory-process { display: grid; gap: 3px; margin: 2px 0 6px; font-size: calc(var(--font-base) - 2px); }
+.memory-process-step { display: grid; grid-template-columns: 17px auto minmax(0, 1fr) auto; align-items: center; gap: 5px; color: var(--ink3); }
+.memory-process-step .mso { font-size: 15px; }
+.memory-process-step.running { color: var(--ink1); }
+.memory-process-step.failed { color: var(--danger); }
+.memory-process-label { white-space: nowrap; }
+.memory-process-summary { min-width: 0; overflow: hidden; color: var(--ink3); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.memory-process-step em { font-style: normal; font-variant-numeric: tabular-nums; }
+.memory-process-error { grid-column: 3 / -1; color: var(--danger); overflow-wrap: anywhere; }
+.memory-process-result { grid-column: 3 / -1; }
+.memory-process-result > summary { width: fit-content; cursor: pointer; color: var(--ink3); list-style: none; }
+.memory-process-result > summary::-webkit-details-marker { display: none; }
+.memory-process-result pre { max-height: 260px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-process-step .spinning { animation: memory-run-spin .9s linear infinite; }
 .memory-run-status > small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }
 @keyframes memory-run-spin { to { transform: rotate(360deg); } }
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }

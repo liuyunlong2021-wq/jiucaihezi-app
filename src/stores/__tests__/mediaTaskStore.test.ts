@@ -1433,6 +1433,24 @@ test(
   },
 )
 
+test('媒体任务存储的每个 pollTask 调用点都走同一个 content 端点判据', () => {
+  // 根因：这个判断曾在四处各写一份——首轮轮询用 apiStyle 白名单，保存/重试/刷新路径
+  // 只认 omni 或硬编码 false。对 comfy-video 两边结论相反，于是保存时把已经正确的
+  // content 地址换成了适配器的内网地址（http://frps:8796/files/…），成片生成成功却存不进项目。
+  const store = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  const runtime = readFileSync(join(process.cwd(), 'src/runtime/creation/creationMediaRuntime.ts'), 'utf8')
+  const calls = (store.match(/pollTask\(/g) || []).length
+  // 存储侧经 taskUsesContentEndpoint() 包装（旧任务的 planSnapshot 可能缺失，需要退回 task.model）。
+  const judgements = (store.match(/\w*ContentEndpoint\(/g) || []).length
+  assert.ok(calls > 0, 'mediaTaskStore 里没有 pollTask 调用')
+  assert.ok(judgements >= calls, `mediaTaskStore: ${calls} 处 pollTask 只有 ${judgements} 处用了统一判据`)
+  // 旧的两套判据不能再回来：omni 专用判断或硬编码 false。
+  assert.doesNotMatch(store, /usesAuthenticatedVideoContent/)
+  assert.doesNotMatch(store, /pollTask\([\s\S]{0,300}?,\s*false\)/)
+  // 首轮轮询也必须用同一个判据。图片/音频的 pollTask 本来就不走 content 端点，不在此列。
+  assert.match(runtime, /CREATION_VIDEO_POLL_INTERVAL_MS,\s*request\.signal, usesNewApiContentEndpoint\(request\.plan\)/)
+})
+
 test(
   'mediaTaskStore rebuilds adapter-relative video results from the polling task id when retrying persistence',
   { concurrency: false },
@@ -1474,6 +1492,114 @@ test(
     }
   },
 )
+
+test(
+  'comfy 成片被写成适配器内网地址后，重试保存按上游任务号重建 content 地址',
+  { concurrency: false },
+  async () => {
+    // 实测事故（2026-09-27）：comfy-video 的保存路径把已经正确的 content 地址换成了
+    // 适配器回的 http://frps:8796/files/…（Docker 内网名），桌面客户端解析不了 frps，
+    // 于是成片生成成功（596 秒、文件已在适配器 static/ 里）却永远存不进项目。
+    const corrupted = 'http://frps:8796/files/20260927-09e058eaedbb4652.mp4'
+    const rebuilt = 'https://api.jiucaihezi.studio/v1/videos/task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h/content'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_comfy_internal_url', type: 'video', model: 'jc-minimax-h3-ref2v',
+      modelLabel: 'jc-MiniMax H3 参考生视频', prompt: '客栈视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl: corrupted,
+      upstreamTaskId: 'task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h',
+      pollUrl: '/v1/videos/task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h',
+      pollKind: 'video',
+      planSnapshot: { apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' },
+      assetStatus: 'failed',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/comfy'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_comfy_internal_url'), true)
+      })
+      assert.deepEqual(files.downloads, [rebuilt])
+      assert.equal(store.getTask('mtask_comfy_internal_url')?.assetStatus, 'local')
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test(
+  '保存失败必须走失败分支，不能把失败与成功状态混在一起',
+  { concurrency: false },
+  async () => {
+    // 实测事故（2026-09-27）：`downloadAndPersistMediaAsset` 自己吞掉异常并写一半状态
+    // （assetStatus/errorMsg），上层 `completeMediaTask` 仍按成功继续（progressText=完成），
+    // 于是产出一条自相矛盾的记录：文件已在项目里，卡片却显示保存失败。
+    const failing = 'https://api.jiucaihezi.studio/v1/videos/task_download_fail_001/content'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_save_failure_state', type: 'video', model: 'jc-minimax-h3-ref2v',
+      modelLabel: 'jc-MiniMax H3 参考生视频', prompt: '保存失败', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl: failing,
+      upstreamTaskId: 'task_download_fail_001',
+      pollUrl: '/v1/videos/task_download_fail_001',
+      pollKind: 'video',
+      planSnapshot: { apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' },
+      // 已经两次失败：这次失败后应停在 remote-only，不能又被降级回 failed。
+      assetStatus: 'failed', assetRetryCount: 2,
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/failure'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_save_failure_state'), false)
+      })
+      const task = store.getTask('mtask_save_failure_state')
+      assert.equal(task?.status, 'success')
+      assert.match(String(task?.errorMsg || ''), /保存到项目失败/)
+      assert.equal(task?.assetStatus, 'remote-only')
+      // 关键：进度文案不能再是“完成”——那是成功路径才会写的。
+      assert.doesNotMatch(String(task?.progressText || ''), /^完成$/)
+      assert.deepEqual(files.downloads, [failing])
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test('同一任务的保存有单一互斥点，且“已落项目”是终态', () => {
+  // 实测同一任务的下载会并发（项目目录里同时出现两个 .part），后到者的失败把先到者的
+  // 成功状态覆盖掉。根因与 `pollTask` 那次同类：没有一个唯一的写入/互斥点。
+  const store = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  assert.match(store, /const savingTaskIds = new Set<string>\(\)/)
+  assert.match(store, /if \(savingTaskIds\.has\(task\.id\)\) return/)
+  assert.match(store, /if \(task\.assetStatus === 'local' && \(task\.projectPath \|\| task\.assetUri\)\) return/)
+  // 失败状态只能由一处写：原先下载函数自己吞异常写一半，上层又按成功写另一半。
+  const download = store.slice(
+    store.indexOf('async function downloadAndPersistMediaAsset'),
+    store.indexOf('function normalizeContentType'),
+  )
+  assert.ok(download.length > 0, '没找到 downloadAndPersistMediaAsset')
+  assert.doesNotMatch(download, /handleAssetDownloadFailure/)
+  assert.doesNotMatch(download, /task\.errorMsg =/)
+})
 
 test(
   'mediaTaskStore restores an explicit failure state when retry persistence cannot re-read the upstream result',

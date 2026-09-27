@@ -4,6 +4,7 @@ import { test } from 'node:test'
 import {
   buildCreationRunPlan,
   sizeFromRatioResolution,
+  usesNewApiContentEndpoint,
   validateCreationModelSpec,
 } from '../creationMediaPlan'
 import {
@@ -1155,3 +1156,19 @@ function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   }
   return params
 }
+
+test('成片是否经 NewAPI /content 回收，只由一处判据决定', () => {
+  // 本机 comfy-adapter 的 public_base_url 是 Docker 内网名（http://frps:8796）：
+  // 它回在 metadata.url 里的地址只有同网络的上游进程能访问，桌面客户端一取就是 DNS 失败。
+  // 这个判断曾在四处各写一份，保存路径把已经正确的 content 地址换成了内网地址。
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'comfy-first-frame', model: 'jc-minimax-h3' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'comfy-first-last', model: 'jc-minimax-h3' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'openai-videos', model: 'omni-fast' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'openai-videos', model: 'omni-v2v' }), true)
+  // 直连上游就会给公网地址的模型不能改走 content 端点（ZX 系明确不调 /content）。
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'openai-videos', model: 'veo-3.1-generate-preview' }), false)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'newapi-task', model: 'grok-imagine-video-1.5' }), false)
+  assert.equal(usesNewApiContentEndpoint({}), false)
+  assert.equal(usesNewApiContentEndpoint(undefined), false)
+})

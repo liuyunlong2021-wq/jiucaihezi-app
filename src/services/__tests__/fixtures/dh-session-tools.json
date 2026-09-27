@@ -1,0 +1,801 @@
+{
+  "session": {
+    "id": "jc-v1-conversation-fixture-tools",
+    "cwd": "D:\\work\\demo",
+    "createdAt": 1790392793071
+  },
+  "events": [
+    {
+      "type": "turn/start",
+      "seq": 4,
+      "time": 1790392793546,
+      "data": {
+        "turn": 1
+      }
+    },
+    {
+      "type": "step/start",
+      "seq": 6,
+      "time": 1790392793584,
+      "data": {
+        "turn": 1,
+        "step": 1
+      }
+    },
+    {
+      "type": "user/message",
+      "seq": 8,
+      "time": 1790392793588,
+      "data": {
+        "content": [
+          {
+            "type": "text",
+            "text": "查看图片内容"
+          },
+          {
+            "type": "image",
+            "attachment": {
+              "attachmentId": "sha256:42a9b5470c4b7194ead8e9e9bedcb67bde28a38355b35f0caf1e2431e7fabf42",
+              "mediaType": "image/webp",
+              "width": 1088,
+              "height": 1920,
+              "bytes": 192416
+            }
+          }
+        ],
+        "source": {
+          "kind": "user"
+        },
+        "role": "user",
+        "id": "9cb910c1-2026-4d52-b1e7-5dd22014ea48"
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "user/message",
+      "seq": 9,
+      "time": 1790392793590,
+      "data": {
+        "content": [
+          {
+            "type": "text",
+            "text": "Current runtime context. This snapshot supersedes earlier runtime-context snapshots.\n\nCurrent DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify file\n…[fixture 截断]"
+          }
+        ],
+        "source": {
+          "kind": "runtime-context",
+          "form": "snapshot",
+          "sections": [
+            {
+              "name": "sandbox:policy",
+              "text": "Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: \"D:\\\\work\\\\demo\". Some platform temporary areas may also be writable."
+            },
+            {
+              "name": "approval:policy",
+              "text": "Approval policy: ask. Operations that require approval may ask through the configured answerers; without an available answerer, the request fails closed."
+            }
+          ]
+        },
+        "role": "user",
+        "id": "afee7d53-08b5-458e-9eb5-c9a926eaf330"
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "assistant/message",
+      "seq": 16,
+      "time": 1790392836638,
+      "data": {
+        "turn": 1,
+        "step": 1,
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool-call",
+              "id": "call_3b20c7fc703141618082b1f83f38f1f1",
+              "name": "glob",
+              "arguments": "{\"path\":\"D:\\\\work\\\\demo\",\"pattern\":\"*\"}"
+            }
+          ],
+          "source": {
+            "kind": "model",
+            "provider": "jiucaihezi",
+            "model": "gemini-3.8-flash",
+            "replayState": {
+              "response": {
+                "kind": "pi-ai",
+                "version": 2,
+                "api": "openai-completions",
+                "provider": "jiucaihezi",
+                "model": "gemini-3.8-flash",
+                "responseId": "chatcmpl-202609260320318908127808268d9d6q5bFocRI",
+                "stopReason": "toolUse"
+              },
+              "blocks": [
+                {
+                  "type": "tool-call"
+                }
+              ]
+            }
+          },
+          "id": "300e245b-f913-4634-86d4-045cc2ae98b1"
+        },
+        "usage": {
+          "inputTokens": 7128,
+          "outputTokens": 131,
+          "totalTokens": 7259
+        }
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "tool/call",
+      "seq": 17,
+      "time": 1790392836642,
+      "data": {
+        "turn": 1,
+        "step": 1,
+        "callId": "call_3b20c7fc703141618082b1f83f38f1f1",
+        "name": "glob",
+        "arguments": "{\"path\":\"D:\\\\work\\\\demo\",\"pattern\":\"*\"}"
+      }
+    },
+    {
+      "type": "tool/result",
+      "seq": 18,
+      "time": 1790392836840,
+      "data": {
+        "turn": 1,
+        "step": 1,
+        "message": {
+          "role": "tool",
+          "source": {
+            "kind": "tool",
+            "callId": "call_3b20c7fc703141618082b1f83f38f1f1"
+          },
+          "toolCallId": "call_3b20c7fc703141618082b1f83f38f1f1",
+          "content": [
+            {
+              "type": "text",
+              "text": "wiki\\index.md\nwiki\\原始材料\\index.md\nwiki\\改编方案\\index.md\nwiki\\剧本\\index.md\nwiki\\资产\\index.md\nwiki\\资产\\角色\\index.md\nwiki\\资产\\场景\\index.md\nwiki\\资产\\道具\\index.md\nwiki\\资产\\关系\\index.md\n.raw\\jc-media\\图片\\一只小野驴_绿色的_卡通_3k2c\n…[fixture 截断]"
+            }
+          ],
+          "isError": false,
+          "id": "12a0bcd0-6bbe-4316-b6fd-ba9cdc985d80"
+        },
+        "meta": {
+          "shape": "paths",
+          "paths": [
+            "wiki\\index.md",
+            "wiki\\原始材料\\index.md",
+            "wiki\\改编方案\\index.md",
+            "wiki\\剧本\\index.md",
+            "wiki\\资产\\index.md",
+            "wiki\\资产\\角色\\index.md",
+            "wiki\\资产\\场景\\index.md",
+            "wiki\\资产\\道具\\index.md",
+            "wiki\\资产\\关系\\index.md",
+            ".raw\\jc-media\\图片\\一只小野驴_绿色的_卡通_3k2cpq.png",
+            ".raw\\jc-media\\图片\\一只小野驴_绿色的_卡通_ts4ns2.png",
+            ".raw\\jc-media\\图片\\驴子哈哈大笑_rrhy69.png",
+            ".raw\\jc-media\\图片\\竖屏三格人物设定参考图_视觉命题_用洗旧的工装与低眉顺眼_ogzm3k.png",
+            ".raw\\jc-media\\视频\\图1男子骑着图2的驴在悬崖边行走_873xhh.mp4",
+            "jc-canvas\\未命名画布.jccanvas",
+            ".raw\\jc-media\\图片\\qwen-image-2.1_00033_.png",
+            ".raw\\jc-media\\视频\\一段搞笑电影片段_江苏图1男子和着图2的驴在悬崖边对着笑_5xrwyd.mp4"
+          ],
+          "truncated": false,
+          "total": 17
+        }
+      },
+      "sourceEventSeqs": [
+        17
+      ],
+      "surfaceOp": "append"
+    },
+    {
+      "type": "step/end",
+      "seq": 19,
+      "time": 1790392836840,
+      "data": {
+        "turn": 1,
+        "step": 1
+      }
+    },
+    {
+      "type": "step/start",
+      "seq": 20,
+      "time": 1790392836860,
+      "data": {
+        "turn": 1,
+        "step": 2
+      }
+    },
+    {
+      "type": "assistant/message",
+      "seq": 21,
+      "time": 1790392885766,
+      "data": {
+        "turn": 1,
+        "step": 2,
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool-call",
+              "id": "call_e231f2a7e1844408a4162aaa1389920d",
+              "name": "read_image",
+              "arguments": "{\"file_path\":\"sha256:42a9b547\"}"
+            }
+          ],
+          "source": {
+            "kind": "model",
+            "provider": "jiucaihezi",
+            "model": "gemini-3.8-flash",
+            "replayState": {
+              "response": {
+                "kind": "pi-ai",
+                "version": 2,
+                "api": "openai-completions",
+                "provider": "jiucaihezi",
+                "model": "gemini-3.8-flash",
+                "responseId": "chatcmpl-202609260320370564244348268d9d6LbuP4MEP",
+                "stopReason": "toolUse"
+              },
+              "blocks": [
+                {
+                  "type": "tool-call"
+                }
+              ]
+            }
+          },
+          "id": "c7e97ea0-db24-450c-86ec-2acd2a994d4b"
+        },
+        "usage": {
+          "inputTokens": 7471,
+          "outputTokens": 404,
+          "totalTokens": 7875
+        }
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "tool/call",
+      "seq": 22,
+      "time": 1790392885768,
+      "data": {
+        "turn": 1,
+        "step": 2,
+        "callId": "call_e231f2a7e1844408a4162aaa1389920d",
+        "name": "read_image",
+        "arguments": "{\"file_path\":\"sha256:42a9b547\"}"
+      }
+    },
+    {
+      "type": "tool/result",
+      "seq": 23,
+      "time": 1790392885775,
+      "data": {
+        "turn": 1,
+        "step": 2,
+        "message": {
+          "role": "tool",
+          "source": {
+            "kind": "tool",
+            "callId": "call_e231f2a7e1844408a4162aaa1389920d"
+          },
+          "toolCallId": "call_e231f2a7e1844408a4162aaa1389920d",
+          "content": [
+            {
+              "type": "text",
+              "text": "Error: cannot read \"sha256:42a9b547\" as an image: model \"gemini-3.8-flash\" does not declare image input; switch to an image-capable model to read images"
+            }
+          ],
+          "isError": true,
+          "id": "889550b9-b8a5-4bfb-9524-2ade6f98c943"
+        }
+      },
+      "sourceEventSeqs": [
+        22
+      ],
+      "surfaceOp": "append"
+    },
+    {
+      "type": "step/end",
+      "seq": 24,
+      "time": 1790392885776,
+      "data": {
+        "turn": 1,
+        "step": 2
+      }
+    },
+    {
+      "type": "step/start",
+      "seq": 25,
+      "time": 1790392885792,
+      "data": {
+        "turn": 1,
+        "step": 3
+      }
+    },
+    {
+      "type": "assistant/message",
+      "seq": 29,
+      "time": 1790392996865,
+      "data": {
+        "turn": 1,
+        "step": 3,
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool-call",
+              "id": "call_8582fb382d154821ac014c03a4fcaa07",
+              "name": "pwsh",
+              "arguments": "{\"command\":\"Get-ChildItem -Recurse -File | ForEach-Object {\\n    $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash\\n    [PSCustomObject]@{ Path = $_.FullName; Hash = $hash }\\n} | Where-Object { $_.Hash -like \\\"42a9b547*\\\" }\",\"description\":\"Find file matching SHA256 hash 42a9b547\"}"
+            }
+          ],
+          "source": {
+            "kind": "model",
+            "provider": "jiucaihezi",
+            "model": "gemini-3.8-flash",
+            "replayState": {
+              "response": {
+                "kind": "pi-ai",
+                "version": 2,
+                "api": "openai-completions",
+                "provider": "jiucaihezi",
+                "model": "gemini-3.8-flash",
+                "responseId": "chatcmpl-202609260321328279532968268d9d62FdI84Hy",
+                "stopReason": "toolUse"
+              },
+              "blocks": [
+                {
+                  "type": "tool-call"
+                }
+              ]
+            }
+          },
+          "id": "15bf7a69-4768-4500-b5a2-27a76619f64d"
+        },
+        "usage": {
+          "inputTokens": 7564,
+          "outputTokens": 244,
+          "totalTokens": 7808
+        }
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "tool/call",
+      "seq": 30,
+      "time": 1790392996867,
+      "data": {
+        "turn": 1,
+        "step": 3,
+        "callId": "call_8582fb382d154821ac014c03a4fcaa07",
+        "name": "pwsh",
+        "arguments": "{\"command\":\"Get-ChildItem -Recurse -File | ForEach-Object {\\n    $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash\\n    [PSCustomObject]@{ Path = $_.FullName; Hash = …\",\"description\":\"Find file matching SHA256 hash 42a9b547\"}"
+      }
+    },
+    {
+      "type": "tool/result",
+      "seq": 31,
+      "time": 1790392997802,
+      "data": {
+        "turn": 1,
+        "step": 3,
+        "message": {
+          "role": "tool",
+          "source": {
+            "kind": "tool",
+            "callId": "call_8582fb382d154821ac014c03a4fcaa07"
+          },
+          "toolCallId": "call_8582fb382d154821ac014c03a4fcaa07",
+          "content": [
+            {
+              "type": "text",
+              "text": "(no output)"
+            }
+          ],
+          "isError": false,
+          "id": "71154fb3-21df-4f4a-b796-497a29aae088"
+        }
+      },
+      "sourceEventSeqs": [
+        30
+      ],
+      "surfaceOp": "append"
+    },
+    {
+      "type": "step/end",
+      "seq": 32,
+      "time": 1790392997803,
+      "data": {
+        "turn": 1,
+        "step": 3
+      }
+    },
+    {
+      "type": "turn/end",
+      "seq": 83,
+      "time": 1790393767195,
+      "data": {
+        "turn": 1,
+        "reason": {
+          "kind": "error",
+          "error": {
+            "message": "524 status code (no body)",
+            "code": "SERVER"
+          }
+        }
+      }
+    },
+    {
+      "type": "turn/start",
+      "seq": 125,
+      "time": 1790414883819,
+      "data": {
+        "turn": 5
+      }
+    },
+    {
+      "type": "step/start",
+      "seq": 127,
+      "time": 1790414883941,
+      "data": {
+        "turn": 5,
+        "step": 1
+      }
+    },
+    {
+      "type": "user/message",
+      "seq": 128,
+      "time": 1790414883944,
+      "data": {
+        "content": [
+          {
+            "type": "text",
+            "text": "给我一个文生图的提示词，不要参考图"
+          }
+        ],
+        "source": {
+          "kind": "user"
+        },
+        "role": "user",
+        "id": "aa2cdab9-def3-4c19-a21c-e8f5bded4fe3"
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "assistant/message",
+      "seq": 130,
+      "time": 1790414907177,
+      "data": {
+        "turn": 5,
+        "step": 1,
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool-call",
+              "id": "call_923eafd185d945bc93e744dff3065504",
+              "name": "read",
+              "arguments": "{\"file_path\":\"C:\\\\Users\\\\tester\\\\.agents\\\\skills\\\\jc-character-prompt\\\\references\\\\photorealistic-skin-control.md\"}"
+            }
+          ],
+          "source": {
+            "kind": "model",
+            "provider": "jiucaihezi",
+            "model": "gemini-3.8-flash",
+            "replayState": {
+              "response": {
+                "kind": "pi-ai",
+                "version": 2,
+                "api": "openai-completions",
+                "provider": "jiucaihezi",
+                "model": "gemini-3.8-flash",
+                "responseId": "chatcmpl-202609260928092038853318268d9d6HVBdpjNp",
+                "stopReason": "toolUse"
+              },
+              "blocks": [
+                {
+                  "type": "tool-call"
+                }
+              ]
+            }
+          },
+          "id": "1a252c9e-e0e4-489a-991d-9a06a362e658"
+        },
+        "usage": {
+          "inputTokens": 26308,
+          "outputTokens": 116,
+          "totalTokens": 26424
+        }
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "tool/call",
+      "seq": 131,
+      "time": 1790414907180,
+      "data": {
+        "turn": 5,
+        "step": 1,
+        "callId": "call_923eafd185d945bc93e744dff3065504",
+        "name": "read",
+        "arguments": "{\"file_path\":\"C:\\\\Users\\\\tester\\\\.agents\\\\skills\\\\jc-character-prompt\\\\references\\\\photorealistic-skin-control.md\"}"
+      }
+    },
+    {
+      "type": "tool/result",
+      "seq": 132,
+      "time": 1790414907204,
+      "data": {
+        "turn": 5,
+        "step": 1,
+        "message": {
+          "role": "tool",
+          "source": {
+            "kind": "tool",
+            "callId": "call_923eafd185d945bc93e744dff3065504"
+          },
+          "toolCallId": "call_923eafd185d945bc93e744dff3065504",
+          "content": [
+            {
+              "type": "text",
+              "text": "<path>C:\\Users\\tester\\.agents\\skills\\jc-character-prompt\\references\\photorealistic-skin-control.md</path>\n<type>file</type>\n<content>\n1: # 真人皮肤微观与真实感控制参考\n2: \n3: ## 适用范围\n4: \n5: 用户指定“真人摄影写实”、“真实人\n…[fixture 截断]"
+            }
+          ],
+          "isError": false,
+          "id": "410eec21-5499-4fd1-b6ec-9e88c4ea493a"
+        },
+        "meta": {
+          "path": "C:\\Users\\tester\\.agents\\skills\\jc-character-prompt\\references\\photorealistic-skin-control.md",
+          "offset": 1,
+          "lines": [
+            {
+              "number": 1,
+              "text": "# 真人皮肤微观与真实感控制参考"
+            },
+            {
+              "number": 2,
+              "text": ""
+            },
+            {
+              "number": 3,
+              "text": "## 适用范围"
+            },
+            {
+              "number": 4,
+              "text": ""
+            },
+            {
+              "number": 5,
+              "text": "用户指定“真人摄影写实”、“真实人类质感”、“胶片质感写真”或明确要求真实人类皮肤细节时使用。本参考只沉淀微观皮肤层、瑕疵层和反磨皮语言，不单独定义版式。始终沿用 `SKILL.md` 已确定的画幅、三格布局、分格职责、18%中灰背景、身高比例尺、特写角度、组织顺序与“只输出一条完整中文提示词”的要求。"
+            },
+            {
+              "number": 6,
+              "text": ""
+            },
+            {
+              "number": 7,
+              "text": "用户提供的角色事实优先。示例中的年龄、肤色和具体特征都是可替换设计值，不得因调用本参考而擅自添加与用户冲突的年龄感或皮肤问题。"
+            },
+            {
+              "number": 8,
+              "text": ""
+            },
+            {
+              "number": 9,
+              "text": "## 核心法则"
+            },
+            {
+              "number": 10,
+              "text": ""
+            },
+            {
+              "number": 11,
+              "text": "把真实感写成具体的物理存在，而不是只写“真实、高清、8K”："
+            },
+            {
+              "number": 12,
+              "text": ""
+            },
+            {
+              "number": 13,
+              "text": "- 真实皮肤不是单一表面，而是具有微观分区：额头、鼻翼、面颊、下巴的皮脂、毛孔分布和粗细各不相同。"
+            },
+            {
+              "number": 14,
+              "text": "- 真实脸孔具有轻微不对称和生活痕迹：细微皮下微血管、天然雀斑、极浅表情纹或干燥纹理，让皮肤具有呼吸感。"
+            },
+            {
+              "number": 15,
+              "text": "- 拒绝 AI 典型伪影：塑料感平滑、过度磨皮、瓷娃娃感、橡胶高光、无毛孔假面、数码锐化过度的白边。"
+            },
+            {
+              "number": 16,
+              "text": "- 光学质感服务于结构核验：用柔和、漫射、均匀的影棚光线穿透表皮形成自然的次表面散射 (subsurface scattering)，但绝不得为了追求氛围而破坏 18% 中灰无缝背景、正面均匀无阴影照明和各分格全焦段清晰的底线。"
+            },
+            {
+              "number": 17,
+              "text": ""
+            },
+            {
+              "number": 18,
+              "text": "## 词汇工具箱"
+            },
+            {
+              "number": 19,
+              "text": ""
+            },
+            {
+              "number": 20,
+              "text": "根据角色年龄、性别、职业和生活状态选择，不要全部堆砌："
+            },
+            {
+              "number": 21,
+              "text": ""
+            },
+            {
+              "number": 22,
+              "text": "- 分区纹理：T区微细毛孔、鼻翼两侧毛孔细小而真实、脸颊细腻绒毛感、眼下细小干纹、唇部天然纵向唇纹。"
+            },
+            {
+              "number": 23,
+              "text": "- 局部高光与皮脂：鼻尖微弱漫射高光、额头健康哑光偏光、颧骨自然微光，非油腻油光，非数码高光。"
+            },
+            {
+              "number": 24,
+              "text": "- 质感基调：透光半透明表皮层、真皮层微血管透色、健康血液充盈感、温暖哑光基调。"
+            },
+            {
+              "number": 25,
+              "text": "- 轻微不完美（克制使用）：少量自然分散浅褐色雀斑、天然不对称微小痣、晒后轻微不均匀肤色、极细微毛细血管显露。"
+            },
+            {
+              "number": 26,
+              "text": ""
+            },
+            {
+              "number": 27,
+              "text": "## 推荐提示词语言组件"
+            },
+            {
+              "number": 28,
+              "text": ""
+            },
+            {
+              "number": 29,
+              "text": "将下列句子融合进角色面部几何与材质描述中："
+            },
+            {
+              "number": 30,
+              "text": ""
+            },
+            {
+              "number": 31,
+              "text": "`真实人类皮肤质感，透光表皮层与自然次表面散射，T区与鼻翼两侧分布均匀细微的真实毛孔，眼下极浅干纹与唇部纵向天然纹理清晰可辨，颧骨与鼻尖呈现极柔和的哑光漫射微光，面部保留轻微不对称与微小生活痕迹，真实毛细血管隐约透光，发丝根根分明具有自然毛鳞片质感。无方向无阴影的正面照明下呈现清晰骨骼与真实皮肤细节，纯粹光学摄影质感，胶片微细颗粒感。`"
+            },
+            {
+              "number": 32,
+              "text": ""
+            },
+            {
+              "number": 33,
+              "text": "## 负面约束"
+            },
+            {
+              "number": 34,
+              "text": ""
+            },
+            {
+              "number": 35,
+              "text": "针对真实人类质感收尾时的专属负面约束："
+            },
+            {
+              "number": 36,
+              "text": ""
+            },
+            {
+              "number": 37,
+              "text": "`避免塑料皮肤、瓷娃娃感、橡胶光泽、过度平滑、AI磨皮面具、数码过度锐化、蜡像感、CGI渲染质感、动漫化眼睛、无毛孔假脸、对称完美假脸、假发质感。`"
+            }
+          ],
+          "totalLines": 37,
+          "lang": "md"
+        }
+      },
+      "sourceEventSeqs": [
+        131
+      ],
+      "surfaceOp": "append"
+    },
+    {
+      "type": "step/end",
+      "seq": 133,
+      "time": 1790414907205,
+      "data": {
+        "turn": 5,
+        "step": 1
+      }
+    },
+    {
+      "type": "step/start",
+      "seq": 134,
+      "time": 1790414907232,
+      "data": {
+        "turn": 5,
+        "step": 2
+      }
+    },
+    {
+      "type": "assistant/message",
+      "seq": 138,
+      "time": 1790415079179,
+      "data": {
+        "turn": 5,
+        "step": 2,
+        "message": {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "text",
+              "text": "生成一张9:16三格人物设定参考图。\n\n视觉命题：将年轻东亚都市女性的精致清纯与随性居家的慵懒感融为一体，以干净通透的骨相结构和松弛洒脱的衣着呈现自然健康的青春纯欲美感。\n\n身份描述：一位21岁的东亚年轻女性，大学生或平面模特身份，气质清澈甜美且带有一丝慵懒随意。身材匀称苗条，皮肤白皙透亮。面容具有极高辨识度，神态温和放松。\n\n体型轮廓：约168厘米，约六点五头身，身形呈优美的匀称沙漏型（X型轮廓\n…[fixture 截断]"
+            }
+          ],
+          "source": {
+            "kind": "model",
+            "provider": "jiucaihezi",
+            "model": "gemini-3.8-flash",
+            "replayState": {
+              "response": {
+                "kind": "pi-ai",
+                "version": 2,
+                "api": "openai-completions",
+                "provider": "jiucaihezi",
+                "model": "gemini-3.8-flash",
+                "responseId": "chatcmpl-202609260928576695305928268d9d6MFRRXEpi",
+                "stopReason": "stop"
+              },
+              "blocks": [
+                {
+                  "type": "text"
+                }
+              ]
+            }
+          },
+          "id": "32aaf6b7-38f7-4c92-a343-1a94df5deff3"
+        },
+        "usage": {
+          "inputTokens": 27383,
+          "outputTokens": 1898,
+          "totalTokens": 29281
+        }
+      },
+      "surfaceOp": "append"
+    },
+    {
+      "type": "step/end",
+      "seq": 139,
+      "time": 1790415079180,
+      "data": {
+        "turn": 5,
+        "step": 2
+      }
+    },
+    {
+      "type": "turn/end",
+      "seq": 140,
+      "time": 1790415079181,
+      "data": {
+        "turn": 5,
+        "reason": {
+          "kind": "completed"
+        }
+      }
+    }
+  ]
+}

@@ -50,6 +50,8 @@ export interface DeepSeekHarnessInput {
   signal?: AbortSignal
   onText?: (text: string) => void
   onStatus?: (status: string) => void
+  /** 实时推理正文；只在内容真的变化时回调，与 `onText` 分开、不混进消息体。 */
+  onReasoning?: (text: string) => void
   onProgress?: (progress: DeepSeekProgress) => void
 }
 
@@ -57,12 +59,47 @@ export type DeepSeekProgress = {
   id: string
   label?: string
   state: 'running' | 'done' | 'failed'
+  /** 白名单字段拼出的参数摘要；解析失败或没有白名单字段时是空串。 */
+  summary?: string
+  /** 工具调用的会话时间戳，用来算时长。 */
+  startedAt?: number
+  endedAt?: number
+  errorReason?: string
+  resultText?: string
+  resultTruncated?: boolean
+}
+
+/** 一次工具调用在 UI 上的完整投影（实时与历史同源）。 */
+export type DeepSeekProcessStep = {
+  id: string
+  label: string
+  summary: string
+  state: 'running' | 'done' | 'failed'
+  startedAt?: number
+  durationMs?: number
+  errorReason?: string
+  resultText?: string
+  resultTruncated?: boolean
+}
+
+/** 官方 `TokenUsage` 的子集；计数互斥，`inputTokens` 只含未缓存输入。 */
+export type DeepSeekUsage = {
+  inputTokens: number
+  outputTokens: number
+  totalTokens?: number
+  cacheReadTokens?: number
+  cacheWriteTokens?: number
+  reasoningTokens?: number
 }
 
 export type DeepSeekAssistantStreamState = {
   attemptId: string
   nextIndex: number
   text: string
+  reasoning: string
+  /** 当前 attempt 所属的 turn/step；实时推理要挂到正确的 step 上。 */
+  turn: number
+  step: number
 }
 
 export type DeepSeekSessionSnapshot = {
@@ -157,6 +194,50 @@ export function deepSeekAssistantText(event: any): string {
     : ''
 }
 
+/**
+ * 同一 step 的推理文本，按 content 里的块顺序拼接。
+ * 官方把 `reasoning` 当普通内容块（`dsh-llm` 的 `ReasoningBlock`），所以它一直在
+ * `assistant/message.data.message.content` 里，不需要额外通道；此前只是被正文过滤丢掉了。
+ */
+export function deepSeekAssistantReasoning(event: any): string {
+  if (event?.type !== 'assistant/message') return ''
+  const content = event?.data?.message?.content
+  return Array.isArray(content)
+    ? content
+        .filter(block => block?.type === 'reasoning')
+        .map(block => String(block.text || ''))
+        .join('')
+    : ''
+}
+
+function deepSeekOptionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+/**
+ * 官方只在适配器报告了 token 计数时给 `usage`，缺省时必须返回 `undefined`：
+ * 用 0 或估算值代替会让用户看到假数字（官方 GUI 同样是“缺就不显示”）。
+ */
+export function deepSeekMessageUsage(event: any): DeepSeekUsage | undefined {
+  const usage = event?.type === 'assistant/message' ? event?.data?.usage : undefined
+  if (!usage || typeof usage !== 'object') return undefined
+  const inputTokens = deepSeekOptionalNumber(usage.inputTokens)
+  const outputTokens = deepSeekOptionalNumber(usage.outputTokens)
+  if (inputTokens === undefined || outputTokens === undefined) return undefined
+  const totalTokens = deepSeekOptionalNumber(usage.totalTokens)
+  const cacheReadTokens = deepSeekOptionalNumber(usage.cacheReadTokens)
+  const cacheWriteTokens = deepSeekOptionalNumber(usage.cacheWriteTokens)
+  const reasoningTokens = deepSeekOptionalNumber(usage.reasoningTokens)
+  return {
+    inputTokens,
+    outputTokens,
+    ...totalTokens === undefined ? {} : { totalTokens },
+    ...cacheReadTokens === undefined ? {} : { cacheReadTokens },
+    ...cacheWriteTokens === undefined ? {} : { cacheWriteTokens },
+    ...reasoningTokens === undefined ? {} : { reasoningTokens },
+  }
+}
+
 function deepSeekMessageText(content: any): string {
   return Array.isArray(content)
     ? content.filter(block => block?.type === 'text').map(block => String(block.text || '')).join('')
@@ -168,13 +249,17 @@ function visibleDeepSeekUserText(text: string): string {
   return current.replace(/^(?:\/[\w.-]+(?:\s+|$))+\n*/u, '').trim()
 }
 
+function deepSeekUserMessageId(event: any): string {
+  return String(event.data?.id || `dh-user-${event.seq}`)
+}
+
 export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): ConversationTurn[] {
   const turns: ConversationTurn[] = []
   for (const event of snapshot.events || []) {
     if (event?.type === 'user/message' && event.data?.source?.kind === 'user') {
       const content = visibleDeepSeekUserText(deepSeekMessageText(event.data.content))
       if (content) turns.push({
-        id: String(event.data.id || `dh-user-${event.seq}`),
+        id: deepSeekUserMessageId(event),
         role: 'user',
         content,
         createdAt: new Date(Number(event.time) || Date.now()).toISOString(),
@@ -202,6 +287,9 @@ export function applyDeepSeekAssistantStream(
     state.attemptId = String(frame.attemptId || '')
     state.nextIndex = 0
     state.text = ''
+    state.reasoning = ''
+    state.turn = Number(frame.turn) || 0
+    state.step = Number(frame.step) || 0
     return ''
   }
   if (
@@ -210,6 +298,12 @@ export function applyDeepSeekAssistantStream(
     || frame.index !== state.nextIndex
   ) return undefined
   state.nextIndex += 1
+  // 推理分片照旧推进序号，但不影响返回值：正文增量仍只由 text-delta 驱动，
+  // 否则调用方会把推理当正文渲染进消息体。
+  if (frame.chunk?.type === 'reasoning-delta') {
+    state.reasoning = `${state.reasoning || ''}${String(frame.chunk.text || '')}`
+    return undefined
+  }
   if (frame.chunk?.type !== 'text-delta') return undefined
   state.text += String(frame.chunk.text || '')
   return state.text
@@ -259,17 +353,193 @@ function deepSeekToolLabel(name: string): string {
   return `执行 ${name || '工具'}`
 }
 
-export function deepSeekProgress(event: any): DeepSeekProgress | undefined {
-  if (event?.type === 'tool/call') return {
-    id: String(event.data?.callId || ''),
-    label: deepSeekToolLabel(String(event.data?.name || '')),
-    state: 'running',
+/**
+ * 参数摘要的白名单与其优先级。
+ * 键名按真样本实测（TDD §2.3）：`read`/`read_image` 用 `file_path`（不是 `path`），
+ * `glob` 用 `path`+`pattern`，`pwsh` 用 `command`+`description`，`skill` 用 `name`。
+ * 白名单之外的字段一律不显示：写入内容、文件正文、密钥都不上屏。
+ */
+const DEEPSEEK_SUMMARY_KEYS = ['command', 'file_path', 'path', 'pattern', 'query', 'url', 'name', 'toolName']
+const DEEPSEEK_SUMMARY_LIMIT = 80
+const DEEPSEEK_ERROR_LIMIT = 200
+/** 工具结果正文的上限：bash 输出与文件正文可能几十万字符，投影层就得截断。 */
+export const DEEPSEEK_PROCESS_RESULT_LIMIT = 4_000
+
+function deepSeekClip(text: string, limit: number): string {
+  return text.length > limit ? `${text.slice(0, limit)}…` : text
+}
+
+function deepSeekToolSummary(rawArguments: unknown): string {
+  if (typeof rawArguments !== 'string') return ''
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(rawArguments)
+  } catch {
+    // 模型产出的参数不保证是合法 JSON；摘要只是锦上添花，不能因此抛错。
+    return ''
   }
-  if (event?.type === 'tool/result') return {
-    id: String(event.data?.message?.toolCallId || ''),
-    state: event.data?.message?.isError ? 'failed' : 'done',
+  if (!parsed || typeof parsed !== 'object') return ''
+  for (const key of DEEPSEEK_SUMMARY_KEYS) {
+    const value = (parsed as Record<string, unknown>)[key]
+    if (typeof value !== 'string' || !value.trim()) continue
+    return deepSeekClip(value.replace(/\s+/g, ' ').trim(), DEEPSEEK_SUMMARY_LIMIT)
+  }
+  return ''
+}
+
+function deepSeekResultText(content: unknown): { text: string; truncated: boolean } {
+  const text = Array.isArray(content)
+    ? content.filter(block => block?.type === 'text').map(block => String(block.text || '')).join('')
+    : ''
+  return { text: deepSeekClip(text, DEEPSEEK_PROCESS_RESULT_LIMIT), truncated: text.length > DEEPSEEK_PROCESS_RESULT_LIMIT }
+}
+
+/**
+ * 失败原因：显式 `error.reason` / `error.code` 优先，都没有时回退到结果正文首行。
+ * 实测那次 `read_image` 失败就是 `isError: true` 但 `error` 整个是 `undefined`，
+ * 失败说明只在正文里（`Error: cannot read … does not declare image input`）。
+ */
+function deepSeekResultErrorReason(error: any, isError: boolean, resultText: string): string | undefined {
+  for (const candidate of [error?.reason, error?.code]) {
+    const text = String(candidate ?? '').replace(/\s+/g, ' ').trim()
+    if (text) return deepSeekClip(text, DEEPSEEK_ERROR_LIMIT)
+  }
+  if (!isError) return undefined
+  const firstLine = resultText.split('\n').map(line => line.trim()).find(Boolean) || ''
+  return firstLine ? deepSeekClip(firstLine, DEEPSEEK_ERROR_LIMIT) : undefined
+}
+
+export function deepSeekProgress(event: any): DeepSeekProgress | undefined {
+  if (event?.type === 'tool/call') {
+    const startedAt = deepSeekOptionalNumber(Number(event?.time))
+    return {
+      id: String(event.data?.callId || ''),
+      label: deepSeekToolLabel(String(event.data?.name || '')),
+      state: 'running',
+      summary: deepSeekToolSummary(event.data?.arguments),
+      ...startedAt === undefined ? {} : { startedAt },
+    }
+  }
+  if (event?.type === 'tool/result') {
+    const isError = Boolean(event.data?.message?.isError)
+    const { text, truncated } = deepSeekResultText(event.data?.message?.content)
+    const endedAt = deepSeekOptionalNumber(Number(event?.time))
+    const errorReason = deepSeekResultErrorReason(event.data?.error, isError, text)
+    return {
+      id: String(event.data?.message?.toolCallId || ''),
+      state: isError ? 'failed' : 'done',
+      ...endedAt === undefined ? {} : { endedAt },
+      ...errorReason === undefined ? {} : { errorReason },
+      resultText: text,
+      resultTruncated: truncated,
+    }
   }
   return undefined
+}
+
+/**
+ * 把一条 `tool/call`（可选配对它自己的 `tool/result`）折叠成一个过程步骤。
+ * 时长由两个事件的时间戳相减得到，不依赖事件里有没有现成的耗时字段。
+ */
+function deepSeekProcessStep(call: any, result: any): DeepSeekProcessStep | undefined {
+  const started = deepSeekProgress(call)
+  if (!started?.id) return undefined
+  const step: DeepSeekProcessStep = {
+    id: started.id,
+    label: started.label || '执行工具',
+    summary: started.summary || '',
+    state: 'running',
+    ...started.startedAt === undefined ? {} : { startedAt: started.startedAt },
+  }
+  const settled = deepSeekProgress(result)
+  if (!settled) return step
+  step.state = settled.state
+  step.errorReason = settled.errorReason
+  step.resultText = settled.resultText
+  step.resultTruncated = settled.resultTruncated
+  if (step.startedAt !== undefined && settled.endedAt !== undefined) {
+    const durationMs = settled.endedAt - step.startedAt
+    if (durationMs >= 0) step.durationMs = durationMs
+  }
+  return step
+}
+
+/**
+ * 会话快照 → 该轮对话的发起人（UI 轮次 id）→ 工具步骤。
+ *
+ * 归属必须落在**发起这一轮的用户消息**上，不能落在 assistant message 上：
+ * 纯工具步（`assistant/message` 只有 `tool-call` 块、无正文）不产出 UI 轮次，
+ * 挂在它上面就等于过程永远不可见——真样本里一整轮 10 个工具步就是这样消失的。
+ *
+ * 工具步骤只取 `tool/call` + `tool/result` 事件，不解析 message content 里的 `tool-call` 块：
+ * 同一 callId 两处都出现，只用事件源天然避免同一步渲染两遍。
+ *
+ * 结果按 UI 轮次 id 侧存，不写 `ConversationTurn`：Harness 对话以 Session 为唯一真源，
+ * 每次打开重建即可，不需要新的持久化格式。
+ */
+export function deepSeekSessionProcess(
+  snapshot: DeepSeekSessionSnapshot,
+): Map<string, DeepSeekProcessStep[]> {
+  const owners = deepSeekTurnOwners(snapshot)
+  const resultsByCall = new Map<string, any>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'tool/result') continue
+    const callId = String(event.data?.message?.toolCallId || '')
+    if (callId) resultsByCall.set(callId, event)
+  }
+  const process = new Map<string, DeepSeekProcessStep[]>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'tool/call') continue
+    const owner = owners.get(Number(event.data?.turn))
+    if (!owner) continue
+    const step = deepSeekProcessStep(event, resultsByCall.get(String(event.data?.callId || '')))
+    if (!step) continue
+    process.set(owner, [...process.get(owner) || [], step])
+  }
+  return process
+}
+
+/** 会话快照 → 同一个 UI 轮次 id → 该轮推理正文（多 step 的推理按事件顺序拼接）。 */
+export function deepSeekSessionReasoning(snapshot: DeepSeekSessionSnapshot): Map<string, string> {
+  const owners = deepSeekTurnOwners(snapshot)
+  const reasoningByOwner = new Map<string, string>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'assistant/message') continue
+    const reasoning = deepSeekAssistantReasoning(event)
+    if (!reasoning) continue
+    const owner = owners.get(Number(event.data?.turn))
+    if (!owner) continue
+    const previous = reasoningByOwner.get(owner)
+    reasoningByOwner.set(owner, previous ? `${previous}\n\n${reasoning}` : reasoning)
+  }
+  return reasoningByOwner
+}
+
+/**
+ * 官方 turn 号 → 该轮 UI 轮次 id。
+ *
+ * 优先认真人消息（`source.kind === 'user'`），没才退回该轮的 assistant message id，
+ * 这样注入式轮次（goal 续轮等）不会连过程带丢。
+ * 这里的 id 必须与 `deepSeekSessionTurns()` 完全一致，所以共用 `deepSeekUserMessageId()`。
+ */
+function deepSeekTurnOwners(snapshot: DeepSeekSessionSnapshot): Map<number, string> {
+  const owners = new Map<number, string>()
+  let currentTurn: number | undefined
+  for (const event of snapshot.events || []) {
+    if (event?.type === 'turn/start') {
+      currentTurn = Number(event.data?.turn)
+      continue
+    }
+    if (currentTurn === undefined || !Number.isFinite(currentTurn)) continue
+    if (event?.type === 'user/message' && event.data?.source?.kind === 'user') {
+      owners.set(currentTurn, deepSeekUserMessageId(event))
+      continue
+    }
+    if (event?.type !== 'assistant/message' || owners.has(currentTurn)) continue
+    const id = String(event.data?.message?.id || '')
+    if (id) owners.set(currentTurn, id)
+  }
+  return owners
 }
 
 export function deepSeekHandoffTurns(turns: ConversationTurn[]): ConversationTurn[] {
@@ -595,12 +865,18 @@ async function runDeepSeekHarnessTurn(
   }
   const requestId = crypto.randomUUID()
   let finalText = ''
-  const stream = { attemptId: '', nextIndex: 0, text: '' }
+  let reasoningSent = ''
+  const stream = { attemptId: '', nextIndex: 0, text: '', reasoning: '', turn: 0, step: 0 }
   const notify = (frame: NonNullable<BridgeMessage['notification']>) => {
     if (frame.params?.sessionId !== wireSessionId) return
     if (frame.method === 'session.assistant-stream') {
       const text = applyDeepSeekAssistantStream(stream, frame.params.frame)
       if (text !== undefined) input.onText?.(text)
+      // 推理不进正文：它在 `assistant/message` 里是一个独立的内容块，实时也走单独通道。
+      if (stream.reasoning !== reasoningSent) {
+        reasoningSent = stream.reasoning
+        input.onReasoning?.(stream.reasoning)
+      }
       return
     }
     if (frame.method === 'session.event') {

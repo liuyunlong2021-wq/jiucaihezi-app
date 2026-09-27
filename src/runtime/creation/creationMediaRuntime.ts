@@ -17,6 +17,7 @@ import {
 } from '@/api/media-generation'
 import type { CreationMediaInputTransport, CreationRunPlan } from './creationMediaTypes'
 import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
+import { usesNewApiContentEndpoint } from './creationMediaPlan'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
 export interface CreationSubmitRequest {
@@ -547,14 +548,11 @@ async function executeDirectVideoRequest(
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
     // 本机 comfy-adapter 的成片同样经 NewAPI 的 /v1/videos/{id}/content 回收，
     // 这样客户端不必直连适配器，也不需要 public_base_url 对客户端可达。
-    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v' ||
-      request.plan.apiStyle === 'comfy-video' ||
-      request.plan.apiStyle === 'comfy-first-frame' ||
-      request.plan.apiStyle === 'comfy-first-last'
+    // 判据只有一处（`usesNewApiContentEndpoint`）：四处各写一份曾把这里修好的地址换回去。
     mediaUrl = await pollTask(
       pollUrl, 'video', onProgress,
       CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS,
-      request.signal, useContentEndpoint,
+      request.signal, usesNewApiContentEndpoint(request.plan),
     )
   }
   if (!mediaUrl) throw new Error('视频生成失败')

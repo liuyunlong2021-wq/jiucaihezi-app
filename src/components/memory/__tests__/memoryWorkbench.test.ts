@@ -1641,3 +1641,28 @@ test('stopping a send gives the draft back to the composer instead of losing it'
   assert.match(workbench, /attachments\.value = \[\.\.\.byPath\.values\(\)\]/)
   assert.match(workbench, /if \(editTargetId\) editingTurnId\.value = editTargetId/)
 })
+
+test('Harness process and reasoning hang on the round that started them', () => {
+  // 方案：[[开发/韭菜盒子Harness输出显示对齐官方TDD-2026-09-27]]。第一档之前，
+  // 过程只在 composer 底部、只在「正在运行」时可见，刷新后就没——过程属于哪一轮对话看不出来。
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  // 归属是「本轮发起人」（用户消息），不是 assistant message：纯工具步不产出 assistant 轮次，
+  // 挂在它上面过程就永远不可见（真样本一整轮 10 个工具步就是这样消失的）。
+  assert.match(workbench, /v-if="turn\.role === 'user' && \(harnessReasoningFor\(turn\.id\) \|\| harnessStepsFor\(turn\.id\)\?\.length\)"/)
+  assert.doesNotMatch(workbench, /turn\.role === 'assistant' && harness(Reasoning|Steps)For/)
+  assert.match(workbench, /v-for="turn in timelineTurns"[\s\S]*?harnessStepsFor\(turn\.id\)/)
+  // 实时与历史走同一个投影：读回 Session 时登记，不另存一份消息副本。
+  assert.match(workbench, /for \(const \[turnId, steps\] of deepSeekSessionProcess\(snapshot\)\)/)
+  assert.match(workbench, /for \(const \[turnId, reasoning\] of deepSeekSessionReasoning\(snapshot\)\)/)
+  assert.match(workbench, /readDeepSeekHarnessSession\([\s\S]*?rememberHarnessSnapshot\(snapshot\)/)
+  // 实时推理走独立回调：不能混进正文（onText 决定消息体）。
+  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?onReasoning\(text\)[\s\S]*?run\.reasoning = text/)
+  assert.doesNotMatch(workbench, /onReasoning\(text\)[\s\S]{0,80}run\.streamingText/)
+  // 工具行带摘要与失败原因，长结果只在展开时渲染并标注截断。
+  assert.match(workbench, /onProgress\(progress\)[\s\S]*?summary: progress\.summary/)
+  assert.match(workbench, /step\.durationMs = progress\.endedAt - step\.startedAt/)
+  assert.match(workbench, /<details v-if="step\.resultText" class="memory-process-result">/)
+  assert.match(workbench, /step\.resultTruncated \? '\\n…（已截断）' : ''/)
+  // 实时列表的上限语义不动：仍需按最近 5 条收敛。
+  assert.match(workbench, /const visibleRunSteps = computed\(\(\) => activeRun\.value\?\.steps\.slice\(-5\) \?\? \[\]\)/)
+})

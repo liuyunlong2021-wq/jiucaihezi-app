@@ -1,5 +1,27 @@
 # 热缓存
 
+## [2026-09-27] 「保存到项目失败」的真因：`pollTask` 的 content 端点判据有四处各写一份
+
+- 现象：comfy 成片生成成功（适配器 `static/` 里已有 15.4 MB 文件、任务 `task_20260927_4fed141a05f7` 执行 596 秒），但「保存到项目」永远失败：`HTTP 下载失败: error sending request for url (http://frps:8796/files/…mp4)`。
+- 根因：`frps:8796` 是 **frp 隧道出口端口**（`frps.example.toml` 的 `allowPorts`），只在 Docker 网络内可达，桌面客户端解析不了 `frps`。而“要不要走 NewAPI `/v1/videos/{id}/content` 回收”这个判断**写了四份且互相矛盾**：首轮轮询（`creationMediaRuntime.ts`）用 apiStyle 白名单（`comfy-*` → 走 content）；保存/重试/刷新路径（`mediaTaskStore.ts`）只认 omni 或硬编码 `false`。于是对 `comfy-video` 两边结论相反，保存时把已经正确的 content 地址**换成了适配器的内网地址**。
+- 修法：`usesNewApiContentEndpoint()` 成为唯一判据（`creationMediaPlan.ts`），四处 `pollTask` 调用点与重试守卫全部改用它；`normalizeAuthenticatedVideoResultUrl` 不再看旧地址长得对不对，而是**按已知的上游任务号重建** content 地址——这样已经被写坏的任务点「重试保存」也能救回来。
+- 排障路径（可复用）：`%APPDATA%\com.jiucaihezi.desktop\data\jiucaihezi.db` 的 `kv_store` → `jc_media_tasks_v1`（**双重 JSON 编码**，要 parse 两次）里有 `resultUrl`/`upstreamTaskId`/`pollUrl`/`planSnapshot.apiStyle`，比猜快得多；适配器侧看 `comfy-adapter/logs/adapter.log`。
+- 验证：新增 5 条用例（唯一判据单元测试、四处调用点契约、内网地址重建行为、失败必须走失败分支、保存单一互斥点与终态）；完整 focused `1550/1542/0/8`、Rust `422/0/1 ignored`、`vue-tsc -b`、lint、差异检查通过。**真机已验收**：11:05 那个新任务与 10:18 那个被写坏的旧任务**都落盘了**，旧任务的成片与适配器产物**逐字节相同**（15,386,931 bytes）。
+- 验收同时暴露两个**独立缺陷**（不是本修复引入，但以前那个永远失败的地址让它进不到下载阶段）：① 同一任务会**并发下载**（实测项目目录里同时有两个同任务 `.part` 文件）；② 后到的失败会**覆盖“已保存”状态**——文件已在项目里，卡片却显示 `保存到项目失败：读取下载数据失败: error decoding response body`。两者均已根治：① `savingTaskIds` 收成**单一互斥点**，`assetStatus === 'local'` 且已有路径时直接返回；② 根因是 `downloadAndPersistMediaAsset` **吞掉自己的异常**并写下半截状态，上层 `completeMediaTask` 又按“成功”写了另一半（DB 里出现 `progressText=完成` + `assetStatus=remote-only` + `errorMsg=保存到项目失败` + `projectPath` 为空的自相矛盾记录），现在下载异常一律上抋、失败状态只由 `handleAssetDownloadFailure` 一处写，`markWebMediaPersistenceFailure` 不再把已是 `local` 的状态降级成 `remote-only`。
+- 保存阶段的**进度反馈按用户 2026-09-27 决定不做**（已实现的 Rust 事件 + 前端订阅已回滚）。但事实仍记录：14.7 MB 走“客户端 ← Cloudflare ← Nginx ← NewAPI ← frp 隧道 ← 本机”实测 **3 分 11 秒**（≈ 80 KB/s），没有进度时慢与卡在界面上无法区分。
+- 比对基准：适配器 `public_base_url` 指向 Docker 内网名时，客户端**取不回 `metadata.url`**；唯一正确通道是 `GET /v1/videos/{task}/content`（15 MB 级文件走这条链就是分钟级）。
+
+## [2026-09-27] Harness 的过程与推理改挂到轮次上
+
+- 根因不在运行时而在投影层：同一批 Session 事件，官方投影成结构化会话节点，我们只留了正文。`deepSeekAssistantText` 只取 `text` 块（丢掉 `reasoning`）、`applyDeepSeekAssistantStream` 只认 `text-delta`、`deepSeekProgress` 只给 `{id,label,state}`，所以**纯工具步（`blocks=[tool-call]`、无正文）根本不产出 turn**——真样本里一整轮 10 个工具步、11 次工具调用、约 1 分钟，在产品里完全不可见。
+- 第一档只动投影与显示：新增 `deepSeekAssistantReasoning` / `deepSeekMessageUsage` / `deepSeekSessionProcess` / `deepSeekSessionReasoning`；`deepSeekProgress` 补参数摘要、`startedAt`/`endedAt`、`resultText`（截断 4000 字）、`errorReason`；UI 在轮次内渲染 Think 折叠行与工具行（摘要 + 时长 + 展开结果），过程不再只在“正在运行”时可见。**运行时 0 处改动**。
+- 三条合同由真样本（本机工作区 `D:\0925测试`，经官方 `session/read`，未解析物理文件）确定而非推测：事件顺序是 `step/start` → `assistant/message` → `tool/call` → `tool/result` → `step/end`，所以按 `{turn, step}` 归并；参数键实测为 `file_path`（`read`/`read_image`，**不是** `path`）、`path`+`pattern`（`glob`）、`command`+`description`（`pwsh`）、`name`（`skill`）；失败的 `tool/result` 可以 `isError: true` 而 `error` 整个是 `undefined`，失败原因必须回退到结果正文首行。
+- 过程**不需要新的持久化格式**：Harness 对话本来就以 Session 为唯一真相（`mergedHarnessTurns` 每次打开重建），所以按 UI 轮次侧存即可，`ConversationTurn` 与旧 Raw 序列化格式不动。工具步骤只从 `tool/call`+`tool/result` 事件取、按 `callId` 配对，不解析 message 里的 `tool-call` 块（同一 callId 两处都出现，只好事件源天然避免渲染两遍）。
+- **归属必须落在“本轮发起人”（该轮的用户消息）上，不能落在 assistant message 上**：纯工具步没有正文、不产出 UI 轮次，挂在它上面就等于过程永远不可见——而那正是本轮要修的东西。没有真人发起人的注入式轮次退回该轮 assistant message id 兜底。过程与 Think 行因此渲染在用户轮次的正文之后（「问 → 它做了什么 → 答」）。
+- **上游目前不产生推理**：真样本 16/16 `assistant/message` 无 `reasoning` 块、嵌入式 stream 无 `reasoning-chunks`。根因指向 route patch 未声明 `reasoningEfforts`（`gpt-5.6-sol` 不在已安装目录里，而 `dsh-llm-pi-ai` 的规则是“省略该字段时保留已安装目录条目的能力”）。Think 行因此是矦眠的，要让它出现得先单独决定要不要开推理。
+- 验证：新增 11 条用例（含真样本 fixture 断言）；定向 `121/121`；完整 focused `1545/1537/0/8`、Rust `422/0/1 ignored`、`exit=0`；`vue-tsc -b`、lint、`git diff --check` 通过。**真机已验收通过**（过程行与刷新后保留），Think 行仍休眠（上游不产生推理）。
+- 查事件 schema 不要再上网：官方全部包就在 `src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/`（`dsh-session`/`dsh-llm`/`dsh-agent` 的 `lib/types/*.d.ts`）。
+
 ## [2026-09-27] macOS 公证改为逐层签名并以 Accepted 为唯一成功条件
 
 - `v2.2.3` 修复两个 Mac 架构共同的公证失败根因：App 内 231 个 Mach-O 原先没有由内向外签名，bundled Node 还继承了发行包禁止的 `get-task-allow`。现由 `scripts/fix-macos-app.mjs` 逐层签名，Node 使用不含调试权限的专用 entitlements，外层 App 最后签名并执行 `codesign --verify --deep --strict`。

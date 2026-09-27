@@ -1651,3 +1651,34 @@
 - 服务器端**不动**：`comfy-adapter` 的 `qwen-image-2.1` 模板与工作流、frp 隧道、NewAPI 渠道 140 的模型映射都留在原地；只有 NewAPI 里的模型与价格条目由用户自行删除。
 - 文档：图片供应商文档保留并加「当前未上线」标注（接回时合同不用重写）；视频供应商文档里「与图片模型共享同一个队列」的说法同步修正；运维文档新增一节说明取舍，以及将来真要混跑的两条路（适配器换模板前 `POST /free`，或 ComfyUI 带 `--disable-smart-memory` 启动）。
 - 验证：`vue-tsc -b` exit 0；`jcComfyAdapterPlan.test.ts` 10/10 全绿；全量聚焦测试 **fail 50 → 47**（顺手修掉 3 条过时断言：尺寸标签用全角 × 导致像素比较失败、ref2v 的 `mode` 断言在「去档位改比例」时已失效），本次新增 0 失败。
+
+## [2026-09-27] 实施 | Harness 输出显示对齐官方：过程与推理挂到轮次上
+
+- 用户先要求对比我们产品与 DH 官方 GUI 在输出显示上的差别，再问「对照官方优化升级适合我们的方案是什么」；定案见 [[开发/韭菜盒子Harness输出显示对齐官方TDD-2026-09-27]]。
+- 结论：差别不在运行时能力，而在投影层。同一批 Session 事件，官方投影成结构化会话节点，我们只留正文——`deepSeekAssistantText` 只取 `text` 块、`applyDeepSeekAssistantStream` 只认 `text-delta`、`deepSeekProgress` 只给 `{id,label,state}`，于是纯工具步（`assistant/message` 只有 `tool-call` 块、无正文）根本不产出 turn。真样本实测：一整轮 10 个工具步、11 次工具调用、约 1 分钟，在产品里完全不可见。
+- 第一档只补投影与显示，**运行时 0 处改动**：新增 `deepSeekAssistantReasoning` / `deepSeekMessageUsage` / `deepSeekSessionProcess` / `deepSeekSessionReasoning`；`deepSeekProgress` 补参数摘要（白名单）、`startedAt`/`endedAt`、`resultText`（截断 4000 字）、`errorReason`；服务新增 `onReasoning`，实时推理与正文分开累积；UI 在轮次内渲染 Think 折叠行与工具行（摘要 + 时长 + 展开结果），过程不再只在「正在运行」时可见。
+- 过程不需要新的持久化格式：Harness 对话以 Session 为唯一真源，`mergedHarnessTurns` 每次打开重建，所以过程按 UI 轮次侧存，`ConversationTurn` 与旧 Raw 序列化格式不动。
+- **实施中发现的根因修正**：归属必须落在**本轮发起人**（该轮 `source.kind === 'user'` 的消息）上，不能落在 assistant message 上——后者对纯工具步（无正文）不产出 UI 轮次，挂上去等于过程仍然不可见，那个锤点就没解决。没有真人发起人的注入式轮次退回该轮 assistant message id 兜底；`deepSeekSessionTurns()` 与两个投影共用 `deepSeekUserMessageId()` 防键名漂移。过程与 Think 行因此渲染在用户轮次的正文之后（「问 → 它做了什么 → 答」）。
+- 三条合同**由真样本确定而非推测**（本机工作区经官方 `session/read`，未解析 `$DSH_HOME` 物理文件，已裁剪脱敏为 30 事件 / 24.8 KB 的 fixture）：① 事件顺序 `step/start` → `assistant/message` → `tool/call` → `tool/result` → `step/end`，故按 `{turn, step}` 归并；② 参数键实测 `file_path`（`read`/`read_image`，不是 `path`）、`path`+`pattern`（`glob`）、`command`+`description`（`pwsh`）、`name`（`skill`）；③ 失败的 `tool/result` 可以 `isError: true` 而 `error` 整个是 `undefined`，失败原因必须回退到结果正文首行。
+- 同时回答了一个影响后续决策的问题：**上游目前不产生推理**（真样本 16/16 无 `reasoning` 块、嵌入式 stream 无 `reasoning-chunks`）。根因指向 route patch 未声明 `reasoningEfforts`（自定义模型 id 不在已安装目录里，而 `llm-pi-ai` 的规则是「省略该字段时保留已安装目录条目的能力」）。Think 行因此休眠，要让它出现属独立决策。
+- 明确不做：不引入官方 `@deepseek-ai/dsh-client-ui-*`（插件化 React，我们是 Vue）、不做 Trajectory 表格与 StatsPills、不做审批交互（官方 SDK 协议明说 server→client 请求从不发送）。同一轮多个 assistant step 的 turn 级分组也留到第二档，本档轮内仍会出现多个答案气泡。
+- 验证：新增 11 条用例（含真样本 fixture 断言）；定向 `121/121`；完整 focused `1545 tests / 1537 pass / 0 fail / 8 skipped`、Rust `422 passed / 0 failed / 1 ignored`、`exit=0`；`vue-tsc -b`、`pnpm run lint`、`git diff --check` 通过。**真机已验收通过**：过程行在真实 Desktop 上可见且刷新后仍在。
+
+## [2026-09-27] 根治 | comfy 成片「保存到项目失败」：content 端点判据有四处各写一份
+
+- 用户实测报错：`保存到项目失败：HTTP 下载失败: error sending request for url (http://frps:8796/files/20260927-09e058eaedbb4652.mp4)`。三段证据表明**成片已经生成成功**：适配器 `static/` 下有该 15.4 MB 文件、`adapter.log` 里任务 `task_20260927_4fed141a05f7` 执行 596 秒后 succeeded、App 的任务记录 `status = success`。所以坏的只有下载这一步。
+- 根因不在网络：`frps:8796` 是 **frp 隧道出口端口**（`comfy-adapter/deploy/frps.example.toml` 的 `allowPorts`），只绑在容器内部、不进 VPS 宿主端口表，Windows 宿主上的桌面客户端解析不了 `frps`，失败发生在 DNS 阶段。而「这条成片要不要走 NewAPI `/v1/videos/{id}/content` 回收」这个判断在代码里有**四份且互相矛盾**：首轮轮询（`creationMediaRuntime.ts`）按 apiStyle 白名单，`comfy-*` 走 content；保存/重试/刷新路径（`mediaTaskStore.ts`）只认 omni 或直接硬编码 `false`。对 `comfy-video` 两边结论相反，于是保存路径调用 `pollTask(..., false)`，把已经正确的 content 地址**覆盖成了适配器回的内网地址**。
+- 修法（根因，不是症状）：`usesNewApiContentEndpoint()` 收成唯一判据（`creationMediaPlan.ts`），四处 `pollTask` 调用点与重试守卫全部改用它；`normalizeAuthenticatedVideoResultUrl` 不再判断旧地址长得对不对，而是**按已知的上游任务号重建** content 地址——这样已经被写坏的历史任务点「重试保存」也能救回来，不需要重新生成、不产生新计费。
+- 排障方法记进热缓存：App 的任务记录在 `%APPDATA%\com.jiucaihezi.desktop\data\jiucaihezi.db` 的 `kv_store` → `jc_media_tasks_v1`（**双重 JSON 编码，要 parse 两次**），里面有 `resultUrl` / `upstreamTaskId` / `pollUrl` / `planSnapshot.apiStyle`，比看界面猜快得多；适配器侧看 `comfy-adapter/logs/adapter.log`。
+- 验证：新增 3 条用例（唯一判据单元测试、四处调用点契约测试、内网地址重建的行为测试，后两条先红后绿）；完整 focused `1548 tests / 1540 pass / 0 fail / 8 skipped`、Rust `422 passed / 0 failed / 1 ignored`；`vue-tsc -b`、`pnpm run lint`、`git diff --check` 通过。
+- **真机验收通过**：新任务（11:05）与那条被写坏的旧任务（10:18）**都落盘了**；旧任务的成片与适配器产物逐字节相同（15,386,931 bytes），所以“卡住”实际上是 14.7 MB 走“客户端 ← Cloudflare ← Nginx ← NewAPI ← frp 隧道 ← 本机”的 **3 分 11 秒**（≈ 80 KB/s），慢与卡在界面上无法区分。
+- 验收同时暴露两个独立缺陷（以前那个永远失败的地址让它们进不到下载阶段）：① 同一任务会**并发下载**（项目目录里同时出现两个同任务 `.part` 文件）；② 后到的失败会**覆盖“已保存”状态**——文件已在项目里，卡片却显示 `保存到项目失败：读取下载数据失败: error decoding response body`。两者已修复，见下条。
+
+## [2026-09-27] 根治 | 保存链路两项修复：并发下载与“失败覆盖成功”
+
+- 真机验收（15,386,931 bytes 逐字节一致）同时暴露两个独立缺陷，用户要求一起修：① 同一任务**并发下载**；② 后到的失败**覆盖已保存状态**。两者都是以前那个永远失败的地址挡住、进不到下载阶段才没发病的。
+- 缺陷②的根因是**异常被吞掉，状态被写了一半**：`downloadAndPersistMediaAsset` 自己 catch 掉下载异常、各自写 `assetStatus`/`errorMsg`，然后正常返回；上层 `completeMediaTask` 当它成功，又写了另一半（`progressText=完成`）。DB 里因此出现自相矛盾记录：`progressText=完成` + `assetStatus=remote-only` + `errorMsg=保存到项目失败：读取下载数据失败: error decoding response body` + `projectPath` 为空——“文件在但卡片红”就是这个组合。
+- 修法（单一职责点，不是打补丁）：① `savingTaskIds` 做成**唯一互斥点**（`completeMediaTask` 开头 `return`），并加**终态保护**（`assetStatus === 'local'` 且已有 `projectPath`/`assetUri` 时直接返回）；② 下载函数的异常一律上抋（原始 `cause`、HTTP 非 2xx、空结果都变成异常），失败状态**只由 `handleAssetDownloadFailure` 一处写**，`markWebMediaPersistenceFailure` 不再把 `local` 降级为 `remote-only`。
+- 证据：项目视频目录里同时存在两个同任务 `.part` 文件（下载过程中直接 `Get-ChildItem` 看到，12 秒后一个消失一个继续长）；同一条任务的 DB 记录如上自相矛盾。
+- 明确不做（用户 2026-09-27 决定）：保存阶段的**进度反馈**。已实现的 Rust 事件 `creation:download-progress` + 前端 `listen` 订阅已**回滚**，`src-tauri/`、`src/utils/projectMediaWriter.ts` 无改动，所以本次不需重新编 Rust、也不用重启 App。
+- 验证：媒体用例全绿（新增 2 条：失败必须走失败分支、保存单一互斥点与终态）；完整 focused `1550 tests / 1542 pass / 0 fail / 8 skipped`、Rust `422 passed / 0 failed / 1 ignored`、`vue-tsc -b` 通过。

@@ -3,16 +3,21 @@ import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
   applyDeepSeekAssistantStream,
+  deepSeekAssistantReasoning,
   deepSeekAssistantText,
   deepSeekContentBlocks,
   deepSeekHandoffTurns,
+  deepSeekMessageUsage,
   deepSeekModelInput,
   deepSeekPermissionMode,
   deepSeekProgress,
   deepSeekPrompt,
   deepSeekSessionId,
+  deepSeekSessionProcess,
+  deepSeekSessionReasoning,
   deepSeekSessionTurns,
   deepSeekTurnError,
+  DEEPSEEK_PROCESS_RESULT_LIMIT,
 } from '@/services/deepSeekHarness'
 
 test('@文件 maps to the official Harness full-access mode', () => {
@@ -161,7 +166,7 @@ test('DeepSeek Harness projects its official Session log into visible conversati
 })
 
 test('DeepSeek Harness streams visible text in order and lets committed text stay authoritative', () => {
-  const state = { attemptId: '', nextIndex: 0, text: '' }
+  const state = { attemptId: '', nextIndex: 0, text: '', reasoning: '', turn: 0, step: 0 }
   assert.equal(applyDeepSeekAssistantStream(state, {
     type: 'start', attemptId: 'attempt-1', turn: 1, step: 1,
   }), '')
@@ -183,16 +188,24 @@ test('DeepSeek Harness streams visible text in order and lets committed text sta
   }), undefined)
 })
 
-test('DeepSeek Harness exposes durable tool progress without leaking arguments', () => {
+// 本条的旧版本（2026-09-23）断言的是「不泄漏 arguments」：那时工具行只有中文标签。
+// 第一档把它换成白名单摘要（见 [[开发/韭菜盒子Harness输出显示对齐官方TDD-2026-09-27]] §3.2）：
+// 本地工作台里用户需要知道 agent 在动哪个文件、跑什么命令，而白名单之外的字段
+// （写入内容、文件正文、密钥）仍然不显示。
+test('DeepSeek Harness exposes tool progress with a whitelisted argument summary', () => {
   assert.deepEqual(deepSeekProgress({
-    type: 'tool/call', data: { callId: 'call-1', name: 'read', arguments: '{"path":"secret"}' },
-  }), { id: 'call-1', label: '读取文件', state: 'running' })
+    type: 'tool/call', data: { callId: 'call-1', name: 'read', arguments: '{"file_path":"wiki/方案.md","content":"不该上屏的正文"}' },
+  }), { id: 'call-1', label: '读取文件', state: 'running', summary: 'wiki/方案.md' })
   assert.deepEqual(deepSeekProgress({
     type: 'tool/result', data: { message: { toolCallId: 'call-1' } },
-  }), { id: 'call-1', state: 'done' })
+  }), { id: 'call-1', state: 'done', resultText: '', resultTruncated: false })
   assert.deepEqual(deepSeekProgress({
     type: 'tool/result', data: { message: { toolCallId: 'call-1', isError: true } },
-  }), { id: 'call-1', state: 'failed' })
+  }), { id: 'call-1', state: 'failed', resultText: '', resultTruncated: false })
+  assert.equal(
+    deepSeekProgress({ type: 'tool/result', data: { message: { toolCallId: 'call-1', isError: true, content: [{ type: 'text', text: 'Error: 读不了' }] } } })?.errorReason,
+    'Error: 读不了',
+  )
   assert.equal(deepSeekProgress({ type: 'assistant/message', data: {} }), undefined)
 })
 
@@ -317,6 +330,216 @@ test('Harness runtimes are owned per workspace instead of one replaceable app si
   assert.match(source, /ensureRuntime\(input, true\)/)
   assert.match(source, /if \(!active\.closing\) return active/)
   assert.doesNotMatch(source, /await stopRuntime\(await current\.ready\) \} catch/)
+})
+
+// ===== 输出显示第一档 =====
+// 方案与证据：[[开发/韭菜盒子Harness输出显示对齐官方TDD-2026-09-27]]
+
+/**
+ * 真样本 fixture（2026-09-27 从本机真实 Harness 会话经官方 `session/read` 裁剪脱敏）：
+ * 工作区 `D:\0925测试` → `D:\work\demo`，用户目录 → `C:\Users\tester`。
+ * 保留 turn 1 的前 3 个 step（glob / read_image 失败 / pwsh）与 turn 5 全量（read + 正文回答），
+ * 共 30 个事件、5 个 assistant/message、4 个 tool/call。
+ * 裁掉了 `assistant/message.data.stream`：本轮不消费，且它带完整正文分片会把 fixture 撑到 100KB。
+ */
+function toolsFixture(): any {
+  return JSON.parse(readFileSync('src/services/__tests__/fixtures/dh-session-tools.json', 'utf8'))
+}
+
+function fixtureEvent(type: string, match?: (event: any) => boolean): any {
+  const found = toolsFixture().events.find((event: any) => event.type === type && (!match || match(event)))
+  assert.ok(found, `fixture 里没有 ${type}`)
+  return found
+}
+
+test('真样本：今天的投影只留下有正文的轮次，工具步全部消失', () => {
+  // 这是第一档要修的那个差距本身：会话有 5 个 assistant/message、4 次工具调用，
+  // 而 deepSeekSessionTurns 只产出 2 个用户轮与 1 个正文轮——纯工具步（blocks=[tool-call]）
+  // 因为正文为空根本不产出 turn。本条同时锁住：过程改走并列 Map，不动这个函数。
+  const turns = deepSeekSessionTurns(toolsFixture())
+  assert.equal(turns.filter(turn => turn.role === 'user').length, 2)
+  assert.equal(turns.filter(turn => turn.role === 'assistant').length, 1)
+})
+
+test('真样本：工具步骤挂到发起该轮的用户消息上，纯工具轮不再消失', () => {
+  const fixture = toolsFixture()
+  const process = deepSeekSessionProcess(fixture)
+  const userTurnIds = deepSeekSessionTurns(fixture).filter(turn => turn.role === 'user').map(turn => turn.id)
+
+  // 归属必须是用户消息，不能是 assistant message：真样本里 turn 1 的 3 个工具步（完整会话是 10 个）
+  // 全部 blocks=[tool-call]、无正文，不产出任何 assistant 轮次；挂在它上面就等于过程永远不可见。
+  assert.deepEqual([...process.keys()], userTurnIds)
+  assert.equal(process.size, 2)
+  assert.equal([...process.values()].flat().length, 4)
+
+  const first = process.get(userTurnIds[0]) ?? []
+  assert.deepEqual(first.map(step => step.state), ['done', 'failed', 'done'])
+  assert.equal(first[0].id, 'call_3b20c7fc703141618082b1f83f38f1f1')
+  assert.equal(first[0].label, '查找文件')
+  assert.equal(first[0].summary, 'D:\\work\\demo')
+  assert.ok(Number(first[0].durationMs) > 0, '工具时长必须由 call→result 的时间算出')
+  assert.match(String(first[2].summary), /^Get-ChildItem -Recurse -File \| ForEach-Object \{/)
+  assert.ok(String(first[2].summary).endsWith('…'), '长命令必须截断')
+})
+
+test('没有真人发起人的轮次退回 assistant message 兜底，过程不丢', () => {
+  // goal 续轮这类注入式轮次不带 `source.kind === 'user'` 的消息，没有兜底就会连过程一起丢。
+  const snapshot = {
+    session: { id: 's1' },
+    events: [
+      { seq: 0, type: 'turn/start', data: { turn: 4 } },
+      { seq: 1, type: 'user/message', data: { id: 'ctx', source: { kind: 'runtime-context' }, content: [{ type: 'text', text: '上下文' }] } },
+      { seq: 2, type: 'assistant/message', data: { turn: 4, step: 1, message: { id: 'm9', content: [{ type: 'tool-call', id: 'c9', name: 'read', arguments: '{"file_path":"a.md"}' }] } } },
+      { seq: 3, type: 'tool/call', time: 100, data: { turn: 4, step: 1, callId: 'c9', name: 'read', arguments: '{"file_path":"a.md"}' } },
+      { seq: 4, type: 'tool/result', time: 160, data: { turn: 4, step: 1, message: { toolCallId: 'c9', content: [{ type: 'text', text: '内容' }] } } },
+    ],
+  }
+  const process = deepSeekSessionProcess(snapshot)
+  assert.deepEqual([...process.keys()], ['m9'])
+  assert.equal(process.get('m9')?.[0].durationMs, 60)
+  assert.equal(process.get('m9')?.[0].summary, 'a.md')
+})
+
+test('真样本：失败的工具结果没有 error.reason 时，原因回退到结果正文', () => {  // 实测该次 read_image 失败：isError=true 但 error 整个是 undefined，失败说明只在 text 块里。
+  // 只认 error.reason 的话，失败行会没有任何原因。
+  const failed = [...deepSeekSessionProcess(toolsFixture()).values()].flat().find(step => step.state === 'failed')
+  assert.ok(failed)
+  assert.match(String(failed.errorReason), /^Error: cannot read/)
+  assert.match(String(failed.errorReason), /does not declare image input/)
+})
+
+test('工具步骤带参数摘要与状态，摘要只取白名单字段', () => {
+  const call = fixtureEvent('tool/call', event => event.data.name === 'glob')
+  assert.deepEqual(deepSeekProgress(call), {
+    id: call.data.callId,
+    label: '查找文件',
+    state: 'running',
+    summary: 'D:\\work\\demo',
+    startedAt: call.time,
+  })
+
+  const result = fixtureEvent('tool/result', event => event.data.message.toolCallId === call.data.callId)
+  const settled = deepSeekProgress(result)
+  assert.equal(settled?.id, call.data.callId)
+  assert.equal(settled?.state, 'done')
+  assert.equal(settled?.endedAt, result.time)
+  assert.match(String(settled?.resultText), /^wiki\\index\.md/)
+  assert.equal(settled?.resultTruncated, false)
+})
+
+test('工具结果超长时截断并标记，摘要候选字段按实操键名兜底', () => {
+  // 实测键名：read / read_image 用 file_path（不是 path），glob 用 path+pattern，
+  // pwsh 用 command+description，skill 用 name。
+  assert.equal(
+    deepSeekProgress({ type: 'tool/call', data: { callId: 'c1', name: 'read', arguments: '{"file_path":"src/a.ts"}' } })?.summary,
+    'src/a.ts',
+  )
+  assert.equal(
+    deepSeekProgress({ type: 'tool/call', data: { callId: 'c2', name: 'skill', arguments: '{"name":"jc-daoju"}' } })?.summary,
+    'jc-daoju',
+  )
+  // 参数不是合法 JSON 时必须退化为空摘要而不是抛错。
+  assert.equal(
+    deepSeekProgress({ type: 'tool/call', data: { callId: 'c3', name: 'read', arguments: '{not json' } })?.summary,
+    '',
+  )
+  // 白名单之外的字段不显示（写入内容、密钥等）。
+  assert.equal(
+    deepSeekProgress({ type: 'tool/call', data: { callId: 'c4', name: 'write', arguments: '{"file_path":"a.md","content":"秘密正文"}' } })?.summary,
+    'a.md',
+  )
+  const long = deepSeekProgress({ type: 'tool/call', data: { callId: 'c5', name: 'write', arguments: `{"file_path":"${'x'.repeat(500)}"}` } })
+  assert.equal(String(long?.summary).length, 81)
+  assert.ok(String(long?.summary).endsWith('…'))
+
+  const longResult = deepSeekProgress({
+    type: 'tool/result',
+    data: { message: { toolCallId: 'c5', content: [{ type: 'text', text: 'y'.repeat(9_000) }] } },
+  })
+  assert.equal(longResult?.resultTruncated, true)
+  assert.equal(String(longResult?.resultText).length, DEEPSEEK_PROCESS_RESULT_LIMIT + 1)
+})
+
+test('assistant 消息里的 reasoning 块按顺序取出，正文取值不变', () => {
+  // 形状来自官方 `dsh-llm` 的 `ReasoningBlock`：它是 `content` 里的普通块，
+  // 与 tool-call 块同级。本机真样本（16/16 assistant/message）尚无推理，
+  // 上游是否产生推理的记录见 TDD §2.3 第 4 条。
+  const event = {
+    type: 'assistant/message',
+    data: {
+      turn: 1,
+      step: 1,
+      message: {
+        id: 'm1',
+        content: [
+          { type: 'reasoning', text: '先看目录' },
+          { type: 'text', text: '正文一' },
+          { type: 'reasoning', text: '再确认一次' },
+          { type: 'text', text: '正文二' },
+        ],
+      },
+    },
+  }
+  assert.equal(deepSeekAssistantReasoning(event), '先看目录再确认一次')
+  assert.equal(deepSeekAssistantText(event), '正文一正文二')
+  assert.equal(deepSeekAssistantReasoning({ type: 'tool/call', data: {} }), '')
+  assert.equal(deepSeekAssistantReasoning({ type: 'assistant/message', data: { message: { content: [{ type: 'text', text: '无推理' }] } } }), '')
+})
+
+test('快照投影把推理按发起该轮的用户消息挂出来，多 step 按顺序拼接', () => {
+  const snapshot = {
+    session: { id: 's1' },
+    events: [
+      { seq: 0, type: 'turn/start', data: { turn: 1 } },
+      { seq: 1, type: 'user/message', data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: '问' }] } },
+      { seq: 2, type: 'assistant/message', data: { turn: 1, step: 1, message: { id: 'm1', content: [{ type: 'reasoning', text: '先想' }] } } },
+      { seq: 3, type: 'assistant/message', data: { turn: 1, step: 2, message: { id: 'm2', content: [{ type: 'reasoning', text: '再想' }, { type: 'text', text: '答案' }] } } },
+    ],
+  }
+  assert.deepEqual([...deepSeekSessionReasoning(snapshot).entries()], [['u1', '先想\n\n再想']])
+  // 没有推理的现实情况下返回空表，不造假条目。
+  assert.deepEqual([...deepSeekSessionReasoning(toolsFixture()).entries()], [])
+  assert.deepEqual([...deepSeekSessionReasoning({ session: { id: 's' }, events: [] }).entries()], [])
+})
+
+test('usage 只在官方报告时给出，缺省不填 0 也不估算', () => {
+  assert.deepEqual(deepSeekMessageUsage(fixtureEvent('assistant/message')), {
+    inputTokens: 7128,
+    outputTokens: 131,
+    totalTokens: 7259,
+  })
+  assert.equal(deepSeekMessageUsage({ type: 'assistant/message', data: { message: { id: 'm' } } }), undefined)
+  assert.equal(deepSeekMessageUsage({ type: 'tool/call', data: {} }), undefined)
+})
+
+test('流式帧分开累积推理与正文，正文增量不受推理分片影响', () => {
+  const state = { attemptId: '', nextIndex: 0, text: '', reasoning: '', turn: 0, step: 0 }
+  assert.equal(applyDeepSeekAssistantStream(state, {
+    type: 'start', attemptId: 'attempt-9', revision: 1, turn: 3, step: 2,
+  }), '')
+  assert.equal(state.turn, 3)
+  assert.equal(state.step, 2)
+  assert.equal(applyDeepSeekAssistantStream(state, {
+    type: 'chunk', attemptId: 'attempt-9', revision: 1, index: 0, time: 1,
+    chunk: { type: 'reasoning-delta', index: 0, text: '想想' },
+  }), undefined)
+  assert.equal(state.reasoning, '想想')
+  assert.equal(applyDeepSeekAssistantStream(state, {
+    type: 'chunk', attemptId: 'attempt-9', revision: 1, index: 1, time: 2,
+    chunk: { type: 'text-delta', index: 0, text: '开始' },
+  }), '开始')
+  assert.equal(applyDeepSeekAssistantStream(state, {
+    type: 'chunk', attemptId: 'attempt-9', revision: 1, index: 2, time: 3,
+    chunk: { type: 'reasoning-delta', index: 0, text: '完' },
+  }), undefined)
+  assert.equal(state.reasoning, '想想完')
+  assert.equal(state.text, '开始')
+  // tool-call-delta / usage / finish 只推进序号，不产生正文。
+  assert.equal(applyDeepSeekAssistantStream(state, {
+    type: 'chunk', attemptId: 'attempt-9', revision: 1, index: 3, time: 4,
+    chunk: { type: 'usage', usage: { inputTokens: 1, outputTokens: 2 } },
+  }), undefined)
+  assert.equal(state.nextIndex, 4)
 })
 
 test('Harness runtime registry survives a module hot replacement', () => {
