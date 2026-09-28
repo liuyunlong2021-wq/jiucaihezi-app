@@ -13,7 +13,7 @@ test('控制器只发纯文字：没有附件、@ 提及或文件引用入口', 
   assert.match(session, /<textarea/)
   assert.match(session, /emit\('send', text\)/)
   // 合同 §7.2 / §12.2：首期不上传附件、不引用文件、不打开 @ 能力。
-  assert.doesNotMatch(session, /attachment|attachments|mention|selectMention|@文件|@影音|@排版|persistentAttachments/)
+  assert.doesNotMatch(session, /attachment|attachments|mention|selectMention|permissionLabel|@影音|@排版|persistentAttachments/)
 })
 
 test('待审批动作的三个决定都接到当前审批项的精确 ID', () => {

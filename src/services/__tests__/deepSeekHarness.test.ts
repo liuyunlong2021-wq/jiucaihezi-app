@@ -9,7 +9,10 @@ import {
   deepSeekHandoffTurns,
   deepSeekMessageUsage,
   deepSeekModelInput,
-  deepSeekPermissionMode,
+  deepSeekPermissionFromChips,
+  deepSeekPermissionChip,
+  DEEPSEEK_DEFAULT_PERMISSION_TIER,
+  DEEPSEEK_PERMISSION_TIERS,
   deepSeekProgress,
   deepSeekPrompt,
   deepSeekSessionId,
@@ -22,8 +25,19 @@ import {
 } from '@/services/deepSeekHarness'
 
 test('@文件 maps to the official Harness full-access mode', () => {
-  assert.equal(deepSeekPermissionMode(false), 'workspace-write')
-  assert.equal(deepSeekPermissionMode(true), 'danger-full-access')
+  // 三档逐字用官方 zh 字典；默认档与官方 sandbox-policy 缺省值一致。
+  assert.deepEqual(
+    DEEPSEEK_PERMISSION_TIERS.map(option => [option.tier, option.label]),
+    [['read-only', '仅可查看'], ['workspace-write', '工作区内修改'], ['danger-full-access', '完全权限']],
+  )
+  assert.equal(DEEPSEEK_DEFAULT_PERMISSION_TIER, 'workspace-write')
+  // 档位 ↔ 持久化芯片：默认档不落芯片，`file` 与旧会话的「开」一一对应。
+  assert.equal(deepSeekPermissionChip('workspace-write'), undefined)
+  assert.equal(deepSeekPermissionChip('danger-full-access'), 'file')
+  assert.equal(deepSeekPermissionChip('read-only'), 'file:read-only')
+  assert.equal(deepSeekPermissionFromChips(['file', 'media']), 'danger-full-access')
+  assert.equal(deepSeekPermissionFromChips(['file:read-only']), 'read-only')
+  assert.equal(deepSeekPermissionFromChips(['media', 'av']), 'workspace-write')
 })
 
 test('DeepSeek Harness keeps one stable namespaced session per conversation', () => {
@@ -287,7 +301,7 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /maxRetries: 1/)
   assert.match(source, /- SERVER/)
   assert.match(source, /PI_AI_ERROR/)
-  assert.match(source, /DSH_PERMISSION_MODE: deepSeekPermissionMode\(input\.fileAccessEnabled\)/)
+  assert.match(source, /DSH_PERMISSION_MODE: input\.permissionTier \?\? DEEPSEEK_DEFAULT_PERMISSION_TIER/)
   assert.match(source, /resolve_creation_mcp/)
   assert.match(source, /@deepseek-ai\/dsh-mcp-client/)
   assert.match(source, /JIUCAIHEZI_PROXY_CAPABILITIES/)
@@ -611,10 +625,10 @@ test('an existing session is switched to the @文件 permission instead of keepi
   // pinInitialPermission 保留自己的开关，所以打开 @文件 也松不开沙箱——写 ~/.agents/skills
   // 会拿到 [sandbox: file access denied under workspace-write mode]，用户看到的就是「没有权限」。
   assert.match(source, /async function alignSessionPermission\(/)
-  assert.match(source, /await alignSessionPermission\(active, wireSessionId, input\.fileAccessEnabled\)/)
+  assert.match(source, /await alignSessionPermission\(active, wireSessionId, input\.permissionTier\)/)
   // 每个 (runtime, 会话) 只切一次：runtimeKey 已经含权限模式，模式一变就是新 runtime。
   assert.match(source, /if \(active\.permissions\.get\(sessionId\) === preset\) return/)
-  assert.match(source, /const preset = deepSeekPermissionMode\(fileAccessEnabled\)/)
+  assert.match(source, /preset: DeepSeekPermissionTier = DEEPSEEK_DEFAULT_PERMISSION_TIER/)
   // 切换只能走官方命令面：SDK 通道只暴露 session/prompt|list|read，没有任何权限方法。
   assert.match(prepare, /const commandInject = 'const inject = \["agents", "sessionQuery", "commands"\];'/)
   assert.match(prepare, /case "session\/permission": return this\.permission\(params\);/)

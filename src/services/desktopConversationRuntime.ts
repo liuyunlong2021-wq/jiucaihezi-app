@@ -9,6 +9,7 @@ import {
   DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
   DEEPSEEK_HARNESS_SESSION_MARKER,
   deepSeekHandoffTurns,
+  deepSeekPermissionChip,
   deepSeekPrompt,
   deepSeekSessionExists,
   deepSeekSessionProcess,
@@ -18,6 +19,7 @@ import {
   readDeepSeekHarnessSession,
   runDeepSeekHarness,
   type DeepSeekHarnessInput,
+  type DeepSeekPermissionTier,
   type DeepSeekSessionSnapshot,
 } from './deepSeekHarness'
 import { DesktopRemoteHost } from './desktopRemoteHost'
@@ -79,7 +81,8 @@ type DesktopConversationSelection = {
   resourcePath: string
   modelId: string
   modelProviderId?: string
-  fileAccessEnabled: boolean
+  /** 本会话的沙箱档位（官方三档）。不过线：`desktopConversationContext()` 不发它。 */
+  permissionTier: DeepSeekPermissionTier
   skillNames?: string[]
   mediaSelected?: boolean
   avSelected?: boolean
@@ -196,7 +199,7 @@ function startDesktopRemoteTextRun(text: string, execute: RemoteExecution) {
     id: `turn-${crypto.randomUUID()}`, role: 'user', content: text,
     createdAt: new Date().toISOString(), skillNames: selected.skillNames || [],
     toolChips: [DEEPSEEK_HARNESS_SESSION_MARKER,
-      ...(selected.fileAccessEnabled ? ['file'] : []),
+      ...(deepSeekPermissionChip(selected.permissionTier) ? [deepSeekPermissionChip(selected.permissionTier)!] : []),
       ...(selected.mediaSelected ? ['media'] : []),
       ...(selected.avSelected ? ['av'] : []),
       ...(selected.scene3dSelected ? ['scene3d'] : []),
@@ -242,7 +245,7 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
     cwd: selected.owner, sessionId: selected.conversationId, message: '',
     model: config.model, apiBase: config.apiBase, apiKey: config.apiKey,
     imageInput: resolveModelInputModalities({ id: config.model, providerId: selected.modelProviderId }).includes('image'),
-    fileAccessEnabled: selected.fileAccessEnabled,
+    permissionTier: selected.permissionTier,
     mediaSelected: selected.mediaSelected, avSelected: selected.avSelected,
     scene3dSelected: selected.scene3dSelected, mcpServerIds: selected.mcpServerIds,
   }
@@ -385,7 +388,7 @@ export async function readDesktopConversationSession(sessionId: string) {
     apiBase: config.apiBase,
     apiKey: config.apiKey,
     imageInput: resolveModelInputModalities({ id: config.model, providerId: selected.modelProviderId }).includes('image'),
-    fileAccessEnabled: selected.fileAccessEnabled,
+    permissionTier: selected.permissionTier,
   }
   const sessions = await listDeepSeekHarnessSessions(query)
   assertSelectedSession(sessionId, selected)

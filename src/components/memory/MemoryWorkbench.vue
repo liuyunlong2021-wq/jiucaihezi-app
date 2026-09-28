@@ -6,6 +6,13 @@ import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
 import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
 import MemorySettings from './MemorySettings.vue'
+import {
+  DEEPSEEK_DEFAULT_PERMISSION_TIER,
+  DEEPSEEK_PERMISSION_TIERS,
+  deepSeekPermissionChip,
+  deepSeekPermissionFromChips,
+  type DeepSeekPermissionTier,
+} from '@/services/deepSeekHarness'
 import MemoryMarkdown from './MemoryMarkdown.vue'
 import EvalReportViewer from './EvalReportViewer.vue'
 import PromptSelectionRevision from './PromptSelectionRevision.vue'
@@ -181,7 +188,6 @@ const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
-const fileToolsSelected = ref(false)
 // 文件能力合同：授权只来自用户在消息里给出的绝对路径，本会话内累积有效。
 const authorizedPaths = ref<string[]>([])
 const selectedMcpToolNames = ref<string[]>([])
@@ -191,8 +197,67 @@ const avSelected = ref(false)
 const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
+/** 本会话的沙箱档位（官方三档，默认「工作区内修改」）。 */
+const permissionTier = ref<DeepSeekPermissionTier>(DEEPSEEK_DEFAULT_PERMISSION_TIER)
+/**
+ * 权限菜单。
+ *
+ * **必须 fixed 定位**：按钮排在 `overflow-x: auto` 的 `.memory-command-strip` 里，绝对定位的
+ * 弹层会被容器裁掉本体（看起来就是「点了没反应」）—— 和 `chipTip` 同一个理由。
+ */
+const permissionMenu = ref<{ left: number; bottom: number } | null>(null)
+
+/** 当前档位的中文名（官方 zh 字典）。 */
+function permissionTierLabel(): string {
+  return DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === permissionTier.value)?.label || ''
+}
+
+/**
+ * 上方已选能力芯片上的权限名。
+ *
+ * 默认档不占位（与旧行为一致）；非默认档把当前档写在脸上 —— 用户报的问题就是「不知道它
+ * 现在是开还是关」。按钮本身一律只写「权限」，宽度与旁边 @Skill/@排版 一致。
+ */
+function permissionLabel(): string {
+  return `权限：${permissionTierLabel()}`
+}
+
+function togglePermissionMenu(event: MouseEvent) {
+  if (permissionMenu.value) {
+    permissionMenu.value = null
+    return
+  }
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  // 向上弹：用 bottom 锚在按钮上沿，不用 transform —— 这个文件的定位约束里明确禁了 translateY。
+  permissionMenu.value = { left: rect.left, bottom: window.innerHeight - rect.top + 8 }
+}
+
+/**
+ * 「完全权限」的二次确认。
+ *
+ * 逐字对齐官方 `dsh-client-ui-permission-presets` 的 `confirm.*`：选 `danger-full-access` 不直接
+ * 生效，先问一次（官方那一档捆绑的是 `approval: never`，点下去就是“以后不再问”，不能手滑）。
+ */
+const permissionConfirm = ref(false)
+
+function choosePermission(tier: DeepSeekPermissionTier) {
+  permissionMenu.value = null
+  if (tier === 'danger-full-access' && permissionTier.value !== tier) {
+    permissionConfirm.value = true
+    return
+  }
+  permissionTier.value = tier
+}
+
+function confirmFullAccess() {
+  permissionTier.value = 'danger-full-access'
+  permissionConfirm.value = false
+}
+
 const selectedToolChips = computed(() => [
-  { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
+  ...permissionTier.value === DEEPSEEK_DEFAULT_PERMISSION_TIER
+    ? []
+    : [{ id: 'file', label: permissionLabel(), icon: 'description', selected: true }],
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
     return {
@@ -213,7 +278,8 @@ function toolChipIds(): string[] {
   const ids: string[] = []
   if (desktopOnlyRuntime) ids.push(DEEPSEEK_HARNESS_SESSION_MARKER)
   if (jevSelected.value) ids.push('jev')
-  if (fileToolsSelected.value) ids.push('file')
+  const permission = deepSeekPermissionChip(permissionTier.value)
+  if (permission) ids.push(permission)
   if (mediaSelected.value) ids.push('media')
   if (avSelected.value) ids.push('av')
   if (scene3dSelected.value) ids.push('scene3d')
@@ -224,7 +290,8 @@ function toolChipIds(): string[] {
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
   jevSelected.value = next.has('jev')
-  fileToolsSelected.value = next.has('file')
+  // 芯片串是会话里持久化的唯一真相源：没芯片 = 默认档，详见 deepSeekPermissionChip。
+  permissionTier.value = deepSeekPermissionFromChips(next)
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
   mediaSelected.value = next.has('media')
   avSelected.value = next.has('av')
@@ -783,8 +850,8 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
   return '程序已返回真实执行回执'
 }
 const toolCommands = [
+  // 权限排第一位：它不是「启用某能力」，而是决定其余能力能碰到什么（官方也把权限放在最前）。
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
-  { id: 'file', label: '@文件', icon: 'description', description: '读写权限' },
   { id: 'media', label: '@排版', icon: 'image', description: '创建文档、网页、长图和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
@@ -935,8 +1002,9 @@ function requestSkillCreatorEdit(payload: unknown) {
   const skillPath = String(data?.skillPath || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
   if (!/^[a-z0-9][a-z0-9-]*$/i.test(skillId)) return
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
-  // 文件能力合同：@文件 是唯一文件开关；Skill 目录的绝对路径就是本会话的读写授权
-  fileToolsSelected.value = true
+  // 文件能力合同：这个开关（旧称 @文件）是唯一的本机操作开关；Skill 目录的绝对路径就是本会话的
+  // 读写授权。产品入口代用户给授权 => 直接给「完全权限」，否则写不进 ~/.agents/skills。
+  permissionTier.value = 'danger-full-access'
   const target = /^(?:\/|[A-Za-z]:\/)/.test(skillPath) ? skillPath : ''
   const prefix = `请修改这个 Skill：\n\nSkill 目录：\n${target || '（把 Skill 文件夹的完整绝对路径粘贴到这里）'}\n\n修改要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
@@ -953,7 +1021,7 @@ function requestSkillCreatorCreate(payload: unknown) {
   const target = /^(?:\/|[A-Za-z]:\/)/.test(skillsRoot) ? skillsRoot : ''
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
   // 文件能力合同：产品入口代用户给出中央 Skill 根目录的绝对路径，就是本次的写授权
-  fileToolsSelected.value = true
+  permissionTier.value = 'danger-full-access'
   const prefix = `请新建一个 Skill：\n\nSkill 根目录：\n${target || '（把中央 Skill 根目录的完整绝对路径粘贴到这里）'}\n\n新建要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
   setEditorText(composerRef.value, input.value)
@@ -1147,7 +1215,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
           apiBase: config.apiBase,
           apiKey: config.apiKey,
           imageInput: harnessImageInput(config.model),
-          fileAccessEnabled: fileToolsSelected.value,
+          permissionTier: permissionTier.value,
         })
         activeConversation = {
           ...activeConversation,
@@ -1387,7 +1455,7 @@ async function copyTurn(turn: ConversationTurn) {
 }
 
 function insertCommand(command: { id: string; label: string }) {
-  if (command.id === 'file') fileToolsSelected.value = true
+  // `file` 不在这里：它不是一个“往输入框插一句话”的指令，点它走权限菜单（见模板）。
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
   if (command.id === 'scene3d') scene3dSelected.value = true
@@ -1409,7 +1477,7 @@ function insertCommand(command: { id: string; label: string }) {
 
 function enableTool(id: string) {
   if (id === 'jev') jevSelected.value = true
-  if (id === 'file') fileToolsSelected.value = true
+  if (id === 'file') permissionTier.value = 'danger-full-access'
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
   if (id.startsWith('mcp__') && !selectedMcpToolNames.value.includes(id)) selectedMcpToolNames.value.push(id)
   if (id === 'media') mediaSelected.value = true
@@ -1419,7 +1487,7 @@ function enableTool(id: string) {
 
 function disableTool(id: string) {
   if (id === 'jev') jevSelected.value = false
-  if (id === 'file') fileToolsSelected.value = false
+  if (id === 'file') permissionTier.value = DEEPSEEK_DEFAULT_PERMISSION_TIER
   if (id.startsWith('mcp__')) {
     selectedMcpToolNames.value = selectedMcpToolNames.value.filter(item => item !== id)
     return
@@ -1882,8 +1950,8 @@ async function send(remoteText?: string) {
     ),
   ]
   // 文件能力合同：开关关掉就是收权，收权必须可见——静默收权会让用户以为文件能力还在。
-  if (!fileToolsSelected.value && authorizedPaths.value.length)
-    contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但 @文件 已关闭：本轮不会读写这些路径。`
+  if (permissionTier.value !== 'danger-full-access' && authorizedPaths.value.length)
+    contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但权限档位是「${permissionTierLabel()}」：本轮不会写这些路径。`
 
   const runKey = memoryRunKey(active.resource.owner, active.resource.path)
   let run: MemoryRun
@@ -1970,7 +2038,7 @@ async function send(remoteText?: string) {
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
       imageInput: dhImageInput,
-      fileAccessEnabled: fileToolsSelected.value,
+      permissionTier: permissionTier.value,
       mediaSelected: mediaSelected.value,
       avSelected: avSelected.value,
       scene3dSelected: scene3dSelected.value,
@@ -1987,7 +2055,8 @@ async function send(remoteText?: string) {
       attachments: requestAttachments,
       files: activeReferencedFiles,
       selectedSkillNames: skillSnapshot,
-      fileToolsSelected: fileToolsSelected.value,
+      // 自研内核（MemoryChatInput）只有布尔开关，映射成它的语义：只有「完全权限」算开。
+      fileToolsSelected: permissionTier.value === 'danger-full-access',
       authorizedPaths: authorizedPaths.value,
       selectedMcpToolNames: selectedMcpToolNames.value,
       mediaSelected: mediaSelected.value,
@@ -2043,7 +2112,7 @@ async function send(remoteText?: string) {
           apiBase: dhConfig!.apiBase,
           apiKey: dhConfig!.apiKey,
           imageInput: dhImageInput,
-          fileAccessEnabled: fileToolsSelected.value,
+          permissionTier: permissionTier.value,
           mediaSelected: mediaSelected.value,
           avSelected: avSelected.value,
           scene3dSelected: scene3dSelected.value,
@@ -2175,8 +2244,7 @@ watch([
   () => projectStore.projectName.value,
   () => agentStore.currentModel,
   () => selectedModel()?.providerId,
-  fileToolsSelected,
-  selectedSkillNames,
+  permissionTier,
   mediaSelected,
   avSelected,
   scene3dSelected,
@@ -2192,7 +2260,7 @@ watch([
     resourcePath: active.resource.path,
     modelId: agentStore.currentModel,
     modelProviderId: selectedModel()?.providerId,
-    fileAccessEnabled: fileToolsSelected.value,
+    permissionTier: permissionTier.value,
     skillNames: selectedSkillNames.value.slice(),
     mediaSelected: mediaSelected.value,
     avSelected: avSelected.value,
@@ -3655,6 +3723,22 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
             <button class="icon-button" title="添加附件" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
             <div class="memory-command-strip" aria-label="常用指令">
+              <!--
+                权限排第一位，而且**不是 `insertCommand` 那种“往输入框插一句话”的指令**：
+                点它弹出官方那三档。旁边五个 `@` 是启用某能力，这一个决定其余能力能碰到什么。
+                菜单复用已有的 `.memory-command-more` / `.memory-command-menu`（向上弹的那一套）。
+              -->
+              <div class="memory-command-more">
+                <button
+                  type="button"
+                  aria-haspopup="menu"
+                  :aria-expanded="permissionMenu ? true : undefined"
+                  :aria-label="`权限：${permissionTierLabel()}`"
+                  @click="togglePermissionMenu($event)"
+                >
+                  <JcIcon name="description" /><span>权限</span>
+                </button>
+              </div>
               <button v-for="command in primaryCommands" :key="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
@@ -3663,6 +3747,37 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
             <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send()"><JcIcon name="arrow-upward" /></button>
           </div>
+        </div>
+        <div
+          v-if="permissionConfirm"
+          class="memory-permission-menu memory-permission-confirm"
+          role="alertdialog"
+          aria-modal="false"
+        >
+          <strong>确认启用完全权限？</strong>
+          <p>启用完全权限后，智能体将减少确认步骤，并且可以直接执行更多操作，包括敏感操作、文件修改或外部命令。仅建议在你信任当前任务时使用。</p>
+          <div class="memory-permission-confirm-actions">
+            <button type="button" @click="permissionConfirm = false">取消</button>
+            <button type="button" class="primary" @click="confirmFullAccess">启用完全权限</button>
+          </div>
+        </div>
+        <div
+          v-if="permissionMenu"
+          class="memory-permission-menu"
+          role="menu"
+          :style="{ left: `${permissionMenu.left}px`, bottom: `${permissionMenu.bottom}px` }"
+        >
+          <button
+            v-for="option in DEEPSEEK_PERMISSION_TIERS"
+            :key="option.tier"
+            type="button"
+            role="menuitemradio"
+            :aria-checked="permissionTier === option.tier"
+            @click="choosePermission(option.tier)"
+          >
+            <JcIcon :name="permissionTier === option.tier ? 'check_circle' : 'circle'" />
+            <span>{{ option.label }}<small class="memory-permission-note">{{ option.note }}</small></span>
+          </button>
         </div>
         <div
           v-if="chipTip"
@@ -4008,6 +4123,15 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
 .memory-command-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
 .memory-command-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
+.memory-permission-note { display: block; margin-top: 2px; color: var(--ink3); font-size: 11px; }
+.memory-permission-menu { position: fixed; z-index: 80; min-width: 200px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
+.memory-permission-confirm { left: 50%; bottom: 120px; width: min(420px, calc(100vw - 40px)); margin-left: calc(min(420px, 100vw - 40px) / -2); padding: 14px; }
+.memory-permission-confirm p { margin: 8px 0 12px; color: var(--ink2); font-size: 12px; line-height: 1.6; }
+.memory-permission-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.memory-permission-confirm-actions button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-permission-confirm-actions button.primary { border-color: transparent; background: var(--olive); color: #fff; }
+.memory-permission-menu button { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
+.memory-permission-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
 .memory-input-row { position: relative; display: grid; min-width: 0; gap: 8px; padding: 10px; }
 .memory-input-area { display: flex; min-width: 0; min-height: 76px; align-items: flex-start; padding: 7px 4px 0; }
 .memory-action-row { display: flex; min-width: 0; align-items: center; gap: 4px; }

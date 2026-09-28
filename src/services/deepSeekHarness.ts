@@ -42,7 +42,8 @@ export interface DeepSeekHarnessInput {
    * 请求，`read_image` 也会被直接拒掉，于是「看一眼图片」退化成找文件、找 OCR。
    */
   imageInput?: boolean
-  fileAccessEnabled?: boolean
+  /** 本会话的沙箱档位；不传即官方默认档。 */
+  permissionTier?: DeepSeekPermissionTier
   mediaSelected?: boolean
   avSelected?: boolean
   scene3dSelected?: boolean
@@ -157,8 +158,49 @@ const harnessRegistry: HarnessRegistry = ((
 const runtimes = harnessRegistry.runtimes
 const runningSessions = harnessRegistry.runningSessions
 
-export function deepSeekPermissionMode(fileAccessEnabled = false): 'workspace-write' | 'danger-full-access' {
-  return fileAccessEnabled ? 'danger-full-access' : 'workspace-write'
+/**
+ * 沙箱档位。官方 base profile（`@deepseek-ai/dsh-base/cordis.patch.yml` 的 `permission` 条目）
+ * 已经配好这三档，官方客户端也叫这三档（仅可查看 / 工作区内修改 / 完全权限）。我们只负责把
+ * 选择传下去 —— 后端不需要改任何配置。
+ */
+export type DeepSeekPermissionTier = 'read-only' | 'workspace-write' | 'danger-full-access'
+
+/**
+ * 权限选择器的三档，顺序即官方 base profile 的顺序。
+ *
+ * `label` 逐字用官方 `dsh-client-ui-permission-presets` 的 zh 字典；`note` 用官方 config 里
+ * 那两档 description 的口径补上「越界怎么办」，因为那才是三档真正的区别。
+ */
+export const DEEPSEEK_PERMISSION_TIERS: ReadonlyArray<{
+  tier: DeepSeekPermissionTier
+  label: string
+  note: string
+}> = [
+  { tier: 'read-only', label: '仅可查看', note: '不改动任何文件' },
+  { tier: 'workspace-write', label: '工作区内修改', note: '只能改工作区内的文件，越界会询问' },
+  { tier: 'danger-full-access', label: '完全权限', note: '本机文件不再受限，也不再询问' },
+]
+
+/** 默认档：官方 `sandbox-policy.mode` 的缺省值，也是审批策略为 `ask` 的那一档。 */
+export const DEEPSEEK_DEFAULT_PERMISSION_TIER: DeepSeekPermissionTier = 'workspace-write'
+
+/**
+ * 档位 → 落盘芯片。
+ *
+ * 默认档不落芯片（与旧会话一致：没芯片 = 默认档）；`danger-full-access` 仍写 `file` ——
+ * 旧会话里 `file` 的意思就是「开」，语义一一对应，不需要迁移；`read-only` 是新档，
+ * 用 `file:read-only`。芯片串是会话里持久化的唯一真相源，所以这两个函数成对写在一起。
+ */
+export function deepSeekPermissionChip(tier: DeepSeekPermissionTier): string | undefined {
+  if (tier === 'danger-full-access') return 'file'
+  return tier === 'read-only' ? 'file:read-only' : undefined
+}
+
+/** 落盘芯片 → 档位。见 {@link deepSeekPermissionChip}。 */
+export function deepSeekPermissionFromChips(ids: Iterable<string>): DeepSeekPermissionTier {
+  const chips = new Set(ids)
+  if (chips.has('file')) return 'danger-full-access'
+  return chips.has('file:read-only') ? 'read-only' : DEEPSEEK_DEFAULT_PERMISSION_TIER
 }
 
 /**
@@ -176,7 +218,7 @@ function runtimeKey(input: DeepSeekHarnessInput): string {
     input.apiBase,
     input.model,
     deepSeekModelInput(input.imageInput).join('+'),
-    deepSeekPermissionMode(input.fileAccessEnabled),
+    input.permissionTier ?? DEEPSEEK_DEFAULT_PERMISSION_TIER,
     input.mediaSelected ? 'media' : '',
     input.avSelected ? 'av' : '',
     input.scene3dSelected ? '3d' : '',
@@ -888,7 +930,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
       JIUCAIHEZI_DH_API_KEY: input.apiKey,
       DSH_HOME: routeDir,
       DSH_TELEMETRY_MODE: 'DISABLED',
-      DSH_PERMISSION_MODE: deepSeekPermissionMode(input.fileAccessEnabled),
+      DSH_PERMISSION_MODE: input.permissionTier ?? DEEPSEEK_DEFAULT_PERMISSION_TIER,
       ...bundledSkills === undefined ? {} : { DSH_BUNDLED_SKILL_DIR: bundledSkills },
     },
   })
@@ -1004,7 +1046,7 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
 }
 
 /**
- * 把当前会话的权限拉齐到 `@文件` 的语义。
+ * 把当前会话的权限拉齐到选中的档位。
  *
  * 会话把权限记成 durable 事实（`permission/preset` + `sandbox/mode` + `approval/policy`，
  * 实测老会话里就是 workspace-write / workspace-write / ask），进程级 `DSH_PERMISSION_MODE`
@@ -1022,9 +1064,8 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
 async function alignSessionPermission(
   active: Runtime,
   sessionId: string,
-  fileAccessEnabled = false,
+  preset: DeepSeekPermissionTier = DEEPSEEK_DEFAULT_PERMISSION_TIER,
 ): Promise<void> {
-  const preset = deepSeekPermissionMode(fileAccessEnabled)
   if (active.permissions.get(sessionId) === preset) return
   const requestId = crypto.randomUUID()
   const completed = new Promise<unknown>((resolve, reject) => {
@@ -1114,7 +1155,7 @@ async function runDeepSeekHarnessTurn(
   input.signal?.addEventListener('abort', abort, { once: true })
   try {
     input.onStatus?.('正在启动')
-    await alignSessionPermission(active, wireSessionId, input.fileAccessEnabled)
+    await alignSessionPermission(active, wireSessionId, input.permissionTier)
     const completed = new Promise<string>((resolve, reject) => {
       active.runs.set(requestId, { resolve, reject, notify })
     })

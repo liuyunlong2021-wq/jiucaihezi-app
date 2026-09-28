@@ -73,7 +73,8 @@ export async function pickLocalDecisionModel(
 // ─── 规则 provider：常见说法零成本零延迟命中 ───
 
 /**
- * `@文件` 开的是本机全权（文件工具 + 终端 + Skill 脚本，零弹窗），所以这条授权
+ * 界面上的「权限」开关（旧称 `@文件`）一旦开启就是本机全权 —— Direct 下是文件工具 + 终端 +
+ * Skill 脚本零弹窗，DH 下是 `danger-full-access` 沙箱（可以往工作区外写）—— 所以这条授权
  * 只能来自用户自己的话，不能由模型猜。命中即视为用户已授权。
  */
 export const LOCAL_GRANT_INTENT =
