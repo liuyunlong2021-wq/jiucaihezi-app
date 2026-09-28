@@ -93,7 +93,23 @@ jobs:
       - name: Sign nested macOS code (ARM)
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: node scripts/fix-macos-app.mjs "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # Tauri 打包时会自建临时钥匙串导入证书，并在命令结束时把它销殁；到这一步已经没有可用身份，
+          # codesign 会报 "<identity>: no identity found"（v2.2.3/v2.2.4 连续两次就挂在这）。
+          # 任何“提前把嵌套二进制签好”的方案同样需要一个钥匙串，绕不开，所以这里自备一个。
+          KEYCHAIN="$RUNNER_TEMP/jc-signing.keychain-db"
+          PASSWORD="$(openssl rand -hex 16)"
+          printf '%s' "$APPLE_CERTIFICATE" | tr -d '\n\r ' | openssl base64 -d -A > "$RUNNER_TEMP/jc-cert.p12"
+          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/jc-cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          node scripts/fix-macos-app.mjs "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/韭菜盒子.app"
 
       - name: Create DMG (ARM, headless)
         run: |
@@ -235,7 +251,21 @@ jobs:
       - name: Sign nested macOS code (Intel)
         env:
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-        run: node scripts/fix-macos-app.mjs "src-tauri/target/x86_64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          # 同 ARM：Tauri 的临时钥匙串到这一步已经没了，必须自备（详见上面的注释）。
+          KEYCHAIN="$RUNNER_TEMP/jc-signing.keychain-db"
+          PASSWORD="$(openssl rand -hex 16)"
+          printf '%s' "$APPLE_CERTIFICATE" | tr -d '\n\r ' | openssl base64 -d -A > "$RUNNER_TEMP/jc-cert.p12"
+          security create-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$PASSWORD" "$KEYCHAIN"
+          security import "$RUNNER_TEMP/jc-cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          node scripts/fix-macos-app.mjs "src-tauri/target/x86_64-apple-darwin/release/bundle/macos/韭菜盒子.app"
 
       - name: Create DMG (Intel, headless)
         run: |
