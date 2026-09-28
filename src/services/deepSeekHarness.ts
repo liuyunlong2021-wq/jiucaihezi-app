@@ -168,17 +168,22 @@ export type DeepSeekPermissionTier = 'read-only' | 'workspace-write' | 'danger-f
 /**
  * 权限选择器的三档，顺序即官方 base profile 的顺序。
  *
- * `label` 逐字用官方 `dsh-client-ui-permission-presets` 的 zh 字典；`note` 用官方 config 里
- * 那两档 description 的口径补上「越界怎么办」，因为那才是三档真正的区别。
+ * `label` 逐字用官方 `dsh-client-ui-permission-presets` 的 zh 字典；`short` 是横排按钮上的
+ * 短名（工作台那个按钮常驻显示当前档，全名「工作区内修改」会把整排按钮撑到滚动）；
+ * `note` 用官方 config 里那两档 description 的口径补上「越界怎么办」，因为那才是三档真正的区别。
+ *
+ * 中间档的 `note` 必须写「会被拒绝」而不是「会询问」：DH 路径下没有任何东西应答
+ * `approval/request`，越界是 fail-closed 直接失败，不是弹窗问一次。
  */
 export const DEEPSEEK_PERMISSION_TIERS: ReadonlyArray<{
   tier: DeepSeekPermissionTier
   label: string
+  short: string
   note: string
 }> = [
-  { tier: 'read-only', label: '仅可查看', note: '不改动任何文件' },
-  { tier: 'workspace-write', label: '工作区内修改', note: '只能改工作区内的文件，越界会询问' },
-  { tier: 'danger-full-access', label: '完全权限', note: '本机文件不再受限，也不再询问' },
+  { tier: 'read-only', label: '仅可查看', short: '仅可查看', note: '不改动任何文件' },
+  { tier: 'workspace-write', label: '工作区内修改', short: '工作区', note: '只能改工作区内的文件，越界会被拒绝' },
+  { tier: 'danger-full-access', label: '完全权限', short: '完全权限', note: '本机文件不再受限，也不再询问' },
 ]
 
 /** 默认档：官方 `sandbox-policy.mode` 的缺省值，也是审批策略为 `ask` 的那一档。 */

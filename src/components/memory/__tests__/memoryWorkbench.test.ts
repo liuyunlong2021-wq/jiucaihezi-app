@@ -632,13 +632,16 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(workbench, /const toolCommands = \[/)
   for (const label of ['@Skill', '@排版', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
-  // 权限开关**不带 `@`**：旁边那五个是「启用某能力」，它不是。标签也不写死 —— 默认态只写
-  // 「权限」，非默认态把当前档写在脸上（用户报的就是「不知道它现在是开还是关」）。
-  assert.match(workbench, /label: permissionLabel\(\)/)
-  // 三档的单一真相源在 service 层（与官方 base profile 同源），工作台只写死按钮文案。
+  // 权限开关**不带 `@`**：旁边那五个是「启用某能力」，它不是。
+  // 当前档位常驻写在按钮上（用户报的就是「不知道它现在是哪一档」），所以按钮文案是短名，
+  // 也不再占输入框上方那排能力芯片 —— 那时默认档一个芯片都不显示，等于看不出档位。
+  assert.match(workbench, /permissionTierShortLabel\(\)/)
+  assert.doesNotMatch(workbench, /permissionLabel\(\)/)
+  assert.match(workbench, /danger: permissionTier === 'danger-full-access'/)
+  // 三档的单一真相源在 service 层（与官方 base profile 同源），工作台不写死档位文案。
   assert.match(workbench, /v-for="option in DEEPSEEK_PERMISSION_TIERS"/)
   assert.match(workbench, /@click="choosePermission\(option\.tier\)"/)
-  assert.match(workbench, /<JcIcon name="description" \/><span>权限<\/span>/)
+  assert.doesNotMatch(workbench, /<span>权限<\/span>/)
   assert.doesNotMatch(workbench, /label: '@文件'/)
   // @Jev 只留 @ 提及一个入口：输入框下沿的常驻开关用户实测不想要
   // （他自己用 @ 的时候才开）。它仍然要能被开启、被持久化、被回填。

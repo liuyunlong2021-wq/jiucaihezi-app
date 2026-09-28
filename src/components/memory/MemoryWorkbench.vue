@@ -207,19 +207,24 @@ const permissionTier = ref<DeepSeekPermissionTier>(DEEPSEEK_DEFAULT_PERMISSION_T
  */
 const permissionMenu = ref<{ left: number; bottom: number } | null>(null)
 
-/** 当前档位的中文名（官方 zh 字典）。 */
-function permissionTierLabel(): string {
-  return DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === permissionTier.value)?.label || ''
-}
+/** 当前档的定义；三档的真相源在 service 层。 */
+const permissionOption = computed(() =>
+  DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === permissionTier.value),
+)
 
 /**
- * 上方已选能力芯片上的权限名。
+ * 按钮上常驻显示的当前档位。
  *
- * 默认档不占位（与旧行为一致）；非默认档把当前档写在脸上 —— 用户报的问题就是「不知道它
- * 现在是开还是关」。按钮本身一律只写「权限」，宽度与旁边 @Skill/@排版 一致。
+ * 用 `short` 而不是官方全名：全名「工作区内修改」会把横排按钮撑到旁边 `@Skill` 的两倍宽，
+ * 而那一排是 `overflow-x: auto`，多出来的宽度只会换来滚动。
  */
-function permissionLabel(): string {
-  return `权限：${permissionTierLabel()}`
+function permissionTierShortLabel(): string {
+  return permissionOption.value?.short || ''
+}
+
+/** 当前档位的中文全名（官方 zh 字典），用于无障碍标签。 */
+function permissionTierLabel(): string {
+  return permissionOption.value?.label || ''
 }
 
 function togglePermissionMenu(event: MouseEvent) {
@@ -255,9 +260,6 @@ function confirmFullAccess() {
 }
 
 const selectedToolChips = computed(() => [
-  ...permissionTier.value === DEEPSEEK_DEFAULT_PERMISSION_TIER
-    ? []
-    : [{ id: 'file', label: permissionLabel(), icon: 'description', selected: true }],
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
     return {
@@ -3727,6 +3729,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 权限排第一位，而且**不是 `insertCommand` 那种“往输入框插一句话”的指令**：
                 点它弹出官方那三档。旁边五个 `@` 是启用某能力，这一个决定其余能力能碰到什么。
                 菜单复用已有的 `.memory-command-more` / `.memory-command-menu`（向上弹的那一套）。
+
+                按钮**常驻显示当前档位**（选什么显示什么，直到用户改）：默认态不再把档位藏在
+                输入框上方那排能力芯片里，那时用户根本看不出现在是哪一档。
               -->
               <div class="memory-command-more">
                 <button
@@ -3734,9 +3739,14 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                   aria-haspopup="menu"
                   :aria-expanded="permissionMenu ? true : undefined"
                   :aria-label="`权限：${permissionTierLabel()}`"
+                  :class="{ danger: permissionTier === 'danger-full-access' }"
+                  @pointerenter="showChipTip($event, `权限：${permissionTierLabel()}`)"
+                  @pointerleave="hideChipTip"
+                  @focus="showChipTip($event, `权限：${permissionTierLabel()}`)"
+                  @blur="hideChipTip"
                   @click="togglePermissionMenu($event)"
                 >
-                  <JcIcon name="description" /><span>权限</span>
+                  <JcIcon name="description" /><span>{{ permissionTierShortLabel() }}</span>
                 </button>
               </div>
               <button v-for="command in primaryCommands" :key="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
@@ -4118,6 +4128,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
+/* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
+   写在 hover 之后，压住 hover 的 olive，红着不动。 */
+.memory-command-more > button.danger { border-color: color-mix(in srgb, var(--jc-error) 45%, transparent); background: color-mix(in srgb, var(--jc-error) 8%, transparent); color: var(--jc-error); }
 .memory-command-strip button:disabled { cursor: default; opacity: .45; }
 .memory-command-more { position: relative; flex: 0 0 auto; }
 .memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
