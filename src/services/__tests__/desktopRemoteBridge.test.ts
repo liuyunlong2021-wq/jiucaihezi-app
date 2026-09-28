@@ -154,7 +154,8 @@ test('Desktop remote treats a catalog-only new conversation as an empty lazy Har
 
 test('a stale official Session does not finalize a repeated remote prompt or a pure tool round', () => {
   const sentAt = '2026-09-28T12:00:00.000Z'
-  const event = (seq: number, time: number) => ({ seq, type: 'user/message', time, data: {
+  // 真实 user/message 必带 surfaceOp=append（人类 transcript 只认 append 事件），fixture 要照做。
+  const event = (seq: number, time: number) => ({ seq, type: 'user/message', time, surfaceOp: 'append', data: {
     id: `user-${seq}`, source: { kind: 'user' }, content: [{ type: 'text', text: '整理项目' }],
   } })
   const old = { session: { id: 'jc-v1-a' }, events: [event(1, Date.parse(sentAt) - 60_000)] }

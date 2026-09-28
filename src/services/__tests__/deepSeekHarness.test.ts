@@ -150,18 +150,20 @@ test('DeepSeek Harness projects its official Session log into visible conversati
   assert.deepEqual(deepSeekSessionTurns({
     session: { id: 'jc-v1-conversation-1' },
     events: [
+      { seq: 2, time: 1_700_000_000_000, type: 'turn/start', surfaceOp: 'append', data: { turn: 1 } },
       {
-        seq: 3, time: 1_700_000_000_000, type: 'user/message',
+        seq: 3, time: 1_700_000_000_000, type: 'user/message', surfaceOp: 'append',
         data: { id: 'user-1', source: { kind: 'user' }, content: [{ type: 'text', text: '/skill-creator\n\n修改文件' }] },
       },
       {
-        seq: 4, time: 1_700_000_001_000, type: 'user/message',
+        seq: 4, time: 1_700_000_001_000, type: 'user/message', surfaceOp: 'append',
         data: { id: 'notice-1', source: { kind: 'skill-invocation' }, content: [{ type: 'text', text: '内部注入' }] },
       },
       {
-        seq: 5, time: 1_700_000_002_000, type: 'assistant/message',
-        data: { message: { id: 'assistant-1', content: [{ type: 'text', text: '已完成' }] } },
+        seq: 5, time: 1_700_000_002_000, type: 'assistant/message', surfaceOp: 'append',
+        data: { turn: 1, step: 1, message: { id: 'assistant-1', content: [{ type: 'text', text: '已完成' }] } },
       },
+      { seq: 6, time: 1_700_000_002_500, type: 'turn/end', surfaceOp: 'append', data: { turn: 1, reason: { kind: 'completed' } } },
     ],
   }), [
     {
@@ -362,12 +364,15 @@ function fixtureEvent(type: string, match?: (event: any) => boolean): any {
 }
 
 test('真样本：今天的投影只留下有正文的轮次，工具步全部消失', () => {
-  // 这是第一档要修的那个差距本身：会话有 5 个 assistant/message、4 次工具调用，
-  // 而 deepSeekSessionTurns 只产出 2 个用户轮与 1 个正文轮——纯工具步（blocks=[tool-call]）
-  // 因为正文为空根本不产出 turn。本条同时锁住：过程改走并列 Map，不动这个函数。
+  // 这是第一档要修的那个差距本身：会话有 5 个 assistant/message、4 次工具调用。
+  // 2026-09-28 改写（旧断言：assistant 轮只有 1 条）。现在一轮一条记录：
+  // turn 5 的末步有正文 → 产出答案；turn 1 三步全是 tool-call、无正文 → 产出**内容为空**的
+  // 锚点轮次（只给过程块做挂载点，侧栏由 turnHasBody() 判掉），因为纯工具轮的过程也得有地方可画。
   const turns = deepSeekSessionTurns(toolsFixture())
   assert.equal(turns.filter(turn => turn.role === 'user').length, 2)
-  assert.equal(turns.filter(turn => turn.role === 'assistant').length, 1)
+  const assistants = turns.filter(turn => turn.role === 'assistant')
+  assert.equal(assistants.length, 2)
+  assert.equal(assistants.filter(turn => turn.content).length, 1)
 })
 
 test('真样本：工具步骤挂到发起该轮的用户消息上，纯工具轮不再消失', () => {
@@ -397,10 +402,10 @@ test('没有真人发起人的轮次退回 assistant message 兜底，过程不�
     session: { id: 's1' },
     events: [
       { seq: 0, type: 'turn/start', data: { turn: 4 } },
-      { seq: 1, type: 'user/message', data: { id: 'ctx', source: { kind: 'runtime-context' }, content: [{ type: 'text', text: '上下文' }] } },
-      { seq: 2, type: 'assistant/message', data: { turn: 4, step: 1, message: { id: 'm9', content: [{ type: 'tool-call', id: 'c9', name: 'read', arguments: '{"file_path":"a.md"}' }] } } },
+      { seq: 1, type: 'user/message', surfaceOp: 'append', data: { id: 'ctx', source: { kind: 'runtime-context' }, content: [{ type: 'text', text: '上下文' }] } },
+      { seq: 2, type: 'assistant/message', surfaceOp: 'append', data: { turn: 4, step: 1, message: { id: 'm9', content: [{ type: 'tool-call', id: 'c9', name: 'read', arguments: '{"file_path":"a.md"}' }] } } },
       { seq: 3, type: 'tool/call', time: 100, data: { turn: 4, step: 1, callId: 'c9', name: 'read', arguments: '{"file_path":"a.md"}' } },
-      { seq: 4, type: 'tool/result', time: 160, data: { turn: 4, step: 1, message: { toolCallId: 'c9', content: [{ type: 'text', text: '内容' }] } } },
+      { seq: 4, type: 'tool/result', time: 160, surfaceOp: 'append', data: { turn: 4, step: 1, message: { toolCallId: 'c9', content: [{ type: 'text', text: '内容' }] } } },
     ],
   }
   const process = deepSeekSessionProcess(snapshot)
@@ -500,9 +505,9 @@ test('快照投影把推理按发起该轮的用户消息挂出来，多 step �
     session: { id: 's1' },
     events: [
       { seq: 0, type: 'turn/start', data: { turn: 1 } },
-      { seq: 1, type: 'user/message', data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: '问' }] } },
-      { seq: 2, type: 'assistant/message', data: { turn: 1, step: 1, message: { id: 'm1', content: [{ type: 'reasoning', text: '先想' }] } } },
-      { seq: 3, type: 'assistant/message', data: { turn: 1, step: 2, message: { id: 'm2', content: [{ type: 'reasoning', text: '再想' }, { type: 'text', text: '答案' }] } } },
+      { seq: 1, type: 'user/message', surfaceOp: 'append', data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: '问' }] } },
+      { seq: 2, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 1, message: { id: 'm1', content: [{ type: 'reasoning', text: '先想' }] } } },
+      { seq: 3, type: 'assistant/message', surfaceOp: 'append', data: { turn: 1, step: 2, message: { id: 'm2', content: [{ type: 'reasoning', text: '再想' }, { type: 'text', text: '答案' }] } } },
     ],
   }
   assert.deepEqual([...deepSeekSessionReasoning(snapshot).entries()], [['u1', '先想\n\n再想']])
@@ -687,6 +692,27 @@ test('a running Harness turn carries no status banner, only the in-turn process'
   // 自研内核（Web 未发布工作台）还没有轮次内过程，保留它原来的 5 条缩略。
   assert.match(workbench, /activeRun\.value\?\.runtime === 'legacy' \? activeRun\.value\.steps\.slice\(-5\) : \[\]/)
   assert.doesNotMatch(workbench, /memory-run-think/)
+})
+
+test('blank assistant text and replaced copies stay out of the transcript', () => {
+  // 官方 visibleAssistantEvent：只认 surfaceOp=append，text 块要 trim 后非空。
+  // 真样本里纯工具步的正文就是两个换行（'\\n\\n'），不 trim 就会多出一个只有
+  // 「韭菜盒子」四个字的空行；而被压缩替掉的副本官方明确「stay model-only」，不该上屏。
+  const turns = deepSeekSessionTurns({
+    session: { id: 's' },
+    events: [
+      { type: 'turn/start', seq: 1, time: 1, surfaceOp: 'append', data: { turn: 1 } },
+      { type: 'assistant/message', seq: 2, time: 2, surfaceOp: 'append',
+        data: { turn: 1, step: 1, message: { id: 'step1', content: [{ type: 'text', text: '\n\n' }, { type: 'tool-call' }] } } },
+      { type: 'assistant/message', seq: 3, time: 3, surfaceOp: 'append',
+        data: { turn: 1, step: 2, message: { id: 'step2', content: [{ type: 'text', text: '搞定 ✅' }] } } },
+      { type: 'assistant/message', seq: 4, time: 4, surfaceOp: { op: 'replace', startSeq: 2, endSeq: 2 },
+        data: { turn: 1, step: 1, message: { id: 'replaced', content: [{ type: 'text', text: '被替换的副本' }] } } },
+      { type: 'turn/end', seq: 5, time: 5, surfaceOp: 'append', data: { turn: 1, reason: { kind: 'completed' } } },
+      { type: 'user/message', seq: 6, time: 6, data: { source: { kind: 'user' }, content: [{ type: 'text', text: '没有 surfaceOp 的旧事件' }] } },
+    ],
+  })
+  assert.deepEqual(turns.map(turn => turn.content), ['搞定 ✅'])
 })
 
 test('the think row previews its latest line and an in-flight marker shows while waiting', () => {

@@ -1799,9 +1799,26 @@ test('Harness process and reasoning hang on the round that started them', () => 
   // 一块（用户实机反馈），官方也是用户消息一行、过程与回答另成一块。
   assert.match(
     workbench,
-    /<\/article>[\s\S]{0,400}?v-if="turn\.role === 'user' && hasTurnProcess\(turn\.id\)"[\s\S]{0,60}?class="memory-turn-process"/,
+    /<\/article>[\s\S]{0,400}?v-if="hasTurnProcess\(turn\.id\)"[\s\S]{0,60}?class="memory-turn-process"/,
   )
   assert.match(workbench, /function hasTurnProcess\(turnId: string\): boolean/)
+  // 一轮一条 assistant 记录之后，纯工具轮会产出一条**内容为空**的锚点轮次（只给过程块做挂载点）。
+  // 空轮次绝不能渲染 article，否则又会留下一个孤儿「韭菜盒子」—— 判定要覆盖 article 的全部内容来源。
+  assert.match(workbench, /v-if="turnHasBody\(turn\)"/)
+  assert.match(workbench, /function turnHasBody\(turn: ConversationTurn\): boolean/)
+  // 中途叙述挂在过程里（官方：step < 答案步的正文归过程，不归答案）；折叠标题只数工具步。
+  assert.match(workbench, /class="memory-process-narration">\{\{ step\.narration \}\}/)
+  assert.match(workbench, /function harnessToolSteps\(turnId: string\): number/)
+  assert.match(workbench, /<summary>\{\{ harnessToolSteps\(turn\.id\) \}\} 个步骤<\/summary>/)
+  // 在飞行必须带**耗时**与**上游状态**：上游一超时，一轮能静默两分多钟，只挂一个不动的
+  // 「思考中」时用户无法分辨「在等上游」和「程序死了」。官方 TurnProcessNodeView 就是每秒跳的
+  // 耗时（`LIVE_RUN_CLOCK_INTERVAL_MS`），重试另有 `message.retry.*` 一行。
+  // 文案不用官方的「深度求索中」—— 那是别家品牌词，我们是韭菜盒子。注释里保留官方原文作对照，
+  // 但**标签文案**必须是我们自己的。
+  assert.match(workbench, /class="memory-process-label">思考中，用时\{\{ formatLiveDuration\(runElapsed\) \}\}/)
+  assert.doesNotMatch(workbench, /memory-process-label">深度求索/)
+  assert.match(workbench, /function formatLiveDuration\(seconds: number\): string/)
+  assert.match(workbench, /v-if="isLiveTurn\(turn\.id\) && liveInFlight"[\s\S]{0,400}?v-if="runStatus"/)
   assert.doesNotMatch(workbench, /turn\.role === 'assistant' && harness(Reasoning|Steps)For/)
   assert.match(workbench, /v-for="turn in timelineTurns"[\s\S]*?harnessStepsFor\(turn\.id\)/)
   // 实时与历史走同一个投影：读回 Session 时登记，不另存一份消息副本。

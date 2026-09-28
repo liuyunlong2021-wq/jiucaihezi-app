@@ -1,5 +1,15 @@
 # 热缓存
 
+## [2026-09-28] `deepseek-v4.1-flash-0910` 在上游已退化：首字 16s–2m49s
+
+- 现象：Harness 对话经常「静默一分多钟」然后 `524 statu…`。先怀疑过 Provider 设计、请求太大、Cloudflare 网络抖动，逐条被排除。
+- 定位靠四方日志对齐（NewAPI 日志 + 上游日志 + 本机 Session zstd + pi-ai 源码）：**同一渠道 #114（小易-DeepSeek-0.23）、同一上游、同一台机器，唯一变量是模型 id**。
+  - `deepseek-v4.1-flash-0910`：首字 16.6s / 25.9s / 40.0s / 1m16s / 1m47s / 2m49s，1–2 t/s
+  - `deepseek-v4.1-flash`：首字 3.2 / 3.3 / 3.7 / 4.3 / 3.9 秒，77–99 t/s
+- 已排除：请求本就是流式的（pi-ai `openai-completions` 固定 `stream: true`）；输入不超标（`缓存 ↓ 54,528 / 输入 54,741` = 命中 99.6%）；Cloudflare 524 只是**判决书** —— 首字一超过 100 秒就被掐，病因在模型版本。31 token 的小请求一样慢，所以与请求形状无关。
+- 结论：**不是 Provider 设计问题，一行代码都不用改。** 给 NewAPI 的动作是把 `deepseek-v4.1-flash-0910` 下架，默认用 `deepseek-v4.1-flash`。已撤回「加 `streamIdleTimeoutMs: 90000`」的提案 —— 上游首字能到 2m49s，固定秒数看门狗会误杀最终会成功的请求。
+- 配套：过程行现在显示每秒跳的耗时与上游重试原因，所以这类等待能直接看出「是上游慢，不是死了」。
+
 ## [2026-09-28] Mobile V2 定案：Desktop Gateway + 可靠同步 + Mini Relay
 
 - 现行合同改为 [[开发/韭菜盒子Mobile控制Desktop-Gateway与Mini-Relay统一合同TDD-V2-2026-09-28]]；旧局域网合同保留 P0/P1/P2 与真机排障证据，但其 fire-and-forget 全量投影、Vue `watch` 发布、无断档补拉和 P3–P5 顺序不再定义终态。目标是手机控制**韭菜盒子 Desktop 的 Harness 对话**并达到 Codex 手机版级别的远控闭环，不是直接接管官方 Codex Desktop App。
@@ -61,7 +71,8 @@
 ## [2026-09-24] Harness Session 成为对话真相，`.raw` 建库改为可选
 
 - Desktop 已删除 `@DH` 按钮、芯片和选择态，所有对话自动运行 Harness；`@排版`、`@影音`、`@MCP`、`@3D` 已通过官方 `dsh-mcp-client` 进入同一个 Harness Session，并复用韭菜盒子既有执行器。旧 `dh-session-v1` 仅用于迁移识别。
-- 524 属于 Harness 官方 `SERVER` 可重试错误；现行策略保留 `SERVER` 且 `maxRetries: 1`。官方 Provider 没有主请求首 token 超时配置，本轮不增加 Harness 外层整轮定时器，避免误杀合法长任务。
+- 524 属于 Harness 官方 `SERVER` 可重试错误；现行策略保留 `SERVER` 且 `maxRetries: 1`。本轮不增加 Harness 外层整轮定时器，避免误杀合法长任务。
+- **订正（2026-09-28）**：本行原先写「官方 Provider 没有主请求首 token 超时配置」——**这句是错的**。`dsh-llm-pi-ai` 的 provider profile 有 `streamIdleTimeoutMs`（默认 `300000`），实现是 `idleWatchdog(…).next(iterator)` 包住**流的每一次等待**，首字节之前就已启动，超时抛 `TIMEOUT`（本就在可重试码里）；另有 `timeoutMs` 与 `transport: sse|websocket`。也就是说：上游一个字节不给时，官方默认允许我们等 5 分钟，而 Cloudflare 的 524 在 ~100 秒先到——**我们一直没有自己的判据，是在等别人报错**。要看全链路证据见 [[log]] 2026-09-28 条目。
 - 用户确认 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24]]：打开项目即可聊天，不再先创建“记忆空间”；Harness Session 独占完整对话、工具轨迹、持久化与压缩，韭菜盒子只保存对话标题、排序、工作区和稳定 Session 映射。
 - 现有文件树“建立改编 Wiki”按钮在原 Wiki 骨架之外补 `.raw/文档|图片|视频|音频`；未建库仍可文字聊天。本期不顺带重写既有 `.raw/jc-media` 媒体保存链路。
 - UI 的“记忆”和“查询”按钮及后端 `.raw/记忆索引`、`memory_search` 预取、最近三轮拼装整体退役。正式 Wiki 仍是项目文件，按用户选择的文件/Skill/MCP 能力读取，与 Harness 对话上下文分层。

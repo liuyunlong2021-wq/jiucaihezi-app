@@ -544,7 +544,8 @@ const liveInFlight = computed(() => {
 /**
  * 状态条的门控。
  *
- * DH 运行中不挂横幅 —— 官方轨迹视图明确不给在飞记录臆造 elapsed，状态由轮次内的过程行表达。
+ * DH 运行中不挂横幅：这一分多钟的状态由轮次内的过程行表达 —— 官方也是过程行里每秒跳的
+ * `深度求索中，用时{duration}`（`TurnProcessNodeView`，`LIVE_RUN_CLOCK_INTERVAL_MS = 1e3`）。
  * 自研内核（Web 未发布工作台）还没有轮次内过程，保留它原来的 5 条缩略。两类在「有终态结论」
  * 时都要这条横幅，否则用户看不到失败原因（那次 524 就是靠它才看见的）。
  */
@@ -717,9 +718,30 @@ function isLiveTurn(turnId: string): boolean {
   return Boolean(turnId) && turnId === liveProcessTurnId.value
 }
 
-/** 本轮有没有过程要显示（思考 / 步骤 / 在飞）。决定过程块是否单独成块。 */
+/** 本轮有没有过程要显示（思考 / 步骤 / 叙述 / 在飞）。决定过程块是否单独成块。 */
 function hasTurnProcess(turnId: string): boolean {
   return Boolean(harnessReasoningFor(turnId) || harnessStepsFor(turnId)?.length || isLiveTurn(turnId))
+}
+
+/** 折叠标题里只数工具步；叙述也是过程的一部分，但算成「步骤」会误导。 */
+function harnessToolSteps(turnId: string): number {
+  return (harnessStepsFor(turnId) || []).filter(step => step.kind !== 'narration').length
+}
+
+/**
+ * 这条轮次有没有东西可渲染。
+ *
+ * 一轮一条 assistant 记录之后，纯工具轮会产出一条**内容为空**的锚点轮次（只为给过程块提供
+ * 挂载点）。空轮次绝不能渲染 article，否则又会留下一个孤儿「韭菜盒子」—— 那正是我们在修的 bug。
+ * 判定必须覆盖 article 里所有可能的内容来源，漏一个就会让那种内容整块消失。
+ */
+function turnHasBody(turn: ConversationTurn): boolean {
+  return turn.role === 'user'
+    || Boolean(displayTurnContent(turn))
+    || turnAttachments(turn).length > 0
+    || sceneCards(turn).length > 0
+    || Boolean(programStatusFor(turn.id))
+    || Boolean(mediaPlans.value[turn.id]?.length)
 }
 
 function harnessStepsFor(turnId: string): DeepSeekProcessStep[] | undefined {
@@ -2235,6 +2257,21 @@ function formatRunElapsed(seconds: number): string {
   return `${String(minutes).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`
 }
 
+/**
+ * 在飞过程行的耗时，逐字对齐官方 `formatLiveRunDuration`：`{seconds}秒` / `{minutes}分{seconds}秒` /
+ * `{hours}小时{minutes}分{seconds}秒`（分与秒补零）。
+ *
+ * 官方在下限上取 `Math.max(1000, elapsedMs)`，所以永远不会显示 `00秒`。
+ */
+function formatLiveDuration(seconds: number): string {
+  const total = Math.max(1, Math.floor(seconds))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor(total / 60) % 60
+  const padd = (value: number) => String(value).padStart(2, '0')
+  if (hours > 0) return `${hours}小时${padd(minutes)}分${padd(total % 60)}秒`
+  return minutes > 0 ? `${minutes}分${padd(total % 60)}秒` : `${total % 60}秒`
+}
+
 function formatToolDuration(durationMs: number): string {
   return durationMs < 1000 ? `${durationMs} ms` : `${(durationMs / 1000).toFixed(1)} 秒`
 }
@@ -3315,6 +3352,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <div v-else class="memory-message-list">
         <template v-for="turn in timelineTurns" :key="turn.id">
         <article
+          v-if="turnHasBody(turn)"
           class="memory-message"
           :class="[turn.role, { streaming: turn.id === 'streaming-assistant' }]"
         >
@@ -3436,10 +3474,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <!--
           过程单独成块，**不塞进用户气泡里**：输入（用户说的话）与输出（它做了什么）必须分开，
           官方 GUI 也是用户消息一行、过程与回答在它下面另成一块。
-          归属仍按本轮发起人（用户消息）：纯工具步不产出 UI 轮次，挂在 assistant 上就永远看不见。
+          归属按官方 `turn-process` 节点：普通轮挂在用户消息上，注入式轮次（goal 续轮等）挂在
+          它的锚点轮次上 —— 不限角色，否则注入式轮次的过程就无处可画。
         -->
         <div
-          v-if="turn.role === 'user' && hasTurnProcess(turn.id)"
+          v-if="hasTurnProcess(turn.id)"
           class="memory-turn-process"
         >
           <details v-if="harnessReasoningFor(turn.id)" class="memory-think">
@@ -3456,32 +3495,39 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             重渲染都会把用户手动展开的状态抢回去。
           -->
           <details v-if="harnessStepsFor(turn.id)?.length" class="memory-process" :open="isLiveTurn(turn.id) || undefined">
-            <summary>{{ harnessStepsFor(turn.id)?.length }} 个步骤</summary>
-            <div
-              v-for="step in harnessStepsFor(turn.id)"
-              :key="step.id"
-              class="memory-process-step"
-              :class="step.state"
-            >
-              <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
-              <span class="memory-process-label">{{ step.label }}</span>
-              <span v-if="step.summary" class="memory-process-summary" :title="step.summary">{{ step.summary }}</span>
-              <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
-              <small v-if="step.errorReason" class="memory-process-error">{{ step.errorReason }}</small>
-              <details v-if="step.resultText" class="memory-process-result">
-                <summary>查看结果</summary>
-                <pre>{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
-              </details>
-            </div>
+            <summary>{{ harnessToolSteps(turn.id) }} 个步骤</summary>
+            <template v-for="step in harnessStepsFor(turn.id)" :key="step.id">
+              <!-- 中途叙述：官方把 step < 答案步的正文归过程，不归答案。 -->
+              <div v-if="step.kind === 'narration'" class="memory-process-narration">{{ step.narration }}</div>
+              <div
+                v-else
+                class="memory-process-step"
+                :class="step.state"
+              >
+                <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
+                <span class="memory-process-label">{{ step.label }}</span>
+                <span v-if="step.summary" class="memory-process-summary" :title="step.summary">{{ step.summary }}</span>
+                <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
+                <small v-if="step.errorReason" class="memory-process-error">{{ step.errorReason }}</small>
+                <details v-if="step.resultText" class="memory-process-result">
+                  <summary>查看结果</summary>
+                  <pre>{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
+                </details>
+              </div>
+            </template>
           </details>
           <!--
             在飞标记：本轮在跑、但当前没有工具在跑（模型在推理/等上游）。没有它，那 83 秒
             和那一分多钟的日志看起来就是“没动静”。
+
+            耗时每秒跳。上游一超时，一轮就会静默两分多钟，只给一个不动的「思考中」时，用户
+            没法区分“在等上游”和“程序死了”—— 2026-09-28 用户就因此卡在这里。推理尾巴不在
+            这里显示：上面思考行的 summary 已经有一份。
           -->
           <div v-if="isLiveTurn(turn.id) && liveInFlight" class="memory-process-step running">
             <JcIcon name="sync" class="spinning" />
-            <span class="memory-process-label">思考中</span>
-            <span v-if="reasoningTail(harnessReasoningFor(turn.id))" class="memory-process-summary">{{ reasoningTail(harnessReasoningFor(turn.id)) }}</span>
+            <span class="memory-process-label">思考中，用时{{ formatLiveDuration(runElapsed) }}</span>
+            <span v-if="runStatus" class="memory-process-summary" :title="runStatus">{{ runStatus }}</span>
           </div>
         </div>
         </template>
@@ -4011,6 +4057,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-think > summary .mso { font-size: 15px; }
 .memory-think-body { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--ink2); }
 .memory-process { display: grid; gap: 3px; margin: 2px 0 6px; font-size: calc(var(--font-base) - 2px); }
+.memory-process-narration { color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.6; overflow-wrap: anywhere; }
 .memory-process > summary { display: flex; width: fit-content; align-items: center; gap: 5px; color: var(--ink3); cursor: pointer; list-style: none; }
 .memory-process > summary::-webkit-details-marker { display: none; }
 .memory-process-step { display: grid; grid-template-columns: 17px auto minmax(0, 1fr) auto; align-items: center; gap: 5px; color: var(--ink3); }

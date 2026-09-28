@@ -1,5 +1,19 @@
 # Wiki 操作日志
 
+## [2026-09-28] 排障 | 「静默两分钟」的真因是模型版本 `deepseek-v4.1-flash-0910`
+
+- 现象：Harness 对话经常静默一分多钟然后 `524 statu…` 失败。用户先后提出两个假设——「是不是我们 Provider 设计有问题」和「我的 NewAPI 后台每次都秒回」。两个都查了。
+- 取证顺序（每一步都排掉一个假设）：
+  1. 本机 Session（zstd 多帧）逐轮时间线：健康轮首字节 2–3 秒，失败轮固定 ~126 秒后收到 524，且 `policyKey` 显示只重试 1 次。
+  2. pi-ai 源码：`openai-completions` 固定 `stream: true` → 排除「我们用了非流式请求」。
+  3. `dsh-llm-pi-ai` 源码：发现 `streamIdleTimeoutMs`（默认 300 秒）就是首字看门狗（`idleWatchdog(...).next(iterator)` 包住流的每次等待），据此订正了 `hot.md` 里「官方没有首 token 超时配置」的错记。
+  4. 用户提供 NewAPI 日志 + 上游日志，两者交叉：**同一渠道 #114、同一上游，唯一变量是模型 id**。`deepseek-v4.1-flash-0910` 首字 16.6s–2m49s、1–2 t/s；`deepseek-v4.1-flash` 首字 3.2–4.3 秒、77–99 t/s。
+  5. 用户换模型后复测，一切都对了。
+- 关键排除项：输入 54,741 token 中缓存命中 54,528（99.6%），所以「请求太大」不成立；31 token 的小请求同样慢（16.6s / 25.9s / 1m47s），所以「请求形状」也不成立。Cloudflare 的 524 只是**判决书**——首字超过 100 秒就被掐。
+- 结论：不是 Provider 设计问题，**一行代码都不用改**。给 NewAPI 的动作是下架 `deepseek-v4.1-flash-0910`。
+- 撤回：上一轮提的 `streamIdleTimeoutMs: 90000` 作废——上游首字能到 2m49s 且最终成功，固定秒数看门狗会误杀它。用一天的真实分布算出来的数字，比拍一个更好。
+- 同期界面配套（本支线内）：过程行加每秒跳的耗时与上游重试原因（官方口径 `message.retry.*` / 每秒跳的 duration），把这类等待从「像死了」变成「看得出在等上游」。
+
 ## [2026-09-28] 实施中 | iOS 扫码权限显式申请
 
 - 本地所装 `tauri-plugin-barcode-scanner 2.4.6` 的 iOS 实现中，`scan()` 在 iOS 14+ 只检查相机权限，未获准时直接返回 `Camera permission denied or not yet requested`，不会自动调用系统授权；旧手机代码直接 `scan()`，且 Mobile capability 只开放 scan/cancel。用户看到的“相机权限被拒绝”可能是这一路真实错误，同时它在粘贴成功后残留，造成粘贴也失败的错觉。
@@ -1780,4 +1794,14 @@
 - ⑤ **输出对齐官方 GUI 四条**：运行中不再挂「正在执行 05:23」横幅（官方轨迹视图明确不给在飞记录臆造 elapsed），状态改由轮次内过程行表达；思考行改带最新一行预览（官方 Chat 的 reasoning previews）；新增在飞标记「思考中」——等模型那 83 秒 / 一分多钟不再看起来没动静；已完成的轮次折叠过程行（官方 fold completed-turn process rows），用 `:open="isLiveTurn(turn.id) || undefined"` 以免抢用户手动展开的状态。自研内核（Web 未发布工作台）保留原 5 条缩略。
 - 失败取证（用户报「10 分钟后 524」）：两条 attempt 都是 `usage 0/0` 后 `finish error 524 status code (no body)`，各 126 秒；524 = Cloudflare 源站超时，即**上游 100 秒没吐第一个字节**。该轮上下文只有 27k token，所以**不是**扫盘撑爆上下文（不拿错的理由顶罪）。用户 2026-09-28 决定上游/抖动问题另找时间专项解决，本轮只记证据不做改动。
 - 验证：定向 `deepSeekHarness` 42/42；完整 focused `1663 tests / 1663 pass / 0 fail`；Rust `453 passed / 0 failed / 1 ignored`（含新增 3 条）；`vue-tsc -b` 通过。替换了两条旧断言（`!runVisible` 状态条口径、过程区 `v-if`）并写明理由。
-- ④ 落地时踩到的第二个坑（用户真机 0.00 秒失败）：`forbidden path: .../src-tauri/target/debug/skills, maybe it is not allowed on the scope for allow-exists permission`。根因不在路径，在**权限**：`@tauri-apps/plugin-fs` 的 `exists()` 除 `fs:allow-*` 外还受 `capabilities/default.json` 的 `fs:default` scope 白名单约束（只放行 `$APPDATA/**`、`$HOME/.agents/**` 等 7 条），越界**抛错而不是返回 false**，于是探测把整个 run 打死。修法：探测移进 Rust（`commands::tools::bundled_skills_dir`，`Path::exists()` 无 ACL），前端只 `invoke('resolve_bundled_skills')`；同时把 `lib.rs` 播种里那份重复探测收敛到同一实现。新命令按惯例登记 `permissions/app-commands.json`（acl-manifests 命中 1 已核）。没有往 fs scope 里加路径——那是安全收缩面，`scripts/check-tauri-fs-acl.mjs` 在守。
+- ④ 落地时踩到的第二个坑（用户真机 0.00 秒失败）：`forbidden path: .../src-tauri/target/debug/skills, maybe it is not allowed on the scope for allow-exists permission`。根因不在路径，在**权限**：`@tauri-apps/plugin-fs` 的 `exists()` 除 `fs:allow-*` 外还受 `capabilities/default.json` 的 `fs:default` scope 白名单约束（只放行 `$APPDATA/**`、`$HOME/.agents/**` 等 7 条），越界**抛错而不是返回 false**，于是探测把整个 run 打死。修法：探测移进 Rust（`commands::tools::bundled_skills_dir`，`Path::exists()` 无 ACL），前端只 `invoke('resolve_bundled_skills')`；同时把 `lib.rs` 播种里那份重复探测收敛到同一实现。新命令按惯例登记 `permissions/app-commands.json`（acl-manifests 命中 1 已核）。没有往 fs scope 里加路径——那是安全收缩面，`scripts/check-tauri-fs-script.mjs` 在守。
+
+## [2026-09-28] 优化 | Harness transcript 对齐官方：一轮一条记录 + 逐字抄官方谓词
+
+- 触发：用户看到界面上连续出现三个空的「韭菜盒子」。取证（最新会话 turn 7）：三步的正文分别是 `'\n\n'`、`'\n\n'`、`'搞定 ✅'`（textLen 2 / 2 / 341）。
+- 根因（数据层，非样式）：`deepSeekSessionTurns` 用 `if (content)` 判空 —— `'\n\n'` 是**真值字符串**，于是纯工具步也被当成「有正文的助手轮次」，而渲染层又无条件画角色名，就留下一个孤儿标签。
+- 用户要求直接对齐官方 GUI。**先去官方包里取证再动手**（上一轮在“官方长什么样”上猜错过一次）：`dsh-client-ui-chat` 的 `visibleAssistantEvent` / `hasAssistantReplyContent` / `latestAnswer` / `processSpec` / `turnProcessDefinition`，规则逐条抄进实现（详见 [[开发/韭菜盒子Harness会话与可选建库统一合同-2026-09-24]] §12.5）。
+- 三条偏差一次改掉：① `text` 块 `trim()` 后判空；② 只认 `surfaceOp === 'append'`（实测本机会话已有 28 条 `{op:'replace'}`，以前会把被压缩替掉的旧范围也显示给用户）；③ **一轮一条 assistant 记录**（官方是一过程节点 + 一答案节点），中途叙述改归过程（`kind: 'narration'`）。
+- 两个自己踩到并修掉的坑：**`turn/end` 是 log-only 事件、不带 `surfaceOp`**（把 surface 过滤放在循环开头会把所有助手轮次一起滤掉）；**纯工具轮仍需要一条内容为空的锚点轮次**做过程挂载点，渲染层用 `turnHasBody()` 判掉 article —— 判定必须覆盖 article 的全部内容来源，否则那种内容会整块消失。
+- 明写不做：官方那个「工作过程展示」开关（`settings.transcript.title`）。先让**默认形态**真对齐官方，再在正确底座上加开关，否则是在错的底座上调参数。
+- 验证：定向 `deepSeekHarness` 43/43；完整 focused `1664 tests / 1664 pass / 0 fail`；Rust `453 passed / 0 failed / 1 ignored`；`vue-tsc -b` 通过。共改写 4 条既有断言（均写明替换理由）并把 3 个 fixture 补成真实事件形状（带 `surfaceOp` / 轮次边界）。

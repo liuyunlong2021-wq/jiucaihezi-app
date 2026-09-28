@@ -74,6 +74,11 @@ export type DeepSeekProgress = {
 /** 一次工具调用在 UI 上的完整投影（实时与历史同源）。 */
 export type DeepSeekProcessStep = {
   id: string
+  /**
+   * 条目种类。`tool`（默认）是一次工具调用；`narration` 是模型在步骤之间说的那句话 ——
+   * 官方把它归**过程**不归答案（`processSpec` 只把 step < 答案步的正文算进过程）。
+   */
+  kind?: 'tool' | 'narration'
   label: string
   summary: string
   state: 'running' | 'done' | 'failed'
@@ -82,6 +87,8 @@ export type DeepSeekProcessStep = {
   errorReason?: string
   resultText?: string
   resultTruncated?: boolean
+  /** 叙述条目的正文，仅 `kind === 'narration'` 使用。 */
+  narration?: string
 }
 
 /** 官方 `TokenUsage` 的子集；计数互斥，`inputTokens` 只含未缓存输入。 */
@@ -253,6 +260,34 @@ function deepSeekMessageText(content: any): string {
     : ''
 }
 
+/**
+ * 官方对「正文」的判据，逐字对齐 `dsh-client-ui-chat` 的 `visibleAssistantEvent` /  
+ * `hasAssistantReplyContent`：`tool-call` 块不算正文；`text` 块必须 `trim()` 后非空。
+ *
+ * 实测踩到：纯工具步的 assistant/message 会带一个只含两个换行的 text 块（`'\n\n'`），
+ * 不 trim 就被当成「有正文的助手轮次」，界面上只留下一个孤儿「韭菜盒子」。
+ */
+function deepSeekVisibleText(content: unknown): string {
+  return Array.isArray(content)
+    ? content
+        .filter(block => block?.type === 'text' && String(block?.text || '').trim())
+        .map(block => String(block.text).trim())
+        .join('\n\n')
+    : ''
+}
+
+/**
+ * 人类 transcript 只认 `surfaceOp === 'append'` 的事件。
+ *
+ * 官方原话：「The model-visible surface deliberately shadows replaced ranges, so it is the
+ * wrong source for a human transcript… replacement copies stay model-only.」实测本机会话里
+ * 已有 28 条 `{ op: 'replace', startSeq, endSeq }`（压缩产生），不过滤就会把被替掉的旧范围
+ * 也显示给用户。
+ */
+function isAppendSurface(event: any): boolean {
+  return event?.surfaceOp === 'append'
+}
+
 function visibleDeepSeekUserText(text: string): string {
   const current = text.split('【本轮消息】\n\n').at(-1) || text
   return current.replace(/^(?:\/[\w.-]+(?:\s+|$))+\n*/u, '').trim()
@@ -262,11 +297,67 @@ function deepSeekUserMessageId(event: any): string {
   return String(event.data?.id || `dh-user-${event.seq}`)
 }
 
+/**
+ * 一轮里能上屏的 assistant 消息，按事件顺序。
+ *
+ * 官方把一轮看成「**一个过程节点 + 一个答案节点**」（`dsh-client-ui-chat` 的 `turn-process`
+ * 定义）：答案取该轮**最后一条有正文且不含 tool-call 块**的 assistant 消息；其余有正文的消息
+ * 是**过程叙述**。实测 turn 7 的三步就是 `'\n\n'` / `'\n\n'` / `'搞定 ✅'` —— 只有最后一步是
+ * 答案。我们以前每步各出一条「韭菜盒子」，所以才会出现两个空行。
+ */
+function deepSeekTurnMessages(
+  snapshot: DeepSeekSessionSnapshot,
+): Map<number, Array<{ id: string; text: string; toolCall: boolean; time: number }>> {
+  const messages = new Map<number, Array<{ id: string; text: string; toolCall: boolean; time: number }>>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'assistant/message' || !isAppendSurface(event)) continue
+    const turn = Number(event.data?.turn)
+    if (!Number.isFinite(turn)) continue
+    const content = event.data?.message?.content
+    messages.set(turn, [...messages.get(turn) || [], {
+      id: String(event.data?.message?.id || ''),
+      text: deepSeekVisibleText(content),
+      toolCall: Array.isArray(content) && content.some((block: any) => block?.type === 'tool-call'),
+      time: Number(event.time) || 0,
+    }])
+  }
+  return messages
+}
+
+/** 每轮的答案：该轮最后一条有正文且不含 tool-call 的消息（官方 `latestAnswer` 的等价物）。 */
+function deepSeekTurnAnswers(
+  snapshot: DeepSeekSessionSnapshot,
+): Map<number, { id: string; text: string; time: number }> {
+  const answers = new Map<number, { id: string; text: string; time: number }>()
+  for (const [turn, messages] of deepSeekTurnMessages(snapshot)) {
+    const answer = [...messages].reverse().find(message => message.id && message.text && !message.toolCall)
+    if (answer) answers.set(turn, { id: answer.id, text: answer.text, time: answer.time })
+  }
+  return answers
+}
+
+/**
+ * 每轮用于挂载的轮次 id：有答案就用答案，没有（纯工具轮）就用最后一条 assistant 消息。
+ *
+ * 纯工具轮也要有一个 UI 轮次做挂载点，否则它的过程无处可渲染。
+ */
+function deepSeekTurnAnchors(snapshot: DeepSeekSessionSnapshot): Map<number, string> {
+  const anchors = new Map<number, string>()
+  for (const [turn, messages] of deepSeekTurnMessages(snapshot)) {
+    const id = [...messages].reverse().find(message => message.id)?.id
+    if (id) anchors.set(turn, id)
+  }
+  return anchors
+}
+
 export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): ConversationTurn[] {
   const turns: ConversationTurn[] = []
+  const answers = deepSeekTurnAnswers(snapshot)
+  const anchors = deepSeekTurnAnchors(snapshot)
   for (const event of snapshot.events || []) {
     if (event?.type === 'user/message' && event.data?.source?.kind === 'user') {
-      const content = visibleDeepSeekUserText(deepSeekMessageText(event.data.content))
+      if (!isAppendSurface(event)) continue
+      const content = visibleDeepSeekUserText(deepSeekVisibleText(event.data.content))
       if (content) turns.push({
         id: deepSeekUserMessageId(event),
         role: 'user',
@@ -274,16 +365,25 @@ export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): Convers
         createdAt: new Date(Number(event.time) || Date.now()).toISOString(),
         toolChips: [DEEPSEEK_HARNESS_SESSION_MARKER],
       })
+      continue
     }
-    if (event?.type === 'assistant/message') {
-      const content = deepSeekMessageText(event.data?.message?.content)
-      if (content) turns.push({
-        id: String(event.data.message.id || `dh-assistant-${event.seq}`),
-        role: 'assistant',
-        content,
-        createdAt: new Date(Number(event.time) || Date.now()).toISOString(),
-      })
-    }
+    // 一轮在 `turn/end` 收口，只产出一条 assistant 记录。
+    // 注意 `turn/end` 是 log-only 边界事件、**不带 surfaceOp**（官方类型上就禁止），
+    // 所以 surface 过滤只能加在消息事件上，不能放在循环开头统一 continue。
+    if (event?.type !== 'turn/end') continue
+    const turn = Number(event.data?.turn)
+    if (!Number.isFinite(turn)) continue
+    const answer = answers.get(turn)
+    const id = answer?.id || anchors.get(turn)
+    if (!id) continue
+    turns.push({
+      id,
+      role: 'assistant',
+      // 只有答案有正文。纯工具轮**故意**留空 —— 它只是过程块的挂载点，
+      // 侧栏由 turnHasBody() 判掉，不会再出现孤儿的「韭菜盒子」。
+      content: answer?.text || '',
+      createdAt: new Date(answer?.time || Number(event.time) || Date.now()).toISOString(),
+    })
   }
   return turns
 }
@@ -492,18 +592,35 @@ export function deepSeekSessionProcess(
   const owners = deepSeekTurnOwners(snapshot)
   const resultsByCall = new Map<string, any>()
   for (const event of snapshot.events || []) {
-    if (event?.type !== 'tool/result') continue
+    if (event?.type !== 'tool/result' || !isAppendSurface(event)) continue
     const callId = String(event.data?.message?.toolCallId || '')
     if (callId) resultsByCall.set(callId, event)
   }
   const process = new Map<string, DeepSeekProcessStep[]>()
-  for (const event of snapshot.events || []) {
-    if (event?.type !== 'tool/call') continue
-    const owner = owners.get(Number(event.data?.turn))
-    if (!owner) continue
-    const step = deepSeekProcessStep(event, resultsByCall.get(String(event.data?.callId || '')))
-    if (!step) continue
+  const answers = deepSeekTurnAnswers(snapshot)
+  const push = (owner: string, step: DeepSeekProcessStep) =>
     process.set(owner, [...process.get(owner) || [], step])
+  for (const event of snapshot.events || []) {
+    const owner = owners.get(Number(event?.data?.turn))
+    if (!owner) continue
+    if (event?.type === 'tool/call') {
+      const step = deepSeekProcessStep(event, resultsByCall.get(String(event.data?.callId || '')))
+      if (step) push(owner, step)
+      continue
+    }
+    // 中途叙述归过程：官方 `processSpec` 只把 step < 答案步的正文算进过程，答案另有节点。
+    if (event?.type !== 'assistant/message' || !isAppendSurface(event)) continue
+    const id = String(event.data?.message?.id || '')
+    if (!id || id === answers.get(Number(event.data?.turn))?.id) continue
+    const text = deepSeekVisibleText(event.data?.message?.content)
+    if (text) push(owner, {
+      id: `narration-${event.seq}`,
+      kind: 'narration',
+      label: '',
+      summary: '',
+      state: 'done',
+      narration: text,
+    })
   }
   return process
 }
@@ -532,6 +649,8 @@ export function deepSeekSessionReasoning(snapshot: DeepSeekSessionSnapshot): Map
  * 这里的 id 必须与 `deepSeekSessionTurns()` 完全一致，所以共用 `deepSeekUserMessageId()`。
  */
 function deepSeekTurnOwners(snapshot: DeepSeekSessionSnapshot): Map<number, string> {
+  const answers = deepSeekTurnAnswers(snapshot)
+  const anchors = deepSeekTurnAnchors(snapshot)
   const owners = new Map<number, string>()
   let currentTurn: number | undefined
   for (const event of snapshot.events || []) {
@@ -541,11 +660,15 @@ function deepSeekTurnOwners(snapshot: DeepSeekSessionSnapshot): Map<number, stri
     }
     if (currentTurn === undefined || !Number.isFinite(currentTurn)) continue
     if (event?.type === 'user/message' && event.data?.source?.kind === 'user') {
+      if (!isAppendSurface(event)) continue
       owners.set(currentTurn, deepSeekUserMessageId(event))
       continue
     }
     if (event?.type !== 'assistant/message' || owners.has(currentTurn)) continue
-    const id = String(event.data?.message?.id || '')
+    if (!isAppendSurface(event)) continue
+    // 注入式轮次（goal 续轮等）没有真人发起人：挂到该轮的**答案或锚点**上，
+    // 挂到中间那条只有换行的消息上就再也找不到可渲染的轮次，过程会整段消失。
+    const id = answers.get(currentTurn)?.id || anchors.get(currentTurn)
     if (id) owners.set(currentTurn, id)
   }
   return owners
@@ -964,13 +1087,15 @@ async function runDeepSeekHarnessTurn(
         const retry = Number(event.data?.retry || 0)
         const max = Number(event.data?.maxRetries || 0)
         // 上游原因必须显形：只报「正在重试」时，16 分钟的盲等和 10 秒的诊断没法区分。
-        // 事件自带 failure（如 RATE_LIMIT + 429 原文），JSON 主体不上面向用户的状态行。
+        // 事件自带 failure（如 SERVER + 524 原文），JSON 主体不上面向用户的状态行。
+        // 文案对齐官方 `message.retry.active`（“正在重试模型请求”），后面按 `message.retry.status`
+        // 补上 `（{retry}/{maximum}）`。
         const failure = event.data?.failure
         const detail = [failure?.code, String(failure?.message ?? '').replace(/\s*\{[\s\S]*$/, '')]
           .map(value => String(value ?? '').replace(/\s+/g, ' ').trim())
           .filter(Boolean)
           .join(' ')
-        input.onStatus?.(max ? `正在重试（${retry}/${max}）${detail ? `·${detail}` : ''}` : '正在重试')
+        input.onStatus?.(max ? `正在重试模型请求（${retry}/${max}）${detail ? `·${detail}` : ''}` : '正在重试模型请求')
       }
       const progress = deepSeekProgress(event)
       if (progress?.id) input.onProgress?.(progress)
