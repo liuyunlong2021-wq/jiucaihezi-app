@@ -2,8 +2,10 @@ export const REMOTE_PROTOCOL_VERSION = 1 as const
 export const REMOTE_PAIRING_TTL_MS = 5 * 60 * 1000
 
 const REMOTE_MESSAGE_TYPES = new Set([
+  'gateway.health',
   'context.get',
   'session.read',
+  'session.attach',
   'session.subscribe',
   'message.send',
   'run.stop',

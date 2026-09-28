@@ -1,24 +1,20 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { nextDesktopRemoteEventSeq } from '@/services/desktopRemoteEventSeq'
+import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from '@/services/desktopRemoteEventSeq'
 
-test('同一进程内严格递增，同一毫秒也要顶开', () => {
-  const first = nextDesktopRemoteEventSeq(1_700_000_000_000)
-  const sameMs = nextDesktopRemoteEventSeq(1_700_000_000_000)
-  const backToNow = nextDesktopRemoteEventSeq(1_700_000_000_000)
-
-  assert.equal(first, 1_700_000_000_000)
-  assert.equal(sameMs, first + 1)
-  assert.equal(backToNow, sameMs + 1, '时钟回拨也不能倒退')
+test('每个 Session 在同一 Gateway epoch 内独立连续编号', () => {
+  const before = desktopRemoteEventCursor('session-a')
+  assert.equal(nextDesktopRemoteEventSeq('session-a'), before.seq + 1)
+  assert.equal(nextDesktopRemoteEventSeq('session-b'), 1)
+  assert.equal(nextDesktopRemoteEventSeq('session-a'), before.seq + 2)
+  assert.equal(desktopRemoteEventCursor('session-a').gatewayEpoch, before.gatewayEpoch)
 })
 
-test('页面重载后发出的序号仍大于重载前的任何序号', () => {
-  // 重载（Vite 热更新 / 刷新 / 窗口重开）会把模块状态清空。
-  // 若序号来自「页面内自增计数器」，重载后就会从 1 重新开始，
-  // 手机端（要求严格递增）会把之后所有事件当成旧事件丢掉 —— 2026-09-27 真机故障。
-  // 这里模拟重载后的第一次发布：时钟打底，天然大于重载前发出去的任何序号。
-  const issuedBeforeReload = nextDesktopRemoteEventSeq(1_700_000_000_000)
-  const afterReload = nextDesktopRemoteEventSeq(1_700_000_060_000)
-
-  assert.ok(afterReload > issuedBeforeReload)
+test('同一个 Session 的 snapshot 游标等于最近一次发布序号', () => {
+  const sessionId = 'session-c'
+  const seq = nextDesktopRemoteEventSeq(sessionId)
+  assert.deepEqual(desktopRemoteEventCursor(sessionId), {
+    gatewayEpoch: desktopRemoteEventCursor(sessionId).gatewayEpoch,
+    seq,
+  })
 })

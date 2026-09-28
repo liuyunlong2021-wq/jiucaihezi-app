@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { computed, effectScope, reactive } from 'vue'
+import { beginMemoryRun, desktopConversationLiveState, desktopConversationRuns, executeDesktopHarnessRun, memoryRunKey, stopRun, type MemoryRun } from '@/services/desktopConversationRuntime'
 import { shouldReadNativeClipboardImage } from '@/utils/clipboard'
 
 function source(path: string) {
@@ -14,7 +16,7 @@ test('Desktop defaults to Harness without an @DH switch', () => {
   assert.doesNotMatch(workbench, /function selectDeepSeekHarness\(\)/)
   assert.doesNotMatch(workbench, /dhSelected/)
   assert.match(workbench, /const useHarness = desktopOnlyRuntime/)
-  assert.match(workbench, /useHarness\s*\?\s*await runDeepSeekHarness/)
+  assert.match(workbench, /useHarness\s*\?\s*await executeDesktopHarnessRun\(runs, run,/)
   assert.match(workbench, /sessionId: active\.transcript\.id/)
   assert.match(workbench, /cwd: active\.resource\.owner/)
   assert.doesNotMatch(workbench, /stopDeepSeekHarness\(\)/)
@@ -23,9 +25,149 @@ test('Desktop defaults to Harness without an @DH switch', () => {
   assert.match(workbench, /if \(desktopOnlyRuntime\) ids\.push\(DEEPSEEK_HARNESS_SESSION_MARKER\)/)
   assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
   assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns\)/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?attachments: requestAttachments/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?attachments: requestAttachments/)
+  assert.match(source('src/services/desktopConversationRuntime.ts'), /executeDesktopHarnessRun\([\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
   assert.doesNotMatch(workbench, /const skillSnapshot = useHarness \? \[\]/)
+})
+
+test('Desktop run ownership survives a workbench page unmount', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /const runs = desktopOnlyRuntime \? desktopConversationRuns/)
+  const cleanup = workbench.match(/onBeforeUnmount\(\(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
+  assert.match(cleanup, /if \(!desktopOnlyRuntime\) \{[\s\S]*?run\.controller\.abort\(\)[\s\S]*?runs\.clear\(\)/)
+  const key = 'remount-test'
+  const run = { phase: 'running', controller: new AbortController() } as MemoryRun
+  desktopConversationRuns.set(key, run)
+  try {
+    const firstPage = effectScope()
+    const firstView = firstPage.run(() => computed(() => desktopConversationRuns.get(key)?.phase))
+    assert.equal(firstView?.value, 'running')
+    firstPage.stop()
+    desktopConversationRuns.get(key)!.phase = 'done'
+    const secondPage = effectScope()
+    const secondView = secondPage.run(() => computed(() => desktopConversationRuns.get(key)?.phase))
+    assert.equal(secondView?.value, 'done')
+    assert.equal(run.controller.signal.aborted, false)
+    secondPage.stop()
+  } finally {
+    desktopConversationRuns.delete(key)
+  }
+})
+
+test('Desktop task can still be stopped and its approval settled after the view scope ends', () => {
+  const decisions: string[] = []
+  const run: MemoryRun = {
+    runId: 'run-1', owner: '/project', resourcePath: 'chat', conversationId: 'chat-1',
+    phase: 'running', status: '等待审批', error: '', streamingText: '部分回答', reasoning: '',
+    steps: [{ id: 'tool-1', label: '执行工具', state: 'running' }], elapsed: 0, metrics: null,
+    userTurn: null, programStatus: null,
+    approval: { id: 'approval-1', message: '确认操作', resolve: decision => decisions.push(decision) },
+    controller: new AbortController(), timer: null, startedAt: Date.now(), editTargetId: '',
+    memoryEnabled: false, runtime: 'dh',
+  }
+  const key = '/project::chat'
+  desktopConversationRuns.set(key, run)
+  try {
+    const page = effectScope()
+    page.run(() => computed(() => desktopConversationRuns.get(key)?.phase))
+    page.stop()
+    stopRun(desktopConversationRuns.get(key)!)
+    assert.equal(run.phase, 'stopped')
+    assert.equal(run.controller.signal.aborted, true)
+    assert.deepEqual(decisions, ['reject'])
+    assert.equal(run.approval, null)
+    assert.equal(run.streamingText, '')
+  } finally {
+    desktopConversationRuns.delete(key)
+  }
+})
+
+test('application-owned run projects streaming, pending turn and approval without a workbench view', () => {
+  const owner = '/project'
+  const path = 'chat'
+  const key = memoryRunKey(owner, path)
+  desktopConversationRuns.set(key, {
+    runId: 'run-1', phase: 'running', status: '等待审批', error: '', streamingText: '部分回答',
+    steps: [{ id: 'tool-1', label: '读取文件', state: 'running' }],
+    userTurn: { id: 'turn-1', role: 'user', content: '继续', createdAt: '2026-09-28T00:00:00.000Z' },
+    approval: { id: 'approval-1', message: '允许读取？', resolve: () => undefined },
+  } as MemoryRun)
+  try {
+    const projection = desktopConversationLiveState(owner, path)
+    assert.equal(projection.streamingText, '部分回答')
+    assert.equal(projection.pendingTurn?.content, '继续')
+    assert.equal(projection.run.state, 'running')
+    assert.equal(projection.run.approval?.id, 'approval-1')
+  } finally {
+    desktopConversationRuns.delete(key)
+  }
+})
+
+test('shared run start rejects a second command before replacing the active run', () => {
+  const runs = reactive(new Map<string, MemoryRun>())
+  const input = {
+    owner: '/project', resourcePath: 'chat', conversationId: 'chat-1',
+    userTurn: { id: 'turn-1', role: 'user' as const, content: '第一条', createdAt: '2026-09-28' },
+    title: undefined, editTargetId: '', runtime: 'dh' as const,
+  }
+  const first = beginMemoryRun(runs, input)
+  assert.throws(() => beginMemoryRun(runs, { ...input, userTurn: { ...input.userTurn, id: 'turn-2' } }), /SESSION_BUSY/)
+  assert.equal(runs.get(memoryRunKey('/project', 'chat'))?.runId, first.runId)
+  first.phase = 'done'
+  assert.equal(beginMemoryRun(runs, { ...input, userTurn: { ...input.userTurn, id: 'turn-3' } }).runId, 'turn-3')
+})
+
+test('stopping an already completed run does not rewrite its successful result', () => {
+  const runs = reactive(new Map<string, MemoryRun>())
+  const run = beginMemoryRun(runs, {
+    owner: '/project', resourcePath: 'chat-a', conversationId: 'a', title: undefined,
+    editTargetId: '', runtime: 'dh',
+    userTurn: { id: 'turn-complete', role: 'user', content: '继续', createdAt: new Date().toISOString() },
+  })
+  run.phase = 'done'
+  run.status = '已完成'
+  run.streamingText = '最终结果'
+  stopRun(run)
+  assert.equal(run.phase, 'done')
+  assert.equal(run.status, '已完成')
+  assert.equal(run.streamingText, '最终结果')
+})
+
+test('the shared Harness executor projects progress for local and remote callers', async () => {
+  const runs = reactive(new Map<string, MemoryRun>())
+  const run = beginMemoryRun(runs, {
+    owner: '/project', resourcePath: 'chat-a', conversationId: 'a', title: undefined,
+    editTargetId: '', runtime: 'dh',
+    userTurn: { id: 'turn-shared', role: 'user', content: '执行工具', createdAt: new Date().toISOString() },
+  })
+  const reply = await executeDesktopHarnessRun(runs, run, {
+    cwd: '/project', sessionId: 'a', message: '执行工具', model: 'model-a', apiBase: 'https://example.test', apiKey: 'test-key',
+  }, async input => {
+    input.onStatus?.('正在思考')
+    input.onProgress?.({ id: 'tool-1', label: '读取文件', state: 'running', startedAt: 10 })
+    input.onProgress?.({ id: 'tool-1', label: '读取文件', state: 'done', endedAt: 25 })
+    input.onText?.('完成')
+    return '完成'
+  })
+  assert.equal(reply, '完成')
+  assert.equal(run.streamingText, '完成')
+  assert.equal(run.steps[0]?.durationMs, 15)
+  assert.equal(run.steps[0]?.state, 'done')
+})
+
+test('a stopped run cannot start Harness after asynchronous preparation finishes', async () => {
+  const runs = reactive(new Map<string, MemoryRun>())
+  const run = beginMemoryRun(runs, {
+    owner: '/project', resourcePath: 'chat-a', conversationId: 'a', title: undefined,
+    editTargetId: '', runtime: 'dh',
+    userTurn: { id: 'turn-cancelled', role: 'user', content: '停止前的任务', createdAt: new Date().toISOString() },
+  })
+  stopRun(run)
+  let executed = false
+  await assert.rejects(() => executeDesktopHarnessRun(runs, run, {
+    cwd: '/project', sessionId: 'a', message: '停止前的任务', model: 'model-a', apiBase: 'https://example.test', apiKey: 'test-key',
+  }, async () => { executed = true; return '不应执行' }), /RUN_STOPPED/)
+  assert.equal(executed, false)
 })
 
 test('@文件 changes Harness permission without selecting an executor', () => {
@@ -33,18 +175,18 @@ test('@文件 changes Harness permission without selecting an executor', () => {
   const restoreTools = workbench.match(/function applyToolChipIds\(ids\?: string\[\]\) \{([\s\S]*?)\n\}/)?.[1] || ''
   assert.doesNotMatch(workbench, /display: 'DH'|label: '@DH'/)
   assert.match(restoreTools, /fileToolsSelected\.value = next\.has\('file'\)/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?fileAccessEnabled: fileToolsSelected\.value/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?fileAccessEnabled: fileToolsSelected\.value/)
 })
 
 test('Desktop specialized capabilities stay inside the Harness session', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /const useHarness = desktopOnlyRuntime/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?mediaSelected: mediaSelected\.value/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?avSelected: avSelected\.value/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?scene3dSelected: scene3dSelected\.value/)
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?mcpServerIds: selectedMcpToolNames\.value\.map/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?mediaSelected: mediaSelected\.value/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?avSelected: avSelected\.value/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?scene3dSelected: scene3dSelected\.value/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?mcpServerIds: selectedMcpToolNames\.value\.map/)
   // 图片能否到达模型取决于路由 patch 里的模态声明：不传能力，Harness 会按纯文本处理附件。
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?imageInput: dhImageInput/)
+  assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?imageInput: dhImageInput/)
   assert.match(workbench, /function harnessImageInput\(modelId: string\): boolean \{[\s\S]*?resolveModelInputModalities\(/)
   // 看不见的图片必须给用户一句人话，而不是静默发出去等 16 分钟。
   assert.match(workbench, /当前模型不支持图片输入，这 \$\{attachedImages\} 张图片不会送达/)
@@ -833,11 +975,11 @@ test('memory composer keeps project file references until the user cancels them'
 })
 
 test('memory cancellation settles the visible run before invalidating stale callbacks', () => {
-  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const runtime = source('src/services/desktopConversationRuntime.ts')
 
   assert.match(
-    workbench,
-    /function stopRun\(run: MemoryRun\) \{\s*if \(run\.phase === 'running'\) run\.phase = 'stopped'\s*run\.status = '已停止'\s*stopRunTimer\(run\)\s*settleApproval\(run, 'reject'\)\s*run\.controller\.abort\(\)/,
+    runtime,
+    /function stopRun\(run: MemoryRun\) \{\s*if \(run\.phase !== 'running'\) return\s*run\.phase = 'stopped'\s*run\.status = '已停止'\s*stopRunTimer\(run\)\s*settleApproval\(run, 'reject'\)\s*run\.controller\.abort\(\)/,
   )
 })
 
@@ -848,8 +990,8 @@ test('memory runs belong to their conversation instead of the visible one', () =
   const deleteConversation = workbench.match(/async function deleteConversation\(item: MemoryConversation\) \{([\s\S]*?)const message = /)?.[1]
 
   // 运行表按 owner::路径 索引：不同项目的对话 Raw 可能同名，只按路径索引会串项目。
-  assert.match(workbench, /const runs = reactive\(new Map<string, MemoryRun>\(\)\)/)
-  assert.match(workbench, /const memoryRunKey = \(owner: string, path: string\) => `\$\{owner\}::\$\{path\}`/)
+  assert.match(workbench, /const runs = desktopOnlyRuntime \? desktopConversationRuns : reactive\(new Map<string, MemoryRun>\(\)\)/)
+  assert.match(source('src/services/desktopConversationRuntime.ts'), /const memoryRunKey = \(owner: string, path: string\) => `\$\{owner\}::\$\{path\}`/)
   assert.match(workbench, /const sending = computed\(\(\) => activeRun\.value\?\.phase === 'running'\)/)
   // 派发那一刻就清空草稿，不必等这一轮跑完才能输入下一段。
   assert.match(
@@ -911,7 +1053,7 @@ test('memory Desktop keeps always-allow for the current conversation in this App
   assert.match(workbench, /memoryToolAlwaysAllowedConversations\.add\(active\.transcript\.id\)/)
   assert.match(workbench, /call\.function\.name !== 'delete'/)
   assert.doesNotMatch(workbench, /localStorage[\s\S]{0,120}始终允许/)
-  assert.match(workbench, /const run = runs\.get\(runKey\) as MemoryRun/)
+  assert.match(workbench, /run = beginMemoryRun\(runs, \{/)
   assert.match(workbench, /settleApproval\(run, 'reject'\)[\s\S]*run\.controller\.abort\(\)/)
 })
 
@@ -1657,11 +1799,12 @@ test('Harness process and reasoning hang on the round that started them', () => 
   assert.match(workbench, /for \(const \[turnId, reasoning\] of deepSeekSessionReasoning\(snapshot\)\)/)
   assert.match(workbench, /readDeepSeekHarnessSession\([\s\S]*?rememberHarnessSnapshot\(snapshot\)/)
   // 实时推理走独立回调：不能混进正文（onText 决定消息体）。
-  assert.match(workbench, /runDeepSeekHarness\(\{[\s\S]*?onReasoning\(text\)[\s\S]*?run\.reasoning = text/)
-  assert.doesNotMatch(workbench, /onReasoning\(text\)[\s\S]{0,80}run\.streamingText/)
+  const desktopRuntime = source('src/services/desktopConversationRuntime.ts')
+  assert.match(desktopRuntime, /executeDesktopHarnessRun\([\s\S]*?onReasoning\(text\)[\s\S]*?run\.reasoning = text/)
+  assert.doesNotMatch(desktopRuntime, /onReasoning\(text\)[\s\S]{0,80}run\.streamingText/)
   // 工具行带摘要与失败原因，长结果只在展开时渲染并标注截断。
-  assert.match(workbench, /onProgress\(progress\)[\s\S]*?summary: progress\.summary/)
-  assert.match(workbench, /step\.durationMs = progress\.endedAt - step\.startedAt/)
+  assert.match(desktopRuntime, /onProgress\(progress\)[\s\S]*?summary: progress\.summary/)
+  assert.match(desktopRuntime, /step\.durationMs = progress\.endedAt - step\.startedAt/)
   assert.match(workbench, /<details v-if="step\.resultText" class="memory-process-result">/)
   assert.match(workbench, /step\.resultTruncated \? '\\n…（已截断）' : ''/)
   // 实时列表的上限语义不动：仍需按最近 5 条收敛。

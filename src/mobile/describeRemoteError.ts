@@ -28,6 +28,7 @@ const CONNECTION_ERRORS: Record<string, string> = {
   APPROVAL_NOT_FOUND: '这个待确认动作已经结束了',
   APPROVAL_DECISION_INVALID: '审批决定无效',
   SCAN_TIMEOUT: '没扫到二维码，已取消。请把二维码放大后重试',
+  CAMERA_PERMISSION_DENIED: '相机权限未开启；可在系统设置中允许韭菜盒子使用相机，或直接粘贴配对信息',
 }
 
 /** 插件与系统给的是自由文本，只能按关键词认。 */

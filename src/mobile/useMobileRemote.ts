@@ -1,5 +1,5 @@
 import { onBeforeUnmount, ref } from 'vue'
-import { Format, cancel, scan } from '@tauri-apps/plugin-barcode-scanner'
+import { Format, cancel, requestPermissions, scan } from '@tauri-apps/plugin-barcode-scanner'
 import {
   MobileRemoteClient,
   type MobileRemoteApprovalDecision,
@@ -41,9 +41,16 @@ export function useMobileRemote() {
 
   const stopWatching = client.onChange(next => { view.value = next })
 
-  /** 手机切后台会被挂起，回来时 socket 已经死了：已配对但不在线就自动重连（合同 §13.6）。 */
+  /** 回前台无论 socket 是否看似在线，都从 Desktop 重新取当前会话。 */
   function onVisibilityChange() {
-    if (document.visibilityState === 'visible' && shouldAutoReconnect(status.value)) void reconnect()
+    if (document.visibilityState !== 'visible') return
+    void mobileRemoteStatus().then(async next => {
+      status.value = next
+      if (next.connected) error.value = ''
+      if (shouldAutoReconnect(next)) await reconnect()
+      else if (next.connected && view.value.state === 'connected') await client.refresh()
+      else if (next.connected) await client.connect()
+    }).catch(cause => { error.value = describeRemoteError(cause) })
   }
   document.addEventListener('visibilitychange', onVisibilityChange)
 
@@ -68,6 +75,7 @@ export function useMobileRemote() {
 
   const refreshStatus = () => run(async () => {
     status.value = await mobileRemoteStatus()
+    if (status.value.connected && view.value.state !== 'connected') await client.connect()
   })
 
   /** 用 Desktop 的一次性 offer 配对，然后按 §10.4 建立当前 Session。 */
@@ -85,6 +93,7 @@ export function useMobileRemote() {
    * （上游 #3050/#3081）。这里加超时自动取消，至少不让用户卡死。
    */
   const pairByScan = () => run(async () => {
+    if (await requestPermissions() !== 'granted') throw new Error('CAMERA_PERMISSION_DENIED')
     const result = await Promise.race([
       scan({ formats: [Format.QRCode] }),
       new Promise<never>((_, reject) => {
@@ -110,10 +119,10 @@ export function useMobileRemote() {
     client.disconnect()
   })
 
-  const send = (text: string) => client.sendMessage(text)
-  const stop = () => client.stopRun()
+  const send = (text: string) => run(() => client.sendMessage(text))
+  const stop = () => run(() => client.stopRun())
   const respondApproval = (approvalId: string, decision: MobileRemoteApprovalDecision) =>
-    client.respondApproval(approvalId, decision)
+    run(() => client.respondApproval(approvalId, decision))
 
   return {
     view, status, error, busy,

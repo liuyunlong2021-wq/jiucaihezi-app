@@ -5,6 +5,7 @@ import type { MobileRemoteStatus } from '@/services/mobileRemoteTransport'
 // 设备页：配对与连接。这里不出现项目、对话、模型或技能入口（合同 §7.2）。
 defineProps<{
   status: MobileRemoteStatus | null
+  waitingForConversation: boolean
   busy: boolean
   error: string
 }>()
@@ -27,30 +28,32 @@ function submitPasted() {
 <template>
   <section class="pairing">
     <header>
-      <JcIcon name="smartphone" />
+      <JcIcon name="smartphone_outline" />
       <h1>韭菜盒子遥控</h1>
-      <p>在电脑上打开「设置 → 手机控制器 → 开启」，再扫描它显示的二维码。</p>
+      <p v-if="status?.connected">已与电脑配对；正在读取电脑上当前打开的对话。</p>
+      <p v-else>在电脑上打开「设置 → 手机控制器 → 开启」，再扫描它显示的二维码。</p>
     </header>
 
     <p class="state" :class="{ offline: !status?.connected }">
       <JcIcon :name="status?.connected ? 'check_circle' : 'link_off'" />
-      <span v-if="status?.connected">已连接到 {{ status.address }}</span>
+      <span v-if="status?.connected && waitingForConversation">已连接电脑，等待电脑打开对话</span>
+      <span v-else-if="status?.connected">已连接到 {{ status.address }}</span>
       <span v-else-if="status?.paired">已配对该电脑，可直接重新连接</span>
       <span v-else>还没有和电脑配对</span>
     </p>
 
-    <button class="primary" type="button" :disabled="busy" @click="$emit('scan')">
+    <button v-if="!status?.connected" class="primary" type="button" :disabled="busy" @click="$emit('scan')">
       <JcIcon name="qr_code_scanner" />
       <span>{{ status?.paired ? '重新扫码配对' : '扫描二维码连接' }}</span>
     </button>
     <button
-      v-if="status?.paired"
+      v-if="status?.paired && (!status?.connected || !waitingForConversation)"
       type="button"
       :disabled="busy"
       @click="$emit('connect')"
     >
       <JcIcon name="sync" />
-      <span>连接上次配对的电脑</span>
+      <span>{{ status?.connected ? '重新进入当前对话' : '连接上次配对的电脑' }}</span>
     </button>
     <button v-if="status?.paired" type="button" :disabled="busy" @click="$emit('disconnect')">
       <JcIcon name="link_off" />
@@ -64,7 +67,7 @@ function submitPasted() {
 
     <p v-if="error" class="error" role="alert">{{ error }}</p>
 
-    <details class="fallback">
+    <details v-if="!status?.connected" class="fallback">
       <summary>相机扫不出来？用粘贴配对</summary>
       <p>在电脑上点「复制配对信息」（或用系统相机扫那个二维码并复制），长按下面输入框粘贴。</p>
       <textarea

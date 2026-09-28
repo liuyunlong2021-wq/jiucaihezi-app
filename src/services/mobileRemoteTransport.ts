@@ -63,7 +63,6 @@ export function parsePairingOffer(raw: string): RemotePairingOffer {
 
 /** Rust 侧只回状态与错误码，凭证（token、设备私钥）不经过 WebView。 */
 export function createTauriMobileTransport(options: { onClosed?: () => void } = {}): MobileRemoteTransport {
-  let unlisteners: UnlistenFn[] = []
   return {
     async request({ type, payload }) {
       return await invoke('mobile_remote_request', {
@@ -72,15 +71,17 @@ export function createTauriMobileTransport(options: { onClosed?: () => void } = 
         payload,
       })
     },
-    subscribe(listener) {
-      unlisteners = []
-      void listen<unknown>(MOBILE_REMOTE_EVENT, event => listener(event.payload))
-        .then(unlisten => { unlisteners.push(unlisten) })
-      void listen<unknown>(MOBILE_REMOTE_CLOSED_EVENT, () => { options.onClosed?.() })
-        .then(unlisten => { unlisteners.push(unlisten) })
-      return () => {
-        for (const unlisten of unlisteners) unlisten()
-        unlisteners = []
+    async subscribe(listener) {
+      const eventUnlisten: UnlistenFn = await listen<unknown>(MOBILE_REMOTE_EVENT, event => listener(event.payload))
+      try {
+        const closedUnlisten: UnlistenFn = await listen<unknown>(MOBILE_REMOTE_CLOSED_EVENT, () => { options.onClosed?.() })
+        return () => {
+          void eventUnlisten()
+          void closedUnlisten()
+        }
+      } catch (cause) {
+        void eventUnlisten()
+        throw cause
       }
     },
   }

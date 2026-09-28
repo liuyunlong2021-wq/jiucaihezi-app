@@ -64,6 +64,7 @@ test('Desktop remote host shares one busy guard and never queues a second send',
     sendMessage: async text => {
       sent.push(text)
       await first.promise
+      return { runId: 'run-1' }
     },
     stopRun: async () => 'idle',
     respondApproval: async () => undefined,

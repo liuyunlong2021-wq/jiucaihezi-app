@@ -183,6 +183,14 @@ export function deepSeekSessionId(conversationId: string): string {
   return `jc-v1-${conversationId}`
 }
 
+export function deepSeekSessionExists(
+  sessions: Array<{ header: { id: string } }>,
+  conversationId: string,
+): boolean {
+  const sessionId = deepSeekSessionId(conversationId)
+  return sessions.some(session => session.header.id === sessionId)
+}
+
 export function deepSeekAssistantText(event: any): string {
   if (event?.type !== 'assistant/message') return ''
   const content = event?.data?.message?.content

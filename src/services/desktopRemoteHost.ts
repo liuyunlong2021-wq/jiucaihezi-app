@@ -17,7 +17,7 @@ export type DesktopRemoteEvent = {
 type DesktopRemoteHostDependencies = {
   getContext: () => DesktopRemoteContext
   readSession: (sessionId: string) => Promise<unknown>
-  sendMessage: (text: string) => Promise<void>
+  sendMessage: (text: string) => Promise<{ runId: string } | void>
   stopRun: () => Promise<string>
   respondApproval: (approvalId: string, decision: 'approve' | 'reject' | 'always') => Promise<void>
   subscribe: (listener: (event: DesktopRemoteEvent) => void) => () => void
@@ -57,7 +57,9 @@ export class DesktopRemoteHost {
     if (this.sending || this.dependencies.isBusy?.()) throw new RemoteProtocolError('SESSION_BUSY')
     this.sending = true
     try {
-      await this.dependencies.sendMessage(text)
+      const receipt = await this.dependencies.sendMessage(text)
+      if (!receipt?.runId) throw new RemoteProtocolError('RUN_NOT_STARTED')
+      return receipt
     } finally {
       this.sending = false
     }

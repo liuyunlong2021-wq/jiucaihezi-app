@@ -16,11 +16,17 @@ use tauri::{AppHandle, Emitter, State};
 use uuid::Uuid;
 
 pub const MAX_FRAME_BYTES: usize = 64 * 1024;
+const CHUNK_BYTES: usize = 60 * 1024;
+// ponytail: bounded reassembly; paginate old history if a snapshot ever exceeds 8 MiB.
+const MAX_MESSAGE_BYTES: usize = 8 * 1024 * 1024;
+const CHUNK_HEADER: &[u8; 4] = b"JCL1";
 const PAIRING_TTL_MS: u64 = 5 * 60 * 1000;
 pub(crate) const NOISE_PATTERN: &str = "Noise_XX_25519_ChaChaPoly_BLAKE2s";
 const MESSAGE_TYPES: &[&str] = &[
+    "gateway.health",
     "context.get",
     "session.read",
+    "session.attach",
     "session.subscribe",
     "message.send",
     "run.stop",
@@ -573,12 +579,40 @@ pub fn remote_bridge_publish(
     event: serde_json::Value,
     state: State<'_, RemoteBridgeState>,
 ) -> Result<(), String> {
-    for client in state.clients.lock().map_err(lock_error)?.values() {
-        if session_id.is_empty() || client.session_id.as_deref() == Some(session_id.as_str()) {
-            let _ = client.sender.send(event.clone());
-        }
+    let clients = state.clients.lock().map_err(lock_error)?;
+    send_remote_event_to_all(
+        clients
+            .values()
+            .filter(|client| {
+                session_id.is_empty() || client.session_id.as_deref() == Some(session_id.as_str())
+            })
+            .map(|client| &client.sender),
+        &event,
+    )
+}
+
+fn send_remote_event(
+    sender: &mpsc::Sender<serde_json::Value>,
+    event: &serde_json::Value,
+) -> Result<(), String> {
+    sender
+        .send(event.clone())
+        .map_err(|_| "REMOTE_PUBLISH_FAILED".to_string())
+}
+
+fn send_remote_event_to_all<'a>(
+    senders: impl IntoIterator<Item = &'a mpsc::Sender<serde_json::Value>>,
+    event: &serde_json::Value,
+) -> Result<(), String> {
+    let mut failed = false;
+    for sender in senders {
+        failed |= send_remote_event(sender, event).is_err();
     }
-    Ok(())
+    if failed {
+        Err("REMOTE_PUBLISH_FAILED".to_string())
+    } else {
+        Ok(())
+    }
 }
 
 impl RemoteBridgeState {
@@ -641,10 +675,54 @@ fn enter_session_mode(stream: &TcpStream) -> Result<(), String> {
 }
 
 fn handle_connection(
-    mut stream: TcpStream,
+    stream: TcpStream,
     app: &AppHandle,
     state: &RemoteBridgeState,
     generation: usize,
+) -> Result<(), String> {
+    handle_connection_with_dispatch(
+        stream,
+        Some(app),
+        state,
+        generation,
+        |request, device_id| {
+            let (sender, receiver) = mpsc::channel();
+            state
+                .pending_requests
+                .lock()
+                .map_err(lock_error)?
+                .insert(request.request_id.clone(), sender);
+            let response = (|| {
+                app.emit(
+                    "desktop-remote:request",
+                    RemoteBridgeRequestEvent {
+                        request_id: request.request_id.clone(),
+                        message_type: request.message_type.clone(),
+                        payload: request.payload.clone(),
+                        device_id: device_id.to_string(),
+                    },
+                )
+                .map_err(|error| error.to_string())?;
+                receiver
+                    .recv_timeout(Duration::from_secs(30))
+                    .map_err(|_| "REMOTE_HOST_TIMEOUT".to_string())?
+            })();
+            state
+                .pending_requests
+                .lock()
+                .map_err(lock_error)?
+                .remove(&request.request_id);
+            response
+        },
+    )
+}
+
+fn handle_connection_with_dispatch(
+    mut stream: TcpStream,
+    app: Option<&AppHandle>,
+    state: &RemoteBridgeState,
+    generation: usize,
+    dispatch: impl Fn(&RemoteRequestFrame, &str) -> Result<serde_json::Value, String>,
 ) -> Result<(), String> {
     prepare_connection(&stream)?;
     let private_key = state.core.lock().map_err(lock_error)?.private_key();
@@ -652,12 +730,15 @@ fn handle_connection(
     bridge_log("handshake ok");
     let transport = Arc::new(Mutex::new(transport));
     let auth = read_encrypted_json::<RemoteAuthFrame>(&mut stream, &transport)?;
-    bridge_log(&format!("auth kind={} device={}", auth.kind, auth.device_id));
+    bridge_log(&format!(
+        "auth kind={} device={}",
+        auth.kind, auth.device_id
+    ));
     let device_id = if auth.kind == "pair.request" {
         handle_pairing(
             &mut stream,
             &transport,
-            app,
+            app.ok_or_else(|| "PAIRING_UNAVAILABLE".to_string())?,
             state,
             auth,
             client_public_key.clone(),
@@ -698,7 +779,9 @@ fn handle_connection(
     let writer_transport = transport.clone();
     let writer_thread = thread::spawn(move || {
         while let Ok(value) = outgoing.recv() {
-            if write_encrypted_json(&mut writer, &writer_transport, &value).is_err() {
+            if let Err(error) = write_encrypted_json(&mut writer, &writer_transport, &value) {
+                bridge_log(&format!("encrypted write failed: {error}"));
+                let _ = writer.shutdown(Shutdown::Both);
                 break;
             }
         }
@@ -726,30 +809,41 @@ fn handle_connection(
             let _ = outbound.send(serde_json::json!({ "version": 1, "requestId": request.request_id, "type": "pong", "sentAt": now_ms(), "payload": {} }));
             continue;
         }
-        let (sender, receiver) = mpsc::channel();
-        state
-            .pending_requests
-            .lock()
-            .map_err(lock_error)?
-            .insert(request.request_id.clone(), sender);
-        app.emit(
-            "desktop-remote:request",
-            RemoteBridgeRequestEvent {
-                request_id: request.request_id.clone(),
-                message_type: request.message_type.clone(),
-                payload: request.payload.clone(),
-                device_id: device_id.clone(),
-            },
-        )
-        .map_err(|error| error.to_string())?;
-        let response = receiver.recv_timeout(Duration::from_secs(30));
-        state
-            .pending_requests
-            .lock()
-            .map_err(lock_error)?
-            .remove(&request.request_id);
+        // attach 必须先登记订阅，再让 WebView 异步读取 Session；否则 read → subscribe 会丢事件。
+        let previous_subscription = if request.message_type == "session.attach" {
+            request
+                .payload
+                .get("sessionId")
+                .and_then(|value| value.as_str())
+                .filter(|id| !id.is_empty() && id.len() <= 200)
+                .and_then(|session_id| {
+                    state
+                        .clients
+                        .lock()
+                        .ok()?
+                        .get_mut(&connection_id)
+                        .map(|client| {
+                            std::mem::replace(&mut client.session_id, Some(session_id.to_string()))
+                        })
+                })
+        } else {
+            None
+        };
+        let response = dispatch(&request, &device_id);
+        if request.message_type == "session.attach" && response.is_err() {
+            if let Some(previous) = previous_subscription {
+                if let Some(client) = state
+                    .clients
+                    .lock()
+                    .map_err(lock_error)?
+                    .get_mut(&connection_id)
+                {
+                    client.session_id = previous;
+                }
+            }
+        }
         let response = match response {
-            Ok(Ok(result)) => {
+            Ok(result) => {
                 if request.message_type == "session.subscribe" {
                     if let Some(session_id) = request
                         .payload
@@ -768,11 +862,8 @@ fn handle_connection(
                 }
                 serde_json::json!({ "version": 1, "requestId": request.request_id, "type": "response", "sentAt": now_ms(), "payload": { "result": result } })
             }
-            Ok(Err(error)) => {
+            Err(error) => {
                 serde_json::json!({ "version": 1, "requestId": request.request_id, "type": "response", "sentAt": now_ms(), "payload": { "error": error } })
-            }
-            Err(_) => {
-                serde_json::json!({ "version": 1, "requestId": request.request_id, "type": "response", "sentAt": now_ms(), "payload": { "error": "REMOTE_HOST_TIMEOUT" } })
             }
         };
         let _ = outbound.send(response);
@@ -907,6 +998,40 @@ pub(crate) fn read_encrypted(
     stream: &mut TcpStream,
     transport: &Arc<Mutex<TransportState>>,
 ) -> Result<Vec<u8>, String> {
+    let first = read_encrypted_frame(stream, transport)?;
+    if first.len() != 8 || &first[..4] != CHUNK_HEADER {
+        return Ok(first);
+    }
+    let total = u32::from_be_bytes(first[4..8].try_into().unwrap()) as usize;
+    if !(CHUNK_BYTES + 1..=MAX_MESSAGE_BYTES).contains(&total) {
+        return Err("INVALID_CHUNKED_MESSAGE".to_string());
+    }
+    // Idle sessions have no read timeout; one authenticated peer must not hold a slot forever mid-message.
+    let previous_timeout = stream.read_timeout().map_err(|error| error.to_string())?;
+    stream
+        .set_read_timeout(Some(Duration::from_secs(30)))
+        .map_err(|error| error.to_string())?;
+    let result = (|| {
+        let mut plain = Vec::with_capacity(total);
+        while plain.len() < total {
+            let chunk = read_encrypted_frame(stream, transport)?;
+            if chunk.is_empty() || chunk.len() > CHUNK_BYTES || chunk.len() > total - plain.len() {
+                return Err("INVALID_CHUNKED_MESSAGE".to_string());
+            }
+            plain.extend_from_slice(&chunk);
+        }
+        Ok(plain)
+    })();
+    stream
+        .set_read_timeout(previous_timeout)
+        .map_err(|error| error.to_string())?;
+    result
+}
+
+fn read_encrypted_frame(
+    stream: &mut TcpStream,
+    transport: &Arc<Mutex<TransportState>>,
+) -> Result<Vec<u8>, String> {
     let encrypted = read_frame(stream, MAX_FRAME_BYTES + 16)?;
     let mut plain = vec![0; encrypted.len()];
     let size = transport
@@ -924,9 +1049,27 @@ pub(crate) fn write_encrypted_json(
     value: &serde_json::Value,
 ) -> Result<(), String> {
     let plain = serde_json::to_vec(value).map_err(|error| error.to_string())?;
-    if plain.len() > MAX_FRAME_BYTES {
-        return Err("FRAME_TOO_LARGE".to_string());
+    if plain.len() > MAX_MESSAGE_BYTES {
+        return Err("MESSAGE_TOO_LARGE".to_string());
     }
+    if plain.len() > CHUNK_BYTES {
+        let mut header = [0u8; 8];
+        header[..4].copy_from_slice(CHUNK_HEADER);
+        header[4..].copy_from_slice(&(plain.len() as u32).to_be_bytes());
+        write_encrypted_frame(stream, transport, &header)?;
+        for chunk in plain.chunks(CHUNK_BYTES) {
+            write_encrypted_frame(stream, transport, chunk)?;
+        }
+        return Ok(());
+    }
+    write_encrypted_frame(stream, transport, &plain)
+}
+
+fn write_encrypted_frame(
+    stream: &mut TcpStream,
+    transport: &Arc<Mutex<TransportState>>,
+    plain: &[u8],
+) -> Result<(), String> {
     let mut encrypted = vec![0; plain.len() + 16];
     let size = transport
         .lock()
@@ -1051,6 +1194,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn publishing_to_a_closed_mobile_connection_is_an_error() {
+        let (sender, receiver) = mpsc::channel();
+        drop(receiver);
+        assert_eq!(
+            send_remote_event(&sender, &serde_json::json!({ "type": "session.event" }))
+                .unwrap_err(),
+            "REMOTE_PUBLISH_FAILED"
+        );
+    }
+
+    #[test]
+    fn a_closed_mobile_connection_does_not_block_other_subscribers() {
+        let (closed_sender, closed_receiver) = mpsc::channel();
+        drop(closed_receiver);
+        let (healthy_sender, healthy_receiver) = mpsc::channel();
+        let event = serde_json::json!({ "type": "session.event" });
+        assert_eq!(
+            send_remote_event_to_all([&closed_sender, &healthy_sender], &event).unwrap_err(),
+            "REMOTE_PUBLISH_FAILED"
+        );
+        assert_eq!(healthy_receiver.try_recv().unwrap(), event);
+    }
+
+    #[test]
     fn session_mode_clears_the_read_timeout() {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -1076,7 +1243,7 @@ mod tests {
         listener.set_nonblocking(true).unwrap();
         let address = listener.local_addr().unwrap();
         let client = thread::spawn(move || {
-            let stream = TcpStream::connect(address).unwrap();
+            let _stream = TcpStream::connect(address).unwrap();
             thread::sleep(Duration::from_millis(500));
         });
 
@@ -1218,6 +1385,17 @@ mod tests {
             assert_eq!(request, b"current-session-only");
             write_encrypted_json(&mut stream, &transport, &serde_json::json!({ "ok": true }))
                 .unwrap();
+            let large_request: serde_json::Value =
+                read_encrypted_json(&mut stream, &transport).unwrap();
+            assert_eq!(large_request["message"].as_str().unwrap().len(), 180_000);
+            write_encrypted_json(
+                &mut stream,
+                &transport,
+                &serde_json::json!({
+                    "snapshot": "x".repeat(180_000)
+                }),
+            )
+            .unwrap();
         });
 
         let client = noise_keypair();
@@ -1228,6 +1406,9 @@ mod tests {
             .build_initiator()
             .unwrap();
         let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
         let mut buffer = vec![0; 1024];
         let size = handshake.write_message(&[], &mut buffer).unwrap();
         write_frame(&mut stream, &buffer[..size]).unwrap();
@@ -1249,6 +1430,201 @@ mod tests {
         write_frame(&mut stream, &encrypted[..size]).unwrap();
         let response: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
         assert_eq!(response, serde_json::json!({ "ok": true }));
+        write_encrypted_json(
+            &mut stream,
+            &transport,
+            &serde_json::json!({
+                "message": "y".repeat(180_000)
+            }),
+        )
+        .unwrap();
+        let large: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+        assert_eq!(large["snapshot"].as_str().unwrap().len(), 180_000);
         server_thread.join().unwrap();
+    }
+
+    #[test]
+    fn fake_mobile_recovers_a_completed_run_over_the_authenticated_noise_gateway() {
+        let state = RemoteBridgeState::default();
+        state.generation.store(1, Ordering::Release);
+        let mobile = noise_keypair();
+        let desktop_public = {
+            let mut core = state.core.lock().unwrap();
+            core.authorize_device("iphone-1", "iPhone", "test-token", &mobile.public);
+            core.public_key.clone()
+        };
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server_state = state.clone();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let publish_state = server_state.clone();
+            handle_connection_with_dispatch(stream, None, &server_state, 1, move |request, device_id| {
+                assert_eq!(device_id, "iphone-1");
+                match request.message_type.as_str() {
+                    "session.attach" if request.payload["sessionId"] != "jc-v1-a" => {
+                        Err("SESSION_NOT_CURRENT".to_string())
+                    }
+                    "session.attach" => Ok(serde_json::json!({
+                        "sessionId": "jc-v1-a", "gatewayEpoch": "test", "seq": 0,
+                        "snapshot": { "sessionId": "jc-v1-a", "gatewayEpoch": "test", "seq": 0,
+                            "turns": [{ "id": "old-1", "role": "assistant", "content": "x".repeat(180_000) }],
+                            "run": { "state": "idle", "steps": [], "approval": null } }
+                    })),
+                    "message.send" => {
+                        let sender = publish_state.clients.lock().unwrap().values().next().unwrap().sender.clone();
+                        for (seq, phase) in [(1, "running"), (2, "done")] {
+                            sender.send(serde_json::json!({
+                                "version": 1, "requestId": format!("event-{seq}"), "type": "session.event",
+                                "sentAt": now_ms(), "payload": { "sessionId": "jc-v1-a", "gatewayEpoch": "test",
+                                    "seq": seq, "turns": [], "run": { "runId": "run-1", "state": phase,
+                                        "steps": [{ "id": "tool-1", "label": "读取文件", "state": phase }], "approval": null } }
+                            })).unwrap();
+                        }
+                        Ok(serde_json::json!({ "accepted": true, "runId": "run-1" }))
+                    }
+                    "session.read" => Ok(serde_json::json!({
+                        "sessionId": "jc-v1-a", "gatewayEpoch": "test", "seq": 2,
+                        "turns": [{ "id": "user-1", "role": "user", "content": "整理项目" }],
+                        "run": { "runId": "run-1", "state": "done",
+                            "steps": [{ "id": "tool-1", "label": "读取文件", "state": "done" }], "approval": null }
+                    })),
+                    _ => Err("UNSUPPORTED_MESSAGE".to_string()),
+                }
+            }).unwrap();
+        });
+
+        let params = NOISE_PATTERN.parse::<NoiseParams>().unwrap();
+        let mut handshake = NoiseBuilder::new(params)
+            .local_private_key(&mobile.private)
+            .unwrap()
+            .build_initiator()
+            .unwrap();
+        let mut stream = TcpStream::connect(address).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut buffer = vec![0; 1024];
+        let size = handshake.write_message(&[], &mut buffer).unwrap();
+        write_frame(&mut stream, &buffer[..size]).unwrap();
+        let second = read_frame(&mut stream, 1024).unwrap();
+        handshake.read_message(&second, &mut buffer).unwrap();
+        assert_eq!(
+            handshake.get_remote_static(),
+            Some(desktop_public.as_slice())
+        );
+        let size = handshake.write_message(&[], &mut buffer).unwrap();
+        write_frame(&mut stream, &buffer[..size]).unwrap();
+        let transport = Arc::new(Mutex::new(handshake.into_transport_mode().unwrap()));
+        write_encrypted_json(
+            &mut stream,
+            &transport,
+            &serde_json::json!({
+                "type": "auth", "deviceId": "iphone-1", "token": "test-token"
+            }),
+        )
+        .unwrap();
+        let auth: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+        assert_eq!(auth["ok"], true);
+
+        let request = |id: &str, kind: &str, payload: serde_json::Value| {
+            serde_json::json!({
+                "version": 1, "requestId": id, "type": kind, "sentAt": now_ms(), "payload": payload
+            })
+        };
+        write_encrypted_json(
+            &mut stream,
+            &transport,
+            &request(
+                "bad-attach",
+                "session.attach",
+                serde_json::json!({ "sessionId": "jc-v1-other" }),
+            ),
+        )
+        .unwrap();
+        let rejected: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+        assert_eq!(rejected["payload"]["error"], "SESSION_NOT_CURRENT");
+        assert_eq!(
+            state
+                .clients
+                .lock()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()
+                .session_id,
+            None,
+            "首次 attach 失败不能留下越权订阅",
+        );
+        write_encrypted_json(
+            &mut stream,
+            &transport,
+            &request(
+                "attach-1",
+                "session.attach",
+                serde_json::json!({ "sessionId": "jc-v1-a" }),
+            ),
+        )
+        .unwrap();
+        let attach: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+        assert_eq!(
+            attach["payload"]["result"]["snapshot"]["run"]["state"],
+            "idle"
+        );
+        assert_eq!(
+            attach["payload"]["result"]["snapshot"]["turns"][0]["content"]
+                .as_str()
+                .unwrap()
+                .len(),
+            180_000
+        );
+        assert_eq!(
+            state
+                .clients
+                .lock()
+                .unwrap()
+                .values()
+                .next()
+                .unwrap()
+                .session_id
+                .as_deref(),
+            Some("jc-v1-a")
+        );
+
+        write_encrypted_json(&mut stream, &transport, &request("send-1", "message.send",
+            serde_json::json!({ "sessionId": "jc-v1-a", "text": "整理项目", "commandId": "cmd-1" }))).unwrap();
+        let frames: Vec<serde_json::Value> = (0..3)
+            .map(|_| read_encrypted_json(&mut stream, &transport).unwrap())
+            .collect();
+        assert!(
+            frames.iter().any(|frame| frame["type"] == "response"
+                && frame["payload"]["result"]["runId"] == "run-1")
+        );
+        assert!(frames.iter().any(|frame| frame["type"] == "session.event"
+            && frame["payload"]["run"]["state"] == "running"));
+        assert!(
+            frames.iter().any(|frame| frame["type"] == "session.event"
+                && frame["payload"]["run"]["state"] == "done")
+        );
+
+        // 模拟手机丢掉过程事件后用权威快照恢复；纯工具轮没有 assistant 正文。
+        write_encrypted_json(
+            &mut stream,
+            &transport,
+            &request(
+                "read-1",
+                "session.read",
+                serde_json::json!({ "sessionId": "jc-v1-a" }),
+            ),
+        )
+        .unwrap();
+        let recovered: serde_json::Value = read_encrypted_json(&mut stream, &transport).unwrap();
+        assert_eq!(recovered["payload"]["result"]["run"]["state"], "done");
+        assert_eq!(
+            recovered["payload"]["result"]["run"]["steps"][0]["label"],
+            "读取文件"
+        );
+        stream.shutdown(Shutdown::Both).unwrap();
+        server.join().unwrap();
     }
 }

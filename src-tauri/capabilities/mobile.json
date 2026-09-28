@@ -6,6 +6,7 @@
   "permissions": [
     "allow-app-commands",
     "barcode-scanner:allow-scan",
-    "barcode-scanner:allow-cancel"
+    "barcode-scanner:allow-cancel",
+    "barcode-scanner:allow-request-permissions"
   ]
 }

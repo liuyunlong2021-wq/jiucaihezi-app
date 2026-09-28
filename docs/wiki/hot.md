@@ -1,13 +1,28 @@
 # 热缓存
 
-## [2026-09-27] Mobile 桌面控制器合同与局域网 MVP TDD 已统一
+## [2026-09-28] Mobile V2 定案：Desktop Gateway + 可靠同步 + Mini Relay
+
+- 现行合同改为 [[开发/韭菜盒子Mobile控制Desktop-Gateway与Mini-Relay统一合同TDD-V2-2026-09-28]]；旧局域网合同保留 P0/P1/P2 与真机排障证据，但其 fire-and-forget 全量投影、Vue `watch` 发布、无断档补拉和 P3–P5 顺序不再定义终态。目标是手机控制**韭菜盒子 Desktop 的 Harness 对话**并达到 Codex 手机版级别的远控闭环，不是直接接管官方 Codex Desktop App。
+- 真机新证据是“Mobile 上行命令已让 Desktop 执行，手机没有反应”。根因边界不是 Harness，而是缺少独立 Gateway：当前 `accepted` 早于 run 建立，发布失败被吞，Mobile 不识别 seq gap，远程状态又依赖页面响应式生命周期。
+- V2 采用 OpenClaw 的单常驻 Gateway/typed req-res-event/hello snapshot/版本恢复，采用 Happy 的 `localId`、receipt、游标补拉、前台恢复与 E2EE；Harness Session 仍是唯一历史真相，不引入第二 Agent、第二会话库或多渠道系统。
+- 阶段固定为 G0 红灯 → G1 LAN 真机控制闭环 → G2 V2 信封/可靠同步与持久 ledger → G3 完整 Session 控制面 → G4 Mini Relay → G5 常驻/推送/发布。当前 LAN 仍是 V1 信封；G0 行为红灯已复现并在定向测试中转绿。G1 已有手机即时 pending、runId 回执、进程内去重、主动补读、attach 原型、应用级共享运行状态/发布和终态后官方历史补读；推送乐观轮次不再提前清除 pending，较新 attach 快照也不再被缓存旧事件覆盖。Desktop App 已改为启动时绑定应用级 Host，远程发送/停止/审批不再调用页面闭包，本地与远程共用 Harness 进度函数和 run 表；重复停止不再改写已完成结果，手机在任务结束后仍展示已收到的工具步骤。但 `watch` 发布与旧官方历史/持续流式竞态尚不能证明完整快照一致性，页面卸载后的真实 Harness+Noise TCP、纯工具轮完整闭环、故障补读和 iPhone 真机未验收，故 **G1 未完成**。G2 只有 epoch/序号、断档和前台恢复的部分原型；V2 信封、持久 ledger、跨重启 uncertain 均未完成；G3–G5 未实施。
+- G1 最新增量：停止后的异步准备不再启动 Harness；Mobile 可显示 Desktop 临时用户轮次；空闲时每 10 秒兜底补读，避免电脑主动任务丢推送后手机永久无反应；低序号旧快照不能覆盖新投影；官方历史没出现本次用户轮次前不清临时态。focused `1648/1648`、Desktop/iOS quick build通过。这些不代替真实 Noise TCP→Harness 和 iPhone 闸门，G1 仍未完成。
+- G1 又补掉一个丢推送后的卡死路径：Desktop 切换对话但 `context.changed` 丢失时，手机在旧 Session 读到 `SESSION_NOT_CURRENT` 后重新取 context/attach；电脑未打开对话时改为等待提示并继续侦测。状态机/UI 定向 `43/43`、focused `1653/1653`、Desktop/iOS quick build与产物审计通过；G1 真机闸门仍未过。
+- 真机联调暴露 Desktop G1 新 `commandId` 合同与手机旧安装包不匹配：Noise 已连接，但旧 iOS 请求无 `commandId` 且发送错误未上屏；新版 iOS arm64 debug 包已构建、审计并覆盖安装到连接的 iPhone，等待重新发送只读消息确认。这是部署版本边界，尚不能写 G1 通过。
+- 后续截图与日志确认粘贴配对其实成功，红色相机报错是旧错误残留。真正的下一处根因是长对话快照约 187 KB，超过 Noise 单帧 64 KB 上限，旧 Bridge 写失败后无声挂住。真实 Noise 红→绿测试覆盖双向 180 KB，认证 Gateway attach 大快照也通过；已加分块、8 MiB 总量上限和读取超时。手机状态页增加已连接但会话未进入时的重试，不再诱导重复配对。focused `1654/1654`、Rust `450 passed / 1 ignored`；新版 iPhone 包已构建并安装，真机复测待完成，G1 未通过。
+- iOS 扫码还有独立权限缺口：已安装的 barcode-scanner 插件在 iOS 14+ 的 `scan()` 只检查权限、不自动申请；Mobile ACL 原先也没有开放 request-permissions。现扫码前显式申请，粘贴路径保持无相机依赖；权限红测转绿，新 iPhone 包已构建、审计并安装。真实扫码与发送/回传仍待用户确认。
+- Rust 已新增复用生产认证连接循环的真实 TCP/Noise 假 Mobile 测试，覆盖授权设备认证、attach、发送、过程/终态推送与丢事件后纯工具轮补读；Rust 全量 `450 passed / 1 ignored`。执行端仍是假 Runtime，WebView→真实 Harness 和 iPhone 闭环待验，G1 仍未完成。
+- 旧官方历史判定又补一条时间边界：若页面历史少载、用户重复相同正文，不能只凭正文和轮次数量清掉手机 pending；必须看到不早于本次发送的官方用户事件。focused `1648/1648`、Rust `450 passed / 1 ignored`、Desktop quick build通过；失败 attach 的空订阅回滚已由真实 Noise 测试确认。
+
+## [2026-09-27] Mobile 桌面控制器已打通至真机最后复测
 
 - 用户确认 [[开发/韭菜盒子Mobile桌面控制器统一合同与局域网MVP-TDD-2026-09-27]]：现有 Mobile 独立工作台继续冻结，解冻的只有 Desktop 控制器；Desktop 是 Harness Runtime、模型/密钥、Skill/MCP、项目文件和 Session 的唯一所有者，Mobile 不运行第二套 Agent。
 - 首期只做局域网当前活动项目/当前活动 Session：扫码配对且 Desktop 必须确认、读取权威历史、订阅过程、发送纯文字、停止和审批。iOS 先行；全部项目/对话导航、公网 Relay、推送、媒体/文件和 Android 后置。
 - 安全从首期生效：一次性二维码最长 5 分钟、每设备独立身份与可吊销、连接加密和重放保护；不以“同一局域网”代替认证，不先上明文协议。
 - P0 已完成：协议/配对与 Desktop Host 新增 11 条红测，旧代码先因模块不存在失败，最小纯内存实现后新增 `11/11`、完整 focused `1561/1561`。
 - P1 Desktop 端已完成：默认关闭的 Rust/Tauri 随机端口监听、Noise XX 加密、一次性二维码 + 本机确认、钥匙串身份/设备、吊销、帧/连接/频率/重放限制、单调启停代次，以及当前 Session 的读/订阅/发送/停止/审批桥；设置页可开启、配对与吊销。远程发送不夹带桌面输入框附件、文件引用、编辑态或 Jev。
-- P1 自动验证：focused `1564/1564`、Rust `436 passed / 1 ignored`（Remote Bridge `8/8`，含真实 TCP + Noise 假 Mobile）、Desktop quick build/产物审计通过。P2 Mobile 客户端、iOS 构建、Mac/Windows 防火墙和 iPhone 真机均未实施，不能宣传为手机已可用。
+- P2 iOS 控制器、扫码/粘贴配对、电脑审批、加密连接、手机收发与逐字同步已完成真机联调；提交 `831ee593` 修掉二维码、macOS socket、空闲超时、断线状态、事件序号与重复监听等问题。
+- 最后一处 `session not found` 的根因是目录新对话早于官方 Harness Session：Desktop Remote 现先用官方 `session/list` 判断，未创建时返回空快照，首条手机消息再按既有链路惰性创建 Session。focused `1611/1611`、Rust `447 passed / 1 ignored`、Desktop/iOS quick build及产物审计通过；修复后的 iPhone 闭环待复测。
 
 ## [2026-09-27] 「保存到项目失败」的真因：`pollTask` 的 content 端点判据有四处各写一份
 

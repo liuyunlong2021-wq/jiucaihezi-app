@@ -53,13 +53,24 @@ import {
   deepSeekSessionReasoning,
   deepSeekSessionTurns,
   readDeepSeekHarnessSession,
-  runDeepSeekHarness,
   type DeepSeekProcessStep,
   type DeepSeekSessionSnapshot,
 } from '@/services/deepSeekHarness'
-import { DesktopRemoteHost } from '@/services/desktopRemoteHost'
-import { publishDesktopRemoteEvent, registerDesktopRemoteBridge } from '@/services/desktopRemoteBridge'
-import { nextDesktopRemoteEventSeq } from '@/services/desktopRemoteEventSeq'
+import {
+  beginRunStatus,
+  beginMemoryRun,
+  desktopConversationRuns,
+  desktopRemoteCompleted,
+  desktopRemoteSyncError,
+  executeDesktopHarnessRun,
+  memoryRunKey,
+  setDesktopConversationSelection,
+  settleApproval,
+  stopRun,
+  stopRunTimer,
+  type MemoryRun,
+  type MemoryToolApprovalDecision,
+} from '@/services/desktopConversationRuntime'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -322,19 +333,8 @@ async function handleCapturedFrame(file: File) {
     contextNotice.value = `截帧保存失败：${cause instanceof Error ? cause.message : String(cause)}`
   }
 }
-type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
 const memoryToolAlwaysAllowedConversations = new Set<string>()
 const referencingDocuments = new Set<string>()
-type MemoryRunStep = {
-  id: string
-  label: string
-  state: 'running' | 'done' | 'failed'
-  durationMs?: number
-  /** 白名单字段拼出的参数摘要；只有 Harness 路径有。 */
-  summary?: string
-  startedAt?: number
-  errorReason?: string
-}
 const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
 // Harness 的过程投影：按 assistant message id 侧存，不写 ConversationTurn。
 // Harness 对话以 Session 为唯一真源，每次打开重建即可，不需要新的持久化格式。
@@ -391,7 +391,6 @@ let offSwitchPanel: (() => void) | null = null
 let offDesktopProjectDrop: (() => void) | null = null
 let offSkillCreatorEdit: (() => void) | null = null
 let offSkillCreatorCreate: (() => void) | null = null
-let offDesktopRemote: (() => void) | null = null
 let stopProjectWatch: (() => void) | null = null
 let creationClosePromise: Promise<boolean> | null = null
 let chatResizeStartX = 0
@@ -500,42 +499,13 @@ const projectOwner = computed(() => desktopRuntime
   ? projectStore.projectDir.value
   : projectStore.webProjectId.value)
 
-type MemoryRunPhase = 'running' | 'done' | 'failed' | 'stopped'
-type MemoryRunApproval = { id: string; message: string; resolve: (decision: MemoryToolApprovalDecision) => void }
-type MemoryRun = {
-  owner: string
-  resourcePath: string
-  conversationId: string
-  phase: MemoryRunPhase
-  status: string
-  error: string
-  streamingText: string
-  /** 实时推理正文（与消息体分开，官方也是同一个 content 里的独立块）。 */
-  reasoning: string
-  steps: MemoryRunStep[]
-  elapsed: number
-  metrics: DirectRunMetrics | null
-  userTurn: ConversationTurn | null
-  programStatus: MemoryProgramStatus | null
-  approval: MemoryRunApproval | null
-  controller: AbortController
-  timer: ReturnType<typeof setInterval> | null
-  startedAt: number
-  title?: string
-  editTargetId: string
-  memoryEnabled: boolean
-  runtime: 'legacy' | 'dh'
-}
-
 /**
  * 运行态按对话归属，而不是按「屏幕上正在显示的那条对话」。
  * 必须用 reactive 包 Map：回调从 runs.get() 拿到的 run 是代理，写 run.status 才会触发渲染；
  * 直接改 `runs.set(key, raw)` 里那个裸对象不会通知视图。
  */
 // ponytail: 跑完的 run 记录留在表里，切回来仍能看到「已完成」横幅；上限是本次会话跑过的对话数。
-const runs = reactive(new Map<string, MemoryRun>())
-// 本方案的前提：切项目不重建 MemoryWorkbench（App.vue 常驻渲染）。改成 :key="projectOwner" 会让运行随组件销毁。
-const memoryRunKey = (owner: string, path: string) => `${owner}::${path}`
+const runs = desktopOnlyRuntime ? desktopConversationRuns : reactive(new Map<string, MemoryRun>())
 const activeRun = computed(() => {
   const active = conversation.value
   return active ? runs.get(memoryRunKey(active.resource.owner, active.resource.path)) ?? null : null
@@ -554,9 +524,26 @@ const runMetrics = computed(() => activeRun.value?.metrics ?? null)
 const runStatus = computed(() => activeRun.value?.status || '')
 const runError = computed(() => activeRun.value?.error || '')
 const displayedStatus = computed(() => runStatus.value || status.value)
-const displayedError = computed(() => runError.value || error.value)
+const displayedError = computed(() => runError.value || error.value || desktopRemoteSyncError.value)
 const pendingMemoryToolApproval = computed(() => activeRun.value?.approval ?? null)
 const isOnScreen = (run: MemoryRun) => run.owner === projectOwner.value && conversation.value?.resource.path === run.resourcePath
+
+watch(desktopRemoteCompleted, completed => {
+  const active = conversation.value
+  if (!completed || !active || active.resource.owner !== completed.owner
+    || active.resource.path !== completed.resourcePath || active.transcript.id !== completed.conversationId) return
+  const updated = {
+    resource: active.resource,
+    transcript: {
+      ...active.transcript,
+      title: completed.title || active.transcript.title,
+      turns: mergedHarnessTurns(active.transcript.turns, deepSeekSessionTurns(completed.snapshot)),
+    },
+  }
+  rememberHarnessSnapshot(completed.snapshot)
+  rememberConversation(updated)
+  if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
+})
 
 type MemoryMentionOption =
   | { type: 'tool'; id: string; display: string; description: string; icon: string }
@@ -796,7 +783,6 @@ onMounted(async () => {
   window.addEventListener('resize', resizeCreationForWindow)
   resizeCreationForWindow()
   stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
-  if (desktopOnlyRuntime) offDesktopRemote = await registerDesktopRemoteBridge(createDesktopRemoteHost())
   await Promise.all([
     refreshSkills().catch(() => {}),
     agentStore.fetchModels().catch(() => {}),
@@ -815,20 +801,21 @@ onBeforeUnmount(() => {
   offDesktopProjectDrop?.()
   offSkillCreatorEdit?.()
   offSkillCreatorCreate?.()
-  offDesktopRemote?.()
   document.removeEventListener('pointerdown', closeModelPicker)
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
   stopChatDockResize()
   stopProjectWatch?.()
   projectGeneration++
-  // 卸载 = 退出工作台：中断所有还在跑的运行，并让挂着的审批先落地。
-  for (const run of runs.values()) {
-    settleApproval(run, 'reject')
-    stopRunTimer(run)
-    run.controller.abort()
+  // Desktop 的运行归应用所有；页面重挂不能把电脑和手机正在执行的任务停掉。
+  if (!desktopOnlyRuntime) {
+    for (const run of runs.values()) {
+      settleApproval(run, 'reject')
+      stopRunTimer(run)
+      run.controller.abort()
+    }
+    runs.clear()
   }
-  runs.clear()
   releaseConversationPreviewUrls()
   releaseMediaUrl()
 })
@@ -1829,31 +1816,23 @@ async function send(remoteText?: string) {
     contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但 @文件 已关闭：本轮不会读写这些路径。`
 
   const runKey = memoryRunKey(active.resource.owner, active.resource.path)
-  runs.set(runKey, {
-    owner: active.resource.owner,
-    resourcePath: active.resource.path,
-    conversationId: active.transcript.id,
-    phase: 'running',
-    status: '正在思考',
-    error: '',
-    streamingText: '',
-    reasoning: '',
-    steps: [],
-    elapsed: 0,
-    metrics: null,
-    userTurn,
-    programStatus: null,
-    approval: null,
-    controller: new AbortController(),
-    timer: null,
-    startedAt: Date.now(),
-    title,
-    editTargetId,
-    memoryEnabled: false,
-    runtime: useHarness ? 'dh' : 'legacy',
-  })
+  let run: MemoryRun
+  try {
+    run = beginMemoryRun(runs, {
+      owner: active.resource.owner,
+      resourcePath: active.resource.path,
+      conversationId: active.transcript.id,
+      userTurn,
+      title,
+      editTargetId,
+      runtime: useHarness ? 'dh' : 'legacy',
+    })
+  } catch (cause) {
+    sendInFlight.value = false
+    error.value = cause instanceof Error ? cause.message : String(cause)
+    return
+  }
   // 派发这一刻起，这一轮就归这条 run；下面所有回调只写它，界面状态由 activeRun 派生。
-  const run = runs.get(runKey) as MemoryRun
   const isCurrentRun = () => runs.get(runKey) === run && run.phase === 'running'
   // 点发送即完成：立刻清空草稿，不必等这一轮跑完才能输入下一段。
   if (!remote) {
@@ -1913,7 +1892,7 @@ async function send(remoteText?: string) {
         })
       : null
     const dhHandoffTurns = (dhContext?.messages.slice(0, -1) || []) as ConversationTurn[]
-    const reply = useHarness ? await runDeepSeekHarness({
+    const reply = useHarness ? await executeDesktopHarnessRun(runs, run, {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
       message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns),
@@ -1928,43 +1907,6 @@ async function send(remoteText?: string) {
       mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
       files: activeReferencedFiles,
       attachments: requestAttachments,
-      signal: run.controller.signal,
-      onStatus(next) {
-        if (isCurrentRun()) run.status = next
-      },
-      onText(text) {
-        if (!isCurrentRun()) return
-        run.status = '正在执行'
-        run.streamingText = text
-      },
-      onReasoning(text) {
-        if (!isCurrentRun()) return
-        run.reasoning = text
-      },
-      onProgress(progress) {
-        if (!isCurrentRun()) return
-        const step = run.steps.find(item => item.id === progress.id)
-        if (progress.state === 'running') {
-          if (!step) run.steps.push({
-            id: progress.id,
-            label: progress.label || '执行工具',
-            state: 'running',
-            summary: progress.summary,
-            startedAt: progress.startedAt,
-          })
-          run.status = `正在${progress.label || '执行工具'}`
-          return
-        }
-        if (step) {
-          step.state = progress.state
-          step.errorReason = progress.errorReason
-          // 时长由 call→result 两个事件的时间戳算出，不依赖事件里的额外字段。
-          if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
-            step.durationMs = progress.endedAt - step.startedAt
-        }
-        const running = run.steps.find(item => item.state === 'running')
-        run.status = running ? `正在${running.label}` : '正在等待模型继续处理'
-      },
     }) : await runMemoryChat({
       projectId: active.resource.owner,
       conversationId: active.transcript.id,
@@ -2154,135 +2096,41 @@ function stop() {
   if (run) stopRun(run)
 }
 
-function desktopRemoteContext() {
-  const active = conversation.value
-  return {
-    projectName: projectStore.projectName.value || '当前项目',
-    conversationTitle: active?.transcript.title || '',
-    conversationId: active?.transcript.id || '',
-    sessionId: active ? `jc-v1-${active.transcript.id}` : '',
-  }
-}
-
-function desktopRemoteTurns(turns: ConversationTurn[]) {
-  return turns.map(({ id, role, content, createdAt }) => ({ id, role, content, createdAt }))
-}
-
-function desktopRemoteProcess(snapshot: DeepSeekSessionSnapshot) {
-  return Object.fromEntries([...deepSeekSessionProcess(snapshot)].map(([turnId, steps]) => [
-    turnId,
-    steps.map(({ id, label, state, durationMs, errorReason }) => ({ id, label, state, durationMs, errorReason })),
-  ]))
-}
-
-async function desktopRemoteSnapshot(sessionId: string) {
-  const active = conversation.value
-  if (!active || sessionId !== `jc-v1-${active.transcript.id}`) throw new Error('SESSION_NOT_CURRENT')
-  const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
-  const snapshot = await readDeepSeekHarnessSession({
-    cwd: active.resource.owner,
-    sessionId: active.transcript.id,
-    message: '',
-    model: config.model,
-    apiBase: config.apiBase,
-    apiKey: config.apiKey,
-    imageInput: harnessImageInput(config.model),
-    fileAccessEnabled: fileToolsSelected.value,
-  })
-  rememberHarnessSnapshot(snapshot)
-  return {
-    sessionId,
-    turns: desktopRemoteTurns(deepSeekSessionTurns(snapshot)),
-    process: desktopRemoteProcess(snapshot),
-    reasoning: Object.fromEntries(deepSeekSessionReasoning(snapshot)),
-  }
-}
-
-function createDesktopRemoteHost() {
-  return new DesktopRemoteHost({
-    getContext: desktopRemoteContext,
-    readSession: desktopRemoteSnapshot,
-    sendMessage: async text => { void send(text) },
-    stopRun: async () => {
-      const run = activeRun.value
-      if (run?.phase === 'running') stopRun(run)
-      return activeRun.value?.phase || 'idle'
-    },
-    respondApproval: async (approvalId, decision) => {
-      const approval = activeRun.value?.approval
-      if (!approval || approval.id !== approvalId) throw new Error('APPROVAL_NOT_FOUND')
-      settleApproval(activeRun.value, decision === 'approve' ? 'once' : decision)
-    },
-    subscribe: () => () => undefined,
-    isBusy: () => sending.value || sendInFlight.value,
-  })
-}
-
-let desktopRemoteSeq = 0
-function publishDesktopRemoteSnapshot() {
-  if (!desktopOnlyRuntime) return
-  const context = desktopRemoteContext()
-  // 序号必须跨页面重载递增，否则手机端会当成旧事件丢掉（见 desktopRemoteEventSeq）。
-  const seq = nextDesktopRemoteEventSeq()
-  void publishDesktopRemoteEvent(context.sessionId, {
-    version: 1,
-    requestId: `event-${seq}`,
-    type: 'session.event',
-    sentAt: Date.now(),
-    payload: {
-      sessionId: context.sessionId,
-      seq,
-      turns: desktopRemoteTurns(conversation.value?.transcript.turns || []),
-      streamingText: streamingText.value,
-      run: activeRun.value ? {
-        state: activeRun.value.phase,
-        status: activeRun.value.status,
-        steps: activeRun.value.steps.map(({ id, label, state, durationMs, errorReason }) => ({ id, label, state, durationMs, errorReason })),
-        approval: activeRun.value.approval
-          ? { id: activeRun.value.approval.id, message: activeRun.value.approval.message }
-          : null,
-      } : { state: 'idle' },
-    },
-  }).catch(() => {})
-}
-
 watch([
-  () => conversation.value?.transcript.turns.length,
-  streamingText,
-  runStatus,
-  () => activeRun.value?.steps.length,
-  () => activeRun.value?.approval?.id,
-], publishDesktopRemoteSnapshot)
-watch(() => conversation.value?.transcript.id, () => {
+  () => conversation.value?.transcript.id,
+  () => conversation.value?.transcript.title,
+  () => conversation.value?.resource.owner,
+  () => conversation.value?.resource.path,
+  () => conversation.value?.transcript.turns,
+  () => projectStore.projectName.value,
+  () => agentStore.currentModel,
+  () => selectedModel()?.providerId,
+  fileToolsSelected,
+  selectedSkillNames,
+  mediaSelected,
+  avSelected,
+  scene3dSelected,
+  selectedMcpToolNames,
+], () => {
   if (!desktopOnlyRuntime) return
-  void publishDesktopRemoteEvent('', {
-    version: 1,
-    requestId: `context-${++desktopRemoteSeq}`,
-    type: 'context.changed',
-    sentAt: Date.now(),
-    payload: desktopRemoteContext(),
-  }).catch(() => {})
-})
-
-/** 停止单条 run：不影响其他对话正在跑的任务。 */
-function stopRun(run: MemoryRun) {
-  if (run.phase === 'running') run.phase = 'stopped'
-  run.status = '已停止'
-  stopRunTimer(run)
-  settleApproval(run, 'reject')
-  run.controller.abort()
-  // 断开运行时会话状态，避免旧运行的气泡/步骤显示到切换后的会话上
-  run.userTurn = null
-  run.streamingText = ''
-  run.steps = []
-}
-
-function settleApproval(run: MemoryRun | null, decision: MemoryToolApprovalDecision) {
-  const pending = run?.approval
-  if (!run || !pending) return
-  run.approval = null
-  pending.resolve(decision)
-}
+  const active = conversation.value
+  setDesktopConversationSelection(active ? {
+    projectName: projectStore.projectName.value || '当前项目',
+    conversationTitle: active.transcript.title,
+    conversationId: active.transcript.id,
+    owner: active.resource.owner,
+    resourcePath: active.resource.path,
+    modelId: agentStore.currentModel,
+    modelProviderId: selectedModel()?.providerId,
+    fileAccessEnabled: fileToolsSelected.value,
+    skillNames: selectedSkillNames.value.slice(),
+    mediaSelected: mediaSelected.value,
+    avSelected: avSelected.value,
+    scene3dSelected: scene3dSelected.value,
+    mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
+    turns: active.transcript.turns,
+  } : null)
+}, { immediate: true, flush: 'sync' })
 
 function settleMemoryToolApproval(decision: MemoryToolApprovalDecision) {
   settleApproval(activeRun.value, decision)
@@ -2296,21 +2144,6 @@ function memoryToolApprovalMessage(call: DirectToolCall): string {
   if (call.function.name === 'delete') return `删除项目资源：${String(args.path || '')}`
   if (call.function.name === 'write' || call.function.name === 'edit') return `修改项目外文件：${String(args.path || '')}`
   return '允许扩展工具继续操作'
-}
-
-function beginRunStatus(run: MemoryRun) {
-  stopRunTimer(run)
-  run.elapsed = 0
-  run.steps = []
-  run.reasoning = ''
-  run.metrics = null
-  run.startedAt = Date.now()
-  run.timer = setInterval(() => { run.elapsed = Math.floor((Date.now() - run.startedAt) / 1000) }, 1000)
-}
-
-function stopRunTimer(run: MemoryRun) {
-  if (run.timer) clearInterval(run.timer)
-  run.timer = null
 }
 
 function updateRunTool(run: MemoryRun, event: DirectToolExecutionEvent) {

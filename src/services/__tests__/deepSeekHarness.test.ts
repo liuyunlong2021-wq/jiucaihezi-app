@@ -13,6 +13,7 @@ import {
   deepSeekProgress,
   deepSeekPrompt,
   deepSeekSessionId,
+  deepSeekSessionExists,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
   deepSeekSessionTurns,
@@ -28,6 +29,14 @@ test('@文件 maps to the official Harness full-access mode', () => {
 test('DeepSeek Harness keeps one stable namespaced session per conversation', () => {
   assert.equal(deepSeekSessionId('conversation-1'), 'jc-v1-conversation-1')
   assert.equal(deepSeekSessionId('conversation-1'), deepSeekSessionId('conversation-1'))
+})
+
+test('an unopened catalog conversation is not mistaken for an existing Harness session', () => {
+  const sessions = [
+    { header: { id: 'jc-v1-conversation-1' }, live: false, persisted: true },
+  ]
+  assert.equal(deepSeekSessionExists(sessions, 'conversation-1'), true)
+  assert.equal(deepSeekSessionExists(sessions, 'conversation-new'), false)
 })
 
 test('DeepSeek Harness invokes UI-selected skills through native skill gestures', () => {

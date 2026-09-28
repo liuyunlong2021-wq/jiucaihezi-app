@@ -24,6 +24,13 @@ const draft = ref('')
 const isRunning = computed(() => props.view.run.state === 'running')
 const approval = computed(() => props.view.run.approval)
 const turns = computed(() => props.view.turns)
+const remotePendingTurn = computed(() => {
+  const turn = props.view.pendingTurn
+  if (!turn || props.view.turns.some(item => item.id === turn.id)) return null
+  if (props.view.pendingMessages.some(message => message.runId && message.runId === props.view.run.runId
+    || message.content === turn.content && message.state !== 'failed')) return null
+  return turn
+})
 
 function kindOf(turn: MobileRemoteTurn) {
   if (turn.role === 'user') return 'user'
@@ -62,11 +69,24 @@ function submit() {
         <div v-else class="bubble" v-html="render(turn.content)" />
       </article>
 
+      <article v-for="message in view.pendingMessages" :key="message.commandId" class="message user">
+        <div class="bubble">
+          {{ message.content }}
+          <small class="pending-state">{{ {
+            sending: '正在发送', accepted: '电脑已接收', unconfirmed: '连接中断，结果待确认', failed: '发送失败',
+          }[message.state] }}</small>
+        </div>
+      </article>
+
+      <article v-if="remotePendingTurn" class="message user">
+        <div class="bubble">{{ remotePendingTurn.content }}<small class="pending-state">电脑正在处理</small></div>
+      </article>
+
       <article v-if="view.streamingText" class="message assistant">
         <div class="bubble" v-html="render(view.streamingText)" />
       </article>
 
-      <p v-if="!turns.length && !view.streamingText" class="empty">这个对话还没有内容。</p>
+      <p v-if="!turns.length && !view.pendingMessages.length && !view.streamingText" class="empty">这个对话还没有内容。</p>
       <ChatScrollNav :container="messagesEl" :is-streaming="isRunning" />
     </div>
 
@@ -78,7 +98,7 @@ function submit() {
         <span v-else>{{ view.state === 'connected' ? '空闲' : '连接已断开' }}</span>
       </div>
 
-      <ul v-if="isRunning && view.run.steps.length" class="steps">
+      <ul v-if="view.run.steps.length" class="steps">
         <li v-for="step in view.run.steps" :key="step.id" :class="step.state">
           <span>{{ step.label }}</span>
           <em v-if="step.errorReason">{{ step.errorReason }}</em>
@@ -125,6 +145,7 @@ function submit() {
 .message.user { justify-content: flex-end; }
 .bubble { max-width: 86%; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); font-size: 14px; line-height: 1.6; word-break: break-word; white-space: pre-wrap; }
 .message.user .bubble { border-color: color-mix(in srgb, var(--olive) 40%, var(--line)); background: color-mix(in srgb, var(--olive) 12%, var(--surface)); }
+.pending-state { display: block; color: var(--ink3); font-size: 11px; }
 .meta-line { margin: 0; color: var(--ink3); font-size: 12px; line-height: 1.5; }
 .empty { margin: 24px 0 0; text-align: center; color: var(--ink3); font-size: 13px; }
 .session > footer { display: flex; flex-direction: column; gap: 8px; padding: 8px 12px calc(env(safe-area-inset-bottom) + 10px); border-top: 1px solid var(--line); background: var(--surface); }

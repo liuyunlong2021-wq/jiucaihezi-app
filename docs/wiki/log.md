@@ -1,5 +1,69 @@
 # Wiki 操作日志
 
+## [2026-09-28] 实施中 | iOS 扫码权限显式申请
+
+- 本地所装 `tauri-plugin-barcode-scanner 2.4.6` 的 iOS 实现中，`scan()` 在 iOS 14+ 只检查相机权限，未获准时直接返回 `Camera permission denied or not yet requested`，不会自动调用系统授权；旧手机代码直接 `scan()`，且 Mobile capability 只开放 scan/cancel。用户看到的“相机权限被拒绝”可能是这一路真实错误，同时它在粘贴成功后残留，造成粘贴也失败的错觉。
+- 先补扫码权限红测，再在调用 `scan()` 前执行插件 `requestPermissions()`，开放 Mobile 目标的对应 ACL；粘贴配对路径不调用相机。显式未授权时给出可操作提示。定向 UI 测试 `12/12`、focused `1655/1655`、iOS arm64 debug 包构建与安装包审计通过，已覆盖安装到 iPhone；真实扫码及发送/回传待用户复测，G1 未完成。
+
+## [2026-09-28] 实施中 | G1 真机长对话快照超出 Noise 单帧
+
+- 用户截图显示“已连接电脑”但仍停在配对页，并残留“相机权限被拒绝”。Desktop 配对日志证明该次粘贴 offer 已领取、电脑已批准且手机已认证重连；相机错误不是粘贴配对失败的证据。
+- 根因追溯：当前长对话的官方可见消息正文约 187 KB，Bridge 单帧限制 64 KB；真实 TCP/Noise 红测中 180 KB 快照报 `FRAME_TOO_LARGE`。现保持单帧上限，将大消息分为受 Noise 逐帧认证的 60 KB 块，重组总量上限 8 MiB、分块读取有 30 秒超时；写失败会断开连接，不再静默悬挂。相同测试已转绿，覆盖手机→电脑与电脑→手机两方向。
+- 手机端在底层已连接但会话读取未完成/失败时提供“重新进入当前对话”，隐藏重复扫码/粘贴入口；回到前台发现已连接时清掉旧相机错误。UI 红测已转绿。focused `1654/1654`、Rust 全量 `450 passed / 1 ignored`、真实 Noise 大消息双向及认证 Gateway attach 测试通过。修复版 iOS arm64 debug 包已构建、审计并覆盖安装到 iPhone；等待用户重连并验证真机发送/回传。G1 真机闭环未验收、未提交。
+
+## [2026-09-28] 真机联调 | Desktop 新协议与旧 iPhone 包不匹配
+
+- 用户用当前 `pnpm tauri dev` Desktop 和已安装 iPhone 包发送只读测试消息，手机无反馈。电脑端真实 Noise 连接已建立，但官方 Harness Session 未见该消息。代码核对：G1 Desktop `message.send` 已要求 `commandId`；已安装的旧手机包来自这项变更前，发送请求没有该字段，且旧 UI 对发送错误未展示。此处是版本不匹配的强证据，仍需新版真机复测确认。
+- 重新构建 iOS arm64 debug 包，`audit:ios-app` 通过，已向连接的 iPhone 覆盖安装 `com.jiucaihezi.mobile`（保留 App 数据）。等待用户重新连接并用新只读消息验证手机 pending、Desktop 执行及最终回传。**G1 未验收、未提交。**
+
+## [2026-09-28] 实施中 | G1 丢失对话切换事件后的恢复
+
+- 红→绿：Desktop 已换对话而 `context.changed` 丢失时，Mobile 原先持续补读旧 Session，吞掉 `SESSION_NOT_CURRENT` 后不会切到新对话；现在重新取 context 并 attach。前台恢复同样先核对当前对话。Desktop 暂无打开对话时清掉旧投影，显示等待提示，后续可接入新对话。
+- 验证：状态机/UI 定向 `43/43`、focused `1653/1653`、TypeScript、Desktop/iOS quick build与产物审计、差异检查通过。真实 WebView→Harness→Noise→iPhone 故障闭环尚未验收；G1 未完成，未提交。
+
+## [2026-09-28] 实施中 | G1 旧同文历史误判修复
+
+- 红→绿：页面历史少载一轮、用户再次发送相同正文时，旧官方 Session 的同文用户轮次会被误判为本次已落盘，过早清空手机临时态；现除轮次数量与正文外，还要求官方用户事件时间不早于本次发送。
+- 同时用真实 TCP/Noise 测试确认首次错误 attach 会恢复原先的空订阅；这条已有生产回滚逻辑正确，没有为它增加补丁。
+- 验证：focused `1648/1648`、Rust `450 passed / 1 ignored`、TypeScript、Desktop quick build/产物审计、本文件 Rust 格式及差异检查通过。WebView→真实 Harness 和 iPhone 真机闭环仍未验收；G1 未完成。
+
+## [2026-09-28] 实施中 | Mobile G1 真实 Noise 通道假 Runtime 闭环
+
+- 将 Rust 认证后的同一连接循环保留给生产 WebView 分发，同时允许测试注入假 Runtime；未改 LAN 协议或认证路径。假 Mobile 通过真实 `127.0.0.1` TCP、Noise XX 公钥钉扎和已授权设备身份，完成 `attach → message.send → running/done 推送 → 丢过程后 session.read`，最终恢复无助手正文的纯工具轮。
+- 验证：新增端到端传输测试通过；Rust 全量 `450 passed / 1 ignored`，本文件 `rustfmt --check` 和差异检查通过。仓库级 `cargo fmt --check` 因多个既有不规范文件未通过，未顺手格式化无关文件。该测试执行端是假 Runtime，不证明 WebView/Harness 或 iPhone 真机；G1 未完成。
+
+## [2026-09-28] 实施中 | Mobile G1 停止竞态与无推送补读
+
+- 红→绿：异步模型配置尚未返回时停止，旧共享执行入口仍会启动 Harness；现执行前核对同一 run 仍在运行，已停止的不再触发模型或工具。
+- 红→绿：Mobile 原先忽略 Desktop `pendingTurn`，纯工具/电脑主动轮次可能没有消息气泡；现接收临时轮次并与手机本地 pending 去重。空闲时若完全丢失 Desktop 主动任务推送，现以 10 秒低频补读兜底；活跃任务维持 3 秒补读。补读中的旧序号快照不能覆盖重连后的新投影。
+- 远程 Harness 返回后仅当官方 Session 确实出现本次用户轮次，才清除临时状态；旧历史先保留流式结果并等待后续补读，重复相同正文以既有官方用户轮次数量区分。
+- 验证：定向 `148/148`、完整 focused `1648/1648`、TypeScript、Desktop/iOS quick build及产物审计通过。真实 Harness+Noise TCP 页面卸载闭环、iPhone 真机、Relay 仍未验收；G1 未完成。
+
+## [2026-09-28] 实施中 | Mobile G1 应用级 Host 与工具步骤收尾
+
+- Desktop App 启动时绑定应用级 Host；远程发送、停止、审批和忙锁不再依赖工作台页面闭包，本地与远程的 Harness 进度复用同一执行函数与 run 表。重复停止不改写已完成状态；异步配置读取期间停止也不再读取已清空的用户轮次。
+- 红→绿：手机原先仅在运行中显示工具步骤，完成瞬间会隐藏；现在完成后保留已收到的步骤。定向 UI 用例先失败后通过。
+- 验证：完整 focused `1643/1643`、Rust Bridge 定向 `12/12`（其中含真实 TCP/Noise 假 Mobile，但未连接前端 Harness）、TypeScript、Desktop/iOS quick build与产物审计、差异检查通过。真实 Harness+Noise TCP 页面卸载闭环、纯工具轮完整投影、iPhone 真机和 Relay 尚未验收；G1 未完成。
+
+## [2026-09-28] 实施中 | Mobile G1 pending 与 attach 快照回退修复
+
+- 先补两条行为红测：推送中的乐观用户轮次会提前清除手机 pending；attach 快照已含较新事件时，缓存旧全量事件会覆盖新快照。旧实现两项均稳定失败。
+- 修复：只有官方 `session.read/attach` 历史能消除 pending；官方历史短暂落后时继续补读。Desktop attach 保留快照自身游标，Mobile 忽略已被快照覆盖的缓存事件。共享 run 建立与忙锁已移入应用级服务，但完整发送执行仍由页面闭包负责。
+- 验证：定向 `39/39`、完整 focused `1637/1637`、TypeScript、Desktop/iOS quick build及差异检查通过。局域网 iPhone、页面卸载后的真实 Harness 任务、Relay/公网均未验收；G1 未完成。
+
+## [2026-09-28] 设计 | Mobile Gateway 与 Mini Relay TDD V2
+
+- **触发证据**：真机已能让 Desktop 执行 Mobile 命令，但 Mobile 没有状态反馈；当前远程链以 `MemoryWorkbench` 的 Vue `watch` 发布整份投影，`message.send` 在 `void send()` 后提前 accepted，发布错误静默丢弃，客户端没有 seq gap 恢复。
+- **定案**：新建 [[开发/韭菜盒子Mobile控制Desktop-Gateway与Mini-Relay统一合同TDD-V2-2026-09-28]]。Desktop Gateway 成为独立于页面的唯一控制平面；Harness Session 仍是唯一历史真相；Mobile 使用 pending/receipt/seq/stateVersion/epoch；Mini Relay 只转发 Noise over WSS 密文。
+- **TDD**：写明 Gateway 生命周期、原子 attach、确定回执、`commandId` at-most-once、断档补拉、前后台/切网恢复、Relay E2EE/撤销和真实故障注入矩阵；实施按 G0–G5 分闸门，不一次性重写。
+- **验证边界**：本轮只更新合同与 Wiki 路由，没有实施 G0 红测或产品代码，不能登记为已修复手机无反馈或已支持异地连接。
+
+## [2026-09-27] 修复 | Mobile 新对话连接报 `session not found`
+
+- **根因**：桌面对话目录立即登记新对话，官方 Harness Session 要到第一条消息才惰性创建；Mobile 初连固定执行 `context.get → session.read → session.subscribe`，因此把合法的空白新对话读成不存在。
+- **修法**：Desktop Remote 复用官方 `session/list` 判断当前会话是否存在；不存在时只返回空快照，已有会话仍走 `session/read`，首条手机消息继续走原发送链创建 Session。没有增加第二套会话库或错误字符串特判。
+- **验证**：先补红测，旧代码因缺少存在性判断失败；修复后 focused `1611/1611`、Rust `447 passed / 1 ignored`、Desktop quick build、iOS quick build和产物审计通过。iPhone 修复后复测待用户完成。
+
 ## [2026-09-27] 实施 | Mobile 桌面控制器 P1 Desktop 局域网 Bridge
 
 - **实现**：Rust/Tauri 增加默认关闭的随机端口 TCP Bridge，以 Noise XX 加密全部配对和业务帧；5 分钟一次性 offer 必须由 Desktop 确认，设备 token 只存哈希并绑定 Mobile Noise 公钥，长期身份/设备写系统钥匙串；限制 64 KiB 帧、4 连接、30 请求/秒并拒绝过期、未知与重放请求。设置页支持开启/关闭、二维码、允许/拒绝和吊销。

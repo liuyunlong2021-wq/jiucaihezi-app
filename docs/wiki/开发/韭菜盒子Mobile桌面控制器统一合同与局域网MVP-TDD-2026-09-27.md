@@ -1,7 +1,7 @@
 # 韭菜盒子 Mobile 桌面控制器统一合同与局域网 MVP TDD
 
 > 日期：2026-09-27
-> 状态：用户已确认；P0 与 P1 Desktop 局域网 Bridge 已完成自动化实现；P2 iOS 控制器进行中（iOS 构建链路隔离与 Mobile 协议客户端已落地，界面、扫码、Rust 客户端与真机验收未实施）
+> 状态：历史合同；P0/P1/P2 实施与真机排障证据继续有效，目标架构、同步协议、幂等规则与 P3–P5 路线已由 [[韭菜盒子Mobile控制Desktop-Gateway与Mini-Relay统一合同TDD-V2-2026-09-28]] 取代
 > 范围：Desktop 唯一 Harness Runtime、Mobile 控制器、局域网配对、当前活动 Session 的读取/订阅/发送/停止/审批
 > 后续但不在首期：项目与会话完整导航、公网 Relay、推送、媒体与文件传输、Android 发布
 > 前置合同：[[韭菜盒子Harness会话与可选建库统一合同-2026-09-24]]、[[架构/产品架构]]
@@ -439,11 +439,12 @@ P4 不得倒逼 P1 抽象通用传输框架；局域网协议稳定后再抽共�
 5. 事件序号是页面内自增计数器，页面重载/热更新后归零，手机端（要求严格递增）会把之后所有事件当旧事件丢弃。新增 `src/services/desktopRemoteEventSeq.ts`（时钟打底）。
 6. 桥接监听器每次组件挂载都注册一个新的，且 `await` 期间卸载会导致清理失效（`offDesktopRemote` 仍是 null），旧实例被留在事件上，用空 context 抢答。`registerDesktopRemoteBridge` 改为进程内单例且始终指向最新 host。
 
-### 19.3 当前阻塞点（交接）
+### 19.3 最后一处阻塞点与根因
 
 - `context.get` 已正常：电脑返回 `sessionId = jc-v1-conversation-<uuid>`。
-- 卡在下一步 `session.read`：电脑返回 `session "jc-v1-conversation-<uuid>" not found`。
-- 入口链路：`src/components/memory/MemoryWorkbench.vue` 的 `desktopRemoteSnapshot` → `readDeepSeekHarnessSession`（`src/services/deepSeekHarness.ts`）。即该对话尚无对应的 harness 会话时，需要给出可用快照（或先建立会话），而不是抛错。
+- 原现象：下一步 `session.read` 返回 `session "jc-v1-conversation-<uuid>" not found`。
+- 根因：对话目录会立即创建新对话，而官方 Harness Session 只在第一条消息发送时惰性创建；手机初次连接按合同先读当前 Session，误把合法的“目录已有、Harness 尚未创建”当成异常。
+- 修法：Desktop Remote 先用官方 `session/list` 判断；只有当前目录对话尚无 Harness Session 时返回空的权威快照，首条手机消息仍走既有发送链创建 Session。已有 Session 继续走官方 `session/read`，其他错误不吞。
 
 ### 19.4 诊断手段（保留）
 
@@ -454,3 +455,12 @@ P4 不得倒逼 P1 抽象通用传输框架；局域网协议稳定后再抽共�
 
 - 门禁：`pnpm run test:focused:build && pnpm run test:focused:run`（本轮 1609/1609）、`pnpm exec vue-tsc -b`、`cd src-tauri && cargo test --lib remote_`（19/19）
 - 出包装机：`pnpm run build:ios:quick` → `npx tauri ios build -t aarch64 -d --config '{"build":{"beforeDevCommand":""}}'` → `xcrun devicectl device install app --device <UDID> <解包后的 .app>`
+
+### 19.6 修复后使用路径
+
+1. 更新并重启 Desktop App；本次功能修复在 Desktop 端，截图中的既有手机 App 可直接重连。
+2. Desktop 打开项目和任意对话，在「设置 → 手机控制器」开启；新建的空对话也可直接连接。
+3. 已配对手机点「连接上次配对的电脑」；仅在凭证被吊销或地址变化时重新扫码/粘贴配对。
+4. 手机发送第一条文字后，Desktop 按既有链路惰性创建官方 Harness Session；历史和后续事件仍只保存在电脑。
+
+自动验证：focused `1611/1611`、Rust `447 passed / 1 ignored`、Desktop quick build、iOS quick build及产物审计通过。该修复后的 iPhone 实机闭环仍待用户复测，不能记作已验收。

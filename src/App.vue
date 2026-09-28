@@ -7,14 +7,19 @@ import { shouldShowSetupWizard } from './utils/localCapabilities'
 import { isTauriRuntime } from './utils/tauriEnv'
 import { isNewerVersion } from './utils/version'
 import { startDesktopProjectDropDispatcher } from './services/desktopProjectDrop'
+import { bindDesktopRemoteRuntime } from './services/desktopRemoteBridge'
+import { createDesktopConversationHost, startDesktopConversationPublisher } from './services/desktopConversationRuntime'
 
 const showSetupWizard = ref(false)
 const desktopRuntime = isTauriRuntime()
 let stopDesktopProjectDrop: () => void = () => undefined
+let stopDesktopConversationPublisher: () => void = () => undefined
 let appUnmounted = false
 
 onMounted(async () => {
   if (!desktopRuntime) return
+  stopDesktopConversationPublisher = startDesktopConversationPublisher()
+  void bindDesktopRemoteRuntime(createDesktopConversationHost()).catch(error => console.warn('[desktop-remote] Gateway listener failed:', error))
   try {
     const stop = await startDesktopProjectDropDispatcher()
     if (appUnmounted) stop()
@@ -31,6 +36,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   appUnmounted = true
   stopDesktopProjectDrop()
+  stopDesktopConversationPublisher()
 })
 
 async function checkNewVersion() {

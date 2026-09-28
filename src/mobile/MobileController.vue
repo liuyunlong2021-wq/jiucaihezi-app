@@ -28,6 +28,7 @@ onMounted(() => { void refreshStatus() })
   <MobilePairingView
     v-else
     :status="status"
+    :waiting-for-conversation="view.state === 'connecting' && Boolean(status?.connected)"
     :busy="busy"
     :error="error"
     @scan="pairByScan"

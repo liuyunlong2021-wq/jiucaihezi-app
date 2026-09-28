@@ -1,6 +1,8 @@
 import { invoke } from '@tauri-apps/api/core'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { listen } from '@tauri-apps/api/event'
 import { DesktopRemoteHost } from './desktopRemoteHost'
+import { RemoteProtocolError } from './desktopRemoteProtocol'
+import { desktopRemoteEventCursor } from './desktopRemoteEventSeq'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
 export type RemoteBridgeStatus = {
@@ -37,9 +39,26 @@ function requiredString(payload: Record<string, unknown>, key: string, max = 20_
   return value
 }
 
-async function dispatch(host: DesktopRemoteHost, request: RemoteRequest) {
+async function dispatch(host: DesktopRemoteHost | undefined, request: RemoteRequest) {
   const payload = request.payload || {}
+  if (request.type === 'gateway.health') return {
+    gatewayEpoch: desktopRemoteEventCursor('').gatewayEpoch,
+    runtimeAvailable: Boolean(host),
+  }
+  if (!host) throw new RemoteProtocolError('RUNTIME_UNAVAILABLE')
   if (request.type === 'context.get') return host.context()
+  if (request.type === 'session.attach') {
+    const sessionId = requiredString(payload, 'sessionId', 200)
+    // Rust 已先绑定订阅；读取官方历史期间发生的事件必须高于这条基线，交给 Mobile 重放。
+    let cursor = desktopRemoteEventCursor(sessionId)
+    let snapshot = await host.readSession(sessionId) as Record<string, unknown>
+    if (desktopRemoteEventCursor(sessionId).seq !== cursor.seq) {
+      // 常见的一次性竞态直接重读；持续流式时仍用重读前基线，让已缓存事件补齐。
+      cursor = desktopRemoteEventCursor(sessionId)
+      snapshot = await host.readSession(sessionId) as Record<string, unknown>
+    }
+    return { sessionId, ...cursor, snapshot }
+  }
   if (request.type === 'session.read') return await host.readSession(requiredString(payload, 'sessionId', 200))
   if (request.type === 'session.subscribe') {
     const sessionId = requiredString(payload, 'sessionId', 200)
@@ -47,8 +66,20 @@ async function dispatch(host: DesktopRemoteHost, request: RemoteRequest) {
     return { subscribed: true, sessionId }
   }
   if (request.type === 'message.send') {
-    await host.sendMessage(requiredString(payload, 'sessionId', 200), requiredString(payload, 'text'))
-    return { accepted: true }
+    const sessionId = requiredString(payload, 'sessionId', 200)
+    const text = requiredString(payload, 'text')
+    const commandId = requiredString(payload, 'commandId', 128)
+    const digestBytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([sessionId, text])))
+    const digest = Array.from(new Uint8Array(digestBytes), byte => byte.toString(16).padStart(2, '0')).join('')
+    const key = `${request.deviceId}\0${commandId}`
+    const existing = commandLedger.get(key)
+    if (existing) {
+      if (existing.digest !== digest) throw new RemoteProtocolError('COMMAND_ID_CONFLICT')
+      return await existing.result
+    }
+    const result = host.sendMessage(sessionId, text).then(receipt => ({ accepted: true, runId: receipt.runId }))
+    commandLedger.set(key, { digest, result })
+    return await result
   }
   if (request.type === 'run.stop') return { state: await host.stopRun(requiredString(payload, 'sessionId', 200)) }
   if (request.type === 'approval.respond') {
@@ -65,7 +96,8 @@ async function dispatch(host: DesktopRemoteHost, request: RemoteRequest) {
 }
 
 let activeHost: DesktopRemoteHost | undefined
-let stopListening: UnlistenFn | undefined
+let listenerReady: Promise<void> | undefined
+const commandLedger = new Map<string, { digest: string; result: Promise<{ accepted: boolean; runId: string }> }>()
 
 /**
  * 桥接处理器在**进程内只注册一次**，且始终响应「最新的 host」。
@@ -75,24 +107,29 @@ let stopListening: UnlistenFn | undefined
  * sessionId 回给手机，手机就报「电脑上还没有打开任何对话」（2026-09-27 真机，
  * 电脑上明明开着对话）。
  */
-export async function registerDesktopRemoteBridge(host: DesktopRemoteHost): Promise<UnlistenFn> {
-  if (!isTauriRuntime()) return () => undefined
-  activeHost = host
-  stopListening ??= await listen<RemoteRequest>('desktop-remote:request', event => {
+export async function startDesktopRemoteGateway(): Promise<void> {
+  if (!isTauriRuntime()) return
+  listenerReady ??= listen<RemoteRequest>('desktop-remote:request', event => {
     const request = event.payload
-    const target = activeHost
-    if (!target) return
-    void dispatch(target, request).then(
+    void dispatch(activeHost, request).then(
       result => invoke('remote_bridge_complete', { requestId: request.requestId, result }),
       error => invoke('remote_bridge_complete', {
         requestId: request.requestId,
         error: error instanceof Error ? error.message : String(error),
       }),
     )
+  }).then(() => undefined).catch(error => {
+    listenerReady = undefined
+    throw error
   })
-  return () => {
-    if (activeHost === host) activeHost = undefined
-  }
+  await listenerReady
+}
+
+/** The runtime binding outlives a workbench view; a remount replaces it with the latest view. */
+export async function bindDesktopRemoteRuntime(host: DesktopRemoteHost): Promise<void> {
+  if (!isTauriRuntime()) return
+  activeHost = host
+  await startDesktopRemoteGateway()
 }
 
 export async function publishDesktopRemoteEvent(sessionId: string, event: unknown) {

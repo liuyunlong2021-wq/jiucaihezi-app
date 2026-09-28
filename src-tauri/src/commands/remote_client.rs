@@ -30,8 +30,10 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// 手机只会发出的请求类型。Desktop 侧的白名单是同一份清单，两边都拦一次。
 const MOBILE_REQUEST_TYPES: &[&str] = &[
+    "gateway.health",
     "context.get",
     "session.read",
+    "session.attach",
     "session.subscribe",
     "message.send",
     "run.stop",
