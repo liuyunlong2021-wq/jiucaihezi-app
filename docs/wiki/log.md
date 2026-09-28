@@ -1765,3 +1765,19 @@
 - 证据：项目视频目录里同时存在两个同任务 `.part` 文件（下载过程中直接 `Get-ChildItem` 看到，12 秒后一个消失一个继续长）；同一条任务的 DB 记录如上自相矛盾。
 - 明确不做（用户 2026-09-27 决定）：保存阶段的**进度反馈**。已实现的 Rust 事件 `creation:download-progress` + 前端 `listen` 订阅已**回滚**，`src-tauri/`、`src/utils/projectMediaWriter.ts` 无改动，所以本次不需重新编 Rust、也不用重启 App。
 - 验证：媒体用例全绿（新增 2 条：失败必须走失败分支、保存单一互斥点与终态）；完整 focused `1550 tests / 1542 pass / 0 fail / 8 skipped`、Rust `422 passed / 0 failed / 1 ignored`、`vue-tsc -b` 通过。
+
+## [2026-09-28] 优化 | DH 支线三项：会话级权限、附件路径、实时过程进消息流
+
+- 背景：用户决定继续用 DH（自研内核保留但当前无线上入口），从 `main` 开支线 `0928-DHyouhua` 做三项优化（手机端 WIP 已先在 `main` 提交为 `32f6387d`，支线与之不互相干扰）。
+- ① **会话级权限**（根因非推测，从真实会话文件解出）：`permission/preset=workspace-write` + `sandbox/mode=workspace-write` + `approval/policy=ask` 就是会话里记下的 durable 事实。官方 `pinInitialPermission` 对**已存在**会话保留它自己记下的开关，进程级 `DSH_PERMISSION_MODE` 只决定新会话默认值 —— 所以打开 `@文件` 也松不开老会话的沙箱，写 `~/.agents/skills` 被判 `file access denied under workspace-write mode`（用户报的「没有权限」）。修法走官方命令面：第 5 处 vendor patch 暴露 `session/permission` → `commands.execute(agent, '/permission <preset>')`，客户端每个 (runtime, 会话) 拉齐一次。**不得**自己写 `permission/preset` 事件绕过官方推导。
+- ② **附件路径进 prompt**：原来只发 base64 图片块、从不给路径，视频连块都没有，模型只能满盘找文件（实测 11 步工具 16 分钟后 524）。现无条件附一段 `[本轮附件]` 路径清单 —— 官方读图就是 `read_image(file_path)`，视频官方也没工具，只能 `bash` 抽帧（落到已有 `jc-watch`）。
+- ③ **实时过程进消息流**：`visibleRunSteps` 的「最近 5 条」只挂在输入框上方，跑完/断开即消失，用户看不到进程走到哪。DH 的实时过程改为挂到本轮发起人（`liveProcessTurnId`）上，与历史（`harnessProcess`/`harnessReasoning`）共用 `memory-turn-process` 那一套渲染，工具结果 `resultText` 也实时带。5 条缩略保留给未迁移的自研内核（Web 未发布工作台），能力不减。
+- 踩到并修掉：第 5 处补丁的锚点最初落在 `session/prompt` 之后，插进第 4 处补丁那段**连续字符串内部**，使它第二次运行误判「还没打过」并抛 `Unsupported ... request server layout`（开发机只跑一次，装包/CI 会撞）。锚点改到 switch 末行（`shutdown`）之后；新增 `scripts/__tests__/deepseek-harness-patch.test.mjs` **真跑两次**守住幂等。
+- 替换旧合同：`韭菜盒子Harness输出显示对齐官方TDD-2026-09-27` 里「实时列表仍需按最近 5 条收敛」被本次取代，已在测试注释里写明替换理由。
+- 验证：定向 `deepSeekHarness` 38/38；完整 focused `1659 tests / 1659 pass / 0 fail`；Rust `450 passed / 0 failed / 1 ignored`；`vue-tsc -b` 通过；补丁脚本连跑 3 次 exit=0 + `node --check` 通过。
+- 未验证：真机上开 `@文件` 改 `~/.agents/skills` 的 skill（需重开 App 让新 runtime 与补丁产物生效）。
+- ④ **内置 Skill 对 DH 不可见（扫盘的真因，用户指出）**：用户问「`jc-duibai` 与 `jc-watch` 的区别」，模型只调到了 `skill 3d-animation-short-generator`，然后开始 `find /Users/by3 -maxdepth 6 -iname "*jc-watch*"`。根因：`jc-watch` 是**内置** Skill（`public/skills` → 打包成 `resources/skills`），而官方 skill 扫描根只覆盖项目与用户目录 —— `bundledSkillDir` / `DSH_BUNDLED_SKILL_DIR` 都没配，就没有 rank 600 的 `bundled` 根，四个内置 Skill 对模型完全不存在。修法：DH runtime env 加 `DSH_BUNDLED_SKILL_DIR`（dev/prod 双路解析复用 Rust `preset_skills_src`）。
+- ⑤ **输出对齐官方 GUI 四条**：运行中不再挂「正在执行 05:23」横幅（官方轨迹视图明确不给在飞记录臆造 elapsed），状态改由轮次内过程行表达；思考行改带最新一行预览（官方 Chat 的 reasoning previews）；新增在飞标记「思考中」——等模型那 83 秒 / 一分多钟不再看起来没动静；已完成的轮次折叠过程行（官方 fold completed-turn process rows），用 `:open="isLiveTurn(turn.id) || undefined"` 以免抢用户手动展开的状态。自研内核（Web 未发布工作台）保留原 5 条缩略。
+- 失败取证（用户报「10 分钟后 524」）：两条 attempt 都是 `usage 0/0` 后 `finish error 524 status code (no body)`，各 126 秒；524 = Cloudflare 源站超时，即**上游 100 秒没吐第一个字节**。该轮上下文只有 27k token，所以**不是**扫盘撑爆上下文（不拿错的理由顶罪）。用户 2026-09-28 决定上游/抖动问题另找时间专项解决，本轮只记证据不做改动。
+- 验证：定向 `deepSeekHarness` 42/42；完整 focused `1663 tests / 1663 pass / 0 fail`；Rust `453 passed / 0 failed / 1 ignored`（含新增 3 条）；`vue-tsc -b` 通过。替换了两条旧断言（`!runVisible` 状态条口径、过程区 `v-if`）并写明理由。
+- ④ 落地时踩到的第二个坑（用户真机 0.00 秒失败）：`forbidden path: .../src-tauri/target/debug/skills, maybe it is not allowed on the scope for allow-exists permission`。根因不在路径，在**权限**：`@tauri-apps/plugin-fs` 的 `exists()` 除 `fs:allow-*` 外还受 `capabilities/default.json` 的 `fs:default` scope 白名单约束（只放行 `$APPDATA/**`、`$HOME/.agents/**` 等 7 条），越界**抛错而不是返回 false**，于是探测把整个 run 打死。修法：探测移进 Rust（`commands::tools::bundled_skills_dir`，`Path::exists()` 无 ACL），前端只 `invoke('resolve_bundled_skills')`；同时把 `lib.rs` 播种里那份重复探测收敛到同一实现。新命令按惯例登记 `permissions/app-commands.json`（acl-manifests 命中 1 已核）。没有往 fs scope 里加路径——那是安全收缩面，`scripts/check-tauri-fs-acl.mjs` 在守。

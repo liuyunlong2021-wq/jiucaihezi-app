@@ -175,6 +175,7 @@ const externalNodeTests = [
   'scripts/creation-models/__tests__/server.test.mjs',
   'scripts/__tests__/audit-skills-manage-parity.test.mjs',
   'scripts/__tests__/create-official-dmg.test.mjs',
+  'scripts/__tests__/deepseek-harness-patch.test.mjs',
   'scripts/__tests__/legal-pages.test.mjs',
   'scripts/__tests__/memory-product-separation.test.mjs',
   'scripts/__tests__/mobile-controller-dist.test.mjs',

@@ -26,6 +26,72 @@ pub fn check_whisper_available(app: tauri::AppHandle) -> Result<bool, String> {
 
 // 自定义 HTTP 请求命令，绕过 WebView/CORS，直接走主进程 reqwest。
 
+/// 解析内置 Skill 源目录（`public/skills` → 打包成 `resources/skills`）。
+///
+/// 必须是 Rust 探测，不能交给前端：前端 fs 插件的 `exists()` 受 capability 的 scope 限制
+/// （`capabilities/default.json` 只放行 `$APPDATA/**`、`$HOME/.agents/**` 等）—— 探测
+/// `target/debug/skills` 会直接抛 `forbidden path ... allow-exists`，而不是返回 false。
+/// 2026-09-28 实测踩到：一轮对话 0.00 秒就失败在这条上。
+///
+/// prod 是 `resource_dir()/skills`，dev 是 `target/debug/` 上三层到仓库根的 `public/skills`。
+/// `lib.rs` 的播种与 `resolve_bundled_skills` 共用这一个实现，避免布局知识散成多份。
+pub(crate) fn bundled_skills_dir(resource_dir: &Path) -> Option<PathBuf> {
+    let production = resource_dir.join("skills");
+    if production.exists() {
+        return Some(production);
+    }
+    let development = resource_dir.join("../../..").join("public").join("skills");
+    if development.exists() {
+        return Some(development);
+    }
+    eprintln!(
+        "[JC] bundled skills: neither prod ({}) nor dev ({}) exists",
+        production.display(),
+        development.display()
+    );
+    None
+}
+
+/// 把内置 Skill 目录交给调用方（Harness 的 `DSH_BUNDLED_SKILL_DIR`）。
+///
+/// 缺它的时候内置 Skill 对模型完全不存在，模型只能满盘找 —— 实测一条
+/// `find /Users/by3 -iname "*jc-watch*"` 白烧一分多钟。
+#[tauri::command]
+pub fn resolve_bundled_skills(app: tauri::AppHandle) -> Option<String> {
+    use tauri::Manager;
+    let resource_dir = app.path().resource_dir().ok()?;
+    bundled_skills_dir(&resource_dir).map(|path| path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod bundled_skills_tests {
+    use super::*;
+
+    #[test]
+    fn prefers_the_packaged_resource_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("skills")).unwrap();
+        assert_eq!(bundled_skills_dir(dir.path()), Some(dir.path().join("skills")));
+    }
+
+    #[test]
+    fn falls_back_to_the_repo_checkout_when_not_packaged() {
+        let dir = tempfile::tempdir().unwrap();
+        let resource_dir = dir.path().join("src-tauri/target/debug");
+        std::fs::create_dir_all(&resource_dir).unwrap();
+        std::fs::create_dir_all(dir.path().join("public/skills")).unwrap();
+        // 返回的是未归一化的 join 路径（与 resolve_creation_mcp 同风格），所以按后缀判布局。
+        let resolved = bundled_skills_dir(&resource_dir).expect("应回退到 dev 布局");
+        assert!(resolved.ends_with("public/skills"), "应当选 dev 布局，实际 {resolved:?}");
+    }
+
+    #[test]
+    fn reports_nothing_when_neither_layout_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(bundled_skills_dir(dir.path()), None);
+    }
+}
+
 pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
     let direct = PathBuf::from(program);
     if direct.is_absolute() && direct.exists() {

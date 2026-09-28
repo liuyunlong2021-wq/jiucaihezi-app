@@ -1213,15 +1213,10 @@ pub fn run() {
             // 解析内置 Skill 源目录（同步，不阻塞窗口创建）
             // dev: 从 target/debug/ 上 3 层到项目根 → public/skills/
             // prod: resource_dir()/skills/
+            // 探测实现只有一份，在 commands::tools::bundled_skills_dir。
             let resource_dir = app.path().resource_dir().ok();
-            let preset_skills_src = resource_dir.as_ref().and_then(|rd| {
-                let prod_path = rd.join("skills");
-                if prod_path.exists() { return Some(prod_path); }
-                let dev_path = rd.join("../../..").join("public").join("skills");
-                if dev_path.exists() { return Some(dev_path); }
-                eprintln!("[JC] seed: neither prod ({}) nor dev ({}) exists", prod_path.display(), dev_path.display());
-                None
-            });
+            let preset_skills_src =
+                resource_dir.as_ref().and_then(|rd| commands::tools::bundled_skills_dir(rd));
 
             // 创建目录（同步），确保路径存在
             // skills DB 连接池和表迁移移到后台——不阻塞窗口创建
@@ -1499,6 +1494,7 @@ pub fn run() {
             commands::mcp::resolve_mcp_node,
             commands::creation_mcp::creation_mcp_complete,
             commands::creation_mcp::resolve_creation_mcp,
+            commands::tools::resolve_bundled_skills,
             commands::remote_bridge::remote_bridge_status,
             commands::remote_bridge::remote_bridge_start,
             commands::remote_bridge::remote_bridge_stop,

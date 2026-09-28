@@ -595,3 +595,115 @@ test('Harness stdio children are reaped as a process tree', () => {
   assert.match(readFileSync('src/main.ts', 'utf8'), /invoke<number>\('mcp_reap_stale_harness'\)/)
   assert.match(lib, /commands::mcp::reap_all_stdio_processes\(\)/)
 })
+
+test('an existing session is switched to the @文件 permission instead of keeping its pinned default', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
+  const prepare = readFileSync('scripts/prepare-deepseek-harness.mjs', 'utf8')
+  // 会话把权限记成 durable 事实。实测会话文件里三条都在：
+  //   permission/preset = workspace-write、sandbox/mode = workspace-write、approval/policy = ask
+  // 进程级 DSH_PERMISSION_MODE 只决定**新会话**的默认值；已存在的会话按官方
+  // pinInitialPermission 保留自己的开关，所以打开 @文件 也松不开沙箱——写 ~/.agents/skills
+  // 会拿到 [sandbox: file access denied under workspace-write mode]，用户看到的就是「没有权限」。
+  assert.match(source, /async function alignSessionPermission\(/)
+  assert.match(source, /await alignSessionPermission\(active, wireSessionId, input\.fileAccessEnabled\)/)
+  // 每个 (runtime, 会话) 只切一次：runtimeKey 已经含权限模式，模式一变就是新 runtime。
+  assert.match(source, /if \(active\.permissions\.get\(sessionId\) === preset\) return/)
+  assert.match(source, /const preset = deepSeekPermissionMode\(fileAccessEnabled\)/)
+  // 切换只能走官方命令面：SDK 通道只暴露 session/prompt|list|read，没有任何权限方法。
+  assert.match(prepare, /const commandInject = 'const inject = \["agents", "sessionQuery", "commands"\];'/)
+  assert.match(prepare, /case "session\/permission": return this\.permission\(params\);/)
+  assert.match(prepare, /commands"\)\.execute\(rec\.handle\.agent, "\/permission " \+ preset/)
+  assert.match(runner, /command\.type === 'permission'/)
+  assert.match(runner, /harness\.client\.request\('session\/permission'/)
+})
+
+test('attachments are addressable by project path, not only by inline content', () => {
+  const blocks = deepSeekContentBlocks(
+    '看一下',
+    [
+      { id: 'a1', name: '原图.png', mime: 'image/png', size: 10, kind: 'image', resourcePath: '.raw/jc-media/图片/原图.png' },
+      { id: 'a2', name: '片段.mp4', mime: 'video/mp4', size: 10, kind: 'video', resourcePath: '.raw/jc-media/视频/片段.mp4' },
+    ] as never,
+    [],
+    false,
+  )
+  const text = String(blocks.find((block: any) => block.type === 'text')?.text || '')
+  // 内联图片块只对声明了视觉的模型有效，视频连块都没有。路径必须无条件给出去：
+  // 官方读图是 read_image(file_path)，视频则是 bash 抽帧（jc-watch 那条链路）。
+  // 不给路径时模型手里只有一个附件 id，只能满盘找文件（实测 11 步工具、16 分钟后 524）。
+  assert.match(text, /\.raw\/jc-media\/图片\/原图\.png/)
+  assert.match(text, /\.raw\/jc-media\/视频\/片段\.mp4/)
+  assert.match(text, /read_image/)
+})
+
+test('a live Harness run shows its process inside the message flow instead of a five-row strip', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  const runtime = readFileSync('src/services/desktopConversationRuntime.ts', 'utf8')
+  // 官方把过程放在轮次内持续显示、结果接在最后。原来只把最后 5 条塞在输入框上方的
+  // 状态条里，跑完或断开就整条消失，用户看不到进程走到哪。实时必须与历史共用同一个投影
+  // （官方：事件日志是 UI 投影的唯一真相），而不是两套渲染。
+  assert.match(workbench, /const liveProcessTurnId = computed/)
+  assert.match(workbench, /turnId === liveProcessTurnId\.value/)
+  // 自研内核（Web 未发布工作台）仍保有自己的缩略；DH 的过程在轮次内渲染，不能再重一次。
+  assert.match(workbench, /activeRun\.value\?\.runtime === 'legacy' \? activeRun\.value\.steps\.slice\(-5\) : \[\]/)
+  // 工具结果也实时可见，不只在跑完后的 Session 快照里。
+  assert.match(runtime, /resultText\?: string/)
+  assert.match(runtime, /step\.resultText = progress\.resultText/)
+})
+
+test('bundled product skills reach the Harness instead of forcing a disk crawl', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  // 内置 Skill 在 public/skills，打包成 resources/skills。官方 skill 扫描根里没有它
+  // （bundledSkillDir 与 DSH_BUNDLED_SKILL_DIR 都没配），所以 jc-watch / skill-creator /
+  // wiki-memory / jc-new-user-guide 这四个对模型完全不存在。实测模型只能
+  // `find /Users/by3 -maxdepth 6 -iname "*jc-watch*"` —— 撞上 60 秒沙箱超时被截断，
+  // 再靠 job_output 取回，白烧一分多钟。这是我们没给它信息，不是模型笨。
+  assert.match(source, /async function bundledSkillsDirectory\(/)
+  // 探测必须在 Rust：前端 fs 插件的 exists() 受 capability 的 scope 限制（只放行
+  // `$APPDATA/**`、`$HOME/.agents/**` 等），探 target/debug/skills 会直接抛
+  // `forbidden path ... allow-exists`，整个 run 0.00 秒就死在那一句上。
+  assert.match(source, /invoke<string \| null>\('resolve_bundled_skills'\)/)
+  assert.doesNotMatch(source, /await exists\(/)
+  assert.match(source, /DSH_BUNDLED_SKILL_DIR/)
+  const tools = readFileSync('src-tauri/src/commands/tools.rs', 'utf8')
+  assert.match(tools, /pub\(crate\) fn bundled_skills_dir\(resource_dir: &Path\)/)
+  assert.match(tools, /pub fn resolve_bundled_skills\(app: tauri::AppHandle\)/)
+  // 新命令必须同时登记 ACL 白名单，否则 invoke 会被拒。
+  assert.match(
+    readFileSync('src-tauri/permissions/app-commands.json', 'utf8'),
+    /"resolve_bundled_skills"/,
+  )
+})
+
+test('a running Harness turn carries no status banner, only the in-turn process', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  // 官方轨迹视图明确「in-flight records show a start marker without inventing elapsed time」：
+  // 运行中不挂横幅、不跳秒 —— 状态由轮次内的过程行表达。终态（失败/完成）仍要横幅，
+  // 否则用户看不到失败原因（那次 524 就是靠它才看见的）。
+  assert.match(workbench, /const runStripVisible = computed/)
+  assert.match(workbench, /run\.runtime === 'legacy' \|\| run\.phase !== 'running'/)
+  assert.match(workbench, /v-if="runStripVisible" class="memory-run-status"/)
+  // 自研内核（Web 未发布工作台）还没有轮次内过程，保留它原来的 5 条缩略。
+  assert.match(workbench, /activeRun\.value\?\.runtime === 'legacy' \? activeRun\.value\.steps\.slice\(-5\) : \[\]/)
+  assert.doesNotMatch(workbench, /memory-run-think/)
+})
+
+test('the think row previews its latest line and an in-flight marker shows while waiting', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  // 官方 Chat：「Work-details modes control reasoning previews」—— 预览挂在推理行上，
+  // 不是在输入框上方另起一条。
+  assert.match(workbench, /function reasoningTail\(/)
+  assert.match(workbench, /reasoningTail\(harnessReasoningFor\(turn\.id\)\)/)
+  // 等模型的那 83 秒、那一分多钟必须看得见：过程区尾部给一个在飞标记，有工具行就换掉。
+  assert.match(workbench, /const liveInFlight = computed/)
+  assert.match(workbench, /isLiveTurn\(turn\.id\) && liveInFlight/)
+})
+
+test('completed Harness turns fold their process rows without hiding the answer', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  // 官方 Chat：「fold eligible completed-turn process rows without hiding final answers」。
+  // 运行中强制展开；跑完交回浏览器默认（折叠），用 undefined 而不绑 false，
+  // 否则每次重渲染都会把用户手动展开的状态抢回去。
+  assert.match(workbench, /class="memory-process"[\s\S]{0,80}?:open="isLiveTurn\(turn\.id\) \|\| undefined"/)
+})

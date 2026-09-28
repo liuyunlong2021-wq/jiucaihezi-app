@@ -36,6 +36,9 @@ export type MemoryRunStep = {
   summary?: string
   startedAt?: number
   errorReason?: string
+  /** 工具结果正文。实时也要带：官方在轮次内就把 `read` / `bash` 的产出摆出来。 */
+  resultText?: string
+  resultTruncated?: boolean
 }
 
 export type MemoryRun = {
@@ -455,6 +458,8 @@ export async function executeDesktopHarnessRun(
       if (step) {
         step.state = progress.state
         step.errorReason = progress.errorReason
+        step.resultText = progress.resultText
+        step.resultTruncated = progress.resultTruncated
         if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
           step.durationMs = progress.endedAt - step.startedAt
       }

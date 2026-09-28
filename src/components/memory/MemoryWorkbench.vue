@@ -512,13 +512,47 @@ const activeRun = computed(() => {
 })
 const sending = computed(() => activeRun.value?.phase === 'running')
 const streamingText = computed(() => activeRun.value?.streamingText || '')
-// 折叠的 Think 行跟随最新一行（官方 ReasoningRow 也是这个行为），过长时从左侧裁掉。
-const liveReasoningTail = computed(() => {
-  const line = (activeRun.value?.reasoning || '').split('\n').map(item => item.trim()).filter(Boolean).at(-1) || ''
+/**
+ * 思考行的预览：始终露最新一行（官方 Chat 的 reasoning previews），过长时从左侧裁掉。
+ * 预览属于推理行本身，不另起一条挂在输入框上方。
+ */
+function reasoningTail(text: string): string {
+  const line = String(text || '').split('\n').map(item => item.trim()).filter(Boolean).at(-1) || ''
   return line.length > 80 ? `…${line.slice(-80)}` : line
-})
+}
 const pendingUserTurn = computed(() => activeRun.value?.userTurn ?? null)
-const runVisible = computed(() => Boolean(activeRun.value) && activeRun.value?.phase !== 'stopped')
+/**
+ * 本轮正在跑的用户轮次 id。
+ *
+ * 实时过程挂到它上面，与历史（Session 快照）走**同一格投影**、同一套渲染 —— 官方就是
+ * 「事件日志是 UI 投影的唯一真相」，实时与回放没有两套。反之就只剩输入框上方那 5 条
+ * 缩略，跑完或断开就消失，用户看不到进程走到哪。
+ */
+const liveProcessTurnId = computed(() =>
+  activeRun.value?.phase === 'running' && activeRun.value.runtime === 'dh'
+    ? activeRun.value.userTurn?.id || ''
+    : '')
+/**
+ * 在飞标记：本轮在跑、但当前没有工具在跑 —— 也就是模型在推理/等上游。
+ * 官方轨迹视图给在飞记录一个「起点标记」，因为空等的那一分多钟用户完全看不出在动。
+ */
+const liveInFlight = computed(() => {
+  const run = activeRun.value
+  if (!run || run.phase !== 'running' || run.runtime !== 'dh') return false
+  return !run.steps.some(step => step.state === 'running')
+})
+/**
+ * 状态条的门控。
+ *
+ * DH 运行中不挂横幅 —— 官方轨迹视图明确不给在飞记录臆造 elapsed，状态由轮次内的过程行表达。
+ * 自研内核（Web 未发布工作台）还没有轮次内过程，保留它原来的 5 条缩略。两类在「有终态结论」
+ * 时都要这条横幅，否则用户看不到失败原因（那次 524 就是靠它才看见的）。
+ */
+const runStripVisible = computed(() => {
+  const run = activeRun.value
+  if (!run || run.phase === 'stopped') return false
+  return run.runtime === 'legacy' || run.phase !== 'running'
+})
 const runElapsed = computed(() => activeRun.value?.elapsed ?? 0)
 const runMetrics = computed(() => activeRun.value?.metrics ?? null)
 const runStatus = computed(() => activeRun.value?.status || '')
@@ -671,17 +705,31 @@ const modelGroups = computed(() => {
   return [...groups.entries()].map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
-const visibleRunSteps = computed(() => activeRun.value?.steps.slice(-5) ?? [])
+// ponytail: 自研内核（Web 未发布工作台）仍用这条 5 条缩略；DH 的过程在轮次内实时渲染，
+// 这里必须为空，否则同一批步骤会在两处各出现一次。
+const visibleRunSteps = computed(() => activeRun.value?.runtime === 'legacy' ? activeRun.value.steps.slice(-5) : [])
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
 function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
   return programStatuses.value[turnId]
 }
 
+function isLiveTurn(turnId: string): boolean {
+  return Boolean(turnId) && turnId === liveProcessTurnId.value
+}
+
+/** 本轮有没有过程要显示（思考 / 步骤 / 在飞）。决定过程块是否单独成块。 */
+function hasTurnProcess(turnId: string): boolean {
+  return Boolean(harnessReasoningFor(turnId) || harnessStepsFor(turnId)?.length || isLiveTurn(turnId))
+}
+
 function harnessStepsFor(turnId: string): DeepSeekProcessStep[] | undefined {
+  if (turnId && turnId === liveProcessTurnId.value)
+    return activeRun.value?.steps.map(step => ({ ...step, summary: step.summary || '' }))
   return harnessProcess.value[turnId]
 }
 
 function harnessReasoningFor(turnId: string): string {
+  if (turnId && turnId === liveProcessTurnId.value) return activeRun.value?.reasoning || ''
   return harnessReasoning.value[turnId] || ''
 }
 
@@ -3265,9 +3313,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       <section v-if="conversation" ref="messagesEl" class="memory-messages">
         <div v-if="!timelineTurns.length" class="memory-empty-state">开始一段对话</div>
         <div v-else class="memory-message-list">
+        <template v-for="turn in timelineTurns" :key="turn.id">
         <article
-          v-for="turn in timelineTurns"
-          :key="turn.id"
           class="memory-message"
           :class="[turn.role, { streaming: turn.id === 'streaming-assistant' }]"
         >
@@ -3288,42 +3335,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             :streaming="turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
           />
-          <!--
-            过程挂在本轮发起人（用户消息）上，不挂 assistant message：纯工具步不产出 UI 轮次，
-            挂它就等于过程永远不可见（真样本一整轮 10 个工具步就是这样消失的）。
-            位置放在本轮正文之后，即「问 → 它做了什么 → 答」，与官方把过程放在轮次内的布局一致。
-          -->
-          <div
-            v-if="turn.role === 'user' && (harnessReasoningFor(turn.id) || harnessStepsFor(turn.id)?.length)"
-            class="memory-turn-process"
-          >
-            <details v-if="harnessReasoningFor(turn.id)" class="memory-think">
-              <summary><JcIcon name="psychology" /><span>思考</span></summary>
-              <MemoryMarkdown
-                class="memory-think-body memory-markdown markdown-body"
-                :content="harnessReasoningFor(turn.id)"
-                :render-id="`think-${turn.id}`"
-              />
-            </details>
-            <div v-if="harnessStepsFor(turn.id)?.length" class="memory-process">
-              <div
-                v-for="step in harnessStepsFor(turn.id)"
-                :key="step.id"
-                class="memory-process-step"
-                :class="step.state"
-              >
-                <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
-                <span class="memory-process-label">{{ step.label }}</span>
-                <span v-if="step.summary" class="memory-process-summary" :title="step.summary">{{ step.summary }}</span>
-                <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
-                <small v-if="step.errorReason" class="memory-process-error">{{ step.errorReason }}</small>
-                <details v-if="step.resultText" class="memory-process-result">
-                  <summary>查看结果</summary>
-                  <pre>{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
-                </details>
-              </div>
-            </div>
-          </div>
           <div
             v-if="programStatusFor(turn.id)"
             class="memory-program-status"
@@ -3422,6 +3433,58 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <em>打开场景</em>
           </button>
         </article>
+        <!--
+          过程单独成块，**不塞进用户气泡里**：输入（用户说的话）与输出（它做了什么）必须分开，
+          官方 GUI 也是用户消息一行、过程与回答在它下面另成一块。
+          归属仍按本轮发起人（用户消息）：纯工具步不产出 UI 轮次，挂在 assistant 上就永远看不见。
+        -->
+        <div
+          v-if="turn.role === 'user' && hasTurnProcess(turn.id)"
+          class="memory-turn-process"
+        >
+          <details v-if="harnessReasoningFor(turn.id)" class="memory-think">
+            <summary><JcIcon name="psychology" /><span>思考</span><small v-if="reasoningTail(harnessReasoningFor(turn.id))" class="memory-think-tail">{{ reasoningTail(harnessReasoningFor(turn.id)) }}</small></summary>
+            <MemoryMarkdown
+              class="memory-think-body memory-markdown markdown-body"
+              :content="harnessReasoningFor(turn.id)"
+              :render-id="`think-${turn.id}`"
+            />
+          </details>
+          <!--
+            官方 Chat：「fold eligible completed-turn process rows without hiding final answers」。
+            运行中强制展开；跑完用 undefined 交回浏览器默认（折叠），不绑 false —— 否则每次
+            重渲染都会把用户手动展开的状态抢回去。
+          -->
+          <details v-if="harnessStepsFor(turn.id)?.length" class="memory-process" :open="isLiveTurn(turn.id) || undefined">
+            <summary>{{ harnessStepsFor(turn.id)?.length }} 个步骤</summary>
+            <div
+              v-for="step in harnessStepsFor(turn.id)"
+              :key="step.id"
+              class="memory-process-step"
+              :class="step.state"
+            >
+              <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
+              <span class="memory-process-label">{{ step.label }}</span>
+              <span v-if="step.summary" class="memory-process-summary" :title="step.summary">{{ step.summary }}</span>
+              <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
+              <small v-if="step.errorReason" class="memory-process-error">{{ step.errorReason }}</small>
+              <details v-if="step.resultText" class="memory-process-result">
+                <summary>查看结果</summary>
+                <pre>{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
+              </details>
+            </div>
+          </details>
+          <!--
+            在飞标记：本轮在跑、但当前没有工具在跑（模型在推理/等上游）。没有它，那 83 秒
+            和那一分多钟的日志看起来就是“没动静”。
+          -->
+          <div v-if="isLiveTurn(turn.id) && liveInFlight" class="memory-process-step running">
+            <JcIcon name="sync" class="spinning" />
+            <span class="memory-process-label">思考中</span>
+            <span v-if="reasoningTail(harnessReasoningFor(turn.id))" class="memory-process-summary">{{ reasoningTail(harnessReasoningFor(turn.id)) }}</span>
+          </div>
+        </div>
+        </template>
         </div>
       </section>
       <section v-else-if="projectOwner" class="memory-onboarding">
@@ -3481,7 +3544,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <span>{{ contextNotice }}</span>
           <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
         </div>
-        <div v-if="runVisible" class="memory-run-status" :class="{ error: Boolean(displayedError) }" aria-live="polite">
+        <div v-if="runStripVisible" class="memory-run-status" :class="{ error: Boolean(displayedError) }" aria-live="polite">
           <div class="memory-run-head">
             <JcIcon :name="displayedError ? 'error' : displayedStatus === '已完成' ? 'check_circle' : displayedStatus === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !displayedError }" />
             <strong>{{ displayedStatus }}</strong>
@@ -3495,7 +3558,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
             </div>
           </div>
-          <small v-if="sending && liveReasoningTail" class="memory-run-think">思考中 · {{ liveReasoningTail }}</small>
           <small v-if="displayedError">{{ displayedError }}</small>
         </div>
         <ToolApprovalStrip
@@ -3505,7 +3567,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runVisible && (displayedStatus || displayedError)" class="memory-status" :class="{ error: Boolean(displayedError) }">
+        <div v-else-if="!runStripVisible && !sending && (displayedStatus || displayedError)" class="memory-status" :class="{ error: Boolean(displayedError) }">
           <span>{{ displayedError || displayedStatus }}</span>
         </div>
         <div
@@ -3938,16 +4000,19 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-run-step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-run-step-summary { margin-left: 6px; color: var(--ink3); font-variant-numeric: tabular-nums; }
 .memory-run-step-error { display: block; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.memory-run-think { display: block; margin-top: 5px; color: var(--ink3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-think-tail { max-width: 420px; overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
 /* 定稿后的过程属于该轮对话：Think 行折叠，工具行一行一步、结果按需展开。
    挂在用户气泡里（该轮的发起人），所以加一条分隔线把它和提问正文分开。 */
-.memory-turn-process { margin-top: 7px; padding-top: 6px; border-top: 1px solid var(--line); }
+/* 过程是独立一块，不在用户气泡里：与用户消息之间留常规间隔，与下一条消息也留常规间隔。 */
+.memory-turn-process { margin: 0 0 24px; padding: 0 2px; }
 .memory-think { margin: 2px 0 6px; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-think > summary { display: flex; width: fit-content; align-items: center; gap: 5px; cursor: pointer; list-style: none; }
 .memory-think > summary::-webkit-details-marker { display: none; }
 .memory-think > summary .mso { font-size: 15px; }
 .memory-think-body { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--ink2); }
 .memory-process { display: grid; gap: 3px; margin: 2px 0 6px; font-size: calc(var(--font-base) - 2px); }
+.memory-process > summary { display: flex; width: fit-content; align-items: center; gap: 5px; color: var(--ink3); cursor: pointer; list-style: none; }
+.memory-process > summary::-webkit-details-marker { display: none; }
 .memory-process-step { display: grid; grid-template-columns: 17px auto minmax(0, 1fr) auto; align-items: center; gap: 5px; color: var(--ink3); }
 .memory-process-step .mso { font-size: 15px; }
 .memory-process-step.running { color: var(--ink1); }

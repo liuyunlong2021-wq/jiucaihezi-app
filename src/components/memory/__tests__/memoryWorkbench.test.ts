@@ -923,7 +923,7 @@ test('memory run status follows real tool start and end events without entering 
     workbench,
     /event\.status === 'succeeded' \? 'done' : 'failed'[\s\S]*run\.steps\.find\(item => item\.state === 'running'\)[\s\S]*正在等待模型继续处理/,
   )
-  assert.match(workbench, /v-if="runVisible" class="memory-run-status"/)
+  assert.match(workbench, /v-if="runStripVisible" class="memory-run-status"/)
   assert.match(workbench, /v-for="step in visibleRunSteps"/)
   assert.match(workbench, /\(sending \|\| displayedError\) && visibleRunSteps\.length/)
   assert.match(workbench, /formatRunElapsed\(runElapsed\)/)
@@ -1061,7 +1061,9 @@ test('memory run status renders one settled status line', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const runtime = source('src/runtime/memory/memoryChat.ts')
 
-  assert.match(workbench, /v-else-if="!runVisible && \(displayedStatus \|\| displayedError\)" class="memory-status"/)
+  // 2026-09-28 替换（原名：`!runVisible`）。状态条改为只在「有终态结论」时出现：
+  // DH 运行中由轮次内的过程行表达（官方形态），横幅里的跳秒计时是自创的，已去掉。
+  assert.match(workbench, /v-else-if="!runStripVisible && !sending && \(displayedStatus \|\| displayedError\)" class="memory-status"/)
   assert.doesNotMatch(runtime, /以最后一条用户消息为当前指令/)
 })
 
@@ -1791,7 +1793,15 @@ test('Harness process and reasoning hang on the round that started them', () => 
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   // 归属是「本轮发起人」（用户消息），不是 assistant message：纯工具步不产出 assistant 轮次，
   // 挂在它上面过程就永远不可见（真样本一整轮 10 个工具步就是这样消失的）。
-  assert.match(workbench, /v-if="turn\.role === 'user' && \(harnessReasoningFor\(turn\.id\) \|\| harnessStepsFor\(turn\.id\)\?\.length\)"/)
+  // 2026-09-28 第二次改写。先是条件末尾多了 `|| isLiveTurn(turn.id)`（本轮刚开跑、还没有
+  // 任何步骤与推理时过程区也要立刻出现），随后整段条件收进 `hasTurnProcess()`；更关键的是
+  // 过程块从用户 `<article>` 里**移到它外面**单独成块 —— 塞在用户气泡里等于把输入和输出混成
+  // 一块（用户实机反馈），官方也是用户消息一行、过程与回答另成一块。
+  assert.match(
+    workbench,
+    /<\/article>[\s\S]{0,400}?v-if="turn\.role === 'user' && hasTurnProcess\(turn\.id\)"[\s\S]{0,60}?class="memory-turn-process"/,
+  )
+  assert.match(workbench, /function hasTurnProcess\(turnId: string\): boolean/)
   assert.doesNotMatch(workbench, /turn\.role === 'assistant' && harness(Reasoning|Steps)For/)
   assert.match(workbench, /v-for="turn in timelineTurns"[\s\S]*?harnessStepsFor\(turn\.id\)/)
   // 实时与历史走同一个投影：读回 Session 时登记，不另存一份消息副本。
@@ -1807,6 +1817,12 @@ test('Harness process and reasoning hang on the round that started them', () => 
   assert.match(desktopRuntime, /step\.durationMs = progress\.endedAt - step\.startedAt/)
   assert.match(workbench, /<details v-if="step\.resultText" class="memory-process-result">/)
   assert.match(workbench, /step\.resultTruncated \? '\\n…（已截断）' : ''/)
-  // 实时列表的上限语义不动：仍需按最近 5 条收敛。
-  assert.match(workbench, /const visibleRunSteps = computed\(\(\) => activeRun\.value\?\.steps\.slice\(-5\) \?\? \[\]\)/)
+  // 2026-09-28 替换旧合同（原断言：`visibleRunSteps` 恒为 `activeRun.steps.slice(-5)`）。
+  // 理由：那条只把最近 5 条塞在输入框上方，跑完或断开就整条消失，用户看不到进程走到哪；
+  // 官方是把执行过程持续渲染在轮次内、结果接在最后。所以 DH 的实时过程改为挂到本轮发起人
+  // （`liveProcessTurnId`）身上，与历史共用同一套渲染；5 条缩略只留给尚未迁移的自研内核
+  // （Web 未发布工作台），那条链路的能力不能消失。
+  assert.match(workbench, /const liveProcessTurnId = computed/)
+  assert.match(workbench, /activeRun\.value\?\.runtime === 'legacy' \? activeRun\.value\.steps\.slice\(-5\) : \[\]/)
+  assert.match(workbench, /if \(turnId && turnId === liveProcessTurnId\.value\)[\s\S]{0,60}activeRun\.value\?\.steps\.map/)
 })

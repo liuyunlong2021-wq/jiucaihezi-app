@@ -22,6 +22,8 @@ type Runtime = {
     reject: (error: Error) => void
     notify: (notification: NonNullable<BridgeMessage['notification']>) => void
   }>
+  /** 已拉齐到 `@文件` 语义的会话（wire id）→ 当前预设；只在 runtime 存活期内记。 */
+  permissions: Map<string, string>
   closed: Promise<void>
   markClosed: () => void
   closing?: Promise<void>
@@ -182,7 +184,6 @@ function workspaceRuntimeKey(input: DeepSeekHarnessInput): string {
 export function deepSeekSessionId(conversationId: string): string {
   return `jc-v1-${conversationId}`
 }
-
 export function deepSeekSessionExists(
   sessions: Array<{ header: { id: string } }>,
   conversationId: string,
@@ -611,10 +612,22 @@ export function deepSeekContentBlocks(
   const notice = undelivered
     ? `[附带 ${undelivered} 张图片，${imageInput ? '当前格式不受支持（仅支持 PNG/JPEG/WebP/GIF）' : '当前模型不支持视觉'}]`
     : ''
+  // 附件一律把**项目内路径**告诉模型：官方读图就是 `read_image(file_path)`，视频则要靠
+  // `bash` 抽帧（jc-watch 那条链路，`read`/`read_image` 都读不了视频）。内联图片块只是
+  // 给声明了视觉的模型省一次工具往返，路径才是模型自己能动手的那条路——不给它的话，
+  // 模型手里只有一个附件 id，只能满盘找文件（实测 11 步工具、16 分钟后 524）。
+  const attachmentKindLabels: Record<string, string> = { image: '图片', video: '视频', audio: '音频', file: '文件' }
+  const attachmentPaths = attachments
+    .filter(attachment => attachment.resourcePath)
+    .map(attachment => `- ${attachment.name}（${attachmentKindLabels[attachment.kind] || '文件'}）：${attachment.resourcePath}`)
+  const pathNotice = attachmentPaths.length
+    ? ['[本轮附件]以下文件就在项目里，用 read 或 read_image 按路径直接读（视频先用 @jc-watch 抽帧）：', ...attachmentPaths].join('\n')
+    : ''
   const text = [
     message,
     ...inlineFiles.map(file => `[已读取文件: ${file.name}]\n${file.content.slice(0, 120_000)}`),
     notice,
+    pathNotice,
   ].filter(Boolean).join('\n\n')
   return [{ type: 'text', text }, ...imageBlocks]
 }
@@ -622,6 +635,23 @@ export function deepSeekContentBlocks(
 export function deepSeekTurnError(event: any): string {
   if (event?.type !== 'turn/end' || event?.data?.reason?.kind !== 'error') return ''
   return String(event.data.reason.error?.message || 'DeepSeek Harness 执行失败')
+}
+
+/**
+ * 内置 Skill 源目录（`public/skills` → 打包成 `resources/skills`）。
+ *
+ * 官方 skill 扫描根只覆盖项目与用户目录（`~/.agents/skills` 等），**不含应用内置目录**：
+ * 不配 `bundledSkillDir` / `DSH_BUNDLED_SKILL_DIR` 就没有 rank 600 的 `bundled` 根。缺它时
+ * 内置的 jc-watch / skill-creator / wiki-memory / jc-new-user-guide 对模型完全不存在，模型
+ * 只能满盘找 —— 实测一条 `find /Users/by3 -iname "*jc-watch*"` 白烧一分多钟。这是我们没给
+ * 信息，不是模型笨。
+ *
+ * 探测必须在 Rust：前端 fs 插件的 `exists()` 受 capability 的 scope 限制（只放行
+ * `$APPDATA/**`、`$HOME/.agents/**` 等），探 `target/debug/skills` 会直接抛
+ * `forbidden path ... allow-exists` 而不是返回 false —— 整个 run 0.00 秒就死在这。
+ */
+async function bundledSkillsDirectory(): Promise<string | undefined> {
+  return await invoke<string | null>('resolve_bundled_skills') || undefined
 }
 
 async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
@@ -726,6 +756,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     `${runtimeRoot}/node/bin/${navigator.userAgent.includes('Windows') ? 'node.exe' : 'node'}`,
   )
   const runner = await resolveResource('deepseek-harness/runner.mjs')
+  const bundledSkills = await bundledSkillsDirectory()
   const transport = new McpStdioTransport({
     command,
     args: [runner, JSON.stringify({ cwd: input.cwd, model: input.model, patchPath, dshHome: routeDir })],
@@ -735,6 +766,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
       DSH_HOME: routeDir,
       DSH_TELEMETRY_MODE: 'DISABLED',
       DSH_PERMISSION_MODE: deepSeekPermissionMode(input.fileAccessEnabled),
+      ...bundledSkills === undefined ? {} : { DSH_BUNDLED_SKILL_DIR: bundledSkills },
     },
   })
   let markReady!: () => void
@@ -746,6 +778,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     key: runtimeKey(input),
     transport,
     runs: new Map(),
+    permissions: new Map(),
     closed,
     markClosed,
   }
@@ -847,6 +880,43 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
   }
 }
 
+/**
+ * 把当前会话的权限拉齐到 `@文件` 的语义。
+ *
+ * 会话把权限记成 durable 事实（`permission/preset` + `sandbox/mode` + `approval/policy`，
+ * 实测老会话里就是 workspace-write / workspace-write / ask），进程级 `DSH_PERMISSION_MODE`
+ * 只决定**新会话**的默认值：官方 `pinInitialPermission` 对已存在的会话保留它自己记下的开关。
+ * 所以打开 `@文件` 也松不开老会话的沙箱，写 `~/.agents/skills` 会拿到
+ * `[sandbox: file access denied under workspace-write mode]` —— 用户看到的就是「没有权限」。
+ *
+ * 切换走官方命令面（`dsh-permission-presets` 注册的 `/permission <preset>`），不自己写
+ * `permission/preset` 事件：官方那两个 canonical setter 才是沙箱与审批的真正开关。
+ * SDK 通道没有权限方法，这条请求由 `scripts/prepare-deepseek-harness.mjs` 的第 5 处补丁补上。
+ *
+ * 每个 (runtime, 会话) 只切一次：`runtimeKey` 已经含权限模式，模式一变就是新 runtime；而切换会往
+ * 会话日志写 `command/run` + `command/done` 两条生命周期事件，不该每轮都写。
+ */
+async function alignSessionPermission(
+  active: Runtime,
+  sessionId: string,
+  fileAccessEnabled = false,
+): Promise<void> {
+  const preset = deepSeekPermissionMode(fileAccessEnabled)
+  if (active.permissions.get(sessionId) === preset) return
+  const requestId = crypto.randomUUID()
+  const completed = new Promise<unknown>((resolve, reject) => {
+    // 这条请求不参与 UI 投影：官方命令面不产生模型轮次，也没有工具进度要转发。
+    active.runs.set(requestId, { resolve, reject, notify: () => {} })
+  })
+  try {
+    await active.transport.send({ type: 'permission', requestId, sessionId, preset } as unknown as JSONRPCMessage)
+    await completed
+  } finally {
+    active.runs.delete(requestId)
+  }
+  active.permissions.set(sessionId, preset)
+}
+
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
   if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const wireSessionId = deepSeekSessionId(input.sessionId)
@@ -919,6 +989,7 @@ async function runDeepSeekHarnessTurn(
   input.signal?.addEventListener('abort', abort, { once: true })
   try {
     input.onStatus?.('正在启动')
+    await alignSessionPermission(active, wireSessionId, input.fileAccessEnabled)
     const completed = new Promise<string>((resolve, reject) => {
       active.runs.set(requestId, { resolve, reject, notify })
     })

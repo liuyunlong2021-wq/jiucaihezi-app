@@ -90,9 +90,12 @@ if (!server.includes(resumableSession)) {
 // Keep the bridge at the protocol edge; the UI must never parse DSH_HOME itself.
 const baseInject = 'const inject = ["agents"];'
 const queryInject = 'const inject = ["agents", "sessionQuery"];'
-if (!server.includes(queryInject)) {
-  if (!server.includes(baseInject)) throw new Error('Unsupported DeepSeek Harness injection layout')
-  server = server.replace(baseInject, queryInject)
+// 权限切换走官方命令面，所以要一并注入 commands 服务。
+const commandInject = 'const inject = ["agents", "sessionQuery", "commands"];'
+if (!server.includes(commandInject)) {
+  if (server.includes(queryInject)) server = server.replace(queryInject, commandInject)
+  else if (server.includes(baseInject)) server = server.replace(baseInject, commandInject)
+  else throw new Error('Unsupported DeepSeek Harness injection layout')
   changed = true
 }
 const requestCases = `\t\t\tcase "initialize": return this.initialize(params);
@@ -106,6 +109,41 @@ const queryCases = `\t\t\tcase "initialize": return this.initialize(params);
 if (!server.includes(queryCases)) {
   if (!server.includes(requestCases)) throw new Error('Unsupported DeepSeek Harness request server layout')
   server = server.replace(requestCases, queryCases)
+  changed = true
+}
+
+// 会话把权限记成 durable 事实（permission/preset + sandbox/mode + approval/policy），进程级
+// DSH_PERMISSION_MODE 只决定**新会话**的默认值：官方 pinInitialPermission 对已存在的会话
+// 保留它自己记下的开关。所以打开 @文件 也松不开老会话的沙箱，写 ~/.agents/skills 会拿到
+// 「file access denied under workspace-write mode」。SDK 通道只有 session/prompt|list|read，
+// 没有任何权限方法，这里挂一个 session/permission，复用官方命令面（dsh-permission-presets
+// 注册的 `/permission <preset>`），而不是自己写 permission/preset 事件绕过官方推导。
+// 上游公开会话级权限 RPC 后整体删除。
+const permissionCase = '\t\t\tcase "session/permission": return this.permission(params);'
+if (!server.includes(permissionCase)) {
+  // 锚在整个 switch 的**末行**（shutdown）之后。插到 session/prompt 或 session/read 后面都会
+  // 落在 queryCases 那段连续字符串内部，把它切断：上一步的幂等检查 `!server.includes(queryCases)`
+  // 于是第二次运行误判成「还没打过」，再去 replace 找不到的 requestCases 就抛错。
+  const permissionAnchor = '\t\t\tcase "shutdown": return this.shutdown();'
+  if (!server.includes(permissionAnchor)) throw new Error('Unsupported DeepSeek Harness request server layout')
+  server = server.replace(permissionAnchor, `${permissionAnchor}\n${permissionCase}`)
+  changed = true
+}
+const permissionMethod = `\tasync permission(params) {
+\t\tif (!this.initialized) throw new Error("SDK server is not initialized");
+\t\tconst rec = await this.getOrCreateSession(params.sessionId);
+\t\tthis.assertLiveAgent(rec, params.sessionId);
+\t\tconst preset = String(params?.preset ?? "");
+\t\tconst settled = await this.ctx.get("commands").execute(rec.handle.agent, "/permission " + preset, [], new AbortController().signal);
+\t\tif (settled === void 0) throw new Error("unknown permission preset: " + preset);
+\t\tif (settled.result.kind !== "success") throw new Error(settled.result.text || "permission preset " + preset + " was rejected");
+\t\treturn { preset };
+\t}
+`
+if (!server.includes('async permission(params) {')) {
+  const liveAgent = '\tassertLiveAgent(rec, sessionId) {'
+  if (!server.includes(liveAgent)) throw new Error('Unsupported DeepSeek Harness agent layout')
+  server = server.replace(liveAgent, `${permissionMethod}${liveAgent}`)
   changed = true
 }
 
