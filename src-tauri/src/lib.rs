@@ -1613,7 +1613,7 @@ pub fn run() {
             }
 
             // ponytail: 照抄 OpenCode desktop/main/windows.ts — 窗口状态持久化
-            // （每窗口一份文件 + 销殁时收 runner，见 `attach_window_state`）
+            // （每窗口一份文件 + 销毁时收 runner，见 `attach_window_state`）
             attach_window_state(app.handle(), &window, "main");
 
             Ok(())
