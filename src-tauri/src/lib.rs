@@ -1333,7 +1333,10 @@ fn attach_window_state(app: &tauri::AppHandle, window: &tauri::WebviewWindow, la
         .collect();
     let state_path = app_data.join(format!("window-state-{safe_label}.json"));
     let legacy_path = app_data.join("window-state.json");
-    let restore_from = if state_path.exists() { state_path.clone() } else { legacy_path };
+    // 旧的单文件 window-state.json 属于单窗口年代 —— 那就是主窗口的几何。工作区窗口若回落
+    // 它，新窗口会正好压在主窗口上，看起来像「按了没反应」。所以只让 main 回落；其余窗口没有
+    // 状态可恢复就交给系统层叠摆放，视觉上立刻能看出是新窗口。
+    let restore_from = if state_path.exists() || label != "main" { state_path.clone() } else { legacy_path };
 
     if let Ok(json) = std::fs::read_to_string(&restore_from) {
         if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {

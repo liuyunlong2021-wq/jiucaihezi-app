@@ -1517,6 +1517,13 @@ test('a workspace opens in its own window and never twice', () => {
   assert.match(main, /listen\('jc:open-workspace-in-new-window'/)
   // 新窗口必须拿到权限，否则起来就是零权限（fs / dialog / 自有命令全无）。
   assert.match(source('src-tauri/capabilities/default.json'), /"windows": \["main", "ws-\*"\]/)
+  // 几何按窗口分文件存；旧的单文件只属于主窗口 —— 工作区窗口回落它会正好压在主窗口上，
+  // 看起来像「按了没反应」。
+  assert.match(lib, /window-state-\{safe_label\}\.json/)
+  assert.match(lib, /state_path\.exists\(\) \|\| label != "main"/)
+  // 关掉一个窗口要收掉它名下的 runner：应用还活着，退出路径不会跑，而它会一直握着会话的
+  // 跨进程内核写锁。
+  assert.match(lib, /WindowEvent::Destroyed[\s\S]{0,240}reap_window_stdio_processes/)
 })
 
 test('memory workbench follows the current project owner on both runtimes', () => {
