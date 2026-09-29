@@ -146,6 +146,7 @@
           "list_skill_directory",
           "open_in_file_manager",
           "open_workspace_window",
+          "open_new_window",
           "open_central_skills_directory",
           "create_collection",
           "get_collections",

@@ -1512,11 +1512,18 @@ test('a workspace opens in its own window and never twice', () => {
   // 分窗口存项目：共用一个键的话，A 窗口换个项目会把 B 窗口也换掉。
   assert.match(store, /const PROJECT_DIR_KEY = `jc_project_dir:\$\{WINDOW_LABEL\}`/)
   assert.match(store, /localStorage\.getItem\(PROJECT_DIR_KEY\)/)
-  // 菜单是应用级的，不知道哪个窗口在工作：转给聚焦窗口，由前端带自己的工作区回来开店。
-  assert.match(lib, /window\.emit\("jc:open-workspace-in-new-window", \(\)\)/)
-  assert.match(main, /listen\('jc:open-workspace-in-new-window'/)
+  // 菜单是应用级的，不知道哪个窗口在工作：转给聚焦窗口，由前端请 Rust 开一个**空**窗口。
+  assert.match(lib, /window\.emit\("jc:new-window", \(\)\)/)
+  assert.match(main, /listen\('jc:new-window'/)
+  assert.match(main, /invoke\('open_new_window'\)/)
+  // 空窗口不回落旧的全键项目 —— 回落了它一开就显示上一个项目，看起来像「新建窗口只是又开了一遍」。
+  assert.match(store, /WINDOW_LABEL === 'main'/)
   // 新窗口必须拿到权限，否则起来就是零权限（fs / dialog / 自有命令全无）。
-  assert.match(source('src-tauri/capabilities/default.json'), /"windows": \["main", "ws-\*"\]/)
+  assert.match(
+    source('src-tauri/capabilities/default.json'),
+    /"windows": \["main", "ws-\*", "win-\*"\]/,
+  )
+  assert.match(source('src-tauri/permissions/app-commands.json'), /"open_new_window"/)
   // 几何按窗口分文件存；旧的单文件只属于主窗口 —— 工作区窗口回落它会正好压在主窗口上，
   // 看起来像「按了没反应」。
   assert.match(lib, /window-state-\{safe_label\}\.json/)

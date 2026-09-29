@@ -1217,6 +1217,17 @@ pub(crate) fn workspace_window_label(cwd: &str) -> String {
     format!("ws-{hex}")
 }
 
+/// 空工作台窗口的 label：`win-<最小可用序号>`。
+///
+/// 用序号而不是 uuid：窗口关掉后号码会被下一个空窗口复用，于是窗口状态文件不会越攒越多
+/// （每窗口一份 `window-state-<label>.json`）。
+pub(crate) fn unbound_window_label(app: &tauri::AppHandle) -> String {
+    (1..)
+        .map(|n| format!("win-{n}"))
+        .find(|label| app.get_webview_window(label).is_none())
+        .expect("无限递增的序号不可能用完")
+}
+
 /// 路径最后一段，用作窗口标题 —— 多窗口时必须能一眼看出谁是谁。
 fn workspace_name(cwd: &str) -> String {
     let trimmed = cwd.trim_end_matches(['/', '\\']);
@@ -1307,6 +1318,22 @@ fn build_workbench_window(
     #[cfg(target_os = "ios")]
     let builder = builder.with_input_accessory_view_builder(|_| None);
     builder.build()
+}
+
+/// 建窗 + 挂窗口状态的公共链路。
+///
+/// 两个入口（指定工作区 / 空窗口）必须走同一条链，理由同 `build_workbench_window`：
+/// 登录回调、返回浮标、窗口状态这三件事漏一件就是一个窗口型 bug。
+pub(crate) fn spawn_workbench_window(
+    app: &tauri::AppHandle,
+    label: &str,
+    workspace: Option<&str>,
+) -> Result<String, String> {
+    let config = workbench_window_config(app, label, workspace)?;
+    let window =
+        build_workbench_window(app, &config, workspace).map_err(|error| error.to_string())?;
+    attach_window_state(app, &window, label);
+    Ok(label.to_string())
 }
 
 /// 当前聚焦的窗口；都没有焦点时给 `main`，再退回任意一个。
@@ -1479,14 +1506,13 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .on_menu_event(|app, event| {
-            if event.id().as_ref() != "jc:new-workspace-window" {
+            if event.id().as_ref() != "jc:new-window" {
                 return;
             }
-            // 菜单是应用级的（`app.set_menu`），而「当前工作区」是每个窗口自己在 localStorage
-            // 里记的 —— 所以让**聚焦窗口**自己决定用哪个工作区：前端收到事件后回调
-            // `open_workspace_window`。
+            // 菜单是应用级的（`app.set_menu`），它需要一个前端来调 Rust 建窗。
+            // 转给**聚焦窗口**：用户点菜单时的那个窗口最可能是他正在看的那个。
             if let Some(window) = focused_window(app) {
-                let _ = window.emit("jc:open-workspace-in-new-window", ());
+                let _ = window.emit("jc:new-window", ());
             }
         })
         .setup(|app| {
@@ -1569,45 +1595,53 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             {
                 use tauri::menu::{MenuBuilder, PredefinedMenuItem, SubmenuBuilder};
-                // ponytail: Edit 子菜单 — PredefinedMenuItem 必须放在子菜单里才能正确注册键盘加速器
-                let edit_menu = SubmenuBuilder::new(app, "Edit")
-                    .item(&PredefinedMenuItem::undo(app, None)?)
-                    .item(&PredefinedMenuItem::redo(app, None)?)
+                // macOS 系统菜单项的默认文案是英文（Tauri 不随系统语言本地化），
+                // 要中文只能自己传文案，否则用户看到的是 Undo / Cut / Paste 那一套。
+                // 另外 macOS 会给**标题恰好是 "Edit"** 的菜单自动塞 AutoFill / 开始听写 / 表情与符号，
+                // 改叫「编辑」之后这些系统项自己就没了 —— 它们不是我们加的，也没法单独关掉。
+                let app_menu = SubmenuBuilder::new(app, "韭菜盒子")
+                    .item(&PredefinedMenuItem::about(app, Some("关于韭菜盒子"), None)?)
                     .separator()
-                    .item(&PredefinedMenuItem::cut(app, None)?)
-                    .item(&PredefinedMenuItem::copy(app, None)?)
-                    .item(&PredefinedMenuItem::paste(app, None)?)
+                    .item(&PredefinedMenuItem::hide(app, Some("隐藏韭菜盒子"))?)
+                    .item(&PredefinedMenuItem::hide_others(app, Some("隐藏其他"))?)
+                    .item(&PredefinedMenuItem::show_all(app, Some("全部显示"))?)
                     .separator()
-                    .item(&PredefinedMenuItem::select_all(app, None)?)
+                    .item(&PredefinedMenuItem::quit(app, Some("退出韭菜盒子"))?)
                     .build()?;
-                // 工作区窗口入口（对齐 VS Code 的「在新窗口打开」与 ⌘⇧N）。
-                let new_workspace_item = tauri::menu::MenuItemBuilder::with_id(
-                    "jc:new-workspace-window",
-                    "在新窗口打开工作区",
+                // PredefinedMenuItem 必须放在子菜单里才能正确注册键盘加速器。
+                // 这六项不是装饰：没有它们，输入框里的 ⌘C / ⌘V / ⌘Z 就没有菜单落点。
+                let edit_menu = SubmenuBuilder::new(app, "编辑")
+                    .item(&PredefinedMenuItem::undo(app, Some("撤销"))?)
+                    .item(&PredefinedMenuItem::redo(app, Some("重做"))?)
+                    .separator()
+                    .item(&PredefinedMenuItem::cut(app, Some("剪切"))?)
+                    .item(&PredefinedMenuItem::copy(app, Some("复制"))?)
+                    .item(&PredefinedMenuItem::paste(app, Some("粘贴"))?)
+                    .separator()
+                    .item(&PredefinedMenuItem::select_all(app, Some("全选"))?)
+                    .build()?;
+                // 「服务」子菜单已移除：它列的是别的 App 提供的系统服务，
+                // 用户机器上出现的是 Instruments 那几项（Activity Monitor / Time Profile …），
+                // 与韭菜盒子无关，纯噪音。
+                let new_window_item = tauri::menu::MenuItemBuilder::with_id(
+                    "jc:new-window",
+                    "新建窗口",
                 )
                 .accelerator("CmdOrCtrl+Shift+N")
                 .build(app)?;
+                // maximize 在 macOS 走的是 performZoom:（绿按钮那个行为），所以叫「缩放」而不是「最大化」。
                 let window_menu = SubmenuBuilder::new(app, "窗口")
-                    .item(&new_workspace_item)
+                    .item(&new_window_item)
+                    .separator()
+                    .item(&PredefinedMenuItem::minimize(app, Some("最小化"))?)
+                    .item(&PredefinedMenuItem::maximize(app, Some("缩放"))?)
+                    .item(&PredefinedMenuItem::fullscreen(app, Some("全屏"))?)
                     .build()?;
+                // 这三个子菜单的顺序就是 macOS 的菜单栏顺序：应用菜单必须是第一个。
                 let menu = MenuBuilder::new(app)
-                    .item(&PredefinedMenuItem::about(app, None, None)?)
-                    .separator()
-                    .item(&PredefinedMenuItem::services(app, None)?)
-                    .separator()
-                    .item(&PredefinedMenuItem::hide(app, None)?)
-                    .item(&PredefinedMenuItem::hide_others(app, None)?)
-                    .item(&PredefinedMenuItem::show_all(app, None)?)
-                    .separator()
-                    .item(&PredefinedMenuItem::quit(app, None)?)
-                    .separator()
+                    .item(&app_menu)
                     .item(&edit_menu)
-                    .separator()
                     .item(&window_menu)
-                    .separator()
-                    .item(&PredefinedMenuItem::minimize(app, None)?)
-                    .item(&PredefinedMenuItem::maximize(app, None)?)
-                    .item(&PredefinedMenuItem::fullscreen(app, None)?)
                     .build()?;
                 app.set_menu(menu)?;
             }
@@ -1621,6 +1655,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::greet::greet,
             commands::workspace::open_workspace_window,
+            commands::workspace::open_new_window,
             commands::jev_scorer::jev_scorer_ensure,
             commands::session::read_session_token,
             commands::session::write_session_token,

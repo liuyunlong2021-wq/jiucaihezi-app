@@ -55,14 +55,18 @@ const PROJECT_DIR_KEY = `jc_project_dir:${WINDOW_LABEL}`
 /**
  * 本窗口的初始工作区。
  *
- * 优先级：窗口绑定 > 分窗口存的 > 旧的全键。分窗口存是必须的 —— 共用一个键的话，
- * A 窗口换个项目会把 B 窗口也换掉。回落旧键是为了老用户升级后不丢当前项目。
+ * 优先级：窗口绑定 > 分窗口存的 > 旧的全键（**只有主窗口回落**）。
+ * 分窗口存是必须的 —— 共用一个键的话，A 窗口换个项目会把 B 窗口也换掉。
+ * 旧的全键属于单窗口年代 = 主窗口；新建的空窗口若回落它，一开就显示上一个项目，
+ * 看起来就像「新建窗口只是把当前窗口又开了一遍」。
  */
 function loadProjectDir(): string {
   const bound = boundWorkspace()
   if (bound) return bound
   try {
-    return localStorage.getItem(PROJECT_DIR_KEY) ?? localStorage.getItem('jc_project_dir') ?? ''
+    const scoped = localStorage.getItem(PROJECT_DIR_KEY)
+    if (scoped) return scoped
+    return WINDOW_LABEL === 'main' ? (localStorage.getItem('jc_project_dir') ?? '') : ''
   } catch {
     return ''
   }
