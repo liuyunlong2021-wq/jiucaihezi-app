@@ -1,5 +1,12 @@
 # 热缓存
 
+## [2026-09-29] Harness 失败轮次按官方 Session 投影到工作台
+
+- 根因：Harness 的 `turn/end(reason.kind=error)` 已持久化在官方 Session，但工作台失败分支只把错误写入临时 `MemoryRun`，随后清掉 `userTurn`；失败轮次因此从 UI 消失，而同一 Session 仍可由“继续”接上。
+- 修复：失败时补读同一 Session，按本轮用户消息 id 关联 `turn/end(error)` 的 `code/message`，保留官方用户轮次和工具过程；UI 在过程区显示“任务失败”及原因，不伪造 assistant 正文、不写旧 Raw、不重放工具。
+- 边界：本轮只对齐官方失败 Turn 投影；不引入任务账本、不要求所有任务跨重启恢复、不扩大自动重试策略。模型请求的官方 retry 仍按现有 Harness policy 执行。
+- 验证：新增失败轮次投影用例通过；focused runner `1664 passed / 0 failed / 18 cancelled`，18 项为既有 Desktop Remote 连接测试取消。
+
 ## [2026-09-28] `deepseek-v4.1-flash-0910` 在上游已退化：首字 16s–2m49s
 
 - 现象：Harness 对话经常「静默一分多钟」然后 `524 statu…`。先怀疑过 Provider 设计、请求太大、Cloudflare 网络抖动，逐条被排除。

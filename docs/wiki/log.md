@@ -1,5 +1,12 @@
 # Wiki 操作日志
 
+## [2026-09-29] 修复 | Harness 失败轮次不再从工作台消失
+
+- 用户确认只执行最小方案：对齐官方 Harness Session 失败事件投影，不建设全局任务账本、不要求所有任务跨重启恢复、不扩大自动恢复。
+- 根因：`runner.mjs` 将官方 `turn/end(error)` 转成 RPC error；`MemoryWorkbench.vue` 失败分支只设置临时 `run.error`，最终清掉 `run.userTurn`，没有补读 Session。因此失败轮次未进入工作台投影，但 Session 仍存在，下一次“继续”仍可接上。
+- 修复：新增 `deepSeekSessionFailures(snapshot)`，从官方 `turn/end(error)` 按用户消息 id建立失败元数据；Harness 失败时补读同一 Session，刷新用户轮次/工具过程，并在过程区显示失败 code/message。失败不伪造 assistant 正文、不写旧 Raw、不重放已完成工具。
+- 验证：新增失败轮次投影红测通过；focused runner `1664 passed / 0 failed / 18 cancelled`，18 项为既有 Desktop Remote 连接测试取消。未做真实上游故障注入。
+
 ## [2026-09-28] 排障 | 「静默两分钟」的真因是模型版本 `deepseek-v4.1-flash-0910`
 
 - 现象：Harness 对话经常静默一分多钟然后 `524 statu…` 失败。用户先后提出两个假设——「是不是我们 Provider 设计有问题」和「我的 NewAPI 后台每次都秒回」。两个都查了。

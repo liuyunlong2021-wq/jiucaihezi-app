@@ -55,6 +55,7 @@ import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
   deepSeekHandoffTurns,
   deepSeekPrompt,
+  deepSeekSessionFailures,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
   deepSeekSessionTurns,
@@ -438,6 +439,7 @@ const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
 // Harness 的过程投影：按 assistant message id 侧存，不写 ConversationTurn。
 // Harness 对话以 Session 为唯一真源，每次打开重建即可，不需要新的持久化格式。
 const harnessProcess = ref<Record<string, DeepSeekProcessStep[]>>({})
+const harnessFailures = ref<Record<string, { code?: string; message: string }>>({})
 const harnessReasoning = ref<Record<string, string>>({})
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
@@ -819,7 +821,11 @@ function isLiveTurn(turnId: string): boolean {
 
 /** 本轮有没有过程要显示（思考 / 步骤 / 叙述 / 在飞）。决定过程块是否单独成块。 */
 function hasTurnProcess(turnId: string): boolean {
-  return Boolean(harnessReasoningFor(turnId) || harnessStepsFor(turnId)?.length || isLiveTurn(turnId))
+  return Boolean(harnessReasoningFor(turnId) || harnessStepsFor(turnId)?.length || harnessFailures.value[turnId] || isLiveTurn(turnId))
+}
+
+function harnessFailureFor(turnId: string) {
+  return harnessFailures.value[turnId]
 }
 
 /** 折叠标题里只数工具步；叙述也是过程的一部分，但算成「步骤」会误导。 */
@@ -861,6 +867,7 @@ function harnessReasoningFor(turnId: string): string {
 function rememberHarnessSnapshot(snapshot: DeepSeekSessionSnapshot) {
   for (const [turnId, steps] of deepSeekSessionProcess(snapshot)) harnessProcess.value[turnId] = steps
   for (const [turnId, reasoning] of deepSeekSessionReasoning(snapshot)) harnessReasoning.value[turnId] = reasoning
+  for (const [turnId, failure] of deepSeekSessionFailures(snapshot)) harnessFailures.value[turnId] = failure
 }
 
 function programStatusTitle(programStatus: MemoryProgramStatus): string {
@@ -2242,6 +2249,41 @@ async function send(remoteText?: string) {
       run.phase = 'failed'
       run.status = '处理失败'
       run.error = cause instanceof Error ? cause.message : String(cause)
+      if (useHarness && run.userTurn) {
+        try {
+          const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
+          const snapshot = await readDeepSeekHarnessSession({
+            cwd: active.resource.owner,
+            sessionId: active.transcript.id,
+            message: '',
+            model: config.model,
+            apiBase: config.apiBase,
+            apiKey: config.apiKey,
+            imageInput: harnessImageInput(config.model),
+            permissionTier: permissionTier.value,
+            mediaSelected: mediaSelected.value,
+            avSelected: avSelected.value,
+            scene3dSelected: scene3dSelected.value,
+            mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
+          })
+          const sessionTurns = deepSeekSessionTurns(snapshot)
+          rememberHarnessSnapshot(snapshot)
+          const failureTurn = [...sessionTurns].reverse().find(turn =>
+            turn.role === 'user' && turn.content === run.userTurn?.content
+              && Date.parse(turn.createdAt) >= Date.parse(run.userTurn?.createdAt || ''))
+          const failure = failureTurn ? deepSeekSessionFailures(snapshot).get(failureTurn.id) : undefined
+          if (failure) run.error = `${failure.code ? `${failure.code}: ` : ''}${failure.message}`
+          const turns = mergedHarnessTurns(active.transcript.turns, sessionTurns)
+          if (runs.get(runKey) === run && isOnScreen(run)) {
+            opened.value = harnessConversationOpenResult({
+              resource: active.resource,
+              transcript: { ...active.transcript, turns },
+            })
+          }
+        } catch (snapshotCause) {
+          run.error += `；失败记录刷新失败：${snapshotCause instanceof Error ? snapshotCause.message : String(snapshotCause)}`
+        }
+      }
       if (!replyCompleted && run.runtime !== 'dh' && isRecoverableDirectTransportFailure(cause)) {
         const interruptedReply = [
           run.streamingText.trim(),
@@ -3638,6 +3680,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <JcIcon name="sync" class="spinning" />
             <span class="memory-process-label">思考中，用时{{ formatLiveDuration(runElapsed) }}</span>
             <span v-if="runStatus" class="memory-process-summary" :title="runStatus">{{ runStatus }}</span>
+          </div>
+          <div v-if="harnessFailureFor(turn.id)" class="memory-process-step failed">
+            <JcIcon name="error" />
+            <span class="memory-process-label">任务失败</span>
+            <small class="memory-process-error">{{ harnessFailureFor(turn.id)?.code ? `${harnessFailureFor(turn.id)?.code}: ` : '' }}{{ harnessFailureFor(turn.id)?.message }}</small>
           </div>
         </div>
         </template>

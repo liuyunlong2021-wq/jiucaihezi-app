@@ -18,6 +18,7 @@ import {
   deepSeekSessionExists,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
+  deepSeekSessionFailures,
   deepSeekSessionTurns,
   deepSeekTurnError,
   DEEPSEEK_PROCESS_RESULT_LIMIT,
@@ -256,6 +257,22 @@ test('Harness labels every official SDK tool instead of falling back to its raw 
       `${name} 落到了兜底标签，应在 DEEPSEEK_TOOL_LABELS 中登记`,
     )
   }
+})
+
+test('failed Harness turns remain addressable by their user turn without becoming assistant text', () => {
+  const snapshot = {
+    session: { id: 's' },
+    events: [
+      { seq: 1, time: 1, type: 'turn/start', surfaceOp: 'append', data: { turn: 1 } },
+      { seq: 2, time: 2, type: 'user/message', surfaceOp: 'append', data: { source: { kind: 'user' }, content: [{ type: 'text', text: '继续处理' }], id: 'user-1' } },
+      { seq: 3, time: 3, type: 'tool/call', surfaceOp: 'append', data: { turn: 1, callId: 'call-1', name: 'read', arguments: '{}' } },
+      { seq: 4, time: 4, type: 'tool/result', surfaceOp: 'append', data: { turn: 1, message: { toolCallId: 'call-1', isError: true, content: [{ type: 'text', text: 'Error: 失败' }] } } },
+      { seq: 5, time: 5, type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'SERVER', message: '上游暂时不可用' } } } },
+    ],
+  }
+  const failures = deepSeekSessionFailures(snapshot)
+  assert.deepEqual(failures.get('user-1'), { code: 'SERVER', message: '上游暂时不可用' })
+  assert.deepEqual(deepSeekSessionTurns(snapshot).map(turn => [turn.id, turn.role, turn.content]), [['user-1', 'user', '继续处理']])
 })
 
 test('DeepSeek Harness exposes terminal turn failures instead of completing on idle', () => {

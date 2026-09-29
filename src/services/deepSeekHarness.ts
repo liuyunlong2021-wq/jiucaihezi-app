@@ -394,6 +394,27 @@ function deepSeekTurnAnchors(snapshot: DeepSeekSessionSnapshot): Map<number, str
   return anchors
 }
 
+export type DeepSeekTurnFailure = {
+  code?: string
+  message: string
+}
+
+/** 会话快照 → 发起该轮的用户消息 id → 官方 turn/end(error) 失败原因。 */
+export function deepSeekSessionFailures(snapshot: DeepSeekSessionSnapshot): Map<string, DeepSeekTurnFailure> {
+  const owners = deepSeekTurnOwners(snapshot)
+  const failures = new Map<string, DeepSeekTurnFailure>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'turn/end' || event.data?.reason?.kind !== 'error') continue
+    const owner = owners.get(Number(event.data?.turn))
+    if (!owner) continue
+    const failure = event.data.reason.error
+    const message = String(failure?.message || 'DeepSeek Harness 执行失败').trim()
+    const code = String(failure?.code || '').trim()
+    failures.set(owner, code ? { code, message } : { message })
+  }
+  return failures
+}
+
 export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): ConversationTurn[] {
   const turns: ConversationTurn[] = []
   const answers = deepSeekTurnAnswers(snapshot)
