@@ -2,6 +2,7 @@ use crate::commands::tools::resolve_local_binary;
 use std::collections::HashMap;
 use std::sync::LazyLock;
 use tauri::ipc::Channel;
+use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex;
@@ -11,6 +12,31 @@ struct McpStdioProcess {
     stdin: tokio::process::ChildStdin,
     /// Harness 运行时（`runner.mjs`）。页面重载后要单独回收，见 [`mcp_reap_stale_harness`]。
     is_harness_runner: bool,
+    /// 归属：哪个窗口、哪一代页面起的。见 [`ReapScope`]。
+    owner: Option<Owner>,
+}
+
+/// 一个 stdio 子进程的归属。
+///
+/// 只需要窗口 label 是不够的：dev 的 F5/HMR 重挂时 label 不变（还是 `main`），光看 label
+/// 就分不出「上一个页面留下的孤儿」和「本页面的活进程」—— 那样要么收不掉旧 runner
+/// （下一轮 resume 撞写锁），要么把多窗口里别人的进程一起误杀。加上每次挂载都会换的
+/// realm，两件事才能分开。
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Owner {
+    window: String,
+    realm: String,
+}
+
+/// 一次收割的视野：哪些窗口还活着、当前是谁在收。
+#[derive(Debug)]
+struct ReapScope<'a> {
+    /// 当前存在的窗口 label（`AppHandle::webview_windows()` 的键）。
+    live_windows: &'a [String],
+    /// 发起收割的窗口。
+    window: &'a str,
+    /// 发起收割的这个页面 realm。
+    realm: &'a str,
 }
 
 #[cfg(unix)]
@@ -27,14 +53,17 @@ static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
 
 #[tauri::command]
 pub async fn mcp_spawn_stdio(
+    window: tauri::WebviewWindow,
     command: String,
     args: Vec<String>,
     cwd: Option<String>,
     env: Option<HashMap<String, String>>,
+    realm: String,
     on_stdout: Channel<String>,
     on_stderr: Channel<String>,
     on_exit: Channel<String>,
 ) -> Result<String, String> {
+    let owner = Owner { window: window.label().to_string(), realm };
     let mut resolved_command = resolve_local_binary(&command);
     let mut resolved_args = args;
     if command.replace('\\', "/").ends_with("/tsx/dist/cli.mjs") {
@@ -114,7 +143,7 @@ pub async fn mcp_spawn_stdio(
     MCP_PROCESSES
         .lock()
         .await
-        .insert(handle_id.clone(), McpStdioProcess { child, stdin, is_harness_runner });
+        .insert(handle_id.clone(), McpStdioProcess { child, stdin, is_harness_runner, owner: Some(owner) });
     let exit_handle_id = handle_id.clone();
     tokio::spawn(async move {
         loop {
@@ -202,15 +231,31 @@ async fn reap_stdio_process(mut process: McpStdioProcess) {
     let _ = process.child.wait().await;
 }
 
+/// 这个进程是不是孤儿：归属的窗口已经不存在，或它就是**本窗口上一代页面**留下的。
+///
+/// `scope` 为 `None` 表示不判归属（应用退出路径：所有窗口都要关，全收）。
+///
+/// 两条必须同时成立，缺一条就会出 bug：
+/// - 只看窗口 label：dev 的 F5 重挂收不掉旧 runner，下一轮 resume 撞
+///   `already owned by an active write handle`；
+/// - 不看窗口 label：新窗口一挂载就把别的窗口的 runner 全杀了。
+fn is_orphan(owner: Option<&Owner>, scope: Option<&ReapScope<'_>>) -> bool {
+    let Some(scope) = scope else { return true };
+    let Some(owner) = owner else { return true };
+    if !scope.live_windows.iter().any(|live| live == &owner.window) { return true }
+    owner.window == scope.window && owner.realm != scope.realm
+}
+
 /// 不等待登记表锁的收尾（退出路径与页面重载路径专用）：能把谁收掉就收掉。
 ///
 /// `only_harness` 为真时只收 Harness 运行时：新页面挂载时创作 MCP 等其他 stdio 子进程
 /// 可能已经起来了，不能被顺手带走。
-fn reap_stdio_processes_blocking(only_harness: bool) -> usize {
+fn reap_stdio_processes_blocking(only_harness: bool, scope: Option<&ReapScope<'_>>) -> usize {
     let Ok(mut processes) = MCP_PROCESSES.try_lock() else { return 0 };
     let handles: Vec<String> = processes
         .iter()
         .filter(|(_, process)| !only_harness || process.is_harness_runner)
+        .filter(|(_, process)| is_orphan(process.owner.as_ref(), scope))
         .map(|(handle_id, _)| handle_id.clone())
         .collect();
     let mut reaped = 0;
@@ -234,16 +279,26 @@ pub async fn mcp_kill_stdio(handle_id: String) -> Result<(), String> {
 }
 
 /// 页面重载（dev 的 F5、HMR 重挂）会丢掉 App 里唯一指向运行时的句柄：进程还活着、stdin 还开着、
-/// 会话写句柄还握着那把跨进程写锁，但再没有人能关掉它。新页面启动时先把上一批 Harness 收掉，
-/// 否则同一会话的下一轮 resume 必撞 `already owned by an active write handle`。
+/// 会话写句柄还握着那把跨进程写锁，但再没有人能关掉它。新页面启动时先把**同一窗口上一代页面**
+/// 留下的 Harness 收掉，否则同一会话的下一轮 resume 必撞 `already owned by an active write handle`。
+///
+/// 只收同窗口的：多开时另一个窗口的运行时是活着的，一个字都不能碰。
 #[tauri::command]
-pub fn mcp_reap_stale_harness() -> usize {
-    reap_stdio_processes_blocking(true)
+pub fn mcp_reap_stale_harness(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    realm: String,
+) -> usize {
+    let live_windows: Vec<String> = app.webview_windows().keys().cloned().collect();
+    reap_stdio_processes_blocking(
+        true,
+        Some(&ReapScope { live_windows: &live_windows, window: window.label(), realm: &realm }),
+    )
 }
 
 /// 应用退出时收掉所有还在跑的 stdio 进程树（同步，退出路径上不再进一次异步调度）。
 pub fn reap_all_stdio_processes() -> usize {
-    reap_stdio_processes_blocking(false)
+    reap_stdio_processes_blocking(false, None)
 }
 
 #[cfg(test)]
@@ -266,6 +321,66 @@ mod tests {
             assert_eq!(program, "/bin/kill");
             assert_eq!(args, vec!["-KILL".to_string(), "-4242".to_string()]);
         }
+    }
+
+    fn owned(window: &str, realm: &str) -> Owner {
+        Owner { window: window.to_string(), realm: realm.to_string() }
+    }
+
+    fn scope<'a>(live: &'a [String], window: &'a str, realm: &'a str) -> ReapScope<'a> {
+        ReapScope { live_windows: live, window, realm }
+    }
+
+    /// 退出路径：不判归属，全收。
+    #[test]
+    fn exit_reaps_everything_regardless_of_owner() {
+        let owner = owned("main", "r1");
+        assert!(is_orphan(Some(&owner), None));
+    }
+
+    /// 多窗口的核心合同：**另一个窗口的运行时一个字都不能碰**。
+    ///
+    /// 没有这条，新窗口一挂载就把主窗口正在跑的那轮任务杀了 —— 收割遍历的是进程内
+    /// 全局表，而每个窗口都会在自己的 main.ts 里调一次收割。
+    #[test]
+    fn another_live_window_is_never_reaped() {
+        let live = vec!["main".to_string(), "ws-abc".to_string()];
+        let owner = owned("ws-abc", "whatever");
+        assert!(!is_orphan(Some(&owner), Some(&scope(&live, "main", "r-main"))));
+    }
+
+    /// dev 的 F5/HMR：同一窗口、新的一代页面，旧 runner 必须收掉。
+    ///
+    /// 少了这条，下一轮 resume 会撞 `already owned by an active write handle` ——
+    /// 这正是收割存在的原因，不能为了多窗口把它丢掉。
+    #[test]
+    fn same_window_previous_realm_is_reaped() {
+        let live = vec!["main".to_string()];
+        let owner = owned("main", "old-realm");
+        assert!(is_orphan(Some(&owner), Some(&scope(&live, "main", "new-realm"))));
+    }
+
+    /// 本窗口本代页面的进程是活的。
+    #[test]
+    fn same_window_same_realm_survives() {
+        let live = vec!["main".to_string()];
+        let owner = owned("main", "realm");
+        assert!(!is_orphan(Some(&owner), Some(&scope(&live, "main", "realm"))));
+    }
+
+    /// 窗口已经关掉了，它留下的进程就是孤儿（哪怕 realm 恰好相同）。
+    #[test]
+    fn closed_window_is_reaped() {
+        let live = vec!["main".to_string()];
+        let owner = owned("ws-gone", "realm");
+        assert!(is_orphan(Some(&owner), Some(&scope(&live, "main", "realm"))));
+    }
+
+    /// 没有归属信息的进程（理论上不存在，留作保守兜底）按孤儿处理。
+    #[test]
+    fn unknown_owner_is_reaped() {
+        let live = vec!["main".to_string()];
+        assert!(is_orphan(None, Some(&scope(&live, "main", "realm"))));
     }
 }
 

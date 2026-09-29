@@ -1139,6 +1139,27 @@ mod tests {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 第二个进程启动时把焦点还给已有窗口（对齐 VS Code 的单实例行为）。
+///
+/// 优先给已经聚焦的窗口，其次 `main`，再退回任意一个。多窗口之后这条语义仍然成立：
+/// 「再点一次图标」= 回到我正在看的那个窗口，而不是开新的 —— 开新窗口有显式菜单入口。
+///
+/// 与插件同条件编译：只在正式构建用得上（dev 下不注册单实例，见 `run` 里的注释）。
+#[cfg(all(not(any(target_os = "ios", target_os = "android")), not(debug_assertions)))]
+fn focus_existing_window(app: &tauri::AppHandle) {
+    let windows = app.webview_windows();
+    let target = windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .or_else(|| windows.get("main"))
+        .or_else(|| windows.values().next());
+    if let Some(window) = target {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 pub fn run() {
     #[cfg(target_os = "ios")]
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -1184,7 +1205,19 @@ pub fn run() {
         }
     }
 
-    let builder = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    // 单实例必须**最先**注册：第二个进程要把命令行与深链交给已有实例，然后自己退出。
+    // 没有它，双击图标会起第二个完整进程——各自一份 Rust 全局状态、各自一份 runner，
+    // 比多窗口更糟，而且用户看不到任何提示。
+    //
+    // **只在正式构建启用**：锁是按 bundle identifier 加的，dev 与正式包同 ID，所以
+    // 「先开着已安装的旧版，再跑 tauri dev」会把 dev 进程交给那个旧包——你会以为在测 HEAD，
+    // 实际看的是旧版本。那比多开本身更难查，所以宁可不在 dev 里启用。
+    #[cfg(all(not(any(target_os = "ios", target_os = "android")), not(debug_assertions)))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        focus_existing_window(app);
+    }));
+    let builder = builder
         .manage(commands::creation_mcp::CreationMcpState::default())
         .manage(commands::remote_bridge::RemoteBridgeState::default())
         .manage(commands::remote_client::MobileRemoteState::default())

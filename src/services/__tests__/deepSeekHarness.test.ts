@@ -617,10 +617,44 @@ test('Harness stdio children are reaped as a process tree', () => {
   assert.match(rust, /vec!\["\/T"\.into\(\), "\/F"\.into\(\), "\/PID"\.into\(\), pid\.to_string\(\)\]/)
   assert.match(rust, /cmd\.process_group\(0\)/)
   assert.match(rust, /if let Some\(pid\) = process\.child\.id\(\) \{\s*kill_process_tree\(pid\)/)
-  assert.match(rust, /pub fn mcp_reap_stale_harness\(\) -> usize/)
   // 页面重载收 Harness 运行时；应用退出收所有 stdio 进程树。
-  assert.match(readFileSync('src/main.ts', 'utf8'), /invoke<number>\('mcp_reap_stale_harness'\)/)
+  assert.match(rust, /pub fn mcp_reap_stale_harness\(/)
+  assert.match(readFileSync('src/main.ts', 'utf8'), /'mcp_reap_stale_harness', \{ realm: MCP_REALM_ID \}/)
   assert.match(lib, /commands::mcp::reap_all_stdio_processes\(\)/)
+})
+
+test('a window only reaps its own previous webpage, never another window', () => {
+  const rust = readFileSync('src-tauri/src/commands/mcp.rs', 'utf8')
+  const transport = readFileSync('src/services/mcpStdioTransport.ts', 'utf8')
+  const main = readFileSync('src/main.ts', 'utf8')
+  // 归属 = (窗口 label, 页面 realm)。只看 label 收不掉 dev 重挂留下的 runner（label 没变），
+  // 完全不看 label 则新窗口一挂载就把别的窗口正在跑的那一轮杀了。
+  assert.match(rust, /struct Owner \{\s*window: String,\s*realm: String,/)
+  assert.match(rust, /fn is_orphan\(owner: Option<&Owner>, scope: Option<&ReapScope<'_>>\) -> bool/)
+  assert.match(rust, /owner\.window == scope\.window && owner\.realm != scope\.realm/)
+  assert.match(rust, /scope\.live_windows\.iter\(\)\.any\(\|live\| live == &owner\.window\)/)
+  // 收割只碰 Harness 运行时：新页面挂载时创作 MCP 等 stdio 子进程可能已经起来了。
+  assert.match(rust, /filter\(\|\(_, process\)\| !only_harness \|\| process\.is_harness_runner\)/)
+  // realm 由前端每次挂载生成，并随 spawn 上报；窗口 label 由 Rust 注入，前端不传。
+  assert.match(transport, /export const MCP_REALM_ID = crypto\.randomUUID\(\)/)
+  assert.match(transport, /realm: MCP_REALM_ID,/)
+  assert.match(rust, /window: tauri::WebviewWindow,/)
+  assert.match(main, /invoke<number>\('mcp_reap_stale_harness', \{ realm: MCP_REALM_ID \}\)/)
+})
+
+test('a second launch focuses the existing instance instead of starting another process', () => {
+  const cargo = readFileSync('src-tauri/Cargo.toml', 'utf8')
+  const lib = readFileSync('src-tauri/src/lib.rs', 'utf8')
+  // 没有单实例插件，双击图标会起第二个完整进程：各自一份 Rust 全局状态、各自一份 runner。
+  // deep-link 特性必须开：否则第二次登录回调会被那个已经退出的进程吞掉。
+  assert.match(cargo, /tauri-plugin-single-instance = \{ version = "2", features = \["deep-link"\] \}/)
+  assert.match(lib, /tauri_plugin_single_instance::init\(/)
+  assert.match(lib, /fn focus_existing_window\(app: &tauri::AppHandle\)/)
+  // 单实例必须最先注册。
+  assert.ok(
+    lib.indexOf('tauri_plugin_single_instance::init') < lib.indexOf('tauri_plugin_fs::init'),
+    '单实例插件必须排在其它插件之前注册',
+  )
 })
 
 test('an existing session is switched to the @文件 permission instead of keeping its pinned default', () => {

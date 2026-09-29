@@ -45,6 +45,9 @@ notify = "8.2"
 tauri-plugin-opener = "2.5.4"
 
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+# 单实例：没有它，双击图标会起第二个完整进程（各自一份 runner 与 Rust 全局状态）。
+# `deep-link` 特性让第二个进程把登录回调 URL 交给已有实例，否则第二次登录会丢回调。
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 anydoc = "=0.2.3"
 arboard = "3"
 rfd = "0.15"

@@ -12,6 +12,7 @@ import { initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newAp
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import { consumeMcpOAuthCallbackUrl, type McpOAuthCallback } from '@/services/mcpOAuth'
 import { completeMcpServerAuthorization, restoreMcpServers } from '@/services/mcpClient'
+import { MCP_REALM_ID } from '@/services/mcpStdioTransport'
 import JcIcon from '@/components/icons/JcIcon.vue'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
@@ -97,8 +98,10 @@ if (earlyErrors && earlyErrors.length > 0) {
 // 页面重载（dev 的 F5、HMR 重挂）会丢掉 App 里唯一指向 Harness 运行时的句柄：进程还活着、
 // 会话写句柄还握着那把永不过期的跨进程写锁，但再没人能关掉它，同一会话下一轮 resume
 // 就只剩「already owned by an active write handle」。在本次挂载拉起任何运行时之前先收掉上一批。
+//
+// `realm` 是本页面新生成的一代：Rust 只收「同窗口、旧一代」的，多开时别的窗口的运行时不受影响。
 if (isTauri) {
-  void invoke<number>('mcp_reap_stale_harness').then(
+  void invoke<number>('mcp_reap_stale_harness', { realm: MCP_REALM_ID }).then(
     reaped => { if (reaped) bootLog('warn', `已收掉上一批遗留的 Harness 运行时：${reaped}`) },
     err => bootLog('warn', `清理遗留 Harness 运行时失败: ${err}`),
   )

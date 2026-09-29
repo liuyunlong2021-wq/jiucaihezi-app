@@ -9,6 +9,18 @@ import { Channel } from '@tauri-apps/api/core'
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 
+/**
+ * 本页面 realm 的标识。页面每次重新加载都会换一个新的。
+ *
+ * Rust 用 `(窗口 label, realm)` 判定一个 stdio 子进程是不是孤儿，两件事靠它分开：
+ * - **dev 的 F5/HMR 重挂**：同窗口、新 realm → 上一代留下的 Harness runner 必须收掉，
+ *   否则同一会话下一轮 resume 撞 `already owned by an active write handle`；
+ * - **多窗口**：不同 label → 另一个窗口正在跑的 runner 一个字都不能碰。
+ *
+ * 光靠窗口 label 做不到：重挂时 label 不变，两种情形长得一模一样。
+ */
+export const MCP_REALM_ID = crypto.randomUUID()
+
 export interface McpStdioOptions {
   command: string
   args: string[]
@@ -63,6 +75,7 @@ export class McpStdioTransport implements Transport {
         args: this._options.args,
         cwd: this._options.cwd || null,
         env: this._options.env || null,
+        realm: MCP_REALM_ID,
         onStdout: channel,
         onStderr: stderr,
         onExit: exit,
