@@ -129,7 +129,7 @@
     "id": "skill-creator",
     "name": "skill-creator",
     "displayName": "skill-creator",
-    "description": "Use when 用户想要创建、编辑、优化、评估、基准测试或确认安装可复用的 Skill 及其发现描述。",
+    "description": "Use when 用户想要创建、编辑、整理或校验可复用的 Skill，或需要改进 Skill 的发现描述与使用边界。",
     "triggers": [
       "Skill缔造",
       "创建技能",
@@ -148,36 +148,27 @@
       "名称：[Skill名]",
       "用途：[描述Skill要做什么]",
       "触发词：[逗号分隔]",
-      "把标准 SKILL.md + references/ + scripts/ + assets/ 结构写进项目文件树的草稿目录。",
+      "把标准 SKILL.md + references/ + scripts/ + assets/ 结构写进用户指定的 Skill 根目录。",
       "修改已有 Skill: 请用 Skill 缔造器帮我修改 Skill「[Skill名]」：",
       "修改要求：[描述要改什么]",
       "保持 SKILL.md 格式规范。"
     ],
     "files": [
-      ".seed_complete",
       "LICENSE.txt",
       "SKILL.md",
-      "agents/analyzer.md",
-      "agents/comparator.md",
-      "agents/grader.md",
-      "assets/eval_review.html",
-      "eval-viewer/generate_review.py",
-      "eval-viewer/viewer.html",
-      "references/schemas.md",
+      "agents/openai.yaml",
+      "assets/skill-creator-small.svg",
+      "assets/skill-creator.png",
+      "references/openai_yaml.md",
       "scripts/__init__.py",
-      "scripts/aggregate_benchmark.py",
-      "scripts/package_skill.py",
-      "scripts/quick_validate.py",
-      "scripts/utils.py"
+      "scripts/generate_openai_yaml.py",
+      "scripts/init_skill.py",
+      "scripts/quick_validate.py"
     ],
     "package": {
       "schemaVersion": 1,
       "entry": "SKILL.md",
       "files": [
-        {
-          "path": ".seed_complete",
-          "kind": "other"
-        },
         {
           "path": "LICENSE.txt",
           "kind": "other"
@@ -187,31 +178,19 @@
           "kind": "instruction"
         },
         {
-          "path": "agents/analyzer.md",
+          "path": "agents/openai.yaml",
           "kind": "metadata"
         },
         {
-          "path": "agents/comparator.md",
-          "kind": "metadata"
-        },
-        {
-          "path": "agents/grader.md",
-          "kind": "metadata"
-        },
-        {
-          "path": "assets/eval_review.html",
+          "path": "assets/skill-creator-small.svg",
           "kind": "asset"
         },
         {
-          "path": "eval-viewer/generate_review.py",
-          "kind": "other"
+          "path": "assets/skill-creator.png",
+          "kind": "asset"
         },
         {
-          "path": "eval-viewer/viewer.html",
-          "kind": "other"
-        },
-        {
-          "path": "references/schemas.md",
+          "path": "references/openai_yaml.md",
           "kind": "reference"
         },
         {
@@ -219,19 +198,15 @@
           "kind": "script"
         },
         {
-          "path": "scripts/aggregate_benchmark.py",
+          "path": "scripts/generate_openai_yaml.py",
           "kind": "script"
         },
         {
-          "path": "scripts/package_skill.py",
+          "path": "scripts/init_skill.py",
           "kind": "script"
         },
         {
           "path": "scripts/quick_validate.py",
-          "kind": "script"
-        },
-        {
-          "path": "scripts/utils.py",
           "kind": "script"
         }
       ]
