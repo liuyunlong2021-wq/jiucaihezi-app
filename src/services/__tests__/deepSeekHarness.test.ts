@@ -351,6 +351,17 @@ test('Harness run verdict belongs to its own session instead of a subagent turn'
   assert.match(runner, /ownSession && notification\.method === 'session\.event'/)
 })
 
+test('a truncated turn without content fails instead of reporting the previous step as done', () => {
+  const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
+  // 上游在整段 prompt 命中缓存时只回 1 个 token 就报 length，这一轮没有正文。
+  // 判成成功时前端 `await completed || finalText` 会拿上一个 step 的旧正文顶上，
+  // 用户看到半截答案 +「已完成」，只能打「继续」；而「继续」不改前缀，必然再次截断。
+  assert.match(runner, /reason\?\.kind === 'max-tokens'\)\s*\n\s*turnTruncated = true/)
+  assert.match(runner, /turnTruncated && !String\(result\.finalResponse \|\| ''\)\.trim\(\)/)
+  // 有正文的截断仍是成功：长回答写到上限不该被判成失败。
+  assert.match(runner, /有正文的截断仍是成功/)
+})
+
 test('Harness subagent calls return a result instead of a fire-and-forget id', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   // continuable 模式下 run_in_background 默认 true：父代理只拿到 “started subagent <id>”，

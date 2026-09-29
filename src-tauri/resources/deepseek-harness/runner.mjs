@@ -55,6 +55,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   if (command.type !== 'run') return
   let turnError = ''
+  let turnTruncated = false
   void harness.run(command.contentBlocks, {
     sessionId: command.sessionId,
     onNotification(notification) {
@@ -66,12 +67,27 @@ createInterface({ input: process.stdin }).on('line', line => {
       const event = ownSession && notification.method === 'session.event' ? params.event : undefined
       if (event?.type === 'turn/end' && event.data?.reason?.kind === 'error')
         turnError = event.data.reason.error?.message || 'DeepSeek Harness 执行失败'
+      if (event?.type === 'turn/end' && event.data?.reason?.kind === 'max-tokens')
+        turnTruncated = true
       send({ type: 'notification', requestId: command.requestId, notification })
     },
   }).then(
-    result => turnError
-      ? send({ type: 'error', requestId: command.requestId, error: turnError })
-      : send({ type: 'result', requestId: command.requestId, text: result.finalResponse }),
+    result => {
+      if (turnError) return send({ type: 'error', requestId: command.requestId, error: turnError })
+      // `max-tokens` 原先直接走成功分支：上游在整段 prompt 命中缓存时只回 1 个 token 就
+      // 报 length，这一轮根本没有正文，前端的 `await completed || finalText` 于是拿上一个
+      // step 的旧正文顶上——半截答案以「已完成」落盘，用户只能打「继续」，而「继续」不改
+      // 前缀，命中同一条缓存路径后必然再次截断。实测一条会话被锁死 35 分钟（9 次，全在
+      // deepseek-v4.1-flash 上，in=0 时 9/9 失败、有真实输入时 0/316 失败）。
+      // 有正文的截断仍是成功（长回答写到上限）；没有正文的截断必须报错，否则等于谎报完成。
+      if (turnTruncated && !String(result.finalResponse || '').trim())
+        return send({
+          type: 'error',
+          requestId: command.requestId,
+          error: '模型因长度上限提前终止，且本轮没有返回任何正文。通常是上游渠道故障，换一个模型重试即可。',
+        })
+      send({ type: 'result', requestId: command.requestId, text: result.finalResponse })
+    },
     error => send({ type: 'error', requestId: command.requestId, error: errorMessage(error) }),
   )
 })
