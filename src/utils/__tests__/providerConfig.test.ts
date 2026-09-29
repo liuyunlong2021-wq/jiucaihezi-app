@@ -15,10 +15,12 @@ import {
   updateDefaultProviderModels,
 } from '../providerConfig'
 
-test('recognizes visual model variants before conservative text-only rules', () => {
+test('treats every configured model as image-capable', () => {
   assert.equal(supportsVision('qwen-vl-plus', DEFAULT_PROVIDER_ID), true)
   assert.equal(supportsVision('deepseek-v4-flash', DEFAULT_PROVIDER_ID), true)
-  assert.equal(supportsVision('o1-mini', DEFAULT_PROVIDER_ID), false)
+  assert.equal(supportsVision('o1-mini', DEFAULT_PROVIDER_ID), true)
+  assert.equal(supportsVision('custom-text-model', 'custom-provider'), true)
+  assert.equal(supportsVision('', DEFAULT_PROVIDER_ID), false)
 })
 
 test('normalizeApiHost hides and normalizes the built-in Gateway host', () => {

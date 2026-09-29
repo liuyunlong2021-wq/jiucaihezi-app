@@ -252,37 +252,10 @@ export function isLocalLikeProviderId(providerId: string | null | undefined): bo
 
 // ─── 视觉模型检测 ───
 //
-// 策略：乐观放行，只黑名单确认不支持 vision 的模型。
-// DeepSeek、Qwen、Kimi 等模型本身支持图片，但需 Gateway/NewAPI 端点配合。
-// 端点未配置好时，这些模型返回 false 避免 502；端点修复后改为 true。
-// 当前 Gateway 已验证支持 vision：GPT / Claude / Gemini / Doubao 系列。
-
-/** 确认只支持 text 的模型 */
-const GATEWAY_VISION_DISABLED_KEYWORDS = [
-  'o1-mini', 'o1-preview', 'o3-mini', 'codex',
-]
-
-// 同一模型系列可能同时提供 text-only 和视觉变体；视觉变体不能被系列级规则误伤。
-const GATEWAY_VISION_LIKELY_KEYWORDS = [
-  'vision', 'vl', 'gemini', 'gpt-4o', 'gpt-4.1', 'gpt-5', 'claude', 'doubao',
-]
-
-/**
- * 检测模型是否支持 vision（image_url）。
- *
- * 对 Gateway/jiucaihezi 模型：用黑名单判断（部分端点未配置 vision）。
- * 对本地/custom provider 模型：乐观返回 true —— 本地模型自己决定是否支持图片，
- * 不应被 Gateway 端点的黑名单误判。
- */
-export function supportsVision(modelId: string | null | undefined, providerId?: string): boolean {
-  if (!modelId) return false
-  // 本地模型和自定义 provider 乐观放行
-  if (providerId === LOCAL_OLLAMA_PROVIDER_ID) return true
-  if (providerId && providerId !== DEFAULT_PROVIDER_ID) return true
-  const lower = modelId.toLowerCase()
-  if (GATEWAY_VISION_LIKELY_KEYWORDS.some(kw => lower.includes(kw))) return true
-  if (GATEWAY_VISION_DISABLED_KEYWORDS.some(kw => lower.includes(kw))) return false
-  return true
+// 当前产品接入的模型端点统一支持图片识别。不要按模型名、provider 或旧缓存
+// 推断为 text-only；模型能力目录的旧值也不能阻止图片发送。
+export function supportsVision(modelId: string | null | undefined, _providerId?: string): boolean {
+  return Boolean(modelId)
 }
 
 export function getLocalOllamaModels(store: KeyValueStore = getStorage()): JcModelRef[] {

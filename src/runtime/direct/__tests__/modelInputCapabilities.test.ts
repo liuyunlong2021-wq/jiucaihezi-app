@@ -32,6 +32,13 @@ describe('direct model input capabilities', () => {
     assert.equal(modalities.includes('audio'), false)
   })
 
+  test('adds image support to stale text-only model metadata', () => {
+    assert.deepEqual(
+      resolveModelInputModalities({ id: 'cached-model', providerId: 'jiucaihezi', inputModalities: ['text'] }),
+      ['image', 'text'],
+    )
+  })
+
   test('preserves explicit gateway image declarations over conservative model-name rules', () => {
     assert.deepEqual(
       resolveModelInputModalities({
