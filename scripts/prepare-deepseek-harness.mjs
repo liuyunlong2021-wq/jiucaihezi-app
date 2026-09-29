@@ -44,6 +44,12 @@ if (!ready) {
 //    已实测删完二进制照常执行。又：Tauri 打包会把硬链接摊成两份真文件，所以是打包后 278M、
 //    而源码树里只有 63M。
 //
+// 1b. `node_modules/.bin/node` —— npm 给 `node` 包建的 bin 链接，指向 `../node/bin/node`。
+//    源码树里是个 19 字节的符号链接，但 **Tauri 打包会解引用符号链接**，于是它在包里变成
+//    第二份 107M 的二进制（实测：源码树 node_modules 452M，打进包变 559M，差额就是它）。
+//    没有任何东西按这个名字找 node：前端用绝对路径启动 harness，SDK 里也没有裸 `node`
+//    的 spawn；Rust 的 `resolve_mcp_node` 走的是系统 Node 与 PATH，不走这里。
+//
 // 2. `@deepseek-ai/libreoffice-kit*`（打好的 App 里 260M）—— 一整套 LibreOffice，
 //    被官方 `dsh-office-to-pdf` 用来把 Office 文档渲染成 PDF。我们不用它：
 //    `src/` 与 `src-tauri/src/` 对 officeToPdf 零引用，SDK 侧的引用方只有它自带 web UI 的
@@ -56,6 +62,7 @@ const deepseekPackages = join(root, 'node_modules', '@deepseek-ai')
 const removable = [
   join(root, 'node_modules', 'node', 'node_modules'),
   join(root, 'node_modules', 'node', 'installArchSpecificPackage.js'),
+  join(root, 'node_modules', '.bin', 'node'),
   ...(existsSync(deepseekPackages)
     ? readdirSync(deepseekPackages)
         .filter(name => name.startsWith('libreoffice-kit'))

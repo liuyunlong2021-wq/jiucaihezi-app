@@ -55,6 +55,11 @@ test('harness 准备脚本只留运行时真正要的东西', t => {
     !existsSync(join(harness, 'node_modules/node/node_modules')),
     'node 包的安装源必须删掉',
   )
+  // 打包会解引用符号链接：留着这个 19 字节的链接，包里就多出一份 107M 的二进制。
+  assert.ok(
+    !existsSync(join(harness, 'node_modules/.bin/node')),
+    '.bin/node 符号链接必须删掉（打包会把它变成第二份真二进制）',
+  )
   assert.deepEqual(
     readdirSync(join(harness, 'node_modules/@deepseek-ai')).filter(name =>
       name.startsWith('libreoffice-kit'),
