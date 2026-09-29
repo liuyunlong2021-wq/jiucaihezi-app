@@ -21,6 +21,18 @@ const context = {
   projectName: '项目 A', conversationTitle: '对话 A', conversationId: 'a', sessionId: 'jc-v1-a',
 }
 
+/** 等一个异步后果真的发生。
+ *
+ * 原本写的是 await new Promise(resolve => setTimeout(resolve, 0))：被试代码内部的定时器与这句
+ * 的定时器到期时刻相同，谁先跑取决于注册顺序，机器一有负载内部定时器就排到后面 —— 2026-09-29
+ * 实测并发跑 20 次挂 7 次。改成轮询到条件成立；真出问题时下面的断言仍会在上限后失败。
+ */
+async function until(condition: () => boolean) {
+  for (let attempt = 0; attempt < 1000 && !condition(); attempt += 1) {
+    await new Promise(resolve => setTimeout(resolve, 1))
+  }
+}
+
 test('Desktop bridge dispatches the minimal protocol through the existing Host', async () => {
   const calls: string[] = []
   const host = new DesktopRemoteHost({
@@ -196,7 +208,7 @@ test('app-level Host starts and finishes the same remote run after the workbench
     assert.equal(run?.userTurn?.content, '手机发来的任务')
     // 页面已经没有订阅者；应用级 selection 和 run 仍然有效。
     finish('电脑完成')
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await until(() => run?.phase === 'done')
     assert.equal(run?.phase, 'done')
     assert.equal(run?.streamingText, '电脑完成')
   } finally {
@@ -263,7 +275,7 @@ test('application publisher sends run progress after the workbench view is gone'
       userTurn: null, approval: null,
     } as MemoryRun)
     desktopConversationRuns.get(key)!.status = '正在执行工具'
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await until(() => published.length > 0)
     assert.ok(published.some(item => item.sessionId === context.sessionId
       && item.event?.type === 'session.event'
       && item.event.payload?.run?.status === '正在执行工具'))
@@ -287,7 +299,7 @@ test('application publisher keeps a failed mobile sync visible to Desktop', asyn
   })
   const stop = startDesktopConversationPublisher()
   try {
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await until(() => desktopRemoteSyncError.value !== '')
     assert.match(desktopRemoteSyncError.value, /手机状态同步失败.*connection closed/)
     assert.match(readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8'), /displayedError = computed\([^\n]*desktopRemoteSyncError\.value/)
   } finally {
@@ -365,7 +377,7 @@ test('工作台页面卸载后，应用级 Gateway 仍能接受手机命令', as
     nativeListener?.({ payload: {
       requestId: 'health-after-unmount', type: 'gateway.health', payload: {}, deviceId: 'iphone-1',
     } })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await until(() => responses.length >= 1)
     assert.equal(responses[0]?.requestId, 'health-after-unmount')
     assert.equal((responses[0]?.result as { runtimeAvailable?: boolean })?.runtimeAvailable, true)
     assert.equal(typeof (responses[0]?.result as { gatewayEpoch?: string })?.gatewayEpoch, 'string')
@@ -374,7 +386,7 @@ test('工作台页面卸载后，应用级 Gateway 仍能接受手机命令', as
       payload: { sessionId: context.sessionId, text: '继续', commandId: 'cmd-after-unmount' },
       deviceId: 'iphone-1',
     } })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await until(() => responses.length >= 2)
     assert.deepEqual(responses[1]?.result, { accepted: true, runId: 'run-after-unmount' })
     const nextContext = { ...context, conversationId: 'b', sessionId: 'jc-v1-b' }
     await bindDesktopRemoteRuntime(new DesktopRemoteHost({
@@ -388,7 +400,7 @@ test('工作台页面卸载后，应用级 Gateway 仍能接受手机命令', as
     nativeListener?.({ payload: {
       requestId: 'context-after-remount', type: 'context.get', payload: {}, deviceId: 'iphone-1',
     } })
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await until(() => responses.length >= 3)
     assert.deepEqual(responses[2]?.result, nextContext, '页面重挂后应改用新视图的当前对话')
   } finally {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
