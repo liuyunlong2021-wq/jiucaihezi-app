@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { test } from 'node:test'
 
@@ -30,4 +30,36 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   assert.match(once, /\"\/permission \" \+ preset/)
   // 官方命令面必须真的被调用，而不是自己写 permission/preset 事件绕过官方推导。
   assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(rec\.handle\.agent/)
+})
+
+// 剪体积的两刀（node 包的安装源 278M、LibreOffice 260M，都是打好的 App 里的实际占用）。
+// 这里真跑脚本再检查结果，而不是断言源码字符串 —— 这两刀切错一点就是把运行时自己删了。
+test('harness 准备脚本只留运行时真正要的东西', t => {
+  const harness = join(process.cwd(), 'src-tauri/resources/deepseek-harness')
+  const nodeBin = join(
+    harness,
+    'node_modules/node/bin',
+    process.platform === 'win32' ? 'node.exe' : 'node',
+  )
+  if (!existsSync(nodeBin)) return t.skip('bundled Harness SDK is not installed')
+  apply()
+
+  // 前端就是用这个二进制启动 harness 的（src/services/deepSeekHarness.ts）——
+  // 它活着不够，得真能执行：node 包的安装源里那个是它的硬链接，切错就一起没了。
+  assert.match(
+    execFileSync(nodeBin, ['-e', 'process.stdout.write(process.version)'], { encoding: 'utf8' }),
+    /^v\d+/,
+    '裁剪后 node/bin/node 必须仍可执行',
+  )
+  assert.ok(
+    !existsSync(join(harness, 'node_modules/node/node_modules')),
+    'node 包的安装源必须删掉',
+  )
+  assert.deepEqual(
+    readdirSync(join(harness, 'node_modules/@deepseek-ai')).filter(name =>
+      name.startsWith('libreoffice-kit'),
+    ),
+    [],
+    'libreoffice-kit 全家（含平台包与 wasm）必须删掉',
+  )
 })

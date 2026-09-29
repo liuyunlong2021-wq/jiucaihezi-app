@@ -1,6 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const version = '0.1.7-alpha.2'
@@ -31,6 +31,41 @@ if (!ready) {
     shell: process.platform === 'win32',
   })
   if (result.status !== 0) process.exit(result.status || 1)
+}
+
+// ── 只留运行时要的东西 ──────────────────────────────────────────────
+//
+// 两处白拿的体积（2026-09-29 实测，打包后各占一份）：
+//
+// 1. `node/node_modules/`（打好的 App 里 278M）—— `node` 这个 npm 包的**安装源**：
+//    里面是同一个 Node 二进制**又一份**，外加 npm / share / include。
+//    前端只用 `node/bin/node` 启动 harness（`src/services/deepSeekHarness.ts`），安装源用不到。
+//    注：`node/bin/node` 与安装源里那个是硬链接，删掉后它仍在（链接数减少）——
+//    已实测删完二进制照常执行。又：Tauri 打包会把硬链接摊成两份真文件，所以是打包后 278M、
+//    而源码树里只有 63M。
+//
+// 2. `@deepseek-ai/libreoffice-kit*`（打好的 App 里 260M）—— 一整套 LibreOffice，
+//    被官方 `dsh-office-to-pdf` 用来把 Office 文档渲染成 PDF。我们不用它：
+//    `src/` 与 `src-tauri/src/` 对 officeToPdf 零引用，SDK 侧的引用方只有它自带 web UI 的
+//    文档预览侧边栏（我们不渲染那套 UI）；读文档走的是内置 AnyDoc。
+//    已实测：删掉后 `dsh --profile sdk` 照常初始化（退出码 0、DSH_HOME 正常创建、零 stderr）。
+//
+// ponytail: 就是删目录，没做依赖图分析。上游哪天把 officeToPdf 变成 agent 工具、
+// 或我们开始用 SDK 自带的文档预览，把第 2 条去掉即可 —— 代价是安装包回到 500M 级。
+const deepseekPackages = join(root, 'node_modules', '@deepseek-ai')
+const removable = [
+  join(root, 'node_modules', 'node', 'node_modules'),
+  join(root, 'node_modules', 'node', 'installArchSpecificPackage.js'),
+  ...(existsSync(deepseekPackages)
+    ? readdirSync(deepseekPackages)
+        .filter(name => name.startsWith('libreoffice-kit'))
+        .map(name => join(deepseekPackages, name))
+    : []),
+]
+for (const target of removable) {
+  if (!existsSync(target)) continue
+  rmSync(target, { recursive: true, force: true })
+  console.log(`[deepseek-harness] 已裁掉 ${relative(root, target)}`)
 }
 
 // The pinned SDK server omits transient assistant chunks from its JSON-RPC transport.
