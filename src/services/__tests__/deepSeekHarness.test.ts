@@ -9,7 +9,6 @@ import {
   deepSeekHandoffTurns,
   deepSeekMessageUsage,
   deepSeekModelInput,
-  deepSeekPermissionFromChips,
   deepSeekPermissionChip,
   DEEPSEEK_DEFAULT_PERMISSION_TIER,
   DEEPSEEK_PERMISSION_TIERS,
@@ -39,13 +38,10 @@ test('@文件 maps to the official Harness full-access mode', () => {
   // 文案不能承诺一个不存在的弹窗。
   assert.equal(DEEPSEEK_PERMISSION_TIERS[1].note, '只能改工作区内的文件，越界会被拒绝')
   assert.equal(DEEPSEEK_DEFAULT_PERMISSION_TIER, 'workspace-write')
-  // 档位 ↔ 持久化芯片：默认档不落芯片，`file` 与旧会话的「开」一一对应。
+  // 档位 → 持久化芯片（只写不读）：默认档不落芯片，`file` 与旧会话的「开」一一对应。
   assert.equal(deepSeekPermissionChip('workspace-write'), undefined)
   assert.equal(deepSeekPermissionChip('danger-full-access'), 'file')
   assert.equal(deepSeekPermissionChip('read-only'), 'file:read-only')
-  assert.equal(deepSeekPermissionFromChips(['file', 'media']), 'danger-full-access')
-  assert.equal(deepSeekPermissionFromChips(['file:read-only']), 'read-only')
-  assert.equal(deepSeekPermissionFromChips(['media', 'av']), 'workspace-write')
 })
 
 test('DeepSeek Harness keeps one stable namespaced session per conversation', () => {

@@ -10,7 +10,6 @@ import {
   DEEPSEEK_DEFAULT_PERMISSION_TIER,
   DEEPSEEK_PERMISSION_TIERS,
   deepSeekPermissionChip,
-  deepSeekPermissionFromChips,
   type DeepSeekPermissionTier,
 } from '@/services/deepSeekHarness'
 import MemoryMarkdown from './MemoryMarkdown.vue'
@@ -197,8 +196,39 @@ const avSelected = ref(false)
 const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
-/** 本会话的沙箱档位（官方三档，默认「工作区内修改」）。 */
+/**
+ * 本工作区的沙箱档位（官方三档）。
+ *
+ * 档位是**工作区级**的持久选择：选中就一直用，直到用户自己改。
+ * 以前它是「对话级」的 —— 编码进每轮消息的 toolChips，恢复对话时再从芯片反推回来
+ * （`deepSeekPermissionFromChips`），于是新建对话、编辑重发、重开旧对话都会把它打回默认档，
+ * 用户体感就是「一个任务一次权限」。
+ */
 const permissionTier = ref<DeepSeekPermissionTier>(DEEPSEEK_DEFAULT_PERMISSION_TIER)
+
+function permissionStorageKey(): string {
+  return `jc_permission_tier:${projectOwner.value || 'none'}`
+}
+
+function loadPermissionTier(): DeepSeekPermissionTier {
+  try {
+    const stored = localStorage.getItem(permissionStorageKey())
+    const known = DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === stored)
+    return known ? known.tier : DEEPSEEK_DEFAULT_PERMISSION_TIER
+  } catch {
+    return DEEPSEEK_DEFAULT_PERMISSION_TIER
+  }
+}
+
+/** 唯一的档位写入口：内存与落盘不能分家，否则又是一次「明明选了却在下次变回去」。 */
+function setPermissionTier(tier: DeepSeekPermissionTier) {
+  permissionTier.value = tier
+  try {
+    localStorage.setItem(permissionStorageKey(), tier)
+  } catch {
+    /* 存不下就只保留本次会话内的选择，不影响本轮运行 */
+  }
+}
 /**
  * 权限菜单。
  *
@@ -251,11 +281,11 @@ function choosePermission(tier: DeepSeekPermissionTier) {
     permissionConfirm.value = true
     return
   }
-  permissionTier.value = tier
+  setPermissionTier(tier)
 }
 
 function confirmFullAccess() {
-  permissionTier.value = 'danger-full-access'
+  setPermissionTier('danger-full-access')
   permissionConfirm.value = false
 }
 
@@ -292,8 +322,8 @@ function toolChipIds(): string[] {
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
   jevSelected.value = next.has('jev')
-  // 芯片串是会话里持久化的唯一真相源：没芯片 = 默认档，详见 deepSeekPermissionChip。
-  permissionTier.value = deepSeekPermissionFromChips(next)
+  // 档位不在这里恢复：它是工作区级的持久选择（见 permissionTier），从对话芯片反推会把它
+  // 打回默认档。芯片里仍然写着档位（toolChipIds），那是说给会话和手机端听的，不是真相源。
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
   mediaSelected.value = next.has('media')
   avSelected.value = next.has('av')
@@ -921,7 +951,11 @@ onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('resize', resizeCreationForWindow)
   resizeCreationForWindow()
-  stopProjectWatch = watch(projectOwner, owner => void openProject(owner), { immediate: true })
+  stopProjectWatch = watch(projectOwner, owner => {
+    // 档位是工作区级的：换工作区就换成那个工作区上次选的档位。
+    setPermissionTier(loadPermissionTier())
+    void openProject(owner)
+  }, { immediate: true })
   await Promise.all([
     refreshSkills().catch(() => {}),
     agentStore.fetchModels().catch(() => {}),
@@ -1006,7 +1040,7 @@ function requestSkillCreatorEdit(payload: unknown) {
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
   // 文件能力合同：这个开关（旧称 @文件）是唯一的本机操作开关；Skill 目录的绝对路径就是本会话的
   // 读写授权。产品入口代用户给授权 => 直接给「完全权限」，否则写不进 ~/.agents/skills。
-  permissionTier.value = 'danger-full-access'
+  setPermissionTier('danger-full-access')
   const target = /^(?:\/|[A-Za-z]:\/)/.test(skillPath) ? skillPath : ''
   const prefix = `请修改这个 Skill：\n\nSkill 目录：\n${target || '（把 Skill 文件夹的完整绝对路径粘贴到这里）'}\n\n修改要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
@@ -1023,7 +1057,7 @@ function requestSkillCreatorCreate(payload: unknown) {
   const target = /^(?:\/|[A-Za-z]:\/)/.test(skillsRoot) ? skillsRoot : ''
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
   // 文件能力合同：产品入口代用户给出中央 Skill 根目录的绝对路径，就是本次的写授权
-  permissionTier.value = 'danger-full-access'
+  setPermissionTier('danger-full-access')
   const prefix = `请新建一个 Skill：\n\nSkill 根目录：\n${target || '（把中央 Skill 根目录的完整绝对路径粘贴到这里）'}\n\n新建要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
   setEditorText(composerRef.value, input.value)
@@ -1479,7 +1513,7 @@ function insertCommand(command: { id: string; label: string }) {
 
 function enableTool(id: string) {
   if (id === 'jev') jevSelected.value = true
-  if (id === 'file') permissionTier.value = 'danger-full-access'
+  if (id === 'file') setPermissionTier('danger-full-access')
   if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
   if (id.startsWith('mcp__') && !selectedMcpToolNames.value.includes(id)) selectedMcpToolNames.value.push(id)
   if (id === 'media') mediaSelected.value = true
@@ -1489,7 +1523,7 @@ function enableTool(id: string) {
 
 function disableTool(id: string) {
   if (id === 'jev') jevSelected.value = false
-  if (id === 'file') permissionTier.value = DEEPSEEK_DEFAULT_PERMISSION_TIER
+  if (id === 'file') setPermissionTier(DEEPSEEK_DEFAULT_PERMISSION_TIER)
   if (id.startsWith('mcp__')) {
     selectedMcpToolNames.value = selectedMcpToolNames.value.filter(item => item !== id)
     return

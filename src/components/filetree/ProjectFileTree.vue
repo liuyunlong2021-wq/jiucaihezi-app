@@ -2937,26 +2937,30 @@ onBeforeUnmount(() => {
       :accept="STORY_IMPORT_ACCEPT"
       @change="onStoryInputChange"
     />
-    <!-- 空窗口（新建窗口）直接平铺出来：最近项目 + 打开本地文件夹，
-         不用先点「项目中心」再选一次。对齐 VS Code 欢迎页的做法。 -->
+    <!-- 空窗口（新建窗口）直接平铺出来，布局对齐 VS Code 欢迎页：上面是「打开/新建」这类动作，
+         下面是最近打开。打开本地文件夹等于新建工作区，不是「最近开过的一个项目」，
+         所以跟项目列表分开，并且放在最上面。 -->
     <div v-if="!hasProject" class="pft-empty">
       <div class="pft-empty-list">
-        <p class="pft-project-section">打开项目</p>
-        <button
-          v-for="project in localProjectChoices"
-          :key="project.id"
-          @click="
-            isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)
-          "
-        >
-          <JcIcon name="folder" /><span>{{ project.name }}</span>
-        </button>
         <button v-if="isDesktop && !isMobile" @click="openLocalProjectFolder">
           <JcIcon name="folder-open" /><span>打开本地文件夹</span>
         </button>
         <button v-else @click="isMobile ? createMobileProject() : createWebProject()">
           <JcIcon name="create-new-folder" /><span>新建项目</span>
         </button>
+        <template v-if="localProjectChoices.length">
+          <div class="pft-ctx-divider"></div>
+          <p class="pft-project-section">最近打开</p>
+          <button
+            v-for="project in localProjectChoices"
+            :key="project.id"
+            @click="
+              isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)
+            "
+          >
+            <JcIcon name="folder" /><span>{{ project.name }}</span>
+          </button>
+        </template>
       </div>
       <p v-if="projectMenuError" class="pft-project-error">{{ projectMenuError }}</p>
     </div>

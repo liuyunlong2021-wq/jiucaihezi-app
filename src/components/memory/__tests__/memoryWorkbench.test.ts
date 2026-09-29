@@ -174,7 +174,14 @@ test('权限芯片只改 Harness 沙箱，不选执行器', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const restoreTools = workbench.match(/function applyToolChipIds\(ids\?: string\[\]\) \{([\s\S]*?)\n\}/)?.[1] || ''
   assert.doesNotMatch(workbench, /display: 'DH'|label: '@DH'/)
-  assert.match(restoreTools, /permissionTier\.value = deepSeekPermissionFromChips\(next\)/)
+  // 档位是工作区级的持久选择：恢复对话芯片这一段不得再动它 —— 以前就是这里把档位打回默认，
+  // 用户体感是「一个任务一次权限」。
+  assert.doesNotMatch(restoreTools, /permissionTier\.value =/)
+  assert.match(workbench, /function setPermissionTier\(tier: DeepSeekPermissionTier\) \{/)
+  assert.match(workbench, /localStorage\.setItem\(permissionStorageKey\(\), tier\)/)
+  assert.match(workbench, /const stored = localStorage\.getItem\(permissionStorageKey\(\)\)/)
+  // 换工作区就换成那个工作区上次选的档位。
+  assert.match(workbench, /setPermissionTier\(loadPermissionTier\(\)\)/)
   assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?permissionTier: permissionTier\.value/)
 })
 
@@ -269,7 +276,7 @@ test('skill edit requests select Skill Creator and prefill the Skill ID and path
   assert.match(workbench, /onEvent\('skill-creator-edit'/)
   assert.match(workbench, /skillId\?: unknown/)
   assert.match(workbench, /Skill 目录：\\n/)
-  assert.match(workbench, /permissionTier\.value = 'danger-full-access'/)
+  assert.match(workbench, /setPermissionTier\('danger-full-access'\)/)
   assert.match(workbench, /修改要求：\\n/)
   assert.match(workbench, /selectedSkillNames\.value = \[\.\.\.new Set\(\[\.\.\.selectedSkillNames\.value, 'skill-creator'\]\)\]/)
 })
@@ -282,7 +289,7 @@ test('skill creation requests prefill the central Skill root and open file tools
   assert.match(workbench, /skillsRoot\?: unknown/)
   assert.match(workbench, /Skill 根目录：\\n/)
   assert.match(workbench, /新建要求：\\n/)
-  assert.match(workbench, /permissionTier\.value = 'danger-full-access'/)
+  assert.match(workbench, /setPermissionTier\('danger-full-access'\)/)
 })
 
 test('switching conversations keeps the middle document preview open', () => {
@@ -1561,7 +1568,11 @@ test('空窗口直接给项目入口，菜单里的快捷键都有落点', () =>
   const remote = source('src-tauri/src/commands/remote_bridge.rs')
 
   // 空窗口（新建窗口）直接平铺最近项目与「打开本地文件夹」，不再要用户先点一次「项目中心」。
-  assert.match(tree, /pft-empty-list[\s\S]*打开本地文件夹/)
+  // 打开本地文件夹等于新建工作区，跟「最近打开」分开并放最上面。
+  assert.match(
+    tree,
+    /pft-empty-list[\s\S]*打开本地文件夹[\s\S]*最近打开[\s\S]*v-for="project in localProjectChoices"/,
+  )
   assert.doesNotMatch(tree, /打开项目中心/)
   // 项目列表只有一处真源：空窗口和项目中心共用，两边各写一份迟早不一致。
   assert.match(tree, /const localProjectChoices = computed/)
@@ -1589,7 +1600,7 @@ test('memory workbench follows the current project owner on both runtimes', () =
   )
   assert.match(
     workbench,
-    /watch\(projectOwner, owner => void openProject\(owner\), \{ immediate: true \}\)/,
+    /watch\(projectOwner, owner => \{[\s\S]*?setPermissionTier\(loadPermissionTier\(\)\)[\s\S]*?void openProject\(owner\)/,
   )
   assert.match(workbench, /inspectMemoryProject\(owner, files\)/)
   assert.match(workbench, /listHarnessConversationCatalog\(owner\)[\s\S]*void projectTextSync\.open/)

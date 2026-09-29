@@ -190,22 +190,19 @@ export const DEEPSEEK_PERMISSION_TIERS: ReadonlyArray<{
 export const DEEPSEEK_DEFAULT_PERMISSION_TIER: DeepSeekPermissionTier = 'workspace-write'
 
 /**
- * 档位 → 落盘芯片。
+ * 档位 → 落盘芯片（只写不读）。
  *
  * 默认档不落芯片（与旧会话一致：没芯片 = 默认档）；`danger-full-access` 仍写 `file` ——
  * 旧会话里 `file` 的意思就是「开」，语义一一对应，不需要迁移；`read-only` 是新档，
- * 用 `file:read-only`。芯片串是会话里持久化的唯一真相源，所以这两个函数成对写在一起。
+ * 用 `file:read-only`。
+ *
+ * **芯片不是档位的真相源**：档位是工作区级的持久选择（见 `MemoryWorkbench` 的
+ * `permissionTier`）—— 以前靠芯片反推回来，新建对话、编辑重发、重开旧对话都会把档位打回默认，
+ * 用户体感就是「一个任务一次权限」。这里只负责把事实告诉会话与手机端。
  */
 export function deepSeekPermissionChip(tier: DeepSeekPermissionTier): string | undefined {
   if (tier === 'danger-full-access') return 'file'
   return tier === 'read-only' ? 'file:read-only' : undefined
-}
-
-/** 落盘芯片 → 档位。见 {@link deepSeekPermissionChip}。 */
-export function deepSeekPermissionFromChips(ids: Iterable<string>): DeepSeekPermissionTier {
-  const chips = new Set(ids)
-  if (chips.has('file')) return 'danger-full-access'
-  return chips.has('file:read-only') ? 'read-only' : DEEPSEEK_DEFAULT_PERMISSION_TIER
 }
 
 /**
