@@ -8,6 +8,7 @@ use std::env;
 #[allow(unused_imports)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::Instant;
 use tauri::{Emitter, Manager, WebviewWindowBuilder, webview::NewWindowResponse};
 use tokio::process::Command;
@@ -1347,6 +1348,36 @@ fn focused_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
         .cloned()
 }
 
+/// 最近一次获得焦点的窗口 label。
+///
+/// 不能用 [`focused_window`] 代替：用手机的时候应用多半不在前台，那时候没有任何窗口是
+/// key window，它会一律退到 `main`。这里记的是「用户最后在看的那个窗口」，失焦也不丢。
+fn last_focused_window() -> &'static std::sync::Mutex<Option<String>> {
+    // 全限定名：这个文件顶层已经 `use tokio::sync::Mutex`（异步锁），两者不能同名导入。
+    static LAST: OnceLock<std::sync::Mutex<Option<String>>> = OnceLock::new();
+    LAST.get_or_init(|| std::sync::Mutex::new(Some("main".to_string())))
+}
+
+fn remember_focused_window(label: &str) {
+    if let Ok(mut last) = last_focused_window().lock() {
+        *last = Some(label.to_string());
+    }
+}
+
+/// 需要「只发给一个窗口」的事件该发给谁。
+///
+/// 远程桥接靠它：每个窗口的前端都会绑 `desktop-remote:request`（`App.vue`），
+/// 而 `app.emit` 是广播 —— 两个窗口会把手机的同一条指令各处理一遍（各自一份
+/// commandLedger），并发地回 `remote_bridge_complete`；第一个到达的赢，
+/// 手机可能拿到另一个窗口的报错。目标是「用户最后在看的那个窗口」：
+/// 手机是桌面当前视图的遥控器。
+pub(crate) fn remote_target_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
+    let last = last_focused_window().lock().ok().and_then(|guard| guard.clone());
+    last.and_then(|label| app.get_webview_window(&label))
+        .or_else(|| app.get_webview_window("main"))
+        .or_else(|| app.webview_windows().values().next().cloned())
+}
+
 /// 恢复/保存一个窗口的几何，并在窗口销毁时收掉它名下的 stdio 子进程。
 ///
 /// 每窗口一份文件：共写一份会互相覆盖 —— A 窗口一移动就把 B 的几何写没了。
@@ -1384,6 +1415,10 @@ fn attach_window_state(app: &tauri::AppHandle, window: &tauri::WebviewWindow, la
     let state_path_save = state_path.clone();
     let reap_label = label.to_string();
     window.on_window_event(move |event| {
+        // 远程桥接只把请求发给「最后在看的那个窗口」，得在失焦前把 label 记下来。
+        if let tauri::WindowEvent::Focused(true) = event {
+            crate::remember_focused_window(&reap_label);
+        }
         // 窗口销毁：它名下的 runner 立刻就是孤儿。必须在应用还活着时就收 ——
         // 退出路径不会跑（应用没退），而它会一直握着会话的跨进程内核写锁。
         if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -1599,7 +1634,17 @@ pub fn run() {
                 // 要中文只能自己传文案，否则用户看到的是 Undo / Cut / Paste 那一套。
                 // 另外 macOS 会给**标题恰好是 "Edit"** 的菜单自动塞 AutoFill / 开始听写 / 表情与符号，
                 // 改叫「编辑」之后这些系统项自己就没了 —— 它们不是我们加的，也没法单独关掉。
+                // 新建窗口是这个 App 用得最多的一条命令（多开是主用法），所以放在第一个菜单的
+                // 第一项 —— 点开菜单第一个看到的就是它。
+                let new_window_item = tauri::menu::MenuItemBuilder::with_id(
+                    "jc:new-window",
+                    "新建窗口",
+                )
+                .accelerator("CmdOrCtrl+Shift+N")
+                .build(app)?;
                 let app_menu = SubmenuBuilder::new(app, "韭菜盒子")
+                    .item(&new_window_item)
+                    .separator()
                     .item(&PredefinedMenuItem::about(app, Some("关于韭菜盒子"), None)?)
                     .separator()
                     .item(&PredefinedMenuItem::hide(app, Some("隐藏韭菜盒子"))?)
@@ -1623,18 +1668,15 @@ pub fn run() {
                 // 「服务」子菜单已移除：它列的是别的 App 提供的系统服务，
                 // 用户机器上出现的是 Instruments 那几项（Activity Monitor / Time Profile …），
                 // 与韭菜盒子无关，纯噪音。
-                let new_window_item = tauri::menu::MenuItemBuilder::with_id(
-                    "jc:new-window",
-                    "新建窗口",
-                )
-                .accelerator("CmdOrCtrl+Shift+N")
-                .build(app)?;
                 // maximize 在 macOS 走的是 performZoom:（绿按钮那个行为），所以叫「缩放」而不是「最大化」。
+                //
+                // 这几项不是装饰：macOS 的 ⌘M / ⌘W / ⌃⌘F 都是经菜单分发到响应链的，
+                // 菜单里没有这一项，快捷键就没有落点 —— 之前这里没有「关闭窗口」，⌘W 一直是没反应的。
                 let window_menu = SubmenuBuilder::new(app, "窗口")
-                    .item(&new_window_item)
-                    .separator()
                     .item(&PredefinedMenuItem::minimize(app, Some("最小化"))?)
                     .item(&PredefinedMenuItem::maximize(app, Some("缩放"))?)
+                    .item(&PredefinedMenuItem::close_window(app, Some("关闭窗口"))?)
+                    .separator()
                     .item(&PredefinedMenuItem::fullscreen(app, Some("全屏"))?)
                     .build()?;
                 // 这三个子菜单的顺序就是 macOS 的菜单栏顺序：应用菜单必须是第一个。

@@ -674,6 +674,20 @@ fn enter_session_mode(stream: &TcpStream) -> Result<(), String> {
         .map_err(|error| error.to_string())
 }
 
+/// 把请求发给**一个**窗口，不是广播。
+///
+/// 每个窗口的前端都会绑 `desktop-remote:request`（`App.vue` 里 bindDesktopRemoteRuntime），
+/// 而 `app.emit` 会送到所有窗口 —— 两个窗口同时开着时，手机的同一条指令会被各处理一遍
+/// （各自一份 commandLedger，拦不住对方），并发地回 `remote_bridge_complete`，
+/// 第一个到达的赢，于是手机可能拿到另一个窗口的报错。
+/// 目标是「用户最后在看的那个窗口」：手机是桌面当前视图的遥控器。
+fn emit_remote_request(app: &AppHandle, event: RemoteBridgeRequestEvent) -> tauri::Result<()> {
+    match crate::remote_target_window(app) {
+        Some(window) => window.emit("desktop-remote:request", event),
+        None => app.emit("desktop-remote:request", event),
+    }
+}
+
 fn handle_connection(
     stream: TcpStream,
     app: &AppHandle,
@@ -693,8 +707,8 @@ fn handle_connection(
                 .map_err(lock_error)?
                 .insert(request.request_id.clone(), sender);
             let response = (|| {
-                app.emit(
-                    "desktop-remote:request",
+                emit_remote_request(
+                    app,
                     RemoteBridgeRequestEvent {
                         request_id: request.request_id.clone(),
                         message_type: request.message_type.clone(),

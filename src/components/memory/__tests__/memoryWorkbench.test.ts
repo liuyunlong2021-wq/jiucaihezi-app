@@ -1555,6 +1555,31 @@ test('同一个工作区不会同时被两个窗口打开', () => {
   assert.match(source('src-tauri/permissions/app-commands.json'), /"claim_workspace"/)
 })
 
+test('空窗口直接给项目入口，菜单里的快捷键都有落点', () => {
+  const lib = source('src-tauri/src/lib.rs')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const remote = source('src-tauri/src/commands/remote_bridge.rs')
+
+  // 空窗口（新建窗口）直接平铺最近项目与「打开本地文件夹」，不再要用户先点一次「项目中心」。
+  assert.match(tree, /pft-empty-list[\s\S]*打开本地文件夹/)
+  assert.doesNotMatch(tree, /打开项目中心/)
+  // 项目列表只有一处真源：空窗口和项目中心共用，两边各写一份迟早不一致。
+  assert.match(tree, /const localProjectChoices = computed/)
+  assert.equal((tree.match(/v-for="project in localProjectChoices"/g) || []).length, 2)
+  // 新建窗口放在第一个菜单的第一项 —— 多开是这个 App 的主用法。
+  assert.match(lib, /with_id\(\n\s*"jc:new-window",\n\s*"新建窗口",/)
+  // macOS 的快捷键经菜单分发到响应链：菜单里没有这一项，快捷键就没有落点。
+  // 之前这里没有「关闭窗口」，⌘W 一直是没反应的。
+  assert.match(lib, /PredefinedMenuItem::close_window\(app, Some\("关闭窗口"\)\)/)
+  assert.match(lib, /SubmenuBuilder::new\(app, "编辑"\)/)
+  // 远程桥接的请求只发给一个窗口：广播会让每个窗口各处理一遍手机的同一条指令，
+  // 各自回一次 remote_bridge_complete，手机可能拿到另一个窗口的报错。
+  assert.match(remote, /fn emit_remote_request/)
+  assert.match(remote, /crate::remote_target_window\(app\)/)
+  assert.match(lib, /fn remember_focused_window/)
+  assert.match(lib, /WindowEvent::Focused\(true\)/)
+})
+
 test('memory workbench follows the current project owner on both runtimes', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 

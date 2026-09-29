@@ -192,6 +192,15 @@ const currentCloudProjectId = computed(() =>
 )
 const webProjects = ref<Array<{ id: string; name: string }>>([])
 const mobileProjects = ref<MobileProject[]>([])
+
+/** 本机（或 Web）可选的项目列表。空窗口与项目中心共用，两边不能各写一份。 */
+const localProjectChoices = computed(() =>
+  isMobile
+    ? mobileProjects.value.map(project => ({ id: project.path, name: project.name }))
+    : isDesktop
+      ? projectStore.recentProjectDirs.value.map(dir => ({ id: dir, name: projectNameFromOwner(dir) }))
+      : webProjects.value,
+)
 const cloudProjects = ref<SyncProject[]>([])
 const showProjectMenu = ref(false)
 const projectMenuBusy = ref(false)
@@ -2928,13 +2937,28 @@ onBeforeUnmount(() => {
       :accept="STORY_IMPORT_ACCEPT"
       @change="onStoryInputChange"
     />
+    <!-- 空窗口（新建窗口）直接平铺出来：最近项目 + 打开本地文件夹，
+         不用先点「项目中心」再选一次。对齐 VS Code 欢迎页的做法。 -->
     <div v-if="!hasProject" class="pft-empty">
-      <JcIcon name="folder" style="font-size: 32px; opacity: 0.3" />
-      <p>还没有打开项目</p>
-      <button class="pft-empty-btn pft-project-trigger" @click="ctxAddProjectFolder">
-        <JcIcon name="create_new_folder" style="font-size: 14px" />
-        打开项目中心
-      </button>
+      <div class="pft-empty-list">
+        <p class="pft-project-section">打开项目</p>
+        <button
+          v-for="project in localProjectChoices"
+          :key="project.id"
+          @click="
+            isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)
+          "
+        >
+          <JcIcon name="folder" /><span>{{ project.name }}</span>
+        </button>
+        <button v-if="isDesktop && !isMobile" @click="openLocalProjectFolder">
+          <JcIcon name="folder-open" /><span>打开本地文件夹</span>
+        </button>
+        <button v-else @click="isMobile ? createMobileProject() : createWebProject()">
+          <JcIcon name="create-new-folder" /><span>新建项目</span>
+        </button>
+      </div>
+      <p v-if="projectMenuError" class="pft-project-error">{{ projectMenuError }}</p>
     </div>
 
     <template v-else>
@@ -3119,14 +3143,7 @@ onBeforeUnmount(() => {
 
       <div class="pft-project-section">本机项目</div>
       <button
-        v-for="project in isMobile
-          ? mobileProjects.map(project => ({ id: project.path, name: project.name }))
-          : isDesktop
-            ? projectStore.recentProjectDirs.value.map(dir => ({
-                id: dir,
-                name: projectNameFromOwner(dir),
-              }))
-            : webProjects"
+        v-for="project in localProjectChoices"
         :key="project.id"
         :class="{ active: project.id === projectKey }"
         @click="
@@ -3621,6 +3638,35 @@ onBeforeUnmount(() => {
 .pft-empty-btn:hover {
   background: var(--olive-pale);
   border-color: var(--olive);
+}
+.pft-empty-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  max-width: 260px;
+  text-align: left;
+}
+.pft-empty-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.pft-empty-list button:hover {
+  background: var(--olive-pale);
+}
+.pft-empty-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .pft-project-menu {
   position: absolute;
