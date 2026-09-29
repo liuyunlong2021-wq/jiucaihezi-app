@@ -66,3 +66,19 @@ test('proxy MCP publishes the app-owned tool catalog and forwards exact calls', 
   ])
   await Promise.all([client.close(), server.close()])
 })
+
+test('creation MCP hides the paid tool unless the mount allows spending', async () => {
+  const server = createCreationMcpServer(async () => ({ ok: true }), { allowPaid: false })
+  const client = new Client({ name: 'test', version: '1.0.0' })
+  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+  await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
+  const names = (await client.listTools()).tools.map(tool => tool.name)
+  // @排版/@3D 要「把已生成的图放进画布」、要查上下文，但不能拿到会花钱的 submit：
+  // 曾经它只挂在 @影音 下，于是只开 @排版 时 add_creation_result_to_canvas 变成
+  // unknown tool，模型只能自己找 CLI 硬做。
+  assert.ok(names.includes('add_creation_result_to_canvas'))
+  assert.ok(names.includes('get_creation_context'))
+  assert.ok(!names.includes('submit_creation_task'))
+  assert.equal(names.length, 7)
+  await Promise.all([client.close(), server.close()])
+})

@@ -310,8 +310,22 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /@deepseek-ai\/dsh-mcp-client/)
   assert.match(source, /JIUCAIHEZI_PROXY_CAPABILITIES/)
   assert.match(source, /JIUCAIHEZI_PROXY_MCP_SERVER/)
-  assert.match(source, /const needsCreation = input\.avSelected/)
   assert.match(source, /JIUCAIHEZI_CREATION_CAPABILITIES: 'av'/)
+  // 创作服务器在任一创作芯片下都挂，付费只由 @影音 放行：只开 @排版 时
+  // add_creation_result_to_canvas 曾是 unknown tool，模型因此跑去找 CLI 硬做。
+  assert.match(source, /const needsCreation = Boolean\(input\.avSelected \|\| input\.mediaSelected \|\| input\.scene3dSelected\)/)
+  assert.match(source, /JIUCAIHEZI_CREATION_PAID: '0'/)
+  // patch 里新增插件只能走 `- insert:`：官方 applyEntryPatches 对非 insert 条目是按 id
+  // 匹配**已有**行，匹配不到就 warn + skip。MCP 条目曾经写成顶层 `- id:`，于是创作 /
+  // 媒体 / 3D / 自定义 MCP 在 Harness 会话里从来没有挂上过（--dump-config 实测命中 0）。
+  assert.match(source, /const insertPatch = \(entries: string\[\]\)/)
+  assert.match(source, /const mcpPatch = insertPatch\(\[/)
+  assert.match(source, /const fileReferencePatch = insertPatch\(\[/)
+  assert.match(source, /'@deepseek-ai\/dsh-file-reference-local'/)
+  // MCP 起不来只降级成「那台服务器的工具不出现」，不能把整轮对话判失败。
+  // 实测 A/B：写成 true 时官方报 `entry did not activate`（该服务器被整个拒绝，
+  // 连重连都没有）；不写（官方默认 false）时插件正常激活、失败被容忍。
+  assert.doesNotMatch(source, /failOnStartupError: true/)
   assert.match(source, /runtimeKey\(input\)/)
   assert.match(source, /wireSessionId = deepSeekSessionId\(input\.sessionId\)/)
   assert.doesNotMatch(source, /sessionNonce/)
@@ -692,6 +706,43 @@ test('attachments are addressable by project path, not only by inline content', 
   assert.match(text, /\.raw\/jc-media\/图片\/原图\.png/)
   assert.match(text, /\.raw\/jc-media\/视频\/片段\.mp4/)
   assert.match(text, /read_image/)
+})
+
+test('a referenced project file reaches the model as an @ path, never as inlined content', () => {
+  const reference = {
+    id: 'a1', name: '1.md', mime: 'text/markdown', size: 10, kind: 'file' as const,
+    value: '', resourcePath: '小姨真厉害/1.md', readablePath: '小姨真厉害/1.md',
+    textContent: '第一集正文',
+  }
+  const text = String((deepSeekContentBlocks('查看内容', [reference] as never, []) as any[])[0].text)
+  // 官方 @file 语义：引用只给路径，正文由模型自己 read（FILE_REFERENCE_PROMPT）。
+  // 两个都给会自相矛盾——实测模型一边拿到正文、一边被叫去“按路径直接读”，于是把整个
+  // 工作区翻了一遍，交回来的是一份项目报告加一句“你想让我做什么”。
+  assert.match(text, /@小姨真厉害\/1\.md/)
+  assert.doesNotMatch(text, /第一集正文/)
+  assert.doesNotMatch(text, /已读取文件/)
+  assert.doesNotMatch(text, /用 read 或 read_image 按路径直接读/)
+})
+
+test('an office reference points at the readable markdown copy', () => {
+  const text = String((deepSeekContentBlocks('看一下', [{
+    id: 'a1', name: '报告.docx', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    size: 10, kind: 'file' as const, value: '',
+    resourcePath: '报告.docx', readablePath: '.raw/jc-media/文档/报告.md',
+    textContent: '转出来的正文',
+  }] as never, []) as any[])[0].text)
+  // read 读不了 .docx：引用必须指向转换后的 markdown 副本，指向原件等于让模型去撞墙。
+  assert.match(text, /@\.raw\/jc-media\/文档\/报告\.md/)
+  assert.doesNotMatch(text, /转出来的正文/)
+})
+
+test('a mention quotes the path when it contains whitespace', () => {
+  const text = String((deepSeekContentBlocks('看', [{
+    id: 'a1', name: 'a b.md', mime: 'text/markdown', size: 1, kind: 'file' as const,
+    value: '', resourcePath: '我的 项目/a b.md',
+  }] as never, []) as any[])[0].text)
+  // 官方 mention 语法：带空白的路径要包引号（`@"path with spaces"`），否则 token 断在空格。
+  assert.match(text, /@"我的 项目\/a b\.md"/)
 })
 
 test('a live Harness run shows its process inside the message flow instead of a five-row strip', () => {

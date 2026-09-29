@@ -173,6 +173,7 @@ const wave1FocusedTests = [
 const externalNodeTests = [
   'scripts/check-tauri-fs-acl.mjs',
   'scripts/creation-models/__tests__/server.test.mjs',
+  'scripts/jiucaihezi-creation-mcp/test.mjs',
   'scripts/__tests__/audit-skills-manage-parity.test.mjs',
   'scripts/__tests__/create-official-dmg.test.mjs',
   'scripts/__tests__/deepseek-harness-patch.test.mjs',

@@ -59,18 +59,29 @@ function toolError(error: unknown) {
   }
 }
 
-export function createCreationMcpServer(callBridge: InvokeBridge = invokeBridge): McpServer {
+/** 会花钱的工具：`allowPaid: false` 的挂载不注册它们。 */
+const PAID_CREATION_TOOLS = new Set(['submit_creation_task'])
+
+export function createCreationMcpServer(
+  callBridge: InvokeBridge = invokeBridge,
+  options: { allowPaid?: boolean } = {},
+): McpServer {
   const server = new McpServer({ name: 'jiucaihezi-creation-mcp-server', version: '1.0.0' })
+  // @排版/@3D 也要能查创作上下文、查任务、把已生成的结果放进画布，但不该拿到会花钱的
+  // submit_creation_task——那个只属于 @影音。默认允许，现有调用方语义不变。
   const register = (
     name: string,
     title: string,
     description: string,
     inputSchema: z.ZodObject,
     annotations: { readOnlyHint: boolean; destructiveHint: boolean; idempotentHint: boolean; openWorldHint: boolean },
-  ) => server.registerTool(name, { title, description, inputSchema, outputSchema: resultSchema, annotations }, async params => {
-    try { return toolResult(await callBridge(name, params as Record<string, unknown>)) }
-    catch (error) { return toolError(error) }
-  })
+  ) => {
+    if (options.allowPaid === false && PAID_CREATION_TOOLS.has(name)) return
+    return server.registerTool(name, { title, description, inputSchema, outputSchema: resultSchema, annotations }, async params => {
+      try { return toolResult(await callBridge(name, params as Record<string, unknown>)) }
+      catch (error) { return toolError(error) }
+    })
+  }
 
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   register('get_creation_context', '获取韭菜盒子创作上下文', '返回当前项目、画布和提交所需的 contextVersion。', z.object({}).strict(), readOnly)
@@ -146,7 +157,7 @@ if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).
   })
   const server = capabilities.length || mcpServerId
     ? await createProxyMcpServer(invokeBridge, { capabilities, mcpServerId })
-    : createCreationMcpServer(scopedBridge)
+    : createCreationMcpServer(scopedBridge, { allowPaid: process.env.JIUCAIHEZI_CREATION_PAID !== '0' })
   server.connect(new StdioServerTransport()).catch(error => {
     console.error(error instanceof Error ? error.message : error)
     process.exitCode = 1

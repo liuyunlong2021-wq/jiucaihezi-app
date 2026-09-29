@@ -755,9 +755,15 @@ export function deepSeekContentBlocks(
   files: DirectMessageFile[] = [],
   imageInput = false,
 ): any[] {
+  // 用户引用的项目内文件一律走官方 @file 语义：提示词里只出现 `@路径`，正文由模型自己
+  // read（官方 `dsh-file-reference` 的 FILE_REFERENCE_PROMPT 定义了这件事）。
+  // 内联正文会跟"去读它"自相矛盾——实测模型因此把整个工作区翻了一遍。
+  const mentionPath = (attachment: ResolvedDirectAttachment) =>
+    attachment.readablePath || attachment.resourcePath || ''
+  const referenced = attachments.filter(attachment => mentionPath(attachment))
   const inlineFiles = [
     ...files,
-    ...attachments.flatMap(attachment => attachment.textContent
+    ...attachments.flatMap(attachment => attachment.textContent && !mentionPath(attachment)
       ? [{ name: attachment.name, content: attachment.textContent }]
       : []),
   ]
@@ -779,22 +785,24 @@ export function deepSeekContentBlocks(
   const notice = undelivered
     ? `[附带 ${undelivered} 张图片，${imageInput ? '当前格式不受支持（仅支持 PNG/JPEG/WebP/GIF）' : '当前模型不支持视觉'}]`
     : ''
-  // 附件一律把**项目内路径**告诉模型：官方读图就是 `read_image(file_path)`，视频则要靠
-  // `bash` 抽帧（jc-watch 那条链路，`read`/`read_image` 都读不了视频）。内联图片块只是
-  // 给声明了视觉的模型省一次工具往返，路径才是模型自己能动手的那条路——不给它的话，
-  // 模型手里只有一个附件 id，只能满盘找文件（实测 11 步工具、16 分钟后 524）。
-  const attachmentKindLabels: Record<string, string> = { image: '图片', video: '视频', audio: '音频', file: '文件' }
-  const attachmentPaths = attachments
-    .filter(attachment => attachment.resourcePath)
-    .map(attachment => `- ${attachment.name}（${attachmentKindLabels[attachment.kind] || '文件'}）：${attachment.resourcePath}`)
-  const pathNotice = attachmentPaths.length
-    ? ['[本轮附件]以下文件就在项目里，用 read 或 read_image 按路径直接读（视频先用 @jc-watch 抽帧）：', ...attachmentPaths].join('\n')
+  // 路径本身就是要给模型的那条路——不给它的话，模型手里只有一个附件 id，只能满盘找
+  // 文件（实测 11 步工具、16 分钟后 524）。但 `read` 读不了图片和视频：图片要
+  // read_image，视频要 bash 抽帧（jc-watch 那条链路），出现这类引用时补一句，其余
+  // 什么都不用说——`@` 的含义由官方 FILE_REFERENCE_PROMPT 交代。
+  const mentionHint = referenced.some(attachment => attachment.kind !== 'file')
+    ? '[本轮引用里的图片用 read_image 读，视频用 @jc-watch 抽帧。]'
     : ''
+  // 带空白的路径按官方 mention 语法加引号（`@"path with spaces"`）。
+  const mentionTokens = referenced.map(attachment => {
+    const path = mentionPath(attachment)
+    return /\s/.test(path) ? `@"${path}"` : `@${path}`
+  })
   const text = [
     message,
     ...inlineFiles.map(file => `[已读取文件: ${file.name}]\n${file.content.slice(0, 120_000)}`),
+    mentionTokens.join('\n'),
     notice,
-    pathNotice,
+    mentionHint,
   ].filter(Boolean).join('\n\n')
   return [{ type: 'text', text }, ...imageBlocks]
 }
@@ -836,12 +844,24 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   for (const id of mcpServerIds) {
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) throw new Error(`MCP 服务器 ID 不符合 Harness 命名规则: ${id}`)
   }
-  const needsCreation = input.avSelected
   const localCapabilities = [input.mediaSelected && 'media', input.scene3dSelected && '3d'].filter(Boolean) as string[]
-  const needsMcp = needsCreation || localCapabilities.length > 0 || mcpServerIds.length > 0
+  // 创作服务器在所有创作芯片下都挂：@排版/@3D 同样需要「把已生成的结果放进画布」和
+  // 创作上下文查询。只有 @影音 允许那个会花钱的 submit_creation_task——以前只有 @影音
+  // 挂它，于是只开 @排版 时 add_creation_result_to_canvas 成了 unknown tool，模型只
+  // 好自己找 CLI 硬做（curl 60 秒超时），最后交出一份对话复盘当回答。
+  const needsCreation = Boolean(input.avSelected || input.mediaSelected || input.scene3dSelected)
+  const needsMcp = needsCreation || mcpServerIds.length > 0
   const mcpLaunch = needsMcp
     ? await invoke<{ command: string; args: string[]; cwd?: string }>('resolve_creation_mcp')
     : null
+  // patch 里新增插件必须包在 `- insert:` 里：官方 patch 语义（dsh-app-boot 的
+  // applyEntryPatches）对非 insert 条目是按 id 匹配**已有**行，匹配不到只 warn + 跳过。
+  // 我们以前把 MCP 条目直接写成顶层 `- id:`，于是全部被静默丢掉——创作 / 媒体 / 3D /
+  // 自定义 MCP 在 Harness 会话里从来没有挂上过（`dsh --dump-config` 实测命中 0，
+  // stderr 报 patch: entry not found）。
+  const insertPatch = (entries: string[]) => entries.length
+    ? ['- insert:', ...entries.map(line => line ? `    ${line}` : line)]
+    : []
   const mcpEntry = (id: string, serverName: string, env: Record<string, string>) => [
     `- id: ${JSON.stringify(id)}`,
     "  name: '@deepseek-ai/dsh-mcp-client'",
@@ -853,13 +873,18 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     ...(mcpLaunch!.cwd ? [`    cwd: ${JSON.stringify(mcpLaunch!.cwd)}`] : []),
     '    env:',
     ...Object.entries(env).map(([key, value]) => `      ${key}: ${JSON.stringify(value)}`),
+    // 生图、生视频、3D 导出是长任务，官方默认 60 秒不够（有意偏离，见 Harness 合同 §12.3）。
     '    toolCallTimeoutMs: 900000',
-    '    failOnStartupError: true',
+    // 不写 failOnStartupError，用官方默认 false：MCP 起不来只让那台服务器的工具不出现并
+    // 记一条 error，不把整轮对话判失败。写 true 时「创作 MCP 没起来」会升级成「任务失败」。
     '',
   ]
-  const mcpPatch = [
+  const mcpPatch = insertPatch([
     ...(needsCreation ? mcpEntry('mcp-jiucaihezi-creation', 'jiucaihezi-creation', {
+      // capabilities 必须带 'av'：App 用 `/av` 筛模型表，缺了它 list_creation_models
+      // 返回空。付费闸门是另一件事，走 JIUCAIHEZI_CREATION_PAID。
       JIUCAIHEZI_CREATION_CAPABILITIES: 'av',
+      ...(input.avSelected ? {} : { JIUCAIHEZI_CREATION_PAID: '0' }),
     }) : []),
     ...(localCapabilities.length ? mcpEntry('mcp-jiucaihezi-tools', 'jiucaihezi', {
       JIUCAIHEZI_PROXY_CAPABILITIES: localCapabilities.join(','),
@@ -867,7 +892,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     ...mcpServerIds.flatMap((serverName, index) => mcpEntry(`mcp-proxy-${index}`, serverName, {
       JIUCAIHEZI_PROXY_MCP_SERVER: serverName,
     })),
-  ]
+  ])
   // 官方 subagent 工具在 continuable（后台）模式下 `run_in_background` 默认 true：
   // 派发只回一句 “started subagent <id>”，父代理拿不到结果却以为已完成，于是重复派活、
   // 重复写文件（实测一轮 34 分钟里 1.md/3.md 各被写两遍，16–20 集的失败也无人知晓）。
@@ -882,6 +907,13 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     '    backgroundMode: one-shot',
     '',
   ]
+  // 官方 @file 语义的对话面：引用文件只给路径，正文由模型自己 read。官方 provider
+  // `dsh-file-reference-local` 会往系统提示装一段 FILE_REFERENCE_PROMPT（"@ 开头的是
+  // 用户显式引用的路径…读完之前不要声称看过"），而且只在 agent 有 read 工具时才装。
+  const fileReferencePatch = insertPatch([
+    '- id: file-reference-local',
+    "  name: '@deepseek-ai/dsh-file-reference-local'",
+  ])
   await mkdir(routeDir, { recursive: true })
   // 不声明时官方默认就是纯文本（DEFAULT_INPUT = ["text"]），所以只有确实声明图片输入时才写这一行：
   // 显式写 [text] 没有信息增量，却会把 catalog 自带的模态一并抹掉。
@@ -916,6 +948,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         '',
         ...mcpPatch,
         ...subagentPatch,
+        ...fileReferencePatch,
       ].join('\n'))
 
   const runtimeRoot = 'deepseek-harness/node_modules'
