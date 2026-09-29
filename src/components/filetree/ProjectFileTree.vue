@@ -1415,7 +1415,7 @@ async function refreshMobileProjects() {
   mobileProjects.value = await invoke<MobileProject[]>('list_mobile_projects')
   // oxfmt-ignore
   const current = mobileProjects.value.find(project => project.name === projectStore.projectName.value)
-  if (current && current.path !== projectDir.value) projectStore.selectProject(current.path)
+  if (current && current.path !== projectDir.value) void projectStore.selectProject(current.path)
 }
 async function refreshWebProjects() {
   const projects = await webProjectFiles.listProjects()
@@ -1429,7 +1429,11 @@ async function selectWebProject(project: { id: string; name: string }) {
   showProjectMenu.value = false
 }
 async function selectDesktopProject(dir: string) {
-  projectStore.selectProject(dir)
+  // 已经在别的窗口开着的项目不切：两个窗口跑同一个工作区会撞会话写锁。
+  if (!(await projectStore.selectProject(dir))) {
+    projectMenuError.value = '这个工作区已经在另一个窗口打开了'
+    return
+  }
   showProjectMenu.value = false
 }
 async function createWebProject() {
@@ -1537,8 +1541,11 @@ async function openCloudProject(cloud: SyncProject) {
     const existing = await localOwnerForCloud(cloud)
     trace(existing ? 'local-project-found' : 'local-project-missing')
     if (existing) {
-      if (isDesktop || isMobile) projectStore.selectProject(existing.owner)
-      else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
+      if (isDesktop || isMobile) {
+        // 已经在别的窗口开着就到这里为止：继续往下走会变成两个窗口跑同一个工作区。
+        if (!(await projectStore.selectProject(existing.owner)))
+          throw new Error('这个项目已经在另一个窗口打开了')
+      } else projectStore.selectWebProject({ id: existing.owner, name: existing.name })
       await projectTextSync.open(existing.owner, existing.name, operationId)
       if ((await projectTextSync.cloudProjectIdFor(existing.owner)) === cloud.id)
         await projectTextSync.downloadNow(operationId)
@@ -1553,7 +1560,7 @@ async function openCloudProject(cloud: SyncProject) {
       if (!project) return
       await projectTextSync.open(project.path, project.name, operationId)
       await projectTextSync.connect(cloud.id, operationId)
-      projectStore.selectProject(project.path)
+      void projectStore.selectProject(project.path)
       trace('mobile-project-complete')
       showProjectMenu.value = false
       return
@@ -1575,7 +1582,7 @@ async function openCloudProject(cloud: SyncProject) {
     if (!dir) return
     if ((await projectFiles.list(dir)).length)
       throw new Error('请选择或新建一个空文件夹来保存云项目')
-    projectStore.selectProject(dir)
+    void projectStore.selectProject(dir)
     await projectTextSync.open(dir, projectNameFromOwner(dir))
     await projectTextSync.connect(cloud.id)
     showProjectMenu.value = false

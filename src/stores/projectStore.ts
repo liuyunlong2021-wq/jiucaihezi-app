@@ -53,6 +53,26 @@ const WINDOW_LABEL = currentWindowLabel()
 const PROJECT_DIR_KEY = `jc_project_dir:${WINDOW_LABEL}`
 
 /**
+ * 向 Rust 认领一个工作区，返回**真正拥有它的**窗口 label。
+ *
+ * 一个工作区同时只能有一个窗口在看它：每个窗口是独立 realm、各有自己的一份运行时表，
+ * 但 `DSH_HOME` 是按 cwd 取的**同一个目录**，两个 runner 会撞会话写锁。
+ *
+ * 失败一律**放行**（返回本窗口 label）：登记表出问题不该让用户连项目都打不开。
+ */
+export async function claimWorkspace(cwd: string): Promise<string> {
+  if (!cwd || !isTauriRuntime()) return WINDOW_LABEL
+  try {
+    // 动态 import：静态引 @tauri-apps/api 会把它拖进 Web 包，这个模块在 Web 端也会加载。
+    const { invoke } = await import('@tauri-apps/api/core')
+    return await invoke<string>('claim_workspace', { cwd })
+  } catch (error) {
+    console.warn('[workspace] 认领工作区失败，按本窗口所有处理:', error)
+    return WINDOW_LABEL
+  }
+}
+
+/**
  * 本窗口的初始工作区。
  *
  * 优先级：窗口绑定 > 分窗口存的 > 旧的全键（**只有主窗口回落**）。
@@ -91,7 +111,14 @@ export function useProjectStore() {
 
   const hasProject = computed(() => isTauriRuntime() ? !!projectDir.value : !!webProjectId.value)
 
-  function selectProject(dir: string) {
+  /**
+   * 切到某个工作区。返回 false = 它已经在别的窗口开着，本窗口不切
+   * （`projectDir` 保持原值，不留切了一半的中间态）。
+   *
+   * 认领必须在改状态**之前**：两个窗口同时切同一个工作区时，先问的那一个赢。
+   */
+  async function selectProject(dir: string): Promise<boolean> {
+    if (dir !== projectDir.value && (await claimWorkspace(dir)) !== WINDOW_LABEL) return false
     projectDir.value = dir
     localStorage.setItem(PROJECT_DIR_KEY, dir)
     if (dir && !recentProjectDirs.value.includes(dir)) {
@@ -99,6 +126,7 @@ export function useProjectStore() {
       if (recentProjectDirs.value.length > 10) recentProjectDirs.value.pop()
       localStorage.setItem('jc_project_dirs', JSON.stringify(recentProjectDirs.value))
     }
+    return true
   }
 
   function clearProject() {

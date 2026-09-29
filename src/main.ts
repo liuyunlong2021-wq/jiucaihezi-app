@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
+import { claimWorkspace, useProjectStore } from '@/stores/projectStore'
 import App from '@app-root'
 import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -235,6 +236,9 @@ function mountApp() {
   try {
     const app = createApp(App)
     app.use(createPinia())
+    // 主窗口的项目是从 localStorage 恢复的，没走 selectProject —— 这里补一次认领。
+    // 不认领的话，在新开的空窗口里选同一个工作区不会被拦住，两个窗口会撞会话写锁。
+    if (isTauri) void claimWorkspace(useProjectStore().projectDir.value)
     registerMcpStore(useMcpStore)
     app.component('JcIcon', JcIcon)
     app.mount('#app')

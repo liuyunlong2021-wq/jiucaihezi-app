@@ -1500,13 +1500,14 @@ test('a workspace opens in its own window and never twice', () => {
   const store = source('src/stores/projectStore.ts')
   const main = source('src/main.ts')
 
-  // label 复用 DSH_HOME 用的同一个哈希：同一个工作区在 Rust / 前端 / 磁盘三处同 key，
-  // 于是「已经开过」就等于「label 已存在」，一个工作区一个窗口不用额外记账。
+  // label 复用 DSH_HOME 用的同一个哈希：同一个工作区在 Rust / 前端 / 磁盘三处同 key。
+  // 但「已经开过」不再只看 label —— 窗口能在里面换工作区，label 会与它显示的东西脱钩，
+  // 所以改看登记表（见下面那条测试）。
   assert.match(lib, /sha2::\{Digest, Sha256\}/)
   assert.match(lib, /format!\("ws-\{hex\}"\)/)
   // 已经开过只聚焦，不新建。
-  assert.match(command, /if let Some\(existing\) = app\.get_webview_window\(&label\)/)
-  assert.match(command, /existing\.set_focus\(\)/)
+  assert.match(command, /if let Some\(owner\) = owner_of_workspace\(&app, &cwd\)/)
+  assert.match(command, /focus_window\(&app, &owner\)/)
   // 工作区走窗口初始化脚本注入，前端同步就能读到（不走 URL query，也不走异步登记表）。
   assert.match(lib, /window\.__JC_WORKSPACE__ = \{\}/)
   // 分窗口存项目：共用一个键的话，A 窗口换个项目会把 B 窗口也换掉。
@@ -1531,6 +1532,27 @@ test('a workspace opens in its own window and never twice', () => {
   // 关掉一个窗口要收掉它名下的 runner：应用还活着，退出路径不会跑，而它会一直握着会话的
   // 跨进程内核写锁。
   assert.match(lib, /WindowEvent::Destroyed[\s\S]{0,240}reap_window_stdio_processes/)
+})
+
+test('同一个工作区不会同时被两个窗口打开', () => {
+  const command = source('src-tauri/src/commands/workspace.rs')
+  const store = source('src/stores/projectStore.ts')
+  const tree = source('src/components/filetree/ProjectFileTree.vue')
+  const main = source('src/main.ts')
+
+  // 记账而不是靠 label：label 是建窗时定死的，而窗口可以在里面换工作区
+  // （空的 win-1 选了 A，或 ws-A 切到 B），label 就与它显示的东西脱钩了。
+  assert.match(command, /fn owner_of_workspace/)
+  assert.match(command, /pub async fn claim_workspace/)
+  // 认领新的要清掉本窗口名下的旧记录，否则它切走之后那个工作区会永远被当成「已经打开」。
+  assert.match(command, /owners\.retain\(\|_, label\| label != &mine\)/)
+  // 切换必须在改状态之前认领，且被拒绝时保持原值。
+  assert.match(store, /async function selectProject\(dir: string\): Promise<boolean>/)
+  assert.match(store, /await claimWorkspace\(dir\)\) !== WINDOW_LABEL\) return false/)
+  assert.match(tree, /这个工作区已经在另一个窗口打开了/)
+  // 主窗口的项目是从 localStorage 恢复的，不补这一次认领它就漏在账外。
+  assert.match(main, /void claimWorkspace\(useProjectStore\(\)\.projectDir\.value\)/)
+  assert.match(source('src-tauri/permissions/app-commands.json'), /"claim_workspace"/)
 })
 
 test('memory workbench follows the current project owner on both runtimes', () => {
