@@ -525,6 +525,10 @@ jobs:
       needs.macos-intel.result == 'success' &&
       needs.windows.result == 'success'))
     steps:
+      # 必须 checkout：最后一步是 `ssh ... "bash -s" < scripts/prune-updates.sh`，
+      # 没有这一步 runner 上没有那个脚本，清理会失败（2026-09-29 前一直如此，
+      # /opt/updates 因此攒了 20 个版本、3.1G）。
+      - uses: actions/checkout@v4
       - name: Publish desktop assets and public download manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
