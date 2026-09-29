@@ -5,6 +5,7 @@ import {
   DEFAULT_PROVIDER_ID,
   DEFAULT_PROVIDER_HOST,
   LOCAL_OLLAMA_PROVIDER_ID,
+  supportsVision,
   getModelProviderId,
   getLocalOllamaModels,
   loadProvidersFromStorage,
@@ -13,6 +14,12 @@ import {
   saveLocalOllamaModels,
   updateDefaultProviderModels,
 } from '../providerConfig'
+
+test('recognizes visual model variants before conservative text-only rules', () => {
+  assert.equal(supportsVision('qwen-vl-plus', DEFAULT_PROVIDER_ID), true)
+  assert.equal(supportsVision('deepseek-v4-flash', DEFAULT_PROVIDER_ID), true)
+  assert.equal(supportsVision('o1-mini', DEFAULT_PROVIDER_ID), false)
+})
 
 test('normalizeApiHost hides and normalizes the built-in Gateway host', () => {
   assert.equal(normalizeApiHost(), DEFAULT_PROVIDER_HOST)

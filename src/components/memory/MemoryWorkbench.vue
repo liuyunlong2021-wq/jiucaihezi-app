@@ -1078,7 +1078,13 @@ function selectedModel() {
  * 能力判断复用产品既有的那一份（@Jev 与直连路径用的是同一份），不在 Harness 侧另立一套。
  */
 function harnessImageInput(modelId: string): boolean {
-  return resolveModelInputModalities({ id: modelId, providerId: selectedModel()?.providerId }).includes('image')
+  const model = selectedModel()
+  // 优先使用模型目录的显式声明；否则才按 provider/model 黑名单推断。
+  return resolveModelInputModalities({
+    id: modelId,
+    providerId: model?.providerId,
+    inputModalities: model?.inputModalities,
+  }).includes('image')
 }
 
 function isSelectedModel(model: { id: string; providerId?: string }): boolean {

@@ -257,12 +257,14 @@ export function isLocalLikeProviderId(providerId: string | null | undefined): bo
 // 端点未配置好时，这些模型返回 false 避免 502；端点修复后改为 true。
 // 当前 Gateway 已验证支持 vision：GPT / Claude / Gemini / Doubao 系列。
 
-/** 确认只支持 text 的模型 + Gateway 端点暂未配置 vision 的模型 */
+/** 确认只支持 text 的模型 */
 const GATEWAY_VISION_DISABLED_KEYWORDS = [
-  // 确认 text-only（OpenAI 文档）
   'o1-mini', 'o1-preview', 'o3-mini', 'codex',
-  // Gateway 端点暂未配 vision，等端点支持后移出此列表
-  'deepseek', 'qwen', 'kimi', 'hunyuan', 'zhipu', 'mistral', 'mixtral',
+]
+
+// 同一模型系列可能同时提供 text-only 和视觉变体；视觉变体不能被系列级规则误伤。
+const GATEWAY_VISION_LIKELY_KEYWORDS = [
+  'vision', 'vl', 'gemini', 'gpt-4o', 'gpt-4.1', 'gpt-5', 'claude', 'doubao',
 ]
 
 /**
@@ -278,6 +280,7 @@ export function supportsVision(modelId: string | null | undefined, providerId?: 
   if (providerId === LOCAL_OLLAMA_PROVIDER_ID) return true
   if (providerId && providerId !== DEFAULT_PROVIDER_ID) return true
   const lower = modelId.toLowerCase()
+  if (GATEWAY_VISION_LIKELY_KEYWORDS.some(kw => lower.includes(kw))) return true
   if (GATEWAY_VISION_DISABLED_KEYWORDS.some(kw => lower.includes(kw))) return false
   return true
 }

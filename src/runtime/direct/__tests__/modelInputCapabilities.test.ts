@@ -32,6 +32,17 @@ describe('direct model input capabilities', () => {
     assert.equal(modalities.includes('audio'), false)
   })
 
+  test('preserves explicit gateway image declarations over conservative model-name rules', () => {
+    assert.deepEqual(
+      resolveModelInputModalities({
+        id: 'qwen-vl-plus',
+        providerId: 'jiucaihezi',
+        inputModalities: ['text', 'image'],
+      }),
+      ['text', 'image'],
+    )
+  })
+
   test('preserves explicit provider model declarations', () => {
     assert.deepEqual(
       resolveModelInputModalities({
