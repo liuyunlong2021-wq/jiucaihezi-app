@@ -13,3 +13,4 @@ pub mod remote_client;
 pub mod session;
 pub mod skill_material;
 pub mod tools;
+pub mod workspace;

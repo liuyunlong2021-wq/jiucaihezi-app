@@ -1,6 +1,8 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
+import { useProjectStore } from '@/stores/projectStore'
 import App from '@app-root'
 import { initDB } from '@/utils/idb'
 import { isTauriRuntime } from '@/utils/tauriEnv'
@@ -105,6 +107,16 @@ if (isTauri) {
     reaped => { if (reaped) bootLog('warn', `已收掉上一批遗留的 Harness 运行时：${reaped}`) },
     err => bootLog('warn', `清理遗留 Harness 运行时失败: ${err}`),
   )
+  // 菜单是应用级的（`app.set_menu`），它不知道哪个窗口在工作 —— Rust 把事件转给**聚焦窗口**，
+  // 由这里带着本窗口的当前工作区去开新窗口。
+  // 「一个工作区只开一个窗口」由 Rust 的 label 兜住：已经开过就聚焦，不新建。
+  void listen('jc:open-workspace-in-new-window', () => {
+    const cwd = useProjectStore().projectDir.value
+    if (!cwd) return
+    void invoke('open_workspace_window', { cwd }).catch(error => {
+      bootLog('warn', `在新窗口打开工作区失败: ${String(error)}`)
+    })
+  })
   // 页面离开（重载 / 应用退出）时尽力让运行时自己 dispose：官方只承诺 flush 过的数据，
   // 优雅关闭才能把最后一批落盘。这是尽力而为的一层，硬保证在 Rust 退出时的进程树收尾。
   void import('@/services/deepSeekHarness').then(({ stopDeepSeekHarness }) => {

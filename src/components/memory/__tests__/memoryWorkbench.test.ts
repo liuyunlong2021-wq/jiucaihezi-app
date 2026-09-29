@@ -1482,14 +1482,41 @@ test('Desktop starts the memory workbench without the legacy OpenCode workspace'
   assert.doesNotMatch(app, /WorkspaceLayout|useOpenCodeSyncStore|projectStoredNewApiForOpenCode/)
   assert.match(vite, /'@app-root': resolve\(__dirname, 'src\/App\.vue'\)/)
   assert.doesNotMatch(vite, /StudioApp|mode === 'studio'/)
-  assert.match(desktop, /app\.config\(\)\.build\.dev_url/)
+  // dev 构建必须加载 Vite，否则源码改动会被陈旧的 dist 遮住。
+  // 匹配放宽到跨换行：这段逻辑搬进了 `workbench_window_config`，拆行不该让测试变红。
+  assert.match(desktop, /app\.config\(\)\s*\.build\s*\.dev_url/)
   assert.match(desktop, /"http:\/\/localhost:1420"\.parse\(\)/)
   assert.match(
     desktop,
     /#\[cfg\(all\(debug_assertions, not\(mobile\)\)\)\][\s\S]{0,300}"http:\/\/localhost:1420"/,
   )
   assert.doesNotMatch(desktop, /#\[cfg\(dev\)\]/)
-  assert.match(desktop, /window_config\.url = tauri::WebviewUrl::External\(dev_url\)/)
+  assert.match(desktop, /config\.url = tauri::WebviewUrl::External\(/)
+})
+
+test('a workspace opens in its own window and never twice', () => {
+  const lib = source('src-tauri/src/lib.rs')
+  const command = source('src-tauri/src/commands/workspace.rs')
+  const store = source('src/stores/projectStore.ts')
+  const main = source('src/main.ts')
+
+  // label 复用 DSH_HOME 用的同一个哈希：同一个工作区在 Rust / 前端 / 磁盘三处同 key，
+  // 于是「已经开过」就等于「label 已存在」，一个工作区一个窗口不用额外记账。
+  assert.match(lib, /sha2::\{Digest, Sha256\}/)
+  assert.match(lib, /format!\("ws-\{hex\}"\)/)
+  // 已经开过只聚焦，不新建。
+  assert.match(command, /if let Some\(existing\) = app\.get_webview_window\(&label\)/)
+  assert.match(command, /existing\.set_focus\(\)/)
+  // 工作区走窗口初始化脚本注入，前端同步就能读到（不走 URL query，也不走异步登记表）。
+  assert.match(lib, /window\.__JC_WORKSPACE__ = \{\}/)
+  // 分窗口存项目：共用一个键的话，A 窗口换个项目会把 B 窗口也换掉。
+  assert.match(store, /const PROJECT_DIR_KEY = `jc_project_dir:\$\{WINDOW_LABEL\}`/)
+  assert.match(store, /localStorage\.getItem\(PROJECT_DIR_KEY\)/)
+  // 菜单是应用级的，不知道哪个窗口在工作：转给聚焦窗口，由前端带自己的工作区回来开店。
+  assert.match(lib, /window\.emit\("jc:open-workspace-in-new-window", \(\)\)/)
+  assert.match(main, /listen\('jc:open-workspace-in-new-window'/)
+  // 新窗口必须拿到权限，否则起来就是零权限（fs / dialog / 自有命令全无）。
+  assert.match(source('src-tauri/capabilities/default.json'), /"windows": \["main", "ws-\*"\]/)
 })
 
 test('memory workbench follows the current project owner on both runtimes', () => {

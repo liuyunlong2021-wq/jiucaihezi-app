@@ -9,7 +9,7 @@ use std::env;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
-use tauri::{Manager, WebviewWindowBuilder, webview::NewWindowResponse};
+use tauri::{Emitter, Manager, WebviewWindowBuilder, webview::NewWindowResponse};
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::{Duration, timeout};
@@ -1139,21 +1139,262 @@ mod tests {
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// 每个工作台窗口都要装的初始化脚本。
+///
+/// 单独抽出来是因为主窗口与「在新窗口打开工作区」必须装同一份 —— NewAPI 登录回调的
+/// JS 拦截和「返回工作台」浮标漏了任何一个，那个窗口就会在一次登录后停在外部页面上。
+const WORKBENCH_INIT_SCRIPT: &str = r#"
+(() => {
+  const workbenchHosts = new Set([
+    'jiucaihezi.studio',
+    'www.jiucaihezi.studio',
+  ]);
+  function isWorkbenchReturn(value) {
+    try {
+      const url = new URL(String(value || ''), window.location.href);
+      return workbenchHosts.has(url.hostname);
+    } catch (_) { return false; }
+  }
+  function goWorkbench(value) {
+    let target = new URL('tauri://localhost/');
+    window.location.href = target.href;
+  }
+  const nativeOpen = window.open;
+  window.open = function(url, target, features) {
+    if (isWorkbenchReturn(url)) { goWorkbench(url); return window; }
+    return nativeOpen ? nativeOpen.call(window, url, target, features) : null;
+  };
+  document.addEventListener('click', (event) => {
+    const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
+    if (anchor && isWorkbenchReturn(anchor.href)) {
+      event.preventDefault(); goWorkbench(anchor.href);
+    }
+  }, true);
+
+  // ═══ NewAPI 页面增强 ═══
+  const host = window.location.hostname;
+  if (host === 'api.jiucaihezi.studio' || host === 'jiucaihezi.studio' || host === 'www.jiucaihezi.studio') {
+    var btnAdded = false;
+    function addFloatBtn() {
+      if (btnAdded || !document.body) return;
+      btnAdded = true;
+      var b = document.createElement('button');
+      b.textContent = '\u2190 \u8fd4\u56de\u5de5\u4f5c\u53f0';
+      Object.assign(b.style, {
+        position:'fixed',bottom:'20px',left:'20px',zIndex:'99999',
+        padding:'10px 18px',border:'none',borderRadius:'10px',
+        background:'#6B8E23',color:'#fff',fontSize:'14px',fontWeight:'700',
+        cursor:'pointer',fontFamily:'inherit',
+        boxShadow:'0 4px 16px rgba(107,142,35,.35)',
+        transition:'transform .15s',
+      });
+      b.onmouseenter=function(){b.style.transform='scale(1.05)'};
+      b.onmouseleave=function(){b.style.transform='scale(1)'};
+      b.onclick=function(){goWorkbench('https://jiucaihezi.studio')};
+      document.body.appendChild(b);
+    }
+    addFloatBtn();
+    setTimeout(addFloatBtn, 800);
+    setTimeout(addFloatBtn, 2500);
+    setTimeout(addFloatBtn, 6000);
+    new MutationObserver(function() {
+      addFloatBtn();
+    }).observe(document.documentElement || document.body, { childList: true, subtree: true });
+  }
+})();
+"#;
+
+/// 工作区窗口的 label：`ws-` + `sha256(cwd)` 前 12 字节的十六进制。
+///
+/// 与 `src/services/deepSeekHarness.ts` 算 `DSH_HOME` 目录用的是同一个哈希，于是「同一个工作区」
+/// 在 Rust、前端和磁盘三处拿到同一个 key —— 「已经开过」就免费变成「label 已存在」，
+/// 「一个工作区同时只有一个窗口」这条约束不用额外记账。
+pub(crate) fn workspace_window_label(cwd: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(cwd.as_bytes());
+    let hex: String = hasher.finalize().iter().take(12).map(|byte| format!("{byte:02x}")).collect();
+    format!("ws-{hex}")
+}
+
+/// 路径最后一段，用作窗口标题 —— 多窗口时必须能一眼看出谁是谁。
+fn workspace_name(cwd: &str) -> String {
+    let trimmed = cwd.trim_end_matches(['/', '\\']);
+    trimmed.rsplit(['/', '\\']).next().unwrap_or(cwd).to_string()
+}
+
+/// 工作台窗口的配置：只有 label 与工作区是变量，尺寸/装饰/入口 URL 全跟主窗口一致。
+///
+/// 入口 URL 在这里也一并处理：dev 必须加载 Vite，否则源码改动会被陈旧的 dist 遮住，
+/// 而新窗口如果漏了这条就会变成「dev 里新窗口显示的是上一个正式版」。
+fn workbench_window_config(
+    app: &tauri::AppHandle,
+    label: &str,
+    workspace: Option<&str>,
+) -> Result<tauri::utils::config::WindowConfig, String> {
+    let mut config = app
+        .config()
+        .app
+        .windows
+        .first()
+        .cloned()
+        .ok_or("missing main window config")?;
+    config.label = label.to_string();
+    #[cfg(all(debug_assertions, not(mobile)))]
+    {
+        config.url = tauri::WebviewUrl::External(
+            app.config()
+                .build
+                .dev_url
+                .clone()
+                .unwrap_or_else(|| "http://localhost:1420".parse().expect("valid desktop dev URL")),
+        );
+    }
+    if let Some(cwd) = workspace {
+        config.title = format!("韭菜盒子 — {}", workspace_name(cwd));
+    }
+    Ok(config)
+}
+
+/// 建一个工作台窗口。
+///
+/// 主窗口与「在新窗口打开工作区」必须共用这一条链路：`on_navigation` 要拦登录回调，
+/// `initialization_script` 要装「返回工作台」浮标 —— 两处各写一份迟早漂移。
+///
+/// `workspace` 为 `Some` 时把工作区路径注入窗口的全局变量，前端**同步**就能读到。
+/// 不走 URL query 是因为生产环境的 App 入口带着 query 跨平台不稳；不走 Rust 侧登记表
+/// 是因为那样前端只能在启动后异步补上，会先闪一下「没有项目」。
+fn build_workbench_window(
+    app: &tauri::AppHandle,
+    config: &tauri::utils::config::WindowConfig,
+    workspace: Option<&str>,
+) -> tauri::Result<tauri::WebviewWindow> {
+    let label = config.label.clone();
+    let navigate_app = app.clone();
+    let navigate_label = label.clone();
+    let new_window_app = app.clone();
+    let new_window_label = label.clone();
+    let builder = WebviewWindowBuilder::from_config(app, config)?
+        .on_navigation(move |url| {
+            if is_workbench_return_url(url) {
+                if let Some(window) = navigate_app.get_webview_window(&navigate_label) {
+                    let _ = window.navigate(workbench_url_from_return(url));
+                    let _ = window.set_focus();
+                }
+                false  // 阻止真实导航
+            } else {
+                true
+            }
+        })
+        .on_new_window(move |url, _features| {
+            if is_workbench_return_url(&url) {
+                if let Some(window) = new_window_app.get_webview_window(&new_window_label) {
+                    let _ = window.navigate(workbench_url_from_return(&url));
+                    let _ = window.set_focus();
+                }
+            }
+            NewWindowResponse::Deny
+        })
+        .initialization_script(WORKBENCH_INIT_SCRIPT)
+        .enable_clipboard_access();
+    let builder = match workspace {
+        Some(cwd) => builder.initialization_script(format!(
+            "window.__JC_WORKSPACE__ = {};",
+            serde_json::Value::String(cwd.to_string()),
+        )),
+        None => builder,
+    };
+    #[cfg(target_os = "ios")]
+    let builder = builder.with_input_accessory_view_builder(|_| None);
+    builder.build()
+}
+
+/// 当前聚焦的窗口；都没有焦点时给 `main`，再退回任意一个。
+fn focused_window(app: &tauri::AppHandle) -> Option<tauri::WebviewWindow> {
+    let windows = app.webview_windows();
+    windows
+        .values()
+        .find(|window| window.is_focused().unwrap_or(false))
+        .or_else(|| windows.get("main"))
+        .or_else(|| windows.values().next())
+        .cloned()
+}
+
+/// 恢复/保存一个窗口的几何，并在窗口销毁时收掉它名下的 stdio 子进程。
+///
+/// 每窗口一份文件：共写一份会互相覆盖 —— A 窗口一移动就把 B 的几何写没了。
+/// `main` 回落到旧文件名，老用户的窗口位置不会丢。
+fn attach_window_state(app: &tauri::AppHandle, window: &tauri::WebviewWindow, label: &str) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let Ok(app_data) = app.path().app_data_dir() else { return };
+    let safe_label: String = label
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
+        .collect();
+    let state_path = app_data.join(format!("window-state-{safe_label}.json"));
+    let legacy_path = app_data.join("window-state.json");
+    let restore_from = if state_path.exists() { state_path.clone() } else { legacy_path };
+
+    if let Ok(json) = std::fs::read_to_string(&restore_from) {
+        if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
+            if let (Some(x), Some(y), Some(w), Some(h)) = (
+                state["x"].as_i64(),
+                state["y"].as_i64(),
+                state["width"].as_u64(),
+                state["height"].as_u64(),
+            ) && is_valid_window_state(x, y, w, h) {
+                let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x as i32, y as i32)));
+                let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w as u32, h as u32)));
+            }
+        }
+    }
+
+    let saving = std::sync::Arc::new(AtomicBool::new(false));
+    let w = window.clone();
+    let state_path_save = state_path.clone();
+    let reap_label = label.to_string();
+    window.on_window_event(move |event| {
+        // 窗口销毁：它名下的 runner 立刻就是孤儿。必须在应用还活着时就收 ——
+        // 退出路径不会跑（应用没退），而它会一直握着会话的跨进程内核写锁。
+        if matches!(event, tauri::WindowEvent::Destroyed) {
+            let reaped = commands::mcp::reap_window_stdio_processes(&reap_label);
+            if reaped > 0 {
+                eprintln!("[window:{reap_label}] 已收掉 {reaped} 个遗留 stdio 进程");
+            }
+            return;
+        }
+        if !matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) { return; }
+        if saving.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_err() { return; }
+        let saving = saving.clone();
+        let state_path = state_path_save.clone();
+        if let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) {
+            if !is_valid_window_state(pos.x.into(), pos.y.into(), size.width.into(), size.height.into()) {
+                saving.store(false, Ordering::Release);
+                return;
+            }
+            let state = serde_json::json!({
+                "x": pos.x, "y": pos.y,
+                "width": size.width, "height": size.height,
+            });
+            std::thread::spawn(move || {
+                let _ = std::fs::write(&state_path, state.to_string());
+                saving.store(false, Ordering::Release);
+            });
+        } else {
+            saving.store(false, Ordering::Release);
+        }
+    });
+}
+
 /// 第二个进程启动时把焦点还给已有窗口（对齐 VS Code 的单实例行为）。
 ///
-/// 优先给已经聚焦的窗口，其次 `main`，再退回任意一个。多窗口之后这条语义仍然成立：
-/// 「再点一次图标」= 回到我正在看的那个窗口，而不是开新的 —— 开新窗口有显式菜单入口。
+/// 多窗口之后这条语义仍然成立：「再点一次图标」= 回到我正在看的那个窗口，而不是开新的
+/// —— 开新窗口有显式菜单入口。
 ///
 /// 与插件同条件编译：只在正式构建用得上（dev 下不注册单实例，见 `run` 里的注释）。
 #[cfg(all(not(any(target_os = "ios", target_os = "android")), not(debug_assertions)))]
 fn focus_existing_window(app: &tauri::AppHandle) {
-    let windows = app.webview_windows();
-    let target = windows
-        .values()
-        .find(|window| window.is_focused().unwrap_or(false))
-        .or_else(|| windows.get("main"))
-        .or_else(|| windows.values().next());
-    if let Some(window) = target {
+    if let Some(window) = focused_window(app) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
@@ -1234,6 +1475,17 @@ pub fn run() {
     let app = builder
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .on_menu_event(|app, event| {
+            if event.id().as_ref() != "jc:new-workspace-window" {
+                return;
+            }
+            // 菜单是应用级的（`app.set_menu`），而「当前工作区」是每个窗口自己在 localStorage
+            // 里记的 —— 所以让**聚焦窗口**自己决定用哪个工作区：前端收到事件后回调
+            // `open_workspace_window`。
+            if let Some(window) = focused_window(app) {
+                let _ = window.emit("jc:open-workspace-in-new-window", ());
+            }
+        })
         .setup(|app| {
             let app_data = app.path().app_data_dir()?;
             let skills_db_dir = app_data.join("skillsmanage");
@@ -1304,108 +1556,11 @@ pub fn run() {
                 eprintln!("[creation-mcp] bridge disabled: {error}");
             }
 
-            // ★ 手动建窗以挂载 on_navigation 拦截 NewAPI 登录回调
-            let mut window_config = app.config().app.windows.first()
-                .ok_or("missing main window config")?
-                .clone();
-            // Debug App must load Vite; otherwise source edits are invisible behind stale dist assets.
-            #[cfg(all(debug_assertions, not(mobile)))]
-            {
-                let dev_url = app.config().build.dev_url.clone().unwrap_or_else(|| {
-                    "http://localhost:1420".parse().expect("valid desktop dev URL")
-                });
-                window_config.url = tauri::WebviewUrl::External(dev_url);
-            }
-            let app_handle_nav = app.handle().clone();
-            let app_handle_new = app.handle().clone();
-
-            let window_builder = WebviewWindowBuilder::from_config(app.handle(), &window_config)?
-                .on_navigation(move |url| {
-                    if is_workbench_return_url(url) {
-                        if let Some(main) = app_handle_nav.get_webview_window("main") {
-                            let _ = main.navigate(workbench_url_from_return(url));
-                            let _ = main.set_focus();
-                        }
-                        false  // 阻止真实导航
-                    } else {
-                        true
-                    }
-                })
-                .on_new_window(move |url, _features| {
-                    if is_workbench_return_url(&url) {
-                        if let Some(main) = app_handle_new.get_webview_window("main") {
-                            let _ = main.navigate(workbench_url_from_return(&url));
-                            let _ = main.set_focus();
-                        }
-                    }
-                    NewWindowResponse::Deny
-                })
-                .initialization_script(
-                    r#"
-(() => {
-  const workbenchHosts = new Set([
-    'jiucaihezi.studio',
-    'www.jiucaihezi.studio',
-  ]);
-  function isWorkbenchReturn(value) {
-    try {
-      const url = new URL(String(value || ''), window.location.href);
-      return workbenchHosts.has(url.hostname);
-    } catch (_) { return false; }
-  }
-  function goWorkbench(value) {
-    let target = new URL('tauri://localhost/');
-    window.location.href = target.href;
-  }
-  const nativeOpen = window.open;
-  window.open = function(url, target, features) {
-    if (isWorkbenchReturn(url)) { goWorkbench(url); return window; }
-    return nativeOpen ? nativeOpen.call(window, url, target, features) : null;
-  };
-  document.addEventListener('click', (event) => {
-    const anchor = event.target && event.target.closest ? event.target.closest('a[href]') : null;
-    if (anchor && isWorkbenchReturn(anchor.href)) {
-      event.preventDefault(); goWorkbench(anchor.href);
-    }
-  }, true);
-
-  // ═══ NewAPI 页面增强 ═══
-  const host = window.location.hostname;
-  if (host === 'api.jiucaihezi.studio' || host === 'jiucaihezi.studio' || host === 'www.jiucaihezi.studio') {
-    var btnAdded = false;
-    function addFloatBtn() {
-      if (btnAdded || !document.body) return;
-      btnAdded = true;
-      var b = document.createElement('button');
-      b.textContent = '\u2190 \u8fd4\u56de\u5de5\u4f5c\u53f0';
-      Object.assign(b.style, {
-        position:'fixed',bottom:'20px',left:'20px',zIndex:'99999',
-        padding:'10px 18px',border:'none',borderRadius:'10px',
-        background:'#6B8E23',color:'#fff',fontSize:'14px',fontWeight:'700',
-        cursor:'pointer',fontFamily:'inherit',
-        boxShadow:'0 4px 16px rgba(107,142,35,.35)',
-        transition:'transform .15s',
-      });
-      b.onmouseenter=function(){b.style.transform='scale(1.05)'};
-      b.onmouseleave=function(){b.style.transform='scale(1)'};
-      b.onclick=function(){goWorkbench('https://jiucaihezi.studio')};
-      document.body.appendChild(b);
-    }
-    addFloatBtn();
-    setTimeout(addFloatBtn, 800);
-    setTimeout(addFloatBtn, 2500);
-    setTimeout(addFloatBtn, 6000);
-    new MutationObserver(function() {
-      addFloatBtn();
-    }).observe(document.documentElement || document.body, { childList: true, subtree: true });
-  }
-})();
-"#,
-                )
-                .enable_clipboard_access();
-            #[cfg(target_os = "ios")]
-            let window_builder = window_builder.with_input_accessory_view_builder(|_| None);
-            let window = window_builder.build()?;
+            // ★ 手动建窗以挂载 on_navigation 拦截 NewAPI 登录回调。
+            // 与「在新窗口打开工作区」共用 build_workbench_window：两处各写一份迟早漂移，
+            // 而漂移的代价是登录回调在某一种窗口里变成打不开的死浏览器。
+            let main_config = workbench_window_config(app.handle(), "main", None)?;
+            let window = build_workbench_window(app.handle(), &main_config, None)?;
 
             // ponytail: 照抄 OpenCode desktop/main/menu.ts — macOS 应用菜单
             #[cfg(target_os = "macos")]
@@ -1422,6 +1577,16 @@ pub fn run() {
                     .separator()
                     .item(&PredefinedMenuItem::select_all(app, None)?)
                     .build()?;
+                // 工作区窗口入口（对齐 VS Code 的「在新窗口打开」与 ⌘⇧N）。
+                let new_workspace_item = tauri::menu::MenuItemBuilder::with_id(
+                    "jc:new-workspace-window",
+                    "在新窗口打开工作区",
+                )
+                .accelerator("CmdOrCtrl+Shift+N")
+                .build(app)?;
+                let window_menu = SubmenuBuilder::new(app, "窗口")
+                    .item(&new_workspace_item)
+                    .build()?;
                 let menu = MenuBuilder::new(app)
                     .item(&PredefinedMenuItem::about(app, None, None)?)
                     .separator()
@@ -1435,6 +1600,8 @@ pub fn run() {
                     .separator()
                     .item(&edit_menu)
                     .separator()
+                    .item(&window_menu)
+                    .separator()
                     .item(&PredefinedMenuItem::minimize(app, None)?)
                     .item(&PredefinedMenuItem::maximize(app, None)?)
                     .item(&PredefinedMenuItem::fullscreen(app, None)?)
@@ -1443,55 +1610,14 @@ pub fn run() {
             }
 
             // ponytail: 照抄 OpenCode desktop/main/windows.ts — 窗口状态持久化
-            {
-                use std::sync::atomic::{AtomicBool, Ordering};
-                let state_path = app_data.join("window-state.json");
-                // 恢复窗口位置和大小
-                if let Ok(json) = std::fs::read_to_string(&state_path) {
-                    if let Ok(state) = serde_json::from_str::<serde_json::Value>(&json) {
-                        if let (Some(x), Some(y), Some(w), Some(h)) = (
-                            state["x"].as_i64(),
-                            state["y"].as_i64(),
-                            state["width"].as_u64(),
-                            state["height"].as_u64(),
-                        ) && is_valid_window_state(x, y, w, h) {
-                            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(x as i32, y as i32)));
-                            let _ = window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(w as u32, h as u32)));
-                        }
-                    }
-                }
-                // 保存窗口状态（AtomicBool 节流：同一时间最多一个写操作）
-                let saving = std::sync::Arc::new(AtomicBool::new(false));
-                let w = window.clone();
-                let state_path_save = state_path.clone();
-                window.on_window_event(move |event| {
-                    if !matches!(event, tauri::WindowEvent::Resized(_) | tauri::WindowEvent::Moved(_)) { return; }
-                    if saving.compare_exchange(false, true, Ordering::AcqRel, Ordering::Relaxed).is_err() { return; }
-                    let saving = saving.clone();
-                    let state_path = state_path_save.clone();
-                    if let (Ok(pos), Ok(size)) = (w.outer_position(), w.inner_size()) {
-                        if !is_valid_window_state(pos.x.into(), pos.y.into(), size.width.into(), size.height.into()) {
-                            saving.store(false, Ordering::Release);
-                            return;
-                        }
-                        let state = serde_json::json!({
-                            "x": pos.x, "y": pos.y,
-                            "width": size.width, "height": size.height,
-                        });
-                        std::thread::spawn(move || {
-                            let _ = std::fs::write(&state_path, state.to_string());
-                            saving.store(false, Ordering::Release);
-                        });
-                    } else {
-                        saving.store(false, Ordering::Release);
-                    }
-                });
-            }
+            // （每窗口一份文件 + 销殁时收 runner，见 `attach_window_state`）
+            attach_window_state(app.handle(), &window, "main");
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             commands::greet::greet,
+            commands::workspace::open_workspace_window,
             commands::jev_scorer::jev_scorer_ensure,
             commands::session::read_session_token,
             commands::session::write_session_token,

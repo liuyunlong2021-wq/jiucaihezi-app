@@ -3,7 +3,7 @@
   "permission": [
     {
       "identifier": "allow-app-commands",
-      "description": "Allows the main window to invoke the Rust commands registered by the application.",
+      "description": "Allows the app's workbench windows (main and one per workspace) to invoke the Rust commands registered by the application.",
       "commands": {
         "allow": [
           "greet",
@@ -145,6 +145,7 @@
           "read_file_by_path",
           "list_skill_directory",
           "open_in_file_manager",
+          "open_workspace_window",
           "open_central_skills_directory",
           "create_collection",
           "get_collections",

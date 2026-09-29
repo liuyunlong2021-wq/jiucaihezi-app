@@ -296,6 +296,34 @@ pub fn mcp_reap_stale_harness(
     )
 }
 
+/// 这个进程是不是归这个窗口的。
+fn owned_by_window(owner: Option<&Owner>, window: &str) -> bool {
+    owner.is_some_and(|owner| owner.window == window)
+}
+
+/// 收掉某个窗口名下的所有 stdio 进程。
+///
+/// 窗口关掉后它的 runner 就是孤儿，而应用还活着，退出路径不会跑 —— 不收的话它会一直
+/// 握着会话的跨进程内核写锁（jsonl 后端的 lease 没有过期时间），那个会话在本机再也写不进去。
+pub fn reap_window_stdio_processes(window: &str) -> usize {
+    let Ok(mut processes) = MCP_PROCESSES.try_lock() else { return 0 };
+    let handles: Vec<String> = processes
+        .iter()
+        .filter(|(_, process)| owned_by_window(process.owner.as_ref(), window))
+        .map(|(handle_id, _)| handle_id.clone())
+        .collect();
+    let mut reaped = 0;
+    for handle_id in handles {
+        if let Some(process) = processes.remove(&handle_id) {
+            if let Some(pid) = process.child.id() {
+                kill_process_tree(pid);
+            }
+            reaped += 1;
+        }
+    }
+    reaped
+}
+
 /// 应用退出时收掉所有还在跑的 stdio 进程树（同步，退出路径上不再进一次异步调度）。
 pub fn reap_all_stdio_processes() -> usize {
     reap_stdio_processes_blocking(false, None)
@@ -381,6 +409,15 @@ mod tests {
     fn unknown_owner_is_reaped() {
         let live = vec!["main".to_string()];
         assert!(is_orphan(None, Some(&scope(&live, "main", "realm"))));
+    }
+
+    /// 关窗收割只碰那个窗口名下的：别把还活着的窗口的 runner 一起收了。
+    #[test]
+    fn window_reap_only_covers_its_own_processes() {
+        let owner = owned("main", "realm");
+        assert!(owned_by_window(Some(&owner), "main"));
+        assert!(!owned_by_window(Some(&owner), "ws-abc"));
+        assert!(!owned_by_window(None, "main"));
     }
 }
 
