@@ -71,6 +71,24 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+test('generic RH AI App keeps the selected webappId at the submit boundary', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/aiapp/rh-aiapp',
+    params: {
+      webappId: '2101840271142117377',
+      billingModel: 'rh-aiapp',
+      outputType: 'video',
+      prompt: '文武双修测试',
+      '65:mode': 1,
+    },
+  })
+
+  const request = buildCreationSubmitRequest(plan)
+
+  assert.equal(request.videoParams?.webappId, '2101840271142117377')
+  assert.equal(plan.debug.normalizedParams['65:mode'], 1)
+})
+
 test('P3 direct GPT Image 2 runtime uses the native OpenAI image contract', () => {
   const plan = buildCreationRunPlan({
     modelId: 'gpt-image-2-超分',
@@ -606,8 +624,8 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
         { nodeId: '4', fieldName: 'image', fieldValue: 'https://cdn.jiucaihezi.studio/person.png' },
         { nodeId: '10', fieldName: 'value', fieldValue: '832' },
       ])
-      assert.equal(body.webappId, '12345')
-      assert.deepEqual(body.extra_fields, { webappId: '12345' })
+      assert.equal(body.webappId, '2101840271142117377')
+      assert.deepEqual(body.extra_fields, { webappId: '2101840271142117377' })
       return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'processing', ai_app: true })
     }
     if (url.endsWith('/rh/tasks/rh_aiapp_runtime_001?ai_app=true')) {
@@ -620,7 +638,7 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
     const plan = buildCreationRunPlan({
       modelId: 'runninghub/aiapp/rh-aiapp',
       params: {
-        webappId: '12345',
+        webappId: '2101840271142117377',
         billingModel: 'rh-aiapp-fast-digital-human',
         outputType: 'video',
         '3:audio': 'https://cdn.jiucaihezi.studio/voice.mp3',

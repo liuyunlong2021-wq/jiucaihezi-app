@@ -79,6 +79,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     request.imageParams = {
       model: plan.model,
       prompt: asString(params.prompt),
+      webappId: asOptionalString(params.webappId),
       size: asOptionalString(params.size),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
       resolution: asOptionalString(params.resolution),
@@ -99,6 +100,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     request.videoParams = {
       model: plan.model,
       prompt: asString(params.prompt),
+      webappId: asOptionalString(params.webappId),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
       resolution: asOptionalString(params.resolution),
       size: asOptionalString(params.size),

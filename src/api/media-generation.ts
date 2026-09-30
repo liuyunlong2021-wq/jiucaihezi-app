@@ -19,6 +19,8 @@
 export interface ImageGenParams {
   model: string
   prompt: string
+  /** Dynamic RunningHub AI App workflow ID. */
+  webappId?: string
   size?: string
   aspectRatio?: string
   resolution?: string
@@ -35,6 +37,8 @@ export interface ImageGenParams {
 export interface VideoGenParams {
   model: string
   prompt: string
+  /** Dynamic RunningHub AI App workflow ID. */
+  webappId?: string
   aspectRatio?: string
   resolution?: string
   /** 具体像素尺寸，如 1088x1920。适配器按模板 constraints 解析成 width/height。 */

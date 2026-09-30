@@ -732,7 +732,22 @@ async function handleDiscoverAiApp() {
   cpState.aiAppDiscovering = true
   cpState.aiAppFields = []
   try {
-    const { app, fields } = await discoverAiAppNodes(cpState.aiAppWebappId)
+    const { app, fields: discoveredFields } = await discoverAiAppNodes(cpState.aiAppWebappId)
+    const fields = isH3AiApp(cpState.aiAppWebappId)
+      ? discoveredFields.map(field =>
+          field.label === '戏种' || /mode/i.test(field.key)
+            ? {
+                ...field,
+                kind: 'select' as const,
+                defaultValue: 0,
+                options: [
+                  { value: 0, label: '文戏' },
+                  { value: 1, label: '武戏' },
+                ],
+              }
+            : field,
+        )
+      : discoveredFields
     cpState.aiAppLabel = app.label
     cpState.aiAppOutputType = app.outputType
     cpState.aiAppBillingModel = app.billingModel

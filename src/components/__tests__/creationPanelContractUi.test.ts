@@ -104,6 +104,9 @@ test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () =>
   // 选应用时把画幅与时长种成统一值
   assert.match(source, /setModelFieldValue\(ratioField, preferredRatio\.value\)/)
   assert.match(source, /setModelFieldValue\(durationField, H3_DURATION_DEFAULT\)/)
+  assert.match(source, /field\.label === '戏种' \|\| \/mode\/i\.test\(field\.key\)/)
+  assert.match(source, /label: '文戏'/)
+  assert.match(source, /label: '武戏'/)
   // H3 不预填工作流自带的示例提示词
   assert.match(source, /if \(promptField && isH3AiApp\(cpState\.aiAppWebappId\)\)/)
   assert.match(source, /cpState\.prompt === String\(promptField\.defaultValue \?\? ''\)\) cpState\.prompt = ''/)
