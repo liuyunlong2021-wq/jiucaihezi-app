@@ -327,6 +327,28 @@ async def test_ai_app_image_rejects_unmatched_user_inputs_instead_of_guessing_no
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [
+    {"webappId": "2101840271142117377"},
+    {"webappId": "2093604127250149377", "extra_fields": {"webappId": "2101840271142117377"}},
+])
+async def test_video_ai_app_resolves_webapp_id_from_request(payload, monkeypatch):
+    import src.config as config
+    monkeypatch.setattr(config, "RH_AI_APP_WHITELIST", set())
+    client = FakeClient()
+    request = VideoRequest.model_validate({
+        "model": "rh-aiapp",
+        "prompt": "test prompt",
+        **payload,
+    })
+
+    result = await generate_video(client, request, api_key="rh_key")
+
+    assert result["task_id"] == "task_123"
+    assert client.calls[0][1]["params"]["webappId"] == "2101840271142117377"
+    assert client.calls[-1][1]["json"]["webappId"] == 2101840271142117377
+
+
+@pytest.mark.asyncio
 async def test_custom_video_ai_app_model_uses_registered_webapp_and_node_discovery(monkeypatch):
     monkeypatch.setitem(mapping.MODEL_MAP, "rh-custom-video", {
         "endpoint": None,
