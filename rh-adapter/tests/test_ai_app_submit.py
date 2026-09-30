@@ -328,6 +328,7 @@ async def test_ai_app_image_rejects_unmatched_user_inputs_instead_of_guessing_no
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload", [
+    {},
     {"webappId": "2101840271142117377"},
     {"webappId": "2093604127250149377", "extra_fields": {"webappId": "2101840271142117377"}},
 ])

@@ -38,6 +38,8 @@ async def generate_video(
     has_image = bool(request.images)
 
     webapp_id = (request.extra_fields or {}).get("webappId") or request.webappId or get_webapp_id(model)
+    if model == "rh-aiapp" and not webapp_id:
+        webapp_id = "2101840271142117377"
     if is_ai_app_model(model) or webapp_id:
         return await _submit_via_app(client, request, key, webapp_id=webapp_id)
 
