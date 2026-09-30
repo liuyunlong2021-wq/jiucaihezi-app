@@ -114,6 +114,7 @@ class VideoRequest(BaseModel):
     nodeInfoList: Optional[list[dict[str, Any]]] = Field(None)
     webappId: Optional[str] = Field(None)
     extra_fields: Optional[dict[str, Any]] = Field(None, description="Passthrough extra fields")
+    metadata: Optional[dict[str, Any]] = Field(None, description="OpenAI-compatible metadata carrier")
 
     @model_validator(mode="before")
     @classmethod

@@ -156,7 +156,12 @@ async def resolve_ai_app_node_media(
     for node in node_list:
         next_node = dict(node)
         value = next_node.get("fieldValue")
-        if isinstance(value, str) and value.startswith("data:"):
+        if isinstance(value, str) and (
+            value.startswith("data:") or (
+                value.startswith(("http://", "https://"))
+                and any(_is_media_node(next_node, kind) for kind in ("image", "video", "audio"))
+            )
+        ):
             next_node["fieldValue"] = await maybe_upload(client, api_key, value, mode="ai_app")
         resolved.append(next_node)
     return resolved

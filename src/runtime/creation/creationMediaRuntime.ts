@@ -198,6 +198,7 @@ async function materializeRequestMedia(request: CreationSubmitRequest): Promise<
   }
   for (const [key, value] of Object.entries(plan.debug.normalizedParams)) {
     if (!/(?:^|:)(?:image|images|video|videos|audio|audios)$/i.test(key)) continue
+    if (request.plan.apiStyle === 'rh-aiapp' && value === 'None') continue
     if (typeof value === 'string') plan.debug.normalizedParams[key] = await materialize(value)
     else if (Array.isArray(value)) plan.debug.normalizedParams[key] = await convertMany(value.map(String))
   }
@@ -717,7 +718,24 @@ async function executeRunningHubVideoRequest(
     const webappId = asOptionalString(normParams['webappId'])
     if (!webappId) throw new Error(`RH AI App 缺少 webappId，无法提交 ${request.plan.model}`)
     body.webappId = webappId
-    body.extra_fields = { webappId }
+    // NewAPI drops unknown top-level fields; keep the full explicit overrides here too.
+    body.extra_fields = { webappId, nodeInfoList }
+    // TaskSubmitReq preserves metadata even when custom top-level fields are stripped.
+    body.metadata = { rh_aiapp: { version: 1, webappId, nodeInfoList } }
+    const durationNodes = nodeInfoList.filter(node => /^(duration|seconds)$/i.test(node.fieldName || ''))
+    const duration = durationNodes.length === 1 ? asOptionalNumber(durationNodes[0]!.fieldValue)
+      : durationNodes.length === 0 ? params.duration : undefined
+    const ratioNodes = nodeInfoList.filter(node => /^(aspect_ratio|aspectRatio|ratio)$/i.test(node.fieldName || ''))
+    const aspectRatio = normalizeRhAspectRatio((ratioNodes.length === 1 ? ratioNodes[0]!.fieldValue : params.aspectRatio)?.split(' (')[0])
+    const nodeImages = nodeInfoList.filter(node => node.fieldName === 'image' && node.fieldValue !== 'None').map(node => node.fieldValue!)
+    Object.assign(body, compact({
+      duration: duration === undefined ? undefined : Number(duration),
+      seconds: duration === undefined ? undefined : String(duration),
+      aspectRatio,
+      aspect_ratio: aspectRatio,
+      ratio: aspectRatio,
+      images: nodeImages.length ? nodeImages : undefined,
+    }))
   } else {
     const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
     Object.assign(body, compact({

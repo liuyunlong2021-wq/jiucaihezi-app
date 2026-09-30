@@ -12,6 +12,7 @@ import {
   materializeMediaInput,
 } from '../creationMediaRuntime'
 import { getCreationModelSpec } from '../creationModelRegistry'
+import { buildCurrentCreationParams, cpState, switchModel, switchTask } from '@/composables/useCreation'
 
 test('creation MCP submissions opt into project media persistence', () => {
   const source = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
@@ -625,7 +626,10 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
         { nodeId: '10', fieldName: 'value', fieldValue: '832' },
       ])
       assert.equal(body.webappId, '2101840271142117377')
-      assert.deepEqual(body.extra_fields, { webappId: '2101840271142117377' })
+      assert.deepEqual(body.extra_fields, { webappId: '2101840271142117377', nodeInfoList: body.nodeInfoList })
+      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/person.png'])
+      assert.equal(body.duration, undefined)
+      assert.equal(body.seconds, undefined)
       return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'processing', ai_app: true })
     }
     if (url.endsWith('/rh/tasks/rh_aiapp_runtime_001?ai_app=true')) {
@@ -658,6 +662,50 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
     assert.equal(result.taskId, 'rh_aiapp_runtime_001')
     assert.equal(result.pollUrl, '/rh/tasks/rh_aiapp_runtime_001?ai_app=true')
   } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('H3 selected 3 seconds and references survive the NewAPI video boundary', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.duration, 3)
+    assert.equal(body.seconds, '3')
+    assert.equal(body.aspect_ratio, '9:16')
+    assert.deepEqual(body.images, ['https://cdn.example.test/selected.png'])
+    assert.deepEqual(body.extra_fields.nodeInfoList, body.nodeInfoList)
+    const forwarded = { model: body.model, prompt: body.prompt, duration: body.duration, metadata: body.metadata }
+    assert.deepEqual(forwarded.metadata.rh_aiapp, {
+      version: 1, webappId: '2101840271142117377', nodeInfoList: body.nodeInfoList,
+    })
+    assert.ok(body.nodeInfoList.some((node: any) => node.nodeId === '27' && node.fieldValue === '3'))
+    assert.ok(body.nodeInfoList.some((node: any) => node.nodeId === '35' && node.fieldValue === 'None'))
+    return Response.json({ url: 'https://cdn.example.test/result.mp4' })
+  }
+  try {
+    switchTask('ai-app')
+    switchModel('runninghub/aiapp/rh-aiapp')
+    cpState.aiAppWebappId = '2101840271142117377'
+    cpState.aiAppOutputType = 'video'
+    cpState.dur = 20
+    cpState.ar = '1:1'
+    cpState.aiAppFields = [
+      { key: '27:value', label: '时长', kind: 'number' },
+      { key: '29:aspect_ratio', label: '比例', kind: 'select' },
+      { key: '6:image', label: 'image1', kind: 'image' },
+      { key: '35:image', label: 'image2', kind: 'image', defaultValue: 'placeholder.png' },
+    ]
+    cpState.fieldValues = { '27:value': 3, '29:aspect_ratio': '9:16 (Portrait Widescreen)', '35:image': 'saved.png' }
+    const plan = buildCreationRunPlan({ modelId: 'runninghub/aiapp/rh-aiapp',
+      params: buildCurrentCreationParams({ images: ['https://cdn.example.test/selected.png'] }) })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'https://cdn.example.test/result.mp4')
+  } finally {
+    cpState.fieldValues = {}
     globalThis.fetch = previousFetch
     await restoreStorage()
   }

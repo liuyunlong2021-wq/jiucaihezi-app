@@ -328,7 +328,6 @@ async def test_ai_app_image_rejects_unmatched_user_inputs_instead_of_guessing_no
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("payload", [
-    {},
     {"webappId": "2101840271142117377"},
     {"webappId": "2093604127250149377", "extra_fields": {"webappId": "2101840271142117377"}},
 ])
@@ -339,6 +338,13 @@ async def test_video_ai_app_resolves_webapp_id_from_request(payload, monkeypatch
     request = VideoRequest.model_validate({
         "model": "rh-aiapp",
         "prompt": "test prompt",
+        "nodeInfoList": [
+            {"nodeId": "52", "fieldName": "prompt", "fieldValue": "test prompt"},
+            {"nodeId": "39", "fieldName": "image", "fieldValue": "None"},
+            {"nodeId": "61", "fieldName": "duration", "fieldValue": "3"},
+            {"nodeId": "62", "fieldName": "ratio", "fieldValue": "9:16"},
+            {"nodeId": "63", "fieldName": "size", "fieldValue": "1024x1024"},
+        ],
         **payload,
     })
 

@@ -110,8 +110,8 @@ test('Minimax H3 AI Apps use one prompt and map canvas images to workflow slots'
   // 张数是上限不是等值：少传时按顺序只占用前面的槽位
   const partial = buildCurrentCreationParams({ images: ['only-one.png'] })
   assert.equal(partial['137:image'], 'only-one.png')
-  assert.equal('156:image' in partial, false)
-  assert.equal('157:image' in partial, false)
+  assert.equal(partial['156:image'], 'None')
+  assert.equal(partial['157:image'], 'None')
 
   assert.throws(
     () => buildCurrentCreationParams({ images: ['a.png', 'b.png', 'c.png', 'd.png'] }),
@@ -166,7 +166,7 @@ test('文武双修 应用用 28:prompt 承接主提示词，参考图按画布�
   assert.equal(params['28:prompt'], '一个男人在雨里回头')
   assert.equal(params['6:image'], 'ref-1.png')
   assert.equal(params['36:image'], 'ref-3.png')
-  assert.equal('37:image' in params, false)
+  assert.equal(params['37:image'], 'None')
   assert.equal(params['29:aspect_ratio'], '16:9 (Widescreen)')
   assert.equal(params['27:value'], 5)
 })
@@ -196,9 +196,48 @@ test('多参-4图 的时长节点描述是 value，仍按统一默认 5 提交',
   assert.equal(params['141:text'], '四个人一起转绘')
   assert.equal(params['137:image'], 'a.png')
   assert.equal(params['156:image'], 'b.png')
-  assert.equal('157:image' in params, false)
+  assert.equal(params['157:image'], 'None')
   assert.equal(params['115:megapixels'], 0.9)
   assert.equal(params['132:value'], 5)
+})
+
+test('AI App selected nodes override stale standard controls and clear saved H3 placeholders', () => {
+  switchTask('ai-app')
+  switchModel('runninghub/aiapp/rh-aiapp')
+  cpState.aiAppWebappId = '2101840271142117377'
+  cpState.aiAppOutputType = 'video'
+  cpState.dur = 20
+  cpState.ar = '1:1'
+  cpState.aiAppFields = [
+    { key: '27:value', label: '时长', kind: 'number', defaultValue: 20 },
+    { key: '29:aspect_ratio', label: '比例', kind: 'select' },
+    { key: '6:image', label: 'image1', kind: 'image', defaultValue: 'placeholder.png' },
+    { key: '35:image', label: 'image2', kind: 'image', defaultValue: 'placeholder.png' },
+    { key: '80:value', label: 'seed', kind: 'number', defaultValue: 123 },
+  ]
+  cpState.fieldValues = { '27:value': 3, '29:aspect_ratio': '9:16 (Portrait Widescreen)', '35:image': 'stored.png' }
+  const params = buildCurrentCreationParams({ images: ['selected.png'] })
+  assert.equal(params.duration, 3)
+  assert.equal(params.aspect_ratio, '9:16')
+  assert.equal(params['35:image'], 'None')
+  assert.equal(params['80:value'], 123)
+
+  cpState.aiAppWebappId = 'dynamic-app'
+  cpState.aiAppFields = [{ key: '80:value', label: 'seed', kind: 'number', defaultValue: 123 },
+    { key: '1:image', label: 'image', kind: 'image', defaultValue: 'placeholder.png' }]
+  const dynamic = buildCurrentCreationParams({ images: [] })
+  assert.equal(dynamic.duration, undefined)
+  assert.equal(dynamic.aspect_ratio, undefined)
+  assert.equal(dynamic['1:image'], undefined)
+  cpState.aiAppFields = [
+    { key: '8:duration', label: 'duration', kind: 'number', defaultValue: 4 },
+    { key: '9:seconds', label: 'seconds', kind: 'number', defaultValue: 6 },
+  ]
+  const ambiguous = buildCurrentCreationParams({ images: [] })
+  assert.equal(ambiguous.duration, undefined)
+  assert.equal(ambiguous['8:duration'], 4)
+  assert.equal(ambiguous['9:seconds'], 6)
+  cpState.fieldValues = {}
 })
 
 test('Seed Audio rejects reference files larger than 10 MB', () => {
