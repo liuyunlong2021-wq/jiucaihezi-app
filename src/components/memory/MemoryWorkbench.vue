@@ -3015,8 +3015,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             @click="conversationPickerOpen = !conversationPickerOpen"
           >
             <JcIcon name="history" class="memory-conversation-icon" />
-            <span>{{ conversation?.transcript.title || '选择对话' }}</span>
-            <JcIcon class="memory-picker-chevron" :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
+            <span class="memory-conversation-title">{{ conversation?.transcript.title || '选择对话' }}</span>
+            <span class="memory-conversation-mobile-label">记录</span>
+            <JcIcon class="memory-picker-chevron memory-conversation-chevron" :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
           </button>
           <div v-if="conversationPickerOpen" class="memory-conversation-menu">
             <input v-model="conversationSearch" type="search" placeholder="搜索对话" aria-label="搜索对话" />
@@ -3040,10 +3041,14 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           v-if="memoryReady"
           class="new-conversation-button"
           :disabled="projectActionPending"
+          aria-label="新建对话"
+          title="新建对话"
           @click="startNewConversation"
         >
           <JcIcon name="add" class="memory-new-conversation-icon" />
-          <span>新建对话</span>
+          <span class="new-conversation-label-full">新建对话</span>
+          <span class="new-conversation-label-short">新建</span>
+          <span class="new-conversation-label-tiny">新</span>
         </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
         <div class="memory-topbar-actions">
@@ -3058,19 +3063,21 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             class="memory-toggle-button"
             :class="{ enabled: memoryEnabled }"
             type="button"
+            aria-label="记忆开关"
             :aria-pressed="memoryEnabled"
-            :title="memoryEnabled ? '关闭记忆' : '开启记忆'"
+            :title="`记忆：${memoryEnabled ? '开' : '关'}`"
             @click="toggleConversationSetting('memory')"
-          ><span class="memory-toggle-label">记忆</span><span class="memory-toggle-state">{{ memoryEnabled ? '开' : '关' }}</span></button>
+          ><JcIcon name="psychology" class="memory-toggle-icon" aria-hidden="true" /><span class="memory-toggle-label">记忆</span><span class="memory-toggle-state"><span class="memory-toggle-dot"></span><span class="memory-toggle-text">{{ memoryEnabled ? '开' : '关' }}</span></span></button>
           <button
             v-if="conversation"
             class="memory-toggle-button"
             :class="{ enabled: memoryQueryEnabled }"
             type="button"
+            aria-label="查询开关"
             :aria-pressed="memoryQueryEnabled"
-            :title="memoryQueryEnabled ? '关闭查询' : '开启查询'"
+            :title="`查询：${memoryQueryEnabled ? '开' : '关'}`"
             @click="toggleConversationSetting('query')"
-          ><span class="memory-toggle-label">查询</span><span class="memory-toggle-state">{{ memoryQueryEnabled ? '开' : '关' }}</span></button>
+          ><JcIcon name="search" class="memory-toggle-icon" aria-hidden="true" /><span class="memory-toggle-label">查询</span><span class="memory-toggle-state"><span class="memory-toggle-dot"></span><span class="memory-toggle-text">{{ memoryQueryEnabled ? '开' : '关' }}</span></span></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -3589,7 +3596,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
 .memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
-.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; container-name: memory-main; container-type: inline-size; }
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
@@ -3599,11 +3606,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-toggle-label { line-height: 1; }
 .memory-toggle-state { display: inline-flex; height: 22px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink3); font-size: 11px; line-height: 1; }
 .memory-toggle-button.enabled .memory-toggle-state { border-color: color-mix(in srgb, #4b9978 42%, transparent); background: color-mix(in srgb, #4b9978 16%, var(--paper)); color: #327657; }
-.memory-toggle-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.memory-toggle-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
 .memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }
 .memory-conversation-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-conversation-mobile-label, .new-conversation-label-short, .new-conversation-label-tiny, .memory-toggle-icon { display: none; }
 .memory-conversation-trigger:hover, .memory-conversation-trigger[aria-expanded="true"] { border-color: var(--olive); }
 .memory-conversation-menu { position: absolute; z-index: 50; top: calc(100% + 7px); left: 0; width: min(320px, 84vw); padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-conversation-menu > input { width: 100%; height: 32px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--surface); color: var(--ink1); font: inherit; }
@@ -3827,7 +3835,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-title-drag { display: none; }
   .memory-topbar-actions { gap: 4px; }
   .memory-conversation-picker { max-width: 90px; }
-  .new-conversation-button { padding: 0 7px; }
+  .memory-conversation-icon, .memory-new-conversation-icon { display: inline; }
   .memory-model-picker { max-width: 100px; }
   .memory-model-menu { right: 0; left: auto; }
   .memory-messages { padding: 18px 14px; }
@@ -3836,5 +3844,44 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-settings-drawer { top: env(safe-area-inset-top, 0); right: 0; bottom: 0; left: 0; width: auto; border-left: 0; }
   .memory-workbench.preview-open .memory-preview { inset: env(safe-area-inset-top, 0) 0 0; }
   .memory-workbench.creation-open .memory-creation { inset: env(safe-area-inset-top, 0) 0 0; height: auto; }
+}
+@container memory-main (max-width: 680px) {
+  .memory-topbar { gap: 2px; padding: 0 6px; }
+  .memory-title-drag { display: none; }
+  .memory-topbar > .icon-button, .memory-topbar .memory-topbar-actions > .icon-button { width: 32px; flex-basis: 32px; }
+  .memory-topbar-actions { flex: 0 0 auto; gap: 2px; margin-left: 0; }
+  .memory-conversation-icon, .memory-new-conversation-icon { display: inline; }
+  .memory-conversation-picker { width: 50px; flex: 0 0 50px; }
+  .memory-conversation-trigger { width: 100%; justify-content: center; gap: 3px; padding: 0 3px; font-size: 12px; }
+  .memory-conversation-title, .memory-conversation-chevron { display: none; }
+  .memory-conversation-mobile-label { display: inline; }
+  .memory-conversation-icon { width: 14px; font-size: 14px; }
+  .new-conversation-button { gap: 3px; padding: 0 5px; font-size: 12px; }
+  .new-conversation-label-full { display: none; }
+  .new-conversation-label-short { display: inline; }
+  .memory-toggle-button { box-sizing: border-box; width: 40px; flex: 0 0 40px; justify-content: center; gap: 2px; padding: 0 2px; }
+  .memory-toggle-icon { display: inline; width: 14px; font-size: 14px; }
+  .memory-toggle-label, .memory-toggle-text { display: none; }
+  .memory-toggle-state { box-sizing: border-box; width: 18px; height: 12px; flex: 0 0 18px; justify-content: flex-start; gap: 0; padding: 1px; border-radius: 999px; }
+  .memory-toggle-dot { display: block; width: 8px; height: 8px; transition: transform .15s ease; }
+  .memory-toggle-button.enabled .memory-toggle-state { justify-content: flex-start; }
+  .memory-toggle-button.enabled .memory-toggle-dot { transform: translateX(6px); }
+  .memory-model-picker { width: 64px; flex: 0 0 64px; max-width: none; }
+  .memory-model-trigger { gap: 2px; padding: 0 4px; font-size: 11px; }
+  .memory-model-trigger .memory-picker-chevron { flex: 0 0 12px; }
+}
+@container memory-main (max-width: 380px) {
+  .memory-topbar { gap: 1px; padding: 0 4px; }
+  .memory-topbar-actions { gap: 1px; }
+  .memory-topbar > .icon-button, .memory-topbar .memory-topbar-actions > .icon-button { width: 30px; flex-basis: 30px; }
+  .memory-conversation-picker { width: 48px; flex-basis: 48px; }
+  .memory-conversation-trigger { gap: 2px; font-size: 11px; }
+  .new-conversation-label-short { display: none; }
+  .new-conversation-label-tiny { display: inline; }
+  .new-conversation-button { gap: 2px; padding: 0 2px; font-size: 11px; }
+  .memory-new-conversation-icon { width: 14px; font-size: 14px; }
+  .memory-toggle-button { width: 38px; flex-basis: 38px; }
+  .memory-toggle-icon { width: 12px; font-size: 12px; }
+  .memory-model-picker { width: 58px; flex-basis: 58px; }
 }
 </style>

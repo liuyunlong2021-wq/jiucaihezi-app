@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-10-01] 手机记忆工作台顶栏自适应
+
+- 手机顶栏保持单行，按可用宽度显示“记录”与“新建 / 新”；记忆、查询切换在窄栏显示图标和真实开关状态，模型、创作面板、设置入口保留。
+- 用 `.memory-main` 容器宽度触发自适应，横屏宽栏显示完整标签；桌面宽屏行为不变。代码位于 `src/components/memory/MemoryWorkbench.vue`。
+- `vue-tsc -b`、`git diff --check` 通过；未做真实 iPhone / WebView 视觉验收。
+
 ## [2026-10-01] 新手指南与 Wiki Memory 收敛
 
 - 新手指南继续作为产品问答入口，平台能力按当前实现说明：三端均可管理 Skill；Web/Mobile 无中央 Skill 目录 AI 新建/修改和 MCP 管理入口，相关说明已写明 Desktop 限定。
