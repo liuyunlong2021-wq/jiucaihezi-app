@@ -1,10 +1,10 @@
 # 热缓存
 
-## [2026-10-01] 手机记忆工作台顶栏自适应
+## [2026-10-01] 手机记忆工作台顶栏左右锚定
 
-- 手机顶栏保持单行，按可用宽度显示“记录”与“新建 / 新”；记忆、查询切换在窄栏显示图标和真实开关状态，模型、创作面板、设置入口保留。
-- 用 `.memory-main` 容器宽度触发自适应，横屏宽栏显示完整标签；桌面宽屏行为不变。代码位于 `src/components/memory/MemoryWorkbench.vue`。
-- `vue-tsc -b`、`git diff --check` 通过；未做真实 iPhone / WebView 视觉验收。
+- 手机顶栏保持单行：左侧紧贴“记录＋新建/新”，右侧依次紧贴记忆开关、查询开关、模型选择器，模型贴右；中间“更多”承接文件树、创作面板和设置。
+- `.memory-main` 容器宽度触发窄栏布局；宽栏继续显示原有完整控件，桌面宽屏行为不变。代码位于 `src/components/memory/MemoryWorkbench.vue`。
+- `pnpm run build:quick`、`git diff --check` 通过；未做真实 iPhone / WebView 视觉验收。
 
 ## [2026-10-01] 新手指南与 Wiki Memory 收敛
 

@@ -135,6 +135,8 @@ const conversations = ref<MemoryConversation[]>([])
 const conversationPickerOpen = ref(false)
 const conversationSearch = ref('')
 const conversationPickerRef = ref<HTMLElement | null>(null)
+const mobileMoreOpen = ref(false)
+const mobileMoreRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const editingTurnId = ref('')
 const fileWriteOpen = ref(false)
@@ -832,6 +834,7 @@ function isInternalMediaModel(modelId: string): boolean {
 function closeModelPicker(event: PointerEvent) {
   if (modelPickerOpen.value && !modelPickerRef.value?.contains(event.target as Node)) modelPickerOpen.value = false
   if (conversationPickerOpen.value && !conversationPickerRef.value?.contains(event.target as Node)) conversationPickerOpen.value = false
+  if (mobileMoreOpen.value && !mobileMoreRef.value?.contains(event.target as Node)) mobileMoreOpen.value = false
   if (mentionOpen.value
     && !composerRef.value?.contains(event.target as Node)
     && !mentionPopoverRef.value?.contains(event.target as Node)) closeMention()
@@ -3006,8 +3009,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <JcIcon v-else-if="error" name="error" />
       </div>
       <header class="memory-topbar">
-        <button v-if="!treeOpen" class="icon-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
-        <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
+        <div class="memory-topbar-left">
+          <button v-if="!treeOpen" class="icon-button memory-tree-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
+          <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
           <button
             class="memory-conversation-trigger"
             type="button"
@@ -3036,25 +3040,34 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <p v-if="!filteredConversations.length" class="memory-model-empty">没有匹配的对话</p>
             </div>
           </div>
+          </div>
+          <button
+            v-if="memoryReady"
+            class="new-conversation-button"
+            :disabled="projectActionPending"
+            aria-label="新建对话"
+            title="新建对话"
+            @click="startNewConversation"
+          >
+            <JcIcon name="add" class="memory-new-conversation-icon" />
+            <span class="new-conversation-label-full">新建对话</span>
+            <span class="new-conversation-label-short">新建</span>
+            <span class="new-conversation-label-tiny">新</span>
+          </button>
         </div>
-        <button
-          v-if="memoryReady"
-          class="new-conversation-button"
-          :disabled="projectActionPending"
-          aria-label="新建对话"
-          title="新建对话"
-          @click="startNewConversation"
-        >
-          <JcIcon name="add" class="memory-new-conversation-icon" />
-          <span class="new-conversation-label-full">新建对话</span>
-          <span class="new-conversation-label-short">新建</span>
-          <span class="new-conversation-label-tiny">新</span>
-        </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
+        <div ref="mobileMoreRef" class="memory-mobile-more">
+          <button class="icon-button memory-more-trigger" type="button" aria-label="更多" title="更多" :aria-expanded="mobileMoreOpen" @click="mobileMoreOpen = !mobileMoreOpen"><JcIcon name="more_horiz" /></button>
+          <div v-if="mobileMoreOpen" class="memory-mobile-more-menu">
+            <button v-if="!treeOpen" type="button" @click="mobileMoreOpen = false; treeOpen = true">打开文件树</button>
+            <button v-if="conversation" type="button" @click="mobileMoreOpen = false; creationOpen ? closeCreationHost() : openCreationForCurrentConversation()">创作面板</button>
+            <button type="button" @click="mobileMoreOpen = false; settingsOpen = true">账号与设置</button>
+          </div>
+        </div>
         <div class="memory-topbar-actions">
           <button
             v-if="conversation"
-            class="icon-button"
+            class="icon-button memory-creation-shortcut"
             title="创作面板"
             @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
           ><JcIcon name="palette" /></button>
@@ -3090,7 +3103,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <p v-if="!textModels.length" class="memory-model-empty">登录后加载模型</p>
             </div>
           </div>
-          <button class="icon-button" title="账号与设置" @click="settingsOpen = true"><JcIcon name="settings" /></button>
+          <button class="icon-button memory-settings-shortcut" title="账号与设置" @click="settingsOpen = true"><JcIcon name="settings" /></button>
         </div>
       </header>
 
@@ -3598,8 +3611,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
 .memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; container-name: memory-main; container-type: inline-size; }
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.memory-topbar-left { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.memory-mobile-more { display: none; }
 .memory-toggle-button { display: inline-flex; height: 34px; align-items: center; gap: 9px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
 .memory-toggle-button:hover { border-color: var(--olive); color: var(--olive); }
 .memory-toggle-button.enabled { border-color: color-mix(in srgb, #4b9978 62%, var(--line)); background: color-mix(in srgb, #4b9978 14%, var(--paper)); color: #327657; }
@@ -3846,42 +3861,46 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-workbench.creation-open .memory-creation { inset: env(safe-area-inset-top, 0) 0 0; height: auto; }
 }
 @container memory-main (max-width: 680px) {
-  .memory-topbar { gap: 2px; padding: 0 6px; }
-  .memory-title-drag { display: none; }
-  .memory-topbar > .icon-button, .memory-topbar .memory-topbar-actions > .icon-button { width: 32px; flex-basis: 32px; }
-  .memory-topbar-actions { flex: 0 0 auto; gap: 2px; margin-left: 0; }
-  .memory-conversation-icon, .memory-new-conversation-icon { display: inline; }
-  .memory-conversation-picker { width: 50px; flex: 0 0 50px; }
-  .memory-conversation-trigger { width: 100%; justify-content: center; gap: 3px; padding: 0 3px; font-size: 12px; }
+  .memory-topbar { gap: 0; padding: 0 8px; }
+  .memory-topbar-left { flex: 0 0 auto; gap: 4px; }
+  .memory-title-drag, .memory-tree-button, .memory-creation-shortcut, .memory-settings-shortcut { display: none; }
+  .memory-mobile-more { position: relative; display: flex; min-width: 32px; flex: 1 1 auto; justify-content: center; }
+  .memory-more-trigger { width: 32px; flex-basis: 32px; border: 0; background: transparent; }
+  .memory-mobile-more-menu { position: absolute; z-index: 50; top: calc(100% + 7px); left: 50%; display: grid; min-width: 150px; padding: 5px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
+  .memory-mobile-more-menu button { min-height: 38px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
+  .memory-mobile-more-menu button:hover { background: color-mix(in srgb, var(--olive) 14%, transparent); }
+  .memory-topbar-actions { flex: 0 0 auto; gap: 0; margin-left: 0; }
+  .memory-conversation-picker { width: 56px; flex: 0 0 56px; max-width: none; }
+  .memory-conversation-trigger { width: 100%; justify-content: center; gap: 3px; padding: 0 2px; border: 0; background: transparent; font-size: 12px; }
   .memory-conversation-title, .memory-conversation-chevron { display: none; }
   .memory-conversation-mobile-label { display: inline; }
   .memory-conversation-icon { width: 14px; font-size: 14px; }
-  .new-conversation-button { gap: 3px; padding: 0 5px; font-size: 12px; }
+  .new-conversation-button { gap: 3px; padding: 0 7px; font-size: 12px; }
   .new-conversation-label-full { display: none; }
   .new-conversation-label-short { display: inline; }
-  .memory-toggle-button { box-sizing: border-box; width: 40px; flex: 0 0 40px; justify-content: center; gap: 2px; padding: 0 2px; }
+  .memory-toggle-button { box-sizing: border-box; width: 38px; flex: 0 0 38px; justify-content: center; gap: 2px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; }
+  .memory-toggle-button.enabled { background: transparent; }
   .memory-toggle-icon { display: inline; width: 14px; font-size: 14px; }
   .memory-toggle-label, .memory-toggle-text { display: none; }
   .memory-toggle-state { box-sizing: border-box; width: 18px; height: 12px; flex: 0 0 18px; justify-content: flex-start; gap: 0; padding: 1px; border-radius: 999px; }
   .memory-toggle-dot { display: block; width: 8px; height: 8px; transition: transform .15s ease; }
-  .memory-toggle-button.enabled .memory-toggle-state { justify-content: flex-start; }
   .memory-toggle-button.enabled .memory-toggle-dot { transform: translateX(6px); }
-  .memory-model-picker { width: 64px; flex: 0 0 64px; max-width: none; }
-  .memory-model-trigger { gap: 2px; padding: 0 4px; font-size: 11px; }
+  .memory-model-picker { width: 92px; flex: 0 0 92px; max-width: none; }
+  .memory-model-trigger { gap: 3px; padding: 0 3px; border: 0; border-radius: 0; background: transparent; font-size: 11px; }
+  .memory-model-trigger .memory-model-icon { display: none; }
   .memory-model-trigger .memory-picker-chevron { flex: 0 0 12px; }
 }
 @container memory-main (max-width: 380px) {
-  .memory-topbar { gap: 1px; padding: 0 4px; }
-  .memory-topbar-actions { gap: 1px; }
-  .memory-topbar > .icon-button, .memory-topbar .memory-topbar-actions > .icon-button { width: 30px; flex-basis: 30px; }
-  .memory-conversation-picker { width: 48px; flex-basis: 48px; }
+  .memory-topbar { padding: 0 5px; }
+  .memory-topbar-left { gap: 2px; }
+  .memory-conversation-picker { width: 53px; flex-basis: 53px; }
   .memory-conversation-trigger { gap: 2px; font-size: 11px; }
   .new-conversation-label-short { display: none; }
   .new-conversation-label-tiny { display: inline; }
-  .new-conversation-button { gap: 2px; padding: 0 2px; font-size: 11px; }
+  .new-conversation-button { gap: 2px; padding: 0 5px; font-size: 11px; }
   .memory-new-conversation-icon { width: 14px; font-size: 14px; }
-  .memory-toggle-button { width: 38px; flex-basis: 38px; }
+  .memory-model-picker { width: 76px; flex-basis: 76px; }
+  .memory-toggle-button { width: 36px; flex-basis: 36px; }
   .memory-toggle-icon { width: 12px; font-size: 12px; }
-  .memory-model-picker { width: 58px; flex-basis: 58px; }
 }
 </style>
