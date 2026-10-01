@@ -1,5 +1,14 @@
 # 热缓存
 
+## [2026-10-01] 适配器收编为 NewAPI 任务插件：comfy / dola / boluo / rh 全部上线并实测通过
+
+- 根因：面板选中的画幅（`aspect_ratio` / `ratio` / `resolution`）与 `extra_fields` 被 NewAPI 的 `TaskSubmitReq` 白名单吃掉，只有 `metadata` 侥幸活着 —— 「选 4:3 出 9:16」不是偶发。修法不是打补丁，而是换**任务插件通道**（type 61）：`decodeRequest` 拿得到客户端原始 body，由插件决定发什么，原样送到适配器。
+- 产物 `newapi-plugins/`：`comfy` / `dola` / `boluo` / `rh` 四个单文件插件 + 51 例夹具（已接入 `test:focused`）。**适配器全部保留**：它们是执行器（comfy 的模板与 Topaz、dola 的 multipart 换字节、RH 的 `fileName` 令牌与节点发现、boluo 的协议差异），插件只是代理。
+- 迁移做法比原方案更简：**不用新建渠道**，直接把现有渠道的类型改成 `Task Plugin` 并选上插件（也不会出现同名模型双渠道分流）。前提：那条渠道上每个模型都要被插件覆盖；RH 的 Custom Channel **不能整体改**（它还担着音频，宿主没有音频协议）。
+- 实测：选 4:3 → ComfyUI 节点 29 = `4:3 (Standard)`（同一渠道走 type 1 时恒为该模板的默认值 `9:16`）。判定画幅只能用**非默认**取值，否则与兑底值撞车看不出来。
+- 两个踩过的坑已写进方案 §3 铁律：① 声明 `openai_video` 的插件**必须**导出 `listArtifacts` + `buildContentRequest`，少一个直接拒收上传；② 先跑 9:16 那笔无法判定（模板 `defaults` 本身就是 9:16）。
+- 对外影响（待办）：插件通道下宿主会移除响应里的 legacy `task_id`，对外合同要改读 `id`；dola 对外文档写的参考图上限 30 与上游/适配器的 **9** 不一致。
+
 ## [2026-09-29] Harness 失败轮次按官方 Session 投影到工作台
 
 - 根因：Harness 的 `turn/end(reason.kind=error)` 已持久化在官方 Session，但工作台失败分支只把错误写入临时 `MemoryRun`，随后清掉 `userTurn`；失败轮次因此从 UI 消失，而同一 Session 仍可由“继续”接上。

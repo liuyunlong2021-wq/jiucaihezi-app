@@ -41,9 +41,9 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 | `model` | 是 | 固定为 `dola-seedance2.5` |
 | `prompt` | 是 | 1-3000 个字符 |
 | `ratio` | 否 | `16:9`、`9:16`、`1:1`、`3:4`、`4:3`、`21:9`；默认 `16:9` |
-| `images` | 否 | 参考图 URL 数组，最多 30 张；每张不超过 20 MiB |
+| `images` | 否 | 参考图 URL 数组，**最多 9 张**；每张不超过 20 MiB |
 
-参考图必须是中转服务可以直接访问的 `http://` 或 `https://` URL，并返回 `image/jpeg` 或 `image/png`。本中转接口不接受本地路径，也不接受 Base64 Data URI。图片数量最多 **30 张**；大小限制是**每个文件单张** 20 MiB，不是所有图片合计 20 MiB。
+参考图必须是中转服务可以直接访问的 `http://` 或 `https://` URL，并返回 `image/jpeg` 或 `image/png`。本中转接口不接受本地路径，也不接受 Base64 Data URI。图片数量最多 **9 张**；大小限制是**每个文件单张** 20 MiB，不是所有图片合计 20 MiB。
 
 ### 上传本地参考图
 
@@ -78,7 +78,7 @@ curl --location 'https://api.jiucaihezi.studio/api/creations/uploads' \
 
 ## 查询结果
 
-使用返回的 `task_id` 轮询：
+使用返回的 `id` 轮询（**服务端现在只保证 `id` 字段**：换到任务插件通道后，宿主会移除 legacy `task_id`，上面示例里那份 `task_id` 可能不再出现——客户端请一律读 `id`）：
 
 ```bash
 curl --location 'https://api.jiucaihezi.studio/v1/videos/task_xxx' \
@@ -110,7 +110,7 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos/task_xxx' \
 | `Unable to fetch reference image` | 图片 URL 对中转服务不可访问，或返回了错误状态 |
 | `Only JPG, JPEG and PNG images are supported` | 参考图不是 JPEG/PNG |
 | `Reference image exceeds 20 MiB` | 单张参考图超过 20 MiB |
-| `Reference images exceed the limit` | 参考图超过 30 张 |
+| `Reference images exceed the limit` | 参考图超过 9 张 |
 
 ## 接入边界
 
