@@ -17,3 +17,5 @@
 - [本机 ComfyUI 模型对外接入（jc- 前缀）](本机ComfyUI模型对外接入-2026-09-26.md) - 本机 4090 上的 MiniMax H3 经 comfy-adapter + frp 隧道接入 NewAPI 与创作面板；含已完成证据、剩余步骤和关键坑。（图片模型 `jc-qwen-image-2.1` 已于 2026-09-26 撤下，服务器端保留）
 - [韭菜盒子本机 ComfyUI 图片模型 API 对外接入](韭菜盒子本机ComfyUI图片模型API对外接入-2026-09-26.md) - `jc-qwen-image-2.1` 的接口合同（模型名、尺寸档位表、b64 响应和错误处理）。**当前未上线**：图片与视频两套权重在 48GB 显存里无法共存，等搬到独立机器后再启用。
 - [韭菜盒子本机 ComfyUI 视频模型 API 对外接入](韭菜盒子本机ComfyUI视频模型API对外接入-2026-09-26.md) - 可直接发给第三方用户的 `jc-MiniMax H3` 四个视频模型：传图字段、画幅表、比例枚举、异步下载和保留期。
+- [本机 ComfyUI 接入 NewAPI 任务插件通道（方案）](本机ComfyUI接入NewAPI任务插件通道SDD-2026-10-01.md) - 把 `jc-minimax-h3*` 从 type 1 OpenAI 渠道换成 type 61「Task Plugin」渠道 + 自写 `comfy` 插件：字段无损透传、任务持久化、用量计费与成片代理交给宿主。**待审，未实施**。
+- [适配器收编任务插件总方案（Wave 计划）](适配器收编任务插件总方案-2026-10-01.md) - 把「每个线路一个独立 Python 服务」改成「NewAPI 单文件插件」的分波计划：能直用官方插件的零代码（`kik-seedance`），其余自写；`comfy-adapter` / `seed-audio-adapter` / 附件与文档服务不下岗。**已决策，待实施**。

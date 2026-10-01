@@ -23,7 +23,9 @@ function testFiles(directory, files = []) {
 test('every repository test is registered exactly once as focused or legacy', () => {
   const runner = source('scripts/run-focused-tests.mjs')
   const registered = [...runner.matchAll(/'(\S+\.(?:test|spec)\.(?:ts|mjs|js))'/g)].map(match => match[1])
-  const actual = [...testFiles('src'), ...testFiles('scripts')].sort()
+  // newapi-plugins/ 是 NewAPI 任务插件的单文件插件与其夹具的家，不在 src/ 也不在 scripts/，
+  // 但同样是仓库测试 —— 一并纳入，保证「每个测试恰好注册一次」这条不变量对它也成立。
+  const actual = [...testFiles('src'), ...testFiles('scripts'), ...testFiles('newapi-plugins')].sort()
 
   assert.deepEqual([...new Set(registered)].sort(), actual)
   assert.equal(registered.length, new Set(registered).size)

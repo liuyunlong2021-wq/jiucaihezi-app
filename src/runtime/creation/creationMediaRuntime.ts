@@ -915,16 +915,29 @@ function buildDirectVideoBody(
     // 模板自定义参数（戏种 mode）必须走 extra_fields：顶层的 mode 是 NewAPI 自己的
     // string 字段，发数字会被它的 JSON 绑定直接拒掉
     // （invalid_json: cannot unmarshal number into ... .mode of type string）。
-    const workflowMode = request.plan.debug.normalizedParams.mode
+    const normalized = request.plan.debug.normalizedParams
+    const workflowMode = normalized.mode
+    const requestedAspectRatio = asOptionalString(
+      normalized.aspect_ratio ?? normalized.ratio ?? normalized.aspectRatio,
+    )
+    // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
+    // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
+    const aspectRatioForBody = asOptionalString(params.size) ? undefined : requestedAspectRatio
+    // NewAPI 对本机 comfy 渠道只转发它 TaskSubmitReq 里认得的字段（model/prompt/images/
+    // duration/size/mode/metadata…）。顶层自定义字段和 extra_fields 都会被整段丢掉 ——
+    // 实测 aspect_ratio 与 mode 都到不了适配器，面板选了比例却出 16:9（模板默认）就是这么来的。
+    // metadata 是它唯一保留的自定义槽位（RH 链路的 metadata.rh_aiapp 已实测可用），
+    // 所以三处都发一份：顶层 / extra_fields / metadata，哪个活着哪个生效。
+    const customParams = compact({ mode: workflowMode, aspect_ratio: aspectRatioForBody })
+    const hasCustomParams = Object.keys(customParams).length > 0
     const body: Record<string, unknown> = compact({
       model: request.plan.model,
       prompt: params.prompt,
       duration: asOptionalNumber(params.duration),
       size: asOptionalString(params.size),
-      // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
-      // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
-      aspect_ratio: asOptionalString(params.size) ? undefined : asOptionalString(params.aspectRatio),
-      extra_fields: workflowMode === undefined ? undefined : { mode: workflowMode },
+      aspect_ratio: aspectRatioForBody,
+      extra_fields: hasCustomParams ? customParams : undefined,
+      metadata: hasCustomParams ? customParams : undefined,
     })
     if (request.plan.apiStyle === 'comfy-first-frame') {
       body.first_frame = uploadedImages[0]

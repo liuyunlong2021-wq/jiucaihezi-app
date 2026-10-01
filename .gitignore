@@ -45,3 +45,8 @@ jc-media/
 .superpowers/
 # Playwright MCP 的默认输出目录：每次浏览器快照/截图都会往这写无障碍树和控制台日志
 .playwright-mcp/
+
+# 本机桌面构建日志（打包过程产物，不是源码）
+/build-app.log
+/bundle-app.log
+/bundle-nsis.log

@@ -1812,3 +1812,82 @@
 - 两个自己踩到并修掉的坑：**`turn/end` 是 log-only 事件、不带 `surfaceOp`**（把 surface 过滤放在循环开头会把所有助手轮次一起滤掉）；**纯工具轮仍需要一条内容为空的锚点轮次**做过程挂载点，渲染层用 `turnHasBody()` 判掉 article —— 判定必须覆盖 article 的全部内容来源，否则那种内容会整块消失。
 - 明写不做：官方那个「工作过程展示」开关（`settings.transcript.title`）。先让**默认形态**真对齐官方，再在正确底座上加开关，否则是在错的底座上调参数。
 - 验证：定向 `deepSeekHarness` 43/43；完整 focused `1664 tests / 1664 pass / 0 fail`；Rust `453 passed / 0 failed / 1 ignored`；`vue-tsc -b` 通过。共改写 4 条既有断言（均写明替换理由）并把 3 个 fixture 补成真实事件形状（带 `surfaceOp` / 轮次边界）。
+
+## [2026-10-01] 排障 | 面板选 4:3 出 9:16：NewAPI 只转发 TaskSubmitReq 字段，画幅与戏种从未到达适配器
+
+- 现象：创作面板选 9:16 / 4:3，成片恒为适配器 `defaults` 的值；戏种（文戏/武戏）选了也没用。
+- 三段证据（谁发的 → 谁收得下 → 谁实际收到）：
+  ① App **发了**：直接跑 `buildCreationRunPlan` + `buildCreationSubmitRequest`，`videoParams.aspectRatio = "4:3 (Standard)"`，`size` 为空所以守卫不会抹掉它；面板 LocalStorage（WebView2 leveldb，值区是 UTF-16LE）里 `jc_cp_state_v3.ar` 也是 `4:3 (Standard)`。
+  ② 适配器 **收得下**：`ImageGenerationRequest` 已开 `ConfigDict(extra="allow")`，`model_dump()` 保留 `aspect_ratio` / `extra_fields` / `metadata`（只有 `resolution` 被自己的整数校验器丢掉）；探针直连 `tpl.normalize()` 时三种载波都能落到节点 29。
+  ③ 适配器 **没收到**：`GET /v1/tasks/{id}` 的归一化 `values` 显示 `aspect_ratio: "9:16 (Portrait Widescreen)"`，正是它自己的默认值。
+- 根因：NewAPI 只转发 `TaskSubmitReq` 认得的字段（`relay/common/relay_info.go`）：`model` / `prompt` / `image` / `images` / `duration` / `size` / `mode` / `seconds` / `input_reference` / `metadata`；`aspect_ratio`、`extra_fields`、`resolution` 一律丢。**戏种从上线起就没生效过**（`mode` 同样走 `extra_fields`，历史 `戏种` 恒为 0）。
+- 排除过才下的结论：适配器无辜（见②）；ComfyUI 历史里 `21:9` / `3:4` / `1:1` 那几笔是**直连适配器**的手工测试（适配器任务记录里有 `ratio` 字段与固定种子 `20261100` / `20261101`），不是面板成功 —— 别被「直连能跑通」误导成「NewAPI 也能跑通」。
+- 临时修法（已实施，待实测）：自定义参数除顶层 + `extra_fields` 外**再镜像一份到 `metadata`**（`metadata` 是 NewAPI 唯一保留的自定义槽位，RH 链路 `metadata.rh_aiapp` 已被用户确认可用，官方内置插件也普遍用 `metadata`）；适配器 `adp/template.py` 的 `normalize()` 把 `extra_fields` 与 `metadata` 里的**标量**摊平回顶层（嵌套对象如 `rh_aiapp` 不摊平，顶层已有的优先）。
+- 验证：改写 2 条断言（`extra_fields`、`metadata`），撤回源码 → 精确 RED，恢复 → GREEN（5 个文件 170 例全绿）；适配器探针 7/7（含 metadata-only、嵌套对象忽略、顶层优先）；`app.py --check` 四步全通过。
+- **未验证**：`metadata` 对**本机 comfy 渠道**的实测尚未做（RH 是另一条渠道）—— 需真跑一笔；适配器还需重启才加载新 `template.py`。
+- 顺带修掉两个环境坑：`cargo` 会把 crates.io 请求发给已关闭的 `127.0.0.1:7897`（来源没找到，`*.cargo/config.toml`、环境变量、系统代理都排除了，而 `curl` 直连正常）→ 用 `NO_PROXY` 绕过；`pnpm run tauri:dev` 挂在前台终端会被回收并连带杀掉整棵进程树 → 改用 `Start-Process` 脱离终端启动。
+- 方案（待审，未实施）：[[运维/本机ComfyUI接入NewAPI任务插件通道SDD-2026-10-01]] —— 换 type 61「Task Plugin」渠道 + 自写 `comfy` 插件，`decodeRequest` 拿原始 body，从根上不再丢字段。
+
+## [2026-10-01] 决策 | 适配器统一收编为 NewAPI 任务插件（分波推进，不做一次性全下岗）
+
+- 触发：用户提出把 `rh-adapter` / `boluo-minimax` / `seed-audio` / `kik` / `zx-video` 全部收编，让适配器下岗，并授权直接判断。
+- 盘清家底（全仓 8 个适配器 + 2 个非生成服务）后的三条决策：
+  ① **不做一次性全下岗**：每波必须真出片 + 核计费 + 成片下载 + Range 四项验收完，才动下一个；新通道验收通过前旧适配器与旧渠道一律不动。
+  ② **先试「官方插件直用」再谈自写**：`kik-seedance-adapter` 的上游是 `https://51kik.com/providers/volcengine` + `/api/v3/contents/generations/tasks`，而官方 `doubao`（火山 Ark）插件拼的正是 `ctx.baseUrl + "/api/v3/contents/generations/tasks"` —— **base URL 指到 51kik 就逐字相同**，且 KIK 模型名本来就是火山名（`doubao-seedance-2-mini`）→ 可能**零代码下岗**。
+  ③ **三个永不下岗**：`comfy-adapter`（执行器：模板渲染/ComfyUI 提交/Topaz/成片存储，插件无网络无 fs 装不下）、`seed-audio-adapter`（走 `/v1/audio/speech`，而宿主协议只有 `openai_responses`/`openai_video`/`openai_image`，**没有音频**）、`attachment-processor` 与 `document-converter`（非生成任务）。
+- 波次：Wave 0 = `comfy`（方案已定，自写插件）→ Wave 1 = `kik`（零代码试验）→ Wave 2 = `boluo`（最简自写，模板定型）→ Wave 3 = `dola` / `shanhai` / `xiaoyi-image` → Wave 4 = `zx-video` → Wave 5 = `rh-adapter`（最复杂，最后做）。
+- 未决（Wave 1 唯一风险，要真跑才能判）：官方 `doubao` 插件的 `meta.models` 未确认是否声明 `doubao-seedance-2-*`；未声明的话该模型可能落到内置 relay 而不是进插件 —— 判定卡已写进方案 §5。
+- 适配器代码**保留为「翻译逻辑的事实源」**，下线只删部署（Docker/compose/端口/计划任务），代码删除另开提交并先确认无调用者。
+- 方案：[[运维/适配器收编任务插件总方案-2026-10-01]]（含分类表、铁律、Wave 1 试验卡与判定）。
+
+## [2026-10-01] 实施 | Wave 1 定为 boluo：自写插件正稿 + 13 例夹具落盘
+
+- 用户明确主力是 `dola-seedance` / `rh-adapter` / `boluo-minimax` / `shanhai` + 本机 ComfyUI，并指定先用 `boluo-minimax` 试。所以**波次从「好写优先」改成「主力优先」**：Wave 1 = boluo（自写模板定型）→ Wave 2 = dola（主力）→ Wave 3 = shanhai → Wave 4 = rh-adapter → Wave 5 = kik / xiaoyi / zx（非主力）。kik 由原 Wave 1 降级（它只是**可能**零代码，不是主力）。
+- 产物（TDD，先夹具后实现）：`newapi-plugins/__tests__/boluo.test.mjs`（RED：模块不存在 → GREEN 13 例全过）与 `newapi-plugins/boluo.plugin.js`；夹具已接入 `scripts/run-focused-tests.mjs` 的 `externalNodeTests`。
+- 事实源是 `boluo-minimax-adapter/src/main.py`，逐条搬过来：`ref_image_N` / `ref_audio_N` 摊平、时长 1~15 与模型默认值（旧版 15 / 增强版 5）、**方向只认 `resolution` 后缀**（`aspect_ratio` 仅在缺 `resolution` 时推导，两者矛盾必须 400）、图 ≤9 音 ≤3、seed 非负整数、prompt ≤12000。
+- 与适配器的三处**有意**差异：① 任务号改用上游真实 id（宿主自己持久化任务行，不需要当年那层「立即返回本地 id」的间接）；② **顺手消掉适配器的 7 天内存任务表**（重启即丢，README 自己写着的故障面）；③ 成片不返回上游 URL（带临时 token，走宿主 `/content` 代理）。
+- 计费：两个模型单价不同 —— 旧版 `0.08/秒`、增强版 `0.1/秒`，走 `usageSchema.seconds` + `u("seconds")` 表达式。
+- 已知边界（写进方案，避免下次误判）：上游**不支持 Range**（总是完整字节流），所以 boluo 这波不能要求 206；参考素材透传的 Worker KV TTL 只有 15 分钟，排队超时可能取不到素材；上游 create 现在是**同步**等的（适配器当年改成后台提交），慢过宿主提交超时会退化成提交失败 —— 这是本波唯一未验的时序风险。
+- 未验证：插件未上传、渠道未建、未真跑一笔（管理员页动作在用户侧）。
+
+## [2026-10-01] 实施 | Wave 0 落地 comfy 插件：10 例夹具全绿，画幅与戏种从根上不再被丢
+
+- 触发：用户对「要不要现在把 comfy 插件也写出来」回答「要」。comfy 是**当前主力**（它既是面板在用的线路，也是「选 4:3 出 9:16」这条 Bug 的现场），所以它插到 boluo 验收之前做。
+- 产物（TDD，先夹具后实现）：`newapi-plugins/__tests__/comfy.test.mjs`（RED：模块不存在 → GREEN 10 例全过）与 `newapi-plugins/comfy.plugin.js`；夹具已接入 `scripts/run-focused-tests.mjs` 的 `externalNodeTests`（紧随 boluo 一行）。文档同步：[[运维/本机ComfyUI接入NewAPI任务插件通道SDD-2026-10-01]] §4 改为「已落地 + 草案差异表」，§5 步骤 1 标完成。
+- 核心是**无脑透传**：`decodeRequest` 把客户端原始 body 直接当 `requestBody` 交出去（`meta.protocols` 只声明 `openai_video`，`action` 由首/尾帧或 `images` 推导）。夹具第一条断言就是「同一份 body 里的 `aspect_ratio`、`extra_fields.mode`、`metadata.mode` 三处都能读到」—— 这条以后就是防回归的锁。
+- 不重复适配器的活：不做 clamp、不做枚举、不做 17n+5 帧对齐（那是 `adp/template.py` 的 `constraints` 职责）。插件只留三条快速失败：prompt 非空、model 认得、duration 是正数（且必须是 number，`"3"` 这种字符串也拒），避免白占额度。
+- `meta.models` = `['jc-minimax-h3', 'jc-minimax-h3-ref2v']`，是逐个核对 `creationModelRegistry` 四个条目得出的（三个模式共用前一个对外名）；渠道再映射成适配器内部 id，`buildSubmitRequest` 用 `ctx.upstreamModel || ctx.model` 兜底，避免没配映射时发出 `model: undefined`。
+- 与草案不同的三处（对照官方文档 + boluo 插件校准）：未知状态一律 `UNKNOWN`（绝不伪装 `IN_PROGRESS`，否则轮询永远不失败）；失败原因取响应体 `fail_reason` / `error` / `message`；结算时长优先取 `body.params.duration`（适配器归一化 clamp 后的实际值），退回 `body.duration`。
+- 有意**不返回** `metadata.url`：插件通道下那就是适配器的内网地址 `http://frps:8796/...`，外泄等于泄露网络布局。成片继续走宿主 `/content` 代理 —— 适配器支持 Range，所以 comfy 这波**可以**要求 206（与 boluo 相反，boluo 上游不支持）。
+- 未验证：插件未上传、type 61 渠道未建、未真跑一笔。另外 `comfy-adapter` 仍需重启才会加载 `adp/template.py` 里 `extra_fields` / `metadata` 摊平的改动 —— 那是**旧渠道 140 的即时修法**，与插件通道并行存在。
+
+## [2026-10-01] 实施 | Wave 2 落地 dola 插件：否证「官方插件直用」，12 例夹具全绿
+
+- 触发：用户对「接着写 dola 吗」回答「要」。dola 是用户点明的主力线路之一。
+- **判定否证**：原假设「dola 疑似 Ark 兼容 → 可能零代码用官方 `doubao` 插件」**不成立**。实测上游是 `https://43.254.166.145/api/v1/videos`（自家形状，不是 `/api/v3/contents/generations/tasks`），官方插件路径逐字对不上 → 只能自写。
+- **决定架构的发现**：上游创建接口**只吃 `multipart/form-data`**，规格原文写死「图片必须上传实际文件，不能用图片 URL 或 Base64 文本代替；文件字段名必须为 `images[]`」。插件没有 `fetch`/`fs`，拿不到图片字节 → **物理上做不到**。所以 `dola-seedance-adapter` 归入**不下岗的执行器**（与 `comfy-adapter` 同类），插件只做代理，把 `ratio` 送到它手上。方案里「不下岗的三个」改成四个。
+- 顺手核到宿主 v1 契约里确实有 `bodyType: "multipart"` + `parts[].fileRef`，但 `fileRef` 只指**客户端 multipart 上传**进来的文件（`ctx.files`）；App 走 `assetFlow: newapi-upload` 发的是 URL，`ctx.files` 为空 → 这条能力本波用不上。
+- **本波真正修掉的 Bug**：面板提交时顶层同时发 `ratio` 与 `aspect_ratio`（`buildDirectVideoBody` 通用尾段，`creationMediaRuntime.ts` 955-956 行），两者都**不在** `TaskSubmitReq` 白名单里 → 适配器永远落回自己的 `16:9` 兜底。**面板选 9:16 出 16:9，一直是这条**，与 Wave 0 同一个根因 —— 主力线路一直在丢画幅。
+- 产物（TDD，先夹具后实现）：`newapi-plugins/__tests__/dola.test.mjs`（RED：模块不存在 → GREEN 12 例全过）与 `newapi-plugins/dola.plugin.js`；夹具已接入 `scripts/run-focused-tests.mjs` 的 `externalNodeTests`。文档同步：[[运维/适配器收编任务插件总方案-2026-10-01]] §2 分类、§4 波次、§5 新增 Wave 2 判定卡、§6 改为「不下岗的四个」、§7 补两条风险。
+- 有意**不整份转发**适配器快照：快照里的 `id`/`task_id` 是上游任务号，而面板的 `extractTaskId` 会**优先读嵌套的** `data.task_id`/`data.id` —— 整份转发会让它拿着上游号去查 NewAPI 的公开任务号（`task_xxx`）。`render` 只给面板要的 `video_url` + `error`。
+- 有意**不导出** `listArtifacts` / `buildContentRequest`：适配器没有 `/content` 路由，成片是上游公开免签 URL，面板对 `newapi-task` 也不走 `/content`（`usesNewApiContentEndpoint` 为 false）。补上只会多一条没人走的死路。
+- 计费：上游只有 `seconds: "30"` 一档（规格原文），预授权与结算都按 30 秒，杜绝「估 5 秒扣 30 秒」的差额；按 0.2/秒 即 6 元/笔。
+- 状态映射：`queued`→`QUEUED`、`processing`→`IN_PROGRESS`、`completed`/`succeeded`→`SUCCESS`、`failed`→`FAILURE`，不认识的一律 `UNKNOWN`（绝不伪装进行中，否则任务永远不失败、永远占额度）。适配器查询是**无状态**的（直透上游），所以适配器重启不影响轮询 —— 比 comfy 干净。
+- 新记两条风险（**未修**，避免顺手改现行 type 1 渠道的行为）：① 适配器每次请求自己 `uuid4()` 生成 `Idempotency-Key`，入参里的键被忽略 → 宿主重试提交会在上游建第二个任务、**再扣一次**积分；② 参考图张数三处不一致：上游规格与适配器是 **9 张**，而面板注册表 `max: 30`、对外文档写「最多 30 张」。
+- 未验证：插件未上传、type 61 渠道未建、未真跑一笔（管理员页动作在用户侧）。
+
+## [2026-10-01] 实施 | Wave 4 落地 rh 标准链路插件：纠正 ak|sk 错判，13 例夹具全绿
+
+- 触发：用户「写rh」。
+- **纠正两处错判**（原方案写 RH 需要 `meta.auth` 的 ak\|sk JWT 与动态节点映射）：`rh-adapter` 全仓检索 `jwt|HS256|hmac|ak|sk|accessKey|secretKey` **零命中**；上游鉴权就是 `Authorization: Bearer <key>` + body `apikey`（标准链路）/ `apiKey`（AI App）。而且适配器用的是**自己环境变量里的** `RUNNINGHUB_API_KEY`，根本不看调用方 Authorization（所以渠道密钥填什么都行）；`site: global` 的模型另要 `RUNNINGHUB_GLOBAL_API_KEY`。→ **不需要 `meta.auth`，也用不上 `utils.jwtSignHS256`**。
+- **边界判定**：**音频**不进插件（这些模型的 App endpoint 是 `/v1/audio/speech`，而宿主只有 `openai_responses` / `openai_video` / `openai_image`，**没有音频协议**）；`z-image-turbo` 不进插件（与本机 comfy 条目**撞名**，收进来会截胡）。这两类继续留在旧 Custom Channel。
+- **同日更正（重要）**：初版还排除了 AI App（`rh-aiapp*`），理由是「换 RH `fileName` 令牌要下载再上传，插件做不到」。**该理由不成立** —— 插件走的是**代理**（插件 → 适配器），换令牌本来就发生在适配器内部，插件不需要下载能力；我把「适配器要干的活」误当成了「插件的阻断」。已改为一并收编：`meta.models` 加 4 个 AI App 视频模型（`rh-aiapp` / `rh-aiapp-director` / `rh-aiapp-digital-human` / `rh-aiapp-fast-digital-human`），并补两处适配：① `render` 透传 `ai_app`（面板据此带 `?ai_app=true` 直连适配器）；② 查询口改走 `GET /tasks/{id}?ai_app=true`（标准口查不到 aiapp 任务）。
+- **收编范围**：35 个模型（7 图 + 24 标准视频/3D + 4 个 AI App 视频），走 `openai_video` + `openai_image` 双协议代理 `http://rh-adapter:8789`；提交打到 `/v1/videos` 或 `/v1/images/generations`，查询走适配器**专为 NewAPI 准备**的 `GET /v1/videos/{taskId}`（AI App 走 `/tasks/{id}?ai_app=true`）。媒体是公网 URL，适配器 `maybe_upload` 对标准模式**原样透传**（只有 `data:` 才上传）→ 插件不需要下载能力。
+- **本波真正修的 Bug**：面板把画幅/分辨率发在顶层 `aspectRatio`/`aspect_ratio`/`ratio`/`resolution`、模型独有字段发在 `extra_fields`，全在 `TaskSubmitReq` 白名单之外 → 适配器只能吃 capabilities 的默认值。这也解释了当年为什么给 AI App 路径加 `extra_fields` + `metadata.rh_aiapp` 双重兜底：那时候就在跟同一个问题打交道。
+- **RH 专属设计（容易踩）**：面板是**直连适配器轮询**的（`extractTaskId` 优先读 `rh_task_id`，注释写明「永远直连 rh-adapter 轮询，NewAPI 只承担提交+计费，不做轮询」），而宿主会删掉 render 输出里的 legacy `task_id` → 插件把适配器任务号放在 **`rh_task_id`** 上，面板轮询链路一字不改；宿主自己另跑一份轮询做任务行与结算。
+- 计费用 `count` 型事实（`calls: 1`），与旧 Custom Channel 的「按次计费；每个模型单独设置价格」一致 —— 不做秒级改写。
+- 产物（TDD，先夹具后实现）：`newapi-plugins/__tests__/rh.test.mjs`（RED：模块不存在 → GREEN 13 例全过）与 `newapi-plugins/rh.plugin.js`；已接入 `scripts/run-focused-tests.mjs`。四个插件合计 **51 例全绿**。文档同步：[[运维/适配器收编任务插件总方案-2026-10-01]] §2 分类、§3 铁律、§4 波次、§5 新增 Wave 4 卡、§6 改为「不下岗的五个」、§7 补三条风险。
+- 新记三条风险：① **`rh_task_id` 可能被宿主改写**（README 说 render 前会替换「known private task IDs」，未验 —— 本波唯一硬风险，已写两条退路）；② 建新渠道时**必须**把旧 Custom Channel 模型列表里被接管的 35 个删掉，否则两个渠道声明同名模型 = 负载均衡，任务随机落两边；③ `site: global` 的模型要 `RUNNINGHUB_GLOBAL_API_KEY`，适配器缺它时插件侧看不出来。
+- 未验证：插件未上传、type 61 渠道未建、旧渠道模型列表未改、未真跑一笔（管理员页动作在用户侧）。
+
+

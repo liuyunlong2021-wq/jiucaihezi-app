@@ -288,7 +288,25 @@ test('视频提交体把画布参考图落到适配器声明的槽位', { concur
   assert.equal(bodies[3].first_frame, undefined)
   assert.equal(bodies[3].mode, undefined)
   assert.equal((bodies[3].extra_fields as { mode?: number })?.mode, 1)
+  // NewAPI 对本机 comfy 渠道只转发它认得的顶层字段：自定义参数得在 extra_fields 和 metadata
+  // 里各镜像一份才到得了适配器（顶层那份会被整段丢掉，实测 aspect_ratio / mode 都是这样）
+  assert.equal(
+    (bodies[3].extra_fields as { aspect_ratio?: string })?.aspect_ratio,
+    '9:16 (Portrait Widescreen)',
+  )
+  assert.equal(
+    (bodies[3].metadata as { aspect_ratio?: string })?.aspect_ratio,
+    '9:16 (Portrait Widescreen)',
+  )
+  assert.equal((bodies[3].metadata as { mode?: number })?.mode, 1)
   assert.equal(bodies[3].duration, 3)
+  // 用显式像素的三个模型既不发顶层比例，也不能靠 extra_fields / metadata 漏出去
+  for (const index of [0, 1, 2]) {
+    const extra = bodies[index].extra_fields as { aspect_ratio?: string } | undefined
+    const meta = bodies[index].metadata as { aspect_ratio?: string } | undefined
+    assert.equal(extra?.aspect_ratio, undefined)
+    assert.equal(meta?.aspect_ratio, undefined)
+  }
 
   for (const url of results) assert.match(url, /\/v1\/videos\/task_test_1\/content$/)
 })

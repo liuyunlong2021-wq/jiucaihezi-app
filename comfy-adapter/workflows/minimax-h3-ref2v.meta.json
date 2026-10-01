@@ -1,14 +1,16 @@
 {
   "id": "minimax-h3-ref2v",
-  "display_name": "MiniMax H3 双采参考生视频 V4（文武双修 · 单开关版）",
-  "description": "MiniMax H3 参考生视频，双采 + 潜空间上采样。LOW 首采 8 步 → 1.5x 潜空间上采样 → HIGH 精修 5 步，音视频同步输出（mp4 自带 AAC 音轨）。参考图 1~9 张，每张会同时接到 LOW 和 HIGH 两个 conditioning 节点 —— 双采工作流必须两遍都拿到参考图，否则报 REF2VA requires at least one reference media input。duration 按秒给，内部按 24fps 对齐到 17n+5 帧；上限取 28 秒（详见 extra.duration_note）。mode 是单开关，只切节点 47 的 LoRA 强度。",
-  "template": "minimax-h3-ref2v.json",
+  "display_name": "MiniMax H3 双采参考生视频 V4 + Topaz 放大（文武双修 · 单开关版）",
+  "description": "MiniMax H3 参考生视频，双采 + 潜空间上采样。LOW 首采 8 步 → 1.5x 潜空间上采样 → HIGH 精修 5 步，音视频同步输出（mp4 自带 AAC 音轨）。参考图 1~9 张，每张会同时接到 LOW 和 HIGH 两个 conditioning 节点 —— 双采工作流必须两遍都拿到参考图，否则报 REF2VA requires at least one reference media input。duration 按秒给，内部按 24fps 对齐到 17n+5 帧；上限取 28 秒（详见 extra.duration_note）。mode 是单开关，只切节点 47 的 LoRA 强度。 成片前多一步本机 Topaz（tvai_up）AI 增强放大：润色帧 → 按 upscale 倍数（默认 1.5x）用 Proteus 4 放大，再交给 SaveVideo 出 mp4（音频仍走原来的旁路，不经过 Topaz）。这一步是串行的，会明显增加耗时。",
+  "template": "minimax-h3-ref2v-topaz.json",
   "output_kind": "video",
   "default_async": true,
-  "output_node": "21",
+  "output_node": "74",
   "defaults": {
     "duration": 15,
-    "mode": 0
+    "mode": 0,
+    "upscale": 1.5,
+    "aspect_ratio": "9:16 (Portrait Widescreen)"
   },
   "bind": {
     "prompt": [
@@ -36,6 +38,36 @@
       }
     ],
     "aspect_ratio": [
+      {
+        "node": "29",
+        "input": "aspect_ratio"
+      }
+    ],
+    "upscale": [
+      {
+        "node": "76",
+        "input": "放大倍数"
+      }
+    ],
+    "topaz_strength": [
+      {
+        "node": "76",
+        "input": "增强强度"
+      }
+    ],
+    "target_width": [
+      {
+        "node": "76",
+        "input": "目标宽度"
+      }
+    ],
+    "target_height": [
+      {
+        "node": "76",
+        "input": "目标高度"
+      }
+    ],
+    "ratio": [
       {
         "node": "29",
         "input": "aspect_ratio"
@@ -82,7 +114,8 @@
     "two_pass": true,
     "latent_upscale": true,
     "seed": true,
-    "duration_seconds": true
+    "duration_seconds": true,
+    "topaz_upscale": true
   },
   "constraints": {
     "clamp": {
@@ -93,14 +126,32 @@
       "mode": [
         0,
         1
+      ],
+      "upscale": [
+        1.0,
+        4.0
+      ],
+      "topaz_strength": [
+        0.5,
+        1.5
+      ],
+      "target_width": [
+        0,
+        8192
+      ],
+      "target_height": [
+        0,
+        8192
       ]
     },
     "int_params": [
-      "mode"
+      "mode",
+      "target_width",
+      "target_height"
     ]
   },
   "extra": {
-    "source_workflow": "30秒文武双修.json（2026-09-27 换上；同源的 V3 画布已归档为 reference/minimax-h3-ref2v.v3.src.ui.json）",
+    "source_workflow": "文武双修v3_Topaz本地放大.json（= 文武双修v3.json + 自建节点 TopazLocalUpscale，插在 Deepcleaner(69) 与 CreateVideo(75) 之间）",
     "engine_note": "本图底座直接用 minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors（非 int8），不用再改节点 4。比 V3 多挂四个模块：MiniMaxH3SemanticBridgeConfigT8/ApplyT8（节点 56/55/58，权重 MiniMaxH3_SemanticBridge_v1_T8_Compat.safetensors）、MiniMaxH3ChunkFeedForwardT8Advanced（节点 54，chunks=2 / seq_threshold=4096）、easy cleanGpuUsed（节点 68）、RunningHub Deepcleaner（节点 69，Purge Model，在输出路径上）。",
     "mode_legend": {
       "0": "文戏：节点 47（turbo v4 hybrid）强度 0.5，首采固定 0.4MP",
@@ -109,6 +160,10 @@
     "duration_note": "clamp 上限取 28 秒而不用官方的 30：实测提交 30 秒会被算式补到 736 帧（≈30.7s），成片最后约 2 秒无效；28 秒 → 685 帧（≈28.54s）。不满足 17n+5 的秒数会被算式向上取整到下一个合法帧数。",
     "resolution_note": "宽高由工作流自带的 ResolutionSelector（multiple=32）算首采尺寸：aspect_ratio 已绑定到节点 29（meta 里 bind.aspect_ratio），megapixels 现在固定 0.4（V3 是随 mode 从 0.4/0.5 切），再由潜空间 1.5x 上采样得到成片尺寸。所以本模型**不接受** width/height/size —— 要改画幅请调 aspect_ratio。",
     "high_prompt_note": "V3 的 HIGH prompt 走 ConcatTextOfUtils（自动拼 'Enhance this video with sharp, crisp details…'）；本图节点 7 和节点 14 都直接吃节点 28 —— 2026-09-27 确认去掉，不要补回。",
-    "reference_note": "每张参考图只上传一次，但会同时接到节点 7（LOW）和节点 14（HIGH）的 ref_images.ref_image_N —— 接线是 0 基。"
+    "reference_note": "每张参考图只上传一次，但会同时接到节点 7（LOW）和节点 14（HIGH）的 ref_images.ref_image_N —— 接线是 0 基。",
+    "topaz_note": "Topaz 这一步在模板里是节点 76（TopazLocalUpscale）：IMAGE →(rawvideo 管道)→ FFV1/MKV →(tvai_up)→ FFV1/MKV →(rawvideo)→ IMAGE，只用 D:\\topazvideo\\ffmpeg.exe。倍率走 upscale / 绝对尺寸走 target_width+height；强度走 topaz_strength（1.0=模型默认）。",
+    "rollback_note": "回退到「不带 Topaz」的老 V4：把本文件 template 改回 minimax-h3-ref2v.json、output_node 改回 21，删掉 upscale/topaz_strength/target_* 的 bind 与 defaults 里的 upscale，重启适配层即可。注意老 V4（minimax-h3-ref2v.json）出自 30秒文武双修.json，与文武双修v3 画布并不完全相同（首采 0.4MP、VHS h265 10bit 输出、上采样用 sharpness/fp32、LoRA 用 speed slider）。",
+    "aspect_note": "画幅默认 9:16（竖屏）。客户端可以传 aspect_ratio 覆盖，可选值必须是 ResolutionSelector 的原始选项字符串：1:1 (Square) / 2:3 (Portrait Photo) / 3:2 (Photo) / 3:4 (Portrait Standard) / 4:3 (Standard) / 9:16 (Portrait Widescreen) / 16:9 (Widescreen) / 21:9 (Ultrawide)。它改的是节点 29 ResolutionSelector 的 aspect_ratio；首采像素固定 0.5MP（节点 29 megapixels）。",
+    "ratio_key_note": "App 把画幅放在 `ratio` 字段（media-generation.ts 的 body.ratio），所以 bind 里 ratio 与 aspect_ratio 都指向节点 29.aspect_ratio —— 两个名字等价。"
   }
 }

@@ -171,6 +171,10 @@ const wave1FocusedTests = [
 ]
 
 const externalNodeTests = [
+  'newapi-plugins/__tests__/boluo.test.mjs',
+  'newapi-plugins/__tests__/comfy.test.mjs',
+  'newapi-plugins/__tests__/dola.test.mjs',
+  'newapi-plugins/__tests__/rh.test.mjs',
   'scripts/check-tauri-fs-acl.mjs',
   'scripts/creation-models/__tests__/server.test.mjs',
   'scripts/jiucaihezi-creation-mcp/test.mjs',

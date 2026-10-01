@@ -684,7 +684,8 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 3, min: 1, max: 28, step: 1 },
       // ref2v 的模板没有 width/height 绑定，尺寸由工作流的 ResolutionSelector 算，
       // 所以这里只给比例（绑到节点 29 的 aspect_ratio），不给尺寸。
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9 (Widescreen)', options: JC_H3_RATIO_OPTIONS },
+      // 提交时字段名是 `ratio`，适配层 bind 里 ratio / aspect_ratio 都指向节点 29.aspect_ratio。
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '9:16 (Portrait Widescreen)', options: JC_H3_RATIO_OPTIONS },
       // 戏种绑到模板节点 65 的 index（切节点 47 的 LoRA 强度）
       { key: 'mode', label: '戏种', kind: 'select', defaultValue: 0, options: JC_H3_MODE_OPTIONS },
       { key: 'images', label: '参考图', kind: 'images', required: true },

@@ -22,7 +22,7 @@
   "4": {
     "class_type": "UNETLoader",
     "inputs": {
-      "unet_name": "minimax_h3_hybrid_fl2va_ref2va_b25-49.safetensors",
+      "unet_name": "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8_r.safetensors",
       "weight_dtype": "default"
     }
   },
@@ -158,13 +158,13 @@
     "inputs": {
       "model_name": "h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors",
       "size_mode": "scale_by",
-      "scale_by": 1.5000000000000002,
+      "scale_by": 1.2000000000000002,
       "target_megapixels": 1,
       "target_width": 1280,
       "target_height": 704,
       "aspect_policy": "preserve_source",
       "max_anisotropy": 1.05,
-      "precision": "fp32",
+      "precision": "fp16",
       "release_policy": "offload_after",
       "av_latent": [
         "12",
@@ -255,7 +255,7 @@
       "enable_restart": false,
       "restart_video_sigma": 0.15,
       "restart_steps": 3,
-      "restart_seed": 642561865824162,
+      "restart_seed": 662691789367969,
       "model": [
         "49",
         0
@@ -325,42 +325,23 @@
       ]
     }
   },
-  "21": {
-    "class_type": "VHS_VideoCombine",
-    "inputs": {
-      "frame_rate": 24,
-      "loop_count": 0,
-      "filename_prefix": "MiniMaxH3/learned_latent_twopass_i2va_upstream_parity_v2_exp",
-      "format": "video/h265-mp4",
-      "pingpong": false,
-      "save_output": true,
-      "images": [
-        "69",
-        0
-      ],
-      "audio": [
-        "20",
-        1
-      ]
-    }
-  },
   "27": {
     "class_type": "PrimitiveFloat",
     "inputs": {
-      "value": 30
+      "value": 20
     }
   },
   "28": {
     "class_type": "CR Prompt Text",
     "inputs": {
-      "prompt": "subject_definitions:\n<Subject 1> 是唯一成年女性，五官、长直中分棕发与自然妆容以 <Picture 2> 为身份依据；细框眼镜、宽松浅色衬衫、松垂深色领带、深色裙装与黑色裤袜来自 <Picture 1>。\n<Subject 2> 是 <Picture 1> 中的青蓝夜景办公室，包括左侧金属椅、右侧堆高的黑色文件箱与散落纸张、背后斜向落地窗和虚化城市灯。\n<Picture 1> 是 [Shot 1] 的首帧与构图锚点，确立低机位倾斜构图、人物在左、文件箱在右的空间关系。\n\nsummary:\n[keyframe completion + reference generation] 目标视频为30秒16:9超宽横版写实一镜到底，从 <Picture 1> 首帧出发，在 <Subject 2> 内让 <Subject 1> 完成低位凝视、缓慢起身、转身压近、近景说唯一台词、极近舔唇后顺滑退回原位并停住；<Picture 2> 只用于锁定五官与长发，不携带蓝色摄影棚背景或黑色吊带，全程无硬切、无新人物、无字幕或Logo。\n\nretention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved - 成年女性身份、<Picture 2> 的五官特征、棕发、细框眼镜、浅色衬衫、深色领带与深色裙装均保留，只按30秒时长扩展动作与表演。\n<Subject 2> (appears in [Shot 1]): fully_preserved - 青蓝夜景办公室、金属椅、文件箱、散落纸张、斜窗和虚化城市灯连续保留，文件箱与纸张不被随意移动。\n<Picture 1> ([Shot 1] first frame): fully_preserved - 首帧人物姿态、低机位倾斜构图和左右空间关系准确保留，随后在同一镜头内自然演变。\n\ndetailed_description:\n写实风格以真实皮肤纹理、青蓝冷光和浅景深为基础，办公室陈设保持稳定；全片为30秒一镜到底，低机位略带倾斜，仅有轻微手持呼吸、慢速推近和顺滑拉远。\n[Shot 1] 00:00，画面准确始于 <Picture 1>：<Subject 1> 在 <Subject 2> 中呈低位俯身姿态，靠画面右侧的手压在文件箱上，金属椅位于左侧，斜窗城市灯在背后虚化。她把镜头当作唯一对视目标，目光从细框眼镜后稳稳落来，另一只手从容抬起扶眼镜，手指顺势靠近嘴边；停顿后指尖离开嘴唇，重新搭回文件箱，重心轻微改变，箱子和纸张保持不动。\n00:05.000，她借文件箱支撑完整站起，身体逐渐升高，腿部与地面散纸入画，松垂领带随动作轻摆。00:08.000，她站定后缓慢牵一下领带与领口，肩、腰形成很小的连续侧摆，头轻轻后仰再偏开，视线先离开镜头，再慵懒地收回。00:12.000，她转身露出短暂侧背，手重新扶住文件箱，随即回头、弯腰，借着同一条动作链朝镜头压近；镜头小幅缓慢推近。\n00:15.000，脸进入近景，一根手指落在下巴到唇边，眼镜后的目光不离开镜头，眼角和嘴角浮出一点玩味。她轻吸气、肩颈放松，<Subject 1> (S1) 用低而松弛的声音说：<d>[Chinese] 各位老板，你要的教程马上就做好了。</d> 说话期间她仍自然靠近，眼神、浅笑和头部细微前倾同步推进，说完后指尖慢慢退出画面。\n00:19.000，不再说话，脸贴到极近，鼻尖与嘴唇占据画面；舌尖伸出，沿嘴唇做一次缓慢、连续、清晰可见的完整一圈，从右到左、从上到下，再从左到右回到起点，眼神保持诱惑，随后舌尖自然收回。00:22.500，镜头顺滑拉远，她同步回落，先重新露出眼睛、眼镜和肩膀，再让斜窗、金属椅、文件箱与地面纸张依次回到构图。00:26.500至00:30.000，她回到接近首帧的低位，一手搭着文件箱，只有轻呼吸、眼神和嘴角余动，安静凝视镜头并停住，构图呼应开头，不再增加动作或持续后退。\n\noverall_soundscape:\n整段保持高层办公室夜间低频室音，空调通风声很轻，窗外城市声被玻璃隔成模糊远景。动作伴随衣料摩擦、领带轻摆、手掌压住文件箱和纸张的细碎声，站起与回落时有轻微鞋底摩擦。近景段她的呼吸更清晰，但除指定台词外没有其他人声或额外音效。\n\nnon_diegetic_music:\nN/A"
+      "prompt": "subject_definitions:\n<Subject 1> from <Picture 1>: The same adult blonde woman throughout, with shoulder-length blonde hair, narrow black sunglasses, gold hoop earrings, a small flower pendant, black blazer, black ribbed top and shoulder-bag strap. Complete the unseen lower outfit with consistent black trousers and boots. She carries one heavy greatsword specified by the user; red-gold liquid sword energy follows its actual blade path.\n<Subject 2> from <Picture 2>: The same ruined suspended Eastern stone bridge above a cloud abyss, with broken rails, stone pillars, giant chains, cliffs and distant ancient buildings.\n<Subject 3> from <Picture 3>: One bone-white insectile machine with cracked armor, black mechanical tissue, two scythe forelimbs, extra limbs, antennae, damaged wings and a warm-gold chest core.\n\nsummary:\n[reference generation] A relentless, close-range 20-second duel on the suspended bridge. The woman survives successive upper, middle and lower scythe attacks, progressively damages one shoulder joint, opens the core guard and lands a final greatsword strike. Both fighters attack and counterattack continuously; every break in armor changes the next exchange.\n\nretention_analysis:\n<Subject 1>: fully_preserved — identity, hair, sunglasses and visible black clothing; new combat motion and the user-specified sword.\n<Subject 2>: fully_preserved — one continuous bridge location and its architecture; accumulated damage remains.\n<Subject 3>: fully_preserved — one consistent insectile machine, scythes, limbs, wings and gold core.\n\ndetailed_description:\nDark-fantasy CG with crisp silhouettes, aggressive camera movement and layered red-gold liquid blade trails against black-white mechanical energy. Fifteen rapid shots in 20 seconds; no pause, slow motion or frozen victory pose.\n[Shot 1] The machine dives diagonally into the bridge. Both scythes cross toward the woman's head; she drives forward under them and catches their crossing point with her greatsword. A narrow white impact core bursts into two red-gold rings; the stone under both fighters cracks.\n[Shot 2] At 00:01.300, a low lateral tracking shot follows her sword sliding down the left scythe. The machine jerks that blade free and stabs with the right; she turns her hips, beats the stab aside and answers with a short rising cut that chips its shoulder armor.\n[Shot 3] At 00:02.600, over her shoulder, the machine pins her sword with both scythes while a third limb shoots beneath the bind. She twists the sword flat to catch it, steps outside the attack line and drives the pommel into the machine's faceplate; bone fragments spin away.\n[Shot 4] At 00:03.900, a sharp reverse angle catches the machine recoiling only half a step before sweeping both scythes back. She ducks the first, meets the second edge-on, and her red-gold return slash carves a glowing groove through a bridge rail behind it.\n[Shot 5] At 00:05.200, the falling rail becomes the foreground wipe. The machine springs through it, attacking high-low-high with scythe, tail and scythe. She parries high, hops the tail without levitating, and rotates directly into a downward block that drives sparks into the deck.\n[Shot 6] At 00:06.500, close on boots and blade contact: the machine shoves her across loose stone; she digs in, shifts her grip and lets its pressure carry the greatsword around her shoulder. The returning edge strikes the already chipped joint; a thin gold fracture appears.\n[Shot 7] At 00:07.800, a wider bridge-side shot shows the machine instantly answering with two stabbing limbs. She bats the first into a pillar and slides inside the second; the pillar breaks, while her horizontal sword arc forces the machine sideways rather than hitting its core.\n[Shot 8] At 00:09.100, the camera follows its sideways skid. The machine hooks a scythe around her sword and yanks; she keeps both hands on the hilt, turns with the pull and shoulder-checks its center. Metal meets bone at close range; the core guard snaps shut.\n[Shot 9] At 00:10.400, a brief overhead view clarifies their positions beside the cracked pillar. The machine attacks from above with both scythes while its tail cuts across her escape route. She blocks one, deflects the other into the tail, and escapes through the gap their collision creates.\n[Shot 10] At 00:11.700, a fast side follow sees her launch three connected cuts—diagonal, horizontal, rising. The machine catches the first two with opposite scythes, but the third tears open the pre-fractured shoulder joint. White armor, black fluid-like energy and cold sparks separate in distinct layers.\n[Shot 11] At 00:13.000, the machine compensates immediately, rotating its intact side forward and striking with a scythe-tail combination. She retreats only one step, catches the scythe on her sword spine and lets the tail break the stone where her foot had been.\n[Shot 12] At 00:14.300, from behind the machine, she uses that broken stone as a springboard. Her sword comes down; the machine raises its intact scythe and redirects the blow into a chain anchor. The anchor cracks, the giant chain jerks, and both fighters adjust their footing as it swings.\n[Shot 13] At 00:15.600, a tight orbit follows the renewed clash: scythe slash, sword catch, third-limb thrust, body turn, sword-back strike. The woman presses the broken shoulder side; the machine guards the chest with its remaining scythe, exposing the earlier fracture around the core.\n[Shot 14] At 00:16.900, the machine surges forward with a gold-core pulse and two rapid cuts. She blocks the first, slips beneath the second and cuts across the damaged shoulder-to-chest seam. Red-gold liquid light travels through the real cut; the guard plates split open.\n[Shot 15] At 00:18.300, the machine lunges once more. She turns its scythe off-line, plants both feet on the cracked deck and drives the unchanged greatsword into the exposed core housing. A narrow white flash expands into a red-gold ring and falling armor fragments; the machine collapses, its core dims, and the already-broken bridge keeps shedding stone into the clouds.\n\noverall_soundscape:\nContinuous steel-on-bone impacts, differentiated misses and contacts, boot scrapes, snapping stone, whipping chain and short electrical crackles. The final core strike has one deep impact followed by falling debris; no dialogue.\nnon_diegetic_music:\nFast dark orchestral percussion and low brass, with sharp rhythmic accents matching the exchanges; the score does not drown out the weapon contacts.\n\nConstraints: no gore, dismemberment, extra characters, weapon changes, costume changes, location changes, UI, text, watermark, slow motion, idle staring, one-sided attacks, spatial resets or repaired scenery."
     }
   },
   "29": {
     "class_type": "ResolutionSelector",
     "inputs": {
       "aspect_ratio": "16:9 (Widescreen)",
-      "megapixels": 0.4,
+      "megapixels": 0.5,
       "multiple": 32
     }
   },
@@ -429,7 +410,7 @@
     "class_type": "LoraLoaderModelOnly",
     "inputs": {
       "lora_name": "Motion_Repair.safetensors",
-      "strength_model": 0.7000000000000002,
+      "strength_model": 0.7500000000000001,
       "model": [
         "50",
         0
@@ -648,6 +629,56 @@
       "model_action": "Purge Model",
       "bridge_input": [
         "20",
+        0
+      ]
+    }
+  },
+  "74": {
+    "class_type": "SaveVideo",
+    "inputs": {
+      "filename_prefix": "video/ComfyUI",
+      "format": "auto",
+      "codec": "auto",
+      "video": [
+        "75",
+        0
+      ]
+    }
+  },
+  "75": {
+    "class_type": "CreateVideo",
+    "inputs": {
+      "fps": 24,
+      "bit_depth": "auto",
+      "color_space": "sRGB",
+      "codec": "none",
+      "images": [
+        "76",
+        0
+      ],
+      "audio": [
+        "20",
+        1
+      ]
+    }
+  },
+  "76": {
+    "class_type": "TopazLocalUpscale",
+    "inputs": {
+      "模型": "Proteus [prob-4]",
+      "放大倍数": 1.5,
+      "增强强度": 1.0,
+      "目标宽度": 0,
+      "目标高度": 0,
+      "帧率": 24,
+      "GPU编号": 0,
+      "显存比例": 0.8,
+      "引擎目录": "D:\\topazvideo",
+      "模型定义目录": "C:\\ProgramData\\Topaz Labs LLC\\Topaz Video\\models",
+      "模型数据目录": "D:\\ComfyUI-aki-v3\\ComfyUI\\models\\topaz-models\\model_data_directory",
+      "保留中间文件": false,
+      "图像": [
+        "69",
         0
       ]
     }

@@ -1067,6 +1067,49 @@ test('Gemini Omni video edit sends billing seconds to NewAPI without RH duration
   }
 })
 
+test('本机 H3 参考生视频把比例字段 ratio 透传给适配器', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.model, 'jc-minimax-h3-ref2v')
+      assert.equal(body.aspect_ratio, '9:16 (Portrait Widescreen)')
+      assert.equal(body.size, undefined)
+      assert.deepEqual(body.extra_fields, { mode: 0, aspect_ratio: '9:16 (Portrait Widescreen)' })
+      // NewAPI 会丢掉顶层自定义字段与 extra_fields，只有 metadata 能活着到适配器
+      assert.deepEqual(body.metadata, { mode: 0, aspect_ratio: '9:16 (Portrait Widescreen)' })
+      assert.deepEqual(body.images, ['https://example.com/reference.png'])
+      return Response.json({ id: 'task_jc_h3_ref2v_001', status: 'queued' })
+    }
+    if (url.endsWith('/v1/videos/task_jc_h3_ref2v_001')) {
+      return Response.json({
+        id: 'task_jc_h3_ref2v_001', status: 'completed', progress: 100,
+        metadata: { url: 'https://api.jiucaihezi.studio/v1/videos/task_jc_h3_ref2v_001/content' },
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'jc-minimax-h3-ref2v',
+      params: {
+        prompt: '竖屏人物回头', duration: 3,
+        ratio: '9:16 (Portrait Widescreen)',
+        images: ['https://example.com/reference.png'],
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://api.jiucaihezi.studio/v1/videos/task_jc_h3_ref2v_001/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Xiaoyi MiniMax H3 submits string seconds without duplicate duration', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

@@ -218,12 +218,21 @@ class WorkflowTemplate:
     # ------------------------------------------------------ 参数归一化
     def normalize(self, raw: dict, *, max_batch: int) -> dict[str, Any]:
         """把 OpenAI 风格入参整理成可直接渲染的字典。"""
-        # NewAPI 只透传它认识的顶层字段，自定义参数由调用方放在 extra_fields 里发过来
-        # （RH 链路的 webappId 就是这么传的）。先摊平到顶层，后面的 bind / clamp / int_params
-        # 照旧工作；已存在的同名顶层键优先。
-        extra = raw.get("extra_fields") or raw.get("extraFields")
-        if isinstance(extra, dict):
-            for key, value in extra.items():
+        # NewAPI 只转发它 TaskSubmitReq 里认得的字段（model/prompt/images/duration/size/
+        # mode/metadata…）：顶层的自定义字段与 extra_fields 都会被整段丢掉。
+        # metadata 是它唯一保留的自定义槽位（RH 链路的 metadata.rh_aiapp 一直走这条，
+        # 2026-10-01 实测本机 comfy 渠道的 aspect_ratio 也只有放进 metadata 才到得了）。
+        # 两个入口都摊平到顶层，后面的 bind / clamp / int_params 照旧工作；已存在的同名
+        # 顶层键优先。只摊平标量：metadata 里可能有嵌套对象（如 rh_aiapp），那不是模板参数。
+        for holder in (
+            raw.get("extra_fields") or raw.get("extraFields"),
+            raw.get("metadata"),
+        ):
+            if not isinstance(holder, dict):
+                continue
+            for key, value in holder.items():
+                if isinstance(value, (dict, list)):
+                    continue
                 raw.setdefault(key, value)
         c = self.constraints
         multiple = int(c.get("multiple_of", 16))
