@@ -260,7 +260,7 @@ export function selectMemoryTools(
       'copy',
       'delete',
       'write_text_batch',
-      // `@文件` = 本机全权：拿到路径就放开终端、Skill 脚本与本地 3D 导出。
+      // 桌面端 `@文件` = 本机全权；Web/iOS 的工具白名单本身不包含终端、Skill 脚本或本地 3D 导出。
       'terminal',
       'skill_run_script',
       'export_3d_scene_video',
@@ -358,10 +358,11 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     ) || agentStore.availableModels.find(entry => entry.id === input.modelId)
   const latestUserTurn = input.userTurn
   const latestUserText = latestUserTurn?.content || ''
-  const authorizedPaths = [
-    ...new Set([...(input.authorizedPaths || []), ...collectAuthorizedPaths(latestUserText)]),
-  ]
   const desktopRuntime = isTauriRuntime() && !isTauriMobileRuntime()
+  // Web/iOS 权限固定为当前项目工作区；用户消息中的绝对路径不能扩大授权范围。
+  const authorizedPaths = desktopRuntime
+    ? [...new Set([...(input.authorizedPaths || []), ...collectAuthorizedPaths(latestUserText)])]
+    : []
   const explicitCapabilitySelected = hasExplicitMemoryCapability(input)
   const attachmentNeedsRead = Boolean(
     input.attachments?.some(

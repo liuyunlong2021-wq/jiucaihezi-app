@@ -151,15 +151,14 @@ function buildSkillRuntimeAppendix(
 const SKILL_CREATOR_RUNTIME_APPENDIX = `
 
 ---
-## 韭菜盒子运行时差异（只列宿主差异；流程以本 Skill 正文为准）
+## 韭菜盒子运行时差异
 
-当前运行环境是韭菜盒子，不是 Claude/Codex。不得调用 claude-with-access-to-the-skill 或 subagent；读写项目外绝对路径时，是否放行由系统运行时判定（用户消息里给过该路径才可用，本会话内持续有效）；Skill 不得假设或代为决定权限。
-Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。
-官方 Python 脚本通过韭菜盒子已接入的受限脚本执行能力运行；Web/Mobile 不伪造本地脚本执行结果。
+当前运行环境是韭菜盒子。不得调用 claude-with-access-to-the-skill 或 subagent。不要假设 Web/Mobile 可以访问桌面本地目录或运行本机脚本；不得伪造执行结果。
+Skill 包内的 references、scripts、agents、eval-viewer 和 assets 必须使用当前 Skill 的相对路径读取；产品会将其安全映射到已加载包根目录。只有当前平台确实提供相应执行能力、且任务需要时才运行配套脚本。
 
-**文件能力**：Skill 层不限制文件权限。用户已给出某个目录或文件的绝对路径时，直接用 read、write、edit 读写它（含 references、scripts、assets），不要绕道其他写法；没有路径时用 skill_creator_load_installed_skill 按精确 ID 读「我的 Skill」里的 SKILL.md，并请用户把 Skill 文件夹的绝对路径发过来。不得自造路径，也不得用 Terminal 兜底搜索。
+**草稿位置**：草稿写在当前项目文件树 \`.raw/jc-media/文档/skill-<skill-name>/\`，用项目文件工具读写。所有生命周期工具统一传同一个 \`draft_path\`。编辑已有 Skill 时，用 \`skill_creator_load_installed_skill\` 按准确 ID 读取，然后在项目内建立草稿；不要要求用户提供桌面 Skill 目录的绝对路径。
 
-**草稿位置**：草稿写在项目文件树里 —— \`.raw/jc-media/文档/skill-<skill-name>/\`，用文件工具写（write_text_batch 一次写多份，或 create_document 写单份）。所有生命周期工具都传同一个 draft_path，不再有别的草稿标识。改内容就用文件工具改那个目录，改完重新调用 skill_creator_validate。
+准备安装卡前调用 \`skill_creator_validate\` 做必要的结构和包路径检查，再调用 \`save_skill\`。默认不创建或运行行为测试、eval、基准比较或评审；只有用户明确要求时才使用对应工具。安装卡由用户点击后才会安装。
 
 可用工具：skill_creator_load_installed_skill、skill_creator_validate、run_skill_tests、skill_creator_submit_eval_feedback、skill_creator_load_eval_feedback、skill_creator_open_eval_review、skill_creator_compare_outputs、skill_creator_analyze_comparison、skill_creator_aggregate_benchmark、skill_creator_improve_description、skill_creator_package、save_skill。
 `

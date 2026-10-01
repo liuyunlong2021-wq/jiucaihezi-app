@@ -55,7 +55,7 @@ const logoutBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteError = ref('')
 const agentStore = useAgentStore()
-const appVersion = __APP_VERSION__
+const appVersion = desktopRuntime || mobileRuntime ? __APP_VERSION__ : `Web ${__WEB_VERSION__}`
 const { theme } = useTheme()
 const textModels = computed(() => agentStore.textModels.map(model => ({ id: model.id, label: model.label })))
 const themeOptions = [
@@ -250,7 +250,7 @@ function showSync() {
       <button :class="{ active: tab === 'sync' }" @click="showSync">
         <JcIcon name="sync" />同步
       </button>
-      <button v-if="desktopRuntime" :class="{ active: tab === 'skills' }" @click="tab = 'skills'">
+      <button :class="{ active: tab === 'skills' }" @click="tab = 'skills'">
         <JcIcon name="extension" />Skill
       </button>
       <button v-if="desktopRuntime" :class="{ active: tab === 'mcp' }" @click="tab = 'mcp'">
@@ -395,7 +395,7 @@ function showSync() {
           <p>当前项目尚未上传。请点击左上角项目名，在项目中心上传当前项目或下载云项目。</p>
         </template>
       </div>
-      <WebSkillPanel v-else-if="desktopRuntime && tab === 'skills'" />
+      <WebSkillPanel v-else-if="tab === 'skills'" />
       <McpManagerPanel v-else-if="desktopRuntime && tab === 'mcp'" />
       <div v-else class="memory-appearance">
         <div class="memory-theme-options" aria-label="主题">

@@ -22,8 +22,8 @@ allowed-tools:
 - `上传并覆盖云端` 用本地文字快照覆盖云端，`下载并覆盖本地` 用云端文字快照覆盖本地；两者都不合并、不产生冲突副本。
 - 同步只处理允许的文字资料；媒体二进制、原始附件、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不参与同步。
 - Desktop 保留完整本机能力。
-- Web / Mobile 保留项目内读写、附件、文档转换、云媒体、`.canvas` 和 `.jccanvas`；不提供 `.jcscene`、Three.js、FFmpeg、Terminal、本地模型或自定义 MCP。
-- 在“我的 Skill”点击“修改”会自动选择 Skill Creator，并填入 Skill ID 与中央 Skill 路径；Skill Creator 先按 ID 读取真实内容，用户确认安装卡后覆盖原 Skill。
+- Web / Mobile 使用项目内读写、附件、文档转换、云媒体、`.canvas` 和 `.jccanvas`；不提供 `.jcscene`、Three.js、FFmpeg、Terminal、本地模型或 MCP 管理。
+- 三端均可管理 Skill；Web / Mobile 提供自建、编辑、删除和内置 Skill 定制。通过中央 Skill 目录让 AI 新建或修改的入口仅在 Desktop 提供，安装仍由用户确认。
 - 桌面三平台发布由版本 `v*` tag 触发 GitHub Actions；`main` 推送只更新源码，不直接生成安装包。
 
 ## 回答流程

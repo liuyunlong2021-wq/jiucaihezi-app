@@ -5,17 +5,19 @@
  */
 import { computed, ref, watch } from 'vue'
 import { resolveJcMediaUrl } from '@/utils/mediaFileReader'
-import { captureVideoFrame, videoCrossOriginFor } from '@/utils/videoFrame'
+import { captureVideoFrame, captureVideoFrameJpeg, videoCrossOriginFor } from '@/utils/videoFrame'
 
 const props = defineProps<{
   show: boolean
   url: string
   title?: string
+  enableVideoAnalysis?: boolean
 }>()
 
 const emit = defineEmits<{
   close: []
   captured: [file: File, seconds: number]
+  framesCaptured: [frames: Array<{ file: File; seconds: number }>]
 }>()
 
 const videoEl = ref<HTMLVideoElement | null>(null)
@@ -24,6 +26,7 @@ const duration = ref(0)
 const currentTime = ref(0)
 const error = ref('')
 const capturing = ref(false)
+const analysisProgress = ref('')
 
 const crossOrigin = computed(() => videoCrossOriginFor(resolvedSrc.value))
 
@@ -91,6 +94,72 @@ async function captureFrame() {
     capturing.value = false
   }
 }
+
+async function seekForAnalysis(video: HTMLVideoElement, seconds: number) {
+  if (Math.abs(video.currentTime - seconds) < 0.02) return
+  await new Promise<void>((resolve, reject) => {
+    const finish = (cause?: Error) => {
+      window.clearTimeout(timeout)
+      video.removeEventListener('seeked', onSeeked)
+      if (cause) reject(cause)
+      else resolve()
+    }
+    const onSeeked = () => finish()
+    const timeout = window.setTimeout(() => finish(new Error('视频定位超时，请重试')), 10_000)
+    video.addEventListener('seeked', onSeeked, { once: true })
+    video.currentTime = seconds
+  })
+}
+
+async function waitForVideoFrame(video: HTMLVideoElement) {
+  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) return
+  await new Promise<void>((resolve, reject) => {
+    const timeout = window.setTimeout(() => finish(new Error('视频画面加载超时，请重试')), 10_000)
+    const finish = (cause?: Error) => {
+      window.clearTimeout(timeout)
+      video.removeEventListener('loadeddata', onLoaded)
+      video.removeEventListener('error', onError)
+      if (cause) reject(cause)
+      else resolve()
+    }
+    const onLoaded = () => finish()
+    const onError = () => finish(new Error('浏览器无法解码该视频'))
+    video.addEventListener('loadeddata', onLoaded, { once: true })
+    video.addEventListener('error', onError, { once: true })
+  })
+}
+
+async function analyzeVideoFrames() {
+  const video = videoEl.value
+    if (!video || capturing.value || !Number.isFinite(duration.value) || duration.value <= 0) return
+  capturing.value = true
+  error.value = ''
+  analysisProgress.value = ''
+  try {
+    video.pause()
+    const count = Math.min(12, Math.max(1, Math.ceil(duration.value / 5) + 1))
+    const base = (props.title || '视频').replace(/\.[^.]+$/, '').replace(/[\\/:*?"<>|]/g, '_') || '视频'
+    const frames: Array<{ file: File; seconds: number }> = []
+    for (let index = 0; index < count; index += 1) {
+      const seconds = count === 1 ? 0 : duration.value * index / (count - 1)
+      await seekForAnalysis(video, seconds)
+      await waitForVideoFrame(video)
+      const blob = await captureVideoFrameJpeg(video)
+      frames.push({
+        file: new File([blob], `视频帧_${base}_${seconds.toFixed(1)}s.jpg`, { type: 'image/jpeg' }),
+        seconds,
+      })
+      analysisProgress.value = `正在抽取 ${index + 1}/${count} 帧`
+    }
+    emit('framesCaptured', frames)
+    emit('close')
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : String(cause)
+  } finally {
+    capturing.value = false
+    analysisProgress.value = ''
+  }
+}
 </script>
 
 <template>
@@ -133,8 +202,12 @@ async function captureFrame() {
             <button class="fcd-primary" type="button" :disabled="capturing || !resolvedSrc" @click="captureFrame">
               <JcIcon name="photo_camera" />{{ capturing ? '截取中…' : '截此帧 → 存入图片并加入画布' }}
             </button>
+            <button v-if="enableVideoAnalysis" class="fcd-analysis" type="button" :disabled="capturing || !resolvedSrc || !duration" @click="analyzeVideoFrames">
+              <JcIcon name="psychology" />{{ analysisProgress || '抽帧给 AI 分析' }}
+            </button>
           </div>
           <p class="fcd-hint">拖到你想要的那一帧再截。截完会保存到项目「图片」目录，并放到画布；之后可在画布中选中它作为参考图。</p>
+          <p v-if="enableVideoAnalysis" class="fcd-hint">“抽帧给 AI”会均匀覆盖全片，最多 12 帧；短视频约每 5 秒一帧，帧图会压缩保存到项目并加入当前对话。</p>
           <p v-if="error" class="fcd-error">{{ error }}</p>
         </div>
       </section>
@@ -154,12 +227,14 @@ async function captureFrame() {
 .fcd-video { max-width: 100%; max-height: 56vh; cursor: pointer; }
 .fcd-controls { padding: 12px 16px 14px; }
 .fcd-range { width: 100%; margin: 0 0 10px; accent-color: var(--olive, #6b7f3a); }
-.fcd-row { display: flex; align-items: center; gap: 10px; }
+.fcd-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .fcd-step { display: inline-flex; align-items: center; gap: 2px; padding: 5px 8px; border: 1px solid var(--line, #ddd); border-radius: 8px; background: #fff; color: var(--ink2, #444); font-size: calc(var(--font-base, 14px) - 2px); cursor: pointer; }
 .fcd-step:hover { background: rgba(0, 0, 0, .04); }
 .fcd-time { color: var(--ink2, #444); font-size: calc(var(--font-base, 14px) - 1px); font-variant-numeric: tabular-nums; }
 .fcd-primary { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 8px 16px; border: 0; border-radius: 10px; background: var(--olive, #6b7f3a); color: #fff; font-size: calc(var(--font-base, 14px) - 1px); cursor: pointer; }
 .fcd-primary:disabled { opacity: .5; cursor: default; }
+.fcd-analysis { display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border: 1px solid var(--olive, #6b7f3a); border-radius: 10px; background: transparent; color: var(--olive, #6b7f3a); font-size: calc(var(--font-base, 14px) - 1px); cursor: pointer; }
+.fcd-analysis:disabled { opacity: .5; cursor: default; }
 .fcd-hint { margin: 10px 0 0; color: var(--ink3, #999); font-size: calc(var(--font-base, 14px) - 2px); line-height: 1.5; }
 .fcd-error { margin: 8px 0 0; color: #c0392b; font-size: calc(var(--font-base, 14px) - 2px); }
 </style>

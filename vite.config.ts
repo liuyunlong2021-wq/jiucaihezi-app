@@ -8,6 +8,7 @@ const host = process.env.TAURI_DEV_HOST
 const assetVersion = process.env.JC_ASSET_VERSION || 'jc20260610b'
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8'))
 const appVersion = JSON.stringify(pkg.version || '0.0.0')
+const webVersion = JSON.stringify(pkg.webVersion || '0.0.0')
 const apiProxy = {
   target: 'https://api.jiucaihezi.studio',
   changeOrigin: true,
@@ -26,6 +27,7 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: appVersion,
+    __WEB_VERSION__: webVersion,
   },
   // prevent vite from obscuring rust errors
   clearScreen: false,

@@ -8,11 +8,12 @@ import type { SkillConfig } from '@/types/skill'
 import { parseSkillMd } from '@/types/skill'
 import { loadWebSkillCatalog, type WebSkillCatalogEntry } from '@/utils/skillContentResolver'
 import { confirmAction } from '@/utils/confirmAction'
-import { isTauriRuntime } from '@/utils/tauriEnv'
+import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { emitEvent } from '@/utils/eventBus'
 
 const store = useAgentStore()
 const manage = useSkillsManageStore()
+const desktopRuntime = isTauriRuntime() && !isTauriMobileRuntime()
 const query = ref('')
 const showEditor = ref(false)
 const editingSkill = ref<SkillConfig | null>(null)
@@ -58,6 +59,7 @@ function openEdit(skill: SkillConfig) {
 }
 
 function requestSkillEdit(skill: SkillConfig) {
+  if (!desktopRuntime) return
   emitEvent('skill-creator-edit', {
     skillId: skill.id,
     // 文件能力合同：中央 Skill 在项目外，必须是绝对路径；目录授权才能连带改 references
@@ -67,6 +69,7 @@ function requestSkillEdit(skill: SkillConfig) {
 
 /** AI 新建：把中央 Skill 根目录的绝对路径交给对话，模型就能直接落盘 */
 function requestSkillCreate() {
+  if (!desktopRuntime) return
   emitEvent('skill-creator-create', { skillsRoot: centralSkillsRoot.value })
 }
 
@@ -150,7 +153,7 @@ async function customizeBuiltInSkill(skill: WebSkillCatalogEntry) {
 }
 
 async function openLocalDirectory() {
-  if (!isTauriRuntime()) return
+  if (!desktopRuntime) return
   await invoke('open_central_skills_directory')
 }
 </script>
@@ -160,9 +163,9 @@ async function openLocalDirectory() {
     <header class="wsp-head">
       <strong>Skill 仓库</strong>
       <div class="wsp-head-actions">
-        <button class="wsp-create" type="button" @click="requestSkillCreate">AI 新建</button>
+        <button v-if="desktopRuntime" class="wsp-create" type="button" @click="requestSkillCreate">AI 新建</button>
         <button class="wsp-create" type="button" @click="openCreate">自建</button>
-        <button class="wsp-create" type="button" @click="openLocalDirectory">打开本地目录</button>
+        <button v-if="desktopRuntime" class="wsp-create" type="button" @click="openLocalDirectory">打开本地目录</button>
       </div>
     </header>
     <label class="wsp-search"><input v-model="query" type="search" placeholder="搜索 Skill" /></label>
@@ -190,7 +193,7 @@ async function openLocalDirectory() {
             <p>{{ skill.description || '暂无描述' }}</p>
           </div>
           <div class="wsp-user-actions">
-            <button type="button" @click="requestSkillEdit(skill)">修改</button>
+            <button v-if="desktopRuntime" type="button" @click="requestSkillEdit(skill)">修改</button>
             <button type="button" @click="openEdit(skill)">编辑</button>
             <button class="danger" type="button" @click="deleteSkill(skill)">删除</button>
           </div>

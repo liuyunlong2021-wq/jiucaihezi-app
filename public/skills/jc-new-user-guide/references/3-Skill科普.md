@@ -44,7 +44,7 @@ Skill 不负责保存对话历史，也不等于 Wiki。当前对话的最近三
 | 检查 Skill | `审计一下 [Skill名]，看看有没有问题` |
 | 优化 Skill | `优化一下 [Skill名] 的描述/触发词` |
 
-在“我的 Skill”点击“修改”时，工作台会自动选择 Skill Creator，并填入精确 Skill ID 和中央 Skill 路径。Skill Creator 必须先按 Skill ID 读取已安装的真实 `SKILL.md`，修改后展示安装卡；用户点击确认后才覆盖原 Skill。中央目录通常是 `~/.agents/skills`，不要把输入框里的展示路径当作加载参数，也不要让它用 Terminal 搜索。
+Desktop 用户在“我的 Skill”点击“修改”时，工作台会自动选择 Skill Creator，并填入精确 Skill ID 和中央 Skill 路径。Skill Creator 按 ID 读取已安装的真实 `SKILL.md`，修改后展示安装卡；用户点击确认后才覆盖原 Skill。中央目录通常是 `~/.agents/skills`，不要把输入框里的展示路径当作加载参数，也不要让它用 Terminal 搜索。Web / Mobile 可在 Skill 管理页手动创建、编辑、删除和定制 Skill；中央目录的 AI 新建/修改入口仅在 Desktop 提供。
 
 ## 常见问题
 

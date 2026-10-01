@@ -29,6 +29,31 @@ export async function captureVideoFrame(video: HTMLVideoElement): Promise<Blob> 
   })
 }
 
+/** 抽帧给视觉模型：限制长边和 JPEG 质量，避免原始视频分辨率推高附件体积。 */
+export async function captureVideoFrameJpeg(video: HTMLVideoElement, maxDimension = 1280): Promise<Blob> {
+  const width = video.videoWidth
+  const height = video.videoHeight
+  if (!width || !height) throw new Error('视频还没有可截取的画面')
+  const scale = Math.min(1, maxDimension / Math.max(width, height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('截帧失败：画布不可用')
+  try {
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
+  } catch {
+    throw new Error('该视频源不允许截帧，请先保存到项目后再试')
+  }
+  return await new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('截帧失败，请重试'))), 'image/jpeg', 0.78)
+    } catch {
+      reject(new Error('该视频源不允许截帧，请先保存到项目后再试'))
+    }
+  })
+}
+
 /**
  * Tauri 本地文件（asset 协议，响应带窗口 Origin 的 CORS 头）需要 CORS 模式加载，
  * canvas 截帧才不被污染；远程源保持原样，避免无 CORS 头的源直接加载失败。

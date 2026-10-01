@@ -153,8 +153,8 @@ const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
-const fileToolsSelected = ref(false)
-// 文件能力合同：授权只来自用户在消息里给出的绝对路径，本会话内累积有效。
+const fileToolsSelected = ref(!desktopOnlyRuntime)
+// Web/iOS 默认仅在当前项目工作区内开放文件工具；桌面端继续使用原有显式开关。
 const authorizedPaths = ref<string[]>([])
 const selectedMcpToolNames = ref<string[]>([])
 const mcpStore = useMcpStore()
@@ -164,7 +164,7 @@ const scene3dSelected = ref(false)
 // @Jev：本轮交给决策层选 Skill、能力与模型档位。默认关，关着时行为与手动模式完全一致。
 const jevSelected = ref(false)
 const selectedToolChips = computed(() => [
-  { id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value },
+  ...(desktopOnlyRuntime ? [{ id: 'file', label: '@文件', icon: 'description', selected: fileToolsSelected.value }] : []),
   ...selectedMcpToolNames.value.map(id => {
     const serverId = id.slice('mcp__'.length)
     return {
@@ -178,13 +178,11 @@ const selectedToolChips = computed(() => [
   { id: 'av', label: '@影音', icon: 'movie', selected: avSelected.value },
   { id: 'scene3d', label: '@3D', icon: 'view-in-ar', selected: scene3dSelected.value },
 ].filter(tool => tool.selected))
-// 文件能力合同：开关与引用文件是会话级状态，随用户消息落盘、重开对话时从最后一轮用户消息恢复。
-// 一轮跑完只清一次性状态（输入框、当轮附件），不清开关与引用——静默收权、引用自己掉下来
-// 都会让用户以为能力还在，得再点一次才能继续。
+// 桌面端开关与文件引用随对话恢复；Web/iOS 文件操作始终受当前项目工作区限制。
 function toolChipIds(): string[] {
   const ids: string[] = []
   if (jevSelected.value) ids.push('jev')
-  if (fileToolsSelected.value) ids.push('file')
+  if (desktopOnlyRuntime && fileToolsSelected.value) ids.push('file')
   if (mediaSelected.value) ids.push('media')
   if (avSelected.value) ids.push('av')
   if (scene3dSelected.value) ids.push('scene3d')
@@ -195,7 +193,8 @@ function toolChipIds(): string[] {
 function applyToolChipIds(ids?: string[]) {
   const next = new Set(ids || [])
   jevSelected.value = next.has('jev')
-  fileToolsSelected.value = next.has('file')
+  // 旧会话的 @文件 代表完全权限；Web/iOS 忽略该历史状态并固定为工作区内修改。
+  fileToolsSelected.value = desktopOnlyRuntime ? next.has('file') : true
   selectedMcpToolNames.value = [...next].filter(id => id.startsWith('mcp__'))
   mediaSelected.value = next.has('media')
   avSelected.value = next.has('av')
@@ -303,6 +302,38 @@ async function handleCapturedFrame(file: File) {
       : '已存入图片；下次打开画布时会自动出现'
   } catch (cause) {
     contextNotice.value = `截帧保存失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
+async function handleVideoFramesCaptured(frames: Array<{ file: File; seconds: number }>) {
+  const owner = projectOwner.value
+  if (!owner) {
+    contextNotice.value = '请先选择项目再分析视频'
+    return
+  }
+  try {
+    const existing = new Set((await files.list(owner)).map(item => item.path))
+    const resources: ProjectResource[] = []
+    for (const { file } of frames) {
+      const resource = await fileActions.importMedia({
+        owner,
+        path: nextMaterialPath('.raw/jc-media/图片', file.name, existing),
+        data: new Uint8Array(await file.arrayBuffer()),
+        mimeType: 'image/jpeg',
+      })
+      existing.add(resource.path)
+      resources.push(resource)
+    }
+    await addProjectMediaReferences({ resources })
+    const available = await availableSkillNamesForComposer()
+    if (available.has('jc-watch') && !selectedSkillNames.value.includes('jc-watch')) selectedSkillNames.value.push('jc-watch')
+    const timestamps = frames.map(frame => `${Math.floor(frame.seconds / 60)}:${(frame.seconds % 60).toFixed(1).padStart(4, '0')}`).join('、')
+    input.value = [input.value.trim(), `请按时间顺序分析这些视频帧（时间点：${timestamps}），总结画面内容、关键变化和值得注意的细节。`].filter(Boolean).join('\n\n')
+    setEditorText(composerRef.value, input.value)
+    composerRef.value?.focus()
+    contextNotice.value = `已抽取 ${frames.length} 帧并加入对话；确认提示后发送即可分析。`
+  } catch (cause) {
+    contextNotice.value = `视频抽帧失败：${cause instanceof Error ? cause.message : String(cause)}`
   }
 }
 type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
@@ -526,11 +557,11 @@ type MemoryMentionOption =
   | { type: 'skill'; display: string; description: string; name: string }
 
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
-  // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
+  // 桌面端 terminal 已并入 @文件、不再单列；Web/iOS 不提供这些本机能力。
   const toolOptions: MemoryMentionOption[] = [
     { type: 'tool', id: 'jev', display: 'Jev', description: '自动判断本轮需要的 Skill、能力和模型档位', icon: 'alt-route' },
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
-    { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
+    ...(desktopOnlyRuntime ? [{ type: 'tool' as const, id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' }] : []),
     ...(desktopOnlyRuntime
       ? [{ type: 'tool' as const, id: 'scene3d', display: '3D', description: '创建或编辑 3D 场景', icon: 'view-in-ar' }]
       : []),
@@ -672,7 +703,7 @@ function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
 }
 const toolCommands = [
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
-  { id: 'file', label: '@文件', icon: 'description', description: '读写权限' },
+  ...(desktopOnlyRuntime ? [{ id: 'file', label: '@文件', icon: 'description', description: '读写权限' }] : []),
   { id: 'media', label: '@图文', icon: 'image', description: '创建文档、网页、图片和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
@@ -817,7 +848,7 @@ function requestSkillCreatorEdit(payload: unknown) {
   const skillPath = String(data?.skillPath || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
   if (!/^[a-z0-9][a-z0-9-]*$/i.test(skillId)) return
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
-  // 文件能力合同：@文件 是唯一文件开关；Skill 目录的绝对路径就是本会话的读写授权
+  // 桌面端 @文件 是本机操作开关；Web/iOS 仍只能操作项目工作区内文件。
   fileToolsSelected.value = true
   const target = /^(?:\/|[A-Za-z]:\/)/.test(skillPath) ? skillPath : ''
   const prefix = `请修改这个 Skill：\n\nSkill 目录：\n${target || '（把 Skill 文件夹的完整绝对路径粘贴到这里）'}\n\n修改要求：\n`
@@ -834,7 +865,7 @@ function requestSkillCreatorCreate(payload: unknown) {
   const skillsRoot = String(data?.skillsRoot || '').trim().replace(/\\/g, '/').replace(/\/+$/, '')
   const target = /^(?:\/|[A-Za-z]:\/)/.test(skillsRoot) ? skillsRoot : ''
   selectedSkillNames.value = [...new Set([...selectedSkillNames.value, 'skill-creator'])]
-  // 文件能力合同：产品入口代用户给出中央 Skill 根目录的绝对路径，就是本次的写授权
+  // 桌面端产品入口使用用户提供的中央 Skill 根目录作为写授权；Web/iOS 仍受项目根限制。
   fileToolsSelected.value = true
   const prefix = `请新建一个 Skill：\n\nSkill 根目录：\n${target || '（把中央 Skill 根目录的完整绝对路径粘贴到这里）'}\n\n新建要求：\n`
   input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${prefix}` : prefix
@@ -1265,7 +1296,7 @@ function enableTool(id: string) {
 
 function disableTool(id: string) {
   if (id === 'jev') jevSelected.value = false
-  if (id === 'file') fileToolsSelected.value = false
+  if (id === 'file' && desktopOnlyRuntime) fileToolsSelected.value = false
   if (id.startsWith('mcp__')) {
     selectedMcpToolNames.value = selectedMcpToolNames.value.filter(item => item !== id)
     return
@@ -1731,20 +1762,16 @@ async function send() {
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || activeAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
     : undefined
-  // 合同：授权来自用户消息。「编辑并重新发送」会截断后续轮次，被截掉的授权必须一起失效，
-  // 所以按保留的轮次重算，而不是把历史授权直接并上来。
-  authorizedPaths.value = [
-    ...new Set(
-      collectAuthorizedPaths(
+  // 桌面端仍允许用户在消息中明确授权项目外路径；Web/iOS 始终限制在当前项目工作区。
+  authorizedPaths.value = desktopOnlyRuntime
+    ? [...new Set(collectAuthorizedPaths(
         [...(editTargetId ? baseTurns : active.transcript.turns), userTurn]
           .filter(turn => turn.role === 'user')
           .map(turn => turn.content)
           .join('\n'),
-      ),
-    ),
-  ]
-  // 文件能力合同：开关关掉就是收权，收权必须可见——静默收权会让用户以为文件能力还在。
-  if (!fileToolsSelected.value && authorizedPaths.value.length)
+      ))]
+    : []
+  if (desktopOnlyRuntime && !fileToolsSelected.value && authorizedPaths.value.length)
     contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但 @文件 已关闭：本轮不会读写这些路径。`
 
   const runKey = memoryRunKey(active.resource.owner, active.resource.path)
@@ -3427,8 +3454,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       :show="showFrameCapture"
       :url="mediaUrl"
       :title="previewResource?.resource?.name || ''"
+      :enable-video-analysis="!desktopOnlyRuntime"
       @close="showFrameCapture = false"
       @captured="handleCapturedFrame"
+      @frames-captured="handleVideoFramesCaptured"
     />
 
     <aside v-if="creationMounted" class="memory-creation">
