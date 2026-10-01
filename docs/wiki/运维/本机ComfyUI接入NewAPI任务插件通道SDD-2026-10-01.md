@@ -263,7 +263,7 @@ export function extractUsageOnComplete(ctx, result, body) {
 | 2 | 本地 `new-api plugin lint` / Sandbox dry-run | 无报错 |
 | 3 | 管理员页上传并激活（key=`comfy`, version=`0.1.0`） | 插件列表可见 |
 | 4 | 建 **type 61「Task Plugin」**渠道：plugin key `comfy`、Base URL `http://frps:8796`、密钥同渠道 140、模型 `jc-minimax-h3` / `jc-minimax-h3-ref2v`、映射到适配器 id | 保存成功 |
-| 5 | 定价：任务用量模式，`seconds` 单价 **0.2**（等价表达式 `u("seconds") * 0.2`）；分组与现渠道一致 | 定价页显示正常 |
+| 5 | 定价：任务用量模式，`seconds` 单价 **0.2**（表达式 `tier("base", u("seconds") * 0.2)`；系数是美元单价）；分组与现渠道一致 | 定价页显示正常 |
 | 6 | 面板切到新渠道验收（§6），**旧渠道 140 原样保留** | 见 §6 |
 | 7 | 验收通过后，把旧渠道停用（不删，留回滚） | — |
 
