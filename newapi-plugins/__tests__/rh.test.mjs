@@ -241,14 +241,26 @@ test('artifact hooks：宿主强制要求，成片直取 RH 公有 COS 地址', 
   assert.throws(() => plugin.buildContentRequest({ artifactKey: 'video', clientRequest: { method: 'GET' }, data: {} }), /artifact_not_found/)
 })
 
-test('用量：按次恒为 1，带时长的请求另报 seconds（rh-aiapp 按秒计费就靠它）', () => {
-  // 视频 / AI App：body 里有 duration
+test('用量：按次恒为 1；有 duration 就上报 seconds，没有就报 0（宿主要求每个 key 都有值）', () => {
   assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: 5 } }), { calls: 1, seconds: 5 })
   assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: '5' } }), { calls: 1, seconds: 5 })
-  // 图片类没有时长 → 不报 seconds（那些模型的表达式要用 u("calls")）
-  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p' } }), { calls: 1 })
-  // 超范围宁可不报，也不能上报一个非法值
-  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: 99999 } }), { calls: 1 })
+  // 图片类没有时长 → 0（不是省略：图片模型用 u("calls")，不受影响）
+  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p' } }), { calls: 1, seconds: 0 })
+  // 超范围宁可记 0，也不上报非法值
+  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: 99999 } }), { calls: 1, seconds: 0 })
   // 完结钩子只回 calls：宿主按 key 覆盖，没回的 seconds 保留提交值
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { status: 'completed' }), { calls: 1 })
+})
+
+test('★ 每个 usageExample 都要带齐所有声明的用量 key（宿主上传校验，少了直接拒收）', () => {
+  const keys = Object.keys(plugin.meta.usageSchema)
+  assert.ok(plugin.meta.usageExamples.length > 0)
+  for (const example of plugin.meta.usageExamples) {
+    for (const key of keys) {
+      assert.ok(
+        Object.prototype.hasOwnProperty.call(example.facts, key),
+        `usageExample「${example.label}」缺少 key ${key}`,
+      )
+    }
+  }
 })

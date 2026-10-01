@@ -94,8 +94,10 @@ export const meta = {
       description: { en: 'Video generation unit price', zh: '视频生成单价' },
     },
   },
+  // 宿主硬校验：**每个例子都要带齐所有声明的 key**，缺一个就拒收上传
+  // （实测报 plugin meta usageExamples[0] facts missing key "seconds"）。
   usageExamples: [
-    { label: '单次生成任务（图片类）', facts: { calls: 1 } },
+    { label: '图片类（无时长）', facts: { calls: 1, seconds: 0 } },
     { label: 'AI App 5 秒（按秒）', facts: { calls: 1, seconds: 5 } },
   ],
 }
@@ -288,15 +290,13 @@ export function buildContentRequest(ctx) {
 }
 
 export function extractUsage(ctx) {
-  const facts = { calls: 1 }
-  // `seconds` 只在请求真的带时长时上报：视频与 AI App 的 body 里有 `duration`
-  // （AI App 的时长来自工作流 duration/seconds 节点，App 会把它提到顶层）。
-  // 图片类模型没有时长 → 不报 seconds，那些模型的表达式必须用 u("calls")。
+  // 宿主要求**每个声明的 key 都有值**（usageExamples 缺 key 都会被拒，运行时同理），
+  // 所以没有时长就报 0，而不是省略：图片类模型的表达式用 u("calls")，不受这个 0 影响。
   const body = ctx && ctx.requestBody && typeof ctx.requestBody === 'object' ? ctx.requestBody : {}
   const duration = Number(body.duration)
-  // 宿主对 second 的上限是 3600，超范围宁可不报也不上报一个非法值
-  if (Number.isFinite(duration) && duration > 0 && duration <= 3600) facts.seconds = duration
-  return facts
+  // 宿主对 second 的上限是 3600；超范围宁可记 0，也不上报一个非法值
+  const seconds = Number.isFinite(duration) && duration > 0 && duration <= 3600 ? duration : 0
+  return { calls: 1, seconds }
 }
 
 export function extractUsageOnComplete(ctx, task, body) {
