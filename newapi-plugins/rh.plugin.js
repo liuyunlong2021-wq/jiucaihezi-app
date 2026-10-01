@@ -28,7 +28,7 @@ export const meta = {
   apiVersion: 1,
   key: 'rh',
   name: 'RunningHub',
-  version: '0.1.0',
+  version: '0.1.1',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'RunningHub standard OpenAPI via rh-adapter',
@@ -86,8 +86,18 @@ export const meta = {
       unitLabel: { en: 'call', zh: '次' },
       description: { en: 'Per-task price', zh: '单次生成单价' },
     },
+    // 只在请求真的带时长时上报（视频 / AI App）；图片类模型没有这个事实，
+    // 那些模型的表达式必须用 u("calls")。
+    seconds: {
+      type: 'number',
+      unit: 'second',
+      description: { en: 'Video generation unit price', zh: '视频生成单价' },
+    },
   },
-  usageExamples: [{ label: '单次生成任务', facts: { calls: 1 } }],
+  usageExamples: [
+    { label: '单次生成任务（图片类）', facts: { calls: 1 } },
+    { label: 'AI App 5 秒（按秒）', facts: { calls: 1, seconds: 5 } },
+  ],
 }
 
 // 图片走 /v1/images/generations，其余走 /v1/videos（registry `runninghubStandard` 的 endpoint 规则）
@@ -278,10 +288,19 @@ export function buildContentRequest(ctx) {
 }
 
 export function extractUsage(ctx) {
-  // 旧 Custom Channel 就是「按次计费；每个模型单独设置价格」，用量事实保持按次
-  return { calls: 1 }
+  const facts = { calls: 1 }
+  // `seconds` 只在请求真的带时长时上报：视频与 AI App 的 body 里有 `duration`
+  // （AI App 的时长来自工作流 duration/seconds 节点，App 会把它提到顶层）。
+  // 图片类模型没有时长 → 不报 seconds，那些模型的表达式必须用 u("calls")。
+  const body = ctx && ctx.requestBody && typeof ctx.requestBody === 'object' ? ctx.requestBody : {}
+  const duration = Number(body.duration)
+  // 宿主对 second 的上限是 3600，超范围宁可不报也不上报一个非法值
+  if (Number.isFinite(duration) && duration > 0 && duration <= 3600) facts.seconds = duration
+  return facts
 }
 
 export function extractUsageOnComplete(ctx, task, body) {
+  // 只回 calls：宿主按 key 覆盖提交时冻结的用量事实，**没回的 key 保留提交值** ——
+  // 所以这里不写 seconds 才能让它保持提交时那个数（适配器的查询响应里本也没有时长）。
   return { calls: 1 }
 }

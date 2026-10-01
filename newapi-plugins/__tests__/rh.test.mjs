@@ -28,9 +28,10 @@ test('meta 对齐适配器与面板注册', () => {
   assert.equal(plugin.meta.fetchMode, 'per_task')
   assert.equal(plugin.meta.baseUrl, BASE)
   assert.deepEqual(plugin.meta.protocols, ['openai_video', 'openai_image'])
-  // RH 是**按次**计费（旧 Custom Channel 就是「按次计费；每个模型单独设置价格」）
-  assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls'])
+  // RH 旧 Custom Channel 是「按次计费」，所以保留 calls；seconds 供视频 / AI App 按秒计费
+  assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'seconds'])
   assert.equal(plugin.meta.usageSchema.calls.unit, 'count')
+  assert.equal(plugin.meta.usageSchema.seconds.unit, 'second')
 })
 
 test('★ 画幅 / 分辨率 / extra_fields 原样透传 —— 换插件的理由', () => {
@@ -240,7 +241,14 @@ test('artifact hooks：宿主强制要求，成片直取 RH 公有 COS 地址', 
   assert.throws(() => plugin.buildContentRequest({ artifactKey: 'video', clientRequest: { method: 'GET' }, data: {} }), /artifact_not_found/)
 })
 
-test('用量：按次（与旧渠道的「按次计费」一致）', () => {
+test('用量：按次恒为 1，带时长的请求另报 seconds（rh-aiapp 按秒计费就靠它）', () => {
+  // 视频 / AI App：body 里有 duration
+  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: 5 } }), { calls: 1, seconds: 5 })
+  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: '5' } }), { calls: 1, seconds: 5 })
+  // 图片类没有时长 → 不报 seconds（那些模型的表达式要用 u("calls")）
   assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p' } }), { calls: 1 })
+  // 超范围宁可不报，也不能上报一个非法值
+  assert.deepEqual(plugin.extractUsage({ requestBody: { prompt: 'p', duration: 99999 } }), { calls: 1 })
+  // 完结钩子只回 calls：宿主按 key 覆盖，没回的 seconds 保留提交值
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { status: 'completed' }), { calls: 1 })
 })
