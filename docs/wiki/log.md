@@ -1890,4 +1890,18 @@
 - 新记三条风险：① **`rh_task_id` 可能被宿主改写**（README 说 render 前会替换「known private task IDs」，未验 —— 本波唯一硬风险，已写两条退路）；② 建新渠道时**必须**把旧 Custom Channel 模型列表里被接管的 35 个删掉，否则两个渠道声明同名模型 = 负载均衡，任务随机落两边；③ `site: global` 的模型要 `RUNNINGHUB_GLOBAL_API_KEY`，适配器缺它时插件侧看不出来。
 - 未验证：插件未上传、type 61 渠道未建、旧渠道模型列表未改、未真跑一笔（管理员页动作在用户侧）。
 
+## [2026-10-01] 修复 | 宿主硬校验 artifact hooks：dola / rh 上传被拒，已补齐
+
+- 症状（用户实测上传）：`plugin dola protocol "openai_video" is missing driver hook "listArtifacts"`，`rh` 同样被拒；`comfy` / `boluo` 能上传 —— 它们本来就有这两个 hook。
+- 根因：**我判断错了**。同日写的 dola / rh 插件里写了「有意不导出 `listArtifacts` / `buildContentRequest`」，理由是「面板对这两条线路不走 `/content`」。但**宿主的校验规则不看这个** —— 它要求声明了 `openai_video` 的插件**必须同时导出这两个 hook**，少了直接拒收。README 那句 "plugins that expose task outputs export `listArtifacts` and `buildContentRequest` together" 是**硬要求**，不是建议。
+- 修法：两边都补上 —— `listArtifacts` 只在 `SUCCESS` 返回 `[{key:'video', type:'video', mimeType:'video/mp4'}]`；`buildContentRequest` 直取快照里的上游成片地址（dola 读 `video_url`、rh 读 `url`）并标 `credentialless: true`（两者上游都是公开免签直链，宿主只放 GET/HEAD、不带插件头，且对每跳做 SSRF 检查）。
+- 夹具同步改写（dola / rh 各一条），四个插件合计 **51 例全绿**。
+
+## [2026-10-01] 排障 | 旧渠道 140 的 metadata 兜底不成立：选 4:3 仍出 9:16
+
+- 用户按要求跑了一笔 **4:3**：ComfyUI history 里该任务 `status=success`（52 节点、`dur27=3.0`、`images=2`），但 **`ar29` 仍是 `9:16 (Portrait Widescreen)`** —— 面板选的 4:3 **没有到达**模板。
+- 排除假阳性的依据（重要）：模板 `defaults.aspect_ratio` **本身就是 9:16**（见 `minimax-h3-ref2v.meta.json`），所以「选 9:16」与「什么都没送到」长得一模一样，**只有非 9:16 的取值才有判定力**。时长 3 秒能到（默认 15），但 `duration` 本来就在 `TaskSubmitReq` 白名单里，代表不了 `aspect_ratio`。
+- 结论：`metadata` 镜像 + 适配器摊平这套**对渠道 140 不生效**。处置：**不在旧渠道上继续纠缠**，走插件通道（`comfy` 插件已可上传）；旧渠道 140 保留 `jc-qwen-image-2.1`，两个 H3 模型迁走后即可。
+- 未查（可查）：`metadata` 究竟有没有被 NewAPI 转发到适配器 —— 适配器的 `/v1/tasks` 需要密钥（匿名访问回 `Invalid API key`，实测）。
+
 

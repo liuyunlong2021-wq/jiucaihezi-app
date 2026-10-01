@@ -157,12 +157,24 @@ test('render 的失败与进行中', () => {
   assert.equal(running.progress, 50)
 })
 
-test('不导出 artifact hooks（有意决策）', () => {
-  // 适配器没有 /content 路由，成片地址是上游公开免签 URL（规格原文：别把 Bearer 附上去），
-  // 面板对 newapi-task 也不走 /content（usesNewApiContentEndpoint 为 false）。
-  // 所以成片走 render 直出 video_url，与旧 type 1 渠道完全同形 —— 补 artifact 只会多一条死路。
-  assert.equal('listArtifacts' in plugin, false)
-  assert.equal('buildContentRequest' in plugin, false)
+test('artifact hooks：宿主强制要求，成片直取上游公有地址', () => {
+  // 声明了 openai_video 却不导出 listArtifacts 的插件会被宿主拒收（实测）
+  assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS' }), [{ key: 'video', type: 'video', mimeType: 'video/mp4' }])
+  assert.deepEqual(plugin.listArtifacts({ status: 'IN_PROGRESS' }), [])
+
+  const req = plugin.buildContentRequest({
+    artifactKey: 'video',
+    clientRequest: { method: 'GET' },
+    data: { status: 'completed', video_url: 'https://media.example.com/a.mp4' },
+  })
+  assert.equal(req.url, 'https://media.example.com/a.mp4')
+  assert.equal(req.method, 'GET')
+  // 上游是公开免签直链 → credentialless，宿主只放 GET/HEAD 且不带插件头
+  assert.equal(req.credentialless, true)
+
+  assert.throws(() => plugin.buildContentRequest({ artifactKey: 'poster', clientRequest: { method: 'GET' }, data: {} }), /artifact_not_found/)
+  // 还没成片时没有地址可给
+  assert.throws(() => plugin.buildContentRequest({ artifactKey: 'video', clientRequest: { method: 'GET' }, data: {} }), /artifact_not_found/)
 })
 
 test('用量：上游只有 30 秒一档，事实就是 30', () => {

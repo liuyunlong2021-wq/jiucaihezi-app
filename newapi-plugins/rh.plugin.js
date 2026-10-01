@@ -261,9 +261,21 @@ export function parseTaskResult(ctx, body) {
   return out
 }
 
-// 有意**不导出** `listArtifacts` / `buildContentRequest`：适配器没有 `/content` 路由，
-// RH 成片是公有 COS 直链（24 小时、无需鉴权），面板对 RH 也不走 `/content`
-// （`usesNewApiContentEndpoint` 为 false）。成片走 render 的 `url` 直出，与旧渠道同形。
+// 宿主**强制**要求声明了 `openai_video` 的插件同时导出这两个 hook —— 少了会被直接拒收：
+// 「plugin rh protocol "openai_video" is missing driver hook "listArtifacts"」。
+// RH 成片是公有 COS 直链（24 小时有效、无需鉴权），所以直取它并标 `credentialless` ——
+// 宿主只放 GET/HEAD、不带插件头，并对每跳做 SSRF 检查。
+export function listArtifacts(task) {
+  return task.status === 'SUCCESS' ? [{ key: 'video', type: 'video', mimeType: 'video/mp4' }] : []
+}
+
+export function buildContentRequest(ctx) {
+  if (ctx.artifactKey !== 'video') fail('artifact_not_found')
+  const snapshot = ctx.data && typeof ctx.data === 'object' && !Array.isArray(ctx.data) ? ctx.data : {}
+  const url = String(snapshot.url || snapshot.video_url || '')
+  if (!url) fail('artifact_not_found')
+  return { url, method: ctx.clientRequest.method, credentialless: true }
+}
 
 export function extractUsage(ctx) {
   // 旧 Custom Channel 就是「按次计费；每个模型单独设置价格」，用量事实保持按次

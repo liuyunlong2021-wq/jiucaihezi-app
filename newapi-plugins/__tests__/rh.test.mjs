@@ -222,12 +222,22 @@ test('render 透传 ai_app，面板才会带 ?ai_app=true 去直连适配器', (
   assert.equal(standard.ai_app, undefined)
 })
 
-test('不导出 artifact hooks（有意决策）', () => {
-  // 适配器没有 /content 路由；RH 成片是公有 COS 直链（24 小时、无需鉴权），
-  // 面板对 RH 也不走 /content（usesNewApiContentEndpoint 为 false）。
-  // 成片走 render 的 url 直出，与旧 Custom Channel 完全同形。
-  assert.equal('listArtifacts' in plugin, false)
-  assert.equal('buildContentRequest' in plugin, false)
+test('artifact hooks：宿主强制要求，成片直取 RH 公有 COS 地址', () => {
+  // 声明了 openai_video 却不导出 listArtifacts 的插件会被宿主拒收（实测）
+  assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS' }), [{ key: 'video', type: 'video', mimeType: 'video/mp4' }])
+  assert.deepEqual(plugin.listArtifacts({ status: 'FAILURE' }), [])
+
+  const req = plugin.buildContentRequest({
+    artifactKey: 'video',
+    clientRequest: { method: 'HEAD' },
+    data: { status: 'completed', url: 'https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/x.mp4' },
+  })
+  assert.equal(req.url, 'https://rh-images-1252422369.cos.ap-beijing.myqcloud.com/x.mp4')
+  assert.equal(req.method, 'HEAD')
+  assert.equal(req.credentialless, true)
+
+  assert.throws(() => plugin.buildContentRequest({ artifactKey: 'poster', clientRequest: { method: 'GET' }, data: {} }), /artifact_not_found/)
+  assert.throws(() => plugin.buildContentRequest({ artifactKey: 'video', clientRequest: { method: 'GET' }, data: {} }), /artifact_not_found/)
 })
 
 test('用量：按次（与旧渠道的「按次计费」一致）', () => {

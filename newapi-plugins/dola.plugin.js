@@ -172,10 +172,21 @@ export function parseTaskResult(ctx, body) {
   return out
 }
 
-// 有意**不导出** `listArtifacts` / `buildContentRequest`：
-// 适配器没有 `/content` 路由，成片是上游公开免签 URL，面板对 `newapi-task` 也不走
-// `/content`（`usesNewApiContentEndpoint` 为 false）。补上只会多一条没人走的死路。
-// 将来若想让成片走宿主代理（上游地址会过期，规格原文警告过），再一起补两个 hook。
+// 宿主**强制**要求声明了 `openai_video` 的插件同时导出这两个 hook —— 少了会被直接拒收：
+// 「plugin dola protocol "openai_video" is missing driver hook "listArtifacts"」。
+// 适配器没有 `/content` 路由，成片是上游公开免签 URL（规格原文：不要把 Bearer 附到视频地址上），
+// 所以直取上游地址并标 `credentialless` —— 宿主只放 GET/HEAD、不带插件头，并对每跳做 SSRF 检查。
+export function listArtifacts(task) {
+  return task.status === 'SUCCESS' ? [{ key: 'video', type: 'video', mimeType: 'video/mp4' }] : []
+}
+
+export function buildContentRequest(ctx) {
+  if (ctx.artifactKey !== 'video') fail('artifact_not_found')
+  const snapshot = ctx.data && typeof ctx.data === 'object' && !Array.isArray(ctx.data) ? ctx.data : {}
+  const url = String(snapshot.video_url || snapshot.url || '')
+  if (!url) fail('artifact_not_found')
+  return { url, method: ctx.clientRequest.method, credentialless: true }
+}
 
 export function extractUsage(ctx) {
   return { seconds: SECONDS_PER_TASK }
