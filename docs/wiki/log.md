@@ -1924,4 +1924,13 @@
 - 收尾改动：`hot.md` 加当日条目；总方案新增 §4.1 收尾状态；`韭菜盒子Seedance2.5中转接入.md`、`本机ComfyUI模型对外接入-2026-09-26.md` 按上面第 1、2 条更正。
 - **用户侧待确认三件**（我没有 key、也不该拿）：① RH 那条是「改类型」还是「新建」——若改类型，音频（suno/speech/music/voice-clone）会断，要单独测一笔；② 渠道上被插件未覆盖的模型（140 上的 `jc-qwen-image-2.1`）；③ 计费口径（类型变了 → 用量事实 × 单价），逐个渠道看用量日志。
 
+## [2026-10-01] 实施 | Wave 3 `shanhai` 与 Wave 5 `zx` 插件落盘：32 例夹具全绿，并查实一条宿主铁律
+
+- 产物（TDD，先夹具后实现）：`newapi-plugins/shanhai.plugin.js` + `newapi-plugins/__tests__/shanhai.test.mjs`（15 例）、`newapi-plugins/zx.plugin.js` + `newapi-plugins/__tests__/zx.test.mjs`（17 例）；两者已接入 `scripts/run-focused-tests.mjs` 的 `externalNodeTests`，「每个测试只注册一次」守卫跑过。六个插件合计 **84 例**。
+- **查实一（读官方 `docs/plugin-api/v1.md` 的 Host protocols 表）：宿主协议路径是封闭集合。** `openai_responses` = `POST /v1/responses` + `GET /v1/responses/:id`；`openai_video` = `POST /v1/videos` + `GET /v1/videos/:id` + `GET|HEAD /v1/videos/:id/content`；`openai_image` = `POST /v1/images/generations` + `POST /v1/images/edits`。后果：**面板 `endpoint` 不在这张表里的模型收编不了** —— type 61 渠道只在这些路径上被触发，原生路线（`meta.routes`）会被加上插件前缀（`/doubao/api/v3/...`）顶不上原路径。实例：`doubao-seedance-2-5-260628` 的面板 endpoint 是 `/v1/video/generations` → **有意不进** zx 插件，继续留在旧渠道（要收编得先改 App 的 endpoint）。已写进总方案 §3 铁律第 9 条。
+- **查实二：`openai_video` 的成品由宿主的 artifact 通道下发**（`GET /v1/videos/:task_id/content` 走插件导出的 `buildContentRequest`）。而 shanhai 适配器回的是 `/v1/videos/{上游任务号}/content`（相对路径 + 成片要带山海 Key 才能取）、zx 的 Omni 是同一形状 —— **这种地址不能透给客户端**（等于让客户端拿上游任务号去问宿主）。两个插件的 `render` 都不透它，改由 `buildContentRequest` 打回适配器带 Bearer 取；只有上游**绝对**直链（Grok / Seedance / MJ 成图）才标 `credentialless` 直取。
+- 两处边界写进代码与卡：zx 的 Grok **时长写在模型名里**（适配器不发 `seconds`），所以用量按模型名查表；zx 的 MJ 是**图片任务却走 `openai_video` 协议**（面板 endpoint 就是 `/v1/videos`）→ `render` 按模型名把 `object` 改成 `image` 并报 `url` + `metadata.url`，定价**必须用 `u("calls")`**；shanhai 的 `seconds` 缺省/越界时回落 **30**（面板唯一允许的档位，报 0 会静默扣不到钱）。
+- 文档：总方案 §2 分类表、§3 铁律第 9 条、§4 波次表与 §4.1 状态、§5 新增 Wave 3 / Wave 5 实施卡、§7 补三条风险；`hot.md` 当日条目同步。
+- **未上传 = 未验证**：两个插件都还没进过管理员页。各自有一条明确未验风险 —— shanhai 的成片要走宿主 artifact 通道、zx 的 MJ 成图能否被面板取到（处置退路写在卡里）。
+
 
