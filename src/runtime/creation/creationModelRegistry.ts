@@ -137,7 +137,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
 }> = [
   {
     model: 'cvk',
-    label: '灵动 cvk 720P 4元/次',
+    label: 'Sd 2.5 720P 30秒 · 灵动 cvk',
     price: '4/次',
     ratios: LINGDONG_RATIOS,
     resolutions: ['720p'],
@@ -147,7 +147,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
   },
   {
     model: '满血-480p',
-    label: '灵动 满血-480p 3.5元/次',
+    label: 'Sd 2.5 480P 30秒 · 灵动 满血',
     price: '3.5/次',
     ratios: LINGDONG_RATIOS,
     resolutions: ['480p'],
@@ -157,7 +157,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
   },
   {
     model: 'cvk-2.5-480',
-    label: '灵动 cvk-2.5-480 0.5元/秒',
+    label: 'Sd 2.5 480P · 灵动 cvk-2.5',
     price: '0.5/秒',
     ratios: LINGDONG_RATIOS,
     resolutions: ['480p'],
@@ -167,7 +167,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
   },
   {
     model: 'cvk-2.5-720',
-    label: '灵动 cvk-2.5-720 0.75元/秒',
+    label: 'Sd 2.5 720P · 灵动 cvk-2.5',
     price: '0.75/秒',
     ratios: LINGDONG_RATIOS,
     resolutions: ['720p'],
@@ -177,7 +177,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
   },
   {
     model: 'cvk-2.5-1080',
-    label: '灵动 cvk-2.5-1080 1.5元/秒',
+    label: 'Sd 2.5 1080P · 灵动 cvk-2.5',
     price: '1.5/秒',
     ratios: LINGDONG_RATIOS,
     resolutions: ['1080p'],
@@ -2306,8 +2306,9 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.5'
-  // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）
-  if (spec.id.startsWith('newapi/lingdong/')) return '灵动'
+  // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）。
+  // 族名是用户 2026-10-02 指定的展示名，面板分组头就是它；改名要同步 `CreationPanel.vue` 的 order 表。
+  if (spec.id.startsWith('newapi/lingdong/')) return '满血seedance2.5'
   // 本机 comfy-adapter 的模型统一用 jc- 前缀，单独成组，不要混进「其他模型」
   if (spec.id.startsWith('jc-')) return 'jc 本机'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'

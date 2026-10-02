@@ -10,6 +10,7 @@ import {
 import {
   CREATION_MODEL_REGISTRY,
   creationModelFamily,
+  displayModelLabel,
   displayModelPrice,
   getCreationModelSpec,
   listCreationPanelModels,
@@ -1167,21 +1168,21 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
     },
   }), /参考图最多支持 9 个/)
 
-  // 定价与范围是有意钉住的：加模型或改价必须同步改这里，也要同步 NewAPI 渠道的计费表达式，
-  // 否则面板显示的实付价与真实扣费会漂移。
+  // 定价、展示名与范围是有意钉住的：加模型或改名/改价必须同步改这里，也要同步 NewAPI 渠道的计费表达式，
+  // 否则面板显示的实付价与真实扣费会漂移。展示名取 `·` 之前那段（displayModelLabel）。
   assert.deepEqual(
     listCreationModels({ source: 'all' })
       .filter(model => model.id.startsWith('newapi/lingdong/'))
-      .map(model => [model.id, model.model, model.price, model.task]),
+      .map(model => [model.id, model.model, displayModelLabel(model.label), model.price, model.task]),
     [
-      ['newapi/lingdong/cvk', 'cvk', '4/次', 'video'],
-      ['newapi/lingdong/满血-480p', '满血-480p', '3.5/次', 'video'],
-      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', '0.5/秒', 'video'],
-      ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', '0.75/秒', 'video'],
-      ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', '1.5/秒', 'video'],
+      ['newapi/lingdong/cvk', 'cvk', 'Sd 2.5 720P 30秒', '4/次', 'video'],
+      ['newapi/lingdong/满血-480p', '满血-480p', 'Sd 2.5 480P 30秒', '3.5/次', 'video'],
+      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', 'Sd 2.5 480P', '0.5/秒', 'video'],
+      ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', 'Sd 2.5 720P', '0.75/秒', 'video'],
+      ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', 'Sd 2.5 1080P', '1.5/秒', 'video'],
     ],
   )
-  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/cvk')!), '灵动')
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/cvk')!), '满血seedance2.5')
   // 上游能力核对过、端到端没跑过：不写 verified
   for (const id of ['newapi/lingdong/cvk', 'newapi/lingdong/cvk-2.5-1080']) {
     assert.equal(getCreationModelSpec(id)!.contractStatus, 'unknown', id)
