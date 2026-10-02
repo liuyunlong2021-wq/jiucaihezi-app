@@ -1,5 +1,13 @@
 # 热缓存
 
+## [2026-10-02] 本机 ComfyUI 云链路改成「开机自动就绪 + 每 5 分钟自愈」
+
+- 用户问「关机再开机怎么让其他电脑用上本机 MiniMax H3」。查到底：**不是没配自启**（两个任务都有登录触发器，且本机 `AutoAdminLogon=1` 会自动登录），而是两条真因：① 两个服务任务的动作用 `cmd.exe /c ...` 包着，**桌面弹的黑窗口被点掉**就把 python / frpc 一起带走（退出码 `0xC000013A` = CONSOLE_CLOSE；证据：01:04 起好、08:33 两者同时死）；② ComfyUI 从来没进过启动项（它是 GUI，关机后没人开就永远没有 8188）。
+- 修法：`comfy-adapter/tools/cloud.ps1`（一键起停/自愈/自查）+ `tools/install-autostart.ps1`（可反复重装的四个任务）。服务任务的动改成**隐藏窗口**的 `-Action run-adapter / run-frpc`；新增 `comfy-cloud-boot`（登录后 30 秒 `ensure-all`，含 ComfyUI）与 `comfy-cloud-guard`（登录后 120 秒起、每 5 分钟 `ensure-services`，只保适配器+隧道 —— ComfyUI 不进守护，否则你关掉它腾显卡会被反复拉起）。
+- 日常自查一条命令：`cloud.ps1 -Action status`（三跳 + `/health` + frpc 最近连上时间）。
+- 实测：从**服务器 NewAPI 容器内** `wget -qO- http://frps:8796/health` 拿到 `comfyui: ok` + RTX 4090；frps 日志 `new proxy [comfy-adapter] type [tcp] success`。未做真实出片（会占唯一并发槽与显存）。
+- 两个 `.ps1` **必须 UTF-8 with BOM**：PS 5.1 读无 BOM 的 UTF-8 当 ANSI，中文乱码并报成「字符串缺少终止符」；另一个坑：`-RepetitionDuration MaxValue` 会被注册接口拒（0x80041318），XML 省略 `<Duration>` 才是无限期重复。
+
 ## [2026-10-01] 适配器收编为 NewAPI 任务插件：comfy / dola / boluo / rh 上线实测通过，shanhai / zx 代码就绲
 
 - 根因：面板选中的画幅（`aspect_ratio` / `ratio` / `resolution`）与 `extra_fields` 被 NewAPI 的 `TaskSubmitReq` 白名单吃掉，只有 `metadata` 侥幸活着 —— 「选 4:3 出 9:16」不是偶发。修法不是打补丁，而是换**任务插件通道**（type 61）：`decodeRequest` 拿得到客户端原始 body，由插件决定发什么，原样送到适配器。

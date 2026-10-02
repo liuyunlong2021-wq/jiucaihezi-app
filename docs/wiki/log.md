@@ -1933,4 +1933,13 @@
 - 文档：总方案 §2 分类表、§3 铁律第 9 条、§4 波次表与 §4.1 状态、§5 新增 Wave 3 / Wave 5 实施卡、§7 补三条风险；`hot.md` 当日条目同步。
 - **未上传 = 未验证**：两个插件都还没进过管理员页。各自有一条明确未验风险 —— shanhai 的成片要走宿主 artifact 通道、zx 的 MJ 成图能否被面板取到（处置退路写在卡里）。
 
+## [2026-10-02] 运维 | 本机 ComfyUI 云链路：开机自动就绪 + 每 5 分钟自愈
+
+- 问题：用户问「每次关机再开机，怎么才能启动，让其他电脑云端用上本机 MiniMax H3」。当时实况：ComfyUI 8188 活着，**适配器 9000 与 frpc 都没在跑**，云链路是断的。
+- 定性过程（先审根因）：① 两个服务任务都在、触发都是登录，本机 `AutoAdminLogon=1` → 自启本身没问题；② 两者的「上次运行结果」都是 `3221225786` = `0xC000013A` = `CTRL_C/CONSOLE_CLOSE`；③ frpc 日志 `08:33:13 service ... stopped` 与适配器日志停在 01:04:22 对得上 → 同一时刻被**关掉控制台窗口**带走的（动作是 `cmd.exe /c ... >> log`，窗口可见）；④ ComfyUI 不在启动文件夹、也不在 Run 键里，它是 GUI，开机后没人开就永远没 8188。
+- 产物：`comfy-adapter/tools/cloud.ps1`（`status` / `ensure-all` / `ensure-services` / `restart-adapter` / `restart-frpc` / `run-adapter` / `run-frpc`）+ `comfy-adapter/tools/install-autostart.ps1`（幂等重装四个任务）。服务任务的动改成隐藏窗口 powershell；`comfy-cloud-boot` 登录后 30 秒全保，`comfy-cloud-guard` 每 5 分钟只保适配器 + 隧道。设置：无执行时限、IgnoreNew、错过触发补跑。
+- 又踩两个坑：① `-RepetitionDuration ([TimeSpan]::MaxValue)` 会被 `Register-ScheduledTask` 拒（生成的 `P99999999DT23H59M59S` 超范围，0x80041318），XML 里省略 `<Duration>` 才是「无限期重复」；② `.ps1` 只有 LF 无 BOM 时 PS 5.1 按 ANSI 读，中文乱码并报成「字符串缺少终止符」—— 两个脚本都存成 UTF-8 with BOM。
+- 验证：`cloud.ps1 -Action status` 三跳全绿；服务器 NewAPI 容器内 `wget -qO- http://frps:8796/health` → `{"adapter":"ok","comfyui":"ok","comfyui_devices":["cuda:0 ... RTX 4090 ..."]}`；frps 日志 `new proxy [comfy-adapter] type [tcp] success`。**未做真实出片**（会占唯一并发槽与显存，按规矩先问用户）。
+- 遗留（用户侧一个设置）：Comfy Desktop 的「端口冲突」仍是 `auto`，8188 被占会静默漂到 8189；建议改「询问」。脚本已能识别并明确报错。
+
 
