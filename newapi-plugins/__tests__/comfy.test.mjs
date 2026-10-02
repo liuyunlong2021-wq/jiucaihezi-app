@@ -8,11 +8,21 @@ import * as plugin from '../comfy.plugin.js'
 
 const REF2V = 'jc-minimax-h3-ref2v'
 const H3 = 'jc-minimax-h3'
+const IMG = 'jc-qwen-image-2.1'
 const INTERNAL_REF2V = 'minimax-h3-ref2v'
+const INTERNAL_IMG = 'qwen-image-2.1'
 
 function decode(value, model = REF2V) {
   return plugin.protocols.openai_video.decodeRequest({
     model,
+    body: { kind: 'json', value: { model, ...value } },
+  })
+}
+
+function decodeImage(value, model = IMG) {
+  return plugin.protocols.openai_image.decodeRequest({
+    model,
+    upstreamModel: INTERNAL_IMG,
     body: { kind: 'json', value: { model, ...value } },
   })
 }
@@ -22,10 +32,19 @@ test('meta 声明与适配器一致', () => {
   assert.equal(plugin.meta.key, 'comfy')
   assert.equal(plugin.meta.fetchMode, 'per_task')
   assert.equal(plugin.meta.baseUrl, 'http://frps:8796')
-  assert.deepEqual(plugin.meta.protocols, ['openai_video'])
-  // 面板 body 里的 model 就是这两个对外名（creationModelRegistry 的 model 字段）
-  assert.deepEqual(plugin.meta.models, [H3, REF2V])
-  assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['seconds'])
+  assert.deepEqual(plugin.meta.protocols, ['openai_video', 'openai_image'])
+  // 面板 body 里的 model 就是这三个对外名（creationModelRegistry 的 model 字段）
+  assert.deepEqual(plugin.meta.models, [H3, REF2V, IMG])
+  assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['seconds', 'image_count'])
+})
+
+test('★ 每个 usageExample 都要带齐所有声明的用量 key（宿主上传校验，少了直接拒收）', () => {
+  const keys = Object.keys(plugin.meta.usageSchema)
+  for (const example of plugin.meta.usageExamples) {
+    for (const key of keys) {
+      assert.ok(Object.prototype.hasOwnProperty.call(example.facts, key), `${example.label} 缺 ${key}`)
+    }
+  }
 })
 
 test('★ 画幅与戏种原样透传 —— 换插件的唯一理由', () => {
@@ -148,8 +167,8 @@ test('成片只在 SUCCESS 时挂 artifact', () => {
 })
 
 test('用量：预留用请求时长，结算优先用适配器归一化后的实际时长', () => {
-  assert.deepEqual(plugin.extractUsage({ requestBody: { duration: 3 } }), { seconds: 3 })
-  assert.deepEqual(plugin.extractUsage({ requestBody: {} }), { seconds: 5 })
+  assert.deepEqual(plugin.extractUsage({ requestBody: { duration: 3 } }), { seconds: 3, image_count: 0 })
+  assert.deepEqual(plugin.extractUsage({ requestBody: {} }), { seconds: 5, image_count: 0 })
   // 适配器 GET /v1/videos/{id} 的 params 就是模板归一化后的值（duration 已 clamp）
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { params: { duration: 28 } }), { seconds: 28 })
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { duration: 12 }), { seconds: 12 })
@@ -163,4 +182,175 @@ test('render 输出 OpenAI video 形状且不泄露内网地址', () => {
   assert.equal(view.status, 'completed')
   // 适配器给的是 http://frps:8796/... 内网地址，绝不能出现在响应里
   assert.equal(JSON.stringify(view).includes('frps'), false)
+})
+
+// ---------------------------------------------------------------- 图片模型（Qwen-Image 2.1）
+// 适配器的图片入口是**同步**的：一次请求就把图跑完回来，所以走宿主协议 openai_image，
+// 图片必须内联 b64 回（适配器 public_base_url 是 Docker 内网名，客户端取不到）。
+
+test('★ 图片 decodeRequest：JSON 两种模式 + action 推导', () => {
+  const text = decodeImage({ prompt: '一只猫' })
+  assert.equal(text.kind, 'submit')
+  assert.equal(text.action, 'text_to_image')
+  assert.equal(text.requestBody.prompt, '一只猫')
+
+  const edit = decodeImage({ prompt: '换成夜景', image: 'https://a/1.png' })
+  assert.equal(edit.action, 'image_to_image')
+  assert.equal(edit.requestBody.image, 'https://a/1.png')
+
+  const multi = decodeImage({ prompt: 'p', images: ['https://a/1.png', 'https://a/2.png'] })
+  assert.equal(multi.action, 'image_to_image')
+  // 空数组不算参考图
+  assert.equal(decodeImage({ prompt: 'p', images: [] }).action, 'text_to_image')
+})
+
+test('★ 图片 decodeRequest：multipart 的上传文件换成宿主占位符（适配器收 data URL）', () => {
+  const intent = plugin.protocols.openai_image.decodeRequest({
+    model: IMG,
+    upstreamModel: INTERNAL_IMG,
+    body: {
+      kind: 'multipart',
+      fields: { prompt: ['p'], n: ['2'] },
+      files: [
+        { ref: 'request_file:image', field: 'image', filename: 'a.png', mimeType: 'image/png', size: 10 },
+        { ref: 'request_file:image#1', field: 'image', filename: 'b.png', mimeType: 'image/png', size: 10 },
+      ],
+    },
+  })
+  assert.equal(intent.action, 'image_to_image')
+  assert.equal(intent.requestBody.prompt, 'p')
+  assert.equal(intent.requestBody.n, '2')
+  assert.deepEqual(intent.requestBody.images, [
+    { __fileRef: 'request_file:image', encoding: 'dataUrl' },
+    { __fileRef: 'request_file:image#1', encoding: 'dataUrl' },
+  ])
+  assert.throws(
+    () => plugin.protocols.openai_image.decodeRequest({ model: IMG, body: { kind: 'multipart', fields: { prompt: ['p'] }, files: [] } }),
+    /at least one file/,
+  )
+})
+
+test('图片协议只收图片模型，且必须有 prompt', () => {
+  // 视频模型从图片协议进来要拦掉（upstreamModel 也要一起给，否则会拿默认的图片 id 误判）
+  assert.throws(
+    () =>
+      plugin.protocols.openai_image.decodeRequest({
+        model: REF2V,
+        upstreamModel: INTERNAL_REF2V,
+        body: { kind: 'json', value: { model: REF2V, prompt: 'p' } },
+      }),
+    /is not an image model/,
+  )
+  assert.throws(() => decodeImage({ prompt: 'p' }, 'jc-别的模型'), /Unsupported model/)
+  assert.throws(() => decodeImage({ prompt: '   ' }), /prompt is required/)
+  assert.throws(
+    () => plugin.protocols.openai_image.decodeRequest({ model: IMG, body: { kind: 'none' } }),
+    /JSON or multipart body required/,
+  )
+})
+
+test('★ 图片提交：/v1/images/generations + async:false + b64_json；视频不受影响', () => {
+  const requestBody = { model: IMG, prompt: 'p', n: 2 }
+  const ctx = {
+    baseUrl: 'http://frps:8796',
+    apiKey: 'adapter-key',
+    model: IMG,
+    upstreamModel: INTERNAL_IMG,
+    requestBody,
+    action: 'text_to_image',
+  }
+
+  const submit = plugin.buildSubmitRequest(ctx)
+  assert.equal(submit.url, 'http://frps:8796/v1/images/generations')
+  assert.equal(submit.method, 'POST')
+  assert.equal(submit.headers.Authorization, 'Bearer adapter-key')
+  assert.equal(submit.body.model, INTERNAL_IMG)
+  // 同步 + 内联：两条都不能依赖模板默认值与客户端请求
+  assert.equal(submit.body.async, false)
+  assert.equal(submit.body.response_format, 'b64_json')
+  // 不改入参
+  assert.notEqual(submit.body, requestBody)
+  assert.equal(requestBody.async, undefined)
+  assert.equal(requestBody.response_format, undefined)
+
+  // 视频那条不能被这两个字段污染，仍然走异步任务口
+  const video = plugin.buildSubmitRequest({
+    ...ctx,
+    model: REF2V,
+    upstreamModel: INTERNAL_REF2V,
+    requestBody: { model: REF2V, prompt: 'p', duration: 3 },
+    action: 'text_to_video',
+  })
+  assert.equal(video.url, 'http://frps:8796/v1/videos')
+  assert.equal(video.body.async, undefined)
+  assert.equal(video.body.response_format, undefined)
+})
+
+test('★ 同步图片：parseSubmitResponse 直接判终态，taskId 用适配器的 prompt_id', () => {
+  const body = {
+    created: 1790388368,
+    data: [{ b64_json: 'AAAA' }],
+    model: INTERNAL_IMG,
+    prompt_id: 'c0ffee-1111',
+    elapsed_seconds: 21.5,
+  }
+  const parsed = plugin.parseSubmitResponse({ model: IMG, upstreamModel: INTERNAL_IMG }, { statusCode: 200, body })
+  assert.equal(parsed.taskId, 'c0ffee-1111')
+  assert.deepEqual(parsed.immediate, { status: 'SUCCESS' })
+  assert.equal(parsed.taskData, body)
+
+  // 没有 prompt_id 时退回宿主的公开任务号，绝不能是空串
+  assert.equal(
+    plugin.parseSubmitResponse({ model: IMG, upstreamModel: INTERNAL_IMG, publicTaskId: 'task_pub' }, { body: { data: [{ b64_json: 'A' }] } }).taskId,
+    'task_pub',
+  )
+  assert.throws(
+    () => plugin.parseSubmitResponse({ model: IMG, upstreamModel: INTERNAL_IMG }, { body: { created: 1 } }),
+    /没有 data 数组/,
+  )
+})
+
+test('★ 图片 render 回 OpenAI ImageResponse 形状', () => {
+  const view = plugin.protocols.openai_image.render({}, {
+    task_id: 'task_x',
+    status: 'SUCCESS',
+    data: { created: 1790388368, data: [{ b64_json: 'AAAA' }, { url: 'http://frps:8796/files/a.png' }] },
+  })
+  assert.equal(view.data.length, 2)
+  assert.equal(view.data[0].b64_json, 'AAAA')
+  // b64 优先：宿主自己补 created
+  assert.equal(view.created, undefined)
+  assert.throws(
+    () => plugin.protocols.openai_image.render({}, { task_id: 'task_x', status: 'SUCCESS', data: { data: [] } }),
+    /没有 data 数组/,
+  )
+})
+
+test('图片不给 artifact（内联回，没有可代理的产物）', () => {
+  assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS', action: 'text_to_image' }), [])
+  assert.deepEqual(
+    plugin.listArtifacts({ status: 'SUCCESS', action: 'unknown', data: { model: INTERNAL_IMG } }),
+    [],
+  )
+  // 视频不变
+  assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS', action: 'text_to_video', data: { model: 'minimax-h3' } }), [
+    { key: 'video', type: 'video', mimeType: 'video/mp4' },
+  ])
+})
+
+test('图片用量：按 n 预约（不超适配器的 batch 上限），结算用实际张数纠正', () => {
+  const usage = n => plugin.extractUsage({ model: IMG, upstreamModel: INTERNAL_IMG, requestBody: { n } })
+  assert.deepEqual(usage(1), { seconds: 0, image_count: 1 })
+  assert.deepEqual(usage(3), { seconds: 0, image_count: 3 })
+  assert.deepEqual(usage(undefined), { seconds: 0, image_count: 1 })
+  // 适配器 meta 的 max_batch = 4，超出的不提前多扣
+  assert.deepEqual(usage(8), { seconds: 0, image_count: 4 })
+  assert.deepEqual(usage('x'), { seconds: 0, image_count: 1 })
+
+  const ctx = { model: IMG, upstreamModel: INTERNAL_IMG }
+  assert.deepEqual(plugin.extractUsageOnComplete(ctx, {}, { data: [{ b64_json: 'A' }, { b64_json: 'B' }] }), {
+    image_count: 2,
+  })
+  assert.equal(plugin.extractUsageOnComplete(ctx, {}, { data: [] }), null)
+  assert.equal(plugin.extractUsageOnComplete(ctx, {}, null), null)
 })

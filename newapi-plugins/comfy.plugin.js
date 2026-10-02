@@ -11,23 +11,35 @@
 // 插件只是它的代理。适配器 `adp/template.py` 的 `normalize()` 会自己摊平
 // `extra_fields` / `metadata` 里的标量并做 clamp/枚举校验，所以透传是安全的。
 //
+// 图片模型（`jc-qwen-image-2.1`）走同一个适配器的 `/v1/images/generations`，但它是**同步**的：
+// 一次请求就把图跑完并回来（模板没设 `default_async`），所以走宿主协议 `openai_image`，
+// 不用查询/轮询。图片**必须以内联 `b64_json` 回** —— 适配器的 `public_base_url` 是 Docker
+// 内网名（`http://frps:8796`），第三方与桌面端都解析不了，而客户端侧的 urlSafety 又禁止把
+// 结果地址指向私有地址；这与当年 type 1 渠道下 `imageResultFormat: 'b64_json'` 完全一致。
+//
+// 显存口径（2026-10-02 实测）：H3 栈（UNET 19.53GB + 文本编码器 14.61GB + 8 个以上 LoRA +
+// 上采样 1.29GB ≈ 40GB）与 Qwen 栈（UNET 6.63GB + 文本编码器 16.33GB ≈ 23GB）**不能同时常驻**，
+// 但 ComfyUI 用完会卸（实测跑完 free 46.3GB），所以图/视频交替只是付一次重载的代价。
+//
 // 详见 docs/wiki/运维/本机ComfyUI接入NewAPI任务插件通道SDD-2026-10-01.md
 export const meta = {
   apiVersion: 1,
   key: 'comfy',
   name: '本机 ComfyUI',
-  version: '0.1.0',
+  version: '0.2.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Local ComfyUI via comfy-adapter',
     zh: '经 comfy-adapter 驱动本机 ComfyUI',
   },
-  // 面板 body 里的 model 就是这两个对外名（creationModelRegistry 的 model 字段）：
-  // 文生 / 首帧图生 / 首尾帧共用 `jc-minimax-h3`，参考生是 `jc-minimax-h3-ref2v`。
-  // 渠道 model_mapping 再把它们换成适配器内部 id（minimax-h3 / minimax-h3-ref2v）。
-  models: ['jc-minimax-h3', 'jc-minimax-h3-ref2v'],
+  // 面板 body 里的 model 就是这三个对外名（creationModelRegistry 的 model 字段）：
+  // 文生 / 首帧图生 / 首尾帧共用 `jc-minimax-h3`，参考生是 `jc-minimax-h3-ref2v`，
+  // 图片（Qwen-Image 2.1）是 `jc-qwen-image-2.1`。
+  // 渠道 model_mapping 再把它们换成适配器内部 id（minimax-h3 / minimax-h3-ref2v / qwen-image-2.1）。
+  models: ['jc-minimax-h3', 'jc-minimax-h3-ref2v', 'jc-qwen-image-2.1'],
   fetchMode: 'per_task',
-  protocols: ['openai_video'],
+  // 视频走异步任务协议，图片走同步图片协议
+  protocols: ['openai_video', 'openai_image'],
   // type 61 渠道把 Base URL 留空时用这个默认值（适配器只绑在 docker 网络内）
   baseUrl: 'http://frps:8796',
   usageSchema: {
@@ -36,11 +48,39 @@ export const meta = {
       unit: 'second',
       description: { en: 'Video generation unit price', zh: '视频生成单价' },
     },
+    // 图片按张计费。这个字段名是宿主认得的：用量日志里会记成 other.image_count
+    image_count: {
+      type: 'number',
+      unit: 'count',
+      unitLabel: { en: 'image', zh: '张' },
+      description: { en: 'Image generation unit price', zh: '图片生成单价' },
+    },
   },
+  // 宿主硬校验：**每个例子都要带齐所有声明的 key**，少一个上传即被拒收
+  // （实测报 plugin meta usageExamples[0] facts missing key "seconds"）
   usageExamples: [
-    { label: '文戏 5 秒', facts: { seconds: 5 } },
-    { label: '文戏 28 秒 · 上限', facts: { seconds: 28 } },
+    { label: '文戏 5 秒', facts: { seconds: 5, image_count: 0 } },
+    { label: '文戏 28 秒 · 上限', facts: { seconds: 28, image_count: 0 } },
+    { label: '图片 1 张', facts: { seconds: 0, image_count: 1 } },
+    { label: '图片 4 张 · 上限', facts: { seconds: 0, image_count: 4 } },
   ],
+}
+
+// 图片模型：客户端对外名与适配器内部 id 都收（渠道没配映射时发的是对外名）
+const IMAGE_MODELS = ['jc-qwen-image-2.1', 'qwen-image-2.1']
+
+// 适配器 meta 的 constraints.max_batch = 4；预约额度时不超它，结算再用实际张数纠正
+const MAX_IMAGE_BATCH = 4
+
+function isImageModel(name) {
+  return IMAGE_MODELS.includes(String(name || ''))
+}
+
+// 图片协议里「有没有参考图」只用来定 action（文生图 / 图生图），张数与格式交给适配器校验
+function hasImageInput(body) {
+  if (!body || typeof body !== 'object') return false
+  if (Array.isArray(body.images)) return body.images.length > 0
+  return Boolean(body.image || body.first_frame || body.last_frame)
 }
 
 // 适配器状态机：queued -> running -> succeeded / failed / cancelled（adp/tasks.py）
@@ -65,6 +105,10 @@ const USAGE_FALLBACK_SECONDS = 5
 
 function fail(message) {
   throw new Error(message)
+}
+
+function snapshotOf(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
 }
 
 export const protocols = {
@@ -110,6 +154,66 @@ export const protocols = {
       }
     },
   },
+  // 图片协议：`openai_image` 是**同步**的（无模式），只需要 decodeRequest + render。
+  // 宿主不会轮询；我们在 parseSubmitResponse 里直接判 SUCCESS。
+  openai_image: {
+    decodeRequest: function (ctx) {
+      const model = String(ctx.model || '')
+      if (!meta.models.includes(model)) {
+        fail(`Unsupported model: ${model || '(missing)'}; expected one of ${meta.models.join(', ')}`)
+      }
+      if (!isImageModel(ctx.upstreamModel || model)) {
+        fail(`Model ${model} is not an image model`)
+      }
+      const kind = ctx.body ? ctx.body.kind : 'none'
+      if (kind === 'json') {
+        const body = ctx.body.value
+        if (!body || typeof body !== 'object' || Array.isArray(body)) fail('request body must be an object')
+        if (!String(body.prompt || '').trim()) fail('prompt is required')
+        // 参考图可以是 `image`（单）或 `images`（多），内容为 URL / data URL / 已上传文件名，
+        // 适配器自己会分流；插件不重复校验它的张数与格式。
+        return {
+          kind: 'submit',
+          model: ctx.model,
+          action: hasImageInput(body) ? 'image_to_image' : 'text_to_image',
+          requestBody: body,
+        }
+      }
+      if (kind === 'multipart') {
+        // `POST /v1/images/edits` 的 multipart 写法：把每个上传文件换成宿主认可的文件占位符，
+        // 宿主会把它替换成 `data:<mime>;base64,...`，而适配器本来就收 data URL。
+        const fields = ctx.body.fields || {}
+        const prompt = String((fields.prompt || [''])[0] || '').trim()
+        if (!prompt) fail('prompt is required')
+        const files = Array.isArray(ctx.body.files) ? ctx.body.files : []
+        if (!files.length) fail('multipart image edit requires at least one file')
+        const body = {}
+        for (const key of Object.keys(fields)) {
+          const values = fields[key]
+          body[key] = values && values.length === 1 ? values[0] : values
+        }
+        body.images = files.map(f => ({ __fileRef: f.ref, encoding: 'dataUrl' }))
+        return { kind: 'submit', model: ctx.model, action: 'image_to_image', requestBody: body }
+      }
+      fail('JSON or multipart body required')
+    },
+    // 必须回 OpenAI ImageResponse 形状：`{ data: [{url|b64_json}] }`。
+    // `created` 不写 —— 宿主会在缺失时自己补上（沙箱里能不碰 Date 就不碰）。
+    render: function (ctx, task) {
+      const snapshot = snapshotOf(task && task.data)
+      const data = Array.isArray(snapshot.data) ? snapshot.data : []
+      if (!data.length) fail('comfy-adapter 的图片响应里没有 data 数组')
+      return {
+        data: data.map(item => {
+          const entry = {}
+          if (item && item.b64_json) entry.b64_json = String(item.b64_json)
+          else if (item && item.url) entry.url = String(item.url)
+          if (item && item.revised_prompt) entry.revised_prompt = String(item.revised_prompt)
+          return entry
+        }),
+      }
+    },
+  },
 }
 
 export function buildSubmitRequest(ctx) {
@@ -117,6 +221,24 @@ export function buildSubmitRequest(ctx) {
   const body = Object.assign({}, ctx.requestBody)
   // 适配器吃的是内部 id（渠道映射后）；没配映射时退回对外名，别变成 undefined
   body.model = ctx.upstreamModel || ctx.model
+  if (isImageModel(ctx.upstreamModel || ctx.model)) {
+    // 图片走同步入口（适配器 default_async=false）。两处显式指定是为了不依赖模板默认值：
+    //   `async: false`  → 一次请求直接回图，没有任务号（与 parseSubmitResponse 的 immediate 对应）
+    //   `b64_json`      → 适配器内网地址第三方取不到，只能内联回图
+    body.async = false
+    body.response_format = 'b64_json'
+    return {
+      url: ctx.baseUrl + '/v1/images/generations',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+        Authorization: 'Bearer ' + ctx.apiKey,
+      },
+      body,
+      action: ctx.action,
+    }
+  }
   return {
     url: ctx.baseUrl + '/v1/videos',
     method: 'POST',
@@ -132,6 +254,17 @@ export function buildSubmitRequest(ctx) {
 
 export function parseSubmitResponse(ctx, resp) {
   const body = resp.body || {}
+  if (isImageModel(ctx.upstreamModel || ctx.model)) {
+    // 同步图片：没有上游任务号，直接判终态，宿主会调 openai_image.render 组装 ImageResponse
+    if (!Array.isArray(body.data) || !body.data.length) {
+      fail('comfy-adapter 的图片响应里没有 data 数组')
+    }
+    return {
+      taskId: String(body.prompt_id || ctx.publicTaskId || 'immediate'),
+      taskData: body,
+      immediate: { status: 'SUCCESS' },
+    }
+  }
   if (!body.id) fail('comfy-adapter did not return a task id')
   return { taskId: String(body.id), taskData: body }
 }
@@ -159,7 +292,12 @@ export function parseTaskResult(ctx, body) {
 }
 
 export function listArtifacts(task) {
-  return task.status === 'SUCCESS' ? [{ key: 'video', type: 'video', mimeType: 'video/mp4' }] : []
+  if (task.status !== 'SUCCESS') return []
+  // 图片是**内联 b64** 回的，没有可代理的产物；而同步图片结果又不落库（与 retainResult: false
+  // 同义），task.data 可能是 null —— 所以除快照外再靠 action 兑一层。
+  const snapshot = snapshotOf(task && task.data)
+  if (isImageModel(snapshot.model) || String(task.action || '').includes('to_image')) return []
+  return [{ key: 'video', type: 'video', mimeType: 'video/mp4' }]
 }
 
 // 适配器的 /content 支持 Range，客户端要什么就透什么（clientRequest.method 里带 GET/HEAD）
@@ -173,12 +311,30 @@ export function buildContentRequest(ctx) {
 }
 
 export function extractUsage(ctx) {
-  const seconds = ctx.requestBody && Number(ctx.requestBody.duration)
-  return { seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : USAGE_FALLBACK_SECONDS }
+  // 宿主要求**每个声明的 key 都有值**，所以两条路都要把另一个字段报 0
+  const body = snapshotOf(ctx && ctx.requestBody)
+  if (isImageModel(ctx && (ctx.upstreamModel || ctx.model))) {
+    // 适配器的 batch 上限是 meta 的 constraints.max_batch；预约不超它，结算用实际张数纠正
+    const n = Number(body.n)
+    let imageCount = 1
+    if (Number.isFinite(n) && n >= 1) imageCount = n > MAX_IMAGE_BATCH ? MAX_IMAGE_BATCH : n
+    return { seconds: 0, image_count: imageCount }
+  }
+  // 面板必带 duration；真没带时按保守值预留额度，结算用适配器归一化后的实际秒数纠正
+  const seconds = Number(body.duration)
+  return {
+    seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : USAGE_FALLBACK_SECONDS,
+    image_count: 0,
+  }
 }
 
 // 适配器任务视图的 params 就是模板归一化后的实际值（duration 已被 clamp 到 1~28）
 export function extractUsageOnComplete(ctx, task, body) {
+  if (isImageModel(ctx && (ctx.upstreamModel || ctx.model))) {
+    // 实际张数以响应里的 data 长度为准（适配器按 batch_size 出图，可能少于请求的 n）
+    const count = body && Array.isArray(body.data) ? body.data.length : 0
+    return count > 0 ? { image_count: count } : null
+  }
   if (!body || typeof body !== 'object') return null
   const raw = body.params && body.params.duration !== undefined ? body.params.duration : body.duration
   const seconds = Number(raw)

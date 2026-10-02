@@ -1954,4 +1954,12 @@
 - 同步的内部文档：`本机ComfyUI模型对外接入-2026-09-26.md` 的对外接口表（`GET /v1/videos/{id}` 不再承诺 `metadata.url`）与「产物地址」小节（补：插件通道下取片不再经过 `metadata.url`）；`运维/index.md` 里 SDD 那条「待审，未实施」→「已实施并实测通过」。
 - **判定为不用改的两处**（先审根因，不留错的待办）：① 图片那份对外文档开头已有「本模型当前未上线（2026-09-26 起）」横幅；② `comfy-adapter/tools/verify_newapi_contract.py` 里「completed 带 metadata.url」的断言**是对的** —— 它 `BASE = http://127.0.0.1:9000`，测的是适配器本身。总方案 §7 那句「同时更新那条断言」是当时的误判，已在原位改成「已决 + 不用改」。
 
+## [2026-10-02] 实施 | Qwen-Image 2.1 接回对外（comfy 插件 0.2.0）+ 订正「显存装不下就不能交替」的错判
+
+- 起点：用户问「显存装不下两套栈有判断依据吗？我自己图/视频交替没有任何问题」。复核结论：**用户是对的**。① 「同时常驻装不下」有依据且成立（磁盘实测：H3 栈 UNET 19.53 + 文本编码器 14.61 + 8 个以上 LoRA + 上采样 1.29 ≈ 40GB；Qwen 栈 UNET 6.63 + 文本编码器 16.33 ≈ 23GB；合计 ≈63GB > 48GB）；② 但「因此不能交替用」是我把 2026-09-26 那次的**探针事故**（探针占住唯一并发槽位 → 用户任务排队 300 秒被拒 + 98% 显存 + HTTP 全超时）当成了「交替不可行」，而撤下图片模型的直接原因其实是**用户自己的产品决定**（留视频、图片等独立机器）。实测：用户图→视频→视频三笔全 success，跑完 `free 46.3GB`。
+- 产物（TDD）：`newapi-plugins/comfy.plugin.js` **0.2.0** —— `meta.models` 加 `jc-qwen-image-2.1`、新增宿主协议 **`openai_image`**（同步，无轮询）、`usageSchema` 加 `image_count`（unit `count` + `unitLabel: 张`）、`buildSubmitRequest` 按模型分岔（图片 `/v1/images/generations` + `async:false` + `b64_json`）、`parseSubmitResponse` 对同步图片回 `immediate`、`openai_image.render` 回 `{data:[{b64_json}]}`、`listArtifacts` 图片返回空、图片用量按 `n` 预约（不超适配器 `max_batch = 4`）并用响应 `data.length` 结算；夹具 `comfy.test.mjs` 10 → **19 例**，六个插件合计 **93 例全绿**。
+- 适配器：`adp/service.py` + `adp/api.py` 加**换栈观测**（`Stats.model_switches`、日志 `栈切换 #N：X -> Y`、`/health` 暴露），**不加卸载动作**（那是在应付臆想的问题）；`app.py --check` 四步全绿；按 `cloud.ps1 -Action restart-adapter` 重启后 `/health` 已带 `model_switches: 0`。
+- 文档订正：内部文档把「切换会把显存顶满、甚至卡死 ComfyUI」改成「同时常驻装不下 → 用完即卸、切换需重载」并写明那次卡死的真实根因（探针占槽位）；图片模型那节改成「2026-09-26 撤下 → 2026-10-02 接回对外」+ 做法表；对外图片文档「未上线」→「已上线」+「交替调用下一笔慢几十秒」+ `response_format` 固定 b64。
+- **未上传/未验证**：插件要用户上传（0.2.0）+ 渠道加模型 + 定价 `tier("base", u("image_count") * 0.2)`。唯一未验风险：图片是单个同步请求（35–50 秒）可能撞宿主提交超时，退路是改成宿主内轮询（600 秒预算）。
+
 

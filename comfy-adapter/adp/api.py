@@ -433,6 +433,7 @@ def create_app(cfg: AppConfig | None = None) -> FastAPI:
         info["stats"] = {
             "total": s.total, "ok": s.ok, "failed": s.failed, "rejected": s.rejected,
             "last_elapsed_seconds": round(s.last_elapsed, 2),
+            "model_switches": s.model_switches,
         }
         info["tasks"] = app.state.tasks.stats()
         info["storage"] = {

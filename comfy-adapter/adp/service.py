@@ -45,6 +45,9 @@ class Stats:
     rejected: int = 0
     last_error: str | None = None
     last_elapsed: float = 0.0
+    # 模型族（图/视频）切换次数。两套栈不能同时常驻，每次切换 ComfyUI 要重载权重，
+    # 这个计数就是「重载代价」出现的次数（第三方交替调用时能直接看到）。
+    model_switches: int = 0
 
 
 class GenerationService:
@@ -58,6 +61,8 @@ class GenerationService:
         self._inflight = 0
         self._lock = asyncio.Lock()
         self.stats = Stats()
+        # 上一次真正跑过的模板 id（用来识别图/视频换栈）
+        self._last_model_id: str | None = None
 
     # ------------------------------------------------------------- 注册表
     def get_template(self, model_id: str | None) -> WorkflowTemplate:
@@ -161,6 +166,17 @@ class GenerationService:
 
             # 计时从「真正拿到并发名额」开始，排队时间不算在生成耗时里
             started = time.monotonic()
+
+            # 换栈观测（2026-10-02）：H3 栈 ≈40GB、Qwen 栈 ≈23GB，两套**不能同时常驻** 48GB，
+            # ComfyUI 会在换模板时整栈重载。这里只计数与记录，不做卸载动作 ——
+            # 实测跑完 ComfyUI 自己会把权重吐出来（free 46.3GB）。
+            if self._last_model_id is not None and self._last_model_id != tpl.id:
+                self.stats.model_switches += 1
+                log.info(
+                    "[%s] 栈切换 #%d：%s -> %s（本次耗时含权重重载）",
+                    tpl.id, self.stats.model_switches, self._last_model_id, tpl.id,
+                )
+            self._last_model_id = tpl.id
 
             if on_start is not None:
                 on_start()
