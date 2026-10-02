@@ -66,6 +66,12 @@ export function isAllowedExternalUrl(input: string): boolean {
   return Boolean(parsed && EXTERNAL_URL_PROTOCOLS.has(parsed.protocol))
 }
 
+/** Tauri 本地资源地址在 Windows 上也可能以 http(s) 协议出现。 */
+export function isLocalAssetUrl(input: string): boolean {
+  const text = String(input || '').trim()
+  return text.startsWith('asset:') || /^https?:\/\/asset\.localhost(?:[/?#]|$)/i.test(text)
+}
+
 export function isAllowedDownloadUrl(input: string): boolean {
   const text = String(input || '').trim()
   if (!text) return false

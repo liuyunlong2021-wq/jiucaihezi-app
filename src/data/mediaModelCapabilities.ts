@@ -61,6 +61,56 @@ export interface MediaModelAvailabilityOverride {
 }
 
 const GPT_IMAGE_SIZES = ['auto', '1024x1024', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '3840x2160', '2160x3840']
+
+/** 本机 comfy-adapter 的 MiniMax H3 可选画幅（视频，multiple_of=32）。
+ *
+ * 同 1K/2K 长边档位，但 32 的倍数比 8 的倍数粗，所以 1080p 系落不到整数：
+ * 9:16 的 2K 是 1088×1920（比例误差 0.74%，仍在 ≤1% 内）。
+ * 1344×768 是工作流原本的默认值，放首位以保持默认行为不变。
+ */
+export const JC_VIDEO_SIZE_OPTIONS: MediaFieldOption[] = [
+  { value: '1344x768', label: '横屏 · 1344×768（工作流默认）' },
+  { value: '1024x1024', label: '1K 方图 1:1 · 1024×1024' },
+  { value: '1024x576', label: '1K 横屏 16:9 · 1024×576' },
+  { value: '576x1024', label: '1K 竖屏 9:16 · 576×1024' },
+  { value: '1024x768', label: '1K 横屏 4:3 · 1024×768' },
+  { value: '768x1024', label: '1K 竖屏 3:4 · 768×1024' },
+  { value: '960x640', label: '1K 横屏 3:2 · 960×640' },
+  { value: '640x960', label: '1K 竖屏 2:3 · 640×960' },
+  { value: '1440x1440', label: '2K 方图 1:1 · 1440×1440' },
+  { value: '1920x1088', label: '2K 横屏 16:9 · 1920×1088' },
+  { value: '1088x1920', label: '2K 竖屏 9:16 · 1088×1920' },
+  { value: '1664x1248', label: '2K 横屏 4:3 · 1664×1248' },
+  { value: '1248x1664', label: '2K 竖屏 3:4 · 1248×1664' },
+  { value: '1760x1184', label: '2K 横屏 3:2 · 1760×1184' },
+  { value: '1184x1760', label: '2K 竖屏 2:3 · 1184×1760' },
+]
+
+export const JC_VIDEO_SIZES = JC_VIDEO_SIZE_OPTIONS.map(option => String(option.value))
+
+/** comfy_extras/nodes_resolution.py 的 ResolutionSelector 只认这几个**带后缀的**字符串，
+ * 不能简写成 "9:16" —— 它算完宽高，再由工作流自己的 latent 上采样出成片。
+ */
+export const JC_H3_RATIO_OPTIONS: MediaFieldOption[] = [
+  { value: '16:9 (Widescreen)', label: '横屏 16:9' },
+  { value: '9:16 (Portrait Widescreen)', label: '竖屏 9:16' },
+  { value: '1:1 (Square)', label: '方图 1:1' },
+  { value: '4:3 (Standard)', label: '横屏 4:3' },
+  { value: '3:4 (Portrait Standard)', label: '竖屏 3:4' },
+  { value: '3:2 (Photo)', label: '横屏 3:2' },
+  { value: '2:3 (Portrait Photo)', label: '竖屏 2:3' },
+  { value: '21:9 (Ultrawide)', label: '超宽 21:9' },
+]
+
+export const JC_H3_RATIOS = JC_H3_RATIO_OPTIONS.map(option => String(option.value))
+
+/** 文武档位：绑到 H3 双采模板节点 65（easy anythingIndexSwitch）的 index，
+ * 切的是节点 47（turbo v4 hybrid LoRA）的强度；分辨率不再随档位变（固定 0.4MP 首采）。
+ */
+export const JC_H3_MODE_OPTIONS: MediaFieldOption[] = [
+  { value: 0, label: '文戏' },
+  { value: 1, label: '武戏' },
+]
 const NANO_ASPECT_RATIOS = ['4:3', '3:4', '16:9', '9:16', '2:3', '3:2', '1:1', '4:5', '5:4', '21:9']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
 const VEO_RATIOS = ['16:9', '9:16']
@@ -575,6 +625,69 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['480p', '720p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 4, max: 15, step: 1 },
       { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+    ],
+  },
+  {
+    id: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 文生视频',
+    task: 'video',
+    model: 'jc-minimax-h3',
+    provider: 'gateway-video',
+    maxFiles: 0,
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
+      { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
+    ],
+  },
+  {
+    id: 'jc-minimax-h3-first-frame',
+    label: 'jc-MiniMax H3 首帧图生',
+    task: 'video',
+    model: 'jc-minimax-h3',
+    provider: 'gateway-video',
+    maxFiles: 1,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
+      { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
+      { key: 'images', label: '首帧图', kind: 'images', required: true },
+    ],
+  },
+  {
+    id: 'jc-minimax-h3-first-last',
+    label: 'jc-MiniMax H3 首尾帧',
+    task: 'video',
+    model: 'jc-minimax-h3',
+    provider: 'gateway-video',
+    maxFiles: 2,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
+      { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
+      { key: 'images', label: '首帧 + 尾帧', kind: 'images', required: true },
+    ],
+  },
+  {
+    id: 'jc-minimax-h3-ref2v',
+    label: 'jc-MiniMax H3 参考生视频',
+    task: 'video',
+    model: 'jc-minimax-h3-ref2v',
+    provider: 'gateway-video',
+    maxFiles: 6,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      // 28 秒是实测上限：30 秒会被算式补到 736 帧，成片最后约 2 秒无效（见模板 meta 的 duration_note）
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 3, min: 1, max: 28, step: 1 },
+      // ref2v 的模板没有 width/height 绑定，尺寸由工作流的 ResolutionSelector 算，
+      // 所以这里只给比例（绑到节点 29 的 aspect_ratio），不给尺寸。
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9 (Widescreen)', options: JC_H3_RATIO_OPTIONS },
+      // 戏种绑到模板节点 65 的 index（切节点 47 的 LoRA 强度）
+      { key: 'mode', label: '戏种', kind: 'select', defaultValue: 0, options: JC_H3_MODE_OPTIONS },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
     ],
   },
   {

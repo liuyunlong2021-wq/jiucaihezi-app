@@ -18,7 +18,7 @@ import type {
 } from './creationMediaTypes'
 
 import { getRhEndpointCapability } from '@/data/rhCapabilities'
-import { MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
+import { JC_H3_MODE_OPTIONS, JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
 
 const RATIOS = ['adaptive', '1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 const GPT_IMAGE_SIZES = [
@@ -39,15 +39,18 @@ const GPT_IMAGE_2_ROUTES: Array<{
   price: number | string
   resolutions: string[]
   maxImages?: number
+  /** 退出面板但仍保留合同：历史任务与按 id 调用照旧。 */
+  hidden?: boolean
 }> = [
   { id: 'gpt-image-2.5-1k', label: 'GPT Image 2.5 1K', price: 0.08, resolutions: ['1k'] },
-  { id: 'gpt-image-2.5-flare-1k', label: 'GPT Image 2.5 Flare 1K', price: 0.08, resolutions: ['1k'] },
-  { id: 'gpt-image-2.5-sunburst-1k', label: 'GPT Image 2.5 Sunburst 1K', price: 0.08, resolutions: ['1k'] },
+  // Flare / Sunburst 变体 2026-09-27 退出面板（用户决定），合同保留
+  { id: 'gpt-image-2.5-flare-1k', label: 'GPT Image 2.5 Flare 1K', price: 0.08, resolutions: ['1k'], hidden: true },
+  { id: 'gpt-image-2.5-sunburst-1k', label: 'GPT Image 2.5 Sunburst 1K', price: 0.08, resolutions: ['1k'], hidden: true },
   { id: 'gpt-image-2-1k', label: 'GPT Image 2 1K', price: 0.08, resolutions: ['1k'] },
   { id: 'gpt-image-2-超分', label: 'GPT Image 2 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
   { id: 'gpt-image-2.5-官方', label: 'GPT Image 2.5 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2.5-flare-官方', label: 'GPT Image 2.5 Flare 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2.5-sunburst-官方', label: 'GPT Image 2.5 Sunburst 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2.5-flare-官方', label: 'GPT Image 2.5 Flare 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
+  { id: 'gpt-image-2.5-sunburst-官方', label: 'GPT Image 2.5 Sunburst 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
 ]
 const XIAOYI_GEMINI_FIELDS = promptFields([
   {
@@ -112,6 +115,37 @@ const SHANHAI_VIDEO_MODELS: Array<{
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
+
+// comfy-adapter 的 H3 用 length（帧）表达时长，秒数由适配器按 24fps 换算，节点自己再对齐到 17n+5。
+// 上限取 28 秒（28 → 672 帧，节点补到 685）：实测 30 秒的成片最后约 2 秒无效。
+// 适配器侧的帧上限是各模板 meta 的 constraints（minimax-h3 用 max_length=685，ref2v 用 clamp.duration）。
+const JC_H3_DURATION_FIELD = {
+  key: 'duration',
+  label: '时长(秒)',
+  kind: 'number' as const,
+  defaultValue: 5,
+  min: 1,
+  max: 28,
+  step: 1,
+}
+
+/** comfy-adapter 的 H3 模板把 width/height 直接绑到节点上（multiple_of=32），所以画幅能传。
+ * 例外：minimax-h3-ref2v 的模板没有 width/height 绑定，
+ * 它的尺寸由工作流自带的 ResolutionSelector 按 mode 算 —— 那里不能给选择器，给了也不生效。
+ */
+const JC_H3_SIZE_FIELD = {
+  key: 'size',
+  label: '画幅',
+  kind: 'select' as const,
+  defaultValue: '1344x768',
+  options: JC_VIDEO_SIZE_OPTIONS,
+}
+
+/** 本机 H3 四个面板项的统一单价：渠道 140 按秒计费。
+ * 面板拿不到自建渠道的单价（NewAPI 只对已知模型回传价目），所以这里是唯一事实源；
+ * 改价只改这一处，`jcComfyAdapterPlan.test.ts` 把四个模型的展示值一起钉住。
+ */
+const JC_H3_PRICE = '0.2/秒'
 
 /** 设为 true 时，创作面板和画布只展示 RunningHub 渠道的模型。 */
 export const RH_ONLY_MODE = false
@@ -456,6 +490,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   baseSpec({
     id: 'local-comfy/grok-video-3-30s',
+    // 2026-09-27 退出面板（用户决定），合同保留
+    hidden: true,
     model: 'grok-video-3',
     label: 'Grok 视频 30 秒 · 本机 ComfyUI',
     task: 'video',
@@ -478,6 +514,144 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: ['2:3', '3:2', '16:9', '9:16', '1:1'],
     duration: { min: 6, max: 30 },
   }),
+  // ── 本机 GPU 的 comfy-adapter（NewAPI → 隧道 → 本机 ComfyUI）───────────────────
+  // 这里的 model 就是 NewAPI 渠道里的公开模型名，渠道的模型映射再换成适配器的 id。
+  // 必须有 GPU 的那台机器在线才能出图/出片；VPS 只负责中转、计费与鉴权。
+
+  // 只注册视频：图片模型（jc-qwen-image-2.1）已按 2026-09-26 的决定从面板撤下。
+  // 图片与视频两套权重在 48GB 显存里无法共存，频繁来回切会互相挤爆；
+  // 服务器端适配器与工作流都还在，等有第二台机器单独跑图片时再把上面那份规格接回来。
+  // 四个面板项同价：渠道 140 按秒计费，管理员 2026-09-27 核实。
+  // 参考生视频排在本组第一位（视频任务的默认模型就是它，`switchTask` 取 models[0]）。
+  baseSpec({
+    id: 'jc-minimax-h3-ref2v',
+    model: 'jc-minimax-h3-ref2v',
+    label: 'jc-MiniMax H3 参考生视频',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-video',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
+    files: { images: { min: 1, max: 6, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      { ...JC_H3_DURATION_FIELD, defaultValue: 3, label: '时长(秒)' },
+      // 尺寸不给：ref2v 模板没绑 width/height，给了也不生效（假控件）。
+      // 但节点 29（ResolutionSelector）有 aspect_ratio 输入，已在 meta 里绑定。
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '16:9 (Widescreen)',
+        options: JC_H3_RATIO_OPTIONS,
+      },
+      // 文武档位：绑到模板节点 65 的 index（切节点 47 的 LoRA 强度）
+      {
+        key: 'mode',
+        label: '戏种',
+        kind: 'select',
+        defaultValue: 0,
+        options: JC_H3_MODE_OPTIONS,
+      },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+    ]),
+    notes: [
+      '双采 + 潜空间上采样 V4（SemanticBridge 语义桥 + 分块前馈），音视频同步输出。',
+      '参考图 1~6 张：7 张以上会击穿 48GB 显存，适配器侧限制为 6 张。',
+      '只选比例：具体像素由工作流自带的 ResolutionSelector（multiple=32）算，再经 1.5x 潜空间上采样。',
+      '戏种只切节点 47 的 LoRA 强度（文戏 0.5 / 武戏 1.0），不再改分辨率。',
+      '时长上限 28 秒：30 秒的成片最后约 2 秒无效。',
+    ],
+    // 比例值必须是 ResolutionSelector 的枚举原字符串（带后缀），不能简写成 "9:16"
+    ratios: JC_H3_RATIOS,
+    resolutions: [],
+    duration: { min: 1, max: 28 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3',
+    model: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 文生视频',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-video',
+    mode: 'text-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'none',
+    resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
+    // 显式声明「不接受任何参考图」：适配器的 H3 模板一旦收到图就会切到 Ref2VA，
+    // 不拦的话用户选一张图会静默变成另一种模式。
+    files: { images: { min: 0, max: 0 } },
+    fields: promptFields([JC_H3_DURATION_FIELD, JC_H3_SIZE_FIELD]),
+    notes: ['本机 ComfyUI 的 MiniMax H3（音视频同步，4 步 Turbo）；默认 1344x768，纯文字生成。'],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 1, max: 28 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3-first-frame',
+    model: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 首帧图生',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-first-frame',
+    mode: 'image-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
+    files: { images: { min: 1, max: 1, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      JC_H3_DURATION_FIELD,
+      JC_H3_SIZE_FIELD,
+      { key: 'images', label: '首帧图', kind: 'images', required: true },
+    ]),
+    notes: ['画布选中的第 1 张图作为首帧，后续画面由提示词补出。'],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 1, max: 28 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3-first-last',
+    model: 'jc-minimax-h3',
+    label: 'jc-MiniMax H3 首尾帧',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-first-last',
+    mode: 'image-to-video',
+    contractStatus: 'verified',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
+    files: { images: { min: 2, max: 2, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      JC_H3_DURATION_FIELD,
+      JC_H3_SIZE_FIELD,
+      { key: 'images', label: '首帧 + 尾帧', kind: 'images', required: true },
+    ]),
+    notes: ['按画布顺序：第 1 张是首帧、第 2 张是尾帧，短片从首帧演到尾帧。'],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 1, max: 28 },
+  }),
   ...GPT_IMAGE_2_ROUTES.map(route => baseSpec({
     id: route.id,
     model: route.model || route.id,
@@ -491,6 +665,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     mode: 'text-to-image',
     contractStatus: 'verified',
     price: route.price,
+    hidden: route.hidden,
     endpoint: '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
@@ -521,6 +696,54 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // 菠萝（aimanplay.cn）GPT Image 同步生图：OpenAI Images 兼容，NewAPI 直配、无适配器。
   // 实测（2026-09-18 非高峰）：1K 约 56s、4K+high 约 64s；高峰期上游可到 9 分钟，
   // 可能撞网关 100 秒超时（524），重试即可。计费档：长边 ≥3072 按 4K 档。
+  // gpt-image-2 的菠萝线路（2026-09-27 上架）：提交字段与 2.5 菠萝完全一致，
+  // 单价 0.08/张（管理员 2026-09-27 核实）。
+  baseSpec({
+    id: 'gpt-image-2-菠萝',
+    model: 'gpt-image-2-菠萝',
+    label: 'GPT Image 2 菠萝',
+    task: 'image',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    pollKind: 'none',
+    mode: 'text-to-image',
+    contractStatus: 'partial',
+    price: 0.08,
+    endpoint: '/v1/images/generations',
+    assetFlow: 'none',
+    resultExtractor: 'openai-image',
+    files: { images: { min: 0, max: 8 } },
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      {
+        key: 'ratio',
+        label: '比例',
+        kind: 'select',
+        defaultValue: '1:1',
+        options: options(['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21']),
+      },
+      {
+        key: 'resolution',
+        label: '分辨率',
+        kind: 'select',
+        defaultValue: '1k',
+        options: options(['1k', '2k', '4k']),
+      },
+      {
+        key: 'quality',
+        label: '质量',
+        kind: 'select',
+        defaultValue: 'auto',
+        options: options(['auto', 'low', 'medium', 'high']),
+      },
+      { key: 'image', label: '参考图', kind: 'images' },
+    ],
+    notes: ['docs/wiki/运维/菠萝生图.md', '2.0 档；合同待真实出图验收。'],
+    ratios: ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '21:9', '9:21'],
+    resolutions: ['1k', '2k', '4k'],
+  }),
   baseSpec({
     id: 'gpt-image-2.5-菠萝',
     model: 'gpt-image-2.5-菠萝',
@@ -896,6 +1119,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
 
   directVideo({
     id: 'newapi/zx/veo-3.1-generate-preview',
+    // 2026-09-27 退出面板（用户决定），合同保留
+    hidden: true,
     model: 'veo-3.1-generate-preview',
     label: 'Veo 3.1',
     price: 0.2,
@@ -915,6 +1140,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/zx/veo-3.1-fast-generate-preview',
+    // 2026-09-27 退出面板（用户决定），合同保留
+    hidden: true,
     model: 'veo-3.1-fast-generate-preview',
     label: 'Veo 3.1 Fast',
     price: 0.1,
@@ -1329,6 +1556,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-grok-text-video',
+    // 2026-09-27 退出面板（用户决定），合同保留
+    hidden: true,
     model: 'rh-grok-text-video',
     label: 'Grok Video 文生视频 · RunningHub',
     task: 'video',
@@ -1340,6 +1569,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-grok-image-video',
+    // 2026-09-27 退出面板（用户决定），合同保留
+    hidden: true,
     model: 'rh-grok-image-video',
     label: 'Grok Video 图生视频 · RunningHub',
     task: 'video',
@@ -1961,9 +2192,14 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
+  // 菠萝线路（aimanplay.cn + 独立 MiniMax 适配器）单独成组：视频两项 + 图片两项
+  // （gpt-image-2 菠萝 / gpt-image-2.5 菠萝）。面板顺序见 `CreationPanel.vue` 的 order 数组。
+  if (spec.id.startsWith('newapi/boluo/') || id.includes('菠萝')) return '菠萝'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
-  if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.0'
+  if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.5'
+  // 本机 comfy-adapter 的模型统一用 jc- 前缀，单独成组，不要混进「其他模型」
+  if (spec.id.startsWith('jc-')) return 'jc 本机'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'
   if (spec.task === 'image' && ['gemini-3.1-flash-image-preview', 'gemini-3-pro-image-preview', 'rh-image-v2', 'rh-pro-image'].some(key => id.includes(key))) return 'Banana'
   if (id.includes('z-image')) return 'Z Image'
@@ -1972,7 +2208,8 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   if (id.includes('veo-') || id.includes('rh-video-v31-fast')) return 'Veo'
   if (id.includes('seedance2-mini')) return 'Seedance 2.0 Mini'
   if (id.includes('seedance2-fast')) return 'Seedance 2.0 Fast'
-  if (id.includes('seedance2')) return 'Seedance 2.0'
+  // 这一档实际全是 2.5（2.0 的 Mini / Fast / 标准三套 RH 模型已退役并隐藏），组名跟着改成 2.5
+  if (id.includes('seedance2')) return 'Seedance 2.5'
   if (id.includes('sora2')) return 'Sora2'
   if (id.includes('ltx23')) return 'LTX 2.3'
   if (id.includes('suno')) return 'Suno'

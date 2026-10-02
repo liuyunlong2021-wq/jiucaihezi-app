@@ -17,6 +17,7 @@ import {
 } from '@/api/media-generation'
 import type { CreationMediaInputTransport, CreationRunPlan } from './creationMediaTypes'
 import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
+import { usesNewApiContentEndpoint } from './creationMediaPlan'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
 export interface CreationSubmitRequest {
@@ -78,6 +79,7 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     request.imageParams = {
       model: plan.model,
       prompt: asString(params.prompt),
+      webappId: asOptionalString(params.webappId),
       size: asOptionalString(params.size),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
       resolution: asOptionalString(params.resolution),
@@ -98,8 +100,10 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
     request.videoParams = {
       model: plan.model,
       prompt: asString(params.prompt),
+      webappId: asOptionalString(params.webappId),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
       resolution: asOptionalString(params.resolution),
+      size: asOptionalString(params.size),
       duration: asOptionalNumber(params.duration),
       seconds: asOptionalNumber(params.seconds),
       imageUrl: images[0],
@@ -194,6 +198,7 @@ async function materializeRequestMedia(request: CreationSubmitRequest): Promise<
   }
   for (const [key, value] of Object.entries(plan.debug.normalizedParams)) {
     if (!/(?:^|:)(?:image|images|video|videos|audio|audios)$/i.test(key)) continue
+    if (request.plan.apiStyle === 'rh-aiapp' && value === 'None') continue
     if (typeof value === 'string') plan.debug.normalizedParams[key] = await materialize(value)
     else if (Array.isArray(value)) plan.debug.normalizedParams[key] = await convertMany(value.map(String))
   }
@@ -544,11 +549,13 @@ async function executeDirectVideoRequest(
   const pollUrl = taskId ? buildVideoPollUrl(request, taskId) : undefined
   if (!mediaUrl && taskId && pollUrl && request.pollKind !== 'none') {
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'video' })
-    const useContentEndpoint = request.plan.model === 'omni-fast' || request.plan.model === 'omni-v2v'
+    // 本机 comfy-adapter 的成片同样经 NewAPI 的 /v1/videos/{id}/content 回收，
+    // 这样客户端不必直连适配器，也不需要 public_base_url 对客户端可达。
+    // 判据只有一处（`usesNewApiContentEndpoint`）：四处各写一份曾把这里修好的地址换回去。
     mediaUrl = await pollTask(
       pollUrl, 'video', onProgress,
       CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS,
-      request.signal, useContentEndpoint,
+      request.signal, usesNewApiContentEndpoint(request.plan),
     )
   }
   if (!mediaUrl) throw new Error('视频生成失败')
@@ -711,7 +718,24 @@ async function executeRunningHubVideoRequest(
     const webappId = asOptionalString(normParams['webappId'])
     if (!webappId) throw new Error(`RH AI App 缺少 webappId，无法提交 ${request.plan.model}`)
     body.webappId = webappId
-    body.extra_fields = { webappId }
+    // NewAPI drops unknown top-level fields; keep the full explicit overrides here too.
+    body.extra_fields = { webappId, nodeInfoList }
+    // TaskSubmitReq preserves metadata even when custom top-level fields are stripped.
+    body.metadata = { rh_aiapp: { version: 1, webappId, nodeInfoList } }
+    const durationNodes = nodeInfoList.filter(node => /^(duration|seconds)$/i.test(node.fieldName || ''))
+    const duration = durationNodes.length === 1 ? asOptionalNumber(durationNodes[0]!.fieldValue)
+      : durationNodes.length === 0 ? params.duration : undefined
+    const ratioNodes = nodeInfoList.filter(node => /^(aspect_ratio|aspectRatio|ratio)$/i.test(node.fieldName || ''))
+    const aspectRatio = normalizeRhAspectRatio((ratioNodes.length === 1 ? ratioNodes[0]!.fieldValue : params.aspectRatio)?.split(' (')[0])
+    const nodeImages = nodeInfoList.filter(node => node.fieldName === 'image' && node.fieldValue !== 'None').map(node => node.fieldValue!)
+    Object.assign(body, compact({
+      duration: duration === undefined ? undefined : Number(duration),
+      seconds: duration === undefined ? undefined : String(duration),
+      aspectRatio,
+      aspect_ratio: aspectRatio,
+      ratio: aspectRatio,
+      images: nodeImages.length ? nodeImages : undefined,
+    }))
   } else {
     const aspectRatio = normalizeRhAspectRatio(params.aspectRatio)
     Object.assign(body, compact({
@@ -878,6 +902,40 @@ function buildDirectVideoBody(
   }
   const isMiniMaxH3 = request.plan.model.startsWith('MiniMaxH3-')
   const isGrokImagineVideo = request.plan.model === 'grok-imagine-video-1.5'
+  if (
+    request.plan.apiStyle === 'comfy-video' ||
+    request.plan.apiStyle === 'comfy-first-frame' ||
+    request.plan.apiStyle === 'comfy-first-last'
+  ) {
+    // 本机 comfy-adapter 的 minimax-h3 模板：首帧 / 尾帧 / 参考图是三个互斥字段。
+    // 面板只有 images 数组（画布选中顺序），所以在唯一一处把数组落到对应槽位。
+    // duration 交的是秒数，适配器按模板的 duration_fps 自己换算成帧。
+    // size 由适配器按模板 constraints（multiple_of=32）解析成 width/height；
+    // ref2v 的模板没有 width/height 绑定，传了会被适配器忽略。
+    // 模板自定义参数（戏种 mode）必须走 extra_fields：顶层的 mode 是 NewAPI 自己的
+    // string 字段，发数字会被它的 JSON 绑定直接拒掉
+    // （invalid_json: cannot unmarshal number into ... .mode of type string）。
+    const workflowMode = request.plan.debug.normalizedParams.mode
+    const body: Record<string, unknown> = compact({
+      model: request.plan.model,
+      prompt: params.prompt,
+      duration: asOptionalNumber(params.duration),
+      size: asOptionalString(params.size),
+      // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
+      // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
+      aspect_ratio: asOptionalString(params.size) ? undefined : asOptionalString(params.aspectRatio),
+      extra_fields: workflowMode === undefined ? undefined : { mode: workflowMode },
+    })
+    if (request.plan.apiStyle === 'comfy-first-frame') {
+      body.first_frame = uploadedImages[0]
+    } else if (request.plan.apiStyle === 'comfy-first-last') {
+      body.first_frame = uploadedImages[0]
+      body.last_frame = uploadedImages[1]
+    } else if (uploadedImages.length) {
+      body.images = uploadedImages
+    }
+    return body
+  }
   return compact({
     model: request.plan.model,
     prompt: params.prompt,

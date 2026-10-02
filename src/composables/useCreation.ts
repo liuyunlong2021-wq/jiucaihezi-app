@@ -110,7 +110,12 @@ export function isAiAppPromptField(
   return field.label === '提示词'
 }
 
-export const H3_DURATION_RANGE = { min: 1, max: 15, step: 1 }
+/** H3 应用的时长滑条：1~28 秒整数。
+ * RH 侧时长节点（如文武双修的 `27:value`）是裸 FLOAT，公网 `app-info` 实测它自报
+ * min/max 只是 ±9.2e18、step 0.1，`rh-adapter` 也不做范围校验 —— 上限完全由面板定。
+ * 28 与本体 comfy 的封顶一致：同一张画布 30 秒会被算式补到 736 帧（≈30.7s），最后约 2 秒无效。
+ */
+export const H3_DURATION_RANGE = { min: 1, max: 28, step: 1 }
 export const H3_DURATION_DEFAULT = 5
 export const H3_RATIO_DEFAULT = '9:16'
 // ponytail: 质量控件对用户无意义（画面大小交给画幅决定），隐藏后固定提交 0.9
@@ -122,13 +127,15 @@ export function isH3AiApp(webappId: string): boolean {
 
 export function isAiAppRatioField(field: Pick<CreationFieldSpec, 'key'>): boolean {
   const name = String(field.key).split(':')[1]?.toLowerCase() || ''
-  return name === 'aspect_ratio' || name === 'ratio'
+  return name === 'aspect_ratio' || name === 'aspectratio' || name === 'ratio'
 }
 
 // 8 个 H3 应用的时长节点分别是 132:value / 133:value / 27:value；
 // 多参-4图 的描述是 value（不是「时长」），所以不能只认 label
 export function isAiAppDurationField(field: Pick<CreationFieldSpec, 'key' | 'label'>): boolean {
-  return field.label === '时长' || String(field.key).endsWith(':value')
+  return /时长|duration|seconds/i.test(field.label)
+    || /:(duration|seconds)$/i.test(field.key)
+    || /^(27|132|133):value$/.test(field.key)
 }
 
 export function isAiAppQualityField(field: Pick<CreationFieldSpec, 'key'>): boolean {
@@ -557,13 +564,18 @@ function aiAppFieldParams(images: unknown[]): Record<string, unknown> {
   const output: Record<string, unknown> = {}
   for (const field of cpState.aiAppFields) {
     const value = cpState.fieldValues[field.key]
+    // Media defaults are workflow examples, never user-selected references.
+    if (MATERIALIZED_MEDIA_FIELD_KINDS.has(field.kind)) {
+      if (!isH3AiApp(cpState.aiAppWebappId) && isFieldValuePresent(value)) output[field.key] = value
+      continue
+    }
     if (value !== undefined && value !== null && value !== '') {
       output[field.key] = value
     } else if (field.defaultValue !== undefined && field.defaultValue !== null && field.defaultValue !== '') {
       output[field.key] = field.defaultValue
     }
   }
-  if (!isH3AiApp(cpState.aiAppWebappId)) return output
+  if (!isH3AiApp(cpState.aiAppWebappId)) return aiAppStandardParams(output)
 
   const label = cpState.aiAppLabel || '当前应用'
 
@@ -583,7 +595,7 @@ function aiAppFieldParams(images: unknown[]): Record<string, unknown> {
   if (promptField) output[promptField.key] = cpState.prompt
 
   // 画布选中顺序即 image1..imageN，张数是上限而不是等值；
-  // 未选到的槽位不提交，交给工作流自身默认值
+  // 未选到的槽位显式清空，避免工作流示例图或保存的旧图混入。
   const imageFields = cpState.aiAppFields.filter(field => field.kind === 'image')
   if (images.length > imageFields.length) {
     throw new Error(`${label}最多 ${imageFields.length} 张参考图，当前已选 ${images.length} 张`)
@@ -592,9 +604,24 @@ function aiAppFieldParams(images: unknown[]): Record<string, unknown> {
     throw new Error(`${label}至少需要 1 张参考图`)
   }
   imageFields.forEach((field, index) => {
-    if (index < images.length) output[field.key] = images[index]
+    output[field.key] = index < images.length ? images[index] : 'None'
   })
-  return output
+  return aiAppStandardParams(output)
+}
+
+function aiAppStandardParams(output: Record<string, unknown>): Record<string, unknown> {
+  // Only discovered, unambiguous fields can replace the unrelated standard panel state.
+  const durationFields = cpState.aiAppFields.filter(field =>
+    isAiAppDurationField(field) && (isH3AiApp(cpState.aiAppWebappId)
+      || /时长|duration|seconds/i.test(field.label) || /:(duration|seconds)$/i.test(field.key)),
+  )
+  const durationValue = durationFields.length === 1 ? output[durationFields[0]!.key] : undefined
+  const duration = isFieldValuePresent(durationValue) && Number.isFinite(Number(durationValue)) && Number(durationValue) > 0
+    ? Number(durationValue) : undefined
+  const ratioFields = cpState.aiAppFields.filter(isAiAppRatioField)
+  const ratioValue = ratioFields.length === 1 ? output[ratioFields[0]!.key] : undefined
+  const ratio = isFieldValuePresent(ratioValue) ? shortRatioLabel(ratioValue) : undefined
+  return { ...output, duration, seconds: duration, ratio, aspectRatio: ratio, aspect_ratio: ratio }
 }
 
 export const currentRunPlan = computed<CreationRunPlan | null>(() => {
@@ -636,6 +663,26 @@ export const aspectOptions = computed(() =>
 
 export const sizeOptions = computed(() =>
   currentModel.value ? getSizeOptions(currentModel.value) : []
+)
+
+/** 下拉要显示人话标签（如「2K 竖屏 9:16 · 1080×1920」），但提交的 value 必须是真实值。
+ * 标签来自当前规格里对应字段的 options；没有配标签的模型回退成原值，行为不变。
+ */
+function labeledChoices(keys: string[], values: string[]): Array<{ value: string; label: string }> {
+  const field = (currentCreationSpec.value?.fields || []).find(item => keys.includes(item.key))
+  const labels = new Map((field?.options || []).map(option => [String(option.value), option.label]))
+  return values.map(value => ({ value, label: labels.get(value) || value }))
+}
+
+export const sizeChoices = computed(() => labeledChoices(['size'], sizeOptions.value))
+export const aspectChoices = computed(() =>
+  labeledChoices(['aspect_ratio', 'ratio', 'aspectRatio'], aspectOptions.value)
+)
+export const currentSizeLabel = computed(
+  () => sizeChoices.value.find(item => item.value === cpState.size)?.label || cpState.size
+)
+export const currentAspectLabel = computed(
+  () => aspectChoices.value.find(item => item.value === cpState.ar)?.label || cpState.ar
 )
 
 export const resolutionOptions = computed(() =>

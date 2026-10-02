@@ -1,7 +1,7 @@
 {
   "name": "jiucaihezi-app",
   "version": "2.1.64",
-  "webVersion": "1.0.0",
+  "webVersion": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {

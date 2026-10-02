@@ -13,6 +13,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getItem, initDB, setItem } from '@/utils/idb'
+import { usesNewApiContentEndpoint } from '@/runtime/creation/creationMediaPlan'
 import {
   CREATION_REFRESH_POLL_INTERVAL_MS,
   CREATION_REFRESH_POLL_MAX_SEC,
@@ -64,22 +65,32 @@ function pollWindowFor(kind: 'image' | 'video' | 'audio' | 'text', isVideo: bool
     : { maxSec: 600, intervalMs: 10000 }
 }
 
-function usesAuthenticatedVideoContent(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
-  const values = [task.planSnapshot?.modelId, task.planSnapshot?.model, task.model]
-    .map(value => String(value || '').trim().toLowerCase())
-  return values.some(value => value === 'omni-fast' || value === 'omni-v2v' || value.endsWith('/omni-fast') || value.endsWith('/omni-v2v'))
+/**
+ * 本模型成片是否必须经 NewAPI 的 `/v1/videos/{id}/content` 回收。
+ *
+ * 判据只有 `usesNewApiContentEndpoint` 一处：这个判断曾在四处各写一份，对 comfy-video
+ * 结论相反，于是保存/重试时把已经正确的 content 地址换成了适配器的内网地址。
+ * 旧任务的 planSnapshot 可能缺失，所以退回 task.model（omni 系的历史记录靠它认出来）。
+ */
+function taskUsesContentEndpoint(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
+  return usesNewApiContentEndpoint({
+    apiStyle: task.planSnapshot?.apiStyle,
+    model: task.planSnapshot?.model || task.model,
+  })
 }
 
+/**
+ * 走 NewAPI content 端点的成片，结果地址必须是 `<api>/v1/videos/{上游任务号}/content`。
+ *
+ * 不信任存下来的形态：实测事故里保存路径把已经正确的 content 地址换成了适配器回的
+ * `http://frps:8796/files/…`（Docker 内网名），桌面客户端解析不了 `frps`，于是成片
+ * 生成成功却永远存不进项目。任务号是已知的，所以直接按它重建，而不是看旧地址长得对不对。
+ * dev WebView 里的 `/__jc_api/…` 相对地址要靠它绕 CORS；任务号已经对了就别动。
+ */
 function normalizeAuthenticatedVideoResultUrl(url: string, task: Pick<MediaTask, 'type' | 'upstreamTaskId' | 'model' | 'planSnapshot'>): string {
-  if (task.type !== 'video' || !task.upstreamTaskId || !usesAuthenticatedVideoContent(task)) return url
-  try {
-    const parsed = new URL(url, DEFAULT_API_BASE_URL)
-    const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
-    if (!/^\/v1\/videos\/task_[A-Za-z0-9._:-]+\/content$/.test(pathname)) return url
-    return `${DEFAULT_API_BASE_URL}/v1/videos/${encodeURIComponent(task.upstreamTaskId)}/content`
-  } catch {
-    return url
-  }
+  if (task.type !== 'video' || !task.upstreamTaskId || !taskUsesContentEndpoint(task)) return url
+  const contentPath = `/v1/videos/${encodeURIComponent(task.upstreamTaskId)}/content`
+  return url === `/__jc_api${contentPath}` ? url : `${DEFAULT_API_BASE_URL}${contentPath}`
 }
 
 /** NewAPI content 形式的结果地址；历史任务可能保存了适配器内部 ID 拼出的死链，重试时按上游任务重查修正。 */
@@ -524,6 +535,8 @@ export function __setCreationSubmitExecutorForTests(
 export const useMediaTaskStore = defineStore('mediaTasks', () => {
   const tasks = ref<MediaTask[]>([])
   const activeTaskIds = ref(new Set<string>())
+  /** 正在写盘的任务；同一任务的保存必须互斥（见 completeMediaTask）。 */
+  const savingTaskIds = new Set<string>()
   const initialized = ref(false)
   let initPromise: Promise<void> | null = null
   let persistenceQueue = Promise.resolve()
@@ -745,19 +758,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         }>('http_download_base64', {
           request: { url: downloadUrl, headers: creationResultRequestHeaders(downloadUrl), timeout_secs: 120 },
         })
-        if (dl.status < 200 || dl.status >= 300) {
-          console.warn('[JC] 创作结果下载失败 HTTP', dl.status)
-          handleAssetDownloadFailure(task)
-          return
-        }
+        if (dl.status < 200 || dl.status >= 300) throw new Error(`HTTP 下载失败: ${dl.status}`)
         dataBase64 = dl.data_base64
         contentType = normalizeContentType(dl.headers || {}, 'image/png')
       }
-      if (!dataBase64) {
-        console.warn('[JC] 创作结果下载为空')
-        handleAssetDownloadFailure(task)
-        return
-      }
+      if (!dataBase64) throw new Error('下载结果为空')
 
       // ★ 桌面端有项目文件夹 → 直写到项目文件夹
       if (projectDir) {
@@ -803,17 +808,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.resultUrl = undefined
       console.log('[JC] 创作结果已落地:', result.assetId)
       void persistTasksSafely('asset-localized')
-    } catch (e) {
-      console.warn('[JC] 创作结果落地失败:', e)
-      handleAssetDownloadFailure(task)
-      // 下载失败不能静默：卡片与重试入口都要能看到真实原因。
-      task.errorMsg = `保存到项目失败：${(e instanceof Error ? e.message : String(e)).slice(0, 160)}`
-      task.error = {
-        category: 'persistence',
-        stage: 'persistence',
-        message: task.errorMsg,
-        raw: e,
-      }
+    } catch (cause) {
+      // 这里只做归一化，然后一律上抛：失败状态只由 `completeMediaTask` 写。
+      // 之前在这里吞掉异常并自己写一半状态（assetStatus / errorMsg），上层却按成功继续
+      // （progressText=完成），于是产出「文件已在项目里、卡片却显示保存失败」的自相矛盾记录。
+      throw cause instanceof Error ? cause : new Error(String(cause))
     }
   }
 
@@ -909,7 +908,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       message,
       raw: error,
     }
-    task.assetStatus = 'failed'
+    task.assetStatus = task.assetStatus === 'remote-only' ? 'remote-only' : 'failed'
     task.completedAt = Date.now()
     markCanvasWriteUnwritten(task)
   }
@@ -919,12 +918,18 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     resultUrl: string,
     persistenceContext: string,
   ): Promise<void> {
+    // 同一任务的保存必须有唯一互斥点：实测同一任务的下载会并发（项目目录里同时出现两个 .part），
+    // 后到者的失败会把先到者的成功状态覆盖掉。四个入口（提交/重试/刷新/恢复）都在这里收口。
+    if (savingTaskIds.has(task.id)) return
     if (isTaskCancelled(task)) {
       markCanvasWriteUnwritten(task)
       await persistTasksSafely(`${persistenceContext}-cancelled`)
       return
     }
+    // “已落项目”是终态：不重下，也不许被后到的失败降级。
+    if (task.assetStatus === 'local' && (task.projectPath || task.assetUri)) return
     acceptedResultTaskIds.add(task.id)
+    savingTaskIds.add(task.id)
     try {
       task.resultUrl = resultUrl
       task.completedAt = Date.now()
@@ -938,6 +943,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           return
         }
         if (task.source !== 'creation') throw error
+        // 失败状态只在这里写：重试计数与卡片文案由同一处决定，不会互相覆盖。
+        handleAssetDownloadFailure(task)
         markWebMediaPersistenceFailure(task, error)
         emitEvent('media-task-complete', {
           taskId: task.id,
@@ -981,6 +988,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       if (!persisted) markPersistenceWarning(task, '结果已完成，但本地保存失败')
     } finally {
       acceptedResultTaskIds.delete(task.id)
+      savingTaskIds.delete(task.id)
     }
   }
 
@@ -1112,7 +1120,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     try {
       const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
       const mediaUrl = await abortTaskExecution(
-        pollTask(task.pollUrl, task.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, usesAuthenticatedVideoContent(task)),
+        pollTask(task.pollUrl, task.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task)),
         controller.signal,
       )
       if ((task as MediaTask).status === 'cancelled') {
@@ -1298,11 +1306,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     activeTaskIds.value.add(task.id)
     try {
       // 历史任务可能保存了错误的全局 /content 地址（含适配器内部任务 ID 拼出的死链）；
-      // 无需鉴权内容端点的模型重新读取原始结果，由 pollTask 用 NewAPI 任务 ID 重建地址。
-      if (isContentResultUrl(resultUrl) && !usesAuthenticatedVideoContent(task) && task.pollUrl && task.pollKind) {
+      // 不走 content 端点的模型重新读取原始结果，由 pollTask 用 NewAPI 任务 ID 重建地址。
+      // comfy 系必须排除：对它们 content 地址才是对的，重查只会拿到适配器内网地址。
+      if (isContentResultUrl(resultUrl) && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
         const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
         try {
-          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, false)
+          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, taskUsesContentEndpoint(task))
         } catch (error) {
           // 重查失败必须回到显式失败态；否则任务会停在 running，错误又无处显示。
           markWebMediaPersistenceFailure(task, error)
@@ -1347,7 +1356,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         pollTask(
           task.pollUrl!, task.pollKind!, onProgress,
           CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS,
-          controller.signal, usesAuthenticatedVideoContent(task),
+          controller.signal, taskUsesContentEndpoint(task),
         ),
         controller.signal,
       )
@@ -1579,7 +1588,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
         const pollWindow = pollWindowFor(result.pollKind, result.pollKind === 'video')
-        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal)
+        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task))
       }
       await completeMediaTask(task, resultUrl, 'execute-success')
       return

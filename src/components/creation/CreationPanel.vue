@@ -53,7 +53,11 @@ import {
   currentModelAvailability,
   availableModels,
   aspectOptions,
+  aspectChoices,
+  currentAspectLabel,
   sizeOptions,
+  sizeChoices,
+  currentSizeLabel,
   resolutionOptions,
   durationOptions,
   durationRange,
@@ -670,6 +674,20 @@ onMounted(async () => {
 // 用户自己选过就尊重已选的那个，不再覆盖。
 const DEFAULT_AI_APP_ID = '2101840271142117377'
 
+/**
+ * 「应用」下拉的展示清单，数组顺序即下拉顺序。
+ *
+ * 只留文武双修：服务器目录里另有 13 项（7 个 Minimax-h3 变体、5 个数字人/语音类、图音生视频），
+ * 用户 2026-09-27 决定一律不上面板。服务器目录与接口保持原样 —— 需要时仍可用下拉底部的
+ * 「或粘贴 ID…」直接指定，`aiAppLabel()` 读的仍是完整目录，名字照常显示。
+ */
+const PANEL_AI_APP_IDS = ['2101840271142117377']
+const visibleAiApps = computed(() =>
+  PANEL_AI_APP_IDS
+    .map(webappId => aiAppDirectory.value.find(app => app.webappId === webappId))
+    .filter((app): app is AiAppDirectoryEntry => Boolean(app)),
+)
+
 async function ensureDefaultAiApp() {
   if (cpState.task !== 'ai-app' || cpState.aiAppWebappId) return
   const app = aiAppDirectory.value.find(item => item.webappId === DEFAULT_AI_APP_ID)
@@ -714,7 +732,23 @@ async function handleDiscoverAiApp() {
   cpState.aiAppDiscovering = true
   cpState.aiAppFields = []
   try {
-    const { app, fields } = await discoverAiAppNodes(cpState.aiAppWebappId)
+    const { app, fields: discoveredFields } = await discoverAiAppNodes(cpState.aiAppWebappId)
+    const fields = isH3AiApp(cpState.aiAppWebappId)
+      ? discoveredFields.map(field =>
+          field.label === '戏种' || /0文1武/.test(field.label) || /^(65:index|.*:mode)$/i.test(field.key)
+            ? {
+                ...field,
+                label: '戏种',
+                kind: 'select' as const,
+                defaultValue: 0,
+                options: [
+                  { value: 0, label: '文戏' },
+                  { value: 1, label: '武戏' },
+                ],
+              }
+            : field,
+        )
+      : discoveredFields
     cpState.aiAppLabel = app.label
     cpState.aiAppOutputType = app.outputType
     cpState.aiAppBillingModel = app.billingModel
@@ -763,7 +797,7 @@ const aiAppPromptField = computed(() =>
 
 // ─── H3 AI 应用专用控件 ───
 // 图槽（image1..imageN）不再逐个显示，张数与顺序完全跟随画布选中；
-// 比例换成浮层（长串只用于提交，界面显示短式），时长换成 1-15 秒滑条，质量隐藏。
+// 比例换成浮层（长串只用于提交，界面显示短式），时长换成 1-28 秒滑条，质量隐藏。
 const isH3App = computed(() => cpState.task === 'ai-app' && isH3AiApp(cpState.aiAppWebappId))
 
 const h3RatioField = computed(() =>
@@ -3924,19 +3958,24 @@ const modelList = computed(() =>
 const modelGroups = computed(() => {
   const groups = new Map<string, typeof modelList.value>()
   for (const model of modelList.value) groups.set(model.family, [...(groups.get(model.family) || []), model])
+  // 分组顺序：不在表里的组会落到最前面（indexOf 返回 -1），新增分组必须同时补进来。
+  // 菠萝 = 图片两项排最前、视频两项跟在 jc 本机后面（用户 2026-09-27 决定）。
   const order = cpState.task === 'image'
     ? [
+        '菠萝', 'jc 本机',
         'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
-        'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+        'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
       ]
     : cpState.task === 'video'
       ? [
-          'Seedance 2.0', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
+          'jc 本机', '菠萝',
+          'Seedance 2.5', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
       : [
+          'jc 本机', '菠萝',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Veo', 'Grok Video',
-          'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.0', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
+          'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
   return [...groups].sort(([left], [right]) => order.indexOf(left) - order.indexOf(right))
 })
@@ -4581,7 +4620,7 @@ const canSend = computed(
         </div>
         <div v-if="openPop === 'aiApp'" class="cp-popover cp-ai-app-pop" @click.stop>
           <button
-            v-for="app in aiAppDirectory"
+            v-for="app in visibleAiApps"
             :key="app.webappId"
             class="cp-pop-item"
             :class="{ active: cpState.aiAppWebappId === app.webappId }"
@@ -4625,38 +4664,38 @@ const canSend = computed(
       <!-- 尺寸 (gpt-image-2) -->
       <div v-if="sizeOptions.length" class="cp-island" @click="togglePop('size')">
         <div class="cp-island-label">尺寸</div>
-        <div class="cp-island-val">{{ cpState.size }}</div>
+        <div class="cp-island-val">{{ currentSizeLabel }}</div>
         <div v-if="openPop === 'size'" class="cp-popover" @click.stop>
           <button
-            v-for="s in sizeOptions"
-            :key="s"
+            v-for="s in sizeChoices"
+            :key="s.value"
             class="cp-pop-item"
-            :class="{ active: cpState.size === s }"
+            :class="{ active: cpState.size === s.value }"
             @click="
-              setSize(s);
+              setSize(s.value);
               openPop = ''
             "
           >
-            {{ s }}
+            {{ s.label }}
           </button>
         </div>
       </div>
       <!-- 比例 (视频) -->
       <div v-if="aspectOptions.length" class="cp-island" @click="togglePop('ar')">
         <div class="cp-island-label">比例</div>
-        <div class="cp-island-val">{{ cpState.ar }}</div>
+        <div class="cp-island-val">{{ currentAspectLabel }}</div>
         <div v-if="openPop === 'ar'" class="cp-popover" @click.stop>
           <button
-            v-for="a in aspectOptions"
-            :key="a"
+            v-for="a in aspectChoices"
+            :key="a.value"
             class="cp-pop-item"
-            :class="{ active: cpState.ar === a }"
+            :class="{ active: cpState.ar === a.value }"
             @click="
-              setAspect(a);
+              setAspect(a.value);
               openPop = ''
             "
           >
-            {{ a }}
+            {{ a.label }}
           </button>
         </div>
       </div>

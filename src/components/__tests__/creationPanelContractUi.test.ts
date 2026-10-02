@@ -104,6 +104,9 @@ test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () =>
   // 选应用时把画幅与时长种成统一值
   assert.match(source, /setModelFieldValue\(ratioField, preferredRatio\.value\)/)
   assert.match(source, /setModelFieldValue\(durationField, H3_DURATION_DEFAULT\)/)
+  assert.match(source, /field\.label === '戏种' \|\| \/0文1武\/\.test\(field\.label\) \|\| \/\^\(65:index\|\.\*:mode\)\$\/i\.test\(field\.key\)/)
+  assert.match(source, /label: '文戏'/)
+  assert.match(source, /label: '武戏'/)
   // H3 不预填工作流自带的示例提示词
   assert.match(source, /if \(promptField && isH3AiApp\(cpState\.aiAppWebappId\)\)/)
   assert.match(source, /cpState\.prompt === String\(promptField\.defaultValue \?\? ''\)\) cpState\.prompt = ''/)
@@ -116,6 +119,25 @@ test('切到 AI 应用时默认选中文武双修', () => {
   assert.match(source, /if \(cpState\.task !== 'ai-app' \|\| cpState\.aiAppWebappId\) return/)
   assert.match(source, /fetchAiAppDirectory\(\)\s*\n\s*\.then\(\(\) => ensureDefaultAiApp\(\)\)/)
   assert.match(source, /if \(task === 'ai-app'\) void ensureDefaultAiApp\(\)/)
+})
+
+test('「应用」下拉只展示文武双修，服务器目录里的其余 13 项不上面板', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  // 用户 2026-09-27 决定：目录共 14 项，面板只留文武双修（也是第一条）。
+  assert.match(source, /const PANEL_AI_APP_IDS = \['2101840271142117377'\]/)
+  assert.match(source, /v-for="app in visibleAiApps"/)
+  assert.doesNotMatch(source, /v-for="app in aiAppDirectory"/)
+  // 名字解析仍读完整目录：用「或粘贴 ID…」指定被隐藏的应用时，不能退化成截断的 ID
+  assert.match(source, /function aiAppLabel\(webappId: string\): string \{\s*\n\s*const app = aiAppDirectory\.value\.find/)
+})
+
+test('H3 应用的时长滑条上界放在面板常量里', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+
+  assert.match(source, /:min="H3_DURATION_RANGE\.min"/)
+  assert.match(source, /:max="H3_DURATION_RANGE\.max"/)
+  assert.match(source, /setH3Duration\(\+\(\$event\.target as HTMLInputElement\)\.value\)/)
 })
 
 test('creation attachment button uses the native multi-file picker on Desktop', () => {

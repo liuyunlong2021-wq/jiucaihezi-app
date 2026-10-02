@@ -28,6 +28,10 @@ export type CreationApiStyle =
   | 'rh-standard'
   | 'rh-aiapp'
   | 'comfy-grok-video'
+  // 本机 comfy-adapter：同一份 H3 工作流靠「图填进哪个槽位」区分文生 / 首帧 / 首尾帧 / 参考生
+  | 'comfy-video'
+  | 'comfy-first-frame'
+  | 'comfy-first-last'
 
 export type CreationMode =
   | 'text-to-image'

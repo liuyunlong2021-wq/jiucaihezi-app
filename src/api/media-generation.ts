@@ -19,6 +19,8 @@
 export interface ImageGenParams {
   model: string
   prompt: string
+  /** Dynamic RunningHub AI App workflow ID. */
+  webappId?: string
   size?: string
   aspectRatio?: string
   resolution?: string
@@ -35,8 +37,12 @@ export interface ImageGenParams {
 export interface VideoGenParams {
   model: string
   prompt: string
+  /** Dynamic RunningHub AI App workflow ID. */
+  webappId?: string
   aspectRatio?: string
   resolution?: string
+  /** 具体像素尺寸，如 1088x1920。适配器按模板 constraints 解析成 width/height。 */
+  size?: string
   duration?: string | number
   seconds?: string | number
   imageUrl?: string
@@ -110,7 +116,7 @@ import {
 } from '@/services/newApiClient'
 import { getApiKey } from '@/services/newApiAuth'
 import { sizeFromRatioResolution } from '@/utils/imageContracts'
-import { isAllowedCreationPollUrl } from '@/utils/urlSafety'
+import { isAllowedCreationPollUrl, isLocalAssetUrl } from '@/utils/urlSafety'
 
 let _cachedConfig: { apiKey: string; apiBase: string } | null = null
 
@@ -423,8 +429,9 @@ export function isTerminalCreationTaskError(error: unknown): boolean {
 export async function uploadCreationAsset(value?: string, externalSignal?: AbortSignal): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
-  // 远程素材已经可被模型服务访问，本地 Tauri asset:// 和浏览器 blob: 必须上传。
-  if (!source.startsWith('data:') && !source.startsWith('asset:') && !source.startsWith('blob:')) return source
+  // 远程素材已经可被模型服务访问，本地 Tauri 资源（asset:// 或 Windows 的
+  // http(s)://asset.localhost/...）和浏览器 blob: 必须上传。
+  if (!source.startsWith('data:') && !isLocalAssetUrl(source) && !source.startsWith('blob:')) return source
   await ensureConfig()
   const blob = source.startsWith('data:')
     ? dataUrlToBlob(source)

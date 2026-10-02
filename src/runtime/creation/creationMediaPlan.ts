@@ -14,6 +14,27 @@ import type {
 
 export { sizeFromRatioResolution } from '@/utils/imageContracts'
 
+/**
+ * 成片是否必须经 NewAPI 的 `/v1/videos/{id}/content` 回收。
+ *
+ * 这是**唯一**判据：本机 comfy-adapter 的 `public_base_url` 是 Docker 内网名
+ * （`http://frps:8796`），它回在 `metadata.url` 里的地址只有同网络的上游进程能访问；
+ * omni 系模型的成片同样只能经 NewAPI 取。客户端直连这些地址只会在 DNS 阶段失败。
+ *
+ * 历史教训：这个判断曾在四处各写一份——首轮轮询用 apiStyle 白名单，保存/重试/刷新路径
+ * 只认 omni 或硬编码 `false`。对 `comfy-video` 两边结论相反，于是把已经正确的 content
+ * 地址换成了适配器的内网地址：成片生成成功（596 秒、文件已在适配器 static/ 里）却存不进项目。
+ */
+export function usesNewApiContentEndpoint(
+  target: { apiStyle?: string; model?: string } | undefined | null,
+): boolean {
+  if (!target) return false
+  const apiStyle = String(target.apiStyle || '')
+  if (apiStyle === 'comfy-video' || apiStyle === 'comfy-first-frame' || apiStyle === 'comfy-first-last') return true
+  const model = String(target.model || '').trim().toLowerCase()
+  return model === 'omni-fast' || model === 'omni-v2v' || model.endsWith('/omni-fast') || model.endsWith('/omni-v2v')
+}
+
 const SOURCE_LABELS = {
   'newapi-direct': '直连',
   runninghub: 'RunningHub',
@@ -262,7 +283,7 @@ function normalizeOpenAiImageParams(
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    response_format: spec.apiStyle === 'xiaoyi-image-task' || spec.apiStyle === 'newapi-image-task' ? 'url' : params.response_format || 'url',
+    response_format: 'url',
   })
 }
 
