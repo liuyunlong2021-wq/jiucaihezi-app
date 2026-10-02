@@ -118,7 +118,7 @@ const SHANHAI_VIDEO_MODELS: Array<{
 // `price` 是面板对用户的实付价（灵动官方价 + 加价），改价必须同步 NewAPI 渠道的计费表达式。
 const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517']
 const LINGDONG_CONTRACT_ISSUES = [
-  '上游能力与计费口径已按公开 GET /api/pricing 核对（2026-10-02）；真实提交、出片与扣费尚未实测。',
+  '2026-10-02 真机验收：`Sd 2.5 480P` 4 秒出片成功，后台实扣 2 元（面板 0.5/秒 × 4 秒对得上）。',
   '参考视频/参考音频（videos[] / audios[]）未接：面板目前只有图片链路。',
 ]
 // /api/pricing 的 supported_ratios：`SD-2.5-特价` 多一档 21:9，其余 4 条是这 5 档
@@ -1119,8 +1119,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     mode: 'text-to-video',
     endpoint: '/v1/videos',
     assetFlow: 'newapi-upload',
-    // 没跑过真单之前不写 verified：上游能力核对过，端到端还没实测
-    contractStatus: 'unknown',
+    // 2026-10-02 真机验收通过（`Sd 2.5 480P` 4 秒出片 + 实扣 2 元）
+    contractStatus: 'verified',
     contractIssues: LINGDONG_CONTRACT_ISSUES,
     ratios: model.ratios,
     resolutions: model.resolutions,

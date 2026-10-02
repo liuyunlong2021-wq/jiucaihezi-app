@@ -1197,9 +1197,9 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
     getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!.fields.some(field => field.key === 'resolution'),
     false,
   )
-  // 上游能力核对过、端到端没跑过：不写 verified
+  // 2026-10-02 真机验收通过（出片 + 实扣 2 元），所以是 verified 而不是 unknown
   for (const id of ['newapi/lingdong/SD-2.5-特价', 'newapi/lingdong/sd2.5-a']) {
-    assert.equal(getCreationModelSpec(id)!.contractStatus, 'unknown', id)
+    assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
   }
   assert.equal(
     listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/lingdong/')),
