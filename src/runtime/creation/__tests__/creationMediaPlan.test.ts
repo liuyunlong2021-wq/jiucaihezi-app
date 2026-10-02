@@ -1131,6 +1131,67 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
   )
 })
 
+test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /api/pricing 钉住', () => {
+  const perCall = buildCreationRunPlan({
+    modelId: 'newapi/lingdong/cvk',
+    params: { prompt: '海边日落，镜头缓推', ratio: '16:9', resolution: '720p', duration: 5 },
+  })
+  assert.equal(perCall.route, 'newapi-direct')
+  assert.equal(perCall.endpoint, '/v1/videos')
+  assert.equal(perCall.pollKind, 'newapi-task')
+  assert.equal(perCall.assetFlow, 'newapi-upload')
+  assert.equal(perCall.mode, 'text-to-video')
+
+  const perSecond = buildCreationRunPlan({
+    modelId: 'newapi/lingdong/cvk-2.5-1080',
+    params: {
+      prompt: '让参考图里的主体自然运动',
+      images: ['https://example.com/1.jpg'],
+      ratio: '9:16',
+      resolution: '1080p',
+      duration: 30,
+    },
+  })
+  assert.equal(perSecond.mode, 'image-to-video')
+
+  // 时长范围与参考图上限按上游 /api/pricing 的能力表拦下（cvk 是 4–15 秒 / 9 张）
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/lingdong/cvk',
+    params: { prompt: '超出时长上限', duration: 16 },
+  }), /时长\(秒\)不能大于 15/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/lingdong/cvk',
+    params: {
+      prompt: '超出参考图上限',
+      images: Array.from({ length: 10 }, (_, index) => `https://example.com/${index}.jpg`),
+    },
+  }), /参考图最多支持 9 个/)
+
+  // 定价与范围是有意钉住的：加模型或改价必须同步改这里，也要同步 NewAPI 渠道的计费表达式，
+  // 否则面板显示的实付价与真实扣费会漂移。
+  assert.deepEqual(
+    listCreationModels({ source: 'all' })
+      .filter(model => model.id.startsWith('newapi/lingdong/'))
+      .map(model => [model.id, model.model, model.price, model.task]),
+    [
+      ['newapi/lingdong/cvk', 'cvk', '4/次', 'video'],
+      ['newapi/lingdong/满血-480p', '满血-480p', '3.5/次', 'video'],
+      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', '0.5/秒', 'video'],
+      ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', '0.75/秒', 'video'],
+      ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', '1.5/秒', 'video'],
+    ],
+  )
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/cvk')!), '灵动')
+  // 上游能力核对过、端到端没跑过：不写 verified
+  for (const id of ['newapi/lingdong/cvk', 'newapi/lingdong/cvk-2.5-1080']) {
+    assert.equal(getCreationModelSpec(id)!.contractStatus, 'unknown', id)
+  }
+  assert.equal(
+    listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/lingdong/')),
+    false,
+  )
+})
+
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   const params: Record<string, unknown> = {
     prompt: '测试提示词',

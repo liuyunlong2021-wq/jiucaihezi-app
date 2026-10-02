@@ -112,6 +112,80 @@ const SHANHAI_VIDEO_MODELS: Array<{
     maxImages: 10,
   },
 ]
+// 灵动 API（https://www.lingdongapi.com）：5 条线路、两类计费口径。
+// 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-02 实测）—— 比文档准：
+// 文档把 cvk-2.5-* 写成「图·视频·音频参考」，实际是 30 图 / 10 视频 / 10 音频。
+// `price` 是面板对用户的实付价（灵动官方价 + 加价），改价必须同步 NewAPI 渠道的计费表达式。
+const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517']
+const LINGDONG_CONTRACT_ISSUES = [
+  '上游能力与计费口径已按公开 GET /api/pricing 核对（2026-10-02）；真实提交、出片与扣费尚未实测。',
+  '参考视频/参考音频（videos[] / audios[]）未接：面板目前只有图片链路。',
+]
+// /api/pricing 的 supported_ratios，5 条线路完全一致
+const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
+const LINGDONG_VIDEO_MODELS: Array<{
+  // NewAPI 渠道里的公开名（面板发什么，渠道就按什么找），与 newapi-plugins/lingdong.plugin.js 的 meta.models 逐字一致
+  model: string
+  label: string
+  price: string
+  ratios: string[]
+  resolutions: string[]
+  duration: { min: number; max: number }
+  // 按秒计费的三条默认给下限 4 秒（一笔最便宜），按次的两条给 5 秒（单价与时长无关）
+  defaultDuration: number
+  maxImages: number
+}> = [
+  {
+    model: 'cvk',
+    label: '灵动 cvk 720P 4元/次',
+    price: '4/次',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['720p'],
+    duration: { min: 4, max: 15 },
+    defaultDuration: 5,
+    maxImages: 9,
+  },
+  {
+    model: '满血-480p',
+    label: '灵动 满血-480p 3.5元/次',
+    price: '3.5/次',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['480p'],
+    duration: { min: 4, max: 15 },
+    defaultDuration: 5,
+    maxImages: 9,
+  },
+  {
+    model: 'cvk-2.5-480',
+    label: '灵动 cvk-2.5-480 0.5元/秒',
+    price: '0.5/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['480p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
+    model: 'cvk-2.5-720',
+    label: '灵动 cvk-2.5-720 0.75元/秒',
+    price: '0.75/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
+    model: 'cvk-2.5-1080',
+    label: '灵动 cvk-2.5-1080 1.5元/秒',
+    price: '1.5/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['1080p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
 const VIDEO_RATIOS = ['2:3', '3:2', '1:1', '16:9', '9:16']
@@ -1026,6 +1100,40 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
     ]),
     notes: SHANHAI_NOTES,
+  })),
+  // ── 灵动 API：直连厂商（newapi-plugins/lingdong.plugin.js），没有适配器也没有隧道 ──
+  ...LINGDONG_VIDEO_MODELS.map(model => directVideo({
+    id: `newapi/lingdong/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    // 没跑过真单之前不写 verified：上游能力核对过，端到端还没实测
+    contractStatus: 'unknown',
+    contractIssues: LINGDONG_CONTRACT_ISSUES,
+    ratios: model.ratios,
+    resolutions: model.resolutions,
+    duration: model.duration,
+    files: { images: { min: 0, max: model.maxImages } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: model.ratios[0], options: options(model.ratios) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: model.resolutions[0], options: options(model.resolutions) },
+      {
+        key: 'duration',
+        label: '时长(秒)',
+        kind: 'number',
+        defaultValue: model.defaultDuration,
+        min: model.duration.min,
+        max: model.duration.max,
+        step: 1,
+      },
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+    ]),
+    notes: LINGDONG_NOTES,
   })),
   directVideo({
     id: 'newapi/xiaoyi/grok-imagine-video-1.5',
@@ -2198,6 +2306,8 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.5'
+  // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）
+  if (spec.id.startsWith('newapi/lingdong/')) return '灵动'
   // 本机 comfy-adapter 的模型统一用 jc- 前缀，单独成组，不要混进「其他模型」
   if (spec.id.startsWith('jc-')) return 'jc 本机'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'

@@ -174,6 +174,7 @@ const externalNodeTests = [
   'newapi-plugins/__tests__/boluo.test.mjs',
   'newapi-plugins/__tests__/comfy.test.mjs',
   'newapi-plugins/__tests__/dola.test.mjs',
+  'newapi-plugins/__tests__/lingdong.test.mjs',
   'newapi-plugins/__tests__/rh.test.mjs',
   'newapi-plugins/__tests__/shanhai.test.mjs',
   'newapi-plugins/__tests__/zx.test.mjs',
