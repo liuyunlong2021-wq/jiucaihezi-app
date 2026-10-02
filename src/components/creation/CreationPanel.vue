@@ -3967,8 +3967,9 @@ const modelGroups = computed(() => {
       ]
     : cpState.task === 'video'
       ? [
-          'jc 本机', '菠萝',
-          'Seedance 2.5', '满血seedance2.5', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
+          // 满血seedance2.5 排最前（用户 2026-10-02 要求）：分组第一 + 组内第一条 = 视频默认模型
+          '满血seedance2.5', 'jc 本机', '菠萝',
+          'Seedance 2.5', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
       : [

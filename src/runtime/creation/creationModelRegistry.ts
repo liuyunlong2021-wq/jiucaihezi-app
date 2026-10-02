@@ -124,6 +124,9 @@ const LINGDONG_CONTRACT_ISSUES = [
 // /api/pricing 的 supported_ratios：`SD-2.5-特价` 多一档 21:9，其余 4 条是这 5 档
 const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
 const LINGDONG_WIDE_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
+// 表内**顺序就是面板顺序**，而面板默认模型 = 当前任务第一条可用模型（useCreation 的
+// `availableModels[0]`）。所以 2026-10-02 用户要求「视频默认走 Sd 2.5 480P」时，
+// 就是把这条放在表首 + 把「满血seedance2.5」分组放到视频最前（CreationPanel.vue 的 order 表），两处缺一不可。
 const LINGDONG_VIDEO_MODELS: Array<{
   // NewAPI 渠道里的公开名（面板发什么，渠道就按什么找），与 newapi-plugins/lingdong.plugin.js 的 meta.models 逐字一致
   model: string
@@ -140,6 +143,16 @@ const LINGDONG_VIDEO_MODELS: Array<{
   promptMaxLength?: number
 }> = [
   {
+    model: 'cvk-2.5-480',
+    label: 'Sd 2.5 480P · 灵动 cvk-2.5',
+    price: '0.5/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['480p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
     model: 'SD-2.5-特价',
     label: 'Sd 2.5 特价 30秒 · 灵动 SD-2.5-特价',
     price: '2.5/次',
@@ -155,16 +168,6 @@ const LINGDONG_VIDEO_MODELS: Array<{
     price: '0.5/秒',
     ratios: LINGDONG_RATIOS,
     resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 30,
-  },
-  {
-    model: 'cvk-2.5-480',
-    label: 'Sd 2.5 480P · 灵动 cvk-2.5',
-    price: '0.5/秒',
-    ratios: LINGDONG_RATIOS,
-    resolutions: ['480p'],
     duration: { min: 4, max: 30 },
     defaultDuration: 4,
     maxImages: 30,

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
@@ -1183,9 +1184,9 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
       .filter(model => model.id.startsWith('newapi/lingdong/'))
       .map(model => [model.id, model.model, displayModelLabel(model.label), model.price, model.task]),
     [
+      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', 'Sd 2.5 480P', '0.5/秒', 'video'],
       ['newapi/lingdong/SD-2.5-特价', 'SD-2.5-特价', 'Sd 2.5 特价 30秒', '2.5/次', 'video'],
       ['newapi/lingdong/sd2.5-a', 'sd2.5-a', 'Sd 2.5-a 720P', '0.5/秒', 'video'],
-      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', 'Sd 2.5 480P', '0.5/秒', 'video'],
       ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', 'Sd 2.5 720P', '0.75/秒', 'video'],
       ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', 'Sd 2.5 1080P', '1.5/秒', 'video'],
     ],
@@ -1204,6 +1205,25 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
     listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/lingdong/')),
     false,
   )
+})
+
+test('灵动分组排在视频最前，视频默认就是 Sd 2.5 480P', () => {
+  // 面板默认模型 = 当前任务第一条可用模型（useCreation 里 `availableModels[0]`），
+  // 所以「组排最前」+「组内第一条」共同决定默认值 —— 两处都钉住，免得以后静默漂移。
+  const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
+  const start = panel.indexOf("cpState.task === 'video'")
+  // 数组字面量里夹了注释，先剔掉注释行再断言第一条
+  const videoOrder = panel
+    .slice(start, start + 400)
+    .split('\n')
+    .filter(line => !line.trim().startsWith('//'))
+    .join('\n')
+  assert.match(videoOrder, /\[\s*'满血seedance2\.5'/)
+
+  const lingdong = listCreationModels({ task: 'video' })
+    .filter(model => model.id.startsWith('newapi/lingdong/'))
+  assert.equal(lingdong[0].id, 'newapi/lingdong/cvk-2.5-480')
+  assert.equal(displayModelLabel(lingdong[0].label), 'Sd 2.5 480P')
 })
 
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
