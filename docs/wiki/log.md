@@ -1961,5 +1961,6 @@
 - 适配器：`adp/service.py` + `adp/api.py` 加**换栈观测**（`Stats.model_switches`、日志 `栈切换 #N：X -> Y`、`/health` 暴露），**不加卸载动作**（那是在应付臆想的问题）；`app.py --check` 四步全绿；按 `cloud.ps1 -Action restart-adapter` 重启后 `/health` 已带 `model_switches: 0`。
 - 文档订正：内部文档把「切换会把显存顶满、甚至卡死 ComfyUI」改成「同时常驻装不下 → 用完即卸、切换需重载」并写明那次卡死的真实根因（探针占槽位）；图片模型那节改成「2026-09-26 撤下 → 2026-10-02 接回对外」+ 做法表；对外图片文档「未上线」→「已上线」+「交替调用下一笔慢几十秒」+ `response_format` 固定 b64。
 - **未上传/未验证**：插件要用户上传（0.2.0）+ 渠道加模型 + 定价 `tier("base", u("image_count") * 0.2)`。唯一未验风险：图片是单个同步请求（35–50 秒）可能撞宿主提交超时，退路是改成宿主内轮询（600 秒预算）。
+- 首次上传被拒：`unsupported plugin syntax ".async": plugins must be synchronous and cannot import modules` —— **宿主对插件源码做静态检查，且扫整份源码（注释也算）**，图片同步开关的点号写法被当成非法语法。处置：不再传该开关（适配器 `default_async` 回落到 `output_kind == "video"`，图片模板天然同步），并给夹具加一条**源码守卫用例**（读插件文件逐 token 断言）—— 它当场就抓出了我写在注释里的同一个词，于是连注释一起改掉。此规则已写进总方案 §3 铁律第 10 条。
 
 

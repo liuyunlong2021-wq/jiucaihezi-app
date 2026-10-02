@@ -2,7 +2,9 @@
 // 这个插件的存在理由只有一条：让面板的自定义参数（画幅、戏种）无损到达适配器。
 // 跑法：node --test newapi-plugins/__tests__/comfy.test.mjs
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 
 import * as plugin from '../comfy.plugin.js'
 
@@ -175,6 +177,17 @@ test('用量：预留用请求时长，结算优先用适配器归一化后的�
   assert.equal(plugin.extractUsageOnComplete({}, {}, null), null)
 })
 
+test('★ 源码里不许出现宿主静态检查封的语法（实测 ".async" 会直接拒收上传）', () => {
+  // 报错原文：unsupported plugin syntax ".async": plugins must be synchronous and cannot import modules
+  // 宿主按关键字扫源码 —— 连 ".async" 这种普通点号访问都会被误伤，所以插件里一律不出现这些写法：
+  // 图片的同步语义靠适配器默认值（default_async 回落 output_kind == 'video'）实现，不靠传参。
+  const source = readFileSync(fileURLToPath(new URL('../comfy.plugin.js', import.meta.url)), 'utf8')
+  const banned = ['.async', 'async function', 'await ', 'import ', 'require(', 'import(']
+  for (const token of banned) {
+    assert.equal(source.includes(token), false, `插件源码里出现了宿主封的语法：${token}`)
+  }
+})
+
 test('render 输出 OpenAI video 形状且不泄露内网地址', () => {
   const view = plugin.protocols.openai_video.render({}, { task_id: 'task_x', status: 'SUCCESS', progress: '100%', created_at: 1 })
   assert.equal(view.id, 'task_x')
@@ -265,8 +278,9 @@ test('★ 图片提交：/v1/images/generations + async:false + b64_json；视�
   assert.equal(submit.method, 'POST')
   assert.equal(submit.headers.Authorization, 'Bearer adapter-key')
   assert.equal(submit.body.model, INTERNAL_IMG)
-  // 同步 + 内联：两条都不能依赖模板默认值与客户端请求
-  assert.equal(submit.body.async, false)
+  // 同步由**适配器默认**保证（图片模板 output_kind=image → default_async=false），
+  // 插件**不能**显式写 `async`：宿主的源码静态检查把 `.async` 判成非法语法（见下面的守卫用例）
+  assert.equal(submit.body.async, undefined)
   assert.equal(submit.body.response_format, 'b64_json')
   // 不改入参
   assert.notEqual(submit.body, requestBody)

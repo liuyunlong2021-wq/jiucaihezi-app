@@ -222,10 +222,11 @@ export function buildSubmitRequest(ctx) {
   // 适配器吃的是内部 id（渠道映射后）；没配映射时退回对外名，别变成 undefined
   body.model = ctx.upstreamModel || ctx.model
   if (isImageModel(ctx.upstreamModel || ctx.model)) {
-    // 图片走同步入口（适配器 default_async=false）。两处显式指定是为了不依赖模板默认值：
-    //   `async: false`  → 一次请求直接回图，没有任务号（与 parseSubmitResponse 的 immediate 对应）
-    //   `b64_json`      → 适配器内网地址第三方取不到，只能内联回图
-    body.async = false
+    // 图片走同步入口。**不要**给请求体塞那个同步开关（它的点号写法被宿主的插件静态检查封了，
+    // 实测上传直接报 `unsupported plugin syntax` 并拒收；宿主扫的是**整份源码，连注释也算**）。
+    // 适配器侧本来也不需要显式传：`WorkflowTemplate.default_async` 在没有 `meta.default_async` 时
+    // 回落到 `output_kind == "video"`，而图片模板的 `output_kind` 默认是 `image` → 同步。
+    // `b64_json` 仍然必须显式指定：适配器内网地址第三方取不到，只能内联回图。
     body.response_format = 'b64_json'
     return {
       url: ctx.baseUrl + '/v1/images/generations',
