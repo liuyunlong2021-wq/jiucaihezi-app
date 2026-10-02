@@ -262,7 +262,7 @@ test('图片协议只收图片模型，且必须有 prompt', () => {
   )
 })
 
-test('★ 图片提交：/v1/images/generations + async:false + b64_json；视频不受影响', () => {
+test('★ 图片提交：/v1/images/generations + async:false + 公网 URL 结果；视频不受影响', () => {
   const requestBody = { model: IMG, prompt: 'p', n: 2 }
   const ctx = {
     baseUrl: 'http://frps:8796',
@@ -281,7 +281,9 @@ test('★ 图片提交：/v1/images/generations + async:false + b64_json；视�
   // 同步由**适配器默认**保证（图片模板 output_kind=image → default_async=false），
   // 插件**不能**显式写 `async`：宿主的源码静态检查把 `.async` 判成非法语法（见下面的守卫用例）
   assert.equal(submit.body.async, undefined)
-  assert.equal(submit.body.response_format, 'b64_json')
+  // 必须是 url 而不是 b64_json：宿主把提交响应落库时卡 1 MiB，一张图的 base64 放不下
+  // （实测 502 `task submit response exceeds size limit`）；URL 前缀由适配器 public_base_url 决定
+  assert.equal(submit.body.response_format, 'url')
   // 不改入参
   assert.notEqual(submit.body, requestBody)
   assert.equal(requestBody.async, undefined)

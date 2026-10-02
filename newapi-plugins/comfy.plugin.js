@@ -26,7 +26,7 @@ export const meta = {
   apiVersion: 1,
   key: 'comfy',
   name: '本机 ComfyUI',
-  version: '0.2.0',
+  version: '0.3.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Local ComfyUI via comfy-adapter',
@@ -226,8 +226,13 @@ export function buildSubmitRequest(ctx) {
     // 实测上传直接报 `unsupported plugin syntax` 并拒收；宿主扫的是**整份源码，连注释也算**）。
     // 适配器侧本来也不需要显式传：`WorkflowTemplate.default_async` 在没有 `meta.default_async` 时
     // 回落到 `output_kind == "video"`，而图片模板的 `output_kind` 默认是 `image` → 同步。
-    // `b64_json` 仍然必须显式指定：适配器内网地址第三方取不到，只能内联回图。
-    body.response_format = 'b64_json'
+    // 图片结果必须是**公网可取**的 URL，不能内联 base64：宿主把提交响应（含它派生的 `taskData`）
+    // 落库时卡 **1 MiB**（`relay/channel/task/jsplugin/adaptor.go` 的
+    // `maxTaskPluginPersistedJSONBytes = 1 << 20`，同名常量也是 plugin state 的上限），
+    // 一张图 base64 就是 2–5 MB → 实测直接 502 `task submit response exceeds size limit`。
+    // URL 前缀由适配器的 `public_base_url` 决定，必须是**客户端**能访问到的地址
+    // （VPS nginx 把 `/files/` 反代到隧道出口）；写内网 `frps:8796` 客户端取不到图。
+    body.response_format = 'url'
     return {
       url: ctx.baseUrl + '/v1/images/generations',
       method: 'POST',
