@@ -121,39 +121,43 @@ const LINGDONG_CONTRACT_ISSUES = [
   '上游能力与计费口径已按公开 GET /api/pricing 核对（2026-10-02）；真实提交、出片与扣费尚未实测。',
   '参考视频/参考音频（videos[] / audios[]）未接：面板目前只有图片链路。',
 ]
-// /api/pricing 的 supported_ratios，5 条线路完全一致
+// /api/pricing 的 supported_ratios：`SD-2.5-特价` 多一档 21:9，其余 4 条是这 5 档
 const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
+const LINGDONG_WIDE_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
 const LINGDONG_VIDEO_MODELS: Array<{
   // NewAPI 渠道里的公开名（面板发什么，渠道就按什么找），与 newapi-plugins/lingdong.plugin.js 的 meta.models 逐字一致
   model: string
   label: string
   price: string
   ratios: string[]
-  resolutions: string[]
-  duration: { min: number; max: number }
-  // 按秒计费的三条默认给下限 4 秒（一笔最便宜），按次的两条给 5 秒（单价与时长无关）
+  // 上游没声明分辨率参数的线路不给这个字段（`SD-2.5-特价` 的 supported_resolutions 是空数组）
+  resolutions?: string[]
+  duration: { min?: number; max?: number; allowedValues?: number[] }
+  // 按秒计费的线路默认给下限 4 秒（一笔最便宜）；`SD-2.5-特价` 是死档，就是 30
   defaultDuration: number
   maxImages: number
+  // 上游 notes 写明提示词上限时才给（`SD-2.5-特价` 是 12000 字）
+  promptMaxLength?: number
 }> = [
   {
-    model: 'cvk',
-    label: 'Sd 2.5 720P 30秒 · 灵动 cvk',
-    price: '4/次',
-    ratios: LINGDONG_RATIOS,
-    resolutions: ['720p'],
-    duration: { min: 4, max: 15 },
-    defaultDuration: 5,
+    model: 'SD-2.5-特价',
+    label: 'Sd 2.5 特价 30秒 · 灵动 SD-2.5-特价',
+    price: '2.5/次',
+    ratios: LINGDONG_WIDE_RATIOS,
+    duration: { allowedValues: [30] },
+    defaultDuration: 30,
     maxImages: 9,
+    promptMaxLength: 12000,
   },
   {
-    model: '满血-480p',
-    label: 'Sd 2.5 480P 30秒 · 灵动 满血',
-    price: '3.5/次',
+    model: 'sd2.5-a',
+    label: 'Sd 2.5-a 720P · 灵动 sd2.5-a',
+    price: '0.5/秒',
     ratios: LINGDONG_RATIOS,
-    resolutions: ['480p'],
-    duration: { min: 4, max: 15 },
-    defaultDuration: 5,
-    maxImages: 9,
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
   },
   {
     model: 'cvk-2.5-480',
@@ -1121,18 +1125,21 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     files: { images: { min: 0, max: model.maxImages } },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: model.ratios[0], options: options(model.ratios) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: model.resolutions[0], options: options(model.resolutions) },
+      // 上游没声明分辨率的线路不展示这一项，免得面板发一个它不认的参数
+      ...(model.resolutions
+        ? [{ key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: model.resolutions[0], options: options(model.resolutions) }]
+        : []),
       {
         key: 'duration',
         label: '时长(秒)',
         kind: 'number',
-        defaultValue: model.defaultDuration,
+        defaultValue: model.defaultDuration ?? model.duration.allowedValues?.[0] ?? model.duration.min,
         min: model.duration.min,
         max: model.duration.max,
         step: 1,
       },
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
-    ]),
+    ], model.promptMaxLength),
     notes: LINGDONG_NOTES,
   })),
   directVideo({

@@ -9,8 +9,8 @@ import { fileURLToPath } from 'node:url'
 
 import * as plugin from '../lingdong.plugin.js'
 
-const CVK = 'cvk'
-const HAI = '满血-480p'
+const TEJIA = 'SD-2.5-特价'
+const SDA = 'sd2.5-a'
 const S480 = 'cvk-2.5-480'
 const S720 = 'cvk-2.5-720'
 const S1080 = 'cvk-2.5-1080'
@@ -39,12 +39,13 @@ function ctx(extra = {}) {
 test('meta 对齐面板注册与渠道：5 个模型名逐字一致，无任何本地服务依赖', () => {
   assert.equal(plugin.meta.apiVersion, 1)
   assert.equal(plugin.meta.key, 'lingdong')
-  assert.equal(plugin.meta.version, '0.1.0')
+  assert.equal(plugin.meta.version, '0.2.0')
   assert.equal(plugin.meta.fetchMode, 'per_task')
   assert.deepEqual(plugin.meta.protocols, ['openai_video'])
   // 这条线直连厂商，baseUrl 是公网域名 —— 没有适配器、没有隧道
   assert.equal(plugin.meta.baseUrl, BASE)
-  assert.deepEqual(plugin.meta.models, [CVK, HAI, S480, S720, S1080])
+  // 面板发什么名字，这里就必须收什么名字；渠道上多出来的名字会开始报 unsupported
+  assert.deepEqual(plugin.meta.models, [TEJIA, SDA, S480, S720, S1080])
   assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'seconds'])
 })
 
@@ -58,7 +59,7 @@ test('★ 每个 usageExample 都要带齐所有声明的用量 key（宿主上�
 })
 
 test('decodeRequest：只认 5 个模型、prompt 必填、按有无参考图定 action', () => {
-  assert.equal(decode({ prompt: '海边' }, CVK).action, 'text_to_video')
+  assert.equal(decode({ prompt: '海边' }, TEJIA).action, 'text_to_video')
   assert.equal(
     decode({ prompt: '海边', images: ['https://api.jiucaihezi.studio/media/creation/a.png'] }).action,
     'image_to_video',
@@ -72,11 +73,11 @@ test('decodeRequest：只认 5 个模型、prompt 必填、按有无参考图定
   assert.throws(() => decode({ prompt: '海边' }, 'cvk-9.9'), /Unsupported model/)
   assert.throws(() => decode({ prompt: '   ' }), /prompt is required/)
   assert.throws(
-    () => plugin.protocols.openai_video.decodeRequest({ model: CVK, body: { kind: 'multipart' } }),
+    () => plugin.protocols.openai_video.decodeRequest({ model: TEJIA, body: { kind: 'multipart' } }),
     /JSON body required/,
   )
   assert.throws(
-    () => plugin.protocols.openai_video.decodeRequest({ model: CVK, body: { kind: 'json', value: [] } }),
+    () => plugin.protocols.openai_video.decodeRequest({ model: TEJIA, body: { kind: 'json', value: [] } }),
     /must be an object/,
   )
 })
@@ -114,13 +115,13 @@ test('★ 画幅 / 分辨率 / 时长原样送到上游，且只发文档字段�
 test('提交体：无参考图不发 images；缺时长不发 duration；渠道映射优先用上游 id', () => {
   const request = plugin.buildSubmitRequest(
     ctx({
-      model: CVK,
+      model: TEJIA,
       upstreamModel: undefined,
       action: 'text_to_video',
-      requestBody: { model: CVK, prompt: '海边' },
+      requestBody: { model: TEJIA, prompt: '海边' },
     }),
   )
-  assert.deepEqual(request.body, { model: CVK, prompt: '海边', watermark: false })
+  assert.deepEqual(request.body, { model: TEJIA, prompt: '海边', watermark: false })
   assert.equal(request.action, 'text_to_video')
 
   // 渠道配了 model_mapping 时发上游 id
@@ -128,7 +129,7 @@ test('提交体：无参考图不发 images；缺时长不发 duration；渠道�
   assert.equal(mapped.body.model, 'lingdong-upstream-id')
 
   // 兼容 aspect_ratio 别名；duration 转成数字（`"10"` 也收）
-  const alias = plugin.buildSubmitRequest(ctx({ requestBody: { model: S480, prompt: 'x', aspect_ratio: '1:1', duration: '10' } }))
+  const alias = plugin.buildSubmitRequest(ctx({ model: SDA, requestBody: { model: SDA, prompt: 'x', aspect_ratio: '1:1', duration: '10' } }))
   assert.equal(alias.body.ratio, '1:1')
   assert.equal(alias.body.duration, 10)
 })

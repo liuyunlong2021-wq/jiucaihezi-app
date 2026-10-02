@@ -27,7 +27,7 @@ export const meta = {
   apiVersion: 1,
   key: 'lingdong',
   name: '灵动 API',
-  version: '0.1.0',
+  version: '0.2.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Lingdong API video (direct vendor endpoint)',
@@ -35,7 +35,9 @@ export const meta = {
   },
   // 面板 `creationModelRegistry` 里 `newapi/lingdong/*` 的 `model` 字段逐字等于这几个名字，
   // 渠道模型列表也必须逐字一致（可用性服务拿它匹配渠道）。
-  models: ['cvk', '满血-480p', 'cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080'],
+  // 2026-10-02 用户换线：去掉按次的两条（`cvk` / `满血-480p`），换成 `SD-2.5-特价`（定死 30 秒）
+  // 与 `sd2.5-a`（按秒）。换完必须**重传插件并同步改渠道模型列表**：渠道上留着插件没收的名字会开始报 unsupported。
+  models: ['SD-2.5-特价', 'sd2.5-a', 'cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080'],
   fetchMode: 'per_task',
   protocols: ['openai_video'],
   // type 61 渠道把 Base URL 留空时用这个默认值；灵动是公网 HTTPS，不需要隧道
