@@ -21,16 +21,21 @@
 
 四个模型共用同一套工作流，区别只在「给几张图、怎么给」。
 
+**渠道里只有下面两个模型名**：
+
 | 模型名 | 用途 | 怎么传图 | 张数 | 默认时长 | 计价 |
 | --- | --- | --- | --- | --- | --- |
 | `jc-minimax-h3` | 文生视频 | **不要传图** | 0 | 5 秒 | `0.2/秒` |
-| `jc-minimax-h3-first-frame` | 首帧图生视频 | `first_frame` | 1 | 5 秒 | `0.2/秒` |
-| `jc-minimax-h3-first-last` | 首尾帧 | `first_frame` + `last_frame` | 各 1 | 5 秒 | `0.2/秒` |
+| `jc-minimax-h3` | 首帧图生视频 | `first_frame` | 1 | 5 秒 | `0.2/秒` |
+| `jc-minimax-h3` | 首尾帧 | `first_frame` + `last_frame` | 各 1 | 5 秒 | `0.2/秒` |
 | `jc-minimax-h3-ref2v` | 参考生视频 | `images`（数组，按顺序） | 1–6 | 3 秒 | `0.2/秒` |
+
+`jc-minimax-h3` 一个名字覆盖前三种模式，**模式由你传的字段决定**：不传图就是文生，传 `first_frame` 就是首帧图生，`first_frame` + `last_frame` 就是首尾帧。
 
 计价 = `0.2 × duration`（秒）。`duration` 不传时按上表默认值计费，**建议显式传**。
 
-> ⚠️ 传图字段不要混用：`jc-minimax-h3-first-frame` / `-first-last` 请用 `first_frame` / `last_frame`；`images` 语义是「参考图」，用错模型会切到另一种模式。`jc-minimax-h3`（文生）请一张图都不要传。
+> ⚠️ **不要用 `jc-minimax-h3-first-frame` / `jc-minimax-h3-first-last` 这类名字** —— 渠道里**没有**它们，会被直接判为模型不存在（400）。首帧 / 首尾帧一律用 `jc-minimax-h3` + `first_frame` / `last_frame`。
+> ⚠️ 传图字段不要混用：`images` 的语义是「参考图」，**只有 `jc-minimax-h3-ref2v` 认它**；`jc-minimax-h3`（文生）请一张图都不要传。
 
 ## 创建任务
 
@@ -57,19 +62,16 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 ```json
 {
   "id": "task_20260926_98bf9754ce1a",
-  "task_id": "task_20260926_98bf9754ce1a",
-  "object": "generation.task",
-  "type": "video.generation",
-  "model": "minimax-h3-ref2v",
+  "object": "video",
+  "model": "jc-minimax-h3-ref2v",
   "status": "queued",
-  "created_at": 1790388368,
-  "queued_seconds": 0.0,
-  "elapsed_seconds": null,
-  "status_url": "/v1/tasks/task_20260926_98bf9754ce1a"
+  "progress": 0,
+  "created_at": 1790388368
 }
 ```
 
-**请用 `task_id`（或 `id`）作为后续轮询与下载的任务标识。**
+**只读 `id`** —— 它就是后续轮询与下载的任务标识。
+（不要在客户端里依赖 `task_id`、`status_url`、`queued_seconds` 这类字段：它们不属于对外保证；`object` / `model` / `progress` / `created_at` 都由平台填写，本示例仅示意字段形状。）
 
 ## 请求字段
 
@@ -77,8 +79,8 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 | --- | --- | --- |
 | `model` | 是 | 上表四个模型名之一，其它值返回 400。 |
 | `prompt` | 是 | 视频内容描述。写清镜头、动作、光线效果更好；参考生模型建议在提示词里用「图1 / 图2」指代参考图顺序。 |
-| `duration` | 否 | 时长（秒），1–15。不传按模型默认值计费。 |
-| `size` | 否 | 画幅，取值见下方画幅表。默认 `1344x768`。**仅前三个模型生效**。 |
+| `duration` | 否 | 时长（秒），**1–28**。不传按模型默认值计费。 |
+| `size` | 否 | 画幅，取值见下方画幅表。默认 `1344x768`。**仅 `jc-minimax-h3` 生效**。 |
 | `aspect_ratio` | 否 | 比例，**仅 `jc-minimax-h3-ref2v` 生效**，取值见下方枚举。默认 `16:9 (Widescreen)`。 |
 | `first_frame` / `last_frame` | 否 | 首帧 / 尾帧图（单张），见模型表。 |
 | `images` | 否 | 参考图数组（`ref2v` 用），1–6 张。 |
@@ -87,7 +89,7 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
 
 ### 画幅（`size`）
 
-API 收的是**像素串**；「1K / 2K」是创作面板里的显示档位，不是接口取值。前三个模型适用。
+API 收的是**像素串**；「1K / 2K」是创作面板里的显示档位，不是接口取值。**仅 `jc-minimax-h3` 适用**（`jc-minimax-h3-ref2v` 用 `aspect_ratio`，见下）。
 
 | 档位 | 1:1 方图 | 16:9 横屏 | 9:16 竖屏 | 4:3 横屏 | 3:4 竖屏 | 3:2 横屏 | 2:3 竖屏 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
@@ -141,6 +143,8 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>' \
   --header 'Authorization: Bearer <YOUR_API_KEY>'
 ```
 
+> 轮询响应**不保证带成片地址**（也不保证是你能访问的地址）—— 取片一律用下面的 `/content` 接口，不要去响应 JSON 里找播放地址。
+
 | 状态 | 含义 |
 | --- | --- |
 | `queued` | 已受理，排队中。 |
@@ -150,7 +154,7 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>' \
 
 ## 下载成片
 
-完成后通过 `/content` 获取 mp4 二进制，不要按 JSON 解析：
+完成后**只通过 `/content`** 获取 mp4 二进制（不要按 JSON 解析，也不要去轮询响应里找成片地址）：
 
 ```bash
 curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>/content' \

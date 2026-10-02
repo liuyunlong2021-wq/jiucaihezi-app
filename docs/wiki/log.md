@@ -1942,4 +1942,16 @@
 - 验证：`cloud.ps1 -Action status` 三跳全绿；服务器 NewAPI 容器内 `wget -qO- http://frps:8796/health` → `{"adapter":"ok","comfyui":"ok","comfyui_devices":["cuda:0 ... RTX 4090 ..."]}`；frps 日志 `new proxy [comfy-adapter] type [tcp] success`。**未做真实出片**（会占唯一并发槽与显存，按规矩先问用户）。
 - 遗留（用户侧一个设置）：Comfy Desktop 的「端口冲突」仍是 `auto`，8188 被占会静默漂到 8189；建议改「询问」。脚本已能识别并明确报错。
 
+## [2026-10-02] 文档 | 对外视频接入合同按实际渠道更正：模型名两个、时长 1–28、只读 `id`
+
+- 起因：用户问「对外接入 API key 的文档有没有需要更新」。核对代码与实际渠道后改了六处（`韭菜盒子本机ComfyUI视频模型API对外接入-2026-09-26.md`）：
+  1. **模型名**：原来列了四个，其中 `jc-minimax-h3-first-frame` / `jc-minimax-h3-first-last` **渠道里不存在**（面板注册表与 `comfy` 插件 `meta.models` 都只有 `jc-minimax-h3` / `jc-minimax-h3-ref2v`；用户 2026-10-02 确认「渠道里没有那两个」）。改成「**只有两个模型名**，`jc-minimax-h3` 一个名字覆盖文生/首帧/首尾帧，模式由传的字段决定」，并加显式警告：用那两个名字会被判为模型不存在。
+  2. **`duration` 1–15 → 1–28**（2026-09-27 已统一到 28 秒，对外文档漏改）。
+  3. `size` 与画幅小节的「前三个模型」→「**仅 `jc-minimax-h3` 生效**」。
+  4. **响应示例**换成插件通道的形状，并把「请用 `task_id`（或 `id`）」改成「**只读 `id`**」—— 宿主对 `openai_video` 会移除 legacy `task_id`。
+  5. 查询任务小节补一句：轮询响应不保证带成片地址。
+  6. 下载成片小节改成「**只通过 `/content`**」。
+- 同步的内部文档：`本机ComfyUI模型对外接入-2026-09-26.md` 的对外接口表（`GET /v1/videos/{id}` 不再承诺 `metadata.url`）与「产物地址」小节（补：插件通道下取片不再经过 `metadata.url`）；`运维/index.md` 里 SDD 那条「待审，未实施」→「已实施并实测通过」。
+- **判定为不用改的两处**（先审根因，不留错的待办）：① 图片那份对外文档开头已有「本模型当前未上线（2026-09-26 起）」横幅；② `comfy-adapter/tools/verify_newapi_contract.py` 里「completed 带 metadata.url」的断言**是对的** —— 它 `BASE = http://127.0.0.1:9000`，测的是适配器本身。总方案 §7 那句「同时更新那条断言」是当时的误判，已在原位改成「已决 + 不用改」。
+
 

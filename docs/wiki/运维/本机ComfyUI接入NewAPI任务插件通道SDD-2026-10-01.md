@@ -294,7 +294,7 @@ export function extractUsageOnComplete(ctx, result, body) {
 | 项 | 说明 | 处置 |
 |---|---|---|
 | 契约未冻结 | 官方 README 明写 "currently unreleased" | 插件体量小、无外部依赖；旧渠道保留，一键切回；升 NewAPI 前先跑 Sandbox |
-| **`metadata.url` 取不取** | 现在面板靠 `metadata.url` + `/content` 双路；插件通道下 provider 的 `data[].url` 是**内网地址**（`http://frps:8796/...`），不能外泄 | 建议：render 只回状态不回 URL，成片走宿主的 `/content` 代理；同时更新 `comfy-adapter/tools/verify_newapi_contract.py` 里「completed 带 metadata.url」这条断言 |
+| **`metadata.url` 取不取** | 现在面板靠 `metadata.url` + `/content` 双路；插件通道下 provider 的 `data[].url` 是**内网地址**（`http://frps:8796/...`），不能外泄 | **已决（0.1.0 就是这么做的）**：`render` 只回状态不回 URL，成片走宿主的 `/content`。自检脚本**不用改**：`verify_newapi_contract.py` 的 `BASE = http://127.0.0.1:9000` 测的是**适配器本身**，适配器确实仍回 `metadata.url`，那条断言成立（2026-10-02 复核，原写的「同时更新那条断言」是误判） |
 | 参考图上传链路 | 面板现在走 `assetFlow: newapi-upload`，适配器侧收到的是 `adapter/uploads/*.png`；换通道后这条上传链路是否照旧未验证 | 列为验收项（§6 参考图行）；异常时在 `decodeRequest` 里补处理 |
 | 适配器任务表只在内存 | 宿主轮询期间适配器重启 → `404` → 宿主判 `FAILURE` 并退款 | 本次**不解决**；单独立项给适配器加任务持久化 |
 | 插件即管理员级信任 | 插件能影响带凭据的上游请求 | 只上传自写插件；升级前看源码 diff |
