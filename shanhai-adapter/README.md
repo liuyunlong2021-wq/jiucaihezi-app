@@ -22,7 +22,7 @@
 
 | 本服务 | 山海 | 说明 |
 | --- | --- | --- |
-| `POST /v1/videos` | `POST /generations` | 统一发 `media_type: video` |
+| `POST /v1/videos` | `POST /generations` | 统一发 `media_type: video`；`scene` 有参考图发 `image-to-video`，否则 `text-to-video` |
 | `GET /v1/videos/{task_id}` | `GET /tasks/{task_id}` | 状态归一化成 `processing` / `completed` / `failed` |
 | `GET /v1/videos/{task_id}/content` | `GET /media/runs/{task_id}` | 带渠道 Key 流式代理，透传 `Range` 支持播放与断点续传 |
 | `GET /v1/models` | `GET /models` | 透传上游目录，用来核对渠道 Key 和真实能力 |

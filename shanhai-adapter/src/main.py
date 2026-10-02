@@ -3,7 +3,7 @@
 链路：创作面板 → NewAPI（计费/鉴权）→ 本服务 /v1/videos → 山海 POST /generations
       → 轮询 GET /tasks/{id} → 成片由本服务 /v1/videos/{id}/content 代理下载。
 
-山海不是 OpenAI 兼容上游：提交走 POST /generations（media_type + inputs + options），
+山海不是 OpenAI 兼容上游：提交走 POST /generations（media_type + scene + inputs + options），
 完成后 output.url（/media/runs/{id}）必须带同一枚渠道 Bearer Key 才能下载，客户端不持有
 渠道 Key，因此任务完成时只返回相对路径 /v1/videos/{id}/content，由 NewAPI 转发回本服务，
 本服务带 Key 拉取并透传字节。
@@ -24,6 +24,8 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.background import BackgroundTask
 
 SHANHAI_BASE_URL = "https://shanhai.vnshu.cn/api/v1"
+SHANHAI_HOST = urlsplit(SHANHAI_BASE_URL).netloc
+SHANHAI_ORIGIN = f"https://{SHANHAI_HOST}"
 SHANHAI_SUBMIT_TIMEOUT_SECONDS = 120.0
 SHANHAI_HTTP_TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 SHANHAI_MEDIA_TIMEOUT = httpx.Timeout(600.0, connect=10.0)
@@ -56,6 +58,9 @@ MODELS = {
 # 而上游三个端点都要求同一枚 Key（zx-video-adapter / boluo-minimax-adapter 同做法）。
 TASK_KEYS: dict[str, tuple[float, str]] = {}
 TASK_KEY_TTL_SECONDS = 6 * 3600
+
+# 任务完成时记下成片地址，/content 优先按它去拉（见 media_url）。
+TASK_MEDIA: dict[str, tuple[float, str]] = {}
 
 AUTO_RATIOS = {"", "auto", "adaptive", "empty"}
 RATIO_KEYS = ("aspect_ratio", "ratio", "aspectRatio")
@@ -135,7 +140,7 @@ async def get_video_content(task_id: str, request: Request):
         headers["Range"] = range_header
     stream = request.app.state.http.stream(
         "GET",
-        f"{SHANHAI_BASE_URL}/media/runs/{task_id}",
+        media_url(task_id),
         headers=headers,
         timeout=SHANHAI_MEDIA_TIMEOUT,
     )
@@ -231,13 +236,40 @@ def log_upstream_failure(
 
 
 def remember_task_key(task_id: str, key: str) -> None:
+    prune_store(TASK_KEYS)
+    TASK_KEYS[task_id] = (time(), key)
+
+
+def remember_task_media(task_id: str, media_url: str) -> None:
+    prune_store(TASK_MEDIA)
+    TASK_MEDIA[task_id] = (time(), media_url)
+
+
+def prune_store(store: dict[str, tuple[float, str]]) -> None:
     # ponytail: 惰性清理，只在有请求进来时触发；单容器够用，不为它起后台线程。
     deadline = time() - TASK_KEY_TTL_SECONDS
     for stale in [
-        expired for expired, (created_at, _) in TASK_KEYS.items() if created_at < deadline
+        expired for expired, (created_at, _) in store.items() if created_at < deadline
     ]:
-        TASK_KEYS.pop(stale, None)
-    TASK_KEYS[task_id] = (time(), key)
+        store.pop(stale, None)
+
+
+def media_url(task_id: str) -> str:
+    """成片地址优先用任务返回的 output.url。
+
+    写死 /media/runs/{id} 只是它当前的形状，上游换路径或加签名参数时不该跟着坏；反过来，
+    相对地址要补全、别的域名一律不用 —— 渠道 Key 只能发给山海自己。重启后表是空的，
+    此时回落到已知路径，仍在变更前的那条路上。
+    """
+    stored = TASK_MEDIA.get(task_id)
+    if stored:
+        candidate = stored[1]
+        parsed = urlsplit(candidate)
+        if not parsed.netloc and candidate.startswith("/"):
+            return f"{SHANHAI_ORIGIN}{candidate}"
+        if parsed.scheme == "https" and parsed.netloc == SHANHAI_HOST:
+            return candidate
+    return f"{SHANHAI_BASE_URL}/media/runs/{task_id}"
 
 
 def task_key(task_id: str, request: Request) -> str:
@@ -279,14 +311,17 @@ def generation_payload(body: dict) -> dict:
     if first_value(body, AUDIO_KEYS) is not None:
         raise HTTPException(422, "Shanhai adapter does not support audio references yet")
 
+    # scene 是官方客户端每次都带的字段（视频/图片/文本三个插件都发），用来说明这次是哪一种场景。
     payload: dict = {
         "model": upstream_model,
         "prompt": prompt,
         "media_type": "video",
+        "scene": "text-to-video",
     }
     images = reference_images(body, MAX_REFERENCE_IMAGES_BY_MODEL[upstream_model])
     if images:
         payload["inputs"] = [{"type": "image", "url": url} for url in images]
+        payload["scene"] = "image-to-video"
 
     options: dict = {}
     ratio = first_text(body, RATIO_KEYS)
@@ -397,6 +432,7 @@ def task_response(task_id: str, data: dict) -> dict:
         if not output.get("url"):
             return failed_response(result, "Shanhai finished without a media URL")
         kind = str(output.get("type") or "video")
+        remember_task_media(task_id, str(output["url"]))
         # 相对路径：客户端会拼上 NewAPI 域名，由 NewAPI 转发回本服务的代理端点。
         result["object"] = kind
         result["progress"] = 100

@@ -96,6 +96,7 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "model": "shanhai-dola-seedance-v2-5-30-9-0-7",
                 "prompt": "让参考图里的主体自然运动",
                 "media_type": "video",
+                "scene": "image-to-video",
                 "inputs": [
                     {"type": "image", "url": "https://cdn.example.test/a.png"},
                     {"type": "image", "url": "https://cdn.example.test/b.png"},
@@ -124,6 +125,7 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
                 "model": "oc-model-r5cfh8",
                 "prompt": "海边的黄昏",
                 "media_type": "video",
+                "scene": "text-to-video",
                 "options": {"resolution": "720p", "duration": "30"},
             },
         )
@@ -221,6 +223,72 @@ class ShanhaiAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.requests[0].headers["authorization"], "Bearer oc_live_channel")
         self.assertEqual(self.requests[0].headers["range"], "bytes=0-3")
         self.assertEqual(self.requests[0].url.path, "/api/v1/media/runs/run_aaa")
+
+    async def test_content_prefers_the_media_url_returned_by_the_task(self):
+        async def upstream(request: httpx.Request):
+            self.requests.append(request)
+            if request.url.path.endswith("/tasks/run_aaa"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "run_aaa",
+                        "status": "succeeded",
+                        "model": "oc-model-r5cfh8",
+                        "output": {
+                            "url": "https://shanhai.vnshu.cn/api/v1/media/runs/run_aaa?sign=abc123",
+                            "type": "video",
+                        },
+                    },
+                )
+            return httpx.Response(
+                206,
+                headers={"content-type": "video/mp4", "content-range": "bytes 0-3/8"},
+                content=b"RIFF",
+            )
+
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        await self.client.get(
+            "/v1/videos/run_aaa", headers={"Authorization": "Bearer oc_live_channel"}
+        )
+        response = await self.client.get(
+            "/v1/videos/run_aaa/content",
+            headers={"Authorization": "Bearer oc_live_channel"},
+        )
+        self.assertEqual(response.status_code, 206)
+        # 上游换路径或加签名参数时应跟着走，而不是继续撞写死的 /media/runs/{id}。
+        self.assertEqual(
+            str(self.requests[-1].url),
+            "https://shanhai.vnshu.cn/api/v1/media/runs/run_aaa?sign=abc123",
+        )
+        self.assertEqual(self.requests[-1].headers["authorization"], "Bearer oc_live_channel")
+
+    async def test_content_ignores_a_media_url_on_another_host(self):
+        async def upstream(request: httpx.Request):
+            self.requests.append(request)
+            if request.url.path.endswith("/tasks/run_aaa"):
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "run_aaa",
+                        "status": "succeeded",
+                        "model": "oc-model-r5cfh8",
+                        "output": {"url": "https://cdn.other.test/run_aaa.mp4", "type": "video"},
+                    },
+                )
+            return httpx.Response(206, headers={"content-type": "video/mp4"}, content=b"RIFF")
+
+        app.state.http = httpx.AsyncClient(transport=httpx.MockTransport(upstream))
+        await self.client.get(
+            "/v1/videos/run_aaa", headers={"Authorization": "Bearer oc_live_channel"}
+        )
+        await self.client.get(
+            "/v1/videos/run_aaa/content",
+            headers={"Authorization": "Bearer oc_live_channel"},
+        )
+        # 渠道 Key 只能发给山海自己；别的域名一律回落到已知路径。
+        self.assertEqual(
+            str(self.requests[-1].url), "https://shanhai.vnshu.cn/api/v1/media/runs/run_aaa"
+        )
 
     async def test_poll_and_content_reuse_the_channel_key_from_submit_without_auth_header(self):
         await self.client.post(
