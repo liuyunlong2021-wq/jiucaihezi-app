@@ -169,6 +169,9 @@ const loading = ref(false)
 const errorMsg = ref('')
 /** 与 errorMsg 互斥的成功提示；只放操作成功文案，失败一律走 errorMsg。 */
 const statusMsg = ref('')
+/** 开新窗口失败。**不能**走 `errorMsg`：那个 ref 会把整棵文件树 `v-show` 掉，
+ *  为一次开窗失败清空用户手里的树不合理。 */
+const newWindowError = ref('')
 const selectedPath = ref<string | null>(null)
 const selectedPaths = ref<Set<string>>(new Set())
 let selectionAnchorPath: string | null = null
@@ -1461,6 +1464,25 @@ async function createMobileProject(name?: string, select = true): Promise<Mobile
   if (select) await selectDesktopProject(project.path)
   return project
 }
+/**
+ * 开一个**空**工作台窗口（对齐 VS Code 的「新建窗口」）。
+ *
+ * macOS 走应用菜单第一项（⌘⇧N）；**Windows 没有菜单栏**（那段菜单构建整块在
+ * `#[cfg(target_os = "macos")]` 里），所以文件树这两个入口是 Windows 上唯一的入口：
+ * 空状态给「还没有项目」、树头部给「项目已打开」—— 两种状态互斥，不是重复入口。
+ * 两边都调同一条 Rust 命令 `open_new_window`，不各自实现建窗逻辑。
+ */
+async function openNewWindow() {
+  if (!isDesktop || isMobile) return
+  newWindowError.value = ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_new_window')
+  } catch (cause) {
+    newWindowError.value = `新建窗口失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 async function openLocalProjectFolder() {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
@@ -2915,6 +2937,7 @@ onBeforeUnmount(() => {
     @keydown="onTreeKeydown"
     tabindex="0"
   >
+    <div v-if="newWindowError" class="pft-status pft-error">{{ newWindowError }}</div>
     <input
       ref="uploadInput"
       class="pft-native-input"
@@ -2947,6 +2970,9 @@ onBeforeUnmount(() => {
         </button>
         <button v-else @click="isMobile ? createMobileProject() : createWebProject()">
           <JcIcon name="create-new-folder" /><span>新建项目</span>
+        </button>
+        <button v-if="isDesktop && !isMobile" @click="openNewWindow">
+          <JcIcon name="new-window" /><span>新建窗口</span>
         </button>
         <template v-if="localProjectChoices.length">
           <div class="pft-ctx-divider"></div>
@@ -2996,6 +3022,15 @@ onBeforeUnmount(() => {
         </button>
         <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories">
           <JcIcon name="refresh" />
+        </button>
+        <button
+          v-if="isDesktop && !isMobile"
+          class="pft-icon-btn"
+          title="新建窗口"
+          aria-label="新建窗口"
+          @click="openNewWindow"
+        >
+          <JcIcon name="new-window" />
         </button>
         <button
           class="pft-icon-btn"

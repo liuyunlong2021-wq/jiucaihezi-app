@@ -1597,13 +1597,20 @@ test('空窗口直接给项目入口，菜单里的快捷键都有落点', () =>
   assert.match(lib, /fn remember_focused_window/)
   assert.match(lib, /WindowEvent::Focused\(true\)/)
 
-  // Windows 没有菜单栏：那段菜单构建整块在 `#[cfg(target_os = "macos")]` 里，所以那边
-  // 既没有菜单项、⌘⇧N 也没有落点。工作台顶栏这个按钮是 Windows 上唯一的入口，两边必须
-  // 调同一条 Rust 命令，不各自实现一份建窗逻辑。
-  const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /title="新建窗口"[\s\S]{0,120}@click="openNewWindow"/)
-  assert.match(workbench, /async function openNewWindow\(\) \{\n\s*if \(!desktopOnlyRuntime\) return/)
-  assert.match(workbench, /await invoke\('open_new_window'\)/)
+  // Windows 没有菜单栏（那段菜单构建整块在 `#[cfg(target_os = "macos")]` 里），所以文件树
+  // 这两个入口是 Windows 上唯一的入口：空状态给「还没有项目」、树头部给「项目已打开」。
+  // 两种状态互斥，不是重复入口；两边都调同一条 Rust 命令 `open_new_window`，不各自实现建窗逻辑。
+  assert.match(
+    tree,
+    /<button v-if="isDesktop && !isMobile" @click="openNewWindow">\s*<JcIcon name="new-window" \/><span>新建窗口<\/span>/,
+  )
+  assert.match(tree, /title="新建窗口"[\s\S]{0,120}@click="openNewWindow"/)
+  assert.match(tree, /async function openNewWindow\(\) \{\n\s*if \(!isDesktop \|\| isMobile\) return/)
+  assert.match(tree, /await invoke\('open_new_window'\)/)
+  // 开窗失败不能走 `errorMsg`：那个 ref 会把整棵文件树 `v-show` 掉。
+  assert.doesNotMatch(tree, /catch \(cause\) \{\n\s*errorMsg\.value = `新建窗口失败/)
+  // 入口只在文件树里，顶栏不重复一份（否则「两种状态各一个」会变成三处语义重叠）。
+  assert.doesNotMatch(source('src/components/memory/MemoryWorkbench.vue'), /openNewWindow/)
 })
 
 test('memory workbench follows the current project owner on both runtimes', () => {

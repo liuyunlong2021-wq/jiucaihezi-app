@@ -3042,23 +3042,6 @@ async function saveSceneScreenshot(blob: Blob, title: string) {
   } catch (cause) { sceneVideoStatus.value = `截图保存失败：${cause instanceof Error ? cause.message : String(cause)}` }
 }
 
-/**
- * 开一个**空**工作台窗口（对齐 VS Code 的「新建窗口」）。
- *
- * macOS 走的是应用菜单的第一项（⌘⇧N）；**Windows 没有菜单栏**，那边整段菜单构建都在
- * `#[cfg(target_os = "macos")]` 里，所以顶栏这个按钮是 Windows 上唯一的入口。
- * 两边调同一条 Rust 命令 `open_new_window`，别各自实现一份建窗逻辑。
- */
-async function openNewWindow() {
-  if (!desktopOnlyRuntime) return
-  try {
-    const { invoke } = await import('@tauri-apps/api/core')
-    await invoke('open_new_window')
-  } catch (cause) {
-    contextNotice.value = `新建窗口失败：${cause instanceof Error ? cause.message : String(cause)}`
-  }
-}
-
 async function checkSceneVideoExport() {
   if (!desktopOnlyRuntime) return
   try {
@@ -3424,13 +3407,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
         <div class="memory-topbar-actions">
-          <button
-            v-if="desktopOnlyRuntime"
-            class="icon-button"
-            title="新建窗口"
-            aria-label="新建窗口"
-            @click="openNewWindow"
-          ><JcIcon name="open-in-new" /></button>
           <button
             v-if="conversation"
             class="icon-button"
