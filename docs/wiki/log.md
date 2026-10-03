@@ -4,7 +4,13 @@
 
 - 版本号三处统一到 `2.2.11`（`pnpm run bump-version`：`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml`，`Cargo.lock` 同步）；发布提交 `dbb21f45`。
 - **发布门禁**：Node 聚焦套件 `1774 用例 / 1765 通过 / 1 失败`（唯一失败是既有的 `scripts/jiucaihezi-creation-mcp/test.mjs` Windows `/tmp` 路径问题）；Rust `454 通过 / 0 失败 / 1 忽略`；`build:desktop:quick` 通过且 `audit:desktop-dist` 通过（工作台被提升为根 `index.html`）。
-- `src/assets/icons-bundle.json` 随版本刷新：锁定版本 `@iconify-json/material-symbols@1.2.86` 下重新生成后上游把 `alt-route` 归并到 `alternate-email`；全仓库无任何引用，只是让产物与锁定依赖一致。
+- `src/assets/icons-bundle.json` 随版本刷新：在锁定版本 `@iconify-json/material-symbols@1.2.86` 下重新生成后，
+  上游丢掉了**没人用的**别名 `alt-route`、**保留了代码真正引用的** `alternate-email`
+  （`src/components/creation/CreationPanel.vue`、`src/components/filetree/ProjectFileTree.vue` 的「引用到对话」按钮各一处），
+  所以这是产物与锁定依赖对齐，不是隐患。
+  ⚠️ **更正**：首次核对时用的是 `src\**\*.ts` 这种 glob，漏掉了 `src` 子目录，把「有引用」误判成「无人引用」；
+  发布提交 `dbb21f45` 的信息里那句「全仓库没有任何地方引用这两个名字」是错的，以本处为准。
+  查引用一律用 `Get-ChildItem -Recurse -Include`，别用 `Select-String -Path <glob>`。
 - 推送：`main`（`833a5984..dbb21f45`）+ annotated tag `v2.2.11`（按合同只推单个 tag，没用 `--tags`）。CI 运行 `37118511789`：`prepare-release` 已成功、`macos-arm` 排队、`macos-intel` / `windows` 进行中。
 - ⚠️ **状态口径**：此刻只能说「已触发、构建中」。要等三个平台 + 上传 + `publish-download-manifest` 全部成功，才能写「v2.2.11 已发布」。
 
