@@ -1596,6 +1596,14 @@ test('空窗口直接给项目入口，菜单里的快捷键都有落点', () =>
   assert.match(remote, /crate::remote_target_window\(app\)/)
   assert.match(lib, /fn remember_focused_window/)
   assert.match(lib, /WindowEvent::Focused\(true\)/)
+
+  // Windows 没有菜单栏：那段菜单构建整块在 `#[cfg(target_os = "macos")]` 里，所以那边
+  // 既没有菜单项、⌘⇧N 也没有落点。工作台顶栏这个按钮是 Windows 上唯一的入口，两边必须
+  // 调同一条 Rust 命令，不各自实现一份建窗逻辑。
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /title="新建窗口"[\s\S]{0,120}@click="openNewWindow"/)
+  assert.match(workbench, /async function openNewWindow\(\) \{\n\s*if \(!desktopOnlyRuntime\) return/)
+  assert.match(workbench, /await invoke\('open_new_window'\)/)
 })
 
 test('memory workbench follows the current project owner on both runtimes', () => {
