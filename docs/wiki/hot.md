@@ -1,5 +1,15 @@
 # 热缓存
 
+## [2026-10-02] 本机链路公网化：图片改回 url（1 MiB 落库上限），H3 视频比例必须完整枚举
+
+- **图片 502 的真因**：宿主任务插件把提交响应落库的上限是 **1 MiB**，2 MB 级 PNG 内联 base64 后约 2.8 MB → `task submit response exceeds size limit`。`comfy.plugin.js` **0.3.0** 改为显式 `response_format:"url"`，适配器 `config.yaml` 同时设了 `public_base_url: https://api.jiucaihezi.studio` + `default_response_format: url`。
+- **VPS 侧把 `/files/` 打通**（否则回的是网页 HTML，客户端存下来的「图片」是 1573 字节的首页）：frps 加 `127.0.0.1:8796:8796` 映射，nginx `api.jiucaihezi.studio` 加 `location /files/ { limit_except GET HEAD { deny all; } proxy_pass http://127.0.0.1:8796/files/; }`。公网 HEAD 图片/视频均 `200` + 正确 `content-type`，`Range` 回 `206`（可拖动/续传）。
+- **H3 参考生视频失败的真因**（`task_20261002_a0d3ccf9392e`，2 秒内 failed 且退款）：提交体里的 `aspect_ratio: '16:9'` 被节点 29 `ResolutionSelector` 拒（只认 `'16:9 (Widescreen)'`）→ `Prompt outputs failed validation`。适配器只记这一句（`node_errors` 挂在异常 detail 上，没进 message），ComfyUI 自己的 `comfyui.log` 才有节点级原文。
+- 修法（三层收口）：`setAspect` 按模型枚举补全短式 → plan 入口 `validateSelectField` 拒短式 → 新增 `canonicalCreationRatio()` 在 comfy 视频提交体**出口**再收敛一次，兜住「旧版本存下来的计划被重试复用」这条绕过校验的路；认不出就不发（交工作流默认）。
+- `comfy.plugin.js` 的失败原因原来 `String(body.error)`，而 `error` 是 `{message,type,code}` → 客户端一片空白（`[object Object]`）。已改成取 `error.message`；适配器侧也把 `node_errors` 压成一行塞进 `ComfyError.message`。
+- **排障陷阱**：`comfy-adapter/logs/adapter.log` 是**混合编码** —— Python 写 UTF-8，`tools/cloud.ps1` 的 `*>> $AdapterLog` 追加的是**未对齐的 UTF-16LE**。`Select-String`/`grep 'task_...'` 一律 0 命中，直接 `Get-Content` 只是把 NUL 吞掉、看着像正常文本。
+- ⚠️ **插件状态词表必须用 API 视图的词**（`comfy.plugin.js` **0.3.1** 修）：`adp/tasks.py` 内部状态机是 `running/succeeded`，但 `/v1/videos/{id}` 视图（`adp/api.py` 的 `_VIDEO_TASK_STATUS`）回的是 **`in_progress`/`completed`**。插件照抄了内部那套 → `completed` 判 `UNKNOWN` → 宿主不认终态 → 任务永远 SUBMITTED、客户端**一直转圈显示「排队中」**，而适配器早已 succeeded；只有 `failed` 两套拼写相同，所以**失败能看到报错、成功的反而卡住**。已修，并加**契约测试**直接读 `adp/api.py` 逐个状态词断言插件都认得。
+
 ## [2026-10-02] 灵动（满血）Seedance 2.5 上架：直连厂商的任务插件，面板默认视频模型改成 Sd 2.5 480P
 
 - 灵动 API 的三条路径（`POST /v1/videos`、`GET /v1/videos/{id}`、`GET /v1/videos/{id}/content`）与宿主 `openai_video` 的协议绑定**逐字相同**，所以这条线**没有适配器、没有隧道**：`newapi-plugins/lingdong.plugin.js`（0.2.0）直接打厂商端点，渠道密钥只进渠道。

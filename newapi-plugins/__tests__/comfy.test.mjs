@@ -163,6 +163,41 @@ test('状态映射：适配器 queued/running/succeeded/failed/cancelled + 不�
   assert.equal(plugin.parseTaskResult({}, { status: '神秘状态' }).status, 'UNKNOWN')
 })
 
+test('适配器 /v1/videos/{id} 的每个状态词都认得（词表脱钩会让任务永远卡在排队中）', () => {
+  // 契约在适配器侧：adp/api.py 的 _VIDEO_TASK_STATUS。照抄 adp/tasks.py 的内部状态机
+  // （running / succeeded）会让 completed 落到 UNKNOWN —— 宿主永远 SUBMITTED，
+  // 客户端一直显示「排队中」，实测任务其实早就完成了。
+  const api = readFileSync(
+    fileURLToPath(new URL('../../comfy-adapter/adp/api.py', import.meta.url)),
+    'utf8',
+  )
+  const block = api.match(/_VIDEO_TASK_STATUS\s*=\s*\{([^}]*)\}/)
+  assert.ok(block, 'adp/api.py 里找不到 _VIDEO_TASK_STATUS')
+  const words = [...block[1].matchAll(/:\s*"([^"]+)"/g)].map(match => match[1])
+  assert.ok(words.length >= 4, `只解析到 ${words.length} 个状态词：${words}`)
+
+  for (const word of words) {
+    const mapped = plugin.parseTaskResult({}, { status: word }).status
+    assert.notEqual(mapped, 'UNKNOWN', `适配器会回 status="${word}"，插件却判 UNKNOWN`)
+  }
+  // 终态必须是客户端能收车的两个
+  assert.equal(plugin.parseTaskResult({}, { status: 'completed' }).status, 'SUCCESS')
+  assert.equal(plugin.parseTaskResult({}, { status: 'in_progress' }).status, 'IN_PROGRESS')
+})
+
+test('failed 的 reason 取适配器 error.message，不能是 [object Object]', () => {
+  // 适配器回的是 {status:'failed', error:{message,type,code}}；直接 String() 客户端会显示空白
+  const failed = plugin.parseTaskResult({}, {
+    status: 'failed',
+    error: { message: 'Prompt outputs failed validation -> 29(ResolutionSelector): Value not in list', type: 'ComfyError', code: 'generation_failed' },
+  })
+  assert.equal(failed.status, 'FAILURE')
+  assert.match(failed.reason, /Value not in list/)
+  assert.doesNotMatch(failed.reason, /object Object/)
+  // 没有 message 的对象也不能丢信息
+  assert.match(plugin.parseTaskResult({}, { status: 'failed', error: { code: 'boom' } }).reason, /boom/)
+})
+
 test('成片只在 SUCCESS 时挂 artifact', () => {
   assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS' }), [{ key: 'video', type: 'video', mimeType: 'video/mp4' }])
   assert.deepEqual(plugin.listArtifacts({ status: 'SUBMITTED' }), [])

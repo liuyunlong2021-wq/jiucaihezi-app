@@ -103,6 +103,11 @@ API 收的是**像素串**；「1K / 2K」是创作面板里的显示档位，�
 
 取值必须**原样**带上括号后缀，简写成 `9:16` 会报错：
 
+> **简写的后果不是 `400`，而是任务失败**：提交仍返回 `200`，随后轮询到 `status: failed`，
+> `error.code: generation_failed`，`error.message` 里会带上出错节点：
+> `Prompt outputs failed validation -> 29(ResolutionSelector): Value not in list aspect_ratio: '16:9' not in [...]`。
+> 不传 `aspect_ratio` 时用下面的默认值，不会出错。
+
 | 取值 | 含义 |
 | --- | --- |
 | `16:9 (Widescreen)` | 横屏 16:9（默认） |
@@ -171,11 +176,12 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>/content' \
 | 状态/错误 | 原因与处理 |
 | --- | --- |
 | `401` / `403` | API Key 缺失、错误或无该模型权限。 |
-| `400` | 模型名、`duration`、`size`、`aspect_ratio`、参考图数量或格式不合法；参考图无法读取。同步返回。 |
+| `400` | 模型名、`duration`、`size`、参考图数量或格式不合法；参考图无法读取。同步返回。`aspect_ratio` 的取值**不会**在这里拦：取值不在枚举内时会在任务阶段失败（见下）。 |
 | `413` | 只在临时素材上传接口出现：单文件超过 20 MB。 |
 | `429` / `server_busy` | **提交阶段**被拒：在途任务已超过上限（单并发 1 + 排队 4）。降低并发、稍后重试。 |
 | 任务 `status: failed` 且 `error.code: server_busy` | **已受理但排不上队**：前面有任务在跑时接口会自动排队，不会失败；但排队等待超过 **5 分钟**仍未拿到执行槽位，任务就以此失败。注意：这类失败发生在提交之后，提交时拿到的仍然是 `200`，不会补一个 `429`——必须在轮询里读 `error.message` 才能发现。处理：降低并发、稍后重试。 |
 | 任务 `status: failed` | 创建成功之后的失败：参考图读取失败、上游生成失败等。读 `error.message`。 |
+| 任务 `status: failed` 且 `error.code: generation_failed` | 工作流自家拒了这次请求（例如 `aspect_ratio` 写成了简写）。`error.message` 里会给出节点级原因，形如 `Prompt outputs failed validation -> 29(ResolutionSelector): Value not in list ...`。 |
 | `404` | 任务 ID 不存在，或已超过 24 小时保留期。 |
 | `503` | 本机 ComfyUI 不可用（未启动、正在加载模型或正在执行上一个任务），稍后重试。 |
 | `5xx` / `502` | 服务或上游暂时不可用，稍后重试；避免重复提交大量任务。 |

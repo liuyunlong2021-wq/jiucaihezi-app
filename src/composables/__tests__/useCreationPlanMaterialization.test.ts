@@ -8,6 +8,7 @@ import {
   cpState,
   currentRunPlan,
   genericModelFields,
+  setAspect,
   setResolution,
   switchModel,
   switchTask,
@@ -47,6 +48,25 @@ test('buildCurrentCreationParams keeps creation file objects so plan preview can
   assert.equal((params.images as File[])[0]?.name, 'hero.png')
 
   clearFiles()
+})
+
+test('短式比例在面板里就补全成模型枚举，不会原样发给工作流', () => {
+  switchTask('video')
+  switchModel('jc-minimax-h3-ref2v')
+  clearFiles()
+  cpState.prompt = '镜头缓慢推进'
+
+  // 记忆计划/画布给的是 '16:9' 这种界面标签；原样提交会被 ResolutionSelector 的
+  // 「Value not in list」校验直接拒掉（2026-10-02 实测）
+  setAspect('16:9')
+  assert.equal(cpState.ar, '16:9 (Widescreen)')
+
+  const params = buildCurrentCreationParams({ images: ['https://cdn.example.test/a.png'] })
+  assert.equal(params.aspect_ratio, '16:9 (Widescreen)')
+
+  // 已经是枚举值就原样保留
+  setAspect('21:9 (Ultrawide)')
+  assert.equal(cpState.ar, '21:9 (Ultrawide)')
 })
 
 test('buildCurrentCreationParams materializes current model field defaults into RunPlan params', () => {

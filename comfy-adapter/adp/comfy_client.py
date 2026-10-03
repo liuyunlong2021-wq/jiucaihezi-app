@@ -30,6 +30,25 @@ class ComfyUnavailable(ComfyError):
     """连不上 ComfyUI。"""
 
 
+def format_node_errors(node_errors: Any) -> str:
+    """把 ComfyUI 的 node_errors 压成一行，塞进 ComfyError 的 message。
+
+    detail 只挂在异常对象上：日志和回给客户端的任务错误都只取 str(exc)，
+    2026-10-02 就因此只看到 "Prompt outputs failed validation"，看不出是哪个节点哪一项。
+    """
+    parts: list[str] = []
+    for node_id, info in list((node_errors or {}).items())[:3]:
+        info = info or {}
+        class_type = info.get("class_type") or ""
+        for item in list(info.get("errors") or [])[:2]:
+            line = f"{node_id}({class_type}): {item.get('message')}"
+            extra = item.get("details")
+            if extra:
+                line += f" {extra}"
+            parts.append(line)
+    return "; ".join(parts)[:400]
+
+
 class ComfyClient:
     def __init__(
         self,
@@ -100,8 +119,9 @@ class ComfyClient:
         details = err.get("details") or ""
         node_errors = body.get("node_errors") or {}
         pretty = json.dumps(node_errors, ensure_ascii=False)[:2000] if node_errors else ""
+        brief = format_node_errors(node_errors)
         raise ComfyError(
-            f"{msg} {details}".strip(),
+            f"{msg} {details}".strip() + (f" -> {brief}" if brief else ""),
             detail={"node_errors": node_errors, "raw": pretty or body},
         )
 

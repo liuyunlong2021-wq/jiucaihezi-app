@@ -35,6 +35,27 @@ export function usesNewApiContentEndpoint(
   return model === 'omni-fast' || model === 'omni-v2v' || model.endsWith('/omni-fast') || model.endsWith('/omni-v2v')
 }
 
+/**
+ * 把面板 / 历史计划里的比例收敛成模型自己声明的枚举值。
+ *
+ * 只认带后缀枚举（'16:9 (Widescreen)'）的工作流，收到界面标签 '16:9' 会直接
+ * `Prompt outputs failed validation` —— 2026-10-02 本机 H3 参考生视频实测。
+ * 入口校验挡得住面板，挡不住旧版本存下来、被重试复用的计划，所以出口要再收一次。
+ * 认不出来就返回 undefined：宁可让工作流用自己的默认画幅，也不发一个必被拒的值。
+ */
+export function canonicalCreationRatio(modelId: string, value: unknown): string | undefined {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return undefined
+  const options: string[] = []
+  for (const field of getCreationModelSpec(modelId)?.fields || []) {
+    if (!['aspect_ratio', 'aspectRatio', 'ratio'].includes(field.key)) continue
+    for (const option of field.options || []) options.push(String(option.value))
+  }
+  if (!options.length || options.includes(raw)) return raw
+  const short = raw.split(' (')[0]
+  return options.find(option => option.split(' (')[0] === short)
+}
+
 const SOURCE_LABELS = {
   'newapi-direct': '直连',
   runninghub: 'RunningHub',

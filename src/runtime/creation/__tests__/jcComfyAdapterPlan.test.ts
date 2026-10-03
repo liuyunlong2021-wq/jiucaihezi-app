@@ -187,6 +187,55 @@ test('视频三项的参考图张数按适配器槽位卡死', () => {
   assert.throws(() => plan('jc-minimax-h3', refs(1)), /参考图最多支持 0 个/)
 })
 
+test('历史计划里残留的短式比例在提交前收敛成工作流枚举，认不出就不发', { concurrency: false }, async () => {
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const previousFetch = globalThis.fetch
+  const bodies: Record<string, any>[] = []
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      bodies.push(JSON.parse(String(init.body)))
+      return Response.json({ id: 'task_test_ratio', status: 'queued' }, { status: 202 })
+    }
+    if (url.includes('/v1/videos/task_test_ratio')) {
+      return Response.json({
+        id: 'task_test_ratio',
+        status: 'completed',
+        metadata: { url: 'https://cdn.example.test/out.mp4' },
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  // 旧版本存下来、被重试复用的计划绕过了 plan 入口的枚举校验，这里直接把残留值塞进计划
+  const submit = async (ratio: unknown) => {
+    const runPlan = buildCreationRunPlan({
+      modelId: 'jc-minimax-h3-ref2v',
+      params: { prompt: '镜头缓慢推进', duration: 5, images: refs(1), ratio: '16:9 (Widescreen)' },
+    })
+    const params = runPlan.debug.normalizedParams
+    for (const key of ['ratio', 'aspectRatio', 'aspect_ratio']) delete params[key]
+    if (ratio !== undefined) params.aspect_ratio = ratio
+    await withImmediateTimers(() =>
+      executeCreationSubmitRequest(buildCreationSubmitRequest(runPlan)),
+    )
+    return bodies[bodies.length - 1]
+  }
+
+  try {
+    assert.equal((await submit('16:9')).aspect_ratio, '16:9 (Widescreen)')
+    assert.equal((await submit('9:16')).aspect_ratio, '9:16 (Portrait Widescreen)')
+    assert.equal((await submit('1:1 (Square)')).aspect_ratio, '1:1 (Square)')
+    // 认不出来的画幅宁可交给工作流默认，也不能发一个必被 ResolutionSelector 拒掉的值
+    assert.equal((await submit('7:5')).aspect_ratio, undefined)
+    assert.equal((await submit(undefined)).aspect_ratio, undefined)
+  } finally {
+    globalThis.fetch = previousFetch
+    __resetApiKeyMemoryCacheForTests('')
+  }
+})
+
 test('H3 参考生视频的时长上限是 28 秒（30 秒的成片最后约 2 秒无效）', () => {
   const spec = getCreationModelSpec('jc-minimax-h3-ref2v')
   assert.equal(spec?.capabilities.duration?.max, 28)

@@ -13,9 +13,10 @@
 //
 // 图片模型（`jc-qwen-image-2.1`）走同一个适配器的 `/v1/images/generations`，但它是**同步**的：
 // 一次请求就把图跑完并回来（模板没设 `default_async`），所以走宿主协议 `openai_image`，
-// 不用查询/轮询。图片**必须以内联 `b64_json` 回** —— 适配器的 `public_base_url` 是 Docker
-// 内网名（`http://frps:8796`），第三方与桌面端都解析不了，而客户端侧的 urlSafety 又禁止把
-// 结果地址指向私有地址；这与当年 type 1 渠道下 `imageResultFormat: 'b64_json'` 完全一致。
+// 不用查询/轮询。图片**必须回公网 `url`**（0.3.0 起）：宿主任务插件把提交响应落库的上限是
+// 1 MiB，2 MB 级 PNG 内联成 base64 约 2.8 MB，直接 `task submit response exceeds size limit`；
+// 适配器的 `public_base_url` 现为 `https://api.jiucaihezi.studio`（VPS 上 nginx 把 `/files/` 转给
+// frps → 本机适配器），所以结果地址可以直接回给客户端。
 //
 // 显存口径（2026-10-02 实测）：H3 栈（UNET 19.53GB + 文本编码器 14.61GB + 8 个以上 LoRA +
 // 上采样 1.29GB ≈ 40GB）与 Qwen 栈（UNET 6.63GB + 文本编码器 16.33GB ≈ 23GB）**不能同时常驻**，
@@ -26,7 +27,7 @@ export const meta = {
   apiVersion: 1,
   key: 'comfy',
   name: '本机 ComfyUI',
-  version: '0.3.0',
+  version: '0.3.1',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Local ComfyUI via comfy-adapter',
@@ -83,13 +84,21 @@ function hasImageInput(body) {
   return Boolean(body.image || body.first_frame || body.last_frame)
 }
 
-// 适配器状态机：queued -> running -> succeeded / failed / cancelled（adp/tasks.py）
+// 适配器 `/v1/videos/{id}` 的状态词表，以 adp/api.py 的 `_VIDEO_TASK_STATUS` 为准：
+// queued -> in_progress -> completed / failed。
+// 🔴 别照抄 adp/tasks.py 的内部状态机（那套是 running / succeeded，只出现在 /v1/tasks）。
+// 词表对不上的后果不是「状态显示不对」，而是每个任务都判成 UNKNOWN → 宿主永远停在
+// SUBMITTED → 客户端一直转圈显示「排队中」，而适配器那边早就 completed 了（2026-10-02 实测）。
+// 下面的夹具用契约测试直接读 adp/api.py 校验这张表，避免再次脱钩。
 const ADAPTER_STATUS = {
   queued: 'SUBMITTED',
-  running: 'IN_PROGRESS',
-  succeeded: 'SUCCESS',
+  in_progress: 'IN_PROGRESS',
+  completed: 'SUCCESS',
   failed: 'FAILURE',
   cancelled: 'FAILURE',
+  // 内部状态机的写法也一并认下（同一个适配器两种词表并存，多认两个词只赚不亏）
+  running: 'IN_PROGRESS',
+  succeeded: 'SUCCESS',
 }
 
 const HOST_STATUS = {
@@ -290,11 +299,25 @@ export function parseTaskResult(ctx, body) {
   if (!status) return { status: 'UNKNOWN' }
   const out = { status }
   if (status === 'FAILURE') {
-    out.reason = String(
-      (body && (body.fail_reason || body.error || body.message)) || `comfy-adapter status: ${raw}`,
-    )
+    out.reason = failureReason(body, raw)
   }
   return out
+}
+
+// 适配器的 error 是对象（{message,type,code}），String() 会得到 "[object Object]"，
+// 客户端的报错框就成了空白 —— 必须先把里面的 message 抠出来。
+export function failureReason(body, raw) {
+  const detail = body && (body.fail_reason || body.error || body.message)
+  if (detail && typeof detail === 'object') {
+    const text = detail.message || detail.detail || detail.reason
+    if (text) return String(text)
+    try {
+      return JSON.stringify(detail).slice(0, 500)
+    } catch (e) {
+      return `comfy-adapter status: ${raw}`
+    }
+  }
+  return String(detail || `comfy-adapter status: ${raw}`)
 }
 
 export function listArtifacts(task) {

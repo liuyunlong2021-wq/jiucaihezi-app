@@ -17,7 +17,7 @@ import {
 } from '@/api/media-generation'
 import type { CreationMediaInputTransport, CreationRunPlan } from './creationMediaTypes'
 import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
-import { usesNewApiContentEndpoint } from './creationMediaPlan'
+import { canonicalCreationRatio, usesNewApiContentEndpoint } from './creationMediaPlan'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
 export interface CreationSubmitRequest {
@@ -922,7 +922,11 @@ function buildDirectVideoBody(
     )
     // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
     // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
-    const aspectRatioForBody = asOptionalString(params.size) ? undefined : requestedAspectRatio
+    // 收敛成模型声明的枚举：旧版本存下来的计划会带着 '16:9' 这种界面标签绕过入口校验，
+    // 直接发给 ResolutionSelector 就是 Value not in list（2026-10-02 实测）。
+    const aspectRatioForBody = asOptionalString(params.size)
+      ? undefined
+      : canonicalCreationRatio(request.plan.modelId, requestedAspectRatio)
     // NewAPI 对本机 comfy 渠道只转发它 TaskSubmitReq 里认得的字段（model/prompt/images/
     // duration/size/mode/metadata…）。顶层自定义字段和 extra_fields 都会被整段丢掉 ——
     // 实测 aspect_ratio 与 mode 都到不了适配器，面板选了比例却出 16:9（模板默认）就是这么来的。
