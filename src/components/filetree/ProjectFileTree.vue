@@ -3004,6 +3004,15 @@ onBeforeUnmount(() => {
             <strong>{{ projectStore.projectName.value }}</strong>
             <JcIcon name="expand-more" />
           </button>
+          <button
+            v-if="isDesktop && !isMobile"
+            class="pft-icon-btn"
+            title="新建窗口"
+            aria-label="新建窗口"
+            @click="openNewWindow"
+          >
+            <JcIcon name="new-window" />
+          </button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree">
             <JcIcon name="chevron-left" />
           </button>
@@ -3022,15 +3031,6 @@ onBeforeUnmount(() => {
         </button>
         <button class="pft-icon-btn" title="刷新" @click="refreshLoadedDirectories">
           <JcIcon name="refresh" />
-        </button>
-        <button
-          v-if="isDesktop && !isMobile"
-          class="pft-icon-btn"
-          title="新建窗口"
-          aria-label="新建窗口"
-          @click="openNewWindow"
-        >
-          <JcIcon name="new-window" />
         </button>
         <button
           class="pft-icon-btn"
@@ -3807,6 +3807,10 @@ onBeforeUnmount(() => {
   min-width: 0;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
+}
+.pft-project-row > .pft-icon-btn {
+  flex-shrink: 0;
 }
 .pft-project-name {
   display: flex;
