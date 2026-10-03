@@ -1,7 +1,13 @@
 {
   "private": true,
   "dependencies": {
-    "@deepseek-ai/dsh-sdk-client": "0.1.7-alpha.2",
+    "@deepseek-ai/dsh-sdk-client": "0.2.0-rc.2",
     "node": "22.23.2"
+  },
+  "allowScripts": {
+    "node@22.23.2": true,
+    "koffi@3.1.1": true,
+    "node-pty@1.2.0-beta.15": true,
+    "@deepseek-ai/dsh-subprocess-local@0.2.0-rc.2": true
   }
 }

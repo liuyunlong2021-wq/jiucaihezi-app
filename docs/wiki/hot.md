@@ -1,5 +1,15 @@
 # 热缓存
 
+## [2026-10-03] Harness 运行时升到 0.2.0-rc.2（官方通道）
+
+- 官方 `latest`/`next` = **`0.2.0-rc.2`**；我们原先锁在 `0.1.7-alpha.2`（`alpha` tag 至今就停在那）。现在 `src-tauri/resources/deepseek-harness/package.json` = `0.2.0-rc.2`。
+- **升级换不到接口面**：官方 SDK 至今只公开 `initialize` / `session/prompt` / `shutdown` 三个请求与 4 个通知，与 `alpha.2` 逐字相同。我们的 5 处 vendor patch（会话读、权限切换、助手流、resume-stat）仍是必需——官方没开这个门，不是我们在自研。
+- 升级的收益在**行为修复**：官方 0.2.0-rc.1 修了「工具调度异常后对话无法继续」并调整了过程展示默认值，rc.2 又优化了过程信息与耗时显示——正好是工作台 P1/P2 要处理的两件事，所以顺序定为「先升级，再按新版官方语义做 P1/P2」（见 [[开发/韭菜盒子Harness重试与失败对齐官方TDD-2026-10-03]]）。
+- **版本已是单一真源**：`prepare-deepseek-harness.mjs` 从 `package.json` 读版本，不再另写常量；`deepSeekHarness.test.ts` 同时锁住「版本值」与「不得回写常量」两条。
+- ⚠️ **npm 12 的 install-scripts 门禁会静默拿掉内置 Node**：`node` 包的 preinstall 被拦 → 打包里 `node/bin/node.exe` 不存在；`koffi`（`dsh-fs-local`、`dsh-session-persistence-jsonl` 的依赖）与 `node-pty` 同理。已在 `package.json` 写 pinned `allowScripts`，CI 可复现。
+- 已验证：老会话格式仍是 **V4**（无 v5 迁移包），新运行时 `read-session` 出 **1832 个事件**、类型计数与升级前一致；`--dump-config` 零 `entry not found`；focused `1786 pass / 1 fail`（既有 Windows `/tmp` 用例）、`vue-tsc -b`、`oxlint` 干净。
+- 未验收：真机 UI 全链路与三平台安装包。**524 不因升级变好**（上游/网关 ~126 秒零字节；与 [[log]] 2026-09-28 同源）。
+
 ## [2026-10-02] 本机链路公网化：图片改回 url（1 MiB 落库上限），H3 视频比例必须完整枚举
 
 - **图片 502 的真因**：宿主任务插件把提交响应落库的上限是 **1 MiB**，2 MB 级 PNG 内联 base64 后约 2.8 MB → `task submit response exceeds size limit`。`comfy.plugin.js` **0.3.0** 改为显式 `response_format:"url"`，适配器 `config.yaml` 同时设了 `public_base_url: https://api.jiucaihezi.studio` + `default_response_format: url`。
@@ -9,6 +19,7 @@
 - `comfy.plugin.js` 的失败原因原来 `String(body.error)`，而 `error` 是 `{message,type,code}` → 客户端一片空白（`[object Object]`）。已改成取 `error.message`；适配器侧也把 `node_errors` 压成一行塞进 `ComfyError.message`。
 - **排障陷阱**：`comfy-adapter/logs/adapter.log` 是**混合编码** —— Python 写 UTF-8，`tools/cloud.ps1` 的 `*>> $AdapterLog` 追加的是**未对齐的 UTF-16LE**。`Select-String`/`grep 'task_...'` 一律 0 命中，直接 `Get-Content` 只是把 NUL 吞掉、看着像正常文本。
 - ⚠️ **插件状态词表必须用 API 视图的词**（`comfy.plugin.js` **0.3.1** 修）：`adp/tasks.py` 内部状态机是 `running/succeeded`，但 `/v1/videos/{id}` 视图（`adp/api.py` 的 `_VIDEO_TASK_STATUS`）回的是 **`in_progress`/`completed`**。插件照抄了内部那套 → `completed` 判 `UNKNOWN` → 宿主不认终态 → 任务永远 SUBMITTED、客户端**一直转圈显示「排队中」**，而适配器早已 succeeded；只有 `failed` 两套拼写相同，所以**失败能看到报错、成功的反而卡住**。已修，并加**契约测试**直接读 `adp/api.py` 逐个状态词断言插件都认得。
+- 配套两条排障口径：**App / 卡片上的 task id 是宿主生成的**（`task_nz5fZ7TS4DDc2Yc0VGW27rMbwfm0T1bk` 这种无日期随机串），拿它去 `adapter.log` 里 grep 搜不到 —— 适配器自己的 id 是 `task_20261002_<hex>`，只能按时间戳对齐；客户端轮询预算 **600 秒**，判不出状态时会在约 10 分钟后以 `[mediaTaskStore] _executeTask FAILED: 上游任务失败` 收场，那是**症状**而不是上游真失败。
 
 ## [2026-10-02] 灵动（满血）Seedance 2.5 上架：直连厂商的任务插件，面板默认视频模型改成 Sd 2.5 480P
 

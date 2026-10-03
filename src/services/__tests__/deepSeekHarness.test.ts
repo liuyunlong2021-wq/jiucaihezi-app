@@ -296,8 +296,13 @@ test('desktop package pins and embeds the official Harness SDK client with Node'
     readFileSync('src-tauri/resources/deepseek-harness/package.json', 'utf8'),
   )
   const tauri = readFileSync('src-tauri/tauri.conf.json', 'utf8')
-  assert.equal(runtimePackage.dependencies['@deepseek-ai/dsh-sdk-client'], '0.1.7-alpha.2')
+  assert.equal(runtimePackage.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.0-rc.2')
   assert.equal(runtimePackage.dependencies.node, '22.23.2')
+  // 版本只由 package.json 提供：prepare 脚本不得再另写一份常量，否则升级时与锁文件漂移。
+  assert.match(
+    readFileSync('scripts/prepare-deepseek-harness.mjs', 'utf8'),
+    /dependencies\['@deepseek-ai\/dsh-sdk-client'\]/,
+  )
   assert.match(tauri, /resources\/deepseek-harness/)
   assert.match(tauri, /build:deepseek-harness/)
 

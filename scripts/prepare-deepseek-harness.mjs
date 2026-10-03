@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-const version = '0.1.7-alpha.2'
 const root = join(
   dirname(fileURLToPath(import.meta.url)),
   '..',
@@ -11,6 +10,9 @@ const root = join(
   'resources',
   'deepseek-harness',
 )
+// 版本只由 package.json 提供：之前脚本里另写一份常量，升级时会与锁文件漂移。
+const version = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  .dependencies['@deepseek-ai/dsh-sdk-client']
 const installed = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-client', 'package.json')
 const bundledNode = join(
   root,

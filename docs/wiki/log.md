@@ -1,5 +1,14 @@
 # Wiki 操作日志
 
+## [2026-10-03] 升级 | Harness 运行时升到 0.2.0-rc.2
+
+- 用户诉求：全面对齐官方。官方 `latest`/`next` = `0.2.0-rc.2`，我们此前锁在 `0.1.7-alpha.2`（`alpha` tag 至今停在那一版）。方案见 [[开发/韭菜盒子Harness升级0.2.0-rc.2方案-2026-10-03]]。
+- **查过再动**：把 `dsh-sdk-protocol` / `dsh-sdk-jsonrpc-server` / `dsh-agent-loop` / `dsh-base` / `dsh-llm-pi-ai` / `dsh-tool-subagent` / `dsh-app-boot` 的 0.2.0-rc.2 包解包，与本机逐字对比：**官方 SDK 请求/通知面逐字未变**；5 处 vendor patch 的锚点全部命中；`agent/assistant-stream` 的发出点逐字相同；`sessionQuery` / `agents.resume` / `commands` 服务仍在 profile 里；route patch 用到的全部配置键与 `- insert:` 语义都还在；**会话数据格式仍是 V4（不存在 v4→v5 迁移包）**；`dsh-sdk-client` 构造参数逐字一致，所以 `runner.mjs` 未改。
+- 改动：`package.json` 升到 `0.2.0-rc.2`；`prepare-deepseek-harness.mjs` 不再自带版本常量，改为从 `package.json` 读（单一真源，测试锁住）；`package-lock.json` 干净重生成——旧锁与 0.2.0 的 peer 解析冲突，`npm ci` 会直接 ERESOLVE。
+- 顺带解决一个**发布级隐患**：npm 12 的 install-scripts 门禁拦下了 `node` 包的 preinstall，导致打包内置的 `node/bin/node.exe` 根本不存在（`koffi` / `node-pty` 的原生件同理，而 `koffi` 是 `dsh-fs-local`、`dsh-session-persistence-jsonl` 的依赖）。已在 `package.json` 写入 pinned `allowScripts`：`node@22.23.2`、`koffi@3.1.1`、`node-pty@1.2.0-beta.15`、`@deepseek-ai/dsh-subprocess-local@0.2.0-rc.2`，让 CI 可复现。
+- 验证：`--dump-config` 退出 0，provider（`api: openai-completions` / `baseURL` / `retryPolicy`）、`tool-subagent(one-shot)`、insert 进来的 `file-reference-local` 逐条命中，零 `entry not found`；补丁幂等测试通过；**用新运行时读老会话：`list-sessions` 1 条（`version: 4`）、`read-session` 1832 个事件，类型计数与升级前逐条一致**；focused `1795 tests / 1786 pass / 1 fail`（唯一失败是既有的 `scripts/jiucaihezi-creation-mcp/test.mjs` Windows `/tmp` 路径问题，与本升级无关）、`vue-tsc -b` 与 `oxlint` 干净。
+- 未验收：真机 UI 全链路（老会话在界面里打开与续聊、工具调用、`@文件` 权限切换）与三平台安装包构建。**524 与本升级无关**（那是上游/网关在 ~126 秒内零字节）。
+
 ## [2026-09-29] 修复 | Harness 失败轮次不再从工作台消失
 
 - 用户确认只执行最小方案：对齐官方 Harness Session 失败事件投影，不建设全局任务账本、不要求所有任务跨重启恢复、不扩大自动恢复。
