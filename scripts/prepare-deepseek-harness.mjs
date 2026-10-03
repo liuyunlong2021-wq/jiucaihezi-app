@@ -134,11 +134,14 @@ if (!server.includes(resumableSession)) {
 // Keep the bridge at the protocol edge; the UI must never parse DSH_HOME itself.
 const baseInject = 'const inject = ["agents"];'
 const queryInject = 'const inject = ["agents", "sessionQuery"];'
-// 权限切换走官方命令面，所以要一并注入 commands 服务。
+// 权限切换走官方命令面（commands），点名 skill 要查注册表（skills）—— 都要在 inject 里声明，
+// 否则 `this.ctx.skills` 直接抛 `cannot get property "skills" without inject`。
 const commandInject = 'const inject = ["agents", "sessionQuery", "commands"];'
-if (!server.includes(commandInject)) {
-  if (server.includes(queryInject)) server = server.replace(queryInject, commandInject)
-  else if (server.includes(baseInject)) server = server.replace(baseInject, commandInject)
+const scopeInject = 'const inject = ["agents", "sessionQuery", "commands", "skills"];'
+if (!server.includes(scopeInject)) {
+  if (server.includes(commandInject)) server = server.replace(commandInject, scopeInject)
+  else if (server.includes(queryInject)) server = server.replace(queryInject, scopeInject)
+  else if (server.includes(baseInject)) server = server.replace(baseInject, scopeInject)
   else throw new Error('Unsupported DeepSeek Harness injection layout')
   changed = true
 }
@@ -188,6 +191,91 @@ if (!server.includes('async permission(params) {')) {
   const liveAgent = '\tassertLiveAgent(rec, sessionId) {'
   if (!server.includes(liveAgent)) throw new Error('Unsupported DeepSeek Harness agent layout')
   server = server.replace(liveAgent, `${permissionMethod}${liveAgent}`)
+  changed = true
+}
+
+// 用户显式点名 skill（官方 `/name` 手势）时，本会话**只许用点名的这些**：把 `skill` 工具从
+// 该 agent 的工具面里掩掉。官方 `dsh-tool-skill` 在工具不可见时**不再发布 skill 目录**
+// （`ctx.tools.get(skillTool.name, agent) === skillTool ? snapshot : { skills: [] }`），
+// 而 `/name` → `<skill_content>` 的注入是**另一个** pre-step 钩子、不看工具可见性 ——
+// 所以点名的那份指令照样进上下文，模型却看不到、也调不到别的 skill。
+//
+// 判定与官方 `invokedSkillNames()` 逐字同源（同一个 `SKILL_GESTURE` 正则 + `isUserInvocable`）：
+// 只按正则匹配会把 `/permission` 这类官方命令也当成点名，把工具面误掩掉；所以必须真去
+// `ctx.skills.get()` 查一次，查不到或不许用户调用的名字一律不算。
+// 用户的芯片是会话级粘性的，我们每条消息都带一遍手势，所以掩码在清空芯片后的下一轮自动解除。
+const skillScopeImport = 'import { isUserInvocable } from "@deepseek-ai/dsh-skill";\n'
+const skillScopeAnchor = 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n'
+const skillGesture = `/**
+* 官方 \`dsh-tool-skill\` 的 \`/name\` 手势正则（逐字搬运）。
+* \`/\` 前面必须是行首或空白，后面必须是空白或结尾，这样 \`/usr/bin\` 与 \`5/8\` 不会误命中。
+*/
+const SKILL_GESTURE = /(^|\\s)\\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\\s|$)/g;
+`
+const pinnedSkillMethod = `\tasync applyPinnedSkillScope(rec, content) {
+\t\tif (this.pinnedSkillScopes === void 0) this.pinnedSkillScopes = new Map();
+\t\tlet names = [];
+\t\ttry {
+\t\t\tnames = await this.pinnedSkillNames(rec, content);
+\t\t} catch (error) {
+\t\t\t// 查注册表失败只降级成「不禁」：不能因为一个增强把整轮判死。
+\t\t\tconsole.error("[skill-scope] 解析点名 skill 失败: " + (error instanceof Error ? error.message : String(error)));
+\t\t\treturn;
+\t\t}
+\t\tconst key = rec.handle.agent.id;
+\t\tconst held = this.pinnedSkillScopes.get(key);
+\t\tif (held !== void 0 && held.names.join(",") === names.join(",")) return;
+\t\tif (held !== void 0) {
+\t\t\tthis.pinnedSkillScopes.delete(key);
+\t\t\tawait held.dispose();
+\t\t}
+\t\tif (names.length === 0) return;
+\t\ttry {
+\t\t\tconst dispose = rec.handle.agent.ctx.tools.restrict({ deny: ["skill"] });
+\t\t\tthis.pinnedSkillScopes.set(key, {
+\t\t\t\tnames,
+\t\t\t\tdispose
+\t\t\t});
+\t\t} catch (error) {
+\t\t\t// 官方改了工具注册名时只记一行，不把这一轮判失败。
+\t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));
+\t\t}
+\t}
+\tasync pinnedSkillNames(rec, content) {
+\t\tconst names = [];
+\t\t// 官方的查找签名是 \`{ cwd, signal, scope }\`，缺 signal 注册表会直接抛。
+\t\tconst signal = new AbortController().signal;
+\t\tfor (const block of content) {
+\t\t\tif (block.type !== "text") continue;
+\t\t\tfor (const match of block.text.matchAll(SKILL_GESTURE)) {
+\t\t\t\tconst name = match[2];
+\t\t\t\tif (name === void 0 || names.includes(name)) continue;
+\t\t\t\tconst skill = await this.ctx.skills.get(name, {
+\t\t\t\t\tcwd: rec.handle.agent.session.header.cwd,
+\t\t\t\t\tsignal,
+\t\t\t\t\tscope: rec.handle.agent
+\t\t\t\t});
+\t\t\t\tif (skill !== void 0 && isUserInvocable(skill)) names.push(name);
+\t\t\t}
+\t\t}
+\t\treturn names;
+\t}
+`
+const promptContentAnchor = `\t\tconst content = await durablePromptContent(this.ctx, params.contentBlocks);
+\t\tthis.assertLiveAgent(rec, params.sessionId);
+\t\tconst message = createUserMessage({`
+if (!server.includes('async applyPinnedSkillScope(rec, content) {')) {
+  if (!server.includes(skillScopeAnchor)) throw new Error('Unsupported DeepSeek Harness import layout')
+  if (!server.includes(promptContentAnchor)) throw new Error('Unsupported DeepSeek Harness prompt layout')
+  const liveAgent = '\tassertLiveAgent(rec, sessionId) {'
+  if (!server.includes(liveAgent)) throw new Error('Unsupported DeepSeek Harness agent layout')
+  server = server
+    .replace(skillScopeAnchor, `${skillScopeAnchor}${skillScopeImport}${skillGesture}`)
+    .replace(promptContentAnchor, promptContentAnchor.replace(
+      '\t\tconst message = createUserMessage({',
+      '\t\tawait this.applyPinnedSkillScope(rec, content);\n\t\tconst message = createUserMessage({',
+    ))
+    .replace(liveAgent, `${pinnedSkillMethod}${liveAgent}`)
   changed = true
 }
 

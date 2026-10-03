@@ -26,10 +26,14 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   // 会话权限是 durable 事实，进程级 DSH_PERMISSION_MODE 只管新会话；这条请求是唯一能
   // 把已存在会话拉齐到 @文件 语义的通道。
   assert.match(once, /case "session\/permission": return this\.permission\(params\);/)
-  assert.match(once, /const inject = \["agents", "sessionQuery", "commands"\];/)
+  // 同一处 inject 必须同时带 `commands`（权限）与 `skills`（点名 skill 要查官方注册表）。
+  assert.match(once, /const inject = \["agents", "sessionQuery", "commands", "skills"\];/)
   assert.match(once, /\"\/permission \" \+ preset/)
   // 官方命令面必须真的被调用，而不是自己写 permission/preset 事件绕过官方推导。
   assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(rec\.handle\.agent/)
+  // 点名 skill → 掩掉 `skill` 工具（官方 tools.restrict），且必须在 prompt 前生效。
+  assert.match(once, /await this\.applyPinnedSkillScope\(rec, content\);/)
+  assert.match(once, /rec\.handle\.agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
 })
 
 // 剪体积的两刀（node 包的安装源 278M、LibreOffice 260M，都是打好的 App 里的实际占用）。

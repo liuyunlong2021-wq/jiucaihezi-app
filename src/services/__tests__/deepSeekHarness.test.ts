@@ -355,8 +355,31 @@ test('失败行补齐尝试次数，失败文案走官方 failureMessage 映射'
   assert.equal(deepSeekFailureText('524 status code (no body)', 'TIMEOUT'), '524 status code (no body)')
 })
 
-test('重试与失败文案逐字取自官方中文字典', () => {
-  assert.equal(DEEPSEEK_RETRY_TEXT.active, '正在重试模型请求')
+test('点名 skill 后本会话只挂这一个：官方手势 → 掩掉 skill 工具，目录随之消失', () => {
+  const prepare = readFileSync('scripts/prepare-deepseek-harness.mjs', 'utf8')
+  // 官方 `dsh-tool-skill`：工具不可见时 `snapshot` 直接变空 → 不发布 skill 目录；
+  // 而 `/name` → `<skill_content>` 的注入是另一个 pre-step 钩子，不看工具可见性。
+  // 所以掩掉 `skill` 工具正好等于「只许用点名的那一个」，且点名的指令照样进上下文。
+  assert.match(prepare, /async applyPinnedSkillScope\(rec, content\) \{/)
+  assert.match(prepare, /rec\.handle\.agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
+  // 必须真去注册表查一次：只按正则会把 `/permission` 这类官方命令也当成点名。
+  assert.match(prepare, /isUserInvocable\(skill\)\) names\.push\(name\)/)
+  assert.match(prepare, /import \{ isUserInvocable \} from "@deepseek-ai\/dsh-skill";/)
+  // 手势正则逐字搬官方的（`/usr/bin` 与 `5/8` 不会命中）。
+  assert.match(prepare, /const SKILL_GESTURE = \/\(\^\|\\\\s\)\\\\\/\(\[a-z0-9\]\+\(\?:-\[a-z0-9\]\+\)\*\)\(\?=\\\\s\|\$\)\/g;/)
+  assert.match(prepare, /block\.text\.matchAll\(SKILL_GESTURE\)/)
+  // 掩码失败只记一行，不能把这一轮判死。
+  assert.match(prepare, /\[skill-scope\] 掩掉 skill 工具失败/)
+  // 真身：安装时确实打进去了（未安装时跳过，CI 会在 build:deepseek-harness 之后跑到）。
+  const installed = 'src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/lib/index.js'
+  if (existsSync(installed)) {
+    const server = readFileSync(installed, 'utf8')
+    assert.match(server, /await this\.applyPinnedSkillScope\(rec, content\);/)
+    assert.match(server, /async pinnedSkillNames\(rec, content\) \{/)
+  }
+})
+
+test('重试与失败文案逐字取自官方中文字典', () => {  assert.equal(DEEPSEEK_RETRY_TEXT.active, '正在重试模型请求')
   assert.equal(DEEPSEEK_RETRY_TEXT.scheduled, '等待重试模型请求')
   assert.equal(DEEPSEEK_RETRY_TEXT.started, '已重试模型请求')
   assert.equal(DEEPSEEK_RETRY_TEXT.cancelled, '模型请求重试已取消')
@@ -849,7 +872,9 @@ test('an existing session is switched to the @文件 permission instead of keepi
   assert.match(source, /if \(active\.permissions\.get\(sessionId\) === preset\) return/)
   assert.match(source, /preset: DeepSeekPermissionTier = DEEPSEEK_DEFAULT_PERMISSION_TIER/)
   // 切换只能走官方命令面：SDK 通道只暴露 session/prompt|list|read，没有任何权限方法。
-  assert.match(prepare, /const commandInject = 'const inject = \["agents", "sessionQuery", "commands"\];'/)
+  // 同一处 inject 还要带 `skills`：点名 skill 要查官方注册表，没声明就直接抛
+  // `cannot get property "skills" without inject`（第一版补丁漏了它，实测整轮失败）。
+  assert.match(prepare, /const scopeInject = 'const inject = \["agents", "sessionQuery", "commands", "skills"\];'/)
   assert.match(prepare, /case "session\/permission": return this\.permission\(params\);/)
   assert.match(prepare, /commands"\)\.execute\(rec\.handle\.agent, "\/permission " \+ preset/)
   assert.match(runner, /command\.type === 'permission'/)

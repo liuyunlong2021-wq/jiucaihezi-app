@@ -39,7 +39,6 @@
           "mcp_kill_stdio",
           "mcp_reap_stale_harness",
           "resolve_mcp_node",
-          "jev_scorer_ensure",
           "creation_mcp_complete",
           "resolve_creation_mcp",
           "resolve_bundled_skills",

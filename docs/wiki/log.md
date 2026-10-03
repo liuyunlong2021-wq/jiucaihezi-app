@@ -1,5 +1,13 @@
 # Wiki 操作日志
 
+## [2026-10-03] 新增 | 点名 Skill 只挂一个（官方 tools.restrict）+ 删除 @Jev
+
+- 用户诉求：「我 @ 了一个具体 skill，后续任务只允许用这一个；不管 @Jev，直接把它删了」。方案与实测见 [[开发/韭菜盒子Harness点名Skill只挂一个-2026-10-03]]。
+- 查过再动：官方 `dsh-tool-skill` 的目录发布与 `/name` 注入是两个钩子；工具不可见时目录变空，而注入不看工具可见性。`dsh-tools` 的 `restrict` 要求在 scoped ctx（`agent.ctx`）上调用、返回 disposer。官方 `dsh-subagent` 已在用同一手法。
+- 改动：`prepare-deepseek-harness.mjs` 第 6 处补丁（`prompt` 前 `applyPinnedSkillScope` + 逐字搬官方手势正则 + 查注册表 + `tools.restrict`，`inject` 补 `skills`）；契约与 §12.4 同步；新增 1 条契约测试；连带删掉 @Jev（决策层、打分器运行时与脚本、Rust 命令、设置项、测试与打包审计条目）。
+- 验证：本地假模型回显工具表 → 24/skill=true → 点名后 23/skill=false → 撤销后 24/skill=true；补丁幂等测试 2/2；`1768 tests / 1759 pass / 1 fail`（既有 Windows `/tmp`）；`vue-tsc -b` 干净。
+- 未验收：真机 UI；`cargo check` 被 dev App 占用构建产物拦住（`os error 32`）。
+
 ## [2026-10-03] 新增 | 重试链可见 + 失败不丢过程 + 重试预算对齐官方
 
 - 用户诉求：报错后「所有之前的任务执行内容也一起隐藏起来」，还得点「继续」才能接着干。方案与实施表见 [[开发/韭菜盒子Harness重试与失败对齐官方TDD-2026-10-03]]。

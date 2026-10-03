@@ -1699,7 +1699,6 @@ pub fn run() {
             commands::workspace::open_workspace_window,
             commands::workspace::open_new_window,
             commands::workspace::claim_workspace,
-            commands::jev_scorer::jev_scorer_ensure,
             commands::session::read_session_token,
             commands::session::write_session_token,
             commands::clipboard::write_clipboard_text,

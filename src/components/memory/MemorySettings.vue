@@ -5,7 +5,6 @@ import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
-import { ensureJevScorer, jevScorerReady, jevScorerStateLabel } from '@/utils/jevScorerRuntime'
 import { getLocalOllamaModels } from '@/utils/providerConfig'
 import { getCustomProviders, normalizeCustomProviderApiBase, saveCustomProviders, type CustomProviderConfig } from '@/utils/providerConfig'
 import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
@@ -53,8 +52,6 @@ const localModelSummary = computed(() => {
 })
 const comfyUiBusy = ref(false)
 const comfyUiStatus = ref<ComfyUiRuntimeStatus | null>(null)
-const jevScorerBusy = ref(false)
-const jevScorerStatus = ref('')
 const comfyWorkflowApiKey = ref('')
 const comfyWorkflowApiKeySaved = ref(false)
 const logoutBusy = ref(false)
@@ -182,22 +179,6 @@ function removeCustomProvider(id: string) {
 async function saveComfyApiKey() {
   await saveComfyWorkflowApiKey(comfyWorkflowApiKey.value)
   comfyWorkflowApiKeySaved.value = true
-}
-
-async function checkJevScorer() {
-  if (jevScorerBusy.value) return
-  jevScorerBusy.value = true
-  jevScorerStatus.value = (await jevScorerReady()) ? '打分器在运行。' : '打分器没在运行。'
-  jevScorerBusy.value = false
-}
-
-async function startJevScorer() {
-  if (jevScorerBusy.value) return
-  jevScorerBusy.value = true
-  jevScorerStatus.value = '正在启动...'
-  // 模型加载有十几秒，这里只报「起了没」，不等它 ready。
-  jevScorerStatus.value = jevScorerStateLabel(await ensureJevScorer())
-  jevScorerBusy.value = false
 }
 
 async function refreshComfyUi() {
@@ -385,30 +366,6 @@ function showSync() {
           </template>
           <div v-else class="memory-local-actions">
             <button @click="openCustomProviderForm">添加端点</button>
-          </div>
-        </section>
-        <section v-if="desktopRuntime" class="memory-local-model">
-          <div>
-            <strong>@Jev 本地打分器</strong>
-            <span>{{ agentStore.jevScorerAutostart ? '启动时自动拉起' : '已关闭' }}</span>
-          </div>
-          <p v-if="jevScorerStatus">{{ jevScorerStatus }}</p>
-          <p v-else>装有打分器的机器上，@Jev 会用它语义挑 Skill（准确率从 71% 提到 95%）。没装的机器自动降级，不用管。</p>
-          <label class="memory-comfy-key">
-            <span>启动时自动拉起</span>
-            <input
-              type="checkbox"
-              :checked="agentStore.jevScorerAutostart"
-              @change="agentStore.toggleJevScorerAutostart(($event.target as HTMLInputElement).checked)"
-            />
-          </label>
-          <div class="memory-local-actions">
-            <button :disabled="jevScorerBusy" @click="checkJevScorer">
-              {{ jevScorerBusy ? '检测中' : '检测状态' }}
-            </button>
-            <button :disabled="jevScorerBusy" @click="startJevScorer">
-              {{ jevScorerBusy ? '启动中' : '立即启动' }}
-            </button>
           </div>
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">

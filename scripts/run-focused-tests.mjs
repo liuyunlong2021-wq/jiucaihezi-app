@@ -77,7 +77,6 @@ const wave1FocusedTests = [
   'src/runtime/tools/__tests__/skillCreatorRuntime.test.ts',
   'src/runtime/tools/__tests__/mcpBridge.test.ts',
   'src/runtime/connection/__tests__/toolConnection.test.ts',
-  'src/runtime/decision/__tests__/decision.test.ts',
   'src/runtime/skills/__tests__/skillFileListing.test.ts',
   'src/stores/__tests__/agentStore.test.ts',
   'src/stores/__tests__/skillsManageStore.test.ts',

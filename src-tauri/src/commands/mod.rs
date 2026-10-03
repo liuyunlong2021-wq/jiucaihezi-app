@@ -4,7 +4,6 @@ pub mod dev;
 pub mod greet;
 pub mod http;
 pub mod image_edit;
-pub mod jev_scorer;
 pub mod mcp;
 pub mod media;
 pub mod plugin;

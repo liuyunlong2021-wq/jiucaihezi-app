@@ -21,7 +21,6 @@ test('桌面配置的资源没有被 iOS 的隔离改动削弱', () => {
 
   assert.deepEqual(Object.keys(desktop.bundle.resources).sort(), [
     '../public/skills',
-    '../scripts/jev-scorer/serve.py',
     '../scripts/jiucaihezi-creation-mcp/dist',
     'resources/deepseek-harness',
     'resources/storyboarder',
@@ -68,7 +67,7 @@ test('安装包审计盯住打进 .app 的桌面资源', () => {
   const audit = source('scripts/audit-ios-app.mjs')
 
   // 前端 dist 审计看不到 bundle.resources，这一层是 §13.4 的唯一出口。
-  for (const name of ['skills', 'deepseek-harness', 'creation-mcp', 'storyboarder', 'jev-scorer']) {
+  for (const name of ['skills', 'deepseek-harness', 'creation-mcp', 'storyboarder']) {
     assert.match(audit, new RegExp(`'${name}'`))
   }
   assert.match(audit, /NSCameraUsageDescription missing/)

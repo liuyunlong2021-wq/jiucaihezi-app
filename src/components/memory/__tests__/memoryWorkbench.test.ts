@@ -650,13 +650,12 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(workbench, /@click="choosePermission\(option\.tier\)"/)
   assert.doesNotMatch(workbench, /<span>权限<\/span>/)
   assert.doesNotMatch(workbench, /label: '@文件'/)
-  // @Jev 只留 @ 提及一个入口：输入框下沿的常驻开关用户实测不想要
-  // （他自己用 @ 的时候才开）。它仍然要能被开启、被持久化、被回填。
-  assert.doesNotMatch(workbench, /label: '@Jev'/)
-  assert.match(workbench, /id: 'jev', display: 'Jev'/)
-  assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = true/)
-  assert.match(workbench, /if \(id === 'jev'\) jevSelected\.value = false/)
-  assert.match(workbench, /if \(jevSelected\.value\) ids\.push\('jev'\)/)
+  // @Jev 整个删掉（2026-10-03 用户决定）：它会把用户手选的 Skill 换成自己挑的，
+  // 而用户要的是「我 @ 了哪个就只用哪个」。删干净包括：提及项、芯片、决策入口、决策层目录。
+  assert.doesNotMatch(workbench, /@Jev/)
+  assert.doesNotMatch(workbench, /jevSelected/)
+  assert.doesNotMatch(workbench, /applyJevDecision|decisionCandidates|runtime\/decision/)
+  assert.doesNotMatch(workbench, /recordSkillUse\(name\)\n/)
   // @Terminal 已并入权限开关：一开就是本机全权（DH 下即 danger-full-access 沙箱），不留第二个终端入口。
   assert.doesNotMatch(workbench, /@Terminal/)
   assert.doesNotMatch(workbench, /terminalSelected/)

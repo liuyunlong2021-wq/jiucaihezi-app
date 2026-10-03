@@ -52,7 +52,6 @@
     "resources": {
       "../public/skills": "skills",
       "../scripts/jiucaihezi-creation-mcp/dist": "creation-mcp",
-      "../scripts/jev-scorer/serve.py": "jev-scorer/serve.py",
       "resources/deepseek-harness": "deepseek-harness",
       "resources/storyboarder": "storyboarder"
     },

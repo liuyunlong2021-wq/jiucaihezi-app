@@ -13,7 +13,6 @@ const forbiddenMarkers = [
   'deepseekHarness',
   'mcp_spawn_stdio',
   'creation-mcp',
-  'jev-scorer',
 ]
 const textExtensions = new Set(['.css', '.html', '.js', '.json', '.svg', '.txt'])
 

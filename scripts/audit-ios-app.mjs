@@ -8,7 +8,7 @@ import { join, relative, resolve, sep } from 'node:path'
 const appDir = resolve(process.argv[2] || process.env.IOS_APP_DIR || 'src-tauri/gen/apple/build/arm64-sim/韭菜盒子.app')
 
 // 桌面端才需要的资源，任何一项出现在手机包里都违反合同 §13.4。
-const forbiddenResourceDirs = ['skills', 'deepseek-harness', 'creation-mcp', 'storyboarder', 'jev-scorer']
+const forbiddenResourceDirs = ['skills', 'deepseek-harness', 'creation-mcp', 'storyboarder']
 
 if (!existsSync(appDir)) {
   console.error(`[ios-app] 找不到安装包：${appDir}`)

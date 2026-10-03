@@ -1,5 +1,14 @@
 # 热缓存
 
+## [2026-10-03] 点名 Skill 后本会话只许用这一个；@Jev 整个删掉
+
+- 用户诉求：「@ 了某个 skill，后续任务只允许用这一个」。官方 skill 是**双通道**：`/name` 手势只把该 skill 正文**注入**这一轮（`source.kind: 'skill-invocation'`），而同一插件还会给模型一份**全量 skill 目录**并明确要求「Load all applicable skills」—— 所以「@ 了 A、模型又用 B」是官方语义下的正常行为，不是丢了用户的选择。官方只有**文件级**开关（`disable-model-invocation` / `user-invocable`），没有「本会话只许这几个」的粒度。
+- 解法（100% 官方件，第 6 处 vendor patch）：点名时对 `agent.ctx.tools.restrict({ deny: ['skill'] })`。官方 `dsh-tool-skill` 在工具不可见时**不再发布目录**（`ctx.tools.get(skillTool.name, agent) === skillTool ? snapshot : { skills: [], complete: true }`），而手势注入是**另一个** pre-step 钩子、不看工具可见性 → 点名的指令照样进上下文，模型却看不到也调不到别的 skill。判定与官方 `invokedSkillNames()` 逐字同源（同一个 `SKILL_GESTURE` 正则 + 真去注册表查 + `isUserInvocable`），否则 `/permission` 这类命令会被误当成点名。
+- **离线实测**（本地假模型回显本轮工具表，不花钱）：无手势 tool=24/skill=true → 点名 `/jc-daoju` tool=23/skill=**false** → 撤掉手势 tool=24/skill=**true**。语义是会话级粘性（芯片跨轮保留、清空后下一轮恢复）。
+- ⚠️ 踩坑：漏在 `inject` 里声明 `skills` → `cannot get property "skills" without inject`，**整轮直接失败**（不是静默降级）。现在查注册表与掩工具各自 try/catch，失败只记一行。
+- **@Jev 整体删除**（用户 2026-10-03 决定）：它会把用户手选的 Skill 换成自己挑的（`selectedSkillNames.value = result.skills`），正是本次要消灭的行为。删掉决策层 `src/runtime/decision/`、`jevScorerRuntime`、`scripts/jev-scorer|jev-eval`、Rust `jev_scorer` 命令与权限/资源映射、设置面板那一节。
+- 门禁：`1768 tests / 1759 pass / 1 fail`（唯一失败是既有 Windows `/tmp` 用例）、`vue-tsc -b` 干净。**未验收**：真机 UI；`cargo check` 因 dev App 占着 `target` 而无法在本机跑（`os error 32`，已用全文检索确认 Rust/JSON 无残留）。详见 [[开发/韭菜盒子Harness点名Skill只挂一个-2026-10-03]]。
+
 ## [2026-10-03] 重试链可见 + 失败不丢过程 + 重试预算对齐官方（P1+P2 落地）
 
 - **重试行进会话投影**：官方 `llm/retry` / `llm/retry-started` 与工具步共用同一条 `deepSeekSessionProcess()` 时间线，折叠成 `{label}（{retry}/{maximum}） · {seconds}s`（官方 `message.retry.status` 逐字），展开看「重试延迟 / 失败原因」。四态文案、`duration.milliseconds` 全部逐字取自官方 zh 字典；主动倒计时用 `事件时间 + delayMs - now`（比官方「挂载时刻 + delayMs」更准），靠每秒跳的 `runElapsed` 重渲染，下限 1 秒同官方。

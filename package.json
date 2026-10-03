@@ -23,8 +23,6 @@
     "build:creation-mcp": "node scripts/jiucaihezi-creation-mcp/build.mjs",
     "build:deepseek-harness": "node scripts/prepare-deepseek-harness.mjs",
     "test:creation-mcp": "node --test scripts/jiucaihezi-creation-mcp/test.mjs",
-    "jev:eval": "node scripts/jev-eval/run.mjs",
-    "jev:scorer": "sh scripts/jev-scorer/start.sh",
     "test:focused": "pnpm run test:focused:build && pnpm run test:focused:run && pnpm run test:tauri",
     "tauri": "tauri",
     "tauri:dev": "pnpm run build:creation-mcp && tauri dev",

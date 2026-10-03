@@ -888,8 +888,6 @@ export const useAgentStore = defineStore('agents', () => {
     setModelVariant,
     warehouseEnabled,
     presetEnabled,
-    jevScorerAutostart,
-    toggleJevScorerAutostart,
     computerUseEnabled,
     toggleComputerUse,
     sortMode,
