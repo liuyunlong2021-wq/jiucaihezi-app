@@ -1,5 +1,13 @@
 # 热缓存
 
+## [2026-10-03] Computer Use 接入（官方实验性 Cua Driver 原生提供方，设置开关默认开）
+
+- 官方 Computer Use 是**两层**且**都发在 npm**：`@deepseek-ai/dsh-computer-use`（只占一个提供方注册位，无工具、无配置项）+ 一个提供方。提供方只有两个，**名字都带 `dsh-experimental-` 前缀**：`dsh-experimental-computer-use-cua-driver-native`（进程内原生，锁 `@trycua/cua-driver@0.28.0`）与 `...-cua-driver-mcp`（连本机已装的 `cua-driver` CLI）。**一次只能挂一个**，第二个注册会失败并报出已占用者名。
+- 我们挂**原生**那个（不要求用户另装 CLI），两条条目走**同一个 `- insert:` seam**（顶层 `- name:` 会被 `applyEntryPatches` 按已有行匹配后静默丢掉）。开关 = `localStorage` 的 `jc_computer_use`（设置 → Computer Use，默认开），并进 `runtimeKey()` —— 否则关掉开关后旧 runtime 仍攥着桌面工具。
+- 风险照抄官方口径：平台二进制走 optionalDependencies（win32-x64 **24.7 MB**，darwin-arm64 50.7 MB）**必须保留**；**原生与宿主同进程，原生崩溃可能终止 harness 进程**（要隔离就用 MCP 提供方）；截图走持久化附件、只有声明图片输入的模型路由收得到；挂载期间加固定指导文本 → token 与 KV 前缀变化一次。
+- 已验证：`--dump-config` 退出 0 且 stderr 空、两条条目命中；**同一条 patch 真跑 `runner.mjs` → `ready` + `list-sessions` 正常 + 零 stderr**（无 `entry did not activate`）；提供方入口（`apply/inject/name`）与 `@trycua/cua-driver`（150 导出）均可加载；`attachment-local` 在组合里。聚焦 `1797 / 1788 pass / 1 fail`（既有 Windows `/tmp`）、`vue-tsc -b` 干净。详见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]]。
+- 未验收：真机让模型调 `cua_driver_native__*` 并接收截图（需一轮真实对话）；关开关后工具确实消失。
+
 ## [2026-10-03] Harness 运行时升到 0.2.0-rc.2（官方通道）
 
 - 官方 `latest`/`next` = **`0.2.0-rc.2`**；我们原先锁在 `0.1.7-alpha.2`（`alpha` tag 至今就停在那）。现在 `src-tauri/resources/deepseek-harness/package.json` = `0.2.0-rc.2`。

@@ -413,6 +413,21 @@ function showSync() {
         </section>
         <section v-if="desktopRuntime" class="memory-local-model">
           <div>
+            <strong>Computer Use</strong>
+            <span>{{ agentStore.computerUseEnabled ? '已开启' : '已关闭' }}</span>
+          </div>
+          <p>让模型在本机桌面上截图、点击、输入（官方 Cua Driver，实验性）。关掉后模型的工具表里不会出现这些工具，下一轮对话生效。</p>
+          <label class="memory-comfy-key">
+            <span>允许操作本机桌面</span>
+            <input
+              type="checkbox"
+              :checked="agentStore.computerUseEnabled"
+              @change="agentStore.toggleComputerUse(($event.target as HTMLInputElement).checked)"
+            />
+          </label>
+        </section>
+        <section v-if="desktopRuntime" class="memory-local-model">
+          <div>
             <strong>本机 ComfyUI</strong>
             <span>{{ comfyUiStatus ? '已连接' : '未启动' }}</span>
           </div>

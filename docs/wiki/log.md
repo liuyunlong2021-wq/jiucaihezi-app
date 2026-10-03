@@ -1,5 +1,14 @@
 # Wiki 操作日志
 
+## [2026-10-03] 新增 | Computer Use 接入官方 Cua Driver 原生提供方
+
+- 用户诉求：**必须要有 Computer Use**。方案与验收记录见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]]。
+- **查过再动**：官方把它拆成「注册位服务 + 提供方」两层，都在 npm 上。上一轮查不到是因为**两个提供方的名字都带 `dsh-experimental-` 前缀**（`@deepseek-ai/dsh-experimental-computer-use-cua-driver-native@0.2.0-rc.2`）。服务包本身无工具无配置；官方限制**一次只能挂一个提供方**。
+- 决策（用户已确认）：提供方选**原生**（不要求用户另装 `cua-driver` CLI），生效方式是**设置开关、默认开**。
+- 改动：`src-tauri/resources/deepseek-harness/package.json` 加两条依赖（`dsh-computer-use` + 原生提供方）并重生成锁；`deepSeekHarness.ts` 新增 `computerUsePatch`（走既有 `insertPatch()`）+ 开关进 `runtimeKey()`；`agentStore.ts` 加 `COMPUTER_USE_STORAGE_KEY` / `computerUseEnabledNow()` / `computerUseEnabled` / `toggleComputerUse`；`MemorySettings.vue` 加开关行；`deepSeekHarness.test.ts` 加 1 条契约测试。
+- 验证：`--dump-config` 退出 0、stderr 空、两条条目命中；同 patch 真跑 `runner.mjs` → `ready`、零 stderr；提供方与原生驱动均可加载；`attachment-local` 在组合里；聚焦 `1797 / 1788 pass / 1 fail`（既有 Windows `/tmp`）；`vue-tsc -b` 与改动文件 `oxlint` 干净。
+- 未验收：真机让模型调用 `cua_driver_native__*` 并接收截图；关开关后工具消失。风险已登记（原生与宿主同进程、平台二进制体积、截图需图片模态）。
+
 ## [2026-10-03] 升级 | Harness 运行时升到 0.2.0-rc.2
 
 - 用户诉求：全面对齐官方。官方 `latest`/`next` = `0.2.0-rc.2`，我们此前锁在 `0.1.7-alpha.2`（`alpha` tag 至今停在那一版）。方案见 [[开发/韭菜盒子Harness升级0.2.0-rc.2方案-2026-10-03]]。

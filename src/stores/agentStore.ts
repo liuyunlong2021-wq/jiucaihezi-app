@@ -191,6 +191,20 @@ export const ORGANIZATION_RECOMMENDED_TIER: ModelTier = 'medium'
 export const PILL_MODELS = DEFAULT_MODELS
 
 
+/**
+ * Computer Use 开关的 localStorage 键。
+ *
+ * 读取函数与键一起放在 store 模块里：Harness 路由组合（`deepSeekHarness.ts` 的
+ * `createRuntime`）不是组件上下文，拿不到 store 实例，但必须与设置面板读**同一个键**，
+ * 否则切开关只改了 UI。
+ */
+export const COMPUTER_USE_STORAGE_KEY = 'jc_computer_use'
+
+/** 非组件上下文（路由组合生成）读取同一开关。 */
+export function computerUseEnabledNow(): boolean {
+  return localStorage.getItem(COMPUTER_USE_STORAGE_KEY) !== '0'
+}
+
 export const useAgentStore = defineStore('agents', () => {
   const currentAgent = ref<SkillConfig | null>(null)
   const currentModel = ref(localStorage.getItem('jcModel') || DEFAULT_TEXT_MODEL)
@@ -710,6 +724,19 @@ export const useAgentStore = defineStore('agents', () => {
     localStorage.setItem('jc_jev_scorer', jevScorerAutostart.value ? '1' : '0')
   }
 
+  // ─── Computer Use（官方实验性 Cua Driver 原生提供方，默认开） ───
+  //
+  // 官方口径：`dsh-computer-use` 只占一个注册位，工具由提供方给；一次只能挂一个提供方。
+  // 关掉时路由组合里不写这两条 —— 于是模型看不到 `cua_driver_native__*` 工具，也不会
+  // 有截图和输入注入。开关是**部署级**的：Harness 运行时按它生成 patch（见
+  // `deepSeekHarness.ts` 的 `computerUseEnabledNow`），所以两个地方读同一个键。
+  const computerUseEnabled = ref(computerUseEnabledNow())
+
+  function toggleComputerUse(enabled?: boolean) {
+    computerUseEnabled.value = enabled !== undefined ? enabled : !computerUseEnabled.value
+    localStorage.setItem(COMPUTER_USE_STORAGE_KEY, computerUseEnabled.value ? '1' : '0')
+  }
+
   // ─── 我的Skill：用户主动添加的Skill列表 ───
   function getMySkills(): SkillConfig[] {
     return loadSkills()
@@ -863,6 +890,8 @@ export const useAgentStore = defineStore('agents', () => {
     presetEnabled,
     jevScorerAutostart,
     toggleJevScorerAutostart,
+    computerUseEnabled,
+    toggleComputerUse,
     sortMode,
     agents,
     modelLabel,

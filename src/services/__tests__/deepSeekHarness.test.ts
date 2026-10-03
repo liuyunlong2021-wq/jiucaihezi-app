@@ -366,6 +366,30 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.doesNotMatch(source, /resolve_deepseek_harness/)
 })
 
+test('Computer Use mounts the official provider pair behind the same insert seam', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  const store = readFileSync('src/stores/agentStore.ts', 'utf8')
+  // 官方 Computer Use 是「注册位 + 一个提供方」两条插件，且只能走 `- insert:`：顶层
+  // `- name:` 会被官方 applyEntryPatches 按已有行匹配，匹配不到就静默丢掉（MCP 条目踩过）。
+  assert.match(source, /const computerUsePatch = computerUseEnabledNow\(\)\n\s*\? insertPatch\(\[/)
+  assert.match(source, /"  name: '@deepseek-ai\/dsh-computer-use'"/)
+  assert.match(source, /"  name: '@deepseek-ai\/dsh-experimental-computer-use-cua-driver-native'"/)
+  assert.match(source, /\.\.\.computerUsePatch,/)
+  // 官方限制：一次只能挂一个提供方（第二个注册会失败并报出已占用者名）。我们选原生那个，
+  // 用户机器不用另装 cua-driver CLI；MCP 那个提供方不出现，避免误挂成两个。
+  assert.doesNotMatch(source, /computer-use-cua-driver-mcp/)
+  // 开关是部署级的，运行时按它生成 patch，所以必须进 runtimeKey —— 否则关掉开关后旧
+  // runtime 还在跑，模型手里仍攥着桌面工具。
+  assert.match(source, /computerUseEnabledNow\(\) \? 'cua' : ''/)
+  // 服务与设置面板读同一个键，否则切开关只改了 UI。
+  assert.match(source, /import \{ computerUseEnabledNow \} from '@\/stores\/agentStore'/)
+  assert.match(store, /export const COMPUTER_USE_STORAGE_KEY = 'jc_computer_use'/)
+  assert.match(store, /return localStorage\.getItem\(COMPUTER_USE_STORAGE_KEY\) !== '0'/)
+  assert.match(store, /computerUseEnabled,\n    toggleComputerUse,/)
+  const settings = readFileSync('src/components/memory/MemorySettings.vue', 'utf8')
+  assert.match(settings, /agentStore\.toggleComputerUse\(\(\$event\.target as HTMLInputElement\)\.checked\)/)
+})
+
 test('Harness run verdict belongs to its own session instead of a subagent turn', () => {
   const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
   // 子代理事件共用同一条通知流；没有这道会话过滤，子会话的失败会顶替本轮结论。

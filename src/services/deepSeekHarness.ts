@@ -5,6 +5,7 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import { McpStdioTransport } from './mcpStdioTransport'
+import { computerUseEnabledNow } from '@/stores/agentStore'
 
 type BridgeMessage = {
   type: 'ready' | 'notification' | 'result' | 'query-result' | 'error' | 'closed'
@@ -224,6 +225,9 @@ function runtimeKey(input: DeepSeekHarnessInput): string {
     input.mediaSelected ? 'media' : '',
     input.avSelected ? 'av' : '',
     input.scene3dSelected ? '3d' : '',
+    // Computer Use 只改路由组合，不改会话；放进键里是为了「切开关 = 换 runtime」——
+    // 不然关掉开关后旧 runtime 仍在跑，模型手里还攥着桌面工具。
+    computerUseEnabledNow() ? 'cua' : '',
     [...new Set(input.mcpServerIds || [])].sort().join(','),
   ].join('\0')
 }
@@ -935,6 +939,19 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     '- id: file-reference-local',
     "  name: '@deepseek-ai/dsh-file-reference-local'",
   ])
+  // 官方 Computer Use（计算机操作）：`dsh-computer-use` 只占一个提供方注册位，模型可见的
+  // 工具由提供方给 —— 一次只能挂一个，第二个注册会失败并报出已占用者名。我们挂原生那个：
+  // 上游 Cua Driver 的 npm 原生运行时跑在 harness 进程内，用户机器不用另装 CLI。
+  // 代价两处，都是官方的已知限制：原生崩溃会带走 harness 进程（要独立进程就用 MCP 那个
+  // 提供方），截图走持久化附件、只有声明图片输入的模型路由收得到（见上面的 modelInputLines）。
+  const computerUsePatch = computerUseEnabledNow()
+    ? insertPatch([
+      '- id: computer-use',
+      "  name: '@deepseek-ai/dsh-computer-use'",
+      '- id: computer-use-cua-driver-native',
+      "  name: '@deepseek-ai/dsh-experimental-computer-use-cua-driver-native'",
+    ])
+    : []
   await mkdir(routeDir, { recursive: true })
   // 不声明时官方默认就是纯文本（DEFAULT_INPUT = ["text"]），所以只有确实声明图片输入时才写这一行：
   // 显式写 [text] 没有信息增量，却会把 catalog 自带的模态一并抹掉。
@@ -970,6 +987,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         ...mcpPatch,
         ...subagentPatch,
         ...fileReferencePatch,
+        ...computerUsePatch,
       ].join('\n'))
 
   const runtimeRoot = 'deepseek-harness/node_modules'
