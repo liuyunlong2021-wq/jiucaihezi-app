@@ -1210,6 +1210,14 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
     /\(isDesktop && !isMobile\) \|\| !path\.toLowerCase\(\)\.endsWith\('\.jcscene'\)/,
   )
   assert.match(creation, /<slot name="toolbar-actions"/)
+  // 顶栏放不下时，先让对话标题截断、模型名不参与收缩：模型名一被挤就只剩「gp…」（用户 2026-10-03 截图）。
+  assert.match(
+    workbench,
+    /\.memory-model-picker \{ position: relative; flex: none; min-width: 0; max-width: min\(260px, 28vw\); \}/,
+  )
+  const pickerCap = /\.memory-workbench\.creation-open \.memory-conversation-picker,[\s\S]{0,140}?max-width: ([^;]+);/.exec(workbench)
+  assert.ok(pickerCap, 'creation-open 下两个 picker 的封顶规则必须存在')
+  assert.equal(pickerCap[1], '220px')
   assert.match(creation, />\u63d0\u793a\u8bcd\u53c2\u8003</)
   assert.doesNotMatch(creation, /title="\u65b0\u5efa\u9879\u76ee\u6587\u6863"/)
 })

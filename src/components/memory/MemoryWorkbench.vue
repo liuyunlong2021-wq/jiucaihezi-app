@@ -4100,7 +4100,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.chat-dock-compact:is(.preview-open, .creation-open) .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
 .memory-workbench.chat-dock-resizing > * { transition: none !important; }
 .memory-workbench.creation-open .memory-title-drag { min-width: 0; }
-.memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: min(220px, 30%); }
+/* 顶栏动作区放不下时，先让对话标题截断（它本来就长），模型名保持完整 ——
+   模型名短且必须可读，一旦被挤就只剩「gp…」（用户 2026-10-03 截图）。封顶用确定长度。 */
+.memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: 220px; }
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
 .memory-workbench.desktop-runtime.creation-focused { padding-top: 28px; }
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
@@ -4127,7 +4129,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-conversation-action:hover { color: var(--olive); }
 .new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
-.memory-model-picker { position: relative; min-width: 0; max-width: min(260px, 28vw); }
+.memory-model-picker { position: relative; flex: none; min-width: 0; max-width: min(260px, 28vw); }
 .memory-model-trigger { display: flex; max-width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-model-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-model-trigger:hover, .memory-model-trigger[aria-expanded="true"] { border-color: var(--olive); }
