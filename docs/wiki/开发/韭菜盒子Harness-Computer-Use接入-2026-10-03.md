@@ -102,6 +102,13 @@ node node_modules\@deepseek-ai\dsh\lib\bin.js --profile sdk --patch <route.cordi
 - 从**全新 home**（`profiles/` 一开始都不存在）跑假模型回显探针 → `tools=80 cua=56 CUA指导=true`；
   同一次运行里 `@skill` 硬限制照旧（点名 `/jc-daoju` → `skill=false`、工具 79）。
 - 修前同一条探针 → `tools=24 cua=0 CUA指导=false`。
+- **真机（用户自己的 App）**：重启后 **18:03:58** 两条链接是 **App 自己建出来的**（排查期手工建的那两条
+  已在清理时删掉）。同一批会话里能直接看到分界 —— `c37ea3f4` 从 18:06 起、`81342a0c` 从 18:11 起、
+  `9de500f5` 首轮起，每次 `request/header` 都是 `tools=80 cua=56`、请求上下文里有 `Cua Driver` 指导段；
+  此前的请求一律 `tools=24 cua=0`。
+- **执行侧**（直接问驱动，不经模型）：`check_permissions` → elevated / UIA 可用 / PostMessage 可用；
+  `get_screen_size` → 2560x1440；`list_windows` → 32 个窗口 / 19 个应用；`health_report` →
+  `cua-driver 0.28.0 on win32 — ok`；`list_apps` → 175 个应用。
 - 新增 `scripts/__tests__/deepseek-harness-profile-plugins.test.mjs`（6 用例：链接、幂等、缺包跳过、
   profile 催生/催不出来、无 DSH_HOME、runner 受开关约束）。
 - 聚焦套件 `1774 tests / 1773 pass / 1 fail`（唯一失败是既有的 `scripts/jiucaihezi-creation-mcp/test.mjs`
