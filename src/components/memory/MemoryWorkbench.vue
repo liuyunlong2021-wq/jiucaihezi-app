@@ -1983,6 +1983,11 @@ async function send(remoteText?: string) {
     skillNames: skillSnapshot,
     toolChips: toolChipIds(),
   }
+  // 缩略图在轮次建立时就挂上：`turnAttachments()` 只从内存的 transient 表取预览，而那张表
+  // 原来要等本轮落盘后才写 —— 发送中图片就只剩一个文件名芯片（历史轮次另走磁盘补预览）。
+  if (pendingAttachments.length) {
+    transientAttachments.value = { ...transientAttachments.value, [userTurn.id]: pendingAttachments }
+  }
   const title = !baseTurns.some(turn => turn.role === 'user') && active.transcript.title === '新对话'
     ? (message || activeAttachments[0]?.name || '新对话').replace(/\s+/g, ' ').slice(0, 28)
     : undefined

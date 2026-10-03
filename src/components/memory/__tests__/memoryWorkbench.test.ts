@@ -1961,3 +1961,13 @@ test('Harness process and reasoning hang on the round that started them', () => 
   assert.match(workbench, /activeRun\.value\?\.runtime === 'legacy' \? activeRun\.value\.steps\.slice\(-5\) : \[\]/)
   assert.match(workbench, /if \(turnId && turnId === liveProcessTurnId\.value\)[\s\S]{0,60}activeRun\.value\?\.steps\.map/)
 })
+
+test('发送中的用户轮次就能拿到附件缩略图', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  // `turnAttachments()` 只从内存的 transient 表取预览，而这张表原来要等本轮落盘后才写 ——
+  // 发送中图片就只剩一个文件名芯片（用户 2026-10-03 截图）。历史轮次另走磁盘补预览的路径。
+  assert.match(
+    workbench,
+    /transientAttachments\.value = \{ \.\.\.transientAttachments\.value, \[userTurn\.id\]: pendingAttachments \}/,
+  )
+})
