@@ -1,5 +1,13 @@
 # Wiki 操作日志
 
+## [2026-10-03] 发布 | v2.2.11（三平台 CI 已触发，构建中）
+
+- 版本号三处统一到 `2.2.11`（`pnpm run bump-version`：`package.json` / `src-tauri/tauri.conf.json` / `src-tauri/Cargo.toml`，`Cargo.lock` 同步）；发布提交 `dbb21f45`。
+- **发布门禁**：Node 聚焦套件 `1774 用例 / 1765 通过 / 1 失败`（唯一失败是既有的 `scripts/jiucaihezi-creation-mcp/test.mjs` Windows `/tmp` 路径问题）；Rust `454 通过 / 0 失败 / 1 忽略`；`build:desktop:quick` 通过且 `audit:desktop-dist` 通过（工作台被提升为根 `index.html`）。
+- `src/assets/icons-bundle.json` 随版本刷新：锁定版本 `@iconify-json/material-symbols@1.2.86` 下重新生成后上游把 `alt-route` 归并到 `alternate-email`；全仓库无任何引用，只是让产物与锁定依赖一致。
+- 推送：`main`（`833a5984..dbb21f45`）+ annotated tag `v2.2.11`（按合同只推单个 tag，没用 `--tags`）。CI 运行 `37118511789`：`prepare-release` 已成功、`macos-arm` 排队、`macos-intel` / `windows` 进行中。
+- ⚠️ **状态口径**：此刻只能说「已触发、构建中」。要等三个平台 + 上传 + `publish-download-manifest` 全部成功，才能写「v2.2.11 已发布」。
+
 ## [2026-10-03] 修复 | Computer Use 定案：图外包「profile 解析不到」，补链接后真机生效
 
 - 用户质疑「官方能实现，直接搬过来」，逼出正解。方案与验收记录见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]] §4。
