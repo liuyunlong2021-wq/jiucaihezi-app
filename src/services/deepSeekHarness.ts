@@ -71,6 +71,26 @@ export type DeepSeekProgress = {
   errorReason?: string
   resultText?: string
   resultTruncated?: boolean
+  /** 重试进度用：条目种类、官方 `retryState` 与重试事实（实时与历史同源）。 */
+  kind?: 'retry'
+  retryState?: DeepSeekRetryState
+  retry?: DeepSeekRetry
+}
+
+/** 官方 `llm/retry` / `llm/retry-started` 里的重试状态（官方 UI 的 `retryState`）。 */
+export type DeepSeekRetryState = 'scheduled' | 'started' | 'cancelled'
+
+/** 一条重试的原始事实，字段名跟着官方事件走，不在中间层改名。 */
+export type DeepSeekRetry = {
+  /** 官方 `retry`：第几次重试（从 1 开始）。 */
+  attempt: number
+  /** 官方 `maxRetries`；`mode: 'always'` 的事件不带它，官方 UI 显示 `∞`。 */
+  maximum: number | '∞'
+  /** 官方 `delayMs`：这次等待的时长。 */
+  delayMs: number
+  /** 官方 `failure.code`；上游不一定给。 */
+  failureCode?: string
+  failureMessage: string
 }
 
 /** 一次工具调用在 UI 上的完整投影（实时与历史同源）。 */
@@ -78,9 +98,10 @@ export type DeepSeekProcessStep = {
   id: string
   /**
    * 条目种类。`tool`（默认）是一次工具调用；`narration` 是模型在步骤之间说的那句话 ——
-   * 官方把它归**过程**不归答案（`processSpec` 只把 step < 答案步的正文算进过程）。
+   * 官方把它归**过程**不归答案（`processSpec` 只把 step < 答案步的正文算进过程）；
+   * `retry` 是官方 `llm/retry` 的一次模型请求重试。
    */
-  kind?: 'tool' | 'narration'
+  kind?: 'tool' | 'narration' | 'retry'
   label: string
   summary: string
   state: 'running' | 'done' | 'failed'
@@ -91,6 +112,10 @@ export type DeepSeekProcessStep = {
   resultTruncated?: boolean
   /** 叙述条目的正文，仅 `kind === 'narration'` 使用。 */
   narration?: string
+  /** 重试条目的状态，仅 `kind === 'retry'` 使用；取自官方同名事实。 */
+  retryState?: DeepSeekRetryState
+  /** 重试条目的原始事实，仅 `kind === 'retry'` 使用。 */
+  retry?: DeepSeekRetry
 }
 
 /** 官方 `TokenUsage` 的子集；计数互斥，`inputTokens` 只含未缓存输入。 */
@@ -204,6 +229,38 @@ export const DEEPSEEK_DEFAULT_PERMISSION_TIER: DeepSeekPermissionTier = 'workspa
 export function deepSeekPermissionChip(tier: DeepSeekPermissionTier): string | undefined {
   if (tier === 'danger-full-access') return 'file'
   return tier === 'read-only' ? 'file:read-only' : undefined
+}
+
+/**
+ * 重试与失败的中文文案，**逐字**取自官方 `@deepseek-ai/dsh-client-ui-chat` 的中文字典
+ * （`lib/client.js` 的 `message.retry.*` / `message.turnError` / `duration.milliseconds`）。
+ * 只登记我们真的会渲染的几条，不自造近义词。
+ */
+export const DEEPSEEK_RETRY_TEXT = {
+  /** 官方 `message.retry.status`：`{label}（{retry}/{maximum}） · {seconds}s`。 */
+  status: (label: string, attempt: number, maximum: number | '∞', seconds: number) =>
+    `${label}（${attempt}/${maximum}） · ${seconds}s`,
+  active: '正在重试模型请求',
+  scheduled: '等待重试模型请求',
+  started: '已重试模型请求',
+  cancelled: '模型请求重试已取消',
+  /** 官方 `message.retry.delay` / `message.retry.failure`。 */
+  delay: '重试延迟：',
+  failure: '失败原因：',
+  /** 官方 `duration.milliseconds`。 */
+  milliseconds: (milliseconds: number) => `${milliseconds}毫秒`,
+  /** 官方 `message.turnError`。 */
+  turnError: '本轮运行失败',
+}
+
+/**
+ * 官方 `failureMessage()`：只有几个已知 code 有专属文案，其余原样透出 message。
+ * 官方那两个 `ACCOUNT_*` 分支针对「退出官方账号登录」，我们不接官方账号，没有这两条。
+ */
+export function deepSeekFailureText(message: string, code?: string): string {
+  if (code === 'AUTH') return 'API 密钥无效'
+  if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') return '当前请求的额度已用尽'
+  return message
 }
 
 /**
@@ -401,12 +458,23 @@ function deepSeekTurnAnchors(snapshot: DeepSeekSessionSnapshot): Map<number, str
 export type DeepSeekTurnFailure = {
   code?: string
   message: string
+  /**
+   * 官方 `assistant/attempt` 的条数：这一轮里没成为可见消息的模型尝试次数。
+   * 只有终止 code 时看不清「重试了几次都没成」，失败原因与尝试次数要一起给出。
+   */
+  attempts?: number
 }
 
 /** 会话快照 → 发起该轮的用户消息 id → 官方 turn/end(error) 失败原因。 */
 export function deepSeekSessionFailures(snapshot: DeepSeekSessionSnapshot): Map<string, DeepSeekTurnFailure> {
   const owners = deepSeekTurnOwners(snapshot)
   const failures = new Map<string, DeepSeekTurnFailure>()
+  const attempts = new Map<number, number>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'assistant/attempt') continue
+    const turn = Number(event.data?.turn)
+    if (Number.isFinite(turn)) attempts.set(turn, (attempts.get(turn) || 0) + 1)
+  }
   for (const event of snapshot.events || []) {
     if (event?.type !== 'turn/end' || event.data?.reason?.kind !== 'error') continue
     const owner = owners.get(Number(event.data?.turn))
@@ -414,7 +482,12 @@ export function deepSeekSessionFailures(snapshot: DeepSeekSessionSnapshot): Map<
     const failure = event.data.reason.error
     const message = String(failure?.message || 'DeepSeek Harness 执行失败').trim()
     const code = String(failure?.code || '').trim()
-    failures.set(owner, code ? { code, message } : { message })
+    const count = attempts.get(Number(event.data?.turn)) || 0
+    failures.set(owner, {
+      ...code ? { code } : {},
+      message,
+      ...count ? { attempts: count } : {},
+    })
   }
   return failures
 }
@@ -587,7 +660,58 @@ function deepSeekResultErrorReason(error: any, isError: boolean, resultText: str
   return firstLine ? deepSeekClip(firstLine, DEEPSEEK_ERROR_LIMIT) : undefined
 }
 
+/**
+ * 重试的配对键。
+ *
+ * 官方 `llm/retry` 与 `llm/retry-started` 靠 `retryId` 配对；但若上游某一版没发这个字段，
+ * 整块重试行会**静默消失**（没有报错，只是看不见），所以同一轮的 `retry` 序号当兜底键 ——
+ * 官方事件里 `turn` + `retry` 在一個轮次内唯一。
+ */
+function deepSeekRetryKey(data: any): string {
+  const id = String(data?.retryId || '').trim()
+  if (id) return `retry-${id}`
+  const turn = Number(data?.turn)
+  const attempt = Number(data?.retry)
+  return Number.isFinite(turn) && Number.isFinite(attempt) ? `retry-${turn}-${attempt}` : ''
+}
+
 export function deepSeekProgress(event: any): DeepSeekProgress | undefined {
+  if (event?.type === 'llm/retry') {
+    const id = deepSeekRetryKey(event.data)
+    if (!id) return undefined
+    const failure = event.data?.failure
+    const failureCode = String(failure?.code || '').trim()
+    const startedAt = deepSeekOptionalNumber(Number(event?.time))
+    return {
+      id,
+      kind: 'retry',
+      // 等待刚排定：官方 `retryState` 的初始态就是 `scheduled`。
+      state: 'running',
+      retryState: 'scheduled',
+      retry: {
+        attempt: Number(event.data?.retry || 0),
+        // 官方：只有 `mode === 'normal'` 的事件带 `maxRetries`，其余显示 `∞`。
+        maximum: event.data?.mode === 'normal' ? Number(event.data?.maxRetries || 0) : '∞',
+        delayMs: Number(event.data?.delayMs || 0),
+        ...failureCode ? { failureCode } : {},
+        failureMessage: String(failure?.message || '').trim(),
+      },
+      ...startedAt === undefined ? {} : { startedAt },
+    }
+  }
+  // 等待结束、下一次请求已发出：官方那份节点只把状态从 scheduled 推成 started。
+  if (event?.type === 'llm/retry-started') {
+    const id = deepSeekRetryKey(event.data)
+    if (!id) return undefined
+    const endedAt = deepSeekOptionalNumber(Number(event?.time))
+    return {
+      id,
+      kind: 'retry',
+      state: 'done',
+      retryState: 'started',
+      ...endedAt === undefined ? {} : { endedAt },
+    }
+  }
   if (event?.type === 'tool/call') {
     const startedAt = deepSeekOptionalNumber(Number(event?.time))
     return {
@@ -652,6 +776,10 @@ function deepSeekProcessStep(call: any, result: any): DeepSeekProcessStep | unde
  * 工具步骤只取 `tool/call` + `tool/result` 事件，不解析 message content 里的 `tool-call` 块：
  * 同一 callId 两处都出现，只用事件源天然避免同一步渲染两遍。
  *
+ * 重试也在这里成条目（官方 `llm/retry` / `llm/retry-started`），与工具步排在同一条时间线上：
+ * 一轮 12 次重试原本只剩状态行一句话，跑完就没了 —— 事后无法区分「重试救回来了」和
+ * 「一次就成功」。
+ *
  * 结果按 UI 轮次 id 侧存，不写 `ConversationTurn`：Harness 对话以 Session 为唯一真源，
  * 每次打开重建即可，不需要新的持久化格式。
  */
@@ -667,11 +795,36 @@ export function deepSeekSessionProcess(
   }
   const process = new Map<string, DeepSeekProcessStep[]>()
   const answers = deepSeekTurnAnswers(snapshot)
+  const retries = new Map<string, { step: DeepSeekProcessStep; turn: number }>()
   const push = (owner: string, step: DeepSeekProcessStep) =>
     process.set(owner, [...process.get(owner) || [], step])
   for (const event of snapshot.events || []) {
     const owner = owners.get(Number(event?.data?.turn))
     if (!owner) continue
+    if (event?.type === 'llm/retry' || event?.type === 'llm/retry-started') {
+      const progress = deepSeekProgress(event)
+      if (!progress?.id) continue
+      const existing = retries.get(progress.id)
+      if (existing) {
+        // `llm/retry-started` 只推状态，原始事实（次数/上限/延迟/原因）留在排定那一条上。
+        existing.step.retryState = progress.retryState
+        existing.step.state = progress.state
+        continue
+      }
+      const step: DeepSeekProcessStep = {
+        id: progress.id,
+        kind: 'retry',
+        label: '',
+        summary: '',
+        state: progress.state,
+        retryState: progress.retryState,
+        ...progress.startedAt === undefined ? {} : { startedAt: progress.startedAt },
+        ...progress.retry === undefined ? {} : { retry: progress.retry },
+      }
+      retries.set(progress.id, { step, turn: Number(event.data?.turn) })
+      push(owner, step)
+      continue
+    }
     if (event?.type === 'tool/call') {
       const step = deepSeekProcessStep(event, resultsByCall.get(String(event.data?.callId || '')))
       if (step) push(owner, step)
@@ -690,6 +843,18 @@ export function deepSeekSessionProcess(
       state: 'done',
       narration: text,
     })
+  }
+  // 官方 `retryState: 'cancelled'`：轮次没正常收口时，那次等待没等到 `llm/retry-started`。
+  const ended = new Map<number, string>()
+  for (const event of snapshot.events || []) {
+    if (event?.type === 'turn/end') ended.set(Number(event.data?.turn), String(event.data?.reason?.kind || ''))
+  }
+  for (const { step, turn } of retries.values()) {
+    const reason = ended.get(turn)
+    if (reason !== undefined && reason !== 'completed' && step.retryState === 'scheduled') {
+      step.retryState = 'cancelled'
+      step.state = 'failed'
+    }
   }
   return process
 }
@@ -969,7 +1134,11 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         `        baseURL: ${JSON.stringify(baseURL)}`,
         '        retryPolicy:',
         '          mode: normal',
-        '          maxRetries: 1',
+        // 官方 `DEFAULT_MAX_RETRIES = 5`。原先写 1 的理由是「一次抖动不该被放大成 5 倍等待」,
+        // 但实测 253 个步骤里 12 次传输故障（每个模型请求约 4.5%，一轮 7 步约 27%、42 步约 85%），
+        // 502 是秒级失败、多等 ~15 秒几乎必然救回；而 turns 33/34 的 524 正是被那唯一一次重试救回来的。
+        // 长任务的失败是必然事件，缺的是预算与可见性（重试链已进会话投影），不是次数。
+        '          maxRetries: 5',
         '          retryableCodes:',
         '            - EMPTY_RESPONSE',
         '            - RATE_LIMIT',

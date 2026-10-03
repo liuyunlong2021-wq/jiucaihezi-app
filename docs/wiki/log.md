@@ -1,5 +1,13 @@
 # Wiki 操作日志
 
+## [2026-10-03] 新增 | 重试链可见 + 失败不丢过程 + 重试预算对齐官方
+
+- 用户诉求：报错后「所有之前的任务执行内容也一起隐藏起来」，还得点「继续」才能接着干。方案与实施表见 [[开发/韭菜盒子Harness重试与失败对齐官方TDD-2026-10-03]]。
+- 改动：`deepSeekHarness.ts` 新增重试投影（`llm/retry` / `llm/retry-started` → 过程条目）、`DEEPSEEK_RETRY_TEXT`（官方 zh 字典逐字）、`deepSeekFailureText()`（官方 `failureMessage()` 的子集）、失败投影补 `attempts`、`maxRetries: 1 → 5`；`desktopConversationRuntime.ts` 的 `MemoryRunStep` 能携带重试条目；`MemoryWorkbench.vue` 加重试行、官方失败行结构、折叠规则改「运行中或本轮失败」、失败行给「继续」按钮。
+- 契约测试：新增 5 条（重试链投影、预算 5 + `∞`、`attempts` + 文案映射、官方字典逐字漂移守卫、重试行/失败行/继续按钮）；同步改掉两条锁旧行为的断言（`maxRetries: 1`、`:open="isLiveTurn(...)"`）。
+- 门禁：`1802 tests / 1793 pass / 1 fail`（既有 Windows `/tmp` 用例）、`vue-tsc -b` 干净、`oxlint` 仅剩既有告警。
+- 未验收：真实 524 时重试行与倒计时的界面效果；含 `llm/retry` 的真会话属于另一个工作区，回放未完成。
+
 ## [2026-10-03] 新增 | Computer Use 接入官方 Cua Driver 原生提供方
 
 - 用户诉求：**必须要有 Computer Use**。方案与验收记录见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]]。

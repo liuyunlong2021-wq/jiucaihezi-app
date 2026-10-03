@@ -53,6 +53,8 @@ import {
   DEEPSEEK_HARNESS_CONTEXT_WINDOW,
   DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
   DEEPSEEK_HARNESS_SESSION_MARKER,
+  DEEPSEEK_RETRY_TEXT,
+  deepSeekFailureText,
   deepSeekHandoffTurns,
   deepSeekPrompt,
   deepSeekSessionFailures,
@@ -439,7 +441,7 @@ const programStatuses = ref<Record<string, MemoryProgramStatus>>({})
 // Harness 的过程投影：按 assistant message id 侧存，不写 ConversationTurn。
 // Harness 对话以 Session 为唯一真源，每次打开重建即可，不需要新的持久化格式。
 const harnessProcess = ref<Record<string, DeepSeekProcessStep[]>>({})
-const harnessFailures = ref<Record<string, { code?: string; message: string }>>({})
+const harnessFailures = ref<Record<string, { code?: string; message: string; attempts?: number }>>({})
 const harnessReasoning = ref<Record<string, string>>({})
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
@@ -828,9 +830,75 @@ function harnessFailureFor(turnId: string) {
   return harnessFailures.value[turnId]
 }
 
-/** 折叠标题里只数工具步；叙述也是过程的一部分，但算成「步骤」会误导。 */
+/** 官方 `failureMessage()` 的映射：AUTH / 额度类 code 有专属文案，其余原样透出。 */
+function harnessFailureText(turnId: string): string {
+  const failure = harnessFailureFor(turnId)
+  return failure ? deepSeekFailureText(failure.message, failure.code) : ''
+}
+
+/**
+ * 过程块是否保持展开。
+ *
+ * 官方：只折叠「符合条件的**已完成**轮次」，且**不隐藏最终答案**。以前只看「运行中」，
+ * 于是一轮失败时整个过程块立刻塌回一行 —— 失败才是用户最需要看过程的时候。
+ */
+function turnProcessOpen(turnId: string): boolean {
+  return isLiveTurn(turnId) || Boolean(harnessFailureFor(turnId))
+}
+
+/** 重试是不是正在等（官方 `active`）：只有活着的这一轮未进入下一次请求时才算。 */
+function retryActive(turnId: string, step: DeepSeekProcessStep): boolean {
+  return isLiveTurn(turnId) && step.retryState === 'scheduled'
+}
+
+/** 官方 `retrySeconds()`：至少 1 秒，向上取整。 */
+function retrySeconds(milliseconds: number): number {
+  return Math.max(1, Math.ceil(milliseconds / 1e3))
+}
+
+/** 重试行的秒数：等待中每秒往下跳，历史行固定显示排定的等待时长。 */
+function retrySecondsLeft(turnId: string, step: DeepSeekProcessStep): number {
+  const delay = step.retry?.delayMs || 0
+  if (!retryActive(turnId, step)) return retrySeconds(delay)
+  // 官方用「挂载时刻 + delayMs」当 deadline；我们用事件时间，重渲染不会把它重置。
+  // 读一下 runElapsed 是故意的：它每秒跳一次，倒计时靠这个依赖才会重新渲染。
+  void runElapsed.value
+  return retrySeconds((step.startedAt ?? Date.now()) + delay - Date.now())
+}
+
+/** 官方 `message.retry.status`：`{label}（{retry}/{maximum}） · {seconds}s`。 */
+function retryStatusText(turnId: string, step: DeepSeekProcessStep): string {
+  const label = retryActive(turnId, step)
+    ? DEEPSEEK_RETRY_TEXT.active
+    : step.retryState === 'cancelled'
+      ? DEEPSEEK_RETRY_TEXT.cancelled
+      : step.retryState === 'started' ? DEEPSEEK_RETRY_TEXT.started : DEEPSEEK_RETRY_TEXT.scheduled
+  return DEEPSEEK_RETRY_TEXT.status(label, step.retry?.attempt || 0, step.retry?.maximum || '∞', retrySecondsLeft(turnId, step))
+}
+
+/** 展开后的「失败原因」行：官方先过一遍 code 映射。 */
+function retryFailureText(step: DeepSeekProcessStep): string {
+  return deepSeekFailureText(step.retry?.failureMessage || '', step.retry?.failureCode)
+}
+
+/**
+ * 失败行下的「继续」：只把「继续」放进输入框并聚焦，**不自动发送**。
+ *
+ * 官方那条提示也是「发送「继续」可让模型接着输出」—— 一次 524 之后连发两次代价很大，
+ * 发不发必须由用户决定。
+ */
+function fillContinue() {
+  const text = '继续'
+  input.value = text
+  editingTurnId.value = ''
+  setEditorText(composerRef.value, text)
+  resizeComposer()
+  composerRef.value?.focus()
+}
+
+/** 折叠标题里只数工具步；叙述也是过程的一部分，但算成「步骤」会误导，重试另有自己的行。 */
 function harnessToolSteps(turnId: string): number {
-  return (harnessStepsFor(turnId) || []).filter(step => step.kind !== 'narration').length
+  return (harnessStepsFor(turnId) || []).filter(step => step.kind !== 'narration' && step.kind !== 'retry').length
 }
 
 /**
@@ -3648,14 +3716,28 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           </details>
           <!--
             官方 Chat：「fold eligible completed-turn process rows without hiding final answers」。
-            运行中强制展开；跑完用 undefined 交回浏览器默认（折叠），不绑 false —— 否则每次
-            重渲染都会把用户手动展开的状态抢回去。
+            运行中或**本轮失败**时强制展开；跑完用 undefined 交回浏览器默认（折叠），不绑 false ——
+            否则每次重渲染都会把用户手动展开的状态抢回去。
           -->
-          <details v-if="harnessStepsFor(turn.id)?.length" class="memory-process" :open="isLiveTurn(turn.id) || undefined">
+          <details v-if="harnessStepsFor(turn.id)?.length" class="memory-process" :open="turnProcessOpen(turn.id) || undefined">
             <summary>{{ harnessToolSteps(turn.id) }} 个步骤</summary>
             <template v-for="step in harnessStepsFor(turn.id)" :key="step.id">
               <!-- 中途叙述：官方把 step < 答案步的正文归过程，不归答案。 -->
               <div v-if="step.kind === 'narration'" class="memory-process-narration">{{ step.narration }}</div>
+              <!-- 官方 ModelRetryItem：summary = `{label}（{retry}/{maximum}） · {seconds}s`，展开是延迟与失败原因。 -->
+              <details
+                v-else-if="step.kind === 'retry'"
+                class="memory-process-retry"
+                :data-active="retryActive(turn.id, step) || undefined"
+              >
+                <summary>
+                  <span role="status">{{ retryStatusText(turn.id, step) }}</span>
+                </summary>
+                <div class="memory-process-retry-detail">
+                  <div><span class="memory-process-retry-label">{{ DEEPSEEK_RETRY_TEXT.delay }}</span>{{ DEEPSEEK_RETRY_TEXT.milliseconds(Math.round(step.retry?.delayMs || 0)) }}</div>
+                  <div v-if="retryFailureText(step)"><span class="memory-process-retry-label">{{ DEEPSEEK_RETRY_TEXT.failure }}</span>{{ retryFailureText(step) }}</div>
+                </div>
+              </details>
               <div
                 v-else
                 class="memory-process-step"
@@ -3686,10 +3768,20 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <span class="memory-process-label">思考中，用时{{ formatLiveDuration(runElapsed) }}</span>
             <span v-if="runStatus" class="memory-process-summary" :title="runStatus">{{ runStatus }}</span>
           </div>
-          <div v-if="harnessFailureFor(turn.id)" class="memory-process-step failed">
+          <!--
+            官方 TurnErrorItem：红点 + `本轮运行失败` + 失败原因 + code。重试历史绝不吞掉它
+            （官方 `conversation-nodes/turn-error.d.ts`），它和重试行是同一轮里的两件事。
+          -->
+          <div v-if="harnessFailureFor(turn.id)" class="memory-turn-error" role="status">
             <JcIcon name="error" />
-            <span class="memory-process-label">任务失败</span>
-            <small class="memory-process-error">{{ harnessFailureFor(turn.id)?.code ? `${harnessFailureFor(turn.id)?.code}: ` : '' }}{{ harnessFailureFor(turn.id)?.message }}</small>
+            <div class="memory-turn-error-copy">
+              <span class="memory-turn-error-title">{{ DEEPSEEK_RETRY_TEXT.turnError }}</span>
+              <span class="memory-turn-error-message">
+                {{ harnessFailureText(turn.id) }}<template v-if="harnessFailureFor(turn.id)?.attempts">（第 {{ harnessFailureFor(turn.id)?.attempts }} 次尝试）</template>
+              </span>
+            </div>
+            <code v-if="harnessFailureFor(turn.id)?.code" class="memory-turn-error-code">{{ harnessFailureFor(turn.id)?.code }}</code>
+            <button class="memory-turn-error-continue" @click="fillContinue()">继续</button>
           </div>
         </div>
         </template>
@@ -4304,6 +4396,20 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-process-result > summary::-webkit-details-marker { display: none; }
 .memory-process-result pre { max-height: 260px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 .memory-process-step .spinning { animation: memory-run-spin .9s linear infinite; }
+/* 官方的重试行（ModelRetryItem）：状态折叠成一行，展开看「重试延迟 / 失败原因」。 */
+.memory-process-retry > summary { display: flex; width: fit-content; align-items: center; gap: 5px; color: var(--ink3); cursor: pointer; list-style: none; }
+.memory-process-retry > summary::-webkit-details-marker { display: none; }
+.memory-process-retry[data-active] > summary { color: var(--ink1); }
+.memory-process-retry-detail { display: grid; gap: 3px; margin: 4px 0 4px 22px; color: var(--ink3); }
+.memory-process-retry-label { margin-right: 2px; color: var(--ink3); }
+/* 官方的失败行（TurnErrorItem）：红点 + 标题 + 原因 + code，末尾给一个「继续」。 */
+.memory-turn-error { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--danger); font-size: calc(var(--font-base) - 2px); }
+.memory-turn-error .mso { font-size: 15px; }
+.memory-turn-error-copy { display: grid; min-width: 0; }
+.memory-turn-error-title { font-weight: 600; }
+.memory-turn-error-message { overflow-wrap: anywhere; }
+.memory-turn-error-code { padding: 0 4px; border-radius: 4px; background: var(--surface); font-size: calc(var(--font-base) - 3px); }
+.memory-turn-error-continue { flex: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); cursor: pointer; font-size: calc(var(--font-base) - 2px); }
 .memory-run-status > small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }
 @keyframes memory-run-spin { to { transform: rotate(360deg); } }
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }

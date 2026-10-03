@@ -1,5 +1,13 @@
 # 热缓存
 
+## [2026-10-03] 重试链可见 + 失败不丢过程 + 重试预算对齐官方（P1+P2 落地）
+
+- **重试行进会话投影**：官方 `llm/retry` / `llm/retry-started` 与工具步共用同一条 `deepSeekSessionProcess()` 时间线，折叠成 `{label}（{retry}/{maximum}） · {seconds}s`（官方 `message.retry.status` 逐字），展开看「重试延迟 / 失败原因」。四态文案、`duration.milliseconds` 全部逐字取自官方 zh 字典；主动倒计时用 `事件时间 + delayMs - now`（比官方「挂载时刻 + delayMs」更准），靠每秒跳的 `runElapsed` 重渲染，下限 1 秒同官方。
+- **失败不再丢过程**：`turnProcessOpen()` 改成「运行中**或**本轮失败」就保持展开——原来只看运行中，于是一轮失败时整个过程块立刻塌回一行，而那正是最需要看过程的时候。失败行改官方式（红点 + `本轮运行失败` + 原因 + code），并补 `attempts`（官方 `assistant/attempt` 条数）显示「第 N 次尝试」，不再只给一个终止 code。
+- **重试预算 `1 → 5`（官方 `DEFAULT_MAX_RETRIES`）**：实测 253 步里 12 次传输故障（每请求约 4.5%、一轮 7 步约 27%、42 步约 85%），502 是秒级失败、多等 ~15 秒几乎必然救回，turns 33/34 的 524 正是被那唯一一次重试救回来的。**顺序约束**：先落地可见性再改次数，否则只看到「卡更久」。
+- 两处有意偏离 TDD 原文（都是为了照官方，不是为了省事）：官方 `TurnErrorItem` **没有**续跑提示，所以失败行不自造提示句，只给一个「继续」按钮（填进输入框并聚焦，**不自动发送**）；没删 `restoreDraft()`（恢复草稿与「继续」两个出口不冲突，等真机反馈再收）。另：配对键不硬依赖 `retryId`，缺字段时用 `turn`+`retry` 序号兜底，避免整块重试行静默消失。
+- 门禁：`1802 tests / 1793 pass / 1 fail`（既有 Windows `/tmp`）、`vue-tsc -b` 干净。⚠️ **未验收**：真实 524 时重试行在界面上的实际效果（本轮不做故障注入）；含 `llm/retry` 的那份真会话属于另一个工作区，还没在真日志上回放看到行。详见 [[开发/韭菜盒子Harness重试与失败对齐官方TDD-2026-10-03]]。
+
 ## [2026-10-03] Computer Use 接入（官方实验性 Cua Driver 原生提供方，设置开关默认开）
 
 - 官方 Computer Use 是**两层**且**都发在 npm**：`@deepseek-ai/dsh-computer-use`（只占一个提供方注册位，无工具、无配置项）+ 一个提供方。提供方只有两个，**名字都带 `dsh-experimental-` 前缀**：`dsh-experimental-computer-use-cua-driver-native`（进程内原生，锁 `@trycua/cua-driver@0.28.0`）与 `...-cua-driver-mcp`（连本机已装的 `cua-driver` CLI）。**一次只能挂一个**，第二个注册会失败并报出已占用者名。

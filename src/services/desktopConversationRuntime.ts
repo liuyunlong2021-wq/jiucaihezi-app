@@ -20,6 +20,8 @@ import {
   runDeepSeekHarness,
   type DeepSeekHarnessInput,
   type DeepSeekPermissionTier,
+  type DeepSeekRetry,
+  type DeepSeekRetryState,
   type DeepSeekSessionSnapshot,
 } from './deepSeekHarness'
 import { DesktopRemoteHost } from './desktopRemoteHost'
@@ -41,6 +43,10 @@ export type MemoryRunStep = {
   /** 工具结果正文。实时也要带：官方在轮次内就把 `read` / `bash` 的产出摆出来。 */
   resultText?: string
   resultTruncated?: boolean
+  /** 重试条目（官方 `llm/retry`）：与工具步共用同一条时间线，靠 `kind` 分开渲染。 */
+  kind?: 'retry'
+  retryState?: DeepSeekRetryState
+  retry?: DeepSeekRetry
 }
 
 export type MemoryRun = {
@@ -452,6 +458,18 @@ export async function executeDesktopHarnessRun(
     onProgress(progress) {
       if (!current()) return
       const step = run.steps.find(item => item.id === progress.id)
+      // 重试条目按事件推进：`llm/retry` 建行、`llm/retry-started` 只推状态。
+      // 它没有工具名，不能走下面那条「label 缺省成执行工具」的分支。
+      if (progress.kind === 'retry') {
+        if (!step) run.steps.push({ id: progress.id, kind: 'retry', label: '', summary: '',
+          state: progress.state, retryState: progress.retryState, retry: progress.retry,
+          startedAt: progress.startedAt })
+        else {
+          step.state = progress.state
+          if (progress.retryState) step.retryState = progress.retryState
+        }
+        return
+      }
       if (progress.state === 'running') {
         if (!step) run.steps.push({ id: progress.id, label: progress.label || '执行工具',
           state: 'running', summary: progress.summary, startedAt: progress.startedAt })

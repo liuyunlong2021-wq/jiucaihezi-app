@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import {
   applyDeepSeekAssistantStream,
   deepSeekAssistantReasoning,
   deepSeekAssistantText,
   deepSeekContentBlocks,
+  deepSeekFailureText,
   deepSeekHandoffTurns,
   deepSeekMessageUsage,
   deepSeekModelInput,
   deepSeekPermissionChip,
   DEEPSEEK_DEFAULT_PERMISSION_TIER,
   DEEPSEEK_PERMISSION_TIERS,
+  DEEPSEEK_RETRY_TEXT,
   deepSeekProgress,
   deepSeekPrompt,
   deepSeekSessionId,
@@ -275,6 +277,113 @@ test('failed Harness turns remain addressable by their user turn without becomin
   assert.deepEqual(deepSeekSessionTurns(snapshot).map(turn => [turn.id, turn.role, turn.content]), [['user-1', 'user', '继续处理']])
 })
 
+test('重试链进过程投影：llm/retry 与 llm/retry-started 各占一行，没走到 started 的按取消收口', () => {
+  const snapshot = {
+    session: { id: 's' },
+    events: [
+      { seq: 1, time: 1, type: 'turn/start', surfaceOp: 'append', data: { turn: 3 } },
+      { seq: 2, time: 2, type: 'user/message', surfaceOp: 'append', data: { id: 'user-3', source: { kind: 'user' }, content: [{ type: 'text', text: '跑一个长任务' }] } },
+      { seq: 3, time: 100, type: 'tool/call', surfaceOp: 'append', data: { turn: 3, step: 1, callId: 'call-1', name: 'read', arguments: '{}' } },
+      { seq: 4, time: 160, type: 'tool/result', surfaceOp: 'append', data: { turn: 3, step: 1, message: { toolCallId: 'call-1', content: [{ type: 'text', text: 'ok' }] } } },
+      { seq: 5, time: 1_700_000_000_000, type: 'llm/retry', data: { retryId: 'r1', turn: 3, step: 2, provider: 'jiucaihezi', mode: 'normal', policyKey: 'k', retry: 1, maxRetries: 5, delayMs: 500, failure: { code: 'SERVER', message: '502 status code (no body)' } } },
+      { seq: 6, time: 1_700_000_000_500, type: 'llm/retry-started', data: { retryId: 'r1', turn: 3, step: 2, retry: 1 } },
+      { seq: 7, time: 1_700_000_130_000, type: 'llm/retry', data: { retryId: 'r2', turn: 3, step: 2, provider: 'jiucaihezi', mode: 'normal', policyKey: 'k', retry: 2, maxRetries: 5, delayMs: 1000, failure: { code: 'TIMEOUT', message: '524 status code (no body)' } } },
+      { seq: 8, time: 1_700_000_132_000, type: 'turn/end', data: { turn: 3, reason: { kind: 'error', error: { code: 'TIMEOUT', message: '524 status code (no body)' } } } },
+    ],
+  }
+  const steps = deepSeekSessionProcess(snapshot).get('user-3') ?? []
+  // 顺序就是事件顺序：重试行夹在工具步与下一轮之间，不另起一块。
+  assert.deepEqual(steps.map(step => step.kind), [undefined, 'retry', 'retry'])
+  assert.equal(steps[1].retryState, 'started')
+  assert.deepEqual(steps[1].retry, {
+    attempt: 1,
+    maximum: 5,
+    delayMs: 500,
+    failureCode: 'SERVER',
+    failureMessage: '502 status code (no body)',
+  })
+  // 没等到 `llm/retry-started` 的那次等待：官方 retryState 记 cancelled，不能显示成「已重试」。
+  assert.equal(steps[2].retryState, 'cancelled')
+  assert.equal(steps[2].state, 'failed')
+  assert.equal(steps[2].retry?.attempt, 2)
+})
+
+test('重试预算对齐官方默认 5，always 模式的上限显示为 ∞', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  // 官方 `DEFAULT_MAX_RETRIES = 5`。写 1 时一轮 42 步的任务约 85% 概率撞上传输故障而中途死掉。
+  assert.match(source, /'          maxRetries: 5',/)
+  assert.doesNotMatch(source, /maxRetries: 1/)
+  assert.doesNotMatch(source, /backoff/)
+  const always = deepSeekProgress({
+    type: 'llm/retry',
+    time: 10,
+    data: { retryId: 'r9', turn: 1, step: 1, mode: 'always', retry: 3, delayMs: 2000, failure: { message: '断线' } },
+  })
+  // 官方：只有 `mode === 'normal'` 的事件带 `maxRetries`，其余显示 ∞。
+  assert.equal(always?.retry?.maximum, '∞')
+  assert.equal(always?.retryState, 'scheduled')
+  assert.equal(always?.state, 'running')
+  assert.equal(deepSeekProgress({ type: 'llm/retry-started', time: 20, data: { retryId: 'r9' } })?.retryState, 'started')
+  // 没有 retryId 时用同一轮的 `retry` 序号兜底配对：缺字段不能让整块重试行静默消失。
+  assert.equal(deepSeekProgress({ type: 'llm/retry', data: {} }), undefined)
+  assert.equal(deepSeekProgress({ type: 'llm/retry-started', data: {} }), undefined)
+  assert.equal(
+    deepSeekProgress({ type: 'llm/retry', data: { turn: 7, retry: 2, mode: 'normal', maxRetries: 5, delayMs: 800, failure: {} } })?.id,
+    'retry-7-2',
+  )
+})
+
+test('失败行补齐尝试次数，失败文案走官方 failureMessage 映射', () => {
+  const snapshot = {
+    session: { id: 's' },
+    events: [
+      { seq: 1, time: 1, type: 'turn/start', surfaceOp: 'append', data: { turn: 1 } },
+      { seq: 2, time: 2, type: 'user/message', surfaceOp: 'append', data: { id: 'user-7', source: { kind: 'user' }, content: [{ type: 'text', text: '干活' }] } },
+      { seq: 3, time: 3, type: 'assistant/attempt', data: { turn: 1, step: 1, stream: [] } },
+      { seq: 4, time: 4, type: 'assistant/attempt', data: { turn: 1, step: 1, stream: [] } },
+      { seq: 5, time: 5, type: 'turn/end', data: { turn: 1, reason: { kind: 'error', error: { code: 'AUTH', message: '401 status code (no body)' } } } },
+    ],
+  }
+  // 只给终止 code 时看不清「重试了几次都没成」，官方 assistant/attempt 的条数要一起给出。
+  assert.deepEqual(deepSeekSessionFailures(snapshot).get('user-7'), {
+    code: 'AUTH',
+    message: '401 status code (no body)',
+    attempts: 2,
+  })
+  assert.equal(deepSeekFailureText('401 status code (no body)', 'AUTH'), 'API 密钥无效')
+  assert.equal(deepSeekFailureText('当前请求的额度已用尽', 'QUOTA'), '当前请求的额度已用尽')
+  assert.equal(deepSeekFailureText('524 status code (no body)', 'TIMEOUT'), '524 status code (no body)')
+})
+
+test('重试与失败文案逐字取自官方中文字典', () => {
+  assert.equal(DEEPSEEK_RETRY_TEXT.active, '正在重试模型请求')
+  assert.equal(DEEPSEEK_RETRY_TEXT.scheduled, '等待重试模型请求')
+  assert.equal(DEEPSEEK_RETRY_TEXT.started, '已重试模型请求')
+  assert.equal(DEEPSEEK_RETRY_TEXT.cancelled, '模型请求重试已取消')
+  assert.equal(DEEPSEEK_RETRY_TEXT.delay, '重试延迟：')
+  assert.equal(DEEPSEEK_RETRY_TEXT.failure, '失败原因：')
+  assert.equal(DEEPSEEK_RETRY_TEXT.turnError, '本轮运行失败')
+  assert.equal(DEEPSEEK_RETRY_TEXT.milliseconds(500), '500毫秒')
+  // 官方 `message.retry.status`：`{label}（{retry}/{maximum}） · {seconds}s`，间隔符是空格+·+空格。
+  assert.equal(DEEPSEEK_RETRY_TEXT.status('已重试模型请求', 2, 5, 1), '已重试模型请求（2/5） · 1s')
+  // 装包在树里时对一次真身：文案漂了要在这里发现，而不是等用户看到中英混排。
+  const dict = 'src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-client-ui-chat/lib/client.js'
+  if (existsSync(dict)) {
+    const source = readFileSync(dict, 'utf8')
+    for (const text of [
+      DEEPSEEK_RETRY_TEXT.active,
+      DEEPSEEK_RETRY_TEXT.scheduled,
+      DEEPSEEK_RETRY_TEXT.started,
+      DEEPSEEK_RETRY_TEXT.cancelled,
+      DEEPSEEK_RETRY_TEXT.delay,
+      DEEPSEEK_RETRY_TEXT.failure,
+      DEEPSEEK_RETRY_TEXT.turnError,
+    ]) assert.ok(source.includes(`"${text}"`), `官方字典里找不到「${text}」`)
+    assert.ok(source.includes('"duration.milliseconds": "{milliseconds}毫秒"'))
+    assert.ok(source.includes('"message.retry.status": "{label}（{retry}/{maximum}） · {seconds}s"'))
+  }
+})
+
 test('DeepSeek Harness exposes terminal turn failures instead of completing on idle', () => {
   assert.equal(
     deepSeekTurnError({
@@ -324,7 +433,8 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /writeTextFile\(patchPath/)
   assert.match(source, /dev_copy_external/)
   assert.match(source, /resolveResource\([^)]*node\/bin\//s)
-  assert.match(source, /maxRetries: 1/)
+  // 重试预算对齐官方默认 5（写 1 时一轮 42 步约 85% 概率撞上传输故障而死）。
+  assert.match(source, /maxRetries: 5/)
   assert.match(source, /- SERVER/)
   assert.match(source, /PI_AI_ERROR/)
   assert.match(source, /DSH_PERMISSION_MODE: input\.permissionTier \?\? DEEPSEEK_DEFAULT_PERMISSION_TIER/)
@@ -889,7 +999,34 @@ test('the think row previews its latest line and an in-flight marker shows while
 test('completed Harness turns fold their process rows without hiding the answer', () => {
   const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
   // 官方 Chat：「fold eligible completed-turn process rows without hiding final answers」。
-  // 运行中强制展开；跑完交回浏览器默认（折叠），用 undefined 而不绑 false，
-  // 否则每次重渲染都会把用户手动展开的状态抢回去。
-  assert.match(workbench, /class="memory-process"[\s\S]{0,80}?:open="isLiveTurn\(turn\.id\) \|\| undefined"/)
+  // 运行中或**本轮失败**时强制展开；跑完交回浏览器默认（折叠），用 undefined 而不绑 false，
+  // 否则每次重渲染都会把用户手动展开的状态抢回去。以前只看「运行中」，于是一轮失败时
+  // 整个过程块立刻塌回一行 —— 失败恰恰是用户最需要看过程的时候。
+  assert.match(workbench, /class="memory-process"[\s\S]{0,80}?:open="turnProcessOpen\(turn\.id\) \|\| undefined"/)
+  assert.match(workbench, /function turnProcessOpen\(turnId: string\): boolean \{\n\s*return isLiveTurn\(turnId\) \|\| Boolean\(harnessFailureFor\(turnId\)\)/)
+})
+
+test('重试链在轮次内可见，失败行按官方 TurnErrorItem 结构给出原因与出口', () => {
+  const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  // 官方 `ModelRetryItem`：折叠成一行 `{label}（{retry}/{maximum}） · {seconds}s`，
+  // 展开是「重试延迟 / 失败原因」。实测一轮 12 次重试原先只剩一句状态行、跑完就没了，
+  // 事后分不清「重试救回来了」和「一次就成功」。
+  assert.match(workbench, /class="memory-process-retry"/)
+  assert.match(workbench, /function retryStatusText\(turnId: string, step: DeepSeekProcessStep\): string/)
+  assert.match(workbench, /DEEPSEEK_RETRY_TEXT\.status\(label, step\.retry\?\.attempt \|\| 0, step\.retry\?\.maximum \|\| '∞', retrySecondsLeft\(turnId, step\)\)/)
+  assert.match(workbench, /function retrySeconds\(milliseconds: number\): number \{\n\s*return Math\.max\(1, Math\.ceil\(milliseconds \/ 1e3\)\)/)
+  // 倒计时要靠每秒跳的 runElapsed 才会重渲染；读它是故意的，删掉就变成不动的死数字。
+  assert.match(workbench, /void runElapsed\.value/)
+  assert.match(workbench, /DEEPSEEK_RETRY_TEXT\.delay/)
+  assert.match(workbench, /DEEPSEEK_RETRY_TEXT\.failure/)
+  // 官方 `TurnErrorItem`：红点 + `本轮运行失败` + 原因 + code；重试历史绝不吞掉它。
+  assert.match(workbench, /class="memory-turn-error"/)
+  assert.match(workbench, /DEEPSEEK_RETRY_TEXT\.turnError/)
+  assert.match(workbench, /harnessFailureText\(turn\.id\)/)
+  assert.match(workbench, /<code v-if="harnessFailureFor\(turn\.id\)\?\.code" class="memory-turn-error-code">/)
+  // 「继续」只把文本放进输入框，**不自动发送**：524 之后连发两次代价很大。
+  assert.match(workbench, /@click="fillContinue\(\)">继续<\/button>/)
+  assert.match(workbench, /function fillContinue\(\) \{\n\s*const text = '继续'/)
+  // 重试不算工具步：折叠标题里的「N 个步骤」不能把重试也算进去。
+  assert.match(workbench, /step\.kind !== 'narration' && step\.kind !== 'retry'/)
 })

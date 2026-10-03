@@ -1,6 +1,6 @@
 # 韭菜盒子 Harness「重试与失败」对齐官方 TDD
 
-> 状态：**待用户确认，未实施**
+> 状态：**P1 + P2 已实施（2026-10-03）**，真机 UI 验收待用户
 > 日期：2026-10-03
 > 范围：`MemoryWorkbench` 的 Harness 路径（`runtime === 'dh'`）的重试显示与失败显示
 > 前提：**100% 搬运官方语义与实现**，不新增自研设计；官方未公开的接口沿用已登记的薄桥
@@ -83,10 +83,34 @@
 
 ## 5. 验证
 
-- **红测（先写）**：用本机真样本构造 fixture —— 12 条 `llm/retry`、12 条 `llm/retry-started`、8 条 `assistant/attempt`、5 条 `turn/end(error)`、1 条 `turn/end(aborted)`；断言重试链行、四态文案、倒计时秒数、`第 N 次尝试`、终态失败行不被吞。
-- **源码契约测试**（沿用 `memoryWorkbench.test.ts` 既有风格）：失败轮次过程默认展开、`restoreDraft` 不再静默、文案逐字等于官方中文。
-- **门禁**：`pnpm run test:focused`（当前基线 `1795 tests / 1786 pass / 1 fail`，唯一失败是既有的 Windows `/tmp` 用例）、`vue-tsc -b`、`oxlint`。
-- **真机**：真实 524 出现时由用户确认（本轮不做故障注入，避免把它写成已通过）。
+### 5.1 实施结果（2026-10-03）
+
+| # | 搬运项 | 落点 | 状态 |
+| --- | --- | --- | --- |
+| 1 | 重试行（`{label}（{retry}/{maximum}） · {seconds}s` + 展开看延迟/原因） | `MemoryWorkbench.vue` 的 `.memory-process-retry`；文案常量 `DEEPSEEK_RETRY_TEXT` | ✅ |
+| 2 | 重试四态文案 | `DEEPSEEK_RETRY_TEXT` 逐字用官方 zh 字典（`正在重试/等待重试/已重试/已取消`） | ✅ |
+| 3 | 倒计时 | `retrySecondsLeft()`：`事件时间 + delayMs - now`，靠每秒跳的 `runElapsed` 重渲染；`Math.max(1, ceil())` 同官方 | ✅ |
+| 4 | 终态失败行 | `.memory-turn-error`：红点 + `本轮运行失败` + 原因 + code；与重试行同存不吞 | ✅ |
+| 5 | 失败尝试可见 | `deepSeekSessionFailures()` 补 `attempts`（官方 `assistant/attempt` 条数），渲染为「（第 N 次尝试）」 | ✅ |
+| 6 | 折叠资格 | `turnProcessOpen()`：运行中**或**本轮失败时强制展开（原来只看运行中） | ✅ |
+| 7 | 重试在同一个打开的轮次内 | 重试与工具步进**同一条** `deepSeekSessionProcess()` 时间线，不另起块 | ✅ |
+| 8 | 续跑出口 | 失败行右侧「继续」按钮 `fillContinue()`：只把「继续」放进输入框并聚焦，**不自动发送** | 🟡 见下 |
+| 9 | 失败信息单一来源 | 失败行以 Session 投影为权威（`harnessFailures`），runner RPC 错仍作兜底 | ✅ |
+| P2 | `retryPolicy.maxRetries: 1 → 5` | `deepSeekHarness.ts` 路由 patch；`backoff` 继续不写 | ✅ |
+
+**与本文档原文的两处偏离（都是「照官方」的结果，不是省事）：**
+
+1. **第 8 条没用 `message.maxTokens.hint` 原文**。官方那条提示是「回答被截断，已有输出保留在对话中。发送“继续”可让模型接着输出。」—— 它挂在官方 `TurnMaxTokensItem` 上；官方 `TurnErrorItem`（失败行）**根本没有续跑提示**。524 之后照搬「回答被截断」是假陈述，所以失败行只留官方结构 + 一个「继续」按钮，不自造提示句。
+2. **没有删 `restoreDraft()`**。原文要求用它「替换静默恢复草稿」。但恢复草稿是另一件事（让用户改一下重发），与「继续」并不冲突；用户反馈的是「内容被隐藏」和「要点继续才能接着干」，不是输入框被填回。两个出口都留着，等真机反馈再收。
+3. **配对键不再硬依赖 `retryId`**：官方 `llm/retry` / `llm/retry-started` 靠它配对，但上游某一版不发这个字段时整块重试行会**静默消失**（无报错、就是看不见），所以同一轮的 `turn` + `retry` 序号做兜底键。
+
+### 5.2 门禁
+
+- **红测（先写）**：用本机真样本字段构造 fixture —— `llm/retry` + `llm/retry-started` 配对、没走到 started 的按 `cancelled` 收口、`mode: 'always'` 的上限为 `∞`、`assistant/attempt` 计入 `attempts`、官方文案逐字（并在官方装包存在时对字典真身）。
+- **源码契约测试**（沿用既有风格）：失败轮次过程默认展开、重试行结构、`继续` 按钮、倒计时依赖 `runElapsed`、重试不算工具步。
+- **门禁结果**：`pnpm run test:focused` → `1802 tests / 1793 pass / 1 fail`（唯一失败是既有的 `scripts/jiucaihezi-creation-mcp/test.mjs` Windows `/tmp` 用例）、`vue-tsc -b` 干净、`oxlint` 仅剩既有告警。
+- **真机**：真实 524 出现时由用户确认（本轮不做故障注入，避免把它写成已通过）。**重试行的真样本回放未完成**：本机那两份会话日志里含 `llm/retry` 的那次属于另一个工作区，投影字段是按官方 `dsh-llm-retry/lib/types/types.d.ts` 与 `dsh-session/lib/types/types.d.ts` 的形状写的，尚未在真会话上回放看到行。
+
 
 ## 6. 已知风险
 
