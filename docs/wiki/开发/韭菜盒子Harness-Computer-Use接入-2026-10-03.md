@@ -49,6 +49,35 @@
 
 ## 4. 验证现状
 
+### 4.1 真机验收结论（2026-10-03 晚，用户实测后复查）
+
+| 面 | 真相 |
+| --- | --- |
+| **Computer Use** | ❌ **没生效**。条目在配置树里、`runner` 能 ready、驱动模块能加载，但模型的工具表里**从来没有 `cua_driver_native__*`**（两个真机会话 + 用当前真实路由组合离线探针，工具数始终 24），系统提示词里也**没有** provider 的 `Cua Driver` 指导段 → provider 没激活 |
+| 底层驱动本身 | ✅ 好的：直接 `CuaDriver.create()` + `listToolsJson()` → **56 个工具**（`click` / `type_text` / `get_window_state` / `launch_app` …） |
+| 用户当时「操作电脑成功」 | 是模型用 **`pwsh`（20 次）+ `job_output`（7）+ `read_image`（2）** 自己敲命令 + 看截图办成的，**不是** Computer Use |
+| `@skill` 硬限制 | ✅ 见 [[开发/韭菜盒子Harness点名Skill只挂一个-2026-10-03]]（真机 3 个独立证据 + 对照组） |
+
+### 4.2 一个把排查带偏的机制（已修）
+
+**SDK client 把子进程 `dsh` 的 stderr 收进 `stderrTail`，只在「运行时死亡」时才抛出**（`dsh-sdk-client/lib/index.js`：`child.stderr.on('data')` → `appendStderr`）。于是插件激活失败在正常运行时**完全看不见** —— 我第一轮就是被"runner 零 stderr"误导，才把「挂上了」当成「生效了」。
+现在 `runner.mjs` 加了一条 `diagnostics` 命令把这段尾巴取出来（实测：加了诊断插件后它仍是 **0 行**，说明官方 loader 对这些静默失败确实一声不吭）。
+
+### 4.3 已排除的方向
+
+- 路由 patch 写法与缩进（与生效中的 `file-reference-local` 逐字同形）
+- 包/锁/可选原生二进制（`@trycua/cua-driver-win32-x64-msvc` 已装、可加载）
+- 「顶层挂载拿不到 agent 作用域服务」——`dsh-mcp-client` 同样 `inject: ['tools']` 且在顶层生效
+- 服务类形状（`ComputerUseRegistry` 是标准 Cordis `Service`，`super(ctx, 'computerUse')`）
+
+### 4.4 还没定论
+
+用自建探针插件判「`- insert:` 条目到底挂没挂载」时，**连不声明 `inject` 的探针也不打印** —— 但这可能是"非官方包被跳过"造成的假阴性，不能据此下结论。下一步应当：把 provider 按**官方桌面用的那种挂载位置**（agent preset / 子插件）试一次，并用已经验证可靠的「假模型回显工具表」回路判定（`skill` 那条 24→23 已证明这个回路可信）。
+
+### 4.5 取舍建议
+
+在它能被证明生效之前，这个开关是**空开关**。要么默认关（并在设置里写明"实验性、当前未生效"），要么照 §4.4 继续定位；不要保持"默认开 + 实际无效"。
+
 已验收（真机，2026-10-03）：
 
 - `dsh --profile sdk --patch <含这两条的 patch> --dump-config` → **退出 0、stderr 空**，composed 树里两条条目逐字命中。

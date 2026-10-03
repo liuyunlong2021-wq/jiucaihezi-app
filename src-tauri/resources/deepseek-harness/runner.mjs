@@ -53,6 +53,17 @@ createInterface({ input: process.stdin }).on('line', line => {
     )
     return
   }
+  if (command.type === 'diagnostics') {
+    // SDK client 把子进程（dsh）的 stderr 收在 `stderrTail` 里，**只在运行时死亡时才抛出**：
+    // 插件激活失败、官方 loader 的告警全在里面。平时看 runner 自己的 stderr 是空的，会误判成
+    // 「一切正常」——2026-10-03 查 Computer Use 没生效时就是这么被误导的。
+    send({
+      type: 'result',
+      requestId: command.requestId,
+      data: { stderr: harness.client?.stderrTail ?? [] },
+    })
+    return
+  }
   if (command.type !== 'run') return
   let turnError = ''
   let turnTruncated = false

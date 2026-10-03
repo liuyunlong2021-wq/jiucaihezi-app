@@ -1,5 +1,13 @@
 # 热缓存
 
+## [2026-10-03] Computer Use 真机复查：**没生效**（那次「操作电脑成功」其实是 pwsh 走的路）
+
+- 用户实测后我复查真机会话：模型工具表里**从来没有 `cua_driver_native__*`**（两个会话 + 用当前真实路由组合离线探针，工具数始终 24），系统提示词里也**没有** provider 的 `Cua Driver` 指导段 → **provider 没激活**。底层驱动是好的（直接调 `listToolsJson()` 有 **56 个工具**）。
+- 那次"操作电脑很成功"是模型用 **`pwsh`×20 + `job_output`×7 + `read_image`×2** 自己敲命令 + 看截图办成的，**不是 Computer Use**。
+- ⚠️ **把排查带偏的机制（已修）**：SDK client 把 `dsh` 子进程的 stderr 收进 `stderrTail`、**只在运行时死亡时才抛** —— 插件激活失败在正常运行时完全不可见，我第一轮就是被"runner 零 stderr"骗了，把"挂上了"当成"生效了"。现在 `runner.mjs` 多一条 `diagnostics` 命令取这段尾巴（实测取回也是 0 行：官方 loader 对这种静默失败一声不吭）。
+- 已排除：patch 写法/缩进、包与锁、可选原生二进制、「顶层拿不到 agent 作用域服务」（`dsh-mcp-client` 同样 `inject:['tools']` 且在顶层生效）、服务类形状。**未定论**：`- insert:` 条目到底挂没挂载（自建探针不打印，但可能是"非官方包被跳过"的假阴性）。
+- 建议：在证明它生效之前，别让这个开关"默认开 + 实际无效"。详见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]] §4。
+
 ## [2026-10-03] 点名 Skill 后本会话只许用这一个；@Jev 整个删掉
 
 - 用户诉求：「@ 了某个 skill，后续任务只允许用这一个」。官方 skill 是**双通道**：`/name` 手势只把该 skill 正文**注入**这一轮（`source.kind: 'skill-invocation'`），而同一插件还会给模型一份**全量 skill 目录**并明确要求「Load all applicable skills」—— 所以「@ 了 A、模型又用 B」是官方语义下的正常行为，不是丢了用户的选择。官方只有**文件级**开关（`disable-model-invocation` / `user-invocable`），没有「本会话只许这几个」的粒度。
