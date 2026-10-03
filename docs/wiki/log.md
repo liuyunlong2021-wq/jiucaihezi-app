@@ -1,5 +1,13 @@
 # Wiki 操作日志
 
+## [2026-10-03] 修复 | Computer Use 定案：图外包「profile 解析不到」，补链接后真机生效
+
+- 用户质疑「官方能实现，直接搬过来」，逼出正解。方案与验收记录见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]] §4。
+- **根因**：官方 Loader 解析裸包名锚在 **profile 目录**（`ctx.baseUrl` = `<DSH_HOME>/profiles/<profile>/`）。已发布 bundle 依赖图内的包能命中（`dsh-file-reference-local` 是 `dsh-web-app` 的依赖），**图外的包解析不到时只记一条 `failed to import`** —— 既不是 `pending`、也不让启动失败，于是表现为「不报错 + runner 零 stderr + 工具表空无一物」。逼出这条记录的唯一办法是直接起一次启动器：`DSH_HOME=<ws> node .../dsh/lib/bin.js --profile sdk --patch <route.cordis.yml> < nul`。
+- **改动**：新增 `src-tauri/resources/deepseek-harness/profile-plugins.mjs`（`ensureProfilePluginLinks()`：profile 缺失先用官方 `--dump-config` 催生骨架，再把运行时那两份包挂成 Windows 目录联接，失败只跳过）；`runner.mjs` 在 `config.computerUse` 打开时调用它；`deepSeekHarness.ts` 把 `computerUse` 传进 runner 配置。
+- **验证**：同一条命令、同一 home、只改一处 —— 修前 `tools=24 cua=0 CUA指导=false`，修后 **`tools=80 cua=56 CUA指导=true`**，且同一轮 `@skill` 硬限制照旧（点名 → 工具 79、`skill=false`）；新增 `scripts/__tests__/deepseek-harness-profile-plugins.test.mjs` 6 用例；聚焦套件 `1774 tests / 1773 pass / 1 fail`（既有 Windows `/tmp`）；`vue-tsc -b` 干净。
+- **未验收**：真机让模型调 `cua_driver_native__*` 并接收截图；关开关后工具消失。**过程教训**：`runner` 零 stderr 不能当生效证据（子进程 stderr 被 SDK 收进 `stderrTail`、只在运行时死亡时抛），判定只看模型实际收到的工具表。
+
 ## [2026-10-03] 新增 | 点名 Skill 只挂一个（官方 tools.restrict）+ 删除 @Jev
 
 - 用户诉求：「我 @ 了一个具体 skill，后续任务只允许用这一个；不管 @Jev，直接把它删了」。方案与实测见 [[开发/韭菜盒子Harness点名Skill只挂一个-2026-10-03]]。

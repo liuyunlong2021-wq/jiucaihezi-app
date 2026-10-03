@@ -1,7 +1,14 @@
 import { createInterface } from 'node:readline'
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
+import { ensureProfilePluginLinks } from './profile-plugins.mjs'
 
 const config = JSON.parse(process.argv[2] || '{}')
+
+// Computer Use 的两个插件包不在官方 bundle 依赖图里，profile 目录解析不到时 Loader 只会
+// 静默记一条 `failed to import`（不报错、工具表里空无一物）。挂上链接再启动，见
+// profile-plugins.mjs 的头注释。
+if (config.computerUse) ensureProfilePluginLinks(config.dshHome)
+
 const harness = new DeepSeekHarness({
   cwd: config.cwd,
   provider: 'jiucaihezi',

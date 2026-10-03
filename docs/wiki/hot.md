@@ -1,12 +1,13 @@
 # 热缓存
 
-## [2026-10-03] Computer Use 真机复查：**没生效**（那次「操作电脑成功」其实是 pwsh 走的路）
+## [2026-10-03] Computer Use 定案：根因是「图外包 profile 解析不到」，已修好并真机验收
 
-- 用户实测后我复查真机会话：模型工具表里**从来没有 `cua_driver_native__*`**（两个会话 + 用当前真实路由组合离线探针，工具数始终 24），系统提示词里也**没有** provider 的 `Cua Driver` 指导段 → **provider 没激活**。底层驱动是好的（直接调 `listToolsJson()` 有 **56 个工具**）。
-- 那次"操作电脑很成功"是模型用 **`pwsh`×20 + `job_output`×7 + `read_image`×2** 自己敲命令 + 看截图办成的，**不是 Computer Use**。
-- ⚠️ **把排查带偏的机制（已修）**：SDK client 把 `dsh` 子进程的 stderr 收进 `stderrTail`、**只在运行时死亡时才抛** —— 插件激活失败在正常运行时完全不可见，我第一轮就是被"runner 零 stderr"骗了，把"挂上了"当成"生效了"。现在 `runner.mjs` 多一条 `diagnostics` 命令取这段尾巴（实测取回也是 0 行：官方 loader 对这种静默失败一声不吭）。
-- 已排除：patch 写法/缩进、包与锁、可选原生二进制、「顶层拿不到 agent 作用域服务」（`dsh-mcp-client` 同样 `inject:['tools']` 且在顶层生效）、服务类形状。**未定论**：`- insert:` 条目到底挂没挂载（自建探针不打印，但可能是"非官方包被跳过"的假阴性）。
-- 建议：在证明它生效之前，别让这个开关"默认开 + 实际无效"。详见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]] §4。
+- 用户质疑「官方能实现，直接搬过来」，逼出了正解：官方 Loader 解析裸包名**锚在 profile 目录**，已发布 bundle **依赖图内**的包能命中；**图外的包解析不到时只记一条 `failed to import`** —— 不是 `pending`、不让启动失败，于是表现为「不报错 + runner 零 stderr + 工具表里空无一物」。
+- 逼出这条静默记录的唯一办法：`DSH_HOME=<ws> node .../dsh/lib/bin.js --profile sdk --patch <route.cordis.yml> < nul` → `warning: 2 entries did not activate / computer-use (...): failed to import`。⚠️ **「runner 零 stderr」永远不能当生效证据**（SDK client 把子进程 stderr 收在 `stderrTail`、只在运行时死亡时才抛）；判定只看**模型实际收到的工具表**。
+- 修法：`runner.mjs` 在开关打开时调 `profile-plugins.mjs` 的 `ensureProfilePluginLinks()` —— profile 目录缺失先用官方 `--dump-config` 催生骨架，再把运行时那两份包挂成 Windows **目录联接**（不能联网、不该跑 pnpm）；失败只跳过。启动前一行，`src/services/deepSeekHarness.ts` 把 `computerUse` 传下来。
+- 真机对照（同一条命令、只改一处）：修前 `tools=24 cua=0 CUA指导=false` → 修后 **`tools=80 cua=56 CUA指导=true`**，同一轮里 `@skill` 硬限制照旧（点名 → 工具 79、`skill=false`）。
+- 顺带查清：用户那次「操作电脑成功」是 `pwsh`×20 + `read_image`×2 走的路，不是 Computer Use；`dsh-file-reference-local` 不用这步也能激活，因为它是 `dsh-web-app` 的依赖（**图内包生效 ≠ 图外包生效**，这是本次误判来源）。
+- 门禁：新增 `scripts/__tests__/deepseek-harness-profile-plugins.test.mjs`（6 用例）；聚焦套件 `1774 tests / 1773 pass / 1 fail`（唯一失败是既有的 creation-mcp Windows `/tmp` 用例）；`vue-tsc -b` 干净。详见 [[开发/韭菜盒子Harness-Computer-Use接入-2026-10-03]] §4。
 
 ## [2026-10-03] 点名 Skill 后本会话只许用这一个；@Jev 整个删掉
 

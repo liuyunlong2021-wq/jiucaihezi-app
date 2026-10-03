@@ -1167,7 +1167,15 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   const bundledSkills = await bundledSkillsDirectory()
   const transport = new McpStdioTransport({
     command,
-    args: [runner, JSON.stringify({ cwd: input.cwd, model: input.model, patchPath, dshHome: routeDir })],
+    args: [runner, JSON.stringify({
+      cwd: input.cwd,
+      model: input.model,
+      patchPath,
+      dshHome: routeDir,
+      // Computer Use 的插件包不在官方 bundle 依赖图里，profile 目录解析不到就只会静默
+      // `failed to import`；runner 按这个开关决定要不要把它们挂进 profile（见 runner.mjs）。
+      computerUse: computerUseEnabledNow(),
+    })],
     cwd: input.cwd,
     env: {
       JIUCAIHEZI_DH_API_KEY: input.apiKey,
