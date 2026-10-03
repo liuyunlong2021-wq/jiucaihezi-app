@@ -45,6 +45,7 @@ const allowedRootFiles = new Set([
 ])
 
 const allowedTopLevelDirs = new Set([
+  'screenshot',
   'assets',
   'help',
   'skills',

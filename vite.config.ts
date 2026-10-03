@@ -71,6 +71,7 @@ export default defineConfig({
         : {
             index: resolve(__dirname, 'index.html'),
             try: resolve(__dirname, 'try/index.html'),
+            screenshot: resolve(__dirname, 'screenshot/index.html'),
           },
       output: {
         entryFileNames: `assets/[name]-[hash]-${assetVersion}.js`,

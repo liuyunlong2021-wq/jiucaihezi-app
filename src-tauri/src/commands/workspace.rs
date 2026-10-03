@@ -112,3 +112,8 @@ pub async fn claim_workspace(
     owners.insert(cwd, mine.clone());
     Ok(mine)
 }
+
+/// 截图绑定触发时真实工作区，不从窗口 label 推导。
+pub(crate) fn workspace_for_window(label: &str) -> Option<String> {
+    lock_owners().iter().find(|(_, owner)| owner.as_str() == label).map(|(cwd, _)| cwd.clone())
+}

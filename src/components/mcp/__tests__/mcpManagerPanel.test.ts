@@ -88,7 +88,7 @@ test('Windows resolves and launches the npx command shim', () => {
   assert.match(mcpCommandSource, /\/C/)
 })
 
-test('Tauri development URL receives every registered app command', () => {
+test('Tauri development windows receive their registered app commands, with screenshot commands isolated', () => {
   assert.match(capabilitySource, /"remote"\s*:\s*\{\s*"urls"\s*:\s*\["http:\/\/localhost:1420\/\*"\]/)
   assert.match(capabilitySource, /"allow-app-commands"/)
 
@@ -102,5 +102,11 @@ test('Tauri development URL receives every registered app command', () => {
     .commands.allow
     .sort()
 
-  assert.deepEqual(allowedCommands, registeredCommands)
+  const screenshotPermission = JSON.parse(readFileSync(join(process.cwd(), 'src-tauri/permissions/screenshot.json'), 'utf8'))
+  const screenshotCommands: string[] = screenshotPermission.permission[0].commands.allow
+  assert.deepEqual([...allowedCommands, ...screenshotCommands].sort(), registeredCommands)
+  assert.equal(screenshotCommands.some(command => allowedCommands.includes(command)), false)
+  const screenshotCapability = JSON.parse(readFileSync(join(process.cwd(), 'src-tauri/capabilities/screenshot.json'), 'utf8'))
+  assert.deepEqual(screenshotCapability.windows, ['shot-*'])
+  assert(!JSON.parse(capabilitySource).windows.includes('shot-*'))
 })

@@ -1,0 +1,24 @@
+{
+  "identifier": "screenshot",
+  "description": "Minimal permissions for the isolated screenshot overlay",
+  "windows": [
+    "shot-*"
+  ],
+  "platforms": [
+    "macOS",
+    "windows"
+  ],
+  "permissions": [
+    "allow-screenshot-overlay",
+    "core:window:allow-set-always-on-top",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "dialog:allow-save",
+    "fs:allow-write-file"
+  ],
+  "remote": {
+    "urls": [
+      "http://localhost:1420/screenshot/*"
+    ]
+  }
+}

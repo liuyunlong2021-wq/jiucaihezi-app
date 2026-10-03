@@ -35,3 +35,5 @@ if (existsSync(redirectsFile)) {
   rmSync(redirectsFile, { force: true })
   console.log('[web-dist] removed _redirects')
 }
+
+rmSync(resolve(distDir, 'screenshot'), { recursive: true, force: true })

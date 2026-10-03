@@ -1,11 +1,12 @@
 # 热缓存
 
-## [2026-10-03] 截图功能与新建窗口入口：**方案已定，代码未动**
+## [2026-10-03] 截图功能已实现，真机待验收；新建窗口入口位置已定
 
-- **截图（SDD 定案，未实施）**：桌面系统截图，**框选** → 复制 / 另存为 / 保存到项目；**给默认快捷键**（`CommandOrControl+Shift+A`，可改）；**v1 不做标注**；应用内入口放**设置**里。
-- 查证结论（省得再查一遍）：`arboard` **已在用**（`commands/clipboard.rs`）→ 写剪贴板图只加一个函数、**零新依赖**；`dialog`/`fs` 已授权；`.raw/jc-media/图片` 是既有落点；**要新增的只有** `png`（Rust）、`xcap`（仅 Windows）、`tauri-plugin-global-shortcut`；`tauri-plugin-clipboard-manager` **不需要**。
-- 关键选择：**两端统一自绘覆盖窗**（不用 mac 的 `screencapture -i`），只在取像素上分流（Windows `xcap` / macOS `screencapture -x`）；**坐标换算只在 Rust 做**（前端逻辑像素 → 物理像素）；捕获与复制在 Rust、保存类走前端既有链路。
-- 详见 [[开发/韭菜盒子截图功能SDD-2026-10-03]]（含 P0/P1/P2 分期 + 9 条验收 + 风险表）。
+- **截图（P0/P1 代码已实现）**：桌面系统截图，**框选** → 复制 / 另存为 / 保存到项目；**给默认快捷键**（`Control+Shift+A`，可改）；**v1 不做标注**；应用内入口放**设置**里。
+- 查证结论：复用 `arboard`、dialog/fs、`files.importBinary` 与 `nextMaterialPath`；新增 `png`、Windows `xcap`、仅 Rust 的桌面 `tauri-plugin-global-shortcut`，不需要前端快捷键插件或剪贴板插件。
+- **2026-10-03 复审完善（用户确认）**：先抓目标屏快照，再显示**不透明**自绘框选窗，后续只裁剪快照；单进程注册快捷键、单活动任务与任务 ID 校验；项目绑定触发时来源窗口，保存交回该工作台；取消/松手预览不复制，自动复制仅保存成功后执行。坐标按实际快照/展示尺寸换算，补齐负坐标副屏、反向拖拽、取整/越界/拔屏。
+- macOS 系统授权检查/引导纳入 **P0**，不以黑图判断权限；`screencapture -D` 目标屏映射待真机核实。截图窗独立最小 capability，不继承 default 工作台权限、不启动 Gateway/Harness。快捷键先注册新键、再注销旧键，失败保持旧配置。
+- 详见 [[开发/韭菜盒子截图功能SDD-2026-10-03]]（P0/P1/P2、15 条验收、来源依据）；**自动验证通过，真机待验收**：focused 1780/1780；Rust 464/0/1 ignored；Intel Mac 编译、TypeScript、桌面构建与产物审计通过。Windows 交叉构建因本机缺 MSVC `assert.h` 阻塞；签名包 TCC、多屏/DPI、复制保存真机操作均未执行。独立入口 `screenshot/index.html`，设置由 Rust 原子写入 `screenshot-settings.json`。
 - **新建窗口入口**：Windows 没有菜单栏（那段菜单整块在 `#[cfg(target_os = "macos")]`），文件树是唯一入口。已实现「空状态」+「动作行」两处（提交 `0047189f`/`19d9ca15`）；**下一步**挪到 **logo 那一行**（`.pft-project-row`，目录名按钮之后），注意给 `.pft-project-name` 补 `min-width: 0`。详见 [[开发/韭菜盒子多窗口多开SDD-2026-09-29]] §10。
 
 ## [2026-10-03] Computer Use 定案：根因是「图外包 profile 解析不到」，已修好并真机验收

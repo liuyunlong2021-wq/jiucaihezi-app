@@ -77,6 +77,9 @@ for (const target of removable) {
   console.log(`[deepseek-harness] 已裁掉 ${relative(root, target)}`)
 }
 
+// LibreOffice 已由上面的既有规则裁掉；它的悬空 bin 链接会使 Tauri 资源打包失败。
+rmSync(join(root, 'node_modules', '.bin', 'dsoffice'), { force: true })
+
 // The pinned SDK server omits transient assistant chunks from its JSON-RPC transport.
 const serverPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-jsonrpc-server', 'lib', 'index.js')
 let server = readFileSync(serverPath, 'utf8')

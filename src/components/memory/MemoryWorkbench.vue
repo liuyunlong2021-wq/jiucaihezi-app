@@ -5,6 +5,7 @@ import ChatScrollNav from '@/components/chat/ChatScrollNav.vue'
 import MediaTaskBubble from '@/components/chat/MediaTaskBubble.vue'
 import SkillInstallCard from '@/components/chat/SkillInstallCard.vue'
 import ToolApprovalStrip from '@/components/chat/ToolApprovalStrip.vue'
+import { startScreenshotProjectBridge } from '@/services/desktopScreenshot'
 import MemorySettings from './MemorySettings.vue'
 import {
   DEEPSEEK_DEFAULT_PERMISSION_TIER,
@@ -139,6 +140,8 @@ const projectStore = useProjectStore()
 const agentStore = useAgentStore()
 const mediaTaskStore = useMediaTaskStore()
 const files = createRuntimeProjectFileService()
+let stopScreenshotBridge: (() => void) | undefined
+let screenshotBridgeUnmounted = false
 const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
 const mobileRuntime = isTauriMobileRuntime()
@@ -1012,6 +1015,14 @@ onMounted(async () => {
   document.addEventListener('keydown', handleGlobalKeydown)
   window.addEventListener('resize', resizeCreationForWindow)
   resizeCreationForWindow()
+  if (desktopOnlyRuntime && /Win|Mac/.test(navigator.platform)) {
+    try {
+      const stop = await startScreenshotProjectBridge(() => projectOwner.value, files, message => { error.value = message })
+      if (screenshotBridgeUnmounted) stop()
+      else stopScreenshotBridge = stop
+    }
+    catch (cause) { error.value = `截图保存监听失败：${String(cause)}` }
+  }
   stopProjectWatch = watch(projectOwner, owner => {
     // 档位是工作区级的：换工作区就换成那个工作区上次选的档位。
     setPermissionTier(loadPermissionTier())
@@ -1025,6 +1036,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  screenshotBridgeUnmounted = true
+  stopScreenshotBridge?.()
   setHarnessSceneRecorder()
   offOpenResource?.()
   offFocusMedia?.()

@@ -1422,6 +1422,8 @@ fn attach_window_state(app: &tauri::AppHandle, window: &tauri::WebviewWindow, la
         // 窗口销毁：它名下的 runner 立刻就是孤儿。必须在应用还活着时就收 ——
         // 退出路径不会跑（应用没退），而它会一直握着会话的跨进程内核写锁。
         if matches!(event, tauri::WindowEvent::Destroyed) {
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::window_closed(&w.app_handle(), &reap_label);
             let reaped = commands::mcp::reap_window_stdio_processes(&reap_label);
             if reaped > 0 {
                 eprintln!("[window:{reap_label}] 已收掉 {reaped} 个遗留 stdio 进程");
@@ -1551,6 +1553,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::setup(app.handle())?;
             let app_data = app.path().app_data_dir()?;
             let skills_db_dir = app_data.join("skillsmanage");
             std::fs::create_dir_all(&skills_db_dir)?;
@@ -1695,6 +1699,36 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_check,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_validate_project,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_settings,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_set_settings,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_recording,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_permission,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_begin,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_read,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_ready,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_crop,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_copy,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_end,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_save_project,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_save_result,
+            #[cfg(any(target_os = "windows", target_os = "macos"))]
+            commands::screenshot::screenshot_remember_directory,
             commands::greet::greet,
             commands::workspace::open_workspace_window,
             commands::workspace::open_new_window,

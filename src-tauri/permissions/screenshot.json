@@ -1,0 +1,20 @@
+{
+  "permission": [
+    {
+      "identifier": "allow-screenshot-overlay",
+      "description": "Only the current screenshot task can be read or operated.",
+      "commands": {
+        "allow": [
+          "screenshot_read",
+          "screenshot_ready",
+          "screenshot_crop",
+          "screenshot_copy",
+          "screenshot_end",
+          "screenshot_save_project",
+          "screenshot_remember_directory",
+          "screenshot_check"
+        ]
+      }
+    }
+  ]
+}

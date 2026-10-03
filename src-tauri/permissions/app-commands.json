@@ -189,7 +189,14 @@
           "explain_skill",
           "get_skill_explanation",
           "explain_skill_stream",
-          "refresh_skill_explanation"
+          "refresh_skill_explanation",
+          "screenshot_settings",
+          "screenshot_set_settings",
+          "screenshot_recording",
+          "screenshot_permission",
+          "screenshot_begin",
+          "screenshot_save_result",
+          "screenshot_validate_project"
         ],
         "deny": []
       }

@@ -13,3 +13,10 @@ pub mod session;
 pub mod skill_material;
 pub mod tools;
 pub mod workspace;
+
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub mod screenshot;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub mod screenshot_capture;
+#[cfg(any(target_os = "windows", target_os = "macos"))]
+pub mod screenshot_geometry;
