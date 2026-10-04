@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onBeforeUnmount, ref } from 'vue'
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -7,6 +7,7 @@ import { save } from '@tauri-apps/plugin-dialog'
 import { writeFile } from '@tauri-apps/plugin-fs'
 import JcIcon from '@/components/icons/JcIcon.vue'
 import { pngBytes, screenshotName } from '@/services/desktopScreenshot'
+import { screenshotToolbarPosition } from '@/utils/screenshotToolbar'
 
 interface Snapshot { id: string; pngBase64: string; width: number; height: number; canSaveProject: boolean; autoCopy: boolean; directory: string }
 const snapshot = ref<Snapshot | null>(null)
@@ -25,10 +26,23 @@ const rect = computed(() => {
   return { left: Math.min(a[0], b[0]), top: Math.min(a[1], b[1]), width: Math.abs(a[0] - b[0]), height: Math.abs(a[1] - b[1]) }
 })
 const selectionStyle = computed(() => ({ left: `${rect.value.left}px`, top: `${rect.value.top}px`, width: `${rect.value.width}px`, height: `${rect.value.height}px` }))
-const toolbarStyle = computed(() => ({
-  left: `${Math.max(8, Math.min(rect.value.left, innerWidth - Math.min(340, innerWidth - 16) - 8))}px`,
-  top: `${rect.value.top + rect.value.height + 60 < innerHeight ? rect.value.top + rect.value.height + 8 : Math.max(8, rect.value.top - 54)}px`,
-}))
+const toolbar = ref<HTMLElement | null>(null)
+const toolbarSize = ref({ width: 0, height: 0 })
+const toolbarObserver = new ResizeObserver(entries => {
+  const element = entries[0]?.target as HTMLElement | undefined
+  if (element) toolbarSize.value = { width: element.offsetWidth, height: element.offsetHeight }
+})
+watch(toolbar, element => {
+  toolbarObserver.disconnect()
+  if (element) {
+    toolbarSize.value = { width: element.offsetWidth, height: element.offsetHeight }
+    toolbarObserver.observe(element)
+  }
+}, { flush: 'post' })
+const toolbarStyle = computed(() => {
+  const position = screenshotToolbarPosition(rect.value, toolbarSize.value, { width: innerWidth, height: innerHeight })
+  return { left: `${position.left}px`, top: `${position.top}px`, visibility: toolbarSize.value.height ? 'visible' as const : 'hidden' as const }
+})
 async function cancel() {
   if (busy.value || !snapshot.value) return
   await invoke('screenshot_end', { id: snapshot.value.id }).catch(error => { status.value = String(error) })
@@ -118,7 +132,7 @@ onMounted(async () => {
   }
 })
 async function ready() { if (snapshot.value) await invoke('screenshot_ready', { id: snapshot.value.id }).catch(error => { status.value = String(error) }) }
-onBeforeUnmount(() => { unmounted = true; clearInterval(integrityTimer); stopResult?.(); stopResize?.(); window.removeEventListener('keydown', keydown) })
+onBeforeUnmount(() => { unmounted = true; toolbarObserver.disconnect(); clearInterval(integrityTimer); stopResult?.(); stopResize?.(); window.removeEventListener('keydown', keydown) })
 </script>
 
 <template>
@@ -127,7 +141,7 @@ onBeforeUnmount(() => { unmounted = true; clearInterval(integrityTimer); stopRes
     <div v-if="!start" class="shade"></div>
     <div v-if="start" class="selection" :style="selectionStyle"></div>
     <p v-if="!selected" class="hint">拖拽框选 · Esc 取消</p>
-    <div v-if="selected" class="toolbar" :style="toolbarStyle" role="toolbar" aria-label="截图操作" @pointerdown.stop>
+    <div v-if="selected" ref="toolbar" class="toolbar" :style="toolbarStyle" role="toolbar" aria-label="截图操作" @pointerdown.stop>
       <button :disabled="busy" @click="copy"><JcIcon name="content_copy" />复制</button>
       <button :disabled="busy" @click="saveAs"><JcIcon name="save_alt" />另存为…</button>
       <button :disabled="busy || !snapshot?.canSaveProject" @click="saveProject"><JcIcon name="folder" />保存到项目</button>
