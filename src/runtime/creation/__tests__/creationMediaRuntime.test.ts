@@ -109,7 +109,7 @@ test('P3 direct GPT Image 2 runtime uses the native OpenAI image contract', () =
   assert.equal(request.pollKind, 'none')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
-  assert.equal(request.imageParams?.responseFormat, 'url')
+  assert.equal(request.imageParams?.responseFormat, 'b64_json')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
   assert.equal((request.imageParams as any)?.resolution, undefined)
 })
@@ -126,6 +126,7 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
       assert.equal(body.get('model'), 'gpt-image-2-超分')
       assert.equal(body.get('prompt'), '把手表改成黄色')
       assert.equal(body.get('size'), '2048x1152')
+      assert.equal(body.get('response_format'), 'b64_json')
       assert.equal(body.get('image[]') instanceof Blob, true)
       return Response.json({ data: [{ url: 'https://cdn.example.test/gpt.png' }] })
     }
@@ -163,7 +164,7 @@ test('菠萝 GPT Image 2.5 透传 size 与 quality（文生图 + 图生图）', 
     }
     if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
-      seen.push({ kind: 'edits', size: body.get('size'), quality: body.get('quality') })
+      seen.push({ kind: 'edits', size: body.get('size'), quality: body.get('quality'), response_format: body.get('response_format') })
       return Response.json({ data: [{ url: 'https://cdn.example.test/boluo/edit.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
@@ -196,9 +197,32 @@ test('菠萝 GPT Image 2.5 透传 size 与 quality（文生图 + 图生图）', 
       prompt: '一只橙色狐狸',
       size: '2048x1152',
       quality: 'high',
-      response_format: 'url',
+      response_format: 'b64_json',
     })
-    assert.deepEqual(seen[1], { kind: 'edits', size: '2048x1152', quality: 'medium' })
+    assert.deepEqual(seen[1], { kind: 'edits', size: '2048x1152', quality: 'medium', response_format: 'b64_json' })
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('GPT Image 2.5 prefers inline bytes over a relay URL', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.match(String(input), /\/v1\/images\/generations$/)
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.model, 'gpt-image-2.5-1k')
+    assert.equal(body.response_format, 'b64_json')
+    return Response.json({ data: [{
+      url: 'https://relay.xiaoyiapi.xyz/v1/images/public/result',
+      b64_json: 'cG5n',
+    }] })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'gpt-image-2.5-1k', params: { prompt: '一只猫' } })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'data:image/png;base64,cG5n')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

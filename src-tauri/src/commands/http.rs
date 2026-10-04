@@ -26,6 +26,7 @@ pub struct HttpResponse {
 pub struct HttpDownloadRequest {
     pub url: String,
     pub headers: Option<HashMap<String, String>>,
+    // 下载通道中是连续无数据的等待上限，不是整个文件的耗时上限。
     pub timeout_secs: Option<u64>,
 }
 
@@ -409,28 +410,8 @@ pub async fn comfy_upload_image(request: ComfyUploadImageRequest) -> Result<Http
 pub async fn http_download_base64(
     request: HttpDownloadRequest,
 ) -> Result<HttpDownloadResponse, String> {
-    let mut client_builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .pool_idle_timeout(std::time::Duration::from_secs(90));
-    client_builder = client_builder.timeout(std::time::Duration::from_secs(
-        request.timeout_secs.unwrap_or(60),
-    ));
-    if should_direct_unified_download_to_newapi(&request) {
-        client_builder = with_newapi_source_resolution(client_builder);
-    }
-    let client = client_builder
-        .build()
-        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-    let mut request_builder = client.get(&request.url);
-    if let Some(headers) = &request.headers {
-        for (key, value) in headers {
-            request_builder = request_builder.header(key, value);
-        }
-    }
-    let resp = request_builder
-        .send()
-        .await
-        .map_err(|e| format!("HTTP 下载失败: {}", e))?;
+    let client = media_download_client(&request)?;
+    let resp = send_media_download(&client, &request).await?;
     let status = resp.status().as_u16();
     let mut headers = HashMap::new();
     for (key, value) in resp.headers() {
@@ -441,12 +422,58 @@ pub async fn http_download_base64(
     let bytes = resp
         .bytes()
         .await
-        .map_err(|e| format!("读取下载数据失败: {}", e))?;
+        .map_err(|e| format!("读取下载数据失败: {}", download_error_detail(e)))?;
     Ok(HttpDownloadResponse {
         status,
         headers,
         data_base64: general_purpose::STANDARD.encode(bytes),
     })
+}
+
+fn media_download_client(request: &HttpDownloadRequest) -> Result<reqwest::Client, String> {
+    let mut client_builder = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .pool_idle_timeout(std::time::Duration::from_secs(90));
+    client_builder = client_builder.read_timeout(std::time::Duration::from_secs(
+        request.timeout_secs.unwrap_or(60),
+    ));
+    if should_direct_unified_download_to_newapi(request) {
+        client_builder = with_newapi_source_resolution(client_builder);
+    }
+    client_builder
+        .build()
+        .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
+}
+
+fn download_error_detail(error: reqwest::Error) -> String {
+    use std::error::Error;
+    let error = error.without_url();
+    let mut detail = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        detail.push_str(": ");
+        detail.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    detail
+}
+
+async fn send_media_download(client: &reqwest::Client, request: &HttpDownloadRequest) -> Result<reqwest::Response, String> {
+    // 只补一次下载 GET；鉴权/链接失效直接交给上层，生成 POST 不经过这里。
+    for attempt in 0..2 {
+        let mut builder = client.get(&request.url);
+        if let Some(headers) = &request.headers {
+            for (key, value) in headers { builder = builder.header(key, value); }
+        }
+        match builder.send().await {
+            Ok(response) if attempt == 0 && matches!(response.status().as_u16(), 502 | 503 | 504) => {}
+            Ok(response) => return Ok(response),
+            Err(error) if attempt == 0 && (error.is_connect() || error.is_timeout()) => {}
+            Err(error) => return Err(format!("HTTP 下载失败: {}", download_error_detail(error))),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    }
+    unreachable!("second attempt returns its result")
 }
 
 #[tauri::command]
@@ -470,24 +497,13 @@ pub async fn http_download_to_project(
         uuid::Uuid::new_v4(),
     ));
 
-    let mut client_builder = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .pool_idle_timeout(std::time::Duration::from_secs(90))
-        .timeout(std::time::Duration::from_secs(request.timeout_secs.unwrap_or(300)));
     let download_request = HttpDownloadRequest {
         url: request.url.clone(),
         headers: request.headers.clone(),
-        timeout_secs: request.timeout_secs,
+        timeout_secs: Some(request.timeout_secs.unwrap_or(300)),
     };
-    if should_direct_unified_download_to_newapi(&download_request) {
-        client_builder = with_newapi_source_resolution(client_builder);
-    }
-    let client = client_builder.build().map_err(|e| format!("创建 HTTP 客户端失败: {}", e))?;
-    let mut builder = client.get(&request.url);
-    if let Some(headers) = &request.headers {
-        for (key, value) in headers { builder = builder.header(key, value); }
-    }
-    let response = builder.send().await.map_err(|e| format!("HTTP 下载失败: {}", e))?;
+    let client = media_download_client(&download_request)?;
+    let response = send_media_download(&client, &download_request).await?;
     let (status, headers, bytes_written) = persist_download_response(response, &target, &temp).await?;
     Ok(HttpDownloadToProjectResponse {
         status,
@@ -509,14 +525,27 @@ async fn persist_download_response(
     if !(200..300).contains(&status) {
         return Err(format!("HTTP 下载失败: {}", status));
     }
+    if status == 206 {
+        return Err("下载只返回部分文件，未保存".into());
+    }
+    let extension = target.extension().and_then(|value| value.to_str()).unwrap_or_default().to_ascii_lowercase();
+    if matches!(extension.as_str(), "mp4" | "webm" | "mov" | "png" | "jpg" | "jpeg" | "webp" | "gif" | "mp3" | "wav" | "ogg" | "m4a") {
+        let content_type = headers.get("content-type").map(|value| value.split(';').next().unwrap_or_default().trim().to_ascii_lowercase()).unwrap_or_default();
+        if content_type == "text/html" || content_type == "application/json" || content_type.ends_with("+json") {
+            return Err(format!("下载返回了错误页面而非媒体文件: {}", content_type));
+        }
+    }
     let result = async {
         let mut file = tokio::fs::File::create(temp).await.map_err(|e| format!("创建临时文件失败: {}", e))?;
         let mut stream = response.bytes_stream();
         let mut bytes_written = 0_u64;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| format!("读取下载数据失败: {}", e))?;
+            let chunk = chunk.map_err(|e| format!("读取下载数据失败: {}", download_error_detail(e)))?;
             file.write_all(&chunk).await.map_err(|e| format!("写入媒体文件失败: {}", e))?;
             bytes_written += chunk.len() as u64;
+        }
+        if bytes_written == 0 {
+            return Err("下载返回空文件，未保存".into());
         }
         file.flush().await.map_err(|e| format!("刷新媒体文件失败: {}", e))?;
         drop(file);
@@ -666,7 +695,7 @@ mod tests {
             let (mut stream, _) = listener.accept().unwrap();
             let mut request = [0_u8; 1024];
             let _ = stream.read(&mut request);
-            std::thread::sleep(std::time::Duration::from_millis(100));
+            std::thread::sleep(std::time::Duration::from_millis(1200));
         });
         (format!("http://{}", address), handle)
     }
@@ -728,6 +757,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn media_download_allows_slow_progress_beyond_the_read_timeout() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request);
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nContent-Type: video/mp4\r\nConnection: close\r\n\r\nv").unwrap();
+            for byte in b"ideo" {
+                std::thread::sleep(std::time::Duration::from_millis(350));
+                if stream.write_all(&[*byte]).is_err() { break; }
+            }
+        });
+        let request = HttpDownloadRequest { url, headers: None, timeout_secs: Some(1) };
+        let response = media_download_client(&request).unwrap().get(&request.url).send().await.unwrap();
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("result.mp4");
+        let temp = dir.path().join(".result.part");
+        let result = persist_download_response(response, &target, &temp).await;
+        server.join().unwrap();
+        assert!(result.is_ok(), "持续收到数据的下载不应按总耗时失败: {result:?}");
+        assert_eq!(std::fs::read(target).unwrap(), b"video");
+    }
+
+    #[tokio::test]
+    async fn project_download_rejects_empty_partial_and_error_document_responses() {
+        for response_bytes in [
+            &b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"[..],
+            &b"HTTP/1.1 206 Partial Content\r\nContent-Length: 3\r\nContent-Range: bytes 0-2/10\r\nConnection: close\r\n\r\nbad"[..],
+            &b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}"[..],
+        ] {
+            let (url, server) = serve_once(response_bytes);
+            let response = reqwest::get(url).await.unwrap();
+            let dir = tempfile::TempDir::new().unwrap();
+            let target = dir.path().join("result.mp4");
+            let temp = dir.path().join(".result.part");
+            let result = persist_download_response(response, &target, &temp).await;
+            server.join().unwrap();
+            assert!(result.is_err(), "无效响应不能标记为媒体保存成功");
+            assert!(!target.exists());
+            assert!(!temp.exists());
+        }
+    }
+
+    #[tokio::test]
     async fn project_download_removes_partial_files_after_a_broken_stream() {
         let (url, server) = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nbad");
         let response = reqwest::get(url).await.unwrap();
@@ -763,15 +837,47 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let target = dir.path().join("result.mp4");
         let temp = dir.path().join(".result.part");
-        let result = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_millis(10))
-            .build().unwrap()
-            .get(url).send().await;
+        let request = HttpDownloadRequest { url, headers: None, timeout_secs: Some(1) };
+        let result = send_media_download(&media_download_client(&request).unwrap(), &request).await;
 
         server.join().unwrap();
         assert!(result.is_err());
         assert!(!target.exists());
         assert!(!temp.exists());
+    }
+
+    #[tokio::test]
+    async fn media_download_retries_a_temporary_http_failure_once() {
+        for (first_status, expected_status, expected_requests) in [(503, 200, 2), (401, 401, 1), (404, 404, 1)] {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let url = format!("http://{}", listener.local_addr().unwrap());
+            listener.set_nonblocking(true).unwrap();
+            let server = std::thread::spawn(move || {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                let mut requests = 0;
+                while std::time::Instant::now() < deadline {
+                    match listener.accept() {
+                        Ok((mut stream, _)) => {
+                            stream.set_read_timeout(Some(std::time::Duration::from_secs(1))).unwrap();
+                            let mut request = [0_u8; 1024];
+                            let _ = stream.read(&mut request);
+                            let status = if requests == 0 { first_status } else { 200 };
+                            requests += 1;
+                            write!(stream, "HTTP/1.1 {status} Status\r\nContent-Length: 5\r\nConnection: close\r\n\r\nvideo").unwrap();
+                            if requests == expected_requests { break; }
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => std::thread::sleep(std::time::Duration::from_millis(10)),
+                        Err(error) => panic!("test server failed: {error}"),
+                    }
+                }
+                requests
+            });
+            let request = HttpDownloadRequest { url, headers: None, timeout_secs: Some(1) };
+            let response = send_media_download(&media_download_client(&request).unwrap(), &request).await.unwrap();
+            let requests = server.join().unwrap();
+            assert_eq!(response.status().as_u16(), expected_status);
+            assert_eq!(requests, expected_requests);
+        }
     }
 
     #[tokio::test]

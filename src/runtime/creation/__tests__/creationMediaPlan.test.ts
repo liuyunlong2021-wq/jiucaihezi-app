@@ -312,6 +312,12 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
   assert.equal(plan.endpoint, '/v1/images/edits')
   assert.equal(plan.apiStyle, 'openai-image-edits')
   assert.equal(plan.pollKind, 'none')
+  assert.equal(plan.debug.normalizedParams.response_format, 'b64_json')
+  const generationPlan = buildCreationRunPlan({
+    modelId: 'gpt-image-2.5-1k',
+    params: { prompt: '商品图', ratio: '1:1' },
+  })
+  assert.equal(generationPlan.debug.normalizedParams.response_format, 'b64_json')
   for (const [modelId, resolutions, price] of [
     ['gpt-image-2.5-1k', ['1k'], '0.08/张'],
     ['gpt-image-2.5-flare-1k', ['1k'], '0.08/张'],

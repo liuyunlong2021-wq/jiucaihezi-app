@@ -14,6 +14,7 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getItem, initDB, setItem } from '@/utils/idb'
 import { usesNewApiContentEndpoint } from '@/runtime/creation/creationMediaPlan'
+import { getCreationModelSpec } from '@/runtime/creation/creationModelRegistry'
 import {
   CREATION_REFRESH_POLL_INTERVAL_MS,
   CREATION_REFRESH_POLL_MAX_SEC,
@@ -70,11 +71,11 @@ function pollWindowFor(kind: 'image' | 'video' | 'audio' | 'text', isVideo: bool
  *
  * 判据只有 `usesNewApiContentEndpoint` 一处：这个判断曾在四处各写一份，对 comfy-video
  * 结论相反，于是保存/重试时把已经正确的 content 地址换成了适配器的内网地址。
- * 旧任务的 planSnapshot 可能缺失，所以退回 task.model（omni 系的历史记录靠它认出来）。
+ * 旧任务的 planSnapshot 可能缺失，按模型注册表补回 apiStyle。
  */
 function taskUsesContentEndpoint(task: Pick<MediaTask, 'model' | 'planSnapshot'>): boolean {
   return usesNewApiContentEndpoint({
-    apiStyle: task.planSnapshot?.apiStyle,
+    apiStyle: task.planSnapshot?.apiStyle || getCreationModelSpec(task.model)?.apiStyle,
     model: task.planSnapshot?.model || task.model,
   })
 }
@@ -1317,6 +1318,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           markWebMediaPersistenceFailure(task, error)
           await persistTasksSafely('retry-media-persistence-refresh-failed')
           return false
+        }
+      } else if (task.type === 'video' && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
+        // CDN 签名链接可能已经过期；只重查已生成的任务，不重新生成。
+        // 查询暂不可用时仍尝试原链接，避免把有效下载也挡住。
+        try {
+          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS)
+        } catch {
+          // 原结果仍可下载时继续保存。
         }
       }
 

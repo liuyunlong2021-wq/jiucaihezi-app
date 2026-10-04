@@ -99,6 +99,12 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           }
           if (command === 'http_request') {
             const url = args.request?.url || ''
+            if (url.endsWith('/v1/videos/task_retry_cdn_video')) {
+              return { status: 200, body: JSON.stringify({ status: 'completed', metadata: { url: 'https://cdn.example.test/fresh.mp4' } }), headers: {} }
+            }
+            if (url.endsWith('/v1/videos/task_retry_cdn_fail')) {
+              return { status: 403, body: 'query unavailable', headers: {} }
+            }
             if (url.endsWith('/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL')) {
               return {
                 status: 200,
@@ -1494,7 +1500,7 @@ test(
 )
 
 test(
-  'comfy 成片被写成适配器内网地址后，重试保存按上游任务号重建 content 地址',
+  '旧 comfy 任务缺少计划快照且保存了内网地址时，仍按注册表与任务号恢复 content 地址',
   { concurrency: false },
   async () => {
     // 实测事故（2026-09-27）：comfy-video 的保存路径把已经正确的 content 地址换成了
@@ -1510,7 +1516,6 @@ test(
       upstreamTaskId: 'task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h',
       pollUrl: '/v1/videos/task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h',
       pollKind: 'video',
-      planSnapshot: { apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' },
       assetStatus: 'failed',
     }]) })
     const files = installTauriTaskFileStore()
@@ -1535,6 +1540,38 @@ test(
     }
   },
 )
+
+test('视频重试保存刷新旧公网链接，查询暂不可用时仍尝试原链接', { concurrency: false }, async () => {
+  for (const refreshSucceeds of [true, false]) {
+    const upstreamTaskId = refreshSucceeds ? 'task_retry_cdn_video' : 'task_retry_cdn_fail'
+    const originalUrl = 'https://cdn.example.test/old.mp4?expired=1'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_retry_cdn', type: 'video', model: 'seedance2.5', modelLabel: 'Seedance',
+      prompt: '视频', referenceImages: [], status: 'success', progress: 100, createdAt: 1,
+      source: 'creation', resultUrl: originalUrl, upstreamTaskId,
+      pollUrl: `/v1/videos/${upstreamTaskId}`, pollKind: 'video', assetStatus: 'failed',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/retry-cdn'
+    try {
+      const store = useMediaTaskStore()
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_retry_cdn'), true)
+      })
+      assert.deepEqual(files.downloads, [refreshSucceeds ? 'https://cdn.example.test/fresh.mp4' : originalUrl])
+      assert.equal(store.getTask('mtask_retry_cdn')?.assetStatus, 'local')
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  }
+})
 
 test(
   '保存失败必须走失败分支，不能把失败与成功状态混在一起',

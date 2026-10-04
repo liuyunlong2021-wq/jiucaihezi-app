@@ -304,7 +304,8 @@ function normalizeOpenAiImageParams(
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    response_format: 'url',
+    // GPT Image 2 系列的中转 URL 可能在客户端不可达；直接带回图片字节供项目落盘。
+    response_format: spec.id.startsWith('gpt-image-2') ? 'b64_json' : 'url',
   })
 }
 

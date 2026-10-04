@@ -241,6 +241,7 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
 
   if (Array.isArray(payload)) {
     for (const item of payload) {
+      if (kind === 'image' && item?.b64_json) return `data:image/png;base64,${item.b64_json}`
       const u = pick(item); if (u) return u
       if (item?.b64_json) return `data:${kind === 'audio' ? 'audio/mpeg' : kind === 'video' ? 'video/mp4' : 'image/png'};base64,${item.b64_json}`
     }
@@ -251,6 +252,7 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
   }
   if (Array.isArray(data)) {
     for (const item of data) {
+      if (kind === 'image' && item?.b64_json) return `data:image/png;base64,${item.b64_json}`
       const u = pick(item); if (u) return u
       if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`
     }
@@ -266,6 +268,7 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
       const nestedU = pick(data.data); if (nestedU) return nestedU
       if (Array.isArray(data.data.data)) {
         for (const item of data.data.data) {
+          if (kind === 'image' && item?.b64_json) return `data:image/png;base64,${item.b64_json}`
           const u2 = pick(item); if (u2) return u2
           if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`
         }
