@@ -308,11 +308,48 @@ if (!server.includes(manjuImport)) {
   changed = true
 }
 
-const manjuRollbackAnchor = '\t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));'
-const manjuRollback = '\t\t\tawait manjuDispose();\n\t\t\tif (names.includes("jc-manju-zhizuo")) throw error;\n'
-if (!server.includes(manjuRollback)) {
-  if (!server.includes(manjuRollbackAnchor)) throw new Error('Unsupported DeepSeek Harness skill scope cleanup layout')
-  server = server.replace(manjuRollbackAnchor, manjuRollback + manjuRollbackAnchor)
+// 绑定属于实际 Agent，不属于可被恢复复用的 Session ID；失败不得缓存或继续发送。
+const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
+\t\tif (this.pinnedSkillScopes === void 0) this.pinnedSkillScopes = new WeakMap();
+\t\tlet names = [];
+\t\ttry {
+\t\t\tnames = await this.pinnedSkillNames(rec, content);
+\t\t} catch (error) {
+\t\t\tif (content.some(block => block.type === "text" && block.text.includes("/jc-manju-zhizuo"))) throw error;
+\t\t\tconsole.error("[skill-scope] 解析点名 skill 失败: " + (error instanceof Error ? error.message : String(error)));
+\t\t\treturn;
+\t\t}
+\t\tconst agent = rec.handle.agent;
+\t\tthis.assertLiveAgent(rec, agent.id);
+\t\tconst held = this.pinnedSkillScopes.get(agent);
+\t\tif (held !== void 0 && held.names.join(",") === names.join(",")) return;
+\t\tif (held !== void 0) {
+\t\t\tthis.pinnedSkillScopes.delete(agent);
+\t\t\tawait held.dispose();
+\t\t}
+\t\tif (names.length === 0) return;
+\t\tconst manjuDispose = await pinManjuSkills(rec, names);
+\t\tlet dispose;
+\t\ttry {
+\t\t\tthis.assertLiveAgent(rec, agent.id);
+\t\t\tif (rec.handle.agent !== agent) throw new Error("漫剧制作 Agent 已替换");
+\t\t\tdispose = agent.ctx.tools.restrict({ deny: ["skill"] });
+\t\t\tthis.pinnedSkillScopes.set(agent, {
+\t\t\t\tnames,
+\t\t\t\tdispose: async () => { try { await dispose(); } finally { await manjuDispose(); } }
+\t\t\t});
+\t\t} catch (error) {
+\t\t\ttry { await dispose?.(); } finally { await manjuDispose(); }
+\t\t\tif (names.includes("jc-manju-zhizuo")) throw error;
+\t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));
+\t\t}
+\t}
+`
+const bindingStart = server.indexOf('\tasync applyPinnedSkillScope(rec, content) {')
+const bindingEnd = server.indexOf('\tasync pinnedSkillNames(rec, content) {', bindingStart)
+if (bindingStart < 0 || bindingEnd < 0) throw new Error('Unsupported DeepSeek Harness skill binding layout')
+if (server.slice(bindingStart, bindingEnd) !== scopedBindingMethod) {
+  server = server.slice(0, bindingStart) + scopedBindingMethod + server.slice(bindingEnd)
   changed = true
 }
 

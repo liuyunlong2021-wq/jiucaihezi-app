@@ -38,7 +38,7 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(rec\.handle\.agent/)
   // 点名 skill → 掩掉 `skill` 工具（官方 tools.restrict），且必须在 prompt 前生效。
   assert.match(once, /await this\.applyPinnedSkillScope\(rec, content\);/)
-  assert.match(once, /rec\.handle\.agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
+  assert.match(once, /agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
 })
 
 // 剪体积的两刀（node 包的安装源 278M、LibreOffice 260M，都是打好的 App 里的实际占用）。

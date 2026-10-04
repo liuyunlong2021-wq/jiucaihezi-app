@@ -5,6 +5,7 @@ import { join } from 'node:path'
 // 模型上下文仍只注入用户点名的入口，子 Skill 由路由器按需读取资源。
 export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUNDLED_SKILL_DIR) {
   if (!names.includes('jc-manju-zhizuo')) return () => {}
+  const agent = rec.handle.agent
   if (!directory) throw new Error('漫剧制作内置 Skill 目录不可用')
   const route = JSON.parse(await readFile(join(directory, 'manju-route.json'), 'utf8'))
   if (route.router !== 'jc-manju-zhizuo' || !Array.isArray(route.skills) || !route.skills.includes(route.router)
@@ -29,13 +30,23 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
       invocation: { userInvocable: true, modelInvocable: name !== route.router },
     }
   }))
-  const disposers = []
-  const dispose = async () => { for (const release of disposers.splice(0).reverse()) await release() }
+  if (rec.handle.agent !== agent) throw new Error('漫剧制作 Agent 已替换')
+  let ready = false
+  const plugin = agent.ctx.plugin({
+    name: 'jiucaihezi-manju-skills',
+    inject: ['skills'],
+    apply(ctx) {
+      for (const skill of skills) ctx.skills.register(skill)
+      ready = true
+    },
+  })
   try {
-    for (const skill of skills) disposers.push(rec.handle.agent.ctx.skills.register(skill))
-    return dispose
+    await plugin.await()
+    if (!ready) throw new Error('漫剧制作 skills 插件未启动：注册表服务不可用')
+    plugin.assertActive()
+    return () => plugin.dispose()
   } catch (error) {
-    await dispose()
+    await plugin.dispose()
     throw error
   }
 }
