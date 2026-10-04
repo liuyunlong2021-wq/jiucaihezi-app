@@ -23,6 +23,11 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   const once = readFileSync(serverPath, 'utf8')
   apply()
   assert.equal(readFileSync(serverPath, 'utf8'), once, '第二次应用不允许改变结果')
+  const clientPath = serverPath.replace('dsh-sdk-jsonrpc-server', 'dsh-sdk-client')
+  const client = readFileSync(clientPath, 'utf8')
+  assert.match(client, /spawn\(this\.runtime\.command, this\.runtime\.args, \{\s*windowsHide: true,/)
+  apply()
+  assert.equal(readFileSync(clientPath, 'utf8'), client, '后台启动补丁必须幂等')
   // 会话权限是 durable 事实，进程级 DSH_PERMISSION_MODE 只管新会话；这条请求是唯一能
   // 把已存在会话拉齐到 @文件 语义的通道。
   assert.match(once, /case "session\/permission": return this\.permission\(params\);/)

@@ -48,6 +48,16 @@ fn exit_signal(status: &std::process::ExitStatus) -> Option<String> {
 #[cfg(not(unix))]
 fn exit_signal(_status: &std::process::ExitStatus) -> Option<String> { None }
 
+/// stdio 服务和收尾命令属于后台进程，不应创建用户可见的控制台。
+fn configure_background_command(_command: &mut std::process::Command) {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        _command.creation_flags(CREATE_NO_WINDOW);
+    }
+}
+
 static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
@@ -90,6 +100,7 @@ pub async fn mcp_spawn_stdio(
     let is_harness_runner = resolved_args.iter().any(|arg| arg.ends_with("runner.mjs"));
     #[cfg(not(windows))]
     let mut cmd = Command::new(&resolved_command);
+    configure_background_command(cmd.as_std_mut());
     cmd.args(resolved_args)
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
@@ -214,7 +225,9 @@ fn tree_kill_plan(pid: u32) -> (&'static str, Vec<String>) {
 /// 收尾路径专用：`taskkill` / `kill` 都是毫秒级命令，阻塞等到返回，换来「返回即已收干净」。
 fn kill_process_tree(pid: u32) {
     let (program, args) = tree_kill_plan(pid);
-    let _ = std::process::Command::new(program)
+    let mut command = std::process::Command::new(program);
+    configure_background_command(&mut command);
+    let _ = command
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -332,6 +345,34 @@ pub fn reap_all_stdio_processes() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn background_commands_keep_stdio_without_creating_a_console() {
+        // 在子进程里直接调用 Win32 API，避免 shell 改写引号或退出码。
+        if std::env::var_os("JC_CONSOLE_PROBE_CHILD").is_some() {
+            #[link(name = "kernel32")]
+            unsafe extern "system" { fn GetConsoleWindow() -> *mut std::ffi::c_void; }
+            assert!(unsafe { GetConsoleWindow() }.is_null(), "unexpected console");
+            println!("background-stdio");
+            eprintln!("background-stderr");
+            return;
+        }
+        use std::os::windows::process::CommandExt;
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        // 测试宿主可能已有隐藏控制台；强制请求新控制台，验证配置确实覆盖它。
+        command.creation_flags(0x00000010);
+        configure_background_command(&mut command);
+        let output = command
+            .args(["background_commands_keep_stdio_without_creating_a_console", "--nocapture"])
+            .env("JC_CONSOLE_PROBE_CHILD", "1")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("background command should start");
+        assert!(output.status.success(), "{:?}", output);
+        assert!(String::from_utf8_lossy(&output.stdout).contains("background-stdio"));
+        assert!(String::from_utf8_lossy(&output.stderr).contains("background-stderr"));
+    }
 
     #[test]
     fn tree_kill_covers_the_whole_process_tree() {

@@ -80,6 +80,16 @@ for (const target of removable) {
 // LibreOffice 已由上面的既有规则裁掉；它的悬空 bin 链接会使 Tauri 资源打包失败。
 rmSync(join(root, 'node_modules', '.bin', 'dsoffice'), { force: true })
 
+// SDK client 在无控制台的桌面宿主中仍会再起一个 Node；管道不等于隐藏窗口。
+const clientPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-client', 'lib', 'index.js')
+const client = readFileSync(clientPath, 'utf8')
+const runtimeSpawn = 'const child = spawn(this.runtime.command, this.runtime.args, {\n'
+const hiddenRuntimeSpawn = `${runtimeSpawn}\t\t\twindowsHide: true,\n`
+if (!client.includes(hiddenRuntimeSpawn)) {
+  if (!client.includes(runtimeSpawn)) throw new Error('Unsupported DeepSeek Harness SDK client spawn layout')
+  writeFileSync(clientPath, client.replace(runtimeSpawn, hiddenRuntimeSpawn))
+}
+
 // The pinned SDK server omits transient assistant chunks from its JSON-RPC transport.
 const serverPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-jsonrpc-server', 'lib', 'index.js')
 let server = readFileSync(serverPath, 'utf8')

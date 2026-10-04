@@ -46,6 +46,7 @@ function initializeProfile(dshHome, profile) {
   ], {
     env: { ...process.env, DSH_HOME: dshHome },
     stdio: 'ignore',
+    windowsHide: true,
     timeout: 60_000,
   })
 }
