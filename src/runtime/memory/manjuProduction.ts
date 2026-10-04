@@ -2,12 +2,7 @@ import route from '../../../public/skills/manju-route.json'
 
 export const MANJU_ROUTER = route.router
 export const MANJU_SKILLS: readonly string[] = route.skills
-export type ManjuVideoModel = 'ask' | 'minimax-h3' | 'seedance-2.5'
-export interface ManjuPreference { enabled: boolean; videoModel: ManjuVideoModel }
-
-export function normalizeManjuVideoModel(value: unknown): ManjuVideoModel {
-  return value === 'minimax-h3' || value === 'seedance-2.5' ? value : 'ask'
-}
+export interface ManjuPreference { enabled: boolean }
 
 export function restoreManjuSelection(names: string[], preference?: ManjuPreference): string[] {
   const migrated = [...new Set(names.map(name => name === 'jc-manju-minimaxh3' ? MANJU_ROUTER : name === 'jc-daoyan-fenjing' ? 'jc-seedance' : name))]
@@ -16,13 +11,13 @@ export function restoreManjuSelection(names: string[], preference?: ManjuPrefere
   return migrated.includes(MANJU_ROUTER) ? migrated.filter(name => MANJU_SKILLS.includes(name)) : migrated
 }
 
-export function manjuRoutePrompt(videoModel: ManjuVideoModel): string {
-  const model = videoModel === 'minimax-h3' ? 'MiniMax H3' : videoModel === 'seedance-2.5' ? 'Seedance 2.5' : '未指定'
+export function manjuRoutePrompt(): string {
   return [
     '【漫剧制作设置】',
-    `默认视频模型：${model}。此值只作为本次未点名片段的后备选择。`,
-    '本轮用户明确指定的模型和镜头范围优先；不同镜头可使用不同模型，同一请求可以分别输出两套提示词。',
-    'MiniMax H3 使用 h3-prompt-writing；Seedance 2.5／SD2.5 使用 jc-seedance。没有模型选择时，仅在当前需要视频提示词且无法判断时询问。',
-    'Seedance 时间戳可有可无，按用户习惯选择；H3 遵循自身格式。切换模型只转换指定镜头或片段，复用已有资料、风格、资产和工程台本。',
+    '用户明确指定的业务 Skill 优先：直接读取并执行该 Skill，不自动补跑其他制作阶段。',
+    '依次按明确指定、已有产物续改、明确交付物、新手求起步处理；其余未指定创作请求默认使用 h3-prompt-writing 生成 MiniMax H3 视频提示词。',
+    '续改已有产物沿用原 Skill 与格式；自然语言指定交付物视为指定对应入口。仅明确求起步才引导，不因消息短判断新手；只推荐当前一步，带我做且材料足够才执行第一步。',
+    '用户明确说用 H3 即使用 h3-prompt-writing；说用 Seedance 2.5／SD2.5 即使用 jc-seedance。只处理指定范围，不混合两套格式。',
+    '仅从漫剧路线清单中选择；缺少必要输入或指令冲突时才询问。默认只交付提示词，不自动生成媒体。',
   ].join('\n')
 }

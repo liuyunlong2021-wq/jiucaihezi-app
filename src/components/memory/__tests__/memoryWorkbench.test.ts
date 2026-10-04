@@ -24,7 +24,7 @@ test('Desktop defaults to Harness without an @DH switch', () => {
   assert.match(workbench, /deepSeekHandoffTurns\(baseTurns\)/)
   assert.match(workbench, /if \(desktopOnlyRuntime\) ids\.push\(DEEPSEEK_HARNESS_SESSION_MARKER\)/)
   assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
-  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns, manjuModelSnapshot\)/)
+  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns\)/)
   assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?attachments: requestAttachments/)
   assert.match(source('src/services/desktopConversationRuntime.ts'), /executeDesktopHarnessRun\([\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
   assert.doesNotMatch(workbench, /const skillSnapshot = useHarness \? \[\]/)

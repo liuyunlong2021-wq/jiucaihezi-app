@@ -5,7 +5,6 @@ import {
   MANJU_ROUTER,
   MANJU_SKILLS,
   manjuRoutePrompt,
-  normalizeManjuVideoModel,
   restoreManjuSelection,
 } from '../manjuProduction'
 
@@ -19,23 +18,57 @@ test('the production bundle includes both video routes and excludes the portrait
   for (const name of MANJU_SKILLS) assert.ok(index.some((entry: { name: string }) => entry.name === name), name)
 })
 
-test('a conversation preference is a fallback and allows per-shot overrides and mixed models', () => {
-  const h3 = manjuRoutePrompt('minimax-h3')
-  const seedance = manjuRoutePrompt('seedance-2.5')
-  assert.match(h3, /默认视频模型：MiniMax H3/)
-  assert.match(seedance, /默认视频模型：Seedance 2.5/)
-  for (const prompt of [h3, seedance, manjuRoutePrompt('ask')]) {
-    assert.match(prompt, /本轮用户明确指定.*优先/)
-    assert.match(prompt, /不同镜头.*不同模型/)
-    assert.match(prompt, /时间戳.*用户/)
+test('production routes explicitly named skills and defaults directly to H3', () => {
+  const prompt = manjuRoutePrompt()
+  assert.match(prompt, /用户明确指定.*Skill.*优先/)
+  assert.match(prompt, /未指定.*h3-prompt-writing.*MiniMax H3/)
+  assert.match(prompt, /不自动补跑/)
+  assert.doesNotMatch(prompt, /界面默认|上轮选择|询问.*模型/)
+  const skill = readFileSync('public/skills/jc-manju-zhizuo/SKILL.md', 'utf8')
+  assert.match(skill, /未指定.*h3-prompt-writing/)
+  assert.doesNotMatch(skill, /完整项目的默认衔接|界面默认模型/)
+})
+
+test('routing instructions preserve continuation, natural requests and explicit beginner help', () => {
+  const skill = readFileSync('public/skills/jc-manju-zhizuo/SKILL.md', 'utf8')
+  const sections = ['明确指定 Skill 或模型', '明确续改已有产物', '明确指定交付物', '明确求起步引导', '其余未指定创作请求']
+  let previous = -1
+  for (const section of sections) {
+    const position = skill.indexOf(section)
+    assert.ok(position > previous, section)
+    previous = position
   }
-  assert.match(manjuRoutePrompt('ask'), /未指定/)
-  assert.equal(normalizeManjuVideoModel('other'), 'ask')
+  for (const text of ['不因消息短', '不执行制作', '执行推荐的第一步', '引导不授权付费生成', '不要求固定文件名']) assert.ok(skill.includes(text), text)
+  assert.match(manjuRoutePrompt(), /续改已有产物沿用原 Skill 与格式/)
+  assert.match(manjuRoutePrompt(), /自然语言指定交付物/)
+  assert.match(manjuRoutePrompt(), /仅明确求起步才引导/)
+})
+
+test('the approved contract and packaged router share the same intent order', () => {
+  const contract = readFileSync('docs/wiki/开发/漫剧制作合同.md', 'utf8')
+  const sections = ['明确指定 Skill 或模型', '明确续改已有产物', '明确指定交付物', '明确求起步引导', '其他未明确指定的创作请求']
+  let previous = -1
+  for (const section of sections) {
+    const position = contract.indexOf(section)
+    assert.ok(position > previous, section)
+    previous = position
+  }
+  assert.match(contract, /旧 `videoModel`.*不恢复、不传递、不参与路由/)
+})
+
+test('the composer retains the production entry without a model selector or model state', () => {
+  const source = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
+  assert.match(source, /@click="toggleManjuProduction"/)
+  assert.doesNotMatch(source, /memory-manju-model|manjuVideoModel|manjuModelSnapshot|changeManjuVideoModel/)
+  for (const file of ['src/services/deepSeekHarness.ts', 'src/services/desktopConversationRuntime.ts']) {
+    assert.doesNotMatch(readFileSync(file, 'utf8'), /manjuVideoModel|ManjuVideoModel/)
+  }
 })
 
 test('unsent toggle preferences survive reopening without leaking to a new conversation', () => {
-  assert.deepEqual(restoreManjuSelection(['wiki-memory'], { enabled: true, videoModel: 'seedance-2.5' }), [MANJU_ROUTER])
-  assert.deepEqual(restoreManjuSelection([MANJU_ROUTER], { enabled: false, videoModel: 'ask' }), [])
+  const legacyPreference = { enabled: true, videoModel: 'seedance-2.5' }
+  assert.deepEqual(restoreManjuSelection(['wiki-memory'], legacyPreference), [MANJU_ROUTER])
+  assert.deepEqual(restoreManjuSelection([MANJU_ROUTER], { enabled: false }), [])
   assert.deepEqual(restoreManjuSelection([], undefined), [])
   assert.deepEqual(restoreManjuSelection(['jc-manju-minimaxh3'], undefined), [MANJU_ROUTER])
   assert.deepEqual(restoreManjuSelection(['jc-daoyan-fenjing'], undefined), ['jc-seedance'])

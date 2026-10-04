@@ -130,8 +130,8 @@ import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/j
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
 import {
-  MANJU_ROUTER, MANJU_SKILLS, normalizeManjuVideoModel, restoreManjuSelection,
-  type ManjuPreference, type ManjuVideoModel,
+  MANJU_ROUTER, MANJU_SKILLS, restoreManjuSelection,
+  type ManjuPreference,
 } from '@/runtime/memory/manjuProduction'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
@@ -190,7 +190,6 @@ const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
-const manjuVideoModel = ref<ManjuVideoModel>('ask')
 const manjuSelected = computed(() => selectedSkillNames.value.includes(MANJU_ROUTER))
 
 function saveManjuPreference() {
@@ -199,7 +198,7 @@ function saveManjuPreference() {
   const entry = listHarnessConversationCatalog(active.resource.owner)
     .find(item => item.conversationId === active.transcript.id)
   if (entry) upsertHarnessConversationCatalogEntry({
-    ...entry, manju: { enabled: manjuSelected.value, videoModel: manjuVideoModel.value },
+    ...entry, manju: { enabled: manjuSelected.value },
   })
 }
 
@@ -210,11 +209,6 @@ function toggleManjuProduction() {
       contextNotice.value = '已切换到漫剧制作路线；本对话使用内置漫剧 Skill。'
     selectedSkillNames.value = [MANJU_ROUTER]
   }
-  saveManjuPreference()
-}
-
-function changeManjuVideoModel(event: Event) {
-  manjuVideoModel.value = normalizeManjuVideoModel((event.target as HTMLSelectElement).value)
   saveManjuPreference()
 }
 
@@ -427,7 +421,6 @@ async function availableSkillNamesForComposer(): Promise<Set<string>> {
 async function restoreComposerSkills(names?: string[], preference?: ManjuPreference) {
   const available = await availableSkillNamesForComposer()
   selectedSkillNames.value = restoreManjuSelection(names || [], preference).filter(name => available.has(name))
-  manjuVideoModel.value = normalizeManjuVideoModel(preference?.videoModel)
 }
 const mentionOpen = ref(false)
 // 从芯片排「@Skill」进入时只列 Skill；手打 @ 时仍给全套候选。
@@ -1949,7 +1942,6 @@ async function send(remoteText?: string) {
 
   const useHarness = desktopOnlyRuntime
   const skillSnapshot = selectedSkillNames.value.slice()
-  const manjuModelSnapshot = manjuVideoModel.value
   const editTargetId = remote ? '' : editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
   if (editTargetId && editIndex < 0) {
@@ -2071,7 +2063,7 @@ async function send(remoteText?: string) {
     const reply = useHarness ? await executeDesktopHarnessRun(runs, run, {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
-      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns, manjuModelSnapshot),
+      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns),
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
@@ -2323,7 +2315,6 @@ watch([
   scene3dSelected,
   selectedMcpToolNames,
   selectedSkillNames,
-  manjuVideoModel,
 ], () => {
   if (!desktopOnlyRuntime) return
   const active = conversation.value
@@ -2337,7 +2328,6 @@ watch([
     modelProviderId: selectedModel()?.providerId,
     permissionTier: permissionTier.value,
     skillNames: selectedSkillNames.value.slice(),
-    manjuVideoModel: manjuVideoModel.value,
     mediaSelected: mediaSelected.value,
     avSelected: avSelected.value,
     scene3dSelected: scene3dSelected.value,
@@ -3865,21 +3855,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 :class="{ active: manjuSelected }"
                 :aria-pressed="manjuSelected"
                 :disabled="!conversation"
-                title="漫剧制作：从任意阶段接手，各镜头可自由选择视频模型"
+                title="漫剧制作"
                 @click="toggleManjuProduction"
               ><JcIcon name="movie" /><span>漫剧制作</span></button>
-              <select
-                v-if="desktopOnlyRuntime && manjuSelected"
-                class="memory-manju-model"
-                :value="manjuVideoModel"
-                aria-label="本次默认视频模型，消息中的镜头选择优先"
-                title="仅作本次默认；可在消息中给不同镜头指定不同模型"
-                @change="changeManjuVideoModel"
-              >
-                <option value="ask">按本次要求</option>
-                <option value="minimax-h3">MiniMax H3</option>
-                <option value="seedance-2.5">Seedance 2.5</option>
-              </select>
               <button v-for="command in primaryCommands" :key="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
@@ -4261,7 +4239,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-strip > .memory-manju-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
-.memory-manju-model { height: 28px; max-width: 132px; flex: 0 0 auto; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink2); font: inherit; font-size: 12px; }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 /* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
    写在 hover 之后，压住 hover 的 olive，红着不动。 */

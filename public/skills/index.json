@@ -180,7 +180,7 @@
     "id": "jc-manju-zhizuo",
     "name": "jc-manju-zhizuo",
     "displayName": "jc-manju-zhizuo",
-    "description": "仅在用户明确选择 jc-manju-zhizuo 时使用。作为漫剧制作总入口，在十个指定 Skill 中按现有材料路由项目资料、小说改编、创作方向、环境角色设计、角色图格式、场景与道具、工程台本及 MiniMax H3／Seedance 2.5 提示词；可从任意阶段接手，图片与视频按用户要求只提交、不等待。",
+    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。",
     "triggers": [],
     "commands": [],
     "files": [
