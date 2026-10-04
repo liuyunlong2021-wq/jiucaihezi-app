@@ -6,6 +6,7 @@ import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/direct
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import { McpStdioTransport } from './mcpStdioTransport'
 import { computerUseEnabledNow } from '@/stores/agentStore'
+import { MANJU_ROUTER, manjuRoutePrompt, type ManjuVideoModel } from '@/runtime/memory/manjuProduction'
 
 type BridgeMessage = {
   type: 'ready' | 'notification' | 'result' | 'query-result' | 'error' | 'closed'
@@ -927,6 +928,7 @@ export function deepSeekPrompt(
   message: string,
   skillNames: string[],
   handoffTurns: ConversationTurn[] = [],
+  manjuVideoModel: ManjuVideoModel = 'ask',
 ): string {
   const gestures = skillNames.map(name => `/${name}`).join(' ')
   const handoff = handoffTurns.length
@@ -936,7 +938,8 @@ export function deepSeekPrompt(
         '【本轮消息】',
       ].join('\n\n')
     : ''
-  return [gestures, handoff, message].filter(Boolean).join('\n\n')
+  const manju = skillNames.includes(MANJU_ROUTER) ? manjuRoutePrompt(manjuVideoModel) : ''
+  return [gestures, manju, handoff, !handoff && manju ? '【本轮消息】' : '', message].filter(Boolean).join('\n\n')
 }
 
 export function deepSeekContentBlocks(

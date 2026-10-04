@@ -1,0 +1,5 @@
+interface:
+  display_name: "漫剧制作"
+  short_description: "漫剧制作总入口，十个 Skill 按阶段接手，逐镜自由选择 H3 或 Seedance"
+policy:
+  allow_implicit_invocation: false

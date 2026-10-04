@@ -68,6 +68,19 @@ test('DeepSeek Harness invokes UI-selected skills through native skill gestures'
   assert.equal(deepSeekPrompt('执行任务', []), '执行任务')
 })
 
+test('production model preferences do not replace the user request or leak into visible history', () => {
+  const request = '镜头1–3用H3，镜头4–6用Seedance 2.5，不要时间戳'
+  const prompt = deepSeekPrompt(request, ['jc-manju-zhizuo'], [], 'minimax-h3')
+  assert.match(prompt, /默认视频模型：MiniMax H3/)
+  assert.ok(prompt.endsWith(request))
+  const turns = deepSeekSessionTurns({ session: { id: 'test' }, events: [{
+    seq: 0, time: 1, type: 'user/message', surfaceOp: 'append',
+    data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: prompt }] },
+  }] })
+  assert.equal(turns[0]?.content, request)
+  assert.equal(deepSeekPrompt('继续', ['wiki-memory'], [], 'seedance-2.5'), '/wiki-memory\n\n继续')
+})
+
 test('DeepSeek Harness hands off only conversation turns not already owned by its session', () => {
   const turns = [
     { id: 'u1', role: 'user' as const, content: '先分析', createdAt: '2026-01-01' },

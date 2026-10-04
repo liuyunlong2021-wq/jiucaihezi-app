@@ -282,4 +282,28 @@ if (!server.includes('async applyPinnedSkillScope(rec, content) {')) {
   changed = true
 }
 
+// 漫剧路由固定到随产品打包的同一套版本；注册在 agent 层，不改变普通对话目录。
+const manjuImport = 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
+if (!server.includes(manjuImport)) {
+  const registerAnchor = '\t\tif (names.length === 0) return;\n\t\ttry {\n\t\t\tconst dispose = rec.handle.agent.ctx.tools.restrict({ deny: ["skill"] });'
+  const disposeAnchor = '\t\t\t\tdispose\n\t\t\t});'
+  const lookupAnchor = '\t\t\t\tconst skill = await this.ctx.skills.get(name, {'
+  if (!server.includes(registerAnchor) || !server.includes(disposeAnchor) || !server.includes(lookupAnchor))
+    throw new Error('Unsupported DeepSeek Harness pinned skill scope layout')
+  server = manjuImport + server
+  server = server.replace(registerAnchor, registerAnchor.replace(
+    '\t\ttry {', '\t\tconst manjuDispose = await pinManjuSkills(rec, names);\n\t\ttry {',
+  )).replace(disposeAnchor, '\t\t\t\tdispose: async () => { await dispose(); await manjuDispose(); }\n\t\t\t});')
+    .replace(lookupAnchor, '\t\t\t\tif (name === "jc-manju-zhizuo") { names.push(name); continue; }\n' + lookupAnchor)
+  changed = true
+}
+
+const manjuRollbackAnchor = '\t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));'
+const manjuRollback = '\t\t\tawait manjuDispose();\n\t\t\tif (names.includes("jc-manju-zhizuo")) throw error;\n'
+if (!server.includes(manjuRollback)) {
+  if (!server.includes(manjuRollbackAnchor)) throw new Error('Unsupported DeepSeek Harness skill scope cleanup layout')
+  server = server.replace(manjuRollbackAnchor, manjuRollback + manjuRollbackAnchor)
+  changed = true
+}
+
 if (changed) writeFileSync(serverPath, server)

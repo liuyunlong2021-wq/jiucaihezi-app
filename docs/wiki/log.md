@@ -2087,3 +2087,10 @@
 - **排障陷阱（写进仓库记忆）**：`comfy-adapter/logs/adapter.log` 是**混合编码** —— Python 写 UTF-8，`tools/cloud.ps1` 的 `*>> $AdapterLog` 追加的是**未对齐的 UTF-16LE**，所以 `Select-String`/`grep 'task_...'` 一律 0 命中，直接 `Get-Content` 只是把 NUL 吞掉、看着像正常文本；要按 UTF-16LE 区段起点解码才能读到。
 - **补一刀：任务永远卡在「排队中」**（用户报 `jc-MiniMax H3 参考生视频` 224 秒仍 queued）。适配器日志显示该笔 19:50:45 就 `succeeded（耗时 100.75s）`、公网 mp4 可下，成功后又收到 8 次轮询才停。真因是**插件状态词表脱钩**：`/v1/videos/{id}` 视图回 `in_progress`/`completed`（`adp/api.py` 的 `_VIDEO_TASK_STATUS`），而插件映射表照抄了 `adp/tasks.py` 的内部状态机 `running`/`succeeded` → `completed` 落到 `UNKNOWN` → 宿主不认终态、任务永远停在 SUBMITTED。`failed` 两套拼写相同，所以此前只有失败可见、成功不可见。修：映射表改成 API 视图词表（保留内部别名），并加**契约测试**直接读 `adp/api.py` 的 `_VIDEO_TASK_STATUS` 逐词断言（`comfy.plugin.js` **0.3.1**，夹具 22/22，聚焦 1795/1）。
 - 文档同步：图片那份对外接入文档的「固定内联 b64」整段改成 URL（含 1 MiB 上限的原因与 `502 exceeds size limit` 一行）；视频那份补「短式比例不是 400 而是任务失败」+ 节点级 `error.message` 样例；内部 `本机ComfyUI模型对外接入` 的做法表更新为插件 0.3.0 + url。
+
+## [2026-10-04] 实施 | 漫剧制作入口与逐镜模型自由路由
+
+- Desktop 输入框权限右侧新增“漫剧制作”，选中内置 `jc-manju-zhizuo`；默认视频模型可选“按本次要求”、MiniMax H3、Seedance 2.5。默认值仅作后备，本轮可给不同镜头／片段分别指定模型，随时切换；前面的项目资料、风格、资产与工程台本复用。
+- 原导演 Skill 改名 `jc-seedance`，保留原导演表达、五份专项参考和用户可选时间戳；八个共同制作入口规则未重写。新增十一份内置包，加原四包共十五包，仍按需读取。`jc-shuaigemeinv` 保留独立使用，未加入漫剧路线。
+- 模式状态在发送前即可按对话保存；Harness 通过 agent 范围的官方 SkillRegistry 固定内置版本，避免同名个人版本覆盖；退出释放绑定。默认不生媒体；明确生成时依原有影音开关及路由合同仅提交、不等待、不轮询。
+- 新增9项、相关定向检查通过；完整 focused `1791/1792`，唯一已有失败为文件树“新建窗口”旧断言；TypeScript、Vite 构建、Desktop 产物审计及差异检查通过。未付费生成、真实模型混合镜头前向验收、跨平台原生点击或打包发布。细节见 [[开发/漫剧制作入口与逐镜模型路由TDD-2026-10-04]]。

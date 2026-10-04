@@ -2,6 +2,7 @@ import { reactive, ref, shallowRef, watch } from 'vue'
 import type { DirectRunMetrics } from '@/runtime/direct/directTypes'
 import type { MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
+import type { ManjuVideoModel } from '@/runtime/memory/manjuProduction'
 import { listHarnessConversationCatalog, upsertHarnessConversationCatalogEntry } from '@/runtime/memory/harnessConversationCatalog'
 import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
 import {
@@ -90,6 +91,7 @@ type DesktopConversationSelection = {
   /** 本会话的沙箱档位（官方三档）。不过线：`desktopConversationContext()` 不发它。 */
   permissionTier: DeepSeekPermissionTier
   skillNames?: string[]
+  manjuVideoModel?: ManjuVideoModel
   mediaSelected?: boolean
   avSelected?: boolean
   scene3dSelected?: boolean
@@ -258,7 +260,7 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
   const key = memoryRunKey(run.owner, run.resourcePath)
   const current = () => desktopConversationRuns.get(key) === run && run.phase === 'running'
   const reply = await executeDesktopHarnessRun(desktopConversationRuns, run, { ...query,
-    message: deepSeekPrompt(userTurn.content, selected.skillNames || [], handoff),
+    message: deepSeekPrompt(userTurn.content, selected.skillNames || [], handoff, selected.manjuVideoModel),
   })
   if (!current()) return reply
   try {

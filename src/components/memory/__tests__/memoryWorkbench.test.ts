@@ -24,7 +24,7 @@ test('Desktop defaults to Harness without an @DH switch', () => {
   assert.match(workbench, /deepSeekHandoffTurns\(baseTurns\)/)
   assert.match(workbench, /if \(desktopOnlyRuntime\) ids\.push\(DEEPSEEK_HARNESS_SESSION_MARKER\)/)
   assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
-  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns\)/)
+  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns, manjuModelSnapshot\)/)
   assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?attachments: requestAttachments/)
   assert.match(source('src/services/desktopConversationRuntime.ts'), /executeDesktopHarnessRun\([\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
   assert.doesNotMatch(workbench, /const skillSnapshot = useHarness \? \[\]/)
@@ -459,10 +459,10 @@ test('Harness conversations open immediately without creating a Raw memory space
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.ok(workbench.includes("const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')"))
-  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames)'))
+  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
-  assert.ok(workbench.includes('selectedSkillNames.value = [...new Set((names || []).filter(name => available.has(name)))]'))
+  assert.ok(workbench.includes('restoreManjuSelection(names || [], preference).filter(name => available.has(name))'))
   assert.ok(workbench.includes("createHarnessConversationCatalogEntry(owner, '新对话')"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
@@ -1852,11 +1852,11 @@ test('editing a turn restores the Skill it was sent with and keeps its reference
   assert.ok(editTurn, 'editTurn should exist')
   assert.ok(cancelEdit, 'cancelEdit should exist')
   // 轮次上存了 skillNames 就必须恢复：丢了它，模型重发时一个 skill-creator 工具都没有。
-  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames\)/)
+  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames, currentManjuPreference\(\)\)/)
   assert.match(cancelEdit, /restoreComposerSkills\(latestUserTurnToolNames\(/)
-  assert.match(workbench, /async function restoreComposerSkills\(names\?: string\[\]\) \{/)
+  assert.match(workbench, /async function restoreComposerSkills\(names\?: string\[\], preference\?: ManjuPreference\) \{/)
   // 恢复要过滤掉已卸载的 Skill：坏引用会污染整段会话的 Skill 加载。
-  assert.match(workbench, /selectedSkillNames\.value = \[\.\.\.new Set\(\(names \|\| \[\]\)\.filter\(name => available\.has\(name\)\)\)\]/)
+  assert.match(workbench, /restoreManjuSelection\(names \|\| \[\], preference\)\.filter\(name => available\.has\(name\)\)/)
   // 引用文件已经跨轮保留，编辑时不该再把它清空。
   assert.doesNotMatch(editTurn, /referencedFiles\.value = \[\]/)
   assert.doesNotMatch(cancelEdit, /referencedFiles\.value = \[\]/)

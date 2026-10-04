@@ -1,4 +1,5 @@
 import { deepSeekSessionId } from '@/services/deepSeekHarness'
+import type { ManjuPreference } from './manjuProduction'
 
 export interface HarnessConversationCatalogEntry {
   conversationId: string
@@ -9,6 +10,8 @@ export interface HarnessConversationCatalogEntry {
   updatedAt: string
   legacyRawPath?: string
   migratedAt?: string
+  /** 输入框选择，属于导航偏好；作品和对话正文仍由项目与 Harness 保存。 */
+  manju?: ManjuPreference
 }
 
 const keyFor = (workspaceKey: string) => `jc:harness-conversations:${workspaceKey}`

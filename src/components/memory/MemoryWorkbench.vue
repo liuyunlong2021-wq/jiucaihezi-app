@@ -129,6 +129,10 @@ import { parseScene3DResultMarkers, serializeScene3DDocument, stripScene3DResult
 import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/jsonCanvas'
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
+import {
+  MANJU_ROUTER, MANJU_SKILLS, normalizeManjuVideoModel, restoreManjuSelection,
+  type ManjuPreference, type ManjuVideoModel,
+} from '@/runtime/memory/manjuProduction'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
 import { setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
@@ -186,6 +190,44 @@ const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
+const manjuVideoModel = ref<ManjuVideoModel>('ask')
+const manjuSelected = computed(() => selectedSkillNames.value.includes(MANJU_ROUTER))
+
+function saveManjuPreference() {
+  const active = conversation.value
+  if (!active || !desktopOnlyRuntime) return
+  const entry = listHarnessConversationCatalog(active.resource.owner)
+    .find(item => item.conversationId === active.transcript.id)
+  if (entry) upsertHarnessConversationCatalogEntry({
+    ...entry, manju: { enabled: manjuSelected.value, videoModel: manjuVideoModel.value },
+  })
+}
+
+function toggleManjuProduction() {
+  if (manjuSelected.value) selectedSkillNames.value = selectedSkillNames.value.filter(name => name !== MANJU_ROUTER)
+  else {
+    if (selectedSkillNames.value.some(name => !MANJU_SKILLS.includes(name)))
+      contextNotice.value = '已切换到漫剧制作路线；本对话使用内置漫剧 Skill。'
+    selectedSkillNames.value = [MANJU_ROUTER]
+  }
+  saveManjuPreference()
+}
+
+function changeManjuVideoModel(event: Event) {
+  manjuVideoModel.value = normalizeManjuVideoModel((event.target as HTMLSelectElement).value)
+  saveManjuPreference()
+}
+
+function removeSelectedSkill(name: string) {
+  selectedSkillNames.value = selectedSkillNames.value.filter(item => item !== name)
+  saveManjuPreference()
+}
+
+function currentManjuPreference(): ManjuPreference | undefined {
+  const active = conversation.value
+  return active ? listHarnessConversationCatalog(active.resource.owner)
+    .find(item => item.conversationId === active.transcript.id)?.manju : undefined
+}
 // 文件能力合同：授权只来自用户在消息里给出的绝对路径，本会话内累积有效。
 const authorizedPaths = ref<string[]>([])
 const selectedMcpToolNames = ref<string[]>([])
@@ -382,9 +424,10 @@ async function availableSkillNamesForComposer(): Promise<Set<string>> {
  * 恢复输入框里的 @Skill。必须过滤掉已经不存在的 Skill：
  * 坏引用会让整段会话的 Skill 加载失败，连带 read 全部不可用。
  */
-async function restoreComposerSkills(names?: string[]) {
+async function restoreComposerSkills(names?: string[], preference?: ManjuPreference) {
   const available = await availableSkillNamesForComposer()
-  selectedSkillNames.value = [...new Set((names || []).filter(name => available.has(name)))]
+  selectedSkillNames.value = restoreManjuSelection(names || [], preference).filter(name => available.has(name))
+  manjuVideoModel.value = normalizeManjuVideoModel(preference?.videoModel)
 }
 const mentionOpen = ref(false)
 // 从芯片排「@Skill」进入时只列 Skill；手打 @ 时仍给全套候选。
@@ -711,6 +754,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   ]
   const seenSkillNames = new Set<string>()
   const skills = sortSkillsForPicker(skillOptions.filter(skill => {
+    if (manjuSelected.value && !MANJU_SKILLS.includes(skill.name)) return false
     if (seenSkillNames.has(skill.name)) return false
     seenSkillNames.add(skill.name)
     return true
@@ -1356,7 +1400,8 @@ async function openResource(resource: ProjectResourceOpenResult) {
       ...attachment, value: '', resourcePath: attachment.projectPath,
     }))
     const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')
-    await restoreComposerSkills(latestUserTurn?.skillNames)
+    await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju)
+    if (generation !== resourceOpenGeneration) return
     applyToolChipIds(latestUserToolChips(activeConversation.transcript.turns))
     rememberConversation({ resource: activeConversation.resource, transcript: activeConversation.transcript })
     if (generation !== resourceOpenGeneration) return
@@ -1688,7 +1733,7 @@ async function editTurn(turn: ConversationTurn) {
   input.value = turn.content
   attachments.value = []
   applyToolChipIds(turn.toolChips)
-  await restoreComposerSkills(turn.skillNames)
+  await restoreComposerSkills(turn.skillNames, currentManjuPreference())
   try {
     for (const attachment of turn.attachments || []) {
       const path = attachment.projectPath || attachment.readablePath
@@ -1716,7 +1761,7 @@ async function cancelEdit() {
   attachments.value = []
   const turns = conversation.value?.transcript.turns || []
   applyToolChipIds(latestUserToolChips(turns))
-  await restoreComposerSkills(latestUserTurnToolNames(turns))
+  await restoreComposerSkills(latestUserTurnToolNames(turns), currentManjuPreference())
   setEditorText(composerRef.value, '')
   resizeComposer()
   composerRef.value?.focus()
@@ -1904,6 +1949,7 @@ async function send(remoteText?: string) {
 
   const useHarness = desktopOnlyRuntime
   const skillSnapshot = selectedSkillNames.value.slice()
+  const manjuModelSnapshot = manjuVideoModel.value
   const editTargetId = remote ? '' : editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
   if (editTargetId && editIndex < 0) {
@@ -2025,7 +2071,7 @@ async function send(remoteText?: string) {
     const reply = useHarness ? await executeDesktopHarnessRun(runs, run, {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
-      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns),
+      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns, manjuModelSnapshot),
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
@@ -2276,6 +2322,8 @@ watch([
   avSelected,
   scene3dSelected,
   selectedMcpToolNames,
+  selectedSkillNames,
+  manjuVideoModel,
 ], () => {
   if (!desktopOnlyRuntime) return
   const active = conversation.value
@@ -2289,6 +2337,7 @@ watch([
     modelProviderId: selectedModel()?.providerId,
     permissionTier: permissionTier.value,
     skillNames: selectedSkillNames.value.slice(),
+    manjuVideoModel: manjuVideoModel.value,
     mediaSelected: mediaSelected.value,
     avSelected: avSelected.value,
     scene3dSelected: scene3dSelected.value,
@@ -2606,6 +2655,12 @@ async function selectMention(option: MemoryMentionOption) {
         if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
       } else enableTool(option.id)
     } else if (option.type === 'skill') {
+      if (manjuSelected.value && !MANJU_SKILLS.includes(option.name))
+        throw new Error('请先退出漫剧制作，再选择其他路线的 Skill。')
+      if (option.name === MANJU_ROUTER) {
+        selectedSkillNames.value = [MANJU_ROUTER]
+        saveManjuPreference()
+      }
       if (!selectedSkillNames.value.includes(option.name)) {
         selectedSkillNames.value.push(option.name)
         recordSkillUse(option.name)
@@ -3676,7 +3731,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name">{{ name }}</span>
-            <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+            <button title="移除 Skill" @click="removeSelectedSkill(name)">×</button>
           </div>
           <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
@@ -3803,6 +3858,28 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                   <JcIcon name="description" /><span>{{ permissionTierShortLabel() }}</span>
                 </button>
               </div>
+              <button
+                v-if="desktopOnlyRuntime"
+                type="button"
+                class="memory-manju-button"
+                :class="{ active: manjuSelected }"
+                :aria-pressed="manjuSelected"
+                :disabled="!conversation"
+                title="漫剧制作：从任意阶段接手，各镜头可自由选择视频模型"
+                @click="toggleManjuProduction"
+              ><JcIcon name="movie" /><span>漫剧制作</span></button>
+              <select
+                v-if="desktopOnlyRuntime && manjuSelected"
+                class="memory-manju-model"
+                :value="manjuVideoModel"
+                aria-label="本次默认视频模型，消息中的镜头选择优先"
+                title="仅作本次默认；可在消息中给不同镜头指定不同模型"
+                @change="changeManjuVideoModel"
+              >
+                <option value="ask">按本次要求</option>
+                <option value="minimax-h3">MiniMax H3</option>
+                <option value="seedance-2.5">Seedance 2.5</option>
+              </select>
               <button v-for="command in primaryCommands" :key="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
@@ -4183,6 +4260,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 /* 芯片提示用 fixed 定位，避开 `.memory-command-strip` 的 overflow 裁剪；颜色走主题。 */
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
+.memory-command-strip > .memory-manju-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
+.memory-manju-model { height: 28px; max-width: 132px; flex: 0 0 auto; padding: 0 5px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink2); font: inherit; font-size: 12px; }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 /* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
    写在 hover 之后，压住 hover 的 olive，红着不动。 */

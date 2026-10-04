@@ -148,8 +148,19 @@ test('current product instructions and packaged Wiki templates use the memory co
 
 test('App bundles only the remaining product Skills', () => {
   const expected = [
+    'h3-prompt-writing',
+    'jc-duanju',
+    'jc-film-style',
+    'jc-gongchengjuben',
+    'jc-juese-geshi',
+    'jc-juese-sheji',
+    'jc-manju-zhizuo',
     'jc-new-user-guide',
+    'jc-prop-prompt',
+    'jc-scene-prompt',
+    'jc-seedance',
     'jc-watch',
+    'jc-xiangmuziliao',
     'skill-creator',
     'wiki-memory',
   ]

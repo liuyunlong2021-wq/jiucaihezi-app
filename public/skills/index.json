@@ -1,5 +1,208 @@
 [
   {
+    "id": "h3-prompt-writing",
+    "name": "h3-prompt-writing",
+    "displayName": "h3-prompt-writing",
+    "description": "Write MiniMax H3 video generation prompts for T2VA, I2VA, FL2VA, L2VA, and Ref2VA. Use when rewriting multimodal requests into H3 prompt structures, composing integrated_multimodal_description, overall_soundscape, and non_diegetic_music, aligning keyframes, or defining reference labels for images, videos, and audio.",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/base-en.txt",
+      "references/ref-en.txt"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        },
+        {
+          "path": "references/base-en.txt",
+          "kind": "reference"
+        },
+        {
+          "path": "references/ref-en.txt",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-duanju",
+    "name": "jc-duanju",
+    "displayName": "jc-duanju",
+    "description": "根据用户提供的人物设定、故事梗概、小说片段、分集大纲、聊天记录或其他创作素材，创作可拍摄的中文短剧剧本、单场戏、单集剧本或分集大纲。只要用户要求把素材改写、扩写、续写、拆分或整理成短剧，就使用本 Skill。严格执行短剧的冲突前置、情绪拉扯、反转打脸、结尾留钩子、短台词和可视化表达规范；不联动任何调性文件。",
+    "triggers": [
+      "写短剧",
+      "创作短剧",
+      "短剧剧本",
+      "短剧改写",
+      "短剧扩写",
+      "短剧续写",
+      "把素材写成短剧",
+      "写一集短剧",
+      "写一场戏",
+      "分集大纲"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-film-style",
+    "name": "jc-film-style",
+    "displayName": "jc-film-style",
+    "description": "从故事或剧本生成影视、MV、短片、广告和短视频的项目总纲内容，包括项目方向、制作路线、整体节奏意图、角色/场景/道具资产清单与空间关系。当用户提供故事或剧本、需要确定视觉方向、生产方式、声音路线或场景空间合同时使用。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/项目参数与视觉风格选项.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "references/项目参数与视觉风格选项.md",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-gongchengjuben",
+    "name": "jc-gongchengjuben",
+    "displayName": "jc-gongchengjuben",
+    "description": "把文学剧本或分场文本改写成拍摄剧本（工程台本），默认9:16竖屏、快节奏、一镜一个说话角色；全景交代位置关系，单人中近景按时间展开人物状态、潜台词与表演因果，保留原台词和动作节拍。当用户需要工程剧本、拍摄台本、景别运镜、光位色温、逐镜时间或角色表演安排时使用；不替代文学剧本创作或模型专用视频提示词。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-juese-geshi",
+    "name": "jc-juese-geshi",
+    "displayName": "jc-juese-geshi",
+    "description": "基于已选定的人物参考图，编写只调整画风和排版的三格人物设定图提示词。用户需要把生活照或已有角色图整理成9:16或16:9角色参考板、统一角色图格式或转换成片画风时使用；人物身份、服装与造型由参考图锁定。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/16-9.md",
+      "references/9-16.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        },
+        {
+          "path": "references/16-9.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/9-16.md",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-juese-sheji",
+    "name": "jc-juese-sheji",
+    "displayName": "jc-juese-sheji",
+    "description": "根据人物小传、角色描述或参考图，设计单个角色在所属环境中的形象、造型与当下状态，输出有气氛且身份清晰的生图提示词；适用于漫剧角色定形，支持真人、二维、三维及非人角色。角色参考板排版由 jc-juese-geshi 处理，独立美女帅哥写真由 jc-shuaigemeinv 处理。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-manju-zhizuo",
+    "name": "jc-manju-zhizuo",
+    "displayName": "jc-manju-zhizuo",
+    "description": "仅在用户明确选择 jc-manju-zhizuo 时使用。作为漫剧制作总入口，在十个指定 Skill 中按现有材料路由项目资料、小说改编、创作方向、环境角色设计、角色图格式、场景与道具、工程台本及 MiniMax H3／Seedance 2.5 提示词；可从任意阶段接手，图片与视频按用户要求只提交、不等待。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        }
+      ]
+    }
+  },
+  {
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
     "displayName": "新手指南",
@@ -55,6 +258,129 @@
         },
         {
           "path": "references/待补充.md",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-prop-prompt",
+    "name": "jc-prop-prompt",
+    "displayName": "jc-prop-prompt",
+    "description": "根据故事素材、项目资料、用户描述或参考图，创作可复用的道具设计提示词、三视图道具设定图和市场化六视图正交转面参考图。用户提到道具设计、道具设定图、道具提示词、道具参考、道具资产、正背侧三视图、六视图、turnaround、武器、工具、饰品、文件或核心剧情道具时使用。",
+    "triggers": [
+      "道具设计",
+      "道具设定图",
+      "道具提示词",
+      "道具资产",
+      "道具参考",
+      "图生图道具",
+      "三视图道具",
+      "六视图道具",
+      "道具转面图",
+      "prop turnaround",
+      "prop design",
+      "画道具",
+      "设计道具"
+    ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-scene-prompt",
+    "name": "jc-scene-prompt",
+    "displayName": "jc-scene-prompt",
+    "description": "根据故事素材、项目资料、用户描述或参考图，创作支持16:9与9:16画幅的场景设计提示词、空镜概念图和可复用场景资产。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-seedance",
+    "name": "jc-seedance",
+    "displayName": "jc-seedance",
+    "description": "为 Seedance 2.5／SD2.5 根据故事、剧本、角色与场景资产生成固定结构的中文电影导演视频提示词，覆盖参考图绑定、角色声音、文戏表演、空间连续、动作攻防、声音与转场。适用于MV、广告、剧情短片、动作戏和视觉喜剧；也承接单场戏成片的电影化视频提示词。",
+    "triggers": [
+      "导演分镜",
+      "导演分镜提示词",
+      "电影导演分镜",
+      "单场戏视频提示词",
+      "单场戏提示词",
+      "写一段电影片段",
+      "写一段情绪戏",
+      "暧昧戏视频提示词",
+      "电影化视频提示词",
+      "按单场戏视频提示词规范"
+    ],
+    "commands": [],
+    "files": [
+      ".jc-skill-package.json",
+      "SKILL.md",
+      "agents/openai.yaml",
+      "references/drama-performance.md",
+      "references/exaggerated-animation-performance.md",
+      "references/kungfu-duel.md",
+      "references/maoshan-exorcism-action.md",
+      "references/single-scene-cinematic.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": ".jc-skill-package.json",
+          "kind": "other"
+        },
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        },
+        {
+          "path": "references/drama-performance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/exaggerated-animation-performance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/kungfu-duel.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/maoshan-exorcism-action.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/single-scene-cinematic.md",
           "kind": "reference"
         }
       ]
@@ -121,6 +447,32 @@
         {
           "path": "scripts/transcribe.py",
           "kind": "script"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-xiangmuziliao",
+    "name": "jc-xiangmuziliao",
+    "displayName": "jc-xiangmuziliao",
+    "description": "从小说、完整剧本或分集文本整理故事梗概、分集梗概、人物小传和故事背景与世界规则。当用户需要在漫剧制作前沉淀项目资料、理解原作、梳理人物动机与关系、明确每集戏剧任务时使用；视觉风格设计、资产提示词、工程台本与视频提示词由后续流程承接。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
         }
       ]
     }

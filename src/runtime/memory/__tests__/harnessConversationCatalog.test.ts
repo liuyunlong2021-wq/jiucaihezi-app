@@ -48,3 +48,16 @@ test('Harness conversation catalog supports legacy mapping, rename, and logical 
   removeHarnessConversationCatalogEntry('/project-a', 'legacy-1', storage)
   assert.deepEqual(listHarnessConversationCatalog('/project-a', storage), [])
 })
+
+test('production selection persists before sending and remains isolated by conversation', () => {
+  const storage = memoryStorage()
+  const a = createHarnessConversationCatalogEntry('/a', 'a', storage, 'a')
+  createHarnessConversationCatalogEntry('/a', 'b', storage, 'b')
+  upsertHarnessConversationCatalogEntry({ ...a, manju: { enabled: true, videoModel: 'seedance-2.5' } }, storage)
+  renameHarnessConversationCatalogEntry('/a', 'a', 'renamed', storage)
+  assert.deepEqual(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'a')?.manju,
+    { enabled: true, videoModel: 'seedance-2.5' })
+  assert.equal(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'b')?.manju, undefined)
+  upsertHarnessConversationCatalogEntry({ ...a, manju: { enabled: false, videoModel: 'seedance-2.5' } }, storage)
+  assert.equal(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'a')?.manju?.enabled, false)
+})
