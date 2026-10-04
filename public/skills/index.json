@@ -97,11 +97,16 @@
     "id": "jc-gongchengjuben",
     "name": "jc-gongchengjuben",
     "displayName": "jc-gongchengjuben",
-    "description": "把文学剧本或分场文本改写成拍摄剧本（工程台本），默认9:16竖屏、快节奏、一镜一个说话角色；全景交代位置关系，单人中近景按时间展开人物状态、潜台词与表演因果，保留原台词和动作节拍。当用户需要工程剧本、拍摄台本、景别运镜、光位色温、逐镜时间或角色表演安排时使用；不替代文学剧本创作或模型专用视频提示词。",
+    "description": "把文学剧本或分场文本改写成拍摄剧本（工程台本），负责导演设计：人物状态与潜台词、可见表演、景别运镜、空间连续、动作特效因果、声音转场及逐镜节奏。默认9:16竖屏、快节奏、一镜一个说话角色，保留原台词和动作节拍。当用户需要工程剧本、拍摄台本或逐镜导演安排时使用；不替代文学剧本创作或模型专用提示词格式转换。",
     "triggers": [],
     "commands": [],
     "files": [
-      "SKILL.md"
+      "SKILL.md",
+      "references/drama-performance.md",
+      "references/exaggerated-animation-performance.md",
+      "references/kungfu-duel.md",
+      "references/maoshan-exorcism-action.md",
+      "references/single-scene-cinematic.md"
     ],
     "package": {
       "schemaVersion": 1,
@@ -110,6 +115,26 @@
         {
           "path": "SKILL.md",
           "kind": "instruction"
+        },
+        {
+          "path": "references/drama-performance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/exaggerated-animation-performance.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/kungfu-duel.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/maoshan-exorcism-action.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/single-scene-cinematic.md",
+          "kind": "reference"
         }
       ]
     }
@@ -323,7 +348,7 @@
     "id": "jc-seedance",
     "name": "jc-seedance",
     "displayName": "jc-seedance",
-    "description": "为 Seedance 2.5／SD2.5 根据故事、剧本、角色与场景资产生成固定结构的中文电影导演视频提示词，覆盖参考图绑定、角色声音、文戏表演、空间连续、动作攻防、声音与转场。适用于MV、广告、剧情短片、动作戏和视觉喜剧；也承接单场戏成片的电影化视频提示词。",
+    "description": "将已确认工程台本忠实转写为 Seedance 2.5／SD2.5 固定结构的中文视频提示词，负责实际素材绑定、既有角色声音、模型适配与排版，保留表演因果、镜头顺序和空间连续。也接收故事或单场戏：先复用 jc-gongchengjuben 的导演规则进行内部设计，再按本格式交付；不另维护导演体系。",
     "triggers": [
       "导演分镜",
       "导演分镜提示词",

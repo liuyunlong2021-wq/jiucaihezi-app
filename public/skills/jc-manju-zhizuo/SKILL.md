@@ -16,9 +16,9 @@ description: "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时�
 | 把选定人物参考图转为指定画风和横竖屏三格排版的中文图生图提示词 | [jc-juese-geshi](../jc-juese-geshi/SKILL.md) |
 | 空镜场景设定图、生图提示词和空间结构 | [jc-scene-prompt](../jc-scene-prompt/SKILL.md) |
 | 剧情道具设定图、生图提示词和多视图资产 | [jc-prop-prompt](../jc-prop-prompt/SKILL.md) |
-| 把文学剧本或分场文本改为逐镜、带连续时间码的工程台本 | [jc-gongchengjuben](../jc-gongchengjuben/SKILL.md) |
+| 完成表演、动作因果、空间声画与逐镜节奏，交付带连续时间码的工程台本 | [jc-gongchengjuben](../jc-gongchengjuben/SKILL.md) |
 | 用户本轮指定 MiniMax H3 的视频提示词 | [h3-prompt-writing](../h3-prompt-writing/SKILL.md) |
-| 用户本轮指定 Seedance 2.5／SD2.5 的导演视频提示词 | [jc-seedance](../jc-seedance/SKILL.md) |
+| 用户本轮指定 Seedance 2.5／SD2.5 的视频提示词转写 | [jc-seedance](../jc-seedance/SKILL.md) |
 
 ## 路由优先级
 
@@ -53,6 +53,12 @@ description: "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时�
 - 后续任务复用已确认的创作方向；改编稿与原作分开，确认的分集变化再同步到分集梗概。已有可用剧本不重写。
 - 工程台本复用剧本、分集任务、人物资料、世界规则和创作方向，不要求先生成资产；后来补入参考图只校准外观、空间和道具，不擅改剧情。
 - 上述依赖不授权调用其他 Skill 或创建缺失的整套资料。当前交付所需材料不足时只问必要缺项。
+
+## 工程台本与视频提示词分工
+
+- `jc-gongchengjuben` 负责导演决策：人物状态与潜台词、触发与反馈、表演过程、动作特效因果、景别机位、空间连续、声音切点及时间预算。确认台本是下游创作依据。
+- `jc-seedance` 负责忠实转写、实际素材与声音绑定、模型适配和格式，不替工程台本补戏。表达缺口可等义澄清；导演缺口与模型限制须回指原镜头，按用户授权先修订工程台本再转换，不偷偷增删、重排或重设表演。
+- 直接给故事请求 Seedance 提示词时，允许该 Skill 读取同套 `jc-gongchengjuben` 的导演规则与必要专项，在内部设计后只交付当前提示词；这项资源依赖不授权自动生成一份额外工程台本或串跑制作阶段。两者随同一内置包提供，不依赖个人 Skill 目录。
 
 ## 视频模型自由路由
 
