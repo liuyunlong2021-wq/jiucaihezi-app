@@ -107,6 +107,10 @@ if (!server.includes(streamBridge)) {
 
 // SDK 0.1.7 creates every first-seen session ID, even when persistence already owns it.
 // Use the official AgentRegistry resume seam until the SDK server ships the same check.
+const approvalAttach = `\t\ttry {
+\t\t\trec.approvalBridge = await attachApprovalBridge(handle.agent, (method, params) => this.transport.notify(method, params));
+\t\t} catch (error) { await handle.dispose(); throw error; }
+`
 const createSession = `\tasync createSession(sessionId) {
 \t\tconst rec = { handle: await this.ctx.agents.create({
 \t\t\tsessionId: brandString(sessionId),
@@ -137,7 +141,7 @@ const resumableSession = `\tasync createSession(sessionId) {
 \t\tthis.sessions.set(sessionId, rec);
 \t\treturn rec;
 \t}`
-if (!server.includes(resumableSession)) {
+if (!server.replace(approvalAttach, '').includes(resumableSession)) {
   if (!server.includes(createSession)) throw new Error('Unsupported DeepSeek Harness session server layout')
   server = server.replace(createSession, resumableSession)
   changed = true
@@ -191,21 +195,47 @@ if (!server.includes(permissionCase)) {
 }
 const permissionMethod = `\tasync permission(params) {
 \t\tif (!this.initialized) throw new Error("SDK server is not initialized");
+\t\tif (params.existingOnly && !this.sessions.has(params.sessionId) && await this.ctx.get("sessionPersistence")?.stat(brandString(params.sessionId)) === void 0) return { exists: false };
 \t\tconst rec = await this.getOrCreateSession(params.sessionId);
 \t\tthis.assertLiveAgent(rec, params.sessionId);
-\t\tconst preset = String(params?.preset ?? "");
-\t\tconst settled = await this.ctx.get("commands").execute(rec.handle.agent, "/permission " + preset, [], new AbortController().signal);
-\t\tif (settled === void 0) throw new Error("unknown permission preset: " + preset);
-\t\tif (settled.result.kind !== "success") throw new Error(settled.result.text || "permission preset " + preset + " was rejected");
-\t\treturn { preset };
+\t\tconst agent = rec.handle.agent;
+\t\tif (params.preset !== void 0) {
+\t\t\tconst preset = String(params.preset);
+\t\t\tconst settled = await this.ctx.get("commands").execute(agent, "/permission " + preset, [], new AbortController().signal);
+\t\t\tif (settled === void 0) throw new Error("unknown permission preset: " + preset);
+\t\t\tif (settled.result.kind !== "success") throw new Error(settled.result.text || "permission preset " + preset + " was rejected");
+\t\t}
+\t\tconst presets = this.ctx.get("permissionPresets");
+\t\treturn { ...presets.permissionState(agent.session), preset: presets.current(agent.session), agentId: agent.id };
+\t}
+\tasync approval(params) {
+\t\tconst rec = this.sessions.get(params.sessionId);
+\t\tif (!rec) throw new Error("approval session is not pending");
+\t\tthis.assertLiveAgent(rec, params.sessionId);
+\t\treturn rec.approvalBridge.answer(params);
 \t}
 `
-if (!server.includes('async permission(params) {')) {
-  const liveAgent = '\tassertLiveAgent(rec, sessionId) {'
-  if (!server.includes(liveAgent)) throw new Error('Unsupported DeepSeek Harness agent layout')
-  server = server.replace(liveAgent, `${permissionMethod}${liveAgent}`)
+const permissionStart = server.indexOf('\tasync permission(params) {')
+const permissionTail = permissionStart < 0 ? -1 : server.slice(permissionStart).search(/\t(?:async applyPinnedSkillScope\(rec, content\)|assertLiveAgent\(rec, sessionId\)) \{/)
+const permissionEnd = permissionStart + permissionTail
+if (permissionStart < 0) {
+  if (!server.includes('\tassertLiveAgent(rec, sessionId) {')) throw new Error('Unsupported permission method layout')
+  server = server.replace('\tassertLiveAgent(rec, sessionId) {', permissionMethod + '\tassertLiveAgent(rec, sessionId) {')
+  changed = true
+} else if (server.slice(permissionStart, permissionEnd) !== permissionMethod) {
+  if (permissionTail < 0) throw new Error('Unsupported permission method layout')
+  server = server.slice(0, permissionStart) + permissionMethod + server.slice(permissionEnd)
   changed = true
 }
+
+// Bridge lifetime follows the actual Agent, including resume and shutdown.
+const approvalImport = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
+if (!server.includes(approvalImport)) { server = approvalImport + server; changed = true }
+const approvalCase = '\t\t\tcase "session/approval": return this.approval(params);'
+if (!server.includes(approvalCase)) { server = server.replace(permissionCase, permissionCase + '\n' + approvalCase); changed = true }
+const sessionRegister = '\t\tconst rec = { handle };\n'
+// The resume-layout check above must remain idempotent with the additional attachment.
+if (!server.includes(approvalAttach)) { server = server.replace(sessionRegister, sessionRegister + approvalAttach); changed = true }
 
 // 用户显式点名 skill（官方 `/name` 手势）时，本会话**只许用点名的这些**：把 `skill` 工具从
 // 该 agent 的工具面里掩掉。官方 `dsh-tool-skill` 在工具不可见时**不再发布 skill 目录**

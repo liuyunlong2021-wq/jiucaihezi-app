@@ -70,6 +70,8 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
     value: {
       isTauri: true,
       __TAURI_INTERNALS__: {
+        transformCallback() { return 1 },
+        unregisterCallback() {},
         async invoke(
           command: string,
           args: {
@@ -82,6 +84,9 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
             }
           } = {},
         ) {
+          if (command === 'retain_media_download_key') return '0'.repeat(64)
+          if (command === 'get_media_download_key') return 'session-cloud'
+          if (command === 'http_cancel_project_download') return
           if (command === 'http_download_base64') {
             downloads.push(args.request?.url || '')
             return { status: 200, data_base64: 'cG5n', headers: { 'content-type': 'image/png' } }
@@ -1590,7 +1595,7 @@ test(
       pollUrl: '/v1/videos/task_download_fail_001',
       pollKind: 'video',
       planSnapshot: { apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' },
-      // 已经两次失败：这次失败后应停在 remote-only，不能又被降级回 failed。
+      // 多次失败仍可重试下载，不永久放弃。
       assetStatus: 'failed', assetRetryCount: 2,
     }]) })
     const files = installTauriTaskFileStore()
@@ -1609,7 +1614,8 @@ test(
       const task = store.getTask('mtask_save_failure_state')
       assert.equal(task?.status, 'success')
       assert.match(String(task?.errorMsg || ''), /保存到项目失败/)
-      assert.equal(task?.assetStatus, 'remote-only')
+      assert.equal(task?.assetStatus, 'failed')
+      assert.equal(task?.downloadState, 'failed')
       // 关键：进度文案不能再是“完成”——那是成功路径才会写的。
       assert.doesNotMatch(String(task?.progressText || ''), /^完成$/)
       assert.deepEqual(files.downloads, [failing])
@@ -3018,4 +3024,82 @@ test('MediaTaskBubble stays on the memory-workbench project and media paths', ()
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
   assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
   assert.equal(source.includes('v-else-if="isSuccess && hasDisplayableResult"'), true)
+})
+
+test('desktop startup resumes a saved download without submitting generation and leaves paused downloads alone', { concurrency: false }, async () => {
+  const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([
+    { id: 'mtask_recover_download', type: 'video', model: 'jc-minimax-h3-ref2v', modelLabel: 'H3', prompt: '恢复下载', referenceImages: [], source: 'creation',
+      status: 'running', createdAt: 1, progress: 100, progressText: '保存中', directory: '/projects/original',
+      resultUrl: 'https://api.jiucaihezi.studio/v1/videos/task_resume_download/content', upstreamTaskId: 'task_resume_download',
+      downloadState: 'downloading', downloadCredentialRef: 'original-reference' },
+    { id: 'mtask_paused_download', type: 'video', model: 'jc-minimax-h3-ref2v', modelLabel: 'H3', prompt: '暂停下载', referenceImages: [], source: 'creation',
+      status: 'success', createdAt: 1, progress: 100, progressText: '暂停', directory: '/projects/original', assetStatus: 'failed',
+      resultUrl: 'https://api.jiucaihezi.studio/v1/videos/task_paused_download/content', downloadState: 'paused', downloadRetryable: false },
+  ]) })
+  const files = installTauriTaskFileStore()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('different-current-key')
+  let submitted = 0
+  __setCreationSubmitExecutorForTests(async () => { submitted++; throw new Error('不能重新生成') })
+  try {
+    const store = useMediaTaskStore()
+    await store.init()
+    await waitFor(() => store.getTask('mtask_recover_download')?.assetStatus === 'local')
+    assert.equal(submitted, 0)
+    assert.equal(store.getTask('mtask_recover_download')?.downloadState, 'complete')
+    assert.equal(store.getTask('mtask_recover_download')?.directory, '/projects/original')
+    assert.equal(store.getTask('mtask_paused_download')?.downloadState, 'paused')
+    assert.equal(files.downloads.length, 1)
+    assert.equal(await store.retryMediaPersistence('mtask_paused_download'), true)
+    assert.equal(store.getTask('mtask_paused_download')?.assetStatus, 'local')
+    assert.equal(submitted, 0)
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    files.restore()
+    storage.restore()
+  }
+})
+
+
+test('desktop download cancellation pauses only the transfer and can resume without regeneration', { concurrency: false }, async () => {
+  const url = 'https://api.jiucaihezi.studio/v1/videos/task_pause_native/content'
+  const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+    id: 'mtask_pause_native', type: 'video', model: 'jc-minimax-h3-ref2v', modelLabel: 'H3', prompt: '暂停后续传', referenceImages: [], source: 'creation',
+    status: 'success', createdAt: 1, progress: 100, progressText: '等待下载', directory: '/projects/original', resultUrl: url,
+  }]) })
+  const files = installTauriTaskFileStore()
+  const runtime = (globalThis as any).window.__TAURI_INTERNALS__
+  const originalInvoke = runtime.invoke
+  let started = false
+  let first = true
+  let rejectDownload: (cause: Error) => void = () => {}
+  runtime.invoke = async (command: string, args: any) => {
+    if (command === 'http_download_to_project' && first) {
+      first = false
+      started = true
+      return new Promise((_resolve, reject) => { rejectDownload = reject })
+    }
+    if (command === 'http_cancel_project_download') { rejectDownload(new Error('下载已暂停')); return }
+    return originalInvoke(command, args)
+  }
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+  try {
+    await store.init()
+    const downloading = store.retryMediaPersistence('mtask_pause_native')
+    await waitFor(() => started)
+    assert.equal(store.canCancelTask('mtask_pause_native'), true)
+    assert.equal(await store.cancelTask('mtask_pause_native'), true)
+    assert.equal(await downloading, false)
+    const paused = store.getTask('mtask_pause_native')
+    assert.equal(paused?.status, 'success')
+    assert.equal(paused?.downloadState, 'paused')
+    assert.equal(paused?.downloadRetryable, false)
+    assert.equal(paused?.assetUri, undefined)
+    assert.equal(paused?.resultUrl, url)
+    assert.equal(await store.retryMediaPersistence('mtask_pause_native'), true)
+    assert.equal(store.getTask('mtask_pause_native')?.downloadState, 'complete')
+    assert.deepEqual(files.downloads, [url])
+  } finally { files.restore(); storage.restore() }
 })

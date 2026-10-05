@@ -9,6 +9,7 @@ import {
   DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
   DEEPSEEK_HARNESS_SESSION_MARKER,
   deepSeekHandoffTurns,
+  deepSeekAssistantText,
   deepSeekPermissionChip,
   deepSeekPrompt,
   deepSeekSessionExists,
@@ -64,6 +65,8 @@ export type MemoryRun = {
   metrics: DirectRunMetrics | null
   userTurn: ConversationTurn | null
   programStatus: MemoryProgramStatus | null
+  permissionTier?: DeepSeekPermissionTier
+  permissionNotice?: string
   approval: { id: string; message: string; resolve: (decision: MemoryToolApprovalDecision) => void } | null
   controller: AbortController
   timer: ReturnType<typeof setInterval> | null
@@ -257,9 +260,18 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
   }
   const key = memoryRunKey(run.owner, run.resourcePath)
   const current = () => desktopConversationRuns.get(key) === run && run.phase === 'running'
-  const reply = await executeDesktopHarnessRun(desktopConversationRuns, run, { ...query,
-    message: deepSeekPrompt(userTurn.content, selected.skillNames || [], handoff),
-  })
+  let reply: string
+  try {
+    reply = await executeDesktopHarnessRun(desktopConversationRuns, run, { ...query,
+      message: deepSeekPrompt(userTurn.content, selected.skillNames || [], handoff),
+    })
+  } catch (cause) {
+    if (desktopConversationRuns.get(key) === run && run.phase === 'stopped') {
+      try { finishDesktopRemoteOfficialSession(run, selected, await readDeepSeekHarnessSession(query)) }
+      catch (readCause) { run.error = `已停止；会话记录刷新失败：${readCause instanceof Error ? readCause.message : String(readCause)}` }
+    }
+    throw cause
+  }
   if (!current()) return reply
   try {
     const snapshot = await readDeepSeekHarnessSession(query)
@@ -307,9 +319,10 @@ function finishDesktopRemoteOfficialSession(
   }
   run.officialHistoryReady = true
   run.userTurn = null
-  run.streamingText = ''
+  if (run.phase !== 'stopped' || snapshot.events.some(event => deepSeekAssistantText(event).trim() === run.streamingText.trim()))
+    run.streamingText = ''
   run.error = ''
-  run.status = '已完成'
+  run.status = run.phase === 'stopped' ? '已停止' : '已完成'
   return true
 }
 
@@ -403,7 +416,7 @@ export async function readDesktopConversationSession(sessionId: string) {
   const snapshot = await readDeepSeekHarnessSession(query)
   assertSelectedSession(sessionId, selected)
   const run = desktopConversationRuns.get(memoryRunKey(selected.owner, selected.resourcePath))
-  if (run?.phase === 'done' && !run.officialHistoryReady && run.conversationId === selected.conversationId)
+  if ((run?.phase === 'done' || run?.phase === 'stopped') && !run.officialHistoryReady && run.conversationId === selected.conversationId)
     finishDesktopRemoteOfficialSession(run, selected, snapshot)
   return desktopConversationProjection(sessionId, selected, snapshot)
 }
@@ -428,9 +441,7 @@ export function stopRun(run: MemoryRun) {
   stopRunTimer(run)
   settleApproval(run, 'reject')
   run.controller.abort()
-  run.userTurn = null
-  run.streamingText = ''
-  run.steps = []
+  // Stop execution; retain the accepted input and observed output until official history replaces them.
 }
 
 export function beginRunStatus(run: MemoryRun) {
@@ -451,41 +462,74 @@ export async function executeDesktopHarnessRun(
 ) {
   const current = () => runs.get(memoryRunKey(run.owner, run.resourcePath)) === run && run.phase === 'running'
   if (!current() || run.controller.signal.aborted) throw new RemoteProtocolError('RUN_STOPPED')
-  return execute({ ...input, signal: run.controller.signal,
-    onStatus(status) { if (current()) run.status = status },
-    onText(text) { if (current()) { run.status = '正在执行'; run.streamingText = text } },
-    onReasoning(text) { if (current()) run.reasoning = text },
-    onProgress(progress) {
-      if (!current()) return
-      const step = run.steps.find(item => item.id === progress.id)
-      // 重试条目按事件推进：`llm/retry` 建行、`llm/retry-started` 只推状态。
-      // 它没有工具名，不能走下面那条「label 缺省成执行工具」的分支。
-      if (progress.kind === 'retry') {
-        if (!step) run.steps.push({ id: progress.id, kind: 'retry', label: '', summary: '',
-          state: progress.state, retryState: progress.retryState, retry: progress.retry,
-          startedAt: progress.startedAt })
-        else {
-          step.state = progress.state
-          if (progress.retryState) step.retryState = progress.retryState
+  let approvalQueue: Promise<unknown> = Promise.resolve()
+  let closed = false
+  try {
+    return await execute({ ...input, signal: run.controller.signal,
+      onPermission(tier) { if (current()) run.permissionTier = tier },
+      onApproval(request, signal) {
+        const answer = approvalQueue.then(() => new Promise<'allowed-once' | 'rejected'>(resolve => {
+          if (closed || !current() || signal.aborted || run.controller.signal.aborted) { resolve('rejected'); return }
+          let settled = false
+          const finish = (decision: MemoryToolApprovalDecision) => {
+            if (settled) return
+            settled = true
+            signal.removeEventListener('abort', abort)
+            run.controller.signal.removeEventListener('abort', abort)
+            if (run.approval?.id === request.id) run.approval = null
+            if (current()) run.status = '正在等待模型继续处理'
+            resolve(decision === 'once' ? 'allowed-once' : 'rejected')
+          }
+          const abort = () => finish('reject')
+          signal.addEventListener('abort', abort, { once: true })
+          run.controller.signal.addEventListener('abort', abort, { once: true })
+          const step = run.steps.find(item => item.id === request.callId)
+          run.approval = { id: request.id, message: [request.toolName, request.target || step?.summary, request.displayReason?.zh || request.reason || '此操作需要你的授权'].filter(Boolean).join(' · '), resolve: finish }
+          run.status = '等待你的授权'
+        }))
+        approvalQueue = answer
+        return answer
+      },
+      onStatus(status) { if (current() && !run.approval) run.status = status },
+      onText(text) { if (current()) { if (!run.approval) run.status = '正在执行'; run.streamingText = text } },
+      onReasoning(text) { if (current()) run.reasoning = text },
+      onProgress(progress) {
+        if (!current()) return
+        const step = run.steps.find(item => item.id === progress.id)
+        // 重试条目按事件推进：`llm/retry` 建行、`llm/retry-started` 只推状态。
+        // 它没有工具名，不能走下面那条「label 缺省成执行工具」的分支。
+        if (progress.kind === 'retry') {
+          if (!step) run.steps.push({ id: progress.id, kind: 'retry', label: '', summary: '',
+            state: progress.state, retryState: progress.retryState, retry: progress.retry,
+            startedAt: progress.startedAt })
+          else {
+            step.state = progress.state
+            if (progress.retryState) step.retryState = progress.retryState
+          }
+          return
         }
-        return
-      }
-      if (progress.state === 'running') {
-        if (!step) run.steps.push({ id: progress.id, label: progress.label || '执行工具',
-          state: 'running', summary: progress.summary, startedAt: progress.startedAt })
-        run.status = `正在${progress.label || '执行工具'}`
-        return
-      }
-      if (step) {
-        step.state = progress.state
-        step.errorReason = progress.errorReason
-        step.resultText = progress.resultText
-        step.resultTruncated = progress.resultTruncated
-        if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
-          step.durationMs = progress.endedAt - step.startedAt
-      }
-      const running = run.steps.find(item => item.state === 'running')
-      run.status = running ? `正在${running.label}` : '正在等待模型继续处理'
-    },
-  })
+        if (progress.state === 'running') {
+          if (!step) run.steps.push({ id: progress.id, label: progress.label || '执行工具',
+            state: 'running', summary: progress.summary, startedAt: progress.startedAt })
+          if (!run.approval) run.status = `正在${progress.label || '执行工具'}`
+          return
+        }
+        if (step) {
+          step.state = progress.state
+          step.errorReason = progress.errorReason
+          step.resultText = progress.resultText
+          step.resultTruncated = progress.resultTruncated
+          if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
+            step.durationMs = progress.endedAt - step.startedAt
+        }
+        const running = run.steps.find(item => item.state === 'running')
+        if (!run.approval) run.status = running ? `正在${running.label}` : '正在等待模型继续处理'
+        if (progress.state === 'failed' && /\[sandbox: file access denied under (?:read-only|workspace-write|danger-full-access) mode\]/.test(progress.resultText || progress.errorReason || ''))
+          run.permissionNotice = '操作被当前权限限制。可调整权限，或在下一次授权请求中本次允许。'
+      },
+    })
+  } finally {
+    closed = true
+    settleApproval(run, 'reject')
+  }
 }

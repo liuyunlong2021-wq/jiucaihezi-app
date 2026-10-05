@@ -57,6 +57,9 @@ export async function downloadProjectMedia(opts: {
   url: string
   headers?: Record<string, string>
   timeoutSecs?: number
+  credentialRef?: string
+  signal?: AbortSignal
+  onProgress?: (progress: { bytes: number; total?: number; attempt: number }) => void
   projectDir: string
   mime: string
   kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
@@ -67,16 +70,31 @@ export async function downloadProjectMedia(opts: {
   memory?: boolean
 }): Promise<WriteProjectMediaResult & { headers: Record<string, string> }> {
   const projectPath = buildProjectMediaPath({ ...opts, sourceUrl: opts.url })
-  const { invoke } = await import('@tauri-apps/api/core')
-  const response = await invoke<{ headers?: Record<string, string> }>('http_download_to_project', {
-    request: {
-      root: opts.projectDir,
-      relative_path: projectPath,
-      url: opts.url,
-      headers: opts.headers,
-      timeout_secs: opts.timeoutSecs ?? 300,
-    },
+  const { invoke, Channel } = await import('@tauri-apps/api/core')
+  if (opts.signal?.aborted) throw new DOMException('下载已暂停', 'AbortError')
+  const progress = new Channel<{ bytes: number; total?: number; attempt: number }>(event => {
+    if (!opts.signal?.aborted) opts.onProgress?.(event)
   })
+  let cancelTimer: ReturnType<typeof setInterval> | undefined
+  const requestCancel = () => { void invoke('http_cancel_project_download', { root: opts.projectDir, relativePath: projectPath }).catch(() => {}) }
+  const abort = () => { requestCancel(); cancelTimer ??= setInterval(requestCancel, 250) }
+  opts.signal?.addEventListener('abort', abort, { once: true })
+  let response: { headers?: Record<string, string> }
+  try {
+    response = await invoke<{ headers?: Record<string, string> }>('http_download_to_project', {
+      request: {
+        root: opts.projectDir, relative_path: projectPath, url: opts.url,
+        headers: opts.headers, timeout_secs: opts.timeoutSecs ?? 300,
+        credential_ref: opts.credentialRef,
+      },
+      onProgress: progress,
+    })
+    if (opts.signal?.aborted) throw new DOMException('下载已暂停', 'AbortError')
+  } finally {
+    opts.signal?.removeEventListener('abort', abort)
+    if (cancelTimer) clearInterval(cancelTimer)
+  }
+
   return {
     filePath: `${opts.projectDir.replace(/[\\/]+$/, '')}/${projectPath}`,
     projectPath,

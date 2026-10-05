@@ -144,18 +144,38 @@ function normalizeContentType(headers: Record<string, string>, fallback: string)
   return normalizeMimeType(raw, fallback)
 }
 
-export function creationResultRequestHeaders(url: string): Record<string, string> | undefined {
-  let parsed: URL
+export function creationResultRequiresKey(url: string): boolean {
   try {
-    parsed = new URL(url, 'https://api.jiucaihezi.studio')
-  } catch {
-    return undefined
-  }
-  const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
-  const isNewApiVideoResult = NEW_API_VIDEO_RESULT_HOSTS.has(parsed.hostname.toLowerCase()) &&
-    /^\/v1\/videos\/[^/]+\/content$/.test(pathname)
-  const apiKey = isNewApiVideoResult ? getApiKey() : ''
+    const parsed = new URL(url, 'https://api.jiucaihezi.studio')
+    const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
+    return NEW_API_VIDEO_RESULT_HOSTS.has(parsed.hostname.toLowerCase()) &&
+      /^\/v1\/videos\/[^/]+\/content$/.test(pathname)
+  } catch { return false }
+}
+
+export function creationResultRequestHeaders(url: string): Record<string, string> | undefined {
+  const apiKey = creationResultRequiresKey(url) ? getApiKey() : ''
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+}
+
+export async function downloadCreationMediaBase64(url: string, credentialRef?: string, signal?: AbortSignal): Promise<DownloadBase64Response> {
+  const { invoke } = await import('@tauri-apps/api/core')
+  if (signal?.aborted) throw new DOMException('下载已暂停', 'AbortError')
+  let timer: ReturnType<typeof setInterval> | undefined
+  const cancel = () => { void invoke('http_cancel_project_download', { root: '', relativePath: '', url }).catch(() => {}) }
+  const abort = () => { cancel(); timer ??= setInterval(cancel, 250) }
+  signal?.addEventListener('abort', abort, { once: true })
+  try {
+    const response = await invoke<DownloadBase64Response>('http_download_base64', {
+      request: { url, headers: creationResultRequestHeaders(url), timeout_secs: 120,
+        credential_ref: creationResultRequiresKey(url) ? credentialRef : undefined },
+    })
+    if (signal?.aborted) throw new DOMException('下载已暂停', 'AbortError')
+    return response
+  } finally {
+    signal?.removeEventListener('abort', abort)
+    if (timer) clearInterval(timer)
+  }
 }
 
 function debugMediaDownloadPath(path: 'tauri' | 'browser', url: string) {

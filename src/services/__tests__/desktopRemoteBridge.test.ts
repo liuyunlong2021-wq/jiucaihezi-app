@@ -11,6 +11,10 @@ import {
   desktopRemoteOfficialHistoryReady,
   createDesktopConversationHost,
   memoryRunKey,
+  beginMemoryRun,
+  executeDesktopHarnessRun,
+  settleApproval,
+  stopRun,
   readDesktopConversationSession,
   setDesktopConversationSelection,
   startDesktopConversationPublisher,
@@ -405,4 +409,74 @@ test('工作台页面卸载后，应用级 Gateway 仍能接受手机命令', as
   } finally {
     Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
   }
+})
+
+const permissionInput = { cwd: '/permission-test', sessionId: 'approval', message: '写入', model: 'test', apiBase: '', apiKey: '' }
+function approvalRun() {
+  const runs = new Map<string, MemoryRun>()
+  const run = beginMemoryRun(runs, { owner: '/permission-test', resourcePath: 'approval.md', conversationId: 'approval', runtime: 'dh', editTargetId: '', userTurn: { id: 'run', role: 'user', content: '写入', createdAt: new Date().toISOString() } })
+  return { runs, run }
+}
+const approvalIdentity = { id: 'approval-1', sessionId: 'jc-v1-approval', agentId: 'agent-1', turn: 1, callId: 'write-1', toolName: 'write', reason: '写入目标文件' }
+
+test('DH approval survives view remount, preserves waiting status, and grants only once', async () => {
+  const { runs, run } = approvalRun()
+  const executing = executeDesktopHarnessRun(runs, run, permissionInput, async input => {
+    input.onPermission?.('read-only')
+    input.onProgress?.({ id: 'write-1', state: 'running', summary: '/test.txt' })
+    const answer = input.onApproval!(approvalIdentity, new AbortController().signal)
+    await until(() => Boolean(run.approval))
+    input.onStatus?.('正在分析')
+    input.onText?.('中间内容')
+    assert.equal(run.status, '等待你的授权')
+    assert.equal(await answer, 'allowed-once')
+    assert.equal(run.permissionTier, 'read-only')
+    return 'OK'
+  })
+  await until(() => Boolean(run.approval))
+  // A remounted view gets the same application-owned run rather than a fresh approval resolver.
+  const remounted = runs.get(memoryRunKey(run.owner, run.resourcePath))!
+  assert.match(remounted.approval!.message, /write.*\/test.txt.*写入/)
+  settleApproval(remounted, 'once')
+  assert.equal(await executing, 'OK')
+  assert.equal(run.approval, null)
+})
+
+test('DH queues parallel approvals and rejects stopped, stale and permanent decisions', async () => {
+  const { runs, run } = approvalRun()
+  const decisions: string[] = []
+  const executing = executeDesktopHarnessRun(runs, run, permissionInput, async input => {
+    const a = input.onApproval!(approvalIdentity, new AbortController().signal)
+    const b = input.onApproval!({ ...approvalIdentity, id: 'approval-2', callId: 'write-2' }, new AbortController().signal)
+    decisions.push(...await Promise.all([a, b]))
+    return 'OK'
+  })
+  await until(() => run.approval?.id === 'approval-1')
+  const stale = run.approval!.resolve
+  settleApproval(run, 'always')
+  await until(() => run.approval?.id === 'approval-2')
+  stale('once')
+  assert.equal(run.approval?.id, 'approval-2')
+  stopRun(run)
+  await executing
+  assert.deepEqual(decisions, ['rejected', 'rejected'])
+  assert.equal(run.approval, null)
+  assert.equal(run.status, '已停止')
+})
+
+test('DH cancellation removes the card and explicit sandbox denials produce a permission reminder', async () => {
+  const { runs, run } = approvalRun()
+  const controller = new AbortController()
+  await executeDesktopHarnessRun(runs, run, permissionInput, async input => {
+    const answer = input.onApproval!(approvalIdentity, controller.signal)
+    await until(() => Boolean(run.approval))
+    controller.abort()
+    assert.equal(await answer, 'rejected')
+    assert.equal(run.approval, null)
+    input.onProgress?.({ id: 'write-1', state: 'failed', resultText: 'network unavailable' })
+    assert.equal(run.permissionNotice, undefined)
+    input.onProgress?.({ id: 'write-1', state: 'failed', resultText: '[sandbox: file access denied under read-only mode]' })
+    assert.match(run.permissionNotice!, /当前权限限制/)
+    return 'OK'
+  })
 })

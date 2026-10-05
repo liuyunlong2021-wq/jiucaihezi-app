@@ -272,3 +272,73 @@ pub fn set_mcp_server_secret(server_id: String, value: String) -> Result<(), Str
 pub fn clear_mcp_server_secret(server_id: String) -> Result<(), String> {
     clear_entry_value(mcp_server_secret_entry(&server_id)?)
 }
+
+/// Reuse the durable CLI credential location; task JSON contains only a digest reference.
+fn media_key_directory() -> std::path::PathBuf {
+    cli_key_file_path().parent().unwrap().join("download-keys")
+}
+
+fn retain_download_key_at(root: &std::path::Path, key: &str) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let key = key.trim();
+    if key.is_empty() { return Err("缺少任务提交密钥".into()); }
+    if std::fs::symlink_metadata(root).is_ok_and(|m| m.file_type().is_symlink()) { return Err("下载凭据目录不能是符号链接".into()); }
+    std::fs::create_dir_all(root).map_err(|_| "创建下载凭据目录失败")?;
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(root, std::fs::Permissions::from_mode(0o700)).map_err(|_| "保护下载凭据目录失败")?; }
+    let reference = format!("{:x}", Sha256::digest(key.as_bytes()));
+    let path = root.join(&reference);
+    if path.exists() { read_download_key_at(root, &reference)?; return Ok(reference); }
+    let staged = root.join(format!(".{reference}.{}.tmp", uuid::Uuid::new_v4()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    let mut file = options.open(&staged).map_err(|_| "保存任务下载密钥失败")?;
+    use std::io::Write;
+    file.write_all(key.as_bytes()).and_then(|_| file.sync_all()).map_err(|_| "保存任务下载密钥失败")?;
+    drop(file);
+    // Link publishes a fully written credential without replacing an existing file.
+    let result = std::fs::hard_link(&staged, &path);
+    let _ = std::fs::remove_file(staged);
+    if result.is_err() { read_download_key_at(root, &reference)?; }
+    Ok(reference)
+}
+
+#[tauri::command]
+pub fn retain_media_download_key(api_key: String) -> Result<String, String> {
+    retain_download_key_at(&media_key_directory(), &api_key)
+}
+
+pub(crate) fn media_download_key(reference: &str) -> Result<String, String> {
+    read_download_key_at(&media_key_directory(), reference)
+}
+
+fn read_download_key_at(root: &std::path::Path, reference: &str) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    if reference.len() != 64 || !reference.bytes().all(|byte| byte.is_ascii_hexdigit()) { return Err("无效的下载密钥引用".into()); }
+    let path = root.join(reference);
+    if std::fs::symlink_metadata(&path).is_ok_and(|m| m.file_type().is_symlink()) { return Err("下载凭据不能是符号链接".into()); }
+    let key = std::fs::read_to_string(path).map_err(|_| "任务提交密钥已不可用，请恢复对应密钥后重试下载")?;
+    if format!("{:x}", Sha256::digest(key.as_bytes())) != reference { return Err("任务下载密钥校验失败".into()); }
+    Ok(key)
+}
+
+#[cfg(test)]
+mod download_key_tests {
+    use super::*;
+    #[test]
+    fn references_survive_a_key_switch_without_putting_credentials_in_tasks() {
+        let root = tempfile::TempDir::new().unwrap();
+        let first = retain_download_key_at(root.path(), "local-first").unwrap();
+        let second = retain_download_key_at(root.path(), "local-second").unwrap();
+        assert_ne!(first, second);
+        assert_eq!(read_download_key_at(root.path(), &first).unwrap(), "local-first");
+        assert_eq!(retain_download_key_at(root.path(), "local-first").unwrap(), first);
+        assert!(read_download_key_at(root.path(), "../escape").is_err());
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(root.path().join(first)).unwrap().permissions().mode() & 0o777, 0o600); }
+    }
+}
+
+#[tauri::command]
+pub fn get_media_download_key(reference: String) -> Result<String, String> {
+    media_download_key(&reference)
+}

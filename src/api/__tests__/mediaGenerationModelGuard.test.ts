@@ -764,3 +764,21 @@ test('direct NewAPI image channel 503 surfaces channel-unavailable guidance inst
     await restoreStorage()
   }
 })
+
+
+test('restored task polling uses its submission key after the current key changes', { concurrency: false }, async () => {
+  const previous = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests('different-current-key')
+  const seen: string[] = []
+  globalThis.fetch = async (_input, init) => {
+    const headers = new Headers(init?.headers)
+    seen.push(headers.get('authorization') || '')
+    assert.equal(headers.get('x-api-key'), 'original-submission-key')
+    return Response.json({ status: 'completed', video_url: 'https://example.com/video.mp4' })
+  }
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_original_key', 'video', undefined, 1, 10, undefined, false, 'original-submission-key'))
+    assert.equal(result, 'https://example.com/video.mp4')
+    assert.deepEqual(seen, ['Bearer original-submission-key'])
+  } finally { globalThis.fetch = previous; __resetApiKeyMemoryCacheForTests('') }
+})

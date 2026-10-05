@@ -35,7 +35,7 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   assert.match(once, /const inject = \["agents", "sessionQuery", "commands", "skills"\];/)
   assert.match(once, /\"\/permission \" \+ preset/)
   // 官方命令面必须真的被调用，而不是自己写 permission/preset 事件绕过官方推导。
-  assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(rec\.handle\.agent/)
+  assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(agent/)
   // 点名 skill → 掩掉 `skill` 工具（官方 tools.restrict），且必须在 prompt 前生效。
   assert.match(once, /await this\.applyPinnedSkillScope\(rec, content\);/)
   assert.match(once, /agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)

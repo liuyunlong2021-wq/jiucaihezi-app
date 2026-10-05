@@ -4527,7 +4527,7 @@ const canSend = computed(
                   v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"
                 >
-                  保存到项目
+                  {{ task.downloadState === 'paused' ? '继续下载' : task.assetStatus === 'failed' ? '重新下载' : '保存到项目' }}
                 </button>
                 <button
                   v-if="

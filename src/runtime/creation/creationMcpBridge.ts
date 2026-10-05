@@ -60,6 +60,9 @@ function publicTask(task: MediaTask) {
     projectPath: task.projectPath,
     localPath,
     assetStatus: task.assetStatus,
+    downloadState: task.downloadState,
+    downloadBytes: task.downloadBytes,
+    downloadTotal: task.downloadTotal,
     error: task.errorMsg,
     canvasWriteStatus: task.canvasWriteStatus,
   }

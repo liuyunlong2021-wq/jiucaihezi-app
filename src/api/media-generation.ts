@@ -501,12 +501,13 @@ function createTimeoutSignal(timeoutSec = 300, externalSignal?: AbortSignal): { 
   }
 }
 
-export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal): Promise<any> {
+export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal, apiKeyOverride?: string): Promise<any> {
   throwIfAborted(externalSignal)
-  await ensureConfig()
-  const key = storedApiKey()
+  if (apiKeyOverride && method !== 'GET') throw new Error('任务密钥仅用于查询')
+  if (!apiKeyOverride) await ensureConfig()
+  const key = apiKeyOverride || storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
-  const headers = model ? authHeadersFor(model) : authHeaders()
+  const headers = apiKeyOverride ? { 'Content-Type': 'application/json', Authorization: `Bearer ${key}`, 'x-api-key': key } : model ? authHeadersFor(model) : authHeaders()
   const opts: RequestInit = { method, headers }
   if (method !== 'GET' && body) opts.body = JSON.stringify(body)
   const base = getApiBase()
@@ -731,6 +732,7 @@ export async function pollTask(
   intervalMs = 10000,
   signal?: AbortSignal,
   useContentEndpoint = false,
+  apiKeyOverride?: string,
 ): Promise<string> {
   if (!isAllowedCreationPollUrl(pollPath)) throw new Error('任务轮询地址不安全，已阻止请求')
   const maxPolls = Math.ceil(maxPollsSec / (intervalMs / 1000))
@@ -752,7 +754,7 @@ export async function pollTask(
     })
     let data: any
     try {
-      data = await apiCall(pollPath, null, 'GET', undefined, signal)
+      data = await apiCall(pollPath, null, 'GET', undefined, signal, apiKeyOverride)
       consecutive521 = 0  // 成功请求，重置 521 计数
     } catch (e: any) {
       if (signal?.aborted) throw abortError()
@@ -790,7 +792,7 @@ export async function pollTask(
       }
       const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
       if (publicVideoTask) {
-        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET', undefined, signal)
+        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET', undefined, signal, apiKeyOverride)
         const detailUrl = extractMediaUrl(detail, 'video')
         if (detailUrl) return detailUrl
       }

@@ -169,8 +169,8 @@ async function previewResult() {
       </div>
       <div v-if="task.projectPath" class="mtb-saved-path">已保存到 {{ task.projectPath }}</div>
       <div v-else-if="hasSaveWarning" class="mtb-save-warning">
-        媒体已生成，但保存到项目失败。
-        <button type="button" @click="retrySave">重试保存</button>
+        {{ task.downloadState === 'paused' ? '下载已暂停，已有断点保留。' : '媒体已生成，但保存到项目失败。' }}
+        <button type="button" @click="retrySave">{{ task.downloadState === 'paused' ? '继续下载' : '重新下载' }}</button>
       </div>
       <div v-if="task.type !== 'text'" class="mtb-actions">
         <button class="mtb-act-btn" @click="downloadCopy" title="下载副本">

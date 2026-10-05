@@ -44,7 +44,7 @@ import { useFileStore } from '@/composables/useFileStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { createProjectFileActions } from '@/services/projectFileActions'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
-import { creationResultRequestHeaders, fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
+import { creationResultRequiresKey, creationResultRequestHeaders, downloadCreationMediaBase64, fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
 import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
@@ -186,6 +186,11 @@ export interface MediaTask {
   assetStatus?: 'pending' | 'local' | 'failed' | 'remote-only'
   /** 下载失败重试次数 */
   assetRetryCount?: number
+  downloadState?: 'queued' | 'downloading' | 'paused' | 'failed' | 'complete'
+  downloadRetryable?: boolean
+  downloadCredentialRef?: string
+  downloadBytes?: number
+  downloadTotal?: number
   errorMsg?: string
   /** 来源面板 */
   source: TaskSource
@@ -232,7 +237,7 @@ function canvasTaskOwner(task: MediaTask): string | undefined {
 }
 
 function isTaskCancelled(task: MediaTask): boolean {
-  return task.status === 'cancelled'
+  return task.status === 'cancelled' || task.downloadState === 'paused'
 }
 
 function isTaskSuccessful(task: MediaTask): boolean {
@@ -282,6 +287,11 @@ function withoutInlineMedia<T>(value: T): T {
   )) as T
 }
 
+function retryableDownloadFailure(detail: string): boolean {
+  return !/401|403|404|密钥|凭据|磁盘|写入|容器|范围|不一致/.test(detail)
+    && /下载连接失败|下载中断|HTTP 下载暂不可用|超时|长度不完整|连接|网络|暂时不可用|HTTP (?:408|429|500|502|503|504)/.test(detail)
+}
+
 async function loadTasks(): Promise<MediaTask[]> {
   try {
     const raw = await getItem(TASKS_KEY)
@@ -289,6 +299,11 @@ async function loadTasks(): Promise<MediaTask[]> {
     const list = typeof raw === 'string' ? JSON.parse(raw) : raw
     if (!Array.isArray(list)) return []
     return list.map((task: MediaTask) => {
+      if (task.assetStatus === 'remote-only') {
+        task.assetStatus = 'failed'
+        task.downloadState = 'failed'
+        task.downloadRetryable = retryableDownloadFailure(task.errorMsg || '')
+      }
       if (task.assetStatus === 'local' && (task.projectPath || task.assetUri) && task.resultUrl) {
         task.sourceUrl ||= task.resultUrl
         task.resultUrl = undefined
@@ -586,7 +601,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     return Boolean(
       task &&
       (task.status === 'pending' || task.status === 'running') &&
-      !acceptedResultTaskIds.has(taskId),
+      (!acceptedResultTaskIds.has(taskId) || (isTauriRuntime() && task.downloadState === 'downloading')),
     )
   }
 
@@ -670,7 +685,6 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return
     }
     if (task.assetStatus === 'local') return
-    if (task.assetStatus === 'remote-only') return
 
     if (!isTauriRuntime()) {
       const projectId = String(task.projectId || '').trim()
@@ -727,6 +741,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           url: downloadUrl,
           headers: creationResultRequestHeaders(downloadUrl),
           timeoutSecs: 300,
+          credentialRef: creationResultRequiresKey(downloadUrl) ? task.downloadCredentialRef : undefined,
+          signal: taskAbortControllers.get(task.id)?.signal,
+          onProgress(progress) {
+            if (task.downloadState !== 'downloading' || isTaskCancelled(task)) return
+            if (progress.total) task.progress = Math.min(99, Math.round(progress.bytes / progress.total * 100))
+            task.downloadBytes = progress.bytes
+            task.downloadTotal = progress.total
+            task.progressText = `下载中 ${Math.round(progress.bytes / 1024 / 1024 * 10) / 10} MB${progress.total ? ` / ${Math.round(progress.total / 1024 / 1024 * 10) / 10} MB` : ''}${progress.attempt ? ` · 重试 ${progress.attempt}/3` : ''}`
+          },
           projectDir,
           mime: fallbackMime,
           kind,
@@ -742,7 +765,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.assetRetryCount = 0
         task.sourceUrl = /^https?:\/\//i.test(downloadUrl) ? downloadUrl : undefined
         task.resultUrl = undefined
-        console.log('[JC] 创作结果已直接落项目文件夹:', task.assetUri)
+        console.log('[JC] 创作结果已流式落盘:', task.assetUri)
         revealMediaResultInFileTree(task)
         void persistTasksSafely('asset-localized-project')
         return
@@ -751,14 +774,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       let contentType = dataUri?.[1] || ''
       if (!dataUri) {
         // 使用 https_download_base64（与 creationMediaCache 同通道，已验证 CDN 兼容）
-        const { invoke } = await import('@tauri-apps/api/core')
-        const dl = await invoke<{
-          status: number
-          data_base64: string
-          headers?: Record<string, string>
-        }>('http_download_base64', {
-          request: { url: downloadUrl, headers: creationResultRequestHeaders(downloadUrl), timeout_secs: 120 },
-        })
+        const dl = await downloadCreationMediaBase64(downloadUrl, task.downloadCredentialRef, taskAbortControllers.get(task.id)?.signal)
         if (dl.status < 200 || dl.status >= 300) throw new Error(`HTTP 下载失败: ${dl.status}`)
         dataBase64 = dl.data_base64
         contentType = normalizeContentType(dl.headers || {}, 'image/png')
@@ -843,10 +859,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   function handleAssetDownloadFailure(task: MediaTask) {
     task.assetRetryCount = (task.assetRetryCount || 0) + 1
-    task.assetStatus = task.assetRetryCount >= 3 ? 'remote-only' : 'failed'
-    if (task.assetRetryCount >= 3) {
-      console.warn('[JC] 创作结果本地化永久放弃（3次失败）:', task.id)
-    }
+    task.assetStatus = 'failed'
+    task.downloadState = 'failed'
   }
 
   async function writeCanvasResult(task: MediaTask) {
@@ -901,7 +915,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     const message = `保存到项目失败：${detail.slice(0, 160)}`
     task.status = 'success'
     task.progress = 100
-    task.progressText = '生成完成，保存到项目失败'
+    task.progressText = isTauriRuntime() ? '生成完成，下载暂停，可重新下载' : '生成完成，保存到项目失败'
     task.errorMsg = message
     task.error = {
       category: 'persistence',
@@ -909,7 +923,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       message,
       raw: error,
     }
-    task.assetStatus = task.assetStatus === 'remote-only' ? 'remote-only' : 'failed'
+    task.assetStatus = 'failed'
+    task.downloadState = 'failed'
+    task.downloadRetryable = retryableDownloadFailure(detail)
     task.completedAt = Date.now()
     markCanvasWriteUnwritten(task)
   }
@@ -931,10 +947,16 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     if (task.assetStatus === 'local' && (task.projectPath || task.assetUri)) return
     acceptedResultTaskIds.add(task.id)
     savingTaskIds.add(task.id)
+    const ownController = !taskAbortControllers.has(task.id)
+    const downloadController = taskAbortControllers.get(task.id) || new AbortController()
+    taskAbortControllers.set(task.id, downloadController)
+    task.downloadState = /^data:/i.test(resultUrl) ? 'queued' : 'downloading'
+    task.downloadRetryable = false
     try {
       task.resultUrl = resultUrl
       task.completedAt = Date.now()
       task.progressText = '结果已生成，正在保存...'
+      await persistTasksSafely(`${persistenceContext}-download-start`)
       try {
         await downloadAndPersistMediaAsset(resultUrl, task)
       } catch (error) {
@@ -970,6 +992,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.status = 'success'
       task.progress = 100
       task.progressText = '完成'
+      task.downloadState = 'complete'
+      task.downloadRetryable = false
+      task.errorMsg = undefined
+      task.error = undefined
       await writeCanvasResult(task)
       emitEvent('media-task-complete', {
         taskId: task.id,
@@ -990,6 +1016,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     } finally {
       acceptedResultTaskIds.delete(task.id)
       savingTaskIds.delete(task.id)
+      if (ownController && taskAbortControllers.get(task.id) === downloadController) taskAbortControllers.delete(task.id)
     }
   }
 
@@ -1004,8 +1031,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       tasks.value = saved
       initialized.value = true
 
+      if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('online', () => { void resumeDownloads() })
       // 尝试恢复在刷新前正在 running/pending 的任务
       for (const task of tasks.value) {
+        if (task.source === 'creation' && !task.projectPath && !task.assetUri && (task.resultUrl || task.sourceUrl)
+          && (task.downloadState === 'downloading' || task.downloadState === 'queued' || task.downloadRetryable)) {
+          task.status = 'success'
+          void retryMediaPersistence(task.id)
+          continue
+        }
         if (task.status === 'running' || task.status === 'pending') {
           if (task.canvasTarget && !task.canvasWriteStatus) task.canvasWriteStatus = 'pending'
           if (task.pollUrl && task.pollKind) {
@@ -1099,6 +1133,12 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   /** 恢复单个任务的轮询 */
+  async function taskPollKey(task: MediaTask): Promise<string | undefined> {
+    if (!isTauriRuntime() || !task.downloadCredentialRef) return undefined
+    const { invoke } = await import('@tauri-apps/api/core')
+    return invoke<string>('get_media_download_key', { reference: task.downloadCredentialRef })
+  }
+
   async function _resumePolling(task: MediaTask) {
     if (!task.pollUrl || !task.pollKind) return
     if (activeTaskIds.value.has(task.id)) return
@@ -1121,7 +1161,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     try {
       const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
       const mediaUrl = await abortTaskExecution(
-        pollTask(task.pollUrl, task.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task)),
+        pollTask(task.pollUrl, task.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task), await taskPollKey(task)),
         controller.signal,
       )
       if ((task as MediaTask).status === 'cancelled') {
@@ -1218,7 +1258,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       assetStatus: projectId ? 'pending' : undefined,
       chatMessageId: params.chatMessageId,
       sessionId: params.sessionId,
-      directory: params.directory,
+      directory: params.directory || (isTauriRuntime() && params.source === 'creation' ? useProjectStore().projectDir.value || undefined : undefined),
       memory: params.memory,
       params: withoutInlineMedia({
         ...(params.imageParams || {}),
@@ -1259,9 +1299,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   async function cancelTask(taskId: string): Promise<boolean> {
     const t = tasks.value.find(x => x.id === taskId)
     if (!t || !canCancelTask(taskId)) return false
+    const downloading = t.downloadState === 'downloading'
+    if (downloading) { t.downloadState = 'paused'; t.downloadRetryable = false; t.assetStatus = 'failed' }
     const knownUnsubmitted = unsubmittedTaskIds.delete(taskId)
-    t.status = 'cancelled'
-    t.progressText = knownUnsubmitted
+    t.status = downloading ? 'success' : 'cancelled'
+    t.progressText = downloading ? '下载已暂停，已有断点保留' : knownUnsubmitted
       ? '已取消（未提交）'
       : t.upstreamTaskId
         ? '已停止跟踪（上游可能继续生成）'
@@ -1279,8 +1321,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     const task = tasks.value.find(item => item.id === taskId)
     if (
       !task ||
+      savingTaskIds.has(taskId) ||
       task.source !== 'creation' ||
-      task.status !== 'success' ||
+      (task.status !== 'success' && !(task.status === 'cancelled' && task.downloadState === 'paused')) ||
       Boolean(task.projectPath || task.assetUri) ||
       (!isTauriRuntime() && !task.projectId) ||
       !(task.resultUrl || task.sourceUrl)
@@ -1300,6 +1343,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     task.errorMsg = undefined
     task.error = undefined
     task.assetStatus = 'pending'
+    task.downloadState = 'queued'
     task.completedAt = undefined
     await persistTasksSafely('retry-media-persistence-start')
 
@@ -1312,7 +1356,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       if (isContentResultUrl(resultUrl) && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
         const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
         try {
-          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, taskUsesContentEndpoint(task))
+          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, taskUsesContentEndpoint(task), await taskPollKey(task))
         } catch (error) {
           // 重查失败必须回到显式失败态；否则任务会停在 running，错误又无处显示。
           markWebMediaPersistenceFailure(task, error)
@@ -1323,7 +1367,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         // CDN 签名链接可能已经过期；只重查已生成的任务，不重新生成。
         // 查询暂不可用时仍尝试原链接，避免把有效下载也挡住。
         try {
-          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS)
+          resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS, undefined, false, await taskPollKey(task))
         } catch {
           // 原结果仍可下载时继续保存。
         }
@@ -1333,6 +1377,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return Boolean(task.projectPath || task.assetUri)
     } finally {
       activeTaskIds.value.delete(task.id)
+    }
+  }
+
+  async function resumeDownloads() {
+    for (const task of tasks.value) {
+      if (task.downloadRetryable && task.status === 'success' && !savingTaskIds.has(task.id))
+        await retryMediaPersistence(task.id)
     }
   }
 
@@ -1365,7 +1416,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         pollTask(
           task.pollUrl!, task.pollKind!, onProgress,
           CREATION_REFRESH_POLL_MAX_SEC, CREATION_REFRESH_POLL_INTERVAL_MS,
-          controller.signal, taskUsesContentEndpoint(task),
+          controller.signal, taskUsesContentEndpoint(task), await taskPollKey(task),
         ),
         controller.signal,
       )
@@ -1463,6 +1514,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         clearInterval(progressTimer)
         return
       }
+      if (task.downloadState === 'downloading') return
       const elapsed = (Date.now() - startTime) / 1000
       const baseSec = task.type === 'image' ? 120 : 480
       task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
@@ -1472,6 +1524,14 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }, 1000)
 
     try {
+      const submissionKey = getApiKey()
+      if (isTauriRuntime() && params.source === 'creation' && submissionKey) {
+        const { invoke } = await import('@tauri-apps/api/core')
+        task.downloadCredentialRef = await invoke<string>('retain_media_download_key', { apiKey: submissionKey })
+        await persistTasksSafely('retain-download-credential')
+        if (isTaskCancelled(task) || controller.signal.aborted) throw new DOMException('已取消', 'AbortError')
+        if (getApiKey() !== submissionKey) throw new Error('提交前密钥已切换，请重新提交')
+      }
       let resultUrl = ''
       let result: MediaResult | null = null
       const shouldUseCreationRuntime = params.source === 'creation' && params.plan
@@ -1597,7 +1657,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
       if (!resultUrl && result?.pollUrl && result?.pollKind) {
         const pollWindow = pollWindowFor(result.pollKind, result.pollKind === 'video')
-        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task))
+        resultUrl = await pollTask(result.pollUrl, result.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task), await taskPollKey(task))
       }
       await completeMediaTask(task, resultUrl, 'execute-success')
       return

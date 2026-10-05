@@ -998,7 +998,7 @@ test('creation panel lets a remote successful result be saved into its project',
   assert.match(retry, /await mediaTaskStore\.retryMediaPersistence\(task\.id\)/)
   assert.match(
     source,
-    /v-if="canPersistMediaResult\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*保存到项目\s*<\/button>/,
+    /v-if="canPersistMediaResult\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*\{\{ task\.downloadState[\s\S]{0,160}保存到项目[\s\S]{0,20}\}\}\s*<\/button>/,
   )
   assert.match(
     source,

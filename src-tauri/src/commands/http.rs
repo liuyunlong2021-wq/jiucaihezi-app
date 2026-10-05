@@ -1,7 +1,9 @@
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+#[cfg(test)]
 use futures_util::StreamExt;
+#[cfg(test)]
 use tokio::io::AsyncWriteExt;
 use tauri::ipc::Channel;
 
@@ -28,6 +30,7 @@ pub struct HttpDownloadRequest {
     pub headers: Option<HashMap<String, String>>,
     // 下载通道中是连续无数据的等待上限，不是整个文件的耗时上限。
     pub timeout_secs: Option<u64>,
+    pub credential_ref: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -44,6 +47,7 @@ pub struct HttpDownloadToProjectRequest {
     pub url: String,
     pub headers: Option<HashMap<String, String>>,
     pub timeout_secs: Option<u64>,
+    pub credential_ref: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -120,10 +124,6 @@ pub(crate) fn should_direct_unified_api_to_newapi(request: &HttpRequest) -> bool
     is_unified_api_host(&request.url)
         && is_newapi_passthrough_path(&request.url)
         && !has_gateway_session_header(&request.headers)
-}
-
-fn should_direct_unified_download_to_newapi(request: &HttpDownloadRequest) -> bool {
-    is_unified_api_host(&request.url) && is_newapi_passthrough_path(&request.url)
 }
 
 fn with_newapi_source_resolution(
@@ -408,26 +408,46 @@ pub async fn comfy_upload_image(request: ComfyUploadImageRequest) -> Result<Http
 
 #[tauri::command]
 pub async fn http_download_base64(
-    request: HttpDownloadRequest,
+    app: tauri::AppHandle, mut request: HttpDownloadRequest,
 ) -> Result<HttpDownloadResponse, String> {
-    let client = media_download_client(&request)?;
-    let resp = send_media_download(&client, &request).await?;
-    let status = resp.status().as_u16();
-    let mut headers = HashMap::new();
-    for (key, value) in resp.headers() {
-        if let Ok(v) = value.to_str() {
-            headers.insert(key.to_string(), v.to_string());
-        }
+    let checked = reqwest::Url::parse(&request.url).map_err(|_| "下载地址无效")?;
+    if !matches!(checked.scheme(), "http" | "https") { return Err("下载仅支持 http/https".into()); }
+    let target = cached_download_target(&app, &request.url)?;
+    tokio::fs::create_dir_all(target.parent().unwrap()).await.map_err(|_| "创建下载缓存目录失败")?;
+    let extension = target.extension().and_then(|ext| ext.to_str()).unwrap_or("bin");
+    let temp = target.with_extension(format!("{extension}.part"));
+    let meta = target.with_extension(format!("{extension}.part.json"));
+    for path in [&temp, &meta, &meta.with_extension("json.tmp")] {
+        if tokio::fs::symlink_metadata(path).await.is_ok_and(|m| m.file_type().is_symlink()) { return Err("下载缓存路径不能是符号链接".into()); }
     }
-    let bytes = resp
-        .bytes()
-        .await
-        .map_err(|e| format!("读取下载数据失败: {}", download_error_detail(e)))?;
-    Ok(HttpDownloadResponse {
-        status,
-        headers,
-        data_base64: general_purpose::STANDARD.encode(bytes),
-    })
+    let (sender, cancel) = tokio::sync::watch::channel(false);
+    {
+        let mut active = DOWNLOADS.get_or_init(Default::default).lock().unwrap();
+        if active.contains_key(&target) { return Err("该媒体正在下载，请稍后重试".into()); }
+        active.insert(target.clone(), sender);
+    }
+    let _guard = DownloadGuard(target.clone());
+    resolve_download_credential(&request.url, &mut request.headers, request.credential_ref.as_deref())?;
+    let (headers, _) = super::media_download::download(&media_download_client(&request)?, &request.url,
+        &request.headers.unwrap_or_default(), &temp, &meta, cancel.clone(), |_| {}).await?;
+    if *cancel.borrow() { return Err("下载已暂停".into()); }
+    validate_download_video(Some(&app), &temp, &target).await?;
+    if *cancel.borrow() { return Err("下载已暂停".into()); }
+    let bytes = tokio::fs::read(&temp).await.map_err(|_| "读取下载结果失败")?;
+    // Compatibility callers still receive Base64; the transfer itself uses the same durable downloader.
+    let _ = tokio::fs::remove_file(temp).await;
+    let _ = tokio::fs::remove_file(meta).await;
+    Ok(HttpDownloadResponse { status: 200, headers, data_base64: general_purpose::STANDARD.encode(bytes) })
+}
+
+fn cached_download_target(app: &tauri::AppHandle, url: &str) -> Result<std::path::PathBuf, String> {
+    use tauri::Manager;
+    let parsed = reqwest::Url::parse(url).map_err(|_| "下载地址无效")?;
+    let extension = if parsed.path().ends_with("/content") && parsed.path().starts_with("/v1/videos/") { "mp4" }
+        else { parsed.path().rsplit('.').next().filter(|ext| matches!(*ext, "mp4" | "webm" | "mov" | "png" | "jpg" | "mp3" | "wav" | "glb")).unwrap_or("bin") };
+    let name = format!("{}.{extension}", super::media_download::identity(url));
+    let dir = app.path().app_cache_dir().map_err(|_| "读取下载缓存目录失败")?.join("media-downloads");
+    Ok(dir.join(name))
 }
 
 fn media_download_client(request: &HttpDownloadRequest) -> Result<reqwest::Client, String> {
@@ -437,15 +457,12 @@ fn media_download_client(request: &HttpDownloadRequest) -> Result<reqwest::Clien
     client_builder = client_builder.read_timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(60),
     ));
-    if should_direct_unified_download_to_newapi(request) {
-        client_builder = with_newapi_source_resolution(client_builder);
-    }
     client_builder
         .build()
         .map_err(|e| format!("创建 HTTP 客户端失败: {}", e))
 }
 
-fn download_error_detail(error: reqwest::Error) -> String {
+pub(crate) fn download_error_detail(error: reqwest::Error) -> String {
     use std::error::Error;
     let error = error.without_url();
     let mut detail = error.to_string();
@@ -458,6 +475,7 @@ fn download_error_detail(error: reqwest::Error) -> String {
     detail
 }
 
+#[cfg(test)]
 async fn send_media_download(client: &reqwest::Client, request: &HttpDownloadRequest) -> Result<reqwest::Response, String> {
     // 只补一次下载 GET；鉴权/链接失效直接交给上层，生成 POST 不经过这里。
     for attempt in 0..2 {
@@ -476,43 +494,112 @@ async fn send_media_download(client: &reqwest::Client, request: &HttpDownloadReq
     unreachable!("second attempt returns its result")
 }
 
+fn resolve_download_credential(url: &str, headers: &mut Option<HashMap<String, String>>, reference: Option<&str>) -> Result<(), String> {
+    if let Some(reference) = reference {
+        let allowed = reqwest::Url::parse(url).ok().is_some_and(|url| {
+            url.scheme() == "https" && matches!(url.host_str(), Some("api.jiucaihezi.studio" | "tian-shu.net"))
+                && url.path().starts_with("/v1/videos/") && url.path().ends_with("/content")
+        });
+        if !allowed { return Err("任务密钥不能用于外部下载地址".into()); }
+        let key = crate::secure_store::media_download_key(reference)?;
+        let headers = headers.get_or_insert_with(HashMap::new);
+        headers.retain(|name, _| !name.eq_ignore_ascii_case("authorization") && !name.eq_ignore_ascii_case("x-api-key"));
+        headers.insert("Authorization".into(), format!("Bearer {key}"));
+    }
+    Ok(())
+}
+
+static DOWNLOADS: std::sync::OnceLock<std::sync::Mutex<HashMap<std::path::PathBuf, tokio::sync::watch::Sender<bool>>>> = std::sync::OnceLock::new();
+
+struct DownloadGuard(std::path::PathBuf);
+impl Drop for DownloadGuard {
+    fn drop(&mut self) { DOWNLOADS.get().unwrap().lock().unwrap().remove(&self.0); }
+}
+
+#[tauri::command]
+pub async fn http_cancel_project_download(app: tauri::AppHandle, root: String, relative_path: String, url: Option<String>) -> Result<(), String> {
+    let target = if let Some(url) = url { cached_download_target(&app, &url)? } else {
+        let root = crate::commands::dev::canonical_root(&root)?;
+        crate::commands::dev::resolve_write_path(&root, &relative_path)?
+    };
+    if let Some(sender) = DOWNLOADS.get_or_init(Default::default).lock().unwrap().get(&target) { let _ = sender.send(true); }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn http_download_to_project(
+    app: tauri::AppHandle,
     request: HttpDownloadToProjectRequest,
+    on_progress: Channel<super::media_download::Progress>,
+) -> Result<HttpDownloadToProjectResponse, String> {
+    download_to_project(request, Some(app), Some(on_progress)).await
+}
+
+async fn validate_download_video(app: Option<&tauri::AppHandle>, path: &std::path::Path, target: &std::path::Path) -> Result<(), String> {
+    if !matches!(target.extension().and_then(|ext| ext.to_str()), Some("mp4" | "mov" | "webm")) { return Ok(()); }
+    let app = app.ok_or_else(|| "视频校验需要桌面运行时".to_string())?;
+    super::media_download::validate_container(path).await?;
+    let Ok(probe) = crate::commands::tools::resolve_app_media_binary(app, "ffprobe") else { return Ok(()); };
+    let output = tokio::time::timeout(std::time::Duration::from_secs(30), tokio::process::Command::new(probe)
+        .args(["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_type", "-of", "csv=p=0"])
+        .arg(path).kill_on_drop(true).output()).await.map_err(|_| "视频完整性校验超时")?
+        .map_err(|_| "无法启动视频校验组件")?;
+    if !output.status.success() || !String::from_utf8_lossy(&output.stdout).contains("video") {
+        return Err("下载内容不是可读取的视频，已保留临时文件".into());
+    }
+    Ok(())
+}
+
+async fn download_to_project(
+    mut request: HttpDownloadToProjectRequest, app: Option<tauri::AppHandle>,
+    on_progress: Option<Channel<super::media_download::Progress>>,
 ) -> Result<HttpDownloadToProjectResponse, String> {
     crate::commands::skill_material::validate_public_http_url(&request.url)?;
     let root = crate::commands::dev::canonical_root(&request.root)?;
     let target = crate::commands::dev::resolve_write_path(&root, &request.relative_path)?;
-    if target.exists() {
-        return Err("目标文件已存在".into());
+    let (sender, cancel) = tokio::sync::watch::channel(false);
+    {
+        let mut active = DOWNLOADS.get_or_init(Default::default).lock().unwrap();
+        if active.contains_key(&target) { return Err("该文件正在下载".into()); }
+        active.insert(target.clone(), sender);
     }
+    let _guard = DownloadGuard(target.clone());
     let parent = target.parent().ok_or_else(|| "写入路径无效".to_string())?;
-    tokio::fs::create_dir_all(parent)
-        .await
-        .map_err(|e| format!("创建媒体目录失败: {}", e))?;
-    let target = crate::commands::dev::resolve_write_path(&root, &request.relative_path)?;
-    let temp = target.with_file_name(format!(
-        ".{}.{}.part",
-        target.file_name().and_then(|name| name.to_str()).unwrap_or("media"),
-        uuid::Uuid::new_v4(),
-    ));
-
-    let download_request = HttpDownloadRequest {
-        url: request.url.clone(),
-        headers: request.headers.clone(),
-        timeout_secs: Some(request.timeout_secs.unwrap_or(300)),
-    };
+    tokio::fs::create_dir_all(parent).await.map_err(|_| "创建媒体目录失败")?;
+    if crate::commands::dev::resolve_write_path(&root, &request.relative_path)? != target { return Err("下载目标路径已变化".into()); }
+    let name = target.file_name().and_then(|name| name.to_str()).ok_or("媒体文件名无效")?;
+    let temp = target.with_file_name(format!(".{name}.part"));
+    let meta = target.with_file_name(format!(".{name}.part.json"));
+    for path in [&temp, &meta, &meta.with_extension("json.tmp")] {
+        if tokio::fs::symlink_metadata(path).await.is_ok_and(|m| m.file_type().is_symlink()) { return Err("下载临时路径不能是符号链接".into()); }
+    }
+    if target.exists() {
+        if !super::media_download::checkpoint_matches(&meta, &request.url, &target).await { return Err("目标文件已存在".into()); }
+        validate_download_video(app.as_ref(), &target, &target).await?;
+        return Ok(HttpDownloadToProjectResponse { status: 200, headers: HashMap::new(), bytes_written: tokio::fs::metadata(&target).await.map_err(|_| "读取媒体文件失败")?.len(), relative_path: request.relative_path });
+    }
+    resolve_download_credential(&request.url, &mut request.headers, request.credential_ref.as_deref())?;
+    let download_request = HttpDownloadRequest { credential_ref: None, url: request.url.clone(), headers: request.headers.clone(), timeout_secs: Some(request.timeout_secs.unwrap_or(300)) };
     let client = media_download_client(&download_request)?;
-    let response = send_media_download(&client, &download_request).await?;
-    let (status, headers, bytes_written) = persist_download_response(response, &target, &temp).await?;
-    Ok(HttpDownloadToProjectResponse {
-        status,
-        headers,
-        bytes_written,
-        relative_path: request.relative_path,
-    })
+    // Throttle IPC so video chunks do not flood the WebView.
+    let last = std::sync::Mutex::new(std::time::Instant::now() - std::time::Duration::from_secs(1));
+    let (headers, bytes_written) = super::media_download::download(&client, &request.url, &request.headers.unwrap_or_default(), &temp, &meta, cancel.clone(), |progress| {
+        let mut time = last.lock().unwrap();
+        if time.elapsed() >= std::time::Duration::from_millis(250) || progress.total == Some(progress.bytes) {
+            if let Some(channel) = &on_progress { let _ = channel.send(progress); }
+            *time = std::time::Instant::now();
+        }
+    }).await?;
+    if *cancel.borrow() { return Err("下载已暂停".into()); }
+    validate_download_video(app.as_ref(), &temp, &target).await?;
+    if *cancel.borrow() { return Err("下载已暂停".into()); }
+    if crate::commands::dev::resolve_write_path(&root, &request.relative_path)? != target { return Err("下载目标路径已变化".into()); }
+    if target.exists() { return Err("目标文件已存在，未覆盖".into()); }
+    tokio::fs::rename(&temp, &target).await.map_err(|_| "完成媒体文件失败")?;
+    Ok(HttpDownloadToProjectResponse { status: 200, headers, bytes_written, relative_path: request.relative_path })
 }
 
+#[cfg(test)]
 async fn persist_download_response(
     response: reqwest::Response,
     target: &std::path::Path,
@@ -552,7 +639,7 @@ async fn persist_download_response(
         tokio::fs::rename(temp, target).await.map_err(|e| format!("完成媒体文件失败: {}", e))?;
         Ok::<u64, String>(bytes_written)
     }.await;
-    if result.is_err() { let _ = tokio::fs::remove_file(temp).await; }
+    if result.is_err() && tokio::fs::metadata(temp).await.is_ok_and(|m| m.len() == 0) { let _ = tokio::fs::remove_file(temp).await; }
     Ok((status, headers, result?))
 }
 
@@ -770,7 +857,7 @@ mod tests {
                 if stream.write_all(&[*byte]).is_err() { break; }
             }
         });
-        let request = HttpDownloadRequest { url, headers: None, timeout_secs: Some(1) };
+        let request = HttpDownloadRequest { credential_ref: None, url, headers: None, timeout_secs: Some(1) };
         let response = media_download_client(&request).unwrap().get(&request.url).send().await.unwrap();
         let dir = tempfile::TempDir::new().unwrap();
         let target = dir.path().join("result.mp4");
@@ -802,7 +889,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_download_removes_partial_files_after_a_broken_stream() {
+    async fn project_download_keeps_partial_files_after_a_broken_stream() {
         let (url, server) = serve_once(b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nConnection: close\r\n\r\nbad");
         let response = reqwest::get(url).await.unwrap();
         let dir = tempfile::TempDir::new().unwrap();
@@ -813,7 +900,7 @@ mod tests {
 
         server.join().unwrap();
         assert!(!target.exists());
-        assert!(!temp.exists());
+        assert!(temp.exists(), "断流必须保留可恢复的临时文件");
     }
 
     #[tokio::test]
@@ -837,7 +924,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let target = dir.path().join("result.mp4");
         let temp = dir.path().join(".result.part");
-        let request = HttpDownloadRequest { url, headers: None, timeout_secs: Some(1) };
+        let request = HttpDownloadRequest { credential_ref: None, url, headers: None, timeout_secs: Some(1) };
         let result = send_media_download(&media_download_client(&request).unwrap(), &request).await;
 
         server.join().unwrap();
@@ -872,7 +959,7 @@ mod tests {
                 }
                 requests
             });
-            let request = HttpDownloadRequest { url, headers: None, timeout_secs: Some(1) };
+            let request = HttpDownloadRequest { credential_ref: None, url, headers: None, timeout_secs: Some(1) };
             let response = send_media_download(&media_download_client(&request).unwrap(), &request).await.unwrap();
             let requests = server.join().unwrap();
             assert_eq!(response.status().as_u16(), expected_status);
@@ -883,13 +970,14 @@ mod tests {
     #[tokio::test]
     async fn project_download_rejects_paths_outside_the_project_before_network_io() {
         let dir = tempfile::TempDir::new().unwrap();
-        let result = http_download_to_project(HttpDownloadToProjectRequest {
+        let result = download_to_project(HttpDownloadToProjectRequest {
             root: dir.path().to_string_lossy().into_owned(),
             relative_path: "../escape.mp4".into(),
+            credential_ref: None,
             url: "https://example.com/result.mp4".into(),
             headers: None,
             timeout_secs: Some(1),
-        }).await;
+        }, None, None).await;
 
         assert!(matches!(result, Err(message) if message.contains("路径") || message.contains("目录")));
         assert!(!dir.path().parent().unwrap().join("escape.mp4").exists());

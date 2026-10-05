@@ -1,9 +1,10 @@
 <script setup lang="ts">
-defineProps<{ message: string }>()
+withDefaults(defineProps<{ message: string; allowAlways?: boolean; showPermission?: boolean }>(), { allowAlways: true, showPermission: false })
 defineEmits<{
   reject: []
   once: []
   always: []
+  permission: [event: MouseEvent]
 }>()
 </script>
 
@@ -11,9 +12,10 @@ defineEmits<{
   <div class="tool-approval" role="alertdialog" aria-live="assertive">
     <span class="tool-approval-message">{{ message }}</span>
     <div class="tool-approval-actions">
+      <button v-if="showPermission" type="button" @click="$emit('permission', $event)">调整权限</button>
       <button type="button" class="reject" @click="$emit('reject')">拒绝</button>
-      <button type="button" @click="$emit('once')">允许</button>
-      <button type="button" class="always" @click="$emit('always')">始终允许</button>
+      <button type="button" @click="$emit('once')">{{ allowAlways ? '允许' : '本次允许' }}</button>
+      <button v-if="allowAlways" type="button" class="always" @click="$emit('always')">始终允许</button>
     </div>
   </div>
 </template>

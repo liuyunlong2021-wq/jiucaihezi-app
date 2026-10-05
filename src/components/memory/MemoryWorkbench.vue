@@ -56,6 +56,7 @@ import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
   DEEPSEEK_RETRY_TEXT,
   deepSeekFailureText,
+  deepSeekAssistantText,
   deepSeekHandoffTurns,
   deepSeekPrompt,
   deepSeekSessionFailures,
@@ -63,6 +64,8 @@ import {
   deepSeekSessionReasoning,
   deepSeekSessionTurns,
   readDeepSeekHarnessSession,
+  readCurrentDeepSeekPermission,
+  switchDeepSeekSessionPermission,
   type DeepSeekProcessStep,
   type DeepSeekSessionSnapshot,
 } from '@/services/deepSeekHarness'
@@ -232,7 +235,7 @@ const scene3dSelected = ref(false)
 /**
  * 本工作区的沙箱档位（官方三档）。
  *
- * 档位是**工作区级**的持久选择：选中就一直用，直到用户自己改。
+ * localStorage 保存工作区的新任务偏好；已有会话显示宿主确认的生效档位。
  * 以前它是「对话级」的 —— 编码进每轮消息的 toolChips，恢复对话时再从芯片反推回来
  * （`deepSeekPermissionFromChips`），于是新建对话、编辑重发、重开旧对话都会把它打回默认档，
  * 用户体感就是「一个任务一次权限」。
@@ -253,7 +256,7 @@ function loadPermissionTier(): DeepSeekPermissionTier {
   }
 }
 
-/** 唯一的档位写入口：内存与落盘不能分家，否则又是一次「明明选了却在下次变回去」。 */
+/** 用户确认的选择同时保存为新任务偏好；宿主回读只更新生效显示。 */
 function setPermissionTier(tier: DeepSeekPermissionTier) {
   permissionTier.value = tier
   try {
@@ -307,6 +310,7 @@ function togglePermissionMenu(event: MouseEvent) {
  * 生效，先问一次（官方那一档捆绑的是 `approval: never`，点下去就是“以后不再问”，不能手滑）。
  */
 const permissionConfirm = ref(false)
+const permissionSwitching = ref(false)
 
 function choosePermission(tier: DeepSeekPermissionTier) {
   permissionMenu.value = null
@@ -314,11 +318,33 @@ function choosePermission(tier: DeepSeekPermissionTier) {
     permissionConfirm.value = true
     return
   }
-  setPermissionTier(tier)
+  void applyPermission(tier)
+}
+
+async function applyPermission(tier: DeepSeekPermissionTier) {
+  if (permissionSwitching.value) return
+  const owner = projectOwner.value
+  const id = conversation.value?.transcript.id
+  const signal = activeRun.value?.phase === 'running' ? activeRun.value.controller.signal : undefined
+  permissionSwitching.value = true
+  contextNotice.value = '权限切换中…'
+  const stillSelected = () => projectOwner.value === owner && conversation.value?.transcript.id === id
+  try {
+    const actual = id ? await switchDeepSeekSessionPermission(owner, id, tier, signal) : undefined
+    if (!stillSelected()) return
+    if (actual && actual !== tier) throw new Error('宿主尚未应用所选权限')
+    setPermissionTier(actual || tier)
+    contextNotice.value = actual ? `已切换为${permissionTierLabel()}，后续操作使用新权限。` : `新任务将使用${permissionTierLabel()}。`
+  } catch (cause) {
+    if (!stillSelected()) return
+    const actual = (cause as { permissionTier?: DeepSeekPermissionTier } | null)?.permissionTier
+    if (actual) permissionTier.value = actual
+    if (stillSelected()) contextNotice.value = `权限切换未确认：${cause instanceof Error ? cause.message : String(cause)}`
+  } finally { permissionSwitching.value = false }
 }
 
 function confirmFullAccess() {
-  setPermissionTier('danger-full-access')
+  void applyPermission('danger-full-access')
   permissionConfirm.value = false
 }
 
@@ -660,7 +686,7 @@ const pendingUserTurn = computed(() => activeRun.value?.userTurn ?? null)
  * 缩略，跑完或断开就消失，用户看不到进程走到哪。
  */
 const liveProcessTurnId = computed(() =>
-  activeRun.value?.phase === 'running' && activeRun.value.runtime === 'dh'
+  activeRun.value?.runtime === 'dh'
     ? activeRun.value.userTurn?.id || ''
     : '')
 /**
@@ -692,6 +718,20 @@ const runError = computed(() => activeRun.value?.error || '')
 const displayedStatus = computed(() => runStatus.value || status.value)
 const displayedError = computed(() => runError.value || error.value || desktopRemoteSyncError.value)
 const pendingMemoryToolApproval = computed(() => activeRun.value?.approval ?? null)
+watch(() => activeRun.value?.permissionTier, tier => { if (tier) permissionTier.value = tier })
+watch(() => activeRun.value?.permissionNotice, notice => { if (notice) contextNotice.value = notice })
+watch(() => [projectOwner.value, conversation.value?.transcript.id] as const, async ([owner, id], _, onCleanup) => {
+  permissionConfirm.value = false
+  permissionMenu.value = null
+  permissionTier.value = activeRun.value?.permissionTier || loadPermissionTier()
+  if (!desktopRuntime || !id) return
+  const controller = new AbortController()
+  onCleanup(() => controller.abort())
+  try {
+    const actual = await readCurrentDeepSeekPermission(owner, id, controller.signal)
+    if (actual && !controller.signal.aborted) permissionTier.value = actual
+  } catch { /* old conversation remains readable without a live host */ }
+})
 const isOnScreen = (run: MemoryRun) => run.owner === projectOwner.value && conversation.value?.resource.path === run.resourcePath
 
 watch(desktopRemoteCompleted, completed => {
@@ -806,7 +846,7 @@ const conversationTurns = computed(() => {
 })
 const timelineTurns = computed<ConversationTurn[]>(() => {
   const turns = pendingUserTurn.value ? [...conversationTurns.value, pendingUserTurn.value] : conversationTurns.value
-  if (!sending.value || !streamingText.value) return turns
+  if (!streamingText.value) return turns
   return [...turns, {
     id: 'streaming-assistant',
     role: 'assistant',
@@ -846,7 +886,7 @@ function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
 }
 
 function isLiveTurn(turnId: string): boolean {
-  return Boolean(turnId) && turnId === liveProcessTurnId.value
+  return activeRun.value?.phase === 'running' && Boolean(turnId) && turnId === liveProcessTurnId.value
 }
 
 /** 本轮有没有过程要显示（思考 / 步骤 / 叙述 / 在飞）。决定过程块是否单独成块。 */
@@ -871,7 +911,7 @@ function harnessFailureText(turnId: string): string {
  * 于是一轮失败时整个过程块立刻塌回一行 —— 失败才是用户最需要看过程的时候。
  */
 function turnProcessOpen(turnId: string): boolean {
-  return isLiveTurn(turnId) || Boolean(harnessFailureFor(turnId))
+  return isLiveTurn(turnId) || (activeRun.value?.phase === 'stopped' && turnId === liveProcessTurnId.value) || Boolean(harnessFailureFor(turnId))
 }
 
 /** 重试是不是正在等（官方 `active`）：只有活着的这一轮未进入下一次请求时才算。 */
@@ -1353,11 +1393,9 @@ async function openResource(resource: ProjectResourceOpenResult) {
     let activeConversation = resource
     const catalogEntry = listHarnessConversationCatalog(resource.resource.owner)
       .find(item => item.conversationId === resource.transcript.id)
-    if (
-      catalogEntry?.migratedAt
-      || (catalogEntry && catalogEntry.updatedAt !== catalogEntry.createdAt)
-      || resource.transcript.turns.some(turn => turn.toolChips?.includes(DEEPSEEK_HARNESS_SESSION_MARKER))
-    ) {
+    // Show the selected conversation immediately; a stopped first run may have durable history even with an unchanged catalog timestamp.
+    opened.value = activeConversation
+    if (catalogEntry || resource.transcript.turns.some(turn => turn.toolChips?.includes(DEEPSEEK_HARNESS_SESSION_MARKER))) {
       try {
         const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
         const snapshot = await readDeepSeekHarnessSession({
@@ -1370,6 +1408,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
           imageInput: harnessImageInput(config.model),
           permissionTier: permissionTier.value,
         })
+        if (generation !== resourceOpenGeneration) return
         activeConversation = {
           ...activeConversation,
           transcript: {
@@ -2221,50 +2260,59 @@ async function send(remoteText?: string) {
     if (!remote) attachments.value = []
   } catch (cause) {
     if (runs.get(runKey) !== run) return
-    const aborted = cause instanceof DOMException && cause.name === 'AbortError'
+    const aborted = run.controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')
     if (aborted) {
       run.phase = 'stopped'
       run.status = '已停止'
-      restoreDraft()
     } else {
       run.phase = 'failed'
       run.status = '处理失败'
       run.error = cause instanceof Error ? cause.message : String(cause)
-      if (useHarness && run.userTurn) {
-        try {
-          const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
-          const snapshot = await readDeepSeekHarnessSession({
-            cwd: active.resource.owner,
-            sessionId: active.transcript.id,
-            message: '',
-            model: config.model,
-            apiBase: config.apiBase,
-            apiKey: config.apiKey,
-            imageInput: harnessImageInput(config.model),
-            permissionTier: permissionTier.value,
-            mediaSelected: mediaSelected.value,
-            avSelected: avSelected.value,
-            scene3dSelected: scene3dSelected.value,
-            mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
-          })
-          const sessionTurns = deepSeekSessionTurns(snapshot)
-          rememberHarnessSnapshot(snapshot)
-          const failureTurn = [...sessionTurns].reverse().find(turn =>
-            turn.role === 'user' && turn.content === run.userTurn?.content
-              && Date.parse(turn.createdAt) >= Date.parse(run.userTurn?.createdAt || ''))
-          const failure = failureTurn ? deepSeekSessionFailures(snapshot).get(failureTurn.id) : undefined
-          if (failure) run.error = `${failure.code ? `${failure.code}: ` : ''}${failure.message}`
-          const turns = mergedHarnessTurns(active.transcript.turns, sessionTurns)
-          if (runs.get(runKey) === run && isOnScreen(run)) {
-            opened.value = harnessConversationOpenResult({
-              resource: active.resource,
-              transcript: { ...active.transcript, turns },
-            })
-          }
-        } catch (snapshotCause) {
-          run.error += `；失败记录刷新失败：${snapshotCause instanceof Error ? snapshotCause.message : String(snapshotCause)}`
+    }
+    if (useHarness && run.userTurn) {
+      try {
+        const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
+        const snapshot = await readDeepSeekHarnessSession({
+          cwd: active.resource.owner,
+          sessionId: active.transcript.id,
+          message: '',
+          model: config.model,
+          apiBase: config.apiBase,
+          apiKey: config.apiKey,
+          imageInput: harnessImageInput(config.model),
+          permissionTier: permissionTier.value,
+          mediaSelected: mediaSelected.value,
+          avSelected: avSelected.value,
+          scene3dSelected: scene3dSelected.value,
+          mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
+        })
+        const sessionTurns = deepSeekSessionTurns(snapshot)
+        rememberHarnessSnapshot(snapshot)
+        const failureTurn = [...sessionTurns].reverse().find(turn =>
+          turn.role === 'user' && turn.content === run.userTurn?.content
+            && Date.parse(turn.createdAt) >= Date.parse(run.userTurn?.createdAt || ''))
+        const failure = failureTurn ? deepSeekSessionFailures(snapshot).get(failureTurn.id) : undefined
+        if (failure && !aborted) run.error = `${failure.code ? `${failure.code}: ` : ''}${failure.message}`
+        const turns = mergedHarnessTurns(active.transcript.turns, sessionTurns)
+        const partial = run.streamingText.trim()
+        if (partial && !snapshot.events.some(event => deepSeekAssistantText(event)?.trim() === partial))
+          turns.push({ id: `interrupted-${run.runId}`, role: 'assistant', content: partial, createdAt: new Date().toISOString() })
+        if (failureTurn && runs.get(runKey) === run) {
+          const existing = listHarnessConversationCatalog(run.owner).find(item => item.conversationId === run.conversationId)
+          if (existing) upsertHarnessConversationCatalogEntry({ ...existing, title: title || existing.title, updatedAt: new Date().toISOString() })
+          const restored = { resource: active.resource, transcript: { ...active.transcript, title: title || active.transcript.title, turns } }
+          if (run.owner === projectOwner.value) rememberConversation(restored)
+          if (isOnScreen(run)) opened.value = harnessConversationOpenResult(restored)
+          run.officialHistoryReady = true
+          run.userTurn = null
+          run.streamingText = ''
         }
+      } catch (snapshotCause) {
+        run.error += `；会话记录刷新失败：${snapshotCause instanceof Error ? snapshotCause.message : String(snapshotCause)}`
       }
+    }
+
+    if (!aborted) {
       if (!replyCompleted && run.runtime !== 'dh' && isRecoverableDirectTransportFailure(cause)) {
         const interruptedReply = [
           run.streamingText.trim(),
@@ -2288,7 +2336,8 @@ async function send(remoteText?: string) {
   } finally {
     // 只有仍标记为 running 的运行才算正常结束，被停掉或换掉的不能被这里改回 done。
     if (run.phase === 'running') run.phase = 'done'
-    run.userTurn = null
+    if (run.phase === 'stopped') restoreDraft()
+    if (roundPersisted || run.officialHistoryReady) run.userTurn = null
     settleApproval(run, 'reject')
     stopRunTimer(run)
     sendInFlight.value = false
@@ -3494,7 +3543,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <article
           v-if="turnHasBody(turn)"
           class="memory-message"
-          :class="[turn.role, { streaming: turn.id === 'streaming-assistant' }]"
+          :class="[turn.role, { streaming: sending && turn.id === 'streaming-assistant' }]"
         >
           <span class="memory-role">{{ turn.role === 'user' ? '你' : '韭菜盒子' }}</span>
           <div v-if="turn.role === 'user' && turnAttachments(turn).length" class="memory-message-attachments">
@@ -3510,7 +3559,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             :data-file-source="conversation?.resource.path"
             :content="displayTurnContent(turn)"
             :render-id="turn.id"
-            :streaming="turn.id === 'streaming-assistant'"
+            :streaming="sending && turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
           />
           <div
@@ -3658,7 +3707,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 class="memory-process-step"
                 :class="step.state"
               >
-                <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' }" />
+                <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' && isLiveTurn(turn.id) }" />
                 <span class="memory-process-label">{{ step.label }}</span>
                 <span v-if="step.summary" class="memory-process-summary" :title="step.summary">{{ step.summary }}</span>
                 <em v-if="step.durationMs !== undefined">{{ formatToolDuration(step.durationMs) }}</em>
@@ -3778,6 +3827,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <ToolApprovalStrip
           v-if="pendingMemoryToolApproval"
           :message="pendingMemoryToolApproval.message"
+          :allow-always="activeRun?.runtime !== 'dh'"
+          :show-permission="activeRun?.runtime === 'dh'"
+          @permission="togglePermissionMenu"
           @reject="settleMemoryToolApproval('reject')"
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
@@ -3845,7 +3897,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                   @blur="hideChipTip"
                   @click="togglePermissionMenu($event)"
                 >
-                  <JcIcon name="description" /><span>{{ permissionTierShortLabel() }}</span>
+                  <JcIcon name="description" /><span>{{ permissionSwitching ? '切换中' : permissionTierShortLabel() }}</span>
                 </button>
               </div>
               <button
@@ -3892,6 +3944,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             type="button"
             role="menuitemradio"
             :aria-checked="permissionTier === option.tier"
+            :disabled="permissionSwitching"
             @click="choosePermission(option.tier)"
           >
             <JcIcon :name="permissionTier === option.tier ? 'check_circle' : 'circle'" />

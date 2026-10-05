@@ -11,6 +11,8 @@ import {
   deepSeekMessageUsage,
   deepSeekModelInput,
   deepSeekPermissionChip,
+  readCurrentDeepSeekPermission,
+  switchDeepSeekSessionPermission,
   DEEPSEEK_DEFAULT_PERMISSION_TIER,
   DEEPSEEK_PERMISSION_TIERS,
   DEEPSEEK_RETRY_TEXT,
@@ -37,9 +39,8 @@ test('@文件 maps to the official Harness full-access mode', () => {
     DEEPSEEK_PERMISSION_TIERS.map(option => [option.tier, option.short]),
     [['read-only', '仅可查看'], ['workspace-write', '工作区'], ['danger-full-access', '完全权限']],
   )
-  // 中间档越界是 fail-closed 拒绝，不是弹窗询问 —— DH 路径下没有应答 approval/request 的通道，
-  // 文案不能承诺一个不存在的弹窗。
-  assert.equal(DEEPSEEK_PERMISSION_TIERS[1].note, '只能改工作区内的文件，越界会被拒绝')
+  // 越界审批已经接通，文案须区分长期档位与本次授权。
+  assert.equal(DEEPSEEK_PERMISSION_TIERS[1].note, '只能改工作区内的文件，越界需请求本次授权')
   assert.equal(DEEPSEEK_DEFAULT_PERMISSION_TIER, 'workspace-write')
   // 档位 → 持久化芯片（只写不读）：默认档不落芯片，`file` 与旧会话的「开」一一对应。
   assert.equal(deepSeekPermissionChip('workspace-write'), undefined)
@@ -880,18 +881,18 @@ test('an existing session is switched to the @文件 permission instead of keepi
   // pinInitialPermission 保留自己的开关，所以打开 @文件 也松不开沙箱——写 ~/.agents/skills
   // 会拿到 [sandbox: file access denied under workspace-write mode]，用户看到的就是「没有权限」。
   assert.match(source, /async function alignSessionPermission\(/)
-  assert.match(source, /await alignSessionPermission\(active, wireSessionId, input\.permissionTier\)/)
-  // 每个 (runtime, 会话) 只切一次：runtimeKey 已经含权限模式，模式一变就是新 runtime。
-  assert.match(source, /if \(active\.permissions\.get\(sessionId\) === preset\) return/)
+  assert.match(source, /await alignSessionPermission\(active, wireSessionId, input\.permissionTier, input\.signal\)/)
+  // Same preset is read back without repeating the mutation.
+  assert.match(source, /if \(current !== preset\)/)
   assert.match(source, /preset: DeepSeekPermissionTier = DEEPSEEK_DEFAULT_PERMISSION_TIER/)
   // 切换只能走官方命令面：SDK 通道只暴露 session/prompt|list|read，没有任何权限方法。
   // 同一处 inject 还要带 `skills`：点名 skill 要查官方注册表，没声明就直接抛
   // `cannot get property "skills" without inject`（第一版补丁漏了它，实测整轮失败）。
   assert.match(prepare, /const scopeInject = 'const inject = \["agents", "sessionQuery", "commands", "skills"\];'/)
   assert.match(prepare, /case "session\/permission": return this\.permission\(params\);/)
-  assert.match(prepare, /commands"\)\.execute\(rec\.handle\.agent, "\/permission " \+ preset/)
+  assert.match(prepare, /commands"\)\.execute\(agent, "\/permission " \+ preset/)
   assert.match(runner, /command\.type === 'permission'/)
-  assert.match(runner, /harness\.client\.request\('session\/permission'/)
+  assert.match(runner, /command\.type === 'permission' \? 'session\/permission'/)
 })
 
 test('attachments are addressable by project path, not only by inline content', () => {
@@ -1041,7 +1042,7 @@ test('completed Harness turns fold their process rows without hiding the answer'
   // 否则每次重渲染都会把用户手动展开的状态抢回去。以前只看「运行中」，于是一轮失败时
   // 整个过程块立刻塌回一行 —— 失败恰恰是用户最需要看过程的时候。
   assert.match(workbench, /class="memory-process"[\s\S]{0,80}?:open="turnProcessOpen\(turn\.id\) \|\| undefined"/)
-  assert.match(workbench, /function turnProcessOpen\(turnId: string\): boolean \{\n\s*return isLiveTurn\(turnId\) \|\| Boolean\(harnessFailureFor\(turnId\)\)/)
+  assert.match(workbench, /function turnProcessOpen\(turnId: string\): boolean \{\n\s*return isLiveTurn\(turnId\)[^\n]*phase === 'stopped'[^\n]*Boolean\(harnessFailureFor\(turnId\)\)/)
 })
 
 test('重试链在轮次内可见，失败行按官方 TurnErrorItem 结构给出原因与出口', () => {
@@ -1067,4 +1068,75 @@ test('重试链在轮次内可见，失败行按官方 TurnErrorItem 结构给�
   assert.match(workbench, /function fillContinue\(\) \{\n\s*const text = '继续'/)
   // 重试不算工具步：折叠标题里的「N 个步骤」不能把重试也算进去。
   assert.match(workbench, /step\.kind !== 'narration' && step\.kind !== 'retry'/)
+})
+
+function controlRuntime(t: { after: (fn: () => void) => void }, send: (command: any, active: any) => Promise<void>) {
+  const registry = (globalThis as any).__JC_DEEPSEEK_HARNESS__
+  const cwd = `/control-${crypto.randomUUID()}`
+  const active: any = { runs: new Map(), permissions: new Map(), permissionListeners: new Map(), transport: { send: (command: any) => send(command, active) } }
+  registry.runtimes.set(cwd, { key: cwd, ready: Promise.resolve(active) })
+  t.after(() => registry.runtimes.delete(cwd))
+  return { cwd, active }
+}
+const microtasks = async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }
+
+test('live permission uses the existing runtime, reads actual state and skips duplicate mutations', async t => {
+  let tier = 'read-only'
+  const commands: any[] = []
+  const { cwd, active } = controlRuntime(t, async (command, runtime) => {
+    commands.push(command)
+    if (command.preset) tier = command.preset
+    runtime.runs.get(command.requestId).resolve({ preset: tier })
+  })
+  const effective: string[] = []
+  active.permissionListeners.set(deepSeekSessionId('chat'), (actual: string) => effective.push(actual))
+  assert.equal(await switchDeepSeekSessionPermission(cwd, 'chat', 'workspace-write'), 'workspace-write')
+  assert.equal(await switchDeepSeekSessionPermission(cwd, 'chat', 'workspace-write'), 'workspace-write')
+  assert.equal(await readCurrentDeepSeekPermission(cwd, 'chat'), 'workspace-write')
+  assert.equal(commands.filter(c => c.preset).length, 1)
+  assert.ok(commands.every(c => c.sessionId === deepSeekSessionId('chat')))
+  assert.equal(active.runs.size, 0)
+  assert.equal(effective.at(-1), 'workspace-write')
+})
+
+test('permission wait settles promptly when stopped even when transport send never completes', async t => {
+  const { cwd, active } = controlRuntime(t, () => new Promise(() => {}))
+  const controller = new AbortController()
+  const request = switchDeepSeekSessionPermission(cwd, 'chat', 'workspace-write', controller.signal)
+  const settled = assert.rejects(request, { name: 'AbortError' })
+  await microtasks()
+  assert.equal(active.runs.size, 1)
+  controller.abort()
+  await settled
+  assert.equal(active.runs.size, 0)
+})
+
+test('permission timeout reads a host change that committed before the missing acknowledgement', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let tier = 'read-only'
+  const { cwd, active } = controlRuntime(t, async (command, runtime) => {
+    if (command.preset) { tier = command.preset; return }
+    runtime.runs.get(command.requestId).resolve({ preset: tier })
+  })
+  const actual: string[] = []
+  active.permissionListeners.set(deepSeekSessionId('chat'), (value: string) => actual.push(value))
+  const switching = switchDeepSeekSessionPermission(cwd, 'chat', 'workspace-write')
+  const settled = switching.then(tier => assert.equal(tier, 'workspace-write'))
+  await microtasks()
+  t.mock.timers.tick(15_000)
+  await settled
+  assert.equal(actual.at(-1), 'workspace-write')
+  assert.equal(active.permissions.get(deepSeekSessionId('chat')), 'workspace-write')
+  assert.equal(active.runs.size, 0)
+})
+
+test('catalog-only permission selection remains a new-task preference without creating a host session', async t => {
+  const commands: any[] = []
+  const { cwd } = controlRuntime(t, async (command, active) => {
+    commands.push(command)
+    active.runs.get(command.requestId).resolve({ exists: false })
+  })
+  assert.equal(await readCurrentDeepSeekPermission(cwd, 'unopened'), undefined)
+  assert.equal(await switchDeepSeekSessionPermission(cwd, 'unopened', 'danger-full-access'), undefined)
+  assert.ok(commands.every(c => c.existingOnly && c.preset === undefined))
 })

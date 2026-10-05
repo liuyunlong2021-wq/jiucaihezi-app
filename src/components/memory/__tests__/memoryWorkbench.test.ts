@@ -60,7 +60,7 @@ test('Desktop task can still be stopped and its approval settled after the view 
     runId: 'run-1', owner: '/project', resourcePath: 'chat', conversationId: 'chat-1',
     phase: 'running', status: '等待审批', error: '', streamingText: '部分回答', reasoning: '',
     steps: [{ id: 'tool-1', label: '执行工具', state: 'running' }], elapsed: 0, metrics: null,
-    userTurn: null, programStatus: null,
+    userTurn: { id: 'pending', role: 'user', content: '长时间任务', createdAt: '2026-10-05T00:00:00.000Z' }, programStatus: null,
     approval: { id: 'approval-1', message: '确认操作', resolve: decision => decisions.push(decision) },
     controller: new AbortController(), timer: null, startedAt: Date.now(), editTargetId: '',
     memoryEnabled: false, runtime: 'dh',
@@ -76,7 +76,9 @@ test('Desktop task can still be stopped and its approval settled after the view 
     assert.equal(run.controller.signal.aborted, true)
     assert.deepEqual(decisions, ['reject'])
     assert.equal(run.approval, null)
-    assert.equal(run.streamingText, '')
+    assert.equal(run.streamingText, '部分回答')
+    assert.equal(run.userTurn?.content, '长时间任务')
+    assert.equal(run.steps.length, 1)
   } finally {
     desktopConversationRuns.delete(key)
   }
@@ -905,7 +907,7 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /const timelineTurns = computed<ConversationTurn\[\]>/)
   assert.match(workbench, /id: 'streaming-assistant'/)
   assert.match(workbench, /v-for="turn in timelineTurns"/)
-  assert.match(workbench, /:streaming="turn\.id === 'streaming-assistant'"/)
+  assert.match(workbench, /:streaming="sending && turn\.id === 'streaming-assistant'"/)
   assert.match(workbench, /watch\(streamingText,[\s\S]*scheduleAutoScrollIfNeeded\(\)/)
   assert.match(workbench, /readDeepSeekHarnessSession\([\s\S]*turns: mergedHarnessTurns/)
   assert.match(workbench, /opened\.value = useHarness[\s\S]*harnessConversationOpenResult\(complete\)/)
@@ -970,7 +972,7 @@ test('legacy retries may write one Raw recovery point while Harness failures kee
   )
   assert.match(
     workbench,
-    /const aborted = cause instanceof DOMException && cause\.name === 'AbortError'[\s\S]*if \(aborted\) \{\s*run\.phase = 'stopped'\s*run\.status = '已停止'/,
+    /const aborted = run\.controller\.signal\.aborted \|\| \(cause instanceof DOMException && cause\.name === 'AbortError'\)[\s\S]*if \(aborted\) \{\s*run\.phase = 'stopped'\s*run\.status = '已停止'/,
   )
   // 运行中 composer 仍然可用：只有发送键变成停止键，草稿属于下一轮。
   assert.match(workbench, /contenteditable="true"/)
@@ -1984,4 +1986,15 @@ test('发送中的用户轮次就能拿到附件缩略图', () => {
     workbench,
     /transientAttachments\.value = \{ \.\.\.transientAttachments\.value, \[userTurn\.id\]: pendingAttachments \}/,
   )
+})
+
+
+test('stopped and failed runs retain visible output while cancellation reads official history', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const timeline = workbench.match(/const timelineTurns = computed<ConversationTurn\[\]>\(\(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
+  assert.doesNotMatch(timeline, /!sending\.value/)
+  const liveAnchor = workbench.split('const liveProcessTurnId = computed')[1]?.split('const liveInFlight = computed')[0] || ''
+  assert.doesNotMatch(liveAnchor, /phase === 'running'/)
+  assert.match(workbench, /if \(roundPersisted \|\| run\.officialHistoryReady\) run\.userTurn = null/)
+  assert.match(workbench, /const aborted = run\.controller\.signal\.aborted/)
 })

@@ -50,11 +50,12 @@ createInterface({ input: process.stdin }).on('line', line => {
   }
   // 会话权限是 durable 事实，进程级 DSH_PERMISSION_MODE 只管新会话的默认值。
   // 已存在的会话必须经官方命令面切换，否则打开 @文件 也松不开沙箱。
-  if (command.type === 'permission') {
-    void harness.start().then(() => harness.client.request('session/permission', {
+  if (command.type === 'permission' || command.type === 'approval') {
+    void harness.start().then(() => harness.client.request(command.type === 'permission' ? 'session/permission' : 'session/approval', command.type === 'permission' ? {
       sessionId: command.sessionId,
-      preset: command.preset,
-    })).then(
+      existingOnly: command.existingOnly === true,
+      ...(command.preset === undefined ? {} : { preset: command.preset }),
+    } : command.approval)).then(
       data => send({ type: 'query-result', requestId: command.requestId, data }),
       error => send({ type: 'error', requestId: command.requestId, error: errorMessage(error) }),
     )

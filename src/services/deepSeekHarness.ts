@@ -24,8 +24,9 @@ type Runtime = {
     reject: (error: Error) => void
     notify: (notification: NonNullable<BridgeMessage['notification']>) => void
   }>
-  /** 已拉齐到 `@文件` 语义的会话（wire id）→ 当前预设；只在 runtime 存活期内记。 */
+  /** 宿主确认的会话预设，只在 runtime 存活期内保留。 */
   permissions: Map<string, string>
+  permissionListeners: Map<string, (tier: DeepSeekPermissionTier) => void>
   closed: Promise<void>
   markClosed: () => void
   closing?: Promise<void>
@@ -58,6 +59,21 @@ export interface DeepSeekHarnessInput {
   /** 实时推理正文；只在内容真的变化时回调，与 `onText` 分开、不混进消息体。 */
   onReasoning?: (text: string) => void
   onProgress?: (progress: DeepSeekProgress) => void
+  onPermission?: (tier: DeepSeekPermissionTier) => void
+  onApproval?: (request: DeepSeekApprovalRequest, signal: AbortSignal) => Promise<'allowed-once' | 'rejected'>
+}
+
+export type DeepSeekApprovalRequest = {
+  id: string
+  sessionId: string
+  agentId: string
+  requestSessionId?: string
+  turn?: number
+  callId?: string
+  toolName: string
+  target?: string
+  reason?: string
+  displayReason?: { zh?: string; en?: string }
 }
 
 export type DeepSeekProgress = {
@@ -199,8 +215,6 @@ export type DeepSeekPermissionTier = 'read-only' | 'workspace-write' | 'danger-f
  * 短名（工作台那个按钮常驻显示当前档，全名「工作区内修改」会把整排按钮撑到滚动）；
  * `note` 用官方 config 里那两档 description 的口径补上「越界怎么办」，因为那才是三档真正的区别。
  *
- * 中间档的 `note` 必须写「会被拒绝」而不是「会询问」：DH 路径下没有任何东西应答
- * `approval/request`，越界是 fail-closed 直接失败，不是弹窗问一次。
  */
 export const DEEPSEEK_PERMISSION_TIERS: ReadonlyArray<{
   tier: DeepSeekPermissionTier
@@ -208,8 +222,8 @@ export const DEEPSEEK_PERMISSION_TIERS: ReadonlyArray<{
   short: string
   note: string
 }> = [
-  { tier: 'read-only', label: '仅可查看', short: '仅可查看', note: '不改动任何文件' },
-  { tier: 'workspace-write', label: '工作区内修改', short: '工作区', note: '只能改工作区内的文件，越界会被拒绝' },
+  { tier: 'read-only', label: '仅可查看', short: '仅可查看', note: '默认不修改文件，需要时可请求本次授权' },
+  { tier: 'workspace-write', label: '工作区内修改', short: '工作区', note: '只能改工作区内的文件，越界需请求本次授权' },
   { tier: 'danger-full-access', label: '完全权限', short: '完全权限', note: '本机文件不再受限，也不再询问' },
 ]
 
@@ -279,7 +293,6 @@ function runtimeKey(input: DeepSeekHarnessInput): string {
     input.apiBase,
     input.model,
     deepSeekModelInput(input.imageInput).join('+'),
-    input.permissionTier ?? DEEPSEEK_DEFAULT_PERMISSION_TIER,
     input.mediaSelected ? 'media' : '',
     input.avSelected ? 'av' : '',
     input.scene3dSelected ? '3d' : '',
@@ -1197,6 +1210,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     transport,
     runs: new Map(),
     permissions: new Map(),
+    permissionListeners: new Map(),
     closed,
     markClosed,
   }
@@ -1238,20 +1252,10 @@ async function queryDeepSeekHarness(
   command: 'list-sessions' | 'read-session',
 ): Promise<any> {
   const active = await ensureRuntime(input, true)
-  const requestId = crypto.randomUUID()
-  const completed = new Promise<any>((resolve, reject) => {
-    active.runs.set(requestId, { resolve, reject, notify() {} })
-  })
-  try {
-    await active.transport.send({
-      type: command,
-      requestId,
-      ...(command === 'read-session' ? { sessionId: deepSeekSessionId(input.sessionId) } : {}),
-    } as unknown as JSONRPCMessage)
-    return await completed
-  } finally {
-    active.runs.delete(requestId)
-  }
+  return harnessControl(active, {
+    type: command,
+    ...(command === 'read-session' ? { sessionId: deepSeekSessionId(input.sessionId) } : {}),
+  }, input.signal)
 }
 
 export async function readDeepSeekHarnessSession(
@@ -1298,40 +1302,74 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
   }
 }
 
-/**
- * 把当前会话的权限拉齐到选中的档位。
- *
- * 会话把权限记成 durable 事实（`permission/preset` + `sandbox/mode` + `approval/policy`，
- * 实测老会话里就是 workspace-write / workspace-write / ask），进程级 `DSH_PERMISSION_MODE`
- * 只决定**新会话**的默认值：官方 `pinInitialPermission` 对已存在的会话保留它自己记下的开关。
- * 所以打开 `@文件` 也松不开老会话的沙箱，写 `~/.agents/skills` 会拿到
- * `[sandbox: file access denied under workspace-write mode]` —— 用户看到的就是「没有权限」。
- *
- * 切换走官方命令面（`dsh-permission-presets` 注册的 `/permission <preset>`），不自己写
- * `permission/preset` 事件：官方那两个 canonical setter 才是沙箱与审批的真正开关。
- * SDK 通道没有权限方法，这条请求由 `scripts/prepare-deepseek-harness.mjs` 的第 5 处补丁补上。
- *
- * 每个 (runtime, 会话) 只切一次：`runtimeKey` 已经含权限模式，模式一变就是新 runtime；而切换会往
- * 会话日志写 `command/run` + `command/done` 两条生命周期事件，不该每轮都写。
- */
-async function alignSessionPermission(
-  active: Runtime,
-  sessionId: string,
-  preset: DeepSeekPermissionTier = DEEPSEEK_DEFAULT_PERMISSION_TIER,
-): Promise<void> {
-  if (active.permissions.get(sessionId) === preset) return
+/** Bounded control RPCs must also settle when stopping during permission alignment. */
+async function harnessControl(active: Runtime, command: Record<string, unknown>, signal?: AbortSignal): Promise<any> {
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const requestId = crypto.randomUUID()
-  const completed = new Promise<unknown>((resolve, reject) => {
-    // 这条请求不参与 UI 投影：官方命令面不产生模型轮次，也没有工具进度要转发。
-    active.runs.set(requestId, { resolve, reject, notify: () => {} })
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let abort = () => {}
+  const completed = new Promise<any>((resolve, reject) => {
+    abort = () => reject(new DOMException('Aborted', 'AbortError'))
+    active.runs.set(requestId, { resolve, reject, notify() {} })
+    timer = setTimeout(() => reject(new Error('运行时通信超时，请重试')), 15_000)
+    signal?.addEventListener('abort', abort, { once: true })
   })
   try {
-    await active.transport.send({ type: 'permission', requestId, sessionId, preset } as unknown as JSONRPCMessage)
-    await completed
+    // Include send in the deadline: a blocked transport must not prevent cancellation.
+    void active.transport.send({ ...command, requestId } as unknown as JSONRPCMessage).catch(error => active.runs.get(requestId)?.reject(error))
+    return await completed
   } finally {
+    clearTimeout(timer)
+    signal?.removeEventListener('abort', abort)
     active.runs.delete(requestId)
   }
-  active.permissions.set(sessionId, preset)
+}
+
+async function sessionPermission(active: Runtime, sessionId: string, preset?: DeepSeekPermissionTier, signal?: AbortSignal, existingOnly = false): Promise<DeepSeekPermissionTier | undefined> {
+  const data = await harnessControl(active, { type: 'permission', sessionId, existingOnly, ...(preset ? { preset } : {}) }, signal)
+  if (existingOnly && data?.exists === false) return undefined
+  const tier = DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === data?.preset)?.tier
+  if (!tier) throw new Error('宿主返回了无法识别的权限档位')
+  active.permissions.set(sessionId, tier)
+  active.permissionListeners.get(sessionId)?.(tier)
+  return tier
+}
+
+export async function readCurrentDeepSeekPermission(cwd: string, conversationId: string, signal?: AbortSignal): Promise<DeepSeekPermissionTier | undefined> {
+  const slot = runtimes.get(cwd)
+  if (!slot) return undefined
+  const active = await slot.ready
+  if (active.closing) return undefined
+  return sessionPermission(active, deepSeekSessionId(conversationId), undefined, signal, true)
+}
+
+/** Update the live Session through the official command; no runtime restart or prompt replay. */
+export async function switchDeepSeekSessionPermission(cwd: string, conversationId: string, tier: DeepSeekPermissionTier, signal?: AbortSignal): Promise<DeepSeekPermissionTier | undefined> {
+  const slot = runtimes.get(cwd)
+  if (!slot) return undefined
+  const active = await slot.ready
+  if (active.closing) throw new Error('任务正在停止，请稍后切换权限')
+  const sessionId = deepSeekSessionId(conversationId)
+  try {
+    const current = await sessionPermission(active, sessionId, undefined, signal, true)
+    if (!current) return undefined
+    return current === tier ? current : await sessionPermission(active, sessionId, tier, signal)
+  } catch (error) {
+    // A deadline can expire after the host committed. Read the authoritative state before reporting.
+    if (!signal?.aborted) {
+      try {
+        const actual = await sessionPermission(active, sessionId, undefined, signal, true)
+        if (actual === tier) return actual
+        if (error instanceof Error && actual) Object.assign(error, { permissionTier: actual })
+      } catch { /* keep the original error */ }
+    }
+    throw error
+  }
+}
+
+async function alignSessionPermission(active: Runtime, sessionId: string, preset: DeepSeekPermissionTier = DEEPSEEK_DEFAULT_PERMISSION_TIER, signal?: AbortSignal): Promise<void> {
+  const current = await sessionPermission(active, sessionId, undefined, signal)
+  if (current !== preset) await sessionPermission(active, sessionId, preset, signal)
 }
 
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
@@ -1361,9 +1399,35 @@ async function runDeepSeekHarnessTurn(
   const requestId = crypto.randomUUID()
   let finalText = ''
   let reasoningSent = ''
+  const approvals = new Map<string, AbortController>()
+  active.permissionListeners.set(wireSessionId, tier => input.onPermission?.(tier))
   const stream = { attemptId: '', nextIndex: 0, text: '', reasoning: '', turn: 0, step: 0 }
   const notify = (frame: NonNullable<BridgeMessage['notification']>) => {
     if (frame.params?.sessionId !== wireSessionId) return
+    if (frame.method === 'session.approval-settled') {
+      approvals.get(frame.params.id)?.abort()
+      approvals.delete(frame.params.id)
+      return
+    }
+    if (frame.method === 'session.approval-request') {
+      const request = frame.params as DeepSeekApprovalRequest
+      if (approvals.has(request.id)) return
+      const controller = new AbortController()
+      approvals.set(request.id, controller)
+      input.onStatus?.('等待你的授权')
+      void Promise.resolve().then(() => input.onApproval?.(request, controller.signal) ?? 'unavailable').then(async outcome => {
+        if (controller.signal.aborted || input.signal?.aborted) return
+        await harnessControl(active, { type: 'approval', approval: { ...request, outcome } }, input.signal)
+      }).catch(error => {
+        if (controller.signal.aborted || input.signal?.aborted) return
+        const failure = new Error(`授权通信失败：${error instanceof Error ? error.message : String(error)}`)
+        input.onStatus?.(failure.message)
+        active.runs.get(requestId)?.reject(failure)
+        // The card has already settled locally; close the host to cancel a lost reply rather than leaving an unanswerable request.
+        void stopRuntime(active)
+      })
+      return
+    }
     if (frame.method === 'session.assistant-stream') {
       const text = applyDeepSeekAssistantStream(stream, frame.params.frame)
       if (text !== undefined) input.onText?.(text)
@@ -1408,7 +1472,7 @@ async function runDeepSeekHarnessTurn(
   input.signal?.addEventListener('abort', abort, { once: true })
   try {
     input.onStatus?.('正在启动')
-    await alignSessionPermission(active, wireSessionId, input.permissionTier)
+    await alignSessionPermission(active, wireSessionId, input.permissionTier, input.signal)
     const completed = new Promise<string>((resolve, reject) => {
       active.runs.set(requestId, { resolve, reject, notify })
     })
@@ -1423,6 +1487,9 @@ async function runDeepSeekHarnessTurn(
     if (!result.trim()) throw new Error('DeepSeek Harness 未返回正文')
     return result
   } finally {
+    for (const controller of approvals.values()) controller.abort()
+    approvals.clear()
+    active.permissionListeners.delete(wireSessionId)
     active.runs.delete(requestId)
     input.signal?.removeEventListener('abort', abort)
   }
