@@ -1,10 +1,15 @@
 # 热缓存
 
+## [2026-10-06] v2.2.18 Intel DMG 重试修复（发布中）
+
+- v2.2.17 run `37477588251` 中 macOS ARM、Windows 成功；Intel 在签名完成后，`hdiutil create` 返回 `Resource busy`，导致公证、Intel 产物和下载清单跳过。这是打包阶段资源忙，不是代码编译失败。
+- Intel DMG 步骤现增加最多 3 次创建尝试、每次独立临时镜像、退避等待、失败时 `hdiutil info` 诊断及临时目录清理。版本提升至 `2.2.18`；CI 完成前不登记发布成功。
+
 ## [2026-10-06] v2.2.16 三平台构建失败修复
 
 - GitHub Actions run `37464731998` 的 macOS ARM、macOS Intel、Windows x64 均在共同的 Desktop TypeScript 构建阶段失败；不是平台工具链故障。错误为 `modeLabel` 未覆盖新增的 `prompt-enhancement`，以及文本轮询分支提前 return 后仍有不可能成立的 `kind === 'text'` 比较。
 - 两处已修复；本地 `pnpm run typecheck` 与 `pnpm run build:desktop:quick` 通过。`v2.2.16` 标签已触发过失败构建，按发布边界保留不移动，修复版提升到 `v2.2.17`。
-- 发布已由 `v2.2.17` 标签触发，未等待 GitHub Actions 结果；三平台产物和下载清单待 CI 完成确认。
+- `v2.2.17` 结果已确认：macOS ARM 与 Windows 成功，Intel 的 DMG 创建因 `hdiutil: Resource busy` 失败，下载清单因此跳过；修复版改用 `v2.2.18`，不移动既有 tag。
 
 ## [2026-10-06] 小易 Grok Imagine Image 2.0 恢复现有异步路由
 

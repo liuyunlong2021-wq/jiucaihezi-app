@@ -275,10 +275,31 @@ jobs:
           SOURCE=$(mktemp -d)
           DMG="$BUNDLE/韭菜盒子_${GITHUB_REF_NAME}_x64.dmg"
           mkdir -p "$BUNDLE"
+          TMP_DMG=""
+          cleanup() {
+            rm -rf "$SOURCE"
+            if [ -n "$TMP_DMG" ]; then rm -f "$TMP_DMG"; fi
+          }
+          trap cleanup EXIT
           cp -R "$APP" "$SOURCE/韭菜盒子.app"
           ln -s /Applications "$SOURCE/Applications"
-          hdiutil create -volname "韭菜盒子" -srcfolder "$SOURCE" -ov -format UDZO "$DMG"
-          rm -rf "$SOURCE"
+          for attempt in 1 2 3; do
+            TMP_DMG="$BUNDLE/.韭菜盒子_${GITHUB_REF_NAME}_x64_attempt_${attempt}.dmg"
+            rm -f "$TMP_DMG"
+            if hdiutil create -volname "韭菜盒子" -srcfolder "$SOURCE" -ov -format UDZO "$TMP_DMG"; then
+              mv "$TMP_DMG" "$DMG"
+              TMP_DMG=""
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "DMG creation failed after $attempt attempts; current disk images:"
+              hdiutil info || true
+              exit 1
+            fi
+            echo "hdiutil failed on attempt $attempt; retrying after cleanup"
+            hdiutil info || true
+            sleep $((attempt * 10))
+          done
 
       - name: Notarize macOS app (Intel)
         env:

@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-10-06] 发布修复 | v2.2.17 Intel DMG 创建 Resource busy
+
+- GitHub Actions run `37477588251` 中 ARM 与 Windows 成功；Intel 构建、签名完成后，`Create DMG (Intel, headless)` 的 `hdiutil create` 以 `Resource busy` 失败，导致 Intel 公证、产物和 `publish-download-manifest` 跳过。
+- Intel 创建步骤改为最多 3 次重试；每次写入独立临时 DMG，成功后移动到正式文件名；增加退避、失败时的 `hdiutil info` 诊断和 `trap` 清理。
+- 版本从 `2.2.17` 提升至 `2.2.18`，保留已存在的失败 tag。待提交并触发 CI；未声称发布完成。
+
 ## [2026-10-06] 发布修复 | v2.2.16 CI 类型检查失败
 
 - 用户提供 GitHub Actions run `37464731998` 失败截图并要求查原因。三个平台的日志均显示 `build:desktop:quick` 中 `vue-tsc -b` 报相同两处错误：`modeLabel` 的 `Record<CreationMode, string>` 漏了 `prompt-enhancement`；`pollTask` 已排除 `text` 后仍以 `kind === 'text'` 条件映射媒体类型，导致 TS2367。
