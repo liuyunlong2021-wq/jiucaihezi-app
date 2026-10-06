@@ -12,6 +12,18 @@ spec.loader.exec_module(backup)
 
 
 class BackupTest(unittest.TestCase):
+    def test_database_name_is_not_connection_uri(self):
+        values = backup.connection('postgresql://newapi:p%40ss@postgres:5432/new-api?sslmode=disable')
+        self.assertEqual(values['PGDATABASE'], 'new-api')
+        self.assertEqual(values['PGSSLMODE'], 'disable')
+
+    def test_error_details_redact_encoded_and_decoded_password(self):
+        dsn = 'postgresql://newapi:p%40ss@postgres:5432/new-api'
+        message = backup.safe_error(('database "'+dsn+'" does not exist; p@ss').encode(), dsn)
+        self.assertIn('does not exist', message)
+        self.assertNotIn('p@ss', message)
+        self.assertNotIn('p%40ss', message)
+
     def test_uses_running_newapi_connection_not_container_default_user(self):
         config = [{'Config': {'Env': ['SQL_DSN=postgres://real_user:p%40ss@postgres:5432/new_api?sslmode=disable']}}]
         def run(args, **kwargs):

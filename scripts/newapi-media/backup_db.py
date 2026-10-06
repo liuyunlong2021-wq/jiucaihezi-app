@@ -6,7 +6,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 
 def connection(dsn):
@@ -22,9 +22,27 @@ def connection(dsn):
     }
     if not all(values[k] for k in ('PGHOST', 'PGUSER', 'PGDATABASE')):
         raise ValueError('Incomplete database connection; stop for review')
-    # Preserve libpq TLS/search-path connection settings without exposing the URL.
-    values['PGDATABASE'] = dsn
+    parameters = {
+        'sslmode': 'PGSSLMODE', 'sslcert': 'PGSSLCERT',
+        'sslkey': 'PGSSLKEY', 'sslrootcert': 'PGSSLROOTCERT',
+        'options': 'PGOPTIONS', 'connect_timeout': 'PGCONNECT_TIMEOUT',
+        'application_name': 'PGAPPNAME',
+    }
+    for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+        if key not in parameters:
+            raise ValueError('Unsupported database connection parameter; stop for review')
+        values[parameters[key]] = value
+    values.setdefault('PGCONNECT_TIMEOUT', '10')
     return values
+
+
+def safe_error(stderr, dsn):
+    message = stderr.decode(errors='replace')
+    password = urlsplit(dsn).password or ''
+    for secret in sorted({dsn, password, unquote(password)}, key=len, reverse=True):
+        if secret:
+            message = message.replace(secret, '[REDACTED]')
+    return message[:1800].strip()
 
 
 def main(directory):
@@ -43,8 +61,7 @@ def main(directory):
             result = subprocess.run(['docker', 'exec', '-i', 'postgres', 'sh', '-s'],
                                     input=script.encode(), stdout=output, stderr=subprocess.PIPE)
         if result.returncode:
-            # Avoid printing third-party errors that might contain connection data.
-            raise RuntimeError('Database dump failed; production has not been switched')
+            raise RuntimeError('Database dump failed: ' + safe_error(result.stderr, dsn))
         if target.stat().st_size < 1024:
             raise RuntimeError('Database archive unexpectedly small')
         with target.open('rb') as archive:
@@ -59,5 +76,5 @@ if __name__ == '__main__':
     try:
         main(sys.argv[1])
     except Exception as error:
-        print('Backup failed: ' + type(error).__name__ + '. Production has not been switched.', file=sys.stderr)
+        print('Backup failed: ' + str(error) + '. Production has not been switched.', file=sys.stderr)
         sys.exit(1)
