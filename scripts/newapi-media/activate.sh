@@ -24,9 +24,8 @@ printf '%s\n' "$ROLLBACK_IMAGE" > "$BACKUP/old-image.txt"
 printf '%s\n' "$PROJECT" > "$BACKUP/project.txt"
 printf 'services:\n  new-api:\n    image: %s\n' "$ROLLBACK_IMAGE" > "$BACKUP/rollback.yml"
 printf '数据库备份中（不输出凭据）……\n'
-docker exec postgres sh -c 'exec pg_dumpall -U "${POSTGRES_USER:-postgres}"' | gzip > "$BACKUP/postgres.sql.gz"
-gzip -t "$BACKUP/postgres.sql.gz"
-[ "$(stat -c %s "$BACKUP/postgres.sql.gz")" -gt 1024 ]
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+python3 "$HERE/backup_db.py" "$BACKUP"
 # Ask before changing production. /dev/tty keeps the key out of shell history/logs.
 printf '请粘贴一个当前有效的 NewAPI 用户 Key（隐藏输入，仅验证上传，不生成、不扣费）：\n'
 IFS= read -r -s KEY </dev/tty
