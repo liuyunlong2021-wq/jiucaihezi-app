@@ -737,9 +737,13 @@ async function handleDiscoverAiApp() {
     const { app, fields: discoveredFields } = await discoverAiAppNodes(cpState.aiAppWebappId)
     const fields = isH3AiApp(cpState.aiAppWebappId)
       ? discoveredFields.map(field =>
-          field.label === '戏种' || /mode/i.test(field.key)
+          field.label === '戏种' ||
+          field.key === '65:index' ||
+          /0\s*文\s*1\s*武/.test(field.label) ||
+          /mode/i.test(field.key)
             ? {
                 ...field,
+                label: '戏种',
                 kind: 'select' as const,
                 defaultValue: 0,
                 options: [

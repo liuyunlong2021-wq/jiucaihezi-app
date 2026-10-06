@@ -19,6 +19,7 @@ import {
 } from '@/data/mediaModelCapabilities'
 import {
   CREATION_MODEL_REGISTRY,
+  creationModelFamily,
   getCreationModelSpec,
   listCreationModels,
 } from '@/runtime/creation/creationModelRegistry'
@@ -298,7 +299,9 @@ function getModelsForTask(task: CreationTask): string[] {
     : task === 'video'
       ? ['newapi/dola/seedance2.5', 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s']
       : []
-  const models = listCreationModels({ task }).map(model => model.id)
+  const models = listCreationModels({ task })
+    .filter(model => task !== 'video' || creationModelFamily(model) !== 'jc 本机')
+    .map(model => model.id)
   const selected = priorities.filter(model => models.includes(model))
   return [...selected, ...models.filter(model => !selected.includes(model))]
 }
@@ -347,10 +350,13 @@ function normalizeSavedTask(task: unknown): CreationTask {
 function normalizeSavedModel(modelKey: unknown, task: CreationTask): string {
   const key = String(modelKey || '')
   if (key === 'gpt-image-2' && task === 'image') return 'gpt-image-2-1k'
+  const visibleModels = new Set(getModelsForTask(task))
   const directSpec = getCreationModelSpec(key)
-  if (directSpec?.task === task) return directSpec.id
-  const migratedSpec = CREATION_MODEL_REGISTRY.find(spec => spec.model === key || spec.aliases?.includes(key))
-  if (migratedSpec?.task === task) return migratedSpec.id
+  if (directSpec?.task === task && visibleModels.has(directSpec.id)) return directSpec.id
+  const migratedSpec = CREATION_MODEL_REGISTRY.find(
+    spec => spec.task === task && visibleModels.has(spec.id) && (spec.model === key || spec.aliases?.includes(key)),
+  )
+  if (migratedSpec) return migratedSpec.id
   return getModelsForTask(task)[0] || 'gpt-image-2-1k'
 }
 

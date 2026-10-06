@@ -1039,6 +1039,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'newapi-task',
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k', '4k']) },
       { key: 'images', label: '参考图', kind: 'images' },
     ]),
     ratios: ['1:1', '16:9', '9:16', '3:2', '2:3'],

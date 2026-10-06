@@ -3,6 +3,8 @@
 > 本文档是韭菜盒子 NewAPI 的公开接入合同，只描述第三方 APP 需要调用的接口。
 >
 > 注意：该模型输出图片，但当前使用异步任务端点 `POST /v1/videos`，不是 `/v1/images/generations`。
+>
+> 2026-10-06：尝试切换到 OpenAI 图片端点后，用户实测收到 HTTP 404 `bad_response_status_code`。客户端已恢复原异步路由；需结合 NewAPI 请求日志中的渠道与实际上游 URL，才能确认 404 是上游路径还是渠道 Base URL 配置导致。
 
 ## 接入信息
 
