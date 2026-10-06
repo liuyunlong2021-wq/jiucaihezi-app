@@ -4,7 +4,7 @@
 
 - GitHub Actions run `37477588251` 中 ARM 与 Windows 成功；Intel 构建、签名完成后，`Create DMG (Intel, headless)` 的 `hdiutil create` 以 `Resource busy` 失败，导致 Intel 公证、产物和 `publish-download-manifest` 跳过。
 - Intel 创建步骤改为最多 3 次重试；每次写入独立临时 DMG，成功后移动到正式文件名；增加退避、失败时的 `hdiutil info` 诊断和 `trap` 清理。
-- 版本从 `2.2.17` 提升至 `2.2.18`，保留已存在的失败 tag。待提交并触发 CI；未声称发布完成。
+- 版本从 `2.2.17` 提升至 `2.2.18`，保留已存在的失败 tag。提交 `8347c428` 和 tag `v2.2.18` 已推送；Actions run `37485179907` 的 ARM、Intel、Windows 和下载清单全部成功。Release 已含 ARM DMG/app.tar.gz、Intel DMG/app.tar.gz、Windows 安装器/便携 ZIP；公网 `latest.json` 返回 `2.2.18` 及三平台下载地址。
 
 ## [2026-10-06] 发布修复 | v2.2.16 CI 类型检查失败
 

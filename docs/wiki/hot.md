@@ -1,9 +1,9 @@
 # 热缓存
 
-## [2026-10-06] v2.2.18 Intel DMG 重试修复（发布中）
+## [2026-10-06] v2.2.18 三平台发布完成
 
 - v2.2.17 run `37477588251` 中 macOS ARM、Windows 成功；Intel 在签名完成后，`hdiutil create` 返回 `Resource busy`，导致公证、Intel 产物和下载清单跳过。这是打包阶段资源忙，不是代码编译失败。
-- Intel DMG 步骤现增加最多 3 次创建尝试、每次独立临时镜像、退避等待、失败时 `hdiutil info` 诊断及临时目录清理。版本提升至 `2.2.18`；CI 完成前不登记发布成功。
+- Intel DMG 步骤现增加最多 3 次创建尝试、每次独立临时镜像、退避等待、失败时 `hdiutil info` 诊断及临时目录清理。GitHub Actions run `37485179907` 的 macOS ARM、macOS Intel、Windows、下载清单全部成功；Release 六项平台资产已上传，线上 `latest.json` 已返回 `2.2.18` 和三个平台地址。
 
 ## [2026-10-06] v2.2.16 三平台构建失败修复
 
