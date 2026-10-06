@@ -1,5 +1,11 @@
 # 热缓存
 
+## [2026-10-06] v2.2.16 三平台构建失败修复
+
+- GitHub Actions run `37464731998` 的 macOS ARM、macOS Intel、Windows x64 均在共同的 Desktop TypeScript 构建阶段失败；不是平台工具链故障。错误为 `modeLabel` 未覆盖新增的 `prompt-enhancement`，以及文本轮询分支提前 return 后仍有不可能成立的 `kind === 'text'` 比较。
+- 两处已修复；本地 `pnpm run typecheck` 与 `pnpm run build:desktop:quick` 通过。`v2.2.16` 标签已触发过失败构建，按发布边界保留不移动，修复版提升到 `v2.2.17`。
+- 发布已由 `v2.2.17` 标签触发，未等待 GitHub Actions 结果；三平台产物和下载清单待 CI 完成确认。
+
 ## [2026-10-06] 小易 Grok Imagine Image 2.0 恢复现有异步路由
 
 - 原生 `/v1/images/generations` 路由在实际调用中返回 HTTP 404 `bad_response_status_code`。本仓现有记录显示该模型原先依赖异步图片适配链路；具体是上游路径不支持还是生产 Base URL/渠道仍指向旧适配器，需查对应 NewAPI 请求日志确认。

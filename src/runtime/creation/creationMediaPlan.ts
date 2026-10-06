@@ -485,6 +485,7 @@ function buildSubmitSummary(plan: CreationRunPlan): string {
 
 function modeLabel(mode: CreationRunPlan['mode']): string {
   const labels: Record<CreationRunPlan['mode'], string> = {
+    'prompt-enhancement': '提示词增强',
     'text-to-image': '文生图',
     'image-to-image': '图生图',
     'text-to-video': '文生视频',

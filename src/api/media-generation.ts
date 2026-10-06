@@ -793,7 +793,7 @@ export async function pollTask(
       }
       const newApiVideoUrl = kind === 'video' && useContentEndpoint ? newApiVideoContentUrl(pollPath) : null
       if (newApiVideoUrl) return newApiVideoUrl
-      const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
+      const url = extractMediaUrl(data, kind)
       if (url) {
         return normalizeAdapterRelativeResultUrl(url, pollPath)
       }

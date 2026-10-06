@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-10-06] 发布修复 | v2.2.16 CI 类型检查失败
+
+- 用户提供 GitHub Actions run `37464731998` 失败截图并要求查原因。三个平台的日志均显示 `build:desktop:quick` 中 `vue-tsc -b` 报相同两处错误：`modeLabel` 的 `Record<CreationMode, string>` 漏了 `prompt-enhancement`；`pollTask` 已排除 `text` 后仍以 `kind === 'text'` 条件映射媒体类型，导致 TS2367。
+- 增加提示词增强模式显示标签，并将已收窄为 image/video/audio 的 `kind` 直接传给 `extractMediaUrl`。本地 `pnpm run typecheck`、`pnpm run build:desktop:quick` 通过；未运行测试。
+- `v2.2.16` tag 已触发失败构建，按发布边界不重写 tag。版本更新到 `2.2.17`，后续提交与 tag 用于修复版三平台发布；本轮 CI 是否成功尚未轮询确认。
+
 ## [2026-10-06] 回退 | 小易 Grok 图片模型原生图片路由导致 404
 
 - 用户实测原生图片路由返回 `HTTP 404 bad_response_status_code`。对照仓库原有配置，创作面板先前通过 `/v1/videos` 调用小易异步图片适配链路；实际失败的上游 URL 和渠道尚未从 NewAPI 请求日志核实，因此不能把 404 精确归因于路径或 Base URL。
