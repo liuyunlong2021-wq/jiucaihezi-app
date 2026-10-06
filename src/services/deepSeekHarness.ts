@@ -15,6 +15,8 @@ type BridgeMessage = {
   text?: string
   data?: unknown
   error?: string
+  errorName?: string
+  errorCode?: string
 }
 type Runtime = {
   key: string
@@ -29,6 +31,7 @@ type Runtime = {
   permissionListeners: Map<string, (tier: DeepSeekPermissionTier) => void>
   closed: Promise<void>
   markClosed: () => void
+  ended?: boolean
   closing?: Promise<void>
 }
 type RuntimeSlot = { key: string; ready: Promise<Runtime> }
@@ -273,6 +276,8 @@ export const DEEPSEEK_RETRY_TEXT = {
  * 官方那两个 `ACCOUNT_*` 分支针对「退出官方账号登录」，我们不接官方账号，没有这两条。
  */
 export function deepSeekFailureText(message: string, code?: string): string {
+  if (code === 'session/writer-held' || /^session "[^"\n]+" is already owned by an active write handle$/.test(message))
+    return '这个对话正被另一个运行时占用。请关闭占用它的实例，释放后可在原对话重试。'
   if (code === 'AUTH') return 'API 密钥无效'
   if (code === 'QUOTA' || code === 'ACCOUNT_QUOTA') return '当前请求的额度已用尽'
   return message
@@ -1223,7 +1228,14 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     if (frame.type === 'notification' && frame.notification) pending.notify(frame.notification)
     if (frame.type === 'result') { active.runs.delete(frame.requestId!); pending.resolve(frame.text || '') }
     if (frame.type === 'query-result') { active.runs.delete(frame.requestId!); pending.resolve(frame.data) }
-    if (frame.type === 'error') { active.runs.delete(frame.requestId!); pending.reject(new Error(frame.error || 'DeepSeek Harness 执行失败')) }
+    if (frame.type === 'error') {
+      active.runs.delete(frame.requestId!)
+      const raw = frame.error || 'DeepSeek Harness 执行失败'
+      const error = Object.assign(new Error(deepSeekFailureText(raw, frame.errorCode), { cause: new Error(raw) }), {
+        name: frame.errorName || 'Error', code: frame.errorCode,
+      })
+      pending.reject(error)
+    }
   }
   transport.onclose = () => {
     const diagnostics = transport.diagnostics()
@@ -1276,28 +1288,38 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
   const current = runtimes.get(workspaceKey)
   if (current && (reuseWorkspace || current.key === key)) {
     const active = await current.ready
-    if (!active.closing) return active
-    await active.closing
+    if (!active.closing && !active.ended) return active
+    await stopRuntime(active)
     if (runtimes.get(workspaceKey) === current) runtimes.delete(workspaceKey)
     return ensureRuntime(input, reuseWorkspace)
   }
 
+  let predecessor: Runtime | undefined
   const slot: RuntimeSlot = {
     key,
     ready: (async () => {
-      if (current) await stopRuntime(await current.ready)
+      if (current) {
+        predecessor = await current.ready
+        await stopRuntime(predecessor)
+      }
       return createRuntime(input)
     })(),
   }
   runtimes.set(workspaceKey, slot)
   try {
     const active = await slot.ready
-    void active.closed.then(() => {
+    void active.closed.then(async () => {
+      active.ended = true
+      await stopRuntime(active)
       if (runtimes.get(workspaceKey) === slot) runtimes.delete(workspaceKey)
-    })
+    }).catch(error => console.warn('[JC-DH] 运行时收尾失败:', error))
     return active
   } catch (error) {
-    if (runtimes.get(workspaceKey) === slot) runtimes.delete(workspaceKey)
+    if (runtimes.get(workspaceKey) === slot) {
+      // 新配置没有接手时仍保留旧拥有者；下一次发送必须先重试它的收尾。
+      if (current && predecessor) runtimes.set(workspaceKey, current)
+      else runtimes.delete(workspaceKey)
+    }
     throw error
   }
 }
@@ -1393,7 +1415,7 @@ async function runDeepSeekHarnessTurn(
 ): Promise<string> {
   const active = await ensureRuntime(input)
   if (input.signal?.aborted) {
-    void stopRuntime(active)
+    void stopRuntime(active).catch(error => console.warn('[JC-DH] 取消后的收尾失败:', error))
     throw new DOMException('Aborted', 'AbortError')
   }
   const requestId = crypto.randomUUID()
@@ -1424,7 +1446,7 @@ async function runDeepSeekHarnessTurn(
         input.onStatus?.(failure.message)
         active.runs.get(requestId)?.reject(failure)
         // The card has already settled locally; close the host to cancel a lost reply rather than leaving an unanswerable request.
-        void stopRuntime(active)
+        void stopRuntime(active).catch(error => console.warn('[JC-DH] 授权失败后的收尾失败:', error))
       })
       return
     }
@@ -1465,7 +1487,7 @@ async function runDeepSeekHarnessTurn(
     }
   }
   const abort = () => {
-    void stopRuntime(active)
+    void stopRuntime(active).catch(error => console.warn('[JC-DH] 取消后的收尾失败:', error))
     active.runs.get(requestId)?.reject(new DOMException('Aborted', 'AbortError'))
     active.runs.delete(requestId)
   }
@@ -1510,7 +1532,11 @@ async function waitForRuntimeClose(active: Runtime, timeoutMs: number): Promise<
 function stopRuntime(active: Runtime): Promise<void> {
   active.closing ??= (async () => {
     try {
-      await active.transport.send({ type: 'close' } as unknown as JSONRPCMessage)
+      // stdin 背压也在关闭期限内；发送被卡住不能让进程树收尾永不可达。
+      void active.transport.send({ type: 'close' } as unknown as JSONRPCMessage).catch(error => {
+        console.warn('[JC-DH] 关闭请求未能送达:', error)
+        active.markClosed()
+      })
       if (!await waitForRuntimeClose(active, DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS)) {
         console.warn(`[JC-DH] ${DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS}ms 内未确认关闭，按进程树收尾`)
       }
@@ -1520,14 +1546,21 @@ function stopRuntime(active: Runtime): Promise<void> {
     } finally {
       // 兜底必须无条件执行：`mcp_kill_stdio` 现在按进程树收尾，否则留下的 `dsh` 子进程
       // 会一直握着这个会话的跨进程写锁。
-      await active.transport.close().catch(() => {})
+      await active.transport.close()
     }
-  })()
+  })().catch(error => {
+    // 收尾失败没有释放所有权；保留登记并允许下一次发送再次完成收尾。
+    active.ended = true
+    active.closing = undefined
+    throw error
+  })
   return active.closing
 }
 
 export async function stopDeepSeekHarness(): Promise<void> {
-  const slots = [...runtimes.values()]
-  runtimes.clear()
-  await Promise.allSettled(slots.map(async slot => stopRuntime(await slot.ready)))
+  const slots = [...runtimes.entries()]
+  await Promise.allSettled(slots.map(async ([key, slot]) => {
+    await stopRuntime(await slot.ready)
+    if (runtimes.get(key) === slot) runtimes.delete(key)
+  }))
 }

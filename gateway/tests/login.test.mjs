@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import gateway from '../src/index.js';
 
 function createKv() {
@@ -29,7 +30,7 @@ async function readJson(response) {
   return response.json();
 }
 
-test('health exposes auth broker and media capabilities', async () => {
+test('health exposes auth broker and sync capabilities', async () => {
   const response = await gateway.fetch(request('/health'), createEnv());
   const payload = await readJson(response);
   assert.equal(response.status, 200);
@@ -39,8 +40,7 @@ test('health exposes auth broker and media capabilities', async () => {
     'auth.session',
     'auth.logout',
     'auth.delete',
-    'sync.text',
-    'media.upload'
+    'sync.text'
   ]);
 });
 
@@ -359,157 +359,6 @@ test('landing image and logo paths redirect to static hosting', async () => {
   assert.equal(screenshot.headers.get('Location'), 'https://static.example.com/landing/IMG_5114.JPG');
 });
 
-test('creation media upload rejects missing and invalid credentials before writing KV', async () => {
-  const env = createEnv();
-  const file = new File(['image'], 'reference.png', { type: 'image/png' });
-  const body = () => { const form = new FormData(); form.append('file', file); return form; };
-
-  const missing = await gateway.fetch(request('/api/creations/uploads', { method: 'POST', body: body() }), env);
-  assert.equal(missing.status, 401);
-  assert.equal(env.PLUGIN_KV.map.size, 0);
-
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () => new Response('unauthorized', { status: 401 });
-  try {
-    const invalid = await gateway.fetch(request('/api/creations/uploads', {
-      method: 'POST',
-      headers: { Authorization: 'Bearer sk-invalid-1234567890' },
-      body: body()
-    }), env);
-    assert.equal(invalid.status, 401);
-    assert.equal(env.PLUGIN_KV.map.size, 0);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
-
-test('creation media upload accepts a NewAPI key only after upstream validation', async () => {
-  const env = createEnv();
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async (url, init) => {
-    assert.equal(String(url), 'https://newapi.example.com/v1/models');
-    assert.equal(init.headers.Authorization, 'Bearer sk-valid-1234567890');
-    assert.equal(init.headers['x-api-key'], 'sk-valid-1234567890');
-    assert.ok(init.signal instanceof AbortSignal);
-    return new Response('{}', { status: 200 });
-  };
-  try {
-    const form = new FormData();
-    form.append('file', new File(['image'], 'reference.png', { type: 'image/png' }));
-    const response = await gateway.fetch(request('/api/creations/uploads', {
-      method: 'POST',
-      headers: { 'x-api-key': 'sk-valid-1234567890' },
-      body: form
-    }), env);
-    const payload = await readJson(response);
-    assert.equal(response.status, 200);
-    assert.match(payload.url, /\/media\/creation\/[a-f0-9]{32}$/);
-    // KV 里现在有两项：凭据校验缓存 + 媒体本体
-    const mediaKeys = [...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media:'));
-    assert.equal(mediaKeys.length, 1);
-    assert.equal(env.PLUGIN_KV.map.get(mediaKeys[0]).options.expirationTtl, 15 * 60);
-    assert.equal([...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media-auth:')).length, 1);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
-
-test('creation media upload returns 502 when upstream credential validation is unavailable', async () => {
-  const env = createEnv();
-  const previousFetch = globalThis.fetch;
-  globalThis.fetch = async () => { throw new Error('upstream unavailable'); };
-  try {
-    const form = new FormData();
-    form.append('file', new File(['image'], 'reference.png', { type: 'image/png' }));
-    const response = await gateway.fetch(request('/api/creations/uploads', {
-      method: 'POST',
-      headers: { 'x-api-key': 'sk-valid-1234567890' },
-      body: form
-    }), env);
-    assert.equal(response.status, 502);
-    assert.equal(env.PLUGIN_KV.map.size, 0);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
-
-test('creation media upload retries once when credential validation flaps', async () => {
-  const env = createEnv();
-  const previousFetch = globalThis.fetch;
-  let attempts = 0;
-  globalThis.fetch = async () => {
-    attempts += 1;
-    if (attempts === 1) throw new Error('edge flap');
-    return new Response('{}', { status: 200 });
-  };
-  try {
-    const form = new FormData();
-    form.append('file', new File(['image'], 'reference.png', { type: 'image/png' }));
-    const response = await gateway.fetch(request('/api/creations/uploads', {
-      method: 'POST',
-      headers: { 'x-api-key': 'sk-valid-1234567890' },
-      body: form
-    }), env);
-    assert.equal(response.status, 200);
-    assert.equal(attempts, 2);
-    assert.equal([...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media:')).length, 1);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
-
-test('creation media upload caches a valid credential check for the following uploads', async () => {
-  const env = createEnv();
-  const previousFetch = globalThis.fetch;
-  let validations = 0;
-  globalThis.fetch = async () => {
-    validations += 1;
-    return new Response('{}', { status: 200 });
-  };
-  try {
-    // 多张参考图 = 多次上传，第二次起不得再跑那条慢的回源校验
-    for (const name of ['first.png', 'second.png', 'third.png']) {
-      const form = new FormData();
-      form.append('file', new File(['image'], name, { type: 'image/png' }));
-      const response = await gateway.fetch(request('/api/creations/uploads', {
-        method: 'POST',
-        headers: { 'x-api-key': 'sk-valid-1234567890' },
-        body: form
-      }), env);
-      assert.equal(response.status, 200);
-    }
-    assert.equal(validations, 1);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
-
-test('creation media upload never caches a rejected credential check', async () => {
-  const env = createEnv();
-  const previousFetch = globalThis.fetch;
-  let validations = 0;
-  globalThis.fetch = async () => {
-    validations += 1;
-    return new Response('{}', { status: 401 });
-  };
-  try {
-    for (const name of ['first.png', 'second.png']) {
-      const form = new FormData();
-      form.append('file', new File(['image'], name, { type: 'image/png' }));
-      const response = await gateway.fetch(request('/api/creations/uploads', {
-        method: 'POST',
-        headers: { 'x-api-key': 'sk-rejected-1234567890' },
-        body: form
-      }), env);
-      assert.equal(response.status, 401);
-    }
-    assert.equal(validations, 2);
-    assert.equal([...env.PLUGIN_KV.map.keys()].filter(key => key.startsWith('creation-media-auth:')).length, 0);
-  } finally {
-    globalThis.fetch = previousFetch;
-  }
-});
-
 test('browser tab icons redirect to the shared landing logo', async () => {
   const env = createEnv();
   const favicon = await gateway.fetch(request('/favicon.ico', { method: 'HEAD' }), env);
@@ -532,4 +381,10 @@ test('unrelated old gateway routes are removed', async () => {
     assert.equal(response.status, 404);
     assert.equal(payload.code, 'not_found');
   }
+});
+
+
+test('creation media routes belong to NewAPI, not the Worker', () => {
+  const config = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.doesNotMatch(config, /api\/creations\/uploads|media\/creation|r2_buckets/);
 });

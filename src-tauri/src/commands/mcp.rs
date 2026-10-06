@@ -1,15 +1,17 @@
 use crate::commands::tools::resolve_local_binary;
 use std::collections::HashMap;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use tauri::ipc::Channel;
 use tauri::Manager;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as AsyncMutex;
 
 struct McpStdioProcess {
+    /// child.try_wait()/wait() 后 child.id() 会变成 None；进程组仍可能有握着会话锁的后代。
+    pid: u32,
     child: tokio::process::Child,
-    stdin: tokio::process::ChildStdin,
+    stdin: Arc<AsyncMutex<tokio::process::ChildStdin>>,
     /// Harness 运行时（`runner.mjs`）。页面重载后要单独回收，见 [`mcp_reap_stale_harness`]。
     is_harness_runner: bool,
     /// 归属：哪个窗口、哪一代页面起的。见 [`ReapScope`]。
@@ -60,6 +62,10 @@ fn configure_background_command(_command: &mut std::process::Command) {
 
 static MCP_PROCESSES: LazyLock<Mutex<HashMap<String, McpStdioProcess>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+fn lock_processes() -> MutexGuard<'static, HashMap<String, McpStdioProcess>> {
+    MCP_PROCESSES.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[tauri::command]
 pub async fn mcp_spawn_stdio(
@@ -128,6 +134,7 @@ pub async fn mcp_spawn_stdio(
     let mut child = cmd
         .spawn()
         .map_err(|error| format!("无法启动 MCP 进程: {error}"))?;
+    let pid = child.id().ok_or("无法获取 MCP PID")?;
     let stdout = child.stdout.take().ok_or("无法获取 MCP stdout")?;
     let stdin = child.stdin.take().ok_or("无法获取 MCP stdin")?;
     let stderr = child.stderr.take().ok_or("无法获取 MCP stderr")?;
@@ -151,15 +158,14 @@ pub async fn mcp_spawn_stdio(
         }
     });
 
-    MCP_PROCESSES
-        .lock()
-        .await
-        .insert(handle_id.clone(), McpStdioProcess { child, stdin, is_harness_runner, owner: Some(owner) });
+    lock_processes().insert(handle_id.clone(), McpStdioProcess {
+        pid, child, stdin: Arc::new(AsyncMutex::new(stdin)), is_harness_runner, owner: Some(owner),
+    });
     let exit_handle_id = handle_id.clone();
     tokio::spawn(async move {
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(250)).await;
-            let mut processes = MCP_PROCESSES.lock().await;
+            let mut processes = lock_processes();
             let Some(process) = processes.get_mut(&exit_handle_id) else { break };
             match process.child.try_wait() {
                 Ok(Some(status)) => {
@@ -180,22 +186,21 @@ pub async fn mcp_spawn_stdio(
 
 #[tauri::command]
 pub async fn mcp_write_stdin(handle_id: String, message: String) -> Result<(), String> {
-    let mut processes = MCP_PROCESSES.lock().await;
-    let process = processes
+    // 只在登记表锁内取句柄；管道背压不能挡住 kill、重载或关窗的进程回收。
+    let stdin = lock_processes()
         .get_mut(&handle_id)
-        .ok_or_else(|| format!("MCP 进程不存在: {handle_id}"))?;
-    process
-        .stdin
+        .ok_or_else(|| format!("MCP 进程不存在: {handle_id}"))?
+        .stdin.clone();
+    let mut stdin = stdin.lock().await;
+    stdin
         .write_all(message.as_bytes())
         .await
         .map_err(|error| format!("写入 MCP 进程失败: {error}"))?;
-    process
-        .stdin
+    stdin
         .write_all(b"\n")
         .await
         .map_err(|error| format!("写入 MCP 换行失败: {error}"))?;
-    process
-        .stdin
+    stdin
         .flush()
         .await
         .map_err(|error| format!("刷新 MCP stdin 失败: {error}"))
@@ -223,25 +228,39 @@ fn tree_kill_plan(pid: u32) -> (&'static str, Vec<String>) {
 }
 
 /// 收尾路径专用：`taskkill` / `kill` 都是毫秒级命令，阻塞等到返回，换来「返回即已收干净」。
-fn kill_process_tree(pid: u32) {
+fn kill_process_tree(pid: u32) -> Result<(), String> {
     let (program, args) = tree_kill_plan(pid);
     let mut command = std::process::Command::new(program);
     configure_background_command(&mut command);
-    let _ = command
+    let status = command
         .args(args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
-        .status();
+        .status().map_err(|error| format!("无法回收 MCP 进程树 {pid}: {error}"))?;
+    if status.success() { return Ok(()) }
+    #[cfg(unix)]
+    {
+        // 已退出且组内没有后代时，重复收尾是成功；仍存活却无法杀掉时必须报告失败。
+        let exists = std::process::Command::new("/bin/kill")
+            .args(["-0", &format!("-{pid}")])
+            .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+            .status().map_err(|error| format!("无法确认 MCP 进程组 {pid}: {error}"))?;
+        if !exists.success() { return Ok(()) }
+    }
+    #[cfg(windows)]
+    if status.code() == Some(128) { return Ok(()) } // taskkill: process not found
+    Err(format!("回收 MCP 进程树 {pid} 失败: {status}"))
 }
 
 /// 收掉一个 stdio 进程：先带走整棵树，再回收直接子进程。
-async fn reap_stdio_process(mut process: McpStdioProcess) {
-    if let Some(pid) = process.child.id() {
-        kill_process_tree(pid);
-    }
+async fn reap_stdio_process(process: &mut McpStdioProcess) -> Result<(), String> {
+    let tree = kill_process_tree(process.pid);
     let _ = process.child.kill().await;
-    let _ = process.child.wait().await;
+    let waited = process.child.wait().await.map_err(|error| format!("等待 MCP 进程 {} 退出失败: {error}", process.pid));
+    tree?;
+    waited?;
+    Ok(())
 }
 
 /// 这个进程是不是孤儿：归属的窗口已经不存在，或它就是**本窗口上一代页面**留下的。
@@ -259,12 +278,12 @@ fn is_orphan(owner: Option<&Owner>, scope: Option<&ReapScope<'_>>) -> bool {
     owner.window == scope.window && owner.realm != scope.realm
 }
 
-/// 不等待登记表锁的收尾（退出路径与页面重载路径专用）：能把谁收掉就收掉。
+/// 登记表锁只保护进程元数据，不跨异步写入；收尾等待短临界区，不能静默漏掉旧写入者。
 ///
 /// `only_harness` 为真时只收 Harness 运行时：新页面挂载时创作 MCP 等其他 stdio 子进程
 /// 可能已经起来了，不能被顺手带走。
-fn reap_stdio_processes_blocking(only_harness: bool, scope: Option<&ReapScope<'_>>) -> usize {
-    let Ok(mut processes) = MCP_PROCESSES.try_lock() else { return 0 };
+fn reap_stdio_processes_blocking(only_harness: bool, scope: Option<&ReapScope<'_>>) -> Result<usize, String> {
+    let mut processes = lock_processes();
     let handles: Vec<String> = processes
         .iter()
         .filter(|(_, process)| !only_harness || process.is_harness_runner)
@@ -272,21 +291,26 @@ fn reap_stdio_processes_blocking(only_harness: bool, scope: Option<&ReapScope<'_
         .map(|(handle_id, _)| handle_id.clone())
         .collect();
     let mut reaped = 0;
+    let mut failures = Vec::new();
     for handle_id in handles {
         if let Some(process) = processes.remove(&handle_id) {
-            if let Some(pid) = process.child.id() {
-                kill_process_tree(pid);
+            match kill_process_tree(process.pid) {
+                Ok(()) => reaped += 1,
+                Err(error) => { failures.push(error); processes.insert(handle_id, process); }
             }
-            reaped += 1;
         }
     }
-    reaped
+    if failures.is_empty() { Ok(reaped) } else { Err(failures.join("; ")) }
 }
 
 #[tauri::command]
 pub async fn mcp_kill_stdio(handle_id: String) -> Result<(), String> {
-    if let Some(process) = MCP_PROCESSES.lock().await.remove(&handle_id) {
-        reap_stdio_process(process).await;
+    let process = lock_processes().remove(&handle_id);
+    if let Some(mut process) = process {
+        if let Err(error) = reap_stdio_process(&mut process).await {
+            lock_processes().insert(handle_id, process);
+            return Err(error);
+        }
     }
     Ok(())
 }
@@ -301,7 +325,7 @@ pub fn mcp_reap_stale_harness(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     realm: String,
-) -> usize {
+) -> Result<usize, String> {
     let live_windows: Vec<String> = app.webview_windows().keys().cloned().collect();
     reap_stdio_processes_blocking(
         true,
@@ -319,7 +343,7 @@ fn owned_by_window(owner: Option<&Owner>, window: &str) -> bool {
 /// 窗口关掉后它的 runner 就是孤儿，而应用还活着，退出路径不会跑 —— 不收的话它会一直
 /// 握着会话的跨进程内核写锁（jsonl 后端的 lease 没有过期时间），那个会话在本机再也写不进去。
 pub fn reap_window_stdio_processes(window: &str) -> usize {
-    let Ok(mut processes) = MCP_PROCESSES.try_lock() else { return 0 };
+    let mut processes = lock_processes();
     let handles: Vec<String> = processes
         .iter()
         .filter(|(_, process)| owned_by_window(process.owner.as_ref(), window))
@@ -328,10 +352,10 @@ pub fn reap_window_stdio_processes(window: &str) -> usize {
     let mut reaped = 0;
     for handle_id in handles {
         if let Some(process) = processes.remove(&handle_id) {
-            if let Some(pid) = process.child.id() {
-                kill_process_tree(pid);
+            match kill_process_tree(process.pid) {
+                Ok(()) => reaped += 1,
+                Err(error) => { eprintln!("[MCP] {error}"); processes.insert(handle_id, process); }
             }
-            reaped += 1;
         }
     }
     reaped
@@ -339,12 +363,74 @@ pub fn reap_window_stdio_processes(window: &str) -> usize {
 
 /// 应用退出时收掉所有还在跑的 stdio 进程树（同步，退出路径上不再进一次异步调度）。
 pub fn reap_all_stdio_processes() -> usize {
-    reap_stdio_processes_blocking(false, None)
+    reap_stdio_processes_blocking(false, None).unwrap_or_else(|error| { eprintln!("[MCP] {error}"); 0 })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn reaped_runner_still_reaps_its_orphaned_descendant() {
+        let mut cmd = Command::new("/bin/sh");
+        cmd.args(["-c", "sleep 30 & echo $!; exit 0"])
+            .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).process_group(0);
+        let mut child = cmd.spawn().unwrap();
+        let pid = child.id().unwrap();
+        let stdin = Arc::new(AsyncMutex::new(child.stdin.take().unwrap()));
+        let mut output = BufReader::new(child.stdout.take().unwrap()).lines();
+        let descendant = output.next_line().await.unwrap().unwrap();
+        child.wait().await.unwrap();
+        assert!(child.id().is_none(), "the original implementation lost the process-group id here");
+        let mut process = McpStdioProcess { pid, child, stdin, is_harness_runner: true, owner: None };
+        reap_stdio_process(&mut process).await.unwrap();
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                let status = std::process::Command::new("/bin/ps").args(["-o", "stat=", "-p", &descendant])
+                    .output().unwrap();
+                let state = String::from_utf8_lossy(&status.stdout);
+                if state.trim().is_empty() || state.trim().starts_with('Z') { break }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        }).await.expect("the descendant must die even after the runner has been waited on");
+    }
+
+    #[tokio::test]
+    async fn stdin_backpressure_does_not_block_process_reaping() {
+        if std::env::var_os("JC_STDIO_BACKPRESSURE_CHILD").is_some() {
+            std::thread::sleep(std::time::Duration::from_secs(30));
+            return;
+        }
+        let mut cmd = Command::new(std::env::current_exe().unwrap());
+        cmd.args(["--exact", "commands::mcp::tests::stdin_backpressure_does_not_block_process_reaping", "--nocapture"])
+            .env("JC_STDIO_BACKPRESSURE_CHILD", "1")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(unix)]
+        cmd.process_group(0);
+        let mut child = cmd.spawn().unwrap();
+        let pid = child.id().unwrap();
+        let stdin = Arc::new(AsyncMutex::new(child.stdin.take().unwrap()));
+        let id = format!("test-backpressure-{}", uuid::Uuid::new_v4());
+        lock_processes().insert(id.clone(), McpStdioProcess {
+            pid, child, stdin: stdin.clone(), is_harness_runner: true,
+            owner: Some(Owner { window: "test".into(), realm: "test".into() }),
+        });
+        let write_id = id.clone();
+        let write = tokio::spawn(async move { mcp_write_stdin(write_id, "x".repeat(8 * 1024 * 1024)).await });
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if stdin.try_lock().is_err() { break }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        }).await.expect("write must acquire its pipe before the reap");
+        tokio::time::timeout(std::time::Duration::from_secs(3), mcp_kill_stdio(id))
+            .await.expect("a blocked write must not monopolize the process registry").unwrap();
+        assert!(write.await.unwrap().is_err());
+    }
 
     #[cfg(windows)]
     #[test]

@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 import { clearMediaModelAvailability, setMediaModelAvailability } from '../../data/mediaModelCapabilities'
-import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo, pollTask } from '../media-generation'
+import { apiCall, apiCallMultipart, assertMediaModelExecutable, generateAudio, generateImage, generateVideo, pollTask } from '../media-generation'
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
@@ -759,6 +759,29 @@ test('direct NewAPI image channel 503 surfaces channel-unavailable guidance inst
       }),
       /NewAPI 渠道暂不可用|无可用渠道/,
     )
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('image JSON and multipart requests preserve the server cause of a 503 without resubmitting', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const message = 'No available compatible accounts (request id: test-503)'
+  let requests = 0
+  globalThis.fetch = async () => {
+    requests += 1
+    return Response.json({ error: { message, type: 'upstream_error' } }, { status: 503 })
+  }
+  try {
+    for (const submit of [
+      () => apiCall('/v1/images/generations', { model: 'gpt-image-2-菠萝', prompt: '一只小驴' }),
+      () => apiCallMultipart('/v1/images/edits', { model: 'gpt-image-2-菠萝', prompt: '一只小驴' }),
+    ]) {
+      await assert.rejects(submit, error => error instanceof Error && error.message.includes('503') && error.message.includes(message))
+    }
+    assert.equal(requests, 2)
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()

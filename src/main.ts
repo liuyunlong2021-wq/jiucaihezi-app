@@ -14,7 +14,7 @@ import { initApiKey, initGatewaySessionToken, setApiKey } from '@/services/newAp
 import { consumeApiKeyCallbackUrl } from '@/services/apiKeyCallback'
 import { consumeMcpOAuthCallbackUrl, type McpOAuthCallback } from '@/services/mcpOAuth'
 import { completeMcpServerAuthorization, restoreMcpServers } from '@/services/mcpClient'
-import { MCP_REALM_ID } from '@/services/mcpStdioTransport'
+import { prepareHarnessRuntime } from '@/services/mcpStdioTransport'
 import JcIcon from '@/components/icons/JcIcon.vue'
 import { DEFAULT_TEXT_MODEL } from '@/utils/modelSelection'
 
@@ -103,7 +103,7 @@ if (earlyErrors && earlyErrors.length > 0) {
 //
 // `realm` 是本页面新生成的一代：Rust 只收「同窗口、旧一代」的，多开时别的窗口的运行时不受影响。
 if (isTauri) {
-  void invoke<number>('mcp_reap_stale_harness', { realm: MCP_REALM_ID }).then(
+  void prepareHarnessRuntime().then(
     reaped => { if (reaped) bootLog('warn', `已收掉上一批遗留的 Harness 运行时：${reaped}`) },
     err => bootLog('warn', `清理遗留 Harness 运行时失败: ${err}`),
   )

@@ -280,7 +280,7 @@ function canPersistMediaResult(task: MediaTask): boolean {
     task.status === 'success' &&
     !task.projectPath &&
     !task.assetUri &&
-    Boolean(task.resultUrl) &&
+    (task.type === 'text' ? Boolean(task.resultText?.trim()) : Boolean(task.resultUrl)) &&
     (isTauriRuntime() || Boolean(task.projectId))
   )
 }
@@ -640,6 +640,8 @@ function modeLabel(mode?: string): string {
       return '图生视频'
     case 'video-edit':
       return '视频编辑'
+    case 'prompt-enhancement':
+      return '提示词增强'
     case 'text-to-audio':
       return '文生音频'
     case 'text-to-3d':
@@ -911,8 +913,9 @@ async function runCreationViaTaskStore() {
       return
     }
     const task = m.capability.task
+    const outputModalities = currentCreationSpec.value?.capabilities.outputModalities || []
     const mediaType =
-      m.modelName === 'rh-suno-lyrics'
+      outputModalities.length === 1 && outputModalities[0] === 'text'
         ? ('text' as const)
         : task === 'image'
           ? ('image' as const)
@@ -3967,8 +3970,8 @@ const modelGroups = computed(() => {
       ]
     : cpState.task === 'video'
       ? [
-          // 满血seedance2.5 排最前（用户 2026-10-02 要求）：分组第一 + 组内第一条 = 视频默认模型
-          '满血seedance2.5', 'jc 本机', '菠萝',
+          // FK-Seedance 分组置顶；其余分组顺序沿用用户已确认的排列。
+          'FK-Seedance', '满血seedance2.5', 'jc 本机', '菠萝',
           'Seedance 2.5', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
@@ -4527,7 +4530,7 @@ const canSend = computed(
                   v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"
                 >
-                  {{ task.downloadState === 'paused' ? '继续下载' : task.assetStatus === 'failed' ? '重新下载' : '保存到项目' }}
+                  {{ task.type === 'text' ? '保存为文档' : task.downloadState === 'paused' ? '继续下载' : task.assetStatus === 'failed' ? '重新下载' : '保存到项目' }}
                 </button>
                 <button
                   v-if="

@@ -1,5 +1,5 @@
 import { corsHeaders, handleOptions } from './cors.js';
-import { badRequest, unauthorized, upstreamError } from './errors.js';
+import { GatewayError, badRequest, unauthorized, upstreamError } from './errors.js';
 import { errorResponse, jsonResponse, notFound, readJson } from './http.js';
 import {
   createDesktopManagedTokenKeyFromBrowserCookie,
@@ -402,100 +402,8 @@ function handleHealth(request) {
   return jsonResponse({
     success: true,
     service: 'jiucaihezi-studio-login-gateway',
-    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'auth.delete', 'sync.text', 'media.upload']
+    capabilities: ['auth.login', 'auth.desktop', 'auth.session', 'auth.logout', 'auth.delete', 'sync.text']
   }, 200, request);
-}
-
-const CREATION_MEDIA_TTL_SECONDS = 15 * 60;
-const CREATION_MEDIA_MAX_BYTES = 20 * 1024 * 1024;
-// 登录校验要从 Worker 绕回公网调 NewAPI 的 /v1/models：源站在国内、前面套着 Cloudflare，
-// 这一跳 2026-09-21 实测源站本机 8ms、走公网 5.5s，还有一次直接 522（21.6s）；而客户端
-// 每张参考图都会单独上传一次（文武双修 9 张 = 9 次校验）。所以 15 秒 + 重试一次，
-// 并把「这个 Key 刚验过」缓存 5 分钟 —— 9 张图只回源 1 次，也把这条慢链路移出上传路径。
-// ponytail: 代价是撤销的 Key 最多还能用 5 分钟；要做到零延迟撤销，得上 gateway 签发的上传票据。
-const CREATION_MEDIA_AUTH_TIMEOUT_MS = 15_000;
-const CREATION_MEDIA_AUTH_ATTEMPTS = 2;
-const CREATION_MEDIA_AUTH_CACHE_TTL_SECONDS = 5 * 60;
-const CREATION_MEDIA_AUTH_CACHE_PREFIX = 'creation-media-auth:';
-
-/** 缓存键存 Key 的摘要：KV 是明文存储，凭据本身不落进去。 */
-async function mediaAuthCacheKey(token) {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token));
-  const hex = [...new Uint8Array(digest)]
-    .map(byte => byte.toString(16).padStart(2, '0'))
-    .join('');
-  return `${CREATION_MEDIA_AUTH_CACHE_PREFIX}${hex}`;
-}
-
-async function fetchMediaKeyValidation(env, token) {
-  for (let attempt = 1; attempt <= CREATION_MEDIA_AUTH_ATTEMPTS; attempt += 1) {
-    try {
-      return await fetch(`${legacyApiBase(env)}/v1/models`, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}`, 'x-api-key': token },
-        signal: AbortSignal.timeout(CREATION_MEDIA_AUTH_TIMEOUT_MS)
-      });
-    } catch {
-      // 抖动就再试一次；最后一次也失败时跳出循环，由调用方报上游故障
-    }
-  }
-  throw upstreamError('登录校验服务暂时不可用');
-}
-
-async function requireMediaUploadAuth(request, env) {
-  const sessionUser = await getSessionUser(request, env);
-  if (sessionUser) return;
-
-  const token = extractManualApiKey(request);
-  if (!token) throw unauthorized('请先登录');
-
-  const cacheable = Boolean(env.PLUGIN_KV && typeof env.PLUGIN_KV.get === 'function');
-  const cacheKey = cacheable ? await mediaAuthCacheKey(token) : '';
-  if (cacheable && (await env.PLUGIN_KV.get(cacheKey))) return;
-
-  const response = await fetchMediaKeyValidation(env, token);
-  if (!response.ok) throw unauthorized('请先登录');
-  if (cacheable)
-    await env.PLUGIN_KV.put(cacheKey, '1', { expirationTtl: CREATION_MEDIA_AUTH_CACHE_TTL_SECONDS });
-}
-
-function creationMediaKey(token) {
-  return `creation-media:${token}`;
-}
-
-async function handleCreationMediaUpload(request, env) {
-  await requireMediaUploadAuth(request, env);
-  if (!env.PLUGIN_KV || typeof env.PLUGIN_KV.put !== 'function') {
-    throw new Error('临时媒体存储尚未配置');
-  }
-  const form = await request.formData();
-  const file = form.get('file');
-  if (!(file instanceof File) || !file.size) throw badRequest('缺少媒体文件');
-  if (file.size > CREATION_MEDIA_MAX_BYTES) throw badRequest('媒体文件不能超过 20 MB');
-  if (!/^(image|video|audio)\//.test(file.type)) throw badRequest('仅支持图片、视频或音频文件');
-
-  const token = crypto.randomUUID().replaceAll('-', '');
-  await env.PLUGIN_KV.put(creationMediaKey(token), await file.arrayBuffer(), {
-    expirationTtl: CREATION_MEDIA_TTL_SECONDS,
-    metadata: { contentType: file.type }
-  });
-  const url = new URL(`/media/creation/${token}`, request.url).href;
-  return jsonResponse({ url }, 200, request);
-}
-
-async function handleCreationMediaRead(request, env, token) {
-  if (!/^[a-f0-9]{32}$/i.test(token) || !env.PLUGIN_KV) return notFound(request);
-  const result = await env.PLUGIN_KV.getWithMetadata(creationMediaKey(token), { type: 'arrayBuffer' });
-  if (!result || !result.value) return notFound(request);
-  return new Response(result.value, {
-    status: 200,
-    headers: {
-      'Content-Type': result.metadata?.contentType || 'application/octet-stream',
-      'Cache-Control': `public, max-age=${CREATION_MEDIA_TTL_SECONDS}, immutable`,
-      'X-Content-Type-Options': 'nosniff',
-      'Access-Control-Allow-Origin': '*'
-    }
-  });
 }
 
 const LANDING_ASSETS = new Set([
@@ -585,9 +493,6 @@ export default {
       if (url.pathname === '/') return Response.redirect('https://api.jiucaihezi.studio/dashboard/overview', 302);
       if (ROOT_ICON_REDIRECTS.has(url.pathname)) return await handleRootIcon(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/health') return handleHealth(request);
-      if (request.method === 'POST' && url.pathname === '/api/creations/uploads') return await handleCreationMediaUpload(request, env);
-      const creationMedia = url.pathname.match(/^\/media\/creation\/([a-f0-9]{32})$/i);
-      if (request.method === 'GET' && creationMedia) return await handleCreationMediaRead(request, env, creationMedia[1]);
       if (url.pathname.startsWith('/landing/')) return await handleLandingAsset(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/start') return await handleDesktopAuthStart(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/callback') return await handleDesktopAuthCallback(request, env);

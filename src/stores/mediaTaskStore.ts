@@ -44,6 +44,7 @@ import { useFileStore } from '@/composables/useFileStore'
 import { webProjectFiles } from '@/utils/webProjectFiles'
 import { createProjectFileActions } from '@/services/projectFileActions'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
+import { nextOriginalMaterialPath } from '@/utils/projectMaterials'
 import { creationResultRequiresKey, creationResultRequestHeaders, downloadCreationMediaBase64, fetchCreationMediaBlob, webCreationMediaProjectPath } from '@/utils/creationMediaCache'
 import {
   buildCreationSubmitRequest,
@@ -669,6 +670,42 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     })
   }
 
+  async function saveTextResultDocument(task: MediaTask): Promise<boolean> {
+    if (task.source !== 'creation' || task.type !== 'text' || !task.resultText?.trim() || task.projectPath) return true
+    const owner = String(task.projectId || task.directory || '').trim()
+    if (!owner) {
+      task.assetStatus = 'failed'
+      task.errorMsg = '生成完成，但没有项目可保存文本'
+      task.error = { category: 'persistence', stage: 'persistence', message: task.errorMsg }
+      task.progressText = '生成完成，文档保存失败'
+      return false
+    }
+    try {
+      const filename = `${task.modelLabel || '生成文本'}-${task.createdAt}-${task.id.slice(-6)}.md`
+      const path = nextOriginalMaterialPath(filename, new Set())
+      const resource = await createRuntimeProjectFileService().importText({
+        owner,
+        path,
+        content: task.resultText,
+      })
+      task.projectPath = resource.path
+      task.directory ||= isTauriRuntime() ? owner : undefined
+      task.assetStatus = 'local'
+      task.assetRetryCount = 0
+      task.errorMsg = undefined
+      task.error = undefined
+      revealMediaResultInFileTree(task)
+      return true
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error || '未知错误')
+      task.assetStatus = 'failed'
+      task.errorMsg = `生成完成，但保存文档失败：${detail.slice(0, 160)}`
+      task.error = { category: 'persistence', stage: 'persistence', message: task.errorMsg, raw: error }
+      task.progressText = '生成完成，文档保存失败'
+      return false
+    }
+  }
+
   /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
@@ -1174,6 +1211,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.progressText = '完成'
         task.resultText = mediaUrl
         task.completedAt = Date.now()
+        await saveTextResultDocument(task)
         markCanvasWriteUnwritten(task)
         emitSettled(task)
         const persisted = await persistTasksSafely('resume-text-success')
@@ -1238,6 +1276,10 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     await init()
     await validateTaskInputs(params)
     const projectId = requireWebCreationProjectId(params, capturedProjectId)
+    const directory = params.directory || (isTauriRuntime() && params.source === 'creation' ? useProjectStore().projectDir.value || undefined : undefined)
+    if (params.type === 'text' && params.source === 'creation' && !projectId && !directory) {
+      throw new Error('生成文本需要保存到项目，请先打开一个项目')
+    }
     const taskId = 'mtask_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6)
 
     const task: MediaTask = {
@@ -1258,7 +1300,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       assetStatus: projectId ? 'pending' : undefined,
       chatMessageId: params.chatMessageId,
       sessionId: params.sessionId,
-      directory: params.directory || (isTauriRuntime() && params.source === 'creation' ? useProjectStore().projectDir.value || undefined : undefined),
+      directory,
       memory: params.memory,
       params: withoutInlineMedia({
         ...(params.imageParams || {}),
@@ -1326,9 +1368,31 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       (task.status !== 'success' && !(task.status === 'cancelled' && task.downloadState === 'paused')) ||
       Boolean(task.projectPath || task.assetUri) ||
       (!isTauriRuntime() && !task.projectId) ||
-      !(task.resultUrl || task.sourceUrl)
+      (task.type === 'text' ? !task.resultText?.trim() : !(task.resultUrl || task.sourceUrl))
     )
       return false
+
+    if (task.type === 'text') {
+      task.status = 'running'
+      task.progress = 100
+      task.progressText = '重新保存文档...'
+      task.errorMsg = undefined
+      task.error = undefined
+      task.assetStatus = 'pending'
+      await persistTasksSafely('retry-text-persistence-start')
+      activeTaskIds.value.add(task.id)
+      try {
+        const saved = await saveTextResultDocument(task)
+        task.status = 'success'
+        task.progressText = saved ? '完成，已保存为项目文档' : '生成完成，文档保存失败'
+        task.completedAt ||= Date.now()
+        emitSettled(task)
+        await persistTasksSafely('retry-text-persistence')
+        return saved
+      } finally {
+        activeTaskIds.value.delete(task.id)
+      }
+    }
 
     let resultUrl: string
     try {
@@ -1430,6 +1494,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.progressText = '完成'
         task.resultText = mediaUrl
         task.completedAt = Date.now()
+        await saveTextResultDocument(task)
         markCanvasWriteUnwritten(task)
         emitSettled(task)
         await persistTasksSafely('refresh-text-success')
@@ -1639,6 +1704,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.progressText = '完成'
         task.resultText = result.text || resultUrl
         task.completedAt = Date.now()
+        await saveTextResultDocument(task)
         markCanvasWriteUnwritten(task)
         emitEvent('media-task-complete', {
           taskId: task.id,

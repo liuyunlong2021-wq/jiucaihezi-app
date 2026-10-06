@@ -23,6 +23,14 @@ const harness = new DeepSeekHarness({
 
 const send = value => process.stdout.write(`${JSON.stringify(value)}\n`)
 const errorMessage = error => error instanceof Error ? error.message : String(error)
+const sendError = (requestId, error) => {
+  const message = errorMessage(error)
+  const writerHeld = error?.name === 'SessionAlreadyOwnedError' || error?.data?.code === 'session/writer-held'
+    // 当前官方 SDK 的 JSON-RPC 只透传 message；限定为官方完整错误格式。
+    || /^session "[^"\n]+" is already owned by an active write handle$/.test(message)
+  send({ type: 'error', requestId, error: message, errorName: error?.name,
+    ...(writerHeld ? { errorCode: 'session/writer-held' } : {}) })
+}
 let closing = false
 
 async function close() {
@@ -44,7 +52,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       command.type === 'read-session' ? { sessionId: command.sessionId } : {},
     )).then(
       data => send({ type: 'query-result', requestId: command.requestId, data }),
-      error => send({ type: 'error', requestId: command.requestId, error: errorMessage(error) }),
+      error => sendError(command.requestId, error),
     )
     return
   }
@@ -57,7 +65,7 @@ createInterface({ input: process.stdin }).on('line', line => {
       ...(command.preset === undefined ? {} : { preset: command.preset }),
     } : command.approval)).then(
       data => send({ type: 'query-result', requestId: command.requestId, data }),
-      error => send({ type: 'error', requestId: command.requestId, error: errorMessage(error) }),
+      error => sendError(command.requestId, error),
     )
     return
   }
@@ -107,7 +115,7 @@ createInterface({ input: process.stdin }).on('line', line => {
         })
       send({ type: 'result', requestId: command.requestId, text: result.finalResponse })
     },
-    error => send({ type: 'error', requestId: command.requestId, error: errorMessage(error) }),
+    error => sendError(command.requestId, error),
   )
 })
 

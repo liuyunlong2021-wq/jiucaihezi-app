@@ -32,8 +32,6 @@ Studio text sync -> /sync/* -> SYNC_DB
 - `POST /sync/projects/:id/files`: pushes 1-100 idempotent, revision-checked text mutations.
 - `POST /sync/projects/:id/delete` and `/restore`: toggles the project tombstone.
 - `GET /health`: health check.
-- `POST /api/creations/uploads`: stores a short-lived local media reference in the existing KV and returns a public HTTPS URL for providers that require URL-based references. Files are limited to 20 MB and expire after 15 minutes.
-- `GET /media/creation/:token`: serves those references until their 15-minute expiry.
 
 Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `jc_session` cookie or `X-JC-Session`; the client cannot submit its own user ID.
 
@@ -41,7 +39,7 @@ Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `j
 
 - Does not proxy `/v1/chat/completions`.
 - Does not proxy `/api/chat/completions`.
-- Does not handle membership, billing, recharge, check-in, invite, usage logs, media generation, or adapters. Temporary creation media is limited to 20 MB and expires automatically after 15 minutes.
+- Does not handle membership, billing, recharge, check-in, invite, usage logs, media generation, or adapters.
 
 ## Routes
 
@@ -51,8 +49,6 @@ Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `j
 api.jiucaihezi.studio/auth/*
 api.jiucaihezi.studio/health
 api.jiucaihezi.studio/sync/*
-api.jiucaihezi.studio/api/creations/uploads
-api.jiucaihezi.studio/media/creation/*
 ```
 
 Do not bind chat completion routes to this Worker.
@@ -77,3 +73,10 @@ npm test
 ```bash
 npm run deploy
 ```
+
+## Creation media ownership (2026-10-06)
+
+`POST /api/creations/uploads` and `GET/HEAD /media/creation/:token` belong to NewAPI.
+Do not bind either route to this Worker. The NewAPI extension stores temporary media
+in its persistent `/data` volume (20 MiB per file, 7 days, 10 GiB budget).
+See [deployment scripts](../scripts/newapi-media/README.md). No R2 subscription is required.

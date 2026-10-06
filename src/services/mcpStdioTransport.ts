@@ -10,16 +10,28 @@ import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 
 /**
- * 本页面 realm 的标识。页面每次重新加载都会换一个新的。
+ * 本页面 realm 的标识。整页重载换代；模块热替换沿用，和 Harness 登记表一致。
  *
  * Rust 用 `(窗口 label, realm)` 判定一个 stdio 子进程是不是孤儿，两件事靠它分开：
- * - **dev 的 F5/HMR 重挂**：同窗口、新 realm → 上一代留下的 Harness runner 必须收掉，
+ * - **dev 的 F5 整页重载**：同窗口、新 realm → 上一代留下的 Harness runner 必须收掉，
  *   否则同一会话下一轮 resume 撞 `already owned by an active write handle`；
  * - **多窗口**：不同 label → 另一个窗口正在跑的 runner 一个字都不能碰。
  *
  * 光靠窗口 label 做不到：重挂时 label 不变，两种情形长得一模一样。
  */
-export const MCP_REALM_ID = crypto.randomUUID()
+const page = globalThis as typeof globalThis & {
+  __JC_MCP_REALM_ID__?: string
+  __JC_HARNESS_REAP__?: Promise<number>
+}
+export const MCP_REALM_ID = page.__JC_MCP_REALM_ID__ ??= crypto.randomUUID()
+
+/** 页面启动回收与新 runner 启动共用同一个闸门；模块热替换保留本页面代数。 */
+export function prepareHarnessRuntime(): Promise<number> {
+  return page.__JC_HARNESS_REAP__ ??= invoke<number>('mcp_reap_stale_harness', { realm: MCP_REALM_ID }).catch(error => {
+    page.__JC_HARNESS_REAP__ = undefined
+    throw error
+  })
+}
 
 export interface McpStdioOptions {
   command: string
@@ -53,6 +65,7 @@ export class McpStdioTransport implements Transport {
   }
 
   async start(): Promise<void> {
+    if (this._options.args.some(arg => arg.endsWith('runner.mjs'))) await prepareHarnessRuntime()
     const channel = new Channel<string>()
     const stderr = new Channel<string>()
     stderr.onmessage = line => this._stderr.push(line)
@@ -106,11 +119,7 @@ export class McpStdioTransport implements Transport {
 
   async close(): Promise<void> {
     if (this._handleId) {
-      try {
-        await invoke('mcp_kill_stdio', { handleId: this._handleId })
-      } catch {
-        // ignore
-      }
+      await invoke('mcp_kill_stdio', { handleId: this._handleId })
       this._handleId = null
     }
     this._onClose?.()

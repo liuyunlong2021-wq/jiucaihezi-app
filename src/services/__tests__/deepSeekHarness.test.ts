@@ -575,7 +575,7 @@ test('Harness runtimes are owned per workspace instead of one replaceable app si
   assert.doesNotMatch(source, /await stopDeepSeekHarness\(\)\s*\n\s*runtime = await createRuntime/)
   assert.match(source, /stopRuntime\(active\)/)
   assert.match(source, /ensureRuntime\(input, true\)/)
-  assert.match(source, /if \(!active\.closing\) return active/)
+  assert.match(source, /if \(!active\.closing && !active\.ended\) return active/)
   assert.doesNotMatch(source, /await stopRuntime\(await current\.ready\) \} catch/)
 })
 
@@ -801,6 +801,12 @@ test('Harness runtime registry survives a module hot replacement', () => {
   assert.doesNotMatch(source, /^const runtimes = new Map/m)
 })
 
+test('writer-held feedback explains recovery in the original conversation without hiding other errors', () => {
+  assert.match(deepSeekFailureText('session "conversation" is already owned by an active write handle', 'session/writer-held'), /原对话重试/)
+  assert.match(deepSeekFailureText('session "conversation" is already owned by an active write handle'), /原对话重试/)
+  assert.equal(deepSeekFailureText('write failed: permission denied'), 'write failed: permission denied')
+})
+
 test('Harness shutdown is bounded and always reaps the runtime', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   // 官方 close 的拆卸阶梯有界：shutdown 1s → stdin EOF 宽限 6s → 强杀 3s。
@@ -810,7 +816,7 @@ test('Harness shutdown is bounded and always reaps the runtime', () => {
   assert.ok(timeout > 10_000, `等待上限必须高于官方阶梯（实测 ${timeout}）`)
   assert.match(source, /if \(!await waitForRuntimeClose\(active, DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS\)\)/)
   // 兜底必须无条件执行：进程已死/写不进去时 `closed` 永不来，没有这句就永远收不到尾。
-  assert.match(source, /finally \{\s*\/\/[\s\S]*?await active\.transport\.close\(\)\.catch\(\(\) => \{\}\)\s*\}/)
+  assert.match(source, /finally \{\s*\/\/[\s\S]*?await active\.transport\.close\(\)\s*\}/)
   assert.doesNotMatch(source, /await active\.closed\s*\n\s*\} finally/)
 })
 
@@ -830,10 +836,10 @@ test('Harness stdio children are reaped as a process tree', () => {
   assert.match(rust, /fn tree_kill_plan\(pid: u32\)/)
   assert.match(rust, /vec!\["\/T"\.into\(\), "\/F"\.into\(\), "\/PID"\.into\(\), pid\.to_string\(\)\]/)
   assert.match(rust, /cmd\.process_group\(0\)/)
-  assert.match(rust, /if let Some\(pid\) = process\.child\.id\(\) \{\s*kill_process_tree\(pid\)/)
+  assert.match(rust, /kill_process_tree\(process\.pid\)/)
   // 页面重载收 Harness 运行时；应用退出收所有 stdio 进程树。
   assert.match(rust, /pub fn mcp_reap_stale_harness\(/)
-  assert.match(readFileSync('src/main.ts', 'utf8'), /'mcp_reap_stale_harness', \{ realm: MCP_REALM_ID \}/)
+  assert.match(readFileSync('src/services/mcpStdioTransport.ts', 'utf8'), /'mcp_reap_stale_harness', \{ realm: MCP_REALM_ID \}/)
   assert.match(lib, /commands::mcp::reap_all_stdio_processes\(\)/)
 })
 
@@ -850,10 +856,10 @@ test('a window only reaps its own previous webpage, never another window', () =>
   // 收割只碰 Harness 运行时：新页面挂载时创作 MCP 等 stdio 子进程可能已经起来了。
   assert.match(rust, /filter\(\|\(_, process\)\| !only_harness \|\| process\.is_harness_runner\)/)
   // realm 由前端每次挂载生成，并随 spawn 上报；窗口 label 由 Rust 注入，前端不传。
-  assert.match(transport, /export const MCP_REALM_ID = crypto\.randomUUID\(\)/)
+  assert.match(transport, /export const MCP_REALM_ID = page\.__JC_MCP_REALM_ID__ \?\?= crypto\.randomUUID\(\)/)
   assert.match(transport, /realm: MCP_REALM_ID,/)
   assert.match(rust, /window: tauri::WebviewWindow,/)
-  assert.match(main, /invoke<number>\('mcp_reap_stale_harness', \{ realm: MCP_REALM_ID \}\)/)
+  assert.match(main, /prepareHarnessRuntime\(\)\.then\(/)
 })
 
 test('a second launch focuses the existing instance instead of starting another process', () => {

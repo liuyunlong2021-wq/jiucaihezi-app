@@ -187,6 +187,7 @@ const externalNodeTests = [
   'scripts/__tests__/audit-skills-manage-parity.test.mjs',
   'scripts/__tests__/create-official-dmg.test.mjs',
   'scripts/__tests__/deepseek-harness-patch.test.mjs',
+  'scripts/__tests__/deepseek-session-lifecycle.test.mjs',
   'scripts/__tests__/manju-skill-scope.test.mjs',
   'scripts/__tests__/deepseek-permission.test.mjs',
   'scripts/__tests__/deepseek-harness-profile-plugins.test.mjs',

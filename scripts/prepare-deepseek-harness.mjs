@@ -141,7 +141,8 @@ const resumableSession = `\tasync createSession(sessionId) {
 \t\tthis.sessions.set(sessionId, rec);
 \t\treturn rec;
 \t}`
-if (!server.replace(approvalAttach, '').includes(resumableSession)) {
+const sessionAlignmentMarker = '// Official Session controller: reuse live agents and recheck after a resume race.'
+if (!server.includes(sessionAlignmentMarker) && !server.replace(approvalAttach, '').includes(resumableSession)) {
   if (!server.includes(createSession)) throw new Error('Unsupported DeepSeek Harness session server layout')
   server = server.replace(createSession, resumableSession)
   changed = true
@@ -235,7 +236,7 @@ const approvalCase = '\t\t\tcase "session/approval": return this.approval(params
 if (!server.includes(approvalCase)) { server = server.replace(permissionCase, permissionCase + '\n' + approvalCase); changed = true }
 const sessionRegister = '\t\tconst rec = { handle };\n'
 // The resume-layout check above must remain idempotent with the additional attachment.
-if (!server.includes(approvalAttach)) { server = server.replace(sessionRegister, sessionRegister + approvalAttach); changed = true }
+if (!server.includes(sessionAlignmentMarker) && !server.includes(approvalAttach)) { server = server.replace(sessionRegister, sessionRegister + approvalAttach); changed = true }
 
 // 用户显式点名 skill（官方 `/name` 手势）时，本会话**只许用点名的这些**：把 `skill` 工具从
 // 该 agent 的工具面里掩掉。官方 `dsh-tool-skill` 在工具不可见时**不再发布 skill 目录**
@@ -380,6 +381,68 @@ const bindingEnd = server.indexOf('\tasync pinnedSkillNames(rec, content) {', bi
 if (bindingStart < 0 || bindingEnd < 0) throw new Error('Unsupported DeepSeek Harness skill binding layout')
 if (server.slice(bindingStart, bindingEnd) !== scopedBindingMethod) {
   server = server.slice(0, bindingStart) + scopedBindingMethod + server.slice(bindingEnd)
+  changed = true
+}
+
+// SDK 冷恢复适配遵循官方 API Session 的 live / shared-resume / race-recheck 顺序。
+// 借用的 Agent 只存裸引用，不伪造 disposer；shutdown 只能释放自己拥有的 handle 与桥接。
+const alignedSession = `\tasync createSession(sessionId) {
+\t\t${sessionAlignmentMarker}
+\t\tconst id = brandString(sessionId);
+\t\tlet agent = this.ctx.agents.get(id);
+\t\tlet handle;
+\t\tif (agent === void 0) {
+\t\t\tconst agentOptions = {
+\t\t\t\tprovider: this.provider, model: this.model,
+\t\t\t\t...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
+\t\t\t\t...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
+\t\t\t};
+\t\t\ttry {
+\t\t\t\tconst persisted = await this.ctx.get("sessionPersistence")?.stat(id);
+\t\t\t\thandle = persisted === void 0
+\t\t\t\t\t? await this.ctx.agents.create({ sessionId: id, meta: { cwd: this.cwd }, agentOptions })
+\t\t\t\t\t: await this.ctx.agents.resume({ resumeSessionId: id, agentOptions });
+\t\t\t\tagent = handle.agent;
+\t\t\t} catch (error) {
+\t\t\t\tagent = this.ctx.agents.get(id);
+\t\t\t\tif (agent === void 0) throw error;
+\t\t\t}
+\t\t}
+\t\tconst rec = { handle: handle ?? { agent } };
+\t\ttry {
+\t\t\tconst parentId = agent.session.header.parentSession;
+\t\t\tconst parent = parentId === void 0 ? void 0 : this.ctx.agents.get(parentId);
+\t\t\tif (agent.session.header.origin === "subagent" || parent !== void 0 && this.ctx.agents.isOwnedBy(id, parent))
+\t\t\t\tthrow new Error("session is owned by subagent routing: " + sessionId);
+\t\t\tif (agent.session.header.cwd !== this.cwd) throw new Error("session belongs to another workspace: " + sessionId);
+\t\t\tif (agent.options.provider !== this.provider || agent.options.model !== this.model)
+\t\t\t\tthrow new Error("live session uses a different model route: " + sessionId);
+\t\t\tthis.assertLiveAgent(rec, sessionId);
+\t\t\trec.approvalBridge = await attachApprovalBridge(agent, (method, params) => this.transport.notify(method, params));
+\t\t\tthis.assertLiveAgent(rec, sessionId);
+\t\t} catch (error) {
+\t\t\ttry { await rec.approvalBridge?.dispose(); } finally { await handle?.dispose(); }
+\t\t\tthrow error;
+\t\t}
+\t\tthis.sessions.set(sessionId, rec);
+\t\treturn rec;
+\t}
+`
+const sessionStart = server.indexOf('\tasync createSession(sessionId) {')
+const sessionEnd = server.indexOf('\thasAdapterFor(provider) {', sessionStart)
+if (sessionStart < 0 || sessionEnd < 0) throw new Error('Unsupported SDK Session lifecycle layout')
+if (server.slice(sessionStart, sessionEnd) !== alignedSession) {
+  server = server.slice(0, sessionStart) + alignedSession + server.slice(sessionEnd)
+  changed = true
+}
+const ownedTeardown = 'records.map((rec) => Promise.resolve().then(() => rec.handle.dispose()))'
+const alignedTeardown = `records.map((rec) => Promise.resolve().then(async () => {
+\t\t\ttry { await this.pinnedSkillScopes?.get(rec.handle.agent)?.dispose(); }
+\t\t\tfinally { try { await rec.approvalBridge?.dispose(); } finally { await rec.handle.dispose?.(); } }
+\t\t}))`
+if (!server.includes(alignedTeardown)) {
+  if (!server.includes(ownedTeardown)) throw new Error('Unsupported SDK owned teardown layout')
+  server = server.replace(ownedTeardown, alignedTeardown)
   changed = true
 }
 

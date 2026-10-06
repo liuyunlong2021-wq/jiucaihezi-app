@@ -150,6 +150,8 @@ export async function executeCreationSubmitRequest(
   request = await materializeRequestMedia(request)
   if (request.runtime === 'local-comfy') return executeLocalComfyRequest(request, onProgress, onSubmitted)
   if (request.runtime === 'newapi-direct') {
+    if (request.plan.apiStyle === 'openai-responses-text')
+      return executeH3ContextIrRequest(request, onProgress, onSubmitted)
     if (request.taskType === 'image') return executeDirectImageRequest(request, onProgress, onSubmitted)
     if (request.taskType === 'video') return executeDirectVideoRequest(request, onProgress, onSubmitted)
     return executeDirectAudioRequest(request, onProgress, onSubmitted)
@@ -157,6 +159,67 @@ export async function executeCreationSubmitRequest(
   if (request.taskType === 'image') return executeRunningHubImageRequest(request, onProgress, onSubmitted)
   if (request.taskType === 'video') return executeRunningHubVideoRequest(request, onProgress, onSubmitted)
   return executeRunningHubAudioRequest(request, onProgress, onSubmitted)
+}
+
+async function executeH3ContextIrRequest(
+  request: CreationSubmitRequest,
+  onProgress?: (elapsed: number, status: string) => void,
+  onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
+): Promise<MediaResult> {
+  const params = request.videoParams || {}
+  const normalized = request.plan.debug.normalizedParams
+  const prompt = asString(params.prompt).trim()
+  const duration = Number(normalized.duration)
+  const imageMode = asString(normalized.image_mode) || 'reference_image'
+  const ratio = asString(normalized.ratio || normalized.aspect_ratio || normalized.aspectRatio) || '16:9'
+  const images = [...new Set([...(params.imageUrls || []), ...(params.imageUrl ? [params.imageUrl] : [])])]
+  const videos = [...new Set([...(params.videoUrls || []), ...(params.videoUrl ? [params.videoUrl] : [])])]
+  const audios = [...new Set([...(params.audioUrls || []), ...(params.audioUrl ? [params.audioUrl] : [])])]
+  const allowedRatios = ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16']
+
+  if (!prompt) throw new Error('请输入提示词')
+  if (!Number.isInteger(duration) || duration < 4 || duration > 15) throw new Error('目标时长必须为 4 到 15 秒的整数')
+  if (!allowedRatios.includes(ratio)) throw new Error('画幅不受支持')
+  if (images.length > 9 || videos.length > 3 || audios.length > 3) throw new Error('参考素材数量超过 MiniMax H3 Context IR 限制')
+  if (!images.length && !videos.length && !audios.length && ratio === 'adaptive') throw new Error('纯文本增强必须选择具体画幅')
+
+  const content: Array<Record<string, unknown>> = [{ type: 'text', text: prompt }]
+  if (imageMode === 'reference_image') {
+    images.forEach(url => content.push({ type: 'image_url', role: 'reference_image', image_url: { url } }))
+  } else if (imageMode === 'first_frame' || imageMode === 'last_frame') {
+    if (images.length !== 1) throw new Error('首帧或尾帧模式需要且只能选择一张图片')
+    if (videos.length || audios.length) throw new Error('首帧/尾帧不能与参考视频或参考音频混用')
+    content.push({ type: 'image_url', role: imageMode, image_url: { url: images[0] } })
+  } else if (imageMode === 'first_last_frames') {
+    if (images.length < 1 || images.length > 2) throw new Error('首尾帧模式需要一张或两张图片')
+    if (videos.length || audios.length) throw new Error('首帧/尾帧不能与参考视频或参考音频混用')
+    content.push({ type: 'image_url', role: 'first_frame', image_url: { url: images[0] } })
+    if (images[1]) content.push({ type: 'image_url', role: 'last_frame', image_url: { url: images[1] } })
+  } else {
+    throw new Error('图片用途不受支持')
+  }
+  videos.forEach(url => content.push({ type: 'video_url', role: 'reference_video', video_url: { url } }))
+  audios.forEach(url => content.push({ type: 'audio_url', role: 'reference_audio', audio_url: { url } }))
+
+  const hasFrame = imageMode === 'first_frame' || imageMode === 'last_frame' || imageMode === 'first_last_frames'
+  onProgress?.(0, '提交提示词增强...')
+  const submitted = await apiCall('/v1/responses', {
+    model: request.plan.model,
+    background: true,
+    content,
+    duration,
+    ratio: hasFrame ? 'adaptive' : ratio,
+  }, 'POST', request.plan.model, request.signal)
+  const responseId = String(submitted?.id || '')
+  if (!/^resp_[A-Za-z0-9._:-]+$/.test(responseId)) throw new Error('MiniMax H3 Context IR 未返回有效的 response id')
+  const pollUrl = `/v1/responses/${encodeURIComponent(responseId)}`
+  const immediateText = extractMediaText(submitted)
+  if (immediateText) return { url: '', text: immediateText, type: 'text', taskId: responseId, pollUrl, pollKind: 'text' }
+
+  await onSubmitted?.({ taskId: responseId, pollUrl, pollKind: 'text' })
+  const text = await pollTask(pollUrl, 'text', onProgress, 600, 5000, request.signal)
+  if (!text.trim()) throw new Error('MiniMax H3 Context IR 已完成，但没有返回增强文本')
+  return { url: '', text, type: 'text', taskId: responseId, pollUrl, pollKind: 'text' }
 }
 
 export async function materializeMediaInput(

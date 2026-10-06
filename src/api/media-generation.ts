@@ -292,10 +292,17 @@ export function extractMediaText(payload: any): string {
   const normalize = (value: string) => value.replace(/\\n/g, '\n').replace(/\\t/g, '\t').trim()
   function pick(obj: any): string {
     if (!obj || typeof obj !== 'object') return ''
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        const text = typeof item === 'string' ? normalize(item) : pick(item)
+        if (text) return text
+      }
+      return ''
+    }
     if (typeof obj.text === 'string' && obj.text.trim()) return normalize(obj.text)
     if (typeof obj.content === 'string' && obj.content.trim()) return normalize(obj.content)
     if (typeof obj.output === 'string' && obj.output.trim() && !/^https?:\/\//i.test(obj.output)) return normalize(obj.output)
-    for (const key of ['result', 'data', 'metadata', 'output']) {
+    for (const key of ['result', 'data', 'metadata', 'output', 'content']) {
       const nested = obj[key]
       if (nested && typeof nested === 'object') {
         const text = pick(nested)
@@ -531,9 +538,9 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
     if (res.status === 503) {
       const text = await res.text().catch(() => '')
       if (text.includes('model_not_found') || text.includes('无可用渠道')) {
-        throw new Error('该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试')
+        throw new Error(`该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试：${text.slice(0, 200)}`)
       }
-      throw new Error(`服务暂时不可用 (503)，请稍后再试`)
+      throw new Error(text.trim() ? `HTTP 503: ${text.slice(0, 200)}` : '服务暂时不可用 (503)，请稍后再试')
     }
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
@@ -668,10 +675,10 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   }
   throwIfAborted(externalSignal)
   if (!res.ok) {
-    if (res.status === 503) {
+    const text = await res.text().catch(() => '')
+    if (res.status === 503 && !text.trim()) {
       throw new Error('服务暂时不可用 (503)，请稍后再试')
     }
-    const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
   }
   const json = await res.json()
@@ -782,7 +789,7 @@ export async function pollTask(
       if (kind === 'text') {
         const text = extractMediaText(data)
         if (text) return text
-        console.warn('[pollTask] 状态完成但未提取到文本:', JSON.stringify(data).slice(0, 300))
+        throw terminalCreationTaskError('任务已完成，但没有返回文本内容')
       }
       const newApiVideoUrl = kind === 'video' && useContentEndpoint ? newApiVideoContentUrl(pollPath) : null
       if (newApiVideoUrl) return newApiVideoUrl
