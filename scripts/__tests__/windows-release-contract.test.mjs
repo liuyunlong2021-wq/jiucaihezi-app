@@ -136,3 +136,12 @@ test('existing-tag revalidation runs native probes and promotion despite skipped
   assert.match(workflow, /verify-native-upgrade:\n\s+needs: publish-download-manifest\n\s+if: always\(\) && needs\.publish-download-manifest\.result == 'success'/)
   assert.match(workflow, /promote-updater:[\s\S]*?if: always\(\) && needs\.verify-native-upgrade\.result == 'success'/)
 })
+
+test('published immutable assets reuse full server checksums only after prior public verification and promotion', () => {
+  assert.match(workflow, /PUBLIC_VERIFIED=false/)
+  assert.match(workflow, /latest\.json[\s\S]*?PUBLIC_VERIFIED=true/)
+  assert.match(workflow, /if \[ "\$PUBLIC_VERIFIED" = true \]; then/)
+  assert.match(workflow, /Online size mismatch/)
+  assert.match(workflow, /Online signature mismatch/)
+  assert.match(workflow, /else\n\s+node scripts\/verify-online-updates\.mjs/)
+})

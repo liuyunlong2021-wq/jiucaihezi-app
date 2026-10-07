@@ -675,10 +675,16 @@ jobs:
           STAGE="/opt/updates/.candidate-${VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           # 摘要覆盖所有最终安装包和签名；清单按同文件系统 rename 推广。
           (cd "$ASSET_DIR" && sha256sum -- ./*.dmg ./*.exe ./*.app.tar.gz ./*.sig > SHA256SUMS)
+          PUBLIC_VERIFIED=false
           if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "test -d '/opt/updates/$VERSION'"; then
             # 已发布目录直接核验不可变字节，重跑验收不再传输整套安装包。
             ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
               "cd '/opt/updates/$VERSION' && sha256sum -c -" < "$ASSET_DIR/SHA256SUMS"
+            # latest 只在全量公网 SHA256 成功后推广；同版本且服务端字节一致才能复用。
+            if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "python3 -c 'import json; assert json.load(open(\"/opt/updates/latest.json\"))[\"version\"] == \"$VERSION\"'"; then
+              PUBLIC_VERIFIED=true
+            fi
           else
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '$STAGE'"
           scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ASSET_DIR/"* "${DEPLOY_USER}@${DEPLOY_HOST}:$STAGE/"
@@ -698,7 +704,26 @@ jobs:
           fi
           REMOTE
           fi
-          node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR"
+          if [ "$PUBLIC_VERIFIED" = true ]; then
+            # 重跑仍检查公网每个文件长度与完整签名；首次发布继续全量下载校验。
+            node --input-type=module - "$VERSION" "$ASSET_DIR" <<'VERIFY'
+          import { readdirSync, statSync, readFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          const [version, dir] = process.argv.slice(2)
+          for (const name of readdirSync(dir).filter(n => /\.(dmg|exe|tar\.gz|sig)$/.test(n))) {
+            const signature = name.endsWith('.sig')
+            const response = await fetch(`https://api.jiucaihezi.studio/updates/${version}/${encodeURIComponent(name)}`, {
+              method: signature ? 'GET' : 'HEAD', signal: AbortSignal.timeout(60000),
+            })
+            if (!response.ok) throw new Error(`Online asset missing: ${name}`)
+            if (Number(response.headers.get('content-length')) !== statSync(join(dir, name)).size) throw new Error(`Online size mismatch: ${name}`)
+            if (signature && !Buffer.from(await response.arrayBuffer()).equals(readFileSync(join(dir, name)))) throw new Error(`Online signature mismatch: ${name}`)
+            console.log(`Verified public immutable asset: ${name}`)
+          }
+          VERIFY
+          else
+            node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR"
+          fi
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "bash -s /opt/updates '$VERSION' downloads" < scripts/promote-updates.sh
           # /opt/updates/latest.json 与 updater.json 分别原子推广；OTA 验收前只发布候选。
