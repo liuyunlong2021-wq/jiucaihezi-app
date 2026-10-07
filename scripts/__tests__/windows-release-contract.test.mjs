@@ -146,3 +146,9 @@ test('published immutable assets reuse full server checksums only after prior pu
   assert.match(workflow, /Online signature mismatch/)
   assert.match(workflow, /else\n\s+node scripts\/verify-online-updates\.mjs/)
 })
+
+test('Windows-only diagnostics cannot promote a public updater manifest', () => {
+  assert.match(workflow, /native_platform:[\s\S]*?options: \[all, windows\]/)
+  assert.match(workflow, /matrix: \$\{\{ fromJSON\(inputs\.native_platform == 'windows'/)
+  assert.match(workflow, /promote-updater:[\s\S]*?inputs\.native_platform != 'windows'/)
+})

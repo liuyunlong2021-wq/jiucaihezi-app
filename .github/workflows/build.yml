@@ -8,6 +8,12 @@ on:
         description: Existing release tag to republish downloads without rebuilding apps
         required: false
         type: string
+      native_platform:
+        description: Windows-only diagnostics never promote OTA; formal acceptance requires all
+        required: false
+        default: all
+        type: choice
+        options: [all, windows]
       promote_updater:
         description: Promote this signed candidate after three-platform A-to-B upgrade acceptance
         required: false
@@ -736,11 +742,7 @@ jobs:
     if: always() && needs.publish-download-manifest.result == 'success'
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - { os: macos-latest, package: _aarch64.app.tar.gz, baseline: _aarch64.app.tar.gz }
-          - { os: macos-15-intel, package: _x64.app.tar.gz, baseline: _x64.app.tar.gz }
-          - { os: windows-2022, package: '*_x64_windows_setup.exe', baseline: '*_x64_windows_setup.exe' }
+      matrix: ${{ fromJSON(inputs.native_platform == 'windows' && '{"include":[{"os":"windows-2022","package":"*_x64_windows_setup.exe","baseline":"*_x64_windows_setup.exe"}]}' || '{"include":[{"os":"macos-latest","package":"_aarch64.app.tar.gz","baseline":"_aarch64.app.tar.gz"},{"os":"macos-15-intel","package":"_x64.app.tar.gz","baseline":"_x64.app.tar.gz"},{"os":"windows-2022","package":"*_x64_windows_setup.exe","baseline":"*_x64_windows_setup.exe"}]}') }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -777,7 +779,7 @@ jobs:
   promote-updater:
     needs: verify-native-upgrade
     # 首个接入版仅建立同版本基线；未来 B 必须显式推广。
-    if: always() && needs.verify-native-upgrade.result == 'success' && (github.ref == 'refs/tags/v2.2.22' || (inputs.promote_updater == true && inputs.publish_tag != ''))
+    if: always() && needs.verify-native-upgrade.result == 'success' && inputs.native_platform != 'windows' && (github.ref == 'refs/tags/v2.2.22' || (inputs.promote_updater == true && inputs.publish_tag != ''))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
