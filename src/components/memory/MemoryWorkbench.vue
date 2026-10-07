@@ -175,7 +175,8 @@ const stopUpdateParticipant = registerUpdateParticipant({
     localStorage.setItem(await updateDraftKey(projectOwner.value), JSON.stringify({
       path: conversation.value?.resource.path, text: input.value, editingTurnId: editingTurnId.value,
       attachments: attachments.value.map(({ previewUrl, ...attachment }) => attachment), referencedFiles: referencedFiles.value,
-      skillNames: selectedSkillNames.value,
+      skillNames: selectedSkillNames.value, mcpToolNames: selectedMcpToolNames.value,
+      mediaSelected: mediaSelected.value, avSelected: avSelected.value, scene3dSelected: scene3dSelected.value,
     }))
   },
   close: () => stopDeepSeekHarness(true),
@@ -1326,6 +1327,34 @@ function mergedHarnessTurns(
   return [...(firstHarnessTurn < 0 ? visibleTurns : visibleTurns.slice(0, firstHarnessTurn)), ...sessionTurns]
 }
 
+interface UpdateInputDraft {
+  path?: string
+  text?: string
+  editingTurnId?: string
+  skillNames?: string[]
+  mcpToolNames?: string[]
+  referencedFiles?: DirectMessageFile[]
+  attachments?: ResolvedDirectAttachment[]
+  mediaSelected?: boolean
+  avSelected?: boolean
+  scene3dSelected?: boolean
+}
+
+function restoreUpdateInputDraft(draft: UpdateInputDraft, key: string) {
+  input.value = draft.text || ''
+  editingTurnId.value = draft.editingTurnId || ''
+  if (draft.skillNames) selectedSkillNames.value = draft.skillNames
+  if (draft.mcpToolNames) selectedMcpToolNames.value = draft.mcpToolNames
+  if (draft.referencedFiles) referencedFiles.value = draft.referencedFiles
+  if (draft.attachments) attachments.value = draft.attachments
+  mediaSelected.value = Boolean(draft.mediaSelected)
+  avSelected.value = Boolean(draft.avSelected)
+  scene3dSelected.value = Boolean(draft.scene3dSelected)
+  setEditorText(composerRef.value, input.value)
+  resizeComposer()
+  localStorage.removeItem(key)
+}
+
 async function openProject(owner: string) {
   // 切项目不停运行：运行归对话，结果落盘，回来读盘就能看到。
   conversationSelectionGeneration++
@@ -1338,7 +1367,14 @@ async function openProject(owner: string) {
   previewResource.value = null
   conversations.value = []
   error.value = ''
-  if (!owner) return
+  const resumeKey = desktopOnlyRuntime ? await updateDraftKey(owner) : `jc:update-resume:${owner}`
+  let updateResume: UpdateInputDraft | undefined
+  try { updateResume = JSON.parse(localStorage.getItem(resumeKey) || 'null') || undefined } catch { /* keep corrupt snapshot for diagnosis */ }
+  if (generation !== projectGeneration) return
+  if (!owner) {
+    if (updateResume) restoreUpdateInputDraft(updateResume, resumeKey)
+    return
+  }
   try {
     const state = await inspectMemoryProject(owner, files)
     if (generation !== projectGeneration) return
@@ -1357,22 +1393,12 @@ async function openProject(owner: string) {
     }
     const entries = listHarnessConversationCatalog(owner)
     conversations.value = entries.map(entry => conversationFromCatalog(entry, legacyById.get(entry.conversationId)))
-    let updateResume: { path?: string; text?: string; editingTurnId?: string; skillNames?: string[]; referencedFiles?: DirectMessageFile[]; attachments?: ResolvedDirectAttachment[] } | undefined
-    const resumeKey = desktopOnlyRuntime ? await updateDraftKey(owner) : `jc:update-resume:${owner}`
-    try { updateResume = JSON.parse(localStorage.getItem(resumeKey) || 'null') || undefined } catch { /* keep corrupt snapshot for diagnosis */ }
     const latest = conversations.value.find(item => item.resource.path === updateResume?.path)
       || conversations.value.at(-1) || conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
     if (!conversations.value.length) conversations.value.push(latest)
     await selectConversation(latest)
     if (updateResume && generation === projectGeneration) {
-      input.value = updateResume.text || ''
-      editingTurnId.value = updateResume.editingTurnId || ''
-      if (updateResume.skillNames) selectedSkillNames.value = updateResume.skillNames
-      if (updateResume.referencedFiles) referencedFiles.value = updateResume.referencedFiles
-      if (updateResume.attachments) attachments.value = updateResume.attachments.map(attachment => ({ ...attachment }))
-      setEditorText(composerRef.value, input.value)
-      resizeComposer()
-      localStorage.removeItem(resumeKey)
+      restoreUpdateInputDraft(updateResume, resumeKey)
     }
     void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {

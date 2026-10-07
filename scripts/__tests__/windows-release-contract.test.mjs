@@ -113,3 +113,10 @@ test('every new workbench constructor holds the native task gate until attachmen
   assert.match(body, /let _update_task = commands::desktop_update::native_task\(app\)\?;/)
   assert.ok(body.indexOf('native_task(app)') < body.indexOf('build_workbench_window'))
 })
+
+test('native screenshot session owns its update lease until capture, annotation, save or cancel finishes', () => {
+  const screenshot = readFileSync('src-tauri/src/commands/screenshot.rs', 'utf8')
+  assert.match(screenshot, /struct Active \{[\s\S]*?update_task: Option<super::desktop_update::NativeTask>/)
+  assert.match(screenshot, /async fn begin\([\s\S]*?let update_task = super::desktop_update::native_task\(&app\)\?;/)
+  assert.match(screenshot, /state\.active = Some\(Active \{[\s\S]*?update_task,/)
+})
