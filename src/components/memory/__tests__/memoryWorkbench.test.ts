@@ -1,14 +1,113 @@
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { createRequire } from 'node:module'
 import { test } from 'node:test'
-import { computed, effectScope, reactive } from 'vue'
+import { computed, effectScope, nextTick, reactive, ref } from 'vue'
+import { useFilteredList } from '@/composables/useFilteredList'
 import { beginMemoryRun, desktopConversationLiveState, desktopConversationRuns, executeDesktopHarnessRun, memoryRunKey, stopRun, type MemoryRun } from '@/services/desktopConversationRuntime'
 import { shouldReadNativeClipboardImage } from '@/utils/clipboard'
 
 function source(path: string) {
   return readFileSync(join(process.cwd(), path), 'utf8')
 }
+
+// Execute the actual SFC candidate loader without mounting the entire workbench.
+function mentionLoaderFixture(blockCatalog = false) {
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const body = source('src/components/memory/MemoryWorkbench.vue').match(/const mentionItems = async[\s\S]*?(?=\nconst mentionKey)/)?.[0]
+  assert.ok(body)
+  const calls = { catalog: 0, customSkills: 0, search: 0, list: 0 }
+  const mentionOpen = ref(true)
+  const mentionScope = ref('all')
+  let finishCatalog!: (entries: unknown[]) => void
+  const catalog = blockCatalog ? new Promise<unknown[]>(resolve => { finishCatalog = resolve }) : Promise.resolve([])
+  const dependencies = {
+    mentionOpen, mentionScope, desktopOnlyRuntime: true,
+    mcpStore: { allMcpTools: [{ serverId: 'github' }, { serverId: 'github' }, { serverId: 'local' }] },
+    loadWebSkillCatalog: () => { calls.catalog++; return catalog },
+    agentStore: { getCustomSkills: () => { calls.customSkills++; return [{ name: 'story', description: '故事' }] } },
+    sortSkillsForPicker: (entries: unknown[]) => entries,
+    manjuSelected: ref(false), MANJU_SKILLS: ['story'], projectOwner: ref('/project'),
+    files: {
+      searchPaths: async () => { calls.search++; return [{ path: 'story.md', kind: 'text', isDirectory: false }] },
+      list: async () => { calls.list++; return [{ path: 'story.md', kind: 'text', isDirectory: false }] },
+    },
+    isOfficeResource: () => false,
+  }
+  type Item = { type: string; id?: string; name?: string; display: string; description: string }
+  const code = transformSync(body, { loader: 'ts', target: 'es2022' }).code
+  const load = new Function(...Object.keys(dependencies), `${code}; return mentionItems`)(...Object.values(dependencies)) as (query: string) => Promise<Item[]>
+  return { load, calls, mentionOpen, mentionScope, finishCatalog: () => finishCatalog([]) }
+}
+
+async function promptly<T>(promise: Promise<T>): Promise<T> {
+  let timer!: ReturnType<typeof setTimeout>
+  try {
+    return await Promise.race([promise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('候选被无关加载阻塞')), 100)
+    })])
+  } finally { clearTimeout(timer) }
+}
+
+test('MCP launcher returns cached servers while the Skill catalog cannot settle', async () => {
+  const fixture = mentionLoaderFixture(true)
+  fixture.mentionScope.value = 'mcp'
+  const items = await promptly(fixture.load(''))
+  assert.deepEqual(items.map(item => [item.id, item.description]), [
+    ['mcp__github', '整体工具（2 个 operation）'], ['mcp__local', '整体工具（1 个 operation）'],
+  ])
+  assert.deepEqual(fixture.calls, { catalog: 0, customSkills: 0, search: 0, list: 0 })
+})
+
+test('typed MCP prefixes also bypass Skill and project discovery', async () => {
+  const fixture = mentionLoaderFixture(true)
+  assert.equal((await promptly(fixture.load('mcp__'))).length, 2)
+  assert.deepEqual(fixture.calls, { catalog: 0, customSkills: 0, search: 0, list: 0 })
+})
+
+test('closed mention menu performs no discovery on initialization or clear', async () => {
+  const fixture = mentionLoaderFixture(true)
+  fixture.mentionOpen.value = false
+  assert.deepEqual(await promptly(fixture.load('')), [])
+  assert.deepEqual(await promptly(fixture.load('mcp__')), [])
+  assert.deepEqual(fixture.calls, { catalog: 0, customSkills: 0, search: 0, list: 0 })
+})
+
+test('Skill launcher loads Skills without project searches; typed @ retains files and tools', async () => {
+  const fixture = mentionLoaderFixture()
+  fixture.mentionScope.value = 'skill'
+  assert.deepEqual((await fixture.load('')).map(item => item.name), ['story'])
+  assert.equal(fixture.calls.list + fixture.calls.search, 0)
+  fixture.mentionScope.value = 'all'
+  const items = await fixture.load('story')
+  assert.ok(items.some(item => item.type === 'file' && item.display === 'story.md'))
+  assert.ok(items.some(item => item.type === 'skill' && item.name === 'story'))
+  assert.ok(items.some(item => item.id === 'mcp__github'))
+  assert.equal(fixture.calls.search, 1)
+  await fixture.load('')
+  assert.equal(fixture.calls.list, 1)
+})
+
+test('switching to MCP and closing drops a late comprehensive candidate request', async () => {
+  const fixture = mentionLoaderFixture(true)
+  const scope = effectScope()
+  const picker = scope.run(() => useFilteredList({ items: fixture.load, key: item => item.id || item.name || item.display, noInitialSelection: true }))!
+  try {
+    fixture.mentionScope.value = 'mcp'
+    picker.onInput('')
+    await nextTick()
+    await nextTick()
+    assert.deepEqual(picker.flat.value.map(item => item.id), ['mcp__github', 'mcp__local'])
+    fixture.mentionOpen.value = false
+    picker.clear()
+    fixture.finishCatalog()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    await nextTick()
+    assert.deepEqual(picker.flat.value, [])
+    assert.equal(fixture.calls.search + fixture.calls.list, 0)
+  } finally { scope.stop() }
+})
 
 test('Desktop defaults to Harness without an @DH switch', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
@@ -331,7 +430,7 @@ test('memory file tree groups project identity above its three file actions', ()
 
   assert.deepEqual(
     Array.from(toolbar.matchAll(/title="([^"]+)"/g), match => match[1]),
-    ['`切换项目：${projectStore.projectName.value}`', '隐藏文件树'],
+    ['`切换项目：${projectStore.projectName.value}`', '新建窗口', '隐藏文件树'],
   )
   assert.match(toolbar, /:title="`切换项目：\$\{projectStore\.projectName\.value\}`"/)
   assert.match(
@@ -626,8 +725,8 @@ test('memory workbench saves Office attachments as durable project materials', (
 
 test('点 @Skill 只列 Skill，不重复芯片排已有的工具入口', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /skillPickerOnly\.value = true/)
-  assert.match(workbench, /if \(skillPickerOnly\.value\) return skills/)
+  assert.match(workbench, /mentionScope\.value = 'skill'/)
+  assert.match(workbench, /if \(scope === 'skill'\) return skills/)
   assert.match(workbench, /sortSkillsForPicker\(/)
   assert.match(workbench, /recordSkillUse\(option\.name\)/)
 })
@@ -1822,8 +1921,8 @@ test('aggregate MCP mentions remain searchable by their internal tool prefix', (
   assert.match(workbench, /selectedMcpToolNames\.value\.map\(id => \{[\s\S]*mcpStore\.servers\.find\(server => server\.id === serverId\)\?\.name \|\| serverId/)
   assert.match(workbench, /if \(id\.startsWith\('mcp__'\)\) \{[\s\S]*selectedMcpToolNames\.value = selectedMcpToolNames\.value\.filter\(item => item !== id\)/)
   assert.match(workbench, /filterKeys: \['id', 'display', 'description'\]/)
-  assert.match(workbench, /mentionOnInput\('mcp__'\)/)
-  assert.match(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return mcpTools/)
+  assert.match(workbench, /mentionScope\.value = 'mcp'/)
+  assert.match(workbench, /if \(scope === 'mcp' \|\| query\.trim\(\)\.startsWith\('mcp__'\)\) return mcpTools/)
   assert.doesNotMatch(workbench, /if \(query\.trim\(\)\.startsWith\('mcp__'\)\) return \[\.\.\.skills/)
 })
 

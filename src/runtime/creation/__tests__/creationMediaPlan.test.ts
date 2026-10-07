@@ -1213,9 +1213,8 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
   )
 })
 
-test('灵动分组排在视频最前，视频默认就是 Sd 2.5 480P', () => {
-  // 面板默认模型 = 当前任务第一条可用模型（useCreation 里 `availableModels[0]`），
-  // 所以「组排最前」+「组内第一条」共同决定默认值 —— 两处都钉住，免得以后静默漂移。
+test('FK 分组排在视频最前，灵动组内首个模型仍为 Sd 2.5 480P', () => {
+  // 用户已将 FK 置顶；同时保留灵动组内既有排序。
   const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
   const start = panel.indexOf("cpState.task === 'video'")
   // 数组字面量里夹了注释，先剔掉注释行再断言第一条
@@ -1224,7 +1223,7 @@ test('灵动分组排在视频最前，视频默认就是 Sd 2.5 480P', () => {
     .split('\n')
     .filter(line => !line.trim().startsWith('//'))
     .join('\n')
-  assert.match(videoOrder, /\[\s*'满血seedance2\.5'/)
+  assert.match(videoOrder, /\[\s*'FK-Seedance', '满血seedance2\.5'/)
 
   const lingdong = listCreationModels({ task: 'video' })
     .filter(model => model.id.startsWith('newapi/lingdong/'))

@@ -51,8 +51,8 @@ test('file tree locate scrolls the target into view and explains a miss', () => 
   assert.match(tree, /if \(owner && projectKey\.value && owner !== projectKey\.value\) return/)
   assert.match(tree, /void locateProjectResource\(String\(path\), Boolean\(payload\?\.quiet\)\)/)
 
-  // 生成物落进项目后自动定位：三条落盘路径（Web 导入、桌面直写、桌面下载）都调它。
+  // 生成物落进项目后自动定位：文本保存和三条媒体落盘路径都调它。
   assert.match(store, /function revealMediaResultInFileTree\(task: MediaTask\)/)
   assert.match(store, /quiet: true,/)
-  assert.equal((store.match(/revealMediaResultInFileTree\(task\)/g) || []).length, 3)
+  assert.equal((store.match(/revealMediaResultInFileTree\(task\)/g) || []).length, 4)
 })

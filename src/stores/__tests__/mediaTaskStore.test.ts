@@ -413,6 +413,9 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
     _timeout?: number,
     ...args: unknown[]
   ) => {
+    // Advance polling waits, but keep HTTP deadlines real: extra awaits must
+    // not make a successful mocked request abort in the next microtask.
+    if ((_timeout || 0) >= 60_000) return previousSetTimeout(handler, _timeout, ...args)
     queueMicrotask(() => handler(...args))
     return 0
   }

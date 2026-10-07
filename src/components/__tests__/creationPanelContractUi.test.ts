@@ -104,7 +104,7 @@ test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () =>
   // 选应用时把画幅与时长种成统一值
   assert.match(source, /setModelFieldValue\(ratioField, preferredRatio\.value\)/)
   assert.match(source, /setModelFieldValue\(durationField, H3_DURATION_DEFAULT\)/)
-  assert.match(source, /field\.label === '戏种' \|\| \/mode\/i\.test\(field\.key\)/)
+  assert.match(source, /field\.label === '戏种'[\s\S]{0,160}field\.key === '65:index'[\s\S]{0,160}\/mode\/i\.test\(field\.key\)/)
   assert.match(source, /label: '文戏'/)
   assert.match(source, /label: '武戏'/)
   // H3 不预填工作流自带的示例提示词
@@ -996,10 +996,11 @@ test('creation panel lets a remote successful result be saved into its project',
   assert.match(retry, /!task\.assetUri/)
   assert.match(retry, /isTauriRuntime\(\) \|\| Boolean\(task\.projectId\)/)
   assert.match(retry, /await mediaTaskStore\.retryMediaPersistence\(task\.id\)/)
-  assert.match(
-    source,
-    /v-if="canPersistMediaResult\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*\{\{ task\.downloadState[\s\S]{0,160}保存到项目[\s\S]{0,20}\}\}\s*<\/button>/,
-  )
+  const saveButton = source.match(/<button\s+v-if="canPersistMediaResult\(task\)"[\s\S]*?<\/button>/)?.[0] || ''
+  assert.match(saveButton, /@click="retryTaskPersistence\(task\)"/)
+  assert.match(saveButton, /task\.type === 'text' \? '保存为文档'/)
+  assert.match(saveButton, /task\.downloadState === 'paused' \? '继续下载'/)
+  assert.match(saveButton, /task\.assetStatus === 'failed' \? '重新下载' : '保存到项目'/)
   assert.match(
     source,
     /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| \(task\.resultUrl && !canPersistMediaResult\(task\)\)\)\s+"\s+@click="previewTask\(task\)"/,

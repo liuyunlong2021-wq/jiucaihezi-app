@@ -449,8 +449,8 @@ async function restoreComposerSkills(names?: string[], preference?: ManjuPrefere
   selectedSkillNames.value = restoreManjuSelection(names || [], preference).filter(name => available.has(name))
 }
 const mentionOpen = ref(false)
-// 从芯片排「@Skill」进入时只列 Skill；手打 @ 时仍给全套候选。
-const skillPickerOnly = ref(false)
+// 芯片入口只加载对应候选；手打 @ 时仍给全套候选。
+const mentionScope = ref<'all' | 'skill' | 'mcp'>('all')
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const projectActionPending = ref(false)
@@ -757,6 +757,17 @@ type MemoryMentionOption =
   | { type: 'skill'; display: string; description: string; name: string }
 
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
+  if (!mentionOpen.value) return []
+  const scope = mentionScope.value
+  const mcpByServer = new Map<string, number>()
+  for (const tool of mcpStore.allMcpTools || []) {
+    mcpByServer.set(tool.serverId, (mcpByServer.get(tool.serverId) || 0) + 1)
+  }
+  const mcpTools: MemoryMentionOption[] = [...mcpByServer.entries()].map(([serverId, count]) => ({
+    type: 'tool', id: `mcp__${serverId}`, display: `MCP · ${serverId}`,
+    description: `整体工具（${count} 个 operation）`, icon: 'extension',
+  }))
+  if (scope === 'mcp' || query.trim().startsWith('mcp__')) return mcpTools
   // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
@@ -769,6 +780,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
   ]
   const bundledSkills = await loadWebSkillCatalog().catch(() => [])
+  if (!mentionOpen.value || mentionScope.value !== scope) return []
   const skillOptions = [
     ...bundledSkills.map(skill => ({
       type: 'skill' as const,
@@ -793,7 +805,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     return true
   }))
   // 从芯片排的「@Skill」进来时只列 Skill：下面的芯片排已经有全部工具入口了。
-  if (skillPickerOnly.value) return skills
+  if (scope === 'skill') return skills
   const owner = projectOwner.value
   const resources = !owner ? [] : await (query.trim()
     ? files.searchPaths(owner, query.trim(), 40)
@@ -809,15 +821,6 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       description: resource.kind === 'media' ? '项目媒体' : '项目文件',
       resource,
     }))
-  const mcpByServer = new Map<string, number>()
-  for (const tool of mcpStore.allMcpTools || []) {
-    mcpByServer.set(tool.serverId, (mcpByServer.get(tool.serverId) || 0) + 1)
-  }
-  const mcpTools: MemoryMentionOption[] = [...mcpByServer.entries()].map(([serverId, count]) => ({
-    type: 'tool', id: `mcp__${serverId}`, display: `MCP · ${serverId}`,
-    description: `整体工具（${count} 个 operation）`, icon: 'extension',
-  }))
-  if (query.trim().startsWith('mcp__')) return mcpTools
   return query.trim() ? [...toolOptions, ...skills, ...mcpTools, ...projectOptions] : [...toolOptions, ...skills.slice(0, 5), ...mcpTools, ...projectOptions]
 }
 const mentionKey = (item: MemoryMentionOption) => item.type === 'tool'
@@ -1653,14 +1656,14 @@ function insertCommand(command: { id: string; label: string }) {
   if (command.id === 'av') avSelected.value = true
   if (command.id === 'scene3d') scene3dSelected.value = true
   if (command.id === 'skill') {
-    skillPickerOnly.value = true
+    mentionScope.value = 'skill'
     mentionOpen.value = true
     mentionOnInput('')
   }
   if (command.id === 'mcp') {
-    skillPickerOnly.value = false
+    mentionScope.value = 'mcp'
     mentionOpen.value = true
-    mentionOnInput('mcp__')
+    mentionOnInput('')
   }
   void nextTick(() => {
     resizeComposer()
@@ -1670,7 +1673,7 @@ function insertCommand(command: { id: string; label: string }) {
 
 function enableTool(id: string) {
   if (id === 'file') setPermissionTier('danger-full-access')
-  if (id === 'mcp') { mentionOpen.value = true; mentionOnInput('mcp__') }
+  if (id === 'mcp') insertCommand({ id: 'mcp', label: '@MCP' })
   if (id.startsWith('mcp__') && !selectedMcpToolNames.value.includes(id)) selectedMcpToolNames.value.push(id)
   if (id === 'media') mediaSelected.value = true
   if (id === 'av') avSelected.value = true
@@ -2683,7 +2686,7 @@ function handleComposerKeydown(event: KeyboardEvent) {
 
 function closeMention() {
   mentionOpen.value = false
-  skillPickerOnly.value = false
+  mentionScope.value = 'all'
   clearMentionFilter()
 }
 
@@ -2716,7 +2719,7 @@ async function selectMention(option: MemoryMentionOption) {
   } catch (cause) {
     error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
   } finally {
-    closeMention()
+    if (!(option.type === 'tool' && option.id === 'mcp')) closeMention()
     composerRef.value?.focus()
   }
 }
@@ -3848,7 +3851,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <div v-show="mentionOpen" ref="mentionPopoverRef" class="memory-mention-popover" @mousedown.prevent>
             <div v-if="!mentionFlat.length" class="memory-mention-empty">没有匹配项</div>
             <button
-              v-for="item in mentionFlat.slice(0, skillPickerOnly ? 40 : 12)"
+              v-for="item in mentionFlat.slice(0, mentionScope === 'skill' ? 40 : 12)"
               :key="mentionKey(item)"
               type="button"
               :class="{ active: mentionActive === mentionKey(item) }"
