@@ -131,3 +131,8 @@ test('Windows upgrade probe embeds the real app manifest into its isolated lib t
   assert.match(manifest, /Microsoft\.Windows\.Common-Controls/)
   assert.doesNotMatch(manifest, /outputresource:\$InstalledExe/)
 })
+
+test('existing-tag revalidation runs native probes and promotion despite skipped build ancestors', () => {
+  assert.match(workflow, /verify-native-upgrade:\n\s+needs: publish-download-manifest\n\s+if: always\(\) && needs\.publish-download-manifest\.result == 'success'/)
+  assert.match(workflow, /promote-updater:[\s\S]*?if: always\(\) && needs\.verify-native-upgrade\.result == 'success'/)
+})

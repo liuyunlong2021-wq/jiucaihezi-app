@@ -708,6 +708,7 @@ jobs:
 
   verify-native-upgrade:
     needs: publish-download-manifest
+    if: always() && needs.publish-download-manifest.result == 'success'
     strategy:
       fail-fast: false
       matrix:
@@ -751,7 +752,7 @@ jobs:
   promote-updater:
     needs: verify-native-upgrade
     # 首个接入版仅建立同版本基线；未来 B 必须显式推广。
-    if: github.ref == 'refs/tags/v2.2.22' || (inputs.promote_updater == true && inputs.publish_tag != '')
+    if: always() && needs.verify-native-upgrade.result == 'success' && (github.ref == 'refs/tags/v2.2.22' || (inputs.promote_updater == true && inputs.publish_tag != ''))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
