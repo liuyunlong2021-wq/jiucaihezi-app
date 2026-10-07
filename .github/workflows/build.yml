@@ -600,7 +600,10 @@ jobs:
           if (-not (Test-Path $zipPath) -or -not (Test-Path $setupPath)) { throw "Windows 发布资产缺失" }
           gh release upload $tag $zipPath $setupPath --clobber
           $hashPath = Join-Path $env:RUNNER_TEMP "native-windows-files.json"
-          node scripts/native-windows-fingerprint.mjs "src-tauri/target/x86_64-pc-windows-msvc/release" $hashPath
+          $payload = Join-Path $env:RUNNER_TEMP "native-final-payload"
+          & "$env:ProgramFiles\7-Zip\7z.exe" e -y $setupPath "jiucaihezi-app.exe" "-o$payload"
+          if ($LASTEXITCODE -ne 0) { throw "Cannot extract the final NSIS executable" }
+          node scripts/native-windows-fingerprint.mjs "src-tauri/target/x86_64-pc-windows-msvc/release" $hashPath (Join-Path $payload "jiucaihezi-app.exe")
           gh release upload $tag $hashPath --clobber
 
   publish-download-manifest:

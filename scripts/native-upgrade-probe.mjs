@@ -46,6 +46,12 @@ const digest = path => createHash('sha256').update(readFileSync(path)).digest('h
 // Windows install() 启动 NSIS 后退出测试子进程，父进程等待文件完成替换。
 if (process.platform === 'win32') {
   const hashes = JSON.parse(readFileSync(join(assets, 'native-windows-files.json'), 'utf8'))
+  // Tauri 在 NSIS 包内写入 NSS 标记，打包后将编译目录恢复成 UNK。
+  // 安装结果必须逐字节匹配最终签名安装器的 payload，而非恢复后的编译文件。
+  execFileSync(join(process.env.ProgramFiles, '7-Zip/7z.exe'), ['e', '-y', artifact, 'jiucaihezi-app.exe', `-o${expected}`], { stdio: 'inherit' })
+  const packagedExe = join(expected, 'jiucaihezi-app.exe')
+  if (!existsSync(packagedExe)) throw new Error('Final NSIS executable payload is missing')
+  hashes['jiucaihezi-app.exe'] = digest(packagedExe)
   const complete = () => Object.entries(hashes).every(([path, hash]) => {
     try { return digest(join(installed, path)) === hash } catch { return false }
   })
