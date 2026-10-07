@@ -15,7 +15,7 @@ try {
     if ($xml -notmatch 'Microsoft.Windows.Common-Controls' -or $xml -notmatch '6.0.0.0') {
         throw 'Baseline App manifest does not activate Common Controls v6'
     }
-    & $mt -nologo "-manifest:$manifest" "-outputresource:$TestExe;#1"
+    & $mt -nologo -manifest $manifest "-outputresource:$TestExe;#1"
     if ($LASTEXITCODE -ne 0) { throw 'Cannot embed the manifest into the isolated test host' }
     Write-Host 'Embedded baseline Common Controls v6 manifest into isolated test host'
 } finally {

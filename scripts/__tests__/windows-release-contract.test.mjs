@@ -129,6 +129,7 @@ test('Windows upgrade probe embeds the real app manifest into its isolated lib t
   assert.match(manifest, /inputresource:\$InstalledExe;#1/)
   assert.match(manifest, /outputresource:\$TestExe;#1/)
   assert.match(manifest, /Microsoft\.Windows\.Common-Controls/)
+  assert.match(manifest, /& \$mt -nologo -manifest \$manifest /)
   assert.doesNotMatch(manifest, /outputresource:\$InstalledExe/)
 })
 
