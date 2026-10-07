@@ -1084,6 +1084,7 @@ mod tests {
             method: Some("POST".into()),
             headers: Some(headers),
             body: None,
+            body_base64: None,
             timeout_secs: None,
         };
 
@@ -1100,6 +1101,7 @@ mod tests {
             method: Some("POST".into()),
             headers: Some(headers),
             body: None,
+            body_base64: None,
             timeout_secs: None,
         };
 
@@ -1115,6 +1117,7 @@ mod tests {
             method: Some("POST".into()),
             headers: Some(headers),
             body: None,
+            body_base64: None,
             timeout_secs: None,
         };
 

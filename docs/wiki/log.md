@@ -1,5 +1,10 @@
 # Wiki 操作日志
 
+## [2026-10-07] FK 本地参考图上传 Load failed 修复
+
+- 两张参考图的失败任务没有上游任务 ID；桌面 FormData 绕过原生 HTTP，WebView 上传遇到缺少允许来源头的跨域响应。已改为原生 multipart 二进制上传。
+- HTTP 13 项、Rust 上传 1 项、创作运行时 41 项回归及类型检查通过；公网素材上传/读回成功。当前发布 v2.2.18 尚不含修复，真实视频生成和安装版 UI 待验收。见 [[排障/FK参考图上传Load failed与桌面原生HTTP修复-2026-10-07]]。
+
 ## [2026-10-06] 发布修复 | v2.2.17 Intel DMG 创建 Resource busy
 
 - GitHub Actions run `37477588251` 中 ARM 与 Windows 成功；Intel 构建、签名完成后，`Create DMG (Intel, headless)` 的 `hdiutil create` 以 `Resource busy` 失败，导致 Intel 公证、产物和 `publish-download-manifest` 跳过。

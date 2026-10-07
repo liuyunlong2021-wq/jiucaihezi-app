@@ -13,6 +13,7 @@ pub struct HttpRequest {
     pub method: Option<String>,
     pub headers: Option<HashMap<String, String>>,
     pub body: Option<String>,
+    pub body_base64: Option<String>,
     pub timeout_secs: Option<u64>,
 }
 
@@ -254,7 +255,12 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
         }
     }
 
-    if let Some(body) = request.body {
+    if let Some(body) = request.body_base64 {
+        let bytes = general_purpose::STANDARD
+            .decode(body)
+            .map_err(|_| "HTTP 二进制请求数据格式无效".to_string())?;
+        req = req.body(bytes);
+    } else if let Some(body) = request.body {
         req = req.body(body);
     }
 
@@ -762,6 +768,48 @@ pub async fn http_request_stream(
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[tokio::test]
+    async fn native_http_preserves_multipart_upload_bytes() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/api/creations/uploads", listener.local_addr().unwrap());
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 4096];
+            loop {
+                let count = stream.read(&mut buffer).unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(end) = request.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&request[..end]).to_lowercase();
+                    let length: usize = headers.lines().find_map(|line| line.strip_prefix("content-length: ")).unwrap().parse().unwrap();
+                    if request.len() >= end + 4 + length { break; }
+                }
+            }
+            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}").unwrap();
+            request
+        });
+        let mut body = b"--jc-boundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"reference.png\"\r\nContent-Type: image/png\r\n\r\n".to_vec();
+        body.extend_from_slice(&[0, 128, 255, 13, 10]);
+        body.extend_from_slice(b"\r\n--jc-boundary--\r\n");
+        let response = http_request(HttpRequest {
+            url, method: Some("POST".into()),
+            headers: Some(HashMap::from([
+                ("Content-Type".into(), "multipart/form-data; boundary=jc-boundary".into()),
+                ("Authorization".into(), "Bearer test-key".into()),
+            ])),
+            body: None, body_base64: Some(general_purpose::STANDARD.encode(&body)), timeout_secs: Some(5),
+        }).await.unwrap();
+        assert_eq!(response.status, 200);
+        let received = server.join().unwrap();
+        let end = received.windows(4).position(|part| part == b"\r\n\r\n").unwrap();
+        let headers = String::from_utf8_lossy(&received[..end]).to_lowercase();
+        assert!(headers.contains("multipart/form-data; boundary=jc-boundary"));
+        assert!(headers.contains("authorization: bearer test-key"));
+        assert_eq!(&received[end + 4..], body.as_slice());
+    }
 
     fn serve_once(response: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

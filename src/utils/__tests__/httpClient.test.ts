@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { isLocalLoopbackUrl, isLocalOllamaUrl, normalizeRustHttpRequest, shouldUseRustHttpBridge } from '../httpClient'
+import { isLocalLoopbackUrl, isLocalOllamaUrl, normalizeRustHttpRequest, serializeRustHttpBody, shouldUseRustHttpBridge } from '../httpClient'
 
 test('detects local loopback urls', () => {
   assert.equal(isLocalLoopbackUrl('http://127.0.0.1:17880/v1/chat/completions'), true)
@@ -46,6 +46,51 @@ test('never routes Tauri own endpoints through the rust bridge', () => {
   assert.equal(shouldUseRustHttpBridge('http://ipc.localhost/get_cli_api_key', { method: 'POST' }), false)
   assert.equal(shouldUseRustHttpBridge('http://tauri.localhost/index.html', { method: 'GET' }), false)
   assert.equal(shouldUseRustHttpBridge('http://asset.localhost/D%3A%5Cfoo.png', { method: 'GET' }), false)
+})
+
+test('Desktop reference uploads use native HTTP instead of WebView CORS', () => {
+  const form = new FormData()
+  form.append('file', new Blob([new Uint8Array([0, 128, 255])], { type: 'image/png' }), 'reference.png')
+  assert.equal(shouldUseRustHttpBridge('https://api.jiucaihezi.studio/api/creations/uploads', {
+    method: 'POST',
+    body: form,
+  }), true)
+  assert.equal(shouldUseRustHttpBridge('http://ipc.localhost/upload', { method: 'POST', body: form }), false)
+})
+
+test('native multipart serialization preserves binary files, fields, boundary and authorization', async () => {
+  const bytes = Uint8Array.from({ length: 70_000 }, (_, index) => index % 256)
+  const form = new FormData()
+  form.append('file', new Blob([bytes], { type: 'image/png' }), 'reference.png')
+  form.append('description', '参考图')
+  const encoded = await serializeRustHttpBody('https://api.jiucaihezi.studio/api/creations/uploads', {
+    method: 'POST', headers: { Authorization: 'Bearer test-key' }, body: form,
+  })
+  const headers = new Headers(encoded.headers)
+  assert.equal(headers.get('authorization'), 'Bearer test-key')
+  assert.match(headers.get('content-type') || '', /^multipart\/form-data; boundary=/)
+  assert.equal(encoded.body, undefined)
+  const decoded = Uint8Array.from(atob(encoded.body_base64!), char => char.charCodeAt(0))
+  const received = await new Response(decoded, { headers }).formData()
+  const file = received.get('file') as File
+  assert.equal(file.name, 'reference.png')
+  assert.equal(file.type, 'image/png')
+  assert.deepEqual(new Uint8Array(await file.arrayBuffer()), bytes)
+  assert.equal(received.get('description'), '参考图')
+})
+
+test('multipart Request normalization keeps non-UTF8 media bytes intact', async () => {
+  const bytes = new Uint8Array([0, 128, 255, 13, 10])
+  const form = new FormData()
+  form.append('file', new Blob([bytes]), 'reference.bin')
+  const request = new Request('https://api.jiucaihezi.studio/api/creations/uploads', { method: 'POST', body: form })
+  const normalized = await normalizeRustHttpRequest(request)
+  assert.equal(shouldUseRustHttpBridge(normalized.url, normalized.init), true)
+  const encoded = await serializeRustHttpBody(normalized.url, normalized.init)
+  const received = await new Response(Uint8Array.from(atob(encoded.body_base64!), char => char.charCodeAt(0)), {
+    headers: encoded.headers,
+  }).formData()
+  assert.deepEqual(new Uint8Array(await (received.get('file') as File).arrayBuffer()), bytes)
 })
 
 test('recognizes OpenCode global event GET as a streaming request', async () => {
