@@ -199,7 +199,7 @@ pub async fn desktop_update_check(window: WebviewWindow, app: AppHandle, state: 
         Ok(update) => {
             inner.status.version = update.as_ref().map(|u| u.version.clone());
             inner.status.notes = update.as_ref().and_then(|u| u.body.clone());
-            inner.status.phase = if update.is_some() { "available" } else { "idle" }.into();
+            inner.status.phase = if update.is_some() { "available" } else { "current" }.into();
             inner.update = update;
         }
         Err(error) => { inner.status.phase = "error".into(); inner.status.error = Some(error); }

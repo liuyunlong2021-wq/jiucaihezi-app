@@ -10,6 +10,7 @@ const outdir = join(tmpdir(), 'jc-focused-tests')
 
 const wave1FocusedTests = [
   'src/services/__tests__/desktopUpdatePreparation.test.ts',
+  'src/services/__tests__/desktopUpdater.test.ts',
   'src/components/canvas/__tests__/canvasDocument.test.ts',
   'src/components/canvas/__tests__/canvasCoordinates.test.ts',
   'src/components/canvas/__tests__/canvasAssetUrlResolver.test.ts',

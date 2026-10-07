@@ -1333,6 +1333,8 @@ pub(crate) fn spawn_workbench_window(
     label: &str,
     workspace: Option<&str>,
 ) -> Result<String, String> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    let _update_task = commands::desktop_update::native_task(app)?;
     let config = workbench_window_config(app, label, workspace)?;
     let window =
         build_workbench_window(app, &config, workspace).map_err(|error| error.to_string())?;

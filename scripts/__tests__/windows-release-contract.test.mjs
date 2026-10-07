@@ -106,3 +106,10 @@ test('Storyboarder assets are fetchable and included in the Windows portable zip
     'storyboarder/models/child.glb',
   ]) assert.ok(workflow.includes(`"${path}"`), path)
 })
+
+test('every new workbench constructor holds the native task gate until attachment completes', () => {
+  const body = rustApp.match(/pub\(crate\) fn spawn_workbench_window\([\s\S]*?\n\}/)?.[0]
+  assert.ok(body)
+  assert.match(body, /let _update_task = commands::desktop_update::native_task\(app\)\?;/)
+  assert.ok(body.indexOf('native_task(app)') < body.indexOf('build_workbench_window'))
+})
