@@ -675,6 +675,11 @@ jobs:
           STAGE="/opt/updates/.candidate-${VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           # 摘要覆盖所有最终安装包和签名；清单按同文件系统 rename 推广。
           (cd "$ASSET_DIR" && sha256sum -- ./*.dmg ./*.exe ./*.app.tar.gz ./*.sig > SHA256SUMS)
+          if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "test -d '/opt/updates/$VERSION'"; then
+            # 已发布目录直接核验不可变字节，重跑验收不再传输整套安装包。
+            ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "cd '/opt/updates/$VERSION' && sha256sum -c -" < "$ASSET_DIR/SHA256SUMS"
+          else
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '$STAGE'"
           scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ASSET_DIR/"* "${DEPLOY_USER}@${DEPLOY_HOST}:$STAGE/"
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
@@ -692,6 +697,7 @@ jobs:
             mv "$stage" "$final"
           fi
           REMOTE
+          fi
           node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR"
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "bash -s /opt/updates '$VERSION' downloads" < scripts/promote-updates.sh
@@ -708,7 +714,7 @@ jobs:
         include:
           - { os: macos-latest, package: _aarch64.app.tar.gz, baseline: _aarch64.app.tar.gz }
           - { os: macos-15-intel, package: _x64.app.tar.gz, baseline: _x64.app.tar.gz }
-          - { os: windows-latest, package: '*_x64_windows_setup.exe', baseline: '*_x64_windows_setup.exe' }
+          - { os: windows-2022, package: '*_x64_windows_setup.exe', baseline: '*_x64_windows_setup.exe' }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

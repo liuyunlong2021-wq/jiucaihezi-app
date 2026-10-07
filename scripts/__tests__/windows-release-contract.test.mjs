@@ -120,3 +120,14 @@ test('native screenshot session owns its update lease until capture, annotation,
   assert.match(screenshot, /async fn begin\([\s\S]*?let update_task = super::desktop_update::native_task\(&app\)\?;/)
   assert.match(screenshot, /state\.active = Some\(Active \{[\s\S]*?update_task,/)
 })
+
+test('Windows upgrade probe embeds the real app manifest into its isolated lib test executable', () => {
+  const probe = readFileSync('scripts/native-upgrade-probe.mjs', 'utf8')
+  assert.match(probe, /--no-run/)
+  assert.match(probe, /prepare-windows-upgrade-test\.ps1/)
+  const manifest = readFileSync('scripts/prepare-windows-upgrade-test.ps1', 'utf8')
+  assert.match(manifest, /inputresource:\$InstalledExe;#1/)
+  assert.match(manifest, /outputresource:\$TestExe;#1/)
+  assert.match(manifest, /Microsoft\.Windows\.Common-Controls/)
+  assert.doesNotMatch(manifest, /outputresource:\$InstalledExe/)
+})

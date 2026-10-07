@@ -28,9 +28,20 @@ if (process.platform === 'darwin') {
   exe = join(installed, 'jiucaihezi-app.exe')
 } else throw new Error('Native probe requires macOS or Windows')
 if (!existsSync(exe)) throw new Error('Baseline installer did not create executable')
-execFileSync('cargo', ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', 'native_release_upgrade', '--', '--ignored', '--nocapture'], {
-  stdio: 'inherit', env: { ...process.env, JC_UPGRADE_INSTALLED_EXE: exe, JC_UPGRADE_PACKAGE: artifact, JC_UPGRADE_VERSION: version, JC_UPGRADE_OLD_VERSION: baseline }, timeout: 45 * 60 * 1000,
-})
+const testEnv = { ...process.env, JC_UPGRADE_INSTALLED_EXE: exe, JC_UPGRADE_PACKAGE: artifact, JC_UPGRADE_VERSION: version, JC_UPGRADE_OLD_VERSION: baseline }
+const cargoArgs = ['test', '--manifest-path', 'src-tauri/Cargo.toml', '--lib', 'native_release_upgrade']
+if (process.platform === 'win32') {
+  const output = execFileSync('cargo', [...cargoArgs, '--no-run', '--message-format=json'], {
+    encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'], maxBuffer: 16 * 1024 * 1024, timeout: 45 * 60 * 1000,
+  })
+  const testExecutable = output.trim().split(/\r?\n/).map(line => JSON.parse(line))
+    .find(item => item.reason === 'compiler-artifact' && item.profile?.test && item.target?.name === 'jiucaihezi_app_lib' && item.executable)?.executable
+  if (!testExecutable) throw new Error('Cargo did not report the isolated Windows lib test executable')
+  execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/prepare-windows-upgrade-test.ps1', '-TestExe', testExecutable, '-InstalledExe', exe], { stdio: 'inherit' })
+  execFileSync(testExecutable, ['native_release_upgrade', '--ignored', '--nocapture'], { stdio: 'inherit', env: testEnv, timeout: 20 * 60 * 1000 })
+} else {
+  execFileSync('cargo', [...cargoArgs, '--', '--ignored', '--nocapture'], { stdio: 'inherit', env: testEnv, timeout: 45 * 60 * 1000 })
+}
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex')
 // Windows install() 启动 NSIS 后退出测试子进程，父进程等待文件完成替换。
 if (process.platform === 'win32') {
