@@ -14,6 +14,8 @@ pub mod session;
 pub mod skill_material;
 pub mod tools;
 pub mod workspace;
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+pub mod desktop_update;
 
 #[cfg(any(target_os = "windows", target_os = "macos"))]
 pub mod screenshot;

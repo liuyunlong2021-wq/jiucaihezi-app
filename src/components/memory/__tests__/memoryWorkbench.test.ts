@@ -631,7 +631,7 @@ test('memory messages expose one copy action and project GLB files use the share
 
 test('memory opens the latest conversation and keeps message actions at the bottom', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /const latest = conversations\.value\.at\(-1\)/)
+  assert.match(workbench, /conversations\.value\.at\(-1\)/)
   assert.match(workbench, /listHarnessConversationCatalog\(owner\)/)
   assert.match(workbench, /class="memory-message-actions"/)
   assert.match(workbench, /\.memory-message-actions \{ display: flex; align-items: center; justify-content: flex-end;/)
@@ -1191,7 +1191,7 @@ test('memory settings show the build version at the bottom', () => {
   assert.match(settings, /const appVersion = __APP_VERSION__/)
   assert.match(
     settings,
-    /<footer class="memory-settings-version">版本 \{\{ appVersion \}\}<\/footer>/,
+    /<footer class="memory-settings-version">[\s\S]*版本 \{\{ desktopRuntime \? desktopUpdateStatus.currentVersion \|\| appVersion : appVersion \}\}/,
   )
 })
 
@@ -1646,7 +1646,7 @@ test('a workspace opens in its own window and never twice', () => {
   assert.match(lib, /state_path\.exists\(\) \|\| label != "main"/)
   // 关掉一个窗口要收掉它名下的 runner：应用还活着，退出路径不会跑，而它会一直握着会话的
   // 跨进程内核写锁。
-  assert.match(lib, /WindowEvent::Destroyed[\s\S]{0,240}reap_window_stdio_processes/)
+  assert.match(lib, /WindowEvent::Destroyed[\s\S]{0,420}reap_window_stdio_processes/)
 })
 
 test('同一个工作区不会同时被两个窗口打开', () => {

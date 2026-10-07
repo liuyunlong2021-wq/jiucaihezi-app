@@ -142,6 +142,8 @@ import { setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
 import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
+import { registerUpdateParticipant, desktopUpdateStatus, updateDraftKey } from '@/services/desktopUpdater'
+import { stopDeepSeekHarness } from '@/services/deepSeekHarness'
 
 const projectStore = useProjectStore()
 const agentStore = useAgentStore()
@@ -153,6 +155,31 @@ const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
 const mobileRuntime = isTauriMobileRuntime()
 const desktopOnlyRuntime = desktopRuntime && !mobileRuntime
+const updateSaveErrors = { scene: '', projectMap: '' }
+const stopUpdateParticipant = registerUpdateParticipant({
+  busy: () => {
+    if ([...runs.values()].some(run => run.phase === 'running') || sendInFlight.value) return '还有对话任务正在运行'
+    if (mediaTaskStore.hasRunning || mediaTaskStore.pendingTasks.length) return '还有媒体任务正在运行或等待恢复'
+    if (recordingScene.value || sceneInstructionSending.value || fileWritePending.value || markdownSavePending.value || conversationSplitBusy.value || creationClosing.value) return '还有录制、文件写入或保存操作正在进行'
+    return ''
+  },
+  save: async () => {
+    await Promise.all([sceneSaveQueue, projectMapSaveQueue, mediaTaskStore.flushPersistence()])
+    const failedSave = updateSaveErrors.scene || updateSaveErrors.projectMap
+    if (failedSave) throw new Error(failedSave)
+    if (editingMarkdown.value) {
+      await saveMarkdownEdit()
+      if (markdownSaveError.value || editingMarkdown.value) throw new Error(markdownSaveError.value || '编辑内容尚未保存')
+    }
+    await creationPanelRef.value?.flushCanvasSave?.()
+    localStorage.setItem(await updateDraftKey(projectOwner.value), JSON.stringify({
+      path: conversation.value?.resource.path, text: input.value, editingTurnId: editingTurnId.value,
+      attachments: attachments.value.map(({ previewUrl, ...attachment }) => attachment), referencedFiles: referencedFiles.value,
+      skillNames: selectedSkillNames.value,
+    }))
+  },
+  close: () => stopDeepSeekHarness(true),
+})
 const loadCreationPanel = () => import('@/components/creation/CreationPanel.vue')
 const CreationPanel = defineAsyncComponent(loadCreationPanel)
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
@@ -1116,6 +1143,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopUpdateParticipant()
   screenshotBridgeUnmounted = true
   stopScreenshotBridge?.()
   setHarnessSceneRecorder()
@@ -1329,9 +1357,23 @@ async function openProject(owner: string) {
     }
     const entries = listHarnessConversationCatalog(owner)
     conversations.value = entries.map(entry => conversationFromCatalog(entry, legacyById.get(entry.conversationId)))
-    const latest = conversations.value.at(-1) || conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
+    let updateResume: { path?: string; text?: string; editingTurnId?: string; skillNames?: string[]; referencedFiles?: DirectMessageFile[]; attachments?: ResolvedDirectAttachment[] } | undefined
+    const resumeKey = desktopOnlyRuntime ? await updateDraftKey(owner) : `jc:update-resume:${owner}`
+    try { updateResume = JSON.parse(localStorage.getItem(resumeKey) || 'null') || undefined } catch { /* keep corrupt snapshot for diagnosis */ }
+    const latest = conversations.value.find(item => item.resource.path === updateResume?.path)
+      || conversations.value.at(-1) || conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
     if (!conversations.value.length) conversations.value.push(latest)
     await selectConversation(latest)
+    if (updateResume && generation === projectGeneration) {
+      input.value = updateResume.text || ''
+      editingTurnId.value = updateResume.editingTurnId || ''
+      if (updateResume.skillNames) selectedSkillNames.value = updateResume.skillNames
+      if (updateResume.referencedFiles) referencedFiles.value = updateResume.referencedFiles
+      if (updateResume.attachments) attachments.value = updateResume.attachments.map(attachment => ({ ...attachment }))
+      setEditorText(composerRef.value, input.value)
+      resizeComposer()
+      localStorage.removeItem(resumeKey)
+    }
     void projectTextSync.open(owner, projectStore.projectName.value).catch(() => {})
   } catch (cause) {
     if (generation !== projectGeneration) return
@@ -1952,10 +1994,12 @@ function saveProjectMap(next: JsonCanvasDocument) {
     const result = await files.writeText(current.resource, content, current.text.revision)
     if (result.status !== 'saved') {
       error.value = result.status === 'conflict' ? '项目地图已在其他位置修改，请关闭后重新打开' : '项目地图文件不存在'
+      updateSaveErrors.projectMap = error.value
       return
     }
     previewResource.value = { ...current, document: next, text: { ...current.text, content, revision: result.revision } }
-  }).catch(cause => { error.value = `项目地图保存失败：${cause instanceof Error ? cause.message : String(cause)}` })
+    updateSaveErrors.projectMap = ''
+  }).catch(cause => { error.value = `项目地图保存失败：${cause instanceof Error ? cause.message : String(cause)}`; updateSaveErrors.projectMap = error.value })
 }
 
 async function previewProjectResource(resource: ProjectResource) {
@@ -1972,6 +2016,10 @@ async function previewProjectResource(resource: ProjectResource) {
 }
 
 async function send(remoteText?: string) {
+  if (['preparing', 'installing'].includes(desktopUpdateStatus.value.phase)) {
+    error.value = '正在准备应用升级，请稍后再试'
+    return
+  }
   const remote = typeof remoteText === 'string'
   const active = conversation.value
   const message = (remote ? remoteText : input.value).trim()
@@ -3131,10 +3179,12 @@ function saveScene3D(next: Scene3DDocument) {
     const result = await files.writeText(current.resource, content, current.text.revision)
     if (result.status !== 'saved') {
       error.value = result.status === 'conflict' ? '白膜场景已在其他位置修改，请关闭后重新打开' : '白膜场景文件不存在'
+      updateSaveErrors.scene = error.value
       return
     }
     previewResource.value = { ...current, text: { ...current.text, content, revision: result.revision } }
-  }).catch(cause => { error.value = `白膜场景保存失败：${cause instanceof Error ? cause.message : String(cause)}` })
+    updateSaveErrors.scene = ''
+  }).catch(cause => { error.value = `白膜场景保存失败：${cause instanceof Error ? cause.message : String(cause)}`; updateSaveErrors.scene = error.value })
 }
 
 async function saveSceneScreenshot(blob: Blob, title: string) {

@@ -84,6 +84,8 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
             }
           } = {},
         ) {
+          if (command === 'desktop_update_task_begin') return 'update-task-fixture'
+          if (command === 'desktop_update_task_end') return
           if (command === 'retain_media_download_key') return '0'.repeat(64)
           if (command === 'get_media_download_key') return 'session-cloud'
           if (command === 'http_cancel_project_download') return
@@ -453,7 +455,7 @@ test('mediaTaskStore waits for initialization before submitting a new task', () 
 
   assert.match(
     source,
-    /async function submitTask\(params: MediaTaskSubmitParams\): Promise<string> \{\s+const capturedProjectId = captureWebCreationProjectId\(params\)\s+await init\(\)/,
+    /async function submitTaskAllowed\([\s\S]*?\): Promise<string> \{\s+await init\(\)/,
   )
 })
 
@@ -1741,7 +1743,7 @@ test(
 
 test('retry persistence holds the task in the active set while re-reading and downloading', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
-  const retry = source.match(/async function retryMediaPersistence\(taskId: string\): Promise<boolean> \{[\s\S]*?\n  \}/)?.[0] || ''
+  const retry = source.match(/async function retryMediaPersistenceAllowed\(taskId: string\): Promise<boolean> \{[\s\S]*?\n  \}/)?.[0] || ''
 
   assert.match(retry, /activeTaskIds\.value\.add\(task\.id\)/)
   assert.match(retry, /finally \{\s*\n?\s*activeTaskIds\.value\.delete\(task\.id\)/)

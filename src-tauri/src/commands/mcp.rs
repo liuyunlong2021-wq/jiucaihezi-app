@@ -79,6 +79,8 @@ pub async fn mcp_spawn_stdio(
     on_stderr: Channel<String>,
     on_exit: Channel<String>,
 ) -> Result<String, String> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    let _update_task = super::desktop_update::native_task(window.app_handle())?;
     let owner = Owner { window: window.label().to_string(), realm };
     let mut resolved_command = resolve_local_binary(&command);
     let mut resolved_args = args;

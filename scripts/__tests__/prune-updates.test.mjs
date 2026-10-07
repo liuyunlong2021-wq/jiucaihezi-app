@@ -60,3 +60,22 @@ test('prune-updates reads its target and keep count from arguments', noBash, () 
 
   assert.deepEqual(versionDirs(dir), ['1.10.0'])
 })
+
+test('prune-updates protects updater and previous stable versions independently of downloads', noBash, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jc-updates-'))
+  for (const version of ['1.0.0', '1.1.0', '1.2.0', '1.3.0', '1.4.0']) mkdirSync(join(dir, version))
+  writeFileSync(join(dir, 'latest.json'), JSON.stringify({ version: '1.2.0' }))
+  writeFileSync(join(dir, 'updater.json'), JSON.stringify({ version: '1.1.0' }))
+  writeFileSync(join(dir, 'updater-previous.json'), JSON.stringify({ version: '1.0.0' }))
+  execFileSync('bash', ['scripts/prune-updates.sh', dir, '1'])
+  assert.deepEqual(versionDirs(dir), ['1.0.0', '1.1.0', '1.2.0', '1.4.0'])
+})
+
+test('prune-updates refuses deletion when an existing update manifest is corrupt', noBash, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'jc-updates-'))
+  for (const version of ['1.0.0', '1.1.0', '1.2.0']) mkdirSync(join(dir, version))
+  writeFileSync(join(dir, 'latest.json'), JSON.stringify({ version: '1.2.0' }))
+  writeFileSync(join(dir, 'updater.json'), '{invalid')
+  assert.throws(() => execFileSync('bash', ['scripts/prune-updates.sh', dir, '1'], { stdio: 'pipe' }))
+  assert.deepEqual(versionDirs(dir), ['1.0.0', '1.1.0', '1.2.0'])
+})

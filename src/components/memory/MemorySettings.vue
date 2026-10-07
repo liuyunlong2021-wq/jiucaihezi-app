@@ -22,9 +22,11 @@ import {
 } from '@/services/newApiClient'
 import { projectTextSync, projectTextSyncStatus } from '@/services/projectTextSync'
 import { confirmAction } from '@/utils/confirmAction'
+import DesktopUpdateSettings from './DesktopUpdateSettings.vue'
+import { desktopUpdateStatus } from '@/services/desktopUpdater'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
-type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot'
+type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot' | 'update'
 
 const tab = ref<SettingsTab>('account')
 const apiKey = ref('')
@@ -259,6 +261,7 @@ function showSync() {
 <template>
   <div class="memory-settings">
     <nav class="memory-settings-tabs" aria-label="设置分类">
+      <button v-if="desktopRuntime" :class="{ active: tab === 'update' }" @click="tab = 'update'">更新<span v-if="desktopUpdateStatus.version"> ●</span></button>
       <button :class="{ active: tab === 'account' }" @click="tab = 'account'">
         <JcIcon name="person" />账号
       </button>
@@ -280,6 +283,7 @@ function showSync() {
       </button>
     </nav>
     <div class="memory-settings-body">
+      <DesktopUpdateSettings v-if="desktopRuntime && tab === 'update'" />
       <ScreenshotSettings v-if="screenshotRuntime && tab === 'screenshot'" />
       <div v-if="tab === 'account'" class="memory-account">
         <JcCloudLoginBox
@@ -466,7 +470,7 @@ function showSync() {
         </section>
       </div>
     </div>
-    <footer class="memory-settings-version">版本 {{ appVersion }}</footer>
+    <footer class="memory-settings-version">版本 {{ desktopRuntime ? desktopUpdateStatus.currentVersion || appVersion : appVersion }}<button v-if="desktopRuntime" @click="tab = 'update'">{{ desktopUpdateStatus.version ? '有新版本' : '检查更新' }}</button></footer>
   </div>
 </template>
 

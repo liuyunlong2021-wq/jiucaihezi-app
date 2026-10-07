@@ -1425,6 +1425,8 @@ fn attach_window_state(app: &tauri::AppHandle, window: &tauri::WebviewWindow, la
         // 窗口销毁：它名下的 runner 立刻就是孤儿。必须在应用还活着时就收 ——
         // 退出路径不会跑（应用没退），而它会一直握着会话的跨进程内核写锁。
         if matches!(event, tauri::WindowEvent::Destroyed) {
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::window_closed(w.app_handle(), &reap_label);
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             commands::screenshot::window_closed(&w.app_handle(), &reap_label);
             let reaped = commands::mcp::reap_window_stdio_processes(&reap_label);
@@ -1517,6 +1519,8 @@ pub fn run() {
     }
 
     let builder = tauri::Builder::default();
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    let builder = builder.manage(commands::desktop_update::DesktopUpdateState::default());
     // 单实例必须**最先**注册：第二个进程要把命令行与深链交给已有实例，然后自己退出。
     // 没有它，双击图标会起第二个完整进程——各自一份 Rust 全局状态、各自一份 runner，
     // 比多窗口更糟，而且用户看不到任何提示。
@@ -1556,6 +1560,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::setup(app.handle());
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             commands::screenshot::setup(app.handle())?;
             let app_data = app.path().app_data_dir()?;
@@ -1630,8 +1636,13 @@ pub fn run() {
             // ★ 手动建窗以挂载 on_navigation 拦截 NewAPI 登录回调。
             // 与「在新窗口打开工作区」共用 build_workbench_window：两处各写一份迟早漂移，
             // 而漂移的代价是登录回调在某一种窗口里变成打不开的死浏览器。
-            let main_config = workbench_window_config(app.handle(), "main", None)?;
-            let window = build_workbench_window(app.handle(), &main_config, None)?;
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            let resume = commands::desktop_update::resume_windows(app.handle());
+            #[cfg(any(target_os = "ios", target_os = "android"))]
+            let resume: Vec<(String, Option<String>)> = Vec::new();
+            let main_cwd = resume.iter().find(|(label, _)| label == "main").and_then(|(_, cwd)| cwd.as_deref());
+            let main_config = workbench_window_config(app.handle(), "main", main_cwd)?;
+            let window = build_workbench_window(app.handle(), &main_config, main_cwd)?;
 
             // ponytail: 照抄 OpenCode desktop/main/menu.ts — macOS 应用菜单
             #[cfg(target_os = "macos")]
@@ -1698,10 +1709,31 @@ pub fn run() {
             // ponytail: 照抄 OpenCode desktop/main/windows.ts — 窗口状态持久化
             // （每窗口一份文件 + 销毁时收 runner，见 `attach_window_state`）
             attach_window_state(app.handle(), &window, "main");
+            for (label, cwd) in &resume {
+                if label != "main" {
+                    if let Err(error) = spawn_workbench_window(app.handle(), label, cwd.as_deref()) {
+                        eprintln!("[updater] restore window {label}: {error}");
+                    }
+                }
+            }
 
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_status,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_check,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_download,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_install,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_ack,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_task_begin,
+            #[cfg(not(any(target_os = "ios", target_os = "android")))]
+            commands::desktop_update::desktop_update_task_end,
             #[cfg(any(target_os = "windows", target_os = "macos"))]
             commands::screenshot::screenshot_check,
             #[cfg(any(target_os = "windows", target_os = "macos"))]

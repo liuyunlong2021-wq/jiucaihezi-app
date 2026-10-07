@@ -199,7 +199,14 @@
           "screenshot_permission",
           "screenshot_begin",
           "screenshot_save_result",
-          "screenshot_validate_project"
+          "screenshot_validate_project",
+          "desktop_update_status",
+          "desktop_update_check",
+          "desktop_update_download",
+          "desktop_update_install",
+          "desktop_update_ack",
+          "desktop_update_task_begin",
+          "desktop_update_task_end"
         ],
         "deny": []
       }

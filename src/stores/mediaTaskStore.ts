@@ -1177,6 +1177,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   async function _resumePolling(task: MediaTask) {
+    const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
+    const release = await beginDesktopUpdateTask()
+    try { return await resumePollingAllowed(task) }
+    finally { await release() }
+  }
+
+  async function resumePollingAllowed(task: MediaTask) {
     if (!task.pollUrl || !task.pollKind) return
     if (activeTaskIds.value.has(task.id)) return
     activeTaskIds.value.add(task.id)
@@ -1273,6 +1280,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   // ─── 提交任务 (单一入口) ───
   async function submitTask(params: MediaTaskSubmitParams): Promise<string> {
     const capturedProjectId = captureWebCreationProjectId(params)
+    const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
+    const release = await beginDesktopUpdateTask()
+    try { return await submitTaskAllowed(params, release, capturedProjectId) }
+    catch (cause) { await release(); throw cause }
+  }
+
+  async function submitTaskAllowed(params: MediaTaskSubmitParams, release: () => Promise<void>, capturedProjectId: ReturnType<typeof captureWebCreationProjectId>): Promise<string> {
     await init()
     await validateTaskInputs(params)
     const projectId = requireWebCreationProjectId(params, capturedProjectId)
@@ -1330,7 +1344,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
 
     // Fire-and-forget: 立刻开始执行
-    _executeTask(taskId, params).catch(() => {
+    _executeTask(taskId, params).finally(release).catch(() => {
       /* 错误已在内部处理 */
     })
 
@@ -1360,6 +1374,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   async function retryMediaPersistence(taskId: string): Promise<boolean> {
+    const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
+    const release = await beginDesktopUpdateTask()
+    try { return await retryMediaPersistenceAllowed(taskId) }
+    finally { await release() }
+  }
+
+  async function retryMediaPersistenceAllowed(taskId: string): Promise<boolean> {
     const task = tasks.value.find(item => item.id === taskId)
     if (
       !task ||
@@ -1461,6 +1482,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   async function refreshTaskResult(taskId: string): Promise<boolean> {
+    const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
+    const release = await beginDesktopUpdateTask()
+    try { return await refreshTaskResultAllowed(taskId) }
+    finally { await release() }
+  }
+
+  async function refreshTaskResultAllowed(taskId: string): Promise<boolean> {
     const task = tasks.value.find(item => item.id === taskId)
     if (!task || !canRefreshTaskResult(task) || activeTaskIds.value.has(task.id)) return false
     const controller = new AbortController()
@@ -1521,6 +1549,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   async function addTaskResultToCanvas(taskId: string, target: CanvasTaskTarget): Promise<boolean> {
+    const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
+    const release = await beginDesktopUpdateTask()
+    try { return await addTaskResultToCanvasAllowed(taskId, target) }
+    finally { await release() }
+  }
+
+  async function addTaskResultToCanvasAllowed(taskId: string, target: CanvasTaskTarget): Promise<boolean> {
     const task = tasks.value.find(item => item.id === taskId)
     if (!task || task.source !== 'creation' || task.status !== 'success' || task.type === 'model3d')
       return false
@@ -1762,6 +1797,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   return {
+    flushPersistence: () => queueTaskPersistence(),
     tasks,
     runningTasks,
     pendingTasks,

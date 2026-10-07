@@ -1109,7 +1109,7 @@ test('submitted or failed video tasks can query the upstream result without resu
   assert.match(store, /canRefreshTaskResult,\n    init,/)
   assert.match(store, /refreshTaskResult,\n    retryMediaPersistence,/)
 
-  const refresh = store.match(/async function refreshTaskResult\(taskId: string\)[\s\S]*?\n  \}/)?.[0] || ''
+  const refresh = store.match(/async function refreshTaskResultAllowed\(taskId: string\)[\s\S]*?\n  \}/)?.[0] || ''
   assert.ok(refresh, 'refreshTaskResult body should be found')
   assert.doesNotMatch(refresh, /submitTask|generateVideo|generateImage|generateAudio/)
   assert.match(refresh, /await completeMediaTask\(task, mediaUrl, 'refresh-result'\)/)

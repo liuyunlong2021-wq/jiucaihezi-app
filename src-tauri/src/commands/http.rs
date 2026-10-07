@@ -538,6 +538,8 @@ pub async fn http_download_to_project(
     request: HttpDownloadToProjectRequest,
     on_progress: Channel<super::media_download::Progress>,
 ) -> Result<HttpDownloadToProjectResponse, String> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    let _update_task = super::desktop_update::native_task(&app)?;
     download_to_project(request, Some(app), Some(on_progress)).await
 }
 

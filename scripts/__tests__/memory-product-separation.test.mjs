@@ -40,7 +40,7 @@ test('memory product keeps its entry, release identity, and desktop release jobs
   assert.match(app, /<MemoryWorkbench \/>/)
   assert.equal(desktop.identifier, 'com.jiucaihezi.desktop')
   assert.deepEqual(desktop.plugins['deep-link'].desktop.schemes, ['jiucaihezi'])
-  assert.equal(desktop.plugins.updater, undefined)
+  assert.deepEqual(desktop.plugins.updater.endpoints, ['https://api.jiucaihezi.studio/updates/updater.json'])
   assert.equal(ios.identifier, 'com.jiucaihezi.mobile')
   for (const job of ['macos-arm:', 'macos-intel:', 'windows:']) assert.match(workflow, new RegExp(`^  ${job}`, 'm'))
   assert.match(workflow, /needs: \[macos-arm, macos-intel, windows\]/)

@@ -1,6 +1,6 @@
 [package]
 name = "jiucaihezi-app"
-version = "2.2.19"
+version = "2.2.20"
 description = "韭菜盒子 — 你的本地 AI 工作台"
 authors = ["you"]
 edition = "2024"
@@ -48,6 +48,7 @@ tauri-plugin-opener = "2.5.4"
 # 单实例：没有它，双击图标会起第二个完整进程（各自一份 runner 与 Rust 全局状态）。
 # `deep-link` 特性让第二个进程把登录回调 URL 交给已有实例，否则第二次登录会丢回调。
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+tauri-plugin-updater = "=2.12.0"
 anydoc = "=0.2.3"
 arboard = "3"
 rfd = "0.15"
@@ -66,6 +67,7 @@ xcap = "=0.6.2"
 
 [dev-dependencies]
 tempfile = "3"
+tauri = { version = "2", features = ["test"] }
 
 [patch.crates-io]
 # Temporary iOS compatibility patch. Remove once Tauri/Wry releases the upstream fix for #14675.

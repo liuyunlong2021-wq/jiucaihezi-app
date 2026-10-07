@@ -22,11 +22,12 @@ test('Windows release config installs WebView2 through the NSIS installer', () =
   assert.match(workflow, /gh release upload \$tag \$zipPath \$setupPath --clobber/)
 })
 
-test('disabled updater cannot panic application startup', () => {
-  assert.equal(tauriConfig.plugins.updater, undefined)
-  assert.doesNotMatch(rustApp, /tauri_plugin_updater/)
-  assert.doesNotMatch(rustManifest, /tauri-plugin-updater/)
-  assert.equal(packageManifest.dependencies['@tauri-apps/plugin-updater'], undefined)
+test('desktop updater registers safely and retains native startup checks', () => {
+  assert.match(tauriConfig.plugins.updater.pubkey, /^[A-Za-z0-9+/=]+$/)
+  assert.deepEqual(tauriConfig.plugins.updater.endpoints, ['https://api.jiucaihezi.studio/updates/updater.json'])
+  assert.equal(tauriConfig.plugins.updater.windows.installMode, 'passive')
+  assert.match(rustApp, /commands::desktop_update::setup/)
+  assert.match(rustManifest, /tauri-plugin-updater/)
   assert.match(workflow, /Smoke test — Windows app startup/)
   assert.match(workflow, /Start-Process[\s\S]*jiucaihezi-app\.exe/)
   assert.match(workflow, /HasExited/)
@@ -42,7 +43,7 @@ test('desktop release creation and public download manifest are independent from
   const downloadJob = workflow.match(/\n  publish-download-manifest:[\s\S]*$/)?.[0]
   assert.ok(downloadJob)
   assert.doesNotMatch(downloadJob, /&& false/)
-  assert.doesNotMatch(downloadJob, /SIGNING_PRIVATE_KEY|signature/)
+  assert.match(downloadJob, /updater\.json/)
   assert.match(downloadJob, /gh release download/)
   assert.match(downloadJob, /inputs\.publish_tag \|\| github\.ref_name/)
   assert.match(downloadJob, /\/opt\/updates\/latest\.json/)

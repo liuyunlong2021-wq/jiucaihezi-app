@@ -185,7 +185,12 @@ export function createDesktopConversationHost(execute: RemoteExecution = execute
   return new DesktopRemoteHost({
     getContext: desktopConversationContext,
     readSession: readDesktopConversationSession,
-    sendMessage: async text => startDesktopRemoteTextRun(text, execute),
+    sendMessage: async text => {
+      const { beginDesktopUpdateTask } = await import('./desktopUpdater')
+      const release = await beginDesktopUpdateTask()
+      try { return startDesktopRemoteTextRun(text, execute) }
+      finally { await release() }
+    },
     stopRun: async () => {
       const run = selectedRun()
       if (run) stopRun(run)

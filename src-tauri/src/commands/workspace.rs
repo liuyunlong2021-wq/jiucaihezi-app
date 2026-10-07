@@ -56,6 +56,8 @@ fn focus_window(app: &tauri::AppHandle, label: &str) {
 /// 登记表而不是 label：窗口可以在里面换工作区，label 会与它显示的东西脱钩。
 #[tauri::command]
 pub async fn open_workspace_window(app: tauri::AppHandle, cwd: String) -> Result<String, String> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    super::desktop_update::ensure_task_allowed(&app)?;
     if cwd.trim().is_empty() {
         return Err("工作区路径为空".to_string());
     }
@@ -80,6 +82,8 @@ pub async fn open_workspace_window(app: tauri::AppHandle, cwd: String) -> Result
 /// 之前 ⌘⇧N 做的是「把当前工作区在新窗口打开」，用户看到的就是一个一模一样的窗口。
 #[tauri::command]
 pub async fn open_new_window(app: tauri::AppHandle) -> Result<String, String> {
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
+    super::desktop_update::ensure_task_allowed(&app)?;
     let label = crate::unbound_window_label(&app);
     crate::spawn_workbench_window(&app, &label, None)
 }

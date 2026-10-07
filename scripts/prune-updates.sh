@@ -18,13 +18,27 @@ DIR="${1:-/opt/updates}"
 KEEP="${2:-5}"
 
 case "$KEEP" in
-  '' | *[!0-9]*) echo "保留数量必须是正整数，收到：$KEEP" >&2; exit 2 ;;
+  '' | 0 | *[!0-9]*) echo "保留数量必须是正整数，收到：$KEEP" >&2; exit 2 ;;
 esac
 [ -d "$DIR" ] || { echo "目录不存在：$DIR" >&2; exit 1; }
 
-# latest.json 里的 version 就是当前在用的版本（CI 每次发布覆盖这个单文件）
-PINNED="$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
-  "$DIR/latest.json" 2>/dev/null | head -1 | sed 's/^v//')"
+# 完整解析已有清单，损坏时停止删除；未接入更新器的部署允许缺少 updater 文件。
+PINNED="$(python3 - "$DIR" <<'PY'
+import json, pathlib, re, sys
+root = pathlib.Path(sys.argv[1])
+for name in ('latest.json', 'updater.json', 'updater-previous.json'):
+    path = root / name
+    if not path.exists() and name != 'latest.json':
+        continue
+    try:
+        version = json.loads(path.read_text())['version'].removeprefix('v')
+        if not re.fullmatch(r'\d+\.\d+\.\d+', version):
+            raise ValueError('invalid version')
+        print(version)
+    except Exception:
+        sys.exit(f'无法解析 {name}，停止清理')
+PY
+)"
 
 versions="$(
   cd "$DIR" && ls -1d */ 2>/dev/null | sed 's#/$##' \
@@ -46,7 +60,7 @@ fi
 drop="$(
   printf '%s\n' "$versions" \
     | awk -v keep="$KEEP" '{ at[NR] = $0 } END { for (i = 1; i <= NR - keep; i++) print at[i] }' \
-    | grep -v -x -F "${PINNED:-__jc_no_pinned_version__}" || true
+    | grep -v -x -F "$PINNED" || true
 )"
 
 if [ -z "$drop" ]; then

@@ -1395,6 +1395,13 @@ async function alignSessionPermission(active: Runtime, sessionId: string, preset
 }
 
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
+  const { beginDesktopUpdateTask } = await import('./desktopUpdater')
+  const release = await beginDesktopUpdateTask()
+  try { return await runDeepSeekHarnessTask(input) }
+  finally { await release() }
+}
+
+async function runDeepSeekHarnessTask(input: DeepSeekHarnessInput): Promise<string> {
   if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
   const wireSessionId = deepSeekSessionId(input.sessionId)
   // 官方把「同一会话的并发 resume」划给调用方排除：resume 要先把会话的写所有权拿到手，
@@ -1557,10 +1564,14 @@ function stopRuntime(active: Runtime): Promise<void> {
   return active.closing
 }
 
-export async function stopDeepSeekHarness(): Promise<void> {
+export async function stopDeepSeekHarness(strict = false): Promise<void> {
   const slots = [...runtimes.entries()]
-  await Promise.allSettled(slots.map(async ([key, slot]) => {
+  const results = await Promise.allSettled(slots.map(async ([key, slot]) => {
     await stopRuntime(await slot.ready)
     if (runtimes.get(key) === slot) runtimes.delete(key)
   }))
+  if (strict) {
+    const failed = results.find(result => result.status === 'rejected')
+    if (failed?.status === 'rejected') throw failed.reason
+  }
 }

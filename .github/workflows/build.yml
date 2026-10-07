@@ -8,6 +8,15 @@ on:
         description: Existing release tag to republish downloads without rebuilding apps
         required: false
         type: string
+      promote_updater:
+        description: Promote this signed candidate after three-platform A-to-B upgrade acceptance
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: desktop-release-${{ github.ref_name }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -110,6 +119,30 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           node scripts/fix-macos-app.mjs "src-tauri/target/aarch64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+
+      - name: Notarize and staple final App (ARM)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+          ZIP="$RUNNER_TEMP/notary-app.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          accepted=false
+          for attempt in 1 2 3; do
+            if result=$(xcrun notarytool submit "$ZIP" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --timeout 30m --wait --output-format json); then
+              if [ "$(echo "$result" | jq -r '.status')" = Accepted ]; then accepted=true; break; fi
+              xcrun notarytool log "$(echo "$result" | jq -r '.id')" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+              exit 1
+            fi
+            sleep 30
+          done
+          [ "$accepted" = true ] || exit 1
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          codesign --verify --deep --strict "$APP"
 
       - name: Create DMG (ARM, headless)
         run: |
@@ -266,6 +299,30 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PASSWORD" "$KEYCHAIN" > /dev/null
           security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
           node scripts/fix-macos-app.mjs "src-tauri/target/x86_64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+
+      - name: Notarize and staple final App (Intel)
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+        run: |
+          set -euo pipefail
+          APP="src-tauri/target/x86_64-apple-darwin/release/bundle/macos/韭菜盒子.app"
+          ZIP="$RUNNER_TEMP/notary-app.zip"
+          ditto -c -k --keepParent "$APP" "$ZIP"
+          accepted=false
+          for attempt in 1 2 3; do
+            if result=$(xcrun notarytool submit "$ZIP" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD" --timeout 30m --wait --output-format json); then
+              if [ "$(echo "$result" | jq -r '.status')" = Accepted ]; then accepted=true; break; fi
+              xcrun notarytool log "$(echo "$result" | jq -r '.id')" --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" --password "$APPLE_APP_PASSWORD"
+              exit 1
+            fi
+            sleep 30
+          done
+          [ "$accepted" = true ] || exit 1
+          xcrun stapler staple "$APP"
+          xcrun stapler validate "$APP"
+          codesign --verify --deep --strict "$APP"
 
       - name: Create DMG (Intel, headless)
         run: |
@@ -534,6 +591,9 @@ jobs:
           $setupPath = "src-tauri\target\韭菜盒子_${tag}_x64_windows_setup.exe"
           if (-not (Test-Path $zipPath) -or -not (Test-Path $setupPath)) { throw "Windows 发布资产缺失" }
           gh release upload $tag $zipPath $setupPath --clobber
+          $hashPath = Join-Path $env:RUNNER_TEMP "native-windows-files.json"
+          node scripts/native-windows-fingerprint.mjs "src-tauri/target/x86_64-pc-windows-msvc/release" $hashPath
+          gh release upload $tag $hashPath --clobber
 
   publish-download-manifest:
     needs: [macos-arm, macos-intel, windows]
@@ -550,12 +610,20 @@ jobs:
       # 没有这一步 runner 上没有那个脚本，清理会失败（2026-09-29 前一直如此，
       # /opt/updates 因此攒了 20 个版本、3.1G）。
       - uses: actions/checkout@v4
-      - name: Publish desktop assets and public download manifest
+        with:
+          ref: ${{ inputs.publish_tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with: { node-version: '24' }
+      - name: Install official signature verifier
+        run: sudo apt-get update && sudo apt-get install -y minisign
+      - name: Publish signed candidates and public download manifest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           TAG="${{ inputs.publish_tag || github.ref_name }}"
@@ -566,7 +634,9 @@ jobs:
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$ASSET_DIR" \
             --pattern '*_aarch64.dmg' \
             --pattern '*_x64.dmg' \
-            --pattern '*_x64_windows_setup.exe'
+            --pattern '*_x64_windows_setup.exe' \
+            --pattern '*_aarch64.app.tar.gz' \
+            --pattern '*_x64.app.tar.gz'
 
           ARM_DMG=$(find "$ASSET_DIR" -maxdepth 1 -name '*_aarch64.dmg' -print -quit)
           INTEL_DMG=$(find "$ASSET_DIR" -maxdepth 1 -name '*_x64.dmg' -print -quit)
@@ -574,6 +644,17 @@ jobs:
           for asset in "$ARM_DMG" "$INTEL_DMG" "$WIN_INSTALLER"; do
             [ -f "$asset" ] || { echo "Missing release asset: $asset"; exit 1; }
           done
+
+          ARM_UPDATE="$ASSET_DIR/_aarch64.app.tar.gz"
+          INTEL_UPDATE="$ASSET_DIR/_x64.app.tar.gz"
+          # 重跑复用已签产物；同版本不覆盖已发布签名或文件字节。
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir "$ASSET_DIR" --pattern '*.sig' || true
+          node scripts/sign-updater.mjs "$VERSION" "$ARM_UPDATE" "$INTEL_UPDATE" "$WIN_INSTALLER"
+          for asset in "$ARM_UPDATE" "$INTEL_UPDATE" "$WIN_INSTALLER"; do
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' | grep -Fx "$(basename "$asset.sig")" >/dev/null || \
+              gh release upload "$TAG" "$asset.sig" --repo "$GITHUB_REPOSITORY"
+          done
+          node scripts/updater-manifest.mjs "$VERSION" "$ASSET_DIR/updater.json" "$ARM_UPDATE" "$INTEL_UPDATE" "$WIN_INSTALLER"
 
           BASE_URL="https://api.jiucaihezi.studio/updates/$VERSION"
           jq -n \
@@ -583,21 +664,100 @@ jobs:
             --arg intel "$BASE_URL/$(basename "$INTEL_DMG")" \
             --arg windows "$BASE_URL/$(basename "$WIN_INSTALLER")" \
             '{version:$version,notes:"更新内容见 GitHub Releases",pub_date:$published,platforms:{"darwin-aarch64":{url:$arm},"darwin-x86_64":{url:$intel},"windows-x86_64":{url:$windows}}}' \
-            > "$RUNNER_TEMP/latest.json"
+            > "$ASSET_DIR/latest.json"
 
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
-          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p /opt/updates/${VERSION}"
-          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
-            "$ARM_DMG" "$INTEL_DMG" "$WIN_INSTALLER" \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/${VERSION}/"
-          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no \
-            "$RUNNER_TEMP/latest.json" \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/latest.json"
-
-          # 新版本已经就位（上面的 scp 都成功了），顺手把旧版本删到只留最近 5 个。
-          # 每个版本 arm dmg 325M + intel dmg 18M + win setup 144M ≈ 487M，只增不减
-          # 会把服务器磁盘吃满；脚本里钉死了「不碰 latest.json、不碰它指向的版本」。
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "python3 -" < scripts/configure-updater-cache.py
+          STAGE="/opt/updates/.candidate-${VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          # 摘要覆盖所有最终安装包和签名；清单按同文件系统 rename 推广。
+          (cd "$ASSET_DIR" && sha256sum *.dmg *.exe *.app.tar.gz *.sig > SHA256SUMS)
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '$STAGE'"
+          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ASSET_DIR/"* "${DEPLOY_USER}@${DEPLOY_HOST}:$STAGE/"
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash -s -- '$STAGE' '$VERSION'" <<'REMOTE'
+          set -euo pipefail
+          stage="$1"; version="$2"; final="/opt/updates/$version"
+          exec 9>/opt/updates/.assets.lock; flock -x 9
+          (cd "$stage" && sha256sum -c SHA256SUMS)
+          if [ -d "$final" ]; then
+            # 已存在版本只允许相同字节，不能 clobber 已签名安装包。
+            (cd "$final" && sha256sum -c "$stage/SHA256SUMS")
+            cp "$stage/latest.json" "$stage/updater.json" "$final/"
+            rm -rf "$stage"
+          else
+            mv "$stage" "$final"
+          fi
+          REMOTE
+          node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR"
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash -s /opt/updates '$VERSION' downloads" < scripts/promote-updates.sh
+          # /opt/updates/latest.json 与 updater.json 分别原子推广；OTA 验收前只发布候选。
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no \
             "${DEPLOY_USER}@${DEPLOY_HOST}" "bash -s /opt/updates 5" \
             < scripts/prune-updates.sh
+
+  verify-native-upgrade:
+    needs: publish-download-manifest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: macos-latest, package: _aarch64.app.tar.gz, baseline: _aarch64.app.tar.gz }
+          - { os: macos-15-intel, package: _x64.app.tar.gz, baseline: _x64.app.tar.gz }
+          - { os: windows-latest, package: '*_x64_windows_setup.exe', baseline: '*_x64_windows_setup.exe' }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '24', cache: 'pnpm' }
+      - run: pnpm install
+      - run: pnpm run build:desktop:quick
+      - name: Download signed candidate and isolated baseline
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CANDIDATE_TAG: ${{ inputs.publish_tag || github.ref_name }}
+          PACKAGE: ${{ matrix.package }}
+          BASELINE: ${{ matrix.baseline }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/upgrade-assets" "$RUNNER_TEMP/baseline-assets"
+          gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/upgrade-assets" --pattern "$PACKAGE" --pattern "$PACKAGE.sig"
+          # 首次接入验证旧安装包的原位替换；A→B 点击和权限验收另行记录。
+          gh release download v2.2.19 --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/baseline-assets" --pattern "$BASELINE"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "$RUNNER_TEMP/baseline-assets/"*.exe "$RUNNER_TEMP/upgrade-assets/baseline_setup.exe"
+            gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/upgrade-assets" --pattern native-windows-files.json
+          else
+            cp "$RUNNER_TEMP/baseline-assets/$BASELINE" "$RUNNER_TEMP/upgrade-assets/baseline$BASELINE"
+          fi
+      - name: Verify official native installation, resources and startup
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ inputs.publish_tag || github.ref_name }}
+        run: node scripts/native-upgrade-probe.mjs "${CANDIDATE_TAG#v}" 2.2.19 "$RUNNER_TEMP/upgrade-assets"
+
+  promote-updater:
+    needs: verify-native-upgrade
+    # 首个接入版仅建立同版本基线；未来 B 必须显式推广。
+    if: github.ref == 'refs/tags/v2.2.20' || (inputs.promote_updater == true && inputs.publish_tag != '')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Atomically promote accepted OTA candidate
+        env:
+          CANDIDATE_TAG: ${{ inputs.publish_tag || github.ref_name }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          set -euo pipefail
+          VERSION="${CANDIDATE_TAG#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
+          KEY_PATH="$RUNNER_TEMP/deploy-key"
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_PATH"; chmod 600 "$KEY_PATH"
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "bash -s /opt/updates '$VERSION' updater" < scripts/promote-updates.sh

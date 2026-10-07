@@ -9,6 +9,7 @@ import { build } from 'esbuild'
 const outdir = join(tmpdir(), 'jc-focused-tests')
 
 const wave1FocusedTests = [
+  'src/services/__tests__/desktopUpdatePreparation.test.ts',
   'src/components/canvas/__tests__/canvasDocument.test.ts',
   'src/components/canvas/__tests__/canvasCoordinates.test.ts',
   'src/components/canvas/__tests__/canvasAssetUrlResolver.test.ts',
@@ -195,6 +196,9 @@ const externalNodeTests = [
   'scripts/__tests__/memory-product-separation.test.mjs',
   'scripts/__tests__/mobile-controller-dist.test.mjs',
   'scripts/__tests__/prune-updates.test.mjs',
+  'scripts/__tests__/updater-manifest.test.mjs',
+  'scripts/__tests__/updater-signature.test.mjs',
+  'scripts/__tests__/promote-updates.test.mjs',
   'scripts/__tests__/windows-release-contract.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]
