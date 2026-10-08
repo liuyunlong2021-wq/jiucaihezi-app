@@ -1953,11 +1953,12 @@ test('editing a turn restores the Skill it was sent with and keeps its reference
   assert.ok(editTurn, 'editTurn should exist')
   assert.ok(cancelEdit, 'cancelEdit should exist')
   // 轮次上存了 skillNames 就必须恢复：丢了它，模型重发时一个 skill-creator 工具都没有。
-  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames, currentManjuPreference\(\)\)/)
+  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames, currentManjuPreference\(\), currentNovelPreference\(\)\)/)
   assert.match(cancelEdit, /restoreComposerSkills\(latestUserTurnToolNames\(/)
-  assert.match(workbench, /async function restoreComposerSkills\(names\?: string\[\], preference\?: ManjuPreference\) \{/)
+  assert.match(workbench, /async function restoreComposerSkills\(/)
   // 恢复要过滤掉已卸载的 Skill：坏引用会污染整段会话的 Skill 加载。
-  assert.match(workbench, /restoreManjuSelection\(names \|\| \[\], preference\)\.filter\(name => available\.has\(name\)\)/)
+  assert.match(workbench, /restoreManjuSelection\(names \|\| \[\], manjuPreference\)/)
+  assert.match(workbench, /restoreNovelSelection\(/)
   // 引用文件已经跨轮保留，编辑时不该再把它清空。
   assert.doesNotMatch(editTurn, /referencedFiles\.value = \[\]/)
   assert.doesNotMatch(cancelEdit, /referencedFiles\.value = \[\]/)

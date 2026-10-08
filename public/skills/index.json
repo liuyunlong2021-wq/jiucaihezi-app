@@ -289,6 +289,581 @@
     }
   },
   {
+    "id": "jc-novel",
+    "name": "jc-novel",
+    "displayName": "jc-novel",
+    "description": "Use when 用户要创作长篇网文或连载小说——开新书、定核心梗、设计角色与世界观、出全书大纲、规划章纲、续写下一章、给已完成长篇做全稿复盘；产出写入项目 Wiki 的创作规划层与资产页，需要 wiki-memory 同时启用。触发词：小说、写小说、小说创作、长篇、网文、开新书、写书、续写下一章、小说大纲、章纲、核心梗、全稿复盘。不适用于短篇故事、短剧、漫剧、单张角色立绘或单张分镜。",
+    "triggers": [
+      "小说",
+      "写小说",
+      "小说创作",
+      "长篇",
+      "网文",
+      "开新书",
+      "写书",
+      "续写下一章",
+      "小说大纲",
+      "章纲",
+      "核心梗"
+    ],
+    "commands": [
+      "灵感策划: 启动阶段1：产出3-10个创意方案",
+      "检查落位: 读 wiki 索引，报告哪些规划页与资产页已存在、哪些还没建",
+      "市场分析: 启动阶段2：赛道定位 + 对标作品",
+      "核心梗: 启动阶段3：Logline公式 + 高概念",
+      "角色设计: 启动阶段4：主角/配角/反派 + 关系网",
+      "大纲: 启动阶段5：全书结构 + 情节节点",
+      "章纲: 启动阶段6：逐章详细规划",
+      "文案包装: 启动阶段7：书名/简介/标签",
+      "写正文: 启动阶段8：逐章催化剂选择 + 写作循环",
+      "续写下一章: 读索引 + 章纲 + 上一章分析页 → 催化剂选择 → 生成 → 确认 → 更新",
+      "复盘: 启动阶段9：全稿诊断报告"
+    ],
+    "files": [
+      "SKILL.md",
+      "references/engines/20个出圈反差人设库.md",
+      "references/engines/40卡板生成器.md",
+      "references/engines/BS2宏观骨架生成器.md",
+      "references/engines/CP化反系统.md",
+      "references/engines/Excel节奏量化器.md",
+      "references/engines/index.md",
+      "references/engines/一句话梗概生成器.md",
+      "references/engines/三层矛盾叠加器.md",
+      "references/engines/三段式文案结构器.md",
+      "references/engines/三段式结构设计器.md",
+      "references/engines/三维风险评估器.md",
+      "references/engines/主线大钩子分离器.md",
+      "references/engines/主角中心检查器.md",
+      "references/engines/人物关系与冲突网.md",
+      "references/engines/人物自检过滤器.md",
+      "references/engines/人设保护器.md",
+      "references/engines/人设化润色器.md",
+      "references/engines/伏笔管理器.md",
+      "references/engines/信息饱和度检查器.md",
+      "references/engines/共情算法与主角工程.md",
+      "references/engines/内线与主题审判器.md",
+      "references/engines/冲突三位一体构建器.md",
+      "references/engines/冲突自检雷达.md",
+      "references/engines/动作与对白生成器.md",
+      "references/engines/卖点数值化引擎.md",
+      "references/engines/卖点锚定检查器.md",
+      "references/engines/卡文急救包.md",
+      "references/engines/原型角色分配器.md",
+      "references/engines/原始动力扫描仪.md",
+      "references/engines/反派与障碍引擎.md",
+      "references/engines/反派阴谋生成器.md",
+      "references/engines/反讽钩子发生器.md",
+      "references/engines/发散穷举器.md",
+      "references/engines/四线对齐诊断器.md",
+      "references/engines/四要素公式检查器.md",
+      "references/engines/场景冲突填充器.md",
+      "references/engines/场景核心逻辑构建器.md",
+      "references/engines/场景模式管理+格式化+终检器.md",
+      "references/engines/场景符号标记器.md",
+      "references/engines/多频道AB测试器.md",
+      "references/engines/对比反差引擎.md",
+      "references/engines/屠龙宝刀三问法.md",
+      "references/engines/希区柯克悬念引擎.md",
+      "references/engines/底层代码检查器.md",
+      "references/engines/弹簧理论节奏控制器.md",
+      "references/engines/归因修正+格式化.md",
+      "references/engines/微型干扰植入器.md",
+      "references/engines/微观修辞升级器.md",
+      "references/engines/心理动力构建器.md",
+      "references/engines/心理弧光对齐器.md",
+      "references/engines/心理描写侧面化器.md",
+      "references/engines/情感数值化引擎.md",
+      "references/engines/情绪主题引擎.md",
+      "references/engines/情绪先行引擎.md",
+      "references/engines/情绪算法引擎.md",
+      "references/engines/情绪素材库匹配器.md",
+      "references/engines/情绪逻辑优先器.md",
+      "references/engines/折叠迭代器.md",
+      "references/engines/排毒自检过滤器.md",
+      "references/engines/救猫咪类型定锚器.md",
+      "references/engines/晚进早出切分器.md",
+      "references/engines/期待感管理引擎.md",
+      "references/engines/未完成态设计器.md",
+      "references/engines/核心梗公式化生成器.md",
+      "references/engines/核心梗前置器.md",
+      "references/engines/格式化输出+终检器.md",
+      "references/engines/模式管理器+格式化+终检器.md",
+      "references/engines/正负极卡点检查器.md",
+      "references/engines/游戏化剧情设计器.md",
+      "references/engines/潜文本设计器.md",
+      "references/engines/爆款迁移引擎.md",
+      "references/engines/特殊类型优化器.md",
+      "references/engines/确定性承诺器.md",
+      "references/engines/确定性承诺引擎.md",
+      "references/engines/积分预测算法器+格式化.md",
+      "references/engines/竞品爬虫分析器.md",
+      "references/engines/章纲自检过滤器.md",
+      "references/engines/终检器.md",
+      "references/engines/结构排毒自检器.md",
+      "references/engines/节奏润色器.md",
+      "references/engines/苏点优先原则.md",
+      "references/engines/英雄序列填充器.md",
+      "references/engines/被见证法则器.md",
+      "references/engines/视觉化锚点设计器.md",
+      "references/engines/视角信息差引擎.md",
+      "references/engines/视角修正器.md",
+      "references/engines/视角修正器_v2.md",
+      "references/engines/读者画像侧写师.md",
+      "references/engines/读者视角检查器.md",
+      "references/engines/质量自检过滤器.md",
+      "references/engines/跳笔剪辑引擎.md",
+      "references/engines/进阶修辞引擎.md",
+      "references/engines/连压预警器.md",
+      "references/engines/逆毛摸引擎+格式化.md",
+      "references/engines/避雷与修正器.md",
+      "references/engines/钩子类型管理+格式化.md",
+      "references/engines/钩子预埋系统.md",
+      "references/engines/颜色标注器.md",
+      "references/engines/风格一致性检查器.md",
+      "references/engines/风格化节奏控制器.md",
+      "references/engines/黄金三章黄金瞳.md",
+      "references/写作工作流.md",
+      "references/写作质量手册.md",
+      "references/建制阶段.md",
+      "references/核心机制.md",
+      "references/落位与提交.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "references/engines/20个出圈反差人设库.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/40卡板生成器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/BS2宏观骨架生成器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/CP化反系统.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/Excel节奏量化器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/index.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/一句话梗概生成器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/三层矛盾叠加器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/三段式文案结构器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/三段式结构设计器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/三维风险评估器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/主线大钩子分离器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/主角中心检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/人物关系与冲突网.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/人物自检过滤器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/人设保护器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/人设化润色器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/伏笔管理器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/信息饱和度检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/共情算法与主角工程.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/内线与主题审判器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/冲突三位一体构建器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/冲突自检雷达.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/动作与对白生成器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/卖点数值化引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/卖点锚定检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/卡文急救包.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/原型角色分配器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/原始动力扫描仪.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/反派与障碍引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/反派阴谋生成器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/反讽钩子发生器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/发散穷举器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/四线对齐诊断器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/四要素公式检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/场景冲突填充器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/场景核心逻辑构建器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/场景模式管理+格式化+终检器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/场景符号标记器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/多频道AB测试器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/对比反差引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/屠龙宝刀三问法.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/希区柯克悬念引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/底层代码检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/弹簧理论节奏控制器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/归因修正+格式化.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/微型干扰植入器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/微观修辞升级器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/心理动力构建器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/心理弧光对齐器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/心理描写侧面化器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/情感数值化引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/情绪主题引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/情绪先行引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/情绪算法引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/情绪素材库匹配器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/情绪逻辑优先器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/折叠迭代器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/排毒自检过滤器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/救猫咪类型定锚器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/晚进早出切分器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/期待感管理引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/未完成态设计器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/核心梗公式化生成器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/核心梗前置器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/格式化输出+终检器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/模式管理器+格式化+终检器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/正负极卡点检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/游戏化剧情设计器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/潜文本设计器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/爆款迁移引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/特殊类型优化器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/确定性承诺器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/确定性承诺引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/积分预测算法器+格式化.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/竞品爬虫分析器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/章纲自检过滤器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/终检器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/结构排毒自检器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/节奏润色器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/苏点优先原则.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/英雄序列填充器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/被见证法则器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/视觉化锚点设计器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/视角信息差引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/视角修正器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/视角修正器_v2.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/读者画像侧写师.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/读者视角检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/质量自检过滤器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/跳笔剪辑引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/进阶修辞引擎.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/连压预警器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/逆毛摸引擎+格式化.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/避雷与修正器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/钩子类型管理+格式化.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/钩子预埋系统.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/颜色标注器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/风格一致性检查器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/风格化节奏控制器.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/engines/黄金三章黄金瞳.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/写作工作流.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/写作质量手册.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/建制阶段.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/核心机制.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/落位与提交.md",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
     "id": "jc-prop-prompt",
     "name": "jc-prop-prompt",
     "displayName": "jc-prop-prompt",
