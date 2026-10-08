@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
@@ -11,15 +11,20 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'jc-manju-test-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   writeFileSync(join(root, 'manju-route.json'), JSON.stringify({ router: 'jc-manju-zhizuo', skills: ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance'] }))
-  for (const name of ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance']) {
+  writeFileSync(join(root, 'wiki-artifacts.json'), readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
+  for (const name of ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance', 'wiki-memory', 'jc-novel']) {
     mkdirSync(join(root, name))
     writeFileSync(join(root, name, 'SKILL.md'), `---\nname: ${name}\ndescription: "test ${name}"\n---\n\n# ${name}\n`)
   }
   const registered = new Map()
+  const registeredTools = new Map()
   const ctx = { skills: { register(skill) {
     registered.set(skill.name, skill)
     return () => registered.delete(skill.name)
-  } }, tools: { register() { return () => {} } }, fs: { sandboxMode: undefined },
+  } }, tools: { register(tool) {
+    registeredTools.set(tool.name, tool)
+    return () => registeredTools.delete(tool.name)
+  } }, fs: { sandboxMode: undefined },
   get() { return undefined }, plugin(definition) {
     const releases = []
     const child = {
@@ -34,22 +39,32 @@ function fixture(t) {
     }
   } }
   const rec = { handle: { agent: { ctx } } }
-  return { root, rec, registered }
+  return { root, rec, registered, registeredTools }
 }
 
-test('production pins exact bundled sources in the agent scope, with both video branches available', async t => {
-  const { root, rec, registered } = fixture(t)
-  const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo'], root)
-  assert.deepEqual([...registered.keys()], ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance'])
+test('both production routes pin wiki-memory and expose one shared wiki writer in the agent scope', async t => {
+  const { root, rec, registered, registeredTools } = fixture(t)
+  const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo', 'wiki-memory'], root)
+  assert.deepEqual([...registered.keys()], ['wiki-memory', 'jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance'])
   assert.equal(registered.get('jc-seedance').resourceBase.path, join(root, 'jc-seedance'))
   assert.match(registered.get('jc-seedance').content, /# jc-seedance/)
+  assert.ok(registeredTools.has('wiki_save_artifact'))
   await dispose()
   assert.equal(registered.size, 0)
+  assert.equal(registeredTools.size, 0)
+
+  const novel = await pinManjuSkills(rec, ['jc-novel', 'wiki-memory'], root)
+  assert.deepEqual([...registered.keys()], ['wiki-memory', 'jc-novel'])
+  assert.ok(registeredTools.has('wiki_save_artifact'))
+  await novel()
+  assert.equal(registered.size, 0)
+  assert.equal(registeredTools.size, 0)
 })
 
-test('missing packages and incompatible pinned skills fail before changing the agent scope', async t => {
+test('missing packages and incompatible production skills fail before changing the agent scope', async t => {
   const { root, rec, registered } = fixture(t)
-  await assert.rejects(pinManjuSkills(rec, ['jc-manju-zhizuo', 'wiki-memory'], root), /漫剧制作.*wiki-memory/)
+  await assert.rejects(pinManjuSkills(rec, ['jc-manju-zhizuo', 'jc-novel'], root), /漫剧制作.*小说创作/)
+  await assert.rejects(pinManjuSkills(rec, ['jc-novel', 'wiki-memory', 'h3-prompt-writing'], root), /小说创作.*不能同时加载/)
   assert.equal(registered.size, 0)
   rmSync(join(root, 'jc-seedance'), { recursive: true })
   await assert.rejects(pinManjuSkills(rec, ['jc-manju-zhizuo'], root), /jc-seedance/)
@@ -58,7 +73,8 @@ test('missing packages and incompatible pinned skills fail before changing the a
 
 test('ordinary skill selection does not pin production packages', async t => {
   const { root, rec, registered } = fixture(t)
-  await (await pinManjuSkills(rec, ['wiki-memory'], root))()
+  const dispose = await pinManjuSkills(rec, ['skill-creator'], root)
+  await dispose()
   assert.equal(registered.size, 0)
 })
 
@@ -71,9 +87,12 @@ test('the real Harness registry prefers scoped bundled definitions and releases 
   const { root } = fixture(t)
   const ctx = new Context()
   const service = await ctx.plugin(SkillRegistry)
+  ctx.provide('tools', { register() { return () => {} } })
+  ctx.provide('fs', { sandboxMode: undefined })
+  ctx.provide('sandboxPolicy', {})
   let checked = false
   const localDispose = ctx.skills.register({ name: 'jc-seedance', source: 'user', description: 'local', content: 'LOCAL VERSION' })
-  const consumer = await ctx.plugin({ name: 'manju-registry-test', inject: [], async apply(c) {
+  const consumer = await ctx.plugin({ name: 'manju-registry-test', inject: ['tools', 'fs', 'sandboxPolicy'], async apply(c) {
     const agent = {}
     const scope = createScope(c, agent)
     agent.ctx = scope.ctx
@@ -290,6 +309,10 @@ test('the actual SDK injects bundled skills before the model request and restore
   assert.doesNotMatch(JSON.stringify(requests[0].messages), /LOCAL_jc-manju-zhizuo/)
   assert.ok(!requests[0].tools?.some(tool => tool.function.name === 'skill'))
   await session.run('/jc-manju-zhizuo\ncontinue')
+  await session.run('/jc-novel\nwrite a chapter draft')
+  assert.match(JSON.stringify(requests.at(-1).messages), /# jc-novel/)
+  assert.ok(requests.at(-1).tools?.some(tool => tool.function.name === 'wiki_save_artifact'))
+  assert.ok(!requests.at(-1).tools?.some(tool => tool.function.name === 'manju_save_artifact'))
   await session.run('/jc-seedance\nordinary selection')
   assert.match(JSON.stringify(requests.at(-1).messages), /LOCAL_jc-seedance/)
   assert.doesNotMatch(JSON.stringify(requests.at(-1).messages), /# jc-seedance/)
@@ -299,5 +322,5 @@ test('the actual SDK injects bundled skills before the model request and restore
   assert.match(JSON.stringify(requests.at(-1).messages), /ordinary selection/)
   assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /# jc-manju-zhizuo/)
   assert.ok(!requests.at(-1).tools?.some(tool => tool.function.name === 'skill'))
-  assert.equal(requests.length, 4)
+  assert.equal(requests.length, 5)
 })

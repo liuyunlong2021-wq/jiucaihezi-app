@@ -1,60 +1,48 @@
 ---
 name: jc-new-user-guide
 display_name: 新手指南
-description: Use when a user asks how to use Jiucaihezi's Memory Workbench (韭菜盒子/记忆工作台), including first-use guidance, product features, platform differences, download or installation, project files, synchronization, attachments, model selection, or how to make a 漫剧 / comic drama step by step. Only trigger for Jiucaihezi-specific requests; do not trigger for generic beginner help, generic tutorials, coding questions, document conversion, or support for another app. Trigger on 韭菜盒子新手、韭菜盒子怎么用、韭菜盒子入门、韭菜盒子使用教程、韭菜盒子功能、韭菜盒子下载、韭菜盒子同步、韭菜盒子附件、韭菜盒子文件、韭菜盒子记忆工作台怎么用、韭菜盒子记忆工作台新手、韭菜盒子怎么做漫剧、漫剧制作流程、jc-new-user-guide.
+description: "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially novel or manga creation, the Creation Panel, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide."
 allowed-tools:
   - read
 ---
 
-# 韭菜盒子记忆工作台新手指引
+# 韭菜盒子新手指南
 
-## 核心事实
+面向第一次使用韭菜盒子的用户。优先讲清楚从项目开始创作、如何使用漫剧和小说路线、如何用创作面板生成媒体，以及账号和模型设置。
 
-- 当前产品只有通用记忆工作台：项目、对话、普通文件和附件。
-- 点击“新建记忆空间”只创建项目所需的普通文件和目录；不预建业务目录，也没有每轮自动读取的隐藏文件。
-- 每次发送都会自动带入当前对话最近最多三个完整问答轮次（受模型上下文上限约束），不因是否选择 Skill 或工具而消失；新建对话不读取其他对话。
-- 用户选中的具体 Skill 会在当前对话后续轮次继续生效，直到点击移除或新建对话；新建对话不继承上一对话的 Skill。
-- 记忆分四层：最近轮次是工作记忆；当前对话 Raw 与 `.raw/记忆索引` 是情节记忆；`wiki/` 普通文件是语义记忆；Skill 包是程序记忆。
-- 右上角有两个独立开关：“记忆”控制回答完成后的自动索引，“查询”控制下一轮是否预取当前对话的 `memory_search`；新建对话默认都开启，互不影响。
-- 自动索引写入 `.raw/记忆索引`，不是 `wiki/`；索引失败不会丢回答，可在消息旁点击“记录对话”重试。
-- `wiki-memory` 用于 Wiki 的组织、查询、写入和检查；当前对话的历史召回由原生 `memory_search` 完成，旧 `jc-jiyi` 不再使用。
-- DOCX、PDF、XLSX、PPTX、EPUB 上传后保留原件并生成 Markdown 可读副本，模型读取 Markdown；原件不会被替换。
-- `上传并覆盖云端` 用本地文字快照覆盖云端，`下载并覆盖本地` 用云端文字快照覆盖本地；两者都不合并、不产生冲突副本。
-- 同步只处理允许的文字资料；媒体二进制、原始附件、空目录、凭据、设置、Skill、MCP、Provider、Session 和 `.raw/.sync` 不参与同步。
-- Desktop 保留完整本机能力。
-- Web / Mobile 保留项目内读写、附件、文档转换、云媒体、`.canvas` 和 `.jccanvas`；不提供 `.jcscene`、Three.js、FFmpeg、Terminal、本地模型或自定义 MCP。
-- 在“我的 Skill”点击“修改”会自动选择 Skill Creator，并填入 Skill ID 与中央 Skill 路径；Skill Creator 先按 ID 读取真实内容，用户确认安装卡后覆盖原 Skill。
-- 桌面三平台发布由版本 `v*` tag 触发 GitHub Actions；`main` 推送只更新源码，不直接生成安装包。
+## 关键事实
 
-## 回答流程
+- 先打开或新建一个项目，再开始对话；文字产物和生成媒体归当前项目管理。
+- Desktop 输入框下方有“漫剧制作”和“小说创作”两个创作路线。点击只切换路线，不会自动生成内容；还要描述本轮要做的事并发送。
+- 小说与漫剧路线会自动配置对应的创作 Skill 和 Wiki 归档能力。正式产物会写入当前项目，并回报实际文件位置。
+- 创作面板是独立的图片、视频、音频等生成入口；聊天模型与创作模型分开选择。提交生成需要用户明确要求。
+- 账号登录用于云端身份和同步；模型调用 API Key 是单独配置项，两者不能混为一谈。
+- 模型、参数、价格、渠道和可用状态会变化，以当前应用界面为准。
 
-1. 判断用户当前想完成什么，以及正在使用 Desktop、Web 还是 Mobile；只有平台会改变答案时才追问。
-2. 读取最相关的一份 Reference，不要一次加载全部资料。
-3. 直接给出可执行步骤，用新手能理解的语言解释必要概念。
-4. 涉及版本、价格、模型列表、下载或发布状态时，以当前界面、正式网站或真实 Release 为准；无法核实时明确说明，不猜测。
-5. 不自动上传用户问题、回答、文件或隐私数据，不静默调用外部接口；需要 Wiki 时明确选择 `@Wiki`，需要方法规则时选择具体 Skill。
+## 回答方式
 
-## Reference 导航
+1. 识别用户要做的是小说、漫剧、媒体生成、账号设置还是项目文件操作。
+2. 只读取最相关的一份参考文档；用户要跨多个部分的完整入门时，再组合阅读。
+3. 给出简短、可照着操作的步骤和一条可直接发送的示例请求。
+4. 说明点击入口是否会自动执行、产物会保存在哪里，以及下一步由用户做什么。
+5. 模型或生成能力不确定时，以当前界面和实际可用状态为准；不要承诺固定模型、价格或成功率。
+6. 不因选择创作路线就自动提交付费的图片、视频或音频任务。
 
-| 用户问题 | 读取 |
+## 参考导航
+
+| 问题 | 阅读 |
 | --- | --- |
-| 项目文件、索引与长期资料 | `references/1-Wiki使用.md`（文件名保留兼容） |
-| Skill | `references/3-Skill科普.md` |
-| 产品功能、平台差异 | `references/4-产品功能.md` |
-| 模型、API、价格 | `references/5-模型科普.md` |
-| 漫剧等一步步的创作流程 | `references/6-漫剧制作.md` |
-| 附件、办公、格式转换 | `references/8-办公.md` |
-
-## 记忆开关速查
-
-- **记忆**：开启后，成功回答在 Raw 保存完成后自动生成 `summary + keywords` 并记录到当前对话索引；关闭只停止后续自动记录，不删除已有 Raw 或索引。
-- **查询**：开启后，下一轮发送前自动查询当前对话的索引；关闭不查询历史索引，但最近三轮工作记忆仍然保留。
-- 两个开关彼此独立，状态属于当前对话；发送开始时锁定本轮状态，途中切换从下一轮生效。
-- 这两个开关都不等于 Wiki 开关，也不会自动把回答写进 `wiki/`。需要长期沉淀时，使用“保存到文件”并选择 Wiki 内的目标文件。
+| 漫剧创作从哪里开始、每一步能做什么 | references/6-漫剧制作.md |
+| 小说从开书到逐章写作、如何确认和保存 | references/7-小说创作.md |
+| 创作面板、账号、模型和常用设置 | references/9-创作面板与设置.md |
+| 项目文件与 Wiki 资料 | references/1-Wiki使用.md |
+| Skill 的作用与选择 | references/3-Skill科普.md |
+| 模型类型、动态目录与 API | references/5-模型科普.md |
+| 附件阅读与文档输出 | references/8-办公.md |
 
 ## 表达标准
 
-- 直接回答当前问题，不强制发送 GIF、欢迎语或菜单。
-- 不让用户去读 Reference；把结论组织成人话。
-- 不承诺当前平台没有的能力。
-- 用户卡住时只给最短的下一步。
+- 直接回答，不发送固定欢迎语、菜单或 GIF。
+- 不要求用户记住 Skill ID；用“故事梗概”“角色设定”“章节草稿”等产物名称讲操作。
+- 不把创作路线按钮说成自动制作整部作品。
+- 不把账号登录说成已经配置好模型调用密钥。

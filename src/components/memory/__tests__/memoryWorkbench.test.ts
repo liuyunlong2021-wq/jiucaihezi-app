@@ -28,7 +28,8 @@ function mentionLoaderFixture(blockCatalog = false) {
     loadWebSkillCatalog: () => { calls.catalog++; return catalog },
     agentStore: { getCustomSkills: () => { calls.customSkills++; return [{ name: 'story', description: '故事' }] } },
     sortSkillsForPicker: (entries: unknown[]) => entries,
-    manjuSelected: ref(false), MANJU_SKILLS: ['story'], projectOwner: ref('/project'),
+    manjuSelected: ref(false), MANJU_SKILLS: ['story'],
+    novelSelected: ref(false), NOVEL_SKILLS: ['jc-novel', 'wiki-memory'], projectOwner: ref('/project'),
     files: {
       searchPaths: async () => { calls.search++; return [{ path: 'story.md', kind: 'text', isDirectory: false }] },
       list: async () => { calls.list++; return [{ path: 'story.md', kind: 'text', isDirectory: false }] },
@@ -123,7 +124,7 @@ test('Desktop defaults to Harness without an @DH switch', () => {
   assert.match(workbench, /deepSeekHandoffTurns\(baseTurns\)/)
   assert.match(workbench, /if \(desktopOnlyRuntime\) ids\.push\(DEEPSEEK_HARNESS_SESSION_MARKER\)/)
   assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
-  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns\)/)
+  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns, dhWikiContext\)/)
   assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?attachments: requestAttachments/)
   assert.match(source('src/services/desktopConversationRuntime.ts'), /executeDesktopHarnessRun\([\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
   assert.doesNotMatch(workbench, /const skillSnapshot = useHarness \? \[\]/)
@@ -560,12 +561,18 @@ test('Harness conversations open immediately without creating a Raw memory space
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.ok(workbench.includes("const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')"))
-  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju)'))
+  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
-  assert.ok(workbench.includes('restoreManjuSelection(names || [], preference).filter(name => available.has(name))'))
+  assert.ok(workbench.includes('restoreNovelSelection(\n    restoreManjuSelection(names || [], manjuPreference), novelPreference,\n  ).filter(name => available.has(name))'))
   assert.ok(workbench.includes("createHarnessConversationCatalogEntry(owner, '新对话')"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
+})
+
+test('novel mode keeps only its writer and the required Wiki dependency selected', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /selectedSkillNames\.value = \[NOVEL_SKILL, WIKI_MEMORY_SKILL\]/)
+  assert.match(workbench, /NOVEL_SKILLS\.includes\(skill\.name\)/)
 })
 
 test('memory file tree and model tools share the hidden and protected project contract', () => {

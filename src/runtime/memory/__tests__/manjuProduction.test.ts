@@ -4,9 +4,11 @@ import { test } from 'node:test'
 import {
   MANJU_ROUTER,
   MANJU_SKILLS,
+  WIKI_MEMORY_SKILL,
   manjuRoutePrompt,
   restoreManjuSelection,
 } from '../manjuProduction'
+import { NOVEL_SKILL, restoreNovelSelection } from '../novelProduction'
 
 test('the production bundle includes both video routes and excludes the portrait skill', () => {
   assert.equal(MANJU_SKILLS.length, 11)
@@ -67,10 +69,19 @@ test('the composer retains the production entry without a model selector or mode
 
 test('unsent toggle preferences survive reopening without leaking to a new conversation', () => {
   const legacyPreference = { enabled: true, videoModel: 'seedance-2.5' }
-  assert.deepEqual(restoreManjuSelection(['wiki-memory'], legacyPreference), [MANJU_ROUTER])
+  assert.deepEqual(restoreManjuSelection(['wiki-memory'], legacyPreference), [MANJU_ROUTER, WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreManjuSelection([MANJU_ROUTER], { enabled: false }), [])
   assert.deepEqual(restoreManjuSelection([], undefined), [])
-  assert.deepEqual(restoreManjuSelection(['jc-manju-minimaxh3'], undefined), [MANJU_ROUTER])
+  assert.deepEqual(restoreManjuSelection(['jc-manju-minimaxh3'], undefined), [MANJU_ROUTER, WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreManjuSelection(['jc-daoyan-fenjing'], undefined), ['jc-seedance'])
-  assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, 'jc-seedance', 'wiki-memory'], undefined), [MANJU_ROUTER, 'jc-seedance'])
+  assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, 'jc-seedance', WIKI_MEMORY_SKILL], undefined), [MANJU_ROUTER, 'jc-seedance', WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, WIKI_MEMORY_SKILL], { enabled: false, wikiMemoryWasSelected: false }), [])
+  assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, WIKI_MEMORY_SKILL], { enabled: false, wikiMemoryWasSelected: true }), [WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreNovelSelection([], { enabled: true }), [NOVEL_SKILL, WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreNovelSelection([MANJU_ROUTER, WIKI_MEMORY_SKILL], { enabled: true }), [NOVEL_SKILL, WIKI_MEMORY_SKILL])
+  assert.deepEqual(
+    restoreNovelSelection([NOVEL_SKILL, 'skill-creator', WIKI_MEMORY_SKILL], { enabled: true }),
+    [NOVEL_SKILL, WIKI_MEMORY_SKILL],
+  )
+  assert.deepEqual(restoreNovelSelection([NOVEL_SKILL, WIKI_MEMORY_SKILL], { enabled: false, wikiMemoryWasSelected: false }), [])
 })

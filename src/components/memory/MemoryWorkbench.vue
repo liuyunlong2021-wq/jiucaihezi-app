@@ -49,7 +49,7 @@ import {
   type ConversationSplitPlan,
   type ConversationSplitResult,
 } from '@/runtime/memory/conversationSplit'
-import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
+import { buildWikiMemoryIndexContext, runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import {
   DEEPSEEK_HARNESS_CONTEXT_WINDOW,
   DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
@@ -133,7 +133,7 @@ import { serializeJsonCanvas, type JsonCanvasDocument } from '@/runtime/memory/j
 import { loadWebSkillCatalog } from '@/utils/skillContentResolver'
 import { recordSkillUse, sortSkillsForPicker } from '@/utils/skillPickerOrder'
 import {
-  MANJU_ROUTER, MANJU_SKILLS, restoreManjuSelection,
+  MANJU_ROUTER, MANJU_SKILLS, WIKI_MEMORY_SKILL, restoreManjuSelection,
   type ManjuPreference,
 } from '@/runtime/memory/manjuProduction'
 import {
@@ -228,33 +228,50 @@ const selectedSkillNames = ref<string[]>([])
 const manjuSelected = computed(() => selectedSkillNames.value.includes(MANJU_ROUTER))
 const novelSelected = computed(() => selectedSkillNames.value.includes(NOVEL_SKILL))
 
-function saveProductionPreferences(novelPreference?: NovelPreference) {
+function saveProductionPreferences(preferences: { manju?: Partial<ManjuPreference>; novel?: Partial<NovelPreference> } = {}) {
   const active = conversation.value
   if (!active || !desktopOnlyRuntime) return
   const entry = listHarnessConversationCatalog(active.resource.owner)
     .find(item => item.conversationId === active.transcript.id)
   if (entry) upsertHarnessConversationCatalogEntry({
     ...entry,
-    manju: { enabled: manjuSelected.value },
+    manju: {
+      ...entry.manju,
+      ...preferences.manju,
+      enabled: manjuSelected.value,
+    },
     novel: {
       ...entry.novel,
-      ...novelPreference,
+      ...preferences.novel,
       enabled: novelSelected.value,
     },
   })
 }
 
 function toggleManjuProduction() {
+  const previousManju = currentManjuPreference()
   const novelPreference = currentNovelPreference()
-  if (manjuSelected.value) selectedSkillNames.value = selectedSkillNames.value.filter(name => name !== MANJU_ROUTER)
-  else {
-    if (selectedSkillNames.value.some(name => !MANJU_SKILLS.includes(name)))
-      contextNotice.value = '已切换到漫剧制作路线；本对话使用内置漫剧 Skill。'
-    selectedSkillNames.value = [MANJU_ROUTER]
+  if (manjuSelected.value) {
+    const wikiMemoryWasSelected = previousManju?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+    selectedSkillNames.value = selectedSkillNames.value.filter(name =>
+      name !== MANJU_ROUTER && (name !== WIKI_MEMORY_SKILL || wikiMemoryWasSelected),
+    )
+    saveProductionPreferences({
+      manju: { enabled: false, wikiMemoryWasSelected },
+      novel: { enabled: false, wikiMemoryWasSelected: novelPreference?.wikiMemoryWasSelected },
+    })
+    return
   }
+
+  const wikiMemoryWasSelected = novelSelected.value
+    ? novelPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+    : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  if (selectedSkillNames.value.some(name => !MANJU_SKILLS.includes(name) && name !== WIKI_MEMORY_SKILL))
+    contextNotice.value = '已切换到漫剧制作路线；本对话使用内置漫剧 Skill。'
+  selectedSkillNames.value = [MANJU_ROUTER, WIKI_MEMORY_SKILL]
   saveProductionPreferences({
-    enabled: false,
-    wikiMemoryWasSelected: novelPreference?.wikiMemoryWasSelected,
+    manju: { enabled: true, wikiMemoryWasSelected },
+    novel: { enabled: false, wikiMemoryWasSelected },
   })
 }
 
@@ -265,31 +282,51 @@ function toggleNovelProduction() {
       name !== NOVEL_SKILL && !(name === 'wiki-memory' && preference?.wikiMemoryWasSelected === false),
     )
     saveProductionPreferences({
-      enabled: false,
-      wikiMemoryWasSelected: preference?.wikiMemoryWasSelected,
+      novel: { enabled: false, wikiMemoryWasSelected: preference?.wikiMemoryWasSelected },
+      manju: { enabled: false, wikiMemoryWasSelected: preference?.wikiMemoryWasSelected },
     })
     return
   }
 
-  const wikiMemoryWasSelected = selectedSkillNames.value.includes('wiki-memory')
-  selectedSkillNames.value = [
-    ...selectedSkillNames.value.filter(name => !MANJU_SKILLS.includes(name) && name !== NOVEL_SKILL),
-    NOVEL_SKILL,
-    ...(wikiMemoryWasSelected ? [] : ['wiki-memory']),
-  ]
-  saveProductionPreferences({ enabled: true, wikiMemoryWasSelected })
+  const manjuPreference = currentManjuPreference()
+  const wikiMemoryWasSelected = manjuSelected.value
+    ? manjuPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+    : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  if (selectedSkillNames.value.some(name => name !== WIKI_MEMORY_SKILL && name !== NOVEL_SKILL))
+    contextNotice.value = '已切换到小说创作路线；本对话使用内置小说 Skill。'
+  selectedSkillNames.value = [NOVEL_SKILL, WIKI_MEMORY_SKILL]
+  saveProductionPreferences({
+    manju: { enabled: false, wikiMemoryWasSelected },
+    novel: { enabled: true, wikiMemoryWasSelected },
+  })
 }
 
 function removeSelectedSkill(name: string) {
-  if (novelSelected.value && (name === NOVEL_SKILL || name === 'wiki-memory')) {
+  if (novelSelected.value && (name === NOVEL_SKILL || name === WIKI_MEMORY_SKILL)) {
     const preference = currentNovelPreference()
     selectedSkillNames.value = selectedSkillNames.value.filter(item =>
-      item !== NOVEL_SKILL && !(name === 'wiki-memory' && item === 'wiki-memory')
-        && !(item === 'wiki-memory' && preference?.wikiMemoryWasSelected === false),
+      item !== NOVEL_SKILL && !(name === WIKI_MEMORY_SKILL && item === WIKI_MEMORY_SKILL)
+        && !(item === WIKI_MEMORY_SKILL && preference?.wikiMemoryWasSelected === false),
     )
     saveProductionPreferences({
-      enabled: false,
-      wikiMemoryWasSelected: name === 'wiki-memory' ? false : preference?.wikiMemoryWasSelected,
+      novel: {
+        enabled: false,
+        wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected,
+      },
+      manju: { enabled: false, wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected },
+    })
+    return
+  }
+  if (manjuSelected.value && (name === MANJU_ROUTER || name === WIKI_MEMORY_SKILL)) {
+    const preference = currentManjuPreference()
+    selectedSkillNames.value = selectedSkillNames.value.filter(item =>
+      item !== MANJU_ROUTER && !(item === WIKI_MEMORY_SKILL && (name === WIKI_MEMORY_SKILL || preference?.wikiMemoryWasSelected === false)),
+    )
+    saveProductionPreferences({
+      manju: {
+        enabled: false,
+        wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected,
+      },
     })
     return
   }
@@ -888,7 +925,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   ]
   const seenSkillNames = new Set<string>()
   const skills = sortSkillsForPicker(skillOptions.filter(skill => {
-    if (manjuSelected.value && !MANJU_SKILLS.includes(skill.name)) return false
+    if (manjuSelected.value && !MANJU_SKILLS.includes(skill.name) && skill.name !== WIKI_MEMORY_SKILL) return false
     if (novelSelected.value && !NOVEL_SKILLS.includes(skill.name)) return false
     if (seenSkillNames.has(skill.name)) return false
     seenSkillNames.add(skill.name)
@@ -2220,6 +2257,9 @@ async function send(remoteText?: string) {
     const dhConfig = useHarness
       ? await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
       : null
+    const dhWikiContext = useHarness && skillSnapshot.includes(WIKI_MEMORY_SKILL)
+      ? await buildWikiMemoryIndexContext(active.resource.owner)
+      : ''
     // 图片能不能送达取决于所选模型声明的输入模态；看不见就得说出来，
     // 而不是让模型拿着一个附件 id 去满盘找文件（实测 16 分钟无果）。
     const dhImageInput = useHarness ? harnessImageInput(dhConfig!.model) : false
@@ -2241,7 +2281,7 @@ async function send(remoteText?: string) {
     const reply = useHarness ? await executeDesktopHarnessRun(runs, run, {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
-      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns),
+      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns, dhWikiContext),
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
@@ -2842,36 +2882,47 @@ async function selectMention(option: MemoryMentionOption) {
         if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
       } else enableTool(option.id)
     } else if (option.type === 'skill') {
-      if (manjuSelected.value && !MANJU_SKILLS.includes(option.name) && option.name !== NOVEL_SKILL)
+      if (manjuSelected.value && !MANJU_SKILLS.includes(option.name) && option.name !== WIKI_MEMORY_SKILL)
         throw new Error('请先退出漫剧制作，再选择其他路线的 Skill。')
       if (novelSelected.value && !NOVEL_SKILLS.includes(option.name) && option.name !== MANJU_ROUTER)
         throw new Error('请先退出小说创作，再选择其他路线的 Skill。')
       if (option.name === MANJU_ROUTER) {
         const novelPreference = currentNovelPreference()
-        selectedSkillNames.value = [MANJU_ROUTER]
+        const wikiMemoryWasSelected = novelSelected.value
+          ? novelPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+          : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+        selectedSkillNames.value = [MANJU_ROUTER, WIKI_MEMORY_SKILL]
         saveProductionPreferences({
-          enabled: false,
-          wikiMemoryWasSelected: novelPreference?.wikiMemoryWasSelected,
+          manju: { enabled: true, wikiMemoryWasSelected },
+          novel: { enabled: false, wikiMemoryWasSelected },
         })
       } else if (option.name === NOVEL_SKILL) {
         const previousPreference = currentNovelPreference()
+        const manjuPreference = currentManjuPreference()
         const wikiMemoryWasSelected = novelSelected.value
-          ? previousPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes('wiki-memory')
-          : selectedSkillNames.value.includes('wiki-memory')
-        selectedSkillNames.value = [
-          ...selectedSkillNames.value.filter(name => !MANJU_SKILLS.includes(name) && name !== NOVEL_SKILL),
-          NOVEL_SKILL,
-          ...(wikiMemoryWasSelected ? [] : ['wiki-memory']),
-        ]
-        saveProductionPreferences({ enabled: true, wikiMemoryWasSelected })
+          ? previousPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+          : manjuSelected.value
+            ? manjuPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+            : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+        selectedSkillNames.value = [NOVEL_SKILL, WIKI_MEMORY_SKILL]
+        saveProductionPreferences({
+          manju: { enabled: false, wikiMemoryWasSelected },
+          novel: { enabled: true, wikiMemoryWasSelected },
+        })
         recordSkillUse(option.name)
       }
       if (!selectedSkillNames.value.includes(option.name)) {
         selectedSkillNames.value.push(option.name)
         recordSkillUse(option.name)
       }
-      if (option.name === 'wiki-memory' && !novelSelected.value && currentNovelPreference()?.wikiMemoryWasSelected === false)
-        saveProductionPreferences({ enabled: false, wikiMemoryWasSelected: true })
+      if (option.name === WIKI_MEMORY_SKILL && !novelSelected.value && !manjuSelected.value) {
+        const novelPreference = currentNovelPreference()
+        const manjuPreference = currentManjuPreference()
+        if (novelPreference?.wikiMemoryWasSelected === false)
+          saveProductionPreferences({ novel: { enabled: false, wikiMemoryWasSelected: true } })
+        if (manjuPreference?.wikiMemoryWasSelected === false)
+          saveProductionPreferences({ manju: { enabled: false, wikiMemoryWasSelected: true } })
+      }
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {

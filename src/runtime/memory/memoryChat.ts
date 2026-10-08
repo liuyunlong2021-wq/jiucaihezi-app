@@ -1,4 +1,5 @@
 import { useAgentStore } from '@/stores/agentStore'
+import wikiArtifactContract from '../../../public/skills/wiki-artifacts.json'
 import {
   createRuntimeProjectFileService,
   createSkillDraftFiles,
@@ -188,15 +189,37 @@ export async function buildWikiMemoryIndexContext(
   } catch {
     return 'Wiki 索引预读失败；请用户选择有效的项目后重试。'
   }
-  const roots = ['wiki', 'docs/wiki'].filter(root =>
-    resources.some(resource => resource.path === root || resource.path.startsWith(`${root}/`)),
-  )
-  if (roots.length !== 1) {
-    return roots.length
-      ? `检测到多个 Wiki 根目录：${roots.join('、')}。请先请用户明确选择，不能混合读取。`
-      : '项目中未发现 wiki/ 或 docs/wiki/，请用户指定 Wiki 根目录。'
+  const paths = new Set(resources.map(resource => resource.path.replace(/\/$/, '')))
+  const roots = await Promise.all(wikiArtifactContract.rootCandidates.map(async root => {
+    const children = new Set(resources
+      .filter(resource => resource.path.startsWith(`${root}/`))
+      .map(resource => resource.path.slice(root.length + 1).split('/')[0]))
+    const exists = paths.has(root) || resources.some(resource => resource.path.startsWith(`${root}/`))
+    const hasIndex = paths.has(`${root}/${wikiArtifactContract.rootIndex}`)
+    const markerCount = wikiArtifactContract.rootMarkers.filter(marker =>
+      marker !== wikiArtifactContract.rootIndex && children.has(marker),
+    ).length
+    const signature = wikiArtifactContract.excludedRootSignatures?.find(item => item.root === root)
+    let excluded = false
+    if (signature && paths.has(`${root}/${signature.path}`)) {
+      try {
+        const marker = await files.readTextAt(owner, `${root}/${signature.path}`)
+        excluded = marker.content.startsWith(signature.startsWith)
+      } catch { /* an unreadable signature cannot exclude an otherwise valid Wiki */ }
+    }
+    return { path: root, exists, hasIndex, markerCount, entries: children.size,
+      actual: !excluded && (hasIndex || markerCount >= wikiArtifactContract.minimumRootMarkers) }
+  }))
+  const actualRoots = roots.filter(root => root.actual)
+  if (actualRoots.length > 1)
+    return `检测到多个 Wiki 根目录：${actualRoots.map(root => root.path).join('、')}。请先明确选择，不能混合读取。`
+  if (actualRoots.length === 0) {
+    const wiki = roots.find(root => root.path === wikiArtifactContract.rootCandidates[0])
+    if (wiki?.exists && wiki.entries > 0)
+      return 'wiki/ 已有内容但缺少可识别的 Wiki 索引；请先整理现有目录，不能另建第二套 Wiki。'
+    return '当前项目还没有可识别的 Wiki。首次正式落盘时会按共享规则在 wiki/ 建立索引，无需用户指定根目录。'
   }
-  const root = roots[0]!
+  const root = actualRoots[0]!.path
   const indexPaths = resources
     .filter(resource => {
       if (!resource.path.startsWith(`${root}/`) || !resource.path.endsWith('/index.md'))

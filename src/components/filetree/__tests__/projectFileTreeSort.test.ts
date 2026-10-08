@@ -49,7 +49,7 @@ test('file tree locate scrolls the target into view and explains a miss', () => 
   )
   // 别的项目的路径不碰这棵树，也不抱怨。
   assert.match(tree, /if \(owner && projectKey\.value && owner !== projectKey\.value\) return/)
-  assert.match(tree, /void locateProjectResource\(String\(path\), Boolean\(payload\?\.quiet\)\)/)
+  assert.match(tree, /const node = await locateProjectResource\(String\(path\), Boolean\(payload\?\.quiet\)\)/)
 
   // 生成物落进项目后自动定位：文本保存和三条媒体落盘路径都调它。
   assert.match(store, /function revealMediaResultInFileTree\(task: MediaTask\)/)

@@ -948,6 +948,7 @@ export function deepSeekPrompt(
   message: string,
   skillNames: string[],
   handoffTurns: ConversationTurn[] = [],
+  wikiContext = '',
 ): string {
   const gestures = skillNames.map(name => `/${name}`).join(' ')
   const handoff = handoffTurns.length
@@ -958,7 +959,8 @@ export function deepSeekPrompt(
       ].join('\n\n')
     : ''
   const manju = skillNames.includes(MANJU_ROUTER) ? manjuRoutePrompt() : ''
-  return [gestures, manju, handoff, !handoff && manju ? '【本轮消息】' : '', message].filter(Boolean).join('\n\n')
+  return [gestures, manju, wikiContext, handoff, !handoff && manju ? '【本轮消息】' : '', message]
+    .filter(Boolean).join('\n\n')
 }
 
 export function deepSeekContentBlocks(
@@ -1472,14 +1474,18 @@ async function runDeepSeekHarnessTurn(
     }
     if (frame.method === 'session.event') {
       const event = frame.params.event
-      if (event?.type === 'tool/call' && event.data.name === 'manju_save_artifact')
+      if (event?.type === 'tool/call' && event.data.name === 'wiki_save_artifact')
         manjuArtifactCallIds.add(String(event.data.callId))
       if (event?.type === 'tool/result') {
         const message = event.data.message
         const callId = String(message.toolCallId || message.source?.callId || '')
         if (callId && manjuArtifactCallIds.delete(callId) && !message.isError) {
-          const text = message.content
-            .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+          const content = Array.isArray(message.content)
+            ? message.content as Array<{ type?: unknown; text?: unknown }>
+            : []
+          const text = content
+            .filter((block): block is { type: 'text'; text: string } =>
+              block?.type === 'text' && typeof block.text === 'string')
             .map(block => block.text)
             .join('\n')
           try {
@@ -1488,7 +1494,8 @@ async function runDeepSeekHarnessTurn(
             const safePath = /^(?:wiki|docs\/wiki)\//.test(path)
               && path.endsWith('.md')
               && !path.split('/').some(part => part === '.' || part === '..')
-            if (result.status === 'saved' && safePath) input.onArtifactSaved?.(path)
+            if ((result.status === 'saved' || result.status === 'saved_with_warnings') && safePath)
+              input.onArtifactSaved?.(path)
           } catch { /* a malformed tool result must not interrupt the Harness event stream */ }
         }
       }

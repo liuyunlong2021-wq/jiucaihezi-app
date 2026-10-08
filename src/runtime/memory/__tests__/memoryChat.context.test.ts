@@ -134,3 +134,34 @@ test('wiki-memory preloads only the first three Wiki index levels', async () => 
   assert.match(context, /wiki\/团队\/工作进度\/index\.md/)
   assert.doesNotMatch(context, /不应预读|正文不应预读/)
 })
+
+test('wiki-memory does not mistake unrelated docs/wiki files for a project Wiki', async () => {
+  const context = await buildWikiMemoryIndexContext('project', files({
+    'docs/wiki/开发/开发历史.md': '# 历史资料',
+  }))
+
+  assert.match(context, /首次正式落盘时会按共享规则在 wiki\//)
+  assert.doesNotMatch(context, /检测到多个 Wiki/)
+})
+
+test('wiki-memory excludes this repository knowledge base when locating a creative project Wiki', async () => {
+  const context = await buildWikiMemoryIndexContext('project', files({
+    'docs/wiki/index.md': '# Wiki 根',
+    'docs/wiki/CLAUDE.md': '# 通用记忆工作台开发文档\n',
+    'wiki/index.md': '# 作品 Wiki',
+    'wiki/创作/index.md': '# 小说规划',
+  }))
+
+  assert.match(context, /Wiki 根目录：wiki/)
+  assert.match(context, /wiki\/创作\/index\.md/)
+  assert.doesNotMatch(context, /docs\/wiki\/index\.md|多个 Wiki 根目录/)
+})
+
+test('wiki-memory reports multiple recognized roots instead of mixing their indexes', async () => {
+  const context = await buildWikiMemoryIndexContext('project', files({
+    'wiki/index.md': '# Wiki A',
+    'docs/wiki/index.md': '# Wiki B',
+  }))
+
+  assert.match(context, /多个 Wiki 根目录：wiki、docs\/wiki/)
+})

@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "rootCandidates": ["wiki", "docs/wiki"],
+  "rootMarkers": ["index.md", "制作进度.md", "原始材料", "项目资料", "改编方案", "创作", "剧本", "资产"],
+  "rootIndex": "index.md",
+  "minimumRootMarkers": 2,
+  "excludedRootSignatures": [
+    { "root": "docs/wiki", "path": "CLAUDE.md", "startsWith": "# 通用记忆工作台开发文档" }
+  ],
+  "scaffold": {
+    "rootTitle": "项目 Wiki",
+    "progressPath": "制作进度.md",
+    "directories": [
+      { "path": "原始材料", "purpose": "保存用户明确授权作为来源的原文与资料。" },
+      { "path": "原始材料/{book}", "purpose": "按作品保存已确认的小说正文与来源材料。" },
+      { "path": "项目资料", "purpose": "保存故事资料与人物小传。" },
+      { "path": "项目资料/人物小传", "purpose": "保存每个人物单独的人物小传。" },
+      { "path": "改编方案", "purpose": "保存已确认的漫剧视觉与制作方向。" },
+      { "path": "创作", "purpose": "保存小说规划、章节草稿及写作复盘。" },
+      { "path": "创作/章节草稿", "purpose": "保存等待用户确认的小说章节草稿。" },
+      { "path": "剧本", "purpose": "按集保存漫剧剧本、工程剧本与视频提示词。" },
+      { "path": "资产/角色", "purpose": "一个角色一份规范档案，保存小传关联、设计及提示词。" },
+      { "path": "资产/场景", "purpose": "保存可复用的场景资料与提示词。" },
+      { "path": "资产/道具", "purpose": "保存可复用的道具资料与提示词。" }
+    ]
+  },
+  "types": {
+    "story_summary": { "path": "项目资料/故事梗概.md", "index": "项目资料/index.md", "label": "故事梗概" },
+    "episode_summaries": { "path": "项目资料/分集梗概.md", "index": "项目资料/index.md", "label": "分集梗概" },
+    "story_background": { "path": "项目资料/故事背景.md", "index": "项目资料/index.md", "label": "故事背景" },
+    "world_rules": { "path": "项目资料/世界规则.md", "index": "项目资料/index.md", "label": "世界规则" },
+    "character_bio": { "path": "项目资料/人物小传/{entity}.md", "index": "项目资料/人物小传/index.md", "label": "{entity}", "entity": true },
+    "project_overview": { "path": "改编方案/项目总纲.md", "index": "改编方案/index.md", "label": "项目总纲" },
+    "screenplay": { "path": "剧本/{episode}/分集剧本.md", "index": "剧本/index.md", "label": "{episode}分集剧本", "episode": true },
+    "engineering_script": { "path": "剧本/{episode}/工程剧本.md", "index": "剧本/index.md", "label": "{episode}工程剧本", "episode": true },
+    "video_prompt": { "path": "剧本/{episode}/视频提示词/{model}/{segment}.md", "index": "剧本/index.md", "label": "{episode}{model} {segment}", "episode": true, "model": ["H3", "Seedance"] },
+    "character_asset": { "path": "资产/角色/{entity}.md", "index": "资产/角色/index.md", "label": "{entity}", "entity": true },
+    "scene_asset": { "path": "资产/场景/{entity}.md", "index": "资产/场景/index.md", "label": "{entity}", "entity": true },
+    "prop_asset": { "path": "资产/道具/{entity}.md", "index": "资产/道具/index.md", "label": "{entity}", "entity": true },
+    "novel_idea": { "path": "创作/灵感方案.md", "index": "创作/index.md", "label": "灵感方案" },
+    "novel_market_analysis": { "path": "创作/市场分析.md", "index": "创作/index.md", "label": "市场分析" },
+    "novel_core_premise": { "path": "创作/核心梗.md", "index": "创作/index.md", "label": "核心梗" },
+    "novel_world_setting": { "path": "创作/世界设定.md", "index": "创作/index.md", "label": "世界设定" },
+    "novel_outline": { "path": "创作/大纲.md", "index": "创作/index.md", "label": "全书大纲" },
+    "novel_chapter_outline": { "path": "创作/章纲.md", "index": "创作/index.md", "label": "章纲" },
+    "novel_foreshadow": { "path": "创作/伏笔.md", "index": "创作/index.md", "label": "伏笔追踪" },
+    "novel_packaging": { "path": "创作/文案包装.md", "index": "创作/index.md", "label": "文案包装" },
+    "novel_manuscript_review": { "path": "创作/全稿复盘.md", "index": "创作/index.md", "label": "全稿复盘" },
+    "novel_character": { "path": "资产/角色/{entity}.md", "index": "资产/角色/index.md", "label": "{entity}", "entity": true },
+    "novel_scene": { "path": "资产/场景/{entity}.md", "index": "资产/场景/index.md", "label": "{entity}", "entity": true },
+    "novel_prop": { "path": "资产/道具/{entity}.md", "index": "资产/道具/index.md", "label": "{entity}", "entity": true },
+    "novel_chapter_draft": { "path": "创作/章节草稿/{book}/第{chapter}章.md", "index": "创作/章节草稿/{book}/index.md", "label": "{book} 第{chapter}章草稿", "mode": "chapter_draft" },
+    "novel_chapter_source": { "path": "原始材料/{book}/原文.md", "index": "原始材料/{book}/index.md", "label": "{book} 第{chapter}章正文", "mode": "chapter_source" }
+  }
+}

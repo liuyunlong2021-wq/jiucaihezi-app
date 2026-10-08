@@ -191,6 +191,7 @@ const externalNodeTests = [
   'scripts/__tests__/deepseek-harness-patch.test.mjs',
   'scripts/__tests__/deepseek-session-lifecycle.test.mjs',
   'scripts/__tests__/manju-skill-scope.test.mjs',
+  'scripts/__tests__/wiki-artifact-writer.test.mjs',
   'scripts/__tests__/deepseek-permission.test.mjs',
   'scripts/__tests__/deepseek-harness-profile-plugins.test.mjs',
   'scripts/__tests__/legal-pages.test.mjs',

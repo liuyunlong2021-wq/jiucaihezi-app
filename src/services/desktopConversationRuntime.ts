@@ -30,6 +30,7 @@ import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from './desktopRe
 import { publishDesktopRemoteEvent } from './desktopRemoteBridge'
 import { RemoteProtocolError } from './desktopRemoteProtocol'
 import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
+import { buildWikiMemoryIndexContext } from '@/runtime/memory/memoryChat'
 import { resolveApiConfig } from '@/utils/api'
 
 export type MemoryToolApprovalDecision = 'always' | 'once' | 'reject'
@@ -268,7 +269,12 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
   let reply: string
   try {
     reply = await executeDesktopHarnessRun(desktopConversationRuns, run, { ...query,
-      message: deepSeekPrompt(userTurn.content, selected.skillNames || [], handoff),
+      message: deepSeekPrompt(
+        userTurn.content,
+        selected.skillNames || [],
+        handoff,
+        selected.skillNames?.includes('wiki-memory') ? await buildWikiMemoryIndexContext(selected.owner) : '',
+      ),
     })
   } catch (cause) {
     if (desktopConversationRuns.get(key) === run && run.phase === 'stopped') {

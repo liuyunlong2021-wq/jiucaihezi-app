@@ -80,6 +80,9 @@ test('production skill routing does not replace the user request or leak into vi
   }] })
   assert.equal(turns[0]?.content, request)
   assert.equal(deepSeekPrompt('继续', ['wiki-memory']), '/wiki-memory\n\n继续')
+  const withWiki = deepSeekPrompt('续写本章', ['jc-novel', 'wiki-memory'], [], '<wiki_index path="wiki/index.md"># 项目</wiki_index>')
+  assert.ok(withWiki.indexOf('<wiki_index') < withWiki.indexOf('续写本章'))
+  assert.match(withWiki, /jc-novel/)
 })
 
 test('DeepSeek Harness hands off only conversation turns not already owned by its session', () => {

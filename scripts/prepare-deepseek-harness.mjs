@@ -323,7 +323,7 @@ if (!server.includes('async applyPinnedSkillScope(rec, content) {')) {
   changed = true
 }
 
-// 漫剧路由固定到随产品打包的同一套版本；注册在 agent 层，不改变普通对话目录。
+// 创作与 Wiki 归档固定到随产品打包的同一套版本；注册在 agent 层，不改变普通对话目录。
 const manjuImport = 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
 if (!server.includes(manjuImport)) {
   const registerAnchor = '\t\tif (names.length === 0) return;\n\t\ttry {\n\t\t\tconst dispose = rec.handle.agent.ctx.tools.restrict({ deny: ["skill"] });'
@@ -335,7 +335,14 @@ if (!server.includes(manjuImport)) {
   server = server.replace(registerAnchor, registerAnchor.replace(
     '\t\ttry {', '\t\tconst manjuDispose = await pinManjuSkills(rec, names);\n\t\ttry {',
   )).replace(disposeAnchor, '\t\t\t\tdispose: async () => { await dispose(); await manjuDispose(); }\n\t\t\t});')
-    .replace(lookupAnchor, '\t\t\t\tif (name === "jc-manju-zhizuo") { names.push(name); continue; }\n' + lookupAnchor)
+    .replace(lookupAnchor, '\t\t\t\tif (name === "jc-manju-zhizuo" || name === "jc-novel") { names.push(name); continue; }\n' + lookupAnchor)
+  changed = true
+}
+
+const oldProductionSkillLookup = '\t\t\t\tif (name === "jc-manju-zhizuo") { names.push(name); continue; }\n'
+const currentProductionSkillLookup = '\t\t\t\tif (name === "jc-manju-zhizuo" || name === "jc-novel") { names.push(name); continue; }\n'
+if (server.includes(oldProductionSkillLookup)) {
+  server = server.replace(oldProductionSkillLookup, currentProductionSkillLookup)
   changed = true
 }
 
@@ -346,7 +353,7 @@ const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\ttry {
 \t\t\tnames = await this.pinnedSkillNames(rec, content);
 \t\t} catch (error) {
-\t\t\tif (content.some(block => block.type === "text" && block.text.includes("/jc-manju-zhizuo"))) throw error;
+\t\t\tif (content.some(block => block.type === "text" && /\\/(?:jc-manju-zhizuo|jc-novel|wiki-memory)\\b/.test(block.text))) throw error;
 \t\t\tconsole.error("[skill-scope] 解析点名 skill 失败: " + (error instanceof Error ? error.message : String(error)));
 \t\t\treturn;
 \t\t}
@@ -371,7 +378,7 @@ const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\t\t});
 \t\t} catch (error) {
 \t\t\ttry { await dispose?.(); } finally { await manjuDispose(); }
-\t\t\tif (names.includes("jc-manju-zhizuo")) throw error;
+\t\t\tif (names.some(name => ["jc-manju-zhizuo", "jc-novel", "wiki-memory"].includes(name))) throw error;
 \t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));
 \t\t}
 \t}
