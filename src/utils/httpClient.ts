@@ -24,7 +24,7 @@ interface RustHttpResponse {
 
 function canUseRustFetch(init?: RequestInit): boolean {
   if (!init?.body) return true
-  return typeof init.body === 'string'
+  return typeof init.body === 'string' || init.body instanceof FormData || init.body instanceof Blob
 }
 
 export function isLocalLoopbackUrl(url: string): boolean {
@@ -115,7 +115,9 @@ export async function normalizeRustHttpRequest(
   const request = new Request(input, init)
   const body = request.method === 'GET' || request.method === 'HEAD'
     ? undefined
-    : await request.clone().text()
+    : request.headers.get('content-type')?.startsWith('multipart/form-data')
+      ? await request.clone().blob()
+      : await request.clone().text()
   return {
     url: request.url,
     init: {
@@ -132,22 +134,39 @@ export async function normalizeRustHttpRequest(
  */
 
 function pickTimeoutForUrl(url: string): number {
+  if (/\/api\/creations\/uploads\b/.test(url)) return 120
   if (/\/v1\/models\b/.test(url)) return 5   // 模型列表探测，5 秒足够
-  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 300  // 图片生成 5 分钟（T8 GPTImage2 实测 ~200s）
+  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 630  // NewAPI rc40 openai_image 轮询上限 600 秒，留少量响应余量
   if (/\/v1\/videos\b/.test(url) && !/\/v1\/videos\/[^/]+$/.test(url)) return 150
   if (/\/suno\/submit/.test(url)) return 60
   if (/\/v1\/audio\/speech\b/.test(url)) return 300
   return 30   // 其余保持原值
 }
 
+export async function serializeRustHttpBody(url: string, init?: RequestInit): Promise<{
+  headers: Record<string, string>
+  body?: string
+  body_base64?: string
+}> {
+  const headers = extractHeaders(init)
+  if (init?.body instanceof FormData || init?.body instanceof Blob) {
+    // Request 同时生成 multipart boundary 和正文，二进制图片不能经 text()/JSON.stringify。
+    const request = new Request(url, { method: init.method || 'POST', headers, body: init.body })
+    const bytes = new Uint8Array(await request.arrayBuffer())
+    let binary = ''
+    for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
+    }
+    return { headers: extractHeaders({ headers: request.headers }), body_base64: btoa(binary) }
+  }
+  return { headers, body: typeof init?.body === 'string' ? init.body : undefined }
+}
+
 async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
   const { invoke } = await import('@tauri-apps/api/core')
 
-  const headers = extractHeaders(init)
-  let body: string | undefined
-  if (init?.body) {
-    body = typeof init.body === 'string' ? init.body : JSON.stringify(init.body)
-  }
+  const { headers, body, body_base64 } = await serializeRustHttpBody(url, init)
+  if (init?.signal?.aborted) throw new DOMException('The operation was aborted', 'AbortError')
 
   const result = await invoke<RustHttpResponse>('http_request', {
     request: {
@@ -155,6 +174,7 @@ async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
       method: init?.method || 'GET',
       headers: Object.keys(headers).length > 0 ? headers : undefined,
       body,
+      body_base64,
       timeout_secs: pickTimeoutForUrl(url),
     },
   })

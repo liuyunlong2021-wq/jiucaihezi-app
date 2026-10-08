@@ -11,6 +11,7 @@ pub struct HttpRequest {
     pub method: Option<String>,
     pub headers: Option<HashMap<String, String>>,
     pub body: Option<String>,
+    pub body_base64: Option<String>,
     pub timeout_secs: Option<u64>,
 }
 
@@ -253,7 +254,12 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
         }
     }
 
-    if let Some(body) = request.body {
+    if let Some(body) = request.body_base64 {
+        let bytes = general_purpose::STANDARD
+            .decode(body)
+            .map_err(|_| "HTTP 二进制请求数据格式无效".to_string())?;
+        req = req.body(bytes);
+    } else if let Some(body) = request.body {
         req = req.body(body);
     }
 

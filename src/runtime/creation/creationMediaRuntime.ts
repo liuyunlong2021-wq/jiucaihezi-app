@@ -17,7 +17,7 @@ import {
 } from '@/api/media-generation'
 import type { CreationMediaInputTransport, CreationRunPlan } from './creationMediaTypes'
 import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
-import { usesNewApiContentEndpoint } from './creationMediaPlan'
+import { canonicalCreationRatio, usesNewApiContentEndpoint } from './creationMediaPlan'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
 export interface CreationSubmitRequest {
@@ -82,7 +82,9 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
       webappId: asOptionalString(params.webappId),
       size: asOptionalString(params.size),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
+      ratio: asOptionalString(params.ratio),
       resolution: asOptionalString(params.resolution),
+      imageSize: asOptionalString(params.imageSize),
       image: imageValueForRequest(params),
       lora: asOptionalString(params.lora),
       lora_strength: asOptionalNumber(params.lora_strength),
@@ -150,6 +152,8 @@ export async function executeCreationSubmitRequest(
   request = await materializeRequestMedia(request)
   if (request.runtime === 'local-comfy') return executeLocalComfyRequest(request, onProgress, onSubmitted)
   if (request.runtime === 'newapi-direct') {
+    if (request.plan.apiStyle === 'openai-responses-text')
+      return executeH3ContextIrRequest(request, onProgress, onSubmitted)
     if (request.taskType === 'image') return executeDirectImageRequest(request, onProgress, onSubmitted)
     if (request.taskType === 'video') return executeDirectVideoRequest(request, onProgress, onSubmitted)
     return executeDirectAudioRequest(request, onProgress, onSubmitted)
@@ -157,6 +161,67 @@ export async function executeCreationSubmitRequest(
   if (request.taskType === 'image') return executeRunningHubImageRequest(request, onProgress, onSubmitted)
   if (request.taskType === 'video') return executeRunningHubVideoRequest(request, onProgress, onSubmitted)
   return executeRunningHubAudioRequest(request, onProgress, onSubmitted)
+}
+
+async function executeH3ContextIrRequest(
+  request: CreationSubmitRequest,
+  onProgress?: (elapsed: number, status: string) => void,
+  onSubmitted?: (submitted: { taskId: string; pollUrl: string; pollKind: 'image' | 'video' | 'audio' | 'text' }) => void | Promise<void>,
+): Promise<MediaResult> {
+  const params = request.videoParams || {}
+  const normalized = request.plan.debug.normalizedParams
+  const prompt = asString(params.prompt).trim()
+  const duration = Number(normalized.duration)
+  const imageMode = asString(normalized.image_mode) || 'reference_image'
+  const ratio = asString(normalized.ratio || normalized.aspect_ratio || normalized.aspectRatio) || '16:9'
+  const images = [...new Set([...(params.imageUrls || []), ...(params.imageUrl ? [params.imageUrl] : [])])]
+  const videos = [...new Set([...(params.videoUrls || []), ...(params.videoUrl ? [params.videoUrl] : [])])]
+  const audios = [...new Set([...(params.audioUrls || []), ...(params.audioUrl ? [params.audioUrl] : [])])]
+  const allowedRatios = ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16']
+
+  if (!prompt) throw new Error('请输入提示词')
+  if (!Number.isInteger(duration) || duration < 4 || duration > 15) throw new Error('目标时长必须为 4 到 15 秒的整数')
+  if (!allowedRatios.includes(ratio)) throw new Error('画幅不受支持')
+  if (images.length > 9 || videos.length > 3 || audios.length > 3) throw new Error('参考素材数量超过 MiniMax H3 Context IR 限制')
+  if (!images.length && !videos.length && !audios.length && ratio === 'adaptive') throw new Error('纯文本增强必须选择具体画幅')
+
+  const content: Array<Record<string, unknown>> = [{ type: 'text', text: prompt }]
+  if (imageMode === 'reference_image') {
+    images.forEach(url => content.push({ type: 'image_url', role: 'reference_image', image_url: { url } }))
+  } else if (imageMode === 'first_frame' || imageMode === 'last_frame') {
+    if (images.length !== 1) throw new Error('首帧或尾帧模式需要且只能选择一张图片')
+    if (videos.length || audios.length) throw new Error('首帧/尾帧不能与参考视频或参考音频混用')
+    content.push({ type: 'image_url', role: imageMode, image_url: { url: images[0] } })
+  } else if (imageMode === 'first_last_frames') {
+    if (images.length < 1 || images.length > 2) throw new Error('首尾帧模式需要一张或两张图片')
+    if (videos.length || audios.length) throw new Error('首帧/尾帧不能与参考视频或参考音频混用')
+    content.push({ type: 'image_url', role: 'first_frame', image_url: { url: images[0] } })
+    if (images[1]) content.push({ type: 'image_url', role: 'last_frame', image_url: { url: images[1] } })
+  } else {
+    throw new Error('图片用途不受支持')
+  }
+  videos.forEach(url => content.push({ type: 'video_url', role: 'reference_video', video_url: { url } }))
+  audios.forEach(url => content.push({ type: 'audio_url', role: 'reference_audio', audio_url: { url } }))
+
+  const hasFrame = imageMode === 'first_frame' || imageMode === 'last_frame' || imageMode === 'first_last_frames'
+  onProgress?.(0, '提交提示词增强...')
+  const submitted = await apiCall('/v1/responses', {
+    model: request.plan.model,
+    background: true,
+    content,
+    duration,
+    ratio: hasFrame ? 'adaptive' : ratio,
+  }, 'POST', request.plan.model, request.signal)
+  const responseId = String(submitted?.id || '')
+  if (!/^resp_[A-Za-z0-9._:-]+$/.test(responseId)) throw new Error('MiniMax H3 Context IR 未返回有效的 response id')
+  const pollUrl = `/v1/responses/${encodeURIComponent(responseId)}`
+  const immediateText = extractMediaText(submitted)
+  if (immediateText) return { url: '', text: immediateText, type: 'text', taskId: responseId, pollUrl, pollKind: 'text' }
+
+  await onSubmitted?.({ taskId: responseId, pollUrl, pollKind: 'text' })
+  const text = await pollTask(pollUrl, 'text', onProgress, 600, 5000, request.signal)
+  if (!text.trim()) throw new Error('MiniMax H3 Context IR 已完成，但没有返回增强文本')
+  return { url: '', text, type: 'text', taskId: responseId, pollUrl, pollKind: 'text' }
 }
 
 export async function materializeMediaInput(
@@ -429,7 +494,7 @@ async function executeDirectImageRequest(
 ): Promise<MediaResult> {
   const params = request.imageParams || {}
   const prompt = asString(params.prompt)
-  if (request.plan.apiStyle === 'xiaoyi-image-task' || request.plan.apiStyle === 'newapi-image-task') {
+  if (request.plan.apiStyle === 'newapi-image-task') {
     onProgress?.(0, '提交图片任务...')
     const images = asStringArray(params.image)
     const fields: Record<string, string | Blob | Blob[]> = {
@@ -460,6 +525,10 @@ async function executeDirectImageRequest(
       response_format: params.responseFormat || 'url',
       image: await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal))),
     }
+    if (request.plan.model.startsWith('ft-image-v1-')) {
+      fields.ratio = asString(params.ratio || params.aspectRatio || '9:16')
+      if (params.imageSize || params.resolution) fields.imageSize = asString(params.imageSize || params.resolution).toUpperCase()
+    }
     if (params.size) fields.size = params.size
     if (params.quality) fields.quality = params.quality
     const data = await apiCallMultipart(request.endpoint, fields, request.signal)
@@ -481,8 +550,14 @@ async function executeDirectImageRequest(
     quality: params.quality,
     aspect_ratio: params.aspectRatio,
     aspectRatio: params.aspectRatio,
-    ratio: params.aspectRatio,
+    ratio: params.ratio || params.aspectRatio,
     resolution: params.resolution,
+    ...(request.plan.model.startsWith('ft-image-v1-')
+      ? {
+          ratio: params.ratio || params.aspectRatio || '9:16',
+          imageSize: params.imageSize || (params.resolution ? asString(params.resolution).toUpperCase() : undefined),
+        }
+      : {}),
     image: params.image,
     response_format: params.responseFormat || 'url',
   })
@@ -915,16 +990,33 @@ function buildDirectVideoBody(
     // 模板自定义参数（戏种 mode）必须走 extra_fields：顶层的 mode 是 NewAPI 自己的
     // string 字段，发数字会被它的 JSON 绑定直接拒掉
     // （invalid_json: cannot unmarshal number into ... .mode of type string）。
-    const workflowMode = request.plan.debug.normalizedParams.mode
+    const normalized = request.plan.debug.normalizedParams
+    const workflowMode = normalized.mode
+    const requestedAspectRatio = asOptionalString(
+      normalized.aspect_ratio ?? normalized.ratio ?? normalized.aspectRatio,
+    )
+    // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
+    // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
+    // 收敛成模型声明的枚举：旧版本存下来的计划会带着 '16:9' 这种界面标签绕过入口校验，
+    // 直接发给 ResolutionSelector 就是 Value not in list（2026-10-02 实测）。
+    const aspectRatioForBody = asOptionalString(params.size)
+      ? undefined
+      : canonicalCreationRatio(request.plan.modelId, requestedAspectRatio)
+    // NewAPI 对本机 comfy 渠道只转发它 TaskSubmitReq 里认得的字段（model/prompt/images/
+    // duration/size/mode/metadata…）。顶层自定义字段和 extra_fields 都会被整段丢掉 ——
+    // 实测 aspect_ratio 与 mode 都到不了适配器，面板选了比例却出 16:9（模板默认）就是这么来的。
+    // metadata 是它唯一保留的自定义槽位（RH 链路的 metadata.rh_aiapp 已实测可用），
+    // 所以三处都发一份：顶层 / extra_fields / metadata，哪个活着哪个生效。
+    const customParams = compact({ mode: workflowMode, aspect_ratio: aspectRatioForBody })
+    const hasCustomParams = Object.keys(customParams).length > 0
     const body: Record<string, unknown> = compact({
       model: request.plan.model,
       prompt: params.prompt,
       duration: asOptionalNumber(params.duration),
       size: asOptionalString(params.size),
-      // ref2v 绑的是 ResolutionSelector 的 aspect_ratio；另外三个 H3 用显式 width/height，
-      // 它们规格里必有 size，此时不要把 plan 兜底的 '16:9' 一起发出去。
-      aspect_ratio: asOptionalString(params.size) ? undefined : asOptionalString(params.aspectRatio),
-      extra_fields: workflowMode === undefined ? undefined : { mode: workflowMode },
+      aspect_ratio: aspectRatioForBody,
+      extra_fields: hasCustomParams ? customParams : undefined,
+      metadata: hasCustomParams ? customParams : undefined,
     })
     if (request.plan.apiStyle === 'comfy-first-frame') {
       body.first_frame = uploadedImages[0]

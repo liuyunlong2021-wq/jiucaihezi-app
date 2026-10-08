@@ -23,7 +23,9 @@ export interface ImageGenParams {
   webappId?: string
   size?: string
   aspectRatio?: string
+  ratio?: string
   resolution?: string
+  imageSize?: string
   image?: string | string[]  // base64/data URL, or ordered reference images for image-to-image
   lora?: string
   lora_strength?: number
@@ -241,6 +243,7 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
 
   if (Array.isArray(payload)) {
     for (const item of payload) {
+      if (kind === 'image' && item?.b64_json) return `data:image/png;base64,${item.b64_json}`
       const u = pick(item); if (u) return u
       if (item?.b64_json) return `data:${kind === 'audio' ? 'audio/mpeg' : kind === 'video' ? 'video/mp4' : 'image/png'};base64,${item.b64_json}`
     }
@@ -251,6 +254,7 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
   }
   if (Array.isArray(data)) {
     for (const item of data) {
+      if (kind === 'image' && item?.b64_json) return `data:image/png;base64,${item.b64_json}`
       const u = pick(item); if (u) return u
       if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`
     }
@@ -266,6 +270,7 @@ export function extractMediaUrl(payload: any, kind: 'image' | 'video' | 'audio' 
       const nestedU = pick(data.data); if (nestedU) return nestedU
       if (Array.isArray(data.data.data)) {
         for (const item of data.data.data) {
+          if (kind === 'image' && item?.b64_json) return `data:image/png;base64,${item.b64_json}`
           const u2 = pick(item); if (u2) return u2
           if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`
         }
@@ -289,10 +294,17 @@ export function extractMediaText(payload: any): string {
   const normalize = (value: string) => value.replace(/\\n/g, '\n').replace(/\\t/g, '\t').trim()
   function pick(obj: any): string {
     if (!obj || typeof obj !== 'object') return ''
+    if (Array.isArray(obj)) {
+      for (const item of obj) {
+        const text = typeof item === 'string' ? normalize(item) : pick(item)
+        if (text) return text
+      }
+      return ''
+    }
     if (typeof obj.text === 'string' && obj.text.trim()) return normalize(obj.text)
     if (typeof obj.content === 'string' && obj.content.trim()) return normalize(obj.content)
     if (typeof obj.output === 'string' && obj.output.trim() && !/^https?:\/\//i.test(obj.output)) return normalize(obj.output)
-    for (const key of ['result', 'data', 'metadata', 'output']) {
+    for (const key of ['result', 'data', 'metadata', 'output', 'content']) {
       const nested = obj[key]
       if (nested && typeof nested === 'object') {
         const text = pick(nested)
@@ -498,19 +510,21 @@ function createTimeoutSignal(timeoutSec = 300, externalSignal?: AbortSignal): { 
   }
 }
 
-export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal): Promise<any> {
+export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal, apiKeyOverride?: string): Promise<any> {
   throwIfAborted(externalSignal)
-  await ensureConfig()
-  const key = storedApiKey()
+  if (apiKeyOverride && method !== 'GET') throw new Error('任务密钥仅用于查询')
+  if (!apiKeyOverride) await ensureConfig()
+  const key = apiKeyOverride || storedApiKey()
   if (!key) throw new Error('请先登录韭菜盒子账号')
-  const headers = model ? authHeadersFor(model) : authHeaders()
+  const headers = apiKeyOverride ? { 'Content-Type': 'application/json', Authorization: `Bearer ${key}`, 'x-api-key': key } : model ? authHeadersFor(model) : authHeaders()
   const opts: RequestInit = { method, headers }
   if (method !== 'GET' && body) opts.body = JSON.stringify(body)
   const base = getApiBase()
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
   // ★ 使用 safeFetch 而非裸 fetch：Tauri 走 Rust 桥，浏览器走原生（带超时）
-  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 300, externalSignal)
+  const imageProtocol = /^\/v1\/images\/(generations|edits)\b/.test(path)
+  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : imageProtocol ? 630 : 300, externalSignal)
   if (signal) opts.signal = signal
   let res: Response
   try {
@@ -527,9 +541,9 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
     if (res.status === 503) {
       const text = await res.text().catch(() => '')
       if (text.includes('model_not_found') || text.includes('无可用渠道')) {
-        throw new Error('该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试')
+        throw new Error(`该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试：${text.slice(0, 200)}`)
       }
-      throw new Error(`服务暂时不可用 (503)，请稍后再试`)
+      throw new Error(text.trim() ? `HTTP 503: ${text.slice(0, 200)}` : '服务暂时不可用 (503)，请稍后再试')
     }
     const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
@@ -650,7 +664,8 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   const headers = buildGatewayHeaders({})
   // multipart 不设置 Content-Type，让浏览器自动带 boundary
   delete headers['Content-Type']
-  const { signal, clear } = createTimeoutSignal(300, externalSignal)
+  const imageProtocol = /^\/v1\/images\/(generations|edits)\b/.test(path)
+  const { signal, clear } = createTimeoutSignal(imageProtocol ? 630 : 300, externalSignal)
   let res: Response
   try {
     res = await safeFetch(`${getApiBase()}${path}`, {
@@ -664,10 +679,10 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   }
   throwIfAborted(externalSignal)
   if (!res.ok) {
-    if (res.status === 503) {
+    const text = await res.text().catch(() => '')
+    if (res.status === 503 && !text.trim()) {
       throw new Error('服务暂时不可用 (503)，请稍后再试')
     }
-    const text = await res.text().catch(() => '')
     throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
   }
   const json = await res.json()
@@ -728,6 +743,7 @@ export async function pollTask(
   intervalMs = 10000,
   signal?: AbortSignal,
   useContentEndpoint = false,
+  apiKeyOverride?: string,
 ): Promise<string> {
   if (!isAllowedCreationPollUrl(pollPath)) throw new Error('任务轮询地址不安全，已阻止请求')
   const maxPolls = Math.ceil(maxPollsSec / (intervalMs / 1000))
@@ -749,7 +765,7 @@ export async function pollTask(
     })
     let data: any
     try {
-      data = await apiCall(pollPath, null, 'GET', undefined, signal)
+      data = await apiCall(pollPath, null, 'GET', undefined, signal, apiKeyOverride)
       consecutive521 = 0  // 成功请求，重置 521 计数
     } catch (e: any) {
       if (signal?.aborted) throw abortError()
@@ -777,17 +793,17 @@ export async function pollTask(
       if (kind === 'text') {
         const text = extractMediaText(data)
         if (text) return text
-        console.warn('[pollTask] 状态完成但未提取到文本:', JSON.stringify(data).slice(0, 300))
+        throw terminalCreationTaskError('任务已完成，但没有返回文本内容')
       }
       const newApiVideoUrl = kind === 'video' && useContentEndpoint ? newApiVideoContentUrl(pollPath) : null
       if (newApiVideoUrl) return newApiVideoUrl
-      const url = extractMediaUrl(data, kind === 'text' ? 'audio' : kind)
+      const url = extractMediaUrl(data, kind)
       if (url) {
         return normalizeAdapterRelativeResultUrl(url, pollPath)
       }
       const publicVideoTask = kind === 'video' && pollPath.match(/^\/v1\/videos\/(task_[A-Za-z0-9._:-]+)$/)
       if (publicVideoTask) {
-        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET', undefined, signal)
+        const detail = await apiCall(`/v1/video/generations/${encodeURIComponent(publicVideoTask[1])}`, null, 'GET', undefined, signal, apiKeyOverride)
         const detailUrl = extractMediaUrl(detail, 'video')
         if (detailUrl) return detailUrl
       }

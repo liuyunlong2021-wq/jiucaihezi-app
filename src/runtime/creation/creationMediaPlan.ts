@@ -35,6 +35,26 @@ export function usesNewApiContentEndpoint(
   return model === 'omni-fast' || model === 'omni-v2v' || model.endsWith('/omni-fast') || model.endsWith('/omni-v2v')
 }
 
+/**
+ * 把面板 / 历史计划里的比例收敛成模型自己声明的枚举值。
+ *
+ * 只认带后缀枚举（'16:9 (Widescreen)'）的工作流，收到界面标签 '16:9' 会直接
+ * `Prompt outputs failed validation` —— 2026-10-02 本机 H3 参考生视频实测。
+ * 入口校验挡得住面板，挡不住旧版本存下来、被重试复用的计划，所以出口要再收一次。
+ * 认不出来就返回 undefined：宁可让工作流用自己的默认画幅，也不发一个必被拒的值。
+ */
+export function canonicalCreationRatio(modelId: string, value: unknown): string | undefined {
+  const raw = typeof value === 'string' ? value.trim() : ''
+  if (!raw) return undefined
+  const options: string[] = []
+  for (const field of getCreationModelSpec(modelId)?.fields || []) {
+    if (!['aspect_ratio', 'aspectRatio', 'ratio'].includes(field.key)) continue
+    for (const option of field.options || []) options.push(String(option.value))
+  }
+  if (!options.length || options.includes(raw)) return raw
+  const short = raw.split(' (')[0]
+  return options.find(option => option.split(' (')[0] === short)
+}
 const SOURCE_LABELS = {
   'newapi-direct': '直连',
   runninghub: 'RunningHub',
@@ -146,7 +166,7 @@ function mediaInputTransportFor(
   assetFlow: CreationAssetFlow,
 ): CreationMediaInputTransport {
   if (spec.route === 'local-comfy') return 'base64'
-  if (apiStyle === 'openai-image-edits' || apiStyle === 'xiaoyi-image-task' || apiStyle === 'newapi-image-task') {
+  if (apiStyle === 'openai-image-edits' || apiStyle === 'newapi-image-task') {
     return 'multipart'
   }
   if (apiStyle === 'openai-videos' && /^veo-3\.1-/.test(spec.model)) return 'multipart'
@@ -196,15 +216,15 @@ function resolveEffectiveContract(
 } {
   if (
     spec.source === 'newapi-direct' &&
-    (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits' || spec.apiStyle === 'xiaoyi-image-task' || spec.apiStyle === 'newapi-image-task')
+    (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits' || spec.apiStyle === 'newapi-image-task')
   ) {
-    if (spec.apiStyle === 'xiaoyi-image-task' || spec.apiStyle === 'newapi-image-task') {
+    if (spec.apiStyle === 'newapi-image-task') {
       return {
         apiStyle: spec.apiStyle,
         mode: referenceImageCount > 0 ? 'image-to-image' : 'text-to-image',
         endpoint: '/v1/videos',
         pollKind: 'newapi-task',
-        assetFlow: spec.apiStyle === 'xiaoyi-image-task' && referenceImageCount > 0 ? 'newapi-upload' : 'none',
+        assetFlow: 'none',
       }
     }
     if (referenceImageCount > 0) {
@@ -246,7 +266,7 @@ function normalizeParams(
   params: Record<string, unknown>,
   apiStyle: CreationApiStyle,
 ): Record<string, unknown> {
-  if (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits' || apiStyle === 'xiaoyi-image-task' || apiStyle === 'newapi-image-task') {
+  if (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits' || apiStyle === 'newapi-image-task') {
     return normalizeOpenAiImageParams(spec, params)
   }
   if (apiStyle === 'rh-standard' || apiStyle === 'rh-aiapp') {
@@ -278,12 +298,18 @@ function normalizeOpenAiImageParams(
     prompt: params.prompt,
     size,
     quality: params.quality,
-    resolution: spec.apiStyle === 'xiaoyi-image-task' ? params.resolution : undefined,
+    ...(spec.model.startsWith('ft-image-v1-')
+      ? {
+          ratio: firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']),
+          imageSize: params.resolution ? String(params.resolution).toUpperCase() : undefined,
+        }
+      : {}),
     image: params.image,
     images: params.images,
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
-    response_format: 'url',
+    // GPT Image 2 系列的中转 URL 可能在客户端不可达；直接带回图片字节供项目落盘。
+    response_format: spec.id.startsWith('gpt-image-2') ? 'b64_json' : 'url',
   })
 }
 
@@ -463,6 +489,7 @@ function buildSubmitSummary(plan: CreationRunPlan): string {
 
 function modeLabel(mode: CreationRunPlan['mode']): string {
   const labels: Record<CreationRunPlan['mode'], string> = {
+    'prompt-enhancement': '提示词增强',
     'text-to-image': '文生图',
     'image-to-image': '图生图',
     'text-to-video': '文生视频',

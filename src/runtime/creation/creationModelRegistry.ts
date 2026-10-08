@@ -47,8 +47,8 @@ const GPT_IMAGE_2_ROUTES: Array<{
   { id: 'gpt-image-2.5-flare-1k', label: 'GPT Image 2.5 Flare 1K', price: 0.08, resolutions: ['1k'], hidden: true },
   { id: 'gpt-image-2.5-sunburst-1k', label: 'GPT Image 2.5 Sunburst 1K', price: 0.08, resolutions: ['1k'], hidden: true },
   { id: 'gpt-image-2-1k', label: 'GPT Image 2 1K', price: 0.08, resolutions: ['1k'] },
-  { id: 'gpt-image-2-超分', label: 'GPT Image 2 超分', price: 0.15, resolutions: ['1k', '2k', '4k'] },
-  { id: 'gpt-image-2.5-官方', label: 'GPT Image 2.5 官方', price: 0.15, resolutions: ['1k', '2k', '4k'] },
+  { id: 'gpt-image-2-超分', label: 'GPT Image 2 超分', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
+  { id: 'gpt-image-2.5-官方', label: 'GPT Image 2.5 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
   { id: 'gpt-image-2.5-flare-官方', label: 'GPT Image 2.5 Flare 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
   { id: 'gpt-image-2.5-sunburst-官方', label: 'GPT Image 2.5 Sunburst 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
 ]
@@ -111,6 +111,201 @@ const SHANHAI_VIDEO_MODELS: Array<{
     defaultDuration: 30,
     maxImages: 10,
   },
+]
+// 灵动 API（https://www.lingdongapi.com）：5 条线路、两类计费口径。
+// 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-02 实测）—— 比文档准：
+// 文档把 cvk-2.5-* 写成「图·视频·音频参考」，实际是 30 图 / 10 视频 / 10 音频。
+// `price` 是面板对用户的实付价（灵动官方价 + 加价），改价必须同步 NewAPI 渠道的计费表达式。
+const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517']
+const LINGDONG_CONTRACT_ISSUES = [
+  '2026-10-02 真机验收：`Sd 2.5 480P` 4 秒出片成功，后台实扣 2 元（面板 0.5/秒 × 4 秒对得上）。',
+  '参考视频/参考音频（videos[] / audios[]）未接：面板目前只有图片链路。',
+]
+// /api/pricing 的 supported_ratios：`SD-2.5-特价` 多一档 21:9，其余 4 条是这 5 档
+const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
+const LINGDONG_WIDE_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
+// 表内**顺序就是面板顺序**，而面板默认模型 = 当前任务第一条可用模型（useCreation 的
+// `availableModels[0]`）。所以 2026-10-02 用户要求「视频默认走 Sd 2.5 480P」时，
+// 就是把这条放在表首 + 把「满血seedance2.5」分组放到视频最前（CreationPanel.vue 的 order 表），两处缺一不可。
+const LINGDONG_VIDEO_MODELS: Array<{
+  // NewAPI 渠道里的公开名（面板发什么，渠道就按什么找），与 newapi-plugins/lingdong.plugin.js 的 meta.models 逐字一致
+  model: string
+  label: string
+  price: string
+  ratios: string[]
+  // 上游没声明分辨率参数的线路不给这个字段（`SD-2.5-特价` 的 supported_resolutions 是空数组）
+  resolutions?: string[]
+  duration: { min?: number; max?: number; allowedValues?: number[] }
+  // 按秒计费的线路默认给下限 4 秒（一笔最便宜）；`SD-2.5-特价` 是死档，就是 30
+  defaultDuration: number
+  maxImages: number
+  // 上游 notes 写明提示词上限时才给（`SD-2.5-特价` 是 12000 字）
+  promptMaxLength?: number
+}> = [
+  {
+    model: 'cvk-2.5-480',
+    label: 'Sd 2.5 480P · 灵动 cvk-2.5',
+    price: '0.5/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['480p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
+    model: 'SD-2.5-特价',
+    label: 'Sd 2.5 特价 30秒 · 灵动 SD-2.5-特价',
+    price: '2.5/次',
+    ratios: LINGDONG_WIDE_RATIOS,
+    duration: { allowedValues: [30] },
+    defaultDuration: 30,
+    maxImages: 9,
+    promptMaxLength: 12000,
+  },
+  {
+    model: 'sd2.5-a',
+    label: 'Sd 2.5-a 720P · 灵动 sd2.5-a',
+    price: '0.5/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
+    model: 'cvk-2.5-720',
+    label: 'Sd 2.5 720P · 灵动 cvk-2.5',
+    price: '0.75/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
+    model: 'cvk-2.5-1080',
+    label: 'Sd 2.5 1080P · 灵动 cvk-2.5',
+    price: '1.5/秒',
+    ratios: LINGDONG_RATIOS,
+    resolutions: ['1080p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+]
+// Fk 渠道：model 必须与已上传 fk Task Plugin 的 meta.models 完全一致。
+// XZ Seedance 2.0「933全参」不在插件白名单中，因此不加入创作面板。
+const FK_SEEDANCE_MODELS: Array<{
+  model: string
+  label: string
+  price: string
+  ratios: string[]
+  resolutions: string[]
+  duration: { min?: number; max?: number; allowedValues?: number[] }
+  defaultDuration: number
+  maxImages: number
+  maxVideos?: number
+  maxAudios?: number
+  promptMaxLength?: number
+}> = [
+  {
+    model: 'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563',
+    label: '特价渠道-Seedance2.5满血720p(30图)',
+    price: '0.1/秒',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+  },
+  {
+    model: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
+    label: '特价渠道Seedance2.5满血720p(可过真人)',
+    price: '0.4/秒',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    resolutions: ['720p'],
+    duration: { allowedValues: [15, 30] },
+    defaultDuration: 15,
+    maxImages: 9,
+  },
+  {
+    model: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
+    label: '长期特惠Seedance2.5满血720p',
+    price: '0.2/秒',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    resolutions: ['720p'],
+    duration: { allowedValues: [30] },
+    defaultDuration: 30,
+    maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+    promptMaxLength: 6000,
+  },
+  {
+    model: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f',
+    label: 'XZ-Seedance 2.5 720p(9图参考)',
+    price: '0.1/秒',
+    ratios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 9,
+  },
+  {
+    model: 'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
+    label: 'XN1-Seedance 2.5满血 480-720p',
+    price: '480p 0.5/秒 · 720p 1/秒',
+    ratios: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+    resolutions: ['480p', '720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+    promptMaxLength: 15000,
+  },
+  {
+    model: 'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
+    label: 'XN2-Seedance 2.5满血 480-720p',
+    price: '480p 0.5/秒 · 720p 0.8/秒',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
+    resolutions: ['480p', '720p'],
+    duration: { min: 4, max: 29 },
+    defaultDuration: 4,
+    maxImages: 30,
+    maxAudios: 10,
+    promptMaxLength: 9999,
+  },
+  {
+    model: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
+    label: '官方渠道-Seedance2.5满血720p',
+    price: '1/秒',
+    ratios: ['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'],
+    resolutions: ['720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+  },
+]
+const FK_IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
+const FK_IMAGE_MODELS: Array<{
+  model: string
+  label: string
+  price: string
+  resolutions?: string[]
+  maxImages: number
+}> = [
+  { model: 'ft-image-v1-211f28f47b0355abb1798f72eb65f22d', label: 'FK-image2', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-186289ba9d3263010c69372f8939dd94', label: 'FK-image2.5', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-eb47192eb578f340043911005a06fb6e', label: 'FK-image2.5-flare', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d', label: 'FK-image2.5-sunburst', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82', label: 'FK-banana-2', price: '0.2/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
+  { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'FK-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
+]
+const FK_SEEDANCE_CONTRACT_ISSUES = [
+  '插件和渠道已由用户配置；创作面板真实提交、成片与账单尚未验收。',
 ]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
@@ -851,14 +1046,38 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Grok Imagine Image 2.0 · 小易',
     price: 0.05,
     upstreamFamily: 'openai-compatible',
-    apiStyle: 'xiaoyi-image-task',
+    apiStyle: 'openai-image-edits',
     mode: 'text-to-image',
-    endpoint: '/v1/videos',
-    assetFlow: 'none',
-    resultExtractor: 'newapi-task',
-    pollKind: 'newapi-task',
+    endpoint: '/v1/images/edits',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k', '4k']) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    ratios: ['1:1', '16:9', '9:16', '3:2', '2:3'],
+    resolutions: ['1k', '2k', '4k'],
+    files: { images: { min: 0, max: 8 } },
+    contractStatus: 'verified',
+    notes: ['https://xiaoyiapi.xyz/docs/api/grok-images/'],
+  }),
+  directImage({
+    id: 'newapi/xiaoyi/grok-imagine-image',
+    model: 'grok-imagine-image',
+    label: 'Grok Imagine Image · 小易',
+    price: 0.05,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-image-edits',
+    mode: 'text-to-image',
+    endpoint: '/v1/images/edits',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k', '4k']) },
       { key: 'images', label: '参考图', kind: 'images' },
     ]),
     ratios: ['1:1', '16:9', '9:16', '3:2', '2:3'],
@@ -967,6 +1186,58 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ], 12000),
     notes: ['菠萝MiniMaxapi.md', '独立菠萝 MiniMax 适配器，上游按秒计费。'],
   }),
+  baseSpec({
+    id: 'newapi/minimax-h3-context-ir',
+    model: 'MiniMax-H3-Context-IR',
+    label: 'MiniMax H3 Context IR 提示词增强',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-responses-text',
+    mode: 'prompt-enhancement',
+    contractStatus: 'partial',
+    endpoint: '/v1/responses',
+    pollKind: 'none',
+    assetFlow: 'newapi-upload',
+    outputModalities: ['text'],
+    inputModalities: ['text', 'image', 'video', 'audio'],
+    files: {
+      images: { min: 0, max: 9, maxBytes: 30 * 1024 * 1024 },
+      videos: { min: 0, max: 3, maxBytes: 50 * 1024 * 1024 },
+      audios: { min: 0, max: 3, maxBytes: 15 * 1024 * 1024 },
+    },
+    fields: promptFields([
+      {
+        key: 'duration', label: '目标时长(秒)', kind: 'number',
+        defaultValue: 6, min: 4, max: 15, step: 1,
+      },
+      {
+        key: 'ratio', label: '画幅', kind: 'select', defaultValue: '16:9',
+        options: options(['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16']),
+      },
+      {
+        key: 'image_mode', label: '图片用途', kind: 'select', defaultValue: 'reference_image',
+        options: [
+          { value: 'reference_image', label: '参考图' },
+          { value: 'first_frame', label: '首帧' },
+          { value: 'last_frame', label: '尾帧' },
+          { value: 'first_last_frames', label: '首尾帧' },
+        ],
+      },
+      { key: 'images', label: '图片参考 (最多9张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (最多3段)', kind: 'video' },
+      { key: 'audios', label: '参考音频 (最多3段)', kind: 'audio' },
+    ]),
+    ratios: ['adaptive', '21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
+    duration: { min: 4, max: 15 },
+    notes: [
+      '独立调用 NewAPI Responses API 的 MiniMax H3 Context IR；只返回增强提示词，不提交视频生成任务。',
+      '纯文本请求必须选择具体画幅；首帧/尾帧由输入图片决定画幅，不能与参考图、参考视频或参考音频混用。',
+      '当前纯文本公网调用已验收；多模态素材形态仍待逐项验收。',
+    ],
+    contractIssues: ['多模态输入形态尚未完成公网验收。'],
+  }),
   directVideo({
     id: 'newapi/boluo/minimax_h3_zm_u24',
     model: 'minimax_h3_zm_u24',
@@ -1027,6 +1298,130 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ]),
     notes: SHANHAI_NOTES,
   })),
+  // ── 灵动 API：直连厂商（newapi-plugins/lingdong.plugin.js），没有适配器也没有隧道 ──
+  ...LINGDONG_VIDEO_MODELS.map(model => directVideo({
+    id: `newapi/lingdong/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    // 2026-10-02 真机验收通过（`Sd 2.5 480P` 4 秒出片 + 实扣 2 元）
+    contractStatus: 'verified',
+    contractIssues: LINGDONG_CONTRACT_ISSUES,
+    ratios: model.ratios,
+    resolutions: model.resolutions,
+    duration: model.duration,
+    files: { images: { min: 0, max: model.maxImages } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: model.ratios[0], options: options(model.ratios) },
+      // 上游没声明分辨率的线路不展示这一项，免得面板发一个它不认的参数
+      ...(model.resolutions
+        ? [{ key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: model.resolutions[0], options: options(model.resolutions) }]
+        : []),
+      {
+        key: 'duration',
+        label: '时长(秒)',
+        kind: 'number',
+        defaultValue: model.defaultDuration ?? model.duration.allowedValues?.[0] ?? model.duration.min,
+        min: model.duration.min,
+        max: model.duration.max,
+        step: 1,
+      },
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+    ], model.promptMaxLength),
+    notes: LINGDONG_NOTES,
+  })),
+  // ── FK-Seedance：7 个模型与 fk Task Plugin 的白名单一一对应 ──
+  ...FK_SEEDANCE_MODELS.map(model => directVideo({
+    id: `newapi/fk/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    contractStatus: 'partial',
+    contractIssues: FK_SEEDANCE_CONTRACT_ISSUES,
+    ratios: model.ratios,
+    resolutions: model.resolutions,
+    duration: model.duration,
+    files: {
+      images: { min: 0, max: model.maxImages },
+      ...(model.maxVideos ? { videos: { min: 0, max: model.maxVideos } } : {}),
+      ...(model.maxAudios ? { audios: { min: 0, max: model.maxAudios } } : {}),
+    },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: model.ratios.includes('16:9') ? '16:9' : model.ratios[0], options: options(model.ratios) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: model.resolutions[0], options: options(model.resolutions) },
+      model.duration.allowedValues
+        ? { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: model.defaultDuration, options: options(model.duration.allowedValues) }
+        : { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: model.defaultDuration, min: model.duration.min, max: model.duration.max, step: 1 },
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+      ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
+      ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
+    ], model.promptMaxLength),
+    notes: ['newapi-plugins/fk.plugin.js', '按用户确认的 Fk 渠道价格显示；真实出片及扣费尚待验收。'],
+  })),
+  // ── FK 图片：模型编号来自当前账号目录；fk Task Plugin 负责异步轮询与结果 URL ──
+  ...FK_IMAGE_MODELS.map(model => directImage({
+    id: `newapi/fk/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-image-edits',
+    mode: 'text-to-image',
+    endpoint: '/v1/images/edits',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
+    contractStatus: 'partial',
+    files: { images: { min: 0, max: model.maxImages } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'auto', options: options(FK_IMAGE_RATIOS) },
+      ...(model.resolutions
+        ? [{ key: 'resolution', label: '画质', kind: 'select' as const, defaultValue: model.resolutions[0], options: options(model.resolutions) }]
+        : []),
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+    ]),
+    ratios: FK_IMAGE_RATIOS,
+    resolutions: model.resolutions,
+    notes: ['newapi-plugins/fk.plugin.js', '模型编号、能力和价格来自用户提供的当前 Fanke 账号目录；真实出图、轮询、下载与扣费尚待验收。'],
+  })),
+  directVideo({
+    id: 'newapi/fk/ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
+    model: 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
+    label: '特价渠道 MiniMax H3-768p',
+    price: '0.08/秒',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    contractStatus: 'partial',
+    contractIssues: ['面板参数已按用户提供的上游目录登记；真实生成与扣费尚未验收。'],
+    ratios: ['16:9', '4:3', '1:1', '3:4', '9:16'],
+    resolutions: ['768p'],
+    duration: { min: 1, max: 15 },
+    files: {
+      images: { min: 0, max: 9 },
+      audios: { min: 0, max: 3 },
+    },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '4:3', '1:1', '3:4', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '768p', options: options(['768p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 1, min: 1, max: 15, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' },
+    ]),
+    notes: ['按用户提供的上游目录登记：768p、1–15秒、5种画幅、最多9张图和3段音频、不支持参考视频。上游目录价 ¥0.06/秒；创作面板对外价按用户设置为 ¥0.08/秒。'],
+  }),
   directVideo({
     id: 'newapi/xiaoyi/grok-imagine-video-1.5',
     hidden: true,
@@ -2192,12 +2587,17 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
+  if (spec.id.startsWith('newapi/fk/ft-image-v1-')) return 'FK-Image'
+  if (spec.id.startsWith('newapi/fk/')) return 'FK-Seedance'
   // 菠萝线路（aimanplay.cn + 独立 MiniMax 适配器）单独成组：视频两项 + 图片两项
   // （gpt-image-2 菠萝 / gpt-image-2.5 菠萝）。面板顺序见 `CreationPanel.vue` 的 order 数组。
   if (spec.id.startsWith('newapi/boluo/') || id.includes('菠萝')) return '菠萝'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.5'
+  // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）。
+  // 族名是用户 2026-10-02 指定的展示名，面板分组头就是它；改名要同步 `CreationPanel.vue` 的 order 表。
+  if (spec.id.startsWith('newapi/lingdong/')) return '满血seedance2.5'
   // 本机 comfy-adapter 的模型统一用 jc- 前缀，单独成组，不要混进「其他模型」
   if (spec.id.startsWith('jc-')) return 'jc 本机'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'
