@@ -23,7 +23,9 @@ export interface ImageGenParams {
   webappId?: string
   size?: string
   aspectRatio?: string
+  ratio?: string
   resolution?: string
+  imageSize?: string
   image?: string | string[]  // base64/data URL, or ordered reference images for image-to-image
   lora?: string
   lora_strength?: number
@@ -521,7 +523,8 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
   const fullUrl = `${base}${path}`
   console.log('[apiCall]', method, fullUrl, 'model=', model, 'keyLen=', (key||'').length)
   // ★ 使用 safeFetch 而非裸 fetch：Tauri 走 Rust 桥，浏览器走原生（带超时）
-  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : 300, externalSignal)
+  const imageProtocol = /^\/v1\/images\/(generations|edits)\b/.test(path)
+  const { signal, clear } = createTimeoutSignal(method === 'GET' ? 60 : imageProtocol ? 630 : 300, externalSignal)
   if (signal) opts.signal = signal
   let res: Response
   try {
@@ -661,7 +664,8 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
   const headers = buildGatewayHeaders({})
   // multipart 不设置 Content-Type，让浏览器自动带 boundary
   delete headers['Content-Type']
-  const { signal, clear } = createTimeoutSignal(300, externalSignal)
+  const imageProtocol = /^\/v1\/images\/(generations|edits)\b/.test(path)
+  const { signal, clear } = createTimeoutSignal(imageProtocol ? 630 : 300, externalSignal)
   let res: Response
   try {
     res = await safeFetch(`${getApiBase()}${path}`, {

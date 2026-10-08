@@ -136,7 +136,7 @@ export async function normalizeRustHttpRequest(
 function pickTimeoutForUrl(url: string): number {
   if (/\/api\/creations\/uploads\b/.test(url)) return 120
   if (/\/v1\/models\b/.test(url)) return 5   // 模型列表探测，5 秒足够
-  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 300  // 图片生成 5 分钟（T8 GPTImage2 实测 ~200s）
+  if (/\/v1\/images\/(generations|edits)\b/.test(url)) return 630  // NewAPI rc40 openai_image 轮询上限 600 秒，留少量响应余量
   if (/\/v1\/videos\b/.test(url) && !/\/v1\/videos\/[^/]+$/.test(url)) return 150
   if (/\/suno\/submit/.test(url)) return 60
   if (/\/v1\/audio\/speech\b/.test(url)) return 300

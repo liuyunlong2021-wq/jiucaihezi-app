@@ -289,6 +289,21 @@ const FK_SEEDANCE_MODELS: Array<{
     maxAudios: 10,
   },
 ]
+const FK_IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
+const FK_IMAGE_MODELS: Array<{
+  model: string
+  label: string
+  price: string
+  resolutions?: string[]
+  maxImages: number
+}> = [
+  { model: 'ft-image-v1-211f28f47b0355abb1798f72eb65f22d', label: 'FK-image2', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-186289ba9d3263010c69372f8939dd94', label: 'FK-image2.5', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-eb47192eb578f340043911005a06fb6e', label: 'FK-image2.5-flare', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d', label: 'FK-image2.5-sunburst', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82', label: 'FK-banana-2', price: '0.2/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
+  { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'FK-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
+]
 const FK_SEEDANCE_CONTRACT_ISSUES = [
   '插件和渠道已由用户配置；创作面板真实提交、成片与账单尚未验收。',
 ]
@@ -1031,12 +1046,35 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     label: 'Grok Imagine Image 2.0 · 小易',
     price: 0.05,
     upstreamFamily: 'openai-compatible',
-    apiStyle: 'xiaoyi-image-task',
+    apiStyle: 'openai-image-edits',
     mode: 'text-to-image',
-    endpoint: '/v1/videos',
-    assetFlow: 'none',
-    resultExtractor: 'newapi-task',
-    pollKind: 'newapi-task',
+    endpoint: '/v1/images/edits',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k', '4k']) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    ratios: ['1:1', '16:9', '9:16', '3:2', '2:3'],
+    resolutions: ['1k', '2k', '4k'],
+    files: { images: { min: 0, max: 8 } },
+    contractStatus: 'verified',
+    notes: ['https://xiaoyiapi.xyz/docs/api/grok-images/'],
+  }),
+  directImage({
+    id: 'newapi/xiaoyi/grok-imagine-image',
+    model: 'grok-imagine-image',
+    label: 'Grok Imagine Image · 小易',
+    price: 0.05,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-image-edits',
+    mode: 'text-to-image',
+    endpoint: '/v1/images/edits',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k', '4k']) },
@@ -1329,6 +1367,32 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ], model.promptMaxLength),
     notes: ['newapi-plugins/fk.plugin.js', '按用户确认的 Fk 渠道价格显示；真实出片及扣费尚待验收。'],
+  })),
+  // ── FK 图片：模型编号来自当前账号目录；fk Task Plugin 负责异步轮询与结果 URL ──
+  ...FK_IMAGE_MODELS.map(model => directImage({
+    id: `newapi/fk/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-image-edits',
+    mode: 'text-to-image',
+    endpoint: '/v1/images/edits',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'openai-image',
+    pollKind: 'none',
+    contractStatus: 'partial',
+    files: { images: { min: 0, max: model.maxImages } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: 'auto', options: options(FK_IMAGE_RATIOS) },
+      ...(model.resolutions
+        ? [{ key: 'resolution', label: '画质', kind: 'select' as const, defaultValue: model.resolutions[0], options: options(model.resolutions) }]
+        : []),
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+    ]),
+    ratios: FK_IMAGE_RATIOS,
+    resolutions: model.resolutions,
+    notes: ['newapi-plugins/fk.plugin.js', '模型编号、能力和价格来自用户提供的当前 Fanke 账号目录；真实出图、轮询、下载与扣费尚待验收。'],
   })),
   directVideo({
     id: 'newapi/fk/ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
@@ -2523,6 +2587,7 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
+  if (spec.id.startsWith('newapi/fk/ft-image-v1-')) return 'FK-Image'
   if (spec.id.startsWith('newapi/fk/')) return 'FK-Seedance'
   // 菠萝线路（aimanplay.cn + 独立 MiniMax 适配器）单独成组：视频两项 + 图片两项
   // （gpt-image-2 菠萝 / gpt-image-2.5 菠萝）。面板顺序见 `CreationPanel.vue` 的 order 数组。

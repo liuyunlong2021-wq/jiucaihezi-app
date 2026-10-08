@@ -82,7 +82,9 @@ export function buildCreationSubmitRequest(plan: CreationRunPlan): CreationSubmi
       webappId: asOptionalString(params.webappId),
       size: asOptionalString(params.size),
       aspectRatio: firstString(params, ['aspect_ratio', 'aspectRatio', 'ratio']),
+      ratio: asOptionalString(params.ratio),
       resolution: asOptionalString(params.resolution),
+      imageSize: asOptionalString(params.imageSize),
       image: imageValueForRequest(params),
       lora: asOptionalString(params.lora),
       lora_strength: asOptionalNumber(params.lora_strength),
@@ -492,7 +494,7 @@ async function executeDirectImageRequest(
 ): Promise<MediaResult> {
   const params = request.imageParams || {}
   const prompt = asString(params.prompt)
-  if (request.plan.apiStyle === 'xiaoyi-image-task' || request.plan.apiStyle === 'newapi-image-task') {
+  if (request.plan.apiStyle === 'newapi-image-task') {
     onProgress?.(0, '提交图片任务...')
     const images = asStringArray(params.image)
     const fields: Record<string, string | Blob | Blob[]> = {
@@ -523,6 +525,10 @@ async function executeDirectImageRequest(
       response_format: params.responseFormat || 'url',
       image: await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal))),
     }
+    if (request.plan.model.startsWith('ft-image-v1-')) {
+      fields.ratio = asString(params.ratio || params.aspectRatio || '9:16')
+      if (params.imageSize || params.resolution) fields.imageSize = asString(params.imageSize || params.resolution).toUpperCase()
+    }
     if (params.size) fields.size = params.size
     if (params.quality) fields.quality = params.quality
     const data = await apiCallMultipart(request.endpoint, fields, request.signal)
@@ -544,8 +550,14 @@ async function executeDirectImageRequest(
     quality: params.quality,
     aspect_ratio: params.aspectRatio,
     aspectRatio: params.aspectRatio,
-    ratio: params.aspectRatio,
+    ratio: params.ratio || params.aspectRatio,
     resolution: params.resolution,
+    ...(request.plan.model.startsWith('ft-image-v1-')
+      ? {
+          ratio: params.ratio || params.aspectRatio || '9:16',
+          imageSize: params.imageSize || (params.resolution ? asString(params.resolution).toUpperCase() : undefined),
+        }
+      : {}),
     image: params.image,
     response_format: params.responseFormat || 'url',
   })

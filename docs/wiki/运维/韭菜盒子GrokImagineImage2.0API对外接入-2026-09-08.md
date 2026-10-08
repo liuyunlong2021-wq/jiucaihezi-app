@@ -1,42 +1,45 @@
-# 韭菜盒子 Grok Imagine Image 2.0 API 对外接入
+# 韭菜盒子 Grok Imagine Image API 对外接入
 
-> 本文档是韭菜盒子 NewAPI 的公开接入合同，只描述第三方 APP 需要调用的接口。
->
-> 注意：该模型输出图片，但当前使用异步任务端点 `POST /v1/videos`，不是 `/v1/images/generations`。
->
-> 2026-10-06：尝试切换到 OpenAI 图片端点后，用户实测收到 HTTP 404 `bad_response_status_code`。客户端已恢复原异步路由；需结合 NewAPI 请求日志中的渠道与实际上游 URL，才能确认 404 是上游路径还是渠道 Base URL 配置导致。
+> 本文档是韭菜盒子 NewAPI 的公开接入合同，只描述第三方 APP 调用方式。
+> 更新：2026-10-08。服务器 NewAPI 官方版本为 `v1.0.0-rc.40`；小易通道内部使用 `openai_image` 任务插件。
 
 ## 接入信息
 
 | 项目 | 值 |
 | --- | --- |
 | Base URL | `https://api.jiucaihezi.studio` |
-| 创建图片任务 | `POST /v1/videos` |
-| 查询任务 | `GET /v1/videos/{task_id}` |
-| 模型名 | `grok-imagine-image-2.0` |
+| 文生图 | `POST /v1/images/generations` |
+| 图生图 | `POST /v1/images/edits` |
+| 模型名 | `grok-imagine-image-2.0` 或 `grok-imagine-image` |
 | 认证 | `Authorization: Bearer <你的 API Key>` |
-| 生成方式 | 文生图、最多 8 张参考图 |
+| 生成方式 | 同步返回 OpenAI 图片响应；NewAPI 在服务端轮询上游任务 |
+
+NewAPI 返回后，客户端直接处理 `data[].url` 或 `data[].b64_json`。小易上游异步任务号不会暴露给客户端，不要轮询 `/v1/videos`。
 
 ## 文生图
 
 ```bash
-curl --location 'https://api.jiucaihezi.studio/v1/videos' \
+curl --location 'https://api.jiucaihezi.studio/v1/images/generations' \
   --header 'Authorization: Bearer <YOUR_API_KEY>' \
   --header 'Content-Type: application/json' \
   --data '{
     "model": "grok-imagine-image-2.0",
     "prompt": "一张电影感的未来城市海报，夜景，震撼光影",
     "size": "2048x1152",
+    "aspect_ratio": "16:9",
+    "n": 1,
     "response_format": "url"
   }'
 ```
 
-## 参考图生成
+`size` 必须明确，并且和 `aspect_ratio` 指定相同比例。支持比例：`1:1`、`16:9`、`9:16`、`3:2`、`2:3`。`response_format` 支持 `url` 和 `b64_json`。
 
-有参考图时使用 `multipart/form-data`。多张图片重复提交 `image[]` 字段：
+## 参考图编辑
+
+图生图使用 `multipart/form-data`，字段名为 `image`；多张图片重复提交 `image[]`：
 
 ```bash
-curl --location 'https://api.jiucaihezi.studio/v1/videos' \
+curl --location 'https://api.jiucaihezi.studio/v1/images/edits' \
   --header 'Authorization: Bearer <YOUR_API_KEY>' \
   --form 'model=grok-imagine-image-2.0' \
   --form 'prompt=保留第一张的人物，融合第二张的色彩和光影风格' \
@@ -46,109 +49,31 @@ curl --location 'https://api.jiucaihezi.studio/v1/videos' \
   --form 'image[]=@./style.jpg'
 ```
 
-参考图必须是 `image/*`，最多 8 张，单张最大 20 MB，合计最大 64 MB。本地图片直接使用 multipart 上传，不要把本地路径、`file:` URL 或 `data:` URL 写入 JSON。
+不要手动设置 `Content-Type: multipart/form-data`，让客户端生成 boundary。参考图必须是可读取的图片文件。不要将本地路径或 `file:` URL 放进 JSON。
 
-## 请求字段
+## 成功响应与结果下载
 
-| 字段 | 必填 | 说明 |
-| --- | --- | --- |
-| `model` | 是 | 固定为 `grok-imagine-image-2.0`。 |
-| `prompt` | 是 | 非空的图片描述或编辑指令。 |
-| `size` | 否 | 输出像素尺寸，例如 `1024x1024` 或 `2048x1152`。 |
-| `response_format` | 否 | 当前公开合同固定使用 `url`。 |
-| `image[]` | 否 | 参考图文件；仅用于 `multipart/form-data`，可重复传入。 |
-
-韭菜盒子 APP 当前提供 `1:1`、`16:9`、`9:16`、`3:2`、`2:3` 五种比例和 `1k`、`2k`、`4k` 三档分辨率。第三方 APP 应将选中的比例和分辨率换算为 `size`；常用值如下：
-
-| 比例 | 1K | 2K | 4K |
-| --- | --- | --- | --- |
-| `1:1` | `1024x1024` | `2048x2048` | `2880x2880` |
-| `16:9` | `1536x864` | `2048x1152` | `3840x2160` |
-| `9:16` | `864x1536` | `1152x2048` | `2160x3840` |
-| `3:2` | `1536x1024` | `2016x1344` | `3504x2336` |
-| `2:3` | `1024x1536` | `1344x2016` | `2336x3504` |
-
-## 创建任务响应
-
-提交成功后返回任务 ID：
+URL 响应示例：
 
 ```json
 {
-  "id": "<task_id>",
-  "task_id": "<task_id>",
-  "object": "video",
-  "model": "grok-imagine-image-2.0",
-  "status": "processing",
-  "progress": 0,
-  "created_at": 1788800000
+  "created": 1785180000,
+  "data": [{ "url": "https://.../generated.png" }]
 }
 ```
 
-`object` 为 `video` 是当前 NewAPI 通用异步任务协议的固定值，不代表该模型会生成视频。客户端应使用 `id` 或 `task_id` 继续查询。
+NewAPI 会在服务端轮询小易任务直至完成，再返回该 OpenAI 图片结构。URL 可能有有效期，客户端应立即下载并保存。`b64_json` 不带 `data:image/...;base64,` 前缀，客户端需先 Base64 解码。小易会尽量返回归档 URL；归档失败时可能返回短期签名的上游 URL。
 
-## 查询任务
+## 错误处理
 
-建议每 10 秒查询一次，直到任务完成或失败：
-
-```bash
-curl --location 'https://api.jiucaihezi.studio/v1/videos/<TASK_ID>' \
-  --header 'Authorization: Bearer <YOUR_API_KEY>'
-```
-
-状态说明：
-
-| 状态 | 含义 |
+| 错误 | 处理 |
 | --- | --- |
-| `queued` | 已排队 |
-| `in_progress` / `processing` | 生成中 |
-| `completed` | 已完成 |
-| `failed` | 生成失败，查看 `error` |
+| `401` | 检查韭菜盒子 API Key。 |
+| 模型不可用 | 确认 NewAPI 已将模型配置到小易图片渠道，且小易当前 Token 的 `/v1/models` 可见该模型。 |
+| `422 At least one reference image is required` | 图生图请使用 `/v1/images/edits` 并以 multipart 上传真实文件。 |
+| `504 task_timeout` | NewAPI 等待上游超过图片协议时限；任务仍由服务器后台轮询，避免立即重复提交同一业务请求。 |
+| 返回成功但没有图片 | 检查 `data[]` 是否包含 `url` 或 `b64_json`，并确认图片下载没有因临时 URL 过期而失败。 |
 
-完成响应示例：
+## 旧接口说明
 
-```json
-{
-  "id": "<task_id>",
-  "task_id": "<task_id>",
-  "model": "grok-imagine-image-2.0",
-  "status": "completed",
-  "progress": 100,
-  "metadata": {
-    "url": "<IMAGE_URL>"
-  },
-  "completed_at": 1788800060
-}
-```
-
-客户端从 `metadata.url` 取得图片地址并及时下载或落盘，不应假设结果 URL 永久有效。
-
-## 错误响应
-
-典型错误格式：
-
-```json
-{
-  "error": {
-    "code": "400",
-    "message": "prompt is required",
-    "type": "xiaoyi_image_error"
-  }
-}
-```
-
-| 状态/错误 | 原因与处理 |
-| --- | --- |
-| `400` | 模型名、提示词或请求格式不合法；修正后重试。 |
-| `401` / `403` | API Key 缺失、错误或无模型权限。 |
-| `413` | 参考图数量或大小超限。 |
-| `model_not_found` | 检查模型名是否完全一致，以及账号是否有可用渠道。 |
-| `model_price_error` | 该模型尚未配置计费价格，联系管理员。 |
-| `429` | 请求过快或额度受限；降低频率后重试。 |
-| `5xx` / `524` | 服务或上游暂时不可用；稍后重试，避免并发重复提交。 |
-
-## 接入边界
-
-- 第三方 APP 只连接 `https://api.jiucaihezi.studio`，不要使用内部适配器或上游地址。
-- API Key 只放在服务端或可信本地环境的 `Authorization` 请求头中，不要写入公开前端代码、日志或提交记录。
-- 只在网络超时或明确的暂时性服务错误后重试；如果已获得 `task_id`，应继续查询原任务，不要重复创建。
-- 模型可用性、账号权限、价格和限额以韭菜盒子 NewAPI 当前配置为准。
+`POST /v1/videos`、`GET /v1/videos/{task_id}` 是 2026-10-06 前后沿用的历史适配器合同，不是当前 Grok Image 公网接口。NewAPI `rc40` 提供 OpenAI Images Task Plugin 协议，当前图片接口请使用 `/v1/images/generations` 和 `/v1/images/edits`。

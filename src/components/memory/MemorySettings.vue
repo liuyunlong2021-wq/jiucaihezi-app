@@ -481,6 +481,9 @@ function showSync() {
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
 .memory-settings-version { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--ink3); font-size: 12px; text-align: center; }
+.memory-settings-version button { margin-left: 4px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink1); font: inherit; cursor: pointer; }
+.memory-settings-version button:hover { border-color: var(--olive); background: var(--surface-alt); }
+.memory-settings-version button:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
 .memory-account { display: grid; gap: 16px; }
 .memory-mobile-account-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .memory-mobile-logout, .memory-mobile-delete { display: flex; min-height: 40px; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font: inherit; }

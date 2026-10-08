@@ -1,5 +1,16 @@
 # 热缓存
 
+## [2026-10-08] Fanke 图片接入复用 Fk Task Plugin
+
+- 复用 `newapi-plugins/fk.plugin.js` 与现有渠道，不新增重复插件；v0.2.0 增加 `openai_image`、6 个映射模型、`image_count` 计费事实和 `/api/open/v1/image/generate` / `image/status` 转换。
+- 创作面板只显示 6 个友好名称，但请求模型名和 NewAPI 渠道模型名均为对应完整 `ft-image-v1-…` ID，渠道映射留空；4 个 GPT 型号 ¥0.08/张、Banana 2 ¥0.20/张、Banana Pro ¥0.30/张。截图中的旧 GPT 型号和其他 Fk 图片模型已移除。**插件尚未上传、渠道模型列表尚未更新、生成/轮询/下载/扣费未验收。** 见 [[运维/Fk渠道图片API接入-2026-10-08]]。
+
+## [2026-10-08] 小易 GPT Image / Grok 图片改用 NewAPI rc40 图片任务插件
+
+- 小易官方当前提供 GPT Image 与 Grok 的 OpenAI Images 文生图/编辑接口，并提供异步图片创建、同 Key 任务查询和 URL/Base64 结果；NewAPI `v1.0.0-rc.40` 官方 `openai_image` 插件协议可在请求中轮询上游任务后返回标准 OpenAI 图片响应。
+- 本地新增 `newapi-plugins/xiaoyi-image.plugin.js`，已把 Grok 面板模型切到 `/v1/images/generations` 与 `/v1/images/edits`，并覆盖现有 GPT Image 别名映射。小易 URL 结果由现有 APP 图片下载/落盘链路消费。
+- **生产未完成**：插件未上传/激活，NewAPI 渠道与价格未配置，GPT/Grok 文生图、单图/多图编辑、轮询下载和账单均待生产验收。此前“原生图片端点 404，必须退回 `/v1/videos`”的 2026-10-06 结论已由官方 rc40 路由能力和当前小易接口文档推翻；历史记录保留作证据。见 [[运维/小易图片NewAPIrc40图片任务插件-2026-10-08]]。
+
 ## [2026-10-07] 桌面一键升级接入版 v2.2.22
 
 - 用户确认 App 内下载、安装并重启的方案，要求写 TDD。现有 v2.2.19 只提示跳转下载页，首次需手动安装带更新器的接入版一次。
@@ -27,10 +38,10 @@
 - 两处已修复；本地 `pnpm run typecheck` 与 `pnpm run build:desktop:quick` 通过。`v2.2.16` 标签已触发过失败构建，按发布边界保留不移动，修复版提升到 `v2.2.17`。
 - `v2.2.17` 结果已确认：macOS ARM 与 Windows 成功，Intel 的 DMG 创建因 `hdiutil: Resource busy` 失败，下载清单因此跳过；修复版改用 `v2.2.18`，不移动既有 tag。
 
-## [2026-10-06] 小易 Grok Imagine Image 2.0 恢复现有异步路由
+## [2026-10-06]（已被 2026-10-08 更新取代）小易 Grok Imagine Image 2.0 恢复现有异步路由
 
 - 原生 `/v1/images/generations` 路由在实际调用中返回 HTTP 404 `bad_response_status_code`。本仓现有记录显示该模型原先依赖异步图片适配链路；具体是上游路径不支持还是生产 Base URL/渠道仍指向旧适配器，需查对应 NewAPI 请求日志确认。
-- 创作面板已恢复到兼容现有服务器的 `/v1/videos` 异步任务路由；模型 ID、显示名、价格和分辨率选项保留。服务器链路升级与同步图片路由验收前不再切换。
+- 当时将创作面板恢复到 `/v1/videos` 异步路由；这一决策建立在旧运维文档与尚未核实的 404 上。2026-10-08 已对照小易当前 API 和 NewAPI rc40 官方能力，改为 OpenAI Images + host 轮询插件；本轮生产部署尚待完成。
 - 已更新旧测试断言但未运行；恢复后的生产生成、计费和落盘尚待用户复验。详见 [[运维/韭菜盒子GrokImagineImage2.0API对外接入-2026-09-08]]。
 
 ## [2026-10-06] 创作面板文武双修戏种按钮与本机视频模型隐藏

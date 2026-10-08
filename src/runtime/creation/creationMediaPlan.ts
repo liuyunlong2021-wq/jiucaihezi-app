@@ -167,7 +167,7 @@ function mediaInputTransportFor(
   assetFlow: CreationAssetFlow,
 ): CreationMediaInputTransport {
   if (spec.route === 'local-comfy') return 'base64'
-  if (apiStyle === 'openai-image-edits' || apiStyle === 'xiaoyi-image-task' || apiStyle === 'newapi-image-task') {
+  if (apiStyle === 'openai-image-edits' || apiStyle === 'newapi-image-task') {
     return 'multipart'
   }
   if (apiStyle === 'openai-videos' && /^veo-3\.1-/.test(spec.model)) return 'multipart'
@@ -217,15 +217,15 @@ function resolveEffectiveContract(
 } {
   if (
     spec.source === 'newapi-direct' &&
-    (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits' || spec.apiStyle === 'xiaoyi-image-task' || spec.apiStyle === 'newapi-image-task')
+    (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits' || spec.apiStyle === 'newapi-image-task')
   ) {
-    if (spec.apiStyle === 'xiaoyi-image-task' || spec.apiStyle === 'newapi-image-task') {
+    if (spec.apiStyle === 'newapi-image-task') {
       return {
         apiStyle: spec.apiStyle,
         mode: referenceImageCount > 0 ? 'image-to-image' : 'text-to-image',
         endpoint: '/v1/videos',
         pollKind: 'newapi-task',
-        assetFlow: spec.apiStyle === 'xiaoyi-image-task' && referenceImageCount > 0 ? 'newapi-upload' : 'none',
+        assetFlow: 'none',
       }
     }
     if (referenceImageCount > 0) {
@@ -267,7 +267,7 @@ function normalizeParams(
   params: Record<string, unknown>,
   apiStyle: CreationApiStyle,
 ): Record<string, unknown> {
-  if (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits' || apiStyle === 'xiaoyi-image-task' || apiStyle === 'newapi-image-task') {
+  if (apiStyle === 'openai-images' || apiStyle === 'openai-image-edits' || apiStyle === 'newapi-image-task') {
     return normalizeOpenAiImageParams(spec, params)
   }
   if (apiStyle === 'rh-standard' || apiStyle === 'rh-aiapp') {
@@ -299,7 +299,12 @@ function normalizeOpenAiImageParams(
     prompt: params.prompt,
     size,
     quality: params.quality,
-    resolution: spec.apiStyle === 'xiaoyi-image-task' ? params.resolution : undefined,
+    ...(spec.model.startsWith('ft-image-v1-')
+      ? {
+          ratio: firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']),
+          imageSize: params.resolution ? String(params.resolution).toUpperCase() : undefined,
+        }
+      : {}),
     image: params.image,
     images: params.images,
     imageUrl: params.imageUrl,

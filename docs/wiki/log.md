@@ -1,5 +1,28 @@
 # Wiki 操作日志
 
+## [2026-10-08] 修正 Fk 图片模型显示名与请求名边界
+
+- 用户澄清面板名称仅供显示，实际模型请求必须发送 Fanke 完整 `ft-image-v1-…` ID；取消将六个显示别名作为请求模型名和插件白名单项的做法，NewAPI 渠道按完整 ID 路由且无需模型映射。
+- 保留六个面板显示名和最新价格，更新 Fk 运维说明；后台错误 `model_not_found` 的修复方向改为让渠道模型列表与请求中完整 ID 一致，并清空别名映射。
+
+## [2026-10-08] Fk 图片面板收敛到 6 个映射模型
+
+- 按用户要求移除截图中的旧 GPT 型号和其余未映射的 Fk 图片型号，仅开放 `FK-image2`、`FK-image2.5`、`FK-image2.5-flare`、`FK-image2.5-sunburst`、`FK-banana-2`、`FK-banana-pro` 六个请求名；插件白名单同步收敛。
+- 价格改为 GPT 四款 `¥0.08/张`、Banana 2 `¥0.20/张`、Banana Pro `¥0.30/张`；同步更新 Fk 运维映射说明。NewAPI 计费表达式按 `image_count` 计张数。
+
+## [2026-10-08] Fanke 图片模型加入现有 Fk 插件
+
+- 复核 `newapi-plugins/fk.plugin.js` 后确认其已连接同一 Fanke 账号和异步任务体系；扩展现有插件至 v0.2.0，新增 `openai_image` 图片提交、状态轮询、结果 URL 呈现和 `image_count` 用量，不创建重复插件。
+- 登记用户提供的 12 个 Fanke 图片模型 ID 到插件白名单与创作面板；图片参数保留 `ratio`/`imageSize`，本地文件经 NewAPI multipart 作为 `images` 转发。同步新增运维接入页与索引。
+- 只做语法和差异检查；未运行测试，未上传/激活插件或修改服务器渠道模型列表，真实图片提交、轮询下载与扣费待验收。
+
+## [2026-10-08] 小易 GPT Image / Grok 图片接入 NewAPI rc40 openai_image
+
+- 对照小易当前图片/Grok/异步接口文档与 QuantumNous/NewAPI 官方 `v1.0.0-rc.40` 发布说明、路由源码及 Task Plugin API：小易支持 OpenAI Images 文生图、multipart 编辑、异步任务查询；NewAPI rc40 `openai_image` 插件会轮询异步任务并回标准 `ImageResponse`。此前“原生图片端点在服务器不支持”的结论不成立；生产 404 的精确实例仍需用部署后的链路日志核实。
+- 新增 `newapi-plugins/xiaoyi-image.plugin.js`：GPT/Grok 模型别名映射、小易异步 generation/edit multipart 提交、同 Key 状态轮询、OpenAI ImageResponse 结果转换与图片张数 usage；Grok 面板模型改用标准 `/v1/images/generations`/`edits`，并登记官方支持的兼容模型名。
+- 更新小易/Grok 运维页、运维索引、热缓存和来源索引；2026-10-06 回退记录保留并标注已被取代。没有运行或新增测试（本轮开发约束）；只做静态差异与语法检查。
+- 尚未上传或激活插件，未配置生产渠道和价格，也未实测生产文生图、图生图、上游轮询、URL 下载/项目落盘或账单；不得表述为生产链路通过。详见 [[运维/小易图片NewAPIrc40图片任务插件-2026-10-08]]。
+
 ## [2026-10-07] 桌面一键升级接入实施
 
 - 根据用户「立刻执行」接入官方 Rust updater 2.12.0，逐窗口保存/关闭与进程级任务准入；复用 Harness、媒体和原生导出生命周期。版本提升到 v2.2.22；v2.2.20/2.2.21 候选分别在窗口创建竞态、独立截图窗口任务保护补审后停止，均不作为正式接入版。

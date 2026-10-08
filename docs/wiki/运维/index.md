@@ -6,12 +6,14 @@
 
 - [新增模型与 NewAPI 插件固定流程](新增模型与NewAPI插件固定流程.md) - 新模型从上游合同、服务器渠道、App 注册、Task Plugin、价格表达式到第三方 API 文档和真实验收的统一入口。
 - [韭菜盒子 Fk 渠道 Seedance 视频 API 对外接入](韭菜盒子Fk渠道Seedance视频API对外接入-2026-10-06.md) - Fk Task Plugin 的 7 个公开模型、规格、价格、异步任务和成片下载合同；真实公网链路待验收。
-- [韭菜盒子 Grok Imagine Image 2.0 API 对外接入](韭菜盒子GrokImagineImage2.0API对外接入-2026-09-08.md) - 当前沿用异步图片适配器的 `/v1/videos` 文生图/图生图任务合同；原生 OpenAI 图片路由在现有服务器链路返回 404。
+- [Fk 渠道图片 API 接入](Fk渠道图片API接入-2026-10-08.md) - 复用 `fk` Task Plugin 的 `openai_image` 接入 Fanke 图片模型、异步轮询与签名结果 URL；插件源码与创作面板已扩展，待上传和生产验收。
+- [韭菜盒子 Grok Imagine Image API 对外接入](韭菜盒子GrokImagineImage2.0API对外接入-2026-09-08.md) - NewAPI 公网 OpenAI Images 接口；小易 Grok 走 `openai_image` 插件，文生图与图生图由 NewAPI rc40 主机轮询后返回标准图片结果。
+- [小易图片 NewAPI rc40 图片任务插件](小易图片NewAPIrc40图片任务插件-2026-10-08.md) - GPT Image 与 Grok Imagine 的 OpenAI Images 路由、上游异步提交/轮询、multipart 编辑与结果下载合同；代码待上传及生产验收。
 - [服务器运维](服务器运维.md) - 生产服务器结构、常用命令和历史运维事实。
 - [服务器存储清理与 AnyDoc 生产切换](服务器存储清理与AnyDoc生产切换-2026-09-07.md) - 已验证的磁盘治理、输出文件一天过期策略和云端文档转换器生产切换。
 - [NewAPI rc.30 升级交接](NewAPI-v1.0.0-rc.30升级交接-2026-09-03.md) - 2026-09-03 从 rc.20 升级到 rc.30 的已完成步骤、待执行命令、验收和回滚。
 - [NewAPI 视频下载 SSRF 端口配置失效排障](NewAPI视频下载SSRF端口配置失效排障-2026-09-09.md) - 记录内部视频适配器 `/content` 被端口策略拦截、端口数组类型不匹配，以及已验证的恢复步骤。
-- [小易图片模型接口与 NewAPI 接入](小易图片模型接口与NewAPI接入-2026-09-04.md) - 当前 GPT Image 2 与 Gemini 图片模型的客户端接口、模型映射、NewAPI 渠道和排错合同。
+- [小易图片模型接口与 NewAPI 接入](小易图片模型接口与NewAPI接入-2026-09-04.md) - GPT Image 与 Gemini 的客户端接口、模型映射、NewAPI 渠道和排错合同；GPT Image/Grok 小易任务插件现行部署步骤以 rc40 接入页为准。
 - [韭菜盒子图片模型 API 对外接入](韭菜盒子图片模型API对外接入-2026-09-04.md) - 可直接发给第三方用户的图片模型接口、模型名、请求格式和错误处理。
 - [韭菜盒子 Seed Audio 1.0 API 对外接入](韭菜盒子SeedAudio1.0API对外接入-2026-09-04.md) - 可直接发给第三方用户的音频模型接口、最多三段参考音频、响应格式和错误处理。
 - [韭菜盒子 MiniMax 参考生视频 API 对外接入](韭菜盒子MiniMax参考生视频API对外接入-2026-09-06.md) - 可直接发给第三方用户的 MiniMax H3 图片与音频参考生视频接口、参数限制和异步下载流程。

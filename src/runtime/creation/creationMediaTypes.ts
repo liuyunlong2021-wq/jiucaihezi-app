@@ -16,7 +16,6 @@ export type CreationUpstreamFamily =
 export type CreationApiStyle =
   | 'openai-images'
   | 'openai-image-edits'
-  | 'xiaoyi-image-task'
   | 'newapi-image-task'
   | 'openai-audio-speech'
   | 'openai-videos'

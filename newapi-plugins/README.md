@@ -20,6 +20,8 @@
 | `comfy.plugin.js` | `comfy` | 不取代（`comfy-adapter` 是执行器，插件只代理它） | 代码已就绪，**未上传** |
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
+| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.2.0` 增加 `openai_image`；与视频复用同一插件和渠道，源码待上传与真实验收 |
+| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | 代码已就绪，**未上传或生产验收**；使用 `openai_image`，由 NewAPI 主机轮询后返回图片 URL |
 
 ## 本地验证
 

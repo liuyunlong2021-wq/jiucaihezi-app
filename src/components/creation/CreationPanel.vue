@@ -3968,7 +3968,7 @@ const modelGroups = computed(() => {
   // 菠萝 = 图片两项排最前、视频两项跟在 jc 本机后面（用户 2026-09-27 决定）。
   const order = cpState.task === 'image'
     ? [
-        '菠萝', 'jc 本机',
+        'FK-Image', '菠萝', 'jc 本机',
         'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
         'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
       ]
