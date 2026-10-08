@@ -48,7 +48,6 @@ import {
   type StoryImportPlan,
 } from '@/runtime/memory/storyImport'
 import { classifyProjectResource, type ProjectResource } from '@/utils/projectResource'
-import { applyAdaptationWikiScaffold, buildAdaptationWikiScaffoldPlan } from '@/runtime/memory/adaptationWikiScaffold'
 import {
   appendProjectDirectoryIndex,
   createRuntimeProjectFileService,
@@ -257,8 +256,6 @@ const storyImportError = ref('')
 const storyImportNamesExpanded = ref(false)
 let storyImportRequestId = 0
 let storyImportMarkerTimer: ReturnType<typeof setTimeout> | null = null
-const wikiScaffoldBusy = ref(false)
-const wikiScaffoldNotice = ref('')
 
 /* ─── 构建树 ─── */
 /**
@@ -567,32 +564,6 @@ async function refreshLoadedDirectories() {
     if (directory) await refreshDirectory(directory)
   }
 }
-async function createAdaptationWiki() {
-  const owner = projectKey.value
-  if (!owner || wikiScaffoldBusy.value) return
-  wikiScaffoldBusy.value = true
-  errorMsg.value = ''
-  wikiScaffoldNotice.value = ''
-  statusMsg.value = ''
-  try {
-    const plan = buildAdaptationWikiScaffoldPlan((await projectFiles.list(owner)).map(resource => ({ path: resource.path, isDirectory: resource.isDirectory })))
-    if (plan.conflicts.length) throw new Error(plan.conflicts.join('\n'))
-    if (!plan.directories.length && !plan.files.length) {
-      wikiScaffoldNotice.value = `${plan.wikiRoot}/ 改编 Wiki 已完整，无需补齐`
-      return
-    }
-    const preview = [...plan.directories.map(path => `目录：${path}/`), ...plan.files.map(file => `索引：${file.path}`)]
-    const approved = await confirmAction(`将补齐改编 Wiki：\n\n${preview.join('\n')}\n\n已有文件不会被覆盖。`, { title: '建库', kind: 'info', okLabel: '开始建库' })
-    if (!approved) return
-    const result = await applyAdaptationWikiScaffold(projectFiles, owner)
-    await loadFileTree()
-    wikiScaffoldNotice.value = `建库完成：新增 ${result.createdDirectories.length} 个目录、${result.createdFiles.length} 个索引`
-  } catch (error) {
-    errorMsg.value = `建库失败：${error instanceof Error ? error.message : String(error)}`
-  } finally {
-    wikiScaffoldBusy.value = false
-  }
-}
 function resourceKey(resource: ProjectResource): string {
   return `${resource.runtime}:${resource.owner}:${resource.path}`
 }
@@ -621,7 +592,16 @@ const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
   // 别的项目的路径不碰这棵树，也不抱怨（结果自动定位会带上 owner）。
   const owner = String(payload?.owner || '')
   if (owner && projectKey.value && owner !== projectKey.value) return
-  void locateProjectResource(String(path), Boolean(payload?.quiet))
+  const expectedOwner = owner || projectKey.value
+  void (async () => {
+    if (payload?.refresh) await loadFileTree()
+    if (expectedOwner && projectKey.value !== expectedOwner) return
+    const node = await locateProjectResource(String(path), Boolean(payload?.quiet))
+    if (payload?.open && node && !node.isDir && projectKey.value)
+      emitEvent('memory:open-resource', await openProjectResource(projectFiles, resourceForNode(node)))
+  })().catch(error => {
+    if (!payload?.quiet) statusMsg.value = `定位文件失败：${error instanceof Error ? error.message : String(error)}`
+  })
 })
 const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload: unknown) => {
   const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
@@ -858,18 +838,18 @@ async function toggleNode(node: TreeNode) {
   if (!node.expanded && !(await ensureDirectoryLoaded(node))) return
   node.expanded = !node.expanded
 }
-async function locateProjectResource(path: string, quiet = false) {
+async function locateProjectResource(path: string, quiet = false): Promise<TreeNode | null> {
   let node: TreeNode | null = treeRoot.value
   for (const part of path.split('/')) {
     const current = node
-    if (!current || !(await ensureDirectoryLoaded(current))) return
+    if (!current || !(await ensureDirectoryLoaded(current))) return null
     current.expanded = true
     const child = current.children.find(item => item.name === part)
     if (!child) {
       // 静默返回会让人以为是「点了没反应」。用户点的那次要说话（走 statusMsg：
       // 写 errorMsg 会把整棵树藏起来）；结果自动定位失败不能留下赶不走的提示。
       if (!quiet) statusMsg.value = `文件树里没有 ${path}`
-      return
+      return null
     }
     node = child
   }
@@ -882,6 +862,7 @@ async function locateProjectResource(path: string, quiet = false) {
   await nextTick()
   const index = visibleNodes.value.findIndex(entry => entry.node.path === path)
   if (index >= 0) fileTreeVirtualizer.value.scrollToIndex(index, { align: 'center' })
+  return node
 }
 
 /* ─── 左键打开 ─── */
@@ -3020,9 +3001,6 @@ onBeforeUnmount(() => {
       </header>
 
       <div class="pft-actions pft-memory-actions">
-        <button class="pft-icon-btn" title="建立改编 Wiki" aria-label="建立改编 Wiki" :disabled="wikiScaffoldBusy" @click="createAdaptationWiki">
-          <JcIcon name="account-tree" />
-        </button>
         <button class="pft-icon-btn" title="新建文件" @click="ctxNewFileFromSelection">
           <JcIcon name="note-add" />
         </button>
@@ -3085,7 +3063,6 @@ onBeforeUnmount(() => {
       <div v-if="!loading && errorMsg" class="pft-status pft-error">{{ errorMsg }}</div>
       <!-- 成功（与错误互斥） -->
       <div v-else-if="!loading && statusMsg" class="pft-status pft-success">{{ statusMsg }}</div>
-      <div v-if="!loading && wikiScaffoldNotice" class="pft-status pft-success">{{ wikiScaffoldNotice }}</div>
 
       <!-- ═══ 文件树列表 ═══ -->
       <div

@@ -1,5 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createManjuArtifactTool } from './manju-wiki.mjs'
 
 // 在当前 agent 的官方 SkillRegistry 层登记内置版本，优先于同名用户／项目文件。
 // 模型上下文仍只注入用户点名的入口，子 Skill 由路由器按需读取资源。
@@ -34,9 +35,11 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
   let ready = false
   const plugin = agent.ctx.plugin({
     name: 'jiucaihezi-manju-skills',
-    inject: ['skills'],
+    inject: ['skills', 'tools', 'fs', 'sandboxPolicy'],
     apply(ctx) {
       for (const skill of skills) ctx.skills.register(skill)
+      const disposeTool = ctx.tools.register(createManjuArtifactTool(ctx))
+      ctx.effect(() => () => disposeTool())
       ready = true
     },
   })

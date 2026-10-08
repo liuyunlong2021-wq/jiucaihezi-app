@@ -2191,6 +2191,15 @@ async function send(remoteText?: string) {
       mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
       files: activeReferencedFiles,
       attachments: requestAttachments,
+      onArtifactSaved(path) {
+        if (!isCurrentRun()) return
+        emitEvent('project-filetree:locate', {
+          path,
+          owner: active.resource.owner,
+          refresh: true,
+          open: true,
+        })
+      },
     }) : await runMemoryChat({
       projectId: active.resource.owner,
       conversationId: active.transcript.id,

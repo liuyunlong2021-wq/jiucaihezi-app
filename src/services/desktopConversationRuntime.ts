@@ -497,6 +497,7 @@ export async function executeDesktopHarnessRun(
       },
       onStatus(status) { if (current() && !run.approval) run.status = status },
       onText(text) { if (current()) { if (!run.approval) run.status = '正在执行'; run.streamingText = text } },
+      onArtifactSaved(path) { if (current()) input.onArtifactSaved?.(path) },
       onReasoning(text) { if (current()) run.reasoning = text },
       onProgress(progress) {
         if (!current()) return

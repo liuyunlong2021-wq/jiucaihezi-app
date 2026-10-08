@@ -54,6 +54,21 @@ description: "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时�
 - 工程台本复用剧本、分集任务、人物资料、世界规则和创作方向，不要求先生成资产；后来补入参考图只校准外观、空间和道具，不擅改剧情。
 - 上述依赖不授权调用其他 Skill 或创建缺失的整套资料。当前交付所需材料不足时只问必要缺项。
 
+## 制作产物归档
+
+漫剧制作实际完成一个用户要求的产物后，在最终回复前调用 `manju_save_artifact` 保存完整 Markdown 正文。只讨论、比较方案、给起步建议时不保存；用户说“只在对话里”或“不要保存”时不调用。第一份实际产物保存时才建立 Wiki 和索引，不预先创建空业务文档。
+
+| 产物 | `artifact_kind` | 额外字段 |
+| --- | --- | --- |
+| 故事梗概／分集梗概／故事背景／世界规则 | `story_summary`／`episode_summaries`／`story_background`／`world_rules` | 无 |
+| 人物小传 | `character_bio` | `entity_name` |
+| 已确认的项目视觉与制作总纲 | `project_overview` | 无 |
+| 分集剧本／工程剧本 | `screenplay`／`engineering_script` | `episode_number` |
+| 角色／场景／道具资产提示词 | `character_asset`／`scene_asset`／`prop_asset` | `entity_name` |
+| H3／Seedance 视频提示词 | `video_prompt` | `episode_number`、`video_model`、`segment` |
+
+一次完成多集、多个人物或多个提示词片段时，每个独立文件分别保存。工具根据类型和字段生成路径，不填写或猜测路径；完成后向用户报告工具返回的准确路径。已有文件默认不覆盖；同一资产新增独立提示词章节（如角色造型与三格版式）时用 `write_mode=append` 并提供 `section_name`；修改已有章节时先读取原文、合并完整新版并使用 `write_mode=update`。不复制原作附件，不调用宽泛文件写入来代替归档。
+
 ## 工程台本与视频提示词分工
 
 - `jc-gongchengjuben` 负责导演决策：人物状态与潜台词、触发与反馈、表演过程、动作特效因果、景别机位、空间连续、声音切点及时间预算。确认台本是下游创作依据。

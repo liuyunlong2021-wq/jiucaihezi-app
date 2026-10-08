@@ -19,13 +19,18 @@ function fixture(t) {
   const ctx = { skills: { register(skill) {
     registered.set(skill.name, skill)
     return () => registered.delete(skill.name)
-  } }, plugin(definition) {
+  } }, tools: { register() { return () => {} } }, fs: { sandboxMode: undefined },
+  get() { return undefined }, plugin(definition) {
     const releases = []
-    const child = { skills: { register(skill) { releases.push(ctx.skills.register(skill)) } } }
+    const child = {
+      skills: { register(skill) { releases.push(ctx.skills.register(skill)) } },
+      tools: ctx.tools, fs: ctx.fs, get: ctx.get,
+      effect(callback) { releases.push(callback()) },
+    }
     return {
       await: async () => definition.apply(child),
       assertActive() {},
-      dispose: async () => { for (const release of releases.splice(0).reverse()) await release() },
+      dispose: async () => { for (const release of releases.splice(0).reverse()) await release?.() },
     }
   } }
   const rec = { handle: { agent: { ctx } } }
@@ -116,7 +121,9 @@ async function realFixture(t, tools) {
   const { root } = fixture(t)
   const ctx = new Context()
   const service = await ctx.plugin(SkillRegistry)
-  if (tools) ctx.provide('tools', tools)
+  ctx.provide('tools', { register() { return () => {} }, ...tools })
+  ctx.provide('fs', { sandboxMode: undefined })
+  ctx.provide('sandboxPolicy', { resolve() { return { mode: 'workspace-write', workspaceRoot: process.cwd() } } })
   const agents = []
   const owner = await ctx.plugin({ name: 'agent-loop-context', inject: tools ? ['tools'] : [], apply(c) {
     for (let i = 0; i < 2; i++) {

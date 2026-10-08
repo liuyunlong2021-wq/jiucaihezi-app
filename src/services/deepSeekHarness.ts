@@ -58,6 +58,8 @@ export interface DeepSeekHarnessInput {
   attachments?: ResolvedDirectAttachment[]
   signal?: AbortSignal
   onText?: (text: string) => void
+  /** 漫剧产物成功保存后，用于刷新并定位文件树。 */
+  onArtifactSaved?: (path: string) => void
   onStatus?: (status: string) => void
   /** 实时推理正文；只在内容真的变化时回调，与 `onText` 分开、不混进消息体。 */
   onReasoning?: (text: string) => void
@@ -1431,6 +1433,7 @@ async function runDeepSeekHarnessTurn(
   const approvals = new Map<string, AbortController>()
   active.permissionListeners.set(wireSessionId, tier => input.onPermission?.(tier))
   const stream = { attemptId: '', nextIndex: 0, text: '', reasoning: '', turn: 0, step: 0 }
+  const manjuArtifactCallIds = new Set<string>()
   const notify = (frame: NonNullable<BridgeMessage['notification']>) => {
     if (frame.params?.sessionId !== wireSessionId) return
     if (frame.method === 'session.approval-settled') {
@@ -1469,6 +1472,26 @@ async function runDeepSeekHarnessTurn(
     }
     if (frame.method === 'session.event') {
       const event = frame.params.event
+      if (event?.type === 'tool/call' && event.data.name === 'manju_save_artifact')
+        manjuArtifactCallIds.add(String(event.data.callId))
+      if (event?.type === 'tool/result') {
+        const message = event.data.message
+        const callId = String(message.toolCallId || message.source?.callId || '')
+        if (callId && manjuArtifactCallIds.delete(callId) && !message.isError) {
+          const text = message.content
+            .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+            .map(block => block.text)
+            .join('\n')
+          try {
+            const result = JSON.parse(text) as { status?: unknown; path?: unknown }
+            const path = typeof result.path === 'string' ? result.path : ''
+            const safePath = /^(?:wiki|docs\/wiki)\//.test(path)
+              && path.endsWith('.md')
+              && !path.split('/').some(part => part === '.' || part === '..')
+            if (result.status === 'saved' && safePath) input.onArtifactSaved?.(path)
+          } catch { /* a malformed tool result must not interrupt the Harness event stream */ }
+        }
+      }
       if (event?.type === 'step/start') input.onStatus?.('正在分析')
       if (event?.type === 'llm/retry') {
         const retry = Number(event.data?.retry || 0)
