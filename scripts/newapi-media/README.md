@@ -31,3 +31,9 @@
 不要使用 `latest`、不要改数据库结构、不要打印 Compose 渲染内容（可能含秘密）。
 当前生产镜像来自官方 rc.40，新增镜像属于本产品维护的受控扩展；后续官方升级需重新
 审计与重放补丁。保留官方许可证、署名与前端链接。
+
+## 已有 OSS 服务的 multipart 修复（2026-10-09）
+
+固定 rc.40 宿主只给入站请求设置 multipart Content-Type，上游新建请求漏头，导致图片编辑的模型与素材不能被解析。`patch_task_multipart.py` 把 writer 生成的 Content-Type 写入上游 descriptor；`prepare.sh` 已纳入该补丁。
+
+已有 OSS 镜像用 `repair-multipart.sh`：核对固定 SHA、镜像和 Compose 三文件，先构建 Linux builder 并执行真实 FK/小易插件的本地 HTTP 回归及素材/OSS 测试，再备份数据库并切换新镜像。检查失败自动回滚；手动回滚脚本保存在回执的备份目录。没有付费生成；真实生产图生图需部署后验收。

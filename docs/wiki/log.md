@@ -1,5 +1,27 @@
 # Wiki 操作日志
 
+## [2026-10-09] FK／菠萝／小易等 App 图生图实测成功
+
+- 用户明确确认菠萝与小易测试均成功；任务历史截图列出 FK-image2、GPT Image 2 菠萝、GPT Image 2.5 1K、Gemini 3.1 Flash Image、Grok Imagine Image 2.0 小易共五个型号绿色成功，并显示本地 PNG 路径。
+- 生产 multipart 宿主补丁与新 Mac 预览包已生效。FK 参考图走 OSS＋JSON，小易仍使用 multipart；成功不意味着全部插件都改走 OSS，也不扩大为所有视频/规格/平台已通过。历史失败退款和逐次账单待核实。
+- 原始截图保存在 `运维/assets/图生图多模型成功-2026-10-09.png`；详见 [[运维/图生图multipart请求头丢失根因与修复-2026-10-09]]。
+
+
+## [2026-10-09] 生产对照 | FK OSS＋JSON 图生图成功
+
+- 用户执行修复脚本，新 multipart 镜像已生产运行，备份 `/root/jc-multipart-switch-20261009T082505Z`。FK multipart 重试仍空正文 500，预扣 `$0.08` 已退款；本地协议回归不等于供应商 multipart 生产通过。
+- 用户随后执行一次 OSS＋JSON 对照：合成参考图上传与字节读回通过，相同 FK-image2 模型 HTTP 200 返回一张图片，请求 `202610090846053942508448268d9d6DWjLrxp6`。此前账号无模型权限的判断已被生产反证推翻；该次成品下载、账单未核验。
+- App 源码已有 FK URL 路径，本轮已重建本机 Mac 预览包；真实 App 点击生成与下载待验收。其它上游不因 FK 对照成功视为通过。详见 [[运维/图生图multipart请求头丢失根因与修复-2026-10-09]]。
+
+
+## [2026-10-09] 纠正与修复 | 图生图 multipart 宿主请求头丢失
+
+- 撤回此前仅凭 FK 403 推断账号权限、小易任务失败推断供应商内部故障的结论。OSS 重建的固定 rc.40 宿主只把表单 Content-Type 写入入站请求，上游独立 HTTP 请求漏头；路由模型非空无法证明供应商收到 model。
+- 官方固定 SHA 两份源码与本地修复前文件逐字节一致。真实 FK / 小易插件＋真实宿主＋本地 HTTP 接收端：修复前 JSON 两例通过、multipart 四例失败；修复后含 FK 签名 URL 共七例通过。三个完整 Go 包与 router 编译通过，不调用付费供应商。
+- 当前 App 12:47 构建不包含 15:10 FK URL 分支；之前把源码已改视为运行包生效，判断错误。补丁及服务器修复脚本已实现，生产重建、切换、真实出图和账单验收尚未执行。
+- 详见 [[运维/图生图multipart请求头丢失根因与修复-2026-10-09]]。历史排障记录保留为纠错证据。
+
+
 ## [2026-10-09] 实施 | FK 图片图生图参考素材改走私有 OSS URL
 
 - 用户同意按 FK 上游插件现有能力修复图生图请求。`fk.plugin.js` 已支持 JSON `imageUrls`；App 仅对 `newapi/fk/ft-image-v1-*` 将本地参考素材交给现有 OSS 直传，再把签名 HTTPS 地址以 JSON 发到 `/v1/images/edits`。其他模型图生图仍保持原 multipart。
@@ -2335,3 +2357,15 @@
 - GPT Image 2.5 1K 图生图命中渠道 #88 / `xiaoyi-image` 0.1.1；NewAPI 记录 `is_model_mapped=true`、`upstream_model_name=gpt-image-2.5` 并取得小易 task ID，任务随即报 `Model name not specified, model name cannot be empty`。15:08、15:20 均出现，当前证据排除 NewAPI 模型映射为空，但不能从 ECS 日志定位小易内部何处丢失模型名。
 - 15:20 GPT 请求按次计费记录 `$0.08`，并跳过差额结算；ECS 输出没有退款记录。上游 request ID `202610090720024319498718268d9d6WlO0H2od`、task ID `canvas-task-mv0my1kh-d15096fea9d75e8869b2b00e`，应据此请小易排查并核对用户账单。
 - 更新 FK / 小易运维页、热缓存、来源索引与知识库入口。只读分析用户提供的日志，没有修改运行代码、查询生产控制台、核账单、生成任务或运行测试。
+
+
+## [2026-10-09] 小说 Skill 唯一准源、意图路由与全部 ref 联动
+
+- 用户明确指定 App 内置版为唯一准源并允许删除个人副本；删除前比较完整文件集合，个人目录没有独有文件，差异仅为入口和两份旧归档说明。已删除 `/Users/by3/.agents/skills/jc-novel`，保留 `public/skills/jc-novel` 全107个文件，构建索引登记16个内置Skill。
+- 升级明确请求／当前节点／真实Wiki资料的路由优先级；规划、续写、修订、诊断、章节确认、落位检查与方法讨论分别进入本轮任务。A/B/C仅用于任务未定且无可承接节点的情况，已给催化剂与章纲不再重复询问。
+- 引擎选择统一到 `references/engines/index.md`：简单任务可0个；需要时1个主引擎加0–2个条件引擎，一章四阶段共用最多3个不同引擎的额度。100个引擎真实链接齐全，正文工作流不再强制串行读取二十多个引擎；分批交付不代替章节确认。
+- 5份引擎引用的缺失扩展目录／文件改为实际包内方法指引。106份参考均从入口显式可达，资源图测试先取得3项红灯，再修复。
+- 验证：`node --test scripts/__tests__/novel-skill-routing.test.mjs` 4/4；`manju-skill-scope.test.mjs` 与 `wiki-artifact-writer.test.mjs` 18/18（真实Harness注册表与SDK、共享归档）；隔离esbuild后包清单与文件展示测试8/8，定向共30项。新增同名本地 `jc-novel` 冲突验证，实际SDK仍加载内置版本，资源根与共享工具正确。
+- Skill Creator通用 `quick_validate.py` 对完整App包报告既有扩展键 `triggers` 不在标准字段中；保留App字段，检查实际生成索引的触发词和描述一致，并在临时副本中只剥离该扩展字段后取得标准校验通过。没有修改个人通用校验器或丢弃App触发信息。
+- `pnpm run build:desktop:quick` 成功，含类型检查、构建和Desktop产物审计；`dist/skills/jc-novel` 107个文件与准源逐字节一致。18条典型请求完成设计走查，未以此声称真实创作模型行为已验收。
+- 更新 [[开发/小说创作Skill路由升级与验收-2026-10-09]]、小说入口合同、共同纲领和知识库导航。未提交Git；未写入用户作品，未执行真实创作模型、原生UI或Windows／Intel Mac安装版验收。

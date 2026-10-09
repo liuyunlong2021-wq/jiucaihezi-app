@@ -4,12 +4,14 @@
 
 ## 页面
 
+- [图生图 multipart 请求头丢失根因与修复](图生图multipart请求头丢失根因与修复-2026-10-09.md) - OSS 重建 rc.40 的公共表单转发缺陷；真实宿主回归、生产部署与用户五个图片型号实测成功；包含原始截图和协议边界。
+
 - [新增模型与 NewAPI 插件固定流程](新增模型与NewAPI插件固定流程.md) - 新模型从上游合同、服务器渠道、App 注册、Task Plugin、价格表达式到第三方 API 文档和真实验收的统一入口。
 - [韭菜盒子 Fk 渠道 Seedance 视频 API 对外接入](韭菜盒子Fk渠道Seedance视频API对外接入-2026-10-06.md) - Fk Task Plugin 的 7 个公开模型、规格、价格、异步任务和成片下载合同；真实公网链路待验收。
 - [韭菜盒子 Fk 渠道图片 API 对外接入](韭菜盒子Fk渠道图片API对外接入-2026-10-08.md) - 六个图片模型的 NewAPI 调用合同、文生图/图生图请求、服务端轮询、结果 URL 和计费边界；ECS 已有 FK 文生图 200 记录，图生图验收待完成。
 - [Fk 渠道图片 API 接入](Fk渠道图片API接入-2026-10-08.md) - 复用已在 ECS 运行的 `fk` Task Plugin `0.2.0`；App 的本地 FK 图生图素材改走私有 OSS JSON `imageUrls`，客户端构建及真实图生图验收待完成。
 - [韭菜盒子 Grok Imagine Image API 对外接入](韭菜盒子GrokImagineImage2.0API对外接入-2026-09-08.md) - NewAPI 公网 OpenAI Images 接口；小易 Grok 走 `openai_image` 插件，文生图与图生图由 NewAPI rc40 主机轮询后返回标准图片结果。
-- [小易图片 NewAPI rc40 图片任务插件](小易图片NewAPIrc40图片任务插件-2026-10-08.md) - GPT Image 与 Grok Imagine 的 OpenAI Images 路由、上游异步提交/轮询、multipart 编辑与结果下载合同；代码待上传及生产验收。
+- [小易图片 NewAPI rc40 图片任务插件](小易图片NewAPIrc40图片任务插件-2026-10-08.md) - GPT Image 与 Grok Imagine 的 OpenAI Images 路由、上游异步提交/轮询、multipart 编辑与结果下载合同；生产部署后用户实测 GPT Image 2.5 1K、Grok Imagine Image 2.0 成功，账单待核对。
 - [服务器运维](服务器运维.md) - 生产服务器结构、常用命令和历史运维事实。
 - [App 参考素材直传阿里云 OSS 验收（2026-10-09）](App参考素材直传阿里云OSS验收-2026-10-09.md) - 记录 NewAPI 生产切换、桌面 App 参考图直传和 FK MiniMax H3 三秒实测、HTTP 204 客户端修复、发布边界与回滚目录。
 - [服务器存储清理与 AnyDoc 生产切换](服务器存储清理与AnyDoc生产切换-2026-09-07.md) - 已验证的磁盘治理、输出文件一天过期策略和云端文档转换器生产切换。

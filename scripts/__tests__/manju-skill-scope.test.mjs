@@ -92,6 +92,7 @@ test('the real Harness registry prefers scoped bundled definitions and releases 
   ctx.provide('sandboxPolicy', {})
   let checked = false
   const localDispose = ctx.skills.register({ name: 'jc-seedance', source: 'user', description: 'local', content: 'LOCAL VERSION' })
+  const localNovelDispose = ctx.skills.register({ name: 'jc-novel', source: 'user', description: 'stale novel', content: 'LOCAL NOVEL VERSION' })
   const consumer = await ctx.plugin({ name: 'manju-registry-test', inject: ['tools', 'fs', 'sandboxPolicy'], async apply(c) {
     const agent = {}
     const scope = createScope(c, agent)
@@ -105,9 +106,18 @@ test('the real Harness registry prefers scoped bundled definitions and releases 
     assert.equal((await ctx.skills.get('jc-seedance', { signal: lookup.signal })).content, 'LOCAL VERSION')
     await dispose()
     assert.equal((await ctx.skills.get('jc-seedance', lookup)).content, 'LOCAL VERSION')
+    const disposeNovel = await pinManjuSkills({ handle: { agent } }, ['jc-novel', 'wiki-memory'], root)
+    const novel = await ctx.skills.get('jc-novel', lookup)
+    assert.equal(novel.source, 'bundled')
+    assert.equal(novel.resourceBase.path, join(root, 'jc-novel'))
+    assert.match(novel.content, /# jc-novel/)
+    assert.equal((await ctx.skills.get('jc-novel', { signal: lookup.signal })).content, 'LOCAL NOVEL VERSION')
+    await disposeNovel()
+    assert.equal((await ctx.skills.get('jc-novel', lookup)).content, 'LOCAL NOVEL VERSION')
     checked = true
     await scope.dispose()
     await localDispose()
+    await localNovelDispose()
   } })
   await consumer.dispose()
   await service.dispose()
@@ -271,7 +281,7 @@ test('the actual SDK injects bundled skills before the model request and restore
   const { root } = fixture({ after: cleanup => { removeRoot = cleanup } })
   let harness
   const local = join(root, '.dsh', 'skills')
-  for (const name of ['jc-manju-zhizuo', 'jc-seedance']) {
+  for (const name of ['jc-manju-zhizuo', 'jc-seedance', 'jc-novel']) {
     mkdirSync(join(local, name), { recursive: true })
     writeFileSync(join(local, name, 'SKILL.md'), `---\nname: ${name}\ndescription: local\n---\n\nLOCAL_${name}\n`)
   }
@@ -311,6 +321,7 @@ test('the actual SDK injects bundled skills before the model request and restore
   await session.run('/jc-manju-zhizuo\ncontinue')
   await session.run('/jc-novel\nwrite a chapter draft')
   assert.match(JSON.stringify(requests.at(-1).messages), /# jc-novel/)
+  assert.doesNotMatch(JSON.stringify(requests.at(-1).messages), /LOCAL_jc-novel/)
   assert.ok(requests.at(-1).tools?.some(tool => tool.function.name === 'wiki_save_artifact'))
   assert.ok(!requests.at(-1).tools?.some(tool => tool.function.name === 'manju_save_artifact'))
   await session.run('/jc-seedance\nordinary selection')
