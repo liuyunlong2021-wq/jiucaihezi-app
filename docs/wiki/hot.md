@@ -1,5 +1,17 @@
 # 热缓存
 
+## [2026-10-09] FK 图片图生图改用私有 OSS 签名 URL
+
+- ECS 日志确认 FK `0.2.0` 插件在渠道 #150 运行；FK-image2.5 (`...186289...`) 文生图返回过 200，FK-image2 (`...211f28...`) `/v1/images/edits` 返回 403 `This image model is not available for the current user`，15:20 重试仍失败。image2.5 与 image2 是不同模型 ID。
+- App 本地 FK 图片参考素材现在计划先直传私有 OSS，再把 HTTPS 签名地址作为 JSON `imageUrls` 发给 NewAPI；复用 FK 插件已有 JSON 路由。
+- OSS + JSON 改动没有解除 FK-image2 的上游 403；当前证据指向 Fanke 模型/账号可用性。GPT Image 2.5 另报 model 空，需单独查服务器请求 ID。详情见 [[运维/Fk渠道图片API接入-2026-10-08]]。
+
+## [2026-10-09] 小易 GPT Image 图生图异步任务失败
+
+- ECS 日志确认 NewAPI 渠道 #88、`xiaoyi-image` 0.1.1 收到 `gpt-image-2.5-1k` 图生图；路由记录 `is_model_mapped=true`、`upstream_model_name=gpt-image-2.5`，并创建了小易任务。
+- 任务异步失败 `Model name not specified, model name cannot be empty`，15:08 与 15:20 都出现。NewAPI 映射层有模型名；日志不足以判断上游提交或小易任务执行层为何报空。上游请求 ID `202610090720024319498718268d9d6WlO0H2od`，任务 `canvas-task-mv0my1kh-d15096fea9d75e8869b2b00e`。
+- 15:20 请求按次计费记录 `$0.08` 且跳过差额结算；先核账单，暂停重复付费图生图，交由小易按请求 ID 排查。详见 [[运维/小易图片NewAPIrc40图片任务插件-2026-10-08]]。
+
 ## [2026-10-09] App 参考素材直传阿里云 OSS 验收
 
 - 用户在 ECS 运行 OSS 直传切换脚本，最终 `ORIGIN VERIFIED`；数据库备份已验证，原 `docker-compose.media.yml` 保留，回滚目录 `/root/jc-oss-switch-20261009T041511Z`。
@@ -36,7 +48,7 @@
 ## [2026-10-08] Fanke 图片接入复用 Fk Task Plugin
 
 - 复用 `newapi-plugins/fk.plugin.js` 与现有渠道，不新增重复插件；v0.2.0 增加 `openai_image`、6 个映射模型、`image_count` 计费事实和 `/api/open/v1/image/generate` / `image/status` 转换。
-- 创作面板只显示 6 个友好名称，但请求模型名和 NewAPI 渠道模型名均为对应完整 `ft-image-v1-…` ID，渠道映射留空；4 个 GPT 型号 ¥0.08/张、Banana 2 ¥0.20/张、Banana Pro ¥0.30/张。截图中的旧 GPT 型号和其他 Fk 图片模型已移除。**插件尚未上传、渠道模型列表尚未更新、生成/轮询/下载/扣费未验收。** 见 [[运维/Fk渠道图片API接入-2026-10-08]]。
+- 创作面板只显示 6 个友好名称，但请求模型名和 NewAPI 渠道模型名均为对应完整 `ft-image-v1-…` ID，渠道映射留空；4 个 GPT 型号 ¥0.08/张、Banana 2 ¥0.20/张、Banana Pro ¥0.30/张。截图中的旧 GPT 型号和其他 Fk 图片模型已移除。插件已在 ECS 运行；最新文生图与图生图状态见上方 2026-10-09 记录。详见 [[运维/Fk渠道图片API接入-2026-10-08]]。
 
 ## [2026-10-08] 新增 Fk 图片 API 对外接入文档
 

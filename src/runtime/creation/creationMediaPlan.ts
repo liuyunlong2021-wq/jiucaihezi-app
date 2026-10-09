@@ -167,6 +167,9 @@ function mediaInputTransportFor(
   assetFlow: CreationAssetFlow,
 ): CreationMediaInputTransport {
   if (spec.route === 'local-comfy') return 'base64'
+  // FK's image plugin accepts signed HTTPS imageUrls. Materialize reference files
+  // to private OSS URLs instead of relaying file bytes through NewAPI multipart.
+  if (spec.id.startsWith('newapi/fk/') && spec.model.startsWith('ft-image-v1-')) return 'url'
   if (apiStyle === 'openai-image-edits' || apiStyle === 'newapi-image-task') {
     return 'multipart'
   }

@@ -65,8 +65,8 @@
 | 新增服务器模型与 NewAPI 插件 | [[运维/新增模型与NewAPI插件固定流程]]（上游核对、URL/Key/模型名、模型与 Task Plugin 配置、收费表达式、第三方 API 文档和生产验收统一流程） |
 | App 参考素材直传阿里云 OSS | [[运维/App参考素材直传阿里云OSS验收-2026-10-09]]（NewAPI 生产切换和回滚、桌面参考素材直传、FK MiniMax H3 三秒端到端实测、204 修复与正式发布边界） |
 | Fk 渠道 Seedance 视频 API | [[运维/韭菜盒子Fk渠道Seedance视频API对外接入-2026-10-06]]（NewAPI 公网调用合同、7 个插件模型、异步提交/查询/下载；真实生成与账单待验收） |
-| Fk 渠道图片 API | 第三方合同见 [[运维/韭菜盒子Fk渠道图片API对外接入-2026-10-08]]；内部配置见 [[运维/Fk渠道图片API接入-2026-10-08]]（复用 `fk` Task Plugin v0.2.0 的 `openai_image` 与现有 type 61 渠道；生产上传和真实验收待完成） |
-| 小易 GPT Image / Grok 图片 API | [[运维/小易图片NewAPIrc40图片任务插件-2026-10-08]]、[[运维/韭菜盒子GrokImagineImage2.0API对外接入-2026-09-08]]（现行合同：NewAPI rc40 `openai_image` + 小易异步创建/轮询；历史 `/v1/videos` 适配器仅作兼容与追溯） |
+| Fk 渠道图片 API | 第三方合同见 [[运维/韭菜盒子Fk渠道图片API对外接入-2026-10-08]]；内部配置见 [[运维/Fk渠道图片API接入-2026-10-08]]（ECS 确认 `fk` v0.2.0 / #150 的 FK-image2.5 文生图曾 200；FK-image2 图生图因 Fanke 模型不可用返回 403；私有 OSS 直传不改变该权限错误） |
+| 小易 GPT Image / Grok 图片 API | [[运维/小易图片NewAPIrc40图片任务插件-2026-10-08]]、[[运维/韭菜盒子GrokImagineImage2.0API对外接入-2026-09-08]]（ECS 确认 #88 / `xiaoyi-image` 0.1.1 的 GPT Image 2.5 图生图有非空映射，但异步任务报 model 为空；成功生成及计费退款待查） |
 | MiniMax H3 Context IR 提示词增强 API | [[运维/韭菜盒子MiniMaxH3ContextIR提示词增强API对外接入-2026-10-06]]（公网第三方接入合同及创作面板独立文本模型的实现边界） |
 | 稳定性与文字覆盖 | [[开发/通用记忆工作台稳定性修复与Markdown体验升级SDD]] |
 | 本地作品生成 | [[开发/通用记忆工作台本地作品生成基础工具SDD]] |

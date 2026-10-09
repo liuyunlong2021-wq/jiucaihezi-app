@@ -1,5 +1,17 @@
 # Wiki 操作日志
 
+## [2026-10-09] 实施 | FK 图片图生图参考素材改走私有 OSS URL
+
+- 用户同意按 FK 上游插件现有能力修复图生图请求。`fk.plugin.js` 已支持 JSON `imageUrls`；App 仅对 `newapi/fk/ft-image-v1-*` 将本地参考素材交给现有 OSS 直传，再把签名 HTTPS 地址以 JSON 发到 `/v1/images/edits`。其他模型图生图仍保持原 multipart。
+- 用户提供的 ECS 日志确认 `fk` 插件 `0.2.0`、渠道 #150 的 FK-image2.5 文生图 `/v1/images/generations` 返回 200。进一步核对发现，精确模型 `ft-image-v1-211f28f47b0355abb1798f72eb65f22d` 的 `/v1/images/edits` 已有 HTTP 403 记录；初始排查漏看了该条。该上游拒绝不能由 OSS 传输改动解决。
+- 更新内部运维页、热缓存与来源索引。未运行测试；未构建客户端、未部署、未进行真实 FK 图生图或计费验收。详见 [[运维/Fk渠道图片API接入-2026-10-08]]。
+
+## [2026-10-09] 排查 | FK-image2 403 与 GPT Image 空模型错误
+
+- 用户重试仍失败。ECS 日志确认 FK-image2 `ft-image-v1-211f28f47b0355abb1798f72eb65f22d` 在渠道 #150 的 `/v1/images/edits` 收到 Fanke HTTP 403 `This image model is not available for the current user`；NewAPI 已退回预扣的 ¥0.08。FK-image2.5 的 200 属于另一个模型 ID，不能证明 image2 有权限；OSS + JSON URL 传输改动没有解除该模型拒绝。
+- 同屏 GPT Image 2.5 1K 另报 `Model name not specified, model name cannot be empty`，请求 ID `202610090720024319498718268d9d6WIO0H2od`。尚未取得这次请求的 ECS/NewAPI 详情，需核对实际请求路径、模型映射和插件提交体；没有据错误文案盲改 App。
+- 已同步更新 FK 内部运维页与热缓存。下一步需查看该请求 ID 的 NewAPI 日志，并确认 Fanke 账号 `/api/open/v1/models` 是否包含 FK-image2。未运行测试或部署。
+
 ## [2026-10-09] 验收 | App 参考素材直传阿里云 OSS
 
 - 用户在 ECS 执行 `/root/jc-oss-direct-v2/scripts/newapi-media/activate.sh`，回执 `ORIGIN VERIFIED`；数据库归档校验通过，原媒体 Compose 保留，回滚目录 `/root/jc-oss-switch-20261009T041511Z`。
@@ -2316,3 +2328,10 @@
 - 记录共同执行链、产物映射、草稿／归档／确认区分、小说确认后来源追加及原生拆分边界、部分成功与重试、存量兼容、P0–P4 实施和验收矩阵。章节草稿与共享保存器标为待实现适配，未将现有 Skill 组合写成统一链路已完成。
 - 两份创作入口合同、知识库首页、热缓存、来源索引与开发历史已登记共同纲领；历史记录保留。本次只改文档，没有修改运行时代码、内置 Skill 包或用户作品，也未执行测试、构建、真实模型或跨平台验收。
 - 文档已读回；4 个真实双链目标全部存在，6 处导航均已登记；已跟踪文档差异检查通过，新文档独立差异检查无空白错误。统一落盘改造与实际用户流程仍待实施。
+
+## [2026-10-09] 排障 | FK 与小易 GPT Image 图生图失败
+
+- 用户提供 ECS `docker logs`。FK-image2 请求命中渠道 #150，Fanke 返回 `This image model is not available for the current user`；NewAPI 明确退回 `$0.08` 预扣费。FK-image2.5 文生图成功记录不能证明 FK-image2 有权限，OSS 素材直传也不能解除模型权限错误。
+- GPT Image 2.5 1K 图生图命中渠道 #88 / `xiaoyi-image` 0.1.1；NewAPI 记录 `is_model_mapped=true`、`upstream_model_name=gpt-image-2.5` 并取得小易 task ID，任务随即报 `Model name not specified, model name cannot be empty`。15:08、15:20 均出现，当前证据排除 NewAPI 模型映射为空，但不能从 ECS 日志定位小易内部何处丢失模型名。
+- 15:20 GPT 请求按次计费记录 `$0.08`，并跳过差额结算；ECS 输出没有退款记录。上游 request ID `202610090720024319498718268d9d6WlO0H2od`、task ID `canvas-task-mv0my1kh-d15096fea9d75e8869b2b00e`，应据此请小易排查并核对用户账单。
+- 更新 FK / 小易运维页、热缓存、来源索引与知识库入口。只读分析用户提供的日志，没有修改运行代码、查询生产控制台、核账单、生成任务或运行测试。

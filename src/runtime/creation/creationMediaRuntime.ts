@@ -516,22 +516,40 @@ async function executeDirectImageRequest(
     return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
   }
   if (request.plan.apiStyle === 'openai-image-edits') {
-    onProgress?.(0, '上传图片中...')
+    const usesFkImageUrls = request.plan.modelId.startsWith('newapi/fk/ft-image-v1-')
+    onProgress?.(0, usesFkImageUrls ? '提交图生图任务...' : '上传图片中...')
     const images = asStringArray(params.image)
     if (!images.length) throw new Error('没有可用参考图片')
-    const fields: Record<string, string | Blob | Blob[]> = {
-      model: request.plan.model,
-      prompt,
-      response_format: params.responseFormat || 'url',
-      image: await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal))),
+    let data: any
+    if (usesFkImageUrls) {
+      // OSS signed URLs are readable by Fanke for a short period. Send references
+      // as JSON imageUrls so file bytes bypass NewAPI/ECS and FK's multipart relay.
+      data = await apiCall(request.endpoint, compact({
+        model: request.plan.model,
+        prompt,
+        ratio: params.ratio || params.aspectRatio || '9:16',
+        imageSize: (params.imageSize || params.resolution)
+          ? asString(params.imageSize || params.resolution).toUpperCase()
+          : undefined,
+        size: params.size,
+        quality: params.quality,
+        imageUrls: images,
+      }), 'POST', request.plan.model, request.signal)
+    } else {
+      const fields: Record<string, string | Blob | Blob[]> = {
+        model: request.plan.model,
+        prompt,
+        response_format: params.responseFormat || 'url',
+        image: await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal))),
+      }
+      if (request.plan.model.startsWith('ft-image-v1-')) {
+        fields.ratio = asString(params.ratio || params.aspectRatio || '9:16')
+        if (params.imageSize || params.resolution) fields.imageSize = asString(params.imageSize || params.resolution).toUpperCase()
+      }
+      if (params.size) fields.size = params.size
+      if (params.quality) fields.quality = params.quality
+      data = await apiCallMultipart(request.endpoint, fields, request.signal)
     }
-    if (request.plan.model.startsWith('ft-image-v1-')) {
-      fields.ratio = asString(params.ratio || params.aspectRatio || '9:16')
-      if (params.imageSize || params.resolution) fields.imageSize = asString(params.imageSize || params.resolution).toUpperCase()
-    }
-    if (params.size) fields.size = params.size
-    if (params.quality) fields.quality = params.quality
-    const data = await apiCallMultipart(request.endpoint, fields, request.signal)
     const mediaUrl = extractMediaUrl(data, 'image')
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     const taskId = extractTaskId(data)
