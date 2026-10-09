@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, copyFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { test } from 'node:test'
 
 // 补丁脚本是纯文本替换，幂等性完全靠它自己的 `!server.includes(anchor)` 检查。
@@ -76,4 +77,33 @@ test('harness 准备脚本只留运行时真正要的东西', t => {
     [],
     'libreoffice-kit 全家（含平台包与 wasm）必须删掉',
   )
+})
+
+// 重建没有三个会话扩展方法的 SDK，不能只验证已打补丁的开发机。
+test('Harness installs dependent session methods on a fresh SDK layout', t => {
+  if (!existsSync(serverPath)) return t.skip('bundled Harness SDK is not installed')
+  const root = mkdtempSync(join(tmpdir(), 'jc-harness-fresh-'))
+  try {
+    const harness = join(root, 'src-tauri/resources/deepseek-harness')
+    const sdk = join(harness, 'node_modules/@deepseek-ai')
+    for (const dir of ['scripts', 'src-tauri/resources/deepseek-harness/node_modules/node/bin']) mkdirSync(join(root, dir), { recursive: true })
+    for (const pkg of ['dsh-sdk-client', 'dsh-sdk-jsonrpc-server']) mkdirSync(join(sdk, pkg, 'lib'), { recursive: true })
+    copyFileSync('scripts/prepare-deepseek-harness.mjs', join(root, 'scripts/prepare-deepseek-harness.mjs'))
+    copyFileSync('src-tauri/resources/deepseek-harness/package.json', join(harness, 'package.json'))
+    copyFileSync(serverPath.replace('dsh-sdk-jsonrpc-server/lib/index.js', 'dsh-sdk-client/package.json'), join(sdk, 'dsh-sdk-client/package.json'))
+    copyFileSync(serverPath.replace('dsh-sdk-jsonrpc-server', 'dsh-sdk-client'), join(sdk, 'dsh-sdk-client/lib/index.js'))
+    writeFileSync(join(harness, 'node_modules/node/bin', process.platform === 'win32' ? 'node.exe' : 'node'), '')
+    let source = readFileSync(serverPath, 'utf8')
+    for (const method of ['cancelSession', 'updateQueue', 'permission', 'approval']) {
+      source = source.replace(new RegExp(`\\tasync ${method}\\(params\\) \{[\\s\\S]*?(?=\\t(?:async |assertLiveAgent\\())`), '')
+    }
+    const target = join(sdk, 'dsh-sdk-jsonrpc-server/lib/index.js')
+    writeFileSync(target, source)
+    const run = () => execFileSync(process.execPath, [join(root, 'scripts/prepare-deepseek-harness.mjs')], { stdio: 'pipe' })
+    run()
+    const once = readFileSync(target, 'utf8')
+    for (const method of ['cancelSession', 'updateQueue', 'permission', 'approval']) assert.ok(once.includes(`async ${method}(params)`), method)
+    run()
+    assert.equal(readFileSync(target, 'utf8'), once)
+  } finally { rmSync(root, { recursive: true, force: true }) }
 })

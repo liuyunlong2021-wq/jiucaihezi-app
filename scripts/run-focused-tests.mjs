@@ -209,6 +209,7 @@ const externalNodeTests = [
   'scripts/__tests__/promote-updates.test.mjs',
   'scripts/__tests__/windows-release-contract.test.mjs',
   'scripts/__tests__/native-windows-fingerprint.test.mjs',
+  'scripts/__tests__/verify-online-updates.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]
 

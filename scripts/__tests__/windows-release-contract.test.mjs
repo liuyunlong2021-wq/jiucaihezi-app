@@ -152,3 +152,11 @@ test('Windows-only diagnostics cannot promote a public updater manifest', () => 
   assert.match(workflow, /matrix: \$\{\{ fromJSON\(inputs\.native_platform == 'windows'/)
   assert.match(workflow, /promote-updater:[\s\S]*?inputs\.native_platform != 'windows'/)
 })
+
+test('native A-to-B probe uses an updater-enabled baseline and allows slow NSIS installation', () => {
+  assert.match(workflow, /gh release download v2\.2\.22/)
+  assert.match(workflow, /native-upgrade-probe\.mjs "\$\{CANDIDATE_TAG#v\}" 2\.2\.22/)
+  const probe = readFileSync('scripts/native-upgrade-probe.mjs', 'utf8')
+  assert.match(probe, /Date\.now\(\) \+ 10 \* 60 \* 1000/)
+  assert.match(probe, /if \(mismatches\.length\) \{[\s\S]*throw new Error\(`NSIS did not install/)
+})

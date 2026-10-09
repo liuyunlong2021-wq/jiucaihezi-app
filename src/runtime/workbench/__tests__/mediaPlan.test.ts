@@ -262,7 +262,8 @@ test('media plan editor uses compatible registry models and normalizes changed m
   }
 
   const controls = getMediaPlanEditorControls(plan)
-  assert.equal(controls.models.some(model => model.value === 'gpt-image-2-超分'), true)
+  assert.equal(controls.models.some(model => model.value === 'gpt-image-2-1k'), true)
+  assert.equal(controls.models.some(model => model.value === 'gpt-image-2-超分'), false)
 
   const updated = updateMediaPlanParameters(plan, {
     ratio: '100:1',

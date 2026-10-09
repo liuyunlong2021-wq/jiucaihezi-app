@@ -765,8 +765,8 @@ jobs:
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/upgrade-assets" "$RUNNER_TEMP/baseline-assets"
           gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/upgrade-assets" --pattern "$PACKAGE" --pattern "$PACKAGE.sig"
-          # 首次接入验证旧安装包的原位替换；A→B 点击和权限验收另行记录。
-          gh release download v2.2.19 --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/baseline-assets" --pattern "$BASELINE"
+          # 使用已接入 updater 的正式 A 版，验收真实 A→B 官方安装链路。
+          gh release download v2.2.22 --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/baseline-assets" --pattern "$BASELINE"
           if [ "$RUNNER_OS" = Windows ]; then
             cp "$RUNNER_TEMP/baseline-assets/"*.exe "$RUNNER_TEMP/upgrade-assets/baseline_setup.exe"
             gh release download "$CANDIDATE_TAG" --repo "$GITHUB_REPOSITORY" --dir "$RUNNER_TEMP/upgrade-assets" --pattern native-windows-files.json
@@ -777,7 +777,7 @@ jobs:
         shell: bash
         env:
           CANDIDATE_TAG: ${{ inputs.publish_tag || github.ref_name }}
-        run: node scripts/native-upgrade-probe.mjs "${CANDIDATE_TAG#v}" 2.2.19 "$RUNNER_TEMP/upgrade-assets"
+        run: node scripts/native-upgrade-probe.mjs "${CANDIDATE_TAG#v}" 2.2.22 "$RUNNER_TEMP/upgrade-assets"
 
   promote-updater:
     needs: verify-native-upgrade

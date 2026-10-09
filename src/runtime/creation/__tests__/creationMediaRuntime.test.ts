@@ -291,12 +291,12 @@ test('Grok Image 2 submits a mapped size and always requests a URL', { concurren
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
-      const body = init.body as FormData
-      assert.equal(body.get('model'), 'grok-imagine-image-2.0')
-      assert.equal(body.get('size'), '2048x1152')
-      assert.equal(body.get('aspect_ratio'), null)
-      assert.equal(body.get('response_format'), 'url')
+    if (url.endsWith('/v1/images/generations') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.model, 'grok-imagine-image-2.0')
+      assert.equal(body.size, '2048x1152')
+      assert.equal(body.aspect_ratio, undefined)
+      assert.equal(body.response_format, 'url')
       return Response.json({ data: [{ url: 'https://cdn.example.test/grok.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
@@ -320,7 +320,7 @@ test('Grok Image 2 uses image[] for multiple reference images', { concurrency: f
   const previousFetch = globalThis.fetch
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+    if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal(body.getAll('image[]').length, 2)
       assert.equal(body.getAll('image').length, 0)

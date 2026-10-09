@@ -213,43 +213,42 @@ if (!server.includes(cancelSessionCase)) {
   server = server.replace(updateQueueCase, `${updateQueueCase}\n${cancelSessionCase}`)
   changed = true
 }
-const cancelSessionMethod = `\tasync cancelSession(params) {
-\t\tconst rec = this.sessions.get(params.sessionId);
-\t\tif (!rec) throw new Error("session is not running");
+// 新安装必须先建立被后续补丁引用的方法；不能依赖开发机的旧补丁。
+const permissionMethod = `\tasync permission(params) {
+\t\tif (!this.initialized) throw new Error("SDK server is not initialized");
+\t\tif (params.existingOnly && !this.sessions.has(params.sessionId) && await this.ctx.get("sessionPersistence")?.stat(brandString(params.sessionId)) === void 0) return { exists: false };
+\t\tconst rec = await this.getOrCreateSession(params.sessionId);
 \t\tthis.assertLiveAgent(rec, params.sessionId);
-\t\tif (this.stoppingSessions?.has(params.sessionId)) return { accepted: true };
-\t\tif (this.stoppingSessions === void 0) this.stoppingSessions = new Set();
-\t\tthis.stoppingSessions.add(params.sessionId);
 \t\tconst agent = rec.handle.agent;
-\t\tconst nextStep = [...agent.inbox.nextStep];
-\t\tconst nextTurn = [...agent.inbox.nextTurn];
-\t\ttry {
-\t\t\tagent.inbox.clear();
-\t\t\tagent.cancel({ kind: "user" }, { keepInbox: true });
-\t\t\tawait agent.whenIdle();
-\t\t\tif (nextStep.length) agent.inbox.splice("next-step", 0, 0, nextStep);
-\t\t\tif (nextTurn.length) agent.inbox.splice("next-turn", 0, 0, nextTurn);
-\t\t\treturn { accepted: true };
-\t\t} finally {
-\t\t\tthis.stoppingSessions.delete(params.sessionId);
+\t\tif (params.preset !== void 0) {
+\t\t\tconst preset = String(params.preset);
+\t\t\tconst settled = await this.ctx.get("commands").execute(agent, "/permission " + preset, [], new AbortController().signal);
+\t\t\tif (settled === void 0) throw new Error("unknown permission preset: " + preset);
+\t\t\tif (settled.result.kind !== "success") throw new Error(settled.result.text || "permission preset " + preset + " was rejected");
 \t\t}
+\t\tconst presets = this.ctx.get("permissionPresets");
+\t\treturn { ...presets.permissionState(agent.session), preset: presets.current(agent.session), agentId: agent.id };
+\t}
+\tasync approval(params) {
+\t\tconst rec = this.sessions.get(params.sessionId);
+\t\tif (!rec) throw new Error("approval session is not pending");
+\t\tthis.assertLiveAgent(rec, params.sessionId);
+\t\treturn rec.approvalBridge.answer(params);
 \t}
 `
-let cancelSessionStart = server.indexOf('\tasync cancelSession(params) {')
-if (cancelSessionStart < 0) cancelSessionStart = server.indexOf('\tcancelSession(params) {')
-const cancelSessionTail = cancelSessionStart < 0 ? -1 : server.slice(cancelSessionStart).search(/\tasync (?:updateQueue|permission|approval)\(params\) \{/)
-const cancelSessionEnd = cancelSessionStart + cancelSessionTail
-if (cancelSessionStart < 0) {
-  const methodAnchor = '\tasync updateQueue(params) {'
-  if (!server.includes(methodAnchor)) throw new Error('Unsupported DeepSeek Harness queue method layout')
-  server = server.replace(methodAnchor, cancelSessionMethod + methodAnchor)
+const permissionStart = server.indexOf('\tasync permission(params) {')
+const permissionTail = permissionStart < 0 ? -1 : server.slice(permissionStart).search(/\t(?:async applyPinnedSkillScope\(rec, content\)|assertLiveAgent\(rec, sessionId\)) \{/)
+const permissionEnd = permissionStart + permissionTail
+if (permissionStart < 0) {
+  if (!server.includes('\tassertLiveAgent(rec, sessionId) {')) throw new Error('Unsupported permission method layout')
+  server = server.replace('\tassertLiveAgent(rec, sessionId) {', permissionMethod + '\tassertLiveAgent(rec, sessionId) {')
   changed = true
-} else if (cancelSessionTail < 0) {
-  throw new Error('Unsupported DeepSeek Harness cancel method layout')
-} else if (server.slice(cancelSessionStart, cancelSessionEnd) !== cancelSessionMethod) {
-  server = server.slice(0, cancelSessionStart) + cancelSessionMethod + server.slice(cancelSessionEnd)
+} else if (server.slice(permissionStart, permissionEnd) !== permissionMethod) {
+  if (permissionTail < 0) throw new Error('Unsupported permission method layout')
+  server = server.slice(0, permissionStart) + permissionMethod + server.slice(permissionEnd)
   changed = true
 }
+
 const updateQueueMethod = `\tasync updateQueue(params) {
 \t\tif (!this.initialized) throw new Error("SDK server is not initialized");
 \t\tconst rec = await this.getOrCreateSession(params.sessionId);
@@ -290,41 +289,43 @@ if (updateQueueStart < 0) {
   server = server.slice(0, updateQueueStart) + updateQueueMethod + server.slice(updateQueueEnd)
   changed = true
 }
-const permissionMethod = `\tasync permission(params) {
-\t\tif (!this.initialized) throw new Error("SDK server is not initialized");
-\t\tif (params.existingOnly && !this.sessions.has(params.sessionId) && await this.ctx.get("sessionPersistence")?.stat(brandString(params.sessionId)) === void 0) return { exists: false };
-\t\tconst rec = await this.getOrCreateSession(params.sessionId);
-\t\tthis.assertLiveAgent(rec, params.sessionId);
-\t\tconst agent = rec.handle.agent;
-\t\tif (params.preset !== void 0) {
-\t\t\tconst preset = String(params.preset);
-\t\t\tconst settled = await this.ctx.get("commands").execute(agent, "/permission " + preset, [], new AbortController().signal);
-\t\t\tif (settled === void 0) throw new Error("unknown permission preset: " + preset);
-\t\t\tif (settled.result.kind !== "success") throw new Error(settled.result.text || "permission preset " + preset + " was rejected");
-\t\t}
-\t\tconst presets = this.ctx.get("permissionPresets");
-\t\treturn { ...presets.permissionState(agent.session), preset: presets.current(agent.session), agentId: agent.id };
-\t}
-\tasync approval(params) {
+const cancelSessionMethod = `\tasync cancelSession(params) {
 \t\tconst rec = this.sessions.get(params.sessionId);
-\t\tif (!rec) throw new Error("approval session is not pending");
+\t\tif (!rec) throw new Error("session is not running");
 \t\tthis.assertLiveAgent(rec, params.sessionId);
-\t\treturn rec.approvalBridge.answer(params);
+\t\tif (this.stoppingSessions?.has(params.sessionId)) return { accepted: true };
+\t\tif (this.stoppingSessions === void 0) this.stoppingSessions = new Set();
+\t\tthis.stoppingSessions.add(params.sessionId);
+\t\tconst agent = rec.handle.agent;
+\t\tconst nextStep = [...agent.inbox.nextStep];
+\t\tconst nextTurn = [...agent.inbox.nextTurn];
+\t\ttry {
+\t\t\tagent.inbox.clear();
+\t\t\tagent.cancel({ kind: "user" }, { keepInbox: true });
+\t\t\tawait agent.whenIdle();
+\t\t\tif (nextStep.length) agent.inbox.splice("next-step", 0, 0, nextStep);
+\t\t\tif (nextTurn.length) agent.inbox.splice("next-turn", 0, 0, nextTurn);
+\t\t\treturn { accepted: true };
+\t\t} finally {
+\t\t\tthis.stoppingSessions.delete(params.sessionId);
+\t\t}
 \t}
 `
-const permissionStart = server.indexOf('\tasync permission(params) {')
-const permissionTail = permissionStart < 0 ? -1 : server.slice(permissionStart).search(/\t(?:async applyPinnedSkillScope\(rec, content\)|assertLiveAgent\(rec, sessionId\)) \{/)
-const permissionEnd = permissionStart + permissionTail
-if (permissionStart < 0) {
-  if (!server.includes('\tassertLiveAgent(rec, sessionId) {')) throw new Error('Unsupported permission method layout')
-  server = server.replace('\tassertLiveAgent(rec, sessionId) {', permissionMethod + '\tassertLiveAgent(rec, sessionId) {')
+let cancelSessionStart = server.indexOf('\tasync cancelSession(params) {')
+if (cancelSessionStart < 0) cancelSessionStart = server.indexOf('\tcancelSession(params) {')
+const cancelSessionTail = cancelSessionStart < 0 ? -1 : server.slice(cancelSessionStart).search(/\tasync (?:updateQueue|permission|approval)\(params\) \{/)
+const cancelSessionEnd = cancelSessionStart + cancelSessionTail
+if (cancelSessionStart < 0) {
+  const methodAnchor = '\tasync updateQueue(params) {'
+  if (!server.includes(methodAnchor)) throw new Error('Unsupported DeepSeek Harness queue method layout')
+  server = server.replace(methodAnchor, cancelSessionMethod + methodAnchor)
   changed = true
-} else if (server.slice(permissionStart, permissionEnd) !== permissionMethod) {
-  if (permissionTail < 0) throw new Error('Unsupported permission method layout')
-  server = server.slice(0, permissionStart) + permissionMethod + server.slice(permissionEnd)
+} else if (cancelSessionTail < 0) {
+  throw new Error('Unsupported DeepSeek Harness cancel method layout')
+} else if (server.slice(cancelSessionStart, cancelSessionEnd) !== cancelSessionMethod) {
+  server = server.slice(0, cancelSessionStart) + cancelSessionMethod + server.slice(cancelSessionEnd)
   changed = true
 }
-
 // Bridge lifetime follows the actual Agent, including resume and shutdown.
 const approvalImport = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
 if (!server.includes(approvalImport)) { server = approvalImport + server; changed = true }

@@ -369,8 +369,17 @@ test('本机视频模型的参考图必须先上传：asset.localhost 不能直�
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     seen.push(url)
-    // 面板把本地字节传到网关，拿回一个远端可访问的短存 URL
-    if (url.includes('/api/creations/uploads')) return Response.json({ url: 'https://cdn.example.test/uploaded-0.png' })
+    // 网关只签发授权，文件字节直传 OSS。
+    if (url.endsWith('/api/creations/upload-url')) return Response.json({
+      upload_url: 'https://oss.example.test/upload',
+      form_fields: { key: 'creation-temp/test.png', policy: 'signed' },
+      asset_url: 'https://cdn.example.test/uploaded-0.png',
+    })
+    if (url === 'https://oss.example.test/upload') {
+      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
+      assert.equal(new Headers(init?.headers).has('Authorization'), false)
+      return new Response(null, { status: 204 })
+    }
     // 本地 Tauri 资源地址：只有上传前读字节会走到这里
     if (url.startsWith('http://asset.localhost/')) {
       return new Response(new Blob([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], { type: 'image/png' }))
@@ -400,7 +409,7 @@ test('本机视频模型的参考图必须先上传：asset.localhost 不能直�
     __resetApiKeyMemoryCacheForTests('')
   }
 
-  assert.ok(seen.some(url => url.includes('/api/creations/uploads')), '参考图没有被上传，本地地址被直接透传了')
+  assert.ok(seen.some(url => url === 'https://oss.example.test/upload'), '参考图没有被上传，本地地址被直接透传了')
   assert.equal(posted?.first_frame, 'https://cdn.example.test/uploaded-0.png')
 })
 

@@ -340,10 +340,12 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
 test('creation panel keeps the requested GPT Image 2.5 order and drops the retired tiers', () => {
   const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
   const position = (id: string) => imageIds.indexOf(id)
-  // 面板分组顺序由 CreationPanel 的 order 数组定；这里钉住保留下来的四档相对顺序
+  // 面板只保留两个普通 1K 档；退役档仍保留历史合同。
   assert.ok(position('gpt-image-2.5-1k') < position('gpt-image-2-1k'))
-  assert.ok(position('gpt-image-2-1k') < position('gpt-image-2-超分'))
-  assert.ok(position('gpt-image-2-超分') < position('gpt-image-2.5-官方'))
+  for (const id of ['gpt-image-2-超分', 'gpt-image-2.5-官方']) {
+    assert.equal(position(id), -1)
+    assert.ok(getCreationModelSpec(id))
+  }
 })
 
 test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 变体退出面板', () => {
@@ -382,8 +384,8 @@ test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 
     assert.ok(getCreationModelSpec(id), id)
   }
 
-  // 图片侧保留：2.5 的 1K / 官方 与两个菠萝项
-  for (const id of ['gpt-image-2.5-1k', 'gpt-image-2.5-官方', 'gpt-image-2-菠萝', 'gpt-image-2.5-菠萝']) {
+  // 图片侧保留：2.5 的 1K 与两个菠萝项
+  for (const id of ['gpt-image-2.5-1k', 'gpt-image-2-菠萝', 'gpt-image-2.5-菠萝']) {
     assert.equal(imageIds.includes(id), true, id)
   }
   assert.equal(displayModelPrice(getCreationModelSpec('gpt-image-2-菠萝')!), '0.08/张')

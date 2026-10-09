@@ -55,17 +55,20 @@ if (process.platform === 'win32') {
   const complete = () => Object.entries(hashes).every(([path, hash]) => {
     try { return digest(join(installed, path)) === hash } catch { return false }
   })
-  const deadline = Date.now() + 180000
+  const deadline = Date.now() + 10 * 60 * 1000
   while (Date.now() < deadline && !complete()) await new Promise(resolve => setTimeout(resolve, 1000))
   if (!complete()) {
     const mismatches = Object.entries(hashes).flatMap(([path, expected]) => {
       try { const actual = digest(join(installed, path)); return actual === expected ? [] : [{ path, expected, actual }] }
       catch { return [{ path, expected, actual: 'missing' }] }
     })
-    console.error('Native install mismatches:', JSON.stringify(mismatches.slice(0, 20)))
-    console.error('Installed top-level files:', readdirSync(installed))
-    execFileSync('powershell', ['-NoProfile', '-Command', '$exe=Get-Item $env:JC_PROBE_EXE; $exe.VersionInfo | Select-Object FileVersion,ProductVersion; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*/UPDATE*" } | Select-Object Name,CommandLine'], { env: { ...process.env, JC_PROBE_EXE: exe }, stdio: 'inherit' })
-    throw new Error(`NSIS did not install ${mismatches.length} expected executable and runtime files`)
+    // 安装器可能刚好在超时边界完成；以下摘要快照为最终判断，避免报零项失败。
+    if (mismatches.length) {
+      console.error('Native install mismatches:', JSON.stringify(mismatches.slice(0, 20)))
+      console.error('Installed top-level files:', readdirSync(installed))
+      execFileSync('powershell', ['-NoProfile', '-Command', '$exe=Get-Item $env:JC_PROBE_EXE; $exe.VersionInfo | Select-Object FileVersion,ProductVersion; Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like "*/UPDATE*" } | Select-Object Name,CommandLine'], { env: { ...process.env, JC_PROBE_EXE: exe }, stdio: 'inherit' })
+      throw new Error(`NSIS did not install ${mismatches.length} expected executable and runtime files`)
+    }
   }
 
 } else {
