@@ -22,6 +22,19 @@ interface RustHttpResponse {
   body_base64?: string
 }
 
+export function createRustHttpResponse(result: RustHttpResponse): Response {
+  const hasNullBodyStatus = result.status === 204 || result.status === 205 || result.status === 304
+  const body = hasNullBodyStatus
+    ? null
+    : result.body_base64
+      ? Uint8Array.from(atob(result.body_base64), char => char.charCodeAt(0))
+      : result.body
+  return new Response(body, {
+    status: result.status,
+    headers: new Headers(result.headers),
+  })
+}
+
 function canUseRustFetch(init?: RequestInit): boolean {
   if (!init?.body) return true
   return typeof init.body === 'string' || init.body instanceof FormData || init.body instanceof Blob
@@ -179,14 +192,7 @@ async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
     },
   })
 
-  const respHeaders = new Headers(result.headers)
-  const responseBody = result.body_base64
-    ? Uint8Array.from(atob(result.body_base64), char => char.charCodeAt(0))
-    : result.body
-  return new Response(responseBody, {
-    status: result.status,
-    headers: respHeaders,
-  })
+  return createRustHttpResponse(result)
 }
 
 /**

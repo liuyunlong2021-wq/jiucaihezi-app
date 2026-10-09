@@ -8,11 +8,13 @@ import {
   DEEPSEEK_HARNESS_CONTEXT_WINDOW,
   DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
   DEEPSEEK_HARNESS_SESSION_MARKER,
+  applyDeepSeekInboxEvent,
   deepSeekHandoffTurns,
   deepSeekAssistantText,
   deepSeekPermissionChip,
   deepSeekPrompt,
   deepSeekSessionExists,
+  deepSeekSessionInbox,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
   deepSeekSessionTurns,
@@ -20,10 +22,13 @@ import {
   readDeepSeekHarnessSession,
   runDeepSeekHarness,
   type DeepSeekHarnessInput,
+  type DeepSeekInboxItem,
   type DeepSeekPermissionTier,
+  type DeepSeekReadFileMeta,
   type DeepSeekRetry,
   type DeepSeekRetryState,
   type DeepSeekSessionSnapshot,
+  type DeepSeekUsage,
 } from './deepSeekHarness'
 import { DesktopRemoteHost } from './desktopRemoteHost'
 import { desktopRemoteEventCursor, nextDesktopRemoteEventSeq } from './desktopRemoteEventSeq'
@@ -45,6 +50,9 @@ export type MemoryRunStep = {
   /** 工具结果正文。实时也要带：官方在轮次内就把 `read` / `bash` 的产出摆出来。 */
   resultText?: string
   resultTruncated?: boolean
+  parentCallId?: string
+  rootCallId?: string
+  readFile?: DeepSeekReadFileMeta
   /** 重试条目（官方 `llm/retry`）：与工具步共用同一条时间线，靠 `kind` 分开渲染。 */
   kind?: 'retry'
   retryState?: DeepSeekRetryState
@@ -64,15 +72,21 @@ export type MemoryRun = {
   steps: MemoryRunStep[]
   elapsed: number
   metrics: DirectRunMetrics | null
+  usage?: DeepSeekUsage
+  inbox?: DeepSeekInboxItem[]
   userTurn: ConversationTurn | null
   programStatus: MemoryProgramStatus | null
   permissionTier?: DeepSeekPermissionTier
   permissionNotice?: string
+  harnessModel?: string
+  harnessProviderId?: string
   approval: { id: string; message: string; resolve: (decision: MemoryToolApprovalDecision) => void } | null
   controller: AbortController
   timer: ReturnType<typeof setInterval> | null
   startedAt: number
   title?: string
+  /** Display-only association used to hand the live Markdown nodes to the authoritative answer. */
+  officialAssistantTurnId?: string
   editTargetId: string
   memoryEnabled: boolean
   runtime: 'legacy' | 'dh'
@@ -264,6 +278,8 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
     mediaSelected: selected.mediaSelected, avSelected: selected.avSelected,
     scene3dSelected: selected.scene3dSelected, mcpServerIds: selected.mcpServerIds,
   }
+  run.harnessModel = config.model
+  run.harnessProviderId = selected.modelProviderId
   const key = memoryRunKey(run.owner, run.resourcePath)
   const current = () => desktopConversationRuns.get(key) === run && run.phase === 'running'
   let reply: string
@@ -299,10 +315,9 @@ export function desktopRemoteOfficialHistoryReady(
   snapshot: DeepSeekSessionSnapshot, baseline: number, userText: string, sentAt: string,
 ) {
   const users = deepSeekSessionTurns(snapshot).filter(turn => turn.role === 'user')
-  const lastEvent = [...(snapshot.events || [])].reverse().find(event =>
-    event?.type === 'user/message' && event.data?.source?.kind === 'user')
-  return users.length > baseline && users.at(-1)?.content === userText
-    && Number.isFinite(Date.parse(sentAt)) && Number(lastEvent?.time) >= Date.parse(sentAt)
+  const sentAtMs = Date.parse(sentAt)
+  return users.length > baseline && Number.isFinite(sentAtMs)
+    && users.some(turn => turn.content === userText && Date.parse(turn.createdAt) >= sentAtMs)
 }
 
 function finishDesktopRemoteOfficialSession(
@@ -312,6 +327,13 @@ function finishDesktopRemoteOfficialSession(
   if (!userTurn || run.officialUserBaseline === undefined
     || !desktopRemoteOfficialHistoryReady(snapshot, run.officialUserBaseline, userTurn.content, userTurn.createdAt)) return false
   const now = new Date().toISOString()
+  const sessionTurns = deepSeekSessionTurns(snapshot)
+  const sentAtMs = Date.parse(userTurn.createdAt)
+  const baseline = run.officialUserBaseline
+  const userIndex = sessionTurns.findIndex((turn, index) => index >= baseline
+    && turn.role === 'user' && turn.content === userTurn.content
+    && Date.parse(turn.createdAt) >= sentAtMs)
+  run.officialAssistantTurnId = sessionTurns.slice(userIndex + 1).find(turn => turn.role === 'assistant')?.id
   const existing = listHarnessConversationCatalog(selected.owner).find(item => item.conversationId === selected.conversationId)
   upsertHarnessConversationCatalogEntry({
     conversationId: selected.conversationId, sessionId: `jc-v1-${selected.conversationId}`,
@@ -355,7 +377,7 @@ export function beginMemoryRun(
     steps: [], elapsed: 0, metrics: null, userTurn: input.userTurn,
     programStatus: null, approval: null, controller: new AbortController(), timer: null,
     startedAt: Date.now(), title: input.title, editTargetId: input.editTargetId,
-    memoryEnabled: false, runtime: input.runtime,
+    memoryEnabled: false, runtime: input.runtime, inbox: [],
   })
   return runs.get(key)!
 }
@@ -505,6 +527,10 @@ export async function executeDesktopHarnessRun(
       onText(text) { if (current()) { if (!run.approval) run.status = '正在执行'; run.streamingText = text } },
       onArtifactSaved(path) { if (current()) input.onArtifactSaved?.(path) },
       onReasoning(text) { if (current()) run.reasoning = text },
+      onUsage(usage) { if (current()) run.usage = usage },
+      onSessionEvent(event) {
+        if (current()) run.inbox = applyDeepSeekInboxEvent(run.inbox || [], event)
+      },
       onProgress(progress) {
         if (!current()) return
         const step = run.steps.find(item => item.id === progress.id)
@@ -522,7 +548,9 @@ export async function executeDesktopHarnessRun(
         }
         if (progress.state === 'running') {
           if (!step) run.steps.push({ id: progress.id, label: progress.label || '执行工具',
-            state: 'running', summary: progress.summary, startedAt: progress.startedAt })
+            state: 'running', summary: progress.summary, startedAt: progress.startedAt,
+            parentCallId: progress.parentCallId, rootCallId: progress.rootCallId,
+            readFile: progress.readFile })
           if (!run.approval) run.status = `正在${progress.label || '执行工具'}`
           return
         }
@@ -531,6 +559,9 @@ export async function executeDesktopHarnessRun(
           step.errorReason = progress.errorReason
           step.resultText = progress.resultText
           step.resultTruncated = progress.resultTruncated
+          step.parentCallId = progress.parentCallId || step.parentCallId
+          step.rootCallId = progress.rootCallId || step.rootCallId
+          step.readFile = progress.readFile || step.readFile
           if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
             step.durationMs = progress.endedAt - step.startedAt
         }

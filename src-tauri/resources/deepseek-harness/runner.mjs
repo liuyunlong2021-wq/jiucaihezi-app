@@ -69,6 +69,26 @@ createInterface({ input: process.stdin }).on('line', line => {
     )
     return
   }
+  if (command.type === 'queue' || command.type === 'update-queue') {
+    const method = command.type === 'queue' ? 'session/prompt' : 'session/update-queue'
+    const params = command.type === 'queue'
+      ? { sessionId: command.sessionId, contentBlocks: command.contentBlocks }
+      : { sessionId: command.sessionId, itemId: command.itemId, action: command.action }
+    void harness.start().then(() => harness.client.request(method, params)).then(
+      data => send({ type: 'query-result', requestId: command.requestId, data }),
+      error => sendError(command.requestId, error),
+    )
+    return
+  }
+  if (command.type === 'cancel') {
+    void harness.start().then(() => harness.client.request('session/cancel', {
+      sessionId: command.sessionId,
+    })).then(
+      data => send({ type: 'query-result', requestId: command.requestId, data }),
+      error => sendError(command.requestId, error),
+    )
+    return
+  }
   if (command.type === 'diagnostics') {
     // SDK client 把子进程（dsh）的 stderr 收在 `stderrTail` 里，**只在运行时死亡时才抛出**：
     // 插件激活失败、官方 loader 的告警全在里面。平时看 runner 自己的 stderr 是空的，会误判成

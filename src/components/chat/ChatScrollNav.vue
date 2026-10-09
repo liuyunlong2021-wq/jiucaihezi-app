@@ -17,6 +17,7 @@ const props = defineProps<{
 }>()
 
 const stickyScrollBottom = ref(true)
+const hasNewContent = ref(false)
 
 let programmaticScroll = false
 let programmaticScrollTimer: number | null = null
@@ -54,11 +55,13 @@ function updateStickyState() {
   if (!el) return
   if (!canScroll(el)) {
     stickyScrollBottom.value = true
+    hasNewContent.value = false
     return
   }
   // 程序化滚动中 → 不改变 sticky 状态（避免 programmatic scroll 被误判为用户滚动）
   if (programmaticScroll) return
   stickyScrollBottom.value = nearBottom(el, 10)
+  if (stickyScrollBottom.value) hasNewContent.value = false
 }
 
 function onScroll() {
@@ -104,6 +107,7 @@ function scrollToBottomNow() {
 
 function scrollToBottom() {
   stickyScrollBottom.value = true
+  hasNewContent.value = false
   scrollToBottomNow()
 }
 
@@ -111,6 +115,7 @@ function scrollToBottom() {
 
 function startStickyFollow() {
   stickyScrollBottom.value = true
+  hasNewContent.value = false
   scrollToBottomNow()
 }
 
@@ -155,8 +160,16 @@ function attachContainerObservers(el: HTMLElement | null) {
   detachContainerObservers()
   if (!el) return
   if (typeof MutationObserver !== 'undefined') {
-    mutationObserver = new MutationObserver(() => {
+    mutationObserver = new MutationObserver(records => {
       observeMessageElements()
+      if (!stickyScrollBottom.value && props.isStreaming && records.some(record => {
+        const insideStreamingMessage = (node: Node) => {
+          const element = node instanceof Element ? node : node.parentElement
+          return Boolean(element?.closest('.memory-message.streaming'))
+        }
+        return insideStreamingMessage(record.target)
+          || Array.from(record.addedNodes).some(insideStreamingMessage)
+      })) hasNewContent.value = true
       if (stickyScrollBottom.value) scheduleAutoScrollIfNeeded()
     })
     mutationObserver.observe(el, {
@@ -199,6 +212,7 @@ defineExpose({
   stickyScrollBottom,
   showScrollToBottom,
   userScrolled,
+  hasNewContent,
 })
 
 // ─── 生命周期 ───

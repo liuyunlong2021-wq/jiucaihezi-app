@@ -176,3 +176,20 @@ export function setEditorText(editor: HTMLElement | null, text: string) {
   // 派发 input 事件让 Vue 响应式系统感知文本变化
   editor.dispatchEvent(new Event('input', { bubbles: true }))
 }
+
+/** Set plain text and restore the caret at a UTF-16 offset before dispatching input. */
+export function setEditorTextAtCursor(editor: HTMLElement | null, text: string, cursor: number) {
+  if (!editor) return
+  editor.textContent = text
+  editor.focus()
+  const range = document.createRange()
+  const selection = window.getSelection()
+  const node = editor.firstChild
+  const offset = Math.max(0, Math.min(text.length, cursor))
+  if (node?.nodeType === Node.TEXT_NODE) range.setStart(node, offset)
+  else range.setStart(editor, 0)
+  range.collapse(true)
+  selection?.removeAllRanges()
+  selection?.addRange(range)
+  editor.dispatchEvent(new Event('input', { bubbles: true }))
+}

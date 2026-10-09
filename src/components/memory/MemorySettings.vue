@@ -26,7 +26,7 @@ import DesktopUpdateSettings from './DesktopUpdateSettings.vue'
 import { desktopUpdateStatus } from '@/services/desktopUpdater'
 
 const props = defineProps<{ owner?: string; projectName?: string }>()
-type SettingsTab = 'account' | 'sync' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot' | 'update'
+type SettingsTab = 'account' | 'models' | 'sync' | 'skills' | 'mcp' | 'remote' | 'theme' | 'screenshot' | 'update'
 
 const tab = ref<SettingsTab>('account')
 const apiKey = ref('')
@@ -259,11 +259,13 @@ function showSync() {
 </script>
 
 <template>
-  <div class="memory-settings">
+  <div class="memory-settings" :class="{ 'memory-settings-desktop': desktopRuntime }">
     <nav class="memory-settings-tabs" aria-label="设置分类">
-      <button v-if="desktopRuntime" :class="{ active: tab === 'update' }" @click="tab = 'update'">更新<span v-if="desktopUpdateStatus.version"> ●</span></button>
       <button :class="{ active: tab === 'account' }" @click="tab = 'account'">
         <JcIcon name="person" />账号
+      </button>
+      <button v-if="desktopRuntime" :class="{ active: tab === 'models' }" @click="tab = 'models'">
+        <JcIcon name="settings" />模型与服务
       </button>
       <button :class="{ active: tab === 'sync' }" @click="showSync">
         <JcIcon name="sync" />同步
@@ -281,11 +283,13 @@ function showSync() {
       <button :class="{ active: tab === 'theme' }" @click="tab = 'theme'">
         <JcIcon name="palette" />主题
       </button>
+      <button v-if="desktopRuntime" :class="{ active: tab === 'update' }" @click="tab = 'update'">更新<span v-if="desktopUpdateStatus.version"> ●</span></button>
     </nav>
     <div class="memory-settings-body">
       <DesktopUpdateSettings v-if="desktopRuntime && tab === 'update'" />
       <ScreenshotSettings v-if="screenshotRuntime && tab === 'screenshot'" />
-      <div v-if="tab === 'account'" class="memory-account">
+      <div v-if="tab === 'account' || tab === 'models'" class="memory-account">
+        <div v-if="tab === 'account'" class="memory-account-identity">
         <JcCloudLoginBox
           v-model:api-key="apiKey"
           v-model:advanced-open="advancedOpen"
@@ -314,13 +318,15 @@ function showSync() {
           <button @click="openExternal('https://jiucaihezi.studio/support/')">用户支持</button>
           <button @click="openExternal('https://jiucaihezi.studio/terms/')">服务条款</button>
         </nav>
-        <div v-if="desktopRuntime" class="memory-local-head">
+        </div>
+        <template v-if="desktopRuntime && tab === 'models'">
+        <div class="memory-local-head">
           <strong>本机模型与服务</strong>
           <span>{{ localModelSummary }}</span>
           <button @click="localModelsOpen = !localModelsOpen">{{ localModelsOpen ? '收起' : '展开' }}</button>
         </div>
-        <template v-if="desktopRuntime && localModelsOpen">
-        <section v-if="desktopRuntime" class="memory-local-model">
+        <template v-if="localModelsOpen">
+        <section class="memory-local-model">
           <div>
             <strong>Ollama 本地模型</strong>
             <span>{{ installedLocalModelCount ? `已识别 ${installedLocalModelCount} 个模型` : '未连接' }}</span>
@@ -333,7 +339,7 @@ function showSync() {
             <button @click="openExternal('https://ollama.com/download/mac')">下载安装</button>
           </div>
         </section>
-        <section v-if="desktopRuntime" class="memory-local-model">
+        <section class="memory-local-model">
           <div>
             <strong>自定义端点</strong>
             <span>{{ customProviders.length ? `已配置 ${customProviders.length} 个` : '未配置' }}</span>
@@ -376,7 +382,7 @@ function showSync() {
             <button @click="openCustomProviderForm">添加端点</button>
           </div>
         </section>
-        <section v-if="desktopRuntime" class="memory-local-model">
+        <section class="memory-local-model">
           <div>
             <strong>Computer Use</strong>
             <span>{{ agentStore.computerUseEnabled ? '已开启' : '已关闭' }}</span>
@@ -391,7 +397,7 @@ function showSync() {
             />
           </label>
         </section>
-        <section v-if="desktopRuntime" class="memory-local-model">
+        <section class="memory-local-model">
           <div>
             <strong>本机 ComfyUI</strong>
             <span>{{ comfyUiStatus ? '已连接' : '未启动' }}</span>
@@ -412,6 +418,7 @@ function showSync() {
             <button @click="saveComfyApiKey">{{ comfyWorkflowApiKeySaved ? '已保存' : '保存 API Key' }}</button>
           </div>
         </section>
+        </template>
         </template>
       </div>
       <div v-else-if="tab === 'sync'" class="memory-sync">
@@ -479,8 +486,15 @@ function showSync() {
 .memory-settings-tabs { display: flex; overflow-x: auto; gap: 4px; padding: 10px; border-bottom: 1px solid var(--line); }
 .memory-settings-tabs button { display: flex; align-items: center; justify-content: center; flex: 1 0 auto; gap: 5px; min-width: 50px; height: 36px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
 .memory-settings-tabs button.active { border-color: var(--line); background: var(--surface); color: var(--ink1); }
+.memory-settings-tabs button:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
+.memory-settings-desktop { display: grid; grid-template-columns: 122px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+.memory-settings-desktop .memory-settings-tabs { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; align-items: stretch; gap: 3px; overflow-x: hidden; overflow-y: auto; padding: 12px 8px; border-right: 1px solid var(--line); border-bottom: 0; }
+.memory-settings-desktop .memory-settings-tabs button { flex: 0 0 auto; justify-content: flex-start; min-width: 0; height: 36px; padding: 0 8px; border-color: transparent; border-radius: 7px; white-space: nowrap; }
+.memory-settings-desktop .memory-settings-tabs button.active { border-color: transparent; background: var(--olive-pale); color: var(--olive); font-weight: 600; }
 .memory-settings-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+.memory-settings-desktop .memory-settings-body { grid-column: 2; grid-row: 1; min-width: 0; padding: 16px; }
 .memory-settings-version { padding: 8px 12px; border-top: 1px solid var(--line); color: var(--ink3); font-size: 12px; text-align: center; }
+.memory-settings-desktop .memory-settings-version { grid-column: 1 / -1; grid-row: 2; }
 .memory-settings-version button { margin-left: 4px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink1); font: inherit; cursor: pointer; }
 .memory-settings-version button:hover { border-color: var(--olive); background: var(--surface-alt); }
 .memory-settings-version button:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
@@ -521,7 +535,7 @@ function showSync() {
 .memory-theme-options button.active { border-color: var(--olive); box-shadow: inset 0 0 0 1px var(--olive); }
 .memory-theme-swatch { width: 18px; height: 18px; flex: 0 0 18px; border: 1px solid rgb(0 0 0 / 16%); border-radius: 50%; }
 .memory-theme-swatch.white { background: #fff; }
-.memory-theme-swatch.light { background: #fdf6e3; }
+.memory-theme-swatch.light { background: #f7f8f5; }
 .memory-theme-swatch.dark { background: #201b14; }
 .memory-theme-swatch.green { background: #c7edcc; }
 .memory-theme-swatch.nord { background: #eceff4; }
@@ -531,4 +545,10 @@ function showSync() {
 .memory-font-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
 .memory-font-options button { min-width: 0; min-height: 38px; padding: 6px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); font: inherit; cursor: pointer; }
 .memory-font-options button.active { border-color: var(--olive); background: var(--olive-pale); }
+@media (max-width: 560px) {
+  .memory-settings-desktop { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr) auto; }
+  .memory-settings-desktop .memory-settings-tabs { grid-column: 1; grid-row: 1; flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 8px; border-right: 0; border-bottom: 1px solid var(--line); }
+  .memory-settings-desktop .memory-settings-tabs button { flex: 0 0 auto; justify-content: center; padding: 0 9px; }
+  .memory-settings-desktop .memory-settings-body { grid-column: 1; grid-row: 2; padding: 12px; }
+}
 </style>

@@ -4117,6 +4117,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   height: 30px;
   padding-right: 8px;
+  border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
@@ -4136,18 +4137,16 @@ onBeforeUnmount(() => {
   background-repeat: no-repeat;
   background-size: calc(var(--tree-depth) * 16px) 100%;
 }
-.pft-node:hover {
-  background-color: var(--olive-pale);
-}
+.pft-node:hover { background-color: color-mix(in srgb, var(--olive) 6%, transparent); }
 .pft-node.selected {
-  background-color: color-mix(in srgb, var(--olive) 18%, var(--paper));
+  background-color: color-mix(in srgb, var(--olive) 12%, var(--paper));
   color: var(--olive);
 }
 .pft-node.selected .pft-icon {
   color: var(--olive);
 }
 .pft-node.focused {
-  background-color: color-mix(in srgb, var(--olive) 26%, var(--paper));
+  background-color: color-mix(in srgb, var(--olive) 16%, var(--paper));
   outline: 1px solid var(--olive);
   outline-offset: -1px;
 }

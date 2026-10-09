@@ -70,11 +70,11 @@ watchEffect(() => {
       </div>
       <div v-if="isVideo && videoDuration" class="ma-duration">{{ videoDuration }}</div>
       <div class="ma-actions">
-        <button @click.stop="emit('preview', asset)" title="查看"><JcIcon name="visibility" /></button>
-        <button @click.stop="emit('reference', asset)" title="设为参考"><JcIcon name="arrow_downward" /></button>
-        <button @click.stop="emit('copyUrl', asset)" title="复制URL"><JcIcon name="link" /></button>
-        <button @click.stop="emit('download', asset)" title="下载"><JcIcon name="download" /></button>
-        <button class="danger" @click.stop="emit('delete', asset)" title="删除"><JcIcon name="delete" /></button>
+        <button @click.stop="emit('preview', asset)" title="查看" aria-label="查看"><JcIcon name="visibility" /></button>
+        <button @click.stop="emit('reference', asset)" title="设为参考" aria-label="设为参考"><JcIcon name="arrow_downward" /></button>
+        <button @click.stop="emit('copyUrl', asset)" title="复制 URL" aria-label="复制 URL"><JcIcon name="link" /></button>
+        <button @click.stop="emit('download', asset)" title="下载" aria-label="下载"><JcIcon name="download" /></button>
+        <button class="danger" @click.stop="emit('delete', asset)" title="删除" aria-label="删除"><JcIcon name="delete" /></button>
       </div>
     </div>
     <div class="ma-info">
@@ -161,14 +161,19 @@ watchEffect(() => {
   right: 8px;
   top: 8px;
   display: flex;
+  max-width: calc(100% - 16px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
   opacity: 0;
   transition: opacity .15s;
 }
-.ma-card:hover .ma-actions { opacity: 1; }
+.ma-card:hover .ma-actions,
+.ma-card:focus-within .ma-actions { opacity: 1; }
 .ma-actions button {
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   border: none;
   border-radius: 999px;
   background: rgba(0,0,0,.54);
@@ -180,6 +185,7 @@ watchEffect(() => {
 }
 .ma-actions button.danger { background: rgba(198,40,40,.74); }
 .ma-actions .mso { font-size: 15px; }
+.ma-actions button:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
 .ma-info {
   display: flex;
   align-items: center;
@@ -199,5 +205,8 @@ watchEffect(() => {
 .ma-time {
   flex-shrink: 0;
   color: var(--ink3);
+}
+@media (hover: none) {
+  .ma-actions { opacity: 1; }
 }
 </style>

@@ -20,10 +20,13 @@ function mentionLoaderFixture(blockCatalog = false) {
   const calls = { catalog: 0, customSkills: 0, search: 0, list: 0 }
   const mentionOpen = ref(true)
   const mentionScope = ref('all')
+  const mentionTrigger = ref('@')
+  const conversations = ref<any[]>([])
+  const conversation = ref<any>(null)
   let finishCatalog!: (entries: unknown[]) => void
   const catalog = blockCatalog ? new Promise<unknown[]>(resolve => { finishCatalog = resolve }) : Promise.resolve([])
   const dependencies = {
-    mentionOpen, mentionScope, desktopOnlyRuntime: true,
+    mentionOpen, mentionScope, mentionTrigger, desktopOnlyRuntime: true, conversations, conversation,
     mcpStore: { allMcpTools: [{ serverId: 'github' }, { serverId: 'github' }, { serverId: 'local' }] },
     loadWebSkillCatalog: () => { calls.catalog++; return catalog },
     agentStore: { getCustomSkills: () => { calls.customSkills++; return [{ name: 'story', description: '故事' }] } },
@@ -39,7 +42,7 @@ function mentionLoaderFixture(blockCatalog = false) {
   type Item = { type: string; id?: string; name?: string; display: string; description: string }
   const code = transformSync(body, { loader: 'ts', target: 'es2022' }).code
   const load = new Function(...Object.keys(dependencies), `${code}; return mentionItems`)(...Object.values(dependencies)) as (query: string) => Promise<Item[]>
-  return { load, calls, mentionOpen, mentionScope, finishCatalog: () => finishCatalog([]) }
+  return { load, calls, mentionOpen, mentionScope, conversations, conversation, finishCatalog: () => finishCatalog([]) }
 }
 
 async function promptly<T>(promise: Promise<T>): Promise<T> {
@@ -73,6 +76,34 @@ test('closed mention menu performs no discovery on initialization or clear', asy
   assert.deepEqual(await promptly(fixture.load('')), [])
   assert.deepEqual(await promptly(fixture.load('mcp__')), [])
   assert.deepEqual(fixture.calls, { catalog: 0, customSkills: 0, search: 0, list: 0 })
+})
+
+test('@session candidates include only other conversations in the active project', async () => {
+  const fixture = mentionLoaderFixture()
+  fixture.mentionScope.value = 'session'
+  const current = { resource: { owner: '/project' }, transcript: { id: 'current', title: '当前会话' } }
+  const sameProject = { resource: { owner: '/project' }, transcript: { id: 'other', title: '角色设定' } }
+  const otherProject = { resource: { owner: '/another' }, transcript: { id: 'private', title: '其他项目会话' } }
+  fixture.conversation.value = current
+  fixture.conversations.value = [current, sameProject, otherProject]
+  assert.deepEqual(await fixture.load(''), [{
+    type: 'session', id: 'other', conversationId: 'other', display: '角色设定',
+    description: '引用该对话最近 12 条用户/助手消息',
+  }])
+  assert.equal(fixture.calls.catalog, 0)
+  assert.equal(fixture.calls.search + fixture.calls.list, 0)
+})
+
+test('@session references use visible turns and survive as composer state for queue and send', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  assert.match(workbench, /if \(option\.conversationId === active\.transcript\.id\) throw new Error/)
+  assert.match(workbench, /target\.resource\.owner !== active\.resource\.owner/)
+  assert.match(workbench, /\.filter\(\(turn\): turn is ConversationTurn & \{ role: 'user' \| 'assistant' \}/)
+  assert.match(workbench, /\.slice\(-12\)/)
+  assert.match(workbench, /deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns, dhWikiContext, activeReferencedSessions\)/)
+  assert.match(workbench, /deepSeekPrompt\(text \|\|[\s\S]{0,150}sessionReferenceSnapshot\)/)
+  assert.match(workbench, /referencedSessions: referencedSessions\.value/)
+  assert.match(workbench, /v-if="referencedSessions\.length"[\s\S]*移除会话引用/)
 })
 
 test('Skill launcher loads Skills without project searches; typed @ retains files and tools', async () => {
@@ -124,7 +155,7 @@ test('Desktop defaults to Harness without an @DH switch', () => {
   assert.match(workbench, /deepSeekHandoffTurns\(baseTurns\)/)
   assert.match(workbench, /if \(desktopOnlyRuntime\) ids\.push\(DEEPSEEK_HARNESS_SESSION_MARKER\)/)
   assert.match(workbench, /maxHistoryRounds: Number\.MAX_SAFE_INTEGER/)
-  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns, dhWikiContext\)/)
+  assert.match(workbench, /message: deepSeekPrompt\(userTurn\.content, skillSnapshot, dhHandoffTurns, dhWikiContext, activeReferencedSessions\)/)
   assert.match(workbench, /executeDesktopHarnessRun\(runs, run, \{[\s\S]*?attachments: requestAttachments/)
   assert.match(source('src/services/desktopConversationRuntime.ts'), /executeDesktopHarnessRun\([\s\S]*?onProgress\(progress\)[\s\S]*?run\.steps\.push/)
   assert.doesNotMatch(workbench, /const skillSnapshot = useHarness \? \[\]/)
@@ -875,10 +906,8 @@ test('memory mode keeps explicit Skill and plugin connections', () => {
   assert.match(workbench, /files\.searchPaths\(owner, query\.trim\(\), 40\)/)
   assert.match(workbench, /const selectedSkillNames = ref<string\[\]>\(\[\]\)/)
   assert.match(workbench, /getCursorPosition\(editor\)/)
-  assert.match(
-    workbench,
-    /input\.value\.slice\(0, cursorPos \|\| input\.value\.length\)\.match\(\/@\(\\S\*\)\$\/\)/,
-  )
+  assert.match(workbench, /findComposerSuggestion\(input\.value, getCursorPosition\(composerRef\.value\)\)/)
+  assert.match(workbench, /replaceComposerSuggestion\(input\.value, suggestion, ''\)/)
   assert.match(workbench, /v-show="mentionOpen" ref="mentionPopoverRef"/)
   assert.match(workbench, /addProjectFileReference\(option\.resource\)/)
   assert.match(workbench, /resource\.kind !== 'binary' \|\| isOfficeResource\(resource\)/)
@@ -935,13 +964,13 @@ test('memory topbar uses a grouped model popover and an adaptive new conversatio
   assert.doesNotMatch(workbench, /memory-toggle-label">(?:记忆|查询)<\/span>/)
 })
 
-test('memory message copy stays compact and copies the original markdown', () => {
+test('memory message copy stays compact, reachable and copies the original markdown', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
   assert.match(
     workbench,
-    /\.memory-message-copy \{ display: flex; width: 26px; height: 26px;/,
+    /\.memory-message-copy \{ display: flex; width: 32px; height: 32px;/,
   )
 })
 
@@ -992,11 +1021,15 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.match(bubble, /class="mtb-media-preview"/)
   assert.match(bubble, /await revealInTree\(\)/)
   assert.match(bubble, /watch\(projectResource[\s\S]*acquireProjectMediaDisplay\(resource\)/)
+  assert.match(bubble, /role="progressbar"[\s\S]*:aria-valuenow="task\.progress"/)
+  assert.match(bubble, /color: var\(--jc-warning-text\)/)
+  assert.match(bubble, /\.mtb\.failed \.mtb-failed \{ color: var\(--jc-error-text\); \}/)
+  assert.doesNotMatch(bubble, /var\(--ink-rgb/)
   assert.doesNotMatch(bubble, /URL\.createObjectURL|URL\.revokeObjectURL/)
   assert.match(bubble, /async function downloadCopy\(\)[\s\S]*readBinary\(resource\)/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
-  assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
+  assert.match(bubble, /\.mtb-progress-fill[\s\S]*background: var\(--jc-primary\)/)
 })
 
 test('iPhone release metadata declares Photos permission and exempt encryption use', () => {
@@ -1020,6 +1053,9 @@ test('memory conversation uses one natural document flow for saved and streaming
   assert.match(workbench, /const pendingUserTurn = computed\(\(\) => activeRun\.value\?\.userTurn \?\? null\)/)
   assert.match(workbench, /await nextTick\(\)[\s\S]*startStickyFollow\(\)/)
   assert.match(workbench, /\.memory-messages \{[^}]*overflow-y: scroll;/)
+  assert.match(workbench, /v-if="memoryScrollNav\?\.showScrollToBottom"[\s\S]*:aria-label="memoryScrollNav\?\.hasNewContent \? '有新内容，回到最新消息' : '回到最新消息'"[\s\S]*memoryScrollNav\?\.scrollToBottom\(\)/)
+  assert.match(workbench, /new ResizeObserver\(updateComposerOffset\)[\s\S]*--memory-composer-height/)
+  assert.match(workbench, /\.memory-scroll-latest \{[^}]*bottom: var\(--memory-composer-height, 180px\)/)
   assert.match(workbench, /\.memory-message \{[^}]*content-visibility: auto;/)
   assert.doesNotMatch(workbench, /\.memory-message \{[^}]*contain-intrinsic-size/)
   assert.match(scrollNav, /querySelectorAll\('\.msg, \.memory-message'\)/)
@@ -1084,7 +1120,8 @@ test('legacy retries may write one Raw recovery point while Harness failures kee
   assert.match(workbench, /contenteditable="true"/)
   assert.match(workbench, /title="添加附件" @click="fileInput\?\.click\(\)"/)
   assert.match(workbench, /title="移除附件" @click="removeAttachment\(file\.id\)"/)
-  assert.match(workbench, /<button v-if="sending" class="send-button" title="本条对话正在运行/)
+  assert.match(workbench, /<button v-else-if="sending" class="send-button" title="本条对话正在运行/)
+  assert.match(workbench, /title="停止当前运行，保留队列"/)
   // 唯一还按运行态禁用的控件是消息级「编辑并重新发送」；输入下一轮的入口全部放开。
   assert.equal((workbench.match(/:disabled="sending"/g) || []).length, 1)
 })
@@ -1188,7 +1225,7 @@ test('memory run status renders one settled status line', () => {
 
   // 2026-09-28 替换（原名：`!runVisible`）。状态条改为只在「有终态结论」时出现：
   // DH 运行中由轮次内的过程行表达（官方形态），横幅里的跳秒计时是自创的，已去掉。
-  assert.match(workbench, /v-else-if="!runStripVisible && !sending && \(displayedStatus \|\| displayedError\)" class="memory-status"/)
+  assert.match(workbench, /v-else-if="!completedRunVisible && !runStripVisible && !sending && \(displayedStatus \|\| displayedError\)" class="memory-status"/)
   assert.doesNotMatch(runtime, /以最后一条用户消息为当前指令/)
 })
 
@@ -1798,20 +1835,42 @@ test('global search opens current Raw conversations through the memory resource 
   assert.match(search, /openProjectResource\(files, item\.resource\)/)
   assert.match(search, /emitEvent\('memory:open-resource', resource\)/)
   assert.match(search, /\(e\.metaKey \|\| e\.ctrlKey\) && e\.key === 'k'/)
+  assert.match(search, /role="dialog" aria-modal="true" aria-label="搜索会话"/)
+  assert.match(search, /role="listbox" aria-label="搜索结果"/)
+  assert.match(search, /returnFocusElement = document\.activeElement/)
+  assert.match(search, /width: min\(520px, 100%\)/)
   assert.doesNotMatch(
     search,
     /useSessionStore|projectSessions|switchSession|emitEvent\('switch-panel', 'chat'\)/,
   )
 })
 
+test('media asset actions stay reachable by keyboard and on touch', () => {
+  const card = source('src/components/media/MediaAssetCard.vue')
+
+  assert.match(card, /aria-label="设为参考"/)
+  assert.match(card, /\.ma-card:focus-within \.ma-actions/)
+  assert.match(card, /\.ma-actions button \{[\s\S]*width: 32px;[\s\S]*height: 32px;/)
+  assert.match(card, /@media \(hover: none\)[\s\S]*\.ma-actions \{ opacity: 1; \}/)
+})
+
 test('memory files and conversation turns use the shared safe Markdown renderer', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const renderer = source('src/components/memory/MemoryMarkdown.vue')
+  const runtime = source('src/services/desktopConversationRuntime.ts')
 
   assert.match(workbench, /<MemoryMarkdown/)
-  assert.match(renderer, /renderMessageMarkdown\(renderMarkdownFileLinks\(props\.content\), 'assistant'\)/)
-  assert.match(renderer, /renderStreamingText\(props\.content\)/)
+  assert.match(renderer, /new IncrementalMarkdown\(\)/)
+  assert.match(renderer, /renderMarkdownFileLinks\(props\.content\)/)
+  assert.match(renderer, /renderMarkdownChunk\(chunk\.token, snapshot\.links/)
+  assert.match(renderer, /let html = chunk\.stable \? renderedChunkCache\.get\(cacheKey\) : undefined/)
+  assert.match(renderer, /if \(chunk\.stable\) renderedChunkCache\.set\(cacheKey, html\)/)
+  assert.match(renderer, /renderMessageMarkdown\(source, 'assistant'\)/)
+  assert.match(renderer, /requestAnimationFrame/)
   assert.match(renderer, /renderMermaidBlocks\(base,/)
+  assert.match(runtime, /run\.officialAssistantTurnId = sessionTurns\.slice\(userIndex \+ 1\)\.find\(turn => turn\.role === 'assistant'\)\?\.id/)
+  assert.match(workbench, /return markdownHandoffIds\.has\(turn\.id\)\s*\|\|\s*\(!streamingText\.value && turn\.id === activeRun\.value\?\.officialAssistantTurnId\)/)
+  assert.match(workbench, /activeRun\.value\?\.phase === 'running', Boolean\(activeRun\.value\?\.streamingText\)\][\s\S]{0,220}markdownHandoffIds\.clear\(\)[\s\S]{0,160}if \(!isRunning && !hasStreamingText && sessionId && assistantId\) markdownHandoffIds\.add\(assistantId\)/)
   assert.match(renderer, /querySelectorAll<HTMLElement>\('h1,h2,h3'\)/)
   assert.match(renderer, /window\.innerWidth > 760/)
   assert.doesNotMatch(workbench, /<pre>\{\{ previewResource\.text\.content \}\}<\/pre>/)
@@ -1911,7 +1970,9 @@ test('memory settings expose the existing Desktop local model runtime', () => {
     /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/,
   )
   assert.match(settings, /agentStore\.refreshLocalModels\(\)/)
-  assert.match(settings, /v-if="desktopRuntime" class="memory-local-model"/)
+  assert.match(settings, /tab === 'models'/)
+  assert.match(settings, /class="memory-local-model"/)
+  assert.match(settings, /memory-settings-desktop/)
   assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'skills' \}"/)
   assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'mcp' \}"/)
   assert.match(
@@ -2049,8 +2110,9 @@ test('Harness process and reasoning hang on the round that started them', () => 
   assert.match(workbench, /function turnHasBody\(turn: ConversationTurn\): boolean/)
   // 中途叙述挂在过程里（官方：step < 答案步的正文归过程，不归答案）；折叠标题只数工具步。
   assert.match(workbench, /class="memory-process-narration">\{\{ step\.narration \}\}/)
-  assert.match(workbench, /function harnessToolSteps\(turnId: string\): number/)
-  assert.match(workbench, /<summary>\{\{ harnessToolSteps\(turn\.id\) \}\} 个步骤<\/summary>/)
+  assert.match(workbench, /function harnessProcessSummary\(turnId: string\): string \{[\s\S]*summarizeProcessSteps\(harnessStepsFor\(turnId\) \|\| \[\]\)/)
+  assert.match(workbench, /<summary @click="rememberProcessDisclosure\(turn\.id, \$event\)">\{\{ harnessProcessSummary\(turn\.id\) \}\}<\/summary>/)
+  assert.match(workbench, /\.memory-process > summary::before/)
   // 在飞行必须带**耗时**与**上游状态**：上游一超时，一轮能静默两分多钟，只挂一个不动的
   // 「思考中」时用户无法分辨「在等上游」和「程序死了」。官方 TurnProcessNodeView 就是每秒跳的
   // 耗时（`LIVE_RUN_CLOCK_INTERVAL_MS`），重试另有 `message.retry.*` 一行。
@@ -2075,6 +2137,10 @@ test('Harness process and reasoning hang on the round that started them', () => 
   assert.match(desktopRuntime, /step\.durationMs = progress\.endedAt - step\.startedAt/)
   assert.match(workbench, /<details v-if="step\.resultText" class="memory-process-result">/)
   assert.match(workbench, /step\.resultTruncated \? '\\n…（已截断）' : ''/)
+  assert.match(workbench, /const processDisclosureOverrides = reactive\(new Map<string, boolean>\(\)\)/)
+  assert.match(workbench, /function processDisclosureOpen\(turnId: string\): boolean/)
+  assert.match(workbench, /<summary @click="rememberProcessDisclosure\(turn\.id, \$event\)"/)
+  assert.match(workbench, /class="memory-current-activity" role="status"/)
   // 2026-09-28 替换旧合同（原断言：`visibleRunSteps` 恒为 `activeRun.steps.slice(-5)`）。
   // 理由：那条只把最近 5 条塞在输入框上方，跑完或断开就整条消失，用户看不到进程走到哪；
   // 官方是把执行过程持续渲染在轮次内、结果接在最后。所以 DH 的实时过程改为挂到本轮发起人

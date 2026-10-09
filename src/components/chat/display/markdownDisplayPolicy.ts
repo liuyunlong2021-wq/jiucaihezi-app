@@ -1,4 +1,4 @@
-import { marked } from 'marked'
+import { marked, type Links, type Token } from 'marked'
 import DOMPurify from 'dompurify'
 import { highlightCode } from '@/utils/highlight'
 import { renderMathInText } from '@/utils/mathRenderer'
@@ -11,6 +11,7 @@ type DomPurifyLike = {
 }
 
 let rendererConfigured = false
+let displayRenderer: ReturnType<typeof createDisplayRenderer>
 
 function escapeHtml(str: string): string {
   return str
@@ -75,44 +76,50 @@ function normalizeCodeLang(lang?: string): string {
   return /^[A-Za-z0-9_-]{1,40}$/.test(value) ? value : 'code'
 }
 
+function createDisplayRenderer(plainUnstableCode = false) {
+  const renderer: any = new marked.Renderer()
+  renderer.link = function (this: any, { href, title, tokens }: any) {
+    const text = this.parser.parseInline(tokens)
+    const safeHref = normalizeLinkHref(href)
+    const titleAttr = title ? ` title="${escapeAttr(title)}"` : ''
+    // 应用内链接（项目文件、评测报告）不能带 target=_blank，否则会被当成外部链接交给系统浏览器。
+    const inAppLink = /^#jc-(?:file|eval-review)=/.test(safeHref)
+    const externalAttrs = inAppLink ? '' : ' target="_blank" rel="noopener noreferrer"'
+    return `<a href="${escapeAttr(safeHref)}"${titleAttr}${externalAttrs}>${text}</a>`
+  }
+  renderer.code = function (this: any, { text, lang }: any) {
+    if (lang === 'mermaid') {
+      return `<div class="md-code" data-scrollable="true" data-mermaid="1"><div class="md-code-head"><span class="md-code-lang">mermaid</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span class="md-code-copy-icon" aria-hidden="true">⧉</span><span class="md-code-copy-label">复制</span></button></div><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>`
+    }
+    const langLabel = normalizeCodeLang(lang)
+    const head = `<div class="md-code-head"><span class="md-code-lang">${langLabel}</span><div class="md-code-actions"><button class="md-code-wrap" type="button" data-code-wrap="1" aria-label="切换代码换行" aria-pressed="false">换行</button><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span class="md-code-copy-icon" aria-hidden="true">⧉</span><span class="md-code-copy-label">复制</span></button></div></div>`
+    if (plainUnstableCode) {
+      return `<div class="md-code md-code-streaming" data-scrollable="true">${head}<pre><code>${escapeHtml(text)}</code></pre></div>`
+    }
+    const highlighted = highlightCode(text, lang)
+    return `<div class="md-code" data-scrollable="true">${head}<pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
+  }
+  renderer.table = function (this: any, token: any) {
+    const renderCell = (cell: any, index: number, header: boolean) => {
+      const tag = header ? 'th' : 'td'
+      const align = token.align?.[index]
+      const alignAttr = align ? ` align="${align}"` : ''
+      return `<${tag}${alignAttr}>${this.parser.parseInline(cell.tokens || [])}</${tag}>`
+    }
+    const header = token.header.map((cell: any, index: number) => renderCell(cell, index, true)).join('')
+    const body = token.rows
+      .map((row: any[]) => `<tr>${row.map((cell: any, index: number) => renderCell(cell, index, false)).join('')}</tr>`)
+      .join('')
+    return `<div class="md-table-wrap" data-scrollable="true"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
+  }
+  return renderer
+}
+
 function configureMarkdownRenderer() {
   if (rendererConfigured) return
   rendererConfigured = true
-
-  marked.use({
-    renderer: {
-      link(this: any, { href, title, tokens }: any) {
-        const text = this.parser.parseInline(tokens)
-        const safeHref = normalizeLinkHref(href)
-        const titleAttr = title ? ` title="${escapeAttr(title)}"` : ''
-        // 应用内链接（项目文件、评测报告）不能带 target=_blank，否则会被当成外部链接交给系统浏览器。
-        const inAppLink = /^#jc-(?:file|eval-review)=/.test(safeHref)
-        const externalAttrs = inAppLink ? '' : ' target="_blank" rel="noopener noreferrer"'
-        return `<a href="${escapeAttr(safeHref)}"${titleAttr}${externalAttrs}>${text}</a>`
-      },
-      code(this: any, { text, lang }: any) {
-        if (lang === 'mermaid') {
-          return `<div class="md-code" data-scrollable="true" data-mermaid="1"><div class="md-code-head"><span class="md-code-lang">mermaid</span></div><pre><code class="language-mermaid">${escapeHtml(text)}</code></pre></div>`
-        }
-        const highlighted = highlightCode(text, lang)
-        const langLabel = normalizeCodeLang(lang)
-        return `<div class="md-code" data-scrollable="true"><div class="md-code-head"><span class="md-code-lang">${langLabel}</span><button class="md-code-copy" type="button" data-code-copy="1" aria-label="复制代码"><span class="md-code-copy-icon" aria-hidden="true">⧉</span><span class="md-code-copy-label">复制</span></button></div><pre><code class="hljs language-${langLabel}">${highlighted}</code></pre></div>`
-      },
-      table(this: any, token: any) {
-        const renderCell = (cell: any, index: number, header: boolean) => {
-          const tag = header ? 'th' : 'td'
-          const align = token.align?.[index]
-          const alignAttr = align ? ` align="${align}"` : ''
-          return `<${tag}${alignAttr}>${this.parser.parseInline(cell.tokens || [])}</${tag}>`
-        }
-        const header = token.header.map((cell: any, index: number) => renderCell(cell, index, true)).join('')
-        const body = token.rows
-          .map((row: any[]) => `<tr>${row.map((cell: any, index: number) => renderCell(cell, index, false)).join('')}</tr>`)
-          .join('')
-        return `<div class="md-table-wrap" data-scrollable="true"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div>`
-      },
-    },
-  })
+  displayRenderer = createDisplayRenderer()
+  marked.use({ renderer: displayRenderer })
 }
 
 export function renderMessageMarkdown(content: string, role: MessageMarkdownRole): string {
@@ -127,5 +134,29 @@ export function renderMessageMarkdown(content: string, role: MessageMarkdownRole
     return sanitizeDisplayHtml(html)
   } catch {
     return sanitizeDisplayHtml(escapeHtml(content).replace(/\n/g, '<br>'))
+  }
+}
+
+/** Renders one pre-lexed block through the same safe link, table and code rules as settled Markdown. */
+export function renderMarkdownChunk(
+  token: Token,
+  links: Links,
+  options: { streaming?: boolean; stable?: boolean } = {},
+): string {
+  if (token.type === 'def' || token.type === 'space') return ''
+  configureMarkdownRenderer()
+  try {
+    const renderer = options.streaming && options.stable === false
+      ? createDisplayRenderer(true)
+      : displayRenderer
+    const html = marked.Parser.parse([token], {
+      breaks: true,
+      gfm: true,
+      links,
+      renderer,
+    } as any) as string
+    return sanitizeDisplayHtml(html)
+  } catch {
+    return sanitizeDisplayHtml(escapeHtml(token.raw).replace(/\n/g, '<br>'))
   }
 }

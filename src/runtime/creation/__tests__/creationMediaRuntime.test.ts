@@ -14,6 +14,32 @@ import {
 import { getCreationModelSpec } from '../creationModelRegistry'
 import { buildCurrentCreationParams, cpState, switchModel, switchTask } from '@/composables/useCreation'
 
+async function mockDirectOssUpload(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  onFile?: (file: Blob) => void,
+): Promise<Response | undefined> {
+  const url = String(input)
+  if (url.endsWith('/api/creations/upload-url')) {
+    assert.match(new Headers(init?.headers).get('Authorization') || '', /^Bearer /)
+    const request = JSON.parse(String(init?.body || '{}'))
+    const ext = request.content_type === 'video/mp4' ? 'mp4' : request.content_type === 'audio/mpeg' ? 'mp3' : 'png'
+    return Response.json({
+      upload_url: 'https://oss.example.test/upload',
+      form_fields: { key: `creation-temp/test/reference.${ext}`, policy: 'signed-policy' },
+      asset_url: `https://cdn.example.test/reference.${ext}`,
+    })
+  }
+  if (url === 'https://oss.example.test/upload' && init?.method === 'POST') {
+    assert.equal(new Headers(init.headers).has('Authorization'), false)
+    const file = (init.body as FormData).get('file')
+    assert.equal(file instanceof Blob, true)
+    if (file instanceof Blob) onFile?.(file)
+    return new Response(null, { status: 204 })
+  }
+  return undefined
+}
+
 test('creation MCP submissions opt into project media persistence', () => {
   const source = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
   assert.match(source, /memory: true/)
@@ -507,13 +533,12 @@ test('RunningHub URL contract uploads local canvas data once before adapter subm
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
-      return Response.json({ url: 'https://cdn.example.test/rh-input.png' })
-    }
+    const directUpload = await mockDirectOssUpload(input, init)
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/images/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.deepEqual(body.images, ['https://cdn.example.test/rh-input.png'])
+      assert.deepEqual(body.images, ['https://cdn.example.test/reference.png'])
       return Response.json({ task_id: 'rh_canvas_data_001', status: 'processing' })
     }
     if (url.endsWith('/rh/tasks/rh_canvas_data_001')) {
@@ -1235,13 +1260,9 @@ test('KIK uploads local video and audio before submitting them to NewAPI', { con
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer session-cloud')
-      assert.equal(new Headers(init?.headers).get('X-JC-Session'), null)
-      const file = (init?.body as FormData).get('file') as Blob
-      uploaded.push(file.type)
-      return Response.json({ url: `https://cdn.example.test/reference.${file.type.startsWith('video/') ? 'mp4' : 'mp3'}` })
-    }
+    const directUpload = await mockDirectOssUpload(input, init, file => uploaded.push(file.type))
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body))
       assert.equal(body.video_url, 'https://cdn.example.test/reference.mp4')
@@ -1279,14 +1300,13 @@ test('ZX Grok URL contract uploads local reference before model submit', async (
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
-      return Response.json({ url: 'https://cdn.example.test/grok-input.png' })
-    }
+    const directUpload = await mockDirectOssUpload(input, init)
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'grok-1.5-video-10s')
-      assert.equal(body.image, 'https://cdn.example.test/grok-input.png')
+      assert.equal(body.image, 'https://cdn.example.test/reference.png')
       return Response.json({ task_id: 'zx_grok_10_001', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/zx_grok_10_001')) {
@@ -1365,9 +1385,9 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      return Response.json({ url: 'https://api.jiucaihezi.studio/media/creation/ref.png' })
-    }
+    const directUpload = await mockDirectOssUpload(input, init)
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       // 面板发渠道公开名；NewAPI 的模型映射再换成 oc-model-r5cfh8。
@@ -1376,10 +1396,10 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
       assert.equal(body.ratio, '16:9')
       assert.equal(body.resolution, '720p')
       assert.equal(body.duration, 30)
-      // 参考图必须是网关上传后的公开 HTTPS 地址：山海只接受可公开抓取的直链。
+      // 参考图由 OSS 直传后，通过临时签名 HTTPS 地址交给模型服务。
       assert.deepEqual(body.images, [
-        'https://api.jiucaihezi.studio/media/creation/ref.png',
-        'https://api.jiucaihezi.studio/media/creation/ref.png',
+        'https://cdn.example.test/reference.png',
+        'https://cdn.example.test/reference.png',
       ])
       return Response.json({ id: 'run_shanhai_1', status: 'processing' })
     }

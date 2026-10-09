@@ -1,9 +1,9 @@
 /* Shared Markdown presentation for chat, memory preview and code blocks. */
 .markdown-body {
   white-space: normal;
-  color: var(--ink1);
+  color: var(--jc-text-primary, var(--ink1));
   font-size: var(--font-base);
-  line-height: 1.7;
+  line-height: 1.72;
 }
 .markdown-body h1,
 .markdown-body h2,
@@ -19,7 +19,7 @@
 }
 .markdown-body h1,
 .markdown-body h2 {
-  color: var(--olive);
+  color: var(--jc-text-primary, var(--ink1));
   border-block-end: 1px solid var(--line);
 }
 .markdown-body h1 { margin-block-start: 1.6em; font-size: 1.5em; font-weight: 700; }
@@ -32,11 +32,11 @@
 .markdown-body blockquote {
   margin: .75em 0;
   padding: .3em 1em;
-  border-inline-start: 3px solid var(--olive);
-  color: var(--ink2);
+  border-inline-start: 3px solid var(--jc-primary, var(--olive));
+  color: var(--jc-text-secondary, var(--ink2));
   background: color-mix(in srgb, var(--olive) 6%, transparent);
 }
-.markdown-body a { color: var(--olive); text-decoration: underline; }
+.markdown-body a { color: var(--jc-primary, var(--olive)); text-decoration: underline; text-underline-offset: .16em; }
 .markdown-body hr { margin: 1em 0; border: 0; border-block-start: 1px solid var(--line); }
 .markdown-body :not(pre) > code {
   padding: 1px 4px;
@@ -64,6 +64,13 @@
 }
 .markdown-body th { background: var(--surface-alt); font-weight: 700; }
 
+/* Chat is a reading surface: keep headings compact; document previews retain the fuller hierarchy. */
+.memory-message-text.markdown-body h1,
+.memory-message-text.markdown-body h2 { border: 0; color: var(--jc-text-primary, var(--ink1)); }
+.memory-message-text.markdown-body h1 { margin-block: .95em .35em; font-size: 1.28em; }
+.memory-message-text.markdown-body h2 { margin-block: .85em .3em; font-size: 1.12em; }
+.memory-message-text.markdown-body h3 { margin-block: .7em .25em; font-size: 1.04em; }
+
 .md-code {
   max-width: 100%;
   margin: 10px 0;
@@ -90,6 +97,7 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.md-code-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; }
 .md-code-copy {
   display: inline-flex;
   flex: 0 0 auto;
@@ -106,6 +114,22 @@
   font-weight: 600;
   transition: background .12s, border-color .12s, color .12s;
 }
+.md-code-wrap {
+  display: inline-flex;
+  min-height: 25px;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink3);
+  cursor: pointer;
+  font: inherit;
+  font-size: .79em;
+  font-weight: 600;
+}
+.md-code-wrap:hover, .md-code-wrap[aria-pressed="true"] { border-color: var(--line); background: var(--surface); color: var(--ink2); }
+.md-code-wrap:focus-visible { outline: 2px solid color-mix(in srgb, var(--olive) 70%, transparent); outline-offset: 2px; }
 .md-code-copy-icon { color: currentColor; font-size: .92em; line-height: 1; }
 .md-code-copy:hover { border-color: var(--olive); background: var(--surface-alt); color: var(--olive-dark); }
 .md-code-copy:focus-visible {
@@ -130,6 +154,8 @@
   font: inherit;
   line-height: inherit;
 }
+.md-code.wrap pre { overflow-x: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.md-code.wrap code { width: 100%; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 .memory-markdown-editor {
   position: relative;

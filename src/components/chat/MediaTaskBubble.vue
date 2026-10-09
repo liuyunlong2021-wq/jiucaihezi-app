@@ -138,10 +138,17 @@ async function previewResult() {
           <JcIcon name="close" />
         </button>
       </div>
-      <div class="mtb-progress-bar">
+      <div
+        class="mtb-progress-bar"
+        role="progressbar"
+        :aria-valuemin="0"
+        :aria-valuemax="100"
+        :aria-valuenow="task.progress"
+        :aria-label="task.progressText || '媒体任务进度'"
+      >
         <div class="mtb-progress-fill" :style="{ width: task.progress + '%' }"></div>
       </div>
-      <div class="mtb-progress-text">{{ task.progressText }}</div>
+      <div class="mtb-progress-text" aria-live="polite">{{ task.progressText }}</div>
     </div>
 
     <!-- 成功 -->
@@ -209,24 +216,26 @@ async function previewResult() {
   margin: 8px 0;
   padding: 12px;
   border-radius: 12px;
-  background: rgba(var(--ink-rgb, 200,200,220), 0.04);
-  border: 1px solid rgba(var(--ink-rgb, 200,200,220), 0.08);
+  border: 1px solid var(--jc-border);
+  background: var(--jc-surface-container-low);
 }
 
 .mtb-header {
   display: flex;
+  min-height: 32px;
   align-items: center;
   gap: 6px;
   font-size: 13px;
 }
-.mtb-model { font-weight: 600; color: var(--olive-dark); }
+.mtb-model { font-weight: 600; color: var(--jc-text-primary); }
 .mtb-type { color: var(--ink2, #888); }
 .mtb-cancel {
   margin-left: auto;
-  background: none; border: none; cursor: pointer;
-  color: var(--ink3, #999); padding: 2px;
+  display: grid; width: 32px; height: 32px; place-items: center;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer;
+  color: var(--ink3, #999);
 }
-.mtb-cancel:hover { color: var(--danger, #e74c3c); }
+.mtb-cancel:hover { border-color: color-mix(in srgb, var(--jc-error) 28%, transparent); background: color-mix(in srgb, var(--jc-error) 8%, transparent); color: var(--jc-error); }
 
 .mtb-spin {
   animation: mtb-spin-anim 1.5s ease-in-out infinite;
@@ -239,16 +248,16 @@ async function previewResult() {
 
 .mtb-progress-bar {
   margin-top: 8px;
-  height: 4px;
-  border-radius: 2px;
-  background: color-mix(in srgb, var(--olive) 12%, transparent);
+  height: 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--jc-primary) 14%, var(--jc-surface));
   overflow: hidden;
 }
 .mtb-progress-fill {
   height: 100%;
-  border-radius: 2px;
-  background: linear-gradient(90deg, var(--olive-dark), var(--olive));
-  transition: width 0.5s ease;
+  border-radius: inherit;
+  background: var(--jc-primary);
+  transition: width var(--jc-transition-normal);
 }
 .mtb-progress-text {
   margin-top: 4px;
@@ -291,15 +300,16 @@ async function previewResult() {
 .mtb-saved-path { color: var(--ink3); font-size: 11px; overflow-wrap: anywhere; }
 .mtb-save-warning {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  color: var(--danger, #c0392b);
+  color: var(--jc-warning-text);
   font-size: 12px;
 }
 .mtb-save-warning button {
-  padding: 3px 8px;
+  min-height: 32px; padding: 0 9px;
   border: 1px solid currentColor;
-  border-radius: 5px;
+  border-radius: 8px;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -312,25 +322,28 @@ async function previewResult() {
 }
 .mtb-act-btn {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 4px 10px;
-  border: 1px solid rgba(var(--ink-rgb, 200,200,220), 0.12);
-  border-radius: 6px;
-  background: rgba(var(--ink-rgb, 200,200,220), 0.04);
+  min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--jc-border);
+  border-radius: 8px;
+  background: var(--jc-surface-container-lowest);
   font-size: 12px;
   cursor: pointer;
   color: var(--ink2, #aaa);
   transition: all 0.15s;
 }
 .mtb-act-btn:hover {
-  background: var(--olive-pale);
-  color: var(--olive-dark);
-  border-color: var(--olive);
+  background: color-mix(in srgb, var(--jc-primary) 9%, var(--jc-surface));
+  color: var(--jc-primary);
+  border-color: color-mix(in srgb, var(--jc-primary) 54%, var(--jc-border));
 }
+.mtb-act-btn:focus-visible, .mtb-save-warning button:focus-visible, .mtb-cancel:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
 .mtb-act-btn .mso { font-size: 14px; }
 
 .mtb-failed, .mtb-cancelled {
   display: flex; align-items: center; gap: 6px;
   font-size: 13px; color: var(--ink3, #999);
 }
-.mtb-failed .mso { font-size: 16px; }
+.mtb.failed .mtb-failed { color: var(--jc-error-text); }
+.mtb-failed .mso { flex: 0 0 auto; font-size: 16px; }
+.mtb-failed span, .mtb-cancelled span { min-width: 0; overflow-wrap: anywhere; }
 </style>

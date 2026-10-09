@@ -64,6 +64,8 @@ export interface DeepSeekHarnessInput {
   /** 实时推理正文；只在内容真的变化时回调，与 `onText` 分开、不混进消息体。 */
   onReasoning?: (text: string) => void
   onProgress?: (progress: DeepSeekProgress) => void
+  onSessionEvent?: (event: any) => void
+  onUsage?: (usage: DeepSeekUsage | undefined) => void
   onPermission?: (tier: DeepSeekPermissionTier) => void
   onApproval?: (request: DeepSeekApprovalRequest, signal: AbortSignal) => Promise<'allowed-once' | 'rejected'>
 }
@@ -93,6 +95,9 @@ export type DeepSeekProgress = {
   errorReason?: string
   resultText?: string
   resultTruncated?: boolean
+  parentCallId?: string
+  rootCallId?: string
+  readFile?: DeepSeekReadFileMeta
   /** 重试进度用：条目种类、官方 `retryState` 与重试事实（实时与历史同源）。 */
   kind?: 'retry'
   retryState?: DeepSeekRetryState
@@ -132,6 +137,9 @@ export type DeepSeekProcessStep = {
   errorReason?: string
   resultText?: string
   resultTruncated?: boolean
+  parentCallId?: string
+  rootCallId?: string
+  readFile?: DeepSeekReadFileMeta
   /** 叙述条目的正文，仅 `kind === 'narration'` 使用。 */
   narration?: string
   /** 重试条目的状态，仅 `kind === 'retry'` 使用；取自官方同名事实。 */
@@ -148,6 +156,23 @@ export type DeepSeekUsage = {
   cacheReadTokens?: number
   cacheWriteTokens?: number
   reasoningTokens?: number
+}
+
+export type DeepSeekReadFileMeta = {
+  path: string
+  lineStart: number
+  lineCount: number
+  totalLines: number
+  language?: string
+}
+
+export type DeepSeekInboxTarget = 'next-turn' | 'next-step'
+export type DeepSeekInboxItem = {
+  id: string
+  target: DeepSeekInboxTarget
+  text: string
+  textOnly: boolean
+  attachmentCount: number
 }
 
 export type DeepSeekAssistantStreamState = {
@@ -377,6 +402,83 @@ export function deepSeekMessageUsage(event: any): DeepSeekUsage | undefined {
     ...cacheReadTokens === undefined ? {} : { cacheReadTokens },
     ...cacheWriteTokens === undefined ? {} : { cacheWriteTokens },
     ...reasoningTokens === undefined ? {} : { reasoningTokens },
+  }
+}
+
+function deepSeekInboxItem(message: any, target: DeepSeekInboxTarget): DeepSeekInboxItem | undefined {
+  const id = String(message?.id || '')
+  if (!id || !Array.isArray(message?.content)) return undefined
+  const content = message.content as Array<{ type?: unknown; text?: unknown }>
+  return {
+    id,
+    target,
+    text: content.filter(block => block?.type === 'text').map(block => String(block.text || '')).join('\n').trim(),
+    textOnly: content.every(block => block?.type === 'text'),
+    attachmentCount: content.filter(block => block?.type !== 'text').length,
+  }
+}
+
+/** Durable Session Inbox projection. A Vue queue is never used as the source of truth. */
+export function applyDeepSeekInboxEvent(
+  current: DeepSeekInboxItem[], event: any,
+): DeepSeekInboxItem[] {
+  if (event?.type !== 'agent/inbox/spliced') return current
+  const target = event.data?.target as DeepSeekInboxTarget
+  if (target !== 'next-turn' && target !== 'next-step') return current
+  const start = Number(event.data?.start)
+  if (!Number.isInteger(start) || start < 0) return current
+  const queue = current.filter(item => item.target === target)
+  const removed = Number(event.data?.removedCount ?? 0)
+  if (!Number.isInteger(removed) || removed < 0 || !Array.isArray(event.data?.inserted)) return current
+  const inserted = event.data.inserted
+    .map((message: any) => deepSeekInboxItem(message, target))
+    .filter((item: DeepSeekInboxItem | undefined): item is DeepSeekInboxItem => Boolean(item))
+  queue.splice(start, removed, ...inserted)
+  return [
+    ...(target === 'next-turn' ? queue : current.filter(item => item.target === 'next-turn')),
+    ...(target === 'next-step' ? queue : current.filter(item => item.target === 'next-step')),
+  ]
+}
+
+export function deepSeekSessionInbox(snapshot: DeepSeekSessionSnapshot): DeepSeekInboxItem[] {
+  let items: DeepSeekInboxItem[] = []
+  for (const event of snapshot.events || []) items = applyDeepSeekInboxEvent(items, event)
+  return items
+}
+
+export function deepSeekSessionUsage(snapshot: DeepSeekSessionSnapshot): Map<string, DeepSeekUsage> {
+  const owners = deepSeekTurnOwners(snapshot)
+  const usageByOwner = new Map<string, DeepSeekUsage>()
+  for (const event of snapshot.events || []) {
+    if (event?.type !== 'assistant/message' || !isAppendSurface(event)) continue
+    const owner = owners.get(Number(event.data?.turn))
+    if (!owner) continue
+    const usage = deepSeekMessageUsage(event)
+    if (usage) usageByOwner.set(owner, usage)
+  }
+  return usageByOwner
+}
+
+function deepSeekReadFileMeta(meta: any): DeepSeekReadFileMeta | undefined {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return undefined
+  const path = typeof meta.path === 'string' ? meta.path.trim() : ''
+  const lineStart = Number(meta.offset)
+  const totalLines = Number(meta.totalLines)
+  const lines = Array.isArray(meta.lines) ? meta.lines : null
+  if (!path || !Number.isInteger(lineStart) || lineStart < 1
+    || !Number.isInteger(totalLines) || totalLines < 0 || !lines
+    || !lines.every((line: any) => Number.isInteger(line?.number) && typeof line?.text === 'string')) return undefined
+  let previous = lineStart - 1
+  for (const line of lines) {
+    if (line.number <= previous || line.number > totalLines) return undefined
+    previous = line.number
+  }
+  return {
+    path,
+    lineStart,
+    lineCount: lines.length,
+    totalLines,
+    ...(typeof meta.lang === 'string' ? { language: meta.lang } : {}),
   }
 }
 
@@ -743,11 +845,43 @@ export function deepSeekProgress(event: any): DeepSeekProgress | undefined {
       ...startedAt === undefined ? {} : { startedAt },
     }
   }
+  if (event?.type === 'tool/ptc-dispatch-start') {
+    const startedAt = deepSeekOptionalNumber(Number(event?.time))
+    const args = typeof event.data?.arguments === 'string'
+      ? event.data.arguments
+      : JSON.stringify(event.data?.arguments ?? {})
+    return {
+      id: String(event.data?.subCallId || ''),
+      parentCallId: String(event.data?.parentCallId || ''),
+      rootCallId: String(event.data?.rootCallId || ''),
+      label: deepSeekToolLabel(String(event.data?.name || '')),
+      summary: deepSeekToolSummary(args),
+      state: 'running',
+      ...startedAt === undefined ? {} : { startedAt },
+    }
+  }
+  if (event?.type === 'tool/ptc-dispatch') {
+    const isError = Boolean(event.data?.isError)
+    const { text, truncated } = deepSeekResultText(event.data?.content)
+    const endedAt = deepSeekOptionalNumber(Number(event?.time))
+    const errorReason = deepSeekResultErrorReason(event.data?.error, isError, text)
+    return {
+      id: String(event.data?.subCallId || ''),
+      parentCallId: String(event.data?.parentCallId || ''),
+      rootCallId: String(event.data?.rootCallId || ''),
+      state: isError ? 'failed' : 'done',
+      ...endedAt === undefined ? {} : { endedAt },
+      ...errorReason === undefined ? {} : { errorReason },
+      resultText: text,
+      resultTruncated: truncated,
+    }
+  }
   if (event?.type === 'tool/result') {
     const isError = Boolean(event.data?.message?.isError)
     const { text, truncated } = deepSeekResultText(event.data?.message?.content)
     const endedAt = deepSeekOptionalNumber(Number(event?.time))
     const errorReason = deepSeekResultErrorReason(event.data?.error, isError, text)
+    const readFile = deepSeekReadFileMeta(event.data?.meta)
     return {
       id: String(event.data?.message?.toolCallId || ''),
       state: isError ? 'failed' : 'done',
@@ -755,6 +889,7 @@ export function deepSeekProgress(event: any): DeepSeekProgress | undefined {
       ...errorReason === undefined ? {} : { errorReason },
       resultText: text,
       resultTruncated: truncated,
+      ...(readFile ? { readFile } : {}),
     }
   }
   return undefined
@@ -773,6 +908,9 @@ function deepSeekProcessStep(call: any, result: any): DeepSeekProcessStep | unde
     summary: started.summary || '',
     state: 'running',
     ...started.startedAt === undefined ? {} : { startedAt: started.startedAt },
+    ...started.parentCallId ? { parentCallId: started.parentCallId } : {},
+    ...started.rootCallId ? { rootCallId: started.rootCallId } : {},
+    ...started.readFile ? { readFile: started.readFile } : {},
   }
   const settled = deepSeekProgress(result)
   if (!settled) return step
@@ -780,6 +918,9 @@ function deepSeekProcessStep(call: any, result: any): DeepSeekProcessStep | unde
   step.errorReason = settled.errorReason
   step.resultText = settled.resultText
   step.resultTruncated = settled.resultTruncated
+  if (settled.parentCallId) step.parentCallId = settled.parentCallId
+  if (settled.rootCallId) step.rootCallId = settled.rootCallId
+  if (settled.readFile) step.readFile = settled.readFile
   if (step.startedAt !== undefined && settled.endedAt !== undefined) {
     const durationMs = settled.endedAt - step.startedAt
     if (durationMs >= 0) step.durationMs = durationMs
@@ -809,18 +950,62 @@ export function deepSeekSessionProcess(
 ): Map<string, DeepSeekProcessStep[]> {
   const owners = deepSeekTurnOwners(snapshot)
   const resultsByCall = new Map<string, any>()
+  const ptcResultsByCall = new Map<string, any>()
   for (const event of snapshot.events || []) {
-    if (event?.type !== 'tool/result' || !isAppendSurface(event)) continue
-    const callId = String(event.data?.message?.toolCallId || '')
-    if (callId) resultsByCall.set(callId, event)
+    if (event?.type === 'tool/result' && isAppendSurface(event)) {
+      const callId = String(event.data?.message?.toolCallId || '')
+      if (callId) resultsByCall.set(callId, event)
+    }
+    if (event?.type === 'tool/ptc-dispatch') {
+      const callId = String(event.data?.subCallId || '')
+      if (callId) ptcResultsByCall.set(callId, event)
+    }
   }
   const process = new Map<string, DeepSeekProcessStep[]>()
   const answers = deepSeekTurnAnswers(snapshot)
   const retries = new Map<string, { step: DeepSeekProcessStep; turn: number }>()
+  const callOwners = new Map<string, string>()
   const push = (owner: string, step: DeepSeekProcessStep) =>
     process.set(owner, [...process.get(owner) || [], step])
   for (const event of snapshot.events || []) {
     const owner = owners.get(Number(event?.data?.turn))
+    if (event?.type === 'tool/call') {
+      if (!owner) continue
+      const callId = String(event.data?.callId || '')
+      const step = deepSeekProcessStep(event, resultsByCall.get(callId))
+      if (step) {
+        callOwners.set(callId, owner)
+        push(owner, step)
+      }
+      continue
+    }
+    if (event?.type === 'tool/ptc-dispatch-start') {
+      const parentCallId = String(event.data?.parentCallId || '')
+      const callOwner = callOwners.get(parentCallId) || callOwners.get(String(event.data?.rootCallId || ''))
+      if (!callOwner) continue
+      const callId = String(event.data?.subCallId || '')
+      const step = deepSeekProcessStep(event, ptcResultsByCall.get(callId))
+      if (step) {
+        callOwners.set(callId, callOwner)
+        push(callOwner, step)
+      }
+      continue
+    }
+    if (event?.type === 'tool/ptc-dispatch') {
+      const callOwner = callOwners.get(String(event.data?.subCallId || ''))
+      if (!callOwner) continue
+      const progress = deepSeekProgress(event)
+      const step = process.get(callOwner)?.find(item => item.id === progress?.id)
+      if (step && progress) {
+        step.state = progress.state
+        step.errorReason = progress.errorReason
+        step.resultText = progress.resultText
+        step.resultTruncated = progress.resultTruncated
+        if (step.startedAt !== undefined && progress.endedAt !== undefined && progress.endedAt >= step.startedAt)
+          step.durationMs = progress.endedAt - step.startedAt
+      }
+      continue
+    }
     if (!owner) continue
     if (event?.type === 'llm/retry' || event?.type === 'llm/retry-started') {
       const progress = deepSeekProgress(event)
@@ -844,11 +1029,6 @@ export function deepSeekSessionProcess(
       }
       retries.set(progress.id, { step, turn: Number(event.data?.turn) })
       push(owner, step)
-      continue
-    }
-    if (event?.type === 'tool/call') {
-      const step = deepSeekProcessStep(event, resultsByCall.get(String(event.data?.callId || '')))
-      if (step) push(owner, step)
       continue
     }
     // 中途叙述归过程：官方 `processSpec` 只把 step < 答案步的正文算进过程，答案另有节点。
@@ -949,6 +1129,7 @@ export function deepSeekPrompt(
   skillNames: string[],
   handoffTurns: ConversationTurn[] = [],
   wikiContext = '',
+  sessionReferences: Array<{ title: string; turns: Array<{ role: 'user' | 'assistant'; content: string }> }> = [],
 ): string {
   const gestures = skillNames.map(name => `/${name}`).join(' ')
   const handoff = handoffTurns.length
@@ -959,7 +1140,16 @@ export function deepSeekPrompt(
       ].join('\n\n')
     : ''
   const manju = skillNames.includes(MANJU_ROUTER) ? manjuRoutePrompt() : ''
-  return [gestures, manju, wikiContext, handoff, !handoff && manju ? '【本轮消息】' : '', message]
+  const references = sessionReferences.map(reference => [
+    `【引用会话：${reference.title} · 最近最多 12 条用户/助手消息】`,
+    ...reference.turns.slice(-12).map(turn => `${turn.role === 'user' ? '用户' : '助手'}：${turn.content.slice(0, 4_000)}`),
+  ].join('\n\n')).join('\n\n')
+  const referenceLabel = sessionReferences.length
+    ? `引用会话：${sessionReferences.map(reference => `「${reference.title.replace(/\s+/g, ' ').trim().slice(0, 120)}」`).join('、')}`
+    : ''
+  const currentMessage = [referenceLabel, message].filter(Boolean).join('\n\n')
+  const currentMarker = !handoff && (manju || wikiContext || references) ? '【本轮消息】' : ''
+  return [gestures, manju, wikiContext, references, handoff, currentMarker, currentMessage]
     .filter(Boolean).join('\n\n')
 }
 
@@ -1398,6 +1588,35 @@ async function alignSessionPermission(active: Runtime, sessionId: string, preset
   if (current !== preset) await sessionPermission(active, sessionId, preset, signal)
 }
 
+export async function queueDeepSeekHarnessMessage(input: DeepSeekHarnessInput): Promise<{ messageId: string }> {
+  const active = await ensureRuntime(input, true)
+  return await harnessControl(active, {
+    type: 'queue',
+    sessionId: deepSeekSessionId(input.sessionId),
+    contentBlocks: deepSeekContentBlocks(input.message, input.attachments, input.files, input.imageInput),
+  }, input.signal) as { messageId: string }
+}
+
+export type DeepSeekQueueAction =
+  | { kind: 'edit'; text: string }
+  | { kind: 'remove' }
+  | { kind: 'steer' }
+
+export async function updateDeepSeekHarnessQueue(
+  input: DeepSeekHarnessInput & { itemId: string; action: DeepSeekQueueAction },
+): Promise<{ accepted: true }> {
+  const active = await ensureRuntime(input, true)
+  const action = input.action.kind === 'edit'
+    ? { kind: 'edit', content: [{ type: 'text', text: input.action.text }] }
+    : { kind: input.action.kind }
+  return await harnessControl(active, {
+    type: 'update-queue',
+    sessionId: deepSeekSessionId(input.sessionId),
+    itemId: input.itemId,
+    action,
+  }, input.signal) as { accepted: true }
+}
+
 export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<string> {
   const { beginDesktopUpdateTask } = await import('./desktopUpdater')
   const release = await beginDesktopUpdateTask()
@@ -1426,7 +1645,6 @@ async function runDeepSeekHarnessTurn(
 ): Promise<string> {
   const active = await ensureRuntime(input)
   if (input.signal?.aborted) {
-    void stopRuntime(active).catch(error => console.warn('[JC-DH] 取消后的收尾失败:', error))
     throw new DOMException('Aborted', 'AbortError')
   }
   const requestId = crypto.randomUUID()
@@ -1474,6 +1692,9 @@ async function runDeepSeekHarnessTurn(
     }
     if (frame.method === 'session.event') {
       const event = frame.params.event
+      input.onSessionEvent?.(event)
+      if (event?.type === 'assistant/message' && isAppendSurface(event))
+        input.onUsage?.(deepSeekMessageUsage(event))
       if (event?.type === 'tool/call' && event.data.name === 'wiki_save_artifact')
         manjuArtifactCallIds.add(String(event.data.callId))
       if (event?.type === 'tool/result') {
@@ -1524,9 +1745,16 @@ async function runDeepSeekHarnessTurn(
     }
   }
   const abort = () => {
-    void stopRuntime(active).catch(error => console.warn('[JC-DH] 取消后的收尾失败:', error))
-    active.runs.get(requestId)?.reject(new DOMException('Aborted', 'AbortError'))
-    active.runs.delete(requestId)
+    const rejectRun = () => {
+      active.runs.get(requestId)?.reject(new DOMException('Aborted', 'AbortError'))
+      active.runs.delete(requestId)
+    }
+    void harnessControl(active, { type: 'cancel', sessionId: wireSessionId })
+      .then(rejectRun)
+      .catch(error => {
+        console.warn('[JC-DH] 会话停止失败，正在收尾运行时:', error)
+        void stopRuntime(active).catch(closeError => console.warn('[JC-DH] 取消后的收尾失败:', closeError)).finally(rejectRun)
+      })
   }
   input.signal?.addEventListener('abort', abort, { once: true })
   try {

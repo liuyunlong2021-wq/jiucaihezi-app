@@ -11,7 +11,7 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { DeepSeekHarness } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js'
 
-async function fixture(t, configured = false) {
+async function fixture(t, configured = false, modelGate) {
   const root = mkdtempSync(join(tmpdir(), 'jc-session-lease-'))
   const requests = []
   const http = createServer(async (req, res) => {
@@ -19,6 +19,7 @@ async function fixture(t, configured = false) {
     for await (const chunk of req) chunks.push(chunk)
     requests.push(JSON.parse(Buffer.concat(chunks).toString()))
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    if (modelGate) await modelGate.promise
     for (const [delta, finish_reason] of [[{ role: 'assistant', content: 'OK' }, null], [{}, 'stop']])
       res.write(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'test', choices: [{ index: 0, delta, finish_reason }] })}\n\n`)
     res.end('data: [DONE]\n\n')
@@ -74,6 +75,7 @@ async function fixture(t, configured = false) {
     return runner
   }
   t.after(async () => {
+    modelGate?.resolve()
     await Promise.allSettled(harnesses.map(h => h.close()))
     http.closeAllConnections()
     await new Promise(resolve => http.close(resolve))
@@ -81,6 +83,139 @@ async function fixture(t, configured = false) {
   })
   return { create, createRunner, requests }
 }
+
+test('session queue can be edited and removed durably while a turn is running', { timeout: 45000 }, async t => {
+  const modelGate = Promise.withResolvers()
+  const f = await fixture(t, false, modelGate)
+  const runner = f.createRunner()
+  const running = runner.request({ type: 'run', sessionId: 'queue-test', contentBlocks: [{ type: 'text', text: '正在运行' }] })
+  const waitFor = async predicate => {
+    const deadline = Date.now() + 8000
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('timed out waiting for the model request')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+  }
+  try {
+    await waitFor(() => f.requests.length === 1)
+
+    const queuedFrame = await runner.request({
+      type: 'queue', sessionId: 'queue-test', contentBlocks: [{ type: 'text', text: '待编辑的内容' }],
+    })
+    const removedFrame = await runner.request({
+      type: 'queue', sessionId: 'queue-test', contentBlocks: [{ type: 'text', text: '待移除的内容' }],
+    })
+    const queued = queuedFrame.data
+    const removed = removedFrame.data
+    assert.ok(queued.messageId)
+    assert.ok(removed.messageId)
+    assert.deepEqual((await runner.request({
+      type: 'update-queue', sessionId: 'queue-test', itemId: queued.messageId,
+      action: { kind: 'edit', content: [{ type: 'text', text: '已编辑的内容' }] },
+    })).data, { accepted: true })
+    assert.deepEqual((await runner.request({
+      type: 'update-queue', sessionId: 'queue-test', itemId: removed.messageId, action: { kind: 'remove' },
+    })).data, { accepted: true })
+
+    const snapshot = (await runner.request({ type: 'read-session', sessionId: 'queue-test' })).data
+    const inbox = { 'next-turn': [], 'next-step': [] }
+    for (const event of snapshot.events) {
+      if (event.type !== 'agent/inbox/spliced') continue
+      const splice = event.data
+      inbox[splice.target].splice(splice.start, splice.removedCount || 0, ...splice.inserted)
+    }
+    assert.deepEqual(inbox['next-turn'].map(message => [message.id, message.content]), [
+      [queued.messageId, [{ type: 'text', text: '已编辑的内容' }]],
+    ])
+
+    modelGate.resolve()
+    await running
+    await waitFor(() => f.requests.some(request => JSON.stringify(request.messages).includes('已编辑的内容')))
+    assert.equal(f.requests.some(request => JSON.stringify(request.messages).includes('待移除的内容')), false)
+  } finally {
+    modelGate.resolve()
+    await running
+  }
+})
+
+test('stopping a live turn leaves queued prompts durable and resumes them in order', { timeout: 45000 }, async t => {
+  const modelGate = Promise.withResolvers()
+  const f = await fixture(t, false, modelGate)
+  const runner = f.createRunner()
+  const running = runner.request({ type: 'run', sessionId: 'queue-stop-test', contentBlocks: [{ type: 'text', text: '正在运行' }] })
+  const waitFor = async predicate => {
+    const deadline = Date.now() + 8000
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('timed out waiting for the model request')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+  }
+  try {
+    await waitFor(() => f.requests.length === 1)
+    const queued = (await runner.request({
+      type: 'queue', sessionId: 'queue-stop-test', contentBlocks: [{ type: 'text', text: '停止后继续' }],
+    })).data
+    assert.deepEqual((await runner.request({ type: 'cancel', sessionId: 'queue-stop-test' })).data, { accepted: true })
+    const snapshot = (await runner.request({ type: 'read-session', sessionId: 'queue-stop-test' })).data
+    const inbox = { 'next-turn': [], 'next-step': [] }
+    for (const event of snapshot.events) {
+      if (event.type !== 'agent/inbox/spliced') continue
+      const splice = event.data
+      inbox[splice.target].splice(splice.start, splice.removedCount || 0, ...splice.inserted)
+    }
+    assert.deepEqual(inbox['next-turn'].map(message => message.id), [queued.messageId])
+
+    modelGate.resolve()
+    await running
+    assert.equal(f.requests.length, 1)
+    await runner.request({ type: 'run', sessionId: 'queue-stop-test', contentBlocks: [{ type: 'text', text: '恢复后追加' }] })
+    await waitFor(() => f.requests.length === 3)
+    assert.match(JSON.stringify(f.requests[1].messages), /停止后继续/)
+    assert.match(JSON.stringify(f.requests[2].messages), /恢复后追加/)
+  } finally {
+    modelGate.resolve()
+    await running
+  }
+})
+
+test('steering a queued prompt removes it from the next turn and feeds the running turn', { timeout: 45000 }, async t => {
+  const modelGate = Promise.withResolvers()
+  const f = await fixture(t, false, modelGate)
+  const runner = f.createRunner()
+  const running = runner.request({ type: 'run', sessionId: 'queue-steer-test', contentBlocks: [{ type: 'text', text: '当前任务' }] })
+  const waitFor = async predicate => {
+    const deadline = Date.now() + 8000
+    while (!predicate()) {
+      if (Date.now() > deadline) throw new Error('timed out waiting for the model request')
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+  }
+  try {
+    await waitFor(() => f.requests.length === 1)
+    const queued = (await runner.request({
+      type: 'queue', sessionId: 'queue-steer-test', contentBlocks: [{ type: 'text', text: '转向当前轮的补充要求' }],
+    })).data
+    assert.deepEqual((await runner.request({
+      type: 'update-queue', sessionId: 'queue-steer-test', itemId: queued.messageId, action: { kind: 'steer' },
+    })).data, { accepted: true })
+    const snapshot = (await runner.request({ type: 'read-session', sessionId: 'queue-steer-test' })).data
+    const inbox = { 'next-turn': [], 'next-step': [] }
+    for (const event of snapshot.events) {
+      if (event.type !== 'agent/inbox/spliced') continue
+      const splice = event.data
+      inbox[splice.target].splice(splice.start, splice.removedCount || 0, ...splice.inserted)
+    }
+    assert.deepEqual(inbox['next-turn'], [])
+
+    modelGate.resolve()
+    await running
+    await waitFor(() => f.requests.some((request, index) => index > 0
+      && JSON.stringify(request.messages).includes('转向当前轮的补充要求')))
+  } finally {
+    modelGate.resolve()
+    await running
+  }
+})
 
 test('SDK adopts an already-live configured Agent without claiming its write handle again', { timeout: 45000 }, async t => {
   const f = await fixture(t, true)

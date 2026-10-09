@@ -86,7 +86,7 @@ test('选中行用不透明主题色，文件名不允许被划成文字选中',
   assert.doesNotMatch(tree, /rgba\(213, 199, 135/)
   assert.match(
     tree,
-    /\.pft-node\.selected \{\s*background-color: color-mix\(in srgb, var\(--olive\) 18%, var\(--paper\)\)/,
+    /\.pft-node\.selected \{\s*background-color: color-mix\(in srgb, var\(--olive\) 12%, var\(--paper\)\)/,
   )
   assert.match(tree, /-webkit-user-select: none/)
   assert.match(sliceFunction(tree, '.pft-name {'), /user-select: none/)

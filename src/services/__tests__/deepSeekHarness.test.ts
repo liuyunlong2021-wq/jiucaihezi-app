@@ -69,6 +69,25 @@ test('DeepSeek Harness invokes UI-selected skills through native skill gestures'
   assert.equal(deepSeekPrompt('执行任务', []), '执行任务')
 })
 
+test('DeepSeek Harness includes only visible same-project session turns as explicit references', () => {
+  const prompt = deepSeekPrompt('继续当前工作', [], [], '', [{
+    title: '角色设定',
+    turns: [
+      { role: 'user', content: '角色的目标是离开旧城。' },
+      { role: 'assistant', content: '已建立人物动机。' },
+    ],
+  }])
+  assert.match(prompt, /【引用会话：角色设定/)
+  assert.match(prompt, /用户：角色的目标是离开旧城。/)
+  assert.match(prompt, /助手：已建立人物动机。/)
+  assert.ok(prompt.endsWith('继续当前工作'))
+  const visibleTurns = deepSeekSessionTurns({ session: { id: 'test' }, events: [{
+    seq: 0, time: 1, type: 'user/message', surfaceOp: 'append',
+    data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: prompt }] },
+  }] })
+  assert.equal(visibleTurns[0]?.content, '引用会话：「角色设定」\n\n继续当前工作')
+})
+
 test('production skill routing does not replace the user request or leak into visible history', () => {
   const request = '镜头1–3用H3，镜头4–6用Seedance 2.5，不要时间戳'
   const prompt = deepSeekPrompt(request, ['jc-manju-zhizuo'])
@@ -1005,7 +1024,7 @@ test('a running Harness turn carries no status banner, only the in-turn process'
   // 运行中不挂横幅、不跳秒 —— 状态由轮次内的过程行表达。终态（失败/完成）仍要横幅，
   // 否则用户看不到失败原因（那次 524 就是靠它才看见的）。
   assert.match(workbench, /const runStripVisible = computed/)
-  assert.match(workbench, /run\.runtime === 'legacy' \|\| run\.phase !== 'running'/)
+  assert.match(workbench, /run\.runtime === 'legacy' \|\| run\.phase === 'failed' \|\| Boolean\(run\.error\)/)
   assert.match(workbench, /v-if="runStripVisible" class="memory-run-status"/)
   // 自研内核（Web 未发布工作台）还没有轮次内过程，保留它原来的 5 条缩略。
   assert.match(workbench, /activeRun\.value\?\.runtime === 'legacy' \? activeRun\.value\.steps\.slice\(-5\) : \[\]/)
@@ -1047,10 +1066,10 @@ test('the think row previews its latest line and an in-flight marker shows while
 test('completed Harness turns fold their process rows without hiding the answer', () => {
   const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
   // 官方 Chat：「fold eligible completed-turn process rows without hiding final answers」。
-  // 运行中或**本轮失败**时强制展开；跑完交回浏览器默认（折叠），用 undefined 而不绑 false，
-  // 否则每次重渲染都会把用户手动展开的状态抢回去。以前只看「运行中」，于是一轮失败时
-  // 整个过程块立刻塌回一行 —— 失败恰恰是用户最需要看过程的时候。
-  assert.match(workbench, /class="memory-process"[\s\S]{0,80}?:open="turnProcessOpen\(turn\.id\) \|\| undefined"/)
+  // 默认开合仍根据实时/停止/失败状态决定；显式记住本轮的用户选择，不在下一次更新时抢回状态。
+  assert.match(workbench, /class="memory-process"[\s\S]{0,100}?:open="processDisclosureOpen\(turn\.id\)"/)
+  assert.match(workbench, /function processDisclosureOpen\(turnId: string\): boolean \{[\s\S]{0,220}processDisclosureOverrides\.has\(key\)[\s\S]{0,100}turnProcessOpen\(turnId\)/)
+  assert.match(workbench, /function rememberProcessDisclosure\(turnId: string, event: Event\)/)
   assert.match(workbench, /function turnProcessOpen\(turnId: string\): boolean \{\n\s*return isLiveTurn\(turnId\)[^\n]*phase === 'stopped'[^\n]*Boolean\(harnessFailureFor\(turnId\)\)/)
 })
 
@@ -1076,7 +1095,7 @@ test('重试链在轮次内可见，失败行按官方 TurnErrorItem 结构给�
   assert.match(workbench, /@click="fillContinue\(\)">继续<\/button>/)
   assert.match(workbench, /function fillContinue\(\) \{\n\s*const text = '继续'/)
   // 重试不算工具步：折叠标题里的「N 个步骤」不能把重试也算进去。
-  assert.match(workbench, /step\.kind !== 'narration' && step\.kind !== 'retry'/)
+  assert.match(workbench, /summarizeProcessSteps\(harnessStepsFor\(turnId\) \|\| \[\]\)/)
 })
 
 function controlRuntime(t: { after: (fn: () => void) => void }, send: (command: any, active: any) => Promise<void>) {

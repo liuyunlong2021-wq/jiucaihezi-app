@@ -451,31 +451,54 @@ export async function uploadCreationAsset(value?: string, externalSignal?: Abort
       if (!response.ok) throw new Error(`读取本地素材失败 (${response.status})`)
       return response.blob()
     })
-  const formData = new FormData()
-  formData.append('file', blob, blob.type.startsWith('audio/') ? 'reference.wav' : blob.type.startsWith('video/') ? 'reference.mp4' : 'reference.png')
+  if (blob.size < 1 || blob.size > 20 * 1024 * 1024) throw new Error('参考素材需大于 0 且不超过 20 MB')
   const headers = buildGatewayHeaders({})
-  delete headers['Content-Type']  // multipart 不设置 Content-Type
   const { signal, clear } = createTimeoutSignal(120, externalSignal)
-  let res: Response
   try {
-    res = await safeFetch(`${getApiBase()}/api/creations/uploads`, {
+    const authorization = await safeFetch(`${getApiBase()}/api/creations/upload-url`, {
       method: 'POST',
-      headers,
-      body: formData,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_type: blob.type || 'application/octet-stream', size: blob.size }),
       signal,
     })
+    if (!authorization.ok) {
+      const text = await authorization.text().catch(() => '')
+      throw new Error(`申请 OSS 上传地址失败 (${authorization.status}): ${text.slice(0, 200)}`)
+    }
+    const signed = await authorization.json()
+    const uploadUrl = String(signed.upload_url || '').trim()
+    const assetUrl = String(signed.asset_url || '').trim()
+    const fields = signed.form_fields
+    if (!uploadUrl || !assetUrl || !fields || typeof fields !== 'object') {
+      throw new Error('OSS 上传授权响应不完整')
+    }
+    const formData = new FormData()
+    for (const [name, value] of Object.entries(fields)) formData.append(name, String(value))
+    const extension = ({
+      'application/octet-stream': 'bin',
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'video/mp4': 'mp4',
+      'video/quicktime': 'mov',
+      'audio/mpeg': 'mp3',
+      'audio/mp4': 'm4a',
+      'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+      'audio/aac': 'aac',
+      'audio/ogg': 'ogg',
+    } as Record<string, string>)[blob.type] || 'bin'
+    formData.append('file', blob, `reference.${extension}`)
+    const uploaded = await safeFetch(uploadUrl, { method: 'POST', body: formData, signal })
+    if (!uploaded.ok) {
+      const text = await uploaded.text().catch(() => '')
+      throw new Error(`参考素材直传 OSS 失败 (${uploaded.status}): ${text.slice(0, 200)}`)
+    }
+    return assetUrl
   } finally {
     clear()
   }
-  throwIfAborted(externalSignal)
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`素材上传失败 (${res.status}): ${text.slice(0, 200)}`)
-  }
-  const data = await res.json()
-  const url = String(data.url || data.data?.url || data.raw?.url || data.raw?.data?.download_url || data.raw?.data?.url || '').trim()
-  if (!url) throw new Error('素材上传成功但未返回 URL')
-  return url
 }
 // ★ submitCreationTask 已废弃，所有 RH 模型统一走 rh-adapter + 标准 OpenAI 端点
 

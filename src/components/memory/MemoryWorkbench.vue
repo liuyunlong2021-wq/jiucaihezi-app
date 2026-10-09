@@ -60,14 +60,21 @@ import {
   deepSeekHandoffTurns,
   deepSeekPrompt,
   deepSeekSessionFailures,
+  deepSeekSessionInbox,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
+  deepSeekSessionUsage,
   deepSeekSessionTurns,
   readDeepSeekHarnessSession,
   readCurrentDeepSeekPermission,
   switchDeepSeekSessionPermission,
   type DeepSeekProcessStep,
   type DeepSeekSessionSnapshot,
+  type DeepSeekInboxItem,
+  type DeepSeekUsage,
+  queueDeepSeekHarnessMessage,
+  updateDeepSeekHarnessQueue,
+  type DeepSeekQueueAction,
 } from '@/services/deepSeekHarness'
 import {
   beginRunStatus,
@@ -109,7 +116,7 @@ import {
   stripSkillInstallBlock,
   type SkillInstallPlan,
 } from '@/runtime/memory/skillInstall'
-import { getCursorPosition, getPlainText, setEditorText } from '@/composables/useContentEditable'
+import { getCursorPosition, getPlainText, setEditorText, setEditorTextAtCursor } from '@/composables/useContentEditable'
 import { detectFileType, processFile } from '@/composables/useFileUpload'
 import { useFilteredList } from '@/composables/useFilteredList'
 import { MAX_INLINE_ATTACHMENT_CHARS, type DirectMessageFile, type ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
@@ -118,6 +125,8 @@ import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import { uint8ArrayToBase64 } from '@/utils/exportSave'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 import { confirmAction } from '@/utils/confirmAction'
+import { findComposerSuggestion, replaceComposerSuggestion } from './composerSuggestions'
+import { summarizeProcessSteps } from './processSummary'
 import { safePrompt } from '@/utils/safePrompt'
 import type { ConversationAttachment, ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import type { ProjectResource } from '@/utils/projectResource'
@@ -179,6 +188,7 @@ const stopUpdateParticipant = registerUpdateParticipant({
     localStorage.setItem(await updateDraftKey(projectOwner.value), JSON.stringify({
       path: conversation.value?.resource.path, text: input.value, editingTurnId: editingTurnId.value,
       attachments: attachments.value.map(({ previewUrl, ...attachment }) => attachment), referencedFiles: referencedFiles.value,
+      referencedSessions: referencedSessions.value,
       skillNames: selectedSkillNames.value, mcpToolNames: selectedMcpToolNames.value,
       mediaSelected: mediaSelected.value, avSelected: avSelected.value, scene3dSelected: scene3dSelected.value,
     }))
@@ -223,7 +233,14 @@ const fileWriteSearch = ref('')
 const fileWritePending = ref(false)
 const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
+const attachmentImportProgress = ref<{ current: number; total: number; name: string } | null>(null)
+const attachmentImportFailures = ref<Array<{ id: string; file: File; error: string }>>([])
+const attachmentImportsPending = ref(0)
+const attachmentPreview = ref<{ source: string; name: string } | null>(null)
+const attachmentPreviewDialog = ref<HTMLElement | null>(null)
+let attachmentImportQueue: Promise<void> = Promise.resolve()
 const referencedFiles = ref<DirectMessageFile[]>([])
+const referencedSessions = ref<Array<{ conversationId: string; title: string; turns: Array<{ role: 'user' | 'assistant'; content: string }> }>>([])
 const selectedSkillNames = ref<string[]>([])
 const manjuSelected = computed(() => selectedSkillNames.value.includes(MANJU_ROUTER))
 const novelSelected = computed(() => selectedSkillNames.value.includes(NOVEL_SKILL))
@@ -575,12 +592,21 @@ async function restoreComposerSkills(
   ).filter(name => available.has(name))
 }
 const mentionOpen = ref(false)
+const mentionTrigger = ref<'@' | '/' | null>(null)
 // 芯片入口只加载对应候选；手打 @ 时仍给全套候选。
-const mentionScope = ref<'all' | 'skill' | 'mcp'>('all')
+const mentionScope = ref<'all' | 'skill' | 'mcp' | 'session'>('all')
 const modelPickerOpen = ref(false)
 const modelPickerRef = ref<HTMLElement | null>(null)
 const projectActionPending = ref(false)
 const copiedTurnId = ref('')
+const harnessInbox = ref<DeepSeekInboxItem[]>([])
+const queueSubmitting = ref(false)
+const queueMutationItemId = ref('')
+const queueEditId = ref('')
+const queueEditText = ref('')
+const harnessUsage = ref<Record<string, DeepSeekUsage>>({})
+const processResultWraps = reactive(new Set<string>())
+const roundNavigatorOpen = ref(false)
 // status / error 只承载非运行的视图提示（写文件、解析附件、预览失败）。
 // 运行自己的进度和错误挂在 run 上，否则后台运行时会把 A 对话的状态写到 B 对话的界面上。
 const status = ref('')
@@ -628,7 +654,27 @@ const treeOpen = ref(true)
 const viewportWidth = ref(window.innerWidth)
 const messagesEl = ref<HTMLElement | null>(null)
 const memoryScrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
+const memoryMainEl = ref<HTMLElement | null>(null)
+const composerPanelEl = ref<HTMLElement | null>(null)
 const composerRef = ref<HTMLElement | null>(null)
+let composerResizeObserver: ResizeObserver | null = null
+watch(composerPanelEl, (element) => {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
+  const main = memoryMainEl.value
+  if (!element || !main) {
+    main?.style.removeProperty('--memory-composer-height')
+    return
+  }
+  const updateComposerOffset = () => {
+    main.style.setProperty('--memory-composer-height', `${Math.ceil(element.getBoundingClientRect().height + 22)}px`)
+  }
+  updateComposerOffset()
+  if (typeof ResizeObserver !== 'undefined') {
+    composerResizeObserver = new ResizeObserver(updateComposerOffset)
+    composerResizeObserver.observe(element)
+  }
+}, { flush: 'post' })
 const mentionPopoverRef = ref<HTMLElement | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const composerDropActive = ref(false)
@@ -777,7 +823,6 @@ function resizeCreationForWindow() {
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
 watch(() => conversation.value?.transcript.id, () => { authorizedPaths.value = [] })
-watch(() => conversation.value?.transcript.id, () => { contextNotice.value = '' })
 const projectOwner = computed(() => desktopRuntime
   ? projectStore.projectDir.value
   : projectStore.webProjectId.value)
@@ -789,11 +834,36 @@ const projectOwner = computed(() => desktopRuntime
  */
 // ponytail: 跑完的 run 记录留在表里，切回来仍能看到「已完成」横幅；上限是本次会话跑过的对话数。
 const runs = desktopOnlyRuntime ? desktopConversationRuns : reactive(new Map<string, MemoryRun>())
+const processDisclosureOverrides = reactive(new Map<string, boolean>())
+const markdownHandoffIds = reactive(new Set<string>())
+watch(() => conversation.value?.transcript.id, () => {
+  contextNotice.value = ''
+  processDisclosureOverrides.clear()
+})
 const activeRun = computed(() => {
   const active = conversation.value
   return active ? runs.get(memoryRunKey(active.resource.owner, active.resource.path)) ?? null : null
 })
+watch(
+  () => [conversation.value?.transcript.id, activeRun.value?.officialAssistantTurnId, activeRun.value?.phase === 'running', Boolean(activeRun.value?.streamingText)] as const,
+  ([sessionId, assistantId, isRunning, hasStreamingText]) => {
+    markdownHandoffIds.clear()
+    if (!isRunning && !hasStreamingText && sessionId && assistantId) markdownHandoffIds.add(assistantId)
+  },
+  { immediate: true },
+)
 const sending = computed(() => activeRun.value?.phase === 'running')
+const composerHasPayload = computed(() => Boolean(
+  input.value.trim() || persistentAttachments.value.length || attachments.value.length
+    || referencedFiles.value.length || referencedSessions.value.length || selectedSkillNames.value.length,
+))
+const queueItems = computed(() => activeRun.value?.runtime === 'dh'
+  ? activeRun.value.inbox ?? harnessInbox.value
+  : harnessInbox.value)
+const canQueueDraft = computed(() => desktopOnlyRuntime && sending.value
+  && activeRun.value?.runtime === 'dh' && Boolean(activeRun.value.harnessModel)
+  && composerHasPayload.value && !queueSubmitting.value && attachmentImportsPending.value === 0
+  && attachmentImportFailures.value.length === 0 && !editingTurnId.value)
 const streamingText = computed(() => activeRun.value?.streamingText || '')
 /**
  * 思考行的预览：始终露最新一行（官方 Chat 的 reasoning previews），过长时从左侧裁掉。
@@ -835,11 +905,14 @@ const liveInFlight = computed(() => {
 const runStripVisible = computed(() => {
   const run = activeRun.value
   if (!run || run.phase === 'stopped') return false
-  return run.runtime === 'legacy' || run.phase !== 'running'
+  return run.runtime === 'legacy' || run.phase === 'failed' || Boolean(run.error)
 })
+const completedRunVisible = computed(() => activeRun.value?.runtime === 'dh'
+  && activeRun.value.phase === 'done' && !activeRun.value.error)
 const runElapsed = computed(() => activeRun.value?.elapsed ?? 0)
 const runMetrics = computed(() => activeRun.value?.metrics ?? null)
 const runStatus = computed(() => activeRun.value?.status || '')
+const liveProcessStep = computed(() => activeRun.value?.steps.find(step => step.state === 'running') || null)
 const runError = computed(() => activeRun.value?.error || '')
 const displayedStatus = computed(() => runStatus.value || status.value)
 const displayedError = computed(() => runError.value || error.value || desktopRemoteSyncError.value)
@@ -879,8 +952,10 @@ watch(desktopRemoteCompleted, completed => {
 
 type MemoryMentionOption =
   | { type: 'tool'; id: string; display: string; description: string; icon: string }
+  | { type: 'command'; id: string; display: string; description: string; icon: string }
   | { type: 'file'; display: string; description: string; resource: ProjectResource }
   | { type: 'skill'; display: string; description: string; name: string }
+  | { type: 'session'; id: string; display: string; description: string; conversationId: string }
 
 const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   if (!mentionOpen.value) return []
@@ -894,6 +969,14 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     description: `整体工具（${count} 个 operation）`, icon: 'extension',
   }))
   if (scope === 'mcp' || query.trim().startsWith('mcp__')) return mcpTools
+  const owner = projectOwner.value
+  const sessionOptions = (): MemoryMentionOption[] => conversations.value
+    .filter(item => item.resource.owner === owner && item.transcript.id !== conversation.value?.transcript.id)
+    .map(item => ({
+      type: 'session', id: item.transcript.id, conversationId: item.transcript.id,
+      display: item.transcript.title, description: '引用该对话最近 12 条用户/助手消息',
+    }))
+  if (scope === 'session') return desktopOnlyRuntime ? sessionOptions() : []
   // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
@@ -905,6 +988,15 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
     { type: 'tool', id: 'av', display: '影音', description: '生成图片、视频和音频', icon: 'movie' },
     { type: 'tool', id: 'mcp', display: 'MCP', description: '调用已连接的 MCP 工具', icon: 'extension' },
   ]
+  const sessionTool: MemoryMentionOption = {
+    type: 'tool', id: 'session', display: '会话', description: '引用当前项目的其他对话', icon: 'chat',
+  }
+  const sessionToolOptions = desktopOnlyRuntime ? [sessionTool] : []
+  if (mentionTrigger.value === '/') {
+    return toolOptions.map(option => option.type === 'tool'
+      ? { type: 'command', id: option.id, display: `/${option.id}`, description: option.description, icon: option.icon }
+      : option)
+  }
   const bundledSkills = await loadWebSkillCatalog().catch(() => [])
   if (!mentionOpen.value || mentionScope.value !== scope) return []
   const skillOptions = [
@@ -933,7 +1025,6 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   }))
   // 从芯片排的「@Skill」进来时只列 Skill：下面的芯片排已经有全部工具入口了。
   if (scope === 'skill') return skills
-  const owner = projectOwner.value
   const resources = !owner ? [] : await (query.trim()
     ? files.searchPaths(owner, query.trim(), 40)
     : files.list(owner))
@@ -948,13 +1039,19 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       description: resource.kind === 'media' ? '项目媒体' : '项目文件',
       resource,
     }))
-  return query.trim() ? [...toolOptions, ...skills, ...mcpTools, ...projectOptions] : [...toolOptions, ...skills.slice(0, 5), ...mcpTools, ...projectOptions]
+  return query.trim()
+    ? [...toolOptions, ...sessionToolOptions, ...skills, ...mcpTools, ...projectOptions, ...(desktopOnlyRuntime ? sessionOptions() : [])]
+    : [...toolOptions, ...sessionToolOptions, ...skills.slice(0, 5), ...mcpTools, ...projectOptions, ...(desktopOnlyRuntime ? sessionOptions().slice(0, 3) : [])]
 }
 const mentionKey = (item: MemoryMentionOption) => item.type === 'tool'
   ? `tool:${item.id}`
+  : item.type === 'command'
+    ? `command:${item.id}`
   : item.type === 'skill'
   ? `skill:${item.name}`
-  : `file:${item.resource.path}`
+  : item.type === 'file'
+    ? `file:${item.resource.path}`
+    : `session:${item.conversationId}`
 const {
   flat: mentionFlat,
   active: mentionActive,
@@ -1011,6 +1108,21 @@ const currentModelLabel = computed(() => selectedModel()?.label || agentStore.cu
 // 这里必须为空，否则同一批步骤会在两处各出现一次。
 const visibleRunSteps = computed(() => activeRun.value?.runtime === 'legacy' ? activeRun.value.steps.slice(-5) : [])
 const latestAssistantTurnId = computed(() => [...conversationTurns.value].reverse().find(turn => turn.role === 'assistant')?.id || '')
+const conversationQuestionCount = computed(() => conversationTurns.value.filter(turn => turn.role === 'user').length)
+function isStreamingHandoffTurn(turn: ConversationTurn): boolean {
+  if (turn.id === 'streaming-assistant') return true
+  return markdownHandoffIds.has(turn.id)
+    || (!streamingText.value && turn.id === activeRun.value?.officialAssistantTurnId)
+}
+
+function timelineTurnKey(turn: ConversationTurn): string {
+  if (isStreamingHandoffTurn(turn)) return `${conversation.value?.transcript.id || 'conversation'}:streaming-assistant`
+  return turn.id
+}
+
+function messageRenderId(turn: ConversationTurn): string {
+  return isStreamingHandoffTurn(turn) ? `${conversation.value?.transcript.id || 'conversation'}:streaming-assistant` : turn.id
+}
 function programStatusFor(turnId: string): MemoryProgramStatus | undefined {
   return programStatuses.value[turnId]
 }
@@ -1021,7 +1133,8 @@ function isLiveTurn(turnId: string): boolean {
 
 /** 本轮有没有过程要显示（思考 / 步骤 / 叙述 / 在飞）。决定过程块是否单独成块。 */
 function hasTurnProcess(turnId: string): boolean {
-  return Boolean(harnessReasoningFor(turnId) || harnessStepsFor(turnId)?.length || harnessFailures.value[turnId] || isLiveTurn(turnId))
+  return Boolean(harnessReasoningFor(turnId) || harnessStepsFor(turnId)?.length || harnessFailures.value[turnId]
+    || harnessUsageFor(turnId) || isLiveTurn(turnId))
 }
 
 function harnessFailureFor(turnId: string) {
@@ -1042,6 +1155,29 @@ function harnessFailureText(turnId: string): string {
  */
 function turnProcessOpen(turnId: string): boolean {
   return isLiveTurn(turnId) || (activeRun.value?.phase === 'stopped' && turnId === liveProcessTurnId.value) || Boolean(harnessFailureFor(turnId))
+}
+
+function processDisclosureKey(turnId: string): string {
+  return `${conversation.value?.transcript.id || ''}:${turnId}`
+}
+
+function processDisclosureOpen(turnId: string): boolean {
+  const key = processDisclosureKey(turnId)
+  return processDisclosureOverrides.has(key) ? Boolean(processDisclosureOverrides.get(key)) : turnProcessOpen(turnId)
+}
+
+function rememberProcessDisclosure(turnId: string, event: Event) {
+  const key = processDisclosureKey(turnId)
+  const details = (event.currentTarget as HTMLElement).closest('details')
+  if (!details) return
+  queueMicrotask(() => {
+    processDisclosureOverrides.set(key, details.open)
+    while (processDisclosureOverrides.size > 200) {
+      const oldest = processDisclosureOverrides.keys().next().value
+      if (oldest === undefined) break
+      processDisclosureOverrides.delete(oldest)
+    }
+  })
 }
 
 /** 重试是不是正在等（官方 `active`）：只有活着的这一轮未进入下一次请求时才算。 */
@@ -1095,8 +1231,13 @@ function fillContinue() {
 }
 
 /** 折叠标题里只数工具步；叙述也是过程的一部分，但算成「步骤」会误导，重试另有自己的行。 */
-function harnessToolSteps(turnId: string): number {
-  return (harnessStepsFor(turnId) || []).filter(step => step.kind !== 'narration' && step.kind !== 'retry').length
+function harnessProcessSummary(turnId: string): string {
+  const summary = summarizeProcessSteps(harnessStepsFor(turnId) || [])
+  const parts = [`${summary.tools} 个工具`]
+  if (summary.retries) parts.push(`重试 ${summary.retries} 次`)
+  if (summary.narration) parts.push(`${summary.narration} 条过程说明`)
+  if (summary.failed) parts.push(`${summary.failed} 项失败`)
+  return `过程 · ${parts.join(' · ')}`
 }
 
 /**
@@ -1126,6 +1267,74 @@ function harnessReasoningFor(turnId: string): string {
   return harnessReasoning.value[turnId] || ''
 }
 
+function harnessUsageFor(turnId: string): DeepSeekUsage | undefined {
+  if (turnId && turnId === liveProcessTurnId.value) return activeRun.value?.usage
+  return harnessUsage.value[turnId]
+}
+
+function formatTokenCount(value: number | undefined): string {
+  return value === undefined ? '未提供' : Math.round(value).toLocaleString('zh-CN')
+}
+
+function usageContextLabel(usage: DeepSeekUsage): string {
+  const { cacheReadTokens, cacheWriteTokens } = usage
+  if (cacheReadTokens === undefined || cacheWriteTokens === undefined) return '缓存明细未提供'
+  const contextTokens = usage.inputTokens + cacheReadTokens + cacheWriteTokens
+  const percent = Math.min(100, contextTokens / DEEPSEEK_HARNESS_CONTEXT_WINDOW * 100)
+  return `上下文 ${percent.toFixed(1)}%`
+}
+
+function processStepIndent(turnId: string, step: DeepSeekProcessStep): Record<string, string> | undefined {
+  if (!step.parentCallId) return undefined
+  const steps = harnessStepsFor(turnId) || []
+  let parent = step.parentCallId
+  let depth = 0
+  const seen = new Set([step.id])
+  while (depth < 4 && !seen.has(parent)) {
+    seen.add(parent)
+    const ancestor = steps.find(item => item.id === parent)
+    if (!ancestor) break
+    depth += 1
+    if (!ancestor.parentCallId) break
+    parent = ancestor.parentCallId
+  }
+  return depth ? { marginInlineStart: `${depth * 16}px` } : undefined
+}
+
+async function copyProcessResult(text: string) {
+  if (!await writeClipboardText(text)) contextNotice.value = '复制结果失败'
+}
+
+function toggleProcessResultWrap(id: string) {
+  if (processResultWraps.has(id)) processResultWraps.delete(id)
+  else processResultWraps.add(id)
+}
+
+async function openReadResultFile(meta: NonNullable<DeepSeekProcessStep['readFile']>) {
+  const owner = projectOwner.value
+  if (!owner) return
+  const normalize = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '')
+  const root = normalize(owner)
+  const sourcePath = normalize(meta.path)
+  const relativePath = sourcePath === root ? '' : sourcePath.startsWith(`${root}/`)
+    ? sourcePath.slice(root.length + 1)
+    : sourcePath
+  if (!relativePath || relativePath.startsWith('/') || /^[A-Za-z]:\//.test(relativePath)
+    || relativePath.split('/').some(part => !part || part === '.' || part === '..')) {
+    contextNotice.value = '读取结果路径不在当前项目内，无法定位'
+    return
+  }
+  try {
+    const resource = (await files.list(owner)).find(item => item.path === relativePath && !item.isDirectory)
+    if (!resource) throw new Error('当前项目中找不到该文件')
+    emitEvent('project-filetree:locate', { path: resource.path, owner, open: true })
+    await openProjectFile(resource)
+    contextNotice.value = `${resource.path} · 第 ${meta.lineStart}–${meta.lineStart + Math.max(0, meta.lineCount - 1)} 行 / 共 ${meta.totalLines} 行`
+  } catch (cause) {
+    contextNotice.value = `无法定位读取文件：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 /**
  * 把一次 Session 快照的过程与推理登记到按 turn id 的侧存表里。
  * 实时与历史走同一个投影，不另存一份副本——官方也是“事件日志是 UI 投影的唯一真相”。
@@ -1134,6 +1343,132 @@ function rememberHarnessSnapshot(snapshot: DeepSeekSessionSnapshot) {
   for (const [turnId, steps] of deepSeekSessionProcess(snapshot)) harnessProcess.value[turnId] = steps
   for (const [turnId, reasoning] of deepSeekSessionReasoning(snapshot)) harnessReasoning.value[turnId] = reasoning
   for (const [turnId, failure] of deepSeekSessionFailures(snapshot)) harnessFailures.value[turnId] = failure
+  Object.assign(harnessUsage.value, Object.fromEntries(deepSeekSessionUsage(snapshot)))
+  if (conversation.value?.transcript.id && snapshot.session.id === `jc-v1-${conversation.value.transcript.id}`) {
+    const inbox = deepSeekSessionInbox(snapshot)
+    harnessInbox.value = inbox
+    const run = activeRun.value
+    if (run?.runtime === 'dh' && run.conversationId === conversation.value.transcript.id) run.inbox = inbox
+  }
+}
+
+async function harnessSessionInput(active: MemoryConversation) {
+  const run = runs.get(memoryRunKey(active.resource.owner, active.resource.path))
+  const config = await resolveApiConfig({
+    modelId: run?.harnessModel || agentStore.currentModel,
+    modelProviderId: run?.harnessProviderId ?? selectedModel()?.providerId,
+  })
+  return {
+    cwd: active.resource.owner,
+    sessionId: active.transcript.id,
+    message: '',
+    model: config.model,
+    apiBase: config.apiBase,
+    apiKey: config.apiKey,
+    imageInput: harnessImageInput(config.model),
+    permissionTier: run?.permissionTier || permissionTier.value,
+    mediaSelected: mediaSelected.value,
+    avSelected: avSelected.value,
+    scene3dSelected: scene3dSelected.value,
+    mcpServerIds: selectedMcpToolNames.value.map(id => id.slice('mcp__'.length)),
+  }
+}
+
+async function refreshHarnessInbox() {
+  const active = conversation.value
+  if (!active) return
+  const snapshot = await readDeepSeekHarnessSession(await harnessSessionInput(active))
+  if (conversation.value?.transcript.id === active.transcript.id) rememberHarnessSnapshot(snapshot)
+  return snapshot
+}
+
+async function queueDraft() {
+  const active = conversation.value
+  const run = activeRun.value
+  const text = input.value.trim()
+  if (!active || !run || !canQueueDraft.value) return
+  const attachmentSnapshot = [...persistentAttachments.value, ...attachments.value]
+  const transientIds = new Set(attachments.value.map(attachment => attachment.id))
+  const referenceSnapshot = referencedFiles.value.slice()
+  const sessionReferenceSnapshot = referencedSessions.value.slice()
+  const skillSnapshot = selectedSkillNames.value.slice()
+  queueSubmitting.value = true
+  error.value = ''
+  try {
+    const [materialized, sessionInput] = await Promise.all([
+      materializeChatAttachments(attachmentSnapshot),
+      harnessSessionInput(active),
+    ])
+    const wikiContext = skillSnapshot.includes(WIKI_MEMORY_SKILL)
+      ? await buildWikiMemoryIndexContext(active.resource.owner)
+      : ''
+    await queueDeepSeekHarnessMessage({
+      ...sessionInput,
+      message: deepSeekPrompt(text || (attachmentSnapshot.length ? '请查看以下附件。' : '请参考引用的会话。'),
+        skillSnapshot, [], wikiContext, sessionReferenceSnapshot),
+      attachments: materialized,
+      files: referenceSnapshot,
+    })
+    if (conversation.value?.transcript.id !== active.transcript.id) return
+    if (input.value.trim() === text) {
+      input.value = ''
+      setEditorText(composerRef.value, '')
+      resizeComposer()
+    }
+    for (const id of transientIds) removeAttachment(id)
+    try {
+      await refreshHarnessInbox()
+      contextNotice.value = '已排入当前会话队列'
+    } catch (cause) {
+      contextNotice.value = `消息已排入队列，但队列状态刷新失败：${cause instanceof Error ? cause.message : String(cause)}`
+    }
+  } catch (cause) {
+    error.value = `排队失败：${cause instanceof Error ? cause.message : String(cause)}`
+  } finally {
+    queueSubmitting.value = false
+  }
+}
+
+function startQueueEdit(item: DeepSeekInboxItem) {
+  if (!item.textOnly || queueMutationItemId.value) return
+  queueEditId.value = item.id
+  queueEditText.value = item.text
+}
+
+function cancelQueueEdit() {
+  queueEditId.value = ''
+  queueEditText.value = ''
+}
+
+async function mutateQueueItem(item: DeepSeekInboxItem, action: DeepSeekQueueAction) {
+  const active = conversation.value
+  if (!active || queueMutationItemId.value) return
+  queueMutationItemId.value = item.id
+  error.value = ''
+  try {
+    const sessionInput = await harnessSessionInput(active)
+    await updateDeepSeekHarnessQueue({ ...sessionInput, itemId: item.id, action })
+    if (action.kind === 'edit') cancelQueueEdit()
+    await refreshHarnessInbox()
+  } catch (cause) {
+    error.value = `队列操作失败：${cause instanceof Error ? cause.message : String(cause)}`
+    try { await refreshHarnessInbox() } catch { /* retain the last confirmed Inbox projection */ }
+  } finally {
+    queueMutationItemId.value = ''
+  }
+}
+
+function showAttachmentPreview(attachment: ResolvedDirectAttachment) {
+  const source = attachment.previewUrl || attachment.value
+  if (source && attachment.kind === 'image') {
+    attachmentPreview.value = { source, name: attachment.name }
+    void nextTick(() => attachmentPreviewDialog.value?.focus())
+  }
+}
+
+function closeAttachmentPreview() {
+  attachmentPreview.value = null
+  void nextTick(() => composerRef.value?.focus())
 }
 
 function programStatusTitle(programStatus: MemoryProgramStatus): string {
@@ -1160,6 +1495,7 @@ const toolCommands = [
   { id: 'media', label: '@排版', icon: 'image', description: '创建文档、网页、长图和幻灯片' },
   { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
   { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
+  ...(desktopOnlyRuntime ? [{ id: 'session', label: '@会话', icon: 'chat', description: '引用当前项目的其他对话' }] : []),
   ...(desktopOnlyRuntime ? [
     { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
   ] : []),
@@ -1243,6 +1579,8 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  composerResizeObserver?.disconnect()
+  composerResizeObserver = null
   stopUpdateParticipant()
   screenshotBridgeUnmounted = true
   stopScreenshotBridge?.()
@@ -1433,6 +1771,7 @@ interface UpdateInputDraft {
   skillNames?: string[]
   mcpToolNames?: string[]
   referencedFiles?: DirectMessageFile[]
+  referencedSessions?: Array<{ conversationId: string; title: string; turns: Array<{ role: 'user' | 'assistant'; content: string }> }>
   attachments?: ResolvedDirectAttachment[]
   mediaSelected?: boolean
   avSelected?: boolean
@@ -1445,6 +1784,7 @@ function restoreUpdateInputDraft(draft: UpdateInputDraft, key: string) {
   if (draft.skillNames) selectedSkillNames.value = draft.skillNames
   if (draft.mcpToolNames) selectedMcpToolNames.value = draft.mcpToolNames
   if (draft.referencedFiles) referencedFiles.value = draft.referencedFiles
+  if (draft.referencedSessions) referencedSessions.value = draft.referencedSessions
   if (draft.attachments) attachments.value = draft.attachments
   mediaSelected.value = Boolean(draft.mediaSelected)
   avSelected.value = Boolean(draft.avSelected)
@@ -1597,7 +1937,10 @@ async function openResource(resource: ProjectResourceOpenResult) {
     }
     opened.value = activeConversation
     attachments.value = []
+    attachmentImportFailures.value = []
+    attachmentPreview.value = null
     referencedFiles.value = []
+    referencedSessions.value = []
     persistentAttachments.value = (activeConversation.transcript.persistentAttachments || []).map(attachment => ({
       ...attachment, value: '', resourcePath: attachment.projectPath,
     }))
@@ -1741,6 +2084,14 @@ async function openProjectFile(resource: ProjectResource) {
 }
 
 async function handleMarkdownClick(event: MouseEvent) {
+  const wrapButton = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-code-wrap="1"]')
+  if (wrapButton) {
+    const codeBlock = wrapButton.closest('.md-code')
+    const wrapped = codeBlock?.classList.toggle('wrap') || false
+    wrapButton.setAttribute('aria-pressed', String(wrapped))
+    wrapButton.textContent = wrapped ? '取消换行' : '换行'
+    return
+  }
   const copyButton = (event.target as Element | null)?.closest<HTMLButtonElement>('[data-code-copy="1"]')
   if (copyButton) {
     const code = copyButton.closest('.md-code')?.querySelector('code')?.textContent || ''
@@ -1817,7 +2168,25 @@ async function copyTurn(turn: ConversationTurn) {
   }, 1500)
 }
 
+function navigateQuestion(direction: -1 | 1) {
+  const container = messagesEl.value
+  if (!container) return
+  const questions = Array.from(container.querySelectorAll<HTMLElement>('.memory-message.user[data-turn-id]'))
+  if (questions.length < 2) return
+  const top = container.getBoundingClientRect().top + 24
+  const currentIndex = questions.findIndex(question => question.getBoundingClientRect().bottom >= top)
+  const targetIndex = currentIndex < 0
+    ? (direction < 0 ? questions.length - 1 : 0)
+    : currentIndex + direction
+  const target = questions[targetIndex]
+  if (!target) return
+  const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+  const delta = target.getBoundingClientRect().top - container.getBoundingClientRect().top - 20
+  container.scrollTo({ top: container.scrollTop + delta, behavior: reducedMotion ? 'auto' : 'smooth' })
+}
+
 function insertCommand(command: { id: string; label: string }) {
+  mentionTrigger.value = null
   // `file` 不在这里：它不是一个“往输入框插一句话”的指令，点它走权限菜单（见模板）。
   if (command.id === 'media') mediaSelected.value = true
   if (command.id === 'av') avSelected.value = true
@@ -1829,6 +2198,11 @@ function insertCommand(command: { id: string; label: string }) {
   }
   if (command.id === 'mcp') {
     mentionScope.value = 'mcp'
+    mentionOpen.value = true
+    mentionOnInput('')
+  }
+  if (command.id === 'session') {
+    mentionScope.value = 'session'
     mentionOpen.value = true
     mentionOnInput('')
   }
@@ -2145,13 +2519,27 @@ async function send(remoteText?: string) {
     error.value = '正在准备应用升级，请稍后再试'
     return
   }
+  if (sending.value) {
+    if (typeof remoteText !== 'string') await queueDraft()
+    return
+  }
+  if (attachmentImportsPending.value) {
+    contextNotice.value = '附件正在本地导入与解析，完成后再发送'
+    return
+  }
+  if (attachmentImportFailures.value.length) {
+    contextNotice.value = '有附件导入失败，请先重试或移除失败项'
+    return
+  }
   const remote = typeof remoteText === 'string'
   const active = conversation.value
   const message = (remote ? remoteText : input.value).trim()
   const activeAttachments = remote ? [] : [...persistentAttachments.value, ...attachments.value]
   const pendingAttachments = remote ? [] : attachments.value.slice()
   const activeReferencedFiles = remote ? [] : referencedFiles.value
-  if (!active || (!message && !activeAttachments.length && !activeReferencedFiles.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value) return
+  const activeReferencedSessions = remote ? [] : referencedSessions.value.slice()
+  if (!active || (!message && !activeAttachments.length && !activeReferencedFiles.length
+    && !activeReferencedSessions.length && !selectedSkillNames.value.length) || sendInFlight.value) return
   sendInFlight.value = true
   // 按芯片快照建发送链路：Skill 与能力都已在 chip 行里，模型侧不再做二次判断。
 
@@ -2168,7 +2556,9 @@ async function send(remoteText?: string) {
   const userTurn: ConversationTurn = {
     id: `turn-${crypto.randomUUID()}`,
     role: 'user',
-    content: message || '请查看以下附件。',
+    content: message || (activeAttachments.length
+      ? activeReferencedSessions.length ? '请参考引用的会话和附件。' : '请查看以下附件。'
+      : '请参考引用的会话。'),
     createdAt: new Date().toISOString(),
     attachments: attachmentMetadata(activeAttachments),
     skillNames: skillSnapshot,
@@ -2257,6 +2647,10 @@ async function send(remoteText?: string) {
     const dhConfig = useHarness
       ? await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
       : null
+    if (dhConfig) {
+      run.harnessModel = dhConfig.model
+      run.harnessProviderId = selectedModel()?.providerId
+    }
     const dhWikiContext = useHarness && skillSnapshot.includes(WIKI_MEMORY_SKILL)
       ? await buildWikiMemoryIndexContext(active.resource.owner)
       : ''
@@ -2281,7 +2675,7 @@ async function send(remoteText?: string) {
     const reply = useHarness ? await executeDesktopHarnessRun(runs, run, {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
-      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns, dhWikiContext),
+      message: deepSeekPrompt(userTurn.content, skillSnapshot, dhHandoffTurns, dhWikiContext, activeReferencedSessions),
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
@@ -2835,10 +3229,11 @@ function handleComposerInput(event: Event) {
   const editor = event.currentTarget as HTMLElement
   input.value = getPlainText(editor)
   const cursorPos = getCursorPosition(editor)
-  const match = input.value.slice(0, cursorPos || input.value.length).match(/@(\S*)$/)
-  if (match) {
+  const suggestion = findComposerSuggestion(input.value, cursorPos)
+  if (suggestion) {
+    mentionTrigger.value = suggestion.trigger
     mentionOpen.value = true
-    mentionOnInput(match[1])
+    mentionOnInput(suggestion.query)
   } else {
     closeMention()
   }
@@ -2871,15 +3266,74 @@ function handleComposerKeydown(event: KeyboardEvent) {
 
 function closeMention() {
   mentionOpen.value = false
+  mentionTrigger.value = null
   mentionScope.value = 'all'
   clearMentionFilter()
 }
 
+async function addSessionReference(option: Extract<MemoryMentionOption, { type: 'session' }>) {
+  if (!desktopOnlyRuntime) throw new Error('会话引用仅在桌面工作台可用')
+  const active = conversation.value
+  if (!active || active.resource.owner !== projectOwner.value) throw new Error('当前项目会话不可用')
+  if (option.conversationId === active.transcript.id) throw new Error('不能引用当前对话本身')
+  const target = conversations.value.find(item => item.transcript.id === option.conversationId)
+  if (!target || target.resource.owner !== active.resource.owner) throw new Error('只能引用当前项目中的对话')
+
+  let turns = target.transcript.turns
+  if (!turns.length || turns.some(turn => turn.toolChips?.includes(DEEPSEEK_HARNESS_SESSION_MARKER))) {
+    try {
+      const snapshot = await readDeepSeekHarnessSession(await harnessSessionInput(target))
+      turns = mergedHarnessTurns(turns, deepSeekSessionTurns(snapshot))
+    } catch (cause) {
+      if (!turns.length) throw cause
+    }
+  }
+  const visibleTurns = turns
+    .filter((turn): turn is ConversationTurn & { role: 'user' | 'assistant' } =>
+      (turn.role === 'user' || turn.role === 'assistant') && Boolean(turn.content.trim()))
+    .slice(-12)
+    .map(turn => ({ role: turn.role, content: turn.content }))
+  if (!visibleTurns.length) throw new Error('该对话还没有可引用的用户或助手消息')
+  const existingIndex = referencedSessions.value.findIndex(item => item.conversationId === target.transcript.id)
+  const reference = {
+    conversationId: target.transcript.id,
+    title: target.transcript.title,
+    turns: visibleTurns,
+  }
+  if (existingIndex < 0) referencedSessions.value.push(reference)
+  else referencedSessions.value[existingIndex] = reference
+}
+
 async function selectMention(option: MemoryMentionOption) {
+  let keepMenuOpen = false
+  let pickerAfterReplacement: 'skill' | 'mcp' | 'session' | null = null
   try {
-    if (option.type === 'tool') {
+    const suggestion = composerRef.value
+      ? findComposerSuggestion(input.value, getCursorPosition(composerRef.value))
+      : null
+    if (option.type === 'command') {
+      if (suggestion?.trigger === '/') {
+        const replaced = replaceComposerSuggestion(input.value, suggestion, '')
+        input.value = replaced.text
+        setEditorTextAtCursor(composerRef.value, replaced.text, replaced.cursor)
+      }
+      closeMention()
+      if (option.id === 'skill' || option.id === 'mcp') {
+        insertCommand({ id: option.id, label: option.display })
+        keepMenuOpen = true
+      } else enableTool(option.id)
+    } else if (option.type === 'tool') {
       if (option.id.startsWith('mcp__')) {
         if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
+      } else if (option.id === 'skill') {
+        pickerAfterReplacement = 'skill'
+        keepMenuOpen = true
+      } else if (option.id === 'mcp') {
+        pickerAfterReplacement = 'mcp'
+        keepMenuOpen = true
+      } else if (option.id === 'session') {
+        pickerAfterReplacement = 'session'
+        keepMenuOpen = true
       } else enableTool(option.id)
     } else if (option.type === 'skill') {
       if (manjuSelected.value && !MANJU_SKILLS.includes(option.name) && option.name !== WIKI_MEMORY_SKILL)
@@ -2923,19 +3377,29 @@ async function selectMention(option: MemoryMentionOption) {
         if (manjuPreference?.wikiMemoryWasSelected === false)
           saveProductionPreferences({ manju: { enabled: false, wikiMemoryWasSelected: true } })
       }
+    } else if (option.type === 'session') {
+      await addSessionReference(option)
     } else if (option.resource.kind === 'media') {
       await addProjectMediaReferences({ resources: [option.resource] })
     } else {
       await addProjectFileReference(option.resource)
     }
-    input.value = input.value.replace(/@([^\s@]*)$/, '')
-    setEditorText(composerRef.value, input.value)
-    await nextTick()
-    resizeComposer()
+    if (option.type !== 'command' && suggestion?.trigger === '@') {
+      const replaced = replaceComposerSuggestion(input.value, suggestion, '')
+      input.value = replaced.text
+      setEditorTextAtCursor(composerRef.value, replaced.text, replaced.cursor)
+      await nextTick()
+      resizeComposer()
+    }
+    if (pickerAfterReplacement) insertCommand({
+      id: pickerAfterReplacement,
+      label: pickerAfterReplacement === 'skill' ? '@Skill' : pickerAfterReplacement === 'mcp' ? '@MCP' : '@会话',
+    })
   } catch (cause) {
     error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
   } finally {
-    if (!(option.type === 'tool' && option.id === 'mcp')) closeMention()
+    if (option.type === 'tool' && option.id === 'mcp') keepMenuOpen = true
+    if (!keepMenuOpen) closeMention()
     composerRef.value?.focus()
   }
 }
@@ -3084,12 +3548,26 @@ async function importDesktopChatPaths(paths: string[], warnings: string[] = []) 
 }
 
 async function addAttachmentFiles(selected: File[]) {
+  if (!selected.length) return
   const owner = projectOwner.value
+  const conversationId = conversation.value?.transcript.id
+  attachmentImportsPending.value += 1
+  const task = attachmentImportQueue.then(() => importAttachmentFiles(selected, owner, conversationId))
+  attachmentImportQueue = task.then(() => undefined, () => undefined)
+  try { await task }
+  finally { attachmentImportsPending.value = Math.max(0, attachmentImportsPending.value - 1) }
+}
+
+async function importAttachmentFiles(selected: File[], owner: string | undefined, conversationId: string | undefined) {
   if (!owner) throw new Error('请先选择项目')
+  attachmentImportProgress.value = { current: 0, total: selected.length, name: '准备附件' }
+  try {
   const existing = new Set((await files.list(owner)).map(resource => resource.path))
   const resolved: ResolvedDirectAttachment[] = []
   const failures: string[] = []
-  for (const file of selected) {
+  const failureEntries: Array<{ id: string; file: File; error: string }> = []
+  for (const [index, file] of selected.entries()) {
+    attachmentImportProgress.value = { current: index + 1, total: selected.length, name: file.name }
     try {
       let mime = file.type || 'application/octet-stream'
       let type = detectFileType(file)
@@ -3131,7 +3609,6 @@ async function addAttachmentFiles(selected: File[]) {
           }
         }
         if (!readablePath) {
-          status.value = `正在解析 ${file.name}`
           const processed = await processFile(file, { maxTextLength: 20_000_000 })
           if (processed.status !== 'ready' || !processed.textContent || processed.truncated) {
             throw new Error(processed.truncated
@@ -3186,13 +3663,38 @@ async function addAttachmentFiles(selected: File[]) {
       }
       resolved.push(attachment)
     } catch (cause) {
-      failures.push(`${file.name}：${cause instanceof Error ? cause.message : String(cause)}`)
+      const reason = cause instanceof Error ? cause.message : String(cause)
+      failures.push(`${file.name}：${reason}`)
+      failureEntries.push({ id: crypto.randomUUID(), file, error: reason })
     }
   }
   const byPath = new Map(attachments.value.map(attachment => [attachment.resourcePath || attachment.id, attachment]))
-  for (const attachment of resolved) byPath.set(attachment.resourcePath || attachment.id, attachment)
-  attachments.value = [...byPath.values()]
+  const stillTargetingOriginalConversation = projectOwner.value === owner
+    && conversation.value?.transcript.id === conversationId
+  if (stillTargetingOriginalConversation) {
+    for (const attachment of resolved) byPath.set(attachment.resourcePath || attachment.id, attachment)
+    attachments.value = [...byPath.values()]
+    if (failureEntries.length) attachmentImportFailures.value = [...attachmentImportFailures.value, ...failureEntries]
+  } else {
+    for (const attachment of resolved) revokeAttachmentPreview(attachment)
+    contextNotice.value = '附件已保存到原项目，但当前已切换对话；请回到原对话后重新添加'
+  }
   if (failures.length) throw new Error(failures.join('；'))
+  } finally {
+    attachmentImportProgress.value = null
+  }
+}
+
+async function retryAttachmentImport(id: string) {
+  const failed = attachmentImportFailures.value.find(item => item.id === id)
+  if (!failed || attachmentImportsPending.value) return
+  attachmentImportFailures.value = attachmentImportFailures.value.filter(item => item.id !== id)
+  try { await addAttachmentFiles([failed.file]) }
+  catch (cause) { error.value = `附件重试失败：${cause instanceof Error ? cause.message : String(cause)}` }
+}
+
+function removeAttachmentImportFailure(id: string) {
+  attachmentImportFailures.value = attachmentImportFailures.value.filter(item => item.id !== id)
 }
 
 function mediaPlanKey(turnId: string, planIndex: number): string {
@@ -3685,7 +4187,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
     </aside>
     <button v-if="treeOpen" class="memory-tree-backdrop" aria-label="关闭文件树" @click="treeOpen = false"></button>
 
-    <main class="memory-main memory-chat-dock">
+    <main ref="memoryMainEl" class="memory-main memory-chat-dock">
       <div v-if="previewResource || creationOpen" class="memory-chat-dock-resizer" title="拖动调整对话宽度" @pointerdown.prevent="startChatDockResize" />
       <!-- 窄条只在有第三列（预览/创作面板）时才成立；没有第三列时主列必须能用完整宽度，否则会被不透明的窄条盖住 -->
       <div v-if="chatDockMode === 'compact' && (previewResource || creationOpen)" class="memory-chat-compact-bar">
@@ -3760,13 +4262,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       <section v-if="conversation" ref="messagesEl" class="memory-messages">
         <div v-if="!timelineTurns.length" class="memory-empty-state">开始一段对话</div>
         <div v-else class="memory-message-list">
-        <template v-for="turn in timelineTurns" :key="turn.id">
+        <template v-for="turn in timelineTurns" :key="timelineTurnKey(turn)">
         <article
           v-if="turnHasBody(turn)"
           class="memory-message"
+          :data-turn-id="turn.id"
           :class="[turn.role, { streaming: sending && turn.id === 'streaming-assistant' }]"
         >
           <span class="memory-role">{{ turn.role === 'user' ? '你' : '韭菜盒子' }}</span>
+          <div v-if="sending && turn.id === 'streaming-assistant'" class="memory-streaming-status" role="status">
+            <span class="memory-streaming-indicator" aria-hidden="true"></span>
+            {{ activeRun?.status || '正在生成' }}
+          </div>
           <div v-if="turn.role === 'user' && turnAttachments(turn).length" class="memory-message-attachments">
             <div v-for="attachment in turnAttachments(turn)" :key="attachment.id" class="memory-message-attachment" :class="attachment.kind">
               <img v-if="attachment.kind === 'image' && attachment.value" :src="attachment.value" :alt="attachment.name" />
@@ -3779,7 +4286,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             class="memory-message-text memory-markdown markdown-body"
             :data-file-source="conversation?.resource.path"
             :content="displayTurnContent(turn)"
-            :render-id="turn.id"
+            :render-id="messageRenderId(turn)"
             :streaming="sending && turn.id === 'streaming-assistant'"
             @click="handleMarkdownClick"
           />
@@ -3899,13 +4406,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               :render-id="`think-${turn.id}`"
             />
           </details>
-          <!--
-            官方 Chat：「fold eligible completed-turn process rows without hiding final answers」。
-            运行中或**本轮失败**时强制展开；跑完用 undefined 交回浏览器默认（折叠），不绑 false ——
-            否则每次重渲染都会把用户手动展开的状态抢回去。
-          -->
-          <details v-if="harnessStepsFor(turn.id)?.length" class="memory-process" :open="turnProcessOpen(turn.id) || undefined">
-            <summary>{{ harnessToolSteps(turn.id) }} 个步骤</summary>
+          <details v-if="harnessStepsFor(turn.id)?.length" class="memory-process" :open="processDisclosureOpen(turn.id)">
+            <summary @click="rememberProcessDisclosure(turn.id, $event)">{{ harnessProcessSummary(turn.id) }}</summary>
             <template v-for="step in harnessStepsFor(turn.id)" :key="step.id">
               <!-- 中途叙述：官方把 step < 答案步的正文归过程，不归答案。 -->
               <div v-if="step.kind === 'narration'" class="memory-process-narration">{{ step.narration }}</div>
@@ -3927,6 +4429,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 v-else
                 class="memory-process-step"
                 :class="step.state"
+                :style="processStepIndent(turn.id, step)"
               >
                 <JcIcon :name="step.state === 'done' ? 'check_circle' : step.state === 'failed' ? 'error' : 'sync'" :class="{ spinning: step.state === 'running' && isLiveTurn(turn.id) }" />
                 <span class="memory-process-label">{{ step.label }}</span>
@@ -3935,7 +4438,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 <small v-if="step.errorReason" class="memory-process-error">{{ step.errorReason }}</small>
                 <details v-if="step.resultText" class="memory-process-result">
                   <summary>查看结果</summary>
-                  <pre>{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
+                  <div class="memory-process-result-tools">
+                    <button type="button" @click="copyProcessResult(step.resultText!)">复制结果</button>
+                    <button type="button" :aria-pressed="processResultWraps.has(step.id)" @click="toggleProcessResultWrap(step.id)">{{ processResultWraps.has(step.id) ? '取消换行' : '自动换行' }}</button>
+                    <button v-if="step.readFile" type="button" @click="openReadResultFile(step.readFile)">{{ step.readFile.path }} · 第 {{ step.readFile.lineStart }}–{{ step.readFile.lineStart + Math.max(0, step.readFile.lineCount - 1) }} 行</button>
+                  </div>
+                  <pre :class="{ wrap: processResultWraps.has(step.id) }">{{ step.resultText }}{{ step.resultTruncated ? '\n…（已截断）' : '' }}</pre>
                 </details>
               </div>
             </template>
@@ -3953,6 +4461,22 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <span class="memory-process-label">思考中，用时{{ formatLiveDuration(runElapsed) }}</span>
             <span v-if="runStatus" class="memory-process-summary" :title="runStatus">{{ runStatus }}</span>
           </div>
+          <div v-else-if="isLiveTurn(turn.id)" class="memory-current-activity" role="status">
+            <JcIcon name="sync" class="spinning" />
+            <span>{{ liveProcessStep?.label || runStatus || '正在执行任务' }}</span>
+            <small v-if="liveProcessStep?.summary">{{ liveProcessStep.summary }}</small>
+          </div>
+          <details v-if="harnessUsageFor(turn.id)" class="memory-usage">
+            <summary>{{ usageContextLabel(harnessUsageFor(turn.id)!) }} · 最近一次请求</summary>
+            <dl>
+              <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.inputTokens) }}</dd></div>
+              <div><dt>缓存读取</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.cacheReadTokens) }}</dd></div>
+              <div><dt>缓存写入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.cacheWriteTokens) }}</dd></div>
+              <div><dt>输出</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.outputTokens) }}</dd></div>
+              <div><dt>思考</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.reasoningTokens) }}</dd></div>
+              <div><dt>本地模型窗口配置</dt><dd>{{ DEEPSEEK_HARNESS_CONTEXT_WINDOW.toLocaleString('zh-CN') }}</dd></div>
+            </dl>
+          </details>
           <!--
             官方 TurnErrorItem：红点 + `本轮运行失败` + 失败原因 + code。重试历史绝不吞掉它
             （官方 `conversation-nodes/turn-error.d.ts`），它和重试行是同一轮里的两件事。
@@ -3985,8 +4509,20 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         :container="messagesEl"
         :is-streaming="sending"
       />
+      <div v-if="conversationQuestionCount > 1" class="memory-round-nav" aria-label="对话轮次导航">
+        <button type="button" aria-label="上一条问题" title="上一条问题" @click="navigateQuestion(-1)"><JcIcon name="arrow_upward" /></button>
+        <span>{{ conversationQuestionCount }} 问</span>
+        <button type="button" aria-label="下一条问题" title="下一条问题" @click="navigateQuestion(1)"><JcIcon name="arrow_downward" /></button>
+      </div>
+      <button
+        v-if="memoryScrollNav?.showScrollToBottom"
+        class="memory-scroll-latest"
+        type="button"
+        :aria-label="memoryScrollNav?.hasNewContent ? '有新内容，回到最新消息' : '回到最新消息'"
+        @click="memoryScrollNav?.scrollToBottom()"
+      ><JcIcon name="arrow_downward" /><span>{{ memoryScrollNav?.hasNewContent ? '有新内容' : '回到最新' }}</span></button>
 
-      <footer v-if="conversation" class="memory-composer">
+      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer">
         <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
@@ -3996,6 +4532,17 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
             <button :title="`移除${tool.label}`" @click="disableTool(tool.id)">×</button>
+          </div>
+        </div>
+        <div v-if="attachmentImportProgress" class="memory-attachment-progress" role="status" aria-live="polite">
+          <JcIcon name="sync" class="spinning" />
+          <span>本地处理附件 {{ attachmentImportProgress.current }}/{{ attachmentImportProgress.total }} · {{ attachmentImportProgress.name }}</span>
+        </div>
+        <div v-if="attachmentImportFailures.length" class="memory-attachment-failures" aria-label="导入失败的附件">
+          <div v-for="failure in attachmentImportFailures" :key="failure.id" class="memory-attachment-failure">
+            <span><strong>{{ failure.file.name }}</strong><small>{{ failure.error }}</small></span>
+            <button type="button" :disabled="attachmentImportsPending > 0" @click="retryAttachmentImport(failure.id)">重试</button>
+            <button type="button" aria-label="移除失败附件" title="移除失败附件" @click="removeAttachmentImportFailure(failure.id)"><JcIcon name="close" /></button>
           </div>
         </div>
         <div v-if="persistentAttachments.length || attachments.length" class="memory-attachments">
@@ -4008,7 +4555,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button title="取消持续引用" @click="removePersistentAttachment(file.id)">×</button>
           </div>
           <div v-for="file in attachments" :key="file.id" class="memory-attachment-chip" :class="file.kind">
-            <img v-if="file.kind === 'image' && (file.previewUrl || file.value)" :src="file.previewUrl || file.value" :alt="file.name" />
+            <button v-if="file.kind === 'image' && (file.previewUrl || file.value)" type="button" class="memory-attachment-preview" :aria-label="`预览图片 ${file.name}`" @click="showAttachmentPreview(file)"><img :src="file.previewUrl || file.value" :alt="file.name" /></button>
             <video v-else-if="file.kind === 'video' && (file.previewUrl || file.value)" :src="file.previewUrl || file.value" muted playsinline preload="auto" />
             <JcIcon v-else :name="file.kind === 'video' ? 'movie' : file.kind === 'audio' ? 'music-note' : 'description'" />
             <span v-if="file.kind !== 'image' && file.kind !== 'video'" class="memory-attachment-copy">
@@ -4025,10 +4572,38 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button title="移除引用" @click="referencedFiles = referencedFiles.filter(item => item.name !== file.name)">×</button>
           </div>
         </div>
+        <div v-if="referencedSessions.length" class="memory-attachments memory-references" aria-label="引用的会话">
+          <div v-for="session in referencedSessions" :key="session.conversationId" class="memory-attachment-chip">
+            <JcIcon name="chat" />
+            <span class="memory-attachment-name" :title="session.title">{{ session.title }} · {{ session.turns.length }} 条</span>
+            <button type="button" :aria-label="`移除会话引用 ${session.title}`" title="移除会话引用" @click="referencedSessions = referencedSessions.filter(item => item.conversationId !== session.conversationId)">×</button>
+          </div>
+        </div>
         <div v-if="contextNotice" class="memory-context-notice" role="status">
           <span>{{ contextNotice }}</span>
           <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
         </div>
+        <section v-if="queueItems.length" class="memory-inbox-queue" aria-label="待处理消息队列">
+          <header><strong>待处理</strong><span>{{ queueItems.length }} 条</span></header>
+          <article v-for="item in queueItems" :key="item.id" class="memory-inbox-item">
+            <template v-if="queueEditId === item.id">
+              <textarea v-model="queueEditText" aria-label="编辑排队消息" rows="3" />
+              <div class="memory-inbox-actions">
+                <button type="button" :disabled="queueMutationItemId === item.id || !queueEditText.trim()" @click="mutateQueueItem(item, { kind: 'edit', text: queueEditText })">保存</button>
+                <button type="button" @click="cancelQueueEdit">取消</button>
+              </div>
+            </template>
+            <template v-else>
+              <p :title="item.text">{{ item.text || `附件 ${item.attachmentCount}` }}</p>
+              <small>{{ item.target === 'next-step' ? '当前轮' : '下一轮' }}<template v-if="item.attachmentCount"> · {{ item.attachmentCount }} 个媒体附件</template></small>
+              <div class="memory-inbox-actions">
+                <button v-if="item.textOnly" type="button" :disabled="Boolean(queueMutationItemId)" @click="startQueueEdit(item)">编辑</button>
+                <button type="button" :disabled="queueMutationItemId === item.id" @click="mutateQueueItem(item, { kind: 'remove' })">移除</button>
+                <button v-if="sending && item.target === 'next-turn'" type="button" :disabled="queueMutationItemId === item.id" @click="mutateQueueItem(item, { kind: 'steer' })">转向本轮</button>
+              </div>
+            </template>
+          </article>
+        </section>
         <div v-if="runStripVisible" class="memory-run-status" :class="{ error: Boolean(displayedError) }" aria-live="polite">
           <div class="memory-run-head">
             <JcIcon :name="displayedError ? 'error' : displayedStatus === '已完成' ? 'check_circle' : displayedStatus === '已停止' ? 'stop' : 'sync'" :class="{ spinning: sending && !displayedError }" />
@@ -4045,6 +4620,17 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           </div>
           <small v-if="displayedError">{{ displayedError }}</small>
         </div>
+        <div v-else-if="completedRunVisible" class="memory-run-complete" role="status" aria-live="polite">
+          <JcIcon name="check_circle" />
+          <span>已完成</span>
+          <time>{{ formatRunElapsed(runElapsed) }}</time>
+          <details v-if="activeRun?.usage" class="memory-run-complete-usage">
+            <summary>用量</summary>
+            <span>输入 {{ formatTokenCount(activeRun.usage.inputTokens) }}</span>
+            <span>输出 {{ formatTokenCount(activeRun.usage.outputTokens) }}</span>
+            <span>上下文窗口 {{ DEEPSEEK_HARNESS_CONTEXT_WINDOW.toLocaleString('zh-CN') }}</span>
+          </details>
+        </div>
         <ToolApprovalStrip
           v-if="pendingMemoryToolApproval"
           :message="pendingMemoryToolApproval.message"
@@ -4055,7 +4641,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           @once="settleMemoryToolApproval('once')"
           @always="settleMemoryToolApproval('always')"
         />
-        <div v-else-if="!runStripVisible && !sending && (displayedStatus || displayedError)" class="memory-status" :class="{ error: Boolean(displayedError) }">
+        <div v-else-if="!completedRunVisible && !runStripVisible && !sending && (displayedStatus || displayedError)" class="memory-status" :class="{ error: Boolean(displayedError) }">
           <span>{{ displayedError || displayedStatus }}</span>
         </div>
         <div
@@ -4076,7 +4662,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               @click="selectMention(item)"
               @pointermove="setMentionActive(mentionKey(item))"
             >
-              <JcIcon :name="item.type === 'tool' ? item.icon : item.type === 'skill' ? 'psychology' : item.resource.kind === 'media' ? 'image' : 'description'" />
+              <JcIcon :name="item.type === 'tool' || item.type === 'command' ? item.icon : item.type === 'skill' ? 'psychology' : item.type === 'session' ? 'chat' : item.resource.kind === 'media' ? 'image' : 'description'" />
               <span class="memory-mention-name">{{ item.display }}</span>
               <span class="memory-mention-kind">{{ item.type === 'tool' ? '工具' : item.type === 'skill' ? 'Skill' : item.description }}</span>
             </button>
@@ -4146,8 +4732,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               </button>
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
-            <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else class="send-button" :title="sendInFlight ? '正在落盘本轮内容…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send()"><JcIcon name="arrow-upward" /></button>
+            <button v-if="sending && (canQueueDraft || queueSubmitting)" class="send-button" :title="queueSubmitting ? '正在排入队列…' : '排入当前会话队列'" :disabled="queueSubmitting" @click="send()"><JcIcon name="playlist_add" /></button>
+            <button v-else-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
+            <button v-if="sending && (canQueueDraft || queueSubmitting)" type="button" class="memory-queue-stop" title="停止当前运行，保留队列" aria-label="停止当前运行，保留队列" @click="stop"><JcIcon name="stop" /></button>
+            <button v-else-if="!sending" class="send-button" :title="sendInFlight ? '正在落盘本轮内容…' : attachmentImportsPending ? '正在本地处理附件…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || attachmentImportsPending > 0 || attachmentImportFailures.length > 0 || !composerHasPayload" @click="send()"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
         <div
@@ -4376,6 +4964,23 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         </section>
       </div>
     </Teleport>
+    <Teleport to="body">
+      <div
+        v-if="attachmentPreview"
+        ref="attachmentPreviewDialog"
+        class="memory-image-lightbox"
+        role="dialog"
+        aria-modal="true"
+        :aria-label="`图片预览：${attachmentPreview.name}`"
+        tabindex="-1"
+        @click.self="closeAttachmentPreview"
+        @keydown.esc.stop.prevent="closeAttachmentPreview"
+      >
+        <button type="button" class="memory-image-lightbox-close" aria-label="关闭图片预览" title="关闭" @click="closeAttachmentPreview"><JcIcon name="close" /></button>
+        <img :src="attachmentPreview.source" :alt="attachmentPreview.name" />
+        <span>{{ attachmentPreview.name }}</span>
+      </div>
+    </Teleport>
     <div v-if="recordingScene" class="memory-scene-recorder" aria-hidden="true">
       <Scene3DEditor ref="recordingSceneEditor" :document="recordingScene" recording-only />
     </div>
@@ -4383,7 +4988,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 </template>
 
 <style scoped>
-.memory-workbench { --memory-header-height: 52px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--paper); color: var(--ink1); font-size: var(--font-base); }
+.memory-workbench { --memory-header-height: 52px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--jc-surface); color: var(--ink1); font-size: var(--font-base); }
 .memory-workbench.desktop-runtime { padding-top: 28px; box-sizing: border-box; }
 .memory-scene-recorder { position: fixed; top: 0; left: -10000px; width: 640px; height: 640px; pointer-events: none; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
@@ -4412,13 +5017,13 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
 .memory-workbench.desktop-runtime.creation-focused { padding-top: 28px; }
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
-.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
+.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--jc-border); background: var(--jc-surface); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
-.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
-.memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--jc-surface); }
+.memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--jc-border); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
 .memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
+.memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 8px; }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
 .memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }
 .memory-conversation-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -4452,9 +5057,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-messages::-webkit-scrollbar-track { border-radius: 999px; background: transparent; }
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .memory-messages::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--olive-dark) 78%, transparent); background-clip: content-box; }
+.memory-scroll-latest { position: absolute; right: 24px; bottom: var(--memory-composer-height, 180px); z-index: 8; display: flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid var(--jc-border); border-radius: 999px; background: var(--surface); color: var(--ink1); box-shadow: 0 3px 12px rgb(36 42 32 / 10%); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-scroll-latest:hover { border-color: color-mix(in srgb, var(--olive) 48%, var(--jc-border)); color: var(--olive); }
+.memory-scroll-latest .mso { font-size: 16px; }
 .memory-message-list { width: 100%; }
 .memory-message { margin-bottom: 24px; content-visibility: auto; }
-.memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border-radius: 8px; background: var(--surface); }
+.memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border: 1px solid var(--jc-border); border-radius: 10px; background: var(--surface-alt); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .memory-message-attachment { display: flex; width: min(220px, 100%); height: 48px; align-items: center; gap: 8px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); overflow: hidden; color: var(--ink3); }
@@ -4480,9 +5088,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-scene-composer button:disabled { cursor: default; opacity: .45; }
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
 .memory-message-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-.memory-message-copy { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-copy { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink2); cursor: pointer; }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-message-edit { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-edit { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink2); cursor: pointer; }
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-file-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-file-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
@@ -4509,8 +5117,12 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-scene-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .memory-scene-card small { color: var(--ink3); font-size: 11px; }
 .memory-scene-card em { flex: 0 0 auto; color: #398362; font-size: 12px; font-style: normal; }
-.memory-message.streaming { opacity: .85; }
-.memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
+.memory-streaming-status { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; color: var(--ink2); font-size: 12px; line-height: 1.4; }
+.memory-streaming-indicator { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--olive); animation: memory-streaming-pulse 1.4s ease-in-out infinite; }
+@keyframes memory-streaming-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .memory-streaming-indicator { animation: none; } }
+.memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--jc-border); border-radius: 12px; background: var(--paper); box-shadow: 0 8px 24px rgb(36 42 32 / 6%); transition: border-color var(--jc-transition-fast), box-shadow var(--jc-transition-fast); }
+.memory-composer:focus-within { border-color: color-mix(in srgb, var(--olive) 64%, var(--jc-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--olive) 9%, transparent), 0 8px 24px rgb(36 42 32 / 5%); }
 .memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 7px 10px 0; scrollbar-width: none; }
 .memory-selected-tools::-webkit-scrollbar { display: none; }
 .memory-selected-tools .memory-attachment-chip { flex: 0 0 auto; }
@@ -4586,15 +5198,22 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
    挂在用户气泡里（该轮的发起人），所以加一条分隔线把它和提问正文分开。 */
 /* 过程是独立一块，不在用户气泡里：与用户消息之间留常规间隔，与下一条消息也留常规间隔。 */
 .memory-turn-process { margin: 0 0 24px; padding: 0 2px; }
+.memory-current-activity { display: flex; align-items: center; gap: 7px; margin: 4px 0 6px; color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-current-activity > .mso { color: var(--olive); font-size: 15px; }
+.memory-current-activity small { min-width: 0; overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
 .memory-think { margin: 2px 0 6px; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-think > summary { display: flex; width: fit-content; align-items: center; gap: 5px; cursor: pointer; list-style: none; }
 .memory-think > summary::-webkit-details-marker { display: none; }
+.memory-think > summary::after { content: '›'; color: var(--ink3); font-size: 17px; line-height: 1; transition: transform var(--jc-transition-fast); }
+.memory-think[open] > summary::after { transform: rotate(90deg); }
 .memory-think > summary .mso { font-size: 15px; }
 .memory-think-body { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--ink2); }
 .memory-process { display: grid; gap: 3px; margin: 2px 0 6px; font-size: calc(var(--font-base) - 2px); }
 .memory-process-narration { color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.6; overflow-wrap: anywhere; }
 .memory-process > summary { display: flex; width: fit-content; align-items: center; gap: 5px; color: var(--ink3); cursor: pointer; list-style: none; }
 .memory-process > summary::-webkit-details-marker { display: none; }
+.memory-process > summary::before { content: '›'; color: var(--ink3); font-size: 18px; line-height: 1; transition: transform var(--jc-transition-fast); }
+.memory-process[open] > summary::before { transform: rotate(90deg); }
 .memory-process-step { display: grid; grid-template-columns: 17px auto minmax(0, 1fr) auto; align-items: center; gap: 5px; color: var(--ink3); }
 .memory-process-step .mso { font-size: 15px; }
 .memory-process-step.running { color: var(--ink1); }
@@ -4708,4 +5327,30 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-workbench.preview-open .memory-preview { inset: env(safe-area-inset-top, 0) 0 0; }
   .memory-workbench.creation-open .memory-creation { inset: env(safe-area-inset-top, 0) 0 0; height: auto; }
 }
+.memory-attachment-progress { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 4px 10px; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
+.memory-attachment-failures { display: grid; gap: 5px; padding: 6px 10px; }
+.memory-attachment-failure { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--danger) 5%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-attachment-failure > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.memory-attachment-failure strong, .memory-attachment-failure small { overflow-wrap: anywhere; }
+.memory-attachment-failure small { color: var(--ink3); }
+.memory-attachment-failure button, .memory-inbox-actions button { min-height: 28px; padding: 0 8px; border: 1px solid var(--jc-border); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: calc(var(--font-base) - 2px); }
+.memory-attachment-failure button:disabled, .memory-inbox-actions button:disabled { opacity: .45; cursor: default; }
+.memory-attachment-preview { display: grid; width: 46px; height: 46px; flex: 0 0 46px; padding: 0; place-items: center; overflow: hidden; border: 0; border-radius: 4px; background: transparent; cursor: zoom-in; }
+.memory-attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+.memory-inbox-queue { display: grid; max-height: 220px; gap: 6px; overflow: auto; padding: 8px 10px; border-top: 1px solid var(--jc-border); }
+.memory-inbox-queue > header { display: flex; align-items: center; gap: 8px; color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-inbox-queue > header span, .memory-inbox-item > small { color: var(--ink3); font-size: calc(var(--font-base) - 3px); }
+.memory-inbox-item { display: grid; gap: 5px; padding: 8px; border: 1px solid var(--jc-border); border-radius: 6px; background: var(--jc-surface); }
+.memory-inbox-item > p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink2); overflow-wrap: anywhere; font-size: calc(var(--font-base) - 1px); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.memory-inbox-item textarea { width: 100%; min-height: 64px; box-sizing: border-box; padding: 7px; border: 1px solid var(--jc-border); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; resize: vertical; }
+.memory-inbox-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.memory-inbox-actions button:hover:not(:disabled), .memory-attachment-failure button:hover:not(:disabled) { border-color: var(--olive); color: var(--olive); }
+.memory-queue-stop { display: grid; width: 30px; height: 30px; flex: 0 0 30px; padding: 0; place-items: center; border: 1px solid var(--jc-border); border-radius: 6px; background: var(--paper); color: var(--danger); cursor: pointer; }
+.memory-queue-stop .mso { font-size: 17px; }
+.memory-image-lightbox { position: fixed; z-index: 300; inset: 0; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 10px; padding: 48px 24px 20px; box-sizing: border-box; background: rgb(12 14 11 / 90%); color: white; outline: none; }
+.memory-image-lightbox img { max-width: min(92vw, 1400px); max-height: 82vh; object-fit: contain; }
+.memory-image-lightbox > span { max-width: 80vw; overflow: hidden; color: rgb(255 255 255 / 76%); text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.memory-image-lightbox-close { position: absolute; top: 14px; right: 18px; display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgb(255 255 255 / 30%); border-radius: 7px; background: rgb(255 255 255 / 10%); color: white; cursor: pointer; }
+.memory-image-lightbox-close .mso { font-size: 20px; }
+@media (prefers-reduced-motion: reduce) { .memory-attachment-progress .spinning { animation: none; } }
 </style>

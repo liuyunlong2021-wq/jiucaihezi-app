@@ -21,6 +21,7 @@ const query = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const selectedIndex = ref(0)
 const conversations = ref<MemoryConversation[]>([])
+let returnFocusElement: HTMLElement | null = null
 const projectOwner = computed(() => isTauriRuntime()
   ? projectStore.projectDir.value
   : projectStore.webProjectId.value)
@@ -61,6 +62,7 @@ const groupedResults = computed(() => {
 const flatResults = computed(() => groupedResults.value.flatMap(g => g.items))
 
 async function open() {
+  returnFocusElement = document.activeElement instanceof HTMLElement ? document.activeElement : null
   visible.value = true
   query.value = ''
   selectedIndex.value = 0
@@ -77,6 +79,11 @@ async function open() {
 function close() {
   visible.value = false
   query.value = ''
+  const target = returnFocusElement
+  returnFocusElement = null
+  nextTick(() => {
+    if (target?.isConnected) target.focus()
+  })
 }
 
 async function selectItem(item: SearchResult) {
@@ -136,7 +143,7 @@ onBeforeUnmount(() => {
 <template>
   <Teleport to="body">
     <div v-if="visible" class="gs-overlay" @click="onOverlayClick">
-      <div class="gs-panel">
+      <div class="gs-panel" role="dialog" aria-modal="true" aria-label="搜索会话">
         <div class="gs-input-wrap">
           <JcIcon name="search" style="font-size:16px;color:var(--ink3)" />
           <input
@@ -144,6 +151,10 @@ onBeforeUnmount(() => {
             v-model="query"
             class="gs-input"
             placeholder="搜索会话..."
+            role="searchbox"
+            aria-label="搜索会话"
+            aria-controls="global-search-results"
+            :aria-activedescendant="flatResults.length ? `global-search-result-${selectedIndex}` : undefined"
             @keydown="onKeydown"
           />
           <kbd class="gs-kbd">esc</kbd>
@@ -153,14 +164,17 @@ onBeforeUnmount(() => {
           未找到匹配结果
         </div>
 
-        <div v-else class="gs-results">
+        <div v-else id="global-search-results" class="gs-results" role="listbox" aria-label="搜索结果">
           <template v-for="group in groupedResults" :key="group.label">
             <div class="gs-group-label">{{ group.label }}</div>
             <div
               v-for="(item, idx) in group.items"
               :key="item.id"
+              :id="`global-search-result-${idx}`"
               class="gs-item"
               :class="{ selected: flatResults.indexOf(item) === selectedIndex }"
+              role="option"
+              :aria-selected="flatResults.indexOf(item) === selectedIndex"
               @click="selectItem(item)"
               @mouseenter="selectedIndex = flatResults.indexOf(item)"
             >
@@ -185,18 +199,19 @@ onBeforeUnmount(() => {
 <style scoped>
 .gs-overlay {
   position: fixed; inset: 0; z-index: 10000;
-  background: rgba(0,0,0,.4);
+  background: color-mix(in srgb, var(--jc-surface-dim) 74%, transparent);
   display: flex; justify-content: center;
-  padding-top: 15vh;
+  padding: 15vh 14px 20px;
   animation: gs-fade-in .15s ease;
 }
 @keyframes gs-fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 .gs-panel {
-  width: 520px; max-height: 60vh;
+  width: min(520px, 100%); max-height: 60vh;
+  border: 1px solid var(--jc-border);
   border-radius: 12px;
   background: var(--paper);
-  box-shadow: 0 16px 48px rgba(0,0,0,.2);
+  box-shadow: 0 16px 48px var(--jc-shadow-color);
   display: flex; flex-direction: column;
   overflow: hidden;
   align-self: flex-start;
@@ -228,10 +243,11 @@ onBeforeUnmount(() => {
 }
 .gs-item {
   display: flex; align-items: center; gap: 10px;
-  padding: 8px 16px; cursor: pointer;
-  transition: background .1s;
+  min-height: 40px; padding: 8px 16px; cursor: pointer;
+  transition: background var(--jc-transition-fast), color var(--jc-transition-fast);
 }
-.gs-item:hover, .gs-item.selected { background: rgba(107,142,35,.08); }
+.gs-item:hover, .gs-item.selected { background: color-mix(in srgb, var(--jc-primary) 9%, transparent); }
+.gs-item:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: -2px; }
 .gs-item-icon { color: var(--olive); flex-shrink: 0; }
 .gs-item-text { display: flex; flex-direction: column; min-width: 0; }
 .gs-item-title {

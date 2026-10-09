@@ -94,6 +94,12 @@ if (!client.includes(hiddenRuntimeSpawn)) {
 const serverPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-jsonrpc-server', 'lib', 'index.js')
 let server = readFileSync(serverPath, 'utf8')
 let changed = false
+const baseLlmImport = 'import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";\n'
+const queueLlmImport = 'import { ReasoningEffortId, createUserMessage, freezeMessage } from "@deepseek-ai/dsh-llm";\n'
+if (!server.includes('freezeMessage') && server.includes(baseLlmImport)) {
+  server = server.replace(baseLlmImport, queueLlmImport)
+  changed = true
+}
 const streamBridge = '\t\tthis.disposers.push(ctx.on("agent/assistant-stream", ({ agent, frame }) => {\n\t\t\tthis.transport.notify("session.assistant-stream", { sessionId: String(agent.session.id), frame });\n\t\t}, { global: true }));\n'
 const oldStreamBridge = streamBridge.replace(', { global: true }', '')
 if (!server.includes(streamBridge)) {
@@ -192,6 +198,96 @@ if (!server.includes(permissionCase)) {
   const permissionAnchor = '\t\t\tcase "shutdown": return this.shutdown();'
   if (!server.includes(permissionAnchor)) throw new Error('Unsupported DeepSeek Harness request server layout')
   server = server.replace(permissionAnchor, `${permissionAnchor}\n${permissionCase}`)
+  changed = true
+}
+const updateQueueCase = '\t\t\tcase "session/update-queue": return this.updateQueue(params);'
+if (!server.includes(updateQueueCase)) {
+  const permissionAnchor = '\t\t\tcase "session/permission": return this.permission(params);'
+  if (!server.includes(permissionAnchor)) throw new Error('Unsupported DeepSeek Harness request server layout')
+  server = server.replace(permissionAnchor, `${permissionAnchor}\n${updateQueueCase}`)
+  changed = true
+}
+const cancelSessionCase = '\t\t\tcase "session/cancel": return this.cancelSession(params);'
+if (!server.includes(cancelSessionCase)) {
+  if (!server.includes(updateQueueCase)) throw new Error('Unsupported DeepSeek Harness request server layout')
+  server = server.replace(updateQueueCase, `${updateQueueCase}\n${cancelSessionCase}`)
+  changed = true
+}
+const cancelSessionMethod = `\tasync cancelSession(params) {
+\t\tconst rec = this.sessions.get(params.sessionId);
+\t\tif (!rec) throw new Error("session is not running");
+\t\tthis.assertLiveAgent(rec, params.sessionId);
+\t\tif (this.stoppingSessions?.has(params.sessionId)) return { accepted: true };
+\t\tif (this.stoppingSessions === void 0) this.stoppingSessions = new Set();
+\t\tthis.stoppingSessions.add(params.sessionId);
+\t\tconst agent = rec.handle.agent;
+\t\tconst nextStep = [...agent.inbox.nextStep];
+\t\tconst nextTurn = [...agent.inbox.nextTurn];
+\t\ttry {
+\t\t\tagent.inbox.clear();
+\t\t\tagent.cancel({ kind: "user" }, { keepInbox: true });
+\t\t\tawait agent.whenIdle();
+\t\t\tif (nextStep.length) agent.inbox.splice("next-step", 0, 0, nextStep);
+\t\t\tif (nextTurn.length) agent.inbox.splice("next-turn", 0, 0, nextTurn);
+\t\t\treturn { accepted: true };
+\t\t} finally {
+\t\t\tthis.stoppingSessions.delete(params.sessionId);
+\t\t}
+\t}
+`
+let cancelSessionStart = server.indexOf('\tasync cancelSession(params) {')
+if (cancelSessionStart < 0) cancelSessionStart = server.indexOf('\tcancelSession(params) {')
+const cancelSessionTail = cancelSessionStart < 0 ? -1 : server.slice(cancelSessionStart).search(/\tasync (?:updateQueue|permission|approval)\(params\) \{/)
+const cancelSessionEnd = cancelSessionStart + cancelSessionTail
+if (cancelSessionStart < 0) {
+  const methodAnchor = '\tasync updateQueue(params) {'
+  if (!server.includes(methodAnchor)) throw new Error('Unsupported DeepSeek Harness queue method layout')
+  server = server.replace(methodAnchor, cancelSessionMethod + methodAnchor)
+  changed = true
+} else if (cancelSessionTail < 0) {
+  throw new Error('Unsupported DeepSeek Harness cancel method layout')
+} else if (server.slice(cancelSessionStart, cancelSessionEnd) !== cancelSessionMethod) {
+  server = server.slice(0, cancelSessionStart) + cancelSessionMethod + server.slice(cancelSessionEnd)
+  changed = true
+}
+const updateQueueMethod = `\tasync updateQueue(params) {
+\t\tif (!this.initialized) throw new Error("SDK server is not initialized");
+\t\tconst rec = await this.getOrCreateSession(params.sessionId);
+\t\tthis.assertLiveAgent(rec, params.sessionId);
+\t\tif (this.stoppingSessions?.has(params.sessionId)) throw new Error("session is stopping");
+\t\tconst agent = rec.handle.agent;
+\t\tconst nextTurn = agent.inbox.nextTurn.find((message) => message.id === params.itemId);
+\t\tconst nextStep = agent.inbox.nextStep.find((message) => message.id === params.itemId);
+\t\tconst located = nextTurn === void 0 ? nextStep === void 0 ? void 0 : { target: "next-step", message: nextStep } : { target: "next-turn", message: nextTurn };
+\t\tif (located === void 0) throw new Error("queued item is no longer pending");
+\t\tconst { target, message } = located;
+\t\tconst action = params.action;
+\t\tif (action?.kind === "edit") {
+\t\t\tif (!Array.isArray(action.content) || action.content.some((block) => block?.type !== "text" || typeof block.text !== "string")) throw new Error("queue edits accept text content only");
+\t\t\tif (!action.content.some((block) => block.text.trim())) throw new Error("queue edit content must include non-whitespace text");
+\t\t\tif (!agent.inbox.replace(params.itemId, freezeMessage({ ...message, content: [...action.content] }))) throw new Error("queued item is no longer pending");
+\t\t} else if (action?.kind === "remove") {
+\t\t\tif (!agent.inbox.remove(params.itemId)) throw new Error("queued item is no longer pending");
+\t\t} else if (action?.kind === "steer") {
+\t\t\tif (target !== "next-turn" || agent.status !== "running") throw new Error("current turn no longer accepts steering");
+\t\t\tif (!agent.inbox.remove(params.itemId)) throw new Error("queued item is no longer pending");
+\t\t\tagent.steer(message);
+\t\t} else throw new Error("unknown queue action");
+\t\treturn { accepted: true };
+\t}
+`
+const updateQueueStart = server.indexOf('\tasync updateQueue(params) {')
+const updateQueueTail = updateQueueStart < 0 ? -1 : server.slice(updateQueueStart).search(/\tasync (?:permission|approval)\(params\) \{/)
+const updateQueueEnd = updateQueueStart + updateQueueTail
+if (updateQueueStart < 0) {
+  const methodAnchor = '\tasync permission(params) {'
+  if (!server.includes(methodAnchor)) throw new Error('Unsupported DeepSeek Harness session server layout')
+  server = server.replace(methodAnchor, updateQueueMethod + methodAnchor)
+  changed = true
+} else if (updateQueueTail < 0) {
+  throw new Error('Unsupported DeepSeek Harness queue method layout')
+} else if (server.slice(updateQueueStart, updateQueueEnd) !== updateQueueMethod) {
+  server = server.slice(0, updateQueueStart) + updateQueueMethod + server.slice(updateQueueEnd)
   changed = true
 }
 const permissionMethod = `\tasync permission(params) {
@@ -320,6 +416,13 @@ if (!server.includes('async applyPinnedSkillScope(rec, content) {')) {
       '\t\tawait this.applyPinnedSkillScope(rec, content);\n\t\tconst message = createUserMessage({',
     ))
     .replace(liveAgent, `${pinnedSkillMethod}${liveAgent}`)
+  changed = true
+}
+const promptStopGuard = '\t\tif (this.stoppingSessions?.has(params.sessionId)) throw new Error("session is stopping");\n\t\trec.handle.agent.followup(message);'
+if (!server.includes(promptStopGuard)) {
+  const followupAnchor = '\t\trec.handle.agent.followup(message);'
+  if (!server.includes(followupAnchor)) throw new Error('Unsupported DeepSeek Harness prompt layout')
+  server = server.replace(followupAnchor, promptStopGuard)
   changed = true
 }
 

@@ -2,7 +2,18 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { isLocalLoopbackUrl, isLocalOllamaUrl, normalizeRustHttpRequest, serializeRustHttpBody, shouldUseRustHttpBridge } from '../httpClient'
+import { createRustHttpResponse, isLocalLoopbackUrl, isLocalOllamaUrl, normalizeRustHttpRequest, serializeRustHttpBody, shouldUseRustHttpBridge } from '../httpClient'
+
+test('constructs bodyless responses for no-content HTTP statuses', async () => {
+  for (const status of [204, 205, 304]) {
+    const response = createRustHttpResponse({ status, headers: {}, body: '', body_base64: undefined })
+    assert.equal(response.status, status)
+    assert.equal(response.body, null)
+  }
+
+  const response = createRustHttpResponse({ status: 200, headers: {}, body: 'ok', body_base64: undefined })
+  assert.equal(await response.text(), 'ok')
+})
 
 test('detects local loopback urls', () => {
   assert.equal(isLocalLoopbackUrl('http://127.0.0.1:17880/v1/chat/completions'), true)

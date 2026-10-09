@@ -109,7 +109,10 @@ fn is_local_comfy_upload_url(url: &str) -> bool {
 fn is_newapi_passthrough_path(url: &str) -> bool {
     tauri::Url::parse(url)
         .ok()
-        .map(|parsed| parsed.path().starts_with("/v1/"))
+        .map(|parsed| {
+            parsed.path().starts_with("/v1/")
+                || parsed.path() == "/api/creations/upload-url"
+        })
         .unwrap_or(false)
 }
 
@@ -770,6 +773,30 @@ pub async fn http_request_stream(
 mod tests {
     use super::*;
     use std::io::{Read, Write};
+
+    #[test]
+    fn oss_upload_authorization_bypasses_cloudflare_but_legacy_upload_does_not() {
+        let make_request = |path: &str, headers: Option<HashMap<String, String>>| HttpRequest {
+            url: format!("https://api.jiucaihezi.studio{path}"),
+            method: Some("POST".into()),
+            headers,
+            body: None,
+            body_base64: None,
+            timeout_secs: None,
+        };
+        assert!(should_direct_unified_api_to_newapi(&make_request(
+            "/api/creations/upload-url",
+            Some(HashMap::from([("Authorization".into(), "Bearer test".into())])),
+        )));
+        assert!(!should_direct_unified_api_to_newapi(&make_request(
+            "/api/creations/uploads",
+            Some(HashMap::from([("Authorization".into(), "Bearer test".into())])),
+        )));
+        assert!(!should_direct_unified_api_to_newapi(&make_request(
+            "/api/creations/upload-url",
+            Some(HashMap::from([("X-JC-Session".into(), "browser-session".into())])),
+        )));
+    }
 
     #[tokio::test]
     async fn native_http_preserves_multipart_upload_bytes() {

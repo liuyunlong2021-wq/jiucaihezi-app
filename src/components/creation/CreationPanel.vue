@@ -5092,7 +5092,7 @@ const canSend = computed(
   box-sizing: border-box;
   overflow: hidden;
   position: relative;
-  background: var(--surface);
+  background: var(--jc-surface);
 }
 
 .cp-toolbar {
@@ -5102,7 +5102,7 @@ const canSend = computed(
   align-items: center;
   gap: 6px;
   padding: 0 10px 0 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--jc-border);
   flex-shrink: 0;
 }
 
@@ -6282,7 +6282,7 @@ const canSend = computed(
   background: var(--olive);
   color: #fff;
   pointer-events: auto;
-  animation: gcGlow 2.2s ease-in-out infinite;
+  animation: none;
 }
 .cp-send-btn.generating {
   background: var(--olive-dark);
@@ -6290,17 +6290,8 @@ const canSend = computed(
   pointer-events: auto;
   cursor: pointer;
 }
-@keyframes gcGlow {
-  0%,
-  100% {
-    box-shadow: 0 0 10px rgba(107, 142, 35, 0.15);
-  }
-  50% {
-    box-shadow: 0 0 22px rgba(107, 142, 35, 0.4);
-  }
-}
 .cp-send-btn:hover {
-  transform: scale(1.08);
+  transform: scale(1.04);
 }
 .cp-send-btn .mso {
   font-size: 18px;

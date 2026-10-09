@@ -22,6 +22,8 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
+
 html, body, #app {
   height: 100%;
   background: var(--bg);
@@ -51,10 +53,11 @@ html, body, #app {
   bottom: 20px;
   left: 50%;
   transform: translateX(-50%);
-  background: #2c2a24;
-  color: #fff;
-  padding: 8px 20px;
-  border-radius: 20px;
+  background: var(--jc-surface-container-highest);
+  color: var(--jc-text-primary);
+  padding: 8px 14px;
+  border: 1px solid var(--jc-border);
+  border-radius: 8px;
   font-size: 13px;
   z-index: 9999;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
@@ -78,5 +81,14 @@ mark { background: rgba(255, 213, 79, 0.45); border-radius: 3px; padding: 0 2px;
 @media (max-width: 760px) {
   input:not([type="checkbox"]):not([type="radio"]), textarea, select, [contenteditable="true"] {
     font-size: max(16px, var(--font-base, 14px)) !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
   }
 }
