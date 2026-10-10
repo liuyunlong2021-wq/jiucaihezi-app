@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, symlinkSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /**
@@ -25,7 +25,11 @@ export const profilePluginPackages = [
 
 /** 运行时里那份包的绝对路径（本模块与 `runner.mjs` 同在 harness 根目录）。 */
 export function runtimePluginPath(plugin) {
-  return fileURLToPath(new URL(`./node_modules/@deepseek-ai/${plugin}`, import.meta.url))
+  if (plugin === '@jiucaihezi/dsh-tool-creation') {
+    return fileURLToPath(new URL('./plugins/creation-tools/', import.meta.url))
+  }
+  const packageName = plugin.startsWith('@') ? plugin : `@deepseek-ai/${plugin}`
+  return fileURLToPath(new URL(`./node_modules/${packageName}`, import.meta.url))
 }
 
 /** 官方启动器给 profile 用的目录。 */
@@ -74,17 +78,19 @@ export function ensureProfilePluginLinks(dshHome, {
     }
     if (!existsSync(directory)) return { state: 'skipped', reason: 'profile-missing' }
   }
-  const scopeDirectory = join(directory, 'node_modules', '@deepseek-ai')
+  const modulesDirectory = join(directory, 'node_modules')
   const linked = []
   for (const plugin of packages) {
     const target = runtimeRoot === undefined
       ? runtimePluginPath(plugin)
-      : join(runtimeRoot, '@deepseek-ai', plugin)
+      : plugin.startsWith('@')
+        ? join(runtimeRoot, plugin)
+        : join(runtimeRoot, '@deepseek-ai', plugin)
     if (!existsSync(target)) continue
-    const link = join(scopeDirectory, plugin)
+    const link = join(modulesDirectory, plugin.startsWith('@') ? plugin : `@deepseek-ai/${plugin}`)
     if (existsSync(link)) continue
     try {
-      mkdirSync(scopeDirectory, { recursive: true })
+      mkdirSync(dirname(link), { recursive: true })
       symlinkSync(target, link, 'junction')
       linked.push(plugin)
     } catch {

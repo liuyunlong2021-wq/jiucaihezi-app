@@ -219,6 +219,18 @@ pub fn clear_gateway_session_token() -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn get_comfy_service_credential() -> Result<Option<String>, String> {
+    get_entry_value(remote_bridge_entry("comfy-service-credential")?)
+}
+
+#[tauri::command]
+pub fn set_comfy_service_credential(value: String) -> Result<(), String> {
+    set_entry_value(remote_bridge_entry("comfy-service-credential")?, value, || {
+        clear_entry_value(remote_bridge_entry("comfy-service-credential")?)
+    })
+}
+
+#[tauri::command]
 pub fn get_comfy_workflow_api_key() -> Result<Option<String>, String> {
     get_entry_value(comfy_workflow_entry()?)
 }

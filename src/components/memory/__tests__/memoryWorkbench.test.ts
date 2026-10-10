@@ -118,7 +118,7 @@ test('Skill launcher loads Skills without project searches; typed @ retains file
   assert.ok(items.some(item => item.id === 'mcp__github'))
   assert.equal(fixture.calls.search, 1)
   await fixture.load('')
-  assert.equal(fixture.calls.list, 1)
+  assert.equal(fixture.calls.list, 0)
 })
 
 test('switching to MCP and closing drops a late comprehensive candidate request', async () => {
@@ -391,7 +391,7 @@ test('memory right chat dock separates preview layout and collapses to a compact
   assert.match(workbench, /class="memory-new-conversation-icon"/)
   assert.match(workbench, /class="memory-model-icon"/)
   assert.doesNotMatch(workbench, /memory-mobile-creation/)
-  assert.equal(workbench.match(/title="创作面板"/g)?.length, 1)
+  assert.equal(workbench.match(/title="创作面板"/g)?.length, 2)
   assert.match(workbench, /\.memory-chat-dock-resizer::after/)
   assert.match(workbench, /\.memory-document \{[^}]*container-type: inline-size;/)
   assert.match(markdown, /@container \(max-width: 700px\)/)
@@ -402,6 +402,22 @@ test('memory right chat dock separates preview layout and collapses to a compact
   )
   assert.match(markdown, /\.outline-collapsed \.memory-document-outline\{position:absolute;/)
   assert.match(markdown, /<JcIcon v-else name="view-list" \/>/)
+})
+
+test('窄对话 Dock 保留模型与对话名称，创作与 Skill 入口常驻', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+
+  assert.doesNotMatch(
+    workbench,
+    /chat-dock-narrow \.memory-conversation-trigger > span, \.memory-workbench\.chat-dock-narrow \.memory-model-trigger > span/,
+  )
+  assert.match(workbench, /\.memory-workbench\.chat-dock-narrow \.memory-model-picker \{[^}]*min-width: 0; flex: 1 1 120px/)
+  assert.match(workbench, /'chat-dock-minimal': viewportWidth >= 940[\s\S]*chatDockWidth < 360/)
+  assert.match(workbench, /class="memory-manju-button"[^>]*@click="toggleManjuProduction\(\)"/)
+  assert.match(workbench, /class="memory-novel-button"[^>]*@click="toggleNovelProduction\(\)"/)
+  assert.match(workbench, /data-command-id="skill"[^>]*@click="insertCommand\(skillCommand\)"/)
+  assert.doesNotMatch(workbench, /quickCommandMenu/)
+  assert.doesNotMatch(workbench, /chat-dock-narrow \.memory-command-strip > button\[data-command-id\]/)
 })
 
 test('skill edit requests select Skill Creator and prefill the Skill ID and path', () => {
@@ -585,7 +601,7 @@ test('Harness conversations open immediately without creating a Raw memory space
   assert.match(workbench, /createHarnessConversationCatalogEntry/)
   assert.doesNotMatch(workbench, /createMemorySpace|initializeMemoryProject|createMemoryConversation/)
   assert.doesNotMatch(workbench, /新建记忆空间|memoryReady/)
-  assert.match(workbench, /<span>新建对话<\/span>/)
+  assert.match(workbench, /class="new-conversation-button"[\s\S]*aria-label="新建对话"/)
   assert.match(workbench, /useHarness[\s\S]*deepSeekSessionTurns/)
 })
 
@@ -679,9 +695,9 @@ test('memory opens the latest conversation and keeps message actions at the bott
   assert.match(workbench, /for \(const lease of conversationPreviewLeases\.values\(\)\) lease\.release\(\)/)
 })
 
-test('memory composer starts at a three-line input height', () => {
+test('memory composer keeps a shared header, text area and internal action row', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /\.memory-input-area \{[^}]*min-height: 76px;/)
+  assert.match(workbench, /\.memory-input-area \{[^}]*min-height: 100px;/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
@@ -775,7 +791,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
 
   assert.doesNotMatch(workbench, /executionMode|ConversationMode/)
   assert.doesNotMatch(workbench, /memory-mode-segment|>快速</)
-  assert.match(workbench, /const toolCommands = \[/)
+  assert.match(workbench, /const skillCommand = \{/)
   for (const label of ['@Skill', '@排版', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
   // 权限开关**不带 `@`**：旁边那五个是「启用某能力」，它不是。
@@ -942,7 +958,7 @@ test('memory composer does not expose removed Jina web tools', () => {
 test('memory topbar uses a grouped model popover and an adaptive new conversation action', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /class="new-conversation-button"[\s\S]*<span>新建对话<\/span>/)
+  assert.match(workbench, /class="new-conversation-button"[\s\S]*title="新建对话"[\s\S]*aria-label="新建对话"/)
   assert.match(
     workbench,
     /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/,
@@ -1313,7 +1329,7 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   )
   assert.match(
     workbench,
-    /\.memory-composer \{ min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/,
+    /\.memory-composer \{ position: relative;[^}]*min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/,
   )
   assert.match(
     workbench,
@@ -2170,4 +2186,14 @@ test('stopped and failed runs retain visible output while cancellation reads off
   assert.doesNotMatch(liveAnchor, /phase === 'running'/)
   assert.match(workbench, /if \(roundPersisted \|\| run\.officialHistoryReady\) run\.userTurn = null/)
   assert.match(workbench, /const aborted = run\.controller\.signal\.aborted/)
+})
+
+
+test('answer metadata lives with output actions and selected capabilities sit on the composer edge', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const composerStart = workbench.indexOf('<footer v-if="conversation"')
+  assert.ok(workbench.indexOf('class="memory-run-complete"') < composerStart)
+  assert.ok(workbench.indexOf('class="memory-usage memory-answer-usage"') < composerStart)
+  assert.match(workbench, /class="memory-composer-header"/)
+  assert.match(workbench, /\.memory-composer-header \{ position: absolute;[^}]*bottom: calc\(100% \+ 1px\)/)
 })

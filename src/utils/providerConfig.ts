@@ -38,8 +38,16 @@ export function getCustomProviders(store: KeyValueStore = getStorage()): CustomP
 
 /**
  * 自定义 OpenAI 兼容端点的地址校验。
- * 允许本机回环 http 与远程 https，并拒绝把凭据/查询参数写进地址，避免密钥跟着 URL 外泄。
+ * 允许本机与局域网 http、远程 https，并拒绝把凭据/查询参数写进地址，避免密钥跟着 URL 外泄。
  */
+export function isLocalNetworkHost(host: string): boolean {
+  if (['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) return true
+  const parts = host.split('.').map(Number)
+  return parts.length === 4 && parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
+    && (parts[0] === 10 || (parts[0] === 192 && parts[1] === 168)
+      || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || parts[0] === 127)
+}
+
 export function normalizeCustomProviderApiBase(value: string): string {
   const raw = String(value || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '')
   let url: URL
@@ -52,8 +60,8 @@ export function normalizeCustomProviderApiBase(value: string): string {
   if (url.username || url.password || url.search || url.hash) {
     throw new Error('端点地址不能包含账号、密码、查询参数或片段')
   }
-  if (url.protocol === 'http:' && !['127.0.0.1', 'localhost', '::1', '[::1]'].includes(url.hostname)) {
-    throw new Error('非本机端点必须使用 https')
+  if (url.protocol === 'http:' && !isLocalNetworkHost(url.hostname)) {
+    throw new Error('公网服务必须使用 https')
   }
   return url.pathname === '/' ? url.origin : url.origin + url.pathname
 }

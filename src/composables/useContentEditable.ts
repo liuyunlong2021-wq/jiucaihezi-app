@@ -43,13 +43,38 @@ export function createPill(part: ContentPart): HTMLSpanElement {
 /** 获取光标在 contenteditable 中的字符偏移 */
 export function getCursorPosition(editor: HTMLElement): number {
   const sel = window.getSelection()
-  if (!sel || sel.rangeCount === 0) return 0
+  const endOfText = () => getPlainText(editor).length
+  if (!sel || sel.rangeCount === 0) return endOfText()
 
   const range = sel.getRangeAt(0)
-  const preRange = range.cloneRange()
-  preRange.selectNodeContents(editor)
-  preRange.setEnd(range.endContainer, range.endOffset)
-  return preRange.toString().length
+  if (range.endContainer !== editor && !editor.contains(range.endContainer)) return endOfText()
+
+  // Match getPlainText's block/newline normalization. Range.toString() omits implicit
+  // block separators, so its offset drifts from input.value in multiline contenteditable text.
+  const path: number[] = []
+  for (let node: Node = range.endContainer; node !== editor;) {
+    const parent = node.parentNode
+    if (!parent) return endOfText()
+    const index = Array.prototype.indexOf.call(parent.childNodes, node) as number
+    if (index < 0) return endOfText()
+    path.unshift(index)
+    node = parent
+  }
+  const clone = editor.cloneNode(true) as HTMLElement
+  let markerParent: Node = clone
+  for (const index of path) {
+    const child = markerParent.childNodes[index]
+    if (!child) return endOfText()
+    markerParent = child
+  }
+  let markerText = '\uE000'
+  while (editor.textContent?.includes(markerText)) markerText += '\uE000'
+  const marker = document.createTextNode(markerText)
+  const markerRange = document.createRange()
+  markerRange.setStart(markerParent, range.endOffset)
+  markerRange.collapse(true)
+  markerRange.insertNode(marker)
+  return getPlainText(clone).indexOf(markerText)
 }
 
 /** 设置 range 的 start/end 边缘 */

@@ -713,6 +713,21 @@ const DEEPSEEK_TOOL_LABELS: Record<string, string> = {
   web_fetch: '抓取网页',
   workflow: '运行工作流',
   exit_plan_mode: '退出计划模式',
+  get_creation_context: '读取创作上下文',
+  list_creation_models: '读取媒体模型',
+  get_creation_task: '查询媒体任务',
+  list_creation_history: '读取创作历史',
+  submit_creation_task: '提交媒体生成',
+  cancel_creation_task: '取消媒体任务',
+  retry_media_persistence: '重新保存媒体结果',
+  add_creation_result_to_canvas: '添加结果到画布',
+  export_markdown_png: '导出长图',
+  create_document: '创建文档',
+  create_html: '创建网页',
+  export_markdown_slides: '创建幻灯片',
+  create_3d_scene: '创建 3D 场景',
+  edit_3d_scene: '编辑 3D 场景',
+  export_3d_scene_video: '导出 3D 视频',
 }
 
 function deepSeekToolLabel(name: string): string {
@@ -1249,12 +1264,11 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) throw new Error(`MCP 服务器 ID 不符合 Harness 命名规则: ${id}`)
   }
   const localCapabilities = [input.mediaSelected && 'media', input.scene3dSelected && '3d'].filter(Boolean) as string[]
-  // 创作服务器在所有创作芯片下都挂：@排版/@3D 同样需要「把已生成的结果放进画布」和
-  // 创作上下文查询。只有 @影音 允许那个会花钱的 submit_creation_task——以前只有 @影音
-  // 挂它，于是只开 @排版 时 add_creation_result_to_canvas 成了 unknown tool，模型只
-  // 好自己找 CLI 硬做（curl 60 秒超时），最后交出一份对话复盘当回答。
+  // App 自己的创作工具由随包原生 Harness 插件注册，通过本机桥接调用现有 Store/executor。
+  // `@影音` 的付费提交只在该芯片选中时注册；排版/3D 只拿免费上下文和对应工具。
   const needsCreation = Boolean(input.avSelected || input.mediaSelected || input.scene3dSelected)
-  const needsMcp = needsCreation || mcpServerIds.length > 0
+  const nativeToolsEnabled = needsCreation || localCapabilities.length > 0
+  const needsMcp = mcpServerIds.length > 0
   const mcpLaunch = needsMcp
     ? await invoke<{ command: string; args: string[]; cwd?: string }>('resolve_creation_mcp')
     : null
@@ -1284,19 +1298,20 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     '',
   ]
   const mcpPatch = insertPatch([
-    ...(needsCreation ? mcpEntry('mcp-jiucaihezi-creation', 'jiucaihezi-creation', {
-      // capabilities 必须带 'av'：App 用 `/av` 筛模型表，缺了它 list_creation_models
-      // 返回空。付费闸门是另一件事，走 JIUCAIHEZI_CREATION_PAID。
-      JIUCAIHEZI_CREATION_CAPABILITIES: 'av',
-      ...(input.avSelected ? {} : { JIUCAIHEZI_CREATION_PAID: '0' }),
-    }) : []),
-    ...(localCapabilities.length ? mcpEntry('mcp-jiucaihezi-tools', 'jiucaihezi', {
-      JIUCAIHEZI_PROXY_CAPABILITIES: localCapabilities.join(','),
-    }) : []),
     ...mcpServerIds.flatMap((serverName, index) => mcpEntry(`mcp-proxy-${index}`, serverName, {
       JIUCAIHEZI_PROXY_MCP_SERVER: serverName,
     })),
   ])
+  const nativeToolCapabilities = [...localCapabilities, ...(needsCreation ? ['av'] : [])]
+  const nativeToolPatch = nativeToolsEnabled ? insertPatch([
+    '- id: jiucaihezi-native-tools',
+    "  name: '@jiucaihezi/dsh-tool-creation'",
+    '  config:',
+    `    creation: ${needsCreation}`,
+    `    allowPaid: ${Boolean(input.avSelected)}`,
+    '    capabilities:',
+    ...nativeToolCapabilities.map(capability => `      - ${capability}`),
+  ]) : []
   // 官方 subagent 工具在 continuable（后台）模式下 `run_in_background` 默认 true：
   // 派发只回一句 “started subagent <id>”，父代理拿不到结果却以为已完成，于是重复派活、
   // 重复写文件（实测一轮 34 分钟里 1.md/3.md 各被写两遍，16–20 集的失败也无人知晓）。
@@ -1368,6 +1383,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         ...modelInputLines,
         '',
         ...mcpPatch,
+        ...nativeToolPatch,
         ...subagentPatch,
         ...fileReferencePatch,
         ...computerUsePatch,
@@ -1389,6 +1405,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
       // Computer Use 的插件包不在官方 bundle 依赖图里，profile 目录解析不到就只会静默
       // `failed to import`；runner 按这个开关决定要不要把它们挂进 profile（见 runner.mjs）。
       computerUse: computerUseEnabledNow(),
+      nativeTools: nativeToolsEnabled,
     })],
     cwd: input.cwd,
     env: {

@@ -2,13 +2,13 @@
 :root {
   color-scheme: light;
 
-  --jc-surface: #F7F8F5;
+  --jc-surface: #FAFAFA;
   --jc-surface-container-lowest: #FFFFFF;
-  --jc-surface-container-low: #F0F2EC;
-  --jc-surface-container: #E8EBE3;
-  --jc-surface-container-high: #DEE3D8;
-  --jc-surface-container-highest: #D1D8CA;
-  --jc-surface-dim: #E8EBE3;
+  --jc-surface-container-low: #F2F2F4;
+  --jc-surface-container: #E9E9EC;
+  --jc-surface-container-high: #DFDFE3;
+  --jc-surface-container-highest: #D2D2D7;
+  --jc-surface-dim: #EDEDF0;
 
   --jc-primary: #4A5D23;
   --jc-primary-container: #37461B;
@@ -17,15 +17,15 @@
   --jc-secondary-container: #E8EBE3;
   --jc-on-secondary-container: #3A4730;
 
-  --jc-on-surface: #242A20;
-  --jc-on-surface-variant: #626B5B;
-  --jc-outline-variant: #DEE3D8;
+  --jc-on-surface: #1D1D1F;
+  --jc-on-surface-variant: #636366;
+  --jc-outline-variant: #DCDCE0;
 
   --jc-error: #B9443A;
   --jc-success: #386747;
   --jc-warning: #966820;
 
-  --jc-shadow-color: rgba(36, 42, 32, 0.08);
+  --jc-shadow-color: rgba(0, 0, 0, 0.06);
   --jc-shadow-sm: 0 4px 12px var(--jc-shadow-color);
   --jc-shadow-lg: 0 20px 40px var(--jc-shadow-color);
 
@@ -39,7 +39,7 @@
   --jc-error-text: var(--jc-error);
 
   --jc-font-display: 'Noto Serif SC', 'Noto Serif', serif;
-  --jc-font-body: 'Inter', system-ui, sans-serif;
+  --jc-font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
 
   --jc-radius-sm: 0.375rem;
   --jc-radius-md: 0.5rem;
@@ -127,30 +127,31 @@
 :root[data-theme="green"], [data-theme="green"] {
   color-scheme: light;
 
-  --jc-surface: #EFF5EC;
-  --jc-surface-container-lowest: #F7FAF5;
-  --jc-surface-container-low: #E9F0E5;
-  --jc-surface-container: #DEE8D8;
-  --jc-surface-container-high: #D2DFCB;
-  --jc-surface-container-highest: #C5D5BD;
-  --jc-surface-dim: #E2EBDD;
+  /* 柔绿主题：低饱和背景与清晰文字对比，不声明医学护眼效果。 */
+  --jc-surface: #EAF0E8;
+  --jc-surface-container-lowest: #F0F4EE;
+  --jc-surface-container-low: #E2E9DF;
+  --jc-surface-container: #D9E2D5;
+  --jc-surface-container-high: #CFDACC;
+  --jc-surface-container-highest: #C3D0BE;
+  --jc-surface-dim: #DDE5D9;
 
   --jc-primary: #426D47;
   --jc-primary-container: #355A39;
   --jc-on-primary: #FFFFFF;
 
-  --jc-secondary-container: #DEE8D8;
+  --jc-secondary-container: #D9E2D5;
   --jc-on-secondary-container: #2F4E33;
 
-  --jc-on-surface: #243329;
-  --jc-on-surface-variant: #526752;
-  --jc-outline-variant: #CFDCCB;
+  --jc-on-surface: #253029;
+  --jc-on-surface-variant: #596459;
+  --jc-outline-variant: #CDD8C8;
 
   --jc-error: #A33D34;
   --jc-success: #386747;
   --jc-warning: #775817;
 
-  --jc-shadow-color: rgba(34, 68, 36, 0.08);
+  --jc-shadow-color: rgba(0, 0, 0, 0.06);
 
   /* Account / Membership area */
   --jc-account-card-bg: rgba(255, 255, 255, 0.45);

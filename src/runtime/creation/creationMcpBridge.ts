@@ -251,8 +251,17 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
       : {}
     const resolvedParams = await resolveReferenceImages(rawParams)
     const plan = buildCreationRunPlan({ modelId, params: resolvedParams })
+    if (context.contextVersion !== currentContext().contextVersion) throw new Error('项目或画布已切换，请重新获取创作上下文')
+    const type = mediaTypeFor(modelId)
+    const canvasTarget = context.canvas && context.project.owner && (!directory || directory === context.project.owner)
+      && type !== 'model3d' && type !== 'text'
+      ? { canvasId: context.canvas.id, canvasPath: context.canvas.path, owner: context.project.owner,
+          operation: 'append' as const, referenceNodeIds: [],
+          outputAspectRatio: String(resolvedParams.aspect_ratio || resolvedParams.aspectRatio || resolvedParams.ratio || resolvedParams.ar || '') }
+      : undefined
     const taskId = await store.submitTask({
-      type: mediaTypeFor(modelId),
+      type,
+      canvasTarget,
       model: plan.model,
       modelLabel: plan.label,
       prompt: requireString(resolvedParams, 'prompt'),

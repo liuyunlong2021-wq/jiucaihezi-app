@@ -45,8 +45,8 @@ test('MCP catalog ships Playwright as a pinned desktop stdio server', () => {
   assert.match(source, /entry\.transport === 'stdio' && !isDesktopRuntime/)
 })
 
-test('MCP catalog exposes only the three product-approved built-ins', () => {
-  assert.match(catalogSource, /id: 'jiucaihezi-creation'/)
+test('MCP catalog exposes only the two product-approved built-ins', () => {
+  assert.doesNotMatch(catalogSource, /id: 'jiucaihezi-creation'/)
   assert.match(catalogSource, /id: 'github'/)
   assert.match(catalogSource, /id: 'playwright'/)
   assert.doesNotMatch(catalogSource, /id: 'obsidian'/)
@@ -68,17 +68,6 @@ test('predefined local MCP connects directly and explains a missing Node runtime
   assert.match(source, /重新检测并连接/)
   assert.match(source, /!\/plugin not found\/i\.test/)
   assert.match(source, /openExternal\('https:\/\/nodejs\.org\/zh-cn\/download'\)/)
-})
-
-test('Jiucaihezi creation MCP resolves a per-install stdio path', () => {
-  assert.match(catalogSource, /id: 'jiucaihezi-creation'/)
-  assert.match(source, /entry\.id === 'jiucaihezi-creation'/)
-  assert.match(
-    source,
-    /invoke<\{ command: string; args: string\[\]; cwd\?: string \}>\('resolve_creation_mcp'\)/,
-  )
-  assert.match(tauriLibSource, /commands::creation_mcp::resolve_creation_mcp/)
-  assert.match(appPermissionSource, /"resolve_creation_mcp"/)
 })
 
 test('Windows resolves and launches the npx command shim', () => {

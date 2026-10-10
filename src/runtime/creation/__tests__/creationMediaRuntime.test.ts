@@ -43,6 +43,10 @@ async function mockDirectOssUpload(
 test('creation MCP submissions opt into project media persistence', () => {
   const source = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
   assert.match(source, /memory: true/)
+  assert.match(source, /canvasTarget,[\s\S]*model: plan.model/)
+  assert.match(source, /owner: context.project.owner/)
+  assert.match(source, /context.contextVersion !== currentContext\(\).contextVersion/)
+  assert.match(source, /!directory \|\| directory === context.project.owner/)
   assert.match(source, /optionalAbsoluteDirectory\(params\)/)
   assert.match(source, /directory \|\| \(isTauriRuntime\(\) \? context\.project\.owner : undefined\)/)
   assert.match(source, /resolveReferenceImages\(rawParams\)/)

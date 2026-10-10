@@ -60,7 +60,7 @@ test('the approved contract and packaged router share the same intent order', ()
 
 test('the composer retains the production entry without a model selector or model state', () => {
   const source = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
-  assert.match(source, /@click="toggleManjuProduction"/)
+  assert.match(source, /@click="[^"\n]*toggleManjuProduction\(\)"/)
   assert.doesNotMatch(source, /memory-manju-model|manjuVideoModel|manjuModelSnapshot|changeManjuVideoModel/)
   for (const file of ['src/services/deepSeekHarness.ts', 'src/services/desktopConversationRuntime.ts']) {
     assert.doesNotMatch(readFileSync(file, 'utf8'), /manjuVideoModel|ManjuVideoModel/)

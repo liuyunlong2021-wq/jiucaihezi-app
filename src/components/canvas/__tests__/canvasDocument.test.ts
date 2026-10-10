@@ -1322,3 +1322,32 @@ test('Web task canvas results reject blob paths before persistence', { concurren
     projectStore.webProjectId.value = originalProjectId
   }
 })
+
+
+test('memory media results append without overlap and retry without duplicating the source', () => {
+  const document = createCanvasDocument({ canvasId: 'generated', updatedAt: 1, scene: [], assets: {} })
+  const target = { canvasId: 'generated', canvasPath: 'jc-canvas/generated.jccanvas', operation: 'append' as const, referenceNodeIds: [] }
+  const first = applyCanvasTaskResult(document, target, '.raw/jc-media/图片/第一张.png', 2)
+  const second = applyCanvasTaskResult(first, target, '.raw/jc-media/视频/第二段.mp4', 3)
+  assert.equal(second.scene.length, 2)
+  assert.ok(Number(second.scene[1]!.x) >= Number(second.scene[0]!.x) + Number(second.scene[0]!.width) + 24)
+  assert.equal(second.assets[String(second.scene[1]!.id)]!.kind, 'video')
+  const retry = applyCanvasTaskResult(second, target, '.raw/jc-media/图片/第一张.png', 4)
+  assert.equal(retry.scene.length, 2)
+  assert.equal(retry.viewport, second.viewport)
+  assert.throws(() => applyCanvasTaskResult(document, target, '.raw/jc-media/../secret.png'), /画布结果必须先保存/)
+})
+
+
+test('portrait generation retains the requested aspect ratio on the canvas', () => {
+  const document = createCanvasDocument({ canvasId: 'portrait', updatedAt: 1, scene: [], assets: {} })
+  const result = applyCanvasTaskResult(document, { canvasId: 'portrait', canvasPath: 'jc-canvas/portrait.jccanvas', operation: 'append', referenceNodeIds: [], outputAspectRatio: '9:16' }, 'jc-media/images/portrait.png')
+  assert.equal(Number(result.scene[0]!.width) / Number(result.scene[0]!.height), 9 / 16)
+})
+
+
+test('generated media clears imported image groups whose size lives on a child', () => {
+  const document = createCanvasDocument({ canvasId: 'grouped', updatedAt: 1, scene: [{ tag: 'Group', id: 'original', x: 500, y: 0, children: [{ tag: 'Image', width: 200, height: 300 }] }], assets: {} })
+  const result = applyCanvasTaskResult(document, { canvasId: 'grouped', canvasPath: 'jc-canvas/grouped.jccanvas', operation: 'append', referenceNodeIds: [] }, 'jc-media/images/new.png')
+  assert.equal(result.scene[1]!.x, 724)
+})

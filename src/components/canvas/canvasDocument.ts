@@ -14,6 +14,7 @@ export interface CanvasDocumentInput {
   scene: CanvasSceneNode[]
   assets: Record<string, CanvasAsset | CanvasDocumentV2['assets'][string]>
   viewport?: CanvasDocumentV3['viewport']
+  viewportInitialized?: boolean
   updatedAt?: number
   idFactory?: () => string
 }
@@ -118,6 +119,7 @@ export function createCanvasDocument(input: CanvasDocumentInput): CanvasDocument
     canvasId: input.canvasId,
     updatedAt: input.updatedAt ?? Date.now(),
     viewport: input.viewport || { x: 0, y: 0, zoom: 1 },
+    viewportInitialized: input.viewportInitialized ?? false,
     scene: input.scene.map(node => normalizeNode(node, assets, idFactory)),
     assets,
   }

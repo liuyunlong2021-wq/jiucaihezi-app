@@ -46,6 +46,7 @@ export interface McpToolSchema {
 
 const STORAGE_KEY = 'jc_mcp_servers_v1'
 const OBSOLETE_BUILTIN_SERVER_IDS = new Set([
+  'jiucaihezi-creation',
   'opencode-official',
   'skill-seekers',
   'notion',

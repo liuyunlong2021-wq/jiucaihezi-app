@@ -11,7 +11,7 @@ import {
 import { createProjectFileActions } from '@/services/projectFileActions'
 import { createRuntimeProjectFileService } from '@/services/projectFileService'
 import { useProjectStore } from '@/stores/projectStore'
-import type { CanvasDocumentV3, CanvasMediaKind, CanvasTaskTarget } from '@/types/canvas'
+import type { CanvasDocumentV3, CanvasMediaKind, CanvasTaskTarget, CanvasSceneNode } from '@/types/canvas'
 import type { ProjectResource, ProjectResourceRevision } from '@/utils/projectResource'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
@@ -41,7 +41,7 @@ function mediaKind(path: string): CanvasMediaKind {
 
 function requireProjectMediaPath(path: string): void {
   const parts = path.split('/')
-  if (!path.startsWith('jc-media/') || path.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
+  if (!(path.startsWith('jc-media/') || path.startsWith('.raw/jc-media/')) || path.includes('\\') || parts.some(part => !part || part === '.' || part === '..')) {
     throw new Error('画布结果必须先保存到项目媒体目录')
   }
 }
@@ -51,10 +51,16 @@ export function applyCanvasTaskResult(document: CanvasDocumentV3, target: Canvas
     throw new Error('画布目标已失效')
   }
   requireProjectMediaPath(path)
+  // A download retry may deliver the same result again; keep one source asset per canvas.
+  if (Object.values(document.assets).some(asset => asset.resource.path === path)) return document
   const next = structuredClone(document)
   const id = crypto.randomUUID()
   const bounds = target.referenceBounds || { x: 80, y: 80, width: 320, height: 240 }
   const kind = mediaKind(path)
+  const aspect = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/.exec(target.outputAspectRatio || '')
+  const ratio = aspect ? Number(aspect[1]) / Number(aspect[2]) : 0
+  const imageHeight = bounds.height || 240
+  const imageWidth = ratio > 0 && Number.isFinite(ratio) ? imageHeight * ratio : (bounds.width || 320)
   next.assets[id] = {
     id,
     kind,
@@ -62,12 +68,19 @@ export function applyCanvasTaskResult(document: CanvasDocumentV3, target: Canvas
     source: 'creation',
     createdAt: updatedAt,
   }
+  // Append after existing media so concurrent generations do not cover each other.
+  const nodeRightEdge = (node: CanvasSceneNode): number => {
+    const width = Math.max(Number(node.width || 0), ...(node.children || []).map(nodeRightEdge))
+    return Number(node.x || 0) + width * Math.abs(Number(node.scaleX ?? 1))
+  }
+  const rightEdge = next.scene.reduce((edge, node) =>
+    Math.max(edge, nodeRightEdge(node)), bounds.x + bounds.width)
   next.scene.push({
     tag: kind === 'image' ? 'Image' : kind === 'video' ? 'Group' : 'canvas-audio-card', id,
     ...(kind === 'video' ? { name: 'canvas-video-reference' } : kind === 'audio' ? { assetId: id } : {}),
-    x: bounds.x + bounds.width + 24, y: bounds.y,
-    width: kind === 'video' ? 320 : (bounds.width || 320),
-    height: kind === 'video' ? 180 : kind === 'audio' ? 96 : (bounds.height || 240),
+    x: rightEdge + 24, y: bounds.y,
+    width: kind === 'video' ? 320 : kind === 'audio' ? 320 : imageWidth,
+    height: kind === 'video' ? 180 : kind === 'audio' ? 96 : imageHeight,
   })
   next.updatedAt = updatedAt
   return next

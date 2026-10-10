@@ -667,6 +667,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       path,
       owner: String(task.directory || task.projectId || ''),
       quiet: true,
+      refresh: true,
     })
   }
 
@@ -944,6 +945,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
     } catch {
       markCanvasWriteUnwritten(task)
+      task.progressText = '生成完成，加入画布失败，可从生成历史重试'
     }
   }
 

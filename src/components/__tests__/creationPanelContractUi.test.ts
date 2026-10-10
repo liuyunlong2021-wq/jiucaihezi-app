@@ -407,7 +407,8 @@ test('canvas viewport tools keep the viewport center stable', () => {
   )
   assert.match(source, /const worldCenterX = focus\?\.x \?\? \(width \/ 2 - x\) \/ currentScale/)
   assert.match(source, /const worldCenterY = focus\?\.y \?\? \(height \/ 2 - y\) \/ currentScale/)
-  assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.match(source, /case 'fit':[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.doesNotMatch(source, /case 'fit':(?:(?!break)[\s\S])*arrangeCanvasMedia\(\)/)
   assert.match(
     source,
     /case 'zoomIn':\s+setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\)\s+break/,
@@ -419,20 +420,21 @@ test('canvas viewport tools keep the viewport center stable', () => {
   assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
 })
 
-test('canvas fit arranges media into one centered horizontal row before framing it', () => {
+test('canvas fit changes the viewport and leaves media arrangement to its separate command', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /function arrangeCanvasMedia\(\)/)
-  assert.match(source, /filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
+  assert.match(source, /filter\(child =>[\s\S]*?Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)/)
   assert.match(source, /const totalWidth = media\.reduce/)
   assert.match(source, /nextX \+= width \+ gap/)
   assert.doesNotMatch(source, /const columns = Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
   assert.match(source, /canvasStore\.updateLayerPosition\(String\(node\.id\), node\.x, node\.y\)/)
   assert.match(
     source,
-    /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/,
+    /const children = app\.tree\.children\.filter\(child => child\.tag !== 'SimulateElement'\)/,
   )
-  assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.match(source, /case 'fit':[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.doesNotMatch(source, /case 'fit':(?:(?!break)[\s\S])*arrangeCanvasMedia\(\)/)
 })
 
 test('canvas fit keeps every media item in one horizontal row', () => {
@@ -656,7 +658,7 @@ test('creation panel persists direct Web and Desktop imports before adding them 
     /class="cp-prompt-wrap"[\s\S]*?class="cp-prompt-entry"[\s\S]*?class="cp-add-reference"/,
   )
   assert.match(source, /\.cp-prompt-entry \.cp-add-reference \{[\s\S]*?position: absolute/)
-  assert.match(source, /\.cp-prompt-input \{[\s\S]*?padding-bottom: 38px/)
+  assert.match(source, /\.cp-prompt-input \{[\s\S]*?padding: 6px 2px 48px/)
   assert.doesNotMatch(source, /\.cp-drag-over/)
   assert.doesNotMatch(source, /flex: 0 0 34px/)
   assert.doesNotMatch(source, />添加参考素材</)
@@ -681,9 +683,9 @@ test('creation panel snapshots debounced saves and binds media work to its resto
   assert.match(schedule, /const document = canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(
     schedule,
-    /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, owner\)/,
+    /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+if \(!isCurrentCanvasTarget\(loadToken, owner, path\)\) return[\s\S]*?void saveCanvas\(document, path, owner\)/,
   )
-  assert.doesNotMatch(schedule, /setTimeout\([\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
+  assert.match(schedule, /setTimeout\([\s\S]*?isCurrentCanvasTarget[\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(load, /setCanvasRestoring\(true\)[\s\S]*?await flushCanvasSave\(\)/)
   assert.match(load, /setCanvasRestoring\(true\)\s+try \{[\s\S]*?await flushCanvasSave\(\)/)
 
@@ -702,10 +704,13 @@ test('creation panel snapshots debounced saves and binds media work to its resto
   assert.match(source, /request\.owner !== owner \|\| request\.loadToken !== loadToken/)
 })
 
-test('creation results enter canvas only through the explicit history action', () => {
+test('creation submissions bind their original canvas and retain the history action', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.doesNotMatch(source, /const offCanvasSync = onEvent\('media-task-settled'/)
+  assert.match(source, /const submissionOwner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
+  assert.match(source, /canvasTarget,[\s\S]*plan: submitPlan/)
+  assert.match(source, /referenceNodeIds: submissionReferenceIds/)
+  assert.match(source, /submissionCanvasPath !== canvasStore\.canvasPath/)
   assert.match(source, /async function addTaskResultToCanvas\(task: MediaTask\)/)
   assert.match(source, /@click="addTaskResultToCanvas\(task\)"/)
   assert.match(source, /放到画布/)
@@ -810,7 +815,7 @@ test('creation panel scopes task write gates to the current owner and canvas pat
     /await restoreCanvasScene\(result\.document, path, owner, \(\) =>\s+isCurrentCanvasTarget\(loadToken, owner, path\),?\s+\)/,
   )
   assert.doesNotMatch(taskRestore, /saveCanvas\(/)
-  assert.match(taskResult, /if \(await restoreCanvasTaskResult\(path, owner\)\) release\?\.\(\)/)
+  assert.match(taskResult, /if \(await restoreCanvasTaskResult\(path, owner\)\) \{[\s\S]*?release\?\.\(\)/)
   assert.doesNotMatch(
     source,
     /canvasSaveEpoch|canvasSaveGeneration|canvasTaskRestoreToken|CanvasFileLifecycleLock|deferredTaskAppends/,
@@ -1117,4 +1122,15 @@ test('submitted or failed video tasks can query the upstream result without resu
   // 面板：有上游任务 ID 的未完成/失败任务均可重查，且调用 store 的刷新动作。
   assert.match(panel, /v-if="canRefreshTaskResult\(task\)" @click="refreshTaskResult\(task\)">重新查询结果<\/button>/)
   assert.match(panel, /const refreshed = await mediaTaskStore\.refreshTaskResult\(task\.id\)/)
+})
+
+
+test('canvas context media exposes an owner-scoped source-file location action', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const locate = source.match(/function locateSelectedCanvasMedia\(\)[\s\S]*?\n}/)?.[0] || ''
+  assert.match(locate, /owner = canvasOwner.value \|\| selectedCanvasOwner\(\)/)
+  assert.match(locate, /emitEvent\('project-filetree:locate', \{ owner, path: asset.resource.path, refresh: true \}\)/)
+  assert.match(source, /@click="locateSelectedCanvasMedia"/)
+  assert.match(source, /!app\?\.editor\?\.list.includes\(node\)/)
+  assert.match(source, /canvasStore.assets\[ctxMenu.value.assetId\]/)
 })

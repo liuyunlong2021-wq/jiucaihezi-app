@@ -111,6 +111,7 @@ export interface CanvasDocumentV3 {
   canvasId: string
   updatedAt: number
   viewport: { x: number; y: number; zoom: number }
+  viewportInitialized?: boolean
   scene: CanvasSceneNode[]
   assets: Record<string, CanvasAsset>
 }
@@ -121,6 +122,8 @@ export interface CanvasTaskTarget {
   /** Immutable project root (Desktop) or project ID (Web); absent only on legacy persisted tasks. */
   owner?: string
   operation: 'append'
+  /** Requested image aspect ratio; keeps generated portrait media from stretching. */
+  outputAspectRatio?: string
   referenceNodeIds: string[]
   referenceBounds?: { x: number; y: number; width: number; height: number }
 }

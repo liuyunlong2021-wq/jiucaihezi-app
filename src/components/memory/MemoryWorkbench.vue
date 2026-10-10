@@ -167,6 +167,7 @@ let screenshotBridgeUnmounted = false
 const fileActions = createProjectFileActions(files)
 const desktopRuntime = isTauriRuntime()
 const mobileRuntime = isTauriMobileRuntime()
+const desktopWindowHeader = desktopRuntime && !mobileRuntime
 const desktopOnlyRuntime = desktopRuntime && !mobileRuntime
 const updateSaveErrors = { scene: '', projectMap: '' }
 const stopUpdateParticipant = registerUpdateParticipant({
@@ -405,11 +406,9 @@ function setPermissionTier(tier: DeepSeekPermissionTier) {
 /**
  * 权限菜单。
  *
- * **必须 fixed 定位**：按钮排在 `overflow-x: auto` 的 `.memory-command-strip` 里，绝对定位的
- * 弹层会被容器裁掉本体（看起来就是「点了没反应」）—— 和 `chipTip` 同一个理由。
+ * 使用 fixed 定位，确保菜单不受输入区布局及祖先容器裁剪影响。
  */
 const permissionMenu = ref<{ left: number; bottom: number } | null>(null)
-
 /** 当前档的定义；三档的真相源在 service 层。 */
 const permissionOption = computed(() =>
   DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === permissionTier.value),
@@ -651,6 +650,11 @@ const harnessFailures = ref<Record<string, { code?: string; message: string; att
 const harnessReasoning = ref<Record<string, string>>({})
 const settingsOpen = ref(false)
 const treeOpen = ref(true)
+const offRevealMediaFile = onEvent('project-filetree:locate', (raw: unknown) => {
+  const payload = raw as { owner?: string; quiet?: boolean } | undefined
+  if (!payload?.quiet && (!payload?.owner || payload.owner === projectOwner.value)) treeOpen.value = true
+})
+onBeforeUnmount(offRevealMediaFile)
 const viewportWidth = ref(window.innerWidth)
 const messagesEl = ref<HTMLElement | null>(null)
 const memoryScrollNav = ref<InstanceType<typeof ChatScrollNav> | null>(null)
@@ -727,11 +731,77 @@ let chatResizeStartWidth = 0
 let sceneSaveQueue = Promise.resolve()
 let projectMapSaveQueue = Promise.resolve()
 
-const MEMORY_TREE_WIDTH = 280
+const MEMORY_TREE_DEFAULT = 280
+const MEMORY_TREE_MIN = 180
+const storedTreeWidth = Number(localStorage.getItem('jcMemoryTreeWidth'))
+const fileTreeWidth = ref(Number.isFinite(storedTreeWidth) && storedTreeWidth >= MEMORY_TREE_MIN ? Math.min(560, storedTreeWidth) : MEMORY_TREE_DEFAULT)
+const fileTreeResizing = ref(false)
+let treeResizeStartX = 0
+let treeResizeStartWidth = 0
+let treePreviousCursor = ''
+let treePreviousUserSelect = ''
+
+function treeMaximumWidth(): number {
+  const contentMin = window.innerWidth >= 940 && (creationOpen.value || previewResource.value)
+    ? MEMORY_CREATION_MIN + (chatDockMode.value === 'compact' ? MEMORY_CHAT_COMPACT : MEMORY_CHAT_FULL_MIN)
+    : 320
+  return Math.max(MEMORY_TREE_MIN, Math.min(560, window.innerWidth - contentMin))
+}
+
+function setFileTreeWidth(width: number) {
+  fileTreeWidth.value = Math.max(MEMORY_TREE_MIN, Math.min(treeMaximumWidth(), width))
+  if (creationOpen.value || previewResource.value) chatDockWidth.value = clampChatDockWidth(chatDockWidth.value)
+}
+
+function moveFileTreeResize(event: PointerEvent) {
+  if (fileTreeResizing.value) setFileTreeWidth(treeResizeStartWidth + event.clientX - treeResizeStartX)
+}
+
+function stopFileTreeResize() {
+  if (!fileTreeResizing.value) return
+  fileTreeResizing.value = false
+  window.removeEventListener('pointermove', moveFileTreeResize)
+  window.removeEventListener('pointerup', stopFileTreeResize)
+  window.removeEventListener('pointercancel', stopFileTreeResize)
+  window.removeEventListener('blur', stopFileTreeResize)
+  document.body.style.cursor = treePreviousCursor
+  document.body.style.userSelect = treePreviousUserSelect
+  localStorage.setItem('jcMemoryTreeWidth', String(Math.round(fileTreeWidth.value)))
+}
+
+function startFileTreeResize(event: PointerEvent) {
+  if (event.button !== 0 || window.innerWidth <= 760 || fileTreeResizing.value || chatDockResizing.value) return
+  treeResizeStartX = event.clientX
+  treeResizeStartWidth = fileTreeWidth.value
+  treePreviousCursor = document.body.style.cursor
+  treePreviousUserSelect = document.body.style.userSelect
+  fileTreeResizing.value = true
+  window.addEventListener('pointermove', moveFileTreeResize)
+  window.addEventListener('pointerup', stopFileTreeResize)
+  window.addEventListener('pointercancel', stopFileTreeResize)
+  window.addEventListener('blur', stopFileTreeResize)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function resetFileTreeWidth() {
+  setFileTreeWidth(MEMORY_TREE_DEFAULT)
+  localStorage.setItem('jcMemoryTreeWidth', String(Math.round(fileTreeWidth.value)))
+}
+
+function handleFileTreeResizeKey(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const step = event.shiftKey ? 40 : 10
+  setFileTreeWidth(event.key === 'Home' ? MEMORY_TREE_MIN : event.key === 'End' ? treeMaximumWidth() : fileTreeWidth.value + (event.key === 'ArrowRight' ? step : -step))
+  localStorage.setItem('jcMemoryTreeWidth', String(Math.round(fileTreeWidth.value)))
+}
+
 const MEMORY_CREATION_MIN = 520
+watch([creationOpen, previewResource, treeOpen], () => { setFileTreeWidth(fileTreeWidth.value) })
 
 function clampChatDockWidth(width: number): number {
-  const treeWidth = treeOpen.value ? MEMORY_TREE_WIDTH : 0
+  const treeWidth = treeOpen.value ? fileTreeWidth.value : 0
   return Math.max(MEMORY_CHAT_FULL_MIN, Math.min(window.innerWidth - treeWidth - MEMORY_CREATION_MIN, width))
 }
 
@@ -762,7 +832,7 @@ function stopChatDockResize() {
 }
 
 function startChatDockResize(event: PointerEvent) {
-  if (chatDockResizing.value || window.innerWidth < 940 || creationFocused.value) return
+  if (chatDockResizing.value || fileTreeResizing.value || window.innerWidth < 940 || creationFocused.value) return
   chatResizeStartX = event.clientX
   chatResizeStartWidth = chatDockWidth.value
   chatDockResizing.value = true
@@ -780,8 +850,10 @@ function expandChatDock() {
 
 function prepareDockLayout() {
   if (window.innerWidth < 940) return
-  if (treeOpen.value && window.innerWidth - MEMORY_TREE_WIDTH < MEMORY_CHAT_FULL_MIN + MEMORY_CREATION_MIN)
-    treeOpen.value = false
+  if (treeOpen.value) {
+    setFileTreeWidth(Math.min(fileTreeWidth.value, window.innerWidth - MEMORY_CHAT_FULL_MIN - MEMORY_CREATION_MIN))
+    if (window.innerWidth - fileTreeWidth.value < MEMORY_CHAT_FULL_MIN + MEMORY_CREATION_MIN) treeOpen.value = false
+  }
 }
 
 async function openCreationHost() {
@@ -817,6 +889,7 @@ async function closeCreationHost(): Promise<boolean> {
 
 function resizeCreationForWindow() {
   viewportWidth.value = window.innerWidth
+  setFileTreeWidth(fileTreeWidth.value)
   if (previewResource.value || creationOpen.value) prepareDockLayout()
   if (chatDockMode.value === 'expanded') chatDockWidth.value = clampChatDockWidth(chatDockWidth.value)
 }
@@ -997,6 +1070,13 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
       ? { type: 'command', id: option.id, display: `/${option.id}`, description: option.description, icon: option.icon }
       : option)
   }
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  if (scope !== 'skill' && normalizedQuery) {
+    const matchingTools = toolOptions.filter(option => option.type === 'tool'
+      && (option.id.toLocaleLowerCase() === normalizedQuery || option.display.toLocaleLowerCase() === normalizedQuery),
+    )
+    if (matchingTools.length) return matchingTools
+  }
   const bundledSkills = await loadWebSkillCatalog().catch(() => [])
   if (!mentionOpen.value || mentionScope.value !== scope) return []
   const skillOptions = [
@@ -1025,9 +1105,10 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   }))
   // 从芯片排的「@Skill」进来时只列 Skill：下面的芯片排已经有全部工具入口了。
   if (scope === 'skill') return skills
-  const resources = !owner ? [] : await (query.trim()
-    ? files.searchPaths(owner, query.trim(), 40)
-    : files.list(owner))
+  // Empty @ shows tools and recent skills without recursively enumerating up to 1,000 project files.
+  const resources = !owner || !normalizedQuery
+    ? []
+    : await files.searchPaths(owner, query.trim(), 40)
   const projectOptions = resources
     .filter(resource => !resource.isDirectory
       && !resource.path.startsWith('.raw/对话记录/')
@@ -1101,7 +1182,17 @@ const modelGroups = computed(() => {
     group.push(model)
     groups.set(key, group)
   }
-  return [...groups.entries()].map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
+  const entries = [...groups.entries()]
+  const modelFamilyOrder = ['doubao', 'qwen', 'local']
+  const familyAnchor = entries.some(([key]) => key === 'doubao') ? 'doubao'
+    : entries.some(([key]) => key === 'qwen') ? 'qwen' : 'local'
+  const familyStart = entries.findIndex(([key]) => key === familyAnchor)
+  const remainingBeforeFamilies = entries.slice(0, familyStart).filter(([key]) => !modelFamilyOrder.includes(key)).length
+  const orderedFamilies = entries.filter(([key]) => modelFamilyOrder.includes(key))
+    .sort(([left], [right]) => modelFamilyOrder.indexOf(left) - modelFamilyOrder.indexOf(right))
+  const remaining = entries.filter(([key]) => !modelFamilyOrder.includes(key))
+  if (familyStart >= 0) remaining.splice(remainingBeforeFamilies, 0, ...orderedFamilies)
+  return remaining.map(([key, models]) => ({ key, label: modelGroupLabel(key), models }))
 })
 const currentModelLabel = computed(() => selectedModel()?.label || agentStore.currentModel || '登录后加载模型')
 // ponytail: 自研内核（Web 未发布工作台）仍用这条 5 条缩略；DH 的过程在轮次内实时渲染，
@@ -1270,6 +1361,26 @@ function harnessReasoningFor(turnId: string): string {
 function harnessUsageFor(turnId: string): DeepSeekUsage | undefined {
   if (turnId && turnId === liveProcessTurnId.value) return activeRun.value?.usage
   return harnessUsage.value[turnId]
+}
+
+const answerUsageAnchors = computed(() => {
+  const anchors = new Map<string, string>()
+  const answered = new Set<string>()
+  let userId = ''
+  for (const turn of conversationTurns.value) {
+    if (turn.role === 'user') userId = turn.id
+    else if (turn.role === 'assistant' && userId) { anchors.set(turn.id, userId); answered.add(userId) }
+  }
+  return { anchors, answered }
+})
+
+function answerUsageFor(turn: ConversationTurn): DeepSeekUsage | undefined {
+  const anchor = answerUsageAnchors.value.anchors.get(turn.id)
+  return anchor ? harnessUsageFor(anchor) : undefined
+}
+
+function hasFollowingAnswer(turnId: string): boolean {
+  return answerUsageAnchors.value.answered.has(turnId)
 }
 
 function formatTokenCount(value: number | undefined): string {
@@ -1489,18 +1600,7 @@ function programStatusTitle(programStatus: MemoryProgramStatus): string {
 function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
   return '程序已返回真实执行回执'
 }
-const toolCommands = [
-  // 权限排第一位：它不是「启用某能力」，而是决定其余能力能碰到什么（官方也把权限放在最前）。
-  { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
-  { id: 'media', label: '@排版', icon: 'image', description: '创建文档、网页、长图和幻灯片' },
-  { id: 'av', label: '@影音', icon: 'movie', description: '生成图片、视频和音频' },
-  { id: 'mcp', label: '@MCP', icon: 'extension', description: '调用已连接的 MCP 工具' },
-  ...(desktopOnlyRuntime ? [{ id: 'session', label: '@会话', icon: 'chat', description: '引用当前项目的其他对话' }] : []),
-  ...(desktopOnlyRuntime ? [
-    { id: 'scene3d', label: '@3D', icon: 'view-in-ar', description: '创建或编辑 3D 场景' },
-  ] : []),
-]
-const primaryCommands = toolCommands
+const skillCommand = { id: 'skill', label: '@Skill', icon: 'psychology', description: '选择 Skill' }
 
 // 芯片提示必须用 fixed 定位：芯片排在 `overflow-x: auto` 的滚动容器里，
 // 绝对定位的提示会被裁掉本体、只剩投影落回容器内（看起来像一条无来由的灰影）。
@@ -1598,6 +1698,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
   stopChatDockResize()
+  stopFileTreeResize()
   stopProjectWatch?.()
   projectGeneration++
   // Desktop 的运行归应用所有；页面重挂不能把电脑和手机正在执行的任务停掉。
@@ -3219,10 +3320,8 @@ function resizeComposer() {
     resetComposer()
     return
   }
-  const maxHeight = window.innerWidth <= 760 ? 120 : Math.min(220, Math.floor(window.innerHeight * 0.3))
-  editor.style.height = 'auto'
-  editor.style.height = `${Math.min(editor.scrollHeight, maxHeight)}px`
-  editor.style.overflowY = editor.scrollHeight > maxHeight ? 'auto' : 'hidden'
+  editor.style.height = ''
+  editor.style.overflowY = editor.scrollHeight > editor.clientHeight ? 'auto' : 'hidden'
 }
 
 function handleComposerInput(event: Event) {
@@ -4177,14 +4276,34 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       'creation-focused': creationFocused,
       'chat-dock-compact': chatDockMode === 'compact',
       'chat-dock-narrow': viewportWidth >= 940 && (previewResource || creationOpen) && chatDockMode === 'expanded' && chatDockWidth < 560,
-      'chat-dock-resizing': chatDockResizing,
+      'chat-dock-minimal': viewportWidth >= 940 && (previewResource || creationOpen) && chatDockMode === 'expanded' && chatDockWidth < 360,
+      'chat-dock-resizing': chatDockResizing || fileTreeResizing,
     }"
-    :style="{ '--memory-chat-width': `${chatDockMode === 'compact' ? MEMORY_CHAT_COMPACT : chatDockWidth}px` }"
+    :style="{ '--memory-tree-width': `${fileTreeWidth}px`, '--memory-chat-width': `${chatDockMode === 'compact' ? MEMORY_CHAT_COMPACT : chatDockWidth}px` }"
     data-tauri-drag-region
   >
+    <div v-if="desktopWindowHeader && creationFocused" class="memory-window-actions" data-tauri-drag-region>
+      <button
+        class="memory-window-action memory-window-creation-toggle"
+        type="button"
+        title="创作面板"
+        aria-label="创作面板"
+        :aria-pressed="creationOpen"
+        :disabled="!conversation"
+        @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
+      ><JcIcon name="movie_filter" /><span>创作面板</span></button>
+      <button
+        class="memory-window-action"
+        type="button"
+        title="账号设置"
+        aria-label="账号设置"
+        @click="settingsOpen = true"
+      ><JcIcon name="settings" /></button>
+    </div>
     <aside class="memory-tree" :class="{ open: treeOpen }">
       <ProjectFileTree />
     </aside>
+    <div v-if="treeOpen && !creationFocused && viewportWidth > 760" class="memory-tree-resizer" role="separator" tabindex="0" aria-label="调整文件树宽度" aria-orientation="vertical" :aria-valuenow="Math.round(fileTreeWidth)" :aria-valuemin="180" :aria-valuemax="treeMaximumWidth()" title="拖动调整文件树宽度，双击恢复默认" @pointerdown.prevent="startFileTreeResize" @keydown="handleFileTreeResizeKey" @dblclick="resetFileTreeWidth" />
     <button v-if="treeOpen" class="memory-tree-backdrop" aria-label="关闭文件树" @click="treeOpen = false"></button>
 
     <main ref="memoryMainEl" class="memory-main memory-chat-dock">
@@ -4229,20 +4348,25 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <button
           v-if="projectOwner"
           class="new-conversation-button"
+          type="button"
+          title="新建对话"
+          aria-label="新建对话"
           :disabled="projectActionPending"
           @click="startNewConversation"
         >
           <JcIcon name="add" class="memory-new-conversation-icon" />
-          <span>新建对话</span>
         </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
         <div class="memory-topbar-actions">
           <button
-            v-if="conversation"
-            class="icon-button"
+            class="memory-creation-toggle"
+            type="button"
             title="创作面板"
+            aria-label="创作面板"
+            :aria-pressed="creationOpen"
+            :disabled="!conversation"
             @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
-          ><JcIcon name="palette" /></button>
+          ><JcIcon name="movie_filter" /><span>创作面板</span></button>
           <div ref="modelPickerRef" class="memory-model-picker">
             <button class="memory-model-trigger" type="button" aria-label="模型" :aria-expanded="modelPickerOpen" @click="modelPickerOpen = !modelPickerOpen">
               <JcIcon name="auto_awesome" class="memory-model-icon" /><span>{{ currentModelLabel }}</span><JcIcon class="memory-picker-chevron" :name="modelPickerOpen ? 'expand-less' : 'expand-more'" />
@@ -4255,7 +4379,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <p v-if="!textModels.length" class="memory-model-empty">登录后加载模型</p>
             </div>
           </div>
-          <button class="icon-button" title="账号与设置" @click="settingsOpen = true"><JcIcon name="settings" /></button>
+          <button class="icon-button memory-account-settings" title="账号设置" aria-label="账号设置" @click="settingsOpen = true"><JcIcon name="settings" /></button>
         </div>
       </header>
 
@@ -4310,6 +4434,25 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             v-if="(turn.id !== 'streaming-assistant' && displayTurnContent(turn)) || turn.role === 'user' || shouldSuggestFileWrite(turn)"
             class="memory-message-actions"
           >
+            <div class="memory-response-meta">
+              <div v-if="completedRunVisible && turn.id === (activeRun?.officialAssistantTurnId || latestAssistantTurnId)" class="memory-run-complete" role="status" aria-live="polite">
+                <JcIcon name="check_circle" />
+                <span>已完成</span>
+                <time>{{ new Date(turn.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</time><span>用时 {{ formatRunElapsed(runElapsed) }}</span>
+              </div>
+              <details v-if="answerUsageFor(turn)" class="memory-usage memory-answer-usage">
+                <summary>用量</summary>
+                <dl>
+                  <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.inputTokens) }}</dd></div>
+                  <div><dt>缓存读取</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.cacheReadTokens) }}</dd></div>
+                  <div><dt>缓存写入</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.cacheWriteTokens) }}</dd></div>
+                  <div><dt>输出</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.outputTokens) }}</dd></div>
+                  <div><dt>思考</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.reasoningTokens) }}</dd></div>
+                  <div><dt>本地模型窗口配置</dt><dd>{{ DEEPSEEK_HARNESS_CONTEXT_WINDOW.toLocaleString('zh-CN') }}</dd></div>
+                </dl>
+              </details>
+
+            </div>
             <button
               v-if="turn.role === 'user' && turn.id !== 'streaming-assistant'"
               class="memory-message-edit"
@@ -4466,7 +4609,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <span>{{ liveProcessStep?.label || runStatus || '正在执行任务' }}</span>
             <small v-if="liveProcessStep?.summary">{{ liveProcessStep.summary }}</small>
           </div>
-          <details v-if="harnessUsageFor(turn.id)" class="memory-usage">
+          <details v-if="!hasFollowingAnswer(turn.id) && harnessUsageFor(turn.id)" class="memory-usage">
             <summary>{{ usageContextLabel(harnessUsageFor(turn.id)!) }} · 最近一次请求</summary>
             <dl>
               <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.inputTokens) }}</dd></div>
@@ -4509,11 +4652,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         :container="messagesEl"
         :is-streaming="sending"
       />
-      <div v-if="conversationQuestionCount > 1" class="memory-round-nav" aria-label="对话轮次导航">
-        <button type="button" aria-label="上一条问题" title="上一条问题" @click="navigateQuestion(-1)"><JcIcon name="arrow_upward" /></button>
-        <span>{{ conversationQuestionCount }} 问</span>
-        <button type="button" aria-label="下一条问题" title="下一条问题" @click="navigateQuestion(1)"><JcIcon name="arrow_downward" /></button>
-      </div>
       <button
         v-if="memoryScrollNav?.showScrollToBottom"
         class="memory-scroll-latest"
@@ -4522,7 +4660,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         @click="memoryScrollNav?.scrollToBottom()"
       ><JcIcon name="arrow_downward" /><span>{{ memoryScrollNav?.hasNewContent ? '有新内容' : '回到最新' }}</span></button>
 
-      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer">
+        <div v-if="contextNotice" class="memory-context-notice" role="status">
+          <span>{{ contextNotice }}</span>
+          <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
+        </div>
+
+      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer" :class="{ 'has-composer-context': selectedSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1 }">
+        <div v-if="selectedSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1" class="memory-composer-header">
+        <div v-if="conversationQuestionCount > 1" class="memory-round-nav" aria-label="对话轮次导航">
+          <button type="button" aria-label="上一条问题" title="上一条问题" @click="navigateQuestion(-1)"><JcIcon name="arrow_upward" /></button>
+          <span>{{ conversationQuestionCount }} 问</span>
+          <button type="button" aria-label="下一条问题" title="下一条问题" @click="navigateQuestion(1)"><JcIcon name="arrow_downward" /></button>
+        </div>
         <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
@@ -4533,6 +4682,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
             <button :title="`移除${tool.label}`" @click="disableTool(tool.id)">×</button>
           </div>
+        </div>
         </div>
         <div v-if="attachmentImportProgress" class="memory-attachment-progress" role="status" aria-live="polite">
           <JcIcon name="sync" class="spinning" />
@@ -4579,10 +4729,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button type="button" :aria-label="`移除会话引用 ${session.title}`" title="移除会话引用" @click="referencedSessions = referencedSessions.filter(item => item.conversationId !== session.conversationId)">×</button>
           </div>
         </div>
-        <div v-if="contextNotice" class="memory-context-notice" role="status">
-          <span>{{ contextNotice }}</span>
-          <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
-        </div>
         <section v-if="queueItems.length" class="memory-inbox-queue" aria-label="待处理消息队列">
           <header><strong>待处理</strong><span>{{ queueItems.length }} 条</span></header>
           <article v-for="item in queueItems" :key="item.id" class="memory-inbox-item">
@@ -4619,17 +4765,6 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </div>
           </div>
           <small v-if="displayedError">{{ displayedError }}</small>
-        </div>
-        <div v-else-if="completedRunVisible" class="memory-run-complete" role="status" aria-live="polite">
-          <JcIcon name="check_circle" />
-          <span>已完成</span>
-          <time>{{ formatRunElapsed(runElapsed) }}</time>
-          <details v-if="activeRun?.usage" class="memory-run-complete-usage">
-            <summary>用量</summary>
-            <span>输入 {{ formatTokenCount(activeRun.usage.inputTokens) }}</span>
-            <span>输出 {{ formatTokenCount(activeRun.usage.outputTokens) }}</span>
-            <span>上下文窗口 {{ DEEPSEEK_HARNESS_CONTEXT_WINDOW.toLocaleString('zh-CN') }}</span>
-          </details>
         </div>
         <ToolApprovalStrip
           v-if="pendingMemoryToolApproval"
@@ -4685,7 +4820,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <div class="memory-command-strip" aria-label="常用指令">
               <!--
                 权限排第一位，而且**不是 `insertCommand` 那种“往输入框插一句话”的指令**：
-                点它弹出官方那三档。旁边五个 `@` 是启用某能力，这一个决定其余能力能碰到什么。
+                点它弹出官方那三档。创作与 Skill 按钮启用能力，这一个决定其余能力能碰到什么。
                 菜单复用已有的 `.memory-command-more` / `.memory-command-menu`（向上弹的那一套）。
 
                 按钮**常驻显示当前档位**（选什么显示什么，直到用户改）：默认态不再把档位藏在
@@ -4704,34 +4839,13 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                   @blur="hideChipTip"
                   @click="togglePermissionMenu($event)"
                 >
-                  <JcIcon name="description" /><span>{{ permissionSwitching ? '切换中' : permissionTierShortLabel() }}</span>
+                  <JcIcon name="folder" /><span>{{ permissionSwitching ? '切换中' : '工作区' }}</span><JcIcon name="expand_more" />
                 </button>
               </div>
-              <button
-                v-if="desktopOnlyRuntime"
-                type="button"
-                class="memory-manju-button"
-                :class="{ active: manjuSelected }"
-                :aria-pressed="manjuSelected"
-                :disabled="!conversation"
-                title="漫剧制作"
-                @click="toggleManjuProduction"
-              ><JcIcon name="movie" /><span>漫剧制作</span></button>
-              <button
-                v-if="desktopOnlyRuntime"
-                type="button"
-                class="memory-novel-button"
-                :class="{ active: novelSelected }"
-                :aria-pressed="novelSelected"
-                :disabled="!conversation"
-                title="小说创作"
-                @click="toggleNovelProduction"
-              ><JcIcon name="edit-note" /><span>小说创作</span></button>
-              <button v-for="command in primaryCommands" :key="command.id" :data-command-id="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
-                <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
-              </button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected }" :aria-pressed="manjuSelected" @click="toggleManjuProduction()"><JcIcon name="movie" /><span>漫剧制作</span></button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="edit-note" /><span>小说创作</span></button>
+              <button type="button" data-command-id="skill" :title="skillCommand.description" @click="insertCommand(skillCommand)"><JcIcon name="psychology" /><span>@Skill</span></button>
             </div>
-            <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending && (canQueueDraft || queueSubmitting)" class="send-button" :title="queueSubmitting ? '正在排入队列…' : '排入当前会话队列'" :disabled="queueSubmitting" @click="send()"><JcIcon name="playlist_add" /></button>
             <button v-else-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
             <button v-if="sending && (canQueueDraft || queueSubmitting)" type="button" class="memory-queue-stop" title="停止当前运行，保留队列" aria-label="停止当前运行，保留队列" @click="stop"><JcIcon name="stop" /></button>
@@ -4988,24 +5102,47 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 </template>
 
 <style scoped>
-.memory-workbench { --memory-header-height: 52px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--jc-surface); color: var(--ink1); font-size: var(--font-base); }
+.memory-workbench { --memory-header-height: 52px; --memory-model-picker-width: min(220px, 28vw); position: relative; display: grid; grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--jc-surface); color: var(--ink1); font-size: var(--font-base); }
 .memory-workbench.desktop-runtime { padding-top: 28px; box-sizing: border-box; }
+.memory-window-actions { position: absolute; z-index: 90; top: 0; right: 10px; display: flex; height: 28px; align-items: center; gap: 5px; }
+.memory-window-action { display: inline-flex; height: 25px; align-items: center; justify-content: center; gap: 5px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+.memory-window-action:not(.memory-window-creation-toggle) { width: 28px; flex: 0 0 28px; padding: 0; }
+.memory-window-action:hover:not(:disabled), .memory-window-action[aria-pressed="true"] { background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
+.memory-window-action:disabled { cursor: default; opacity: .45; }
+.memory-window-creation-toggle { box-sizing: border-box; padding: 0 9px; }
+.memory-workbench.desktop-runtime .memory-model-picker { width: var(--memory-model-picker-width); max-width: var(--memory-model-picker-width); }
+.memory-workbench.desktop-runtime .memory-model-trigger { width: 100%; box-sizing: border-box; }
 .memory-scene-recorder { position: fixed; top: 0; left: -10000px; width: 640px; height: 640px; pointer-events: none; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
-.memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.creation-open { grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr) var(--memory-chat-width); }
 .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr) var(--memory-chat-width); }
-.memory-workbench.preview-open { grid-template-columns: 280px minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.preview-open { grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr) var(--memory-chat-width); }
 .memory-workbench.preview-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr) var(--memory-chat-width); }
 .memory-workbench.preview-open .memory-main { grid-column: 3; }
 .memory-workbench.preview-open .memory-preview { grid-column: 2; grid-row: 1; }
 .memory-workbench.creation-open .memory-main { grid-column: 3; }
 .memory-workbench.creation-open .memory-creation { grid-column: 2; grid-row: 1; }
 .memory-chat-dock { min-width: 0; }
-.memory-conversation-icon, .memory-new-conversation-icon, .memory-model-icon { display: none; }
+.memory-conversation-icon, .memory-model-icon { display: none; }
+.memory-new-conversation-icon { display: block; width: 18px; height: 18px; }
 .memory-workbench.chat-dock-narrow .memory-topbar { gap: 4px; padding: 0 6px; }
-.memory-workbench.chat-dock-narrow .memory-conversation-trigger, .memory-workbench.chat-dock-narrow .new-conversation-button, .memory-workbench.chat-dock-narrow .memory-model-trigger { width: 34px; padding: 0; justify-content: center; }
-.memory-workbench.chat-dock-narrow .memory-conversation-trigger > span, .memory-workbench.chat-dock-narrow .new-conversation-button > span, .memory-workbench.chat-dock-narrow .memory-model-trigger > span, .memory-workbench.chat-dock-narrow .memory-picker-chevron { display: none; }
+.memory-workbench.chat-dock-narrow .memory-conversation-picker { flex: 0 1 38%; max-width: 38%; min-width: 52px; }
+.memory-workbench.chat-dock-narrow .memory-conversation-trigger { width: 100%; min-width: 0; gap: 4px; padding: 0 6px; }
+.memory-workbench.chat-dock-narrow .new-conversation-button { width: 30px; flex: 0 0 30px; }
+.memory-workbench.chat-dock-narrow .memory-title-drag { min-width: 0; flex: 0; }
+.memory-workbench.chat-dock-narrow .memory-topbar-actions { min-width: 0; flex: 1 1 auto; gap: 6px; }
+.memory-workbench.chat-dock-narrow .memory-model-picker { width: auto; max-width: none; min-width: 0; flex: 1 1 120px; }
+.memory-workbench.desktop-runtime.chat-dock-narrow .memory-model-picker { width: auto; max-width: none; }
+.memory-workbench.chat-dock-narrow .memory-model-trigger { width: 100%; min-width: 0; gap: 4px; justify-content: flex-start; padding: 0 6px; }
+.memory-workbench.chat-dock-narrow .memory-model-trigger > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-workbench.chat-dock-narrow .memory-creation-toggle { flex: 0 0 auto; padding: 0 8px; }
 .memory-workbench.chat-dock-narrow .memory-conversation-icon, .memory-workbench.chat-dock-narrow .memory-new-conversation-icon, .memory-workbench.chat-dock-narrow .memory-model-icon { display: inline; }
+.memory-workbench.chat-dock-minimal .memory-conversation-picker { flex: 0 0 34px; max-width: 34px; min-width: 34px; }
+.memory-workbench.chat-dock-minimal .memory-conversation-trigger { justify-content: center; padding: 0; }
+.memory-workbench.chat-dock-minimal .memory-conversation-trigger > span, .memory-workbench.chat-dock-minimal .memory-conversation-trigger .memory-picker-chevron { display: none; }
+.memory-workbench.chat-dock-minimal .memory-topbar-actions { gap: 2px; }
+.memory-workbench.chat-dock-minimal .memory-model-picker { flex-basis: 72px; }
+.memory-workbench.chat-dock-minimal .memory-topbar-actions > .icon-button { width: 34px; flex-basis: 34px; }
 .memory-chat-compact-bar { position: absolute; z-index: 30; inset: 0; display: grid; align-content: start; justify-items: center; gap: 10px; padding-top: 10px; background: var(--paper); }
 .memory-chat-compact-bar .icon-button { width: 34px; }
 .memory-workbench.chat-dock-compact:is(.preview-open, .creation-open) .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
@@ -5017,13 +5154,25 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
 .memory-workbench.desktop-runtime.creation-focused { padding-top: 28px; }
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
-.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--jc-border); background: var(--jc-surface); }
+.memory-tree-resizer { position: absolute; z-index: 40; top: 0; bottom: 0; left: calc(var(--memory-tree-width, 280px) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
+.memory-workbench.desktop-runtime .memory-tree-resizer { top: 28px; }
+.memory-tree-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; }
+.memory-tree-resizer:hover::after, .memory-tree-resizer:focus-visible::after { background: var(--olive); }
+.memory-tree-resizer:focus-visible { outline: 0; }
+.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--jc-border); background: var(--jc-surface-container-low); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
 .memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--jc-surface); }
 .memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--jc-border); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
-.memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.memory-topbar-actions { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 8px; margin-left: auto; }
+.memory-topbar-actions > .memory-account-settings { width: 34px; flex: 0 0 34px; border: 0; background: transparent; color: var(--ink2); }
+.memory-topbar-actions > .memory-account-settings:hover { background: var(--surface-alt); }
 .memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 8px; }
+.memory-creation-toggle { display: inline-flex; align-items: center; gap: 6px; height: 34px; flex: 0 0 auto; padding: 0 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.memory-creation-toggle > svg, .memory-window-creation-toggle > svg { width: 20px; height: 20px; flex: 0 0 20px; }
+.memory-creation-toggle:hover:not(:disabled) { background: var(--surface-alt); color: var(--ink1); }
+.memory-creation-toggle:disabled { cursor: default; opacity: .45; }
+.memory-creation-toggle[aria-pressed="true"] { color: var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--surface)); }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
 .memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }
 .memory-conversation-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5038,7 +5187,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .memory-conversation-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
 .memory-conversation-action:hover { color: var(--olive); }
-.new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
+.new-conversation-button { display: grid; width: 34px; flex: 0 0 34px; place-items: center; padding: 0; border: 0; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; }
+.new-conversation-button:hover:not(:disabled) { background: var(--surface-alt); color: var(--olive); }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
 .memory-model-picker { position: relative; flex: none; min-width: 0; max-width: min(260px, 28vw); }
 .memory-model-trigger { display: flex; max-width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
@@ -5052,7 +5202,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-model-empty { margin: 8px; color: var(--ink3); font-size: 12px; }
 .icon-button, .send-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; }
 .icon-button:hover { color: var(--olive); border-color: var(--olive); }
-.memory-messages { min-height: 0; overflow-y: scroll; padding: 24px max(20px, calc((100% - 820px) / 2)); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
+.memory-topbar .icon-button, .memory-topbar .new-conversation-button { border: 0; background: transparent; color: var(--ink2); }
+.memory-topbar .icon-button:hover, .memory-topbar .new-conversation-button:hover:not(:disabled) { background: var(--surface-alt); color: var(--olive); }
+.memory-messages { min-height: 0; overflow-y: scroll; padding: 24px max(20px, calc((100% - 820px) / 2)); background: var(--jc-surface); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
 .memory-messages::-webkit-scrollbar { width: 18px; }
 .memory-messages::-webkit-scrollbar-track { border-radius: 999px; background: transparent; }
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
@@ -5087,6 +5239,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-scene-composer button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 6px; background: var(--olive); color: white; cursor: pointer; }
 .memory-scene-composer button:disabled { cursor: default; opacity: .45; }
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
+.memory-run-complete { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--ink3); font-size: 12px; }
+.memory-run-complete > svg, .memory-run-complete > span:first-of-type { color: var(--olive); }
+.memory-response-meta { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
+.memory-answer-usage { position: relative; margin: 0; font-size: 12px; color: var(--ink3); }
+.memory-answer-usage > dl { position: absolute; z-index: 12; bottom: 100%; left: 0; width: 220px; padding: 10px; border: 1px solid var(--jc-border); border-radius: 10px; background: var(--paper); box-shadow: 0 6px 20px rgb(36 42 32 / 8%); }
 .memory-message-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .memory-message-copy { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink2); cursor: pointer; }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
@@ -5121,19 +5278,27 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-streaming-indicator { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--olive); animation: memory-streaming-pulse 1.4s ease-in-out infinite; }
 @keyframes memory-streaming-pulse { 50% { opacity: .35; } }
 @media (prefers-reduced-motion: reduce) { .memory-streaming-indicator { animation: none; } }
-.memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--jc-border); border-radius: 12px; background: var(--paper); box-shadow: 0 8px 24px rgb(36 42 32 / 6%); transition: border-color var(--jc-transition-fast), box-shadow var(--jc-transition-fast); }
-.memory-composer:focus-within { border-color: color-mix(in srgb, var(--olive) 64%, var(--jc-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--olive) 9%, transparent), 0 8px 24px rgb(36 42 32 / 5%); }
-.memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 7px 10px 0; scrollbar-width: none; }
+.memory-composer { position: relative; box-sizing: border-box; min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--jc-border); border-radius: 16px; background: var(--paper); box-shadow: 0 2px 8px rgb(36 42 32 / 3%); transition: border-color var(--jc-transition-fast), box-shadow var(--jc-transition-fast); }
+.memory-composer:focus-within { border-color: color-mix(in srgb, var(--olive) 64%, var(--jc-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--olive) 9%, transparent), 0 2px 8px rgb(36 42 32 / 3%); }
+.memory-composer.has-composer-context { margin-top: 28px; }
+.memory-composer-header { position: absolute; z-index: 2; bottom: calc(100% + 1px); right: 14px; left: 14px; display: flex; height: 28px; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 0; order: -1; flex: 1; scrollbar-width: none; }
 .memory-selected-tools::-webkit-scrollbar { display: none; }
-.memory-selected-tools .memory-attachment-chip { flex: 0 0 auto; }
+.memory-selected-tools .memory-attachment-chip { height: 26px; flex: 0 0 auto; border: 0; border-radius: 7px; background: var(--olive-pale); color: var(--olive); }
+.memory-round-nav { position: static; margin-left: auto; display: inline-flex; align-items: center; gap: 3px; padding: 1px 4px; flex: 0 0 auto; border-radius: 8px; background: transparent; color: var(--ink3); font-size: 12px; white-space: nowrap; }
+.memory-round-nav button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
+.memory-round-nav button:hover { background: color-mix(in srgb, var(--olive) 9%, transparent); color: var(--olive); }
+.memory-round-nav svg { width: 16px; height: 16px; }
 .memory-editing-cancel { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-editing-cancel:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-command-strip { display: flex; min-width: 0; max-width: calc(100% - 80px); flex: 0 1 auto; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.memory-command-strip { display: flex; min-width: 0; flex: 1 1 0; align-items: center; gap: 4px; flex-wrap: wrap; overflow: visible; }
 .memory-command-strip::-webkit-scrollbar { display: none; }
 .memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-/* 保留 @ 提及入口和能力执行链路，只隐藏底部重复的快捷按钮。 */
-.memory-command-strip > button[data-command-id="media"], .memory-command-strip > button[data-command-id="av"], .memory-command-strip > button[data-command-id="mcp"], .memory-command-strip > button[data-command-id="scene3d"] { display: none; }
-/* 芯片提示用 fixed 定位，避开 `.memory-command-strip` 的 overflow 裁剪；颜色走主题。 */
+.memory-workbench.chat-dock-minimal .memory-command-more > button { width: 30px; justify-content: center; padding: 0; }
+.memory-workbench.chat-dock-minimal .memory-command-more > button > span { display: none; }
+.memory-action-row > .icon-button { width: 36px; height: 36px; flex: 0 0 36px; border: 0; background: transparent; }
+.memory-action-row > .icon-button:hover { background: var(--surface); }
+/* 芯片提示用 fixed 定位，避开祖先容器裁剪；颜色走主题。 */
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
 .memory-command-strip > .memory-manju-button.active, .memory-command-strip > .memory-novel-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
@@ -5155,10 +5320,9 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-permission-confirm-actions button.primary { border-color: transparent; background: var(--olive); color: #fff; }
 .memory-permission-menu button { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
 .memory-permission-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
-.memory-input-row { position: relative; display: grid; min-width: 0; gap: 8px; padding: 10px; }
-.memory-input-area { display: flex; min-width: 0; min-height: 76px; align-items: flex-start; padding: 7px 4px 0; }
-.memory-action-row { display: flex; min-width: 0; align-items: center; gap: 4px; }
-.memory-action-spacer { min-width: 8px; flex: 1; }
+.memory-input-row { position: relative; display: grid; min-width: 0; gap: 12px; padding: 8px 14px 12px; }
+.memory-input-area { display: flex; min-width: 0; align-items: flex-start; padding: 6px 2px 0; }
+.memory-action-row { display: flex; min-width: 0; align-items: flex-end; gap: 4px; }
 .memory-input-drop-active { border: 1px dashed var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--paper)); }
 .memory-mention-popover { position: absolute; z-index: 60; right: 10px; bottom: calc(100% + 7px); left: 10px; max-height: min(320px, 42vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-mention-popover > button { display: grid; width: 100%; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
@@ -5166,16 +5330,21 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-mention-kind, .memory-mention-empty { color: var(--ink3); font-size: 11px; }
 .memory-mention-empty { padding: 9px; }
-.memory-composer-editable { width: 100%; min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.memory-composer-editable { width: 100%; min-width: 0; height: 4.65em; min-height: 4.65em; max-height: 4.65em; flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .memory-composer-editable:empty::before { color: var(--ink3); content: attr(data-placeholder); pointer-events: none; }
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }
 .memory-composer-editable::-webkit-scrollbar-thumb { min-height: 36px; border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .send-button { border-color: var(--olive); background: var(--olive); color: white; }
+.memory-action-row > .send-button { width: 36px; height: 36px; flex-basis: 36px; border: 0; border-radius: 8px; }
+.memory-action-row > .send-button > svg { width: 18px; height: 18px; }
+.memory-action-row > .send-button:disabled { background: var(--line); color: var(--surface); opacity: .5; }
+.memory-action-row > .send-button:hover:not(:disabled) { opacity: .9; }
 .send-button:disabled { opacity: .4; cursor: default; }
 .memory-status { padding: 6px 12px 0; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-status.error { color: var(--danger); }
 .memory-context-notice { display: flex; min-height: 0; align-items: center; gap: 6px; margin: 7px 10px 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.35; }
+.memory-main > .memory-context-notice { box-sizing: border-box; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 8px; border: 0; background: transparent; }
 .memory-context-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .memory-context-notice button { display: grid; width: 18px; height: 18px; flex: 0 0 18px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }
 .memory-run-status { margin: 7px 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
@@ -5295,7 +5464,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 @media (max-width: 939px) {
   .memory-workbench.chat-dock-compact .memory-main > :not(.memory-chat-compact-bar) { visibility: visible; }
   .memory-workbench.chat-dock-compact .memory-chat-compact-bar { display: none; }
-  .memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr); }
+  .memory-workbench.creation-open { grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr); }
   .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
   .memory-workbench.creation-open .memory-main { grid-column: auto; }
   .memory-workbench.creation-open .memory-creation { grid-column: auto; }
@@ -5317,8 +5486,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-title-drag { display: none; }
   .memory-topbar-actions { gap: 4px; }
   .memory-conversation-picker { max-width: 90px; }
-  .new-conversation-button { padding: 0 7px; }
   .memory-model-picker { max-width: 100px; }
+  .memory-workbench.desktop-runtime .memory-model-picker { width: auto; max-width: 100px; }
+  .memory-workbench.desktop-runtime .memory-model-trigger { width: 100%; }
+  .memory-workbench.desktop-runtime .memory-window-creation-toggle { width: auto; }
   .memory-model-menu { right: 0; left: auto; }
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }

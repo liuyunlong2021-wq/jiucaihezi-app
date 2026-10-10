@@ -14,6 +14,7 @@ export const useCanvasStore = defineStore('canvas', () => {
   const canvasId = ref('default')
   const canvasPath = ref('')
   const viewport = ref({ x: 0, y: 0, zoom: 1 })
+  const viewportInitialized = ref(false)
   const canvasName = computed(() => canvasPath.value.split('/').pop()?.replace(/\.jccanvas$/i, '') || '未命名画布')
 
   const imageLayers = computed(() => layers.value)
@@ -55,6 +56,7 @@ export const useCanvasStore = defineStore('canvas', () => {
     return createCanvasDocument({
       canvasId: canvasId.value,
       viewport: viewport.value,
+      viewportInitialized: viewportInitialized.value,
       scene,
       assets: assets.value,
     })
@@ -81,10 +83,11 @@ export const useCanvasStore = defineStore('canvas', () => {
     }))
     annotations.value = []
     viewport.value = document.viewport || { x: 0, y: 0, zoom: 1 }
+    viewportInitialized.value = document.viewportInitialized ?? false
   }
 
   return {
-    layers, annotations, assets, canvasId, canvasPath, canvasName, viewport,
+    layers, annotations, assets, canvasId, canvasPath, canvasName, viewport, viewportInitialized,
     imageLayers,
     addLayer, removeLayer,
     updateLayerPosition, updateLayerSize,

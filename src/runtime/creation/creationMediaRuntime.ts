@@ -16,7 +16,7 @@ import {
   type VideoGenParams,
 } from '@/api/media-generation'
 import type { CreationMediaInputTransport, CreationRunPlan } from './creationMediaTypes'
-import { getComfyUiApiBase, getComfyWorkflowApiKey } from '@/utils/comfyUiRuntime'
+import { getComfyUiApiBase, getComfyWorkflowApiKey, comfyServiceHeaders } from '@/utils/comfyUiRuntime'
 import { canonicalCreationRatio, usesNewApiContentEndpoint } from './creationMediaPlan'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 
@@ -332,6 +332,14 @@ async function executeLocalComfyRequest(
       continue
     }
     const resultUrl = `${base}/view?filename=${encodeURIComponent(image.filename)}&subfolder=${encodeURIComponent(image.subfolder || '')}&type=${encodeURIComponent(image.type || 'output')}`
+    const headers = await comfyServiceHeaders(resultUrl)
+    if (headers.Authorization) {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const downloaded = await invoke<{ data_base64: string }>('http_download_base64', { request: { url: resultUrl, headers } })
+      throwIfCreationAborted(request.signal)
+      const bytes = Uint8Array.from(atob(downloaded.data_base64), char => char.charCodeAt(0))
+      return { url: `data:${detectImageMimeFromBytes(bytes)};base64,${downloaded.data_base64}`, type: 'image', taskId: promptId, pollKind: 'image' }
+    }
     return { url: resultUrl, type: 'image', taskId: promptId, pollKind: 'image' }
   }
   throw new Error('本机 ComfyUI 生成超时')
@@ -348,7 +356,7 @@ async function executeLocalComfyGrokVideoRequest(
   const images = asStringArray(request.plan.debug.normalizedParams.images)
   if (!images.length || images.length > GROK_REFERENCE_NODE_IDS.length) throw new Error('请选择 1 至 7 张参考图')
   const apiKey = await getComfyWorkflowApiKey()
-  if (!apiKey) throw new Error('请先在设置 → 本机 ComfyUI 填写 API Key')
+  if (!apiKey) throw new Error('请先在设置 → 模型与服务 → 工作流服务填写上游模型 Key')
   const base = getComfyUiApiBase()
   const uploadedImages: string[] = []
   onProgress?.(0, '上传参考图到本机 ComfyUI...')
@@ -391,7 +399,7 @@ async function uploadComfyImage(base: string, image: string, index: number, sign
   if (!match) throw new Error(`参考图 ${index + 1} 不是可上传的本机图片`)
   const { invoke } = await import('@tauri-apps/api/core')
   const response = await invoke<{ status: number; body: string }>('comfy_upload_image', {
-    request: buildComfyUploadRequestData(base, index, match[1], match[2]),
+    request: { ...buildComfyUploadRequestData(base, index, match[1], match[2]), headers: await comfyServiceHeaders(base + '/upload/image') },
   })
   throwIfCreationAborted(signal)
   if (response.status < 200 || response.status >= 300) throw new Error(`ComfyUI 参考图上传失败 HTTP ${response.status}`)
@@ -417,7 +425,7 @@ async function localComfyJson(url: string, init: RequestInit = {}, signal?: Abor
     request: {
       url,
       method: init.method || 'GET',
-      headers: init.headers || undefined,
+      headers: { ...await comfyServiceHeaders(url), ...Object.fromEntries(new Headers(init.headers).entries()) },
       body: typeof init.body === 'string' ? init.body : undefined,
       timeout_secs: 120,
     },

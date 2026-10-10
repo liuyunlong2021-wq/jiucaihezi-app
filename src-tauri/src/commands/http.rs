@@ -72,6 +72,7 @@ pub struct DocumentMarkdownRequest {
 #[derive(Deserialize)]
 pub struct ComfyUploadImageRequest {
     pub url: String,
+    pub headers: Option<HashMap<String, String>>,
     pub filename: String,
     pub mime_type: String,
     pub data_base64: String,
@@ -99,10 +100,15 @@ fn is_document_converter_url(url: &str) -> bool {
 
 fn is_local_comfy_upload_url(url: &str) -> bool {
     tauri::Url::parse(url).ok().is_some_and(|parsed| {
-        parsed.scheme() == "http"
-            && matches!(parsed.host_str(), Some("127.0.0.1" | "localhost" | "::1"))
-            && parsed.path() == "/upload/image"
-            && parsed.query().is_none()
+        let local = parsed.host_str().is_some_and(|host| {
+            host == "localhost" || host.trim_matches(['[', ']']).parse::<std::net::IpAddr>().is_ok_and(|ip| match ip {
+                std::net::IpAddr::V4(ip) => ip.is_loopback() || ip.is_private(),
+                std::net::IpAddr::V6(ip) => ip.is_loopback(),
+            })
+        });
+        (parsed.scheme() == "https" || (parsed.scheme() == "http" && local))
+            && parsed.username().is_empty() && parsed.password().is_none()
+            && parsed.path().ends_with("/upload/image") && parsed.query().is_none() && parsed.fragment().is_none()
     })
 }
 
@@ -379,7 +385,7 @@ pub async fn document_markdown_request(
 #[tauri::command]
 pub async fn comfy_upload_image(request: ComfyUploadImageRequest) -> Result<HttpResponse, String> {
     if !is_local_comfy_upload_url(&request.url) {
-        return Err("ComfyUI 上传地址必须是本机 /upload/image".into());
+        return Err("ComfyUI 上传地址必须是本机、局域网 HTTP 或 HTTPS 服务的 /upload/image".into());
     }
     let data = general_purpose::STANDARD
         .decode(&request.data_base64)
@@ -397,14 +403,18 @@ pub async fn comfy_upload_image(request: ComfyUploadImageRequest) -> Result<Http
         .file_name(filename)
         .mime_str(&request.mime_type)
         .map_err(|_| "参考图 MIME 类型无效".to_string())?;
-    let response = reqwest::Client::builder()
+    let mut upload = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
         .connect_timeout(std::time::Duration::from_secs(10))
         .timeout(std::time::Duration::from_secs(120))
         .build()
         .map_err(|e| format!("创建 ComfyUI 上传连接失败: {}", e))?
         .post(&request.url)
-        .multipart(reqwest::multipart::Form::new().text("overwrite", "true").part("image", file))
-        .send()
+        .multipart(reqwest::multipart::Form::new().text("overwrite", "true").part("image", file));
+    for (key, value) in request.headers.unwrap_or_default() {
+        if key.eq_ignore_ascii_case("authorization") { upload = upload.header(key, value); }
+    }
+    let response = upload.send()
         .await
         .map_err(|e| format!("ComfyUI 参考图上传失败: {}", e))?;
     let status = response.status().as_u16();

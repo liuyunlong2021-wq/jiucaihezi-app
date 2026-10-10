@@ -4,10 +4,13 @@ import { ensureProfilePluginLinks } from './profile-plugins.mjs'
 
 const config = JSON.parse(process.argv[2] || '{}')
 
-// Computer Use 的两个插件包不在官方 bundle 依赖图里，profile 目录解析不到时 Loader 只会
-// 静默记一条 `failed to import`（不报错、工具表里空无一物）。挂上链接再启动，见
-// profile-plugins.mjs 的头注释。
-if (config.computerUse) ensureProfilePluginLinks(config.dshHome)
+// 这些官方/应用内插件不在 profile 依赖图里，Cordis 无法解析时只会静默记一条
+// `failed to import`。链接本机原生工具包后再启动，不创建 MCP 子进程。
+const profilePlugins = [
+  ...(config.computerUse ? ['dsh-computer-use', 'dsh-experimental-computer-use-cua-driver-native'] : []),
+  ...(config.nativeTools ? ['@jiucaihezi/dsh-tool-creation'] : []),
+]
+if (profilePlugins.length) ensureProfilePluginLinks(config.dshHome, { packages: profilePlugins })
 
 const harness = new DeepSeekHarness({
   cwd: config.cwd,

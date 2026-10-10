@@ -1791,6 +1791,8 @@ pub fn run() {
             secure_store::get_gateway_session_token,
             secure_store::set_gateway_session_token,
             secure_store::clear_gateway_session_token,
+            secure_store::get_comfy_service_credential,
+            secure_store::set_comfy_service_credential,
             secure_store::get_comfy_workflow_api_key,
             secure_store::set_comfy_workflow_api_key,
             secure_store::clear_comfy_workflow_api_key,

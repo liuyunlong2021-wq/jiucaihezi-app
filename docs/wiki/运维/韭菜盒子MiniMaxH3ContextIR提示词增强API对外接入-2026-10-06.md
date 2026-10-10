@@ -2,7 +2,7 @@
 
 > 本文档是韭菜盒子 API 的第三方接入说明。接口接收文本及可选图像、视频、音频上下文，返回 MiniMax H3 增强后的视频提示词；**不会生成视频**。
 >
-> **接入状态：基础链路已完成公网验收。** 已通过纯文本、后台任务模式的创建与轮询，成功取回非空增强提示词。多模态输入、流式模式、回调通知以及 `usage` 与实际结算的对账尚未完成专项验收。
+> **接入状态：基础链路已完成公网验收。** 已通过纯文本、后台任务模式的创建与轮询，成功取回非空增强提示词。官方上游合同于 2026-10-10 复核。多模态输入、同步模式、流式模式、回调通知以及 `usage` 与实际结算的对账尚未完成专项验收。
 
 ## 接入信息
 
@@ -17,6 +17,19 @@
 | 协议 | OpenAI Responses API 兼容；`content`、`duration`、`ratio`、`callback_url` 为本模型支持的扩展字段 |
 
 请使用韭菜盒子发放且已开通该模型权限的 API Key。MiniMax 上游密钥由服务端渠道管理，客户端不需要也不应传 MiniMax 密钥。
+
+## 兼容范围与验收状态
+
+| 能力 | 当前说明 |
+| --- | --- |
+| 后台任务 | 推荐使用；纯文本创建、轮询和非空结果已完成公网验收。 |
+| 同步响应 | 网关插件声明支持；尚未专项验收。 |
+| 流式响应 | 网关插件声明支持；尚未专项验收。 |
+| 图像、视频、音频输入 | 插件按上游格式转发；仅有上游规格依据，尚未完成公网多模态验收。 |
+| `callback_url` | 转发给 MiniMax，由 MiniMax 直接回调调用方；尚未专项验收。 |
+| 计费 | 已验收样例的 `usage` 为 0，尚未与账户结算记录对账；请勿据此推算价格。 |
+
+“插件声明支持”表示网关已实现对应协议分支，不代表该形态已完成公网验收。需要稳定接入时，请优先采用下方已验收的纯文本后台任务模式。
 
 ## 快速开始
 
@@ -47,6 +60,26 @@ curl --location 'https://api.jiucaihezi.studio/v1/responses' \
 ```bash
 curl --location 'https://api.jiucaihezi.studio/v1/responses/<RESPONSE_ID>' \
   --header 'Authorization: Bearer <YOUR_JIUCAIHEZI_API_KEY>'
+```
+
+下面只展示读取任务所需的关键字段，完整响应可能包含其他 Responses API 字段：
+
+```json
+{
+  "id": "resp_<response_id>",
+  "status": "completed",
+  "metadata": {
+    "task_id": "task_<upstream_task_id>"
+  },
+  "output": [
+    {
+      "type": "message",
+      "content": [
+        { "type": "output_text", "text": "<增强后的视频提示词>" }
+      ]
+    }
+  ]
+}
 ```
 
 任务成功时，须同时确认 `status` 为 `completed` 且 `output[].content[]` 中 `type` 为 `output_text` 的 `text` 非空。`metadata.task_status` 可辅助排查任务状态，但不能替代对最终输出文本的检查。响应文本就是增强后的提示词，可交给后续视频生成模型。
@@ -185,7 +218,7 @@ curl --location 'https://api.jiucaihezi.studio/v1/responses/<RESPONSE_ID>' \
 | --- | --- |
 | `400` | 参数不合法，例如缺少文本、时长/比例不支持、素材角色冲突。修正请求后再创建任务。 |
 | `401` | API Key 无效或未正确传入。 |
-| `402` | 上游账户余额不足。 |
+| `402` | 额度或余额不足；结合错误正文和账户记录确认是调用额度还是上游账户余额。 |
 | `422` | 内容审核拒绝。修改输入后再试。 |
 | `429` | 请求限流。降低并发并延迟重试；避免重复创建任务。 |
 | `5xx` | 上游或网关暂时不可用。若创建请求未返回响应 ID，确认任务是否已创建后再重试，避免重复扣费。 |
@@ -203,3 +236,4 @@ curl --location 'https://api.jiucaihezi.studio/v1/responses/<RESPONSE_ID>' \
 
 - [MiniMax 创建 H3-Context-IR 任务](https://platform.minimax.cn/docs/api-reference/video-generation-v2-h3-context-ir)
 - [MiniMax 查询任务](https://platform.minimax.cn/docs/api-reference/video-generation-v2-query)
+- [MiniMax 查询任务列表](https://platform.minimax.cn/docs/api-reference/video-generation-v2-list)
