@@ -10,5 +10,5 @@ test('ComfyUI address uses a local default and persists a normalized URL', () =>
 })
 
 test('ComfyUI address rejects non-http URLs', () => {
-  assert.throws(() => saveComfyUiApiBase('file:///tmp/comfyui', new Map()), /http/)
+  assert.throws(() => saveComfyUiApiBase('file:///tmp/comfyui', new Map()), /http/i)
 })

@@ -83,7 +83,8 @@ export interface AudioGenParams {
 
 export interface MediaResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  type: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
+  outputs?: Array<{ outputId: string; type: MediaResult['type']; url: string; text?: string; mimeType: string }>
   text?: string
   taskId?: string
   /** 上游轮询路径（用于任务恢复） */
@@ -152,6 +153,8 @@ function getApiBase(): string {
   }
   return _cachedConfig?.apiBase || DEFAULT_API_BASE_URL
 }
+
+export { getApiBase as getCreationApiBase }
 
 /**
  * 构建认证头：统一主 NewAPI Token

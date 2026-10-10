@@ -1,4 +1,5 @@
 import { resolveProductDefaultModelId, type MediaPlan } from './mediaPlan'
+import { classifyProjectResource } from '@/utils/projectResource'
 import type { ProjectResource } from '@/utils/projectResource'
 
 export type MediaReferenceKind = 'image' | 'video'
@@ -172,7 +173,7 @@ export function projectResourceForMediaTask(task: RecentMediaTask): ProjectResou
       path: task.projectPath,
       name: task.projectPath.split('/').pop() || task.projectPath,
       isDirectory: false,
-      kind: 'media',
+      kind: task.type === 'file' ? classifyProjectResource({ path: task.projectPath || task.assetUri || '' }) : 'media',
     }
   }
   const projectPath = String(task.projectPath || '').replace(/^\/+/, '')
@@ -191,7 +192,7 @@ export function projectResourceForMediaTask(task: RecentMediaTask): ProjectResou
         path,
         name: path.split('/').pop() || path,
         isDirectory: false,
-        kind: 'media',
+        kind: task.type === 'file' ? classifyProjectResource({ path: task.projectPath || task.assetUri || '' }) : 'media',
       }
     }
   }

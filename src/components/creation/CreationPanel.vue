@@ -544,6 +544,7 @@ async function previewTask(task: MediaTask) {
     return
   }
   const sourceUrl = task.resultUrl || task.sourceUrl
+  if (task.type === 'file') { cpState.progressText = task.projectPath ? `结果已保存：${task.projectPath}` : '此结果是通用文件，请先保存到项目后打开'; return }
   if (sourceUrl && isAllowedCreationResultUrl(sourceUrl)) {
     const type =
       task.type === 'video'
@@ -581,7 +582,7 @@ async function openTaskHistory() {
 }
 
 async function addTaskResultToCanvas(task: MediaTask) {
-  if (task.status !== 'success' || task.type === 'model3d') return
+  if (task.status !== 'success' || task.type === 'model3d' || task.type === 'file') return
   const owner = String(task.projectId || task.directory || selectedCanvasOwner())
   if (!owner || owner !== selectedCanvasOwner()) {
     cpState.progressText = '该结果属于其他项目，请先切换到对应项目'
@@ -1052,12 +1053,12 @@ async function runCreationViaTaskStore() {
         source: 'creation',
         canvasTarget,
         directory: isTauriRuntime() ? owner : undefined,
+        memory: true,
         plan: submitPlan,
         ...(origin ? {
           chatMessageId: origin.key,
           sessionId: origin.conversationId,
           directory: isTauriRuntime() ? origin.owner : undefined,
-          memory: true,
         } : {}),
       })
       if (objectUrls.length) submissionObjectUrls.set(taskId, objectUrls.splice(0))
@@ -4636,7 +4637,7 @@ const canSend = computed(
                 <button
                   v-if="
                     task.status === 'success' &&
-                    task.type !== 'model3d' &&
+                    task.type !== 'model3d' && task.type !== 'file' &&
                     (task.projectPath || task.assetUri)
                   "
                   @click="addTaskResultToCanvas(task)"

@@ -66,8 +66,13 @@ function registerCreationTool(ctx, name, description, parameters, execute) {
 function registerCreationTools(ctx, allowPaid) {
   registerCreationTool(ctx, 'get_creation_context', '读取当前韭菜盒子项目、画布和提交上下文。', {},
     () => invokeApp('get_creation_context', {}))
-  registerCreationTool(ctx, 'list_creation_models', '从韭菜盒子当前媒体模型表读取可用模型、参数、选项和价格。', {},
-    () => invokeApp('list_creation_models', { capabilities: ['av'] }))
+  registerCreationTool(ctx, 'list_creation_models', '按 Key 权限分页查询影音能力；创作面板可见性不影响执行权限。新模型须先读取详情合同。', {
+    query: { type: 'string' }, cursor: { type: 'string' }, limit: { type: 'integer' },
+    input_modality: { type: 'string' }, output_modality: { type: 'string' },
+  }, args => invokeApp('list_creation_models', { ...args, capabilities: ['av'] }))
+  registerCreationTool(ctx, 'get_creation_model', '读取影音能力的参数 schema、素材槽位和版本；只按合同填写，不猜接口。', {
+    modelId: { type: 'string', required: true }, revision: { type: 'string' },
+  }, args => invokeApp('get_creation_model', { ...args, capabilities: ['av'] }))
   registerCreationTool(ctx, 'get_creation_task', '查询韭菜盒子媒体任务的状态、进度和结果。', {
     taskId: { type: 'string', required: true },
   }, args => invokeApp('get_creation_task', args))
@@ -75,8 +80,8 @@ function registerCreationTools(ctx, allowPaid) {
     offset: { type: 'integer' },
     limit: { type: 'integer' },
   }, args => invokeApp('list_creation_history', args))
-  registerCreationTool(ctx, 'cancel_creation_task', '停止跟踪一项媒体任务；上游可能已经接收请求。', {
-    taskId: { type: 'string', required: true },
+  registerCreationTool(ctx, 'cancel_creation_task', '默认停止跟踪；remote=true 按能力合同请求远程取消，等待真实终态。停止跟踪或请求取消均不代表退款。', {
+    taskId: { type: 'string', required: true }, remote: { type: 'boolean' },
   }, args => invokeApp('cancel_creation_task', args))
   registerCreationTool(ctx, 'retry_media_persistence', '重试保存已成功生成的结果，不会重新生成。', {
     taskId: { type: 'string', required: true },
@@ -86,10 +91,11 @@ function registerCreationTools(ctx, allowPaid) {
     contextVersion: { type: 'string', required: true },
   }, args => invokeApp('add_creation_result_to_canvas', args))
   if (allowPaid) {
-    registerCreationTool(ctx, 'submit_creation_task', '使用韭菜盒子媒体模型提交一项图片、视频或音频生成任务。调用前先读取模型表和当前上下文；params 按模型字段传值，requestId 每次请求唯一。任务使用 App 已配置的媒体服务与 Key，并进入创作历史。', {
+    registerCreationTool(ctx, 'submit_creation_task', '使用 Key 有权调用的影音能力提交任务。调用前先查询目录、get_creation_model 与上下文；modelId 使用 capability_id，revision 和 params 按合同填写。网络不确定时使用原 requestId 查询恢复，重新生成才使用新 ID。任务使用 App 已配置的媒体服务与 Key，并进入创作历史。', {
       requestId: { type: 'string', required: true },
       contextVersion: { type: 'string', required: true },
       modelId: { type: 'string', required: true },
+      revision: { type: 'string' },
       params: { type: 'object', additionalProperties: true, required: true },
       directory: { type: 'string' },
     }, args => invokeApp('submit_creation_task', { ...args, capabilities: ['av'] }))

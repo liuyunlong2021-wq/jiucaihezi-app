@@ -50,6 +50,7 @@ import {
   buildCreationSubmitRequest,
   executeCreationSubmitRequest,
 } from '@/runtime/creation/creationMediaRuntime'
+import { executeDynamicCreation, prepareDynamicInputs, cancelDynamicCreation, CreationProtocolError } from '@/runtime/creation/creationProtocolClient'
 import type { CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
 import { writeCanvasTaskResult } from '@/components/canvas/canvasPersistence'
 import type { CanvasTaskTarget } from '@/types/canvas'
@@ -57,7 +58,7 @@ import type { CanvasTaskTarget } from '@/types/canvas'
 // ─── Types ───
 
 export type TaskStatus = 'pending' | 'running' | 'success' | 'failed' | 'cancelled'
-export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text'
+export type TaskMediaType = 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
 export type TaskSource = 'chat' | 'creation'
 
 /** 轮询窗口：视频按上游合同给足 30 分钟，其余保持原有的 10 分钟。 */
@@ -140,6 +141,7 @@ export interface CreationTaskError {
 }
 
 export interface CreationPlanSnapshot {
+  protocol?: CreationRunPlan['protocol']
   modelId: string
   model: string
   label: string
@@ -210,6 +212,10 @@ export interface MediaTask {
   upstreamFamily?: CreationRunPlan['upstreamFamily']
   apiStyle?: CreationRunPlan['apiStyle']
   mode?: CreationRunPlan['mode']
+  protocolOutputId?: string
+  parentTaskId?: string
+  resultMime?: string
+  outputTasks?: Array<{ outputId: string; taskId: string; type: TaskMediaType }>
   planSnapshot?: CreationPlanSnapshot
   error?: CreationTaskError
   // ─── 任务恢复字段 ───
@@ -364,6 +370,7 @@ export function __setMediaTaskSaverForTests(saver: typeof saveTasks | null) {
 
 function toPlanSnapshot(plan: CreationRunPlan): CreationPlanSnapshot {
   return {
+    protocol: plan.protocol,
     modelId: plan.modelId,
     model: plan.model,
     label: plan.label,
@@ -626,7 +633,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   /** 将媒体结果存入文件树（媒体 tab） */
   async function saveMediaToFileTree(task: MediaTask) {
-    if (!task.resultUrl || task.type === 'model3d') return
+    if (!task.resultUrl || task.type === 'model3d' || task.type === 'file') return
     try {
       const fileStore = useFileStore()
       const name = (task.prompt || task.modelLabel || '未命名').substring(0, 50)
@@ -707,7 +714,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     }
   }
 
-  /** P3: 创作结果下载落地到 data/media/creation/，使 Finder「我的文件」可见 */
+  /** 创作结果统一落到项目 .raw/jc-media/，不依赖对话来源或旧任务的 memory 标记。 */
   async function downloadAndPersistMediaAsset(url: string, task: MediaTask) {
     if (!url || task.source !== 'creation') return
     // dev WebView（加载 localhost 页面）里 getApiBase 会给出 Vite 代理相对前缀 /__jc_api：
@@ -744,7 +751,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         taskId: task.id,
         mimeType,
         sourceUrl: downloadUrl,
-        memory: task.memory,
+        memory: true,
       })
       await createProjectFileActions(createRuntimeProjectFileService()).importMedia({
         owner: projectId,
@@ -769,11 +776,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       const kind = task.type === 'video' ? 'video'
         : task.type === 'audio' ? 'audio'
           : task.type === 'model3d' ? 'model3d'
-            : task.type === 'text' ? 'text' : 'image'
-      const fallbackMime = kind === 'video' ? 'video/mp4'
+            : task.type === 'text' ? 'text' : task.type === 'file' ? 'file' : 'image'
+      const fallbackMime = task.resultMime || (kind === 'video' ? 'video/mp4'
         : kind === 'audio' ? 'audio/mpeg'
           : kind === 'model3d' ? 'model/gltf-binary'
-            : kind === 'text' ? 'text/plain' : 'image/png'
+            : kind === 'text' ? 'text/plain' : kind === 'file' ? 'application/octet-stream' : 'image/png')
       if (projectDir && !dataUri) {
         const { filePath, projectPath } = await downloadProjectMedia({
           url: downloadUrl,
@@ -794,7 +801,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           summary: task.summary,
           prompt: task.prompt || task.modelLabel || '',
           taskId: task.id,
-          memory: task.memory,
+          memory: true,
         })
         task.assetUri = filePath
         task.projectPath = projectPath
@@ -830,7 +837,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           prompt: task.prompt || task.modelLabel || '',
           taskId: task.id,
           sourceUrl: downloadUrl,
-          memory: task.memory,
+          memory: true,
         })
         task.assetUri = filePath
         task.projectPath = projectPath
@@ -969,6 +976,58 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     markCanvasWriteUnwritten(task)
   }
 
+  async function completeProtocolResult(task: MediaTask, result: MediaResult): Promise<void> {
+    if (isTaskCancelled(task)) return
+    const outputs = result.outputs || []
+    if (!outputs.length) throw new Error('统一任务没有输出清单')
+    const outputCanvasTarget = task.canvasTarget || tasks.value.find(item => item.parentTaskId === task.id && item.canvasTarget)?.canvasTarget
+    const destinations: MediaTask[] = []
+    for (const [index, output] of outputs.entries()) {
+      const id = index === 0 ? task.id : `${task.id}_out_${index + 1}`
+      let destination = tasks.value.find(item => item.id === id)
+      if (!destination) {
+        destination = { ...task, id, parentTaskId: task.id, outputTasks: undefined,
+          projectPath: undefined, assetUri: undefined, sourceUrl: undefined, resultUrl: undefined,
+          status: 'success', assetStatus: 'pending', downloadState: 'queued', canvasWriteStatus: task.canvasTarget ? 'pending' : undefined }
+        tasks.value.unshift(destination)
+      }
+      if (destination.protocolOutputId && destination.protocolOutputId !== output.outputId) throw new Error('输出身份与已保存记录冲突')
+      destination.protocolOutputId = output.outputId
+      destination.type = output.type
+      destination.resultMime = output.mimeType
+      if (['image', 'video', 'audio'].includes(output.type)) {
+        destination.canvasTarget = outputCanvasTarget
+        if (outputCanvasTarget && destination.canvasWriteStatus !== 'written') destination.canvasWriteStatus = 'pending'
+      } else { destination.canvasTarget = undefined; destination.canvasWriteStatus = 'unwritten' }
+      if (destination.assetStatus !== 'local') {
+        destination.resultUrl = output.url
+        destination.resultText = output.text
+        destination.status = 'success'
+        destination.downloadState = output.type === 'text' ? undefined : 'queued'
+      }
+      destinations.push(destination)
+    }
+    task.outputTasks = destinations.map(item => ({ outputId: item.protocolOutputId!, taskId: item.id, type: item.type }))
+    // Save all output identities before any download; a restart retries saving, never generation.
+    await queueTaskPersistence(() => {}, () => {})
+    for (const destination of destinations) {
+      if (isTaskCancelled(task)) break
+      const child = destination.id !== task.id
+      if (child) activeTaskIds.value.add(destination.id)
+      try {
+        destination.status = 'running'
+        if (destination.type === 'text') {
+          destination.progress = 100; destination.progressText = '正在保存文档'; destination.completedAt = Date.now()
+          await saveTextResultDocument(destination)
+          destination.status = 'success'
+          if (destination.assetStatus === 'local') destination.progressText = '完成'
+          emitSettled(destination)
+        } else await completeMediaTask(destination, destination.resultUrl || destination.sourceUrl || '', 'protocol-output')
+      } finally { if (child) activeTaskIds.value.delete(destination.id) }
+    }
+    await persistTasksSafely('protocol-outputs-complete')
+  }
+
   async function completeMediaTask(
     task: MediaTask,
     resultUrl: string,
@@ -1072,7 +1131,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
       if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') window.addEventListener('online', () => { void resumeDownloads() })
       // 尝试恢复在刷新前正在 running/pending 的任务
-      for (const task of tasks.value) {
+      for (const task of [...tasks.value]) {
+        if (task.type === 'text' && task.source === 'creation' && task.resultText && !task.projectPath && task.status === 'success') { void retryMediaPersistence(task.id); continue }
         if (task.source === 'creation' && !task.projectPath && !task.assetUri && (task.resultUrl || task.sourceUrl)
           && (task.downloadState === 'downloading' || task.downloadState === 'queued' || task.downloadRetryable)) {
           task.status = 'success'
@@ -1081,8 +1141,9 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         }
         if (task.status === 'running' || task.status === 'pending') {
           if (task.canvasTarget && !task.canvasWriteStatus) task.canvasWriteStatus = 'pending'
-          if (task.pollUrl && task.pollKind) {
+          if (task.planSnapshot?.protocol || (task.pollUrl && task.pollKind)) {
             // 有上游轮询地址，尝试恢复轮询
+            if (task.parentTaskId) continue
             _resumePolling(task).catch(() => {
               /* already handled internally */
             })
@@ -1186,7 +1247,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   async function resumePollingAllowed(task: MediaTask) {
-    if (!task.pollUrl || !task.pollKind) return
+    if ((!task.pollUrl || !task.pollKind) && !task.planSnapshot?.protocol) return
     if (activeTaskIds.value.has(task.id)) return
     activeTaskIds.value.add(task.id)
     const controller = new AbortController()
@@ -1201,13 +1262,17 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       }
       task.progressText = `恢复轮询 ${Math.round(elapsed)}s · ${status}`
       const baseSec = task.type === 'image' ? 120 : 480
-      task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
+      if (!task.planSnapshot?.protocol) task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
     }
 
     try {
-      const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
+      const pollWindow = pollWindowFor(task.pollKind || 'video', task.type === 'video' || task.type === 'model3d')
+      const dynamicResult = task.planSnapshot?.protocol
+        ? await executeDynamicCreation(task.planSnapshot.protocol, await taskPollKey(task) || getApiKey(), submitted => markTaskSubmittedWithoutBlocking(task, submitted), onProgress, controller.signal, task.upstreamTaskId)
+        : undefined
+      if (dynamicResult) { await completeProtocolResult(task, dynamicResult); return }
       const mediaUrl = await abortTaskExecution(
-        pollTask(task.pollUrl, task.pollKind, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task), await taskPollKey(task)),
+        pollTask(task.pollUrl!, task.pollKind!, onProgress, pollWindow.maxSec, pollWindow.intervalMs, controller.signal, taskUsesContentEndpoint(task), await taskPollKey(task)),
         controller.signal,
       )
       if ((task as MediaTask).status === 'cancelled') {
@@ -1248,8 +1313,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         markCanvasWriteUnwritten(task)
         return
       }
+      if (e instanceof CreationProtocolError && e.code === 'remote_cancelled') {
+        task.status = 'cancelled'; task.progressText = '上游已取消'; task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task); emitSettled(task); await persistTasksSafely('remote-cancel-confirmed')
+        return
+      }
       const terminalFailure = isTerminalCreationTaskError(e)
-      if (task.upstreamTaskId && task.pollUrl && task.pollKind && !terminalFailure) {
+      if ((task.planSnapshot?.protocol || (task.upstreamTaskId && task.pollUrl && task.pollKind)) && !terminalFailure) {
         task.status = 'pending'
         task.progressText = '轮询暂时失败，重启后将继续恢复'
         task.errorMsg = undefined
@@ -1354,6 +1424,26 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   }
 
   // ─── 取消任务 ───
+  async function resumeDynamicSubmission(taskId: string, plan: CreationRunPlan): Promise<void> {
+    const task = tasks.value.find(item => item.id === taskId)
+    if (!task?.planSnapshot?.protocol || !plan.protocol || isTaskActive(taskId)) return
+    if (task.planSnapshot.protocol.fingerprint !== plan.protocol.fingerprint) throw new Error('恢复内容与原请求不一致')
+    const { beginDesktopUpdateTask } = await import('@/services/desktopUpdater')
+    const release = await beginDesktopUpdateTask()
+    void _executeTask(task.id, { type: task.type, model: task.model, modelLabel: task.modelLabel,
+      prompt: task.prompt, source: 'creation', directory: task.directory, memory: task.memory,
+      canvasTarget: task.canvasTarget, plan }).finally(release).catch(() => {})
+  }
+
+  async function cancelRemoteTask(taskId: string) {
+    const task = tasks.value.find(item => item.id === taskId)
+    if (!task?.planSnapshot?.protocol || !task.upstreamTaskId) throw new Error('此任务没有可远程取消的统一合同或任务 ID')
+    const result = await cancelDynamicCreation(task.planSnapshot.protocol, task.upstreamTaskId, await taskPollKey(task) || getApiKey())
+    task.progressText = result.status === 'cancelled' ? '上游已取消' : result.status === 'cancel_requested' ? '已请求上游取消，等待确认' : task.progressText
+    await persistTasksSafely('remote-cancel-requested')
+    return { remoteStatus: result.status, stoppedTracking: false, refundStatus: 'unknown' }
+  }
+
   async function cancelTask(taskId: string): Promise<boolean> {
     const t = tasks.value.find(x => x.id === taskId)
     if (!t || !canCancelTask(taskId)) return false
@@ -1440,8 +1530,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       // 历史任务可能保存了错误的全局 /content 地址（含适配器内部任务 ID 拼出的死链）；
       // 不走 content 端点的模型重新读取原始结果，由 pollTask 用 NewAPI 任务 ID 重建地址。
       // comfy 系必须排除：对它们 content 地址才是对的，重查只会拿到适配器内网地址。
-      if (isContentResultUrl(resultUrl) && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
-        const pollWindow = pollWindowFor(task.pollKind, task.type === 'video' || task.type === 'model3d')
+      if (!task.planSnapshot?.protocol && isContentResultUrl(resultUrl) && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
+        const pollWindow = pollWindowFor(task.pollKind || 'video', task.type === 'video' || task.type === 'model3d')
         try {
           resultUrl = await pollTask(task.pollUrl, task.pollKind, undefined, pollWindow.maxSec, pollWindow.intervalMs, undefined, taskUsesContentEndpoint(task), await taskPollKey(task))
         } catch (error) {
@@ -1450,7 +1540,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
           await persistTasksSafely('retry-media-persistence-refresh-failed')
           return false
         }
-      } else if (task.type === 'video' && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
+      } else if (!task.planSnapshot?.protocol && task.type === 'video' && !taskUsesContentEndpoint(task) && task.pollUrl && task.pollKind) {
         // CDN 签名链接可能已经过期；只重查已生成的任务，不重新生成。
         // 查询暂不可用时仍尝试原链接，避免把有效下载也挡住。
         try {
@@ -1479,7 +1569,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
   // 命中就恢复成 success，不产生新的提交和计费。
   function canRefreshTaskResult(task: MediaTask): boolean {
     return ['running', 'pending', 'failed'].includes(task.status)
-      && Boolean(task.upstreamTaskId) && Boolean(task.pollUrl) && Boolean(task.pollKind)
+      && (Boolean(task.planSnapshot?.protocol) || (Boolean(task.upstreamTaskId) && Boolean(task.pollUrl) && Boolean(task.pollKind)))
       && !activeTaskIds.value.has(task.id)
   }
 
@@ -1506,6 +1596,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progressText = `查询结果 ${Math.round(elapsed)}s · ${status}`
     }
     try {
+      if (task.planSnapshot?.protocol) {
+        const result = await executeDynamicCreation(task.planSnapshot.protocol, await taskPollKey(task) || getApiKey(), submitted => markTaskSubmittedWithoutBlocking(task, submitted), onProgress, controller.signal, task.upstreamTaskId)
+        await completeProtocolResult(task, result)
+        return task.assetStatus === 'local'
+      }
       const mediaUrl = await abortTaskExecution(
         pollTask(
           task.pollUrl!, task.pollKind!, onProgress,
@@ -1534,6 +1629,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       return true
     } catch (e: any) {
       if ((task as MediaTask).status === 'cancelled') return false
+      if (e instanceof CreationProtocolError && e.code === 'remote_cancelled') {
+        task.status = 'cancelled'; task.progressText = '上游已取消'; task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task); emitSettled(task); await persistTasksSafely('remote-cancel-confirmed')
+        return false
+      }
       const previousMessage = task.errorMsg
       task.status = 'failed'
       task.progress = 0
@@ -1559,7 +1659,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
   async function addTaskResultToCanvasAllowed(taskId: string, target: CanvasTaskTarget): Promise<boolean> {
     const task = tasks.value.find(item => item.id === taskId)
-    if (!task || task.source !== 'creation' || task.status !== 'success' || task.type === 'model3d')
+    if (!task || task.source !== 'creation' || task.status !== 'success' || (task.type === 'model3d' || task.type === 'file'))
       return false
     task.canvasTarget = target
     task.canvasWriteStatus = 'pending'
@@ -1605,7 +1705,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       task.progressText = text
       lastStatus.text = text
       const baseSec = task.type === 'image' ? 120 : 480
-      task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
+      if (!task.planSnapshot?.protocol) task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
     }
 
     // ★ 独立计时器：API 等待期间秒数持续跳动，避免"0s不变化"
@@ -1619,7 +1719,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
       if (task.downloadState === 'downloading') return
       const elapsed = (Date.now() - startTime) / 1000
       const baseSec = task.type === 'image' ? 120 : 480
-      task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
+      if (!task.planSnapshot?.protocol) task.progress = Math.min(95, Math.round((elapsed / baseSec) * 100))
       // 保留最后一次 onProgress 设置的状态文字，仅更新时间
       const statusPart = lastStatus.text.replace(/^\d+s · /, '') || '等待中'
       task.progressText = `${Math.round(elapsed)}s · ${statusPart}`
@@ -1650,7 +1750,15 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         params.model,
       )
 
-      if (shouldUseCreationRuntime) {
+      if (params.plan?.protocol) {
+        const prepared = await prepareDynamicInputs(params.plan, submissionKey, controller.signal)
+        task.planSnapshot!.protocol = prepared
+        // Persist uploaded asset IDs before the first paid submit; retries keep the same request ID.
+        await queueTaskPersistence(() => {}, () => {})
+        result = await executeDynamicCreation(prepared, submissionKey, submitted => markTaskSubmittedWithoutBlocking(task, submitted), onProgress, controller.signal)
+        await completeProtocolResult(task, result)
+        return
+      } else if (shouldUseCreationRuntime) {
         const request = buildCreationSubmitRequest(params.plan!)
         task.planSnapshot = toPlanSnapshot(params.plan!)
         task.route = params.plan!.route
@@ -1769,8 +1877,13 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         markCanvasWriteUnwritten(task)
         return
       }
+      if (e instanceof CreationProtocolError && e.code === 'remote_cancelled') {
+        task.status = 'cancelled'; task.progressText = '上游已取消'; task.completedAt = Date.now()
+        markCanvasWriteUnwritten(task); emitSettled(task); await persistTasksSafely('remote-cancel-confirmed')
+        return
+      }
       const terminalFailure = isTerminalCreationTaskError(e)
-      if (task.upstreamTaskId && task.pollUrl && task.pollKind && !terminalFailure) {
+      if ((task.planSnapshot?.protocol || (task.upstreamTaskId && task.pollUrl && task.pollKind)) && !terminalFailure) {
         task.status = 'pending'
         task.progressText = '轮询暂时失败，重启后将继续恢复'
         task.errorMsg = undefined
@@ -1812,6 +1925,8 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
     init,
     submitTask,
     cancelTask,
+    cancelRemoteTask,
+    resumeDynamicSubmission,
     refreshTaskResult,
     retryMediaPersistence,
     addTaskResultToCanvas,

@@ -499,13 +499,13 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /DSH_PERMISSION_MODE: input\.permissionTier \?\? DEEPSEEK_DEFAULT_PERMISSION_TIER/)
   assert.match(source, /resolve_creation_mcp/)
   assert.match(source, /@deepseek-ai\/dsh-mcp-client/)
-  assert.match(source, /JIUCAIHEZI_PROXY_CAPABILITIES/)
-  assert.match(source, /JIUCAIHEZI_PROXY_MCP_SERVER/)
-  assert.match(source, /JIUCAIHEZI_CREATION_CAPABILITIES: 'av'/)
+  assert.match(source, /nativeToolCapabilities/)
+  assert.match(source, /@jiucaihezi\/dsh-tool-creation/)
+  assert.match(source, /creation: \$\{needsCreation\}/)
   // 创作服务器在任一创作芯片下都挂，付费只由 @影音 放行：只开 @排版 时
   // add_creation_result_to_canvas 曾是 unknown tool，模型因此跑去找 CLI 硬做。
   assert.match(source, /const needsCreation = Boolean\(input\.avSelected \|\| input\.mediaSelected \|\| input\.scene3dSelected\)/)
-  assert.match(source, /JIUCAIHEZI_CREATION_PAID: '0'/)
+  assert.match(source, /allowPaid: \$\{Boolean\(input\.avSelected\)\}/)
   // patch 里新增插件只能走 `- insert:`：官方 applyEntryPatches 对非 insert 条目是按 id
   // 匹配**已有**行，匹配不到就 warn + skip。MCP 条目曾经写成顶层 `- id:`，于是创作 /
   // 媒体 / 3D / 自定义 MCP 在 Harness 会话里从来没有挂上过（--dump-config 实测命中 0）。

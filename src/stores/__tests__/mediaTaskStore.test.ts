@@ -542,13 +542,13 @@ test(
       const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
 
       assert.equal(task?.canvasTarget?.owner, ownerA)
-      assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
-      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
+      assert.equal(task?.assetUri?.startsWith(`${ownerA}/.raw/jc-media/图片/`), true)
+      assert.match(task?.projectPath || '', /^\.raw\/jc-media\/图片\/.+\.png$/)
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(ownerACanvas.scene.length, 1)
       assert.equal(ownerBCanvas.scene.length, 0)
       assert.equal(
-        files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')),
+        files.calls.some(call => call.root === ownerB && call.path.startsWith('.raw/jc-media/图片/')),
         false,
       )
     } finally {
@@ -614,7 +614,7 @@ test(
       const ownerACanvas = JSON.parse(files.get(ownerA, canvasPath) || '{}')
       const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
 
-      assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
+      assert.equal(task?.assetUri?.startsWith(`${ownerA}/.raw/jc-media/图片/`), true)
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(ownerACanvas.scene.length, 1)
       assert.equal(ownerBCanvas.scene.length, 0)
@@ -803,7 +803,7 @@ test(
       const write = files.binaryWrites[0]
 
       assert.equal(write.projectId, projectA)
-      assert.match(write.path, /^jc-media\/images\/.+\.webp$/)
+      assert.match(write.path, /^\.raw\/jc-media\/图片\/.+\.webp$/)
       assert.equal(write.options.mimeType, 'image/webp')
       assert.equal(task?.projectPath, write.path)
       assert.equal(task?.assetStatus, 'local')
@@ -866,7 +866,7 @@ test(
       assert.equal(task?.resultUrl, undefined)
       assert.equal(task?.sourceUrl, resultUrl)
       assert.equal(task?.assetStatus, 'local')
-      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
+      assert.match(task?.projectPath || '', /^\.raw\/jc-media\/图片\/.+\.png$/)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       globalThis.fetch = previousFetch
@@ -1038,7 +1038,7 @@ test(
         files.binaryWrites.some(write => write.projectId === projectB),
         false,
       )
-      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
+      assert.match(task?.projectPath || '', /^\.raw\/jc-media\/图片\/.+\.png$/)
       assert.equal(task?.assetStatus, 'local')
     } finally {
       __setMediaTaskSaverForTests(null)
@@ -1357,6 +1357,48 @@ test(
   },
 )
 
+test('creation results use Raw directories even when old tasks omit or disable memory', { concurrency: false }, async () => {
+  const owner = '/projects/raw-media'
+  const cases = [
+    { type: 'image', folder: '图片', mime: 'image/png', ext: 'png' },
+    { type: 'video', folder: '视频', mime: 'video/mp4', ext: 'mp4' },
+    { type: 'audio', folder: '音频', mime: 'audio/mpeg', ext: 'mp3' },
+  ].flatMap(media => [undefined, false].map(memory => ({ ...media, memory })))
+  const tasks = cases.map((media, index) => ({
+    id: `mtask_raw_${index}`, type: media.type, model: 'legacy-model', modelLabel: '旧任务',
+    prompt: '恢复保存', referenceImages: [], status: 'success', progress: 100, createdAt: 1,
+    source: 'creation', directory: owner, memory: media.memory, assetStatus: 'remote-only',
+    resultUrl: media.memory === false ? `data:${media.mime};base64,cG5n` : `https://cdn.example.com/result.${media.ext}`,
+  }))
+  const legacyPath = 'jc-media/images/already-saved.png'
+  const savedTask = {
+    ...tasks[0], id: 'mtask_raw_existing', assetStatus: 'local',
+    projectPath: legacyPath, assetUri: `${owner}/${legacyPath}`, resultUrl: undefined,
+  }
+  const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([...tasks, savedTask]) })
+  const files = installTauriTaskFileStore()
+  files.set(owner, legacyPath, 'original')
+  setActivePinia(createPinia())
+  const store = useMediaTaskStore()
+  try {
+    await store.init()
+    for (const [index, media] of cases.entries()) {
+      assert.equal(await store.retryMediaPersistence(tasks[index].id), true)
+      const task = store.getTask(tasks[index].id)
+      assert.ok(task?.projectPath?.startsWith(`.raw/jc-media/${media.folder}/`))
+      assert.ok(task?.projectPath?.endsWith(`.${media.ext}`))
+      assert.equal(task?.assetUri, `${owner}/${task?.projectPath}`)
+      assert.equal(files.get(owner, task!.projectPath!), 'png')
+    }
+    assert.equal(await store.retryMediaPersistence(savedTask.id), false)
+    assert.equal(store.getTask(savedTask.id)?.projectPath, legacyPath)
+    assert.equal(files.get(owner, legacyPath), 'original')
+  } finally {
+    files.restore()
+    storage.restore()
+  }
+})
+
 test(
   'mediaTaskStore writes Base64 creation media locally without persisting inline data',
   { concurrency: false },
@@ -1400,7 +1442,7 @@ test(
       assert.equal(files.downloads.length, 0)
       assert.equal(task?.resultUrl, undefined)
       assert.equal(task?.sourceUrl, undefined)
-      assert.match(task?.assetUri || '', /^\/projects\/base64-image\/jc-media\/images\//)
+      assert.match(task?.assetUri || '', /^\/projects\/base64-image\/\.raw\/jc-media\/图片\//)
       assert.equal(task?.assetStatus, 'local')
       assert.equal(JSON.stringify(task?.params).includes('data:image/'), false)
       assert.equal(JSON.stringify(task?.planSnapshot).includes('data:image/'), false)
@@ -1439,7 +1481,7 @@ test(
       assert.equal(await store.retryMediaPersistence('mtask_veo_legacy'), true)
       const task = store.getTask('mtask_veo_legacy')
       assert.deepEqual(files.downloads, [resultUrl])
-      assert.match(task?.assetUri || '', /^\/projects\/veo\/jc-media\/videos\//)
+      assert.match(task?.assetUri || '', /^\/projects\/veo\/\.raw\/jc-media\/视频\//)
       assert.equal(task?.assetStatus, 'local')
     } finally {
       projectStore.projectDir.value = originalProjectDir
@@ -1500,7 +1542,7 @@ test(
       assert.deepEqual(files.downloads, [rebuiltUrl])
       assert.equal(task?.status, 'success')
       assert.equal(task?.assetStatus, 'local')
-      assert.match(task?.assetUri || '', /^\/projects\/shanhai\/jc-media\/videos\//)
+      assert.match(task?.assetUri || '', /^\/projects\/shanhai\/\.raw\/jc-media\/视频\//)
     } finally {
       projectStore.projectDir.value = originalProjectDir
       files.restore()
@@ -1842,7 +1884,7 @@ test(
       assert.equal(task?.canvasWriteStatus, 'unwritten')
       assert.equal(ownerBCanvas.scene.length, 0)
       assert.equal(
-        files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')),
+        files.calls.some(call => call.root === ownerB && call.path.startsWith('.raw/jc-media/图片/')),
         false,
       )
     } finally {

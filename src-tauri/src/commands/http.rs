@@ -517,7 +517,10 @@ fn resolve_download_credential(url: &str, headers: &mut Option<HashMap<String, S
     if let Some(reference) = reference {
         let allowed = reqwest::Url::parse(url).ok().is_some_and(|url| {
             url.scheme() == "https" && matches!(url.host_str(), Some("api.jiucaihezi.studio" | "tian-shu.net"))
-                && url.path().starts_with("/v1/videos/") && url.path().ends_with("/content")
+                && ((url.path().starts_with("/v1/videos/") && url.path().ends_with("/content"))
+                    || { let parts: Vec<_> = url.path().split('/').collect();
+                         parts.len() == 8 && parts[1] == "v1" && parts[2] == "creation" && parts[3] == "tasks" && parts[5] == "outputs" && parts[7] == "content"
+                         && [parts[4], parts[6]].iter().all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_alphanumeric() || "._:-".contains(c))) })
         });
         if !allowed { return Err("任务密钥不能用于外部下载地址".into()); }
         let key = crate::secure_store::media_download_key(reference)?;

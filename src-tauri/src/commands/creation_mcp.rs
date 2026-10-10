@@ -14,6 +14,7 @@ const MAX_REQUEST_BYTES: usize = 1_048_576;
 const OPERATIONS: &[&str] = &[
     "get_creation_context",
     "list_creation_models",
+    "get_creation_model",
     "submit_creation_task",
     "get_creation_task",
     "list_creation_history",

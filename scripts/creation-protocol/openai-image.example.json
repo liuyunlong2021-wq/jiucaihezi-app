@@ -1,0 +1,36 @@
+{
+  "capability": {
+    "protocol_version": "1.0",
+    "schema_profile": "creation-params-v1",
+    "capability_id": "boluo/gpt-image-2",
+    "revision": "r1",
+    "model": "gpt-image-2-菠萝",
+    "display_name": "GPT Image 2 菠萝",
+    "availability": "available",
+    "input_modalities": ["text"],
+    "output_modalities": ["image"],
+    "parameter_schema": {
+      "type": "object",
+      "properties": {
+        "prompt": {"type": "string", "minLength": 1, "maxLength": 20000},
+        "ratio": {"type": "string", "enum": ["1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3", "21:9", "9:21"]},
+        "resolution": {"type": "string", "enum": ["1k", "2k", "4k"]},
+        "quality": {"type": "string", "enum": ["auto", "low", "medium", "high"]}
+      },
+      "required": ["prompt"],
+      "additionalProperties": false
+    },
+    "asset_slots": [],
+    "execution": {"supports_cancel": false, "recommended_poll_seconds": 3},
+    "pricing": null,
+    "presentation": {"featured": false}
+  },
+  "adapter": {
+    "submit": {
+      "path": "/v1/images/generations",
+      "encoding": "json",
+      "defaults": {"n": 1, "response_format": "b64_json"}
+    },
+    "outputs": {"items_path": "data", "url_path": "url", "base64_path": "b64_json", "modality": "image", "mime_type": "image/png", "extension": "png"}
+  }
+}

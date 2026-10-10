@@ -30,7 +30,7 @@ function contrast(a: string, b: string): number {
 
 test('default workbench tokens use a quiet branded light surface', () => {
   const block = blockFor('light')
-  assert.equal(value(block, '--jc-surface'), '#F7F8F5')
+  assert.equal(value(block, '--jc-surface'), '#FAFAFA')
   assert.equal(value(block, '--jc-surface-container-lowest'), '#FFFFFF')
   assert.equal(value(block, '--jc-primary'), '#4A5D23')
   assert.match(block, /--jc-text-primary:\s*var\(--jc-on-surface\)/)

@@ -14,6 +14,7 @@ export type CreationUpstreamFamily =
   | 'unknown'
 
 export type CreationApiStyle =
+  | 'creation-protocol'
   | 'openai-images'
   | 'openai-image-edits'
   | 'newapi-image-task'
@@ -66,7 +67,7 @@ export type CreationResultExtractor =
 
 export type CreationInputModality = 'text' | 'image' | 'video' | 'audio'
 
-export type CreationOutputModality = 'image' | 'video' | 'audio' | 'model3d' | 'text'
+export type CreationOutputModality = 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
 
 export interface CreationFieldOption {
   value: string | number | boolean
@@ -162,6 +163,7 @@ export interface CreationRunPlanInput {
 }
 
 export interface CreationRunPlan {
+  protocol?: import('./creationProtocolClient').CreationProtocolSnapshot
   modelId: string
   model: string
   label: string

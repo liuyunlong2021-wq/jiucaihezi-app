@@ -380,7 +380,7 @@ test('memory right chat dock separates preview layout and collapses to a compact
   )
   assert.match(
     workbench,
-    /\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\) var\(--memory-chat-width\); \}/,
+    /\.memory-workbench\.creation-open \{ grid-template-columns: var\(--memory-tree-width, 280px\) minmax\(0, 1fr\) var\(--memory-chat-width\); \}/,
   )
   assert.doesNotMatch(
     workbench,
@@ -697,7 +697,7 @@ test('memory opens the latest conversation and keeps message actions at the bott
 
 test('memory composer keeps a shared header, text area and internal action row', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /\.memory-input-area \{[^}]*min-height: 100px;/)
+  assert.match(workbench, /\.memory-composer-editable \{[^}]*height: 4\.65em;[^}]*line-height: 1\.55;/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
@@ -1362,7 +1362,7 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   )
   assert.match(
     workbench,
-    /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/,
+    /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: var\(--memory-tree-width, 280px\) minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/,
   )
   assert.match(workbench, /desktopOnlyRuntime && turn\.role === 'assistant'/)
   assert.match(
@@ -1978,9 +1978,9 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   // 本机模型与服务收进可折叠区，默认收起；自定义端点覆盖原本机 MLX 的接入场景。
   assert.match(settings, /本机模型与服务/)
   assert.match(settings, /localModelsOpen/)
-  assert.match(settings, /自定义端点/)
+  assert.match(settings, /兼容 API/)
   assert.match(settings, /openCustomProviderForm/)
-  assert.doesNotMatch(settings, /localMlx|本机 MLX/)
+  assert.doesNotMatch(settings, /localMlx/)
   assert.match(
     store,
     /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/,

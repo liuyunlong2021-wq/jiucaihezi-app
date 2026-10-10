@@ -99,7 +99,7 @@ test('没有 DSH_HOME 时不动文件系统', () => {
 test('runner 只在开关打开时补链接，且由路由侧把开关传下来', () => {
   const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
   // 开关关着就不该动用户的 profile 目录。
-  assert.match(runner, /if \(config\.computerUse\) ensureProfilePluginLinks\(config\.dshHome\)/)
+  assert.match(runner, /if \(profilePlugins\.length\) ensureProfilePluginLinks\(config\.dshHome, \{ packages: profilePlugins \}\)/)
   assert.match(runner, /import \{ ensureProfilePluginLinks \} from '\.\/profile-plugins\.mjs'/)
 
   const route = readFileSync('src/services/deepSeekHarness.ts', 'utf8')

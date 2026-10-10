@@ -15,6 +15,8 @@
           "http_request",
           "document_markdown_request",
           "comfy_upload_image",
+          "get_comfy_service_credential",
+          "set_comfy_service_credential",
           "http_download_base64",
           "http_download_to_project",
           "http_cancel_project_download",

@@ -19,7 +19,7 @@ test('creation MCP exposes the fixed tool contract and forwards structured calls
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)])
   const tools = await client.listTools()
   assert.deepEqual(tools.tools.map(tool => tool.name), [
-    'get_creation_context', 'list_creation_models', 'get_creation_task', 'list_creation_history',
+    'get_creation_context', 'list_creation_models', 'get_creation_model', 'get_creation_task', 'list_creation_history',
     'submit_creation_task', 'cancel_creation_task', 'retry_media_persistence', 'add_creation_result_to_canvas',
   ])
   assert.equal(tools.tools.find(tool => tool.name === 'submit_creation_task').annotations.idempotentHint, true)
@@ -79,6 +79,6 @@ test('creation MCP hides the paid tool unless the mount allows spending', async 
   assert.ok(names.includes('add_creation_result_to_canvas'))
   assert.ok(names.includes('get_creation_context'))
   assert.ok(!names.includes('submit_creation_task'))
-  assert.equal(names.length, 7)
+  assert.equal(names.length, 8)
   await Promise.all([client.close(), server.close()])
 })

@@ -2,7 +2,7 @@ import { listen } from '@tauri-apps/api/event'
 import { invoke } from '@tauri-apps/api/core'
 import { useCanvasStore } from '@/components/canvas/canvasStore'
 import { buildCreationRunPlan } from './creationMediaPlan'
-import { getCreationModelSpec, listCreationPanelModels } from './creationModelRegistry'
+import { getCreationModelSpec, listCreationModels } from './creationModelRegistry'
 import { useMediaTaskStore, type MediaTask, type TaskMediaType } from '@/stores/mediaTaskStore'
 import { useProjectStore } from '@/stores/projectStore'
 import { useMcpStore } from '@/stores/mcpStore'
@@ -11,6 +11,8 @@ import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjec
 import { callMcpTool } from '@/services/mcpClient'
 import type { Scene3DDocument } from '@/runtime/memory/scene3d'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
+import { listDynamicCreationCapabilities, getDynamicCreationCapability, buildDynamicCreationPlan, CreationProtocolError, creationIdentity } from './creationProtocolClient'
+import { canonicalCreationJson } from '../../../shared/creation-schema.mjs'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 
 interface BridgeEvent {
@@ -20,6 +22,8 @@ interface BridgeEvent {
 }
 
 const submissions = new Map<string, string>()
+const submissionBodies = new Map<string, string>()
+const pendingSubmissions = new Map<string, { fingerprint: string; promise: Promise<unknown> }>()
 let sceneRecorder: ((document: Scene3DDocument) => Promise<Blob>) | undefined
 
 export function setHarnessSceneRecorder(recorder?: (document: Scene3DDocument) => Promise<Blob>) {
@@ -63,8 +67,14 @@ function publicTask(task: MediaTask) {
     downloadState: task.downloadState,
     downloadBytes: task.downloadBytes,
     downloadTotal: task.downloadTotal,
-    error: task.errorMsg,
+    error: task.errorMsg || task.error?.message,
+    requestId: task.planSnapshot?.protocol?.requestId,
+    capabilityId: task.planSnapshot?.protocol?.capabilityId,
+    revision: task.planSnapshot?.protocol?.revision,
     canvasWriteStatus: task.canvasWriteStatus,
+    outputs: task.outputTasks,
+    parentTaskId: task.parentTaskId,
+    outputId: task.protocolOutputId,
   }
 }
 
@@ -102,9 +112,9 @@ function imageMimeForPath(path: string, bytes: Uint8Array): string {
         : 'image/png'
 }
 
-async function resolveReferenceImages(params: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function resolveReferenceImages(params: Record<string, unknown>, slotNames: string[] = []): Promise<Record<string, unknown>> {
   if (!isTauriRuntime()) return params
-  const keys = ['images', 'image', 'imageUrl', 'imageUrls']
+  const keys = [...new Set(['images', 'image', 'imageUrl', 'imageUrls', 'videos', 'audios', ...slotNames])]
   const output = { ...params }
   for (const key of keys) {
     const value = params[key]
@@ -118,7 +128,9 @@ async function resolveReferenceImages(params: Record<string, unknown>): Promise<
       })
       if (!file?.base64 || file.truncated) throw new Error(`参考图不可读取或超过 50 MB：${reference}`)
       const bytes = Uint8Array.from(atob(file.base64), char => char.charCodeAt(0))
-      return `data:${imageMimeForPath(reference, bytes)};base64,${file.base64}`
+      const extension = reference.split('.').pop()?.toLowerCase() || ''
+      const mediaMime: Record<string, string> = { mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', m4a: 'audio/mp4' }
+      return `data:${mediaMime[extension] || imageMimeForPath(reference, bytes)};base64,${file.base64}`
     }))
     output[key] = Array.isArray(value) ? resolved : resolved[0]
   }
@@ -136,13 +148,21 @@ function capabilities(params: Record<string, unknown>): string[] {
   return Array.isArray(params.capabilities) ? params.capabilities.map(String) : []
 }
 
-function creationModels(params: Record<string, unknown>) {
-  const selected = capabilities(params)
-  if (!selected.length) return listCreationPanelModels()
-  return listCreationPanelModels().filter(model =>
-    selected.includes('av')
-    && (model.task === 'image' || model.task === 'video' || model.task === 'audio' || model.task === 'model3d'),
-  )
+async function creationModels(params: Record<string, unknown>) {
+  if (capabilities(params).length && !capabilities(params).includes('av')) throw new Error('当前入口未授权影音能力')
+  try {
+    const directory = await listDynamicCreationCapabilities(params)
+    return { source: 'dynamic', models: directory.items.map(item => ({ ...item, id: item.capability_id })), ...directory,
+      localModels: listCreationModels({ source: 'local-comfy', includeDisabled: true }) }
+  } catch (error) {
+    // Only a missing protocol allows the old adapters. Permission/network errors never broaden access.
+    if (error instanceof CreationProtocolError && error.code === 'missing_key') return { source: 'local', models: listCreationModels({ source: 'local-comfy', includeDisabled: true }), next_cursor: null }
+    if (!(error instanceof CreationProtocolError) || ![404, 405].includes(error.status)) return { source: 'local', models: listCreationModels({ source: 'local-comfy', includeDisabled: true }), warning: error instanceof Error ? error.message : '远程目录暂不可用', next_cursor: null }
+    const models = listCreationModels({ includeDisabled: true }).filter(model => model.contractStatus !== 'broken')
+    const offset = Math.max(0, Number(params.cursor) || 0), limit = Math.min(100, Math.max(1, Number(params.limit) || 20))
+    const filtered = models.filter(model => !params.query || `${model.id} ${model.label}`.toLowerCase().includes(String(params.query).toLowerCase()))
+    return { source: 'legacy', warning: '服务端尚未发布动态合同，仅现有适配可执行', models: filtered.slice(offset, offset + limit), next_cursor: offset + limit < filtered.length ? String(offset + limit) : null }
+  }
 }
 
 function harnessToolCatalog(params: Record<string, unknown>) {
@@ -192,10 +212,18 @@ async function callHarnessTool(params: Record<string, unknown>) {
   return { content: result.content }
 }
 
-async function handleBridgeRequest(operation: string, params: Record<string, unknown>): Promise<unknown> {
+async function handleBridgeRequestUnchecked(operation: string, params: Record<string, unknown>): Promise<unknown> {
   const store = useMediaTaskStore()
   if (operation === 'get_creation_context') return currentContext()
-  if (operation === 'list_creation_models') return { models: creationModels(params) }
+  if (operation === 'list_creation_models') return creationModels(params)
+  if (operation === 'get_creation_model') {
+    const id = requireString(params, 'modelId', 200)
+    const catalog = getCreationModelSpec(id)?.source === 'local-comfy' ? { source: 'local' } : await creationModels(params)
+    if (catalog.source === 'dynamic' && getCreationModelSpec(id)?.source !== 'local-comfy') return getDynamicCreationCapability(id, typeof params.revision === 'string' ? params.revision : undefined)
+    const spec = getCreationModelSpec(id)
+    if (!spec || spec.contractStatus === 'broken' || (catalog.source === 'local' && spec.source !== 'local-comfy')) throw new Error('未找到当前可执行能力')
+    return spec
+  }
   if (operation === 'list_harness_tools') return { tools: harnessToolCatalog(params) }
   if (operation === 'call_harness_tool') return callHarnessTool(params)
 
@@ -203,6 +231,7 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
   if (operation === 'get_creation_task') {
     const task = store.getTask(requireString(params, 'taskId', 120))
     if (!task || task.source !== 'creation') throw new Error('未找到创作任务')
+    if (task.planSnapshot?.protocol?.prepared && !store.isTaskActive(task.id) && (task.status === 'pending' || task.status === 'running')) void store.refreshTaskResult(task.id).catch(() => {})
     return publicTask(task)
   }
   if (operation === 'list_creation_history') {
@@ -217,7 +246,10 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
     }
   }
   if (operation === 'cancel_creation_task') {
-    return { cancelled: await store.cancelTask(requireString(params, 'taskId', 120)) }
+    const taskId = requireString(params, 'taskId', 120)
+    if (params.remote === true) return store.cancelRemoteTask(taskId)
+    const stopped = await store.cancelTask(taskId)
+    return { cancelled: stopped, stoppedTracking: stopped, remoteCancellation: false }
   }
   if (operation === 'retry_media_persistence') {
     return { persisted: await store.retryMediaPersistence(requireString(params, 'taskId', 120)) }
@@ -242,19 +274,43 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
     const directory = optionalAbsoluteDirectory(params)
     if (!context.project.owner && !directory) throw new Error('请先在韭菜盒子中选择项目，或传入 directory')
     const requestId = requireString(params, 'requestId', 120)
-    const existing = submissions.get(requestId)
-    if (existing) return { taskId: existing, duplicate: true }
+    const submissionScope = `${await creationIdentity()}:${requestId}`
+    const existing = submissions.get(submissionScope)
+    if (existing) {
+      if (submissionBodies.get(submissionScope) !== canonicalCreationJson(params)) throw new Error('requestId 已用于不同参数或项目')
+      return { taskId: existing, duplicate: true }
+    }
     const modelId = requireString(params, 'modelId', 200)
-    if (!creationModels(params).some(model => model.id === modelId)) throw new Error(`当前能力未授权模型: ${modelId}`)
+    const catalog = getCreationModelSpec(modelId)?.source === 'local-comfy' ? { source: 'local' } : await creationModels(params)
     const rawParams = params.params && typeof params.params === 'object' && !Array.isArray(params.params)
       ? params.params as Record<string, unknown>
       : {}
-    const resolvedParams = await resolveReferenceImages(rawParams)
-    const plan = buildCreationRunPlan({ modelId, params: resolvedParams })
+    if (catalog.source !== 'dynamic') {
+      const spec = getCreationModelSpec(modelId)
+      if (!spec || spec.contractStatus === 'broken' || (catalog.source === 'local' && spec.source !== 'local-comfy')) throw new Error('该能力当前不可执行')
+    }
+    const dynamic = catalog.source === 'dynamic' && getCreationModelSpec(modelId)?.source !== 'local-comfy'
+    const capability = dynamic ? await getDynamicCreationCapability(modelId, typeof params.revision === 'string' ? params.revision : undefined) : undefined
+    const resolvedParams = await resolveReferenceImages(rawParams, capability?.asset_slots.map(slot => slot.name))
+    const plan = capability
+      ? await buildDynamicCreationPlan(capability, requestId, resolvedParams)
+      : buildCreationRunPlan({ modelId, params: resolvedParams })
+    if (plan.protocol) {
+      plan.protocol.fingerprint = await creationIdentity('local-submit', canonicalCreationJson({ fingerprint: plan.protocol.fingerprint, context: context.contextVersion, directory: directory || '' }))
+      const persisted = store.tasks.find(task => !task.parentTaskId && task.planSnapshot?.protocol?.identity === plan.protocol!.identity && task.planSnapshot.protocol.requestId === requestId)
+      if (persisted) {
+        if (persisted.planSnapshot!.protocol!.fingerprint !== plan.protocol.fingerprint) throw new Error('requestId 已用于不同参数，请创建新的 requestId')
+        if (!store.isTaskActive(persisted.id) && persisted.status === 'pending') {
+          if (persisted.planSnapshot!.protocol!.prepared) void store.refreshTaskResult(persisted.id).catch(() => {})
+          else await store.resumeDynamicSubmission(persisted.id, plan)
+        }
+        return { taskId: persisted.id, duplicate: true }
+      }
+    }
     if (context.contextVersion !== currentContext().contextVersion) throw new Error('项目或画布已切换，请重新获取创作上下文')
-    const type = mediaTypeFor(modelId)
+    const type = plan.protocol?.outputModality || mediaTypeFor(modelId)
     const canvasTarget = context.canvas && context.project.owner && (!directory || directory === context.project.owner)
-      && type !== 'model3d' && type !== 'text'
+      && (plan.protocol ? plan.protocol.declaredOutputModalities.some(modality => ['image', 'video', 'audio'].includes(modality)) : type !== 'model3d' && type !== 'text' && type !== 'file')
       ? { canvasId: context.canvas.id, canvasPath: context.canvas.path, owner: context.project.owner,
           operation: 'append' as const, referenceNodeIds: [],
           outputAspectRatio: String(resolvedParams.aspect_ratio || resolvedParams.aspectRatio || resolvedParams.ratio || resolvedParams.ar || '') }
@@ -264,7 +320,7 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
       canvasTarget,
       model: plan.model,
       modelLabel: plan.label,
-      prompt: requireString(resolvedParams, 'prompt'),
+      prompt: typeof resolvedParams.prompt === 'string' ? resolvedParams.prompt : dynamic ? plan.label : requireString(resolvedParams, 'prompt'),
       referenceImages: Array.isArray(resolvedParams.images) ? resolvedParams.images.map(String) : [],
       referenceVideos: Array.isArray(resolvedParams.videos) ? resolvedParams.videos.map(String) : [],
       source: 'creation',
@@ -272,10 +328,25 @@ async function handleBridgeRequest(operation: string, params: Record<string, unk
       memory: true,
       plan,
     })
-    submissions.set(requestId, taskId)
+    submissions.set(submissionScope, taskId)
+    submissionBodies.set(submissionScope, canonicalCreationJson(params))
     return { taskId, duplicate: false }
   }
   throw new Error('未知创作操作')
+}
+
+async function handleBridgeRequest(operation: string, params: Record<string, unknown>): Promise<unknown> {
+  if (operation !== 'submit_creation_task') return handleBridgeRequestUnchecked(operation, params)
+  const scope = `${await creationIdentity()}:${requireString(params, 'requestId', 120)}`
+  const fingerprint = canonicalCreationJson(params)
+  const pending = pendingSubmissions.get(scope)
+  if (pending) {
+    if (pending.fingerprint !== fingerprint) throw new Error('同一 requestId 正在提交不同内容')
+    return pending.promise
+  }
+  const promise = handleBridgeRequestUnchecked(operation, params)
+  pendingSubmissions.set(scope, { fingerprint, promise })
+  try { return await promise } finally { pendingSubmissions.delete(scope) }
 }
 
 export async function registerCreationMcpBridge(): Promise<() => void> {

@@ -149,7 +149,7 @@ export function creationResultRequiresKey(url: string): boolean {
     const parsed = new URL(url, 'https://api.jiucaihezi.studio')
     const pathname = parsed.pathname.replace(/^\/__jc_api(?=\/)/, '')
     return NEW_API_VIDEO_RESULT_HOSTS.has(parsed.hostname.toLowerCase()) &&
-      /^\/v1\/videos\/[^/]+\/content$/.test(pathname)
+      (/^\/v1\/videos\/[^/]+\/content$/.test(pathname) || /^\/v1\/creation\/tasks\/[A-Za-z0-9._:-]+\/outputs\/[A-Za-z0-9._:-]+\/content$/.test(pathname))
   } catch { return false }
 }
 

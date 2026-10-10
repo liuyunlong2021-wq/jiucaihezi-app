@@ -85,7 +85,8 @@ export function createCreationMcpServer(
 
   const readOnly = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false }
   register('get_creation_context', '获取韭菜盒子创作上下文', '返回当前项目、画布和提交所需的 contextVersion。', z.object({}).strict(), readOnly)
-  register('list_creation_models', '列出韭菜盒子创作模型', '从运行中的韭菜盒子模型注册表返回模型、字段、选项、默认值与价格。', z.object({}).strict(), readOnly)
+  register('list_creation_models', '列出韭菜盒子创作模型', '从运行中的韭菜盒子模型注册表返回模型、字段、选项、默认值与价格。', z.object({ query: z.string().optional(), cursor: z.string().optional(), limit: z.number().int().min(1).max(100).optional(), input_modality: z.string().optional(), output_modality: z.string().optional() }).strict(), readOnly)
+  register('get_creation_model', '读取影音能力合同', '读取 capability_id 对应的参数、素材槽位和不可变版本。', z.object({ modelId: z.string().min(1).max(200), revision: z.string().optional() }).strict(), readOnly)
   register('get_creation_task', '查询韭菜盒子创作任务', '查询一个创作任务的状态、进度、错误和稳定本地结果。', z.object({ taskId: z.string().min(1).max(120) }).strict(), readOnly)
   register('list_creation_history', '列出韭菜盒子创作历史', '分页读取与创作面板右上角相同的历史记录。', z.object({
     offset: z.number().int().min(0).default(0),
@@ -95,10 +96,11 @@ export function createCreationMcpServer(
     requestId: z.string().min(8).max(120),
     contextVersion: z.string().min(1).max(1000),
     modelId: z.string().min(1).max(200),
+    revision: z.string().optional(),
     params: z.record(z.string(), z.unknown()),
     directory: z.string().min(1).max(4000).optional(),
   }).strict(), { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true })
-  register('cancel_creation_task', '取消韭菜盒子创作任务', '停止跟踪仍在执行的任务；上游可能已接收请求。', z.object({ taskId: z.string().min(1).max(120) }).strict(), {
+  register('cancel_creation_task', '取消韭菜盒子创作任务', '停止跟踪仍在执行的任务；上游可能已接收请求。', z.object({ taskId: z.string().min(1).max(120), remote: z.boolean().optional() }).strict(), {
     readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: true,
   })
   register('retry_media_persistence', '重新保存韭菜盒子创作结果', '重试把已成功生成但未落盘的结果保存到当前任务所属项目，不重新生成。', z.object({ taskId: z.string().min(1).max(120) }).strict(), {

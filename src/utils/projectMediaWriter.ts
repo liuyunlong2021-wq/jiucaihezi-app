@@ -19,7 +19,7 @@ function mimeToExt(mime: string, sourceUrl = ''): string {
     'audio/mpeg': '.mp3', 'audio/wav': '.wav', 'audio/ogg': '.ogg',
     'audio/mp4': '.m4a', 'text/plain': '.txt', 'text/markdown': '.md',
     'model/gltf-binary': '.glb', 'model/gltf+json': '.gltf', 'model/obj': '.obj',
-    'application/zip': '.zip',
+    'application/zip': '.zip', 'application/pdf': '.pdf', 'application/json': '.json', 'application/octet-stream': '.bin',
   }
   const urlExt = sourceUrl.split(/[?#]/, 1)[0]?.match(/\.(glb|gltf|obj|fbx|stl|ply|zip)$/i)?.[0]?.toLowerCase()
   return map[mime] || urlExt || (mime.startsWith('image/') ? '.png' : mime.startsWith('video/') ? '.mp4' : mime.startsWith('audio/') ? '.mp3' : '.bin')
@@ -27,7 +27,7 @@ function mimeToExt(mime: string, sourceUrl = ''): string {
 
 export function buildProjectMediaPath(opts: {
   mime: string
-  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
   summary?: string
   prompt?: string
   model?: string
@@ -62,7 +62,7 @@ export async function downloadProjectMedia(opts: {
   onProgress?: (progress: { bytes: number; total?: number; attempt: number }) => void
   projectDir: string
   mime: string
-  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
   summary?: string
   prompt?: string
   model?: string
@@ -113,7 +113,7 @@ export async function writeProjectMedia(opts: {
   dataBase64: string   // 纯 base64，不含 data: 前缀
   mime: string
   projectDir: string
-  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  kind: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
   summary?: string
   prompt?: string
   model?: string
