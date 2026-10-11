@@ -969,6 +969,7 @@ function resizeCreationForWindow() {
   setFileTreeWidth(fileTreeWidth.value)
   if (previewResource.value || creationOpen.value) prepareDockLayout()
   if (chatDockMode.value === 'expanded') chatDockWidth.value = clampChatDockWidth(chatDockWidth.value)
+  resizeComposer()
 }
 
 const conversation = computed(() => opened.value?.type === 'conversation' ? opened.value : null)
@@ -3398,8 +3399,15 @@ function resizeComposer() {
     resetComposer()
     return
   }
-  editor.style.height = ''
-  editor.style.overflowY = editor.scrollHeight > editor.clientHeight ? 'auto' : 'hidden'
+  const style = window.getComputedStyle(editor)
+  const fontSize = Number.parseFloat(style.fontSize) || 16
+  const lineHeight = Number.parseFloat(style.lineHeight) || fontSize * 1.55
+  const minHeight = lineHeight * 3
+  const maxHeight = lineHeight * 10
+  editor.style.height = 'auto'
+  const contentHeight = editor.scrollHeight
+  editor.style.height = `${Math.max(minHeight, Math.min(contentHeight, maxHeight))}px`
+  editor.style.overflowY = contentHeight > maxHeight + 1 ? 'auto' : 'hidden'
 }
 
 function handleComposerInput(event: Event) {
@@ -4929,7 +4937,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               </div>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected }" :aria-pressed="manjuSelected" @click="toggleManjuProduction()"><JcIcon name="movie" /><span>漫剧制作</span></button>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" :aria-pressed="shortDramaSelected" @click="toggleShortDramaProduction()"><JcIcon name="edit-note" /><span>短剧写作</span></button>
-              <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="edit-note" /><span>小说创作</span></button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="auto_stories" /><span>小说创作</span></button>
               <button type="button" data-command-id="skill" :title="skillCommand.description" @click="insertCommand(skillCommand)"><JcIcon name="psychology" /><span>@Skill</span></button>
             </div>
             <button v-if="sending && (canQueueDraft || queueSubmitting)" class="send-button" :title="queueSubmitting ? '正在排入队列…' : '排入当前会话队列'" :disabled="queueSubmitting" @click="send()"><JcIcon name="playlist_add" /></button>
@@ -5416,7 +5424,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-mention-kind, .memory-mention-empty { color: var(--ink3); font-size: 11px; }
 .memory-mention-empty { padding: 9px; }
-.memory-composer-editable { width: 100%; min-width: 0; height: 4.65em; min-height: 4.65em; max-height: 4.65em; flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.memory-composer-editable { width: 100%; min-width: 0; height: auto; min-height: 4.65em; max-height: 15.5em; flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .memory-composer-editable:empty::before { color: var(--ink3); content: attr(data-placeholder); pointer-events: none; }
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }

@@ -4066,7 +4066,7 @@ const modelGroups = computed(() => {
       ? [
           // FK-Seedance 分组置顶；其余分组顺序沿用用户已确认的排列。
           'FK-Seedance', '满血seedance2.5', 'jc 本机', '菠萝',
-          'Seedance 2.5', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
+          'Seedance 2.5', '易红 API', '源流 AI', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
       : [

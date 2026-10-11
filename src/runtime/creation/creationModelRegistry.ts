@@ -247,7 +247,7 @@ const YIHONG_VIDEO_MODELS: Array<{
   {
     model: 'seedance2.5 cheap',
     label: 'Seedance 2.5 Cheap · 易红',
-    price: '¥1.10/次',
+    price: '¥2/次',
     duration: { min: 4, max: 30 },
     defaultDuration: 15,
     maxImages: 30,
@@ -275,7 +275,7 @@ const YIHONG_VIDEO_MODELS: Array<{
 const YIHONG_VIDEO_CONTRACT_ISSUES = [
   '按客户文档接入；用户账号授权目录 GET /v1/models、NewAPI 渠道路由与真实任务尚未核验。',
   'Super/Cheap 文档只写明六种画幅且含 21:9，没有列全枚举；面板先给常见六档，具体值和默认画幅待核实。',
-  '价格取文档中的积分价（1 积分 = ¥1）；Task Usage 表达式沿用用户指定的 1 美元 = 1 元数值口径，模型/分组倍率及实扣待核对。',
+  '面板价格按用户指定值；Cheap 面板价为 ¥2/次（易红文档价 ¥1.10/次）。Task Usage 表达式沿用用户指定的 1 美元 = 1 元数值口径，模型/分组倍率及实扣待核对。',
   'Seedance 2.5 Super 文档要求素材为公网 HTTPS URL；App 上传链路和上游实际取图/音视频能力待真实任务验收。',
 ]
 // Fk 渠道：model 必须与已上传 fk Task Plugin 的 meta.models 完全一致。
@@ -2742,8 +2742,9 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.5'
-  if (spec.id.startsWith('newapi/yuanliu/')) return 'Seedance 2.5'
-  if (spec.id.startsWith('newapi/yihong/')) return 'Seedance 2.5'
+  // 新渠道单独成组，面板里能直接看出模型归属。
+  if (spec.id.startsWith('newapi/yihong/')) return '易红 API'
+  if (spec.id.startsWith('newapi/yuanliu/')) return '源流 AI'
   // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）。
   // 族名是用户 2026-10-02 指定的展示名，面板分组头就是它；改名要同步 `CreationPanel.vue` 的 order 表。
   if (spec.id.startsWith('newapi/lingdong/')) return '满血seedance2.5'

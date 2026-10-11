@@ -135,7 +135,7 @@ test('missing skills service rejects instead of treating an inactive plugin as r
   const scope = createScope(ctx, agent)
   agent.ctx = scope.ctx
   t.after(() => scope.dispose())
-  await assert.rejects(pinManjuSkills({ handle: { agent } }, ['jc-manju-zhizuo'], root), /漫剧制作.*skills.*未启动/)
+  await assert.rejects(pinManjuSkills({ handle: { agent } }, ['jc-manju-zhizuo'], root), /创作路线 Wiki 归档 skills 插件未启动/)
 })
 
 async function realFixture(t, tools) {

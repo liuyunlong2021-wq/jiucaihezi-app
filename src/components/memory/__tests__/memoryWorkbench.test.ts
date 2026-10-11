@@ -1360,8 +1360,13 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   )
   assert.match(
     workbench,
-    /function resizeCreationForWindow\(\) \{[\s\S]*?prepareDockLayout\(\)[\s\S]*?clampChatDockWidth\(chatDockWidth\.value\)\s*\}/,
+    /function resizeCreationForWindow\(\) \{[\s\S]*?prepareDockLayout\(\)[\s\S]*?clampChatDockWidth\(chatDockWidth\.value\)[\s\S]*?resizeComposer\(\)\s*\}/,
   )
+  assert.match(workbench, /const minHeight = lineHeight \* 3/)
+  assert.match(workbench, /const maxHeight = lineHeight \* 10/)
+  assert.match(workbench, /editor\.style\.overflowY = contentHeight > maxHeight \+ 1 \? 'auto' : 'hidden'/)
+  assert.match(workbench, /memory-short-drama-button[\s\S]*?<JcIcon name="edit-note"/)
+  assert.match(workbench, /memory-novel-button[\s\S]*?<JcIcon name="auto_stories"/)
   assert.match(
     workbench,
     /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: var\(--memory-tree-width, 280px\) minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/,
