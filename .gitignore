@@ -9,6 +9,7 @@ scripts/jiucaihezi-creation-mcp/dist/
 dist-desktop/
 src-tauri/target/
 gateway/.wrangler/
+gateway/assets/
 public/landing/*.dmg
 __pycache__/
 *.pyc

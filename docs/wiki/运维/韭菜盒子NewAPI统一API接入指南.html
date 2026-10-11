@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>韭菜盒子 API 接入统一指南</title>
+<style>
+:root{--ink:#18202f;--muted:#5c687c;--line:#dfe5ee;--paper:#fff;--wash:#f4f7fb;--brand:#3157d5;--brand2:#eaf0ff;--teal:#087f78;--amber:#8a5a00;--amberbg:#fff5da;--red:#a33c39;--code:#111827;--shadow:0 12px 36px rgba(29,48,88,.07)}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--wash);color:var(--ink);font:16px/1.72 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+a{color:var(--brand);text-decoration:none}a:hover{text-decoration:underline}.wrap{max-width:1120px;margin:auto;padding:30px 26px 80px}
+.hero{padding:38px 42px 34px;background:linear-gradient(125deg,#172651,#3157d5 65%,#5b75db);color:#fff;border-radius:22px;box-shadow:var(--shadow)}
+.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#c8d5ff;font-weight:700}.hero h1{font-size:36px;line-height:1.25;margin:10px 0 12px;letter-spacing:-.03em}.hero p{max-width:760px;color:#e4eaff;margin:0}.hero .stamp{display:inline-block;margin-top:20px;padding:5px 10px;border:1px solid #ffffff55;border-radius:999px;font-size:12px;color:#eef2ff}
+.nav{position:sticky;top:0;z-index:5;display:flex;gap:8px;flex-wrap:wrap;padding:13px 0;background:rgba(244,247,251,.94);backdrop-filter:blur(10px)}
+.nav a{border:1px solid var(--line);border-radius:999px;background:#fff;padding:5px 12px;font-size:13px;color:#31405e}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:25px 28px;margin:18px 0;box-shadow:var(--shadow);scroll-margin-top:78px}
+h2{font-size:25px;line-height:1.35;margin:0 0 14px;letter-spacing:-.02em}h3{font-size:19px;margin:26px 0 10px}h4{font-size:15px;margin:20px 0 7px}p{margin:9px 0}ul,ol{padding-left:23px}li{margin:4px 0}
+.kicker{color:var(--brand);font-weight:750;font-size:12px;letter-spacing:.09em;text-transform:uppercase}
+.lead{font-size:17px;color:#35445f}.notice{border-left:4px solid var(--brand);padding:12px 15px;background:var(--brand2);border-radius:0 10px 10px 0;margin:16px 0}.notice.warn{border-color:#d59b23;background:var(--amberbg)}.notice.good{border-color:#15998f;background:#e9f8f5}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.mini{border:1px solid var(--line);border-radius:12px;padding:15px;background:#fcfdff}.mini strong{display:block;margin-bottom:5px}.pill{display:inline-block;margin:3px 5px 3px 0;padding:2px 8px;border-radius:999px;background:#eef2f8;color:#394864;font-size:12px}.pill.blue{background:#eaf0ff;color:#2948ac}.pill.green{background:#e7f7f3;color:#087f78}
+code{font: .92em ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:#eef2f7;padding:2px 5px;border-radius:5px;overflow-wrap:anywhere}
+pre{margin:12px 0 16px;padding:16px 18px;overflow:auto;background:var(--code);color:#e5edf8;border-radius:12px;font:13px/1.65 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+pre code{padding:0;background:none;color:inherit;overflow-wrap:normal}
+table{width:100%;border-collapse:collapse;margin:12px 0 18px;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top}
+th{background:#f1f4f9;font-weight:700;color:#273650}
+td code{font-size:12px}
+.table-scroll{overflow-x:auto}
+small,.muted{color:var(--muted)}.tiny{font-size:12px}
+hr{border:0;border-top:1px solid var(--line);margin:25px 0}
+.cols{columns:2;column-gap:36px}.cols li{break-inside:avoid}
+.endpoint{display:inline-block;padding:3px 8px;margin:2px;border-radius:6px;background:#edf2ff;color:#2846a8;font:12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+footer{padding:24px 8px;color:var(--muted);font-size:13px;text-align:center}
+@media(max-width:720px){.wrap{padding:16px 12px 50px}.hero{padding:27px 23px;border-radius:16px}.hero h1{font-size:29px}.card{padding:20px 17px}.grid{grid-template-columns:1fr}.cols{columns:1}table{font-size:13px}th,td{padding:7px 8px}}
+@media print{body{background:white}.wrap{max-width:none;padding:0}.hero{background:#213a87!important;print-color-adjust:exact}.nav{position:static}.card{box-shadow:none;break-inside:avoid}.nav a{padding:3px 7px}}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header class="hero">
+<div class="eyebrow">JIUCAIHEZI · NEWAPI PUBLIC API</div>
+<h1>韭菜盒子 API 接入统一指南</h1>
+<p>用一套 API Key 接入聊天、图片、视频、音频与视频提示词增强模型。本文说明公共地址、认证方式、模型发现、请求格式、任务处理，以及各条模型线路的专属参数。</p>
+<span class="stamp">整理日期：2026-10-11 · 可独立保存和投放的 HTML</span>
+</header>
+
+<nav class="nav" aria-label="目录">
+<a href="#start">快速开始</a><a href="#discover">模型列表</a><a href="#catalog">模型目录</a><a href="#chat">聊天</a><a href="#images">图片</a><a href="#videos">视频</a><a href="#audio">音频</a><a href="#context-ir">提示词增强</a><a href="#assets">参考素材</a><a href="#errors">错误与安全</a>
+</nav>
+
+<section class="card" id="start">
+<div class="kicker">01 · Start here</div>
+<h2>接入信息</h2>
+<div class="grid">
+<div class="mini"><strong>公共 Base URL</strong><code>https://api.jiucaihezi.studio</code><br><small>OpenAI SDK 通常填写 <code>https://api.jiucaihezi.studio/v1</code></small></div>
+<div class="mini"><strong>认证</strong><code>Authorization: Bearer YOUR_API_KEY</code><br><small>使用韭菜盒子 NewAPI 发放的 Key。</small></div>
+</div>
+<div class="notice warn"><strong>模型名以 Key 实际返回为准。</strong>目录中的模型是现有公开接入合同汇总，不代表每个账号都已开通全部线路；仅有本地插件或待发布的模型也不视为可用。每次接入先查询 <code>GET /v1/models</code>；只使用该 Key 返回的精确 <code>id</code>，不要用展示名、上游模型名或猜测出来的别名。</div>
+<p>示例中的 <code>YOUR_API_KEY</code>、<code>YOUR_MODEL_ID</code> 和 <code>TASK_ID</code> 都是占位文字。将 API Key 保存在服务端环境变量或密钥管理器，不要写入网页前端、公开仓库或日志。</p>
+</section>
+
+<section class="card" id="discover">
+<div class="kicker">02 · Discover</div>
+<h2>查询当前账号可用模型</h2>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/models' \
+  -H 'Authorization: Bearer YOUR_API_KEY'</code></pre>
+<p>响应中 <code>data[].id</code> 是后续请求要使用的精确模型名。模型列表受账号权限、分组和当前 NewAPI 渠道配置影响；如果下面目录中的型号没有出现在响应中，当前 Key 就不能按该型号发起调用。</p>
+<pre><code>{
+  "object": "list",
+  "data": [
+    {
+      "id": "YOUR_MODEL_ID",
+      "object": "model",
+      "owned_by": "jiucaihezi"
+    }
+  ]
+}</code></pre>
+</section>
+
+<section class="card" id="catalog">
+<div class="kicker">03 · Model catalog</div>
+<h2>现有公开模型目录</h2>
+<p class="lead">此目录汇总 Wiki 中已有第三方 API 合同的型号与请求方式。实时开通状态始终以 <code>/v1/models</code> 为准；平台价格、额度与最终扣费以账号侧定价及账单为准。此页不把价格写死，避免将会变化的售价当作接口协议。</p>
+
+<h3>聊天模型</h3>
+<p>聊天模型由账号动态提供。直接从 <code>/v1/models</code> 选择返回的 ID，通过 <code>POST /v1/chat/completions</code> 调用。Wiki 的对外合同使用 OpenAI Chat Completions 格式，不固定某一组文本模型名。</p>
+
+<h3>图片模型</h3>
+<div class="table-scroll">
+<table>
+<thead><tr><th>线路 / 协议</th><th>公开模型名（请求 model）</th><th>关键差异</th></tr></thead>
+<tbody>
+<tr><td>GPT Image / Gemini 图片合同</td><td>
+<code>gpt-image-2.5-1k</code><br><code>gpt-image-2.5-flare-1k</code><br><code>gpt-image-2.5-sunburst-1k</code><br><code>gpt-image-2-1k</code><br><code>gpt-image-2-超分</code><br><code>gpt-image-2.5-官方</code><br><code>gpt-image-2.5-flare-官方</code><br><code>gpt-image-2.5-sunburst-官方</code><br><code>gpt-image-2.5-flare-CF-超分</code><br><code>gpt-image-2.5-sunburst-CF-超分</code><br><code>gpt-image-2-低质量</code><br><code>gpt-image-2-中质量</code><br><code>gpt-image-2-vip</code><br><code>gpt-image-2-官方</code><br><code>[按token]gpt-image-2</code><br><code>gemini-3.1-flash-image-preview</code><br><code>gemini-3-pro-image-preview</code>
+</td><td>使用 OpenAI Images 风格的 JSON 文生图与 multipart 图生图。四个带 <code>1k</code> 的型号限制为 1K；其它 GPT Image 2 型号按具体线路支持 1K/2K/4K；Token 型号最多 16 张参考图；Gemini 型号最多 10 张参考图。两个 CF 超分型号虽保留 API 合同，但不在创作面板列表中。</td></tr>
+<tr><td>Fk 图片</td><td>
+<code>ft-image-v1-211f28f47b0355abb1798f72eb65f22d</code><br><code>ft-image-v1-186289ba9d3263010c69372f8939dd94</code><br><code>ft-image-v1-eb47192eb578f340043911005a06fb6e</code><br><code>ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d</code><br><code>ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82</code><br><code>ft-image-v1-d51c811d3d74a5b2433e6916ab564db9</code>
+</td><td>分别为 FK-image2、FK-image2.5、FK-image2.5-flare、FK-image2.5-sunburst、FK-banana-2、FK-banana-pro。1K/2K/4K；参考图分别最多 10 张（前四个）或 8 张（后两个）。请求用 <code>ratio</code> 与 <code>imageSize</code>；结果 URL 由 NewAPI 服务端等待上游任务完成后返回。</td></tr>
+<tr><td>Grok Imagine Image</td><td><code>grok-imagine-image-2.0</code><br><code>grok-imagine-image</code></td><td><code>/v1/images/generations</code> 文生图、<code>/v1/images/edits</code> multipart 图生图；比例与 <code>size</code> 要一致。上游异步轮询由 NewAPI 服务端完成，不要轮询视频接口。</td></tr>
+<tr><td>本机 Qwen Image</td><td><code>jc-qwen-image-2.1</code></td><td>文生图与图像编辑共用模型名；不带参考图为文生图，带图为编辑。最多 10 张，最长边不超过 2048；仅保证 URL 响应，不使用 <code>b64_json</code>。本线路与本机视频模型共用队列，可能排队且重载模型。</td></tr>
+</tbody>
+</table>
+</div>
+<p class="tiny muted">历史目录包含多个别名、质量档与渠道型号。具体型号的权限、别名映射和参数以当前模型列表及对应 API 校验结果为准。</p>
+
+<h3>视频模型</h3>
+<h4>Fk Seedance / MiniMax H3（完整 model ID）</h4>
+<div class="table-scroll">
+<table>
+<thead><tr><th>model ID</th><th>规格摘要</th><th>支持画幅</th><th>参考素材上限</th></tr></thead>
+<tbody>
+<tr><td><code>ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563</code></td><td>Seedance 2.5 满血 720p；4–30 秒</td><td>16:9、9:16、1:1、4:3、3:4、21:9</td><td>30 图，无视频/音频</td></tr>
+<tr><td><code>ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70</code></td><td>Seedance 2.5 满血 720p、支持过真人；15 或 30 秒</td><td>16:9、9:16、1:1、4:3、3:4</td><td>9 图，无视频/音频</td></tr>
+<tr><td><code>ft-video-v1-bdf45387433ac0a9042ebab3fae0299d</code></td><td>Seedance 2.5 满血 720p；固定 30 秒；提示词最多 6000 字</td><td>16:9、9:16、1:1、4:3、3:4、21:9</td><td>30 图、10 视频、10 音频</td></tr>
+<tr><td><code>ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f</code></td><td>XZ Seedance 2.5 720p；4–30 秒</td><td>9:16、16:9、1:1、4:3、3:4</td><td>9 图，无视频/音频</td></tr>
+<tr><td><code>ft-video-v1-7393b0529b788d532d031dcac5e820cb</code></td><td>XN1 Seedance 2.5 480p/720p；4–30 秒；提示词最多 15000 字</td><td>21:9、16:9、4:3、1:1、3:4、9:16</td><td>30 图、10 视频、10 音频</td></tr>
+<tr><td><code>ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4</code></td><td>XN2 Seedance 2.5 480p/720p；4–29 秒；提示词最多 9999 字</td><td>16:9、9:16、1:1、4:3、3:4、21:9</td><td>30 图、0 视频、10 音频</td></tr>
+<tr><td><code>ft-video-v1-451adae35b0c4a3d275c2c46394abc98</code></td><td>官方 Seedance 2.5 720p；4–30 秒</td><td>16:9、9:16、1:1、21:9、4:3、3:4</td><td>30 图、10 视频、10 音频</td></tr>
+<tr><td><code>ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746</code></td><td>MiniMax H3 768p；1–15 秒</td><td>16:9、4:3、1:1、3:4、9:16</td><td>9 图、3 音频，不支持视频</td></tr>
+</tbody>
+</table>
+</div>
+<p class="tiny muted">以上是当前 Fk 插件公开白名单的 8 个 ID。分辨率、画幅、时长及素材组合必须按该 ID 的模型合同逐项匹配。</p>
+
+<h4>山 / 海 Seedance 2.5</h4>
+<div class="table-scroll"><table><thead><tr><th>model</th><th>规格</th><th>素材</th></tr></thead><tbody>
+<tr><td><code>山seedance2.5</code></td><td>720p；4–30 秒（默认 30）；支持 16:9、9:16、1:1、4:3、3:4、21:9</td><td>最多 9 张图</td></tr>
+<tr><td><code>海seedance2.5</code></td><td>720p；固定 30 秒；支持 16:9、9:16、1:1、4:3、3:4、21:9</td><td>最多 10 张图</td></tr>
+</tbody></table></div>
+<p>这两条线路的公开合同不支持参考音频；参考图使用服务端可访问的 URL。任务通过视频任务接口创建、查询与下载。</p>
+
+<h4>灵动（满血）Seedance 2.5</h4>
+<div class="table-scroll"><table><thead><tr><th>model</th><th>规格</th><th>支持画幅</th><th>素材</th></tr></thead><tbody>
+<tr><td><code>cvk-2.5-480</code></td><td>480p；4–30 秒；按秒</td><td>1:1、16:9、9:16、4:3、3:4</td><td>最多 30 张图</td></tr>
+<tr><td><code>sd2.5-a</code></td><td>720p；4–30 秒；按秒</td><td>1:1、16:9、9:16、4:3、3:4</td><td>最多 30 张图</td></tr>
+<tr><td><code>cvk-2.5-720</code></td><td>720p；4–30 秒；按秒</td><td>1:1、16:9、9:16、4:3、3:4</td><td>最多 30 张图</td></tr>
+<tr><td><code>cvk-2.5-1080</code></td><td>1080p；4–30 秒；按秒</td><td>1:1、16:9、9:16、4:3、3:4</td><td>最多 30 张图</td></tr>
+<tr><td><code>SD-2.5-特价</code></td><td>固定 30 秒；不传 <code>resolution</code>；提示词最多 12000 字</td><td>1:1、16:9、9:16、4:3、3:4、21:9</td><td>最多 9 张图</td></tr>
+</tbody></table></div>
+<p>这些型号不支持参考视频或参考音频。按秒型号须传与型号匹配的 <code>resolution</code>；特价型号不要传该字段。</p>
+
+<h4>MiniMax H3 参考生视频</h4>
+<div class="table-scroll"><table><thead><tr><th>model</th><th>说明</th><th>图片 / 音频</th><th>时长与分辨率</th></tr></thead><tbody>
+<tr><td><code>minimax_h3_image_audio_to_video_v2_15s</code></td><td>图片与音频参考生视频</td><td>1–9 图；最多 3 段音频</td><td>1–15 秒；480p/768p 横竖</td></tr>
+<tr><td><code>minimax_h3_zm_u24</code></td><td>参考生视频增强版</td><td>1–9 图；最多 3 段音频</td><td>1–15 秒；480p/768p 横竖/1:1</td></tr>
+</tbody></table></div>
+<p>画幅由 <code>resolution</code> 的“横 / 竖”后缀指定：<code>480p竖</code>、<code>768p竖</code>、<code>480p横</code>、<code>768p横</code>；1:1 仅增强版额外支持 <code>480p(1:1)</code>、<code>768p(1:1)</code>。每次至少传 1 张参考图，最多 9 张；参考素材须为公网 URL，或先通过临时素材接口上传。</p>
+
+<h4>Dola Seedance 2.5</h4>
+<div class="mini"><strong><code>dola-seedance2.5</code></strong><p>720p，固定生成 30 秒；最多 9 张图片；仅支持图片参考，不接受视频或音频参考。任务查询完成后读取响应的 <code>video_url</code>。</p></div>
+<pre><code>{
+  "model": "dola-seedance2.5",
+  "prompt": "一只橘猫在窗边伸懒腰，电影感，自然光",
+  "ratio": "16:9",
+  "images": ["https://example.com/reference.jpg"]
+}</code></pre>
+<p class="tiny muted">Dola 参考图只接受可访问的 HTTP(S) 图片 URL，不接受本机路径或 data URI；最多 9 张、每张不超过 20 MB。画幅支持 <code>16:9</code>、<code>9:16</code>、<code>1:1</code>、<code>3:4</code>、<code>4:3</code>、<code>21:9</code>。创建后查询任务，完成时取响应 <code>video_url</code>。</p>
+
+<h4>RH MiniMax H3 AI 应用</h4>
+<p>请求模型固定为 <code>rh-aiapp</code>，通过 <code>webappId</code> 选择以下应用。各应用的请求结构相同，但参考图槽位数量不同。</p>
+<div class="table-scroll"><table><thead><tr><th>AI 应用</th><th>webappId</th><th>图片上限</th></tr></thead><tbody>
+<tr><td>Minimax-h3 文生视频</td><td><code>2093604127250149377</code></td><td>0（不要传图）</td></tr>
+<tr><td>Minimax-h3 首帧图生视频</td><td><code>2093571735550521345</code></td><td>1</td></tr>
+<tr><td>Minimax-h3 首尾帧</td><td><code>2093579373894000642</code></td><td>2（首帧与尾帧）</td></tr>
+<tr><td>Minimax-h3 多参双图</td><td><code>2093654136997900290</code></td><td>2</td></tr>
+<tr><td>Minimax-h3 多参3图</td><td><code>2093662476146667522</code></td><td>3</td></tr>
+<tr><td>Minimax-h3 多参-4图</td><td><code>2093651661213491202</code></td><td>4</td></tr>
+<tr><td>Minimax-h3多参5图</td><td><code>2093706819385516034</code></td><td>5</td></tr>
+<tr><td>文武双修</td><td><code>2101840271142117377</code></td><td>9</td></tr>
+</tbody></table></div>
+<div class="notice warn">RH 当前采用动态节点合同：调用前以同一 API Key 获取该应用完整 <code>nodeInfoList</code>，保留所有节点并只改本次输入；完整节点、版本 <code>1</code> 与 <code>webappId</code> 放入 <code>metadata.rh_aiapp</code>。不能只发送通用的 <code>prompt/images/duration/ratio</code>。文武双修有成功链路记录，其余 7 个应用尚未逐个复测。详情应严格按当前响应字段构造请求。</div>
+<p class="tiny">发现节点：<code>GET /api/runninghub/app-info?webappId=WEBAPP_ID</code>。参考图数组顺序对应应用槽位；本次没有使用的图片节点在节点列表中保留并填 <code>"None"</code>。</p>
+<pre><code>// 先用同一 API Key 请求 app-info；按 nodeId + fieldName 更新输入，保留完整节点列表。
+const webappId = '2101840271142117377';
+const nodes = discoveredApp.nodeInfoList;
+const body = {
+  model: 'rh-aiapp',
+  prompt: '图1和图2的人在掰手腕',
+  duration: 5,
+  ratio: '9:16',
+  metadata: { rh_aiapp: { version: 1, webappId, nodeInfoList: nodes } },
+  webappId,
+  nodeInfoList: nodes,
+  extra_fields: { webappId, nodeInfoList: nodes }
+};
+// POST https://api.jiucaihezi.studio/v1/videos，创建、查询与下载沿用视频任务接口。</code></pre>
+<p class="tiny muted">示例中的 nodes 必须来自本次 app-info 查询，并按所选应用修改节点值；不能直接使用旧的节点清单。重复出现的 webappId 和 nodeInfoList 必须保持一致。</p>
+
+<h4>本机 ComfyUI MiniMax H3</h4>
+<div class="table-scroll"><table><thead><tr><th>model</th><th>模式</th><th>字段</th><th>图片数</th></tr></thead><tbody>
+<tr><td><code>jc-minimax-h3</code></td><td>文生、首帧图生、首尾帧</td><td>不传图；或传 <code>first_frame</code>；或传 <code>first_frame</code> + <code>last_frame</code></td><td>0 / 1 / 2</td></tr>
+<tr><td><code>jc-minimax-h3-ref2v</code></td><td>参考生视频</td><td><code>images</code> 数组 + <code>aspect_ratio</code></td><td>1–6</td></tr>
+</tbody></table></div>
+<p>两款接口的时长为 1–28 秒。首帧模型使用像素尺寸字段 <code>size</code>；参考生模型的 <code>aspect_ratio</code> 必须使用完整枚举：<code>16:9 (Widescreen)</code>、<code>9:16 (Portrait Widescreen)</code>、<code>1:1 (Square)</code>、<code>4:3 (Standard)</code>、<code>3:4 (Portrait Standard)</code>、<code>3:2 (Photo)</code>、<code>2:3 (Portrait Photo)</code>、<code>21:9 (Ultrawide)</code>。单机线路单并发，结果保留 24 小时。</p>
+<pre><code>{
+  "model": "jc-minimax-h3",
+  "prompt": "从首帧开始，人物走到窗边并停下",
+  "duration": 5,
+  "size": "1088x1920",
+  "first_frame": "https://example.com/first.png"
+}</code></pre>
+<p class="tiny muted">首尾帧模式在同一请求中加 <code>last_frame</code>；参考生模式则使用模型 <code>jc-minimax-h3-ref2v</code> 和 <code>images</code> 数组。像素串必须符合该型号的尺寸合同。</p>
+<p class="tiny muted">所有视频模型名称都必须逐字复制。视频型号之间的时长、分辨率、画幅、参考素材能力、结果保留时间可能不同，不能把一个型号的参数直接套到另一个型号。</p>
+
+<h3>音频模型</h3>
+<div class="mini"><strong><code>seed-audio-1.0</code></strong>文本转语音/音频生成；文本长度 1–3000 字符；输出可选 MP3、WAV、PCM、Opus、Ogg Opus；参考音频最多 3 段。该接口成功响应为原始音频二进制，不是 JSON。</div>
+
+<h3>视频提示词增强模型</h3>
+<div class="mini"><strong><code>MiniMax-H3-Context-IR</code></strong>从文本和可选图像、视频、音频上下文生成增强后的视频提示词文本，不生成视频。时长须为 4–15 秒；文生提示词须传比例；推荐使用 Responses 后台任务并查询顶层响应 <code>id</code>。截至本指南整理时，已验收纯文本后台任务；多模态、同步、流式、回调及账单对账仍待专项验证。</div>
+</section>
+
+<section class="card" id="chat">
+<div class="kicker">04 · Chat</div>
+<h2>聊天补全</h2>
+<p><span class="endpoint">POST /v1/chat/completions</span>请求体使用 OpenAI Chat Completions JSON。消息至少包含一条 user 消息。</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/chat/completions' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "model": "YOUR_MODEL_ID",
+    "messages": [
+      {"role": "user", "content": "请用一句话介绍韭菜盒子。"}
+    ],
+    "stream": false
+  }'</code></pre>
+<p>非流式从 <code>choices[0].message.content</code> 读取回复。流式请求设置 <code>"stream": true</code>，按 SSE 的 <code>data:</code> 行解析 JSON、拼接 <code>choices[0].delta.content</code>，收到 <code>data: [DONE]</code> 后结束。温度、工具调用和结构化输出应先确认所选模型支持。</p>
+</section>
+
+<section class="card" id="images">
+<div class="kicker">05 · Images</div>
+<h2>图片生成与编辑</h2>
+<h3>标准 OpenAI Images 线路</h3>
+<p><span class="endpoint">POST /v1/images/generations</span> 文生图；<span class="endpoint">POST /v1/images/edits</span> 图生图。文生图传 JSON；编辑接口传 <code>multipart/form-data</code>，让客户端自动生成 boundary。</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/images/generations' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "model": "YOUR_MODEL_ID",
+    "prompt": "一间有自然光的现代工作室，写实摄影风格",
+    "size": "1024x1024",
+    "n": 1,
+    "response_format": "url"
+  }'</code></pre>
+<p>图生图例子（本地文件直接上传）：</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/images/edits' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'model=YOUR_MODEL_ID' \
+  -F 'prompt=保留主体和构图，改成电影级夜景' \
+  -F 'size=2048x1152' \
+  -F 'image=@./reference.png'</code></pre>
+<p>标准图片响应通常是 <code>data[]</code>，其中每项可能含 <code>url</code> 或 <code>b64_json</code>。客户端应按照该模型合同处理结果格式并及时下载 URL。</p>
+
+<h3>图片线路差异</h3>
+<div class="grid">
+<div class="mini"><strong>Fk 图片</strong><p>文生图用 JSON，可选 <code>ratio</code> 与 <code>imageSize</code>；比例支持 <code>auto</code>、<code>1:1</code>、<code>9:16</code>、<code>16:9</code>、<code>4:3</code>、<code>3:4</code>、<code>3:2</code>、<code>2:3</code>、<code>5:4</code>、<code>4:5</code>、<code>21:9</code>；尺寸为 <code>1K</code>、<code>2K</code>、<code>4K</code>。本地图生图用 multipart（重复 <code>images</code> 字段），公网图可通过 JSON <code>imageUrls</code> 提交。参考图最多 8 或 10 张，依模型而定。接口返回 URL；NewAPI 在服务端等待 Fk 任务，调用方没有图片任务轮询 API。返回签名 URL 后应尽快下载。</p></div>
+<div class="mini"><strong>Grok Imagine Image</strong><p>使用标准 Images 路径；支持 <code>1:1</code>、<code>16:9</code>、<code>9:16</code>、<code>3:2</code>、<code>2:3</code>；<code>size</code> 必须与 <code>aspect_ratio</code> 对应比例一致。图生图重复上传 <code>image[]</code>。NewAPI 在服务端轮询，调用方不使用 <code>/v1/videos</code>。</p></div>
+<div class="mini"><strong>本机 Qwen Image</strong><p><code>jc-qwen-image-2.1</code> 可用 JSON <code>images</code> URL 数组或 Images 编辑 multipart。最多 10 张；最长边上限 2048；返回 URL。<code>b64_json</code> 不适用于该线路。</p></div>
+<div class="mini"><strong>模型尺寸提示</strong><p>OpenAI Images 的尺寸使用像素串（例如 <code>1024x1024</code>、<code>2048x1152</code>）。不要把 Gemini 的比例/画质参数、Fk 的 <code>imageSize</code> 或本机 Qwen 的尺寸上限直接套用到其他图片型号。</p></div>
+</div>
+</section>
+
+<section class="card" id="videos">
+<div class="kicker">06 · Videos</div>
+<h2>视频任务：创建、轮询、取回</h2>
+<p>多数视频线路通过 <span class="endpoint">POST /v1/videos</span> 创建任务，再用同一 API Key 调用 <span class="endpoint">GET /v1/videos/{task_id}</span> 查询。创建响应中的 <code>id</code> 是 NewAPI 任务 ID；保存并复用它，不要拿上游 <code>jobId</code> 代替。查询看到 <code>queued</code> 只代表受理成功，继续轮询直到 <code>completed</code> 或 <code>failed</code>。</p>
+<p>下面是 Fk Seedance 线路的请求示例；其它视频型号请使用目录和该型号合同指定的字段名。</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/videos' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "model": "YOUR_VIDEO_MODEL_ID",
+    "prompt": "雨夜霓虹街道，骑手穿过积水，电影感冷色调",
+    "ratio": "16:9",
+    "duration": 5,
+    "resolution": "720p",
+    "imageUrls": ["https://example.com/reference.png"]
+  }'</code></pre>
+<p>查询状态：</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/videos/TASK_ID' \
+  -H 'Authorization: Bearer YOUR_API_KEY'</code></pre>
+<p>已完成的视频多数通过二进制接口保存：</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/videos/TASK_ID/content' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -o result.mp4</code></pre>
+<div class="notice">Dola Seedance 2.5 是一个合同例外：查询完成后读取响应中的 <code>video_url</code>；不要假定所有视频都能从轮询 JSON 取得地址，也不要假定每条线路都使用同一种下载方式。某型号文档指定 <code>/content</code> 时按其规定取回文件。</div>
+
+<h3>视频字段：以型号决定是否必填</h3>
+<div class="table-scroll"><table><thead><tr><th>字段</th><th>常见用途</th><th>注意</th></tr></thead><tbody>
+<tr><td><code>model</code></td><td>选择模型</td><td>精确复制 <code>/v1/models</code> 的模型 ID。</td></tr>
+<tr><td><code>prompt</code></td><td>视频描述</td><td>个别型号有字符上限；提示词长度不代表无限制。</td></tr>
+<tr><td><code>duration</code> / <code>seconds</code></td><td>目标时长，单位秒</td><td>兼容字段随线路而异；请传该型号支持的值。</td></tr>
+<tr><td><code>resolution</code></td><td>画质，如 480p、720p、768p、1080p</td><td>本地 ComfyUI 有些型号使用 <code>size</code> 像素尺寸，而非 resolution 字符串。</td></tr>
+<tr><td><code>ratio</code> / <code>aspect_ratio</code></td><td>画幅</td><td>枚举可能需要完整描述文字；短比例并非每条线路都接受。</td></tr>
+<tr><td><code>imageUrls</code> / <code>images</code></td><td>参考图片</td><td>字段别名并非所有插件通用；素材槽位语义按模型决定。</td></tr>
+<tr><td><code>videoUrls</code>、<code>audioUrls</code></td><td>参考视频、音频</td><td>只适用于明确支持该素材类型的型号。</td></tr>
+<tr><td><code>first_frame</code>、<code>last_frame</code></td><td>首帧或首尾帧生成</td><td>主要用于 <code>jc-minimax-h3</code>；与参考图数组模式区分。</td></tr>
+</tbody></table></div>
+
+<h3>任务重试原则</h3>
+<ul>
+<li>轮询间隔通常从 3–5 秒开始；若出现 429，降低频率并延长间隔。</li>
+<li>创建请求遇到网络超时或连接中断时，先确认任务是否已经受理；不要立即重复创建，以免生成重复任务或重复计费。</li>
+<li>异步任务的错误可能在查询响应的 <code>error</code> 字段中；检查任务最终状态。</li>
+<li>任务和结果的保留期按具体线路而异。部分线路为 24 小时、部分为 7 天；完成后尽快下载并保存到自己的存储。</li>
+</ul>
+</section>
+
+<section class="card" id="audio">
+<div class="kicker">07 · Audio</div>
+<h2>Seed Audio 1.0</h2>
+<p><span class="endpoint">POST /v1/audio/speech</span> 使用 JSON 请求，成功响应为音频二进制。curl 示例中用 <code>-o</code> 将文件落盘。</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/audio/speech' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  -o result.mp3 \
+  --data '{
+    "model": "seed-audio-1.0",
+    "input": "请自然地说：这是一段音频测试。",
+    "response_format": "mp3"
+  }'</code></pre>
+<p>文本 <code>input</code> 为 1–3000 字符；格式支持 <code>mp3</code>、<code>wav</code>、<code>pcm</code>、<code>opus</code>、<code>ogg_opus</code>。参考音频通过 <code>metadata.references</code> 传入，最多 3 段；每项可使用可访问的 <code>audio_url</code>，或不带 data URI 前缀的原始 <code>audio_data</code> Base64。单段 <code>audio_data</code> 最大 10 MiB。</p>
+<p>成功响应不是 JSON；不要尝试按图片数组或聊天 completions 解析。当前公开合同不保证 <code>voice</code>、<code>speed</code>、<code>n</code> 或 <code>stream</code> 字段有效。</p>
+</section>
+
+<section class="card" id="context-ir">
+<div class="kicker">08 · Prompt enhancement</div>
+<h2>MiniMax H3 Context IR</h2>
+<p>该接口只返回增强后的视频提示词，不会创建视频。使用 <span class="endpoint">POST /v1/responses</span>，建议后台模式；用响应顶层 <code>id</code> 查询结果。</p>
+<pre><code>curl 'https://api.jiucaihezi.studio/v1/responses' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -H 'Content-Type: application/json' \
+  --data '{
+    "model": "MiniMax-H3-Context-IR",
+    "background": true,
+    "content": [
+      {"type": "text", "text": "雨夜的老街上，一名侦探撑伞走进霓虹灯下。"}
+    ],
+    "duration": 6,
+    "ratio": "9:16"
+  }'</code></pre>
+<p>以创建响应顶层 <code>id</code>（<code>resp_...</code>）作为 <code>GET /v1/responses/{response_id}</code> 的 ID，不要用 <code>metadata.task_id</code>（<code>task_...</code>）。完成后读取 output 里的非空 <code>output_text</code>。多模态内容可包括图、视频、音频 URL，但该模式尚未完成公网专项验收；可靠接入先使用纯文本后台任务。</p>
+<p class="tiny muted">多模态 <code>content</code> 每次至少带一段非空文本；图像项使用 <code>image_url</code>（角色可为 <code>first_frame</code>、<code>last_frame</code> 或 <code>reference_image</code>），视频与音频项分别使用 <code>video_url</code> / <code>audio_url</code> 及 <code>reference_video</code> / <code>reference_audio</code> 角色。首尾帧模式不能与多模态参考模式混用。</p>
+</section>
+
+<section class="card" id="assets">
+<div class="kicker">09 · Reference assets</div>
+<h2>参考素材怎么传</h2>
+<p>素材方式由模型接口合同决定，不存在一个适用于所有模型的上传格式：</p>
+<ul>
+<li><strong>图片编辑接口：</strong>OpenAI Images 的本地参考图可直接作为 multipart 文件上传。</li>
+<li><strong>视频模型接受 URL 数组时：</strong>可传公开 HTTPS 文件链接；部分线路也接受 HTTP 或内联 data URI，须以该型号合同为准。</li>
+<li><strong>临时素材上传：</strong>需要 URL 且本地没有公网链接时，可调用 <code>POST /api/creations/uploads</code>，以 multipart 字段 <code>file</code> 上传。接口接受图片、音频或视频文件，单文件最大 20 MB，返回的 URL 在 15 分钟后失效。应在失效前创建任务。</li>
+</ul>
+<pre><code>curl 'https://api.jiucaihezi.studio/api/creations/uploads' \
+  -H 'Authorization: Bearer YOUR_API_KEY' \
+  -F 'file=@./reference.png'</code></pre>
+<pre><code>{
+  "url": "https://api.jiucaihezi.studio/media/creation/TEMP_TOKEN"
+}</code></pre>
+<div class="notice warn">本机路径、<code>file:</code>、<code>blob:</code> 地址不是服务器可访问的 URL。若接口要求公网地址，先直传可访问的 HTTPS 文件链接，或使用临时素材上传。已明确支持 multipart 直传的图片编辑接口无需先上传临时素材。</div>
+</section>
+
+<section class="card" id="errors">
+<div class="kicker">10 · Troubleshooting &amp; security</div>
+<h2>常见错误与安全约定</h2>
+<div class="table-scroll"><table><thead><tr><th>错误</th><th>检查方法</th></tr></thead><tbody>
+<tr><td><code>401 Unauthorized</code></td><td>确认请求带有 <code>Authorization: Bearer YOUR_API_KEY</code>，Key 未失效。</td></tr>
+<tr><td><code>403 Forbidden</code></td><td>确认账号、分组和 Key 已开通该模型权限。</td></tr>
+<tr><td><code>model_not_found</code></td><td>重新获取 <code>/v1/models</code>，逐字复制返回的 ID。</td></tr>
+<tr><td><code>400 Bad Request</code></td><td>检查模型专属的必填字段、参数类型、素材数量、尺寸和枚举值。</td></tr>
+<tr><td><code>429 Too Many Requests</code></td><td>降低并发与查询频率；按退避间隔重试。</td></tr>
+<tr><td><code>model_price_error</code> / 余额不足</td><td>确认该账号的模型价格已配置且额度充足；实际扣费以 NewAPI 账单为准。</td></tr>
+<tr><td><code>5xx</code> / 超时</td><td>查看任务状态或请求记录。对创建型接口先确认请求是否已受理，再决定是否重试。</td></tr>
+</tbody></table></div>
+<ul>
+<li>API Key 仅放在服务端密钥配置中，不放进浏览器端代码、移动端公开包、网页 HTML、截图或日志。</li>
+<li>请求只连接 <code>api.jiucaihezi.studio</code>。不要向 NewAPI 客户端发送供应商 Key、渠道编号、上游 Job ID 或内部适配器 URL。</li>
+<li>使用参考素材前确认有权提交该素材，并确保服务端能够读取。</li>
+<li>价格、模型权限、调用额度和结果保留期属于账号或线路配置，可能调整；按实际 NewAPI 返回、账户设置及账单确认。</li>
+</ul>
+<div class="notice good"><strong>最短接入流程：</strong>创建 API Key → 调用 <code>/v1/models</code> → 按模型类型选择接口 → 提交请求 → 按对应协议读取同步结果或轮询任务 → 及时保存媒体结果。</div>
+</section>
+
+<footer>韭菜盒子 NewAPI · 对外 API 接入指南 · 2026-10-11<br>模型目录与线路参数可能变更；以 API Key 实际可见模型及对应接口返回为准。</footer>
+</div>
+</body>
+</html>
+

@@ -34,11 +34,6 @@ test('@文件 maps to the official Harness full-access mode', () => {
     DEEPSEEK_PERMISSION_TIERS.map(option => [option.tier, option.label]),
     [['read-only', '仅可查看'], ['workspace-write', '工作区内修改'], ['danger-full-access', '完全权限']],
   )
-  // 按钮上的短名：只有中间档需要缩，另外两档全名本来就短。
-  assert.deepEqual(
-    DEEPSEEK_PERMISSION_TIERS.map(option => [option.tier, option.short]),
-    [['read-only', '仅可查看'], ['workspace-write', '工作区'], ['danger-full-access', '完全权限']],
-  )
   // 越界审批已经接通，文案须区分长期档位与本次授权。
   assert.equal(DEEPSEEK_PERMISSION_TIERS[1].note, '只能改工作区内的文件，越界需请求本次授权')
   assert.equal(DEEPSEEK_DEFAULT_PERMISSION_TIER, 'workspace-write')

@@ -80,7 +80,7 @@ function rootIndex(contract) {
   return [
     `# ${contract.scaffold.rootTitle}`,
     '',
-    '用途：统一管理本项目的创作规划、来源材料、漫剧制作资料与可复用资产。',
+    '用途：统一管理本项目的创作规划、来源材料、短剧剧本、漫剧制作资料与可复用资产。',
     '',
     '## 子目录',
     '',
@@ -624,7 +624,7 @@ export function createWikiArtifactTool(ctx, contract) {
     throw new Error('Wiki 归档工具缺少 Harness 沙箱策略')
   return defineTool({
     name: 'wiki_save_artifact',
-    description: '把已完成且用户要求保存的漫剧或小说产物，按固定类型写入当前项目统一 Wiki 并更新直属索引。不得接收任意路径。小说章节先保存草稿，只有用户明确确认后才能追加到原文。',
+    description: '把已完成且用户要求保存的短剧、漫剧或小说产物，按固定类型写入当前项目统一 Wiki 并更新直属索引。不得接收任意路径。小说章节先保存草稿，只有用户明确确认后才能追加到原文。',
     parameters: {
       artifact_kind: {
         type: 'string', required: true,

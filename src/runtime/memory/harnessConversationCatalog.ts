@@ -1,6 +1,7 @@
 import { deepSeekSessionId } from '@/services/deepSeekHarness'
 import type { ManjuPreference } from './manjuProduction'
 import type { NovelPreference } from './novelProduction'
+import type { ShortDramaPreference } from './shortDramaProduction'
 
 export interface HarnessConversationCatalogEntry {
   conversationId: string
@@ -14,6 +15,7 @@ export interface HarnessConversationCatalogEntry {
   /** 输入框选择，属于导航偏好；作品和对话正文仍由项目与 Harness 保存。 */
   manju?: ManjuPreference
   novel?: NovelPreference
+  shortDrama?: ShortDramaPreference
 }
 
 const keyFor = (workspaceKey: string) => `jc:harness-conversations:${workspaceKey}`

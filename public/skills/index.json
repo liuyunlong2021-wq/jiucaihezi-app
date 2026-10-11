@@ -39,7 +39,7 @@
     "id": "jc-duanju",
     "name": "jc-duanju",
     "displayName": "jc-duanju",
-    "description": "根据人物设定、故事梗概、小说片段、分集大纲、聊天记录等素材，创作、改编、扩写、续写或润色可拍摄的中文短剧、单场戏、单集剧本及分集大纲。执行合理删减、背景入戏、场景合并、每集仅一场戏、台词总量不超过400字、黄金3秒强开篇、20–30秒短频反转、集尾卡高潮和精简画面。适用于明确的短剧创作请求；普通小说写作、纯素材摘要或非短剧单场戏不自动触发。不联动任何调性文件。",
+    "description": "短剧写作独立路线：创作原创短剧，或将小说、故事、剧本等改编为可拍摄的中文短剧；负责改编方向、分集规划、逐集剧本、续写与修订。根据用户和项目规格确定时长、集数、场次、字数与节奏；未指定时采用快节奏短剧默认规格。不是小说正文创作，也不负责漫剧视觉资产、工程台本或视频提示词。",
     "triggers": [
       "写短剧",
       "创作短剧",
@@ -50,7 +50,10 @@
       "把素材写成短剧",
       "写一集短剧",
       "写一场戏",
-      "分集大纲"
+      "分集大纲",
+      "短剧改编方向",
+      "把小说改编成短剧",
+      "按改编方案写短剧"
     ],
     "commands": [],
     "files": [
@@ -205,7 +208,7 @@
     "id": "jc-manju-zhizuo",
     "name": "jc-manju-zhizuo",
     "displayName": "jc-manju-zhizuo",
-    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。",
+    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在九个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。短剧方向和文学剧本使用独立的短剧写作入口。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -231,13 +234,14 @@
     "id": "jc-new-user-guide",
     "name": "jc-new-user-guide",
     "displayName": "新手指南",
-    "description": "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially novel or manga creation, the Creation Panel, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide.",
+    "description": "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially short-drama, novel or manga creation, the Creation Panel, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、短剧写作、短剧改编、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide.",
     "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md",
       "huanying.GIF",
       "references/1-Wiki使用.md",
+      "references/10-短剧写作.md",
       "references/3-Skill科普.md",
       "references/4-产品功能.md",
       "references/5-模型科普.md",
@@ -261,6 +265,10 @@
         },
         {
           "path": "references/1-Wiki使用.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/10-短剧写作.md",
           "kind": "reference"
         },
         {

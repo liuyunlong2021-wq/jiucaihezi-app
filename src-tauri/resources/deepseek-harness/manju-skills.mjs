@@ -7,11 +7,13 @@ import { createWikiArtifactTool } from './manju-wiki.mjs'
 export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUNDLED_SKILL_DIR) {
   const hasManju = names.includes('jc-manju-zhizuo')
   const hasNovel = names.includes('jc-novel')
-  const hasWikiMemory = names.includes('wiki-memory') || hasManju || hasNovel
+  const hasShortDrama = names.includes('jc-duanju')
+  const hasWikiMemory = names.includes('wiki-memory') || hasManju || hasNovel || hasShortDrama
   if (!hasWikiMemory) return () => {}
   const agent = rec.handle.agent
   if (!directory) throw new Error('内置创作与 Wiki 资源目录不可用')
-  if (hasManju && hasNovel) throw new Error('漫剧制作与小说创作不能同时启用')
+  if (Number(hasManju) + Number(hasNovel) + Number(hasShortDrama) > 1)
+    throw new Error('漫剧制作、短剧写作与小说创作不能同时启用')
   const route = hasManju ? JSON.parse(await readFile(join(directory, 'manju-route.json'), 'utf8')) : undefined
   if (route && (route.router !== 'jc-manju-zhizuo' || !Array.isArray(route.skills) || !route.skills.includes(route.router)
     || route.skills.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name))))
@@ -20,12 +22,16 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
     ? names.filter(name => name !== 'wiki-memory' && !route.skills.includes(name))
     : hasNovel
       ? names.filter(name => name !== 'wiki-memory' && name !== 'jc-novel')
-      : names.filter(name => name === 'jc-manju-zhizuo')
-  if (unsupported.length) throw new Error(`${hasManju ? '漫剧制作' : '小说创作'}路线不能同时加载 ${unsupported.join('、')}；请先退出当前路线。`)
+      : hasShortDrama
+        ? names.filter(name => name !== 'wiki-memory' && name !== 'jc-duanju')
+        : names.filter(name => ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju'].includes(name))
+  const routeLabel = hasManju ? '漫剧制作' : hasNovel ? '小说创作' : '短剧写作'
+  if (unsupported.length) throw new Error(`${routeLabel}路线不能同时加载 ${unsupported.join('、')}；请先退出当前路线。`)
   const skillNames = [...new Set([
     'wiki-memory',
     ...(route?.skills || []),
     ...(hasNovel ? ['jc-novel'] : []),
+    ...(hasShortDrama ? ['jc-duanju'] : []),
   ])]
   const artifactContract = JSON.parse(await readFile(join(directory, 'wiki-artifacts.json'), 'utf8'))
   if (!artifactContract || typeof artifactContract.types !== 'object' || !Array.isArray(artifactContract.rootCandidates)
@@ -49,7 +55,7 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
       invocation: { userInvocable: true, modelInvocable: name !== route?.router },
     }
   }))
-  if (rec.handle.agent !== agent) throw new Error('漫剧制作 Agent 已替换')
+  if (rec.handle.agent !== agent) throw new Error(`${routeLabel} Agent 已替换`)
   let ready = false
   const plugin = agent.ctx.plugin({
     name: 'jiucaihezi-wiki-memory',
@@ -63,7 +69,7 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
   })
   try {
     await plugin.await()
-    if (!ready) throw new Error('漫剧制作／小说创作 Wiki 归档 skills 插件未启动：注册表服务不可用')
+    if (!ready) throw new Error('创作路线 Wiki 归档 skills 插件未启动：注册表服务不可用')
     plugin.assertActive()
     return () => plugin.dispose()
   } catch (error) {

@@ -32,7 +32,8 @@ function mentionLoaderFixture(blockCatalog = false) {
     agentStore: { getCustomSkills: () => { calls.customSkills++; return [{ name: 'story', description: '故事' }] } },
     sortSkillsForPicker: (entries: unknown[]) => entries,
     manjuSelected: ref(false), MANJU_SKILLS: ['story'],
-    novelSelected: ref(false), NOVEL_SKILLS: ['jc-novel', 'wiki-memory'], projectOwner: ref('/project'),
+    novelSelected: ref(false), NOVEL_SKILLS: ['jc-novel', 'wiki-memory'],
+    shortDramaSelected: ref(false), SHORT_DRAMA_SKILLS: ['jc-duanju', 'wiki-memory'], projectOwner: ref('/project'),
     files: {
       searchPaths: async () => { calls.search++; return [{ path: 'story.md', kind: 'text', isDirectory: false }] },
       list: async () => { calls.list++; return [{ path: 'story.md', kind: 'text', isDirectory: false }] },
@@ -414,6 +415,7 @@ test('窄对话 Dock 保留模型与对话名称，创作与 Skill 入口常驻'
   assert.match(workbench, /\.memory-workbench\.chat-dock-narrow \.memory-model-picker \{[^}]*min-width: 0; flex: 1 1 120px/)
   assert.match(workbench, /'chat-dock-minimal': viewportWidth >= 940[\s\S]*chatDockWidth < 360/)
   assert.match(workbench, /class="memory-manju-button"[^>]*@click="toggleManjuProduction\(\)"/)
+  assert.match(workbench, /class="memory-short-drama-button"[^>]*@click="toggleShortDramaProduction\(\)"/)
   assert.match(workbench, /class="memory-novel-button"[^>]*@click="toggleNovelProduction\(\)"/)
   assert.match(workbench, /data-command-id="skill"[^>]*@click="insertCommand\(skillCommand\)"/)
   assert.doesNotMatch(workbench, /quickCommandMenu/)
@@ -608,10 +610,10 @@ test('Harness conversations open immediately without creating a Raw memory space
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.ok(workbench.includes("const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')"))
-  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel)'))
+  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel, catalogEntry?.shortDrama)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
-  assert.ok(workbench.includes('restoreNovelSelection(\n    restoreManjuSelection(names || [], manjuPreference), novelPreference,\n  ).filter(name => available.has(name))'))
+  assert.ok(workbench.includes('if (shortDramaPreference?.enabled) {\n    selectedSkillNames.value = restoreShortDramaSelection(names || [], shortDramaPreference).filter(name => available.has(name))'))
   assert.ok(workbench.includes("createHarnessConversationCatalogEntry(owner, '新对话')"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
@@ -795,9 +797,9 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   for (const label of ['@Skill', '@排版', '@影音', '@3D', '@MCP'])
     assert.match(workbench, new RegExp(`label: '${label}'`))
   // 权限开关**不带 `@`**：旁边那五个是「启用某能力」，它不是。
-  // 当前档位常驻写在按钮上（用户报的就是「不知道它现在是哪一档」），所以按钮文案是短名，
-  // 也不再占输入框上方那排能力芯片 —— 那时默认档一个芯片都不显示，等于看不出档位。
-  assert.match(workbench, /permissionTierShortLabel\(\)/)
+  // 当前档位常驻写在按钮上；按钮显示和菜单选项相同的全名，避免不同档位看起来都像“工作区”。
+  assert.match(workbench, /permissionSwitching \? '切换中' : permissionTierLabel\(\)/)
+  assert.doesNotMatch(workbench, /permissionTierShortLabel\(\)/)
   assert.doesNotMatch(workbench, /permissionLabel\(\)/)
   assert.match(workbench, /danger: permissionTier === 'danger-full-access'/)
   // 三档的单一真相源在 service 层（与官方 base profile 同源），工作台不写死档位文案。
@@ -2037,7 +2039,7 @@ test('editing a turn restores the Skill it was sent with and keeps its reference
   assert.ok(editTurn, 'editTurn should exist')
   assert.ok(cancelEdit, 'cancelEdit should exist')
   // 轮次上存了 skillNames 就必须恢复：丢了它，模型重发时一个 skill-creator 工具都没有。
-  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames, currentManjuPreference\(\), currentNovelPreference\(\)\)/)
+  assert.match(editTurn, /restoreComposerSkills\(turn\.skillNames, currentManjuPreference\(\), currentNovelPreference\(\), currentShortDramaPreference\(\)\)/)
   assert.match(cancelEdit, /restoreComposerSkills\(latestUserTurnToolNames\(/)
   assert.match(workbench, /async function restoreComposerSkills\(/)
   // 恢复要过滤掉已卸载的 Skill：坏引用会污染整段会话的 Skill 加载。

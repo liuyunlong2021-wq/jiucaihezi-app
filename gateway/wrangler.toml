@@ -5,15 +5,43 @@ workers_dev = false
 preview_urls = false
 
 routes = [
-  { pattern = "api.jiucaihezi.studio/", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/favicon.svg", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/favicon.ico", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/apple-touch-icon.svg", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/apple-touch-icon.png", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/legal.css", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/support", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/support/*", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/privacy", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/privacy/*", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/terms", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/terms/*", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/homepage-content", zone_name = "jiucaihezi.studio" },
+  { pattern = "api.jiucaihezi.studio/homepage-content/*", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/auth/*", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/sync/*", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/health", zone_name = "jiucaihezi.studio" },
   { pattern = "api.jiucaihezi.studio/landing/*", zone_name = "jiucaihezi.studio" }
+]
+
+[assets]
+directory = "./assets"
+binding = "SITE"
+run_worker_first = [
+  "/favicon.svg",
+  "/favicon.ico",
+  "/apple-touch-icon.svg",
+  "/apple-touch-icon.png",
+  "/legal.css",
+  "/support",
+  "/support/*",
+  "/privacy",
+  "/privacy/*",
+  "/terms",
+  "/terms/*",
+  "/homepage-content",
+  "/homepage-content/*",
+  "/landing/*"
 ]
 
 [vars]

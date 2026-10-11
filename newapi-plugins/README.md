@@ -22,6 +22,8 @@
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
 | `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.2.0` 增加 `openai_image`；与视频复用同一插件和渠道，源码待上传与真实验收 |
 | `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | 代码已就绪，**未上传或生产验收**；使用 `openai_image`，由 NewAPI 主机轮询后返回图片 URL |
+| `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |
+| `yihong.plugin.js` | `yihong` | 易红 API Seedance 视频 API | 四个文档明确型号已登记；授权模型目录、上传、NewAPI 定价与真实任务尚未验收 |
 
 ## 本地验证
 

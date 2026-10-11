@@ -30,7 +30,7 @@ export function manjuRoutePrompt(): string {
     '用户明确说用 H3 即使用 h3-prompt-writing；说用 Seedance 2.5／SD2.5 即使用 jc-seedance。只处理指定范围，不混合两套格式。',
     '仅从漫剧路线清单中选择；缺少必要输入或指令冲突时才询问。默认只交付提示词，不自动生成媒体。',
     '【Wiki 产物归档】完成用户明确要求的正式制作产物后，依照 wiki-memory 的唯一 Wiki 与索引规则，在最终回答前调用 wiki_save_artifact 保存完整 Markdown 正文；只讨论、比较方向、提供起步建议时不保存。用户说“只在对话里”“不要保存”时不调用。',
-    '类型映射：项目资料→story_summary／episode_summaries／story_background／world_rules；人物小传→character_bio；确认后的项目视觉与制作总纲→project_overview；分集剧本→screenplay；工程剧本→engineering_script；角色／场景／道具提示词→character_asset／scene_asset／prop_asset；视频提示词→video_prompt。',
+    '类型映射：项目资料→story_summary／episode_summaries／story_background／world_rules；人物小传→character_bio；确认后的项目改编方向、视觉与制作总纲→project_overview；已确认的分集剧本→screenplay；工程剧本→engineering_script；角色／场景／道具提示词→character_asset／scene_asset／prop_asset；视频提示词→video_prompt。',
     '按一个文件一个实体／集／视频片段调用 wiki_save_artifact；必填集数、人物或资产名称、视频模型与片段范围。只提供类型和内容，不能提供任意路径。按工具返回状态与真实路径交付；警告存在时不得说索引归档已完整。已有文件默认不覆盖。同一资产新增独立提示词章节时用 write_mode=append；只有用户明确修订时才用 write_mode=update。',
     '资料整理仅保存用户要求生成的资料，不复制原作附件；改编方向选项未确认前不保存项目总纲。第一份产物保存成功时才建立 Wiki。',
   ].join('\n')

@@ -193,6 +193,91 @@ const LINGDONG_VIDEO_MODELS: Array<{
     maxImages: 30,
   },
 ]
+
+// 源流 AI OpenAPI：模型 ID / 参考素材上限 / 单次售价由用户提供；视频任务协议见其公开 API 文档。
+// `/models` 的模型级限制尚未核对；先不传画幅/分辨率，让上游应用文档默认值，时长 UI 仅校验正整数。
+const YUANLIU_VIDEO_MODELS = [
+  {
+    model: 'yl_seedance-2-5_6caffaca7390',
+    label: 'Seedance 2.5 HD（仅图参考，可过人脸）',
+    price: '5元/次',
+    maxImages: 30,
+    maxVideos: 0,
+    maxAudios: 0,
+  },
+  {
+    model: 'yl_seedance-2-5_0fab2f1b1f10',
+    label: 'Seedance 2.5 HD（多模态参考，可过人脸）',
+    price: '6元/次',
+    maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+  },
+] as const
+const YUANLIU_VIDEO_CONTRACT_ISSUES = [
+  '源流 API `/models` 返回的时长档位、画幅和分辨率允许值尚未核对；UI 暂不发送画幅/分辨率，由上游应用文档默认值（16:9、480p），模型级限制需通过授权目录核实。',
+  '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数 5/6；NewAPI 模型/分组倍率及最终扣费尚未验收。',
+]
+// 易红 API（https://yihongapi.com）：字段与价格取自用户提供的 2026-10-06 客户 API 接入文档。
+// 模型需在授权 Key 的 GET /v1/models 中可用；渠道映射保持空，NewAPI 模型名与上游名称逐字一致。
+const YIHONG_VIDEO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
+const YIHONG_VIDEO_MODELS: Array<{
+  model: string
+  label: string
+  price: string
+  duration: { min?: number; max?: number; allowedValues?: number[] }
+  defaultDuration: number
+  maxImages: number
+  maxImageBytes?: number
+  maxVideos?: number
+  maxAudios?: number
+  ratios?: string[]
+}> = [
+  {
+    model: 'seedance2.5 super',
+    label: 'Seedance 2.5 Super · 易红',
+    price: '¥0.45/秒',
+    duration: { min: 5, max: 30 },
+    defaultDuration: 5,
+    maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+    ratios: YIHONG_VIDEO_RATIOS,
+  },
+  {
+    model: 'seedance2.5 cheap',
+    label: 'Seedance 2.5 Cheap · 易红',
+    price: '¥1.10/次',
+    duration: { min: 4, max: 30 },
+    defaultDuration: 15,
+    maxImages: 30,
+    ratios: YIHONG_VIDEO_RATIOS,
+  },
+  {
+    model: 'seedance-2.5-max',
+    label: 'Seedance 2.5 Max · 易红',
+    price: '¥4/次',
+    duration: { allowedValues: [30] },
+    defaultDuration: 30,
+    maxImages: 30,
+    maxImageBytes: 25 * 1024 * 1024,
+  },
+  {
+    model: 'seedance-2.5-Muse',
+    label: 'Seedance 2.5 Muse · 易红',
+    price: '¥8.50/次',
+    duration: { min: 5, max: 30 },
+    defaultDuration: 30,
+    maxImages: 9,
+    ratios: ['16:9', '9:16'],
+  },
+]
+const YIHONG_VIDEO_CONTRACT_ISSUES = [
+  '按客户文档接入；用户账号授权目录 GET /v1/models、NewAPI 渠道路由与真实任务尚未核验。',
+  'Super/Cheap 文档只写明六种画幅且含 21:9，没有列全枚举；面板先给常见六档，具体值和默认画幅待核实。',
+  '价格取文档中的积分价（1 积分 = ¥1）；Task Usage 表达式沿用用户指定的 1 美元 = 1 元数值口径，模型/分组倍率及实扣待核对。',
+  'Seedance 2.5 Super 文档要求素材为公网 HTTPS URL；App 上传链路和上游实际取图/音视频能力待真实任务验收。',
+]
 // Fk 渠道：model 必须与已上传 fk Task Plugin 的 meta.models 完全一致。
 // XZ Seedance 2.0「933全参」不在插件白名单中，因此不加入创作面板。
 const FK_SEEDANCE_MODELS: Array<{
@@ -1334,6 +1419,68 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
     ], model.promptMaxLength),
     notes: LINGDONG_NOTES,
+  })),
+  // ── 源流 AI Seedance：NewAPI Task Plugin 直连源流 OpenAPI ──
+  ...YUANLIU_VIDEO_MODELS.map(model => directVideo({
+    id: `newapi/yuanliu/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    contractStatus: 'partial',
+    contractIssues: YUANLIU_VIDEO_CONTRACT_ISSUES,
+    duration: { min: 1 },
+    files: {
+      images: { min: 0, max: model.maxImages },
+      ...(model.maxVideos ? { videos: { min: 0, max: model.maxVideos } } : {}),
+      ...(model.maxAudios ? { audios: { min: 0, max: model.maxAudios } } : {}),
+    },
+    fields: promptFields([
+      { key: 'duration', label: '时长(秒)', kind: 'number', required: true, min: 1, step: 1 },
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+      ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
+      ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
+    ]),
+    notes: ['https://test.yuanliuai.tsyzai.com/openapi/docs.md', 'NewAPI Task Usage 与真实扣费尚未验收。'],
+  })),
+  // ── 易红 API Seedance：模型名逐字匹配 yihong Task Plugin 的 meta.models ──
+  ...YIHONG_VIDEO_MODELS.map(model => directVideo({
+    id: `newapi/yihong/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'newapi-task',
+    mode: 'text-to-video',
+    endpoint: '/v1/videos',
+    assetFlow: 'newapi-upload',
+    contractStatus: 'partial',
+    contractIssues: YIHONG_VIDEO_CONTRACT_ISSUES,
+    ratios: 'ratios' in model ? model.ratios : undefined,
+    duration: model.duration,
+    files: {
+      images: {
+        min: 0,
+        max: model.maxImages,
+        ...('maxImageBytes' in model ? { maxBytes: model.maxImageBytes } : {}),
+      },
+      ...('maxVideos' in model ? { videos: { min: 0, max: model.maxVideos } } : {}),
+      ...('maxAudios' in model ? { audios: { min: 0, max: model.maxAudios } } : {}),
+    },
+    fields: promptFields([
+      ...(model.ratios ? [{ key: 'ratio', label: '比例', kind: 'select' as const, defaultValue: model.ratios.includes('16:9') ? '16:9' : model.ratios[0], options: options(model.ratios) }] : []),
+      model.duration.allowedValues
+        ? { key: 'duration', label: '时长(秒)', kind: 'select' as const, defaultValue: model.defaultDuration, options: options(model.duration.allowedValues) }
+        : { key: 'duration', label: '时长(秒)', kind: 'number' as const, defaultValue: model.defaultDuration, min: model.duration.min, max: model.duration.max, step: 1 },
+      { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' as const },
+      ...('maxVideos' in model ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
+      ...('maxAudios' in model ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
+    ]),
+    notes: ['用户提供的易红 API 客户接入文档（2026-10-06）', '插件、授权模型目录、真实生成与计费尚待验收。'],
   })),
   // ── FK-Seedance：7 个模型与 fk Task Plugin 的白名单一一对应 ──
   ...FK_SEEDANCE_MODELS.map(model => directVideo({
@@ -2595,6 +2742,8 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 山海画布的 Seedance 2.5 线路上游 id（oc-model-*）不带厂商前缀，
   // 不显式归族会掉进「其他模型」
   if (spec.id.startsWith('newapi/shanhai/')) return 'Seedance 2.5'
+  if (spec.id.startsWith('newapi/yuanliu/')) return 'Seedance 2.5'
+  if (spec.id.startsWith('newapi/yihong/')) return 'Seedance 2.5'
   // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）。
   // 族名是用户 2026-10-02 指定的展示名，面板分组头就是它；改名要同步 `CreationPanel.vue` 的 order 表。
   if (spec.id.startsWith('newapi/lingdong/')) return '满血seedance2.5'

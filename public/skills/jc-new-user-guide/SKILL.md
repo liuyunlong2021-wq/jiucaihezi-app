@@ -1,20 +1,20 @@
 ---
 name: jc-new-user-guide
 display_name: 新手指南
-description: "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially novel or manga creation, the Creation Panel, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide."
+description: "Use when a user asks how to use Jiucaihezi (韭菜盒子), especially short-drama, novel or manga creation, the Creation Panel, account and model setup, settings, projects, or first-use guidance. Only trigger for Jiucaihezi-specific requests, not generic writing or generic software help. Trigger on 韭菜盒子怎么用、韭菜盒子新手、短剧写作、短剧改编、漫剧制作、漫剧创作流程、小说创作、小说怎么写、创作面板怎么用、设置怎么配置、模型怎么选、API Key、jc-new-user-guide."
 allowed-tools:
   - read
 ---
 
 # 韭菜盒子新手指南
 
-面向第一次使用韭菜盒子的用户。优先讲清楚从项目开始创作、如何使用漫剧和小说路线、如何用创作面板生成媒体，以及账号和模型设置。
+面向第一次使用韭菜盒子的用户。优先讲清楚从项目开始创作、如何使用短剧写作、漫剧制作和小说创作路线、如何用创作面板生成媒体，以及账号和模型设置。
 
 ## 关键事实
 
 - 先打开或新建一个项目，再开始对话；文字产物和生成媒体归当前项目管理。
-- Desktop 输入框下方有“漫剧制作”和“小说创作”两个创作路线。点击只切换路线，不会自动生成内容；还要描述本轮要做的事并发送。
-- 小说与漫剧路线会自动配置对应的创作 Skill 和 Wiki 归档能力。正式产物会写入当前项目，并回报实际文件位置。
+- Desktop 输入框下方依次有“漫剧制作”“短剧写作”“小说创作”三个创作路线。点击只切换路线，不会自动生成内容；还要描述本轮要做的事并发送。
+- 三条路线互斥，按每个对话分别记住。短剧写作负责原创短剧和既有作品改编；漫剧制作从项目资料、视觉资产继续到工程台本和视频提示词；小说创作负责长篇连载。正式产物会写入当前项目，并回报实际文件位置。
 - 创作面板是独立的图片、视频、音频等生成入口；聊天模型与创作模型分开选择。提交生成需要用户明确要求。
 - 账号登录用于云端身份和同步；模型调用 API Key 是单独配置项，两者不能混为一谈。
 - 模型、参数、价格、渠道和可用状态会变化，以当前应用界面为准。
@@ -33,6 +33,7 @@ allowed-tools:
 | 问题 | 阅读 |
 | --- | --- |
 | 漫剧创作从哪里开始、每一步能做什么 | references/6-漫剧制作.md |
+| 原创短剧、小说改编方向或逐集剧本怎么写 | references/10-短剧写作.md |
 | 小说从开书到逐章写作、如何确认和保存 | references/7-小说创作.md |
 | 创作面板、账号、模型和常用设置 | references/9-创作面板与设置.md |
 | 项目文件与 Wiki 资料 | references/1-Wiki使用.md |

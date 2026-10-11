@@ -13,12 +13,39 @@ function createKv() {
   };
 }
 
+function createSiteAssets() {
+  const files = new Map([
+    ['/index.html', ['<!doctype html><title>韭菜盒子 Studio</title>', 'text/html; charset=utf-8']],
+    ['/landing/logo.svg', ['<svg></svg>', 'image/svg+xml']],
+    ['/landing/IMG_5114.webp', ['hero image', 'image/webp']],
+    ['/favicon.svg', ['<svg></svg>', 'image/svg+xml']],
+    ['/apple-touch-icon.png', ['touch icon', 'image/png']],
+    ['/legal.css', ['body { color: black; }', 'text/css; charset=utf-8']],
+    ['/support/index.html', ['<title>用户支持</title>', 'text/html; charset=utf-8']],
+    ['/privacy/index.html', ['<title>隐私政策</title>', 'text/html; charset=utf-8']],
+    ['/terms/index.html', ['<title>服务条款</title>', 'text/html; charset=utf-8']]
+  ]);
+  return {
+    async fetch(request) {
+      let pathname = new URL(request.url).pathname;
+      if (pathname.endsWith('/')) pathname += 'index.html';
+      const [body, contentType] = files.get(pathname) || [];
+      if (body === undefined) return new Response(null, { status: 404 });
+      return new Response(request.method === 'HEAD' ? null : body, {
+        status: 200,
+        headers: { 'Content-Type': contentType }
+      });
+    }
+  };
+}
+
 function createEnv() {
   return {
     NEWAPI_BASE_URL: 'https://newapi.example.com',
     NEWAPI_DEFAULT_GROUP: 'auto',
     PLUGIN_KV: createKv(),
-    LANDING_ASSET_BASE_URL: 'https://static.example.com/landing'
+    LANDING_ASSET_BASE_URL: 'https://static.example.com/landing',
+    SITE: createSiteAssets()
   };
 }
 
@@ -342,35 +369,48 @@ test('landing assets redirect only approved download files to static hosting', a
   assert.equal(missing.status, 404);
 });
 
-test('root opens the account dashboard', async () => {
-  const response = await gateway.fetch(request('/'), createEnv());
-
-  assert.equal(response.status, 302);
-  assert.equal(response.headers.get('Location'), 'https://api.jiucaihezi.studio/dashboard/overview');
+test('NewAPI root remains outside the Gateway Worker routes', () => {
+  const config = readFileSync(new URL('../wrangler.toml', import.meta.url), 'utf8');
+  assert.doesNotMatch(config, /pattern\s*=\s*"api\.jiucaihezi\.studio\/"/);
 });
 
-test('landing image and logo paths redirect to static hosting', async () => {
+test('homepage images and logos are served from the bundled static assets', async () => {
   const response = await gateway.fetch(request('/landing/logo.svg', { method: 'HEAD' }), createEnv());
-  const screenshot = await gateway.fetch(request('/landing/IMG_5114.JPG'), createEnv());
+  const screenshot = await gateway.fetch(request('/landing/IMG_5114.webp'), createEnv());
 
-  assert.equal(response.status, 302);
-  assert.equal(response.headers.get('Location'), 'https://static.example.com/landing/logo.svg');
-  assert.equal(screenshot.status, 302);
-  assert.equal(screenshot.headers.get('Location'), 'https://static.example.com/landing/IMG_5114.JPG');
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('Content-Type'), 'image/svg+xml');
+  assert.equal(screenshot.status, 200);
+  assert.equal(screenshot.headers.get('Content-Type'), 'image/webp');
 });
 
-test('browser tab icons redirect to the shared landing logo', async () => {
+test('browser tab icons are served from the bundled site assets', async () => {
   const env = createEnv();
   const favicon = await gateway.fetch(request('/favicon.ico', { method: 'HEAD' }), env);
   const svg = await gateway.fetch(request('/favicon.svg'), env);
   const touchIcon = await gateway.fetch(request('/apple-touch-icon.png'), env);
 
-  assert.equal(favicon.status, 302);
-  assert.equal(favicon.headers.get('Location'), 'https://static.example.com/landing/favicon.svg');
-  assert.equal(svg.status, 302);
-  assert.equal(svg.headers.get('Location'), 'https://static.example.com/landing/favicon.svg');
-  assert.equal(touchIcon.status, 302);
-  assert.equal(touchIcon.headers.get('Location'), 'https://static.example.com/landing/apple-touch-icon.svg');
+  assert.equal(favicon.status, 200);
+  assert.equal(favicon.headers.get('Content-Type'), 'image/svg+xml');
+  assert.equal(svg.status, 200);
+  assert.equal(touchIcon.status, 200);
+  assert.equal(touchIcon.headers.get('Content-Type'), 'image/png');
+});
+
+test('support and legal pages remain available on the API host', async () => {
+  for (const [path, title] of [
+    ['/support/', '用户支持'],
+    ['/privacy/', '隐私政策'],
+    ['/terms/', '服务条款']
+  ]) {
+    const response = await gateway.fetch(request(path), createEnv());
+    assert.equal(response.status, 200, path);
+    assert.match(await response.text(), new RegExp(title), path);
+  }
+
+  const stylesheet = await gateway.fetch(request('/legal.css'), createEnv());
+  assert.equal(stylesheet.status, 200);
+  assert.match(stylesheet.headers.get('Content-Type'), /text\/css/);
 });
 
 test('unrelated old gateway routes are removed', async () => {

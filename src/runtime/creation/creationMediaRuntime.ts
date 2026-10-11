@@ -1057,6 +1057,7 @@ function buildDirectVideoBody(
   return compact({
     model: request.plan.model,
     prompt: params.prompt,
+    client_request_id: request.plan.modelId.startsWith('newapi/yuanliu/') ? crypto.randomUUID() : undefined,
     ratio: params.aspectRatio,
     aspect_ratio: params.aspectRatio,
     resolution: params.resolution,

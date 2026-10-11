@@ -421,37 +421,43 @@ const LANDING_ASSETS = new Set([
   'guanfangweixin.jpg',
   '韭菜盒子_0.1.6_aarch64.dmg',
   '韭菜盒子_0.1.6_x64.dmg',
+  'IMG_5114.webp',
+  'IMG_5107.webp',
+  'IMG_5110.webp',
+  'IMG_5113.webp',
+  'IMG_5108.webp',
+  'IMG_5111.webp',
+  'og-cover.jpg',
+]);
+
+const BUNDLED_LANDING_ASSETS = new Set([
+  'logo.svg',
+  'IMG_5114.webp',
+  'IMG_5107.webp',
+  'IMG_5110.webp',
+  'IMG_5113.webp',
+  'IMG_5108.webp',
+  'IMG_5111.webp',
+  'douyinerweima.jpg',
+  'guanfangweixin.jpg',
+  'og-cover.jpg',
 ]);
 
 const ROOT_ICON_REDIRECTS = new Map([
   ['/favicon.svg', 'favicon.svg'],
   ['/favicon.ico', 'favicon.svg'],
-  ['/apple-touch-icon.svg', 'apple-touch-icon.svg'],
-  ['/apple-touch-icon.png', 'apple-touch-icon.svg'],
+  ['/apple-touch-icon.svg', 'apple-touch-icon.png'],
+  ['/apple-touch-icon.png', 'apple-touch-icon.png'],
 ]);
 
-async function handleLandingHome(request, env) {
-  if (request.method !== 'GET' && request.method !== 'HEAD') return notFound(request);
-
-  const assetBase = String(env.LANDING_ASSET_BASE_URL || 'https://jiucaihezi.studio/landing').replace(/\/+$/, '');
-  const upstream = await fetch(`${assetBase}/index.html`, {
+async function fetchSiteAsset(request, env, assetPath) {
+  if (!env.SITE?.fetch) return notFound(request);
+  const url = new URL(assetPath, request.url);
+  const assetRequest = new Request(url, {
     method: request.method,
-    headers: {
-      Accept: 'text/html,application/xhtml+xml'
-    }
+    headers: request.headers
   });
-  if (!upstream.ok) return notFound(request);
-
-  const headers = new Headers(upstream.headers);
-  headers.set('Content-Type', 'text/html; charset=utf-8');
-  headers.set('Cache-Control', 'no-cache');
-  headers.delete('Content-Encoding');
-  headers.delete('Content-Length');
-
-  return new Response(request.method === 'HEAD' ? null : upstream.body, {
-    status: 200,
-    headers
-  });
+  return await env.SITE.fetch(assetRequest);
 }
 
 async function handleLandingAsset(request, env, pathname) {
@@ -463,6 +469,10 @@ async function handleLandingAsset(request, env, pathname) {
     return notFound(request);
   }
   if (!LANDING_ASSETS.has(assetName) || assetName.includes('/')) return notFound(request);
+
+  if (BUNDLED_LANDING_ASSETS.has(assetName)) {
+    return await fetchSiteAsset(request, env, `/landing/${encodeURIComponent(assetName)}`);
+  }
 
   const assetBase = String(env.LANDING_ASSET_BASE_URL || 'https://jiucaihezi.studio/landing').replace(/\/+$/, '');
   const headers = new Headers({ Location: `${assetBase}/${encodeURIComponent(assetName)}` });
@@ -477,12 +487,26 @@ async function handleRootIcon(request, env, pathname) {
   const assetName = ROOT_ICON_REDIRECTS.get(pathname);
   if (!assetName) return notFound(request);
 
-  const assetBase = String(env.LANDING_ASSET_BASE_URL || 'https://jiucaihezi.studio/landing').replace(/\/+$/, '');
-  const headers = new Headers({ Location: `${assetBase}/${assetName}` });
-  headers.set('Cache-Control', 'public, max-age=3600, must-revalidate');
-  headers.set('Access-Control-Allow-Origin', '*');
+  const response = await fetchSiteAsset(request, env, `/${assetName}`);
+  if (!response.ok) return response;
 
-  return new Response(null, { status: 302, headers });
+  const headers = new Headers(response.headers);
+  headers.set('Cache-Control', 'public, max-age=3600, must-revalidate');
+  return new Response(request.method === 'HEAD' ? null : response.body, {
+    status: response.status,
+    headers
+  });
+}
+
+const PUBLIC_SITE_PATHS = new Set(['/legal.css']);
+const PUBLIC_SITE_PREFIXES = ['/support/', '/privacy/', '/terms/', '/homepage-content/'];
+
+async function handlePublicSiteAsset(request, env, pathname) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return notFound(request);
+  if (!PUBLIC_SITE_PATHS.has(pathname) && !PUBLIC_SITE_PREFIXES.some((prefix) => pathname.startsWith(prefix))) {
+    return notFound(request);
+  }
+  return await fetchSiteAsset(request, env, pathname);
 }
 
 export default {
@@ -490,10 +514,18 @@ export default {
     try {
       if (request.method === 'OPTIONS') return handleOptions(request);
       const url = new URL(request.url);
-      if (url.pathname === '/') return Response.redirect('https://api.jiucaihezi.studio/dashboard/overview', 302);
       if (ROOT_ICON_REDIRECTS.has(url.pathname)) return await handleRootIcon(request, env, url.pathname);
       if (request.method === 'GET' && url.pathname === '/health') return handleHealth(request);
       if (url.pathname.startsWith('/landing/')) return await handleLandingAsset(request, env, url.pathname);
+      if (url.pathname === '/support' || url.pathname === '/privacy' || url.pathname === '/terms') {
+        return Response.redirect(new URL(`${url.pathname}/`, request.url), 308);
+      }
+      if (url.pathname === '/homepage-content') {
+        return Response.redirect(new URL('/homepage-content/', request.url), 308);
+      }
+      if (PUBLIC_SITE_PATHS.has(url.pathname) || PUBLIC_SITE_PREFIXES.some((prefix) => url.pathname.startsWith(prefix))) {
+        return await handlePublicSiteAsset(request, env, url.pathname);
+      }
       if (request.method === 'GET' && url.pathname === '/auth/desktop/start') return await handleDesktopAuthStart(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/callback') return await handleDesktopAuthCallback(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/desktop/token') return await handleDesktopAuthToken(request, env);
@@ -507,14 +539,6 @@ export default {
       if (request.method === 'DELETE' && url.pathname === '/auth/account') return await handleDeleteAccount(request, env);
       if (request.method === 'GET' && url.pathname === '/auth/session') return await handleSession(request, env);
       if (url.pathname.startsWith('/sync/')) return await handleSync(request, env);
-
-      // SPA fallback for public landing routes.
-      if (request.method === 'GET'
-        && !url.pathname.startsWith('/auth/')
-        && !url.pathname.startsWith('/landing/')
-        && !url.pathname.startsWith('/api/')) {
-        return await handleLandingHome(request, env);
-      }
 
       return notFound(request);
     } catch (error) {

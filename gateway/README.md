@@ -13,6 +13,7 @@ Studio text sync -> /sync/* -> SYNC_DB
 
 ## Responsibilities
 
+- Serves an iframe-ready Studio homepage body for NewAPI's native homepage setting, favicon, landing images, and support/privacy/terms pages on the API host. `npm run deploy` synchronizes these files from the repository's current `index.html` and `public/` assets before deployment.
 - `POST /auth/login`: validates a NewAPI username/password, creates or reuses the user's `韭菜盒子工作台` token, and returns:
 
 ```json
@@ -43,15 +44,19 @@ Chat continues to use the ordinary NewAPI key. `/sync/*` accepts only a valid `j
 
 ## Routes
 
-`wrangler.toml` should only bind:
+`wrangler.toml` binds public static pages and these gateway routes:
 
 ```text
+api.jiucaihezi.studio/homepage-content/*
+api.jiucaihezi.studio/support/*
+api.jiucaihezi.studio/privacy/*
+api.jiucaihezi.studio/terms/*
 api.jiucaihezi.studio/auth/*
 api.jiucaihezi.studio/health
 api.jiucaihezi.studio/sync/*
 ```
 
-Do not bind chat completion routes to this Worker.
+The root `/` remains on NewAPI so its navigation shell and client-side routes keep working. Set NewAPI's homepage content to `https://api.jiucaihezi.studio/homepage-content/` to show the Studio page beneath that shell. Do not bind `/`, `/v1/*`, `/api/*`, or media routes to this Worker. Those continue to NewAPI and its existing adapters.
 
 ## Environment
 

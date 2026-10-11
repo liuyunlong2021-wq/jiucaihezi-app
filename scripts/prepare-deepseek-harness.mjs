@@ -437,9 +437,9 @@ if (!server.includes(manjuImport)) {
     throw new Error('Unsupported DeepSeek Harness pinned skill scope layout')
   server = manjuImport + server
   server = server.replace(registerAnchor, registerAnchor.replace(
-    '\t\ttry {', '\t\tconst manjuDispose = await pinManjuSkills(rec, names);\n\t\ttry {',
-  )).replace(disposeAnchor, '\t\t\t\tdispose: async () => { await dispose(); await manjuDispose(); }\n\t\t\t});')
-    .replace(lookupAnchor, '\t\t\t\tif (name === "jc-manju-zhizuo" || name === "jc-novel") { names.push(name); continue; }\n' + lookupAnchor)
+    '\t\ttry {', '\t\tconst wikiSkillDispose = await pinManjuSkills(rec, names);\n\t\ttry {',
+  )).replace(disposeAnchor, '\t\t\t\tdispose: async () => { await dispose(); await wikiSkillDispose(); }\n\t\t\t});')
+    .replace(lookupAnchor, '\t\t\t\tif (name === "jc-manju-zhizuo" || name === "jc-novel" || name === "jc-duanju") { names.push(name); continue; }\n' + lookupAnchor)
   changed = true
 }
 
@@ -457,7 +457,7 @@ const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\ttry {
 \t\t\tnames = await this.pinnedSkillNames(rec, content);
 \t\t} catch (error) {
-\t\t\tif (content.some(block => block.type === "text" && /\\/(?:jc-manju-zhizuo|jc-novel|wiki-memory)\\b/.test(block.text))) throw error;
+\t\t\tif (content.some(block => block.type === "text" && /\\/(?:jc-manju-zhizuo|jc-novel|jc-duanju|wiki-memory)\\b/.test(block.text))) throw error;
 \t\t\tconsole.error("[skill-scope] 解析点名 skill 失败: " + (error instanceof Error ? error.message : String(error)));
 \t\t\treturn;
 \t\t}
@@ -470,19 +470,19 @@ const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\t\tawait held.dispose();
 \t\t}
 \t\tif (names.length === 0) return;
-\t\tconst manjuDispose = await pinManjuSkills(rec, names);
+\t\tconst wikiSkillDispose = await pinManjuSkills(rec, names);
 \t\tlet dispose;
 \t\ttry {
 \t\t\tthis.assertLiveAgent(rec, agent.id);
-\t\t\tif (rec.handle.agent !== agent) throw new Error("漫剧制作 Agent 已替换");
+\t\t\tif (rec.handle.agent !== agent) throw new Error("创作路线 Agent 已替换");
 \t\t\tdispose = agent.ctx.tools.restrict({ deny: ["skill"] });
 \t\t\tthis.pinnedSkillScopes.set(agent, {
 \t\t\t\tnames,
-\t\t\t\tdispose: async () => { try { await dispose(); } finally { await manjuDispose(); } }
+\t\t\t\tdispose: async () => { try { await dispose(); } finally { await wikiSkillDispose(); } }
 \t\t\t});
 \t\t} catch (error) {
-\t\t\ttry { await dispose?.(); } finally { await manjuDispose(); }
-\t\t\tif (names.some(name => ["jc-manju-zhizuo", "jc-novel", "wiki-memory"].includes(name))) throw error;
+\t\t\ttry { await dispose?.(); } finally { await wikiSkillDispose(); }
+\t\t\tif (names.some(name => ["jc-manju-zhizuo", "jc-novel", "jc-duanju", "wiki-memory"].includes(name))) throw error;
 \t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));
 \t\t}
 \t}

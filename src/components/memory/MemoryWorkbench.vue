@@ -149,6 +149,10 @@ import {
   NOVEL_SKILL, NOVEL_SKILLS, restoreNovelSelection,
   type NovelPreference,
 } from '@/runtime/memory/novelProduction'
+import {
+  SHORT_DRAMA_SKILL, SHORT_DRAMA_SKILLS, restoreShortDramaSelection,
+  type ShortDramaPreference,
+} from '@/runtime/memory/shortDramaProduction'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
 import { setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
@@ -245,25 +249,49 @@ const referencedSessions = ref<Array<{ conversationId: string; title: string; tu
 const selectedSkillNames = ref<string[]>([])
 const manjuSelected = computed(() => selectedSkillNames.value.includes(MANJU_ROUTER))
 const novelSelected = computed(() => selectedSkillNames.value.includes(NOVEL_SKILL))
+const shortDramaSelected = computed(() => selectedSkillNames.value.includes(SHORT_DRAMA_SKILL))
 
-function saveProductionPreferences(preferences: { manju?: Partial<ManjuPreference>; novel?: Partial<NovelPreference> } = {}) {
+function saveProductionPreferences(preferences: {
+  manju?: Partial<ManjuPreference>
+  novel?: Partial<NovelPreference>
+  shortDrama?: Partial<ShortDramaPreference>
+} = {}) {
   const active = conversation.value
   if (!active || !desktopOnlyRuntime) return
   const entry = listHarnessConversationCatalog(active.resource.owner)
     .find(item => item.conversationId === active.transcript.id)
+  const wikiMemoryWasSelected = preferences.manju?.wikiMemoryWasSelected
+    ?? preferences.novel?.wikiMemoryWasSelected
+    ?? preferences.shortDrama?.wikiMemoryWasSelected
+    ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
   if (entry) upsertHarnessConversationCatalogEntry({
     ...entry,
     manju: {
       ...entry.manju,
       ...preferences.manju,
       enabled: manjuSelected.value,
+      wikiMemoryWasSelected,
     },
     novel: {
       ...entry.novel,
       ...preferences.novel,
       enabled: novelSelected.value,
+      wikiMemoryWasSelected,
+    },
+    shortDrama: {
+      ...entry.shortDrama,
+      ...preferences.shortDrama,
+      enabled: shortDramaSelected.value,
+      wikiMemoryWasSelected,
     },
   })
+}
+
+function currentWikiMemoryPreference(): boolean {
+  if (manjuSelected.value) return currentManjuPreference()?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  if (novelSelected.value) return currentNovelPreference()?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  if (shortDramaSelected.value) return currentShortDramaPreference()?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  return selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
 }
 
 function toggleManjuProduction() {
@@ -281,15 +309,14 @@ function toggleManjuProduction() {
     return
   }
 
-  const wikiMemoryWasSelected = novelSelected.value
-    ? novelPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
-    : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  const wikiMemoryWasSelected = currentWikiMemoryPreference()
   if (selectedSkillNames.value.some(name => !MANJU_SKILLS.includes(name) && name !== WIKI_MEMORY_SKILL))
     contextNotice.value = '已切换到漫剧制作路线；本对话使用内置漫剧 Skill。'
   selectedSkillNames.value = [MANJU_ROUTER, WIKI_MEMORY_SKILL]
   saveProductionPreferences({
     manju: { enabled: true, wikiMemoryWasSelected },
     novel: { enabled: false, wikiMemoryWasSelected },
+    shortDrama: { enabled: false, wikiMemoryWasSelected },
   })
 }
 
@@ -306,16 +333,36 @@ function toggleNovelProduction() {
     return
   }
 
-  const manjuPreference = currentManjuPreference()
-  const wikiMemoryWasSelected = manjuSelected.value
-    ? manjuPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
-    : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+  const wikiMemoryWasSelected = currentWikiMemoryPreference()
   if (selectedSkillNames.value.some(name => name !== WIKI_MEMORY_SKILL && name !== NOVEL_SKILL))
     contextNotice.value = '已切换到小说创作路线；本对话使用内置小说 Skill。'
   selectedSkillNames.value = [NOVEL_SKILL, WIKI_MEMORY_SKILL]
   saveProductionPreferences({
     manju: { enabled: false, wikiMemoryWasSelected },
     novel: { enabled: true, wikiMemoryWasSelected },
+    shortDrama: { enabled: false, wikiMemoryWasSelected },
+  })
+}
+
+function toggleShortDramaProduction() {
+  if (shortDramaSelected.value) {
+    const preference = currentShortDramaPreference()
+    const wikiMemoryWasSelected = preference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+    selectedSkillNames.value = selectedSkillNames.value.filter(name =>
+      name !== SHORT_DRAMA_SKILL && (name !== WIKI_MEMORY_SKILL || wikiMemoryWasSelected),
+    )
+    saveProductionPreferences({ shortDrama: { enabled: false, wikiMemoryWasSelected } })
+    return
+  }
+
+  const wikiMemoryWasSelected = currentWikiMemoryPreference()
+  if (selectedSkillNames.value.some(name => !SHORT_DRAMA_SKILLS.includes(name)))
+    contextNotice.value = '已切换到短剧写作路线；本对话使用内置短剧 Skill。'
+  selectedSkillNames.value = [SHORT_DRAMA_SKILL, WIKI_MEMORY_SKILL]
+  saveProductionPreferences({
+    manju: { enabled: false, wikiMemoryWasSelected },
+    novel: { enabled: false, wikiMemoryWasSelected },
+    shortDrama: { enabled: true, wikiMemoryWasSelected },
   })
 }
 
@@ -348,6 +395,19 @@ function removeSelectedSkill(name: string) {
     })
     return
   }
+  if (shortDramaSelected.value && (name === SHORT_DRAMA_SKILL || name === WIKI_MEMORY_SKILL)) {
+    const preference = currentShortDramaPreference()
+    selectedSkillNames.value = selectedSkillNames.value.filter(item =>
+      item !== SHORT_DRAMA_SKILL && !(item === WIKI_MEMORY_SKILL && (name === WIKI_MEMORY_SKILL || preference?.wikiMemoryWasSelected === false)),
+    )
+    saveProductionPreferences({
+      shortDrama: {
+        enabled: false,
+        wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected,
+      },
+    })
+    return
+  }
   selectedSkillNames.value = selectedSkillNames.value.filter(item => item !== name)
   saveProductionPreferences()
 }
@@ -362,6 +422,12 @@ function currentNovelPreference(): NovelPreference | undefined {
   const active = conversation.value
   return active ? listHarnessConversationCatalog(active.resource.owner)
     .find(item => item.conversationId === active.transcript.id)?.novel : undefined
+}
+
+function currentShortDramaPreference(): ShortDramaPreference | undefined {
+  const active = conversation.value
+  return active ? listHarnessConversationCatalog(active.resource.owner)
+    .find(item => item.conversationId === active.transcript.id)?.shortDrama : undefined
 }
 // 文件能力合同：授权只来自用户在消息里给出的绝对路径，本会话内累积有效。
 const authorizedPaths = ref<string[]>([])
@@ -413,16 +479,6 @@ const permissionMenu = ref<{ left: number; bottom: number } | null>(null)
 const permissionOption = computed(() =>
   DEEPSEEK_PERMISSION_TIERS.find(option => option.tier === permissionTier.value),
 )
-
-/**
- * 按钮上常驻显示的当前档位。
- *
- * 用 `short` 而不是官方全名：全名「工作区内修改」会把横排按钮撑到旁边 `@Skill` 的两倍宽，
- * 而那一排是 `overflow-x: auto`，多出来的宽度只会换来滚动。
- */
-function permissionTierShortLabel(): string {
-  return permissionOption.value?.short || ''
-}
 
 /** 当前档位的中文全名（官方 zh 字典），用于无障碍标签。 */
 function permissionTierLabel(): string {
@@ -584,11 +640,32 @@ async function restoreComposerSkills(
   names?: string[],
   manjuPreference?: ManjuPreference,
   novelPreference?: NovelPreference,
+  shortDramaPreference?: ShortDramaPreference,
 ) {
   const available = await availableSkillNamesForComposer()
-  selectedSkillNames.value = restoreNovelSelection(
-    restoreManjuSelection(names || [], manjuPreference), novelPreference,
-  ).filter(name => available.has(name))
+  const legacyShortDrama = !shortDramaPreference && names?.includes(SHORT_DRAMA_SKILL)
+  if (legacyShortDrama) {
+    selectedSkillNames.value = restoreShortDramaSelection(names || [], {
+      enabled: true,
+      wikiMemoryWasSelected: manjuPreference?.wikiMemoryWasSelected,
+    }).filter(name => available.has(name))
+    return
+  }
+  if (shortDramaPreference?.enabled) {
+    selectedSkillNames.value = restoreShortDramaSelection(names || [], shortDramaPreference).filter(name => available.has(name))
+    return
+  }
+  if (novelPreference?.enabled) {
+    selectedSkillNames.value = restoreNovelSelection(names || [], novelPreference).filter(name => available.has(name))
+    return
+  }
+  if (manjuPreference?.enabled) {
+    selectedSkillNames.value = restoreManjuSelection(names || [], manjuPreference).filter(name => available.has(name))
+    return
+  }
+  const manju = restoreManjuSelection(names || [], manjuPreference)
+  const novel = restoreNovelSelection(manju, novelPreference)
+  selectedSkillNames.value = restoreShortDramaSelection(novel, shortDramaPreference).filter(name => available.has(name))
 }
 const mentionOpen = ref(false)
 const mentionTrigger = ref<'@' | '/' | null>(null)
@@ -1099,6 +1176,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   const skills = sortSkillsForPicker(skillOptions.filter(skill => {
     if (manjuSelected.value && !MANJU_SKILLS.includes(skill.name) && skill.name !== WIKI_MEMORY_SKILL) return false
     if (novelSelected.value && !NOVEL_SKILLS.includes(skill.name)) return false
+    if (shortDramaSelected.value && !SHORT_DRAMA_SKILLS.includes(skill.name)) return false
     if (seenSkillNames.has(skill.name)) return false
     seenSkillNames.add(skill.name)
     return true
@@ -2046,7 +2124,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
       ...attachment, value: '', resourcePath: attachment.projectPath,
     }))
     const latestUserTurn = [...activeConversation.transcript.turns].reverse().find(turn => turn.role === 'user')
-    await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel)
+    await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel, catalogEntry?.shortDrama)
     if (generation !== resourceOpenGeneration) return
     applyToolChipIds(latestUserToolChips(activeConversation.transcript.turns))
     rememberConversation({ resource: activeConversation.resource, transcript: activeConversation.transcript })
@@ -2410,7 +2488,7 @@ async function editTurn(turn: ConversationTurn) {
   input.value = turn.content
   attachments.value = []
   applyToolChipIds(turn.toolChips)
-  await restoreComposerSkills(turn.skillNames, currentManjuPreference(), currentNovelPreference())
+  await restoreComposerSkills(turn.skillNames, currentManjuPreference(), currentNovelPreference(), currentShortDramaPreference())
   try {
     for (const attachment of turn.attachments || []) {
       const path = attachment.projectPath || attachment.readablePath
@@ -2438,7 +2516,7 @@ async function cancelEdit() {
   attachments.value = []
   const turns = conversation.value?.transcript.turns || []
   applyToolChipIds(latestUserToolChips(turns))
-  await restoreComposerSkills(latestUserTurnToolNames(turns), currentManjuPreference(), currentNovelPreference())
+  await restoreComposerSkills(latestUserTurnToolNames(turns), currentManjuPreference(), currentNovelPreference(), currentShortDramaPreference())
   setEditorText(composerRef.value, '')
   resizeComposer()
   composerRef.value?.focus()
@@ -3439,28 +3517,32 @@ async function selectMention(option: MemoryMentionOption) {
         throw new Error('请先退出漫剧制作，再选择其他路线的 Skill。')
       if (novelSelected.value && !NOVEL_SKILLS.includes(option.name) && option.name !== MANJU_ROUTER)
         throw new Error('请先退出小说创作，再选择其他路线的 Skill。')
+      if (shortDramaSelected.value && !SHORT_DRAMA_SKILLS.includes(option.name))
+        throw new Error('请先退出短剧写作，再选择其他路线的 Skill。')
       if (option.name === MANJU_ROUTER) {
-        const novelPreference = currentNovelPreference()
-        const wikiMemoryWasSelected = novelSelected.value
-          ? novelPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
-          : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+        const wikiMemoryWasSelected = currentWikiMemoryPreference()
         selectedSkillNames.value = [MANJU_ROUTER, WIKI_MEMORY_SKILL]
         saveProductionPreferences({
           manju: { enabled: true, wikiMemoryWasSelected },
           novel: { enabled: false, wikiMemoryWasSelected },
+          shortDrama: { enabled: false, wikiMemoryWasSelected },
         })
       } else if (option.name === NOVEL_SKILL) {
-        const previousPreference = currentNovelPreference()
-        const manjuPreference = currentManjuPreference()
-        const wikiMemoryWasSelected = novelSelected.value
-          ? previousPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
-          : manjuSelected.value
-            ? manjuPreference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
-            : selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
+        const wikiMemoryWasSelected = currentWikiMemoryPreference()
         selectedSkillNames.value = [NOVEL_SKILL, WIKI_MEMORY_SKILL]
         saveProductionPreferences({
           manju: { enabled: false, wikiMemoryWasSelected },
           novel: { enabled: true, wikiMemoryWasSelected },
+          shortDrama: { enabled: false, wikiMemoryWasSelected },
+        })
+        recordSkillUse(option.name)
+      } else if (option.name === SHORT_DRAMA_SKILL) {
+        const wikiMemoryWasSelected = currentWikiMemoryPreference()
+        selectedSkillNames.value = [SHORT_DRAMA_SKILL, WIKI_MEMORY_SKILL]
+        saveProductionPreferences({
+          manju: { enabled: false, wikiMemoryWasSelected },
+          novel: { enabled: false, wikiMemoryWasSelected },
+          shortDrama: { enabled: true, wikiMemoryWasSelected },
         })
         recordSkillUse(option.name)
       }
@@ -3468,13 +3550,16 @@ async function selectMention(option: MemoryMentionOption) {
         selectedSkillNames.value.push(option.name)
         recordSkillUse(option.name)
       }
-      if (option.name === WIKI_MEMORY_SKILL && !novelSelected.value && !manjuSelected.value) {
+      if (option.name === WIKI_MEMORY_SKILL && !novelSelected.value && !manjuSelected.value && !shortDramaSelected.value) {
         const novelPreference = currentNovelPreference()
         const manjuPreference = currentManjuPreference()
+        const shortDramaPreference = currentShortDramaPreference()
         if (novelPreference?.wikiMemoryWasSelected === false)
           saveProductionPreferences({ novel: { enabled: false, wikiMemoryWasSelected: true } })
         if (manjuPreference?.wikiMemoryWasSelected === false)
           saveProductionPreferences({ manju: { enabled: false, wikiMemoryWasSelected: true } })
+        if (shortDramaPreference?.wikiMemoryWasSelected === false)
+          saveProductionPreferences({ shortDrama: { enabled: false, wikiMemoryWasSelected: true } })
       }
     } else if (option.type === 'session') {
       await addSessionReference(option)
@@ -4839,10 +4924,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                   @blur="hideChipTip"
                   @click="togglePermissionMenu($event)"
                 >
-                  <JcIcon name="folder" /><span>{{ permissionSwitching ? '切换中' : '工作区' }}</span><JcIcon name="expand_more" />
+                  <JcIcon name="folder" /><span>{{ permissionSwitching ? '切换中' : permissionTierLabel() }}</span><JcIcon name="expand_more" />
                 </button>
               </div>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-manju-button" :class="{ active: manjuSelected }" :aria-pressed="manjuSelected" @click="toggleManjuProduction()"><JcIcon name="movie" /><span>漫剧制作</span></button>
+              <button v-if="desktopOnlyRuntime" type="button" class="memory-short-drama-button" :class="{ active: shortDramaSelected }" :aria-pressed="shortDramaSelected" @click="toggleShortDramaProduction()"><JcIcon name="edit-note" /><span>短剧写作</span></button>
               <button v-if="desktopOnlyRuntime" type="button" class="memory-novel-button" :class="{ active: novelSelected }" :aria-pressed="novelSelected" @click="toggleNovelProduction()"><JcIcon name="edit-note" /><span>小说创作</span></button>
               <button type="button" data-command-id="skill" :title="skillCommand.description" @click="insertCommand(skillCommand)"><JcIcon name="psychology" /><span>@Skill</span></button>
             </div>
@@ -5124,7 +5210,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-workbench.creation-open .memory-creation { grid-column: 2; grid-row: 1; }
 .memory-chat-dock { min-width: 0; }
 .memory-conversation-icon, .memory-model-icon { display: none; }
-.memory-new-conversation-icon { display: block; width: 18px; height: 18px; }
+.memory-new-conversation-icon { display: block; width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgb(36 42 32 / 24%)); }
 .memory-workbench.chat-dock-narrow .memory-topbar { gap: 4px; padding: 0 6px; }
 .memory-workbench.chat-dock-narrow .memory-conversation-picker { flex: 0 1 38%; max-width: 38%; min-width: 52px; }
 .memory-workbench.chat-dock-narrow .memory-conversation-trigger { width: 100%; min-width: 0; gap: 4px; padding: 0 6px; }
@@ -5301,7 +5387,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 /* 芯片提示用 fixed 定位，避开祖先容器裁剪；颜色走主题。 */
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
-.memory-command-strip > .memory-manju-button.active, .memory-command-strip > .memory-novel-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
+.memory-command-strip > .memory-manju-button.active, .memory-command-strip > .memory-short-drama-button.active, .memory-command-strip > .memory-novel-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
 /* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
    写在 hover 之后，压住 hover 的 olive，红着不动。 */
@@ -5336,8 +5422,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }
 .memory-composer-editable::-webkit-scrollbar-thumb { min-height: 36px; border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .send-button { border-color: var(--olive); background: var(--olive); color: white; }
-.memory-action-row > .send-button { width: 36px; height: 36px; flex-basis: 36px; border: 0; border-radius: 8px; }
-.memory-action-row > .send-button > svg { width: 18px; height: 18px; }
+.memory-action-row > .send-button { width: 30px; height: 30px; flex-basis: 30px; border: 0; border-radius: 6px; }
+.memory-action-row > .send-button > svg { width: 17px; height: 17px; }
 .memory-action-row > .send-button:disabled { background: var(--line); color: var(--surface); opacity: .5; }
 .memory-action-row > .send-button:hover:not(:disabled) { opacity: .9; }
 .send-button:disabled { opacity: .4; cursor: default; }
