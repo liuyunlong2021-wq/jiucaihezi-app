@@ -1,5 +1,11 @@
 # Wiki 操作日志
 
+## [2026-10-12] v2.2.30 发布准备
+
+- 版本统一到 2.2.30，更新 `CHANGELOG.md` 与开发说明；发布内容包括本机 ComfyUI MiniMax H3 Director 8-step 工作流、恢复 `jc-qwen-image-2.1`、创作参数输入调整，以及聊天模型选择器排除媒体模型。
+- focused 回归通过：Node `1919/1919`；Rust `484 passed / 2 ignored`。首轮发现 Rust 测试共用临时目录造成并发删除，已将目录名改为每次调用唯一并复测通过。
+- `pnpm run build:desktop:quick` 和 Desktop 产物审计通过。三平台 tag CI 尚未触发，发布完成状态待 GitHub Actions 与线上下载清单核实；正式 OTA 推广仍走独立门禁。
+
 ## H3 导演台 Windows 复检与插件修正
 
 - 检查项目 `.raw/jc-media/文档/MiniMax H3 导演台8步0.9.json` 与已登记的新模型，修正 `comfy` 插件至 v0.3.3：模型映射后的时长回退、轮询上下文任务快照及参考图前置校验，补充回归测试。

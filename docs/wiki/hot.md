@@ -1,5 +1,7 @@
 # 热缓存
 
+- v2.2.30 桌面版发布准备：统一 package/Tauri/Cargo 版本并记录发布说明；focused 回归 Node `1919/1919`、Rust `484 passed / 2 ignored`，桌面快速构建与产物审计通过。修复 Rust 测试临时目录的并行冲突。主线提交与 tag 尚未推送，三平台 CI 尚未运行；正式 OTA 仍需独立门禁。
+
 - H3 导演台 Windows 复检：`comfy` v0.3.3 修复映射后的计费回退，将提交时长存入任务快照供真实轮询上下文读取，并提前拒绝无图/过量图/首尾帧输入。本机运行配置已补新 meta，但适配器尚未重启加载；8188 导演台节点、四个模型文件与 Topaz 路径已确认，1/9 图接线和参数验证通过。NewAPI 配置、GPU 成片及账单未验收。见 [[运维/本机ComfyUI-MiniMaxH3导演台8步接入-2026-10-12]]。
 
 - 2026-10-12 本机 ComfyUI 新增 MiniMax H3 Director 8-step R2V 模型 `jc-minimax-h3-director8`：面板提供提示词、0.2–120 秒时长（默认 5 秒，步进 0.1 秒）、1–9 张参考图、输出分辨率；固定单组、8 步，保留 Topaz 1.5×。Task Usage 表达式为 `tier("base", u("seconds") * 0.2)`。插件版本 0.3.2、适配器模板与 App 注册已落本地；NewAPI 上传/映射/定价、GPU 实际生成、下载和账单待验收。见 [[运维/本机ComfyUI-MiniMaxH3导演台8步接入-2026-10-12]]。

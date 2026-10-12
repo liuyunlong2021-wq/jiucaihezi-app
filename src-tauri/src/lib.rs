@@ -619,11 +619,19 @@ mod tests {
         build_skill_material_command, collect_skill_material_raw_files,
         latest_skill_seekers_output_dir,
     };
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::SystemTime;
 
+    static TEMP_TEST_DIR_ID: AtomicU64 = AtomicU64::new(0);
+
     fn temp_test_dir(name: &str) -> PathBuf {
-        let dir =
-            std::env::temp_dir().join(format!("jc_skill_material_{}_{}", name, std::process::id()));
+        let id = TEMP_TEST_DIR_ID.fetch_add(1, Ordering::Relaxed);
+        let dir = std::env::temp_dir().join(format!(
+            "jc_skill_material_{}_{}_{}",
+            name,
+            std::process::id(),
+            id
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).expect("create temp test dir");
         // macOS 的 `/var` 是指向 `/private/var` 的符号链接，原样返回会让 reject_symlink_path
