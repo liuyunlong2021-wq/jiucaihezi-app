@@ -1,0 +1,96 @@
+{
+  "id": "minimax-h3-director8",
+  "display_name": "MiniMax H3 Director 8-step R2V + Topaz 1.5×",
+  "description": "本机 MiniMax H3 Director 8 步参考生视频，单组时长 0.2–120 秒（默认 5 秒，步进 0.1 秒）；保留来源工作流中的 Topaz 1.5× 后处理。输入提示词、时长、1–9 张参考图和生成分辨率。",
+  "template": "minimax-h3-director8.json",
+  "output_kind": "video",
+  "default_async": true,
+  "output_node": "7",
+  "defaults": {
+    "duration": 5,
+    "width": 736,
+    "height": 1280,
+    "ref_max_size": 1280
+  },
+  "bind": {
+    "prompt": [
+      {
+        "node": "16",
+        "input": "prompt"
+      }
+    ],
+    "duration": [
+      {
+        "node": "16",
+        "input": "duration_sec"
+      }
+    ],
+    "width": [
+      {
+        "node": "12",
+        "input": "width"
+      }
+    ],
+    "height": [
+      {
+        "node": "12",
+        "input": "height"
+      }
+    ],
+    "seed": [
+      {
+        "node": "12",
+        "input": "seed"
+      }
+    ]
+  },
+  "dynamic_blocks": [
+    {
+      "param": "reference_images",
+      "required": true,
+      "min_items": 1,
+      "max_items": 9,
+      "node_id_format": "ref{i1}",
+      "node_template": {
+        "class_type": "LoadImage",
+        "inputs": {
+          "image": "{value}"
+        },
+        "_meta": {
+          "title": "参考图 {i1}"
+        }
+      },
+      "binding": [
+        {
+          "node": "16",
+          "input": "ref_images.ref_image_{i}"
+        }
+      ]
+    }
+  ],
+  "capabilities": {
+    "reference_to_video": true,
+    "max_reference_images": 9,
+    "audio": "generated",
+    "steps": 8,
+    "topaz_upscale": true
+  },
+  "constraints": {
+    "multiple_of": 32,
+    "min_size": 256,
+    "max_size": 2048,
+    "max_pixels": 2100000,
+    "clamp": {
+      "duration": [
+        0.2,
+        120
+      ]
+    }
+  },
+  "extra": {
+    "source_workflow": "MiniMax H3 导演台8步0.9.json",
+    "duration_note": "外接单组时长由面板传入，限制 0.2–120 秒，默认 5 秒，精度 0.1 秒；工作流按导演台规则对齐到 17n+5 帧。",
+    "resolution_note": "面板分辨率绑定导演台 width/height；附件中的 TopazLocalUpscale 节点仍按 1.5× 输出最终视频。",
+    "topaz_note": "保留附件中的 TopazLocalUpscale 节点和本机 Windows 路径配置；GPU 工作机需具备该节点、Topaz 可执行文件及对应模型。"
+  }
+}

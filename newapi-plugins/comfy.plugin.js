@@ -27,17 +27,15 @@ export const meta = {
   apiVersion: 1,
   key: 'comfy',
   name: '本机 ComfyUI',
-  version: '0.3.1',
+  version: '0.3.2',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Local ComfyUI via comfy-adapter',
     zh: '经 comfy-adapter 驱动本机 ComfyUI',
   },
-  // 面板 body 里的 model 就是这三个对外名（creationModelRegistry 的 model 字段）：
-  // 文生 / 首帧图生 / 首尾帧共用 `jc-minimax-h3`，参考生是 `jc-minimax-h3-ref2v`，
-  // 图片（Qwen-Image 2.1）是 `jc-qwen-image-2.1`。
-  // 渠道 model_mapping 再把它们换成适配器内部 id（minimax-h3 / minimax-h3-ref2v / qwen-image-2.1）。
-  models: ['jc-minimax-h3', 'jc-minimax-h3-ref2v', 'jc-qwen-image-2.1'],
+  // 面板 body 里的 model 就是这些对外名（creationModelRegistry 的 model 字段）。
+  // 渠道 model_mapping 将 H3 Director 8-step 映射为内部 id `minimax-h3-director8`。
+  models: ['jc-minimax-h3', 'jc-minimax-h3-ref2v', 'jc-minimax-h3-director8', 'jc-qwen-image-2.1'],
   fetchMode: 'per_task',
   // 视频走异步任务协议，图片走同步图片协议
   protocols: ['openai_video', 'openai_image'],
@@ -109,8 +107,12 @@ const HOST_STATUS = {
   FAILURE: 'failed',
 }
 
-// 面板必带 duration；真没带时按保守值预留额度，结算用适配器归一化后的实际秒数纠正
+// 普通视频模型优先按面板 duration 预约；Director 8-step 按外接组节点范围限制。
 const USAGE_FALLBACK_SECONDS = 5
+const DIRECTOR8_MODEL = 'jc-minimax-h3-director8'
+const DIRECTOR8_DEFAULT_SECONDS = 5
+const DIRECTOR8_MIN_SECONDS = 0.2
+const DIRECTOR8_MAX_SECONDS = 120
 
 function fail(message) {
   throw new Error(message)
@@ -142,13 +144,21 @@ export const protocols = {
       }
       const hasImage = Boolean(body.first_frame || body.last_frame || body.image ||
         (Array.isArray(body.images) && body.images.length))
+      // Director 8-step also exposes duration. Normalize it to the supported integer range
+      // to 0.1-second precision before usage reservation and adapter execution.
+      const directorDuration = body.duration === undefined || body.duration === null
+        ? DIRECTOR8_DEFAULT_SECONDS
+        : Math.max(DIRECTOR8_MIN_SECONDS, Math.min(DIRECTOR8_MAX_SECONDS, Math.round(body.duration * 10) / 10))
+      const requestBody = model === DIRECTOR8_MODEL
+        ? Object.assign({}, body, { duration: directorDuration })
+        : body
       // 原样返回：返回值就是「归一化后的 requestBody」，再复制一份只会白拷 data URL。
       // 不动入参（宿主把 hook 参数当只读），文件占位符替换由宿主在副本上做。
       return {
         kind: 'submit',
         model: ctx.model,
         action: hasImage ? 'image_to_video' : 'text_to_video',
-        requestBody: body,
+        requestBody,
       }
     },
     // 成片与状态由宿主渲染；这里不返回上游 URL —— 适配器给的是内网地址（frps:8796）。
@@ -349,7 +359,7 @@ export function extractUsage(ctx) {
     if (Number.isFinite(n) && n >= 1) imageCount = n > MAX_IMAGE_BATCH ? MAX_IMAGE_BATCH : n
     return { seconds: 0, image_count: imageCount }
   }
-  // 面板必带 duration；真没带时按保守值预留额度，结算用适配器归一化后的实际秒数纠正
+  // Director 8-step 的 decodeRequest 已归一化所选时长；其它模型缺省时按 5 秒预留。
   const seconds = Number(body.duration)
   return {
     seconds: Number.isFinite(seconds) && seconds > 0 ? seconds : USAGE_FALLBACK_SECONDS,
@@ -357,7 +367,7 @@ export function extractUsage(ctx) {
   }
 }
 
-// 适配器任务视图的 params 就是模板归一化后的实际值（duration 已被 clamp 到 1~28）
+// 适配器任务视图的 params 是模板归一化后的值；若响应缺少 params，则回退到已提交时长。
 export function extractUsageOnComplete(ctx, task, body) {
   if (isImageModel(ctx && (ctx.upstreamModel || ctx.model))) {
     // 实际张数以响应里的 data 长度为准（适配器按 batch_size 出图，可能少于请求的 n）
@@ -365,7 +375,13 @@ export function extractUsageOnComplete(ctx, task, body) {
     return count > 0 ? { image_count: count } : null
   }
   if (!body || typeof body !== 'object') return null
-  const raw = body.params && body.params.duration !== undefined ? body.params.duration : body.duration
+  const raw = body.params && body.params.duration !== undefined
+    ? body.params.duration
+    : body.duration !== undefined
+      ? body.duration
+      : String(ctx && (ctx.upstreamModel || ctx.model) || '') === DIRECTOR8_MODEL
+        ? snapshotOf(ctx.requestBody).duration
+        : undefined
   const seconds = Number(raw)
   return Number.isFinite(seconds) && seconds > 0 ? { seconds } : null
 }

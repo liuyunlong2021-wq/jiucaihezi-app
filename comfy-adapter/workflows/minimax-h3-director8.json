@@ -1,0 +1,182 @@
+{
+  "1": {
+    "inputs": {
+      "unet_name": "DasiwaMinimaxH3_dasiwaHybridV3_int8_r.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "UNet加载器"
+    }
+  },
+  "2": {
+    "inputs": {
+      "clip_name": "qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors",
+      "type": "minimax",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "加载CLIP"
+    }
+  },
+  "3": {
+    "inputs": {
+      "vae_name": "minimax_h3_video_vae_fp16.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "4": {
+    "inputs": {
+      "vae_name": "minimax_h3_audio_vae_fp32.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "加载VAE"
+    }
+  },
+  "6": {
+    "inputs": {
+      "fps": [
+        "12",
+        2
+      ],
+      "bit_depth": 8,
+      "color_space": "sRGB",
+      "codec": "none",
+      "images": [
+        "15",
+        0
+      ],
+      "audio": [
+        "12",
+        1
+      ]
+    },
+    "class_type": "CreateVideo",
+    "_meta": {
+      "title": "创建视频"
+    }
+  },
+  "7": {
+    "inputs": {
+      "filename_prefix": "adapter/minimax-h3-director8",
+      "format": "auto",
+      "format.codec": "auto",
+      "codec": "auto",
+      "video-preview": "",
+      "video": [
+        "6",
+        0
+      ]
+    },
+    "class_type": "SaveVideo",
+    "_meta": {
+      "title": "保存视频"
+    }
+  },
+  "8": {
+    "inputs": {
+      "source": [
+        "12",
+        5
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "Director 运行报告"
+    }
+  },
+  "12": {
+    "inputs": {
+      "task_type": "r2v — 参考主体生视频(Reference to Video)",
+      "global_prompt": "",
+      "bd_grp_sample": "采样设置",
+      "cfg": 1,
+      "seed": 0,
+      "frame_rate": 24,
+      "width": 736,
+      "height": 1280,
+      "ref_max_size": 1280,
+      "total_frames": 124,
+      "timeline_data": "",
+      "bd_grp_advanced": "高级采样",
+      "steps": 8,
+      "sampler": "res_multistep",
+      "scheduler": "simple",
+      "shift_video": 12,
+      "shift_audio": 3,
+      "export_source_images": false,
+      "export_pre_face_refine": false,
+      "bd_grp_perf": "性能",
+      "clear_vram_between_segments": true,
+      "clear_vram_before_refine": true,
+      "clear_vram_before_face_refine": false,
+      "cache_frames_codec": "raw",
+      "cache_name": "",
+      "minimax_director_ui": "",
+      "model": [
+        "1",
+        0
+      ],
+      "video_vae": [
+        "3",
+        0
+      ],
+      "audio_vae": [
+        "4",
+        0
+      ],
+      "clip": [
+        "2",
+        0
+      ],
+      "r2v_groups": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "MiniMaxH3Director",
+    "_meta": {
+      "title": "MiniMaxH3Director"
+    }
+  },
+  "15": {
+    "inputs": {
+      "模型": "Proteus [prob-4]",
+      "放大倍数": 1.5,
+      "增强强度": 1,
+      "目标宽度": 0,
+      "目标高度": 0,
+      "帧率": 24,
+      "GPU编号": 0,
+      "显存比例": 0.8,
+      "引擎目录": "D:\\topazvideo",
+      "模型定义目录": "C:\\ProgramData\\Topaz Labs LLC\\Topaz Video\\models",
+      "模型数据目录": "D:\\ComfyUI-aki-v3\\ComfyUI\\models\\topaz-models\\model_data_directory",
+      "保留中间文件": false,
+      "图像": [
+        "12",
+        0
+      ]
+    },
+    "class_type": "TopazLocalUpscale",
+    "_meta": {
+      "title": "Topaz 本地放大 1.5x (Proteus)"
+    }
+  },
+  "16": {
+    "class_type": "MiniMaxH3DirectorGroupReferenceToVideo",
+    "inputs": {
+      "prompt": "",
+      "duration_sec": 5.0,
+      "ref_image_size": "match"
+    },
+    "_meta": {
+      "title": "外接参考图与提示词"
+    }
+  }
+}

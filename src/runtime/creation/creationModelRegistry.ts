@@ -18,7 +18,7 @@ import type {
 } from './creationMediaTypes'
 
 import { getRhEndpointCapability } from '@/data/rhCapabilities'
-import { JC_H3_MODE_OPTIONS, JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
+import { JC_H3_DIRECTOR_SIZE_OPTIONS, JC_H3_MODE_OPTIONS, JC_H3_RATIO_OPTIONS, JC_H3_RATIOS, JC_VIDEO_SIZE_OPTIONS, MEDIA_MODEL_CAPABILITIES } from '@/data/mediaModelCapabilities'
 
 const RATIOS = ['adaptive', '1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 const GPT_IMAGE_SIZES = [
@@ -877,6 +877,42 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     ratios: [],
     resolutions: [],
     duration: { min: 1, max: 28 },
+  }),
+  baseSpec({
+    id: 'jc-minimax-h3-director8',
+    model: 'jc-minimax-h3-director8',
+    label: 'jc-MiniMax H3 导演台 8 步',
+    task: 'video',
+    source: 'newapi-direct',
+    route: 'newapi-direct',
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'comfy-video',
+    mode: 'image-to-video',
+    contractStatus: 'partial',
+    endpoint: '/v1/videos',
+    pollKind: 'newapi-task',
+    assetFlow: 'newapi-upload',
+    resultExtractor: 'newapi-task',
+    price: JC_H3_PRICE,
+    files: { images: { min: 1, max: 9, maxBytes: 20 * 1024 * 1024 } },
+    fields: promptFields([
+      { ...JC_H3_DURATION_FIELD, defaultValue: 5, min: 0.2, max: 120, step: 0.1, label: '时长(秒)' },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+      {
+        key: 'size',
+        label: '输出分辨率',
+        kind: 'select',
+        defaultValue: '736x1280',
+        options: JC_H3_DIRECTOR_SIZE_OPTIONS,
+      },
+    ]),
+    notes: [
+      '本机 ComfyUI 的 MiniMax H3 Director 8-step R2V 工作流；提示词、1–9 张参考图、时长与输出分辨率可调。',
+      '单组时长 0.2–120 秒；附件工作流中的 Topaz 后处理保留，成片会按 1.5× 放大。',
+    ],
+    ratios: [],
+    resolutions: [],
+    duration: { min: 0.2, max: 120 },
   }),
   baseSpec({
     id: 'jc-minimax-h3-first-frame',

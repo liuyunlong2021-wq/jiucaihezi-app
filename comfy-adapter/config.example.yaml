@@ -63,3 +63,4 @@ models:
   - workflows/qwen-image-2.1.meta.json
   - workflows/minimax-h3-video.meta.json
   - workflows/minimax-h3-ref2v.meta.json
+  - workflows/minimax-h3-director8.meta.json

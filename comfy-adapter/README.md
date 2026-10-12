@@ -563,17 +563,17 @@ location /files/ {
 | 类型 | OpenAI（图片）/ 视频任务渠道 |
 | Base URL | `http://127.0.0.1:8791`（隧道出口） |
 | 密钥 | `config.yaml` 里的 `auth.api_keys` |
-| 模型 | `jc-qwen-image-2.1`、`jc-minimax-h3`、`jc-minimax-h3-ref2v` |
-| 模型映射 | 把上面的 `jc-*` 映射到适配器的 `qwen-image-2.1` / `minimax-h3` / `minimax-h3-ref2v` |
+| 模型 | `jc-qwen-image-2.1`、`jc-minimax-h3`、`jc-minimax-h3-ref2v`、`jc-minimax-h3-director8` |
+| 模型映射 | 把上面的 `jc-*` 映射到适配器的 `qwen-image-2.1` / `minimax-h3` / `minimax-h3-ref2v` / `minimax-h3-director8` |
 | 分组 | 建议单独建 `comfy` 分组，方便定价和限流 |
 
 > 公开模型名带 `jc-` 前缀，和创作面板下拉里的显示名一致；适配器内部 id 保持
-> `qwen-image-2.1` / `minimax-h3` / `minimax-h3-ref2v` 不变，靠 NewAPI 的模型映射衔接。
+> `qwen-image-2.1` / `minimax-h3` / `minimax-h3-ref2v` / `minimax-h3-director8` 不变，靠 NewAPI 的模型映射衔接。
 
 **同步 vs 异步**：
 - `jc-qwen-image-2.1` 走同步 `/v1/images/generations`（有参考图则走 `/v1/images/edits` 的
   multipart），8~42s 都在 Cloudflare 的 100s 内
-- 三个 `jc-minimax-h3*` **必须异步**（110s+），提交 202 后由 NewAPI 轮询
+- 四个 `jc-minimax-h3*` **必须异步**，提交后由 NewAPI 轮询
   `/v1/videos/{task_id}`，成片走 `/v1/videos/{task_id}/content`
 - ⚠️ `server.public_base_url` 要填成**调用方可达**的隧道地址，否则完成任务时返回的
   `metadata.url` 会是一条死链

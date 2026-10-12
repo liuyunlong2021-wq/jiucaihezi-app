@@ -88,6 +88,12 @@ export const JC_VIDEO_SIZE_OPTIONS: MediaFieldOption[] = [
 
 export const JC_VIDEO_SIZES = JC_VIDEO_SIZE_OPTIONS.map(option => String(option.value))
 
+/** MiniMax H3 Director 8-step adds the source workflow's 736×1280 default. */
+export const JC_H3_DIRECTOR_SIZE_OPTIONS: MediaFieldOption[] = [
+  { value: '736x1280', label: '竖屏 · 736×1280（导演台默认）' },
+  ...JC_VIDEO_SIZE_OPTIONS,
+]
+
 /** comfy_extras/nodes_resolution.py 的 ResolutionSelector 只认这几个**带后缀的**字符串，
  * 不能简写成 "9:16" —— 它算完宽高，再由工作流自己的 latent 上采样出成片。
  */
@@ -842,6 +848,21 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
       { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
+    ],
+  },
+  {
+    id: 'jc-minimax-h3-director8',
+    label: 'jc-MiniMax H3 导演台 8 步',
+    task: 'video',
+    model: 'jc-minimax-h3-director8',
+    provider: 'gateway-video',
+    maxFiles: 9,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 0.2, max: 120, step: 0.1 },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+      { key: 'size', label: '输出分辨率', kind: 'select', defaultValue: '736x1280', options: JC_H3_DIRECTOR_SIZE_OPTIONS },
     ],
   },
   {

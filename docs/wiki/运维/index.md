@@ -31,6 +31,7 @@
 - [源流 AI Seedance 2.5 接入](源流AISeedance2.5接入-2026-10-11.md) - 两个 OpenAPI 视频模型的 NewAPI Task Plugin、素材上限、面板售价与待验收项。
 - [易红 API Seedance 2.5 插件接入](易红APISeedance2.5插件接入-2026-10-11.md) - 四个明确型号的 NewAPI Task Plugin、素材与时长限制、计费表达式及待验收项；`seedance2.5 max` 因文档未列出而暂缓。
 - [本机 ComfyUI 模型对外接入（jc- 前缀）](本机ComfyUI模型对外接入-2026-09-26.md) - 本机 4090 上的 MiniMax H3 与 Qwen Image 经 comfy-adapter + NewAPI Task Plugin 接入；图片型号于 2026-10-02 接回对外，和视频共用 GPU 与队列。
+- [本机 ComfyUI MiniMax H3 导演台 8 步接入](本机ComfyUI-MiniMaxH3导演台8步接入-2026-10-12.md) - 提示词、0.2–120 秒时长、1–9 张参考图与输出分辨率四个面板字段；保留 Topaz 1.5×；NewAPI 上传、生产配置、生成和账单待验收。
 - [韭菜盒子本机 ComfyUI 图片模型 API 对外接入](韭菜盒子本机ComfyUI图片模型API对外接入-2026-09-26.md) - `jc-qwen-image-2.1` 已接回 NewAPI；含尺寸、参考图、URL 响应、单并发与重载说明。
 - [韭菜盒子本机 ComfyUI 视频模型 API 对外接入](韭菜盒子本机ComfyUI视频模型API对外接入-2026-09-26.md) - 可直接发给第三方用户的 `jc-MiniMax H3` 四个视频模型：传图字段、画幅表、比例枚举、异步下载和保留期。
 - [本机 ComfyUI 接入 NewAPI 任务插件通道（方案）](本机ComfyUI接入NewAPI任务插件通道SDD-2026-10-01.md) - 把 `jc-minimax-h3*` 从 type 1 OpenAI 渠道换成 type 61「Task Plugin」渠道 + 自写 `comfy` 插件：字段无损透传、任务持久化、用量计费与成片代理交给宿主。**已实施并实测通过**（选 4:3 → ComfyUI 节点 29 = `4:3 (Standard)`）。
