@@ -16,6 +16,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { appendSkillCreatorHistory } from '@/utils/skillCreatorWorkspace'
 import type { SkillWithLinks } from '@/types/skillsManage'
+import { CREATION_MODEL_REGISTRY } from '@/runtime/creation/creationModelRegistry'
 import {
   LOCAL_OLLAMA_API_BASE,
   LOCAL_OLLAMA_PROVIDER_ID,
@@ -25,7 +26,7 @@ import {
   resolveModelProviderId,
   updateDefaultProviderModels,
 } from '@/utils/providerConfig'
-import { DEFAULT_TEXT_MODEL, filterExecutableModels, resolveModelSelection } from '@/utils/modelSelection'
+import { DEFAULT_TEXT_MODEL, filterExecutableModels, resolveTextModelSelection } from '@/utils/modelSelection'
 import { resolveModelInputModalities, type ModelInputModality } from '@/runtime/direct/modelInputCapabilities'
 
 // ─── 向后兼容：旧 Agent 类型（迁移用） ───
@@ -78,6 +79,18 @@ const DEFAULT_MODELS: ModelEntry[] = [
   { id: 'grok-video-3', label: '🎬 Grok Video', capability: 'video' },
   { id: 'suno-custom-song', label: '🎵 Suno 自定义歌曲', capability: 'audio' },
 ]
+
+/** Models already routed through @影音 must not appear as ordinary chat models. */
+const MEDIA_CREATION_MODEL_IDS = new Set(
+  CREATION_MODEL_REGISTRY.flatMap(spec => [spec.id, spec.model, ...(spec.aliases || [])])
+    .filter((id): id is string => Boolean(id))
+    .map(id => id.toLowerCase()),
+)
+
+function isMediaCreationModel(model: ModelEntry): boolean {
+  if (model.providerId && model.providerId !== 'jiucaihezi') return false
+  return MEDIA_CREATION_MODEL_IDS.has(model.id.trim().toLowerCase())
+}
 
 function loadLocalModelEntries(): ModelEntry[] {
   return getLocalOllamaModels().map(model => ({
@@ -236,7 +249,9 @@ export const useAgentStore = defineStore('agents', () => {
   }
 
   /** 按能力分类的视图 */
-  const textModels = computed(() => availableModels.value.filter(m => (m.capability || inferCapability(m.id)) === 'text'))
+  const textModels = computed(() => availableModels.value.filter(
+    m => (m.capability || inferCapability(m.id)) === 'text' && !isMediaCreationModel(m),
+  ))
   const imageModels = computed(() => availableModels.value.filter(m => m.capability === 'image'))
   const videoModels = computed(() => availableModels.value.filter(m => m.capability === 'video'))
   const audioModels = computed(() => availableModels.value.filter(m => m.capability === 'audio'))
@@ -245,7 +260,7 @@ export const useAgentStore = defineStore('agents', () => {
     const merged = filterExecutableModels(models)
     if (merged.length === 0) return false
     availableModels.value = mergeLocalModels(merged)
-    const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+    const resolvedModel = resolveTextModelSelection(currentModel.value, textModels.value)
     if (resolvedModel !== currentModel.value) {
       setModel(resolvedModel)
     } else {
@@ -339,7 +354,7 @@ export const useAgentStore = defineStore('agents', () => {
           const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
           if (filtered.length > 0 && cachedTextCount >= defaultTextCount) {
             availableModels.value = mergeLocalModels(filtered)
-            const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+            const resolvedModel = resolveTextModelSelection(currentModel.value, textModels.value)
             if (resolvedModel !== currentModel.value) setModel(resolvedModel)
             else syncModelProviderStorage()
             modelsFetched.value = true
@@ -349,7 +364,7 @@ export const useAgentStore = defineStore('agents', () => {
     }
   }
 
-  const initialResolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+  const initialResolvedModel = resolveTextModelSelection(currentModel.value, textModels.value)
   if (initialResolvedModel !== currentModel.value) {
     setModel(initialResolvedModel)
   } else {
@@ -358,9 +373,9 @@ export const useAgentStore = defineStore('agents', () => {
 
   function refreshLocalModels() {
     availableModels.value = mergeLocalModels(availableModels.value)
-    const model = availableModels.value.find(x => x.id === currentModel.value)
+    const model = textModels.value.find(x => x.id === currentModel.value)
     if (!model) {
-      setModel(resolveModelSelection(currentModel.value, availableModels.value))
+      setModel(resolveTextModelSelection(currentModel.value, textModels.value))
       return
     }
     syncModelProviderStorage()

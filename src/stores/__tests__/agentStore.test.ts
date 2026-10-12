@@ -5,6 +5,62 @@ import { createPinia, setActivePinia } from 'pinia'
 import { useAgentStore } from '../agentStore'
 import type { SkillConfig } from '../../types/skill'
 
+const DEFAULT_CHAT_MODEL_IDS = [
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'gpt-5.5',
+  'gpt-5.4',
+  'qwen3.6-plus',
+  'deepseek-v4-flash',
+  'deepseek-v4-pro',
+  'openai/gpt-oss-120b:free',
+  'google/gemma-4-31b-it:free',
+  'gemini-3.1-flash-lite-preview',
+  'gemini-3.1-pro-preview',
+]
+
+test(
+  'chat model list excludes registered media models mislabeled as text and replaces a cached media selection',
+  { concurrency: false },
+  () => {
+    const mediaModelIds = [
+      'cvk-2.5-480',
+      'SD-2.5-特价',
+      'minimax_h3_zm_u24',
+      'MiniMaxH3-720p-sec',
+      'omni-fast',
+      'omni-v2v',
+      'mj_fast_imagine',
+      'MiniMax-H3-Context-IR',
+    ]
+    const cachedModels = [
+      ...DEFAULT_CHAT_MODEL_IDS.map(id => ({
+        id,
+        label: id,
+        providerId: 'jiucaihezi',
+        capability: 'text',
+      })),
+      ...mediaModelIds.map(id => ({ id, label: id, providerId: 'jiucaihezi', capability: 'text' })),
+    ]
+    const storage = installLocalStorage({
+      jcModel: 'cvk-2.5-480',
+      jc_models_cache: JSON.stringify(cachedModels),
+    })
+
+    try {
+      setActivePinia(createPinia())
+      const agentStore = useAgentStore()
+
+      assert.deepEqual(agentStore.textModels.map(model => model.id), DEFAULT_CHAT_MODEL_IDS)
+      assert.equal(mediaModelIds.every(id => agentStore.availableModels.some(model => model.id === id)), true)
+      assert.equal(agentStore.currentModel, DEFAULT_CHAT_MODEL_IDS[0])
+    } finally {
+      storage.restore()
+    }
+  },
+)
+
 function installLocalStorage(values: Record<string, string> = {}) {
   const store = new Map<string, string>(Object.entries(values))
   const previous = (globalThis as any).localStorage
