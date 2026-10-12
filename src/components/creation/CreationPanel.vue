@@ -3969,6 +3969,16 @@ onBeforeUnmount(() => {
 })
 
 // 任务/模型 popover
+function commitDurationInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const range = durationRange.value
+  const value = input.valueAsNumber
+  if (range && Number.isFinite(value)) {
+    setDuration(Math.max(Math.ceil(range.min), Math.min(Math.floor(range.max), Math.round(value))))
+  }
+  input.value = String(Math.round(cpState.dur))
+}
+
 const openPop = ref<string>('')
 function togglePop(key: string) {
   openPop.value = openPop.value === key ? '' : key
@@ -4797,7 +4807,7 @@ const canSend = computed(
       </div>
       <!-- 分辨率 (grok) -->
       <div v-if="resolutionOptions.length" class="cp-island">
-        <div class="cp-island-label">分辨率</div>
+        <div class="cp-island-label">{{ currentCreationSpec?.fields.find(field => field.key === 'resolution')?.label || '分辨率' }}</div>
         <div v-if="resolutionOptions.length === 1" class="cp-island-val">{{ resolutionOptions[0] }}</div>
         <div v-else class="cp-btn-group">
           <button
@@ -4829,13 +4839,24 @@ const canSend = computed(
           <input
             type="range"
             class="cp-dur-slider"
-            :min="durationRange.min"
-            :max="durationRange.max"
-            :step="durationRange.step"
-            :value="cpState.dur"
-            @input="setDuration(+($event.target as HTMLInputElement).value)"
+            :min="Math.ceil(durationRange.min)"
+            :max="Math.floor(durationRange.max)"
+            :step="Math.max(1, durationRange.step)"
+            :value="Math.round(cpState.dur)"
+            @input="setDuration(Math.round(+($event.target as HTMLInputElement).value))"
           />
-          <span class="cp-dur-val">{{ cpState.dur }}s</span>
+          <input
+            type="number"
+            class="cp-dur-val"
+            aria-label="时长（秒）"
+            :min="Math.ceil(durationRange.min)"
+            :max="Math.floor(durationRange.max)"
+            :step="Math.max(1, durationRange.step)"
+            :value="Math.round(cpState.dur)"
+            @change="commitDurationInput($event)"
+            @keydown.enter="($event.target as HTMLInputElement).blur()"
+          />
+          <span>s</span>
         </div>
       </div>
       <div v-if="showMvSelect" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('mv')" @keydown.space.self.prevent="togglePop('mv')" @click="togglePop('mv')">
@@ -5867,7 +5888,6 @@ const canSend = computed(
   background: transparent;
 }
 .cp-params > .cp-island-selector { border: 1px solid var(--jc-border); border-radius: 8px; padding: 5px 8px !important; background: var(--paper) !important; }
-.cp-island-selector::after { content: '⌄'; color: var(--ink3); margin-left: 3px; }
 .cp-island-selector > .cp-island-label { display: none; }
 .cp-island-selector:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
 .cp-params > .cp-island:not(.cp-rh-island):hover {
@@ -5997,6 +6017,15 @@ const canSend = computed(
   font-weight: 700;
   color: var(--olive-dark);
   min-width: 28px;
+}
+
+input.cp-dur-val {
+  width: 52px;
+  padding: 3px 5px;
+  border: 1px solid var(--olive);
+  border-radius: 5px;
+  background: transparent;
+  text-align: center;
 }
 
 .cp-generic-media-row {

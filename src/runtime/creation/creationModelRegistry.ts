@@ -798,9 +798,25 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // 这里的 model 就是 NewAPI 渠道里的公开模型名，渠道的模型映射再换成适配器的 id。
   // 必须有 GPU 的那台机器在线才能出图/出片；VPS 只负责中转、计费与鉴权。
 
-  // 只注册视频：图片模型（jc-qwen-image-2.1）已按 2026-09-26 的决定从面板撤下。
-  // 图片与视频两套权重在 48GB 显存里无法共存，频繁来回切会互相挤爆；
-  // 服务器端适配器与工作流都还在，等有第二台机器单独跑图片时再把上面那份规格接回来。
+  directImage({
+    id: 'jc-qwen-image-2.1',
+    model: 'jc-qwen-image-2.1',
+    label: 'jc-Qwen Image 2.1',
+    price: '0.2/张',
+    contractStatus: 'partial',
+    files: { images: { min: 0, max: 10 } },
+    fields: promptFields([
+      {
+        key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1',
+        options: options(['1:1', '9:16', '16:9', '3:4', '4:3', '2:3', '3:2']),
+      },
+      { key: 'resolution', label: '尺寸', kind: 'select', defaultValue: '1k', options: options(['1k', '2k']) },
+      { key: 'images', label: '参考图', kind: 'images' },
+    ]),
+    ratios: ['1:1', '9:16', '16:9', '3:4', '4:3', '2:3', '3:2'],
+    resolutions: ['1k', '2k'],
+    notes: ['本机 ComfyUI Qwen-Image 2.1；无参考图时文生图，有参考图时编辑，最多支持 10 张参考图。'],
+  }),
   // 四个面板项同价：渠道 140 按秒计费，管理员 2026-09-27 核实。
   // 参考生视频排在本组第一位（视频任务的默认模型就是它，`switchTask` 取 models[0]）。
   baseSpec({

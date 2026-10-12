@@ -27,7 +27,7 @@ export const meta = {
   apiVersion: 1,
   key: 'comfy',
   name: '本机 ComfyUI',
-  version: '0.3.2',
+  version: '0.3.3',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Local ComfyUI via comfy-adapter',
@@ -141,6 +141,12 @@ export const protocols = {
         if (typeof duration !== 'number' || !Number.isFinite(duration) || duration <= 0) {
           fail('duration must be a positive number')
         }
+      }
+      if (model === DIRECTOR8_MODEL) {
+        if (body.first_frame || body.last_frame) fail('Director 8-step requires reference images, not first_frame/last_frame')
+        const refs = Array.isArray(body.images) ? body.images.slice() : body.images ? [body.images] : []
+        if (body.image) refs.push(body.image)
+        if (refs.length < 1 || refs.length > 9) fail('Director 8-step requires 1–9 reference images')
       }
       const hasImage = Boolean(body.first_frame || body.last_frame || body.image ||
         (Array.isArray(body.images) && body.images.length))
@@ -291,7 +297,11 @@ export function parseSubmitResponse(ctx, resp) {
     }
   }
   if (!body.id) fail('comfy-adapter did not return a task id')
-  return { taskId: String(body.id), taskData: body }
+  const taskData = Object.assign({}, body)
+  if (ctx.model === DIRECTOR8_MODEL || ctx.upstreamModel === 'minimax-h3-director8') {
+    taskData.duration = snapshotOf(ctx.requestBody).duration
+  }
+  return { taskId: String(body.id), taskData }
 }
 
 export function buildQueryRequest(ctx) {
@@ -379,8 +389,11 @@ export function extractUsageOnComplete(ctx, task, body) {
     ? body.params.duration
     : body.duration !== undefined
       ? body.duration
-      : String(ctx && (ctx.upstreamModel || ctx.model) || '') === DIRECTOR8_MODEL
-        ? snapshotOf(ctx.requestBody).duration
+      : String(ctx && ctx.model || '') === DIRECTOR8_MODEL ||
+        String(ctx && ctx.upstreamModel || '') === 'minimax-h3-director8'
+        ? snapshotOf(ctx.data).duration !== undefined
+          ? snapshotOf(ctx.data).duration
+          : snapshotOf(ctx.requestBody).duration
         : undefined
   const seconds = Number(raw)
   return Number.isFinite(seconds) && seconds > 0 ? { seconds } : null

@@ -21,9 +21,7 @@ import {
   listCreationPanelModels,
 } from '../creationModelRegistry'
 
-/** 本机 comfy-adapter 的四个面板项（渠道公开模型名只有两个）。
- * 图片模型（jc-qwen-image-2.1）已从面板撤下：图片与视频两套权重在 48GB 显存里无法共存。
- */
+/** 本机 comfy-adapter 的传统视频面板项。 */
 const JC_MODEL_IDS = [
   'jc-minimax-h3',
   'jc-minimax-h3-first-frame',

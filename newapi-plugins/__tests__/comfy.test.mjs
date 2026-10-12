@@ -10,6 +10,8 @@ import * as plugin from '../comfy.plugin.js'
 
 const REF2V = 'jc-minimax-h3-ref2v'
 const H3 = 'jc-minimax-h3'
+const DIRECTOR8 = 'jc-minimax-h3-director8'
+const INTERNAL_DIRECTOR8 = 'minimax-h3-director8'
 const IMG = 'jc-qwen-image-2.1'
 const INTERNAL_REF2V = 'minimax-h3-ref2v'
 const INTERNAL_IMG = 'qwen-image-2.1'
@@ -35,8 +37,8 @@ test('meta 声明与适配器一致', () => {
   assert.equal(plugin.meta.fetchMode, 'per_task')
   assert.equal(plugin.meta.baseUrl, 'http://frps:8796')
   assert.deepEqual(plugin.meta.protocols, ['openai_video', 'openai_image'])
-  // 面板 body 里的 model 就是这三个对外名（creationModelRegistry 的 model 字段）
-  assert.deepEqual(plugin.meta.models, [H3, REF2V, IMG])
+  // 面板 body 里的 model 与插件公开模型白名单一致。
+  assert.deepEqual(plugin.meta.models, [H3, REF2V, DIRECTOR8, IMG])
   assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['seconds', 'image_count'])
 })
 
@@ -210,6 +212,29 @@ test('用量：预留用请求时长，结算优先用适配器归一化后的�
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { params: { duration: 28 } }), { seconds: 28 })
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { duration: 12 }), { seconds: 12 })
   assert.equal(plugin.extractUsageOnComplete({}, {}, null), null)
+})
+
+test('Director 8-step 时长归一化、映射与结算回退', () => {
+  for (const [duration, expected] of [[undefined, 5], [0.1, 0.2], [5.26, 5.3], [121, 120]]) {
+    const intent = decode({ prompt: '参考 <Picture 1> 生成视频', duration, images: ['ref.png'], size: '736x1280' }, DIRECTOR8)
+    assert.equal(intent.requestBody.duration, expected)
+    assert.equal(intent.action, 'image_to_video')
+    const ctx = { model: DIRECTOR8, upstreamModel: INTERNAL_DIRECTOR8, requestBody: intent.requestBody, baseUrl: 'http://frps:8796', apiKey: 'fixture' }
+    assert.equal(plugin.buildSubmitRequest(ctx).body.model, INTERNAL_DIRECTOR8)
+    assert.deepEqual(plugin.extractUsage(ctx), { seconds: expected, image_count: 0 })
+    // /v1/videos/{id} 不返回 params/duration，且渠道配置了内部模型映射。
+    assert.deepEqual(plugin.extractUsageOnComplete(ctx, {}, { status: 'completed' }), { seconds: expected })
+    const submitted = plugin.parseSubmitResponse(ctx, { body: { id: 'fixture', status: 'queued' } })
+    // 宿主轮询上下文没有 requestBody，提交快照通过 data 保留。
+    assert.deepEqual(plugin.extractUsageOnComplete({ model: DIRECTOR8, upstreamModel: INTERNAL_DIRECTOR8, data: submitted.taskData }, {}, { status: 'completed' }), { seconds: expected })
+  }
+})
+
+test('Director 8-step 提交前拒绝缺图、过量参考图和首尾帧模式', () => {
+  for (const fields of [{}, { images: [] }, { images: Array(10).fill('ref.png') }, { first_frame: 'ref.png' }, { images: ['ref.png'], last_frame: 'last.png' }]) {
+    assert.throws(() => decode({ prompt: 'p', ...fields }, DIRECTOR8), /Director 8-step/)
+  }
+  assert.equal(decode({ prompt: 'p', image: 'ref.png' }, DIRECTOR8).action, 'image_to_video')
 })
 
 test('★ 源码里不许出现宿主静态检查封的语法（实测 ".async" 会直接拒收上传）', () => {
