@@ -22,6 +22,16 @@ function fixture(t) {
   const ctx = { skills: { register(skill) {
     registered.set(skill.name, skill)
     return () => registered.delete(skill.name)
+  }, registerProvider(create) {
+    const provider = create({ signal: new AbortController().signal, invalidate() {} })
+    const releases = []
+    let active = true
+    const dispose = () => { active = false; releases.reverse().forEach(release => release()) }
+    dispose.ready = provider.list().then(async candidates => {
+      const skills = await Promise.all(candidates.map(candidate => provider.get(candidate, { signal: new AbortController().signal })))
+      if (active) for (const skill of skills) releases.push(ctx.skills.register(skill))
+    })
+    return dispose
   } }, tools: { register(tool) {
     registeredTools.set(tool.name, tool)
     return () => registeredTools.delete(tool.name)
@@ -29,12 +39,12 @@ function fixture(t) {
   get() { return undefined }, plugin(definition) {
     const releases = []
     const child = {
-      skills: { register(skill) { releases.push(ctx.skills.register(skill)) } },
+      skills: { registerProvider(create) { releases.push(ctx.skills.registerProvider(create)) } },
       tools: ctx.tools, fs: ctx.fs, get: ctx.get,
       effect(callback) { releases.push(callback()) },
     }
     return {
-      await: async () => definition.apply(child),
+      await: async () => { definition.apply(child); await Promise.all(releases.map(release => release?.ready)) },
       assertActive() {},
       dispose: async () => { for (const release of releases.splice(0).reverse()) await release?.() },
     }
@@ -206,16 +216,13 @@ test('a partially failed registration is rolled back and can be retried', async 
   const f = await realFixture(t)
   if (!f) return
   const { rec } = f.agents[0]
-  const registry = f.ctx.skills
-  const original = registry.register
-  registry.register = function(skill) {
-    if (skill.name === 'h3-prompt-writing') throw new Error('registration failure')
-    return original.call(this, skill)
-  }
+  const tools = f.ctx.get('tools')
+  const original = tools.register
+  tools.register = () => { throw new Error('registration failure') }
   await assert.rejects(pinManjuSkills(rec, ['jc-manju-zhizuo'], f.root), /registration failure/)
   const lookup = { scope: rec.handle.agent, signal: new AbortController().signal }
   assert.deepEqual(await f.ctx.skills.list(lookup), [])
-  registry.register = original
+  tools.register = original
   await (await pinManjuSkills(rec, ['jc-manju-zhizuo'], f.root))()
   assert.deepEqual(await f.ctx.skills.list(lookup), [])
 })
@@ -272,6 +279,41 @@ test('SDK bindings reuse the same agent, rebind restored agents, and clean up af
   assert.equal((await f.ctx.skills.get('jc-seedance', lookup())).source, 'bundled')
   await server.applyPinnedSkillScope(rec, ordinary)
   assert.equal(restrictions, 0)
+})
+
+test('the same SDK agent reloads edited bundled skills on the next production turn', async t => {
+  let restrictions = 0
+  const f = await realFixture(t, { restrict() { restrictions++; return () => { restrictions-- } } })
+  if (!f) return
+  const route = JSON.parse(readFileSync(join(f.root, 'manju-route.json'), 'utf8'))
+  route.skills.push('jc-gongchengjuben')
+  writeFileSync(join(f.root, 'manju-route.json'), JSON.stringify(route))
+  mkdirSync(join(f.root, 'jc-gongchengjuben'))
+  writeFileSync(join(f.root, 'jc-gongchengjuben', 'SKILL.md'), '---\nname: jc-gongchengjuben\ndescription: engineering\n---\nINITIAL_ENGINEERING_RULES\n')
+  const { HarnessSdkJsonRpcServer } = await import('../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/lib/index.js')
+  const { rec } = f.agents[0]
+  f.ctx.provide('agents', { get: () => rec.handle.agent })
+  const originalDirectory = process.env.DSH_BUNDLED_SKILL_DIR
+  process.env.DSH_BUNDLED_SKILL_DIR = f.root
+  t.after(() => {
+    if (originalDirectory === undefined) delete process.env.DSH_BUNDLED_SKILL_DIR
+    else process.env.DSH_BUNDLED_SKILL_DIR = originalDirectory
+  })
+  const server = Object.assign(Object.create(HarnessSdkJsonRpcServer.prototype), { ctx: f.ctx })
+  const production = [{ type: 'text', text: '/jc-manju-zhizuo\ncontinue engineering script' }]
+  const lookup = { scope: rec.handle.agent, signal: new AbortController().signal }
+  await server.applyPinnedSkillScope(rec, production)
+  const before = await f.ctx.skills.get('jc-gongchengjuben', lookup)
+  const updated = before.content + '\nUPDATED_ENGINEERING_RULES\n'
+  writeFileSync(join(f.root, 'jc-gongchengjuben', 'SKILL.md'), updated)
+  await server.applyPinnedSkillScope(rec, production)
+  assert.equal((await f.ctx.skills.get('jc-gongchengjuben', lookup)).content, updated)
+  assert.equal(restrictions, 1)
+  writeFileSync(join(f.root, 'jc-gongchengjuben', 'SKILL.md'), updated.replace('name: jc-gongchengjuben', 'name: wrong-name'))
+  await assert.rejects(f.ctx.skills.get('jc-gongchengjuben', lookup), /身份不符/)
+  await server.applyPinnedSkillScope(rec, [{ type: 'text', text: 'ordinary conversation' }])
+  assert.equal(restrictions, 0)
+  assert.deepEqual(await f.ctx.skills.list(lookup), [])
 })
 
 test('SDK rejects a disposed agent after bundle preparation and rolls back its plugin', async t => {
@@ -355,4 +397,9 @@ test('the actual SDK injects bundled skills before the model request and restore
   assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /# jc-manju-zhizuo/)
   assert.ok(!requests.at(-1).tools?.some(tool => tool.function.name === 'skill'))
   assert.equal(requests.length, 5)
+  const routerPath = join(root, 'jc-manju-zhizuo', 'SKILL.md')
+  writeFileSync(routerPath, readFileSync(routerPath, 'utf8') + '\nUPDATED_RULES_FOR_NEXT_TURN\n')
+  await harness.session('manju-sdk-test').run('/jc-manju-zhizuo\ncontinue after rules changed')
+  assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /UPDATED_RULES_FOR_NEXT_TURN/)
+  assert.equal(requests.length, 6)
 })

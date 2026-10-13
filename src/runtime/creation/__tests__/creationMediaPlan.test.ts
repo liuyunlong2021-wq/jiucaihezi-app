@@ -529,7 +529,7 @@ test('Xiaoyi Kling and Seedance 2.5 display per-second prices', () => {
 test('unstable or retired video models stay out of the creation panel', () => {
   const retiredIds = [
     'newapi/xiaoyi/MiniMaxH3-2k-pro-sec', 'newapi/xiaoyi/MiniMaxH3-2k-sec', 'newapi/xiaoyi/MiniMaxH3-720p-sec',
-    'newapi/xiaoyi/kling-video-v3', 'newapi/xiaoyi/grok-imagine-video-1.5', 'newapi/xiaoyi/seedance2.5',
+    'newapi/xiaoyi/kling-video-v3', 'newapi/xiaoyi/seedance2.5',
     'runninghub/api/rh-video-v31-fast',
     'newapi/zx/grok-1.5-video-6s', 'newapi/zx/grok-1.5-video-10s', 'newapi/zx/grok-1.5-video-15s',
     'newapi/zx/doubao-seedance-2-5-260628', 'runninghub/api/rh-seedance25-no-video-ref', 'runninghub/api/rh-seedance25-with-video-ref',
@@ -1273,4 +1273,35 @@ test('成片是否经 NewAPI /content 回收，只由一处判据决定', () => 
   assert.equal(usesNewApiContentEndpoint({ apiStyle: 'newapi-task', model: 'grok-imagine-video-1.5' }), false)
   assert.equal(usesNewApiContentEndpoint({}), false)
   assert.equal(usesNewApiContentEndpoint(undefined), false)
+})
+
+test('易红新增 H3 与图片模型，Gemini 比例画质和 GPT 分级尺寸进入提交计划', () => {
+  const gemini = buildCreationRunPlan({ modelId: 'newapi/yihong/gemini-nano-banana-2.1', params: { prompt: 'p', ratio: '9:16', resolution: '4k', images: ['https://a/i.png'] } })
+  assert.equal(gemini.endpoint, '/v1/images/edits')
+  assert.equal(gemini.mediaInputTransport, 'multipart')
+  assert.equal(gemini.debug.normalizedParams.ratio, '9:16')
+  assert.equal(gemini.debug.normalizedParams.imageSize, '4K')
+  assert.equal(gemini.debug.normalizedParams.response_format, 'b64_json')
+  const gpt = buildCreationRunPlan({ modelId: 'newapi/yihong/gpt-image-2-1K-4K', params: { prompt: 'p', size: '3840x2160' } })
+  assert.equal(gpt.endpoint, '/v1/images/generations')
+  assert.equal(gpt.debug.normalizedParams.size, '3840x2160')
+  const h3 = getCreationModelSpec('newapi/yihong/minimax H3')!
+  assert.equal(h3.model, 'minimax H3')
+  assert.equal(h3.price, '¥0.05/秒')
+  for (const id of ['newapi/yihong/minimax H3', 'newapi/yihong/gemini-nano-banana-2.1', 'newapi/yihong/gpt-image-2-1K-4K']) {
+    assert.ok(listCreationPanelModels().some(item => item.id === id))
+  }
+})
+
+test('小易Grok1.5恢复面板显示、三档售价与6/10秒合同', () => {
+ const id = 'newapi/xiaoyi/grok-imagine-video-1.5'
+ const spec = getCreationModelSpec(id)!
+ assert.ok(listCreationModels().some(model => model.id === id))
+ assert.equal(spec.price, '480p ¥0.2/秒 · 720p ¥0.3/秒 · 1080p ¥0.4/秒')
+ for (const resolution of ['480p', '720p', '1080p']) {
+  const plan = buildCreationRunPlan({ modelId: id, params: { prompt: 'p', duration: 10, resolution, ratio: '9:16' } })
+  assert.equal(plan.endpoint, '/v1/videos')
+  assert.equal(plan.model, 'grok-imagine-video-1.5')
+  assert.equal(plan.debug.normalizedParams.resolution, resolution)
+ }
 })

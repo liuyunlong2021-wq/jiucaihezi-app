@@ -40,13 +40,23 @@ const IMAGE_MODEL_IDS = [
   'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9',
 ]
 
+const IMAGE_LIMITS = {
+  'ft-image-v1-211f28f47b0355abb1798f72eb65f22d': 10,
+  'ft-image-v1-186289ba9d3263010c69372f8939dd94': 10,
+  'ft-image-v1-eb47192eb578f340043911005a06fb6e': 10,
+  'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d': 10,
+  'ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82': 8,
+  'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9': 8,
+}
+const IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
+
 const MODEL_IDS = [...VIDEO_MODEL_IDS, ...IMAGE_MODEL_IDS]
 
 export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.2.0',
+  version: '0.2.1',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -266,6 +276,10 @@ export const protocols = {
       const size = String(firstValue(values, ['size']) || '')
       const ratio = String(firstValue(values, ['ratio', 'aspect_ratio', 'aspectRatio']) || ratioFromSize(size) || 'auto')
       const imageSize = normalizeImageSize(firstValue(values, ['imageSize', 'image_size', 'resolution', 'quality']))
+      if (!IMAGE_RATIOS.includes(ratio)) fail('Unsupported Fk image ratio: ' + ratio)
+      if (imageRefs.length + imageUrls.length > IMAGE_LIMITS[model]) fail('Reference images accepts at most ' + IMAGE_LIMITS[model])
+      if (imageRefs.length && imageUrls.length) fail('Files and image URLs cannot be combined')
+      if (values.mask !== undefined) fail('Fk does not support mask edits')
 
       return {
         kind: 'submit',
@@ -375,7 +389,8 @@ function imageUrlList(values) {
 
 function normalizeImageSize(value) {
   const text = String(value || '').trim().toUpperCase()
-  return ['1K', '2K', '4K'].includes(text) ? text : ''
+  if (text && !['1K', '2K', '4K'].includes(text)) fail('Unsupported Fk imageSize: ' + text)
+  return text
 }
 
 function ratioFromSize(size) {
@@ -400,24 +415,30 @@ function imageResultUrls(body) {
   return values.map(item => typeof item === 'string' ? item : item && item.url).filter(url => typeof url === 'string' && /^https:\/\//i.test(url))
 }
 
+function imageError(body) {
+  const error = snapshot(body.error)
+  return String(body.errorMessage || error.message || (typeof body.error === 'string' ? body.error : '') || body.message || 'Fk image request failed')
+}
+
 export function parseSubmitResponse(ctx, resp) {
   const body = snapshot(resp && resp.body)
   if (isImageModel(ctx)) {
+    if (body.success === false) fail(imageError(body))
     const status = String(body.status || '').toLowerCase()
     const urls = imageResultUrls(body)
-    const taskId = body.jobId || body.job_id || ctx.publicTaskId || 'image-immediate'
+    const taskId = body.jobId || body.job_id
+    if (!taskId) fail('Fk image generation did not return a jobId')
     if (status === 'failed') {
       return {
         taskId: String(taskId),
         taskData: body,
-        immediate: { status: 'FAILURE', reason: String(body.errorMessage || body.error || 'Fk image generation failed') },
+        immediate: { status: 'FAILURE', reason: imageError(body) },
       }
     }
-    if (status === 'success' && urls.length) {
+    if (status === 'success' && body.resultAvailable !== false && urls.length) {
       return { taskId: String(taskId), taskData: body, immediate: { status: 'SUCCESS' } }
     }
-    if (!body.jobId && !body.job_id) fail('Fk image generation did not return a jobId')
-    return { taskId: String(body.jobId || body.job_id), taskData: body }
+    return { taskId: String(taskId), taskData: body }
   }
   const data = snapshot(body.data)
   const taskId = body.id || body.job_id || body.task_id || data.id || data.job_id || data.task_id
@@ -444,16 +465,17 @@ export function buildQueryRequest(ctx) {
 export function parseTaskResult(ctx, body) {
   if (isImageModel(ctx)) {
     const value = snapshot(body)
+    if (value.success === false) fail(imageError(value))
     const status = String(value.status || '').toLowerCase()
     if (status === 'submitted') return { status: 'IN_PROGRESS', progress: '0%' }
     if (status === 'success') {
-      if (value.resultAvailable === false || !imageResultUrls(value).length) {
+      if (value.resultAvailable !== true || !imageResultUrls(value).length) {
         return { status: 'IN_PROGRESS', progress: '100%' }
       }
       return { status: 'SUCCESS', progress: '100%' }
     }
     if (status === 'failed') {
-      return { status: 'FAILURE', reason: String(value.errorMessage || value.error || 'Fk image generation failed') }
+      return { status: 'FAILURE', reason: imageError(value) }
     }
     return { status: 'UNKNOWN', reason: 'Unknown Fk image task status: ' + (status || '(empty)') }
   }

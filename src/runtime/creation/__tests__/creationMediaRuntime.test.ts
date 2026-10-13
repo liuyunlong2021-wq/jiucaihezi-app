@@ -1459,3 +1459,29 @@ test('视频轮询窗口按上游合同延长，图片/音频保持原窗口', (
   assert.match(runtime, /pollTask\([\s\S]{0,60}CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS/)
   assert.doesNotMatch(runtime, /pollTask\(pollUrl, 'video', onProgress, 600, 10000/)
 })
+
+test('易红 Gemini 图生图保留比例和画质，使用 multipart 引用文件', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/v1/images/edits')) {
+      assert.ok(init?.body instanceof FormData)
+      const body = init.body as FormData
+      assert.equal(body.get('model'), 'gemini-nano-banana-2.1')
+      assert.equal(body.get('ratio'), '9:16')
+      assert.equal(body.get('imageSize'), '4K')
+      assert.equal(body.get('response_format'), 'b64_json')
+      assert.ok(body.get('image[]') instanceof Blob)
+      return Response.json({ data: [{ url: 'https://cdn.example.test/yihong.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${String(input)}`)
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/yihong/gemini-nano-banana-2.1', params: { prompt: 'p', ratio: '9:16', resolution: '4k', images: ['data:image/png;base64,aGVsbG8='] } })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'https://cdn.example.test/yihong.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})

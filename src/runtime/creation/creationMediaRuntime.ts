@@ -554,6 +554,10 @@ async function executeDirectImageRequest(
         fields.ratio = asString(params.ratio || params.aspectRatio || '9:16')
         if (params.imageSize || params.resolution) fields.imageSize = asString(params.imageSize || params.resolution).toUpperCase()
       }
+      if (request.plan.modelId === 'newapi/yihong/gemini-nano-banana-2.1') {
+        fields.ratio = asString(params.ratio || params.aspectRatio || '1:1')
+        fields.imageSize = asString(params.imageSize || '1K')
+      }
       if (params.size) fields.size = params.size
       if (params.quality) fields.quality = params.quality
       data = await apiCallMultipart(request.endpoint, fields, request.signal)
@@ -584,6 +588,7 @@ async function executeDirectImageRequest(
           imageSize: params.imageSize || (params.resolution ? asString(params.resolution).toUpperCase() : undefined),
         }
       : {}),
+    ...(request.plan.modelId === 'newapi/yihong/gemini-nano-banana-2.1' ? { imageSize: params.imageSize || '1K' } : {}),
     image: params.image,
     response_format: params.responseFormat || 'url',
   })

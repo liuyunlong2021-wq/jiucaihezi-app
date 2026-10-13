@@ -37,3 +37,15 @@
 固定 rc.40 宿主只给入站请求设置 multipart Content-Type，上游新建请求漏头，导致图片编辑的模型与素材不能被解析。`patch_task_multipart.py` 把 writer 生成的 Content-Type 写入上游 descriptor；`prepare.sh` 已纳入该补丁。
 
 已有 OSS 镜像用 `repair-multipart.sh`：核对固定 SHA、镜像和 Compose 三文件，先构建 Linux builder 并执行真实 FK/小易插件的本地 HTTP 回归及素材/OSS 测试，再备份数据库并切换新镜像。检查失败自动回滚；手动回滚脚本保存在回执的备份目录。没有付费生成；真实生产图生图需部署后验收。
+
+## 易红同步图片响应补丁（2026-10-13，未部署）
+
+`patch_yihong_image_response.py` 只在固定 rc.40 源码中，将 yihong 的 `gemini-nano-banana-2.1` / `gpt-image-2-1K-4K` 图片端点提交响应与 taskData 上限提高到 32 MiB；其余请求与 plugin state 保持 1 MiB。支持幂等重放，未知源码/非固定 Git SHA 拒绝。先应用已有 multipart 补丁，再应用此补丁；原 multipart 补丁的源码保护会拒绝已有的额外图片补丁，因此不要事后重复运行旧 repair 脚本。
+
+本地 `python3 scripts/newapi-media/yihong_image_response_test.py` 验证补丁重放/错误源码与实际门控分支的 Go 编译和 1/2/32 MiB 边界。未编译完整宿主或部署服务器；这些测试不能替代宿主包、Docker 和真实图片/账单验收。具体步骤与价格见 `docs/wiki/运维/易红官方文档复查与全模型计费-2026-10-13.md`。
+
+### 用户实测 response exceeds size limit 后的一键修复
+
+`repair-yihong-images.sh` 复用现有 multipart 修复的基线检查、数据库备份、镜像切换与失败回滚。针对运行中的 `rc40-local-media-ossdirect-multipart-20261009` 构建新 `rc40-local-media-ossdirect-yihong-images-20261013`。新增真实 rc.40 jsplugin + yihong 的 2 MiB GPT/Gemini 回归，同时验证其他插件和视频路径仍保持原上限；测试包失败即停止，不切换生产。只使用合成响应，无付费调用。
+
+本地未连接成功生产 SSH，未编译/执行完整宿主包测试或部署；不要把脚本准备/隔离测试写成服务器已修复。操作见易红现行运维文档。

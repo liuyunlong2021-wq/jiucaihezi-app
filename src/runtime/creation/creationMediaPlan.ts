@@ -302,6 +302,9 @@ function normalizeOpenAiImageParams(
     prompt: params.prompt,
     size,
     quality: params.quality,
+    ...(spec.id === 'newapi/yihong/gemini-nano-banana-2.1'
+      ? { ratio: firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1', imageSize: String(params.resolution || '1k').toUpperCase() }
+      : {}),
     ...(spec.model.startsWith('ft-image-v1-')
       ? {
           ratio: firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']),
@@ -313,7 +316,7 @@ function normalizeOpenAiImageParams(
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
     // GPT Image 2 系列的中转 URL 可能在客户端不可达；直接带回图片字节供项目落盘。
-    response_format: spec.id.startsWith('gpt-image-2') ? 'b64_json' : 'url',
+    response_format: spec.id.startsWith('gpt-image-2') || spec.id.startsWith('newapi/yihong/') ? 'b64_json' : 'url',
   })
 }
 

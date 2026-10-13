@@ -109,6 +109,7 @@
       "references/exaggerated-animation-performance.md",
       "references/kungfu-duel.md",
       "references/maoshan-exorcism-action.md",
+      "references/shot-visibility.md",
       "references/single-scene-cinematic.md"
     ],
     "package": {
@@ -133,6 +134,10 @@
         },
         {
           "path": "references/maoshan-exorcism-action.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/shot-visibility.md",
           "kind": "reference"
         },
         {

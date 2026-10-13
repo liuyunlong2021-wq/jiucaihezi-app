@@ -218,7 +218,7 @@ const YUANLIU_VIDEO_CONTRACT_ISSUES = [
   '源流 API `/models` 返回的时长档位、画幅和分辨率允许值尚未核对；UI 暂不发送画幅/分辨率，由上游应用文档默认值（16:9、480p），模型级限制需通过授权目录核实。',
   '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数 5/6；NewAPI 模型/分组倍率及最终扣费尚未验收。',
 ]
-// 易红 API（https://yihongapi.com）：字段与价格取自用户提供的 2026-10-06 客户 API 接入文档。
+// 易红 API：旧型号沿用客户文档；2026-10-13 新型号取自 /api/pricing、/api/status，基础价 × 1.3 后取整。
 // 模型需在授权 Key 的 GET /v1/models 中可用；渠道映射保持空，NewAPI 模型名与上游名称逐字一致。
 const YIHONG_VIDEO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
 const YIHONG_VIDEO_MODELS: Array<{
@@ -232,11 +232,12 @@ const YIHONG_VIDEO_MODELS: Array<{
   maxVideos?: number
   maxAudios?: number
   ratios?: string[]
+  resolutions?: string[]
 }> = [
   {
     model: 'seedance2.5 super',
     label: 'Seedance 2.5 Super · 易红',
-    price: '¥0.45/秒',
+    price: '¥0.5/秒',
     duration: { min: 5, max: 30 },
     defaultDuration: 5,
     maxImages: 30,
@@ -271,10 +272,47 @@ const YIHONG_VIDEO_MODELS: Array<{
     maxImages: 9,
     ratios: ['16:9', '9:16'],
   },
+  {
+    model: 'seedance-2.5-omni', label: 'Seedance 2.5 Omni · 易红', price: '¥12/次',
+    duration: { min: 4, max: 29 }, defaultDuration: 29,
+    maxImages: 30, maxAudios: 10, ratios: ['16:9', '9:16', '4:3', '3:4', '1:1'], resolutions: ['720p'],
+  },
+  {
+    model: 'seedance-2.5-pro', label: 'Seedance 2.5 Pro · 易红', price: '¥10/次',
+    duration: { min: 5, max: 30 }, defaultDuration: 30,
+    maxImages: 30, maxVideos: 10, maxAudios: 10, ratios: ['16:9', '9:16'], resolutions: ['720p'],
+  },
+  {
+    model: 'seedance-2.0-mini-Muse', label: 'Seedance 2.0 Mini Muse · 易红', price: '¥2/次',
+    duration: { min: 5, max: 15 }, defaultDuration: 15,
+    maxImages: 9, ratios: ['16:9', '9:16'], resolutions: ['720p'],
+  },
+  {
+    model: 'Wan3.0 pro max', label: 'Wan 3.0 Pro Max · 易红', price: '¥5/次',
+    duration: { min: 2, max: 30 }, defaultDuration: 30,
+    maxImages: 10, maxVideos: 5, maxAudios: 5, ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'], resolutions: ['480p'],
+  },
+  {
+    model: 'wan3.0-video-prime', label: 'Wan 3.0 Prime · 易红', price: '480P ¥0.35/秒 · 720P ¥0.45/秒 · 1080P ¥0.5/秒',
+    duration: { min: 2, max: 30 }, defaultDuration: 5,
+    // 参考视频需 media[].duration_seconds；面板尚不提供时长元数据，通过 API 使用。
+    maxImages: 10, maxAudios: 5, ratios: ['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16'], resolutions: ['480P', '720P', '1080P'],
+  },
+  {
+    model: 'grok-imagine-video-1.5-preview', label: 'Grok Imagine Video 1.5 Preview · 易红', price: '¥1/次',
+    duration: { allowedValues: [15] }, defaultDuration: 15,
+    maxImages: 7, ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '2:3', '3:2'], resolutions: ['720p', '480p', '1080p'],
+  },
+  {
+    model: 'minimax H3', label: 'MiniMax H3 · 易红', price: '¥0.05/秒',
+    duration: { min: 4, max: 15 }, defaultDuration: 10,
+    // 视频参考需 attachments[].duration_seconds；面板暂仅开放图、音频。
+    maxImages: 9, maxAudios: 3, ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], resolutions: ['768p'],
+  },
 ]
 const YIHONG_VIDEO_CONTRACT_ISSUES = [
-  '按客户文档接入；用户账号授权目录 GET /v1/models、NewAPI 渠道路由与真实任务尚未核验。',
-  'Super/Cheap 文档只写明六种画幅且含 21:9，没有列全枚举；面板先给常见六档，具体值和默认画幅待核实。',
+  '旧型号沿用客户文档；新增六型号按 2026-10-13 易红公开 /api/pricing 接入。授权目录 GET /v1/models、NewAPI 渠道路由与真实任务尚未核验。',
+  'Super 的画幅已由 2026-10-13 官方文档确认；Cheap/Max/Muse 旧型号未列入新版文档，继续保留旧合同，当前可用性需授权目录核实。',
   '面板价格按用户指定值；Cheap 面板价为 ¥2/次（易红文档价 ¥1.10/次）。Task Usage 表达式沿用用户指定的 1 美元 = 1 元数值口径，模型/分组倍率及实扣待核对。',
   'Seedance 2.5 Super 文档要求素材为公网 HTTPS URL；App 上传链路和上游实际取图/音视频能力待真实任务验收。',
 ]
@@ -1513,6 +1551,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractStatus: 'partial',
     contractIssues: YIHONG_VIDEO_CONTRACT_ISSUES,
     ratios: 'ratios' in model ? model.ratios : undefined,
+    resolutions: model.resolutions,
     duration: model.duration,
     files: {
       images: {
@@ -1524,6 +1563,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...('maxAudios' in model ? { audios: { min: 0, max: model.maxAudios } } : {}),
     },
     fields: promptFields([
+      ...(model.resolutions ? [{ key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: model.resolutions[0], options: options(model.resolutions) }] : []),
       ...(model.ratios ? [{ key: 'ratio', label: '比例', kind: 'select' as const, defaultValue: model.ratios.includes('16:9') ? '16:9' : model.ratios[0], options: options(model.ratios) }] : []),
       model.duration.allowedValues
         ? { key: 'duration', label: '时长(秒)', kind: 'select' as const, defaultValue: model.defaultDuration, options: options(model.duration.allowedValues) }
@@ -1532,8 +1572,33 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...('maxVideos' in model ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...('maxAudios' in model ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ]),
-    notes: ['用户提供的易红 API 客户接入文档（2026-10-06）', '插件、授权模型目录、真实生成与计费尚待验收。'],
+    notes: ['易红客户文档（2026-10-06）及公开 /api/pricing（2026-10-13）', ...(model.model === 'wan3.0-video-prime' ? ['参考视频需通过 API media[] 携带 duration_seconds；面板仅开放图片与音频参考。'] : []), '插件、授权模型目录、真实生成与计费尚待验收。'],
   })),
+  // 易红同步图片由同一插件转换为 OpenAI 图片响应；生产需要配套的大图片响应宿主补丁。
+  directImage({
+    id: 'newapi/yihong/gemini-nano-banana-2.1', model: 'gemini-nano-banana-2.1',
+    label: 'Gemini Nano Banana 2.1 · 易红', price: '¥0.15/张', mode: 'text-to-image', pollKind: 'none',
+    contractStatus: 'partial', files: { images: { min: 0, max: 1 } },
+    ratios: ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9'], resolutions: ['1k', '2k', '4k'],
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1k', options: options(['1k', '2k', '4k']) },
+      { key: 'images', label: '参考图 (0-1张)', kind: 'images' },
+    ]),
+    contractIssues: ['NewAPI rc.40 需应用易红同步图片 32 MiB 响应补丁；上传插件前不能视为生产可用。', '官方未给出 Nano 参考图上限，本地保守支持 1 张；参考图走 multipart 文件。'],
+    notes: ['易红官方客户API接入文档(24).md（2026-10-13）', '真实图片生成和扣费尚未验收。'],
+  }),
+  directImage({
+    id: 'newapi/yihong/gpt-image-2-1K-4K', model: 'gpt-image-2-1K-4K',
+    label: 'GPT Image 2 1K–4K · 易红', price: '1K ¥0.4/张 · 2K/4K ¥0.08/张', mode: 'text-to-image', pollKind: 'none',
+    contractStatus: 'partial', files: { images: { min: 0, max: 10 } },
+    fields: promptFields([
+      { key: 'size', label: '尺寸', kind: 'select', defaultValue: '1024x1024', options: options(['1024x1024', '1536x864', '864x1536', '1536x1152', '1152x1536', '1536x1024', '1024x1536', '2048x2048', '2048x1152', '1152x2048', '2048x1536', '1536x2048', '3840x2160', '2160x3840']) },
+      { key: 'images', label: '参考图 (0-10张)', kind: 'images' },
+    ]),
+    contractIssues: ['NewAPI rc.40 需应用易红同步图片 32 MiB 响应补丁；真实生成、失败与扣费尚未验收。'],
+    notes: ['易红官方客户API接入文档(24).md（2026-10-13）'],
+  }),
   // ── FK-Seedance：7 个模型与 fk Task Plugin 的白名单一一对应 ──
   ...FK_SEEDANCE_MODELS.map(model => directVideo({
     id: `newapi/fk/${model.model}`,
@@ -1623,16 +1688,15 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directVideo({
     id: 'newapi/xiaoyi/grok-imagine-video-1.5',
-    hidden: true,
     model: 'grok-imagine-video-1.5',
     label: 'Grok Imagine Video 1.5 · 小易',
-    price: 0.25,
+    price: '480p ¥0.2/秒 · 720p ¥0.3/秒 · 1080p ¥0.4/秒',
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'text-to-video',
     endpoint: '/v1/videos',
     assetFlow: 'newapi-upload',
-    contractStatus: 'verified',
+    contractStatus: 'partial',
     ratios: ['16:9', '9:16'],
     resolutions: ['480p', '720p', '1080p'],
     duration: { allowedValues: [6, 10] },
@@ -1643,7 +1707,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 6, options: options([6, 10]) },
       { key: 'images', label: '参考图', kind: 'images' },
     ]),
-    notes: ['https://xiaoyiapi.xyz/docs/api/grok-videos/'],
+    notes: ['https://xiaoyiapi.xyz/docs/api/grok-videos/', 'xiaoyi-image 0.2.0插件与分档定价尚需上传配置；真实生成与账单待验收。'],
   }),
   directImage({
     id: 'gemini-3.1-flash-image-preview',

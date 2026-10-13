@@ -39,9 +39,9 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
     || !Number.isSafeInteger(artifactContract.minimumRootMarkers) || artifactContract.minimumRootMarkers < 1)
     throw new Error('共享 Wiki 归档合同无效')
   // 全部读回成功后再登记，避免坏包留下半套已注册状态。
-  const skills = await Promise.all(skillNames.map(async name => {
+  const loadSkill = async (name, signal) => {
     const base = join(directory, name)
-    const content = await readFile(join(base, 'SKILL.md'), 'utf8')
+    const content = await readFile(join(base, 'SKILL.md'), { encoding: 'utf8', signal })
     const frontmatter = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)?.[1] || ''
     const actualName = frontmatter.match(/^name:\s*([^\r\n]+)$/m)?.[1]?.trim()
     if (actualName !== name) throw new Error(`内置 Wiki／创作 Skill 身份不符：${name}`)
@@ -54,14 +54,26 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
       resourceBase: { kind: 'directory', path: base },
       invocation: { userInvocable: true, modelInvocable: name !== route?.router },
     }
-  }))
+  }
+  const skills = await Promise.all(skillNames.map(name => loadSkill(name)))
   if (rec.handle.agent !== agent) throw new Error(`${routeLabel} Agent 已替换`)
   let ready = false
   const plugin = agent.ctx.plugin({
     name: 'jiucaihezi-wiki-memory',
     inject: ['skills', 'tools', 'fs', 'sandboxPolicy'],
     apply(ctx) {
-      for (const skill of skills) ctx.skills.register(skill)
+      // 官方 provider 的目录可以缓存，get() 的正文按需读盘；不将旧正文固定在 Agent 生命周期内。
+      const providerName = 'jiucaihezi-bundled'
+      ctx.skills.registerProvider(() => ({
+        name: providerName,
+        list: async () => skills.map(({ content, ...skill }) => ({
+          ...skill, provider: providerName, rank: 600, locator: skill.name,
+        })),
+        get: async (candidate, options) => {
+          if (!skillNames.includes(candidate.locator)) return undefined
+          return { ...await loadSkill(candidate.locator, options.signal), provider: providerName }
+        },
+      }))
       const disposeTool = ctx.tools.register(createWikiArtifactTool(ctx, artifactContract))
       ctx.effect(() => () => disposeTool())
       ready = true
