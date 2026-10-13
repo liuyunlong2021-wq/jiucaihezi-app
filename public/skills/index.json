@@ -74,7 +74,7 @@
     "id": "jc-film-style",
     "name": "jc-film-style",
     "displayName": "jc-film-style",
-    "description": "从故事或剧本生成影视、MV、短片、广告和短视频的项目总纲内容，包括项目方向、制作路线、整体节奏意图、角色/场景/道具资产清单与空间关系。当用户提供故事或剧本、需要确定视觉方向、生产方式、声音路线或场景空间合同时使用。",
+    "description": "从故事、剧本或一句场景灵感确定影视项目的视觉与制作方向；灵感片段先给可选的影像表达，完整项目生成包含节奏、资产清单与空间关系的总纲。当用户需要确定视觉方向、生产方式、声音路线或场景空间合同时使用。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -100,7 +100,7 @@
     "id": "jc-gongchengjuben",
     "name": "jc-gongchengjuben",
     "displayName": "jc-gongchengjuben",
-    "description": "把文学剧本或分场文本改写成拍摄剧本（工程台本），负责导演设计：人物状态与潜台词、可见表演、景别运镜、空间连续、动作特效因果、声音转场及逐镜节奏。默认9:16竖屏、快节奏、一镜一个说话角色，保留原台词和动作节拍。当用户需要工程剧本、拍摄台本或逐镜导演安排时使用；不替代文学剧本创作或模型专用提示词格式转换。",
+    "description": "把文学剧本、分场文本或脑暴已选定的对白动作改写成拍摄剧本（工程台本），负责导演设计：人物状态与潜台词、可见表演、景别运镜、空间连续、动作特效因果、声音转场及逐镜节奏。默认9:16竖屏、快节奏、一镜一个说话角色，保留原台词和动作节拍。只有灵感却要工程脚本时先由 jc-manju-brainstorm 补全内容；不替代完整文学剧本创作或模型专用提示词格式转换。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -205,10 +205,46 @@
     }
   },
   {
+    "id": "jc-manju-brainstorm",
+    "name": "jc-manju-brainstorm",
+    "displayName": "jc-manju-brainstorm",
+    "description": "在漫剧制作中从一句灵感、画面、台词或招式出发，基于项目资料提供风格与资产候选，并对每个对白、动作和攻防节拍给出具体选项；支持逐句、整组、混搭与委托推荐，选定后形成专业工程剧本。用于没有完整剧本却要写工程脚本、卡在某个节拍或明确要求脑暴的任务；已有完整剧本只做工程转换时直接使用 jc-gongchengjuben，完整短剧与分集文学创作由短剧写作路线承接。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "references/action.md",
+      "references/assets-and-resume.md",
+      "references/dialogue.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "references/action.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/assets-and-resume.md",
+          "kind": "reference"
+        },
+        {
+          "path": "references/dialogue.md",
+          "kind": "reference"
+        }
+      ]
+    }
+  },
+  {
     "id": "jc-manju-zhizuo",
     "name": "jc-manju-zhizuo",
     "displayName": "jc-manju-zhizuo",
-    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在九个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。短剧方向和文学剧本使用独立的短剧写作入口。",
+    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；无完整剧本却要工程脚本或明确要求脑暴时进入逐节拍创作，明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。完整短剧方向和文学剧本使用独立的短剧写作入口。",
     "triggers": [],
     "commands": [],
     "files": [

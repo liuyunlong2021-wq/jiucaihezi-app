@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
+import { dirname, relative, resolve } from 'node:path'
 import { test } from 'node:test'
 import {
   MANJU_ROUTER,
@@ -11,7 +12,7 @@ import {
 import { NOVEL_SKILL, restoreNovelSelection } from '../novelProduction'
 
 test('the production bundle includes both video routes and excludes the portrait skill', () => {
-  assert.equal(MANJU_SKILLS.length, 10)
+  assert.equal(MANJU_SKILLS.length, 11)
   assert.ok(!MANJU_SKILLS.includes('jc-duanju'))
   assert.ok(MANJU_SKILLS.includes('h3-prompt-writing'))
   assert.ok(MANJU_SKILLS.includes('jc-seedance'))
@@ -19,6 +20,41 @@ test('the production bundle includes both video routes and excludes the portrait
   for (const name of MANJU_SKILLS) assert.ok(existsSync(`public/skills/${name}/SKILL.md`), name)
   const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
   for (const name of MANJU_SKILLS) assert.ok(index.some((entry: { name: string }) => entry.name === name), name)
+})
+
+test('brainstorm is discoverable and remains selected across production session restore', () => {
+  assert.ok(MANJU_SKILLS.includes('jc-manju-brainstorm'))
+  const selected = [MANJU_ROUTER, 'jc-manju-brainstorm', WIKI_MEMORY_SKILL]
+  assert.deepEqual(restoreManjuSelection(selected, { enabled: true }), selected)
+  assert.deepEqual(restoreManjuSelection(selected, undefined), selected)
+  assert.deepEqual(restoreManjuSelection(selected, { enabled: false }), [WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreManjuSelection(selected, { enabled: false, wikiMemoryWasSelected: false }), [])
+})
+
+test('brainstorm resources and delegated skills resolve inside the production package', () => {
+  const root = resolve('public/skills')
+  const index = JSON.parse(readFileSync(`${root}/index.json`, 'utf8'))
+  const skill = index.find((entry: { name: string }) => entry.name === 'jc-manju-brainstorm')
+  assert.ok(skill, 'brainstorm must be indexed')
+  const declared = new Set(skill.package.files.map((file: { path: string }) => file.path))
+  const pending = ['SKILL.md']
+  const visited = new Set<string>()
+  while (pending.length) {
+    const resource = pending.pop()!
+    if (visited.has(resource)) continue
+    visited.add(resource)
+    assert.ok(declared.has(resource), `unpackaged resource: ${resource}`)
+    const path = resolve(root, skill.id, resource)
+    const content = readFileSync(path, 'utf8')
+    for (const match of content.matchAll(/\]\(([^)]+\.md)\)/g)) {
+      const target = resolve(dirname(path), match[1]!)
+      assert.ok(existsSync(target), `missing reference: ${target}`)
+      const [name, ...parts] = relative(root, target).split(/[\\/]/)
+      assert.ok(MANJU_SKILLS.includes(name!) || name === WIKI_MEMORY_SKILL, `outside route: ${name}`)
+      if (name === skill.id) pending.push(parts.join('/'))
+    }
+  }
+  assert.deepEqual([...visited].sort(), [...declared].sort(), 'every brainstorm resource must be reachable')
 })
 
 test('production routes explicitly named skills and defaults directly to H3', () => {

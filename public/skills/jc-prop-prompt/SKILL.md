@@ -43,7 +43,7 @@ triggers:
 Render a [16:9 horizontal or 9:16 vertical] prop turnaround reference sheet according to the following specification. Every field describes the finished sheet.
 
 SHEET:
-layout: six orthographic views of the SAME object in one sheet, generous even spacing, identical object scale in every view, each view captioned below; for 16:9 use a clean 3×2 grid; for 9:16 use a clean 2×3 grid with front/back/left on the upper row and right/top/bottom on the lower row
+layout: six orthographic views of the SAME object in one sheet, generous even spacing, identical object scale in every view, each view captioned below; for 16:9 use a clean 3×2 grid with front/back/left on the upper row and right/top/bottom on the lower row; for 9:16 use a clean 2×3 grid with front/back on the top row, left/right on the middle row, and top/bottom on the bottom row
 aspect: [16:9 horizontal or 9:16 vertical], 4K
 
 MEDIUM:

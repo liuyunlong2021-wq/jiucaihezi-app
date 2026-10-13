@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { test } from 'node:test'
 import { createServer } from 'node:http'
 import { execFileSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { pinManjuSkills } from '../../src-tauri/resources/deepseek-harness/manju-skills.mjs'
 
 function fixture(t) {
@@ -69,6 +70,23 @@ test('missing packages and incompatible production skills fail before changing t
   rmSync(join(root, 'jc-seedance'), { recursive: true })
   await assert.rejects(pinManjuSkills(rec, ['jc-manju-zhizuo'], root), /jc-seedance/)
   assert.equal(registered.size, 0)
+})
+
+test('the actual production package registers brainstorm with its resource base and releases on exit', async t => {
+  const { rec, registered, registeredTools } = fixture(t)
+  const directory = fileURLToPath(new URL('../../public/skills/', import.meta.url))
+  const route = JSON.parse(readFileSync(join(directory, 'manju-route.json'), 'utf8'))
+  const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo', 'jc-manju-brainstorm', 'wiki-memory'], directory)
+  assert.deepEqual([...registered.keys()], ['wiki-memory', ...route.skills])
+  const brainstorm = registered.get('jc-manju-brainstorm')
+  assert.equal(brainstorm.source, 'bundled')
+  assert.equal(brainstorm.invocation.modelInvocable, true)
+  assert.equal(brainstorm.resourceBase.path, join(directory, 'jc-manju-brainstorm'))
+  for (const resource of ['dialogue.md', 'action.md', 'assets-and-resume.md'])
+    assert.ok(existsSync(join(brainstorm.resourceBase.path, 'references', resource)))
+  await dispose()
+  assert.equal(registered.size, 0)
+  assert.equal(registeredTools.size, 0)
 })
 
 test('ordinary skill selection does not pin production packages', async t => {
