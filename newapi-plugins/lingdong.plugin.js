@@ -17,8 +17,6 @@
 //    实测（2026-10-02）两条都是别名、都能通，这里跟官方插件，宿主协议也对得上。
 //
 // 有意未接（都不是"忘了"）：
-// - 参考视频 / 参考音频：灵动支持 `videos[]` / `audios[]`，但面板目前只有图片链路，
-//   收不到这两类素材，声明了也没人发；
 // - 本地素材上传：灵动有 `POST /v1/media/uploads`，但面板走网关 `/api/creations/uploads`
 //   换成公开直链，插件不碰字节（插件本来也没有网络与文件系统权限）；
 // - `prompt_extend` / `generate_audio`：官方插件 1.1.0 会发，但公开文档的字段表里没有，
@@ -27,7 +25,7 @@ export const meta = {
   apiVersion: 1,
   key: 'lingdong',
   name: '灵动 API',
-  version: '0.2.0',
+  version: '0.3.0',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Lingdong API video (direct vendor endpoint)',
@@ -37,7 +35,7 @@ export const meta = {
   // 渠道模型列表也必须逐字一致（可用性服务拿它匹配渠道）。
   // 2026-10-02 用户换线：去掉按次的两条（`cvk` / `满血-480p`），换成 `SD-2.5-特价`（定死 30 秒）
   // 与 `sd2.5-a`（按秒）。换完必须**重传插件并同步改渠道模型列表**：渠道上留着插件没收的名字会开始报 unsupported。
-  models: ['SD-2.5-特价', 'sd2.5-a', 'cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080'],
+  models: ['SD-2.5-特价', 'sd2.5-a', 'cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080', 'sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010'],
   fetchMode: 'per_task',
   protocols: ['openai_video'],
   // type 61 渠道把 Base URL 留空时用这个默认值；灵动是公网 HTTPS，不需要隧道
@@ -124,10 +122,10 @@ function firstText(source, keys) {
 
 // 参考图只认公开 HTTP(S) 直链：灵动自己去抓，data URL 与本地路径送过去只会挂任务。
 // 张数上限交给上游校验（超出它会明确报错），插件重复一遍只会两处漂移。
-function imageUrls(source) {
+function imageUrls(source, kind = 'image') {
   // 面板多图发 `images`、单图发 `imageUrl`（历史坑：只认 `images` 会静默丢参考图），
   // 复数 `imageUrls` 与 `image` 是其它线路的别名，一起收；空数组不算给了素材。
-  const candidates = [source.images, source.imageUrls, source.imageUrl, source.image]
+  const candidates = [source[kind + 's'], source[kind + 'Urls'], source[kind + 'Url'], source[kind]]
   let raw
   for (const candidate of candidates) {
     if (candidate === undefined || candidate === null) continue
@@ -201,6 +199,10 @@ export function buildSubmitRequest(ctx) {
   }
   const images = imageUrls(source)
   if (images.length) body.images = images
+  for (const kind of ['video', 'audio']) {
+    const urls = imageUrls(source, kind)
+    if (urls.length) body[kind + 's'] = urls
+  }
   for (const field of SUBMIT_FIELDS) {
     const text = firstText(source, field === 'ratio' ? ['ratio', 'aspect_ratio', 'aspectRatio'] : [field])
     if (text) body[field] = text

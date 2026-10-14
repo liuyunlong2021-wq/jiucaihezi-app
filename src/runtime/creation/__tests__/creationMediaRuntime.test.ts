@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 import { test } from 'node:test'
 
 import {
@@ -13,6 +14,78 @@ import {
 } from '../creationMediaRuntime'
 import { getCreationModelSpec } from '../creationModelRegistry'
 import { buildCurrentCreationParams, cpState, switchModel, switchTask } from '@/composables/useCreation'
+
+test('易红 Grok HTTP 请求按无图、单首帧、多参考图互斥提交并通过插件解码', { concurrency: false }, async () => {
+  const plugin = await import(pathToFileURL(`${process.cwd()}/newapi-plugins/yihong.plugin.js`).href)
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let body: Record<string, unknown> = {}
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    body = JSON.parse(String(init?.body))
+    return Response.json({ video_url: 'https://cdn.example.test/grok.mp4' })
+  }
+  try {
+    const model = 'grok-imagine-video-1.5-preview'
+    for (const count of [2, 0, 1, 7]) {
+      const images = Array.from({ length: count }, (_, index) => `https://cdn.example.test/image-${index}.png`)
+      const expected = {
+        model, prompt: 'p', aspect_ratio: '9:16', resolution: '720p',
+        ...(count === 1 ? { image_url: images[0] } : count > 1 ? { reference_images: images } : {}),
+      }
+      const plan = buildCreationRunPlan({ modelId: `newapi/yihong/${model}`, params: { prompt: 'p', duration: 15, resolution: '720p', ratio: '9:16', images } })
+      await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+      const decoded = plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: body } })
+      assert.deepEqual(body, expected)
+      assert.ok(plugin.meta.usageSchema.resolution.enum.includes(decoded.requestBody.resolution))
+      const upstream = plugin.buildSubmitRequest({ model, baseUrl: plugin.meta.baseUrl, requestBody: decoded.requestBody })
+      assert.deepEqual(upstream.body, expected)
+    }
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('易红 Max 的面板运镜选择进入实际 HTTP 请求体', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    const body = JSON.parse(String(init?.body))
+    assert.equal(body.model, 'seedance-2.5-max')
+    assert.equal(body.duration, 30)
+    assert.equal(body.resolution, '720p')
+    assert.equal(body.camera_movement, 'fixed')
+    return Response.json({ video_url: 'https://cdn.example.test/max.mp4' })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/yihong/seedance-2.5-max', params: { prompt: 'p', duration: 30, resolution: '720p', camera_movement: 'fixed' } })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://cdn.example.test/max.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('FK 面板中文模型名进入实际 NewAPI 请求体', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    assert.equal(JSON.parse(String(init?.body)).model, 'Seedance 2.5 满血 480-720p')
+    return Response.json({ video_url: 'https://cdn.example.test/fk.mp4' })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/fk/ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', params: { prompt: 'p', duration: 15, resolution: '720p', ratio: '9:16' } })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://cdn.example.test/fk.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
 
 async function mockDirectOssUpload(
   input: RequestInfo | URL,

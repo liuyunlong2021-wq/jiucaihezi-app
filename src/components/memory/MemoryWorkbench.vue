@@ -5281,7 +5281,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .memory-conversation-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
 .memory-conversation-action:hover { color: var(--olive); }
-.new-conversation-button { display: grid; width: 34px; flex: 0 0 34px; place-items: center; padding: 0; border: 0; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; }
+.new-conversation-button { display: grid; width: 34px; flex: 0 0 34px; place-items: center; padding: 0; border: 0; background: var(--surface-alt); color: var(--ink2); cursor: pointer; font: inherit; }
 .new-conversation-button:hover:not(:disabled) { background: var(--surface-alt); color: var(--olive); }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
 .memory-model-picker { position: relative; flex: none; min-width: 0; max-width: min(260px, 28vw); }
@@ -5296,7 +5296,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-model-empty { margin: 8px; color: var(--ink3); font-size: 12px; }
 .icon-button, .send-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; }
 .icon-button:hover { color: var(--olive); border-color: var(--olive); }
-.memory-topbar .icon-button, .memory-topbar .new-conversation-button { border: 0; background: transparent; color: var(--ink2); }
+.memory-topbar .icon-button { border: 0; background: transparent; color: var(--ink2); }
+.memory-topbar .new-conversation-button { border: 0; background: var(--surface-alt); color: var(--ink2); }
 .memory-topbar .icon-button:hover, .memory-topbar .new-conversation-button:hover:not(:disabled) { background: var(--surface-alt); color: var(--olive); }
 .memory-messages { min-height: 0; overflow-y: scroll; padding: 24px max(20px, calc((100% - 820px) / 2)); background: var(--jc-surface); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
 .memory-messages::-webkit-scrollbar { width: 18px; }

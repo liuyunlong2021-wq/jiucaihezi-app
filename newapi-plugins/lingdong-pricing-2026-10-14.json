@@ -1,0 +1,13 @@
+{
+  "plugin": "lingdong",
+  "version": "0.3.0",
+  "pricingRule": "新增型号：ceil(上游人民币成本 * 1.3)，现有售价保持不变",
+  "coefficientConvention": "沿用现有后台的人民币售价与Task Usage系数同数值口径；实扣待验证",
+  "models": [
+    { "model": "sd-2.5-720-v3", "upstreamCostCny": 15, "salePriceCny": 20, "expression": "tier(\"base\", u(\"calls\") * 20)" },
+    { "model": "SD-2.5-特价-2", "upstreamCostCny": 2.5, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" },
+    { "model": "sd2.5-3033", "upstreamCostCny": 2.5, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" },
+    { "model": "sd2.5-101010", "upstreamCostCny": 2.5, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" },
+    { "model": "sd2.5-301010", "upstreamCostCny": 3, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" }
+  ]
+}

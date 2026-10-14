@@ -1059,10 +1059,21 @@ function buildDirectVideoBody(
     }
     return body
   }
+  if (request.plan.modelId === 'newapi/yihong/grok-imagine-video-1.5-preview') {
+    return compact({
+      model: request.plan.model,
+      prompt: params.prompt,
+      aspect_ratio: params.aspectRatio,
+      resolution: params.resolution,
+      image_url: uploadedImages.length === 1 ? uploadedImages[0] : undefined,
+      reference_images: uploadedImages.length > 1 ? uploadedImages : undefined,
+    })
+  }
   return compact({
     model: request.plan.model,
     prompt: params.prompt,
     client_request_id: request.plan.modelId.startsWith('newapi/yuanliu/') ? crypto.randomUUID() : undefined,
+    camera_movement: request.plan.modelId === 'newapi/yihong/seedance-2.5-max' ? request.plan.debug.normalizedParams.camera_movement : undefined,
     ratio: params.aspectRatio,
     aspect_ratio: params.aspectRatio,
     resolution: params.resolution,

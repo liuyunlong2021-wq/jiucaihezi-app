@@ -112,6 +112,9 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
   validatePlanInputs(spec, params)
   const warnings = buildWarnings(spec)
   const referenceImageCount = countReferences(params, ['images', 'image', 'imageUrl', 'imageUrls'])
+  if (spec.id === 'newapi/yihong/grok-imagine-video-1.5-preview' && String(params.resolution).toLowerCase() === '1080p' && referenceImageCount > 1) {
+    throw new Error('1080p 仅支持 1 张首帧图，请只保留一张参考图或改用 720p')
+  }
   const referenceVideoCount = countReferences(params, ['videos', 'video', 'videoUrl', 'videoUrls'])
   const referenceAudioCount = countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls'])
   const effective = resolveEffectiveContract(spec, referenceImageCount)

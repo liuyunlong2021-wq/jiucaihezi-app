@@ -18,6 +18,66 @@ function submit(model, fields = {}) {
   })
 }
 
+test('Max 仅透传官方 auto/fixed 运镜，固定 30 秒并保留图片参考', () => {
+  const model = 'seedance-2.5-max'
+  for (const camera_movement of ['auto', 'fixed']) {
+    const request = submit(model, { camera_movement, images: ['https://a/i.png'] })
+    assert.deepEqual(request.body, { model, prompt: '镜头推进', duration: 30, camera_movement, image_urls: ['https://a/i.png'] })
+  }
+  assert.equal(submit(model).body.camera_movement, undefined)
+  assert.equal(submit('seedance2.5 cheap', { camera_movement: 'fixed' }).body.camera_movement, undefined)
+  assert.throws(() => submit(model, { camera_movement: 'handheld' }), /camera_movement/)
+})
+
+test('NewAPI 解码请求的分辨率通过 usage enum，发上游仍使用官方大小写', () => {
+  const cases = [
+    ...models.map(([model, seconds, resolution]) => [model, resolution, resolution]),
+    ['wan3.0-video-prime', '720p', '720P'],
+    ['wan3.0-video-prime', '1080p', '1080P'],
+    ['grok-imagine-video-1.5-preview', '480p', '480p'],
+    ['grok-imagine-video-1.5-preview', '1080p', '1080p'],
+    ['minimax H3', '768p', '768p'],
+    ...['seedance2.5 super', 'seedance2.5 cheap', 'seedance-2.5-max', 'seedance-2.5-Muse']
+      .map(model => [model, '1080p', undefined]),
+  ]
+  for (const [model, resolution, upstreamResolution] of cases) {
+    for (const input of [resolution, resolution.toUpperCase(), undefined]) {
+      const source = Object.freeze({ model, prompt: 'p', resolution: input, ratio: '9:16', image: 'https://a/i.png' })
+      const intent = plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: source } })
+      // rc.40 在构建上游请求前按 usageSchema 校验解码后的请求体。
+      assert.ok(plugin.meta.usageSchema.resolution.enum.includes(intent.requestBody.resolution), model)
+      const usage = plugin.extractUsage({ model, requestBody: intent.requestBody })
+      assert.equal(intent.requestBody.resolution, usage.resolution)
+      const request = plugin.buildSubmitRequest({ model, baseUrl: plugin.meta.baseUrl, requestBody: intent.requestBody })
+      assert.equal(request.body.resolution, input === undefined ? submit(model).body.resolution : upstreamResolution)
+      assert.equal(intent.action, 'image_to_video')
+      if (model === 'Wan3.0 pro max') {
+        assert.equal(request.body.seconds, 30)
+        assert.equal(request.body.ratio, '9:16')
+        assert.deepEqual(request.body.image_urls, ['https://a/i.png'])
+      }
+    }
+  }
+  const model = 'Wan3.0 pro max'
+  assert.throws(() => plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: { model, prompt: 'p', resolution: '720p' } } }), /resolution/)
+})
+
+test('图片解码也规范化 resolution，GPT 按 size 确定实际计费档位', () => {
+  for (const [model, fields, expected] of [
+    ['gemini-nano-banana-2.1', { resolution: '4k' }, '4K'],
+    ['gpt-image-2-1K-4K', { resolution: '1k', size: '3840x2160' }, '4K'],
+  ]) {
+    const source = Object.freeze({ model, prompt: 'p', ...fields })
+    const intent = plugin.protocols.openai_image.decodeRequest({ model, body: { kind: 'json', value: source } })
+    assert.ok(plugin.meta.usageSchema.resolution.enum.includes(intent.requestBody.resolution))
+    assert.equal(intent.requestBody.resolution, expected)
+    assert.equal(plugin.extractUsage({ requestBody: intent.requestBody }).resolution, expected)
+    const request = plugin.buildSubmitRequest({ model, baseUrl: plugin.meta.baseUrl, requestBody: intent.requestBody })
+    if (model.startsWith('gemini')) assert.equal(request.body.generationConfig.imageConfig.imageSize, expected)
+    else assert.equal(request.body.size, fields.size)
+  }
+})
+
 test('新增六个型号：白名单、默认时长、分辨率、面板与取整售价一致', () => {
   const registry = readFileSync(new URL('../../src/runtime/creation/creationModelRegistry.ts', import.meta.url), 'utf8')
   const capabilities = readFileSync(new URL('../../src/data/mediaModelCapabilities.ts', import.meta.url), 'utf8')
@@ -149,6 +209,7 @@ test('同步图片：GPT JSON 编辑与分辨率计费，拒绝错尺寸、超�
 test('Gemini multipart 参考图转原生 inline_data，比例画质保留，返回 OpenAI 图片形状', () => {
   const model = 'gemini-nano-banana-2.1'
   const decoded = plugin.protocols.openai_image.decodeRequest({ model, operation: 'edit', body: { kind: 'multipart', fields: { prompt: ['p'], resolution: ['4k'], ratio: ['9:16'] }, files: [{ ref: 'request_file:image', mimeType: 'image/png' }] } })
+  assert.ok(plugin.meta.usageSchema.resolution.enum.includes(decoded.requestBody.resolution))
   const req = plugin.buildSubmitRequest({ model, baseUrl: plugin.meta.baseUrl, requestBody: decoded.requestBody })
   assert.equal(req.url, 'https://yihongapi.com/v1beta/models/gemini-nano-banana-2.1:generateContent')
   assert.deepEqual(req.body.generationConfig.imageConfig, { imageSize: '4K', aspectRatio: '9:16' })

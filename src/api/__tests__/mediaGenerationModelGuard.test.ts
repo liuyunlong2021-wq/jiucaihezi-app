@@ -25,6 +25,33 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+test('HTTP 视频错误展示被多层 JSON 和校验前缀包裹的真实原因', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let responseText = ''
+  globalThis.fetch = async () => new Response(responseText, { status: 400 })
+  try {
+    const reason = '1080p 仅支持 1 张首帧图，请只上传一张 input_reference 或改用 720p'
+    let payload = JSON.stringify({ error: { code: 'invalid_request', message: reason } })
+    payload = JSON.stringify({ code: 'invalid_request', message: `请求未通过校验：${payload}` })
+    for (let i = 0; i < 2; i++) payload = JSON.stringify({ code: 'fail_to_fetch_task', message: payload })
+    responseText = payload
+    await assert.rejects(() => apiCall('/v1/videos', { model: 'grok-imagine-video-1.5-preview' }), error => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.message, `HTTP 400: invalid_request: ${reason}`)
+      return true
+    })
+    await assert.rejects(() => apiCallMultipart('/v1/videos', { model: 'grok-imagine-video-1.5-preview' }), /HTTP 400: invalid_request: 1080p 仅支持 1 张首帧图/)
+    responseText = 'ordinary upstream error'
+    await assert.rejects(() => apiCall('/v1/videos', {}), /HTTP 400: ordinary upstream error/)
+    responseText = JSON.stringify({ error: { message: 'invalid JSON {broken}' } })
+    await assert.rejects(() => apiCall('/v1/videos', {}), /HTTP 400: invalid JSON \{broken\}/)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('media task polling stops before another request when cancelled', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

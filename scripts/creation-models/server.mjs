@@ -16,6 +16,7 @@ const PSQL_USER = process.env.NEWAPI_PSQL_USER || 'newapi'
 const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
+  ...['cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080', 'SD-2.5-特价', 'sd2.5-a', 'sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010'].map(model => ({ id: `newapi/lingdong/${model}`, aliases: [model] })),
   { id: 'gpt-image-2.5-1k', aliases: ['gpt-image-2.5-1k'] },
   { id: 'gpt-image-2.5-flare-1k', aliases: ['gpt-image-2.5-flare-1k'] },
   { id: 'gpt-image-2.5-sunburst-1k', aliases: ['gpt-image-2.5-sunburst-1k'] },
@@ -37,13 +38,12 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'newapi/boluo/minimax_h3_zm_u24', aliases: ['minimax_h3_zm_u24'] },
   { id: 'newapi/shanhai/shanhai-dola-seedance-v2-5-30-9-0-7', aliases: ['山seedance2.5'] },
   { id: 'newapi/shanhai/oc-model-r5cfh8', aliases: ['海seedance2.5'] },
-  { id: 'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563', aliases: ['ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563'] },
-  { id: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', aliases: ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70'] },
-  { id: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d', aliases: ['ft-video-v1-bdf45387433ac0a9042ebab3fae0299d'] },
-  { id: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f', aliases: ['ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f'] },
-  { id: 'ft-video-v1-7393b0529b788d532d031dcac5e820cb', aliases: ['ft-video-v1-7393b0529b788d532d031dcac5e820cb'] },
-  { id: 'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4', aliases: ['ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4'] },
-  { id: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98', aliases: ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98'] },
+  { id: '特价渠道 Seedance 2.5 满血 720p', aliases: ['特价渠道 Seedance 2.5 满血 720p'] },
+  { id: '特价渠道 Seedance 2.5 满血 720p（可过真人）', aliases: ['特价渠道 Seedance 2.5 满血 720p（可过真人）'] },
+  { id: '长期特惠 Seedance 2.5 满血 720p', aliases: ['长期特惠 Seedance 2.5 满血 720p'] },
+  { id: 'Seedance 2.5 满血 480-720p', aliases: ['Seedance 2.5 满血 480-720p'] },
+  { id: 'XN2-Seedance 2.5 满血 480-720p', aliases: ['XN2-Seedance 2.5 满血 480-720p'] },
+  { id: '官方渠道-Seedance 2.5 满血 720p', aliases: ['官方渠道-Seedance 2.5 满血 720p'] },
   { id: 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746', aliases: ['ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'] },
   { id: 'newapi/zx/mj_fast_imagine', aliases: ['mj_fast_imagine'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },

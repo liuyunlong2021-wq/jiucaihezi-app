@@ -8,11 +8,35 @@ import {
   cpState,
   currentRunPlan,
   genericModelFields,
+  hasDuration,
+  durationRange,
+  resolutionOptions,
+  setModelFieldValue,
   setAspect,
   setResolution,
   switchModel,
   switchTask,
 } from '../useCreation'
+
+test('易红 Max 显示固定时长、720p 和运镜，切换后不沿用其他模型参数', () => {
+  switchTask('video')
+  switchModel('newapi/yihong/seedance-2.5-max')
+  clearFiles()
+  cpState.prompt = '公交车内的公益短片'
+  assert.equal(hasDuration.value, true)
+  assert.deepEqual(durationRange.value, { min: 30, max: 30, step: 1, fixed: true })
+  assert.deepEqual(resolutionOptions.value, ['720p'])
+  const camera = genericModelFields.value.find(field => field.key === 'camera_movement')
+  assert.ok(camera)
+  assert.deepEqual(camera.options?.map(option => option.value), ['auto', 'fixed'])
+  setModelFieldValue(camera, 'fixed')
+  const params = buildCurrentCreationParams()
+  assert.equal(params.duration, 30)
+  assert.equal(params.resolution, '720p')
+  assert.equal(params.camera_movement, 'fixed')
+  switchModel('newapi/yihong/seedance2.5 cheap')
+  assert.equal(buildCurrentCreationParams().camera_movement, undefined)
+})
 
 function makeFile(name: string, type: string): File {
   return new File(['fixture'], name, { type })

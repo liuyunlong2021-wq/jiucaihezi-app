@@ -700,7 +700,7 @@ export const durationRange = computed(() => {
   return { min: m.dur[0], max: m.dur[m.dur.length - 1], step: 1, fixed: false }
 })
 
-export const hasDuration = computed(() => !!durationRange.value && !durationRange.value.fixed)
+export const hasDuration = computed(() => !!durationRange.value)
 export const durationOptions = computed(() => currentModel.value?.dur || [])
 
 // 是否是图片模型（gateway-image 或 runninghub-image）

@@ -5,6 +5,33 @@ import { test } from 'node:test'
 
 const root = process.cwd()
 
+test('创作面板历史入口显示为任务记录文字按钮', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /<button class="cp-toolbar-link" type="button" @click="openTaskHistory">任务记录<\/button>/)
+  assert.doesNotMatch(source, /cp-toolbar-icon[^>]*@click="openTaskHistory"/)
+  assert.match(source, /\.cp-toolbar-link \{[\s\S]*?background: var\(--surface-alt\);/)
+  assert.match(source, /class="cp-toolbar-link"[\s\S]*提示词参考/)
+})
+
+test('固定时长作为只读参数显示，仍保留可调时长控件', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /v-if="durationRange.fixed"[^>]*>\{\{ durationRange.min \}\}s（固定）/)
+  assert.match(source, /v-else-if="durationOptions.length <= 3"/)
+})
+
+test('FK 面板隐藏参考上限与常驻收费说明，仅保留视频参考 Token 提示与模型状态', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /v-if="fkBillingHint" class="cp-fk-model-info"/)
+  assert.doesNotMatch(source, /fkReferenceLimits|参考上限：/)
+  assert.match(source, /\{\{ fkBillingHint \}\}/)
+  assert.match(source, /selectedReferenceAssets\.value\.some\(asset => asset\.kind === 'video'\)/)
+  assert.match(source, /cpState\.files\.some\(file => file\.type\.startsWith\('video\/'\)\)/)
+  assert.match(source, /按 Token 计费/)
+  assert.doesNotMatch(source, /显示价格为平台收费价/)
+  assert.doesNotMatch(source, /价格为上游参考价/)
+  assert.match(source, /cp-model-status/)
+})
+
 test('video capture dialog is wired into the creation panel and the memory workbench', () => {
   const dialog = readFileSync(join(root, 'src/components/media/FrameCaptureDialog.vue'), 'utf8')
   assert.match(dialog, /截此帧 → 存入图片并加入画布/)

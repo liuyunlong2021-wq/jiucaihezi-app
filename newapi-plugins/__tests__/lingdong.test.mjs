@@ -36,17 +36,28 @@ function ctx(extra = {}) {
   }
 }
 
-test('meta 对齐面板注册与渠道：5 个模型名逐字一致，无任何本地服务依赖', () => {
+test('meta 对齐面板注册与渠道：10 个模型名逐字一致，无任何本地服务依赖', () => {
   assert.equal(plugin.meta.apiVersion, 1)
   assert.equal(plugin.meta.key, 'lingdong')
-  assert.equal(plugin.meta.version, '0.2.0')
+  assert.equal(plugin.meta.version, '0.3.0')
   assert.equal(plugin.meta.fetchMode, 'per_task')
   assert.deepEqual(plugin.meta.protocols, ['openai_video'])
   // 这条线直连厂商，baseUrl 是公网域名 —— 没有适配器、没有隧道
   assert.equal(plugin.meta.baseUrl, BASE)
   // 面板发什么名字，这里就必须收什么名字；渠道上多出来的名字会开始报 unsupported
-  assert.deepEqual(plugin.meta.models, [TEJIA, SDA, S480, S720, S1080])
+  assert.deepEqual(plugin.meta.models, [TEJIA, SDA, S480, S720, S1080, 'sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010'])
   assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'seconds'])
+})
+
+test('新增型号保留图片、视频与音频参考，按次用量不随时长增加', () => {
+  for (const model of ['sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010']) {
+    const body = { model, prompt: '参考运动', duration: 4, images: ['https://x.test/a.png'], videos: ['https://x.test/v.mp4'], audios: ['https://x.test/a.mp3'] }
+    const intent = decode(body, model)
+    const request = plugin.buildSubmitRequest(ctx({ model, upstreamModel: model, requestBody: intent.requestBody }))
+    assert.deepEqual(request.body.videos, body.videos)
+    assert.deepEqual(request.body.audios, body.audios)
+    assert.equal(plugin.extractUsage({ requestBody: body }).calls, 1)
+  }
 })
 
 test('★ 每个 usageExample 都要带齐所有声明的用量 key（宿主上传校验，少了直接拒收）', () => {
@@ -58,7 +69,7 @@ test('★ 每个 usageExample 都要带齐所有声明的用量 key（宿主上�
   }
 })
 
-test('decodeRequest：只认 5 个模型、prompt 必填、按有无参考图定 action', () => {
+test('decodeRequest：只认登记模型、prompt 必填、按有无参考图定 action', () => {
   assert.equal(decode({ prompt: '海边' }, TEJIA).action, 'text_to_video')
   assert.equal(
     decode({ prompt: '海边', images: ['https://api.jiucaihezi.studio/media/creation/a.png'] }).action,
@@ -80,6 +91,15 @@ test('decodeRequest：只认 5 个模型、prompt 必填、按有无参考图定
     () => plugin.protocols.openai_video.decodeRequest({ model: TEJIA, body: { kind: 'json', value: [] } }),
     /must be an object/,
   )
+})
+
+test('新增型号售价、按次表达式与 App 展示一致，成本加30%向上取整', () => {
+  const prices = JSON.parse(readFileSync(new URL('../lingdong-pricing-2026-10-14.json', import.meta.url), 'utf8'))
+  for (const row of prices.models) {
+    assert.ok(plugin.meta.models.includes(row.model))
+    assert.equal(row.salePriceCny, Math.ceil(row.upstreamCostCny * 1.3))
+    assert.equal(row.expression, `tier("base", u("calls") * ${row.salePriceCny})`)
+  }
 })
 
 test('★ 画幅 / 分辨率 / 时长原样送到上游，且只发文档字段（面板残留字段一律丢掉）', () => {

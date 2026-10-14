@@ -31,6 +31,14 @@ const RH_TARGET_MODELS = [
   'rh-suno-lyrics',
 ]
 
+test('FK 中文请求仅匹配登记了中文公开名的渠道，真实 ID 不替代公开名路由', () => {
+  const name = '长期特惠 Seedance 2.5 满血 720p'
+  for (const model of [name, 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d']) {
+    const result = buildCreationModelAvailability([{ id: 1, name: 'FK', status: 1, models: [model] }])
+    assert.equal(result.find(item => item.id === name)?.status, model === name ? 'enabled' : 'disabled')
+  }
+})
+
 const REMOVED_RH_MODELS = [
   'rh-kling-v30-pro',
   'rh-veo-31-fast',

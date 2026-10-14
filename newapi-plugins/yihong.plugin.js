@@ -81,7 +81,7 @@ export const meta = {
   apiVersion: 1,
   key: 'yihong',
   name: '易红 API',
-  version: '0.1.4',
+  version: '0.1.5',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Yihong API Seedance, Wan, MiniMax and image generation',
@@ -340,6 +340,7 @@ function decodeImage(ctx) {
   body.model = ctx.model || body.model
   const normalized = imageRequest(body)
   if (ctx.operation === 'edit' && !normalized.images.length) fail('Image edit requires references')
+  body.resolution = normalized.resolution
   return { kind: 'submit', model: body.model, action: normalized.images.length ? 'image_to_image' : 'text_to_image', requestBody: body }
 }
 
@@ -398,7 +399,8 @@ export const protocols = {
         kind: 'submit',
         model: ctx.model,
         action: attachments.length || media.length || inputs.images.length || inputs.videos.length || inputs.audios.length ? 'image_to_video' : 'text_to_video',
-        requestBody: ctx.body.value,
+        // NewAPI 在 buildSubmitRequest 前按 usageSchema 校验请求体，须使用计费枚举。
+        requestBody: { ...ctx.body.value, resolution: validated.resolution },
       }
     },
     render(ctx, task) {
@@ -430,6 +432,10 @@ export function buildSubmitRequest(ctx) {
     model,
     prompt: promptOf(source),
     [config.durationField]: seconds,
+  }
+  if (model === 'seedance-2.5-max' && source.camera_movement !== undefined) {
+    if (!['auto', 'fixed'].includes(source.camera_movement)) fail('camera_movement must be auto or fixed')
+    body.camera_movement = source.camera_movement
   }
   if (config.grok) delete body.seconds
   if (attachments.length) body.attachments = attachments

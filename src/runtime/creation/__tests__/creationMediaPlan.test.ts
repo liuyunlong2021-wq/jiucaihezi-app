@@ -19,6 +19,15 @@ import {
 } from '../creationModelRegistry'
 import type { CreationModelSpec } from '../creationMediaTypes'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
+import { getMediaModel } from '@/data/mediaModelCapabilities'
+
+test('易红 Grok 1080p 只允许单首帧，720p 保留七张参考图', () => {
+  const modelId = 'newapi/yihong/grok-imagine-video-1.5-preview'
+  const images = ['https://example.test/1.png', 'https://example.test/2.png']
+  assert.throws(() => buildCreationRunPlan({ modelId, params: { prompt: 'p', resolution: '1080p', images } }), /1080p.*1 张首帧.*720p/)
+  assert.doesNotThrow(() => buildCreationRunPlan({ modelId, params: { prompt: 'p', resolution: '1080p', images: images.slice(0, 1) } }))
+  assert.doesNotThrow(() => buildCreationRunPlan({ modelId, params: { prompt: 'p', resolution: '720p', images: Array.from({ length: 7 }, (_, index) => `https://example.test/${index}.png`) } }))
+})
 
 test('image size matrix preserves ratio and upstream constraints', () => {
   const ratios = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
@@ -1141,7 +1150,7 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
   )
 })
 
-test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /api/pricing 钉住', () => {
+test('灵动渠道新增五型号，保留旧售价并更新参考能力', () => {
   const perCall = buildCreationRunPlan({
     modelId: 'newapi/lingdong/SD-2.5-特价',
     params: { prompt: '海边日落，镜头缓推', ratio: '16:9', duration: 30 },
@@ -1164,7 +1173,7 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
   })
   assert.equal(perSecond.mode, 'image-to-video')
 
-  // `SD-2.5-特价` 的死档就是 30 秒（上游 supported_duration 是 values:[30]），参考图 9 张
+  // 实时目录已将 SD-2.5-特价扩展为 30 图，固定 30 秒。
   assert.throws(() => buildCreationRunPlan({
     modelId: 'newapi/lingdong/SD-2.5-特价',
     params: { prompt: '换一个时长', duration: 15 },
@@ -1173,9 +1182,9 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
     modelId: 'newapi/lingdong/SD-2.5-特价',
     params: {
       prompt: '超出参考图上限',
-      images: Array.from({ length: 10 }, (_, index) => `https://example.com/${index}.jpg`),
+      images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`),
     },
-  }), /参考图最多支持 9 个/)
+  }), /参考图最多支持 30 个/)
   // `sd2.5-a` 是 4–30 秒 / 30 张图
   assert.throws(() => buildCreationRunPlan({
     modelId: 'newapi/lingdong/sd2.5-a',
@@ -1197,9 +1206,26 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
       ['newapi/lingdong/sd2.5-a', 'sd2.5-a', 'Sd 2.5-a 720P', '0.5/秒', 'video'],
       ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', 'Sd 2.5 720P', '0.75/秒', 'video'],
       ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', 'Sd 2.5 1080P', '1.5/秒', 'video'],
+      ['newapi/lingdong/sd-2.5-720-v3', 'sd-2.5-720-v3', 'Sd 2.5 720P V3', '20/次', 'video'],
+      ['newapi/lingdong/SD-2.5-特价-2', 'SD-2.5-特价-2', 'Sd 2.5 特价 2', '4/次', 'video'],
+      ['newapi/lingdong/sd2.5-3033', 'sd2.5-3033', 'Sd 2.5 30图3视频3音频', '4/次', 'video'],
+      ['newapi/lingdong/sd2.5-101010', 'sd2.5-101010', 'Sd 2.5 10图10视频10音频', '4/次', 'video'],
+      ['newapi/lingdong/sd2.5-301010', 'sd2.5-301010', 'Sd 2.5 30图10视频10音频', '4/次', 'video'],
     ],
   )
-  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!), '满血seedance2.5')
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!), '灵动seedace2.5')
+  const mixed = buildCreationRunPlan({
+    modelId: 'newapi/lingdong/sd2.5-3033',
+    params: { prompt: '运动参考', duration: 4, videos: ['https://example.com/v.mp4'], audios: ['https://example.com/a.mp3'] },
+  })
+  assert.deepEqual(mixed.debug.normalizedParams.videos, ['https://example.com/v.mp4'])
+  assert.deepEqual(mixed.debug.normalizedParams.audios, ['https://example.com/a.mp3'])
+  assert.throws(() => buildCreationRunPlan({ modelId: mixed.modelId, params: { prompt: '超限', videos: Array.from({ length: 4 }, (_, i) => `https://example.com/${i}.mp4`) } }), /视频最多支持 3 个/)
+  const prices = JSON.parse(readFileSync('newapi-plugins/lingdong-pricing-2026-10-14.json', 'utf8'))
+  for (const row of prices.models) {
+    assert.equal(getCreationModelSpec(`newapi/lingdong/${row.model}`)!.price, `${row.salePriceCny}/次`)
+    assert.equal(getMediaModel(row.model)!.task, 'video')
+  }
   // `SD-2.5-特价` 上游没声明分辨率参数（supported_resolutions 是空数组），面板就不该有这一项
   assert.equal(
     getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!.fields.some(field => field.key === 'resolution'),
@@ -1215,6 +1241,46 @@ test('灵动渠道登记 5 条线路：按次与按秒两套计价，能力按 /
   )
 })
 
+test('FK Seedance 2.5 只显示官方六型号，旧型号保留历史注册，参数与上游一致', () => {
+  const expected = [
+    ['ft-video-v1-89e87205d3be4eb2cf3fda249569e693', [30], 9, 0, 0, '¥3/次'],
+    ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [15, 30], 9, 0, 0, '¥5/次'],
+    ['ft-video-v1-bdf45387433ac0a9042ebab3fae0299d', [30], 30, 10, 10, '¥3/次'],
+    ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '¥0.5/秒'],
+    ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '¥0.5/秒'],
+    ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1.1/秒 · 视频参考 ¥41/百万Token'],
+  ] as const
+  const active = listCreationModels({ task: 'video' }).filter(model => creationModelFamily(model) === 'FK · Seedance 2.5')
+  assert.deepEqual(active.map(model => model.id.replace('newapi/fk/', '')).sort(), expected.map(([id]) => id).sort())
+  const plugin = readFileSync('newapi-plugins/fk.plugin.js', 'utf8')
+  const availability = readFileSync('scripts/creation-models/server.mjs', 'utf8')
+  for (const [id, duration, images, videos, audios, price] of expected) {
+    const spec = getCreationModelSpec(`newapi/fk/${id}`)!
+    assert.equal(spec.files?.images?.max, images)
+    assert.equal(spec.files?.videos?.max || 0, videos)
+    assert.equal(spec.files?.audios?.max || 0, audios)
+    assert.deepEqual(spec.capabilities.duration?.allowedValues || [spec.capabilities.duration?.min, spec.capabilities.duration?.max], [...duration])
+    assert.equal(spec.endpoint, '/v1/videos')
+    const executable = getMediaModel(id)!
+    assert.ok(executable && executable.enabled !== false, `${id} must pass the media API execution gate`)
+    assert.equal(executable.label, spec.label)
+    assert.equal(spec.model, spec.label)
+    assert.equal(executable.model, spec.label)
+    assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', duration: duration[0], resolution: spec.capabilities.resolutions?.[0], ratio: '16:9' } }).model, spec.label)
+    assert.deepEqual(executable.fields.find(field => field.key === 'ratio')?.options, spec.fields.find(field => field.key === 'ratio')?.options)
+    assert.deepEqual(executable.fields.find(field => field.key === 'duration')?.options, spec.fields.find(field => field.key === 'duration')?.options)
+    assert.equal(spec.price, price)
+    assert.doesNotMatch(displayModelPrice(spec), /上游参考/)
+    assert.ok(plugin.includes(`'${id}':`))
+    assert.ok(availability.includes(spec.label))
+  }
+  for (const id of ['fe82aee0b8ce5ee1d790a56291dc5563', '69ef4c70291248a25c8198cd1c7c9c1f', '7393b0529b788d532d031dcac5e820cb', '9f4e77de6c05f3c360c1c0b9938a44a4']) {
+    assert.equal(getCreationModelSpec(`newapi/fk/ft-video-v1-${id}`)?.hidden, true)
+    assert.equal(getMediaModel(`ft-video-v1-${id}`)?.enabled, false)
+  }
+  assert.ok(listCreationModels({ task: 'video' }).some(model => model.model === 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'))
+})
+
 test('FK 分组排在视频最前，灵动组内首个模型仍为 Sd 2.5 480P', () => {
   // 用户已将 FK 置顶；同时保留灵动组内既有排序。
   const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
@@ -1225,7 +1291,7 @@ test('FK 分组排在视频最前，灵动组内首个模型仍为 Sd 2.5 480P',
     .split('\n')
     .filter(line => !line.trim().startsWith('//'))
     .join('\n')
-  assert.match(videoOrder, /\[\s*'FK-Seedance', '满血seedance2\.5'/)
+  assert.match(videoOrder, /\[\s*'FK · Seedance 2\.5', '灵动seedace2\.5'/)
 
   const lingdong = listCreationModels({ task: 'video' })
     .filter(model => model.id.startsWith('newapi/lingdong/'))

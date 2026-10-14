@@ -536,6 +536,33 @@ function createTimeoutSignal(timeoutSec = 300, externalSignal?: AbortSignal): { 
   }
 }
 
+function mediaHttpErrorDetail(text: string): string {
+  let message = text
+  let code = ''
+  // 上游多层 JSON 包装应先解开，再截取展示文字。
+  for (let depth = 0; depth < 8; depth++) {
+    let payload: any
+    try {
+      payload = JSON.parse(message)
+    } catch {
+      const start = message.indexOf('{')
+      const end = message.lastIndexOf('}')
+      if (start < 0 || end <= start) break
+      try { payload = JSON.parse(message.slice(start, end + 1)) } catch { break }
+    }
+    if (typeof payload === 'string') {
+      message = payload
+      continue
+    }
+    const error = payload?.error ?? payload
+    const next = typeof error === 'string' ? error : error?.message
+    if (typeof next !== 'string' || !next.trim()) break
+    code = typeof error?.code === 'string' ? error.code : ''
+    message = next
+  }
+  return `${code ? `${code}: ` : ''}${message}`.slice(0, 200)
+}
+
 export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal, apiKeyOverride?: string): Promise<any> {
   throwIfAborted(externalSignal)
   if (apiKeyOverride && method !== 'GET') throw new Error('任务密钥仅用于查询')
@@ -569,10 +596,10 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
       if (text.includes('model_not_found') || text.includes('无可用渠道')) {
         throw new Error(`该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试：${text.slice(0, 200)}`)
       }
-      throw new Error(text.trim() ? `HTTP 503: ${text.slice(0, 200)}` : '服务暂时不可用 (503)，请稍后再试')
+      throw new Error(text.trim() ? `HTTP 503: ${mediaHttpErrorDetail(text)}` : '服务暂时不可用 (503)，请稍后再试')
     }
     const text = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+    throw new Error(`HTTP ${res.status}: ${mediaHttpErrorDetail(text)}`)
   }
   const json = await res.json()
   console.log('[apiCall] response data keys:', Object.keys(json), 'data[0]:', json?.data?.[0] ? JSON.stringify(json.data[0]).slice(0,200) : 'no data')
@@ -598,7 +625,7 @@ export async function apiCallBinary(path: string, body: unknown, model?: string,
     clear()
   }
   throwIfAborted(externalSignal)
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${mediaHttpErrorDetail(await res.text().catch(() => ''))}`)
   const mime = (res.headers.get('content-type') || 'audio/mpeg').split(';')[0]
   const bytes = new Uint8Array(await res.arrayBuffer())
   let binary = ''
@@ -709,7 +736,7 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
     if (res.status === 503 && !text.trim()) {
       throw new Error('服务暂时不可用 (503)，请稍后再试')
     }
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+    throw new Error(`HTTP ${res.status}: ${mediaHttpErrorDetail(text)}`)
   }
   const json = await res.json()
   checkUpstreamError(json)

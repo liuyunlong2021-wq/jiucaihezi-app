@@ -961,6 +961,7 @@ test('memory topbar uses a grouped model popover and an adaptive new conversatio
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
   assert.match(workbench, /class="new-conversation-button"[\s\S]*title="新建对话"[\s\S]*aria-label="新建对话"/)
+  assert.match(workbench, /\.new-conversation-button \{[\s\S]*?background: var\(--surface-alt\);/)
   assert.match(
     workbench,
     /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/,

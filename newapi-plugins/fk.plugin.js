@@ -2,33 +2,48 @@
 //
 // 图片使用 openai_image 协议并由 NewAPI 主机轮询；视频使用 openai_video 协议。
 // 上游 Key 由 NewAPI 渠道配置提供，源码不保存密钥。Base URL: https://ai.fanke2026.xyz
-// 上游端点：POST /v1/videos、GET /v1/videos/{id}、GET /v1/videos/{id}/content。
-// 成片通过宿主 content 代理返回，避免把上游临时下载地址暴露给客户端。
-//
-// 用户面板显示名按模型顺序：
-// 特价渠道-Seedance2.5满血720p(30图)；特价渠道Seedance2.5满血720p(可过真人)；
-// 长期特惠Seedance2.5满血720p；XZ-Seedance 2.5 720p(9图参考)；
-// XN1-Seedance 2.5满血 480-720p；XN2-Seedance 2.5满血 480-720p；
-// 官方渠道-Seedance2.5满血720p；特价渠道 MiniMax H3-768p。
-// XZ Seedance 2.0「933全参」不在本插件模型白名单中。
-// 计费表达式在 NewAPI 定价页设置（按用户给出的人民币/秒费率）：
-// 固定价模板：tier("base", u("seconds") * 费率)
-// XN 480p 模板：tier("base", u("seconds_480p") * 0.5)
-// XN1 720p 模板：tier("base", u("seconds_720p") * 1)
-// XN2 720p 模板：tier("base", u("seconds_720p") * 0.8)
-// 固定价模型依次用 0.1、0.4、0.2、0.1、1、0.08；XN1/XN2 两档分别为 0.5/1、0.5/0.8。
-// 插件只提取用量事实，不设价格；XN1/XN2 的具体模型 ID 应按上游模型表在定价页确认。
+// Seedance 2.5 使用 /api/open/v1/video/generate 与 /video/status?jobId=。
+// 签名结果由宿主 content 代理免鉴权回收。旧型号仅保留历史查询；H3 维持兼容接口。
+// 事实源：用户 2026-10-14 提供的 FK 官方视频文档。价格在 NewAPI Task Usage 中配置。
+// 按次型号使用 calls；按秒型号使用 seconds/seconds_480p/seconds_720p。
+// 官方型号有参考视频时完成用量使用 video_reference_tokens，需同步更新定价表达式。
 
-const VIDEO_MODEL_IDS = [
+const LEGACY_VIDEO_IDS = [
   'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563',
-  'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
-  'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
   'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f',
   'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
   'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
-  'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
-  'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746',
 ]
+const H3_MODEL = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
+const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4']
+const VIDEO_SPECS = {
+  'ft-video-v1-89e87205d3be4eb2cf3fda249569e693': { durations: [30], refs: [9, 0, 0], unit: 'request' },
+  'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70': { durations: [15, 30], refs: [9, 0, 0], unit: 'request' },
+  'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d': { durations: [30], refs: [30, 10, 10], wide: true, promptMax: 6000, unit: 'request' },
+  'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848': { min: 4, max: 30, refs: [30, 10, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
+  'ft-video-v1-756e0feb4b3e1f893726314109762123': { min: 15, max: 30, refs: [30, 0, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
+  'ft-video-v1-451adae35b0c4a3d275c2c46394abc98': { min: 4, max: 30, refs: [30, 10, 10], wide: true, tokenWithVideo: true },
+}
+const VIDEO_MODEL_IDS = [...Object.keys(VIDEO_SPECS), H3_MODEL]
+const VIDEO_MODEL_ALIASES = {
+  '特价渠道 Seedance 2.5 满血 720p': 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
+  '特价渠道 Seedance 2.5 满血 720p（可过真人）': 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
+  '长期特惠 Seedance 2.5 满血 720p': 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
+  'Seedance 2.5 满血 480-720p': 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848',
+  'XN2-Seedance 2.5 满血 480-720p': 'ft-video-v1-756e0feb4b3e1f893726314109762123',
+  '官方渠道-Seedance 2.5 满血 720p': 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
+}
+
+function videoModel(value) {
+  const model = String(value || '')
+  return VIDEO_MODEL_ALIASES[model] || model
+}
+
+function compatibilityVideo(ctx) {
+  const model = videoModel(ctx.upstreamModel || ctx.model || snapshot(ctx.requestBody).model)
+  const data = snapshot(ctx.data)
+  return model === H3_MODEL || LEGACY_VIDEO_IDS.includes(model) || !data.jobId && Boolean(data.id || data.job_id || data.task_id)
+}
 
 // 来自账号可用模型目录；这些模型走 /api/open/v1/image/generate。
 const IMAGE_MODEL_IDS = [
@@ -50,13 +65,13 @@ const IMAGE_LIMITS = {
 }
 const IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
 
-const MODEL_IDS = [...VIDEO_MODEL_IDS, ...IMAGE_MODEL_IDS]
+const MODEL_IDS = [...VIDEO_MODEL_IDS, ...Object.keys(VIDEO_MODEL_ALIASES), ...IMAGE_MODEL_IDS]
 
 export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.2.1',
+  version: '0.3.2',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -68,6 +83,9 @@ export const meta = {
   protocols: ['openai_video', 'openai_image'],
   baseUrl: 'https://ai.fanke2026.xyz',
   usageSchema: {
+    calls: { type: 'number', unit: 'count', description: { en: 'Billable video requests', zh: '按次视频计费次数' } },
+    video_reference_tokens: { type: 'number', unit: 'token', description: { en: 'Settled official video reference tokens', zh: '官方视频参考实际结算 Token' } },
+    upstream_cost_yuan: { type: 'number', unit: 'count', unitLabel: { en: 'CNY', zh: '元' }, description: { en: 'Settled upstream cost in CNY', zh: '上游实际结算人民币，仅作账单核对' } },
     seconds: {
       type: 'number',
       unit: 'second',
@@ -96,7 +114,10 @@ export const meta = {
     { label: 'XN 720p 视频 5 秒', facts: { seconds: 0, seconds_480p: 0, seconds_720p: 5, image_count: 0 } },
     { label: '图片 1 张', facts: { seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 1 } },
     { label: '图片 4 张', facts: { seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 4 } },
-  ],
+  ].map(example => ({ ...example, facts: { calls: 0, video_reference_tokens: 0, upstream_cost_yuan: 0, ...example.facts } })).concat([
+    { label: '按次视频', facts: { calls: 1, video_reference_tokens: 0, upstream_cost_yuan: 0, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
+    { label: '官方视频参考结算', facts: { calls: 0, video_reference_tokens: 1000000, upstream_cost_yuan: 31.5, seconds: 0, seconds_480p: 0, seconds_720p: 0, image_count: 0 } },
+  ]),
 }
 
 const HOST_STATUS = {
@@ -144,36 +165,46 @@ function mediaUrls(body, keys) {
   const list = Array.isArray(value) ? value : [value]
   return list.map(function (item) {
     const url = item && typeof item === 'object' ? item.url : item
-    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) fail('reference media must be a URL')
+    if (typeof url !== 'string' || !/^https:\/\//i.test(url)) fail('reference media must be a public HTTPS URL')
     return url
   })
 }
 
-function normalizeRequest(body) {
+function normalizeRequest(body, fileRefs = []) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) fail('request body must be an object')
-  const model = String(body.model || '')
+  const model = videoModel(body.model)
   if (!VIDEO_MODEL_IDS.includes(model)) fail('Unsupported video model: ' + (model || '(missing)'))
   if (!String(body.prompt || '').trim()) fail('prompt is required')
 
-  const payload = Object.assign({}, body)
-  payload.model = model
-  if (payload.ratio === undefined && payload.aspect_ratio !== undefined) payload.ratio = payload.aspect_ratio
-  if (payload.duration === undefined && payload.seconds !== undefined) payload.duration = payload.seconds
+  const spec = VIDEO_SPECS[model]
+  const payload = {
+    model,
+    prompt: String(body.prompt),
+    ratio: String(body.ratio || body.aspect_ratio || '16:9'),
+    duration: Number(body.duration === undefined ? body.seconds : body.duration),
+    resolution: String(body.resolution || (spec ? (spec.resolutions || ['720p'])[0] : '768p')),
+  }
 
   const images = mediaUrls(body, ['imageUrls', 'images', 'image_urls', 'imageUrl', 'image_url', 'image'])
-  const videos = mediaUrls(body, ['videoUrls', 'video_urls', 'video_url', 'videoUrl', 'video'])
-  const audios = mediaUrls(body, ['audioUrls', 'audio_urls', 'audio_url', 'audioUrl', 'audio'])
-  ;['imageUrls', 'images', 'image_urls', 'imageUrl', 'image_url', 'image',
-    'videoUrls', 'video_urls', 'video_url', 'videoUrl', 'video',
-    'audioUrls', 'audio_urls', 'audio_url', 'audioUrl', 'audio']
-    .forEach(function (key) { delete payload[key] })
+  const videos = mediaUrls(body, ['videoUrls', 'videos', 'video_urls', 'video_url', 'videoUrl', 'video'])
+  const audios = mediaUrls(body, ['audioUrls', 'audios', 'audio_urls', 'audio_url', 'audioUrl', 'audio'])
   if (images.length) payload.imageUrls = images
   if (videos.length) payload.videoUrls = videos
   if (audios.length) payload.audioUrls = audios
-
-  ;['aspect_ratio', 'seconds', 'images', 'image_urls', 'imageUrl', 'image_url', 'image',
-    'video_urls', 'video_url', 'videoUrl', 'video', 'audio_urls', 'audio_url', 'audioUrl', 'audio']
-    .forEach(function (key) { delete payload[key] })
+  if (spec) {
+    const ratios = spec.wide ? [...VIDEO_RATIOS, '21:9'] : VIDEO_RATIOS
+    if (!ratios.includes(payload.ratio)) fail('Unsupported Fk video ratio: ' + payload.ratio)
+    if (!(spec.resolutions || ['720p']).includes(payload.resolution)) fail('Unsupported Fk video resolution: ' + payload.resolution)
+    if (!Number.isInteger(payload.duration) || (spec.durations ? !spec.durations.includes(payload.duration) : payload.duration < spec.min || payload.duration > spec.max)) fail('Unsupported Fk video duration: ' + payload.duration)
+    if (spec.promptMax && payload.prompt.length > spec.promptMax) fail('prompt accepts at most ' + spec.promptMax + ' characters')
+    ;['images', 'videos', 'audios'].forEach((kind, index) => {
+      const urls = [images, videos, audios][index]
+      const files = fileRefs.filter(file => file.name === kind)
+      if (urls.length + files.length > spec.refs[index]) fail(kind + ' accepts at most ' + spec.refs[index])
+    })
+  }
+  if (fileRefs.length && (images.length || videos.length || audios.length)) fail('Files and media URLs cannot be combined')
+  if (fileRefs.length) payload.fileRefs = fileRefs
   return payload
 }
 
@@ -189,10 +220,17 @@ function usageFacts(ctx, duration, body) {
   const seconds = Number(duration)
   const validSeconds = Number.isFinite(seconds) && seconds > 0 ? seconds : normalizedDuration(request)
   const resolution = String(result.resolution || request.resolution || '').toLowerCase()
+  const spec = compatibilityVideo(ctx) ? undefined : VIDEO_SPECS[videoModel(ctx.upstreamModel || ctx.model || request.model)]
+  const billing = snapshot(result.billing)
+  const token = billing.mode === 'token' && billing.settled === true
+  const billableSeconds = (spec && spec.unit === 'request') || token ? 0 : validSeconds
   return {
-    seconds: validSeconds,
-    seconds_480p: resolution.includes('480') ? validSeconds : 0,
-    seconds_720p: resolution.includes('720') ? validSeconds : 0,
+    calls: spec && spec.unit === 'request' ? 1 : 0,
+    video_reference_tokens: token ? Number(snapshot(billing.usage).total_tokens) : 0,
+    upstream_cost_yuan: Number.isFinite(Number(billing.charged_cost_cents)) ? Number(billing.charged_cost_cents) / 100 : 0,
+    seconds: billableSeconds,
+    seconds_480p: resolution.includes('480') ? billableSeconds : 0,
+    seconds_720p: resolution.includes('720') ? billableSeconds : 0,
     image_count: 0,
   }
 }
@@ -224,12 +262,20 @@ function imageApiBase(baseUrl) {
 export const protocols = {
   openai_video: {
     decodeRequest: function (ctx) {
-      if (!ctx.body || ctx.body.kind !== 'json') fail('JSON body required')
-      const payload = normalizeRequest(ctx.body.value)
+      if (!ctx.body || !['json', 'multipart'].includes(ctx.body.kind)) fail('JSON or multipart video request required')
+      const values = ctx.body.kind === 'json' ? snapshot(ctx.body.value) : formValues(ctx.body.fields)
+      const files = ctx.body.kind === 'multipart' && Array.isArray(ctx.body.files) ? ctx.body.files : []
+      const fileRefs = files.map(file => {
+        const name = file.name || file.fieldName
+        if (!['images', 'videos', 'audios'].includes(name) || !file.ref) fail('Unsupported video file field: ' + name)
+        return { name, ref: file.ref, filename: file.filename }
+      })
+      const payload = normalizeRequest({ ...values, model: ctx.upstreamModel || ctx.model || values.model }, fileRefs)
+      if (compatibilityVideo(ctx) && fileRefs.length) fail('H3 requires public HTTPS media URLs')
       const hasReference = Boolean(
         (payload.imageUrls && payload.imageUrls.length) ||
         (payload.videoUrls && payload.videoUrls.length) ||
-        (payload.audioUrls && payload.audioUrls.length),
+        (payload.audioUrls && payload.audioUrls.length) || fileRefs.length,
       )
       return {
         kind: 'submit',
@@ -334,15 +380,21 @@ export function buildSubmitRequest(ctx) {
       action: ctx.action,
     }
   }
-  body.model = ctx.upstreamModel || ctx.model
+  body.model = videoModel(ctx.upstreamModel || ctx.model || body.model)
+  const headers = { Accept: 'application/json', Authorization: 'Bearer ' + ctx.apiKey }
+  const url = compatibilityVideo(ctx) ? String(ctx.baseUrl).replace(/\/+$/, '') + '/v1/videos' : imageApiBase(ctx.baseUrl) + '/video/generate'
+  if (!compatibilityVideo(ctx)) headers['X-Public-Model-Ids'] = '1'
+  const fileRefs = body.fileRefs || []
+  delete body.fileRefs
+  if (fileRefs.length) {
+    const parts = Object.keys(body).map(name => ({ name, value: String(body[name]) }))
+    fileRefs.forEach(file => parts.push({ name: file.name, fileRef: String(file.ref), filename: String(file.filename || 'reference') }))
+    return { url, method: 'POST', headers, bodyType: 'multipart', parts, action: ctx.action }
+  }
   return {
-    url: ctx.baseUrl + '/v1/videos',
+    url,
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-      Authorization: 'Bearer ' + ctx.apiKey,
-    },
+    headers: Object.assign({ 'Content-Type': 'application/json' }, headers),
     body,
     action: ctx.action,
   }
@@ -417,7 +469,7 @@ function imageResultUrls(body) {
 
 function imageError(body) {
   const error = snapshot(body.error)
-  return String(body.errorMessage || error.message || (typeof body.error === 'string' ? body.error : '') || body.message || 'Fk image request failed')
+  return String(body.errorMessage || error.message || (typeof body.error === 'string' ? body.error : '') || body.message || 'Fk request failed')
 }
 
 export function parseSubmitResponse(ctx, resp) {
@@ -440,6 +492,11 @@ export function parseSubmitResponse(ctx, resp) {
     }
     return { taskId: String(taskId), taskData: body }
   }
+  if (!compatibilityVideo(ctx)) {
+    if (body.success === false) fail(imageError(body))
+    if (!body.jobId) fail('Fk video generation did not return a jobId')
+    return { taskId: String(body.jobId), taskData: body }
+  }
   const data = snapshot(body.data)
   const taskId = body.id || body.job_id || body.task_id || data.id || data.job_id || data.task_id
   if (!taskId) fail('Fk did not return a task ID')
@@ -451,6 +508,13 @@ export function buildQueryRequest(ctx) {
     const separator = ctx.baseUrl.includes('?') ? '&' : '?'
     return {
       url: imageApiBase(ctx.baseUrl) + '/image/status' + separator + 'jobId=' + encodeURIComponent(ctx.taskId) + '&_t=' + Date.now(),
+      method: 'GET',
+      headers: { Accept: 'application/json', Authorization: 'Bearer ' + ctx.apiKey, 'X-Public-Model-Ids': '1' },
+    }
+  }
+  if (!compatibilityVideo(ctx)) {
+    return {
+      url: imageApiBase(ctx.baseUrl) + '/video/status?jobId=' + encodeURIComponent(ctx.taskId) + '&_t=' + Date.now(),
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: 'Bearer ' + ctx.apiKey, 'X-Public-Model-Ids': '1' },
     }
@@ -481,15 +545,37 @@ export function parseTaskResult(ctx, body) {
   }
   const data = snapshot(body && body.data)
   const result = Object.keys(data).length ? data : snapshot(body)
+  if (result.success === false) fail(imageError(result))
   const raw = String(result.status || result.state || '').toLowerCase()
   const status = UPSTREAM_STATUS[raw]
   if (!status) return { status: 'UNKNOWN' }
   const out = { status }
+  if (status === 'SUCCESS' && !compatibilityVideo(ctx)) {
+    const billing = snapshot(result.billing)
+    const spec = VIDEO_SPECS[videoModel(ctx.upstreamModel || ctx.model || snapshot(ctx.requestBody).model)]
+    const request = snapshot(ctx.requestBody)
+    const tokenExpected = spec && spec.tokenWithVideo && ((request.videoUrls || []).length || (request.fileRefs || []).some(file => file.name === 'videos'))
+    if (!videoResultUrl(result) || (billing.mode === 'token' || tokenExpected) && !settledTokenBilling(billing)) {
+      return { status: 'IN_PROGRESS', progress: '100%' }
+    }
+    out.url = videoResultUrl(result)
+  }
   if (status === 'FAILURE') {
     const error = snapshot(result.error)
     out.reason = String(error.message || result.errorMessage || result.fail_reason || result.message || ('Fk task ' + raw))
   }
   return out
+}
+
+function videoResultUrl(body) {
+  const url = String(body.videoUrl || body.contentUrl || body.video_url || body.url || '')
+  return /^https:\/\//i.test(url) ? url : ''
+}
+
+function settledTokenBilling(billing) {
+  const tokens = snapshot(billing.usage).total_tokens
+  const cents = billing.charged_cost_cents
+  return billing.mode === 'token' && billing.settled === true && typeof tokens === 'number' && Number.isInteger(tokens) && tokens >= 0 && typeof cents === 'number' && Number.isFinite(cents) && cents >= 0
 }
 
 export function listArtifacts(task) {
@@ -498,6 +584,10 @@ export function listArtifacts(task) {
 
 export function buildContentRequest(ctx) {
   if (ctx.artifactKey !== 'video') fail('artifact_not_found')
+  const data = snapshot(ctx.data)
+  const url = videoResultUrl(data) || videoResultUrl(snapshot(data.data))
+  if (url) return { url, method: ctx.clientRequest.method, credentialless: true }
+  if (!compatibilityVideo(ctx)) fail('artifact_not_found')
   return {
     url: ctx.baseUrl + '/v1/videos/' + encodeURIComponent(ctx.upstreamTaskId) + '/content',
     method: ctx.clientRequest.method,
@@ -520,6 +610,9 @@ export function extractUsageOnComplete(ctx, task, body) {
   }
   const data = snapshot(body && body.data)
   const result = Object.keys(data).length ? data : snapshot(body)
+  const billing = snapshot(result.billing)
+  if (billing.mode === 'token' && !settledTokenBilling(billing)) return null
+  if (!compatibilityVideo(ctx)) return usageFacts(ctx, normalizedDuration(result) || normalizedDuration(ctx.requestBody), result)
   const actualDuration = Number(result.duration || result.seconds)
   if (Number.isFinite(actualDuration) && actualDuration > 0) return usageFacts(ctx, actualDuration, result)
   return null

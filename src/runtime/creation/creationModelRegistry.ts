@@ -112,21 +112,21 @@ const SHANHAI_VIDEO_MODELS: Array<{
     maxImages: 10,
   },
 ]
-// 灵动 API（https://www.lingdongapi.com）：5 条线路、两类计费口径。
+// 灵动 API：9条公开线路与1条待核实兼容线路，两类计费口径。
 // 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-02 实测）—— 比文档准：
 // 文档把 cvk-2.5-* 写成「图·视频·音频参考」，实际是 30 图 / 10 视频 / 10 音频。
 // `price` 是面板对用户的实付价（灵动官方价 + 加价），改价必须同步 NewAPI 渠道的计费表达式。
 const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517']
 const LINGDONG_CONTRACT_ISSUES = [
   '2026-10-02 真机验收：`Sd 2.5 480P` 4 秒出片成功，后台实扣 2 元（面板 0.5/秒 × 4 秒对得上）。',
-  '参考视频/参考音频（videos[] / audios[]）未接：面板目前只有图片链路。',
+  '2026-10-14 新型号与音视频参考按官方 /api/pricing 接入，生产路由与实扣待验收；带参考视频时，参考视频与生成时长合计最多 25 秒。',
 ]
-// /api/pricing 的 supported_ratios：`SD-2.5-特价` 多一档 21:9，其余 4 条是这 5 档
+// 标准画幅与支持21:9的宽画幅按实时目录分别登记。
 const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
 const LINGDONG_WIDE_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
 // 表内**顺序就是面板顺序**，而面板默认模型 = 当前任务第一条可用模型（useCreation 的
 // `availableModels[0]`）。所以 2026-10-02 用户要求「视频默认走 Sd 2.5 480P」时，
-// 就是把这条放在表首 + 把「满血seedance2.5」分组放到视频最前（CreationPanel.vue 的 order 表），两处缺一不可。
+// 就是把这条放在表首 + 把「灵动seedace2.5」分组放到视频最前（CreationPanel.vue 的 order 表），两处缺一不可。
 const LINGDONG_VIDEO_MODELS: Array<{
   // NewAPI 渠道里的公开名（面板发什么，渠道就按什么找），与 newapi-plugins/lingdong.plugin.js 的 meta.models 逐字一致
   model: string
@@ -139,6 +139,8 @@ const LINGDONG_VIDEO_MODELS: Array<{
   // 按秒计费的线路默认给下限 4 秒（一笔最便宜）；`SD-2.5-特价` 是死档，就是 30
   defaultDuration: number
   maxImages: number
+  maxVideos?: number
+  maxAudios?: number
   // 上游 notes 写明提示词上限时才给（`SD-2.5-特价` 是 12000 字）
   promptMaxLength?: number
 }> = [
@@ -151,6 +153,8 @@ const LINGDONG_VIDEO_MODELS: Array<{
     duration: { min: 4, max: 30 },
     defaultDuration: 4,
     maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
   },
   {
     model: 'SD-2.5-特价',
@@ -159,7 +163,7 @@ const LINGDONG_VIDEO_MODELS: Array<{
     ratios: LINGDONG_WIDE_RATIOS,
     duration: { allowedValues: [30] },
     defaultDuration: 30,
-    maxImages: 9,
+    maxImages: 30,
     promptMaxLength: 12000,
   },
   {
@@ -181,6 +185,8 @@ const LINGDONG_VIDEO_MODELS: Array<{
     duration: { min: 4, max: 30 },
     defaultDuration: 4,
     maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
   },
   {
     model: 'cvk-2.5-1080',
@@ -191,6 +197,33 @@ const LINGDONG_VIDEO_MODELS: Array<{
     duration: { min: 4, max: 30 },
     defaultDuration: 4,
     maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+  },
+  {
+    model: 'sd-2.5-720-v3', label: 'Sd 2.5 720P V3 · 灵动', price: '20/次',
+    ratios: LINGDONG_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
+    defaultDuration: 4, maxImages: 30, maxVideos: 10, maxAudios: 10,
+  },
+  {
+    model: 'SD-2.5-特价-2', label: 'Sd 2.5 特价 2 · 灵动', price: '4/次',
+    ratios: LINGDONG_WIDE_RATIOS, duration: { allowedValues: [30] },
+    defaultDuration: 30, maxImages: 10,
+  },
+  {
+    model: 'sd2.5-3033', label: 'Sd 2.5 30图3视频3音频 · 灵动', price: '4/次',
+    ratios: LINGDONG_WIDE_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
+    defaultDuration: 4, maxImages: 30, maxVideos: 3, maxAudios: 3,
+  },
+  {
+    model: 'sd2.5-101010', label: 'Sd 2.5 10图10视频10音频 · 灵动', price: '4/次',
+    ratios: LINGDONG_WIDE_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
+    defaultDuration: 4, maxImages: 10, maxVideos: 10, maxAudios: 10,
+  },
+  {
+    model: 'sd2.5-301010', label: 'Sd 2.5 30图10视频10音频 · 灵动', price: '4/次',
+    ratios: LINGDONG_WIDE_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
+    defaultDuration: 4, maxImages: 30, maxVideos: 10, maxAudios: 10,
   },
 ]
 
@@ -258,6 +291,7 @@ const YIHONG_VIDEO_MODELS: Array<{
     model: 'seedance-2.5-max',
     label: 'Seedance 2.5 Max · 易红',
     price: '¥4/次',
+    resolutions: ['720p'],
     duration: { allowedValues: [30] },
     defaultDuration: 30,
     maxImages: 30,
@@ -317,7 +351,7 @@ const YIHONG_VIDEO_CONTRACT_ISSUES = [
   'Seedance 2.5 Super 文档要求素材为公网 HTTPS URL；App 上传链路和上游实际取图/音视频能力待真实任务验收。',
 ]
 // Fk 渠道：model 必须与已上传 fk Task Plugin 的 meta.models 完全一致。
-// XZ Seedance 2.0「933全参」不在插件白名单中，因此不加入创作面板。
+// 旧 ID 隐藏但保留注册，历史任务不得被改绑到新型号。
 const FK_SEEDANCE_MODELS: Array<{
   model: string
   label: string
@@ -330,10 +364,12 @@ const FK_SEEDANCE_MODELS: Array<{
   maxVideos?: number
   maxAudios?: number
   promptMaxLength?: number
+  hidden?: boolean
 }> = [
   {
     model: 'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563',
     label: '特价渠道-Seedance2.5满血720p(30图)',
+    hidden: true,
     price: '0.1/秒',
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
     resolutions: ['720p'],
@@ -343,8 +379,8 @@ const FK_SEEDANCE_MODELS: Array<{
   },
   {
     model: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
-    label: '特价渠道Seedance2.5满血720p(可过真人)',
-    price: '0.4/秒',
+    label: '特价渠道 Seedance 2.5 满血 720p（可过真人）',
+    price: '¥5/次',
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
     resolutions: ['720p'],
     duration: { allowedValues: [15, 30] },
@@ -353,8 +389,8 @@ const FK_SEEDANCE_MODELS: Array<{
   },
   {
     model: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
-    label: '长期特惠Seedance2.5满血720p',
-    price: '0.2/秒',
+    label: '长期特惠 Seedance 2.5 满血 720p',
+    price: '¥3/次',
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
     resolutions: ['720p'],
     duration: { allowedValues: [30] },
@@ -367,6 +403,7 @@ const FK_SEEDANCE_MODELS: Array<{
   {
     model: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f',
     label: 'XZ-Seedance 2.5 720p(9图参考)',
+    hidden: true,
     price: '0.1/秒',
     ratios: ['9:16', '16:9', '1:1', '4:3', '3:4'],
     resolutions: ['720p'],
@@ -377,6 +414,7 @@ const FK_SEEDANCE_MODELS: Array<{
   {
     model: 'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
     label: 'XN1-Seedance 2.5满血 480-720p',
+    hidden: true,
     price: '480p 0.5/秒 · 720p 1/秒',
     ratios: ['21:9', '16:9', '4:3', '1:1', '3:4', '9:16'],
     resolutions: ['480p', '720p'],
@@ -390,6 +428,7 @@ const FK_SEEDANCE_MODELS: Array<{
   {
     model: 'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
     label: 'XN2-Seedance 2.5满血 480-720p',
+    hidden: true,
     price: '480p 0.5/秒 · 720p 0.8/秒',
     ratios: ['16:9', '9:16', '1:1', '4:3', '3:4', '21:9'],
     resolutions: ['480p', '720p'],
@@ -401,8 +440,8 @@ const FK_SEEDANCE_MODELS: Array<{
   },
   {
     model: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
-    label: '官方渠道-Seedance2.5满血720p',
-    price: '1/秒',
+    label: '官方渠道-Seedance 2.5 满血 720p',
+    price: '¥1.1/秒 · 视频参考 ¥41/百万Token',
     ratios: ['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'],
     resolutions: ['720p'],
     duration: { min: 4, max: 30 },
@@ -410,6 +449,41 @@ const FK_SEEDANCE_MODELS: Array<{
     maxImages: 30,
     maxVideos: 10,
     maxAudios: 10,
+  },
+  {
+    model: 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
+    label: '特价渠道 Seedance 2.5 满血 720p',
+    price: '¥3/次',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    resolutions: ['720p'],
+    duration: { allowedValues: [30] },
+    defaultDuration: 30,
+    maxImages: 9,
+  },
+  {
+    model: 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848',
+    label: 'Seedance 2.5 满血 480-720p',
+    price: '¥0.5/秒',
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    resolutions: ['480p', '720p'],
+    duration: { min: 4, max: 30 },
+    defaultDuration: 4,
+    maxImages: 30,
+    maxVideos: 10,
+    maxAudios: 10,
+    promptMaxLength: 10000,
+  },
+  {
+    model: 'ft-video-v1-756e0feb4b3e1f893726314109762123',
+    label: 'XN2-Seedance 2.5 满血 480-720p',
+    price: '¥0.5/秒',
+    ratios: ['16:9', '9:16', '4:3', '3:4', '1:1'],
+    resolutions: ['480p', '720p'],
+    duration: { min: 15, max: 30 },
+    defaultDuration: 15,
+    maxImages: 30,
+    maxAudios: 10,
+    promptMaxLength: 10000,
   },
 ]
 const FK_IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
@@ -428,7 +502,7 @@ const FK_IMAGE_MODELS: Array<{
   { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'FK-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
 ]
 const FK_SEEDANCE_CONTRACT_ISSUES = [
-  '插件和渠道已由用户配置；创作面板真实提交、成片与账单尚未验收。',
+  '新版插件 0.3.0、渠道模型与按次/Token 定价需同步激活；真实提交、成片与账单尚未验收。',
 ]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
@@ -1484,13 +1558,17 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     mode: 'text-to-video',
     endpoint: '/v1/videos',
     assetFlow: 'newapi-upload',
-    // 2026-10-02 真机验收通过（`Sd 2.5 480P` 4 秒出片 + 实扣 2 元）
-    contractStatus: 'verified',
+    // 旧图片链路保留验收状态；新型号尚待生产验证。
+    contractStatus: ['cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080', 'SD-2.5-特价', 'sd2.5-a'].includes(model.model) ? 'verified' : 'partial',
     contractIssues: LINGDONG_CONTRACT_ISSUES,
     ratios: model.ratios,
     resolutions: model.resolutions,
     duration: model.duration,
-    files: { images: { min: 0, max: model.maxImages } },
+    files: {
+      images: { min: 0, max: model.maxImages },
+      ...(model.maxVideos ? { videos: { min: 0, max: model.maxVideos } } : {}),
+      ...(model.maxAudios ? { audios: { min: 0, max: model.maxAudios } } : {}),
+    },
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: model.ratios[0], options: options(model.ratios) },
       // 上游没声明分辨率的线路不展示这一项，免得面板发一个它不认的参数
@@ -1507,6 +1585,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         step: 1,
       },
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' },
+      ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
+      ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ], model.promptMaxLength),
     notes: LINGDONG_NOTES,
   })),
@@ -1569,6 +1649,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         ? { key: 'duration', label: '时长(秒)', kind: 'select' as const, defaultValue: model.defaultDuration, options: options(model.duration.allowedValues) }
         : { key: 'duration', label: '时长(秒)', kind: 'number' as const, defaultValue: model.defaultDuration, min: model.duration.min, max: model.duration.max, step: 1 },
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' as const },
+      ...(model.model === 'seedance-2.5-max' ? [{ key: 'camera_movement', label: '运镜', kind: 'select' as const, defaultValue: 'auto', options: [{ value: 'auto', label: '自动' }, { value: 'fixed', label: '固定' }] }] : []),
       ...('maxVideos' in model ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...('maxAudios' in model ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ]),
@@ -1599,12 +1680,13 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractIssues: ['NewAPI rc.40 需应用易红同步图片 32 MiB 响应补丁；真实生成、失败与扣费尚未验收。'],
     notes: ['易红官方客户API接入文档(24).md（2026-10-13）'],
   }),
-  // ── FK-Seedance：7 个模型与 fk Task Plugin 的白名单一一对应 ──
+  // ── FK Seedance 2.5：6 个当前型号，4 个旧型号仅供历史记录识别 ──
   ...FK_SEEDANCE_MODELS.map(model => directVideo({
     id: `newapi/fk/${model.model}`,
-    model: model.model,
+    model: model.hidden ? model.model : model.label,
     label: model.label,
     price: model.price,
+    hidden: model.hidden,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'text-to-video',
@@ -1630,7 +1712,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ], model.promptMaxLength),
-    notes: ['newapi-plugins/fk.plugin.js', '按用户确认的 Fk 渠道价格显示；真实出片及扣费尚待验收。'],
+    notes: ['newapi-plugins/fk.plugin.js', '2026-10-14 用户提供的 FK 官方视频目录；面板价格为用户确认的对外收费价，NewAPI 表达式系数与人民币同数值。'],
   })),
   // ── FK 图片：模型编号来自当前账号目录；fk Task Plugin 负责异步轮询与结果 URL ──
   ...FK_IMAGE_MODELS.map(model => directImage({
@@ -2851,7 +2933,8 @@ export function displayModelLabel(label: string): string {
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
   if (spec.id.startsWith('newapi/fk/ft-image-v1-')) return 'FK-Image'
-  if (spec.id.startsWith('newapi/fk/')) return 'FK-Seedance'
+  if (spec.id === 'newapi/fk/ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746') return 'FK · H3'
+  if (spec.id.startsWith('newapi/fk/')) return 'FK · Seedance 2.5'
   // 菠萝线路（aimanplay.cn + 独立 MiniMax 适配器）单独成组：视频两项 + 图片两项
   // （gpt-image-2 菠萝 / gpt-image-2.5 菠萝）。面板顺序见 `CreationPanel.vue` 的 order 数组。
   if (spec.id.startsWith('newapi/boluo/') || id.includes('菠萝')) return '菠萝'
@@ -2861,9 +2944,9 @@ export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model'
   // 新渠道单独成组，面板里能直接看出模型归属。
   if (spec.id.startsWith('newapi/yihong/')) return '易红 API'
   if (spec.id.startsWith('newapi/yuanliu/')) return '源流 AI'
-  // 灵动 API 的 5 条线路自成一族（cvk / cvk-2.5-* / 满血-480p 不带厂商前缀，不显式归族会掉进「其他模型」）。
-  // 族名是用户 2026-10-02 指定的展示名，面板分组头就是它；改名要同步 `CreationPanel.vue` 的 order 表。
-  if (spec.id.startsWith('newapi/lingdong/')) return '满血seedance2.5'
+  // 灵动线路按厂商ID归族，避免无厂商前缀的型号掉进「其他模型」。
+  // 族名就是面板分组头；改名要同步 `CreationPanel.vue` 的 order 表。
+  if (spec.id.startsWith('newapi/lingdong/')) return '灵动seedace2.5'
   // 本机 comfy-adapter 的模型统一用 jc- 前缀，单独成组，不要混进「其他模型」
   if (spec.id.startsWith('jc-')) return 'jc 本机'
   if (spec.task === 'image' && (id.includes('gpt-image') || id.includes('rh-gpt2-'))) return 'GPT Image'

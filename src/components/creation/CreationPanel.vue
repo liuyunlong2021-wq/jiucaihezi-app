@@ -1230,6 +1230,19 @@ const selectedReferenceSummary = computed(() => {
   const audios = selectedReferenceAssets.value.filter(asset => asset.kind === 'audio').length
   return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
+const isFkSeedanceModel = computed(() => {
+  const spec = currentCreationSpec.value
+  return Boolean(spec && creationModelFamily(spec) === 'FK · Seedance 2.5')
+})
+const fkBillingHint = computed(() => {
+  if (!isFkSeedanceModel.value) return ''
+  const hasVideo = selectedReferenceAssets.value.some(asset => asset.kind === 'video')
+    || cpState.files.some(file => file.type.startsWith('video/'))
+  if (currentCreationSpec.value?.id === 'newapi/fk/ft-video-v1-451adae35b0c4a3d275c2c46394abc98' && hasVideo) {
+    return '已添加视频参考：按 Token 计费，先预扣、完成后多退少补。等待结果时请勿重复提交。实际费用以渠道账单为准。'
+  }
+  return ''
+})
 const unsupportedReferenceSummary = computed(() => {
   const images = selectedReferenceAssets.value.filter(
     asset => asset.kind === 'image' && !currentReferenceModalities.value.has('image'),
@@ -4074,8 +4087,8 @@ const modelGroups = computed(() => {
       ]
     : cpState.task === 'video'
       ? [
-          // FK-Seedance 分组置顶；其余分组顺序沿用用户已确认的排列。
-          'FK-Seedance', '满血seedance2.5', 'jc 本机', '菠萝',
+          // FK Seedance 2.5 置顶；H3 保留独立分组。
+          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'jc 本机', '菠萝',
           'Seedance 2.5', '易红 API', '源流 AI', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
@@ -4136,9 +4149,7 @@ const canSend = computed(
         <JcIcon name="add" />
       </button>
       <span class="cp-toolbar-spacer" />
-      <button class="cp-toolbar-link cp-toolbar-icon" @click="openTaskHistory" title="查看生成历史">
-        <JcIcon name="history" />
-      </button>
+      <button class="cp-toolbar-link" type="button" @click="openTaskHistory">任务记录</button>
       <button
         class="cp-toolbar-link"
         @click="openExternal('https://dazi.studio/')"
@@ -4699,6 +4710,9 @@ const canSend = computed(
         <div class="cp-island-label">模型</div>
         <div class="cp-island-val">
           {{ displayModelLabel(currentModel?.label || cpState.modelKey) }}
+          <small v-if="isFkSeedanceModel && currentModelAvailability" class="cp-model-status" :title="currentModelAvailability.reason">
+            {{ currentModelAvailability.status === 'disabled' ? '已停用' : currentModelAvailability.status === 'degraded' ? (currentModelAvailability.reason || '受限') : '可用' }}
+          </small>
         </div>
         <div v-if="openPop === 'model'" class="cp-popover" @click.stop>
           <section v-for="[family, models] in modelGroups" :key="family" class="cp-model-group">
@@ -4824,7 +4838,8 @@ const canSend = computed(
       <!-- 时长 (视频) -->
       <div v-if="hasDuration && durationRange" class="cp-island cp-island-grow">
         <div class="cp-island-label">时长</div>
-        <div v-if="durationOptions.length <= 3" class="cp-btn-group">
+        <div v-if="durationRange.fixed" class="cp-island-val">{{ durationRange.min }}s（固定）</div>
+        <div v-else-if="durationOptions.length <= 3" class="cp-btn-group">
           <button
             v-for="d in durationOptions"
             :key="d"
@@ -5063,6 +5078,9 @@ const canSend = computed(
 
     <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
+      <div v-if="fkBillingHint" class="cp-fk-model-info">
+        <small>{{ fkBillingHint }}</small>
+      </div>
       <div
         v-if="creationMentionOpen"
         class="cp-reference-popover"
@@ -5258,14 +5276,14 @@ const canSend = computed(
   padding: 0 8px;
   border: 0;
   border-radius: 7px;
-  background: transparent;
+  background: var(--surface-alt);
   color: var(--ink2);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
 }
-.cp-toolbar-icon, .cp-new-canvas { width: 32px; padding: 0; justify-content: center; }
+.cp-new-canvas { width: 32px; padding: 0; justify-content: center; }
 .cp-toolbar-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .cp-erase-active { cursor: crosshair; }
 .cp-erase-preview {
@@ -5292,7 +5310,7 @@ const canSend = computed(
 .cp-canvas-empty { margin: 10px 8px; color: var(--ink3); font-size: 12px; }
 
 .cp-toolbar-link:hover {
-  background: color-mix(in srgb, var(--olive) 8%, transparent);
+  background: color-mix(in srgb, var(--olive) 8%, var(--surface-alt));
   color: var(--olive-dark);
 }
 .cp-toolbar-link > svg {
@@ -6111,6 +6129,9 @@ input.cp-dur-val {
 .cp-reference-popover button:hover, .cp-reference-popover button.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
 .cp-reference-popover button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-reference-empty { padding: 8px; color: var(--ink3); font-size: 12px; }
+.cp-fk-model-info { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 14px 8px; color: var(--ink3); font-size: 12px; }
+.cp-fk-model-info small { font-size: inherit; }
+.cp-model-status { margin-left: 6px; color: var(--ink3); font-size: 11px; }
 .cp-composer-row {
   display: flex;
   width: 100%;
