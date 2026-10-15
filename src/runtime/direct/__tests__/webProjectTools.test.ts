@@ -67,6 +67,20 @@ test('web project tools use OpenCode-compatible names', () => {
   )
 })
 
+test('web text writes cannot overwrite a file changed after the model read it', async () => {
+  const files = createWebProjectFiles(memoryAdapter())
+  const project = await files.createProject('版本冲突')
+  await files.createText(project.id, 'wiki/王刚.md', '初恋未揭晓')
+  const execute = createWebProjectToolExecutor({ projectId: project.id, files })
+  await assert.rejects(execute(call('write', { path: 'wiki/王刚.md', content: '新设定' })), /先读取/)
+  await execute(call('read', { path: 'wiki/王刚.md' }))
+  const current = await files.read(project.id, 'wiki/王刚.md')
+  await files.writeIfRevision(project.id, 'wiki/王刚.md', '人工补充：不能复合', (await import('@/utils/webProjectFiles')).webProjectTextRevision(current))
+  await assert.rejects(execute(call('write', { path: 'wiki/王刚.md', content: '新设定' })), /变化|冲突/)
+  await assert.rejects(execute(call('edit', { path: 'wiki/王刚.md', oldString: '初恋未揭晓', newString: '已揭晓' })), /变化|冲突/)
+  assert.equal((await files.read(project.id, 'wiki/王刚.md')).content, '人工补充：不能复合')
+})
+
 test('web project tools pass a loaded Skill image to the model as multimodal input', async () => {
   const files = createWebProjectFiles(memoryAdapter())
   const project = await files.createProject('Skill 图片')

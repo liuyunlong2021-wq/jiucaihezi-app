@@ -42,8 +42,28 @@ test('conversation memory query matches the index and returns the verified turn 
   assert.equal(result.matches.length, 1)
   assert.equal(result.matches[0]?.assistantTurnId, 'a1')
   assert.equal(result.matches[0]?.content, '确认采用苹果方案')
+  assert.equal(result.matches[0]?.userContent, '讨论苹果方案')
   assert.equal(rawReads, 1)
   const empty = await queryConversationMemoryIndex('project', 'chat-query', '不存在', createProjectFileService(adapter))
   assert.deepEqual(empty.matches, [])
   assert.equal(rawReads, 1)
+})
+
+test('names beyond twelve survive storage and match a natural Chinese creative request', async () => {
+  const keywords = [...Array.from({ length: 18 }, (_, index) => `角色${index}`), '王刚', '初恋', '玉佩']
+  const rawPath = '.raw/对话记录/names.md'
+  let raw = createConversationTranscript('names')
+  raw = appendConversationTurn(raw, { id: 'u', role: 'user', content: '不要让王刚与初恋复合', createdAt: '2026-10-15' })
+  raw = appendConversationTurn(raw, { id: 'a', role: 'assistant', content: '王刚捡到初恋的玉佩，暂未复合。', createdAt: '2026-10-15' })
+  const index = upsertConversationMemoryIndex('', { conversationId: 'names', rawPath, assistantTurnId: 'a' }, { summary: '候选重逢情节', keywords })
+  assert.deepEqual(parseConversationMemoryIndex(index)?.entries[0]?.keywords, keywords)
+  const files = createProjectFileService({
+    runtime: 'web', async list() { throw new Error('must not scan project') },
+    async readText(_owner, path) { const content = path === rawPath ? raw : index; return { content, size: content.length, truncated: false, revision: { value: path, size: content.length } } },
+    async createText() { throw new Error('unused') }, async rename() { throw new Error('unused') }, async remove() { throw new Error('unused') },
+  })
+  const result = await queryConversationMemoryIndex('p', 'names', '给王刚的初恋安排一个重逢情节', files)
+  assert.equal(result.matches[0]?.assistantTurnId, 'a')
+  assert.match(result.matches[0]?.userContent || '', /不要.*复合/)
+  assert.equal((await queryConversationMemoryIndex('p', 'names', '', files, 5, 'deleted-answer')).matches.length, 0)
 })

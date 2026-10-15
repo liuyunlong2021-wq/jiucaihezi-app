@@ -144,13 +144,16 @@ test('current product instructions and packaged Wiki templates use the memory co
   assert.deepEqual(blockers, [])
 })
 
-test('App bundles only the remaining product Skills', () => {
+test('App bundles base Skills and the three approved creation routes, not old product shells', () => {
   const expected = [
     'jc-new-user-guide',
     'jc-watch',
     'skill-creator',
     'wiki-memory',
-  ]
+    ...JSON.parse(source('public/skills/manju-route.json')).skills,
+    'jc-duanju',
+    'jc-novel',
+  ].sort()
   const directories = readdirSync('public/skills', { withFileTypes: true })
     .filter(entry => entry.isDirectory() && existsSync(join('public/skills', entry.name, 'SKILL.md')))
     .map(entry => entry.name)

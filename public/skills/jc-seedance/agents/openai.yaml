@@ -1,0 +1,3 @@
+interface:
+  display_name: "jc-seedance"
+  short_description: "将工程台本忠实转为 Seedance 提示词，负责素材绑定、模型适配与格式"

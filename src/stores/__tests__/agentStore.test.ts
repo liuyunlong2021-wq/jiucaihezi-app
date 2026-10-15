@@ -99,6 +99,20 @@ test('agentStore initialization does not delete legacy persisted Skill data', ()
   }
 })
 
+test('old fabricated 1M cache is estimated conservatively, while declared 1M remains intact', () => {
+  for (const declared of [false, true]) {
+    const models = Array.from({ length: 20 }, (_, i) => ({ id: `cached-${i}`, label: `cached-${i}`, providerId: 'jiucaihezi', capability: 'text', contextWindow: 1_000_000, maxOutputTokens: 128000, ...(declared ? { contextWindowEstimated: false } : {}) }))
+    const storage = installLocalStorage({ jc_models_cache: JSON.stringify(models) })
+    try {
+      setActivePinia(createPinia())
+      const model = useAgentStore().availableModels.find(item => item.id === 'cached-0')!
+      assert.ok(model)
+      assert.equal(model.contextWindow, declared ? 1_000_000 : 32768)
+      assert.equal(model.contextWindowEstimated, !declared)
+    } finally { storage.restore() }
+  }
+})
+
 test('Web Skill warehouse does not expose the bundled product catalog', { concurrency: false }, async () => {
   const storage = installLocalStorage()
   try {

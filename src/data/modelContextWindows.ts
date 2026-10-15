@@ -5,14 +5,15 @@
  * 所有值以 tokens 为单位。
  */
 
-export const DEFAULT_CLOUD_CONTEXT_WINDOW = 1_000_000
-export const DEFAULT_CLOUD_MAX_OUTPUT_TOKENS = 128_000
+// shortcut: 上游未声明窗口时暂按32K估算；取得真实容量后由模型元数据直接覆盖。
+export const DEFAULT_CLOUD_CONTEXT_WINDOW = 32_768
+export const DEFAULT_CLOUD_MAX_OUTPUT_TOKENS = 4_096
 export const DEFAULT_LOCAL_CONTEXT_WINDOW = 32_768
 export const DEFAULT_LOCAL_MAX_OUTPUT_TOKENS = 4_096
 
 /**
  * 获取模型的上下文窗口大小
- * @returns tokens 数，未知云端模型返回 1M
+ * @returns tokens 数，未知容量保守估算32K，不代表已探测成功
  */
 export function getModelContextWindow(modelId: string, providerId?: string): number {
   // 本地运行时保守使用 32K，避免把云端默认能力误用于本机模型。

@@ -13,7 +13,7 @@ test('conversation memory summary request uses the fixed plain-text prompt', () 
   assert.equal(request.messages[0]?.role, 'system')
   assert.equal(request.messages[0]?.content, CONVERSATION_MEMORY_SUMMARY_PROMPT)
   assert.deepEqual(request.messages[1], { role: 'user', content: '当前 assistant 的完整回答' })
-  assert.equal(request.max_tokens, 800)
+  assert.equal(request.max_tokens, 2048)
   assert.match(CONVERSATION_MEMORY_SUMMARY_PROMPT, /只输出两行纯文本/)
   assert.equal('response_format' in request, false)
   assert.equal('tools' in request, false)
@@ -24,7 +24,7 @@ test('conversation memory summary uses the same text contract for Opus', () => {
     'claude-opus-4-7',
     '当前 assistant 的完整回答',
   )
-  assert.equal(request.max_tokens, 800)
+  assert.equal(request.max_tokens, 2048)
   assert.equal('tools' in request, false)
   assert.equal('response_format' in request, false)
 })
@@ -38,10 +38,30 @@ test('conversation memory summary uses Ollama native no-thinking text contract',
   assert.equal(request.model, 'qwen3.6:35b-a3b')
   assert.equal(request.stream, false)
   assert.equal(request.think, false)
-  assert.equal(request.options?.num_predict, 256)
+  assert.equal(request.options?.num_predict, 2048)
   assert.equal(request.options?.temperature, 0.2)
   assert.equal('format' in request, false)
   assert.equal('response_format' in request, false)
+})
+
+test('one index request includes the user constraints and does not clip names after twelve', () => {
+  const request = buildConversationMemorySummaryRequest('model', '王刚见到李静。', 'jiucaihezi', '不要让王刚与初恋复合。')
+  assert.match(request.messages[1]!.content, /不要让王刚与初恋复合/)
+  assert.match(request.messages[1]!.content, /王刚见到李静/)
+  assert.match(CONVERSATION_MEMORY_SUMMARY_PROMPT, /角色名|人物名/)
+  assert.match(CONVERSATION_MEMORY_SUMMARY_PROMPT, /否定/)
+  const names = Array.from({ length: 20 }, (_, i) => `人物${i}`)
+  const parsed = parseConversationMemorySummaryPayload({ choices: [{ message: { content: `简介：候选，不是已确认设定\n关键词：${names.join('、')}` } }] })
+  assert.deepEqual(parsed.keywords, names)
+})
+
+test('the same summary request includes real saved output even when the visible reply is only a receipt', () => {
+  const request = buildConversationMemorySummaryRequest('model', '已保存草稿。', 'jiucaihezi', '续写本章，不要复合。', [{ path: 'wiki/创作/章节草稿/初恋/第001章.md', content: '李静在旧车站归还青玉佩，没有复合。' }])
+  assert.match(request.messages[1]!.content, /李静在旧车站归还青玉佩/)
+  assert.match(request.messages[1]!.content, /草稿不代表已确认/)
+  assert.match(request.messages[1]!.content, /不要复合/)
+  assert.equal(request.messages.length, 2)
+  assert.equal('tools' in request, false)
 })
 
 test('conversation memory summary parser turns plain text into the fixed index structure', () => {
@@ -89,5 +109,5 @@ test('conversation memory summary parser normalizes text and caps it program-sid
   )
   const result = parseConversationMemorySummaryPayload({ choices: [{ message: { content: `简介：${'a'.repeat(241)}\n关键词：${'x'.repeat(33)}` } }] })
   assert.equal(result.summary.length, 240)
-  assert.deepEqual(result.keywords, ['a'.repeat(32)])
+  assert.deepEqual(result.keywords, ['x'.repeat(33)])
 })

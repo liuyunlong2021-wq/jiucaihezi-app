@@ -29,10 +29,9 @@ import {
   replaceMemoryRound,
   updateMemoryConversationPersistentAttachments,
   updateMemoryConversationSettings,
-  writeConversationMemoryIndex,
+  recordPersistedConversationAnswer,
   type MemoryConversation,
 } from '@/runtime/memory/memoryProject'
-import { generateConversationMemorySummary } from '@/runtime/memory/conversationMemorySummary'
 import {
   applyConversationSplitPlan,
   buildConversationSplitPlan,
@@ -41,6 +40,7 @@ import {
 } from '@/runtime/memory/conversationSplit'
 import { conversationMemoryIndexPath, parseConversationMemoryIndex } from '@/runtime/memory/conversationMemoryIndex'
 import { runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
+import { CREATION_ROUTES, selectCreationRoute } from '@/runtime/memory/creationRoutes'
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
@@ -155,6 +155,26 @@ const persistentAttachments = ref<ResolvedDirectAttachment[]>([])
 const attachments = ref<ResolvedDirectAttachment[]>([])
 const referencedFiles = ref<DirectMessageFile[]>([])
 const selectedSkillNames = ref<string[]>([])
+const routeSavePending = ref(false)
+async function setComposerSkills(names: string[]) {
+  const active = conversation.value
+  if (!active || routeSavePending.value) return
+  const previous = selectedSkillNames.value
+  selectedSkillNames.value = [...new Set(names)]
+  routeSavePending.value = true
+  try {
+    const updated = await updateMemoryConversationSettings(active.resource, { composerSkills: selectedSkillNames.value }, files)
+    if (conversation.value?.resource.owner === active.resource.owner && conversation.value?.resource.path === active.resource.path) {
+      rememberConversation(updated)
+      if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
+    }
+  } catch (cause) {
+    if (conversation.value?.resource.owner === active.resource.owner && conversation.value?.resource.path === active.resource.path) {
+      selectedSkillNames.value = previous
+      error.value = `创作选择保存失败：${String(cause)}`
+    }
+  } finally { routeSavePending.value = false }
+}
 const fileToolsSelected = ref(!desktopOnlyRuntime)
 // Web/iOS 默认仅在当前项目工作区内开放文件工具；桌面端继续使用原有显式开关。
 const authorizedPaths = ref<string[]>([])
@@ -694,14 +714,14 @@ function programStatusTitle(programStatus: MemoryProgramStatus): string {
     mcp: 'MCP 调用',
   }[programStatus.kind]
   return programStatus.status === 'succeeded'
-    ? `${subject}已完成`
+    ? `${subject}${programStatus.reason ? '已完成（有待补项）' : '已完成'}`
     : programStatus.status === 'cancelled'
       ? `${subject}已取消`
       : `${subject}失败`
 }
 
 function programStatusSuccessNote(programStatus: MemoryProgramStatus): string {
-  return '程序已返回真实执行回执'
+  return programStatus.reason ? `程序回执中的待补项：${programStatus.reason}` : '程序已返回真实执行回执'
 }
 const toolCommands = [
   { id: 'skill', label: '@Skill', icon: 'psychology', description: '规则' },
@@ -1028,7 +1048,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
       ...attachment, value: '', resourcePath: attachment.projectPath,
     }))
     const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')
-    await restoreComposerSkills(latestUserTurn?.skillNames)
+    await restoreComposerSkills(resource.transcript.composerSkills ?? latestUserTurn?.skillNames)
     applyToolChipIds(latestUserToolChips(resource.transcript.turns))
     rememberConversation({ resource: resource.resource, transcript: resource.transcript })
     await restoreConversationMemoryIndexState(resource, generation)
@@ -1109,17 +1129,25 @@ async function restoreConversationMemoryIndexState(
   let content = ''
   try {
     content = (await files.readTextAt(resource.resource.owner, conversationMemoryIndexPath(resource.transcript.id))).content
-  } catch { return }
+  } catch { /* 没有索引时仍展示当前对话的缺项，供用户补建。 */ }
   if (generation !== resourceOpenGeneration) return
   const index = parseConversationMemoryIndex(content)
-  if (!index || index.conversationId !== resource.transcript.id) return
   const assistantTurnIds = new Set(resource.transcript.turns.filter(turn => turn.role === 'assistant').map(turn => turn.id))
-  const recordedTurnIds = index.entries
+  const recordedTurnIds = (index?.conversationId === resource.transcript.id ? index.entries : [])
     .filter(entry => entry.rawPath === resource.resource.path && assistantTurnIds.has(entry.assistantTurnId))
     .map(entry => entry.assistantTurnId)
   const path = conversationMemoryIndexPath(resource.transcript.id)
   memoryIndexStates.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, 'success' as const]))
   memoryIndexPaths.value = Object.fromEntries(recordedTurnIds.map(turnId => [turnId, path]))
+  if (resource.transcript.memoryEnabled) {
+    for (let i = 1; i < resource.transcript.turns.length; i++) {
+      const turn = resource.transcript.turns[i]!
+      if (turn.role === 'assistant' && resource.transcript.turns[i - 1]?.role === 'user' && !recordedTurnIds.includes(turn.id) && !turn.content.includes('> 本轮因网络或上游服务中断，已保留当前结果。')) {
+        memoryIndexStates.value[turn.id] = 'error'
+        memoryIndexErrors.value[turn.id] = '尚未记录，可重试补建；回答原文仍在。'
+      }
+    }
+  }
 }
 
 async function startMarkdownEdit() {
@@ -1499,21 +1527,25 @@ async function commitFileWrite() {
   }
 }
 
-async function recordConversation(turn: ConversationTurn, source = conversation.value) {
+async function recordConversation(turn: ConversationTurn, source: Pick<MemoryConversation, 'resource' | 'transcript'> | null = conversation.value, modelId = agentStore.currentModel, modelProviderId = localStorage.getItem('jcModelProviderId') || 'jiucaihezi') {
   const active = source
   const owner = active?.resource.owner || projectOwner.value
-  if (!active || !owner || turn.role !== 'assistant' || memoryIndexStates.value[turn.id] === 'writing' || memoryIndexStates.value[turn.id] === 'success') return
+  if (!active || !owner || turn.role !== 'assistant') return
+  const visible = () => conversation.value?.resource.owner === active.resource.owner && conversation.value?.resource.path === active.resource.path
+  if (visible() && (memoryIndexStates.value[turn.id] === 'writing' || memoryIndexStates.value[turn.id] === 'success')) return
   const index = active.transcript.turns.findIndex(item => item.id === turn.id)
-  if (index < 0) { error.value = '这条回答已不存在或已被编辑'; return }
-  memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'writing' }
-  memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: '' }
-  error.value = ''
+  if (index < 0) { if (visible()) error.value = '这条回答已不存在或已被编辑'; return }
+  if (visible()) {
+    memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'writing' }
+    memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: '' }
+  }
   try {
-    const summary = await generateConversationMemorySummary({ modelId: agentStore.currentModel, assistantTurn: turn })
-    const path = await writeConversationMemoryIndex(owner, { conversationId: active.transcript.id, rawPath: active.resource.path, assistantTurnId: turn.id, runtime: active.resource.runtime }, summary, files)
+    const path = await recordPersistedConversationAnswer(active.resource, turn, modelId, files, undefined, modelProviderId)
+    if (!visible()) return
     memoryIndexPaths.value = { ...memoryIndexPaths.value, [turn.id]: path }
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'success' }
   } catch (cause) {
+    if (!visible()) return
     const message = cause instanceof Error ? cause.message : String(cause)
     memoryIndexStates.value = { ...memoryIndexStates.value, [turn.id]: 'error' }
     memoryIndexErrors.value = { ...memoryIndexErrors.value, [turn.id]: message }
@@ -1740,11 +1772,21 @@ async function send() {
   const pendingAttachments = attachments.value.slice()
   const memorySnapshot = memoryEnabled.value
   const memoryQuerySnapshot = memoryQueryEnabled.value
-  if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value) return
+  if (!active || (!message && !activeAttachments.length && !referencedFiles.value.length && !selectedSkillNames.value.length) || sending.value || sendInFlight.value || routeSavePending.value) return
   sendInFlight.value = true
   // @Jev：先决策、把结果回填成普通芯片，再走完全一样的发送链路。决策失败就地退回手动模式。
   if (jevSelected.value) await applyJevDecision(message)
   const skillSnapshot = selectedSkillNames.value.slice()
+  const modelSnapshot = agentStore.currentModel
+  const providerSnapshot = localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
+  const capabilitySnapshot = {
+    fileToolsSelected: fileToolsSelected.value,
+    selectedMcpToolNames: selectedMcpToolNames.value.slice(),
+    mediaSelected: mediaSelected.value,
+    avSelected: avSelected.value,
+    scene3dSelected: scene3dSelected.value,
+    files: referencedFiles.value.slice(),
+  }
   const editTargetId = editingTurnId.value
   const editIndex = editTargetId ? active.transcript.turns.findIndex(turn => turn.id === editTargetId && turn.role === 'user') : -1
   if (editTargetId && editIndex < 0) {
@@ -1776,6 +1818,7 @@ async function send() {
     : []
   if (desktopOnlyRuntime && !fileToolsSelected.value && authorizedPaths.value.length)
     contextNotice.value = `本会话已授权路径 ${authorizedPaths.value.join('、')}，但 @文件 已关闭：本轮不会读写这些路径。`
+  const authorizedPathSnapshot = authorizedPaths.value.slice()
 
   const runKey = memoryRunKey(active.resource.owner, active.resource.path)
   runs.set(runKey, {
@@ -1813,6 +1856,7 @@ async function send() {
   error.value = ''
   let replyCompleted = false
   try {
+    await updateMemoryConversationSettings(active.resource, { composerSkills: skillSnapshot }, files)
     const requestAttachments = await materializeChatAttachments(activeAttachments)
     if (!isCurrentRun()) return
     const mediaContext = conversationMediaContext(
@@ -1825,18 +1869,14 @@ async function send() {
       conversationId: active.transcript.id,
       conversationTurns: editTargetId ? baseTurns : active.transcript.turns,
       userTurn,
-      modelId: agentStore.currentModel,
+      modelId: modelSnapshot,
+      modelProviderId: providerSnapshot,
       mediaReferencePolicy: buildMediaReferencePolicy(mediaContext),
       attachments: requestAttachments,
-      files: referencedFiles.value,
       selectedSkillNames: skillSnapshot,
       memoryQueryEnabled: memoryQuerySnapshot,
-      fileToolsSelected: fileToolsSelected.value,
-      authorizedPaths: authorizedPaths.value,
-      selectedMcpToolNames: selectedMcpToolNames.value,
-      mediaSelected: mediaSelected.value,
-      avSelected: avSelected.value,
-      scene3dSelected: scene3dSelected.value,
+      ...capabilitySnapshot,
+      authorizedPaths: authorizedPathSnapshot,
       recordSceneVideo,
       signal: run.controller.signal,
       onToolEvent: event => {
@@ -1856,6 +1896,9 @@ async function send() {
         if (!isCurrentRun()) return
         // P0 fix: Removed outdated “写入 Wiki” prompt - memory_search is now native
         contextNoticeShownConversations.add(active.transcript.id)
+      },
+      onContextCapacity(capacity, estimated) {
+        if (estimated && isOnScreen(run)) contextNotice.value = `模型未声明上下文容量，暂按 ${Math.round(capacity / 1024)}K 保守估算；不会按旧版1M假定发送。`
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false
@@ -1887,6 +1930,8 @@ async function send() {
     if (run.owner === projectOwner.value) rememberConversation(complete)
     if (!isCurrentRun()) return
     run.status = '已完成'
+    const completedTurn = complete.transcript.turns.at(-1)
+    if (completedTurn?.role === 'assistant' && memorySnapshot) void recordConversation(completedTurn, complete, modelSnapshot, providerSnapshot)
     // 改视图有条件：这条 run 不在屏上时，只落盘、不碰界面。
     if (!isOnScreen(run)) return
     opened.value = await openProjectResource(files, complete.resource)
@@ -1894,7 +1939,6 @@ async function send() {
     run.streamingText = ''
     const turn = complete.transcript.turns.at(-1)
     if (turn?.role === 'assistant') {
-      if (memorySnapshot) void recordConversation(turn, { ...active, transcript: complete.transcript })
       if (run.programStatus) programStatuses.value[turn.id] = run.programStatus
       try {
         mediaPlans.value[turn.id] = await Promise.all(parseMediaPlans(turn.content)
@@ -1930,6 +1974,12 @@ async function send() {
       run.phase = 'failed'
       run.status = '处理失败'
       run.error = cause instanceof Error ? cause.message : String(cause)
+      if (!replyCompleted && !isRecoverableDirectTransportFailure(cause) && isOnScreen(run) && !input.value.trim() && message) {
+        input.value = message
+        if (editTargetId) editingTurnId.value = editTargetId
+        setEditorText(composerRef.value, message)
+        resizeComposer()
+      }
       if (!replyCompleted && isRecoverableDirectTransportFailure(cause)) {
         const interruptedReply = [
           run.streamingText.trim(),
@@ -2277,7 +2327,9 @@ async function selectMention(option: MemoryMentionOption) {
       } else enableTool(option.id)
     } else if (option.type === 'skill') {
       if (!selectedSkillNames.value.includes(option.name)) {
-        selectedSkillNames.value.push(option.name)
+        await setComposerSkills(CREATION_ROUTES.some(route => route.name === option.name)
+          ? selectCreationRoute(selectedSkillNames.value, option.name)
+          : [...selectedSkillNames.value, option.name])
         recordSkillUse(option.name)
       }
     } else if (option.resource.kind === 'media') {
@@ -3262,11 +3314,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       />
 
       <footer v-if="conversation" class="memory-composer">
+        <div class="memory-creation-routes" role="group" aria-label="创作路线（正式产物保存到项目 Wiki，小说先保存草稿）">
+          <button v-for="route in CREATION_ROUTES" :key="route.name" type="button"
+            :class="{ active: selectedSkillNames.includes(route.name) }"
+            :aria-pressed="selectedSkillNames.includes(route.name)" :disabled="routeSavePending"
+            :title="`${route.label}：正式产物保存到项目 Wiki；讨论或明确不要保存时不写入，小说章节先存草稿`"
+            @click="setComposerSkills(selectCreationRoute(selectedSkillNames, route.name))">{{ route.label }}</button>
+        </div>
         <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name">{{ name }}</span>
-            <button title="移除 Skill" @click="selectedSkillNames = selectedSkillNames.filter(item => item !== name)">×</button>
+            <button title="移除 Skill" :disabled="routeSavePending" @click="setComposerSkills(selectedSkillNames.filter(item => item !== name))">×</button>
           </div>
           <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
@@ -3374,7 +3433,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             </div>
             <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
-            <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send"><JcIcon name="arrow-upward" /></button>
+            <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || routeSavePending || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
         </div>
         <div
@@ -3723,6 +3782,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-scene-card em { flex: 0 0 auto; color: #398362; font-size: 12px; font-style: normal; }
 .memory-message.streaming { opacity: .85; }
 .memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
+.memory-creation-routes { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px 0; }
+.memory-creation-routes button { min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-creation-routes button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 12%, var(--paper)); color: var(--olive); }
+.memory-creation-routes button:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
+.memory-creation-routes button:disabled { cursor: wait; opacity: .6; }
 .memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 7px 10px 0; scrollbar-width: none; }
 .memory-selected-tools::-webkit-scrollbar { display: none; }
 .memory-selected-tools .memory-attachment-chip { flex: 0 0 auto; }

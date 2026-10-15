@@ -722,7 +722,7 @@ test('决策请求不走重试路径，且发送按钮看得见决策中的状�
   )
   // 发送锁非响应式时，按钮看着是亮的、点了却被静默吐掉——这就是「点不动」的观感。
   assert.match(workbench, /const sendInFlight = ref\(false\)/)
-  assert.match(workbench, /:disabled="sendInFlight \|\| \(!input\.trim\(\)/)
+  assert.match(workbench, /:disabled="sendInFlight \|\| routeSavePending \|\| \(!input\.trim\(\)/)
   // 决策期间的等待要有提示语，不能什么都不显示。
   assert.match(workbench, /@Jev 正在判断这一轮该用哪个 Skill/)
 })

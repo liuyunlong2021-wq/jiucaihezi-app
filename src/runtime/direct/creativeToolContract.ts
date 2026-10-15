@@ -53,9 +53,13 @@ export const TOOL_DESCRIBE_TOOL_DEFINITION = tool(
 
 export const MEMORY_SEARCH_TOOL_DEFINITION = tool(
   'memory_search',
-  'Search earlier assistant responses in the current conversation. Only finds content from this conversation, not from other conversations. Read-only.',
+  'Search verified user/assistant pairs in the current conversation. Returns relevant line pages, not merely index summaries. Use assistantTurnId and offset to continue a specific answer. Read-only; never searches other conversations.',
   {
     query: { type: 'string', description: 'Keywords or topic to search for in earlier responses' },
+    assistantTurnId: { type: 'string', description: 'Optional exact answer ID from an index or previous result; use query="" to read this pair.' },
+    offset: { type: 'integer', minimum: 1, description: 'One-based answer line offset; default starts near the matching keyword.' },
+    userOffset: { type: 'integer', minimum: 1, description: 'One-based user-question line offset, for continuing long source questions.' },
+    lineLimit: { type: 'integer', minimum: 1, maximum: 200, description: 'Lines per result page, default 60.' },
     limit: {
       type: 'integer',
       minimum: 1,
@@ -681,7 +685,7 @@ type ToolFieldType = 'string' | 'boolean' | 'integer' | 'json'
 const fieldTypes: Record<string, Record<string, ToolFieldType>> = {
   tool_search: { query: 'string', limit: 'integer' },
   tool_describe: { name: 'string' },
-  memory_search: { query: 'string', limit: 'integer' },
+  memory_search: { query: 'string', limit: 'integer', assistantTurnId: 'string', offset: 'integer', userOffset: 'integer', lineLimit: 'integer' },
   skill: { name: 'string' },
   read: { path: 'string', offset: 'integer', limit: 'integer' },
   glob: { pattern: 'string', path: 'string', limit: 'integer' },

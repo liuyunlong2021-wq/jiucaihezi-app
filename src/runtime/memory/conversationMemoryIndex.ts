@@ -5,7 +5,7 @@ import { parseConversationTranscript } from './conversationTranscript'
 export interface ConversationMemorySummary { summary: string; keywords: string[] }
 export interface ConversationMemoryIndexInput { conversationId: string; rawPath: string; assistantTurnId: string; runtime?: 'web' | 'desktop' }
 export interface ConversationMemoryIndexEntry extends ConversationMemorySummary { rawPath: string; assistantTurnId: string }
-export interface ConversationMemoryQueryMatch { summary: string; keywords: string[]; rawPath: string; assistantTurnId: string; content: string }
+export interface ConversationMemoryQueryMatch { summary: string; keywords: string[]; rawPath: string; assistantTurnId: string; content: string; userTurnId?: string; userContent?: string }
 export interface ConversationMemoryQueryResult { conversationId: string; matches: ConversationMemoryQueryMatch[] }
 
 const INDEX_MARKER = /<!--\s*jc:conversation-memory-index\s+conversation-id="([^"]+)"\s+source="([^"]+)"\s+version="(\d+)"\s*-->/
@@ -33,7 +33,7 @@ export function upsertConversationMemoryIndex(content: string | undefined, input
   const existing = parseConversationMemoryIndex(content || '')
   const entry: ConversationMemoryIndexEntry = {
     summary: summary.summary.trim().replace(/[\r\n]+/g, ' ').slice(0, 240),
-    keywords: [...new Set(summary.keywords.map(keyword => String(keyword).trim().replace(/[\r\n]+/g, ' ')).filter(Boolean))].slice(0, 12),
+    keywords: [...new Set(summary.keywords.map(keyword => String(keyword).trim().replace(/[\r\n]+/g, ' ')).filter(Boolean))],
     rawPath: input.rawPath,
     assistantTurnId: input.assistantTurnId,
   }
@@ -42,7 +42,7 @@ export function upsertConversationMemoryIndex(content: string | undefined, input
   return `${createConversationMemoryIndex(input).trimEnd()}\n\n${[...withoutCurrent, entry].map(formatConversationMemoryIndexEntry).join('\n\n')}\n`
 }
 
-export async function queryConversationMemoryIndex(owner: string, conversationId: string, query: string, files: ProjectFileService = createRuntimeProjectFileService(), limit = 5): Promise<ConversationMemoryQueryResult> {
+export async function queryConversationMemoryIndex(owner: string, conversationId: string, query: string, files: ProjectFileService = createRuntimeProjectFileService(), limit = 5, assistantTurnId?: string): Promise<ConversationMemoryQueryResult> {
   const id = safeSegment(conversationId)
   let indexContent: string
   try { indexContent = (await files.readTextAt(owner, conversationMemoryIndexPath(id))).content } catch { return { conversationId: id, matches: [] } }
@@ -51,9 +51,10 @@ export async function queryConversationMemoryIndex(owner: string, conversationId
   const terms = tokenize(query)
   const candidates = index.entries
     .filter(entry => isValidConversationRawPath(entry.rawPath, id))
-    .map(entry => ({ entry, score: terms.reduce((total, term) => total + (`${entry.summary}\n${entry.keywords.join(' ')}`.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }))
+    .filter(entry => !assistantTurnId || entry.assistantTurnId === assistantTurnId)
+    .map((entry, position) => ({ entry, position, score: terms.reduce((total, term) => total + (`${entry.summary}\n${entry.keywords.join(' ')}`.toLocaleLowerCase().includes(term) ? 1 : 0), 0) + entry.keywords.filter(keyword => String(query).toLocaleLowerCase().includes(keyword.toLocaleLowerCase())).length * 2 }))
     .filter(value => terms.length === 0 || value.score > 0)
-    .sort((left, right) => right.score - left.score)
+    .sort((left, right) => right.score - left.score || right.position - left.position)
     .slice(0, Math.max(1, Math.min(20, limit)))
   if (!candidates.length) return { conversationId: id, matches: [] }
   const rawTexts = new Map<string, string>()
@@ -66,8 +67,10 @@ export async function queryConversationMemoryIndex(owner: string, conversationId
     const raw = rawTexts.get(entry.rawPath)
     const transcript = raw ? parseConversationTranscript(entry.rawPath, raw) : null
     if (!transcript || transcript.id !== id) return []
-    const assistant = transcript.turns.find(turn => turn.id === entry.assistantTurnId && turn.role === 'assistant')
-    return assistant ? [{ summary: entry.summary, keywords: entry.keywords, rawPath: entry.rawPath, assistantTurnId: assistant.id, content: assistant.content }] : []
+    const index = transcript.turns.findIndex(turn => turn.id === entry.assistantTurnId && turn.role === 'assistant')
+    const assistant = transcript.turns[index]
+    const user = transcript.turns[index - 1]
+    return assistant && user?.role === 'user' ? [{ summary: entry.summary, keywords: entry.keywords, rawPath: entry.rawPath, assistantTurnId: assistant.id, content: assistant.content, userTurnId: user.id, userContent: user.content }] : []
   })
   return { conversationId: id, matches }
 }
@@ -88,5 +91,11 @@ function isValidConversationRawPath(rawPath: string, conversationId: string): bo
   if (!normalized.startsWith(MEMORY_CONVERSATION_DIRECTORY + '/') || normalized.startsWith('/') || normalized.includes('\\')) return false
   return normalized === MEMORY_CONVERSATION_DIRECTORY + '/' + conversationId + '.md'
 }
-function tokenize(value: string): string[] { return [...new Set(String(value || '').toLocaleLowerCase().split(/[\s,，。；;、|/\\:：!?！？()[\]{}"'`]+/).map(item => item.trim()).filter(Boolean))] }
+function tokenize(value: string): string[] {
+  const text = String(value || '').toLocaleLowerCase()
+  const words = typeof Intl.Segmenter === 'function'
+    ? [...new Intl.Segmenter('zh', { granularity: 'word' }).segment(text)].filter(item => item.isWordLike).map(item => item.segment)
+    : text.split(/[\s,，。；;、!?！？]+/)
+  return [...new Set(words.filter(item => item.length > 1))].slice(0, 128)
+}
 function attribute(value: string): string { return String(value || '').replace(/["<>]/g, '') }

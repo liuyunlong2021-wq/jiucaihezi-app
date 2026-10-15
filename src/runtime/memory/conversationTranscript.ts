@@ -30,6 +30,7 @@ export interface ConversationTranscript {
   memoryEnabled: boolean
   memoryQueryEnabled: boolean
   persistentAttachments?: ConversationAttachment[]
+  composerSkills?: string[]
   turns: ConversationTurn[]
 }
 
@@ -45,7 +46,7 @@ export function conversationDocumentSources(turns: ConversationTurn[]): Array<{ 
   return [...sources.values()]
 }
 
-const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"(?:\s+memory-enabled="(on|off)")?(?:\s+memory-query-enabled="(on|off)")?(?:\s+persistent-attachments="([^"]*)")?\s*-->/
+const CONVERSATION_MARKER = /<!--\s*jc:conversation\s+id="([^"]+)"\s+created-at="([^"]+)"(?:\s+memory-enabled="(on|off)")?(?:\s+memory-query-enabled="(on|off)")?(?:\s+persistent-attachments="([^"]*)")?(?:\s+composer-skills="([^"]*)")?\s*-->/
 // Keep accepting the removed mode attribute so existing Raw conversations remain readable.
 const TURN_BLOCK = /<!--\s*jc:turn\s+id="([^"]+)"\s+role="(user|assistant)"\s+created-at="([^"]+)"(?:\s+mode="(?:quick|memory)")?(?:\s+attachments="([^"]*)")?(?:\s+skills="([^"]*)")?(?:\s+tools="([^"]*)")?\s*-->\s*\n## (?:用户|助手)\s*\n\n([\s\S]*?)\n<!--\s*\/jc:turn\s*-->/g
 
@@ -57,9 +58,9 @@ export function createConversationTranscript(
   id: string,
   title = '新对话',
   createdAt = new Date().toISOString(),
-  settings: Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled' | 'persistentAttachments'> = { memoryEnabled: true, memoryQueryEnabled: true },
+  settings: Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled' | 'persistentAttachments' | 'composerSkills'> = { memoryEnabled: true, memoryQueryEnabled: true },
 ): string {
-  return `# ${cleanTitle(title)}\n\n<!-- jc:conversation id="${attribute(id)}" created-at="${attribute(createdAt)}" memory-enabled="${settings.memoryEnabled ? 'on' : 'off'}" memory-query-enabled="${settings.memoryQueryEnabled ? 'on' : 'off'}"${serializePersistentAttachments(settings.persistentAttachments)} -->\n`
+  return `# ${cleanTitle(title)}\n\n<!-- jc:conversation id="${attribute(id)}" created-at="${attribute(createdAt)}" memory-enabled="${settings.memoryEnabled ? 'on' : 'off'}" memory-query-enabled="${settings.memoryQueryEnabled ? 'on' : 'off'}"${serializePersistentAttachments(settings.persistentAttachments)}${settings.composerSkills ? ` composer-skills="${attribute(encodeURIComponent(JSON.stringify(settings.composerSkills)))}"` : ''} -->\n`
 }
 
 export function parseConversationTranscript(path: string, content: string): ConversationTranscript | null {
@@ -89,6 +90,7 @@ export function parseConversationTranscript(path: string, content: string): Conv
     memoryEnabled: marker[3] !== 'off',
     memoryQueryEnabled: marker[4] !== 'off',
     ...(persistentAttachments ? { persistentAttachments } : {}),
+    ...(marker[6] ? { composerSkills: parseSkillNames(marker[6]) || [] } : {}),
     turns,
   }
 }

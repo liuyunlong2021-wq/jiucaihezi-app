@@ -52,6 +52,7 @@ export interface ModelEntry {
   capability?: 'text' | 'image' | 'video' | 'audio'
   /** 模型上下文 token 上限 */
   contextWindow?: number
+  contextWindowEstimated?: boolean
   /** 模型单次输出 token 上限 */
   maxOutputTokens?: number
   toolCall?: boolean
@@ -136,6 +137,9 @@ function loadCachedModelEntries(): ModelEntry[] | null {
       ? parsed.map((model: ModelEntry) => ({
           ...model,
           capability: model.capability || inferCapability(model.id),
+          // 旧版把1M兜底写成了真实元数据；刷新目录前先保守处理。
+          ...(model.contextWindowEstimated === undefined && model.contextWindow === 1_000_000
+            ? { contextWindow: getModelContextWindow(model.id, model.providerId), maxOutputTokens: getModelMaxOutputTokens(model.id, model.providerId), contextWindowEstimated: true } : {}),
         }))
       : []
     const filtered = filterExecutableModels(normalized)
@@ -263,6 +267,7 @@ export const useAgentStore = defineStore('agents', () => {
         contextWindow: typeof item.contextWindow === 'number' && item.contextWindow > 0
           ? item.contextWindow
           : getModelContextWindow(id, providerId),
+        contextWindowEstimated: !(typeof item.contextWindow === 'number' && item.contextWindow > 0),
         maxOutputTokens: typeof item.maxOutputTokens === 'number' && item.maxOutputTokens > 0
           ? item.maxOutputTokens
           : getModelMaxOutputTokens(id, providerId),

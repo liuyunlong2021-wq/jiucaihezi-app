@@ -78,6 +78,7 @@ export function createWebProjectToolExecutor(input: {
 }): DirectToolExecutor {
   const fetcher = input.fetcher || fetch
   const skills = createCreativeSkillSession(fetcher)
+  const observedText = new Map<string, { content: string; revision: string; complete: boolean }>()
   let preloadPromise: Promise<void> | null = null
   const ensurePreloadedSkills = () => {
     preloadPromise ||= Promise.all((input.preloadSkills || []).map(name => skills.load(name))).then(
@@ -172,7 +173,9 @@ export function createWebProjectToolExecutor(input: {
           ],
         }
       }
-      return { content: readTextPage(entry.content, args.offset, args.limit) }
+      const page = readTextPage(entry.content, args.offset, args.limit)
+      observedText.set(rawPath, { content: entry.content, revision: webProjectTextRevision(entry), complete: page === entry.content.replace(/\r\n/g, '\n') })
+      return { content: page, ...(page === entry.content.replace(/\r\n/g, '\n') ? { details: { observedContent: entry.content } } : {}) }
     }
 
     if (name === 'glob') {
@@ -252,22 +255,36 @@ export function createWebProjectToolExecutor(input: {
     }
 
     if (name === 'write') {
-      const file = await input.files.write(
-        requireProject(),
-        String(args.path || ''),
-        String(args.content ?? ''),
-      )
+      const path = String(args.path || '')
+      const content = String(args.content ?? '')
+      const exists = (await input.files.list(requireProject())).some(entry => entry.path === path)
+      let file
+      if (!exists) file = await input.files.createText(requireProject(), path, content)
+      else {
+        const observed = observedText.get(path)
+        if (!observed?.complete) throw new Error('请先读取目标文件的完整正文，再整体更新；长文件可使用edit局部修改')
+        const result = await input.files.writeIfRevision(requireProject(), path, content, observed.revision)
+        if (result.status !== 'saved') throw new Error(`文件已发生变化或版本冲突，未覆盖：${path}`)
+        file = result.entry
+      }
+      observedText.set(path, { content, revision: webProjectTextRevision(file), complete: true })
       return { content: `Wrote file successfully: ${file.metadata?.relativePath}` }
     }
 
     if (name === 'edit') {
-      const replacements = await input.files.edit(
-        requireProject(),
-        String(args.path || ''),
-        String(args.oldString ?? ''),
-        String(args.newString ?? ''),
-        args.replaceAll === true,
-      )
+      const path = String(args.path || '')
+      const observed = observedText.get(path)
+      if (!observed) throw new Error('请先读取目标文件，再编辑')
+      const oldString = String(args.oldString ?? '')
+      const newString = String(args.newString ?? '')
+      if (!oldString || oldString === newString) throw new Error('oldString不能为空，新旧内容不能相同')
+      const replacements = observed.content.split(oldString).length - 1
+      if (!replacements) throw new Error('没有找到要替换的内容；若文件已变化，请重新读取')
+      if (replacements > 1 && !args.replaceAll) throw new Error('匹配到多处内容，请使用replaceAll')
+      const content = args.replaceAll ? observed.content.split(oldString).join(newString) : observed.content.replace(oldString, newString)
+      const result = await input.files.writeIfRevision(requireProject(), path, content, observed.revision)
+      if (result.status !== 'saved') throw new Error(`文件已发生变化或版本冲突，未覆盖：${path}`)
+      observedText.set(path, { content, revision: result.revision, complete: observed.complete })
       return { content: `Edited file successfully: ${args.path}\nReplacements: ${replacements}` }
     }
 

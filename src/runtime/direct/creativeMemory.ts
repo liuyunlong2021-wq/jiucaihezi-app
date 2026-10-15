@@ -1,5 +1,6 @@
 import { getModelContextWindow } from '@/data/modelContextWindows'
 import { estimateTokenCount } from 'tokenx'
+import type { DirectChatCompletionRequest } from './directEngine'
 
 export interface CreativeContextMessage {
   id: string
@@ -10,9 +11,6 @@ export interface CreativeContextMessage {
   attachments?: Array<{ name: string; readablePath?: string; textContent?: string }>
   finishReason?: string
 }
-
-const MAX_HISTORY_ROUNDS = 3
-const MAX_HISTORY_TOKENS = 24_000
 
 const FAILED_ASSISTANT_FINISH_REASONS = new Set([
   'network_error',
@@ -71,10 +69,9 @@ export function buildCreativeContext(input: {
   used += latestTokens
   index -= 1
 
-  const historyBudget = Math.min(MAX_HISTORY_TOKENS, Math.max(0, budget - latestTokens))
+  const historyBudget = Math.max(0, budget - latestTokens)
   let historyTokens = 0
-  let historyRounds = 0
-  while (index >= 1 && historyRounds < MAX_HISTORY_ROUNDS) {
+  while (index >= 1) {
     const assistant = history[index]
     const user = history[index - 1]
     if (assistant.role !== 'assistant' || user.role !== 'user') break
@@ -83,7 +80,6 @@ export function buildCreativeContext(input: {
     selected.unshift(user, assistant)
     used += pairTokens
     historyTokens += pairTokens
-    historyRounds += 1
     index -= 2
   }
 
@@ -92,4 +88,48 @@ export function buildCreativeContext(input: {
     estimatedTokens: used,
     omittedMessages: history.length - selected.length,
   }
+}
+
+/** 每次请求（包括工具续轮）检查完整负载；必需正文和当前任务工具结果不做隐式切片。 */
+export function fitDirectRequest(request: DirectChatCompletionRequest, contextWindow: number, outputCeiling: number, currentTaskMessage?: DirectChatCompletionRequest['messages'][number]) {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) throw new Error('模型上下文容量无效')
+  const safetyTokens = Math.min(2048, Math.max(256, Math.ceil(contextWindow * 0.02)))
+  const maxOutputTokens = Math.max(1, Math.min(outputCeiling, Math.floor(contextWindow / 4)))
+  const messages = request.messages.map(message => ({ ...message }))
+  const firstTool = messages.findIndex(message => message.role === 'assistant' && message.tool_calls?.length)
+  let protectedIndex = currentTaskMessage ? request.messages.indexOf(currentTaskMessage) : -1
+  if (protectedIndex < 0) {
+    for (let i = 0; i < (firstTool < 0 ? messages.length : firstTool); i++) if (messages[i]?.role === 'user') protectedIndex = i
+  }
+  const estimate = () => estimateTokenCount(JSON.stringify(messages)) + estimateTokenCount(JSON.stringify(request.tools || []))
+  const budget = contextWindow - safetyTokens - maxOutputTokens
+  let omittedMessages = 0
+  // 同内容工具结果只保留一次正文，但调用/结果仍完整配对。
+  const seenResults = new Set<string>()
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]!
+    if (message.role !== 'tool' || typeof message.content !== 'string') continue
+    if (seenResults.has(message.content)) message.content = '[重复工具正文已省略，使用本请求中较新的相同工具结果。]'
+    else seenResults.add(message.content)
+  }
+  while (estimate() > budget) {
+    const users = messages.flatMap((message, i) => message.role === 'user' && i <= protectedIndex ? [i] : [])
+    if (users.length < 2) break
+    const start = users[0]!
+    const end = users[1]!
+    omittedMessages += end - start
+    messages.splice(start, end - start)
+    protectedIndex -= end - start
+  }
+  if (estimate() > budget) {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i]?.role === 'system' && String(messages[i]?.content).startsWith('<retrieved_context>')) {
+        messages.splice(i, 1)
+        omittedMessages++
+      }
+    }
+  }
+  const inputTokens = estimate()
+  if (inputTokens > budget) throw new Error('本轮必需原文、规则或工具结果超过模型可用上下文，请缩小处理范围或分段读取；未截断正文，也未发送超限请求。')
+  return { messages, inputTokens, maxOutputTokens, safetyTokens, omittedMessages }
 }

@@ -7,12 +7,12 @@ import { buildConversationMemoryIndexContext, buildWikiMemoryIndexContext } from
 
 const memoryChatSource = readFileSync('src/runtime/memory/memoryChat.ts', 'utf8')
 
-test('all memory chats share one Direct Agent Loop and ordinary chat supplies no tools', () => {
+test('all memory chats retain a single Direct Loop with a built-in project Wiki connection', () => {
   assert.equal(memoryChatSource.match(/runDirectChatCompletion\(\{/g)?.length, 1)
   assert.doesNotMatch(memoryChatSource, /if \(!explicitCapabilitySelected\) \{[\s\S]*runDirectChatCompletion/)
   assert.match(memoryChatSource, /const memoryToolDefinitions = toolLoopRequired[\s\S]*: \[\]/)
   assert.match(memoryChatSource, /const resolveTools = \(\) => memoryToolDefinitions\.length[\s\S]*: \[\]/)
-  assert.match(memoryChatSource, /const toolLoopRequired = explicitCapabilitySelected \|\| attachmentNeedsRead/)
+  assert.match(memoryChatSource, /const projectWikiEnabled = Boolean\(input\.projectId\)/)
   assert.match(memoryChatSource, /!toolLoopRequired[\s\S]*不要使用任何工具能力/)
 })
 
@@ -37,7 +37,7 @@ test('T1.1: context building includes history when no explicit capabilities sele
   assert.equal(context.messages[context.messages.length - 1]?.id, '5', 'Current message should be last')
 })
 
-test('T1.2: context respects 24000 token budget and only drops complete rounds', () => {
+test('context respects the current model budget and only drops complete rounds', () => {
   // Create a very long history that exceeds 24000 tokens
   const messages = []
   for (let i = 0; i < 20; i++) {
@@ -51,12 +51,12 @@ test('T1.2: context respects 24000 token budget and only drops complete rounds',
   const context = buildCreativeContext({
     messages,
     modelId: 'claude-opus-4',
-    contextWindow: 200_000,
-    reservedTokens: 16_000,
+    contextWindow: 8_000,
+    reservedTokens: 1_000,
   })
 
   // Should have dropped old rounds but kept complete rounds only
-  assert.ok(context.estimatedTokens <= 24_000, 'Should stay under 24K token limit')
+  assert.ok(context.estimatedTokens <= 7_000, 'Should stay under this model input budget')
   assert.ok(context.omittedMessages > 0, 'Should have dropped some old messages')
 
   // Verify we don't have orphan assistant without its user message

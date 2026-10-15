@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { buildCreativeContext } from '../creativeMemory'
+import { buildCreativeContext, fitDirectRequest } from '../creativeMemory'
 
 test('creative memory only assembles context and never defines a project raw ledger', () => {
   const source = readFileSync('src/runtime/direct/creativeMemory.ts', 'utf8')
@@ -77,7 +77,7 @@ test('buildCreativeContext keeps ordinary stop and length assistant turns', () =
   assert.deepEqual(result.messages.map(message => message.id), ['u-stop', 'a-stop', 'u-length', 'a-length', 'u-latest'])
 })
 
-test('buildCreativeContext keeps only the last three complete rounds', () => {
+test('buildCreativeContext keeps all five complete rounds when capacity permits', () => {
   const messages = Array.from({ length: 5 }, (_, index) => [
     { id: `u${index + 1}`, role: 'user', content: `问题 ${index + 1}` },
     { id: `a${index + 1}`, role: 'assistant', content: `回答 ${index + 1}` },
@@ -90,11 +90,11 @@ test('buildCreativeContext keeps only the last three complete rounds', () => {
   })
 
   assert.deepEqual(result.messages.map(message => message.id), [
-    'u3', 'a3', 'u4', 'a4', 'u5', 'a5', 'u-latest',
+    'u1', 'a1', 'u2', 'a2', 'u3', 'a3', 'u4', 'a4', 'u5', 'a5', 'u-latest',
   ])
 })
 
-test('buildCreativeContext caps completed-round history at 12K tokens', () => {
+test('buildCreativeContext uses model capacity rather than a fixed history token ceiling', () => {
   const result = buildCreativeContext({
     messages: [
       { id: 'u1', role: 'user', content: '旧问题'.repeat(10_000) },
@@ -106,6 +106,53 @@ test('buildCreativeContext caps completed-round history at 12K tokens', () => {
     reservedTokens: 0,
   })
 
-  assert.deepEqual(result.messages.map(message => message.id), ['u-latest'])
-  assert.equal(result.omittedMessages, 2)
+  assert.deepEqual(result.messages.map(message => message.id), ['u1', 'a1', 'u-latest'])
+  assert.equal(result.omittedMessages, 0)
+})
+
+test('request budget includes rules, tools and output, removes whole older turns only', () => {
+  const messages = [
+    { role: 'system', content: '规则'.repeat(500) },
+    { role: 'user', content: '旧问题'.repeat(500) },
+    { role: 'assistant', content: '旧回答'.repeat(500) },
+    { role: 'user', content: '修改本段：不能复合。' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'r1', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'r1', content: '王刚的初恋尚未揭晓。' },
+  ]
+  const result = fitDirectRequest({ messages, tools: [{ function: { name: 'read', description: '工具'.repeat(80) } }] }, 4000, 500)
+  assert.ok(result.inputTokens + result.maxOutputTokens + result.safetyTokens <= 4000)
+  assert.equal(result.messages.length, 4)
+  assert.equal(result.messages.at(-1)?.tool_call_id, 'r1')
+  assert.match(result.messages.find(item => item.role === 'user')!.content, /不能复合/)
+  assert.equal(messages.length, 6)
+})
+
+test('oversized current source fails visibly instead of truncating names or dialogue', () => {
+  assert.throws(() => fitDirectRequest({ messages: [{ role: 'user', content: '不能复合。'.repeat(3000) }] }, 2000, 500), /上下文|分段/)
+})
+
+test('query material is optional, latest task evidence and tool pairs are not discarded', () => {
+  const result = fitDirectRequest({ messages: [
+    { role: 'system', content: '规则' },
+    { role: 'system', content: `<retrieved_context>\n${'可选历史'.repeat(4000)}\n</retrieved_context>` },
+    { role: 'user', content: '当前文本' },
+  ] }, 2000, 500)
+  assert.equal(result.messages.at(-1)?.content, '当前文本')
+  assert.ok(result.omittedMessages > 0)
+})
+
+test('tool image followups and length continuation prompts do not replace the protected user request', () => {
+  const current = { role: 'user', content: '当前不可丢失的修改要求：不要复合。' }
+  const request = { messages: [
+    { role: 'user', content: '旧问题'.repeat(1500) },
+    { role: 'assistant', content: '旧回答'.repeat(1500) }, current,
+    { role: 'assistant', tool_calls: [{ id: 'image', type: 'function', function: { name: 'read', arguments: '{}' } }] },
+    { role: 'tool', tool_call_id: 'image', content: '图片已读取' },
+    { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/ref.png' } }] },
+    { role: 'user', content: '继续未完成输出' },
+  ] }
+  const result = fitDirectRequest(request, 3000, 500, current)
+  assert.ok(result.messages.some(item => item.content === current.content))
+  assert.ok(result.messages.some(item => item.tool_call_id === 'image'))
+  assert.ok(result.messages.some(item => Array.isArray(item.content)))
 })

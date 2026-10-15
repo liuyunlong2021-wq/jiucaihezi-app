@@ -22,9 +22,13 @@ import {
   type ConversationTranscript,
   type ConversationTurn,
 } from './conversationTranscript'
-import { conversationMemoryIndexPath, upsertConversationMemoryIndex, type ConversationMemoryIndexInput, type ConversationMemorySummary } from './conversationMemoryIndex'
+import { conversationMemoryIndexPath, parseConversationMemoryIndex, upsertConversationMemoryIndex, type ConversationMemoryIndexInput, type ConversationMemorySummary } from './conversationMemoryIndex'
+import { generateConversationMemorySummary } from './conversationMemorySummary'
+import { parseMarkdownFileLinks } from './markdownFileLinks'
+import { WIKI_ARTIFACT_RECEIPT_MARKER } from './wikiArtifacts'
 
 const MAX_WRITE_ATTEMPTS = 3
+const indexingAnswers = new Map<string, Promise<string>>()
 
 export interface MemoryConversation {
   resource: ProjectResource
@@ -169,7 +173,7 @@ export async function renameMemoryConversation(
 
 export async function updateMemoryConversationSettings(
   resource: ProjectResource,
-  settings: Partial<Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled'>>,
+  settings: Partial<Pick<ConversationTranscript, 'memoryEnabled' | 'memoryQueryEnabled' | 'composerSkills'>>,
   files: ProjectFileService = createRuntimeProjectFileService(),
 ): Promise<MemoryConversation> {
   return mutateConversation(resource, files, current => {
@@ -179,6 +183,7 @@ export async function updateMemoryConversationSettings(
       memoryEnabled: settings.memoryEnabled ?? transcript.memoryEnabled,
       memoryQueryEnabled: settings.memoryQueryEnabled ?? transcript.memoryQueryEnabled,
       persistentAttachments: transcript.persistentAttachments,
+      composerSkills: settings.composerSkills ?? transcript.composerSkills,
     })
     let merged = next
     for (const turn of transcript.turns) merged = appendConversationTurn(merged, turn)
@@ -259,27 +264,64 @@ export async function writeConversationMemoryIndex(
   const indexResource: ProjectResource = {
     runtime: input.runtime || 'web', owner, path, name: path.split('/').pop() || path, isDirectory: false, kind: 'document',
   }
-  let current: Awaited<ReturnType<ProjectFileService['readTextAt']>> | null = null
-  try { current = await files.readTextAt(owner, path) } catch { current = null }
-  if (!current) {
-    try {
-      await files.createText(owner, path, upsertConversationMemoryIndex('', input, summary))
-      return path
-    } catch {
-      try { await files.createFolder(owner, MEMORY_INDEX_DIRECTORY) } catch { /* already exists */ }
-      await files.createText(owner, path, upsertConversationMemoryIndex('', input, summary))
-      return path
-    }
-  }
   for (let attempt = 0; attempt < MAX_WRITE_ATTEMPTS; attempt += 1) {
+    let current: Awaited<ReturnType<ProjectFileService['readTextAt']>> | null = null
+    try { current = await files.readTextAt(owner, path) } catch { current = null }
+    if (!current) {
+      await files.createFolder(owner, MEMORY_INDEX_DIRECTORY)
+      try { await files.createText(owner, path, upsertConversationMemoryIndex('', input, summary)); return path } catch (error) {
+        try { await files.readTextAt(owner, path) } catch { throw error }
+        continue
+      }
+    }
     const next = upsertConversationMemoryIndex(current.content, input, summary)
     if (next === current.content) return path
     const result = await files.writeText(indexResource, next, current.revision)
     if (result.status === 'saved') return path
     if (result.status === 'missing') throw new Error('记忆索引文件已被删除')
-    try { current = await files.readTextAt(owner, path) } catch { break }
   }
   throw new Error('记忆索引正在其他窗口更新，请重试')
+}
+
+export async function recordPersistedConversationAnswer(
+  resource: ProjectResource,
+  assistantTurn: ConversationTurn,
+  modelId: string,
+  files: ProjectFileService = createRuntimeProjectFileService(),
+  summarize: typeof generateConversationMemorySummary = generateConversationMemorySummary,
+  modelProviderId?: string,
+): Promise<string> {
+  const key = JSON.stringify([resource.owner, resource.path, assistantTurn.id])
+  const pending = indexingAnswers.get(key)
+  if (pending) return pending
+  const task = (async () => {
+    if (assistantTurn.role !== 'assistant' || !assistantTurn.content.trim() || assistantTurn.content.includes('> 本轮因网络或上游服务中断，已保留当前结果。')) throw new Error('不完整回答不能建立索引')
+    const active = await loadMemoryConversation(resource, files)
+    const index = active.transcript.turns.findIndex(turn => turn.id === assistantTurn.id && turn.role === 'assistant')
+    const userTurn = active.transcript.turns[index - 1]
+    if (index < 0 || active.transcript.turns[index]?.content !== assistantTurn.content || userTurn?.role !== 'user') throw new Error('这条问答已被编辑或不存在')
+    const path = conversationMemoryIndexPath(active.transcript.id)
+    let existing = ''
+    try { existing = (await files.readTextAt(resource.owner, path)).content } catch { /* 尚未建立索引。 */ }
+    if (parseConversationMemoryIndex(existing)?.entries.some(entry => entry.rawPath === resource.path && entry.assistantTurnId === assistantTurn.id)) return path
+    const receiptIndex = assistantTurn.content.lastIndexOf(WIKI_ARTIFACT_RECEIPT_MARKER)
+    const paths = receiptIndex < 0 ? [] : [...new Set(parseMarkdownFileLinks(assistantTurn.content.slice(receiptIndex + WIKI_ARTIFACT_RECEIPT_MARKER.length)).map(link => link.target))]
+    const wikiArtifacts: Array<{ path: string; content: string }> = []
+    for (const path of paths) {
+      if (!/^(?:wiki|docs\/wiki)\/.+\.md$/.test(path) || path.split('/').some(part => !part || part === '..' || part === '.') || path.includes('\\') || path.includes('\0')) throw new Error('保存回执路径无效，未建立索引')
+      const text = await files.readTextAt(resource.owner, path)
+      if (text.truncated) throw new Error('保存正文读取不完整，未建立索引')
+      wikiArtifacts.push({ path, content: text.content })
+    }
+    const generated = await summarize({ modelId, modelProviderId, assistantTurn, userTurn, ...(wikiArtifacts.length ? { wikiArtifacts } : {}) })
+    const summary = { ...generated, keywords: [...new Set([...generated.keywords, ...paths])] }
+    const latest = await loadMemoryConversation(resource, files)
+    const latestIndex = latest.transcript.turns.findIndex(turn => turn.id === assistantTurn.id)
+    if (latest.transcript.turns[latestIndex]?.content !== assistantTurn.content || latest.transcript.turns[latestIndex - 1]?.id !== userTurn.id || latest.transcript.turns[latestIndex - 1]?.content !== userTurn.content) throw new Error('生成索引期间问答发生变化，请重试')
+    return writeConversationMemoryIndex(resource.owner, { conversationId: active.transcript.id, rawPath: resource.path, assistantTurnId: assistantTurn.id, runtime: resource.runtime }, summary, files)
+  })()
+  indexingAnswers.set(key, task)
+  try { return await task } finally { if (indexingAnswers.get(key) === task) indexingAnswers.delete(key) }
 }
 
 function uniqueId(prefix: string): string {

@@ -284,7 +284,7 @@ test('memory space and conversations are created only by their explicit actions'
 test('conversation lifecycle restores the latest Skill selection and clears it for new chats', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.ok(workbench.includes("const latestUserTurn = [...resource.transcript.turns].reverse().find(turn => turn.role === 'user')"))
-  assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames)'))
+  assert.ok(workbench.includes('await restoreComposerSkills(resource.transcript.composerSkills ?? latestUserTurn?.skillNames)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
   assert.ok(workbench.includes('selectedSkillNames.value = [...new Set((names || []).filter(name => available.has(name)))]'))
@@ -561,7 +561,7 @@ test('conversation memory status restores from its persisted index and only fail
 
   assert.match(workbench, /conversationMemoryIndexPath, parseConversationMemoryIndex/)
   assert.match(workbench, /files\.readTextAt\(resource\.resource\.owner, conversationMemoryIndexPath\(resource\.transcript\.id\)\)/)
-  assert.match(workbench, /index\.conversationId !== resource\.transcript\.id/)
+  assert.match(workbench, /index\?\.conversationId === resource\.transcript\.id/)
   assert.match(workbench, /entry\.rawPath === resource\.resource\.path/)
   assert.match(workbench, /memoryIndexStates\.value = Object\.fromEntries/)
   assert.match(workbench, /v-if="memoryIndexStates\[turn\.id\] === 'writing'"/)
@@ -1356,7 +1356,7 @@ test('memory text models default to tools unless the gateway explicitly disables
   )
   assert.match(
     runtime,
-    /toolLoopRequired && agentStore\.modelsFetched && model\?\.toolCall === false/,
+    /agentStore\.modelsFetched && model\?\.toolCall === false/,
   )
 })
 

@@ -624,8 +624,8 @@ export function normalizeGatewayModels(payload: any): GatewayModelEntry[] {
         label: String(item?.label || item?.name || item?.displayName || item?.display_name || id),
         providerId: 'jiucaihezi' as const,
         capability,
-        contextWindow: positiveNumber(item?.contextWindow ?? item?.context_window),
-        maxOutputTokens: positiveNumber(item?.maxOutputTokens ?? item?.max_output_tokens),
+        contextWindow: positiveNumber(item?.contextWindow ?? item?.context_window ?? item?.context_length ?? item?.max_context_tokens ?? item?.top_provider?.context_length),
+        maxOutputTokens: positiveNumber(item?.maxOutputTokens ?? item?.max_output_tokens ?? item?.top_provider?.max_completion_tokens),
         channel: item?.channel ? String(item.channel) : undefined,
         taskTypes,
         toolCall: typeof item?.tool_call === 'boolean'

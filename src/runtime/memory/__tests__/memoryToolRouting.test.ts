@@ -3,7 +3,6 @@ import { test } from 'node:test'
 
 import {
   buildSelectedSkillPrompt,
-  hasWikiWriteIntent,
   hasExplicitMemoryCapability,
   memoryProgramKind,
   normalizeMemoryToolResult,
@@ -232,11 +231,14 @@ test('Wiki Memory declares the file tool bundle for read/write tasks', () => {
   ])
 })
 
-test('Wiki story distillation is treated as write intent', () => {
-  assert.equal(hasWikiWriteIntent('把这部小说拆分并沉淀到 Wiki'), true)
-  assert.equal(hasWikiWriteIntent('继续分析下一章'), true)
-  assert.equal(hasWikiWriteIntent('同意'), true)
-  assert.equal(hasWikiWriteIntent('查询这部小说有哪些人物'), false)
+test('built-in Wiki tools support explicit requests independently of automatic query', () => {
+  const wikiTools = [...tools, { function: { name: 'wiki_save_artifact' } }, MEMORY_SEARCH_TOOL_DEFINITION]
+  const names = selectMemoryTools(wikiTools, [], false, false, false, [], false, false, [], false, true).map(tool => tool.function.name)
+  assert.ok(names.includes('read'))
+  assert.ok(names.includes('wiki_save_artifact'))
+  assert.ok(names.includes('memory_search'))
+  assert.ok(!names.includes('terminal'))
+  assert.ok(!names.includes('delete'))
 })
 
 test('story analysis exposes one read operation and one structured commit operation', () => {

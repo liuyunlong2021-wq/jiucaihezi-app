@@ -553,6 +553,15 @@ test('normalizeGatewayModels preserves an explicit tool-call capability', () => 
   ])
 })
 
+test('model capacity is read from endpoint metadata without inferring it from the model name', () => {
+  const models = normalizeGatewayModels({ items: [
+    { id: 'same-name-small', context_length: 40000, top_provider: { max_completion_tokens: 4000 } },
+    { id: 'same-name-large', top_provider: { context_length: 80000, max_completion_tokens: 12000 } },
+    { id: 'unknown-model' },
+  ] })
+  assert.deepEqual(models.map(model => [model.contextWindow, model.maxOutputTokens]), [[40000, 4000], [80000, 12000], [undefined, undefined]])
+})
+
 test('normalizeGatewayModels infers RH and AI application capabilities without taskTypes', () => {
   const models = normalizeGatewayModels({
     items: [
