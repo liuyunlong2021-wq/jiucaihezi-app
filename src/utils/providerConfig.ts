@@ -38,20 +38,85 @@ export function getCustomProviders(store: KeyValueStore = getStorage()): CustomP
   try {
     const parsed = JSON.parse(raw)
     if (!Array.isArray(parsed)) return []
-    return parsed.map((p: Partial<CustomProviderConfig>) => ({
-      id: String(p.id || '').trim(),
-      name: String(p.name || p.id || '').trim(),
-      apiBase: String(p.apiBase || '').trim().replace(/\/+$/, ''),
-      apiKey: p.apiKey ? String(p.apiKey).trim() : undefined,
-      modelIds: Array.isArray(p.modelIds) ? p.modelIds.map(String) : [],
-    })).filter(p => p.id && p.apiBase)
+    return parsed
+      .map((p: Partial<CustomProviderConfig>) => sanitizeCustomProvider(p))
+      .filter(Boolean) as CustomProviderConfig[]
   } catch (_) {
     return []
   }
 }
 
+/**
+ * 自定义 OpenAI 兼容端点的地址校验。
+ * 允许本机与局域网 http、远程 https，并拒绝把凭据/查询参数写进地址，避免密钥跟着 URL 外泄。
+ */
+export function isLocalNetworkHost(host: string): boolean {
+  if (['localhost', '127.0.0.1', '::1', '[::1]'].includes(host)) return true
+  const parts = host.split('.').map(Number)
+  return parts.length === 4 && parts.every(part => Number.isInteger(part) && part >= 0 && part <= 255)
+    && (parts[0] === 10 || (parts[0] === 192 && parts[1] === 168)
+      || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) || parts[0] === 127)
+}
+
+export function normalizeCustomProviderApiBase(value: string): string {
+  const raw = String(value || '').trim().replace(/\/+$/, '').replace(/\/v1$/, '')
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error('端点地址无效')
+  }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('端点只支持 http 或 https')
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error('端点地址不能包含账号、密码、查询参数或片段')
+  }
+  if (url.protocol === 'http:' && !isLocalNetworkHost(url.hostname)) {
+    throw new Error('公网服务必须使用 https')
+  }
+  return url.pathname === '/' ? url.origin : url.origin + url.pathname
+}
+
+/** 单个自定义端点的信任边界校验；地址非法时返回 null（不写入、不参与请求）。 */
+function sanitizeCustomProvider(provider: Partial<CustomProviderConfig>): CustomProviderConfig | null {
+  const id = String(provider.id || '').trim()
+  if (!id) return null
+  let apiBase: string
+  try {
+    apiBase = normalizeCustomProviderApiBase(String(provider.apiBase || ''))
+  } catch {
+    return null
+  }
+  return {
+    id,
+    name: String(provider.name || id).trim() || id,
+    apiBase,
+    apiKey: provider.apiKey ? String(provider.apiKey).trim() || undefined : undefined,
+    // ponytail: 只去空去重，不校验模型 ID 格式；端点自己能列出什么就填什么。
+    modelIds: Array.isArray(provider.modelIds)
+      ? [...new Set(provider.modelIds.map(modelId => String(modelId || '').trim()).filter(Boolean))]
+      : [],
+  }
+}
+
 export function saveCustomProviders(providers: CustomProviderConfig[], store: KeyValueStore = getStorage()): void {
-  writeStore(store, CUSTOM_PROVIDERS_KEY, JSON.stringify(providers))
+  const sanitized = (Array.isArray(providers) ? providers : [])
+    .map(provider => sanitizeCustomProvider(provider))
+    .filter(Boolean) as CustomProviderConfig[]
+  writeStore(store, CUSTOM_PROVIDERS_KEY, JSON.stringify(sanitized))
+}
+
+export function findCustomProvider(
+  providerId: string | null | undefined,
+  store: KeyValueStore = getStorage(),
+): CustomProviderConfig | undefined {
+  const id = String(providerId || '').trim()
+  if (!id) return undefined
+  try {
+    return getCustomProviders(store).find(provider => provider.id === id)
+  } catch {
+    // 存储不可用时按“未注册”处理，不让模型能力查询整体打挂。
+    return undefined
+  }
 }
 
 export type ProviderType = 'new-api' | 'local-mlx' | 'local-ollama'

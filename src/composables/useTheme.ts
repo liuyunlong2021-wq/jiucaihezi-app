@@ -62,7 +62,7 @@ export function useTheme() {
   const themeLabel = ref('')
   watch(theme, (t) => {
     const labelMap: Record<string, string> = {
-      white: '切换浅色模式', light: '切换黑夜模式', dark: '切换护眼模式',
+      white: '切换浅色模式', light: '切换黑夜模式', dark: '切换柔绿模式',
       green: '切换冷灰模式', nord: '切换暗紫模式', dracula: '切换白色模式',
     }
     themeLabel.value = labelMap[t] || '切换黑夜模式'

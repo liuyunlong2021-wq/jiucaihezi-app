@@ -13,6 +13,8 @@ import {
   Pen,
   Platform,
   Rect,
+  MoveEvent,
+  ZoomEvent,
   DragEvent as LeaferDragEvent,
   Text as LeaferText,
   PointerEvent,
@@ -542,6 +544,7 @@ async function previewTask(task: MediaTask) {
     return
   }
   const sourceUrl = task.resultUrl || task.sourceUrl
+  if (task.type === 'file') { cpState.progressText = task.projectPath ? `结果已保存：${task.projectPath}` : '此结果是通用文件，请先保存到项目后打开'; return }
   if (sourceUrl && isAllowedCreationResultUrl(sourceUrl)) {
     const type =
       task.type === 'video'
@@ -579,7 +582,7 @@ async function openTaskHistory() {
 }
 
 async function addTaskResultToCanvas(task: MediaTask) {
-  if (task.status !== 'success' || task.type === 'model3d') return
+  if (task.status !== 'success' || task.type === 'model3d' || task.type === 'file') return
   const owner = String(task.projectId || task.directory || selectedCanvasOwner())
   if (!owner || owner !== selectedCanvasOwner()) {
     cpState.progressText = '该结果属于其他项目，请先切换到对应项目'
@@ -905,11 +908,20 @@ async function materializeAiAppMediaFields(params: Record<string, unknown>): Pro
 // ─── 生成入口 ───
 async function runCreationViaTaskStore() {
   const objectUrls: string[] = []
+  const submissionOwner = canvasOwner.value || selectedCanvasOwner()
+  const submissionCanvasPath = canvasStore.canvasPath
+  const submissionCanvasId = canvasStore.canvasId
+  const submissionReferenceIds = [...selectedReferenceIds.value]
+  const submissionOrigin = memoryMediaOrigin.value
   try {
     console.log('[Creation] runCreationViaTaskStore called')
     const m = currentModel.value
     if (!m) {
       cpState.progressText = '请先选择模型'
+      return
+    }
+    if (!isTauriRuntime() && currentCreationSpec.value?.route === 'local-comfy') {
+      cpState.progressText = '本机 ComfyUI 仅支持桌面 App，请选择云端模型'
       return
     }
     if (currentModelAvailability.value?.status === 'disabled') {
@@ -1022,7 +1034,16 @@ async function runCreationViaTaskStore() {
       ? mediaTaskSummary.value
       : undefined
     try {
-      const origin = memoryMediaOrigin.value
+      const origin = submissionOrigin
+      const owner = submissionOwner
+      if (owner !== selectedCanvasOwner() || submissionCanvasPath !== canvasStore.canvasPath
+        || submissionCanvasId !== canvasStore.canvasId) throw new Error('项目或画布已切换，请在当前画布重新提交')
+      const canvasTarget: CanvasTaskTarget | undefined = canvasReady && owner && canvasStore.canvasPath
+        && mediaType !== 'model3d' && mediaType !== 'text'
+        ? { canvasId: submissionCanvasId, canvasPath: submissionCanvasPath, owner,
+            operation: 'append', referenceNodeIds: submissionReferenceIds, outputAspectRatio: String(cpState.ar || '') }
+        : undefined
+      if (canvasTarget) await flushCanvasSave()
       const taskId = await mediaTaskStore.submitTask({
         type: mediaType,
         model: m.modelName,
@@ -1034,12 +1055,14 @@ async function runCreationViaTaskStore() {
         audioParams: refAudios.length ? { audioUrls: refAudios } : undefined,
         videoParams: refVideos.length ? { videoUrl: refVideos[0] } : undefined,
         source: 'creation',
+        canvasTarget,
+        directory: isTauriRuntime() ? owner : undefined,
+        memory: true,
         plan: submitPlan,
         ...(origin ? {
           chatMessageId: origin.key,
           sessionId: origin.conversationId,
           directory: isTauriRuntime() ? origin.owner : undefined,
-          memory: true,
         } : {}),
       })
       if (objectUrls.length) submissionObjectUrls.set(taskId, objectUrls.splice(0))
@@ -1159,7 +1182,7 @@ const erasePreviewStyle = computed(() =>
     : undefined,
 )
 // 右键菜单
-const ctxMenu = ref({ show: false, x: 0, y: 0 })
+const ctxMenu = ref({ show: false, x: 0, y: 0, assetId: '' })
 let app: App | null = null
 const selectedReferenceIds = ref<string[]>([])
 const selectedReferenceAssets = computed(() =>
@@ -1211,6 +1234,19 @@ const selectedReferenceSummary = computed(() => {
   const audios = selectedReferenceAssets.value.filter(asset => asset.kind === 'audio').length
   return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
+const isFkSeedanceModel = computed(() => {
+  const spec = currentCreationSpec.value
+  return Boolean(spec && creationModelFamily(spec) === 'FK · Seedance 2.5')
+})
+const fkBillingHint = computed(() => {
+  if (!isFkSeedanceModel.value) return ''
+  const hasVideo = selectedReferenceAssets.value.some(asset => asset.kind === 'video')
+    || cpState.files.some(file => file.type.startsWith('video/'))
+  if (currentCreationSpec.value?.id === 'newapi/fk/ft-video-v1-451adae35b0c4a3d275c2c46394abc98' && hasVideo) {
+    return '已添加视频参考：按 Token 计费，先预扣、完成后多退少补。等待结果时请勿重复提交。实际费用以渠道账单为准。'
+  }
+  return ''
+})
 const unsupportedReferenceSummary = computed(() => {
   const images = selectedReferenceAssets.value.filter(
     asset => asset.kind === 'image' && !currentReferenceModalities.value.has('image'),
@@ -1223,6 +1259,14 @@ const unsupportedReferenceSummary = computed(() => {
   ).length
   return [images ? `${images} 图` : '', videos ? `${videos} 视频` : '', audios ? `${audios} 音频` : ''].filter(Boolean).join(' · ')
 })
+function locateSelectedCanvasMedia() {
+  const asset = canvasStore.assets[ctxMenu.value.assetId] || selectedReferenceAssets.value[0]
+  const owner = canvasOwner.value || selectedCanvasOwner()
+  if (!asset || !owner) return
+  ctxMenu.value.show = false
+  emitEvent('project-filetree:locate', { owner, path: asset.resource.path, refresh: true })
+}
+
 function referenceSelectedCanvasMedia() {
   const owner = canvasOwner.value || selectedCanvasOwner()
   if (!owner) return
@@ -2130,14 +2174,27 @@ function scheduleCanvasSave() {
   if (!owner) return
   const path = canvasStore.canvasPath
   if (!path) return
-  const document = canvasStore.getCanvasDocument(getCanvasScene())
+  const loadToken = canvasLoadToken
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(() => {
     saveTimer = undefined
+    if (!isCurrentCanvasTarget(loadToken, owner, path)) return
+    syncCanvasViewport()
+    const document = canvasStore.getCanvasDocument(getCanvasScene())
     void saveCanvas(document, path, owner).catch(error => {
       console.warn('[canvas] save failed:', error)
     })
   }, 500)
+}
+
+function syncCanvasViewport() {
+  if (!app) return
+  canvasStore.viewport = {
+    x: Number(app.zoomLayer.x || 0),
+    y: Number(app.zoomLayer.y || 0),
+    zoom: Number(app.zoomLayer.scale || 1),
+  }
+  canvasStore.viewportInitialized = true
 }
 
 async function flushCanvasSave(allowPreviousOwner = false) {
@@ -2150,6 +2207,7 @@ async function flushCanvasSave(allowPreviousOwner = false) {
     clearTimeout(saveTimer)
     saveTimer = undefined
   }
+  syncCanvasViewport()
   await saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, owner)
 }
 
@@ -2170,6 +2228,9 @@ async function restoreCanvasScene(
   canvasOwner.value = owner
   releaseCanvasRuntimeMediaUrls()
   app.tree.clear()
+  app.zoomLayer.x = document.viewport.x
+  app.zoomLayer.y = document.viewport.y
+  app.zoomLayer.scale = document.viewport.zoom
   const projectDir = owner
   // 旧路径自愈：会话附件迁移时漏改了画布文档（jc-media/images → .raw/jc-media/图片）。
   const projectPaths = new Set((await projectFiles.list(owner)).map(item => item.path))
@@ -2262,6 +2323,16 @@ async function restoreCanvasScene(
   canvasHistory.length = 0
   canvasHistoryIndex = -1
   saveCanvasHistory()
+  if (
+    !canvasStore.viewportInitialized &&
+    app.tree.children.some(child => child.tag !== 'SimulateElement')
+  ) {
+    fitCanvasViewport()
+    syncCanvasViewport()
+    void saveCanvas(canvasStore.getCanvasDocument(getCanvasScene()), path, owner).catch(error => {
+      console.warn('[canvas] initial viewport save failed:', error)
+    })
+  }
 }
 
 function reportCanvasRestoreFailure(error: unknown) {
@@ -2703,7 +2774,28 @@ const offCanvasTaskResult = onEvent('canvas:task-result', async (payload: any) =
     return
   }
   try {
-    if (await restoreCanvasTaskResult(path, owner)) release?.()
+    const previousIds = new Set(Object.keys(canvasStore.assets))
+    const referenceIds = new Set(selectedReferenceIds.value)
+    if (await restoreCanvasTaskResult(path, owner)) {
+      const added = app?.tree.children.filter(node => canvasStore.assets[String(node.id)] && !previousIds.has(String(node.id))) || []
+      if (added.length && app) {
+        app.editor.select(app.tree.children.filter(node => referenceIds.has(String(node.id))))
+        syncSelectedReferences()
+        if (!previousIds.size) fitCanvasViewport()
+        const node = added[added.length - 1]!
+        const bounds = node.getBounds?.('box', app.tree)
+        if (bounds) {
+          const scale = Number(app.zoomLayer.scale || 1)
+          const left = bounds.x * scale + Number(app.zoomLayer.x || 0)
+          const top = bounds.y * scale + Number(app.zoomLayer.y || 0)
+          if (left < 0 || top < 0 || left + bounds.width * scale > (app.width || canvasContainer.value?.clientWidth || 800) || top + bounds.height * scale > (app.height || canvasContainer.value?.clientHeight || 600)) {
+            setCanvasViewportScale(scale, { x: bounds.x + bounds.width / 2, y: bounds.y + bounds.height / 2 })
+          }
+        }
+      }
+      release?.()
+      scheduleCanvasSave()
+    }
   } catch (error) {
     console.warn('[canvas] task result restore failed:', error)
     cpState.progressText = '画布任务结果无法恢复，请重新打开画布'
@@ -2714,7 +2806,7 @@ const offCanvasTaskResult = onEvent('canvas:task-result', async (payload: any) =
 /** 读取 CSS 变量获取当前主题背景色 */
 function getCanvasFill(): string {
   return (
-    getComputedStyle(document.documentElement).getPropertyValue('--surface').trim() || '#fafaf8'
+    getComputedStyle(document.documentElement).getPropertyValue('--jc-surface-container-low').trim() || '#f2f2f4'
   )
 }
 
@@ -3145,6 +3237,8 @@ function setCanvasViewportScale(scale: number, focus?: { x: number; y: number })
   app.zoomLayer.scale = nextScale
   app.zoomLayer.x = width / 2 - worldCenterX * nextScale
   app.zoomLayer.y = height / 2 - worldCenterY * nextScale
+  syncCanvasViewport()
+  scheduleCanvasSave()
 }
 
 function arrangeCanvasMedia() {
@@ -3172,17 +3266,18 @@ function arrangeCanvasMedia() {
 
 function fitCanvasViewport() {
   if (!app) return
-  const children = app.tree.children.filter(child => Boolean(canvasStore.assets[String(child.id)]))
+  const children = app.tree.children.filter(child => child.tag !== 'SimulateElement')
   if (!children.length) return
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,
     maxY = -Infinity
   for (const child of children) {
-    const x = Number(child.x || 0)
-    const y = Number(child.y || 0)
-    const width = Math.abs(Number(child.width || 0) * Number(child.scaleX || 1))
-    const height = Math.abs(Number(child.height || 0) * Number(child.scaleY || 1))
+    const bounds = child.getBounds?.('box', app.tree)
+    const x = Number(bounds?.x ?? child.x ?? 0)
+    const y = Number(bounds?.y ?? child.y ?? 0)
+    const width = Math.abs(Number(bounds?.width ?? child.width ?? 0))
+    const height = Math.abs(Number(bounds?.height ?? child.height ?? 0))
     minX = Math.min(minX, x)
     minY = Math.min(minY, y)
     maxX = Math.max(maxX, x + width)
@@ -3422,6 +3517,9 @@ function canvasTool(action: string) {
       }
       break
     case 'fit':
+      fitCanvasViewport()
+      break
+    case 'arrange':
       arrangeCanvasMedia()
       fitCanvasViewport()
       break
@@ -3725,10 +3823,15 @@ onMounted(() => {
     if (canvasInteractionBlocked.value) return
     e.origin?.preventDefault?.()
     const origin = e.origin as MouseEvent | undefined
+    let node = e.target as any
+    while (node && !canvasStore.assets[String(node.id)]) node = node.parent
+    if (node && !app?.editor?.list.includes(node)) app?.editor?.select(node)
+    syncSelectedReferences()
     ctxMenu.value = {
       show: true,
-      x: origin?.clientX ?? e.x,
-      y: origin?.clientY ?? e.y,
+      assetId: String(node?.id || ''),
+      x: Math.max(8, Math.min(origin?.clientX ?? e.x, window.innerWidth - 248)),
+      y: Math.max(8, Math.min(origin?.clientY ?? e.y, window.innerHeight - 400)),
     }
   }
   const ctxMenuId = app.on_(PointerEvent.MENU, onContextMenu)
@@ -3841,6 +3944,10 @@ onMounted(() => {
 
   const dragEndId = app.on_(LeaferDragEvent.END, scheduleCanvasSave)
   canvasCleanups.push(() => app?.off_(dragEndId))
+  const viewportMoveId = app.on_(MoveEvent.END, scheduleCanvasSave)
+  canvasCleanups.push(() => app?.off_(viewportMoveId))
+  const viewportZoomId = app.on_(ZoomEvent.END, scheduleCanvasSave)
+  canvasCleanups.push(() => app?.off_(viewportZoomId))
   const selectionId = app.editor?.on_(EditorEvent.AFTER_SELECT, syncSelectedReferences)
   canvasCleanups.push(() => {
     if (selectionId) app?.editor?.off_(selectionId)
@@ -3879,6 +3986,16 @@ onBeforeUnmount(() => {
 })
 
 // 任务/模型 popover
+function commitDurationInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const range = durationRange.value
+  const value = input.valueAsNumber
+  if (range && Number.isFinite(value)) {
+    setDuration(Math.max(Math.ceil(range.min), Math.min(Math.floor(range.max), Math.round(value))))
+  }
+  input.value = String(Math.round(cpState.dur))
+}
+
 const openPop = ref<string>('')
 function togglePop(key: string) {
   openPop.value = openPop.value === key ? '' : key
@@ -3958,6 +4075,7 @@ const modelList = computed(() =>
       label: displayModelLabel(spec.label),
       family: creationModelFamily(spec),
       price: displayModelPrice(spec),
+      desktopOnly: !isTauriRuntime() && spec.route === 'local-comfy',
     }] : []
   }),
 )
@@ -3974,9 +4092,9 @@ const modelGroups = computed(() => {
       ]
     : cpState.task === 'video'
       ? [
-          // FK-Seedance 分组置顶；其余分组顺序沿用用户已确认的排列。
-          'FK-Seedance', '满血seedance2.5', 'jc 本机', '菠萝',
-          'Seedance 2.5', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
+          // FK Seedance 2.5 置顶；H3 保留独立分组。
+          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'jc 本机', '菠萝',
+          'Seedance 2.5', '易红 API', '源流 AI', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
       : [
@@ -3989,8 +4107,7 @@ const modelGroups = computed(() => {
 
 function resizePromptInput(el = promptInput.value) {
   if (!el) return
-  el.style.height = 'auto'
-  el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+  el.style.removeProperty('height')
 }
 
 watch(
@@ -4002,6 +4119,7 @@ watch(
 const canSend = computed(
   () =>
     Boolean(currentCreationSpec.value) &&
+    (isTauriRuntime() || currentCreationSpec.value?.route !== 'local-comfy') &&
     currentModelAvailability.value?.status !== 'disabled' &&
     Boolean(cpState.prompt?.trim()),
 )
@@ -4033,13 +4151,11 @@ const canSend = computed(
           </div>
         </div>
       </div>
-      <button class="cp-toolbar-link cp-new-canvas" title="新建画布" @click="createCanvasRecord">
-        <JcIcon name="add" /><span>新建画布</span>
+      <button class="cp-toolbar-link cp-new-canvas" type="button" title="新建画布" aria-label="新建画布" @click="createCanvasRecord">
+        <JcIcon name="add" />
       </button>
       <span class="cp-toolbar-spacer" />
-      <button class="cp-toolbar-link cp-toolbar-icon" @click="openTaskHistory" title="查看生成历史">
-        <JcIcon name="history" />
-      </button>
+      <button class="cp-toolbar-link" type="button" @click="openTaskHistory">任务记录</button>
       <button
         class="cp-toolbar-link"
         @click="openExternal('https://dazi.studio/')"
@@ -4048,7 +4164,7 @@ const canSend = computed(
         <JcIcon name="tips_and_updates" />
         <span class="cp-toolbar-link-text">提示词参考</span>
       </button>
-      <span class="cp-toolbar-actions"><slot name="toolbar-actions" /></span>
+          <span class="cp-toolbar-actions"><slot name="toolbar-actions" /></span>
     </div>
 
     <!-- 🆕 画布区域（替代原 cp-gallery-zone） -->
@@ -4098,13 +4214,6 @@ const canSend = computed(
         <button title="选择工具 V" :class="{ active: !drawMode && !eraseMode }" @click="canvasTool('select')">
           <JcIcon name="select" />
         </button>
-        <button
-          title="擦除选区：选中图片后框住要擦掉的地方"
-          :class="{ active: eraseMode }"
-          @click="toggleEraseMode"
-        >
-          <JcIcon name="auto_fix_high" />
-        </button>
         <span class="cp-toolbar-sep" />
         <button
           title="画箭头 A"
@@ -4153,21 +4262,23 @@ const canSend = computed(
         >
           <JcIcon name="format_list_numbered" />
         </button>
-        <span class="cp-toolbar-sep" />
-        <button title="撤销 Ctrl+Z" @click="canvasTool('undo')"><JcIcon name="undo" /></button>
-        <button title="重做 Ctrl+Shift+Z" @click="canvasTool('redo')">
-          <JcIcon name="redo" />
-        </button>
-        <button title="删除 Delete" @click="canvasTool('delete')"><JcIcon name="delete" /></button>
-        <span class="cp-toolbar-sep" />
-        <button
-          title="更多对象操作"
-          :class="{ active: showCanvasMore }"
-          @click="showCanvasMore = !showCanvasMore"
-        >
-          <JcIcon name="more_horiz" />
-        </button>
-        <div v-if="showCanvasMore" class="cp-canvas-more" @click.stop>
+        <div class="cp-canvas-more-anchor">
+          <button
+            title="更多对象操作"
+            :class="{ active: showCanvasMore }"
+            @click="showCanvasMore = !showCanvasMore"
+          >
+            <JcIcon name="more_horiz" />
+          </button>
+          <div v-if="showCanvasMore" class="cp-canvas-more" @click.stop>
+          <span>工具</span>
+          <button
+            title="擦除选区：选中图片后框住要擦掉的地方"
+            :class="{ active: eraseMode }"
+            @click="toggleEraseMode(); showCanvasMore = false"
+          >
+            <JcIcon name="auto_awesome" />
+          </button>
           <span>素材</span>
           <button
             title="导入素材"
@@ -4188,6 +4299,10 @@ const canSend = computed(
           >
             <JcIcon name="link" />
           </button>
+          <span>画布</span>
+          <button title="整理媒体布局" @click="runCanvasMore('arrange')">
+            <JcIcon name="view_agenda" />
+          </button>
           <span>图层</span>
           <button title="上移一层" @click="runCanvasMore('layerUp')">
             <JcIcon name="arrow_upward" />
@@ -4202,6 +4317,7 @@ const canSend = computed(
             <JcIcon name="vertical_align_bottom" />
           </button>
           <span>对象</span>
+          <button title="删除 Delete" @click="runCanvasMore('delete')"><JcIcon name="delete" /></button>
           <button title="编组" @click="runCanvasMore('group')"><JcIcon name="group_add" /></button>
           <button title="解组" @click="runCanvasMore('ungroup')">
             <JcIcon name="call_split" />
@@ -4229,13 +4345,16 @@ const canSend = computed(
           <button title="向右倾斜" @click="runCanvasMore('skewRight')">
             <JcIcon name="transform" class="cp-flip-horizontal" />
           </button>
+          </div>
         </div>
-        <span class="cp-toolbar-sep" />
-        <button title="整理媒体并适应窗口" @click="canvasTool('fit')">
-          <JcIcon name="fit_screen" />
-        </button>
-        <button title="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
-        <button title="缩小" @click="canvasTool('zoomOut')"><JcIcon name="zoom_out" /></button>
+      </div>
+      <div class="cp-canvas-view-controls" aria-label="画布视图控制">
+        <button type="button" title="撤销 Ctrl+Z" aria-label="撤销" @click="canvasTool('undo')"><JcIcon name="undo" /></button>
+        <button type="button" title="重做 Ctrl+Shift+Z" aria-label="重做" @click="canvasTool('redo')"><JcIcon name="redo" /></button>
+        <span class="cp-view-controls-sep" />
+        <button type="button" title="适配画布内容" aria-label="适配画布内容" @click="canvasTool('fit')"><JcIcon name="fit_screen" /></button>
+        <button type="button" title="放大" aria-label="放大" @click="canvasTool('zoomIn')"><JcIcon name="zoom_in" /></button>
+        <button type="button" title="缩小" aria-label="缩小" @click="canvasTool('zoomOut')"><JcIcon name="zoom_out" /></button>
       </div>
       <!-- 右键菜单 -->
       <Teleport to="body">
@@ -4245,6 +4364,9 @@ const canSend = computed(
           :style="{ left: ctxMenu.x + 'px', top: ctxMenu.y + 'px' }"
           @click.stop
         >
+          <button v-if="selectedReferenceAssets.length" @click="locateSelectedCanvasMedia">
+            <JcIcon name="folder" />在文件树中定位
+          </button>
           <button v-if="selectedReferenceAssets.length" @click="referenceSelectedCanvasMedia">
             <JcIcon name="alternate-email" />引用到对话
           </button>
@@ -4440,14 +4562,8 @@ const canSend = computed(
           >
             ✖ 取消选中
           </button>
-          <button
-            @click="
-              canvasTool('fit');
-              ctxMenu.show = false
-            "
-          >
-            🔲 整理媒体并适应窗口
-          </button>
+          <button @click="canvasTool('fit'); ctxMenu.show = false">🔲 适配画布内容</button>
+          <button @click="canvasTool('arrange'); ctxMenu.show = false">▦ 整理媒体布局</button>
         </div>
       </Teleport>
     </div>
@@ -4534,7 +4650,7 @@ const canSend = computed(
                   v-if="canPersistMediaResult(task)"
                   @click="retryTaskPersistence(task)"
                 >
-                  {{ task.type === 'text' ? '保存为文档' : task.assetStatus === 'failed' ? '重新下载' : '保存到项目' }}
+                  {{ task.type === 'text' ? '保存为文档' : task.downloadState === 'paused' ? '继续下载' : task.assetStatus === 'failed' ? '重新下载' : '保存到项目' }}
                 </button>
                 <button
                   v-if="
@@ -4548,7 +4664,7 @@ const canSend = computed(
                 <button
                   v-if="
                     task.status === 'success' &&
-                    task.type !== 'model3d' &&
+                    task.type !== 'model3d' && task.type !== 'file' &&
                     (task.projectPath || task.assetUri)
                   "
                   @click="addTaskResultToCanvas(task)"
@@ -4577,7 +4693,7 @@ const canSend = computed(
     <!-- 参数条 -->
     <div class="cp-params">
       <!-- 任务 -->
-      <div class="cp-island" @click="togglePop('task')">
+      <div class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('task')" @keydown.space.self.prevent="togglePop('task')" @click="togglePop('task')">
         <div class="cp-island-label">任务</div>
         <div class="cp-island-val">{{ RH_TASK_LABELS[cpState.task] }}</div>
         <div v-if="openPop === 'task'" class="cp-popover" @click.stop>
@@ -4596,10 +4712,13 @@ const canSend = computed(
         </div>
       </div>
       <!-- 模型 -->
-      <div class="cp-island" @click="togglePop('model')">
+      <div class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('model')" @keydown.space.self.prevent="togglePop('model')" @click="togglePop('model')">
         <div class="cp-island-label">模型</div>
         <div class="cp-island-val">
           {{ displayModelLabel(currentModel?.label || cpState.modelKey) }}
+          <small v-if="isFkSeedanceModel && currentModelAvailability" class="cp-model-status" :title="currentModelAvailability.reason">
+            {{ currentModelAvailability.status === 'disabled' ? '已停用' : currentModelAvailability.status === 'degraded' ? (currentModelAvailability.reason || '受限') : '可用' }}
+          </small>
         </div>
         <div v-if="openPop === 'model'" class="cp-popover" @click.stop>
           <section v-for="[family, models] in modelGroups" :key="family" class="cp-model-group">
@@ -4609,12 +4728,14 @@ const canSend = computed(
               :key="m.key"
               class="cp-pop-item"
               :class="{ active: cpState.modelKey === m.key }"
+              :disabled="m.desktopOnly"
+              :title="m.desktopOnly ? '本机 ComfyUI 仅支持桌面 App' : undefined"
               @click="
                 switchModel(m.key);
                 openPop = ''
               "
             >
-              <span>{{ m.label }}</span><small>{{ m.price }}</small>
+              <span>{{ m.label }}</span><small>{{ m.desktopOnly ? '桌面专用' : m.price }}</small>
             </button>
           </section>
         </div>
@@ -4669,7 +4790,7 @@ const canSend = computed(
         <div class="cp-island-val">{{ rhModeLabel }}</div>
       </div>
       <!-- 尺寸 (gpt-image-2) -->
-      <div v-if="sizeOptions.length" class="cp-island" @click="togglePop('size')">
+      <div v-if="sizeOptions.length" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('size')" @keydown.space.self.prevent="togglePop('size')" @click="togglePop('size')">
         <div class="cp-island-label">尺寸</div>
         <div class="cp-island-val">{{ currentSizeLabel }}</div>
         <div v-if="openPop === 'size'" class="cp-popover" @click.stop>
@@ -4688,7 +4809,7 @@ const canSend = computed(
         </div>
       </div>
       <!-- 比例 (视频) -->
-      <div v-if="aspectOptions.length" class="cp-island" @click="togglePop('ar')">
+      <div v-if="aspectOptions.length" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('ar')" @keydown.space.self.prevent="togglePop('ar')" @click="togglePop('ar')">
         <div class="cp-island-label">比例</div>
         <div class="cp-island-val">{{ currentAspectLabel }}</div>
         <div v-if="openPop === 'ar'" class="cp-popover" @click.stop>
@@ -4708,7 +4829,7 @@ const canSend = computed(
       </div>
       <!-- 分辨率 (grok) -->
       <div v-if="resolutionOptions.length" class="cp-island">
-        <div class="cp-island-label">分辨率</div>
+        <div class="cp-island-label">{{ currentCreationSpec?.fields.find(field => field.key === 'resolution')?.label || '分辨率' }}</div>
         <div v-if="resolutionOptions.length === 1" class="cp-island-val">{{ resolutionOptions[0] }}</div>
         <div v-else class="cp-btn-group">
           <button
@@ -4725,7 +4846,8 @@ const canSend = computed(
       <!-- 时长 (视频) -->
       <div v-if="hasDuration && durationRange" class="cp-island cp-island-grow">
         <div class="cp-island-label">时长</div>
-        <div v-if="durationOptions.length <= 3" class="cp-btn-group">
+        <div v-if="durationRange.fixed" class="cp-island-val">{{ durationRange.min }}s（固定）</div>
+        <div v-else-if="durationOptions.length <= 3" class="cp-btn-group">
           <button
             v-for="d in durationOptions"
             :key="d"
@@ -4740,16 +4862,27 @@ const canSend = computed(
           <input
             type="range"
             class="cp-dur-slider"
-            :min="durationRange.min"
-            :max="durationRange.max"
-            :step="durationRange.step"
-            :value="cpState.dur"
-            @input="setDuration(+($event.target as HTMLInputElement).value)"
+            :min="Math.ceil(durationRange.min)"
+            :max="Math.floor(durationRange.max)"
+            :step="Math.max(1, durationRange.step)"
+            :value="Math.round(cpState.dur)"
+            @input="setDuration(Math.round(+($event.target as HTMLInputElement).value))"
           />
-          <span class="cp-dur-val">{{ cpState.dur }}s</span>
+          <input
+            type="number"
+            class="cp-dur-val"
+            aria-label="时长（秒）"
+            :min="Math.ceil(durationRange.min)"
+            :max="Math.floor(durationRange.max)"
+            :step="Math.max(1, durationRange.step)"
+            :value="Math.round(cpState.dur)"
+            @change="commitDurationInput($event)"
+            @keydown.enter="($event.target as HTMLInputElement).blur()"
+          />
+          <span>s</span>
         </div>
       </div>
-      <div v-if="showMvSelect" class="cp-island" @click="togglePop('mv')">
+      <div v-if="showMvSelect" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('mv')" @keydown.space.self.prevent="togglePop('mv')" @click="togglePop('mv')">
         <div class="cp-island-label">版本</div>
         <div class="cp-island-val">{{ cpState.mv }}</div>
         <div v-if="openPop === 'mv'" class="cp-popover" @click.stop>
@@ -4767,7 +4900,7 @@ const canSend = computed(
           </button>
         </div>
       </div>
-      <div v-if="showLanguageSelect" class="cp-island" @click="togglePop('language')">
+      <div v-if="showLanguageSelect" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('language')" @keydown.space.self.prevent="togglePop('language')" @click="togglePop('language')">
         <div class="cp-island-label">语言</div>
         <div class="cp-island-val">{{ cpState.language }}</div>
         <div v-if="openPop === 'language'" class="cp-popover" @click.stop>
@@ -4825,7 +4958,7 @@ const canSend = computed(
           画布已选 {{ h3SelectedImageCount }} 张 / 最多 {{ h3ImageSlotCount }} 张
         </div>
       </div>
-      <div v-if="h3RatioField" class="cp-island" @click="togglePop('h3Ratio')">
+      <div v-if="h3RatioField" class="cp-island cp-island-selector" role="button" tabindex="0" @keydown.enter.self.prevent="togglePop('h3Ratio')" @keydown.space.self.prevent="togglePop('h3Ratio')" @click="togglePop('h3Ratio')">
         <div class="cp-island-label">比例</div>
         <div class="cp-island-val">{{ shortRatioLabel(h3RatioValue) }}</div>
         <div v-if="openPop === 'h3Ratio'" class="cp-popover" @click.stop>
@@ -4953,6 +5086,9 @@ const canSend = computed(
 
     <!-- ★ 提示词输入区 (增强版) ★ -->
     <div class="cp-composer">
+      <div v-if="fkBillingHint" class="cp-fk-model-info">
+        <small>{{ fkBillingHint }}</small>
+      </div>
       <div
         v-if="creationMentionOpen"
         class="cp-reference-popover"
@@ -4972,7 +5108,13 @@ const canSend = computed(
         </button>
       </div>
       <div class="cp-composer-row">
-        <div class="cp-prompt-wrap">
+        <div class="cp-prompt-wrap" :class="{ 'has-composer-context': selectedReferenceAssets.length || cpState.files.length }">
+          <div v-if="selectedReferenceAssets.length || cpState.files.length" class="cp-composer-header">
+          <div v-if="selectedReferenceAssets.length || cpState.files.length" class="cp-composer-references">
+            <JcIcon name="image" /><span>参考素材 · {{ selectedReferenceAssets.length + cpState.files.length }}</span>
+            <small v-if="unsupportedReferenceSummary">当前模型不使用 {{ unsupportedReferenceSummary }}</small>
+          </div>
+          </div>
           <!-- 模型专属参数 -->
           <div v-if="showTitleInput" class="cp-suno-row">
             <input
@@ -5053,7 +5195,7 @@ const canSend = computed(
               v-if="showPromptInput || aiAppPromptField"
               ref="promptInput"
               v-model="cpState.prompt"
-              rows="2"
+              rows="3"
               :placeholder="promptPlaceholder"
               @blur="saveCpState()"
               @input="onCreationPromptInput"
@@ -5061,20 +5203,21 @@ const canSend = computed(
               class="cp-prompt-input"
             />
           </div>
-        </div>
-        <div class="cp-submit">
-          <button
-            class="cp-send-btn"
-            :class="{ ready: canSend, generating: creationRunningCount > 0 }"
-            :disabled="!canSend && creationRunningCount < 1"
-            @click="runCreationViaTaskStore"
-            title="生成"
-          >
-            <span v-if="creationRunningCount > 0" class="cp-running-badge">{{
-              creationRunningCount
-            }}</span>
-            <JcIcon name="arrow_upward" />
-          </button>
+          <div class="cp-submit">
+            <button
+              class="cp-send-btn"
+              :class="{ ready: canSend, generating: creationRunningCount > 0 }"
+              :disabled="!canSend && creationRunningCount < 1"
+              @click="runCreationViaTaskStore"
+              title="生成"
+              aria-label="生成媒体"
+            >
+              <span v-if="creationRunningCount > 0" class="cp-running-badge">{{
+                creationRunningCount
+              }}</span>
+              <JcIcon name="arrow_upward" />
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -5092,7 +5235,7 @@ const canSend = computed(
   box-sizing: border-box;
   overflow: hidden;
   position: relative;
-  background: var(--surface);
+  background: var(--jc-surface);
 }
 
 .cp-toolbar {
@@ -5102,7 +5245,7 @@ const canSend = computed(
   align-items: center;
   gap: 6px;
   padding: 0 10px 0 14px;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--jc-border);
   flex-shrink: 0;
 }
 
@@ -5116,9 +5259,11 @@ const canSend = computed(
   font-weight: 700;
 }
 
-.cp-title .mso {
-  font-size: 18px;
-  color: var(--olive-dark);
+.cp-title > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  color: var(--ink2);
 }
 .cp-title-text {
   overflow: hidden;
@@ -5135,18 +5280,18 @@ const canSend = computed(
   align-items: center;
   gap: 4px;
   min-width: 0;
-  height: 28px;
+  height: 32px;
   padding: 0 8px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--paper);
+  border: 0;
+  border-radius: 7px;
+  background: var(--surface-alt);
   color: var(--ink2);
   font: inherit;
   font-size: 12px;
   cursor: pointer;
   flex-shrink: 0;
 }
-.cp-toolbar-icon { width: 28px; padding: 0; justify-content: center; }
+.cp-new-canvas { width: 32px; padding: 0; justify-content: center; }
 .cp-toolbar-actions { display: inline-flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 .cp-erase-active { cursor: crosshair; }
 .cp-erase-preview {
@@ -5173,15 +5318,17 @@ const canSend = computed(
 .cp-canvas-empty { margin: 10px 8px; color: var(--ink3); font-size: 12px; }
 
 .cp-toolbar-link:hover {
-  border-color: var(--olive);
+  background: color-mix(in srgb, var(--olive) 8%, var(--surface-alt));
   color: var(--olive-dark);
 }
-.cp-toolbar-link .mso {
-  font-size: 16px;
+.cp-toolbar-link > svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* ─── 🆕 画布区域 ─── */
 .cp-canvas-zone {
+  background: var(--jc-surface-container-low);
   flex: 1 1 0;
   min-height: 0;
   position: relative;
@@ -5272,9 +5419,9 @@ const canSend = computed(
 .cp-canvas-toolbar button {
   width: 30px;
   height: 30px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 6px;
-  background: color-mix(in srgb, var(--surface) 90%, var(--paper));
+  background: transparent;
   color: var(--ink2);
   cursor: pointer;
   display: flex;
@@ -5282,16 +5429,15 @@ const canSend = computed(
   justify-content: center;
   font-size: 16px;
   padding: 0;
+  transition: background-color 0.12s, color 0.12s;
 }
 .cp-canvas-toolbar button:hover {
-  border-color: var(--olive);
   color: var(--olive-dark);
-  background: var(--olive-pale);
+  background: color-mix(in srgb, var(--olive) 8%, transparent);
 }
 .cp-canvas-toolbar button.active {
-  border-color: var(--olive);
-  color: white;
-  background: var(--olive);
+  color: var(--olive-dark);
+  background: color-mix(in srgb, var(--olive) 12%, transparent);
 }
 .cp-brush-tool {
   position: relative;
@@ -5336,7 +5482,10 @@ const canSend = computed(
 .cp-canvas-more {
   position: absolute;
   right: 38px;
-  top: 206px;
+  top: 0;
+  max-height: min(70vh, calc(100dvh - 250px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
   width: 142px;
   padding: 6px;
   display: grid;
@@ -5347,6 +5496,7 @@ const canSend = computed(
   border-radius: 8px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.14);
 }
+.cp-canvas-more-anchor { position: relative; width: 30px; height: 30px; flex: 0 0 30px; }
 .cp-canvas-more span {
   grid-column: 1 / -1;
   color: var(--ink3);
@@ -5357,6 +5507,38 @@ const canSend = computed(
   width: 28px;
   height: 28px;
 }
+.cp-canvas-view-controls {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid color-mix(in srgb, var(--jc-border) 78%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--jc-surface) 90%, transparent);
+  backdrop-filter: blur(10px);
+}
+.cp-canvas-view-controls button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink2);
+  cursor: pointer;
+}
+.cp-canvas-view-controls button:hover {
+  background: color-mix(in srgb, var(--olive) 8%, transparent);
+  color: var(--olive-dark);
+}
+.cp-canvas-view-controls button > svg { width: 17px; height: 17px; }
+.cp-view-controls-sep { width: 1px; height: 18px; margin: 0 2px; background: var(--line); }
 .cp-flip-vertical {
   transform: rotate(90deg);
 }
@@ -5372,7 +5554,9 @@ const canSend = computed(
   border-radius: 8px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   padding: 4px;
-  min-width: 160px;
+  width: 232px;
+  max-height: min(380px, calc(100vh - 16px));
+  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 2px;
@@ -5702,11 +5886,11 @@ const canSend = computed(
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  gap: 6px;
-  padding: 8px 12px;
+  gap: 4px 8px;
+  padding: 6px 12px;
   border-top: 1px solid var(--line);
   flex-wrap: wrap;
-  align-items: flex-start;
+  align-items: center;
   flex-shrink: 0;
   user-select: text;
 }
@@ -5715,25 +5899,47 @@ const canSend = computed(
   min-width: 0;
   max-width: 100%;
   box-sizing: border-box;
-  padding: 6px 10px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 0;
+  background: transparent;
   cursor: pointer;
-  transition: border-color 0.12s;
+  transition: background-color 0.12s;
 }
-.cp-island:hover {
-  border-color: var(--olive);
+.cp-params > .cp-island:not(.cp-number-island):not(.cp-generic-field):not(.cp-island-grow) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+  background: transparent;
+}
+.cp-params > .cp-island-selector { border: 1px solid var(--jc-border); border-radius: 8px; padding: 5px 8px !important; background: var(--paper) !important; }
+.cp-island-selector > .cp-island-label { display: none; }
+.cp-island-selector:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
+.cp-params > .cp-island:not(.cp-rh-island):hover {
+  background: color-mix(in srgb, var(--olive) 7%, transparent);
 }
 .cp-rh-island {
   cursor: default;
-  background: color-mix(in srgb, var(--olive-pale) 54%, transparent);
+  background: transparent;
 }
 .cp-rh-island:hover {
-  border-color: var(--line);
+  background: transparent;
 }
 .cp-island-grow {
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 120px;
+}
+.cp-params > .cp-island-grow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 5px;
+}
+.cp-params > .cp-island-grow > .cp-island-label {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 11px;
 }
 .cp-island-label {
   font-size: 10px;
@@ -5744,6 +5950,18 @@ const canSend = computed(
   font-size: 12px;
   font-weight: 600;
   color: var(--ink1);
+}
+.cp-params > .cp-island:not(.cp-number-island):not(.cp-generic-field):not(.cp-island-grow) > .cp-island-label {
+  flex: 0 0 auto;
+  margin: 0;
+  font-size: 11px;
+}
+.cp-params > .cp-island:not(.cp-number-island):not(.cp-generic-field):not(.cp-island-grow) > .cp-island-val {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 500;
 }
 .cp-popover {
   position: absolute;
@@ -5802,9 +6020,9 @@ const canSend = computed(
   font-family: inherit;
 }
 .cp-param-btn.active {
-  background: var(--olive);
-  color: #fff;
-  border-color: var(--olive);
+  background: color-mix(in srgb, var(--olive) 14%, var(--paper));
+  color: var(--olive-dark);
+  border-color: color-mix(in srgb, var(--olive) 42%, var(--line));
 }
 .cp-param-btn:hover {
   border-color: var(--olive);
@@ -5825,6 +6043,15 @@ const canSend = computed(
   font-weight: 700;
   color: var(--olive-dark);
   min-width: 28px;
+}
+
+input.cp-dur-val {
+  width: 52px;
+  padding: 3px 5px;
+  border: 1px solid var(--olive);
+  border-radius: 5px;
+  background: transparent;
+  text-align: center;
 }
 
 .cp-generic-media-row {
@@ -5910,12 +6137,14 @@ const canSend = computed(
 .cp-reference-popover button:hover, .cp-reference-popover button.active { background: color-mix(in srgb, var(--olive) 14%, transparent); }
 .cp-reference-popover button span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cp-reference-empty { padding: 8px; color: var(--ink3); font-size: 12px; }
+.cp-fk-model-info { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 0 14px 8px; color: var(--ink3); font-size: 12px; }
+.cp-fk-model-info small { font-size: inherit; }
+.cp-model-status { margin-left: 6px; color: var(--ink3); font-size: 11px; }
 .cp-composer-row {
   display: flex;
   width: 100%;
   min-width: 0;
-  align-items: flex-end;
-  gap: 8px;
+  align-items: stretch;
 }
 .cp-add-reference {
   display: grid;
@@ -5962,35 +6191,44 @@ const canSend = computed(
   font-size: 14px;
 }
 .cp-prompt-wrap {
+  position: relative;
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 4px;
-  min-height: 48px;
-  padding: 8px 12px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1px solid var(--jc-border);
+  border-radius: 16px;
   background: var(--paper);
+  box-shadow: 0 2px 8px rgb(36 42 32 / 3%);
   transition:
-    border-color 0.15s,
-    box-shadow 0.15s;
+    border-color var(--jc-transition-fast),
+    box-shadow var(--jc-transition-fast);
 }
 .cp-prompt-wrap:focus-within {
-  border-color: var(--olive);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--olive) 16%, transparent);
+  border-color: color-mix(in srgb, var(--olive) 64%, var(--jc-border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--olive) 9%, transparent), 0 2px 8px rgb(36 42 32 / 3%);
 }
 .cp-prompt-entry {
   position: relative;
   min-width: 0;
-  min-height: 34px;
+  flex: 1;
 }
 .cp-prompt-entry .cp-add-reference {
   position: absolute;
   z-index: 1;
   bottom: 0;
   left: 0;
+  border-color: transparent;
+  background: transparent;
 }
+.cp-prompt-wrap.has-composer-context { margin-top: 28px; }
+.cp-composer-header { position: absolute; bottom: calc(100% + 1px); right: 14px; left: 14px; display: flex; height: 28px; align-items: flex-end; overflow: hidden; }
+.cp-composer-references { display: flex; align-items: center; gap: 6px; min-width: 0; height: 26px; box-sizing: border-box; padding: 0 8px; border-radius: 7px; white-space: nowrap; background: var(--olive-pale); color: var(--olive); font-size: 12px; }
+.cp-composer-references svg { width: 18px; height: 18px; }
+.cp-composer-references small { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--ink3); }
 
 .cp-media-slots {
   display: grid;
@@ -6242,35 +6480,38 @@ const canSend = computed(
   width: 100%;
   min-width: 0;
   box-sizing: border-box;
-  padding-bottom: 38px;
+  padding: 6px 2px 48px;
   border: none;
   background: none;
-  font-size: 13px;
+  font-size: var(--font-base);
   color: var(--ink);
   resize: none;
   outline: none;
   font-family: inherit;
-  line-height: 1.6;
-  min-height: 28px;
-  max-height: 200px;
+  line-height: 1.55;
   overflow-y: auto;
-  field-sizing: content;
+  height: calc(4.65em + 54px);
+  min-height: calc(4.65em + 54px);
+  max-height: calc(4.65em + 54px);
 }
 .cp-submit {
-  flex: 0 0 40px;
+  position: absolute;
+  right: 14px;
+  bottom: 12px;
+  display: flex;
 }
 .cp-send-btn {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
+  display: flex;
+  width: 36px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
   border: none;
   background: var(--line);
   color: var(--surface);
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s;
+  transition: background-color 0.15s, opacity 0.15s;
   position: relative;
   pointer-events: none;
 }
@@ -6282,7 +6523,7 @@ const canSend = computed(
   background: var(--olive);
   color: #fff;
   pointer-events: auto;
-  animation: gcGlow 2.2s ease-in-out infinite;
+  animation: none;
 }
 .cp-send-btn.generating {
   background: var(--olive-dark);
@@ -6290,20 +6531,12 @@ const canSend = computed(
   pointer-events: auto;
   cursor: pointer;
 }
-@keyframes gcGlow {
-  0%,
-  100% {
-    box-shadow: 0 0 10px rgba(107, 142, 35, 0.15);
-  }
-  50% {
-    box-shadow: 0 0 22px rgba(107, 142, 35, 0.4);
-  }
-}
 .cp-send-btn:hover {
-  transform: scale(1.08);
+  opacity: .9;
 }
-.cp-send-btn .mso {
-  font-size: 18px;
+.cp-send-btn > svg {
+  width: 18px;
+  height: 18px;
 }
 .cp-running-badge {
   position: absolute;
@@ -6325,16 +6558,21 @@ const canSend = computed(
 @media (max-width: 768px) {
   /* P0: 参数栏溢出修复 */
   .cp-params {
-    flex-direction: column;
-    gap: 4px;
-    padding: 6px 8px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 2px 6px;
+    padding: 4px 8px;
   }
   .cp-island {
-    width: 100%;
+    width: auto;
+    max-width: 100%;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-start;
     align-items: center;
   }
+  .cp-params > .cp-island:not(.cp-number-island):not(.cp-generic-field):not(.cp-island-grow) { flex: 0 1 auto; }
+  .cp-params > .cp-island-grow { flex: 0 1 auto; min-width: 120px; }
+  .cp-params > .cp-generic-field, .cp-params > .cp-number-island { flex: 1 1 100%; }
   .cp-popover {
     max-width: calc(100vw - 24px);
     left: 50%;
@@ -6359,7 +6597,6 @@ const canSend = computed(
     min-width: 38px;
   }
   .cp-prompt-input {
-    max-height: 80px;
     font-size: 16px; /* 防止 iOS 缩放 */
   }
 
@@ -6368,7 +6605,7 @@ const canSend = computed(
     padding: 0 8px;
     gap: 4px;
   }
-  .cp-title-text, .cp-new-canvas span {
+  .cp-title-text {
     display: none;
   }
   .cp-canvas-picker {

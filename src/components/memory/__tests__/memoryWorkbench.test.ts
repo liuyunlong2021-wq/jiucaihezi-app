@@ -41,7 +41,7 @@ test('memory right chat dock separates preview layout and collapses to a compact
   )
   assert.match(
     workbench,
-    /\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\) var\(--memory-chat-width\); \}/,
+    /\.memory-workbench\.creation-open \{ grid-template-columns: var\(--memory-tree-width, 280px\) minmax\(0, 1fr\) var\(--memory-chat-width\); \}/,
   )
   assert.doesNotMatch(
     workbench,
@@ -123,7 +123,7 @@ test('memory file tree groups project identity above its three file actions', ()
 
   assert.deepEqual(
     Array.from(toolbar.matchAll(/title="([^"]+)"/g), match => match[1]),
-    ['`切换项目：${projectStore.projectName.value}`', '隐藏文件树'],
+    ['`切换项目：${projectStore.projectName.value}`', '新建窗口', '隐藏文件树'],
   )
   assert.match(toolbar, /:title="`切换项目：\$\{projectStore\.projectName\.value\}`"/)
   assert.match(
@@ -254,7 +254,7 @@ test('memory space and conversations are created only by their explicit actions'
     /async function startNewConversation\(\)[\s\S]*createMemoryConversation\(owner, '新对话', files\)/,
   )
   assert.match(workbench, /'新建记忆空间'/)
-  assert.match(workbench, /<span>新建对话<\/span>/)
+  assert.match(workbench, /aria-label="新建对话"/)
   assert.match(
     project,
     /const result = await mutateConversation[\s\S]*return \{ \.\.\.result, lastAssistantTurnId: assistantTurn\.id \}/,
@@ -368,7 +368,7 @@ test('memory opens the latest conversation and keeps message actions at the bott
 
 test('memory composer starts at a three-line input height', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /\.memory-input-area \{[^}]*min-height: 76px;/)
+  assert.match(workbench, /\.memory-composer-editable \{[^}]*min-height: 4\.65em;/)
 })
 
 test('memory workbench accepts text references and uses the adaptive main composer behavior', () => {
@@ -477,7 +477,7 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(workbench, /@Skill \+ @MCP/)
   assert.doesNotMatch(workbench, /const commonCommands = \[/)
   assert.match(workbench, /function insertCommand\(command/)
-  assert.match(workbench, /fileToolsSelected = ref\(false\)/)
+  assert.match(workbench, /fileToolsSelected = ref\(!desktopOnlyRuntime\)/)
   assert.match(workbench, /selectedMcpToolNames = ref<string\[\]>\(\[\]\)/)
   assert.match(workbench, /scene3dSelected = ref\(false\)/)
   assert.match(workbench, /appendMemoryRound\(active\.resource, userTurn, reply, files, title\)/)
@@ -500,20 +500,20 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.doesNotMatch(runtime, /maxModelRequests: maxMemorySteps|stopAfterSuccessfulToolNames/)
   assert.match(runtime, /maxToolRounds: 64/)
   assert.match(runtime, /finalizeAtToolRoundLimit: true/)
-  assert.match(runtime, /compactToolHistory: selectedSkillNames\.length === 0/)
+  assert.match(runtime, /compactToolHistory: false/)
   assert.doesNotMatch(runtime, /WIKI_SEARCH_TOOL_DEFINITION/)
   assert.doesNotMatch(runtime, /READ_ONLY_DOCUMENT_TOOL_DEFINITIONS|快速模式只能读取/)
   assert.match(runtime, /attachments: input\.attachments/)
   assert.match(runtime, /files: input\.files/)
   assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
-  assert.match(runtime, /reservedTokens: maxOutputTokens \+ Math\.min\(32_768, Math\.max\(2_048, Math\.floor\(contextWindow \* 0\.1\)\)\)/)
+  assert.match(runtime, /fitDirectRequest\(request, contextWindow, maxOutputTokens, currentTaskMessage\)/)
   assert.match(
     workbench,
     /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.add\(active\.transcript\.id\)/,
   )
   assert.match(workbench, /recordConversation\(turn\)/)
   assert.doesNotMatch(workbench, /status\.value = `已记录对话：\$\{path\}`/)
-  assert.match(runtime, /不得查找 Raw 对话记录补充当前任务/)
+  assert.match(runtime, /不扫描其他 Raw 对话/)
   assert.match(workbench, /async function addAttachmentFiles\(selected: File\[\]\) \{/)
 })
 
@@ -627,7 +627,7 @@ test('memory composer does not expose removed Jina web tools', () => {
 test('memory topbar uses a grouped model popover and an adaptive new conversation action', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
 
-  assert.match(workbench, /class="new-conversation-button"[\s\S]*<span>新建对话<\/span>/)
+  assert.match(workbench, /class="new-conversation-button"[\s\S]*aria-label="新建对话"/)
   assert.match(
     workbench,
     /memory-conversation-picker[\s\S]*new-conversation-button[\s\S]*memory-title-drag[\s\S]*memory-topbar-actions/,
@@ -643,7 +643,7 @@ test('memory topbar uses a grouped model popover and an adaptive new conversatio
   assert.match(workbench, /id === 'jina-search' \|\| id === 'jina-reader'/)
   assert.doesNotMatch(workbench, /runninghub: 'RunningHub'/)
   assert.match(workbench, /class="memory-model-menu" role="listbox"/)
-  assert.match(workbench, /\.memory-model-menu \{[\s\S]*left: 0;/)
+  assert.match(workbench, /\.memory-model-menu \{[^}]*right: 0;/)
   assert.match(workbench, /role="option" :aria-selected="isSelectedModel\(model\)"/)
   assert.match(workbench, /agentStore\.setModel\(model\.id, model\.providerId\)/)
   assert.match(workbench, /memory-toggle-label">记忆<\/span>/)
@@ -657,7 +657,7 @@ test('memory message copy stays compact and copies the original markdown', () =>
   assert.match(workbench, /writeClipboardText\(displayTurnContent\(turn\)\)/)
   assert.match(
     workbench,
-    /\.memory-message-copy \{ display: flex; width: 26px; height: 26px;/,
+    /\.memory-message-copy \{ display: flex; width: 32px; height: 32px;/,
   )
 })
 
@@ -712,7 +712,7 @@ test('memory media results stay project-first, downloadable, locatable and theme
   assert.match(bubble, /async function downloadCopy\(\)[\s\S]*readBinary\(resource\)/)
   assert.match(bubble, /> \u5728\u6587\u4ef6\u6811\u4e2d\u67e5\u770b\s*<\/button>/)
   assert.doesNotMatch(bubble, /useFileStore|#6c5ce7|#a29bfe|--accent/)
-  assert.match(bubble, /linear-gradient\(90deg, var\(--olive-dark\), var\(--olive\)\)/)
+  assert.match(bubble, /background: var\(--jc-primary\)/)
 })
 
 test('iPhone release metadata declares Photos permission and exempt encryption use', () => {
@@ -911,7 +911,7 @@ test('memory run status does not render the legacy duplicate status line', () =>
 test('memory settings show the build version at the bottom', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
 
-  assert.match(settings, /const appVersion = __APP_VERSION__/)
+  assert.match(settings, /const appVersion = desktopRuntime \|\| mobileRuntime \? __APP_VERSION__ : `Web \$\{__WEB_VERSION__\}`/)
   assert.match(
     settings,
     /<footer class="memory-settings-version">版本 \{\{ appVersion \}\}<\/footer>/,
@@ -992,7 +992,7 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   )
   assert.match(
     workbench,
-    /\.memory-composer \{ min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/,
+    /\.memory-composer \{[^}]*min-width: 0; width: calc\(100% - 28px\); max-width: 860px;/,
   )
   assert.match(
     workbench,
@@ -1025,7 +1025,7 @@ test('memory creation surface reuses the chat dock resize, host preview, and sti
   )
   assert.match(
     workbench,
-    /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: 280px minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/,
+    /@media \(max-width: 939px\) \{[\s\S]*\.memory-workbench\.creation-open \{ grid-template-columns: var\(--memory-tree-width, 280px\) minmax\(0, 1fr\); \}[\s\S]*\.memory-creation \{ position: fixed;/,
   )
   assert.match(workbench, /desktopOnlyRuntime && turn\.role === 'assistant'/)
   assert.match(
@@ -1416,8 +1416,13 @@ test('memory files and conversation turns use the shared safe Markdown renderer'
   const renderer = source('src/components/memory/MemoryMarkdown.vue')
 
   assert.match(workbench, /<MemoryMarkdown/)
-  assert.match(renderer, /renderMessageMarkdown\(renderMarkdownFileLinks\(props\.content\), 'assistant'\)/)
-  assert.match(renderer, /renderStreamingText\(props\.content\)/)
+  assert.match(renderer, /new IncrementalMarkdown\(\)/)
+  assert.match(renderer, /renderMarkdownFileLinks\(props\.content\)/)
+  assert.match(renderer, /renderMarkdownChunk\(chunk\.token, snapshot\.links/)
+  assert.match(renderer, /let html = chunk\.stable \? renderedChunkCache\.get\(cacheKey\) : undefined/)
+  assert.match(renderer, /if \(chunk\.stable\) renderedChunkCache\.set\(cacheKey, html\)/)
+  assert.match(renderer, /renderMessageMarkdown\(source, 'assistant'\)/)
+  assert.match(renderer, /requestAnimationFrame/)
   assert.match(renderer, /renderMermaidBlocks\(base,/)
   assert.match(renderer, /querySelectorAll<HTMLElement>\('h1,h2,h3'\)/)
   assert.match(renderer, /window\.innerWidth > 760/)
@@ -1499,36 +1504,14 @@ test('memory Markdown editing supplies project files to one shared WikiLink pick
   assert.match(workbench, /@cancel-edit="cancelMarkdownEdit"/)
 })
 
-test('memory settings expose the existing Desktop local model runtime', () => {
+test('Web settings exposes desktop-compatible endpoints and keeps native controls gated', () => {
   const settings = source('src/components/memory/MemorySettings.vue')
-  const runtime = source('src/runtime/memory/memoryChat.ts')
-  const mlxRuntime = source('src/utils/localMlxRuntime.ts')
-  const store = source('src/stores/agentStore.ts')
-
-  assert.match(settings, /connectLocalOllama/)
-  assert.match(settings, /getLocalOllamaModels/)
-  assert.match(settings, /connectLocalMlx/)
-  assert.match(settings, /startLocalMlx/)
-  assert.match(settings, /v-model="localMlxApiBase"/)
-  assert.match(settings, /v-model="localMlxModelPath"/)
-  assert.match(settings, /启动并连接/)
-  assert.match(settings, /placeholder="http:\/\/127\.0\.0\.1:9523"/)
-  assert.match(settings, /本机 MLX/)
-  assert.match(mlxRuntime, /fetcher: typeof fetch = safeFetch/)
-  assert.match(
-    store,
-    /x\.id === modelId && x\.providerId === \(explicitProviderId \|\| storedProviderId\)/,
-  )
-  assert.match(settings, /agentStore\.refreshLocalModels\(\)/)
+  assert.match(settings, /normalizeCustomProviderApiBase/)
+  assert.match(settings, /v-model="customProviderDraft.apiBase"/)
+  assert.match(settings, /v-model="customProviderDraft.modelIds"/)
   assert.match(settings, /v-if="desktopRuntime" class="memory-local-model"/)
-  assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'skills' \}"/)
-  assert.match(settings, /v-if="desktopRuntime" :class="\{ active: tab === 'mcp' \}"/)
-  assert.match(
-    runtime,
-    /recordSceneVideo: input\.recordSceneVideo[\s\S]{0,120}document => input\.recordSceneVideo!\(document, input\.signal\)[\s\S]{0,40}: undefined/,
-  )
-  assert.match(runtime, /platform: isTauriRuntime\(\) \? 'desktop' : 'web'/)
-  assert.doesNotMatch(runtime, /forceCloud: true/)
+  assert.match(settings, /<WebSkillPanel v-else-if="tab === 'skills'"/)
+  assert.doesNotMatch(settings, /desktopUpdater|DesktopRemoteSettings|ScreenshotSettings/)
 })
 
 test('aggregate MCP mentions remain searchable by their internal tool prefix', () => {

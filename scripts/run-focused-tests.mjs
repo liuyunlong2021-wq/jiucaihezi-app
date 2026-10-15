@@ -9,6 +9,8 @@ import { build } from 'esbuild'
 const outdir = join(tmpdir(), 'jc-focused-tests')
 
 const wave1FocusedTests = [
+  'src/styles/__tests__/designTokens.test.ts',
+  'src/components/chat/display/__tests__/incrementalMarkdown.test.ts',
   'src/components/canvas/__tests__/canvasDocument.test.ts',
   'src/components/canvas/__tests__/canvasCoordinates.test.ts',
   'src/components/canvas/__tests__/canvasAssetUrlResolver.test.ts',
@@ -59,6 +61,8 @@ const wave1FocusedTests = [
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',
   'src/runtime/creation/__tests__/localComfyRuntime.test.ts',
+  'src/runtime/creation/__tests__/jcComfyAdapterPlan.test.ts',
+  'src/utils/__tests__/projectMediaWriter.test.ts',
   'src/runtime/workbench/__tests__/mediaReference.test.ts',
   'src/runtime/workbench/__tests__/mediaPlan.test.ts',
   'src/runtime/workbench/__tests__/mediaPlanBridge.test.ts',
@@ -168,6 +172,7 @@ const externalNodeTests = [
   'scripts/__tests__/create-official-dmg.test.mjs',
   'scripts/__tests__/legal-pages.test.mjs',
   'scripts/__tests__/memory-product-separation.test.mjs',
+  'scripts/__tests__/web-desktop-ui-parity.test.mjs',
   'scripts/__tests__/windows-release-contract.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]

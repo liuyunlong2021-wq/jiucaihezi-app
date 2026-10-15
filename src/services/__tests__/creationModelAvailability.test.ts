@@ -6,6 +6,12 @@ import { normalizeCreationModelAvailability } from '../creationModelAvailability
 
 const source = readFileSync('src/services/creationModelAvailability.ts', 'utf8')
 
+test('FK replenishing 显示补量中，仍可提交', () => {
+  const [model] = normalizeCreationModelAvailability([{ model: 'fk-video', status: 'replenishing' }])
+  assert.equal(model.status, 'degraded')
+  assert.equal(model.reason, '补量中')
+})
+
 test('Web reads creation model availability from the deployed API service', () => {
   assert.match(source, /const apiUrl = `\$\{DEFAULT_API_BASE_URL\}\/api\/creation\/models`/)
   assert.doesNotMatch(source, /:\s*`?\/api\/creation\/models`?/)

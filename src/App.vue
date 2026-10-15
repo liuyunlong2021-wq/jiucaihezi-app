@@ -64,7 +64,7 @@ async function checkNewVersion() {
 
 <template>
   <MemoryWorkbench />
-  <GlobalSearch v-if="desktopRuntime" />
+  <GlobalSearch />
   <LocalCapabilitySetup
     v-if="showSetupWizard"
     mode="modal"

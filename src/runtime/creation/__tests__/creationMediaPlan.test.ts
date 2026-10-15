@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
 import {
   buildCreationRunPlan,
   sizeFromRatioResolution,
+  usesNewApiContentEndpoint,
   validateCreationModelSpec,
 } from '../creationMediaPlan'
 import {
   CREATION_MODEL_REGISTRY,
   creationModelFamily,
+  displayModelLabel,
   displayModelPrice,
   getCreationModelSpec,
   listCreationPanelModels,
@@ -16,6 +19,15 @@ import {
 } from '../creationModelRegistry'
 import type { CreationModelSpec } from '../creationMediaTypes'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
+import { getMediaModel } from '@/data/mediaModelCapabilities'
+
+test('易红 Grok 1080p 只允许单首帧，720p 保留七张参考图', () => {
+  const modelId = 'newapi/yihong/grok-imagine-video-1.5-preview'
+  const images = ['https://example.test/1.png', 'https://example.test/2.png']
+  assert.throws(() => buildCreationRunPlan({ modelId, params: { prompt: 'p', resolution: '1080p', images } }), /1080p.*1 张首帧.*720p/)
+  assert.doesNotThrow(() => buildCreationRunPlan({ modelId, params: { prompt: 'p', resolution: '1080p', images: images.slice(0, 1) } }))
+  assert.doesNotThrow(() => buildCreationRunPlan({ modelId, params: { prompt: 'p', resolution: '720p', images: Array.from({ length: 7 }, (_, index) => `https://example.test/${index}.png`) } }))
+})
 
 test('image size matrix preserves ratio and upstream constraints', () => {
   const ratios = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
@@ -160,7 +172,8 @@ test('removed defaults stay absent and model metadata drives family and fee labe
   assert.equal(creationModelFamily(getCreationModelSpec('newapi/xiaoyi/grok-imagine-image-2.0')!), 'Grok Image')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-mini-image')!), 'Seedance 2.0 Mini')
   assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-fast-text')!), 'Seedance 2.0 Fast')
-  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-image')!), 'Seedance 2.0')
+  // 这一档里现在只有 2.5（2.0 的 Mini/Fast/标准三套 RH 模型已退役隐藏），组名跟着改成 2.5
+  assert.equal(creationModelFamily(getCreationModelSpec('runninghub/api/rh-seedance2-image')!), 'Seedance 2.5')
   assert.equal(displayModelPrice(getCreationModelSpec('gemini-3-pro-image-preview')!), '0.2/张')
   assert.equal(displayModelPrice(getCreationModelSpec('runninghub/api/rh-3d-image')!), '6.6/次')
 })
@@ -308,6 +321,12 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
   assert.equal(plan.endpoint, '/v1/images/edits')
   assert.equal(plan.apiStyle, 'openai-image-edits')
   assert.equal(plan.pollKind, 'none')
+  assert.equal(plan.debug.normalizedParams.response_format, 'b64_json')
+  const generationPlan = buildCreationRunPlan({
+    modelId: 'gpt-image-2.5-1k',
+    params: { prompt: '商品图', ratio: '1:1' },
+  })
+  assert.equal(generationPlan.debug.normalizedParams.response_format, 'b64_json')
   for (const [modelId, resolutions, price] of [
     ['gpt-image-2.5-1k', ['1k'], '0.08/张'],
     ['gpt-image-2.5-flare-1k', ['1k'], '0.08/张'],
@@ -330,11 +349,55 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
 test('creation panel keeps the requested GPT Image 2.5 order and drops the retired tiers', () => {
   const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
   const position = (id: string) => imageIds.indexOf(id)
-  assert.ok(position('gpt-image-2.5-sunburst-1k') < position('gpt-image-2-1k'))
-  assert.ok(position('gpt-image-2-1k') < position('gpt-image-2-超分'))
-  assert.ok(position('gpt-image-2-超分') < position('gpt-image-2.5-官方'))
-  assert.ok(position('gpt-image-2.5-官方') < position('gpt-image-2.5-flare-官方'))
-  assert.ok(position('gpt-image-2.5-flare-官方') < position('gpt-image-2.5-sunburst-官方'))
+  // 面板只保留两个普通 1K 档；退役档仍保留历史合同。
+  assert.ok(position('gpt-image-2.5-1k') < position('gpt-image-2-1k'))
+  for (const id of ['gpt-image-2-超分', 'gpt-image-2.5-官方']) {
+    assert.equal(position(id), -1)
+    assert.ok(getCreationModelSpec(id))
+  }
+})
+
+test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 变体退出面板', () => {
+  // 族名：视频两项看 `newapi/boluo/` 前缀，图片两项看名字里的「菠萝」
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/boluo/minimax_h3_zm_u24')!), '菠萝')
+  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2-菠萝')!), '菠萝')
+  assert.equal(creationModelFamily(getCreationModelSpec('gpt-image-2.5-菠萝')!), '菠萝')
+
+  const videoIds = listCreationModels({ task: 'video' }).map(model => model.id)
+  const imageIds = listCreationModels({ task: 'image' }).map(model => model.id)
+
+  // 视频任务的默认模型 = jc 本机的参考生视频（switchTask 取 models[0]，面板分组里也是本组第一条）
+  assert.equal(videoIds[0], 'jc-minimax-h3-ref2v')
+
+  // 截图里的五个视频模型（Veo 两项 + 本机 Grok 30 秒 + RH Grok 文生/图生）不再上面板，
+  // 但合同保留（按 id 调用与历史任务照旧）
+  for (const id of [
+    'newapi/zx/veo-3.1-generate-preview',
+    'newapi/zx/veo-3.1-fast-generate-preview',
+    'local-comfy/grok-video-3-30s',
+    'runninghub/api/rh-grok-text-video',
+    'runninghub/api/rh-grok-image-video',
+  ]) {
+    assert.equal(videoIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
+  }
+
+  // 四个 GPT Image 2.5 变体（Flare / Sunburst 的 1K 与官方）同样退出面板
+  for (const id of [
+    'gpt-image-2.5-flare-1k',
+    'gpt-image-2.5-sunburst-1k',
+    'gpt-image-2.5-flare-官方',
+    'gpt-image-2.5-sunburst-官方',
+  ]) {
+    assert.equal(imageIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
+  }
+
+  // 图片侧保留：2.5 的 1K 与两个菠萝项
+  for (const id of ['gpt-image-2.5-1k', 'gpt-image-2-菠萝', 'gpt-image-2.5-菠萝']) {
+    assert.equal(imageIds.includes(id), true, id)
+  }
+  assert.equal(displayModelPrice(getCreationModelSpec('gpt-image-2-菠萝')!), '0.08/张')
 })
 
 test('Gemini image models use the native Xiaoyi image contract', () => {
@@ -475,7 +538,7 @@ test('Xiaoyi Kling and Seedance 2.5 display per-second prices', () => {
 test('unstable or retired video models stay out of the creation panel', () => {
   const retiredIds = [
     'newapi/xiaoyi/MiniMaxH3-2k-pro-sec', 'newapi/xiaoyi/MiniMaxH3-2k-sec', 'newapi/xiaoyi/MiniMaxH3-720p-sec',
-    'newapi/xiaoyi/kling-video-v3', 'newapi/xiaoyi/grok-imagine-video-1.5', 'newapi/xiaoyi/seedance2.5',
+    'newapi/xiaoyi/kling-video-v3', 'newapi/xiaoyi/seedance2.5',
     'runninghub/api/rh-video-v31-fast',
     'newapi/zx/grok-1.5-video-6s', 'newapi/zx/grok-1.5-video-10s', 'newapi/zx/grok-1.5-video-15s',
     'newapi/zx/doubao-seedance-2-5-260628', 'runninghub/api/rh-seedance25-no-video-ref', 'runninghub/api/rh-seedance25-with-video-ref',
@@ -1069,7 +1132,7 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
     assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
   }
 
-  assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.0')
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/shanhai/oc-model-r5cfh8')!), 'Seedance 2.5')
 
   // 定价与范围是有意钉住的：加模型或改价必须同步改这里，避免静默漂移。
   // model 必须是 NewAPI 渠道的公开名（渠道里的模型映射再换成山海上游 id）。
@@ -1085,6 +1148,147 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
     listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/shanhai/')),
     false,
   )
+})
+
+test('灵动渠道新增五型号，保留旧售价并更新参考能力', () => {
+  const perCall = buildCreationRunPlan({
+    modelId: 'newapi/lingdong/SD-2.5-特价',
+    params: { prompt: '海边日落，镜头缓推', ratio: '16:9', duration: 30 },
+  })
+  assert.equal(perCall.route, 'newapi-direct')
+  assert.equal(perCall.endpoint, '/v1/videos')
+  assert.equal(perCall.pollKind, 'newapi-task')
+  assert.equal(perCall.assetFlow, 'newapi-upload')
+  assert.equal(perCall.mode, 'text-to-video')
+
+  const perSecond = buildCreationRunPlan({
+    modelId: 'newapi/lingdong/sd2.5-a',
+    params: {
+      prompt: '让参考图里的主体自然运动',
+      images: ['https://example.com/1.jpg'],
+      ratio: '9:16',
+      resolution: '720p',
+      duration: 30,
+    },
+  })
+  assert.equal(perSecond.mode, 'image-to-video')
+
+  // 实时目录已将 SD-2.5-特价扩展为 30 图，固定 30 秒。
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/lingdong/SD-2.5-特价',
+    params: { prompt: '换一个时长', duration: 15 },
+  }), /时长不支持/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/lingdong/SD-2.5-特价',
+    params: {
+      prompt: '超出参考图上限',
+      images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`),
+    },
+  }), /参考图最多支持 30 个/)
+  // `sd2.5-a` 是 4–30 秒 / 30 张图
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/lingdong/sd2.5-a',
+    params: {
+      prompt: '超出参考图上限',
+      images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`),
+    },
+  }), /参考图最多支持 30 个/)
+
+  // 定价、展示名与范围是有意钉住的：加模型或改名/改价必须同步改这里，也要同步 NewAPI 渠道的计费表达式，
+  // 否则面板显示的实付价与真实扣费会漂移。展示名取 `·` 之前那段（displayModelLabel）。
+  assert.deepEqual(
+    listCreationModels({ source: 'all' })
+      .filter(model => model.id.startsWith('newapi/lingdong/'))
+      .map(model => [model.id, model.model, displayModelLabel(model.label), model.price, model.task]),
+    [
+      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', 'Sd 2.5 480P', '0.5/秒', 'video'],
+      ['newapi/lingdong/SD-2.5-特价', 'SD-2.5-特价', 'Sd 2.5 特价 30秒', '2.5/次', 'video'],
+      ['newapi/lingdong/sd2.5-a', 'sd2.5-a', 'Sd 2.5-a 720P', '0.5/秒', 'video'],
+      ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', 'Sd 2.5 720P', '0.75/秒', 'video'],
+      ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', 'Sd 2.5 1080P', '1.5/秒', 'video'],
+      ['newapi/lingdong/sd-2.5-720-v3', 'sd-2.5-720-v3', 'Sd 2.5 720P V3', '20/次', 'video'],
+      ['newapi/lingdong/SD-2.5-特价-2', 'SD-2.5-特价-2', 'Sd 2.5 特价 2', '4/次', 'video'],
+      ['newapi/lingdong/sd2.5-3033', 'sd2.5-3033', 'Sd 2.5 30图3视频3音频', '4/次', 'video'],
+      ['newapi/lingdong/sd2.5-101010', 'sd2.5-101010', 'Sd 2.5 10图10视频10音频', '4/次', 'video'],
+      ['newapi/lingdong/sd2.5-301010', 'sd2.5-301010', 'Sd 2.5 30图10视频10音频', '4/次', 'video'],
+    ],
+  )
+  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!), '灵动seedace2.5')
+  const mixed = buildCreationRunPlan({
+    modelId: 'newapi/lingdong/sd2.5-3033',
+    params: { prompt: '运动参考', duration: 4, videos: ['https://example.com/v.mp4'], audios: ['https://example.com/a.mp3'] },
+  })
+  assert.deepEqual(mixed.debug.normalizedParams.videos, ['https://example.com/v.mp4'])
+  assert.deepEqual(mixed.debug.normalizedParams.audios, ['https://example.com/a.mp3'])
+  assert.throws(() => buildCreationRunPlan({ modelId: mixed.modelId, params: { prompt: '超限', videos: Array.from({ length: 4 }, (_, i) => `https://example.com/${i}.mp4`) } }), /视频最多支持 3 个/)
+
+  // `SD-2.5-特价` 上游没声明分辨率参数（supported_resolutions 是空数组），面板就不该有这一项
+  assert.equal(
+    getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!.fields.some(field => field.key === 'resolution'),
+    false,
+  )
+  // 2026-10-02 真机验收通过（出片 + 实扣 2 元），所以是 verified 而不是 unknown
+  for (const id of ['newapi/lingdong/SD-2.5-特价', 'newapi/lingdong/sd2.5-a']) {
+    assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
+  }
+  assert.equal(
+    listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/lingdong/')),
+    false,
+  )
+})
+
+test('FK Seedance 2.5 只显示官方六型号，旧型号保留历史注册，参数与上游一致', () => {
+  const expected = [
+    ['ft-video-v1-89e87205d3be4eb2cf3fda249569e693', [30], 9, 0, 0, '¥3/次'],
+    ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [15, 30], 9, 0, 0, '¥5/次'],
+    ['ft-video-v1-bdf45387433ac0a9042ebab3fae0299d', [30], 30, 10, 10, '¥3/次'],
+    ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '¥0.5/秒'],
+    ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '¥0.5/秒'],
+    ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1.1/秒 · 视频参考 ¥41/百万Token'],
+  ] as const
+  const active = listCreationModels({ task: 'video' }).filter(model => creationModelFamily(model) === 'FK · Seedance 2.5')
+  assert.deepEqual(active.map(model => model.id.replace('newapi/fk/', '')).sort(), expected.map(([id]) => id).sort())
+  for (const [id, duration, images, videos, audios, price] of expected) {
+    const spec = getCreationModelSpec(`newapi/fk/${id}`)!
+    assert.equal(spec.files?.images?.max, images)
+    assert.equal(spec.files?.videos?.max || 0, videos)
+    assert.equal(spec.files?.audios?.max || 0, audios)
+    assert.deepEqual(spec.capabilities.duration?.allowedValues || [spec.capabilities.duration?.min, spec.capabilities.duration?.max], [...duration])
+    assert.equal(spec.endpoint, '/v1/videos')
+    const executable = getMediaModel(id)!
+    assert.ok(executable && executable.enabled !== false, `${id} must pass the media API execution gate`)
+    assert.equal(executable.label, spec.label)
+    assert.equal(spec.model, spec.label)
+    assert.equal(executable.model, spec.label)
+    assert.equal(buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', duration: duration[0], resolution: spec.capabilities.resolutions?.[0], ratio: '16:9' } }).model, spec.label)
+    assert.deepEqual(executable.fields.find(field => field.key === 'ratio')?.options, spec.fields.find(field => field.key === 'ratio')?.options)
+    assert.deepEqual(executable.fields.find(field => field.key === 'duration')?.options, spec.fields.find(field => field.key === 'duration')?.options)
+    assert.equal(spec.price, price)
+    assert.doesNotMatch(displayModelPrice(spec), /上游参考/)
+  }
+  for (const id of ['fe82aee0b8ce5ee1d790a56291dc5563', '69ef4c70291248a25c8198cd1c7c9c1f', '7393b0529b788d532d031dcac5e820cb', '9f4e77de6c05f3c360c1c0b9938a44a4']) {
+    assert.equal(getCreationModelSpec(`newapi/fk/ft-video-v1-${id}`)?.hidden, true)
+    assert.equal(getMediaModel(`ft-video-v1-${id}`)?.enabled, false)
+  }
+  assert.ok(listCreationModels({ task: 'video' }).some(model => model.model === 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'))
+})
+
+test('FK 分组排在视频最前，灵动组内首个模型仍为 Sd 2.5 480P', () => {
+  // 用户已将 FK 置顶；同时保留灵动组内既有排序。
+  const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
+  const start = panel.indexOf("cpState.task === 'video'")
+  // 数组字面量里夹了注释，先剔掉注释行再断言第一条
+  const videoOrder = panel
+    .slice(start, start + 400)
+    .split('\n')
+    .filter(line => !line.trim().startsWith('//'))
+    .join('\n')
+  assert.match(videoOrder, /\[\s*'FK · Seedance 2\.5', '灵动seedace2\.5'/)
+
+  const lingdong = listCreationModels({ task: 'video' })
+    .filter(model => model.id.startsWith('newapi/lingdong/'))
+  assert.equal(lingdong[0].id, 'newapi/lingdong/cvk-2.5-480')
+  assert.equal(displayModelLabel(lingdong[0].label), 'Sd 2.5 480P')
 })
 
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
@@ -1112,3 +1316,50 @@ function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {
   }
   return params
 }
+
+test('成片是否经 NewAPI /content 回收，只由一处判据决定', () => {
+  // 本机 comfy-adapter 的 public_base_url 是 Docker 内网名（http://frps:8796）：
+  // 它回在 metadata.url 里的地址只有同网络的上游进程能访问，桌面客户端一取就是 DNS 失败。
+  // 这个判断曾在四处各写一份，保存路径把已经正确的 content 地址换成了内网地址。
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'comfy-first-frame', model: 'jc-minimax-h3' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'comfy-first-last', model: 'jc-minimax-h3' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'openai-videos', model: 'omni-fast' }), true)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'openai-videos', model: 'omni-v2v' }), true)
+  // 直连上游就会给公网地址的模型不能改走 content 端点（ZX 系明确不调 /content）。
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'openai-videos', model: 'veo-3.1-generate-preview' }), false)
+  assert.equal(usesNewApiContentEndpoint({ apiStyle: 'newapi-task', model: 'grok-imagine-video-1.5' }), false)
+  assert.equal(usesNewApiContentEndpoint({}), false)
+  assert.equal(usesNewApiContentEndpoint(undefined), false)
+})
+
+test('易红新增 H3 与图片模型，Gemini 比例画质和 GPT 分级尺寸进入提交计划', () => {
+  const gemini = buildCreationRunPlan({ modelId: 'newapi/yihong/gemini-nano-banana-2.1', params: { prompt: 'p', ratio: '9:16', resolution: '4k', images: ['https://a/i.png'] } })
+  assert.equal(gemini.endpoint, '/v1/images/edits')
+  assert.equal(gemini.mediaInputTransport, 'multipart')
+  assert.equal(gemini.debug.normalizedParams.ratio, '9:16')
+  assert.equal(gemini.debug.normalizedParams.imageSize, '4K')
+  assert.equal(gemini.debug.normalizedParams.response_format, 'b64_json')
+  const gpt = buildCreationRunPlan({ modelId: 'newapi/yihong/gpt-image-2-1K-4K', params: { prompt: 'p', size: '3840x2160' } })
+  assert.equal(gpt.endpoint, '/v1/images/generations')
+  assert.equal(gpt.debug.normalizedParams.size, '3840x2160')
+  const h3 = getCreationModelSpec('newapi/yihong/minimax H3')!
+  assert.equal(h3.model, 'minimax H3')
+  assert.equal(h3.price, '¥0.05/秒')
+  for (const id of ['newapi/yihong/minimax H3', 'newapi/yihong/gemini-nano-banana-2.1', 'newapi/yihong/gpt-image-2-1K-4K']) {
+    assert.ok(listCreationPanelModels().some(item => item.id === id))
+  }
+})
+
+test('小易Grok1.5恢复面板显示、三档售价与6/10秒合同', () => {
+ const id = 'newapi/xiaoyi/grok-imagine-video-1.5'
+ const spec = getCreationModelSpec(id)!
+ assert.ok(listCreationModels().some(model => model.id === id))
+ assert.equal(spec.price, '480p ¥0.2/秒 · 720p ¥0.3/秒 · 1080p ¥0.4/秒')
+ for (const resolution of ['480p', '720p', '1080p']) {
+  const plan = buildCreationRunPlan({ modelId: id, params: { prompt: 'p', duration: 10, resolution, ratio: '9:16' } })
+  assert.equal(plan.endpoint, '/v1/videos')
+  assert.equal(plan.model, 'grok-imagine-video-1.5')
+  assert.equal(plan.debug.normalizedParams.resolution, resolution)
+ }
+})

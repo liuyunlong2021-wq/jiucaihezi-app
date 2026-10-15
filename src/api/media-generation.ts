@@ -83,7 +83,8 @@ export interface AudioGenParams {
 
 export interface MediaResult {
   url: string
-  type: 'image' | 'video' | 'audio' | 'model3d' | 'text'
+  type: 'image' | 'video' | 'audio' | 'model3d' | 'text' | 'file'
+  outputs?: Array<{ outputId: string; type: MediaResult['type']; url: string; text?: string; mimeType: string }>
   text?: string
   taskId?: string
   /** 上游轮询路径（用于任务恢复） */
@@ -152,6 +153,8 @@ function getApiBase(): string {
   }
   return _cachedConfig?.apiBase || DEFAULT_API_BASE_URL
 }
+
+export { getApiBase as getCreationApiBase }
 
 /**
  * 构建认证头：统一主 NewAPI Token
@@ -451,31 +454,54 @@ export async function uploadCreationAsset(value?: string, externalSignal?: Abort
       if (!response.ok) throw new Error(`读取本地素材失败 (${response.status})`)
       return response.blob()
     })
-  const formData = new FormData()
-  formData.append('file', blob, blob.type.startsWith('audio/') ? 'reference.wav' : blob.type.startsWith('video/') ? 'reference.mp4' : 'reference.png')
+  if (blob.size < 1 || blob.size > 20 * 1024 * 1024) throw new Error('参考素材需大于 0 且不超过 20 MB')
   const headers = buildGatewayHeaders({})
-  delete headers['Content-Type']  // multipart 不设置 Content-Type
   const { signal, clear } = createTimeoutSignal(120, externalSignal)
-  let res: Response
   try {
-    res = await safeFetch(`${getApiBase()}/api/creations/uploads`, {
+    const authorization = await safeFetch(`${getApiBase()}/api/creations/upload-url`, {
       method: 'POST',
-      headers,
-      body: formData,
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content_type: blob.type || 'application/octet-stream', size: blob.size }),
       signal,
     })
+    if (!authorization.ok) {
+      const text = await authorization.text().catch(() => '')
+      throw new Error(`申请 OSS 上传地址失败 (${authorization.status}): ${text.slice(0, 200)}`)
+    }
+    const signed = await authorization.json()
+    const uploadUrl = String(signed.upload_url || '').trim()
+    const assetUrl = String(signed.asset_url || '').trim()
+    const fields = signed.form_fields
+    if (!uploadUrl || !assetUrl || !fields || typeof fields !== 'object') {
+      throw new Error('OSS 上传授权响应不完整')
+    }
+    const formData = new FormData()
+    for (const [name, value] of Object.entries(fields)) formData.append(name, String(value))
+    const extension = ({
+      'application/octet-stream': 'bin',
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'image/gif': 'gif',
+      'video/mp4': 'mp4',
+      'video/quicktime': 'mov',
+      'audio/mpeg': 'mp3',
+      'audio/mp4': 'm4a',
+      'audio/wav': 'wav',
+      'audio/x-wav': 'wav',
+      'audio/aac': 'aac',
+      'audio/ogg': 'ogg',
+    } as Record<string, string>)[blob.type] || 'bin'
+    formData.append('file', blob, `reference.${extension}`)
+    const uploaded = await safeFetch(uploadUrl, { method: 'POST', body: formData, signal })
+    if (!uploaded.ok) {
+      const text = await uploaded.text().catch(() => '')
+      throw new Error(`参考素材直传 OSS 失败 (${uploaded.status}): ${text.slice(0, 200)}`)
+    }
+    return assetUrl
   } finally {
     clear()
   }
-  throwIfAborted(externalSignal)
-  if (!res.ok) {
-    const text = await res.text().catch(() => '')
-    throw new Error(`素材上传失败 (${res.status}): ${text.slice(0, 200)}`)
-  }
-  const data = await res.json()
-  const url = String(data.url || data.data?.url || data.raw?.url || data.raw?.data?.download_url || data.raw?.data?.url || '').trim()
-  if (!url) throw new Error('素材上传成功但未返回 URL')
-  return url
 }
 // ★ submitCreationTask 已废弃，所有 RH 模型统一走 rh-adapter + 标准 OpenAI 端点
 
@@ -508,6 +534,33 @@ function createTimeoutSignal(timeoutSec = 300, externalSignal?: AbortSignal): { 
       externalSignal?.removeEventListener('abort', abort)
     },
   }
+}
+
+function mediaHttpErrorDetail(text: string): string {
+  let message = text
+  let code = ''
+  // 上游多层 JSON 包装应先解开，再截取展示文字。
+  for (let depth = 0; depth < 8; depth++) {
+    let payload: any
+    try {
+      payload = JSON.parse(message)
+    } catch {
+      const start = message.indexOf('{')
+      const end = message.lastIndexOf('}')
+      if (start < 0 || end <= start) break
+      try { payload = JSON.parse(message.slice(start, end + 1)) } catch { break }
+    }
+    if (typeof payload === 'string') {
+      message = payload
+      continue
+    }
+    const error = payload?.error ?? payload
+    const next = typeof error === 'string' ? error : error?.message
+    if (typeof next !== 'string' || !next.trim()) break
+    code = typeof error?.code === 'string' ? error.code : ''
+    message = next
+  }
+  return `${code ? `${code}: ` : ''}${message}`.slice(0, 200)
 }
 
 export async function apiCall(path: string, body: any | null, method = 'POST', model?: string, externalSignal?: AbortSignal, apiKeyOverride?: string): Promise<any> {
@@ -543,10 +596,10 @@ export async function apiCall(path: string, body: any | null, method = 'POST', m
       if (text.includes('model_not_found') || text.includes('无可用渠道')) {
         throw new Error(`该模型对应的 NewAPI 渠道暂不可用或无可用渠道，请检查后台渠道状态后再试：${text.slice(0, 200)}`)
       }
-      throw new Error(text.trim() ? `HTTP 503: ${text.slice(0, 200)}` : '服务暂时不可用 (503)，请稍后再试')
+      throw new Error(text.trim() ? `HTTP 503: ${mediaHttpErrorDetail(text)}` : '服务暂时不可用 (503)，请稍后再试')
     }
     const text = await res.text().catch(() => '')
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+    throw new Error(`HTTP ${res.status}: ${mediaHttpErrorDetail(text)}`)
   }
   const json = await res.json()
   console.log('[apiCall] response data keys:', Object.keys(json), 'data[0]:', json?.data?.[0] ? JSON.stringify(json.data[0]).slice(0,200) : 'no data')
@@ -572,7 +625,7 @@ export async function apiCallBinary(path: string, body: unknown, model?: string,
     clear()
   }
   throwIfAborted(externalSignal)
-  if (!res.ok) throw new Error(`HTTP ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+  if (!res.ok) throw new Error(`HTTP ${res.status}: ${mediaHttpErrorDetail(await res.text().catch(() => ''))}`)
   const mime = (res.headers.get('content-type') || 'audio/mpeg').split(';')[0]
   const bytes = new Uint8Array(await res.arrayBuffer())
   let binary = ''
@@ -683,7 +736,7 @@ export async function apiCallMultipart(path: string, fields: Record<string, stri
     if (res.status === 503 && !text.trim()) {
       throw new Error('服务暂时不可用 (503)，请稍后再试')
     }
-    throw new Error(`HTTP ${res.status}: ${text.slice(0, 200)}`)
+    throw new Error(`HTTP ${res.status}: ${mediaHttpErrorDetail(text)}`)
   }
   const json = await res.json()
   checkUpstreamError(json)

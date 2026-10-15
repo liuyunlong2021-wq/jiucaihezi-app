@@ -3,7 +3,7 @@ import { test } from 'node:test'
 
 import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 import { clearMediaModelAvailability, setMediaModelAvailability } from '../../data/mediaModelCapabilities'
-import { assertMediaModelExecutable, generateAudio, generateImage, generateVideo, pollTask } from '../media-generation'
+import { apiCall, apiCallMultipart, assertMediaModelExecutable, generateAudio, generateImage, generateVideo, pollTask } from '../media-generation'
 
 async function installGatewaySession() {
   __resetApiKeyMemoryCacheForTests('session-cloud')
@@ -24,6 +24,33 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
     globalThis.setTimeout = previousSetTimeout
   }
 }
+
+test('HTTP 视频错误展示被多层 JSON 和校验前缀包裹的真实原因', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let responseText = ''
+  globalThis.fetch = async () => new Response(responseText, { status: 400 })
+  try {
+    const reason = '1080p 仅支持 1 张首帧图，请只上传一张 input_reference 或改用 720p'
+    let payload = JSON.stringify({ error: { code: 'invalid_request', message: reason } })
+    payload = JSON.stringify({ code: 'invalid_request', message: `请求未通过校验：${payload}` })
+    for (let i = 0; i < 2; i++) payload = JSON.stringify({ code: 'fail_to_fetch_task', message: payload })
+    responseText = payload
+    await assert.rejects(() => apiCall('/v1/videos', { model: 'grok-imagine-video-1.5-preview' }), error => {
+      assert.ok(error instanceof Error)
+      assert.equal(error.message, `HTTP 400: invalid_request: ${reason}`)
+      return true
+    })
+    await assert.rejects(() => apiCallMultipart('/v1/videos', { model: 'grok-imagine-video-1.5-preview' }), /HTTP 400: invalid_request: 1080p 仅支持 1 张首帧图/)
+    responseText = 'ordinary upstream error'
+    await assert.rejects(() => apiCall('/v1/videos', {}), /HTTP 400: ordinary upstream error/)
+    responseText = JSON.stringify({ error: { message: 'invalid JSON {broken}' } })
+    await assert.rejects(() => apiCall('/v1/videos', {}), /HTTP 400: invalid JSON \{broken\}/)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
 
 test('media task polling stops before another request when cancelled', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
@@ -46,6 +73,47 @@ test('media task polling stops before another request when cancelled', { concurr
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
+})
+
+test('image JSON and multipart requests preserve the server cause of a 503 without resubmitting', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const message = 'No available compatible accounts (request id: test-503)'
+  let requests = 0
+  globalThis.fetch = async () => {
+    requests += 1
+    return Response.json({ error: { message, type: 'upstream_error' } }, { status: 503 })
+  }
+  try {
+    for (const submit of [
+      () => apiCall('/v1/images/generations', { model: 'gpt-image-2-菠萝', prompt: '一只小驴' }),
+      () => apiCallMultipart('/v1/images/edits', { model: 'gpt-image-2-菠萝', prompt: '一只小驴' }),
+    ]) {
+      await assert.rejects(submit, error => error instanceof Error && error.message.includes('503') && error.message.includes(message))
+    }
+    assert.equal(requests, 2)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+
+test('restored task polling uses its submission key after the current key changes', { concurrency: false }, async () => {
+  const previous = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests('different-current-key')
+  const seen: string[] = []
+  globalThis.fetch = async (_input, init) => {
+    const headers = new Headers(init?.headers)
+    seen.push(headers.get('authorization') || '')
+    assert.equal(headers.get('x-api-key'), 'original-submission-key')
+    return Response.json({ status: 'completed', video_url: 'https://example.com/video.mp4' })
+  }
+  try {
+    const result = await withImmediateTimers(() => pollTask('/v1/videos/task_original_key', 'video', undefined, 1, 10, undefined, false, 'original-submission-key'))
+    assert.equal(result, 'https://example.com/video.mp4')
+    assert.deepEqual(seen, ['Bearer original-submission-key'])
+  } finally { globalThis.fetch = previous; __resetApiKeyMemoryCacheForTests('') }
 })
 
 test('Omni video polling uses the authenticated content endpoint instead of upstream metadata URL', { concurrency: false }, async () => {

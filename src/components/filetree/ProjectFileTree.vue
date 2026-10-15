@@ -169,6 +169,7 @@ const loading = ref(false)
 const errorMsg = ref('')
 /** 与 errorMsg 互斥的成功提示；只放操作成功文案，失败一律走 errorMsg。 */
 const statusMsg = ref('')
+const newWindowError = ref('')
 const selectedPath = ref<string | null>(null)
 const selectedPaths = ref<Set<string>>(new Set())
 let selectionAnchorPath: string | null = null
@@ -192,6 +193,13 @@ const currentCloudProjectId = computed(() =>
 )
 const webProjects = ref<Array<{ id: string; name: string }>>([])
 const mobileProjects = ref<MobileProject[]>([])
+const localProjectChoices = computed(() =>
+  isMobile
+    ? mobileProjects.value.map(project => ({ id: project.path, name: project.name }))
+    : isDesktop
+      ? projectStore.recentProjectDirs.value.map(dir => ({ id: dir, name: projectNameFromOwner(dir) }))
+      : webProjects.value,
+)
 const cloudProjects = ref<SyncProject[]>([])
 const showProjectMenu = ref(false)
 const projectMenuBusy = ref(false)
@@ -609,7 +617,16 @@ const offCanvasLocate = onEvent('project-filetree:locate', (payload: any) => {
   // 别的项目的路径不碰这棵树，也不抱怨（结果自动定位会带上 owner）。
   const owner = String(payload?.owner || '')
   if (owner && projectKey.value && owner !== projectKey.value) return
-  void locateProjectResource(String(path), Boolean(payload?.quiet))
+  const expectedOwner = owner || projectKey.value
+  void (async () => {
+    if (payload?.refresh) await loadFileTree()
+    if (expectedOwner && projectKey.value !== expectedOwner) return
+    const node = await locateProjectResource(String(path), Boolean(payload?.quiet))
+    if (payload?.open && node && !node.isDir && projectKey.value)
+      emitEvent('memory:open-resource', await openProjectResource(projectFiles, resourceForNode(node)))
+  })().catch(error => {
+    if (!payload?.quiet) statusMsg.value = `定位文件失败：${error instanceof Error ? error.message : String(error)}`
+  })
 })
 const offWebProjectFilesChanged = onEvent('web-project-files-changed', (payload: unknown) => {
   const changedProjectId = String((payload as { projectId?: string })?.projectId || '')
@@ -846,18 +863,18 @@ async function toggleNode(node: TreeNode) {
   if (!node.expanded && !(await ensureDirectoryLoaded(node))) return
   node.expanded = !node.expanded
 }
-async function locateProjectResource(path: string, quiet = false) {
+async function locateProjectResource(path: string, quiet = false): Promise<TreeNode | null> {
   let node: TreeNode | null = treeRoot.value
   for (const part of path.split('/')) {
     const current = node
-    if (!current || !(await ensureDirectoryLoaded(current))) return
+    if (!current || !(await ensureDirectoryLoaded(current))) return null
     current.expanded = true
     const child = current.children.find(item => item.name === part)
     if (!child) {
       // 静默返回会让人以为是「点了没反应」。用户点的那次要说话（走 statusMsg：
       // 写 errorMsg 会把整棵树藏起来）；结果自动定位失败不能留下赶不走的提示。
       if (!quiet) statusMsg.value = `文件树里没有 ${path}`
-      return
+      return null
     }
     node = child
   }
@@ -870,6 +887,7 @@ async function locateProjectResource(path: string, quiet = false) {
   await nextTick()
   const index = visibleNodes.value.findIndex(entry => entry.node.path === path)
   if (index >= 0) fileTreeVirtualizer.value.scrollToIndex(index, { align: 'center' })
+  return node
 }
 
 /* ─── 左键打开 ─── */
@@ -1448,6 +1466,17 @@ async function createMobileProject(name?: string, select = true): Promise<Mobile
   if (select) await selectDesktopProject(project.path)
   return project
 }
+async function openNewWindow() {
+  if (!isDesktop || isMobile) return
+  newWindowError.value = ''
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_new_window')
+  } catch (cause) {
+    newWindowError.value = `新建窗口失败：${cause instanceof Error ? cause.message : String(cause)}`
+  }
+}
+
 async function openLocalProjectFolder() {
   try {
     const { invoke } = await import('@tauri-apps/api/core')
@@ -2899,6 +2928,7 @@ onBeforeUnmount(() => {
     @keydown="onTreeKeydown"
     tabindex="0"
   >
+    <div v-if="newWindowError" class="pft-status pft-error">{{ newWindowError }}</div>
     <input
       ref="uploadInput"
       class="pft-native-input"
@@ -2921,13 +2951,35 @@ onBeforeUnmount(() => {
       :accept="STORY_IMPORT_ACCEPT"
       @change="onStoryInputChange"
     />
+    <!-- 空窗口（新建窗口）直接平铺出来，布局对齐 VS Code 欢迎页：上面是「打开/新建」这类动作，
+         下面是最近打开。打开本地文件夹等于新建工作区，不是「最近开过的一个项目」，
+         所以跟项目列表分开，并且放在最上面。 -->
     <div v-if="!hasProject" class="pft-empty">
-      <JcIcon name="folder" style="font-size: 32px; opacity: 0.3" />
-      <p>还没有打开项目</p>
-      <button class="pft-empty-btn pft-project-trigger" @click="ctxAddProjectFolder">
-        <JcIcon name="create_new_folder" style="font-size: 14px" />
-        打开项目中心
-      </button>
+      <div class="pft-empty-list">
+        <button v-if="isDesktop && !isMobile" @click="openLocalProjectFolder">
+          <JcIcon name="folder-open" /><span>打开本地文件夹</span>
+        </button>
+        <button v-else @click="isMobile ? createMobileProject() : createWebProject()">
+          <JcIcon name="create-new-folder" /><span>新建项目</span>
+        </button>
+        <button v-if="isDesktop && !isMobile" @click="openNewWindow">
+          <JcIcon name="new-window" /><span>新建窗口</span>
+        </button>
+        <template v-if="localProjectChoices.length">
+          <div class="pft-ctx-divider"></div>
+          <p class="pft-project-section">最近打开</p>
+          <button
+            v-for="project in localProjectChoices"
+            :key="project.id"
+            @click="
+              isDesktop || isMobile ? selectDesktopProject(project.id) : selectWebProject(project)
+            "
+          >
+            <JcIcon name="folder" /><span>{{ project.name }}</span>
+          </button>
+        </template>
+      </div>
+      <p v-if="projectMenuError" class="pft-project-error">{{ projectMenuError }}</p>
     </div>
 
     <template v-else>
@@ -2942,6 +2994,15 @@ onBeforeUnmount(() => {
             <img class="pft-brand-logo" src="/logo.svg" alt="" />
             <strong>{{ projectStore.projectName.value }}</strong>
             <JcIcon name="expand-more" />
+          </button>
+          <button
+            v-if="isDesktop && !isMobile"
+            class="pft-icon-btn"
+            title="新建窗口"
+            aria-label="新建窗口"
+            @click="openNewWindow"
+          >
+            <JcIcon name="new-window" />
           </button>
           <button class="pft-icon-btn" title="隐藏文件树" @click="toggleFileTree">
             <JcIcon name="chevron-left" />
@@ -3015,6 +3076,7 @@ onBeforeUnmount(() => {
       <div v-if="!loading && errorMsg" class="pft-status pft-error">{{ errorMsg }}</div>
       <!-- 成功（与错误互斥） -->
       <div v-else-if="!loading && statusMsg" class="pft-status pft-success">{{ statusMsg }}</div>
+
       <div v-if="!loading && wikiScaffoldNotice" class="pft-status pft-success">{{ wikiScaffoldNotice }}</div>
 
       <!-- ═══ 文件树列表 ═══ -->
@@ -3112,14 +3174,7 @@ onBeforeUnmount(() => {
 
       <div class="pft-project-section">本机项目</div>
       <button
-        v-for="project in isMobile
-          ? mobileProjects.map(project => ({ id: project.path, name: project.name }))
-          : isDesktop
-            ? projectStore.recentProjectDirs.value.map(dir => ({
-                id: dir,
-                name: projectNameFromOwner(dir),
-              }))
-            : webProjects"
+        v-for="project in localProjectChoices"
         :key="project.id"
         :class="{ active: project.id === projectKey }"
         @click="
@@ -3615,6 +3670,35 @@ onBeforeUnmount(() => {
   background: var(--olive-pale);
   border-color: var(--olive);
 }
+.pft-empty-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  max-width: 260px;
+  text-align: left;
+}
+.pft-empty-list button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+}
+.pft-empty-list button:hover {
+  background: var(--olive-pale);
+}
+.pft-empty-list button span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .pft-project-menu {
   position: absolute;
   top: 48px;
@@ -3715,6 +3799,10 @@ onBeforeUnmount(() => {
   min-width: 0;
   align-items: center;
   justify-content: space-between;
+  gap: 4px;
+}
+.pft-project-row > .pft-icon-btn {
+  flex-shrink: 0;
 }
 .pft-project-name {
   display: flex;
@@ -4044,6 +4132,7 @@ onBeforeUnmount(() => {
   gap: 4px;
   height: 30px;
   padding-right: 8px;
+  border-radius: 4px;
   cursor: pointer;
   font-size: 12px;
   white-space: nowrap;
@@ -4063,18 +4152,16 @@ onBeforeUnmount(() => {
   background-repeat: no-repeat;
   background-size: calc(var(--tree-depth) * 16px) 100%;
 }
-.pft-node:hover {
-  background-color: var(--olive-pale);
-}
+.pft-node:hover { background-color: color-mix(in srgb, var(--olive) 6%, transparent); }
 .pft-node.selected {
-  background-color: color-mix(in srgb, var(--olive) 18%, var(--paper));
+  background-color: color-mix(in srgb, var(--olive) 12%, var(--paper));
   color: var(--olive);
 }
 .pft-node.selected .pft-icon {
   color: var(--olive);
 }
 .pft-node.focused {
-  background-color: color-mix(in srgb, var(--olive) 26%, var(--paper));
+  background-color: color-mix(in srgb, var(--olive) 16%, var(--paper));
   outline: 1px solid var(--olive);
   outline-offset: -1px;
 }

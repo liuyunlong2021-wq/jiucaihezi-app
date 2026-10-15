@@ -52,6 +52,14 @@ test('MCP catalog exposes only the three product-approved built-ins', () => {
   assert.doesNotMatch(catalogSource, /id: 'obsidian'/)
 })
 
+test('GitHub OAuth client id is read from the gateway at connect time, not baked in at build time', () => {
+  assert.doesNotMatch(catalogSource, /import\.meta\.env\.VITE_GITHUB_OAUTH_CLIENT_ID/)
+  assert.doesNotMatch(catalogSource, /oauthClientId: import\.meta\.env/)
+  assert.match(catalogSource, /export async function resolveMcpOAuthClientId/)
+  assert.match(catalogSource, /gatewayJson<\{ client_id\?: string \}>\(\'\/auth\/mcp\/github\/config\'\)/)
+  assert.match(source, /await resolveMcpOAuthClientId\(entry\)/)
+})
+
 test('predefined local MCP connects directly and explains a missing Node runtime', () => {
   assert.match(source, /entry\.transport === 'stdio' && entry\.command/)
   assert.match(source, /await toggleServer\(server\)/)
@@ -60,17 +68,6 @@ test('predefined local MCP connects directly and explains a missing Node runtime
   assert.match(source, /重新检测并连接/)
   assert.match(source, /!\/plugin not found\/i\.test/)
   assert.match(source, /openExternal\('https:\/\/nodejs\.org\/zh-cn\/download'\)/)
-})
-
-test('Jiucaihezi creation MCP resolves a per-install stdio path', () => {
-  assert.match(catalogSource, /id: 'jiucaihezi-creation'/)
-  assert.match(source, /entry\.id === 'jiucaihezi-creation'/)
-  assert.match(
-    source,
-    /invoke<\{ command: string; args: string\[\]; cwd\?: string \}>\('resolve_creation_mcp'\)/,
-  )
-  assert.match(tauriLibSource, /commands::creation_mcp::resolve_creation_mcp/)
-  assert.match(appPermissionSource, /"resolve_creation_mcp"/)
 })
 
 test('Windows resolves and launches the npx command shim', () => {

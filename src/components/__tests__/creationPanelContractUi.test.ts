@@ -5,6 +5,33 @@ import { test } from 'node:test'
 
 const root = process.cwd()
 
+test('创作面板历史入口显示为任务记录文字按钮', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /<button class="cp-toolbar-link" type="button" @click="openTaskHistory">任务记录<\/button>/)
+  assert.doesNotMatch(source, /cp-toolbar-icon[^>]*@click="openTaskHistory"/)
+  assert.match(source, /\.cp-toolbar-link \{[\s\S]*?background: var\(--surface-alt\);/)
+  assert.match(source, /class="cp-toolbar-link"[\s\S]*提示词参考/)
+})
+
+test('固定时长作为只读参数显示，仍保留可调时长控件', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /v-if="durationRange.fixed"[^>]*>\{\{ durationRange.min \}\}s（固定）/)
+  assert.match(source, /v-else-if="durationOptions.length <= 3"/)
+})
+
+test('FK 面板隐藏参考上限与常驻收费说明，仅保留视频参考 Token 提示与模型状态', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /v-if="fkBillingHint" class="cp-fk-model-info"/)
+  assert.doesNotMatch(source, /fkReferenceLimits|参考上限：/)
+  assert.match(source, /\{\{ fkBillingHint \}\}/)
+  assert.match(source, /selectedReferenceAssets\.value\.some\(asset => asset\.kind === 'video'\)/)
+  assert.match(source, /cpState\.files\.some\(file => file\.type\.startsWith\('video\/'\)\)/)
+  assert.match(source, /按 Token 计费/)
+  assert.doesNotMatch(source, /显示价格为平台收费价/)
+  assert.doesNotMatch(source, /价格为上游参考价/)
+  assert.match(source, /cp-model-status/)
+})
+
 test('video capture dialog is wired into the creation panel and the memory workbench', () => {
   const dialog = readFileSync(join(root, 'src/components/media/FrameCaptureDialog.vue'), 'utf8')
   assert.match(dialog, /截此帧 → 存入图片并加入画布/)
@@ -104,7 +131,7 @@ test('H3 应用隐藏图槽与质量，比例改浮层、时长改滑条', () =>
   // 选应用时把画幅与时长种成统一值
   assert.match(source, /setModelFieldValue\(ratioField, preferredRatio\.value\)/)
   assert.match(source, /setModelFieldValue\(durationField, H3_DURATION_DEFAULT\)/)
-  assert.match(source, /field\.label === '戏种' \|\| \/0文1武\/\.test\(field\.label\) \|\| \/\^\(65:index\|\.\*:mode\)\$\/i\.test\(field\.key\)/)
+  assert.match(source, /field\.label === '戏种'[\s\S]{0,160}field\.key === '65:index'[\s\S]{0,160}\/mode\/i\.test\(field\.key\)/)
   assert.match(source, /label: '文戏'/)
   assert.match(source, /label: '武戏'/)
   // H3 不预填工作流自带的示例提示词
@@ -407,7 +434,8 @@ test('canvas viewport tools keep the viewport center stable', () => {
   )
   assert.match(source, /const worldCenterX = focus\?\.x \?\? \(width \/ 2 - x\) \/ currentScale/)
   assert.match(source, /const worldCenterY = focus\?\.y \?\? \(height \/ 2 - y\) \/ currentScale/)
-  assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.match(source, /case 'fit':[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.doesNotMatch(source, /case 'fit':(?:(?!break)[\s\S])*arrangeCanvasMedia\(\)/)
   assert.match(
     source,
     /case 'zoomIn':\s+setCanvasViewportScale\(Number\(app\.zoomLayer\.scale \|\| 1\) \* 1\.3\)\s+break/,
@@ -419,20 +447,21 @@ test('canvas viewport tools keep the viewport center stable', () => {
   assert.doesNotMatch(source, /case 'zoomIn': app\.zoomLayer\.scale/)
 })
 
-test('canvas fit arranges media into one centered horizontal row before framing it', () => {
+test('canvas fit changes the viewport and leaves media arrangement to its separate command', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
   assert.match(source, /function arrangeCanvasMedia\(\)/)
-  assert.match(source, /filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/)
+  assert.match(source, /filter\(child =>[\s\S]*?Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)/)
   assert.match(source, /const totalWidth = media\.reduce/)
   assert.match(source, /nextX \+= width \+ gap/)
   assert.doesNotMatch(source, /const columns = Math\.ceil\(Math\.sqrt\(media\.length\)\)/)
   assert.match(source, /canvasStore\.updateLayerPosition\(String\(node\.id\), node\.x, node\.y\)/)
   assert.match(
     source,
-    /const children = app\.tree\.children\.filter\(child => Boolean\(canvasStore\.assets\[String\(child\.id\)\]\)\)/,
+    /const children = app\.tree\.children\.filter\(child => child\.tag !== 'SimulateElement'\)/,
   )
-  assert.match(source, /case 'fit':[\s\S]{0,80}arrangeCanvasMedia\(\)[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.match(source, /case 'fit':[\s\S]{0,80}fitCanvasViewport\(\)[\s\S]{0,40}break/)
+  assert.doesNotMatch(source, /case 'fit':(?:(?!break)[\s\S])*arrangeCanvasMedia\(\)/)
 })
 
 test('canvas fit keeps every media item in one horizontal row', () => {
@@ -656,7 +685,7 @@ test('creation panel persists direct Web and Desktop imports before adding them 
     /class="cp-prompt-wrap"[\s\S]*?class="cp-prompt-entry"[\s\S]*?class="cp-add-reference"/,
   )
   assert.match(source, /\.cp-prompt-entry \.cp-add-reference \{[\s\S]*?position: absolute/)
-  assert.match(source, /\.cp-prompt-input \{[\s\S]*?padding-bottom: 38px/)
+  assert.match(source, /\.cp-prompt-input \{[\s\S]*?padding: 6px 2px 48px/)
   assert.doesNotMatch(source, /\.cp-drag-over/)
   assert.doesNotMatch(source, /flex: 0 0 34px/)
   assert.doesNotMatch(source, />添加参考素材</)
@@ -681,9 +710,9 @@ test('creation panel snapshots debounced saves and binds media work to its resto
   assert.match(schedule, /const document = canvasStore\.getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(
     schedule,
-    /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+void saveCanvas\(document, path, owner\)/,
+    /setTimeout\(\(\) => \{\s+saveTimer = undefined\s+if \(!isCurrentCanvasTarget\(loadToken, owner, path\)\) return[\s\S]*?void saveCanvas\(document, path, owner\)/,
   )
-  assert.doesNotMatch(schedule, /setTimeout\([\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
+  assert.match(schedule, /setTimeout\([\s\S]*?isCurrentCanvasTarget[\s\S]*?getCanvasDocument\(getCanvasScene\(\)\)/)
   assert.match(load, /setCanvasRestoring\(true\)[\s\S]*?await flushCanvasSave\(\)/)
   assert.match(load, /setCanvasRestoring\(true\)\s+try \{[\s\S]*?await flushCanvasSave\(\)/)
 
@@ -702,10 +731,13 @@ test('creation panel snapshots debounced saves and binds media work to its resto
   assert.match(source, /request\.owner !== owner \|\| request\.loadToken !== loadToken/)
 })
 
-test('creation results enter canvas only through the explicit history action', () => {
+test('creation submissions bind their original canvas and retain the history action', () => {
   const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
 
-  assert.doesNotMatch(source, /const offCanvasSync = onEvent\('media-task-settled'/)
+  assert.match(source, /const submissionOwner = canvasOwner\.value \|\| selectedCanvasOwner\(\)/)
+  assert.match(source, /canvasTarget,[\s\S]*plan: submitPlan/)
+  assert.match(source, /referenceNodeIds: submissionReferenceIds/)
+  assert.match(source, /submissionCanvasPath !== canvasStore\.canvasPath/)
   assert.match(source, /async function addTaskResultToCanvas\(task: MediaTask\)/)
   assert.match(source, /@click="addTaskResultToCanvas\(task\)"/)
   assert.match(source, /放到画布/)
@@ -810,7 +842,7 @@ test('creation panel scopes task write gates to the current owner and canvas pat
     /await restoreCanvasScene\(result\.document, path, owner, \(\) =>\s+isCurrentCanvasTarget\(loadToken, owner, path\),?\s+\)/,
   )
   assert.doesNotMatch(taskRestore, /saveCanvas\(/)
-  assert.match(taskResult, /if \(await restoreCanvasTaskResult\(path, owner\)\) release\?\.\(\)/)
+  assert.match(taskResult, /if \(await restoreCanvasTaskResult\(path, owner\)\) \{[\s\S]*?release\?\.\(\)/)
   assert.doesNotMatch(
     source,
     /canvasSaveEpoch|canvasSaveGeneration|canvasTaskRestoreToken|CanvasFileLifecycleLock|deferredTaskAppends/,
@@ -996,10 +1028,11 @@ test('creation panel lets a remote successful result be saved into its project',
   assert.match(retry, /!task\.assetUri/)
   assert.match(retry, /isTauriRuntime\(\) \|\| Boolean\(task\.projectId\)/)
   assert.match(retry, /await mediaTaskStore\.retryMediaPersistence\(task\.id\)/)
-  assert.match(
-    source,
-    /v-if="canPersistMediaResult\(task\)"[\s\S]{0,100}@click="retryTaskPersistence\(task\)"[\s\S]{0,80}>\s*保存到项目\s*<\/button>/,
-  )
+  const saveButton = source.match(/<button\s+v-if="canPersistMediaResult\(task\)"[\s\S]*?<\/button>/)?.[0] || ''
+  assert.match(saveButton, /@click="retryTaskPersistence\(task\)"/)
+  assert.match(saveButton, /task\.type === 'text' \? '保存为文档'/)
+  assert.match(saveButton, /task\.downloadState === 'paused' \? '继续下载'/)
+  assert.match(saveButton, /task\.assetStatus === 'failed' \? '重新下载' : '保存到项目'/)
   assert.match(
     source,
     /v-if="\s+task\.status === 'success' &&\s+\(task\.projectPath \|\| task\.assetUri \|\| \(task\.resultUrl && !canPersistMediaResult\(task\)\)\)\s+"\s+@click="previewTask\(task\)"/,
@@ -1108,7 +1141,7 @@ test('submitted or failed video tasks can query the upstream result without resu
   assert.match(store, /canRefreshTaskResult,\n    init,/)
   assert.match(store, /refreshTaskResult,\n    retryMediaPersistence,/)
 
-  const refresh = store.match(/async function refreshTaskResult\(taskId: string\)[\s\S]*?\n  \}/)?.[0] || ''
+  const refresh = store.match(/async function refreshTaskResultAllowed\(taskId: string\)[\s\S]*?\n  \}/)?.[0] || ''
   assert.ok(refresh, 'refreshTaskResult body should be found')
   assert.doesNotMatch(refresh, /submitTask|generateVideo|generateImage|generateAudio/)
   assert.match(refresh, /await completeMediaTask\(task, mediaUrl, 'refresh-result'\)/)
@@ -1116,4 +1149,15 @@ test('submitted or failed video tasks can query the upstream result without resu
   // 面板：有上游任务 ID 的未完成/失败任务均可重查，且调用 store 的刷新动作。
   assert.match(panel, /v-if="canRefreshTaskResult\(task\)" @click="refreshTaskResult\(task\)">重新查询结果<\/button>/)
   assert.match(panel, /const refreshed = await mediaTaskStore\.refreshTaskResult\(task\.id\)/)
+})
+
+
+test('canvas context media exposes an owner-scoped source-file location action', () => {
+  const source = readFileSync(join(root, 'src/components/creation/CreationPanel.vue'), 'utf8')
+  const locate = source.match(/function locateSelectedCanvasMedia\(\)[\s\S]*?\n}/)?.[0] || ''
+  assert.match(locate, /owner = canvasOwner.value \|\| selectedCanvasOwner\(\)/)
+  assert.match(locate, /emitEvent\('project-filetree:locate', \{ owner, path: asset.resource.path, refresh: true \}\)/)
+  assert.match(source, /@click="locateSelectedCanvasMedia"/)
+  assert.match(source, /!app\?\.editor\?\.list.includes\(node\)/)
+  assert.match(source, /canvasStore.assets\[ctxMenu.value.assetId\]/)
 })

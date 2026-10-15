@@ -39,7 +39,7 @@ export function normalizeCreationModelAvailability(payload: unknown): CreationMo
     normalized.push({
       id,
       status: normalizeAvailabilityStatus(raw),
-      reason: firstString(raw.reason, raw.message),
+      reason: firstString(raw.reason, raw.message) || (String(raw.status).toLowerCase() === 'replenishing' ? '补量中' : undefined),
       lastSuccessAt: firstString(raw.lastSuccessAt, raw.last_success_at),
       estimatedWaitSeconds: firstFiniteNumber(raw.estimatedWaitSeconds, raw.estimated_wait_seconds),
     })
@@ -75,7 +75,7 @@ function extractAvailabilityItems(payload: unknown): RawAvailabilityItem[] {
 function normalizeAvailabilityStatus(item: RawAvailabilityItem): CreationModelAvailabilityStatus {
   const rawStatus = String(item.status || '').trim().toLowerCase()
   if (rawStatus === 'disabled' || rawStatus === 'unavailable' || rawStatus === 'offline') return 'disabled'
-  if (rawStatus === 'degraded' || rawStatus === 'maintenance' || rawStatus === 'limited') return 'degraded'
+  if (rawStatus === 'degraded' || rawStatus === 'maintenance' || rawStatus === 'limited' || rawStatus === 'replenishing') return 'degraded'
   if (rawStatus === 'enabled' || rawStatus === 'available' || rawStatus === 'online') return 'enabled'
 
   if (item.enabled === false || item.available === false) return 'disabled'

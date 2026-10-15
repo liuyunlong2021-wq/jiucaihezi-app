@@ -70,6 +70,8 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
     value: {
       isTauri: true,
       __TAURI_INTERNALS__: {
+        transformCallback() { return 1 },
+        unregisterCallback() {},
         async invoke(
           command: string,
           args: {
@@ -82,6 +84,11 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
             }
           } = {},
         ) {
+          if (command === 'desktop_update_task_begin') return 'update-task-fixture'
+          if (command === 'desktop_update_task_end') return
+          if (command === 'retain_media_download_key') return '0'.repeat(64)
+          if (command === 'get_media_download_key') return 'session-cloud'
+          if (command === 'http_cancel_project_download') return
           if (command === 'http_download_base64') {
             downloads.push(args.request?.url || '')
             return { status: 200, data_base64: 'cG5n', headers: { 'content-type': 'image/png' } }
@@ -99,6 +106,12 @@ function installTauriTaskFileStore(): TauriTaskFileStore {
           }
           if (command === 'http_request') {
             const url = args.request?.url || ''
+            if (url.endsWith('/v1/videos/task_retry_cdn_video')) {
+              return { status: 200, body: JSON.stringify({ status: 'completed', metadata: { url: 'https://cdn.example.test/fresh.mp4' } }), headers: {} }
+            }
+            if (url.endsWith('/v1/videos/task_retry_cdn_fail')) {
+              return { status: 403, body: 'query unavailable', headers: {} }
+            }
             if (url.endsWith('/v1/videos/task_fsWNQWbeZ2HRzDbkBKhyr0nBM3Fn2zSL')) {
               return {
                 status: 200,
@@ -402,6 +415,9 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
     _timeout?: number,
     ...args: unknown[]
   ) => {
+    // Advance polling waits, but keep HTTP deadlines real: extra awaits must
+    // not make a successful mocked request abort in the next microtask.
+    if ((_timeout || 0) >= 60_000) return previousSetTimeout(handler, _timeout, ...args)
     queueMicrotask(() => handler(...args))
     return 0
   }
@@ -439,7 +455,7 @@ test('mediaTaskStore waits for initialization before submitting a new task', () 
 
   assert.match(
     source,
-    /async function submitTask\(params: MediaTaskSubmitParams\): Promise<string> \{\s+const capturedProjectId = captureWebCreationProjectId\(params\)\s+await init\(\)/,
+    /async function submitTaskAllowed\([\s\S]*?\): Promise<string> \{\s+await init\(\)/,
   )
 })
 
@@ -526,13 +542,13 @@ test(
       const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
 
       assert.equal(task?.canvasTarget?.owner, ownerA)
-      assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
-      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
+      assert.equal(task?.assetUri?.startsWith(`${ownerA}/.raw/jc-media/图片/`), true)
+      assert.match(task?.projectPath || '', /^\.raw\/jc-media\/图片\/.+\.png$/)
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(ownerACanvas.scene.length, 1)
       assert.equal(ownerBCanvas.scene.length, 0)
       assert.equal(
-        files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')),
+        files.calls.some(call => call.root === ownerB && call.path.startsWith('.raw/jc-media/图片/')),
         false,
       )
     } finally {
@@ -598,7 +614,7 @@ test(
       const ownerACanvas = JSON.parse(files.get(ownerA, canvasPath) || '{}')
       const ownerBCanvas = JSON.parse(files.get(ownerB, canvasPath) || '{}')
 
-      assert.equal(task?.assetUri?.startsWith(`${ownerA}/jc-media/images/`), true)
+      assert.equal(task?.assetUri?.startsWith(`${ownerA}/.raw/jc-media/图片/`), true)
       assert.equal(task?.canvasWriteStatus, 'written')
       assert.equal(ownerACanvas.scene.length, 1)
       assert.equal(ownerBCanvas.scene.length, 0)
@@ -787,7 +803,7 @@ test(
       const write = files.binaryWrites[0]
 
       assert.equal(write.projectId, projectA)
-      assert.match(write.path, /^jc-media\/images\/.+\.webp$/)
+      assert.match(write.path, /^\.raw\/jc-media\/图片\/.+\.webp$/)
       assert.equal(write.options.mimeType, 'image/webp')
       assert.equal(task?.projectPath, write.path)
       assert.equal(task?.assetStatus, 'local')
@@ -850,7 +866,7 @@ test(
       assert.equal(task?.resultUrl, undefined)
       assert.equal(task?.sourceUrl, resultUrl)
       assert.equal(task?.assetStatus, 'local')
-      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
+      assert.match(task?.projectPath || '', /^\.raw\/jc-media\/图片\/.+\.png$/)
     } finally {
       __setCreationSubmitExecutorForTests(null)
       globalThis.fetch = previousFetch
@@ -1022,7 +1038,7 @@ test(
         files.binaryWrites.some(write => write.projectId === projectB),
         false,
       )
-      assert.match(task?.projectPath || '', /^jc-media\/images\/.+\.png$/)
+      assert.match(task?.projectPath || '', /^\.raw\/jc-media\/图片\/.+\.png$/)
       assert.equal(task?.assetStatus, 'local')
     } finally {
       __setMediaTaskSaverForTests(null)
@@ -1341,6 +1357,48 @@ test(
   },
 )
 
+test('creation results use Raw directories even when old tasks omit or disable memory', { concurrency: false }, async () => {
+  const owner = '/projects/raw-media'
+  const cases = [
+    { type: 'image', folder: '图片', mime: 'image/png', ext: 'png' },
+    { type: 'video', folder: '视频', mime: 'video/mp4', ext: 'mp4' },
+    { type: 'audio', folder: '音频', mime: 'audio/mpeg', ext: 'mp3' },
+  ].flatMap(media => [undefined, false].map(memory => ({ ...media, memory })))
+  const tasks = cases.map((media, index) => ({
+    id: `mtask_raw_${index}`, type: media.type, model: 'legacy-model', modelLabel: '旧任务',
+    prompt: '恢复保存', referenceImages: [], status: 'success', progress: 100, createdAt: 1,
+    source: 'creation', directory: owner, memory: media.memory, assetStatus: 'remote-only',
+    resultUrl: media.memory === false ? `data:${media.mime};base64,cG5n` : `https://cdn.example.com/result.${media.ext}`,
+  }))
+  const legacyPath = 'jc-media/images/already-saved.png'
+  const savedTask = {
+    ...tasks[0], id: 'mtask_raw_existing', assetStatus: 'local',
+    projectPath: legacyPath, assetUri: `${owner}/${legacyPath}`, resultUrl: undefined,
+  }
+  const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([...tasks, savedTask]) })
+  const files = installTauriTaskFileStore()
+  files.set(owner, legacyPath, 'original')
+  setActivePinia(createPinia())
+  const store = useMediaTaskStore()
+  try {
+    await store.init()
+    for (const [index, media] of cases.entries()) {
+      assert.equal(await store.retryMediaPersistence(tasks[index].id), true)
+      const task = store.getTask(tasks[index].id)
+      assert.ok(task?.projectPath?.startsWith(`.raw/jc-media/${media.folder}/`))
+      assert.ok(task?.projectPath?.endsWith(`.${media.ext}`))
+      assert.equal(task?.assetUri, `${owner}/${task?.projectPath}`)
+      assert.equal(files.get(owner, task!.projectPath!), 'png')
+    }
+    assert.equal(await store.retryMediaPersistence(savedTask.id), false)
+    assert.equal(store.getTask(savedTask.id)?.projectPath, legacyPath)
+    assert.equal(files.get(owner, legacyPath), 'original')
+  } finally {
+    files.restore()
+    storage.restore()
+  }
+})
+
 test(
   'mediaTaskStore writes Base64 creation media locally without persisting inline data',
   { concurrency: false },
@@ -1384,7 +1442,7 @@ test(
       assert.equal(files.downloads.length, 0)
       assert.equal(task?.resultUrl, undefined)
       assert.equal(task?.sourceUrl, undefined)
-      assert.match(task?.assetUri || '', /^\/projects\/base64-image\/jc-media\/images\//)
+      assert.match(task?.assetUri || '', /^\/projects\/base64-image\/\.raw\/jc-media\/图片\//)
       assert.equal(task?.assetStatus, 'local')
       assert.equal(JSON.stringify(task?.params).includes('data:image/'), false)
       assert.equal(JSON.stringify(task?.planSnapshot).includes('data:image/'), false)
@@ -1423,7 +1481,7 @@ test(
       assert.equal(await store.retryMediaPersistence('mtask_veo_legacy'), true)
       const task = store.getTask('mtask_veo_legacy')
       assert.deepEqual(files.downloads, [resultUrl])
-      assert.match(task?.assetUri || '', /^\/projects\/veo\/jc-media\/videos\//)
+      assert.match(task?.assetUri || '', /^\/projects\/veo\/\.raw\/jc-media\/视频\//)
       assert.equal(task?.assetStatus, 'local')
     } finally {
       projectStore.projectDir.value = originalProjectDir
@@ -1432,6 +1490,24 @@ test(
     }
   },
 )
+
+test('媒体任务存储的每个 pollTask 调用点都走同一个 content 端点判据', () => {
+  // 根因：这个判断曾在四处各写一份——首轮轮询用 apiStyle 白名单，保存/重试/刷新路径
+  // 只认 omni 或硬编码 false。对 comfy-video 两边结论相反，于是保存时把已经正确的
+  // content 地址换成了适配器的内网地址（http://frps:8796/files/…），成片生成成功却存不进项目。
+  const store = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  const runtime = readFileSync(join(process.cwd(), 'src/runtime/creation/creationMediaRuntime.ts'), 'utf8')
+  const calls = (store.match(/pollTask\(/g) || []).length
+  // 存储侧经 taskUsesContentEndpoint() 包装（旧任务的 planSnapshot 可能缺失，需要退回 task.model）。
+  const judgements = (store.match(/\w*ContentEndpoint\(/g) || []).length
+  assert.ok(calls > 0, 'mediaTaskStore 里没有 pollTask 调用')
+  assert.ok(judgements >= calls, `mediaTaskStore: ${calls} 处 pollTask 只有 ${judgements} 处用了统一判据`)
+  // 旧的两套判据不能再回来：omni 专用判断或硬编码 false。
+  assert.doesNotMatch(store, /usesAuthenticatedVideoContent/)
+  assert.doesNotMatch(store, /pollTask\([\s\S]{0,300}?,\s*false\)/)
+  // 首轮轮询也必须用同一个判据。图片/音频的 pollTask 本来就不走 content 端点，不在此列。
+  assert.match(runtime, /CREATION_VIDEO_POLL_INTERVAL_MS,\s*request\.signal, usesNewApiContentEndpoint\(request\.plan\)/)
+})
 
 test(
   'mediaTaskStore rebuilds adapter-relative video results from the polling task id when retrying persistence',
@@ -1466,7 +1542,7 @@ test(
       assert.deepEqual(files.downloads, [rebuiltUrl])
       assert.equal(task?.status, 'success')
       assert.equal(task?.assetStatus, 'local')
-      assert.match(task?.assetUri || '', /^\/projects\/shanhai\/jc-media\/videos\//)
+      assert.match(task?.assetUri || '', /^\/projects\/shanhai\/\.raw\/jc-media\/视频\//)
     } finally {
       projectStore.projectDir.value = originalProjectDir
       files.restore()
@@ -1474,6 +1550,146 @@ test(
     }
   },
 )
+
+test(
+  '旧 comfy 任务缺少计划快照且保存了内网地址时，仍按注册表与任务号恢复 content 地址',
+  { concurrency: false },
+  async () => {
+    // 实测事故（2026-09-27）：comfy-video 的保存路径把已经正确的 content 地址换成了
+    // 适配器回的 http://frps:8796/files/…（Docker 内网名），桌面客户端解析不了 frps，
+    // 于是成片生成成功（596 秒、文件已在适配器 static/ 里）却永远存不进项目。
+    const corrupted = 'http://frps:8796/files/20260927-09e058eaedbb4652.mp4'
+    const rebuilt = 'https://api.jiucaihezi.studio/v1/videos/task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h/content'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_comfy_internal_url', type: 'video', model: 'jc-minimax-h3-ref2v',
+      modelLabel: 'jc-MiniMax H3 参考生视频', prompt: '客栈视频', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl: corrupted,
+      upstreamTaskId: 'task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h',
+      pollUrl: '/v1/videos/task_Q5DZZCjXloFTngkCBh8sxAVHnLIo6s5h',
+      pollKind: 'video',
+      assetStatus: 'failed',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/comfy'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_comfy_internal_url'), true)
+      })
+      assert.deepEqual(files.downloads, [rebuilt])
+      assert.equal(store.getTask('mtask_comfy_internal_url')?.assetStatus, 'local')
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test('视频重试保存刷新旧公网链接，查询暂不可用时仍尝试原链接', { concurrency: false }, async () => {
+  for (const refreshSucceeds of [true, false]) {
+    const upstreamTaskId = refreshSucceeds ? 'task_retry_cdn_video' : 'task_retry_cdn_fail'
+    const originalUrl = 'https://cdn.example.test/old.mp4?expired=1'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_retry_cdn', type: 'video', model: 'seedance2.5', modelLabel: 'Seedance',
+      prompt: '视频', referenceImages: [], status: 'success', progress: 100, createdAt: 1,
+      source: 'creation', resultUrl: originalUrl, upstreamTaskId,
+      pollUrl: `/v1/videos/${upstreamTaskId}`, pollKind: 'video', assetStatus: 'failed',
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/retry-cdn'
+    try {
+      const store = useMediaTaskStore()
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_retry_cdn'), true)
+      })
+      assert.deepEqual(files.downloads, [refreshSucceeds ? 'https://cdn.example.test/fresh.mp4' : originalUrl])
+      assert.equal(store.getTask('mtask_retry_cdn')?.assetStatus, 'local')
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  }
+})
+
+test(
+  '保存失败必须走失败分支，不能把失败与成功状态混在一起',
+  { concurrency: false },
+  async () => {
+    // 实测事故（2026-09-27）：`downloadAndPersistMediaAsset` 自己吞掉异常并写一半状态
+    // （assetStatus/errorMsg），上层 `completeMediaTask` 仍按成功继续（progressText=完成），
+    // 于是产出一条自相矛盾的记录：文件已在项目里，卡片却显示保存失败。
+    const failing = 'https://api.jiucaihezi.studio/v1/videos/task_download_fail_001/content'
+    const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+      id: 'mtask_save_failure_state', type: 'video', model: 'jc-minimax-h3-ref2v',
+      modelLabel: 'jc-MiniMax H3 参考生视频', prompt: '保存失败', referenceImages: [],
+      status: 'success', progress: 100, progressText: '完成', createdAt: 1,
+      source: 'creation', resultUrl: failing,
+      upstreamTaskId: 'task_download_fail_001',
+      pollUrl: '/v1/videos/task_download_fail_001',
+      pollKind: 'video',
+      planSnapshot: { apiStyle: 'comfy-video', model: 'jc-minimax-h3-ref2v' },
+      // 多次失败仍可重试下载，不永久放弃。
+      assetStatus: 'failed', assetRetryCount: 2,
+    }]) })
+    const files = installTauriTaskFileStore()
+    setActivePinia(createPinia())
+    __resetApiKeyMemoryCacheForTests('session-cloud')
+    const projectStore = useProjectStore()
+    const originalProjectDir = projectStore.projectDir.value
+    projectStore.projectDir.value = '/projects/failure'
+    const store = useMediaTaskStore()
+
+    try {
+      await store.init()
+      await withImmediateTimers(async () => {
+        assert.equal(await store.retryMediaPersistence('mtask_save_failure_state'), false)
+      })
+      const task = store.getTask('mtask_save_failure_state')
+      assert.equal(task?.status, 'success')
+      assert.match(String(task?.errorMsg || ''), /保存到项目失败/)
+      assert.equal(task?.assetStatus, 'failed')
+      assert.equal(task?.downloadState, 'failed')
+      // 关键：进度文案不能再是“完成”——那是成功路径才会写的。
+      assert.doesNotMatch(String(task?.progressText || ''), /^完成$/)
+      assert.deepEqual(files.downloads, [failing])
+    } finally {
+      projectStore.projectDir.value = originalProjectDir
+      files.restore()
+      storage.restore()
+    }
+  },
+)
+
+test('同一任务的保存有单一互斥点，且“已落项目”是终态', () => {
+  // 实测同一任务的下载会并发（项目目录里同时出现两个 .part），后到者的失败把先到者的
+  // 成功状态覆盖掉。根因与 `pollTask` 那次同类：没有一个唯一的写入/互斥点。
+  const store = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
+  assert.match(store, /const savingTaskIds = new Set<string>\(\)/)
+  assert.match(store, /if \(savingTaskIds\.has\(task\.id\)\) return/)
+  assert.match(store, /if \(task\.assetStatus === 'local' && \(task\.projectPath \|\| task\.assetUri\)\) return/)
+  // 失败状态只能由一处写：原先下载函数自己吞异常写一半，上层又按成功写另一半。
+  const download = store.slice(
+    store.indexOf('async function downloadAndPersistMediaAsset'),
+    store.indexOf('function normalizeContentType'),
+  )
+  assert.ok(download.length > 0, '没找到 downloadAndPersistMediaAsset')
+  assert.doesNotMatch(download, /handleAssetDownloadFailure/)
+  assert.doesNotMatch(download, /task\.errorMsg =/)
+})
 
 test(
   'mediaTaskStore restores an explicit failure state when retry persistence cannot re-read the upstream result',
@@ -1569,7 +1785,7 @@ test(
 
 test('retry persistence holds the task in the active set while re-reading and downloading', () => {
   const source = readFileSync(join(process.cwd(), 'src/stores/mediaTaskStore.ts'), 'utf8')
-  const retry = source.match(/async function retryMediaPersistence\(taskId: string\): Promise<boolean> \{[\s\S]*?\n  \}/)?.[0] || ''
+  const retry = source.match(/async function retryMediaPersistenceAllowed\(taskId: string\): Promise<boolean> \{[\s\S]*?\n  \}/)?.[0] || ''
 
   assert.match(retry, /activeTaskIds\.value\.add\(task\.id\)/)
   assert.match(retry, /finally \{\s*\n?\s*activeTaskIds\.value\.delete\(task\.id\)/)
@@ -1668,7 +1884,7 @@ test(
       assert.equal(task?.canvasWriteStatus, 'unwritten')
       assert.equal(ownerBCanvas.scene.length, 0)
       assert.equal(
-        files.calls.some(call => call.root === ownerB && call.path.startsWith('jc-media/images/')),
+        files.calls.some(call => call.root === ownerB && call.path.startsWith('.raw/jc-media/图片/')),
         false,
       )
     } finally {
@@ -2855,4 +3071,82 @@ test('MediaTaskBubble stays on the memory-workbench project and media paths', ()
   assert.equal(source.includes("t.type === 'audio' ? 'audio/mpeg'"), true)
   assert.equal(source.includes("emitEvent('project-filetree:locate', { path: resource.path })"), true)
   assert.equal(source.includes('v-else-if="isSuccess && hasDisplayableResult"'), true)
+})
+
+test('desktop startup resumes a saved download without submitting generation and leaves paused downloads alone', { concurrency: false }, async () => {
+  const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([
+    { id: 'mtask_recover_download', type: 'video', model: 'jc-minimax-h3-ref2v', modelLabel: 'H3', prompt: '恢复下载', referenceImages: [], source: 'creation',
+      status: 'running', createdAt: 1, progress: 100, progressText: '保存中', directory: '/projects/original',
+      resultUrl: 'https://api.jiucaihezi.studio/v1/videos/task_resume_download/content', upstreamTaskId: 'task_resume_download',
+      downloadState: 'downloading', downloadCredentialRef: 'original-reference' },
+    { id: 'mtask_paused_download', type: 'video', model: 'jc-minimax-h3-ref2v', modelLabel: 'H3', prompt: '暂停下载', referenceImages: [], source: 'creation',
+      status: 'success', createdAt: 1, progress: 100, progressText: '暂停', directory: '/projects/original', assetStatus: 'failed',
+      resultUrl: 'https://api.jiucaihezi.studio/v1/videos/task_paused_download/content', downloadState: 'paused', downloadRetryable: false },
+  ]) })
+  const files = installTauriTaskFileStore()
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('different-current-key')
+  let submitted = 0
+  __setCreationSubmitExecutorForTests(async () => { submitted++; throw new Error('不能重新生成') })
+  try {
+    const store = useMediaTaskStore()
+    await store.init()
+    await waitFor(() => store.getTask('mtask_recover_download')?.assetStatus === 'local')
+    assert.equal(submitted, 0)
+    assert.equal(store.getTask('mtask_recover_download')?.downloadState, 'complete')
+    assert.equal(store.getTask('mtask_recover_download')?.directory, '/projects/original')
+    assert.equal(store.getTask('mtask_paused_download')?.downloadState, 'paused')
+    assert.equal(files.downloads.length, 1)
+    assert.equal(await store.retryMediaPersistence('mtask_paused_download'), true)
+    assert.equal(store.getTask('mtask_paused_download')?.assetStatus, 'local')
+    assert.equal(submitted, 0)
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    files.restore()
+    storage.restore()
+  }
+})
+
+
+test('desktop download cancellation pauses only the transfer and can resume without regeneration', { concurrency: false }, async () => {
+  const url = 'https://api.jiucaihezi.studio/v1/videos/task_pause_native/content'
+  const storage = installLocalStorage({ jc_media_tasks_v1: JSON.stringify([{
+    id: 'mtask_pause_native', type: 'video', model: 'jc-minimax-h3-ref2v', modelLabel: 'H3', prompt: '暂停后续传', referenceImages: [], source: 'creation',
+    status: 'success', createdAt: 1, progress: 100, progressText: '等待下载', directory: '/projects/original', resultUrl: url,
+  }]) })
+  const files = installTauriTaskFileStore()
+  const runtime = (globalThis as any).window.__TAURI_INTERNALS__
+  const originalInvoke = runtime.invoke
+  let started = false
+  let first = true
+  let rejectDownload: (cause: Error) => void = () => {}
+  runtime.invoke = async (command: string, args: any) => {
+    if (command === 'http_download_to_project' && first) {
+      first = false
+      started = true
+      return new Promise((_resolve, reject) => { rejectDownload = reject })
+    }
+    if (command === 'http_cancel_project_download') { rejectDownload(new Error('下载已暂停')); return }
+    return originalInvoke(command, args)
+  }
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('session-cloud')
+  const store = useMediaTaskStore()
+  try {
+    await store.init()
+    const downloading = store.retryMediaPersistence('mtask_pause_native')
+    await waitFor(() => started)
+    assert.equal(store.canCancelTask('mtask_pause_native'), true)
+    assert.equal(await store.cancelTask('mtask_pause_native'), true)
+    assert.equal(await downloading, false)
+    const paused = store.getTask('mtask_pause_native')
+    assert.equal(paused?.status, 'success')
+    assert.equal(paused?.downloadState, 'paused')
+    assert.equal(paused?.downloadRetryable, false)
+    assert.equal(paused?.assetUri, undefined)
+    assert.equal(paused?.resultUrl, url)
+    assert.equal(await store.retryMediaPersistence('mtask_pause_native'), true)
+    assert.equal(store.getTask('mtask_pause_native')?.downloadState, 'complete')
+    assert.deepEqual(files.downloads, [url])
+  } finally { files.restore(); storage.restore() }
 })

@@ -12,6 +12,100 @@ import {
   materializeMediaInput,
 } from '../creationMediaRuntime'
 import { getCreationModelSpec } from '../creationModelRegistry'
+import { buildCurrentCreationParams, cpState, switchModel, switchTask } from '@/composables/useCreation'
+
+test('易红 Grok HTTP 请求按无图、单首帧、多参考图互斥提交', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let body: Record<string, unknown> = {}
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    body = JSON.parse(String(init?.body))
+    return Response.json({ video_url: 'https://cdn.example.test/grok.mp4' })
+  }
+  try {
+    const model = 'grok-imagine-video-1.5-preview'
+    for (const count of [2, 0, 1, 7]) {
+      const images = Array.from({ length: count }, (_, index) => `https://cdn.example.test/image-${index}.png`)
+      const expected = {
+        model, prompt: 'p', aspect_ratio: '9:16', resolution: '720p',
+        ...(count === 1 ? { image_url: images[0] } : count > 1 ? { reference_images: images } : {}),
+      }
+      const plan = buildCreationRunPlan({ modelId: `newapi/yihong/${model}`, params: { prompt: 'p', duration: 15, resolution: '720p', ratio: '9:16', images } })
+      await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+      assert.deepEqual(body, expected)
+    }
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('易红 Max 的面板运镜选择进入实际 HTTP 请求体', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    const body = JSON.parse(String(init?.body))
+    assert.equal(body.model, 'seedance-2.5-max')
+    assert.equal(body.duration, 30)
+    assert.equal(body.resolution, '720p')
+    assert.equal(body.camera_movement, 'fixed')
+    return Response.json({ video_url: 'https://cdn.example.test/max.mp4' })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/yihong/seedance-2.5-max', params: { prompt: 'p', duration: 30, resolution: '720p', camera_movement: 'fixed' } })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://cdn.example.test/max.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('FK 面板中文模型名进入实际 NewAPI 请求体', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    assert.equal(JSON.parse(String(init?.body)).model, 'Seedance 2.5 满血 480-720p')
+    return Response.json({ video_url: 'https://cdn.example.test/fk.mp4' })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/fk/ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', params: { prompt: 'p', duration: 15, resolution: '720p', ratio: '9:16' } })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://cdn.example.test/fk.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+async function mockDirectOssUpload(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  onFile?: (file: Blob) => void,
+): Promise<Response | undefined> {
+  const url = String(input)
+  if (url.endsWith('/api/creations/upload-url')) {
+    assert.match(new Headers(init?.headers).get('Authorization') || '', /^Bearer /)
+    const request = JSON.parse(String(init?.body || '{}'))
+    const ext = request.content_type === 'video/mp4' ? 'mp4' : request.content_type === 'audio/mpeg' ? 'mp3' : 'png'
+    return Response.json({
+      upload_url: 'https://oss.example.test/upload',
+      form_fields: { key: `creation-temp/test/reference.${ext}`, policy: 'signed-policy' },
+      asset_url: `https://cdn.example.test/reference.${ext}`,
+    })
+  }
+  if (url === 'https://oss.example.test/upload' && init?.method === 'POST') {
+    assert.equal(new Headers(init.headers).has('Authorization'), false)
+    const file = (init.body as FormData).get('file')
+    assert.equal(file instanceof Blob, true)
+    if (file instanceof Blob) onFile?.(file)
+    return new Response(null, { status: 204 })
+  }
+  return undefined
+}
 
 test('creation MCP submissions opt into project media persistence', () => {
   const source = readFileSync('src/runtime/creation/creationMcpBridge.ts', 'utf8')
@@ -66,6 +160,24 @@ async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   }
 }
 
+test('generic RH AI App keeps the selected webappId at the submit boundary', () => {
+  const plan = buildCreationRunPlan({
+    modelId: 'runninghub/aiapp/rh-aiapp',
+    params: {
+      webappId: '2101840271142117377',
+      billingModel: 'rh-aiapp',
+      outputType: 'video',
+      prompt: '文武双修测试',
+      '65:mode': 1,
+    },
+  })
+
+  const request = buildCreationSubmitRequest(plan)
+
+  assert.equal(request.videoParams?.webappId, '2101840271142117377')
+  assert.equal(plan.debug.normalizedParams['65:mode'], 1)
+})
+
 test('P3 direct GPT Image 2 runtime uses the native OpenAI image contract', () => {
   const plan = buildCreationRunPlan({
     modelId: 'gpt-image-2-超分',
@@ -85,7 +197,7 @@ test('P3 direct GPT Image 2 runtime uses the native OpenAI image contract', () =
   assert.equal(request.pollKind, 'none')
   assert.equal(request.usesRhAdapter, false)
   assert.equal(request.imageParams?.size, '2048x1152')
-  assert.equal(request.imageParams?.responseFormat, 'url')
+  assert.equal(request.imageParams?.responseFormat, 'b64_json')
   assert.equal((request.imageParams as any)?.aspectRatio, undefined)
   assert.equal((request.imageParams as any)?.resolution, undefined)
 })
@@ -102,6 +214,7 @@ test('direct GPT Image 2 submits to the native image edit endpoint', { concurren
       assert.equal(body.get('model'), 'gpt-image-2-超分')
       assert.equal(body.get('prompt'), '把手表改成黄色')
       assert.equal(body.get('size'), '2048x1152')
+      assert.equal(body.get('response_format'), 'b64_json')
       assert.equal(body.get('image[]') instanceof Blob, true)
       return Response.json({ data: [{ url: 'https://cdn.example.test/gpt.png' }] })
     }
@@ -139,7 +252,7 @@ test('菠萝 GPT Image 2.5 透传 size 与 quality（文生图 + 图生图）', 
     }
     if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
-      seen.push({ kind: 'edits', size: body.get('size'), quality: body.get('quality') })
+      seen.push({ kind: 'edits', size: body.get('size'), quality: body.get('quality'), response_format: body.get('response_format') })
       return Response.json({ data: [{ url: 'https://cdn.example.test/boluo/edit.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
@@ -172,9 +285,32 @@ test('菠萝 GPT Image 2.5 透传 size 与 quality（文生图 + 图生图）', 
       prompt: '一只橙色狐狸',
       size: '2048x1152',
       quality: 'high',
-      response_format: 'url',
+      response_format: 'b64_json',
     })
-    assert.deepEqual(seen[1], { kind: 'edits', size: '2048x1152', quality: 'medium' })
+    assert.deepEqual(seen[1], { kind: 'edits', size: '2048x1152', quality: 'medium', response_format: 'b64_json' })
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('GPT Image 2.5 prefers inline bytes over a relay URL', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.match(String(input), /\/v1\/images\/generations$/)
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.model, 'gpt-image-2.5-1k')
+    assert.equal(body.response_format, 'b64_json')
+    return Response.json({ data: [{
+      url: 'https://relay.xiaoyiapi.xyz/v1/images/public/result',
+      b64_json: 'cG5n',
+    }] })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'gpt-image-2.5-1k', params: { prompt: '一只猫' } })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'data:image/png;base64,cG5n')
   } finally {
     globalThis.fetch = previousFetch
     await restoreStorage()
@@ -217,12 +353,12 @@ test('Grok Image 2 submits a mapped size and always requests a URL', { concurren
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
-      const body = init.body as FormData
-      assert.equal(body.get('model'), 'grok-imagine-image-2.0')
-      assert.equal(body.get('size'), '2048x1152')
-      assert.equal(body.get('aspect_ratio'), null)
-      assert.equal(body.get('response_format'), 'url')
+    if (url.endsWith('/v1/images/generations') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.model, 'grok-imagine-image-2.0')
+      assert.equal(body.size, '2048x1152')
+      assert.equal(body.aspect_ratio, undefined)
+      assert.equal(body.response_format, 'url')
       return Response.json({ data: [{ url: 'https://cdn.example.test/grok.png' }] })
     }
     throw new Error(`Unexpected fetch ${url}`)
@@ -246,7 +382,7 @@ test('Grok Image 2 uses image[] for multiple reference images', { concurrency: f
   const previousFetch = globalThis.fetch
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+    if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
       assert.equal(body.getAll('image[]').length, 2)
       assert.equal(body.getAll('image').length, 0)
@@ -459,13 +595,12 @@ test('RunningHub URL contract uploads local canvas data once before adapter subm
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
-      return Response.json({ url: 'https://cdn.example.test/rh-input.png' })
-    }
+    const directUpload = await mockDirectOssUpload(input, init)
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/images/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.deepEqual(body.images, ['https://cdn.example.test/rh-input.png'])
+      assert.deepEqual(body.images, ['https://cdn.example.test/reference.png'])
       return Response.json({ task_id: 'rh_canvas_data_001', status: 'processing' })
     }
     if (url.endsWith('/rh/tasks/rh_canvas_data_001')) {
@@ -601,8 +736,11 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
         { nodeId: '4', fieldName: 'image', fieldValue: 'https://cdn.jiucaihezi.studio/person.png' },
         { nodeId: '10', fieldName: 'value', fieldValue: '832' },
       ])
-      assert.equal(body.webappId, '12345')
-      assert.deepEqual(body.extra_fields, { webappId: '12345' })
+      assert.equal(body.webappId, '2101840271142117377')
+      assert.deepEqual(body.extra_fields, { webappId: '2101840271142117377', nodeInfoList: body.nodeInfoList })
+      assert.deepEqual(body.images, ['https://cdn.jiucaihezi.studio/person.png'])
+      assert.equal(body.duration, undefined)
+      assert.equal(body.seconds, undefined)
       return Response.json({ task_id: 'rh_aiapp_runtime_001', status: 'processing', ai_app: true })
     }
     if (url.endsWith('/rh/tasks/rh_aiapp_runtime_001?ai_app=true')) {
@@ -615,7 +753,7 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
     const plan = buildCreationRunPlan({
       modelId: 'runninghub/aiapp/rh-aiapp',
       params: {
-        webappId: '12345',
+        webappId: '2101840271142117377',
         billingModel: 'rh-aiapp-fast-digital-human',
         outputType: 'video',
         '3:audio': 'https://cdn.jiucaihezi.studio/voice.mp3',
@@ -635,6 +773,50 @@ test('generic RunningHub AI App runtime uses dynamic nodeInfoList and ai_app pol
     assert.equal(result.taskId, 'rh_aiapp_runtime_001')
     assert.equal(result.pollUrl, '/rh/tasks/rh_aiapp_runtime_001?ai_app=true')
   } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('H3 selected 3 seconds and references survive the NewAPI video boundary', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input, init) => {
+    assert.ok(String(input).endsWith('/v1/videos'))
+    const body = JSON.parse(String(init?.body || '{}'))
+    assert.equal(body.duration, 3)
+    assert.equal(body.seconds, '3')
+    assert.equal(body.aspect_ratio, '9:16')
+    assert.deepEqual(body.images, ['https://cdn.example.test/selected.png'])
+    assert.deepEqual(body.extra_fields.nodeInfoList, body.nodeInfoList)
+    const forwarded = { model: body.model, prompt: body.prompt, duration: body.duration, metadata: body.metadata }
+    assert.deepEqual(forwarded.metadata.rh_aiapp, {
+      version: 1, webappId: '2101840271142117377', nodeInfoList: body.nodeInfoList,
+    })
+    assert.ok(body.nodeInfoList.some((node: any) => node.nodeId === '27' && node.fieldValue === '3'))
+    assert.ok(body.nodeInfoList.some((node: any) => node.nodeId === '35' && node.fieldValue === 'None'))
+    return Response.json({ url: 'https://cdn.example.test/result.mp4' })
+  }
+  try {
+    switchTask('ai-app')
+    switchModel('runninghub/aiapp/rh-aiapp')
+    cpState.aiAppWebappId = '2101840271142117377'
+    cpState.aiAppOutputType = 'video'
+    cpState.dur = 20
+    cpState.ar = '1:1'
+    cpState.aiAppFields = [
+      { key: '27:value', label: '时长', kind: 'number' },
+      { key: '29:aspect_ratio', label: '比例', kind: 'select' },
+      { key: '6:image', label: 'image1', kind: 'image' },
+      { key: '35:image', label: 'image2', kind: 'image', defaultValue: 'placeholder.png' },
+    ]
+    cpState.fieldValues = { '27:value': 3, '29:aspect_ratio': '9:16 (Portrait Widescreen)', '35:image': 'saved.png' }
+    const plan = buildCreationRunPlan({ modelId: 'runninghub/aiapp/rh-aiapp',
+      params: buildCurrentCreationParams({ images: ['https://cdn.example.test/selected.png'] }) })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'https://cdn.example.test/result.mp4')
+  } finally {
+    cpState.fieldValues = {}
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
@@ -996,6 +1178,49 @@ test('Gemini Omni video edit sends billing seconds to NewAPI without RH duration
   }
 })
 
+test('本机 H3 参考生视频把比例字段 ratio 透传给适配器', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.equal(body.model, 'jc-minimax-h3-ref2v')
+      assert.equal(body.aspect_ratio, '9:16 (Portrait Widescreen)')
+      assert.equal(body.size, undefined)
+      assert.deepEqual(body.extra_fields, { mode: 0, aspect_ratio: '9:16 (Portrait Widescreen)' })
+      // NewAPI 会丢掉顶层自定义字段与 extra_fields，只有 metadata 能活着到适配器
+      assert.deepEqual(body.metadata, { mode: 0, aspect_ratio: '9:16 (Portrait Widescreen)' })
+      assert.deepEqual(body.images, ['https://example.com/reference.png'])
+      return Response.json({ id: 'task_jc_h3_ref2v_001', status: 'queued' })
+    }
+    if (url.endsWith('/v1/videos/task_jc_h3_ref2v_001')) {
+      return Response.json({
+        id: 'task_jc_h3_ref2v_001', status: 'completed', progress: 100,
+        metadata: { url: 'https://api.jiucaihezi.studio/v1/videos/task_jc_h3_ref2v_001/content' },
+      })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'jc-minimax-h3-ref2v',
+      params: {
+        prompt: '竖屏人物回头', duration: 3,
+        ratio: '9:16 (Portrait Widescreen)',
+        images: ['https://example.com/reference.png'],
+      },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://api.jiucaihezi.studio/v1/videos/task_jc_h3_ref2v_001/content')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('Xiaoyi MiniMax H3 submits string seconds without duplicate duration', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
@@ -1097,13 +1322,9 @@ test('KIK uploads local video and audio before submitting them to NewAPI', { con
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal(new Headers(init?.headers).get('Authorization'), 'Bearer session-cloud')
-      assert.equal(new Headers(init?.headers).get('X-JC-Session'), null)
-      const file = (init?.body as FormData).get('file') as Blob
-      uploaded.push(file.type)
-      return Response.json({ url: `https://cdn.example.test/reference.${file.type.startsWith('video/') ? 'mp4' : 'mp3'}` })
-    }
+    const directUpload = await mockDirectOssUpload(input, init, file => uploaded.push(file.type))
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body))
       assert.equal(body.video_url, 'https://cdn.example.test/reference.mp4')
@@ -1141,14 +1362,13 @@ test('ZX Grok URL contract uploads local reference before model submit', async (
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
-      return Response.json({ url: 'https://cdn.example.test/grok-input.png' })
-    }
+    const directUpload = await mockDirectOssUpload(input, init)
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'grok-1.5-video-10s')
-      assert.equal(body.image, 'https://cdn.example.test/grok-input.png')
+      assert.equal(body.image, 'https://cdn.example.test/reference.png')
       return Response.json({ task_id: 'zx_grok_10_001', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/zx_grok_10_001')) {
@@ -1227,9 +1447,9 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    if (url.endsWith('/api/creations/uploads')) {
-      return Response.json({ url: 'https://api.jiucaihezi.studio/media/creation/ref.png' })
-    }
+    const directUpload = await mockDirectOssUpload(input, init)
+    if (directUpload) return directUpload
+    if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       // 面板发渠道公开名；NewAPI 的模型映射再换成 oc-model-r5cfh8。
@@ -1238,10 +1458,10 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
       assert.equal(body.ratio, '16:9')
       assert.equal(body.resolution, '720p')
       assert.equal(body.duration, 30)
-      // 参考图必须是网关上传后的公开 HTTPS 地址：山海只接受可公开抓取的直链。
+      // 参考图由 OSS 直传后，通过临时签名 HTTPS 地址交给模型服务。
       assert.deepEqual(body.images, [
-        'https://api.jiucaihezi.studio/media/creation/ref.png',
-        'https://api.jiucaihezi.studio/media/creation/ref.png',
+        'https://cdn.example.test/reference.png',
+        'https://cdn.example.test/reference.png',
       ])
       return Response.json({ id: 'run_shanhai_1', status: 'processing' })
     }
@@ -1296,4 +1516,30 @@ test('视频轮询窗口按上游合同延长，图片/音频保持原窗口', (
   const runtime = readFileSync('src/runtime/creation/creationMediaRuntime.ts', 'utf8')
   assert.match(runtime, /pollTask\([\s\S]{0,60}CREATION_VIDEO_POLL_MAX_SEC, CREATION_VIDEO_POLL_INTERVAL_MS/)
   assert.doesNotMatch(runtime, /pollTask\(pollUrl, 'video', onProgress, 600, 10000/)
+})
+
+test('易红 Gemini 图生图保留比例和画质，使用 multipart 引用文件', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/v1/images/edits')) {
+      assert.ok(init?.body instanceof FormData)
+      const body = init.body as FormData
+      assert.equal(body.get('model'), 'gemini-nano-banana-2.1')
+      assert.equal(body.get('ratio'), '9:16')
+      assert.equal(body.get('imageSize'), '4K')
+      assert.equal(body.get('response_format'), 'b64_json')
+      assert.ok(body.get('image[]') instanceof Blob)
+      return Response.json({ data: [{ url: 'https://cdn.example.test/yihong.png' }] })
+    }
+    throw new Error(`Unexpected fetch ${String(input)}`)
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/yihong/gemini-nano-banana-2.1', params: { prompt: 'p', ratio: '9:16', resolution: '4k', images: ['data:image/png;base64,aGVsbG8='] } })
+    const result = await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    assert.equal(result.url, 'https://cdn.example.test/yihong.png')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
 })

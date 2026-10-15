@@ -55,6 +55,7 @@ export function canonicalCreationRatio(modelId: string, value: unknown): string 
   const short = raw.split(' (')[0]
   return options.find(option => option.split(' (')[0] === short)
 }
+
 const SOURCE_LABELS = {
   'newapi-direct': '直连',
   runninghub: 'RunningHub',
@@ -111,6 +112,9 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
   validatePlanInputs(spec, params)
   const warnings = buildWarnings(spec)
   const referenceImageCount = countReferences(params, ['images', 'image', 'imageUrl', 'imageUrls'])
+  if (spec.id === 'newapi/yihong/grok-imagine-video-1.5-preview' && String(params.resolution).toLowerCase() === '1080p' && referenceImageCount > 1) {
+    throw new Error('1080p 仅支持 1 张首帧图，请只保留一张参考图或改用 720p')
+  }
   const referenceVideoCount = countReferences(params, ['videos', 'video', 'videoUrl', 'videoUrls'])
   const referenceAudioCount = countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls'])
   const effective = resolveEffectiveContract(spec, referenceImageCount)
@@ -166,6 +170,9 @@ function mediaInputTransportFor(
   assetFlow: CreationAssetFlow,
 ): CreationMediaInputTransport {
   if (spec.route === 'local-comfy') return 'base64'
+  // FK's image plugin accepts signed HTTPS imageUrls. Materialize reference files
+  // to private OSS URLs instead of relaying file bytes through NewAPI multipart.
+  if (spec.id.startsWith('newapi/fk/') && spec.model.startsWith('ft-image-v1-')) return 'url'
   if (apiStyle === 'openai-image-edits' || apiStyle === 'newapi-image-task') {
     return 'multipart'
   }
@@ -298,6 +305,9 @@ function normalizeOpenAiImageParams(
     prompt: params.prompt,
     size,
     quality: params.quality,
+    ...(spec.id === 'newapi/yihong/gemini-nano-banana-2.1'
+      ? { ratio: firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1', imageSize: String(params.resolution || '1k').toUpperCase() }
+      : {}),
     ...(spec.model.startsWith('ft-image-v1-')
       ? {
           ratio: firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']),
@@ -309,7 +319,7 @@ function normalizeOpenAiImageParams(
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
     // GPT Image 2 系列的中转 URL 可能在客户端不可达；直接带回图片字节供项目落盘。
-    response_format: spec.id.startsWith('gpt-image-2') ? 'b64_json' : 'url',
+    response_format: spec.id.startsWith('gpt-image-2') || spec.id.startsWith('newapi/yihong/') ? 'b64_json' : 'url',
   })
 }
 

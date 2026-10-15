@@ -135,8 +135,6 @@ const conversations = ref<MemoryConversation[]>([])
 const conversationPickerOpen = ref(false)
 const conversationSearch = ref('')
 const conversationPickerRef = ref<HTMLElement | null>(null)
-const mobileMoreOpen = ref(false)
-const mobileMoreRef = ref<HTMLElement | null>(null)
 const input = ref('')
 const editingTurnId = ref('')
 const fileWriteOpen = ref(false)
@@ -422,11 +420,77 @@ let chatResizeStartWidth = 0
 let sceneSaveQueue = Promise.resolve()
 let projectMapSaveQueue = Promise.resolve()
 
-const MEMORY_TREE_WIDTH = 280
+const MEMORY_TREE_DEFAULT = 280
+const MEMORY_TREE_MIN = 180
+const storedTreeWidth = Number(localStorage.getItem('jcMemoryTreeWidth'))
+const fileTreeWidth = ref(Number.isFinite(storedTreeWidth) && storedTreeWidth >= MEMORY_TREE_MIN ? Math.min(560, storedTreeWidth) : MEMORY_TREE_DEFAULT)
+const fileTreeResizing = ref(false)
+let treeResizeStartX = 0
+let treeResizeStartWidth = 0
+let treePreviousCursor = ''
+let treePreviousUserSelect = ''
+
+function treeMaximumWidth(): number {
+  const contentMin = window.innerWidth >= 940 && (creationOpen.value || previewResource.value)
+    ? MEMORY_CREATION_MIN + (chatDockMode.value === 'compact' ? MEMORY_CHAT_COMPACT : MEMORY_CHAT_FULL_MIN)
+    : 320
+  return Math.max(MEMORY_TREE_MIN, Math.min(560, window.innerWidth - contentMin))
+}
+
+function setFileTreeWidth(width: number) {
+  fileTreeWidth.value = Math.max(MEMORY_TREE_MIN, Math.min(treeMaximumWidth(), width))
+  if (creationOpen.value || previewResource.value) chatDockWidth.value = clampChatDockWidth(chatDockWidth.value)
+}
+
+function moveFileTreeResize(event: PointerEvent) {
+  if (fileTreeResizing.value) setFileTreeWidth(treeResizeStartWidth + event.clientX - treeResizeStartX)
+}
+
+function stopFileTreeResize() {
+  if (!fileTreeResizing.value) return
+  fileTreeResizing.value = false
+  window.removeEventListener('pointermove', moveFileTreeResize)
+  window.removeEventListener('pointerup', stopFileTreeResize)
+  window.removeEventListener('pointercancel', stopFileTreeResize)
+  window.removeEventListener('blur', stopFileTreeResize)
+  document.body.style.cursor = treePreviousCursor
+  document.body.style.userSelect = treePreviousUserSelect
+  localStorage.setItem('jcMemoryTreeWidth', String(Math.round(fileTreeWidth.value)))
+}
+
+function startFileTreeResize(event: PointerEvent) {
+  if (event.button !== 0 || window.innerWidth <= 760 || fileTreeResizing.value || chatDockResizing.value) return
+  treeResizeStartX = event.clientX
+  treeResizeStartWidth = fileTreeWidth.value
+  treePreviousCursor = document.body.style.cursor
+  treePreviousUserSelect = document.body.style.userSelect
+  fileTreeResizing.value = true
+  window.addEventListener('pointermove', moveFileTreeResize)
+  window.addEventListener('pointerup', stopFileTreeResize)
+  window.addEventListener('pointercancel', stopFileTreeResize)
+  window.addEventListener('blur', stopFileTreeResize)
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+}
+
+function resetFileTreeWidth() {
+  setFileTreeWidth(MEMORY_TREE_DEFAULT)
+  localStorage.setItem('jcMemoryTreeWidth', String(Math.round(fileTreeWidth.value)))
+}
+
+function handleFileTreeResizeKey(event: KeyboardEvent) {
+  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const step = event.shiftKey ? 40 : 10
+  setFileTreeWidth(event.key === 'Home' ? MEMORY_TREE_MIN : event.key === 'End' ? treeMaximumWidth() : fileTreeWidth.value + (event.key === 'ArrowRight' ? step : -step))
+  localStorage.setItem('jcMemoryTreeWidth', String(Math.round(fileTreeWidth.value)))
+}
+
 const MEMORY_CREATION_MIN = 520
+watch([creationOpen, previewResource, treeOpen], () => { setFileTreeWidth(fileTreeWidth.value) })
 
 function clampChatDockWidth(width: number): number {
-  const treeWidth = treeOpen.value ? MEMORY_TREE_WIDTH : 0
+  const treeWidth = treeOpen.value ? fileTreeWidth.value : 0
   return Math.max(MEMORY_CHAT_FULL_MIN, Math.min(window.innerWidth - treeWidth - MEMORY_CREATION_MIN, width))
 }
 
@@ -475,7 +539,7 @@ function expandChatDock() {
 
 function prepareDockLayout() {
   if (window.innerWidth < 940) return
-  if (treeOpen.value && window.innerWidth - MEMORY_TREE_WIDTH < MEMORY_CHAT_FULL_MIN + MEMORY_CREATION_MIN)
+  if (treeOpen.value && window.innerWidth - fileTreeWidth.value < MEMORY_CHAT_FULL_MIN + MEMORY_CREATION_MIN)
     treeOpen.value = false
 }
 
@@ -512,6 +576,7 @@ async function closeCreationHost(): Promise<boolean> {
 
 function resizeCreationForWindow() {
   viewportWidth.value = window.innerWidth
+  setFileTreeWidth(fileTreeWidth.value)
   if (previewResource.value || creationOpen.value) prepareDockLayout()
   if (chatDockMode.value === 'expanded') chatDockWidth.value = clampChatDockWidth(chatDockWidth.value)
 }
@@ -814,6 +879,7 @@ onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleGlobalKeydown)
   window.removeEventListener('resize', resizeCreationForWindow)
   stopChatDockResize()
+  stopFileTreeResize()
   stopProjectWatch?.()
   projectGeneration++
   // 卸载 = 退出工作台：中断所有还在跑的运行，并让挂着的审批先落地。
@@ -854,7 +920,6 @@ function isInternalMediaModel(modelId: string): boolean {
 function closeModelPicker(event: PointerEvent) {
   if (modelPickerOpen.value && !modelPickerRef.value?.contains(event.target as Node)) modelPickerOpen.value = false
   if (conversationPickerOpen.value && !conversationPickerRef.value?.contains(event.target as Node)) conversationPickerOpen.value = false
-  if (mobileMoreOpen.value && !mobileMoreRef.value?.contains(event.target as Node)) mobileMoreOpen.value = false
   if (mentionOpen.value
     && !composerRef.value?.contains(event.target as Node)
     && !mentionPopoverRef.value?.contains(event.target as Node)) closeMention()
@@ -3042,14 +3107,16 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       'creation-focused': creationFocused,
       'chat-dock-compact': chatDockMode === 'compact',
       'chat-dock-narrow': viewportWidth >= 940 && (previewResource || creationOpen) && chatDockMode === 'expanded' && chatDockWidth < 560,
-      'chat-dock-resizing': chatDockResizing,
+      'chat-dock-minimal': viewportWidth >= 940 && (previewResource || creationOpen) && chatDockMode === 'expanded' && chatDockWidth < 360,
+      'chat-dock-resizing': chatDockResizing || fileTreeResizing,
     }"
-    :style="{ '--memory-chat-width': `${chatDockMode === 'compact' ? MEMORY_CHAT_COMPACT : chatDockWidth}px` }"
+    :style="{ '--memory-tree-width': `${fileTreeWidth}px`, '--memory-chat-width': `${chatDockMode === 'compact' ? MEMORY_CHAT_COMPACT : chatDockWidth}px` }"
     data-tauri-drag-region
   >
     <aside class="memory-tree" :class="{ open: treeOpen }">
       <ProjectFileTree />
     </aside>
+    <div v-if="treeOpen && !creationFocused && viewportWidth > 760" class="memory-tree-resizer" role="separator" tabindex="0" aria-label="调整文件树宽度" aria-orientation="vertical" :aria-valuenow="Math.round(fileTreeWidth)" :aria-valuemin="180" :aria-valuemax="treeMaximumWidth()" title="拖动调整文件树宽度，双击恢复默认" @pointerdown.prevent="startFileTreeResize" @keydown="handleFileTreeResizeKey" @dblclick="resetFileTreeWidth" />
     <button v-if="treeOpen" class="memory-tree-backdrop" aria-label="关闭文件树" @click="treeOpen = false"></button>
 
     <main class="memory-main memory-chat-dock">
@@ -3061,9 +3128,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <JcIcon v-else-if="error" name="error" />
       </div>
       <header class="memory-topbar">
-        <div class="memory-topbar-left">
-          <button v-if="!treeOpen" class="icon-button memory-tree-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
-          <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
+        <button v-if="!treeOpen" class="icon-button" title="打开文件树" @click="treeOpen = true"><JcIcon name="menu" /></button>
+        <div v-if="memoryReady" ref="conversationPickerRef" class="memory-conversation-picker">
           <button
             class="memory-conversation-trigger"
             type="button"
@@ -3071,9 +3137,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             @click="conversationPickerOpen = !conversationPickerOpen"
           >
             <JcIcon name="history" class="memory-conversation-icon" />
-            <span class="memory-conversation-title">{{ conversation?.transcript.title || '选择对话' }}</span>
-            <span class="memory-conversation-mobile-label">记录</span>
-            <JcIcon class="memory-picker-chevron memory-conversation-chevron" :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
+            <span>{{ conversation?.transcript.title || '选择对话' }}</span>
+            <JcIcon class="memory-picker-chevron" :name="conversationPickerOpen ? 'expand-less' : 'expand-more'" />
           </button>
           <div v-if="conversationPickerOpen" class="memory-conversation-menu">
             <input v-model="conversationSearch" type="search" placeholder="搜索对话" aria-label="搜索对话" />
@@ -3092,37 +3157,29 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <p v-if="!filteredConversations.length" class="memory-model-empty">没有匹配的对话</p>
             </div>
           </div>
-          </div>
-          <button
-            v-if="memoryReady"
-            class="new-conversation-button"
-            :disabled="projectActionPending"
-            aria-label="新建对话"
-            title="新建对话"
-            @click="startNewConversation"
-          >
-            <JcIcon name="add" class="memory-new-conversation-icon" />
-            <span class="new-conversation-label-full">新建对话</span>
-            <span class="new-conversation-label-short">新建</span>
-            <span class="new-conversation-label-tiny">新</span>
-          </button>
         </div>
+        <button
+          v-if="memoryReady"
+          class="new-conversation-button"
+          type="button"
+          title="新建对话"
+          aria-label="新建对话"
+          :disabled="projectActionPending"
+          @click="startNewConversation"
+        >
+          <JcIcon name="add" class="memory-new-conversation-icon" />
+        </button>
         <div class="memory-title-drag" data-tauri-drag-region></div>
-        <div ref="mobileMoreRef" class="memory-mobile-more">
-          <button class="icon-button memory-more-trigger" type="button" aria-label="更多" title="更多" :aria-expanded="mobileMoreOpen" @click="mobileMoreOpen = !mobileMoreOpen"><JcIcon name="more_horiz" /></button>
-          <div v-if="mobileMoreOpen" class="memory-mobile-more-menu">
-            <button v-if="!treeOpen" type="button" @click="mobileMoreOpen = false; treeOpen = true">打开文件树</button>
-            <button v-if="conversation" type="button" @click="mobileMoreOpen = false; creationOpen ? closeCreationHost() : openCreationForCurrentConversation()">创作面板</button>
-            <button type="button" @click="mobileMoreOpen = false; settingsOpen = true">账号与设置</button>
-          </div>
-        </div>
         <div class="memory-topbar-actions">
           <button
-            v-if="conversation"
-            class="icon-button memory-creation-shortcut"
+            class="memory-creation-toggle"
+            type="button"
             title="创作面板"
+            aria-label="创作面板"
+            :aria-pressed="creationOpen"
+            :disabled="!conversation"
             @click="creationOpen ? closeCreationHost() : openCreationForCurrentConversation()"
-          ><JcIcon name="palette" /></button>
+          ><JcIcon name="movie_filter" /><span>创作面板</span></button>
           <button
             v-if="conversation"
             class="memory-toggle-button"
@@ -3155,7 +3212,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               <p v-if="!textModels.length" class="memory-model-empty">登录后加载模型</p>
             </div>
           </div>
-          <button class="icon-button memory-settings-shortcut" title="账号与设置" @click="settingsOpen = true"><JcIcon name="settings" /></button>
+          <button class="icon-button memory-account-settings" title="账号设置" aria-label="账号设置" @click="settingsOpen = true"><JcIcon name="settings" /></button>
         </div>
       </header>
 
@@ -3313,14 +3370,16 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         :is-streaming="sending"
       />
 
-      <footer v-if="conversation" class="memory-composer">
-        <div class="memory-creation-routes" role="group" aria-label="创作路线（正式产物保存到项目 Wiki，小说先保存草稿）">
-          <button v-for="route in CREATION_ROUTES" :key="route.name" type="button"
-            :class="{ active: selectedSkillNames.includes(route.name) }"
-            :aria-pressed="selectedSkillNames.includes(route.name)" :disabled="routeSavePending"
-            :title="`${route.label}：正式产物保存到项目 Wiki；讨论或明确不要保存时不写入，小说章节先存草稿`"
-            @click="setComposerSkills(selectCreationRoute(selectedSkillNames, route.name))">{{ route.label }}</button>
-        </div>
+      <button
+        v-if="memoryScrollNav?.showScrollToBottom"
+        class="memory-scroll-latest"
+        type="button"
+        :aria-label="memoryScrollNav?.hasNewContent ? '有新内容，回到最新消息' : '回到最新消息'"
+        @click="memoryScrollNav?.scrollToBottom()"
+      ><JcIcon name="arrow_downward" /><span>{{ memoryScrollNav?.hasNewContent ? '有新内容' : '回到最新' }}</span></button>
+
+      <footer v-if="conversation" class="memory-composer" :class="{ 'has-composer-context': selectedSkillNames.length || selectedToolChips.length }">
+        <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-composer-header">
         <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
@@ -3331,6 +3390,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>
             <button :title="`移除${tool.label}`" @click="disableTool(tool.id)">×</button>
           </div>
+        </div>
         </div>
         <div v-if="persistentAttachments.length || attachments.length" class="memory-attachments">
           <div v-for="file in persistentAttachments" :key="file.id" class="memory-attachment-chip">
@@ -3427,11 +3487,23 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <button v-if="editingTurnId" class="memory-editing-cancel" type="button" title="取消编辑" aria-label="取消编辑" @click="cancelEdit"><JcIcon name="close" /><span>取消编辑</span></button>
             <button class="icon-button" title="添加附件" @click="fileInput?.click()"><JcIcon name="attach-file" /></button>
             <div class="memory-command-strip" aria-label="常用指令">
-              <button v-for="command in primaryCommands" :key="command.id" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
+        <div class="memory-creation-routes" role="group" aria-label="创作路线（正式产物保存到项目 Wiki，小说先保存草稿）">
+          <button v-for="route in CREATION_ROUTES" :key="route.name" type="button"
+            :class="{ active: selectedSkillNames.includes(route.name) }"
+            :aria-pressed="selectedSkillNames.includes(route.name)" :disabled="routeSavePending"
+            :title="`${route.label}：正式产物保存到项目 Wiki；讨论或明确不要保存时不写入，小说章节先存草稿`"
+            @click="setComposerSkills(selectCreationRoute(selectedSkillNames, route.name))">{{ route.label }}</button>
+        </div>
+              <button v-for="command in primaryCommands" :key="command.id" class="memory-primary-command" type="button" :aria-label="command.description" @pointerenter="showChipTip($event, command.description)" @pointerleave="hideChipTip" @focus="showChipTip($event, command.description)" @blur="hideChipTip" @click="insertCommand(command)">
                 <JcIcon :name="command.icon" /><span>{{ command.label }}</span>
               </button>
+              <details class="memory-command-overflow">
+                <summary aria-label="更多工具"><JcIcon name="more_horiz" /></summary>
+                <div class="memory-command-menu">
+                  <button v-for="command in toolCommands" :key="command.id" type="button" @click="insertCommand(command)"><JcIcon :name="command.icon" /><span>{{ command.label }}</span></button>
+                </div>
+              </details>
             </div>
-            <span class="memory-action-spacer" aria-hidden="true"></span>
             <button v-if="sending" class="send-button" title="本条对话正在运行，点此停止（其他对话不受影响）" @click="stop"><JcIcon name="stop" /></button>
             <button v-else class="send-button" :title="sendInFlight ? '@Jev 正在判断本轮能力…' : editingTurnId ? '重新发送' : '发送'" :disabled="sendInFlight || routeSavePending || (!input.trim() && !persistentAttachments.length && !attachments.length && !referencedFiles.length && !selectedSkillNames.length)" @click="send"><JcIcon name="arrow-upward" /></button>
           </div>
@@ -3557,7 +3629,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
     </aside>
 
     <div v-if="settingsOpen" class="memory-settings-backdrop" @click="settingsOpen = false"></div>
-    <aside class="memory-settings-drawer" :class="{ open: settingsOpen }">
+    <aside class="memory-settings-drawer" :class="{ open: settingsOpen }" :inert="!settingsOpen" :aria-hidden="!settingsOpen">
       <header><strong>设置</strong><button class="icon-button" title="关闭" @click="settingsOpen = false"><JcIcon name="close" /></button></header>
       <MemorySettings
         :owner="projectOwner"
@@ -3639,53 +3711,80 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 </template>
 
 <style scoped>
-.memory-workbench { --memory-header-height: 52px; display: grid; grid-template-columns: 280px minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--paper); color: var(--ink1); font-size: var(--font-base); }
+.memory-workbench { --memory-header-height: 52px; --memory-model-picker-width: min(220px, 28vw); position: relative; display: grid; grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr); width: 100vw; height: 100dvh; overflow: hidden; background: var(--jc-surface); color: var(--ink1); font-size: var(--font-base); }
 .memory-workbench.desktop-runtime { padding-top: 28px; box-sizing: border-box; }
+.memory-window-actions { position: absolute; z-index: 90; top: 0; right: 10px; display: flex; height: 28px; align-items: center; gap: 5px; }
+.memory-window-action { display: inline-flex; height: 25px; align-items: center; justify-content: center; gap: 5px; padding: 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; line-height: 1; }
+.memory-window-action:not(.memory-window-creation-toggle) { width: 28px; flex: 0 0 28px; padding: 0; }
+.memory-window-action:hover:not(:disabled), .memory-window-action[aria-pressed="true"] { background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
+.memory-window-action:disabled { cursor: default; opacity: .45; }
+.memory-window-creation-toggle { box-sizing: border-box; padding: 0 9px; }
+.memory-workbench.desktop-runtime .memory-model-picker { width: var(--memory-model-picker-width); max-width: var(--memory-model-picker-width); }
+.memory-workbench.desktop-runtime .memory-model-trigger { width: 100%; box-sizing: border-box; }
 .memory-scene-recorder { position: fixed; top: 0; left: -10000px; width: 640px; height: 640px; pointer-events: none; }
 .memory-workbench.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
-.memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.creation-open { grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr) var(--memory-chat-width); }
 .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr) var(--memory-chat-width); }
-.memory-workbench.preview-open { grid-template-columns: 280px minmax(0, 1fr) var(--memory-chat-width); }
+.memory-workbench.preview-open { grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr) var(--memory-chat-width); }
 .memory-workbench.preview-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr) var(--memory-chat-width); }
 .memory-workbench.preview-open .memory-main { grid-column: 3; }
 .memory-workbench.preview-open .memory-preview { grid-column: 2; grid-row: 1; }
 .memory-workbench.creation-open .memory-main { grid-column: 3; }
 .memory-workbench.creation-open .memory-creation { grid-column: 2; grid-row: 1; }
 .memory-chat-dock { min-width: 0; }
-.memory-conversation-icon, .memory-new-conversation-icon, .memory-model-icon { display: none; }
+.memory-conversation-icon, .memory-model-icon { display: none; }
+.memory-new-conversation-icon { display: block; width: 18px; height: 18px; filter: drop-shadow(0 1px 2px rgb(36 42 32 / 24%)); }
 .memory-workbench.chat-dock-narrow .memory-topbar { gap: 4px; padding: 0 6px; }
-.memory-workbench.chat-dock-narrow .memory-conversation-trigger, .memory-workbench.chat-dock-narrow .new-conversation-button, .memory-workbench.chat-dock-narrow .memory-model-trigger { width: 34px; padding: 0; justify-content: center; }
-.memory-workbench.chat-dock-narrow .memory-conversation-trigger > span, .memory-workbench.chat-dock-narrow .new-conversation-button > span, .memory-workbench.chat-dock-narrow .memory-model-trigger > span, .memory-workbench.chat-dock-narrow .memory-picker-chevron { display: none; }
+.memory-workbench.chat-dock-narrow .memory-conversation-picker { flex: 0 1 38%; max-width: 38%; min-width: 52px; }
+.memory-workbench.chat-dock-narrow .memory-conversation-trigger { width: 100%; min-width: 0; gap: 4px; padding: 0 6px; }
+.memory-workbench.chat-dock-narrow .new-conversation-button { width: 30px; flex: 0 0 30px; }
+.memory-workbench.chat-dock-narrow .memory-title-drag { min-width: 0; flex: 0; }
+.memory-workbench.chat-dock-narrow .memory-topbar-actions { min-width: 0; flex: 1 1 auto; gap: 6px; }
+.memory-workbench.chat-dock-narrow .memory-model-picker { width: auto; max-width: none; min-width: 0; flex: 1 1 120px; }
+.memory-workbench.desktop-runtime.chat-dock-narrow .memory-model-picker { width: auto; max-width: none; }
+.memory-workbench.chat-dock-narrow .memory-model-trigger { width: 100%; min-width: 0; gap: 4px; justify-content: flex-start; padding: 0 6px; }
+.memory-workbench.chat-dock-narrow .memory-model-trigger > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-workbench.chat-dock-narrow .memory-creation-toggle { flex: 0 0 auto; padding: 0 8px; }
 .memory-workbench.chat-dock-narrow .memory-conversation-icon, .memory-workbench.chat-dock-narrow .memory-new-conversation-icon, .memory-workbench.chat-dock-narrow .memory-model-icon { display: inline; }
+.memory-workbench.chat-dock-minimal .memory-conversation-picker { flex: 0 0 34px; max-width: 34px; min-width: 34px; }
+.memory-workbench.chat-dock-minimal .memory-conversation-trigger { justify-content: center; padding: 0; }
+.memory-workbench.chat-dock-minimal .memory-conversation-trigger > span, .memory-workbench.chat-dock-minimal .memory-conversation-trigger .memory-picker-chevron { display: none; }
+.memory-workbench.chat-dock-minimal .memory-topbar-actions { gap: 2px; }
+.memory-workbench.chat-dock-minimal .memory-model-picker { flex-basis: 72px; }
+.memory-workbench.chat-dock-minimal .memory-topbar-actions > .icon-button { width: 34px; flex-basis: 34px; }
 .memory-chat-compact-bar { position: absolute; z-index: 30; inset: 0; display: grid; align-content: start; justify-items: center; gap: 10px; padding-top: 10px; background: var(--paper); }
 .memory-chat-compact-bar .icon-button { width: 34px; }
 .memory-workbench.chat-dock-compact:is(.preview-open, .creation-open) .memory-main > :not(.memory-chat-compact-bar) { visibility: hidden; }
 .memory-workbench.chat-dock-resizing > * { transition: none !important; }
 .memory-workbench.creation-open .memory-title-drag { min-width: 0; }
-.memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: min(220px, 30%); }
+/* 顶栏动作区放不下时，先让对话标题截断（它本来就长），模型名保持完整 ——
+   模型名短且必须可读，一旦被挤就只剩「gp…」（用户 2026-10-03 截图）。封顶用确定长度。 */
+.memory-workbench.creation-open .memory-conversation-picker, .memory-workbench.creation-open .memory-model-picker { max-width: 220px; }
 .memory-workbench.creation-focused { display: block; padding-top: 0; }
 .memory-workbench.desktop-runtime.creation-focused { padding-top: 28px; }
 .memory-workbench.creation-focused .memory-tree, .memory-workbench.creation-focused .memory-main { display: none; }
-.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--line); background: var(--surface); }
+.memory-tree-resizer { position: absolute; z-index: 40; top: 0; bottom: 0; left: calc(var(--memory-tree-width, 280px) - 4px); width: 8px; cursor: col-resize; touch-action: none; }
+.memory-workbench.desktop-runtime .memory-tree-resizer { top: 28px; }
+.memory-tree-resizer::after { content: ''; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; }
+.memory-tree-resizer:hover::after, .memory-tree-resizer:focus-visible::after { background: var(--olive); }
+.memory-tree-resizer:focus-visible { outline: 0; }
+.memory-tree { min-width: 0; min-height: 0; overflow: hidden; border-right: 1px solid var(--jc-border); background: var(--jc-surface-container-low); }
 .memory-workbench.tree-closed .memory-tree { overflow: hidden; border-right: 0; }
-.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; container-name: memory-main; container-type: inline-size; }
-.memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--line); }
-.memory-topbar-left { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.memory-main { position: relative; display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: var(--memory-header-height) minmax(0, 1fr) auto; min-width: 0; min-height: 0; background: var(--jc-surface); }
+.memory-topbar { display: flex; align-items: center; gap: 8px; padding: 0 12px; border-bottom: 1px solid var(--jc-border); }
 .memory-title-drag { display: flex; min-width: 80px; height: 100%; flex: 1; align-items: center; gap: 9px; user-select: none; }
-.memory-topbar-actions { display: flex; align-items: center; gap: 8px; margin-left: auto; }
-.memory-mobile-more { display: none; }
-.memory-toggle-button { display: inline-flex; height: 34px; align-items: center; gap: 9px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-.memory-toggle-button:hover { border-color: var(--olive); color: var(--olive); }
-.memory-toggle-button.enabled { border-color: color-mix(in srgb, #4b9978 62%, var(--line)); background: color-mix(in srgb, #4b9978 14%, var(--paper)); color: #327657; }
-.memory-toggle-label { line-height: 1; }
-.memory-toggle-state { display: inline-flex; height: 22px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink3); font-size: 11px; line-height: 1; }
-.memory-toggle-button.enabled .memory-toggle-state { border-color: color-mix(in srgb, #4b9978 42%, transparent); background: color-mix(in srgb, #4b9978 16%, var(--paper)); color: #327657; }
-.memory-toggle-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 6px; }
+.memory-topbar-actions { display: flex; flex-wrap: nowrap; min-width: 0; align-items: center; gap: 8px; margin-left: auto; }
+.memory-topbar-actions > .memory-account-settings { width: 34px; flex: 0 0 34px; border: 0; background: transparent; color: var(--ink2); }
+.memory-topbar-actions > .memory-account-settings:hover { background: var(--surface-alt); }
+.memory-topbar .new-conversation-button, .memory-topbar .icon-button, .memory-model-trigger, .memory-conversation-trigger { height: 34px; box-sizing: border-box; border-radius: 8px; }
+.memory-creation-toggle { display: inline-flex; align-items: center; gap: 6px; height: 34px; flex: 0 0 auto; padding: 0 9px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.memory-creation-toggle > svg, .memory-window-creation-toggle > svg { width: 20px; height: 20px; flex: 0 0 20px; }
+.memory-creation-toggle:hover:not(:disabled) { background: var(--surface-alt); color: var(--ink1); }
+.memory-creation-toggle:disabled { cursor: default; opacity: .45; }
+.memory-creation-toggle[aria-pressed="true"] { color: var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--surface)); }
 .memory-conversation-picker { position: relative; min-width: 0; max-width: min(280px, 34vw); }
 .memory-conversation-trigger { display: flex; max-width: 100%; align-items: center; gap: 6px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; }
 .memory-conversation-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.memory-conversation-mobile-label, .new-conversation-label-short, .new-conversation-label-tiny, .memory-toggle-icon { display: none; }
 .memory-conversation-trigger:hover, .memory-conversation-trigger[aria-expanded="true"] { border-color: var(--olive); }
 .memory-conversation-menu { position: absolute; z-index: 50; top: calc(100% + 7px); left: 0; width: min(320px, 84vw); padding: 7px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-conversation-menu > input { width: 100%; height: 32px; padding: 0 9px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 5px; outline: 0; background: var(--surface); color: var(--ink1); font: inherit; }
@@ -3697,9 +3796,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-conversation-name { overflow: hidden; padding: 0 8px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
 .memory-conversation-action { display: grid; padding: 0; place-items: center; color: var(--ink3); }
 .memory-conversation-action:hover { color: var(--olive); }
-.new-conversation-button { display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--olive); background: var(--olive); color: white; cursor: pointer; font: inherit; white-space: nowrap; }
+.new-conversation-button { display: grid; width: 34px; flex: 0 0 34px; place-items: center; padding: 0; border: 0; background: var(--surface-alt); color: var(--ink2); cursor: pointer; font: inherit; }
+.new-conversation-button:hover:not(:disabled) { background: var(--surface-alt); color: var(--olive); }
 .new-conversation-button:disabled { opacity: .45; cursor: default; }
-.memory-model-picker { position: relative; min-width: 0; max-width: min(260px, 28vw); }
+.memory-model-picker { position: relative; flex: none; min-width: 0; max-width: min(260px, 28vw); }
 .memory-model-trigger { display: flex; max-width: 100%; align-items: center; justify-content: space-between; gap: 8px; padding: 0 9px; border: 1px solid var(--line); background: var(--surface); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
 .memory-model-trigger span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-model-trigger:hover, .memory-model-trigger[aria-expanded="true"] { border-color: var(--olive); }
@@ -3711,19 +3811,25 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-model-empty { margin: 8px; color: var(--ink3); font-size: 12px; }
 .icon-button, .send-button { display: grid; width: 34px; height: 34px; flex: 0 0 34px; padding: 0; place-items: center; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; }
 .icon-button:hover { color: var(--olive); border-color: var(--olive); }
-.memory-messages { min-height: 0; overflow-y: scroll; padding: 24px max(20px, calc((100% - 820px) / 2)); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
+.memory-topbar .icon-button { border: 0; background: transparent; color: var(--ink2); }
+.memory-topbar .new-conversation-button { border: 0; background: var(--surface-alt); color: var(--ink2); }
+.memory-topbar .icon-button:hover, .memory-topbar .new-conversation-button:hover:not(:disabled) { background: var(--surface-alt); color: var(--olive); }
+.memory-messages { min-height: 0; overflow-y: scroll; padding: 24px max(20px, calc((100% - 820px) / 2)); background: var(--jc-surface); scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: color-mix(in srgb, var(--olive) 62%, transparent) transparent; }
 .memory-messages::-webkit-scrollbar { width: 18px; }
 .memory-messages::-webkit-scrollbar-track { border-radius: 999px; background: transparent; }
 .memory-messages::-webkit-scrollbar-thumb { min-height: 44px; border: 3px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .memory-messages::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--olive-dark) 78%, transparent); background-clip: content-box; }
+.memory-scroll-latest { position: absolute; right: 24px; bottom: var(--memory-composer-height, 180px); z-index: 8; display: flex; min-height: 34px; align-items: center; gap: 6px; padding: 0 11px; border: 1px solid var(--jc-border); border-radius: 999px; background: var(--surface); color: var(--ink1); box-shadow: 0 3px 12px rgb(36 42 32 / 10%); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-scroll-latest:hover { border-color: color-mix(in srgb, var(--olive) 48%, var(--jc-border)); color: var(--olive); }
+.memory-scroll-latest .mso { font-size: 16px; }
 .memory-message-list { width: 100%; }
 .memory-message { margin-bottom: 24px; content-visibility: auto; }
-.memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border-radius: 8px; background: var(--surface); }
+.memory-message.user { margin-left: min(18%, 130px); padding: 12px 14px; border: 1px solid var(--jc-border); border-radius: 10px; background: var(--surface-alt); }
 .memory-role { display: block; margin-bottom: 6px; color: var(--ink3); font-size: calc(var(--font-base) - 3px); font-weight: 700; }
 .memory-message-attachments { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .memory-message-attachment { display: flex; width: min(220px, 100%); height: 48px; align-items: center; gap: 8px; padding: 0 10px; box-sizing: border-box; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-alt); overflow: hidden; color: var(--ink3); }
-.memory-message-attachment.image { width: 64px; padding: 0; }
-.memory-message-attachment img { width: 100%; height: 100%; object-fit: cover; }
+.memory-message-attachment.image, .memory-message-attachment.video { width: 64px; padding: 0; }
+.memory-message-attachment img, .memory-message-attachment video { width: 100%; height: 100%; object-fit: cover; }
 .memory-message-attachment span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--font-base) - 2px); }
 .memory-message-text { overflow-wrap: anywhere; }
 .memory-program-status { display: grid; gap: 5px; margin-top: 9px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
@@ -3743,20 +3849,18 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-scene-composer button { display: grid; width: 36px; height: 36px; place-items: center; border: 0; border-radius: 6px; background: var(--olive); color: white; cursor: pointer; }
 .memory-scene-composer button:disabled { cursor: default; opacity: .45; }
 .memory-editor-error { margin: 10px 0; color: var(--danger, #b33); font-size: 13px; }
+.memory-run-complete { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; color: var(--ink3); font-size: 12px; }
+.memory-run-complete > svg, .memory-run-complete > span:first-of-type { color: var(--olive); }
+.memory-response-meta { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
+.memory-answer-usage { position: relative; margin: 0; font-size: 12px; color: var(--ink3); }
+.memory-answer-usage > dl { position: absolute; z-index: 12; bottom: 100%; left: 0; width: 220px; padding: 10px; border: 1px solid var(--jc-border); border-radius: 10px; background: var(--paper); box-shadow: 0 6px 20px rgb(36 42 32 / 8%); }
 .memory-message-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-.memory-message-copy { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-copy { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink2); cursor: pointer; }
 .memory-message-copy:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-message-edit { display: flex; width: 26px; height: 26px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); }
+.memory-message-edit { display: flex; width: 32px; height: 32px; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink2); cursor: pointer; }
 .memory-message-edit:hover { background: var(--surface-alt); color: var(--ink); }
 .memory-file-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-file-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
-.memory-index-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
-.memory-index-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
-.memory-index-suggest.state-error { border-color: color-mix(in srgb, #b34a4a 52%, var(--line)); background: color-mix(in srgb, #b34a4a 8%, var(--paper)); color: #a13f3f; cursor: pointer; }
-.memory-index-suggest.state-error:hover { border-color: #b34a4a; background: color-mix(in srgb, #b34a4a 14%, var(--paper)); }
-.memory-index-status { display: inline-flex; align-items: center; gap: 4px; color: var(--ink3); font-size: 12px; }
-.memory-index-status.state-success { color: var(--olive); }
-.memory-index-error { max-width: 260px; color: #a13f3f; font-size: 11px; }
 .memory-file-write-backdrop { position: fixed; z-index: 90; inset: 0; display: grid; place-items: center; padding: 20px; background: rgb(0 0 0 / 30%); }
 .memory-file-write-dialog { width: min(520px, 100%); max-height: min(680px, 88vh); overflow: hidden; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 16px 44px rgb(0 0 0 / 18%); }
 .memory-file-write-dialog > header, .memory-file-write-dialog > footer { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; border-bottom: 1px solid var(--line); }
@@ -3773,41 +3877,62 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-media-plan-link .mso { color: var(--olive); }
 .memory-media-plan-link span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-media-plan-link small { flex: 0 0 auto; color: var(--ink3); }
-.memory-scene-card { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, #4b9978 38%, var(--line)); border-radius: 6px; background: color-mix(in srgb, #4b9978 7%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
-.memory-scene-card:hover { border-color: #4b9978; }
+.memory-scene-card { display: flex; width: 100%; min-height: 58px; align-items: center; gap: 10px; margin-top: 8px; padding: 8px 10px; border: 1px solid color-mix(in srgb, var(--olive) 38%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
+.memory-scene-card:hover { border-color: var(--olive); }
 .memory-scene-card > .mso { flex: 0 0 auto; color: #398362; font-size: 22px; }
 .memory-scene-card span { min-width: 0; display: grid; flex: 1; gap: 2px; }
 .memory-scene-card strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
 .memory-scene-card small { color: var(--ink3); font-size: 11px; }
 .memory-scene-card em { flex: 0 0 auto; color: #398362; font-size: 12px; font-style: normal; }
-.memory-message.streaming { opacity: .85; }
-.memory-composer { min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 8px 26px rgb(0 0 0 / 8%); }
-.memory-creation-routes { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 10px 0; }
-.memory-creation-routes button { min-height: 32px; padding: 4px 10px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
-.memory-creation-routes button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 12%, var(--paper)); color: var(--olive); }
-.memory-creation-routes button:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
-.memory-creation-routes button:disabled { cursor: wait; opacity: .6; }
-.memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 7px 10px 0; scrollbar-width: none; }
+.memory-streaming-status { display: flex; align-items: center; gap: 7px; margin: 0 0 7px; color: var(--ink2); font-size: 12px; line-height: 1.4; }
+.memory-streaming-indicator { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--olive); animation: memory-streaming-pulse 1.4s ease-in-out infinite; }
+@keyframes memory-streaming-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .memory-streaming-indicator { animation: none; } }
+.memory-composer { position: relative; box-sizing: border-box; min-width: 0; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 14px; border: 1px solid var(--jc-border); border-radius: 16px; background: var(--paper); box-shadow: 0 2px 8px rgb(36 42 32 / 3%); transition: border-color var(--jc-transition-fast), box-shadow var(--jc-transition-fast); }
+.memory-composer:focus-within { border-color: color-mix(in srgb, var(--olive) 64%, var(--jc-border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--olive) 9%, transparent), 0 2px 8px rgb(36 42 32 / 3%); }
+.memory-composer.has-composer-context { margin-top: 28px; }
+.memory-composer-header { position: absolute; z-index: 2; bottom: calc(100% + 1px); right: 14px; left: 14px; display: flex; height: 28px; align-items: flex-end; justify-content: space-between; gap: 8px; }
+.memory-selected-tools { display: flex; min-width: 0; align-items: center; gap: 5px; overflow-x: auto; padding: 0; order: -1; flex: 1; scrollbar-width: none; }
 .memory-selected-tools::-webkit-scrollbar { display: none; }
-.memory-selected-tools .memory-attachment-chip { flex: 0 0 auto; }
+.memory-selected-tools .memory-attachment-chip { height: 26px; flex: 0 0 auto; border: 0; border-radius: 7px; background: var(--olive-pale); color: var(--olive); }
+.memory-round-nav { position: static; margin-left: auto; display: inline-flex; align-items: center; gap: 3px; padding: 1px 4px; flex: 0 0 auto; border-radius: 8px; background: transparent; color: var(--ink3); font-size: 12px; white-space: nowrap; }
+.memory-round-nav button { display: grid; width: 24px; height: 24px; padding: 0; place-items: center; border: 0; border-radius: 6px; background: transparent; color: var(--ink2); cursor: pointer; }
+.memory-round-nav button:hover { background: color-mix(in srgb, var(--olive) 9%, transparent); color: var(--olive); }
+.memory-round-nav svg { width: 16px; height: 16px; }
 .memory-editing-cancel { display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
 .memory-editing-cancel:hover { background: var(--surface-alt); color: var(--ink); }
-.memory-command-strip { display: flex; min-width: 0; max-width: calc(100% - 80px); flex: 0 1 auto; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+.memory-command-strip { display: flex; min-width: 0; flex: 1 1 0; align-items: center; gap: 4px; flex-wrap: wrap; overflow: visible; }
 .memory-command-strip::-webkit-scrollbar { display: none; }
 .memory-command-strip > button, .memory-command-more > button { display: inline-flex; height: 28px; flex: 0 0 auto; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
-/* 芯片提示用 fixed 定位，避开 `.memory-command-strip` 的 overflow 裁剪；颜色走主题。 */
+.memory-workbench.chat-dock-minimal .memory-command-more > button { width: 30px; justify-content: center; padding: 0; }
+.memory-workbench.chat-dock-minimal .memory-command-more > button > span { display: none; }
+.memory-action-row > .icon-button { width: 36px; height: 36px; flex: 0 0 36px; border: 0; background: transparent; }
+.memory-action-row > .icon-button:hover { background: var(--surface); }
+/* 芯片提示用 fixed 定位，避开祖先容器裁剪；颜色走主题。 */
 .memory-chip-tip { position: fixed; z-index: 80; transform: translateX(-50%); padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 5px; background: var(--paper); box-shadow: 0 5px 14px rgb(0 0 0 / 10%); color: var(--olive); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .memory-command-strip > button:hover { border-color: transparent; background: transparent; color: var(--olive); }
+.memory-command-strip > .memory-manju-button.active, .memory-command-strip > .memory-short-drama-button.active, .memory-command-strip > .memory-novel-button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 10%, transparent); color: var(--olive); }
 .memory-command-more > button:hover, .memory-command-more > button[aria-expanded="true"] { border-color: var(--line); background: var(--surface); color: var(--olive); }
+/* 完全权限常驻警示色：它是唯一一个「忘了它就一直开着」的档位，必须在整排里一眼可见。
+   写在 hover 之后，压住 hover 的 olive，红着不动。 */
+.memory-command-more > button.danger { border-color: color-mix(in srgb, var(--jc-error) 45%, transparent); background: color-mix(in srgb, var(--jc-error) 8%, transparent); color: var(--jc-error); }
 .memory-command-strip button:disabled { cursor: default; opacity: .45; }
 .memory-command-more { position: relative; flex: 0 0 auto; }
 .memory-command-menu { position: absolute; z-index: 65; right: 0; bottom: calc(100% + 7px); width: 190px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
 .memory-command-menu button { display: flex; width: 100%; align-items: center; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
 .memory-command-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
-.memory-input-row { position: relative; display: grid; min-width: 0; gap: 8px; padding: 10px; }
-.memory-input-area { display: flex; min-width: 0; min-height: 76px; align-items: flex-start; padding: 7px 4px 0; }
-.memory-action-row { display: flex; min-width: 0; align-items: center; gap: 4px; }
-.memory-action-spacer { min-width: 8px; flex: 1; }
+.memory-permission-note { display: block; margin-top: 2px; color: var(--ink3); font-size: 11px; }
+.memory-permission-menu { position: fixed; z-index: 80; min-width: 200px; padding: 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); box-shadow: 0 10px 28px rgb(0 0 0 / 15%); }
+.memory-permission-confirm { left: 50%; bottom: 120px; width: min(420px, calc(100vw - 40px)); margin-left: calc(min(420px, 100vw - 40px) / -2); padding: 14px; }
+.memory-permission-confirm p { margin: 8px 0 12px; color: var(--ink2); font-size: 12px; line-height: 1.6; }
+.memory-permission-confirm-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.memory-permission-confirm-actions button { padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-permission-confirm-actions button.primary { border-color: transparent; background: var(--olive); color: #fff; }
+.memory-permission-menu button { display: flex; width: 100%; align-items: flex-start; gap: 8px; padding: 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; font-size: 12px; text-align: left; }
+.memory-permission-menu button:hover { background: color-mix(in srgb, var(--olive) 12%, transparent); color: var(--olive); }
+.memory-input-row { position: relative; display: grid; min-width: 0; gap: 12px; padding: 8px 14px 12px; }
+.memory-input-area { display: flex; min-width: 0; align-items: flex-start; padding: 6px 2px 0; }
+.memory-action-row { display: flex; min-width: 0; align-items: flex-end; gap: 4px; }
 .memory-input-drop-active { border: 1px dashed var(--olive); background: color-mix(in srgb, var(--olive) 8%, var(--paper)); }
 .memory-mention-popover { position: absolute; z-index: 60; right: 10px; bottom: calc(100% + 7px); left: 10px; max-height: min(320px, 42vh); overflow-y: auto; padding: 5px; border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
 .memory-mention-popover > button { display: grid; width: 100%; grid-template-columns: 22px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
@@ -3815,16 +3940,21 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-mention-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .memory-mention-kind, .memory-mention-empty { color: var(--ink3); font-size: 11px; }
 .memory-mention-empty { padding: 9px; }
-.memory-composer-editable { width: 100%; min-width: 0; min-height: 24px; max-height: min(220px, 30vh); flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
+.memory-composer-editable { width: 100%; min-width: 0; height: auto; min-height: 4.65em; max-height: 15.5em; flex: 1; overflow-y: hidden; overscroll-behavior: contain; scrollbar-width: thin; border: 0; outline: 0; background: transparent; color: var(--ink1); font: inherit; font-size: var(--font-base); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; }
 .memory-composer-editable:empty::before { color: var(--ink3); content: attr(data-placeholder); pointer-events: none; }
 .memory-composer-editable::-webkit-scrollbar { width: 12px; }
 .memory-composer-editable::-webkit-scrollbar-track { background: transparent; }
 .memory-composer-editable::-webkit-scrollbar-thumb { min-height: 36px; border: 2px solid transparent; border-radius: 999px; background: color-mix(in srgb, var(--olive) 68%, transparent); background-clip: content-box; }
 .send-button { border-color: var(--olive); background: var(--olive); color: white; }
+.memory-action-row > .send-button { width: 30px; height: 30px; flex-basis: 30px; border: 0; border-radius: 6px; }
+.memory-action-row > .send-button > svg { width: 17px; height: 17px; }
+.memory-action-row > .send-button:disabled { background: var(--line); color: var(--surface); opacity: .5; }
+.memory-action-row > .send-button:hover:not(:disabled) { opacity: .9; }
 .send-button:disabled { opacity: .4; cursor: default; }
 .memory-status { padding: 6px 12px 0; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
 .memory-status.error { color: var(--danger); }
 .memory-context-notice { display: flex; min-height: 0; align-items: center; gap: 6px; margin: 7px 10px 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 30%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.35; }
+.memory-main > .memory-context-notice { box-sizing: border-box; width: calc(100% - 28px); max-width: 860px; margin: 0 auto 8px; border: 0; background: transparent; }
 .memory-context-notice span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
 .memory-context-notice button { display: grid; width: 18px; height: 18px; flex: 0 0 18px; padding: 0; place-items: center; border: 0; background: transparent; color: var(--ink3); cursor: pointer; }
 .memory-run-status { margin: 7px 10px 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
@@ -3839,11 +3969,63 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 .memory-run-metrics { min-width: 0; flex: 1; overflow: hidden; margin: 0; color: var(--ink3); font-variant-numeric: tabular-nums; text-overflow: ellipsis; }
 .memory-run-steps > div.running { color: var(--ink1); }
 .memory-run-steps > div.failed, .memory-run-status.error, .memory-run-status.error strong { color: var(--danger); }
+.memory-run-step-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-run-step-summary { margin-left: 6px; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.memory-run-step-error { display: block; color: var(--danger); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.memory-think-tail { max-width: 420px; overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
+/* 定稿后的过程属于该轮对话：Think 行折叠，工具行一行一步、结果按需展开。
+   挂在用户气泡里（该轮的发起人），所以加一条分隔线把它和提问正文分开。 */
+/* 过程是独立一块，不在用户气泡里：与用户消息之间留常规间隔，与下一条消息也留常规间隔。 */
+.memory-turn-process { margin: 0 0 24px; padding: 0 2px; }
+.memory-current-activity { display: flex; align-items: center; gap: 7px; margin: 4px 0 6px; color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-current-activity > .mso { color: var(--olive); font-size: 15px; }
+.memory-current-activity small { min-width: 0; overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
+.memory-think { margin: 2px 0 6px; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
+.memory-think > summary { display: flex; width: fit-content; align-items: center; gap: 5px; cursor: pointer; list-style: none; }
+.memory-think > summary::-webkit-details-marker { display: none; }
+.memory-think > summary::after { content: '›'; color: var(--ink3); font-size: 17px; line-height: 1; transition: transform var(--jc-transition-fast); }
+.memory-think[open] > summary::after { transform: rotate(90deg); }
+.memory-think > summary .mso { font-size: 15px; }
+.memory-think-body { margin: 6px 0 0; padding-left: 10px; border-left: 2px solid var(--line); color: var(--ink2); }
+.memory-process { display: grid; gap: 3px; margin: 2px 0 6px; font-size: calc(var(--font-base) - 2px); }
+.memory-process-narration { color: var(--ink2); font-size: calc(var(--font-base) - 2px); line-height: 1.6; overflow-wrap: anywhere; }
+.memory-process > summary { display: flex; width: fit-content; align-items: center; gap: 5px; color: var(--ink3); cursor: pointer; list-style: none; }
+.memory-process > summary::-webkit-details-marker { display: none; }
+.memory-process > summary::before { content: '›'; color: var(--ink3); font-size: 18px; line-height: 1; transition: transform var(--jc-transition-fast); }
+.memory-process[open] > summary::before { transform: rotate(90deg); }
+.memory-process-step { display: grid; grid-template-columns: 17px auto minmax(0, 1fr) auto; align-items: center; gap: 5px; color: var(--ink3); }
+.memory-process-step .mso { font-size: 15px; }
+.memory-process-step.running { color: var(--ink1); }
+.memory-process-step.failed { color: var(--danger); }
+.memory-process-label { white-space: nowrap; }
+.memory-process-summary { min-width: 0; overflow: hidden; color: var(--ink3); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.memory-process-step em { font-style: normal; font-variant-numeric: tabular-nums; }
+.memory-process-error { grid-column: 3 / -1; color: var(--danger); overflow-wrap: anywhere; }
+.memory-process-result { grid-column: 3 / -1; }
+.memory-process-result > summary { width: fit-content; cursor: pointer; color: var(--ink3); list-style: none; }
+.memory-process-result > summary::-webkit-details-marker { display: none; }
+.memory-process-result pre { max-height: 260px; margin: 5px 0 0; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-process-step .spinning { animation: memory-run-spin .9s linear infinite; }
+/* 官方的重试行（ModelRetryItem）：状态折叠成一行，展开看「重试延迟 / 失败原因」。 */
+.memory-process-retry > summary { display: flex; width: fit-content; align-items: center; gap: 5px; color: var(--ink3); cursor: pointer; list-style: none; }
+.memory-process-retry > summary::-webkit-details-marker { display: none; }
+.memory-process-retry[data-active] > summary { color: var(--ink1); }
+.memory-process-retry-detail { display: grid; gap: 3px; margin: 4px 0 4px 22px; color: var(--ink3); }
+.memory-process-retry-label { margin-right: 2px; color: var(--ink3); }
+/* 官方的失败行（TurnErrorItem）：红点 + 标题 + 原因 + code，末尾给一个「继续」。 */
+.memory-turn-error { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; color: var(--danger); font-size: calc(var(--font-base) - 2px); }
+.memory-turn-error .mso { font-size: 15px; }
+.memory-turn-error-copy { display: grid; min-width: 0; }
+.memory-turn-error-title { font-weight: 600; }
+.memory-turn-error-message { overflow-wrap: anywhere; }
+.memory-turn-error-code { padding: 0 4px; border-radius: 4px; background: var(--surface); font-size: calc(var(--font-base) - 3px); }
+.memory-turn-error-continue { flex: none; margin-left: auto; padding: 2px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink2); cursor: pointer; font-size: calc(var(--font-base) - 2px); }
 .memory-run-status > small { display: block; margin: 6px 0 0 24px; overflow-wrap: anywhere; }
 @keyframes memory-run-spin { to { transform: rotate(360deg); } }
 .memory-attachments { display: flex; gap: 6px; flex-wrap: wrap; padding: 5px 10px 0; }
 .memory-attachment-chip { display: flex; height: 34px; max-width: 240px; align-items: center; gap: 5px; padding: 0 7px; box-sizing: border-box; border-radius: 5px; background: var(--surface); color: var(--ink2); font-size: calc(var(--font-base) - 3px); }
-.memory-attachment-chip img { width: 26px; height: 26px; flex: 0 0 26px; border-radius: 4px; object-fit: cover; }
+.memory-attachment-chip.image, .memory-attachment-chip.video { height: 54px; }
+.memory-attachment-chip img, .memory-attachment-chip video { width: 46px; height: 46px; flex: 0 0 46px; border-radius: 4px; object-fit: cover; }
 .memory-attachment-copy { display: grid; min-width: 0; line-height: 1.2; }
 .memory-attachment-copy small { overflow: hidden; color: var(--ink3); text-overflow: ellipsis; white-space: nowrap; }
 .memory-attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3892,7 +4074,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
 @media (max-width: 939px) {
   .memory-workbench.chat-dock-compact .memory-main > :not(.memory-chat-compact-bar) { visibility: visible; }
   .memory-workbench.chat-dock-compact .memory-chat-compact-bar { display: none; }
-  .memory-workbench.creation-open { grid-template-columns: 280px minmax(0, 1fr); }
+  .memory-workbench.creation-open { grid-template-columns: var(--memory-tree-width, 280px) minmax(0, 1fr); }
   .memory-workbench.creation-open.tree-closed { grid-template-columns: 0 minmax(0, 1fr); }
   .memory-workbench.creation-open .memory-main { grid-column: auto; }
   .memory-workbench.creation-open .memory-creation { grid-column: auto; }
@@ -3914,8 +4096,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-title-drag { display: none; }
   .memory-topbar-actions { gap: 4px; }
   .memory-conversation-picker { max-width: 90px; }
-  .memory-conversation-icon, .memory-new-conversation-icon { display: inline; }
   .memory-model-picker { max-width: 100px; }
+  .memory-workbench.desktop-runtime .memory-model-picker { width: auto; max-width: 100px; }
+  .memory-workbench.desktop-runtime .memory-model-trigger { width: 100%; }
+  .memory-workbench.desktop-runtime .memory-window-creation-toggle { width: auto; }
   .memory-model-menu { right: 0; left: auto; }
   .memory-messages { padding: 18px 14px; }
   .memory-message.user { margin-left: 12%; }
@@ -3924,47 +4108,68 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
   .memory-workbench.preview-open .memory-preview { inset: env(safe-area-inset-top, 0) 0 0; }
   .memory-workbench.creation-open .memory-creation { inset: env(safe-area-inset-top, 0) 0 0; height: auto; }
 }
-@container memory-main (max-width: 680px) {
-  .memory-topbar { gap: 0; padding: 0 8px; }
-  .memory-topbar-left { flex: 0 0 auto; gap: 4px; }
-  .memory-title-drag, .memory-tree-button, .memory-creation-shortcut, .memory-settings-shortcut { display: none; }
-  .memory-mobile-more { position: relative; display: flex; min-width: 32px; flex: 1 1 auto; justify-content: center; }
-  .memory-more-trigger { width: 32px; flex-basis: 32px; border: 0; background: transparent; }
-  .memory-mobile-more-menu { position: absolute; z-index: 50; top: calc(100% + 7px); left: 50%; display: grid; min-width: 150px; padding: 5px; transform: translateX(-50%); border: 1px solid var(--line); border-radius: 8px; background: var(--paper); box-shadow: 0 12px 30px rgb(0 0 0 / 16%); }
-  .memory-mobile-more-menu button { min-height: 38px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: var(--ink1); cursor: pointer; font: inherit; text-align: left; }
-  .memory-mobile-more-menu button:hover { background: color-mix(in srgb, var(--olive) 14%, transparent); }
-  .memory-topbar-actions { flex: 0 0 auto; gap: 0; margin-left: 0; }
-  .memory-conversation-picker { width: 56px; flex: 0 0 56px; max-width: none; }
-  .memory-conversation-trigger { width: 100%; justify-content: center; gap: 3px; padding: 0 2px; border: 0; background: transparent; font-size: 12px; }
-  .memory-conversation-title, .memory-conversation-chevron { display: none; }
-  .memory-conversation-mobile-label { display: inline; }
-  .memory-conversation-icon { width: 14px; font-size: 14px; }
-  .new-conversation-button { gap: 3px; padding: 0 7px; font-size: 12px; }
-  .new-conversation-label-full { display: none; }
-  .new-conversation-label-short { display: inline; }
-  .memory-toggle-button { box-sizing: border-box; width: 38px; flex: 0 0 38px; justify-content: center; gap: 2px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; }
-  .memory-toggle-button.enabled { background: transparent; }
-  .memory-toggle-icon { display: inline; width: 14px; font-size: 14px; }
-  .memory-toggle-label, .memory-toggle-text { display: none; }
-  .memory-toggle-state { box-sizing: border-box; width: 18px; height: 12px; flex: 0 0 18px; justify-content: flex-start; gap: 0; padding: 1px; border-radius: 999px; }
-  .memory-toggle-dot { display: block; width: 8px; height: 8px; transition: transform .15s ease; }
-  .memory-toggle-button.enabled .memory-toggle-dot { transform: translateX(6px); }
-  .memory-model-picker { width: 92px; flex: 0 0 92px; max-width: none; }
-  .memory-model-trigger { gap: 3px; padding: 0 3px; border: 0; border-radius: 0; background: transparent; font-size: 11px; }
-  .memory-model-trigger .memory-model-icon { display: none; }
-  .memory-model-trigger .memory-picker-chevron { flex: 0 0 12px; }
-}
-@container memory-main (max-width: 380px) {
-  .memory-topbar { padding: 0 5px; }
-  .memory-topbar-left { gap: 2px; }
-  .memory-conversation-picker { width: 53px; flex-basis: 53px; }
-  .memory-conversation-trigger { gap: 2px; font-size: 11px; }
-  .new-conversation-label-short { display: none; }
-  .new-conversation-label-tiny { display: inline; }
-  .new-conversation-button { gap: 2px; padding: 0 5px; font-size: 11px; }
-  .memory-new-conversation-icon { width: 14px; font-size: 14px; }
-  .memory-model-picker { width: 76px; flex-basis: 76px; }
-  .memory-toggle-button { width: 36px; flex-basis: 36px; }
-  .memory-toggle-icon { width: 12px; font-size: 12px; }
-}
+.memory-attachment-progress { display: flex; min-height: 30px; align-items: center; gap: 8px; padding: 4px 10px; color: var(--ink3); font-size: calc(var(--font-base) - 2px); }
+.memory-attachment-failures { display: grid; gap: 5px; padding: 6px 10px; }
+.memory-attachment-failure { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid color-mix(in srgb, var(--danger) 28%, var(--line)); border-radius: 6px; background: color-mix(in srgb, var(--danger) 5%, var(--paper)); color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-attachment-failure > span { display: grid; min-width: 0; flex: 1; gap: 2px; }
+.memory-attachment-failure strong, .memory-attachment-failure small { overflow-wrap: anywhere; }
+.memory-attachment-failure small { color: var(--ink3); }
+.memory-attachment-failure button, .memory-inbox-actions button { min-height: 28px; padding: 0 8px; border: 1px solid var(--jc-border); border-radius: 5px; background: var(--surface); color: var(--ink2); cursor: pointer; font: inherit; font-size: calc(var(--font-base) - 2px); }
+.memory-attachment-failure button:disabled, .memory-inbox-actions button:disabled { opacity: .45; cursor: default; }
+.memory-attachment-preview { display: grid; width: 46px; height: 46px; flex: 0 0 46px; padding: 0; place-items: center; overflow: hidden; border: 0; border-radius: 4px; background: transparent; cursor: zoom-in; }
+.memory-attachment-preview img { width: 100%; height: 100%; object-fit: cover; }
+.memory-inbox-queue { display: grid; max-height: 220px; gap: 6px; overflow: auto; padding: 8px 10px; border-top: 1px solid var(--jc-border); }
+.memory-inbox-queue > header { display: flex; align-items: center; gap: 8px; color: var(--ink2); font-size: calc(var(--font-base) - 2px); }
+.memory-inbox-queue > header span, .memory-inbox-item > small { color: var(--ink3); font-size: calc(var(--font-base) - 3px); }
+.memory-inbox-item { display: grid; gap: 5px; padding: 8px; border: 1px solid var(--jc-border); border-radius: 6px; background: var(--jc-surface); }
+.memory-inbox-item > p { display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink2); overflow-wrap: anywhere; font-size: calc(var(--font-base) - 1px); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
+.memory-inbox-item textarea { width: 100%; min-height: 64px; box-sizing: border-box; padding: 7px; border: 1px solid var(--jc-border); border-radius: 5px; background: var(--paper); color: var(--ink1); font: inherit; resize: vertical; }
+.memory-inbox-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.memory-inbox-actions button:hover:not(:disabled), .memory-attachment-failure button:hover:not(:disabled) { border-color: var(--olive); color: var(--olive); }
+.memory-queue-stop { display: grid; width: 30px; height: 30px; flex: 0 0 30px; padding: 0; place-items: center; border: 1px solid var(--jc-border); border-radius: 6px; background: var(--paper); color: var(--danger); cursor: pointer; }
+.memory-queue-stop .mso { font-size: 17px; }
+.memory-image-lightbox { position: fixed; z-index: 300; inset: 0; display: grid; grid-template-rows: 1fr auto; place-items: center; gap: 10px; padding: 48px 24px 20px; box-sizing: border-box; background: rgb(12 14 11 / 90%); color: white; outline: none; }
+.memory-image-lightbox img { max-width: min(92vw, 1400px); max-height: 82vh; object-fit: contain; }
+.memory-image-lightbox > span { max-width: 80vw; overflow: hidden; color: rgb(255 255 255 / 76%); text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.memory-image-lightbox-close { position: absolute; top: 14px; right: 18px; display: grid; width: 36px; height: 36px; place-items: center; border: 1px solid rgb(255 255 255 / 30%); border-radius: 7px; background: rgb(255 255 255 / 10%); color: white; cursor: pointer; }
+.memory-image-lightbox-close .mso { font-size: 20px; }
+@media (prefers-reduced-motion: reduce) { .memory-attachment-progress .spinning { animation: none; } }
+
+/* Web Runtime controls retain their existing behavior. */
+.memory-topbar-left { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.memory-mobile-more { display: none; }
+.memory-toggle-button { display: inline-flex; height: 34px; align-items: center; gap: 9px; padding: 0 8px 0 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; white-space: nowrap; }
+.memory-toggle-button:hover { border-color: var(--olive); color: var(--olive); }
+.memory-toggle-button.enabled { border-color: color-mix(in srgb, var(--olive) 62%, var(--line)); background: color-mix(in srgb, var(--olive) 14%, var(--paper)); color: var(--olive-dark); }
+.memory-toggle-label { line-height: 1; }
+.memory-toggle-state { display: inline-flex; height: 22px; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink3); font-size: 11px; line-height: 1; }
+.memory-toggle-button.enabled .memory-toggle-state { border-color: color-mix(in srgb, var(--olive) 42%, transparent); background: color-mix(in srgb, var(--olive) 16%, var(--paper)); color: var(--olive-dark); }
+.memory-toggle-dot { display: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.memory-conversation-mobile-label, .new-conversation-label-short, .new-conversation-label-tiny, .memory-toggle-icon { display: none; }
+.memory-index-suggest { display: inline-flex; align-items: center; gap: 4px; margin-top: 0; padding: 5px 8px; border: 1px solid color-mix(in srgb, var(--olive) 32%, var(--line)); border-radius: 5px; background: color-mix(in srgb, var(--olive) 7%, var(--paper)); color: var(--olive); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-index-suggest:hover { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 13%, var(--paper)); }
+.memory-index-suggest.state-error { border-color: color-mix(in srgb, #b34a4a 52%, var(--line)); background: color-mix(in srgb, #b34a4a 8%, var(--paper)); color: #a13f3f; cursor: pointer; }
+.memory-index-suggest.state-error:hover { border-color: #b34a4a; background: color-mix(in srgb, #b34a4a 14%, var(--paper)); }
+.memory-index-status { display: inline-flex; align-items: center; gap: 4px; color: var(--ink3); font-size: 12px; }
+.memory-index-status.state-success { color: var(--olive); }
+.memory-index-error { max-width: 260px; color: #a13f3f; font-size: 11px; }
+.memory-message.streaming { opacity: .85; }
+.memory-creation-routes { display: contents; }
+.memory-creation-routes button { min-height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 5px; background: var(--paper); color: var(--ink2); cursor: pointer; font: inherit; font-size: 12px; }
+.memory-creation-routes button.active { border-color: var(--olive); background: color-mix(in srgb, var(--olive) 12%, var(--paper)); color: var(--olive); }
+.memory-creation-routes button:focus-visible { outline: 2px solid var(--olive); outline-offset: 2px; }
+.memory-creation-routes button:disabled { cursor: wait; opacity: .6; }
+.memory-command-overflow { display: none; position: relative; }
+.memory-command-overflow summary { display: grid; width: 28px; height: 28px; place-items: center; cursor: pointer; list-style: none; border-radius: 5px; }
+.memory-command-overflow summary::-webkit-details-marker { display: none; }
+.memory-command-overflow summary:hover { background: var(--surface); }
+.chat-dock-narrow .memory-primary-command { display: none; }
+.chat-dock-narrow .memory-command-overflow { display: block; }
+.chat-dock-narrow .memory-toggle-button { width: 28px; flex: 0 0 28px; justify-content: center; padding: 0; }
+.chat-dock-narrow .memory-toggle-label, .chat-dock-narrow .memory-toggle-state { display: none; }
+.chat-dock-narrow .memory-toggle-icon { display: block; }
+.chat-dock-narrow .memory-creation-toggle { width: 30px; padding: 0; justify-content: center; }
+.chat-dock-narrow .memory-creation-toggle > span { display: none; }
+.chat-dock-minimal .memory-creation-toggle { display: none; }
+.memory-action-spacer { min-width: 8px; flex: 1; }
 </style>

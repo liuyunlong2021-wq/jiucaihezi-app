@@ -20,13 +20,12 @@ test('project file tree exposes canvas create, copy, rename, and delete actions'
   assert.match(source, /projectFileActions\.remove/)
 })
 
-test('project file tree exposes the deterministic adaptation Wiki scaffold action', () => {
+test('project file tree locates saved artifacts and retains the Web Wiki scaffold action', () => {
   const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
   assert.match(source, /建立改编 Wiki/)
-  assert.match(source, /createAdaptationWiki/)
-  assert.match(source, /buildAdaptationWikiScaffoldPlan/)
   assert.match(source, /applyAdaptationWikiScaffold/)
-  assert.match(source, /已有文件不会被覆盖/)
+  assert.match(source, /payload\?\.refresh/)
+  assert.match(source, /payload\?\.open/)
 })
 
 test('project file tree waits for pending canvas persistence before rename or delete', () => {
@@ -117,7 +116,7 @@ test('project file tree locates a deep resource by loading its collapsed ancesto
 
   assert.match(source, /async function locateProjectResource\(path: string, quiet = false\)/)
   assert.match(source, /await ensureDirectoryLoaded\(node\)/)
-  assert.match(source, /void locateProjectResource\(String\(path\), Boolean\(payload\?\.quiet\)\)/)
+  assert.match(source, /const node = await locateProjectResource\(String\(path\), Boolean\(payload\?\.quiet\)\)/)
 })
 
 test('Desktop project tree receives filesystem hints instead of restoring the five second poller', () => {

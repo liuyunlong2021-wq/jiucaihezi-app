@@ -1,3 +1,5 @@
+import { gatewayJson } from '@/services/newApiClient'
+
 export type BuiltinMcpTransport = 'stdio' | 'sse' | 'streamable-http' | 'remote'
 
 export interface BuiltinMcpCatalogEntry {
@@ -16,7 +18,6 @@ export interface BuiltinMcpCatalogEntry {
   env?: Record<string, string>
   secretEnvVar?: string
   url?: string
-  oauthClientId?: string
   oauthTokenProxyUrl?: string
   oauthAuthorizationServerUrl?: string
   oauthAuthorizationEndpoint?: string
@@ -48,7 +49,6 @@ export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
     risk: 'medium',
     installHint: '需要 GitHub OAuth 或 MCP 专用凭据。启用前应限制仓库范围。',
     url: 'https://api.githubcopilot.com/mcp/',
-    oauthClientId: import.meta.env.VITE_GITHUB_OAUTH_CLIENT_ID || '',
     oauthTokenProxyUrl: 'https://api.jiucaihezi.studio/auth/mcp/github/token',
     oauthAuthorizationServerUrl: 'https://github.com/login/oauth',
     oauthAuthorizationEndpoint: 'https://github.com/login/oauth/authorize',
@@ -69,3 +69,13 @@ export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
     args: ['-y', '@playwright/mcp@0.0.79'],
   },
 ]
+
+/**
+ * GitHub 的 OAuth client id 与 client secret 成对存放在 Gateway，属于 Gateway 的配置，
+ * 所以连接时向 Gateway 取；不再用 `VITE_GITHUB_OAUTH_CLIENT_ID` 在构建期塞进产物。
+ */
+export async function resolveMcpOAuthClientId(entry: BuiltinMcpCatalogEntry): Promise<string> {
+  if (entry.id !== 'github') return ''
+  const payload = await gatewayJson<{ client_id?: string }>('/auth/mcp/github/config')
+  return String(payload.client_id || '').trim()
+}

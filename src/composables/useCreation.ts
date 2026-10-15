@@ -19,7 +19,6 @@ import {
 } from '@/data/mediaModelCapabilities'
 import {
   CREATION_MODEL_REGISTRY,
-  creationModelFamily,
   getCreationModelSpec,
   listCreationModels,
 } from '@/runtime/creation/creationModelRegistry'
@@ -300,7 +299,6 @@ function getModelsForTask(task: CreationTask): string[] {
       ? ['newapi/dola/seedance2.5', 'newapi/boluo/minimax_h3_image_audio_to_video_v2_15s']
       : []
   const models = listCreationModels({ task })
-    .filter(model => task !== 'video' || creationModelFamily(model) !== 'jc 本机')
     .map(model => model.id)
   const selected = priorities.filter(model => models.includes(model))
   return [...selected, ...models.filter(model => !selected.includes(model))]
@@ -702,7 +700,7 @@ export const durationRange = computed(() => {
   return { min: m.dur[0], max: m.dur[m.dur.length - 1], step: 1, fixed: false }
 })
 
-export const hasDuration = computed(() => !!durationRange.value && !durationRange.value.fixed)
+export const hasDuration = computed(() => !!durationRange.value)
 export const durationOptions = computed(() => currentModel.value?.dur || [])
 
 // 是否是图片模型（gateway-image 或 runninghub-image）
@@ -811,10 +809,12 @@ export function setAspect(ar: string) {
 export function setSize(size: string) { cpState.size = size; saveCpState() }
 export function setResolution(res: string) {
   cpState.res = res
-  cpState.size = sizeFromRatioResolution(cpState.ar || '1:1', res)
+  if (cpState.modelKey !== 'jc-qwen-image-2.1') {
+    cpState.size = sizeFromRatioResolution(cpState.ar || '1:1', res)
+  }
   saveCpState()
 }
-export function setDuration(dur: number) { cpState.dur = dur; saveCpState() }
+export function setDuration(dur: number) { cpState.dur = Math.round(dur); saveCpState() }
 export function setMv(mv: string) { cpState.mv = mv; saveCpState() }
 export function setLanguage(language: string) { cpState.language = language; saveCpState() }
 

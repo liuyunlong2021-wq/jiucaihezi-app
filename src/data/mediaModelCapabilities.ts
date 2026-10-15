@@ -88,6 +88,12 @@ export const JC_VIDEO_SIZE_OPTIONS: MediaFieldOption[] = [
 
 export const JC_VIDEO_SIZES = JC_VIDEO_SIZE_OPTIONS.map(option => String(option.value))
 
+/** MiniMax H3 Director 8-step adds the source workflow's 736×1280 default. */
+export const JC_H3_DIRECTOR_SIZE_OPTIONS: MediaFieldOption[] = [
+  { value: '736x1280', label: '竖屏 · 736×1280（导演台默认）' },
+  ...JC_VIDEO_SIZE_OPTIONS,
+]
+
 /** comfy_extras/nodes_resolution.py 的 ResolutionSelector 只认这几个**带后缀的**字符串，
  * 不能简写成 "9:16" —— 它算完宽高，再由工作流自己的 latent 上采样出成片。
  */
@@ -125,6 +131,30 @@ function options(values: Array<string | number | boolean>): MediaFieldOption[] {
 }
 
 export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
+  // 灵动公开型号；sd2.5-a 保留兼容，授权目录可用性待核实。
+  ...[
+    ['cvk-2.5-480', 30, 10, 10],
+    ['cvk-2.5-720', 30, 10, 10],
+    ['cvk-2.5-1080', 30, 10, 10],
+    ['SD-2.5-特价', 30, 0, 0],
+    ['sd2.5-a', 30, 0, 0],
+    ['sd-2.5-720-v3', 30, 10, 10],
+    ['SD-2.5-特价-2', 10, 0, 0],
+    ['sd2.5-3033', 30, 3, 3],
+    ['sd2.5-101010', 10, 10, 10],
+    ['sd2.5-301010', 30, 10, 10],
+  ].map(([model, images, videos, audios]) => ({
+    id: String(model), model: String(model), label: String(model), task: 'video' as const,
+    provider: 'gateway-video' as const,
+    maxFiles: Number(images) + Number(videos) + Number(audios),
+    acceptedFiles: ['image' as const, ...(videos ? ['video' as const] : []), ...(audios ? ['audio' as const] : [])],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt' as const, required: true },
+      { key: 'images', label: `参考图 (0-${images}张)`, kind: 'images' as const },
+      ...(videos ? [{ key: 'videos', label: `参考视频 (0-${videos}段)`, kind: 'video' as const }] : []),
+      ...(audios ? [{ key: 'audios', label: `参考音频 (0-${audios}段)`, kind: 'audio' as const }] : []),
+    ],
+  })),
   {
     id: 'gpt-image-2',
     label: 'GPT Image 2',
@@ -427,24 +457,211 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
     ],
   },
-  // Fk Task Plugin 已支持的模型。模型 ID 与 NewAPI 渠道 model 逐字一致；不包含未上传的 XZ 2.0 933全参。
   {
-    id: 'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563',
-    label: '特价渠道-Seedance2.5满血720p(30图)',
-    task: 'video', model: 'ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563', provider: 'gateway-video',
-    maxFiles: 30, acceptedFiles: ['image'],
+    id: 'yl_seedance-2-5_6caffaca7390',
+    label: 'Seedance 2.5 HD（仅图参考，可过人脸）',
+    task: 'video',
+    model: 'yl_seedance-2-5_6caffaca7390',
+    provider: 'gateway-video',
+    maxFiles: 30,
+    acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 4, min: 4, max: 30, step: 1 },
+      { key: 'duration', label: '时长(秒)', kind: 'number', required: true, min: 1, step: 1 },
       { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
     ],
   },
   {
+    id: 'yl_seedance-2-5_0fab2f1b1f10',
+    label: 'Seedance 2.5 HD（多模态参考，可过人脸）',
+    task: 'video',
+    model: 'yl_seedance-2-5_0fab2f1b1f10',
+    provider: 'gateway-video',
+    maxFiles: 50,
+    acceptedFiles: ['image', 'video', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'number', required: true, min: 1, step: 1 },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (0-10段)', kind: 'video' },
+      { key: 'audios', label: '参考音频 (0-10段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'seedance2.5 super',
+    label: 'Seedance 2.5 Super · 易红',
+    task: 'video',
+    model: 'seedance2.5 super',
+    provider: 'gateway-video',
+    maxFiles: 50,
+    acceptedFiles: ['image', 'video', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 5, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (0-10段)', kind: 'video' },
+      { key: 'audios', label: '参考音频 (0-10段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'seedance2.5 cheap',
+    label: 'Seedance 2.5 Cheap · 易红',
+    task: 'video',
+    model: 'seedance2.5 cheap',
+    provider: 'gateway-video',
+    maxFiles: 30,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 15, min: 4, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
+    ],
+  },
+  {
+    id: 'seedance-2.5-max',
+    label: 'Seedance 2.5 Max · 易红',
+    task: 'video',
+    model: 'seedance-2.5-max',
+    provider: 'gateway-video',
+    maxFiles: 30,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'camera_movement', label: '运镜', kind: 'select', defaultValue: 'auto', options: [{ value: 'auto', label: '自动' }, { value: 'fixed', label: '固定' }] },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
+    ],
+  },
+  {
+    id: 'seedance-2.5-Muse',
+    label: 'Seedance 2.5 Muse · 易红',
+    task: 'video',
+    model: 'seedance-2.5-Muse',
+    provider: 'gateway-video',
+    maxFiles: 9,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 30, min: 5, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+    ],
+  },
+  {
+    id: 'seedance-2.5-omni', label: 'Seedance 2.5 Omni · 易红',
+    task: 'video', model: 'seedance-2.5-omni', provider: 'gateway-video',
+    maxFiles: 40, acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '4:3', '3:4', '1:1']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 29, min: 4, max: 29, step: 1 },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
+      { key: 'audios', label: '参考音频 (0-10段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'seedance-2.5-pro', label: 'Seedance 2.5 Pro · 易红',
+    task: 'video', model: 'seedance-2.5-pro', provider: 'gateway-video',
+    maxFiles: 50, acceptedFiles: ['image', 'video', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 30, min: 5, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (0-10段)', kind: 'video' },
+      { key: 'audios', label: '参考音频 (0-10段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'seedance-2.0-mini-Muse', label: 'Seedance 2.0 Mini Muse · 易红',
+    task: 'video', model: 'seedance-2.0-mini-Muse', provider: 'gateway-video',
+    maxFiles: 9, acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 15, min: 5, max: 15, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+    ],
+  },
+  {
+    id: 'Wan3.0 pro max', label: 'Wan 3.0 Pro Max · 易红',
+    task: 'video', model: 'Wan3.0 pro max', provider: 'gateway-video',
+    maxFiles: 20, acceptedFiles: ['image', 'video', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['480p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 30, min: 2, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-10张)', kind: 'images' },
+      { key: 'videos', label: '参考视频 (0-5段)', kind: 'video' },
+      { key: 'audios', label: '参考音频 (0-5段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'wan3.0-video-prime', label: 'Wan 3.0 Prime · 易红',
+    task: 'video', model: 'wan3.0-video-prime', provider: 'gateway-video',
+    maxFiles: 15, acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['adaptive', '16:9', '4:3', '1:1', '3:4', '9:16']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480P', options: options(['480P', '720P', '1080P']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 2, max: 30, step: 1 },
+      { key: 'images', label: '参考图 (0-10张)', kind: 'images' },
+      { key: 'audios', label: '参考音频 (0-5段)', kind: 'audio' },
+    ],
+  },
+  {
+    id: 'grok-imagine-video-1.5-preview', label: 'Grok Imagine Video 1.5 Preview · 易红',
+    task: 'video', model: 'grok-imagine-video-1.5-preview', provider: 'gateway-video',
+    maxFiles: 7, acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4', '2:3', '3:2']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p', '480p', '1080p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 15, options: options([15]) },
+      { key: 'images', label: '参考图 (0-7张)', kind: 'images' },
+    ],
+  },
+  {
+    id: 'minimax H3', label: 'MiniMax H3 · 易红',
+    task: 'video', model: 'minimax H3', provider: 'gateway-video', maxFiles: 10, acceptedFiles: ['image', 'audio'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1', '21:9']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 10, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+      { key: 'audios', label: '参考音频 (0-3段；素材总数≤10)', kind: 'audio' },
+    ],
+  },
+  // FK 2026-10-14 官方 Seedance 2.5 目录；旧型号禁用新提交，历史 ID 保留。
+  ...[
+    ['ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563', '特价渠道-Seedance2.5满血720p(30图)'],
+    ['ft-video-v1-7393b0529b788d532d031dcac5e820cb', 'XN1-Seedance 2.5满血 480-720p'],
+    ['ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4', 'XN2-Seedance 2.5满血 480-720p'],
+  ].map(([id, label]) => ({ id, model: id, label, task: 'video' as const, provider: 'gateway-video' as const, enabled: false, fields: [] })),
+  {
+    id: 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
+    label: '特价渠道 Seedance 2.5 满血 720p',
+    task: 'video', model: '特价渠道 Seedance 2.5 满血 720p', provider: 'gateway-video',
+    maxFiles: 9, acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'select', defaultValue: 30, options: options([30]) },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' },
+    ],
+  },
+  {
     id: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
-    label: '特价渠道Seedance2.5满血720p(可过真人)',
-    task: 'video', model: 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', provider: 'gateway-video',
+    label: '特价渠道 Seedance 2.5 满血 720p（可过真人）',
+    task: 'video', model: '特价渠道 Seedance 2.5 满血 720p（可过真人）', provider: 'gateway-video',
     maxFiles: 9, acceptedFiles: ['image'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
@@ -456,8 +673,8 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
   },
   {
     id: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
-    label: '长期特惠Seedance2.5满血720p',
-    task: 'video', model: 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d', provider: 'gateway-video',
+    label: '长期特惠 Seedance 2.5 满血 720p',
+    task: 'video', model: '长期特惠 Seedance 2.5 满血 720p', provider: 'gateway-video',
     maxFiles: 50, acceptedFiles: ['image', 'video', 'audio'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 6000 },
@@ -472,6 +689,7 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
   {
     id: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f',
     label: 'XZ-Seedance 2.5 720p(9图参考)',
+    enabled: false,
     task: 'video', model: 'ft-video-v1-69ef4c70291248a25c8198cd1c7c9c1f', provider: 'gateway-video',
     maxFiles: 9, acceptedFiles: ['image'],
     fields: [
@@ -483,13 +701,13 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     ],
   },
   {
-    id: 'ft-video-v1-7393b0529b788d532d031dcac5e820cb',
-    label: 'XN1-Seedance 2.5满血 480-720p',
-    task: 'video', model: 'ft-video-v1-7393b0529b788d532d031dcac5e820cb', provider: 'gateway-video',
+    id: 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848',
+    label: 'Seedance 2.5 满血 480-720p',
+    task: 'video', model: 'Seedance 2.5 满血 480-720p', provider: 'gateway-video',
     maxFiles: 50, acceptedFiles: ['image', 'video', 'audio'],
     fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 15000 },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['21:9', '16:9', '4:3', '1:1', '3:4', '9:16']) },
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 10000 },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['480p', '720p']) },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 4, min: 4, max: 30, step: 1 },
       { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
@@ -498,23 +716,23 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
     ],
   },
   {
-    id: 'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4',
-    label: 'XN2-Seedance 2.5满血 480-720p',
-    task: 'video', model: 'ft-video-v1-9f4e77de6c05f3c360c1c0b9938a44a4', provider: 'gateway-video',
+    id: 'ft-video-v1-756e0feb4b3e1f893726314109762123',
+    label: 'XN2-Seedance 2.5 满血 480-720p',
+    task: 'video', model: 'XN2-Seedance 2.5 满血 480-720p', provider: 'gateway-video',
     maxFiles: 40, acceptedFiles: ['image', 'audio'],
     fields: [
-      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 9999 },
-      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4', '21:9']) },
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true, maxLength: 10000 },
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '4:3', '3:4', '1:1']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '480p', options: options(['480p', '720p']) },
-      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 4, min: 4, max: 29, step: 1 },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 15, min: 15, max: 30, step: 1 },
       { key: 'images', label: '参考图 (0-30张)', kind: 'images' },
       { key: 'audios', label: '参考音频 (0-10段)', kind: 'audio' },
     ],
   },
   {
     id: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
-    label: '官方渠道-Seedance2.5满血720p',
-    task: 'video', model: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98', provider: 'gateway-video',
+    label: '官方渠道-Seedance 2.5 满血 720p',
+    task: 'video', model: '官方渠道-Seedance 2.5 满血 720p', provider: 'gateway-video',
     maxFiles: 50, acceptedFiles: ['image', 'video', 'audio'],
     fields: [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
@@ -751,6 +969,21 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
       { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 1, max: 28, step: 1 },
       { key: 'size', label: '画幅', kind: 'select', defaultValue: '1344x768', options: JC_VIDEO_SIZE_OPTIONS },
+    ],
+  },
+  {
+    id: 'jc-minimax-h3-director8',
+    label: 'jc-MiniMax H3 导演台 8 步',
+    task: 'video',
+    model: 'jc-minimax-h3-director8',
+    provider: 'gateway-video',
+    maxFiles: 9,
+    acceptedFiles: ['image'],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt', required: true },
+      { key: 'duration', label: '时长(秒)', kind: 'number', defaultValue: 5, min: 0.2, max: 120, step: 0.1 },
+      { key: 'images', label: '参考图', kind: 'images', required: true },
+      { key: 'size', label: '输出分辨率', kind: 'select', defaultValue: '736x1280', options: JC_H3_DIRECTOR_SIZE_OPTIONS },
     ],
   },
   {

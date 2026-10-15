@@ -1,11 +1,28 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
-import { addFiles, aiAppNodeToField, availableModels, clearFiles, cpState, switchModel, switchTask } from '../useCreation'
+import {
+  H3_DURATION_DEFAULT,
+  H3_DURATION_RANGE,
+  addFiles,
+  aiAppNodeToField,
+  availableModels,
+  clearFiles,
+  cpState,
+  switchModel,
+  switchTask,
+} from '../useCreation'
 
 function makeFile(name: string, type: string): File {
   return new File(['fixture'], name, { type })
 }
+
+test('H3 应用的时长上限是 28 秒，与本体 comfy 的封顶一致', () => {
+  // RH 的时长节点是裸 FLOAT（app-info 实测自报 ±9.2e18、step 0.1），适配器也不校验，
+  // 所以 28 这个上限只有面板在管；放宽到 30 会出同样的尾部无效帧（736 帧 ≈ 30.7s）。
+  assert.deepEqual(H3_DURATION_RANGE, { min: 1, max: 28, step: 1 })
+  assert.equal(H3_DURATION_DEFAULT, 5)
+})
 
 test('AI App ratio nodes without upstream options still expose standard video ratios', () => {
   const field = aiAppNodeToField({
