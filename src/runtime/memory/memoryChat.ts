@@ -57,8 +57,6 @@ import { resolveCreativeProjectPath } from '@/runtime/direct/creativeToolContrac
 import { mergeCreativeSkillCatalog } from '@/runtime/direct/creativeSkillCatalog'
 import { buildMediaPlanPolicy } from '@/runtime/workbench/mediaPlan'
 import { buildCreativeContext, fitDirectRequest } from '@/runtime/direct/creativeMemory'
-import { getModelContextWindow } from '@/data/modelContextWindows'
-import { getModelMaxOutputTokens } from '@/data/modelContextWindows'
 import { chooseProjectWikiRoot, saveWikiArtifact, WIKI_ARTIFACT_TOOL, WIKI_ARTIFACT_RECEIPT_MARKER } from './wikiArtifacts'
 import { creationRoutePrompt, creationSkillNames, resolveCreationSkillPath } from './creationRoutes'
 import { webProjectFiles } from '@/utils/webProjectFiles'
@@ -403,10 +401,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
     loadWebSkillByName,
     skillAllowedToolNames,
   )
-  const contextWindow = model?.contextWindow || getModelContextWindow(input.modelId, providerId)
-  const maxOutputTokens =
-    model?.maxOutputTokens || getModelMaxOutputTokens(input.modelId, providerId)
-  input.onContextCapacity?.(contextWindow, !model?.contextWindow || model.contextWindowEstimated === true)
+  const { contextWindow, maxOutputTokens, contextWindowEstimated } = useAgentStore().modelCapacityFor(input.modelId, providerId)
+  input.onContextCapacity?.(contextWindow, contextWindowEstimated)
   const projectFiles = createRuntimeProjectFileService()
   let memoryQueryContext = ''
   if (input.memoryQueryEnabled !== false && input.projectId) {

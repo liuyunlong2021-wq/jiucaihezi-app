@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync, existsSync } from 'node:fs'
 import { test, type TestContext } from 'node:test'
+import { randomBytes } from 'node:crypto'
 import { createPinia, setActivePinia } from 'pinia'
 import { useAgentStore } from '@/stores/agentStore'
 import { createWebProjectFiles, webProjectFiles } from '@/utils/webProjectFiles'
@@ -8,6 +9,7 @@ import type { FileEntry } from '@/composables/useFileStore'
 import { runMemoryChat } from '../memoryChat'
 import { appendConversationTurn, createConversationTranscript } from '../conversationTranscript'
 import { upsertConversationMemoryIndex } from '../conversationMemoryIndex'
+import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
 
 function tool(name: string, args: Record<string, unknown>) {
   return { id: `call-${name}`, type: 'function', function: { name, arguments: JSON.stringify(args) } }
@@ -133,6 +135,38 @@ test('declared model capacity controls the request and missing capacity is marke
   await f.run('再讨论想法', { onContextCapacity: (capacity: number, estimated: boolean) => capacities.push([capacity, estimated]) })
   assert.deepEqual(capacities, [[80000, false], [32768, true]])
   assert.equal(f.requests[1].max_tokens, 4096)
+})
+
+test('relay presets and manual capacity reach actual Runtime requests, including stale 32K entries', async t => {
+  const f = await fixture(t, ['预设回答', '手动容量回答'])
+  __resetApiKeyMemoryCacheForTests('test-only-fake-key')
+  t.after(() => __resetApiKeyMemoryCacheForTests(''))
+  const store = useAgentStore()
+  store.availableModels = [{ id: 'gpt-6.1-sol', label: 'GPT6.1', providerId: 'jiucaihezi', capability: 'text', contextWindow: 32_768, maxOutputTokens: 4_096, contextWindowEstimated: true }]
+  const capacities: Array<[number, boolean]> = []
+  const extra = { modelId: 'gpt-6.1-sol', modelProviderId: 'jiucaihezi', memoryQueryEnabled: false, onContextCapacity: (value: number, estimated: boolean) => capacities.push([value, estimated]) }
+  await f.run('讨论情节', extra)
+  assert.equal(f.requests[0].max_tokens, 128_000)
+  store.setModelCapacity('jiucaihezi', 'gpt-6.1-sol', { contextWindow: 182_000, maxOutputTokens: 8_000 })
+  await f.run('继续讨论情节', extra)
+  assert.equal(f.requests[1].max_tokens, 8_000)
+  assert.deepEqual(capacities, [[1_050_000, false], [182_000, false]])
+})
+
+test('a large image reaches GPT6.1 unchanged instead of being blocked as base64 text', async t => {
+  const f = await fixture(t, ['图片分析完成'])
+  __resetApiKeyMemoryCacheForTests('test-only-fake-key')
+  t.after(() => __resetApiKeyMemoryCacheForTests(''))
+  useAgentStore().availableModels = [{ id: 'gpt-6.1-sol', label: 'GPT6.1', providerId: 'jiucaihezi', capability: 'text', toolCall: true }]
+  const data = randomBytes(4 * 1024 * 1024)
+  data.set([137, 80, 78, 71, 13, 10, 26, 10], 0)
+  data.writeUInt32BE(1024, 16); data.writeUInt32BE(1024, 20)
+  const url = `data:image/png;base64,${data.toString('base64')}`
+  await f.run('分析附件图片', { modelId: 'gpt-6.1-sol', modelProviderId: 'jiucaihezi', memoryQueryEnabled: false,
+    attachments: [{ id: 'image', name: 'ref.png', mime: 'image/png', size: data.length, kind: 'image', value: url }] })
+  const parts = f.requests[0].messages.findLast((message: any) => message.role === 'user').content
+  assert.equal(parts.find((part: any) => part.type === 'image_url').image_url.url, url)
+  assert.equal(f.requests[0].max_tokens, 128_000)
 })
 
 test('partial Wiki save exposes program-owned warnings independently of the model reply', async t => {

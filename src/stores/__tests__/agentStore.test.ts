@@ -4,6 +4,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 import { useAgentStore } from '../agentStore'
 import type { SkillConfig } from '../../types/skill'
+import { __resetApiKeyMemoryCacheForTests } from '../../services/newApiClient'
 
 function installLocalStorage(values: Record<string, string> = {}) {
   const store = new Map<string, string>(Object.entries(values))
@@ -125,6 +126,88 @@ test('Web Skill warehouse does not expose the bundled product catalog', { concur
     assert.deepEqual(agentStore.getCustomSkills(), [])
   } finally {
     storage.restore()
+  }
+})
+
+test('known model caches upgrade both old 1M and estimated 32K without replacing explicit channel limits', () => {
+  for (const cached of [
+    { contextWindow: 1_000_000, maxOutputTokens: 128_000 },
+    { contextWindow: 32_768, maxOutputTokens: 4_096, contextWindowEstimated: true },
+    { contextWindow: 1_000_000, contextWindowSource: 'preset' },
+    { contextWindow: 256_000, maxOutputTokens: 8_000, contextWindowEstimated: false },
+  ]) {
+    const models = Array.from({ length: 20 }, (_, i) => ({ id: i ? `cached-${i}` : 'gpt-6.1-sol', label: 'test', providerId: 'jiucaihezi', capability: 'text', ...cached }))
+    const storage = installLocalStorage({ jc_models_cache: JSON.stringify(models) })
+    try {
+      setActivePinia(createPinia())
+      const model = useAgentStore().availableModels.find(item => item.id === 'gpt-6.1-sol')!
+      assert.equal(model.contextWindow, cached.contextWindowEstimated === false ? 256_000 : 1_050_000)
+      assert.equal(model.contextWindowEstimated, false)
+    } finally { storage.restore() }
+  }
+})
+
+test('manual model capacity is validated, provider scoped, persistent and resettable', () => {
+  const storage = installLocalStorage()
+  try {
+    setActivePinia(createPinia())
+    let store = useAgentStore()
+    store.setModelCapacity('relay-a', 'gpt-6.1-sol', { contextWindow: 182_000, maxOutputTokens: 8_000 })
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol', 'relay-a').contextWindowSource, 'manual')
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol', 'relay-a').contextWindow, 182_000)
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol', 'relay-b').contextWindow, 1_050_000)
+    for (const value of [0, -1, NaN, Infinity, 1.5]) {
+      assert.throws(() => store.setModelCapacity('relay-a', 'gpt-6.1-sol', { contextWindow: value, maxOutputTokens: 8_000 }))
+    }
+    assert.throws(() => store.setModelCapacity('relay-a', 'gpt-6.1-sol', { contextWindow: 100, maxOutputTokens: 100 }))
+    setActivePinia(createPinia())
+    store = useAgentStore()
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol', 'relay-a').contextWindow, 182_000)
+    store.setModelCapacity('relay-a', 'gpt-6.1-sol', null)
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol', 'relay-a').contextWindow, 1_050_000)
+  } finally { storage.restore() }
+})
+
+test('a relay catalog without capacities uses presets, refresh keeps manual limits, and offline recovery migrates caches', async () => {
+  const storage = installLocalStorage()
+  const previousFetch = globalThis.fetch
+  __resetApiKeyMemoryCacheForTests('test-only-fake-key')
+  try {
+    globalThis.fetch = (async () => new Response(JSON.stringify({ data: [
+      { id: 'gpt-6.1-sol' }, { id: 'gemini-3.8-flash' },
+      { id: 'claude-opus-4-8', context_window: 256_000, max_output_tokens: 8_000 },
+      { id: 'unknown-relay-model' },
+    ] }), { headers: { 'Content-Type': 'application/json' } })) as typeof fetch
+    setActivePinia(createPinia())
+    const store = useAgentStore()
+    await store.fetchModels()
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol').contextWindow, 1_050_000)
+    assert.equal(store.modelCapacityFor('gemini-3.8-flash').contextWindowSource, 'preset')
+    assert.equal(store.modelCapacityFor('claude-opus-4-8').contextWindow, 256_000)
+    assert.equal(store.modelCapacityFor('unknown-relay-model').contextWindowEstimated, true)
+    store.setModelCapacity('jiucaihezi', 'gpt-6.1-sol', { contextWindow: 182_000, maxOutputTokens: 8_000 })
+    await store.fetchModels()
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol').contextWindow, 182_000)
+    const models = Array.from({ length: 20 }, (_, i) => ({ id: i ? `offline-${i}` : 'gpt-6.1-sol', label: 'test', providerId: 'jiucaihezi', capability: 'text', contextWindow: 32_768, contextWindowEstimated: true }))
+    globalThis.localStorage.setItem('jc_models_cache', JSON.stringify(models))
+    __resetApiKeyMemoryCacheForTests('')
+    await store.fetchModels()
+    assert.equal(store.availableModels.find(model => model.id === 'gpt-6.1-sol')?.contextWindow, 1_050_000)
+    assert.equal(store.modelCapacityFor('gpt-6.1-sol').contextWindow, 182_000)
+  } finally {
+    __resetApiKeyMemoryCacheForTests('')
+    globalThis.fetch = previousFetch
+    storage.restore()
+  }
+})
+
+test('corrupt or invalid persisted overrides cannot override built-in capacity', () => {
+  for (const raw of ['null', 'not json', JSON.stringify({ '["relay-a","gpt-6.1-sol"]': { contextWindow: -10, maxOutputTokens: 99 } })]) {
+    const storage = installLocalStorage({ jc_model_capacity_overrides: raw })
+    try {
+      setActivePinia(createPinia())
+      assert.equal(useAgentStore().modelCapacityFor('gpt-6.1-sol', 'relay-a').contextWindow, 1_050_000)
+    } finally { storage.restore() }
   }
 })
 test('stores variants separately for each provider model', { concurrency: false }, () => {

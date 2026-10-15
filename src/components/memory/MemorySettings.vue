@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
 import { useAgentStore } from '@/stores/agentStore'
@@ -66,6 +66,38 @@ const agentStore = useAgentStore()
 const appVersion = desktopRuntime || mobileRuntime ? __APP_VERSION__ : `Web ${__WEB_VERSION__}`
 const { theme } = useTheme()
 const textModels = computed(() => agentStore.textModels.map(model => ({ id: model.id, label: model.label })))
+const capacityModels = computed(() => agentStore.textModels.map(model => ({ ...model, key: JSON.stringify([model.providerId || 'jiucaihezi', model.id]) })))
+const capacityModelKey = ref('')
+const capacityModel = computed(() => capacityModels.value.find(model => model.key === capacityModelKey.value))
+const capacity = computed(() => capacityModel.value
+  ? agentStore.modelCapacityFor(capacityModel.value.id, capacityModel.value.providerId)
+  : undefined)
+const capacityContext = ref(0)
+const capacityOutput = ref(0)
+const capacityStatus = ref('')
+const capacitySourceLabels = { manual: '手动设置', declared: '接口声明', preset: '内置预设（非通道实测）', estimated: '未知容量，保守估算' }
+watch([() => agentStore.currentModel, capacityModels], () => {
+  const providerId = localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
+  capacityModelKey.value = (capacityModels.value.find(model => model.id === agentStore.currentModel && (model.providerId || 'jiucaihezi') === providerId)
+    || capacityModels.value.find(model => model.id === agentStore.currentModel) || capacityModels.value[0])?.key || ''
+}, { immediate: true })
+watch(capacity, value => {
+  capacityContext.value = value?.contextWindow || 0
+  capacityOutput.value = value?.maxOutputTokens || 0
+}, { immediate: true })
+watch(capacityModelKey, () => { capacityStatus.value = '' })
+
+function saveCapacity(reset = false) {
+  const model = capacityModel.value
+  if (!model) return
+  try {
+    agentStore.setModelCapacity(model.providerId || 'jiucaihezi', model.id,
+      reset ? null : { contextWindow: capacityContext.value, maxOutputTokens: capacityOutput.value })
+    capacityStatus.value = reset ? '已恢复自动预设，下次请求生效。' : '已保存，下次请求生效。'
+  } catch (error) {
+    capacityStatus.value = error instanceof Error ? error.message : '保存失败'
+  }
+}
 const themeOptions = [
   { key: 'white', label: '白色' },
   { key: 'light', label: '浅色' },
@@ -362,6 +394,19 @@ function showSync() {
         </nav>
         </div>
         <template v-if="tab === 'models'">
+        <section v-if="capacityModel && capacity" class="memory-local-model">
+          <strong>模型上下文容量</strong>
+          <label class="memory-comfy-key"><span>模型（按供应商分别保存）</span>
+            <select v-model="capacityModelKey">
+              <option v-for="model in capacityModels" :key="model.key" :value="model.key">{{ model.label }} · {{ model.providerId || 'jiucaihezi' }}</option>
+            </select>
+          </label>
+          <p>{{ capacitySourceLabels[capacity.contextWindowSource] }}。容量包含输入与输出，不代表每轮会塞满。中转站有限制时可手动覆盖。</p>
+          <label class="memory-comfy-key"><span>上下文总容量（token）</span><input v-model.number="capacityContext" type="number" min="2" step="1" /></label>
+          <label class="memory-comfy-key"><span>单次输出上限（token）</span><input v-model.number="capacityOutput" type="number" min="1" :max="capacityContext - 1" step="1" /></label>
+          <div class="memory-local-actions"><button type="button" @click="saveCapacity()">保存容量</button><button type="button" @click="saveCapacity(true)">恢复自动预设</button></div>
+          <p v-if="capacityStatus" role="status">{{ capacityStatus }}</p>
+        </section>
         <div class="memory-local-head">
           <strong>模型与服务</strong>
           <span>{{ localModelSummary }}</span>
@@ -569,6 +614,8 @@ function showSync() {
 .memory-comfy-key { display: grid; min-width: 0; gap: 6px; color: var(--ink2); font-size: 12px; }
 .memory-comfy-key input { min-width: 0; width: 100%; box-sizing: border-box; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink1); font: inherit; }
 .memory-comfy-key input:focus { outline: 2px solid color-mix(in srgb, var(--olive) 35%, transparent); border-color: var(--olive); }
+.memory-comfy-key select { min-width: 0; width: 100%; min-height: 34px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink1); font: inherit; }
+.memory-comfy-key select:focus-visible { outline: 2px solid var(--jc-focus-ring); }
 .memory-service-switch { display: flex; align-items: center; justify-content: space-between; gap: 12px; cursor: pointer; }
 .memory-service-switch input { appearance: none; position: relative; box-sizing: border-box; width: 34px; height: 20px; flex: 0 0 34px; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 999px; background: var(--jc-surface-container-high); cursor: pointer; transition: background var(--jc-transition-fast); }
 .memory-service-switch input::before { content: ''; position: absolute; top: 1px; left: 1px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 15%); transition: left var(--jc-transition-fast); }

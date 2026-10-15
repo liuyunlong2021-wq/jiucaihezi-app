@@ -9,7 +9,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { SkillConfig } from '../types/skill'
-import { getModelContextWindow, getModelMaxOutputTokens } from '@/data/modelContextWindows'
+import { resolveModelCapacity, type ModelCapacity } from '@/data/modelContextWindows'
 import { parseSkillMd, serializeToSkillMd } from '../types/skill'
 import { gatewayModels } from '@/services/newApiClient'
 import { invoke } from '@tauri-apps/api/core'
@@ -53,6 +53,8 @@ export interface ModelEntry {
   /** 模型上下文 token 上限 */
   contextWindow?: number
   contextWindowEstimated?: boolean
+  contextWindowSource?: ModelCapacity['contextWindowSource']
+  maxOutputTokensSource?: ModelCapacity['maxOutputTokensSource']
   /** 模型单次输出 token 上限 */
   maxOutputTokens?: number
   toolCall?: boolean
@@ -137,9 +139,10 @@ function loadCachedModelEntries(): ModelEntry[] | null {
       ? parsed.map((model: ModelEntry) => ({
           ...model,
           capability: model.capability || inferCapability(model.id),
-          // 旧版把1M兜底写成了真实元数据；刷新目录前先保守处理。
-          ...(model.contextWindowEstimated === undefined && model.contextWindow === 1_000_000
-            ? { contextWindow: getModelContextWindow(model.id, model.providerId), maxOutputTokens: getModelMaxOutputTokens(model.id, model.providerId), contextWindowEstimated: true } : {}),
+          ...resolveModelCapacity(model.id, model.providerId,
+            // 旧版1M没有来源；按当前预设重算，不覆盖明确声明的通道限额。
+            model.contextWindowEstimated === undefined && !model.contextWindowSource && model.contextWindow === 1_000_000
+              ? {} : model),
         }))
       : []
     const filtered = filterExecutableModels(normalized)
@@ -204,6 +207,38 @@ export const useAgentStore = defineStore('agents', () => {
   const modelsFetchError = ref('')
   let modelsFetchPromise: Promise<void> | null = null
 
+  const capacityOverrides = ref<Record<string, Pick<ModelCapacity, 'contextWindow' | 'maxOutputTokens'>>>(loadCapacityOverrides())
+
+  function loadCapacityOverrides(): Record<string, Pick<ModelCapacity, 'contextWindow' | 'maxOutputTokens'>> {
+    try {
+      const parsed = JSON.parse(localStorage.getItem('jc_model_capacity_overrides') || '{}')
+      return Object.fromEntries(Object.entries(parsed).filter((entry): entry is [string, Pick<ModelCapacity, 'contextWindow' | 'maxOutputTokens'>] => validCapacity(entry[1])))
+    } catch { return {} }
+  }
+
+  function validCapacity(value: any): value is Pick<ModelCapacity, 'contextWindow' | 'maxOutputTokens'> {
+    return value && Number.isSafeInteger(value.contextWindow) && Number.isSafeInteger(value.maxOutputTokens)
+      && value.maxOutputTokens > 0 && value.contextWindow > value.maxOutputTokens
+  }
+
+  function modelCapacityFor(modelId: string, providerId = 'jiucaihezi'): ModelCapacity {
+    const override = capacityOverrides.value[JSON.stringify([providerId, modelId])]
+    if (override) return { ...override, contextWindowSource: 'manual', maxOutputTokensSource: 'manual', contextWindowEstimated: false }
+    const model = availableModels.value.find(entry => entry.id === modelId && (entry.providerId || 'jiucaihezi') === providerId)
+    return resolveModelCapacity(modelId, providerId, model)
+  }
+
+  function setModelCapacity(providerId: string, modelId: string, capacity: Pick<ModelCapacity, 'contextWindow' | 'maxOutputTokens'> | null) {
+    if (!providerId.trim() || !modelId.trim()) throw new Error('请选择供应商和模型')
+    if (capacity !== null && !validCapacity(capacity)) throw new Error('请输入正整数 token 数，上下文容量必须大于单次输出上限')
+    const next = { ...capacityOverrides.value }
+    const key = JSON.stringify([providerId, modelId])
+    if (capacity === null) delete next[key]
+    else next[key] = { contextWindow: capacity.contextWindow, maxOutputTokens: capacity.maxOutputTokens }
+    localStorage.setItem('jc_model_capacity_overrides', JSON.stringify(next))
+    capacityOverrides.value = next
+  }
+
   function syncModelProviderStorage(modelId = currentModel.value, explicitProviderId?: string) {
     const storedProviderId = localStorage.getItem('jcModelProviderId') || ''
     const model = availableModels.value.find(x => x.id === modelId && x.providerId === (explicitProviderId || storedProviderId))
@@ -264,13 +299,7 @@ export const useAgentStore = defineStore('agents', () => {
           providerId,
           inputModalities: item.input_modalities || item.inputModalities,
         }),
-        contextWindow: typeof item.contextWindow === 'number' && item.contextWindow > 0
-          ? item.contextWindow
-          : getModelContextWindow(id, providerId),
-        contextWindowEstimated: !(typeof item.contextWindow === 'number' && item.contextWindow > 0),
-        maxOutputTokens: typeof item.maxOutputTokens === 'number' && item.maxOutputTokens > 0
-          ? item.maxOutputTokens
-          : getModelMaxOutputTokens(id, providerId),
+        ...resolveModelCapacity(id, providerId, item),
       }
     }).filter(Boolean) as ModelEntry[]
   }
@@ -308,27 +337,15 @@ export const useAgentStore = defineStore('agents', () => {
       }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
-      // 尝试从缓存恢复，但只有缓存比兜底模型更多时才采用（防止坏缓存覆盖）
+      // 与启动共用缓存校验及容量迁移，避免断网恢复旧32K估算。
       try {
-        const cached = localStorage.getItem('jc_models_cache')
+        const cached = loadCachedModelEntries()
         if (cached) {
-          const parsed = JSON.parse(cached)
-          const normalized = Array.isArray(parsed)
-            ? parsed.map((model: ModelEntry) => ({
-                ...model,
-                capability: model.capability || inferCapability(model.id),
-              }))
-            : []
-          const filtered = filterExecutableModels(normalized)
-          const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-          const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-          if (filtered.length > 0 && cachedTextCount >= defaultTextCount) {
-            availableModels.value = mergeLocalModels(filtered)
-            const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
-            if (resolvedModel !== currentModel.value) setModel(resolvedModel)
-            else syncModelProviderStorage()
-            modelsFetched.value = true
-          }
+          availableModels.value = mergeLocalModels(cached)
+          const resolvedModel = resolveModelSelection(currentModel.value, availableModels.value)
+          if (resolvedModel !== currentModel.value) setModel(resolvedModel)
+          else syncModelProviderStorage()
+          modelsFetched.value = true
         }
       } catch { /* noop */ }
     }
@@ -874,6 +891,8 @@ export const useAgentStore = defineStore('agents', () => {
     videoModels,
     audioModels,
     fetchModels,
+    modelCapacityFor,
+    setModelCapacity,
     refreshLocalModels,
     // ─── Skill管理 ───
     loadAgents,

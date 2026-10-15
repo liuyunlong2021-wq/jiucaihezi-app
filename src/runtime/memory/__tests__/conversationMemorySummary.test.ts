@@ -1,11 +1,36 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { createPinia, setActivePinia } from 'pinia'
+import { useAgentStore } from '@/stores/agentStore'
+import { __resetApiKeyMemoryCacheForTests } from '@/services/newApiClient'
 
 import {
   CONVERSATION_MEMORY_SUMMARY_PROMPT,
   buildConversationMemorySummaryRequest,
   parseConversationMemorySummaryPayload,
+  generateConversationMemorySummary,
 } from '../conversationMemorySummary'
+
+test('index requests honor the same provider-scoped manual output limit as chat', async t => {
+  const previous = { storage: globalThis.localStorage, window: globalThis.window, fetch: globalThis.fetch }
+  const records = new Map<string, string>()
+  Object.assign(globalThis, {
+    localStorage: { getItem: (key: string) => records.get(key) || null, setItem: (key: string, value: string) => records.set(key, value) },
+    window: { location: { origin: 'http://localhost', href: 'http://localhost' } },
+  })
+  __resetApiKeyMemoryCacheForTests('test-only-fake-key')
+  t.after(() => { __resetApiKeyMemoryCacheForTests(''); Object.assign(globalThis, { localStorage: previous.storage, window: previous.window, fetch: previous.fetch }) })
+  setActivePinia(createPinia())
+  useAgentStore().setModelCapacity('jiucaihezi', 'gpt-6.1-sol', { contextWindow: 182_000, maxOutputTokens: 1_024 })
+  let request: any
+  globalThis.fetch = (async (_url, options) => {
+    request = JSON.parse(String(options?.body))
+    return new Response(JSON.stringify({ choices: [{ message: { content: '简介：车站重逢\n关键词：王刚、车站' } }] }), { headers: { 'Content-Type': 'application/json' } })
+  }) as typeof fetch
+  const summary = await generateConversationMemorySummary({ modelId: 'gpt-6.1-sol', modelProviderId: 'jiucaihezi', assistantTurn: { id: 'a', role: 'assistant', content: '王刚在车站重逢。', createdAt: '2026-10-15' } })
+  assert.equal(request.max_tokens, 1_024)
+  assert.equal(summary.summary, '车站重逢')
+})
 
 test('conversation memory summary request uses the fixed plain-text prompt', () => {
   const request = buildConversationMemorySummaryRequest('model-1', '当前 assistant 的完整回答')

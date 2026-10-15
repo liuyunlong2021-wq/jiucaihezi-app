@@ -11,7 +11,6 @@ import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
 import type { ConversationTurn } from './conversationTranscript'
 import type { ConversationMemorySummary } from './conversationMemoryIndex'
 import { useAgentStore } from '@/stores/agentStore'
-import { getModelContextWindow } from '@/data/modelContextWindows'
 import { fitDirectRequest } from '@/runtime/direct/creativeMemory'
 
 export const CONVERSATION_MEMORY_SUMMARY_PROMPT = [
@@ -74,9 +73,9 @@ export async function generateConversationMemorySummary(input: {
 }): Promise<ConversationMemorySummary> {
   const providerId = input.modelProviderId || localStorage.getItem('jcModelProviderId') || 'jiucaihezi'
   const config = await resolveApiConfig({ modelId: input.modelId, modelProviderId: providerId })
-  const model = useAgentStore().availableModels.find(entry => entry.id === input.modelId && (entry.providerId || 'jiucaihezi') === providerId)
+  const { contextWindow, maxOutputTokens } = useAgentStore().modelCapacityFor(input.modelId, providerId)
   const request = buildConversationMemorySummaryRequest(config.model, input.assistantTurn.content, config.providerId, input.userTurn?.content, input.wikiArtifacts)
-  const budget = fitDirectRequest({ messages: request.messages }, model?.contextWindow || getModelContextWindow(input.modelId, providerId), CONVERSATION_MEMORY_SUMMARY_MAX_TOKENS)
+  const budget = fitDirectRequest({ messages: request.messages }, contextWindow, Math.min(CONVERSATION_MEMORY_SUMMARY_MAX_TOKENS, maxOutputTokens))
   const response = await sendDirectRequestWithRetry(
     () =>
       sendNewApiRequest(

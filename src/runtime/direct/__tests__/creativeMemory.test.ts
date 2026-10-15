@@ -1,8 +1,73 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
+import { randomBytes } from 'node:crypto'
 
 import { buildCreativeContext, fitDirectRequest } from '../creativeMemory'
+
+function imageData(width = 1024, height = 1024, bytes = 4 * 1024 * 1024) {
+  const data = randomBytes(bytes)
+  data.set([137, 80, 78, 71, 13, 10, 26, 10], 0)
+  data.writeUInt32BE(width, 16)
+  data.writeUInt32BE(height, 20)
+  return `data:image/png;base64,${data.toString('base64')}`
+}
+
+test('image payload size is not text tokens, pixels still reserve budget, and payload stays intact', () => {
+  const url = imageData()
+  const messages = [{ role: 'user', content: [{ type: 'text', text: '分析图片' }, { type: 'image_url', image_url: { url } }] }]
+  const result = fitDirectRequest({ messages }, 32_768, 4096)
+  assert.ok(result.inputTokens >= 4096 && result.inputTokens < 20_000)
+  assert.deepEqual(result.messages, messages)
+  assert.equal((messages[0]!.content[1] as any).image_url.url, url)
+  const small = fitDirectRequest({ messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: imageData(1024, 1024, 100) } }] }] }, 32_768, 4096)
+  assert.ok(Math.abs(result.inputTokens - small.inputTokens) < 100)
+  assert.throws(() => fitDirectRequest({ messages }, 3000, 500), /上下文|分段/)
+})
+
+test('remote or malformed image dimensions keep a nonzero conservative reserve without fetching', () => {
+  for (const url of ['https://example.com/ref.png', 'data:image/png;base64,broken']) {
+    const messages = [{ role: 'user', content: [{ type: 'image_url', image_url: { url } }] }]
+    const result = fitDirectRequest({ messages }, 1_050_000, 128_000)
+    assert.ok(result.inputTokens >= 65_536)
+    assert.deepEqual(result.messages, messages)
+  }
+})
+
+test('JPEG, GIF and all three WebP headers use pixel estimates rather than the unknown fallback', () => {
+  const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0, 9, 8, 4, 0, 4, 0, 1, 0, 0xff, 0xd9])
+  const gif = Buffer.alloc(10)
+  gif.write('GIF89a'); gif.writeUInt16LE(1024, 6); gif.writeUInt16LE(1024, 8)
+  const webp = (kind: string) => { const data = Buffer.alloc(30); data.write('RIFF'); data.write('WEBP', 8); data.write(kind, 12); return data }
+  const vp8x = webp('VP8X'); vp8x.writeUIntLE(1023, 24, 3); vp8x.writeUIntLE(1023, 27, 3)
+  const vp8l = webp('VP8L'); vp8l[20] = 0x2f; vp8l.writeUInt32LE(1023 | (1023 << 14), 21)
+  const vp8 = webp('VP8 '); vp8.set([0x9d, 1, 0x2a], 23); vp8.writeUInt16LE(1024, 26); vp8.writeUInt16LE(1024, 28)
+  for (const [mime, data] of [['jpeg', jpeg], ['gif', gif], ['webp', vp8x], ['webp', vp8l], ['webp', vp8]] as const) {
+    const result = fitDirectRequest({ messages: [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/${mime};base64,${data.toString('base64')}` } }] }] }, 32_768, 4096)
+    assert.ok(result.inputTokens >= 4096 && result.inputTokens < 5000, mime)
+  }
+})
+
+test('images reserve pixels per occurrence and do not bypass text or tool-result limits', () => {
+  const url = imageData(2048, 2048, 100)
+  const image = { type: 'image_url', image_url: { url } }
+  const one = fitDirectRequest({ messages: [{ role: 'user', content: [image] }] }, 1_050_000, 128_000)
+  const two = fitDirectRequest({ messages: [{ role: 'user', content: [image, image] }] }, 1_050_000, 128_000)
+  assert.ok(two.inputTokens > one.inputTokens * 1.9)
+  assert.throws(() => fitDirectRequest({ messages: [{ role: 'user', content: [image, { type: 'text', text: '正文'.repeat(100_000) }] }] }, 32_768, 4096), /上下文/)
+  assert.throws(() => fitDirectRequest({ messages: [{ role: 'tool', content: imageData() }] }, 2000, 500), /上下文/)
+})
+
+test('history images use the same estimator without dropping an entire valid round', () => {
+  const url = imageData()
+  const result = buildCreativeContext({ messages: [
+    { id: 'u1', role: 'user', content: '看图', images: [url] },
+    { id: 'a1', role: 'assistant', content: '分析结果' },
+    { id: 'u2', role: 'user', content: '继续' },
+  ], modelId: 'gpt-6.1-sol', contextWindow: 1_050_000, reservedTokens: 130_048 })
+  assert.equal(result.omittedMessages, 0)
+  assert.ok(result.estimatedTokens < 20_000)
+})
 
 test('creative memory only assembles context and never defines a project raw ledger', () => {
   const source = readFileSync('src/runtime/direct/creativeMemory.ts', 'utf8')
@@ -151,7 +216,7 @@ test('tool image followups and length continuation prompts do not replace the pr
     { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/ref.png' } }] },
     { role: 'user', content: '继续未完成输出' },
   ] }
-  const result = fitDirectRequest(request, 3000, 500, current)
+  const result = fitDirectRequest(request, 100_000, 500, current)
   assert.ok(result.messages.some(item => item.content === current.content))
   assert.ok(result.messages.some(item => item.tool_call_id === 'image'))
   assert.ok(result.messages.some(item => Array.isArray(item.content)))

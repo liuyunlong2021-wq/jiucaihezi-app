@@ -1963,7 +1963,9 @@ async function send() {
         contextNoticeShownConversations.add(active.transcript.id)
       },
       onContextCapacity(capacity, estimated) {
-        if (estimated && isOnScreen(run)) contextNotice.value = `模型未声明上下文容量，暂按 ${Math.round(capacity / 1024)}K 保守估算；不会按旧版1M假定发送。`
+        if (!isOnScreen(run)) return
+        if (estimated) contextNotice.value = `模型容量未知，暂按 ${Math.round(capacity / 1024)}K 估算；可在设置 → 模型中手动修改。`
+        else if (contextNotice.value.startsWith('模型容量未知，')) contextNotice.value = ''
       },
       confirmTool: async call => {
         if (!isCurrentRun()) return false

@@ -507,6 +507,9 @@ test('memory composer uses one workbench mode with beginner-friendly command tem
   assert.match(runtime, /files: input\.files/)
   assert.match(runtime, /context\.omittedMessages > 0[\s\S]*onContextTrimmed/)
   assert.match(runtime, /fitDirectRequest\(request, contextWindow, maxOutputTokens, currentTaskMessage\)/)
+  assert.match(runtime, /modelCapacityFor\(input.modelId, providerId\)/)
+  assert.doesNotMatch(workbench, /不会按旧版1M假定发送/)
+  assert.match(workbench, /onContextCapacity\(capacity, estimated\)[\s\S]*!isOnScreen\(run\)\) return[\s\S]*else if \(contextNotice.value.startsWith\('模型容量未知，'\)\) contextNotice.value = ''/)
   assert.match(
     workbench,
     /onContextTrimmed\(\)[\s\S]*contextNoticeShownConversations\.add\(active\.transcript\.id\)/,
