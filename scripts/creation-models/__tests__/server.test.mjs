@@ -119,6 +119,16 @@ test('buildCreationModelAvailability keeps channel 61 RH GPT Image 2 separate fr
   assert.equal(models.find(model => model.id === 'gpt-image-2-1k')?.status, 'disabled')
 })
 
+test('buildCreationModelAvailability keeps the three Yihong image aliases isolated', () => {
+  const models = buildCreationModelAvailability([
+    { id: 61, name: 'Yihong image', status: 1, baseUrl: 'x', models: ['yihong-gpt-image-2.5-flare'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'newapi/yihong/yihong-gpt-image-2.5-flare')?.status, 'enabled')
+  assert.equal(models.find(model => model.id === 'newapi/yihong/yihong-gpt-image-2')?.status, 'disabled')
+  assert.equal(models.find(model => model.id === 'newapi/yihong/yihong-gpt-image-2.5-sunburst')?.status, 'disabled')
+})
+
 test('buildCreationModelAvailability detects channel 94 Gemini image models', () => {
   const models = buildCreationModelAvailability([
     { id: 94, name: 'Gemini image', status: 1, baseUrl: 'x', models: ['gemini-3-pro-image-preview', 'gemini-3.1-flash-image-preview'] },

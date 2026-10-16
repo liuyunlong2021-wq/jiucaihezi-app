@@ -11,6 +11,15 @@ const GROK = 'grok-1.5-video-10s'
 const OMNI = 'omni-fast'
 const MJ = 'mj_fast_imagine'
 const SEEDANCE = 'doubao-seedance-2-5-260628'
+const ZX_SEEDANCE_MODELS = [
+  'seedance-2.0-0826-480p',
+  'seedance-2.0-0826-720p',
+  'seedance-2.0-fast-0826-480p',
+  'seedance-2.0-fast-0826-720p',
+  'seedance-2.0-TS',
+  'seedance-2.5',
+  'seedance-2.5-30s',
+]
 const BASE = 'http://zx-video-adapter:8789'
 
 function decode(value, model = GROK) {
@@ -27,7 +36,7 @@ function render(task, ctx = {}) {
 test('meta 对齐适配器与面板注册', () => {
   assert.equal(plugin.meta.apiVersion, 1)
   assert.equal(plugin.meta.key, 'zx')
-  assert.equal(plugin.meta.version, '0.1.0')
+  assert.equal(plugin.meta.version, '0.1.1')
   assert.equal(plugin.meta.fetchMode, 'per_task')
   assert.deepEqual(plugin.meta.protocols, ['openai_video'])
   // 适配器容器加入 new-api-new_new-api-network、不映射宿主端口，所以走服务名
@@ -39,14 +48,35 @@ test('meta 对齐适配器与面板注册', () => {
     'omni-fast',
     'omni-v2v',
     'mj_fast_imagine',
+    ...ZX_SEEDANCE_MODELS,
   ])
   assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'seconds'])
 })
 
-test('★ Seedance 有意不收编：面板发的是 /v1/video/generations，不是宿主协议路径', () => {
-  // 宿主协议绑定表里 `openai_video` 的 create 只有 POST /v1/videos；
-  // `/v1/video/generations` 不在任何协议的绑定里，type 61 渠道接不住。
-  // 这条断言是**故意**的：将来要收编它，得先改 App 的 endpoint。
+test('ZX Seedance 型号按 OpenAI Video 接口收编，旧直连接口名保持未注册', () => {
+  for (const model of ZX_SEEDANCE_MODELS) {
+    const intent = decode({ prompt: 'p', duration: 8 }, model)
+    assert.equal(intent.requestBody.model, model)
+    assert.equal(intent.action, 'text_to_video')
+    assert.deepEqual(plugin.extractUsage({ model, requestBody: { duration: 8 } }), { calls: 1, seconds: 8 })
+    assert.deepEqual(plugin.extractUsage({
+      model,
+      upstreamModel: `zx-${model}`,
+      requestBody: { duration: 8 },
+    }), { calls: 1, seconds: 8 })
+    assert.equal(plugin.buildSubmitRequest({
+      baseUrl: BASE,
+      apiKey: 'zx-key',
+      model,
+      upstreamModel: `zx-${model}`,
+      requestBody: { model, prompt: 'p' },
+      action: 'text_to_video',
+    }).body.model, `zx-${model}`)
+    assert.equal(
+      plugin.extractUsage({ model, requestBody: { duration: -1 } }).seconds,
+      model.startsWith('seedance-2.5') ? 30 : 15,
+    )
+  }
   assert.ok(!plugin.meta.models.includes(SEEDANCE))
   assert.throws(() => decode({ prompt: 'p' }, SEEDANCE), /Unsupported model/)
 })

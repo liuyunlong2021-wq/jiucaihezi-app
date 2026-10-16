@@ -339,12 +339,10 @@ test('重试链进过程投影：llm/retry 与 llm/retry-started 各占一行，
   assert.equal(steps[2].retry?.attempt, 2)
 })
 
-test('重试预算对齐官方默认 5，always 模式的上限显示为 ∞', () => {
+test('重试策略继承官方默认值，always 模式的上限显示为 ∞', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
-  // 官方 `DEFAULT_MAX_RETRIES = 5`。写 1 时一轮 42 步的任务约 85% 概率撞上传输故障而中途死掉。
-  assert.match(source, /'          maxRetries: 5',/)
-  assert.doesNotMatch(source, /maxRetries: 1/)
-  assert.doesNotMatch(source, /backoff/)
+  // 不复制官方默认清单，尤其不能把兜底 PI_AI_ERROR 扩成可重试错误。
+  assert.doesNotMatch(source, /'        retryPolicy:'|'          (?:maxRetries|retryableCodes|backoff):/)
   const always = deepSeekProgress({
     type: 'llm/retry',
     time: 10,
@@ -362,6 +360,12 @@ test('重试预算对齐官方默认 5，always 模式的上限显示为 ∞', (
     deepSeekProgress({ type: 'llm/retry', data: { turn: 7, retry: 2, mode: 'normal', maxRetries: 5, delayMs: 800, failure: {} } })?.id,
     'retry-7-2',
   )
+})
+
+test('压缩期间沿用官方运行文案，结束后退出压缩状态', () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  assert.match(source, /event\?\.type === 'compaction\/start'\) input\.onStatus\?\.\('正在压缩…'\)/)
+  assert.match(source, /event\?\.type === 'compaction\/end'\) input\.onStatus\?\.\('正在分析'\)/)
 })
 
 test('失败行补齐尝试次数，失败文案走官方 failureMessage 映射', () => {
@@ -487,10 +491,6 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(source, /writeTextFile\(patchPath/)
   assert.match(source, /dev_copy_external/)
   assert.match(source, /resolveResource\([^)]*node\/bin\//s)
-  // 重试预算对齐官方默认 5（写 1 时一轮 42 步约 85% 概率撞上传输故障而死）。
-  assert.match(source, /maxRetries: 5/)
-  assert.match(source, /- SERVER/)
-  assert.match(source, /PI_AI_ERROR/)
   assert.match(source, /DSH_PERMISSION_MODE: input\.permissionTier \?\? DEEPSEEK_DEFAULT_PERMISSION_TIER/)
   assert.match(source, /resolve_creation_mcp/)
   assert.match(source, /@deepseek-ai\/dsh-mcp-client/)

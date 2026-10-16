@@ -19,6 +19,8 @@ import {
 } from '@/data/mediaModelCapabilities'
 import {
   CREATION_MODEL_REGISTRY,
+  YIHONG_GPT_IMAGE_RESOLUTIONS,
+  getYihongGptImageResolutions,
   getCreationModelSpec,
   listCreationModels,
 } from '@/runtime/creation/creationModelRegistry'
@@ -690,7 +692,9 @@ export const currentAspectLabel = computed(
 )
 
 export const resolutionOptions = computed(() =>
-  currentModel.value ? (currentCreationSpec.value?.capabilities.resolutions || getResolutionOptions(currentModel.value)) : []
+  !currentModel.value ? [] : currentCreationSpec.value?.id.startsWith('newapi/yihong/yihong-gpt-image-')
+    ? getYihongGptImageResolutions(cpState.ar)
+    : currentCreationSpec.value?.capabilities.resolutions || getResolutionOptions(currentModel.value)
 )
 
 export const durationRange = computed(() => {
@@ -757,6 +761,12 @@ export function switchModel(key: string) {
   saveCpState()
 }
 
+function preferredYihongGptImageResolution(options: string[], preferred: string): string {
+  const preferredIndex = YIHONG_GPT_IMAGE_RESOLUTIONS.indexOf(preferred)
+  const notHigher = options.filter(option => YIHONG_GPT_IMAGE_RESOLUTIONS.indexOf(option) <= preferredIndex)
+  return notHigher[notHigher.length - 1] || options[0] || ''
+}
+
 function syncParams() {
   const m = currentModel.value
   if (!m) return
@@ -767,8 +777,13 @@ function syncParams() {
   const szs = getSizeOptions(m)
   if (szs.length && !szs.includes(cpState.size)) cpState.size = getDefaultSize(m)
   // resolution
-  const ress = getResolutionOptions(m)
-  if (ress.length && !ress.includes(cpState.res)) cpState.res = getDefaultResolution(m)
+  const yihongGptImage = currentCreationSpec.value?.id.startsWith('newapi/yihong/yihong-gpt-image-')
+  const ress = yihongGptImage ? getYihongGptImageResolutions(cpState.ar) : getResolutionOptions(m)
+  if (ress.length && !ress.includes(cpState.res)) {
+    cpState.res = yihongGptImage
+      ? preferredYihongGptImageResolution(ress, cpState.res)
+      : getDefaultResolution(m)
+  }
   // duration
   if (m.dur && m.dur.length >= 1) {
     if (cpState.dur < m.dur[0]) cpState.dur = m.defDur || m.dur[0]
@@ -802,15 +817,25 @@ function canonicalAspect(ar: string) {
 
 export function setAspect(ar: string) {
   cpState.ar = canonicalAspect(ar)
+  if (currentCreationSpec.value?.id.startsWith('newapi/yihong/yihong-gpt-image-')) {
+    const resolutions = getYihongGptImageResolutions(cpState.ar)
+    if (!resolutions.includes(cpState.res)) cpState.res = preferredYihongGptImageResolution(resolutions, cpState.res)
+    saveCpState()
+    return
+  }
   // ★ 比例变化时同步更新 size，使 sizeFromRatioResolution 生效
   cpState.size = sizeFromRatioResolution(ar, cpState.res || '2k')
   saveCpState()
 }
 export function setSize(size: string) { cpState.size = size; saveCpState() }
 export function setResolution(res: string) {
-  cpState.res = res
+  const yihongGptImage = currentCreationSpec.value?.id.startsWith('newapi/yihong/yihong-gpt-image-')
+  const supported = yihongGptImage ? getYihongGptImageResolutions(cpState.ar) : []
+  cpState.res = yihongGptImage && !supported.includes(res)
+    ? preferredYihongGptImageResolution(supported, res)
+    : res
   if (cpState.modelKey !== 'jc-qwen-image-2.1') {
-    cpState.size = sizeFromRatioResolution(cpState.ar || '1:1', res)
+    cpState.size = sizeFromRatioResolution(cpState.ar || '1:1', cpState.res)
   }
   saveCpState()
 }

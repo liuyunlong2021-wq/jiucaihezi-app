@@ -25,7 +25,24 @@ GROK_MODELS = {
     "grok-1.5-video-15s": 15,
 }
 SEEDANCE_MODEL = "doubao-seedance-2-5-260628"
-MODELS = {**GROK_MODELS, SEEDANCE_MODEL: None, "omni-fast": None, "omni-v2v": None, MJ_FAST_MODEL: None}
+ZX_SEEDANCE_MODELS = (
+    "seedance-2.0-0826-480p",
+    "seedance-2.0-0826-720p",
+    "seedance-2.0-fast-0826-480p",
+    "seedance-2.0-fast-0826-720p",
+    "seedance-2.0-TS",
+    "seedance-2.5",
+    "seedance-2.5-30s",
+)
+ZX_SEEDANCE_MODEL_MAPPINGS = {f"zx-{model}": model for model in ZX_SEEDANCE_MODELS}
+SEEDANCE_MODELS = {SEEDANCE_MODEL, *ZX_SEEDANCE_MODELS, *ZX_SEEDANCE_MODEL_MAPPINGS}
+MODELS = {
+    **GROK_MODELS,
+    **{model: None for model in SEEDANCE_MODELS},
+    "omni-fast": None,
+    "omni-v2v": None,
+    MJ_FAST_MODEL: None,
+}
 MJ_FAST_TASKS: set[str] = set()
 SEEDANCE_TASKS: set[str] = set()
 TASK_AUTHORIZATIONS: dict[str, str] = {}
@@ -81,7 +98,7 @@ async def create_video(request: Request):
 
     if model == MJ_FAST_MODEL:
         return await submit_mj_fast(str(prompt), images, authorization, request.app.state.http)
-    if model == SEEDANCE_MODEL:
+    if model in SEEDANCE_MODELS:
         return await submit_seedance(payload, authorization, request.app.state.http)
     if model in GROK_MODELS:
         size = payload.get("size") or "1280x720"
@@ -126,12 +143,13 @@ async def create_seedance_video(request: Request):
     model = payload.get("model")
     prompt = payload.get("prompt")
     validate_common(model, prompt)
-    if model != SEEDANCE_MODEL:
+    if model not in SEEDANCE_MODELS:
         raise HTTPException(status_code=400, detail="Unsupported ZX Seedance video model")
     return await submit_seedance(payload, authorization, request.app.state.http)
 
 
 async def submit_seedance(payload: dict, authorization: str, client: httpx.AsyncClient) -> dict:
+    requested_model = str(payload["model"])
     body = seedance_payload(payload)
     try:
         response = await client.post(
@@ -141,7 +159,7 @@ async def submit_seedance(payload: dict, authorization: str, client: httpx.Async
         )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail="ZX video service is unavailable") from exc
-    result = submitted_response(response, SEEDANCE_MODEL)
+    result = submitted_response(response, requested_model)
     SEEDANCE_TASKS.add(result["id"])
     return result
 
@@ -311,7 +329,7 @@ def references(payload: dict) -> list:
 def validate_common(model, prompt):
     if model not in MODELS:
         raise HTTPException(status_code=400, detail="Unsupported ZX video model")
-    max_chars = SEEDANCE_MAX_PROMPT_CHARS if model == SEEDANCE_MODEL else MAX_PROMPT_CHARS
+    max_chars = SEEDANCE_MAX_PROMPT_CHARS if model in SEEDANCE_MODELS else MAX_PROMPT_CHARS
     if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > max_chars:
         raise HTTPException(status_code=400, detail="Prompt is required and too long")
 
@@ -350,17 +368,24 @@ def validate_omni_reference(value: str) -> str:
 
 def seedance_payload(payload: dict) -> dict:
     duration = payload.get("seconds", payload.get("duration", 5))
+    model = str(payload["model"])
+    upstream_model = ZX_SEEDANCE_MODEL_MAPPINGS.get(model, model)
+    max_duration = 15 if upstream_model.startswith("seedance-2.0") else 30
     try:
         duration_number = int(duration)
     except (TypeError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail="Seedance duration must be 4-30 or -1") from exc
-    if duration_number != -1 and not 4 <= duration_number <= 30:
-        raise HTTPException(status_code=400, detail="Seedance duration must be 4-30 or -1")
+        raise HTTPException(status_code=400, detail=f"Seedance duration must be 4-{max_duration} or -1") from exc
+    if duration_number != -1 and not 4 <= duration_number <= max_duration:
+        raise HTTPException(status_code=400, detail=f"Seedance duration must be 4-{max_duration} or -1")
     images = references(payload)
     videos = reference_list(payload, "video_urls", "videoUrls", "video_url")
     audios = reference_list(payload, "audio_urls", "audioUrls", "audio_url")
-    if len(images) > 30 or len(videos) > 10 or len(audios) > 10:
-        raise HTTPException(status_code=400, detail="Seedance supports at most 30 images, 10 videos and 10 audios")
+    image_limit, video_limit, audio_limit = (30, 10, 10) if upstream_model == SEEDANCE_MODEL else (9, 3, 3)
+    if len(images) > image_limit or len(videos) > video_limit or len(audios) > audio_limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Seedance supports at most {image_limit} images, {video_limit} videos and {audio_limit} audios",
+        )
     content = [
         {"type": "image_url", "role": "reference_image", "image_url": {"url": validate_public_url(str(url))}}
         for url in images
@@ -382,7 +407,7 @@ def seedance_payload(payload: dict) -> dict:
         "omni_reference_task_type": payload.get("omni_reference_task_type"),
     })
     return compact({
-        "model": payload["model"],
+        "model": upstream_model,
         "prompt": payload["prompt"],
         "seconds": None if duration_number == -1 else str(duration_number),
         "metadata": metadata,

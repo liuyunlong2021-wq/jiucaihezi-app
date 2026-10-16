@@ -1330,6 +1330,43 @@ test('ZX Seedance submits every documented parameter and media reference', async
   }
 })
 
+test('ZX Seedance plugin models submit and poll through the host OpenAI Video route', async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    if (url.endsWith('/v1/videos') && init?.method === 'POST') {
+      const body = JSON.parse(String(init.body))
+      assert.deepEqual(body, {
+        model: 'seedance-2.0-fast-0826-720p',
+        prompt: '竖屏画面自然运动',
+        duration: 8,
+        ratio: '9:16',
+        aspect_ratio: '9:16',
+        resolution: '720p',
+      })
+      return Response.json({ id: 'zx_seedance_plugin_001', status: 'processing' })
+    }
+    if (url.endsWith('/v1/videos/zx_seedance_plugin_001')) {
+      return Response.json({ status: 'completed', video_url: 'https://example.com/zx-seedance.mp4' })
+    }
+    throw new Error(`Unexpected fetch ${url}`)
+  }
+
+  try {
+    const plan = buildCreationRunPlan({
+      modelId: 'newapi/zx/seedance-2.0-fast-0826-720p',
+      params: { prompt: '竖屏画面自然运动', duration: 8, ratio: '9:16', resolution: '720p' },
+    })
+    const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
+    assert.equal(result.url, 'https://example.com/zx-seedance.mp4')
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
 test('KIK uploads local video and audio before submitting them to NewAPI', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch

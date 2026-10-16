@@ -7,10 +7,12 @@ import {
   clearFiles,
   cpState,
   currentRunPlan,
+  aspectOptions,
   genericModelFields,
   hasDuration,
   durationRange,
   resolutionOptions,
+  sizeOptions,
   setModelFieldValue,
   setAspect,
   setResolution,
@@ -54,6 +56,29 @@ test('switching from a 2K GPT route to the 1K route discards the stale derived s
 
   assert.equal(buildCurrentCreationParams().size, undefined)
   assert.equal(currentRunPlan.value?.debug.normalizedParams.size, '1024x1024')
+})
+
+test('易红 GPT Image 面板拆分尺寸与比例，并按可用像素组合约束选项', () => {
+  switchTask('image')
+  cpState.prompt = 'p'
+  cpState.ar = '1:1'
+  cpState.res = '1k'
+  switchModel('newapi/yihong/yihong-gpt-image-2')
+
+  assert.deepEqual(aspectOptions.value, ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'])
+  assert.deepEqual(resolutionOptions.value, ['1k', '2k'])
+  assert.deepEqual(sizeOptions.value, [])
+  assert.equal(buildCurrentCreationParams().size, undefined)
+
+  setAspect('9:16')
+  assert.deepEqual(resolutionOptions.value, ['1k', '2k', '4k'])
+  setResolution('4k')
+  assert.equal(currentRunPlan.value?.debug.normalizedParams.size, '2160x3840')
+
+  setAspect('3:2')
+  assert.equal(cpState.res, '1k')
+  assert.deepEqual(resolutionOptions.value, ['1k'])
+  assert.equal(currentRunPlan.value?.debug.normalizedParams.size, '1536x1024')
 })
 
 test('buildCurrentCreationParams keeps creation file objects so plan preview can materialize the same payload as submit', () => {

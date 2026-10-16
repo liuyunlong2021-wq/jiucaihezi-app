@@ -256,6 +256,45 @@ class ZxVideoAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.url.path, "/v1/video/generations")
         self.assertNotIn("seconds", json.loads(request.read()))
 
+    async def test_new_seedance_models_route_through_openai_video_endpoint(self):
+        models = [
+            "seedance-2.0-0826-480p",
+            "seedance-2.0-0826-720p",
+            "seedance-2.0-fast-0826-480p",
+            "seedance-2.0-fast-0826-720p",
+            "seedance-2.0-TS",
+            "seedance-2.5",
+            "seedance-2.5-30s",
+        ]
+        for public_model in models:
+            mapped_model = f"zx-{public_model}"
+            with self.subTest(model=mapped_model):
+                response = await self.client.post(
+                    "/v1/videos",
+                    headers={"Authorization": "Bearer zx-test-key"},
+                    json={"model": mapped_model, "prompt": "主体自然运动", "duration": 8},
+                )
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual(response.json()["model"], mapped_model)
+                request = self.upstream_requests[-1]
+                self.assertEqual(request.url.path, "/v1/video/generations")
+                self.assertEqual(json.loads(request.read())["model"], public_model)
+
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer zx-test-key"},
+            json={"model": "zx-seedance-2.0-0826-720p", "prompt": "超过上限", "duration": 16},
+        )
+        self.assertEqual(response.status_code, 400)
+
+        response = await self.client.post(
+            "/v1/videos",
+            headers={"Authorization": "Bearer zx-test-key"},
+            json={"model": "zx-seedance-2.5", "prompt": "30 秒", "duration": 30},
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(self.upstream_requests[-1].read())["seconds"], "30")
+
     async def test_video_poll_falls_back_to_seedance_endpoint(self):
         requests = []
 

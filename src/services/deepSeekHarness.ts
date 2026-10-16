@@ -1358,20 +1358,6 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         '        apiKeyEnv: JIUCAIHEZI_DH_API_KEY',
         '        api: openai-completions',
         `        baseURL: ${JSON.stringify(baseURL)}`,
-        '        retryPolicy:',
-        '          mode: normal',
-        // 官方 `DEFAULT_MAX_RETRIES = 5`。原先写 1 的理由是「一次抖动不该被放大成 5 倍等待」,
-        // 但实测 253 个步骤里 12 次传输故障（每个模型请求约 4.5%，一轮 7 步约 27%、42 步约 85%），
-        // 502 是秒级失败、多等 ~15 秒几乎必然救回；而 turns 33/34 的 524 正是被那唯一一次重试救回来的。
-        // 长任务的失败是必然事件，缺的是预算与可见性（重试链已进会话投影），不是次数。
-        '          maxRetries: 5',
-        '          retryableCodes:',
-        '            - EMPTY_RESPONSE',
-        '            - RATE_LIMIT',
-        '            - SERVER',
-        '            - TIMEOUT',
-        '            - TRANSPORT',
-        '            - PI_AI_ERROR',
         '        models:',
         `          - id: ${JSON.stringify(input.model)}`,
         `            name: ${JSON.stringify(input.model)}`,
@@ -1735,6 +1721,8 @@ async function runDeepSeekHarnessTurn(
         }
       }
       if (event?.type === 'step/start') input.onStatus?.('正在分析')
+      if (event?.type === 'compaction/start') input.onStatus?.('正在压缩…')
+      if (event?.type === 'compaction/end') input.onStatus?.('正在分析')
       if (event?.type === 'llm/retry') {
         const retry = Number(event.data?.retry || 0)
         const max = Number(event.data?.maxRetries || 0)

@@ -5,6 +5,8 @@
 > 范围：`MemoryWorkbench` 的 Harness 路径（`runtime === 'dh'`）的重试显示与失败显示
 > 前提：**100% 搬运官方语义与实现**，不新增自研设计；官方未公开的接口沿用已登记的薄桥
 
+> 2026-10-15 纠偏：§3、§4 原称“官方 6 类”有误，实际默认只有五类；本地额外加入了 `PI_AI_ERROR`。现已删除整段 `retryPolicy` 覆盖，继承官方默认；实施与复检见 §7。
+
 ## 0. 官方版本调查（2026-10-03 实测，不是推测）
 
 | 项 | 值 |
@@ -62,7 +64,7 @@
 | --- | --- | --- | --- |
 | `retryPolicy.maxRetries` | `1` | **`5`** | `DEFAULT_MAX_RETRIES = 5`（`dsh-llm/lib/types/retry-policy.d.ts`） |
 | `retryPolicy.backoff` | 未写 | **继续不写** | 官方默认 `initialDelayMs 500` / `maxDelayMs 10000` / `jitterRatio 0.1`；实测 5 次共多等约 15 秒（`dsh-llm-retry/lib/index.js:46-48`） |
-| `retryPolicy.retryableCodes` | 官方 6 类 | **不动** | 同上 |
+| `retryPolicy.retryableCodes` | 本地六类（当时误标为官方） | 2026-10-15 删除覆盖，继承官方五类 | 官方 `DEFAULT_RETRYABLE_CODES` 不含 `PI_AI_ERROR`，见 §7 |
 | `streamIdleTimeoutMs` | 未写（默认 300000） | **继续不写** | 见 §4 第 3 条：实测有 5 个成功步骤首字 ≥120s |
 
 **为什么敢从 1 提到 5（有实测支撑）：**
@@ -77,7 +79,7 @@
 1. **不在本 TDD 里做升级**：升级是独立任务，先于本 TDD 执行，见 [[开发/韭菜盒子Harness升级0.2.0-rc.2方案-2026-10-03]]。
 2. **不加第 6 处 patch**（例如 `session/projection`）：官方 `llmRetry` 投影是 pending-only（实测投影缓存里 `llmRetry.val = {}`），历史重试链官方自己也是从事件回放（`retryDefinition` 的 `RetryState { turn, step, attempts }`），加了也换不掉现有投影。
 3. **不设固定首字看门狗**：本机 245 个成功步骤的首字延迟 `p50=17s / p90=58s / p99=236s / max=260s`，其中 **5 个 ≥120s 且全部成功**；任何固定阈值都会误杀它们（也印证 09-28 撤销 `streamIdleTimeoutMs: 90000` 的决定）。
-4. **不在 Harness 外套整轮定时器**；不改官方 6 类 `retryableCodes`。
+4. **不在 Harness 外套整轮定时器**；继承官方默认五类 `retryableCodes`（2026-10-15 更正）。
 5. **不碰自研内核链路**（`runtime === 'legacy'` 的 2 次 / 2s+4s 重试与 Raw 中断恢复点保持原样）。
 6. **不新增任务表、断点表、后台队列或逐 token 持久化**（沿用 2026-09-24 合同）。
 
@@ -119,3 +121,14 @@
 | 524 走满 5 次约 10 分钟 | 每次尝试 126s 是上游/网关行为，重试次数放大等待 | 靠 §2 可见倒计时 + 停止按钮承担；§2 落地前**不得**单独先改次数 |
 | 524 的真正闸门在服务端 | ~126s 结算不像 Cloudflare 的 100s 判决（有 260s 首字的成功反例），更像链路中某一跳的 ~120s 超时（nginx / new-api / 上游白标） | 本 TDD 治不了；需要 NewAPI + 上游日志对齐定位（另立事项） |
 | 502 簇 | turn 3–7 连续 5 轮秒级 502，与超时无关 | 由 §3 的 5 次重试覆盖；若仍复现，转服务端排查 |
+
+## 7. 2026-10-15 最小纠偏与官方能力复检
+
+用户授权仅执行恢复官方默认重试策略、检查已有官方能力接入。本次不升级 SDK，不修改超时、压缩阈值或服务端渠道。
+
+- **重试**：移除 route 的整个 `retryPolicy` 覆盖，继承 `normal`、初次请求后最多五次重试、官方退避与五类错误：`EMPTY_RESPONSE`、`RATE_LIMIT`、`SERVER`、`TIMEOUT`、`TRANSPORT`。`PI_AI_ERROR` 仍由官方适配器生成，但不再额外允许自动重试。来源是已安装 `@deepseek-ai/dsh-llm/lib/index.js` 的 `resolveRetryPolicy` 与 `DEFAULT_RETRYABLE_CODES`。
+- **压缩与裁剪**：SDK 继承 `dsh-base` 已启用的 `token-meter`、`compaction-basic`、`tool-result-pruner`，不存在需要补建的第二套压缩机制。本地模拟 OpenAI SSE 服务、真实 SDK/runner、262144 窗口及 runner 32768 输出上限下，不覆盖压缩/裁剪默认配置，触发长历史压缩与工具结果裁剪；验证 replacement surface 进入重启后请求，原始历史和工具结果仍在日志中。
+- **恢复**：已有 live Agent 复用、共享冷恢复、恢复竞态重检、跨进程写锁与释放后原对话续跑测试通过；没有新增会话存储或改写官方生命周期。
+- **事件展示**：重试/失败投影与持久事件链已接通。确认 `compaction/start`、`compaction/summary`、`compaction/end` 均经 runner 传到 APP；补齐原先遗漏的运行状态：开始时使用官方 `message.compaction.running` 中文“正在压缩…”，结束后回到“正在分析”。压缩摘要仍不混入助手正文。
+- **验证**：先写两项红测，实施后 Harness 单测 65/65、真实 SDK/runner 生命周期 16/16、补丁/插件/权限回归 16/16；改用官方默认压缩阈值后的压缩用例单独复跑通过。`pnpm run typecheck` 通过。
+- **边界**：本机模拟服务不代表真实上游模型或 Windows/Intel Mac 原生验收；未构建/发布安装包。新 route 配置在新运行时创建时生效，已存活进程不会因源码修改自动换配置。`524` 仍是 `SERVER`，恢复默认不等于上游超时已解决。

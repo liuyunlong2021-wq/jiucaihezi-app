@@ -10,25 +10,21 @@
 //   - 它自己记着 `TASK_AUTHORIZATIONS`，成片要带 Key 才能取。
 //   插件没有 fetch / fs，这些都装不下。
 //
-// ★ 只收编 **6 个模型**，`doubao-seedance-2-5-260628` 有意不在表里：
-// 面板把它发到 `/v1/video/generations`（registry 的 `endpoint`），而宿主的协议绑定表里
-// `openai_video` 只有 `POST /v1/videos` 这一条 create 路径 —— `/v1/video/generations`
-// 不是任何宿主协议的路径，type 61 渠道接不住它（原生路线还会被加上插件前缀）。
-// 那个模型继续留在旧渠道上；要用插件接管得先改 App 的 endpoint，本波不做。
+// Seedance 面板统一走宿主支持的 `POST /v1/videos`；适配器再翻译为 ZX 上游
+// `/v1/video/generations`，因此无需让 NewAPI 插件直接声明宿主不支持的路径。
 //
 // 事实源：`zx-video-adapter/src/main.py` 与 `zx-video-adapter/README.md`。
 export const meta = {
   apiVersion: 1,
   key: 'zx',
   name: 'ZX 视频',
-  version: '0.1.0',
+  version: '0.1.1',
   author: { name: 'jiucaihezi' },
   description: {
-    en: 'ZX Grok / Omni / Midjourney via zx-video-adapter',
-    zh: '经 zx-video-adapter 驱动 ZX 的 Grok / Omni / Midjourney',
+    en: 'ZX Grok / Omni / Midjourney / Seedance via zx-video-adapter',
+    zh: '经 zx-video-adapter 驱动 ZX 的 Grok / Omni / Midjourney / Seedance',
   },
   // 面板 body 的 `model`（creationModelRegistry 的 `model` 字段）。
-  // Seedance 有意缺席，理由见文件头。
   models: [
     'grok-1.5-video-6s',
     'grok-1.5-video-10s',
@@ -36,12 +32,19 @@ export const meta = {
     'omni-fast',
     'omni-v2v',
     'mj_fast_imagine',
+    'seedance-2.0-0826-480p',
+    'seedance-2.0-0826-720p',
+    'seedance-2.0-fast-0826-480p',
+    'seedance-2.0-fast-0826-720p',
+    'seedance-2.0-TS',
+    'seedance-2.5',
+    'seedance-2.5-30s',
   ],
   fetchMode: 'per_task',
   protocols: ['openai_video'],
   // 适配器容器加入 new-api-new_new-api-network 且不映射宿主端口，所以只能走服务名
   baseUrl: 'http://zx-video-adapter:8789',
-  // 三种计费口径：Grok/Omni/Seedance 按秒，MJ 是**图片任务**按次（请求里没有时长）。
+  // 声明 calls 与 seconds；Seedance/MJ 按条计费时用 calls，Grok/Omni 仍可按秒计费。
   // 两个 key 都声明，两种表达式才都能存进定价页。
   usageSchema: {
     calls: {
@@ -59,6 +62,7 @@ export const meta = {
   // 宿主硬校验：每个例子都要带齐所有声明的 key，少一个上传即被拒
   usageExamples: [
     { label: 'Grok 10 秒', facts: { calls: 1, seconds: 10 } },
+    { label: '视频任务按条计费', facts: { calls: 1, seconds: 5 } },
     { label: '图片任务（无时长）', facts: { calls: 1, seconds: 0 } },
   ],
 }
@@ -74,6 +78,15 @@ const GROK_SECONDS = {
 // Omni 两档固定 10 秒（registry `allowedValues: [10]`），请求里真没带就按它算
 const OMNI_SECONDS = 10
 const OMNI_MODELS = ['omni-fast', 'omni-v2v']
+const SEEDANCE_MODELS = [
+  'seedance-2.0-0826-480p',
+  'seedance-2.0-0826-720p',
+  'seedance-2.0-fast-0826-480p',
+  'seedance-2.0-fast-0826-720p',
+  'seedance-2.0-TS',
+  'seedance-2.5',
+  'seedance-2.5-30s',
+]
 
 // MJ 是**图片**任务：适配器 `normalized_mj_task_response` 把成图放在 `metadata.url`，
 // 而且把 `object` 也写成 `video`（适配器的历史形状），所以只能按模型名区分。
@@ -280,7 +293,7 @@ export function buildContentRequest(ctx) {
 export function extractUsage(ctx) {
   // 宿主要求**每个声明的 key 都有值**，所以没有时长就报 0，而不是省略
   const body = snapshotOf(ctx && ctx.requestBody)
-  const model = String((ctx && (ctx.upstreamModel || ctx.model)) || '')
+  const model = String((ctx && (ctx.upstreamModel || ctx.model)) || '').replace(/^zx-(?=seedance-)/, '')
   let seconds = 0
   if (GROK_SECONDS[model] !== undefined) {
     // 时长写在模型名里，请求体带的 duration 也不影响上游实际产出
@@ -288,6 +301,10 @@ export function extractUsage(ctx) {
   } else if (OMNI_MODELS.includes(model)) {
     const raw = Number(body.duration !== undefined ? body.duration : body.seconds)
     seconds = Number.isFinite(raw) && raw > 0 && raw <= 3600 ? raw : OMNI_SECONDS
+  } else if (SEEDANCE_MODELS.includes(model)) {
+    const maxSeconds = model.startsWith('seedance-2.5') ? 30 : 15
+    const raw = Number(body.duration !== undefined ? body.duration : body.seconds ?? 5)
+    seconds = raw === -1 ? maxSeconds : Number.isFinite(raw) && raw > 0 && raw <= 30 ? raw : 5
   }
   // MJ 是图片任务：没有时长，定价必须用 `u("calls")`（用秒会真的扣 0）
   return { calls: 1, seconds }

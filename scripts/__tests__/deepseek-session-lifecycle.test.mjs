@@ -11,13 +11,14 @@ import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { DeepSeekHarness } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js'
 
-async function fixture(t, configured = false, modelGate) {
+async function fixture(t, configured = false, modelGate, { respond } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'jc-session-lease-'))
   const requests = []
   const http = createServer(async (req, res) => {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
     requests.push(JSON.parse(Buffer.concat(chunks).toString()))
+    if (respond && await respond(requests.at(-1), res, requests.length)) return
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
     if (modelGate) await modelGate.promise
     for (const [delta, finish_reason] of [[{ role: 'assistant', content: 'OK' }, null], [{}, 'stop']])
@@ -26,7 +27,7 @@ async function fixture(t, configured = false, modelGate) {
   })
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve))
   const patch = join(root, 'route.yml')
-  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: openai-completions\n        baseURL: http://127.0.0.1:${http.address().port}/v1\n        models:\n          - id: test\n            name: test\n            contextWindow: 65536\n            maxTokens: 1024\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
+  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: openai-completions\n        baseURL: http://127.0.0.1:${http.address().port}/v1\n        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: 1024\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
   const options = { cwd: root, processCwd: root, dshHome: join(root, 'home'), patches: [patch], provider: 'jiucaihezi', model: 'test', initializeTimeoutMs: 15000,
     env: { ...process.env, DSH_AGENTS_HOME: join(root, 'agents'), DSH_PRIMARY_RUNTIME: '', JIUCAIHEZI_DH_API_KEY: 'local-test' } }
   const harnesses = []
@@ -35,6 +36,7 @@ async function fixture(t, configured = false, modelGate) {
     const ready = Promise.withResolvers()
     const closed = Promise.withResolvers()
     const pending = new Map()
+    const notifications = []
     let next = 0
     let stopping
     const runnerPath = fileURLToPath(new URL('../../src-tauri/resources/deepseek-harness/runner.mjs', import.meta.url))
@@ -42,6 +44,7 @@ async function fixture(t, configured = false, modelGate) {
     child.stderr.resume()
     createInterface({ input: child.stdout }).on('line', line => {
       const frame = JSON.parse(line)
+      if (frame.type === 'notification') notifications.push(frame.notification)
       if (frame.type === 'ready') ready.resolve()
       if (frame.type === 'closed') closed.resolve()
       if (['error', 'result', 'query-result'].includes(frame.type)) {
@@ -55,6 +58,7 @@ async function fixture(t, configured = false, modelGate) {
       pending.clear()
     })
     const runner = {
+      notifications,
       async request(command) {
         await ready.promise
         const requestId = String(++next)
@@ -81,8 +85,70 @@ async function fixture(t, configured = false, modelGate) {
     await new Promise(resolve => http.close(resolve))
     rmSync(root, { recursive: true, force: true })
   })
-  return { create, createRunner, requests }
+  return { create, createRunner, requests, root }
 }
+
+test('APP runner inherits official retries: 524 gets five retries, an unclassified error gets none', { timeout: 45000 }, async t => {
+  let status = 524
+  const f = await fixture(t, false, undefined, { respond: (_request, res) => {
+    res.writeHead(status)
+    res.end()
+    return true
+  } })
+  const runner = f.createRunner()
+  const run = sessionId => runner.request({ type: 'run', sessionId, contentBlocks: [{ type: 'text', text: 'test retry policy' }] })
+  const failed = await run('server-error')
+  assert.equal(failed.type, 'error')
+  assert.equal(f.requests.length, 6)
+  const events = runner.notifications.filter(n => n.method === 'session.event').map(n => n.params.event)
+  assert.equal(events.filter(e => e.type === 'llm/retry').length, 5)
+  assert.equal(events.filter(e => e.type === 'llm/retry-started').length, 5)
+  assert.equal(events.findLast(e => e.type === 'turn/end').data.reason.error.code, 'SERVER')
+  const saved = (await runner.request({ type: 'read-session', sessionId: 'server-error' })).data
+  assert.equal(saved.events.filter(e => e.type === 'llm/retry').length, 5)
+
+  status = 418
+  assert.equal((await run('unknown-error')).type, 'error')
+  assert.equal(f.requests.length, 7, 'PI_AI_ERROR must fail after the first request')
+  const unknown = (await runner.request({ type: 'read-session', sessionId: 'unknown-error' })).data
+  assert.equal(unknown.events.findLast(e => e.type === 'turn/end').data.reason.error.code, 'PI_AI_ERROR')
+  assert.equal(unknown.events.filter(e => e.type === 'llm/retry').length, 0)
+})
+
+test('SDK prunes tool results, compacts under pressure, and cold-resumes the replacement surface', { timeout: 45000 }, async t => {
+  let readRequested = false
+  const f = await fixture(t, false, undefined, {
+    respond: (request, res) => {
+      if (readRequested || !JSON.stringify(request.messages).includes('HISTORY_TWO')) return false
+      readRequested = true
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+      const delta = { role: 'assistant', tool_calls: [{ index: 0, id: 'read-test', type: 'function', function: {
+        name: 'read', arguments: JSON.stringify({ file_path: join(f.root, 'tool.txt') }),
+      } }] }
+      res.end(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'test', choices: [{ index: 0, delta, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`)
+      return true
+    },
+  })
+  const original = Array.from({ length: 600 }, (_, i) => `original-tool-line-${i}: abcdefghijklmnopqrstuvwxyz`).join('\n')
+  writeFileSync(join(f.root, 'tool.txt'), original)
+  const runner = f.createRunner()
+  const run = (host, text) => host.request({ type: 'run', sessionId: 'compaction-test', contentBlocks: [{ type: 'text', text }] })
+  assert.equal((await run(runner, 'HISTORY_ONE\n' + 'a'.repeat(350000))).type, 'result')
+  assert.equal((await run(runner, 'HISTORY_TWO\n' + 'b'.repeat(350000))).type, 'result')
+  const saved = (await runner.request({ type: 'read-session', sessionId: 'compaction-test' })).data
+  const toolResults = saved.events.filter(e => e.type === 'tool/result')
+  assert.ok(toolResults.some(e => e.surfaceOp === 'append' && JSON.stringify(e.data).includes('original-tool-line-300')))
+  assert.ok(toolResults.some(e => typeof e.surfaceOp === 'object' && JSON.stringify(e.data).includes('pruned')))
+  for (const type of ['compaction/start', 'compaction/summary', 'compaction/end']) {
+    assert.ok(saved.events.some(e => e.type === type), `${type} must be persisted`)
+    assert.ok(runner.notifications.some(n => n.method === 'session.event' && n.params.event.type === type), `${type} must reach the APP`)
+  }
+  assert.ok(saved.events.some(e => e.type === 'user/message' && e.surfaceOp === 'append' && JSON.stringify(e.data).includes('HISTORY_ONE')))
+  await runner.close()
+  const restored = f.createRunner()
+  assert.equal((await run(restored, 'continue after restart')).type, 'result')
+  assert.match(JSON.stringify(f.requests.at(-1).messages), /<compacted-summary>/)
+})
 
 test('session queue can be edited and removed durably while a turn is running', { timeout: 45000 }, async t => {
   const modelGate = Promise.withResolvers()

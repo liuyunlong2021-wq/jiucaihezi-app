@@ -206,6 +206,29 @@ test('同步图片：GPT JSON 编辑与分辨率计费，拒绝错尺寸、超�
   assert.throws(() => submit(model, { images: Array(11).fill('https://a/i.png') }), /Too many/)
 })
 
+test('易红 GPT Image 新型号使用 yihong-公开名映射到上游原名', () => {
+  for (const model of ['yihong-gpt-image-2', 'yihong-gpt-image-2.5-flare', 'yihong-gpt-image-2.5-sunburst']) {
+    const upstreamModel = model.replace(/^yihong-/, '')
+    assert.ok(plugin.meta.models.includes(model))
+    assert.ok(plugin.meta.models.includes(upstreamModel))
+    const decoded = plugin.protocols.openai_image.decodeRequest({
+      model,
+      body: { kind: 'json', value: { model, prompt: 'p', size: '1024x1024' } },
+    })
+    const request = plugin.buildSubmitRequest({
+      model,
+      upstreamModel,
+      baseUrl: plugin.meta.baseUrl,
+      requestBody: decoded.requestBody,
+    })
+    assert.equal(request.url, 'https://yihongapi.com/v1/images/generations')
+    assert.equal(request.body.model, upstreamModel)
+    assert.deepEqual(plugin.extractUsage({ requestBody: decoded.requestBody }), {
+      calls: 1, seconds: 0, resolution: '1K', image_count: 1,
+    })
+  }
+})
+
 test('Gemini multipart 参考图转原生 inline_data，比例画质保留，返回 OpenAI 图片形状', () => {
   const model = 'gemini-nano-banana-2.1'
   const decoded = plugin.protocols.openai_image.decodeRequest({ model, operation: 'edit', body: { kind: 'multipart', fields: { prompt: ['p'], resolution: ['4k'], ratio: ['9:16'] }, files: [{ ref: 'request_file:image', mimeType: 'image/png' }] } })

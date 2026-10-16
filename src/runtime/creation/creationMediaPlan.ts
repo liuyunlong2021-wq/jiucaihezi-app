@@ -1,4 +1,4 @@
-import { getCreationModelSpec } from './creationModelRegistry'
+import { getCreationModelSpec, getYihongGptImageSize } from './creationModelRegistry'
 import { sizeFromRatioResolution } from '@/utils/imageContracts'
 import type {
   CreationApiStyle,
@@ -294,12 +294,15 @@ function normalizeOpenAiImageParams(
       aspectRatio: firstValue(params, ['aspectRatio', 'ratio', 'aspect_ratio']) || '16:9',
     })
   }
-  const size = typeof params.size === 'string' && params.size !== 'auto'
-    ? params.size
-    : sizeFromRatioResolution(
-        String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1'),
-        String(params.resolution || '2k'),
-      )
+  const ratio = String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1')
+  const yihongGptImage = spec.id.startsWith('newapi/yihong/yihong-gpt-image-')
+  const resolution = String(params.resolution || spec.fields.find(field => field.key === 'resolution')?.defaultValue || '2k')
+  const size = yihongGptImage
+    ? getYihongGptImageSize(ratio, resolution)
+    : typeof params.size === 'string' && params.size !== 'auto'
+      ? params.size
+      : sizeFromRatioResolution(ratio, resolution)
+  if (!size) throw new Error(`Unsupported 易红 GPT Image size: ${resolution} ${ratio}`)
   return compact({
     model: spec.model,
     prompt: params.prompt,

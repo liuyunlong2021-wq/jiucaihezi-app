@@ -76,6 +76,23 @@ const XIAOYI_MINIMAX_H3_MODELS = [
   { model: 'MiniMaxH3-720p-sec', label: 'MiniMax H3 720P', price: 0.12, resolution: '720p' },
 ] as const
 
+const ZX_SEEDANCE_MODELS: Array<{
+  model: string
+  price: string
+  resolution: string
+  maxDuration: number
+  hidden?: boolean
+  fixedDuration?: number
+}> = [
+  { model: 'seedance-2.0-0826-480p', price: '1/条', resolution: '480p', maxDuration: 15, hidden: true },
+  { model: 'seedance-2.0-0826-720p', price: '1.2/条', resolution: '720p', maxDuration: 15 },
+  { model: 'seedance-2.0-fast-0826-480p', price: '0.8/条', resolution: '480p', maxDuration: 15, hidden: true },
+  { model: 'seedance-2.0-fast-0826-720p', price: '1.2/条', resolution: '720p', maxDuration: 15, hidden: true },
+  { model: 'seedance-2.0-TS', price: '1.2/条', resolution: '720p', maxDuration: 15, hidden: true },
+  { model: 'seedance-2.5', price: '1.2/条', resolution: '720p', maxDuration: 30 },
+  { model: 'seedance-2.5-30s', price: '8/条', resolution: '720p', maxDuration: 30, fixedDuration: 30 },
+]
+
 // ── 山海画布（https://shanhai.vnshu.cn/docs）────────────────────────────────
 // 上游不是 OpenAI 兼容面：提交 POST /generations（media_type + inputs + options），
 // 轮询 GET /tasks/{id}，成片地址需同一个 Bearer Key。统一经 shanhai-adapter 翻译，
@@ -252,7 +269,7 @@ const YUANLIU_VIDEO_CONTRACT_ISSUES = [
   '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数 5/6；NewAPI 模型/分组倍率及最终扣费尚未验收。',
 ]
 // 易红 API：旧型号沿用客户文档；2026-10-13 新型号取自 /api/pricing、/api/status，基础价 × 1.3 后取整。
-// 模型需在授权 Key 的 GET /v1/models 中可用；渠道映射保持空，NewAPI 模型名与上游名称逐字一致。
+// 视频模型需在授权 Key 的 GET /v1/models 中可用且保持原名；同步图片模型使用 yihong- 前缀并由渠道映射到上游名。
 const YIHONG_VIDEO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
 const YIHONG_VIDEO_MODELS: Array<{
   model: string
@@ -350,6 +367,28 @@ const YIHONG_VIDEO_CONTRACT_ISSUES = [
   '面板价格按用户指定值；Cheap 面板价为 ¥2/次（易红文档价 ¥1.10/次）。Task Usage 表达式沿用用户指定的 1 美元 = 1 元数值口径，模型/分组倍率及实扣待核对。',
   'Seedance 2.5 Super 文档要求素材为公网 HTTPS URL；App 上传链路和上游实际取图/音视频能力待真实任务验收。',
 ]
+const YIHONG_GPT_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as const
+// Match the NewAPI plugin's exact size allowlist so each visible ratio/resolution pair can be submitted.
+export const YIHONG_GPT_IMAGE_SIZE_MATRIX: Record<string, Record<string, string>> = {
+  '1k': {
+    '1:1': '1024x1024', '16:9': '1536x864', '9:16': '864x1536', '4:3': '1536x1152',
+    '3:4': '1152x1536', '3:2': '1536x1024', '2:3': '1024x1536',
+  },
+  '2k': {
+    '1:1': '2048x2048', '16:9': '2048x1152', '9:16': '1152x2048', '4:3': '2048x1536', '3:4': '1536x2048',
+  },
+  '4k': { '16:9': '3840x2160', '9:16': '2160x3840' },
+}
+export const YIHONG_GPT_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
+export const YIHONG_GPT_IMAGE_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3']
+
+export function getYihongGptImageSize(ratio: string, resolution: string): string | undefined {
+  return YIHONG_GPT_IMAGE_SIZE_MATRIX[resolution]?.[ratio]
+}
+
+export function getYihongGptImageResolutions(ratio: string): string[] {
+  return YIHONG_GPT_IMAGE_RESOLUTIONS.filter(resolution => getYihongGptImageSize(ratio, resolution))
+}
 // Fk 渠道：model 必须与已上传 fk Task Plugin 的 meta.models 完全一致。
 // 旧 ID 隐藏但保留注册，历史任务不得被改绑到新型号。
 const FK_SEEDANCE_MODELS: Array<{
@@ -493,11 +532,12 @@ const FK_IMAGE_MODELS: Array<{
   price: string
   resolutions?: string[]
   maxImages: number
+  hidden?: boolean
 }> = [
-  { model: 'ft-image-v1-211f28f47b0355abb1798f72eb65f22d', label: 'FK-image2', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
-  { model: 'ft-image-v1-186289ba9d3263010c69372f8939dd94', label: 'FK-image2.5', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
-  { model: 'ft-image-v1-eb47192eb578f340043911005a06fb6e', label: 'FK-image2.5-flare', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
-  { model: 'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d', label: 'FK-image2.5-sunburst', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-211f28f47b0355abb1798f72eb65f22d', label: 'FK-image2', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
+  { model: 'ft-image-v1-186289ba9d3263010c69372f8939dd94', label: 'FK-image2.5', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
+  { model: 'ft-image-v1-eb47192eb578f340043911005a06fb6e', label: 'FK-image2.5-flare', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
+  { model: 'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d', label: 'FK-image2.5-sunburst', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
   { model: 'ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82', label: 'FK-banana-2', price: '0.2/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
   { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'FK-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
 ]
@@ -862,6 +902,7 @@ function runninghubStandard(input: {
 export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   baseSpec({
     id: 'local-comfy/z-image-turbo',
+    hidden: true,
     model: 'z-image-turbo',
     label: 'Z-Image Turbo · 本机 ComfyUI',
     task: 'image',
@@ -1144,6 +1185,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // 单价 0.08/张（管理员 2026-09-27 核实）。
   baseSpec({
     id: 'gpt-image-2-菠萝',
+    hidden: true,
     model: 'gpt-image-2-菠萝',
     label: 'GPT Image 2 菠萝',
     task: 'image',
@@ -1190,6 +1232,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   baseSpec({
     id: 'gpt-image-2.5-菠萝',
+    hidden: true,
     model: 'gpt-image-2.5-菠萝',
     label: 'GPT Image 2.5 菠萝',
     task: 'image',
@@ -1255,6 +1298,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/z-image-turbo',
+    hidden: true,
     model: 'z-image-turbo',
     label: 'Z Image Turbo · RunningHub',
     task: 'image',
@@ -1314,6 +1358,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directImage({
     id: 'newapi/xiaoyi/grok-imagine-image',
+    hidden: true,
     model: 'grok-imagine-image',
     label: 'Grok Imagine Image · 小易',
     price: 0.05,
@@ -1680,6 +1725,19 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     contractIssues: ['NewAPI rc.40 需应用易红同步图片 32 MiB 响应补丁；真实生成、失败与扣费尚未验收。'],
     notes: ['易红官方客户API接入文档(24).md（2026-10-13）'],
   }),
+  ...YIHONG_GPT_IMAGE_MODELS.map(model => directImage({
+    id: `newapi/yihong/yihong-${model}`, model: `yihong-${model}`, label: model, price: '¥0.1/张', mode: 'text-to-image', pollKind: 'none',
+    contractStatus: 'partial', files: { images: { min: 0, max: 10 } },
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(YIHONG_GPT_IMAGE_RATIOS) },
+      { key: 'resolution', label: '尺寸', kind: 'select', defaultValue: '1k', options: options(YIHONG_GPT_IMAGE_RESOLUTIONS) },
+      { key: 'images', label: '参考图 (0-10张)', kind: 'images' },
+    ]),
+    ratios: YIHONG_GPT_IMAGE_RATIOS,
+    resolutions: YIHONG_GPT_IMAGE_RESOLUTIONS,
+    contractIssues: ['NewAPI rc.40 需应用易红同步图片 32 MiB 响应补丁；真实生成、失败与扣费尚未验收。', `渠道公开名 yihong-${model} 必须映射到上游 ${model}。`],
+    notes: ['易红 GPT Image 新型号（2026-10-16）'],
+  })),
   // ── FK Seedance 2.5：6 个当前型号，4 个旧型号仅供历史记录识别 ──
   ...FK_SEEDANCE_MODELS.map(model => directVideo({
     id: `newapi/fk/${model.model}`,
@@ -1719,6 +1777,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: `newapi/fk/${model.model}`,
     model: model.model,
     label: model.label,
+    hidden: model.hidden,
     price: model.price,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'openai-image-edits',
@@ -1793,6 +1852,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directImage({
     id: 'gemini-3.1-flash-image-preview',
+    hidden: true,
     model: 'gemini-3.1-flash-image-preview',
     label: 'Gemini 3.1 Flash Image',
     price: 0.1,
@@ -1812,6 +1872,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directImage({
     id: 'gemini-3-pro-image-preview',
+    hidden: true,
     model: 'gemini-3-pro-image-preview',
     label: 'Gemini 3 Pro Image',
     price: 0.2,
@@ -2069,6 +2130,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-image-v2',
+    hidden: true,
     model: 'rh-image-v2',
     label: 'Banana Fresh · RunningHub',
     task: 'image',
@@ -2080,6 +2142,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-pro-image',
+    hidden: true,
     model: 'rh-pro-image',
     label: 'Banana Pro · RunningHub',
     task: 'image',
@@ -2092,6 +2155,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   // ── 🆕 FLUX.2 Klein 9B 系列 (3 个) ──
   runninghubStandard({
     id: 'runninghub/api/rh-flux-klein-edit',
+    hidden: true,
     model: 'rh-flux-klein-edit',
     label: 'FLUX Klein 9B 编辑 · RunningHub',
     task: 'image',
@@ -2142,6 +2206,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-flux-klein-text',
+    hidden: true,
     model: 'rh-flux-klein-text',
     label: 'FLUX Klein 9B 文生图 · RunningHub',
     task: 'image',
@@ -2187,6 +2252,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   runninghubStandard({
     id: 'runninghub/api/rh-flux-klein-lora',
+    hidden: true,
     model: 'rh-flux-klein-lora',
     label: 'FLUX Klein 9B LoRA · RunningHub',
     task: 'image',
@@ -2324,7 +2390,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     id: 'newapi/zx/mj_fast_imagine',
     model: 'mj_fast_imagine',
     label: 'Midjourney Fast Imagine · ZX',
-    price: 'ZX 实时计费',
+    price: 0.5,
     upstreamFamily: 'zx',
     apiStyle: 'newapi-image-task',
     mode: 'text-to-image',
@@ -2406,6 +2472,41 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['docs/wiki/开发/ZX视频适配器多模型升级TDD-2026-08-18.md'],
     contractIssues: ['上游文档未列出该别名，需用 ZX Key 完成真实提交与轮询验证。'],
   }),
+  ...ZX_SEEDANCE_MODELS.map(({ model, price, resolution, maxDuration, fixedDuration, hidden }) => directVideo({
+    id: `newapi/zx/${model}`,
+    hidden,
+    model,
+    label: `${model} · ZX`,
+    price,
+    upstreamFamily: 'zx',
+    apiStyle: 'seedance-task',
+    endpoint: '/v1/videos',
+    assetFlow: 'none',
+    mode: 'text-to-video',
+    contractStatus: 'partial',
+    files: {
+      images: { min: 0, max: 9, maxBytes: 50 * 1024 * 1024 },
+      videos: { min: 0, max: 3, maxBytes: 50 * 1024 * 1024 },
+      audios: { min: 0, max: 3, maxBytes: 15 * 1024 * 1024 },
+    },
+    duration: fixedDuration ? { allowedValues: [fixedDuration] } : { min: 4, max: maxDuration },
+    ratios: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+    resolutions: [resolution],
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '4:3', '3:4']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: resolution, options: options([resolution]) },
+      fixedDuration
+        ? { key: 'duration', label: '时长', kind: 'select', defaultValue: fixedDuration, options: options([fixedDuration]) }
+        : { key: 'duration', label: '时长', kind: 'number', defaultValue: 5, min: 4, max: maxDuration, step: 1 },
+      { key: 'images', label: '参考图', kind: 'images' },
+      { key: 'videos', label: '参考视频', kind: 'video' },
+      { key: 'audios', label: '参考音频', kind: 'audio' },
+    ]),
+    notes: ['https://docs.zxai.work/seedance-video.html'],
+    contractIssues: [
+      '该精确模型 ID 未列入 ZX 文档；渠道映射使用 zx- 前缀，面板价格由用户指定。真实提交与账单待验收。',
+    ],
+  })),
   directVideo({
     id: 'newapi/zx/omni-fast',
     hidden: true,
@@ -2932,6 +3033,7 @@ export function displayModelLabel(label: string): string {
 
 export function creationModelFamily(spec: Pick<CreationModelSpec, 'id' | 'model' | 'task'>): string {
   const id = `${spec.id} ${spec.model}`.toLowerCase()
+  if (spec.id.startsWith('newapi/zx/seedance-')) return 'ZX · Seedance'
   if (spec.id.startsWith('newapi/fk/ft-image-v1-')) return 'FK-Image'
   if (spec.id === 'newapi/fk/ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746') return 'FK · H3'
   if (spec.id.startsWith('newapi/fk/')) return 'FK · Seedance 2.5'

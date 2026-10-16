@@ -22,7 +22,7 @@ func TestYihongLargeImageResponse(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	source, err := os.ReadFile(filepath.Join("jc-test-plugins", "yihong.plugin.js"))
 	require.NoError(t, err)
-	for _, model := range []string{"gpt-image-2-1K-4K", "gemini-nano-banana-2.1"} {
+	for _, model := range []string{"gpt-image-2-1K-4K", "gpt-image-2", "gpt-image-2.5-flare", "gpt-image-2.5-sunburst", "gemini-nano-banana-2.1"} {
 		for _, key := range []string{"yihong", "other-image-limit"} {
 			for _, path := range []string{"/v1/images/generations", "/v1/images/edits", "/v1/videos"} {
 				t.Run(model+"/"+key+path, func(t *testing.T) {

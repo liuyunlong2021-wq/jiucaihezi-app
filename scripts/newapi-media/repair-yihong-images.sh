@@ -5,13 +5,16 @@ umask 077
 HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 SOURCE=/opt/jc-newapi-media/source
 BASE=/root/new-api-new
-OLD_TAG=jiucaihezi/new-api:rc40-local-media-ossdirect-multipart-20261009
-IMAGE=jiucaihezi/new-api:rc40-local-media-ossdirect-yihong-images-20261013
+IMAGE=jiucaihezi/new-api:rc40-local-media-ossdirect-yihong-images-20261016
 UPSTREAM=0aec08fee811ec6136828fda790551b49e410301
 OVERRIDE=$BASE/docker-compose.oss-direct.yml
 FILES=$BASE/docker-compose.yml,$BASE/docker-compose.media.yml,$OVERRIDE
 [ "$(id -u)" = 0 ] || { echo 'Run as root'; exit 1; }
-[ "$(docker inspect new-api --format '{{.Config.Image}}')" = "$OLD_TAG" ] || { echo 'Production image changed; stop and inspect'; exit 1; }
+OLD_TAG=$(docker inspect new-api --format '{{.Config.Image}}')
+case "$OLD_TAG" in
+  jiucaihezi/new-api:rc40-local-media-ossdirect-multipart-20261009|jiucaihezi/new-api:rc40-local-media-ossdirect-yihong-images-20261013) ;;
+  *) echo 'Production image changed; stop and inspect'; exit 1 ;;
+esac
 [ "$(docker inspect new-api --format '{{.State.Running}}')" = true ]
 [ "$(docker inspect new-api --format '{{index .Config.Labels "com.docker.compose.project"}}')" = new-api-new ]
 [ "$(docker inspect new-api --format '{{index .Config.Labels "com.docker.compose.project.config_files"}}')" = "$FILES" ] || { echo 'Compose files changed; stop and inspect'; exit 1; }

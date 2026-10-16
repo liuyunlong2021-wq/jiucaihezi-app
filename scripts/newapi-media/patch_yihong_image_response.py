@@ -11,11 +11,17 @@ REPLACEMENT = '''\tstarted := time.Now()
 \t// Only Yihong's synchronous images need large inline Base64 responses.
 \tresponseLimit := maxTaskPluginPersistedJSONBytes
 \tif a.plugin.Meta.Key == "yihong" &&
-\t\t(info.UpstreamModelName == "gemini-nano-banana-2.1" || info.UpstreamModelName == "gpt-image-2-1K-4K") &&
+\t\t(info.UpstreamModelName == "gemini-nano-banana-2.1" || info.UpstreamModelName == "gpt-image-2-1K-4K" ||
+\t\t\tinfo.UpstreamModelName == "gpt-image-2" || info.UpstreamModelName == "gpt-image-2.5-flare" ||
+\t\t\tinfo.UpstreamModelName == "gpt-image-2.5-sunburst") &&
 \t\t(c.Request.URL.Path == "/v1/images/generations" || c.Request.URL.Path == "/v1/images/edits") {
 \t\tresponseLimit = 32 << 20
 \t}
 \tvar responseBody any'''
+LEGACY_REPLACEMENT = REPLACEMENT.replace(
+    ' ||\n\t\t\tinfo.UpstreamModelName == "gpt-image-2" || info.UpstreamModelName == "gpt-image-2.5-flare" ||\n\t\t\tinfo.UpstreamModelName == "gpt-image-2.5-sunburst"',
+    '',
+)
 CHANGES = [
     (MARKER, REPLACEMENT),
     ('io.LimitReader(resp.Body, maxTaskPluginPersistedJSONBytes+1)', 'io.LimitReader(resp.Body, int64(responseLimit)+1)'),
@@ -34,9 +40,12 @@ def patch(root: Path) -> None:
     if all(source.count(new) == 1 for _, new in CHANGES):
         print('Yihong image response fix already applied')
         return
-    if not all(source.count(old) == 1 for old, _ in CHANGES):
+    changes = CHANGES
+    if source.count(LEGACY_REPLACEMENT) == 1 and all(source.count(new) == 1 for _, new in CHANGES[1:]):
+        changes = [(LEGACY_REPLACEMENT, REPLACEMENT)]
+    if not all(source.count(old) == 1 for old, _ in changes):
         raise SystemExit('Unexpected task response source; stop and inspect')
-    for old, new in CHANGES:
+    for old, new in changes:
         source = source.replace(old, new, 1)
     target.write_text(source)
     print('Yihong image response fix prepared (32 MiB); no service changed')

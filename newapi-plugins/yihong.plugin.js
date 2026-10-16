@@ -59,7 +59,14 @@ const GPT_SIZES = {
   '2K': ['2048x2048', '2048x1152', '1152x2048', '2048x1536', '1536x2048'],
   '4K': ['3840x2160', '2160x3840'],
 }
-const IMAGE_MODELS = ['gemini-nano-banana-2.1', 'gpt-image-2-1K-4K']
+const YIHONG_GPT_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']
+const YIHONG_GPT_IMAGE_ALIASES = YIHONG_GPT_IMAGE_MODELS.map(model => `yihong-${model}`)
+const IMAGE_MODELS = [
+  'gemini-nano-banana-2.1',
+  'gpt-image-2-1K-4K',
+  ...YIHONG_GPT_IMAGE_MODELS,
+  ...YIHONG_GPT_IMAGE_ALIASES,
+]
 const IMAGE_RATIOS = ['1:1', '3:2', '2:3', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']
 
 const UPSTREAM_STATUS = {
@@ -81,7 +88,7 @@ export const meta = {
   apiVersion: 1,
   key: 'yihong',
   name: '易红 API',
-  version: '0.1.5',
+  version: '0.1.7',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Yihong API Seedance, Wan, MiniMax and image generation',

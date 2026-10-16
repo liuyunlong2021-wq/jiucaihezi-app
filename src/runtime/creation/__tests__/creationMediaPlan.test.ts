@@ -121,6 +121,13 @@ test('registry keeps current direct, RunningHub and generic AI App entries', () 
     'newapi/zx/grok-1.5-video-10s',
     'newapi/zx/grok-1.5-video-15s',
     'newapi/zx/mj_fast_imagine',
+    'newapi/zx/seedance-2.0-0826-480p',
+    'newapi/zx/seedance-2.0-0826-720p',
+    'newapi/zx/seedance-2.0-fast-0826-480p',
+    'newapi/zx/seedance-2.0-fast-0826-720p',
+    'newapi/zx/seedance-2.0-TS',
+    'newapi/zx/seedance-2.5',
+    'newapi/zx/seedance-2.5-30s',
     'runninghub/api/rh-suno-v55-single',
     'runninghub/api/rh-suno-v55-custom',
     'runninghub/api/rh-suno-lyrics',
@@ -223,6 +230,38 @@ test('ZX Midjourney Fast Imagine uses the NewAPI image task contract', () => {
   assert.equal(textPlan.assetFlow, 'none')
   assert.equal(imagePlan.mode, 'image-to-image')
   assert.equal(imagePlan.assetFlow, 'none')
+  assert.equal(displayModelPrice(getCreationModelSpec('newapi/zx/mj_fast_imagine')!), '0.5/张')
+})
+
+test('ZX Seedance models are mapped and routed; only selected models are visible at per-task prices', () => {
+  const models = [
+    ['seedance-2.0-0826-480p', '1/条', '480p', true],
+    ['seedance-2.0-0826-720p', '1.2/条', '720p', false],
+    ['seedance-2.0-fast-0826-480p', '0.8/条', '480p', true],
+    ['seedance-2.0-fast-0826-720p', '1.2/条', '720p', true],
+    ['seedance-2.0-TS', '1.2/条', '720p', true],
+    ['seedance-2.5', '1.2/条', '720p', false],
+    ['seedance-2.5-30s', '8/条', '720p', false],
+  ] as const
+  const visibleIds = new Set(listCreationModels({ task: 'video' }).map(model => model.id))
+
+  for (const [model, price, resolution, hidden] of models) {
+    const id = `newapi/zx/${model}`
+    const spec = getCreationModelSpec(id)!
+    assert.equal(Boolean(spec.hidden), hidden, `${id} hidden state`)
+    assert.equal(visibleIds.has(id), !hidden, `${id} visibility`)
+    assert.equal(creationModelFamily(spec), 'ZX · Seedance')
+    assert.equal(displayModelLabel(spec.label), model)
+    assert.equal(displayModelPrice(spec), price)
+    const plan = buildCreationRunPlan({
+      modelId: id,
+      params: { prompt: '主体自然运动', duration: model.endsWith('-30s') ? 30 : 8, ratio: '9:16', resolution },
+    })
+    assert.equal(plan.endpoint, '/v1/videos')
+    assert.equal(plan.apiStyle, 'seedance-task')
+    assert.equal(plan.pollKind, 'seedance-task')
+    assert.equal(plan.assetFlow, 'none')
+  }
 })
 
 test('Dola Seedance 2.5 switches to image-to-video with four references and stays fixed at 720p', () => {
@@ -393,10 +432,12 @@ test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 
     assert.ok(getCreationModelSpec(id), id)
   }
 
-  // 图片侧保留：2.5 的 1K 与两个菠萝项
-  for (const id of ['gpt-image-2.5-1k', 'gpt-image-2-菠萝', 'gpt-image-2.5-菠萝']) {
-    assert.equal(imageIds.includes(id), true, id)
+  // 菠萝图片合同仍可按 ID 调用，但不再进入默认选择列表。
+  for (const id of ['gpt-image-2-菠萝', 'gpt-image-2.5-菠萝']) {
+    assert.equal(imageIds.includes(id), false, id)
+    assert.ok(getCreationModelSpec(id), id)
   }
+  assert.equal(imageIds.includes('gpt-image-2.5-1k'), true)
   assert.equal(displayModelPrice(getCreationModelSpec('gpt-image-2-菠萝')!), '0.08/张')
 })
 
@@ -1056,33 +1097,58 @@ test('P2 panel model view is sourced from CreationModelSpec and RunPlan summary'
   const items = listCreationPanelModels({ task: 'image', source: 'all' })
   const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
-  const zImage = items.find(item => item.id === 'runninghub/api/z-image-turbo')
 
   assert.ok(gpt)
   assert.ok(rh)
-  assert.ok(zImage)
+  assert.equal(items.some(item => item.id === 'runninghub/api/z-image-turbo'), false)
   assert.equal(gpt.source, 'newapi-direct')
   assert.equal(rh.source, 'runninghub')
-  assert.equal(zImage.source, 'runninghub')
   assert.ok(gpt.fields.some(field => field.key === 'prompt'))
   assert.ok(rh.fields.some(field => field.key === 'aspectRatio'))
-  assert.ok(zImage.fields.some(field => field.key === 'outputFormat'))
   assert.match(gpt.submitSummaryPreview, /直连/)
   assert.match(rh.submitSummaryPreview, /RunningHub/)
-  assert.match(zImage.submitSummaryPreview, /RunningHub/)
 })
 
 test('panel model labels distinguish GPT Image 2 routing tiers', () => {
   const items = listCreationPanelModels({ task: 'image', source: 'all' })
   const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
-  const zImage = items.find(item => item.id === 'runninghub/api/z-image-turbo')
 
   assert.equal(gpt?.label, 'GPT Image 2.5 1K')
   assert.equal(rh?.label, 'GPT2.0 图生图')
-  assert.equal(zImage?.label, 'Z Image Turbo')
   for (const item of items) {
     assert.doesNotMatch(item.label, /·\s*(T8|RunningHub|NewAPI|直连|RH)/, item.id)
+  }
+})
+
+test('selected image families stay registered but are hidden from creation choices', () => {
+  const hiddenIds = [
+    'newapi/fk/ft-image-v1-211f28f47b0355abb1798f72eb65f22d',
+    'newapi/fk/ft-image-v1-186289ba9d3263010c69372f8939dd94',
+    'newapi/fk/ft-image-v1-eb47192eb578f340043911005a06fb6e',
+    'newapi/fk/ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d',
+    'gpt-image-2-菠萝',
+    'gpt-image-2.5-菠萝',
+    'gemini-3.1-flash-image-preview',
+    'gemini-3-pro-image-preview',
+    'newapi/xiaoyi/grok-imagine-image',
+    'runninghub/api/rh-image-v2',
+    'runninghub/api/rh-pro-image',
+    'local-comfy/z-image-turbo',
+    'runninghub/api/z-image-turbo',
+    'runninghub/api/rh-flux-klein-edit',
+    'runninghub/api/rh-flux-klein-text',
+    'runninghub/api/rh-flux-klein-lora',
+  ]
+  const panelIds = new Set(listCreationPanelModels({ task: 'image', source: 'all' }).map(model => model.id))
+  const registeredIds = new Set(CREATION_MODEL_REGISTRY.map(model => model.id))
+  const explicitlyListedIds = new Set(listCreationModels({ task: 'image', source: 'all', includeDisabled: true }).map(model => model.id))
+
+  for (const id of hiddenIds) {
+    assert.equal(registeredIds.has(id), true, `${id} stays registered`)
+    assert.equal(panelIds.has(id), false, `${id} is hidden from panel choices`)
+    assert.equal(explicitlyListedIds.has(id), true, `${id} remains explicitly discoverable`)
+    assert.ok(getCreationModelSpec(id), `${id} remains addressable by ID`)
   }
 })
 
@@ -1351,10 +1417,37 @@ test('易红新增 H3 与图片模型，Gemini 比例画质和 GPT 分级尺寸�
   const gpt = buildCreationRunPlan({ modelId: 'newapi/yihong/gpt-image-2-1K-4K', params: { prompt: 'p', size: '3840x2160' } })
   assert.equal(gpt.endpoint, '/v1/images/generations')
   assert.equal(gpt.debug.normalizedParams.size, '3840x2160')
+  for (const model of ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst']) {
+    const id = `newapi/yihong/yihong-${model}`
+    const spec = getCreationModelSpec(id)!
+    assert.equal(spec.model, `yihong-${model}`)
+    assert.equal(displayModelLabel(spec.label), model)
+    assert.equal(displayModelPrice(spec), '0.1/张')
+    assert.equal(creationModelFamily(spec), '易红 API')
+    assert.equal(spec.fields.some(field => field.key === 'size'), false)
+    assert.equal(spec.fields.find(field => field.key === 'resolution')?.label, '尺寸')
+    assert.deepEqual(spec.capabilities.resolutions, ['1k', '2k', '4k'])
+    assert.deepEqual(spec.capabilities.ratios, ['1:1', '16:9', '9:16', '4:3', '3:4', '3:2', '2:3'])
+    const plan = buildCreationRunPlan({ modelId: id, params: { prompt: 'p', size: '1152x1536', ratio: '9:16', resolution: '1k' } })
+    assert.equal(plan.endpoint, '/v1/images/generations')
+    assert.equal(plan.model, `yihong-${model}`)
+    assert.equal(plan.debug.normalizedParams.size, '864x1536')
+  }
+  assert.throws(() => buildCreationRunPlan({
+    modelId: 'newapi/yihong/yihong-gpt-image-2',
+    params: { prompt: 'p', ratio: '1:1', resolution: '4k' },
+  }), /Unsupported 易红 GPT Image size: 4k 1:1/)
   const h3 = getCreationModelSpec('newapi/yihong/minimax H3')!
   assert.equal(h3.model, 'minimax H3')
   assert.equal(h3.price, '¥0.05/秒')
-  for (const id of ['newapi/yihong/minimax H3', 'newapi/yihong/gemini-nano-banana-2.1', 'newapi/yihong/gpt-image-2-1K-4K']) {
+  for (const id of [
+    'newapi/yihong/minimax H3',
+    'newapi/yihong/gemini-nano-banana-2.1',
+    'newapi/yihong/gpt-image-2-1K-4K',
+    'newapi/yihong/yihong-gpt-image-2',
+    'newapi/yihong/yihong-gpt-image-2.5-flare',
+    'newapi/yihong/yihong-gpt-image-2.5-sunburst',
+  ]) {
     assert.ok(listCreationPanelModels().some(item => item.id === id))
   }
 })

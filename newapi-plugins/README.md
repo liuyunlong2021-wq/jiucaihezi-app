@@ -22,8 +22,9 @@
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
 | `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.2` 同时认领六个中文公开名与真实 ID，支持模型映射；长期特惠名称缩短，待上传与真实验收 |
 | `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | 代码已就绪，**未上传或生产验收**；使用 `openai_image`，由 NewAPI 主机轮询后返回图片 URL |
+| `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
 | `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |
-| `yihong.plugin.js` | `yihong` | 易红视频与同步图片 API | 0.1.6 共 13 型号；保留分辨率枚举修复，补齐 Max auto/fixed 运镜，待上传/激活；两图片型号仍需 rc.40 大响应补丁，真实生成与账单待验收 |
+| `yihong.plugin.js` | `yihong` | 易红视频与同步图片 API | 0.1.7 共 16 个上游型号，新增 3 个 `yihong-` 图片公开别名；保留分辨率枚举修复，待上传/激活；5 个图片型号需 rc.40 大响应补丁，真实生成与账单待验收 |
 
 ## 本地验证
 

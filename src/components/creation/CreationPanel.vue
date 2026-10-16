@@ -4081,14 +4081,14 @@ const modelGroups = computed(() => {
   // 菠萝 = 图片两项排最前、视频两项跟在 jc 本机后面（用户 2026-09-27 决定）。
   const order = cpState.task === 'image'
     ? [
-        'FK-Image', '菠萝', 'jc 本机',
+        'FK-Image', '菠萝', 'jc 本机', '易红 API',
         'Grok Image', 'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Veo', 'Grok Video',
         'Seedance 2.0 Mini', 'Seedance 2.0 Fast', 'Seedance 2.5', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
       ]
     : cpState.task === 'video'
       ? [
           // FK Seedance 2.5 置顶；H3 保留独立分组。
-          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'jc 本机', '菠萝',
+          'FK · Seedance 2.5', '灵动seedace2.5', 'FK · H3', 'jc 本机', 'ZX · Seedance', '菠萝',
           'Seedance 2.5', '易红 API', '源流 AI', 'Veo', 'Grok Video', 'Seedance 2.0 Mini', 'Seedance 2.0 Fast',
           'GPT Image', 'Banana', 'Z Image', 'FLUX Klein', 'Grok Image', 'Sora2', 'LTX 2.3', 'Suno', '3D', 'AI 应用', '其他模型',
         ]
