@@ -7,6 +7,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::Mutex as AsyncMutex;
 
+pub mod canvas_agent;
+
 struct McpStdioProcess {
     /// child.try_wait()/wait() 后 child.id() 会变成 None；进程组仍可能有握着会话锁的后代。
     pid: u32,
@@ -345,6 +347,7 @@ fn owned_by_window(owner: Option<&Owner>, window: &str) -> bool {
 /// 窗口关掉后它的 runner 就是孤儿，而应用还活着，退出路径不会跑 —— 不收的话它会一直
 /// 握着会话的跨进程内核写锁（jsonl 后端的 lease 没有过期时间），那个会话在本机再也写不进去。
 pub fn reap_window_stdio_processes(window: &str) -> usize {
+    canvas_agent::release_window(window);
     let mut processes = lock_processes();
     let handles: Vec<String> = processes
         .iter()

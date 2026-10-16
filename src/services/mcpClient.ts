@@ -8,6 +8,7 @@ import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
 import { McpStdioTransport } from './mcpStdioTransport'
 import type { McpStdioDiagnostics } from './mcpStdioTransport'
 import { createMcpOAuthProvider, McpOAuthInteractionRequiredError } from './mcpOAuthProvider'
+import { canvasAgentConnection, canvasToolDescription, isCanvasAgentServer, MCP_CONNECT_TIMEOUT_MS } from './canvasAgentConnection'
 
 // ─── Types ───────────────────────────────────────────
 
@@ -17,6 +18,7 @@ export interface McpConnectionState {
   authProvider?: OAuthClientProvider
   serverId: string
   config: McpServerConfig
+  canvasAgent?: boolean
 }
 
 export class McpAuthorizationRequiredError extends Error {
@@ -35,7 +37,7 @@ export function mcpOAuthPostAuthFailureMessage(hasAccessToken: boolean): string 
 
 const connections = new Map<string, McpConnectionState>()
 
-const STDIO_TIMEOUT = 30_000
+const STDIO_TIMEOUT = MCP_CONNECT_TIMEOUT_MS
 const TOOL_TIMEOUT = 120_000
 
 async function normalizeStdioConfig(config: McpServerConfig): Promise<McpServerConfig> {
@@ -147,23 +149,30 @@ export async function connectMcpServer(config: McpServerConfig, options: { inter
   // Disconnect if already connected
   await disconnectMcpServer(config.id)
 
-  const normalizedConfig = await normalizeStdioConfig(config)
-  const connection = await createMcpConnection(normalizedConfig, options.interactiveAuth !== false)
-  connections.set(config.id, connection)
+  if (isCanvasAgentServer(config)) await canvasAgentConnection.prepare(config.id)
   try {
-    await connection.client?.connect(connection.transport!, { timeout: STDIO_TIMEOUT })
-  } catch (error) {
-    if (error instanceof UnauthorizedError || error instanceof McpOAuthInteractionRequiredError) {
-      throw new McpAuthorizationRequiredError(config.id)
+    const normalizedConfig = await normalizeStdioConfig(config)
+    const connection = await createMcpConnection(normalizedConfig, options.interactiveAuth !== false)
+    connection.canvasAgent = isCanvasAgentServer(config)
+    connections.set(config.id, connection)
+    try {
+      await connection.client?.connect(connection.transport!, { timeout: STDIO_TIMEOUT })
+    } catch (error) {
+      if (error instanceof UnauthorizedError || error instanceof McpOAuthInteractionRequiredError) {
+        throw new McpAuthorizationRequiredError(config.id)
+      }
+      await disconnectMcpServer(config.id)
+      throw withMcpDiagnostics(error, connection)
     }
-    await disconnectMcpServer(config.id)
-    throw withMcpDiagnostics(error, connection)
-  }
-  try {
-    return await listMcpTools(config.id, connection.client)
+    try {
+      return await listMcpTools(config.id, connection.client)
+    } catch (error) {
+      await disconnectMcpServer(config.id)
+      throw withMcpDiagnostics(error, connection)
+    }
   } catch (error) {
-    await disconnectMcpServer(config.id)
-    throw withMcpDiagnostics(error, connection)
+    if (isCanvasAgentServer(config)) await canvasAgentConnection.release(config.id)
+    throw error
   }
 }
 
@@ -228,7 +237,8 @@ async function listMcpTools(serverId: string, client: Client | null): Promise<Mc
   const result = await client.listTools(undefined, { timeout: STDIO_TIMEOUT })
   const tools: McpToolSchema[] = (result.tools || []).map(tool => ({
     name: `mcp__${serverId}__${tool.name}`,
-    description: tool.description || '',
+    description: connections.get(serverId)?.canvasAgent
+      ? canvasToolDescription(tool.name, tool.description || '') : tool.description || '',
     inputSchema: tool.inputSchema as Record<string, unknown> || { type: 'object', properties: {} },
     serverId,
     originalName: tool.name,
@@ -240,7 +250,10 @@ async function listMcpTools(serverId: string, client: Client | null): Promise<Mc
 
 export async function disconnectMcpServer(serverId: string): Promise<void> {
   const conn = connections.get(serverId)
-  if (!conn) return
+  if (!conn) {
+    await canvasAgentConnection.release(serverId)
+    return
+  }
 
   try {
     await conn.client?.close()
@@ -249,6 +262,7 @@ export async function disconnectMcpServer(serverId: string): Promise<void> {
   }
 
   connections.delete(serverId)
+  await canvasAgentConnection.release(serverId)
 }
 
 export async function callMcpTool(
@@ -288,6 +302,10 @@ export async function callMcpTool(
   }
 
   const joined = texts.join('\n')
+  if (conn.canvasAgent) {
+    if (result.isError) throw new Error(joined || '画布工具执行失败')
+    await canvasAgentConnection.refresh(serverId).catch(() => undefined)
+  }
   // Truncate to 100KB
   return joined.length > 102400
     ? joined.slice(0, 102400) + '\n\n[结果已截断，超过 100KB]'

@@ -45,10 +45,11 @@ test('MCP catalog ships Playwright as a pinned desktop stdio server', () => {
   assert.match(source, /entry\.transport === 'stdio' && !isDesktopRuntime/)
 })
 
-test('MCP catalog exposes only the two product-approved built-ins', () => {
+test('MCP catalog preserves existing built-ins and adds Infinite Canvas', () => {
   assert.doesNotMatch(catalogSource, /id: 'jiucaihezi-creation'/)
   assert.match(catalogSource, /id: 'github'/)
   assert.match(catalogSource, /id: 'playwright'/)
+  assert.match(catalogSource, /id: 'infinite-canvas'/)
   assert.doesNotMatch(catalogSource, /id: 'obsidian'/)
 })
 

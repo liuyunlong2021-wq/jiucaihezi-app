@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useMcpStore, type McpServerConfig } from '@/stores/mcpStore'
 import {
   connectMcpServer,
@@ -10,6 +10,7 @@ import { BUILTIN_MCP_CATALOG, resolveMcpOAuthClientId, type BuiltinMcpCatalogEnt
 import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriRuntime } from '@/utils/tauriEnv'
+import { canvasAgentConnection, isCanvasAgentServer } from '@/services/canvasAgentConnection'
 
 type ViewMode = 'grid' | 'list'
 type CatalogCard = BuiltinMcpCatalogEntry & {
@@ -38,15 +39,18 @@ const newServer = ref({
 const configuredIds = computed(() => new Set(mcpStore.servers.map(server => server.id)))
 
 const catalogCards = computed<CatalogCard[]>(() =>
-  BUILTIN_MCP_CATALOG.map(entry => ({
-    ...entry,
-    installed: configuredIds.value.has(entry.id),
-    server: mcpStore.servers.find(server => server.id === entry.id),
-  })),
+  BUILTIN_MCP_CATALOG.map(entry => {
+    const server = mcpStore.servers.find(server => server.id === entry.id || (entry.id === 'infinite-canvas' && isCanvasAgentServer(server)))
+    return {
+      ...entry,
+      installed: Boolean(server),
+      server,
+    }
+  }),
 )
 
 const customServers = computed(() =>
-  mcpStore.servers.filter(server => !BUILTIN_MCP_CATALOG.some(entry => entry.id === server.id)),
+  mcpStore.servers.filter(server => !catalogCards.value.some(card => card.server?.id === server.id)),
 )
 
 const categories = computed(() => [
@@ -103,6 +107,7 @@ function transportLabel(transport: BuiltinMcpCatalogEntry['transport'] | McpServ
 
 function statusLabel(server?: McpServerConfig) {
   if (!server) return '未安装'
+  if (server.status === 'connected' && isCanvasAgentServer(server)) return canvasAgentConnection.statuses[server.id]?.ready ? '画布可操作' : '已连接，等待画布'
   if (server.status === 'connected') return '已连接'
   if (server.status === 'connecting') return '连接中'
   if (server.status === 'error') return '异常'
@@ -304,13 +309,13 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
 
   const server = mcpStore.addServer(config)
   if (entry.auth === 'oauth' || (entry.transport === 'stdio' && entry.command && !entry.secretEnvVar)) {
-    await toggleServer(server)
+    await toggleServer(server, entry.id === 'infinite-canvas')
     return
   }
   message.value = `已加入 MCP 扩展：${entry.name}。启用后才会连接并暴露工具。`
 }
 
-async function toggleServer(server: McpServerConfig) {
+async function toggleServer(server: McpServerConfig, newCanvas = false) {
   message.value = ''
   if (connectingId.value) return
   if (server.enabled && server.status === 'connected') {
@@ -328,6 +333,7 @@ async function toggleServer(server: McpServerConfig) {
     mcpStore.setServerTools(server.id, tools)
     mcpStore.setServerStatus(server.id, 'connected')
     message.value = `${server.name} 已连接，发现 ${tools.length} 个外部工具。`
+    if (isCanvasAgentServer(server) && !canvasAgentConnection.statuses[server.id]?.ready) await openCanvas(server, newCanvas)
   } catch (error) {
     if (error instanceof McpAuthorizationRequiredError) {
       message.value = `已打开浏览器，请完成 ${server.name} 授权。`
@@ -340,6 +346,26 @@ async function toggleServer(server: McpServerConfig) {
     connectingId.value = ''
   }
 }
+
+async function openCanvas(server: McpServerConfig, newCanvas = false) {
+  try {
+    await canvasAgentConnection.open(server.id, newCanvas)
+    message.value = '画布已在浏览器打开并自动填写连接信息；返回后可选择「无限画布」操作。'
+  } catch (error) {
+    message.value = `打开画布失败：${error instanceof Error ? error.message : String(error)}`
+  }
+}
+
+async function refreshCanvasStatus() {
+  for (const server of mcpStore.connectedServers.filter(isCanvasAgentServer)) {
+    await canvasAgentConnection.refresh(server.id).catch(() => undefined)
+  }
+}
+onMounted(() => {
+  void refreshCanvasStatus()
+  window.addEventListener('focus', refreshCanvasStatus)
+})
+onBeforeUnmount(() => window.removeEventListener('focus', refreshCanvasStatus))
 
 async function removeServer(server: McpServerConfig) {
   if (!(await confirmAction(`删除 MCP 扩展「${server.name}」？`))) return
@@ -507,6 +533,7 @@ async function removeServer(server: McpServerConfig) {
                 }}
               </button>
               <template v-else-if="card.server">
+                <button v-if="isCanvasAgentServer(card.server) && card.server.status === 'connected'" class="mcp-ghost" @click="openCanvas(card.server)">打开画布</button>
                 <button
                   class="mcp-primary"
                   :disabled="connectingId === card.server.id"

@@ -1,4 +1,5 @@
 import { gatewayJson } from '@/services/newApiClient'
+import { CANVAS_AGENT_PACKAGE } from '@/services/canvasAgentConnection'
 
 export type BuiltinMcpTransport = 'stdio' | 'sse' | 'streamable-http' | 'remote'
 
@@ -25,6 +26,20 @@ export interface BuiltinMcpCatalogEntry {
 }
 
 export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
+  {
+    id: 'infinite-canvas',
+    name: '无限画布',
+    icon: 'dashboard',
+    category: '创作',
+    transport: 'stdio',
+    description: '连接无限画布，让 AI 读取画布、编辑节点与连线，并在画布生成图片、视频和音频。',
+    tasks: ['读取与编辑画布', '创建节点与连线', '画布媒体生成'],
+    auth: 'none',
+    risk: 'high',
+    installHint: '仅桌面版可用，需要本机 Node.js/npm。连接后自动打开画布并填写连接信息；生图 API Key 在画布网页配置。',
+    command: 'npx',
+    args: ['-y', CANVAS_AGENT_PACKAGE, 'mcp'],
+  },
   {
     id: 'github',
     name: 'GitHub',

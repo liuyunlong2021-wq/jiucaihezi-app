@@ -9,6 +9,7 @@ import { build } from 'esbuild'
 const outdir = join(tmpdir(), 'jc-focused-tests')
 
 const wave1FocusedTests = [
+  'src/services/__tests__/canvasAgentConnection.test.ts',
   'src/services/__tests__/desktopUpdatePreparation.test.ts',
   'src/services/__tests__/desktopUpdater.test.ts',
   'src/components/canvas/__tests__/canvasDocument.test.ts',
