@@ -43,8 +43,6 @@ const DesktopRemoteSettings = defineAsyncComponent(() => import('./DesktopRemote
 const localModelBusy = ref(false)
 const localModelStatus = ref('')
 const installedLocalModelCount = ref(0)
-// 本机模型与服务默认折叠：五块展开后设置页过长，收起后一行也能看到状态。
-const localModelsOpen = ref(false)
 const customProviders = ref<CustomProviderConfig[]>(getCustomProviders())
 const customProviderStatus = ref('')
 const customProviderFormOpen = ref(false)
@@ -376,9 +374,7 @@ function showSync() {
         <div class="memory-local-head">
           <strong>模型与服务</strong>
           <span>{{ localModelSummary }}</span>
-          <button type="button" :aria-expanded="localModelsOpen" @click="localModelsOpen = !localModelsOpen">{{ localModelsOpen ? '收起' : '展开' }}</button>
         </div>
-        <template v-if="localModelsOpen">
         <section class="memory-local-model">
           <div>
             <strong>本地模型 · Ollama</strong>
@@ -482,7 +478,6 @@ function showSync() {
           </div>
         </section>
         </template>
-        </template>
       </div>
       <div v-else-if="tab === 'sync'" class="memory-sync">
         <template v-if="!gatewaySessionAuthenticated">
@@ -569,11 +564,9 @@ function showSync() {
 .memory-account-error { margin: 0; color: var(--danger); font-size: 12px; }
 .memory-mobile-legal { display: flex; justify-content: center; gap: 12px; }
 .memory-mobile-legal button { padding: 0; border: 0; background: transparent; color: var(--ink3); font: inherit; font-size: 12px; text-decoration: underline; }
-.memory-local-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 4px 0 8px; }
+.memory-local-head { display: grid; align-items: center; gap: 4px 12px; padding: 4px 0 8px; }
 .memory-local-head strong { grid-column: 1; min-width: 0; font-size: 15px; font-weight: 600; line-height: 1.5; }
 .memory-local-head span { grid-column: 1; color: var(--ink3); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
-.memory-local-head button { grid-column: 2; grid-row: 1 / 3; min-height: 30px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink2); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
-.memory-local-head button:hover { background: var(--surface-alt); }
 .memory-local-model { display: grid; min-width: 0; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--paper); }
 .memory-local-model > div:first-child { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
 .memory-local-model strong { min-width: 0; font-size: 13px; font-weight: 600; line-height: 1.5; }
@@ -592,7 +585,7 @@ function showSync() {
 .memory-provider-more > button { position: absolute; z-index: 2; top: calc(100% + 4px); right: 0; background: var(--paper); color: var(--jc-error); box-shadow: var(--jc-shadow-sm); }
 .memory-provider-more summary:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
 .memory-local-actions button:disabled { opacity: .55; cursor: progress; }
-.memory-local-actions button:focus-visible, .memory-local-head button:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
+.memory-local-actions button:focus-visible { outline: 2px solid var(--jc-focus-ring); outline-offset: 2px; }
 .memory-comfy-key { display: grid; min-width: 0; gap: 6px; color: var(--ink2); font-size: 12px; }
 .memory-comfy-key input { min-width: 0; width: 100%; box-sizing: border-box; height: 34px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--ink1); font: inherit; }
 .memory-comfy-key input:focus { outline: 2px solid color-mix(in srgb, var(--olive) 35%, transparent); border-color: var(--olive); }

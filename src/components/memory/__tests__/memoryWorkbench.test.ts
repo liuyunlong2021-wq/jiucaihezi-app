@@ -1983,9 +1983,10 @@ test('memory settings expose the existing Desktop local model runtime', () => {
   assert.match(settings, /connectLocalOllama/)
   assert.match(settings, /getLocalOllamaModels/)
   assert.match(settings, /连接 Ollama/)
-  // 本机模型与服务收进可折叠区，默认收起；自定义端点覆盖原本机 MLX 的接入场景。
-  assert.match(settings, /本机模型与服务/)
-  assert.match(settings, /localModelsOpen/)
+  // 模型与服务直接显示，保留本地模型和自定义端点全部接入能力。
+  assert.match(settings, /<strong>模型与服务<\/strong>/)
+  assert.doesNotMatch(settings, /localModelsOpen/)
+  assert.doesNotMatch(settings, /:aria-expanded=/)
   assert.match(settings, /兼容 API/)
   assert.match(settings, /openCustomProviderForm/)
   assert.doesNotMatch(settings, /localMlx/)
