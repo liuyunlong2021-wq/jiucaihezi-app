@@ -72,6 +72,38 @@ test('FK 失败原因保留 error.message，用量不混入参考图数量', () 
 
 const VIDEO = 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98'
 const SPECIAL = 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693'
+const H3 = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
+
+test('FK H3 当前合同支持公开映射、本地文件和标准 jobId 查询', () => {
+ for (const upstreamModel of ['fk-MiniMaxh3', H3]) {
+   const context = { ...ctx('fk-MiniMaxh3'), upstreamModel }
+   const intent = plugin.protocols.openai_video.decodeRequest({ ...context, body: {
+     kind: 'multipart', fields: { prompt: ['p'], duration: ['1'], resolution: ['768p'], ratio: ['4:3'] },
+     files: [{ name: 'images', ref: 'image1', filename: 'a.png' }, { name: 'audios', ref: 'audio1', filename: 'a.mp3' }],
+   } })
+   const request = plugin.buildSubmitRequest({ ...context, requestBody: intent.requestBody })
+   assert.equal(request.url, 'https://ai.fanke2026.xyz/api/open/v1/video/generate')
+   assert.equal(request.headers['X-Public-Model-Ids'], '1')
+   assert.equal(request.parts.find(part => part.name === 'model').value, H3)
+   assert.deepEqual(request.parts.slice(-2).map(part => part.name), ['images', 'audios'])
+   const submitted = plugin.parseSubmitResponse(context, { body: { success: true, jobId: 'h3/job', taskId: 'provider' } })
+   assert.equal(submitted.taskId, 'h3/job')
+   assert.match(plugin.buildQueryRequest({ ...context, taskId: submitted.taskId }).url, /video\/status\?jobId=h3%2Fjob/)
+   assert.equal(plugin.parseTaskResult(context, { success: true, status: 'success' }).status, 'IN_PROGRESS')
+   assert.equal(plugin.parseTaskResult(context, { success: true, status: 'success', videoUrl: URL }).status, 'SUCCESS')
+ }
+ assert.ok(plugin.meta.models.includes('fk-MiniMaxh3'))
+ for (const value of [{ duration: 0 }, { duration: 16 }, { duration: 1, resolution: '720p' }, { duration: 1, videoUrls: ['https://a/v.mp4'] }, { duration: 1, imageUrls: Array(10).fill('https://a/i.png') }, { duration: 1, audioUrls: Array(4).fill('https://a/a.mp3') }])
+   assert.throws(() => video(value, H3))
+ const legacy = { ...ctx(H3), data: { id: 'old-h3', job_id: 'old-h3' }, taskId: 'old-h3' }
+ assert.equal(plugin.buildQueryRequest(legacy).url, 'https://ai.fanke2026.xyz/v1/videos/old-h3')
+})
+
+test('FK 视频字符串错误不丢失，避免只显示生成失败', () => {
+ const result = plugin.parseTaskResult(ctx(VIDEO), { status: 'failed', error: '模型补量中' })
+ assert.equal(result.reason, '模型补量中')
+ assert.equal(plugin.protocols.openai_video.render({}, { status: 'FAILURE', data: { error: '模型补量中' } }).error, '模型补量中')
+})
 
 test('FK 中文公开名可提交且始终转为真实公共 ID，计费和轮询保持正确', () => {
  for (const [name, model, duration] of [

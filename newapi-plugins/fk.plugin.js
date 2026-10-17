@@ -3,8 +3,8 @@
 // 图片使用 openai_image 协议并由 NewAPI 主机轮询；视频使用 openai_video 协议。
 // 上游 Key 由 NewAPI 渠道配置提供，源码不保存密钥。Base URL: https://ai.fanke2026.xyz
 // Seedance 2.5 使用 /api/open/v1/video/generate 与 /video/status?jobId=。
-// 签名结果由宿主 content 代理免鉴权回收。旧型号仅保留历史查询；H3 维持兼容接口。
-// 事实源：用户 2026-10-14 提供的 FK 官方视频文档。价格在 NewAPI Task Usage 中配置。
+// 签名结果由宿主 content 代理免鉴权回收。旧任务仅保留历史兼容查询；H3 同样走标准接口。
+// 事实源：用户提供的 FK 官方视频文档与公开模型映射。价格在 NewAPI Task Usage 中配置。
 // 按次型号使用 calls；按秒型号使用 seconds/seconds_480p/seconds_720p。
 // 官方型号有参考视频时完成用量使用 video_reference_tokens，需同步更新定价表达式。
 
@@ -17,6 +17,7 @@ const LEGACY_VIDEO_IDS = [
 const H3_MODEL = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
 const VIDEO_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4']
 const VIDEO_SPECS = {
+  [H3_MODEL]: { min: 1, max: 15, refs: [9, 0, 3], resolutions: ['768p'] },
   'ft-video-v1-89e87205d3be4eb2cf3fda249569e693': { durations: [30], refs: [9, 0, 0], unit: 'request' },
   'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70': { durations: [15, 30], refs: [9, 0, 0], unit: 'request' },
   'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d': { durations: [30], refs: [30, 10, 10], wide: true, promptMax: 6000, unit: 'request' },
@@ -24,8 +25,9 @@ const VIDEO_SPECS = {
   'ft-video-v1-756e0feb4b3e1f893726314109762123': { min: 15, max: 30, refs: [30, 0, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
   'ft-video-v1-451adae35b0c4a3d275c2c46394abc98': { min: 4, max: 30, refs: [30, 10, 10], wide: true, tokenWithVideo: true },
 }
-const VIDEO_MODEL_IDS = [...Object.keys(VIDEO_SPECS), H3_MODEL]
+const VIDEO_MODEL_IDS = Object.keys(VIDEO_SPECS)
 const VIDEO_MODEL_ALIASES = {
+  'fk-MiniMaxh3': H3_MODEL,
   '特价渠道 Seedance 2.5 满血 720p': 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693',
   '特价渠道 Seedance 2.5 满血 720p（可过真人）': 'ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70',
   '长期特惠 Seedance 2.5 满血 720p': 'ft-video-v1-bdf45387433ac0a9042ebab3fae0299d',
@@ -42,7 +44,7 @@ function videoModel(value) {
 function compatibilityVideo(ctx) {
   const model = videoModel(ctx.upstreamModel || ctx.model || snapshot(ctx.requestBody).model)
   const data = snapshot(ctx.data)
-  return model === H3_MODEL || LEGACY_VIDEO_IDS.includes(model) || !data.jobId && Boolean(data.id || data.job_id || data.task_id)
+  return LEGACY_VIDEO_IDS.includes(model) || !data.jobId && Boolean(data.id || data.job_id || data.task_id)
 }
 
 // 来自账号可用模型目录；这些模型走 /api/open/v1/image/generate。
@@ -71,7 +73,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.2',
+  version: '0.3.3',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -271,7 +273,6 @@ export const protocols = {
         return { name, ref: file.ref, filename: file.filename }
       })
       const payload = normalizeRequest({ ...values, model: ctx.upstreamModel || ctx.model || values.model }, fileRefs)
-      if (compatibilityVideo(ctx) && fileRefs.length) fail('H3 requires public HTTPS media URLs')
       const hasReference = Boolean(
         (payload.imageUrls && payload.imageUrls.length) ||
         (payload.videoUrls && payload.videoUrls.length) ||
@@ -295,9 +296,7 @@ export const protocols = {
       }
       if (task.status === 'FAILURE') {
         const data = snapshot(task.data)
-        const error = snapshot(data.error)
-        const reason = error.message || data.errorMessage || data.fail_reason || data.message
-        if (reason) view.error = String(reason)
+        view.error = imageError(data)
       }
       const artifacts = snapshot(ctx && ctx.artifacts)
       if (task.status === 'SUCCESS' && artifacts.video && artifacts.video.url) {
@@ -469,7 +468,7 @@ function imageResultUrls(body) {
 
 function imageError(body) {
   const error = snapshot(body.error)
-  return String(body.errorMessage || error.message || (typeof body.error === 'string' ? body.error : '') || body.message || 'Fk request failed')
+  return String(body.errorMessage || error.message || (typeof body.error === 'string' ? body.error : '') || body.fail_reason || body.message || 'Fk request failed')
 }
 
 export function parseSubmitResponse(ctx, resp) {
@@ -561,8 +560,7 @@ export function parseTaskResult(ctx, body) {
     out.url = videoResultUrl(result)
   }
   if (status === 'FAILURE') {
-    const error = snapshot(result.error)
-    out.reason = String(error.message || result.errorMessage || result.fail_reason || result.message || ('Fk task ' + raw))
+    out.reason = imageError(result)
   }
   return out
 }
