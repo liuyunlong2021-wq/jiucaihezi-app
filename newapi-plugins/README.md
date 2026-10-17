@@ -20,7 +20,7 @@
 | `comfy.plugin.js` | `comfy` | 不取代（`comfy-adapter` 是执行器，插件只代理它） | 代码已就绪，**未上传** |
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
-| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.3` 补齐 `fk-MiniMaxh3`，H3 改走标准接口并支持本地文件；保留历史任务查询和六个 Seedance 映射，待上传激活与真实验收 |
+| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.4` 修正视频文件字段读取为宿主的 `file.field`；0.3.3 的本地文件提交会报 undefined，须上传并激活新版。真实验收待执行 |
 | `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | 代码已就绪，**未上传或生产验收**；使用 `openai_image`，由 NewAPI 主机轮询后返回图片 URL |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
 | `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |

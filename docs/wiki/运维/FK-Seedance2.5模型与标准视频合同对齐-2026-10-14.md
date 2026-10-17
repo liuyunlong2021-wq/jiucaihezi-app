@@ -1,5 +1,9 @@
 # FK Seedance 2.5 模型与标准视频合同对齐
 
+## 当前阻断修正：0.3.4 文件元数据字段
+
+用户生产截图显示 `Unsupported video file field: undefined`。固定宿主 SHA `0aec08fee811ec6136828fda790551b49e410301` 的 `middleware/task_plugin.go` 提供 `{field, ref, filename, mimeType, size}`；插件 0.3.3 却读取 `name/fieldName`，原测试也手填同样错误的结构。0.3.4 只改为读取 `file.field`，两仓视频夹具同步真实结构；先复现与截图一致的错误再修复，不改模型、素材字段白名单、价格或上游端点。需上传激活 0.3.4；无需重新部署已有 v0.20.3 画布，真实转发/出片仍待验收。以下 0.3.3 记录是历史实施，不代表宿主已通过。
+
 ## 当前补充：H3 标准接口（插件 0.3.3，尚未生产激活）
 
 用户最新上游文档及 NewAPI 截图确认七条公开映射：原六条 Seedance 保持，新增 `fk-MiniMaxh3` → `ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746`。H3 同样使用 `/api/open/v1/video/generate`，支持 JSON 公网 HTTPS URL 或 multipart 重复 images/audios 文件字段；768p、1–15 秒、9 图/0 视频/3 音频。旧的「H3 只能走兼容接口、必须 URL」结论已失效。

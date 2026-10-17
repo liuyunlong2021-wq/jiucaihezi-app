@@ -79,7 +79,7 @@ test('FK H3 当前合同支持公开映射、本地文件和标准 jobId 查询'
    const context = { ...ctx('fk-MiniMaxh3'), upstreamModel }
    const intent = plugin.protocols.openai_video.decodeRequest({ ...context, body: {
      kind: 'multipart', fields: { prompt: ['p'], duration: ['1'], resolution: ['768p'], ratio: ['4:3'] },
-     files: [{ name: 'images', ref: 'image1', filename: 'a.png' }, { name: 'audios', ref: 'audio1', filename: 'a.mp3' }],
+     files: [{ field: 'images', ref: 'request_file:images', filename: 'a.png' }, { field: 'audios', ref: 'request_file:audios', filename: 'a.mp3' }],
    } })
    const request = plugin.buildSubmitRequest({ ...context, requestBody: intent.requestBody })
    assert.equal(request.url, 'https://ai.fanke2026.xyz/api/open/v1/video/generate')
@@ -176,11 +176,11 @@ test('FK 视频成功须有成片与 Token 结算，签名 URL 经免鉴权代�
 })
 
 test('FK 视频 multipart 使用重复素材字段，不写死 boundary', () => {
- const intent = plugin.protocols.openai_video.decodeRequest({ ...ctx(VIDEO), body: { kind: 'multipart', fields: { prompt: ['p'], duration: ['5'], resolution: ['720p'] }, files: [{ name: 'images', ref: 'image1', filename: 'a.png' }, { name: 'videos', ref: 'video1', filename: 'a.mp4' }] } })
+ const intent = plugin.protocols.openai_video.decodeRequest({ ...ctx(VIDEO), body: { kind: 'multipart', fields: { prompt: ['p'], duration: ['5'], resolution: ['720p'] }, files: [{ field: 'images', ref: 'request_file:images', filename: 'a.png' }, { field: 'videos', ref: 'request_file:videos', filename: 'a.mp4' }] } })
  const request = plugin.buildSubmitRequest({ ...ctx(VIDEO), requestBody: intent.requestBody })
  assert.equal(request.headers['Content-Type'], undefined)
  assert.equal(request.bodyType, 'multipart')
- assert.deepEqual(request.parts.slice(-2), [{ name: 'images', fileRef: 'image1', filename: 'a.png' }, { name: 'videos', fileRef: 'video1', filename: 'a.mp4' }])
+ assert.deepEqual(request.parts.slice(-2), [{ name: 'images', fileRef: 'request_file:images', filename: 'a.png' }, { name: 'videos', fileRef: 'request_file:videos', filename: 'a.mp4' }])
 })
 
 test('FK 历史视频保留兼容轮询及 content 回收，examples 覆盖完整 schema', () => {

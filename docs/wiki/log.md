@@ -1,5 +1,10 @@
 # Wiki 操作日志
 
+## FK 生产 400 文件字段错读根因
+
+- 用户提供失败 Response：`Unsupported video file field: undefined`。核对固定 rc.40 宿主 `middleware/task_plugin.go`，确认视频解码应读 `file.field`；0.3.3 插件与旧夹具错误使用 `name/fieldName`，此前测试不证明宿主通过。
+- 先将两仓夹具改为真实字段并复现同一错误，再以 0.3.4 单点修复。无生产配置/收费生成操作；插件上传激活、真实转发/结果仍待用户验收，画布不需重发。
+
 ## FK H3 标准视频接口补齐（本地）
 
 - 用户确认 Canvas 图生图成功，移除执行脚本后文武双修成功；提供七条 FK 映射与最新账号 API 文档，要求重点修 FK 视频。

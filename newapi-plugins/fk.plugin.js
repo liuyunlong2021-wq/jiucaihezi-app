@@ -73,7 +73,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.3',
+  version: '0.3.4',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -268,7 +268,7 @@ export const protocols = {
       const values = ctx.body.kind === 'json' ? snapshot(ctx.body.value) : formValues(ctx.body.fields)
       const files = ctx.body.kind === 'multipart' && Array.isArray(ctx.body.files) ? ctx.body.files : []
       const fileRefs = files.map(file => {
-        const name = file.name || file.fieldName
+        const name = file.field
         if (!['images', 'videos', 'audios'].includes(name) || !file.ref) fail('Unsupported video file field: ' + name)
         return { name, ref: file.ref, filename: file.filename }
       })
