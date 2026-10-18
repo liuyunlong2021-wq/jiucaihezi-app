@@ -9,7 +9,10 @@ import {
   deepSeekFailureText,
   deepSeekHandoffTurns,
   deepSeekMessageUsage,
+  deepSeekTurnUsage,
+  deepSeekSessionUsage,
   deepSeekModelInput,
+  deepSeekModelLimits,
   deepSeekPermissionChip,
   readCurrentDeepSeekPermission,
   switchDeepSeekSessionPermission,
@@ -86,7 +89,7 @@ test('DeepSeek Harness includes only visible same-project session turns as expli
 test('production skill routing does not replace the user request or leak into visible history', () => {
   const request = '镜头1–3用H3，镜头4–6用Seedance 2.5，不要时间戳'
   const prompt = deepSeekPrompt(request, ['jc-manju-zhizuo'])
-  assert.match(prompt, /未指定.*h3-prompt-writing.*MiniMax H3/)
+  assert.equal(prompt, `/jc-manju-zhizuo\n\n${request}`)
   assert.ok(prompt.endsWith(request))
   const turns = deepSeekSessionTurns({ session: { id: 'test' }, events: [{
     seq: 0, time: 1, type: 'user/message', surfaceOp: 'append',
@@ -97,6 +100,16 @@ test('production skill routing does not replace the user request or leak into vi
   const withWiki = deepSeekPrompt('续写本章', ['jc-novel', 'wiki-memory'], [], '<wiki_index path="wiki/index.md"># 项目</wiki_index>')
   assert.ok(withWiki.indexOf('<wiki_index') < withWiki.indexOf('续写本章'))
   assert.match(withWiki, /jc-novel/)
+})
+
+test('creative buttons send native skill gestures and project context without duplicate business instructions', () => {
+  const request = '只修改刚才选中的片段，不要保存'
+  const wiki = '<wiki_index path="wiki/index.md"># 已有项目</wiki_index>'
+  for (const name of ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju']) {
+    assert.equal(deepSeekPrompt(request, [name, 'wiki-memory']), `/${name} /wiki-memory\n\n${request}`)
+    assert.equal(deepSeekPrompt(request, [name, 'wiki-memory'], [], wiki),
+      `/${name} /wiki-memory\n\n${wiki}\n\n【本轮消息】\n\n${request}`)
+  }
 })
 
 test('DeepSeek Harness hands off only conversation turns not already owned by its session', () => {
@@ -396,7 +409,7 @@ test('点名 skill 后本会话只挂这一个：官方手势 → 掩掉 skill �
   // 而 `/name` → `<skill_content>` 的注入是另一个 pre-step 钩子，不看工具可见性。
   // 所以掩掉 `skill` 工具正好等于「只许用点名的那一个」，且点名的指令照样进上下文。
   assert.match(prepare, /async applyPinnedSkillScope\(rec, content\) \{/)
-  assert.match(prepare, /rec\.handle\.agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
+  assert.match(prepare, /agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
   // 必须真去注册表查一次：只按正则会把 `/permission` 这类官方命令也当成点名。
   assert.match(prepare, /isUserInvocable\(skill\)\) names\.push\(name\)/)
   assert.match(prepare, /import \{ isUserInvocable \} from "@deepseek-ai\/dsh-skill";/)
@@ -463,7 +476,7 @@ test('desktop package pins and embeds the official Harness SDK client with Node'
     readFileSync('src-tauri/resources/deepseek-harness/package.json', 'utf8'),
   )
   const tauri = readFileSync('src-tauri/tauri.conf.json', 'utf8')
-  assert.equal(runtimePackage.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.0-rc.2')
+  assert.equal(runtimePackage.dependencies['@deepseek-ai/dsh-sdk-client'], '0.2.1-rc.2')
   assert.equal(runtimePackage.dependencies.node, '22.23.2')
   // 版本只由 package.json 提供：prepare 脚本不得再另写一份常量，否则升级时与锁文件漂移。
   assert.match(
@@ -522,10 +535,10 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   const prepare = readFileSync('scripts/prepare-deepseek-harness.mjs', 'utf8')
   assert.match(prepare, /session\.assistant-stream/)
   assert.match(prepare, /sessionPersistence/)
-  assert.match(prepare, /agents\.resume/)
+  assert.match(prepare, /this\.createOfficialSession\(sessionId, persisted\)/)
   assert.match(prepare, /session\/list/)
   assert.match(prepare, /session\/read/)
-  assert.match(prepare, /const queryInject = 'const inject = \["agents", "sessionQuery"\];'/)
+  assert.match(prepare, /const inject = \["agents", "workingDirectory", "sessionQuery", "commands", "skills"\];/)
   assert.match(runner, /harness\.client\.request/)
   assert.doesNotMatch(source, /resolve_deepseek_harness/)
 })
@@ -546,7 +559,7 @@ test('Computer Use mounts the official provider pair behind the same insert seam
   // runtime 还在跑，模型手里仍攥着桌面工具。
   assert.match(source, /computerUseEnabledNow\(\) \? 'cua' : ''/)
   // 服务与设置面板读同一个键，否则切开关只改了 UI。
-  assert.match(source, /import \{ computerUseEnabledNow \} from '@\/stores\/agentStore'/)
+  assert.match(source, /import \{ computerUseEnabledNow, useAgentStore \} from '@\/stores\/agentStore'/)
   assert.match(store, /export const COMPUTER_USE_STORAGE_KEY = 'jc_computer_use'/)
   assert.match(store, /return localStorage\.getItem\(COMPUTER_USE_STORAGE_KEY\) !== '0'/)
   assert.match(store, /computerUseEnabled,\n    toggleComputerUse,/)
@@ -572,16 +585,23 @@ test('a truncated turn without content fails instead of reporting the previous s
   assert.match(runner, /有正文的截断仍是成功/)
 })
 
-test('Harness subagent calls return a result instead of a fire-and-forget id', () => {
+test('Harness leaves subagent scheduling and execution policies to the official profile', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
-  // continuable 模式下 run_in_background 默认 true：父代理只拿到 “started subagent <id>”，
-  // 会误判完成并重复派活。one-shot 让调用等结果。
-  assert.match(source, /'    backgroundMode: one-shot'/)
-  assert.doesNotMatch(source, /backgroundMode: continuable/)
-  // patch 按顶层键整体替换 config：基线的 provider/toolName 必须一起给出，否则会被抹掉。
-  assert.match(source, /'- id: tool-subagent'/)
-  assert.match(source, /'    provider: spawn'/)
-  assert.match(source, /'    toolName: subagent'/)
+  const runner = readFileSync('src-tauri/resources/deepseek-harness/runner.mjs', 'utf8')
+  assert.doesNotMatch(source, /backgroundMode:|'- id: tool-subagent'|maxSteps:|compactionThreshold:|maxRetries:/)
+  assert.doesNotMatch(runner, /maxTokens:/)
+})
+
+test('Harness uses existing catalog metadata, cloud defaults and smaller local limits', () => {
+  const models = [
+    { id: 'ds', providerId: 'jiucaihezi', contextWindow: 1_048_576, maxOutputTokens: 65_536 },
+    { id: 'ds', providerId: 'local-ollama', contextWindow: 16_384, maxOutputTokens: 2_048 },
+  ]
+  assert.deepEqual(deepSeekModelLimits({ model: 'ds', modelProviderId: 'jiucaihezi' }, models), { contextWindow: 1_048_576, maxTokens: 65_536 })
+  assert.deepEqual(deepSeekModelLimits({ model: 'ds', modelProviderId: 'local-ollama' }, models), { contextWindow: 16_384, maxTokens: 2_048 })
+  assert.deepEqual(deepSeekModelLimits({ model: 'unknown' }, []), { contextWindow: 1_000_000, maxTokens: 128_000 })
+  assert.deepEqual(deepSeekModelLimits({ model: 'unknown', modelProviderId: 'local-ollama' }, models), { contextWindow: 32_768, maxTokens: 4_096 })
+  assert.deepEqual(deepSeekModelLimits({ model: 'ds' }, [{ id: 'ds', contextWindow: NaN, maxOutputTokens: -1 }]), { contextWindow: 1_000_000, maxTokens: 128_000 })
 })
 
 test('Harness runtimes are owned per workspace instead of one replaceable app singleton', () => {
@@ -911,7 +931,7 @@ test('an existing session is switched to the @文件 permission instead of keepi
   // 切换只能走官方命令面：SDK 通道只暴露 session/prompt|list|read，没有任何权限方法。
   // 同一处 inject 还要带 `skills`：点名 skill 要查官方注册表，没声明就直接抛
   // `cannot get property "skills" without inject`（第一版补丁漏了它，实测整轮失败）。
-  assert.match(prepare, /const scopeInject = 'const inject = \["agents", "sessionQuery", "commands", "skills"\];'/)
+  assert.match(prepare, /const inject = \["agents", "workingDirectory", "sessionQuery", "commands", "skills"\];/)
   assert.match(prepare, /case "session\/permission": return this\.permission\(params\);/)
   assert.match(prepare, /commands"\)\.execute\(agent, "\/permission " \+ preset/)
   assert.match(runner, /command\.type === 'permission'/)
@@ -1162,4 +1182,32 @@ test('catalog-only permission selection remains a new-task preference without cr
   assert.equal(await readCurrentDeepSeekPermission(cwd, 'unopened'), undefined)
   assert.equal(await switchDeepSeekSessionPermission(cwd, 'unopened', 'danger-full-access'), undefined)
   assert.ok(commands.every(c => c.existingOnly && c.preset === undefined))
+})
+
+function usageTurn() {
+  const event = (type: string, data: any) => ({ type, data })
+  const usage = { inputTokens: 100, outputTokens: 20, totalTokens: 170, cacheReadTokens: 50 }
+  return [
+    event('turn/start', { turn: 1 }), event('step/start', { turn: 1, step: 1 }),
+    event('assistant/attempt', { turn: 1, step: 1, stream: [{ type: 'chunk', time: 1, chunk: { type: 'usage', usage } }] }),
+    event('llm/retry', { turn: 1, step: 1 }), event('llm/retry-started', { turn: 1, step: 1 }),
+    event('assistant/message', { turn: 1, step: 1, stream: [], usage, message: { source: { kind: 'model', provider: 'jiucaihezi', model: 'test' } } }),
+    event('step/end', { turn: 1, step: 1 }), event('step/start', { turn: 1, step: 2 }),
+    event('assistant/message', { turn: 1, step: 2, stream: [], usage, message: { source: { kind: 'model', provider: 'jiucaihezi', model: 'test' } } }),
+    event('step/end', { turn: 1, step: 2 }), event('turn/end', { turn: 1 }),
+  ]
+}
+
+test('round usage follows the official fold across retry and multiple steps, without inventing unknown buckets', () => {
+  assert.deepEqual(deepSeekTurnUsage(usageTurn()), { inputTokens: 300, outputTokens: 60, totalTokens: 510, cacheReadTokens: 150 })
+  assert.equal(deepSeekTurnUsage(usageTurn().slice(0, -1)), undefined)
+  const missing = usageTurn()
+  delete missing[5]!.data.usage
+  assert.equal(deepSeekTurnUsage(missing), undefined)
+})
+
+test('history uses the same official round totals as live events', () => {
+  const events = usageTurn()
+  events.splice(1, 0, { type: 'user/message', surfaceOp: 'append', data: { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'go' }] } } as any)
+  assert.deepEqual(deepSeekSessionUsage({ session: { id: 's' }, events }).get('u1'), deepSeekTurnUsage(usageTurn()))
 })

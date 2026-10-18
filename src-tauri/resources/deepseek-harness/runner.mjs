@@ -1,6 +1,7 @@
 import { createInterface } from 'node:readline'
 import { DeepSeekHarness } from '@deepseek-ai/dsh-sdk-client'
 import { ensureProfilePluginLinks } from './profile-plugins.mjs'
+import { runHarnessTask } from './run-task.mjs'
 
 const config = JSON.parse(process.argv[2] || '{}')
 
@@ -21,7 +22,6 @@ const harness = new DeepSeekHarness({
   processCwd: config.cwd,
   env: process.env,
   initializeTimeoutMs: 15_000,
-  maxTokens: 32_768,
 })
 
 const send = value => process.stdout.write(`${JSON.stringify(value)}\n`)
@@ -106,7 +106,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   if (command.type !== 'run') return
   let turnError = ''
   let turnTruncated = false
-  void harness.run(command.contentBlocks, {
+  void runHarnessTask(harness, command.contentBlocks, {
     sessionId: command.sessionId,
     onNotification(notification) {
       // 子代理（subagent）的事件也走这条通知流，而子会话是独立 turn：

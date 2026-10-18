@@ -90,130 +90,35 @@ if (!client.includes(hiddenRuntimeSpawn)) {
   writeFileSync(clientPath, client.replace(runtimeSpawn, hiddenRuntimeSpawn))
 }
 
-// The pinned SDK server omits transient assistant chunks from its JSON-RPC transport.
+// 官方 0.2.1 保留恢复、等待和关闭流程；这里只补 SDK 尚未提供的工作台接口。
 const serverPath = join(root, 'node_modules', '@deepseek-ai', 'dsh-sdk-jsonrpc-server', 'lib', 'index.js')
 let server = readFileSync(serverPath, 'utf8')
-let changed = false
-const baseLlmImport = 'import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";\n'
-const queueLlmImport = 'import { ReasoningEffortId, createUserMessage, freezeMessage } from "@deepseek-ai/dsh-llm";\n'
-if (!server.includes('freezeMessage') && server.includes(baseLlmImport)) {
-  server = server.replace(baseLlmImport, queueLlmImport)
-  changed = true
+function patch(before, after) {
+  if (server.includes(after)) return
+  if (!server.includes(before)) throw new Error('Unsupported DeepSeek Harness SDK layout: ' + before.slice(0, 100))
+  server = server.replace(before, after)
 }
+patch('const inject = ["agents", "workingDirectory"];', 'const inject = ["agents", "workingDirectory", "sessionQuery", "commands", "skills"];')
+patch('import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";', 'import { ReasoningEffortId, createUserMessage, freezeMessage } from "@deepseek-ai/dsh-llm";')
 const streamBridge = '\t\tthis.disposers.push(ctx.on("agent/assistant-stream", ({ agent, frame }) => {\n\t\t\tthis.transport.notify("session.assistant-stream", { sessionId: String(agent.session.id), frame });\n\t\t}, { global: true }));\n'
-const oldStreamBridge = streamBridge.replace(', { global: true }', '')
-if (!server.includes(streamBridge)) {
-  const anchor = '\t\tconst serverOptions = this.options;\n'
-  if (!server.includes(anchor)) throw new Error('Unsupported DeepSeek Harness SDK server layout')
-  server = server.includes(oldStreamBridge)
-    ? server.replace(oldStreamBridge, streamBridge)
-    : server.replace(anchor, `${anchor}${streamBridge}`)
-  changed = true
-}
-
-// SDK 0.1.7 creates every first-seen session ID, even when persistence already owns it.
-// Use the official AgentRegistry resume seam until the SDK server ships the same check.
-const approvalAttach = `\t\ttry {
-\t\t\trec.approvalBridge = await attachApprovalBridge(handle.agent, (method, params) => this.transport.notify(method, params));
-\t\t} catch (error) { await handle.dispose(); throw error; }
+patch('\t\tconst serverOptions = this.options;\n', '\t\tconst serverOptions = this.options;\n' + streamBridge)
+const requestExtensions = `
+			case "session/list": return this.ctx.sessionQuery.listSessions();
+			case "session/read": return this.readSession(params);
+			case "session/permission": return this.permission(params);
+			case "session/approval": return this.approval(params);
+			case "session/update-queue": return this.updateQueue(params);
+			case "session/cancel": return this.cancelSession(params);`
+patch('\t\t\tcase "shutdown": return this.shutdown();', '\t\t\tcase "shutdown": return this.shutdown();' + requestExtensions)
+patch('case "session/read": return this.ctx.sessionQuery.readSession(brandString(String(params?.sessionId || "")));', 'case "session/read": return this.readSession(params);')
+const readSessionMethod = `\tasync readSession(params) {
+\t\tconst observation = await this.ctx.sessionQuery.observeSession(brandString(String(params?.sessionId || "")));
+\t\ttry {
+\t\t\treturn { session: observation.header, events: observation.events, inheritedEventCount: observation.inheritedEventCount,
+\t\t\t\tcontextPressure: observation.projections?.values.contextPressure };
+\t\t} finally { observation[Symbol.dispose](); }
+\t}
 `
-const createSession = `\tasync createSession(sessionId) {
-\t\tconst rec = { handle: await this.ctx.agents.create({
-\t\t\tsessionId: brandString(sessionId),
-\t\t\tmeta: { cwd: this.cwd },
-\t\t\tagentOptions: {
-\t\t\t\tprovider: this.provider,
-\t\t\t\tmodel: this.model,
-\t\t\t\t...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
-\t\t\t\t...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
-\t\t\t}
-\t\t}) };
-\t\tthis.sessions.set(sessionId, rec);
-\t\treturn rec;
-\t}`
-const resumableSession = `\tasync createSession(sessionId) {
-\t\tconst id = brandString(sessionId);
-\t\tconst agentOptions = {
-\t\t\tprovider: this.provider,
-\t\t\tmodel: this.model,
-\t\t\t...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
-\t\t\t...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
-\t\t};
-\t\tconst persisted = await this.ctx.get("sessionPersistence")?.stat(id);
-\t\tconst handle = persisted === void 0
-\t\t\t? await this.ctx.agents.create({ sessionId: id, meta: { cwd: this.cwd }, agentOptions })
-\t\t\t: await this.ctx.agents.resume({ resumeSessionId: id, agentOptions });
-\t\tconst rec = { handle };
-\t\tthis.sessions.set(sessionId, rec);
-\t\treturn rec;
-\t}`
-const sessionAlignmentMarker = '// Official Session controller: reuse live agents and recheck after a resume race.'
-if (!server.includes(sessionAlignmentMarker) && !server.replace(approvalAttach, '').includes(resumableSession)) {
-  if (!server.includes(createSession)) throw new Error('Unsupported DeepSeek Harness session server layout')
-  server = server.replace(createSession, resumableSession)
-  changed = true
-}
-
-// SDK 0.1.7 exposes prompts but not the official sessionQuery reads yet.
-// Keep the bridge at the protocol edge; the UI must never parse DSH_HOME itself.
-const baseInject = 'const inject = ["agents"];'
-const queryInject = 'const inject = ["agents", "sessionQuery"];'
-// 权限切换走官方命令面（commands），点名 skill 要查注册表（skills）—— 都要在 inject 里声明，
-// 否则 `this.ctx.skills` 直接抛 `cannot get property "skills" without inject`。
-const commandInject = 'const inject = ["agents", "sessionQuery", "commands"];'
-const scopeInject = 'const inject = ["agents", "sessionQuery", "commands", "skills"];'
-if (!server.includes(scopeInject)) {
-  if (server.includes(commandInject)) server = server.replace(commandInject, scopeInject)
-  else if (server.includes(queryInject)) server = server.replace(queryInject, scopeInject)
-  else if (server.includes(baseInject)) server = server.replace(baseInject, scopeInject)
-  else throw new Error('Unsupported DeepSeek Harness injection layout')
-  changed = true
-}
-const requestCases = `\t\t\tcase "initialize": return this.initialize(params);
-\t\t\tcase "session/prompt": return this.prompt(params);
-\t\t\tcase "shutdown": return this.shutdown();`
-const queryCases = `\t\t\tcase "initialize": return this.initialize(params);
-\t\t\tcase "session/prompt": return this.prompt(params);
-\t\t\tcase "session/list": return this.ctx.sessionQuery.listSessions();
-\t\t\tcase "session/read": return this.ctx.sessionQuery.readSession(brandString(String(params?.sessionId || "")));
-\t\t\tcase "shutdown": return this.shutdown();`
-if (!server.includes(queryCases)) {
-  if (!server.includes(requestCases)) throw new Error('Unsupported DeepSeek Harness request server layout')
-  server = server.replace(requestCases, queryCases)
-  changed = true
-}
-
-// 会话把权限记成 durable 事实（permission/preset + sandbox/mode + approval/policy），进程级
-// DSH_PERMISSION_MODE 只决定**新会话**的默认值：官方 pinInitialPermission 对已存在的会话
-// 保留它自己记下的开关。所以打开 @文件 也松不开老会话的沙箱，写 ~/.agents/skills 会拿到
-// 「file access denied under workspace-write mode」。SDK 通道只有 session/prompt|list|read，
-// 没有任何权限方法，这里挂一个 session/permission，复用官方命令面（dsh-permission-presets
-// 注册的 `/permission <preset>`），而不是自己写 permission/preset 事件绕过官方推导。
-// 上游公开会话级权限 RPC 后整体删除。
-const permissionCase = '\t\t\tcase "session/permission": return this.permission(params);'
-if (!server.includes(permissionCase)) {
-  // 锚在整个 switch 的**末行**（shutdown）之后。插到 session/prompt 或 session/read 后面都会
-  // 落在 queryCases 那段连续字符串内部，把它切断：上一步的幂等检查 `!server.includes(queryCases)`
-  // 于是第二次运行误判成「还没打过」，再去 replace 找不到的 requestCases 就抛错。
-  const permissionAnchor = '\t\t\tcase "shutdown": return this.shutdown();'
-  if (!server.includes(permissionAnchor)) throw new Error('Unsupported DeepSeek Harness request server layout')
-  server = server.replace(permissionAnchor, `${permissionAnchor}\n${permissionCase}`)
-  changed = true
-}
-const updateQueueCase = '\t\t\tcase "session/update-queue": return this.updateQueue(params);'
-if (!server.includes(updateQueueCase)) {
-  const permissionAnchor = '\t\t\tcase "session/permission": return this.permission(params);'
-  if (!server.includes(permissionAnchor)) throw new Error('Unsupported DeepSeek Harness request server layout')
-  server = server.replace(permissionAnchor, `${permissionAnchor}\n${updateQueueCase}`)
-  changed = true
-}
-const cancelSessionCase = '\t\t\tcase "session/cancel": return this.cancelSession(params);'
-if (!server.includes(cancelSessionCase)) {
-  if (!server.includes(updateQueueCase)) throw new Error('Unsupported DeepSeek Harness request server layout')
-  server = server.replace(updateQueueCase, `${updateQueueCase}\n${cancelSessionCase}`)
-  changed = true
-}
-// 新安装必须先建立被后续补丁引用的方法；不能依赖开发机的旧补丁。
 const permissionMethod = `\tasync permission(params) {
 \t\tif (!this.initialized) throw new Error("SDK server is not initialized");
 \t\tif (params.existingOnly && !this.sessions.has(params.sessionId) && await this.ctx.get("sessionPersistence")?.stat(brandString(params.sessionId)) === void 0) return { exists: false };
@@ -236,19 +141,6 @@ const permissionMethod = `\tasync permission(params) {
 \t\treturn rec.approvalBridge.answer(params);
 \t}
 `
-const permissionStart = server.indexOf('\tasync permission(params) {')
-const permissionTail = permissionStart < 0 ? -1 : server.slice(permissionStart).search(/\t(?:async applyPinnedSkillScope\(rec, content\)|assertLiveAgent\(rec, sessionId\)) \{/)
-const permissionEnd = permissionStart + permissionTail
-if (permissionStart < 0) {
-  if (!server.includes('\tassertLiveAgent(rec, sessionId) {')) throw new Error('Unsupported permission method layout')
-  server = server.replace('\tassertLiveAgent(rec, sessionId) {', permissionMethod + '\tassertLiveAgent(rec, sessionId) {')
-  changed = true
-} else if (server.slice(permissionStart, permissionEnd) !== permissionMethod) {
-  if (permissionTail < 0) throw new Error('Unsupported permission method layout')
-  server = server.slice(0, permissionStart) + permissionMethod + server.slice(permissionEnd)
-  changed = true
-}
-
 const updateQueueMethod = `\tasync updateQueue(params) {
 \t\tif (!this.initialized) throw new Error("SDK server is not initialized");
 \t\tconst rec = await this.getOrCreateSession(params.sessionId);
@@ -275,20 +167,6 @@ const updateQueueMethod = `\tasync updateQueue(params) {
 \t\treturn { accepted: true };
 \t}
 `
-const updateQueueStart = server.indexOf('\tasync updateQueue(params) {')
-const updateQueueTail = updateQueueStart < 0 ? -1 : server.slice(updateQueueStart).search(/\tasync (?:permission|approval)\(params\) \{/)
-const updateQueueEnd = updateQueueStart + updateQueueTail
-if (updateQueueStart < 0) {
-  const methodAnchor = '\tasync permission(params) {'
-  if (!server.includes(methodAnchor)) throw new Error('Unsupported DeepSeek Harness session server layout')
-  server = server.replace(methodAnchor, updateQueueMethod + methodAnchor)
-  changed = true
-} else if (updateQueueTail < 0) {
-  throw new Error('Unsupported DeepSeek Harness queue method layout')
-} else if (server.slice(updateQueueStart, updateQueueEnd) !== updateQueueMethod) {
-  server = server.slice(0, updateQueueStart) + updateQueueMethod + server.slice(updateQueueEnd)
-  changed = true
-}
 const cancelSessionMethod = `\tasync cancelSession(params) {
 \t\tconst rec = this.sessions.get(params.sessionId);
 \t\tif (!rec) throw new Error("session is not running");
@@ -311,146 +189,6 @@ const cancelSessionMethod = `\tasync cancelSession(params) {
 \t\t}
 \t}
 `
-let cancelSessionStart = server.indexOf('\tasync cancelSession(params) {')
-if (cancelSessionStart < 0) cancelSessionStart = server.indexOf('\tcancelSession(params) {')
-const cancelSessionTail = cancelSessionStart < 0 ? -1 : server.slice(cancelSessionStart).search(/\tasync (?:updateQueue|permission|approval)\(params\) \{/)
-const cancelSessionEnd = cancelSessionStart + cancelSessionTail
-if (cancelSessionStart < 0) {
-  const methodAnchor = '\tasync updateQueue(params) {'
-  if (!server.includes(methodAnchor)) throw new Error('Unsupported DeepSeek Harness queue method layout')
-  server = server.replace(methodAnchor, cancelSessionMethod + methodAnchor)
-  changed = true
-} else if (cancelSessionTail < 0) {
-  throw new Error('Unsupported DeepSeek Harness cancel method layout')
-} else if (server.slice(cancelSessionStart, cancelSessionEnd) !== cancelSessionMethod) {
-  server = server.slice(0, cancelSessionStart) + cancelSessionMethod + server.slice(cancelSessionEnd)
-  changed = true
-}
-// Bridge lifetime follows the actual Agent, including resume and shutdown.
-const approvalImport = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
-if (!server.includes(approvalImport)) { server = approvalImport + server; changed = true }
-const approvalCase = '\t\t\tcase "session/approval": return this.approval(params);'
-if (!server.includes(approvalCase)) { server = server.replace(permissionCase, permissionCase + '\n' + approvalCase); changed = true }
-const sessionRegister = '\t\tconst rec = { handle };\n'
-// The resume-layout check above must remain idempotent with the additional attachment.
-if (!server.includes(sessionAlignmentMarker) && !server.includes(approvalAttach)) { server = server.replace(sessionRegister, sessionRegister + approvalAttach); changed = true }
-
-// 用户显式点名 skill（官方 `/name` 手势）时，本会话**只许用点名的这些**：把 `skill` 工具从
-// 该 agent 的工具面里掩掉。官方 `dsh-tool-skill` 在工具不可见时**不再发布 skill 目录**
-// （`ctx.tools.get(skillTool.name, agent) === skillTool ? snapshot : { skills: [] }`），
-// 而 `/name` → `<skill_content>` 的注入是**另一个** pre-step 钩子、不看工具可见性 ——
-// 所以点名的那份指令照样进上下文，模型却看不到、也调不到别的 skill。
-//
-// 判定与官方 `invokedSkillNames()` 逐字同源（同一个 `SKILL_GESTURE` 正则 + `isUserInvocable`）：
-// 只按正则匹配会把 `/permission` 这类官方命令也当成点名，把工具面误掩掉；所以必须真去
-// `ctx.skills.get()` 查一次，查不到或不许用户调用的名字一律不算。
-// 用户的芯片是会话级粘性的，我们每条消息都带一遍手势，所以掩码在清空芯片后的下一轮自动解除。
-const skillScopeImport = 'import { isUserInvocable } from "@deepseek-ai/dsh-skill";\n'
-const skillScopeAnchor = 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n'
-const skillGesture = `/**
-* 官方 \`dsh-tool-skill\` 的 \`/name\` 手势正则（逐字搬运）。
-* \`/\` 前面必须是行首或空白，后面必须是空白或结尾，这样 \`/usr/bin\` 与 \`5/8\` 不会误命中。
-*/
-const SKILL_GESTURE = /(^|\\s)\\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\\s|$)/g;
-`
-const pinnedSkillMethod = `\tasync applyPinnedSkillScope(rec, content) {
-\t\tif (this.pinnedSkillScopes === void 0) this.pinnedSkillScopes = new Map();
-\t\tlet names = [];
-\t\ttry {
-\t\t\tnames = await this.pinnedSkillNames(rec, content);
-\t\t} catch (error) {
-\t\t\t// 查注册表失败只降级成「不禁」：不能因为一个增强把整轮判死。
-\t\t\tconsole.error("[skill-scope] 解析点名 skill 失败: " + (error instanceof Error ? error.message : String(error)));
-\t\t\treturn;
-\t\t}
-\t\tconst key = rec.handle.agent.id;
-\t\tconst held = this.pinnedSkillScopes.get(key);
-\t\tif (held !== void 0 && held.names.join(",") === names.join(",")) return;
-\t\tif (held !== void 0) {
-\t\t\tthis.pinnedSkillScopes.delete(key);
-\t\t\tawait held.dispose();
-\t\t}
-\t\tif (names.length === 0) return;
-\t\ttry {
-\t\t\tconst dispose = rec.handle.agent.ctx.tools.restrict({ deny: ["skill"] });
-\t\t\tthis.pinnedSkillScopes.set(key, {
-\t\t\t\tnames,
-\t\t\t\tdispose
-\t\t\t});
-\t\t} catch (error) {
-\t\t\t// 官方改了工具注册名时只记一行，不把这一轮判失败。
-\t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));
-\t\t}
-\t}
-\tasync pinnedSkillNames(rec, content) {
-\t\tconst names = [];
-\t\t// 官方的查找签名是 \`{ cwd, signal, scope }\`，缺 signal 注册表会直接抛。
-\t\tconst signal = new AbortController().signal;
-\t\tfor (const block of content) {
-\t\t\tif (block.type !== "text") continue;
-\t\t\tfor (const match of block.text.matchAll(SKILL_GESTURE)) {
-\t\t\t\tconst name = match[2];
-\t\t\t\tif (name === void 0 || names.includes(name)) continue;
-\t\t\t\tconst skill = await this.ctx.skills.get(name, {
-\t\t\t\t\tcwd: rec.handle.agent.session.header.cwd,
-\t\t\t\t\tsignal,
-\t\t\t\t\tscope: rec.handle.agent
-\t\t\t\t});
-\t\t\t\tif (skill !== void 0 && isUserInvocable(skill)) names.push(name);
-\t\t\t}
-\t\t}
-\t\treturn names;
-\t}
-`
-const promptContentAnchor = `\t\tconst content = await durablePromptContent(this.ctx, params.contentBlocks);
-\t\tthis.assertLiveAgent(rec, params.sessionId);
-\t\tconst message = createUserMessage({`
-if (!server.includes('async applyPinnedSkillScope(rec, content) {')) {
-  if (!server.includes(skillScopeAnchor)) throw new Error('Unsupported DeepSeek Harness import layout')
-  if (!server.includes(promptContentAnchor)) throw new Error('Unsupported DeepSeek Harness prompt layout')
-  const liveAgent = '\tassertLiveAgent(rec, sessionId) {'
-  if (!server.includes(liveAgent)) throw new Error('Unsupported DeepSeek Harness agent layout')
-  server = server
-    .replace(skillScopeAnchor, `${skillScopeAnchor}${skillScopeImport}${skillGesture}`)
-    .replace(promptContentAnchor, promptContentAnchor.replace(
-      '\t\tconst message = createUserMessage({',
-      '\t\tawait this.applyPinnedSkillScope(rec, content);\n\t\tconst message = createUserMessage({',
-    ))
-    .replace(liveAgent, `${pinnedSkillMethod}${liveAgent}`)
-  changed = true
-}
-const promptStopGuard = '\t\tif (this.stoppingSessions?.has(params.sessionId)) throw new Error("session is stopping");\n\t\trec.handle.agent.followup(message);'
-if (!server.includes(promptStopGuard)) {
-  const followupAnchor = '\t\trec.handle.agent.followup(message);'
-  if (!server.includes(followupAnchor)) throw new Error('Unsupported DeepSeek Harness prompt layout')
-  server = server.replace(followupAnchor, promptStopGuard)
-  changed = true
-}
-
-// 创作与 Wiki 归档固定到随产品打包的同一套版本；注册在 agent 层，不改变普通对话目录。
-const manjuImport = 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
-if (!server.includes(manjuImport)) {
-  const registerAnchor = '\t\tif (names.length === 0) return;\n\t\ttry {\n\t\t\tconst dispose = rec.handle.agent.ctx.tools.restrict({ deny: ["skill"] });'
-  const disposeAnchor = '\t\t\t\tdispose\n\t\t\t});'
-  const lookupAnchor = '\t\t\t\tconst skill = await this.ctx.skills.get(name, {'
-  if (!server.includes(registerAnchor) || !server.includes(disposeAnchor) || !server.includes(lookupAnchor))
-    throw new Error('Unsupported DeepSeek Harness pinned skill scope layout')
-  server = manjuImport + server
-  server = server.replace(registerAnchor, registerAnchor.replace(
-    '\t\ttry {', '\t\tconst wikiSkillDispose = await pinManjuSkills(rec, names);\n\t\ttry {',
-  )).replace(disposeAnchor, '\t\t\t\tdispose: async () => { await dispose(); await wikiSkillDispose(); }\n\t\t\t});')
-    .replace(lookupAnchor, '\t\t\t\tif (name === "jc-manju-zhizuo" || name === "jc-novel" || name === "jc-duanju") { names.push(name); continue; }\n' + lookupAnchor)
-  changed = true
-}
-
-const oldProductionSkillLookup = '\t\t\t\tif (name === "jc-manju-zhizuo") { names.push(name); continue; }\n'
-const currentProductionSkillLookup = '\t\t\t\tif (name === "jc-manju-zhizuo" || name === "jc-novel") { names.push(name); continue; }\n'
-if (server.includes(oldProductionSkillLookup)) {
-  server = server.replace(oldProductionSkillLookup, currentProductionSkillLookup)
-  changed = true
-}
-
-// 绑定属于实际 Agent，不属于可被恢复复用的 Session ID；失败不得缓存或继续发送。
 const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\tif (this.pinnedSkillScopes === void 0) this.pinnedSkillScopes = new WeakMap();
 \t\tlet names = [];
@@ -487,74 +225,95 @@ const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\t}
 \t}
 `
-const bindingStart = server.indexOf('\tasync applyPinnedSkillScope(rec, content) {')
-const bindingEnd = server.indexOf('\tasync pinnedSkillNames(rec, content) {', bindingStart)
-if (bindingStart < 0 || bindingEnd < 0) throw new Error('Unsupported DeepSeek Harness skill binding layout')
-if (server.slice(bindingStart, bindingEnd) !== scopedBindingMethod) {
-  server = server.slice(0, bindingStart) + scopedBindingMethod + server.slice(bindingEnd)
-  changed = true
-}
-
-// SDK 冷恢复适配遵循官方 API Session 的 live / shared-resume / race-recheck 顺序。
-// 借用的 Agent 只存裸引用，不伪造 disposer；shutdown 只能释放自己拥有的 handle 与桥接。
-const alignedSession = `\tasync createSession(sessionId) {
-\t\t${sessionAlignmentMarker}
-\t\tconst id = brandString(sessionId);
-\t\tlet agent = this.ctx.agents.get(id);
-\t\tlet handle;
-\t\tif (agent === void 0) {
-\t\t\tconst agentOptions = {
-\t\t\t\tprovider: this.provider, model: this.model,
-\t\t\t\t...this.reasoningEffort === void 0 ? {} : { reasoningEffort: this.reasoningEffort },
-\t\t\t\t...this.maxTokens === void 0 ? {} : { maxTokens: this.maxTokens }
-\t\t\t};
-\t\t\ttry {
-\t\t\t\tconst persisted = await this.ctx.get("sessionPersistence")?.stat(id);
-\t\t\t\thandle = persisted === void 0
-\t\t\t\t\t? await this.ctx.agents.create({ sessionId: id, meta: { cwd: this.cwd }, agentOptions })
-\t\t\t\t\t: await this.ctx.agents.resume({ resumeSessionId: id, agentOptions });
-\t\t\t\tagent = handle.agent;
-\t\t\t} catch (error) {
-\t\t\t\tagent = this.ctx.agents.get(id);
-\t\t\t\tif (agent === void 0) throw error;
+const skillGesture = `/**
+* 官方 \`dsh-tool-skill\` 的 \`/name\` 手势正则（逐字搬运）。
+* \`/\` 前面必须是行首或空白，后面必须是空白或结尾，这样 \`/usr/bin\` 与 \`5/8\` 不会误命中。
+*/
+const SKILL_GESTURE = /(^|\\s)\\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\\s|$)/g;
+`
+const pinnedSkillLookup = `\tasync pinnedSkillNames(rec, content) {
+\t\tconst names = [];
+\t\t// 官方的查找签名是 \`{ cwd, signal, scope }\`，缺 signal 注册表会直接抛。
+\t\tconst signal = new AbortController().signal;
+\t\tfor (const block of content) {
+\t\t\tif (block.type !== "text") continue;
+\t\t\tfor (const match of block.text.matchAll(SKILL_GESTURE)) {
+\t\t\t\tconst name = match[2];
+\t\t\t\tif (name === void 0 || names.includes(name)) continue;
+\t\t\t\tif (["jc-manju-zhizuo", "jc-novel", "jc-duanju"].includes(name)) { names.push(name); continue; }
+\t\t\t\tconst skill = await this.ctx.skills.get(name, {
+\t\t\t\t\tcwd: rec.handle.agent.session.header.cwd,
+\t\t\t\t\tsignal,
+\t\t\t\t\tscope: rec.handle.agent
+\t\t\t\t});
+\t\t\t\tif (skill !== void 0 && isUserInvocable(skill)) names.push(name);
 \t\t\t}
 \t\t}
-\t\tconst rec = { handle: handle ?? { agent } };
-\t\ttry {
-\t\t\tconst parentId = agent.session.header.parentSession;
-\t\t\tconst parent = parentId === void 0 ? void 0 : this.ctx.agents.get(parentId);
-\t\t\tif (agent.session.header.origin === "subagent" || parent !== void 0 && this.ctx.agents.isOwnedBy(id, parent))
-\t\t\t\tthrow new Error("session is owned by subagent routing: " + sessionId);
-\t\t\tif (agent.session.header.cwd !== this.cwd) throw new Error("session belongs to another workspace: " + sessionId);
-\t\t\tif (agent.options.provider !== this.provider || agent.options.model !== this.model)
-\t\t\t\tthrow new Error("live session uses a different model route: " + sessionId);
-\t\t\tthis.assertLiveAgent(rec, sessionId);
-\t\t\trec.approvalBridge = await attachApprovalBridge(agent, (method, params) => this.transport.notify(method, params));
-\t\t\tthis.assertLiveAgent(rec, sessionId);
-\t\t} catch (error) {
-\t\t\ttry { await rec.approvalBridge?.dispose(); } finally { await handle?.dispose(); }
-\t\t\tthrow error;
-\t\t}
-\t\tthis.sessions.set(sessionId, rec);
-\t\treturn rec;
+\t\treturn names;
 \t}
 `
-const sessionStart = server.indexOf('\tasync createSession(sessionId) {')
-const sessionEnd = server.indexOf('\thasAdapterFor(provider) {', sessionStart)
-if (sessionStart < 0 || sessionEnd < 0) throw new Error('Unsupported SDK Session lifecycle layout')
-if (server.slice(sessionStart, sessionEnd) !== alignedSession) {
-  server = server.slice(0, sessionStart) + alignedSession + server.slice(sessionEnd)
-  changed = true
+
+const imports = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
+  + 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
+  + 'import { isUserInvocable } from "@deepseek-ai/dsh-skill";\n'
+patch('import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n', 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n' + imports + skillGesture)
+for (const method of [readSessionMethod, cancelSessionMethod, updateQueueMethod, permissionMethod, scopedBindingMethod, pinnedSkillLookup]) {
+  if (!server.includes(method)) patch('\tassertLiveAgent(rec, sessionId) {', method + '\tassertLiveAgent(rec, sessionId) {')
 }
+patch('\t\tconst message = createUserMessage({', '\t\tawait this.applyPinnedSkillScope(rec, content);\n\t\tconst message = createUserMessage({')
+patch('\t\trec.handle.agent.followup(message);', '\t\tif (this.stoppingSessions?.has(params.sessionId)) throw new Error("session is stopping");\n\t\trec.handle.agent.followup(message);')
+
+// 保留官方 createSession 的恢复与 failure 状态；兼容 App 的惰性续接和已激活 Agent。
+const sessionBridge = `	async createSession(sessionId, resume) {
+		const id = brandString(sessionId);
+		let agent = this.ctx.agents.get(id);
+		let rec;
+		let owned;
+		if (agent === void 0) {
+			try {
+				const persisted = resume || await this.ctx.get("sessionPersistence")?.stat(id) !== void 0;
+				rec = await this.createOfficialSession(sessionId, persisted);
+				owned = rec.handle;
+				agent = owned.agent;
+			} catch (error) {
+				agent = this.ctx.agents.get(id);
+				if (agent === void 0) throw error;
+			}
+		}
+		rec ??= { handle: { agent }, failure: void 0 };
+		try {
+			const parentId = agent.session.header.parentSession;
+			const parent = parentId === void 0 ? void 0 : this.ctx.agents.get(parentId);
+			if (agent.session.header.origin === "subagent" || parent !== void 0 && this.ctx.agents.isOwnedBy(id, parent))
+				throw new Error("session is owned by subagent routing: " + sessionId);
+			if (agent.session.header.cwd !== this.cwd) throw new Error("session belongs to another workspace: " + sessionId);
+			if (agent.options.provider !== this.provider || agent.options.model !== this.model)
+				throw new Error("live session uses a different model route: " + sessionId);
+			this.assertLiveAgent(rec, sessionId);
+			rec.approvalBridge = await attachApprovalBridge(agent, (method, params) => this.transport.notify(method, params));
+			this.assertLiveAgent(rec, sessionId);
+		} catch (error) {
+			this.sessions.delete(sessionId);
+			try { await rec.approvalBridge?.dispose(); } finally { await owned?.dispose(); }
+			throw error;
+		}
+		this.sessions.set(sessionId, rec);
+		return rec;
+	}
+`
+patch('\tasync createSession(sessionId, resume) {', sessionBridge + '\tasync createOfficialSession(sessionId, resume) {')
+// 官方创建会先登记 Agent；审批桥接完成前，其他消费者必须等待同一个创建任务。
+patch(`\t\tconst existing = this.sessions.get(sessionId);
+\t\tif (existing) return existing;
+\t\tconst pending = this.sessionCreations.get(sessionId);
+\t\tif (pending) return pending;`, `\t\tconst pending = this.sessionCreations.get(sessionId);
+\t\tif (pending) return pending;
+\t\tconst existing = this.sessions.get(sessionId);
+\t\tif (existing) return existing;`)
 const ownedTeardown = 'records.map((rec) => Promise.resolve().then(() => rec.handle.dispose()))'
 const alignedTeardown = `records.map((rec) => Promise.resolve().then(async () => {
 \t\t\ttry { await this.pinnedSkillScopes?.get(rec.handle.agent)?.dispose(); }
 \t\t\tfinally { try { await rec.approvalBridge?.dispose(); } finally { await rec.handle.dispose?.(); } }
 \t\t}))`
-if (!server.includes(alignedTeardown)) {
-  if (!server.includes(ownedTeardown)) throw new Error('Unsupported SDK owned teardown layout')
-  server = server.replace(ownedTeardown, alignedTeardown)
-  changed = true
-}
-
-if (changed) writeFileSync(serverPath, server)
+patch(ownedTeardown, alignedTeardown)
+writeFileSync(serverPath, server)

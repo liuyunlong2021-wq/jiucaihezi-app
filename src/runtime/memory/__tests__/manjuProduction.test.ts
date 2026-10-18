@@ -6,7 +6,6 @@ import {
   MANJU_ROUTER,
   MANJU_SKILLS,
   WIKI_MEMORY_SKILL,
-  manjuRoutePrompt,
   restoreManjuSelection,
 } from '../manjuProduction'
 import { NOVEL_SKILL, restoreNovelSelection } from '../novelProduction'
@@ -58,13 +57,12 @@ test('brainstorm resources and delegated skills resolve inside the production pa
 })
 
 test('production routes explicitly named skills and defaults directly to H3', () => {
-  const prompt = manjuRoutePrompt()
-  assert.match(prompt, /用户明确指定.*Skill.*优先/)
-  assert.match(prompt, /未指定.*h3-prompt-writing.*MiniMax H3/)
-  assert.match(prompt, /不自动补跑/)
-  assert.doesNotMatch(prompt, /界面默认|上轮选择|询问.*模型/)
   const skill = readFileSync('public/skills/jc-manju-zhizuo/SKILL.md', 'utf8')
-  assert.match(skill, /未指定.*h3-prompt-writing/)
+  assert.match(skill, /明确指定 Skill 或模型/)
+  assert.match(skill, /未指定.*h3-prompt-writing.*MiniMax H3/)
+  assert.match(skill, /不自动补跑/)
+  assert.match(skill, /不询问默认模型/)
+  assert.doesNotMatch(skill, /界面默认|上轮选择/)
   assert.doesNotMatch(skill, /完整项目的默认衔接|界面默认模型/)
 })
 
@@ -78,9 +76,26 @@ test('routing instructions preserve continuation, natural requests and explicit 
     previous = position
   }
   for (const text of ['不因消息短', '不执行制作', '执行推荐的第一步', '引导不授权付费生成', '不要求固定文件名']) assert.ok(skill.includes(text), text)
-  assert.match(manjuRoutePrompt(), /续改已有产物沿用原 Skill 与格式/)
-  assert.match(manjuRoutePrompt(), /自然语言指定交付物/)
-  assert.match(manjuRoutePrompt(), /仅明确求起步才引导/)
+  assert.match(skill, /明确续改已有产物/)
+  assert.match(skill, /明确指定交付物/)
+  assert.match(skill, /只有.*明确请求才进入下节/)
+})
+
+test('character format requests accept existing character text and override ordinary continuation routing', () => {
+  const router = readFileSync('public/skills/jc-manju-zhizuo/SKILL.md', 'utf8')
+  const format = readFileSync('public/skills/jc-juese-geshi/SKILL.md', 'utf8')
+  assert.match(router, /已有角色文字提示词.*jc-juese-geshi/)
+  assert.match(router, /格式转换.*优先于.*续改/)
+  assert.match(format, /已有角色文字提示词/)
+  assert.match(format, /文字模式.*不要求.*参考图/)
+  assert.match(format, /不声称.*看过.*图片/)
+  assert.match(format, /不重新设计.*服装/)
+  assert.match(format, /H3.*Seedance.*不属于/)
+  assert.match(format, /此段身份描述适用于全部三格/)
+  assert.match(format, /此段造型描述适用于全部三格/)
+  assert.match(format, /不要求先生成单幅角色图/)
+  assert.match(format, /不凭空附加参考图/)
+  assert.doesNotMatch(format, /缺少参考图时只指出需先选定人物图/)
 })
 
 test('the approved contract and packaged router share the same intent order', () => {

@@ -51,8 +51,6 @@ import {
 } from '@/runtime/memory/conversationSplit'
 import { buildWikiMemoryIndexContext, runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import {
-  DEEPSEEK_HARNESS_CONTEXT_WINDOW,
-  DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
   DEEPSEEK_HARNESS_SESSION_MARKER,
   DEEPSEEK_RETRY_TEXT,
   deepSeekFailureText,
@@ -94,7 +92,6 @@ import {
 import { collectAuthorizedPaths } from '@/runtime/memory/memoryToolPolicy'
 import type { DirectRunMetrics, DirectToolCall, DirectToolExecutionEvent } from '@/runtime/direct/directTypes'
 import { isRecoverableDirectTransportFailure } from '@/runtime/direct/directEngine'
-import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
 import {
   parseMediaPlans,
   stripMediaPlanBlocks,
@@ -680,6 +677,8 @@ const queueSubmitting = ref(false)
 const queueMutationItemId = ref('')
 const queueEditId = ref('')
 const queueEditText = ref('')
+const harnessContextSessionId = ref('')
+const harnessContextPressure = ref<DeepSeekSessionSnapshot['contextPressure']>()
 const harnessUsage = ref<Record<string, DeepSeekUsage>>({})
 const processResultWraps = reactive(new Set<string>())
 const roundNavigatorOpen = ref(false)
@@ -1466,13 +1465,13 @@ function formatTokenCount(value: number | undefined): string {
   return value === undefined ? '未提供' : Math.round(value).toLocaleString('zh-CN')
 }
 
-function usageContextLabel(usage: DeepSeekUsage): string {
-  const { cacheReadTokens, cacheWriteTokens } = usage
-  if (cacheReadTokens === undefined || cacheWriteTokens === undefined) return '缓存明细未提供'
-  const contextTokens = usage.inputTokens + cacheReadTokens + cacheWriteTokens
-  const percent = Math.min(100, contextTokens / DEEPSEEK_HARNESS_CONTEXT_WINDOW * 100)
-  return `上下文 ${percent.toFixed(1)}%`
-}
+const harnessContextLabel = computed(() => {
+  const pressure = harnessContextSessionId.value === `jc-v1-${conversation.value?.transcript.id}` ? harnessContextPressure.value : undefined
+  const tokens = pressure?.projectedTokens ?? pressure?.pressureTokens
+  if (!pressure?.contextWindow) return '上下文窗口：未提供'
+  const window = formatTokenCount(pressure.contextWindow)
+  return tokens === undefined ? `上下文窗口：${window}` : `上下文 ${Math.min(100, tokens / pressure.contextWindow * 100).toFixed(1)}% · 窗口 ${window}`
+})
 
 function processStepIndent(turnId: string, step: DeepSeekProcessStep): Record<string, string> | undefined {
   if (!step.parentCallId) return undefined
@@ -1530,6 +1529,8 @@ async function openReadResultFile(meta: NonNullable<DeepSeekProcessStep['readFil
  * 实时与历史走同一个投影，不另存一份副本——官方也是“事件日志是 UI 投影的唯一真相”。
  */
 function rememberHarnessSnapshot(snapshot: DeepSeekSessionSnapshot) {
+  harnessContextSessionId.value = snapshot.session.id
+  harnessContextPressure.value = snapshot.contextPressure
   for (const [turnId, steps] of deepSeekSessionProcess(snapshot)) harnessProcess.value[turnId] = steps
   for (const [turnId, reasoning] of deepSeekSessionReasoning(snapshot)) harnessReasoning.value[turnId] = reasoning
   for (const [turnId, failure] of deepSeekSessionFailures(snapshot)) harnessFailures.value[turnId] = failure
@@ -1555,6 +1556,7 @@ async function harnessSessionInput(active: MemoryConversation) {
     model: config.model,
     apiBase: config.apiBase,
     apiKey: config.apiKey,
+    modelProviderId: run?.harnessProviderId ?? selectedModel()?.providerId,
     imageInput: harnessImageInput(config.model),
     permissionTier: run?.permissionTier || permissionTier.value,
     mediaSelected: mediaSelected.value,
@@ -2095,6 +2097,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
           model: config.model,
           apiBase: config.apiBase,
           apiKey: config.apiKey,
+          modelProviderId: selectedModel()?.providerId,
           imageInput: harnessImageInput(config.model),
           permissionTier: permissionTier.value,
         })
@@ -2841,17 +2844,7 @@ async function send(remoteText?: string) {
     if (!dhImageInput && attachedImages)
       contextNotice.value = `当前模型不支持图片输入，这 ${attachedImages} 张图片不会送达；换成支持视觉的模型再试。`
     const dhMissingTurns = useHarness ? deepSeekHandoffTurns(baseTurns) : []
-    const dhContext = useHarness && dhMissingTurns.length
-      ? buildCreativeContext({
-          messages: [...dhMissingTurns, userTurn],
-          modelId: dhConfig!.model,
-          contextWindow: DEEPSEEK_HARNESS_CONTEXT_WINDOW,
-          reservedTokens: DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS + 32_768,
-          maxHistoryRounds: Number.MAX_SAFE_INTEGER,
-          maxHistoryTokens: Number.MAX_SAFE_INTEGER,
-        })
-      : null
-    const dhHandoffTurns = (dhContext?.messages.slice(0, -1) || []) as ConversationTurn[]
+    const dhHandoffTurns = dhMissingTurns
     const reply = useHarness ? await executeDesktopHarnessRun(runs, run, {
       cwd: active.resource.owner,
       sessionId: active.transcript.id,
@@ -2859,6 +2852,7 @@ async function send(remoteText?: string) {
       model: dhConfig!.model,
       apiBase: dhConfig!.apiBase,
       apiKey: dhConfig!.apiKey,
+      modelProviderId: run.harnessProviderId,
       imageInput: dhImageInput,
       permissionTier: permissionTier.value,
       mediaSelected: mediaSelected.value,
@@ -2942,6 +2936,7 @@ async function send(remoteText?: string) {
           model: dhConfig!.model,
           apiBase: dhConfig!.apiBase,
           apiKey: dhConfig!.apiKey,
+          modelProviderId: run.harnessProviderId,
           imageInput: dhImageInput,
           permissionTier: permissionTier.value,
           mediaSelected: mediaSelected.value,
@@ -3041,6 +3036,7 @@ async function send(remoteText?: string) {
           model: config.model,
           apiBase: config.apiBase,
           apiKey: config.apiKey,
+          modelProviderId: selectedModel()?.providerId,
           imageInput: harnessImageInput(config.model),
           permissionTier: permissionTier.value,
           mediaSelected: mediaSelected.value,
@@ -4477,6 +4473,7 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
       </header>
 
       <section v-if="conversation" ref="messagesEl" class="memory-messages">
+        <p v-if="desktopOnlyRuntime" class="memory-role">{{ sending ? '上次统计 · ' : '' }}{{ harnessContextLabel }}</p>
         <div v-if="!timelineTurns.length" class="memory-empty-state">开始一段对话</div>
         <div v-else class="memory-message-list">
         <template v-for="turn in timelineTurns" :key="timelineTurnKey(turn)">
@@ -4534,14 +4531,13 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
                 <time>{{ new Date(turn.createdAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }}</time><span>用时 {{ formatRunElapsed(runElapsed) }}</span>
               </div>
               <details v-if="answerUsageFor(turn)" class="memory-usage memory-answer-usage">
-                <summary>用量</summary>
+                <summary>本轮用量</summary>
                 <dl>
                   <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.inputTokens) }}</dd></div>
                   <div><dt>缓存读取</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.cacheReadTokens) }}</dd></div>
                   <div><dt>缓存写入</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.cacheWriteTokens) }}</dd></div>
                   <div><dt>输出</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.outputTokens) }}</dd></div>
                   <div><dt>思考</dt><dd>{{ formatTokenCount(answerUsageFor(turn)?.reasoningTokens) }}</dd></div>
-                  <div><dt>本地模型窗口配置</dt><dd>{{ DEEPSEEK_HARNESS_CONTEXT_WINDOW.toLocaleString('zh-CN') }}</dd></div>
                 </dl>
               </details>
 
@@ -4703,14 +4699,13 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
             <small v-if="liveProcessStep?.summary">{{ liveProcessStep.summary }}</small>
           </div>
           <details v-if="!hasFollowingAnswer(turn.id) && harnessUsageFor(turn.id)" class="memory-usage">
-            <summary>{{ usageContextLabel(harnessUsageFor(turn.id)!) }} · 最近一次请求</summary>
+            <summary>本轮用量</summary>
             <dl>
               <div><dt>未缓存输入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.inputTokens) }}</dd></div>
               <div><dt>缓存读取</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.cacheReadTokens) }}</dd></div>
               <div><dt>缓存写入</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.cacheWriteTokens) }}</dd></div>
               <div><dt>输出</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.outputTokens) }}</dd></div>
               <div><dt>思考</dt><dd>{{ formatTokenCount(harnessUsageFor(turn.id)?.reasoningTokens) }}</dd></div>
-              <div><dt>本地模型窗口配置</dt><dd>{{ DEEPSEEK_HARNESS_CONTEXT_WINDOW.toLocaleString('zh-CN') }}</dd></div>
             </dl>
           </details>
           <!--

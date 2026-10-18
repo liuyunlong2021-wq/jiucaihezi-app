@@ -10,8 +10,69 @@ import { spawn } from 'node:child_process'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import { DeepSeekHarness } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js'
+import { runHarnessTask } from '../../src-tauri/resources/deepseek-harness/run-task.mjs'
 
-async function fixture(t, configured = false, modelGate, { respond } = {}) {
+test('APP task waits beyond the first idle and includes the final parent summary', async () => {
+  const queue = []
+  const finished = Promise.withResolvers()
+  const waiting = Promise.withResolvers()
+  let pending, closed = false, settled = false
+  const push = value => {
+    if (pending) { const waiter = pending; pending = undefined; waiter.resolve(value) }
+    else queue.push(value)
+  }
+  const event = (type, data) => ({ method: 'session.event', params: { sessionId: 'parent', event: { type, data } } })
+  const harness = { async start() {}, client: {
+    subscribeSessionTree() { return {
+      next() { if (queue.length) return Promise.resolve(queue.shift()); pending = Promise.withResolvers(); return pending.promise },
+      tryNext() { return queue.shift() },
+      close() { closed = true; pending?.reject(new Error('closed')) },
+    } },
+    async prompt() {
+      push(event('agent/inbox/spliced', { inserted: [{ id: 'input' }] }))
+      push(event('assistant/message', { message: { content: [{ type: 'text', text: 'delegated' }] } }))
+      push({ method: 'session.status', params: { sessionId: 'parent', status: 'idle' } })
+      return 'input'
+    },
+    request(method, params) {
+      assert.equal(method, 'session/wait')
+      assert.equal(params.sessionId, 'parent')
+      waiting.resolve()
+      return finished.promise
+    },
+  } }
+  const seen = []
+  const running = runHarnessTask(harness, [], { sessionId: 'parent', onNotification: n => seen.push(n) })
+    .then(result => { settled = true; return result })
+  await waiting.promise
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, false, 'first idle must not finish a task with active children')
+  push(event('assistant/message', { message: { content: [{ type: 'text', text: 'final summary' }] } }))
+  finished.resolve({})
+  assert.equal((await running).finalResponse, 'final summary')
+  assert.equal(seen.length, 4)
+  assert.equal(closed, true)
+})
+
+test('APP task rejects failed waits and missing receipts and releases its subscription', async () => {
+  for (const waitError of [undefined, new Error('child runtime failed')]) {
+    let rejectNext, closed = false
+    const harness = { async start() {}, client: {
+      subscribeSessionTree() { return {
+        next() { return new Promise((_resolve, reject) => { rejectNext = reject }) },
+        tryNext() {},
+        close() { closed = true; rejectNext?.(new Error('closed')) },
+      } },
+      async prompt() { return 'input' },
+      async request() { if (waitError) throw waitError; return {} },
+    } }
+    await assert.rejects(runHarnessTask(harness, [], { sessionId: 'parent', onNotification() {} }),
+      waitError ? /child runtime failed/ : /durable input receipt/)
+    assert.equal(closed, true)
+  }
+})
+
+async function fixture(t, configured = false, modelGate, { respond, maxTokens = 1024 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'jc-session-lease-'))
   const requests = []
   const http = createServer(async (req, res) => {
@@ -27,11 +88,11 @@ async function fixture(t, configured = false, modelGate, { respond } = {}) {
   })
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve))
   const patch = join(root, 'route.yml')
-  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: openai-completions\n        baseURL: http://127.0.0.1:${http.address().port}/v1\n        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: 1024\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
+  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: openai-completions\n        baseURL: http://127.0.0.1:${http.address().port}/v1\n        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: ${maxTokens}\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
   const options = { cwd: root, processCwd: root, dshHome: join(root, 'home'), patches: [patch], provider: 'jiucaihezi', model: 'test', initializeTimeoutMs: 15000,
     env: { ...process.env, DSH_AGENTS_HOME: join(root, 'agents'), DSH_PRIMARY_RUNTIME: '', JIUCAIHEZI_DH_API_KEY: 'local-test' } }
   const harnesses = []
-  const create = () => { const h = new DeepSeekHarness(options); harnesses.push(h); return h }
+  const create = (overrides = {}) => { const h = new DeepSeekHarness({ ...options, ...overrides }); harnesses.push(h); return h }
   const createRunner = () => {
     const ready = Promise.withResolvers()
     const closed = Promise.withResolvers()
@@ -85,7 +146,7 @@ async function fixture(t, configured = false, modelGate, { respond } = {}) {
     await new Promise(resolve => http.close(resolve))
     rmSync(root, { recursive: true, force: true })
   })
-  return { create, createRunner, requests, root }
+  return { create, createRunner, requests, root, patch, options }
 }
 
 test('APP runner inherits official retries: 524 gets five retries, an unclassified error gets none', { timeout: 45000 }, async t => {
@@ -118,6 +179,7 @@ test('APP runner inherits official retries: 524 gets five retries, an unclassifi
 test('SDK prunes tool results, compacts under pressure, and cold-resumes the replacement surface', { timeout: 45000 }, async t => {
   let readRequested = false
   const f = await fixture(t, false, undefined, {
+    maxTokens: 32768,
     respond: (request, res) => {
       if (readRequested || !JSON.stringify(request.messages).includes('HISTORY_TWO')) return false
       readRequested = true
@@ -283,6 +345,22 @@ test('steering a queued prompt removes it from the next turn and feeds the runni
   }
 })
 
+test('official SDK resume preserves history and rejects missing sessions without creating replacements', { timeout: 45000 }, async t => {
+  const f = await fixture(t)
+  const first = f.create()
+  await first.run('saved before upgrade', { sessionId: 'official-resume' })
+  await first.close()
+  const next = f.create()
+  const session = await next.resumeSession('official-resume')
+  await session.run('continued after upgrade')
+  await next.client.request('session/wait', { sessionId: 'official-resume' })
+  assert.match(JSON.stringify(f.requests[1].messages), /saved before upgrade/)
+  assert.equal(f.requests.length, 2)
+  await assert.rejects(next.resumeSession('missing-session'))
+  const sessions = await next.client.request('session/list', {})
+  assert.doesNotMatch(JSON.stringify(sessions), /missing-session/)
+})
+
 test('SDK adopts an already-live configured Agent without claiming its write handle again', { timeout: 45000 }, async t => {
   const f = await fixture(t, true)
   const h = f.create()
@@ -345,6 +423,26 @@ test('SDK shares a cold activation across concurrent permission and prompt consu
   const saved = await h.client.request('session/read', { sessionId: 'lease-test' })
   assert.equal(saved.events.filter(e => e.type === 'turn/start').length, 1)
   assert.equal(f.requests.length, 1)
+})
+
+test('SDK waits for approval attachment even after the official creator registers its Agent', async t => {
+  const vendor = '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/'
+  const { Context } = await import(`${vendor}cordis/lib/index.js`)
+  const { HarnessSdkJsonRpcServer } = await import(`${vendor}dsh-sdk-jsonrpc-server/lib/index.js`)
+  const ctx = new Context()
+  const server = new HarnessSdkJsonRpcServer(ctx, { notify() {} })
+  const gate = Promise.withResolvers()
+  const rec = { handle: { agent: {} } }
+  server.createSession = async id => { server.sessions.set(id, rec); await gate.promise; return rec }
+  t.after(async () => { gate.resolve(); await server.shutdown(); await ctx.fiber.dispose() })
+  const first = server.getOrCreateSession('attaching')
+  let delivered = false
+  const second = server.getOrCreateSession('attaching').then(value => { delivered = true; return value })
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(delivered, false, 'a registered Agent is not ready until its approval bridge is attached')
+  gate.resolve()
+  assert.equal(await first, rec)
+  assert.equal(await second, rec)
 })
 
 test('SDK adopts a losing activation race without taking the original owner disposer', async t => {
@@ -481,4 +579,55 @@ test('a failed process reap is reported and keeps its handle for a later close a
   await assert.rejects(transport.close(), /kill failed/)
   await transport.close()
   assert.equal(attempts, 2)
+})
+
+// 原版模块由 npm pack 的同版本发布包提供；不反向撤销 App 补丁来伪造对照组。
+test('official unpatched SDK and APP runner share request budgets, tool loops and asynchronous subagents', { timeout: 45000 }, async t => {
+  const officialServer = process.env.DSH_OFFICIAL_CONTROL_SERVER
+  if (!officialServer) return t.skip('set DSH_OFFICIAL_CONTROL_SERVER to an unmodified 0.2.1-rc.2 server module')
+  assert.doesNotMatch(readFileSync(officialServer, 'utf8'), /attachApprovalBridge|applyPinnedSkillScope|createOfficialSession/)
+  const f = await fixture(t, false, undefined, { respond(request, res) {
+    const text = JSON.stringify(request.messages)
+    const called = request.messages.some(m => m.role === 'assistant' && m.tool_calls?.length)
+    const tool = !called && text.includes('READ_FIXTURE') ? 'read'
+      : !called && text.includes('DELEGATE_FIXTURE') ? 'subagent' : undefined
+    if (!tool) return false
+    const args = tool === 'read' ? { file_path: join(f.root, 'input.md') }
+      : { description: 'Compare child route', prompt: 'CHILD_FIXTURE' }
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.end(`data: ${JSON.stringify({ id: 'fixture', object: 'chat.completion.chunk', created: 1, model: 'test', choices: [{ index: 0, delta: { role: 'assistant', tool_calls: [{ index: 0, id: 'tool-fixture', type: 'function', function: { name: tool, arguments: JSON.stringify(args) } }] }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`)
+    return true
+  } })
+  writeFileSync(join(f.root, 'input.md'), 'READ_RESULT_FIXTURE')
+  const controlPatch = join(f.root, 'control.yml')
+  writeFileSync(controlPatch, `- id: sdk-jsonrpc-server\n  name: ${JSON.stringify(officialServer)}\n`)
+  const official = f.create({ dshHome: join(f.root, 'official-home'), patches: [f.patch, controlPatch] })
+  const app = f.createRunner()
+  const signatures = []
+  for (const host of [official, app]) {
+    const start = f.requests.length
+    const events = []
+    for (const [sessionId, text] of [['plain', 'PLAIN_FIXTURE'], ['read', 'READ_FIXTURE'], ['parent', 'DELEGATE_FIXTURE']]) {
+      if (host === official) {
+        const result = await runHarnessTask(host, [{ type: 'text', text }], { sessionId,
+          onNotification(n) { if (n.method === 'session.event') events.push(n.params.event) } })
+        assert.equal(result.finalResponse, 'OK')
+      } else {
+        assert.equal((await host.request({ type: 'run', sessionId, contentBlocks: [{ type: 'text', text }] })).type, 'result')
+      }
+    }
+    if (host === app) events.push(...app.notifications.filter(n => n.method === 'session.event').map(n => n.params.event))
+    const requests = f.requests.slice(start)
+    assert.ok(requests.length >= 6)
+    assert.ok(requests.every(r => (r.max_tokens ?? r.max_completion_tokens) === 1024), `catalog budget differs: ${JSON.stringify(requests.map(r => ({ model: r.model, max_tokens: r.max_tokens, max_completion_tokens: r.max_completion_tokens })))}`)
+    assert.ok(events.some(e => e.type === 'request/context' && e.data.contextWindow === 262144))
+    const activations = events.filter(e => e.type === 'tool/result' && JSON.stringify(e.data).includes('started subagent '))
+    assert.ok(activations.length, `subagent activation missing: ${JSON.stringify(events.filter(e => e.type === 'tool/result').map(e => e.data))}`)
+    // 比较所有模型可见工具定义，不绑定并发完成时的请求到达顺序。
+    signatures.push([...new Set(requests.map(r => JSON.stringify({ model: r.model, max_tokens: r.max_tokens, max_completion_tokens: r.max_completion_tokens,
+      tools: r.tools, tool_choice: r.tool_choice })))].sort())
+  }
+  assert.deepEqual(signatures[1], signatures[0])
+  const snapshot = (await app.request({ type: 'read-session', sessionId: 'parent' })).data
+  assert.equal(snapshot.contextPressure.contextWindow, 262144)
 })

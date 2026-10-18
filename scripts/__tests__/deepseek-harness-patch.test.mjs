@@ -33,7 +33,7 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   // 把已存在会话拉齐到 @文件 语义的通道。
   assert.match(once, /case "session\/permission": return this\.permission\(params\);/)
   // 同一处 inject 必须同时带 `commands`（权限）与 `skills`（点名 skill 要查官方注册表）。
-  assert.match(once, /const inject = \["agents", "sessionQuery", "commands", "skills"\];/)
+  assert.match(once, /const inject = \["agents", "workingDirectory", "sessionQuery", "commands", "skills"\];/)
   assert.match(once, /\"\/permission \" \+ preset/)
   // 官方命令面必须真的被调用，而不是自己写 permission/preset 事件绕过官方推导。
   assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(agent/)

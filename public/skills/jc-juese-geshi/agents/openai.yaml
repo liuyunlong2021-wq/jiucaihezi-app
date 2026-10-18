@@ -1,3 +1,3 @@
 interface:
   display_name: "jc-juese-geshi"
-  short_description: "基于人物参考图统一三格角色板的横竖屏排版与目标画风"
+  short_description: "基于人物参考图或已有角色文字提示词统一三格排版与画风"

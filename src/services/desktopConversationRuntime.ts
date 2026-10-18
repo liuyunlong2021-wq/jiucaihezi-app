@@ -3,10 +3,7 @@ import type { DirectRunMetrics } from '@/runtime/direct/directTypes'
 import type { MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import { listHarnessConversationCatalog, upsertHarnessConversationCatalogEntry } from '@/runtime/memory/harnessConversationCatalog'
-import { buildCreativeContext } from '@/runtime/direct/creativeMemory'
 import {
-  DEEPSEEK_HARNESS_CONTEXT_WINDOW,
-  DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS,
   DEEPSEEK_HARNESS_SESSION_MARKER,
   applyDeepSeekInboxEvent,
   deepSeekHandoffTurns,
@@ -264,15 +261,11 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
   const userTurn = run.userTurn!
   const config = await resolveApiConfig({ modelId: selected.modelId, modelProviderId: selected.modelProviderId })
   const missing = deepSeekHandoffTurns(selected.turns)
-  const handoff = missing.length ? buildCreativeContext({
-    messages: [...missing, userTurn], modelId: config.model,
-    contextWindow: DEEPSEEK_HARNESS_CONTEXT_WINDOW,
-    reservedTokens: DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS + 32_768,
-    maxHistoryRounds: Number.MAX_SAFE_INTEGER, maxHistoryTokens: Number.MAX_SAFE_INTEGER,
-  }).messages.slice(0, -1) as ConversationTurn[] : []
+  const handoff = missing
   const query = {
     cwd: selected.owner, sessionId: selected.conversationId, message: '',
     model: config.model, apiBase: config.apiBase, apiKey: config.apiKey,
+    modelProviderId: selected.modelProviderId,
     imageInput: resolveModelInputModalities({ id: config.model, providerId: selected.modelProviderId }).includes('image'),
     permissionTier: selected.permissionTier,
     mediaSelected: selected.mediaSelected, avSelected: selected.avSelected,
@@ -439,6 +432,7 @@ export async function readDesktopConversationSession(sessionId: string) {
     model: config.model,
     apiBase: config.apiBase,
     apiKey: config.apiKey,
+    modelProviderId: selected.modelProviderId,
     imageInput: resolveModelInputModalities({ id: config.model, providerId: selected.modelProviderId }).includes('image'),
     permissionTier: selected.permissionTier,
   }

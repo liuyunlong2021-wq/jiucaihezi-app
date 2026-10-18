@@ -1,3 +1,4 @@
+import { deriveTurnTokenUsage } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-token-meter/lib/types/client.js'
 import { invoke } from '@tauri-apps/api/core'
 import { appDataDir, join, resolveResource } from '@tauri-apps/api/path'
 import { mkdir, writeTextFile } from '@tauri-apps/plugin-fs'
@@ -5,8 +6,8 @@ import type { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js'
 import type { DirectMessageFile, ResolvedDirectAttachment } from '@/utils/directMessageBuilder'
 import type { ConversationTurn } from '@/runtime/memory/conversationTranscript'
 import { McpStdioTransport } from './mcpStdioTransport'
-import { computerUseEnabledNow } from '@/stores/agentStore'
-import { MANJU_ROUTER, manjuRoutePrompt } from '@/runtime/memory/manjuProduction'
+import { getModelContextWindow, getModelMaxOutputTokens } from '@/data/modelContextWindows'
+import { computerUseEnabledNow, useAgentStore } from '@/stores/agentStore'
 
 type BridgeMessage = {
   type: 'ready' | 'notification' | 'result' | 'query-result' | 'error' | 'closed'
@@ -41,6 +42,7 @@ export interface DeepSeekHarnessInput {
   sessionId: string
   message: string
   model: string
+  modelProviderId?: string
   apiBase: string
   apiKey: string
   /**
@@ -188,10 +190,9 @@ export type DeepSeekAssistantStreamState = {
 export type DeepSeekSessionSnapshot = {
   session: { id: string; cwd?: string; createdAt?: number }
   events: any[]
+  contextPressure?: { pressureTokens?: number; projectedTokens?: number; contextWindow?: number }
 }
 
-export const DEEPSEEK_HARNESS_CONTEXT_WINDOW = 262_144
-export const DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS = 32_768
 export const DEEPSEEK_HARNESS_SESSION_MARKER = 'dh-session-v1'
 
 /**
@@ -316,11 +317,27 @@ export function deepSeekModelInput(imageInput = false): Array<'text' | 'image'> 
   return imageInput ? ['text', 'image'] : ['text']
 }
 
+/** 已有模型目录只声明接入能力；执行策略交给官方。 */
+export function deepSeekModelLimits(
+  input: { model: string; modelProviderId?: string },
+  models: Array<{ id: string; providerId?: string; contextWindow?: number; maxOutputTokens?: number }> = useAgentStore().availableModels,
+): { contextWindow: number; maxTokens: number } {
+  const model = models.find(entry => entry.id === input.model
+    && (entry.providerId || 'jiucaihezi') === (input.modelProviderId || 'jiucaihezi'))
+  const positive = (value: number | undefined): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+  return {
+    contextWindow: positive(model?.contextWindow) ? model.contextWindow : getModelContextWindow(input.model, input.modelProviderId),
+    maxTokens: positive(model?.maxOutputTokens) ? model.maxOutputTokens : getModelMaxOutputTokens(input.model, input.modelProviderId),
+  }
+}
+
 function runtimeKey(input: DeepSeekHarnessInput): string {
   return [
     input.cwd,
     input.apiBase,
     input.model,
+    input.modelProviderId || 'jiucaihezi',
+    JSON.stringify(deepSeekModelLimits(input)),
     deepSeekModelInput(input.imageInput).join('+'),
     input.mediaSelected ? 'media' : '',
     input.avSelected ? 'av' : '',
@@ -443,15 +460,27 @@ export function deepSeekSessionInbox(snapshot: DeepSeekSessionSnapshot): DeepSee
   return items
 }
 
+/** 只映射字段名；计费尝试、重试与未知值全部由同版本官方实现裁决。 */
+export function deepSeekTurnUsage(events: any[]): DeepSeekUsage | undefined {
+  const usage = deriveTurnTokenUsage(events)
+  if (!usage) return undefined
+  const { uncachedInputTokens, routes: _routes, ...rest } = usage
+  return { inputTokens: uncachedInputTokens, ...rest }
+}
+
 export function deepSeekSessionUsage(snapshot: DeepSeekSessionSnapshot): Map<string, DeepSeekUsage> {
   const owners = deepSeekTurnOwners(snapshot)
   const usageByOwner = new Map<string, DeepSeekUsage>()
+  let events: any[] = []
   for (const event of snapshot.events || []) {
-    if (event?.type !== 'assistant/message' || !isAppendSurface(event)) continue
+    if (event?.type === 'turn/start') events = []
+    events.push(event)
+    if (event?.type !== 'turn/end') continue
     const owner = owners.get(Number(event.data?.turn))
     if (!owner) continue
-    const usage = deepSeekMessageUsage(event)
+    const usage = deepSeekTurnUsage(events)
     if (usage) usageByOwner.set(owner, usage)
+    else usageByOwner.delete(owner)
   }
   return usageByOwner
 }
@@ -1151,7 +1180,6 @@ export function deepSeekPrompt(
         '【本轮消息】',
       ].join('\n\n')
     : ''
-  const manju = skillNames.includes(MANJU_ROUTER) ? manjuRoutePrompt() : ''
   const references = sessionReferences.map(reference => [
     `【引用会话：${reference.title} · 最近最多 12 条用户/助手消息】`,
     ...reference.turns.slice(-12).map(turn => `${turn.role === 'user' ? '用户' : '助手'}：${turn.content.slice(0, 4_000)}`),
@@ -1160,8 +1188,8 @@ export function deepSeekPrompt(
     ? `引用会话：${sessionReferences.map(reference => `「${reference.title.replace(/\s+/g, ' ').trim().slice(0, 120)}」`).join('、')}`
     : ''
   const currentMessage = [referenceLabel, message].filter(Boolean).join('\n\n')
-  const currentMarker = !handoff && (manju || wikiContext || references) ? '【本轮消息】' : ''
-  return [gestures, manju, wikiContext, references, handoff, currentMarker, currentMessage]
+  const currentMarker = !handoff && (wikiContext || references) ? '【本轮消息】' : ''
+  return [gestures, wikiContext, references, handoff, currentMarker, currentMessage]
     .filter(Boolean).join('\n\n')
 }
 
@@ -1246,6 +1274,7 @@ async function bundledSkillsDirectory(): Promise<string | undefined> {
 }
 
 async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
+  const limits = deepSeekModelLimits(input)
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input.cwd))
   const workspaceKey = [...new Uint8Array(digest)].slice(0, 12).map(byte => byte.toString(16).padStart(2, '0')).join('')
   const routeDir = await join(await appDataDir(), 'deepseek-harness', 'workspaces', workspaceKey)
@@ -1288,8 +1317,6 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     ...(mcpLaunch!.cwd ? [`    cwd: ${JSON.stringify(mcpLaunch!.cwd)}`] : []),
     '    env:',
     ...Object.entries(env).map(([key, value]) => `      ${key}: ${JSON.stringify(value)}`),
-    // 生图、生视频、3D 导出是长任务，官方默认 60 秒不够（有意偏离，见 Harness 合同 §12.3）。
-    '    toolCallTimeoutMs: 900000',
     // 不写 failOnStartupError，用官方默认 false：MCP 起不来只让那台服务器的工具不出现并
     // 记一条 error，不把整轮对话判失败。写 true 时「创作 MCP 没起来」会升级成「任务失败」。
     '',
@@ -1309,20 +1336,6 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     '    capabilities:',
     ...nativeToolCapabilities.map(capability => `      - ${capability}`),
   ]) : []
-  // 官方 subagent 工具在 continuable（后台）模式下 `run_in_background` 默认 true：
-  // 派发只回一句 “started subagent <id>”，父代理拿不到结果却以为已完成，于是重复派活、
-  // 重复写文件（实测一轮 34 分钟里 1.md/3.md 各被写两遍，16–20 集的失败也无人知晓）。
-  // 改成官方 one-shot：该模式默认等结果，父代理能拿到子代理的产出与失败。
-  // config 必须给全量且照抄基线——patch 按顶层键整体替换，漏一个键会把 provider/toolName
-  // 一起抹掉；`subagent_fork` 在 sdk 基线上本来就是 one-shot，不需要在这里重复声明。
-  const subagentPatch = [
-    '- id: tool-subagent',
-    '  config:',
-    '    provider: spawn',
-    '    toolName: subagent',
-    '    backgroundMode: one-shot',
-    '',
-  ]
   // 官方 @file 语义的对话面：引用文件只给路径，正文由模型自己 read。官方 provider
   // `dsh-file-reference-local` 会往系统提示装一段 FILE_REFERENCE_PROMPT（"@ 开头的是
   // 用户显式引用的路径…读完之前不要声称看过"），而且只在 agent 有 read 工具时才装。
@@ -1361,13 +1374,12 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         '        models:',
         `          - id: ${JSON.stringify(input.model)}`,
         `            name: ${JSON.stringify(input.model)}`,
-        `            contextWindow: ${DEEPSEEK_HARNESS_CONTEXT_WINDOW}`,
-        `            maxTokens: ${DEEPSEEK_HARNESS_MAX_OUTPUT_TOKENS}`,
+        `            contextWindow: ${limits.contextWindow}`,
+        `            maxTokens: ${limits.maxTokens}`,
         ...modelInputLines,
         '',
         ...mcpPatch,
         ...nativeToolPatch,
-        ...subagentPatch,
         ...fileReferencePatch,
         ...computerUsePatch,
       ].join('\n'))
@@ -1653,6 +1665,7 @@ async function runDeepSeekHarnessTurn(
   const approvals = new Map<string, AbortController>()
   active.permissionListeners.set(wireSessionId, tier => input.onPermission?.(tier))
   const stream = { attemptId: '', nextIndex: 0, text: '', reasoning: '', turn: 0, step: 0 }
+  let usageEvents: any[] = []
   const manjuArtifactCallIds = new Set<string>()
   const notify = (frame: NonNullable<BridgeMessage['notification']>) => {
     if (frame.params?.sessionId !== wireSessionId) return
@@ -1693,8 +1706,9 @@ async function runDeepSeekHarnessTurn(
     if (frame.method === 'session.event') {
       const event = frame.params.event
       input.onSessionEvent?.(event)
-      if (event?.type === 'assistant/message' && isAppendSurface(event))
-        input.onUsage?.(deepSeekMessageUsage(event))
+      if (event?.type === 'turn/start') usageEvents = []
+      usageEvents.push(event)
+      if (event?.type === 'turn/end') input.onUsage?.(deepSeekTurnUsage(usageEvents))
       if (event?.type === 'tool/call' && event.data.name === 'wiki_save_artifact')
         manjuArtifactCallIds.add(String(event.data.callId))
       if (event?.type === 'tool/result') {
