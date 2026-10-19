@@ -6,9 +6,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js'
 import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.js'
 import { STORYBOARDER_BONE_NAMES, applyCameraPoints, cameraPointsFromDocument, evaluateScene3DAnimation, parseScene3DDocument, SCENE3D_FOCAL, type Scene3DCamera, type Scene3DCameraPoint, type Scene3DCharacter, type Scene3DDocument, type Scene3DFormation, type Scene3DGroup, type Scene3DObject } from '@/runtime/memory/scene3d'
-import { STORYBOARDER_CHARACTER_MODELS, STORYBOARDER_EDITABLE_BONES, STORYBOARDER_HAND_POSES, STORYBOARDER_POSES, handPosePreset, posePreset, resolveStoryboarderModelUrl } from '@/runtime/memory/storyboarderAssets'
+import { STORYBOARDER_CHARACTER_MODELS, STORYBOARDER_EDITABLE_BONES, STORYBOARDER_HAND_POSES, STORYBOARDER_POSES, applyStoryboarderCharacterState, handPosePreset, posePreset, resolveStoryboarderModelUrl } from '@/runtime/memory/storyboarderAssets'
 
-const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean; videoStatus?: string }>(), { recordingOnly: false, videoStatus: '' })
+import { appendScene3DHistory, type Scene3DEditorContext } from '@/runtime/memory/scene3dHost'
+import { alignRenderedCharacterToSeat } from '@/runtime/memory/scene3dSeating'
+
+const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean; readOnly?: boolean; videoStatus?: string }>(), { recordingOnly: false, videoStatus: '' })
 const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string]; record: [document: Scene3DDocument, title: string] }>()
 
 const canvas = ref<HTMLCanvasElement | null>(null)
@@ -273,17 +276,6 @@ function setPresetRotation(root: THREE.Object3D, state: Record<string, { rotatio
   }
 }
 
-function applyCharacterState(root: THREE.Object3D, character: Scene3DCharacter) {
-  root.traverse(node => {
-    const bind = node.userData.storyboarderBindQuaternion as [number, number, number, number] | undefined
-    if (bind) node.quaternion.fromArray(bind)
-  })
-  for (const [name, values] of Object.entries(character.bones || {})) {
-    const bone = root.getObjectByName(name)
-    if (bone) bone.quaternion.fromArray(values)
-  }
-}
-
 async function storyboarderTemplate(model: Scene3DCharacter['model']): Promise<THREE.Object3D | null> {
   const cached = characterTemplates.get(model)
   if (cached) return cached
@@ -326,7 +318,7 @@ async function hydrateCharacter(node: THREE.Object3D, item: Scene3DObject, token
     if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; child.userData.storyboarderSharedResource = true }
     if ((child as THREE.Bone).isBone) child.userData.storyboarderBindQuaternion = child.quaternion.toArray()
   })
-  applyCharacterState(model, item.character)
+  applyStoryboarderCharacterState(model, item.character, item.pose)
   node.add(model)
   renderRevision.value++
 }
@@ -475,6 +467,7 @@ function buildScene() {
   for (const item of document.objects) {
     const node = makePrimitive(item)
     node.traverse(child => { const mesh = child as THREE.Mesh; if (mesh.isMesh) { mesh.castShadow = true; mesh.receiveShadow = true; const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]; materials.forEach(item => { if (item instanceof THREE.MeshStandardMaterial) item.userData.baseColor = item.color.getHex() }) } })
+    node.name = `scene-object:${item.id}`
     node.position.copy(vector(item.position)); node.rotation.set(...(item.rotation || [0, 0, 0]))
     if (item.type === 'person') addLabel(node, item.label || '', item.color || '#ffffff', 1.8)
     setSelectable(node, item.id, 'object'); nodes.set(item.id, node); root.add(node)
@@ -637,6 +630,8 @@ function createCameraControls() {
   transformHelper = transform.getHelper()
   scene?.add(transformHelper)
   attachSelection(selectedId.value)
+  orbit.enabled = !props.readOnly
+  transform.enabled = !props.readOnly
   resize()
 }
 
@@ -768,6 +763,7 @@ function nudgeSelection(offset: [number, number, number]) {
 
 /** 有选中就微调对象，没选中就平移机位调构图；步长和吸附档位保持一致 */
 function handleNudgeKeys(event: KeyboardEvent) {
+  if (props.readOnly) return
   if (event.metaKey || event.ctrlKey || event.altKey || playing.value) return
   if ((event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -898,11 +894,7 @@ function persistCharacterBones() {
 
 function persist(options: { history?: boolean } = {}) {
   if (options.history !== false) {
-    history.splice(historyIndex + 1)
-    const snapshot = structuredClone(document)
-    if (JSON.stringify(history[history.length - 1]) !== JSON.stringify(snapshot)) history.push(snapshot)
-    historyIndex = history.length - 1
-    if (history.length > 100) { history.shift(); historyIndex-- }
+    historyIndex = appendScene3DHistory(history, historyIndex, document)
   }
   renderRevision.value++; emit('save', structuredClone(document))
 }
@@ -945,6 +937,7 @@ function pasteSelection() {
 }
 
 function handleHistoryKeyboard(event: KeyboardEvent) {
+  if (props.readOnly) return
   if ((event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
   const modifier = event.metaKey || event.ctrlKey
   if (modifier && event.key.toLowerCase() === 'z') { event.preventDefault(); event.shiftKey ? redo() : undo(); return }
@@ -1036,13 +1029,16 @@ function removeSelection() {
 }
 
 function removeSelectedWithKeyboard(event: KeyboardEvent) {
+  if (props.readOnly) return
   if (event.key === 'Escape') { clearSelection(); return }
   if ((event.key !== 'Delete' && event.key !== 'Backspace') || (event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]') || !selectedId.value) return
   event.preventDefault(); removeSelection()
 }
 
-async function capture() {
-  if (!renderer || !canvas.value) return
+async function capturePreview(context?: Scene3DEditorContext | null): Promise<Blob> {
+  await waitForCharacters()
+  if (!renderer || !canvas.value) throw new Error('3D 渲染器尚未就绪')
+  if (context) { applyAnimation(context.time); applyCamera(context.camera) }
   clearSelection()
   renderer.render(scene!, activeCamera())
   const source = renderer.domElement
@@ -1052,7 +1048,33 @@ async function capture() {
   output.width = Math.max(1, Math.round(crop.width)); output.height = Math.max(1, Math.round(crop.width / aspectRatio(currentAspect.value)))
   output.getContext('2d')!.drawImage(source, (width - crop.width) / 2, (height - crop.height) / 2, crop.width, crop.height, 0, 0, output.width, output.height)
   const blob = await new Promise<Blob | null>(resolve => output.toBlob(resolve, 'image/png'))
-  if (blob && blob.size) emit('screenshot', blob, `${document.title}-${cameraName.value || '机位'}`)
+  if (!blob?.size) throw new Error('3D 截图为空')
+  return blob
+}
+
+async function capture() {
+  try { emit('screenshot', await capturePreview(), `${document.title}-${cameraName.value || '机位'}`) }
+  catch (cause) { showNotice(`截图失败：${cause instanceof Error ? cause.message : String(cause)}`) }
+}
+
+async function waitForCharacters() {
+  const deadline = performance.now() + 30_000
+  while (characterLoading.value > 0) {
+    if (performance.now() > deadline) throw new Error('人物模型加载超时，无法检查画面')
+    await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+  }
+  if (characterLoadError.value) throw new Error(characterLoadError.value)
+}
+
+function getContext() {
+  return { selectedId: selectedId.value || null, selectedBone: activeBoneName.value || null,
+    camera: { ...structuredClone(document.camera), position: tuple(camera!.position), target: tuple(orbit!.target), focal: currentFocal.value }, time: currentTime.value, recording: manualRecording.value }
+}
+
+async function seatCharacter(target: string, seat: string, floorY: number) {
+  await waitForCharacters()
+  if (!root) throw new Error('场景尚未就绪')
+  return alignRenderedCharacterToSeat(document, root, target, seat, floorY)
 }
 
 function recordingMimeType() {
@@ -1121,6 +1143,7 @@ function render() {
 }
 
 async function recordVideo(signal?: AbortSignal): Promise<Blob> {
+  await waitForCharacters()
   if (!renderer || !canvas.value || !duration.value || !document.timeline?.length) throw new Error('当前场景没有可录制的动画时间线')
   if (!canvas.value.captureStream) throw new Error('当前系统不支持 3D 画布录制')
   const mimeType = recordingMimeType()
@@ -1151,7 +1174,7 @@ async function recordVideo(signal?: AbortSignal): Promise<Blob> {
   return await completed
 }
 
-defineExpose({ recordVideo })
+defineExpose({ recordVideo, capturePreview, getContext, seatCharacter })
 
 onMounted(() => {
   if (!canvas.value) return
@@ -1168,8 +1191,18 @@ onMounted(() => {
   resizeObserver = new ResizeObserver(resize); resizeObserver.observe(canvas.value); render()
 })
 
+watch(() => props.readOnly, locked => {
+  // End an in-flight drag through its normal save handler before the Agent reads the file.
+  if (locked && transform?.dragging) transform.dragging = false
+  if (orbit) orbit.enabled = !locked
+  if (transform) transform.enabled = !locked
+  if (locked) playing.value = false
+})
+
 watch(() => props.document, value => {
-  document = parseScene3DDocument(value); currentTime.value = 0; playing.value = false; renderRevision.value++; buildScene(); createCameraControls(); applyAnimation(0)
+  const next = parseScene3DDocument(value)
+  historyIndex = appendScene3DHistory(history, historyIndex, next)
+  document = next; currentTime.value = 0; playing.value = false; renderRevision.value++; buildScene(); createCameraControls(); applyAnimation(0)
 })
 
 // 运镜播放时视角在变；停下来要把视角复位成工具栏显示的焦段

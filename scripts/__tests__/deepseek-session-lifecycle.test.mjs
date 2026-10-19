@@ -12,6 +12,26 @@ import { fileURLToPath } from 'node:url'
 import { DeepSeekHarness } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-client/lib/index.js'
 import { runHarnessTask } from '../../src-tauri/resources/deepseek-harness/run-task.mjs'
 
+test('required app tools are checked before any prompt or subscription is created', async () => {
+  let prompted = false, subscribed = false, checked = false
+  const harness = { async start() {}, client: {
+    request: async (method, params) => {
+      assert.equal(method, 'session/check-tools')
+      assert.deepEqual(params.names, ['create_3d_scene'])
+      checked = true
+      throw new Error('内置工具未就绪：create_3d_scene')
+    },
+    prompt: async () => { prompted = true; throw new Error('must not send') },
+    subscribeSessionTree: () => { subscribed = true; throw new Error('must not subscribe') },
+  } }
+  await assert.rejects(runHarnessTask(harness, [], {
+    sessionId: 'parent', requiredTools: ['create_3d_scene'], onNotification() {},
+  }), /内置工具未就绪/)
+  assert.equal(checked, true)
+  assert.equal(prompted, false)
+  assert.equal(subscribed, false)
+})
+
 test('APP task waits beyond the first idle and includes the final parent summary', async () => {
   const queue = []
   const finished = Promise.withResolvers()

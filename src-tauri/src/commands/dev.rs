@@ -14,6 +14,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::process::Command;
 use tokio::time::{Duration, timeout};
 
+// Serialize revision check + replacement across desktop windows and Agent writers.
+static CONDITIONAL_TEXT_WRITE: Mutex<()> = Mutex::new(());
+
 static PROJECT_WATCHERS: OnceLock<Mutex<HashMap<String, RecommendedWatcher>>> = OnceLock::new();
 
 #[derive(Serialize, Clone)]
@@ -1443,7 +1446,12 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
         return Err("读取路径必须是文件".into());
     }
     let max_bytes = input.max_bytes.unwrap_or(120_000).clamp(1, 30_000_000);
+    let before = resource_revision(&path)?;
     let bytes = std::fs::read(&path).map_err(|e| format!("读取文件失败: {}", e))?;
+    let revision = resource_revision(&path)?;
+    if before.value != revision.value {
+        return Err("读取期间文件已变化，请重新读取".into());
+    }
     let truncated = bytes.len() > max_bytes;
     let slice = if truncated {
         &bytes[..max_bytes]
@@ -1458,7 +1466,7 @@ pub fn dev_read_file(input: DevReadFileInput) -> Result<DevReadFileOutput, Strin
         base64: base64_str,
         truncated,
         size: bytes.len(),
-        revision: resource_revision(&path)?,
+        revision,
     })
 }
 
@@ -1587,6 +1595,7 @@ pub fn dev_create_file_if_missing(input: DevWriteFileInput) -> Result<DevWriteFi
 pub fn dev_write_file_if_revision(
     input: DevWriteFileIfRevisionInput,
 ) -> Result<DevWriteFileIfRevisionOutput, String> {
+    let _guard = CONDITIONAL_TEXT_WRITE.lock().map_err(|_| "条件保存锁不可用".to_string())?;
     let root = canonical_root(&input.root)?;
     let path = resolve_write_path(&root, &input.relative_path)?;
     if !path.exists() {
@@ -2741,6 +2750,68 @@ mod tests {
             std::fs::read_to_string(temp.path().join("note.md")).unwrap(),
             "external change"
         );
+    }
+
+    #[test]
+    fn scene_reads_never_pair_old_bytes_with_a_new_revision() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        std::fs::write(temp.path().join("scene.jcscene"), "original").unwrap();
+        let writer_root = root.clone();
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let writer_barrier = barrier.clone();
+        let writer = std::thread::spawn(move || {
+            writer_barrier.wait();
+            for index in 0..200 {
+                let revision = resource_revision(&Path::new(&writer_root).join("scene.jcscene")).unwrap();
+                let result = dev_write_file_if_revision(DevWriteFileIfRevisionInput {
+                    root: writer_root.clone(), relative_path: "scene.jcscene".into(),
+                    content: "x".repeat(if index % 2 == 0 { 8000 } else { 17 }),
+                    expected_revision: revision.value,
+                }).unwrap();
+                assert_eq!(result.status, "saved");
+            }
+        });
+        barrier.wait();
+        let mut failures = Vec::new();
+        for _ in 0..500 {
+            match dev_read_file(DevReadFileInput {
+                root: root.clone(), relative_path: "scene.jcscene".into(), max_bytes: None,
+            }) {
+                Ok(read) => {
+                    if read.size != read.revision.size { failures.push("mixed file revision".to_string()); }
+                }
+                Err(error) => {
+                    if !error.contains("读取期间文件已变化") { failures.push(error); }
+                }
+            }
+        }
+        writer.join().unwrap();
+        assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    #[test]
+    fn conditional_text_writers_share_one_revision_commit() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().to_string_lossy().to_string();
+        std::fs::write(temp.path().join("scene.jcscene"), "original").unwrap();
+        let revision = resource_revision(&temp.path().join("scene.jcscene")).unwrap().value;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+        let handles: Vec<_> = (0..16).map(|index| {
+            let root = root.clone();
+            let revision = revision.clone();
+            let barrier = barrier.clone();
+            std::thread::spawn(move || {
+                barrier.wait();
+                dev_write_file_if_revision(DevWriteFileIfRevisionInput {
+                    root, relative_path: "scene.jcscene".into(),
+                    content: format!("writer-{index}-updated"), expected_revision: revision,
+                }).unwrap().status
+            })
+        }).collect();
+        let statuses: Vec<_> = handles.into_iter().map(|handle| handle.join().unwrap()).collect();
+        assert_eq!(statuses.iter().filter(|status| status.as_str() == "saved").count(), 1);
+        assert_eq!(statuses.iter().filter(|status| status.as_str() == "conflict").count(), 15);
     }
 
     #[test]

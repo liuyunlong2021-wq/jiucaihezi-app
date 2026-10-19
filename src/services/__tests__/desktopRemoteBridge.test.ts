@@ -255,7 +255,7 @@ test('Desktop app binds the remote Host before the workbench view exists', () =>
   const workbench = readFileSync('src/components/memory/MemoryWorkbench.vue', 'utf8')
   assert.match(app, /bindDesktopRemoteRuntime\(createDesktopConversationHost\(\)\)/)
   assert.doesNotMatch(workbench, /createDesktopRemoteHost\(|bindDesktopRemoteRuntime\(/)
-  assert.match(workbench, /watch\(desktopRemoteCompleted, completed =>/)
+  assert.match(workbench, /watch\(desktopRemoteCompleted, async completed =>/)
 })
 
 test('application publisher sends run progress after the workbench view is gone', async () => {

@@ -526,7 +526,7 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   // 连重连都没有）；不写（官方默认 false）时插件正常激活、失败被容忍。
   assert.doesNotMatch(source, /failOnStartupError: true/)
   assert.match(source, /runtimeKey\(input\)/)
-  assert.match(source, /wireSessionId = deepSeekSessionId\(input\.sessionId\)/)
+  assert.match(source, /wireSessionId = deepSeekSessionId\(input\.sessionId, input\.cwd\)/)
   assert.doesNotMatch(source, /sessionNonce/)
   assert.match(source, /await waitForRuntimeClose\(active, DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS\)/)
   assert.doesNotMatch(source, /active\.closed,[\s\S]{0,100}2_000/)
@@ -538,7 +538,8 @@ test('Harness keeps its runtime state in app data instead of the user project', 
   assert.match(prepare, /this\.createOfficialSession\(sessionId, persisted\)/)
   assert.match(prepare, /session\/list/)
   assert.match(prepare, /session\/read/)
-  assert.match(prepare, /const inject = \["agents", "workingDirectory", "sessionQuery", "commands", "skills"\];/)
+  for (const dependency of ['sessionQuery', 'commands', 'skills', 'storageDomain', 'sessionTitle', 'sessionProjections', 'sessions'])
+    assert.ok(prepare.includes(`'${dependency}'`), `SDK must inject ${dependency}`)
   assert.match(runner, /harness\.client\.request/)
   assert.doesNotMatch(source, /resolve_deepseek_harness/)
 })
@@ -931,7 +932,8 @@ test('an existing session is switched to the @文件 permission instead of keepi
   // 切换只能走官方命令面：SDK 通道只暴露 session/prompt|list|read，没有任何权限方法。
   // 同一处 inject 还要带 `skills`：点名 skill 要查官方注册表，没声明就直接抛
   // `cannot get property "skills" without inject`（第一版补丁漏了它，实测整轮失败）。
-  assert.match(prepare, /const inject = \["agents", "workingDirectory", "sessionQuery", "commands", "skills"\];/)
+  for (const dependency of ['sessionQuery', 'commands', 'skills', 'storageDomain', 'sessionTitle', 'sessionProjections', 'sessions'])
+    assert.ok(prepare.includes(`'${dependency}'`), `SDK must inject ${dependency}`)
   assert.match(prepare, /case "session\/permission": return this\.permission\(params\);/)
   assert.match(prepare, /commands"\)\.execute\(agent, "\/permission " \+ preset/)
   assert.match(runner, /command\.type === 'permission'/)

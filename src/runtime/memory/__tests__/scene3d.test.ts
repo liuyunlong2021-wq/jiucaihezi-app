@@ -3,6 +3,11 @@ import { createHash } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 import { reactive } from 'vue'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js'
+import { Bone, BoxGeometry, Euler, Group, Mesh, Quaternion } from 'three'
+import { appendScene3DHistory } from '../scene3dHost'
+import { alignRenderedCharacterToSeat } from '../scene3dSeating'
+import { applyStoryboarderCharacterState, STORYBOARDER_POSES } from '../storyboarderAssets'
 
 import { applyCameraPoints, applyScene3DEdits, cameraPointsFromDocument, createScene3DDocument, evaluateScene3DAnimation, parseScene3DDocument, parseScene3DResultMarkers, scene3DResultMarker, stripScene3DResultMarkers } from '../scene3d'
 
@@ -226,4 +231,124 @@ test('scene3d rejects an invalid edit batch without mutating the source', () => 
     { action: 'remove', target: 'missing' },
   ]), /目标不存在/)
   assert.deepEqual(source.objects[0].position, [0, 0, 0])
+})
+
+
+test('Agent sitting pose bends the actual skeleton of all five character models', () => {
+  const preset = STORYBOARDER_POSES.find(item => item.name === 'sit chair')!
+  for (const model of ['adult-male', 'adult-female', 'teen-male', 'teen-female', 'child'] as const) {
+    const bytes = readFileSync(`src-tauri/resources/storyboarder/models/${model}.glb`)
+    const gltf = JSON.parse(bytes.subarray(20, 20 + bytes.readUInt32LE(12)).toString().replace(/\0+$/, ''))
+    const root = new Group()
+    for (const index of gltf.skins[0].joints) {
+      const node = gltf.nodes[index]
+      const bone = new Bone()
+      bone.name = node.name
+      bone.quaternion.fromArray(node.rotation || [0, 0, 0, 1])
+      bone.userData.storyboarderBindQuaternion = bone.quaternion.toArray()
+      root.add(bone)
+    }
+    const leg = root.getObjectByName('LeftUpLeg')!
+    const before = leg.quaternion.clone()
+    applyStoryboarderCharacterState(root, { model, scale: 1 }, 'sitting')
+    const rotation = preset.state.skeleton!.LeftUpLeg.rotation!
+    const expected = new Quaternion().setFromEuler(new Euler(rotation.x, rotation.y, rotation.z))
+    assert.ok(leg.quaternion.angleTo(expected) < 1e-6, model)
+    assert.ok(leg.quaternion.angleTo(before) > 0.1, model)
+    // Manual bone edits remain authoritative when loading older scene files.
+    applyStoryboarderCharacterState(root, { model, scale: 1, bones: { LeftUpLeg: [0, 0, 0, 1] } }, 'sitting')
+    assert.deepEqual(leg.quaternion.toArray(), [0, 0, 0, 1])
+  }
+})
+
+test('incremental pose and rotation edit existing people without replacing scene or retaining old bones', () => {
+  const source = createScene3DDocument({ title: '车厢', objects: [
+    { id: 'actor', type: 'person', position: [1, 0.5, 2], character: { model: 'adult-male', bones: { LeftUpLeg: [0, 0, 0, 1] } } },
+    { id: 'seat', type: 'box', position: [1, 0, 2] },
+  ] })
+  const next = applyScene3DEdits(source, [
+    { action: 'pose', target: 'actor', pose: 'sitting' },
+    { action: 'rotate', target: 'seat', to: [0, Math.PI, 0] },
+  ])
+  assert.equal(next.objects[0].pose, 'sitting')
+  assert.equal(next.objects[0].character?.bones, undefined)
+  assert.deepEqual(next.objects[0].position, source.objects[0].position)
+  assert.deepEqual(next.objects[1].rotation, [0, Math.PI, 0])
+  assert.equal(source.objects[0].pose, 'standing')
+  assert.ok(source.objects[0].character?.bones)
+  for (const operations of [
+    [{ action: 'pose', target: 'seat', pose: 'sitting' }],
+    [{ action: 'pose', target: 'actor', pose: 'invalid' }],
+    [{ action: 'rotate', target: 'missing', to: [0, 0, 0] }],
+    [{ action: 'rotate', target: 'seat' }],
+    [{ action: 'move', target: 'actor', to: [1, 0, 2], pose: 'sitting' }],
+  ]) assert.throws(() => applyScene3DEdits(source, operations))
+})
+
+
+test('Agent snapshots join manual undo history and invalidate redo without duplicate entries', () => {
+  const original = createScene3DDocument({ title: 'history', objects: [] })
+  const manual = { ...original, title: 'manual' }
+  const agent = { ...original, title: 'agent' }
+  const history = [original]
+  let index = appendScene3DHistory(history, 0, manual)
+  index = appendScene3DHistory(history, index, agent)
+  assert.equal(history[index - 1].title, 'manual')
+  assert.equal(appendScene3DHistory(history, index, agent), index)
+  index = appendScene3DHistory(history, index - 1, { ...original, title: 'after undo' })
+  assert.deepEqual(history.map(item => item.title), ['history', 'manual', 'after undo'])
+  assert.equal(index, 2)
+})
+
+test('seating uses the rendered cushion bounds and hip height, preserves groups and rejects tilted seats', () => {
+  const source = createScene3DDocument({ title: 'seat', objects: [
+    { id: 'actor', type: 'person', position: [0, 0, 0], pose: 'sitting', character: { model: 'adult-male' } },
+    { id: 'seat', type: 'box', position: [2, 0.5, 3], size: [1, 0.2, 1] },
+  ] })
+  const root = new Group()
+  const actor = new Group(); actor.name = 'scene-object:actor'
+  const body = new Group(); body.name = 'scene-character'
+  const hips = new Bone(); hips.name = 'Hips'; hips.position.y = 1
+  const spine = new Bone(); spine.name = 'Spine'; spine.position.y = 1.2
+  body.add(hips, spine, new Mesh(new BoxGeometry(0.3, 1, 0.3))); actor.add(body)
+  const seat = new Mesh(new BoxGeometry(1, 0.2, 1)); seat.name = 'scene-object:seat'; seat.position.set(2, 0.5, 3)
+  root.add(actor, seat)
+  const result = alignRenderedCharacterToSeat(source, root, 'actor', 'seat')
+  assert.deepEqual(result.document.objects[0].position.map(n => Math.round(n * 100)), [200, -30, 300])
+  assert.equal(result.report.contactMethod, 'hip-bone-estimate')
+  assert.equal(result.report.visualCheckRequired, true)
+  assert.deepEqual(source.objects[0].position, [0, 0, 0])
+  seat.rotation.x = 0.5
+  assert.throws(() => alignRenderedCharacterToSeat(source, root, 'actor', 'seat'), /倾斜/)
+  assert.throws(() => alignRenderedCharacterToSeat(source, root, 'actor', 'missing'), /座面/)
+})
+
+
+test('seating measures real skinned geometry for all five shipped models in translated groups', async () => {
+  for (const model of ['adult-male', 'adult-female', 'teen-male', 'teen-female', 'child'] as const) {
+    // Preserve the shipped geometry and skin; omit materials to avoid browser image APIs in Node.
+    const loader = new GLTFLoader().register(parser => {
+      for (const mesh of parser.json.meshes || []) for (const primitive of mesh.primitives) delete primitive.material
+      return { name: 'test-geometry-only' }
+    })
+    const bytes = readFileSync(`src-tauri/resources/storyboarder/models/${model}.glb`)
+    const gltf = await loader.parseAsync(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), '')
+    const body = gltf.scene; body.name = 'scene-character'
+    body.traverse(node => { if ((node as Bone).isBone) node.userData.storyboarderBindQuaternion = node.quaternion.toArray() })
+    applyStoryboarderCharacterState(body, { model, scale: 1 }, 'sitting')
+    const root = new Group()
+    const group = new Group(); group.position.set(5, 0, 2)
+    const actor = new Group(); actor.name = 'scene-object:actor'; actor.add(body); group.add(actor)
+    const cushion = new Mesh(new BoxGeometry(0.6, 0.1, 0.6)); cushion.name = 'scene-object:cushion'; cushion.position.set(1, 0.5, 3)
+    root.add(group, cushion)
+    const source = createScene3DDocument({ title: model, objects: [
+      { id: 'actor', type: 'person', position: [0, 0, 0], pose: 'sitting', character: { model } },
+      { id: 'cushion', type: 'box', position: [1, 0.5, 3], size: [0.6, 0.1, 0.6] },
+    ], groups: [{ id: 'actors', memberIds: ['actor'], position: [5, 0, 2] }] })
+    const placed = alignRenderedCharacterToSeat(source, root, 'actor', 'cushion')
+    assert.ok(placed.document.objects[0].position.every(Number.isFinite), model)
+    assert.ok(Number.isFinite(placed.report.footGap), model)
+    assert.ok(Math.abs(placed.document.objects[0].position[0] + 4) < 0.1, model)
+    assert.deepEqual(placed.document.groups, source.groups)
+  }
 })

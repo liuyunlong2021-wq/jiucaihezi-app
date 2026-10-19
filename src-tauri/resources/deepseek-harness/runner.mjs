@@ -50,10 +50,17 @@ createInterface({ input: process.stdin }).on('line', line => {
     return
   }
   if (command.type === 'list-sessions' || command.type === 'read-session') {
-    void harness.start().then(() => harness.client.request(
+    void harness.client.request(
       command.type === 'list-sessions' ? 'session/list' : 'session/read',
       command.type === 'read-session' ? { sessionId: command.sessionId } : {},
-    )).then(
+    ).then(
+      data => send({ type: 'query-result', requestId: command.requestId, data }),
+      error => sendError(command.requestId, error),
+    )
+    return
+  }
+  if (command.type === 'conversation-ui') {
+    void harness.client.request('session/ui', { ...command.params, provider: 'jiucaihezi', model: config.model }).then(
       data => send({ type: 'query-result', requestId: command.requestId, data }),
       error => sendError(command.requestId, error),
     )
@@ -108,6 +115,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   let turnTruncated = false
   void runHarnessTask(harness, command.contentBlocks, {
     sessionId: command.sessionId,
+    requiredTools: config.requiredTools || [],
     onNotification(notification) {
       // 子代理（subagent）的事件也走这条通知流，而子会话是独立 turn：
       // 只认本会话的 turn/end，否则子会话的失败会顶替本轮的结论——实测一轮 34 分钟正常

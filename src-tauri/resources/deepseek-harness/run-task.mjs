@@ -1,9 +1,10 @@
 import { SdkProtocolError, validatedSessionEvent } from '@deepseek-ai/dsh-sdk-client'
 
 // 官方 run() 在首次 idle 返回；工作台任务要等受管理子任务及根会话汇总结束。
-export async function runHarnessTask(harness, contentBlocks, { sessionId, onNotification }) {
+export async function runHarnessTask(harness, contentBlocks, { sessionId, onNotification, requiredTools = [] }) {
   await harness.start()
   const client = harness.client
+  if (requiredTools.length) await client.request('session/check-tools', { names: requiredTools })
   const subscription = client.subscribeSessionTree(sessionId)
   let received = false
   let finalResponse = ''

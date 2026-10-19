@@ -5,6 +5,7 @@ import (
 	"github.com/QuantumNous/new-api/jcmedia"
 	"github.com/QuantumNous/new-api/middleware"
 	"github.com/QuantumNous/new-api/ossdirect"
+	"github.com/QuantumNous/new-api/r2direct"
 	"github.com/gin-gonic/gin"
 	"log"
 	"net/http"
@@ -14,6 +15,36 @@ import (
 )
 
 func SetCreationMediaRouter(router *gin.Engine) {
+	r2Signer, r2Err := r2direct.New(os.Getenv("R2_ACCOUNT_ID"), os.Getenv("R2_BUCKET"), os.Getenv("R2_ACCESS_KEY_ID"), os.Getenv("R2_SECRET_ACCESS_KEY"))
+	if r2Err != nil {
+		log.Printf("[Creation media] Lingdong R2 experiment is not configured")
+	}
+	// Separate route: old clients and every other channel keep the existing OSS contract.
+	router.POST("/api/creations/lingdong/upload-url", middleware.TokenAuth(), func(c *gin.Context) {
+		c.Header("Cache-Control", "no-store")
+		if r2Signer == nil {
+			c.JSON(503, gin.H{"code": "r2_upload_unavailable", "message": "灵动 R2 直传暂未配置"})
+			return
+		}
+		var input struct {
+			Model       string `json:"model"`
+			ContentType string `json:"content_type"`
+			Size        int64  `json:"size"`
+		}
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 4096)
+		decoder := json.NewDecoder(c.Request.Body)
+		decoder.DisallowUnknownFields()
+		if err := decoder.Decode(&input); err != nil {
+			c.JSON(400, gin.H{"code": "bad_request", "message": "上传参数无效"})
+			return
+		}
+		grant, err := r2Signer.SignUpload(c.Request.Context(), c.GetInt("id"), input.Model, input.ContentType, input.Size)
+		if err != nil {
+			c.JSON(400, gin.H{"code": "bad_request", "message": "灵动参考素材型号、类型或大小不受支持"})
+			return
+		}
+		c.JSON(200, grant)
+	})
 	ossSigner, ossErr := ossdirect.New(
 		os.Getenv("OSS_ENDPOINT"),
 		os.Getenv("OSS_BUCKET"),

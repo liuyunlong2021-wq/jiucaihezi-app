@@ -32,6 +32,7 @@ assert set(changed)<= {'router/main.go','relay/channel/task/jsplugin/adaptor.go'
 PYCODE
 cp -R "$HERE/extension/jcmedia" "$BASE/source/"
 cp -R "$HERE/extension/ossdirect" "$BASE/source/"
+cp -R "$HERE/extension/r2direct" "$BASE/source/"
 cp "$HERE/extension/creation_media_router.go" "$BASE/source/router/"
 TEST_DIR=$BASE/source/relay/channel/task/jsplugin
 mkdir -p "$TEST_DIR/jc-test-plugins"
@@ -46,7 +47,7 @@ if 'SetCreationMediaRouter(router)' not in s:
  open(p,'w').write(s.replace(needle,needle+'\n\tSetCreationMediaRouter(router)',1))
 PY
 # Compile and verify against the exact official release before the full image build.
-docker run --rm -v "$BASE/source:/src" -w /src golang:1.26.1 sh -c 'go test ./relay/channel/task/jsplugin && go test -race ./jcmedia ./ossdirect && go test ./router -run "^$"'
+docker run --rm -v "$BASE/source:/src" -w /src golang:1.26.1 sh -c 'go test ./relay/channel/task/jsplugin && go test -race ./jcmedia ./ossdirect ./r2direct && go test ./router -run "^$"'
 docker build --progress plain -t "$TAG" "$BASE/source"
 docker image inspect "$TAG" --format 'PREPARED image={{.Id}}'
 docker inspect new-api --format 'Compose目录={{index .Config.Labels "com.docker.compose.project.working_dir"}} 配置={{index .Config.Labels "com.docker.compose.project.config_files"}} 服务={{index .Config.Labels "com.docker.compose.service"}}'

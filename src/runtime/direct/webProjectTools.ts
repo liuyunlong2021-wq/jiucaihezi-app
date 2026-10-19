@@ -63,7 +63,7 @@ export function buildMemoryWebProjectToolDefinitions() {
     ...WEB_PROJECT_TOOL_DEFINITIONS,
     ...MEMORY_FILE_TOOL_DEFINITIONS,
     ...MEMORY_ARTIFACT_TOOL_DEFINITIONS,
-  ].filter(tool => !['create_3d_scene', 'edit_3d_scene', 'copy'].includes(tool.function.name))
+  ].filter(tool => !['create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'copy'].includes(tool.function.name))
   const coreToolNames = coreTools.map(tool => tool.function.name)
   return [...coreTools, ...getMcpServerBridgeToolDefinitions({ coreToolNames })]
 }

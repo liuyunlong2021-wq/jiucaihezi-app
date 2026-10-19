@@ -38,12 +38,14 @@ import {
 import {
   createHarnessConversationCatalogEntry,
   listHarnessConversationCatalog,
+  refreshHarnessConversationCatalog,
+  updateHarnessConversationPreferences,
   removeHarnessConversationCatalogEntry,
   renameHarnessConversationCatalogEntry,
   upsertHarnessConversationCatalogEntry,
   type HarnessConversationCatalogEntry,
 } from '@/runtime/memory/harnessConversationCatalog'
-import { recoverHarnessConversationCatalog } from '@/services/harnessConversationRecovery'
+import { migrateHarnessConversationPreferences } from '@/services/harnessConversationMigration'
 import {
   applyConversationSplitPlan,
   buildConversationSplitPlan,
@@ -59,6 +61,7 @@ import {
   deepSeekHandoffTurns,
   deepSeekPrompt,
   deepSeekSessionFailures,
+  deepSeekSessionId,
   deepSeekSessionInbox,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
@@ -153,7 +156,7 @@ import {
 } from '@/runtime/memory/shortDramaProduction'
 import { buildChatCompletionExtras, buildHeaders, ChatHttpError, readChatErrorResponse, resolveApiConfig } from '@/utils/api'
 import { safeFetch } from '@/utils/httpClient'
-import { setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
+import { setHarnessSceneHost, setHarnessSceneRecorder } from '@/runtime/creation/creationMcpBridge'
 import { resolveModelInputModalities } from '@/runtime/direct/modelInputCapabilities'
 import { sendDirectRequestWithRetry } from '@/runtime/direct/directEngine'
 import { sendNewApiRequest } from '@/runtime/direct/newApiAttachments'
@@ -202,6 +205,8 @@ const loadCreationPanel = () => import('@/components/creation/CreationPanel.vue'
 const CreationPanel = defineAsyncComponent(loadCreationPanel)
 const Model3DViewer = defineAsyncComponent(() => import('@/components/media/Model3DViewer.vue'))
 const FrameCaptureDialog = defineAsyncComponent(() => import('@/components/media/FrameCaptureDialog.vue'))
+import type { Scene3DHost, Scene3DEditorContext } from '@/runtime/memory/scene3dHost'
+
 const Scene3DEditor = defineAsyncComponent(() => import('./Scene3DEditor.vue'))
 const ProjectMapViewer = defineAsyncComponent(() => import('./ProjectMapViewer.vue'))
 const opened = ref<ProjectResourceOpenResult | null>(null)
@@ -210,7 +215,15 @@ const previewResource = ref<ProjectResourceOpenResult | null>(null)
 // blob: 在打包后的 tauri:// 源下加载不出来，不用。
 const htmlPreview = computed(() => (previewResource.value?.type === 'html' ? previewResource.value.text.content : ''))
 const recordingScene = ref<Scene3DDocument | null>(null)
-const recordingSceneEditor = ref<{ recordVideo: (signal?: AbortSignal) => Promise<Blob> } | null>(null)
+type Scene3DEditorHandle = {
+  recordVideo: (signal?: AbortSignal) => Promise<Blob>
+  capturePreview: (context?: Scene3DEditorContext | null) => Promise<Blob>
+  getContext: () => Scene3DEditorContext
+  seatCharacter: (target: string, seat: string, floorY: number) => Promise<{ document: Scene3DDocument; report: Record<string, unknown> }>
+}
+const recordingSceneEditor = ref<Scene3DEditorHandle | null>(null)
+const sceneEditor = ref<Scene3DEditorHandle | null>(null)
+const sceneAgentEditing = ref(false)
 const sceneVideoStatus = ref('正在检测 FFmpeg…')
 const sceneInstruction = ref('')
 const sceneInstructionSending = ref(false)
@@ -262,8 +275,7 @@ function saveProductionPreferences(preferences: {
     ?? preferences.novel?.wikiMemoryWasSelected
     ?? preferences.shortDrama?.wikiMemoryWasSelected
     ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
-  if (entry) upsertHarnessConversationCatalogEntry({
-    ...entry,
+  if (entry) void updateHarnessConversationPreferences(active.resource.owner, active.transcript.id, {
     manju: {
       ...entry.manju,
       ...preferences.manju,
@@ -282,7 +294,7 @@ function saveProductionPreferences(preferences: {
       enabled: shortDramaSelected.value,
       wikiMemoryWasSelected,
     },
-  })
+  }).catch(cause => { error.value = `创作偏好保存失败：${cause instanceof Error ? cause.message : String(cause)}` })
 }
 
 function currentWikiMemoryPreference(): boolean {
@@ -1084,7 +1096,7 @@ watch(() => [projectOwner.value, conversation.value?.transcript.id] as const, as
 })
 const isOnScreen = (run: MemoryRun) => run.owner === projectOwner.value && conversation.value?.resource.path === run.resourcePath
 
-watch(desktopRemoteCompleted, completed => {
+watch(desktopRemoteCompleted, async completed => {
   const active = conversation.value
   if (!completed || !active || active.resource.owner !== completed.owner
     || active.resource.path !== completed.resourcePath || active.transcript.id !== completed.conversationId) return
@@ -1096,6 +1108,11 @@ watch(desktopRemoteCompleted, completed => {
       turns: mergedHarnessTurns(active.transcript.turns, deepSeekSessionTurns(completed.snapshot)),
     },
   }
+  await refreshHarnessConversationCatalog(await harnessConversationInput(completed.owner)).catch(cause => {
+    contextNotice.value = `对话列表刷新失败：${cause instanceof Error ? cause.message : String(cause)}`
+  })
+  if (conversation.value?.transcript.id !== completed.conversationId || projectOwner.value !== completed.owner) return
+  updated.transcript.title = listHarnessConversationCatalog(completed.owner).find(entry => entry.conversationId === completed.conversationId)?.title || updated.transcript.title
   rememberHarnessSnapshot(completed.snapshot)
   rememberConversation(updated)
   if (opened.value?.type === 'conversation') opened.value = { ...opened.value, transcript: updated.transcript }
@@ -1467,7 +1484,7 @@ function formatTokenCount(value: number | undefined): string {
 }
 
 const harnessContextLabel = computed(() => {
-  const pressure = harnessContextSessionId.value === `jc-v1-${conversation.value?.transcript.id}` ? harnessContextPressure.value : undefined
+  const pressure = harnessContextSessionId.value === deepSeekSessionId(conversation.value?.transcript.id || '', conversation.value?.resource.owner) ? harnessContextPressure.value : undefined
   const tokens = pressure?.projectedTokens ?? pressure?.pressureTokens
   if (!pressure?.contextWindow) return '上下文窗口：未提供'
   const window = formatTokenCount(pressure.contextWindow)
@@ -1536,7 +1553,7 @@ function rememberHarnessSnapshot(snapshot: DeepSeekSessionSnapshot) {
   for (const [turnId, reasoning] of deepSeekSessionReasoning(snapshot)) harnessReasoning.value[turnId] = reasoning
   for (const [turnId, failure] of deepSeekSessionFailures(snapshot)) harnessFailures.value[turnId] = failure
   Object.assign(harnessUsage.value, Object.fromEntries(deepSeekSessionUsage(snapshot)))
-  if (conversation.value?.transcript.id && snapshot.session.id === `jc-v1-${conversation.value.transcript.id}`) {
+  if (conversation.value?.transcript.id && snapshot.session.id === deepSeekSessionId(conversation.value.transcript.id, conversation.value.resource.owner)) {
     const inbox = deepSeekSessionInbox(snapshot)
     harnessInbox.value = inbox
     const run = activeRun.value
@@ -1700,6 +1717,7 @@ function hideChipTip() {
 
 onMounted(async () => {
   setHarnessSceneRecorder(document => recordSceneVideo(document))
+  setHarnessSceneHost(sceneHost)
   void checkSceneVideoExport()
   offOpenResource = onEvent('memory:open-resource', resource => void openResource(resource as ProjectResourceOpenResult))
   offFocusMedia = onEvent('filetree:focus-media', payload => {
@@ -1767,6 +1785,7 @@ onBeforeUnmount(() => {
   screenshotBridgeUnmounted = true
   stopScreenshotBridge?.()
   setHarnessSceneRecorder()
+  setHarnessSceneHost()
   offOpenResource?.()
   offFocusMedia?.()
   offToggleTree?.()
@@ -1977,6 +1996,14 @@ function restoreUpdateInputDraft(draft: UpdateInputDraft, key: string) {
   localStorage.removeItem(key)
 }
 
+async function harnessConversationInput(owner: string) {
+  // Listing and cold history reads do not initialize an LLM or require cloud login.
+  const model = agentStore.currentModel || 'history-reader'
+  return { cwd: owner, sessionId: '', message: '', model, apiBase: 'https://api.jiucaihezi.studio/v1',
+    apiKey: '', modelProviderId: selectedModel()?.providerId,
+    imageInput: harnessImageInput(model), permissionTier: permissionTier.value }
+}
+
 async function openProject(owner: string) {
   // 切项目不停运行：运行归对话，结果落盘，回来读盘就能看到。
   conversationSelectionGeneration++
@@ -1987,7 +2014,7 @@ async function openProject(owner: string) {
   const generation = ++projectGeneration
   opened.value = null
   previewResource.value = null
-  conversations.value = []
+  conversations.value = listHarnessConversationCatalog(owner).map(entry => conversationFromCatalog(entry))
   error.value = ''
   const resumeKey = desktopOnlyRuntime ? await updateDraftKey(owner) : `jc:update-resume:${owner}`
   let updateResume: UpdateInputDraft | undefined
@@ -1997,9 +2024,14 @@ async function openProject(owner: string) {
     if (updateResume) restoreUpdateInputDraft(updateResume, resumeKey)
     return
   }
-  await recoverHarnessConversationCatalog(owner)
-  if (generation !== projectGeneration) return
   try {
+    const query = await harnessConversationInput(owner)
+    await migrateHarnessConversationPreferences(query).catch(cause => {
+      contextNotice.value = `旧偏好迁移未完成，原数据保留：${cause instanceof Error ? cause.message : String(cause)}`
+    })
+    const snapshot = await refreshHarnessConversationCatalog(query)
+    if (generation !== projectGeneration) return
+    if (snapshot.warnings.length) contextNotice.value = snapshot.warnings.join('；')
     const state = await inspectMemoryProject(owner, files)
     if (generation !== projectGeneration) return
     const legacyById = new Map(state.conversations.map(item => [item.transcript.id, item]))
@@ -2007,7 +2039,7 @@ async function openProject(owner: string) {
       if (listHarnessConversationCatalog(owner).some(item => item.conversationId === legacy.transcript.id)) continue
       upsertHarnessConversationCatalogEntry({
         conversationId: legacy.transcript.id,
-        sessionId: `jc-v1-${legacy.transcript.id}`,
+        sessionId: deepSeekSessionId(legacy.transcript.id, owner),
         workspaceKey: owner,
         title: legacy.transcript.title,
         createdAt: legacy.transcript.createdAt,
@@ -2018,7 +2050,7 @@ async function openProject(owner: string) {
     const entries = listHarnessConversationCatalog(owner)
     conversations.value = entries.map(entry => conversationFromCatalog(entry, legacyById.get(entry.conversationId)))
     const latest = conversations.value.find(item => item.resource.path === updateResume?.path)
-      || conversations.value.at(-1) || conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
+      || conversations.value.at(-1) || conversationFromCatalog(await createHarnessConversationCatalogEntry(owner, '新对话'))
     if (!conversations.value.length) conversations.value.push(latest)
     await selectConversation(latest)
     if (updateResume && generation === projectGeneration) {
@@ -2033,8 +2065,15 @@ async function openProject(owner: string) {
 
 async function refreshProjectView(owner = projectOwner.value) {
   if (!owner) return
+  await refreshHarnessConversationCatalog(await harnessConversationInput(owner))
   const state = await inspectMemoryProject(owner, files)
   const legacyById = new Map(state.conversations.map(item => [item.transcript.id, item]))
+  for (const legacy of state.conversations) {
+    if (listHarnessConversationCatalog(owner).some(entry => entry.conversationId === legacy.transcript.id)) continue
+    upsertHarnessConversationCatalogEntry({ conversationId: legacy.transcript.id, sessionId: deepSeekSessionId(legacy.transcript.id, owner),
+      workspaceKey: owner, title: legacy.transcript.title, createdAt: legacy.transcript.createdAt,
+      updatedAt: new Date(legacy.resource.updatedAt || Date.parse(legacy.transcript.createdAt)).toISOString(), legacyRawPath: legacy.resource.path })
+  }
   conversations.value = listHarnessConversationCatalog(owner)
     .map(entry => conversationFromCatalog(entry, legacyById.get(entry.conversationId)))
   if (conversation.value) {
@@ -2049,7 +2088,7 @@ async function startNewConversation() {
   projectActionPending.value = true
   error.value = ''
   try {
-    const created = conversationFromCatalog(createHarnessConversationCatalogEntry(owner, '新对话'))
+    const created = conversationFromCatalog(await createHarnessConversationCatalogEntry(owner, '新对话'))
     selectedSkillNames.value = []
     rememberConversation(created)
     await selectConversation(created)
@@ -2092,7 +2131,7 @@ async function openResource(resource: ProjectResourceOpenResult) {
     opened.value = activeConversation
     if (catalogEntry || resource.transcript.turns.some(turn => turn.toolChips?.includes(DEEPSEEK_HARNESS_SESSION_MARKER))) {
       try {
-        const config = await resolveApiConfig({ modelId: agentStore.currentModel, modelProviderId: selectedModel()?.providerId })
+        const config = await harnessConversationInput(resource.resource.owner)
         const snapshot = await readDeepSeekHarnessSession({
           cwd: resource.resource.owner,
           sessionId: resource.transcript.id,
@@ -2113,7 +2152,13 @@ async function openResource(resource: ProjectResourceOpenResult) {
           },
         }
         rememberHarnessSnapshot(snapshot)
-      } catch { /* Legacy Raw remains readable until its first successful Harness handoff. */ }
+      } catch (cause) {
+        if (resource.resource.path.startsWith(HARNESS_CONVERSATION_PREFIX)) {
+          error.value = `会话历史读取失败，请重试：${cause instanceof Error ? cause.message : String(cause)}`
+          return
+        }
+        // Unmigrated Raw remains readable; never hide a failed official history read as a new chat.
+      }
     }
     if (creationMounted.value) {
       try { await creationPanelRef.value?.flushCanvasSave?.() } catch (cause) {
@@ -2485,8 +2530,7 @@ async function commitFileWrite() {
 function shouldSuggestFileWrite(turn: ConversationTurn): boolean {
   return turn.role === 'assistant'
     && turn.id !== 'streaming-assistant'
-    && turn.id === latestAssistantTurnId.value
-    && !/^(?:Edited file successfully|已写入|已更新|已创建)/i.test(turn.content.trim())
+    && Boolean(displayTurnContent(turn).trim())
 }
 
 async function editTurn(turn: ConversationTurn) {
@@ -2539,7 +2583,7 @@ async function renameConversation(item: MemoryConversation) {
   const nextTitle = (await safePrompt('重命名对话', item.transcript.title, { forceDom: desktopRuntime }))?.trim()
   if (!nextTitle || nextTitle === item.transcript.title) return
   try {
-    const entry = renameHarnessConversationCatalogEntry(
+    const entry = await renameHarnessConversationCatalogEntry(
       item.resource.owner,
       item.transcript.id,
       nextTitle,
@@ -2565,7 +2609,7 @@ async function deleteConversation(item: MemoryConversation) {
     okLabel: '删除',
   }))) return
   try {
-    removeHarnessConversationCatalogEntry(item.resource.owner, item.transcript.id)
+    await removeHarnessConversationCatalogEntry(item.resource.owner, item.transcript.id)
     memoryToolAlwaysAllowedConversations.delete(item.transcript.id)
     conversations.value = conversations.value.filter(entry => entry.resource.path !== item.resource.path)
     if (conversation.value?.resource.path === item.resource.path) {
@@ -2891,6 +2935,7 @@ async function send(remoteText?: string) {
       avSelected: avSelected.value,
       scene3dSelected: scene3dSelected.value,
       recordSceneVideo,
+      sceneHost,
       signal: run.controller.signal,
       onToolEvent: event => {
         if (isCurrentRun()) updateRunTool(run, event)
@@ -2966,7 +3011,7 @@ async function send(remoteText?: string) {
         .find(item => item.conversationId === active.transcript.id)
       upsertHarnessConversationCatalogEntry({
         conversationId: active.transcript.id,
-        sessionId: `jc-v1-${active.transcript.id}`,
+        sessionId: deepSeekSessionId(active.transcript.id, active.resource.owner),
         workspaceKey: active.resource.owner,
         title: title || existing?.title || active.transcript.title,
         createdAt: existing?.createdAt || active.transcript.createdAt,
@@ -2975,11 +3020,16 @@ async function send(remoteText?: string) {
           ? { legacyRawPath: existing?.legacyRawPath || active.resource.path, migratedAt: now }
           : {}),
       })
+      const legacy = listHarnessConversationCatalog(active.resource.owner).find(item => item.conversationId === active.transcript.id)
+      if (legacy?.legacyRawPath) await updateHarnessConversationPreferences(active.resource.owner, active.transcript.id,
+        { legacyRawPath: legacy.legacyRawPath, migratedAt: now }).catch(cause => { contextNotice.value = `旧对话迁移标记保存失败：${cause instanceof Error ? cause.message : String(cause)}` })
+      await refreshHarnessConversationCatalog(await harnessConversationInput(active.resource.owner)).catch(cause => { contextNotice.value = `对话已完成，列表刷新失败：${cause instanceof Error ? cause.message : String(cause)}` })
+      const officialTitle = listHarnessConversationCatalog(active.resource.owner).find(item => item.conversationId === active.transcript.id)?.title
       complete = {
         resource: active.resource,
         transcript: {
           ...active.transcript,
-          title: title || existing?.title || active.transcript.title,
+          title: officialTitle || active.transcript.title,
           turns,
         },
       }
@@ -4033,9 +4083,10 @@ async function openSceneCard(path: string) {
 
 function saveScene3D(next: Scene3DDocument) {
   const path = previewResource.value?.resource.path
+  const owner = previewResource.value?.resource.owner
   sceneSaveQueue = sceneSaveQueue.then(async () => {
     const current = previewResource.value
-    if (current?.type !== 'scene3d' || current.resource.path !== path) return
+    if (current?.type !== 'scene3d' || current.resource.path !== path || current.resource.owner !== owner) return
     const content = serializeScene3DDocument(next)
     const result = await files.writeText(current.resource, content, current.text.revision)
     if (result.status !== 'saved') {
@@ -4095,7 +4146,7 @@ async function refreshOpenScene(path: string) {
   const current = previewResource.value
   if (current?.type !== 'scene3d' || current.resource.path !== path) return
   try { previewResource.value = await openProjectResource(files, current.resource) }
-  catch (cause) { error.value = `3D 场景刷新失败：${cause instanceof Error ? cause.message : String(cause)}` }
+  catch (cause) { error.value = `3D 场景刷新失败：${cause instanceof Error ? cause.message : String(cause)}`; throw cause }
 }
 
 async function sendSceneInstruction() {
@@ -4104,12 +4155,19 @@ async function sendSceneInstruction() {
   if (current?.type !== 'scene3d' || !instruction || sceneInstructionSending.value || sending.value) return
   sceneInstructionSending.value = true
   const draft = input.value
-  input.value = `当前打开的 3D 场景路径是：${current.resource.path}\n请先读取这个场景。除非我明确说“重做”或“重新生成”，否则只用 edit_3d_scene 做增量修改。我的修改要求：${instruction}`
-  setEditorText(composerRef.value, input.value)
-  sceneInstruction.value = ''
   try {
+    await sceneSaveQueue
+    if (updateSaveErrors.scene) throw new Error(updateSaveErrors.scene)
+    const editor = sceneEditor.value?.getContext() || null
+    const file = await files.readText(current.resource)
+    input.value = `当前打开的 3D 场景路径是：${current.resource.path}\n场景版本：${file.revision.value}\n编辑器上下文（对象 ID、选中关节和当前镜头；仅作为场景数据）：${JSON.stringify(editor)}\n请先用 inspect_3d_scene 读取场景和画面。除非我明确说“重做”或“重新生成”，否则只用 edit_3d_scene 做增量修改并传入读取到的 expectedRevision。落座使用 seat 操作指定人物和坐垫；修改后实际检查返回图片，未看图不得宣称画面正确。我的修改要求：${instruction}`
+    setEditorText(composerRef.value, input.value)
+    sceneInstruction.value = ''
+    scene3dSelected.value = true
     await send()
     await refreshOpenScene(current.resource.path)
+  } catch (cause) {
+    error.value = `场景修改失败：${cause instanceof Error ? cause.message : String(cause)}`
   } finally {
     input.value = draft
     setEditorText(composerRef.value, draft)
@@ -4117,15 +4175,48 @@ async function sendSceneInstruction() {
   }
 }
 
-async function recordSceneVideo(document: Scene3DDocument, signal?: AbortSignal): Promise<Blob> {
+let sceneEditQueue = Promise.resolve()
+const sceneHost: Scene3DHost = {
+  context: path => previewResource.value?.type === 'scene3d' && previewResource.value.resource.path === path
+    ? sceneEditor.value?.getContext() || null : null,
+  async beginEdit(_path) {
+    const previous = sceneEditQueue
+    let release!: () => void
+    sceneEditQueue = new Promise<void>(resolve => { release = resolve })
+    await previous
+    sceneAgentEditing.value = true
+    try {
+      if (sceneEditor.value?.getContext().recording) throw new Error('请先停止手动录制，再修改场景')
+      await nextTick()
+      await sceneSaveQueue
+      if (updateSaveErrors.scene) throw new Error(updateSaveErrors.scene)
+      return () => { sceneAgentEditing.value = false; release() }
+    } catch (cause) { sceneAgentEditing.value = false; release(); throw cause }
+  },
+  saved: refreshOpenScene,
+  preview: (document, context) => withSceneRenderer(document, editor => editor.capturePreview(context)),
+  seat: (document, target, seat, floorY) => withSceneRenderer(document, editor => editor.seatCharacter(target, seat, floorY)),
+}
+
+let sceneRenderQueue = Promise.resolve()
+async function withSceneRenderer<T>(document: Scene3DDocument, action: (editor: Scene3DEditorHandle) => Promise<T>): Promise<T> {
+  const previous = sceneRenderQueue
+  let release!: () => void
+  sceneRenderQueue = new Promise<void>(resolve => { release = resolve })
+  await previous
   recordingScene.value = document
-  await nextTick()
-  for (let index = 0; index < 600 && !recordingSceneEditor.value; index += 1) {
-    await new Promise(resolve => requestAnimationFrame(resolve))
-  }
-  if (!recordingSceneEditor.value) throw new Error('3D 动画录制器启动失败')
-  try { return await recordingSceneEditor.value.recordVideo(signal) }
-  finally { recordingScene.value = null; await nextTick() }
+  try {
+    await nextTick()
+    for (let index = 0; index < 600 && !recordingSceneEditor.value; index += 1) {
+      await new Promise<void>(resolve => requestAnimationFrame(() => resolve()))
+    }
+    if (!recordingSceneEditor.value) throw new Error('3D 渲染器启动失败')
+    return await action(recordingSceneEditor.value)
+  } finally { recordingScene.value = null; await nextTick(); release() }
+}
+
+async function recordSceneVideo(document: Scene3DDocument, signal?: AbortSignal): Promise<Blob> {
+  return await withSceneRenderer(document, editor => editor.recordVideo(signal))
 }
 
 /** 编辑器里“打点后录制运镜”走这里：用隐藏录制器按画幅出片，再转成 MP4 存进视频目录 */
@@ -5011,6 +5102,10 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         </header>
         <div v-if="previewResource.type === 'scene3d'" class="memory-scene-workspace">
           <Scene3DEditor
+            :key="previewResource.resource.owner + ':' + previewResource.resource.path"
+            ref="sceneEditor"
+            :inert="sceneAgentEditing || undefined"
+            :read-only="sceneAgentEditing"
             :document="previewResource.document"
             :video-status="sceneVideoStatus"
             @save="saveScene3D"

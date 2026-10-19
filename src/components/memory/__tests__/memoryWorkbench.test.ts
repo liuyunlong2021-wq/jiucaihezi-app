@@ -686,6 +686,27 @@ test('memory messages expose one copy action and project GLB files use the share
   assert.match(viewer, /\.model-viewer \{ width: 100%; max-width: 100%; height: 68vh;/)
 })
 
+test('every completed assistant answer with visible text can be saved, including older and file-operation answers', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const body = workbench.match(/function shouldSuggestFileWrite\([\s\S]*?\n}/)?.[0]
+  assert.ok(body)
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const script = transformSync(body, { loader: 'ts' }).code
+  const visibleText = (turn: { content: string }) => turn.content
+  const canSave = new Function('latestAssistantTurnId', 'displayTurnContent', `${script}; return shouldSuggestFileWrite`)(
+    ref('latest-answer'), visibleText,
+  )
+  for (const [id, content] of [
+    ['older-answer', '之前的回答'], ['latest-answer', '当前回答'],
+    ['created', '已创建场景，以下是说明'], ['updated', '已更新文档'],
+    ['written', '已写入文件'], ['english', 'Edited file successfully'],
+  ]) assert.equal(canSave({ id, role: 'assistant', content }), true, `${id} must keep its save action`)
+  assert.equal(canSave({ id: 'empty', role: 'assistant', content: '  ' }), false)
+  assert.equal(canSave({ id: 'user', role: 'user', content: '问题' }), false)
+  assert.equal(canSave({ id: 'streaming-assistant', role: 'assistant', content: '生成中' }), false)
+  assert.match(workbench, /v-if="shouldSuggestFileWrite\(turn\)"[\s\S]*?@click="suggestFileWrite\(turn\)"/)
+})
+
 test('memory opens the latest conversation and keeps message actions at the bottom', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   assert.match(workbench, /conversations\.value\.at\(-1\)/)
@@ -1450,7 +1471,8 @@ test('3D scene editor clones plain scene data instead of Vue proxies', () => {
   const editor = source('src/components/memory/Scene3DEditor.vue')
 
   assert.match(editor, /let document = parseScene3DDocument\(props\.document\)/)
-  assert.match(editor, /document = parseScene3DDocument\(value\)/)
+  assert.match(editor, /const next = parseScene3DDocument\(value\)/)
+  assert.match(editor, /appendScene3DHistory\(history, historyIndex, next\)/)
   assert.match(editor, /sizeAttenuation: false/)
   assert.doesNotMatch(editor, /depthTest: false/)
   assert.match(editor, /scenePeople\.slice\(0, PERSON_BUTTON_LIMIT\)/)
@@ -2206,4 +2228,39 @@ test('answer metadata lives with output actions and selected capabilities sit on
   assert.ok(workbench.indexOf('class="memory-usage memory-answer-usage"') < composerStart)
   assert.match(workbench, /class="memory-composer-header"/)
   assert.match(workbench, /\.memory-composer-header \{ position: absolute;[^}]*bottom: calc\(100% \+ 1px\)/)
+})
+
+
+test('scene instruction waits for manual saves and sends actual selection, camera and revision', async () => {
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const body = workbench.slice(workbench.indexOf('async function sendSceneInstruction()'), workbench.indexOf('\nlet sceneEditQueue'))
+  let finishSave!: () => void
+  const order: string[] = []
+  const input = ref('原来的草稿')
+  const sent: string[] = []
+  const scene3dSelected = ref(false)
+  const dependencies = {
+    previewResource: ref({ type: 'scene3d', resource: { path: '.raw/jc-media/文档/train.jcscene' } }),
+    sceneInstruction: ref('把选中的人坐到座位上'), sceneInstructionSending: ref(false), sending: ref(false), input,
+    sceneSaveQueue: new Promise<void>(resolve => { finishSave = resolve }), updateSaveErrors: { scene: '' },
+    sceneEditor: ref({ getContext: () => ({ selectedId: 'passenger9', selectedBone: 'Head', camera: { focal: 85 }, time: 0 }) }),
+    files: { readText: async () => { order.push('read'); return { revision: { value: 'after-manual-save' } } } },
+    setEditorText: () => {}, composerRef: ref(null), scene3dSelected,
+    send: async () => { order.push('send'); sent.push(input.value) },
+    refreshOpenScene: async () => { order.push('refresh') }, error: ref(''),
+  }
+  const code = transformSync(body, { loader: 'ts', target: 'es2022' }).code
+  const execute = new Function(...Object.keys(dependencies), `${code}; return sendSceneInstruction`)(...Object.values(dependencies))
+  const pending = execute()
+  await Promise.resolve()
+  assert.equal(sent.length, 0)
+  finishSave(); await pending
+  assert.deepEqual(order, ['read', 'send', 'refresh'])
+  assert.match(sent[0], /passenger9/)
+  assert.match(sent[0], /after-manual-save/)
+  assert.match(sent[0], /85/)
+  assert.match(sent[0], /expectedRevision/)
+  assert.equal(scene3dSelected.value, true)
+  assert.equal(input.value, '原来的草稿')
 })

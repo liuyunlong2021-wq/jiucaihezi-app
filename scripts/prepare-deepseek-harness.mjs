@@ -98,11 +98,23 @@ function patch(before, after) {
   if (!server.includes(before)) throw new Error('Unsupported DeepSeek Harness SDK layout: ' + before.slice(0, 100))
   server = server.replace(before, after)
 }
-patch('const inject = ["agents", "workingDirectory"];', 'const inject = ["agents", "workingDirectory", "sessionQuery", "commands", "skills"];')
+const conversationUiUrl = '../../../../conversation-ui.mjs'
+const conversationUiImport = `import { createConversationUi } from ${JSON.stringify(conversationUiUrl)};\n`
+if (!server.includes(conversationUiImport)) server = conversationUiImport + server
+
+const injectLine = server.match(/^const inject = (\[[^\n]+\]);$/m)
+if (!injectLine) throw new Error('Unsupported DeepSeek Harness SDK injection layout')
+const sdkDependencies = [...new Set([...JSON.parse(injectLine[1]), 'sessionQuery', 'commands', 'skills', 'storageDomain', 'sessionTitle', 'sessionProjections', 'sessions', 'tools'])]
+patch(injectLine[0], `const inject = [${sdkDependencies.map(name => JSON.stringify(name)).join(', ')}];`)
+patch('if (method === "initialize") await ctx.get("loader")?.await();', 'if (method === "initialize" || method === "session/check-tools") await ctx.get("loader")?.await();')
 patch('import { ReasoningEffortId, createUserMessage } from "@deepseek-ai/dsh-llm";', 'import { ReasoningEffortId, createUserMessage, freezeMessage } from "@deepseek-ai/dsh-llm";')
 const streamBridge = '\t\tthis.disposers.push(ctx.on("agent/assistant-stream", ({ agent, frame }) => {\n\t\t\tthis.transport.notify("session.assistant-stream", { sessionId: String(agent.session.id), frame });\n\t\t}, { global: true }));\n'
 patch('\t\tconst serverOptions = this.options;\n', '\t\tconst serverOptions = this.options;\n' + streamBridge)
+// Rebuild only our added dispatch cases so repeated preparation cannot duplicate them.
+server = server.replace(/\n\t{3}case "session\/(?:list|read|ui|check-tools|permission|approval|update-queue|cancel)":.*(?=\n)/g, '')
 const requestExtensions = `
+			case "session/check-tools": { const missing = params.names.filter(name => !this.ctx.tools.get(name)); if (missing.length) throw new Error("内置工具未就绪：" + missing.join(", ") + "；请重新连接 App 后重试"); return { ready: true }; }
+			case "session/ui": return (this.conversationUi ??= createConversationUi(this))(params);
 			case "session/list": return this.ctx.sessionQuery.listSessions();
 			case "session/read": return this.readSession(params);
 			case "session/permission": return this.permission(params);

@@ -1,3 +1,4 @@
+import type { Scene3DHost } from './scene3dHost'
 import { useAgentStore } from '@/stores/agentStore'
 import wikiArtifactContract from '../../../public/skills/wiki-artifacts.json'
 import {
@@ -143,6 +144,7 @@ export interface MemoryChatInput {
   onRetry?: (attempt: number, total: number) => void
   onContextTrimmed?: (omittedMessages: number) => void
   confirmTool: (call: DirectToolCall) => boolean | Promise<boolean>
+  sceneHost?: Scene3DHost
   recordSceneVideo?: (document: Scene3DDocument, signal?: AbortSignal) => Promise<Blob>
   authorizedRawPaths?: string[]
   /** 本会话已累积的绝对路径授权；本输用户消息里的绝对路径会自动并入。 */
@@ -313,7 +315,7 @@ export function selectMemoryTools(
     ])
       allowed.add(name)
   if (scene3dSelected)
-    for (const name of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
+    for (const name of ['create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
       allowed.add(name)
   for (const name of [
     ...skillAllowedToolNames,
@@ -350,7 +352,7 @@ export function normalizeSkillAllowedToolNames(names: Iterable<string>): string[
       ])
         expanded.add(tool)
     } else if (name === '3d') {
-      for (const tool of ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
+      for (const tool of ['create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'])
         expanded.add(tool)
     } else if (/^mcp__[^_]+__.+$/.test(name)) {
       expanded.add(name.replace(/^((?:mcp__[^_]+)__).+$/, '$1').replace(/__$/, ''))
@@ -595,6 +597,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   }
   const rawProjectTools = isTauriRuntime()
     ? createDesktopProjectToolExecutor({
+        sceneHost: input.sceneHost,
+        sceneImageInput: supportsVision(input.modelId, providerId),
         projectDir: input.projectId || '',
         authorizedRawPaths: input.authorizedRawPaths,
         loadSkill: localSkillLoader,
@@ -928,7 +932,7 @@ function shouldReportProgramStatus(name: string): boolean {
 export function memoryProgramKind(name: string): MemoryProgramStatus['kind'] {
   if (name === 'terminal') return 'terminal'
   if (name.startsWith('mcp__')) return 'mcp'
-  if (name.startsWith('create_3d_') || name.startsWith('edit_3d_') || name.startsWith('export_3d_'))
+  if (name.startsWith('inspect_3d_') || name.startsWith('create_3d_') || name.startsWith('edit_3d_') || name.startsWith('export_3d_'))
     return '3d'
   if (name.startsWith('create_') || name.startsWith('export_')) return 'media'
   return 'file'

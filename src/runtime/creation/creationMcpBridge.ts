@@ -9,6 +9,7 @@ import { useMcpStore } from '@/stores/mcpStore'
 import { buildMemoryDesktopToolDefinitions } from '@/runtime/direct/creativeToolContract'
 import { createDesktopProjectToolExecutor } from '@/runtime/direct/desktopProjectTools'
 import { callMcpTool } from '@/services/mcpClient'
+import type { Scene3DHost } from '@/runtime/memory/scene3dHost'
 import type { Scene3DDocument } from '@/runtime/memory/scene3d'
 import { detectImageMimeFromBytes } from '@/utils/imageContracts'
 import { listDynamicCreationCapabilities, getDynamicCreationCapability, buildDynamicCreationPlan, CreationProtocolError, creationIdentity } from './creationProtocolClient'
@@ -29,6 +30,9 @@ let sceneRecorder: ((document: Scene3DDocument) => Promise<Blob>) | undefined
 export function setHarnessSceneRecorder(recorder?: (document: Scene3DDocument) => Promise<Blob>) {
   sceneRecorder = recorder
 }
+
+let sceneHost: Scene3DHost | undefined
+export function setHarnessSceneHost(host?: Scene3DHost) { sceneHost = host }
 
 function currentContext() {
   const project = useProjectStore()
@@ -182,7 +186,7 @@ function harnessToolCatalog(params: Record<string, unknown>) {
       ? ['export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides']
       : []),
     ...(selected.includes('3d')
-      ? ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video']
+      ? ['create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'export_3d_scene_video']
       : []),
   ])
   return buildMemoryDesktopToolDefinitions()
@@ -204,12 +208,12 @@ async function callHarnessTool(params: Record<string, unknown>) {
   if (mcpServerId) return { content: await callMcpTool(mcpServerId, name, args) }
 
   const owner = currentContext().project.owner
-  const result = await createDesktopProjectToolExecutor({ projectDir: owner, recordSceneVideo: sceneRecorder })({
+  const result = await createDesktopProjectToolExecutor({ projectDir: owner, recordSceneVideo: sceneRecorder, sceneHost })({
     id: crypto.randomUUID(),
     type: 'function',
     function: { name, arguments: JSON.stringify(args) },
   })
-  return { content: result.content }
+  return { content: result.content, image: result.details?.scenePreview }
 }
 
 async function handleBridgeRequestUnchecked(operation: string, params: Record<string, unknown>): Promise<unknown> {

@@ -1,238 +1,121 @@
-// 夹具：锁住 lingdong 插件的对外行为。
-// 存在理由与 comfy / dola / shanhai 同一条：面板的画幅、分辨率、时长都在旧渠道
-// `TaskSubmitReq` 白名单之外，走旧渠道会被整段丢掉，上游只能落回自己的默认值。
-// 跑法：node --test newapi-plugins/__tests__/lingdong.test.mjs
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
-
 import * as plugin from '../lingdong.plugin.js'
 
-const TEJIA = 'SD-2.5-特价'
-const SDA = 'sd2.5-a'
-const S480 = 'cvk-2.5-480'
-const S720 = 'cvk-2.5-720'
-const S1080 = 'cvk-2.5-1080'
+const VIDEO = ['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2']
+const IMAGE = ['灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst']
 const BASE = 'https://www.lingdongapi.com'
+const ctx = (model = VIDEO[0], extra = {}) => ({ model, upstreamModel: model, baseUrl: BASE, apiKey: 'test-key', requestBody: { model, prompt: '海边' }, ...extra })
+const decode = (model, value = {}, kind = 'json') => plugin.protocols[IMAGE.includes(model) ? 'openai_image' : 'openai_video'].decodeRequest({ model, body: { kind, value: { model, prompt: '海边', ...value } } })
 
-function decode(value, model = S720) {
-  return plugin.protocols.openai_video.decodeRequest({
-    model,
-    body: { kind: 'json', value: { model, ...value } },
-  })
-}
-
-function ctx(extra = {}) {
-  return {
-    model: S720,
-    upstreamModel: S720,
-    upstreamTaskId: 'task_lingdong_1',
-    apiKey: 'lingdong-key',
-    baseUrl: BASE,
-    requestBody: { model: S720, prompt: '人物回头' },
-    clientRequest: { method: 'GET' },
-    ...extra,
-  }
-}
-
-test('meta 对齐面板注册与渠道：10 个模型名逐字一致，无任何本地服务依赖', () => {
-  assert.equal(plugin.meta.apiVersion, 1)
-  assert.equal(plugin.meta.key, 'lingdong')
-  assert.equal(plugin.meta.version, '0.3.0')
-  assert.equal(plugin.meta.fetchMode, 'per_task')
-  assert.deepEqual(plugin.meta.protocols, ['openai_video'])
-  // 这条线直连厂商，baseUrl 是公网域名 —— 没有适配器、没有隧道
-  assert.equal(plugin.meta.baseUrl, BASE)
-  // 面板发什么名字，这里就必须收什么名字；渠道上多出来的名字会开始报 unsupported
-  assert.deepEqual(plugin.meta.models, [TEJIA, SDA, S480, S720, S1080, 'sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010'])
-  assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'seconds'])
+test('只保留四个前缀公开名，按图片与视频绑定协议', () => {
+  assert.equal(plugin.meta.version, '0.4.0')
+  assert.deepEqual(plugin.meta.models, [...VIDEO, ...IMAGE])
+  assert.deepEqual(plugin.meta.protocols, [{ name: 'openai_video', models: VIDEO }, { name: 'openai_image', models: IMAGE }])
+  assert.deepEqual(Object.keys(plugin.meta.usageSchema), ['calls', 'image_count'])
+  for (const example of plugin.meta.usageExamples) for (const key of Object.keys(plugin.meta.usageSchema)) assert.ok(key in example.facts)
 })
 
-test('新增型号保留图片、视频与音频参考，按次用量不随时长增加', () => {
-  for (const model of ['sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010']) {
-    const body = { model, prompt: '参考运动', duration: 4, images: ['https://x.test/a.png'], videos: ['https://x.test/v.mp4'], audios: ['https://x.test/a.mp3'] }
-    const intent = decode(body, model)
-    const request = plugin.buildSubmitRequest(ctx({ model, upstreamModel: model, requestBody: intent.requestBody }))
-    assert.deepEqual(request.body.videos, body.videos)
-    assert.deepEqual(request.body.audios, body.audios)
-    assert.equal(plugin.extractUsage({ requestBody: body }).calls, 1)
+test('旧名、原始名、跨协议、无提示词和multipart明确拒绝', () => {
+  for (const model of ['SD-2.5-特价', 'sd2.5-301010', 'sd2.5-满血-301010', ...IMAGE]) {
+    assert.throws(() => plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: { model, prompt: 'x' } } }), /Unsupported model/)
   }
+  assert.throws(() => plugin.protocols.openai_image.decodeRequest({ model: VIDEO[0], body: { kind: 'json', value: { model: VIDEO[0], prompt: 'x' } } }), /Unsupported model/)
+  assert.throws(() => decode(VIDEO[0], { prompt: ' ' }), /prompt is required/)
+  assert.throws(() => decode(IMAGE[0], {}, 'multipart'), /JSON/)
+  assert.throws(() => plugin.protocols.openai_video.decodeRequest({ model: VIDEO[0], body: { kind: 'json', value: [] } }), /object/)
 })
 
-test('★ 每个 usageExample 都要带齐所有声明的用量 key（宿主上传校验，少了直接拒收）', () => {
-  const keys = Object.keys(plugin.meta.usageSchema)
-  for (const example of plugin.meta.usageExamples) {
-    for (const key of keys) {
-      assert.ok(Object.prototype.hasOwnProperty.call(example.facts, key), `${example.label} 缺 ${key}`)
-    }
+test('自动去掉灵动前缀，上游显式映射优先', () => {
+  for (const model of [...VIDEO, ...IMAGE]) for (const upstreamModel of [undefined, model, model.slice(3)]) {
+    const request = plugin.buildSubmitRequest(ctx(model, { upstreamModel }))
+    assert.equal(request.body.model, model.slice(3))
+    assert.equal(request.headers.Authorization, 'Bearer test-key')
+    assert.equal(request.url, BASE + (IMAGE.includes(model) ? '/v1/images/generations' : '/v1/videos'))
+  }
+  assert.equal(plugin.buildSubmitRequest(ctx(VIDEO[0], { upstreamModel: 'vendor-id' })).body.model, 'vendor-id')
+})
+
+test('视频参考三类素材、画幅时长保留，不发图片残留字段', () => {
+  for (const model of VIDEO) {
+    const value = { prompt: '回头', imageUrl: 'https://x.test/a.png?sig=1', videos: ['https://x.test/v.mp4'], audios: ['https://x.test/a.mp3'], aspect_ratio: '9:16', resolution: '720p', duration: '30', n: 4, size: '2k' }
+    const intent = decode(model, value)
+    assert.equal(intent.action, 'image_to_video')
+    assert.deepEqual(plugin.buildSubmitRequest(ctx(model, { requestBody: intent.requestBody })).body, {
+      model: model.slice(3), prompt: value.prompt, images: [value.imageUrl], videos: value.videos, audios: value.audios,
+      ratio: '9:16', resolution: '720p', duration: 30, watermark: false,
+    })
+    assert.equal(decode(model).action, 'text_to_video')
   }
 })
 
-test('decodeRequest：只认登记模型、prompt 必填、按有无参考图定 action', () => {
-  assert.equal(decode({ prompt: '海边' }, TEJIA).action, 'text_to_video')
-  assert.equal(
-    decode({ prompt: '海边', images: ['https://api.jiucaihezi.studio/media/creation/a.png'] }).action,
-    'image_to_video',
-  )
-  // 兼容单图与别名
-  assert.equal(decode({ prompt: '海边', image: 'https://x.test/a.png' }).action, 'image_to_video')
-  assert.equal(decode({ prompt: '海边', imageUrl: 'https://x.test/a.png' }).action, 'image_to_video')
-  // 空数组不算有参考图
-  assert.equal(decode({ prompt: '海边', images: [] }).action, 'text_to_video')
-
-  assert.throws(() => decode({ prompt: '海边' }, 'cvk-9.9'), /Unsupported model/)
-  assert.throws(() => decode({ prompt: '   ' }), /prompt is required/)
-  assert.throws(
-    () => plugin.protocols.openai_video.decodeRequest({ model: TEJIA, body: { kind: 'multipart' } }),
-    /JSON body required/,
-  )
-  assert.throws(
-    () => plugin.protocols.openai_video.decodeRequest({ model: TEJIA, body: { kind: 'json', value: [] } }),
-    /must be an object/,
-  )
-})
-
-test('新增型号售价、按次表达式与 App 展示一致，成本加30%向上取整', () => {
-  const prices = JSON.parse(readFileSync(new URL('../lingdong-pricing-2026-10-14.json', import.meta.url), 'utf8'))
-  for (const row of prices.models) {
-    assert.ok(plugin.meta.models.includes(row.model))
-    assert.equal(row.salePriceCny, Math.ceil(row.upstreamCostCny * 1.3))
-    assert.equal(row.expression, `tier("base", u("calls") * ${row.salePriceCny})`)
+test('图片JSON URL参考、默认一张、张数校验，不静默丢弃非法素材', () => {
+  for (const model of IMAGE) {
+    const intent = decode(model, { images: ['https://x.test/a.png'], size: '720x1280', n: 2, duration: 30 })
+    assert.equal(intent.action, 'image_to_image')
+    assert.deepEqual(plugin.buildSubmitRequest(ctx(model, { requestBody: intent.requestBody })).body, {
+      model: model.slice(3), prompt: '海边', images: ['https://x.test/a.png'], size: '720x1280', n: 2, response_format: 'url',
+    })
+    assert.equal(plugin.buildSubmitRequest(ctx(model)).body.n, 1)
+    for (const n of [0, -1, 1.5, 'x']) assert.throws(() => decode(model, { n }), /positive integer/)
+    assert.throws(() => decode(model, { videos: ['https://x.test/v.mp4'] }), /video or audio/)
+    for (const url of ['data:image/png;base64,abc', 'blob:https://x.test/a', '/local.png', { ref: 'file' }]) assert.throws(() => decode(model, { images: [url] }), /HTTP/)
   }
 })
 
-test('★ 画幅 / 分辨率 / 时长原样送到上游，且只发文档字段（面板残留字段一律丢掉）', () => {
-  const intent = decode({
-    prompt: '人物回头',
-    ratio: '9:16',
-    resolution: '720p',
-    duration: 30,
-    images: ['https://api.jiucaihezi.studio/media/creation/a.png'],
-    // 面板会残留别的模型的字段（历史上 `resolution: '2k'` 打断过另一条线路）
-    size: '1024x1024',
-    mode: 'whatever',
-    seconds: 99,
-    metadata: { channel: 'x' },
-    n: 4,
-  })
-  const request = plugin.buildSubmitRequest(ctx({ requestBody: intent.requestBody, action: intent.action }))
-  assert.equal(request.url, `${BASE}/v1/videos`)
-  assert.equal(request.method, 'POST')
-  assert.equal(request.headers.Authorization, 'Bearer lingdong-key')
-  assert.equal(request.action, 'image_to_video')
-  assert.deepEqual(request.body, {
-    model: S720,
-    prompt: '人物回头',
-    images: ['https://api.jiucaihezi.studio/media/creation/a.png'],
-    ratio: '9:16',
-    resolution: '720p',
-    duration: 30,
-    watermark: false,
-  })
+test('即时图片结果按实际张数结算，不猜测未公开的图片轮询接口', () => {
+  const body = { created: 1, data: [{ url: 'https://x.test/out.png' }, { b64_json: 'fixture' }] }
+  const result = plugin.parseSubmitResponse(ctx(IMAGE[0], { publicTaskId: 'public-image' }), { body })
+  assert.equal(result.immediate.status, 'SUCCESS')
+  assert.equal(result.taskId, 'public-image')
+  assert.deepEqual(plugin.protocols.openai_image.render({}, { data: result.taskData }), body)
+  assert.deepEqual(plugin.extractUsageOnComplete({}, {}, result.taskData), { calls: 0, image_count: 2 })
+  for (const data of [[], [{}], [{ url: '' }]]) assert.throws(() => plugin.parseSubmitResponse(ctx(IMAGE[0]), { body: { data } }), /image results/)
+  assert.throws(() => plugin.parseSubmitResponse(ctx(IMAGE[0]), { body: { id: 'image-job', status: 'processing' } }), /image results/)
+  assert.throws(() => plugin.buildQueryRequest(ctx(IMAGE[0], { taskId: 'image-job' })), /image polling/)
+  assert.deepEqual(plugin.listArtifacts({ model: IMAGE[0], status: 'SUCCESS' }), [])
 })
 
-test('提交体：无参考图不发 images；缺时长不发 duration；渠道映射优先用上游 id', () => {
-  const request = plugin.buildSubmitRequest(
-    ctx({
-      model: TEJIA,
-      upstreamModel: undefined,
-      action: 'text_to_video',
-      requestBody: { model: TEJIA, prompt: '海边' },
-    }),
-  )
-  assert.deepEqual(request.body, { model: TEJIA, prompt: '海边', watermark: false })
-  assert.equal(request.action, 'text_to_video')
-
-  // 渠道配了 model_mapping 时发上游 id
-  const mapped = plugin.buildSubmitRequest(ctx({ upstreamModel: 'lingdong-upstream-id' }))
-  assert.equal(mapped.body.model, 'lingdong-upstream-id')
-
-  // 兼容 aspect_ratio 别名；duration 转成数字（`"10"` 也收）
-  const alias = plugin.buildSubmitRequest(ctx({ model: SDA, requestBody: { model: SDA, prompt: 'x', aspect_ratio: '1:1', duration: '10' } }))
-  assert.equal(alias.body.ratio, '1:1')
-  assert.equal(alias.body.duration, 10)
-})
-
-test('parseSubmitResponse：id / task_id 两种都认', () => {
-  const body = { id: 'task_lingdong_1', status: 'processing' }
-  assert.deepEqual(plugin.parseSubmitResponse({}, { statusCode: 200, body }), {
-    taskId: 'task_lingdong_1',
-    taskData: body,
-  })
-  assert.equal(
-    plugin.parseSubmitResponse({}, { statusCode: 200, body: { task_id: 'task_lingdong_2' } }).taskId,
-    'task_lingdong_2',
-  )
-  assert.throws(() => plugin.parseSubmitResponse({}, { statusCode: 200, body: { status: 'processing' } }), /did not return a task id/)
-})
-
-test('查询与成片路径跟宿主协议绑定逐字对齐', () => {
-  const query = plugin.buildQueryRequest(ctx({ taskId: 'task_lingdong_1' }))
-  assert.equal(query.url, `${BASE}/v1/videos/task_lingdong_1`)
-  assert.equal(query.method, 'GET')
-  assert.equal(query.headers.Authorization, 'Bearer lingdong-key')
-
-  // 灵动对 /content 原生支持 HEAD 与 Range，客户端用什么方法就透什么
-  const head = plugin.buildContentRequest(ctx({ artifactKey: 'video', clientRequest: { method: 'HEAD' } }))
-  assert.equal(head.url, `${BASE}/v1/videos/task_lingdong_1/content`)
-  assert.equal(head.method, 'HEAD')
-  assert.equal(head.headers.Authorization, 'Bearer lingdong-key')
-  assert.throws(
-    () => plugin.buildContentRequest(ctx({ artifactKey: 'poster' })),
-    /artifact_not_found/,
-  )
-})
-
-test('状态映射：processing / completed / failed + 不认识的算 UNKNOWN', () => {
-  assert.equal(plugin.parseTaskResult({}, { status: 'processing', progress: 45 }).status, 'IN_PROGRESS')
-  assert.equal(plugin.parseTaskResult({}, { status: 'queued' }).status, 'QUEUED')
+test('视频任务查询、状态、产物和HEAD鉴权不退化', () => {
+  for (const key of ['id', 'task_id']) assert.equal(plugin.parseSubmitResponse(ctx(), { body: { [key]: 'task/a' } }).taskId, 'task/a')
+  assert.throws(() => plugin.parseSubmitResponse(ctx(), { body: {} }), /task id/)
+  assert.equal(plugin.buildQueryRequest(ctx(VIDEO[0], { taskId: 'task/a' })).url, BASE + '/v1/videos/task%2Fa')
+  const req = plugin.buildContentRequest(ctx(VIDEO[0], { artifactKey: 'video', upstreamTaskId: 'task/a', clientRequest: { method: 'HEAD' } }))
+  assert.equal(req.url, BASE + '/v1/videos/task%2Fa/content')
+  assert.equal(req.method, 'HEAD')
+  assert.equal(req.headers.Authorization, 'Bearer test-key')
+  assert.throws(() => plugin.buildContentRequest(ctx(VIDEO[0], { artifactKey: 'poster' })), /artifact_not_found/)
+  assert.equal(plugin.parseTaskResult({}, { status: 'processing' }).status, 'IN_PROGRESS')
   assert.equal(plugin.parseTaskResult({}, { status: 'completed' }).status, 'SUCCESS')
-  assert.equal(plugin.parseTaskResult({}, { status: 'succeeded' }).status, 'SUCCESS')
-  const failed = plugin.parseTaskResult({}, { status: 'failed', error: { message: '灵动资源不足' } })
-  assert.equal(failed.status, 'FAILURE')
-  assert.match(failed.reason, /灵动资源不足/)
-  assert.equal(plugin.parseTaskResult({}, { status: 'cancelled' }).status, 'FAILURE')
-  assert.equal(plugin.parseTaskResult({}, {}).status, 'UNKNOWN')
-  assert.equal(plugin.parseTaskResult({}, { status: '神秘状态' }).status, 'UNKNOWN')
+  assert.match(plugin.parseTaskResult({}, { status: 'failed', error: { message: '资源不足' } }).reason, /资源不足/)
+  assert.equal(plugin.parseTaskResult({}, { status: 'unknown' }).status, 'UNKNOWN')
+  assert.deepEqual(plugin.listArtifacts({ model: VIDEO[0], status: 'SUCCESS' }), [{ key: 'video', type: 'video', mimeType: 'video/mp4' }])
+  assert.deepEqual(plugin.listArtifacts({ model: VIDEO[0], status: 'IN_PROGRESS' }), [])
+  const view = plugin.protocols.openai_video.render({ artifacts: { video: { url: '/v1/videos/public/content' } } }, { task_id: 'public', status: 'SUCCESS' })
+  assert.equal(view.video_url, '/v1/videos/public/content')
+  assert.equal(JSON.stringify(view).includes('test-key'), false)
 })
 
-test('成片只在 SUCCESS 时挂 artifact', () => {
-  assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS' }), [
-    { key: 'video', type: 'video', mimeType: 'video/mp4' },
-  ])
-  assert.deepEqual(plugin.listArtifacts({ status: 'IN_PROGRESS' }), [])
-})
-
-test('用量：两个口径都给值 —— 按次模型看 calls，按秒模型看 seconds', () => {
-  assert.deepEqual(plugin.extractUsage({ requestBody: { duration: 30 } }), { calls: 1, seconds: 30 })
-  assert.deepEqual(plugin.extractUsage({ requestBody: { seconds: 12 } }), { calls: 1, seconds: 12 })
-  // 面板必带 duration；真没带时按 10 秒预留（官方插件默认值），不报 0 也不按上限多扣
-  assert.deepEqual(plugin.extractUsage({ requestBody: {} }), { calls: 1, seconds: 10 })
-  // 补全事实逐 key 覆盖，没给的 key 保留提交值 —— 所以只回确定的 calls
+test('四个指定售价，视频按次、图片按张，视频不按时长加价', () => {
+  const pricing = JSON.parse(readFileSync(new URL('../lingdong-pricing-2026-10-14.json', import.meta.url), 'utf8'))
+  assert.equal(pricing.version, plugin.meta.version)
+  assert.deepEqual(pricing.models.map(row => row.model), plugin.meta.models)
+  const prices = [6, 8, 0.08, 0.1]
+  for (const [index, row] of pricing.models.entries()) {
+    assert.equal(row.upstreamModel, row.model.slice(3))
+    assert.equal(row.salePriceCny, prices[index])
+    assert.equal(row.expression, `tier("base", u("${IMAGE.includes(row.model) ? 'image_count' : 'calls'}") * ${prices[index]})`)
+  }
+  for (const model of VIDEO) for (const duration of [4, 30]) assert.deepEqual(plugin.extractUsage(ctx(model, { requestBody: { model, duration } })), { calls: 1, image_count: 0 })
+  for (const model of IMAGE) {
+    assert.deepEqual(plugin.extractUsage(ctx(model)), { calls: 0, image_count: 1 })
+    assert.deepEqual(plugin.extractUsage(ctx(model, { requestBody: { model, n: 3 } })), { calls: 0, image_count: 3 })
+  }
   assert.deepEqual(plugin.extractUsageOnComplete({}, {}, { status: 'completed' }), { calls: 1 })
 })
 
-test('★ 源码里不许出现宿主静态检查封的语法（实测 ".async" 会直接拒收上传）', () => {
-  // 报错原文：unsupported plugin syntax ".async": plugins must be synchronous and cannot import modules
-  // 宿主按关键字扫整份源码 —— 连注释里出现都算，所以这些写法一律不出现。
-  const source = readFileSync(fileURLToPath(new URL('../lingdong.plugin.js', import.meta.url)), 'utf8')
-  const banned = ['.async', 'async function', 'await ', 'import ', 'require(', 'import(']
-  for (const token of banned) {
-    assert.equal(source.includes(token), false, `插件源码里出现了宿主封的语法：${token}`)
-  }
-})
-
-test('render 输出宿主形状且不泄露厂商地址与渠道 Key', () => {
-  const view = plugin.protocols.openai_video.render(
-    { artifacts: { video: { url: '/v1/videos/task_x/content' } } },
-    { task_id: 'task_x', status: 'SUCCESS', progress: '100%', created_at: 1 },
-  )
-  assert.equal(view.id, 'task_x')
-  assert.equal(view.object, 'video')
-  assert.equal(view.status, 'completed')
-  assert.equal(view.video_url, '/v1/videos/task_x/content')
-  const text = JSON.stringify(view)
-  assert.equal(text.includes('lingdongapi.com'), false)
-  assert.equal(text.includes('lingdong-key'), false)
+test('宿主同步沙箱语法', () => {
+  const source = readFileSync(new URL('../lingdong.plugin.js', import.meta.url), 'utf8')
+  for (const token of ['.async', 'async function', 'await ', 'import ', 'require(', 'import(']) assert.equal(source.includes(token), false, token)
 })

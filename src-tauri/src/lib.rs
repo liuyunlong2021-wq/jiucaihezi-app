@@ -1779,7 +1779,6 @@ pub fn run() {
             commands::workspace::open_new_window,
             commands::workspace::claim_workspace,
             commands::session::read_session_token,
-            commands::harness::recover_harness_conversation_catalog,
             commands::session::write_session_token,
             commands::clipboard::write_clipboard_text,
             commands::clipboard::read_clipboard_image,
@@ -1972,9 +1971,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(|_, event| {
+    app.run(|app_handle, event| {
         if matches!(event, tauri::RunEvent::Exit { .. }) {
-            commands::creation_mcp::remove_discovery();
+            commands::creation_mcp::remove_discovery(app_handle);
             // stdio 子进程不会跟着 App 一起走：Harness 的 runner 还带着一个 dsh 孙进程，
             // 而会话写锁是跨进程内核锁且永不过期。退出前按进程树收干净，否则下次启动
             // 同一会话就撞 `already owned by an active write handle`。

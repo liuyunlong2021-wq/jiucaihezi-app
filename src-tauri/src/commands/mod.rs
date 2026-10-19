@@ -2,7 +2,6 @@ pub mod clipboard;
 pub mod creation_mcp;
 pub mod dev;
 pub mod greet;
-pub mod harness;
 pub mod http;
 pub(crate) mod media_download;
 pub mod image_edit;

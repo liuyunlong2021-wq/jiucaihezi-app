@@ -1,3 +1,4 @@
+import type { Scene3DEditorContext, Scene3DHost } from '@/runtime/memory/scene3dHost'
 import type { DirectToolExecutor, DirectToolResult } from './directTypes'
 import {
   boundedInteger,
@@ -151,6 +152,8 @@ export function createDesktopProjectToolExecutor(input: {
   preloadSkills?: string[]
   attachments?: TerminalAttachment[]
   renderImage?: MemoryImageRenderer
+  sceneHost?: Scene3DHost
+  sceneImageInput?: boolean
   recordSceneVideo?: (document: Scene3DDocument) => Promise<Blob>
 }): DirectToolExecutor {
   const root = String(input.projectDir || '').trim()
@@ -231,6 +234,36 @@ export function createDesktopProjectToolExecutor(input: {
     const rootPath = requireProject().replace(/\\/g, '/').replace(/\/+$/, '')
     const outputPath = String(result.path || '').replace(/\\/g, '/')
     return outputPath.startsWith(`${rootPath}/`) ? outputPath.slice(rootPath.length + 1) : path
+  }
+
+  async function commitScene(path: string, document: Scene3DDocument, expectedRevision: string, signal?: AbortSignal) {
+    signal?.throwIfAborted()
+    const content = serializeScene3DDocument(document)
+    const written = await invoke('dev_write_file_if_revision', {
+      root: requireProject(), relativePath: path, content, expectedRevision,
+    })
+    if (written.status !== 'saved') throw new Error('场景保存冲突或文件已移除，请重新读取；本次未覆盖其他修改')
+    const verified = await readFile(path)
+    if (verified.truncated || verified.content !== content) throw new Error('场景已保存，但读回结果发生变化，请重新检查')
+    await input.sceneHost?.saved(path)
+    return verified.revision
+  }
+
+  async function attachScenePreview(result: DirectToolResult, document: Scene3DDocument, signal?: AbortSignal, context?: Scene3DEditorContext | null) {
+    try {
+      if (!input.sceneHost) throw new Error('当前环境未连接 3D 渲染器')
+      const blob = await input.sceneHost.preview(document, context)
+      const bytes = new Uint8Array(await blob.arrayBuffer())
+      const previewPath = await writeGeneratedFile(`.raw/jc-media/图片/${artifactFilename(document.title + '-检查', 'png')}`, bytes, signal)
+      const data = uint8ArrayToBase64(bytes)
+      result.details = { ...result.details, scenePreview: { data, mimeType: 'image/png' } }
+      if (input.sceneImageInput !== false) result.followupMessages = [{ role: 'user', content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${data}` } }] }]
+      if (input.sceneImageInput === false) result.content += '\n当前模型不支持看图，视觉检查尚未完成。'
+      result.content += `\n画面检查图：${previewPath}。请实际查看图片；未检查视觉效果前，不得宣称落座、朝向或接触关系正确。`
+    } catch (cause) {
+      result.content += `\n画面尚未验证：${cause instanceof Error ? cause.message : String(cause)}。文件状态不能代替视觉验收。`
+    }
+    return result
   }
 
   function selectedLocalSkill(nameOrId: string): LocalCreativeSkill | undefined {
@@ -671,39 +704,63 @@ export function createDesktopProjectToolExecutor(input: {
       const existingPath = String(args.existingPath || '')
       if (existingPath && !/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(existingPath))
         throw new Error('已有白膜场景路径无效')
-      const content = serializeScene3DDocument(scene)
-      const path = existingPath
-        ? (await invoke('dev_write_file', {
-            root: requireProject(),
-            relativePath: existingPath,
-            content,
-          }),
-          existingPath)
-        : await writeGeneratedFile(
-            `.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`,
-            content,
-            signal,
-          )
-      return {
-        content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}`,
-      }
+      const unlock = existingPath ? await input.sceneHost?.beginEdit(existingPath) : undefined
+      try {
+        if (existingPath) {
+          const current = await readFile(existingPath)
+          if (!args.expectedRevision || current.revision?.value !== args.expectedRevision) throw new Error('场景版本已修改或缺少 expectedRevision，请先 inspect_3d_scene')
+          await commitScene(existingPath, scene, String(args.expectedRevision), signal)
+        }
+        const path = existingPath || await writeGeneratedFile(
+          `.raw/jc-media/文档/${artifactFilename(scene.title, 'jcscene')}`, serializeScene3DDocument(scene), signal,
+        )
+        return await attachScenePreview({
+          content: `已生成 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: scene.title, objectCount: scene.objects.length, formationCount: scene.formations.length })}`,
+        }, scene, signal, input.sceneHost?.context(path))
+      } finally { unlock?.() }
     }
 
-    if (name === 'edit_3d_scene') {
+    if (name === 'inspect_3d_scene' || name === 'edit_3d_scene') {
       const path = normalizeCreativeProjectPath(String(args.path))
-      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path))
-        throw new Error('白膜场景路径无效')
-      const scene = parseScene3DDocument(JSON.parse((await readFile(path)).content))
-      const next = applyScene3DEdits(scene, args.operations)
-      signal?.throwIfAborted()
-      await invoke('dev_write_file', {
-        root: requireProject(),
-        relativePath: path,
-        content: serializeScene3DDocument(next),
-      })
-      return {
-        content: `已增量修改 3D 白膜场景: ${path}\n${scene3DResultMarker({ path, title: next.title, objectCount: next.objects.length, formationCount: next.formations.length })}`,
-      }
+      if (!/^\.raw\/jc-media\/文档\/[^/]+\.jcscene$/i.test(path)) throw new Error('白膜场景路径无效')
+      const unlock = await input.sceneHost?.beginEdit(path)
+      try {
+        const file = await readFile(path)
+        if (file.truncated || !file.revision?.value) throw new Error('场景读取不完整或缺少版本，请重新读取')
+        let next = parseScene3DDocument(JSON.parse(file.content))
+        const reports: Record<string, unknown>[] = []
+        if (name === 'edit_3d_scene') {
+          if (args.expectedRevision !== file.revision.value) throw new Error('场景版本已修改，请重新 inspect_3d_scene 后规划操作')
+          if (!Array.isArray(args.operations) || !args.operations.length || args.operations.length > 100) throw new Error('3D 场景增量操作必须包含 1 到 100 项')
+          for (const raw of args.operations) {
+            if (raw?.action !== 'seat') { next = applyScene3DEdits(next, [raw]); continue }
+            if (Object.keys(raw).some(key => !['action', 'target', 'seat', 'floorY'].includes(key))) throw new Error('落座操作包含不支持的参数')
+            if (!input.sceneHost) throw new Error('当前环境未连接 3D 渲染器，无法测量落座')
+            const seat = next.objects.find(item => item.id === raw.seat)
+            const actor = next.objects.find(item => item.id === raw.target)
+            if (seat?.type !== 'box' || actor?.type !== 'person' || !actor.character) throw new Error('落座需要真实人物与独立 box 坐垫')
+            const floorY = raw.floorY === undefined ? 0 : raw.floorY
+            if (typeof floorY !== 'number' || !Number.isFinite(floorY)) throw new Error('落座地面高度无效')
+            next = applyScene3DEdits(next, [
+              { action: 'pose', target: actor.id, pose: 'sitting' },
+              { action: 'rotate', target: actor.id, to: seat.rotation || [0, 0, 0] },
+            ])
+            const placed = await input.sceneHost.seat(next, actor.id, seat.id, floorY)
+            next = parseScene3DDocument(placed.document)
+            reports.push(placed.report)
+          }
+          file.revision = await commitScene(path, next, file.revision.value, signal)
+        }
+        const result: DirectToolResult = {
+          content: name === 'edit_3d_scene'
+            ? `已增量修改并读回 3D 场景: ${path}\n${scene3DResultMarker({ path, title: next.title, objectCount: next.objects.length, formationCount: next.formations.length })}`
+            : `3D 场景: ${path}`,
+          details: { revision: file.revision, reports },
+        }
+        result.content += `\n${JSON.stringify({ revision: file.revision?.value, editor: input.sceneHost?.context(path) || null, reports, scene: next })}`
+        if (args.includeImage !== false) await attachScenePreview(result, next, signal, input.sceneHost?.context(path))
+        return result
+      } finally { unlock?.() }
     }
 
     if (name === 'export_3d_scene_video') {

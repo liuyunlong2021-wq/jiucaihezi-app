@@ -21,14 +21,15 @@ const resultSchema = { result: z.unknown() }
 async function invokeBridge(operation: string, params: Record<string, unknown>): Promise<unknown> {
   let discovery: Discovery
   try {
-    const [raw, metadata] = await Promise.all([readFile(discoveryPath, 'utf8'), stat(discoveryPath)])
+    const path = process.env.JIUCAIHEZI_BRIDGE_DISCOVERY || discoveryPath
+    const [raw, metadata] = await Promise.all([readFile(path, 'utf8'), stat(path)])
     if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) throw new Error('发现文件权限不是 600')
     discovery = JSON.parse(raw) as Discovery
   } catch (error) {
     throw new Error(`请先启动韭菜盒子 Desktop（无法读取 ${discoveryPath}：${error instanceof Error ? error.message : error}）`)
   }
   const url = new URL('/v1/invoke', discovery.address)
-  if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password) {
+  if (!discovery.token || url.protocol !== 'http:' || url.hostname !== '127.0.0.1' || !url.port || url.username || url.password) {
     throw new Error('韭菜盒子 MCP 发现文件中的本机地址无效')
   }
   const response = await fetch(url, {
@@ -141,7 +142,8 @@ export async function createProxyMcpServer(
       const text = result && typeof result === 'object' && 'content' in result
         ? String((result as { content: unknown }).content)
         : JSON.stringify(result)
-      return { content: [{ type: 'text' as const, text }] }
+      const image = result && typeof result === 'object' && 'image' in result ? (result as { image?: { data: string; mimeType: string } }).image : undefined
+      return { content: [{ type: 'text' as const, text }, ...(image ? [{ type: 'image' as const, data: image.data, mimeType: image.mimeType }] : [])] }
     } catch (error) {
       return toolError(error)
     }

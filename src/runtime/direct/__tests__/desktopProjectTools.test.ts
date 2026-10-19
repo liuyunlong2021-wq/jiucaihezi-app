@@ -122,7 +122,7 @@ test('creative tool definitions append connected MCP tools without changing core
     )
     assert.deepEqual(
       buildMemoryDesktopToolDefinitions().map(tool => tool.function.name),
-      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'skill_copy_asset', 'skill_run_script', 'mkdir', 'move', 'copy', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
+      ['skill', 'read', 'glob', 'grep', 'write', 'edit', 'skill_copy_asset', 'skill_run_script', 'mkdir', 'move', 'copy', 'delete', 'write_text_batch', 'export_markdown_png', 'create_document', 'create_html', 'export_markdown_slides', 'create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'export_3d_scene_video', 'terminal', 'mcp__docs'],
     )
     assert.match(
       buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'export_markdown_png')!.function.description,
@@ -136,8 +136,12 @@ test('creative tool definitions append connected MCP tools without changing core
     assert.match(sceneTool.function.description, /add a camera action for every section/)
     assert.match(sceneTool.function.parameters.properties.timeline.description, /without duration is a hard cut/)
     const editSceneTool = buildMemoryDesktopToolDefinitions().find(tool => tool.function.name === 'edit_3d_scene')!
-    assert.equal(editSceneTool.function.parameters.required.join(','), 'path,operations')
+    assert.equal(editSceneTool.function.parameters.required.join(','), 'path,expectedRevision,operations')
     assert.equal('objects' in editSceneTool.function.parameters.properties, false)
+    const operation = editSceneTool.function.parameters.properties.operations.items.properties
+    assert.ok(operation.action.enum.includes('pose'))
+    assert.ok(operation.action.enum.includes('rotate'))
+    assert.ok(operation.pose.enum.includes('sitting'))
   } finally {
     ;(globalThis as any).__jiucaihezi_mcpStore__ = original
   }
@@ -151,21 +155,29 @@ test('Web creative tools do not expose local Skill Asset or Script execution', (
 
 test('desktop incrementally edits one existing scene and writes it once', async () => {
   const writes: any[] = []
+  let content = JSON.stringify({ title: '街道', objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }] })
   const execute = createDesktopProjectToolExecutor({
     projectDir: '/fixture',
     invoke: async (command, payload) => {
-      if (command === 'dev_read_file') return { content: JSON.stringify({ title: '街道', objects: [{ id: 'person', type: 'person', position: [0, 0, 0] }] }) }
-      if (command === 'dev_write_file') { writes.push(payload.input); return payload.input.relativePath }
+      if (command === 'dev_read_file') return { content, revision: { value: 'r1' } }
+      if (command === 'dev_write_file_if_revision') { writes.push(payload.input); content = String(payload.input.content); return { status: 'saved' } }
       throw new Error(`unexpected command: ${command}`)
     },
   })
   const result = await execute(call('edit_3d_scene', {
-    path: '.raw/jc-media/文档/街道.jcscene',
-    operations: [{ action: 'move', target: 'person', to: [-2, 0, 1] }],
+    path: '.raw/jc-media/文档/街道.jcscene', expectedRevision: 'r1',
+    operations: [{ action: 'move', target: 'person', to: [-2, 0, 1] }, { action: 'pose', target: 'person', pose: 'sitting' }, { action: 'rotate', target: 'person', to: [0, Math.PI, 0] }],
   }))
-  assert.match(result.content, /已增量修改 3D 白膜场景/)
+  assert.match(result.content, /已增量修改并读回 3D 场景/)
   assert.equal(writes.length, 1)
   assert.deepEqual(JSON.parse(writes[0].content).objects[0].position, [-2, 0, 1])
+  assert.equal(JSON.parse(writes[0].content).objects[0].pose, 'sitting')
+  assert.deepEqual(JSON.parse(writes[0].content).objects[0].rotation, [0, Math.PI, 0])
+  await assert.rejects(() => execute(call('edit_3d_scene', {
+    path: '.raw/jc-media/文档/街道.jcscene', expectedRevision: 'r1',
+    operations: [{ action: 'pose', target: 'person', pose: 'sitting' }, { action: 'rotate', target: 'missing', to: [0, 0, 0] }],
+  })))
+  assert.equal(writes.length, 1, 'invalid batch must not write partial changes')
 })
 
 test('desktop exports an animated scene through the local recorder and FFmpeg command', async () => {
@@ -705,4 +717,96 @@ test('desktop creative terminal blocks only an immediate identical retry after f
 
   assert.match(repeated.content, /不要原样重复/)
   assert.deepEqual(commands, ['extract-frame', 'repair-environment', 'extract-frame'])
+})
+
+
+test('scene editing refuses stale revisions and returns rendered verification after a conditional save', async () => {
+  const scene = { title: 'seat', objects: [{ id: 'actor', type: 'person', position: [0, 0, 0] }] }
+  let content = JSON.stringify(scene)
+  const calls: string[] = []
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    sceneHost: {
+      context: () => ({ selectedId: 'actor', selectedBone: null, camera: { position: [1, 2, 3], target: [0, 0, 0] }, time: 0 }),
+      beginEdit: async () => { calls.push('lock'); return () => { calls.push('unlock') } },
+      saved: async () => { calls.push('refresh') },
+      preview: async (_document, context) => {
+        assert.equal(context?.selectedId, 'actor')
+        assert.deepEqual(context?.camera.position, [1, 2, 3])
+        return new Blob(['png'], { type: 'image/png' })
+      },
+      seat: async () => { throw new Error('not expected') },
+    },
+    invoke: async (command, payload) => {
+      calls.push(command)
+      if (command === 'dev_read_file') return { content, revision: { value: 'r1' } }
+      if (command === 'dev_write_file_if_revision') {
+        assert.equal(payload.input.expectedRevision, 'r1')
+        content = String(payload.input.content)
+        return { status: 'saved', revision: { value: 'r2' } }
+      }
+      if (command === 'save_generated_file') return { path: payload.input.path }
+      throw new Error(command)
+    },
+  })
+  const path = '.raw/jc-media/文档/seat.jcscene'
+  await assert.rejects(() => execute(call('edit_3d_scene', { path, expectedRevision: 'old', operations: [{ action: 'pose', target: 'actor', pose: 'sitting' }] })), /版本|修改/)
+  assert.ok(!calls.includes('dev_write_file_if_revision'))
+  const result = await execute(call('edit_3d_scene', { path, expectedRevision: 'r1', operations: [{ action: 'pose', target: 'actor', pose: 'sitting' }] }))
+  assert.ok(calls.includes('dev_write_file_if_revision'))
+  assert.ok(calls.indexOf('refresh') > calls.indexOf('dev_write_file_if_revision'))
+  assert.equal(calls.at(-1), 'unlock')
+  assert.equal(result.followupMessages?.[0].content[0].type, 'image_url')
+  assert.equal(result.details?.scenePreview && typeof result.details.scenePreview, 'object')
+  assert.match(result.content, /视觉|画面/)
+  const inspected = await execute(call('inspect_3d_scene', { path, includeImage: false }))
+  assert.match(inspected.content, /actor/)
+  assert.match(inspected.content, /selectedId/)
+})
+
+
+test('seat operations measure the posed model before one commit and abort invalid batches without partial writes', async () => {
+  let content = JSON.stringify({ title: 'train', objects: [
+    { id: 'actor', type: 'person', position: [0, 0, 0], character: { model: 'adult-male' } },
+    { id: 'cushion', type: 'box', position: [2, 0.5, 3], rotation: [0, Math.PI, 0] },
+  ] })
+  let writes = 0, refreshed = 0, released = 0
+  let conflict = false
+  const execute = createDesktopProjectToolExecutor({
+    projectDir: '/fixture',
+    sceneHost: {
+      context: () => null,
+      beginEdit: async () => () => { released++ },
+      saved: async () => { refreshed++ },
+      preview: async () => { throw new Error('fixture render unavailable') },
+      seat: async (document, target, seat, floorY) => {
+        assert.equal(target, 'actor'); assert.equal(seat, 'cushion'); assert.equal(floorY, 0)
+        assert.equal(document.objects[0].pose, 'sitting')
+        assert.deepEqual(document.objects[0].rotation, [0, Math.PI, 0])
+        document.objects[0].position = [2, 0.2, 3]
+        return { document, report: { visualCheckRequired: true, footGap: 0.1 } }
+      },
+    },
+    invoke: async (command, payload) => {
+      if (command === 'dev_read_file') return { content, revision: { value: 'r1' } }
+      if (command === 'dev_write_file_if_revision') {
+        if (conflict) return { status: 'conflict' }
+        writes++; content = String(payload.input.content); return { status: 'saved' }
+      }
+      throw new Error(command)
+    },
+  })
+  const path = '.raw/jc-media/文档/train.jcscene'
+  const seat = { action: 'seat', target: 'actor', seat: 'cushion' }
+  await assert.rejects(() => execute(call('edit_3d_scene', { path, expectedRevision: 'r1', operations: [seat, { action: 'remove', target: 'missing' }] })))
+  assert.equal(writes, 0)
+  const result = await execute(call('edit_3d_scene', { path, expectedRevision: 'r1', operations: [seat] }))
+  assert.equal(writes, 1); assert.equal(refreshed, 1)
+  assert.deepEqual(JSON.parse(content).objects[0].position, [2, 0.2, 3])
+  assert.match(result.content, /画面尚未验证/)
+  assert.equal(result.followupMessages, undefined)
+  conflict = true
+  await assert.rejects(() => execute(call('edit_3d_scene', { path, expectedRevision: 'r1', operations: [seat] })), /冲突/)
+  assert.equal(refreshed, 1)
+  assert.equal(released, 3)
 })

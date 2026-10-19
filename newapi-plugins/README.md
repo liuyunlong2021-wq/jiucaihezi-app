@@ -5,6 +5,8 @@
 
 ## 约定
 
+接入任何 URL 素材渠道前，完整读取 [URL素材渠道接入执行手册](../docs/wiki/运维/URL素材渠道接入执行手册.md)，填写合同卡并分步验收。灵动 v0.20.7 成功经验：客户端向 NewAPI 请求 `b64_json`，插件按厂商合同请求 URL，由已有宿主负责下载；不要机械把所有渠道改成同一输入格式，也不要把客户端/厂商两层响应格式混为一谈。
+
 | 约定 | 说明 |
 |---|---|
 | 文件名 | `<key>.plugin.js`，`key` 与 `meta.key` 一致 |
@@ -21,10 +23,46 @@
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
 | `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.4` 修正视频文件字段读取为宿主的 `file.field`；0.3.3 的本地文件提交会报 undefined，须上传并激活新版。真实验收待执行 |
-| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | 代码已就绪，**未上传或生产验收**；使用 `openai_image`，由 NewAPI 主机轮询后返回图片 URL |
+| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.0` 仅五个 `xy-` 图片模型，文件直传、向上游请求 Base64；已本地测试，未上传；宿主大响应容量与真实生成待验收 |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
 | `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |
 | `yihong.plugin.js` | `yihong` | 易红视频与同步图片 API | 0.1.7 共 16 个上游型号，新增 3 个 `yihong-` 图片公开别名；保留分辨率枚举修复，待上传/激活；5 个图片型号需 rc.40 大响应补丁，真实生成与账单待验收 |
+| `lingdong.plugin.js` | `lingdong` | 灵动图片与视频 API | 0.4.0 仅四个 `灵动-` 公开名，用户已上传配置；画布/R2 配套已本地实现，待部署与真实验收 |
+
+## 灵动四模型配置
+
+上传 `lingdong.plugin.js` 0.4.0 后选择并激活此版本，将**灵动渠道**的模型列表替换为下列四项，删除该渠道其他型号。不要删除其他渠道的同名模型。插件会自动移除 `灵动-` 前缀发送厂商原名；若后台有旧映射，也必须清理或对应修改。
+
+| 公开模型名 | 人民币售价 | Task Usage 表达式 |
+|---|---|---|
+| `灵动-sd2.5-满血-301010` | 6 元/次 | `tier("base", u("calls") * 6)` |
+| `灵动-sd2.5-满血-301010-2` | 8 元/次 | `tier("base", u("calls") * 8)` |
+| `灵动-gpt-image-2.5-flare` | 0.08 元/张 | `tier("base", u("image_count") * 0.08)` |
+| `灵动-gpt-image-2.5-sunburst` | 0.1 元/张 | `tier("base", u("image_count") * 0.1)` |
+
+定价清单保留在 `lingdong-pricing-2026-10-14.json`；不再使用原成本加价公式。上传 JS **不会自动修改后台渠道名单和定价**；沿用既有人民币系数口径，生产实际扣费仍需验收。
+
+## 小易五图片模型配置（0.3.0）
+
+上传文件为 **`xiaoyi-image.plugin.js`**，不是 `__tests__/xiaoyi-image.test.mjs`。继续绑定 key `xiaoyi-image`，Base URL 保持 `https://image.xiaoyiapi.xyz`。仅替换小易目标渠道的模型列表，不删除其他渠道模型。插件内置公开名到上游原名映射，不必另建相同映射；旧渠道映射需要检查清理。
+
+| 公开模型名 | 允许档位 | 人民币售价 | Task Usage 表达式 |
+| --- | --- | --- | --- |
+| `xy-gpt-image-2-1k` | 1K | 0.04/张 | `tier("base", u("image_count") * 0.04)` |
+| `xy-gpt-image-2.5-1k` | 1K | 0.04/张 | `tier("base", u("image_count") * 0.04)` |
+| `xy-gpt-image-2.5-flare-1k` | 1K | 0.04/张 | `tier("base", u("image_count") * 0.04)` |
+| `xy-gpt-image-2.5-sunburst-1k` | 1K | 0.04/张 | `tier("base", u("image_count") * 0.04)` |
+| `xy-grok-imagine-image-2.0` | 1K、2K | 0.08/张 | `tier("base", u("image_count") * 0.08)` |
+
+清单见 `xiaoyi-image-pricing.json`，上传插件不会自动设置价格。0.3.0 移除所有视频协议和视频用量，先等该渠道旧视频任务结束再激活，不继续沿用引用 `seconds` / `resolution` 的视频计费表达式。
+
+文生图 JSON、编辑 multipart `image` / `image[]`，均调用现有异步端点；不调用 OSS/R2，不改画布名单。用户已确认严格预设校验：缺省尺寸沿用 `1024x1024`，四个 GPT 仅接受现有画布九个 1K 预设，Grok 接受九个 1K 与九个 2K 预设；未识别的自定义尺寸在收费提交前拒绝，不自动缩小。`quality=high` 不代表 4K，不用它代替 `size`。插件预设不代表供应商已逐项验收，真实输出仍需核对。
+
+**激活前闸门**：当前本地 rc.40 宿主容量补丁只覆盖易红；小易异步任务的 Base64 查询响应、JS hook 结果和 taskData 持久化容量尚未验证，大图可能超过默认限制。必须先核对目标宿主，不能据 Node 模拟通过宣称只上传插件就可稳定出图，也不能失败后重复付费生成。真实五型号权限、返回 Base64、画布保存和扣费均待验收。本次未修改宿主限制或发布生产。
+
+按[灵动官方文档](https://www.lingdongapi.com/docs/api/?v=20260517)使用 JSON `images` 公网 URL 传图片参考，不接 multipart 本地字节；图片默认 `n=1`，按请求张数预留、按返回有效图片数结算；视频固定 `calls=1`，不按秒收费。图片结果采用现有宿主的 OpenAI `data` 即时结果合同；文档未给出图片异步查询路径，若只回任务号会明确报错，不猜测路径或创建第二个任务。真实响应形状、大图响应容量和读回可用性待验收。
+
+用户已上传插件并配置渠道和定价；随后画布图生图报 JSON body required。本地已补齐四个新名称的画布合同：图片原图→现有 R2→JSON images，服务端签名白名单同步四个公开名。画布28项、插件147项与 Go 三包通过；未构建发布或更新生产白名单。**不能仅上传插件就宣称图生图/图生视频可用**：需要先更新服务端镜像再发布画布，真实图片返回、素材读取、生成和账单仍待验收。首次试验镜像及固定基线切换脚本不能直接用于此次升级，见兄弟画布仓库 `deploy/lingdong-r2-experiment.md` 当前修复节。
 
 ## 本地验证
 
@@ -59,4 +97,4 @@ FK 2026-10-14 Seedance 2.5：三保留、三新增、四旧型号隐藏；插件
 
 小易图片 2026-10-13 官方合同复查：`xiaoyi-image` 0.1.2补齐n计费一致性、background/output_format透传、JSON参考图拒绝、Grok size/比例校验和成功结果校验；135/135插件回归通过，生产上传与真实生成待验收。见 `docs/wiki/运维/小易图片官方合同复查-2026-10-13.md`。
 
-小易0.2.0继续使用key `xiaoyi-image`，扩展 `grok-imagine-video-1.5`；原图片模型保留，视频480p/720p/1080p按0.2/0.3/0.4每秒。渠道需新增精确名称并保存分档Task Usage表达式，见 `docs/wiki/运维/小易GrokVideo1.5三档接入-2026-10-13.md`。
+历史小易0.2.0曾使用key `xiaoyi-image` 扩展 `grok-imagine-video-1.5`；当前0.3.0按用户要求改为上文五个图片型号，不再登记任何视频。旧视频记录见 `docs/wiki/运维/小易GrokVideo1.5三档接入-2026-10-13.md`，不要照旧步骤重新添加视频。

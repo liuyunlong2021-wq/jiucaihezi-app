@@ -17,20 +17,41 @@ const jsonOutput = {
   schema: { type: 'json' },
   render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) ?? 'null' }],
 }
-const textOutput = {
-  schema: { type: 'string' },
-  render: (_args, value) => [{ type: 'text', text: value }],
+export function renderAppToolResult(_args, value) {
+  return [{ type: 'text', text: value.content }, ...(value.image ? [{ type: 'image', attachment: value.image }] : [])]
+}
+const appToolOutput = { schema: { type: 'json' }, render: renderAppToolResult }
+
+export async function prepareAppToolResult(ctx, result, exec) {
+  const value = { content: result && typeof result === 'object' && 'content' in result
+    ? String(result.content ?? '') : typeof result === 'string' ? result : JSON.stringify(result) ?? 'null' }
+  if (!result?.image) return value
+  try {
+    const routed = exec.agent?.session.requestHeader()?.config
+    const provider = routed?.provider ?? exec.agent?.options.provider
+    const model = routed?.model ?? exec.agent?.options.model
+    const llm = ctx.get('llm')
+    const attachments = ctx.get('attachments')
+    if (!provider || !model || !llm || !attachments) throw new Error('当前模型路线或图片存储不可用')
+    const info = await llm.resolveModelInfo(provider, model, exec.signal)
+    if (!info.inputModalities?.includes('image')) throw new Error('当前模型不支持看图')
+    value.image = await attachments.saveImage({ data: Buffer.from(result.image.data, 'base64'), mediaType: result.image.mimeType, name: '3D 场景检查.png' })
+  } catch (error) {
+    value.content += `\n视觉检查尚未完成：${error instanceof Error ? error.message : String(error)}。不得宣称已看图验收。`
+  }
+  return value
 }
 
 async function invokeApp(operation, params) {
   let discovery
   try {
-    discovery = JSON.parse(await readFile(discoveryPath, 'utf8'))
+    // Each App owns its discovery file; the shared path is only for external clients.
+    discovery = JSON.parse(await readFile(process.env.JIUCAIHEZI_BRIDGE_DISCOVERY || discoveryPath, 'utf8'))
   } catch (error) {
     throw new Error(`请先启动韭菜盒子 Desktop：${error instanceof Error ? error.message : String(error)}`)
   }
   const address = new URL(String(discovery.address || ''))
-  if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1' || !address.port
+  if (address.protocol !== 'http:' || address.hostname !== '127.0.0.1' || !address.port || address.username || address.password
     || typeof discovery.token !== 'string' || !discovery.token) {
     throw new Error('韭菜盒子本机桥接地址无效')
   }
@@ -145,16 +166,15 @@ function registerAppTools(ctx, capabilities, listed) {
       name: tool.name,
       description: String(tool.description || tool.name),
       parameters,
-      output: textOutput,
+      output: appToolOutput,
       timeoutMs: tool.name === 'export_3d_scene_video' ? 900_000 : undefined,
-      async execute(args) {
+      async execute(args, exec) {
         const result = await invokeApp('call_harness_tool', {
           capabilities,
           name: tool.name,
           arguments: args,
         })
-        if (result && typeof result === 'object' && 'content' in result) return String(result.content ?? '')
-        return typeof result === 'string' ? result : JSON.stringify(result) ?? 'null'
+        return await prepareAppToolResult(ctx, result, exec)
       },
     }))
   }
@@ -164,11 +184,7 @@ export async function apply(ctx, config) {
   if (config.creation) registerCreationTools(ctx, config.allowPaid)
   const capabilities = [...new Set(config.capabilities.filter(item => item === 'media' || item === '3d'))]
   if (capabilities.length) {
-    try {
-      const listed = await invokeApp('list_harness_tools', { capabilities })
-      registerAppTools(ctx, capabilities, listed)
-    } catch (error) {
-      console.error(`[jiucaihezi] 内置工具目录加载失败：${error instanceof Error ? error.message : String(error)}`)
-    }
+    const listed = await invokeApp('list_harness_tools', { capabilities })
+    registerAppTools(ctx, capabilities, listed)
   }
 }

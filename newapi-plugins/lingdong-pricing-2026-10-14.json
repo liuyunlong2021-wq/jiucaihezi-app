@@ -1,13 +1,12 @@
 {
   "plugin": "lingdong",
-  "version": "0.3.0",
-  "pricingRule": "新增型号：ceil(上游人民币成本 * 1.3)，现有售价保持不变",
+  "version": "0.4.0",
+  "pricingRule": "用户指定售价：图片按张，视频按次；不按视频时长加价",
   "coefficientConvention": "沿用现有后台的人民币售价与Task Usage系数同数值口径；实扣待验证",
   "models": [
-    { "model": "sd-2.5-720-v3", "upstreamCostCny": 15, "salePriceCny": 20, "expression": "tier(\"base\", u(\"calls\") * 20)" },
-    { "model": "SD-2.5-特价-2", "upstreamCostCny": 2.5, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" },
-    { "model": "sd2.5-3033", "upstreamCostCny": 2.5, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" },
-    { "model": "sd2.5-101010", "upstreamCostCny": 2.5, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" },
-    { "model": "sd2.5-301010", "upstreamCostCny": 3, "salePriceCny": 4, "expression": "tier(\"base\", u(\"calls\") * 4)" }
+    { "model": "灵动-sd2.5-满血-301010", "upstreamModel": "sd2.5-满血-301010", "salePriceCny": 6, "unit": "次", "expression": "tier(\"base\", u(\"calls\") * 6)" },
+    { "model": "灵动-sd2.5-满血-301010-2", "upstreamModel": "sd2.5-满血-301010-2", "salePriceCny": 8, "unit": "次", "expression": "tier(\"base\", u(\"calls\") * 8)" },
+    { "model": "灵动-gpt-image-2.5-flare", "upstreamModel": "gpt-image-2.5-flare", "salePriceCny": 0.08, "unit": "张", "expression": "tier(\"base\", u(\"image_count\") * 0.08)" },
+    { "model": "灵动-gpt-image-2.5-sunburst", "upstreamModel": "gpt-image-2.5-sunburst", "salePriceCny": 0.1, "unit": "张", "expression": "tier(\"base\", u(\"image_count\") * 0.1)" }
   ]
 }

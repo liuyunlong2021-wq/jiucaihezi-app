@@ -31,7 +31,7 @@ func TestProductImageUpstreamRequest(t *testing.T) {
 	require.NoError(t, err)
 	for _, provider := range []struct{ key, model, upstream string }{
 		{"fk", "ft-image-v1-211f28f47b0355abb1798f72eb65f22d", "ft-image-v1-211f28f47b0355abb1798f72eb65f22d"},
-		{"xiaoyi-image", "gpt-image-2.5-1k", "gpt-image-2.5"},
+		{"xiaoyi-image", "xy-gpt-image-2.5-1k", "gpt-image-2.5"},
 	} {
 		for _, count := range []int{0, 1, 2, -1} {
 			if count < 0 && provider.key != "fk" {
@@ -101,7 +101,7 @@ func TestProductImageUpstreamRequest(t *testing.T) {
 					require.NoError(t, err)
 					_, err = part.Write(image)
 					require.NoError(t, err)
-					refs = append(refs, map[string]any{"ref": pluginruntime.FileReference("image", i), "filename": fmt.Sprintf("ref%d.png", i)})
+					refs = append(refs, map[string]any{"ref": pluginruntime.FileReference("image", i), "field": "image", "filename": fmt.Sprintf("ref%d.png", i)})
 				}
 				require.NoError(t, writer.Close())
 				operation := "generate"

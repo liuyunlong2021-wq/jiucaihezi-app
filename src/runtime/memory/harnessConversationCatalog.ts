@@ -1,4 +1,4 @@
-import { deepSeekSessionId } from '@/services/deepSeekHarness'
+import { queryDeepSeekHarnessConversations, type DeepSeekHarnessInput } from '@/services/deepSeekHarness'
 import type { ManjuPreference } from './manjuProduction'
 import type { NovelPreference } from './novelProduction'
 import type { ShortDramaPreference } from './shortDramaProduction'
@@ -12,102 +12,68 @@ export interface HarnessConversationCatalogEntry {
   updatedAt: string
   legacyRawPath?: string
   migratedAt?: string
-  /** 输入框选择，属于导航偏好；作品和对话正文仍由项目与 Harness 保存。 */
   manju?: ManjuPreference
   novel?: NovelPreference
   shortDrama?: ShortDramaPreference
 }
+export type HarnessConversationPreferences = Pick<HarnessConversationCatalogEntry, 'manju' | 'novel' | 'shortDrama' | 'legacyRawPath' | 'migratedAt'>
+export type HarnessConversationSnapshot = { entries: HarnessConversationCatalogEntry[]; hiddenIds: string[]; warnings: string[] }
 
-const keyFor = (workspaceKey: string) => `jc:harness-conversations:${workspaceKey}`
-
-function read(workspaceKey: string, storage: Storage): HarnessConversationCatalogEntry[] {
-  try {
-    const value = JSON.parse(storage.getItem(keyFor(workspaceKey)) || '[]')
-    return Array.isArray(value)
-      ? value.filter(entry => entry?.workspaceKey === workspaceKey && entry?.conversationId && entry?.sessionId)
-      : []
-  } catch {
-    return []
-  }
+/** Disposable view of official DSH sessions. Never persisted as a second directory. */
+const views = new Map<string, HarnessConversationSnapshot>()
+type Query = typeof queryDeepSeekHarnessConversations
+const inputs = new Map<string, { input: DeepSeekHarnessInput; query: Query }>()
+const mutations = new Map<string, Promise<unknown>>()
+function accept(owner: string, result: HarnessConversationSnapshot): HarnessConversationSnapshot {
+  if (!Array.isArray(result?.entries) || !Array.isArray(result.hiddenIds)
+    || result.entries.some(entry => !entry.sessionId || !entry.conversationId || entry.workspaceKey !== owner))
+    throw new Error('DSH 会话列表格式无效，保留已有列表')
+  const snapshot = structuredClone(result)
+  views.set(owner, snapshot)
+  return snapshot
 }
-
-function write(workspaceKey: string, entries: HarnessConversationCatalogEntry[], storage: Storage) {
-  storage.setItem(keyFor(workspaceKey), JSON.stringify(entries))
+export function listHarnessConversationCatalog(owner: string): HarnessConversationCatalogEntry[] {
+  return [...(views.get(owner)?.entries || [])].sort((a, b) => a.updatedAt.localeCompare(b.updatedAt))
 }
-
-export function listHarnessConversationCatalog(
-  workspaceKey: string,
-  storage: Storage = localStorage,
-): HarnessConversationCatalogEntry[] {
-  return read(workspaceKey, storage).sort((left, right) => left.updatedAt.localeCompare(right.updatedAt))
-}
-
-export function upsertHarnessConversationCatalogEntry(
-  entry: HarnessConversationCatalogEntry,
-  storage: Storage = localStorage,
-): HarnessConversationCatalogEntry {
-  const entries = read(entry.workspaceKey, storage)
-  const index = entries.findIndex(item => item.conversationId === entry.conversationId)
-  if (index < 0) entries.push(entry)
-  else entries[index] = { ...entries[index], ...entry }
-  write(entry.workspaceKey, entries, storage)
+/** Update an in-flight UI projection only; DSH remains the existence/title authority. */
+export function upsertHarnessConversationCatalogEntry(entry: HarnessConversationCatalogEntry): HarnessConversationCatalogEntry {
+  const view = views.get(entry.workspaceKey) || { entries: [], hiddenIds: [], warnings: [] }
+  if (view.hiddenIds.includes(entry.conversationId)) return entry
+  const index = view.entries.findIndex(item => item.conversationId === entry.conversationId)
+  if (index < 0) view.entries.push(structuredClone(entry))
+  else view.entries[index] = structuredClone({ ...view.entries[index], ...entry })
+  views.set(entry.workspaceKey, view)
   return entry
 }
-
-/**
- * 把从 Harness 会话缓存恢复出来的目录项合并进现有目录。
- *
- * 只补缺失的 conversationId，不覆盖用户已有的标题、模型选择和创作偏好；
- * 返回实际新增的条数。
- */
-export function mergeHarnessConversationCatalogEntries(
-  workspaceKey: string,
-  entries: HarnessConversationCatalogEntry[],
-  storage: Storage = localStorage,
-): number {
-  const existing = new Set(read(workspaceKey, storage).map(item => item.conversationId))
-  let added = 0
-  for (const entry of entries) {
-    if (!entry?.conversationId || !entry?.sessionId || existing.has(entry.conversationId)) continue
-    upsertHarnessConversationCatalogEntry({ ...entry, workspaceKey }, storage)
-    existing.add(entry.conversationId)
-    added += 1
-  }
-  return added
+export async function refreshHarnessConversationCatalog(input: DeepSeekHarnessInput, query: Query = queryDeepSeekHarnessConversations): Promise<HarnessConversationSnapshot> {
+  inputs.set(input.cwd, { input, query })
+  return await mutate(input.cwd, { action: 'list' })
 }
 
-export function createHarnessConversationCatalogEntry(
-  workspaceKey: string,
-  title = '新对话',
-  storage: Storage = localStorage,
-  conversationId = `conversation-${crypto.randomUUID()}`,
-  now = new Date().toISOString(),
-): HarnessConversationCatalogEntry {
-  return upsertHarnessConversationCatalogEntry({
-    conversationId,
-    sessionId: deepSeekSessionId(conversationId),
-    workspaceKey,
-    title,
-    createdAt: now,
-    updatedAt: now,
-  }, storage)
+async function mutate(owner: string, params: Record<string, unknown>) {
+  const input = inputs.get(owner)
+  if (!input) throw new Error('尚未连接 DSH 会话服务，请重新打开项目')
+  const pending = (mutations.get(owner) || Promise.resolve()).catch(() => {}).then(async () =>
+    accept(owner, await input.query(input.input, params)))
+  mutations.set(owner, pending)
+  try { return await pending }
+  finally { if (mutations.get(owner) === pending) mutations.delete(owner) }
 }
-
-export function renameHarnessConversationCatalogEntry(
-  workspaceKey: string,
-  conversationId: string,
-  title: string,
-  storage: Storage = localStorage,
-  now = new Date().toISOString(),
-): HarnessConversationCatalogEntry | undefined {
-  const entry = read(workspaceKey, storage).find(item => item.conversationId === conversationId)
-  return entry ? upsertHarnessConversationCatalogEntry({ ...entry, title, updatedAt: now }, storage) : undefined
+export async function createHarnessConversationCatalogEntry(owner: string, _title = '新对话'): Promise<HarnessConversationCatalogEntry> {
+  const id = `conversation-${crypto.randomUUID()}`
+  const result = await mutate(owner, { action: 'create', conversationId: id })
+  const entry = result.entries.find(item => item.conversationId === id)
+  if (!entry) throw new Error('DSH 未返回新建的会话，未创建浏览器替代记录')
+  return entry
 }
-
-export function removeHarnessConversationCatalogEntry(
-  workspaceKey: string,
-  conversationId: string,
-  storage: Storage = localStorage,
-) {
-  write(workspaceKey, read(workspaceKey, storage).filter(item => item.conversationId !== conversationId), storage)
+export async function renameHarnessConversationCatalogEntry(owner: string, id: string, title: string) {
+  return (await mutate(owner, { action: 'rename', conversationId: id, title })).entries.find(item => item.conversationId === id)
+}
+export async function removeHarnessConversationCatalogEntry(owner: string, id: string) {
+  await mutate(owner, { action: 'hide', conversationId: id })
+}
+export async function updateHarnessConversationPreferences(owner: string, id: string, preferences: HarnessConversationPreferences) {
+  const existing = listHarnessConversationCatalog(owner).find(entry => entry.conversationId === id)
+  await mutate(owner, { action: 'preferences', conversationId: id, title: existing?.title,
+    preferences: { ...(existing?.legacyRawPath ? { legacyRawPath: existing.legacyRawPath } : {}), ...preferences } })
 }

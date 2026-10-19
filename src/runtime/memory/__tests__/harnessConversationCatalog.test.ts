@@ -1,91 +1,85 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
-  createHarnessConversationCatalogEntry,
-  listHarnessConversationCatalog,
-  mergeHarnessConversationCatalogEntries,
-  removeHarnessConversationCatalogEntry,
-  renameHarnessConversationCatalogEntry,
-  upsertHarnessConversationCatalogEntry,
+  createHarnessConversationCatalogEntry, listHarnessConversationCatalog,
+  refreshHarnessConversationCatalog, removeHarnessConversationCatalogEntry,
+  renameHarnessConversationCatalogEntry, updateHarnessConversationPreferences,
+  upsertHarnessConversationCatalogEntry, type HarnessConversationCatalogEntry,
 } from '../harnessConversationCatalog'
+import { migrateHarnessConversationPreferences } from '@/services/harnessConversationMigration'
+import type { DeepSeekHarnessInput } from '@/services/deepSeekHarness'
 
-function memoryStorage(): Storage {
-  const values = new Map<string, string>()
-  return {
-    get length() { return values.size },
-    clear: () => values.clear(),
-    getItem: key => values.get(key) ?? null,
-    key: index => [...values.keys()][index] ?? null,
-    removeItem: key => { values.delete(key) },
-    setItem: (key, value) => { values.set(key, value) },
+function fixture(owner: string) {
+  const input = { cwd: owner, sessionId: '', message: '', model: 'offline', apiBase: 'http://127.0.0.1', apiKey: '' }
+  const rows = new Map<string, HarnessConversationCatalogEntry>()
+  const hidden = new Set<string>()
+  let failure = false
+  const calls: string[] = []
+  const query = async (_input: DeepSeekHarnessInput, params: Record<string, unknown>) => {
+    calls.push(String(params.action))
+    if (failure) throw new Error('DSH unavailable')
+    const id = String(params.conversationId)
+    if (params.action === 'create') rows.set(id, entry(id))
+    if (params.action === 'rename') rows.set(id, { ...rows.get(id)!, title: String(params.title) })
+    if (params.action === 'hide') hidden.add(id)
+    if (params.action === 'preferences') rows.set(id, { ...rows.get(id)!, ...params.preferences as object })
+    return { entries: [...rows.values()].filter(row => !hidden.has(row.conversationId)), hiddenIds: [...hidden], warnings: [] }
   }
+  function entry(id: string) { return { conversationId: id, sessionId: `jc-v1-${id}`, workspaceKey: owner, title: id,
+    createdAt: '2026-10-19T00:00:00.000Z', updatedAt: '2026-10-19T00:00:00.000Z' } }
+  return { input, rows, query, entry, calls, fail: () => { failure = true } }
 }
 
-test('Harness conversation catalog stores navigation metadata without message bodies', () => {
-  const storage = memoryStorage()
-  const created = createHarnessConversationCatalogEntry('/project-a', '新对话', storage, 'conversation-1', '2026-09-24T00:00:00.000Z')
-  assert.deepEqual(created, {
-    conversationId: 'conversation-1',
-    sessionId: 'jc-v1-conversation-1',
-    workspaceKey: '/project-a',
-    title: '新对话',
-    createdAt: '2026-09-24T00:00:00.000Z',
-    updatedAt: '2026-09-24T00:00:00.000Z',
-  })
-  assert.deepEqual(listHarnessConversationCatalog('/project-a', storage), [created])
-  assert.deepEqual(listHarnessConversationCatalog('/project-b', storage), [])
-  assert.doesNotMatch(JSON.stringify(created), /turns|messages|content/)
+test('Desktop discovers official sessions with no browser directory and keeps projects isolated', async () => {
+  const f = fixture('/official-a')
+  f.rows.set('old', f.entry('old'))
+  await refreshHarnessConversationCatalog(f.input, f.query)
+  assert.equal(listHarnessConversationCatalog('/official-a')[0].conversationId, 'old')
+  assert.deepEqual(listHarnessConversationCatalog('/official-b'), [])
+  assert.deepEqual(f.calls, ['list'])
 })
 
-test('Harness conversation catalog supports legacy mapping, rename, and logical delete', () => {
-  const storage = memoryStorage()
-  upsertHarnessConversationCatalogEntry({
-    conversationId: 'legacy-1', sessionId: 'jc-v1-legacy-1', workspaceKey: '/project-a',
-    title: '旧对话', createdAt: '2026-09-23T00:00:00.000Z', updatedAt: '2026-09-23T00:00:00.000Z',
-    legacyRawPath: '.raw/对话记录/legacy-1.md',
-  }, storage)
-  renameHarnessConversationCatalogEntry('/project-a', 'legacy-1', '新标题', storage, '2026-09-24T01:00:00.000Z')
-  assert.equal(listHarnessConversationCatalog('/project-a', storage)[0]?.title, '新标题')
-  removeHarnessConversationCatalogEntry('/project-a', 'legacy-1', storage)
-  assert.deepEqual(listHarnessConversationCatalog('/project-a', storage), [])
+test('creating, renaming and preferences commit through DSH before updating the view', async () => {
+  const f = fixture('/official-mutations')
+  await refreshHarnessConversationCatalog(f.input, f.query)
+  const created = await createHarnessConversationCatalogEntry(f.input.cwd)
+  await renameHarnessConversationCatalogEntry(f.input.cwd, created.conversationId, 'renamed')
+  await updateHarnessConversationPreferences(f.input.cwd, created.conversationId, { manju: { enabled: true } })
+  assert.equal(f.rows.get(created.conversationId)?.title, 'renamed')
+  assert.deepEqual(listHarnessConversationCatalog(f.input.cwd)[0].manju, { enabled: true })
+  assert.deepEqual(f.calls, ['list', 'create', 'rename', 'preferences'])
 })
 
-test('production selection persists before sending and remains isolated by conversation', () => {
-  const storage = memoryStorage()
-  const a = createHarnessConversationCatalogEntry('/a', 'a', storage, 'a')
-  createHarnessConversationCatalogEntry('/a', 'b', storage, 'b')
-  upsertHarnessConversationCatalogEntry({ ...a, manju: { enabled: true } }, storage)
-  renameHarnessConversationCatalogEntry('/a', 'a', 'renamed', storage)
-  assert.deepEqual(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'a')?.manju,
-    { enabled: true })
-  assert.equal(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'b')?.manju, undefined)
-  upsertHarnessConversationCatalogEntry({ ...a, manju: { enabled: false } }, storage)
-  assert.equal(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'a')?.manju?.enabled, false)
+test('deleted sessions cannot be resurrected by a late completion or a later official refresh', async () => {
+  const f = fixture('/official-delete')
+  f.rows.set('old', f.entry('old'))
+  await refreshHarnessConversationCatalog(f.input, f.query)
+  await removeHarnessConversationCatalogEntry(f.input.cwd, 'old')
+  upsertHarnessConversationCatalogEntry(f.entry('old'))
+  await refreshHarnessConversationCatalog(f.input, f.query)
+  assert.deepEqual(listHarnessConversationCatalog(f.input.cwd), [])
+  assert.equal(f.rows.size, 1, 'official history is retained')
 })
 
-test('recovered catalog only fills missing conversations and keeps existing user edits', () => {
-  const storage = memoryStorage()
-  createHarnessConversationCatalogEntry('/project-a', '用户标题', storage, 'conversation-1', '2026-09-24T00:00:00.000Z')
-  const added = mergeHarnessConversationCatalogEntries('/project-a', [
-    {
-      conversationId: 'conversation-1',
-      sessionId: 'jc-v1-conversation-1',
-      workspaceKey: '/project-a',
-      title: '会话缓存旧标题',
-      createdAt: '2026-09-23T00:00:00.000Z',
-      updatedAt: '2026-09-23T00:00:00.000Z',
-    },
-    {
-      conversationId: 'conversation-2',
-      sessionId: 'jc-v1-conversation-2',
-      workspaceKey: '/project-a',
-      title: '恢复的对话',
-      createdAt: '2026-09-25T00:00:00.000Z',
-      updatedAt: '2026-09-25T00:00:00.000Z',
-    },
-  ], storage)
-  assert.equal(added, 1)
-  const entries = listHarnessConversationCatalog('/project-a', storage)
-  assert.equal(entries.find(entry => entry.conversationId === 'conversation-1')?.title, '用户标题')
-  assert.equal(entries.find(entry => entry.conversationId === 'conversation-2')?.title, '恢复的对话')
+test('a failed official list never becomes an empty successful directory or a replacement new chat', async () => {
+  const f = fixture('/official-failure')
+  f.rows.set('old', f.entry('old'))
+  await refreshHarnessConversationCatalog(f.input, f.query)
+  f.fail()
+  await assert.rejects(() => refreshHarnessConversationCatalog(f.input, f.query), /DSH unavailable/)
+  assert.equal(listHarnessConversationCatalog(f.input.cwd).length, 1)
+  await assert.rejects(() => createHarnessConversationCatalogEntry(f.input.cwd), /DSH unavailable/)
+  assert.equal(listHarnessConversationCatalog(f.input.cwd).length, 1)
+})
+
+test('legacy browser keys retire only after successful durable migration, and failures are retryable', async () => {
+  const f = fixture('/official-migration')
+  const key = `jc:harness-conversations:${f.input.cwd}`
+  const values = new Map([[key, JSON.stringify([f.entry('old')])]])
+  const storage = { getItem: (key: string) => values.get(key) ?? null, removeItem: (key: string) => { values.delete(key) } } as Storage
+  await assert.rejects(() => migrateHarnessConversationPreferences(f.input, storage, async () => { throw new Error('write failed') }))
+  assert.ok(values.has(key))
+  await migrateHarnessConversationPreferences(f.input, storage, f.query)
+  assert.equal(values.has(key), false)
+  assert.deepEqual(f.calls, ['import'])
 })

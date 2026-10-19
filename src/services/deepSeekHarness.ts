@@ -335,6 +335,7 @@ function runtimeKey(input: DeepSeekHarnessInput): string {
   return [
     input.cwd,
     input.apiBase,
+    input.apiKey ? 'authenticated' : 'history-only',
     input.model,
     input.modelProviderId || 'jiucaihezi',
     JSON.stringify(deepSeekModelLimits(input)),
@@ -353,15 +354,17 @@ function workspaceRuntimeKey(input: DeepSeekHarnessInput): string {
   return input.cwd
 }
 
-export function deepSeekSessionId(conversationId: string): string {
-  return `jc-v1-${conversationId}`
+const officialSessionIds = new Map<string, Set<string>>()
+export function deepSeekSessionId(conversationId: string, owner?: string): string {
+  return Boolean(owner && officialSessionIds.get(owner)?.has(conversationId)) || conversationId.startsWith('jc-v1-') ? conversationId : `jc-v1-${conversationId}`
 }
+
 export function deepSeekSessionExists(
   sessions: Array<{ header: { id: string } }>,
   conversationId: string,
 ): boolean {
   const sessionId = deepSeekSessionId(conversationId)
-  return sessions.some(session => session.header.id === sessionId)
+  return sessions.some(session => session.header.id === conversationId || session.header.id === sessionId)
 }
 
 export function deepSeekAssistantText(event: any): string {
@@ -752,6 +755,7 @@ const DEEPSEEK_TOOL_LABELS: Record<string, string> = {
   create_html: '创建网页',
   export_markdown_slides: '创建幻灯片',
   create_3d_scene: '创建 3D 场景',
+  inspect_3d_scene: '检查 3D 场景与画面',
   edit_3d_scene: '编辑 3D 场景',
   export_3d_scene_video: '导出 3D 视频',
 }
@@ -1295,8 +1299,8 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   const needsCreation = Boolean(input.avSelected || input.mediaSelected || input.scene3dSelected)
   const nativeToolsEnabled = needsCreation || localCapabilities.length > 0
   const needsMcp = mcpServerIds.length > 0
-  const mcpLaunch = needsMcp
-    ? await invoke<{ command: string; args: string[]; cwd?: string }>('resolve_creation_mcp')
+  const mcpLaunch = needsMcp || nativeToolsEnabled
+    ? await invoke<{ command: string; args: string[]; cwd?: string; env: Record<string, string> }>('resolve_creation_mcp')
     : null
   // patch 里新增插件必须包在 `- insert:` 里：官方 patch 语义（dsh-app-boot 的
   // applyEntryPatches）对非 insert 条目是按 id 匹配**已有**行，匹配不到只 warn + 跳过。
@@ -1324,6 +1328,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
   const mcpPatch = insertPatch([
     ...mcpServerIds.flatMap((serverName, index) => mcpEntry(`mcp-proxy-${index}`, serverName, {
       JIUCAIHEZI_PROXY_MCP_SERVER: serverName,
+      JIUCAIHEZI_BRIDGE_DISCOVERY: mcpLaunch!.env.JIUCAIHEZI_BRIDGE_DISCOVERY,
     })),
   ])
   const nativeToolCapabilities = [...localCapabilities, ...(needsCreation ? ['av'] : [])]
@@ -1401,9 +1406,16 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
       // `failed to import`；runner 按这个开关决定要不要把它们挂进 profile（见 runner.mjs）。
       computerUse: computerUseEnabledNow(),
       nativeTools: nativeToolsEnabled,
+      requiredTools: [
+        ...(needsCreation ? ['get_creation_context'] : []),
+        ...(input.scene3dSelected ? ['create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'] : []),
+        ...(input.mediaSelected ? ['create_document', 'create_html', 'export_markdown_png', 'export_markdown_slides'] : []),
+        ...(input.avSelected ? ['submit_creation_task'] : []),
+      ],
     })],
     cwd: input.cwd,
     env: {
+      ...mcpLaunch?.env,
       JIUCAIHEZI_DH_API_KEY: input.apiKey,
       DSH_HOME: routeDir,
       DSH_TELEMETRY_MODE: 'DISABLED',
@@ -1472,7 +1484,7 @@ async function queryDeepSeekHarness(
   const active = await ensureRuntime(input, true)
   return harnessControl(active, {
     type: command,
-    ...(command === 'read-session' ? { sessionId: deepSeekSessionId(input.sessionId) } : {}),
+    ...(command === 'read-session' ? { sessionId: deepSeekSessionId(input.sessionId, input.cwd) } : {}),
   }, input.signal)
 }
 
@@ -1486,6 +1498,20 @@ export async function listDeepSeekHarnessSessions(
   input: DeepSeekHarnessInput,
 ): Promise<Array<{ header: { id: string }; live: boolean; persisted: boolean }>> {
   return queryDeepSeekHarness(input, 'list-sessions')
+}
+
+/** Thin SDK bridge. Session existence and titles come from the official DSH services. */
+export async function queryDeepSeekHarnessConversations(input: DeepSeekHarnessInput, params: Record<string, unknown>): Promise<{
+  entries: import('@/runtime/memory/harnessConversationCatalog').HarnessConversationCatalogEntry[]
+  hiddenIds: string[]
+  warnings: string[]
+}> {
+  const active = await ensureRuntime(input, true)
+  const result = await harnessControl(active, { type: 'conversation-ui', params }, input.signal)
+  const ids = officialSessionIds.get(input.cwd) || new Set<string>()
+  for (const entry of result.entries) ids.add(entry.sessionId)
+  officialSessionIds.set(input.cwd, ids)
+  return result
 }
 
 async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false): Promise<Runtime> {
@@ -1568,7 +1594,7 @@ export async function readCurrentDeepSeekPermission(cwd: string, conversationId:
   if (!slot) return undefined
   const active = await slot.ready
   if (active.closing) return undefined
-  return sessionPermission(active, deepSeekSessionId(conversationId), undefined, signal, true)
+  return sessionPermission(active, deepSeekSessionId(conversationId, cwd), undefined, signal, true)
 }
 
 /** Update the live Session through the official command; no runtime restart or prompt replay. */
@@ -1577,7 +1603,7 @@ export async function switchDeepSeekSessionPermission(cwd: string, conversationI
   if (!slot) return undefined
   const active = await slot.ready
   if (active.closing) throw new Error('任务正在停止，请稍后切换权限')
-  const sessionId = deepSeekSessionId(conversationId)
+  const sessionId = deepSeekSessionId(conversationId, cwd)
   try {
     const current = await sessionPermission(active, sessionId, undefined, signal, true)
     if (!current) return undefined
@@ -1604,7 +1630,7 @@ export async function queueDeepSeekHarnessMessage(input: DeepSeekHarnessInput): 
   const active = await ensureRuntime(input, true)
   return await harnessControl(active, {
     type: 'queue',
-    sessionId: deepSeekSessionId(input.sessionId),
+    sessionId: deepSeekSessionId(input.sessionId, input.cwd),
     contentBlocks: deepSeekContentBlocks(input.message, input.attachments, input.files, input.imageInput),
   }, input.signal) as { messageId: string }
 }
@@ -1623,7 +1649,7 @@ export async function updateDeepSeekHarnessQueue(
     : { kind: input.action.kind }
   return await harnessControl(active, {
     type: 'update-queue',
-    sessionId: deepSeekSessionId(input.sessionId),
+    sessionId: deepSeekSessionId(input.sessionId, input.cwd),
     itemId: input.itemId,
     action,
   }, input.signal) as { accepted: true }
@@ -1638,7 +1664,7 @@ export async function runDeepSeekHarness(input: DeepSeekHarnessInput): Promise<s
 
 async function runDeepSeekHarnessTask(input: DeepSeekHarnessInput): Promise<string> {
   if (input.signal?.aborted) throw new DOMException('Aborted', 'AbortError')
-  const wireSessionId = deepSeekSessionId(input.sessionId)
+  const wireSessionId = deepSeekSessionId(input.sessionId, input.cwd)
   // 官方把「同一会话的并发 resume」划给调用方排除：resume 要先把会话的写所有权拿到手，
   // 上一个句柄还没放手时第二次以写模式打开会被跨进程写锁顶回 `SessionAlreadyOwnedError`。
   // 在这里挡住，用户看到的是一句话，而不是几秒后的英文锁冲突。

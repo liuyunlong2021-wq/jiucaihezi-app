@@ -1,5 +1,17 @@
 # NewAPI rc.40 临时素材与 OSS 直传扩展
 
+## 灵动 R2 小范围试验（源码已实现，尚未部署）
+
+新增 `POST /api/creations/lingdong/upload-url`，沿用 TokenAuth，只接受当前核实的灵动型号与固定私有标准桶 `jiucaihezi-media-test`。浏览器直传 R2，不经香港服务器转发文件；旧 OSS 与本地上传接口保持不动。
+
+- `r2direct/` 使用宿主已有 AWS SDK v4 signer，单文件 20 MiB，上传 5 分钟、读取 6 小时；PUT 绑定 Content-Length 和 Content-Type，GET/HEAD 分别签名。`head_url` 供独立 HEAD 检查，不可将 GET 签名拿去 HEAD。
+- 凭据字段见 `r2.env.example`，真实文件仅保存在服务器 `/root/jc-r2.env`（600）；不得进入前端、插件、Git 或聊天。
+- `extension/go.mod` / `go.sum` 是独立回归入口（校验和与固定宿主一致），不要覆盖宿主模块文件。验证：`cd extension && go test -mod=readonly ./r2direct ./ossdirect ./jcmedia`。
+- `prepare-r2.sh` 只核对固定源码、保留现有补丁、备份媒体源码路由并构建测试镜像，不切换生产；用户已在服务器成功执行。之后必须核对当前 Compose、备份数据库，再保留全部原有 override/env/挂载/网络做切换，不能直接运行历史 `activate.sh` 或 `repair-*.sh`。
+- 用户服务器已完成准备，镜像 ID 为 `sha256:4daecc3bc0f41dbf39dfda3847b28193438e436cfd8be0537d3dde3898ff23bc`，生产暂未切换。新增 `activate-r2.py` 针对已核实的易红修复 20261016 基线激活，隐藏输入 NewAPI 用户 Key，只验一个合成小图与旧 OSS 授权，不调用生成。校验合并后的端口/挂载/网络/其他环境完全保留，数据库备份后仅重建 NewAPI；验证失败执行旧镜像回滚并验健康，回滚脚本保存备份目录。`python3 activate_r2_test.py` 与 `python3 backup_db_test.py` 为本地模拟回归，不能代替真实切换。
+- 画布实现与验收清单：兄弟仓库 `../jiucaihezi-canvas/deploy/lingdong-r2-experiment.md`；App 运维记录见 `docs/wiki/运维/灵动R2素材直传试验.md`。
+- 本地三包回归通过；尚未验证完整宿主编译、真实 R2 读写/CORS、签名 URL 被灵动读取、收费生成、下载或账单。没有自动删除，也没有用新的存储方案宣称已修复此前视频下载超时。
+
 这是 NewAPI 后台扩展，不是独立鉴权服务或 APP 图床。
 
 - 固定上游 rc.40 SHA `0aec08fee811ec6136828fda790551b49e410301`。

@@ -28,6 +28,7 @@ const OPERATIONS: &[&str] = &[
 #[derive(Default)]
 pub struct CreationMcpState {
     pending: Mutex<HashMap<String, mpsc::Sender<Result<Value, String>>>>,
+    connection: Mutex<Option<DiscoveryFile>>,
 }
 
 #[derive(Serialize)]
@@ -36,6 +37,7 @@ pub struct CreationMcpLaunchConfig {
     pub command: String,
     pub args: Vec<String>,
     pub cwd: Option<String>,
+    pub env: HashMap<String, String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -53,7 +55,7 @@ struct InvokeBody {
     params: Value,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Deserialize, Serialize)]
 struct DiscoveryFile {
     version: u8,
     address: String,
@@ -102,7 +104,22 @@ pub fn resolve_creation_mcp(app: AppHandle) -> Result<CreationMcpLaunchConfig, S
         command: node,
         args: vec![entry.to_string_lossy().into_owned()],
         cwd,
+        env: connection_env(&app.state::<CreationMcpState>())?,
     })
+}
+
+fn connection_env(state: &CreationMcpState) -> Result<HashMap<String, String>, String> {
+    let connection = state
+        .connection
+        .lock()
+        .map_err(|_| "bridge state unavailable")?;
+    if connection.is_none() {
+        return Err("本机工具桥接未启动，请重启 App".into());
+    }
+    Ok(HashMap::from([(
+        "JIUCAIHEZI_BRIDGE_DISCOVERY".into(),
+        instance_discovery_path()?.to_string_lossy().into_owned(),
+    )]))
 }
 
 pub fn start(app: AppHandle) -> Result<PathBuf, String> {
@@ -110,14 +127,17 @@ pub fn start(app: AppHandle) -> Result<PathBuf, String> {
     let address = listener.local_addr().map_err(|error| error.to_string())?;
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let discovery_path = discovery_path()?;
-    write_discovery(
-        &discovery_path,
-        &DiscoveryFile {
-            version: 1,
-            address: format!("http://{address}"),
-            token: token.clone(),
-        },
-    )?;
+    let connection = DiscoveryFile {
+        version: 1,
+        address: format!("http://{address}"),
+        token: token.clone(),
+    };
+    write_discovery(&instance_discovery_path()?, &connection)?;
+    write_discovery(&discovery_path, &connection)?;
+    *app.state::<CreationMcpState>()
+        .connection
+        .lock()
+        .map_err(|error| error.to_string())? = Some(connection);
 
     std::thread::spawn(move || {
         for stream in listener.incoming() {
@@ -130,8 +150,25 @@ pub fn start(app: AppHandle) -> Result<PathBuf, String> {
     Ok(discovery_path)
 }
 
-pub fn remove_discovery() {
-    if let Ok(path) = discovery_path() {
+pub fn remove_discovery(app: &AppHandle) {
+    if let (Ok(path), Ok(connection)) = (
+        discovery_path(),
+        app.state::<CreationMcpState>().connection.lock(),
+    ) {
+        if let Some(connection) = connection.as_ref() {
+            remove_owned_discovery(&path, &connection.token);
+            if let Ok(owned) = instance_discovery_path() {
+                remove_owned_discovery(&owned, &connection.token);
+            }
+        }
+    }
+}
+
+fn remove_owned_discovery(path: &PathBuf, token: &str) {
+    let current = fs::read(path)
+        .ok()
+        .and_then(|raw| serde_json::from_slice::<DiscoveryFile>(&raw).ok());
+    if current.is_some_and(|value| value.token == token) {
         let _ = fs::remove_file(path);
     }
 }
@@ -140,6 +177,10 @@ fn discovery_path() -> Result<PathBuf, String> {
     dirs_next::home_dir()
         .map(|home| home.join(".jiucaihezi").join("mcp-bridge.json"))
         .ok_or_else(|| "home directory unavailable".to_string())
+}
+
+fn instance_discovery_path() -> Result<PathBuf, String> {
+    Ok(discovery_path()?.with_file_name(format!("mcp-bridge-{}.json", std::process::id())))
 }
 
 fn write_discovery(path: &PathBuf, value: &DiscoveryFile) -> Result<(), String> {
@@ -292,6 +333,40 @@ fn internal_error(error: impl ToString) -> (&'static str, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closing_one_app_keeps_another_apps_discovery_and_bound_connection() {
+        let directory = std::env::temp_dir().join(format!("jc-bridge-{}", Uuid::new_v4()));
+        let path = directory.join("mcp-bridge.json");
+        let first = CreationMcpState::default();
+        *first.connection.lock().unwrap() = Some(DiscoveryFile {
+            version: 1,
+            address: "http://127.0.0.1:1234".into(),
+            token: "first".into(),
+        });
+        let second = DiscoveryFile {
+            version: 1,
+            address: "http://127.0.0.1:5678".into(),
+            token: "second".into(),
+        };
+        write_discovery(&path, &second).unwrap();
+        let first_env = connection_env(&first).unwrap();
+        assert!(
+            first_env["JIUCAIHEZI_BRIDGE_DISCOVERY"]
+                .ends_with(&format!("mcp-bridge-{}.json", std::process::id()))
+        );
+        remove_owned_discovery(&path, "first");
+        assert!(
+            path.exists(),
+            "one App must not delete another App's discovery"
+        );
+        fs::remove_file(&path).unwrap(); // An older installed App may still delete the global file.
+        assert_eq!(connection_env(&first).unwrap(), first_env);
+        write_discovery(&path, &second).unwrap();
+        remove_owned_discovery(&path, "second");
+        assert!(!path.exists());
+        fs::remove_dir_all(directory).unwrap();
+    }
 
     #[test]
     fn bridge_contract_rejects_unknown_operations() {

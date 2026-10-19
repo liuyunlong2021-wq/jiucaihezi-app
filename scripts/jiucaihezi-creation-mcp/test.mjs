@@ -51,7 +51,7 @@ test('proxy MCP publishes the app-owned tool catalog and forwards exact calls', 
       name: 'create_3d_scene', description: '创建场景',
       inputSchema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
     }] }
-    return { content: '已创建' }
+    return { content: '已创建', image: { data: 'cG5n', mimeType: 'image/png' } }
   }
   const server = await createProxyMcpServer(bridge, { capabilities: ['3d'] })
   const client = new Client({ name: 'test', version: '1.0.0' })
@@ -60,6 +60,7 @@ test('proxy MCP publishes the app-owned tool catalog and forwards exact calls', 
   assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['create_3d_scene'])
   const result = await client.callTool({ name: 'create_3d_scene', arguments: { title: '街道' } })
   assert.equal(result.content[0].text, '已创建')
+  assert.deepEqual(result.content[1], { type: 'image', data: 'cG5n', mimeType: 'image/png' })
   assert.deepEqual(calls, [
     { operation: 'list_harness_tools', params: { capabilities: ['3d'] } },
     { operation: 'call_harness_tool', params: { capabilities: ['3d'], name: 'create_3d_scene', arguments: { title: '街道' } } },
@@ -81,4 +82,22 @@ test('creation MCP hides the paid tool unless the mount allows spending', async 
   assert.ok(!names.includes('submit_creation_task'))
   assert.equal(names.length, 8)
   await Promise.all([client.close(), server.close()])
+})
+
+
+test('Harness app tools persist previews as native image blocks and explicitly refuse text-only visual claims', async () => {
+  const { prepareAppToolResult, renderAppToolResult } = await import('../../src-tauri/resources/deepseek-harness/plugins/creation-tools/index.mjs')
+  const saved = []
+  const ctx = { get: name => name === 'llm' ? { resolveModelInfo: async () => ({ inputModalities: ['text', 'image'] }) }
+    : { saveImage: async input => { saved.push(input); return { attachmentId: 'image-ref', mediaType: 'image/png', bytes: 3, width: 1, height: 1 } } } }
+  const exec = { agent: { session: { requestHeader: () => ({ config: { provider: 'fixture', model: 'vision' } }) } } }
+  const value = await prepareAppToolResult(ctx, { content: 'saved', image: { data: 'cG5n', mimeType: 'image/png' } }, exec)
+  assert.equal(saved.length, 1)
+  assert.equal(renderAppToolResult({}, value)[1].type, 'image')
+  assert.equal(renderAppToolResult({}, value)[1].attachment.attachmentId, 'image-ref')
+  const textOnly = { get: name => name === 'llm' ? { resolveModelInfo: async () => ({ inputModalities: ['text'] }) } : ctx.get(name) }
+  const refused = await prepareAppToolResult(textOnly, { content: 'saved', image: { data: 'cG5n', mimeType: 'image/png' } }, exec)
+  assert.equal(refused.image, undefined)
+  assert.match(refused.content, /不支持看图/)
+  assert.equal(saved.length, 1)
 })

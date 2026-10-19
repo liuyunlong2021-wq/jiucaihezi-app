@@ -110,6 +110,8 @@ export type Scene3DEditOperation =
   | { action: 'add_object'; object: unknown }
   | { action: 'add_formation'; formation: unknown }
   | { action: 'move'; target: string; to: [number, number, number] }
+  | { action: 'pose'; target: string; pose: NonNullable<Scene3DObject['pose']> }
+  | { action: 'rotate'; target: string; to: [number, number, number] }
   | { action: 'remove'; target: string }
   | { action: 'camera'; position?: [number, number, number]; lookAt?: [number, number, number] }
 
@@ -354,6 +356,12 @@ export function applyScene3DEdits(source: Scene3DDocument, operations: unknown):
   for (const raw of operations) {
     const operation = record(raw, '3D 场景增量操作')
     const action = text(operation.action)
+    const fields: Record<string, string[]> = {
+      add_object: ['object'], add_formation: ['formation'], move: ['target', 'to'],
+      pose: ['target', 'pose'], rotate: ['target', 'to'], remove: ['target'], camera: ['position', 'lookAt'],
+    }
+    if (fields[action] && Object.keys(operation).some(key => key !== 'action' && !fields[action]!.includes(key)))
+      throw new Error(`3D 场景操作 ${action} 包含不支持的参数`)
     if (action === 'add_object') next.objects.push(record(operation.object, '新增对象') as unknown as Scene3DObject)
     else if (action === 'add_formation') next.formations.push(record(operation.formation, '新增排列') as unknown as Scene3DFormation)
     else if (action === 'move') {
@@ -361,6 +369,20 @@ export function applyScene3DEdits(source: Scene3DDocument, operations: unknown):
       const target = [...next.objects, ...next.formations, ...next.groups].find(item => item.id === targetId)
       if (!target) throw new Error(`3D 场景目标不存在: ${targetId}`)
       target.position = vector(operation.to)
+    } else if (action === 'pose' || action === 'rotate') {
+      const targetId = id(operation.target, '对象目标')
+      const target = next.objects.find(item => item.id === targetId)
+      if (!target) throw new Error(`3D 场景对象不存在: ${targetId}`)
+      if (action === 'rotate') {
+        if (operation.to === undefined) throw new Error('旋转操作缺少目标角度')
+        target.rotation = vector(operation.to)
+      } else {
+        if (target.type !== 'person') throw new Error('姿态操作只允许人物对象使用')
+        if (operation.pose === undefined) throw new Error('姿态操作缺少姿态')
+        target.pose = enumValue(operation.pose, new Set(['standing', 'sitting', 'crouching', 'lying'] as const), 'standing', '人物姿势')
+        // A new base pose must not be overridden by the previously saved skeleton.
+        if (target.character) delete target.character.bones
+      }
     } else if (action === 'remove') {
       const targetId = id(operation.target, '删除目标')
       const before = next.objects.length + next.formations.length + next.groups.length

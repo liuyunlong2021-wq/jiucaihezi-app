@@ -11,6 +11,7 @@ import {
   deepSeekPermissionChip,
   deepSeekPrompt,
   deepSeekSessionExists,
+  deepSeekSessionId,
   deepSeekSessionInbox,
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
@@ -153,7 +154,7 @@ export function startDesktopConversationPublisher() {
       const selected = selectedConversation.value
       if (!selected) return null
       return {
-        sessionId: `jc-v1-${selected.conversationId}`,
+        sessionId: deepSeekSessionId(selected.conversationId, selected.owner),
         turns: desktopRemoteTurns(selected.turns),
         ...desktopConversationLiveState(selected.owner, selected.resourcePath),
       }
@@ -182,7 +183,7 @@ export function desktopConversationContext() {
     projectName: selected?.projectName || '当前项目',
     conversationTitle: selected?.conversationTitle || '',
     conversationId: selected?.conversationId || '',
-    sessionId: selected ? `jc-v1-${selected.conversationId}` : '',
+    sessionId: selected ? deepSeekSessionId(selected.conversationId, selected.owner) : '',
   }
 }
 
@@ -329,7 +330,7 @@ function finishDesktopRemoteOfficialSession(
   run.officialAssistantTurnId = sessionTurns.slice(userIndex + 1).find(turn => turn.role === 'assistant')?.id
   const existing = listHarnessConversationCatalog(selected.owner).find(item => item.conversationId === selected.conversationId)
   upsertHarnessConversationCatalogEntry({
-    conversationId: selected.conversationId, sessionId: `jc-v1-${selected.conversationId}`,
+    conversationId: selected.conversationId, sessionId: deepSeekSessionId(selected.conversationId, selected.owner),
     workspaceKey: selected.owner, title: run.title || existing?.title || selected.conversationTitle,
     createdAt: existing?.createdAt || userTurn.createdAt, updatedAt: now,
     ...(existing?.legacyRawPath || !selected.resourcePath.startsWith('.harness-conversations/')
@@ -397,7 +398,7 @@ export function desktopConversationLiveState(owner: string, path: string) {
 
 function assertSelectedSession(sessionId: string, selected: DesktopConversationSelection) {
   const current = selectedConversation.value
-  if (!current || `jc-v1-${current.conversationId}` !== sessionId
+  if (!current || deepSeekSessionId(current.conversationId, current.owner) !== sessionId
     || current.owner !== selected.owner || current.resourcePath !== selected.resourcePath)
     throw new Error('SESSION_NOT_CURRENT')
 }

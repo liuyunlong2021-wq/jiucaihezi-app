@@ -1,0 +1,13 @@
+{
+  "plugin": "xiaoyi-image",
+  "version": "0.3.0",
+  "pricingRule": "用户指定人民币售价，全部按实际生成图片张数计费；不包含视频",
+  "coefficientConvention": "沿用现有人民币售价与Task Usage系数同数值口径；分组倍率和实扣需生产核对",
+  "models": [
+    { "model": "xy-gpt-image-2-1k", "upstreamModel": "gpt-image-2", "resolutions": ["1k"], "salePriceCny": 0.04, "expression": "tier(\"base\", u(\"image_count\") * 0.04)" },
+    { "model": "xy-gpt-image-2.5-1k", "upstreamModel": "gpt-image-2.5", "resolutions": ["1k"], "salePriceCny": 0.04, "expression": "tier(\"base\", u(\"image_count\") * 0.04)" },
+    { "model": "xy-gpt-image-2.5-flare-1k", "upstreamModel": "gpt-image-2.5-flare", "resolutions": ["1k"], "salePriceCny": 0.04, "expression": "tier(\"base\", u(\"image_count\") * 0.04)" },
+    { "model": "xy-gpt-image-2.5-sunburst-1k", "upstreamModel": "gpt-image-2.5-sunburst", "resolutions": ["1k"], "salePriceCny": 0.04, "expression": "tier(\"base\", u(\"image_count\") * 0.04)" },
+    { "model": "xy-grok-imagine-image-2.0", "upstreamModel": "grok-imagine-image-2.0", "resolutions": ["1k", "2k"], "salePriceCny": 0.08, "expression": "tier(\"base\", u(\"image_count\") * 0.08)" }
+  ]
+}

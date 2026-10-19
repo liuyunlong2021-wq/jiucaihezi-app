@@ -36,6 +36,7 @@ const tools = [
   'skill_run_script',
   'create_document',
   'create_3d_scene',
+  'inspect_3d_scene',
   'edit_3d_scene',
   'export_3d_scene_video',
   'mcp__github__run',
@@ -62,6 +63,7 @@ test('program status kind follows the selected tool family', () => {
   assert.equal(memoryProgramKind('write'), 'file')
   assert.equal(memoryProgramKind('create_document'), 'media')
   assert.equal(memoryProgramKind('edit_3d_scene'), '3d')
+  assert.equal(memoryProgramKind('inspect_3d_scene'), '3d')
   assert.equal(memoryProgramKind('export_3d_scene_video'), '3d')
   assert.equal(memoryProgramKind('terminal'), 'terminal')
   assert.equal(memoryProgramKind('mcp__github__run'), 'mcp')
@@ -166,6 +168,7 @@ test('Skill tool declarations expand to the real current tool names', () => {
       'create_html',
       'export_markdown_slides',
       'create_3d_scene',
+      'inspect_3d_scene',
       'edit_3d_scene',
       'export_3d_scene_video',
       'mcp__demo',
@@ -337,7 +340,7 @@ test('3D selection exposes create, edit, and export tools', () => {
     selectMemoryTools(tools, [], false, false, false, [], false, true).map(
       tool => tool.function.name,
     ),
-    ['create_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'],
+    ['create_3d_scene', 'inspect_3d_scene', 'edit_3d_scene', 'export_3d_scene_video'],
   )
 })
 
