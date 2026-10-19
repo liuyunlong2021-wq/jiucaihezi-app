@@ -1216,10 +1216,19 @@ test('山海画布渠道只登记一条 Seedance 2.5 线路，并走适配器任
   )
 })
 
-test('灵动渠道新增五型号，保留旧售价并更新参考能力', () => {
+test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频按次、图片按张', () => {
+  const plugin = readFileSync('newapi-plugins/lingdong.plugin.js', 'utf8')
+  const quoted = (line: string) => [...line.matchAll(/'([^']+)'/g)].map(match => match[1])
+  const pluginModels = [
+    ...quoted(plugin.match(/^const VIDEO_MODELS = (.*)$/m)![1]),
+    ...quoted(plugin.match(/^const IMAGE_MODELS = (.*)$/m)![1]),
+  ]
+  const pricing = JSON.parse(readFileSync('newapi-plugins/lingdong-pricing-2026-10-14.json', 'utf8'))
+
+  const videoId = 'newapi/lingdong/灵动-sd2.5-满血-301010'
   const perCall = buildCreationRunPlan({
-    modelId: 'newapi/lingdong/SD-2.5-特价',
-    params: { prompt: '海边日落，镜头缓推', ratio: '16:9', duration: 30 },
+    modelId: videoId,
+    params: { prompt: '海边日落，镜头缓推', ratio: '21:9', resolution: '720p', duration: 15 },
   })
   assert.equal(perCall.route, 'newapi-direct')
   assert.equal(perCall.endpoint, '/v1/videos')
@@ -1227,84 +1236,65 @@ test('灵动渠道新增五型号，保留旧售价并更新参考能力', () =>
   assert.equal(perCall.assetFlow, 'newapi-upload')
   assert.equal(perCall.mode, 'text-to-video')
 
-  const perSecond = buildCreationRunPlan({
-    modelId: 'newapi/lingdong/sd2.5-a',
-    params: {
-      prompt: '让参考图里的主体自然运动',
-      images: ['https://example.com/1.jpg'],
-      ratio: '9:16',
-      resolution: '720p',
-      duration: 30,
-    },
-  })
-  assert.equal(perSecond.mode, 'image-to-video')
-
-  // 实时目录已将 SD-2.5-特价扩展为 30 图，固定 30 秒。
+  // 官方 `GET /api/pricing`：4–30 秒，30 图 / 10 视频 / 10 音频。
+  assert.throws(() => buildCreationRunPlan({ modelId: videoId, params: { prompt: '太短', duration: 3 } }), /时长\(秒\)不能小于 4/)
+  assert.throws(() => buildCreationRunPlan({ modelId: videoId, params: { prompt: '太长', duration: 31 } }), /时长\(秒\)不能大于 30/)
   assert.throws(() => buildCreationRunPlan({
-    modelId: 'newapi/lingdong/SD-2.5-特价',
-    params: { prompt: '换一个时长', duration: 15 },
-  }), /时长不支持/)
-  assert.throws(() => buildCreationRunPlan({
-    modelId: 'newapi/lingdong/SD-2.5-特价',
-    params: {
-      prompt: '超出参考图上限',
-      images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`),
-    },
+    modelId: videoId,
+    params: { prompt: '超限', images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`) },
   }), /参考图最多支持 30 个/)
-  // `sd2.5-a` 是 4–30 秒 / 30 张图
   assert.throws(() => buildCreationRunPlan({
-    modelId: 'newapi/lingdong/sd2.5-a',
-    params: {
-      prompt: '超出参考图上限',
-      images: Array.from({ length: 31 }, (_, index) => `https://example.com/${index}.jpg`),
-    },
-  }), /参考图最多支持 30 个/)
+    modelId: videoId,
+    params: { prompt: '超限', videos: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.mp4`) },
+  }), /视频最多支持 10 个/)
+  assert.throws(() => buildCreationRunPlan({
+    modelId: videoId,
+    params: { prompt: '超限', audios: Array.from({ length: 11 }, (_, index) => `https://example.com/${index}.mp3`) },
+  }), /音频最多支持 10 个/)
 
-  // 定价、展示名与范围是有意钉住的：加模型或改名/改价必须同步改这里，也要同步 NewAPI 渠道的计费表达式，
-  // 否则面板显示的实付价与真实扣费会漂移。展示名取 `·` 之前那段（displayModelLabel）。
-  assert.deepEqual(
-    listCreationModels({ source: 'all' })
-      .filter(model => model.id.startsWith('newapi/lingdong/'))
-      .map(model => [model.id, model.model, displayModelLabel(model.label), model.price, model.task]),
-    [
-      ['newapi/lingdong/cvk-2.5-480', 'cvk-2.5-480', 'Sd 2.5 480P', '0.5/秒', 'video'],
-      ['newapi/lingdong/SD-2.5-特价', 'SD-2.5-特价', 'Sd 2.5 特价 30秒', '2.5/次', 'video'],
-      ['newapi/lingdong/sd2.5-a', 'sd2.5-a', 'Sd 2.5-a 720P', '0.5/秒', 'video'],
-      ['newapi/lingdong/cvk-2.5-720', 'cvk-2.5-720', 'Sd 2.5 720P', '0.75/秒', 'video'],
-      ['newapi/lingdong/cvk-2.5-1080', 'cvk-2.5-1080', 'Sd 2.5 1080P', '1.5/秒', 'video'],
-      ['newapi/lingdong/sd-2.5-720-v3', 'sd-2.5-720-v3', 'Sd 2.5 720P V3', '20/次', 'video'],
-      ['newapi/lingdong/SD-2.5-特价-2', 'SD-2.5-特价-2', 'Sd 2.5 特价 2', '4/次', 'video'],
-      ['newapi/lingdong/sd2.5-3033', 'sd2.5-3033', 'Sd 2.5 30图3视频3音频', '4/次', 'video'],
-      ['newapi/lingdong/sd2.5-101010', 'sd2.5-101010', 'Sd 2.5 10图10视频10音频', '4/次', 'video'],
-      ['newapi/lingdong/sd2.5-301010', 'sd2.5-301010', 'Sd 2.5 30图10视频10音频', '4/次', 'video'],
-    ],
-  )
-  assert.equal(creationModelFamily(getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!), '灵动seedace2.5')
-  const mixed = buildCreationRunPlan({
-    modelId: 'newapi/lingdong/sd2.5-3033',
-    params: { prompt: '运动参考', duration: 4, videos: ['https://example.com/v.mp4'], audios: ['https://example.com/a.mp3'] },
+  // 图片走同步 OpenAI Images 合同；App 暂不提交参考图，避免走到插件拒绝的 multipart 编辑接口。
+  const imageId = 'newapi/lingdong/灵动-gpt-image-2.5-flare'
+  const imagePlan = buildCreationRunPlan({
+    modelId: imageId,
+    params: { prompt: '电商产品主图', ratio: '9:16', resolution: '1k' },
   })
-  assert.deepEqual(mixed.debug.normalizedParams.videos, ['https://example.com/v.mp4'])
-  assert.deepEqual(mixed.debug.normalizedParams.audios, ['https://example.com/a.mp3'])
-  assert.throws(() => buildCreationRunPlan({ modelId: mixed.modelId, params: { prompt: '超限', videos: Array.from({ length: 4 }, (_, i) => `https://example.com/${i}.mp4`) } }), /视频最多支持 3 个/)
-  const prices = JSON.parse(readFileSync('newapi-plugins/lingdong-pricing-2026-10-14.json', 'utf8'))
-  for (const row of prices.models) {
-    assert.equal(getCreationModelSpec(`newapi/lingdong/${row.model}`)!.price, `${row.salePriceCny}/次`)
-    assert.equal(getMediaModel(row.model)!.task, 'video')
+  assert.equal(getCreationModelSpec(imageId)!.task, 'image')
+  assert.equal(imagePlan.apiStyle, 'openai-images')
+  assert.equal(imagePlan.endpoint, '/v1/images/generations')
+  assert.equal(imagePlan.pollKind, 'none')
+  assert.equal(imagePlan.mode, 'text-to-image')
+  assert.equal(imagePlan.debug.normalizedParams.size, sizeFromRatioResolution('9:16', '1k'))
+  assert.throws(() => buildCreationRunPlan({
+    modelId: imageId,
+    params: { prompt: '带参考图', images: ['https://example.com/ref.png'] },
+  }), /参考图最多支持 0 个/)
+
+  // 定价、展示名与计费口径是有意钉住的：加模型或改名/改价必须同步改这里，
+  // 也要同步 NewAPI 渠道的计费表达式与 pricing JSON。展示名取 `·` 之前那段。
+  const ids = listCreationModels({ source: 'all' })
+    .filter(model => model.id.startsWith('newapi/lingdong/'))
+    .map(model => [model.id, model.model, displayModelLabel(model.label), model.price, model.task])
+  assert.deepEqual(ids, [
+    ['newapi/lingdong/灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010', 'Sd 2.5 满血 301010', '6/次', 'video'],
+    ['newapi/lingdong/灵动-sd2.5-满血-301010-2', '灵动-sd2.5-满血-301010-2', 'Sd 2.5 满血 301010-2', '8/次', 'video'],
+    ['newapi/lingdong/灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-flare', 'GPT Image 2.5 Flare', '0.08/张', 'image'],
+    ['newapi/lingdong/灵动-gpt-image-2.5-sunburst', '灵动-gpt-image-2.5-sunburst', 'GPT Image 2.5 Sunburst', '0.1/张', 'image'],
+  ])
+  // 面板公开名必须与插件 `meta.models` 逐字一致，否则渠道按名字找不到模型。
+  assert.deepEqual(ids.map(row => row[1]), pluginModels)
+  assert.deepEqual(pricing.models.map((row: { model: string }) => row.model), pluginModels)
+
+  for (const id of ids.map(row => row[0])) {
+    const spec = getCreationModelSpec(id)!
+    assert.equal(creationModelFamily(spec), '灵动seedace2.5', id)
+    assert.equal(spec.contractStatus, 'partial', id)
   }
-  // `SD-2.5-特价` 上游没声明分辨率参数（supported_resolutions 是空数组），面板就不该有这一项
-  assert.equal(
-    getCreationModelSpec('newapi/lingdong/SD-2.5-特价')!.fields.some(field => field.key === 'resolution'),
-    false,
-  )
-  // 2026-10-02 真机验收通过（出片 + 实扣 2 元），所以是 verified 而不是 unknown
-  for (const id of ['newapi/lingdong/SD-2.5-特价', 'newapi/lingdong/sd2.5-a']) {
-    assert.equal(getCreationModelSpec(id)!.contractStatus, 'verified', id)
+  for (const row of pricing.models as Array<{ model: string; salePriceCny: number; unit: string }>) {
+    const spec = getCreationModelSpec(`newapi/lingdong/${row.model}`)!
+    assert.equal(spec.price, `${row.salePriceCny}/${row.unit}`)
+    assert.equal(spec.task, row.unit === '张' ? 'image' : 'video')
+    if (row.unit === '次') assert.equal(getMediaModel(row.model)!.task, 'video')
   }
-  assert.equal(
-    listCreationModels({ task: 'image' }).some(model => model.id.startsWith('newapi/lingdong/')),
-    false,
-  )
 })
 
 test('FK Seedance 2.5 只显示官方六型号，旧型号保留历史注册，参数与上游一致', () => {
@@ -1347,7 +1337,7 @@ test('FK Seedance 2.5 只显示官方六型号，旧型号保留历史注册，�
   assert.ok(listCreationModels({ task: 'video' }).some(model => model.model === 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'))
 })
 
-test('FK 分组排在视频最前，灵动组内首个模型仍为 Sd 2.5 480P', () => {
+test('FK 分组排在视频最前，灵动组内首个模型为 Sd 2.5 满血 301010', () => {
   // 用户已将 FK 置顶；同时保留灵动组内既有排序。
   const panel = readFileSync('src/components/creation/CreationPanel.vue', 'utf8')
   const start = panel.indexOf("cpState.task === 'video'")
@@ -1361,8 +1351,8 @@ test('FK 分组排在视频最前，灵动组内首个模型仍为 Sd 2.5 480P',
 
   const lingdong = listCreationModels({ task: 'video' })
     .filter(model => model.id.startsWith('newapi/lingdong/'))
-  assert.equal(lingdong[0].id, 'newapi/lingdong/cvk-2.5-480')
-  assert.equal(displayModelLabel(lingdong[0].label), 'Sd 2.5 480P')
+  assert.equal(lingdong[0].id, 'newapi/lingdong/灵动-sd2.5-满血-301010')
+  assert.equal(displayModelLabel(lingdong[0].label), 'Sd 2.5 满血 301010')
 })
 
 function sampleParamsFor(spec: CreationModelSpec): Record<string, unknown> {

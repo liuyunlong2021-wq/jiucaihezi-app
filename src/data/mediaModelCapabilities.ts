@@ -131,18 +131,11 @@ function options(values: Array<string | number | boolean>): MediaFieldOption[] {
 }
 
 export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
-  // 灵动公开型号；sd2.5-a 保留兼容，授权目录可用性待核实。
+  // 灵动 0.4.0 只发布四个公开名：两个按次视频、两个按张图片；
+  // 素材上限来自官方 `GET /api/pricing`（30 图 / 10 视频 / 10 音频）。
   ...[
-    ['cvk-2.5-480', 30, 10, 10],
-    ['cvk-2.5-720', 30, 10, 10],
-    ['cvk-2.5-1080', 30, 10, 10],
-    ['SD-2.5-特价', 30, 0, 0],
-    ['sd2.5-a', 30, 0, 0],
-    ['sd-2.5-720-v3', 30, 10, 10],
-    ['SD-2.5-特价-2', 10, 0, 0],
-    ['sd2.5-3033', 30, 3, 3],
-    ['sd2.5-101010', 10, 10, 10],
-    ['sd2.5-301010', 30, 10, 10],
+    ['灵动-sd2.5-满血-301010', 30, 10, 10],
+    ['灵动-sd2.5-满血-301010-2', 30, 10, 10],
   ].map(([model, images, videos, audios]) => ({
     id: String(model), model: String(model), label: String(model), task: 'video' as const,
     provider: 'gateway-video' as const,

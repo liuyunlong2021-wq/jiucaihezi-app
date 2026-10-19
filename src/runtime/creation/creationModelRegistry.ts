@@ -129,74 +129,37 @@ const SHANHAI_VIDEO_MODELS: Array<{
     maxImages: 10,
   },
 ]
-// 灵动 API：9条公开线路与1条待核实兼容线路，两类计费口径。
-// 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-02 实测）—— 比文档准：
-// 文档把 cvk-2.5-* 写成「图·视频·音频参考」，实际是 30 图 / 10 视频 / 10 音频。
-// `price` 是面板对用户的实付价（灵动官方价 + 加价），改价必须同步 NewAPI 渠道的计费表达式。
-const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517']
+// 灵动 API 0.4.0 只发布四个公开名：两个按次视频、两个按张图片。
+// 能力与 `billing_unit` 来自公开 `GET /api/pricing`（2026-10-19 实测）—— 比文档准：
+// 文档只写「图·视频·音频参考」，实际视频是 30 图 / 10 视频 / 10 音频、4–30 秒、720P。
+// `price` 是面板对用户的实付价，改价必须同步 NewAPI 渠道的计费表达式。
+const LINGDONG_NOTES = ['https://www.lingdongapi.com/docs/api/?v=20260517', 'newapi-plugins/lingdong.plugin.js 0.4.0']
 const LINGDONG_CONTRACT_ISSUES = [
-  '2026-10-02 真机验收：`Sd 2.5 480P` 4 秒出片成功，后台实扣 2 元（面板 0.5/秒 × 4 秒对得上）。',
-  '2026-10-14 新型号与音视频参考按官方 /api/pricing 接入，生产路由与实扣待验收；带参考视频时，参考视频与生成时长合计最多 25 秒。',
+  '插件 0.4.0 的四个公开名已本地登记；生产渠道名单、插件激活与真实出片/扣费尚未验收。',
+  '带参考视频时，参考视频与生成时长合计最多 25 秒（官方文档限制）。',
 ]
-// 标准画幅与支持21:9的宽画幅按实时目录分别登记。
-const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4']
-const LINGDONG_WIDE_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
+// 官方 `supported_ratios`（含 21:9）；顺序即面板顺序。
+const LINGDONG_RATIOS = ['1:1', '16:9', '9:16', '3:4', '4:3', '21:9']
 // 表内**顺序就是面板顺序**，而面板默认模型 = 当前任务第一条可用模型（useCreation 的
-// `availableModels[0]`）。所以 2026-10-02 用户要求「视频默认走 Sd 2.5 480P」时，
-// 就是把这条放在表首 + 把「灵动seedace2.5」分组放到视频最前（CreationPanel.vue 的 order 表），两处缺一不可。
+// `availableModels[0]`）。分组顺序由 `CreationPanel.vue` 的 order 表决定。
 const LINGDONG_VIDEO_MODELS: Array<{
   // NewAPI 渠道里的公开名（面板发什么，渠道就按什么找），与 newapi-plugins/lingdong.plugin.js 的 meta.models 逐字一致
   model: string
   label: string
   price: string
   ratios: string[]
-  // 上游没声明分辨率参数的线路不给这个字段（`SD-2.5-特价` 的 supported_resolutions 是空数组）
   resolutions?: string[]
   duration: { min?: number; max?: number; allowedValues?: number[] }
-  // 按秒计费的线路默认给下限 4 秒（一笔最便宜）；`SD-2.5-特价` 是死档，就是 30
   defaultDuration: number
   maxImages: number
   maxVideos?: number
   maxAudios?: number
-  // 上游 notes 写明提示词上限时才给（`SD-2.5-特价` 是 12000 字）
   promptMaxLength?: number
 }> = [
   {
-    model: 'cvk-2.5-480',
-    label: 'Sd 2.5 480P · 灵动 cvk-2.5',
-    price: '0.5/秒',
-    ratios: LINGDONG_RATIOS,
-    resolutions: ['480p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 30,
-    maxVideos: 10,
-    maxAudios: 10,
-  },
-  {
-    model: 'SD-2.5-特价',
-    label: 'Sd 2.5 特价 30秒 · 灵动 SD-2.5-特价',
-    price: '2.5/次',
-    ratios: LINGDONG_WIDE_RATIOS,
-    duration: { allowedValues: [30] },
-    defaultDuration: 30,
-    maxImages: 30,
-    promptMaxLength: 12000,
-  },
-  {
-    model: 'sd2.5-a',
-    label: 'Sd 2.5-a 720P · 灵动 sd2.5-a',
-    price: '0.5/秒',
-    ratios: LINGDONG_RATIOS,
-    resolutions: ['720p'],
-    duration: { min: 4, max: 30 },
-    defaultDuration: 4,
-    maxImages: 30,
-  },
-  {
-    model: 'cvk-2.5-720',
-    label: 'Sd 2.5 720P · 灵动 cvk-2.5',
-    price: '0.75/秒',
+    model: '灵动-sd2.5-满血-301010',
+    label: 'Sd 2.5 满血 301010 · 灵动',
+    price: '6/次',
     ratios: LINGDONG_RATIOS,
     resolutions: ['720p'],
     duration: { min: 4, max: 30 },
@@ -206,43 +169,26 @@ const LINGDONG_VIDEO_MODELS: Array<{
     maxAudios: 10,
   },
   {
-    model: 'cvk-2.5-1080',
-    label: 'Sd 2.5 1080P · 灵动 cvk-2.5',
-    price: '1.5/秒',
+    model: '灵动-sd2.5-满血-301010-2',
+    label: 'Sd 2.5 满血 301010-2 · 灵动',
+    price: '8/次',
     ratios: LINGDONG_RATIOS,
-    resolutions: ['1080p'],
+    resolutions: ['720p'],
     duration: { min: 4, max: 30 },
     defaultDuration: 4,
     maxImages: 30,
     maxVideos: 10,
     maxAudios: 10,
-  },
-  {
-    model: 'sd-2.5-720-v3', label: 'Sd 2.5 720P V3 · 灵动', price: '20/次',
-    ratios: LINGDONG_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
-    defaultDuration: 4, maxImages: 30, maxVideos: 10, maxAudios: 10,
-  },
-  {
-    model: 'SD-2.5-特价-2', label: 'Sd 2.5 特价 2 · 灵动', price: '4/次',
-    ratios: LINGDONG_WIDE_RATIOS, duration: { allowedValues: [30] },
-    defaultDuration: 30, maxImages: 10,
-  },
-  {
-    model: 'sd2.5-3033', label: 'Sd 2.5 30图3视频3音频 · 灵动', price: '4/次',
-    ratios: LINGDONG_WIDE_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
-    defaultDuration: 4, maxImages: 30, maxVideos: 3, maxAudios: 3,
-  },
-  {
-    model: 'sd2.5-101010', label: 'Sd 2.5 10图10视频10音频 · 灵动', price: '4/次',
-    ratios: LINGDONG_WIDE_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
-    defaultDuration: 4, maxImages: 10, maxVideos: 10, maxAudios: 10,
-  },
-  {
-    model: 'sd2.5-301010', label: 'Sd 2.5 30图10视频10音频 · 灵动', price: '4/次',
-    ratios: LINGDONG_WIDE_RATIOS, resolutions: ['720p'], duration: { min: 4, max: 30 },
-    defaultDuration: 4, maxImages: 30, maxVideos: 10, maxAudios: 10,
   },
 ]
+
+// 图片按张计费。官方 `size_control` 只说明「1K/2K/4K 共 10 种比例」，逐档像素表未列出，
+// 面板沿用本仓通用的比例 × 分辨率换算，默认 1:1 / 1k = 1024x1024（官方声明的默认尺寸）。
+const LINGDONG_IMAGE_MODELS = [
+  { model: '灵动-gpt-image-2.5-flare', label: 'GPT Image 2.5 Flare · 灵动', price: '0.08/张' },
+  { model: '灵动-gpt-image-2.5-sunburst', label: 'GPT Image 2.5 Sunburst · 灵动', price: '0.1/张' },
+] as const
+const LINGDONG_IMAGE_RATIOS = ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']
 
 // 源流 AI OpenAPI：模型 ID / 参考素材上限 / 单次售价由用户提供；视频任务协议见其公开 API 文档。
 // `/models` 的模型级限制尚未核对；先不传画幅/分辨率，让上游应用文档默认值，时长 UI 仅校验正整数。
@@ -1603,8 +1549,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     mode: 'text-to-video',
     endpoint: '/v1/videos',
     assetFlow: 'newapi-upload',
-    // 旧图片链路保留验收状态；新型号尚待生产验证。
-    contractStatus: ['cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080', 'SD-2.5-特价', 'sd2.5-a'].includes(model.model) ? 'verified' : 'partial',
+    contractStatus: 'partial',
     contractIssues: LINGDONG_CONTRACT_ISSUES,
     ratios: model.ratios,
     resolutions: model.resolutions,
@@ -1633,6 +1578,32 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       ...(model.maxVideos ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...(model.maxAudios ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ], model.promptMaxLength),
+    notes: LINGDONG_NOTES,
+  })),
+  // ── 灵动图片：JSON 公网 URL 由插件转发，同步返回 data[]；官方没有图片任务查询接口 ──
+  // App 图片链路暂只发提示词与尺寸（不提交参考图）；图生图的 JSON images 走画布，
+  // 待 App 侧接入 JSON 参考图后再开放，避免走到插件明确拒绝的 /v1/images/edits multipart。
+  ...LINGDONG_IMAGE_MODELS.map(model => directImage({
+    id: `newapi/lingdong/${model.model}`,
+    model: model.model,
+    label: model.label,
+    price: model.price,
+    upstreamFamily: 'openai-compatible',
+    apiStyle: 'openai-images',
+    mode: 'text-to-image',
+    pollKind: 'none',
+    endpoint: '/v1/images/generations',
+    assetFlow: 'none',
+    resultExtractor: 'openai-image',
+    contractStatus: 'partial',
+    contractIssues: [...LINGDONG_CONTRACT_ISSUES, 'App 暂不提交参考图；官方 size 逐档像素表未列出，尺寸由比例 × 分辨率换算。'],
+    files: { images: { min: 0, max: 0 } },
+    ratios: LINGDONG_IMAGE_RATIOS,
+    resolutions: ['1k', '2k', '4k'],
+    fields: promptFields([
+      { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(LINGDONG_IMAGE_RATIOS) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1k', options: options(['1k', '2k', '4k']) },
+    ]),
     notes: LINGDONG_NOTES,
   })),
   // ── 源流 AI Seedance：NewAPI Task Plugin 直连源流 OpenAPI ──

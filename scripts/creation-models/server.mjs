@@ -16,7 +16,7 @@ const PSQL_USER = process.env.NEWAPI_PSQL_USER || 'newapi'
 const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
-  ...['cvk-2.5-480', 'cvk-2.5-720', 'cvk-2.5-1080', 'SD-2.5-特价', 'sd2.5-a', 'sd-2.5-720-v3', 'SD-2.5-特价-2', 'sd2.5-3033', 'sd2.5-101010', 'sd2.5-301010'].map(model => ({ id: `newapi/lingdong/${model}`, aliases: [model] })),
+  ...['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2', '灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/lingdong/${model}`, aliases: [model, model.slice(3)] })),
   ...['yihong-gpt-image-2', 'yihong-gpt-image-2.5-flare', 'yihong-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/yihong/${model}`, aliases: [model] })),
   { id: 'gpt-image-2.5-1k', aliases: ['gpt-image-2.5-1k'] },
   { id: 'gpt-image-2.5-flare-1k', aliases: ['gpt-image-2.5-flare-1k'] },
