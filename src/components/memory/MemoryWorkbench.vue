@@ -43,6 +43,7 @@ import {
   upsertHarnessConversationCatalogEntry,
   type HarnessConversationCatalogEntry,
 } from '@/runtime/memory/harnessConversationCatalog'
+import { recoverHarnessConversationCatalog } from '@/services/harnessConversationRecovery'
 import {
   applyConversationSplitPlan,
   buildConversationSplitPlan,
@@ -1996,6 +1997,8 @@ async function openProject(owner: string) {
     if (updateResume) restoreUpdateInputDraft(updateResume, resumeKey)
     return
   }
+  await recoverHarnessConversationCatalog(owner)
+  if (generation !== projectGeneration) return
   try {
     const state = await inspectMemoryProject(owner, files)
     if (generation !== projectGeneration) return

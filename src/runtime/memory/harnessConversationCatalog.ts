@@ -54,6 +54,28 @@ export function upsertHarnessConversationCatalogEntry(
   return entry
 }
 
+/**
+ * 把从 Harness 会话缓存恢复出来的目录项合并进现有目录。
+ *
+ * 只补缺失的 conversationId，不覆盖用户已有的标题、模型选择和创作偏好；
+ * 返回实际新增的条数。
+ */
+export function mergeHarnessConversationCatalogEntries(
+  workspaceKey: string,
+  entries: HarnessConversationCatalogEntry[],
+  storage: Storage = localStorage,
+): number {
+  const existing = new Set(read(workspaceKey, storage).map(item => item.conversationId))
+  let added = 0
+  for (const entry of entries) {
+    if (!entry?.conversationId || !entry?.sessionId || existing.has(entry.conversationId)) continue
+    upsertHarnessConversationCatalogEntry({ ...entry, workspaceKey }, storage)
+    existing.add(entry.conversationId)
+    added += 1
+  }
+  return added
+}
+
 export function createHarnessConversationCatalogEntry(
   workspaceKey: string,
   title = '新对话',

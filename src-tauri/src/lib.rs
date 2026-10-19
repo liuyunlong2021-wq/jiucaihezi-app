@@ -1779,6 +1779,7 @@ pub fn run() {
             commands::workspace::open_new_window,
             commands::workspace::claim_workspace,
             commands::session::read_session_token,
+            commands::harness::recover_harness_conversation_catalog,
             commands::session::write_session_token,
             commands::clipboard::write_clipboard_text,
             commands::clipboard::read_clipboard_image,

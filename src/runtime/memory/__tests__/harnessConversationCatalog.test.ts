@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import {
   createHarnessConversationCatalogEntry,
   listHarnessConversationCatalog,
+  mergeHarnessConversationCatalogEntries,
   removeHarnessConversationCatalogEntry,
   renameHarnessConversationCatalogEntry,
   upsertHarnessConversationCatalogEntry,
@@ -60,4 +61,31 @@ test('production selection persists before sending and remains isolated by conve
   assert.equal(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'b')?.manju, undefined)
   upsertHarnessConversationCatalogEntry({ ...a, manju: { enabled: false } }, storage)
   assert.equal(listHarnessConversationCatalog('/a', storage).find(entry => entry.conversationId === 'a')?.manju?.enabled, false)
+})
+
+test('recovered catalog only fills missing conversations and keeps existing user edits', () => {
+  const storage = memoryStorage()
+  createHarnessConversationCatalogEntry('/project-a', '用户标题', storage, 'conversation-1', '2026-09-24T00:00:00.000Z')
+  const added = mergeHarnessConversationCatalogEntries('/project-a', [
+    {
+      conversationId: 'conversation-1',
+      sessionId: 'jc-v1-conversation-1',
+      workspaceKey: '/project-a',
+      title: '会话缓存旧标题',
+      createdAt: '2026-09-23T00:00:00.000Z',
+      updatedAt: '2026-09-23T00:00:00.000Z',
+    },
+    {
+      conversationId: 'conversation-2',
+      sessionId: 'jc-v1-conversation-2',
+      workspaceKey: '/project-a',
+      title: '恢复的对话',
+      createdAt: '2026-09-25T00:00:00.000Z',
+      updatedAt: '2026-09-25T00:00:00.000Z',
+    },
+  ], storage)
+  assert.equal(added, 1)
+  const entries = listHarnessConversationCatalog('/project-a', storage)
+  assert.equal(entries.find(entry => entry.conversationId === 'conversation-1')?.title, '用户标题')
+  assert.equal(entries.find(entry => entry.conversationId === 'conversation-2')?.title, '恢复的对话')
 })

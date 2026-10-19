@@ -8,6 +8,7 @@
         "allow": [
           "greet",
           "read_session_token",
+          "recover_harness_conversation_catalog",
           "write_session_token",
           "write_clipboard_text",
           "read_clipboard_image",
