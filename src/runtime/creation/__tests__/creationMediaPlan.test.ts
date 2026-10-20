@@ -295,7 +295,7 @@ test('Dola Seedance 2.5 switches to image-to-video with four references and stay
 })
 
 test('model lookup prefers exact ids and resolves aliases', () => {
-  assert.equal(getCreationModelSpec('gpt-image-2.5-1k')?.model, 'gpt-image-2.5-1k')
+  assert.equal(getCreationModelSpec('gpt-image-2.5-1k')?.model, 'xy-gpt-image-2.5-1k')
   assert.equal(getCreationModelSpec('gpt-image-2')?.id, 'gpt-image-2-超分')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp')?.model, 'rh-aiapp')
   assert.equal(getCreationModelSpec('runninghub/aiapp/rh-aiapp-fast-digital-human'), undefined)
@@ -352,8 +352,8 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
     },
   })
 
-  assert.equal(spec?.model, 'gpt-image-2.5-1k')
-  assert.equal(plan.model, 'gpt-image-2.5-1k')
+  assert.equal(spec?.model, 'xy-gpt-image-2.5-1k')
+  assert.equal(plan.model, 'xy-gpt-image-2.5-1k')
   assert.equal(plan.source, 'newapi-direct')
   assert.equal(plan.route, 'newapi-direct')
   assert.equal(plan.usesRhAdapter, false)
@@ -367,17 +367,17 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
   })
   assert.equal(generationPlan.debug.normalizedParams.response_format, 'b64_json')
   for (const [modelId, resolutions, price] of [
-    ['gpt-image-2.5-1k', ['1k'], '0.08/张'],
-    ['gpt-image-2.5-flare-1k', ['1k'], '0.08/张'],
-    ['gpt-image-2.5-sunburst-1k', ['1k'], '0.08/张'],
-    ['gpt-image-2-1k', ['1k'], '0.08/张'],
+    ['gpt-image-2.5-1k', ['1k'], '0.04/张'],
+    ['gpt-image-2.5-flare-1k', ['1k'], '0.04/张'],
+    ['gpt-image-2.5-sunburst-1k', ['1k'], '0.04/张'],
+    ['gpt-image-2-1k', ['1k'], '0.04/张'],
     ['gpt-image-2-超分', ['1k', '2k', '4k'], '0.15/张'],
     ['gpt-image-2.5-官方', ['1k', '2k', '4k'], '0.15/张'],
     ['gpt-image-2.5-flare-官方', ['1k', '2k', '4k'], '0.15/张'],
     ['gpt-image-2.5-sunburst-官方', ['1k', '2k', '4k'], '0.15/张'],
   ]) {
     const route = getCreationModelSpec(modelId)!
-    assert.equal(route.model, modelId)
+    assert.equal(route.model, resolutions.length === 1 ? `xy-${modelId}` : modelId)
     assert.deepEqual(route.capabilities.resolutions, resolutions)
     assert.equal(displayModelPrice(route), price)
     assert.equal(route.fields.some(field => field.key === 'response_format'), false)
@@ -421,10 +421,8 @@ test('菠萝线路自成一族，图 4 的四个视频模型与四个 GPT Image 
     assert.ok(getCreationModelSpec(id), id)
   }
 
-  // 四个 GPT Image 2.5 变体（Flare / Sunburst 的 1K 与官方）同样退出面板
+  // 官方Flare/Sunburst历史档仍隐藏；小易1K变体现已按0.3.0插件开放。
   for (const id of [
-    'gpt-image-2.5-flare-1k',
-    'gpt-image-2.5-sunburst-1k',
     'gpt-image-2.5-flare-官方',
     'gpt-image-2.5-sunburst-官方',
   ]) {
@@ -599,7 +597,7 @@ test('Xiaoyi Grok and Kling expose only their supported creation fields', () => 
   const video = getCreationModelSpec('newapi/xiaoyi/grok-imagine-video-1.5')!
   const kling = getCreationModelSpec('newapi/xiaoyi/kling-video-v3')!
 
-  assert.deepEqual(image.capabilities.resolutions, ['1k', '2k', '4k'])
+  assert.deepEqual(image.capabilities.resolutions, ['1k', '2k'])
   assert.equal(image.fields.some(field => field.key === 'responseFormat'), false)
   assert.deepEqual(video.capabilities.resolutions, ['480p', '720p', '1080p'])
   assert.equal(video.files?.images?.min, 0)
@@ -1114,7 +1112,7 @@ test('panel model labels distinguish GPT Image 2 routing tiers', () => {
   const gpt = items.find(item => item.id === 'gpt-image-2.5-1k')
   const rh = items.find(item => item.id === 'runninghub/api/rh-gpt2-image')
 
-  assert.equal(gpt?.label, 'GPT Image 2.5 1K')
+  assert.equal(gpt?.label, 'xy-gpt-image-2.5-1k')
   assert.equal(rh?.label, 'GPT2.0 图生图')
   for (const item of items) {
     assert.doesNotMatch(item.label, /·\s*(T8|RunningHub|NewAPI|直连|RH)/, item.id)
@@ -1453,4 +1451,35 @@ test('小易Grok1.5恢复面板显示、三档售价与6/10秒合同', () => {
   assert.equal(plan.model, 'grok-imagine-video-1.5')
   assert.equal(plan.debug.normalizedParams.resolution, resolution)
  }
+})
+
+test('小易五个图片公开名、UI售价与全部可选尺寸匹配插件合同', async () => {
+  const pricing = JSON.parse(readFileSync('newapi-plugins/xiaoyi-image-pricing.json', 'utf8'))
+  const { pathToFileURL } = await import('node:url')
+  const plugin = await import(pathToFileURL(`${process.cwd()}/newapi-plugins/xiaoyi-image.plugin.js`).href)
+  const models = listCreationModels({ task: 'image' })
+  for (const entry of pricing.models) {
+    const visible = models.find(spec => spec.model === entry.model)!
+    const spec = visible && getCreationModelSpec(visible.id)!
+    assert.ok(spec, entry.model)
+    // 面板标签必须与 NewAPI 渠道里的公开名逐字一致。
+    assert.equal(spec.label, entry.model)
+    assert.equal(displayModelPrice(spec), `${entry.salePriceCny}/张`)
+    assert.deepEqual(spec.capabilities.resolutions, entry.resolutions)
+    for (const resolution of spec.capabilities.resolutions!) {
+      for (const ratio of spec.capabilities.ratios!) {
+        const plan = buildCreationRunPlan({ modelId: spec.id, params: { prompt: '合同测试', resolution, ratio } })
+        assert.equal(plan.model, entry.model)
+        const ctx = { model: plan.model, upstreamModel: entry.upstreamModel, baseUrl: plugin.meta.baseUrl, apiKey: 'fixture-key' }
+        const intent = plugin.protocols.openai_image.decodeRequest({ ...ctx, body: { kind: 'json', value: plan.debug.normalizedParams } })
+        const request = plugin.buildSubmitRequest({ ...ctx, requestBody: intent.requestBody })
+        assert.equal(request.body.model, entry.upstreamModel)
+        const edit = plugin.protocols.openai_image.decodeRequest({ ...ctx, operation: 'edit', body: {
+          kind: 'multipart', fields: { prompt: ['合同测试'], size: [plan.debug.normalizedParams.size] },
+          files: [{ ref: 'fixture:image', field: 'image[]', filename: 'a.png' }],
+        } })
+        assert.equal(plugin.buildSubmitRequest({ ...ctx, requestBody: edit.requestBody }).body.model, entry.upstreamModel)
+      }
+    }
+  }
 })

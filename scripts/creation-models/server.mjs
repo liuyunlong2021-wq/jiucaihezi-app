@@ -18,10 +18,11 @@ const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 export const CREATION_MODEL_ROUTES = [
   ...['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2', '灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/lingdong/${model}`, aliases: [model, model.slice(3)] })),
   ...['yihong-gpt-image-2', 'yihong-gpt-image-2.5-flare', 'yihong-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/yihong/${model}`, aliases: [model] })),
-  { id: 'gpt-image-2.5-1k', aliases: ['gpt-image-2.5-1k'] },
-  { id: 'gpt-image-2.5-flare-1k', aliases: ['gpt-image-2.5-flare-1k'] },
-  { id: 'gpt-image-2.5-sunburst-1k', aliases: ['gpt-image-2.5-sunburst-1k'] },
-  { id: 'gpt-image-2-1k', aliases: ['gpt-image-2-1k'] },
+  // 小易 0.3.0 起渠道公开名带 xy- 前缀，历史内部名保留兼容。
+  { id: 'gpt-image-2.5-1k', aliases: ['xy-gpt-image-2.5-1k', 'gpt-image-2.5-1k'] },
+  { id: 'gpt-image-2.5-flare-1k', aliases: ['xy-gpt-image-2.5-flare-1k', 'gpt-image-2.5-flare-1k'] },
+  { id: 'gpt-image-2.5-sunburst-1k', aliases: ['xy-gpt-image-2.5-sunburst-1k', 'gpt-image-2.5-sunburst-1k'] },
+  { id: 'gpt-image-2-1k', aliases: ['xy-gpt-image-2-1k', 'gpt-image-2-1k'] },
   { id: 'gpt-image-2-超分', aliases: ['gpt-image-2-超分'] },
   { id: 'gpt-image-2.5-官方', aliases: ['gpt-image-2.5-官方'] },
   { id: 'gpt-image-2.5-flare-官方', aliases: ['gpt-image-2.5-flare-官方'] },

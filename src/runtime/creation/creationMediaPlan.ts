@@ -297,12 +297,21 @@ function normalizeOpenAiImageParams(
   const ratio = String(firstValue(params, ['ratio', 'aspectRatio', 'aspect_ratio']) || '1:1')
   const yihongGptImage = spec.id.startsWith('newapi/yihong/yihong-gpt-image-')
   const resolution = String(params.resolution || spec.fields.find(field => field.key === 'resolution')?.defaultValue || '2k')
-  const size = yihongGptImage
+  // 小易插件只接受列明的像素预设，通用比例取整结果并不总在该集合中。
+  const xiaoyiSizes: Record<string, Record<string, string>> = {
+    '1k': { '1:1': '1024x1024', '2:3': '1024x1536', '3:2': '1536x1024', '4:3': '1024x768', '3:4': '768x1024', '16:9': '1536x864', '9:16': '864x1536', '21:9': '2016x864', '9:21': '864x2016' },
+    '2k': { '1:1': '2048x2048', '2:3': '1360x2048', '3:2': '2048x1360', '4:3': '2048x1536', '3:4': '1536x2048', '16:9': '2048x1152', '9:16': '1152x2048', '21:9': '2688x1152', '9:21': '1152x2688' },
+  }
+  const size = spec.model.startsWith('xy-') && !params.size
+    ? xiaoyiSizes[resolution]?.[ratio]
+    : yihongGptImage
     ? getYihongGptImageSize(ratio, resolution)
     : typeof params.size === 'string' && params.size !== 'auto'
       ? params.size
       : sizeFromRatioResolution(ratio, resolution)
-  if (!size) throw new Error(`Unsupported 易红 GPT Image size: ${resolution} ${ratio}`)
+  if (!size) throw new Error(`Unsupported ${yihongGptImage ? '易红 GPT Image' : '小易 image'} size: ${resolution} ${ratio}`)
+  if (spec.model.startsWith('xy-') && !Object.values(xiaoyiSizes[resolution] || {}).includes(size))
+    throw new Error(`Unsupported 小易 image size: ${resolution} ${size}`)
   return compact({
     model: spec.model,
     prompt: params.prompt,

@@ -228,3 +228,34 @@ test('sanitizeErrorForLog redacts password-bearing command details', () => {
   assert.ok(!safe.includes('another-secret'))
   assert.ok(safe.includes('PGPASSWORD=***'))
 })
+
+// 小易 0.3.0 起渠道里的公开名带 xy- 前缀；面板 id 仍是历史内部名。
+// 路由只登记旧名时，创作面板会把四个 GPT 1K 型号判成「未配置该模型渠道」并禁用发送。
+test('buildCreationModelAvailability recognizes the Xiaoyi xy- public names for the four GPT 1K routes', () => {
+  const models = buildCreationModelAvailability([
+    {
+      id: 167,
+      name: '小易图片',
+      status: 1,
+      baseUrl: 'x',
+      models: [
+        'xy-gpt-image-2.5-1k',
+        'xy-gpt-image-2.5-flare-1k',
+        'xy-gpt-image-2.5-sunburst-1k',
+        'xy-gpt-image-2-1k',
+      ],
+    },
+  ])
+
+  for (const id of ['gpt-image-2.5-1k', 'gpt-image-2.5-flare-1k', 'gpt-image-2.5-sunburst-1k', 'gpt-image-2-1k']) {
+    assert.equal(models.find(model => model.id === id)?.status, 'enabled', `${id} 应匹配 xy- 公开名`)
+  }
+})
+
+test('buildCreationModelAvailability still accepts the legacy Xiaoyi names', () => {
+  const models = buildCreationModelAvailability([
+    { id: 168, name: '小易图片旧名', status: 1, baseUrl: 'x', models: ['gpt-image-2.5-1k'] },
+  ])
+
+  assert.equal(models.find(model => model.id === 'gpt-image-2.5-1k')?.status, 'enabled')
+})

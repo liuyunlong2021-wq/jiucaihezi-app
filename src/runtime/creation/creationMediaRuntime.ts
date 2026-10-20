@@ -509,7 +509,7 @@ async function executeDirectImageRequest(
       model: request.plan.model,
       prompt,
       seconds: '1',
-      response_format: request.plan.apiStyle === 'newapi-image-task' || request.plan.model === 'grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
+      response_format: request.plan.apiStyle === 'newapi-image-task' || request.plan.model === 'xy-grok-imagine-image-2.0' ? 'url' : params.responseFormat || 'url',
     }
     if (params.size) fields.size = params.size
     if (images.length) fields.image = await Promise.all(images.map(image => imageReferenceToBlob(image, request.signal)))

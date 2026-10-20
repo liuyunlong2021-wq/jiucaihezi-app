@@ -315,7 +315,7 @@ test('GPT Image 2.5 prefers inline bytes over a relay URL', { concurrency: false
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     assert.match(String(input), /\/v1\/images\/generations$/)
     const body = JSON.parse(String(init?.body || '{}'))
-    assert.equal(body.model, 'gpt-image-2.5-1k')
+    assert.equal(body.model, 'xy-gpt-image-2.5-1k')
     assert.equal(body.response_format, 'b64_json')
     return Response.json({ data: [{
       url: 'https://relay.xiaoyiapi.xyz/v1/images/public/result',
@@ -370,7 +370,7 @@ test('Grok Image 2 submits a mapped size and always requests a URL', { concurren
     const url = String(input)
     if (url.endsWith('/v1/images/generations') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body))
-      assert.equal(body.model, 'grok-imagine-image-2.0')
+      assert.equal(body.model, 'xy-grok-imagine-image-2.0')
       assert.equal(body.size, '2048x1152')
       assert.equal(body.aspect_ratio, undefined)
       assert.equal(body.response_format, 'url')
@@ -399,6 +399,7 @@ test('Grok Image 2 uses image[] for multiple reference images', { concurrency: f
     const url = String(input)
     if (url.endsWith('/v1/images/edits') && init?.method === 'POST') {
       const body = init.body as FormData
+      assert.equal(body.get('model'), 'xy-grok-imagine-image-2.0')
       assert.equal(body.getAll('image[]').length, 2)
       assert.equal(body.getAll('image').length, 0)
       return Response.json({ data: [{ url: 'https://cdn.example.test/grok.png' }] })

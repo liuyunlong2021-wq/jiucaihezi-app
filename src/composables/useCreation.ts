@@ -441,9 +441,21 @@ export function saveCpState() {
 }
 
 // ─── 计算属性 ───
-export const currentModel = computed<CreationModel | undefined>(
-  () => CREATION_PANEL_MODELS[cpState.modelKey]
-)
+// 面板内部一律用注册表 id；计划/历史快照可能给的是公开 model 名或别名，
+// 直接按 id 查不到时回落到注册表，否则界面会把 xy- 这类原始 model 名当标签显示。
+function resolveCreationModelKey(key: string): string {
+  try {
+    return getCreationModelSpec(key)?.id || key
+  } catch {
+    return key
+  }
+}
+
+export const currentModel = computed<CreationModel | undefined>(() => {
+  const direct = CREATION_PANEL_MODELS[cpState.modelKey]
+  if (direct) return direct
+  return CREATION_PANEL_MODELS[resolveCreationModelKey(cpState.modelKey)]
+})
 export const currentCreationSpec = computed(() => getCreationModelSpec(cpState.modelKey))
 
 export const availableModels = computed(() => getModelsForTask(cpState.task))
@@ -756,7 +768,7 @@ export function switchTask(task: CreationTask) {
 }
 
 export function switchModel(key: string) {
-  cpState.modelKey = key
+  cpState.modelKey = resolveCreationModelKey(key)
   syncParams()
   saveCpState()
 }

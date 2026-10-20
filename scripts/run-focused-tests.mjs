@@ -36,6 +36,7 @@ const wave1FocusedTests = [
   'src/composables/__tests__/useContentEditable.test.ts',
   'src/composables/__tests__/webDirectEngine.test.ts',
   'src/composables/__tests__/useCreationPlanMaterialization.test.ts',
+  'src/composables/__tests__/useCreationModelKey.test.ts',
   'src/runtime/direct/__tests__/directStream.test.ts',
   'src/runtime/direct/__tests__/directTools.test.ts',
   'src/runtime/direct/__tests__/creativeMemory.test.ts',

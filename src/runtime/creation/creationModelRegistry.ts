@@ -42,11 +42,11 @@ const GPT_IMAGE_2_ROUTES: Array<{
   /** 退出面板但仍保留合同：历史任务与按 id 调用照旧。 */
   hidden?: boolean
 }> = [
-  { id: 'gpt-image-2.5-1k', label: 'GPT Image 2.5 1K', price: 0.08, resolutions: ['1k'] },
-  // Flare / Sunburst 变体 2026-09-27 退出面板（用户决定），合同保留
-  { id: 'gpt-image-2.5-flare-1k', label: 'GPT Image 2.5 Flare 1K', price: 0.08, resolutions: ['1k'], hidden: true },
-  { id: 'gpt-image-2.5-sunburst-1k', label: 'GPT Image 2.5 Sunburst 1K', price: 0.08, resolutions: ['1k'], hidden: true },
-  { id: 'gpt-image-2-1k', label: 'GPT Image 2 1K', price: 0.08, resolutions: ['1k'] },
+  { id: 'gpt-image-2.5-1k', model: 'xy-gpt-image-2.5-1k', label: 'xy-gpt-image-2.5-1k', price: 0.04, resolutions: ['1k'] },
+  // 小易0.3.0开放四个1K型号，历史内部ID保留，公开调用名使用xy前缀。
+  { id: 'gpt-image-2.5-flare-1k', model: 'xy-gpt-image-2.5-flare-1k', label: 'xy-gpt-image-2.5-flare-1k', price: 0.04, resolutions: ['1k'] },
+  { id: 'gpt-image-2.5-sunburst-1k', model: 'xy-gpt-image-2.5-sunburst-1k', label: 'xy-gpt-image-2.5-sunburst-1k', price: 0.04, resolutions: ['1k'] },
+  { id: 'gpt-image-2-1k', model: 'xy-gpt-image-2-1k', label: 'xy-gpt-image-2-1k', price: 0.04, resolutions: ['1k'] },
   { id: 'gpt-image-2-超分', label: 'GPT Image 2 超分', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
   { id: 'gpt-image-2.5-官方', label: 'GPT Image 2.5 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
   { id: 'gpt-image-2.5-flare-官方', label: 'GPT Image 2.5 Flare 官方', price: 0.15, resolutions: ['1k', '2k', '4k'], hidden: true },
@@ -1109,7 +1109,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         label: '比例',
         kind: 'select',
         defaultValue: '1:1',
-        options: options(['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']),
+        options: options(route.model?.startsWith('xy-') ? ['1:1', '2:3', '3:2', '4:3', '3:4', '16:9', '9:16', '21:9', '9:21'] : ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9']),
       },
       {
         key: 'resolution',
@@ -1121,7 +1121,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
       { key: 'image', label: '参考图', kind: 'images' },
     ],
     notes: ['docs/wiki/运维/模型矩阵.md'],
-    ratios: ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
+    ratios: route.model?.startsWith('xy-') ? ['1:1', '2:3', '3:2', '4:3', '3:4', '16:9', '9:16', '21:9', '9:21'] : ['1:1', '2:3', '3:2', '4:5', '5:4', '4:3', '3:4', '16:9', '9:16', '21:9'],
     resolutions: route.resolutions,
   })),
   // 菠萝（aimanplay.cn）GPT Image 同步生图：OpenAI Images 兼容，NewAPI 直配、无适配器。
@@ -1281,9 +1281,9 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
   }),
   directImage({
     id: 'newapi/xiaoyi/grok-imagine-image-2.0',
-    model: 'grok-imagine-image-2.0',
-    label: 'Grok Imagine Image 2.0 · 小易',
-    price: 0.05,
+    model: 'xy-grok-imagine-image-2.0',
+    label: 'xy-grok-imagine-image-2.0',
+    price: 0.08,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'openai-image-edits',
     mode: 'text-to-image',
@@ -1293,11 +1293,11 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     pollKind: 'none',
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
-      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k', '4k']) },
+      { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k']) },
       { key: 'images', label: '参考图', kind: 'images' },
     ]),
     ratios: ['1:1', '16:9', '9:16', '3:2', '2:3'],
-    resolutions: ['1k', '2k', '4k'],
+    resolutions: ['1k', '2k'],
     files: { images: { min: 0, max: 8 } },
     contractStatus: 'verified',
     notes: ['https://xiaoyiapi.xyz/docs/api/grok-images/'],
