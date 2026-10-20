@@ -3405,6 +3405,7 @@ async function addProjectFileReference(resource: ProjectResource, persistent = t
 
 async function addProjectMediaReferences(payload: unknown) {
   const resources = (payload as { resources?: ProjectResource[] } | null)?.resources || []
+  const previews: Promise<void>[] = []
   for (const resource of resources) {
     if (resource.isDirectory || resource.kind !== 'media'
       || attachments.value.some(attachment => attachment.resourcePath === resource.path)) continue
@@ -3421,17 +3422,21 @@ async function addProjectMediaReferences(payload: unknown) {
         value: '',
         resourcePath: resource.path,
       }
-      if (attachment.kind === 'image' || attachment.kind === 'video') {
-        try { attachment.previewUrl = await createProjectMediaPreview(resource) }
-        catch { /* keep the file fallback */ }
-      }
       attachments.value.push(attachment)
-      await nextTick()
-      composerRef.value?.focus()
+      if (attachment.kind === 'image' || attachment.kind === 'video') {
+        previews.push(createProjectMediaPreview(resource).then(previewUrl => {
+          const current = attachments.value.find(item => item.id === attachment.id)
+          if (current) current.previewUrl = previewUrl
+          else URL.revokeObjectURL(previewUrl)
+        }).catch(() => { /* keep the file fallback */ }))
+      }
     } catch (cause) {
       error.value = `引用失败：${cause instanceof Error ? cause.message : String(cause)}`
     }
   }
+  await nextTick()
+  composerRef.value?.focus()
+  await Promise.all(previews)
 }
 
 function resetComposer() {

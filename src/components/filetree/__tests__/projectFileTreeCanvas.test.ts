@@ -609,3 +609,15 @@ test('project file preview ignores stale OPFS reads and revokes stale object URL
   )
   assert.match(preview, /filePreviewLease = lease/)
 })
+
+test('reference to chat sends every selected image in one event', async () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const body = source.split('async function ctxReferenceInChat() {')[1]!.split('\nasync function ctxOpenInSystem')[0]!.replace(/\n}\s*$/, '')
+  const images = ['a.png', 'b.png', 'c.png'].map(path => ({ path, name: path, kind: 'media', isDirectory: false }))
+  const events: Array<[string, any]> = []
+  const run = new Function('ctxMenu', 'closeCtxMenu', 'selectedResources', 'emitEvent', 'isCanvasMediaFile', 'resourceForNode', `return (async () => {${body}})()`)
+  await run({ value: { node: { path: 'b.png', name: 'b.png' } } }, () => {}, () => images,
+    (name: string, payload: any) => events.push([name, payload]), () => true,
+    (node: { path: string }) => images.find(image => image.path === node.path))
+  assert.deepEqual(events.filter(([name]) => name === 'media-reference:add').map(([, payload]) => payload.resources), [images])
+})

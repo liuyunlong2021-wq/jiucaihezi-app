@@ -1271,7 +1271,7 @@ async function ctxReferenceInChat() {
   emitEvent('switch-panel', 'chat')
   if (isCanvasMediaFile(node)) {
     emitEvent('media-reference:add', {
-      resources: [resourceForNode(node)],
+      resources: selectedResources().filter(resource => !resource.isDirectory && resource.kind === 'media'),
       source: 'project',
     })
     return
