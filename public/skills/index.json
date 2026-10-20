@@ -1,5 +1,31 @@
 [
   {
+    "id": "cinematic-four-panel-frames",
+    "name": "cinematic-four-panel-frames",
+    "displayName": "cinematic-four-panel-frames",
+    "description": "根据已确认工程剧本及角色、场景、服装和道具参考图，制作2×2四格成片级分镜图。每格对应一个明确镜头瞬间，继承人物身份、摄影机位、表演、光影、材质和项目画风，可单独作为成片关键帧使用。适用于工程台本后的参考图驱动分镜生成、局部修正与单格提取；不用于简笔画、草图分镜或重新编写工程剧本。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        }
+      ]
+    }
+  },
+  {
     "id": "h3-prompt-writing",
     "name": "h3-prompt-writing",
     "displayName": "h3-prompt-writing",
@@ -289,7 +315,7 @@
     "id": "jc-manju-zhizuo",
     "name": "jc-manju-zhizuo",
     "displayName": "jc-manju-zhizuo",
-    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；无完整剧本却要工程脚本或明确要求脑暴时进入逐节拍创作，明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。完整短剧方向和文学剧本使用独立的短剧写作入口。",
+    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十二个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；无完整剧本却要工程脚本或明确要求脑暴时进入逐节拍创作，明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。完整短剧方向和文学剧本使用独立的短剧写作入口。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -1155,6 +1181,32 @@
     "name": "jc-xiangmuziliao",
     "displayName": "jc-xiangmuziliao",
     "description": "从小说、完整剧本或分集文本整理故事梗概、分集梗概、人物小传和故事背景与世界规则。当用户需要在漫剧制作前沉淀项目资料、理解原作、梳理人物动机与关系、明确每集戏剧任务时使用；视觉风格设计、资产提示词、工程台本与视频提示词由后续流程承接。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md",
+      "agents/openai.yaml"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        },
+        {
+          "path": "agents/openai.yaml",
+          "kind": "metadata"
+        }
+      ]
+    }
+  },
+  {
+    "id": "seedance-storyboard-assets",
+    "name": "seedance-storyboard-assets",
+    "displayName": "seedance-storyboard-assets",
+    "description": "根据工程剧本制作供Seedance使用的简笔宫格分镜图，并绑定独立角色、场景与道具资产参考，输出逐镜视频提示词。分镜控制镜头顺序、构图、站位和动作，资产控制身份与造型，项目设定控制最终媒介与光影。适用于分镜图加资产图的Seedance视频准备与提示词交付；不制作MiniMax H3成片级四格，不将简笔画风带入最终视频。",
     "triggers": [],
     "commands": [],
     "files": [

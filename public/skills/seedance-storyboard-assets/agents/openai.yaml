@@ -1,0 +1,3 @@
+interface:
+  display_name: "Seedance分镜与资产参考"
+  short_description: "根据工程剧本生成简笔宫格分镜，绑定角色场景资产并编写逐镜视频提示词"

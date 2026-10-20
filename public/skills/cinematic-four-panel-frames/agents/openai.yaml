@@ -1,0 +1,3 @@
+interface:
+  display_name: "四格成片级分镜"
+  short_description: "依据工程剧本和角色场景参考图生成四格分镜，每格达到成片静帧标准"

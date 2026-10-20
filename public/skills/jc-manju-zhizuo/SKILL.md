@@ -1,11 +1,11 @@
 ---
 name: jc-manju-zhizuo
-description: "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；无完整剧本却要工程脚本或明确要求脑暴时进入逐节拍创作，明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。完整短剧方向和文学剧本使用独立的短剧写作入口。"
+description: "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十二个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；无完整剧本却要工程脚本或明确要求脑暴时进入逐节拍创作，明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，媒体按用户要求只提交、不等待。完整短剧方向和文学剧本使用独立的短剧写作入口。"
 ---
 
 # jc-manju-zhizuo｜漫剧制作路由器
 
-用户选用本 Skill 后，在当前漫剧任务及其后续同一创作流程中，只从下表十个 Skill 选择业务流程，直到用户明确更换路线。普通文件、图片读取和影音提交工具仍可使用。表中的相对路径固定指向本路由器所在的同一套 Skill 目录；不要因名称相似改选其他业务 Skill。
+用户选用本 Skill 后，在当前漫剧任务及其后续同一创作流程中，只从下表十二个 Skill 选择业务流程，直到用户明确更换路线。普通文件、图片读取和影音提交工具仍可使用。表中的相对路径固定指向本路由器所在的同一套 Skill 目录；不要因名称相似改选其他业务 Skill。
 
 | 当前要交付的内容 | 唯一入口 |
 | --- | --- |
@@ -17,8 +17,16 @@ description: "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时�
 | 空镜场景设定图、生图提示词和空间结构 | [jc-scene-prompt](../jc-scene-prompt/SKILL.md) |
 | 剧情道具设定图、生图提示词和多视图资产 | [jc-prop-prompt](../jc-prop-prompt/SKILL.md) |
 | 完成表演、动作因果、空间声画与逐镜节奏，交付带连续时间码的工程台本 | [jc-gongchengjuben](../jc-gongchengjuben/SKILL.md) |
+| 工程剧本后为MiniMax H3制作成片级四格分镜图或其生图提示词 | [cinematic-four-panel-frames](../cinematic-four-panel-frames/SKILL.md) |
+| 工程剧本后为Seedance制作简笔宫格分镜，绑定资产图与逐镜视频提示词 | [seedance-storyboard-assets](../seedance-storyboard-assets/SKILL.md) |
 | 用户本轮指定 MiniMax H3 的视频提示词 | [h3-prompt-writing](../h3-prompt-writing/SKILL.md) |
 | 用户本轮指定 Seedance 2.5／SD2.5 的视频提示词转写 | [jc-seedance](../jc-seedance/SKILL.md) |
+
+## 分镜图路线
+
+用户要求“MiniMax H3四宫格／四格分镜图／成片级分镜图提示词”时，进入 `cinematic-four-panel-frames`，每格为继承资产、光影与画风的成片瞬间，不误入H3视频提示词入口。只要生图提示词就只交付提示词与必要的参考绑定，不自动生成图片或视频。
+
+用户要求“Seedance简笔分镜＋资产参考图”时，进入 `seedance-storyboard-assets`，分镜只控制镜头与动作，独立资产控制身份，最终画风按项目设定；不套成片级四格。仅请求普通Seedance视频提示词仍用 `jc-seedance`。已明确模型与交付物直接路由；只说分镜图且上下文无法确定两条路线时，再询问成片四格还是简笔宫格。
 
 ## 路由优先级
 

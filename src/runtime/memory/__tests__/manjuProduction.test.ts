@@ -11,10 +11,15 @@ import {
 import { NOVEL_SKILL, restoreNovelSelection } from '../novelProduction'
 
 test('the production bundle includes both video routes and excludes the portrait skill', () => {
-  assert.equal(MANJU_SKILLS.length, 11)
+  assert.equal(MANJU_SKILLS.length, 13)
   assert.ok(!MANJU_SKILLS.includes('jc-duanju'))
   assert.ok(MANJU_SKILLS.includes('h3-prompt-writing'))
   assert.ok(MANJU_SKILLS.includes('jc-seedance'))
+  for (const name of ['cinematic-four-panel-frames', 'seedance-storyboard-assets']) {
+    assert.ok(MANJU_SKILLS.includes(name))
+    const router = readFileSync('public/skills/jc-manju-zhizuo/SKILL.md', 'utf8')
+    assert.ok(router.includes(`../${name}/SKILL.md`))
+  }
   assert.ok(!MANJU_SKILLS.includes('jc-shuaigemeinv'))
   for (const name of MANJU_SKILLS) assert.ok(existsSync(`public/skills/${name}/SKILL.md`), name)
   const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
