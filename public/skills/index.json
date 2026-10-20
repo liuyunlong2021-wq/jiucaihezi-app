@@ -193,6 +193,7 @@
     "files": [
       "SKILL.md",
       "agents/openai.yaml",
+      "references/body-proportions.md",
       "references/deai-and-detail.md",
       "references/guxiang.md",
       "references/mianxiang.md",
@@ -212,6 +213,10 @@
         {
           "path": "agents/openai.yaml",
           "kind": "metadata"
+        },
+        {
+          "path": "references/body-proportions.md",
+          "kind": "reference"
         },
         {
           "path": "references/deai-and-detail.md",

@@ -119,9 +119,9 @@ test('custom OpenAI-compatible endpoints surface as selectable models with image
     assert.equal(entry?.label, '本机 MLX: mlx-community/LensVLM-9B-OptiQ-4bit')
     // 声明图片输入，否则本地 VLM 永远收不到图。
     assert.deepEqual(entry?.inputModalities, ['text', 'image'])
-    // 自定义端点必须用本地保守预算，避免把云端 1M/128K 误用上去。
+    // 未声明能力的自定义端点与官方 DSH 的未知模型预算对齐。
     assert.equal(entry?.contextWindow, 262_144)
-    assert.equal(entry?.maxOutputTokens, 4_096)
+    assert.equal(entry?.maxOutputTokens, 32_768)
   } finally {
     storage.restore()
   }

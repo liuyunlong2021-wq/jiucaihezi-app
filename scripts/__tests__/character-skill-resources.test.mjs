@@ -16,7 +16,7 @@ function files(directory) {
 test('the character package bundles all four physiognomy references and both prompt suffix resources', () => {
   const index = JSON.parse(readFileSync(join(root, '..', 'index.json'), 'utf8'))
   const skill = index.find(item => item.id === 'jc-juese-sheji')
-  const required = ['guxiang.md', 'mianxiang.md', 'tixiang.md', 'shouxiang.md', 'portrait-beauty.md', 'deai-and-detail.md', 'random-words.md']
+  const required = ['guxiang.md', 'mianxiang.md', 'tixiang.md', 'body-proportions.md', 'shouxiang.md', 'portrait-beauty.md', 'deai-and-detail.md', 'random-words.md']
   for (const name of required) assert.ok(skill.files.includes(`references/${name}`), name)
   const actual = files(root).map(path => relative(root, path).split(sep).join('/')).sort()
   assert.deepEqual(skill.files, actual)

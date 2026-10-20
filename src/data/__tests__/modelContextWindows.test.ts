@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import { readFileSync } from 'node:fs'
 
 import { getModelContextWindow, getModelMaxOutputTokens } from '../modelContextWindows'
 
@@ -10,7 +11,7 @@ test('cloud models use the unified defaults while local and free models keep the
   assert.equal(getModelContextWindow('qwen3.8:9b-q5', 'local-ollama'), 262_144)
   assert.equal(getModelContextWindow('openai/gpt-oss-120b:free', 'openrouter'), 32_000)
   assert.equal(getModelMaxOutputTokens('claude-sonnet-4-6', 'jiucaihezi'), 128_000)
-  assert.equal(getModelMaxOutputTokens('gpt-5', 'local-ollama'), 4_096)
+  assert.equal(getModelMaxOutputTokens('gpt-5', 'local-ollama'), 32_768)
   assert.equal(getModelMaxOutputTokens('openai/gpt-oss-120b:free', 'openrouter'), 32_000)
 })
 
@@ -50,4 +51,14 @@ test('custom discovery honors a server output cap and tolerates missing optional
     propsAvailable = false
     assert.equal((await discoverCustomProviderModels({ apiBase: 'http://localhost:8080' })).modelCapabilities.local?.maxOutputTokens, 16384)
   } finally { globalThis.fetch = originalFetch }
+})
+
+
+test('unknown local model fallback stays aligned with the bundled official DSH adapter', () => {
+  const adapter = readFileSync('src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/index.js', 'utf8')
+  const contextWindow = Number(adapter.match(/const DEFAULT_CONTEXT_WINDOW = (\d+);/)?.[1])
+  const maxTokens = Number(adapter.match(/const DEFAULT_MAX_TOKENS = (\d+);/)?.[1])
+  assert.ok(contextWindow > 0 && maxTokens > 0)
+  assert.equal(getModelContextWindow('unknown-model', 'local-ollama'), contextWindow)
+  assert.equal(getModelMaxOutputTokens('unknown-model', 'local-ollama'), maxTokens)
 })
