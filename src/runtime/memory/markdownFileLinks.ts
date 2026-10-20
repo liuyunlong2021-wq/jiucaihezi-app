@@ -40,6 +40,9 @@ export function resolveMarkdownFileLinkTarget(
 ): ProjectResource | undefined {
   const wanted = normalizedTarget(target)
   if (!wanted) return undefined
+  const absolute = resources.find(resource => !resource.isDirectory
+    && normalizedTarget(`${resource.owner}/${resource.path}`) === wanted)
+  if (absolute) return absolute
   const sourceDirectory = sourcePath.includes('/') ? sourcePath.slice(0, sourcePath.lastIndexOf('/')) : ''
   const candidates = [sourceDirectory ? `${sourceDirectory}/${wanted}` : '', wanted].filter(Boolean)
   for (const candidate of candidates) {

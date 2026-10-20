@@ -71,6 +71,7 @@ const wave1FocusedTests = [
   'src/runtime/memory/__tests__/skillCreatorToolExecutor.test.ts',
   'src/runtime/memory/__tests__/skillCreatorFileTreeDraft.test.ts',
   'src/runtime/memory/__tests__/scene3d.test.ts',
+  'src/runtime/memory/__tests__/scene3dNavigation.test.ts',
   'src/runtime/memory/__tests__/skillInstall.test.ts',
   'src/runtime/creation/__tests__/creationMediaPlan.test.ts',
   'src/runtime/creation/__tests__/creationMediaRuntime.test.ts',

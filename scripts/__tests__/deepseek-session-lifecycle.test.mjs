@@ -502,8 +502,8 @@ function lifecycle(createRuntime) {
   const stop = source.slice(source.indexOf('async function waitForRuntimeClose('))
   const code = transformSync(start + '\n' + stop.replace('export async function', 'async function'), { loader: 'ts', target: 'es2022' }).code
   const runtimes = new Map()
-  return new Function('runtimes', 'createRuntime', 'workspaceRuntimeKey', 'runtimeKey', 'DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS', code + '\nreturn { ensureRuntime, stopRuntime, stopDeepSeekHarness };')(
-    runtimes, createRuntime, input => input.cwd, input => input.model, 20,
+  return new Function('runtimes', 'createRuntime', 'refreshCustomModelCapabilities', 'findCustomProvider', 'workspaceRuntimeKey', 'runtimeKey', 'DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS', code + '\nreturn { ensureRuntime, stopRuntime, stopDeepSeekHarness };')(
+    runtimes, createRuntime, async () => {}, () => undefined, input => input.cwd, input => input.model, 20,
   )
 }
 
@@ -650,4 +650,45 @@ test('official unpatched SDK and APP runner share request budgets, tool loops an
   assert.deepEqual(signatures[1], signatures[0])
   const snapshot = (await app.request({ type: 'read-session', sessionId: 'parent' })).data
   assert.equal(snapshot.contextPressure.contextWindow, 262144)
+})
+
+test('APP runner sends the discovered Strata 256K/128K budget without a 4K override', { timeout: 20000 }, async t => {
+  const f = await fixture(t, false, undefined, { maxTokens: 131072, respond(request, res) {
+    if (request.messages.some(message => message.role === 'tool')) return false
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.end(`data: ${JSON.stringify({ id: 'strata-fixture', object: 'chat.completion.chunk', created: 1, model: 'test', choices: [{ index: 0, delta: {
+      role: 'assistant', content: '', reasoning_content: 'Read the local fixture.',
+      tool_calls: [{ index: 0, id: 'strata-read', type: 'function', function: { name: 'read', arguments: JSON.stringify({ file_path: join(f.root, 'strata.txt') }) } }],
+    }, finish_reason: 'tool_calls' }] })}\n\ndata: [DONE]\n\n`)
+    return true
+  } })
+  writeFileSync(join(f.root, 'strata.txt'), 'STRATA_LOCAL_TOOL_RESULT')
+  const runner = f.createRunner()
+  const result = await runner.request({ type: 'run', sessionId: 'strata-budget', contentBlocks: [{ type: 'text', text: 'Hello Strata' }] })
+  assert.equal(result.type, 'result')
+  assert.ok(f.requests.length >= 2)
+  assert.ok(f.requests.some(request => request.messages.some(message => message.role === 'tool' && JSON.stringify(message.content).includes('STRATA_LOCAL_TOOL_RESULT'))))
+  assert.ok(f.requests.every(request => (request.max_completion_tokens ?? request.max_tokens) === 131072))
+  const snapshot = (await runner.request({ type: 'read-session', sessionId: 'strata-budget' })).data
+  assert.equal(snapshot.contextPressure.contextWindow, 262144)
+})
+
+test('existing custom connections discover capabilities once and preserve manual model IDs', async () => {
+  const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
+  const code = transformSync(source.slice(source.indexOf('const customDiscovery ='), source.indexOf('async function ensureRuntime(')), { loader: 'ts' }).code
+  let providers = [{ id: 'strata', apiBase: 'http://localhost:8080', modelIds: ['strata', 'manual-alias'] }]
+  let discoveries = 0, refreshes = 0
+  const refresh = new Function('findCustomProvider', 'getCustomProviders', 'saveCustomProviders', 'discoverCustomProviderModels', 'useAgentStore', code + '\nreturn refreshCustomModelCapabilities;')(
+    id => providers.find(provider => provider.id === id), () => providers, value => { providers = value },
+    async () => { discoveries++; return { modelCapabilities: { strata: { contextWindow: 262144, maxOutputTokens: 131072 } } } },
+    () => ({ refreshLocalModels() { refreshes++ } }),
+  )
+  const input = { modelProviderId: 'strata', apiBase: 'http://localhost:8080/v1' }
+  await Promise.all([refresh(input), refresh(input)])
+  assert.equal(discoveries, 1)
+  assert.equal(refreshes, 1)
+  assert.deepEqual(providers[0].modelIds, ['strata', 'manual-alias'])
+  assert.equal(providers[0].modelCapabilities.strata.maxOutputTokens, 131072)
+  await refresh({ ...input, apiBase: 'http://another-host:8080/v1' })
+  assert.equal(discoveries, 1, 'a mismatched endpoint must not reuse this provider credentials')
 })

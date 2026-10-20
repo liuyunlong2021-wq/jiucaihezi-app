@@ -110,11 +110,10 @@ function loadCustomProviderEntries(): ModelEntry[] {
       label: `${provider.name}: ${modelId}`,
       providerId: provider.id,
       capability: 'text' as const,
-      inputModalities: resolveModelInputModalities({ id: modelId, providerId: provider.id }),
-      // 自定义端点无法提前知道真实窗口，按本地保守值兜底；
-      // 否则云端 1M 上下文 / 128K 输出预算会被误用上去。
-      contextWindow: DEFAULT_LOCAL_CONTEXT_WINDOW,
-      maxOutputTokens: DEFAULT_LOCAL_MAX_OUTPUT_TOKENS,
+      inputModalities: provider.modelCapabilities?.[modelId]?.inputModalities || resolveModelInputModalities({ id: modelId, providerId: provider.id }),
+      // 服务声明优先；旧端点缺少能力信息时复用本地默认值。
+      contextWindow: provider.modelCapabilities?.[modelId]?.contextWindow || DEFAULT_LOCAL_CONTEXT_WINDOW,
+      maxOutputTokens: provider.modelCapabilities?.[modelId]?.maxOutputTokens || DEFAULT_LOCAL_MAX_OUTPUT_TOKENS,
     }))
   )
 }

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { createRequire } from 'node:module'
 import { test } from 'node:test'
 import { computed, effectScope, nextTick, reactive, ref } from 'vue'
+import { findComposerSuggestion, replaceComposerSuggestion } from '../composerSuggestions'
 import { useFilteredList } from '@/composables/useFilteredList'
 import { beginMemoryRun, desktopConversationLiveState, desktopConversationRuns, executeDesktopHarnessRun, memoryRunKey, stopRun, type MemoryRun } from '@/services/desktopConversationRuntime'
 import { shouldReadNativeClipboardImage } from '@/utils/clipboard'
@@ -1645,7 +1646,7 @@ test('3D scene editor marks camera points and records the move through the hidde
   assert.match(editor, /function requestCameraPathRecording\(\)/)
   assert.match(editor, /<span>运镜<\/span>/)
   assert.match(editor, /title="把当前机位打成一个点"/)
-  assert.match(editor, /watch\(playing, value => \{ if \(!value\) restoreLens\(\) \}\)/)
+  assert.match(editor, /watch\(playing, value => \{ if \(value\) stopRoam\(\); else restoreLens\(\) \}\)/)
   assert.match(editor, /applyAnimation\(currentTime\.value, false\)/)
   assert.match(editor, /function cameraFovFor\(focal: number, canvasRatio: number\)/)
   assert.match(workbench, /@record="recordScenePath"/)
@@ -2209,7 +2210,6 @@ test('发送中的用户轮次就能拿到附件缩略图', () => {
   )
 })
 
-
 test('stopped and failed runs retain visible output while cancellation reads official history', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const timeline = workbench.match(/const timelineTurns = computed<ConversationTurn\[\]>\(\(\) => \{([\s\S]*?)\n\}\)/)?.[1] || ''
@@ -2220,7 +2220,6 @@ test('stopped and failed runs retain visible output while cancellation reads off
   assert.match(workbench, /const aborted = run\.controller\.signal\.aborted/)
 })
 
-
 test('answer metadata lives with output actions and selected capabilities sit on the composer edge', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const composerStart = workbench.indexOf('<footer v-if="conversation"')
@@ -2229,7 +2228,6 @@ test('answer metadata lives with output actions and selected capabilities sit on
   assert.match(workbench, /class="memory-composer-header"/)
   assert.match(workbench, /\.memory-composer-header \{ position: absolute;[^}]*bottom: calc\(100% \+ 1px\)/)
 })
-
 
 test('scene instruction waits for manual saves and sends actual selection, camera and revision', async () => {
   const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
@@ -2263,4 +2261,33 @@ test('scene instruction waits for manual saves and sends actual selection, camer
   assert.match(sent[0], /expectedRevision/)
   assert.equal(scene3dSelected.value, true)
   assert.equal(input.value, '原来的草稿')
+})
+
+test('choosing @3D removes the trigger without deleting the draft after the caret', async () => {
+  const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const body = workbench.slice(workbench.indexOf('async function selectMention('), workbench.indexOf('\nasync function handleComposerPaste'))
+  for (const [text, caret, expected] of [
+    ['@生成11个人的火车车厢', 1, '生成11个人的火车车厢'],
+    ['前文 @后文', 4, '前文 后文'],
+    ['生成车厢 @3d', 8, '生成车厢 '],
+  ] as const) {
+    const input = ref(text)
+    let editorText = text as string
+    const enabled: string[] = []
+    const dependencies = {
+      input, composerRef: ref({ focus() {} }),
+      getCursorPosition: () => caret, findComposerSuggestion, replaceComposerSuggestion,
+      enableTool: (id: string) => enabled.push(id),
+      setEditorTextAtCursor: (_editor: unknown, value: string) => { editorText = value },
+      nextTick, resizeComposer() {}, closeMention() {}, error: ref(''),
+    }
+    const code = transformSync(body, { loader: 'ts', target: 'es2022' }).code
+    const select = new Function(...Object.keys(dependencies), `${code}; return selectMention`)(...Object.values(dependencies))
+    await select({ type: 'tool', id: 'scene3d' })
+    assert.equal(dependencies.error.value, '')
+    assert.deepEqual(enabled, ['scene3d'])
+    assert.equal(input.value, expected)
+    assert.equal(editorText, expected)
+  }
 })

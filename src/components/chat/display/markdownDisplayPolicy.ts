@@ -42,7 +42,7 @@ function escapeAttr(str: string): string {
 }
 
 /**
- * Markdown 里的项目内文件路径（`30秒广告.md`、`wiki/剧本/30秒广告.md`、`/wiki/剧本/30秒广告.md`）
+ * Markdown 里的项目内源文件路径（`30秒广告.md`、`wiki/剧本/30秒广告.md`、`/wiki/剧本/30秒广告.md`）
  * 必须带着路径交给点击处理器，否则链接只剩外观。返回未编码的项目路径。
  */
 function projectFileLinkTarget(href: string): string | null {
@@ -53,7 +53,7 @@ function projectFileLinkTarget(href: string): string | null {
   } catch {
     /* 含裸 % 的路径按原样处理 */
   }
-  if (!/\.(?:md|markdown)$/i.test(path)) return null
+  if (!/\.(?:md|markdown|jcscene|canvas|jccanvas)$/i.test(path)) return null
   const target = path.replace(/^\.?\//, '')
   if (!target || target.startsWith('/') || target.includes('//')) return null
   return target

@@ -35,3 +35,10 @@ test('backlinks scan current Markdown sources without a separate index store', (
   ]
   assert.deepEqual(findMarkdownFileBacklinks(target, sources).map(item => item.path), ['第001集/剧本.md'])
 })
+
+test('generated scene links resolve project-relative and absolute source paths', () => {
+  const scene = { ...resource('.raw/jc-media/文档/11人火车车厢场景.jcscene'), owner: '/Users/by3/Documents/列车' }
+  for (const path of [scene.path, scene.name, `${scene.owner}/${scene.path}`, `${scene.owner}/${scene.path}`.slice(1)]) {
+    assert.equal(resolveMarkdownFileLinkTarget(path, '', [scene]), scene)
+  }
+})

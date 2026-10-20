@@ -20,6 +20,7 @@ export interface CustomProviderConfig {
   apiBase: string
   apiKey?: string
   modelIds: string[]
+  modelCapabilities?: Record<string, import('./customProviderModels').CustomModelCapabilities>
 }
 
 export function getCustomProviders(store: KeyValueStore = getStorage()): CustomProviderConfig[] {
@@ -81,6 +82,14 @@ function sanitizeCustomProvider(provider: Partial<CustomProviderConfig>): Custom
     name: String(provider.name || id).trim() || id,
     apiBase,
     apiKey: provider.apiKey ? String(provider.apiKey).trim() || undefined : undefined,
+    modelCapabilities: provider.modelCapabilities && typeof provider.modelCapabilities === 'object'
+      ? Object.fromEntries(Object.entries(provider.modelCapabilities).filter(([id, value]) =>
+          Array.isArray(provider.modelIds) && provider.modelIds.includes(id) && value && typeof value === 'object').map(([id, value]) => [id, {
+            contextWindow: Number.isSafeInteger(value.contextWindow) && value.contextWindow! > 0 ? value.contextWindow : undefined,
+            maxOutputTokens: Number.isSafeInteger(value.maxOutputTokens) && value.maxOutputTokens! > 0 ? value.maxOutputTokens : undefined,
+            inputModalities: Array.isArray(value.inputModalities) ? value.inputModalities.filter(v => v === 'text' || v === 'image') : undefined,
+          }]))
+      : undefined,
     // ponytail: 只去空去重，不校验模型 ID 格式；端点自己能列出什么就填什么。
     modelIds: Array.isArray(provider.modelIds)
       ? [...new Set(provider.modelIds.map(modelId => String(modelId || '').trim()).filter(Boolean))]

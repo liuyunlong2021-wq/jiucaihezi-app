@@ -1,0 +1,13 @@
+{
+  "plugin": "yihong",
+  "version": "0.2.0",
+  "coefficientConvention": "用户确认人民币售价；沿用现有Task Usage系数口径，实际扣费及分组倍率待验收",
+  "models": [
+    { "model": "yh-seedance2.5 Ultra", "upstreamModel": "seedance2.5 Ultra", "unit": "次", "salePriceCny": 8.5, "expression": "tier(\"base\", u(\"calls\") * 8.5)" },
+    { "model": "yh-seedance2.5 super", "upstreamModel": "seedance2.5 super", "unit": "秒", "salePriceCny": 0.5, "expression": "tier(\"base\", u(\"seconds\") * 0.5)" },
+    { "model": "yh-seedance-2.5-Muse", "upstreamModel": "seedance-2.5-Muse", "unit": "次", "salePriceCny": 9, "expression": "tier(\"base\", u(\"calls\") * 9)" },
+    { "model": "yh-kling-omni-4.0", "upstreamModel": "kling-omni-4.0", "unit": "秒", "salePriceCny": 0.25, "expression": "tier(\"base\", u(\"seconds\") * 0.25)" },
+    { "model": "yh-seedance2.0 mini Love", "upstreamModel": "seedance2.0 mini Love", "unit": "秒", "salePriceCny": { "480P": 0.15, "720P": 0.25 }, "expression": "u(\"resolution\") == \"480P\" ? tier(\"480P\", u(\"seconds\") * 0.15) : tier(\"720P\", u(\"seconds\") * 0.25)" },
+    { "model": "yh-wan3.0-video", "upstreamModel": "wan3.0-video", "unit": "秒", "salePriceCny": { "480P": 0.2, "720P": 0.3, "1080P": 0.4 }, "expression": "u(\"resolution\") == \"720P\" ? tier(\"720P\", u(\"seconds\") * 0.3) : u(\"resolution\") == \"1080P\" ? tier(\"1080P\", u(\"seconds\") * 0.4) : tier(\"480P\", u(\"seconds\") * 0.2)" }
+  ]
+}

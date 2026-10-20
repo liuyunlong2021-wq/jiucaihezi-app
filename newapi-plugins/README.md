@@ -5,6 +5,8 @@
 
 ## 约定
 
+**统一操作入口**：[小易、灵动与画布 / NewAPI 适配统一手册](../docs/wiki/运维/URL素材渠道接入执行手册.md)。模型映射、价格、画布改动、R2/CORS、后台设置及实际故障在同一MD查阅；本页保留目录与配置速查，状态冲突以统一手册的最新证据为准。
+
 接入任何 URL 素材渠道前，完整读取 [URL素材渠道接入执行手册](../docs/wiki/运维/URL素材渠道接入执行手册.md)，填写合同卡并分步验收。灵动 v0.20.7 成功经验：客户端向 NewAPI 请求 `b64_json`，插件按厂商合同请求 URL，由已有宿主负责下载；不要机械把所有渠道改成同一输入格式，也不要把客户端/厂商两层响应格式混为一谈。
 
 | 约定 | 说明 |
@@ -22,12 +24,12 @@
 | `comfy.plugin.js` | `comfy` | 不取代（`comfy-adapter` 是执行器，插件只代理它） | 代码已就绪，**未上传** |
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
-| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.4` 修正视频文件字段读取为宿主的 `file.field`；0.3.3 的本地文件提交会报 undefined，须上传并激活新版。真实验收待执行 |
-| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.0` 仅五个 `xy-` 图片模型，文件直传、向上游请求 Base64；已本地测试，未上传；宿主大响应容量与真实生成待验收 |
+| `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.5` 新增三个官方 Seedance 2.0 型号，图片及其他视频保持；四官方型号最新售价见 `fk-pricing.json` 与统一手册F节。未上传激活，画布配套源码未发布，图生图500仍在排查 |
+| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.0` 仅五个 `xy-` 图片模型，文件直传、向上游请求 Base64；用户已上传，最新两次请求限流，真实出图/容量/保存与账单待验收 |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
 | `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |
-| `yihong.plugin.js` | `yihong` | 易红视频与同步图片 API | 0.1.7 共 16 个上游型号，新增 3 个 `yihong-` 图片公开别名；保留分辨率枚举修复，待上传/激活；5 个图片型号需 rc.40 大响应补丁，真实生成与账单待验收 |
-| `lingdong.plugin.js` | `lingdong` | 灵动图片与视频 API | 0.4.0 仅四个 `灵动-` 公开名，用户已上传配置；画布/R2 配套已本地实现，待部署与真实验收 |
+| `yihong.plugin.js` | `yihong` | 易红视频 API | 0.2.0仅六个yh-视频型号，无图片/fast Zeus；配套 `yihong-pricing.json`。宿主R2已激活；用户确认插件、六模型和计费已配置。画布待发布，真实生成/保存/账单未验收；见统一手册E节 |
+| `lingdong.plugin.js` | `lingdong` | 灵动图片与视频 API | 0.4.0 仅四个 `灵动-` 公开名；画布v0.20.7与R2配套已部署，用户确认该次图生图显示成功，其他型号/视频/读回/账单待验收 |
 
 ## 灵动四模型配置
 
@@ -93,7 +95,9 @@ curl -X POST <NewAPI>/api/plugin/task \
 
 FK 2026-10-13 官方图片合同复查：0.2.1 修复规格校验、混合素材静默丢失、请求失败/结果可用性判断、真实jobId与错误消息解析；CPU503来自宿主准入，独立于插件。见 `docs/wiki/运维/FK官方图片合同复查与CPU503定位-2026-10-13.md`。
 
-FK 2026-10-14 Seedance 2.5：三保留、三新增、四旧型号隐藏；插件 0.3.0 的按次型号改用 `calls`，官方视频参考最终使用 `video_reference_tokens`。**激活前须同步渠道模型和 Task Usage 表达式**，原 seconds-only 表达式会在完成重算时错误收费。生产步骤与计费事实见 `docs/wiki/运维/FK-Seedance2.5模型与标准视频合同对齐-2026-10-14.md`。
+FK 当前增量：上传 `fk.plugin.js` 0.3.5，保留已有渠道模型，只添加三个官方2.0名称；已有官方2.5仍保留。四型号无视频售价分别0.4/0.6/0.7/1元每秒，有参考视频按上游Token单价最终结算的人民币分金额收取；使用 `fk-pricing.json` 中的四条表达式，不能只保留seconds，也不能把秒费、Token费和上游金额重复相加。后台配置不会随插件自动保存；三个新型号需配套画布合同。详见统一手册F节，不为此次变更构建NewAPI。
+
+历史 FK Seedance 2.5：三保留、三新增、四旧型号隐藏；插件 0.3.0 的按次型号改用 `calls`，官方视频参考最终使用 `video_reference_tokens`。旧配置与计费事实见 `docs/wiki/运维/FK-Seedance2.5模型与标准视频合同对齐-2026-10-14.md`，四官方型号价格以当前F节为准。
 
 小易图片 2026-10-13 官方合同复查：`xiaoyi-image` 0.1.2补齐n计费一致性、background/output_format透传、JSON参考图拒绝、Grok size/比例校验和成功结果校验；135/135插件回归通过，生产上传与真实生成待验收。见 `docs/wiki/运维/小易图片官方合同复查-2026-10-13.md`。
 

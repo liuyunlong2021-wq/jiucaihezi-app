@@ -10,6 +10,7 @@ import { STORYBOARDER_CHARACTER_MODELS, STORYBOARDER_EDITABLE_BONES, STORYBOARDE
 
 import { appendScene3DHistory, type Scene3DEditorContext } from '@/runtime/memory/scene3dHost'
 import { alignRenderedCharacterToSeat } from '@/runtime/memory/scene3dSeating'
+import { frameScene3DBounds, lookScene3DCamera, moveScene3DCamera } from '@/runtime/memory/scene3dNavigation'
 
 const props = withDefaults(defineProps<{ document: Scene3DDocument; recordingOnly?: boolean; readOnly?: boolean; videoStatus?: string }>(), { recordingOnly: false, videoStatus: '' })
 const emit = defineEmits<{ save: [document: Scene3DDocument]; screenshot: [blob: Blob, title: string]; video: [blob: Blob, title: string]; record: [document: Scene3DDocument, title: string] }>()
@@ -45,6 +46,12 @@ function showNotice(text: string) {
   noticeTimer = window.setTimeout(() => { notice.value = '' }, 10000)
 }
 const frameMode = ref(false)
+const roamMode = ref(false)
+const roamSpeed = ref(2)
+const roamKeys = new Set<string>()
+let roamPointer: { id: number; x: number; y: number } | null = null
+let lastRenderTime = 0
+let doubleClickTarget = ''
 const snapStep = ref(0.1)
 const previewHidden = ref(new Set<string>())
 const stageSize = ref({ width: 0, height: 0 })
@@ -588,6 +595,7 @@ function syncCameraState() {
 
 function applyFrameMode() {
   if (!orbit) return
+  orbit.enabled = !props.readOnly && !roamMode.value
   orbit.enableRotate = !frameMode.value
   orbit.mouseButtons = frameMode.value
     ? { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN }
@@ -595,6 +603,96 @@ function applyFrameMode() {
 }
 
 function toggleFrameMode() { frameMode.value = !frameMode.value; applyFrameMode() }
+
+function releaseRoam() {
+  const pointer = roamPointer
+  roamPointer = null
+  roamKeys.clear()
+  if (pointer && canvas.value?.hasPointerCapture(pointer.id)) canvas.value.releasePointerCapture(pointer.id)
+  return Boolean(pointer)
+}
+
+function stopRoam() { if (releaseRoam()) syncCameraState() }
+
+function toggleRoam() {
+  if (props.readOnly || playing.value) return
+  stopRoam()
+  roamMode.value = !roamMode.value
+  // 清掉环绕控件尚未结束的惯性，退出漫游后不会突然跳回旧方向。
+  if (orbit) { orbit.enableDamping = false; orbit.update(); orbit.enableDamping = true }
+  applyFrameMode()
+  if (transform) transform.enabled = !roamMode.value
+  if (transformHelper) transformHelper.visible = !roamMode.value
+  contextMenu.value.show = false
+  canvas.value?.focus({ preventScroll: true })
+}
+
+function startRoam(event: PointerEvent) {
+  if (!roamMode.value || event.button !== 2 || props.readOnly || playing.value) return
+  event.preventDefault()
+  canvas.value?.focus({ preventScroll: true })
+  roamPointer = { id: event.pointerId, x: event.clientX, y: event.clientY }
+  if (event.shiftKey) roamKeys.add('ShiftLeft')
+  canvas.value?.setPointerCapture(event.pointerId)
+}
+
+function dragRoam(event: PointerEvent) {
+  if (!roamPointer || event.pointerId !== roamPointer.id || !camera || !orbit) return
+  if (!(event.buttons & 2) || props.readOnly || playing.value) { stopRoam(); return }
+  lookScene3DCamera(camera, orbit.target, event.clientX - roamPointer.x, event.clientY - roamPointer.y)
+  roamPointer.x = event.clientX; roamPointer.y = event.clientY
+}
+
+function endRoam(event: PointerEvent) {
+  if (event.pointerId === roamPointer?.id) stopRoam()
+}
+
+function handleRoamWheel(event: WheelEvent) {
+  if (!roamMode.value || props.readOnly || playing.value) return
+  event.preventDefault()
+  roamSpeed.value = THREE.MathUtils.clamp(roamSpeed.value * Math.exp(-event.deltaY * .001), .1, 20)
+}
+
+function handleNavigationKeydown(event: KeyboardEvent) {
+  if (props.readOnly || playing.value || event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return
+  if (event.code === 'KeyF' && !event.repeat) {
+    event.preventDefault(); focusScene(selectedId.value); return
+  }
+  if (!roamMode.value) return
+  if (event.code === 'Escape') { event.preventDefault(); toggleRoam(); return }
+  if (!['KeyW', 'KeyA', 'KeyS', 'KeyD', 'KeyQ', 'KeyE', 'ShiftLeft', 'ShiftRight'].includes(event.code)) return
+  event.preventDefault(); roamKeys.add(event.code)
+}
+
+function handleNavigationKeyup(event: KeyboardEvent) {
+  roamKeys.delete(event.code)
+  if (!event.shiftKey) { roamKeys.delete('ShiftLeft'); roamKeys.delete('ShiftRight') }
+}
+
+function focusScene(id = '') {
+  if (!camera || !orbit || !root || props.readOnly || playing.value || manualRecording.value) return
+  stopRoam()
+  const target = id ? selectable.get(id) : root
+  if (!target) return
+  target.updateWorldMatrix(true, true)
+  const shot = frameScene3DBounds(new THREE.Box3().setFromObject(target, true), camera.position.clone().sub(orbit.target), frameFov(), aspectRatio(document.canvas.aspect))
+  if (!shot) { showNotice('当前场景没有可定位的对象'); return }
+  applyShot(id ? '聚焦对象' : '全场景', shot.position, shot.target)
+  canvas.value?.focus({ preventScroll: true })
+}
+
+function focusAtPointer(event: MouseEvent) {
+  if (props.readOnly || playing.value || manualRecording.value || transform?.dragging) return
+  // 第一次选中会展开侧栏，画布随之变窄；保留第一次点击的对象，避免第二击落到地板上。
+  const id = doubleClickTarget || sceneHitId(event)
+  doubleClickTarget = ''
+  if (!id) return
+  attachSelection(id); focusScene(id)
+}
+
+function rememberFocusTarget(event: MouseEvent) {
+  if (event.detail === 1) doubleClickTarget = frameMode.value || roamMode.value ? sceneHitId(event) : selectedId.value
+}
 
 function createCameraControls() {
   if (!renderer || !canvas.value) return
@@ -620,7 +718,7 @@ function createCameraControls() {
   transform.setMode('translate')
   transform.setTranslationSnap(document.canvas.snap ? snapStep.value : null)
   transform.addEventListener('dragging-changed', event => {
-    orbit!.enabled = !event.value
+    orbit!.enabled = !event.value && !props.readOnly && !roamMode.value
     if (!event.value) {
       ignoreScenePick = true
       activeBoneName.value ? persistCharacterBones() : persistSelection()
@@ -630,8 +728,9 @@ function createCameraControls() {
   transformHelper = transform.getHelper()
   scene?.add(transformHelper)
   attachSelection(selectedId.value)
-  orbit.enabled = !props.readOnly
-  transform.enabled = !props.readOnly
+  orbit.enabled = !props.readOnly && !roamMode.value
+  transform.enabled = !props.readOnly && !roamMode.value
+  if (transformHelper) transformHelper.visible = !roamMode.value
   resize()
 }
 
@@ -763,7 +862,7 @@ function nudgeSelection(offset: [number, number, number]) {
 
 /** 有选中就微调对象，没选中就平移机位调构图；步长和吸附档位保持一致 */
 function handleNudgeKeys(event: KeyboardEvent) {
-  if (props.readOnly) return
+  if (props.readOnly || roamMode.value) return
   if (event.metaKey || event.ctrlKey || event.altKey || playing.value) return
   if ((event.target as HTMLElement | null)?.closest('input, textarea, [contenteditable="true"]')) return
   if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(event.key)) return
@@ -780,6 +879,7 @@ function handleNudgeKeys(event: KeyboardEvent) {
 }
 
 function openContextMenu(event: MouseEvent) {
+  if (roamMode.value) return
   pick(event as PointerEvent)
   if (selectedId.value) contextMenu.value = { show: true, x: event.offsetX, y: event.offsetY }
 }
@@ -851,15 +951,21 @@ function applyHand(id: string, side: 'left' | 'right') {
 }
 
 function pick(event: PointerEvent) {
-  if (manualRecording.value || ignoreScenePick || !canvas.value || !camera || !root || !raycaster || transform?.dragging || frameMode.value) return
+  if (manualRecording.value || ignoreScenePick || !canvas.value || !camera || !root || !raycaster || transform?.dragging || frameMode.value || roamMode.value) return
+  const id = sceneHitId(event)
+  if (id) attachSelection(id)
+  else clearSelection()
+}
+
+function sceneHitId(event: MouseEvent): string {
+  if (!canvas.value || !camera || !root || !raycaster) return ''
   const rect = canvas.value.getBoundingClientRect()
   const pointer = new THREE.Vector2((event.clientX - rect.left) / rect.width * 2 - 1, -((event.clientY - rect.top) / rect.height) * 2 + 1)
   raycaster.setFromCamera(pointer, activeCamera())
   const hit = raycaster.intersectObjects(root.children, true)[0]
   let node: THREE.Object3D | null = hit?.object || null
   while (node && !node.userData.sceneSelection) node = node.parent
-  if (node?.userData.sceneSelection) attachSelection(node.userData.sceneSelection.id)
-  else clearSelection()
+  return node?.userData.sceneSelection?.id || ''
 }
 
 function persistSelection() {
@@ -1134,11 +1240,18 @@ function resize() {
 
 function render() {
   animationFrame = requestAnimationFrame(render)
+  const now = performance.now()
+  const seconds = Math.min(Math.max((now - lastRenderTime) / 1000, 0), .05)
+  lastRenderTime = now
   if (playing.value) {
     currentTime.value = Math.min(duration.value, (performance.now() - playStartedAt) / 1000)
     applyAnimation(currentTime.value)
     if (currentTime.value >= duration.value) playing.value = false
-  } else if (!props.recordingOnly) orbit?.update()
+  } else if (!props.recordingOnly) {
+    if (roamMode.value) {
+      if (roamPointer && camera && orbit && !props.readOnly) moveScene3DCamera(camera, orbit.target, roamKeys, seconds, roamSpeed.value)
+    } else orbit?.update()
+  }
   if (scene && camera) renderer?.render(scene, activeCamera())
 }
 
@@ -1188,31 +1301,38 @@ onMounted(() => {
   window.addEventListener('keydown', removeSelectedWithKeyboard)
   window.addEventListener('keydown', handleHistoryKeyboard)
   window.addEventListener('keydown', handleNudgeKeys)
+  window.addEventListener('keyup', handleNavigationKeyup)
+  window.addEventListener('blur', stopRoam)
   resizeObserver = new ResizeObserver(resize); resizeObserver.observe(canvas.value); render()
 })
 
 watch(() => props.readOnly, locked => {
   // End an in-flight drag through its normal save handler before the Agent reads the file.
   if (locked && transform?.dragging) transform.dragging = false
-  if (orbit) orbit.enabled = !locked
-  if (transform) transform.enabled = !locked
+  if (locked) stopRoam()
+  if (orbit) orbit.enabled = !locked && !roamMode.value
+  if (transform) transform.enabled = !locked && !roamMode.value
   if (locked) playing.value = false
 })
 
 watch(() => props.document, value => {
+  releaseRoam()
   const next = parseScene3DDocument(value)
   historyIndex = appendScene3DHistory(history, historyIndex, next)
   document = next; currentTime.value = 0; playing.value = false; renderRevision.value++; buildScene(); createCameraControls(); applyAnimation(0)
 })
 
 // 运镜播放时视角在变；停下来要把视角复位成工具栏显示的焦段
-watch(playing, value => { if (!value) restoreLens() })
+watch(playing, value => { if (value) stopRoam(); else restoreLens() })
 
 // 工作台回的录制/截图结果、本机录制错误，都走画面上的浮动提示
 watch(() => props.videoStatus, value => { if (value) showNotice(value) }, { immediate: true })
 watch(recordingError, value => { if (value) showNotice(value) })
 
 onBeforeUnmount(() => {
+  releaseRoam()
+  window.removeEventListener('keyup', handleNavigationKeyup)
+  window.removeEventListener('blur', stopRoam)
   discardManualRecording = true
   const recorder = manualRecorder
   if (recorder && recorder.state !== 'inactive') recorder.stop()
@@ -1234,6 +1354,9 @@ onBeforeUnmount(() => {
         <button title="侧视" @click="setCameraPreset('side')">侧</button>
         <button title="低机位" @click="setCameraPreset('low')">低</button>
         <button title="恢复默认视角" @click="setCameraPreset('reset')">复</button>
+        <button :disabled="readOnly || playing || manualRecording" title="查看全场景，自动取景" @click="focusScene()">全景</button>
+        <button :disabled="!selectedId || readOnly || playing || manualRecording" title="聚焦选中对象（F），自动透视取景" @click="focusScene(selectedId)">聚焦</button>
+        <button :disabled="readOnly || playing" :class="{ active: roamMode }" :aria-pressed="roamMode" title="漫游：按住右键看方向，WASD 移动，Q/E 升降，Shift 加速，滚轮调速，Esc 退出" @click="toggleRoam">漫游</button>
         <span class="scene3d-divider"></span>
         <button :class="{ active: document.camera.projection === 'perspective' }" title="透视视图" @click="setProjection('perspective')">透</button>
         <button :class="{ active: document.camera.projection === 'orthographic' }" title="正交视图" @click="setProjection('orthographic')">正</button>
@@ -1280,7 +1403,7 @@ onBeforeUnmount(() => {
     </header>
     <div class="scene3d-workspace" :class="{ 'inspector-open': Boolean(selectedEntry) }">
       <div class="scene3d-stage">
-        <canvas ref="canvas" aria-label="3D 白膜场景" @contextmenu.prevent="openContextMenu"></canvas>
+        <canvas ref="canvas" tabindex="0" aria-label="3D 白膜场景" @contextmenu.prevent="openContextMenu" @click="rememberFocusTarget" @dblclick="focusAtPointer" @pointerdown="startRoam" @pointermove="dragRoam" @pointerup="endRoam" @pointercancel="endRoam" @lostpointercapture="endRoam" @wheel.capture="handleRoamWheel" @keydown="handleNavigationKeydown" @blur="stopRoam"></canvas>
         <div v-if="contextMenu.show" class="scene3d-context-menu" :style="{ left: `${contextMenu.x}px`, top: `${contextMenu.y}px` }" @pointerdown.stop>
           <button @click="copySelection">复制</button>
           <button :disabled="!copiedSelection" @click="pasteSelection">粘贴</button>
@@ -1288,7 +1411,8 @@ onBeforeUnmount(() => {
           <button v-if="selectedEntry && 'label' in selectedEntry" @click="clearSelectedLabel">删字</button>
         </div>
         <div v-if="!recordingOnly" class="scene3d-frame" :class="{ framing: frameMode }" :style="{ width: `${frameRect.width}px`, height: `${frameRect.height}px` }"></div>
-        <p v-if="!recordingOnly && !selectedId" class="scene3d-hint">点击选中后拖动或按方向键微调 · 取景模式拖动平移镜头</p>
+        <p v-if="!recordingOnly && roamMode" class="scene3d-hint">按住右键看方向 · WASD 移动 · Q/E 升降 · Shift 加速 · 滚轮调速 {{ roamSpeed.toFixed(1) }} 米/秒 · Esc 退出</p>
+        <p v-else-if="!recordingOnly && !selectedId" class="scene3d-hint">双击对象或选中后按 F 定位 · 点击选中后拖动或按方向键微调 · 取景模式拖动平移镜头</p>
         <p v-if="notice" class="scene3d-notice" :class="`tone-${noticeTone(notice)}`" :title="notice" @click="notice = ''">{{ notice }}</p>
       </div>
       <aside v-if="selectedEntry" class="scene3d-inspector" aria-label="对象设置">

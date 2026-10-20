@@ -1,0 +1,13 @@
+{
+  "plugin": "fk",
+  "version": "0.3.5",
+  "scope": "仅新增三个官方2.0型号并调整官方2.5；其他模型及价格保持不变",
+  "coefficientConvention": "沿用用户确认人民币与Task Usage系数同数值口径；实际分组倍率和实扣待验收",
+  "videoReferenceBilling": "带参考视频按上游Token价格结算；完成后seconds=0，使用upstream_cost_yuan收取上游已结算人民币分金额，包含四舍五入和最低1分，不再叠加Token或秒费。预扣仍沿用宿主按请求秒数估算，不等于上游Token预扣，最终多退少补待真实验收。",
+  "models": [
+    { "model": "官方渠道-Seedance 2.0 Mini 720p", "upstreamModel": "ft-video-v1-e820a676bd820bff4a79d2571fdb7fde", "salePriceCnyPerSecond": 0.4, "videoReferencePriceCnyPerMillionTokens": 10.5, "expression": "u(\"seconds\") > 0 ? tier(\"base\", u(\"seconds\") * 0.4) : tier(\"video_reference\", u(\"upstream_cost_yuan\"))" },
+    { "model": "官方渠道-Seedance 2.0 Fast 720p", "upstreamModel": "ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3", "salePriceCnyPerSecond": 0.6, "videoReferencePriceCnyPerMillionTokens": 16.5, "expression": "u(\"seconds\") > 0 ? tier(\"base\", u(\"seconds\") * 0.6) : tier(\"video_reference\", u(\"upstream_cost_yuan\"))" },
+    { "model": "官方渠道-Seedance 2.0 满血 720p", "upstreamModel": "ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30", "salePriceCnyPerSecond": 0.7, "videoReferencePriceCnyPerMillionTokens": 21, "expression": "u(\"seconds\") > 0 ? tier(\"base\", u(\"seconds\") * 0.7) : tier(\"video_reference\", u(\"upstream_cost_yuan\"))" },
+    { "model": "官方渠道-Seedance 2.5 满血 720p", "upstreamModel": "ft-video-v1-451adae35b0c4a3d275c2c46394abc98", "salePriceCnyPerSecond": 1, "videoReferencePriceCnyPerMillionTokens": 31.5, "expression": "u(\"seconds\") > 0 ? tier(\"base\", u(\"seconds\") * 1) : tier(\"video_reference\", u(\"upstream_cost_yuan\"))" }
+  ]
+}

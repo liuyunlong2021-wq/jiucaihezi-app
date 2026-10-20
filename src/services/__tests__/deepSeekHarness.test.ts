@@ -593,7 +593,7 @@ test('Harness leaves subagent scheduling and execution policies to the official 
   assert.doesNotMatch(runner, /maxTokens:/)
 })
 
-test('Harness uses existing catalog metadata, cloud defaults and smaller local limits', () => {
+test('Harness uses existing catalog metadata, cloud defaults and 256K local fallback', () => {
   const models = [
     { id: 'ds', providerId: 'jiucaihezi', contextWindow: 1_048_576, maxOutputTokens: 65_536 },
     { id: 'ds', providerId: 'local-ollama', contextWindow: 16_384, maxOutputTokens: 2_048 },
@@ -601,7 +601,7 @@ test('Harness uses existing catalog metadata, cloud defaults and smaller local l
   assert.deepEqual(deepSeekModelLimits({ model: 'ds', modelProviderId: 'jiucaihezi' }, models), { contextWindow: 1_048_576, maxTokens: 65_536 })
   assert.deepEqual(deepSeekModelLimits({ model: 'ds', modelProviderId: 'local-ollama' }, models), { contextWindow: 16_384, maxTokens: 2_048 })
   assert.deepEqual(deepSeekModelLimits({ model: 'unknown' }, []), { contextWindow: 1_000_000, maxTokens: 128_000 })
-  assert.deepEqual(deepSeekModelLimits({ model: 'unknown', modelProviderId: 'local-ollama' }, models), { contextWindow: 32_768, maxTokens: 4_096 })
+  assert.deepEqual(deepSeekModelLimits({ model: 'unknown', modelProviderId: 'local-ollama' }, models), { contextWindow: 262_144, maxTokens: 4_096 })
   assert.deepEqual(deepSeekModelLimits({ model: 'ds' }, [{ id: 'ds', contextWindow: NaN, maxOutputTokens: -1 }]), { contextWindow: 1_000_000, maxTokens: 128_000 })
 })
 

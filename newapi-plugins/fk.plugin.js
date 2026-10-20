@@ -2,7 +2,7 @@
 //
 // 图片使用 openai_image 协议并由 NewAPI 主机轮询；视频使用 openai_video 协议。
 // 上游 Key 由 NewAPI 渠道配置提供，源码不保存密钥。Base URL: https://ai.fanke2026.xyz
-// Seedance 2.5 使用 /api/open/v1/video/generate 与 /video/status?jobId=。
+// Seedance 2.0/2.5 使用 /api/open/v1/video/generate 与 /video/status?jobId=。
 // 签名结果由宿主 content 代理免鉴权回收。旧任务仅保留历史兼容查询；H3 同样走标准接口。
 // 事实源：用户提供的 FK 官方视频文档与公开模型映射。价格在 NewAPI Task Usage 中配置。
 // 按次型号使用 calls；按秒型号使用 seconds/seconds_480p/seconds_720p。
@@ -24,6 +24,9 @@ const VIDEO_SPECS = {
   'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848': { min: 4, max: 30, refs: [30, 10, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
   'ft-video-v1-756e0feb4b3e1f893726314109762123': { min: 15, max: 30, refs: [30, 0, 10], resolutions: ['480p', '720p'], promptMax: 10000 },
   'ft-video-v1-451adae35b0c4a3d275c2c46394abc98': { min: 4, max: 30, refs: [30, 10, 10], wide: true, tokenWithVideo: true },
+  'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde': { min: 4, max: 15, refs: [9, 3, 3], wide: true, tokenWithVideo: true },
+  'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3': { min: 4, max: 15, refs: [9, 3, 3], wide: true, tokenWithVideo: true },
+  'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30': { min: 4, max: 15, refs: [9, 3, 3], wide: true, tokenWithVideo: true },
 }
 const VIDEO_MODEL_IDS = Object.keys(VIDEO_SPECS)
 const VIDEO_MODEL_ALIASES = {
@@ -34,6 +37,9 @@ const VIDEO_MODEL_ALIASES = {
   'Seedance 2.5 满血 480-720p': 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848',
   'XN2-Seedance 2.5 满血 480-720p': 'ft-video-v1-756e0feb4b3e1f893726314109762123',
   '官方渠道-Seedance 2.5 满血 720p': 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
+  '官方渠道-Seedance 2.0 Mini 720p': 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde',
+  '官方渠道-Seedance 2.0 Fast 720p': 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3',
+  '官方渠道-Seedance 2.0 满血 720p': 'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30',
 }
 
 function videoModel(value) {
@@ -73,7 +79,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.4',
+  version: '0.3.5',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',

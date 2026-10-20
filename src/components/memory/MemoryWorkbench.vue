@@ -3626,6 +3626,8 @@ async function selectMention(option: MemoryMentionOption) {
       await addProjectFileReference(option.resource)
     }
     if (option.type !== 'command' && suggestion?.trigger === '@') {
+      // 能力不是文件名补全：光标后的文字仍属于用户草稿。
+      if (option.type === 'tool') suggestion.end = suggestion.start + 1 + suggestion.query.length
       const replaced = replaceComposerSuggestion(input.value, suggestion, '')
       input.value = replaced.text
       setEditorTextAtCursor(composerRef.value, replaced.text, replaced.cursor)

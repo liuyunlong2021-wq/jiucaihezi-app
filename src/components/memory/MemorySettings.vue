@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, ref, watch } from 'vue'
 import JcCloudLoginBox from '@/components/auth/JcCloudLoginBox.vue'
 import type { JcCloudLoginPayload, JcCloudLoginResult } from '@/components/auth/jcCloudAuth'
 import { useAgentStore } from '@/stores/agentStore'
 import { useTheme } from '@/composables/useTheme'
 import { connectLocalOllama } from '@/utils/localOllamaRuntime'
+import { discoverCustomProviderModels, type CustomModelCapabilities } from '@/utils/customProviderModels'
 import { getLocalOllamaModels } from '@/utils/providerConfig'
 import { getCustomProviders, normalizeCustomProviderApiBase, saveCustomProviders, type CustomProviderConfig } from '@/utils/providerConfig'
 import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, getComfyUiApiBase, normalizeComfyUiApiBase, saveComfyUiApiBase, getComfyServiceAccessKey, saveComfyServiceAccessKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
@@ -46,7 +47,9 @@ const installedLocalModelCount = ref(0)
 const customProviders = ref<CustomProviderConfig[]>(getCustomProviders())
 const customProviderStatus = ref('')
 const customProviderFormOpen = ref(false)
+const customProviderCapabilities = ref<Record<string, CustomModelCapabilities>>({})
 const customProviderDraft = ref({ id: '', name: '', apiBase: '', apiKey: '', modelIds: '' })
+watch(() => [customProviderDraft.value.apiBase, customProviderDraft.value.apiKey], () => { customProviderCapabilities.value = {} }, { flush: 'sync' })
 const localModelSummary = computed(() => {
   const parts = [installedLocalModelCount.value ? `Ollama ${installedLocalModelCount.value} 个模型` : 'Ollama 未连接']
   parts.push(customProviders.value.length ? `兼容 API ${customProviders.value.length} 个` : '无兼容 API')
@@ -122,6 +125,7 @@ async function connectOllama() {
 }
 
 function resetCustomProviderDraft() {
+  customProviderCapabilities.value = {}
   customProviderDraft.value = { id: '', name: '', apiBase: '', apiKey: '', modelIds: '' }
 }
 
@@ -144,6 +148,7 @@ function editCustomProvider(provider: CustomProviderConfig) {
     apiKey: provider.apiKey || '',
     modelIds: provider.modelIds.join(', '),
   }
+  customProviderCapabilities.value = provider.modelCapabilities || {}
   customProviderStatus.value = ''
   customProviderFormOpen.value = true
 }
@@ -169,8 +174,8 @@ function saveCustomProviderDraft() {
     return
   }
   saveCustomProviders([
-    ...customProviders.value.filter(provider => provider.id !== id),
-    { id, name: name || id, apiBase, apiKey: draft.apiKey.trim() || undefined, modelIds },
+    ...getCustomProviders().filter(provider => provider.id !== id),
+    { id, name: name || id, apiBase, apiKey: draft.apiKey.trim() || undefined, modelIds, modelCapabilities: customProviderCapabilities.value },
   ])
   customProviders.value = getCustomProviders()
   agentStore.refreshLocalModels()
@@ -180,7 +185,7 @@ function saveCustomProviderDraft() {
 }
 
 function removeCustomProvider(id: string) {
-  saveCustomProviders(customProviders.value.filter(provider => provider.id !== id))
+  saveCustomProviders(getCustomProviders().filter(provider => provider.id !== id))
   customProviders.value = getCustomProviders()
   agentStore.refreshLocalModels()
   if (customProviderDraft.value.id === id) closeCustomProviderForm()
@@ -194,16 +199,18 @@ async function detectProviderModels(provider?: CustomProviderConfig) {
   providerProbeBusy.value = probeId
   try {
     const base = normalizeCustomProviderApiBase(candidate.apiBase)
-    const headers = candidate.apiKey?.trim() ? { Authorization: `Bearer ${candidate.apiKey.trim()}` } : undefined
-    const response = await fetch(`${base}/v1/models`, { headers, signal: AbortSignal.timeout(10000) })
-    if (!response.ok) throw new Error(`HTTP ${response.status}`)
-    const data = await response.json()
-    if (!Array.isArray(data?.data)) throw new Error('服务未返回 OpenAI 兼容模型列表，请手动填写模型 ID')
-    const ids = [...new Set<string>(data.data.map((model: { id?: string }) => model.id).filter((id: unknown): id is string => typeof id === 'string' && Boolean(id.trim())))]
-    if (provider) providerConnectionStatus.value[probeId] = `已连接 · 服务返回 ${ids.length} 个模型`
-    else {
+    const result = await discoverCustomProviderModels({ apiBase: base, apiKey: candidate.apiKey })
+    const ids = result.modelIds
+    if (provider) {
+      saveCustomProviders(getCustomProviders().map(item => item.id === provider.id && item.apiBase === provider.apiBase && item.apiKey === provider.apiKey
+        ? { ...item, modelIds: [...new Set([...item.modelIds, ...ids])], modelCapabilities: result.modelCapabilities } : item))
+      customProviders.value = getCustomProviders()
+      agentStore.refreshLocalModels()
+      providerConnectionStatus.value[probeId] = `已连接 · 已同步 ${ids.length} 个模型及容量`
+    } else {
+      customProviderCapabilities.value = result.modelCapabilities
       customProviderDraft.value.modelIds = ids.join(', ')
-      customProviderStatus.value = `已连接 · 获取 ${ids.length} 个模型；保存后生效`
+      customProviderStatus.value = `已连接 · 获取 ${ids.length} 个模型及容量；保存后生效`
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : '检测失败'

@@ -120,11 +120,25 @@ test('custom OpenAI-compatible endpoints surface as selectable models with image
     // 声明图片输入，否则本地 VLM 永远收不到图。
     assert.deepEqual(entry?.inputModalities, ['text', 'image'])
     // 自定义端点必须用本地保守预算，避免把云端 1M/128K 误用上去。
-    assert.equal(entry?.contextWindow, 32_768)
+    assert.equal(entry?.contextWindow, 262_144)
     assert.equal(entry?.maxOutputTokens, 4_096)
   } finally {
     storage.restore()
   }
+})
+
+test('Strata capabilities survive storage and reach the selected model', { concurrency: false }, () => {
+  const storage = installLocalStorage({ jcCustomProviders: JSON.stringify([{
+    id: 'strata', name: 'Strata', apiBase: 'http://localhost:8080', modelIds: ['strata'],
+    modelCapabilities: { strata: { contextWindow: 262144, maxOutputTokens: 131072, inputModalities: ['text'] } },
+  }]) })
+  try {
+    setActivePinia(createPinia())
+    const entry = useAgentStore().availableModels.find(model => model.providerId === 'strata')
+    assert.equal(entry?.contextWindow, 262144)
+    assert.equal(entry?.maxOutputTokens, 131072)
+    assert.deepEqual(entry?.inputModalities, ['text'])
+  } finally { storage.restore() }
 })
 
 test('Web restores only installed user Skills', { concurrency: false }, async () => {

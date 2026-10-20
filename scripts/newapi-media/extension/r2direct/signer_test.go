@@ -93,3 +93,30 @@ func TestRejectsInvalidInputAndOtherChannels(t *testing.T) {
 		t.Fatal("accepted cancelled signing")
 	}
 }
+
+func TestYihongNamespaceAndChannelIsolation(t *testing.T) {
+	s := fixture(t)
+	for _, model := range []string{"yh-seedance2.5 Ultra", "yh-seedance2.5 super", "yh-seedance-2.5-Muse", "yh-kling-omni-4.0", "yh-seedance2.0 mini Love", "yh-wan3.0-video"} {
+		g, err := s.SignYihongUpload(context.Background(), 17, model, "image/png", MaxFile)
+		if err != nil {
+			t.Fatal(err)
+		}
+		u, _ := url.Parse(g.UploadURL)
+		if !strings.HasPrefix(u.Path, "/jiucaihezi-media-test/yihong-temp/17/") || u.Query().Get("X-Amz-Expires") != "300" {
+			t.Fatal("wrong namespace or expiry")
+		}
+		if _, err := s.SignUpload(context.Background(), 17, model, "image/png", 1); err == nil {
+			t.Fatal("Lingdong route accepted Yihong")
+		}
+	}
+	for _, model := range []string{"seedance2.5 Ultra", "灵动-gpt-image-2.5-flare", "yh-seedance2.5 cheap", "yh-gpt-image-2"} {
+		if _, err := s.SignYihongUpload(context.Background(), 17, model, "image/png", 1); err == nil {
+			t.Fatal("unexpected model accepted")
+		}
+	}
+	for _, size := range []int64{0, MaxFile + 1} {
+		if _, err := s.SignYihongUpload(context.Background(), 17, "yh-seedance2.5 Ultra", "image/png", size); err == nil {
+			t.Fatal("invalid size accepted")
+		}
+	}
+}

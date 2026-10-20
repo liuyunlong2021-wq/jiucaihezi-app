@@ -102,21 +102,23 @@ def http(address, method='GET', data=None, headers=None, expected=(200,), timeou
         return response.read(), response.headers
 
 
-def check_grant(grant):
+def check_grant(grant, channel='lingdong'):
+    require(channel in ('lingdong', 'yihong'), 'Unknown R2 channel')
     require(grant.get('method') == 'PUT' and grant.get('headers') == {'Content-Type': 'image/png'}, 'Unexpected R2 upload method or headers')
     urls = [urlsplit(grant[name]) for name in ('upload_url', 'asset_url', 'head_url')]
     for url in urls:
         require(url.scheme == 'https' and url.netloc == ACCOUNT + '.r2.cloudflarestorage.com' and not url.fragment and parse_qs(url.query).get('X-Amz-Signature'), 'Unexpected signed URL destination')
-    require(len({url.path for url in urls}) == 1 and urls[0].path.startswith('/' + BUCKET + '/lingdong-temp/'), 'R2 grant must name the same experiment object')
+    require(len({url.path for url in urls}) == 1 and urls[0].path.startswith('/' + BUCKET + '/' + channel + '-temp/'), 'R2 grant must name the same channel object')
 
 
-def verify(key, model):
-    route = LOCAL + '/api/creations/lingdong/upload-url'
+def verify(key, model, channel='lingdong'):
+    require(channel in ('lingdong', 'yihong'), 'Unknown R2 channel')
+    route = LOCAL + '/api/creations/' + channel + '/upload-url'
     http(route, 'POST', b'{}', {'Content-Type': 'application/json'}, expected=(401,))
     png = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=')
     auth = {'Authorization': 'Bearer ' + key, 'Content-Type': 'application/json'}
     grant = json.loads(http(route, 'POST', json.dumps({'model': model, 'content_type': 'image/png', 'size': len(png)}).encode(), auth, timeout=15)[0])
-    check_grant(grant)
+    check_grant(grant, channel)
     # Origin checks exercise R2's CORS responses, but do not replace a real browser test.
     _, cors = http(grant['upload_url'], 'OPTIONS', headers={'Origin': ORIGIN, 'Access-Control-Request-Method': 'PUT', 'Access-Control-Request-Headers': 'content-type'}, expected=(200, 204))
     require(cors.get('Access-Control-Allow-Origin') == ORIGIN and 'PUT' in cors.get('Access-Control-Allow-Methods', ''), 'R2 PUT preflight is not allowed')

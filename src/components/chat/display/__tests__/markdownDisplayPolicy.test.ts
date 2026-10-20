@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { renderMessageMarkdown } from '../markdownDisplayPolicy'
+import { marked } from 'marked'
+import { renderMarkdownChunk, renderMessageMarkdown } from '../markdownDisplayPolicy'
 
 test('renderMessageMarkdown escapes user HTML without rewriting it as Markdown', () => {
   const html = renderMessageMarkdown('<img src=x onerror=alert(1)>\n**not bold**', 'user')
@@ -81,4 +82,17 @@ test('renderMessageMarkdown keeps semantic blocks for a compact document layout'
   assert.match(html, /<ol>/)
   assert.match(html, /<hr>/)
   assert.match(html, /<p>正文第二段。<\/p>/)
+})
+
+test('scene and canvas source links open in the workbench in settled and streaming Markdown', () => {
+  for (const extension of ['jcscene', 'canvas', 'jccanvas']) {
+    for (const path of [`场景.${extension}`, `.raw/jc-media/文档/场景.${extension}`, `/Users/by3/Documents/列车/.raw/jc-media/文档/场景.${extension}`]) {
+      const markdown = `[场景](<${path}>)`
+      const tokens = marked.lexer(markdown)
+      for (const html of [renderMessageMarkdown(markdown, 'assistant'), renderMarkdownChunk(tokens[0]!, tokens.links, { streaming: true, stable: false })]) {
+        assert.ok(html.includes(`href="#jc-file=${encodeURIComponent(path.replace(/^\//, ''))}"`))
+        assert.doesNotMatch(html, /target="_blank"/)
+      }
+    }
+  }
 })

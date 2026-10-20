@@ -1,3 +1,5 @@
+import { discoverCustomProviderModels } from '@/utils/customProviderModels'
+import { findCustomProvider, getCustomProviders, saveCustomProviders } from '@/utils/providerConfig'
 import { deriveTurnTokenUsage } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-token-meter/lib/types/client.js'
 import { invoke } from '@tauri-apps/api/core'
 import { appDataDir, join, resolveResource } from '@tauri-apps/api/path'
@@ -1514,7 +1516,31 @@ export async function queryDeepSeekHarnessConversations(input: DeepSeekHarnessIn
   return result
 }
 
+const customDiscovery = new Map<string, { checkedAt: number; pending: Promise<void> }>()
+
+async function refreshCustomModelCapabilities(input: DeepSeekHarnessInput): Promise<void> {
+  const provider = findCustomProvider(input.modelProviderId)
+  if (!provider || provider.apiBase.replace(/\/v1\/?$/, '').replace(/\/$/, '') !== input.apiBase.replace(/\/v1\/?$/, '').replace(/\/$/, '')) return
+  const key = JSON.stringify([provider.id, provider.apiBase, provider.apiKey])
+  const previous = customDiscovery.get(key)
+  if (previous && Date.now() - previous.checkedAt < 30_000) return previous.pending
+  const pending = (async () => {
+    try {
+      const result = await discoverCustomProviderModels(provider)
+      // 保留手动别名；发现接口仅更新其明确报告的模型能力。
+      saveCustomProviders(getCustomProviders().map(item => item.id === provider.id && item.apiBase === provider.apiBase && item.apiKey === provider.apiKey
+        ? { ...item, modelCapabilities: { ...item.modelCapabilities, ...result.modelCapabilities } } : item))
+      useAgentStore().refreshLocalModels()
+    } catch { /* 离线或旧服务不支持发现时，保留已保存的能力与手动模型。 */ }
+  })()
+  customDiscovery.set(key, { checkedAt: Date.now(), pending })
+  return pending
+}
+
 async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false): Promise<Runtime> {
+  await refreshCustomModelCapabilities(input)
+  const modalities = findCustomProvider(input.modelProviderId)?.modelCapabilities?.[input.model]?.inputModalities
+  if (modalities) input.imageInput = modalities.includes('image')
   const workspaceKey = workspaceRuntimeKey(input)
   const key = runtimeKey(input)
   const current = runtimes.get(workspaceKey)

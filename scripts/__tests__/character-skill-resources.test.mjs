@@ -41,3 +41,15 @@ test('every character reference is reachable locally without personal skill dire
   }
   assert.deepEqual([...visited].sort(), [...resources].sort())
 })
+
+test('both character format templates accept text without implying an attached image', () => {
+  for (const ratio of ['9-16', '16-9']) {
+    const template = readFileSync(join(root, '..', 'jc-juese-geshi', 'references', `${ratio}.md`), 'utf8')
+    assert.match(template, /角色文字提示词或人物参考图/)
+    assert.match(template, /只有文字时直接用于文生图，无需参考图/)
+    assert.doesNotMatch(template, /所附参考图|参考图中人物/)
+    for (const layout of ['正面全身，无头', '背面全身，带头', '齐胸大特写', '18% 中灰', 'shadowless frontal illumination']) {
+      assert.ok(template.includes(layout), `${ratio}: ${layout}`)
+    }
+  }
+})
