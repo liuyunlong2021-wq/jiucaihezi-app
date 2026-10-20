@@ -92,12 +92,14 @@ test('APP task rejects failed waits and missing receipts and releases its subscr
   }
 })
 
-async function fixture(t, configured = false, modelGate, { respond, maxTokens = 1024 } = {}) {
+async function fixture(t, configured = false, modelGate, { respond, maxTokens = 1024, nativeClaude = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'jc-session-lease-'))
   const requests = []
+  const paths = []
   const http = createServer(async (req, res) => {
     const chunks = []
     for await (const chunk of req) chunks.push(chunk)
+    paths.push(req.url)
     requests.push(JSON.parse(Buffer.concat(chunks).toString()))
     if (respond && await respond(requests.at(-1), res, requests.length)) return
     res.writeHead(200, { 'Content-Type': 'text/event-stream' })
@@ -108,7 +110,7 @@ async function fixture(t, configured = false, modelGate, { respond, maxTokens = 
   })
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve))
   const patch = join(root, 'route.yml')
-  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: openai-completions\n        baseURL: http://127.0.0.1:${http.address().port}/v1\n        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: ${maxTokens}\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
+  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: ${nativeClaude ? 'anthropic-messages' : 'openai-completions'}\n        baseURL: http://127.0.0.1:${http.address().port}${nativeClaude ? '' : '/v1'}\n        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: ${maxTokens}\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
   const options = { cwd: root, processCwd: root, dshHome: join(root, 'home'), patches: [patch], provider: 'jiucaihezi', model: 'test', initializeTimeoutMs: 15000,
     env: { ...process.env, DSH_AGENTS_HOME: join(root, 'agents'), DSH_PRIMARY_RUNTIME: '', JIUCAIHEZI_DH_API_KEY: 'local-test' } }
   const harnesses = []
@@ -166,7 +168,7 @@ async function fixture(t, configured = false, modelGate, { respond, maxTokens = 
     await new Promise(resolve => http.close(resolve))
     rmSync(root, { recursive: true, force: true })
   })
-  return { create, createRunner, requests, root, patch, options }
+  return { create, createRunner, requests, paths, root, patch, options }
 }
 
 test('APP runner inherits official retries: 524 gets five retries, an unclassified error gets none', { timeout: 45000 }, async t => {
@@ -691,4 +693,38 @@ test('existing custom connections discover capabilities once and preserve manual
   assert.equal(providers[0].modelCapabilities.strata.maxOutputTokens, 131072)
   await refresh({ ...input, apiBase: 'http://another-host:8080/v1' })
   assert.equal(discoveries, 1, 'a mismatched endpoint must not reuse this provider credentials')
+})
+
+test('native Claude carries cache markers and completes a streamed tool round through the APP runner', { timeout: 30000 }, async t => {
+  const f = await fixture(t, false, undefined, { nativeClaude: true, respond: (_request, res, count) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    const emit = event => res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    emit({ type: 'message_start', message: { id: `msg_${count}`, type: 'message', role: 'assistant', model: 'test', content: [], stop_reason: null, stop_sequence: null,
+      usage: { input_tokens: 10, output_tokens: 0, cache_creation_input_tokens: count === 1 ? 2048 : 0, cache_read_input_tokens: count === 1 ? 0 : 2048 } } })
+    if (count === 1) {
+      emit({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'read_fixture', name: 'read', input: {} } })
+      emit({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: JSON.stringify({ file_path: join(f.root, 'cache.txt') }) } })
+    } else {
+      emit({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })
+      emit({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'CACHE_ROUND_OK' } })
+    }
+    emit({ type: 'content_block_stop', index: 0 })
+    emit({ type: 'message_delta', delta: { stop_reason: count === 1 ? 'tool_use' : 'end_turn', stop_sequence: null }, usage: { output_tokens: 5 } })
+    emit({ type: 'message_stop' })
+    res.end()
+    return true
+  } })
+  writeFileSync(join(f.root, 'cache.txt'), 'CACHE_FILE_CONTENT')
+  const runner = f.createRunner()
+  const result = await runner.request({ type: 'run', sessionId: 'native-cache', contentBlocks: [{ type: 'text', text: 'Read cache.txt and answer.' }] })
+  assert.equal(result.type, 'result', JSON.stringify(result))
+  assert.equal(f.requests.length, 2)
+  assert.ok(f.paths.every(path => path.split('?')[0] === '/v1/messages'), JSON.stringify(f.paths))
+  for (const request of f.requests) {
+    assert.match(JSON.stringify(request.system), /"cache_control":\{"type":"ephemeral"\}/)
+    assert.match(JSON.stringify(request.messages), /"cache_control":\{"type":"ephemeral"\}/)
+    assert.ok(request.tools.some(tool => tool.name === 'read'))
+  }
+  assert.match(JSON.stringify(f.requests[1].messages), /CACHE_FILE_CONTENT/)
+  assert.match(JSON.stringify(result), /CACHE_ROUND_OK/)
 })

@@ -177,6 +177,7 @@ export interface CreationRunPlan {
   endpoint: string
   usesRhAdapter: boolean
   pollKind: CreationPollKind
+  pollPathTemplate?: string
   assetFlow: CreationAssetFlow
   mediaInputTransport: CreationMediaInputTransport
   submitSummary: string

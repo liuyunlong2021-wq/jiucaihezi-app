@@ -16,6 +16,14 @@ const PSQL_USER = process.env.NEWAPI_PSQL_USER || 'newapi'
 const PSQL_DB = process.env.NEWAPI_PSQL_DB || 'new-api'
 
 export const CREATION_MODEL_ROUTES = [
+  { id: 'newapi/yihong/yh-seedance2.5 Ultra', aliases: ['yh-seedance2.5 Ultra'] },
+  { id: 'newapi/yihong/yh-seedance2.5 super', aliases: ['yh-seedance2.5 super'] },
+  { id: 'newapi/yihong/yh-seedance-2.5-Muse', aliases: ['yh-seedance-2.5-Muse'] },
+  { id: 'newapi/yihong/yh-kling-omni-4.0', aliases: ['yh-kling-omni-4.0'] },
+  { id: 'newapi/yihong/yh-seedance2.0 mini Love', aliases: ['yh-seedance2.0 mini Love'] },
+  { id: 'newapi/yihong/yh-wan3.0-video', aliases: ['yh-wan3.0-video'] },
+  { id: 'newapi/yuanliu/yl_seedance-2-5_6caffaca7390', aliases: ['yl_seedance-2-5_6caffaca7390'] },
+  { id: 'newapi/yuanliu/yl_seedance-2-5_0fab2f1b1f10', aliases: ['yl_seedance-2-5_0fab2f1b1f10'] },
   ...['灵动-sd2.5-满血-301010', '灵动-sd2.5-满血-301010-2', '灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/lingdong/${model}`, aliases: [model, model.slice(3)] })),
   ...['yihong-gpt-image-2', 'yihong-gpt-image-2.5-flare', 'yihong-gpt-image-2.5-sunburst'].map(model => ({ id: `newapi/yihong/${model}`, aliases: [model] })),
   // 小易 0.3.0 起渠道公开名带 xy- 前缀，历史内部名保留兼容。
@@ -46,6 +54,9 @@ export const CREATION_MODEL_ROUTES = [
   { id: 'Seedance 2.5 满血 480-720p', aliases: ['Seedance 2.5 满血 480-720p'] },
   { id: 'XN2-Seedance 2.5 满血 480-720p', aliases: ['XN2-Seedance 2.5 满血 480-720p'] },
   { id: '官方渠道-Seedance 2.5 满血 720p', aliases: ['官方渠道-Seedance 2.5 满血 720p'] },
+  { id: '官方渠道-Seedance 2.0 Mini 720p', aliases: ['官方渠道-Seedance 2.0 Mini 720p'] },
+  { id: '官方渠道-Seedance 2.0 Fast 720p', aliases: ['官方渠道-Seedance 2.0 Fast 720p'] },
+  { id: '官方渠道-Seedance 2.0 满血 720p', aliases: ['官方渠道-Seedance 2.0 满血 720p'] },
   { id: 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746', aliases: ['ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'] },
   { id: 'newapi/zx/mj_fast_imagine', aliases: ['mj_fast_imagine'] },
   { id: 'veo-3.1-generate-preview', aliases: ['veo-3.1-generate-preview'] },

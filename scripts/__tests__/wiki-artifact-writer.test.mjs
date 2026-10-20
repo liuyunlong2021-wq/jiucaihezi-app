@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { join, dirname, relative, sep } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
-import { createWikiArtifactTool } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
+import { createWikiArtifactTool, setWikiSourceContent } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 
 function createHarness(root, { beforeWrite } = {}) {
   const files = new Map()
@@ -77,9 +77,10 @@ function createHarness(root, { beforeWrite } = {}) {
     async waterfall(_event, _target, _exec, fallback) { return fallback() },
   }
   const contract = JSON.parse(readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
-  const tool = createWikiArtifactTool(ctx, contract)
+  const sourceAgent = {}
+  const tool = createWikiArtifactTool(ctx, contract, sourceAgent)
   const exec = { agent: { session: { header: { cwd: root } } }, signal: new AbortController().signal }
-  return { tool, exec, files }
+  return { tool, exec, files, sourceAgent }
 }
 
 test('one shared writer archives Manju artifacts and updates the project indexes', async t => {
@@ -251,4 +252,51 @@ test('chapter confirmation conversion can recover after the source was appended'
   assert.equal(retry.operation, 'unchanged')
   assert.match(files.get(draftPath).content, /已由用户确认并追加到原文/)
   assert.equal(files.get(join(root, retry.path)).content.match(/# 第001章 归来/g)?.length, 1)
+})
+
+
+test('original and adapted research stay separate and legacy paths remain unchanged', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-research-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files } = createHarness(root)
+  const base = { artifact_kind: 'character_bio', entity_name: '林舟' }
+  const legacy = await tool.execute({ ...base, content: '旧资料' }, exec)
+  const original = await tool.execute({ ...base, content: '原作人物', research_version: 'original' }, exec)
+  const adapted = await tool.execute({ ...base, content: '新版人物', research_version: 'adapted' }, exec)
+  assert.equal(legacy.path, 'wiki/项目资料/人物小传/林舟.md')
+  assert.equal(original.path, 'wiki/项目资料/原作/人物小传/林舟.md')
+  assert.equal(adapted.path, 'wiki/项目资料/改编版/人物小传/林舟.md')
+  assert.match(files.get(join(root, original.path)).content, /原作人物/)
+  assert.match(files.get(join(root, 'wiki/项目资料/改编版/index.md')).content, /人物小传/)
+  for (const artifact_kind of ['scene_research', 'prop_research', 'event_timeline']) {
+    const result = await tool.execute({ artifact_kind, entity_name: '圣剑', research_version: 'adapted', content: '剧情功能与规则' }, exec)
+    assert.equal(result.status, 'saved')
+    assert.ok(result.path.startsWith('wiki/项目资料/改编版/'))
+  }
+  const plan = await tool.execute({ artifact_kind: 'adaptation_episode_plan', content: '分集规划' }, exec)
+  assert.equal(plan.path, 'wiki/改编方案/分集规划.md')
+  await assert.rejects(tool.execute({ ...base, content: '坏版本', research_version: '../外部' }, exec), /research_version/)
+  await assert.rejects(tool.execute({ artifact_kind: 'screenplay', episode_number: 1, content: '正文', research_version: 'adapted' }, exec), /research_version/)
+})
+
+
+test('long pasted source is sliced verbatim from the current turn, never from model content', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'jc-pasted-source-'))
+  t.after(() => rmSync(root, { recursive: true, force: true }))
+  const { tool, exec, files, sourceAgent } = createHarness(root)
+  const beginning = '第一章：山门前的少年拔出断剑。'
+  const ending = '终章：他终于将圣剑放回神殿。'
+  const original = beginning + '\r\n' + '云海翻涌，众人各有心事。\r\n'.repeat(5000) + ending
+  setWikiSourceContent(sourceAgent, [{ type: 'text', text: '/jc-duanju\n请改编下面小说：\n' + original + '\n请先做项目资料。' }])
+  const args = { artifact_kind: 'source_material', work_name: '云海', source_block: 0, source_start: beginning, source_end: ending, content: '模型伪造的正文' }
+  const result = await tool.execute(args, exec)
+  assert.equal(result.status, 'saved')
+  assert.equal(files.get(join(root, result.path)).content, original)
+  assert.match(files.get(join(root, 'wiki/原始材料/index.md')).content, /云海/)
+  assert.equal((await tool.execute(args, exec)).operation, 'unchanged')
+  await assert.rejects(tool.execute({ ...args, write_mode: 'update' }, exec), /不覆盖/)
+  setWikiSourceContent(sourceAgent, [{ type: 'text', text: '下一轮只有继续，没有小说原文' }])
+  await assert.rejects(tool.execute({ ...args, work_name: '第二本' }, exec), /来源首尾/)
+  setWikiSourceContent(sourceAgent, [{ type: 'text', text: original + beginning }])
+  await assert.rejects(tool.execute({ ...args, work_name: '歧义来源' }, exec), /不唯一/)
 })

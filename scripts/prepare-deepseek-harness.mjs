@@ -213,6 +213,7 @@ const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
 \t\t}
 \t\tconst agent = rec.handle.agent;
 \t\tthis.assertLiveAgent(rec, agent.id);
+\t\tsetWikiSourceContent(agent, content);
 \t\tconst held = this.pinnedSkillScopes.get(agent);
 \t\tif (held !== void 0 && held.names.join(",") === names.join(",")) return;
 \t\tif (held !== void 0) {
@@ -265,8 +266,15 @@ const pinnedSkillLookup = `\tasync pinnedSkillNames(rec, content) {
 \t}
 `
 
+// 更新生成的作用域方法时先移除旧版，避免旧方法覆盖新版或重复声明导入。
+server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable) \} from .*;\n/gm, '')
+server = server.split(skillGesture).join('')
+server = server.replace(/^const SKILL_GESTURE = .*;\n/gm, '')
+server = server.replace(/\tasync applyPinnedSkillScope\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
+
 const imports = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
   + 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
+  + 'import { setWikiSourceContent } from "../../../../manju-wiki.mjs";\n'
   + 'import { isUserInvocable } from "@deepseek-ai/dsh-skill";\n'
 patch('import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n', 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n' + imports + skillGesture)
 for (const method of [readSessionMethod, cancelSessionMethod, updateQueueMethod, permissionMethod, scopedBindingMethod, pinnedSkillLookup]) {

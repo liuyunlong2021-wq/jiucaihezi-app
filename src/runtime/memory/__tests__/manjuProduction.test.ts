@@ -142,3 +142,31 @@ test('unsent toggle preferences survive reopening without leaking to a new conve
   )
   assert.deepEqual(restoreNovelSelection([NOVEL_SKILL, WIKI_MEMORY_SKILL], { enabled: false, wikiMemoryWasSelected: false }), [])
 })
+
+
+test('short drama restores explicitly selected route skills and removes them on exit', async () => {
+  const { SHORT_DRAMA_SKILLS, restoreShortDramaSelection } = await import('../shortDramaProduction')
+  const selected = ['jc-duanju', 'jc-duanju-cehua', 'wiki-memory']
+  assert.ok(SHORT_DRAMA_SKILLS.includes('jc-xiangmuziliao'))
+  assert.deepEqual(restoreShortDramaSelection(selected, { enabled: true }), selected)
+  assert.deepEqual(restoreShortDramaSelection(selected, { enabled: false }), ['wiki-memory'])
+  assert.deepEqual(restoreShortDramaSelection(selected, { enabled: false, wikiMemoryWasSelected: false }), [])
+  assert.deepEqual(restoreShortDramaSelection(['jc-duanju', 'jc-seedance']), ['jc-duanju', 'wiki-memory'])
+})
+
+
+test('short drama route resources are packaged and all delegated links resolve inside its scope', () => {
+  const route = JSON.parse(readFileSync('public/skills/short-drama-route.json', 'utf8'))
+  const index = JSON.parse(readFileSync('public/skills/index.json', 'utf8'))
+  const allowed = new Set([...route.skills, 'wiki-memory'])
+  for (const name of route.skills) {
+    const entry = index.find((item: { name: string }) => item.name === name)
+    assert.ok(entry?.package.files.some((file: { path: string }) => file.path === 'SKILL.md'), name)
+    const path = resolve('public/skills', name, 'SKILL.md')
+    for (const match of readFileSync(path, 'utf8').matchAll(/\]\(([^)]+\.md)\)/g)) {
+      const target = resolve(dirname(path), match[1]!)
+      assert.ok(existsSync(target), target)
+      assert.ok(allowed.has(relative(resolve('public/skills'), target).split(/[\\/]/)[0]), target)
+    }
+  }
+})

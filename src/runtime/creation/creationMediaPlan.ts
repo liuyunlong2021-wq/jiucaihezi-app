@@ -32,6 +32,15 @@ export function usesNewApiContentEndpoint(
   const apiStyle = String(target.apiStyle || '')
   if (apiStyle === 'comfy-video' || apiStyle === 'comfy-first-frame' || apiStyle === 'comfy-first-last') return true
   const model = String(target.model || '').trim().toLowerCase()
+  // 四个Task Plugin的成片由宿主鉴权content交付，恢复下载沿用同一判据。
+  if (model.startsWith('yh-') || model.startsWith('yl_seedance-') || model.startsWith('灵动-sd') || model.startsWith('ft-video-v1-')) return true
+  if ([
+    'fk-minimaxh3',
+    '特价渠道 seedance 2.5 满血 720p', '特价渠道 seedance 2.5 满血 720p（可过真人）',
+    '长期特惠 seedance 2.5 满血 720p', 'seedance 2.5 满血 480-720p', 'xn2-seedance 2.5 满血 480-720p',
+    '官方渠道-seedance 2.5 满血 720p', '官方渠道-seedance 2.0 mini 720p',
+    '官方渠道-seedance 2.0 fast 720p', '官方渠道-seedance 2.0 满血 720p',
+  ].includes(model)) return true
   return model === 'omni-fast' || model === 'omni-v2v' || model.endsWith('/omni-fast') || model.endsWith('/omni-v2v')
 }
 
@@ -117,6 +126,7 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
   }
   const referenceVideoCount = countReferences(params, ['videos', 'video', 'videoUrl', 'videoUrls'])
   const referenceAudioCount = countReferences(params, ['audios', 'audio', 'audioUrl', 'audioUrls'])
+  if (spec.model === 'yh-seedance2.5 Ultra' && referenceAudioCount && !referenceImageCount) throw new Error('Ultra 音频参考必须同时提供参考图')
   const effective = resolveEffectiveContract(spec, referenceImageCount)
   const normalizedParams = normalizeParams(spec, params, effective.apiStyle)
   assertParamShape(effective.apiStyle, normalizedParams, spec.route)
@@ -143,6 +153,7 @@ export function buildCreationRunPlan(input: CreationRunPlanInput): CreationRunPl
     endpoint: effective.endpoint,
     usesRhAdapter,
     pollKind: effective.pollKind,
+    pollPathTemplate: spec.poll?.pathTemplate,
     assetFlow: effective.assetFlow,
     mediaInputTransport: mediaInputTransportFor(spec, effective.apiStyle, effective.assetFlow),
     submitSummary: '',
@@ -221,6 +232,9 @@ function resolveEffectiveContract(
   pollKind: CreationPollKind
   assetFlow: CreationAssetFlow
 } {
+  if (spec.task === 'image' && spec.id.startsWith('newapi/lingdong/')) {
+    return { apiStyle: 'openai-images', mode: referenceImageCount ? 'image-to-image' : 'text-to-image', endpoint: '/v1/images/generations', pollKind: 'none', assetFlow: referenceImageCount ? 'newapi-upload' : 'none' }
+  }
   if (
     spec.source === 'newapi-direct' &&
     (spec.apiStyle === 'openai-images' || spec.apiStyle === 'openai-image-edits' || spec.apiStyle === 'newapi-image-task')
@@ -238,7 +252,7 @@ function resolveEffectiveContract(
       return {
         apiStyle: 'openai-image-edits',
         mode: 'image-to-image',
-        endpoint: '/v1/images/edits',
+        endpoint: spec.poll?.pathTemplate ? spec.endpoint.replace(/\/generations$/, '/edits') : '/v1/images/edits',
         pollKind: spec.poll?.kind || 'none',
         assetFlow: 'newapi-upload',
       }
@@ -246,7 +260,7 @@ function resolveEffectiveContract(
     return {
       apiStyle: 'openai-images',
       mode: 'text-to-image',
-      endpoint: '/v1/images/generations',
+      endpoint: spec.poll?.pathTemplate ? spec.endpoint : '/v1/images/generations',
       pollKind: spec.poll?.kind || 'none',
       assetFlow: 'none',
     }
@@ -331,7 +345,7 @@ function normalizeOpenAiImageParams(
     imageUrl: params.imageUrl,
     imageUrls: params.imageUrls,
     // GPT Image 2 系列的中转 URL 可能在客户端不可达；直接带回图片字节供项目落盘。
-    response_format: spec.id.startsWith('gpt-image-2') || spec.id.startsWith('newapi/yihong/') ? 'b64_json' : 'url',
+    response_format: spec.id.startsWith('gpt-image-2') || spec.id.startsWith('newapi/yihong/') || spec.id.startsWith('newapi/lingdong/') ? 'b64_json' : 'url',
   })
 }
 
@@ -447,8 +461,8 @@ function normalizeGenericTaskParams(
   const normalized = compact({
     model: spec.model,
     prompt: params.prompt,
-    ratio: params.ratio || params.aspectRatio,
-    aspect_ratio: firstValue(params, ['aspect_ratio', 'ratio', 'aspectRatio']),
+    ratio: spec.capabilities.ratios?.length === 0 ? undefined : params.ratio || params.aspectRatio,
+    aspect_ratio: spec.capabilities.ratios?.length === 0 ? undefined : firstValue(params, ['aspect_ratio', 'ratio', 'aspectRatio']),
     resolution: params.resolution,
     duration: params.duration,
     images: params.images,

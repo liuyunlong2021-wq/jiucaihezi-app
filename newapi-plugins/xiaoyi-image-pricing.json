@@ -1,6 +1,6 @@
 {
   "plugin": "xiaoyi-image",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "pricingRule": "用户指定人民币售价，全部按实际生成图片张数计费；不包含视频",
   "coefficientConvention": "沿用现有人民币售价与Task Usage系数同数值口径；分组倍率和实扣需生产核对",
   "models": [

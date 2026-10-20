@@ -632,6 +632,24 @@ export const MEDIA_MODEL_CAPABILITIES: MediaModelCapability[] = [
       { key: 'audios', label: '参考音频 (0-3段；素材总数≤10)', kind: 'audio' },
     ],
   },
+  // FK 0.3.5官方2.0三型号，执行目录与面板使用相同公开名。
+  ...[
+    ['ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', '官方渠道-Seedance 2.0 Mini 720p'],
+    ['ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', '官方渠道-Seedance 2.0 Fast 720p'],
+    ['ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', '官方渠道-Seedance 2.0 满血 720p'],
+  ].map(([id, label]) => ({
+    id, label, model: label, task: 'video' as const, provider: 'gateway-video' as const,
+    maxFiles: 15, acceptedFiles: ['image', 'video', 'audio'] as ('image' | 'video' | 'audio')[],
+    fields: [
+      { key: 'prompt', label: '提示词', kind: 'prompt' as const, required: true },
+      { key: 'ratio', label: '比例', kind: 'select' as const, defaultValue: '16:9', options: options(['16:9', '9:16', '1:1', '21:9', '4:3', '3:4']) },
+      { key: 'resolution', label: '分辨率', kind: 'select' as const, defaultValue: '720p', options: options(['720p']) },
+      { key: 'duration', label: '时长(秒)', kind: 'number' as const, defaultValue: 4, min: 4, max: 15, step: 1 },
+      { key: 'images', label: '参考图 (0-9张)', kind: 'images' as const },
+      { key: 'videos', label: '参考视频 (0-3段)', kind: 'video' as const },
+      { key: 'audios', label: '参考音频 (0-3段)', kind: 'audio' as const },
+    ],
+  })),
   // FK 2026-10-14 官方 Seedance 2.5 目录；旧型号禁用新提交，历史 ID 保留。
   ...[
     ['ft-video-v1-fe82aee0b8ce5ee1d790a56291dc5563', '特价渠道-Seedance2.5满血720p(30图)'],

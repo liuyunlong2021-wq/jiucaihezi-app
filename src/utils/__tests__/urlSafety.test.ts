@@ -130,3 +130,11 @@ test('creation poll url guard only allows known task polling paths', () => {
   assert.equal(isAllowedCreationPollUrl('https://api.jiucaihezi.studio/api/creations/tasks/rh_task_001'), false)
   assert.equal(isAllowedCreationPollUrl('/api/creations/tasks/../../user/self'), false)
 })
+
+
+test('小易任务查询只允许同源公共任务路径', () => {
+  assert.equal(isAllowedCreationPollUrl('/xiaoyi/v1/images/tasks/task_abc123'), true)
+  for (const path of ['https://evil.test/xiaoyi/v1/images/tasks/task_a', '//evil.test/task_a', '/xiaoyi/v1/images/tasks/private_id', '/xiaoyi/v1/images/tasks/task_a/../task_b', '/xiaoyi/v1/images/generations']) {
+    assert.equal(isAllowedCreationPollUrl(path), false, path)
+  }
+})

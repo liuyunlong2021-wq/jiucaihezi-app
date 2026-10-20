@@ -162,9 +162,16 @@ function chapterFolder(value) {
 }
 
 function artifactSpec(args, contract) {
-  const template = contract.types[args.artifact_kind]
+  let template = contract.types[args.artifact_kind]
   if (!template) throw new Error(`不支持的 Wiki 产物类型：${args.artifact_kind}`)
+  if (args.research_version !== undefined) {
+    if (!template.research || !['original', 'adapted'].includes(args.research_version))
+      throw new Error('research_version 只允许项目资料使用 original 或 adapted')
+    const prefix = `项目资料/${args.research_version === 'original' ? '原作' : '改编版'}/`
+    template = { ...template, path: template.path.replace('项目资料/', prefix), index: template.index.replace('项目资料/', prefix) }
+  }
   const values = {}
+  if (template.mode === 'source_selection') values.work = safeName(args.work_name, 'work_name')
   if (template.episode) values.episode = episodeFolder(args.episode_number)
   if (template.entity) values.entity = safeName(args.entity_name, 'entity_name')
   if (template.model) {
@@ -230,6 +237,8 @@ async function projectTarget(ctx, cwd, relativePath, signal, workspace) {
 async function writePath(ctx, args, exec, cwd, workspace, policy, relativePath, content, mode = 'create', expectedPriorContent) {
   const target = await projectTarget(ctx, cwd, relativePath, exec.signal, workspace)
   const beforeInfo = await ctx.fs.stat(target, exec.signal)
+  if (mode === 'create' && beforeInfo?.type === 'file' && args.artifact_kind === 'source_material'
+    && await ctx.fs.readText(target, exec.signal) === content) return 'unchanged'
   if (mode === 'create' && beforeInfo) throw new Error(`文件已存在，未覆盖：${relativePath}。若用户明确要求修改，请先读取原文件并使用 write_mode=update。`)
   if (mode === 'update' && !beforeInfo) throw new Error(`要更新的文件不存在：${relativePath}。请先按新产物创建。`)
   if (beforeInfo && beforeInfo.type !== 'file') throw new Error(`目标不是普通文件：${relativePath}`)
@@ -457,10 +466,28 @@ function indexEntries(spec, wikiRoot, contract) {
     })
   }
   entries.push({ index: `${wikiRoot}/${contract.scaffold.progressPath}`, target, label: spec.label, summary: spec.summary })
-  return entries
+  if (spec.template.research || spec.mode === 'source_selection') {
+    let child = `${wikiRoot}/${spec.index}`
+    let directory = posix.dirname(spec.index)
+    while (directory.includes('/')) {
+      const parent = posix.dirname(directory)
+      entries.push({ index: `${wikiRoot}/${parent}/index.md`, target: child, label: posix.basename(directory), summary: `${posix.basename(directory)}资料索引。` })
+      child = `${wikiRoot}/${parent}/index.md`
+      directory = parent
+    }
+  }
+  return entries.filter(entry => entry.index !== entry.target)
 }
 
 async function ensureDynamicIndexes(ctx, args, exec, cwd, workspace, policy, wikiRoot, spec, contract) {
+  if (spec.template.research || spec.mode === 'source_selection') {
+    let directory = posix.dirname(spec.index)
+    while (directory !== '.') {
+      await ensureFile(ctx, args, exec, cwd, workspace, policy,
+        `${wikiRoot}/${directory}/index.md`, `# ${posix.basename(directory)}\n\n## 页面\n`)
+      directory = posix.dirname(directory)
+    }
+  }
   if (spec.episode) {
     const episodeRoot = `${wikiRoot}/剧本/${spec.episode}`
     await ensureFile(ctx, args, exec, cwd, workspace, policy, `${episodeRoot}/index.md`, episodeIndex(spec.episode))
@@ -574,7 +601,7 @@ async function saveArtifact(ctx, args, exec, contract) {
     throw new Error('Wiki 产物保存失败：当前文件系统缺少沙箱策略服务。')
   const policy = policyService?.resolve({ session: exec.agent.session })
   const spec = artifactSpec(args, contract)
-  const content = normalizedMarkdown(args.content)
+  const content = spec.mode === 'source_selection' ? args.content : normalizedMarkdown(args.content)
   spec.summary = indexSummary(args.summary, content, spec.label)
   const wikiRoot = await chooseWikiRoot(ctx, cwd, exec, workspace, contract)
 
@@ -618,7 +645,32 @@ async function saveArtifact(ctx, args, exec, contract) {
   }
 }
 
-export function createWikiArtifactTool(ctx, contract) {
+
+const sourceMessages = new WeakMap()
+
+export function setWikiSourceContent(agent, blocks) {
+  sourceMessages.set(agent, blocks.filter(block => block.type === 'text').map(block => block.text))
+}
+
+export function selectWikiSource(agent, args) {
+  const blocks = sourceMessages.get(agent)
+  if (!blocks || !Number.isSafeInteger(args.source_block) || args.source_block < 0 || args.source_block >= blocks.length)
+    throw new Error('source_block 必须指向当前用户消息的文本块（从0开始）')
+  const text = blocks[args.source_block]
+  const start = args.source_start
+  const end = args.source_end
+  if (typeof start !== 'string' || typeof end !== 'string' || start.length < 12 || end.length < 12)
+    throw new Error('source_start 与 source_end 各需至少12个原文字符')
+  const a = text.indexOf(start)
+  const b = text.indexOf(end)
+  if (a < 0 || b < a || text.indexOf(start, a + 1) !== -1 || text.indexOf(end, b + 1) !== -1)
+    throw new Error('来源首尾片段缺失、顺序错误或不唯一，未保存')
+  const selected = text.slice(a, b + end.length)
+  if (Buffer.byteLength(selected, 'utf8') > 1_000_000) throw new Error('单份来源不能超过 1 MB，请使用已有文件导入')
+  return selected
+}
+
+export function createWikiArtifactTool(ctx, contract, sourceAgent) {
   if (!ctx.fs || !ctx.tools) throw new Error('Wiki 归档工具缺少 Harness 文件或工具服务')
   if (ctx.fs.sandboxMode !== undefined && !ctx.get('sandboxPolicy'))
     throw new Error('Wiki 归档工具缺少 Harness 沙箱策略')
@@ -631,8 +683,12 @@ export function createWikiArtifactTool(ctx, contract) {
         enum: Object.keys(contract.types),
         description: '产物类型，决定唯一保存目录。',
       },
-      content: { type: 'string', required: true, description: '本次完成的 Markdown 正文。小说章节传章节正文，不含工具自动生成的章标题。' },
+      content: { type: 'string', description: '本次完成的 Markdown 正文。小说章节传章节正文，不含工具自动生成的章标题。' },
+      source_block: { type: 'integer', description: 'source_material 必填，当前用户消息文本块序号，从0开始。' },
+      source_start: { type: 'string', description: '来源开始处至少12字符的唯一原文，包含在保存内容中。' },
+      source_end: { type: 'string', description: '来源结束处至少12字符的唯一原文，包含在保存内容中。' },
       summary: { type: 'string', description: '一条简短、可检索的内容摘要；缺省时由工具提取正文首个有效句。' },
+      research_version: { type: 'string', enum: ['original', 'adapted'], description: '项目资料版本；省略时保留旧目录，original 为原作，adapted 为改编版。' },
       episode_number: { type: 'integer', description: '分集剧本、工程剧本或视频提示词对应的集数。' },
       entity_name: { type: 'string', description: '人物、角色、场景或道具名称。' },
       video_model: { type: 'string', enum: ['H3', 'Seedance'], description: '视频提示词使用的模型分支。' },
@@ -649,6 +705,10 @@ export function createWikiArtifactTool(ctx, contract) {
       render: (_args, value) => [{ type: 'text', text: JSON.stringify(value) }],
     },
     async execute(args, exec) {
+      if (args.artifact_kind === 'source_material') {
+        if (args.write_mode && args.write_mode !== 'create') throw new Error('原始来源只允许创建，不覆盖已有原文')
+        args = { ...args, content: selectWikiSource(sourceAgent, args) }
+      }
       const value = await saveArtifact(ctx, args, exec, contract)
       return { status: value.status, path: value.path, operation: value.operation, warnings: value.warnings }
     },

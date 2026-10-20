@@ -259,3 +259,21 @@ test('buildCreationModelAvailability still accepts the legacy Xiaoyi names', () 
 
   assert.equal(models.find(model => model.id === 'gpt-image-2.5-1k')?.status, 'enabled')
 })
+
+test('calibrated yihong, yuanliu and FK official routes match exact public channel names', () => {
+  const cases = [
+    ['newapi/yihong/yh-seedance2.5 Ultra', 'yh-seedance2.5 Ultra'],
+    ['newapi/yihong/yh-seedance2.5 super', 'yh-seedance2.5 super'],
+    ['newapi/yihong/yh-seedance-2.5-Muse', 'yh-seedance-2.5-Muse'],
+    ['newapi/yihong/yh-kling-omni-4.0', 'yh-kling-omni-4.0'],
+    ['newapi/yihong/yh-seedance2.0 mini Love', 'yh-seedance2.0 mini Love'],
+    ['newapi/yihong/yh-wan3.0-video', 'yh-wan3.0-video'],
+    ['newapi/yuanliu/yl_seedance-2-5_6caffaca7390', 'yl_seedance-2-5_6caffaca7390'],
+    ['newapi/yuanliu/yl_seedance-2-5_0fab2f1b1f10', 'yl_seedance-2-5_0fab2f1b1f10'],
+    ...['Mini', 'Fast', '满血'].map(name => [`官方渠道-Seedance 2.0 ${name} 720p`, `官方渠道-Seedance 2.0 ${name} 720p`]),
+  ]
+  for (const [id, model] of cases) {
+    assert.equal(buildCreationModelAvailability([{ id: 1, name: 'fixture', status: 1, models: [model] }]).find(item => item.id === id)?.status, 'enabled')
+    assert.equal(buildCreationModelAvailability([]).find(item => item.id === id)?.status, 'disabled')
+  }
+})

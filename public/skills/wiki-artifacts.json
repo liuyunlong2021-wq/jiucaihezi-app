@@ -25,11 +25,11 @@
     ]
   },
   "types": {
-    "story_summary": { "path": "项目资料/故事梗概.md", "index": "项目资料/index.md", "label": "故事梗概" },
-    "episode_summaries": { "path": "项目资料/分集梗概.md", "index": "项目资料/index.md", "label": "分集梗概" },
-    "story_background": { "path": "项目资料/故事背景.md", "index": "项目资料/index.md", "label": "故事背景" },
-    "world_rules": { "path": "项目资料/世界规则.md", "index": "项目资料/index.md", "label": "世界规则" },
-    "character_bio": { "path": "项目资料/人物小传/{entity}.md", "index": "项目资料/人物小传/index.md", "label": "{entity}", "entity": true },
+    "story_summary": { "path": "项目资料/故事梗概.md", "index": "项目资料/index.md", "label": "故事梗概", "research": true },
+    "episode_summaries": { "path": "项目资料/分集梗概.md", "index": "项目资料/index.md", "label": "分集梗概", "research": true },
+    "story_background": { "path": "项目资料/故事背景.md", "index": "项目资料/index.md", "label": "故事背景", "research": true },
+    "world_rules": { "path": "项目资料/世界规则.md", "index": "项目资料/index.md", "label": "世界规则", "research": true },
+    "character_bio": { "path": "项目资料/人物小传/{entity}.md", "index": "项目资料/人物小传/index.md", "label": "{entity}", "entity": true, "research": true },
     "project_overview": { "path": "改编方案/项目总纲.md", "index": "改编方案/index.md", "label": "项目总纲" },
     "screenplay": { "path": "剧本/{episode}/分集剧本.md", "index": "剧本/index.md", "label": "{episode}分集剧本", "episode": true },
     "engineering_script": { "path": "剧本/{episode}/工程剧本.md", "index": "剧本/index.md", "label": "{episode}工程剧本", "episode": true },
@@ -50,6 +50,13 @@
     "novel_scene": { "path": "资产/场景/{entity}.md", "index": "资产/场景/index.md", "label": "{entity}", "entity": true },
     "novel_prop": { "path": "资产/道具/{entity}.md", "index": "资产/道具/index.md", "label": "{entity}", "entity": true },
     "novel_chapter_draft": { "path": "创作/章节草稿/{book}/第{chapter}章.md", "index": "创作/章节草稿/{book}/index.md", "label": "{book} 第{chapter}章草稿", "mode": "chapter_draft" },
-    "novel_chapter_source": { "path": "原始材料/{book}/原文.md", "index": "原始材料/{book}/index.md", "label": "{book} 第{chapter}章正文", "mode": "chapter_source" }
+    "novel_chapter_source": { "path": "原始材料/{book}/原文.md", "index": "原始材料/{book}/index.md", "label": "{book} 第{chapter}章正文", "mode": "chapter_source" },
+    "scene_research": { "path": "项目资料/场景/{entity}.md", "index": "项目资料/场景/index.md", "label": "{entity}", "research": true, "entity": true },
+    "prop_research": { "path": "项目资料/道具/{entity}.md", "index": "项目资料/道具/index.md", "label": "{entity}", "research": true, "entity": true },
+    "event_timeline": { "path": "项目资料/事件线与发展阶段.md", "index": "项目资料/index.md", "label": "事件线与发展阶段", "research": true },
+    "research_coverage": { "path": "项目资料/阅读覆盖.md", "index": "项目资料/index.md", "label": "阅读覆盖", "research": true },
+    "adaptation_episode_plan": { "path": "改编方案/分集规划.md", "index": "改编方案/index.md", "label": "分集规划" },
+    "production_progress": { "path": "制作进度.md", "index": "index.md", "label": "制作进度" },
+    "source_material": { "path": "原始材料/{work}/原文.md", "index": "原始材料/{work}/index.md", "label": "{work} 原文", "mode": "source_selection" }
   }
 }

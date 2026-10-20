@@ -131,7 +131,7 @@ export function isAllowedCreationPollUrl(input: string): boolean {
     const isRhTaskPoll = /^\/rh\/tasks\/[A-Za-z0-9._:-]+$/.test(decodeURIComponent(parsed.pathname)) &&
       (parsed.search === '' || parsed.search === '?ai_app=true')
     if (isRhTaskPoll) return true
-    return /^\/v1\/creation\/tasks\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) || /^\/api\/creations\/tasks\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
+    return /^\/xiaoyi\/v1\/images\/tasks\/task_[A-Za-z0-9_-]+$/.test(parsed.pathname) || /^\/v1\/creation\/tasks\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) || /^\/api\/creations\/tasks\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
       /^\/api\/seedance\/v1\/videos\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
       /^\/v1\/responses\/resp_[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||
       /^\/v1\/images\/generations\/[A-Za-z0-9._:-]+$/.test(parsed.pathname) ||

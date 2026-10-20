@@ -12,6 +12,7 @@ import {
   deepSeekTurnUsage,
   deepSeekSessionUsage,
   deepSeekModelInput,
+  deepSeekModelRoute,
   deepSeekModelLimits,
   deepSeekPermissionChip,
   readCurrentDeepSeekPermission,
@@ -1212,4 +1213,20 @@ test('history uses the same official round totals as live events', () => {
   const events = usageTurn()
   events.splice(1, 0, { type: 'user/message', surfaceOp: 'append', data: { id: 'u1', role: 'user', source: { kind: 'user' }, content: [{ type: 'text', text: 'go' }] } } as any)
   assert.deepEqual(deepSeekSessionUsage({ session: { id: 's' }, events }).get('u1'), deepSeekTurnUsage(usageTurn()))
+})
+
+test('cloud Claude uses native Messages while custom providers keep their declared OpenAI route', () => {
+  assert.deepEqual(deepSeekModelRoute({ model: 'claude-haiku-5-5', apiBase: 'https://api.example.com/v1/' }), {
+    api: 'anthropic-messages', baseURL: 'https://api.example.com',
+  })
+  assert.deepEqual(deepSeekModelRoute({ model: 'claude-opus-5-5', apiBase: 'https://api.example.com' }), {
+    api: 'anthropic-messages', baseURL: 'https://api.example.com',
+  })
+  for (const input of [
+    { model: 'gpt-5', apiBase: 'https://api.example.com' },
+    { model: 'claude-haiku-5-5', modelProviderId: 'custom-proxy', apiBase: 'http://localhost:1234/v1' },
+  ]) {
+    assert.equal(deepSeekModelRoute(input).api, 'openai-completions')
+    assert.ok(deepSeekModelRoute(input).baseURL.endsWith('/v1'))
+  }
 })

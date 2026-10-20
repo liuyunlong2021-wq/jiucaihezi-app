@@ -25,7 +25,7 @@
 | `dola.plugin.js` | `dola` | 不取代（`dola-seedance-adapter` 是执行器：上游只吃 multipart，插件拿不到图片字节） | 代码已就绪，**未上传** |
 | `rh.plugin.js` | `rh` | 不取代（`rh-adapter` 是执行器：AI App 媒体要换 RH `fileName` 令牌） | 代码已就绪，**未上传**；接 35 个模型（含 4 个 AI App 视频） |
 | `fk.plugin.js` | `fk` | Fanke 图片与视频 API | `0.3.5` 新增三个官方 Seedance 2.0 型号，图片及其他视频保持；四官方型号最新售价见 `fk-pricing.json` 与统一手册F节。未上传激活，画布配套源码未发布，图生图500仍在排查 |
-| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.0` 仅五个 `xy-` 图片模型，文件直传、向上游请求 Base64；用户已上传，最新两次请求限流，真实出图/容量/保存与账单待验收 |
+| `xiaoyi-image.plugin.js` | `xiaoyi-image` | 小易图片异步 API | `0.3.1` 新增原生异步提交/查询，覆盖五个 `xy-` 图片模型；本地通过，尚未上传，宿主容量与真实出图待验收 |
 | `zx.plugin.js` | `zx` | 不取代（`zx-video-adapter` 保留为执行器） | `0.1.1` 新增七个 Seedance 模型；面板开放 720p、2.5 与固定 30 秒型号，渠道模型映射目标使用 `zx-` 前缀；待上传、适配器部署与真实验收 |
 | `yuanliu.plugin.js` | `yuanliu` | 源流 AI Seedance 视频 API | 两个模型 ID 与素材上限已登记；代码待上传、NewAPI 定价与真实任务尚未验收 |
 | `yihong.plugin.js` | `yihong` | 易红视频 API | 0.2.0仅六个yh-视频型号，无图片/fast Zeus；配套 `yihong-pricing.json`。宿主R2已激活；用户确认插件、六模型和计费已配置。画布待发布，真实生成/保存/账单未验收；见统一手册E节 |
@@ -44,7 +44,7 @@
 
 定价清单保留在 `lingdong-pricing-2026-10-14.json`；不再使用原成本加价公式。上传 JS **不会自动修改后台渠道名单和定价**；沿用既有人民币系数口径，生产实际扣费仍需验收。
 
-## 小易五图片模型配置（0.3.0）
+## 小易五图片模型配置（0.3.1）
 
 上传文件为 **`xiaoyi-image.plugin.js`**，不是 `__tests__/xiaoyi-image.test.mjs`。继续绑定 key `xiaoyi-image`，Base URL 保持 `https://image.xiaoyiapi.xyz`。仅替换小易目标渠道的模型列表，不删除其他渠道模型。插件内置公开名到上游原名映射，不必另建相同映射；旧渠道映射需要检查清理。
 
@@ -55,6 +55,8 @@
 | `xy-gpt-image-2.5-flare-1k` | 1K | 0.04/张 | `tier("base", u("image_count") * 0.04)` |
 | `xy-gpt-image-2.5-sunburst-1k` | 1K | 0.04/张 | `tier("base", u("image_count") * 0.04)` |
 | `xy-grok-imagine-image-2.0` | 1K、2K | 0.08/张 | `tier("base", u("image_count") * 0.08)` |
+
+0.3.1 新增 `POST /xiaoyi/v1/images/generations`、`POST /xiaoyi/v1/images/edits` 和 `GET /xiaoyi/v1/images/tasks/:task_id`。提交仅等上游受理，返回 NewAPI 公共任务号；App 保存任务号后独立轮询，复用宿主后台任务与计费。原 `/v1/images/*` 同步协议保留供旧客户端使用。部署顺序：先核对目标宿主支持 Task Plugin 原生路由及结果容量，再上传并激活 0.3.1，最后使用配套 App；不要在旧插件未更新时运行新版小易提交，也不要通过重新生成代替查询已有任务。
 
 清单见 `xiaoyi-image-pricing.json`，上传插件不会自动设置价格。0.3.0 移除所有视频协议和视频用量，先等该渠道旧视频任务结束再激活，不继续沿用引用 `seconds` / `resolution` 的视频计费表达式。
 

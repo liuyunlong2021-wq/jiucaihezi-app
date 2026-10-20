@@ -20,12 +20,18 @@ export const meta = {
   apiVersion: 1,
   key: 'xiaoyi-image',
   name: '小易图片',
-  version: '0.3.0',
+  version: '0.3.1',
   author: { name: 'jiucaihezi' },
   description: { en: 'Five Xiaoyi image models via file uploads and asynchronous APIs', zh: '小易五个图片模型，参考图直接传文件，按张计费' },
   baseUrl: 'https://image.xiaoyiapi.xyz',
   models: IMAGE_MODELS,
   fetchMode: 'per_task',
+  // 原生路由只等待上游受理；标准openai_image继续为旧客户端提供同步结果。
+  routes: [
+    { method: 'POST', path: '/xiaoyi/v1/images/generations', type: 'submit', models: IMAGE_MODELS, decode: 'generate', render: 'created' },
+    { method: 'POST', path: '/xiaoyi/v1/images/edits', type: 'submit', models: IMAGE_MODELS, decode: 'edit', render: 'created' },
+    { method: 'GET', path: '/xiaoyi/v1/images/tasks/:task_id', type: 'query', render: 'query' },
+  ],
   protocols: [{ name: 'openai_image', models: IMAGE_MODELS }],
   usageSchema: {
     image_count: { type: 'number', unit: 'count', unitLabel: { en: 'image', zh: '张' }, description: { en: 'Generated image count', zh: '生成图片张数' } },
@@ -275,4 +281,38 @@ export function extractUsage(ctx) {
 export function extractUsageOnComplete(task, result, data) {
   const images = imageEntries(data).length
   return images > 0 ? { image_count: images } : null
+}
+
+
+// 任务所有权、持久化、计费和后台轮询均由NewAPI宿主管理。
+function decodeNative(ctx, operation) {
+  const expected = operation === 'edit' ? 'multipart' : 'json'
+  if (!ctx.body || ctx.body.kind !== expected) fail(expected + ' body required')
+  const values = expected === 'json' ? ctx.body.value : ctx.body.fields
+  const model = String(first(values, 'model', '') || '')
+  return protocols.openai_image.decodeRequest(Object.assign({}, ctx, { model, operation }))
+}
+
+export const native = {
+  generate: function (ctx) {
+    return decodeNative(ctx, 'generate')
+  },
+  edit: function (ctx) {
+    return decodeNative(ctx, 'edit')
+  },
+  created: function (ctx, task) {
+    return { id: task.task_id, status: 'queued' }
+  },
+  query: function (ctx, task) {
+    const states = { SUBMITTED: 'queued', QUEUED: 'queued', IN_PROGRESS: 'in_progress', SUCCESS: 'completed', FAILURE: 'failed' }
+    const status = states[task.status]
+    if (!status) fail('Unknown Xiaoyi host task status: ' + String(task.status))
+    const result = { id: task.task_id, status }
+    if (status === 'completed') {
+      const image = protocols.openai_image.render(ctx, task)
+      result.data = image.data
+    }
+    if (status === 'failed') result.error = { message: String(task.fail_reason || 'Xiaoyi image generation failed') }
+    return result
+  },
 }

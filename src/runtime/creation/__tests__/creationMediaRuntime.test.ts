@@ -15,8 +15,7 @@ import {
 import { getCreationModelSpec } from '../creationModelRegistry'
 import { buildCurrentCreationParams, cpState, switchModel, switchTask } from '@/composables/useCreation'
 
-test('易红 Grok HTTP 请求按无图、单首帧、多参考图互斥提交并通过插件解码', { concurrency: false }, async () => {
-  const plugin = await import(pathToFileURL(`${process.cwd()}/newapi-plugins/yihong.plugin.js`).href)
+test('易红历史Grok请求保留原输入结构但不再声称当前插件支持', { concurrency: false }, async () => {
   const restoreStorage = await installGatewaySession()
   const previousFetch = globalThis.fetch
   let body: Record<string, unknown> = {}
@@ -35,11 +34,8 @@ test('易红 Grok HTTP 请求按无图、单首帧、多参考图互斥提交并
       }
       const plan = buildCreationRunPlan({ modelId: `newapi/yihong/${model}`, params: { prompt: 'p', duration: 15, resolution: '720p', ratio: '9:16', images } })
       await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)))
-      const decoded = plugin.protocols.openai_video.decodeRequest({ model, body: { kind: 'json', value: body } })
+      assert.equal(getCreationModelSpec(plan.modelId)?.hidden, true)
       assert.deepEqual(body, expected)
-      assert.ok(plugin.meta.usageSchema.resolution.enum.includes(decoded.requestBody.resolution))
-      const upstream = plugin.buildSubmitRequest({ model, baseUrl: plugin.meta.baseUrl, requestBody: decoded.requestBody })
-      assert.deepEqual(upstream.body, expected)
     }
   } finally {
     globalThis.fetch = previousFetch
@@ -1595,4 +1591,154 @@ test('易红 Gemini 图生图保留比例和画质，使用 multipart 引用文�
     globalThis.fetch = previousFetch
     await restoreStorage()
   }
+})
+
+test('小易五型号文生图和文件编辑先保存任务号再轮询，等待期间不重复提交', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  const pricing = JSON.parse(readFileSync('newapi-plugins/xiaoyi-image-pricing.json', 'utf8'))
+  try {
+    for (const entry of pricing.models) {
+      for (const images of [[], ['data:image/png;base64,AA==']]) {
+        let posts = 0
+        let polls = 0
+        let recorded = false
+        globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+          const path = new URL(String(input)).pathname
+          if (init?.method === 'POST') {
+            posts++
+            assert.equal(path, `/xiaoyi/v1/images/${images.length ? 'edits' : 'generations'}`)
+            const body = images.length ? (init.body as FormData).get('model') : JSON.parse(String(init.body)).model
+            assert.equal(body, entry.model)
+            return Response.json({ id: 'task_image123', status: 'queued' })
+          }
+          assert.equal(path, '/xiaoyi/v1/images/tasks/task_image123')
+          assert.equal(recorded, true, '任务号必须先保存，才允许开始查询')
+          polls++
+          return Response.json(polls === 1 ? { id: 'task_image123', status: 'in_progress' }
+            : { id: 'task_image123', status: 'completed', data: [{ b64_json: 'AA==' }] })
+        }
+        const plan = buildCreationRunPlan({ modelId: entry.model, params: { prompt: 'p', images } })
+        const result = await withImmediateTimers(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan), undefined, async submitted => {
+          assert.deepEqual(submitted, { taskId: 'task_image123', pollUrl: '/xiaoyi/v1/images/tasks/task_image123', pollKind: 'image' })
+          recorded = true
+        }))
+        assert.equal(posts, 1)
+        assert.equal(polls, 2)
+        assert.equal(result.url, 'data:image/png;base64,AA==')
+        assert.equal(result.taskId, 'task_image123')
+        assert.equal(result.pollUrl, '/xiaoyi/v1/images/tasks/task_image123')
+      }
+    }
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('小易原生入口未部署时明确失败，不回退同步接口或重复收费提交', { concurrency: false }, async () => {
+  const restoreStorage = await installGatewaySession()
+  const previousFetch = globalThis.fetch
+  let posts = 0
+  globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    assert.ok(String(input).endsWith('/xiaoyi/v1/images/generations'))
+    posts++
+    return Response.json({ error: { message: 'native route not installed' } }, { status: 404 })
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'xy-gpt-image-2.5-1k', params: { prompt: 'p' } })
+    await assert.rejects(() => executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /native route not installed/)
+    assert.equal(posts, 1)
+  } finally {
+    globalThis.fetch = previousFetch
+    await restoreStorage()
+  }
+})
+
+test('calibrated four-channel video HTTP bodies pass their actual plugins, including references', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const oldFetch = globalThis.fetch
+  const oldDocument = globalThis.document
+  globalThis.document = { createElement: () => ({ duration: 3, preload: '', onloadedmetadata: null, onerror: null, removeAttribute() {}, load() {}, set src(_value: string) { queueMicrotask(() => (this as any).onloadedmetadata?.()) } }) } as any
+  try {
+    const { listCreationModels } = await import('../creationModelRegistry')
+    for (const key of ['yihong', 'yuanliu', 'fk', 'lingdong']) {
+      const plugin = await import(pathToFileURL(`${process.cwd()}/newapi-plugins/${key}.plugin.js`).href)
+      const models = listCreationModels({ task: 'video', source: 'all' }).filter(item => item.id.startsWith(`newapi/${key}/`))
+      for (const model of models) {
+        for (const refs of [false, true]) {
+          const spec = getCreationModelSpec(model.id)!
+          const images = refs ? ['https://media.example.test/image.png'] : []
+          const videos = refs && spec.files?.videos?.max ? ['https://media.example.test/video.mp4'] : []
+          const audios = refs && spec.files?.audios?.max ? ['https://media.example.test/audio.mp3'] : []
+          let posts = 0
+          globalThis.fetch = async (_input, init) => {
+            const body = JSON.parse(String(init?.body))
+            assert.equal(body.model, spec.model)
+            const ctx = { model: spec.model, baseUrl: plugin.meta.baseUrl, apiKey: 'fixture' }
+            const intent = plugin.protocols.openai_video.decodeRequest({ ...ctx, body: { kind: 'json', value: body } })
+            const upstream = plugin.buildSubmitRequest({ ...ctx, requestBody: intent.requestBody, action: intent.action })
+            const vendorBody = upstream.body
+            if (key === 'yihong') {
+              assert.equal(vendorBody.model, spec.model.slice(3))
+              if (refs) assert.ok(vendorBody.image_urls?.length || vendorBody.images?.length || vendorBody.media?.length || vendorBody.content?.length, spec.model)
+              if (spec.model === 'yh-wan3.0-video' && refs) assert.equal(vendorBody.media.find((item: any) => item.type === 'reference_video').duration_seconds, 3)
+            }
+            if (key === 'yuanliu') {
+              assert.equal(body.ratio, undefined)
+              assert.equal(body.resolution, undefined)
+              if (refs) assert.equal(vendorBody.images.length, 1)
+            }
+            posts++
+            return Response.json({ video_url: 'https://media.example.test/result.mp4' })
+          }
+          const plan = buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'test', duration: spec.fields.find(field => field.key === 'duration')?.defaultValue || 5, images, videos, audios } })
+          await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+          assert.equal(posts, 1, spec.id)
+        }
+      }
+    }
+  } finally { globalThis.fetch = oldFetch; globalThis.document = oldDocument; await restore() }
+})
+
+test('Lingdong reference image stays JSON generations and decodes through current plugin', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const oldFetch = globalThis.fetch
+  const plugin = await import(pathToFileURL(`${process.cwd()}/newapi-plugins/lingdong.plugin.js`).href)
+  try {
+    for (const model of ['灵动-gpt-image-2.5-flare', '灵动-gpt-image-2.5-sunburst']) {
+      globalThis.fetch = async (input, init) => {
+        assert.ok(String(input).endsWith('/v1/images/generations'))
+        assert.ok(!(init?.body instanceof FormData))
+        const body = JSON.parse(String(init?.body))
+        assert.deepEqual(body.images, ['https://media.example.test/ref.png'])
+        assert.equal(body.response_format, 'b64_json')
+        const intent = plugin.protocols.openai_image.decodeRequest({ model, body: { kind: 'json', value: body } })
+        const upstream = plugin.buildSubmitRequest({ model, baseUrl: plugin.meta.baseUrl, requestBody: intent.requestBody })
+        assert.deepEqual(upstream.body.images, body.images)
+        assert.equal(upstream.body.response_format, 'url')
+        return Response.json({ data: [{ b64_json: 'eA==' }] })
+      }
+      const plan = buildCreationRunPlan({ modelId: `newapi/lingdong/${model}`, params: { prompt: 'test', images: ['https://media.example.test/ref.png'] } })
+      await executeCreationSubmitRequest(buildCreationSubmitRequest(plan))
+    }
+  } finally { globalThis.fetch = oldFetch; await restore() }
+})
+
+test('invalid Wan and Love reference durations stop before generation POST', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const oldFetch = globalThis.fetch
+  const oldDocument = globalThis.document
+  let duration = 8
+  globalThis.document = { createElement: () => ({ duration, onloadedmetadata: null, onerror: null, removeAttribute() {}, load() {}, set src(_value: string) { queueMicrotask(() => (this as any).onloadedmetadata?.()) } }) } as any
+  let posts = 0
+  globalThis.fetch = async () => { posts++; throw new Error('must not submit') }
+  try {
+    let plan = buildCreationRunPlan({ modelId: 'newapi/yihong/yh-wan3.0-video', params: { prompt: 'p', videos: ['https://a/1.mp4', 'https://a/2.mp4'] } })
+    await assert.rejects(executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /合计不能超过15秒/)
+    duration = 1
+    plan = buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance2.0 mini Love', params: { prompt: 'p', audios: ['https://a/1.mp3'] } })
+    await assert.rejects(executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /2–15秒/)
+    assert.equal(posts, 0)
+  } finally { globalThis.fetch = oldFetch; globalThis.document = oldDocument; await restore() }
 })

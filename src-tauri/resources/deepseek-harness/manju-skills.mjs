@@ -14,17 +14,16 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
   if (!directory) throw new Error('内置创作与 Wiki 资源目录不可用')
   if (Number(hasManju) + Number(hasNovel) + Number(hasShortDrama) > 1)
     throw new Error('漫剧制作、短剧写作与小说创作不能同时启用')
-  const route = hasManju ? JSON.parse(await readFile(join(directory, 'manju-route.json'), 'utf8')) : undefined
-  if (route && (route.router !== 'jc-manju-zhizuo' || !Array.isArray(route.skills) || !route.skills.includes(route.router)
+  const route = hasManju || hasShortDrama
+    ? JSON.parse(await readFile(join(directory, hasManju ? 'manju-route.json' : 'short-drama-route.json'), 'utf8')) : undefined
+  if (route && (route.router !== (hasManju ? 'jc-manju-zhizuo' : 'jc-duanju') || !Array.isArray(route.skills) || !route.skills.includes(route.router)
     || route.skills.some(name => typeof name !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name))))
-    throw new Error('漫剧制作内置 Skill 清单无效')
-  const unsupported = hasManju
+    throw new Error('创作路线内置 Skill 清单无效')
+  const unsupported = hasManju || hasShortDrama
     ? names.filter(name => name !== 'wiki-memory' && !route.skills.includes(name))
     : hasNovel
       ? names.filter(name => name !== 'wiki-memory' && name !== 'jc-novel')
-      : hasShortDrama
-        ? names.filter(name => name !== 'wiki-memory' && name !== 'jc-duanju')
-        : names.filter(name => ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju'].includes(name))
+      : names.filter(name => ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju'].includes(name))
   const routeLabel = hasManju ? '漫剧制作' : hasNovel ? '小说创作' : '短剧写作'
   if (unsupported.length) throw new Error(`${routeLabel}路线不能同时加载 ${unsupported.join('、')}；请先退出当前路线。`)
   const skillNames = [...new Set([
@@ -74,7 +73,7 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
           return { ...await loadSkill(candidate.locator, options.signal), provider: providerName }
         },
       }))
-      const disposeTool = ctx.tools.register(createWikiArtifactTool(ctx, artifactContract))
+      const disposeTool = ctx.tools.register(createWikiArtifactTool(ctx, artifactContract, agent))
       ctx.effect(() => () => disposeTool())
       ready = true
     },

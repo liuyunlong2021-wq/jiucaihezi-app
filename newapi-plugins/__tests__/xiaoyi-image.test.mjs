@@ -20,7 +20,7 @@ const submit = (intent, model = GPT, overrides = {}) => plugin.buildSubmitReques
 
 test('仅五个 xy 图片公开名，没有视频协议与视频用量', () => {
  assert.equal(plugin.meta.key, 'xiaoyi-image')
- assert.equal(plugin.meta.version, '0.3.0')
+ assert.equal(plugin.meta.version, '0.3.1')
  assert.deepEqual(plugin.meta.models, Object.keys(MODELS))
  assert.deepEqual(plugin.meta.protocols, [{ name: 'openai_image', models: Object.keys(MODELS) }])
  assert.equal(plugin.protocols.openai_video, undefined)
@@ -164,4 +164,30 @@ test('五型号售价清单与插件一致，人民币系数按实际张数', ()
   assert.deepEqual(item.resolutions, grok ? ['1k', '2k'] : ['1k'])
   assert.equal(item.expression, 'tier("base", u("image_count") * ' + item.salePriceCny + ')')
  }
+})
+
+test('原生图片路由提交立即返回公共任务号，查询才提供终态图片', () => {
+ const routes = plugin.meta.routes
+ assert.ok(routes && routes.length === 3)
+ for (const model of Object.keys(MODELS)) {
+  for (const editMode of [false, true]) {
+   const route = routes.find(route => route.type === 'submit' && route.path.endsWith(editMode ? '/edits' : '/generations'))
+   assert.ok(route.models.includes(model))
+   const context = editMode
+    ? { ...ctx(model), body: { kind: 'multipart', fields: { model: [model], prompt: ['p'], size: ['1024x1024'] }, files: [{ ref: 'file:a', field: 'image', filename: 'a.png' }] } }
+    : { ...ctx(model), body: { kind: 'json', value: { model, prompt: 'p', size: '1024x1024' } } }
+   const intent = plugin.native[route.decode]({ ...context, model: undefined })
+   assert.equal(intent.action, editMode ? 'image_to_image' : 'text_to_image')
+   assert.equal(submit(intent, model).body?.model || submit(intent, model).parts.find(part => part.name === 'model').value, MODELS[model])
+   const created = plugin.native[route.render](context, { task_id: 'task_public', status: 'SUBMITTED', data: { task_id: 'private_upstream' } })
+   assert.deepEqual(created, { id: 'task_public', status: 'queued' })
+  }
+ }
+ const query = routes.find(route => route.type === 'query')
+ const render = plugin.native[query.render]
+ assert.deepEqual(render({}, { task_id: 'task_public', status: 'IN_PROGRESS' }), { id: 'task_public', status: 'in_progress' })
+ assert.deepEqual(render({}, { task_id: 'task_public', status: 'SUCCESS', data: { result: { data: [{ b64_json: 'AA==' }] } } }), { id: 'task_public', status: 'completed', data: [{ b64_json: 'AA==' }] })
+ assert.equal(render({}, { task_id: 'task_public', status: 'FAILURE', fail_reason: 'upstream failed' }).error.message, 'upstream failed')
+ assert.throws(() => render({}, { task_id: 'task_public', status: 'SUCCESS', data: {} }), /without an image/)
+ assert.throws(() => render({}, { task_id: 'task_public', status: 'nonsense' }), /Unknown/)
 })

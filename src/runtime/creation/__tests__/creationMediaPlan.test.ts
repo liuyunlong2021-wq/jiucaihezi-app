@@ -357,9 +357,9 @@ test('GPT Image 2 routes send exact model names and expose only their supported 
   assert.equal(plan.source, 'newapi-direct')
   assert.equal(plan.route, 'newapi-direct')
   assert.equal(plan.usesRhAdapter, false)
-  assert.equal(plan.endpoint, '/v1/images/edits')
+  assert.equal(plan.endpoint, '/xiaoyi/v1/images/edits')
   assert.equal(plan.apiStyle, 'openai-image-edits')
-  assert.equal(plan.pollKind, 'none')
+  assert.equal(plan.pollKind, 'newapi-task')
   assert.equal(plan.debug.normalizedParams.response_format, 'b64_json')
   const generationPlan = buildCreationRunPlan({
     modelId: 'gpt-image-2.5-1k',
@@ -1121,10 +1121,6 @@ test('panel model labels distinguish GPT Image 2 routing tiers', () => {
 
 test('selected image families stay registered but are hidden from creation choices', () => {
   const hiddenIds = [
-    'newapi/fk/ft-image-v1-211f28f47b0355abb1798f72eb65f22d',
-    'newapi/fk/ft-image-v1-186289ba9d3263010c69372f8939dd94',
-    'newapi/fk/ft-image-v1-eb47192eb578f340043911005a06fb6e',
-    'newapi/fk/ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d',
     'gpt-image-2-菠萝',
     'gpt-image-2.5-菠萝',
     'gemini-3.1-flash-image-preview',
@@ -1262,10 +1258,10 @@ test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频�
   assert.equal(imagePlan.pollKind, 'none')
   assert.equal(imagePlan.mode, 'text-to-image')
   assert.equal(imagePlan.debug.normalizedParams.size, sizeFromRatioResolution('9:16', '1k'))
-  assert.throws(() => buildCreationRunPlan({
-    modelId: imageId,
-    params: { prompt: '带参考图', images: ['https://example.com/ref.png'] },
-  }), /参考图最多支持 0 个/)
+  const referencePlan = buildCreationRunPlan({ modelId: imageId, params: { prompt: '带参考图', images: ['https://example.com/ref.png'] } })
+  assert.equal(referencePlan.apiStyle, 'openai-images')
+  assert.equal(referencePlan.endpoint, '/v1/images/generations')
+  assert.equal(referencePlan.mediaInputTransport, 'url')
 
   // 定价、展示名与计费口径是有意钉住的：加模型或改名/改价必须同步改这里，
   // 也要同步 NewAPI 渠道的计费表达式与 pricing JSON。展示名取 `·` 之前那段。
@@ -1295,14 +1291,17 @@ test('灵动 0.4.0 四个公开名与插件、定价清单逐字一致，视频�
   }
 })
 
-test('FK Seedance 2.5 只显示官方六型号，旧型号保留历史注册，参数与上游一致', () => {
+test('FK九个Seedance型号与插件0.3.5一致，旧型号保留历史注册', () => {
   const expected = [
     ['ft-video-v1-89e87205d3be4eb2cf3fda249569e693', [30], 9, 0, 0, '¥3/次'],
     ['ft-video-v1-99d13a482c1f6f0e71db1e36c4154b70', [15, 30], 9, 0, 0, '¥5/次'],
     ['ft-video-v1-bdf45387433ac0a9042ebab3fae0299d', [30], 30, 10, 10, '¥3/次'],
     ['ft-video-v1-b8a797753dd4c6bf8e5a69820b293848', [4, 30], 30, 10, 10, '¥0.5/秒'],
     ['ft-video-v1-756e0feb4b3e1f893726314109762123', [15, 30], 30, 0, 10, '¥0.5/秒'],
-    ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1.1/秒 · 视频参考 ¥41/百万Token'],
+    ['ft-video-v1-451adae35b0c4a3d275c2c46394abc98', [4, 30], 30, 10, 10, '¥1/秒 · 视频参考 ¥31.5/百万Token'],
+    ['ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', [4, 15], 9, 3, 3, '¥0.4/秒 · 视频参考 ¥10.5/百万Token'],
+    ['ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', [4, 15], 9, 3, 3, '¥0.6/秒 · 视频参考 ¥16.5/百万Token'],
+    ['ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', [4, 15], 9, 3, 3, '¥0.7/秒 · 视频参考 ¥21/百万Token'],
   ] as const
   const active = listCreationModels({ task: 'video' }).filter(model => creationModelFamily(model) === 'FK · Seedance 2.5')
   assert.deepEqual(active.map(model => model.id.replace('newapi/fk/', '')).sort(), expected.map(([id]) => id).sort())
@@ -1395,7 +1394,7 @@ test('成片是否经 NewAPI /content 回收，只由一处判据决定', () => 
   assert.equal(usesNewApiContentEndpoint(undefined), false)
 })
 
-test('易红新增 H3 与图片模型，Gemini 比例画质和 GPT 分级尺寸进入提交计划', () => {
+test('易红历史H3与图片保留计划解析但退出面板', () => {
   const gemini = buildCreationRunPlan({ modelId: 'newapi/yihong/gemini-nano-banana-2.1', params: { prompt: 'p', ratio: '9:16', resolution: '4k', images: ['https://a/i.png'] } })
   assert.equal(gemini.endpoint, '/v1/images/edits')
   assert.equal(gemini.mediaInputTransport, 'multipart')
@@ -1436,7 +1435,7 @@ test('易红新增 H3 与图片模型，Gemini 比例画质和 GPT 分级尺寸�
     'newapi/yihong/yihong-gpt-image-2.5-flare',
     'newapi/yihong/yihong-gpt-image-2.5-sunburst',
   ]) {
-    assert.ok(listCreationPanelModels().some(item => item.id === id))
+    assert.equal(listCreationPanelModels().some(item => item.id === id), false)
   }
 })
 
@@ -1482,4 +1481,89 @@ test('小易五个图片公开名、UI售价与全部可选尺寸匹配插件合
       }
     }
   }
+})
+
+
+test('小易五图片模型使用独立任务提交与查询，其他图片接口保持原合同', () => {
+  const pricing = JSON.parse(readFileSync('newapi-plugins/xiaoyi-image-pricing.json', 'utf8'))
+  for (const entry of pricing.models) {
+    const spec = getCreationModelSpec(entry.model)!
+    for (const images of [[], ['data:image/png;base64,AA==']]) {
+      const plan = buildCreationRunPlan({ modelId: spec.id, params: { prompt: 'p', images } })
+      assert.equal(plan.endpoint, `/xiaoyi/v1/images/${images.length ? 'edits' : 'generations'}`)
+      assert.equal(plan.pollKind, 'newapi-task')
+      assert.equal(plan.pollPathTemplate, '/xiaoyi/v1/images/tasks/{task_id}')
+      if (images.length) assert.equal(plan.mediaInputTransport, 'multipart')
+    }
+  }
+  assert.equal(buildCreationRunPlan({ modelId: 'gpt-image-2-菠萝', params: { prompt: 'p' } }).endpoint, '/v1/images/generations')
+})
+
+test('FK six image choices expose upstream names while submitting exact plugin IDs', async () => {
+  const plugin = await import('../../../../newapi-plugins/fk.plugin.js')
+  const expected = [
+    ['211f28f47b0355abb1798f72eb65f22d', 'GPT-image-2', 10],
+    ['186289ba9d3263010c69372f8939dd94', 'GPT-image-2.5', 10],
+    ['eb47192eb578f340043911005a06fb6e', 'GPT-image-2.5-flare', 10],
+    ['3432bdee1a22da4ce8ff2bbfc6ef4c1d', 'GPT-image-2.5-sunburst', 10],
+    ['80fa79934b03dcdc7a54dacdb1ad7f82', 'nano-banana-2', 8],
+    ['d51c811d3d74a5b2433e6916ab564db9', 'nano-banana-pro', 8],
+  ] as const
+  const visible = listCreationPanelModels({ task: 'image', source: 'all' })
+  for (const [suffix, label, max] of expected) {
+    const model = `ft-image-v1-${suffix}`
+    const id = `newapi/fk/${model}`
+    assert.equal(visible.find(item => item.id === id)?.label, label)
+    assert.ok(plugin.meta.models.includes(model))
+    for (const resolution of ['1k', '2k', '4k']) {
+      for (const images of [[], ['data:image/png;base64,eA==']]) {
+        const plan = buildCreationRunPlan({ modelId: id, params: { prompt: 'test', ratio: '16:9', resolution, images } })
+        assert.equal(plan.model, model)
+        assert.equal(plan.endpoint, images.length ? '/v1/images/edits' : '/v1/images/generations')
+        const intent = plugin.protocols.openai_image.decodeRequest({ model, body: { kind: 'json', value: { prompt: 'test', ratio: '16:9', resolution } } })
+        const request = plugin.buildSubmitRequest({ model, requestBody: intent.requestBody, baseUrl: plugin.meta.baseUrl, apiKey: 'test' })
+        assert.equal(request.body.model, model)
+        assert.equal(request.body.imageSize, resolution.toUpperCase())
+      }
+    }
+    assert.equal(getCreationModelSpec(id)?.files?.images?.max, max)
+  }
+})
+
+test('four calibrated channels expose only current plugin image/video models', async () => {
+  for (const key of ['yihong', 'yuanliu', 'fk', 'lingdong']) {
+    const plugin = await import(`../../../../newapi-plugins/${key}.plugin.js`)
+    const visible = listCreationModels({ source: 'all' }).filter(item => item.id.startsWith(`newapi/${key}/`))
+    const expected = plugin.meta.models.filter((model: string) => key !== 'fk' || (!model.startsWith('ft-video-') && model !== 'fk-MiniMaxh3') || model === 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746')
+    assert.deepEqual(visible.map(item => item.model).sort(), [...expected].sort(), key)
+    if (key === 'yihong') assert.ok(visible.every(item => item.task === 'video'))
+  }
+})
+
+test('Yihong six-model durations, references and price labels follow 0.2.0', () => {
+  const rows = [
+    ['yh-seedance2.5 Ultra', 10, 30, 14, 0, 10],
+    ['yh-seedance2.5 super', 5, 30, 30, 10, 10],
+    ['yh-seedance-2.5-Muse', 5, 30, 9, 0, 0],
+    ['yh-kling-omni-4.0', 3, 30, 10, 0, 3],
+    ['yh-seedance2.0 mini Love', 4, 15, 9, 0, 3],
+    ['yh-wan3.0-video', 2, 30, 10, 5, 5],
+  ] as const
+  const prices = JSON.parse(readFileSync('newapi-plugins/yihong-pricing.json', 'utf8')).models
+  for (const [model, min, max, images, videos, audios] of rows) {
+    const id = `newapi/yihong/${model}`
+    const spec = getCreationModelSpec(id)!
+    assert.equal(spec.files?.images?.max, images)
+    assert.equal(spec.files?.videos?.max || 0, videos)
+    assert.equal(spec.files?.audios?.max || 0, audios)
+    for (const duration of [min, max]) assert.doesNotThrow(() => buildCreationRunPlan({ modelId: id, params: { prompt: 'p', duration } }))
+    for (const duration of [min - 1, max + 1]) assert.throws(() => buildCreationRunPlan({ modelId: id, params: { prompt: 'p', duration } }))
+    assert.equal(usesNewApiContentEndpoint(spec), true)
+    const price = prices.find((item: any) => item.model === model)
+    assert.ok(price)
+    if (typeof price.salePriceCny === 'number') assert.ok(String(spec.price).includes(String(price.salePriceCny)))
+    else for (const [resolution, amount] of Object.entries(price.salePriceCny)) assert.ok(String(spec.price).includes(`${resolution} ¥${amount}`))
+  }
+  assert.throws(() => buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance-2.5-Muse', params: { prompt: 'p', duration: 20 } }))
+  assert.throws(() => buildCreationRunPlan({ modelId: 'newapi/yihong/yh-seedance2.5 Ultra', params: { prompt: 'p', audios: ['https://a/audio.mp3'] } }), /必须同时提供参考图/)
 })

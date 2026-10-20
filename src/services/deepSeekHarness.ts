@@ -319,6 +319,17 @@ export function deepSeekModelInput(imageInput = false): Array<'text' | 'image'> 
   return imageInput ? ['text', 'image'] : ['text']
 }
 
+/** 云端 Claude 直走 Messages，避免 OpenAI 转换丢失缓存块。 */
+export function deepSeekModelRoute(input: Pick<DeepSeekHarnessInput, 'model' | 'modelProviderId' | 'apiBase'>): {
+  api: 'anthropic-messages' | 'openai-completions'; baseURL: string
+} {
+  const apiBase = input.apiBase.replace(/\/+$/, '')
+  if ((input.modelProviderId || 'jiucaihezi') === 'jiucaihezi' && input.model.startsWith('claude-')) {
+    return { api: 'anthropic-messages', baseURL: apiBase.replace(/\/v1$/, '') }
+  }
+  return { api: 'openai-completions', baseURL: apiBase.endsWith('/v1') ? apiBase : `${apiBase}/v1` }
+}
+
 /** 已有模型目录只声明接入能力；执行策略交给官方。 */
 export function deepSeekModelLimits(
   input: { model: string; modelProviderId?: string },
@@ -1289,8 +1300,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     await invoke('dev_copy_external', { input: { source: legacyRouteDir, destination: routeDir } })
   } catch { /* Missing/already migrated legacy state needs no action. */ }
   const patchPath = await join(routeDir, 'route.cordis.yml')
-  const apiBase = input.apiBase.replace(/\/+$/, '')
-  const baseURL = apiBase.endsWith('/v1') ? apiBase : `${apiBase}/v1`
+  const { api, baseURL } = deepSeekModelRoute(input)
   const mcpServerIds = [...new Set(input.mcpServerIds || [])]
   for (const id of mcpServerIds) {
     if (!/^[A-Za-z0-9_-]{1,32}$/.test(id)) throw new Error(`MCP 服务器 ID 不符合 Harness 命名规则: ${id}`)
@@ -1376,7 +1386,7 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
         '      jiucaihezi:',
         '        displayName: 韭菜盒子',
         '        apiKeyEnv: JIUCAIHEZI_DH_API_KEY',
-        '        api: openai-completions',
+        `        api: ${api}`,
         `        baseURL: ${JSON.stringify(baseURL)}`,
         '        models:',
         `          - id: ${JSON.stringify(input.model)}`,

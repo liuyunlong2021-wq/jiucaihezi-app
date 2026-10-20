@@ -214,10 +214,9 @@ const YUANLIU_VIDEO_CONTRACT_ISSUES = [
   '源流 API `/models` 返回的时长档位、画幅和分辨率允许值尚未核对；UI 暂不发送画幅/分辨率，由上游应用文档默认值（16:9、480p），模型级限制需通过授权目录核实。',
   '按用户指定的 1 美元 = 1 元直接使用 Task Usage 系数 5/6；NewAPI 模型/分组倍率及最终扣费尚未验收。',
 ]
-// 易红 API：旧型号沿用客户文档；2026-10-13 新型号取自 /api/pricing、/api/status，基础价 × 1.3 后取整。
-// 视频模型需在授权 Key 的 GET /v1/models 中可用且保持原名；同步图片模型使用 yihong- 前缀并由渠道映射到上游名。
+// 易红0.2.0只开放六个yh-视频型号；旧记录保留注册并隐藏，不改绑历史任务。
 const YIHONG_VIDEO_RATIOS = ['1:1', '16:9', '9:16', '4:3', '3:4', '21:9']
-const YIHONG_VIDEO_MODELS: Array<{
+const LEGACY_YIHONG_VIDEO_MODELS: Array<{
   model: string
   label: string
   price: string
@@ -225,6 +224,7 @@ const YIHONG_VIDEO_MODELS: Array<{
   defaultDuration: number
   maxImages: number
   maxImageBytes?: number
+  hidden?: boolean
   maxVideos?: number
   maxAudios?: number
   ratios?: string[]
@@ -307,11 +307,17 @@ const YIHONG_VIDEO_MODELS: Array<{
     maxImages: 9, maxAudios: 3, ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], resolutions: ['768p'],
   },
 ]
+const YIHONG_VIDEO_MODELS: typeof LEGACY_YIHONG_VIDEO_MODELS = [
+  { model: 'yh-seedance2.5 Ultra', label: 'yh-seedance2.5 Ultra', price: '¥8.5/次', duration: { min: 10, max: 30 }, defaultDuration: 30, resolutions: ['720P'], maxImages: 14, maxAudios: 10 },
+  { model: 'yh-seedance2.5 super', label: 'yh-seedance2.5 super', price: '¥0.5/秒', duration: { min: 5, max: 30 }, defaultDuration: 5, resolutions: ['720P'], ratios: ['16:9', '9:16', '4:3', '3:4', '1:1', '21:9'], maxImages: 30, maxVideos: 10, maxAudios: 10 },
+  { model: 'yh-seedance-2.5-Muse', label: 'yh-seedance-2.5-Muse', price: '¥9/次', duration: { allowedValues: [5, 10, 15, 30] }, defaultDuration: 30, resolutions: ['720P'], ratios: ['16:9', '9:16'], maxImages: 9 },
+  { model: 'yh-kling-omni-4.0', label: 'yh-kling-omni-4.0', price: '¥0.25/秒', duration: { min: 3, max: 30 }, defaultDuration: 5, resolutions: ['720P'], ratios: ['1:1', '16:9', '9:16', '21:9'], maxImages: 10, maxAudios: 3 },
+  { model: 'yh-seedance2.0 mini Love', label: 'yh-seedance2.0 mini Love', price: '480P ¥0.15/秒 · 720P ¥0.25/秒', duration: { min: 4, max: 15 }, defaultDuration: 5, resolutions: ['720P', '480P'], ratios: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'], maxImages: 9, maxAudios: 3 },
+  { model: 'yh-wan3.0-video', label: 'yh-wan3.0-video', price: '480P ¥0.2/秒 · 720P ¥0.3/秒 · 1080P ¥0.4/秒', duration: { min: 2, max: 30 }, defaultDuration: 5, resolutions: ['480P', '720P', '1080P'], ratios: ['adaptive', '16:9', '9:16', '4:3', '3:4', '1:1'], maxImages: 10, maxVideos: 5, maxAudios: 5 },
+]
 const YIHONG_VIDEO_CONTRACT_ISSUES = [
-  '旧型号沿用客户文档；新增六型号按 2026-10-13 易红公开 /api/pricing 接入。授权目录 GET /v1/models、NewAPI 渠道路由与真实任务尚未核验。',
-  'Super 的画幅已由 2026-10-13 官方文档确认；Cheap/Max/Muse 旧型号未列入新版文档，继续保留旧合同，当前可用性需授权目录核实。',
-  '面板价格按用户指定值；Cheap 面板价为 ¥2/次（易红文档价 ¥1.10/次）。Task Usage 表达式沿用用户指定的 1 美元 = 1 元数值口径，模型/分组倍率及实扣待核对。',
-  'Seedance 2.5 Super 文档要求素材为公网 HTTPS URL；App 上传链路和上游实际取图/音视频能力待真实任务验收。',
+  '按yihong.plugin.js 0.2.0六型号合同提交；参考素材先上传为URL，真实App生成、结果恢复与账单仍待验收。',
+  'Ultra音频必须配图；Love音频每段2–15秒；Wan视频每段1–15秒且合计≤15秒、音频合计≤15秒，提交前读取元数据。',
 ]
 const YIHONG_GPT_IMAGE_MODELS = ['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst'] as const
 // Match the NewAPI plugin's exact size allowlist so each visible ratio/resolution pair can be submitted.
@@ -426,7 +432,7 @@ const FK_SEEDANCE_MODELS: Array<{
   {
     model: 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98',
     label: '官方渠道-Seedance 2.5 满血 720p',
-    price: '¥1.1/秒 · 视频参考 ¥41/百万Token',
+    price: '¥1/秒 · 视频参考 ¥31.5/百万Token',
     ratios: ['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'],
     resolutions: ['720p'],
     duration: { min: 4, max: 30 },
@@ -470,6 +476,11 @@ const FK_SEEDANCE_MODELS: Array<{
     maxAudios: 10,
     promptMaxLength: 10000,
   },
+  ...[
+    { model: 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', label: '官方渠道-Seedance 2.0 Mini 720p', price: '¥0.4/秒 · 视频参考 ¥10.5/百万Token' },
+    { model: 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', label: '官方渠道-Seedance 2.0 Fast 720p', price: '¥0.6/秒 · 视频参考 ¥16.5/百万Token' },
+    { model: 'ft-video-v1-24ee1a4df896ea53869d6a2e5ae59a30', label: '官方渠道-Seedance 2.0 满血 720p', price: '¥0.7/秒 · 视频参考 ¥21/百万Token' },
+  ].map(model => ({ ...model, ratios: ['16:9', '9:16', '1:1', '21:9', '4:3', '3:4'], resolutions: ['720p'], duration: { min: 4, max: 15 }, defaultDuration: 4, maxImages: 9, maxVideos: 3, maxAudios: 3 })),
 ]
 const FK_IMAGE_RATIOS = ['auto', '1:1', '9:16', '16:9', '4:3', '3:4', '3:2', '2:3', '5:4', '4:5', '21:9']
 const FK_IMAGE_MODELS: Array<{
@@ -480,15 +491,15 @@ const FK_IMAGE_MODELS: Array<{
   maxImages: number
   hidden?: boolean
 }> = [
-  { model: 'ft-image-v1-211f28f47b0355abb1798f72eb65f22d', label: 'FK-image2', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
-  { model: 'ft-image-v1-186289ba9d3263010c69372f8939dd94', label: 'FK-image2.5', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
-  { model: 'ft-image-v1-eb47192eb578f340043911005a06fb6e', label: 'FK-image2.5-flare', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
-  { model: 'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d', label: 'FK-image2.5-sunburst', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10, hidden: true },
-  { model: 'ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82', label: 'FK-banana-2', price: '0.2/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
-  { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'FK-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
+  { model: 'ft-image-v1-211f28f47b0355abb1798f72eb65f22d', label: 'GPT-image-2', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-186289ba9d3263010c69372f8939dd94', label: 'GPT-image-2.5', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-eb47192eb578f340043911005a06fb6e', label: 'GPT-image-2.5-flare', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-3432bdee1a22da4ce8ff2bbfc6ef4c1d', label: 'GPT-image-2.5-sunburst', price: '0.08/张', resolutions: ['1k', '2k', '4k'], maxImages: 10 },
+  { model: 'ft-image-v1-80fa79934b03dcdc7a54dacdb1ad7f82', label: 'nano-banana-2', price: '0.2/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
+  { model: 'ft-image-v1-d51c811d3d74a5b2433e6916ab564db9', label: 'nano-banana-pro', price: '0.3/张', resolutions: ['1k', '2k', '4k'], maxImages: 8 },
 ]
 const FK_SEEDANCE_CONTRACT_ISSUES = [
-  '新版插件 0.3.0、渠道模型与按次/Token 定价需同步激活；真实提交、成片与账单尚未验收。',
+  '新版插件 0.3.5、渠道模型与按次/Token 定价需同步激活；真实提交、成片与账单尚未验收。',
 ]
 const RH_IMAGE_RESOLUTIONS = ['1k', '2k', '4k']
 const VIDEO_RESOLUTIONS = ['480p', '720p', '1080p', 'native1080p', '2k', '4k']
@@ -552,6 +563,7 @@ function baseSpec(input: {
   hidden?: boolean
   price?: number | string
   endpoint: string
+  pollPathTemplate?: string
   pollKind?: NonNullable<CreationModelSpec['poll']>['kind']
   assetFlow?: CreationAssetFlow
   resultExtractor?: CreationResultExtractor
@@ -595,7 +607,7 @@ function baseSpec(input: {
     hidden: input.hidden,
     price: input.price,
     endpoint: input.endpoint,
-    poll: { kind: input.pollKind || 'none' },
+    poll: { kind: input.pollKind || 'none', pathTemplate: input.pollPathTemplate },
     files: input.files,
     capabilities: {
       officialAbilityTypes: input.officialAbilityTypes || [input.mode.replaceAll('-', '_')],
@@ -625,6 +637,7 @@ function directImage(input: {
   apiStyle?: CreationApiStyle
   mode?: CreationMode
   endpoint?: string
+  pollPathTemplate?: string
   pollKind?: NonNullable<CreationModelSpec['poll']>['kind']
   assetFlow?: CreationAssetFlow
   resultExtractor?: CreationResultExtractor
@@ -653,6 +666,7 @@ function directImage(input: {
     price: input.price,
     endpoint: input.endpoint || '/v1/images/edits',
     pollKind: input.pollKind,
+    pollPathTemplate: input.pollPathTemplate,
     assetFlow: input.assetFlow || 'newapi-upload',
     resultExtractor: input.resultExtractor || 'openai-image',
     files: input.files || { images: { min: 0, max: 8 } },
@@ -1092,12 +1106,13 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     route: 'newapi-direct',
     upstreamFamily: 'openai-compatible',
     apiStyle: 'openai-images',
-    pollKind: 'none',
+    pollKind: route.model?.startsWith('xy-') ? 'newapi-task' : 'none',
+    pollPathTemplate: route.model?.startsWith('xy-') ? '/xiaoyi/v1/images/tasks/{task_id}' : undefined,
     mode: 'text-to-image',
     contractStatus: 'verified',
     price: route.price,
     hidden: route.hidden,
-    endpoint: '/v1/images/generations',
+    endpoint: route.model?.startsWith('xy-') ? '/xiaoyi/v1/images/generations' : '/v1/images/generations',
     assetFlow: 'none',
     resultExtractor: 'openai-image',
     files: { images: { min: 0, max: route.maxImages || 8 } },
@@ -1287,10 +1302,11 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     upstreamFamily: 'openai-compatible',
     apiStyle: 'openai-image-edits',
     mode: 'text-to-image',
-    endpoint: '/v1/images/edits',
+    endpoint: '/xiaoyi/v1/images/generations',
     assetFlow: 'newapi-upload',
     resultExtractor: 'openai-image',
-    pollKind: 'none',
+    pollKind: 'newapi-task',
+    pollPathTemplate: '/xiaoyi/v1/images/tasks/{task_id}',
     fields: promptFields([
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(['1:1', '16:9', '9:16', '3:2', '2:3']) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '2k', options: options(['1k', '2k']) },
@@ -1581,8 +1597,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: LINGDONG_NOTES,
   })),
   // ── 灵动图片：JSON 公网 URL 由插件转发，同步返回 data[]；官方没有图片任务查询接口 ──
-  // App 图片链路暂只发提示词与尺寸（不提交参考图）；图生图的 JSON images 走画布，
-  // 待 App 侧接入 JSON 参考图后再开放，避免走到插件明确拒绝的 /v1/images/edits multipart。
+  // 参考图复用现有URL上传，保持JSON generations，不走multipart edits。
   ...LINGDONG_IMAGE_MODELS.map(model => directImage({
     id: `newapi/lingdong/${model.model}`,
     model: model.model,
@@ -1596,11 +1611,12 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     assetFlow: 'none',
     resultExtractor: 'openai-image',
     contractStatus: 'partial',
-    contractIssues: [...LINGDONG_CONTRACT_ISSUES, 'App 暂不提交参考图；官方 size 逐档像素表未列出，尺寸由比例 × 分辨率换算。'],
-    files: { images: { min: 0, max: 0 } },
+    contractIssues: [...LINGDONG_CONTRACT_ISSUES, '参考图按JSON images提交；插件未声明张数上限，沿用App通用素材入口，厂商上限仍待核实。官方 size 逐档像素表未列出，尺寸由比例 × 分辨率换算。'],
+    files: { images: { min: 0 } },
     ratios: LINGDONG_IMAGE_RATIOS,
     resolutions: ['1k', '2k', '4k'],
     fields: promptFields([
+      { key: 'images', label: '参考图', kind: 'images' },
       { key: 'ratio', label: '比例', kind: 'select', defaultValue: '1:1', options: options(LINGDONG_IMAGE_RATIOS) },
       { key: 'resolution', label: '分辨率', kind: 'select', defaultValue: '1k', options: options(['1k', '2k', '4k']) },
     ]),
@@ -1619,6 +1635,8 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     assetFlow: 'newapi-upload',
     contractStatus: 'partial',
     contractIssues: YUANLIU_VIDEO_CONTRACT_ISSUES,
+    ratios: [],
+    resolutions: [],
     duration: { min: 1 },
     files: {
       images: { min: 0, max: model.maxImages },
@@ -1634,11 +1652,12 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['https://test.yuanliuai.tsyzai.com/openapi/docs.md', 'NewAPI Task Usage 与真实扣费尚未验收。'],
   })),
   // ── 易红 API Seedance：模型名逐字匹配 yihong Task Plugin 的 meta.models ──
-  ...YIHONG_VIDEO_MODELS.map(model => directVideo({
+  ...[...YIHONG_VIDEO_MODELS, ...LEGACY_YIHONG_VIDEO_MODELS.map(model => ({ ...model, hidden: true }))].map(model => directVideo({
     id: `newapi/yihong/${model.model}`,
     model: model.model,
     label: model.label,
     price: model.price,
+    hidden: model.hidden,
     upstreamFamily: 'openai-compatible',
     apiStyle: 'newapi-task',
     mode: 'text-to-video',
@@ -1646,7 +1665,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     assetFlow: 'newapi-upload',
     contractStatus: 'partial',
     contractIssues: YIHONG_VIDEO_CONTRACT_ISSUES,
-    ratios: 'ratios' in model ? model.ratios : undefined,
+    ratios: model.ratios || [],
     resolutions: model.resolutions,
     duration: model.duration,
     files: {
@@ -1665,14 +1684,23 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
         ? { key: 'duration', label: '时长(秒)', kind: 'select' as const, defaultValue: model.defaultDuration, options: options(model.duration.allowedValues) }
         : { key: 'duration', label: '时长(秒)', kind: 'number' as const, defaultValue: model.defaultDuration, min: model.duration.min, max: model.duration.max, step: 1 },
       { key: 'images', label: `参考图 (0-${model.maxImages}张)`, kind: 'images' as const },
+      ...(model.model === 'yh-seedance2.0 mini Love' ? [
+        { key: 'generate_audio', label: '生成音频', kind: 'boolean' as const, defaultValue: false },
+        { key: 'watermark', label: '水印', kind: 'boolean' as const },
+        { key: 'camera_fixed', label: '固定镜头', kind: 'boolean' as const },
+        { key: 'return_last_frame', label: '返回尾帧', kind: 'boolean' as const },
+        { key: 'seed', label: '随机种子', kind: 'number' as const, min: 0, step: 1 },
+      ] : []),
+      ...(model.model === 'yh-wan3.0-video' ? [{ key: 'prompt_extend', label: '提示词扩写', kind: 'boolean' as const }] : []),
       ...(model.model === 'seedance-2.5-max' ? [{ key: 'camera_movement', label: '运镜', kind: 'select' as const, defaultValue: 'auto', options: [{ value: 'auto', label: '自动' }, { value: 'fixed', label: '固定' }] }] : []),
       ...('maxVideos' in model ? [{ key: 'videos', label: `参考视频 (0-${model.maxVideos}段)`, kind: 'video' as const }] : []),
       ...('maxAudios' in model ? [{ key: 'audios', label: `参考音频 (0-${model.maxAudios}段)`, kind: 'audio' as const }] : []),
     ]),
-    notes: ['易红客户文档（2026-10-06）及公开 /api/pricing（2026-10-13）', ...(model.model === 'wan3.0-video-prime' ? ['参考视频需通过 API media[] 携带 duration_seconds；面板仅开放图片与音频参考。'] : []), '插件、授权模型目录、真实生成与计费尚待验收。'],
+    notes: ['newapi-plugins/yihong.plugin.js 0.2.0', '易红客户文档（2026-10-06）及公开 /api/pricing（2026-10-13）', ...(model.model === 'wan3.0-video-prime' ? ['参考视频需通过 API media[] 携带 duration_seconds；面板仅开放图片与音频参考。'] : []), '插件、授权模型目录、真实生成与计费尚待验收。'],
   })),
   // 易红同步图片由同一插件转换为 OpenAI 图片响应；生产需要配套的大图片响应宿主补丁。
   directImage({
+    hidden: true,
     id: 'newapi/yihong/gemini-nano-banana-2.1', model: 'gemini-nano-banana-2.1',
     label: 'Gemini Nano Banana 2.1 · 易红', price: '¥0.15/张', mode: 'text-to-image', pollKind: 'none',
     contractStatus: 'partial', files: { images: { min: 0, max: 1 } },
@@ -1686,6 +1714,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['易红官方客户API接入文档(24).md（2026-10-13）', '真实图片生成和扣费尚未验收。'],
   }),
   directImage({
+    hidden: true,
     id: 'newapi/yihong/gpt-image-2-1K-4K', model: 'gpt-image-2-1K-4K',
     label: 'GPT Image 2 1K–4K · 易红', price: '1K ¥0.4/张 · 2K/4K ¥0.08/张', mode: 'text-to-image', pollKind: 'none',
     contractStatus: 'partial', files: { images: { min: 0, max: 10 } },
@@ -1697,6 +1726,7 @@ export const CREATION_MODEL_REGISTRY: CreationModelSpec[] = [
     notes: ['易红官方客户API接入文档(24).md（2026-10-13）'],
   }),
   ...YIHONG_GPT_IMAGE_MODELS.map(model => directImage({
+    hidden: true,
     id: `newapi/yihong/yihong-${model}`, model: `yihong-${model}`, label: model, price: '¥0.1/张', mode: 'text-to-image', pollKind: 'none',
     contractStatus: 'partial', files: { images: { min: 0, max: 10 } },
     fields: promptFields([

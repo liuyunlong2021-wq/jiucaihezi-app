@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import { createServer } from 'node:http'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { selectWikiSource } from '../../src-tauri/resources/deepseek-harness/manju-wiki.mjs'
 import { pinManjuSkills } from '../../src-tauri/resources/deepseek-harness/manju-skills.mjs'
 
 function fixture(t) {
@@ -271,7 +272,9 @@ test('SDK bindings reuse the same agent, rebind restored agents, and clean up af
   assert.equal(server.pinnedSkillScopes.has(rec.handle.agent), false)
   failRestriction = false
   await server.applyPinnedSkillScope(rec, production)
-  await server.applyPinnedSkillScope(rec, production)
+  await server.applyPinnedSkillScope(rec, [{ type: 'text', text: '/jc-manju-zhizuo\nupdated source for the next turn' }])
+  assert.equal(selectWikiSource(rec.handle.agent, { source_block: 0, source_start: 'updated source', source_end: 'the next turn' }), 'updated source for the next turn')
+  assert.throws(() => selectWikiSource(rec.handle.agent, { source_block: 0, source_start: 'make a prompt', source_end: 'make a prompt' }), /来源首尾/)
   assert.equal(restrictions, 1)
   failRelease = true
   await assert.rejects(server.applyPinnedSkillScope(rec, ordinary), /release failure/)
@@ -408,4 +411,18 @@ test('the actual SDK injects bundled skills before the model request and restore
   await harness.session('manju-sdk-test').run('/jc-manju-zhizuo\ncontinue after rules changed')
   assert.match(JSON.stringify(requests.at(-1).messages.at(-1)), /UPDATED_RULES_FOR_NEXT_TURN/)
   assert.equal(requests.length, 6)
+})
+
+
+test('short drama pins its complete route and shares project research without exposing video production', async t => {
+  const { rec, registered } = fixture(t)
+  const directory = fileURLToPath(new URL('../../public/skills/', import.meta.url))
+  const dispose = await pinManjuSkills(rec, ['jc-duanju', 'jc-duanju-cehua', 'wiki-memory'], directory)
+  for (const name of ['jc-duanju', 'jc-xiangmuziliao', 'jc-duanju-cehua', 'jc-duanju-fenji', 'jc-duanju-xiezuo'])
+    assert.equal(registered.get(name)?.source, 'bundled', name)
+  assert.equal(registered.has('jc-gongchengjuben'), false)
+  assert.equal(registered.get('jc-duanju').invocation.modelInvocable, false)
+  await dispose()
+  assert.equal(registered.size, 0)
+  await assert.rejects(pinManjuSkills(rec, ['jc-duanju', 'jc-seedance'], directory), /不能同时加载/)
 })

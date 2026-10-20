@@ -566,7 +566,7 @@ async function executeDirectImageRequest(
     if (mediaUrl) return { url: mediaUrl, type: 'image' }
     const taskId = extractTaskId(data)
     if (!taskId || request.pollKind === 'none') throw new Error('图片生成完成但未返回可用结果')
-    const pollUrl = `${request.endpoint}/${encodeURIComponent(taskId)}`
+    const pollUrl = request.plan.pollPathTemplate?.replace('{task_id}', encodeURIComponent(taskId)) || `${request.endpoint}/${encodeURIComponent(taskId)}`
     await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
     const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000, request.signal)
     return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
@@ -589,7 +589,7 @@ async function executeDirectImageRequest(
         }
       : {}),
     ...(request.plan.modelId === 'newapi/yihong/gemini-nano-banana-2.1' ? { imageSize: params.imageSize || '1K' } : {}),
-    image: params.image,
+    ...(request.plan.modelId.startsWith('newapi/lingdong/') ? { images: asStringArray(params.image) } : { image: params.image }),
     response_format: params.responseFormat || 'url',
   })
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
@@ -600,7 +600,7 @@ async function executeDirectImageRequest(
   // MJ task: poll URL 是 /mj/task/{id}/fetch，不同于 submit endpoint
   const pollUrl = request.plan.apiStyle === 'mj-task'
     ? `/mj/task/${encodeURIComponent(taskId)}/fetch`
-    : `${request.endpoint}/${encodeURIComponent(taskId)}`
+    : request.plan.pollPathTemplate?.replace('{task_id}', encodeURIComponent(taskId)) || `${request.endpoint}/${encodeURIComponent(taskId)}`
   await onSubmitted?.({ taskId, pollUrl, pollKind: 'image' })
   const url = await pollTask(pollUrl, 'image', onProgress, 600, 10000, request.signal)
   return { url, type: 'image', taskId, pollUrl, pollKind: 'image' }
@@ -635,6 +635,21 @@ async function executeDirectVideoRequest(
     }, onProgress)
   }
   const images = asStringArray(params.imageUrls?.length ? params.imageUrls : params.imageUrl)
+  // Wan需要真实时长；Love音频同样先读元数据，校验失败时不提交生成。
+  const model = request.plan.model
+  let referenceDurations: { videos: number[]; audios: number[] } | undefined
+  if (model === 'yh-wan3.0-video' || model === 'yh-seedance2.0 mini Love') {
+    const videoSources = params.videoUrls?.length ? params.videoUrls : params.videoUrl ? [params.videoUrl] : []
+    const audioSources = params.audioUrls?.length ? params.audioUrls : params.audioUrl ? [params.audioUrl] : []
+    referenceDurations = {
+      videos: await Promise.all(videoSources.map(url => readReferenceDuration(url, 'video', request.signal))),
+      audios: await Promise.all(audioSources.map(url => readReferenceDuration(url, 'audio', request.signal))),
+    }
+    if (model === 'yh-wan3.0-video') {
+      if (referenceDurations.videos.some(value => value < 1 || value > 15) || referenceDurations.videos.reduce((a, b) => a + b, 0) > 15) throw new Error('Wan参考视频每段1–15秒，合计不能超过15秒')
+      if (referenceDurations.audios.reduce((a, b) => a + b, 0) > 15) throw new Error('Wan参考音频合计不能超过15秒')
+    } else if (referenceDurations.audios.some(value => value < 2 || value > 15)) throw new Error('Love参考音频每段必须为2–15秒')
+  }
   const shouldUploadAssets = request.plan.assetFlow !== 'none'
   const uploadedImages = shouldUploadAssets
     ? await Promise.all(images.map(image => uploadCreationAsset(image, request.signal)))
@@ -648,7 +663,7 @@ async function executeDirectVideoRequest(
     ? await Promise.all(audios.map(audio => uploadCreationAsset(audio, request.signal)))
     : audios
 
-  const body = buildDirectVideoBody(request, uploadedImages, uploadedVideos, uploadedAudios)
+  const body = buildDirectVideoBody(request, uploadedImages, uploadedVideos, uploadedAudios, referenceDurations)
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)
   let mediaUrl = extractMediaUrl(data, 'video')
   const taskId = extractTaskId(data)
@@ -969,13 +984,66 @@ async function executeRunningHubAudioRequest(
   return { url: result, type: 'audio', taskId, pollUrl, pollKind }
 }
 
+function readReferenceDuration(url: string, kind: 'video' | 'audio', signal?: AbortSignal): Promise<number> {
+  throwIfCreationAborted(signal)
+  return new Promise((resolve, reject) => {
+    const media = document.createElement(kind)
+    const finish = (error?: Error) => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', abort)
+      const duration = media.duration
+      media.onloadedmetadata = null
+      media.onerror = null
+      media.removeAttribute('src')
+      media.load()
+      if (error) reject(error)
+      else if (!Number.isFinite(duration) || duration <= 0) reject(new Error('参考素材时长无效，请重新导入'))
+      else resolve(duration)
+    }
+    const abort = () => finish(creationAbortError())
+    const timer = setTimeout(() => finish(new Error('读取参考素材时长超时，请确认素材可读取')), 8000)
+    signal?.addEventListener('abort', abort, { once: true })
+    media.preload = 'metadata'
+    media.onloadedmetadata = () => finish()
+    media.onerror = () => finish(new Error('无法读取参考素材时长，请确认素材可读取'))
+    media.src = url
+  })
+}
+
 function buildDirectVideoBody(
   request: CreationSubmitRequest,
   uploadedImages: string[],
   uploadedVideos: string[],
   uploadedAudios: string[],
+  referenceDurations?: { videos: number[]; audios: number[] },
 ): Record<string, unknown> {
   const params = request.videoParams || {}
+  if (request.plan.model.startsWith('yh-')) {
+    const normalized = request.plan.debug.normalizedParams
+    const body: Record<string, unknown> = compact({ model: request.plan.model, prompt: params.prompt, seconds: params.duration, resolution: params.resolution, ratio: params.aspectRatio })
+    if (request.plan.model === 'yh-wan3.0-video') {
+      body.media = [
+        ...uploadedImages.map(url => ({ type: 'reference_image', url })),
+        ...uploadedVideos.map((url, index) => ({ type: 'reference_video', url, duration_seconds: referenceDurations?.videos[index] })),
+        ...uploadedAudios.map((url, index) => ({ type: 'reference_audio', url, duration_seconds: referenceDurations?.audios[index] })),
+      ]
+      if (normalized.prompt_extend !== undefined) body.prompt_extend = normalized.prompt_extend
+    } else {
+      if (uploadedImages.length) body.image_urls = uploadedImages
+      if (uploadedVideos.length) body.video_urls = uploadedVideos
+      if (uploadedAudios.length) body.audio_urls = uploadedAudios
+      if (request.plan.model === 'yh-seedance2.0 mini Love') {
+        for (const key of ['generate_audio', 'watermark', 'camera_fixed', 'return_last_frame', 'seed']) if (normalized[key] !== undefined) body[key] = normalized[key]
+      }
+    }
+    return body
+  }
+  if (request.plan.modelId.startsWith('newapi/yuanliu/')) {
+    return compact({ model: request.plan.model, prompt: params.prompt, duration: params.duration, client_request_id: crypto.randomUUID(), images: uploadedImages.length ? uploadedImages : undefined, videos: uploadedVideos.length ? uploadedVideos : undefined, audios: uploadedAudios.length ? uploadedAudios : undefined })
+  }
+  if (request.plan.modelId.startsWith('newapi/lingdong/')) {
+    return compact({ model: request.plan.model, prompt: params.prompt, duration: params.duration, ratio: params.aspectRatio, resolution: params.resolution, images: uploadedImages.length ? uploadedImages : undefined, videos: uploadedVideos.length ? uploadedVideos : undefined, audios: uploadedAudios.length ? uploadedAudios : undefined })
+  }
   if (request.plan.apiStyle === 'seedance-task') {
     const normalized = request.plan.debug.normalizedParams
     const body: Record<string, unknown> = compact({

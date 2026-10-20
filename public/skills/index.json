@@ -65,7 +65,7 @@
     "id": "jc-duanju",
     "name": "jc-duanju",
     "displayName": "jc-duanju",
-    "description": "短剧写作独立路线：创作原创短剧，或将小说、故事、剧本等改编为可拍摄的中文短剧；负责改编方向、分集规划、逐集剧本、续写与修订。根据用户和项目规格确定时长、集数、场次、字数与节奏；未指定时采用快节奏短剧默认规格。不是小说正文创作，也不负责漫剧视觉资产、工程台本或视频提示词。",
+    "description": "短剧写作总路由：小说或已有短剧改编、原创短剧、项目资料、改编策划、分集规划、逐集写作与Wiki归档。按当前阶段调用内置子Skill，支持已有资料复用和中断续做。",
     "triggers": [
       "写短剧",
       "创作短剧",
@@ -81,6 +81,69 @@
       "把小说改编成短剧",
       "按改编方案写短剧"
     ],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-duanju-cehua",
+    "name": "jc-duanju-cehua",
+    "displayName": "jc-duanju-cehua",
+    "description": "以原作项目资料制定改编思路，联动重建新版世界、人物关系、场景道具及事件阶段，再确定整体改编方案。用于小说或已有短剧的改编策划，不写逐集剧本。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-duanju-fenji",
+    "name": "jc-duanju-fenji",
+    "displayName": "jc-duanju-fenji",
+    "description": "根据新版项目资料和整体改编方案，规划故事阶段容量与逐集事件、人物状态、钩子及承接。用于分集大纲和分集重排，不替代原作资料提取或逐集文学剧本。",
+    "triggers": [],
+    "commands": [],
+    "files": [
+      "SKILL.md"
+    ],
+    "package": {
+      "schemaVersion": 1,
+      "entry": "SKILL.md",
+      "files": [
+        {
+          "path": "SKILL.md",
+          "kind": "instruction"
+        }
+      ]
+    }
+  },
+  {
+    "id": "jc-duanju-xiezuo",
+    "name": "jc-duanju-xiezuo",
+    "displayName": "jc-duanju-xiezuo",
+    "description": "根据新版项目资料、已确认整体方案与分集规划，创作、续写或修订短剧文学剧本；也承接原创单集与单场戏。不生成工程台本。",
+    "triggers": [],
     "commands": [],
     "files": [
       "SKILL.md"
@@ -1180,7 +1243,7 @@
     "id": "jc-xiangmuziliao",
     "name": "jc-xiangmuziliao",
     "displayName": "jc-xiangmuziliao",
-    "description": "从小说、完整剧本或分集文本整理故事梗概、分集梗概、人物小传和故事背景与世界规则。当用户需要在漫剧制作前沉淀项目资料、理解原作、梳理人物动机与关系、明确每集戏剧任务时使用；视觉风格设计、资产提示词、工程台本与视频提示词由后续流程承接。",
+    "description": "从小说、完整剧本或分集文本整理故事梗概、分集梗概、人物小传和故事背景与世界规则。当用户需要为短剧改编或漫剧制作提取原作人物、场景道具、事件发展阶段和规则资料时使用；视觉风格设计、资产提示词、工程台本与视频提示词由后续流程承接。",
     "triggers": [],
     "commands": [],
     "files": [

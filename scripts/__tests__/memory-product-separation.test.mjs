@@ -148,8 +148,12 @@ test('current product instructions and packaged Wiki templates use the memory co
 
 test('App bundles only the remaining product Skills', () => {
   const expected = [
+    'cinematic-four-panel-frames',
     'h3-prompt-writing',
     'jc-duanju',
+    'jc-duanju-cehua',
+    'jc-duanju-fenji',
+    'jc-duanju-xiezuo',
     'jc-film-style',
     'jc-gongchengjuben',
     'jc-juese-geshi',
@@ -163,6 +167,7 @@ test('App bundles only the remaining product Skills', () => {
     'jc-seedance',
     'jc-watch',
     'jc-xiangmuziliao',
+    'seedance-storyboard-assets',
     'skill-creator',
     'wiki-memory',
   ]

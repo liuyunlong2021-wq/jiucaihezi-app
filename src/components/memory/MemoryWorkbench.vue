@@ -359,7 +359,7 @@ function toggleShortDramaProduction() {
     const preference = currentShortDramaPreference()
     const wikiMemoryWasSelected = preference?.wikiMemoryWasSelected ?? selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)
     selectedSkillNames.value = selectedSkillNames.value.filter(name =>
-      name !== SHORT_DRAMA_SKILL && (name !== WIKI_MEMORY_SKILL || wikiMemoryWasSelected),
+      !SHORT_DRAMA_SKILLS.includes(name) || (name === WIKI_MEMORY_SKILL && wikiMemoryWasSelected),
     )
     saveProductionPreferences({ shortDrama: { enabled: false, wikiMemoryWasSelected } })
     return
@@ -408,7 +408,7 @@ function removeSelectedSkill(name: string) {
   if (shortDramaSelected.value && (name === SHORT_DRAMA_SKILL || name === WIKI_MEMORY_SKILL)) {
     const preference = currentShortDramaPreference()
     selectedSkillNames.value = selectedSkillNames.value.filter(item =>
-      item !== SHORT_DRAMA_SKILL && !(item === WIKI_MEMORY_SKILL && (name === WIKI_MEMORY_SKILL || preference?.wikiMemoryWasSelected === false)),
+      !SHORT_DRAMA_SKILLS.includes(item) || (item === WIKI_MEMORY_SKILL && name !== WIKI_MEMORY_SKILL && preference?.wikiMemoryWasSelected !== false),
     )
     saveProductionPreferences({
       shortDrama: {
