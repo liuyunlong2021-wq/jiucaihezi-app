@@ -1837,6 +1837,10 @@ function relinkCanvasAsset(filePath: string, kind: CanvasMediaKind, owner: strin
 
 /** 文件树 → 画布联动 */
 async function addFileTreeMediaToCanvas(payload: any) {
+  if (Array.isArray(payload?.resources)) {
+    for (const resource of payload.resources) await addFileTreeMediaToCanvas(resource)
+    return
+  }
   const projectId = String(payload?.projectId || '')
   const path = String(payload?.path || '')
   const kind: CanvasMediaKind | null =

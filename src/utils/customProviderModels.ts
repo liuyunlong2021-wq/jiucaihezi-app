@@ -24,11 +24,11 @@ export async function discoverCustomProviderModels(provider: Pick<CustomProvider
   const modelCapabilities: Record<string, CustomModelCapabilities> = Object.create(null)
   for (const model of data.data) {
     if (typeof model?.id !== 'string' || !model.id.trim()) continue
-    const contextWindow = capacity(model.contextWindow, model.context_length, model.meta?.n_ctx)
+    const contextWindow = capacity(model.contextWindow, model.context_window, model.context_length, model.meta?.n_ctx)
     const modalities = model.input_modalities || model.architecture?.input_modalities
     modelCapabilities[model.id] = {
       contextWindow,
-      maxOutputTokens: capacity(model.maxOutputTokens, model.max_output_tokens),
+      maxOutputTokens: capacity(model.maxOutputTokens, model.max_output_tokens, model.top_provider?.max_completion_tokens),
       ...(Array.isArray(modalities) ? { inputModalities: modalities.includes('image') ? ['text', 'image'] : ['text'] } : {}),
     }
   }

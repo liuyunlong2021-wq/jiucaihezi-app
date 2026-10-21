@@ -613,3 +613,10 @@ test('inferGatewayModelCapability uses task type, channel and id signals', () =>
   assert.equal(inferGatewayModelCapability('voice-model', [], ''), 'audio')
   assert.equal(inferGatewayModelCapability('claude-sonnet', [], 'newapi'), 'text')
 })
+
+
+test('gateway preserves OpenRouter capacity fields instead of falling back', () => {
+  const [model] = normalizeGatewayModels({ data: [{ id: 'minimax/minimax-m3.1-flash:free', context_length: 1000000, top_provider: { max_completion_tokens: 524288 } }] })
+  assert.equal(model?.contextWindow, 1000000)
+  assert.equal(model?.maxOutputTokens, 524288)
+})

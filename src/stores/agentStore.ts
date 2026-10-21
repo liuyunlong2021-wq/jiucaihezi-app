@@ -163,10 +163,6 @@ function loadCachedModelEntries(): ModelEntry[] | null {
       m => (m as any).source === 'gateway' || m.providerId === 'jiucaihezi'
     )
     if (!hasGatewayModels) return null
-    // 缓存中的文本模型数少于兜底默认值 → 缓存已损坏，丢弃
-    const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-    const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-    if (cachedTextCount < defaultTextCount) return null
     return filtered
   } catch {
     return null
@@ -337,29 +333,14 @@ export const useAgentStore = defineStore('agents', () => {
       }
     } catch (e: any) {
       modelsFetchError.value = e.message || 'fetch failed'
-      // 尝试从缓存恢复，但只有缓存比兜底模型更多时才采用（防止坏缓存覆盖）
-      try {
-        const cached = localStorage.getItem('jc_models_cache')
-        if (cached) {
-          const parsed = JSON.parse(cached)
-          const normalized = Array.isArray(parsed)
-            ? parsed.map((model: ModelEntry) => ({
-                ...model,
-                capability: model.capability || inferCapability(model.id),
-              }))
-            : []
-          const filtered = filterExecutableModels(normalized)
-          const defaultTextCount = DEFAULT_MODELS.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-          const cachedTextCount = filtered.filter(m => (m.capability || inferCapability(m.id)) === 'text').length
-          if (filtered.length > 0 && cachedTextCount >= defaultTextCount) {
-            availableModels.value = mergeLocalModels(filtered)
-            const resolvedModel = resolveTextModelSelection(currentModel.value, textModels.value)
-            if (resolvedModel !== currentModel.value) setModel(resolvedModel)
-            else syncModelProviderStorage()
-            modelsFetched.value = true
-          }
-        }
-      } catch { /* noop */ }
+      const cached = loadCachedModelEntries()
+      if (cached) {
+        availableModels.value = mergeLocalModels(cached)
+        const resolvedModel = resolveTextModelSelection(currentModel.value, textModels.value)
+        if (resolvedModel !== currentModel.value) setModel(resolvedModel)
+        else syncModelProviderStorage()
+        modelsFetched.value = true
+      }
     }
   }
 

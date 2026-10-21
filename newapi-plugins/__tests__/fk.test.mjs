@@ -19,6 +19,37 @@ function decode(value, model = MODEL) {
  return plugin.protocols.openai_image.decodeRequest({ ...ctx(model), body: { kind: 'json', value } })
 }
 
+test('FK 图片即时成功仍查询原 jobId，以持久结果提供全部图片制品', () => {
+ const urls = [URL, URL + '&image=2']
+ const body = { jobId: 'image/job', success: true, status: 'success', resultAvailable: true, resultUrls: urls }
+ const submitted = plugin.parseSubmitResponse(ctx(), { body })
+ assert.equal(submitted.immediate, undefined)
+ assert.equal(submitted.taskId, 'image/job')
+ const query = plugin.buildQueryRequest({ ...ctx(), taskId: submitted.taskId })
+ assert.equal(query.method, 'GET')
+ assert.match(query.url, /\/image\/status\?jobId=image%2Fjob/)
+ const completed = plugin.parseTaskResult(ctx(), body)
+ const artifactContext = { taskId: 'public-task', status: completed.status, action: 'text_to_image', data: body }
+ assert.deepEqual(plugin.listArtifacts(artifactContext), [{ key: 'image_0', type: 'image' }, { key: 'image_1', type: 'image' }])
+ for (const action of ['text_to_image', 'image_to_image']) {
+   for (const method of ['GET', 'HEAD']) {
+     for (let index = 0; index < urls.length; index++) {
+       assert.deepEqual(plugin.buildContentRequest({ ...artifactContext, action, artifactKey: 'image_' + index, clientRequest: { method } }), {
+         url: urls[index], method, credentialless: true,
+       })
+     }
+   }
+ }
+ for (const key of ['video', 'image_-1', 'image_01', 'image_2', 'image_0junk']) {
+   assert.throws(() => plugin.buildContentRequest({ ...artifactContext, artifactKey: key, clientRequest: { method: 'GET' } }), /artifact_not_found/)
+ }
+ assert.deepEqual(plugin.listArtifacts({ ...artifactContext, status: 'IN_PROGRESS' }), [])
+ assert.deepEqual(plugin.listArtifacts({ ...artifactContext, data: null }), [])
+ assert.deepEqual(plugin.listArtifacts({ ...artifactContext, data: { resultUrls: ['http://unsafe/image'] } }), [])
+ assert.deepEqual(plugin.protocols.openai_image.render({}, { data: body }), { data: urls.map(url => ({ url })) })
+ assert.deepEqual(plugin.listArtifacts({ status: 'SUCCESS', action: 'text_to_video', data: { videoUrl: URL } }), [{ key: 'video', type: 'video', mimeType: 'video/mp4' }])
+})
+
 test('FK 标准图片 JSON 合同：公共 ID、鉴权、画质、图片 URL 和端点', () => {
  const intent = decode({ prompt: '一只小狗', ratio: '16:9', imageSize: '4k', imageUrls: ['https://a/ref.png'] })
  const request = plugin.buildSubmitRequest({ ...ctx(), requestBody: intent.requestBody, action: intent.action })

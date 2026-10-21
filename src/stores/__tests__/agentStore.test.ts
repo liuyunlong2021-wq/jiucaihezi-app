@@ -226,3 +226,17 @@ test('stores variants separately for each provider model', { concurrency: false 
     storage.restore()
   }
 })
+
+
+test('a small valid gateway catalog is not discarded as corrupt', () => {
+  const storage = installLocalStorage({ jc_models_cache: JSON.stringify([
+    { id: 'minimax/minimax-m3.1-flash:free', label: 'MiniMax', providerId: 'jiucaihezi', capability: 'text', contextWindow: 1000000, maxOutputTokens: 524288 },
+  ]) })
+  try {
+    setActivePinia(createPinia())
+    const store = useAgentStore()
+    assert.equal(store.textModels.length, 1)
+    assert.equal(store.textModels[0]?.contextWindow, 1000000)
+    assert.equal(store.textModels[0]?.maxOutputTokens, 524288)
+  } finally { storage.restore() }
+})

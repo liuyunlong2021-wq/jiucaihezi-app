@@ -17,18 +17,16 @@ export const DEFAULT_LOCAL_MAX_OUTPUT_TOKENS = 32_768
  * 获取模型的上下文窗口大小
  * @returns tokens 数，未知云端模型返回 1M
  */
-export function getModelContextWindow(modelId: string, providerId?: string): number {
+export function getModelContextWindow(_modelId: string, providerId?: string): number {
   // 本地/自定义端点未声明容量时按产品合同使用 256K；明确的模型元数据优先。
   if (isLocalLikeProviderId(providerId)) return DEFAULT_LOCAL_CONTEXT_WINDOW
 
-  if (modelId.toLowerCase().includes(':free')) return 32_000
   return DEFAULT_CLOUD_CONTEXT_WINDOW
 }
 
 /** 单次输出默认上限；真实 Gateway 元数据优先于此兜底值。 */
-export function getModelMaxOutputTokens(modelId: string, providerId?: string): number {
+export function getModelMaxOutputTokens(_modelId: string, providerId?: string): number {
   if (isLocalLikeProviderId(providerId)) return DEFAULT_LOCAL_MAX_OUTPUT_TOKENS
-  if (modelId.toLowerCase().includes(':free')) return 32_000
   return DEFAULT_CLOUD_MAX_OUTPUT_TOKENS
 }
 

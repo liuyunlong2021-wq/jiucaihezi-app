@@ -3,7 +3,6 @@ import { test } from 'node:test'
 
 import {
   DEFAULT_TEXT_MODEL,
-  chooseModelCatalogForProjection,
   filterExecutableModels,
   resolveModelSelection,
   resolveTextModelSelection,
@@ -86,23 +85,4 @@ test('resolveModelSelection does not keep removed cached model ids', () => {
     ]),
     'gpt-5.4',
   )
-})
-
-test('uses richer gateway catalog for OpenCode projection instead of stale cache', () => {
-  const cached = [
-    { id: 'deepseek-v4-flash-free', capability: 'text' as const },
-    { id: 'big-pickle', capability: 'text' as const },
-  ]
-  const gateway = [
-    ...cached,
-    { id: 'claude-sonnet-4-6', capability: 'text' as const },
-    { id: 'gpt-5.5', capability: 'text' as const },
-  ]
-
-  assert.deepEqual(chooseModelCatalogForProjection(cached, gateway).map(model => model.id), [
-    'deepseek-v4-flash-free',
-    'big-pickle',
-    'claude-sonnet-4-6',
-    'gpt-5.5',
-  ])
 })

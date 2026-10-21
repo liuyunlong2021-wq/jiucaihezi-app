@@ -4,15 +4,15 @@ import { readFileSync } from 'node:fs'
 
 import { getModelContextWindow, getModelMaxOutputTokens } from '../modelContextWindows'
 
-test('cloud models use the unified defaults while local and free models keep their own limits', () => {
+test('cloud models use the unified defaults without inferring capacity from free pricing', () => {
   for (const model of ['claude-3.5-sonnet', 'gpt-4o', 'o3', 'gemini-2.5-pro', 'deepseek-r1', 'grok-3', 'glm-4.5', 'doubao-pro']) {
     assert.equal(getModelContextWindow(model, 'jiucaihezi'), 1_000_000, model)
   }
   assert.equal(getModelContextWindow('qwen3.8:9b-q5', 'local-ollama'), 262_144)
-  assert.equal(getModelContextWindow('openai/gpt-oss-120b:free', 'openrouter'), 32_000)
+  assert.equal(getModelContextWindow('openai/gpt-oss-120b:free', 'openrouter'), 1_000_000)
   assert.equal(getModelMaxOutputTokens('claude-sonnet-4-6', 'jiucaihezi'), 128_000)
   assert.equal(getModelMaxOutputTokens('gpt-5', 'local-ollama'), 32_768)
-  assert.equal(getModelMaxOutputTokens('openai/gpt-oss-120b:free', 'openrouter'), 32_000)
+  assert.equal(getModelMaxOutputTokens('openai/gpt-oss-120b:free', 'openrouter'), 128_000)
 })
 
 
@@ -61,4 +61,22 @@ test('unknown local model fallback stays aligned with the bundled official DSH a
   assert.ok(contextWindow > 0 && maxTokens > 0)
   assert.equal(getModelContextWindow('unknown-model', 'local-ollama'), contextWindow)
   assert.equal(getModelMaxOutputTokens('unknown-model', 'local-ollama'), maxTokens)
+})
+
+test('MiniMax free pricing does not consume the entire context as output reservation', () => {
+  const id = 'minimax/minimax-m3.1-flash:free'
+  assert.equal(getModelContextWindow(id, 'jiucaihezi'), 1_000_000)
+  assert.ok(getModelMaxOutputTokens(id, 'jiucaihezi') < getModelContextWindow(id, 'jiucaihezi'))
+})
+
+test('custom endpoints preserve declared OpenRouter output and context capacity', async () => {
+  const { discoverCustomProviderModels } = await import('../../utils/customProviderModels')
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = (async url => String(url).includes('/props?')
+    ? new Response('', { status: 404 })
+    : Response.json({ data: [{ id: 'minimax/minimax-m3.1-flash:free', context_window: 1000000, top_provider: { max_completion_tokens: 524288 } }] })) as typeof fetch
+  try {
+    const result = await discoverCustomProviderModels({ apiBase: 'https://example.test/v1' })
+    assert.deepEqual(result.modelCapabilities['minimax/minimax-m3.1-flash:free'], { contextWindow: 1000000, maxOutputTokens: 524288 })
+  } finally { globalThis.fetch = originalFetch }
 })

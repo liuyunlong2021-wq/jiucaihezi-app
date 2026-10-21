@@ -69,7 +69,7 @@ test('project file tree adds images videos and audio to canvas as selectable med
 
   assert.match(source, /openProjectResource\(projectFiles, resource\)/)
   assert.match(source, /if \(result\.type === 'media' && result\.mediaKind !== 'model3d'\)/)
-  assert.match(source, /emitMediaToCanvas\(result\.resource, result\.mediaKind\)/)
+  assert.match(source, /kind: result\.mediaKind/)
   assert.match(
     source,
     /function isCanvasAddableMediaResource\(node: TreeNode \| null \| undefined\): boolean/,
@@ -281,7 +281,7 @@ test('project file tree uses native Web file interactions and local binary data'
   assert.match(source, /mode="file"/)
   assert.match(
     source,
-    /function emitMediaToCanvas[\s\S]*?'canvas:add-media', \{\s+projectId: resource\.owner,\s+path: resource\.path,\s+kind/,
+    /media\.push\(\{\s+projectId: result\.resource\.owner,\s+path: result\.resource\.path,\s+kind: result\.mediaKind/,
   )
   assert.match(source, /node\.mimeType\?\.startsWith\('audio\/'\)/)
   assert.match(viewer, /mode\?: 'creation' \| 'file'/)
@@ -296,7 +296,8 @@ test('memory file-tree canvas action bypasses preview and opens the creation hos
   const action = source.match(/async function ctxOpenInCanvas[\s\S]*?\n}/)?.[0] || ''
 
   assert.match(action, /openProjectResource/)
-  assert.match(action, /emitMediaToCanvas/)
+  assert.match(action, /emitEvent\('canvas:add-media'/)
+  assert.match(action, /emitEvent\('switch-panel', 'creation'\)/)
   assert.doesNotMatch(action, /openFile\(/)
   assert.match(source, /application\/x-jc-media-reference/)
 })
@@ -620,4 +621,36 @@ test('reference to chat sends every selected image in one event', async () => {
     (name: string, payload: any) => events.push([name, payload]), () => true,
     (node: { path: string }) => images.find(image => image.path === node.path))
   assert.deepEqual(events.filter(([name]) => name === 'media-reference:add').map(([, payload]) => payload.resources), [images])
+})
+
+test('加入画布将所选媒体一次投递，跳过目录、文档和3D资源', async () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/filetree/ProjectFileTree.vue'), 'utf8')
+  const start = source.indexOf('async function ctxOpenInCanvas() {')
+  const body = source.slice(start + 'async function ctxOpenInCanvas() {'.length, source.indexOf('\n}', start))
+  const events: unknown[][] = []
+  const opened: string[] = []
+  const resources = [
+    { name: 'folder', isDirectory: true, kind: 'media' },
+    { name: 'note.md', kind: 'text' },
+    ...['image', 'video', 'audio', 'model3d'].map(name => ({ name, kind: 'media' })),
+  ]
+  const run = new Function('selectedResources', 'closeCtxMenu', 'openProjectResource', 'projectFiles', 'emitEvent', 'errorMsg', `return (async () => {${body}})()`)
+  await run(() => resources, () => {}, async (_files: unknown, resource: { name: string }) => {
+    opened.push(resource.name)
+    return { type: 'media', resource, mediaKind: resource.name }
+  }, {}, (...args: unknown[]) => events.push(args), { value: '' })
+  assert.deepEqual(opened, ['image', 'video', 'audio', 'model3d'])
+  assert.deepEqual(events, [
+    ['canvas:add-media', { resources: resources.slice(2, 5).map(resource => ({
+      projectId: undefined, path: undefined, kind: resource.name, label: resource.name,
+    })) }],
+    ['switch-panel', 'creation'],
+  ])
+})
+
+test('画布的实时事件与挂载前缓存共用批量媒体接收逻辑', () => {
+  const source = readFileSync(join(process.cwd(), 'src/components/creation/CreationPanel.vue'), 'utf8')
+  assert.match(source, /if \(Array\.isArray\(payload\?\.resources\)\) \{\s+for \(const resource of payload\.resources\) await addFileTreeMediaToCanvas\(resource\)\s+return/)
+  assert.match(source, /onEvent\('canvas:add-media',[\s\S]*?addFileTreeMediaToCanvas\(payload\)/)
+  assert.match(source, /consumeLastEvent\('canvas:add-media'\)[\s\S]*?addFileTreeMediaToCanvas\(payload\)/)
 })

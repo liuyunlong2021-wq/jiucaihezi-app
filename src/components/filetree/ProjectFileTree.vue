@@ -1242,27 +1242,27 @@ function previewType(node: TreeNode | null | undefined): FilePreview['type'] | n
   if (ext === 'glb' || ext === 'gltf') return 'model3d'
   return null
 }
-function emitMediaToCanvas(resource: ProjectResource, kind: 'image' | 'video' | 'audio') {
-  emitEvent('canvas:add-media', {
-    projectId: resource.owner,
-    path: resource.path,
-    kind,
-    label: resource.name,
-  })
-  emitEvent('switch-panel', 'creation')
-}
-
 async function ctxOpenInCanvas() {
-  const n = ctxMenu.value.node
+  const resources = selectedResources().filter(resource => !resource.isDirectory && resource.kind === 'media')
   closeCtxMenu()
-  if (!n || n.isDir) return
-  try {
-    const result = await openProjectResource(projectFiles, resourceForNode(n))
-    if (result.type === 'media' && result.mediaKind !== 'model3d')
-      emitMediaToCanvas(result.resource, result.mediaKind)
-  } catch (error) {
-    errorMsg.value = `加入画布失败: ${error instanceof Error ? error.message : String(error)}`
+  const media = []
+  for (const resource of resources) {
+    try {
+      const result = await openProjectResource(projectFiles, resource)
+      if (result.type === 'media' && result.mediaKind !== 'model3d')
+        media.push({
+          projectId: result.resource.owner,
+          path: result.resource.path,
+          kind: result.mediaKind,
+          label: result.resource.name,
+        })
+    } catch (error) {
+      errorMsg.value = `加入画布失败: ${error instanceof Error ? error.message : String(error)}`
+    }
   }
+  if (!media.length) return
+  emitEvent('canvas:add-media', { resources: media })
+  emitEvent('switch-panel', 'creation')
 }
 async function ctxReferenceInChat() {
   const node = ctxMenu.value.node

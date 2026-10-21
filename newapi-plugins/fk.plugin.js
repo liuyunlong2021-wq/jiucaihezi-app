@@ -79,7 +79,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.6',
+  version: '0.3.7',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -482,7 +482,6 @@ export function parseSubmitResponse(ctx, resp) {
   if (isImageModel(ctx)) {
     if (body.success === false) fail(imageError(body))
     const status = String(body.status || '').toLowerCase()
-    const urls = imageResultUrls(body)
     const taskId = body.jobId || body.job_id
     if (!taskId) fail('Fk image generation did not return a jobId')
     if (status === 'failed') {
@@ -492,9 +491,7 @@ export function parseSubmitResponse(ctx, resp) {
         immediate: { status: 'FAILURE', reason: imageError(body) },
       }
     }
-    if (status === 'success' && body.resultAvailable !== false && urls.length) {
-      return { taskId: String(taskId), taskData: body, immediate: { status: 'SUCCESS' } }
-    }
+    // openai_image 的即时终态不保留结果；查询原 jobId 后完成，复用宿主持久化。
     return { taskId: String(taskId), taskData: body }
   }
   if (!compatibilityVideo(ctx)) {
@@ -583,10 +580,20 @@ function settledTokenBilling(billing) {
 }
 
 export function listArtifacts(task) {
-  return task.status === 'SUCCESS' ? [{ key: 'video', type: 'video', mimeType: 'video/mp4' }] : []
+  if (task.status !== 'SUCCESS') return []
+  if (task.action === 'text_to_image' || task.action === 'image_to_image') {
+    return imageResultUrls(task.data).map((url, index) => ({ key: 'image_' + index, type: 'image' }))
+  }
+  return [{ key: 'video', type: 'video', mimeType: 'video/mp4' }]
 }
 
 export function buildContentRequest(ctx) {
+  if (ctx.action === 'text_to_image' || ctx.action === 'image_to_image') {
+    const match = /^image_(0|[1-9][0-9]*)$/.exec(ctx.artifactKey)
+    const url = match && imageResultUrls(ctx.data)[Number(match[1])]
+    if (!url) fail('artifact_not_found')
+    return { url, method: ctx.clientRequest.method, credentialless: true }
+  }
   if (ctx.artifactKey !== 'video') fail('artifact_not_found')
   const data = snapshot(ctx.data)
   const url = videoResultUrl(data) || videoResultUrl(snapshot(data.data))

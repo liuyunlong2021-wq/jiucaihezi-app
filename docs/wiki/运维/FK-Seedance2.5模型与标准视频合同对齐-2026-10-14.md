@@ -1,5 +1,13 @@
 # FK Seedance 2.5 模型与标准视频合同对齐
 
+## 2026-10-22 图片成功但结果未保留（0.3.7，本地修复）
+
+合同卡：仅FK图片成功生命周期与图片制品声明/取回；不改模型、价格、素材提交、视频或历史账务。渠道150的三笔text_to_image成功任务data为SQL NULL、result_url非空；不能据此宣称上游文件已丢失或URL仍有效。固定宿主 `0aec08fee811ec6136828fda790551b49e410301` 的 `docs/plugin-api/v1.md` 说明openai_image即时终态直接交付且丢弃持久结果；后台 `resolveTaskPreviewMode` 根据result_discarded显示“结果未保留”，仅增加listArtifacts不能解除该标记。
+
+0.3.7不再为图片提交成功返回immediate，而用已有GET image/status查询同一jobId后完成，复用宿主持久化，不重提生成；同步OpenAI图片返回格式不变，但多一次查询等待。制品按宿主真实action（制品上下文没有model）区分图片与视频；每张HTTPS图片声明image_N，通过credentialless GET/HEAD取回，不猜MIME。保留0.3.6零用量退款保护。
+
+G0回归先复现immediate SUCCESS；G1–G2：FK19/19、全部插件149/149通过，覆盖原任务查询、多图列表/内容、签名URL、不带上游鉴权、非法编号/越界/非HTTPS拒绝、图片响应格式与视频保留。G3上传激活、G4真实生成、G5后台查看/下载、G6实际账单待验收；未运行真实宿主集成测试。不恢复历史result_discarded任务，不修改数据库。上传 `newapi-plugins/fk.plugin.js` 0.3.7前备份当前激活版本；旧任务是否使用生产时插件版本由宿主决定。
+
 ## 2026-10-21 成功任务被零用量结算全额退款（0.3.6，本地修复）
 
 合同卡：仅修改 FK 插件完成用量提取；模型、价格表达式、素材、提交/查询/结果取回与历史账务不变。用户提供生产只读 SQL：渠道149的三笔成功任务最终 quota=0，其中 `task_NIi2lxUYaeydborbZ5j9cYMepkZ6pwfJ` 的结算日志显示预扣5500000、实际0、全额退款；完成响应无 duration/seconds/resolution，billing=null。生产插件缺失字段仍返回零用量。完成 hook 未获得有效请求回退值的具体宿主原因尚未查明。
