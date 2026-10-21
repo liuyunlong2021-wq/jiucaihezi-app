@@ -65,7 +65,7 @@
     "id": "jc-duanju",
     "name": "jc-duanju",
     "displayName": "jc-duanju",
-    "description": "短剧写作总路由：小说或已有短剧改编、原创短剧、项目资料、改编策划、分集规划、逐集写作与Wiki归档。按当前阶段调用内置子Skill，支持已有资料复用和中断续做。",
+    "description": "短剧写作总路由：改编按原作落袋、确定新皮、原文组合分集、逐集换皮推进，完整继承原文并自动归档；保留原创、扩写、续写、润色与中断续做。",
     "triggers": [
       "写短剧",
       "创作短剧",
@@ -100,7 +100,7 @@
     "id": "jc-duanju-cehua",
     "name": "jc-duanju-cehua",
     "displayName": "jc-duanju-cehua",
-    "description": "以原作项目资料制定改编思路，联动重建新版世界、人物关系、场景道具及事件阶段，再确定整体改编方案。用于小说或已有短剧的改编策划，也承接原创多集的核心设定与整体方案，不写逐集剧本。",
+    "description": "确定六类可组合换皮方向、核心梗及人物关系背景规则的必要替换资料，默认完整继承原文，不重编平行故事；也承接原创多集的核心设定与整体方案，不写逐集剧本。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -121,7 +121,7 @@
     "id": "jc-duanju-fenji",
     "name": "jc-duanju-fenji",
     "displayName": "jc-duanju-fenji",
-    "description": "根据新版项目资料和整体改编方案，规划故事阶段容量与逐集事件、人物状态、钩子及承接。用于分集大纲和分集重排，不替代原作资料提取或逐集文学剧本。",
+    "description": "根据原文与新皮资料，组合情绪关联、选择强开头和集尾钩子并按体量分集，保留原文全部内容；也承接原创多集规划与已有分集重排，不写正文。",
     "triggers": [],
     "commands": [],
     "files": [
@@ -142,7 +142,7 @@
     "id": "jc-duanju-xiezuo",
     "name": "jc-duanju-xiezuo",
     "displayName": "jc-duanju-xiezuo",
-    "description": "根据新版项目资料、已确认整体方案与分集规划，创作、续写或修订短剧文学剧本；也承接原创单集与单场戏。不生成工程台本。",
+    "description": "按分集规划直接读取原文、排列组合并用新项目资料换皮，保留全部内容，自检后归档；也承接原创、扩写、续写与润色。不生成工程台本。",
     "triggers": [],
     "commands": [],
     "files": [
