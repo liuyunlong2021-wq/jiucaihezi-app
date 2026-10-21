@@ -1,6 +1,5 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createWikiArtifactTool } from './manju-wiki.mjs'
 
 // 在当前 agent 的官方 SkillRegistry 层登记内置版本，优先于同名用户／项目文件。
 // 模型上下文仍只注入用户点名的入口，子 Skill 由路由器按需读取资源。
@@ -8,8 +7,7 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
   const hasManju = names.includes('jc-manju-zhizuo')
   const hasNovel = names.includes('jc-novel')
   const hasShortDrama = names.includes('jc-duanju')
-  const hasWikiMemory = names.includes('wiki-memory') || hasManju || hasNovel || hasShortDrama
-  if (!hasWikiMemory) return () => {}
+  if (!hasManju && !hasNovel && !hasShortDrama) return () => {}
   const agent = rec.handle.agent
   if (!directory) throw new Error('内置创作与 Wiki 资源目录不可用')
   if (Number(hasManju) + Number(hasNovel) + Number(hasShortDrama) > 1)
@@ -27,16 +25,10 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
   const routeLabel = hasManju ? '漫剧制作' : hasNovel ? '小说创作' : '短剧写作'
   if (unsupported.length) throw new Error(`${routeLabel}路线不能同时加载 ${unsupported.join('、')}；请先退出当前路线。`)
   const skillNames = [...new Set([
-    'wiki-memory',
     ...(route?.skills || []),
     ...(hasNovel ? ['jc-novel'] : []),
     ...(hasShortDrama ? ['jc-duanju'] : []),
   ])]
-  const artifactContract = JSON.parse(await readFile(join(directory, 'wiki-artifacts.json'), 'utf8'))
-  if (!artifactContract || typeof artifactContract.types !== 'object' || !Array.isArray(artifactContract.rootCandidates)
-    || !Array.isArray(artifactContract.rootMarkers) || !artifactContract.scaffold
-    || !Number.isSafeInteger(artifactContract.minimumRootMarkers) || artifactContract.minimumRootMarkers < 1)
-    throw new Error('共享 Wiki 归档合同无效')
   // 全部读回成功后再登记，避免坏包留下半套已注册状态。
   const loadSkill = async (name, signal) => {
     const base = join(directory, name)
@@ -58,8 +50,8 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
   if (rec.handle.agent !== agent) throw new Error(`${routeLabel} Agent 已替换`)
   let ready = false
   const plugin = agent.ctx.plugin({
-    name: 'jiucaihezi-wiki-memory',
-    inject: ['skills', 'tools', 'fs', 'sandboxPolicy'],
+    name: 'jiucaihezi-production-skills',
+    inject: ['skills'],
     apply(ctx) {
       // 官方 provider 的目录可以缓存，get() 的正文按需读盘；不将旧正文固定在 Agent 生命周期内。
       const providerName = 'jiucaihezi-bundled'
@@ -73,8 +65,6 @@ export async function pinManjuSkills(rec, names, directory = process.env.DSH_BUN
           return { ...await loadSkill(candidate.locator, options.signal), provider: providerName }
         },
       }))
-      const disposeTool = ctx.tools.register(createWikiArtifactTool(ctx, artifactContract, agent))
-      ctx.effect(() => () => disposeTool())
       ready = true
     },
   })

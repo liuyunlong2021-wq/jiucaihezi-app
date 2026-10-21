@@ -202,6 +202,21 @@ const cancelSessionMethod = `\tasync cancelSession(params) {
 \t}
 `
 const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
+\t\tif (this.nativeWikiScopes === void 0) this.nativeWikiScopes = new WeakMap();
+\t\tconst nativeAgent = rec.handle.agent;
+\t\tthis.assertLiveAgent(rec, nativeAgent.id);
+\t\tif (!this.nativeWikiScopes.has(nativeAgent)) {
+\t\t\tthis.nativeWikiScopes.set(nativeAgent, (async () => {
+\t\t\t\tconst disposeWiki = await attachWikiRuntime(rec);
+\t\t\t\ttry {
+\t\t\t\t\tconst disposePresent = await attachPresent(rec);
+\t\t\t\t\ttry { this.assertLiveAgent(rec, nativeAgent.id); } catch (error) { await disposePresent(); throw error; }
+\t\t\t\t\treturn async () => { try { await disposePresent(); } finally { await disposeWiki(); } };
+\t\t\t\t} catch (error) { await disposeWiki(); throw error; }
+\t\t\t})());
+\t\t}
+\t\ttry { await this.nativeWikiScopes.get(nativeAgent); }
+\t\tcatch (error) { this.nativeWikiScopes.delete(nativeAgent); throw error; }
 \t\tif (this.pinnedSkillScopes === void 0) this.pinnedSkillScopes = new WeakMap();
 \t\tlet names = [];
 \t\ttry {
@@ -252,6 +267,7 @@ const pinnedSkillLookup = `\tasync pinnedSkillNames(rec, content) {
 \t\t\tif (block.type !== "text") continue;
 \t\t\tfor (const match of block.text.matchAll(SKILL_GESTURE)) {
 \t\t\t\tconst name = match[2];
+\t\t\t\tif (name === "wiki-memory" || name === "project-wiki") continue;
 \t\t\t\tif (name === void 0 || names.includes(name)) continue;
 \t\t\t\tif (["jc-manju-zhizuo", "jc-novel", "jc-duanju"].includes(name)) { names.push(name); continue; }
 \t\t\t\tconst skill = await this.ctx.skills.get(name, {
@@ -267,12 +283,14 @@ const pinnedSkillLookup = `\tasync pinnedSkillNames(rec, content) {
 `
 
 // 更新生成的作用域方法时先移除旧版，避免旧方法覆盖新版或重复声明导入。
-server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable) \} from .*;\n/gm, '')
+server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable|attachWikiRuntime, attachPresent) \} from .*;\n/gm, '')
 server = server.split(skillGesture).join('')
 server = server.replace(/^const SKILL_GESTURE = .*;\n/gm, '')
 server = server.replace(/\tasync applyPinnedSkillScope\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
+server = server.replace(/\tasync pinnedSkillNames\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
 
 const imports = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
+  + 'import { attachWikiRuntime, attachPresent } from "../../../../wiki-runtime.mjs";\n'
   + 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
   + 'import { setWikiSourceContent } from "../../../../manju-wiki.mjs";\n'
   + 'import { isUserInvocable } from "@deepseek-ai/dsh-skill";\n'

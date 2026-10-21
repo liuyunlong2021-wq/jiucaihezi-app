@@ -28,6 +28,7 @@ import {
   deepSeekSessionReasoning,
   deepSeekSessionFailures,
   deepSeekSessionTurns,
+  deepSeekDeliverables,
   deepSeekTurnError,
   DEEPSEEK_PROCESS_RESULT_LIMIT,
 } from '@/services/deepSeekHarness'
@@ -63,7 +64,7 @@ test('an unopened catalog conversation is not mistaken for an existing Harness s
 test('DeepSeek Harness invokes UI-selected skills through native skill gestures', () => {
   assert.equal(
     deepSeekPrompt('执行任务', ['wiki-memory', 'skill-creator']),
-    '/wiki-memory /skill-creator\n\n执行任务',
+    '/skill-creator\n\n请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n执行任务',
   )
   assert.equal(deepSeekPrompt('执行任务', []), '执行任务')
 })
@@ -97,7 +98,7 @@ test('production skill routing does not replace the user request or leak into vi
     data: { id: 'u1', source: { kind: 'user' }, content: [{ type: 'text', text: prompt }] },
   }] })
   assert.equal(turns[0]?.content, request)
-  assert.equal(deepSeekPrompt('继续', ['wiki-memory']), '/wiki-memory\n\n继续')
+  assert.equal(deepSeekPrompt('继续', ['wiki-memory']), '请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n继续')
   const withWiki = deepSeekPrompt('续写本章', ['jc-novel', 'wiki-memory'], [], '<wiki_index path="wiki/index.md"># 项目</wiki_index>')
   assert.ok(withWiki.indexOf('<wiki_index') < withWiki.indexOf('续写本章'))
   assert.match(withWiki, /jc-novel/)
@@ -107,9 +108,9 @@ test('creative buttons send native skill gestures and project context without du
   const request = '只修改刚才选中的片段，不要保存'
   const wiki = '<wiki_index path="wiki/index.md"># 已有项目</wiki_index>'
   for (const name of ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju']) {
-    assert.equal(deepSeekPrompt(request, [name, 'wiki-memory']), `/${name} /wiki-memory\n\n${request}`)
+    assert.equal(deepSeekPrompt(request, [name, 'wiki-memory']), `/${name}\n\n请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n${request}`)
     assert.equal(deepSeekPrompt(request, [name, 'wiki-memory'], [], wiki),
-      `/${name} /wiki-memory\n\n${wiki}\n\n【本轮消息】\n\n${request}`)
+      `/${name}\n\n请使用项目 Wiki 原生能力处理本轮任务。\n\n${wiki}\n\n【本轮消息】\n\n${request}`)
   }
 })
 
@@ -1229,4 +1230,24 @@ test('cloud Claude uses native Messages while custom providers keep their declar
     assert.equal(deepSeekModelRoute(input).api, 'openai-completions')
     assert.ok(deepSeekModelRoute(input).baseURL.endsWith('/v1'))
   }
+})
+
+test('official deliveries survive history projection, deduplicate per turn and never appear on user messages', () => {
+  const snapshot = { session: { id: 's' }, events: [
+    { type: 'user/message', surfaceOp: 'append', time: 1, data: { id: 'u', content: [{ type: 'text', text: '写剧本' }], source: { kind: 'user' }, surfaceOp: 'append' } },
+    { type: 'assistant/message', surfaceOp: 'append', time: 2, data: { message: { id: 'a', content: [{ type: 'text', text: '已保存' }] }, turn: 1, surfaceOp: 'append' } },
+    { type: 'deliverables/presented', data: { turn: 1, callId: 'p', files: [{ path: '/project/wiki/剧本.md', description: '剧本' }, { path: '/project/wiki/剧本.md' }, { path: 'https://evil.test/a' }] } },
+    { type: 'turn/end', time: 3, data: { turn: 1 } },
+  ] }
+  const assistant = deepSeekSessionTurns(snapshot).find(turn => turn.role === 'assistant')
+  assert.deepEqual(assistant?.deliverables, [{ path: '/project/wiki/剧本.md', description: '剧本' }])
+})
+
+test('official delivery projection handles Windows paths and keeps separate turn ownership', () => {
+  const events = [
+    { type: 'deliverables/presented', data: { turn: 1, files: [{ path: 'C:\\项目\\剧本.md' }, { path: '\\\\server\\share\\角色.png' }, { path: '/x/../secret' }] } },
+    { type: 'deliverables/presented', data: { turn: 2, files: [{ path: '/project/下一集.md' }] } },
+  ]
+  assert.deepEqual(deepSeekDeliverables(events, 1).map(file => file.path), ['C:\\项目\\剧本.md', '\\\\server\\share\\角色.png'])
+  assert.deepEqual(deepSeekDeliverables(events, 2), [{ path: '/project/下一集.md' }])
 })

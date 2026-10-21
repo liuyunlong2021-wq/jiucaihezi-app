@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { cpSync, mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { test } from 'node:test'
@@ -13,6 +13,7 @@ function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'jc-manju-test-'))
   t.after(() => rmSync(root, { recursive: true, force: true }))
   writeFileSync(join(root, 'manju-route.json'), JSON.stringify({ router: 'jc-manju-zhizuo', skills: ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance'] }))
+  cpSync('public/skills/wiki-native', join(root, 'wiki-native'), { recursive: true })
   writeFileSync(join(root, 'wiki-artifacts.json'), readFileSync('public/skills/wiki-artifacts.json', 'utf8'))
   for (const name of ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance', 'wiki-memory', 'jc-novel']) {
     mkdirSync(join(root, name))
@@ -54,20 +55,20 @@ function fixture(t) {
   return { root, rec, registered, registeredTools }
 }
 
-test('both production routes pin wiki-memory and expose one shared wiki writer in the agent scope', async t => {
+test('production scopes pin only production Skills; the native Wiki writer has an independent lifecycle', async t => {
   const { root, rec, registered, registeredTools } = fixture(t)
   const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo', 'wiki-memory'], root)
-  assert.deepEqual([...registered.keys()], ['wiki-memory', 'jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance'])
+  assert.deepEqual([...registered.keys()], ['jc-manju-zhizuo', 'h3-prompt-writing', 'jc-seedance'])
   assert.equal(registered.get('jc-seedance').resourceBase.path, join(root, 'jc-seedance'))
   assert.match(registered.get('jc-seedance').content, /# jc-seedance/)
-  assert.ok(registeredTools.has('wiki_save_artifact'))
+  assert.equal(registeredTools.has('wiki_save_artifact'), false)
   await dispose()
   assert.equal(registered.size, 0)
   assert.equal(registeredTools.size, 0)
 
   const novel = await pinManjuSkills(rec, ['jc-novel', 'wiki-memory'], root)
-  assert.deepEqual([...registered.keys()], ['wiki-memory', 'jc-novel'])
-  assert.ok(registeredTools.has('wiki_save_artifact'))
+  assert.deepEqual([...registered.keys()], ['jc-novel'])
+  assert.equal(registeredTools.has('wiki_save_artifact'), false)
   await novel()
   assert.equal(registered.size, 0)
   assert.equal(registeredTools.size, 0)
@@ -88,7 +89,7 @@ test('the actual production package registers brainstorm with its resource base 
   const directory = fileURLToPath(new URL('../../public/skills/', import.meta.url))
   const route = JSON.parse(readFileSync(join(directory, 'manju-route.json'), 'utf8'))
   const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo', 'jc-manju-brainstorm', 'wiki-memory'], directory)
-  assert.deepEqual([...registered.keys()], ['wiki-memory', ...route.skills])
+  assert.deepEqual([...registered.keys()], [...route.skills])
   const brainstorm = registered.get('jc-manju-brainstorm')
   assert.equal(brainstorm.source, 'bundled')
   assert.equal(brainstorm.invocation.modelInvocable, true)
@@ -190,6 +191,9 @@ async function realFixture(t, tools) {
   const service = await ctx.plugin(SkillRegistry)
   ctx.provide('tools', { register() { return () => {} }, ...tools })
   ctx.provide('fs', { sandboxMode: undefined })
+  ctx.provide('systemPrompt', { section() { return () => {} } })
+  ctx.provide('sessionProjections', { stateOf() {} })
+  ctx.provide('workingDirectory', { ensure() { return process.cwd() } })
   ctx.provide('sandboxPolicy', { resolve() { return { mode: 'workspace-write', workspaceRoot: process.cwd() } } })
   const agents = []
   const owner = await ctx.plugin({ name: 'agent-loop-context', inject: tools ? ['tools'] : [], apply(c) {
@@ -223,13 +227,13 @@ test('a partially failed registration is rolled back and can be retried', async 
   const f = await realFixture(t)
   if (!f) return
   const { rec } = f.agents[0]
-  const tools = f.ctx.get('tools')
-  const original = tools.register
-  tools.register = () => { throw new Error('registration failure') }
+  const registry = f.ctx.skills
+  const original = registry.registerProvider
+  registry.registerProvider = () => { throw new Error('registration failure') }
   await assert.rejects(pinManjuSkills(rec, ['jc-manju-zhizuo'], f.root), /registration failure/)
   const lookup = { scope: rec.handle.agent, signal: new AbortController().signal }
   assert.deepEqual(await f.ctx.skills.list(lookup), [])
-  tools.register = original
+  registry.registerProvider = original
   await (await pinManjuSkills(rec, ['jc-manju-zhizuo'], f.root))()
   assert.deepEqual(await f.ctx.skills.list(lookup), [])
 })
@@ -269,7 +273,7 @@ test('SDK bindings reuse the same agent, rebind restored agents, and clean up af
   const lookup = () => ({ scope: rec.handle.agent, signal: new AbortController().signal })
   await assert.rejects(server.applyPinnedSkillScope(rec, production), /restriction failure/)
   assert.deepEqual(await f.ctx.skills.list(lookup()), [])
-  assert.equal(server.pinnedSkillScopes.has(rec.handle.agent), false)
+  assert.equal(server.pinnedSkillScopes?.has(rec.handle.agent) ?? false, false)
   failRestriction = false
   await server.applyPinnedSkillScope(rec, production)
   await server.applyPinnedSkillScope(rec, [{ type: 'text', text: '/jc-manju-zhizuo\nupdated source for the next turn' }])
@@ -279,7 +283,7 @@ test('SDK bindings reuse the same agent, rebind restored agents, and clean up af
   failRelease = true
   await assert.rejects(server.applyPinnedSkillScope(rec, ordinary), /release failure/)
   assert.deepEqual(await f.ctx.skills.list(lookup()), [])
-  assert.equal(server.pinnedSkillScopes.has(rec.handle.agent), false)
+  assert.equal(server.pinnedSkillScopes?.has(rec.handle.agent) ?? false, false)
   failRelease = false
   await server.applyPinnedSkillScope(rec, production)
   await server.applyPinnedSkillScope(rec, ordinary)
@@ -341,7 +345,7 @@ test('SDK rejects a disposed agent after bundle preparation and rolls back its p
   const server = Object.assign(Object.create(HarnessSdkJsonRpcServer.prototype), { ctx: f.ctx })
   await assert.rejects(server.applyPinnedSkillScope(rec, [{ type: 'text', text: '/jc-manju-zhizuo' }]), /disposed/)
   assert.deepEqual(await f.ctx.skills.list({ scope: rec.handle.agent, signal: new AbortController().signal }), [])
-  assert.equal(server.pinnedSkillScopes.has(rec.handle.agent), false)
+  assert.equal(server.pinnedSkillScopes?.has(rec.handle.agent) ?? false, false)
 })
 
 test('the actual SDK injects bundled skills before the model request and restores ordinary selection', { timeout: 45000 }, async t => {
@@ -425,4 +429,34 @@ test('short drama pins its complete route and shares project research without ex
   await dispose()
   assert.equal(registered.size, 0)
   await assert.rejects(pinManjuSkills(rec, ['jc-duanju', 'jc-seedance'], directory), /不能同时加载/)
+})
+
+test('production scope no longer publishes Wiki as a Skill or owns its writer', async t => {
+  const { root, rec, registered, registeredTools } = fixture(t)
+  const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo'], root)
+  assert.equal(registered.has('wiki-memory'), false)
+  assert.equal(registeredTools.has('wiki_save_artifact'), false)
+  await dispose()
+})
+
+test('concurrent ordinary SDK prompts share one native Wiki/present activation and legacy gestures do not restrict Skills', async t => {
+  let writers = 0, deliveries = 0, restrictions = 0
+  const f = await realFixture(t, { register(tool) {
+    if (tool.name === 'wiki_save_artifact') writers++
+    if (tool.name === 'present') deliveries++
+    return () => {}
+  }, restrict() { restrictions++; return () => {} } })
+  const { HarnessSdkJsonRpcServer } = await import('../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/lib/index.js')
+  const { rec } = f.agents[0]
+  f.ctx.provide('agents', { get: () => rec.handle.agent })
+  const server = Object.assign(Object.create(HarnessSdkJsonRpcServer.prototype), { ctx: f.ctx })
+  await Promise.all([
+    server.applyPinnedSkillScope(rec, [{ type: 'text', text: '/wiki-memory 查询项目资料' }]),
+    server.applyPinnedSkillScope(rec, [{ type: 'text', text: '普通聊天' }]),
+  ])
+  assert.equal(writers, 1)
+  assert.equal(deliveries, 1)
+  assert.equal(restrictions, 0)
+  const dispose = await server.nativeWikiScopes.get(rec.handle.agent)
+  await dispose()
 })

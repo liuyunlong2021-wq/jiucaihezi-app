@@ -1,3 +1,4 @@
+import { needsProjectWiki } from '@/runtime/memory/projectWiki'
 import { reactive, ref, shallowRef, watch } from 'vue'
 import type { DirectRunMetrics } from '@/runtime/direct/directTypes'
 import type { MemoryProgramStatus } from '@/runtime/memory/memoryChat'
@@ -16,6 +17,7 @@ import {
   deepSeekSessionProcess,
   deepSeekSessionReasoning,
   deepSeekSessionTurns,
+  deepSeekDeliverables,
   listDeepSeekHarnessSessions,
   readDeepSeekHarnessSession,
   runDeepSeekHarness,
@@ -71,6 +73,7 @@ export type MemoryRun = {
   elapsed: number
   metrics: DirectRunMetrics | null
   usage?: DeepSeekUsage
+  deliverables?: Array<{ path: string; description?: string }>
   inbox?: DeepSeekInboxItem[]
   userTurn: ConversationTurn | null
   programStatus: MemoryProgramStatus | null
@@ -283,7 +286,7 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
         userTurn.content,
         selected.skillNames || [],
         handoff,
-        selected.skillNames?.includes('wiki-memory') ? await buildWikiMemoryIndexContext(selected.owner) : '',
+        needsProjectWiki(userTurn.content, selected.skillNames || []) ? await buildWikiMemoryIndexContext(selected.owner) : '',
       ),
     })
   } catch (cause) {
@@ -524,7 +527,15 @@ export async function executeDesktopHarnessRun(
       onReasoning(text) { if (current()) run.reasoning = text },
       onUsage(usage) { if (current()) run.usage = usage },
       onSessionEvent(event) {
-        if (current()) run.inbox = applyDeepSeekInboxEvent(run.inbox || [], event)
+        if (current()) {
+          run.inbox = applyDeepSeekInboxEvent(run.inbox || [], event)
+          if (event?.type === 'turn/start') run.deliverables = []
+          if (event?.type === 'deliverables/presented') {
+            const existing = new Map((run.deliverables || []).map(file => [file.path, file]))
+            for (const file of deepSeekDeliverables([event])) if (!existing.has(file.path)) existing.set(file.path, file)
+            run.deliverables = [...existing.values()]
+          }
+        }
       },
       onProgress(progress) {
         if (!current()) return

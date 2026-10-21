@@ -207,6 +207,7 @@ const externalNodeTests = [
   'scripts/__tests__/novel-skill-routing.test.mjs',
   'scripts/__tests__/character-skill-resources.test.mjs',
   'scripts/__tests__/wiki-artifact-writer.test.mjs',
+  'scripts/__tests__/wiki-native.test.mjs',
   'scripts/__tests__/deepseek-permission.test.mjs',
   'scripts/__tests__/deepseek-harness-profile-plugins.test.mjs',
   'scripts/__tests__/legal-pages.test.mjs',

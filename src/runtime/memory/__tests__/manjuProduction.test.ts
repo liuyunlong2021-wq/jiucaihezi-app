@@ -129,12 +129,12 @@ test('unsent toggle preferences survive reopening without leaking to a new conve
   assert.deepEqual(restoreManjuSelection(['wiki-memory'], legacyPreference), [MANJU_ROUTER, WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreManjuSelection([MANJU_ROUTER], { enabled: false }), [])
   assert.deepEqual(restoreManjuSelection([], undefined), [])
-  assert.deepEqual(restoreManjuSelection(['jc-manju-minimaxh3'], undefined), [MANJU_ROUTER, WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreManjuSelection(['jc-manju-minimaxh3'], undefined), [MANJU_ROUTER])
   assert.deepEqual(restoreManjuSelection(['jc-daoyan-fenjing'], undefined), ['jc-seedance'])
   assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, 'jc-seedance', WIKI_MEMORY_SKILL], undefined), [MANJU_ROUTER, 'jc-seedance', WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, WIKI_MEMORY_SKILL], { enabled: false, wikiMemoryWasSelected: false }), [])
   assert.deepEqual(restoreManjuSelection([MANJU_ROUTER, WIKI_MEMORY_SKILL], { enabled: false, wikiMemoryWasSelected: true }), [WIKI_MEMORY_SKILL])
-  assert.deepEqual(restoreNovelSelection([], { enabled: true }), [NOVEL_SKILL, WIKI_MEMORY_SKILL])
+  assert.deepEqual(restoreNovelSelection([], { enabled: true }), [NOVEL_SKILL])
   assert.deepEqual(restoreNovelSelection([MANJU_ROUTER, WIKI_MEMORY_SKILL], { enabled: true }), [NOVEL_SKILL, WIKI_MEMORY_SKILL])
   assert.deepEqual(
     restoreNovelSelection([NOVEL_SKILL, 'skill-creator', WIKI_MEMORY_SKILL], { enabled: true }),
@@ -146,12 +146,12 @@ test('unsent toggle preferences survive reopening without leaking to a new conve
 
 test('short drama restores explicitly selected route skills and removes them on exit', async () => {
   const { SHORT_DRAMA_SKILLS, restoreShortDramaSelection } = await import('../shortDramaProduction')
-  const selected = ['jc-duanju', 'jc-duanju-cehua', 'wiki-memory']
+  const selected = ['jc-duanju', 'jc-duanju-cehua', WIKI_MEMORY_SKILL]
   assert.ok(SHORT_DRAMA_SKILLS.includes('jc-xiangmuziliao'))
   assert.deepEqual(restoreShortDramaSelection(selected, { enabled: true }), selected)
-  assert.deepEqual(restoreShortDramaSelection(selected, { enabled: false }), ['wiki-memory'])
+  assert.deepEqual(restoreShortDramaSelection(selected, { enabled: false }), [WIKI_MEMORY_SKILL])
   assert.deepEqual(restoreShortDramaSelection(selected, { enabled: false, wikiMemoryWasSelected: false }), [])
-  assert.deepEqual(restoreShortDramaSelection(['jc-duanju', 'jc-seedance']), ['jc-duanju', 'wiki-memory'])
+  assert.deepEqual(restoreShortDramaSelection(['jc-duanju', 'jc-seedance']), ['jc-duanju'])
 })
 
 
@@ -169,4 +169,18 @@ test('short drama route resources are packaged and all delegated links resolve i
       assert.ok(allowed.has(relative(resolve('public/skills'), target).split(/[\\/]/)[0]), target)
     }
   }
+})
+
+
+test('native Wiki remains independent of all three production Skill selections', async () => {
+  const { needsProjectWiki, nativeWikiSelection, PROJECT_WIKI } = await import('../projectWiki')
+  const { restoreShortDramaSelection } = await import('../shortDramaProduction')
+  assert.deepEqual(nativeWikiSelection(['wiki-memory', PROJECT_WIKI, 'skill-creator']), [PROJECT_WIKI, 'skill-creator'])
+  assert.deepEqual(restoreManjuSelection([], { enabled: true }), [MANJU_ROUTER])
+  assert.deepEqual(restoreNovelSelection([], { enabled: true }), [NOVEL_SKILL])
+  assert.deepEqual(restoreShortDramaSelection([], { enabled: true }), ['jc-duanju'])
+  for (const name of [MANJU_ROUTER, NOVEL_SKILL, 'jc-duanju', PROJECT_WIKI, 'wiki-memory'])
+    assert.equal(needsProjectWiki('继续', [name]), true)
+  assert.equal(needsProjectWiki('你好', []), false)
+  assert.equal(needsProjectWiki('查询项目 Wiki', []), true)
 })

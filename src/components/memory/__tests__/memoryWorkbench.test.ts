@@ -620,9 +620,9 @@ test('conversation lifecycle restores the latest Skill selection and clears it f
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
 
-test('novel mode keeps only its writer and the required Wiki dependency selected', () => {
+test('novel mode retains its writer and an independently selected native Wiki entry', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /selectedSkillNames\.value = \[NOVEL_SKILL, WIKI_MEMORY_SKILL\]/)
+  assert.match(workbench, /selectedSkillNames\.value = \[NOVEL_SKILL, \.\.\.selectedSkillNames\.value\.filter/)
   assert.match(workbench, /NOVEL_SKILLS\.includes\(skill\.name\)/)
 })
 
@@ -2290,4 +2290,12 @@ test('choosing @3D removes the trigger without deleting the draft after the care
     assert.equal(input.value, expected)
     assert.equal(editorText, expected)
   }
+})
+
+
+test('@Wiki Memory is a native tool entry and does not load the Skill catalog', async () => {
+  const fixture = mentionLoaderFixture(true)
+  const result = await fixture.load('wiki')
+  assert.deepEqual(result, [{ type: 'tool', id: 'wiki', display: 'Wiki Memory', description: '查询、整理项目资料与归档创作成果', icon: 'description' }])
+  assert.equal(fixture.calls.catalog, 0)
 })

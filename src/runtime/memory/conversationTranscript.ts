@@ -18,6 +18,8 @@ export interface ConversationTurn {
   role: 'user' | 'assistant'
   content: string
   createdAt: string
+  /** 官方交付事件的文件引用；不复制文件内容。 */
+  deliverables?: Array<{ path: string; description?: string }>
   attachments?: ConversationAttachment[]
   skillNames?: string[]
   toolChips?: string[]

@@ -169,7 +169,6 @@ test('App bundles only the remaining product Skills', () => {
     'jc-xiangmuziliao',
     'seedance-storyboard-assets',
     'skill-creator',
-    'wiki-memory',
   ]
   const directories = readdirSync('public/skills', { withFileTypes: true })
     .filter(entry => entry.isDirectory() && existsSync(join('public/skills', entry.name, 'SKILL.md')))

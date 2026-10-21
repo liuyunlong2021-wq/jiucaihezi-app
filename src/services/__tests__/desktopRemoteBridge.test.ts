@@ -480,3 +480,18 @@ test('DH cancellation removes the card and explicit sandbox denials produce a pe
     return 'OK'
   })
 })
+
+test('live official deliveries deduplicate and clear at the next turn without trusting failed tool calls', async () => {
+  const { runs, run } = approvalRun()
+  await executeDesktopHarnessRun(runs, run, permissionInput, async input => {
+    input.onSessionEvent?.({ type: 'tool/result', data: { message: { isError: true } } })
+    assert.equal(run.deliverables, undefined)
+    const event = { type: 'deliverables/presented', data: { turn: 1, callId: 'p', files: [{ path: '/permission-test/剧本.md' }] } }
+    input.onSessionEvent?.(event)
+    input.onSessionEvent?.(event)
+    assert.deepEqual(run.deliverables, [{ path: '/permission-test/剧本.md' }])
+    input.onSessionEvent?.({ type: 'turn/start', data: { turn: 2 } })
+    assert.deepEqual(run.deliverables, [])
+    return 'OK'
+  })
+})

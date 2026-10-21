@@ -1,3 +1,4 @@
+import { needsProjectWiki, PROJECT_WIKI } from './projectWiki'
 import type { Scene3DHost } from './scene3dHost'
 import { useAgentStore } from '@/stores/agentStore'
 import wikiArtifactContract from '../../../public/skills/wiki-artifacts.json'
@@ -415,8 +416,8 @@ export async function runMemoryChat(input: MemoryChatInput): Promise<string> {
   })
 
   const customSkills = explicitCapabilitySelected ? agentStore.getCustomSkills() : []
-  const selectedSkillNames = selectedSkillNamesForInput(input)
-  const wikiMemorySelected = selectedSkillNames.includes('wiki-memory')
+  const selectedSkillNames = selectedSkillNamesForInput(input).filter(name => name !== PROJECT_WIKI && name !== 'wiki-memory')
+  const wikiMemorySelected = needsProjectWiki(latestUserText, input.selectedSkillNames || [])
   const customSkillsByName = new Map(customSkills.map(skill => [skill.name, skill]))
   let catalog: ReturnType<typeof mergeCreativeSkillCatalog> = []
   let catalogError = ''

@@ -52,6 +52,7 @@ import {
   type ConversationSplitPlan,
   type ConversationSplitResult,
 } from '@/runtime/memory/conversationSplit'
+import { needsProjectWiki } from '@/runtime/memory/projectWiki'
 import { buildWikiMemoryIndexContext, runMemoryChat, type MemoryProgramStatus } from '@/runtime/memory/memoryChat'
 import {
   DEEPSEEK_HARNESS_SESSION_MARKER,
@@ -322,7 +323,7 @@ function toggleManjuProduction() {
   const wikiMemoryWasSelected = currentWikiMemoryPreference()
   if (selectedSkillNames.value.some(name => !MANJU_SKILLS.includes(name) && name !== WIKI_MEMORY_SKILL))
     contextNotice.value = '已切换到漫剧制作路线；本对话使用内置漫剧 Skill。'
-  selectedSkillNames.value = [MANJU_ROUTER, WIKI_MEMORY_SKILL]
+  selectedSkillNames.value = [MANJU_ROUTER, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
   saveProductionPreferences({
     manju: { enabled: true, wikiMemoryWasSelected },
     novel: { enabled: false, wikiMemoryWasSelected },
@@ -334,7 +335,7 @@ function toggleNovelProduction() {
   if (novelSelected.value) {
     const preference = currentNovelPreference()
     selectedSkillNames.value = selectedSkillNames.value.filter(name =>
-      name !== NOVEL_SKILL && !(name === 'wiki-memory' && preference?.wikiMemoryWasSelected === false),
+      name !== NOVEL_SKILL && !(name === WIKI_MEMORY_SKILL && preference?.wikiMemoryWasSelected === false),
     )
     saveProductionPreferences({
       novel: { enabled: false, wikiMemoryWasSelected: preference?.wikiMemoryWasSelected },
@@ -346,7 +347,7 @@ function toggleNovelProduction() {
   const wikiMemoryWasSelected = currentWikiMemoryPreference()
   if (selectedSkillNames.value.some(name => name !== WIKI_MEMORY_SKILL && name !== NOVEL_SKILL))
     contextNotice.value = '已切换到小说创作路线；本对话使用内置小说 Skill。'
-  selectedSkillNames.value = [NOVEL_SKILL, WIKI_MEMORY_SKILL]
+  selectedSkillNames.value = [NOVEL_SKILL, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
   saveProductionPreferences({
     manju: { enabled: false, wikiMemoryWasSelected },
     novel: { enabled: true, wikiMemoryWasSelected },
@@ -368,7 +369,7 @@ function toggleShortDramaProduction() {
   const wikiMemoryWasSelected = currentWikiMemoryPreference()
   if (selectedSkillNames.value.some(name => !SHORT_DRAMA_SKILLS.includes(name)))
     contextNotice.value = '已切换到短剧写作路线；本对话使用内置短剧 Skill。'
-  selectedSkillNames.value = [SHORT_DRAMA_SKILL, WIKI_MEMORY_SKILL]
+  selectedSkillNames.value = [SHORT_DRAMA_SKILL, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
   saveProductionPreferences({
     manju: { enabled: false, wikiMemoryWasSelected },
     novel: { enabled: false, wikiMemoryWasSelected },
@@ -377,48 +378,9 @@ function toggleShortDramaProduction() {
 }
 
 function removeSelectedSkill(name: string) {
-  if (novelSelected.value && (name === NOVEL_SKILL || name === WIKI_MEMORY_SKILL)) {
-    const preference = currentNovelPreference()
-    selectedSkillNames.value = selectedSkillNames.value.filter(item =>
-      item !== NOVEL_SKILL && !(name === WIKI_MEMORY_SKILL && item === WIKI_MEMORY_SKILL)
-        && !(item === WIKI_MEMORY_SKILL && preference?.wikiMemoryWasSelected === false),
-    )
-    saveProductionPreferences({
-      novel: {
-        enabled: false,
-        wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected,
-      },
-      manju: { enabled: false, wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected },
-    })
-    return
-  }
-  if (manjuSelected.value && (name === MANJU_ROUTER || name === WIKI_MEMORY_SKILL)) {
-    const preference = currentManjuPreference()
-    selectedSkillNames.value = selectedSkillNames.value.filter(item =>
-      item !== MANJU_ROUTER && !(item === WIKI_MEMORY_SKILL && (name === WIKI_MEMORY_SKILL || preference?.wikiMemoryWasSelected === false)),
-    )
-    saveProductionPreferences({
-      manju: {
-        enabled: false,
-        wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected,
-      },
-    })
-    return
-  }
-  if (shortDramaSelected.value && (name === SHORT_DRAMA_SKILL || name === WIKI_MEMORY_SKILL)) {
-    const preference = currentShortDramaPreference()
-    selectedSkillNames.value = selectedSkillNames.value.filter(item =>
-      !SHORT_DRAMA_SKILLS.includes(item) || (item === WIKI_MEMORY_SKILL && name !== WIKI_MEMORY_SKILL && preference?.wikiMemoryWasSelected !== false),
-    )
-    saveProductionPreferences({
-      shortDrama: {
-        enabled: false,
-        wikiMemoryWasSelected: name === WIKI_MEMORY_SKILL ? false : preference?.wikiMemoryWasSelected,
-      },
-    })
-    return
-  }
   selectedSkillNames.value = selectedSkillNames.value.filter(item => item !== name)
+  if (name === MANJU_ROUTER) selectedSkillNames.value = selectedSkillNames.value.filter(item => !MANJU_SKILLS.includes(item))
+  if (name === SHORT_DRAMA_SKILL) selectedSkillNames.value = selectedSkillNames.value.filter(item => !SHORT_DRAMA_SKILLS.includes(item))
   saveProductionPreferences()
 }
 
@@ -637,6 +599,7 @@ async function revealEvalReport(path: string) {
 
 async function availableSkillNamesForComposer(): Promise<Set<string>> {
   return new Set([
+    WIKI_MEMORY_SKILL,
     ...(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name),
     ...agentStore.getCustomSkills().filter(skill => skill.enabled !== false).map(skill => skill.name),
   ])
@@ -1147,6 +1110,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   if (scope === 'session') return desktopOnlyRuntime ? sessionOptions() : []
   // 与芯片排保持一致：terminal 已并入 @文件，这里不再单列；3D 是桌面独有。
   const toolOptions: MemoryMentionOption[] = [
+    ...(desktopOnlyRuntime ? [{ type: 'tool' as const, id: 'wiki', display: 'Wiki Memory', description: '查询、整理项目资料与归档创作成果', icon: 'description' }] : []),
     { type: 'tool', id: 'skill', display: 'Skill', description: '加载指定 Skill', icon: 'psychology' },
     { type: 'tool', id: 'file', display: '文件', description: '读取、写入和管理文件', icon: 'description' },
     ...(desktopOnlyRuntime
@@ -1175,7 +1139,7 @@ const mentionItems = async (query: string): Promise<MemoryMentionOption[]> => {
   const bundledSkills = await loadWebSkillCatalog().catch(() => [])
   if (!mentionOpen.value || mentionScope.value !== scope) return []
   const skillOptions = [
-    ...bundledSkills.map(skill => ({
+    ...bundledSkills.filter(skill => skill.name !== 'wiki-memory').map(skill => ({
       type: 'skill' as const,
       display: skill.displayName,
       description: skill.description || '韭菜盒子内置 Skill',
@@ -1250,10 +1214,12 @@ const conversationTurns = computed(() => {
 })
 const timelineTurns = computed<ConversationTurn[]>(() => {
   const turns = pendingUserTurn.value ? [...conversationTurns.value, pendingUserTurn.value] : conversationTurns.value
-  if (!streamingText.value) return turns
+  const deliverables = activeRun.value?.officialHistoryReady ? undefined : activeRun.value?.deliverables
+  if (!streamingText.value && !deliverables?.length) return turns
   return [...turns, {
     id: 'streaming-assistant',
     role: 'assistant',
+    deliverables,
     content: streamingText.value,
     createdAt: new Date().toISOString(),
   }]
@@ -1437,6 +1403,7 @@ function harnessProcessSummary(turnId: string): string {
 function turnHasBody(turn: ConversationTurn): boolean {
   return turn.role === 'user'
     || Boolean(displayTurnContent(turn))
+    || Boolean(turn.deliverables?.length)
     || turnAttachments(turn).length > 0
     || sceneCards(turn).length > 0
     || Boolean(programStatusFor(turn.id))
@@ -1609,7 +1576,7 @@ async function queueDraft() {
       materializeChatAttachments(attachmentSnapshot),
       harnessSessionInput(active),
     ])
-    const wikiContext = skillSnapshot.includes(WIKI_MEMORY_SKILL)
+    const wikiContext = needsProjectWiki(text, skillSnapshot)
       ? await buildWikiMemoryIndexContext(active.resource.owner)
       : ''
     await queueDeepSeekHarnessMessage({
@@ -2444,6 +2411,10 @@ function insertCommand(command: { id: string; label: string }) {
 }
 
 function enableTool(id: string) {
+  if (id === 'wiki') {
+    if (!selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)) selectedSkillNames.value.push(WIKI_MEMORY_SKILL)
+    saveProductionPreferences()
+  }
   if (id === 'file') setPermissionTier('danger-full-access')
   if (id === 'mcp') insertCommand({ id: 'mcp', label: '@MCP' })
   if (id.startsWith('mcp__') && !selectedMcpToolNames.value.includes(id)) selectedMcpToolNames.value.push(id)
@@ -2881,7 +2852,7 @@ async function send(remoteText?: string) {
       run.harnessModel = dhConfig.model
       run.harnessProviderId = selectedModel()?.providerId
     }
-    const dhWikiContext = useHarness && skillSnapshot.includes(WIKI_MEMORY_SKILL)
+    const dhWikiContext = useHarness && needsProjectWiki(userTurn.content, skillSnapshot)
       ? await buildWikiMemoryIndexContext(active.resource.owner)
       : ''
     // 图片能不能送达取决于所选模型声明的输入模态；看不见就得说出来，
@@ -3562,7 +3533,10 @@ async function selectMention(option: MemoryMentionOption) {
         keepMenuOpen = true
       } else enableTool(option.id)
     } else if (option.type === 'tool') {
-      if (option.id.startsWith('mcp__')) {
+      if (option.id === 'wiki') {
+        if (!selectedSkillNames.value.includes(WIKI_MEMORY_SKILL)) selectedSkillNames.value.push(WIKI_MEMORY_SKILL)
+        saveProductionPreferences()
+      } else if (option.id.startsWith('mcp__')) {
         if (!selectedMcpToolNames.value.includes(option.id)) selectedMcpToolNames.value.push(option.id)
       } else if (option.id === 'skill') {
         pickerAfterReplacement = 'skill'
@@ -3583,7 +3557,7 @@ async function selectMention(option: MemoryMentionOption) {
         throw new Error('请先退出短剧写作，再选择其他路线的 Skill。')
       if (option.name === MANJU_ROUTER) {
         const wikiMemoryWasSelected = currentWikiMemoryPreference()
-        selectedSkillNames.value = [MANJU_ROUTER, WIKI_MEMORY_SKILL]
+        selectedSkillNames.value = [MANJU_ROUTER, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
         saveProductionPreferences({
           manju: { enabled: true, wikiMemoryWasSelected },
           novel: { enabled: false, wikiMemoryWasSelected },
@@ -3591,7 +3565,7 @@ async function selectMention(option: MemoryMentionOption) {
         })
       } else if (option.name === NOVEL_SKILL) {
         const wikiMemoryWasSelected = currentWikiMemoryPreference()
-        selectedSkillNames.value = [NOVEL_SKILL, WIKI_MEMORY_SKILL]
+        selectedSkillNames.value = [NOVEL_SKILL, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
         saveProductionPreferences({
           manju: { enabled: false, wikiMemoryWasSelected },
           novel: { enabled: true, wikiMemoryWasSelected },
@@ -3600,7 +3574,7 @@ async function selectMention(option: MemoryMentionOption) {
         recordSkillUse(option.name)
       } else if (option.name === SHORT_DRAMA_SKILL) {
         const wikiMemoryWasSelected = currentWikiMemoryPreference()
-        selectedSkillNames.value = [SHORT_DRAMA_SKILL, WIKI_MEMORY_SKILL]
+        selectedSkillNames.value = [SHORT_DRAMA_SKILL, ...selectedSkillNames.value.filter(name => name === WIKI_MEMORY_SKILL)]
         saveProductionPreferences({
           manju: { enabled: false, wikiMemoryWasSelected },
           novel: { enabled: false, wikiMemoryWasSelected },
@@ -4068,6 +4042,39 @@ function displayTurnContent(turn: ConversationTurn): string {
 
 function sceneCards(turn: ConversationTurn) {
   return desktopOnlyRuntime && turn.role === 'assistant' ? parseScene3DResultMarkers(turn.content) : []
+}
+
+function deliverablesForTurn(turn: ConversationTurn) {
+  const owner = (projectOwner.value || '').replace(/\\/g, '/').replace(/\/$/, '')
+  const shown = new Set(turnAttachments(turn).map(file => `${owner}/${file.projectPath || file.readablePath || ''}`))
+  for (const card of sceneCards(turn)) shown.add(`${owner}/${card.path}`)
+  const task = mediaTaskStore.getTask(mediaResultTaskId(turn))
+  if (task?.assetUri) shown.add(task.assetUri.replace(/\\/g, '/'))
+  return (turn.deliverables || []).filter(file => !shown.has(file.path.replace(/\\/g, '/')))
+}
+
+async function openDeliverable(path: string) {
+  const owner = projectOwner.value
+  if (!owner) return
+  try {
+    const normalized = path.replace(/\\/g, '/')
+    const root = owner.replace(/\\/g, '/').replace(/\/$/, '')
+    const withinProject = /^[A-Za-z]:/.test(root)
+      ? normalized.toLowerCase().startsWith(`${root.toLowerCase()}/`)
+      : normalized.startsWith(`${root}/`)
+    if (withinProject) {
+      const relative = normalized.slice(root.length + 1)
+      const resource = (await files.searchPaths(owner, relative, 100)).find(item => item.path === relative)
+      if (!resource) throw new Error('文件已移动或删除')
+      emitEvent('project-filetree:locate', { path: resource.path })
+      await openProjectFile(resource)
+    } else {
+      const { open } = await import('@tauri-apps/plugin-shell')
+      await open(path)
+    }
+  } catch (cause) {
+    error.value = `成果文件不可用：${path} · ${cause instanceof Error ? cause.message : String(cause)}`
+  }
 }
 
 async function openSceneCard(path: string) {
@@ -4668,6 +4675,11 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
               @click="suggestFileWrite(turn)"
             ><JcIcon name="save" /><span>保存到文件</span></button>
           </div>
+          <button v-for="file in deliverablesForTurn(turn)" :key="file.path" type="button"
+            class="memory-media-plan-link" :title="file.path" @click="openDeliverable(file.path)">
+            <JcIcon name="description" /><span>{{ file.path.split(/[\\/]/).at(-1) }}</span>
+            <small>{{ file.description || '打开成果文件' }}</small>
+          </button>
           <div v-if="evalReports[turn.id]" class="memory-eval-report-actions">
             <button type="button" class="memory-media-plan-link" @click="openEvalReport(evalReports[turn.id]!)">
               <JcIcon name="description" />
@@ -4864,8 +4876,8 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
         <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
           <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
-            <span class="memory-attachment-name" :title="name">{{ name }}</span>
-            <button title="移除 Skill" @click="removeSelectedSkill(name)">×</button>
+            <span class="memory-attachment-name" :title="name === WIKI_MEMORY_SKILL ? 'Wiki Memory' : name">{{ name === WIKI_MEMORY_SKILL ? 'Wiki Memory' : name }}</span>
+            <button :title="name === WIKI_MEMORY_SKILL ? '移除 Wiki Memory 选择' : '移除 Skill'" @click="removeSelectedSkill(name)">×</button>
           </div>
           <div v-for="tool in selectedToolChips" :key="tool.id" class="memory-attachment-chip">
             <JcIcon :name="tool.icon" /><span class="memory-attachment-name">{{ tool.label }}</span>

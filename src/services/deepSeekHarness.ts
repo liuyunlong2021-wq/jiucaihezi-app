@@ -657,6 +657,21 @@ export function deepSeekSessionFailures(snapshot: DeepSeekSessionSnapshot): Map<
   return failures
 }
 
+export function deepSeekDeliverables(events: any[], turn?: number): Array<{ path: string; description?: string }> {
+  const files = new Map<string, { path: string; description?: string }>()
+  for (const event of events) {
+    if (event?.type !== 'deliverables/presented' || (turn !== undefined && event.data?.turn !== turn)) continue
+    if (!Array.isArray(event.data?.files)) continue
+    for (const file of event.data.files) {
+      const path = file?.path
+      if (typeof path !== 'string' || !/^(?:\/|[A-Za-z]:[\\/])/.test(path.replace(/\\/g, '/')) || path.includes('\0')
+        || path.replace(/\\/g, '/').split('/').some(part => part === '..' || part === '.')) continue
+      if (!files.has(path)) files.set(path, { path, ...(typeof file.description === 'string' ? { description: file.description } : {}) })
+    }
+  }
+  return [...files.values()]
+}
+
 export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): ConversationTurn[] {
   const turns: ConversationTurn[] = []
   const answers = deepSeekTurnAnswers(snapshot)
@@ -689,6 +704,7 @@ export function deepSeekSessionTurns(snapshot: DeepSeekSessionSnapshot): Convers
       // 只有答案有正文。纯工具轮**故意**留空 —— 它只是过程块的挂载点，
       // 侧栏由 turnHasBody() 判掉，不会再出现孤儿的「韭菜盒子」。
       content: answer?.text || '',
+      ...deepSeekDeliverables(snapshot.events || [], turn).length ? { deliverables: deepSeekDeliverables(snapshot.events || [], turn) } : {},
       createdAt: new Date(answer?.time || Number(event.time) || Date.now()).toISOString(),
     })
   }
@@ -739,6 +755,9 @@ const DEEPSEEK_TOOL_LABELS: Record<string, string> = {
   glob: '查找文件',
   grep: '搜索内容',
   skill: '加载 Skill',
+  wiki_read_guidance: '读取 Wiki 规则',
+  wiki_save_artifact: '归档创作成果',
+  present: '交付成果文件',
   todo_write: '更新任务清单',
   create_goal: '创建目标',
   update_goal: '更新目标',
@@ -1189,7 +1208,8 @@ export function deepSeekPrompt(
   wikiContext = '',
   sessionReferences: Array<{ title: string; turns: Array<{ role: 'user' | 'assistant'; content: string }> }> = [],
 ): string {
-  const gestures = skillNames.map(name => `/${name}`).join(' ')
+  const wikiSelected = skillNames.some(name => name === 'wiki-memory' || name === 'project-wiki')
+  const gestures = skillNames.filter(name => name !== 'wiki-memory' && name !== 'project-wiki').map(name => `/${name}`).join(' ')
   const handoff = handoffTurns.length
     ? [
         '【既有对话移交】',
@@ -1205,8 +1225,8 @@ export function deepSeekPrompt(
     ? `引用会话：${sessionReferences.map(reference => `「${reference.title.replace(/\s+/g, ' ').trim().slice(0, 120)}」`).join('、')}`
     : ''
   const currentMessage = [referenceLabel, message].filter(Boolean).join('\n\n')
-  const currentMarker = !handoff && (wikiContext || references) ? '【本轮消息】' : ''
-  return [gestures, wikiContext, references, handoff, currentMarker, currentMessage]
+  const currentMarker = !handoff && (wikiSelected || wikiContext || references) ? '【本轮消息】' : ''
+  return [gestures, wikiSelected ? '请使用项目 Wiki 原生能力处理本轮任务。' : '', wikiContext, references, handoff, currentMarker, currentMessage]
     .filter(Boolean).join('\n\n')
 }
 
