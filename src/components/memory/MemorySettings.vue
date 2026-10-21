@@ -8,7 +8,6 @@ import { connectLocalOllama } from '@/utils/localOllamaRuntime'
 import { discoverCustomProviderModels, type CustomModelCapabilities } from '@/utils/customProviderModels'
 import { getLocalOllamaModels } from '@/utils/providerConfig'
 import { getCustomProviders, normalizeCustomProviderApiBase, saveCustomProviders, type CustomProviderConfig } from '@/utils/providerConfig'
-import { getComfyWorkflowApiKey, probeComfyUi, saveComfyWorkflowApiKey, getComfyUiApiBase, normalizeComfyUiApiBase, saveComfyUiApiBase, getComfyServiceAccessKey, saveComfyServiceAccessKey, type ComfyUiRuntimeStatus } from '@/utils/comfyUiRuntime'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriMobileRuntime, isTauriRuntime } from '@/utils/tauriEnv'
 import {
@@ -55,16 +54,8 @@ const localModelSummary = computed(() => {
   parts.push(customProviders.value.length ? `兼容 API ${customProviders.value.length} 个` : '无兼容 API')
   return parts.join(' · ')
 })
-const comfyServiceName = ref(localStorage.getItem('jcComfyServiceName') || 'ComfyUI')
-const comfyServiceBase = ref(getComfyUiApiBase())
-const comfyServiceAccessKey = ref('')
-const comfyServiceMessage = ref('')
 const providerProbeBusy = ref('')
 const providerConnectionStatus = ref<Record<string, string>>({})
-const comfyUiBusy = ref(false)
-const comfyUiStatus = ref<ComfyUiRuntimeStatus | null>(null)
-const comfyWorkflowApiKey = ref('')
-const comfyWorkflowApiKeySaved = ref(false)
 const logoutBusy = ref(false)
 const deleteBusy = ref(false)
 const deleteError = ref('')
@@ -97,11 +88,6 @@ function setFontSize(value: number) {
 onMounted(async () => {
   if (desktopRuntime) {
     installedLocalModelCount.value = getLocalOllamaModels().length
-  }
-  if (desktopRuntime) void refreshComfyUi()
-  if (desktopRuntime) {
-    comfyWorkflowApiKey.value = await getComfyWorkflowApiKey()
-    comfyServiceAccessKey.value = await getComfyServiceAccessKey()
   }
   apiKey.value = getApiKey() || await initApiKey()
   await initGatewaySessionToken()
@@ -217,42 +203,6 @@ async function detectProviderModels(provider?: CustomProviderConfig) {
     if (provider) providerConnectionStatus.value[probeId] = `检测失败 · ${message}`
     else customProviderStatus.value = message
   } finally { providerProbeBusy.value = '' }
-}
-
-async function saveComfyApiKey() {
-  try {
-    await saveComfyWorkflowApiKey(comfyWorkflowApiKey.value)
-    comfyWorkflowApiKeySaved.value = true
-    comfyServiceMessage.value = '上游模型 Key 已保存'
-  } catch (error) { comfyServiceMessage.value = error instanceof Error ? error.message : '保存失败' }
-}
-
-async function saveWorkflowConnection() {
-  if (comfyUiBusy.value) return
-  comfyUiBusy.value = true
-  try {
-    const base = normalizeComfyUiApiBase(comfyServiceBase.value)
-    if (!comfyServiceName.value.trim()) throw new Error('请填写连接名称')
-    await saveComfyServiceAccessKey(base, comfyServiceAccessKey.value)
-    comfyServiceBase.value = saveComfyUiApiBase(base)
-    localStorage.setItem('jcComfyServiceName', comfyServiceName.value.trim())
-    comfyUiStatus.value = null
-    comfyServiceMessage.value = '连接已保存，创作工作流将使用此地址'
-  } catch (error) { comfyServiceMessage.value = error instanceof Error ? error.message : '保存失败' }
-  finally { comfyUiBusy.value = false }
-}
-
-async function refreshComfyUi() {
-  if (comfyUiBusy.value) return
-  comfyUiBusy.value = true
-  try {
-    if (normalizeComfyUiApiBase(comfyServiceBase.value) !== getComfyUiApiBase() || comfyServiceAccessKey.value.trim() !== await getComfyServiceAccessKey()) throw new Error('连接已修改，请先保存，再检测')
-    comfyUiStatus.value = await probeComfyUi()
-    comfyServiceMessage.value = '服务已连接'
-  } catch (error) {
-    comfyUiStatus.value = null
-    comfyServiceMessage.value = error instanceof Error ? error.message : '连接检测失败'
-  } finally { comfyUiBusy.value = false }
 }
 
 async function login(payload: JcCloudLoginPayload): Promise<JcCloudLoginResult> {
@@ -459,30 +409,9 @@ function showSync() {
           </label>
         </section>
         <section class="memory-local-model">
-          <div>
-            <strong>工作流服务</strong>
-            <span>{{ comfyUiStatus ? '已连接' : '未检测 / 未连接' }}</span>
-          </div>
-          <p v-if="comfyUiStatus">
-            {{ comfyUiStatus.version ? `版本 ${comfyUiStatus.version} · ` : '' }}
-            {{ comfyUiStatus.device || '服务设备信息未提供' }}
-          </p>
-          <p>服务类型：ComfyUI · 支持本机、局域网和 HTTPS 远程服务</p>
-          <label class="memory-comfy-key"><span>连接名称</span><input v-model="comfyServiceName" autocomplete="off" placeholder="例如：本机 ComfyUI、工作室工作流" /></label>
-          <label class="memory-comfy-key"><span>服务地址</span><input v-model="comfyServiceBase" type="url" autocomplete="off" @input="comfyUiStatus = null" placeholder="http://127.0.0.1:8188" /></label>
-          <label class="memory-comfy-key"><span>服务访问密钥（可选，Bearer）</span><input v-model="comfyServiceAccessKey" type="password" autocomplete="off" @input="comfyUiStatus = null" placeholder="仅用于服务访问鉴权" /></label>
-          <p v-if="comfyServiceMessage" role="status">{{ comfyServiceMessage }}</p>
-          <div class="memory-local-actions">
-            <button :disabled="comfyUiBusy" @click="saveWorkflowConnection">保存连接</button>
-            <button :disabled="comfyUiBusy" @click="refreshComfyUi">{{ comfyUiBusy ? '处理中' : '检测连接' }}</button>
-          </div>
-          <label class="memory-comfy-key">
-            <span>工作流凭据 · 上游模型 Key</span>
-            <input v-model="comfyWorkflowApiKey" type="password" autocomplete="off" placeholder="仅用于工作流中的上游模型调用" @input="comfyWorkflowApiKeySaved = false" />
-          </label>
-          <div class="memory-local-actions">
-            <button @click="saveComfyApiKey">{{ comfyWorkflowApiKeySaved ? '已保存' : '保存上游模型 Key' }}</button>
-          </div>
+          <strong>ComfyUI</strong>
+          <p>通过官方 MCP 控制工作流，在输入框选择 @MCP → ComfyUI。</p>
+          <div class="memory-local-actions"><button @click="tab = 'mcp'">打开 MCP 设置</button></div>
         </section>
         </template>
       </div>

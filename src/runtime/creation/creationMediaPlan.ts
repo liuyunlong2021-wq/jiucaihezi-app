@@ -104,7 +104,10 @@ export function validateCreationModelSpec(spec: CreationModelSpec): void {
   if (spec.route === 'newapi-direct' && ['rh-standard', 'rh-aiapp'].includes(spec.apiStyle)) {
     throw new Error('newapi-direct route does not allow RH apiStyle')
   }
-  if (!spec.endpoint.startsWith('/')) {
+  if (spec.route === 'local-comfy' && spec.endpoint !== 'mcp:run_workflow') {
+    throw new Error('local-comfy route requires official ComfyUI MCP')
+  }
+  if (spec.route !== 'local-comfy' && !spec.endpoint.startsWith('/')) {
     throw new Error(`Creation endpoint must be a NewAPI path: ${spec.endpoint}`)
   }
   if (/runninghub\.ai|www\.runninghub/i.test(spec.endpoint)) {

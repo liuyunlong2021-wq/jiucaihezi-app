@@ -1,0 +1,132 @@
+{
+  "11": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "Z-image-vae.safetensors"
+    }
+  },
+  "12": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "qwen_image",
+      "device": "default"
+    }
+  },
+  "14": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "23",
+        0
+      ],
+      "lora_name": "Z-Image-Fun-Lora-Distill-2-Steps-2603-ComfyUI.safetensors",
+      "strength_model": 0.45
+    }
+  },
+  "16": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "12",
+        0
+      ],
+      "text": "泛黄，发绿，模糊，低分辨率，低质量图像，扭曲的肢体，诡异的外观，丑陋，AI感，噪点，网格感，JPEG压缩条纹，异常的肢体，水印，乱码，意义不明的字符，泛蓝"
+    }
+  },
+  "17": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "22",
+        0
+      ],
+      "vae": [
+        "11",
+        0
+      ]
+    }
+  },
+  "18": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "z_image_bf16.safetensors",
+      "weight_dtype": "default"
+    }
+  },
+  "21": {
+    "class_type": "EmptyLatentImage",
+    "inputs": {
+      "width": 1280,
+      "height": 720,
+      "batch_size": 1
+    }
+  },
+  "22": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "14",
+        0
+      ],
+      "positive": [
+        "24",
+        0
+      ],
+      "negative": [
+        "16",
+        0
+      ],
+      "latent_image": [
+        "21",
+        0
+      ],
+      "seed": 0,
+      "steps": 4,
+      "cfg": 1,
+      "sampler_name": "dpmpp_2s_ancestral",
+      "scheduler": "simple",
+      "denoise": 1
+    }
+  },
+  "23": {
+    "class_type": "LoraLoaderModelOnly",
+    "inputs": {
+      "model": [
+        "18",
+        0
+      ],
+      "lora_name": "Kook_Zimage_瑶光.safetensors",
+      "strength_model": 1
+    }
+  },
+  "24": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "12",
+        0
+      ],
+      "text": [
+        "47",
+        0
+      ]
+    }
+  },
+  "46": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "images": [
+        "17",
+        0
+      ],
+      "filename_prefix": "jiucaihezi_z-image"
+    }
+  },
+  "47": {
+    "class_type": "CR Text",
+    "inputs": {
+      "text": ""
+    }
+  }
+}

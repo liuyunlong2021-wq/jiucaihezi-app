@@ -67,6 +67,7 @@ export function getMcpServerBridgeToolDefinitions(
       name: `mcp__${serverId}`,
       description: [
         `MCP 服务器「${serverId}」整体工具。通过 operation 选择操作；不要把服务器内部操作当作独立工具。`,
+        ...(tools[0]?.serverInstructions ? [`官方服务说明：${tools[0].serverInstructions}`] : []),
         ...tools.map(
           tool =>
             `- ${tool.originalName}: ${tool.description || '无描述'}; schema=${JSON.stringify(tool.inputSchema)}`,
@@ -272,7 +273,7 @@ function convertMcpToolToChat(tool: McpToolSchema): ChatCompletionTool {
     type: 'function',
     function: {
       name: tool.name,
-      description: tool.description || `MCP 外挂工具：${getMcpToolLabel(tool.name)}`,
+      description: [tool.description || `MCP 外挂工具：${getMcpToolLabel(tool.name)}`, tool.serverInstructions].filter(Boolean).join('\n\n'),
       parameters: tool.inputSchema as Record<string, unknown>,
     },
   }

@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { OAuthClientProvider, OAuthDiscoveryState } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { FetchLike, Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
+import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 import type { McpServerConfig, McpToolSchema } from '@/stores/mcpStore'
 import { McpStdioTransport } from './mcpStdioTransport'
 import type { McpStdioDiagnostics } from './mcpStdioTransport'
@@ -235,6 +236,7 @@ async function listMcpTools(serverId: string, client: Client | null): Promise<Mc
   if (!client) throw new Error(`MCP server "${serverId}" 未连接`)
   // List tools
   const result = await client.listTools(undefined, { timeout: STDIO_TIMEOUT })
+  const serverInstructions = client.getInstructions()
   const tools: McpToolSchema[] = (result.tools || []).map(tool => ({
     name: `mcp__${serverId}__${tool.name}`,
     description: connections.get(serverId)?.canvasAgent
@@ -242,6 +244,7 @@ async function listMcpTools(serverId: string, client: Client | null): Promise<Mc
     inputSchema: tool.inputSchema as Record<string, unknown> || { type: 'object', properties: {} },
     serverId,
     originalName: tool.name,
+    ...(serverInstructions ? { serverInstructions } : {}),
     annotations: tool.annotations,
   }))
 
@@ -270,6 +273,15 @@ export async function callMcpTool(
   toolName: string,
   args: Record<string, unknown>,
 ): Promise<string> {
+  const result = await callMcpToolResult(serverId, toolName, args)
+  const contents = result.content
+  const joined = contents.some(c => c.type !== 'text')
+    ? JSON.stringify(contents)
+    : contents.length ? contents.map(c => c.type === 'text' ? c.text : '').join('\n') : JSON.stringify(result.structuredContent || '')
+  return joined.length > 102400 ? joined.slice(0, 102400) + '\n\n[结果已截断，超过 100KB]' : joined
+}
+
+export async function callMcpToolResult(serverId: string, toolName: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<CallToolResult> {
   const conn = connections.get(serverId)
   if (!conn?.client) {
     throw new Error(`MCP server "${serverId}" is not connected`)
@@ -285,31 +297,24 @@ export async function callMcpTool(
     result = await conn.client.callTool({
       name: originalName,
       arguments: args,
-    }, undefined, { timeout: TOOL_TIMEOUT })
+    }, undefined, { timeout: TOOL_TIMEOUT, signal })
   } catch (error) {
+    if (signal?.aborted) throw error
     await disconnectMcpServer(serverId)
     throw withMcpDiagnostics(error, conn)
   }
 
-  // Serialize result
   const contents = (result.content as any[]) || []
   const texts = contents
     .filter((c: any) => c.type === 'text')
     .map((c: any) => c.text as string)
 
-  if (texts.length === 0 && contents.length > 0) {
-    return JSON.stringify(contents)
-  }
-
   const joined = texts.join('\n')
+  if (result.isError) throw new Error(joined || 'MCP 工具执行失败')
   if (conn.canvasAgent) {
-    if (result.isError) throw new Error(joined || '画布工具执行失败')
     await canvasAgentConnection.refresh(serverId).catch(() => undefined)
   }
-  // Truncate to 100KB
-  return joined.length > 102400
-    ? joined.slice(0, 102400) + '\n\n[结果已截断，超过 100KB]'
-    : joined
+  return result as CallToolResult
 }
 
 export function isMcpToolName(name: string): boolean {

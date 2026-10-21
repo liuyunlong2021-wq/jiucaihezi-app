@@ -8,6 +8,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex as AsyncMutex;
 
 pub mod canvas_agent;
+pub mod comfy_files;
 
 struct McpStdioProcess {
     /// child.try_wait()/wait() 后 child.id() 会变成 None；进程组仍可能有握着会话锁的后代。

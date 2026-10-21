@@ -24,7 +24,7 @@ import {
   generateVideo,
   generateAudio,
   isTerminalCreationTaskError,
-  pollTask,
+  pollTask as pollApiTask,
 } from '@/api/media-generation'
 import type {
   AudioGenParams,
@@ -54,6 +54,19 @@ import { executeDynamicCreation, prepareDynamicInputs, cancelDynamicCreation, Cr
 import type { CreationRunPlan } from '@/runtime/creation/creationMediaTypes'
 import { writeCanvasTaskResult } from '@/components/canvas/canvasPersistence'
 import type { CanvasTaskTarget } from '@/types/canvas'
+import { resumeComfyWorkflow } from '@/services/comfyMcp'
+
+async function pollTask(...args: Parameters<typeof pollApiTask>): Promise<string> {
+  const [url, kind, onProgress, , , signal] = args
+  if (url.startsWith('comfy-mcp:') || /^https?:\/\/[^/]+\/history\//.test(url)) {
+    if (kind !== 'image' && kind !== 'video') throw new Error('ComfyUI 恢复媒体类型无效')
+    const descriptor = new URL(url)
+    const id = descriptor.searchParams.get('prompt') || decodeURIComponent(descriptor.pathname.split('/').at(-1) || '')
+    const result = await resumeComfyWorkflow(url, id, kind, onProgress, signal)
+    return result.url
+  }
+  return pollApiTask(...args)
+}
 
 // ─── Types ───
 
@@ -487,7 +500,7 @@ function splitReferenceFiles(params: MediaTaskSubmitParams): {
 }
 
 async function validateTaskInputs(params: MediaTaskSubmitParams): Promise<void> {
-  if (!getApiKey() && !(await initApiKey()))
+  if (params.plan?.route !== 'local-comfy' && !getApiKey() && !(await initApiKey()))
     throw new Error('使用云端模型需要先登录，请在设置中登录')
   if (params.source === 'creation' && !params.plan) {
     throw new Error('Creation source tasks must include a run plan')
@@ -1727,7 +1740,7 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
 
     try {
       const submissionKey = getApiKey()
-      if (isTauriRuntime() && params.source === 'creation' && submissionKey) {
+      if (isTauriRuntime() && params.source === 'creation' && params.plan?.route !== 'local-comfy' && submissionKey) {
         const { invoke } = await import('@tauri-apps/api/core')
         task.downloadCredentialRef = await invoke<string>('retain_media_download_key', { apiKey: submissionKey })
         await persistTasksSafely('retain-download-credential')
@@ -1767,6 +1780,11 @@ export const useMediaTaskStore = defineStore('mediaTasks', () => {
         task.mode = params.plan!.mode
         result = await abortTaskExecution(
           creationSubmitExecutor(request, onProgress, submitted => {
+            if (params.plan!.route === 'local-comfy') {
+              return markTaskSubmitted(task, submitted).then(persisted => {
+                if (!persisted) throw new Error('官方 ComfyUI 已提交，但任务 ID 保存失败；请核查原任务，不要重新生成')
+              })
+            }
             markTaskSubmittedWithoutBlocking(task, submitted)
           }, controller.signal),
           controller.signal,

@@ -22,6 +22,7 @@ import {
   DEEPSEEK_RETRY_TEXT,
   deepSeekProgress,
   deepSeekPrompt,
+  deepSeekMcpPrompt,
   deepSeekSessionId,
   deepSeekSessionExists,
   deepSeekSessionProcess,
@@ -32,6 +33,17 @@ import {
   deepSeekTurnError,
   DEEPSEEK_PROCESS_RESULT_LIMIT,
 } from '@/services/deepSeekHarness'
+
+test('explicit MCP selection reaches the model as execution intent, not only a mounted tool list', () => {
+  assert.equal(deepSeekMcpPrompt('只讨论构图', []), '只讨论构图')
+  const prompt = deepSeekMcpPrompt('生成一张美女图片', ['comfyui', 'comfyui'])
+  assert.match(prompt, /comfyui/)
+  assert.match(prompt, /实际执行/)
+  assert.match(prompt, /不能.*提示词/)
+  assert.match(prompt, /Skill.*辅助/)
+  assert.match(prompt, /未启动/)
+  assert.ok(prompt.endsWith('生成一张美女图片'))
+})
 
 test('@文件 maps to the official Harness full-access mode', () => {
   // 三档逐字用官方 zh 字典；默认档与官方 sandbox-policy 缺省值一致。

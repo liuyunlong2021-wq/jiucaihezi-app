@@ -11,6 +11,8 @@ import { confirmAction } from '@/utils/confirmAction'
 import { openExternal } from '@/utils/httpClient'
 import { isTauriRuntime } from '@/utils/tauriEnv'
 import { canvasAgentConnection, isCanvasAgentServer } from '@/services/canvasAgentConnection'
+import { comfyMcpConfig, isComfyMcpServer, COMFY_MCP_DOCS } from '@/services/comfyMcp'
+import { saveComfyWorkflowApiKey } from '@/utils/comfyWorkflowCredential'
 
 type ViewMode = 'grid' | 'list'
 type CatalogCard = BuiltinMcpCatalogEntry & {
@@ -26,6 +28,11 @@ const message = ref('')
 const connectingId = ref('')
 const isDesktopRuntime = isTauriRuntime()
 const showAddForm = ref(false)
+const comfyTarget = ref(localStorage.getItem('jcComfyUiApiBase') || 'http://127.0.0.1:8188')
+const comfyCommand = ref('comfy-mcp')
+const comfyBin = ref('')
+const comfyKey = ref('')
+const comfyServiceStatus = ref('')
 const addFormError = ref('')
 const newServer = ref({
   name: '',
@@ -40,7 +47,7 @@ const configuredIds = computed(() => new Set(mcpStore.servers.map(server => serv
 
 const catalogCards = computed<CatalogCard[]>(() =>
   BUILTIN_MCP_CATALOG.map(entry => {
-    const server = mcpStore.servers.find(server => server.id === entry.id || (entry.id === 'infinite-canvas' && isCanvasAgentServer(server)))
+    const server = mcpStore.servers.find(server => server.id === entry.id || (entry.id === 'infinite-canvas' && isCanvasAgentServer(server)) || (entry.id === 'comfyui' && isComfyMcpServer(server)))
     return {
       ...entry,
       installed: Boolean(server),
@@ -108,7 +115,7 @@ function transportLabel(transport: BuiltinMcpCatalogEntry['transport'] | McpServ
 function statusLabel(server?: McpServerConfig) {
   if (!server) return '未安装'
   if (server.status === 'connected' && isCanvasAgentServer(server)) return canvasAgentConnection.statuses[server.id]?.ready ? '画布可操作' : '已连接，等待画布'
-  if (server.status === 'connected') return '已连接'
+  if (server.status === 'connected') return isComfyMcpServer(server) ? 'MCP 已连接' : '已连接'
   if (server.status === 'connecting') return '连接中'
   if (server.status === 'error') return '异常'
   return server.enabled ? '已启用' : '已安装'
@@ -222,6 +229,7 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
     message.value = `「${entry.name}」仅支持桌面版。`
     return
   }
+  if (entry.id === 'comfyui') { await saveComfyConnection(); return }
   if (configuredIds.value.has(entry.id)) {
     message.value = `「${entry.name}」已经在 MCP 扩展中。`
     return
@@ -315,6 +323,53 @@ async function addFromCatalog(entry: BuiltinMcpCatalogEntry) {
   message.value = `已加入 MCP 扩展：${entry.name}。启用后才会连接并暴露工具。`
 }
 
+async function saveComfyConnection() {
+  if (connectingId.value || !isDesktopRuntime) return
+  message.value = ''
+  comfyServiceStatus.value = ''
+  try {
+    const config = comfyMcpConfig(comfyTarget.value)
+    config.command = comfyCommand.value.trim() || 'comfy-mcp'
+    if (!isComfyMcpServer(config)) throw new Error('请选择官方 comfy-mcp 或 comfy-mcp.exe 可执行文件')
+    if (comfyBin.value.trim()) config.env!.COMFY_BIN = comfyBin.value.trim()
+    const { invoke } = await import('@tauri-apps/api/core')
+    const legacy = await invoke<string | null>('get_comfy_service_credential')
+    if (legacy) {
+      let credential: { base?: string; key?: string }
+      try { credential = JSON.parse(legacy) } catch { throw new Error('旧 ComfyUI 服务凭据无法解析，原数据已保留') }
+      if (credential.key && credential.base?.replace(/\/+$/, '') === config.env!.COMFY_LOCAL_URL) throw new Error('原服务配置了 Bearer 鉴权，当前官方 MCP 尚不能承接；原凭据已保留，请先为官方 MCP 配置可用目标。')
+    }
+    const existing = mcpStore.servers.find(isComfyMcpServer)
+    config.name = existing?.name || localStorage.getItem('jcComfyServiceName')?.trim() || config.name
+    if (existing) {
+      await disconnectMcpServer(existing.id)
+      mcpStore.updateServer(existing.id, { ...config, id: existing.id, enabled: false, status: 'disconnected' })
+    }
+    const server = existing || mcpStore.addServer(config)
+    await mcpStore.persist()
+    await toggleServer(server)
+  } catch (error) { message.value = error instanceof Error ? error.message : String(error) }
+}
+
+async function saveComfyKey() {
+  try { await saveComfyWorkflowApiKey(comfyKey.value); comfyKey.value = ''; message.value = '工作流上游模型 Key 已保存到安全存储' }
+  catch (error) { message.value = error instanceof Error ? error.message : String(error) }
+}
+
+async function inspectComfyService(server: McpServerConfig) {
+  try {
+    const { callMcpToolResult } = await import('@/services/mcpClient')
+    const result = await callMcpToolResult(server.id, 'server_info', {})
+    const text = result.content.filter(c => c.type === 'text').map(c => c.text).join('\n')
+    const raw = result.structuredContent || JSON.parse(text)
+    const info: any = raw.result || raw
+    const running = info.server?.running ?? info.running
+    comfyServiceStatus.value = running === true ? 'ComfyUI 服务可用，可以在输入框通过 @MCP 请求实际生成'
+      : running === false ? 'MCP 已连接，但 ComfyUI 未运行。请先启动本机 ComfyUI，确认端口与上方地址一致，再检查服务。'
+        : 'MCP 已连接，但未确认 ComfyUI 运行状态；请检查服务地址及官方 CLI 环境'
+  } catch (error) { comfyServiceStatus.value = error instanceof Error ? error.message : String(error) }
+}
+
 async function toggleServer(server: McpServerConfig, newCanvas = false) {
   message.value = ''
   if (connectingId.value) return
@@ -333,6 +388,7 @@ async function toggleServer(server: McpServerConfig, newCanvas = false) {
     mcpStore.setServerTools(server.id, tools)
     mcpStore.setServerStatus(server.id, 'connected')
     message.value = `${server.name} 已连接，发现 ${tools.length} 个外部工具。`
+    if (isComfyMcpServer(server)) await inspectComfyService(server)
     if (isCanvasAgentServer(server) && !canvasAgentConnection.statuses[server.id]?.ready) await openCanvas(server, newCanvas)
   } catch (error) {
     if (error instanceof McpAuthorizationRequiredError) {
@@ -362,6 +418,15 @@ async function refreshCanvasStatus() {
   }
 }
 onMounted(() => {
+  void mcpStore.ensureLoaded().then(() => {
+    const server = mcpStore.servers.find(isComfyMcpServer)
+    if (server) {
+      comfyTarget.value = server.env?.COMFY_LOCAL_URL || server.env?.COMFYUI_URL || 'http://127.0.0.1:8188'
+      comfyCommand.value = server.command || 'comfy-mcp'
+      comfyBin.value = server.env?.COMFY_BIN || ''
+      if (server.status === 'connected') void inspectComfyService(server)
+    }
+  })
   void refreshCanvasStatus()
   window.addEventListener('focus', refreshCanvasStatus)
 })
@@ -515,6 +580,19 @@ async function removeServer(server: McpServerConfig) {
             </div>
 
             <div class="mcp-hint">{{ card.installHint }}</div>
+            <div v-if="card.id === 'comfyui' && isDesktopRuntime" class="mcp-comfy-fields">
+              <label>ComfyUI 服务地址<input v-model="comfyTarget" placeholder="http://127.0.0.1:8188" /></label>
+              <label>官方 MCP 可执行文件<input v-model="comfyCommand" placeholder="comfy-mcp 或完整路径" /></label>
+              <label>comfy-cli 可执行文件（可选）<input v-model="comfyBin" placeholder="comfy 或虚拟环境中的完整路径" /></label>
+              <div class="mcp-actions">
+                <button v-if="card.installed" class="mcp-ghost" :disabled="Boolean(connectingId)" @click="saveComfyConnection">保存配置并连接</button>
+                <button class="mcp-ghost" @click="openExternal(COMFY_MCP_DOCS)">官方安装说明</button>
+                <button v-if="card.server?.status === 'connected'" class="mcp-ghost" @click="inspectComfyService(card.server)">检查服务</button>
+              </div>
+              <p v-if="comfyServiceStatus" role="status">{{ comfyServiceStatus }}</p>
+              <label>自定义工作流上游模型 Key<input v-model="comfyKey" type="password" autocomplete="new-password" placeholder="保存在本机安全存储，不是 Comfy 官方账号 Key" /></label>
+              <button class="mcp-ghost" @click="saveComfyKey">保存工作流 Key</button>
+            </div>
             <div v-if="card.server?.error" class="mcp-error">{{ card.server.error }}</div>
 
             <div class="mcp-actions">
@@ -542,7 +620,7 @@ async function removeServer(server: McpServerConfig) {
                   {{
                     card.server.status === 'connected'
                       ? '停用'
-                      : needsNodeInstall(card.server)
+                      : needsNodeInstall(card.server) || (card.id === 'comfyui' && card.server.status === 'error')
                         ? '重新检测并连接'
                       : card.server.auth === 'oauth'
                         ? '连接'
@@ -623,6 +701,10 @@ async function removeServer(server: McpServerConfig) {
 </template>
 
 <style scoped>
+.mcp-comfy-fields { display: grid; gap: 8px; }
+.mcp-comfy-fields label { display: grid; gap: 4px; font-size: 12px; color: var(--ink2); }
+.mcp-comfy-fields input { box-sizing: border-box; width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink1); background: var(--paper); }
+
 .mcp-panel {
   height: 100%;
   display: flex;

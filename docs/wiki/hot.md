@@ -946,3 +946,9 @@
 # 2026-10-21 Wiki 原生能力与独立成果交付方案
 
 - 用户确认：不加 persona，暂不加 tool-ask-user；Wiki-memory 原生化，present 独立并与归档/现有成果展示联动。源码已实施，见 [[开发/Wiki原生能力与独立成果交付TDD-2026-10-21]] §9：保留查询、沉淀、草稿确认、索引和三路线归档；@Wiki Memory 原生入口与独立官方 present 已接入，交付可随历史恢复。全量 Node/前端2075通过/1跳过，Rust494通过/2忽略；随包Node22专项30/30，类型通过。原生点击、真实创作、Windows/Intel Mac 待验收；未打包发布。
+
+# 2026-10-21 ComfyUI 官方 MCP 与桌面直连退役
+
+- 后续用户实测「只输出提示词」：会话实际仅调用 jc-shuaigemeinv Skill，未调用 MCP。已补本轮显式 MCP 执行意图和连接后自动服务检测，定向 92/92、类型通过。找到真实安装目录并修正官方 CLI 默认目录，Comfy Desktop 已启动；官方 MCP server_info 确认 127.0.0.1:8000 running=true，官方模型查询发现 z_image_bf16.safetensors。仍未实际生成；详见同 TDD §11，以下初始不可达记录保留为历史阶段。
+
+- 桌面源码已统一接入官方 comfy-mcp：设置归入 MCP，输入框复用 @MCP；原 HTTP 探测、上传、提交与轮询退役，保留 Z-Image/Grok 工作流资产与任务数据。新任务先保存官方 ID，恢复不重提；本地任务不依赖云端登录或 NewAPI Key。完整 focused 2086 通过/1 跳过，Rust 495 通过/2 忽略，类型和 Vite 构建通过，开发版已启动。真实生成、原生点击、旧任务与跨平台升级仍待验收；官方 HTTPS/路径前缀/Bearer 缺口未解决，旧配置保留并明确拒绝降级。服务器 NewAPI/comfy-adapter 未改，未发布。见 [[开发/ComfyUI官方MCP统一接入与自研链路退役TDD-2026-10-21]] §10。

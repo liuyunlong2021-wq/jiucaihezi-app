@@ -1201,6 +1201,15 @@ export function deepSeekHandoffTurns(turns: ConversationTurn[]): ConversationTur
   return turns.slice(afterHarnessRound)
 }
 
+export function deepSeekMcpPrompt(message: string, serverIds: string[] = []): string {
+  if (!serverIds.length) return message
+  return [
+    `【本轮用户显式选择的 MCP 服务】${JSON.stringify([...new Set(serverIds)])}`,
+    '当本轮任务需要这些服务的能力时，使用所选 MCP 实际执行。Skill 仅作辅助，不能用提示词、方案或 Skill 文本代替用户要求的生成结果。先核实服务和所需依赖；服务未启动或执行失败时说明真实原因，不得宣称已经完成。用户明确只要提示词或方案时按其要求处理。',
+    '【本轮消息】', message,
+  ].join('\n\n')
+}
+
 export function deepSeekPrompt(
   message: string,
   skillNames: string[],
@@ -1687,7 +1696,7 @@ export async function queueDeepSeekHarnessMessage(input: DeepSeekHarnessInput): 
   return await harnessControl(active, {
     type: 'queue',
     sessionId: deepSeekSessionId(input.sessionId, input.cwd),
-    contentBlocks: deepSeekContentBlocks(input.message, input.attachments, input.files, input.imageInput),
+    contentBlocks: deepSeekContentBlocks(deepSeekMcpPrompt(input.message, input.mcpServerIds), input.attachments, input.files, input.imageInput),
   }, input.signal) as { messageId: string }
 }
 
@@ -1865,7 +1874,7 @@ async function runDeepSeekHarnessTurn(
       type: 'run',
       requestId,
       sessionId: wireSessionId,
-      contentBlocks: deepSeekContentBlocks(input.message, input.attachments, input.files, input.imageInput),
+    contentBlocks: deepSeekContentBlocks(deepSeekMcpPrompt(input.message, input.mcpServerIds), input.attachments, input.files, input.imageInput),
     } as unknown as JSONRPCMessage)
     input.onStatus?.('正在执行')
     const result = await completed || finalText

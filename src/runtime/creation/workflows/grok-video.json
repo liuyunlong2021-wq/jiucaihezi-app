@@ -1,0 +1,34 @@
+{
+  "7": {
+    "class_type": "ComflyGrok3VideoApi30S",
+    "inputs": {
+      "prompt": [
+        "16",
+        0
+      ],
+      "model": "grok-video-3",
+      "ratio": "16:9",
+      "duration": "8",
+      "resolution": "720P",
+      "api_key": "",
+      "seed": 0,
+      "skip_error": false
+    }
+  },
+  "16": {
+    "class_type": "CR Prompt Text",
+    "inputs": {
+      "prompt": ""
+    }
+  },
+  "18": {
+    "class_type": "easy showAnything",
+    "inputs": {
+      "text": "",
+      "anything": [
+        "7",
+        3
+      ]
+    }
+  }
+}

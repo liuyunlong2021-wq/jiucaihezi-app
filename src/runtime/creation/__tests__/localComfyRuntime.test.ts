@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildCreationRunPlan } from '../creationMediaPlan'
-import { buildComfyUploadRequestData, buildCreationSubmitRequest, buildLocalGrokVideoPrompt, firstComfyVideoUrl } from '../creationMediaRuntime'
+import { validateCreationModelSpec } from '../creationMediaPlan'
+import { getCreationModelSpec } from '../creationModelRegistry'
+import { buildCreationSubmitRequest, buildLocalGrokVideoPrompt } from '../creationMediaRuntime'
 
 test('local Z-Image uses the ComfyUI route', () => {
   const plan = buildCreationRunPlan({ modelId: 'local-comfy/z-image-turbo', params: { prompt: '一只猫', resolution: '1080p', aspectRatio: '9:16' } })
@@ -9,8 +11,14 @@ test('local Z-Image uses the ComfyUI route', () => {
   assert.equal(plan.route, 'local-comfy')
   assert.equal(plan.mediaInputTransport, 'base64')
   assert.equal(request.runtime, 'local-comfy')
+  assert.equal(request.endpoint, 'mcp:run_workflow')
   assert.equal(request.imageParams?.resolution, '1080p')
   assert.equal(request.imageParams?.aspectRatio, '9:16')
+})
+
+test('local Comfy models only accept the official MCP operation endpoint', () => {
+  const spec = getCreationModelSpec('local-comfy/z-image-turbo')!
+  assert.throws(() => validateCreationModelSpec({ ...spec, endpoint: '/prompt' }))
 })
 
 test('local Grok workflow maps seven images to the verified ComfyUI slots', () => {
@@ -27,20 +35,6 @@ test('local Grok workflow maps seven images to the verified ComfyUI slots', () =
   assert.deepEqual(workflow['18'].inputs.anything, ['7', 3])
   assert.equal(workflow['20'], undefined)
   assert.equal(JSON.stringify(workflow).includes('secret'), true)
-})
-
-test('local Grok workflow reads the remote video URL without SaveVideo', () => {
-  assert.equal(
-    firstComfyVideoUrl({ 18: { text: ['https://cdn.example.test/video.mp4?token=ok'] } }),
-    'https://cdn.example.test/video.mp4?token=ok',
-  )
-})
-
-test('local Comfy upload uses Rust snake_case request fields', () => {
-  const request = buildComfyUploadRequestData('http://127.0.0.1:8000', 0, 'image/png', 'abc')
-  assert.equal(request.mime_type, 'image/png')
-  assert.equal(request.data_base64, 'abc')
-  assert.equal('mimeType' in request, false)
 })
 
 test('local Grok plan accepts up to seven canvas references', () => {

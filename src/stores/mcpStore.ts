@@ -36,6 +36,7 @@ export interface McpToolSchema {
   inputSchema: Record<string, unknown>
   serverId: string
   originalName: string
+  serverInstructions?: string
   annotations?: {
     readOnlyHint?: boolean
     destructiveHint?: boolean
@@ -68,7 +69,7 @@ async function loadServers(): Promise<McpServerConfig[]> {
 }
 
 function saveServers(servers: McpServerConfig[]) {
-  setItem(STORAGE_KEY, JSON.stringify(servers))
+  return setItem(STORAGE_KEY, JSON.stringify(servers))
 }
 
 // ─── Store ───────────────────────────────────────────
@@ -171,11 +172,13 @@ export const useMcpStore = defineStore('mcp', () => {
   }
 
   function persist() {
-    saveServers(servers.value.map(s => ({
+    const pending = saveServers(servers.value.map(s => ({
       ...s,
       status: 'disconnected' as const, // never persist connection state
       error: undefined,
     })))
+    void pending.catch(error => console.error('[MCP] 保存连接失败', error))
+    return pending
   }
 
   return {
@@ -194,5 +197,6 @@ export const useMcpStore = defineStore('mcp', () => {
     isServerConnected,
     getMcpToolByName,
     toggleServer,
+    persist,
   }
 })

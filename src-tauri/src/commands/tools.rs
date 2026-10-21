@@ -131,6 +131,12 @@ pub(crate) fn resolve_local_binary(program: &str) -> PathBuf {
         }
     }
 
+    // pipx / uv tool installs use ~/.local/bin even when a packaged app has no shell PATH.
+    if matches!(program, "comfy-mcp" | "comfy") {
+        let candidate = resolve_home_dir().join(".local").join("bin").join(program);
+        if candidate.exists() { return candidate; }
+    }
+
     // Unix 平台补充查找（Windows 上 PATH 已足够）
     #[cfg(not(windows))]
     for dir in ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"] {

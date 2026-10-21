@@ -9,6 +9,8 @@ import { build } from 'esbuild'
 const outdir = join(tmpdir(), 'jc-focused-tests')
 
 const wave1FocusedTests = [
+  'src/services/__tests__/comfyMcp.test.ts',
+  'src/utils/__tests__/comfyWorkflowCredential.test.ts',
   'src/services/__tests__/canvasAgentConnection.test.ts',
   'src/services/__tests__/desktopUpdatePreparation.test.ts',
   'src/services/__tests__/desktopUpdater.test.ts',
@@ -117,7 +119,7 @@ const wave1FocusedTests = [
   'src/utils/__tests__/localContentTools.test.ts',
   'src/utils/__tests__/localCapabilities.test.ts',
   'src/utils/__tests__/localToolsPreference.test.ts',
-  'src/utils/__tests__/comfyUiRuntime.test.ts',
+  'src/utils/__tests__/comfyUiRetirement.test.ts',
   'src/utils/__tests__/providerConfig.test.ts',
   'src/utils/__tests__/directMessageBuilder.test.ts',
   'src/utils/__tests__/modelSelection.test.ts',

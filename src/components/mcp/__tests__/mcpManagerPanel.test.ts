@@ -53,6 +53,17 @@ test('MCP catalog preserves existing built-ins and adds Infinite Canvas', () => 
   assert.doesNotMatch(catalogSource, /id: 'obsidian'/)
 })
 
+test('ComfyUI is an official stdio preset configured in MCP with an existing composer entry', () => {
+  assert.match(catalogSource, /id: 'comfyui'/)
+  assert.match(catalogSource, /command: 'comfy-mcp'/)
+  assert.match(source, /comfyMcpConfig\(comfyTarget\.value\)/)
+  assert.match(source, /await mcpStore\.persist\(\)/)
+  assert.match(source, /官方安装说明/)
+  assert.match(source, /保存配置并连接/)
+  assert.match(source, /get_comfy_service_credential/)
+  assert.match(source, /原凭据已保留/)
+})
+
 test('GitHub OAuth client id is read from the gateway at connect time, not baked in at build time', () => {
   assert.doesNotMatch(catalogSource, /import\.meta\.env\.VITE_GITHUB_OAUTH_CLIENT_ID/)
   assert.doesNotMatch(catalogSource, /oauthClientId: import\.meta\.env/)

@@ -1,5 +1,6 @@
 import { gatewayJson } from '@/services/newApiClient'
 import { CANVAS_AGENT_PACKAGE } from '@/services/canvasAgentConnection'
+import { COMFY_MCP_INSTALL } from '@/services/comfyMcp'
 
 export type BuiltinMcpTransport = 'stdio' | 'sse' | 'streamable-http' | 'remote'
 
@@ -26,6 +27,13 @@ export interface BuiltinMcpCatalogEntry {
 }
 
 export const BUILTIN_MCP_CATALOG: BuiltinMcpCatalogEntry[] = [
+  {
+    id: 'comfyui', name: 'ComfyUI（官方）', icon: 'account_tree', category: '创作', transport: 'stdio',
+    description: '使用 Comfy 官方 MCP 构建和执行工作流、查询模型与任务、取回生成结果。先启动本机 ComfyUI，检查服务可用后，在输入框选择 @MCP → ComfyUI 并提出生成要求。',
+    tasks: ['构建与执行工作流', '查询和取消任务', '取回生成结果'], auth: 'none', risk: 'high',
+    installHint: `仅桌面版，需要 Python ≥3.10。官方安装命令：${COMFY_MCP_INSTALL}。ComfyUI 本身需已安装。当前官方版本仅支持本机或局域网裸 HTTP 地址。`,
+    command: 'comfy-mcp', args: [],
+  },
   {
     id: 'infinite-canvas',
     name: '无限画布',

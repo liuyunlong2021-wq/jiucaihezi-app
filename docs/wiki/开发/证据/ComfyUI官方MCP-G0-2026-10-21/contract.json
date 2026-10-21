@@ -1,0 +1,175 @@
+{
+  "date": "2026-10-21",
+  "status": "blocked",
+  "runtime": {
+    "platform": "macOS",
+    "python": "3.14",
+    "comfy-mcp": "0.10.0",
+    "comfy-cli": "1.20.0"
+  },
+  "serverInfo": {
+    "name": "comfy-mcp",
+    "version": ""
+  },
+  "discoveredToolCount": 39,
+  "schemas": [
+    {
+      "name": "server_info",
+      "inputSchema": {
+        "type": "object",
+        "properties": {},
+        "title": "server_infoArguments"
+      }
+    },
+    {
+      "name": "run_workflow",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "workflow_path": {
+            "title": "Workflow Path",
+            "type": "string"
+          },
+          "wait": {
+            "default": true,
+            "title": "Wait",
+            "type": "boolean"
+          },
+          "timeout_seconds": {
+            "default": 110,
+            "title": "Timeout Seconds",
+            "type": "number"
+          },
+          "confirm_spend": {
+            "default": false,
+            "title": "Confirm Spend",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "workflow_path"
+        ],
+        "title": "run_workflowArguments"
+      }
+    },
+    {
+      "name": "job",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "default": "status",
+            "title": "Action",
+            "type": "string"
+          },
+          "prompt_id": {
+            "default": "",
+            "title": "Prompt Id",
+            "type": "string"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Timeout Seconds"
+          }
+        },
+        "title": "jobArguments"
+      }
+    },
+    {
+      "name": "fetch_outputs",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "prompt_id": {
+            "title": "Prompt Id",
+            "type": "string"
+          },
+          "out_dir": {
+            "title": "Out Dir",
+            "type": "string"
+          },
+          "url_only": {
+            "default": false,
+            "title": "Url Only",
+            "type": "boolean"
+          },
+          "inline_images": {
+            "default": false,
+            "title": "Inline Images",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "prompt_id",
+          "out_dir"
+        ],
+        "title": "fetch_outputsArguments"
+      }
+    },
+    {
+      "name": "upload_file",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "paths": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Paths",
+            "type": "array"
+          },
+          "overwrite": {
+            "default": false,
+            "title": "Overwrite",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "paths"
+        ],
+        "title": "upload_fileArguments"
+      }
+    }
+  ],
+  "latestArtifactsInspected": [
+    {
+      "package": "comfy-mcp",
+      "version": "0.10.0",
+      "sha256": "23f5e02a9865a54d85811e9a4242beca911400e083a3c8dedbebb07309baecb0"
+    },
+    {
+      "package": "comfy-cli",
+      "version": "1.23.0",
+      "sha256": "3cd4bf80dd93b759e910fa825951c154781b8b95e526da59155ab96656483b31"
+    }
+  ],
+  "blockingCases": [
+    {
+      "input": "https://comfy.example.test",
+      "actual": "COMFYUI_URL rejects HTTPS; COMFY_LOCAL_URL also rejects HTTPS",
+      "required": "Preserve HTTPS service targets"
+    },
+    {
+      "input": "http://192.168.1.25:8188/comfyui",
+      "actual": "COMFYUI_URL rejects base paths",
+      "required": "Preserve accepted service base paths"
+    }
+  ],
+  "notVerified": [
+    "Bearer authentication",
+    "upstream workflow secret injection",
+    "old task recovery",
+    "real generation",
+    "Windows",
+    "Intel Mac",
+    "packaged app"
+  ]
+}

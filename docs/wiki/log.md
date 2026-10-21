@@ -2809,3 +2809,8 @@
 - 修复：按官方 `GET /api/pricing` 登记四个公开名与能力——`灵动-sd2.5-满血-301010` 6/次、`灵动-sd2.5-满血-301010-2` 8/次（30 图 / 10 视频 / 10 音频、720p、4–30 秒、6 种画幅含 21:9），`灵动-gpt-image-2.5-flare` 0.08/张、`灵动-gpt-image-2.5-sunburst` 0.1/张（1K/2K/4K、10 种比例）；同步 `mediaModelCapabilities`、`scripts/creation-models/server.mjs` 与两处测试夹具，旧 9 个型号删除。图片暂走 text-to-image、不提交参考图，避免 App 走到插件明确拒绝的 multipart 编辑接口。
 - 验证：测试改为直接对账插件 `meta.models` 与定价 JSON；定向 63/63 通过，全量 focused 1999/2017。4 项失败为既有 Windows-only 测试（`/tmp` 硬编码、正斜杠 replace、动态 import 绝对路径）与 TEMP 重定向造成的 `manju-skill-scope` 假阳性（默认 TEMP 单跑通过）；`vue-tsc -b` 通过。
 - 未验收：生产渠道名单与插件激活、真实出片与扣费、App 图生图参考图链路；Rust 测试二进制在本机启动即 `0xC0000139`，一条断言未执行；未打包发布。
+
+## 2026-10-21 ComfyUI 官方 MCP 接入与桌面直连退役
+
+- 用户要求采用官方 MCP、废除桌面重复实现，并在关闭发布版后要求继续执行。已新增官方 MCP 卡片与配置，复用 @MCP 和统一工具桥；Z-Image/Grok 改用官方上传、运行、等待、取消与结果工具，工作流保留为 JSON 资产，旧设置及桌面 HTTP 链路和专用原生命令退役。旧配置/凭据保留，禁止 HTTPS 或鉴权静默降级。
+- 红绿测试补齐官方调用、任务恢复/取消、私有文件、密钥迁移、schema/instructions/混合内容透传、本地免云端登录与 Key 隔离。最终 focused 2086 通过/1 跳过，Rust 495 通过/2 忽略，类型与 Vite 构建通过；开发版已启动。无运行中的本机 ComfyUI，真实生成、原生点击、三平台与正式发布未验收，未提交/推送。服务器 NewAPI/comfy-adapter 不在此次桌面退役范围。见 [[开发/ComfyUI官方MCP统一接入与自研链路退役TDD-2026-10-21]] §10。

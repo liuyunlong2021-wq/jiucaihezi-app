@@ -237,6 +237,48 @@ function targetedCanvasDocument(canvasId: string) {
   })
 }
 
+test('official Comfy tasks retain their ID before waiting and do not capture a cloud API key', { concurrency: false }, async () => {
+  const storage = installLocalStorage()
+  const files = installTauriTaskFileStore()
+  const internal = (globalThis as any).window.__TAURI_INTERNALS__
+  const originalInvoke = internal.invoke
+  internal.invoke = async (command: string, args: any) => {
+    if (command === 'retain_media_download_key') throw Error('local task must not capture cloud credentials')
+    return originalInvoke(command, args)
+  }
+  setActivePinia(createPinia())
+  __resetApiKeyMemoryCacheForTests('cloud-test-key')
+  const store = useMediaTaskStore()
+  let reached = false
+  __setCreationSubmitExecutorForTests(async (_request, _progress, submitted) => {
+    await submitted?.({ taskId: 'comfy-job', pollUrl: 'comfy-mcp://task?prompt=comfy-job', pollKind: 'image' })
+    const raw = JSON.parse((globalThis as any).localStorage.getItem('jc_media_tasks_v1') || '[]')
+    const saved = typeof raw === 'string' ? JSON.parse(raw) : raw
+    assert.equal(saved[0]?.upstreamTaskId, 'comfy-job')
+    reached = true
+    throw Error('end of local submission fixture')
+  })
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'local-comfy/z-image-turbo', params: { prompt: 'local test' } })
+    const params = { type: 'image' as const, model: plan.model, modelLabel: plan.label, prompt: 'local test', source: 'creation' as const, plan }
+    const id = await store.submitTask(params)
+    await waitFor(() => reached && !store.isTaskActive(id))
+    assert.equal(reached, true)
+    assert.equal(store.getTask(id)?.downloadCredentialRef, undefined)
+    assert.equal(store.getTask(id)?.status, 'pending', 'submitted unknown outcomes remain recoverable')
+    reached = false
+    __resetApiKeyMemoryCacheForTests('')
+    const localOnlyId = await store.submitTask(params)
+    await waitFor(() => reached && !store.isTaskActive(localOnlyId))
+    assert.equal(reached, true, 'local workflows must work without a cloud login')
+  } finally {
+    __setCreationSubmitExecutorForTests(null)
+    __resetApiKeyMemoryCacheForTests(null)
+    files.restore()
+    storage.restore()
+  }
+})
+
 interface WebTaskFileStore {
   binaryWrites: Array<{
     projectId: string
