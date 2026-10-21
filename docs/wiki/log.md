@@ -2836,3 +2836,11 @@
 
 - 用户通过SSH复用连接登录；实际旧镜像/四Compose和两处源码哈希与prepare基线一致。服务器完整NewAPI构建、五包回归通过；新镜像精确ID`sha256:311f21c7a4787a294028a56302b8257b6f0f35b611ffa506d3821b6c78d07eda`，源码备份`/root/jc-public-r2-source.EfIqa6`。构建后再次核对生产仍为健康旧镜像。
 - 三上传路径公网OPTIONS均204、Origin正确；未改Nginx/Worker。新增固定基线activate-public-r2及5项模拟，尚需用户在终端隐藏输入NewAPI Key以执行实际备份/切换/读回，不在聊天获取Key。未迁移用户数据或退役OSS。详见 [[开发/桌面App全面迁移R2与OSS退役TDD-2026-10-21]] §12。
+
+
+## 2026-10-21 公共R2激活回执
+
+- 用户在服务器隐藏输入NewAPI用户Key执行固定激活脚本，提供`PUBLIC R2 ACTIVE`和备份`/root/jc-public-r2-switch-cblvcmp7`。记录脚本已核验数据库备份、新镜像/运行配置、公共/易红/灵动R2合成读回、旧OSS授权和公网CORS；未生成/计费。
+- 本机独立公网复核健康200/success及三入口未鉴权401和唯一CORS Origin；SSH独立inspect因复用连接Broken pipe未完成。实际范围及未验收项见 [[开发/桌面App全面迁移R2与OSS退役TDD-2026-10-21]] §13。
+
+- 本机ARM64 `tauri build --bundles app`及macOS修复/重签成功，19个嵌套Mach-O与深度严格签名验证通过；主程序SHA-256`37bd8611d7555ecda96fac564dc2b1b71e315ee27abfdf1489ba8b54492e0e2c`。2.2.36本机重建，未公证/安装/发布，未执行GUI生成或Intel/Windows验收。见 [[开发/桌面App全面迁移R2与OSS退役TDD-2026-10-21]] §13。

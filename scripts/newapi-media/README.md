@@ -1,13 +1,13 @@
 # NewAPI rc.40 临时素材上传扩展
 
-## 当前桌面公共 R2 迁移（源码就绪，生产未部署）
+## 当前桌面公共 R2 迁移（公共服务端已激活，桌面逐项验收待做）
 
 现行 TDD：`../../docs/wiki/开发/桌面App全面迁移R2与OSS退役TDD-2026-10-21.md`。桌面公共上传已改为 `POST /api/creations/r2/upload-url` → 原始 Blob PUT，不接受 OSS grant 或回退；单文件20MiB、上传5分钟/读取6小时，保留原有文件直传与本机协议。**先部署新服务端，再使用新桌面构建**。旧服务404会明确提示升级。
 
 - `prepare-public-r2.sh <只读核对后的当前镜像sha256>` 仅准备镜像：严格匹配固定源码/旧路由及R2签名器哈希，保留其他宿主补丁；备份、测试、构建失败恢复源码，不改生产容器。未知基线先核对，不绕过哈希检查。
 - 同包须包含 `extension/creation_media_router.go` 与 `extension/r2direct/*.go`，包括新HTTP handler及测试。旧prepare只复制signer两文件，不能用来部署本次新入口。
-- 准备镜像后，按实际Compose/env/挂载/网络比较、数据库备份验证和自动回滚模式制定激活步骤。不要重跑绑定历史镜像ID的activate脚本。用户已登录；服务器完整编译与五包回归通过，新镜像已准备，生产尚未切换。
-- 当前固定生产基线的切换入口为 `activate-public-r2.py`：交互隐藏输入NewAPI用户Key，先验证数据库备份再只重建NewAPI；验证失败自动回滚。精确新旧ID见TDD§12，不用于其他基线。`python3 activate_public_r2_test.py`共5项模拟通过，尚未执行真实激活。
+- 准备镜像后，按实际Compose/env/挂载/网络比较、数据库备份验证和自动回滚模式制定激活步骤。不要重跑绑定历史镜像ID的activate脚本。用户已登录；服务器完整编译与五包回归通过，新镜像已准备，用户已提供`PUBLIC R2 ACTIVE`回执，独立公网健康/401/CORS通过。
+- 当前固定生产基线的切换入口为 `activate-public-r2.py`：交互隐藏输入NewAPI用户Key，先验证数据库备份再只重建NewAPI；验证失败自动回滚。精确新旧ID见TDD§12，不用于其他基线。`python3 activate_public_r2_test.py`共5项模拟通过，真实激活已由用户执行并回执成功，备份`/root/jc-public-r2-switch-cblvcmp7`；见TDD§13。
 - 激活后交互运行 `python3 verify-public-r2.py`（同目录需要`activate-r2.py`，仅复用无重定向HTTP辅助函数，不运行旧激活main），隐藏输入用户Key；只验合成小图PUT/GET/HEAD和字节，不生成、不扣模型费。此脚本不替代原生平台/所有MIME/逐型号取材及账单验收。
 - 本地测试：`python3 prepare_public_r2_test.py`、`python3 verify_public_r2_test.py`；扩展目录 `go test -mod=readonly ./r2direct ./ossdirect ./jcmedia`。
 - 共享OSS入口暂留给旧消费者；新桌面不调用。最终删除OSS包/路由/env与撤销凭据，必须先完成画布/旧客户端迁移及历史唯一原件保存。签名过期不等于对象删除，R2生命周期待生产核对。

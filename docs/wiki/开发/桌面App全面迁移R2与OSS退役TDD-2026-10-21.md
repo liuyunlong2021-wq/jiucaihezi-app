@@ -1,6 +1,6 @@
 # 桌面 App 全面迁移 R2 与 OSS 退役 TDD
 
-> 日期：2026-10-21。状态：桌面/公共 R2 服务端源码已实施，本地验证见§11；生产未部署、OSS未退役。用户目标：桌面 App 全面转 R2，完全舍弃 OSS。用户已授权先提交全部既有改动，再执行 TDD。
+> 日期：2026-10-21。状态：公共 R2 已生产激活（用户完整脚本回执），独立公网复核通过；桌面包与OSS退役进展见§13。用户目标：桌面 App 全面转 R2，完全舍弃 OSS。用户已授权先提交全部既有改动，再执行 TDD。
 
 ## 1. 可验证目标与范围
 
@@ -255,3 +255,34 @@ SSH尝试以现有身份连接生产 `47.82.86.196`，返回 `Permission denied 
 - 新激活仍需交互隐藏输入NewAPI用户Key；这是上传接口鉴权，与SSH登录凭据不同。Key不在命令参数/聊天/落盘文件内。当前未获取该Key，未执行激活、模型生成或OSS退役。
 
 本节取代§11“当前SSH身份被拒绝/未执行完整宿主构建”的阶段状态；数据库备份与生产切换仍待激活脚本实际回执，不提前标通过。
+
+
+## 13. 公共 R2 实际激活与独立复核（2026-10-21）
+
+用户在服务器交互执行固定基线激活脚本并提供完整成功回执：
+
+```text
+Redis dollar escaping verified equivalent; keeping the existing connection unchanged.
+Configuration preserved. Backing up and verifying databases...
+Database backup verified. Recreating only NewAPI...
+PUBLIC R2 ACTIVE: image switched; public/Yihong/Lingdong R2 readback, legacy OSS grants and public API CORS probes passed.
+Backup: /root/jc-public-r2-switch-cblvcmp7
+No generation requested. Desktop packages, canvas, prices and legacy OSS retirement are NOT completed.
+```
+
+该回执证明脚本已验证数据库备份、切换到固定镜像、运行环境/挂载/端口/网络保持、公共/易红/灵动各一次合成小图R2 PUT/GET/HEAD及字节读回、旧OSS授权与公网CORS。新镜像ID仍为§12固定值；这是脚本内部校验与用户回执，不是额外的远程inspect证据。回滚脚本预期在`/root/jc-public-r2-switch-cblvcmp7/rollback.sh`，使用前重新确认存在。
+
+随后从本机独立请求公网：`/api/status` HTTP200、success=true；公共`r2`、`lingdong`、`yihong`三个上传入口未鉴权POST均401，均有唯一允许画布Origin的CORS头。没有使用/获取用户Key，也没有再次生成或扣费。
+
+独立SSH inspect/回滚文件检查遇到复用连接Broken pipe后鉴权失败，未取得结果；不把该检查写成已完成。公网检查成功，未据此再次切换或回滚健康服务。
+
+当前范围：G3合成小图存储与公网鉴权已取得证据；大文件/其他MIME、桌面App实际上传、逐型号厂商取材/生成/本地读回/账单和跨平台安装版仍待验收。共享画布/旧桌面与历史唯一原件清点未完成，旧OSS路由/包/凭据继续保留，**最终OSS退役尚未完成**。
+
+
+### 本机 Mac ARM64 包
+
+- `pnpm exec tauri build --bundles app` 与 `node scripts/fix-macos-app.mjs` 成功；本机版本2.2.36重建，未改版本号/推tag/发布更新。
+- 产物：`src-tauri/target/release/bundle/macos/韭菜盒子.app`，架构`arm64`；19个嵌套Mach-O文件签名，`codesign --verify --deep --strict`通过。
+- 主可执行文件SHA-256：`37bd8611d7555ecda96fac564dc2b1b71e315ee27abfdf1489ba8b54492e0e2c`。桌面前端资源已确认含公共R2新入口。
+- 构建环境缺少公证凭据，本包未公证；未自动安装/启动、未操作用户项目或执行真实模型生成。Intel Mac/Windows安装包和本机GUI上传尚未验证，不能把ARM64构建成功写成跨平台验收。
+- 用户随后确认原SSH终端显示`Shared connection ... closed`并回到Mac提示符，与复用连接断开一致。独立公网健康/鉴权检查已通过，无需重复运行只接受旧镜像基线的激活脚本。
