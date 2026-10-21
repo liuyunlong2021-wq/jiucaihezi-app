@@ -161,3 +161,16 @@ test('Tauri opens external URLs through the official opener plugin', () => {
   assert.match(source, /await openUrl\(url\)/)
   assert.doesNotMatch(source, /@tauri-apps\/plugin-shell'[\s\S]*await open\(url\)/)
 })
+
+test('R2 PUT serializes raw Blob bytes and preserves redirect policy for Request inputs', async () => {
+  const bytes = new Uint8Array([0, 128, 255, 13, 10, 228, 184, 173])
+  const blob = new Blob([bytes], { type: 'image/png' })
+  const serialized = await serializeRustHttpBody('https://example.test/object', { method: 'PUT', headers: { 'Content-Type': 'image/png' }, body: blob })
+  assert.deepEqual(Uint8Array.from(atob(serialized.body_base64!), char => char.charCodeAt(0)), bytes)
+  assert.equal(new Headers(serialized.headers).get('Content-Type'), 'image/png')
+  const normalized = await normalizeRustHttpRequest(new Request('https://example.test/object', { method: 'PUT', body: blob, redirect: 'error', credentials: 'omit' }))
+  assert.equal(normalized.init.redirect, 'error')
+  assert.equal(normalized.init.credentials, 'omit')
+  assert.ok(normalized.init.body instanceof Blob)
+  assert.deepEqual(new Uint8Array(await normalized.init.body.arrayBuffer()), bytes)
+})

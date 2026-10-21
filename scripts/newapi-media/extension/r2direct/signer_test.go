@@ -120,3 +120,38 @@ func TestYihongNamespaceAndChannelIsolation(t *testing.T) {
 		}
 	}
 }
+
+func TestCreationUploadPreservesPublicUploadContract(t *testing.T) {
+	s := fixture(t)
+	for _, mime := range []string{"image/png", "image/gif", "application/octet-stream", "video/mp4", "audio/mpeg"} {
+		g, err := s.SignCreationUpload(context.Background(), 17, mime, MaxFile)
+		if err != nil {
+			t.Fatalf("%s: %v", mime, err)
+		}
+		put, _ := url.Parse(g.UploadURL)
+		get, _ := url.Parse(g.AssetURL)
+		if !strings.HasPrefix(put.Path, "/"+Bucket+"/creation-temp/17/") || put.Path != get.Path || g.Method != "PUT" {
+			t.Fatal("public upload scope changed")
+		}
+	}
+	for _, size := range []int64{0, -1, MaxFile + 1} {
+		if _, err := s.SignCreationUpload(context.Background(), 17, "image/png", size); err == nil {
+			t.Fatal("invalid size accepted")
+		}
+	}
+	if _, err := s.SignCreationUpload(context.Background(), 0, "image/png", 1); err == nil {
+		t.Fatal("invalid owner accepted")
+	}
+	if _, err := s.SignCreationUpload(context.Background(), 17, "text/html", 1); err == nil {
+		t.Fatal("invalid MIME accepted")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := s.SignCreationUpload(ctx, 17, "image/png", 1); err == nil {
+		t.Fatal("cancelled upload accepted")
+	}
+	// Expanding the public upload contract must not expand channel-specific MIME contracts.
+	if _, err := s.SignUpload(context.Background(), 17, "灵动-gpt-image-2.5-flare", "image/gif", 1); err == nil {
+		t.Fatal("channel MIME contract expanded")
+	}
+}

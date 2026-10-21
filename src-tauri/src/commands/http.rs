@@ -15,6 +15,7 @@ pub struct HttpRequest {
     pub body: Option<String>,
     pub body_base64: Option<String>,
     pub timeout_secs: Option<u64>,
+    pub deny_redirects: Option<bool>,
 }
 
 #[derive(Serialize)]
@@ -95,6 +96,7 @@ fn is_newapi_passthrough_path(url: &str) -> bool {
         .map(|parsed| {
             parsed.path().starts_with("/v1/")
                 || parsed.path() == "/api/creations/upload-url"
+                || parsed.path() == "/api/creations/r2/upload-url"
         })
         .unwrap_or(false)
 }
@@ -210,6 +212,9 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
     client_builder = client_builder.timeout(std::time::Duration::from_secs(
         request.timeout_secs.unwrap_or(30),
     ));
+    if request.deny_redirects.unwrap_or(false) {
+        client_builder = client_builder.redirect(reqwest::redirect::Policy::none());
+    }
     if should_direct_unified_api_to_newapi(&request) {
         client_builder = with_newapi_source_resolution(client_builder);
     }
@@ -253,7 +258,7 @@ pub async fn http_request(request: HttpRequest) -> Result<HttpResponse, String> 
     let resp = req
         .send()
         .await
-        .map_err(|e| format!("HTTP 请求失败: {}", e))?;
+        .map_err(|e| format!("HTTP 请求失败: {}", e.without_url()))?;
 
     let status = resp.status().as_u16();
     let mut headers = HashMap::new();
@@ -730,6 +735,7 @@ mod tests {
             body: None,
             body_base64: None,
             timeout_secs: None,
+            deny_redirects: None,
         };
         assert!(should_direct_unified_api_to_newapi(&make_request(
             "/api/creations/upload-url",
@@ -776,7 +782,7 @@ mod tests {
                 ("Content-Type".into(), "multipart/form-data; boundary=jc-boundary".into()),
                 ("Authorization".into(), "Bearer test-key".into()),
             ])),
-            body: None, body_base64: Some(general_purpose::STANDARD.encode(&body)), timeout_secs: Some(5),
+            body: None, body_base64: Some(general_purpose::STANDARD.encode(&body)), timeout_secs: Some(5), deny_redirects: None,
         }).await.unwrap();
         assert_eq!(response.status, 200);
         let received = server.join().unwrap();
@@ -785,6 +791,45 @@ mod tests {
         assert!(headers.contains("multipart/form-data; boundary=jc-boundary"));
         assert!(headers.contains("authorization: bearer test-key"));
         assert_eq!(&received[end + 4..], body.as_slice());
+    }
+
+    #[tokio::test]
+    async fn r2_put_preserves_bytes_and_does_not_follow_redirects() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let bytes = vec![0, 128, 255, 13, 10, 228, 184, 173];
+        let server = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            let mut received = Vec::new();
+            loop {
+                let mut buffer = [0; 1024];
+                let n = stream.read(&mut buffer).unwrap();
+                assert!(n > 0);
+                received.extend_from_slice(&buffer[..n]);
+                if let Some(end) = received.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let headers = String::from_utf8_lossy(&received[..end]).to_lowercase();
+                    let length: usize = headers.lines().find_map(|line| line.strip_prefix("content-length: ")).unwrap().parse().unwrap();
+                    if received.len() >= end + 4 + length { break; }
+                }
+            }
+            // Following this redirect would fail or leak the signed request to another destination.
+            stream.write_all(b"HTTP/1.1 307 Temporary Redirect\r\nLocation: http://127.0.0.1:1/leak\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            received
+        });
+        let response = http_request(HttpRequest {
+            url: format!("http://{address}/object?signature=fixture"), method: Some("PUT".into()),
+            headers: Some(HashMap::from([("Content-Type".into(), "image/png".into())])),
+            body: None, body_base64: Some(general_purpose::STANDARD.encode(&bytes)), timeout_secs: Some(5), deny_redirects: Some(true),
+        }).await.unwrap();
+        assert_eq!(response.status, 307);
+        let received = server.join().unwrap();
+        let end = received.windows(4).position(|part| part == b"\r\n\r\n").unwrap();
+        let headers = String::from_utf8_lossy(&received[..end]).to_lowercase();
+        assert!(headers.starts_with("put "));
+        assert!(headers.contains("content-type: image/png"));
+        assert!(!headers.contains("authorization:") && !headers.contains("cookie:"));
+        assert_eq!(&received[end+4..], bytes.as_slice());
     }
 
     fn serve_once(response: &'static [u8]) -> (String, std::thread::JoinHandle<()>) {

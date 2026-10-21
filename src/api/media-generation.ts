@@ -1,3 +1,4 @@
+import { validateCreationR2Grant, assertNoLegacyCreationOssReference } from '@/utils/creationR2Upload'
 /**
  * api/media-generation.ts — 云端媒体生成（统一走 NewAPI）
  *
@@ -444,6 +445,7 @@ export function isTerminalCreationTaskError(error: unknown): boolean {
 export async function uploadCreationAsset(value?: string, externalSignal?: AbortSignal): Promise<string> {
   const source = String(value || '').trim()
   if (!source) return source
+  assertNoLegacyCreationOssReference(source)
   // 远程素材已经可被模型服务访问，本地 Tauri 资源（asset:// 或 Windows 的
   // http(s)://asset.localhost/...）和浏览器 blob: 必须上传。
   if (!source.startsWith('data:') && !isLocalAssetUrl(source) && !source.startsWith('blob:')) return source
@@ -458,47 +460,24 @@ export async function uploadCreationAsset(value?: string, externalSignal?: Abort
   const headers = buildGatewayHeaders({})
   const { signal, clear } = createTimeoutSignal(120, externalSignal)
   try {
-    const authorization = await safeFetch(`${getApiBase()}/api/creations/upload-url`, {
+    const authorization = await safeFetch(`${getApiBase()}/api/creations/r2/upload-url`, {
       method: 'POST',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ content_type: blob.type || 'application/octet-stream', size: blob.size }),
       signal,
     })
     if (!authorization.ok) {
-      const text = await authorization.text().catch(() => '')
-      throw new Error(`申请 OSS 上传地址失败 (${authorization.status}): ${text.slice(0, 200)}`)
+      if (authorization.status === 404) throw new Error('服务器尚未支持 R2 素材上传，请先升级服务端')
+      throw new Error(`申请 R2 上传地址失败 (${authorization.status})`)
     }
-    const signed = await authorization.json()
-    const uploadUrl = String(signed.upload_url || '').trim()
-    const assetUrl = String(signed.asset_url || '').trim()
-    const fields = signed.form_fields
-    if (!uploadUrl || !assetUrl || !fields || typeof fields !== 'object') {
-      throw new Error('OSS 上传授权响应不完整')
-    }
-    const formData = new FormData()
-    for (const [name, value] of Object.entries(fields)) formData.append(name, String(value))
-    const extension = ({
-      'application/octet-stream': 'bin',
-      'image/jpeg': 'jpg',
-      'image/png': 'png',
-      'image/webp': 'webp',
-      'image/gif': 'gif',
-      'video/mp4': 'mp4',
-      'video/quicktime': 'mov',
-      'audio/mpeg': 'mp3',
-      'audio/mp4': 'm4a',
-      'audio/wav': 'wav',
-      'audio/x-wav': 'wav',
-      'audio/aac': 'aac',
-      'audio/ogg': 'ogg',
-    } as Record<string, string>)[blob.type] || 'bin'
-    formData.append('file', blob, `reference.${extension}`)
-    const uploaded = await safeFetch(uploadUrl, { method: 'POST', body: formData, signal })
-    if (!uploaded.ok) {
-      const text = await uploaded.text().catch(() => '')
-      throw new Error(`参考素材直传 OSS 失败 (${uploaded.status}): ${text.slice(0, 200)}`)
-    }
-    return assetUrl
+    if (signal?.aborted) throw abortError()
+    const grant = validateCreationR2Grant(await authorization.json(), blob.type || 'application/octet-stream')
+    const uploaded = await safeFetch(grant.uploadUrl, {
+      method: 'PUT', headers: grant.headers, body: blob, signal, credentials: 'omit', redirect: 'error',
+    })
+    if (!uploaded.ok) throw new Error(`参考素材直传 R2 失败 (${uploaded.status})`)
+    if (signal?.aborted) throw abortError()
+    return grant.assetUrl
   } finally {
     clear()
   }

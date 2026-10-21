@@ -83,27 +83,27 @@ test('FK 面板中文模型名进入实际 NewAPI 请求体', { concurrency: fal
   }
 })
 
-async function mockDirectOssUpload(
+function r2Fixture(ext = 'png') {
+  const root = `https://d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com/jiucaihezi-media-test/creation-temp/17/0123456789abcdef0123456789abcdef.${ext}`
+  const signed = (ttl: number, signature: string) => `${root}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20261021T000000Z&X-Amz-Credential=test&X-Amz-SignedHeaders=${ttl === 300 ? 'content-length%3Bcontent-type%3Bhost' : 'host'}&X-Amz-Expires=${ttl}&X-Amz-Signature=${signature.repeat(64)}`
+  return { upload_url: signed(300, 'a'), asset_url: signed(21600, 'b'), head_url: signed(21600, 'c') }
+}
+async function mockDirectR2Upload(
   input: RequestInfo | URL,
   init?: RequestInit,
   onFile?: (file: Blob) => void,
 ): Promise<Response | undefined> {
   const url = String(input)
-  if (url.endsWith('/api/creations/upload-url')) {
+  if (url.endsWith('/api/creations/r2/upload-url')) {
     assert.match(new Headers(init?.headers).get('Authorization') || '', /^Bearer /)
     const request = JSON.parse(String(init?.body || '{}'))
     const ext = request.content_type === 'video/mp4' ? 'mp4' : request.content_type === 'audio/mpeg' ? 'mp3' : 'png'
-    return Response.json({
-      upload_url: 'https://oss.example.test/upload',
-      form_fields: { key: `creation-temp/test/reference.${ext}`, policy: 'signed-policy' },
-      asset_url: `https://cdn.example.test/reference.${ext}`,
-    })
+    return Response.json({ method: 'PUT', headers: { 'Content-Type': request.content_type }, ...r2Fixture(ext) })
   }
-  if (url === 'https://oss.example.test/upload' && init?.method === 'POST') {
+  if (url.startsWith('https://d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com/') && init?.method === 'PUT') {
     assert.equal(new Headers(init.headers).has('Authorization'), false)
-    const file = (init.body as FormData).get('file')
-    assert.equal(file instanceof Blob, true)
-    if (file instanceof Blob) onFile?.(file)
+    assert.equal(init.body instanceof Blob, true)
+    if (init.body instanceof Blob) onFile?.(init.body)
     return new Response(null, { status: 204 })
   }
   return undefined
@@ -133,12 +133,12 @@ test('media transport materializes only at the request boundary', { concurrency:
   let uploads = 0
   const upload = async () => {
     uploads += 1
-    return 'https://cdn.example.test/reference.png'
+    return r2Fixture().asset_url
   }
 
   assert.equal(await materializeMediaInput('blob:reference', 'multipart', upload), 'blob:reference')
   assert.equal(uploads, 0)
-  assert.equal(await materializeMediaInput('blob:reference', 'url', upload), 'https://cdn.example.test/reference.png')
+  assert.equal(await materializeMediaInput('blob:reference', 'url', upload), r2Fixture().asset_url)
   assert.equal(uploads, 1)
 
   const previousFetch = globalThis.fetch
@@ -161,6 +161,7 @@ async function installGatewaySession() {
 async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   const previousSetTimeout = globalThis.setTimeout
   ;(globalThis as any).setTimeout = (handler: (...args: unknown[]) => void, _timeout?: number, ...args: unknown[]) => {
+    if (_timeout === 120_000) return previousSetTimeout(handler, _timeout, ...args)
     queueMicrotask(() => handler(...args))
     return 0
   }
@@ -607,12 +608,12 @@ test('RunningHub URL contract uploads local canvas data once before adapter subm
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    const directUpload = await mockDirectOssUpload(input, init)
+    const directUpload = await mockDirectR2Upload(input, init)
     if (directUpload) return directUpload
     if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/images/generations')) {
       const body = JSON.parse(String(init?.body || '{}'))
-      assert.deepEqual(body.images, ['https://cdn.example.test/reference.png'])
+      assert.deepEqual(body.images, [r2Fixture().asset_url])
       return Response.json({ task_id: 'rh_canvas_data_001', status: 'processing' })
     }
     if (url.endsWith('/rh/tasks/rh_canvas_data_001')) {
@@ -1371,13 +1372,13 @@ test('KIK uploads local video and audio before submitting them to NewAPI', { con
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    const directUpload = await mockDirectOssUpload(input, init, file => uploaded.push(file.type))
+    const directUpload = await mockDirectR2Upload(input, init, file => uploaded.push(file.type))
     if (directUpload) return directUpload
     if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos') && init?.method === 'POST') {
       const body = JSON.parse(String(init.body))
-      assert.equal(body.video_url, 'https://cdn.example.test/reference.mp4')
-      assert.equal(body.audio_url, 'https://cdn.example.test/reference.mp3')
+      assert.equal(body.video_url, r2Fixture('mp4').asset_url)
+      assert.equal(body.audio_url, r2Fixture('mp3').asset_url)
       assert.equal(JSON.stringify(body).includes('data:'), false)
       return Response.json({ id: 'task_kik', status: 'processing' })
     }
@@ -1411,13 +1412,13 @@ test('ZX Grok URL contract uploads local reference before model submit', async (
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    const directUpload = await mockDirectOssUpload(input, init)
+    const directUpload = await mockDirectR2Upload(input, init)
     if (directUpload) return directUpload
     if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos')) {
       const body = JSON.parse(String(init?.body || '{}'))
       assert.equal(body.model, 'grok-1.5-video-10s')
-      assert.equal(body.image, 'https://cdn.example.test/reference.png')
+      assert.equal(body.image, r2Fixture().asset_url)
       return Response.json({ task_id: 'zx_grok_10_001', status: 'processing' })
     }
     if (url.endsWith('/v1/videos/zx_grok_10_001')) {
@@ -1496,7 +1497,7 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
 
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
-    const directUpload = await mockDirectOssUpload(input, init)
+    const directUpload = await mockDirectR2Upload(input, init)
     if (directUpload) return directUpload
     if (url.endsWith('/api/creations/uploads')) throw new Error('legacy server-side media upload was used')
     if (url.endsWith('/v1/videos')) {
@@ -1507,10 +1508,10 @@ test('P6 山海画布视频经适配器任务路由提交并回传代理成片�
       assert.equal(body.ratio, '16:9')
       assert.equal(body.resolution, '720p')
       assert.equal(body.duration, 30)
-      // 参考图由 OSS 直传后，通过临时签名 HTTPS 地址交给模型服务。
+      // 参考图由 R2 直传后，通过临时签名 HTTPS 地址交给模型服务。
       assert.deepEqual(body.images, [
-        'https://cdn.example.test/reference.png',
-        'https://cdn.example.test/reference.png',
+        r2Fixture().asset_url,
+        r2Fixture().asset_url,
       ])
       return Response.json({ id: 'run_shanhai_1', status: 'processing' })
     }
@@ -1741,4 +1742,98 @@ test('invalid Wan and Love reference durations stop before generation POST', { c
     await assert.rejects(executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /2–15秒/)
     assert.equal(posts, 0)
   } finally { globalThis.fetch = oldFetch; globalThis.document = oldDocument; await restore() }
+})
+
+test('desktop local references use R2 PUT and never the OSS grant', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const previous = globalThis.fetch
+  const bytes = new Uint8Array([0, 128, 255, 13, 10])
+  const root = 'https://d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com/jiucaihezi-media-test/creation-temp/17/0123456789abcdef0123456789abcdef.png'
+  const signed = (ttl: number, signature: string) => `${root}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20261021T000000Z&X-Amz-Credential=test&X-Amz-SignedHeaders=${ttl === 300 ? 'content-length%3Bcontent-type%3Bhost' : 'host'}&X-Amz-Expires=${ttl}&X-Amz-Signature=${signature.repeat(64)}`
+  let put = 0
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith('/api/creations/r2/upload-url')) return Response.json({ method: 'PUT', headers: { 'Content-Type': 'image/png' }, upload_url: signed(300, 'a'), asset_url: signed(21600, 'b'), head_url: signed(21600, 'c') })
+    assert.equal(String(input), signed(300, 'a'))
+    assert.equal(init?.method, 'PUT')
+    assert.equal(init?.redirect, 'error')
+    assert.equal(init?.credentials, 'omit')
+    assert.equal(new Headers(init?.headers).has('Authorization'), false)
+    assert.deepEqual(new Uint8Array(await (init?.body as Blob).arrayBuffer()), bytes)
+    put++
+    return new Response(null, { status: 204 })
+  }
+  try {
+    const { uploadCreationAsset } = await import('@/api/media-generation')
+    assert.equal(await uploadCreationAsset(`data:image/png;base64,${Buffer.from(bytes).toString('base64')}`), signed(21600, 'b'))
+    assert.equal(put, 1)
+  } finally { globalThis.fetch = previous; await restore() }
+})
+
+test('R2 grant validation and failure never submit or fall back to OSS', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const previous = globalThis.fetch
+  const { uploadCreationAsset } = await import('@/api/media-generation')
+  const { validateCreationR2Grant } = await import('@/utils/creationR2Upload')
+  const valid = { method: 'PUT', headers: { 'Content-Type': 'image/png' }, ...r2Fixture() }
+  const mutations = [
+    { method: 'POST' }, { headers: { 'Content-Type': 'image/png', Authorization: 'bad' } },
+    { upload_url: valid.upload_url.replace('d055e5deea504cb25551755cc486a61a', '0123456789abcdef0123456789abcdef') },
+    { asset_url: valid.asset_url.replace('/17/', '/18/') },
+    { upload_url: valid.upload_url.replace('Expires=300', 'Expires=600') },
+    { upload_url: valid.upload_url.replace('X-Amz-Signature=', 'removed=') },
+    { head_url: valid.asset_url }, { form_fields: { key: 'oss' } },
+    { upload_url: valid.upload_url.replace('/creation-temp/', '/other/') },
+    { upload_url: valid.upload_url + '&X-Amz-Expires=300' },
+  ]
+  try {
+    for (const mutation of mutations) assert.throws(() => validateCreationR2Grant({ ...valid, ...mutation }, 'image/png'), /R2/)
+    for (const stage of ['authorization', 'grant', 'put', 'cancel']) {
+      const controller = new AbortController()
+      let requests = 0
+      globalThis.fetch = async (input, init) => {
+        requests++
+        if (String(input).endsWith('/api/creations/r2/upload-url')) {
+          if (stage === 'authorization') return new Response(null, { status: 503 })
+          if (stage === 'cancel') controller.abort()
+          return Response.json(stage === 'grant' ? { ...valid, method: 'POST' } : valid)
+        }
+        assert.equal(String(input), valid.upload_url)
+        assert.equal(init?.method, 'PUT')
+        return new Response(null, { status: 403 })
+      }
+      await assert.rejects(uploadCreationAsset('data:image/png;base64,AA==', controller.signal))
+      assert.equal(requests, stage === 'put' ? 2 : 1)
+    }
+    let requests = 0
+    globalThis.fetch = async () => { requests++; throw new Error('unexpected HTTP') }
+    await assert.rejects(uploadCreationAsset('https://jc-fk-ref-test-20261009-4c82.oss-cn-shanghai.aliyuncs.com/creation-temp/17/0123456789abcdef0123456789abcdef.png?OSSAccessKeyId=old&Signature=old'), /本地原件/)
+    assert.equal(await uploadCreationAsset('https://cdn.example.test/original.png'), 'https://cdn.example.test/original.png')
+    assert.equal(requests, 0)
+  } finally { globalThis.fetch = previous; await restore() }
+})
+
+test('one failed R2 reference prevents a multi-reference generation', { concurrency: false }, async () => {
+  const restore = await installGatewaySession()
+  const previous = globalThis.fetch
+  let generates = 0
+  let uploads = 0
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith('/api/creations/r2/upload-url')) return Response.json({ method: 'PUT', headers: { 'Content-Type': 'image/png' }, ...r2Fixture() })
+    if (init?.method === 'PUT') return new Response(null, { status: ++uploads === 1 ? 204 : 403 })
+    generates++
+    throw new Error('unexpected generation or OSS request')
+  }
+  try {
+    const plan = buildCreationRunPlan({ modelId: 'newapi/fk/ft-image-v1-186289ba9d3263010c69372f8939dd94', params: { prompt: 'p', images: ['data:image/png;base64,AA==', 'data:image/png;base64,AQ=='] } })
+    await assert.rejects(executeCreationSubmitRequest(buildCreationSubmitRequest(plan)), /R2/)
+    assert.equal(generates, 0)
+    assert.equal(uploads, 2)
+  } finally { globalThis.fetch = previous; await restore() }
+})
+
+test('new references reject legacy platform OSS before any transport reads it', async () => {
+  const source = 'https://jc-fk-ref-test-20261009-4c82.oss-cn-shanghai.aliyuncs.com/creation-temp/17/0123456789abcdef0123456789abcdef.png?OSSAccessKeyId=old&Signature=old'
+  for (const transport of ['multipart', 'base64', 'url'] as const) {
+    await assert.rejects(materializeMediaInput(source, transport, async () => { throw new Error('unexpected upload') }), /本地原件/)
+  }
 })

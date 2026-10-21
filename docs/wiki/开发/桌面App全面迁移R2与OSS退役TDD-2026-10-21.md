@@ -1,6 +1,6 @@
 # 桌面 App 全面迁移 R2 与 OSS 退役 TDD
 
-> 日期：2026-10-21。状态：方案，尚未实施、测试、打包或部署。用户目标：桌面 App 全面转 R2，完全舍弃 OSS。本次授权为编写 TDD。
+> 日期：2026-10-21。状态：桌面/公共 R2 服务端源码已实施，本地验证见§11；生产未部署、OSS未退役。用户目标：桌面 App 全面转 R2，完全舍弃 OSS。用户已授权先提交全部既有改动，再执行 TDD。
 
 ## 1. 可验证目标与范围
 
@@ -195,4 +195,48 @@ Go扩展：在 `scripts/newapi-media/extension` 执行 `go test -mod=readonly ./
 - 现行接入与验收：[[运维/URL素材渠道接入执行手册]]；历史成功与发布边界：[[运维/App参考素材直传阿里云OSS验收-2026-10-09]]。
 - Cloudflare官方：[预签名URL](https://developers.cloudflare.com/r2/api/s3/presigned-urls/)、[CORS](https://developers.cloudflare.com/r2/buckets/cors/)、[对象生命周期](https://developers.cloudflare.com/r2/buckets/object-lifecycles/)。预签名使用S3 API端点；PUT带匹配Content-Type，GET/HEAD按方法签名；生命周期是对象删除规则，与签名有效期分开验证。
 
-当前仅完成源码追踪、设计和文档检查；没有声称任何新测试、真实平台、生产切换、历史数据迁移或收费生成已通过。
+原设计阶段仅完成源码追踪与文档检查；本次实施进展见下方，未完成的闸门仍保留。
+
+
+## 11. 本轮执行记录
+
+### G0 合同卡与边界
+
+```yaml
+channel: 桌面公共临时素材上传（保留各生成渠道合同）
+record_status: 源码实施；生产基线与逐型号取材未验收
+authorized_scope: 用户授权提交main全部既有改动并执行本TDD
+baseline_commit: d89e74f2
+storage: 复用既有私有R2桶及服务器凭据；不创建新存储服务
+api: POST /api/creations/r2/upload-url
+request_fields: [content_type, size]
+object_prefix: creation-temp/{鉴权用户ID}/{128bit随机名}
+limits: 单文件20MiB；上传300秒；读取21600秒；客户端上传120秒
+references: 保留multipart、base64、本机Comfy与动态asset_id链路
+production_access: 当前SSH身份被拒绝；未读取生产配置或凭据
+legacy_consumers: 画布仍有OSS公共入口；兄弟仓存在未提交改动，本轮未覆盖
+history_inventory: 未扫描用户项目、在途任务和OSS唯一原件；最终退役前必须完成
+```
+
+### 已实施
+
+- 公共 R2 签名复用现有 AWS v4 实现，增加 `SignCreationUpload`；公共上传保留 GIF/bin 等原类型，灵动/易红白名单及类型不扩张。新入口保留 TokenAuth，严格字段/请求体/用户归属；可独立运行的 HTTP handler 测试不冒充完整宿主集成。
+- 桌面 `uploadCreationAsset` 改为新入口与 Blob PUT，校验固定 R2 主机/桶/目录、同一对象、方法/头/签名/期限；不再消费 OSS grant，不提供回退。404 明确提示升级服务端；上传错误不展示签名地址。
+- 数据物化失败或取消不提交生成；多参考图中任何一次 PUT 失败，生成 POST=0。旧临时 OSS 签名引用在公共上传、三种素材物化协议与动态新素材准备阶段拒绝并提示恢复本地原件，普通远程引用保持。此识别依赖平台式 `creation-temp` 路径与 OSS 签名形态，实际桶归属/历史原件仍须生产清点，不宣称全量历史已迁移。
+- 原生 HTTP 将 `redirect:error` 传给 Rust，PUT不跟随重定向；保留二进制 Request 的 Blob 字节和原JSON/文本行为。删除会打印参考URL正文的运行时调试输出，HTTP诊断不打印查询签名。
+- 已交付 `prepare-public-r2.sh`：精确当前镜像参数、固定源码及旧媒体路由/R2源码哈希检查、备份/失败恢复、测试和镜像构建；只准备镜像，不激活。已交付 `verify-public-r2.py`：隐藏读取用户Key，合成小图PUT/GET/HEAD及逐字节读回，绝不发生成请求。未执行服务器脚本。
+
+### 红测与本地证据
+
+- 首轮桌面红测实际请求旧 `/api/creations/upload-url`，未走新R2入口；Go公共方法用例因旧实现缺 `SignCreationUpload` 编译失败。新增 Request 二进制用例在旧文本物化逻辑下失败，再改为Blob保留。
+- 上传/运行时/Comfy/HTTP定向82项通过（随后补上二进制Request字节断言并纳入最终focused回归）。全部任务插件148/148通过；Go `r2direct/ossdirect/jcmedia`三包通过；准备脚本保护3项、合成读回验证脚本3项通过。
+- 最终完整Node回归2093通过/1跳过；Rust496通过/2忽略。第一次同时运行两套完整Rust测试，冲突于既有固定Skill夹具目录；该用例单跑通过，随后串行完整回归通过。没有为此改动Skill逻辑。
+- 类型检查与 `pnpm run build:desktop` 通过，桌面分发产物审计通过。后补的跨协议旧OSS引用保护已通过最终focused、类型与Vite/桌面产物审计；未打包原生安装版。未执行完整NewAPI宿主编译、Docker镜像构建、真实R2上传、厂商生成、跨平台安装包或历史数据迁移。
+
+### 当前停止边界与下一步
+
+SSH尝试以现有身份连接生产 `47.82.86.196`，返回 `Permission denied (publickey,password)`，没有执行服务器命令。未访问/修改生产凭据、数据库、Compose、模型名单、定价或OSS对象。不能通过本地模拟推断服务已切换。
+
+后续需取得可用连接，先只读核对最新镜像、源码哈希、Compose、API代理路径与R2规则；执行准备后基于实际回执生成对应激活步骤（保留原比较/数据库备份/自动回滚），不直接重跑旧activate脚本。再运行合成验证、桌面平台与逐型号G3–G5。公共路径若被既有网关/Nginx拦截，按真实配置补齐对应路由，不能改通用代理或开放任意存储目标。
+
+共享OSS路由/包仍为未迁移画布和旧客户端保留，因此**OSS彻底退役尚未完成**；只有消费者迁移、在途任务与唯一原件核清后才执行§7阶段D。用户本次目标未因此被缩减或标记完成。

@@ -35,7 +35,8 @@ function refs(count: number): string[] {
 
 async function withImmediateTimers<T>(fn: () => Promise<T>): Promise<T> {
   const previousSetTimeout = globalThis.setTimeout
-  ;(globalThis as any).setTimeout = (handler: (...args: unknown[]) => void) => {
+  ;(globalThis as any).setTimeout = (handler: (...args: unknown[]) => void, timeout?: number) => {
+    if (timeout === 120_000) return previousSetTimeout(handler, timeout)
     queueMicrotask(() => handler())
     return 0
   }
@@ -367,14 +368,16 @@ test('本机视频模型的参考图必须先上传：asset.localhost 不能直�
   globalThis.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     seen.push(url)
-    // 网关只签发授权，文件字节直传 OSS。
-    if (url.endsWith('/api/creations/upload-url')) return Response.json({
-      upload_url: 'https://oss.example.test/upload',
-      form_fields: { key: 'creation-temp/test.png', policy: 'signed' },
-      asset_url: 'https://cdn.example.test/uploaded-0.png',
+    // 网关只签发授权，原始 Blob 直传 R2。
+    const root = 'https://d055e5deea504cb25551755cc486a61a.r2.cloudflarestorage.com/jiucaihezi-media-test/creation-temp/17/0123456789abcdef0123456789abcdef.png'
+    const signed = (ttl: number, signature: string) => `${root}?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Date=20261021T000000Z&X-Amz-Credential=test&X-Amz-SignedHeaders=${ttl === 300 ? 'content-length%3Bcontent-type%3Bhost' : 'host'}&X-Amz-Expires=${ttl}&X-Amz-Signature=${signature.repeat(64)}`
+    if (url.endsWith('/api/creations/r2/upload-url')) return Response.json({
+      method: 'PUT', headers: { 'Content-Type': 'image/png' },
+      upload_url: signed(300, 'a'), asset_url: signed(21600, 'b'), head_url: signed(21600, 'c'),
     })
-    if (url === 'https://oss.example.test/upload') {
-      assert.equal((init?.body as FormData).get('file') instanceof Blob, true)
+    if (url === signed(300, 'a')) {
+      assert.equal(init?.method, 'PUT')
+      assert.equal(init?.body instanceof Blob, true)
       assert.equal(new Headers(init?.headers).has('Authorization'), false)
       return new Response(null, { status: 204 })
     }
@@ -407,8 +410,8 @@ test('本机视频模型的参考图必须先上传：asset.localhost 不能直�
     __resetApiKeyMemoryCacheForTests('')
   }
 
-  assert.ok(seen.some(url => url === 'https://oss.example.test/upload'), '参考图没有被上传，本地地址被直接透传了')
-  assert.equal(posted?.first_frame, 'https://cdn.example.test/uploaded-0.png')
+  assert.ok(seen.some(url => url.includes('r2.cloudflarestorage.com/') && url.includes('X-Amz-Expires=300')), '参考图没有被上传，本地地址被直接透传了')
+  assert.match(posted?.first_frame, /r2\.cloudflarestorage\.com\/.*X-Amz-Expires=21600/)
 })
 
 test('本地 comfy 视频时长单位是秒，帧数换算留给适配器', () => {

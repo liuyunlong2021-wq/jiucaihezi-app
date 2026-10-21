@@ -1,3 +1,4 @@
+import { assertNoLegacyCreationOssReference } from '@/utils/creationR2Upload'
 import { safeFetch } from '@/utils/httpClient'
 import { getApiKey, initApiKey } from '@/services/newApiClient'
 import { isAllowedCreationResultUrl } from '@/utils/urlSafety'
@@ -137,6 +138,7 @@ export async function prepareDynamicInputs(plan: CreationRunPlan, key: string, s
       if (reference && typeof reference === 'object' && typeof (reference as { asset_id?: unknown }).asset_id === 'string') {
         snapshot.inputs[slot.name].push(reference as { asset_id: string }); continue
       }
+      if (typeof reference === 'string') assertNoLegacyCreationOssReference(reference)
       let media = reference
       if (typeof media === 'string' && media.startsWith('https://') && isAllowedCreationResultUrl(media)) {
         if (isTauriRuntime()) {

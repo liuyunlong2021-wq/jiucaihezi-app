@@ -1094,6 +1094,7 @@ mod tests {
             body: None,
             body_base64: None,
             timeout_secs: None,
+            deny_redirects: None,
         };
 
         assert!(should_direct_unified_api_to_newapi(&request));
@@ -1111,6 +1112,7 @@ mod tests {
             body: None,
             body_base64: None,
             timeout_secs: None,
+            deny_redirects: None,
         };
 
         assert!(!should_direct_unified_api_to_newapi(&request));
@@ -1127,6 +1129,7 @@ mod tests {
             body: None,
             body_base64: None,
             timeout_secs: None,
+            deny_redirects: None,
         };
 
         assert!(!should_direct_unified_api_to_newapi(&request));

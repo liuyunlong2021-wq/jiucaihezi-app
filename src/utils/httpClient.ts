@@ -130,7 +130,9 @@ export async function normalizeRustHttpRequest(
     ? undefined
     : request.headers.get('content-type')?.startsWith('multipart/form-data')
       ? await request.clone().blob()
-      : await request.clone().text()
+      : request.headers.get('content-type') && !/^(text\/|application\/(?:json|[^;]+\+json|x-www-form-urlencoded)(?:;|$))/i.test(request.headers.get('content-type')!)
+        ? await request.clone().blob()
+        : await request.clone().text()
   return {
     url: request.url,
     init: {
@@ -138,6 +140,8 @@ export async function normalizeRustHttpRequest(
       headers: request.headers,
       body: body || undefined,
       signal: request.signal,
+      redirect: request.redirect,
+      credentials: request.credentials,
     },
   }
 }
@@ -189,6 +193,7 @@ async function rustFetch(url: string, init?: RequestInit): Promise<Response> {
       body,
       body_base64,
       timeout_secs: pickTimeoutForUrl(url),
+      deny_redirects: init?.redirect === 'error',
     },
   })
 
@@ -341,9 +346,9 @@ export async function safeFetch(input: RequestInfo | URL, init?: RequestInit): P
       }
       return rustFetch(url, normalized.init)
     }
-    console.warn('[safeFetch] Tauri but shouldUseRustHttpBridge=false for:', url, 'init:', JSON.stringify({method: init?.method, hasBody: !!init?.body, bodyType: typeof init?.body}))
+    console.warn('[safeFetch] Tauri but shouldUseRustHttpBridge=false for:', url.split('?')[0], 'init:', JSON.stringify({method: init?.method, hasBody: !!init?.body, bodyType: typeof init?.body}))
   } else {
-    console.warn('[safeFetch] NOT Tauri, using native fetch for:', typeof input === 'string' ? input : input instanceof URL ? input.href : 'Request')
+    console.warn('[safeFetch] NOT Tauri, using native fetch for:', (typeof input === 'string' ? input : input instanceof URL ? input.href : 'Request').split('?')[0])
   }
   return fetch(input, init)
 }

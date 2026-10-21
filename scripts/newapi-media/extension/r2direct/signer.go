@@ -58,19 +58,30 @@ func New(account, bucket, accessKey, secret string) (*Signer, error) {
 }
 
 func (s *Signer) SignUpload(ctx context.Context, owner int, model, contentType string, size int64) (UploadGrant, error) {
-	return s.signUpload(ctx, owner, model, contentType, size, models, "lingdong-temp")
+	return s.signUpload(ctx, owner, model, contentType, size, models, "lingdong-temp", mediaTypes)
 }
 
 func (s *Signer) SignYihongUpload(ctx context.Context, owner int, model, contentType string, size int64) (UploadGrant, error) {
-	return s.signUpload(ctx, owner, model, contentType, size, yihongModels, "yihong-temp")
+	return s.signUpload(ctx, owner, model, contentType, size, yihongModels, "yihong-temp", mediaTypes)
 }
 
-func (s *Signer) signUpload(ctx context.Context, owner int, model, contentType string, size int64, allowed map[string]bool, prefix string) (UploadGrant, error) {
+// SignCreationUpload preserves the public temporary-media contract without granting model access.
+func (s *Signer) SignCreationUpload(ctx context.Context, owner int, contentType string, size int64) (UploadGrant, error) {
+	types := make(map[string]string, len(mediaTypes)+2)
+	for mime, ext := range mediaTypes {
+		types[mime] = ext
+	}
+	types["image/gif"] = "gif"
+	types["application/octet-stream"] = "bin"
+	return s.signUpload(ctx, owner, "", contentType, size, nil, "creation-temp", types)
+}
+
+func (s *Signer) signUpload(ctx context.Context, owner int, model, contentType string, size int64, allowed map[string]bool, prefix string, types map[string]string) (UploadGrant, error) {
 	if err := ctx.Err(); err != nil {
 		return UploadGrant{}, err
 	}
-	extension, ok := mediaTypes[contentType]
-	if owner <= 0 || !allowed[model] || !ok || size < 1 || size > MaxFile {
+	extension, ok := types[contentType]
+	if owner <= 0 || (allowed != nil && !allowed[model]) || !ok || size < 1 || size > MaxFile {
 		return UploadGrant{}, errors.New("参考素材用户、型号、类型或大小无效")
 	}
 	var nonce [16]byte

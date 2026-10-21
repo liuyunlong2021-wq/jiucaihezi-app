@@ -1,3 +1,4 @@
+import { assertNoLegacyCreationOssReference } from '@/utils/creationR2Upload'
 import {
   CREATION_VIDEO_POLL_INTERVAL_MS,
   CREATION_VIDEO_POLL_MAX_SEC,
@@ -233,6 +234,7 @@ export async function materializeMediaInput(
   upload: typeof uploadCreationAsset = uploadCreationAsset,
   signal?: AbortSignal,
 ): Promise<string> {
+  assertNoLegacyCreationOssReference(source)
   if (!source || transport === 'multipart') return source
   if (transport === 'url') return upload(source, signal)
   if (source.startsWith('data:')) return source
@@ -394,7 +396,7 @@ async function executeDirectImageRequest(
     if (!images.length) throw new Error('没有可用参考图片')
     let data: any
     if (usesFkImageUrls) {
-      // OSS signed URLs are readable by Fanke for a short period. Send references
+      // R2 signed URLs are readable by Fanke for a short period. Send references
       // as JSON imageUrls so file bytes bypass NewAPI/ECS and FK's multipart relay.
       data = await apiCall(request.endpoint, compact({
         model: request.plan.model,
@@ -661,9 +663,7 @@ async function executeRunningHubImageRequest(
   // ★ 扩大的调试日志：覆盖所有 RH 图片模型，帮助排查 image-to-image 422 问题
   if (request.plan.usesRhAdapter && request.plan.task === 'image') {
     console.log('[DEBUG RH IMAGE] model:', request.plan.model, 'endpoint:', request.endpoint)
-    console.log('[DEBUG RH IMAGE] images count:', images.length, 'firstImage:', typeof images[0] === 'string' ? (images[0] as string).slice(0, 80) : 'N/A')
     console.log('[DEBUG RH IMAGE] body keys:', Object.keys(body).join(', '))
-    console.log('[DEBUG RH IMAGE] full body:', JSON.stringify(body).slice(0, 800))
   }
 
   const data = await apiCall(request.endpoint, body, 'POST', request.plan.model, request.signal)

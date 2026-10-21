@@ -52,6 +52,7 @@ func SetCreationMediaRouter(router *gin.Engine) {
 			c.JSON(200, grant)
 		})
 	}
+	router.POST("/api/creations/r2/upload-url", middleware.TokenAuth(), func(c *gin.Context) { r2direct.ServeCreationUpload(c.Writer, c.Request, r2Signer, c.GetInt("id")) })
 	ossSigner, ossErr := ossdirect.New(
 		os.Getenv("OSS_ENDPOINT"),
 		os.Getenv("OSS_BUCKET"),
