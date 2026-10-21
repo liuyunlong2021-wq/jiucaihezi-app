@@ -65,18 +65,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "韭菜盒子 ${{ github.ref_name }}"
-          releaseBody: |
-            ## 韭菜盒子 ${{ github.ref_name }}
-
-            ### macOS Apple Silicon (M 芯片)
-            | 文件 | SHA256 |
-            |------|--------|
-            | 韭菜盒子_${{ github.ref_name }}_aarch64.dmg | 见 .sha256 文件 |
-
-            ### 校验
-            下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
+          # Publish only the final signed and notarized artifacts below.
           tauriScript: pnpm tauri
           args: --target aarch64-apple-darwin --bundles app --config '{"build":{"beforeBuildCommand":""}}'
 
@@ -90,18 +79,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "韭菜盒子 ${{ github.ref_name }}"
-          releaseBody: |
-            ## 韭菜盒子 ${{ github.ref_name }}
-
-            ### macOS Apple Silicon (M 芯片)
-            | 文件 | SHA256 |
-            |------|--------|
-            | 韭菜盒子_${{ github.ref_name }}_aarch64.dmg | 见 .sha256 文件 |
-
-            ### 校验
-            下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
+          # Publish only the final signed and notarized artifacts below.
           tauriScript: pnpm tauri
           args: --target aarch64-apple-darwin --bundles app --config '{"build":{"beforeBuildCommand":""}}'
 
@@ -147,8 +125,8 @@ jobs:
             sleep 30
           done
           [ "$accepted" = true ] || exit 1
-          xcrun stapler staple "$APP"
-          xcrun stapler validate "$APP"
+          node scripts/apple-stapler.mjs staple "$APP"
+          node scripts/apple-stapler.mjs validate "$APP"
           codesign --verify --deep --strict "$APP"
 
       - name: Create DMG (ARM, headless)
@@ -206,8 +184,8 @@ jobs:
                 sleep 30
               fi
             done
-            xcrun stapler staple "$dmg"
-            xcrun stapler validate "$dmg"
+            node scripts/apple-stapler.mjs staple "$dmg"
+            node scripts/apple-stapler.mjs validate "$dmg"
           done
 
       - name: Generate SHA256
@@ -271,18 +249,7 @@ jobs:
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: "韭菜盒子 ${{ github.ref_name }}"
-          releaseBody: |
-            ## 韭菜盒子 ${{ github.ref_name }}
-
-            ### macOS Intel
-            | 文件 | SHA256 |
-            |------|--------|
-            | 韭菜盒子_${{ github.ref_name }}_x64.dmg | 见 .sha256 文件 |
-
-            ### 校验
-            下载后请校验 SHA256：`shasum -a 256 -c 韭菜盒子_*.dmg.sha256`
+          # Publish only the final signed and notarized artifacts below.
           tauriScript: pnpm tauri
           # macos-15-intel 没有可用 Finder 会话；Tauri 默认 DMG 的 AppleScript 美化会失败。
           # 先只生成已签名 .app，下一步用 hdiutil 生成可安装 DMG。
@@ -328,8 +295,8 @@ jobs:
             sleep 30
           done
           [ "$accepted" = true ] || exit 1
-          xcrun stapler staple "$APP"
-          xcrun stapler validate "$APP"
+          node scripts/apple-stapler.mjs staple "$APP"
+          node scripts/apple-stapler.mjs validate "$APP"
           codesign --verify --deep --strict "$APP"
 
       - name: Create DMG (Intel, headless)
@@ -408,8 +375,8 @@ jobs:
                 sleep 30
               fi
             done
-            xcrun stapler staple "$dmg"
-            xcrun stapler validate "$dmg"
+            node scripts/apple-stapler.mjs staple "$dmg"
+            node scripts/apple-stapler.mjs validate "$dmg"
           done
 
       - name: Generate SHA256

@@ -78,7 +78,7 @@ test('macOS release signs nested code before packaging and requires accepted not
     assert.ok(body.indexOf('Create DMG') < body.indexOf('Notarize macOS app'), job)
     assert.match(body, /\.status'\)" = "Accepted"/, job)
     assert.match(body, /notarytool log/, job)
-    assert.match(body, /stapler validate/, job)
+    assert.match(body, /apple-stapler\.mjs validate/, job)
     assert.doesNotMatch(body, /name: Notarize macOS app[^\n]*\n\s+continue-on-error: true/, job)
     assert.match(body, /find "\$APP_PATH\/Contents\/MacOS" -maxdepth 1 -type f -iname 'opencode\*'/, job)
   }
@@ -159,4 +159,25 @@ test('native A-to-B probe uses an updater-enabled baseline and allows slow NSIS 
   const probe = readFileSync('scripts/native-upgrade-probe.mjs', 'utf8')
   assert.match(probe, /Date\.now\(\) \+ 10 \* 60 \* 1000/)
   assert.match(probe, /if \(mismatches\.length\) \{[\s\S]*throw new Error\(`NSIS did not install/)
+})
+
+test('macOS build does not publish intermediate apps before final signing and notarization', () => {
+  const macJobs = workflow.slice(workflow.indexOf('\n  macos-arm:'), workflow.indexOf('\n  windows:'))
+  assert.doesNotMatch(macJobs, /tagName:|releaseId:|releaseName:|releaseBody:/)
+  assert.equal((macJobs.match(/node scripts\/apple-stapler.mjs/g) || []).length, 8)
+})
+
+test('Apple ticket network failures retry without accepting invalid signatures', async () => {
+  const { runStapler } = await import('../apple-stapler.mjs')
+  let calls = 0
+  const waits = []
+  await runStapler('validate', '/tmp/app', { run() { if (++calls < 3) throw Object.assign(new Error('network lost'), { status: 68 }) }, wait: async ms => waits.push(ms) })
+  assert.equal(calls, 3)
+  assert.deepEqual(waits, [10000, 20000])
+  calls = 0
+  await assert.rejects(runStapler('validate', '/tmp/app', { run() { calls++; throw Object.assign(new Error('invalid ticket'), { status: 65 }) }, wait: async () => {} }), /invalid ticket/)
+  assert.equal(calls, 1)
+  calls = 0
+  await assert.rejects(runStapler('staple', '/tmp/app', { run() { calls++; throw Object.assign(new Error('network lost'), { status: 68 }) }, wait: async () => {} }), /network lost/)
+  assert.equal(calls, 3)
 })

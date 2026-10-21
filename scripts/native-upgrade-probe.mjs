@@ -3,6 +3,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { runStapler } from './apple-stapler.mjs'
 const [version, baseline, assetsDirectory] = process.argv.slice(2)
 for (const value of [version, baseline]) if (!/^\d+\.\d+\.\d+$/.test(value)) throw new Error('Invalid upgrade version')
 const assets = resolve(assetsDirectory)
@@ -82,7 +83,7 @@ if (process.platform === 'win32') {
   }
   verifyTree()
   execFileSync('codesign', ['--verify', '--deep', '--strict', join(installed, '韭菜盒子.app')], { stdio: 'inherit' })
-  execFileSync('xcrun', ['stapler', 'validate', join(installed, '韭菜盒子.app')], { stdio: 'inherit' })
+  await runStapler('validate', join(installed, '韭菜盒子.app'))
   const actualVersion = execFileSync('/usr/libexec/PlistBuddy', ['-c', 'Print :CFBundleShortVersionString', join(installed, '韭菜盒子.app/Contents/Info.plist')], { encoding: 'utf8' }).trim()
   if (actualVersion !== version) throw new Error('Installed native version mismatch')
 }
