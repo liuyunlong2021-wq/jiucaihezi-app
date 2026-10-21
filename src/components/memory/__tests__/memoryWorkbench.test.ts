@@ -2263,11 +2263,17 @@ test('scene instruction waits for manual saves and sends actual selection, camer
   assert.equal(input.value, '原来的草稿')
 })
 
-test('choosing @3D removes the trigger without deleting the draft after the caret', async () => {
+test('all @ selections preserve the draft after the caret', async () => {
   const { transformSync } = createRequire(join(process.cwd(), 'package.json'))('esbuild')
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
   const body = workbench.slice(workbench.indexOf('async function selectMention('), workbench.indexOf('\nasync function handleComposerPaste'))
-  for (const [text, caret, expected] of [
+  for (const option of [
+    { type: 'tool', id: 'scene3d' }, { type: 'tool', id: 'av' },
+    { type: 'tool', id: 'wiki' }, { type: 'tool', id: 'mcp__github' },
+    { type: 'tool', id: 'skill' }, { type: 'tool', id: 'mcp' }, { type: 'tool', id: 'session' },
+    { type: 'skill', name: 'story' }, { type: 'session', conversationId: 'other' },
+    { type: 'file', resource: { kind: 'text' } }, { type: 'file', resource: { kind: 'media' } },
+  ]) for (const [text, caret, expected] of [
     ['@生成11个人的火车车厢', 1, '生成11个人的火车车厢'],
     ['前文 @后文', 4, '前文 后文'],
     ['生成车厢 @3d', 8, '生成车厢 '],
@@ -2276,6 +2282,11 @@ test('choosing @3D removes the trigger without deleting the draft after the care
     let editorText = text as string
     const enabled: string[] = []
     const dependencies = {
+      manjuSelected: ref(false), novelSelected: ref(false), shortDramaSelected: ref(false),
+      MANJU_ROUTER: 'jc-manju-zhizuo', NOVEL_SKILL: 'jc-novel', SHORT_DRAMA_SKILL: 'jc-duanju', WIKI_MEMORY_SKILL: 'wiki-native',
+      selectedSkillNames: ref<string[]>([]), selectedMcpToolNames: ref<string[]>([]), recordSkillUse() {},
+      addSessionReference: async () => {}, addProjectFileReference: async () => {}, addProjectMediaReferences: async () => {},
+      insertCommand() {}, saveProductionPreferences() {},
       input, composerRef: ref({ focus() {} }),
       getCursorPosition: () => caret, findComposerSuggestion, replaceComposerSuggestion,
       enableTool: (id: string) => enabled.push(id),
@@ -2284,9 +2295,9 @@ test('choosing @3D removes the trigger without deleting the draft after the care
     }
     const code = transformSync(body, { loader: 'ts', target: 'es2022' }).code
     const select = new Function(...Object.keys(dependencies), `${code}; return selectMention`)(...Object.values(dependencies))
-    await select({ type: 'tool', id: 'scene3d' })
+    await select(option)
     assert.equal(dependencies.error.value, '')
-    assert.deepEqual(enabled, ['scene3d'])
+    assert.deepEqual(enabled, option.type === 'tool' && ['scene3d', 'av'].includes(option.id!) ? [option.id] : [])
     assert.equal(input.value, expected)
     assert.equal(editorText, expected)
   }
@@ -2298,4 +2309,19 @@ test('@Wiki Memory is a native tool entry and does not load the Skill catalog', 
   const result = await fixture.load('wiki')
   assert.deepEqual(result, [{ type: 'tool', id: 'wiki', display: 'Wiki Memory', description: '查询、整理项目资料与归档创作成果', icon: 'description' }])
   assert.equal(fixture.calls.catalog, 0)
+})
+
+
+test('production buttons represent their route without duplicate Skill chips', () => {
+  const workbench = source('src/components/memory/MemoryWorkbench.vue')
+  const expression = workbench.match(/const visibleSkillNames = computed\(\(\) => ([\s\S]*?)\n\)/)?.[1]
+  assert.ok(expression)
+  for (const route of ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju']) {
+    const selectedSkillNames = ref([route, 'wiki-native', 'custom'])
+    const visible = new Function('selectedSkillNames', 'MANJU_ROUTER', 'NOVEL_SKILL', 'SHORT_DRAMA_SKILL', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selectedSkillNames, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native')
+    assert.deepEqual(visible, ['custom'])
+    assert.deepEqual(selectedSkillNames.value, [route, 'wiki-native', 'custom'])
+  }
+  const selected = ref(['wiki-native', 'custom'])
+  assert.deepEqual(new Function('selectedSkillNames', 'MANJU_ROUTER', 'NOVEL_SKILL', 'SHORT_DRAMA_SKILL', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selected, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native'), ['wiki-native', 'custom'])
 })

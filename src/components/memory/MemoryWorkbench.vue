@@ -262,6 +262,10 @@ const selectedSkillNames = ref<string[]>([])
 const manjuSelected = computed(() => selectedSkillNames.value.includes(MANJU_ROUTER))
 const novelSelected = computed(() => selectedSkillNames.value.includes(NOVEL_SKILL))
 const shortDramaSelected = computed(() => selectedSkillNames.value.includes(SHORT_DRAMA_SKILL))
+const visibleSkillNames = computed(() => selectedSkillNames.value.filter(name =>
+  ![MANJU_ROUTER, NOVEL_SKILL, SHORT_DRAMA_SKILL].includes(name)
+  && (name !== WIKI_MEMORY_SKILL || !selectedSkillNames.value.some(skill => [MANJU_ROUTER, NOVEL_SKILL, SHORT_DRAMA_SKILL].includes(skill))))
+)
 
 function saveProductionPreferences(preferences: {
   manju?: Partial<ManjuPreference>
@@ -3605,8 +3609,8 @@ async function selectMention(option: MemoryMentionOption) {
       await addProjectFileReference(option.resource)
     }
     if (option.type !== 'command' && suggestion?.trigger === '@') {
-      // 能力不是文件名补全：光标后的文字仍属于用户草稿。
-      if (option.type === 'tool') suggestion.end = suggestion.start + 1 + suggestion.query.length
+      // 所有引用都只消费光标前的触发内容，保留光标后的草稿。
+      suggestion.end = suggestion.start + 1 + suggestion.query.length
       const replaced = replaceComposerSuggestion(input.value, suggestion, '')
       input.value = replaced.text
       setEditorTextAtCursor(composerRef.value, replaced.text, replaced.cursor)
@@ -4866,15 +4870,15 @@ async function materializeChatAttachments(items: ResolvedDirectAttachment[]): Pr
           <button type="button" title="关闭提醒" aria-label="关闭上下文提醒" @click="contextNotice = ''"><JcIcon name="close" /></button>
         </div>
 
-      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer" :class="{ 'has-composer-context': selectedSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1 }">
-        <div v-if="selectedSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1" class="memory-composer-header">
+      <footer v-if="conversation" ref="composerPanelEl" class="memory-composer" :class="{ 'has-composer-context': visibleSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1 }">
+        <div v-if="visibleSkillNames.length || selectedToolChips.length || conversationQuestionCount > 1" class="memory-composer-header">
         <div v-if="conversationQuestionCount > 1" class="memory-round-nav" aria-label="对话轮次导航">
           <button type="button" aria-label="上一条问题" title="上一条问题" @click="navigateQuestion(-1)"><JcIcon name="arrow_upward" /></button>
           <span>{{ conversationQuestionCount }} 问</span>
           <button type="button" aria-label="下一条问题" title="下一条问题" @click="navigateQuestion(1)"><JcIcon name="arrow_downward" /></button>
         </div>
-        <div v-if="selectedSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
-          <div v-for="name in selectedSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
+        <div v-if="visibleSkillNames.length || selectedToolChips.length" class="memory-selected-tools" aria-label="已选能力">
+          <div v-for="name in visibleSkillNames" :key="`skill:${name}`" class="memory-attachment-chip">
             <JcIcon name="psychology" />
             <span class="memory-attachment-name" :title="name === WIKI_MEMORY_SKILL ? 'Wiki Memory' : name">{{ name === WIKI_MEMORY_SKILL ? 'Wiki Memory' : name }}</span>
             <button :title="name === WIKI_MEMORY_SKILL ? '移除 Wiki Memory 选择' : '移除 Skill'" @click="removeSelectedSkill(name)">×</button>
