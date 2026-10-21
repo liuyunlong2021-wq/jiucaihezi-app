@@ -19,6 +19,7 @@
       { "path": "创作", "purpose": "保存小说规划、章节草稿及写作复盘。" },
       { "path": "创作/章节草稿", "purpose": "保存等待用户确认的小说章节草稿。" },
       { "path": "剧本", "purpose": "按集保存漫剧剧本、工程剧本与视频提示词。" },
+      { "path": "资产/声音", "purpose": "每角色一份稳定九维声音身份与录音绑定。" },
       { "path": "资产/角色", "purpose": "一个角色一份规范档案，保存小传关联、设计及提示词。" },
       { "path": "资产/场景", "purpose": "保存可复用的场景资料与提示词。" },
       { "path": "资产/道具", "purpose": "保存可复用的道具资料与提示词。" }
@@ -34,6 +35,9 @@
     "screenplay": { "path": "剧本/{episode}/分集剧本.md", "index": "剧本/index.md", "label": "{episode}分集剧本", "episode": true },
     "engineering_script": { "path": "剧本/{episode}/工程剧本.md", "index": "剧本/index.md", "label": "{episode}工程剧本", "episode": true },
     "video_prompt": { "path": "剧本/{episode}/视频提示词/{model}/{segment}.md", "index": "剧本/index.md", "label": "{episode}{model} {segment}", "episode": true, "model": ["H3", "Seedance"] },
+    "storyboard_prompt": { "path": "剧本/{episode}/分镜提示词/{model}/{segment}.md", "index": "剧本/index.md", "label": "{episode}{model}分镜 {segment}", "episode": true, "model": ["H3", "Seedance"] },
+    "character_voice": { "path": "资产/声音/{entity}.md", "index": "资产/声音/index.md", "label": "{entity}声音", "entity": true },
+    "sound_direction": { "path": "剧本/{episode}/声音导演/{segment}.md", "index": "剧本/index.md", "label": "{episode}声音导演 {segment}", "episode": true },
     "character_asset": { "path": "资产/角色/{entity}.md", "index": "资产/角色/index.md", "label": "{entity}", "entity": true },
     "scene_asset": { "path": "资产/场景/{entity}.md", "index": "资产/场景/index.md", "label": "{entity}", "entity": true },
     "prop_asset": { "path": "资产/道具/{entity}.md", "index": "资产/道具/index.md", "label": "{entity}", "entity": true },

@@ -90,6 +90,12 @@ test('the actual production package registers brainstorm with its resource base 
   const route = JSON.parse(readFileSync(join(directory, 'manju-route.json'), 'utf8'))
   const dispose = await pinManjuSkills(rec, ['jc-manju-zhizuo', 'jc-manju-brainstorm', 'wiki-memory'], directory)
   assert.deepEqual([...registered.keys()], [...route.skills])
+  for (const name of ['jc-shengyin-sheji', 'jc-shengyin-daoyan']) {
+    const sound = registered.get(name)
+    assert.equal(sound.source, 'bundled')
+    assert.equal(sound.invocation.modelInvocable, true)
+    assert.equal(sound.resourceBase.path, join(directory, name))
+  }
   const brainstorm = registered.get('jc-manju-brainstorm')
   assert.equal(brainstorm.source, 'bundled')
   assert.equal(brainstorm.invocation.modelInvocable, true)

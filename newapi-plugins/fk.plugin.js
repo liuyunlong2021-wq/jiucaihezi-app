@@ -79,7 +79,7 @@ export const meta = {
   apiVersion: 1,
   key: 'fk',
   name: 'Fk渠道',
-  version: '0.3.5',
+  version: '0.3.6',
   author: { name: 'jiucaihezi' },
   description: {
     en: 'Image and video generation via ai.fanke2026.xyz',
@@ -616,7 +616,17 @@ export function extractUsageOnComplete(ctx, task, body) {
   const result = Object.keys(data).length ? data : snapshot(body)
   const billing = snapshot(result.billing)
   if (billing.mode === 'token' && !settledTokenBilling(billing)) return null
-  if (!compatibilityVideo(ctx)) return usageFacts(ctx, normalizedDuration(result) || normalizedDuration(ctx.requestBody), result)
+  if (!compatibilityVideo(ctx)) {
+    const request = snapshot(ctx.requestBody)
+    const spec = VIDEO_SPECS[videoModel(ctx.upstreamModel || ctx.model || request.model)]
+    const duration = normalizedDuration(result) || normalizedDuration(request)
+    if (spec && spec.unit === 'request' || settledTokenBilling(billing)) return usageFacts(ctx, duration, result)
+    // 完成响应和宿主上下文可能都缺少计费字段；返回 null 保留预扣，不能按零用量退款。
+    if (!duration || !spec) return null
+    const resolution = String(result.resolution || request.resolution || '').toLowerCase()
+    if (spec.resolutions && spec.resolutions.length > 1 && !spec.resolutions.includes(resolution)) return null
+    return usageFacts(ctx, duration, result)
+  }
   const actualDuration = Number(result.duration || result.seconds)
   if (Number.isFinite(actualDuration) && actualDuration > 0) return usageFacts(ctx, actualDuration, result)
   return null

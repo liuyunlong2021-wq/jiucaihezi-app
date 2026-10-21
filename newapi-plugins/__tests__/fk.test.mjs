@@ -74,6 +74,28 @@ test('FK 失败原因保留 error.message，用量不混入参考图数量', () 
 const VIDEO = 'ft-video-v1-451adae35b0c4a3d275c2c46394abc98'
 const SPECIAL = 'ft-video-v1-89e87205d3be4eb2cf3fda249569e693'
 const H3 = 'ft-video-v1-77e8ee7a636f15dac27b2ce6d6fcd746'
+
+test('FK 成功响应缺少可靠计费字段时保留预扣，不以零用量全额退款', () => {
+ const model = 'ft-video-v1-b8a797753dd4c6bf8e5a69820b293848'
+ const body = { jobId: 'job', success: true, status: 'success', videoUrl: URL, billing: null }
+ for (const requestBody of [undefined, {}, { duration: 22 }, { resolution: '720p' }]) {
+   assert.equal(plugin.extractUsageOnComplete({ ...ctx(model), requestBody }, {}, body), null)
+ }
+ assert.equal(plugin.extractUsageOnComplete(ctx(model), {}, { ...body, duration: 22 }), null)
+ assert.equal(plugin.extractUsageOnComplete(ctx(model), {}, { ...body, duration: 22, resolution: '1080p' }), null)
+ assert.equal(plugin.extractUsageOnComplete(ctx(VIDEO), {}, body), null)
+ assert.equal(plugin.extractUsageOnComplete(ctx(H3), {}, body), null)
+ for (const resolution of ['480p', '720p']) {
+   const context = { ...ctx(model), requestBody: { duration: 22, resolution } }
+   assert.equal(plugin.extractUsageOnComplete(context, {}, body)['seconds_' + resolution], 22)
+   const result = plugin.extractUsageOnComplete(ctx(model), {}, { data: { ...body, duration: 20, resolution } })
+   assert.equal(result['seconds_' + resolution], 20)
+ }
+ assert.equal(plugin.extractUsageOnComplete(ctx(SPECIAL), {}, body).calls, 1)
+ const token = { ...body, billing: { mode: 'token', settled: true, usage: { total_tokens: 123456 }, charged_cost_cents: 389 } }
+ assert.equal(plugin.extractUsageOnComplete(ctx(VIDEO), {}, token).video_reference_tokens, 123456)
+ assert.equal(plugin.extractUsageOnComplete(ctx(VIDEO), {}, { ...token, billing: { ...token.billing, settled: false } }), null)
+})
 const OFFICIAL_20 = [
  ['官方渠道-Seedance 2.0 Mini 720p', 'ft-video-v1-e820a676bd820bff4a79d2571fdb7fde', 0.4, 10.5],
  ['官方渠道-Seedance 2.0 Fast 720p', 'ft-video-v1-0a4bb4e7f4e95d0bd4ef584f2a4db1a3', 0.6, 16.5],

@@ -676,7 +676,7 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent) {
     throw new Error('Wiki 归档工具缺少 Harness 沙箱策略')
   return defineTool({
     name: 'wiki_save_artifact',
-    description: '把已完成且用户要求保存的短剧、漫剧或小说产物，按固定类型写入当前项目统一 Wiki 并更新直属索引。不得接收任意路径。小说章节先保存草稿，只有用户明确确认后才能追加到原文。',
+    description: '把已完成、按当前创作路线规则应归档或用户要求保存的短剧、漫剧或小说产物，按固定类型写入当前项目统一 Wiki 并更新直属索引。不得接收任意路径。小说章节先保存草稿，只有用户明确确认后才能追加到原文。',
     parameters: {
       artifact_kind: {
         type: 'string', required: true,
@@ -689,10 +689,10 @@ export function createWikiArtifactTool(ctx, contract, sourceAgent) {
       source_end: { type: 'string', description: '来源结束处至少12字符的唯一原文，包含在保存内容中。' },
       summary: { type: 'string', description: '一条简短、可检索的内容摘要；缺省时由工具提取正文首个有效句。' },
       research_version: { type: 'string', enum: ['original', 'adapted'], description: '项目资料版本；省略时保留旧目录，original 为原作，adapted 为改编版。' },
-      episode_number: { type: 'integer', description: '分集剧本、工程剧本或视频提示词对应的集数。' },
+      episode_number: { type: 'integer', description: '剧本、分镜、视频提示词或声音导演稿对应的集数。' },
       entity_name: { type: 'string', description: '人物、角色、场景或道具名称。' },
-      video_model: { type: 'string', enum: ['H3', 'Seedance'], description: '视频提示词使用的模型分支。' },
-      segment: { type: 'string', description: '视频提示词的片段或镜头范围，如 片段001-003。' },
+      video_model: { type: 'string', enum: ['H3', 'Seedance'], description: '视频或分镜提示词使用的模型分支。' },
+      segment: { type: 'string', description: '视频、分镜提示词或声音导演稿的片段或镜头范围，如 片段001-003；整集声音稿用 全篇。' },
       write_mode: { type: 'string', enum: ['create', 'update', 'append'], description: '默认 create；update 替换完整文件，append 保留现有文件并新增章节。' },
       section_name: { type: 'string', description: 'write_mode=append 时用于新章节的标题。' },
       work_name: { type: 'string', description: '小说书名；章节草稿和确认正文必填。' },

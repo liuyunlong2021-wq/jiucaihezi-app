@@ -165,6 +165,8 @@ test('App bundles only the remaining product Skills', () => {
     'jc-prop-prompt',
     'jc-scene-prompt',
     'jc-seedance',
+    'jc-shengyin-daoyan',
+    'jc-shengyin-sheji',
     'jc-watch',
     'jc-xiangmuziliao',
     'seedance-storyboard-assets',
