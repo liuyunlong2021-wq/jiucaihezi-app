@@ -240,3 +240,18 @@ SSH尝试以现有身份连接生产 `47.82.86.196`，返回 `Permission denied 
 后续需取得可用连接，先只读核对最新镜像、源码哈希、Compose、API代理路径与R2规则；执行准备后基于实际回执生成对应激活步骤（保留原比较/数据库备份/自动回滚），不直接重跑旧activate脚本。再运行合成验证、桌面平台与逐型号G3–G5。公共路径若被既有网关/Nginx拦截，按真实配置补齐对应路由，不能改通用代理或开放任意存储目标。
 
 共享OSS路由/包仍为未迁移画布和旧客户端保留，因此**OSS彻底退役尚未完成**；只有消费者迁移、在途任务与唯一原件核清后才执行§7阶段D。用户本次目标未因此被缩减或标记完成。
+
+
+## 12. 生产准备实测（2026-10-21）
+
+用户在Mac终端以复用SSH连接登录后，本轮继续只读核对并执行prepare，未切换生产：
+
+- 当前健康镜像：`sha256:bfd510bc74c2fb4bf2d7dd7c687aa6228a74273a2b061ca773702a1d371af428`；固定NewAPI源码和四Compose均与既有记录一致，现有R2/OSS字段仍在。
+- 源码基线实测：媒体路由`67d6620971d5b743c06ef66f19a28921ac8dfc98ea9887b9bd2e5f9046f676da`，R2 signer `356d4646af8ba7cc787618142105158f2c389e2d7a92199837aa5854eb761684`，与prepare保护一致。源码备份：`/root/jc-public-r2-source.EfIqa6`。
+- 服务器完整NewAPI编译通过；断网容器内 `r2direct`、`ossdirect`、`jcmedia`、`router`、`relay/channel/task/jsplugin` 五包回归通过。
+- 新镜像：`jiucaihezi/new-api:rc40-public-r2-20261021`，精确ID `sha256:311f21c7a4787a294028a56302b8257b6f0f35b611ffa506d3821b6c78d07eda`；构建日志在`/root/jc-public-r2-prep/build.log`，只在服务器保留，不含用户Key。
+- 公网`r2/lingdong/yihong`三个上传路径的OPTIONS均204，允许画布Origin；现行Nginx兜底转发覆盖新公共路径，本次未改Nginx或Worker。预检成功不代表尚未激活的新POST已可用。
+- 新增固定基线`activate-public-r2.py`及5项模拟测试；沿用已验证的镜像差异检查、Redis美元等价处理、数据库备份验证和失败自动回滚，增加公共R2合成读回，保留灵动/易红/旧OSS授权回归。已上传到`/root/jc-public-r2-prep/scripts/newapi-media/`。
+- 新激活仍需交互隐藏输入NewAPI用户Key；这是上传接口鉴权，与SSH登录凭据不同。Key不在命令参数/聊天/落盘文件内。当前未获取该Key，未执行激活、模型生成或OSS退役。
+
+本节取代§11“当前SSH身份被拒绝/未执行完整宿主构建”的阶段状态；数据库备份与生产切换仍待激活脚本实际回执，不提前标通过。
