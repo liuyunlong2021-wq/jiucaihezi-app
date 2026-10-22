@@ -615,14 +615,14 @@ test('conversation lifecycle restores the latest Skill selection and clears it f
   assert.ok(workbench.includes('await restoreComposerSkills(latestUserTurn?.skillNames, catalogEntry?.manju, catalogEntry?.novel, catalogEntry?.shortDrama)'))
   assert.ok(workbench.includes('async function availableSkillNamesForComposer(): Promise<Set<string>> {'))
   assert.ok(workbench.includes('(await loadWebSkillCatalog().catch(() => [])).map(skill => skill.name)'))
-  assert.ok(workbench.includes('if (shortDramaPreference?.enabled) {\n    selectedSkillNames.value = restoreShortDramaSelection(names || [], shortDramaPreference).filter(name => available.has(name))'))
+  assert.ok(workbench.includes('if (shortDramaPreference?.enabled) {\n    selectedSkillNames.value = restoreShortDramaSelection(names || [], shortDramaPreference).filter(name => isProductionSelection(name) || available.has(name))'))
   assert.ok(workbench.includes("createHarnessConversationCatalogEntry(owner, '新对话')"))
   assert.ok(workbench.includes('selectedSkillNames.value = []'))
 })
 
 test('novel mode retains its writer and an independently selected native Wiki entry', () => {
   const workbench = source('src/components/memory/MemoryWorkbench.vue')
-  assert.match(workbench, /selectedSkillNames\.value = \[NOVEL_SKILL, \.\.\.selectedSkillNames\.value\.filter/)
+  assert.match(workbench, /selectedSkillNames\.value = \[NOVEL_MODE, \.\.\.selectedSkillNames\.value\.filter/)
   assert.match(workbench, /NOVEL_SKILLS\.includes\(skill\.name\)/)
 })
 
@@ -2283,7 +2283,7 @@ test('all @ selections preserve the draft after the caret', async () => {
     const enabled: string[] = []
     const dependencies = {
       manjuSelected: ref(false), novelSelected: ref(false), shortDramaSelected: ref(false),
-      MANJU_ROUTER: 'jc-manju-zhizuo', NOVEL_SKILL: 'jc-novel', SHORT_DRAMA_SKILL: 'jc-duanju', WIKI_MEMORY_SKILL: 'wiki-native',
+      MANJU_MODE: 'jc-manju-zhizuo', NOVEL_MODE: 'jc-novel', SHORT_DRAMA_MODE: 'jc-duanju', WIKI_MEMORY_SKILL: 'wiki-native',
       selectedSkillNames: ref<string[]>([]), selectedMcpToolNames: ref<string[]>([]), recordSkillUse() {},
       addSessionReference: async () => {}, addProjectFileReference: async () => {}, addProjectMediaReferences: async () => {},
       insertCommand() {}, saveProductionPreferences() {},
@@ -2318,10 +2318,10 @@ test('production buttons represent their route without duplicate Skill chips', (
   assert.ok(expression)
   for (const route of ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju']) {
     const selectedSkillNames = ref([route, 'wiki-native', 'custom'])
-    const visible = new Function('selectedSkillNames', 'MANJU_ROUTER', 'NOVEL_SKILL', 'SHORT_DRAMA_SKILL', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selectedSkillNames, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native')
+    const visible = new Function('selectedSkillNames', 'MANJU_MODE', 'NOVEL_MODE', 'SHORT_DRAMA_MODE', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selectedSkillNames, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native')
     assert.deepEqual(visible, ['custom'])
     assert.deepEqual(selectedSkillNames.value, [route, 'wiki-native', 'custom'])
   }
   const selected = ref(['wiki-native', 'custom'])
-  assert.deepEqual(new Function('selectedSkillNames', 'MANJU_ROUTER', 'NOVEL_SKILL', 'SHORT_DRAMA_SKILL', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selected, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native'), ['wiki-native', 'custom'])
+  assert.deepEqual(new Function('selectedSkillNames', 'MANJU_MODE', 'NOVEL_MODE', 'SHORT_DRAMA_MODE', 'WIKI_MEMORY_SKILL', `return (${expression})`)(selected, 'jc-manju-zhizuo', 'jc-novel', 'jc-duanju', 'wiki-native'), ['wiki-native', 'custom'])
 })

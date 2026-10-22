@@ -1,3 +1,4 @@
+import type { ProductionMode } from '@/runtime/memory/productionSkills'
 import { discoverCustomProviderModels } from '@/utils/customProviderModels'
 import { findCustomProvider, getCustomProviders, saveCustomProviders } from '@/utils/providerConfig'
 import { deriveTurnTokenUsage } from '../../src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-token-meter/lib/types/client.js'
@@ -30,6 +31,8 @@ type Runtime = {
     notify: (notification: NonNullable<BridgeMessage['notification']>) => void
   }>
   /** 宿主确认的会话预设，只在 runtime 存活期内保留。 */
+  taskSessions: Set<string>
+  productionScopeVersion?: 1
   permissions: Map<string, string>
   permissionListeners: Map<string, (tier: DeepSeekPermissionTier) => void>
   closed: Promise<void>
@@ -57,6 +60,7 @@ export interface DeepSeekHarnessInput {
   mediaSelected?: boolean
   avSelected?: boolean
   scene3dSelected?: boolean
+  productionMode?: ProductionMode
   mcpServerIds?: string[]
   files?: DirectMessageFile[]
   attachments?: ResolvedDirectAttachment[]
@@ -346,6 +350,7 @@ export function deepSeekModelLimits(
 
 function runtimeKey(input: DeepSeekHarnessInput): string {
   return [
+    'production-skill-v2',
     input.cwd,
     input.apiBase,
     input.apiKey ? 'authenticated' : 'history-only',
@@ -863,15 +868,14 @@ function deepSeekResultErrorReason(error: any, isError: boolean, resultText: str
 /**
  * 重试的配对键。
  *
- * 官方 `llm/retry` 与 `llm/retry-started` 靠 `retryId` 配对；但若上游某一版没发这个字段，
- * 整块重试行会**静默消失**（没有报错，只是看不见），所以同一轮的 `retry` 序号当兜底键 ——
- * 官方事件里 `turn` + `retry` 在一個轮次内唯一。
+ * 官方 `retryId` 标识整组重试，组内还须用 `retry` 区分每次尝试。
+ * 旧事件缺少组 ID 时仍以轮次和尝试序号配对。
  */
 function deepSeekRetryKey(data: any): string {
   const id = String(data?.retryId || '').trim()
-  if (id) return `retry-${id}`
-  const turn = Number(data?.turn)
   const attempt = Number(data?.retry)
+  if (id) return Number.isFinite(attempt) && attempt > 0 ? `retry-${id}-${attempt}` : `retry-${id}`
+  const turn = Number(data?.turn)
   return Number.isFinite(turn) && Number.isFinite(attempt) ? `retry-${turn}-${attempt}` : ''
 }
 
@@ -1218,7 +1222,6 @@ export function deepSeekPrompt(
   sessionReferences: Array<{ title: string; turns: Array<{ role: 'user' | 'assistant'; content: string }> }> = [],
 ): string {
   const wikiSelected = skillNames.some(name => name === 'wiki-memory' || name === 'project-wiki')
-  const gestures = skillNames.filter(name => name !== 'wiki-memory' && name !== 'project-wiki').map(name => `/${name}`).join(' ')
   const handoff = handoffTurns.length
     ? [
         '【既有对话移交】',
@@ -1235,7 +1238,7 @@ export function deepSeekPrompt(
     : ''
   const currentMessage = [referenceLabel, message].filter(Boolean).join('\n\n')
   const currentMarker = !handoff && (wikiSelected || wikiContext || references) ? '【本轮消息】' : ''
-  return [gestures, wikiSelected ? '请使用项目 Wiki 原生能力处理本轮任务。' : '', wikiContext, references, handoff, currentMarker, currentMessage]
+  return [wikiSelected ? '请使用项目 Wiki 原生能力处理本轮任务。' : '', wikiContext, references, handoff, currentMarker, currentMessage]
     .filter(Boolean).join('\n\n')
 }
 
@@ -1473,6 +1476,8 @@ async function createRuntime(input: DeepSeekHarnessInput): Promise<Runtime> {
     key: runtimeKey(input),
     transport,
     runs: new Map(),
+    taskSessions: new Set(),
+    productionScopeVersion: 1,
     permissions: new Map(),
     permissionListeners: new Map(),
     closed,
@@ -1597,6 +1602,9 @@ async function ensureRuntime(input: DeepSeekHarnessInput, reuseWorkspace = false
     ready: (async () => {
       if (current) {
         predecessor = await current.ready
+        const sdkBusy = predecessor.productionScopeVersion === 1 && !predecessor.ended && !predecessor.closing
+          ? (await harnessControl(predecessor, { type: 'runtime-busy' }, input.signal)).busy : false
+        if (predecessor.taskSessions?.size || sdkBusy) throw new Error('有任务正在使用原设置，请等任务完成后再使用新设置。')
         await stopRuntime(predecessor)
       }
       return createRuntime(input)
@@ -1695,6 +1703,7 @@ export async function queueDeepSeekHarnessMessage(input: DeepSeekHarnessInput): 
   const active = await ensureRuntime(input, true)
   return await harnessControl(active, {
     type: 'queue',
+    productionMode: input.productionMode ?? 'none',
     sessionId: deepSeekSessionId(input.sessionId, input.cwd),
     contentBlocks: deepSeekContentBlocks(deepSeekMcpPrompt(input.message, input.mcpServerIds), input.attachments, input.files, input.imageInput),
   }, input.signal) as { messageId: string }
@@ -1750,6 +1759,7 @@ async function runDeepSeekHarnessTurn(
   if (input.signal?.aborted) {
     throw new DOMException('Aborted', 'AbortError')
   }
+  active.taskSessions.add(wireSessionId)
   const requestId = crypto.randomUUID()
   let finalText = ''
   let reasoningSent = ''
@@ -1872,6 +1882,7 @@ async function runDeepSeekHarnessTurn(
     })
     await active.transport.send({
       type: 'run',
+      productionMode: input.productionMode ?? 'none',
       requestId,
       sessionId: wireSessionId,
     contentBlocks: deepSeekContentBlocks(deepSeekMcpPrompt(input.message, input.mcpServerIds), input.attachments, input.files, input.imageInput),
@@ -1884,6 +1895,7 @@ async function runDeepSeekHarnessTurn(
     for (const controller of approvals.values()) controller.abort()
     approvals.clear()
     active.permissionListeners.delete(wireSessionId)
+    active.taskSessions.delete(wireSessionId)
     active.runs.delete(requestId)
     input.signal?.removeEventListener('abort', abort)
   }

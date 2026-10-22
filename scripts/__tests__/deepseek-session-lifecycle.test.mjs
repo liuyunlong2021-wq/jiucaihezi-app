@@ -92,7 +92,7 @@ test('APP task rejects failed waits and missing receipts and releases its subscr
   }
 })
 
-async function fixture(t, configured = false, modelGate, { respond, maxTokens = 1024, nativeClaude = false } = {}) {
+async function fixture(t, configured = false, modelGate, { respond, maxTokens = 1024, nativeClaude = false, nativeResponses = false, streamIdleTimeoutMs } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'jc-session-lease-'))
   const requests = []
   const paths = []
@@ -110,7 +110,7 @@ async function fixture(t, configured = false, modelGate, { respond, maxTokens = 
   })
   await new Promise(resolve => http.listen(0, '127.0.0.1', resolve))
   const patch = join(root, 'route.yml')
-  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: ${nativeClaude ? 'anthropic-messages' : 'openai-completions'}\n        baseURL: http://127.0.0.1:${http.address().port}${nativeClaude ? '' : '/v1'}\n        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: ${maxTokens}\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
+  writeFileSync(patch, `- id: llm-pi-ai\n  config:\n    providers:\n      jiucaihezi:\n        apiKeyEnv: JIUCAIHEZI_DH_API_KEY\n        api: ${nativeClaude ? 'anthropic-messages' : nativeResponses ? 'openai-responses' : 'openai-completions'}\n        baseURL: http://127.0.0.1:${http.address().port}${nativeClaude ? '' : '/v1'}\n${streamIdleTimeoutMs === undefined ? '' : `        streamIdleTimeoutMs: ${streamIdleTimeoutMs}\n`}        models:\n          - id: test\n            name: test\n            contextWindow: 262144\n            maxTokens: ${maxTokens}\n` + (configured ? `- id: agent-loop\n  config:\n    agents:\n      - id: configured\n        sessionId: lease-test\n        cwd: ${JSON.stringify(root)}\n        provider: jiucaihezi\n        model: test\n` : ''))
   const options = { cwd: root, processCwd: root, dshHome: join(root, 'home'), patches: [patch], provider: 'jiucaihezi', model: 'test', initializeTimeoutMs: 15000,
     env: { ...process.env, DSH_AGENTS_HOME: join(root, 'agents'), DSH_PRIMARY_RUNTIME: '', JIUCAIHEZI_DH_API_KEY: 'local-test' } }
   const harnesses = []
@@ -498,14 +498,14 @@ test('SDK adopts a losing activation race without taking the original owner disp
 
 // Exercise the actual runtime handoff functions with a controlled stdio transport.
 // A pending send / reap must not make a new runtime appear safe to resume.
-function lifecycle(createRuntime) {
+function lifecycle(createRuntime, harnessControl = async () => ({ busy: false })) {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   const start = source.slice(source.indexOf('async function ensureRuntime('), source.indexOf('/** Bounded control RPCs'))
   const stop = source.slice(source.indexOf('async function waitForRuntimeClose('))
   const code = transformSync(start + '\n' + stop.replace('export async function', 'async function'), { loader: 'ts', target: 'es2022' }).code
   const runtimes = new Map()
-  return new Function('runtimes', 'createRuntime', 'refreshCustomModelCapabilities', 'findCustomProvider', 'workspaceRuntimeKey', 'runtimeKey', 'DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS', code + '\nreturn { ensureRuntime, stopRuntime, stopDeepSeekHarness };')(
-    runtimes, createRuntime, async () => {}, () => undefined, input => input.cwd, input => input.model, 20,
+  return new Function('runtimes', 'createRuntime', 'refreshCustomModelCapabilities', 'findCustomProvider', 'workspaceRuntimeKey', 'runtimeKey', 'DEEPSEEK_HARNESS_SHUTDOWN_TIMEOUT_MS', 'harnessControl', code + '\nreturn { ensureRuntime, stopRuntime, stopDeepSeekHarness };')(
+    runtimes, createRuntime, async () => {}, () => undefined, input => input.cwd, input => input.model, 20, harnessControl,
   )
 }
 
@@ -543,6 +543,37 @@ test('a failed handoff does not abandon the old runtime and the next attempt ret
   await assert.rejects(f.stopRuntime(runtime), /reap failed/)
   await f.ensureRuntime({ cwd: 'workspace', model: 'new' })
   assert.equal(reaps, 2)
+  assert.equal(creations, 2)
+})
+
+test('changing runtime settings never reaps a task still running in another session', async () => {
+  let creations = 0, reaps = 0
+  const runtime = { taskSessions: new Set(['running-task']), closed: new Promise(() => {}), transport: { send: async () => {}, close: async () => { reaps++ } } }
+  const f = lifecycle(async () => { creations++; return runtime })
+  await f.ensureRuntime({ cwd: 'workspace', model: 'old' })
+  await assert.rejects(f.ensureRuntime({ cwd: 'workspace', model: 'new' }), /有任务正在使用原设置/)
+  assert.equal(reaps, 0)
+  assert.equal(creations, 1)
+  runtime.taskSessions.clear()
+  await f.ensureRuntime({ cwd: 'workspace', model: 'new' })
+  assert.equal(reaps, 1)
+  assert.equal(creations, 2)
+})
+
+test('changing settings preserves queued SDK work after the frontend turn has settled', async () => {
+  let busy = true, creations = 0, reaps = 0
+  const runtime = { productionScopeVersion: 1, taskSessions: new Set(), closed: new Promise(() => {}), transport: { send: async () => {}, close: async () => { reaps++ } } }
+  const f = lifecycle(async () => { creations++; return runtime }, async (_, command) => {
+    assert.equal(command.type, 'runtime-busy')
+    return { busy }
+  })
+  await f.ensureRuntime({ cwd: 'workspace', model: 'old' })
+  await assert.rejects(f.ensureRuntime({ cwd: 'workspace', model: 'new' }), /有任务正在使用原设置/)
+  assert.equal(reaps, 0)
+  assert.equal(creations, 1)
+  busy = false
+  await f.ensureRuntime({ cwd: 'workspace', model: 'new' })
+  assert.equal(reaps, 1)
   assert.equal(creations, 2)
 })
 
@@ -647,7 +678,7 @@ test('official unpatched SDK and APP runner share request budgets, tool loops an
     assert.ok(activations.length, `subagent activation missing: ${JSON.stringify(events.filter(e => e.type === 'tool/result').map(e => e.data))}`)
     // 比较所有模型可见工具定义，不绑定并发完成时的请求到达顺序。
     signatures.push([...new Set(requests.map(r => JSON.stringify({ model: r.model, max_tokens: r.max_tokens, max_completion_tokens: r.max_completion_tokens,
-      tools: r.tools, tool_choice: r.tool_choice })))].sort())
+      tools: r.tools?.filter(tool => !['wiki_read_guidance', 'wiki_save_artifact', 'present'].includes(tool.function.name)), tool_choice: r.tool_choice })))].sort())
   }
   assert.deepEqual(signatures[1], signatures[0])
   const snapshot = (await app.request({ type: 'read-session', sessionId: 'parent' })).data
@@ -727,4 +758,97 @@ test('native Claude carries cache markers and completes a streamed tool round th
   }
   assert.match(JSON.stringify(f.requests[1].messages), /CACHE_FILE_CONTENT/)
   assert.match(JSON.stringify(result), /CACHE_ROUND_OK/)
+})
+
+test('GPT protocol audit: custom Chat Completions omits the cache key while native Responses preserves it', { timeout: 30000 }, async t => {
+  const compatible = await fixture(t)
+  const a = await compatible.createRunner().request({ type: 'run', sessionId: 'gpt-compatible', contentBlocks: [{ type: 'text', text: 'protocol check' }] })
+  assert.equal(a.type, 'result', JSON.stringify(a))
+  assert.equal(compatible.paths[0], '/v1/chat/completions')
+  assert.equal(compatible.requests[0].prompt_cache_key, undefined)
+
+  const native = await fixture(t, false, undefined, { nativeResponses: true, respond: (_request, res, count) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    const emit = event => res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    const item = { id: `msg_${count}`, type: 'message', role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'GPT_NATIVE_OK', annotations: [] }] }
+    const response = { id: `resp_${count}`, object: 'response', model: 'test', status: 'completed', output: [item], usage: { input_tokens: 10, output_tokens: 5, total_tokens: 15, input_tokens_details: { cached_tokens: 8 }, output_tokens_details: { reasoning_tokens: 0 } } }
+    emit({ type: 'response.created', response: { ...response, status: 'in_progress', output: [] } })
+    emit({ type: 'response.output_item.added', output_index: 0, item: { ...item, status: 'in_progress', content: [] } })
+    emit({ type: 'response.output_text.delta', output_index: 0, content_index: 0, item_id: item.id, delta: 'GPT_NATIVE_OK' })
+    emit({ type: 'response.output_item.done', output_index: 0, item })
+    emit({ type: 'response.completed', response })
+    res.end()
+    return true
+  } })
+  const runner = native.createRunner()
+  for (const text of ['protocol check', 'continue']) {
+    const result = await runner.request({ type: 'run', sessionId: 'gpt-native', contentBlocks: [{ type: 'text', text }] })
+    assert.equal(result.type, 'result', JSON.stringify(result))
+    assert.match(JSON.stringify(result), /GPT_NATIVE_OK/)
+  }
+  assert.ok(native.paths.every(path => path === '/v1/responses'))
+  assert.ok(native.requests[0].prompt_cache_key)
+  assert.equal(native.requests[0].prompt_cache_key, native.requests[1].prompt_cache_key)
+  assert.equal(native.requests[0].store, false)
+})
+
+test('SDK idle timeout closes the old HTTP stream before retry even while SSE heartbeats continue', { timeout: 30000 }, async t => {
+  const trace = []
+  const f = await fixture(t, false, undefined, { streamIdleTimeoutMs: 150, respond: (_request, res, count) => {
+    trace.push(`start-${count}`)
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    res.flushHeaders()
+    const timer = setInterval(() => res.write(': heartbeat\n\n'), 20)
+    res.on('close', () => { clearInterval(timer); trace.push(`close-${count}`) })
+    return true
+  } })
+  const runner = f.createRunner()
+  const result = await runner.request({ type: 'run', sessionId: 'idle-cancel', contentBlocks: [{ type: 'text', text: 'idle cancellation check' }] })
+  assert.equal(result.type, 'error', JSON.stringify(result))
+  assert.equal(f.requests.length, 6)
+  for (let attempt = 1; attempt < 6; attempt++) {
+    assert.ok(trace.indexOf(`close-${attempt}`) >= 0, JSON.stringify(trace))
+    assert.ok(trace.indexOf(`close-${attempt}`) < trace.indexOf(`start-${attempt + 1}`), JSON.stringify(trace))
+  }
+  const events = runner.notifications.filter(n => n.method === 'session.event').map(n => n.params.event)
+  const retries = events.filter(e => e.type === 'llm/retry')
+  assert.equal(retries.length, 5)
+  assert.deepEqual(retries.map(e => e.data.retry), [1, 2, 3, 4, 5])
+  assert.equal(new Set(retries.map(e => e.data.retryId)).size, 1, 'official retryId identifies the retry group, not each attempt')
+})
+
+test('GPT stream reaches APP notifications before completion and keeps reasoning separate', { timeout: 20000 }, async t => {
+  const finish = Promise.withResolvers()
+  t.after(() => finish.resolve())
+  const f = await fixture(t, false, undefined, { respond: async (_request, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream' })
+    const emit = (delta, finish_reason = null) => res.write(`data: ${JSON.stringify({ id: 'trace', object: 'chat.completion.chunk', model: 'test', choices: [{ index: 0, delta, finish_reason }] })}\n\n`)
+    emit({ role: 'assistant', reasoning_content: 'TRACE_REASONING' })
+    emit({ content: 'TRACE_PARTIAL' })
+    await finish.promise
+    emit({ content: '_DONE' })
+    emit({}, 'stop')
+    res.end('data: [DONE]\n\n')
+    return true
+  } })
+  const runner = f.createRunner()
+  let settled = false
+  const running = runner.request({ type: 'run', sessionId: 'output-trace', contentBlocks: [{ type: 'text', text: 'stream trace' }] })
+    .then(result => { settled = true; return result })
+  try {
+    const deadline = Date.now() + 10000
+    while (!runner.notifications.some(n => n.method === 'session.assistant-stream' && JSON.stringify(n).includes('TRACE_PARTIAL')) && Date.now() < deadline)
+      await new Promise(resolve => setTimeout(resolve, 10))
+    const live = runner.notifications.filter(n => n.method === 'session.assistant-stream')
+    assert.match(JSON.stringify(live), /TRACE_PARTIAL/)
+    assert.match(JSON.stringify(live), /TRACE_REASONING/)
+    assert.equal(settled, false, 'APP must receive deltas while the HTTP response remains open')
+  } finally {
+    finish.resolve()
+  }
+  const result = await running
+  assert.equal(result.type, 'result', JSON.stringify(result))
+  assert.match(JSON.stringify(result), /TRACE_PARTIAL_DONE/)
+  assert.doesNotMatch(JSON.stringify(result), /TRACE_REASONING/)
+  assert.equal(f.requests.length, 1)
 })

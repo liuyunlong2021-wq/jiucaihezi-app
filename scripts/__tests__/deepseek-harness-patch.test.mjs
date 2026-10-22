@@ -37,9 +37,9 @@ test('the Harness vendor patch is idempotent and carries the permission request'
   assert.match(once, /\"\/permission \" \+ preset/)
   // 官方命令面必须真的被调用，而不是自己写 permission/preset 事件绕过官方推导。
   assert.match(once, /this\.ctx\.get\("commands"\)\.execute\(agent/)
-  // 点名 skill → 掩掉 `skill` 工具（官方 tools.restrict），且必须在 prompt 前生效。
-  assert.match(once, /await this\.applyPinnedSkillScope\(rec, content\);/)
-  assert.match(once, /agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
+  // 点名 Skill 只绑定内置版本，不能屏蔽官方加载器。
+  assert.match(once, /await this\.applyNativeCapabilities\(rec, content\);/)
+  assert.doesNotMatch(once, /agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
 })
 
 // 剪体积的两刀（node 包的安装源 278M、LibreOffice 260M，都是打好的 App 里的实际占用）。
@@ -87,7 +87,7 @@ test('Harness installs dependent session methods on a fresh SDK layout', t => {
     const harness = join(root, 'src-tauri/resources/deepseek-harness')
     const sdk = join(harness, 'node_modules/@deepseek-ai')
     for (const dir of ['scripts', 'src-tauri/resources/deepseek-harness/node_modules/node/bin']) mkdirSync(join(root, dir), { recursive: true })
-    for (const pkg of ['dsh-sdk-client', 'dsh-sdk-jsonrpc-server']) mkdirSync(join(sdk, pkg, 'lib'), { recursive: true })
+    for (const pkg of ['dsh-sdk-client', 'dsh-sdk-jsonrpc-server', 'dsh-skill']) mkdirSync(join(sdk, pkg, 'lib'), { recursive: true })
     copyFileSync('scripts/prepare-deepseek-harness.mjs', join(root, 'scripts/prepare-deepseek-harness.mjs'))
     copyFileSync('src-tauri/resources/deepseek-harness/package.json', join(harness, 'package.json'))
     copyFileSync(serverPath.replace('dsh-sdk-jsonrpc-server/lib/index.js', 'dsh-sdk-client/package.json'), join(sdk, 'dsh-sdk-client/package.json'))
@@ -97,6 +97,7 @@ test('Harness installs dependent session methods on a fresh SDK layout', t => {
     for (const method of ['cancelSession', 'updateQueue', 'permission', 'approval']) {
       source = source.replace(new RegExp(`\\tasync ${method}\\(params\\) \{[\\s\\S]*?(?=\\t(?:async |assertLiveAgent\\())`), '')
     }
+    copyFileSync(serverPath.replace('dsh-sdk-jsonrpc-server', 'dsh-skill'), join(sdk, 'dsh-skill/lib/index.js'))
     const target = join(sdk, 'dsh-sdk-jsonrpc-server/lib/index.js')
     writeFileSync(target, source)
     const run = () => execFileSync(process.execPath, [join(root, 'scripts/prepare-deepseek-harness.mjs')], { stdio: 'pipe' })

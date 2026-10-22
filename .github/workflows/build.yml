@@ -576,6 +576,9 @@ jobs:
   publish-download-manifest:
     needs: [macos-arm, macos-intel, windows]
     runs-on: ubuntu-latest
+    concurrency:
+      group: desktop-download-publish
+      cancel-in-progress: false
     if: >-
       always() &&
       (inputs.publish_tag != '' ||
@@ -584,14 +587,17 @@ jobs:
       needs.macos-intel.result == 'success' &&
       needs.windows.result == 'success'))
     steps:
-      # 必须 checkout：最后一步是 `ssh ... "bash -s" < scripts/prune-updates.sh`，
-      # 没有这一步 runner 上没有那个脚本，清理会失败（2026-09-29 前一直如此，
-      # /opt/updates 因此攒了 20 个版本、3.1G）。
+      # 保留服务器源文件作为迁移回滚；R2 只承担公开分发。
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.publish_tag || github.ref }}
+          # 发布工具取本次工作流版本，publish_tag 只选择不可变安装包。
+          ref: ${{ github.ref }}
       - uses: actions/setup-node@v4
         with: { node-version: '24' }
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install release R2 client
+        run: python -m pip install boto3==1.40.61
       - name: Install official signature verifier
         run: sudo apt-get update && sudo apt-get install -y minisign
       - name: Publish signed candidates and public download manifest
@@ -606,6 +612,7 @@ jobs:
           set -euo pipefail
           TAG="${{ inputs.publish_tag || github.ref_name }}"
           VERSION="${TAG#v}"
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 2
           ASSET_DIR="$RUNNER_TEMP/download-assets"
           KEY_PATH="$RUNNER_TEMP/deploy-key"
           mkdir -p "$ASSET_DIR"
@@ -613,6 +620,7 @@ jobs:
             --pattern '*_aarch64.dmg' \
             --pattern '*_x64.dmg' \
             --pattern '*_x64_windows_setup.exe' \
+            --pattern '*_x64_windows_portable.zip' \
             --pattern '*_aarch64.app.tar.gz' \
             --pattern '*_x64.app.tar.gz'
 
@@ -646,66 +654,72 @@ jobs:
 
           printf '%s\n' "$DEPLOY_SSH_KEY" > "$KEY_PATH"
           chmod 600 "$KEY_PATH"
-          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "python3 -" < scripts/configure-updater-cache.py
-          STAGE="/opt/updates/.candidate-${VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          # 摘要覆盖所有最终安装包和签名；清单按同文件系统 rename 推广。
-          (cd "$ASSET_DIR" && sha256sum -- ./*.dmg ./*.exe ./*.app.tar.gz ./*.sig > SHA256SUMS)
-          PUBLIC_VERIFIED=false
-          if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "test -d '/opt/updates/$VERSION'"; then
-            # 已发布目录直接核验不可变字节，重跑验收不再传输整套安装包。
-            ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "cd '/opt/updates/$VERSION' && sha256sum -c -" < "$ASSET_DIR/SHA256SUMS"
-            # latest 只在全量公网 SHA256 成功后推广；同版本且服务端字节一致才能复用。
-            if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
-              "python3 -c 'import json; assert json.load(open(\"/opt/updates/latest.json\"))[\"version\"] == \"$VERSION\"'"; then
-              PUBLIC_VERIFIED=true
-            fi
+          R2_CONFIG="$RUNNER_TEMP/release-r2.env"
+          trap 'rm -f "$KEY_PATH" "$R2_CONFIG"' EXIT
+          # 复用部署 SSH，专用桶凭据只经加密连接进入临时文件，不增加客户端配置。
+          (umask 077; ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "cat /root/jc-release-r2.env" > "$R2_CONFIG")
+          # 已有公开摘要不可改写；新版本才生成原有 SHA256SUMS。
+          if ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "test -f '/opt/updates/$VERSION/SHA256SUMS'"; then
+            scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/$VERSION/SHA256SUMS" "$ASSET_DIR/SHA256SUMS"
+            (cd "$ASSET_DIR" && sha256sum -c SHA256SUMS)
           else
+            (cd "$ASSET_DIR" && sha256sum -- ./*.dmg ./*.exe ./*.zip ./*.app.tar.gz ./*.sig > SHA256SUMS)
+          fi
+          # 独立摘要覆盖便携 ZIP 和历史摘要本身，不覆盖任何已发布文件。
+          (cd "$ASSET_DIR" && sha256sum -- ./*.dmg ./*.exe ./*.zip ./*.app.tar.gz ./*.sig SHA256SUMS > R2-SHA256SUMS)
+          python scripts/publish-r2-updates.py "$VERSION" "$ASSET_DIR" "$R2_CONFIG"
+          node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR" r2
+
+          STAGE="/opt/updates/.candidate-${VERSION}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '$STAGE'"
-          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ASSET_DIR/"* "${DEPLOY_USER}@${DEPLOY_HOST}:$STAGE/"
+          # 仅传服务器缺少的文件；现有文件在提交阶段逐字节核对，禁止覆盖。
+          for asset in "$ASSET_DIR/"*; do
+            name="$(basename "$asset")"
+            if ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "test -f '/opt/updates/$VERSION/$name'"; then
+              scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$asset" "${DEPLOY_USER}@${DEPLOY_HOST}:$STAGE/"
+            fi
+          done
+          # 清单和 R2 摘要作为本次提交输入；签名包及历史摘要不覆盖。
+          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no "$ASSET_DIR/latest.json" "$ASSET_DIR/updater.json" "$ASSET_DIR/R2-SHA256SUMS" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:$STAGE/"
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
             "bash -s -- '$STAGE' '$VERSION'" <<'REMOTE'
           set -euo pipefail
           stage="$1"; version="$2"; final="/opt/updates/$version"
           exec 9>/opt/updates/.assets.lock; flock -x 9
-          (cd "$stage" && sha256sum -c SHA256SUMS)
-          if [ -d "$final" ]; then
-            # 已存在版本只允许相同字节，不能 clobber 已签名安装包。
-            (cd "$final" && sha256sum -c "$stage/SHA256SUMS")
-            cp "$stage/latest.json" "$stage/updater.json" "$final/"
-            rm -rf "$stage"
-          else
-            mv "$stage" "$final"
-          fi
+          mkdir -p "$final"
+          for file in "$stage/"*; do
+            name="$(basename "$file")"
+            case "$name" in latest.json|updater.json|R2-SHA256SUMS) continue;; esac
+            if [ -f "$final/$name" ]; then
+              cmp "$file" "$final/$name"
+            else
+              mv "$file" "$final/$name"
+            fi
+          done
+          (cd "$final" && sha256sum -c "$stage/R2-SHA256SUMS")
+          if [ -f "$final/R2-SHA256SUMS" ]; then cmp "$stage/R2-SHA256SUMS" "$final/R2-SHA256SUMS"; fi
+          cp "$stage/latest.json" "$stage/updater.json" "$stage/R2-SHA256SUMS" "$final/"
+          rm -rf "$stage"
           REMOTE
-          fi
-          if [ "$PUBLIC_VERIFIED" = true ]; then
-            # 重跑仍检查公网每个文件长度与完整签名；首次发布继续全量下载校验。
-            node --input-type=module - "$VERSION" "$ASSET_DIR" <<'VERIFY'
-          import { readdirSync, statSync, readFileSync } from 'node:fs'
-          import { join } from 'node:path'
-          const [version, dir] = process.argv.slice(2)
-          for (const name of readdirSync(dir).filter(n => /\.(dmg|exe|tar\.gz|sig)$/.test(n))) {
-            const signature = name.endsWith('.sig')
-            const response = await fetch(`https://api.jiucaihezi.studio/updates/${version}/${encodeURIComponent(name)}`, {
-              method: signature ? 'GET' : 'HEAD', signal: AbortSignal.timeout(60000),
-            })
-            if (!response.ok) throw new Error(`Online asset missing: ${name}`)
-            if (Number(response.headers.get('content-length')) !== statSync(join(dir, name)).size) throw new Error(`Online size mismatch: ${name}`)
-            if (signature && !Buffer.from(await response.arrayBuffer()).equals(readFileSync(join(dir, name)))) throw new Error(`Online signature mismatch: ${name}`)
-            console.log(`Verified public immutable asset: ${name}`)
-          }
-          VERIFY
-          else
-            node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR"
-          fi
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p /opt/updates/.release-tools"
+          scp -i "$KEY_PATH" -o StrictHostKeyChecking=no scripts/publish-r2-updates.py scripts/configure-r2-downloads.py \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:/opt/updates/.release-tools/"
           ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            "bash -s /opt/updates '$VERSION' downloads" < scripts/promote-updates.sh
-          # /opt/updates/latest.json 与 updater.json 分别原子推广；OTA 验收前只发布候选。
-          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no \
-            "${DEPLOY_USER}@${DEPLOY_HOST}" "bash -s /opt/updates 5" \
-            < scripts/prune-updates.sh
+            "python3 -" < scripts/configure-updater-cache.py
+          ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            "python3 /opt/updates/.release-tools/configure-r2-downloads.py '$VERSION' '/opt/updates/$VERSION'"
+          # 兼容验证或清单推广失败时恢复此次下载映射；正式 OTA 保持独立。
+          if ! node scripts/verify-online-updates.mjs "$VERSION" "$ASSET_DIR" redirects || \
+             ! ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+               "bash -s /opt/updates '$VERSION' downloads" < scripts/promote-updates.sh; then
+            ssh -i "$KEY_PATH" -o StrictHostKeyChecking=no "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "python3 /opt/updates/.release-tools/configure-r2-downloads.py '$VERSION' '/opt/updates/$VERSION' rollback"
+            exit 1
+          fi
+          # 迁移验收完成前不清理服务器源文件；R2 不执行版本自动删除。
 
   verify-native-upgrade:
     needs: publish-download-manifest

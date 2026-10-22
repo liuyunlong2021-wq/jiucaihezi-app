@@ -210,7 +210,7 @@ export const COMPUTER_USE_STORAGE_KEY = 'jc_computer_use'
 
 /** 非组件上下文（路由组合生成）读取同一开关。 */
 export function computerUseEnabledNow(): boolean {
-  return localStorage.getItem(COMPUTER_USE_STORAGE_KEY) !== '0'
+  return localStorage.getItem(COMPUTER_USE_STORAGE_KEY) === '1'
 }
 
 export const useAgentStore = defineStore('agents', () => {
@@ -719,7 +719,7 @@ export const useAgentStore = defineStore('agents', () => {
     localStorage.setItem('jc_jev_scorer', jevScorerAutostart.value ? '1' : '0')
   }
 
-  // ─── Computer Use（官方实验性 Cua Driver 原生提供方，默认开） ───
+  // ─── Computer Use（官方实验性 Cua Driver 原生提供方，默认关） ───
   //
   // 官方口径：`dsh-computer-use` 只占一个注册位，工具由提供方给；一次只能挂一个提供方。
   // 关掉时路由组合里不写这两条 —— 于是模型看不到 `cua_driver_native__*` 工具，也不会

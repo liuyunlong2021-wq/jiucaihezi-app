@@ -150,7 +150,6 @@ test('App bundles only the remaining product Skills', () => {
   const expected = [
     'cinematic-four-panel-frames',
     'h3-prompt-writing',
-    'jc-duanju',
     'jc-duanju-cehua',
     'jc-duanju-fenji',
     'jc-duanju-xiezuo',
@@ -159,7 +158,6 @@ test('App bundles only the remaining product Skills', () => {
     'jc-juese-geshi',
     'jc-juese-sheji',
     'jc-manju-brainstorm',
-    'jc-manju-zhizuo',
     'jc-new-user-guide',
     'jc-novel',
     'jc-prop-prompt',

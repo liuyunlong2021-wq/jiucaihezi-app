@@ -1,3 +1,4 @@
+import { productionMode } from '@/runtime/memory/productionSkills'
 import { needsProjectWiki } from '@/runtime/memory/projectWiki'
 import { reactive, ref, shallowRef, watch } from 'vue'
 import type { DirectRunMetrics } from '@/runtime/direct/directTypes'
@@ -282,6 +283,7 @@ async function executeDesktopRemoteText(run: MemoryRun, selected: DesktopConvers
   let reply: string
   try {
     reply = await executeDesktopHarnessRun(desktopConversationRuns, run, { ...query,
+      productionMode: productionMode(selected.skillNames || []),
       message: deepSeekPrompt(
         userTurn.content,
         selected.skillNames || [],

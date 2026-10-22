@@ -79,12 +79,22 @@ createInterface({ input: process.stdin }).on('line', line => {
     )
     return
   }
+  if (command.type === 'runtime-busy') {
+    void harness.start().then(() => harness.client.request('session/runtime-busy', {})).then(
+      data => send({ type: 'query-result', requestId: command.requestId, data }),
+      error => sendError(command.requestId, error),
+    )
+    return
+  }
   if (command.type === 'queue' || command.type === 'update-queue') {
     const method = command.type === 'queue' ? 'session/prompt' : 'session/update-queue'
     const params = command.type === 'queue'
-      ? { sessionId: command.sessionId, contentBlocks: command.contentBlocks }
+      ? { sessionId: command.sessionId, contentBlocks: command.contentBlocks, productionMode: command.productionMode }
       : { sessionId: command.sessionId, itemId: command.itemId, action: command.action }
-    void harness.start().then(() => harness.client.request(method, params)).then(
+    void harness.start().then(async () => {
+      if (command.type === 'queue' && command.productionMode !== undefined && (await harness.client.request('session/production-scope', {})).version !== 1) throw new Error('当前运行时不支持创作 Skill 白名单，请重启应用。')
+      return harness.client.request(method, params)
+    }).then(
       data => send({ type: 'query-result', requestId: command.requestId, data }),
       error => sendError(command.requestId, error),
     )
@@ -115,6 +125,7 @@ createInterface({ input: process.stdin }).on('line', line => {
   let turnTruncated = false
   void runHarnessTask(harness, command.contentBlocks, {
     sessionId: command.sessionId,
+    productionMode: command.productionMode,
     requiredTools: config.requiredTools || [],
     onNotification(notification) {
       // 子代理（subagent）的事件也走这条通知流，而子会话是独立 turn：

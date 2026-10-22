@@ -46,10 +46,9 @@ test('desktop release creation and public download manifest are independent from
   assert.match(downloadJob, /updater\.json/)
   assert.match(downloadJob, /gh release download/)
   assert.match(downloadJob, /inputs\.publish_tag \|\| github\.ref_name/)
-  assert.match(downloadJob, /\/opt\/updates\/latest\.json/)
-  // 上传完之后必须收掉旧版本：每个版本 ≈ 487MB，只增不减会把服务器磁盘吃满。
-  assert.match(downloadJob, /bash -s \/opt\/updates 5/)
-  assert.match(downloadJob, /prune-updates\.sh/)
+  assert.match(downloadJob, /bash -s \/opt\/updates '\$VERSION' downloads/)
+  // R2 迁移验收完成前保留源文件，避免失去下载映射回滚能力。
+  assert.doesNotMatch(downloadJob, /< scripts\/prune-updates\.sh/)
 })
 
 test('every desktop release job uses the audited desktop build before Tauri', () => {
@@ -138,13 +137,22 @@ test('existing-tag revalidation runs native probes and promotion despite skipped
   assert.match(workflow, /promote-updater:[\s\S]*?if: always\(\) && needs\.verify-native-upgrade\.result == 'success'/)
 })
 
-test('published immutable assets reuse full server checksums only after prior public verification and promotion', () => {
-  assert.match(workflow, /PUBLIC_VERIFIED=false/)
-  assert.match(workflow, /latest\.json[\s\S]*?PUBLIC_VERIFIED=true/)
-  assert.match(workflow, /if \[ "\$PUBLIC_VERIFIED" = true \]; then/)
-  assert.match(workflow, /Online size mismatch/)
-  assert.match(workflow, /Online signature mismatch/)
-  assert.match(workflow, /else\n\s+node scripts\/verify-online-updates\.mjs/)
+test('R2 publication verifies all immutable public bytes before redirects and download promotion', () => {
+  const job = workflow.slice(workflow.indexOf('\n  publish-download-manifest:'), workflow.indexOf('\n  verify-native-upgrade:'))
+  assert.match(job, /--pattern '\*_x64_windows_portable\.zip'/)
+  assert.match(job, /publish-r2-updates\.py/)
+  assert.match(job, /ref: \$\{\{ github\.ref \}\}/)
+  assert.match(job, /group: desktop-download-publish/)
+  assert.match(job, /R2-SHA256SUMS/)
+  assert.match(job, /verify-online-updates\.mjs "\$VERSION" "\$ASSET_DIR" r2/)
+  const upload = job.indexOf('python scripts/publish-r2-updates.py')
+  const verify = job.indexOf('node scripts/verify-online-updates.mjs')
+  const activate = job.indexOf('python3 /opt/updates/.release-tools/configure-r2-downloads.py')
+  const promote = job.indexOf('bash -s /opt/updates')
+  assert.ok(upload < verify && verify < activate && activate < promote)
+  assert.match(job, /if ! node scripts\/verify-online-updates\.mjs[^\n]+ redirects \|\|/)
+  assert.match(job, /configure-r2-downloads\.py '\$VERSION' '\/opt\/updates\/\$VERSION' rollback/)
+  assert.doesNotMatch(job, /PUBLIC_VERIFIED/)
 })
 
 test('Windows-only diagnostics cannot promote a public updater manifest', () => {

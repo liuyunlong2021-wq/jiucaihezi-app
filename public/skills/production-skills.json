@@ -1,7 +1,5 @@
 {
-  "router": "jc-manju-zhizuo",
-  "skills": [
-    "jc-manju-zhizuo",
+  "manju": [
     "jc-manju-brainstorm",
     "jc-xiangmuziliao",
     "jc-film-style",
@@ -16,5 +14,14 @@
     "seedance-storyboard-assets",
     "jc-shengyin-sheji",
     "jc-shengyin-daoyan"
+  ],
+  "short-drama": [
+    "jc-xiangmuziliao",
+    "jc-duanju-cehua",
+    "jc-duanju-fenji",
+    "jc-duanju-xiezuo"
+  ],
+  "novel": [
+    "jc-novel"
   ]
 }

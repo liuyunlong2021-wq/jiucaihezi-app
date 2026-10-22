@@ -173,6 +173,7 @@ const updateQueueMethod = `\tasync updateQueue(params) {
 \t\t\tif (!agent.inbox.remove(params.itemId)) throw new Error("queued item is no longer pending");
 \t\t} else if (action?.kind === "steer") {
 \t\t\tif (target !== "next-turn" || agent.status !== "running") throw new Error("current turn no longer accepts steering");
+\t\t\tif (message.source.productionMode !== undefined && message.source.productionMode !== productionModeFor(agent)) throw new Error("这条消息使用不同的 Skill 范围，请保留在下一轮队列。");
 \t\t\tif (!agent.inbox.remove(params.itemId)) throw new Error("queued item is no longer pending");
 \t\t\tagent.steer(message);
 \t\t} else throw new Error("unknown queue action");
@@ -201,104 +202,42 @@ const cancelSessionMethod = `\tasync cancelSession(params) {
 \t\t}
 \t}
 `
-const scopedBindingMethod = `\tasync applyPinnedSkillScope(rec, content) {
+const scopedBindingMethod = `\tasync applyNativeCapabilities(rec, content) {
 \t\tif (this.nativeWikiScopes === void 0) this.nativeWikiScopes = new WeakMap();
-\t\tconst nativeAgent = rec.handle.agent;
-\t\tthis.assertLiveAgent(rec, nativeAgent.id);
-\t\tif (!this.nativeWikiScopes.has(nativeAgent)) {
-\t\t\tthis.nativeWikiScopes.set(nativeAgent, (async () => {
-\t\t\t\tconst disposeWiki = await attachWikiRuntime(rec);
-\t\t\t\ttry {
-\t\t\t\t\tconst disposePresent = await attachPresent(rec);
-\t\t\t\t\ttry { this.assertLiveAgent(rec, nativeAgent.id); } catch (error) { await disposePresent(); throw error; }
-\t\t\t\t\treturn async () => { try { await disposePresent(); } finally { await disposeWiki(); } };
-\t\t\t\t} catch (error) { await disposeWiki(); throw error; }
-\t\t\t})());
-\t\t}
-\t\ttry { await this.nativeWikiScopes.get(nativeAgent); }
-\t\tcatch (error) { this.nativeWikiScopes.delete(nativeAgent); throw error; }
-\t\tif (this.pinnedSkillScopes === void 0) this.pinnedSkillScopes = new WeakMap();
-\t\tlet names = [];
-\t\ttry {
-\t\t\tnames = await this.pinnedSkillNames(rec, content);
-\t\t} catch (error) {
-\t\t\tif (content.some(block => block.type === "text" && /\\/(?:jc-manju-zhizuo|jc-novel|jc-duanju|wiki-memory)\\b/.test(block.text))) throw error;
-\t\t\tconsole.error("[skill-scope] 解析点名 skill 失败: " + (error instanceof Error ? error.message : String(error)));
-\t\t\treturn;
-\t\t}
 \t\tconst agent = rec.handle.agent;
 \t\tthis.assertLiveAgent(rec, agent.id);
-\t\tsetWikiSourceContent(agent, content);
-\t\tconst held = this.pinnedSkillScopes.get(agent);
-\t\tif (held !== void 0 && held.names.join(",") === names.join(",")) return;
-\t\tif (held !== void 0) {
-\t\t\tthis.pinnedSkillScopes.delete(agent);
-\t\t\tawait held.dispose();
-\t\t}
-\t\tif (names.length === 0) return;
-\t\tconst wikiSkillDispose = await pinManjuSkills(rec, names);
-\t\tlet dispose;
-\t\ttry {
-\t\t\tthis.assertLiveAgent(rec, agent.id);
-\t\t\tif (rec.handle.agent !== agent) throw new Error("创作路线 Agent 已替换");
-\t\t\tdispose = agent.ctx.tools.restrict({ deny: ["skill"] });
-\t\t\tthis.pinnedSkillScopes.set(agent, {
-\t\t\t\tnames,
-\t\t\t\tdispose: async () => { try { await dispose(); } finally { await wikiSkillDispose(); } }
-\t\t\t});
-\t\t} catch (error) {
-\t\t\ttry { await dispose?.(); } finally { await wikiSkillDispose(); }
-\t\t\tif (names.some(name => ["jc-manju-zhizuo", "jc-novel", "jc-duanju", "wiki-memory"].includes(name))) throw error;
-\t\t\tconsole.error("[skill-scope] 掩掉 skill 工具失败: " + (error instanceof Error ? error.message : String(error)));
-\t\t}
+\t\tif (!this.nativeWikiScopes.has(agent)) this.nativeWikiScopes.set(agent, (async () => {
+\t\t\tconst wiki = await attachWikiRuntime(rec);
+\t\t\ttry {
+\t\t\t\tconst present = await attachPresent(rec);
+\t\t\t\treturn async () => { try { await present(); } finally { await wiki(); } };
+\t\t\t} catch (error) { await wiki(); throw error; }
+\t\t})());
+\t\ttry { await this.nativeWikiScopes.get(agent); }
+\t\tcatch (error) { this.nativeWikiScopes.delete(agent); throw error; }
+\t\tthis.assertLiveAgent(rec, agent.id);
 \t}
 `
-const skillGesture = `/**
-* 官方 \`dsh-tool-skill\` 的 \`/name\` 手势正则（逐字搬运）。
-* \`/\` 前面必须是行首或空白，后面必须是空白或结尾，这样 \`/usr/bin\` 与 \`5/8\` 不会误命中。
-*/
-const SKILL_GESTURE = /(^|\\s)\\/([a-z0-9]+(?:-[a-z0-9]+)*)(?=\\s|$)/g;
-`
-const pinnedSkillLookup = `\tasync pinnedSkillNames(rec, content) {
-\t\tconst names = [];
-\t\t// 官方的查找签名是 \`{ cwd, signal, scope }\`，缺 signal 注册表会直接抛。
-\t\tconst signal = new AbortController().signal;
-\t\tfor (const block of content) {
-\t\t\tif (block.type !== "text") continue;
-\t\t\tfor (const match of block.text.matchAll(SKILL_GESTURE)) {
-\t\t\t\tconst name = match[2];
-\t\t\t\tif (name === "wiki-memory" || name === "project-wiki") continue;
-\t\t\t\tif (name === void 0 || names.includes(name)) continue;
-\t\t\t\tif (["jc-manju-zhizuo", "jc-novel", "jc-duanju"].includes(name)) { names.push(name); continue; }
-\t\t\t\tconst skill = await this.ctx.skills.get(name, {
-\t\t\t\t\tcwd: rec.handle.agent.session.header.cwd,
-\t\t\t\t\tsignal,
-\t\t\t\t\tscope: rec.handle.agent
-\t\t\t\t});
-\t\t\t\tif (skill !== void 0 && isUserInvocable(skill)) names.push(name);
-\t\t\t}
-\t\t}
-\t\treturn names;
-\t}
-`
-
-// 更新生成的作用域方法时先移除旧版，避免旧方法覆盖新版或重复声明导入。
-server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable|attachWikiRuntime, attachPresent) \} from .*;\n/gm, '')
-server = server.split(skillGesture).join('')
+// 删除旧的手势推导/屏蔽链，再安装最小的原生能力挂接。
+server = server.replace(/^import \{ (?:attachApprovalBridge|pinManjuSkills|setWikiSourceContent|isUserInvocable|attachWikiRuntime, attachPresent|installProductionSkills, validateProductionMode, productionModeFor) \} from .*;\n/gm, '')
+server = server.replace(/\/\*\*\n\* 官方 `dsh-tool-skill`[\s\S]*?\*\/\n/g, '')
 server = server.replace(/^const SKILL_GESTURE = .*;\n/gm, '')
-server = server.replace(/\tasync applyPinnedSkillScope\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
-server = server.replace(/\tasync pinnedSkillNames\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
-
+server = server.replace(/\tasync (?:updateQueue|applyPinnedSkillScope|pinnedSkillNames|applyNativeCapabilities)\(rec, content\) \{[\s\S]*?\n\t\}\n/g, '')
+server = server.replace('await this.applyPinnedSkillScope(rec, content);', 'await this.applyNativeCapabilities(rec, content);')
+server = server.replace(/\tasync (?:readSession|cancelSession|updateQueue|permission|approval)\(params\) \{[\s\S]*?\n\t\}\n/g, '')
 const imports = 'import { attachApprovalBridge } from "../../../../permission-bridge.mjs";\n'
   + 'import { attachWikiRuntime, attachPresent } from "../../../../wiki-runtime.mjs";\n'
-  + 'import { pinManjuSkills } from "../../../../manju-skills.mjs";\n'
-  + 'import { setWikiSourceContent } from "../../../../manju-wiki.mjs";\n'
-  + 'import { isUserInvocable } from "@deepseek-ai/dsh-skill";\n'
-patch('import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n', 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n' + imports + skillGesture)
-for (const method of [readSessionMethod, cancelSessionMethod, updateQueueMethod, permissionMethod, scopedBindingMethod, pinnedSkillLookup]) {
+  + 'import { installProductionSkills, validateProductionMode, productionModeFor } from "../../../../production-skills.mjs";\n'
+patch('import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n', 'import { carrierKeyOf } from "@deepseek-ai/dsh-scope";\n' + imports)
+for (const method of [readSessionMethod, cancelSessionMethod, updateQueueMethod, permissionMethod, scopedBindingMethod]) {
   if (!server.includes(method)) patch('\tassertLiveAgent(rec, sessionId) {', method + '\tassertLiveAgent(rec, sessionId) {')
 }
-patch('\t\tconst message = createUserMessage({', '\t\tawait this.applyPinnedSkillScope(rec, content);\n\t\tconst message = createUserMessage({')
+server = server.replace(/^\t\t\tcase "session\/(?:runtime-busy|production-scope)":.*\n/gm, '')
+patch('case "session/prompt": return this.prompt(params);', 'case "session/production-scope": return { version: 1 };\n\t\t\tcase "session/runtime-busy": return { busy: [...this.sessions.values()].some(rec => rec.handle.agent.status === "running" || rec.handle.agent.inbox.hasPending) };\n\t\t\tcase "session/prompt": return this.prompt(params);')
+patch('\t\tthis.options = options;', '\t\tthis.options = options;\n\t\tinstallProductionSkills(ctx);')
+patch('\t\tconst message = createUserMessage({', '\t\tawait this.applyNativeCapabilities(rec, content);\n\t\tconst message = createUserMessage({')
+server = server.replace('productionMode: validateProductionMode(params.productionMode)', 'productionMode: validateProductionMode(params.productionMode ?? productionModeFor(rec.handle.agent))')
+patch('source: { kind: "user" }', 'source: { kind: "user", productionMode: validateProductionMode(params.productionMode ?? productionModeFor(rec.handle.agent)) }')
 patch('\t\trec.handle.agent.followup(message);', '\t\tif (this.stoppingSessions?.has(params.sessionId)) throw new Error("session is stopping");\n\t\trec.handle.agent.followup(message);')
 
 // 保留官方 createSession 的恢复与 failure 状态；兼容 App 的惰性续接和已激活 Agent。
@@ -350,8 +289,35 @@ patch(`\t\tconst existing = this.sessions.get(sessionId);
 \t\tif (existing) return existing;`)
 const ownedTeardown = 'records.map((rec) => Promise.resolve().then(() => rec.handle.dispose()))'
 const alignedTeardown = `records.map((rec) => Promise.resolve().then(async () => {
-\t\t\ttry { await this.pinnedSkillScopes?.get(rec.handle.agent)?.dispose(); }
+\t\t\ttry { await (await this.nativeWikiScopes?.get(rec.handle.agent))?.(); }
 \t\t\tfinally { try { await rec.approvalBridge?.dispose(); } finally { await rec.handle.dispose?.(); } }
 \t\t}))`
+server = server.replace('this.pinnedSkillScopes?.get(rec.handle.agent)?.dispose()', '(await this.nativeWikiScopes?.get(rec.handle.agent))?.()')
 patch(ownedTeardown, alignedTeardown)
 writeFileSync(serverPath, server)
+
+const skillRegistryPath = join(deepseekPackages, 'dsh-skill', 'lib', 'index.js')
+let registry = readFileSync(skillRegistryPath, 'utf8')
+const registryImport = 'import { allowsProductionSkill, filterProductionSkills } from "../../../../production-skills.mjs";\n'
+if (!registry.includes(registryImport)) registry = registryImport + registry
+const scopeFilter = '\n\t\tconst entries = filterProductionSkills(options.scope, [...collected.entries.values()].map((entry) => toSummary(entry.candidate)));'
+if (!registry.includes(scopeFilter)) registry = registry.replace('async snapshot(options = {}) {\n\t\tconst collected = await this.collect(options);', 'async snapshot(options = {}) {\n\t\tconst collected = await this.collect(options);' + scopeFilter)
+registry = registry.replace('skills: [...collected.entries.values()].map((entry) => toSummary(entry.candidate)).sort(compareSkillSummary)', 'skills: entries.sort(compareSkillSummary)')
+const nameGuard = 'if (!allowsProductionSkill(options.scope, name)) return void 0;'
+if (!registry.includes(nameGuard)) registry = registry.replace('async get(name, options = {}) {', 'async get(name, options = {}) {\n\t\t' + nameGuard)
+const providerGuard = 'if (!allowsProductionSkill(options.scope, name, match.candidate.provider)) return void 0;'
+if (!registry.includes(providerGuard)) registry = registry.replace('if (match === void 0) return void 0;', 'if (match === void 0) return void 0;\n\t\t' + providerGuard)
+if (!registry.includes('skills: entries.sort') || !registry.includes(nameGuard) || !registry.includes(providerGuard)) throw new Error('官方 Skill 范围补丁锚点不匹配')
+writeFileSync(skillRegistryPath, registry)
+
+// Preserve accepted official Inbox entries across a desktop runtime restart.
+const loopPath = join(deepseekPackages, 'dsh-agent-loop', 'lib', 'index.js')
+if (existsSync(loopPath)) {
+  let loop = readFileSync(loopPath, 'utf8')
+  const ordinaryDispose = 'machine.cancel({ kind: "disposed" });'
+  const durableDispose = 'machine.cancel({ kind: "disposed" }, { keepInbox: true });'
+  if (!loop.includes(durableDispose)) {
+    if (!loop.includes(ordinaryDispose)) throw new Error('官方 Inbox 重启保留补丁锚点不匹配')
+    writeFileSync(loopPath, loop.replace(ordinaryDispose, durableDispose))
+  }
+}

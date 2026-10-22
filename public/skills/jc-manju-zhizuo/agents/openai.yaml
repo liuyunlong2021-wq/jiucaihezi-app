@@ -1,5 +1,0 @@
-interface:
-  display_name: "漫剧制作"
-  short_description: "漫剧制作总入口，融合角色九维声音与分镜，只交付文字和提示词并自动归档"
-policy:
-  allow_implicit_invocation: false

@@ -206,6 +206,7 @@ const externalNodeTests = [
   'scripts/__tests__/deepseek-session-lifecycle.test.mjs',
   'scripts/__tests__/harness-native-tools.test.mjs',
   'scripts/__tests__/manju-skill-scope.test.mjs',
+  'scripts/__tests__/production-skills.test.mjs',
   'scripts/__tests__/novel-skill-routing.test.mjs',
   'scripts/__tests__/character-skill-resources.test.mjs',
   'scripts/__tests__/wiki-artifact-writer.test.mjs',
@@ -222,6 +223,7 @@ const externalNodeTests = [
   'scripts/__tests__/windows-release-contract.test.mjs',
   'scripts/__tests__/native-windows-fingerprint.test.mjs',
   'scripts/__tests__/verify-online-updates.test.mjs',
+  'scripts/__tests__/release-r2.test.mjs',
   // ponytail: rh-deploy config test removed — canvas archived, canvasModels.ts gone
 ]
 

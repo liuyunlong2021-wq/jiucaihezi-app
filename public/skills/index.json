@@ -62,41 +62,6 @@
     }
   },
   {
-    "id": "jc-duanju",
-    "name": "jc-duanju",
-    "displayName": "jc-duanju",
-    "description": "短剧写作总路由：改编按原作落袋、确定新皮、原文组合分集、逐集换皮推进，完整继承原文并自动归档；保留原创、扩写、续写、润色与中断续做。",
-    "triggers": [
-      "写短剧",
-      "创作短剧",
-      "短剧剧本",
-      "短剧改写",
-      "短剧扩写",
-      "短剧续写",
-      "把素材写成短剧",
-      "写一集短剧",
-      "写一场戏",
-      "分集大纲",
-      "短剧改编方向",
-      "把小说改编成短剧",
-      "按改编方案写短剧"
-    ],
-    "commands": [],
-    "files": [
-      "SKILL.md"
-    ],
-    "package": {
-      "schemaVersion": 1,
-      "entry": "SKILL.md",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "kind": "instruction"
-        }
-      ]
-    }
-  },
-  {
     "id": "jc-duanju-cehua",
     "name": "jc-duanju-cehua",
     "displayName": "jc-duanju-cehua",
@@ -370,32 +335,6 @@
         {
           "path": "references/dialogue.md",
           "kind": "reference"
-        }
-      ]
-    }
-  },
-  {
-    "id": "jc-manju-zhizuo",
-    "name": "jc-manju-zhizuo",
-    "displayName": "jc-manju-zhizuo",
-    "description": "仅在用户明确选择 jc-manju-zhizuo 或开启漫剧制作时使用。在十四个业务 Skill 内按用户指定、已有产物续改或明确交付物直接路由；无完整剧本却要工程脚本或明确要求脑暴时进入逐节拍创作，明确求起步时提供简短新手引导，其余创作请求默认生成 MiniMax H3 视频提示词。不自动串制作流程，只交付文字与提示词，到提示词为止，不生成或提交媒体。完整短剧方向和文学剧本使用独立的短剧写作入口。",
-    "triggers": [],
-    "commands": [],
-    "files": [
-      "SKILL.md",
-      "agents/openai.yaml"
-    ],
-    "package": {
-      "schemaVersion": 1,
-      "entry": "SKILL.md",
-      "files": [
-        {
-          "path": "SKILL.md",
-          "kind": "instruction"
-        },
-        {
-          "path": "agents/openai.yaml",
-          "kind": "metadata"
         }
       ]
     }

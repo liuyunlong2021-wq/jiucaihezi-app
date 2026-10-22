@@ -1,3 +1,5 @@
+import { productionMode } from '@/runtime/memory/productionSkills'
+import { computerUseEnabledNow } from '@/stores/agentStore'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import { test } from 'node:test'
@@ -73,12 +75,13 @@ test('an unopened catalog conversation is not mistaken for an existing Harness s
   assert.equal(deepSeekSessionExists(sessions, 'conversation-new'), false)
 })
 
-test('DeepSeek Harness invokes UI-selected skills through native skill gestures', () => {
+test('DeepSeek Harness uses UI-selected skills as whitelist metadata without automatic gestures', () => {
   assert.equal(
     deepSeekPrompt('执行任务', ['wiki-memory', 'skill-creator']),
-    '/skill-creator\n\n请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n执行任务',
+    '请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n执行任务',
   )
   assert.equal(deepSeekPrompt('执行任务', []), '执行任务')
+  assert.equal(deepSeekPrompt('/skill-creator 执行任务', []), '/skill-creator 执行任务')
 })
 
 test('DeepSeek Harness includes only visible same-project session turns as explicit references', () => {
@@ -103,7 +106,7 @@ test('DeepSeek Harness includes only visible same-project session turns as expli
 test('production skill routing does not replace the user request or leak into visible history', () => {
   const request = '镜头1–3用H3，镜头4–6用Seedance 2.5，不要时间戳'
   const prompt = deepSeekPrompt(request, ['jc-manju-zhizuo'])
-  assert.equal(prompt, `/jc-manju-zhizuo\n\n${request}`)
+  assert.equal(prompt, request)
   assert.ok(prompt.endsWith(request))
   const turns = deepSeekSessionTurns({ session: { id: 'test' }, events: [{
     seq: 0, time: 1, type: 'user/message', surfaceOp: 'append',
@@ -113,16 +116,16 @@ test('production skill routing does not replace the user request or leak into vi
   assert.equal(deepSeekPrompt('继续', ['wiki-memory']), '请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n继续')
   const withWiki = deepSeekPrompt('续写本章', ['jc-novel', 'wiki-memory'], [], '<wiki_index path="wiki/index.md"># 项目</wiki_index>')
   assert.ok(withWiki.indexOf('<wiki_index') < withWiki.indexOf('续写本章'))
-  assert.match(withWiki, /jc-novel/)
+  assert.doesNotMatch(withWiki, /\/jc-novel/)
 })
 
-test('creative buttons send native skill gestures and project context without duplicate business instructions', () => {
+test('creative buttons select a scope without forcing a skill invocation', () => {
   const request = '只修改刚才选中的片段，不要保存'
   const wiki = '<wiki_index path="wiki/index.md"># 已有项目</wiki_index>'
   for (const name of ['jc-manju-zhizuo', 'jc-novel', 'jc-duanju']) {
-    assert.equal(deepSeekPrompt(request, [name, 'wiki-memory']), `/${name}\n\n请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n${request}`)
+    assert.equal(deepSeekPrompt(request, [name, 'wiki-memory']), `请使用项目 Wiki 原生能力处理本轮任务。\n\n【本轮消息】\n\n${request}`)
     assert.equal(deepSeekPrompt(request, [name, 'wiki-memory'], [], wiki),
-      `/${name}\n\n请使用项目 Wiki 原生能力处理本轮任务。\n\n${wiki}\n\n【本轮消息】\n\n${request}`)
+      `请使用项目 Wiki 原生能力处理本轮任务。\n\n${wiki}\n\n【本轮消息】\n\n${request}`)
   }
 })
 
@@ -151,7 +154,7 @@ test('DeepSeek Harness transfers missing history once without a three-round cont
       { id: 'u1', role: 'user', content: '原始要求', createdAt: '2026-01-01' },
       { id: 'a1', role: 'assistant', content: '确认方案', createdAt: '2026-01-01' },
     ]),
-    '/skill-creator\n\n【既有对话移交】\n\n用户：原始要求\n\n助手：确认方案\n\n【本轮消息】\n\n直接执行',
+    '【既有对话移交】\n\n用户：原始要求\n\n助手：确认方案\n\n【本轮消息】\n\n直接执行',
   )
 })
 
@@ -366,6 +369,23 @@ test('重试链进过程投影：llm/retry 与 llm/retry-started 各占一行，
   assert.equal(steps[2].retry?.attempt, 2)
 })
 
+test('同一官方重试组的多次尝试分别投影，历史与实时进度使用相同键', () => {
+  const events: any[] = [
+    { seq: 1, time: 1, type: 'turn/start', surfaceOp: 'append', data: { turn: 1 } },
+    { seq: 2, time: 2, type: 'user/message', surfaceOp: 'append', data: { id: 'user-retries', source: { kind: 'user' }, content: [{ type: 'text', text: '继续' }] } },
+  ]
+  for (let retry = 1; retry <= 5; retry++) {
+    events.push({ type: 'llm/retry', time: retry * 300000, data: { turn: 1, step: 1, retryId: 'same-group', retry, mode: 'normal', maxRetries: 5, delayMs: 500, failure: { code: 'TIMEOUT', message: 'idle timeout' } } })
+    events.push({ type: 'llm/retry-started', time: retry * 300000 + 500, data: { turn: 1, step: 1, retryId: 'same-group', retry } })
+  }
+  const steps = deepSeekSessionProcess({ session: { id: 's' }, events }).get('user-retries') ?? []
+  assert.deepEqual(steps.map(step => step.retry?.attempt), [1, 2, 3, 4, 5])
+  assert.ok(steps.every(step => step.retryState === 'started'))
+  const live = events.filter(event => event.type === 'llm/retry').map(event => deepSeekProgress(event)?.id)
+  assert.deepEqual(steps.map(step => step.id), live)
+  assert.equal(new Set(live).size, 5)
+})
+
 test('重试策略继承官方默认值，always 模式的上限显示为 ∞', () => {
   const source = readFileSync('src/services/deepSeekHarness.ts', 'utf8')
   // 不复制官方默认清单，尤其不能把兜底 PI_AI_ERROR 扩成可重试错误。
@@ -417,28 +437,12 @@ test('失败行补齐尝试次数，失败文案走官方 failureMessage 映射'
   assert.equal(deepSeekFailureText('524 status code (no body)', 'TIMEOUT'), '524 status code (no body)')
 })
 
-test('点名 skill 后本会话只挂这一个：官方手势 → 掩掉 skill 工具，目录随之消失', () => {
+test('创作范围由结构化参数传递，保留官方加载器和原生能力', () => {
   const prepare = readFileSync('scripts/prepare-deepseek-harness.mjs', 'utf8')
-  // 官方 `dsh-tool-skill`：工具不可见时 `snapshot` 直接变空 → 不发布 skill 目录；
-  // 而 `/name` → `<skill_content>` 的注入是另一个 pre-step 钩子，不看工具可见性。
-  // 所以掩掉 `skill` 工具正好等于「只许用点名的那一个」，且点名的指令照样进上下文。
-  assert.match(prepare, /async applyPinnedSkillScope\(rec, content\) \{/)
-  assert.match(prepare, /agent\.ctx\.tools\.restrict\(\{ deny: \["skill"\] \}\)/)
-  // 必须真去注册表查一次：只按正则会把 `/permission` 这类官方命令也当成点名。
-  assert.match(prepare, /isUserInvocable\(skill\)\) names\.push\(name\)/)
-  assert.match(prepare, /import \{ isUserInvocable \} from "@deepseek-ai\/dsh-skill";/)
-  // 手势正则逐字搬官方的（`/usr/bin` 与 `5/8` 不会命中）。
-  assert.match(prepare, /const SKILL_GESTURE = \/\(\^\|\\\\s\)\\\\\/\(\[a-z0-9\]\+\(\?:-\[a-z0-9\]\+\)\*\)\(\?=\\\\s\|\$\)\/g;/)
-  assert.match(prepare, /block\.text\.matchAll\(SKILL_GESTURE\)/)
-  // 掩码失败只记一行，不能把这一轮判死。
-  assert.match(prepare, /\[skill-scope\] 掩掉 skill 工具失败/)
-  // 真身：安装时确实打进去了（未安装时跳过，CI 会在 build:deepseek-harness 之后跑到）。
-  const installed = 'src-tauri/resources/deepseek-harness/node_modules/@deepseek-ai/dsh-sdk-jsonrpc-server/lib/index.js'
-  if (existsSync(installed)) {
-    const server = readFileSync(installed, 'utf8')
-    assert.match(server, /await this\.applyPinnedSkillScope\(rec, content\);/)
-    assert.match(server, /async pinnedSkillNames\(rec, content\) \{/)
-  }
+  assert.doesNotMatch(prepare, /tools\.restrict\(\{ deny: \["skill"\]/)
+  assert.doesNotMatch(prepare, /async pinnedSkillNames/)
+  assert.match(prepare, /installProductionSkills/)
+  assert.match(prepare, /validateProductionMode\(params\.productionMode/)
 })
 
 test('重试与失败文案逐字取自官方中文字典', () => {  assert.equal(DEEPSEEK_RETRY_TEXT.active, '正在重试模型请求')
@@ -576,7 +580,7 @@ test('Computer Use mounts the official provider pair behind the same insert seam
   // 服务与设置面板读同一个键，否则切开关只改了 UI。
   assert.match(source, /import \{ computerUseEnabledNow, useAgentStore \} from '@\/stores\/agentStore'/)
   assert.match(store, /export const COMPUTER_USE_STORAGE_KEY = 'jc_computer_use'/)
-  assert.match(store, /return localStorage\.getItem\(COMPUTER_USE_STORAGE_KEY\) !== '0'/)
+  assert.match(store, /return localStorage\.getItem\(COMPUTER_USE_STORAGE_KEY\) === '1'/)
   assert.match(store, /computerUseEnabled,\n    toggleComputerUse,/)
   const settings = readFileSync('src/components/memory/MemorySettings.vue', 'utf8')
   assert.match(settings, /agentStore\.toggleComputerUse\(\(\$event\.target as HTMLInputElement\)\.checked\)/)
@@ -1262,4 +1266,31 @@ test('official delivery projection handles Windows paths and keeps separate turn
   ]
   assert.deepEqual(deepSeekDeliverables(events, 1).map(file => file.path), ['C:\\项目\\剧本.md', '\\\\server\\share\\角色.png'])
   assert.deepEqual(deepSeekDeliverables(events, 2), [{ path: '/project/下一集.md' }])
+})
+
+
+test('creative selections are scope metadata, including old conversation preferences', () => {
+  for (const [selection, expected] of [['production:manju', 'manju'], ['production:short-drama', 'short-drama'], ['production:novel', 'novel'], ['jc-manju-zhizuo', 'manju'], ['jc-duanju', 'short-drama'], ['jc-novel', 'novel']] as const) {
+    assert.equal(productionMode([selection]), expected)
+    assert.equal(deepSeekPrompt('当前任务', [selection]), '当前任务')
+  }
+  assert.equal(productionMode(['skill-creator']), 'skills:skill-creator')
+  assert.equal(productionMode(['production:manju', 'jc-seedance']), 'skills:jc-seedance')
+  assert.equal(productionMode(['project-wiki']), 'none')
+  assert.throws(() => productionMode(['production:manju', 'production:novel']), /只能选择一个/)
+})
+
+test('computer operation defaults off and only an explicitly enabled setting loads it', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+  let value: string | null = null
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => value } })
+  try {
+    assert.equal(computerUseEnabledNow(), false)
+    value = '0'; assert.equal(computerUseEnabledNow(), false)
+    value = '1'; assert.equal(computerUseEnabledNow(), true)
+    value = 'unknown'; assert.equal(computerUseEnabledNow(), false)
+  } finally {
+    if (original) Object.defineProperty(globalThis, 'localStorage', original)
+    else Reflect.deleteProperty(globalThis, 'localStorage')
+  }
 })
