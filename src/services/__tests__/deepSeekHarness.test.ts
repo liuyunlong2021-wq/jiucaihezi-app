@@ -202,22 +202,22 @@ test('DeepSeek Harness tells the model when an attached image cannot be delivere
   )
 })
 
-test('已经内联送达的图片不再让模型 read_image', () => {
-  // 附件对象路径是 attachments/v1/objects/xx/<64 位十六进制>：无扩展名、无文件名。
-  // 既内联又点名「用 read_image 读」＝自相矛盾，模型会去重抄那串哈希，实测抄错
-  // 一个字符就是 FS_NOT_FOUND（...f355c58bf36f355c58bf36...）。
+test('图片引用不再附加 read_image 指路，视频仍在', () => {
+  // `read_image` 只在模型声明图片输入时才工作（官方：model "..." does not declare
+  // image input）。所以三种情况都不该点名它：内联送达时不必读、没视觉时读必定被拒、
+  // 格式不支持时读回来还是那个格式。那半句只会让模型去重抄 64 位十六进制哈希，
+  // 实测抄错一个字符 → FS_NOT_FOUND。
   const image = {
     id: 'image-1', name: 'image.png', mime: 'image/png', size: 3, kind: 'image' as const,
     value: 'data:image/png;base64,QUJD',
     readablePath: '/tmp/objects/67/6760a7be49ce1886f355c58bf36a5f417c129725b323f1b4c26a325d9d04080f',
   }
-  const delivered = deepSeekContentBlocks('看图', [image], [], true)
-  assert.equal(delivered.filter(block => block.type === 'image').length, 1)
-  assert.doesNotMatch(String(delivered[0].text), /read_image/)
+  for (const imageInput of [true, false])
+    assert.doesNotMatch(String(deepSeekContentBlocks('看图', [image], [], imageInput)[0].text), /read_image/)
 
-  // 没送达（模型不支持视觉）时仍要告诉它怎么自己去看。
-  const undelivered = deepSeekContentBlocks('看图', [image], [], false)
-  assert.match(String(undelivered[0].text), /read_image/)
+  // 视频永远不能内联，`read` 读回来是二进制，只有 jc-watch 一条路，得说。
+  const video = { ...image, id: 'video-1', name: 'clip.mp4', mime: 'video/mp4', kind: 'video' as const }
+  assert.match(String(deepSeekContentBlocks('看片', [video], [], true)[0].text), /@jc-watch/)
 })
 
 test('DeepSeek Harness sends already-read files in the first prompt', () => {
@@ -998,11 +998,12 @@ test('attachments are addressable by project path, not only by inline content', 
   )
   const text = String(blocks.find((block: any) => block.type === 'text')?.text || '')
   // 内联图片块只对声明了视觉的模型有效，视频连块都没有。路径必须无条件给出去：
-  // 官方读图是 read_image(file_path)，视频则是 bash 抽帧（jc-watch 那条链路）。
   // 不给路径时模型手里只有一个附件 id，只能满盘找文件（实测 11 步工具、16 分钟后 524）。
+  // 但不再指路 read_image：这个模型没声明视觉，官方会直接拒掉那次调用。
   assert.match(text, /\.raw\/jc-media\/图片\/原图\.png/)
   assert.match(text, /\.raw\/jc-media\/视频\/片段\.mp4/)
-  assert.match(text, /read_image/)
+  assert.doesNotMatch(text, /read_image/)
+  assert.match(text, /@jc-watch/)
 })
 
 test('a referenced project file reaches the model as an @ path, never as inlined content', () => {

@@ -1041,5 +1041,5 @@
 
 - 现象：一次「这些 @ 有什么用」的对话里，第一步 `读取图片` 32ms 失败 `FS_NOT_FOUND`，路径在 `~/Library/Application Support/com.jiucaihezi.desktop/deepseek-harness/workspaces/<key>/attachments/…`。
 - 日志证据（`workspaces/<key>/sessions/<cwd>/<session>/session.v4.jsonl.zstd`，`zstd -dc`）：正确路径出现 5 次、模型抄错的路径出现 4 次。真文件是 `…/objects/67/6760a7be49ce1886f355c58bf36` + `a5f417c1…`，模型抄成 `…f355c58bf36f355c58bf36f4f417c1…`——把一段哈希重复了一遍。
-- 根因在**我们的提示**：`deepSeekContentBlocks` 对已内联的图片仍追加「本轮引用里的图片用 read_image 读」。图片明明已经在消息里，再指路只会诱导模型去重抄那串 64 位十六进制（无扩展名、无文件名，最容易抄错）。
-- 已改为只对**没能内联**的图片（模型不支持视觉 / 格式不支持）提示 `read_image`。
+- 根因在**我们的提示**：`deepSeekContentBlocks` 给引用图片追加「本轮引用里的图片用 read_image 读」。这句在三种情况下全错：内联送达时不必读；模型没声明视觉时官方直接报 `does not declare image input`（`dsh-tool-fs` 实测）；格式不支持时读回来还是那个格式。副作用是诱导模型重抄那串 64 位十六进制（无扩展名、无文件名），抄错就是 `FS_NOT_FOUND`。
+- 已**整句删除**图片指路。视频提示保留，理由不同：视频永远不能内联，`read` 读回来是二进制，只有 `@jc-watch` 抽帧一条路，工具说明里查不到。

@@ -1287,10 +1287,6 @@ export function deepSeekContentBlocks(
   ]
   const images = attachments.filter(attachment => attachment.kind === 'image')
   const imageBlocks: any[] = []
-  // 已经内联送到的图片记下来：再让模型「用 read_image 去读」是自相矛盾的指令，
-  // 而它的路径是 attachments/v1/objects/xx/<64 位十六进制>——无扩展名、无文件名，
-  // 模型重抄这串哈希会抄错（实测抄成 ...f355c58bf36f355c58bf36...，FS_NOT_FOUND）。
-  const deliveredImages = new Set<ResolvedDirectAttachment>()
   // 模型声明的图片输入是唯一开关：官方对未声明的模型按纯文本处理，送过去的图片块
   // 既不会内联，`read_image` 也会被拒。所以这里不发块，而是把它当“未送达”说清楚。
   if (imageInput) {
@@ -1299,7 +1295,6 @@ export function deepSeekContentBlocks(
       const mimeType = (match?.[1] || attachment.mime).toLowerCase().replace('image/jpg', 'image/jpeg')
       if (!match || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(mimeType)) continue
       imageBlocks.push({ type: 'image', data: match[2], mimeType })
-      deliveredImages.add(attachment)
     }
   }
   // 看不见的图片必须说出来：直连路径一直有这句降级文案，Harness 路径漏了它，
@@ -1312,10 +1307,14 @@ export function deepSeekContentBlocks(
   // 文件（实测 11 步工具、16 分钟后 524）。但 `read` 读不了图片和视频：图片要
   // read_image，视频要 bash 抽帧（jc-watch 那条链路），出现这类引用时补一句，其余
   // 什么都不用说——`@` 的含义由官方 FILE_REFERENCE_PROMPT 交代。
-  // 已经内联的图片不再点一次名：那会诱导模型去重抄一遍长哈希。
-  const mentionHint = referenced.some(attachment =>
-    (attachment.kind === 'image' && !deliveredImages.has(attachment)) || attachment.kind === 'video')
-    ? '[本轮引用里没能在消息内看到的图片用 read_image 读，视频用 @jc-watch 抽帧。]'
+  // 图片一句都不说。`read_image` 只在模型声明了图片输入时才工作（官方原话：model
+  // "..." does not declare image input），所以三种情况都不该点名它：内联送达时不必读、
+  // 没视觉时读必定被拒、格式不支持时读回来还是那个格式。之前那半句只会让模型去重抄
+  // 一遍 64 位十六进制哈希，抄错就是 FS_NOT_FOUND。
+  // 视频留着是有理由的：视频永远不可能内联，而 `read` 读回来是二进制，只有 jc-watch
+  // 抽帧这条路，工具说明里查不到。
+  const mentionHint = referenced.some(attachment => attachment.kind === 'video')
+    ? '[本轮引用的视频不能直接读取，用 @jc-watch 抽帧看。]'
     : ''
   // 带空白的路径按官方 mention 语法加引号（`@"path with spaces"`）。
   const mentionTokens = referenced.map(attachment => {
